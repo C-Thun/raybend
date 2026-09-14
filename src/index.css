@@ -1,0 +1,65 @@
+@import "tailwindcss";
+
+/*
+ * 设计令牌层（深色基准）
+ *
+ * 约定见 AGENTS.md 的「设计立场」：中性灰 UI、颜色只承载状态语义（选中/激活/警告），
+ * 不做装饰性配色；照片四周必须是中性色。
+ *
+ * 命名说明：Tailwind v4 要求令牌以 `--color-` 前缀声明才能生成对应工具类
+ * （如 `--color-ui-bg-2` → `bg-ui-bg-2`）。计划里写的 `--text-1/2/3`
+ * 落地为 `--color-fg-1/2/3`（→ `text-fg-1`）。
+ *
+ * 完整的尺寸档位、密度与令牌集在 UI 设计阶段定案；这里只建立最小可用集。
+ */
+@theme {
+  /* 三级背景：数字越大越"靠近用户" */
+  --color-ui-bg-1: #141414;
+  --color-ui-bg-2: #1a1a1a;
+  --color-ui-bg-3: #212121;
+
+  /* 描边（行业软件的层次用 1px 描边 + 灰阶表达，不用卡片阴影） */
+  --color-ui-line: #2e2e2e;
+  --color-ui-line-strong: #3d3d3d;
+
+  /* 文本三级 */
+  --color-fg-1: #e8e8e8;
+  --color-fg-2: #a8a8a8;
+  --color-fg-3: #6e6e6e;
+
+  /* 强调色：仅用于状态（选中 / 激活 / 焦点） */
+  --color-accent: #3b82f6;
+  --color-accent-dim: #1d4ed8;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--color-ui-bg-1);
+  color: var(--color-fg-1);
+  font-family:
+    "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Noto Sans CJK SC",
+    "Microsoft YaHei", sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  /* 桌面应用：整窗不滚动，由内部区域各自滚动 */
+  overflow: hidden;
+  /* 桌面观感：默认不可选中文本，可编辑区域单独放开 */
+  user-select: none;
+}
+
+input,
+textarea,
+[contenteditable] {
+  user-select: text;
+}

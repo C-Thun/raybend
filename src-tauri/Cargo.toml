@@ -1,0 +1,29 @@
+[package]
+name = "raybend-desktop"
+description = "raybend（光伴）桌面外壳：窗口、WebView 与 IPC 边界"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lib]
+# 此处的 `_lib` 后缀看似冗余，但用于让 lib 名与 bin 名不冲突。
+# 这在 Windows 上是必需的，见 https://github.com/rust-lang/cargo/issues/8519
+name = "raybend_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+# NOTE: [profile.*] 必须定义在 workspace 根（见仓库根 Cargo.toml）
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+raybend.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

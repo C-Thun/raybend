@@ -10,13 +10,13 @@
 
 ## 1. 项目定位
 
-raybend 是一个**个人开发的相片管理软件**，目标是成为 ON1 Photo RAW 这类商业软件的优秀开源替代。
+raybend（中文名**「光伴」**，产品名 `RayBend`）是一个**相片管理软件**，目标是成为 ON1 Photo RAW 这类商业软件的优秀开源替代。
 
 - **主战场**：相片管理全流程 —— 导入 → 浏览 → 评级/打标 → 筛选/搜索 → 集合整理 → 导出。
 - **第一阶段不做编辑**：RAW 只做最基础支持；显影/编辑模块作为后续里程碑（见 `PLAN.md`、`FUTURE.md`）。
 - **平台**：Windows 优先（Win10/11 近两年版本即可，不考虑 Win7/8）；macOS / Linux 属远期。
 - **相机支持策略**：不追求最新机型即时适配，跟得上主流即可。
-- **许可**：GPL-3.0（见 `LICENSE`）。**从一开始就没打算闭源盈利**，先满足自己使用，做得好最多开放捐赠。
+- **许可**：**AGPL-3.0-only**（见 `LICENSE`）。选它的原因很实际：本项目主体是本地桌面应用，AGPL 的额外网络条款只在「对外提供网络服务」时才咬合；而它带来的好处是 rawler（LGPL-2.1-only）、darktable / RawTherapee（GPL-3.0）与 RapidRAW（AGPL-3.0）的代码都可以合法复用。项目以开源方式发布，不计划闭源收费。
 - **设计立场**：要有行业软件的质感，但不做 20 年前那种拥挤界面；同时主动吸收 Web 应用的易用性与高可视化特性。不做 Affinity 的克隆，也不是 Web 应用的桌面壳。
 
 ---
@@ -26,11 +26,17 @@ raybend 是一个**个人开发的相片管理软件**，目标是成为 ON1 Pho
 1. **发布与推送必须由人类执行**：`git push`、打 tag、生成/上传发布物、上传到任何包注册表（npm/商店/发布页），全部由人操作。Agent 不得代劳。
 2. **commit 可以由 Agent 自行管理**：实现完成后可自行 `git commit`。提交信息用中文，格式 `<type>: <subject>`（如 `feat: 实现相片仓注册表`）。
    - 例外：处于 plannotator review 流程时，遵守全局规则 —— 审查期间**禁止** commit。
-3. **前端不写图像算法**：像素、色彩空间、视口变换、渲染管线全部属于 Rust。前端只负责交互状态、矢量覆盖层与 UI。
-4. **不引入 SolidStart**（桌面应用无 SSR 需求，SolidStart v2 面向 Solid v1，与 Solid 2 不配套）。
-5. **Pencil 设计纪律**：所有界面设计用 Pencil MCP 绘制 `.pen` 文件，存放于 `design/`；每个 `.pen` 必须配一个**同名 `.md`** 说明界面结构、状态与交互。
-6. **实施记录纪律**：每次编写/改动完成后，在 `implementations/` 下写一个 `.md` 记录，文件名以 `YYYY-MM-DD_` 开头后接简短命名；**文件内容开头必须写明本次改动的具体完成时间（精确到秒）**。
-7. 新增顶层框架或大型依赖前先在会话中讨论，候选方案统一登记到 `FUTURE.md`。
+3. **工具链只有 pnpm + cargo**：前端与脚本用 **pnpm**，Rust 用 **cargo**。禁止引入 npm / yarn / bun 或混用锁文件——仓库只允许 `pnpm-lock.yaml` 与 `Cargo.lock`。（`npm install -g` 仅用于本机全局 CLI 工具，不用于本项目依赖。）
+4. **前端不写图像算法**：像素、色彩空间、视口变换、渲染管线全部属于 Rust。前端只负责交互状态、矢量覆盖层与 UI。
+5. **不引入 SolidStart**（桌面应用无 SSR 需求，SolidStart v2 面向 Solid v1，与 Solid 2 不配套）。
+6. **Pencil 设计纪律**：所有界面设计用 Pencil MCP 绘制 `.pen` 文件，存放于 `design/`；每个 `.pen` 必须配一个**同名 `.md`** 说明界面结构、状态与交互。
+7. **实施记录纪律**：每次编写/改动完成后，在 `implementations/` 下写一个 `.md` 记录，文件名以 `YYYY-MM-DD_` 开头后接简短命名；**文件内容开头必须写明本次改动的具体完成时间（精确到秒）**。
+8. **测试分工：Agent 只做冒烟，E2E 归人类**：
+   - **Agent 只做冒烟测试**：编译通过、命令能跑通、进程能启动、日志无报错、单元测试通过 —— 到此为止。
+   - **真正的 E2E 测试交给人类执行**：涉及 GUI 交互与视觉正确性、多显示器与 DPI、真实照片库、性能体感、色彩正确性这类验证，一律由人类在真实环境确认，Agent 不得声称它已验证过。
+   - **E2E 若要自动化**：除非用户特别指定要实现，否则不由 Agent 临时手跑一遍完事；需要时写成**可重复执行的自动化测试代码**。
+   - 推而广之：**“进程起来了”不等于“功能对了”**。Agent 报告中必须清楚区分「已验证（冒烟）」与「未经人类验证」两部分。
+9. 新增顶层框架或大型依赖前先在会话中讨论，候选方案统一登记到 `FUTURE.md`。
 
 ---
 
@@ -60,7 +66,7 @@ raybend/
 ├── AGENTS.md                  # 本文件：核心信息与纪律
 ├── PLAN.md                    # 近中期计划：Milestone（阶段）→ Wave（波次）
 ├── FUTURE.md                  # 远期方向登记册
-├── LICENSE                    # GPL-3.0
+├── LICENSE                    # AGPL-3.0-only
 ├── README.md
 ├── Cargo.toml                 # [workspace]
 ├── package.json / vite.config.ts / index.html
@@ -133,7 +139,7 @@ Tauri 3.0 已进入 alpha（`3.0.0-alpha.0`），已知关键变更：
 ### 6.3 RAW 解码层（可插拔）
 
 - 首选 **rawler 0.8.0**（上游 [dnglab](https://github.com/dnglab/dnglab)），但必须在 `raybend-raw` 内做成**后端可插拔**接口，禁止其它模块直接依赖 rawler 类型。
-- 已知事实：rawler 是 **LGPL-2.1-only**（已核实与 GPL-3 兼容，可直接静态链接）、**API 不稳定且不遵循 SemVer**、**没有 GPU 依赖（纯 CPU，rayon）**、dnglab README 明说 **Windows 未官方支持**，且明确声明「**不要把 dnglab/rawler 用于处理不可信文件**」。
+- 已知事实：rawler 是 **LGPL-2.1-only**（已核实与 GPLv3 兼容〔LGPL v2.1 → GPLv3 的转换路径〕，因而可静态链接进本项目的 AGPL-3.0）、**API 不稳定且不遵循 SemVer**、**没有 GPU 依赖（纯 CPU，rayon）**、dnglab README 明说 **Windows 未官方支持**，且明确声明「**不要把 dnglab/rawler 用于处理不可信文件**」。
   → **纪律**：RAW 解码必须在**独立 worker 进程**中执行，崩溃不得带走主进程；对文件做大小/格式预检。
 - rawler 提供：CFA 像素、black/white level、白平衡系数、色彩矩阵（`xyz_to_cam` / `color_matrix`）、active/crop area、orientation、以及**嵌入式预览与缩略图**。
 - rawler 不提供：高质量去马赛克、降噪、镜头校正、色调映射、色彩管理。这些属于未来的 `raybend-develop`，第一阶段只有最基础处理。
@@ -207,8 +213,9 @@ SQLite FTS5 默认 `unicode61` 分词器**对中文基本无效**；必须使用
 - **没有 SQLite 依赖**：它是**sidecar 流派**（编辑状态写文件），没有 catalog 数据库。这正是 raybend 要走与之不同的路线的地方。
 - **渲染**：编辑器视口用「透明挖洞 + wgpu 直绘」；官方博文记录改造前后**拖动滑块 20fps → 120fps**，瓶颈原本是「JPEG 编码 → IPC → 浏览器解码」。
 - **许可：AGPL-3.0**（已核实 `LICENSE` 为 GNU Affero GPL v3）。
-  → **纪律**：可以**读它的代码学习思路**，但**不要直接复制代码进 raybend（GPL-3.0）**。AGPL-3 与 GPL-3 在严格意义上不能互相整体改写，只能按「独立模块/文件」方式组合。若将来确实要复用其代码，先在会话中讨论「是否把 raybend 改为 AGPL-3.0」（对桌面应用影响很小，除非将来做成 SaaS）。
-  → 派生说明：它 fork 的 rawler 仍属 LGPL-2.1 派生，**可以直接作为我们的 rawler 来源**（用于吸收其解码修复），但使用前需确认 fork 新增代码的许可标注。
+  → **本项目同样采用 AGPL-3.0-only，两边许可一致**：在保留版权与许可声明、并注明来源的前提下，其代码可被借鉴/移植进 raybend（需逐文件确认文件头的许可标注）。
+  → 其 fork 的 rawler（`CyberTimon/RapidRAW-DngLab`）仍属 **LGPL-2.1 派生**，可直接作为我们的 rawler 来源（用于吸收其解码修复），使用前确认 fork 新增代码的许可标注。
+  → 反向约束：一旦 raybend 对外提供网络服务，就必须按 AGPL 第 13 条向使用者提供对应源码。
 
 ### 7.6 组件原语：Kobalte vs Ark UI
 

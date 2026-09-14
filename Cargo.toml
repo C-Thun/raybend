@@ -1,0 +1,44 @@
+[workspace]
+resolver = "3"
+members = ["src-tauri", "crates/raybend"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+license = "AGPL-3.0-only"
+authors = ["raybend contributors"]
+repository = "https://github.com/C-Thun/raybend"
+
+[workspace.dependencies]
+# 内部 crate
+raybend = { path = "crates/raybend" }
+
+# 第三方（随使用逐步补充，不预置未使用的依赖）
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+[workspace.lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("cargo-clippy"))'] }
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+undocumented_unsafe_blocks = "warn"
+
+# workspace 强制：profile 只能定义在根
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true
+
+# 图像类工作负载在 dev 下也需要足够性能（详见 AGENTS.md）
+[profile.dev]
+opt-level = 2
+debug = 1
+incremental = true
+
+[profile.dev.package."*"]
+opt-level = 3

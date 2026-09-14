@@ -45,15 +45,15 @@
 
 | 编号 | 候选 | 许可 | 优点 | 缺点 / 风险 | 状态 |
 | --- | --- | --- | --- | --- | --- |
-| B1 | **rawler**（上游 [dnglab](https://github.com/dnglab/dnglab)） | LGPL-2.1-only | 纯 Rust、覆盖最广、同时给像素与元数据、自带 DNG 写出能力、可静态链接进 GPL-3 | API 不稳定不遵循 SemVer、无 GPU、官方明说 Windows 未支持、不为恶意文件做防护 | **当前首选** |
+| B1 | **rawler**（上游 [dnglab](https://github.com/dnglab/dnglab)） | LGPL-2.1-only | 纯 Rust、覆盖最广、同时给像素与元数据、自带 DNG 写出能力、可静态链接进 AGPL-3.0 | API 不稳定不遵循 SemVer、无 GPU、官方明说 Windows 未支持、不为恶意文件做防护 | **当前首选** |
 | B2 | rawler（RapidRAW fork：`CyberTimon/RapidRAW-DngLab`） | LGPL-2.1 派生 | 含其解码修复（可从 diff 学习/吸收） | 需确认 fork 新增代码的许可标注；跟随 fork 有维护耦合 | 待评估（可能直接采用或只吸收补丁） |
 | B3 | [libraw](https://www.libraw.org/)（Rust 绑定 [rsraw](https://github.com/mdegans/rsraw)、[libraw-rs](https://github.com/paolobarbolini/libraw-rs)） | LGPL-2.1 / CDDL-1.0 | 成熟、相机覆盖广、可作质量对照基准 | C++ 依赖、线程模型一般、性能不突出 | 备选/对照基准 |
 | B4 | [rawspeed](https://github.com/darktable-org/rawspeed) | LGPL-2.1 | 解包速度极快（Canon/Nikon 尤其） | 只解包不做颜色；C++；集成成本高 | 性能备选 |
 | B5 | rawloader（[pedrocr/rawloader](https://github.com/pedrocr/rawloader)） | 宽松许可（需复核） | 纯 Rust、干净 | 覆盖少、维护弱 | 低优先 |
 | B6 | [openraw](https://lib.rs/crates/libopenraw) | 需复核（Rust 原生重构版） | Rust 原生、专注文件结构解析 | 生态小、成熟度未知 | 观察 |
-| B7 | [zenraw](https://github.com/imazen/zenraw)（imazen） | **AGPL-3.0-only 或商业授权** | 三种可换后端、与 zencodec 生态整合 | 许可与 GPL-3 组合需谨慎、太新 | 观察（不做首选） |
+| B7 | [zenraw](https://github.com/imazen/zenraw)（imazen） | **AGPL-3.0-only 或商业授权** | 三种可换后端、与 zencodec 生态整合；**AGPL-3.0-only 与本项目许可一致，License 障碍已消失** | 太新、生态小 | 观察（可重新评估） |
 | B8 | 平台原生：macOS ImageIO / Windows WIC + Raw Image Extension | 系统组件 | 免费、与系统一致、mac 上质量好 | Windows 侧质量一般且依赖商店包；不可控 | 远期（mac 阶段） |
-| B9 | Adobe DNG SDK | 专有 | 最省事 | 与 GPL-3 不兼容 | **排除** |
+| B9 | Adobe DNG SDK | 专有 | 最省事 | 与 AGPL-3.0 不兼容 | **排除** |
 | B10 | 自研解析器 | 自有 | 完全可控、可针对性能优化 | 工作量巨大、相机覆盖是长期苦役 | 长期（仅在 B1/B2 出现阻断问题时考虑） |
 
 **补充方向**：DNG 归档功能（把老 RAW 批量转 DNG 并嵌入原图）——rawler 本身是 DNG 写出器，这是少见的能力，可作为「档案化」卖点，但属于编辑/归档里程碑。
@@ -100,17 +100,17 @@
 
 - 从 RAW 线性数据开始处理，保证色阶连续（**不是**转成 JPEG 再编辑）
 - 关键认知：RAW 编辑必须是「解码 → 线性化 → 场景参考处理 → 显示变换」的完整链路；任何在 8bit 显示参考空间里做的编辑都会损失色阶
-- 参考：[darktable 的色彩管线文档](https://docs.darktable.org/usermangement/development/en/special-topics/color-pipeline/)（注意 darktable 是 GPL-3，算法可移植）
+- 参考：[darktable 的色彩管线文档](https://docs.darktable.org/usermangement/development/en/special-topics/color-pipeline/)（注意 darktable 是 GPL-3.0+，依 AGPL-3.0 第 13 条可与本项目组合，算法可移植，需保留署名与来源）
 
 ### D2　去马赛克算法候选
 
 - 候选：RCD（darktable）、Markesteijn（X-Trans，darktable/RawTherapee）、AMaZE / DCB（RawTherapee）
-- **许可前提已满足**：darktable 与 RawTherapee 都是 GPL-3，可移植（需保留署名与来源说明）
+- **许可前提已满足**：darktable（GPL-3.0+）与 RawTherapee（GPL-3.0）都可与 AGPL-3.0 组合（AGPL-3.0 §13 允许与 GPL-3.0 作品组成单一作品），算法可移植，需保留署名与来源说明
 - **触发条件**：显影模块启动；此时需要在「直接用简单算法（快）」与「移植高质量算法（慢）」之间做取舍
 
 ### D3　降噪 / 锐化 / 镜头校正
 
-- 镜头校正数据库：[lensfun](https://lensfun.github.io/)（LGPL-3，与 GPL-3 兼容）
+- 镜头校正数据库：[lensfun](https://lensfun.github.io/)（LGPL-3.0，可经 GPL-3.0 路径与本项目 AGPL-3.0 组合）
 - 降噪候选：小波（RawTherapee）、NLM、后期可接 AI 去噪
 - GPU 化：wgpu compute shader（`AGENTS.md` §6.1 的渲染纪律已为此留口）
 
@@ -170,7 +170,7 @@
 
 - 解码：ImageIO / CoreImage（免费且质量好）
 - 渲染：Metal（wgpu 已支持）
-- 打包：签名与公证（notarization）、App Store 政策与 GPL-3 的冲突（**注意：GPL-3 与 App Store 条款不兼容**，需走独立分发）
+- 打包：签名与公证（notarization）、App Store 政策与 AGPL-3.0 的冲突（**注意：AGPL-3.0 与 App Store 条款不兼容**，需走独立分发）
 - 路径：NFD 规范化问题（`AGENTS.md` §7.3 已预留）
 
 ### F2　Linux
@@ -186,7 +186,7 @@
 | --- | --- | --- | --- |
 | G1 | 插件/脚本系统 | 用户可用 Lua 或 WASM 扩展（导出规则、自定义元数据面板等） | 核心 API 稳定后 |
 | G2 | Windows Shell 集成 | 注册 `IThumbnailProvider` 让资源管理器显示 raybend 渲染的缩略图。**风险**：进程内 shell 扩展，崩溃会影响 explorer.exe，签名与测试成本高 | 发布后 |
-| G3 | 云端同步 | 多机同步 catalog 与编辑。**注意**：若做成网络服务，AGPL 的条款就会咬合；当前 GPL-3 不受影响 | 不考虑近期 |
+| G3 | 云端同步 | 多机同步 catalog 与编辑。**注意**：本项目已是 AGPL-3.0，一旦对外提供网络服务，就必须按第 13 条向使用者提供对应源码 | 不考虑近期 |
 | G4 | 视频与 Live Photo | 视频缩略图与时码；大幅增加复杂度 | 相片流程稳定后 |
 | G5 | 打印与色彩校准 | 软打样、打印布局 | 色彩管理（C1）完成后 |
 | G6 | 多语言 | 从一开始预留 i18n（建议 i18next 或等价方案），首个版本只做中文 + 英文 | M1 UI 骨架时留位 |

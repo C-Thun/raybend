@@ -1,0 +1,15 @@
+[package]
+name = "raybend"
+description = "raybend（光伴）核心库：媒体、索引、RAW 解码、缩略图与渲染"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[lints]
+workspace = true

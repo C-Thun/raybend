@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#141414" />
+    <title>RayBend</title>
+    <!-- 避免启动瞬间的白屏闪烁：在样式加载前先把底色压成深色 -->
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #141414;
+      }
+    </style>
+  </head>
+
+  <body>
+    <noscript>需要启用 JavaScript 才能运行本应用。</noscript>
+    <div id="root"></div>
+
+    <script src="/src/index.tsx" type="module"></script>
+  </body>
+</html>
