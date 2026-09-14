@@ -15,10 +15,10 @@ import "./index.css";
  * 若最终不需要，此依赖可以移除。
  */
 render(
-  () => (
-    <Router>
-      <Route path="*" component={App} />
-    </Router>
-  ),
-  document.getElementById("root") as HTMLElement,
+ () => (
+  <Router>
+   <Route path="*" component={App} />
+  </Router>
+ ),
+ document.getElementById("root") as HTMLElement,
 );

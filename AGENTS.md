@@ -4,7 +4,15 @@
 > 全局约定见 `~/.pi/agent/AGENTS.md`（包管理、URL 书写、plannotator 流程等），本文件不重复。
 >
 > 建立时间：2026-09-15 00:18:03 CST
-> 相关文档：近中期计划见 `PLAN.md`，远期方向见 `FUTURE.md`。
+> 相关文档：近中期计划见 `PLAN.md`，远期方向见 `FUTURE.md`，**视觉与配色体系见 `DESIGN.md`**，**待人类协助事项见 `ASSISTANCE.md`**。
+
+<!-- -->
+
+> [!IMPORTANT]
+> **开工前先查 `ASSISTANCE.md`。**
+> 只要该文件存在**且有实际内容（不为空）**，则**任何任务在真正开始前（哪怕只是规划阶段）必须立即停止**，
+> 并向用户提示先协助完成 `ASSISTANCE.md` 中的事项；待用户确认完成后，Agent 需**逐项验证**后才可继续推进。
+> 本规则优先于本文件中其他一切流程约定。
 
 ---
 
@@ -37,6 +45,11 @@ raybend（中文名**「光伴」**，产品名 `RayBend`）是一个**相片管
    - **E2E 若要自动化**：除非用户特别指定要实现，否则不由 Agent 临时手跑一遍完事；需要时写成**可重复执行的自动化测试代码**。
    - 推而广之：**“进程起来了”不等于“功能对了”**。Agent 报告中必须清楚区分「已验证（冒烟）」与「未经人类验证」两部分。
 9. 新增顶层框架或大型依赖前先在会话中讨论，候选方案统一登记到 `FUTURE.md`。
+10. **单元测试必须齐备**——交付任一模块时，必须同时交付与之匹配的单元测试：
+    - **覆盖边界，不只测正常路径**：空输入 / 单元素 / 上下限 / 非法值 / Unicode 与中文 / 超长与非法路径 / 大小写与规范化差异 / 并发竞争 / 溢出与截断……按模块性质取用。
+    - **考虑执行效率**：`cargo test` 必须保持在秒级。真实照片、大文件、十万行数据这类重负载要降为小规模合成数据，或标记为 `#[ignore]` 的手动基准，不要拖慢日常测试。
+    - 与第 8 条不冲突：**单元测试属于 Agent 的职责**（冒烟的一部分），E2E 才归人类。
+11. **遇到 `ASSISTANCE.md` 有内容就停下来**：见本文件开头的「开工前先查 `ASSISTANCE.md`」。需要人类做的事（装工具链、授权、提供样本、目视确认、在真机上跑 E2E 等）一律写进 `ASSISTANCE.md`，不要口头带过或自己硬干。
 
 ---
 
@@ -48,14 +61,14 @@ raybend（中文名**「光伴」**，产品名 `RayBend`）是一个**相片管
 | 构建 | Vite | 8.x | RapidRAW 亦用 Vite 8 |
 | UI | Solid | **1.9.x（选定）**；`@solidjs/router` 1.0.0 | Solid 2.0 仍是 RC（2.0.0-rc.8），迁移登记 `FUTURE.md` |
 | 样式 | Tailwind CSS | 4.3.3 | CSS-first 配置 + CSS 变量令牌层 |
-| 组件原语 | Kobalte（待与 Ark UI 最终定夺） | — | 对比见 §7.6 |
-| 图标 | 待定（Lucide / Tabler / Material Symbols） | — | 评估见 §7.7 |
+| 组件原语 | **Ark UI**（`@ark-ui/solid`） | 5.39.x | 已定；实测对比见 §7.6 |
+| 图标 | **Tabler**（`@tabler/icons-solidjs`） | 3.46.0 | 已定；实测对比见 §7.7 |
 | RAW 解码 | rawler 0.8.0（LGPL-2.1-only） | 上游 dnglab | 可插拔后端，候选见 `FUTURE.md` |
 | 渲染 | wgpu + WGSL | 需锁定版本 | **版本锁定有前例教训**：RapidRAW 将 wgpu 降到 29.0 以规避 Apple 设备 P3 色偏 |
 | DB | SQLite（rusqlite + 迁移工具） | — | 见 §6.4 存储架构 |
 | 色彩 | lcms2（预留，后期接入） | — | 第一阶段不做色彩管理 |
 | 类型桥 | specta / tauri-specta | — | Rust 类型 → TS 类型，避免手写漂移 |
-| MSRV | ≥ 1.95（建议统一 1.95+） | rawler 要 1.89，Tauri 3 要 1.95，RapidRAW 用 1.98 | |
+| Rust 工具链 | **1.98.1**（`rust-toolchain.toml` 锁定，不改全局默认） | rawler 要 1.89，Tauri 3 要 1.95 | 全局默认仍是用户自己的版本，仓库内自动切换 |
 
 ---
 
@@ -64,12 +77,17 @@ raybend（中文名**「光伴」**，产品名 `RayBend`）是一个**相片管
 ```text
 raybend/
 ├── AGENTS.md                  # 本文件：核心信息与纪律
+├── ASSISTANCE.md              # 待人类协助事项（有内容则先停下来处理它）
+├── DESIGN.md                  # 视觉与配色体系（唯一事实来源）
 ├── PLAN.md                    # 近中期计划：Milestone（阶段）→ Wave（波次）
 ├── FUTURE.md                  # 远期方向登记册
+├── THIRD-PARTY-NOTICES.md     # 第三方许可登记
 ├── LICENSE                    # AGPL-3.0-only
 ├── README.md
-├── Cargo.toml                 # [workspace]
-├── package.json / vite.config.ts / index.html
+├── Cargo.toml                 # [workspace]；profile 也必须在这里
+├── rust-toolchain.toml        # 锁定 Rust 1.98.1
+├── package.json / pnpm-lock.yaml / vite.config.ts / index.html
+├── plans/                     # 各里程碑的详细计划（plans/M0.md …）
 ├── design/                    # Pencil 设计稿：xxx.pen + xxx.md（同名）
 ├── implementations/           # 实施记录：YYYY-MM-DD_<简述>.md（文件内首行写精确时间）
 ├── src/                       # 前端（Solid + Tailwind）
@@ -77,10 +95,11 @@ raybend/
 │   ├── tauri.conf.json        # productName = "RayBend"
 │   └── src/{main.rs, lib.rs}
 └── crates/
-    ├── raybend/               # 核心库（占位命名，避免被后续库占用）
-    │   └── src/{lib.rs, media/, index/, raw/, thumbnail/}
-    └── raybend-ipc/           # 可选：IPC 契约与 specta 生成
+    └── raybend/               # 核心库（package.name = "raybend"，不依赖 Tauri）
+        └── src/{lib.rs, error.rs, media/, index/, raw/, thumbnail/, render/}
 ```
+
+`crates/raybend-ipc`（IPC 契约与 specta 生成）在 M1 出现真实契约时再拆，不提前建空壳。
 
 **分层原则**：`src-tauri` 只做「窗口 + WebView + 命令转发」的薄壳，业务逻辑全部在 `crates/` 内，且**业务 crate 不依赖 tauri**。这是为了 Tauri 3.0 迁移（见 §6.2）与未来做 CLI/无头模式时不需要重写。
 
@@ -108,6 +127,31 @@ raybend/
 
 - 正文至少包含：本次改动的范围、涉及文件、关键决策与理由、验证方式（跑了什么命令/看到什么结果）、遗留问题。
 - 一天内多次改动写多个文件；不要追加到同一个文件里堆叠。
+
+### 5.3 构建与运行命令（已实测，2026-09-15）
+
+```bash
+# —— WSL 侧（日常开发）——
+pnpm install
+pnpm tauri dev            # Linux/webkit2gtk 版窗口（经 WSLg 显示）
+cargo check --workspace   # Rust 侧快速检查（WSL 侧 target/）
+
+# —— Windows 侧（真实产品环境：WebView2）——
+# 前端在 WSL 构建，Windows 只跑 Rust，不需要在 Windows 装 Node。
+pnpm build                              # ① WSL 里产出 dist/
+export CARGO_TARGET_DIR='C:\rb-target\raybend'
+export WSLENV='CARGO_TARGET_DIR'        # ② 跨 WSL→Windows 透传环境变量（cmd 的 set 经互操作不可靠）
+cmd.exe /c 'pushd \\wsl.localhost\Ubuntu-24.04\home\andares\repos\c-thun\raybend & cargo build --workspace'
+/mnt/c/rb-target/raybend/debug/raybend-desktop.exe   # ③ 运行（产物在 C: 本地）
+```
+
+**三条硬规矩（实测踩坑）：**
+
+1. **Windows 构建的产物必须落在 Windows 本地盘**（`C:\rb-target\...`）。9p 共享（`\\wsl.localhost`）不支持 rustc 增量编译的锁文件语义，会报 `os error -2147024895`，且会把 Windows 产物污染进 WSL 的 `target/`。
+2. **跨 WSL→Windows 传环境变量用 `WSLENV`**，不要用 cmd 的 `set VAR=x & ...`（`&` 前的空格会进值，且引号经互操作会丢）。
+3. 前端改动后必须重新 `pnpm build`（dist 是编译期嵌入的）；Rust 改动则只需重跑 cargo。
+
+实测参考：首次 Windows 全量构建约 3–4 分钟；WSL 侧 `cargo check` 首次约 2–3 分钟。
 
 ---
 
@@ -232,6 +276,10 @@ SQLite FTS5 默认 `unicode61` 分词器**对中文基本无效**；必须使用
 
 决策留到设计阶段（用 Pencil 画出第一批界面控件后再定），结论写入 `PLAN.md` 对应里程碑。
 
+**✅ 已决（2026-09-15）**：本项目选 **Ark UI**（`@ark-ui/solid`）—— 原因是 `splitter`（可拖拽分栏）
+与 `tree-view`（标签层级树）是我们最需要且最难自研的两个组件，只有它提供；其活跃度也明显领先。
+实测数据（版本号、组件数、活跃度）见 `plans/M0.md` 文末附录。
+
 ### 7.7 图标体系（核实结果，2026-09-15）
 
 | 图标集 | 数量 | 风格 | 许可 | 填充态 | 影像领域覆盖 |
@@ -248,7 +296,8 @@ SQLite FTS5 默认 `unicode61` 分词器**对中文基本无效**；必须使用
 - 首选 **Tabler**（唯一同时满足「数量大 + 描边/填充成对 + MIT + 小尺寸清晰」）；次选 Lucide（生态最成熟、风格最现代，但激活态需用别的手段表达而非填充）。
 - 编辑模块的领域专用图标（histogram / vignette / tonality / dehaze 等）从 **Material Symbols** 借用（Apache-2.0 可与 MIT 混用，但混用需注意描边粗细与网格差异）。
 - 图标尺寸规范：16 / 20 / 24 三档，激活态优先用**强调色 + 背景块**表达（Web 设计里有大量成熟做法），不依赖填充变体。
-- 最终选型在设计阶段（画出第一批界面后）敲定，结论写入 `PLAN.md` 对应里程碑。
+- **✅ 已决（2026-09-15）**：本项目选 **Tabler**（`@tabler/icons-solidjs`）；
+  实测数据见 `plans/M0.md` 文末附录。选型原则仍是「只用套内图标做组合、降低数量」，不自绘几十个图标。
 
 ### 7.8 Tauri 分发与 npm
 
@@ -285,7 +334,11 @@ SQLite FTS5 默认 `unicode61` 分词器**对中文基本无效**；必须使用
 | 文件 | 内容 |
 | --- | --- |
 | `AGENTS.md` | 本文件：定位、硬约束、版本基线、目录、纪律、架构决定、关键真相、问题清单 |
+| `ASSISTANCE.md` | **待人类协助事项清单**（有内容则先停下来处理它） |
+| `DESIGN.md` | 视觉与配色体系（唯一事实来源） |
 | `PLAN.md` | 近中期开发计划：Milestone（阶段）→ Wave（波次），含初始化清单与完成定义 |
+| `plans/M0.md` 等 | 各里程碑的详细计划（planner 产物） |
 | `FUTURE.md` | 远期方向登记册：框架迁移、RAW 后端候选、渲染演进、编辑模块、AI、平台扩展 |
+| `THIRD-PARTY-NOTICES.md` | 第三方组件与参考项目的许可登记 |
 | `design/*.pen` + `design/*.md` | Pencil 设计稿与其说明（成对存在） |
 | `implementations/*.md` | 每次改动的实施记录（文件名带日期，内容首行带精确时间） |
