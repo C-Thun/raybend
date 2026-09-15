@@ -30,6 +30,13 @@ import { RadioCircle } from "./Form.tsx";
 export interface TreeNodeProps {
   /** 行名（目录名） */
   label: string;
+  /**
+   * 行内容的替代渲染（省略时用 `label` 画文字）。
+   *
+   * `Recent` 列表用它换行 `PathText`（缩写路径 + 悬停看完整路径，`DESIGN.md` §12.3）；
+   * 目录树则用默认的纯名字。行本身的语义（勾选 / 选中 / 指向）不分家。
+   */
+  labelNode?: JSX.Element;
   /** 深度，从 0 开始。决定缩进 */
   depth: number;
   /** 有子节点（决定是否画展开箭头） */
@@ -55,6 +62,7 @@ export interface TreeNodeProps {
 export function TreeNode(props: TreeNodeProps) {
   const [local, rest] = splitProps(props, [
     "label",
+    "labelNode",
     "depth",
     "hasChildren",
     "expanded",
@@ -140,17 +148,21 @@ export function TreeNode(props: TreeNodeProps) {
         </span>
       </Show>
 
-      <span
-        class={[
-          "min-w-0 flex-1 truncate text-fs-2",
-          local.selected ? "text-fg-1" : "",
-        ]
-          .filter(Boolean)
-          .join(" ")}
-        title={local.label}
-      >
-        {local.label}
-      </span>
+      <Show when={local.labelNode} fallback={
+        <span
+          class={[
+            "min-w-0 flex-1 truncate text-fs-2",
+            local.selected ? "text-fg-1" : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+          title={local.label}
+        >
+          {local.label}
+        </span>
+      }>
+        <span class="min-w-0 flex-1">{local.labelNode}</span>
+      </Show>
 
       <Show when={local.trailing}>
         <span class="shrink-0 text-fs-1 text-fg-3 tnum">

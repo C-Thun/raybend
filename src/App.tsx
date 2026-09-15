@@ -16,15 +16,23 @@
  * 等到 M1-5 再验证，问题会混在照片网格里，分不清是谁的。
  */
 
+import * as db from "./api/db.ts";
 import { createAppearanceStore } from "./lib/appearance.ts";
 import { FlowBar } from "./shell/FlowBar.tsx";
 import { createShellStore } from "./shell/store.ts";
 import { TitleBar } from "./shell/TitleBar.tsx";
 import { ToolsBar } from "./shell/ToolsBar.tsx";
+import { createImportStore, ImportWorkspace } from "./workspaces/import/index.ts";
 
 export default function App() {
   const shell = createShellStore();
   const appearance = createAppearanceStore();
+  /*
+   * 导入工作区的共享状态（`ARCHITECTURE.md` §3）：创建在组装层、往下传。
+   * 只有它能同时被工作区（三列）与外壳的 `toolsbar`（批量排除）用到 ——
+   * 照片选择状态横跨这两层，所以不能藏在任何一个 feature 里。
+   */
+  const importStore = createImportStore({ api: db });
 
   return (
     <div class="flex h-full w-full flex-col bg-surface-main text-fg-1">
@@ -40,18 +48,9 @@ export default function App() {
       */}
       <ToolsBar store={shell} hasSelection={false} />
 
-      {/* ── workspace（M1-5 换掉）───────────────────────────── */}
-      <div class="flex min-h-0 flex-1">
-        <aside class="w-panel-w-left shrink-0 bg-surface-main p-panel-pad">
-          <p class="text-fs-1 tracking-wide text-fg-2 uppercase">来源</p>
-        </aside>
-        <main class="flex min-w-0 flex-1 items-center justify-center bg-surface-bar">
-          <p class="text-fg-3">照片区（M1-5）</p>
-        </main>
-        <aside class="w-panel-w-right shrink-0 bg-surface-main p-panel-pad">
-          <p class="text-fs-1 tracking-wide text-fg-2 uppercase">库</p>
-        </aside>
-      </div>
+      {/* ── workspace（导入工作区；其余工作流仍待实现）────────── */}
+      <ImportWorkspace store={importStore} />
+
     </div>
   );
 }

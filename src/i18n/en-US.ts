@@ -59,6 +59,25 @@ export const enUS: Record<MessageKey, string> = {
  "source.selected": "Selected",
  "source.include_subdirs": "Include subdirectories",
 
+ // ── Left column: states and hints (M1-5) ─────────
+ "source.recent.empty": "No recent folders yet",
+ "source.tree.empty": "No sources available",
+ "source.selected.empty": "Checked folders show up here",
+ "source.load_error": "Can't read this location: {message}",
+ "source.remove_from_recent": "Remove from recent",
+ "source.remove_dir": "Remove {path}",
+ "source.check": "Check",
+ "source.expand": "Expand",
+ "source.collapse": "Collapse",
+ "source.photo_count": "{n} photos",
+ "source.counting": "Counting…",
+ "source.volume.local": "Local disk",
+ "source.volume.removable": "Removable disk",
+ "source.volume.optical": "Optical disc",
+ "source.volume.network": "Network location",
+ "source.volume.cloud": "Cloud drive",
+ "source.volume.unknown": "Unknown source",
+
  "grid.count": "{n} items",
  "grid.exclude": "Exclude",
  "grid.fit": "Fit to screen",
@@ -70,6 +89,9 @@ export const enUS: Record<MessageKey, string> = {
  "grid.select_all_range": "Select this range",
  "grid.unknown_time": "Unknown time",
  "grid.excluded": "Excluded",
+ "grid.pick_dir": "Pick a folder on the left",
+ "grid.empty_dir": "No photos in this folder",
+ "grid.load_error": "Can't read this folder: {message}",
 
  "tools.batch_exclude": "Exclude selected",
 

@@ -66,6 +66,25 @@ export const zhCN = {
  "source.selected": "已选目录",
  "source.include_subdirs": "包含子目录",
 
+ // ── 左列：状态与提示（M1-5）──────────────────────
+ "source.recent.empty": "还没有导入过的目录",
+ "source.tree.empty": "没有可用的来源",
+ "source.selected.empty": "勾选目录后会出现在这里",
+ "source.load_error": "读不了这个位置：{message}",
+ "source.remove_from_recent": "从最近中移除",
+ "source.remove_dir": "移除 {path}",
+ "source.check": "勾选",
+ "source.expand": "展开",
+ "source.collapse": "折叠",
+ "source.photo_count": "{n} 张照片",
+ "source.counting": "统计中…",
+ "source.volume.local": "本地磁盘",
+ "source.volume.removable": "可移动磁盘",
+ "source.volume.optical": "光盘",
+ "source.volume.network": "网络位置",
+ "source.volume.cloud": "云盘",
+ "source.volume.unknown": "未知来源",
+
  // ── 中列：照片区（design/main.md §3.2、DESIGN.md §12.7）─
  "grid.count": "{n} 张",
  "grid.exclude": "排除",
@@ -78,6 +97,9 @@ export const zhCN = {
  "grid.select_all_range": "全选此段",
  "grid.unknown_time": "未知时间",
  "grid.excluded": "已排除",
+ "grid.pick_dir": "从左侧选一个目录",
+ "grid.empty_dir": "这个目录里没有照片",
+ "grid.load_error": "读不了这个目录：{message}",
 
  // ── toolsbar（内容居中，随工作流装配）──────────────────
  "tools.batch_exclude": "批量排除",
