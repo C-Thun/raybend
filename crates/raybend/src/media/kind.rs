@@ -141,6 +141,24 @@ pub fn junk_kind(file_name: &str) -> Option<JunkKind> {
         return Some(JunkKind::OsMetadata);
     }
 
+    // 系统自己的目录：浏览盘根时一定会撞到，列出来只是噪声
+    // （它们可能出现在目录**或**文件位置，按名字判就够了）
+    if matches!(
+        lower.as_str(),
+        "$recycle.bin"
+            | "recycler"
+            | "system volume information"
+            | "$windows.~ws"
+            | "$windows.~bt"
+            | ".trash"
+            | ".trashes"
+            | ".spotlight-v100"
+            | ".fseventsd"
+            | ".documentrevisions-v100"
+    ) {
+        return Some(JunkKind::OsMetadata);
+    }
+
     if lower.starts_with("~$") || lower.ends_with(".tmp") || lower.starts_with(".goutputstream-") {
         return Some(JunkKind::EditorTemp);
     }
@@ -311,6 +329,29 @@ mod tests {
         );
         assert_eq!(junk_kind("catalog.db-wal"), Some(JunkKind::RepositoryFile));
         assert_eq!(junk_kind("CATALOG.DB-SHM"), Some(JunkKind::RepositoryFile));
+    }
+
+    #[test]
+    fn system_directories_are_junk() {
+        // 浏览盘根（`D:\`）时一定会碰到它们 —— 列进来源树或网格只是噪声
+        for name in [
+            "$RECYCLE.BIN",
+            "$Recycle.Bin",
+            "RECYCLER",
+            "System Volume Information",
+            "$WINDOWS.~WS",
+            ".Trash",
+            ".Spotlight-V100",
+        ] {
+            assert_eq!(
+                junk_kind(name),
+                Some(JunkKind::OsMetadata),
+                "{name} 是系统自己的目录"
+            );
+        }
+        // 只是名字里带一点相像的，不能误伤
+        assert_eq!(junk_kind("Recycle Bin Photos"), None);
+        assert_eq!(junk_kind("trash"), None);
     }
 
     #[test]

@@ -6,6 +6,7 @@
 //! * [`scan`]：目录扫描（可取消、顺序确定、跳过规则）
 //! * [`diff`]：变更追踪（磁盘快照 vs 库记录 → 变更计划；纯函数、绝不删记录）
 //! * [`exif`]：EXIF 抽取与拍摄时间来源判定（EXIF → 文件名 → 文件修改时间）
+//! * [`source`]：来源目录的列取（目录树的一层 / 中列的照片清单 / 并行补拍时间）
 //!
 //!
 //! 文件身份 `(volume_serial, file_id128)` 已在 `store::file_id` 落地（Windows 用
@@ -16,5 +17,6 @@ pub mod diff;
 pub mod exif;
 pub mod kind;
 pub mod scan;
+pub mod source;
 
 pub use kind::{JunkKind, MediaKind, extension, junk_kind, kind_of_file, stem_folded};

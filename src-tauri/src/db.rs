@@ -42,7 +42,7 @@ impl DbState {
     }
 
     /// 在已打开的库上执行一段操作。
-    fn with<R: Runtime, T>(
+    pub(crate) fn with<R: Runtime, T>(
         &self,
         app: &AppHandle<R>,
         f: impl FnOnce(&AppDb) -> Result<T, String>,

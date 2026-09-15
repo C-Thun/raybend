@@ -8,6 +8,9 @@
 //! 主窗口保持不透明、不受影响。
 
 pub mod db;
+pub mod repo;
+pub mod source;
+pub mod thumbs;
 
 /// 主窗口标签（与 `tauri.conf.json` 的窗口配置、`capabilities/default.json` 对应）。
 pub const MAIN_WINDOW_LABEL: &str = "main";
@@ -20,11 +23,32 @@ pub const MAIN_WINDOW_LABEL: &str = "main";
 pub fn run() {
     tauri::Builder::default()
         .manage(db::DbState::default())
+        .manage(thumbs::SourcesThumbs::default())
         .invoke_handler(tauri::generate_handler![
+            // ── 数据底座的诊断与设置（M1-2）──
             db::app_paths,
             db::db_status,
             db::setting_get,
-            db::setting_set
+            db::setting_set,
+            // ── 来源：最近目录 / 驱动器 / 目录树 / 照片清单 ──
+            source::recent_dirs_list,
+            source::recent_dir_remember,
+            source::recent_dir_forget,
+            source::volumes_list,
+            source::dir_list,
+            source::source_scan,
+            source::source_count,
+            source::source_times,
+            source::file_exif,
+            // ── 缩略图（未入库的源文件也要能出图）──
+            thumbs::thumb_get,
+            thumbs::thumb_sources_stats,
+            // ── 库（相片仓）──
+            repo::repositories_list,
+            repo::repository_probe,
+            repo::repository_create,
+            repo::repository_remount,
+            repo::repository_counts,
         ])
         .setup(|app| {
             use tauri::Manager;

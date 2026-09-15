@@ -30,4 +30,6 @@ pub mod worker;
 
 pub use cache::{CacheStats, GcOutcome, ThumbsDb, cache_key};
 pub use render::{SizeClass, Thumb, render_file, render_sig};
-pub use worker::{Claimed, Outcome, QueueStats, RunStats, ThumbJob};
+pub use worker::{
+    Claimed, Outcome, QueueStats, RunStats, ThumbJob, cache_key_for, render_now,
+};

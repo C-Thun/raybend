@@ -260,6 +260,17 @@ impl RunStats {
     }
 }
 
+/// 缓存键的**唯一算法**（`produce` 与 `render_now` 共用，避免两处各算一遍算歪）。
+///
+/// `key_material` 是「这个文件在缓存里的身份字符串」：入库文件传**库内相对路径**，
+/// 未入库的源文件传**绝对路径**（否则不同目录里的同名文件会撞键）。
+#[must_use]
+pub fn cache_key_for(abs_path: &Path, key_material: &str) -> Vec<u8> {
+    let forms = PathForms::new(key_material);
+    let identity = FileId::try_read(abs_path);
+    cache::cache_key(identity.as_ref(), forms.folded())
+}
+
 /// 干一条活：读文件 → 渲染（或占位图）→ 写缓存。
 ///
 /// **纯函数式的一次调用**：不碰 `jobs` 表，方便单测与复用（导入现场也可以直接调）。
@@ -275,10 +286,8 @@ pub fn produce(conn: &Connection, root: &Path, job: &ThumbJob, now_ms: i64) -> R
             job.size
         )));
     };
-    let forms = PathForms::new(&job.rel_path);
     let abs = root.join(&job.rel_path);
-    let identity = FileId::try_read(&abs);
-    let key = cache::cache_key(identity.as_ref(), forms.folded());
+    let key = cache_key_for(&abs, &job.rel_path);
     let sig = render::render_sig(size);
 
     // 命中就不干活（渲染是这里最贵的部分）
@@ -308,6 +317,53 @@ pub fn produce(conn: &Connection, root: &Path, job: &ThumbJob, now_ms: i64) -> R
         now_ms,
     )?;
     Ok(outcome)
+}
+
+/// 「**现在就给我一张缩略图**」：导入工作区滚动源目录时走这条路。
+///
+/// 与队列那条路的区别只有「谁来等」：这里同步等结果，队列是后台慢慢跑。
+/// **缓存键与渲染逻辑完全共用** —— 同一个文件以后入库再生成缩略图时，直接命中这里写下的那条。
+///
+/// 调用方负责控制并发（前端只同时发 4 个请求）；这里不做限流，超时/取消也不属于它。
+///
+/// 文件不存在 / 读不了 → 报错（界面显示破图占位）；文件能读但解不了码（RAW）→ 占位图。
+pub fn render_now(
+    thumbs: &ThumbsDb,
+    abs_path: &Path,
+    size: SizeClass,
+    now_ms: i64,
+) -> Result<Vec<u8>> {
+    // 源文件还没入库，「身份字符串」就是**绝对路径**（见 `cache_key_for`）
+    let material = abs_path.to_string_lossy().into_owned();
+    let key = cache_key_for(abs_path, &material);
+    let sig = render::render_sig(size);
+
+    // 读池的连接是 `query_only`，且闭包要 `Send + 'static` —— 键得自己持一份
+    let read_key = key.clone();
+    if let Some(bytes) = thumbs.read(move |conn| cache::get(conn, &read_key, size, sig))? {
+        return Ok(bytes);
+    }
+
+    let file_name = abs_path
+        .file_name()
+        .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+    let kind = kind::kind_of_file(&file_name);
+    let thumb = match render::render_file(abs_path, size)? {
+        Some(t) => t,
+        // 不可解码（RAW）：先用占位图兜住（与队列那条路同一取舍）
+        None => render::placeholder(kind, size)?,
+    };
+    let (data, width, height) = (thumb.data, thumb.width, thumb.height);
+
+    thumbs.write(move |conn| cache::put(conn, &key, size, sig, &data, width, height, now_ms))?;
+    // 写进缓存的那份已由闭包持有，这里再取一次（一次 BLOB 读，微不足道）
+    let read_key = abs_path.to_string_lossy().into_owned();
+    let key = cache_key_for(abs_path, &read_key);
+    thumbs
+        .read(move |conn| cache::get(conn, &key, size, sig))?
+        .ok_or_else(|| {
+            crate::error::Error::Unsupported("缩略图刚写进缓存却读不回来".to_string())
+        })
 }
 
 /// 一条「真的干过活」的任务的完整结果（给访问用）。
@@ -430,6 +486,21 @@ mod tests {
 
     fn thumbs_db(dir: &Path) -> ThumbsDb {
         ThumbsDb::open(dir.join("cache"), T0).unwrap()
+    }
+
+    /// 某条缓存被写入/刷新时记下的时间（测试用；取不到则 panic）。
+    fn last_used_at(thumbs: &ThumbsDb, key: &[u8], size: &str) -> i64 {
+        let key = key.to_vec();
+        let size = size.to_string();
+        thumbs
+            .read(move |conn| {
+                Ok(conn.query_row(
+                    "SELECT last_used_at FROM thumbs WHERE cache_key = ?1 AND size_class = ?2",
+                    params![&key, &size],
+                    |r| r.get::<_, i64>(0),
+                )?)
+            })
+            .unwrap()
     }
 
     // ---------- 载荷 ----------
@@ -870,6 +941,86 @@ mod tests {
                 .read(crate::store::migration::schema_version)
                 .unwrap(),
             migration::supported_version(DbKind::Thumbs)
+        );
+    }
+
+    // ---------- render_now（导入工作区的滚动加载）----------
+
+    #[test]
+    fn render_now_returns_bytes_and_then_hits_the_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        let photo = dir.path().join("源");
+        write_jpeg(&photo.join("a.jpg"), 600, 400);
+        let thumbs = thumbs_db(dir.path());
+
+        let abs = photo.join("a.jpg");
+        let first = render_now(&thumbs, &abs, SizeClass::Grid, T0).unwrap();
+        assert!(render::is_valid_jpeg(&first), "应当是一张真 JPEG");
+
+        // 记下写入时间：第二次若又走渲染，`put` 会把 last_used_at 推到新值
+        let key = cache_key_for(&abs, &abs.to_string_lossy());
+        let after_first = last_used_at(&thumbs, &key, "grid");
+
+        let second = render_now(&thumbs, &abs, SizeClass::Grid, T0 + 999).unwrap();
+        assert_eq!(first, second, "同样的输入要拿到同样的字节");
+        assert_eq!(
+            last_used_at(&thumbs, &key, "grid"),
+            after_first,
+            "第二次必须命中缓存，不再重写"
+        );
+    }
+
+    #[test]
+    fn render_now_uses_a_placeholder_for_undecodable_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let photo = dir.path().join("源");
+        std::fs::create_dir_all(&photo).unwrap();
+        // RW2 在本阶段就是「读得出来但解不了码」那一类
+        std::fs::write(photo.join("a.rw2"), vec![1u8, 2, 3, 4, 5]).unwrap();
+        let thumbs = thumbs_db(dir.path());
+
+        let bytes = render_now(&thumbs, &photo.join("a.rw2"), SizeClass::Strip, T0).unwrap();
+        assert!(render::is_valid_jpeg(&bytes), "占位图也是合法 JPEG");
+        assert_eq!(thumbs.read(cache::stats).unwrap().entries, 1, "占位图也入缓存");
+    }
+
+    #[test]
+    fn render_now_reports_a_missing_file_instead_of_faking_an_image() {
+        let dir = tempfile::tempdir().unwrap();
+        let thumbs = thumbs_db(dir.path());
+        let missing = dir.path().join("gone.jpg");
+        assert!(render_now(&thumbs, &missing, SizeClass::Grid, T0).is_err());
+    }
+
+    #[test]
+    fn render_now_keeps_different_directories_apart_without_identity() {
+        // 两个目录里的**同名**文件必须各占一条缓存 ——
+        // 否则（读不到文件身份时）缓存会把它们当成同一张图
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a");
+        let b = dir.path().join("b");
+        write_jpeg(&a.join("same.jpg"), 100, 80);
+        write_jpeg(&b.join("same.jpg"), 300, 240);
+        let thumbs = thumbs_db(dir.path());
+
+        let a_bytes = render_now(&thumbs, &a.join("same.jpg"), SizeClass::Grid, T0).unwrap();
+        let b_bytes = render_now(&thumbs, &b.join("same.jpg"), SizeClass::Grid, T0).unwrap();
+        assert_ne!(a_bytes, b_bytes, "不同目录的同名文件不能撞缓存");
+    }
+
+    #[test]
+    fn render_now_respects_size_classes() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("big.jpg");
+        write_jpeg(&file, 1200, 800);
+        let thumbs = thumbs_db(dir.path());
+
+        render_now(&thumbs, &file, SizeClass::Grid, T0).unwrap();
+        render_now(&thumbs, &file, SizeClass::Strip, T0).unwrap();
+        assert_eq!(
+            thumbs.read(cache::stats).unwrap().entries,
+            2,
+            "两个尺度各存一条"
         );
     }
 }
