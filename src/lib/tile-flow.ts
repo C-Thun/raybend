@@ -118,6 +118,9 @@ export function tileTotalHeight(
  */
 export function tileRowCount(count: number, columns: number): number {
  if (!Number.isFinite(count) || count <= 0) return 0;
- const cols = Math.max(1, Math.floor(columns));
+ // 列数非法时退化为「每行一张」。
+ // 注意不能只写 Math.max(1, Math.floor(columns)) —— NaN 会穿透 Math.max，
+ // 结果整个变成 NaN，进而让虚拟化的总高度算不出来。
+ const cols = Number.isFinite(columns) ? Math.max(1, Math.floor(columns)) : 1;
  return Math.ceil(count / cols);
 }
