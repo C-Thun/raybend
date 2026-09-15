@@ -27,6 +27,8 @@ pub enum DbKind {
     App,
     /// 每库的 `catalog.db`。
     Catalog,
+    /// 缩略图缓存库 `thumbs.db`（派生数据：**删掉即可重建**，见 AGENTS.md §6.5）。
+    Thumbs,
 }
 
 impl DbKind {
@@ -36,6 +38,7 @@ impl DbKind {
         match self {
             Self::App => "app",
             Self::Catalog => "catalog",
+            Self::Thumbs => "thumbs",
         }
     }
 
@@ -45,6 +48,7 @@ impl DbKind {
         match self {
             Self::App => "应用库",
             Self::Catalog => "照片库",
+            Self::Thumbs => "缩略图缓存",
         }
     }
 
@@ -54,6 +58,7 @@ impl DbKind {
         match self {
             Self::App => APP_MIGRATIONS,
             Self::Catalog => CATALOG_MIGRATIONS,
+            Self::Thumbs => THUMBS_MIGRATIONS,
         }
     }
 }
@@ -105,6 +110,15 @@ pub const CATALOG_MIGRATIONS: &[Migration] = &[
         sql: include_str!("migrations/catalog_0002_marking_tags_geo.sql"),
     },
 ];
+
+/// 缩略图缓存库 `thumbs.db` 的迁移列表。
+///
+/// 缓存**不做快照**（派生数据，最坏情况就是重新生成一遍）。
+pub const THUMBS_MIGRATIONS: &[Migration] = &[Migration {
+    version: 1,
+    name: "init",
+    sql: include_str!("migrations/thumbs_0001_init.sql"),
+}];
 
 /// 每类库保留的快照份数（`AGENTS.md` §6.4：保留 7 份）。**按库分别保留**。
 pub const BACKUP_KEEP: usize = 7;
@@ -422,7 +436,7 @@ mod tests {
 
     #[test]
     fn migration_lists_are_contiguous_from_one() {
-        for kind in [DbKind::App, DbKind::Catalog] {
+        for kind in [DbKind::App, DbKind::Catalog, DbKind::Thumbs] {
             let versions: Vec<i64> = kind.migrations().iter().map(|m| m.version).collect();
             let expected: Vec<i64> = (1..=versions.len() as i64).collect();
             assert_eq!(versions, expected, "{:?} 的版本号必须从 1 连续递增", kind);

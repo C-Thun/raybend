@@ -29,6 +29,9 @@ tempfile = "3"                                             # 仅测试用（临�
 # （它另引 little_exif 只用于**写回**，本项目不写 EXIF）。
 # 注意：只读 EXIF；RAW 的元数据将来走 rawler（FUTURE.md B8）。
 kamadak-exif = "0.6"
+
+# 缩略图（M1-3）：只开需要的解码/编码格式，不开 avif/hdr 等大件
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "tiff"] }
 # Windows 平台调用：文件身份（GetFileInformationByHandleEx）/ 驱动器类型（GetDriveTypeW）
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
 

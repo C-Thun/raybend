@@ -385,7 +385,7 @@ impl std::fmt::Debug for CatalogDb {
 /// 打开文件 → 套 PRAGMA → 跑迁移（带快照与版本闸门）→ 关掉临时连接。
 ///
 /// `create_if_missing` 为假时要求文件已存在（库目录不能凭函数调用凭空长出来）。
-fn migrate_file(
+pub(crate) fn migrate_file(
     path: &Path,
     kind: DbKind,
     backups: Backups<'_>,
