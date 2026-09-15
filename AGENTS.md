@@ -94,7 +94,8 @@ raybend/
 ├── Cargo.toml                 # [workspace]；profile 也必须在这里
 ├── rust-toolchain.toml        # 锁定 Rust 1.98.1
 ├── package.json / pnpm-lock.yaml / vite.config.ts / index.html
-├── plans/                     # 单工作单元的计划（plans/M0-1.md；一次一个，见 §5.4）
+├── plans/                     # 单工作单元的计划（plans/M1-5.md；一次一个，见 §5.4）
+│                              # + M1-handover.md（换会话时的交接说明）
 ├── design/                    # Pencil 设计稿：xxx.pen + xxx.md（同名）
 ├── implementations/           # 实施记录：YYYY-MM-DD_<简述>.md（文件内首行写精确时间）
 ├── src/                       # 前端（Solid + Tailwind）
@@ -445,6 +446,7 @@ SQLite FTS5 默认 `unicode61` 分词器**对中文基本无效**；必须使用
 | `DESIGN.md` | 视觉与配色体系（唯一事实来源） |
 | `PLAN.md` | 近中期开发计划：Milestone（阶段）→ Wave（波次），含初始化清单与完成定义 |
 | `plans/M0-1.md` 等 | 单个工作单元的详细计划与完成记录（一次一个，命名 `plans/<milestone>-<单元>.md`，见 §5.4） |
+| **`plans/M1-handover.md`** | **M1 交接说明**：剩余工作（M1-5→M1-7）、已就绪资产清单、待定问题默认值、已知坑与验证纪律。**换会话/换 Agent 时先读它**（M1 收尾后即可删除） |
 | `FUTURE.md` | 远期方向登记册：框架迁移、RAW 后端候选、渲染演进、编辑模块、AI、平台扩展 |
 | `THIRD-PARTY-NOTICES.md` | 第三方组件与参考项目的许可登记 |
 | `design/*.pen` + `design/*.md` | Pencil 设计稿与其说明（成对存在） |
