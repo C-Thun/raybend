@@ -69,7 +69,7 @@ fn main() {
         *by_kind.entry(k).or_default() += 1;
     }
     let mut kinds: Vec<_> = by_kind.into_iter().collect();
-    kinds.sort_by(|a, b| b.1.cmp(&a.1));
+    kinds.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
     println!("类型    {kinds:?}");
 
     let mut by_ext: HashMap<String, usize> = HashMap::new();
