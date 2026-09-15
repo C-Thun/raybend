@@ -11,3 +11,6 @@ target/
 # 编辑器 / 系统
 .DS_Store
 *.log
+
+# 开发
+prompts/
