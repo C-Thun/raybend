@@ -64,7 +64,7 @@
           "id": "hrAhp",
           "name": "TitleBar",
           "width": "fill_container",
-          "height": 32,
+          "height": 40,
           "fill": "$surface-bar",
           "padding": [
             0,
@@ -112,7 +112,7 @@
               "fill": "$fg-1",
               "content": "光伴",
               "fontFamily": "Inter",
-              "fontSize": 13,
+              "fontSize": 15,
               "fontWeight": "600"
             },
             {
@@ -149,7 +149,7 @@
                       "fill": "$fg-1",
                       "content": "帮助",
                       "fontFamily": "Inter",
-                      "fontSize": 12,
+                      "fontSize": 14,
                       "fontWeight": "normal"
                     }
                   ]
@@ -222,7 +222,7 @@
                       "fill": "$fg-on-brand",
                       "content": "紧凑",
                       "fontFamily": "Inter",
-                      "fontSize": 12,
+                      "fontSize": 14,
                       "fontWeight": "500"
                     }
                   ]
@@ -246,7 +246,7 @@
                       "fill": "$fg-2",
                       "content": "宽松",
                       "fontFamily": "Inter",
-                      "fontSize": 12,
+                      "fontSize": 14,
                       "fontWeight": "normal"
                     }
                   ]
@@ -264,15 +264,15 @@
               "type": "frame",
               "id": "vPatv",
               "name": "WindowControls",
-              "height": 32,
+              "height": 40,
               "alignItems": "center",
               "children": [
                 {
                   "type": "frame",
                   "id": "c5PCTZ",
                   "name": "WinBtn / min",
-                  "width": 46,
-                  "height": 32,
+                  "width": 52,
+                  "height": 40,
                   "layout": "vertical",
                   "justifyContent": "center",
                   "alignItems": "center",
@@ -293,8 +293,8 @@
                   "type": "frame",
                   "id": "zKU5A",
                   "name": "WinBtn / max",
-                  "width": 46,
-                  "height": 32,
+                  "width": 52,
+                  "height": 40,
                   "layout": "vertical",
                   "justifyContent": "center",
                   "alignItems": "center",
@@ -315,8 +315,8 @@
                   "type": "frame",
                   "id": "yeD65",
                   "name": "WinBtn / close",
-                  "width": 46,
-                  "height": 32,
+                  "width": 52,
+                  "height": 40,
                   "layout": "vertical",
                   "justifyContent": "center",
                   "alignItems": "center",
@@ -342,7 +342,7 @@
           "id": "uVSjs",
           "name": "FlowBar",
           "width": "fill_container",
-          "height": 44,
+          "height": 52,
           "fill": "$surface-main",
           "padding": [
             0,
@@ -353,7 +353,7 @@
             {
               "type": "frame",
               "id": "U3Z3Q",
-              "name": "SegmentedControl / 工作流",
+              "name": "FlowSwitcher / 工作流",
               "fill": "$surface-track",
               "cornerRadius": 17,
               "padding": 3,
@@ -390,7 +390,7 @@
                       "fill": "$fg-on-brand",
                       "content": "导入",
                       "fontFamily": "Inter",
-                      "fontSize": 13,
+                      "fontSize": 15,
                       "fontWeight": "500"
                     }
                   ]
@@ -425,7 +425,7 @@
                       "fill": "$fg-2",
                       "content": "浏览",
                       "fontFamily": "Inter",
-                      "fontSize": 13,
+                      "fontSize": 15,
                       "fontWeight": "normal"
                     }
                   ]
@@ -460,7 +460,7 @@
                       "fill": "$fg-2",
                       "content": "编辑",
                       "fontFamily": "Inter",
-                      "fontSize": 13,
+                      "fontSize": 15,
                       "fontWeight": "normal"
                     }
                   ]
@@ -495,7 +495,7 @@
                       "fill": "$fg-2",
                       "content": "导出",
                       "fontFamily": "Inter",
-                      "fontSize": 13,
+                      "fontSize": 15,
                       "fontWeight": "normal"
                     }
                   ]
@@ -535,7 +535,7 @@
                       "fill": "$fg-1",
                       "content": "DC-G9",
                       "fontFamily": "Inter",
-                      "fontSize": 12,
+                      "fontSize": 13,
                       "fontWeight": "500"
                     },
                     {
@@ -545,7 +545,7 @@
                       "fill": "$fg-2",
                       "content": "LEICA DG 12-60mm F2.8-4.0",
                       "fontFamily": "Inter",
-                      "fontSize": 12,
+                      "fontSize": 13,
                       "fontWeight": "normal"
                     }
                   ]
@@ -577,7 +577,7 @@
                       "fill": "$fg-2",
                       "content": "12mm · ƒ/2.8 · 1/125s · ISO 200",
                       "fontFamily": "Inter",
-                      "fontSize": 12,
+                      "fontSize": 13,
                       "fontWeight": "normal"
                     }
                   ]
@@ -609,7 +609,7 @@
                       "fill": "$fg-2",
                       "content": "5184 × 3888 · 20.2 MP · RAW",
                       "fontFamily": "Inter",
-                      "fontSize": 12,
+                      "fontSize": 13,
                       "fontWeight": "normal"
                     }
                   ]
@@ -634,8 +634,8 @@
               "type": "frame",
               "id": "twdoH",
               "name": "ToggleBlock / 吸附 / 未开启",
-              "width": 28,
-              "height": 28,
+              "width": 32,
+              "height": 32,
               "cornerRadius": 4,
               "layout": "vertical",
               "justifyContent": "center",
@@ -660,7 +660,7 @@
           "id": "U6cvt",
           "name": "ToolsBar",
           "width": "fill_container",
-          "height": 32,
+          "height": 40,
           "fill": "$surface-main",
           "padding": [
             0,
@@ -699,7 +699,7 @@
                   "fill": "$fg-2",
                   "content": "批量排除",
                   "fontFamily": "Inter",
-                  "fontSize": 12,
+                  "fontSize": 14,
                   "fontWeight": "normal"
                 }
               ]
@@ -711,7 +711,7 @@
           "id": "Vp7uj",
           "name": "Workspace / Import",
           "width": "fill_container",
-          "height": "fill_container",
+          "height": 868,
           "fill": "$surface-main",
           "children": [
             {
@@ -742,7 +742,7 @@
                       "fill": "$fg-2",
                       "content": "最近",
                       "fontFamily": "Inter",
-                      "fontSize": 11,
+                      "fontSize": 14,
                       "fontWeight": "600"
                     }
                   ]
@@ -789,7 +789,7 @@
                           "fill": "$fg-1",
                           "content": "D:\\P\\2\\V\\J\\Kyoto",
                           "fontFamily": "Inter",
-                          "fontSize": 12,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         },
                         {
@@ -852,7 +852,7 @@
                           "fill": "$fg-2",
                           "content": "E:\\P\\W\\Portraits",
                           "fontFamily": "Inter",
-                          "fontSize": 12,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         },
                         {
@@ -893,7 +893,7 @@
                           "fill": "$fg-2",
                           "content": "C:\\U\\a\\P\\Wallpapers",
                           "fontFamily": "Inter",
-                          "fontSize": 12,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         },
                         {
@@ -935,7 +935,7 @@
                           "fill": "$fg-1",
                           "content": "D:\\P\\2\\W\\Wedding-Studio",
                           "fontFamily": "Inter",
-                          "fontSize": 12,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         },
                         {
@@ -976,7 +976,7 @@
                           "fill": "$fg-2",
                           "content": "E:\\2\\S\\Spring-Festival",
                           "fontFamily": "Inter",
-                          "fontSize": 12,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         },
                         {
@@ -995,7 +995,7 @@
                   "id": "Td6GK",
                   "name": "SplitHandle / 1",
                   "width": "fill_container",
-                  "height": 11,
+                  "height": 8,
                   "gap": 2,
                   "justifyContent": "center",
                   "alignItems": "center",
@@ -1046,7 +1046,7 @@
                       "fill": "$fg-2",
                       "content": "来源",
                       "fontFamily": "Inter",
-                      "fontSize": 11,
+                      "fontSize": 14,
                       "fontWeight": "600"
                     }
                   ]
@@ -1112,7 +1112,7 @@
                           "fill": "$fg-1",
                           "content": "本地磁盘 (C:)",
                           "fontFamily": "Inter",
-                          "fontSize": 12,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         }
                       ]
@@ -1177,7 +1177,7 @@
                           "fill": "$fg-1",
                           "content": "数据 (D:)",
                           "fontFamily": "Inter",
-                          "fontSize": 12,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         }
                       ]
@@ -1239,7 +1239,7 @@
                           "fill": "$fg-1",
                           "content": "Photos",
                           "fontFamily": "Inter",
-                          "fontSize": 12,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         }
                       ]
@@ -1300,7 +1300,7 @@
                           "fill": "$fg-1",
                           "content": "Work",
                           "fontFamily": "Inter",
-                          "fontSize": 12,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         }
                       ]
@@ -1354,7 +1354,7 @@
                           "fill": "$fg-1",
                           "content": "备份 (E:)",
                           "fontFamily": "Inter",
-                          "fontSize": 12,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         }
                       ]
@@ -1420,7 +1420,7 @@
                           "fill": "$fg-1",
                           "content": "群晖 NAS (\\\\nas)",
                           "fontFamily": "Inter",
-                          "fontSize": 12,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         }
                       ]
@@ -1486,7 +1486,7 @@
                           "fill": "$fg-1",
                           "content": " OneDrive",
                           "fontFamily": "Inter",
-                          "fontSize": 12,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         }
                       ]
@@ -1498,7 +1498,7 @@
                   "id": "kEwZw",
                   "name": "SplitHandle / 2",
                   "width": "fill_container",
-                  "height": 11,
+                  "height": 8,
                   "gap": 2,
                   "justifyContent": "center",
                   "alignItems": "center",
@@ -1549,7 +1549,7 @@
                       "fill": "$fg-2",
                       "content": "已选目录",
                       "fontFamily": "Inter",
-                      "fontSize": 11,
+                      "fontSize": 14,
                       "fontWeight": "600"
                     }
                   ]
@@ -1610,15 +1610,15 @@
                               "width": "fill_container",
                               "content": "D:\\P\\2\\V\\J\\Kyoto",
                               "fontFamily": "Inter",
-                              "fontSize": 12,
+                              "fontSize": 14,
                               "fontWeight": "normal"
                             },
                             {
                               "type": "frame",
                               "id": "uWK3V",
                               "name": "BarRemove / hover",
-                              "width": 22,
-                              "height": 22,
+                              "width": 24,
+                              "height": 24,
                               "cornerRadius": 4,
                               "layout": "vertical",
                               "justifyContent": "center",
@@ -1655,7 +1655,7 @@
                               "fill": "$fg-3",
                               "content": "包含子目录",
                               "fontFamily": "Inter",
-                              "fontSize": 10,
+                              "fontSize": 13,
                               "fontWeight": "normal"
                             },
                             {
@@ -1727,15 +1727,15 @@
                               "width": "fill_container",
                               "content": "D:\\P\\2\\W\\Wedding-Studio",
                               "fontFamily": "Inter",
-                              "fontSize": 12,
+                              "fontSize": 14,
                               "fontWeight": "normal"
                             },
                             {
                               "type": "frame",
                               "id": "wY7at",
                               "name": "BarRemove / hover",
-                              "width": 22,
-                              "height": 22,
+                              "width": 24,
+                              "height": 24,
                               "cornerRadius": 4,
                               "layout": "vertical",
                               "justifyContent": "center",
@@ -1772,7 +1772,7 @@
                               "fill": "$fg-3",
                               "content": "包含子目录",
                               "fontFamily": "Inter",
-                              "fontSize": 10,
+                              "fontSize": 13,
                               "fontWeight": "normal"
                             },
                             {
@@ -1843,15 +1843,15 @@
                               "width": "fill_container",
                               "content": "E:\\P\\W\\Portraits",
                               "fontFamily": "Inter",
-                              "fontSize": 12,
+                              "fontSize": 14,
                               "fontWeight": "normal"
                             },
                             {
                               "type": "frame",
                               "id": "C5EJf",
                               "name": "BarRemove / hover",
-                              "width": 22,
-                              "height": 22,
+                              "width": 24,
+                              "height": 24,
                               "cornerRadius": 4,
                               "layout": "vertical",
                               "justifyContent": "center",
@@ -1888,7 +1888,7 @@
                               "fill": "$fg-3",
                               "content": "包含子目录",
                               "fontFamily": "Inter",
-                              "fontSize": 10,
+                              "fontSize": 13,
                               "fontWeight": "normal"
                             },
                             {
@@ -1973,7 +1973,7 @@
                                   "fill": "$fg-3",
                                   "content": "RW2",
                                   "fontFamily": "Inter",
-                                  "fontSize": 9,
+                                  "fontSize": 12,
                                   "fontWeight": "600"
                                 }
                               ]
@@ -1996,7 +1996,7 @@
                                   "width": 132,
                                   "content": "P1004821.RW2",
                                   "fontFamily": "Inter",
-                                  "fontSize": 10,
+                                  "fontSize": 13,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -2031,7 +2031,7 @@
                                   "fill": "$fg-3",
                                   "content": "RW2",
                                   "fontFamily": "Inter",
-                                  "fontSize": 9,
+                                  "fontSize": 12,
                                   "fontWeight": "600"
                                 }
                               ]
@@ -2054,7 +2054,7 @@
                                   "width": 132,
                                   "content": "P1004822.RW2",
                                   "fontFamily": "Inter",
-                                  "fontSize": 10,
+                                  "fontSize": 13,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -2089,7 +2089,7 @@
                                   "fill": "$fg-3",
                                   "content": "RW2",
                                   "fontFamily": "Inter",
-                                  "fontSize": 9,
+                                  "fontSize": 12,
                                   "fontWeight": "600"
                                 }
                               ]
@@ -2112,7 +2112,7 @@
                                   "width": 132,
                                   "content": "P1004823.RW2",
                                   "fontFamily": "Inter",
-                                  "fontSize": 10,
+                                  "fontSize": 13,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -2147,7 +2147,7 @@
                                   "fill": "$fg-3",
                                   "content": "RW2",
                                   "fontFamily": "Inter",
-                                  "fontSize": 9,
+                                  "fontSize": 12,
                                   "fontWeight": "600"
                                 }
                               ]
@@ -2170,7 +2170,7 @@
                                   "width": 132,
                                   "content": "P1004824.RW2",
                                   "fontFamily": "Inter",
-                                  "fontSize": 10,
+                                  "fontSize": 13,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -2205,7 +2205,7 @@
                                   "fill": "$fg-3",
                                   "content": "RW2",
                                   "fontFamily": "Inter",
-                                  "fontSize": 9,
+                                  "fontSize": 12,
                                   "fontWeight": "600"
                                 }
                               ]
@@ -2228,7 +2228,7 @@
                                   "width": 132,
                                   "content": "P1004825.RW2",
                                   "fontFamily": "Inter",
-                                  "fontSize": 10,
+                                  "fontSize": 13,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -2263,7 +2263,7 @@
                                   "fill": "$fg-3",
                                   "content": "RW2",
                                   "fontFamily": "Inter",
-                                  "fontSize": 9,
+                                  "fontSize": 12,
                                   "fontWeight": "600"
                                 }
                               ]
@@ -2286,7 +2286,7 @@
                                   "width": 132,
                                   "content": "P1004826.RW2",
                                   "fontFamily": "Inter",
-                                  "fontSize": 10,
+                                  "fontSize": 13,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -2329,7 +2329,7 @@
                                   "fill": "$fg-3",
                                   "content": "NEF",
                                   "fontFamily": "Inter",
-                                  "fontSize": 9,
+                                  "fontSize": 12,
                                   "fontWeight": "600"
                                 }
                               ]
@@ -2352,7 +2352,7 @@
                                   "width": 132,
                                   "content": "DSC_0917.NEF",
                                   "fontFamily": "Inter",
-                                  "fontSize": 10,
+                                  "fontSize": 13,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -2387,7 +2387,7 @@
                                   "fill": "$fg-3",
                                   "content": "NEF",
                                   "fontFamily": "Inter",
-                                  "fontSize": 9,
+                                  "fontSize": 12,
                                   "fontWeight": "600"
                                 }
                               ]
@@ -2410,7 +2410,7 @@
                                   "width": 132,
                                   "content": "DSC_0918.NEF",
                                   "fontFamily": "Inter",
-                                  "fontSize": 10,
+                                  "fontSize": 13,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -2445,7 +2445,7 @@
                                   "fill": "$fg-3",
                                   "content": "NEF",
                                   "fontFamily": "Inter",
-                                  "fontSize": 9,
+                                  "fontSize": 12,
                                   "fontWeight": "600"
                                 }
                               ]
@@ -2468,7 +2468,7 @@
                                   "width": 132,
                                   "content": "DSC_0919.NEF",
                                   "fontFamily": "Inter",
-                                  "fontSize": 10,
+                                  "fontSize": 13,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -2503,7 +2503,7 @@
                                   "fill": "$fg-3",
                                   "content": "NEF",
                                   "fontFamily": "Inter",
-                                  "fontSize": 9,
+                                  "fontSize": 12,
                                   "fontWeight": "600"
                                 }
                               ]
@@ -2526,7 +2526,7 @@
                                   "width": 132,
                                   "content": "DSC_0920.NEF",
                                   "fontFamily": "Inter",
-                                  "fontSize": 10,
+                                  "fontSize": 13,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -2557,7 +2557,7 @@
                       "fill": "$fg-2",
                       "content": "1 248 张",
                       "fontFamily": "Inter",
-                      "fontSize": 11,
+                      "fontSize": 14,
                       "fontWeight": "normal"
                     },
                     {
@@ -2574,7 +2574,7 @@
                       "fill": "$fg-2",
                       "content": "D:\\P\\2\\V\\J\\Kyoto",
                       "fontFamily": "Inter",
-                      "fontSize": 11,
+                      "fontSize": 14,
                       "fontWeight": "normal"
                     },
                     {
@@ -2588,7 +2588,7 @@
                       "type": "frame",
                       "id": "R0J32",
                       "name": "ToggleBlock / 按时间 / 未开启",
-                      "height": 24,
+                      "height": 28,
                       "cornerRadius": 4,
                       "gap": 5,
                       "padding": [
@@ -2614,7 +2614,7 @@
                           "fill": "$fg-2",
                           "content": "按时间",
                           "fontFamily": "Inter",
-                          "fontSize": 11,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         }
                       ]
@@ -2692,7 +2692,7 @@
                       "fill": "$fg-2",
                       "content": "库",
                       "fontFamily": "Inter",
-                      "fontSize": 11,
+                      "fontSize": 14,
                       "fontWeight": "600"
                     }
                   ]
@@ -2708,10 +2708,10 @@
                   "children": [
                     {
                       "type": "frame",
-                      "id": "sivH3",
+                      "id": "gGE6d",
                       "name": "RepoCard / Kowloon Studio",
                       "width": "fill_container",
-                      "height": 56,
+                      "height": 60,
                       "fill": "$state-selected",
                       "cornerRadius": 4,
                       "gap": 10,
@@ -2723,7 +2723,7 @@
                       "children": [
                         {
                           "type": "frame",
-                          "id": "gs1Pm",
+                          "id": "bdzEQ",
                           "name": "RepoIconBox",
                           "width": 28,
                           "height": 28,
@@ -2735,7 +2735,7 @@
                           "children": [
                             {
                               "type": "icon",
-                              "id": "XHMkd",
+                              "id": "yXR6k",
                               "name": "Glyph / library",
                               "width": 16,
                               "height": 16,
@@ -2747,63 +2747,79 @@
                         },
                         {
                           "type": "frame",
-                          "id": "yb3dB",
+                          "id": "GHGW1",
                           "name": "RepoTextCol",
-                          "width": "fill_container",
+                          "width": 118,
                           "layout": "vertical",
                           "gap": 2,
                           "children": [
                             {
                               "type": "text",
-                              "id": "e3Ypv",
+                              "id": "fe2ui",
                               "name": "RepoName / Kowloon Studio",
                               "fill": "$fg-1",
                               "textGrowth": "fixed-width",
                               "width": "fill_container",
                               "content": "Kowloon Studio",
                               "fontFamily": "Inter",
-                              "fontSize": 12,
+                              "fontSize": 14,
                               "fontWeight": "500"
                             },
                             {
                               "type": "text",
-                              "id": "txNjL",
+                              "id": "hiCpP",
                               "name": "RepoPath / D:\\Libraries\\Main",
                               "fill": "$fg-3",
                               "textGrowth": "fixed-width",
                               "width": "fill_container",
                               "content": "D:\\Libraries\\Main",
                               "fontFamily": "Inter",
-                              "fontSize": 10,
+                              "fontSize": 13,
                               "fontWeight": "normal"
                             }
                           ]
                         },
                         {
                           "type": "text",
-                          "id": "DIeYa",
+                          "id": "dQLdq",
                           "name": "RepoCount / 12 480 张",
                           "fill": "$fg-3",
                           "content": "12 480 张",
                           "fontFamily": "Inter",
-                          "fontSize": 10,
+                          "fontSize": 13,
                           "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "d1tlXM",
+                          "name": "RepoGear / 库设置",
+                          "width": 24,
+                          "height": 24,
+                          "cornerRadius": 4,
+                          "layout": "vertical",
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "WJQd7",
+                              "name": "Glyph / settings",
+                              "width": 14,
+                              "height": 14,
+                              "icon": "settings",
+                              "library": "lucide",
+                              "fill": "$fg-2"
+                            }
+                          ]
                         }
                       ]
                     },
                     {
                       "type": "frame",
-                      "id": "kQkBf",
-                      "name": "RepoGap",
-                      "width": 1,
-                      "height": 8
-                    },
-                    {
-                      "type": "frame",
-                      "id": "PQcw4",
+                      "id": "gwzre",
                       "name": "RepoCard / 个人相册",
                       "width": "fill_container",
-                      "height": 56,
+                      "height": 60,
                       "fill": "$surface-track",
                       "cornerRadius": 4,
                       "gap": 10,
@@ -2815,11 +2831,11 @@
                       "children": [
                         {
                           "type": "frame",
-                          "id": "ySXk7",
+                          "id": "o09BE",
                           "name": "RepoIconBox",
                           "width": 28,
                           "height": 28,
-                          "fill": "$surface-main",
+                          "fill": "$surface-bar",
                           "cornerRadius": 4,
                           "layout": "vertical",
                           "justifyContent": "center",
@@ -2827,19 +2843,19 @@
                           "children": [
                             {
                               "type": "icon",
-                              "id": "qms7o",
+                              "id": "yQ9di",
                               "name": "Glyph / library",
                               "width": 16,
                               "height": 16,
                               "icon": "library",
                               "library": "lucide",
-                              "fill": "$fg-2"
+                              "fill": "$fg-3"
                             }
                           ]
                         },
                         {
                           "type": "frame",
-                          "id": "Fbmlq",
+                          "id": "DKP5Q",
                           "name": "RepoTextCol",
                           "width": "fill_container",
                           "layout": "vertical",
@@ -2847,41 +2863,84 @@
                           "children": [
                             {
                               "type": "text",
-                              "id": "Uhoap",
+                              "id": "R2qdkK",
                               "name": "RepoName / 个人相册",
-                              "fill": "$fg-1",
+                              "fill": "$fg-2",
                               "textGrowth": "fixed-width",
                               "width": "fill_container",
                               "content": "个人相册",
                               "fontFamily": "Inter",
-                              "fontSize": 12,
+                              "fontSize": 14,
                               "fontWeight": "500"
                             },
                             {
                               "type": "text",
-                              "id": "a2GAg",
+                              "id": "cP1Tv",
                               "name": "RepoPath / E:\\Photos",
                               "fill": "$fg-3",
                               "textGrowth": "fixed-width",
                               "width": "fill_container",
                               "content": "E:\\Photos",
                               "fontFamily": "Inter",
-                              "fontSize": 10,
+                              "fontSize": 13,
                               "fontWeight": "normal"
                             }
                           ]
                         },
                         {
                           "type": "text",
-                          "id": "uOVIe",
+                          "id": "Xx5Bk",
                           "name": "RepoCount / 3 210 张",
                           "fill": "$fg-3",
                           "content": "3 210 张",
                           "fontFamily": "Inter",
-                          "fontSize": 10,
+                          "fontSize": 13,
                           "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "Ih9ta",
+                          "name": "RepoOffline / 离线（可点重挂载）",
+                          "height": 28,
+                          "fill": "$surface-bar",
+                          "cornerRadius": 4,
+                          "gap": 5,
+                          "padding": [
+                            0,
+                            10
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "k1wk5",
+                              "name": "Glyph / cloud-off",
+                              "width": 13,
+                              "height": 13,
+                              "icon": "cloud-off",
+                              "library": "lucide",
+                              "fill": "$fg-2"
+                            },
+                            {
+                              "type": "text",
+                              "id": "QAo8i",
+                              "name": "RepoOfflineLabel",
+                              "fill": "$fg-2",
+                              "content": "离线",
+                              "fontFamily": "Inter",
+                              "fontSize": 14,
+                              "fontWeight": "normal"
+                            }
+                          ]
                         }
                       ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "kQkBf",
+                      "name": "RepoGap",
+                      "width": 1,
+                      "height": 8
                     },
                     {
                       "type": "frame",
@@ -2919,7 +2978,7 @@
                           "fill": "$fg-2",
                           "content": "新建库",
                           "fontFamily": "Inter",
-                          "fontSize": 12,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         }
                       ]
@@ -2942,7 +3001,7 @@
                       "fill": "$fg-2",
                       "content": "已选择 3 个目录 · 1 248 张照片",
                       "fontFamily": "Inter",
-                      "fontSize": 11,
+                      "fontSize": 14,
                       "fontWeight": "normal"
                     },
                     {
@@ -2950,7 +3009,7 @@
                       "id": "MC0Gt",
                       "name": "ImportButton / 可点",
                       "width": "fill_container",
-                      "height": 32,
+                      "height": 36,
                       "fill": "$brand",
                       "cornerRadius": 4,
                       "gap": 6,
@@ -2974,7 +3033,7 @@
                           "fill": "$fg-on-brand",
                           "content": "导入",
                           "fontFamily": "Inter",
-                          "fontSize": 13,
+                          "fontSize": 15,
                           "fontWeight": "600"
                         }
                       ]
@@ -2990,8 +3049,8 @@
                           "type": "frame",
                           "id": "sf9lN",
                           "name": "Checkbox / checked",
-                          "width": 12,
-                          "height": 12,
+                          "width": 16,
+                          "height": 16,
                           "fill": "$brand",
                           "cornerRadius": 2,
                           "layout": "vertical",
@@ -3002,8 +3061,8 @@
                               "type": "icon",
                               "id": "Z3DhOi",
                               "name": "Glyph / check",
-                              "width": 9,
-                              "height": 9,
+                              "width": 11,
+                              "height": 11,
                               "icon": "check",
                               "library": "lucide",
                               "fill": "$fg-on-brand"
@@ -3017,7 +3076,7 @@
                           "fill": "$fg-2",
                           "content": "避免重复导入",
                           "fontFamily": "Inter",
-                          "fontSize": 11,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         }
                       ]
@@ -3067,7 +3126,7 @@
               "fill": "$fg-1",
               "content": "演示：按时间分组 + 批量排除（模拟中列宽 960）",
               "fontFamily": "Inter",
-              "fontSize": 12,
+              "fontSize": 14,
               "fontWeight": "600"
             }
           ]
@@ -3077,7 +3136,7 @@
           "id": "MnTbc",
           "name": "ToolsBar / 居中",
           "width": "fill_container",
-          "height": 32,
+          "height": 40,
           "fill": "$surface-main",
           "gap": 8,
           "padding": [
@@ -3117,7 +3176,7 @@
                   "fill": "$fg-2",
                   "content": "批量排除",
                   "fontFamily": "Inter",
-                  "fontSize": 12,
+                  "fontSize": 14,
                   "fontWeight": "normal"
                 }
               ]
@@ -3165,7 +3224,7 @@
                   "fill": "$fg-1",
                   "content": "2026-09-14 星期日",
                   "fontFamily": "Inter",
-                  "fontSize": 12,
+                  "fontSize": 14,
                   "fontWeight": "600"
                 },
                 {
@@ -3195,7 +3254,7 @@
                       "fill": "$fg-1",
                       "content": "全选当天",
                       "fontFamily": "Inter",
-                      "fontSize": 11,
+                      "fontSize": 14,
                       "fontWeight": "normal"
                     }
                   ]
@@ -3222,7 +3281,7 @@
                   "fill": "$fg-2",
                   "content": "09:15 – 11:42",
                   "fontFamily": "Inter",
-                  "fontSize": 11,
+                  "fontSize": 14,
                   "fontWeight": "normal"
                 },
                 {
@@ -3232,7 +3291,7 @@
                   "fill": "$fg-3",
                   "content": "7 张",
                   "fontFamily": "Inter",
-                  "fontSize": 11,
+                  "fontSize": 14,
                   "fontWeight": "normal"
                 },
                 {
@@ -3262,7 +3321,7 @@
                       "fill": "$fg-2",
                       "content": "全选此段",
                       "fontFamily": "Inter",
-                      "fontSize": 10,
+                      "fontSize": 13,
                       "fontWeight": "normal"
                     }
                   ]
@@ -3299,7 +3358,7 @@
                       "fill": "$fg-3",
                       "content": "RW2",
                       "fontFamily": "Inter",
-                      "fontSize": 9,
+                      "fontSize": 12,
                       "fontWeight": "600"
                     }
                   ]
@@ -3324,7 +3383,7 @@
                       "fill": "$fg-3",
                       "content": "RW2",
                       "fontFamily": "Inter",
-                      "fontSize": 9,
+                      "fontSize": 12,
                       "fontWeight": "600"
                     }
                   ]
@@ -3349,7 +3408,7 @@
                       "fill": "$fg-3",
                       "content": "RW2",
                       "fontFamily": "Inter",
-                      "fontSize": 9,
+                      "fontSize": 12,
                       "fontWeight": "600"
                     }
                   ]
@@ -3374,7 +3433,7 @@
                       "fill": "$fg-3",
                       "content": "RW2",
                       "fontFamily": "Inter",
-                      "fontSize": 9,
+                      "fontSize": 12,
                       "fontWeight": "600"
                     }
                   ]
@@ -3399,7 +3458,7 @@
                       "fill": "$fg-3",
                       "content": "RW2",
                       "fontFamily": "Inter",
-                      "fontSize": 9,
+                      "fontSize": 12,
                       "fontWeight": "600"
                     }
                   ]
@@ -3424,7 +3483,7 @@
                       "fill": "$fg-3",
                       "content": "RW2",
                       "fontFamily": "Inter",
-                      "fontSize": 9,
+                      "fontSize": 12,
                       "fontWeight": "600"
                     }
                   ]
@@ -3449,7 +3508,7 @@
                       "fill": "$fg-3",
                       "content": "RW2",
                       "fontFamily": "Inter",
-                      "fontSize": 9,
+                      "fontSize": 12,
                       "fontWeight": "600"
                     }
                   ]
@@ -3476,7 +3535,7 @@
                   "fill": "$fg-2",
                   "content": "15:03 – 15:47",
                   "fontFamily": "Inter",
-                  "fontSize": 11,
+                  "fontSize": 14,
                   "fontWeight": "normal"
                 },
                 {
@@ -3486,7 +3545,7 @@
                   "fill": "$fg-3",
                   "content": "5 张",
                   "fontFamily": "Inter",
-                  "fontSize": 11,
+                  "fontSize": 14,
                   "fontWeight": "normal"
                 },
                 {
@@ -3516,7 +3575,7 @@
                       "fill": "$fg-2",
                       "content": "全选此段",
                       "fontFamily": "Inter",
-                      "fontSize": 10,
+                      "fontSize": 13,
                       "fontWeight": "normal"
                     }
                   ]
@@ -3553,7 +3612,7 @@
                       "fill": "$fg-3",
                       "content": "RW2",
                       "fontFamily": "Inter",
-                      "fontSize": 9,
+                      "fontSize": 12,
                       "fontWeight": "600"
                     }
                   ]
@@ -3578,7 +3637,7 @@
                       "fill": "$fg-3",
                       "content": "RW2",
                       "fontFamily": "Inter",
-                      "fontSize": 9,
+                      "fontSize": 12,
                       "fontWeight": "600"
                     }
                   ]
@@ -3603,7 +3662,7 @@
                       "fill": "$fg-3",
                       "content": "RW2",
                       "fontFamily": "Inter",
-                      "fontSize": 9,
+                      "fontSize": 12,
                       "fontWeight": "600"
                     }
                   ]
@@ -3641,7 +3700,7 @@
                       "fill": "$fg-3",
                       "content": "RW2",
                       "fontFamily": "Inter",
-                      "fontSize": 9,
+                      "fontSize": 12,
                       "fontWeight": "600"
                     }
                   ]
@@ -3679,7 +3738,7 @@
                       "fill": "$fg-3",
                       "content": "RW2",
                       "fontFamily": "Inter",
-                      "fontSize": 9,
+                      "fontSize": 12,
                       "fontWeight": "600"
                     }
                   ]
@@ -3716,7 +3775,7 @@
                   "fill": "$fg-1",
                   "content": "2026-09-13 星期六",
                   "fontFamily": "Inter",
-                  "fontSize": 12,
+                  "fontSize": 14,
                   "fontWeight": "600"
                 },
                 {
@@ -3746,7 +3805,7 @@
                       "fill": "$fg-1",
                       "content": "全选当天",
                       "fontFamily": "Inter",
-                      "fontSize": 11,
+                      "fontSize": 14,
                       "fontWeight": "normal"
                     }
                   ]
@@ -3773,7 +3832,7 @@
                   "fill": "$fg-2",
                   "content": "18:20 – 19:05",
                   "fontFamily": "Inter",
-                  "fontSize": 11,
+                  "fontSize": 14,
                   "fontWeight": "normal"
                 },
                 {
@@ -3783,7 +3842,7 @@
                   "fill": "$fg-3",
                   "content": "6 张",
                   "fontFamily": "Inter",
-                  "fontSize": 11,
+                  "fontSize": 14,
                   "fontWeight": "normal"
                 },
                 {
@@ -3813,7 +3872,7 @@
                       "fill": "$fg-2",
                       "content": "全选此段",
                       "fontFamily": "Inter",
-                      "fontSize": 10,
+                      "fontSize": 13,
                       "fontWeight": "normal"
                     }
                   ]
@@ -3850,7 +3909,7 @@
                       "fill": "$fg-3",
                       "content": "RW2",
                       "fontFamily": "Inter",
-                      "fontSize": 9,
+                      "fontSize": 12,
                       "fontWeight": "600"
                     }
                   ]
@@ -3875,7 +3934,7 @@
                       "fill": "$fg-3",
                       "content": "RW2",
                       "fontFamily": "Inter",
-                      "fontSize": 9,
+                      "fontSize": 12,
                       "fontWeight": "600"
                     }
                   ]
@@ -3900,7 +3959,7 @@
                       "fill": "$fg-3",
                       "content": "RW2",
                       "fontFamily": "Inter",
-                      "fontSize": 9,
+                      "fontSize": 12,
                       "fontWeight": "600"
                     }
                   ]
@@ -3925,7 +3984,7 @@
                       "fill": "$fg-3",
                       "content": "RW2",
                       "fontFamily": "Inter",
-                      "fontSize": 9,
+                      "fontSize": 12,
                       "fontWeight": "600"
                     }
                   ]
@@ -3950,7 +4009,7 @@
                       "fill": "$fg-3",
                       "content": "RW2",
                       "fontFamily": "Inter",
-                      "fontSize": 9,
+                      "fontSize": 12,
                       "fontWeight": "600"
                     }
                   ]
@@ -3975,7 +4034,7 @@
                       "fill": "$fg-3",
                       "content": "RW2",
                       "fontFamily": "Inter",
-                      "fontSize": 9,
+                      "fontSize": 12,
                       "fontWeight": "600"
                     }
                   ]
@@ -4008,7 +4067,7 @@
               "content": "分组：同一拍摄日内按时间升序，相邻间隔 > 1 小时则断为新片；片标题显示首尾时间范围，可点击全选。排除：选定后按顶部「批量排除」——它是反转操作，把选中的未排除项排除、已排除项取消排除。",
               "lineHeight": 1.4,
               "fontFamily": "Inter",
-              "fontSize": 11,
+              "fontSize": 14,
               "fontWeight": "normal"
             }
           ]
@@ -4065,7 +4124,7 @@
                       "fill": "$fg-2",
                       "content": "批量排除",
                       "fontFamily": "Inter",
-                      "fontSize": 12,
+                      "fontSize": 14,
                       "fontWeight": "normal"
                     }
                   ]
@@ -4077,7 +4136,7 @@
                   "fill": "$fg-3",
                   "content": "有选中 → 可点",
                   "fontFamily": "Inter",
-                  "fontSize": 10,
+                  "fontSize": 13,
                   "fontWeight": "normal"
                 }
               ]
@@ -4120,7 +4179,7 @@
                       "fill": "$fg-2",
                       "content": "批量排除",
                       "fontFamily": "Inter",
-                      "fontSize": 12,
+                      "fontSize": 14,
                       "fontWeight": "normal"
                     }
                   ]
@@ -4132,7 +4191,7 @@
                   "fill": "$fg-3",
                   "content": "无选中 → 禁用",
                   "fontFamily": "Inter",
-                  "fontSize": 10,
+                  "fontSize": 13,
                   "fontWeight": "normal"
                 }
               ]
@@ -4201,8 +4260,8 @@
                   "type": "frame",
                   "id": "rDIUj",
                   "name": "ToggleBlock / 未开启 Off",
-                  "width": 28,
-                  "height": 28,
+                  "width": 32,
+                  "height": 32,
                   "cornerRadius": 4,
                   "layout": "vertical",
                   "justifyContent": "center",
@@ -4227,7 +4286,7 @@
                   "fill": "$fg-3",
                   "content": "未开启 Off",
                   "fontFamily": "Inter",
-                  "fontSize": 11,
+                  "fontSize": 14,
                   "fontWeight": "normal"
                 }
               ]
@@ -4243,8 +4302,8 @@
                   "type": "frame",
                   "id": "g6rVFD",
                   "name": "ToggleBlock / 已开启 On",
-                  "width": 28,
-                  "height": 28,
+                  "width": 32,
+                  "height": 32,
                   "fill": "$brand",
                   "cornerRadius": 4,
                   "layout": "vertical",
@@ -4270,7 +4329,7 @@
                   "fill": "$fg-3",
                   "content": "已开启 On",
                   "fontFamily": "Inter",
-                  "fontSize": 11,
+                  "fontSize": 14,
                   "fontWeight": "normal"
                 }
               ]
@@ -4284,7 +4343,7 @@
           "fill": "$fg-3",
           "content": "全局反馈规则：指向 → 辅色底；点击后 → 主色底（已有主色底时指向不变）",
           "fontFamily": "Inter",
-          "fontSize": 11,
+          "fontSize": 14,
           "fontWeight": "normal"
         },
         {
@@ -4330,7 +4389,7 @@
                       "fill": "$fg-1",
                       "content": "D:\\P\\2\\V\\J\\Kyoto",
                       "fontFamily": "Inter",
-                      "fontSize": 12,
+                      "fontSize": 14,
                       "fontWeight": "normal"
                     }
                   ]
@@ -4342,7 +4401,7 @@
                   "fill": "$fg-3",
                   "content": "默认 Default",
                   "fontFamily": "Inter",
-                  "fontSize": 11,
+                  "fontSize": 14,
                   "fontWeight": "normal"
                 }
               ]
@@ -4384,7 +4443,7 @@
                       "fill": "$fg-1",
                       "content": "D:\\P\\2\\V\\J\\Kyoto",
                       "fontFamily": "Inter",
-                      "fontSize": 12,
+                      "fontSize": 14,
                       "fontWeight": "normal"
                     }
                   ]
@@ -4396,7 +4455,7 @@
                   "fill": "$fg-3",
                   "content": "指向 Hover（辅色底）",
                   "fontFamily": "Inter",
-                  "fontSize": 11,
+                  "fontSize": 14,
                   "fontWeight": "normal"
                 }
               ]
@@ -4438,7 +4497,7 @@
                       "fill": "$fg-1",
                       "content": "D:\\P\\2\\V\\J\\Kyoto",
                       "fontFamily": "Inter",
-                      "fontSize": 12,
+                      "fontSize": 14,
                       "fontWeight": "normal"
                     }
                   ]
@@ -4450,7 +4509,7 @@
                   "fill": "$fg-3",
                   "content": "选中 Selected（主色底）",
                   "fontFamily": "Inter",
-                  "fontSize": 11,
+                  "fontSize": 14,
                   "fontWeight": "normal"
                 }
               ]
@@ -4480,7 +4539,7 @@
           "id": "fAfsf",
           "name": "TitleBar",
           "width": "fill_container",
-          "height": 32,
+          "height": 40,
           "fill": "$surface-bar",
           "padding": [
             0,
@@ -4528,7 +4587,7 @@
               "fill": "$fg-1",
               "content": "光伴",
               "fontFamily": "Inter",
-              "fontSize": 13,
+              "fontSize": 15,
               "fontWeight": "600"
             },
             {
@@ -4565,7 +4624,7 @@
                       "fill": "$fg-1",
                       "content": "帮助",
                       "fontFamily": "Inter",
-                      "fontSize": 12,
+                      "fontSize": 14,
                       "fontWeight": "normal"
                     }
                   ]
@@ -4638,7 +4697,7 @@
                       "fill": "$fg-on-brand",
                       "content": "紧凑",
                       "fontFamily": "Inter",
-                      "fontSize": 12,
+                      "fontSize": 14,
                       "fontWeight": "500"
                     }
                   ]
@@ -4662,7 +4721,7 @@
                       "fill": "$fg-2",
                       "content": "宽松",
                       "fontFamily": "Inter",
-                      "fontSize": 12,
+                      "fontSize": 14,
                       "fontWeight": "normal"
                     }
                   ]
@@ -4680,15 +4739,15 @@
               "type": "frame",
               "id": "tvUwR",
               "name": "WindowControls",
-              "height": 32,
+              "height": 40,
               "alignItems": "center",
               "children": [
                 {
                   "type": "frame",
                   "id": "ATvaX",
                   "name": "WinBtn / min",
-                  "width": 46,
-                  "height": 32,
+                  "width": 52,
+                  "height": 40,
                   "layout": "vertical",
                   "justifyContent": "center",
                   "alignItems": "center",
@@ -4709,8 +4768,8 @@
                   "type": "frame",
                   "id": "CrIes",
                   "name": "WinBtn / max",
-                  "width": 46,
-                  "height": 32,
+                  "width": 52,
+                  "height": 40,
                   "layout": "vertical",
                   "justifyContent": "center",
                   "alignItems": "center",
@@ -4731,8 +4790,8 @@
                   "type": "frame",
                   "id": "TtGFw",
                   "name": "WinBtn / close",
-                  "width": 46,
-                  "height": 32,
+                  "width": 52,
+                  "height": 40,
                   "layout": "vertical",
                   "justifyContent": "center",
                   "alignItems": "center",
@@ -4758,7 +4817,7 @@
           "id": "SViY8",
           "name": "FlowBar",
           "width": "fill_container",
-          "height": 44,
+          "height": 52,
           "fill": "$surface-main",
           "padding": [
             0,
@@ -4769,7 +4828,7 @@
             {
               "type": "frame",
               "id": "K5ty6",
-              "name": "SegmentedControl / 工作流",
+              "name": "FlowSwitcher / 工作流",
               "fill": "$surface-track",
               "cornerRadius": 17,
               "padding": 3,
@@ -4806,7 +4865,7 @@
                       "fill": "$fg-on-brand",
                       "content": "导入",
                       "fontFamily": "Inter",
-                      "fontSize": 13,
+                      "fontSize": 15,
                       "fontWeight": "500"
                     }
                   ]
@@ -4841,7 +4900,7 @@
                       "fill": "$fg-2",
                       "content": "浏览",
                       "fontFamily": "Inter",
-                      "fontSize": 13,
+                      "fontSize": 15,
                       "fontWeight": "normal"
                     }
                   ]
@@ -4876,7 +4935,7 @@
                       "fill": "$fg-2",
                       "content": "编辑",
                       "fontFamily": "Inter",
-                      "fontSize": 13,
+                      "fontSize": 15,
                       "fontWeight": "normal"
                     }
                   ]
@@ -4911,7 +4970,7 @@
                       "fill": "$fg-2",
                       "content": "导出",
                       "fontFamily": "Inter",
-                      "fontSize": 13,
+                      "fontSize": 15,
                       "fontWeight": "normal"
                     }
                   ]
@@ -4951,7 +5010,7 @@
                       "fill": "$fg-1",
                       "content": "DC-G9",
                       "fontFamily": "Inter",
-                      "fontSize": 12,
+                      "fontSize": 13,
                       "fontWeight": "500"
                     },
                     {
@@ -4961,7 +5020,7 @@
                       "fill": "$fg-2",
                       "content": "LEICA DG 12-60mm F2.8-4.0",
                       "fontFamily": "Inter",
-                      "fontSize": 12,
+                      "fontSize": 13,
                       "fontWeight": "normal"
                     }
                   ]
@@ -4993,7 +5052,7 @@
                       "fill": "$fg-2",
                       "content": "12mm · ƒ/2.8 · 1/125s · ISO 200",
                       "fontFamily": "Inter",
-                      "fontSize": 12,
+                      "fontSize": 13,
                       "fontWeight": "normal"
                     }
                   ]
@@ -5025,7 +5084,7 @@
                       "fill": "$fg-2",
                       "content": "5184 × 3888 · 20.2 MP · RAW",
                       "fontFamily": "Inter",
-                      "fontSize": 12,
+                      "fontSize": 13,
                       "fontWeight": "normal"
                     }
                   ]
@@ -5050,8 +5109,8 @@
               "type": "frame",
               "id": "qfSHT",
               "name": "ToggleBlock / 吸附 / 未开启",
-              "width": 28,
-              "height": 28,
+              "width": 32,
+              "height": 32,
               "cornerRadius": 4,
               "layout": "vertical",
               "justifyContent": "center",
@@ -5076,7 +5135,7 @@
           "id": "VXDIr",
           "name": "ToolsBar",
           "width": "fill_container",
-          "height": 32,
+          "height": 40,
           "fill": "$surface-main",
           "padding": [
             0,
@@ -5115,7 +5174,7 @@
                   "fill": "$fg-2",
                   "content": "批量排除",
                   "fontFamily": "Inter",
-                  "fontSize": 12,
+                  "fontSize": 14,
                   "fontWeight": "normal"
                 }
               ]
@@ -5127,7 +5186,7 @@
           "id": "epMi6",
           "name": "Workspace / Import",
           "width": "fill_container",
-          "height": "fill_container",
+          "height": 868,
           "fill": "$surface-main",
           "children": [
             {
@@ -5158,7 +5217,7 @@
                       "fill": "$fg-2",
                       "content": "最近",
                       "fontFamily": "Inter",
-                      "fontSize": 11,
+                      "fontSize": 14,
                       "fontWeight": "600"
                     }
                   ]
@@ -5205,7 +5264,7 @@
                           "fill": "$fg-1",
                           "content": "D:\\P\\2\\V\\J\\Kyoto",
                           "fontFamily": "Inter",
-                          "fontSize": 12,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         },
                         {
@@ -5268,7 +5327,7 @@
                           "fill": "$fg-2",
                           "content": "E:\\P\\W\\Portraits",
                           "fontFamily": "Inter",
-                          "fontSize": 12,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         },
                         {
@@ -5309,7 +5368,7 @@
                           "fill": "$fg-2",
                           "content": "C:\\U\\a\\P\\Wallpapers",
                           "fontFamily": "Inter",
-                          "fontSize": 12,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         },
                         {
@@ -5351,7 +5410,7 @@
                           "fill": "$fg-1",
                           "content": "D:\\P\\2\\W\\Wedding-Studio",
                           "fontFamily": "Inter",
-                          "fontSize": 12,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         },
                         {
@@ -5392,7 +5451,7 @@
                           "fill": "$fg-2",
                           "content": "E:\\2\\S\\Spring-Festival",
                           "fontFamily": "Inter",
-                          "fontSize": 12,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         },
                         {
@@ -5411,7 +5470,7 @@
                   "id": "nCryx",
                   "name": "SplitHandle / 1",
                   "width": "fill_container",
-                  "height": 11,
+                  "height": 8,
                   "gap": 2,
                   "justifyContent": "center",
                   "alignItems": "center",
@@ -5462,7 +5521,7 @@
                       "fill": "$fg-2",
                       "content": "来源",
                       "fontFamily": "Inter",
-                      "fontSize": 11,
+                      "fontSize": 14,
                       "fontWeight": "600"
                     }
                   ]
@@ -5528,7 +5587,7 @@
                           "fill": "$fg-1",
                           "content": "本地磁盘 (C:)",
                           "fontFamily": "Inter",
-                          "fontSize": 12,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         }
                       ]
@@ -5593,7 +5652,7 @@
                           "fill": "$fg-1",
                           "content": "数据 (D:)",
                           "fontFamily": "Inter",
-                          "fontSize": 12,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         }
                       ]
@@ -5655,7 +5714,7 @@
                           "fill": "$fg-1",
                           "content": "Photos",
                           "fontFamily": "Inter",
-                          "fontSize": 12,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         }
                       ]
@@ -5716,7 +5775,7 @@
                           "fill": "$fg-1",
                           "content": "Work",
                           "fontFamily": "Inter",
-                          "fontSize": 12,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         }
                       ]
@@ -5770,7 +5829,7 @@
                           "fill": "$fg-1",
                           "content": "备份 (E:)",
                           "fontFamily": "Inter",
-                          "fontSize": 12,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         }
                       ]
@@ -5836,7 +5895,7 @@
                           "fill": "$fg-1",
                           "content": "群晖 NAS (\\\\nas)",
                           "fontFamily": "Inter",
-                          "fontSize": 12,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         }
                       ]
@@ -5902,7 +5961,7 @@
                           "fill": "$fg-1",
                           "content": " OneDrive",
                           "fontFamily": "Inter",
-                          "fontSize": 12,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         }
                       ]
@@ -5914,7 +5973,7 @@
                   "id": "CxUXm",
                   "name": "SplitHandle / 2",
                   "width": "fill_container",
-                  "height": 11,
+                  "height": 8,
                   "gap": 2,
                   "justifyContent": "center",
                   "alignItems": "center",
@@ -5965,7 +6024,7 @@
                       "fill": "$fg-2",
                       "content": "已选目录",
                       "fontFamily": "Inter",
-                      "fontSize": 11,
+                      "fontSize": 14,
                       "fontWeight": "600"
                     }
                   ]
@@ -6026,15 +6085,15 @@
                               "width": "fill_container",
                               "content": "D:\\P\\2\\V\\J\\Kyoto",
                               "fontFamily": "Inter",
-                              "fontSize": 12,
+                              "fontSize": 14,
                               "fontWeight": "normal"
                             },
                             {
                               "type": "frame",
                               "id": "xutDd",
                               "name": "BarRemove / hover",
-                              "width": 22,
-                              "height": 22,
+                              "width": 24,
+                              "height": 24,
                               "cornerRadius": 4,
                               "layout": "vertical",
                               "justifyContent": "center",
@@ -6071,7 +6130,7 @@
                               "fill": "$fg-3",
                               "content": "包含子目录",
                               "fontFamily": "Inter",
-                              "fontSize": 10,
+                              "fontSize": 13,
                               "fontWeight": "normal"
                             },
                             {
@@ -6143,15 +6202,15 @@
                               "width": "fill_container",
                               "content": "D:\\P\\2\\W\\Wedding-Studio",
                               "fontFamily": "Inter",
-                              "fontSize": 12,
+                              "fontSize": 14,
                               "fontWeight": "normal"
                             },
                             {
                               "type": "frame",
                               "id": "uMk06",
                               "name": "BarRemove / hover",
-                              "width": 22,
-                              "height": 22,
+                              "width": 24,
+                              "height": 24,
                               "cornerRadius": 4,
                               "layout": "vertical",
                               "justifyContent": "center",
@@ -6188,7 +6247,7 @@
                               "fill": "$fg-3",
                               "content": "包含子目录",
                               "fontFamily": "Inter",
-                              "fontSize": 10,
+                              "fontSize": 13,
                               "fontWeight": "normal"
                             },
                             {
@@ -6259,15 +6318,15 @@
                               "width": "fill_container",
                               "content": "E:\\P\\W\\Portraits",
                               "fontFamily": "Inter",
-                              "fontSize": 12,
+                              "fontSize": 14,
                               "fontWeight": "normal"
                             },
                             {
                               "type": "frame",
                               "id": "xTFZ1",
                               "name": "BarRemove / hover",
-                              "width": 22,
-                              "height": 22,
+                              "width": 24,
+                              "height": 24,
                               "cornerRadius": 4,
                               "layout": "vertical",
                               "justifyContent": "center",
@@ -6304,7 +6363,7 @@
                               "fill": "$fg-3",
                               "content": "包含子目录",
                               "fontFamily": "Inter",
-                              "fontSize": 10,
+                              "fontSize": 13,
                               "fontWeight": "normal"
                             },
                             {
@@ -6389,7 +6448,7 @@
                                   "fill": "$fg-3",
                                   "content": "RW2",
                                   "fontFamily": "Inter",
-                                  "fontSize": 9,
+                                  "fontSize": 12,
                                   "fontWeight": "600"
                                 }
                               ]
@@ -6412,7 +6471,7 @@
                                   "width": 132,
                                   "content": "P1004821.RW2",
                                   "fontFamily": "Inter",
-                                  "fontSize": 10,
+                                  "fontSize": 13,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -6447,7 +6506,7 @@
                                   "fill": "$fg-3",
                                   "content": "RW2",
                                   "fontFamily": "Inter",
-                                  "fontSize": 9,
+                                  "fontSize": 12,
                                   "fontWeight": "600"
                                 }
                               ]
@@ -6470,7 +6529,7 @@
                                   "width": 132,
                                   "content": "P1004822.RW2",
                                   "fontFamily": "Inter",
-                                  "fontSize": 10,
+                                  "fontSize": 13,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -6505,7 +6564,7 @@
                                   "fill": "$fg-3",
                                   "content": "RW2",
                                   "fontFamily": "Inter",
-                                  "fontSize": 9,
+                                  "fontSize": 12,
                                   "fontWeight": "600"
                                 }
                               ]
@@ -6528,7 +6587,7 @@
                                   "width": 132,
                                   "content": "P1004823.RW2",
                                   "fontFamily": "Inter",
-                                  "fontSize": 10,
+                                  "fontSize": 13,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -6563,7 +6622,7 @@
                                   "fill": "$fg-3",
                                   "content": "RW2",
                                   "fontFamily": "Inter",
-                                  "fontSize": 9,
+                                  "fontSize": 12,
                                   "fontWeight": "600"
                                 }
                               ]
@@ -6586,7 +6645,7 @@
                                   "width": 132,
                                   "content": "P1004824.RW2",
                                   "fontFamily": "Inter",
-                                  "fontSize": 10,
+                                  "fontSize": 13,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -6621,7 +6680,7 @@
                                   "fill": "$fg-3",
                                   "content": "RW2",
                                   "fontFamily": "Inter",
-                                  "fontSize": 9,
+                                  "fontSize": 12,
                                   "fontWeight": "600"
                                 }
                               ]
@@ -6644,7 +6703,7 @@
                                   "width": 132,
                                   "content": "P1004825.RW2",
                                   "fontFamily": "Inter",
-                                  "fontSize": 10,
+                                  "fontSize": 13,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -6679,7 +6738,7 @@
                                   "fill": "$fg-3",
                                   "content": "RW2",
                                   "fontFamily": "Inter",
-                                  "fontSize": 9,
+                                  "fontSize": 12,
                                   "fontWeight": "600"
                                 }
                               ]
@@ -6702,7 +6761,7 @@
                                   "width": 132,
                                   "content": "P1004826.RW2",
                                   "fontFamily": "Inter",
-                                  "fontSize": 10,
+                                  "fontSize": 13,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -6745,7 +6804,7 @@
                                   "fill": "$fg-3",
                                   "content": "NEF",
                                   "fontFamily": "Inter",
-                                  "fontSize": 9,
+                                  "fontSize": 12,
                                   "fontWeight": "600"
                                 }
                               ]
@@ -6768,7 +6827,7 @@
                                   "width": 132,
                                   "content": "DSC_0917.NEF",
                                   "fontFamily": "Inter",
-                                  "fontSize": 10,
+                                  "fontSize": 13,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -6803,7 +6862,7 @@
                                   "fill": "$fg-3",
                                   "content": "NEF",
                                   "fontFamily": "Inter",
-                                  "fontSize": 9,
+                                  "fontSize": 12,
                                   "fontWeight": "600"
                                 }
                               ]
@@ -6826,7 +6885,7 @@
                                   "width": 132,
                                   "content": "DSC_0918.NEF",
                                   "fontFamily": "Inter",
-                                  "fontSize": 10,
+                                  "fontSize": 13,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -6861,7 +6920,7 @@
                                   "fill": "$fg-3",
                                   "content": "NEF",
                                   "fontFamily": "Inter",
-                                  "fontSize": 9,
+                                  "fontSize": 12,
                                   "fontWeight": "600"
                                 }
                               ]
@@ -6884,7 +6943,7 @@
                                   "width": 132,
                                   "content": "DSC_0919.NEF",
                                   "fontFamily": "Inter",
-                                  "fontSize": 10,
+                                  "fontSize": 13,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -6919,7 +6978,7 @@
                                   "fill": "$fg-3",
                                   "content": "NEF",
                                   "fontFamily": "Inter",
-                                  "fontSize": 9,
+                                  "fontSize": 12,
                                   "fontWeight": "600"
                                 }
                               ]
@@ -6942,7 +7001,7 @@
                                   "width": 132,
                                   "content": "DSC_0920.NEF",
                                   "fontFamily": "Inter",
-                                  "fontSize": 10,
+                                  "fontSize": 13,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -6973,7 +7032,7 @@
                       "fill": "$fg-2",
                       "content": "1 248 张",
                       "fontFamily": "Inter",
-                      "fontSize": 11,
+                      "fontSize": 14,
                       "fontWeight": "normal"
                     },
                     {
@@ -6990,7 +7049,7 @@
                       "fill": "$fg-2",
                       "content": "D:\\P\\2\\V\\J\\Kyoto",
                       "fontFamily": "Inter",
-                      "fontSize": 11,
+                      "fontSize": 14,
                       "fontWeight": "normal"
                     },
                     {
@@ -7004,7 +7063,7 @@
                       "type": "frame",
                       "id": "eaDqI",
                       "name": "ToggleBlock / 按时间 / 未开启",
-                      "height": 24,
+                      "height": 28,
                       "cornerRadius": 4,
                       "gap": 5,
                       "padding": [
@@ -7030,7 +7089,7 @@
                           "fill": "$fg-2",
                           "content": "按时间",
                           "fontFamily": "Inter",
-                          "fontSize": 11,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         }
                       ]
@@ -7108,7 +7167,7 @@
                       "fill": "$fg-2",
                       "content": "库",
                       "fontFamily": "Inter",
-                      "fontSize": 11,
+                      "fontSize": 14,
                       "fontWeight": "600"
                     }
                   ]
@@ -7127,7 +7186,7 @@
                       "id": "ZFcEr",
                       "name": "RepoCard / Kowloon Studio",
                       "width": "fill_container",
-                      "height": 56,
+                      "height": 60,
                       "fill": "$state-selected",
                       "cornerRadius": 4,
                       "gap": 10,
@@ -7165,7 +7224,7 @@
                           "type": "frame",
                           "id": "q2o3fe",
                           "name": "RepoTextCol",
-                          "width": "fill_container",
+                          "width": 118,
                           "layout": "vertical",
                           "gap": 2,
                           "children": [
@@ -7178,7 +7237,7 @@
                               "width": "fill_container",
                               "content": "Kowloon Studio",
                               "fontFamily": "Inter",
-                              "fontSize": 12,
+                              "fontSize": 14,
                               "fontWeight": "500"
                             },
                             {
@@ -7190,7 +7249,7 @@
                               "width": "fill_container",
                               "content": "D:\\Libraries\\Main",
                               "fontFamily": "Inter",
-                              "fontSize": 10,
+                              "fontSize": 13,
                               "fontWeight": "normal"
                             }
                           ]
@@ -7202,8 +7261,31 @@
                           "fill": "$fg-3",
                           "content": "12 480 张",
                           "fontFamily": "Inter",
-                          "fontSize": 10,
+                          "fontSize": 13,
                           "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "i9vjJZ",
+                          "name": "RepoGear / 库设置",
+                          "width": 24,
+                          "height": 24,
+                          "cornerRadius": 4,
+                          "layout": "vertical",
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "N3hFk",
+                              "name": "Glyph / settings",
+                              "width": 14,
+                              "height": 14,
+                              "icon": "settings",
+                              "library": "lucide",
+                              "fill": "$fg-2"
+                            }
+                          ]
                         }
                       ]
                     },
@@ -7219,7 +7301,7 @@
                       "id": "W2q0jl",
                       "name": "RepoCard / 个人相册",
                       "width": "fill_container",
-                      "height": 56,
+                      "height": 60,
                       "fill": "$surface-track",
                       "cornerRadius": 4,
                       "gap": 10,
@@ -7235,7 +7317,7 @@
                           "name": "RepoIconBox",
                           "width": 28,
                           "height": 28,
-                          "fill": "$surface-main",
+                          "fill": "$surface-bar",
                           "cornerRadius": 4,
                           "layout": "vertical",
                           "justifyContent": "center",
@@ -7249,7 +7331,7 @@
                               "height": 16,
                               "icon": "library",
                               "library": "lucide",
-                              "fill": "$fg-2"
+                              "fill": "$fg-3"
                             }
                           ]
                         },
@@ -7257,7 +7339,7 @@
                           "type": "frame",
                           "id": "tk2PS",
                           "name": "RepoTextCol",
-                          "width": "fill_container",
+                          "width": 96,
                           "layout": "vertical",
                           "gap": 2,
                           "children": [
@@ -7265,12 +7347,12 @@
                               "type": "text",
                               "id": "Gv6UF",
                               "name": "RepoName / 个人相册",
-                              "fill": "$fg-1",
+                              "fill": "$fg-2",
                               "textGrowth": "fixed-width",
                               "width": "fill_container",
                               "content": "个人相册",
                               "fontFamily": "Inter",
-                              "fontSize": 12,
+                              "fontSize": 14,
                               "fontWeight": "500"
                             },
                             {
@@ -7282,7 +7364,7 @@
                               "width": "fill_container",
                               "content": "E:\\Photos",
                               "fontFamily": "Inter",
-                              "fontSize": 10,
+                              "fontSize": 13,
                               "fontWeight": "normal"
                             }
                           ]
@@ -7294,8 +7376,44 @@
                           "fill": "$fg-3",
                           "content": "3 210 张",
                           "fontFamily": "Inter",
-                          "fontSize": 10,
+                          "fontSize": 13,
                           "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "cMKHF",
+                          "name": "RepoOffline / 离线（可点重挂载）",
+                          "height": 28,
+                          "fill": "$surface-bar",
+                          "cornerRadius": 4,
+                          "gap": 5,
+                          "padding": [
+                            0,
+                            10
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "V3jAd6",
+                              "name": "Glyph / cloud-off",
+                              "width": 13,
+                              "height": 13,
+                              "icon": "cloud-off",
+                              "library": "lucide",
+                              "fill": "$fg-2"
+                            },
+                            {
+                              "type": "text",
+                              "id": "QtkBg",
+                              "name": "RepoOfflineLabel",
+                              "fill": "$fg-2",
+                              "content": "离线",
+                              "fontFamily": "Inter",
+                              "fontSize": 14,
+                              "fontWeight": "normal"
+                            }
+                          ]
                         }
                       ]
                     },
@@ -7335,7 +7453,7 @@
                           "fill": "$fg-2",
                           "content": "新建库",
                           "fontFamily": "Inter",
-                          "fontSize": 12,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         }
                       ]
@@ -7358,7 +7476,7 @@
                       "fill": "$fg-2",
                       "content": "已选择 3 个目录 · 1 248 张照片",
                       "fontFamily": "Inter",
-                      "fontSize": 11,
+                      "fontSize": 14,
                       "fontWeight": "normal"
                     },
                     {
@@ -7366,7 +7484,7 @@
                       "id": "S1Ojxf",
                       "name": "ImportButton / 可点",
                       "width": "fill_container",
-                      "height": 32,
+                      "height": 36,
                       "fill": "$brand",
                       "cornerRadius": 4,
                       "gap": 6,
@@ -7390,7 +7508,7 @@
                           "fill": "$fg-on-brand",
                           "content": "导入",
                           "fontFamily": "Inter",
-                          "fontSize": 13,
+                          "fontSize": 15,
                           "fontWeight": "600"
                         }
                       ]
@@ -7406,8 +7524,8 @@
                           "type": "frame",
                           "id": "ketXx",
                           "name": "Checkbox / checked",
-                          "width": 12,
-                          "height": 12,
+                          "width": 16,
+                          "height": 16,
                           "fill": "$brand",
                           "cornerRadius": 2,
                           "layout": "vertical",
@@ -7418,8 +7536,8 @@
                               "type": "icon",
                               "id": "Xlv2a",
                               "name": "Glyph / check",
-                              "width": 9,
-                              "height": 9,
+                              "width": 11,
+                              "height": 11,
                               "icon": "check",
                               "library": "lucide",
                               "fill": "$fg-on-brand"
@@ -7433,7 +7551,7 @@
                           "fill": "$fg-2",
                           "content": "避免重复导入",
                           "fontFamily": "Inter",
-                          "fontSize": 11,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         }
                       ]
@@ -7467,7 +7585,7 @@
           "id": "dfyTM",
           "name": "TitleBar",
           "width": "fill_container",
-          "height": 40,
+          "height": 48,
           "fill": "$surface-bar",
           "padding": [
             0,
@@ -7515,7 +7633,7 @@
               "fill": "$fg-1",
               "content": "光伴",
               "fontFamily": "Inter",
-              "fontSize": 13,
+              "fontSize": 15,
               "fontWeight": "600"
             },
             {
@@ -7552,7 +7670,7 @@
                       "fill": "$fg-1",
                       "content": "帮助",
                       "fontFamily": "Inter",
-                      "fontSize": 12,
+                      "fontSize": 14,
                       "fontWeight": "normal"
                     }
                   ]
@@ -7625,7 +7743,7 @@
                       "fill": "$fg-2",
                       "content": "紧凑",
                       "fontFamily": "Inter",
-                      "fontSize": 12,
+                      "fontSize": 14,
                       "fontWeight": "normal"
                     }
                   ]
@@ -7650,7 +7768,7 @@
                       "fill": "$fg-on-brand",
                       "content": "宽松",
                       "fontFamily": "Inter",
-                      "fontSize": 12,
+                      "fontSize": 14,
                       "fontWeight": "500"
                     }
                   ]
@@ -7668,15 +7786,15 @@
               "type": "frame",
               "id": "VNaeH",
               "name": "WindowControls",
-              "height": 32,
+              "height": 48,
               "alignItems": "center",
               "children": [
                 {
                   "type": "frame",
                   "id": "bvNdT",
                   "name": "WinBtn / min",
-                  "width": 46,
-                  "height": 32,
+                  "width": 62,
+                  "height": 48,
                   "layout": "vertical",
                   "justifyContent": "center",
                   "alignItems": "center",
@@ -7697,8 +7815,8 @@
                   "type": "frame",
                   "id": "a1Shb",
                   "name": "WinBtn / max",
-                  "width": 46,
-                  "height": 32,
+                  "width": 62,
+                  "height": 48,
                   "layout": "vertical",
                   "justifyContent": "center",
                   "alignItems": "center",
@@ -7719,8 +7837,8 @@
                   "type": "frame",
                   "id": "jJ7I7",
                   "name": "WinBtn / close",
-                  "width": 46,
-                  "height": 32,
+                  "width": 62,
+                  "height": 48,
                   "layout": "vertical",
                   "justifyContent": "center",
                   "alignItems": "center",
@@ -7746,7 +7864,7 @@
           "id": "U97LF",
           "name": "FlowBar",
           "width": "fill_container",
-          "height": 60,
+          "height": 68,
           "fill": "$surface-main",
           "padding": [
             0,
@@ -7757,7 +7875,7 @@
             {
               "type": "frame",
               "id": "A82Gw",
-              "name": "SegmentedControl / 工作流",
+              "name": "FlowSwitcher / 工作流",
               "fill": "$surface-track",
               "cornerRadius": 17,
               "padding": 3,
@@ -7794,7 +7912,7 @@
                       "fill": "$fg-on-brand",
                       "content": "导入",
                       "fontFamily": "Inter",
-                      "fontSize": 13,
+                      "fontSize": 15,
                       "fontWeight": "500"
                     }
                   ]
@@ -7829,7 +7947,7 @@
                       "fill": "$fg-2",
                       "content": "浏览",
                       "fontFamily": "Inter",
-                      "fontSize": 13,
+                      "fontSize": 15,
                       "fontWeight": "normal"
                     }
                   ]
@@ -7864,7 +7982,7 @@
                       "fill": "$fg-2",
                       "content": "编辑",
                       "fontFamily": "Inter",
-                      "fontSize": 13,
+                      "fontSize": 15,
                       "fontWeight": "normal"
                     }
                   ]
@@ -7899,7 +8017,7 @@
                       "fill": "$fg-2",
                       "content": "导出",
                       "fontFamily": "Inter",
-                      "fontSize": 13,
+                      "fontSize": 15,
                       "fontWeight": "normal"
                     }
                   ]
@@ -7939,7 +8057,7 @@
                       "fill": "$fg-1",
                       "content": "DC-G9",
                       "fontFamily": "Inter",
-                      "fontSize": 12,
+                      "fontSize": 13,
                       "fontWeight": "500"
                     },
                     {
@@ -7949,7 +8067,7 @@
                       "fill": "$fg-2",
                       "content": "LEICA DG 12-60mm F2.8-4.0",
                       "fontFamily": "Inter",
-                      "fontSize": 12,
+                      "fontSize": 13,
                       "fontWeight": "normal"
                     }
                   ]
@@ -7981,7 +8099,7 @@
                       "fill": "$fg-2",
                       "content": "12mm · ƒ/2.8 · 1/125s · ISO 200",
                       "fontFamily": "Inter",
-                      "fontSize": 12,
+                      "fontSize": 13,
                       "fontWeight": "normal"
                     }
                   ]
@@ -8013,7 +8131,7 @@
                       "fill": "$fg-2",
                       "content": "5184 × 3888 · 20.2 MP · RAW",
                       "fontFamily": "Inter",
-                      "fontSize": 12,
+                      "fontSize": 13,
                       "fontWeight": "normal"
                     }
                   ]
@@ -8038,8 +8156,8 @@
               "type": "frame",
               "id": "t1KviU",
               "name": "ToggleBlock / 吸附 / 未开启",
-              "width": 34,
-              "height": 34,
+              "width": 38,
+              "height": 38,
               "cornerRadius": 4,
               "layout": "vertical",
               "justifyContent": "center",
@@ -8064,7 +8182,7 @@
           "id": "KMtgk",
           "name": "ToolsBar",
           "width": "fill_container",
-          "height": 40,
+          "height": 48,
           "fill": "$surface-main",
           "padding": [
             0,
@@ -8103,7 +8221,7 @@
                   "fill": "$fg-2",
                   "content": "批量排除",
                   "fontFamily": "Inter",
-                  "fontSize": 12,
+                  "fontSize": 14,
                   "fontWeight": "normal"
                 }
               ]
@@ -8115,7 +8233,7 @@
           "id": "oFKYe",
           "name": "Workspace / Import",
           "width": "fill_container",
-          "height": "fill_container",
+          "height": 836,
           "fill": "$surface-main",
           "children": [
             {
@@ -8146,7 +8264,7 @@
                       "fill": "$fg-2",
                       "content": "最近",
                       "fontFamily": "Inter",
-                      "fontSize": 11,
+                      "fontSize": 14,
                       "fontWeight": "600"
                     }
                   ]
@@ -8193,7 +8311,7 @@
                           "fill": "$fg-1",
                           "content": "D:\\P\\2\\V\\J\\Kyoto",
                           "fontFamily": "Inter",
-                          "fontSize": 12,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         },
                         {
@@ -8256,7 +8374,7 @@
                           "fill": "$fg-2",
                           "content": "E:\\P\\W\\Portraits",
                           "fontFamily": "Inter",
-                          "fontSize": 12,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         },
                         {
@@ -8297,7 +8415,7 @@
                           "fill": "$fg-2",
                           "content": "C:\\U\\a\\P\\Wallpapers",
                           "fontFamily": "Inter",
-                          "fontSize": 12,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         },
                         {
@@ -8339,7 +8457,7 @@
                           "fill": "$fg-1",
                           "content": "D:\\P\\2\\W\\Wedding-Studio",
                           "fontFamily": "Inter",
-                          "fontSize": 12,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         },
                         {
@@ -8380,7 +8498,7 @@
                           "fill": "$fg-2",
                           "content": "E:\\2\\S\\Spring-Festival",
                           "fontFamily": "Inter",
-                          "fontSize": 12,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         },
                         {
@@ -8399,7 +8517,7 @@
                   "id": "PbySv",
                   "name": "SplitHandle / 1",
                   "width": "fill_container",
-                  "height": 11,
+                  "height": 8,
                   "gap": 2,
                   "justifyContent": "center",
                   "alignItems": "center",
@@ -8450,7 +8568,7 @@
                       "fill": "$fg-2",
                       "content": "来源",
                       "fontFamily": "Inter",
-                      "fontSize": 11,
+                      "fontSize": 14,
                       "fontWeight": "600"
                     }
                   ]
@@ -8516,7 +8634,7 @@
                           "fill": "$fg-1",
                           "content": "本地磁盘 (C:)",
                           "fontFamily": "Inter",
-                          "fontSize": 12,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         }
                       ]
@@ -8581,7 +8699,7 @@
                           "fill": "$fg-1",
                           "content": "数据 (D:)",
                           "fontFamily": "Inter",
-                          "fontSize": 12,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         }
                       ]
@@ -8643,7 +8761,7 @@
                           "fill": "$fg-1",
                           "content": "Photos",
                           "fontFamily": "Inter",
-                          "fontSize": 12,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         }
                       ]
@@ -8704,7 +8822,7 @@
                           "fill": "$fg-1",
                           "content": "Work",
                           "fontFamily": "Inter",
-                          "fontSize": 12,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         }
                       ]
@@ -8758,7 +8876,7 @@
                           "fill": "$fg-1",
                           "content": "备份 (E:)",
                           "fontFamily": "Inter",
-                          "fontSize": 12,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         }
                       ]
@@ -8824,7 +8942,7 @@
                           "fill": "$fg-1",
                           "content": "群晖 NAS (\\\\nas)",
                           "fontFamily": "Inter",
-                          "fontSize": 12,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         }
                       ]
@@ -8890,7 +9008,7 @@
                           "fill": "$fg-1",
                           "content": " OneDrive",
                           "fontFamily": "Inter",
-                          "fontSize": 12,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         }
                       ]
@@ -8902,7 +9020,7 @@
                   "id": "TNzJl",
                   "name": "SplitHandle / 2",
                   "width": "fill_container",
-                  "height": 11,
+                  "height": 8,
                   "gap": 2,
                   "justifyContent": "center",
                   "alignItems": "center",
@@ -8953,7 +9071,7 @@
                       "fill": "$fg-2",
                       "content": "已选目录",
                       "fontFamily": "Inter",
-                      "fontSize": 11,
+                      "fontSize": 14,
                       "fontWeight": "600"
                     }
                   ]
@@ -9014,15 +9132,15 @@
                               "width": "fill_container",
                               "content": "D:\\P\\2\\V\\J\\Kyoto",
                               "fontFamily": "Inter",
-                              "fontSize": 12,
+                              "fontSize": 14,
                               "fontWeight": "normal"
                             },
                             {
                               "type": "frame",
                               "id": "z8kju",
                               "name": "BarRemove / hover",
-                              "width": 26,
-                              "height": 26,
+                              "width": 30,
+                              "height": 30,
                               "cornerRadius": 4,
                               "layout": "vertical",
                               "justifyContent": "center",
@@ -9059,7 +9177,7 @@
                               "fill": "$fg-3",
                               "content": "包含子目录",
                               "fontFamily": "Inter",
-                              "fontSize": 10,
+                              "fontSize": 13,
                               "fontWeight": "normal"
                             },
                             {
@@ -9131,15 +9249,15 @@
                               "width": "fill_container",
                               "content": "D:\\P\\2\\W\\Wedding-Studio",
                               "fontFamily": "Inter",
-                              "fontSize": 12,
+                              "fontSize": 14,
                               "fontWeight": "normal"
                             },
                             {
                               "type": "frame",
                               "id": "LMTWU",
                               "name": "BarRemove / hover",
-                              "width": 26,
-                              "height": 26,
+                              "width": 30,
+                              "height": 30,
                               "cornerRadius": 4,
                               "layout": "vertical",
                               "justifyContent": "center",
@@ -9176,7 +9294,7 @@
                               "fill": "$fg-3",
                               "content": "包含子目录",
                               "fontFamily": "Inter",
-                              "fontSize": 10,
+                              "fontSize": 13,
                               "fontWeight": "normal"
                             },
                             {
@@ -9247,15 +9365,15 @@
                               "width": "fill_container",
                               "content": "E:\\P\\W\\Portraits",
                               "fontFamily": "Inter",
-                              "fontSize": 12,
+                              "fontSize": 14,
                               "fontWeight": "normal"
                             },
                             {
                               "type": "frame",
                               "id": "E85WdA",
                               "name": "BarRemove / hover",
-                              "width": 26,
-                              "height": 26,
+                              "width": 30,
+                              "height": 30,
                               "cornerRadius": 4,
                               "layout": "vertical",
                               "justifyContent": "center",
@@ -9292,7 +9410,7 @@
                               "fill": "$fg-3",
                               "content": "包含子目录",
                               "fontFamily": "Inter",
-                              "fontSize": 10,
+                              "fontSize": 13,
                               "fontWeight": "normal"
                             },
                             {
@@ -9377,7 +9495,7 @@
                                   "fill": "$fg-3",
                                   "content": "RW2",
                                   "fontFamily": "Inter",
-                                  "fontSize": 9,
+                                  "fontSize": 12,
                                   "fontWeight": "600"
                                 }
                               ]
@@ -9400,7 +9518,7 @@
                                   "width": 132,
                                   "content": "P1004821.RW2",
                                   "fontFamily": "Inter",
-                                  "fontSize": 10,
+                                  "fontSize": 13,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -9435,7 +9553,7 @@
                                   "fill": "$fg-3",
                                   "content": "RW2",
                                   "fontFamily": "Inter",
-                                  "fontSize": 9,
+                                  "fontSize": 12,
                                   "fontWeight": "600"
                                 }
                               ]
@@ -9458,7 +9576,7 @@
                                   "width": 132,
                                   "content": "P1004822.RW2",
                                   "fontFamily": "Inter",
-                                  "fontSize": 10,
+                                  "fontSize": 13,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -9493,7 +9611,7 @@
                                   "fill": "$fg-3",
                                   "content": "RW2",
                                   "fontFamily": "Inter",
-                                  "fontSize": 9,
+                                  "fontSize": 12,
                                   "fontWeight": "600"
                                 }
                               ]
@@ -9516,7 +9634,7 @@
                                   "width": 132,
                                   "content": "P1004823.RW2",
                                   "fontFamily": "Inter",
-                                  "fontSize": 10,
+                                  "fontSize": 13,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -9551,7 +9669,7 @@
                                   "fill": "$fg-3",
                                   "content": "RW2",
                                   "fontFamily": "Inter",
-                                  "fontSize": 9,
+                                  "fontSize": 12,
                                   "fontWeight": "600"
                                 }
                               ]
@@ -9574,7 +9692,7 @@
                                   "width": 132,
                                   "content": "P1004824.RW2",
                                   "fontFamily": "Inter",
-                                  "fontSize": 10,
+                                  "fontSize": 13,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -9609,7 +9727,7 @@
                                   "fill": "$fg-3",
                                   "content": "RW2",
                                   "fontFamily": "Inter",
-                                  "fontSize": 9,
+                                  "fontSize": 12,
                                   "fontWeight": "600"
                                 }
                               ]
@@ -9632,7 +9750,7 @@
                                   "width": 132,
                                   "content": "P1004825.RW2",
                                   "fontFamily": "Inter",
-                                  "fontSize": 10,
+                                  "fontSize": 13,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -9675,7 +9793,7 @@
                                   "fill": "$fg-3",
                                   "content": "NEF",
                                   "fontFamily": "Inter",
-                                  "fontSize": 9,
+                                  "fontSize": 12,
                                   "fontWeight": "600"
                                 }
                               ]
@@ -9698,7 +9816,7 @@
                                   "width": 132,
                                   "content": "DSC_0917.NEF",
                                   "fontFamily": "Inter",
-                                  "fontSize": 10,
+                                  "fontSize": 13,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -9733,7 +9851,7 @@
                                   "fill": "$fg-3",
                                   "content": "NEF",
                                   "fontFamily": "Inter",
-                                  "fontSize": 9,
+                                  "fontSize": 12,
                                   "fontWeight": "600"
                                 }
                               ]
@@ -9756,7 +9874,7 @@
                                   "width": 132,
                                   "content": "DSC_0918.NEF",
                                   "fontFamily": "Inter",
-                                  "fontSize": 10,
+                                  "fontSize": 13,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -9791,7 +9909,7 @@
                                   "fill": "$fg-3",
                                   "content": "NEF",
                                   "fontFamily": "Inter",
-                                  "fontSize": 9,
+                                  "fontSize": 12,
                                   "fontWeight": "600"
                                 }
                               ]
@@ -9814,7 +9932,7 @@
                                   "width": 132,
                                   "content": "DSC_0919.NEF",
                                   "fontFamily": "Inter",
-                                  "fontSize": 10,
+                                  "fontSize": 13,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -9849,7 +9967,7 @@
                                   "fill": "$fg-3",
                                   "content": "NEF",
                                   "fontFamily": "Inter",
-                                  "fontSize": 9,
+                                  "fontSize": 12,
                                   "fontWeight": "600"
                                 }
                               ]
@@ -9872,7 +9990,7 @@
                                   "width": 132,
                                   "content": "DSC_0920.NEF",
                                   "fontFamily": "Inter",
-                                  "fontSize": 10,
+                                  "fontSize": 13,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -9903,7 +10021,7 @@
                       "fill": "$fg-2",
                       "content": "1 248 张",
                       "fontFamily": "Inter",
-                      "fontSize": 11,
+                      "fontSize": 14,
                       "fontWeight": "normal"
                     },
                     {
@@ -9920,7 +10038,7 @@
                       "fill": "$fg-2",
                       "content": "D:\\P\\2\\V\\J\\Kyoto",
                       "fontFamily": "Inter",
-                      "fontSize": 11,
+                      "fontSize": 14,
                       "fontWeight": "normal"
                     },
                     {
@@ -9934,7 +10052,7 @@
                       "type": "frame",
                       "id": "JBcnf",
                       "name": "ToggleBlock / 按时间 / 未开启",
-                      "height": 30,
+                      "height": 34,
                       "cornerRadius": 4,
                       "gap": 5,
                       "padding": [
@@ -9960,7 +10078,7 @@
                           "fill": "$fg-2",
                           "content": "按时间",
                           "fontFamily": "Inter",
-                          "fontSize": 11,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         }
                       ]
@@ -10038,7 +10156,7 @@
                       "fill": "$fg-2",
                       "content": "库",
                       "fontFamily": "Inter",
-                      "fontSize": 11,
+                      "fontSize": 14,
                       "fontWeight": "600"
                     }
                   ]
@@ -10057,7 +10175,7 @@
                       "id": "x8BNbM",
                       "name": "RepoCard / Kowloon Studio",
                       "width": "fill_container",
-                      "height": 68,
+                      "height": 72,
                       "fill": "$state-selected",
                       "cornerRadius": 4,
                       "gap": 10,
@@ -10095,7 +10213,7 @@
                           "type": "frame",
                           "id": "rE4d1",
                           "name": "RepoTextCol",
-                          "width": "fill_container",
+                          "width": 130,
                           "layout": "vertical",
                           "gap": 2,
                           "children": [
@@ -10108,7 +10226,7 @@
                               "width": "fill_container",
                               "content": "Kowloon Studio",
                               "fontFamily": "Inter",
-                              "fontSize": 12,
+                              "fontSize": 14,
                               "fontWeight": "500"
                             },
                             {
@@ -10120,7 +10238,7 @@
                               "width": "fill_container",
                               "content": "D:\\Libraries\\Main",
                               "fontFamily": "Inter",
-                              "fontSize": 10,
+                              "fontSize": 13,
                               "fontWeight": "normal"
                             }
                           ]
@@ -10132,8 +10250,31 @@
                           "fill": "$fg-3",
                           "content": "12 480 张",
                           "fontFamily": "Inter",
-                          "fontSize": 10,
+                          "fontSize": 13,
                           "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "dWH79",
+                          "name": "RepoGear / 库设置",
+                          "width": 24,
+                          "height": 24,
+                          "cornerRadius": 4,
+                          "layout": "vertical",
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "nR5ye",
+                              "name": "Glyph / settings",
+                              "width": 14,
+                              "height": 14,
+                              "icon": "settings",
+                              "library": "lucide",
+                              "fill": "$fg-2"
+                            }
+                          ]
                         }
                       ]
                     },
@@ -10149,7 +10290,7 @@
                       "id": "pE5Zp",
                       "name": "RepoCard / 个人相册",
                       "width": "fill_container",
-                      "height": 68,
+                      "height": 72,
                       "fill": "$surface-track",
                       "cornerRadius": 4,
                       "gap": 10,
@@ -10165,7 +10306,7 @@
                           "name": "RepoIconBox",
                           "width": 34,
                           "height": 34,
-                          "fill": "$surface-main",
+                          "fill": "$surface-bar",
                           "cornerRadius": 4,
                           "layout": "vertical",
                           "justifyContent": "center",
@@ -10179,7 +10320,7 @@
                               "height": 16,
                               "icon": "library",
                               "library": "lucide",
-                              "fill": "$fg-2"
+                              "fill": "$fg-3"
                             }
                           ]
                         },
@@ -10187,7 +10328,7 @@
                           "type": "frame",
                           "id": "EfMUY",
                           "name": "RepoTextCol",
-                          "width": "fill_container",
+                          "width": 106,
                           "layout": "vertical",
                           "gap": 2,
                           "children": [
@@ -10195,12 +10336,12 @@
                               "type": "text",
                               "id": "Lw9fI",
                               "name": "RepoName / 个人相册",
-                              "fill": "$fg-1",
+                              "fill": "$fg-2",
                               "textGrowth": "fixed-width",
                               "width": "fill_container",
                               "content": "个人相册",
                               "fontFamily": "Inter",
-                              "fontSize": 12,
+                              "fontSize": 14,
                               "fontWeight": "500"
                             },
                             {
@@ -10212,7 +10353,7 @@
                               "width": "fill_container",
                               "content": "E:\\Photos",
                               "fontFamily": "Inter",
-                              "fontSize": 10,
+                              "fontSize": 13,
                               "fontWeight": "normal"
                             }
                           ]
@@ -10224,8 +10365,44 @@
                           "fill": "$fg-3",
                           "content": "3 210 张",
                           "fontFamily": "Inter",
-                          "fontSize": 10,
+                          "fontSize": 13,
                           "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "CnvRt",
+                          "name": "RepoOffline / 离线（可点重挂载）",
+                          "height": 28,
+                          "fill": "$surface-bar",
+                          "cornerRadius": 4,
+                          "gap": 5,
+                          "padding": [
+                            0,
+                            10
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "p6V0Y",
+                              "name": "Glyph / cloud-off",
+                              "width": 13,
+                              "height": 13,
+                              "icon": "cloud-off",
+                              "library": "lucide",
+                              "fill": "$fg-2"
+                            },
+                            {
+                              "type": "text",
+                              "id": "jS8bm",
+                              "name": "RepoOfflineLabel",
+                              "fill": "$fg-2",
+                              "content": "离线",
+                              "fontFamily": "Inter",
+                              "fontSize": 14,
+                              "fontWeight": "normal"
+                            }
+                          ]
                         }
                       ]
                     },
@@ -10265,7 +10442,7 @@
                           "fill": "$fg-2",
                           "content": "新建库",
                           "fontFamily": "Inter",
-                          "fontSize": 12,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         }
                       ]
@@ -10288,7 +10465,7 @@
                       "fill": "$fg-2",
                       "content": "已选择 3 个目录 · 1 248 张照片",
                       "fontFamily": "Inter",
-                      "fontSize": 11,
+                      "fontSize": 14,
                       "fontWeight": "normal"
                     },
                     {
@@ -10296,7 +10473,7 @@
                       "id": "Hi1xv",
                       "name": "ImportButton / 可点",
                       "width": "fill_container",
-                      "height": 40,
+                      "height": 44,
                       "fill": "$brand",
                       "cornerRadius": 4,
                       "gap": 6,
@@ -10320,7 +10497,7 @@
                           "fill": "$fg-on-brand",
                           "content": "导入",
                           "fontFamily": "Inter",
-                          "fontSize": 13,
+                          "fontSize": 15,
                           "fontWeight": "600"
                         }
                       ]
@@ -10336,8 +10513,8 @@
                           "type": "frame",
                           "id": "A77UsN",
                           "name": "Checkbox / checked",
-                          "width": 12,
-                          "height": 12,
+                          "width": 18,
+                          "height": 18,
                           "fill": "$brand",
                           "cornerRadius": 2,
                           "layout": "vertical",
@@ -10348,8 +10525,8 @@
                               "type": "icon",
                               "id": "zKw9j",
                               "name": "Glyph / check",
-                              "width": 9,
-                              "height": 9,
+                              "width": 11,
+                              "height": 11,
                               "icon": "check",
                               "library": "lucide",
                               "fill": "$fg-on-brand"
@@ -10363,7 +10540,7 @@
                           "fill": "$fg-2",
                           "content": "避免重复导入",
                           "fontFamily": "Inter",
-                          "fontSize": 11,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         }
                       ]
@@ -10513,23 +10690,23 @@
     },
     "brand": {
       "type": "color",
-      "value": "#8DB8AA"
+      "value": "#52C6AB"
     },
     "brand-2": {
       "type": "color",
-      "value": "#EECC55"
+      "value": "#F0B033"
     },
     "state-hover": {
       "type": "color",
       "value": [
         {
-          "value": "#EECC5529",
+          "value": "#F0B03329",
           "theme": {
             "mode": "dark"
           }
         },
         {
-          "value": "#EECC552E",
+          "value": "#F0B0332E",
           "theme": {
             "mode": "light"
           }
@@ -10540,13 +10717,13 @@
       "type": "color",
       "value": [
         {
-          "value": "#F6F8F41F",
+          "value": "#52C6AB49",
           "theme": {
             "mode": "dark"
           }
         },
         {
-          "value": "#2022261A",
+          "value": "#52C6AB53",
           "theme": {
             "mode": "light"
           }
@@ -10557,13 +10734,13 @@
       "type": "color",
       "value": [
         {
-          "value": "#8DB8AA38",
+          "value": "#52C6AB38",
           "theme": {
             "mode": "dark"
           }
         },
         {
-          "value": "#8DB8AA40",
+          "value": "#52C6AB40",
           "theme": {
             "mode": "light"
           }
@@ -10642,13 +10819,13 @@
       "type": "number",
       "value": [
         {
-          "value": 32,
+          "value": 40,
           "theme": {
             "density": "compact"
           }
         },
         {
-          "value": 40,
+          "value": 48,
           "theme": {
             "density": "loose"
           }
@@ -10659,13 +10836,13 @@
       "type": "number",
       "value": [
         {
-          "value": 44,
+          "value": 52,
           "theme": {
             "density": "compact"
           }
         },
         {
-          "value": 60,
+          "value": 68,
           "theme": {
             "density": "loose"
           }
@@ -10676,13 +10853,13 @@
       "type": "number",
       "value": [
         {
-          "value": 32,
+          "value": 40,
           "theme": {
             "density": "compact"
           }
         },
         {
-          "value": 40,
+          "value": 48,
           "theme": {
             "density": "loose"
           }
@@ -10693,13 +10870,13 @@
       "type": "number",
       "value": [
         {
-          "value": 24,
+          "value": 28,
           "theme": {
             "density": "compact"
           }
         },
         {
-          "value": 32,
+          "value": 36,
           "theme": {
             "density": "loose"
           }
@@ -10736,6 +10913,31 @@
           "value": 16,
           "theme": {
             "density": "loose"
+          }
+        }
+      ]
+    },
+    "danger": {
+      "type": "color",
+      "value": "#BF4E30"
+    },
+    "fg-on-danger": {
+      "type": "color",
+      "value": "#F6F8F4"
+    },
+    "scrim": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#17191CB8",
+          "theme": {
+            "mode": "dark"
+          }
+        },
+        {
+          "value": "#2022266B",
+          "theme": {
+            "mode": "light"
           }
         }
       ]
