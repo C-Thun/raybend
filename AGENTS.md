@@ -87,7 +87,7 @@ raybend/
 ├── Cargo.toml                 # [workspace]；profile 也必须在这里
 ├── rust-toolchain.toml        # 锁定 Rust 1.98.1
 ├── package.json / pnpm-lock.yaml / vite.config.ts / index.html
-├── plans/                     # 各里程碑的详细计划（plans/M0.md …）
+├── plans/                     # 单工作单元的计划（plans/M0-1.md；一次一个，见 §5.4）
 ├── design/                    # Pencil 设计稿：xxx.pen + xxx.md（同名）
 ├── implementations/           # 实施记录：YYYY-MM-DD_<简述>.md（文件内首行写精确时间）
 ├── src/                       # 前端（Solid + Tailwind）
@@ -152,6 +152,14 @@ cmd.exe /c 'pushd \\wsl.localhost\Ubuntu-24.04\home\andares\repos\c-thun\raybend
 3. 前端改动后必须重新 `pnpm build`（dist 是编译期嵌入的）；Rust 改动则只需重跑 cargo。
 
 实测参考：首次 Windows 全量构建约 3–4 分钟；WSL 侧 `cargo check` 首次约 2–3 分钟。
+
+### 5.4 规划纪律
+
+- **一次规划只覆盖一个工作单元**（一个波次，或一个 milestone 里连续可交付的几波）。
+- **`PLAN.md` 只做路线级描述**（每个 milestone 含哪些波次、完成定义是什么）。**具体实现方案在每个工作单元开工前单独规划**，写入 `plans/<milestone>-<单元>.md`（如 `plans/M0-1.md`），并走 plannotator 评审。
+- **不提前细化未开工的工作单元** —— 项目规模决定了前置规划必然失真；开工时按当时情况重新规划。
+- **已归档的旧规划**放 `PLAN.md` 附录（如附录 A），并明确标注「仅供参考、不是待办清单」。
+- 规划文件中的勾选项会被 plannotator 进度跟踪，且 `mark_done` **会真实改写文件** —— 所以计划文件的范围要小、要准，否则勾选状态随变更失真、tracker 也会堆满未开工条目。
 
 ---
 
@@ -278,7 +286,7 @@ SQLite FTS5 默认 `unicode61` 分词器**对中文基本无效**；必须使用
 
 **✅ 已决（2026-09-15）**：本项目选 **Ark UI**（`@ark-ui/solid`）—— 原因是 `splitter`（可拖拽分栏）
 与 `tree-view`（标签层级树）是我们最需要且最难自研的两个组件，只有它提供；其活跃度也明显领先。
-实测数据（版本号、组件数、活跃度）见 `plans/M0.md` 文末附录。
+实测数据（版本号、组件数、活跃度）见 `PLAN.md` 附录 A.10。
 
 ### 7.7 图标体系（核实结果，2026-09-15）
 
@@ -297,7 +305,7 @@ SQLite FTS5 默认 `unicode61` 分词器**对中文基本无效**；必须使用
 - 编辑模块的领域专用图标（histogram / vignette / tonality / dehaze 等）从 **Material Symbols** 借用（Apache-2.0 可与 MIT 混用，但混用需注意描边粗细与网格差异）。
 - 图标尺寸规范：16 / 20 / 24 三档，激活态优先用**强调色 + 背景块**表达（Web 设计里有大量成熟做法），不依赖填充变体。
 - **✅ 已决（2026-09-15）**：本项目选 **Tabler**（`@tabler/icons-solidjs`）；
-  实测数据见 `plans/M0.md` 文末附录。选型原则仍是「只用套内图标做组合、降低数量」，不自绘几十个图标。
+  实测数据见 `PLAN.md` 附录 A.10。选型原则仍是「只用套内图标做组合、降低数量」，不自绘几十个图标。
 
 ### 7.8 Tauri 分发与 npm
 
@@ -337,7 +345,7 @@ SQLite FTS5 默认 `unicode61` 分词器**对中文基本无效**；必须使用
 | `ASSISTANCE.md` | **待人类协助事项清单**（有内容则先停下来处理它） |
 | `DESIGN.md` | 视觉与配色体系（唯一事实来源） |
 | `PLAN.md` | 近中期开发计划：Milestone（阶段）→ Wave（波次），含初始化清单与完成定义 |
-| `plans/M0.md` 等 | 各里程碑的详细计划（planner 产物） |
+| `plans/M0-1.md` 等 | 单个工作单元的详细计划与完成记录（一次一个，命名 `plans/<milestone>-<单元>.md`，见 §5.4） |
 | `FUTURE.md` | 远期方向登记册：框架迁移、RAW 后端候选、渲染演进、编辑模块、AI、平台扩展 |
 | `THIRD-PARTY-NOTICES.md` | 第三方组件与参考项目的许可登记 |
 | `design/*.pen` + `design/*.md` | Pencil 设计稿与其说明（成对存在） |
