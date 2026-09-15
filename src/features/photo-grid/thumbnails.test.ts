@@ -1,0 +1,226 @@
+/**
+ * 缩略图队列的测试。
+ *
+ * 这三件事在界面上分别表现为「滚动时卡顿」「重复读盘」「内存一直涨」——
+ * 都属于「不像 bug 的 bug」，所以用假 loader 把它们钉死。
+ * URL 的创建与回收也是注入的，测试里数得清每一个 `blob:` 有没有被回收。
+ */
+
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { createThumbQueue } from "./thumbnails.ts";
+
+/** 可挂起、可失败的假加载器；同时统计并发峰值 */
+function fakeLoader(options: { hold?: boolean; fail?: boolean } = {}) {
+  const calls: string[] = [];
+  const pendings: Array<() => void> = [];
+  const state = {
+    hold: options.hold ?? false,
+    fail: options.fail ?? false,
+    inflight: 0,
+    peak: 0,
+  };
+
+  const load = async (path: string): Promise<Uint8Array | null> => {
+    calls.push(path);
+    state.inflight += 1;
+    state.peak = Math.max(state.peak, state.inflight);
+    try {
+      if (state.hold) {
+        await new Promise<void>((resolve) => pendings.push(resolve));
+      }
+      if (state.fail) throw new Error("读不了");
+      return new Uint8Array([1, 2, 3]);
+    } finally {
+      state.inflight -= 1;
+    }
+  };
+
+  return {
+    load,
+    calls,
+    state,
+    releaseAll() {
+      const waiters = pendings.splice(0, pendings.length);
+      for (const resolve of waiters) resolve();
+    },
+  };
+}
+
+/** 记录 URL 的创建与回收 */
+function fakeUrls() {
+  const created: string[] = [];
+  const revoked: string[] = [];
+  return {
+    created,
+    revoked,
+    toUrl: (bytes: Uint8Array) => {
+      const url = `blob:fake/${created.length}-${bytes.length}`;
+      created.push(url);
+      return url;
+    },
+    revokeUrl: (url: string) => {
+      revoked.push(url);
+    },
+  };
+}
+
+async function flush(times = 4): Promise<void> {
+  for (let i = 0; i < times; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+}
+
+test("请求一张：加载 → ready，带 URL", async () => {
+  const loader = fakeLoader();
+  const urls = fakeUrls();
+  const queue = createThumbQueue({ load: loader.load, ...urls });
+
+  assert.deepEqual(queue.get("/a.jpg"), { status: "idle", url: null });
+  queue.request("/a.jpg");
+  await flush();
+
+  const entry = queue.get("/a.jpg");
+  assert.equal(entry.status, "ready");
+  assert.ok(entry.url);
+  assert.equal(loader.calls.length, 1);
+  assert.deepEqual(queue.stats(), { entries: 1, inflight: 0, queued: 0 });
+});
+
+test("同一个文件请求两次只读一次（滚出去又滚回来）", async () => {
+  const loader = fakeLoader();
+  const urls = fakeUrls();
+  const queue = createThumbQueue({ load: loader.load, ...urls });
+
+  queue.request("/a.jpg");
+  queue.request("/a.jpg");
+  await flush();
+  queue.request("/a.jpg"); // 已完成后再次请求也不重读
+  await flush();
+
+  assert.equal(loader.calls.length, 1);
+  assert.equal(urls.created.length, 1);
+});
+
+test("限流：同时在飞的请求不超过上限", async () => {
+  const loader = fakeLoader({ hold: true });
+  const urls = fakeUrls();
+  const queue = createThumbQueue({ load: loader.load, concurrency: 2, ...urls });
+
+  for (let i = 0; i < 6; i += 1) queue.request(`/p${i}.jpg`);
+  assert.equal(loader.calls.length, 2, "只有 2 个真的发出去了");
+  assert.equal(queue.stats().inflight, 2);
+  assert.ok(queue.stats().queued >= 3);
+
+  loader.state.hold = false;
+  loader.releaseAll();
+  await flush(8);
+  assert.equal(loader.state.peak, 2, "峰值并发不能超过 2");
+  for (let i = 0; i < 6; i += 1) {
+    assert.equal(queue.get(`/p${i}.jpg`).status, "ready");
+  }
+  assert.equal(queue.stats().inflight, 0);
+});
+
+test("加载失败：记 error，再请求可以重试", async () => {
+  const loader = fakeLoader({ fail: true });
+  const urls = fakeUrls();
+  const queue = createThumbQueue({ load: loader.load, ...urls });
+
+  queue.request("/a.jpg");
+  await flush();
+  assert.equal(queue.get("/a.jpg").status, "error");
+  assert.equal(queue.get("/a.jpg").url, null);
+
+  queue.request("/a.jpg");
+  await flush();
+  assert.equal(loader.calls.length, 2, "失败过的允许重试");
+});
+
+test("拿不到字节（浏览器里就是这样）：记 error 而不是一直转圈", async () => {
+  const urls = fakeUrls();
+  const queue = createThumbQueue({
+    load: async () => null,
+    ...urls,
+  });
+
+  queue.request("/a.jpg");
+  await flush();
+  assert.equal(queue.get("/a.jpg").status, "error");
+  assert.equal(urls.created.length, 0);
+});
+
+test("LRU：超过上限时淘汰最久未用并回收 URL", async () => {
+  const loader = fakeLoader();
+  const urls = fakeUrls();
+  const queue = createThumbQueue({
+    load: loader.load,
+    maxEntries: 2,
+    ...urls,
+  });
+
+  queue.request("/a.jpg");
+  await flush();
+  queue.request("/b.jpg");
+  await flush();
+  queue.request("/c.jpg");
+  await flush();
+
+  assert.equal(queue.stats().entries, 2, "表里最多 2 条");
+  assert.equal(queue.get("/a.jpg").status, "idle", "最久没用的被淘汰");
+  assert.equal(queue.get("/b.jpg").status, "ready");
+  assert.equal(queue.get("/c.jpg").status, "ready");
+  assert.equal(urls.revoked.length, 1, "被淘汰的 URL 必须回收");
+  assert.equal(urls.revoked[0], urls.created[0]);
+});
+
+test("clear：回收全部 URL、清空表，并丢掉上一个目录还在飞的结果", async () => {
+  const loader = fakeLoader({ hold: true });
+  const urls = fakeUrls();
+  const queue = createThumbQueue({ load: loader.load, ...urls });
+
+  queue.request("/old.jpg");
+  await flush(1);
+  assert.equal(queue.stats().inflight, 1);
+
+  queue.clear();
+  assert.deepEqual(queue.stats(), { entries: 0, inflight: 0, queued: 0 });
+
+  // 上一个目录的请求结果回来：不能补进新表
+  loader.state.hold = false;
+  loader.releaseAll();
+  await flush();
+  assert.equal(queue.get("/old.jpg").status, "idle");
+  assert.equal(urls.created.length, 0, "迟到的结果不该创建 URL");
+});
+
+test("已完成之后 clear：URL 被回收", async () => {
+  const loader = fakeLoader();
+  const urls = fakeUrls();
+  const queue = createThumbQueue({ load: loader.load, ...urls });
+
+  queue.request("/a.jpg");
+  queue.request("/b.jpg");
+  await flush();
+  assert.equal(urls.created.length, 2);
+
+  queue.clear();
+  assert.equal(urls.revoked.length, 2);
+  assert.deepEqual(queue.stats().entries, 0);
+});
+
+test("统计里的 queued / inflight 与实际进度一致", async () => {
+  const loader = fakeLoader({ hold: true });
+  const urls = fakeUrls();
+  const queue = createThumbQueue({ load: loader.load, concurrency: 1, ...urls });
+
+  queue.request("/a.jpg");
+  queue.request("/b.jpg");
+  queue.request("/c.jpg");
+  assert.deepEqual(queue.stats(), { entries: 3, inflight: 1, queued: 2 });
+
+  loader.state.hold = false;
+  loader.releaseAll();
+  await flush(6);
+  assert.deepEqual(queue.stats(), { entries: 3, inflight: 0, queued: 0 });
+});
