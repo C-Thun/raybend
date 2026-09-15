@@ -20,7 +20,8 @@ import { Show, splitProps } from "solid-js";
 export type ButtonVariant = "primary" | "secondary" | "ghost";
 export type ButtonSize = "sm" | "md";
 
-export interface ButtonProps extends JSX.ButtonHTMLAttributes<HTMLButtonElement> {
+export interface ButtonProps
+  extends JSX.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
   size?: ButtonSize;
   /** 选中态（如 toggle 按钮处于开启） */
@@ -79,7 +80,9 @@ export function Button(props: ButtonProps) {
         SIZE_CLASSES[local.size ?? "md"],
         variantClasses(variant(), Boolean(local.selected)),
         // 禁用态只降前景、不动面（DESIGN.md §5）
-        isDisabled() ? "pointer-events-none text-fg-3 opacity-60" : "cursor-pointer",
+        isDisabled()
+          ? "pointer-events-none text-fg-3 opacity-60"
+          : "cursor-pointer",
         local.class ?? "",
       ].join(" ")}
     >
@@ -87,9 +90,15 @@ export function Button(props: ButtonProps) {
         加载中仍然渲染图标/文字但置为透明 —— 这样按钮宽度不会在加载时跳变。
         禁用态优先级高于 loading，所以这里用 loading 单独判断。
       */}
-      <span class={local.loading ? "invisible flex items-center gap-1.5" : "contents"}>
+      <span
+        class={
+          local.loading ? "invisible flex items-center gap-1.5" : "contents"
+        }
+      >
         <Show when={local.icon}>
-          <span class="flex size-3.5 items-center justify-center">{local.icon}</span>
+          <span class="flex size-3.5 items-center justify-center">
+            {local.icon}
+          </span>
         </Show>
         {local.children}
       </span>
@@ -109,7 +118,8 @@ export function Button(props: ButtonProps) {
 
 export type IconButtonShape = "square" | "circle";
 
-export interface IconButtonProps extends JSX.ButtonHTMLAttributes<HTMLButtonElement> {
+export interface IconButtonProps
+  extends JSX.ButtonHTMLAttributes<HTMLButtonElement> {
   shape?: IconButtonShape;
   selected?: boolean;
   /** 无障碍名。**必填** —— 纯图标按钮没有可读文本，缺了它对屏幕阅读器就是空白。 */
@@ -141,7 +151,9 @@ export function IconButton(props: IconButtonProps) {
         local.selected
           ? "bg-brand text-fg-on-brand hover:bg-brand"
           : "text-fg-2 hover:bg-state-hover hover:text-fg-1",
-        local.disabled ? "pointer-events-none text-fg-3 opacity-60" : "cursor-pointer",
+        local.disabled
+          ? "pointer-events-none text-fg-3 opacity-60"
+          : "cursor-pointer",
         local.class ?? "",
       ].join(" ")}
     >

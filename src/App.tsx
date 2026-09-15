@@ -1,3 +1,5 @@
+import { A } from "@solidjs/router";
+
 /**
  * 应用外壳骨架 —— 按 design/main.md §2 的三行结构实现。
  *
@@ -25,6 +27,16 @@ export default function App() {
 
         {/* 拖拽区：撑开中间空白，窗口由此拖动（双击自动最大化，免权限） */}
         <div class="h-px flex-1" />
+
+        {/* 开发期入口：用三元而不是 `Show` —— 生产构建下整条分支会被摇掉（连字符串都不留） */}
+        {import.meta.env.DEV ? (
+          <A
+            href="/dev/kitchen-sink"
+            class="rounded-ui px-2 py-0.5 text-[11px] text-fg-2 hover:bg-state-hover hover:text-fg-1"
+          >
+            组件陈列室
+          </A>
+        ) : null}
       </header>
 
       {/* ── flowbar：工作流 + 图片信息 + 开关组 ──────────────────── */}

@@ -2,6 +2,9 @@
 node_modules
 dist
 
+# TypeScript 增量构建信息（tsc -p / --build 会产出，属构建产物）
+*.tsbuildinfo
+
 # Rust
 target/
 

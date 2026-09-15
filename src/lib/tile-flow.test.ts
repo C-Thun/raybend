@@ -46,7 +46,11 @@ test("正好整除时余量为 0", () => {
 });
 
 test("间距为 0 也能算", () => {
-  const flow = computeTileFlow({ containerWidth: 1000, cellWidth: 100, gap: 0 });
+  const flow = computeTileFlow({
+    containerWidth: 1000,
+    cellWidth: 100,
+    gap: 0,
+  });
   assert.equal(flow.columns, 10);
   assert.equal(flow.remainder, 0);
 });
@@ -76,9 +80,16 @@ test("容器宽为 0 或负数 → 1 列且标记溢出", () => {
 
 test("cellWidth 非法（0 / 负 / NaN）→ 1 列、不除零、不产生 NaN", () => {
   for (const cw of [0, -100, Number.NaN]) {
-    const flow = computeTileFlow({ containerWidth: 900, cellWidth: cw, gap: 8 });
+    const flow = computeTileFlow({
+      containerWidth: 900,
+      cellWidth: cw,
+      gap: 8,
+    });
     assert.equal(flow.columns, 1);
-    assert.ok(Number.isFinite(flow.remainder), `remainder 不应为 NaN：${flow.remainder}`);
+    assert.ok(
+      Number.isFinite(flow.remainder),
+      `remainder 不应为 NaN：${flow.remainder}`,
+    );
   }
 });
 
@@ -90,7 +101,11 @@ test("负间距按 0 处理（不让公式产出诡异列数）", () => {
 
 test("NaN / Infinity 输入不传播成 NaN 结果", () => {
   for (const bad of [Number.NaN, Number.POSITIVE_INFINITY]) {
-    const flow = computeTileFlow({ containerWidth: bad, cellWidth: 150, gap: 8 });
+    const flow = computeTileFlow({
+      containerWidth: bad,
+      cellWidth: 150,
+      gap: 8,
+    });
     assert.ok(Number.isFinite(flow.columns));
     assert.ok(Number.isFinite(flow.remainder));
   }
@@ -102,8 +117,15 @@ test("不变式：列数恒 ≥ 1，且余量 < 一个「单元格+间距」", (
   for (const w of [1, 50, 100, 199, 200, 201, 433, 960, 1920, 3840]) {
     for (const cw of [96, 150, 208, 512]) {
       for (const gap of [0, 4, 8, 16]) {
-        const { columns, remainder } = computeTileFlow({ containerWidth: w, cellWidth: cw, gap });
-        assert.ok(columns >= 1, `w=${w} cw=${cw} gap=${gap} → columns=${columns}`);
+        const { columns, remainder } = computeTileFlow({
+          containerWidth: w,
+          cellWidth: cw,
+          gap,
+        });
+        assert.ok(
+          columns >= 1,
+          `w=${w} cw=${cw} gap=${gap} → columns=${columns}`,
+        );
         // 若能再塞一列，说明列数算少了
         if (!(w < cw)) {
           assert.ok(
@@ -120,7 +142,11 @@ test("不变式：used + remainder 恒等于容器宽（无四舍五入丢像素
   for (const w of [320, 640, 868, 960, 1000, 1920]) {
     for (const cw of [96, 150, 208, 512]) {
       for (const gap of [4, 8]) {
-        const { columns, remainder } = computeTileFlow({ containerWidth: w, cellWidth: cw, gap });
+        const { columns, remainder } = computeTileFlow({
+          containerWidth: w,
+          cellWidth: cw,
+          gap,
+        });
         const used = columns * cw + (columns - 1) * gap;
         assert.equal(used + remainder, w, `w=${w} cw=${cw} gap=${gap}`);
       }
@@ -156,7 +182,11 @@ test("越界下标被夹到合法范围", () => {
   assert.equal(clampTileStepIndex(9), 8);
   assert.equal(clampTileStepIndex(999), 8);
   assert.equal(clampTileStepIndex(2.6), 3, "小数四舍五入");
-  assert.equal(clampTileStepIndex(Number.NaN), DEFAULT_TILE_STEP_INDEX, "NaN 回落到默认档");
+  assert.equal(
+    clampTileStepIndex(Number.NaN),
+    DEFAULT_TILE_STEP_INDEX,
+    "NaN 回落到默认档",
+  );
 });
 
 test("tileSizeAt 对越界与非法下标都返回合法档位", () => {
@@ -210,9 +240,15 @@ test("不变式：行数 × 列数 ≥ 总数，且 (行数−1) × 列数 < 总
   for (const count of [1, 5, 6, 7, 12, 13, 59, 60, 61, 1248, 100000]) {
     for (const cols of [1, 2, 5, 6, 8]) {
       const rows = tileRowCount(count, cols);
-      assert.ok(rows * cols >= count, `count=${count} cols=${cols} rows=${rows}`);
+      assert.ok(
+        rows * cols >= count,
+        `count=${count} cols=${cols} rows=${rows}`,
+      );
       if (rows > 0) {
-        assert.ok((rows - 1) * cols < count, `count=${count} cols=${cols} rows=${rows} 多算了一行`);
+        assert.ok(
+          (rows - 1) * cols < count,
+          `count=${count} cols=${cols} rows=${rows} 多算了一行`,
+        );
       }
     }
   }

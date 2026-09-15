@@ -1,0 +1,47 @@
+/*
+ * 细滚动条（DESIGN.md §10.1 #15）。
+ *
+ * 为什么用 CSS 而不是自绘 JS 滚动条：
+ *   1. 产品目标是 Windows / WebView2（Chromium），`::-webkit-scrollbar` 完全可用
+ *   2. 自绘滚动条会丢掉系统的**惯性滚动、触控板手势、键盘翻页**行为，
+ *      这些在相片网格里天天用，不能靠 JS 重新实现一遍
+ *   3. 自绘还要处理 RTL、缩放、内容变化的重新测量 —— 全是与相片业务无关的坑
+ * 配套的 `ScrollBox`（`src/components/ui/ScrollBar.tsx`）只是个套了标准类的容器。
+ *
+ * 颜色仍然只从令牌来（`--scrollbar-thumb*` 由 `fg-3`/`fg-2` 派生），
+ * 所以改前景色时滚动条跟着走，不需要动这里。
+ */
+
+/* 标准属性：新版 Chromium / Firefox 都支持，作为 `::-webkit-` 之外的兜底 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+/* WebKit/Chromium 细粒度样式 */
+::-webkit-scrollbar {
+  width: var(--scrollbar-w);
+  height: var(--scrollbar-w);
+}
+
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  /* 轨道透明：滚动条只以「滑块」的形式出现，不额外占一块底色（§6 无边线） */
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb);
+  border-radius: 9999px;
+  /* 用透明边框把滑块「收窄」，视觉更细；命中区仍是整条宽度 */
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--scrollbar-thumb-hover);
+}
+
+::-webkit-scrollbar-thumb:active {
+  background-color: var(--scrollbar-thumb-hover);
+}

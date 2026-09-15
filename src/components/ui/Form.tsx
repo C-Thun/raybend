@@ -33,7 +33,7 @@ export function Checkbox(props: CheckboxProps) {
     >
       <ArkCheckbox.Control
         class={[
-          "flex size-3 shrink-0 items-center justify-center rounded-[2px] transition-colors",
+          "flex size-checkbox-size shrink-0 items-center justify-center rounded-[2px] transition-colors",
           "border border-fg-3",
           "data-[state=checked]:border-brand data-[state=checked]:bg-brand",
           "data-[disabled]:opacity-60",
@@ -94,7 +94,7 @@ export function RadioCircle(props: RadioCircleProps) {
         props.onCheckedChange(!props.checked);
       }}
       class={[
-        "flex size-3.5 shrink-0 items-center justify-center rounded-full transition-colors",
+        "flex size-checkbox-size shrink-0 items-center justify-center rounded-full transition-colors",
         local.checked
           ? "bg-brand text-fg-on-brand hover:bg-brand"
           : "border-[1.5px] border-fg-3 hover:bg-state-hover",

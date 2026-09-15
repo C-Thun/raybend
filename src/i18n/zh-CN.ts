@@ -51,6 +51,7 @@ export const zhCN = {
  "common.easy_destroy.confirm": "确定要移除吗？",
  "common.easy_destroy.shift_hint": "按住 Shift 可跳过确认",
  "common.remove": "移除",
+ "common.close": "关闭",
  "common.cancel": "取消",
  "common.confirm": "确定",
  "common.loading": "加载中",

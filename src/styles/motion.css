@@ -1,0 +1,51 @@
+/*
+ * 动效（DESIGN.md §12.1 等范式的「弹出 / 翻转」部分）。
+ *
+ * 这里只放**少数几个语义化的动画**，理由和令牌一样：动效散落在组件里就没人能统一调它。
+ * 三条纪律：
+ *   1. 时长 ≤ 150ms —— 桌面软件的反馈要「立刻」，超过这个数就开始像卡顿
+ *   2. 只动 `transform` 与 `opacity`（不触发布局与重绘）
+ *   3. **不做阴影、不做毛玻璃**（§6）；这里也没有任何 `box-shadow`
+ */
+
+/* `easy copy` 的提示气泡：由下向上弹出（§12.1） */
+@keyframes rb-pop-up {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.rb-pop-up {
+  animation: rb-pop-up 120ms ease-out;
+}
+
+/* 徽标 / 提示的淡入（用于「已复制」这类状态切换） */
+@keyframes rb-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.rb-fade-in {
+  animation: rb-fade-in 120ms ease-out;
+}
+
+/*
+ * 尊重系统的「减少动态效果」偏好。
+ * 桌面软件里这一条尤其重要：前庭敏感的用户开了它之后，
+ * 每个 hover 都在动会让界面变得不可用。
+ */
+@media (prefers-reduced-motion: reduce) {
+  .rb-pop-up,
+  .rb-fade-in {
+    animation: none;
+  }
+}

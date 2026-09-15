@@ -45,6 +45,7 @@ export const enUS: Record<MessageKey, string> = {
  "common.easy_destroy.confirm": "Remove this?",
  "common.easy_destroy.shift_hint": "Hold Shift to skip confirmation",
  "common.remove": "Remove",
+ "common.close": "Close",
  "common.cancel": "Cancel",
  "common.confirm": "OK",
  "common.loading": "Loading",

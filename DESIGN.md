@@ -331,6 +331,16 @@ DESIGN.md（本文件，人类可读的规格与色板）
 | `--state-hover` | `bg-state-hover` | 悬停叠加 |
 | `--state-active` | `bg-state-active` | 按下叠加 |
 | `--state-selected` | `bg-state-selected` | 选中叠加 |
+| `--scrim` | `bg-scrim` | 浮层遮罩（Dialog 背景压暗） |
+| `--ring-easy-copy` | `border-ring-easy-copy` | `easy copy` 悬停细边框（品牌主色 40%） |
+| `--focus-ring` / `--focus-ring-w` | `border-focus-ring` | 焦点环（品牌主色 / 1px） |
+| `--scrollbar-thumb` / `--scrollbar-thumb-hover` | —（CSS 内部使用） | 细滚动条滑块（由 `fg-3` / `fg-2` 派生） |
+
+> **不以字面色出现的派生值**（同 §5.2 的思路）：`--scrim`、`--ring-easy-copy`、
+> `--scrollbar-thumb*` 全部由池内颜色用 `color-mix()` 实时合成。
+> 这样「主色/前景色改动时它们自动跟着走」，无需新增任何字面色值。
+> 两主题的遮罩都必须是**压暗**：dark 用最深的 `surface-track` 派生，light 用 `深色`（`fg-1`）派生 ——
+> 浅色主题若用浅面派生会把背景洗白，看起来不像弹窗。
 
 **密度令牌**用同样的思路，但挂在 `[data-density]` 上：
 
@@ -699,3 +709,4 @@ L = W − (N·cellW + (N−1)·gap)                    // 右侧剩余空间
 | 2026-09-15 | **全局反馈规则定案**：指向=辅色底、点击=主色底（§5 重写）；新增 §8.3 两档尺寸对照与「移除按钮点击区 ≥22×22」；新增 §12.4.1 选中状态跨面板同步 + **明确禁止「为显示选中而强制展开树」** |
 | 2026-09-15 | 新增 §5.2 **浓度必须是配置项 + `color-mix` 实时合成 + （可选）亮度反推算法**；§12.2 排除改到 `toolsbar` 居中批量操作；新增 §12.7 **按时间分组与时间片**（阈值 1 小时可配）；新增 §12.8 **`ToggleBlock` 统一样式** |
 | 2026-09-15 | 修正 §12.2：**没有独立的「反排除」按钮** —— `批量排除` 就是个**反转操作**（未排除的排除、已排除的取消），按钮文字与外观恒定 |
+| 2026-09-15 | 新增 §9.2 派生令牌：`--scrim`（遮罩）/ `--ring-easy-copy`（§12.1 的 40% 主色细边框）/ `--focus-ring` / `--scrollbar-thumb*`，均用 `color-mix()` 派生，**不新增字面色值**；新增 §8.3 派生尺寸 `--scrollbar-w` |

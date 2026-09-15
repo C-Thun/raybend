@@ -37,6 +37,9 @@
   --tint-hover: 0.16;
   --tint-selected: 0.22;
 
+  /* 浮层遮罩：用池内最深的面派生，不引入新的字面黑 */
+  --scrim: color-mix(in oklab, var(--surface-track) 72%, transparent);
+
   color-scheme: dark;
 }
 
@@ -53,6 +56,10 @@
 
   --tint-hover: 0.18;
   --tint-selected: 0.25;
+
+  /* 浅色主题下遮罩要用**深色**（用户色板里的 `深色`）压暗，
+     用浅面派生会把背景「洗白」而不是压暗 —— 那看起来像弹窗没出来。 */
+  --scrim: color-mix(in oklab, var(--fg-1) 42%, transparent);
 
   color-scheme: light;
 }
@@ -82,6 +89,21 @@
   );
   /* 按下瞬间，比 hover 再深一档 */
   --state-active: color-mix(in oklab, var(--brand) calc(var(--tint-selected) * 130%), transparent);
+
+  /*
+   * `easy copy` 的悬停细边框（DESIGN.md §12.1）：固定用品牌主色、约 40% 透明度。
+   * 描述的是**品牌色的浓度**而不是某个色值，所以同样用 color-mix 派生 ——
+   * 用户之后微调主色时这里自动跟着走。
+   */
+  --ring-easy-copy: color-mix(in oklab, var(--brand) 40%, transparent);
+
+  /* 焦点环：品牌主色、1px（DESIGN.md §5） */
+  --focus-ring: var(--brand);
+  --focus-ring-w: 1px;
+
+  /* 细滚动条（DESIGN.md §10.1 #15）：滑块色彩由前景色派生 */
+  --scrollbar-thumb: color-mix(in oklab, var(--fg-3) 70%, transparent);
+  --scrollbar-thumb-hover: color-mix(in oklab, var(--fg-2) 85%, transparent);
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -130,6 +152,7 @@
   --toggle-block-icon: 16px;
 
   --caption-h: 22px; /* 图片 tile 字幕条高 */
+  --scrollbar-w: 8px; /* 细滚动条宽/高 */
 
   --action-btn-h: 32px; /* 导入按钮等 */
   --card-h: 56px; /* 库卡片 */
@@ -175,6 +198,7 @@
   --toggle-block-icon: 18px;
 
   --caption-h: 28px;
+  --scrollbar-w: 10px;
 
   --action-btn-h: 40px;
   --card-h: 68px;
@@ -218,6 +242,11 @@
   --color-state-selected: var(--state-selected);
   --color-state-active: var(--state-active);
 
+  /* 浮层遮罩与范式描边 */
+  --color-scrim: var(--scrim);
+  --color-ring-easy-copy: var(--ring-easy-copy);
+  --color-focus-ring: var(--focus-ring);
+
   /*
    * 密度令牌投到 `--spacing-*` 命名空间，
    * 这样 `h-bar-title-h` / `w-panel-w-left` / `p-panel-pad` / `gap-gap` 等都能直接用。
@@ -238,12 +267,16 @@
   --spacing-seg-chip-h: var(--seg-chip-h);
   --spacing-seg-chip-pad-x: var(--seg-chip-pad-x);
   --spacing-remove-hit: var(--remove-hit);
+  --spacing-remove-icon: var(--remove-icon);
+  --spacing-checkbox-size: var(--checkbox-size);
+  --spacing-toggle-block-icon: var(--toggle-block-icon);
   --spacing-selected-bar-h: var(--selected-bar-h);
   --spacing-switch-w: var(--switch-w);
   --spacing-switch-h: var(--switch-h);
   --spacing-switch-knob: var(--switch-knob);
   --spacing-toggle-block: var(--toggle-block);
   --spacing-caption-h: var(--caption-h);
+  --spacing-scrollbar-w: var(--scrollbar-w);
   --spacing-action-btn-h: var(--action-btn-h);
   --spacing-card-h: var(--card-h);
 
