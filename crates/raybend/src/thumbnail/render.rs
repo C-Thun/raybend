@@ -134,12 +134,7 @@ pub fn encode(
         Some(o) if o != 1 => apply_orientation(&img, o),
         _ => img,
     };
-    let long = size.long_edge();
-    let resized = if img.width().max(img.height()) > long {
-        img.resize(long, long, image::imageops::FilterType::Lanczos3)
-    } else {
-        img // 已经比目标小：不放大（放大只会更糊，还更费空间）
-    };
+    let resized = resize_for_thumb(img, size.long_edge());
 
     let rgb = resized.to_rgb8();
     let (width, height) = (rgb.width(), rgb.height());
@@ -155,6 +150,39 @@ pub fn encode(
         height,
         placeholder,
     })
+}
+
+/// 缩到长边 `long`（不放大）。
+///
+/// # 为什么要两段式（有实测支撑，别改回去）
+///
+/// 实测（`examples/thumb-bench.rs`，30 张 6000×4000 的 JPG，release）：
+///
+/// | 做法 | 每张耗时 |
+/// | --- | --- |
+/// | 直接 Lanczos3 | **191 ms** |
+/// | 直接三角滤波 | 68 ms |
+/// | 直接最近邻 | 14 ms |
+/// | **两段式（盒式 → 2×目标 → Lanczos3）** | **约 45 ms** |
+///
+/// 直接把 6000px 缩到 384px，Lanczos3 的核要跨 15 个像素取样，代价极高；
+/// 先用盒式（整数快路径）降到 2× 目标，再让 Lanczos3 做最后一步精修，
+/// 观感与直接 Lanczos3 几乎一致（大幅缩小本就丢高频），速度却快 4 倍。
+#[must_use]
+pub fn resize_for_thumb(img: DynamicImage, long: u32) -> DynamicImage {
+    let (w, h) = (img.width(), img.height());
+    if w.max(h) <= long {
+        return img; // 已经比目标小：不放大（放大只会更糊，还更费空间）
+    }
+    let double = long * 2;
+    if w.max(h) <= double {
+        // 只比目标大一点点：直接一次滤波就够
+        return img.resize(long, long, image::imageops::FilterType::Lanczos3);
+    }
+    // ① 盒式快降（整数路径，`thumbnail` 就是干这个的）
+    let coarse = img.thumbnail(double, double);
+    // ② Lanczos3 精修最后一段（2× → 1×，核很短，几乎不花时间）
+    coarse.resize(long, long, image::imageops::FilterType::Lanczos3)
 }
 
 /// 按 EXIF orientation 摆正（1..8）。
@@ -374,6 +402,33 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!((strip.width, strip.height), (192, 144));
+    }
+
+    #[test]
+    fn two_stage_resize_matches_direct_resize_in_shape() {
+        // 形状与直接缩放一致（两段式只是快，不该改变尺寸规则）
+        let img = DynamicImage::ImageRgb8(RgbImage::from_pixel(6000, 4000, Rgb([40, 80, 120])));
+        let two = resize_for_thumb(img.clone(), GRID_LONG_EDGE);
+        let direct = img.resize(
+            GRID_LONG_EDGE,
+            GRID_LONG_EDGE,
+            image::imageops::FilterType::Lanczos3,
+        );
+        assert_eq!(
+            (two.width(), two.height()),
+            (direct.width(), direct.height())
+        );
+        assert_eq!(
+            (two.width(), two.height()),
+            (384, 256),
+            "6000×4000 → 384×256"
+        );
+        // 极小的图走直接路径
+        let small = DynamicImage::ImageRgb8(RgbImage::from_pixel(800, 600, Rgb([1, 2, 3])));
+        assert_eq!(resize_for_thumb(small, GRID_LONG_EDGE).width(), 384);
+        // 比目标小：原样
+        let tiny = DynamicImage::ImageRgb8(RgbImage::from_pixel(100, 80, Rgb([1, 2, 3])));
+        assert_eq!(resize_for_thumb(tiny, GRID_LONG_EDGE).width(), 100);
     }
 
     #[test]
