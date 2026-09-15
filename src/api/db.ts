@@ -123,7 +123,10 @@ export async function readFileExif(path: string): Promise<FileExif> {
   return call<FileExif>("file_exif", { path });
 }
 
-/** 浏览器降级时返回的空 EXIF（**这是「没有数据」，不是「读失败」**）。 */
+/**
+ * 浏览器降级时返回的空 EXIF（**这是「没有数据」，不是「读失败」**）。
+ * 字段与 `FileExif` 一一对应：Rust 侧加了字段，这里也要跟着加。
+ */
 export const EMPTY_FILE_EXIF: FileExif = {
   cameraMake: null,
   cameraModel: null,
@@ -137,6 +140,7 @@ export const EMPTY_FILE_EXIF: FileExif = {
   orientation: null,
   takenAtMs: null,
   takenAtSource: null,
+  takenAtOffsetMin: null,
   ext: null,
   kind: "other",
 };

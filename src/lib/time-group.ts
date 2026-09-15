@@ -18,10 +18,17 @@
  * 测试里为了让结果确定，可以显式传 `offsetMinutes`（东八区 = 480）。
  */
 
-/** 参与分组的照片（只要 id 与拍摄时间）。 */
+/** 参与分组的照片（只要 id、拍摄时间与它的时区偏移）。 */
 export interface TimePhotoLike {
   id: string;
   takenAtMs: number | null;
+  /**
+   * 该张照片的时区偏移（分钟）：
+   *   * 数字 → 用它（EXIF 写了 `OffsetTime*`）
+   *   * `null` → 相机没写时区，毫秒本身就是墙上时间 → 按 **UTC** 分组
+   *   * 省略 / `undefined` → 用 `options.offsetMinutes`，再退到本机时区
+   */
+  offsetMinutes?: number | null;
 }
 
 /** 一个时间片（一次连续拍摄）。 */
@@ -32,6 +39,11 @@ export interface TimeSlice {
   startMs: number;
   /** 片内最后一张的拍摄时间 */
   endMs: number;
+  /**
+   * 这一片用的时区偏移（分钟）——显示时间范围时用它把毫秒还原成
+   * 「相机上的数字」（见 `lib/datetime.ts`）。
+   */
+  offsetMinutes: number;
   /** 片内的照片 id（按拍摄时间升序） */
   photoIds: string[];
 }
@@ -59,13 +71,20 @@ export interface TimeGroupingOptions {
   /** 时间片阈值（**分钟**）。<= 0 或非法值 → 不切分（一天一片） */
   gapMinutes: number;
   /**
-   * 时区偏移（分钟，东八区 = 480）。
+   * 兜底的时区偏移（分钟，东八区 = 480）—— 只对**没带偏移**的照片生效。
    * 省略时用**运行环境的本地时区**（浏览器里就是用户的时区）。
    */
   offsetMinutes?: number;
 }
 
 const MS_PER_MINUTE = 60_000;
+
+/** 带上「用哪个偏移看它」的照片（分组与显示时间范围都要用） */
+interface TimedPhoto {
+  id: string;
+  takenAtMs: number;
+  offset: number;
+}
 
 /** 本地时区偏移（分钟，东为正），取给定时刻的偏移（能正确处理夏令时） */
 function localOffsetMinutes(ms: number): number {
@@ -103,14 +122,24 @@ export function groupByTime(
       ? options.gapMinutes * MS_PER_MINUTE
       : Number.POSITIVE_INFINITY;
 
-  const timed: Array<{ id: string; takenAtMs: number }> = [];
+  const timed: TimedPhoto[] = [];
   const untimed: string[] = [];
   for (const photo of photos) {
     if (photo.takenAtMs === null || !Number.isFinite(photo.takenAtMs)) {
       untimed.push(photo.id);
-    } else {
-      timed.push({ id: photo.id, takenAtMs: photo.takenAtMs });
+      continue;
     }
+    // 偏移的优先级：这张自己的 → 调用方给的兜底 → 本机时区。
+    // `null`（有值但为空）表示「相机没写时区」→ 按 UTC 看，不要再套本机时区。
+    let offset: number;
+    if (typeof photo.offsetMinutes === "number") {
+      offset = photo.offsetMinutes;
+    } else if (photo.offsetMinutes === null) {
+      offset = 0;
+    } else {
+      offset = options.offsetMinutes ?? localOffsetMinutes(photo.takenAtMs);
+    }
+    timed.push({ id: photo.id, takenAtMs: photo.takenAtMs, offset });
   }
 
   // 按时间升序；同一时刻的按 id 兜底，保证顺序确定（可断言）
@@ -120,32 +149,30 @@ export function groupByTime(
       : a.takenAtMs - b.takenAtMs,
   );
 
-  const days = new Map<
-    string,
-    { photos: Array<{ id: string; takenAtMs: number }>; offset: number }
-  >();
+  const days = new Map<string, { photos: TimedPhoto[]; offset: number }>();
 
   for (const photo of timed) {
-    const offset = options.offsetMinutes ?? localOffsetMinutes(photo.takenAtMs);
-    const key = dayKey(photo.takenAtMs, offset);
+    const key = dayKey(photo.takenAtMs, photo.offset);
     const bucket = days.get(key);
     if (bucket) {
       bucket.photos.push(photo);
     } else {
-      days.set(key, { photos: [photo], offset });
+      days.set(key, { photos: [photo], offset: photo.offset });
     }
   }
 
   const result: TimeDay[] = [];
   for (const [key, bucket] of days) {
     const slices: TimeSlice[] = [];
-    let current: Array<{ id: string; takenAtMs: number }> = [];
+    let current: TimedPhoto[] = [];
     const flush = (): void => {
       if (current.length === 0) return;
       slices.push({
         id: `${key} #${slices.length + 1}`,
         startMs: current[0].takenAtMs,
         endMs: current[current.length - 1].takenAtMs,
+        // 同一片内的偏移理论上一致（都来自同一台相机）；用第一张的即可
+        offsetMinutes: current[0].offset,
         photoIds: current.map((photo) => photo.id),
       });
       current = [];
@@ -178,6 +205,7 @@ export function groupByTime(
             id: "unknown",
             startMs: 0,
             endMs: 0,
+            offsetMinutes: 0,
             photoIds: untimed,
           }
         : null,

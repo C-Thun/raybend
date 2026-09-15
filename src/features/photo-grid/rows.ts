@@ -50,6 +50,8 @@ export interface GroupRowModel {
   /** 片内首尾时间（视图据此显示时间范围）；未知时间组是 `null` */
   startMs: number | null;
   endMs: number | null;
+  /** 显示时间范围用的偏移（分钟）；`null` = 不显示时间 */
+  offsetMinutes: number | null;
   /** 这一组里有多少张（视图显示计数） */
   count: number;
   /** 是否是「未知时间」那一组 */
@@ -109,6 +111,7 @@ export function buildGridRows(input: GridRowsInput): GridRowModel[] {
         day.slices.length > 0
           ? day.slices[day.slices.length - 1].endMs
           : null,
+      offsetMinutes: day.slices.length > 0 ? day.slices[0].offsetMinutes : null,
       count: day.photoIds.length,
       unknown: false,
     });
@@ -123,6 +126,7 @@ export function buildGridRows(input: GridRowsInput): GridRowModel[] {
         dayId: day.id,
         startMs: slice.startMs,
         endMs: slice.endMs,
+        offsetMinutes: slice.offsetMinutes,
         count: slice.photoIds.length,
         unknown: false,
       });
@@ -146,6 +150,7 @@ export function buildGridRows(input: GridRowsInput): GridRowModel[] {
       dayId: "unknown",
       startMs: null,
       endMs: null,
+      offsetMinutes: null,
       count: photoIds.length,
       unknown: true,
     });

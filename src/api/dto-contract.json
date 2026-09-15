@@ -4,9 +4,21 @@
     "（src-tauri/src/contract.rs）都对着它断言。数组是**排序后**的 camelCase 键名。",
     "改字段名时必须同时改：Rust 结构 → 本文件 → src/api/types.ts。"
   ],
-  "RecentDir": ["includeSubdirs", "path", "useCount", "usedAt"],
-  "Volume": ["kind", "kindLabel", "path"],
-  "DirEntry": ["name", "path"],
+  "RecentDir": [
+    "includeSubdirs",
+    "path",
+    "useCount",
+    "usedAt"
+  ],
+  "Volume": [
+    "kind",
+    "kindLabel",
+    "path"
+  ],
+  "DirEntry": [
+    "name",
+    "path"
+  ],
   "SourceItem": [
     "ext",
     "fileName",
@@ -15,11 +27,27 @@
     "path",
     "sizeBytes",
     "takenAtMs",
+    "takenAtOffsetMin",
     "takenAtSource"
   ],
-  "SourceScan": ["elapsedMs", "items", "problems", "root", "skipped"],
-  "TimeEntry": ["path", "takenAtMs", "takenAtSource"],
-  "PhotoCount": ["photos", "skipped", "truncated"],
+  "SourceScan": [
+    "elapsedMs",
+    "items",
+    "problems",
+    "root",
+    "skipped"
+  ],
+  "TimeEntry": [
+    "path",
+    "takenAtMs",
+    "takenAtOffsetMin",
+    "takenAtSource"
+  ],
+  "PhotoCount": [
+    "photos",
+    "skipped",
+    "truncated"
+  ],
   "FileExif": [
     "cameraMake",
     "cameraModel",
@@ -33,6 +61,7 @@
     "lens",
     "orientation",
     "takenAtMs",
+    "takenAtOffsetMin",
     "takenAtSource",
     "width"
   ],
@@ -49,7 +78,22 @@
     "root",
     "triedPaths"
   ],
-  "RepositoryPath": ["lastSeenAt", "path", "status"],
-  "RepositoryProbe": ["kind", "message", "name", "registered", "repositoryId"],
-  "ThumbCacheStats": ["bySize", "bytes", "entries", "pinned"]
+  "RepositoryPath": [
+    "lastSeenAt",
+    "path",
+    "status"
+  ],
+  "RepositoryProbe": [
+    "kind",
+    "message",
+    "name",
+    "registered",
+    "repositoryId"
+  ],
+  "ThumbCacheStats": [
+    "bySize",
+    "bytes",
+    "entries",
+    "pinned"
+  ]
 }

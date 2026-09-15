@@ -73,6 +73,7 @@ const SOURCE_ITEM_KEYS = [
   "path",
   "sizeBytes",
   "takenAtMs",
+  "takenAtOffsetMin",
   "takenAtSource",
 ] as const satisfies readonly (keyof SourceItem)[];
 const SOURCE_SCAN_KEYS = [
@@ -85,6 +86,7 @@ const SOURCE_SCAN_KEYS = [
 const TIME_ENTRY_KEYS = [
   "path",
   "takenAtMs",
+  "takenAtOffsetMin",
   "takenAtSource",
 ] as const satisfies readonly (keyof TimeEntry)[];
 const PHOTO_COUNT_KEYS = [
@@ -105,6 +107,7 @@ const FILE_EXIF_KEYS = [
   "lens",
   "orientation",
   "takenAtMs",
+  "takenAtOffsetMin",
   "takenAtSource",
   "width",
 ] as const satisfies readonly (keyof FileExif)[];

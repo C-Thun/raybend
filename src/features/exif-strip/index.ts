@@ -15,3 +15,6 @@ export type { ExifGroup, ExifPart } from "./grouping.ts";
 
 /** 数据形状：`src/api` 的 EXIF 命令返回它 */
 export type { ExifData, ExifGroupId } from "./types.ts";
+
+/** 传输形状（`src/api/types.ts` 的 `FileExif`）→ 界面形状（`ExifData`） */
+export { toExifData } from "./from-file.ts";

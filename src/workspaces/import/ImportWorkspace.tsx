@@ -18,24 +18,33 @@
  * 两种主题下中央都形成聚焦（`design/main.md` §3）。
  */
 
-import { onMount } from "solid-js";
+import { createEffect, onMount } from "solid-js";
+import { PhotoGrid, type PhotoGridStore } from "../../features/photo-grid/index.ts";
 import { t } from "../../i18n/index.ts";
 import type { ImportStore } from "./store.ts";
 import { LeftColumn } from "./LeftColumn.tsx";
 
 export interface ImportWorkspaceProps {
   store: ImportStore;
+  /** 照片网格的状态（在组装层创建，因为外壳的 `toolsbar` 也要读它的选择） */
+  grid: PhotoGridStore;
 }
 
 export function ImportWorkspace(props: ImportWorkspaceProps) {
   const store = props.store;
+  const grid = props.grid;
 
   onMount(() => {
     // 三个列表各拉一次；互不依赖，失败各自记状态（不阻塞其它面板）
     void store.reloadRecent();
     void store.reloadVolumes();
     void store.reloadRepositories();
+    // 网格的偏好（档位 / 按时间 / 时间片阈值）从设置里读回
+    void grid.hydrate();
   });
+
+  // 左列选中哪个目录，中列就跟着换（选中是**一个**状态，跨面板同步）
+  createEffect(() => grid.setSourceDir(store.selectedDir()));
 
   return (
     <div class="flex min-h-0 flex-1">
@@ -43,11 +52,9 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
         <LeftColumn store={store} />
       </aside>
 
-      {/* ── 中列：照片网格（B 批）──────────────────────── */}
+      {/* ── 中列：照片网格 ─────────────────────────────── */}
       <main class="flex min-w-0 flex-1 flex-col bg-surface-bar">
-        <div class="flex min-h-0 flex-1 items-center justify-center p-panel-pad">
-          <p class="text-fs-1 text-fg-3">{t("grid.pick_dir")}</p>
-        </div>
+        <PhotoGrid store={grid} />
       </main>
 
       {/* ── 右列：库（C 批）───────────────────────────── */}

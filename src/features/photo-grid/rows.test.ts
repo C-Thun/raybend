@@ -33,6 +33,7 @@ function item(name: string, takenAtMs: number | null = null): SourceItem {
     mtimeMs: null,
     takenAtMs,
     takenAtSource: takenAtMs === null ? null : "exif",
+    takenAtOffsetMin: takenAtMs === null ? null : CST,
   };
 }
 

@@ -97,6 +97,10 @@ pub struct SourceItemView {
     pub taken_at_ms: Option<i64>,
     /// `exif` / `filename` / `file_mtime`。
     pub taken_at_source: Option<String>,
+    /// 拍摄时间的时区偏移（分钟，东八区 = 480）。
+    /// `None` = 相机没写时区，毫秒是「墙上时间当 UTC」（见 M1-3 的口径），
+    /// 界面上要按 UTC 显示才对得上相机里的数字。
+    pub taken_at_offset_min: Option<i32>,
 }
 
 /// 一次目录列取的结果。
@@ -117,6 +121,7 @@ pub struct TimeEntryView {
     pub path: String,
     pub taken_at_ms: Option<i64>,
     pub taken_at_source: Option<String>,
+    pub taken_at_offset_min: Option<i32>,
 }
 
 /// 照片计数。
@@ -145,6 +150,7 @@ pub struct FileExifView {
     pub orientation: Option<i64>,
     pub taken_at_ms: Option<i64>,
     pub taken_at_source: Option<String>,
+    pub taken_at_offset_min: Option<i32>,
     /// 小写扩展名（不含点）。
     pub ext: Option<String>,
     /// `raw` / `image`。
@@ -291,6 +297,7 @@ fn item_view(item: source::SourceItem) -> SourceItemView {
         mtime_ms: item.mtime_ms,
         taken_at_ms: item.taken_at.map(|t| t.millis),
         taken_at_source: item.taken_at.map(|t| taken_source_code(t.source).to_string()),
+        taken_at_offset_min: item.taken_at.and_then(|t| t.offset_min),
     }
 }
 
@@ -319,7 +326,10 @@ pub async fn source_times(paths: Vec<String>) -> Result<Vec<TimeEntryView>, Stri
             .map(|entry| TimeEntryView {
                 path: entry.path.to_string_lossy().into_owned(),
                 taken_at_ms: entry.taken_at.map(|t| t.millis),
-                taken_at_source: entry.taken_at.map(|t| taken_source_code(t.source).to_string()),
+                taken_at_source: entry
+                    .taken_at
+                    .map(|t| taken_source_code(t.source).to_string()),
+                taken_at_offset_min: entry.taken_at.and_then(|t| t.offset_min),
             })
             .collect())
     })
@@ -355,6 +365,7 @@ pub async fn file_exif(path: String) -> Result<FileExifView, String> {
             orientation: data.orientation,
             taken_at_ms: taken.map(|t| t.millis),
             taken_at_source: taken.map(|t| taken_source_code(t.source).to_string()),
+            taken_at_offset_min: taken.and_then(|t| t.offset_min),
             ext: raybend::media::kind::extension(&file_name),
             kind: kind_code(kind).to_string(),
         })

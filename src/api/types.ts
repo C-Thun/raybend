@@ -66,6 +66,12 @@ export interface SourceItem {
   /** **快速兜底**的拍摄时间：来自文件名或 mtime；真相要用 `readSourceTimes` 补。 */
   takenAtMs: number | null;
   takenAtSource: TakenAtSource | null;
+  /**
+   * 拍摄时间的时区偏移（分钟，东八区 = 480）。
+   * `null` = 相机没写时区，`takenAtMs` 是「墙上时间当 UTC」（M1-3 的口径）——
+   * 显示与分组都要按 **UTC** 处理，才对得上相机里的数字。
+   */
+  takenAtOffsetMin: number | null;
 }
 
 /** 一次目录列取的结果。 */
@@ -84,6 +90,7 @@ export interface TimeEntry {
   path: string;
   takenAtMs: number | null;
   takenAtSource: TakenAtSource | null;
+  takenAtOffsetMin: number | null;
 }
 
 /** 照片计数（喂「已选择 N 张照片」）。 */
@@ -109,6 +116,7 @@ export interface FileExif {
   orientation: number | null;
   takenAtMs: number | null;
   takenAtSource: TakenAtSource | null;
+  takenAtOffsetMin: number | null;
   ext: string | null;
   kind: MediaKind;
 }
