@@ -56,16 +56,27 @@
   ② `#B6B0AF` 在 light 主题下只用于非文字用途；③ 接受现状。
 - **状态**：⏳ 待你决定
 
-### A5　删除 Pencil 连接测试标记（等你一句确认）
+### A5　删除 Pencil 连接测试标记
 
 - **背景**：为确认 Pencil MCP 能连上你打开的窗口，已在 `design/main.pen` 插入临时标记
   （节点 `ZZ_PENCIL_CONNECTION_TEST`，ID `D9ZRU`，黄色块 + 文字「Pencil MCP 连接测试」）。
-- **需要你做**：确认你已在画布上看到它 → 告知 Agent 删除。
-- **状态**：⏳ 等你确认（未确认前不删，以保留证据）
+- **你的答复（2026-09-15）**：「不保存就行了，无所谓」—— 无需 Agent 再调用删除接口。
+- **已转入「已完成」B3。**
 
 ---
 
 ## 二、已完成（保留记录）
+
+### B3　Pencil MCP 连接确认与测试标记处理
+
+- **事项**：确认 Pencil MCP 能操作你打开的画布。
+- **验证结果**（2026-09-15）：
+  - `pencil_get_app_state` 读到 `design/main.pen`（顶层 frame `bi8Au`，800×600，layout:none，白底、空）；
+    **`design/` 目录里实际不存在 `main.pen` 文件** —— 说明 `.pen` 由 Pencil 应用自身管理，不经文件系统暴露。
+  - `pencil_execute` 插入标记 `ZZ_PENCIL_CONNECTION_TEST`（`D9ZRU`，子文本 `M82h1s`），
+    截图确认已渲染到画布 —— **读写链路双向均通**。
+- **标记的处理**：你选择都不保存（标记不会被写入磁盘），无需 Agent 调用删除接口。
+- **状态**：✅ 已验证（人类目视截图确认）
 
 ### B1　Windows 侧 MSVC 与 Windows SDK 安装
 
@@ -95,3 +106,4 @@
 | --- | --- | --- | --- |
 | 2026-09-15 | B2 WSLg 窗口 | 人类目视确认 | ✅ 正常 |
 | 2026-09-15 | B1 Windows 工具链与 UNC 构建 | `vswhere` + SDK 目录 + `rustc -vV` + 实跑 `cargo build`/exe | ✅ 全部通过（细节见 B1） |
+| 2026-09-15 | B3 Pencil MCP 连接 | `pencil_get_app_state` + `pencil_execute` 插入标记 + 截图 | ✅ 读写链路双向均通（细节见 B3） |
