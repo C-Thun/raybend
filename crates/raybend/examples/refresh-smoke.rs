@@ -14,6 +14,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use raybend::media::diff::{self, DiskFile};
+use raybend::media::exif::{self, ExifData, TakenAt, TakenAtSource};
 use raybend::media::scan::{self, Cancel, ScanEvent, ScanOptions};
 use raybend::store::assets::{self, FileRow};
 use raybend::store::db::{CatalogDb, OpenOpts};
@@ -59,6 +60,80 @@ fn refresh(
     // 闭包会被送进写者线程，所以要把数据 move 进去（'static + Send）
     db.write(move |conn| assets::apply_diff(conn, &plan, &disk, now))
         .expect("落库失败")
+}
+
+/// 给库里每个资产填 EXIF（每个资产只读**一个**文件：优先位图）。
+///
+/// 两个设计点：
+/// * **优先读位图**（JPG 几 MB）而不是 RAW（几十 MB）—— 同一次拍摄两者的拍摄时间一致，
+///   读小文件快得多；只有「没有位图」的资产才去读 RAW。
+/// * **读文件在写锁之外**：EXIF 解析是慢活，不能占着单写者不放。
+fn fill_exif(db: &CatalogDb, root: &std::path::Path, now: i64) -> (usize, usize) {
+    let files = db.read(assets::list_files).expect("读文件表失败");
+
+    // 每个资产挑一个文件：位图优先，其次 RAW
+    let mut best: std::collections::HashMap<i64, (u8, &raybend::store::assets::FileRow)> =
+        std::collections::HashMap::new();
+    for f in &files {
+        let rank = match f.role.as_str() {
+            "bitmap" => 0u8,
+            "raw" => 1,
+            _ => 2,
+        };
+        best.entry(f.asset_id)
+            .and_modify(|e| {
+                if rank < e.0 {
+                    *e = (rank, f);
+                }
+            })
+            .or_insert((rank, f));
+    }
+
+    let jobs: Vec<(i64, std::path::PathBuf, String, Option<i64>)> = best
+        .values()
+        .map(|(_, f)| {
+            let name = f
+                .rel_path
+                .rsplit('/')
+                .next()
+                .unwrap_or(&f.rel_path)
+                .to_string();
+            (f.asset_id, root.join(&f.rel_path), name, f.mtime_ms)
+        })
+        .collect();
+
+    // 读文件与解析 EXIF 全部在写锁**之外**（慢活不该占着单写者）
+    let n = jobs.len();
+    let mut filled: Vec<(i64, ExifData, Option<TakenAt>)> = Vec::with_capacity(n);
+    let mut by_source: std::collections::HashMap<&'static str, usize> =
+        std::collections::HashMap::new();
+    for (asset_id, abs, name, mtime) in jobs {
+        let data = exif::read_file(&abs);
+        let taken = exif::resolve_taken_at(Some(&data), &name, mtime);
+        if let Some(t) = taken {
+            let key = match t.source {
+                TakenAtSource::Exif => "exif",
+                TakenAtSource::Filename => "filename",
+                TakenAtSource::FileMtime => "file_mtime",
+            };
+            *by_source.entry(key).or_default() += 1;
+        }
+        filled.push((asset_id, data, taken));
+    }
+    let with_exif = filled.iter().filter(|(_, d, _)| !d.is_empty()).count();
+
+    db.write(move |conn| {
+        for (asset_id, data, taken) in &filled {
+            assets::apply_exif(conn, *asset_id, data, *taken, now)?;
+        }
+        Ok(())
+    })
+    .expect("写 EXIF 失败");
+
+    let mut src: Vec<(&str, usize)> = by_source.into_iter().collect();
+    src.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
+    println!("时间来源  {src:?}");
+    (n, with_exif)
 }
 
 fn main() {
@@ -112,7 +187,36 @@ fn main() {
         }
     );
 
-    // ④ 库内统计
+    // ④ 填 EXIF（读文件在写锁之外）
+    let t = Instant::now();
+    let (n, with_exif) = fill_exif(&db, &root, now + 2000);
+    println!(
+        "EXIF      读了 {n} 个文件 · {with_exif} 个有 EXIF · 耗时 {:.0} 毫秒",
+        t.elapsed().as_secs_f64() * 1000.0
+    );
+    let sample: Vec<(String, Option<i64>, String)> = db
+        .read(|c| {
+            let mut stmt = c.prepare(
+                "SELECT camera_model, taken_at, coalesce(iso, 0) FROM assets
+                  WHERE taken_at IS NOT NULL ORDER BY taken_at LIMIT 3",
+            )?;
+            let rows = stmt.query_map([], |r| {
+                let t: Option<i64> = r.get(1)?;
+                let iso: i64 = r.get(2)?;
+                Ok((
+                    r.get::<_, Option<String>>(0)?.unwrap_or_default(),
+                    t.map(|ms| raybend::store::time::civil(ms).0),
+                    format!("ISO {iso}"),
+                ))
+            })?;
+            Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        })
+        .unwrap();
+    for (model, year, iso) in sample {
+        println!("          样例：{model} · {year:?} · {iso}");
+    }
+
+    // ⑤ 库内统计
     let (assets_n, files_n) = db.read(assets::counts).unwrap();
     println!("库内      资产 {assets_n} · 文件 {files_n}");
 

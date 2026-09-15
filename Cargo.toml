@@ -24,6 +24,11 @@ rusqlite = { version = "0.40", features = ["bundled"] }   # bundled：自带 SQL
 getrandom = "0.4"                                          # 库 ID 的随机段（见 LIBRARY.md §2.5）
 unicode-normalization = "0.1"                              # 路径 NFC 规范化（std 不提供）
 tempfile = "3"                                             # 仅测试用（临时目录）
+
+# 元数据抽取（M1-3）：纯 Rust 的 EXIF 读取器。RapidRAW 也用同一个
+# （它另引 little_exif 只用于**写回**，本项目不写 EXIF）。
+# 注意：只读 EXIF；RAW 的元数据将来走 rawler（FUTURE.md B8）。
+kamadak-exif = "0.6"
 # Windows 平台调用：文件身份（GetFileInformationByHandleEx）/ 驱动器类型（GetDriveTypeW）
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
 

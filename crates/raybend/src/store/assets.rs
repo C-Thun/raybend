@@ -346,6 +346,58 @@ fn find_asset_for_group(
     Ok(None)
 }
 
+/// 把一个资产的 EXIF 元数据写进去。
+///
+/// **只写「从文件推出来」的字段**：拍摄时间/器材/曝光/尺寸/朝向。
+/// 绝不碰用户自己写的（`author` / `description` / `rating` / 色标 / 标签）——
+/// 重新读一遍 EXIF 不该把用户的劳动冲掉。
+pub fn apply_exif(
+    conn: &Connection,
+    asset_id: i64,
+    exif: &crate::media::exif::ExifData,
+    taken: Option<crate::media::exif::TakenAt>,
+    now_ms: i64,
+) -> Result<()> {
+    let (taken_at, taken_src, offset) = match taken {
+        Some(t) => (
+            Some(t.millis),
+            Some(match t.source {
+                crate::media::exif::TakenAtSource::Exif => "exif",
+                crate::media::exif::TakenAtSource::Filename => "filename",
+                crate::media::exif::TakenAtSource::FileMtime => "file_mtime",
+            }),
+            t.offset_min,
+        ),
+        None => (None, None, None),
+    };
+    conn.execute(
+        "UPDATE assets SET
+            taken_at = ?1, taken_at_source = ?2, taken_at_offset_min = ?3,
+            camera_make = ?4, camera_model = ?5, lens = ?6,
+            focal_mm = ?7, f_number = ?8, exposure_ms = ?9, iso = ?10,
+            width = ?11, height = ?12, orientation = ?13, updated_at = ?14
+          WHERE id = ?15",
+        params![
+            taken_at,
+            taken_src,
+            offset,
+            exif.camera_make,
+            exif.camera_model,
+            exif.lens,
+            exif.focal_mm,
+            exif.f_number,
+            exif.exposure_ms,
+            exif.iso,
+            exif.width,
+            exif.height,
+            exif.orientation,
+            now_ms,
+            asset_id
+        ],
+    )?;
+    Ok(())
+}
+
 /// 一个资产下有哪些文件（按角色）。
 pub fn files_of_asset(conn: &Connection, asset_id: i64) -> Result<Vec<FileRow>> {
     Ok(list_files(conn)?
@@ -714,6 +766,96 @@ mod tests {
         round(&conn, &[disk("a.jpg", 1, 1)], T0);
         let row = list_files(&conn).unwrap()[0].row_id;
         assert!(reattach_file(&conn, row, 999, T0).is_err());
+    }
+
+    #[test]
+    fn apply_exif_writes_derived_fields_and_leaves_user_fields_alone() {
+        use crate::media::exif::{ExifData, TakenAt, TakenAtSource};
+        let conn = catalog();
+        round(&conn, &[disk("a.jpg", 1, 1)], T0);
+        let asset_id = list_files(&conn).unwrap()[0].asset_id;
+
+        // 用户先写了作者与描述（EXIF 不该冲掉它们）
+        conn.execute(
+            "UPDATE assets SET author = '张三', description = '海边的清晨' WHERE id = ?1",
+            [asset_id],
+        )
+        .unwrap();
+
+        let exif = ExifData {
+            camera_make: Some("Panasonic".into()),
+            camera_model: Some("DC-S5M2".into()),
+            lens: Some("LUMIX S 20-60".into()),
+            focal_mm: Some(35.0),
+            f_number: Some(5.6),
+            exposure_ms: Some(4.0),
+            iso: Some(800),
+            width: Some(6000),
+            height: Some(4000),
+            orientation: Some(1),
+            ..ExifData::default()
+        };
+        let taken = Some(TakenAt {
+            millis: T0,
+            offset_min: Some(480),
+            source: TakenAtSource::Exif,
+        });
+        apply_exif(&conn, asset_id, &exif, taken, T0 + 5).unwrap();
+
+        let row = conn
+            .query_row(
+                "SELECT taken_at, taken_at_source, taken_at_offset_min, camera_model, iso,
+                        width, height, orientation, author, description
+                   FROM assets WHERE id = ?1",
+                [asset_id],
+                |r| {
+                    Ok((
+                        r.get::<_, i64>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, i64>(2)?,
+                        r.get::<_, String>(3)?,
+                        r.get::<_, i64>(4)?,
+                        r.get::<_, i64>(5)?,
+                        r.get::<_, i64>(6)?,
+                        r.get::<_, i64>(7)?,
+                        r.get::<_, String>(8)?,
+                        r.get::<_, String>(9)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(row.0, T0);
+        assert_eq!(row.1, "exif", "来源要如实记下来");
+        assert_eq!(row.2, 480);
+        assert_eq!(row.3, "DC-S5M2");
+        assert_eq!((row.4, row.5, row.6, row.7), (800, 6000, 4000, 1));
+        assert_eq!(row.8, "张三", "用户写的作者不能被冲掉");
+        assert_eq!(row.9, "海边的清晨", "用户写的描述不能被冲掉");
+    }
+
+    #[test]
+    fn apply_exif_without_time_clears_stale_values() {
+        // 文件被换成另一张、新文件没有拍摄时间：旧时间不能留着骗人
+        use crate::media::exif::ExifData;
+        let conn = catalog();
+        round(&conn, &[disk("a.jpg", 1, 1)], T0);
+        let asset_id = list_files(&conn).unwrap()[0].asset_id;
+        conn.execute(
+            "UPDATE assets SET taken_at = 1, taken_at_source = 'exif' WHERE id = ?1",
+            [asset_id],
+        )
+        .unwrap();
+
+        apply_exif(&conn, asset_id, &ExifData::default(), None, T0 + 9).unwrap();
+        let (t, src): (Option<i64>, Option<String>) = conn
+            .query_row(
+                "SELECT taken_at, taken_at_source FROM assets WHERE id = ?1",
+                [asset_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(t, None);
+        assert_eq!(src, None);
     }
 
     #[test]

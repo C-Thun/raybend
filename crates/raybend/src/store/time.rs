@@ -78,6 +78,57 @@ pub fn format_human(millis: i64) -> String {
     format!("{y:04}-{mo:02}-{d:02} {h:02}:{mi:02}:{s:02} UTC")
 }
 
+/// 由年月日（公历）算「距 1970-01-01 的天数」。Howard Hinnant 的算法。
+fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400; // [0, 399]
+    let mp = i64::from(if m > 2 { m - 3 } else { m + 9 }); // [0, 11]，3 月为 0
+    let doy = (153 * mp + 2) / 5 + i64::from(d) - 1; // [0, 365]
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy; // [0, 146096]
+    era * 146_097 + doe - 719_468
+}
+
+/// 由「墙上时间」构造 Unix 毫秒（**当作 UTC**）。`civil` 的逆函数。
+///
+/// 这是给 EXIF 用的：`DateTimeOriginal` 是**不带时区**的墙上时间（当地钟表读数）。
+/// 超出范围的输入返回 `None`（而不是静默算出个垃圾值）——EXIF 里什么烂值都有。
+/// 秒可以是 60（漏斗秒）会被夹到 59。
+#[must_use]
+pub fn from_civil(y: i64, mo: u32, d: u32, hh: u32, mi: u32, ss: u32) -> Option<i64> {
+    if !(1..=12).contains(&mo) || d == 0 || d > 31 || hh > 23 || mi > 59 || ss > 60 {
+        return None;
+    }
+    let days = days_from_civil(y, mo, d);
+    let sod = i64::from(hh) * 3600 + i64::from(mi) * 60 + i64::from(ss.min(59));
+    let ms = days * 86_400_000 + sod * 1000;
+    // **日历往返校验**：`2026-02-31` 这种「格式合法、日历非法」的输入在 EXIF 与文件名里
+    // 都出现过。算出来的天数会被 `civil` 还原成 3 月 3 日 —— 一比对就知道是烂值。
+    // （只比年月日：秒可能是漏斗秒 60，上面已夹到 59。）
+    let (cy, cmo, cd, _, _, _) = civil(ms);
+    if (cy, cmo, cd) != (y, mo, d) {
+        return None;
+    }
+    Some(ms)
+}
+
+/// 由「带时区偏移的墙上时间」构造 Unix 毫秒。
+///
+/// `offset_min` 是该时刻**当地的 UTC 偏移**（东八区 = `480`，西五区 = `-300`），
+/// 与 EXIF 的 `OffsetTimeOriginal`（`+08:00`）对应。
+#[must_use]
+pub fn from_civil_with_offset(
+    y: i64,
+    mo: u32,
+    d: u32,
+    hh: u32,
+    mi: u32,
+    ss: u32,
+    offset_min: i32,
+) -> Option<i64> {
+    from_civil(y, mo, d, hh, mi, ss).map(|ms| ms - i64::from(offset_min) * 60_000)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -154,5 +205,93 @@ mod tests {
         // 1970 之前
         let before = UNIX_EPOCH - Duration::from_millis(1500);
         assert_eq!(from_system_time(before), -1500);
+    }
+
+    #[test]
+    fn from_civil_matches_the_epoch() {
+        assert_eq!(from_civil(1970, 1, 1, 0, 0, 0), Some(0));
+        assert_eq!(from_civil(1970, 1, 1, 0, 0, 1), Some(1000));
+        assert_eq!(from_civil(1970, 1, 2, 0, 0, 0), Some(86_400_000));
+        assert_eq!(
+            from_civil(1969, 12, 31, 23, 59, 59),
+            Some(-1000),
+            "1970 之前"
+        );
+        // 闰年 2 月 29 日
+        assert_eq!(from_civil(2024, 2, 29, 12, 0, 0), Some(1_709_208_000_000));
+    }
+
+    #[test]
+    fn from_civil_roundtrips_with_civil() {
+        // 拿真实照片里的时间戳来回跑一遍（含闰年、跨年、1970 前后）
+        for ms in [
+            0,
+            1_789_516_800_000,
+            1_709_208_000_000,
+            -1,
+            -2_208_988_800_000, // 1900-01-01
+            4_102_444_800_000,  // 2100-01-01
+        ] {
+            let (y, mo, d, hh, mi, ss) = civil(ms);
+            assert_eq!(
+                from_civil(y, mo, d, hh, mi, ss),
+                Some(ms - ms.rem_euclid(1000)),
+                "{ms}"
+            );
+        }
+    }
+
+    #[test]
+    fn from_civil_rejects_garbage() {
+        // EXIF 里什么烂值都有：宁可返回 None 也不算出个垃圾时间
+        assert_eq!(from_civil(2026, 0, 1, 0, 0, 0), None, "月份 0");
+        assert_eq!(from_civil(2026, 13, 1, 0, 0, 0), None, "月份 13");
+        assert_eq!(from_civil(2026, 1, 0, 0, 0, 0), None, "日 0");
+        assert_eq!(from_civil(2026, 1, 32, 0, 0, 0), None, "日 32");
+        assert_eq!(from_civil(2026, 1, 1, 24, 0, 0), None, "时 24");
+        assert_eq!(from_civil(2026, 1, 1, 0, 60, 0), None, "分 60");
+        assert_eq!(from_civil(2026, 1, 1, 0, 0, 61), None, "秒 61");
+        // 漏斗秒 60 允许（夹到 59）
+        assert_eq!(
+            from_civil(2026, 1, 1, 0, 0, 60),
+            from_civil(2026, 1, 1, 0, 0, 59)
+        );
+        // 0 年、负年份不该 panic
+        assert!(from_civil(0, 1, 1, 0, 0, 0).is_some());
+        assert!(from_civil(-1000, 6, 15, 12, 30, 0).is_some());
+    }
+
+    #[test]
+    fn from_civil_checks_the_real_calendar() {
+        // 格式合法但日历非法 —— EXIF 与文件名里都真的出现过这种值
+        assert_eq!(from_civil(2026, 2, 31, 0, 0, 0), None, "2 月没有 31 日");
+        assert_eq!(from_civil(2026, 2, 30, 0, 0, 0), None);
+        assert_eq!(from_civil(2026, 4, 31, 0, 0, 0), None, "4 月只有 30 天");
+        assert_eq!(from_civil(2026, 2, 29, 0, 0, 0), None, "2026 不是闰年");
+        assert!(from_civil(2024, 2, 29, 0, 0, 0).is_some(), "2024 是闰年");
+        assert!(
+            from_civil(2000, 2, 29, 0, 0, 0).is_some(),
+            "2000 是闰年（能被 400 整除）"
+        );
+        assert_eq!(
+            from_civil(1900, 2, 29, 0, 0, 0),
+            None,
+            "1900 不是闰年（能被 100 整除）"
+        );
+    }
+
+    #[test]
+    fn offset_conversion_points_the_right_way() {
+        // 东八区 08:00 的墙上时间 = UTC 00:00
+        let utc = from_civil_with_offset(2026, 9, 16, 8, 0, 0, 480).unwrap();
+        assert_eq!(utc, from_civil(2026, 9, 16, 0, 0, 0).unwrap());
+        // 西五区 08:00 = UTC 13:00
+        let utc = from_civil_with_offset(2026, 9, 16, 8, 0, 0, -300).unwrap();
+        assert_eq!(utc, from_civil(2026, 9, 16, 13, 0, 0).unwrap());
+        // 偏移为 0 时与不带偏移完全一致
+        assert_eq!(
+            from_civil_with_offset(2026, 9, 16, 8, 0, 0, 0),
+            from_civil(2026, 9, 16, 8, 0, 0)
+        );
     }
 }
