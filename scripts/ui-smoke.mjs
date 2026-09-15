@@ -17,6 +17,9 @@
  *   3. 控制台无 error / warning
  *   4. 外壳规则（若页面上有工作流控件）：工具行**跟着工作流显隐**、
  *      无选中时「批量排除」是禁用态（`DESIGN.md` §12.2、`design/main.md` §2.3）
+ *   5. 分段（Ark `Splitter`）的面板高度不为 0
+ *   6. **导入工作区**（总会导航到应用外壳跑一遍）：右列库区有宽度、
+ *      没勾选目录时「导入」禁用且给出原因、建库弹窗能打开且空路径时不可提交
  *
  * 用法：
  *   pnpm dev                       # 另开一个终端起开发服务器
@@ -155,37 +158,47 @@ try {
   const mounted = await waitForContent(send);
   if (!mounted) problems.push("等待 30 秒后 #root 仍为空（白屏）");
 
-  for (const event of events) {
-    if (event.method === "Runtime.exceptionThrown") {
-      const details = event.params.exceptionDetails;
-      problems.push(
-        `未捕获异常：${details.exception?.description ?? details.text}`,
-      );
+  /**
+   * 把浏览器日志里的「未捕获异常 / console.error / console.warning」收进 problems。
+   *
+   * 抽成函数是因为脚本要访问**两个**页面（厨房水槽 + 应用外壳），
+   * 每个页面加载后都得收一次 —— 只收第一页会漏掉外壳页的真实报错。
+   */
+  const collectConsoleProblems = (list) => {
+    for (const event of list) {
+      if (event.method === "Runtime.exceptionThrown") {
+        const details = event.params.exceptionDetails;
+        problems.push(
+          `未捕获异常：${details.exception?.description ?? details.text}`,
+        );
+      }
+      if (
+        event.method === "Runtime.consoleAPICalled" &&
+        ["error", "warning"].includes(event.params.type)
+      ) {
+        problems.push(
+          `console.${event.params.type}：${event.params.args
+            .map((arg) => arg.description ?? JSON.stringify(arg.value))
+            .join(" ")}`,
+        );
+      }
+      if (
+        event.method === "Log.entryAdded" &&
+        event.params.entry.level === "error" &&
+        /*
+         * 浏览器自己会去要 `favicon.ico`，404 与页面无关（本项目目前真没放 favicon），
+         * 而这条日志里**不带 URL**，所以只能按状态码放行 —— 真正的模块加载失败
+         * 会在下面以「未捕获异常：Failed to fetch dynamically imported module」的形式出现，
+         * 不会因为这条放行而被掩盖。
+         */
+        !String(event.params.entry.text).includes("404")
+      ) {
+        problems.push(`浏览器日志：${event.params.entry.text}`);
+      }
     }
-    if (
-      event.method === "Runtime.consoleAPICalled" &&
-      ["error", "warning"].includes(event.params.type)
-    ) {
-      problems.push(
-        `console.${event.params.type}：${event.params.args
-          .map((arg) => arg.description ?? JSON.stringify(arg.value))
-          .join(" ")}`,
-      );
-    }
-    if (
-      event.method === "Log.entryAdded" &&
-      event.params.entry.level === "error" &&
-      /*
-       * 浏览器自己会去要 `favicon.ico`，404 与页面无关（本项目目前真没放 favicon），
-       * 而这条日志里**不带 URL**，所以只能按状态码放行 —— 真正的模块加载失败
-       * 会在下面以「未捕获异常：Failed to fetch dynamically imported module」的形式出现，
-       * 不会因为这条放行而被掩盖。
-       */
-      !String(event.params.entry.text).includes("404")
-    ) {
-      problems.push(`浏览器日志：${event.params.entry.text}`);
-    }
-  }
+  };
+
+  collectConsoleProblems(events);
 
   const snapshot = await evaluate(`(() => {
     const root = document.documentElement;
@@ -373,9 +386,126 @@ try {
     }
   }
 
+
+  /*
+   * 导入工作区（M1-5）：三列里的**右列库区** + 建库弹窗。
+   *
+   * 为什么值得断言：右列是这一轮新加的，而它有两种「看起来没事」的坏法 ——
+   * 面板宽度塌成 0（Ark 只给变量，尺寸要自己接），或者选中统计/按钮可用性算错
+   * （左边没勾选目录时「导入」**必须**是禁用的）。
+   * 页面上没有导入工作区时返回 null（陈列室等其它路由）。
+   */
+  /*
+   * 导入工作区在**应用外壳**页上（厨房水槽里没有它），所以这里自己导航过去 ——
+   * 脚本无论被传入哪个 URL，都会把两页都过一遍。
+   */
+  const appUrl = new URL("/", url).href;
+  await send("Page.navigate", { url: appUrl });
+  if (!(await waitForContent(send))) {
+    problems.push("导航到应用外壳后 30 秒仍没渲染出内容（白屏）");
+  }
+  const workspaceEventsFrom = events.length;
+
+  const workspace = await evaluate(`(async () => {
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const aside = [...document.querySelectorAll("aside")].find((el) =>
+      el.textContent.includes("新建库"),
+    );
+    if (!aside) return null;
+
+    const buttons = [...aside.querySelectorAll("button")];
+    const importButton = buttons.find((el) => el.textContent.trim() === "导入");
+    const createButton = buttons.find((el) => el.textContent.includes("新建库"));
+    const text = aside.textContent.replace(/\\s+/g, " ");
+
+    const result = {
+      width: Math.round(aside.getBoundingClientRect().width),
+      emptyState: text.includes("还没有库"),
+      summary: /已选择\\s*0\\s*个目录/.test(text),
+      avoidDuplicates: text.includes("避免重复导入"),
+      hint: text.includes("先在左边勾选目录"),
+      importDisabled: importButton ? importButton.disabled : null,
+      createFound: Boolean(createButton),
+      dialog: null,
+    };
+
+    // 点「+ 新建库」——弹窗必须真的开（Portal 出去，role=dialog）
+    if (createButton) {
+      createButton.click();
+      await sleep(400);
+      const dialog = document.querySelector('[role="dialog"]');
+      if (dialog) {
+        const dialogText = dialog.innerText.replace(/\\s+/g, " ").trim();
+        const submit = [...dialog.querySelectorAll("button")].find(
+          (el) => el.textContent.trim() === "新建库",
+        );
+        result.dialog = {
+          text: dialogText.slice(0, 120),
+          hasNameField: dialogText.includes("名称"),
+          hasPathField: dialogText.includes("库根目录"),
+          hasIntro: dialogText.includes("catalog.db"),
+          submitDisabled: submit ? submit.disabled : null,
+          // 空路径时**没有**判定行（画布上就是这个口径）
+          noHintYet: !dialogText.includes("将登记为已有库"),
+        };
+        // 关掉，别影响后面的断言
+        const cancel = [...dialog.querySelectorAll("button")].find(
+          (el) => el.textContent.trim() === "取消",
+        );
+        if (cancel) cancel.click();
+        await sleep(250);
+        result.dialogClosed = document.querySelector('[role="dialog"]') === null;
+      }
+    }
+    return result;
+  })()`);
+
+  if (workspace) {
+    if (workspace.width <= 0) {
+      problems.push("右列（库）宽度为 0 —— 面板尺寸没接上");
+    }
+    if (!workspace.createFound) {
+      problems.push("右列里找不到「+ 新建库」入口");
+    }
+    if (!workspace.avoidDuplicates) {
+      problems.push("右列里没有「避免重复导入」复选框");
+    }
+    if (workspace.importDisabled !== true) {
+      problems.push(
+        `左边一个目录都没勾选时，「导入」按钮必须禁用（实际 disabled=${workspace.importDisabled}）`,
+      );
+    }
+    if (!workspace.hint) {
+      problems.push("「导入」禁用时没有给出一句原因（先在左边勾选目录、再选一个库）");
+    }
+    if (workspace.emptyState !== true && !workspace.summary) {
+      problems.push("右列既没有库列表的形态，也没有空态文案");
+    }
+    if (workspace.createFound) {
+      if (workspace.dialog) {
+        if (!workspace.dialog.hasNameField) problems.push("建库弹窗里没有「名称」字段");
+        if (!workspace.dialog.hasPathField) problems.push("建库弹窗里没有「库根目录」字段");
+        if (workspace.dialog.submitDisabled !== true) {
+          problems.push("建库弹窗：路径为空时「新建库」必须禁用");
+        }
+        if (!workspace.dialog.noHintYet) {
+          problems.push("建库弹窗：路径为空时不该出现判定行");
+        }
+        if (workspace.dialogClosed === false) {
+          problems.push("建库弹窗点了「取消」没关上");
+        }
+      } else {
+        problems.push("点了「+ 新建库」但弹窗没出现");
+      }
+    }
+  }
+
+  // 外壳页自己加载出来的报错也要算上
+  collectConsoleProblems(events.slice(workspaceEventsFrom));
+
   console.log(
     JSON.stringify(
-      { url, chrome: chromePath, snapshot, interact, shell, splitter, problems },
+      { url, chrome: chromePath, snapshot, interact, shell, splitter, workspace, problems },
       null,
       2,
     ),

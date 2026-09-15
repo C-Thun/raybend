@@ -45,6 +45,9 @@ export interface ImportApi {
     recursive: boolean,
   ) => Promise<{ photos: number; skipped: number; truncated: boolean }>;
   listRepositories: () => Promise<RepositoryView[]>;
+  remountRepository: (repositoryId: string) => Promise<RepositoryView>;
+  getSetting: (key: string) => Promise<string | null>;
+  setSetting: (key: string, value: string) => Promise<void>;
   listDirs: (path: string) => Promise<DirEntry[]>;
   listVolumes: () => Promise<Volume[]>;
 }
@@ -105,6 +108,22 @@ export interface ImportStore {
   selectedRepository: () => RepositoryView | null;
   /** 替换一个库的视图（建库/重挂载后局部刷新，不必重载整张表） */
   upsertRepository: (view: RepositoryView) => void;
+  /** 正在重新查找的库 id */
+  remountingId: () => string | null;
+  /** 重新查找失败的原因（库 id → 文案；成功则清掉） */
+  remountErrors: () => Readonly<Record<string, string>>;
+  /** 对所有登记路径重新查找一次（离线徽标点它） */
+  remount: (repositoryId: string) => Promise<void>;
+
+  /* ── 导入偏好 ─────────────────────────────── */
+  /**
+   * 「避免重复导入」——默认**开**（`REPOSITORY.md` §4.3）。
+   * 它跨会话记住（放 `app.db` 的设置表），因为这是用户的稳定偏好。
+   */
+  avoidDuplicates: () => boolean;
+  setAvoidDuplicates: (value: boolean) => void;
+  /** 从设置里读回导入偏好（工作区挂载时调一次） */
+  hydratePreferences: () => Promise<void>;
 }
 
 export interface ImportStoreDeps {
@@ -114,6 +133,9 @@ export interface ImportStoreDeps {
 }
 
 export const DEFAULT_RECENT_LIMIT = 50;
+
+/** 设置键：「避免重复导入」（与 `src/api/db.ts` 的 `SETTING_KEYS` 一致） */
+const IMPORT_AVOID_DUPLICATES_KEY = "import.avoid_duplicates";
 
 export function createImportStore(deps: ImportStoreDeps): ImportStore {
   const limit = deps.recentLimit ?? DEFAULT_RECENT_LIMIT;
@@ -146,6 +168,11 @@ export function createImportStore(deps: ImportStoreDeps): ImportStore {
   const [selectedRepositoryId, setSelectedRepositoryId] = createSignal<
     string | null
   >(null);
+  const [remountingId, setRemountingId] = createSignal<string | null>(null);
+  const [remountErrors, setRemountErrors] = createSignal<Record<string, string>>(
+    {},
+  );
+  const [avoidDuplicates, setAvoidDuplicatesSignal] = createSignal(true);
 
   /* ══════════════════════════════════════════════════════════
    * 选中
@@ -277,6 +304,60 @@ export function createImportStore(deps: ImportStoreDeps): ImportStore {
     setRecentDirs((prev) => prev.filter((row) => !samePath(row.path, path)));
   }
 
+  async function remount(repositoryId: string): Promise<void> {
+    if (remountingId() !== null) return;
+    setRemountingId(repositoryId);
+    try {
+      const view = await deps.api.remountRepository(repositoryId);
+      upsertRepository(view);
+      clearRemountError(repositoryId);
+      // 没找到**不是错误**（`REPOSITORY.md` §2.3），但要说清楚
+      if (!view.online) {
+        setRemountError(
+          repositoryId,
+          `未找到该库（已试过 ${view.triedPaths} 处已登记路径）`,
+        );
+      }
+    } catch (error) {
+      setRemountError(repositoryId, errorText(error));
+    } finally {
+      setRemountingId(null);
+    }
+  }
+
+  function setRemountError(repositoryId: string, message: string): void {
+    setRemountErrors((prev) => ({ ...prev, [repositoryId]: message }));
+  }
+
+  function clearRemountError(repositoryId: string): void {
+    setRemountErrors((prev) => {
+      if (!(repositoryId in prev)) return prev;
+      const next = { ...prev };
+      delete next[repositoryId];
+      return next;
+    });
+  }
+
+  const setAvoidDuplicates = (value: boolean): void => {
+    if (value === avoidDuplicates()) return;
+    setAvoidDuplicatesSignal(value);
+    void deps.api
+      .setSetting(IMPORT_AVOID_DUPLICATES_KEY, value ? "1" : "0")
+      .catch(() => {
+        // 存不下偏好不影响本次使用
+      });
+  };
+
+  async function hydratePreferences(): Promise<void> {
+    try {
+      const raw = await deps.api.getSetting(IMPORT_AVOID_DUPLICATES_KEY);
+      if (raw === null) return;
+      setAvoidDuplicatesSignal(raw === "1" || raw.toLowerCase() === "true");
+    } catch {
+      // 读不到就用默认（开）
+    }
+  }
+
   /* ══════════════════════════════════════════════════════════
    * 来源树的第一层
    * ══════════════════════════════════════════════════════════ */
@@ -366,6 +447,12 @@ export function createImportStore(deps: ImportStoreDeps): ImportStore {
     selectRepository,
     selectedRepository,
     upsertRepository,
+    remountingId,
+    remountErrors,
+    remount,
+    avoidDuplicates,
+    setAvoidDuplicates,
+    hydratePreferences,
   };
 }
 

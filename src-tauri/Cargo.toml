@@ -36,6 +36,7 @@ tauri = { version = "2", features = [] }
 raybend.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+tauri-plugin-dialog = "2.7.3"
 
 [lints]
 workspace = true

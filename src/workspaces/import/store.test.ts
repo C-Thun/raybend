@@ -33,6 +33,12 @@ interface FakeState {
   failCounts: boolean;
   /** 让「枚列驱动器」报错 */
   failVolumes: boolean;
+  /** 重挂载能不能找到库 */
+  remountFinds: boolean;
+  /** 让重挂载报错 */
+  failRemount: boolean;
+  /** 设置表 */
+  settings: Map<string, string>;
 }
 
 function fakeApi(overrides: Partial<FakeState> = {}) {
@@ -47,6 +53,9 @@ function fakeApi(overrides: Partial<FakeState> = {}) {
     failListRecent: false,
     failCounts: false,
     failVolumes: false,
+    remountFinds: false,
+    failRemount: false,
+    settings: new Map(),
     ...overrides,
   };
   const pending: Array<() => void> = [];
@@ -100,6 +109,19 @@ function fakeApi(overrides: Partial<FakeState> = {}) {
     async listRepositories() {
       state.calls.push("listRepositories");
       return [...state.repositories];
+    },
+    async remountRepository(repositoryId) {
+      state.calls.push(`remount:${repositoryId}`);
+      if (state.failRemount) throw new Error("重挂载炸了");
+      const found = state.repositories.find((row) => row.id === repositoryId);
+      if (!found) throw new Error(`没有这个库：${repositoryId}`);
+      return { ...found, online: state.remountFinds };
+    },
+    async getSetting(key) {
+      return state.settings.get(key) ?? null;
+    },
+    async setSetting(key, value) {
+      state.settings.set(key, value);
     },
     async listDirs(path) {
       state.calls.push(`listDirs:${path}`);
@@ -399,6 +421,52 @@ test("库：重新加载后选中的库没了，就把选中清掉", async () =>
   await store.reloadRepositories();
   assert.equal(store.selectedRepositoryId(), null);
   assert.equal(store.selectedRepository(), null);
+});
+
+test("重挂载：找到就转在线并刷新视图；找不到只记一句提示（不是错误）", async () => {
+  const { api, state } = fakeApi({
+    repositories: [{ ...repository("a"), online: false }],
+  });
+  const store = createImportStore({ api });
+  await store.reloadRepositories();
+
+  await store.remount("a");
+  assert.equal(store.remountingId(), null, "结束后要给放掉转圈状态");
+  assert.match(store.remountErrors()["a"] ?? "", /未找到该库/);
+  assert.equal(store.repositories()[0].online, false);
+
+  state.remountFinds = true;
+  await store.remount("a");
+  assert.equal(store.repositories()[0].online, true, "找到了就转在线");
+  assert.equal(store.remountErrors()["a"], undefined, "成功要把上次的提示清掉");
+});
+
+test("重挂载失败（命令报错）：错误记在那一张卡片上，不影响其它库", async () => {
+  const { api, state } = fakeApi({
+    repositories: [{ ...repository("a"), online: false }, repository("b")],
+  });
+  state.failRemount = true;
+  const store = createImportStore({ api });
+  await store.reloadRepositories();
+
+  await store.remount("a");
+  assert.match(store.remountErrors()["a"] ?? "", /重挂载炸了/);
+  assert.equal(store.remountErrors()["b"], undefined);
+  assert.equal(store.remountingId(), null);
+});
+
+test("避免重复导入：默认开、写回设置、能读回", async () => {
+  const { api, state } = fakeApi();
+  const store = createImportStore({ api });
+
+  assert.equal(store.avoidDuplicates(), true, "默认勾上（REPOSITORY.md §4.3）");
+  store.setAvoidDuplicates(false);
+  await flush();
+  assert.equal(state.settings.get("import.avoid_duplicates"), "0");
+
+  const reopened = createImportStore({ api });
+  await reopened.hydratePreferences();
+  assert.equal(reopened.avoidDuplicates(), false);
 });
 
 /* ══════════════════════════════════════════════════════════════

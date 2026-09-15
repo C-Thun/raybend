@@ -26,6 +26,8 @@ pub const MAIN_WINDOW_LABEL: &str = "main";
 /// Tauri 运行时初始化失败时 panic —— 此时进程已无法提供任何功能。
 pub fn run() {
     tauri::Builder::default()
+        // 目录选择器（建库弹窗的「浏览…」）。官方插件：Windows 走原生对话框。
+        .plugin(tauri_plugin_dialog::init())
         .manage(db::DbState::default())
         .manage(thumbs::SourcesThumbs::default())
         .invoke_handler(tauri::generate_handler![
