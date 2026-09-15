@@ -196,14 +196,21 @@ enum MountKind {
 }
 
 /// 一条挂载记录（Linux `/proc/mounts` 的行）。
+///
+/// `pub(crate)`：`store::volumes` 要复用它来枚列「可选来源」（驱动器/挂载点）——
+/// 解析规则只能有一份，两份必然漂移。
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct MountEntry {
-    mount_point: String,
-    fs_type: String,
+pub(crate) struct MountEntry {
+    /// 设备名（`/dev/sda1`、`C:\` 等）。
+    pub(crate) device: String,
+    /// 挂载点。
+    pub(crate) mount_point: String,
+    /// 文件系统类型（小写原样）。
+    pub(crate) fs_type: String,
 }
 
 /// 网络文件系统类型（Linux）。
-const NETWORK_FS_TYPES: &[&str] = &[
+pub(crate) const NETWORK_FS_TYPES: &[&str] = &[
     "nfs",
     "nfs4",
     "cifs",
@@ -222,21 +229,24 @@ const NETWORK_FS_TYPES: &[&str] = &[
 ];
 
 /// 本地文件系统类型（**白名单**：不在这两个表里的都算 Unknown → 不报警）。
-const LOCAL_FS_TYPES: &[&str] = &[
+pub(crate) const LOCAL_FS_TYPES: &[&str] = &[
     "ext2", "ext3", "ext4", "btrfs", "xfs", "f2fs", "jfs", "reiserfs", "zfs", "bcachefs",
     "overlay", "tmpfs", "devtmpfs", "vfat", "exfat", "ntfs", "ntfs3", "fuseblk", "hfs", "hfsplus",
     "apfs", "squashfs", "ramfs", "ubifs",
 ];
 
 /// 解析 `/proc/mounts` 风格的内容。
-fn parse_mounts(text: &str) -> Vec<MountEntry> {
+///
+/// `pub(crate)`：`store::volumes` 的目录枚列也用它（见 [`MountEntry`]）。
+pub(crate) fn parse_mounts(text: &str) -> Vec<MountEntry> {
     text.lines()
         .filter_map(|line| {
             let mut it = line.split_whitespace();
-            let _device = it.next()?;
+            let device = it.next()?;
             let point = it.next()?;
             let fs = it.next()?;
             Some(MountEntry {
+                device: device.to_string(),
                 // 挂载点里的转义（\040 空格等）按原样保留即可 —— 极少见，且匹配是前缀式的
                 mount_point: point.to_string(),
                 fs_type: fs.to_string(),

@@ -80,6 +80,7 @@ pub struct Migration {
 ///
 /// * v1 `init`：库注册表 / 路径 / 设置 / 任务队列 / 应用元信息
 /// * v2 `tags`：**标签词典**（跨库公用，BROWSE.md §7.1）
+/// * v3 `recent_dirs`：最近导入过的目录（design/main.md §3.1.1 的「最近」）
 pub const APP_MIGRATIONS: &[Migration] = &[
     Migration {
         version: 1,
@@ -90,6 +91,11 @@ pub const APP_MIGRATIONS: &[Migration] = &[
         version: 2,
         name: "tags",
         sql: include_str!("migrations/app_0002_tags.sql"),
+    },
+    Migration {
+        version: 3,
+        name: "recent_dirs",
+        sql: include_str!("migrations/app_0003_recent_dirs.sql"),
     },
 ];
 
@@ -448,8 +454,8 @@ mod tests {
     fn fresh_app_db_applies_all_migrations() {
         let mut conn = mem();
         let out = apply(&mut conn, DbKind::App, Backups::none(), 1_789_516_800_000).unwrap();
-        assert_eq!((out.from, out.to), (0, 2));
-        assert_eq!(out.applied, vec![1, 2]);
+        assert_eq!((out.from, out.to), (0, 3));
+        assert_eq!(out.applied, vec![1, 2, 3]);
         assert!(out.snapshot.is_none(), "全新库不需要快照");
         assert!(out.changed());
 
@@ -461,6 +467,7 @@ mod tests {
             "jobs",
             "app_meta",
             "tags",
+            "recent_dirs",
         ] {
             let n: i64 = conn
                 .query_row(
@@ -504,6 +511,48 @@ mod tests {
                 .unwrap();
             assert_eq!(n, 1, "缺表：{table}");
         }
+    }
+
+    #[test]
+    fn existing_app_db_upgrades_from_v2_to_v3_without_losing_data() {
+        // 真实升级路径：一个已经跑过 v1/v2 的 app.db（用户上一步装的就是这个版本）
+        let mut conn = mem();
+        let old = apply_list(
+            &mut conn,
+            DbKind::App,
+            &APP_MIGRATIONS[..2],
+            Backups::none(),
+            1_789_516_800_000,
+        )
+        .unwrap();
+        assert_eq!((old.from, old.to), (0, 2));
+        conn.execute(
+            "INSERT INTO settings(key, value, updated_at) VALUES ('theme', '\"dark\"', 1)",
+            [],
+        )
+        .unwrap();
+
+        let out = apply(&mut conn, DbKind::App, Backups::none(), 1_789_516_800_001).unwrap();
+        assert_eq!((out.from, out.to), (2, 3), "只补跑 v3");
+        assert_eq!(out.applied, vec![3]);
+
+        // 老数据还在
+        let value: String = conn
+            .query_row("SELECT value FROM settings WHERE key = 'theme'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(value, "\"dark\"");
+        // 新表能用
+        conn.execute(
+            "INSERT INTO recent_dirs(path, path_folded, include_subdirs, used_at, use_count)
+             VALUES ('/photos', '/photos', 0, 1, 1)",
+            [],
+        )
+        .unwrap();
+        // 没被重复执行（不然这里会因主键冲突报错）
+        let again = apply(&mut conn, DbKind::App, Backups::none(), 0).unwrap();
+        assert_eq!(again.applied, Vec::<i64>::new());
     }
 
     #[test]
