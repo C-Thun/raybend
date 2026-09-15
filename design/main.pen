@@ -425,7 +425,8 @@
                       "fill": "$fg-2",
                       "content": "浏览",
                       "fontFamily": "Inter",
-                      "fontSize": 13
+                      "fontSize": 13,
+                      "fontWeight": "normal"
                     }
                   ]
                 },
@@ -459,7 +460,8 @@
                       "fill": "$fg-2",
                       "content": "编辑",
                       "fontFamily": "Inter",
-                      "fontSize": 13
+                      "fontSize": 13,
+                      "fontWeight": "normal"
                     }
                   ]
                 },
@@ -493,7 +495,8 @@
                       "fill": "$fg-2",
                       "content": "导出",
                       "fontFamily": "Inter",
-                      "fontSize": 13
+                      "fontSize": 13,
+                      "fontWeight": "normal"
                     }
                   ]
                 }
@@ -4838,7 +4841,8 @@
                       "fill": "$fg-2",
                       "content": "浏览",
                       "fontFamily": "Inter",
-                      "fontSize": 13
+                      "fontSize": 13,
+                      "fontWeight": "normal"
                     }
                   ]
                 },
@@ -4872,7 +4876,8 @@
                       "fill": "$fg-2",
                       "content": "编辑",
                       "fontFamily": "Inter",
-                      "fontSize": 13
+                      "fontSize": 13,
+                      "fontWeight": "normal"
                     }
                   ]
                 },
@@ -4906,7 +4911,8 @@
                       "fill": "$fg-2",
                       "content": "导出",
                       "fontFamily": "Inter",
-                      "fontSize": 13
+                      "fontSize": 13,
+                      "fontWeight": "normal"
                     }
                   ]
                 }
@@ -7619,7 +7625,8 @@
                       "fill": "$fg-2",
                       "content": "紧凑",
                       "fontFamily": "Inter",
-                      "fontSize": 12
+                      "fontSize": 12,
+                      "fontWeight": "normal"
                     }
                   ]
                 },
@@ -7822,7 +7829,8 @@
                       "fill": "$fg-2",
                       "content": "浏览",
                       "fontFamily": "Inter",
-                      "fontSize": 13
+                      "fontSize": 13,
+                      "fontWeight": "normal"
                     }
                   ]
                 },
@@ -7856,7 +7864,8 @@
                       "fill": "$fg-2",
                       "content": "编辑",
                       "fontFamily": "Inter",
-                      "fontSize": 13
+                      "fontSize": 13,
+                      "fontWeight": "normal"
                     }
                   ]
                 },
@@ -7890,7 +7899,8 @@
                       "fill": "$fg-2",
                       "content": "导出",
                       "fontFamily": "Inter",
-                      "fontSize": 13
+                      "fontSize": 13,
+                      "fontWeight": "normal"
                     }
                   ]
                 }
