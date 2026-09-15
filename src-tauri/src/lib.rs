@@ -7,6 +7,8 @@
 //! M0-2 的渲染可行性验证会在这里另开一个 `spike-viewport` 调试窗口，
 //! 主窗口保持不透明、不受影响。
 
+pub mod db;
+
 /// 主窗口标签（与 `tauri.conf.json` 的窗口配置、`capabilities/default.json` 对应）。
 pub const MAIN_WINDOW_LABEL: &str = "main";
 
@@ -17,6 +19,21 @@ pub const MAIN_WINDOW_LABEL: &str = "main";
 /// Tauri 运行时初始化失败时 panic —— 此时进程已无法提供任何功能。
 pub fn run() {
     tauri::Builder::default()
+        .manage(db::DbState::default())
+        .invoke_handler(tauri::generate_handler![
+            db::app_paths,
+            db::db_status,
+            db::setting_get,
+            db::setting_set
+        ])
+        .setup(|app| {
+            use tauri::Manager;
+            // 先把数据底座打开（命令也可以懒打开，这里做一次是为了启动日志能立刻反映问题）。
+            // **失败不阻止启动**：窗口该出来还是要出来，错误让前端在需要时再报。
+            let state = app.state::<db::DbState>();
+            db::warm_up(app.handle(), &state);
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("启动 Tauri 应用失败");
 }

@@ -13,11 +13,13 @@
 //! - [`raw`]：RAW 解码，后端可插拔（M0-3）
 //! - [`thumbnail`]：缩略图与预览（M0-5）
 //! - [`render`]：wgpu 渲染与视口变换（M0-2）
+//! - [`store`]：数据底座（SQLite 打开/迁移/备份/写并发，M1-2）
 
 pub mod index;
 pub mod media;
 pub mod raw;
 pub mod render;
+pub mod store;
 pub mod thumbnail;
 
 mod error;

@@ -19,6 +19,14 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 
+# 数据底座（M1-2）
+rusqlite = { version = "0.40", features = ["bundled"] }   # bundled：自带 SQLite 源码，Windows 上不依赖系统 sqlite
+getrandom = "0.4"                                          # 库 ID 的随机段（见 LIBRARY.md §2.5）
+unicode-normalization = "0.1"                              # 路径 NFC 规范化（std 不提供）
+tempfile = "3"                                             # 仅测试用（临时目录）
+# Windows 平台调用：文件身份（GetFileInformationByHandleEx）/ 驱动器类型（GetDriveTypeW）
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("cargo-clippy"))'] }
 

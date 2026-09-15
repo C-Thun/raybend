@@ -1,0 +1,34 @@
+//! 数据底座：本地 SQLite 库的打开、迁移、备份与写并发。
+//!
+//! 见 `AGENTS.md` §6.4（存储架构）、§7.1–§7.3，以及 `LIBRARY.md`（库与导入规格）。
+//!
+//! 本模块只依赖 `rusqlite` 与标准库：**不认识 Tauri、不认识渲染**。
+//! 路径与目录由调用方注入（`src-tauri` 从 Tauri 的 path API 取到后传进来）。
+//!
+//! 分层：
+//!
+//! | 模块 | 职责 |
+//! | --- | --- |
+//! | [`path_semantics`] | 路径的三种表示（原始 / NFC / 折叠），全库唯一的「路径相等」判据 |
+//! | [`file_id`] | 文件身份 `(卷序列号, 文件 ID)`，用于稳定追踪重命名与移动 |
+//! | [`pragma`] | SQLite 连接的统一 PRAGMA 设置（WAL、外键、忙等待） |
+//! | [`migration`] | 迁移执行器：版本闸门 + 快照 + 逐条事务 + 完整性检查 |
+//! | [`time`] | Unix 毫秒工具（库里时间统一用它） |
+//! | [`pool`] | 读连接池（连接数有上限、借还靠 `Drop`、连接坏了就丢） |
+//! | [`writer`] | 单写者 actor：所有写串行到一条连接上，退出时把队列跑干 |
+//! | [`ids`] | 库 ID：可排序的定长 base62（时间 + 随机） |
+//! | [`library`] | 库身份、元信息、`app.db` 登记与在线/离线解析 |
+//! | [`db`] | 门面：`AppDb`（全局库）与 `CatalogDb`（每库），上层只用这一层 |
+//! | [`location`] | 位置判定：本地 / 网络 / 云同步（放 catalog 的风险提示） |
+
+pub mod db;
+pub mod file_id;
+pub mod ids;
+pub mod library;
+pub mod location;
+pub mod migration;
+pub mod path_semantics;
+pub mod pool;
+pub mod pragma;
+pub mod time;
+pub mod writer;
