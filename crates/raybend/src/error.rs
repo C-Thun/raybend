@@ -71,7 +71,7 @@ pub enum Error {
 
     /// 库当前处于离线状态（登记的路径下找不到它的 `catalog.db`）。
     #[error("库「{name}」当前离线：登记过的 {tried} 个路径下都没有找到它")]
-    LibraryOffline { name: String, tried: usize },
+    RepositoryOffline { name: String, tried: usize },
 }
 
 impl Error {
@@ -111,7 +111,7 @@ mod tests {
 
     #[test]
     fn library_offline_message_has_name_and_count() {
-        let e = Error::LibraryOffline {
+        let e = Error::RepositoryOffline {
             name: "照片库".into(),
             tried: 2,
         };

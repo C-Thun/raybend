@@ -9,8 +9,8 @@
 --   * 路径存两份：`path`（原始，展示用）与 `path_folded`（NFC + 小写，比较/索引用）
 --     —— 见 store::path_semantics
 
--- 库注册表：一个库一条记录（身份 = catalog.db 里的 library_id）
-CREATE TABLE libraries (
+-- 库注册表：一个库一条记录（身份 = catalog.db 里的 repository_id）
+CREATE TABLE repositories (
     id              TEXT    PRIMARY KEY,          -- 库唯一 ID（可排序的 16 位 base62，LIBRARY.md §2.5）
     name            TEXT    NOT NULL,             -- 展示名（用户可改）
     import_template TEXT,                         -- 导入模版缓存（真相源在 catalog.db，离线时也要能显示）
@@ -20,17 +20,17 @@ CREATE TABLE libraries (
 );
 
 -- 库 → 路径：一个库可登记多条路径（同库多路径），一个路径也可登记多个库（同路径不同库）
-CREATE TABLE library_paths (
-    library_id   TEXT    NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+CREATE TABLE repository_paths (
+    repository_id   TEXT    NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
     path         TEXT    NOT NULL,                -- 原始路径（展示/打开用）
     path_folded  TEXT    NOT NULL,                -- NFC + 折叠（比较用）
     added_at     INTEGER NOT NULL,
     last_seen_at INTEGER,                         -- 最近一次确认「该路径下确实有这个库」
     status       TEXT    NOT NULL DEFAULT 'unknown',  -- online / offline / unknown
-    PRIMARY KEY (library_id, path_folded)
+    PRIMARY KEY (repository_id, path_folded)
 );
 
-CREATE INDEX idx_library_paths_folded ON library_paths(path_folded);
+CREATE INDEX idx_repository_paths_folded ON repository_paths(path_folded);
 
 -- 应用设置（KV，值是 JSON 文本）
 CREATE TABLE settings (

@@ -22,10 +22,10 @@
 //! let w = Writer::open("/tmp/x.db")?;
 //! // 单条语句用 run，多条用 transaction（自动提交/回滚）
 //! w.run(|conn| {
-//!     conn.execute("INSERT INTO library_meta(key,value) VALUES ('k','v')", [])?;
+//!     conn.execute("INSERT INTO repository_meta(key,value) VALUES ('k','v')", [])?;
 //!     Ok(())
 //! })?;
-//! let n: i64 = w.run(|conn| Ok(conn.query_row("SELECT count(*) FROM library_meta", [], |r| r.get(0))?))?;
+//! let n: i64 = w.run(|conn| Ok(conn.query_row("SELECT count(*) FROM repository_meta", [], |r| r.get(0))?))?;
 //! assert_eq!(n, 1);
 //! # Ok(()) }
 //! ```
@@ -216,7 +216,7 @@ mod tests {
     }
 
     fn count_meta(pool: &ReadPool) -> i64 {
-        pool.with(|c| Ok(c.query_row("SELECT count(*) FROM library_meta", [], |r| r.get(0))?))
+        pool.with(|c| Ok(c.query_row("SELECT count(*) FROM repository_meta", [], |r| r.get(0))?))
             .unwrap()
     }
 
@@ -227,7 +227,7 @@ mod tests {
         let inserted = w
             .run(|conn| {
                 conn.execute(
-                    "INSERT INTO library_meta(key, value) VALUES ('library_id', 'abc')",
+                    "INSERT INTO repository_meta(key, value) VALUES ('repository_id', 'abc')",
                     [],
                 )?;
                 Ok(conn.changes())
@@ -237,7 +237,7 @@ mod tests {
 
         let id: String = w
             .run(|conn| {
-                Ok(conn.query_row("SELECT value FROM library_meta WHERE key='library_id'", [], |r| {
+                Ok(conn.query_row("SELECT value FROM repository_meta WHERE key='repository_id'", [], |r| {
                     r.get(0)
                 })?)
             })
@@ -251,7 +251,7 @@ mod tests {
         let path = dir.path().join("catalog.db");
         let w = Writer::open(&path).unwrap();
         w.run(|conn| {
-            conn.execute("INSERT INTO library_meta(key, value) VALUES ('a','1')", [])?;
+            conn.execute("INSERT INTO repository_meta(key, value) VALUES ('a','1')", [])?;
             Ok(())
         })
         .unwrap();
@@ -268,7 +268,7 @@ mod tests {
         w.transaction(|tx| {
             for i in 0..50 {
                 tx.execute(
-                    "INSERT INTO library_meta(key, value) VALUES (?1, 'x')",
+                    "INSERT INTO repository_meta(key, value) VALUES (?1, 'x')",
                     [format!("k{i}")],
                 )?;
             }
@@ -287,9 +287,9 @@ mod tests {
         let w = Writer::open(&path).unwrap();
         let err = w
             .transaction(|tx| {
-                tx.execute("INSERT INTO library_meta(key, value) VALUES ('good','1')", [])?;
+                tx.execute("INSERT INTO repository_meta(key, value) VALUES ('good','1')", [])?;
                 // 主键冲突：整批都要回滚
-                tx.execute("INSERT INTO library_meta(key, value) VALUES ('good','2')", [])?;
+                tx.execute("INSERT INTO repository_meta(key, value) VALUES ('good','2')", [])?;
                 Ok(())
             })
             .unwrap_err();
@@ -312,7 +312,7 @@ mod tests {
             threads.push(std::thread::spawn(move || {
                 w.run(move |conn| {
                     conn.execute(
-                        "INSERT INTO library_meta(key, value) VALUES (?1, 'v')",
+                        "INSERT INTO repository_meta(key, value) VALUES (?1, 'v')",
                         [format!("k{i}")],
                     )?;
                     order.lock().unwrap().push(i);
@@ -350,7 +350,7 @@ mod tests {
                         let key = format!("t{t}-{i}");
                         if w.run(move |conn| {
                             conn.execute(
-                                "INSERT INTO library_meta(key, value) VALUES (?1, 'v')",
+                                "INSERT INTO repository_meta(key, value) VALUES (?1, 'v')",
                                 [key],
                             )?;
                             Ok(())
@@ -380,7 +380,7 @@ mod tests {
                 let w2 = &w;
                 w2.run(move |conn| {
                     conn.execute(
-                        "INSERT INTO library_meta(key, value) VALUES (?1, 'v')",
+                        "INSERT INTO repository_meta(key, value) VALUES (?1, 'v')",
                         [format!("k{i}")],
                     )?;
                     Ok(())
@@ -399,7 +399,7 @@ mod tests {
         let dir = file_db();
         let w = Writer::open(dir.path().join("catalog.db")).unwrap();
         w.run(|conn| {
-            conn.execute("INSERT INTO library_meta(key, value) VALUES ('a','1')", [])?;
+            conn.execute("INSERT INTO repository_meta(key, value) VALUES ('a','1')", [])?;
             Ok(())
         })
         .unwrap();

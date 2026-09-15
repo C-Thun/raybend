@@ -1,4 +1,4 @@
-# raybend 库与导入规格（LIBRARY.md）
+# raybend 库与导入规格（REPOSITORY.md）
 
 > 本文件是**库（library）与导入流程**的业务事实来源。来自用户 2026-09-15 的完整口述，
 > Agent 负责整理、指出冲突与待确认项，**不擅自改语义**。
@@ -53,7 +53,7 @@
 | 位置 | 记录什么 |
 | --- | --- |
 | 中央 `app.db` | **所有已登记库**：库唯一 ID、名称、导入模版缓存、**该库登记过的每个路径**及其最近状态 |
-| 每个 `catalog.db` | **自己的唯一 ID**（`library_meta.library_id`）+ 库内数据 |
+| 每个 `catalog.db` | **自己的唯一 ID**（`repository_meta.repository_id`）+ 库内数据 |
 
 路径挂载了哪个库，靠「**读该路径下 `catalog.db` 里的 ID**」与 `app.db` 的登记比对得出 ——
 而不是靠路径字符串。这正是「同路径不同库」能成立的机制。
@@ -63,7 +63,7 @@
 用户要求：库的所有操作都要过一层状态检查，统一处理「目录/文件刚失效」的情况。
 
 ```text
-resolve_library(library_id) -> LibraryResolution
+resolve_repository(repository_id) -> LibraryResolution
   ├─ Online { root, catalog_path }   # 某个已登记路径下确实有这个 ID 的 catalog.db
   ├─ Offline { tried_paths }         # 登记过的路径都不含该 ID 的 catalog.db
   └─ Missing                          # 从未在线过（新建但还没落地）
@@ -72,7 +72,7 @@ resolve_library(library_id) -> LibraryResolution
 规则：
 
 - 判定顺序：先查**上次已知在线的路径**（快），再遍历该库登记过的其它路径。
-- 任何对库的操作（读列表、导入、缩略图、写元数据）都先走 `resolve_library`；
+- 任何对库的操作（读列表、导入、缩略图、写元数据）都先走 `resolve_repository`；
   解析失败一律转为**离线**而不是报错 —— 界面显示离线徽标，操作给出可读提示。
 - 判定结果**缓存**（带失效时间），避免每次点击都遍历路径。
 
@@ -92,7 +92,7 @@ resolve_library(library_id) -> LibraryResolution
 ```text
 用户选中一个目录，点击「添加库」：
   ├─ 该目录下**已有** catalog.db
-  │    → 读出其中的 library_id
+  │    → 读出其中的 repository_id
   │    ├─ app.db 里已有这个 ID → 这不是新建，而是**登记一条新路径**（同库多路径）
   │    └─ app.db 里没有这个 ID → 把该库整体登记进来（连同它已有的资产）
   └─ 该目录下**没有** catalog.db
@@ -103,7 +103,7 @@ resolve_library(library_id) -> LibraryResolution
 
 - 「一个路径被标记了但没有 catalog.db」→ 该库**显示为离线**，并可在同一路径下**创建库**
   （即补建 catalog.db）。
-- **同一路径允许登记给多个库**（`UNIQUE(path_folded, library_id)`，而不是路径唯一）。
+- **同一路径允许登记给多个库**（`UNIQUE(path_folded, repository_id)`，而不是路径唯一）。
 
 ### 2.5 库唯一 ID 的生成方式（**待你定，见 §6 问题 1**）
 

@@ -118,7 +118,7 @@ pub struct DbStatus {
     /// 当前 schema 版本（应等于程序支持的版本）。
     pub schema_version: i64,
     /// 已登记的库数量。
-    pub libraries: usize,
+    pub repositories: usize,
     /// 应用数据目录的位置性质。
     pub data_dir_kind: String,
 }
@@ -133,11 +133,11 @@ pub fn db_status<R: Runtime>(app: AppHandle<R>, state: State<'_, DbState>) -> Re
         let version = db
             .read(raybend::store::migration::schema_version)
             .map_err(|e| e.to_string())?;
-        let libraries = db.list_libraries().map_err(|e| e.to_string())?.len();
+        let repositories = db.list_repositories().map_err(|e| e.to_string())?.len();
         Ok(DbStatus {
             path: db.path().to_string_lossy().into_owned(),
             schema_version: version,
-            libraries,
+            repositories,
             data_dir_kind: data_kind,
         })
     })

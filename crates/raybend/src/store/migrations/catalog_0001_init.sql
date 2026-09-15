@@ -10,10 +10,10 @@
 --   * 路径同样存两份：原始 + 折叠（见 store::path_semantics）
 
 -- 库元信息（KV）。必填键：
---   library_id     —— 库身份（LIBRARY.md §2.5），决定「同路径不同库 / 同库多路径」能否成立
+--   repository_id     —— 库身份（LIBRARY.md §2.5），决定「同路径不同库 / 同库多路径」能否成立
 --   import_template—— 导入模版（默认 `:CYEAR-:CMONTH-:CDAY/MY:FILENAME`）
 --   created_at     —— 建库时间
-CREATE TABLE library_meta (
+CREATE TABLE repository_meta (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );

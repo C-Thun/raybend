@@ -1,4 +1,4 @@
-//! 库 ID：**可排序的定长 base62**（`LIBRARY.md` §2.5）。
+//! 库 ID：**可排序的定长 base62**（`REPOSITORY.md` §2.5）。
 //!
 //! 形制来自用户的 Luclin `Gid` 方案（时间戳 + 随机数 → 压缩成定长字符串），
 //! 针对本项目做了两点裁剪：
@@ -41,12 +41,12 @@ const SINGULARITY_SECS: u64 = 1_750_000_000;
 const MAX_TICKS: u64 = (1 << 55) - 1;
 
 /// 生成一个新的库 ID（当前时间）。
-pub fn new_library_id() -> Result<String> {
-    new_library_id_at(super::time::now_millis())
+pub fn new_repository_id() -> Result<String> {
+    new_repository_id_at(super::time::now_millis())
 }
 
 /// 按给定时间生成（测试与「补建历史库」用）。
-pub fn new_library_id_at(now_millis: i64) -> Result<String> {
+pub fn new_repository_id_at(now_millis: i64) -> Result<String> {
     let mut random = [0u8; 5];
     getrandom::fill(&mut random).map_err(|e| Error::Random(e.to_string()))?;
     Ok(encode(now_millis, &random))
@@ -149,7 +149,7 @@ mod tests {
 
     #[test]
     fn ids_have_the_expected_shape() {
-        let id = new_library_id().unwrap();
+        let id = new_repository_id().unwrap();
         assert_eq!(id.len(), ID_LEN);
         assert!(is_valid(&id), "生成的 ID 必须合法：{id}");
         assert!(id.bytes().all(|b| b.is_ascii_alphanumeric()));
@@ -167,7 +167,7 @@ mod tests {
         ];
         let mut ids: Vec<String> = times
             .iter()
-            .map(|t| new_library_id_at(*t).unwrap())
+            .map(|t| new_repository_id_at(*t).unwrap())
             .collect();
         let sorted = {
             let mut c = ids.clone();
@@ -185,7 +185,7 @@ mod tests {
         let mut seen = HashSet::new();
         for _ in 0..10_000 {
             assert!(
-                seen.insert(new_library_id_at(1_789_430_400_000).unwrap()),
+                seen.insert(new_repository_id_at(1_789_430_400_000).unwrap()),
                 "同一毫秒内出现了重复 ID"
             );
         }
@@ -198,7 +198,7 @@ mod tests {
             for _ in 0..8 {
                 s.spawn(|| {
                     for _ in 0..2_000 {
-                        let id = new_library_id().unwrap();
+                        let id = new_repository_id().unwrap();
                         assert!(ids.lock().unwrap().insert(id), "并发下出现了重复 ID");
                     }
                 });
@@ -214,7 +214,7 @@ mod tests {
             1_789_430_400_123,
             2_000_000_000_000,
         ] {
-            let id = new_library_id_at(t).unwrap();
+            let id = new_repository_id_at(t).unwrap();
             let back = created_at_millis(&id).expect("应当能解出时间");
             // 刻度是 10µs，毫秒级必须完全一致
             assert_eq!(back, t, "id={id}");
@@ -224,17 +224,17 @@ mod tests {
     #[test]
     fn clock_before_singularity_still_works() {
         // 系统时钟跑偏（早于起点）不该 panic，也不该生成非法 ID
-        let id = new_library_id_at(1_000_000_000_000).unwrap(); // 2001 年
+        let id = new_repository_id_at(1_000_000_000_000).unwrap(); // 2001 年
         assert!(is_valid(&id));
-        let id = new_library_id_at(0).unwrap();
+        let id = new_repository_id_at(0).unwrap();
         assert!(is_valid(&id));
-        let id = new_library_id_at(-12345).unwrap();
+        let id = new_repository_id_at(-12345).unwrap();
         assert!(is_valid(&id));
     }
 
     #[test]
     fn far_future_is_clamped_not_broken() {
-        let id = new_library_id_at(i64::MAX).unwrap();
+        let id = new_repository_id_at(i64::MAX).unwrap();
         assert!(is_valid(&id), "远期时间也要给出合法 ID");
         assert_eq!(id.len(), ID_LEN);
     }

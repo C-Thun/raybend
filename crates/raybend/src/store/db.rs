@@ -14,7 +14,7 @@
 //! let backups = std::path::Path::new("/tmp/raybend/backups");
 //! let opts = OpenOpts::new(Some(backups), now);
 //! let lib = CatalogDb::create("/tmp/照片库", "我的照片", None, opts)?;
-//! app.register_library(lib.meta(), std::path::Path::new("/tmp/照片库"), now)?;
+//! app.register_repository(lib.meta(), std::path::Path::new("/tmp/照片库"), now)?;
 //! # Ok(()) }
 //! ```
 //!
@@ -36,7 +36,7 @@ use rusqlite::Connection;
 
 use crate::error::{Error, Result};
 
-use super::library::{self, LibraryMeta};
+use super::repository::{self, RepositoryMeta};
 use super::migration::{self, Backups, DbKind, MigrationOutcome};
 use super::pool::ReadPool;
 use super::writer::Writer;
@@ -49,7 +49,7 @@ pub const BACKUPS_DIR: &str = "backups";
 
 /// 打开一个库时的选项。
 ///
-/// 备份目录**不在库目录里**（`LIBRARY.md` §1 规定库根只有 `catalog.db` 与 `photos/`），
+/// 备份目录**不在库目录里**（`REPOSITORY.md` §1 规定库根只有 `catalog.db` 与 `photos/`），
 /// 而是由调用方指定 —— 生产环境一律是 `<app data>/backups/`。
 #[derive(Debug, Clone, Copy)]
 pub struct OpenOpts<'a> {
@@ -203,24 +203,24 @@ impl AppDb {
     // ---------- 库注册表 ----------
 
     /// 登记（或更新）一个库。
-    pub fn register_library(&self, meta: &LibraryMeta, root: &Path, now_ms: i64) -> Result<()> {
+    pub fn register_repository(&self, meta: &RepositoryMeta, root: &Path, now_ms: i64) -> Result<()> {
         let meta = meta.clone();
         let root = root.to_string_lossy().into_owned();
         self.write_tx(move |tx| {
-            library::register_library(tx, &meta, now_ms)?;
-            library::add_library_path(tx, &meta.id, &root, now_ms)?;
+            repository::register_repository(tx, &meta, now_ms)?;
+            repository::add_repository_path(tx, &meta.id, &root, now_ms)?;
             Ok(())
         })
     }
 
     /// 列出所有已登记的库。
-    pub fn list_libraries(&self) -> Result<Vec<library::LibraryRow>> {
-        self.read(library::list_libraries)
+    pub fn list_repositories(&self) -> Result<Vec<repository::RepositoryRow>> {
+        self.read(repository::list_repositories)
     }
 
     /// 解析一个库当前在不在线。
-    pub fn resolve_library(&self, library_id: &str) -> Result<library::LibraryState> {
-        self.read(|conn| library::resolve_library(conn, library_id))
+    pub fn resolve_repository(&self, repository_id: &str) -> Result<repository::RepositoryState> {
+        self.read(|conn| repository::resolve_repository(conn, repository_id))
     }
 }
 
@@ -236,7 +236,7 @@ impl std::fmt::Debug for AppDb {
 pub struct CatalogDb {
     pool: ReadPool,
     writer: Writer,
-    meta: LibraryMeta,
+    meta: RepositoryMeta,
     report: OpenReport,
 }
 
@@ -246,15 +246,15 @@ impl CatalogDb {
     /// 缺文件 / 不是库 → 明确的错误；库更新 → [`Error::SchemaTooNew`]（拒绝打开）。
     pub fn open(root: impl AsRef<Path>, opts: OpenOpts<'_>) -> Result<Self> {
         let root = root.as_ref();
-        let path = root.join(library::CATALOG_FILE_NAME);
+        let path = root.join(repository::CATALOG_FILE_NAME);
         if !path.is_file() {
             return Err(Error::NotALibrary {
                 path: root.to_path_buf(),
-                reason: format!("目录下没有 {}", library::CATALOG_FILE_NAME),
+                reason: format!("目录下没有 {}", repository::CATALOG_FILE_NAME),
             });
         }
         // 先在只读连接上确认身份（避免对「不是库」的目录做迁移这种重活）
-        let meta = library::read_library_meta(&path)?;
+        let meta = repository::read_repository_meta(&path)?;
 
         let outcome = migrate_file(
             &path,
@@ -276,7 +276,7 @@ impl CatalogDb {
         })
     }
 
-    /// 建一个新库（已存在则原样打开，**不会换 ID**）。详见 [`library::create_or_open_catalog`]。
+    /// 建一个新库（已存在则原样打开，**不会换 ID**）。详见 [`repository::create_or_open_catalog`]。
     pub fn create(
         root: impl AsRef<Path>,
         name: &str,
@@ -284,8 +284,8 @@ impl CatalogDb {
         opts: OpenOpts<'_>,
     ) -> Result<Self> {
         let root = root.as_ref();
-        let path = root.join(library::CATALOG_FILE_NAME);
-        let meta = library::create_or_open_catalog(&path, name, template, opts.now_ms)?;
+        let path = root.join(repository::CATALOG_FILE_NAME);
+        let meta = repository::create_or_open_catalog(&path, name, template, opts.now_ms)?;
 
         let outcome = migrate_file(
             &path,
@@ -309,7 +309,7 @@ impl CatalogDb {
 
     /// 库元信息。
     #[must_use]
-    pub fn meta(&self) -> &LibraryMeta {
+    pub fn meta(&self) -> &RepositoryMeta {
         &self.meta
     }
 
@@ -365,7 +365,7 @@ impl CatalogDb {
     /// 改导入模版（写进库内元信息；`app.db` 的缓存由调用方决定是否同步）。
     pub fn set_import_template(&self, template: &str) -> Result<()> {
         let template = template.to_string();
-        self.write(move |conn| library::write_meta(conn, library::META_IMPORT_TEMPLATE, &template))
+        self.write(move |conn| repository::write_meta(conn, repository::META_IMPORT_TEMPLATE, &template))
     }
 }
 
@@ -373,7 +373,7 @@ impl std::fmt::Debug for CatalogDb {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CatalogDb")
             .field("path", &self.report.path)
-            .field("library_id", &self.meta.id)
+            .field("repository_id", &self.meta.id)
             .finish_non_exhaustive()
     }
 }
@@ -399,14 +399,14 @@ fn migrate_file(
 }
 
 /// 库快照的文件名标签：库 ID 前 8 位（同一个备份目录里要能区分是哪个库）。
-fn label_for(library_id: &str) -> &str {
-    &library_id[..library_id.len().min(8)]
+fn label_for(repository_id: &str) -> &str {
+    &repository_id[..repository_id.len().min(8)]
 }
 
 /// 按选项给某个库组织快照策略。
-fn backups_for<'a>(opts: &OpenOpts<'a>, library_id: &'a str) -> Backups<'a> {
+fn backups_for<'a>(opts: &OpenOpts<'a>, repository_id: &'a str) -> Backups<'a> {
     match opts.backups {
-        Some(dir) => Backups::labelled(dir, label_for(library_id)),
+        Some(dir) => Backups::labelled(dir, label_for(repository_id)),
         None => Backups::none(),
     }
 }
@@ -589,7 +589,7 @@ mod tests {
 
     #[test]
     fn catalogue_snapshots_do_not_pollute_the_library_root() {
-        // LIBRARY.md §1：库根只有 catalog.db 与 photos/。
+        // REPOSITORY.md §1：库根只有 catalog.db 与 photos/。
         // 快照统一放调用方给的目录（生产是 app data 下的 backups/）。
         let dir = tmp();
         let backups = dir.path().join("app数据").join(BACKUPS_DIR);
@@ -607,7 +607,7 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_label_is_the_library_id_prefix() {
+    fn snapshot_label_is_the_repository_id_prefix() {
         assert_eq!(label_for("Ab3xY9zQ1mNp7Kd2"), "Ab3xY9zQ");
         assert_eq!(label_for("短"), "短");
         assert_eq!(label_for(""), "");
@@ -631,16 +631,16 @@ mod tests {
         let root = dir.path().join("库");
         let lib = CatalogDb::create(&root, "我的照片", None, opts(&root, T0)).unwrap();
 
-        app.register_library(lib.meta(), &root, T0).unwrap();
-        let list = app.list_libraries().unwrap();
+        app.register_repository(lib.meta(), &root, T0).unwrap();
+        let list = app.list_repositories().unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].id, lib.meta().id);
         assert_eq!(list[0].name, "我的照片");
         assert_eq!(list[0].paths.len(), 1);
 
-        let state = app.resolve_library(&lib.meta().id).unwrap();
+        let state = app.resolve_repository(&lib.meta().id).unwrap();
         assert!(state.is_online(), "库就在那儿，应当在线：{state:?}");
-        if let library::LibraryState::Online { root: found } = state {
+        if let repository::RepositoryState::Online { root: found } = state {
             assert_eq!(found, root);
         }
     }
@@ -651,20 +651,20 @@ mod tests {
         let app = AppDb::open(dir.path().join("app 数据"), T0).unwrap();
         let root = dir.path().join("库");
         let lib = CatalogDb::create(&root, "我的照片", None, opts(&root, T0)).unwrap();
-        app.register_library(lib.meta(), &root, T0).unwrap();
+        app.register_repository(lib.meta(), &root, T0).unwrap();
         lib.flush().unwrap();
         drop(lib);
 
         // 模拟「移动硬盘被拔掉」：库目录整个不见了
         std::fs::remove_dir_all(&root).unwrap();
         assert_eq!(
-            app.resolve_library("Ab3xY9zQ1mNp7Kd2").unwrap(),
-            library::LibraryState::Offline { tried: 0 },
+            app.resolve_repository("Ab3xY9zQ1mNp7Kd2").unwrap(),
+            repository::RepositoryState::Offline { tried: 0 },
             "没登记过的库当然是离线"
         );
         // 真正登记过的那个库
         let after = AppDb::open(dir.path().join("app 数据"), T0).unwrap();
-        let n = after.list_libraries().unwrap().len();
+        let n = after.list_repositories().unwrap().len();
         assert_eq!(n, 1);
     }
 
@@ -677,19 +677,19 @@ mod tests {
 
         let a = CatalogDb::create(&root, "库A", None, opts(&root, T0)).unwrap();
         let a_id = a.meta().id.clone();
-        app.register_library(a.meta(), &root, T0).unwrap();
+        app.register_repository(a.meta(), &root, T0).unwrap();
         a.flush().unwrap();
         drop(a);
 
         // 把目录里换成另一个库（模拟用户换了 catalog.db）
         std::fs::remove_file(root.join("catalog.db")).unwrap();
         let b = CatalogDb::create(&root, "库B", None, opts(&root, T0 + 1)).unwrap();
-        app.register_library(b.meta(), &root, T0 + 1).unwrap();
+        app.register_repository(b.meta(), &root, T0 + 1).unwrap();
 
-        let list = app.list_libraries().unwrap();
+        let list = app.list_repositories().unwrap();
         assert_eq!(list.len(), 2, "同一路径下的两个库都要留着");
         // 现在这个路径上是 B → A 离线、B 在线（判据是文件里的 ID，不是路径）
-        assert!(app.resolve_library(&b.meta().id).unwrap().is_online());
-        assert!(!app.resolve_library(&a_id).unwrap().is_online());
+        assert!(app.resolve_repository(&b.meta().id).unwrap().is_online());
+        assert!(!app.resolve_repository(&a_id).unwrap().is_online());
     }
 }

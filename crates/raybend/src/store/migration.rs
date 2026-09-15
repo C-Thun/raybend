@@ -416,7 +416,7 @@ mod tests {
         assert!(out.changed());
 
         // 表都建出来了
-        for table in ["libraries", "library_paths", "settings", "jobs", "app_meta"] {
+        for table in ["repositories", "repository_paths", "settings", "jobs", "app_meta"] {
             let n: i64 = conn
                 .query_row(
                     "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?1",
@@ -434,7 +434,7 @@ mod tests {
         let out = apply(&mut conn, DbKind::Catalog, Backups::none(), 1_789_516_800_000).unwrap();
         assert_eq!((out.from, out.to), (0, 1));
         for table in [
-            "library_meta",
+            "repository_meta",
             "assets",
             "asset_files",
             "seq_counters",
@@ -791,7 +791,7 @@ mod tests {
         let mut conn = mem();
         apply(&mut conn, DbKind::Catalog, Backups::none(), 0).unwrap();
         conn.execute(
-            "INSERT INTO library_meta(key, value) VALUES ('library_id', 'Ab3xY9zQ1mNp7Kd2')",
+            "INSERT INTO repository_meta(key, value) VALUES ('repository_id', 'Ab3xY9zQ1mNp7Kd2')",
             [],
         )
         .unwrap();
@@ -867,7 +867,7 @@ mod tests {
 
     #[test]
     fn seq_counters_are_independent_per_width() {
-        // LIBRARY.md §3.3：同一目录下不同位数各自计数
+        // REPOSITORY.md §3.3：同一目录下不同位数各自计数
         let mut conn = mem();
         apply(&mut conn, DbKind::Catalog, Backups::none(), 0).unwrap();
         for w in [3, 4, 5] {
@@ -932,17 +932,17 @@ mod tests {
     }
 
     #[test]
-    fn app_db_cascades_library_paths() {
+    fn app_db_cascades_repository_paths() {
         let mut conn = mem();
         apply(&mut conn, DbKind::App, Backups::none(), 0).unwrap();
         conn.execute(
-            "INSERT INTO libraries(id, name, created_at) VALUES ('lib1', '照片库', 1)",
+            "INSERT INTO repositories(id, name, created_at) VALUES ('lib1', '照片库', 1)",
             [],
         )
         .unwrap();
         for p in ["D:\\照片", "E:\\备份\\照片"] {
             conn.execute(
-                "INSERT INTO library_paths(library_id, path, path_folded, added_at)
+                "INSERT INTO repository_paths(repository_id, path, path_folded, added_at)
                  VALUES ('lib1', ?1, ?2, 1)",
                 rusqlite::params![p, p.to_lowercase()],
             )
@@ -950,34 +950,34 @@ mod tests {
         }
         // 同一个库的两条不同路径都记得住（同库多路径）
         let n: i64 = conn
-            .query_row("SELECT count(*) FROM library_paths WHERE library_id='lib1'", [], |r| r.get(0))
+            .query_row("SELECT count(*) FROM repository_paths WHERE repository_id='lib1'", [], |r| r.get(0))
             .unwrap();
         assert_eq!(n, 2);
         // 删库时路径记录跟着走（外键级联）
-        conn.execute("DELETE FROM libraries WHERE id='lib1'", []).unwrap();
-        let left: i64 = conn.query_row("SELECT count(*) FROM library_paths", [], |r| r.get(0)).unwrap();
+        conn.execute("DELETE FROM repositories WHERE id='lib1'", []).unwrap();
+        let left: i64 = conn.query_row("SELECT count(*) FROM repository_paths", [], |r| r.get(0)).unwrap();
         assert_eq!(left, 0, "删库必须级联清掉路径记录");
     }
 
     #[test]
     fn app_db_allows_same_path_for_different_libraries() {
-        // 「同路径不同库」是明确需求（LIBRARY.md §2.1）
+        // 「同路径不同库」是明确需求（REPOSITORY.md §2.1）
         let mut conn = mem();
         apply(&mut conn, DbKind::App, Backups::none(), 0).unwrap();
         for id in ["libA", "libB"] {
             conn.execute(
-                "INSERT INTO libraries(id, name, created_at) VALUES (?1, ?1, 1)",
+                "INSERT INTO repositories(id, name, created_at) VALUES (?1, ?1, 1)",
                 [id],
             )
             .unwrap();
             conn.execute(
-                "INSERT INTO library_paths(library_id, path, path_folded, added_at)
+                "INSERT INTO repository_paths(repository_id, path, path_folded, added_at)
                  VALUES (?1, 'D:\\照片', 'd:\\照片', 1)",
                 [id],
             )
             .unwrap();
         }
-        let n: i64 = conn.query_row("SELECT count(*) FROM library_paths", [], |r| r.get(0)).unwrap();
+        let n: i64 = conn.query_row("SELECT count(*) FROM repository_paths", [], |r| r.get(0)).unwrap();
         assert_eq!(n, 2, "同一路径可以属于两个库");
     }
 }
