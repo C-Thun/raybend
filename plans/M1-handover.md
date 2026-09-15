@@ -1,8 +1,14 @@
 # M1 交接说明（M1-5 → M1-6 → M1-7）
 
 > **用途**：新会话从这一份接上，一口气跑到 M1 收尾。
-> **现状**：M1-1 / M1-2 / M1-3 / M1-4 **已完成并提交**；剩余 **M1-5 / M1-6 / M1-7**。
-> **本文档是一次性交接材料**：M1-5 开工后可以删掉，内容该进 `plans/M1-5.md` 与 `plans/M1.md`。
+> **现状**（2026-09-16 更新）：M1-1 / M1-2 / M1-3 / M1-4 / **M1-5 已完成并提交**；剩余 **M1-6 / M1-7**。
+> **本文档是一次性交接材料**：内容该进各单元的 `plans/*.md`，**M1-7 收尾后删掉**。
+>
+> M1-5 的产出（可复用资产，M1-6 直接调）：`src/api/db.ts`（全部命令封装）+ `src/api/types.ts`（手写 TS 镜像，
+> 与 `src/api/dto-contract.json` 契约夹具对测）、`src/workspaces/import/store.ts`（选中/勾选/排除/偏好）、
+> `src/features/photo-grid/*`（网格与缩略图队列）、`src/features/repositories/*`（库卡片/建库弹窗/导入动作区）、
+> `src/lib/{virtual-window,time-group,selection,tree,shortpath}.ts`（纯算法，均有单测）。
+> 导入按钮已给出「左右都就绪才可点」的可用性与事件，**只等 M1-6 接上执行与进度**。
 > 建立时间：2026-09-16 03:5x CST（M1-3 收尾后）
 
 ---
