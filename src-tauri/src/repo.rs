@@ -17,7 +17,7 @@ use crate::db::DbState;
 use crate::source::blocking;
 
 /// 一个库在界面上的形状（`design/main.md` §3.3 的库卡片）。
-#[derive(Debug, Serialize)]
+#[derive(Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepositoryViewDto {
     pub id: String,
@@ -37,7 +37,7 @@ pub struct RepositoryViewDto {
 }
 
 /// 一条登记路径。
-#[derive(Debug, Serialize)]
+#[derive(Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepositoryPathDto {
     pub path: String,
@@ -73,7 +73,7 @@ impl From<repository::RepositoryView> for RepositoryViewDto {
 }
 
 /// 建库弹窗在按下确认前看到的东西。
-#[derive(Debug, Serialize)]
+#[derive(Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepositoryProbeDto {
     /// `notDirectory` / `empty` / `existing` / `broken`。

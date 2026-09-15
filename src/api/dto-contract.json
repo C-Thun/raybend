@@ -1,0 +1,55 @@
+{
+  "_comment": [
+    "IPC 契约的键名清单 —— TS 侧（src/api/dto-contract.test.ts）与 Rust 侧",
+    "（src-tauri/src/contract.rs）都对着它断言。数组是**排序后**的 camelCase 键名。",
+    "改字段名时必须同时改：Rust 结构 → 本文件 → src/api/types.ts。"
+  ],
+  "RecentDir": ["includeSubdirs", "path", "useCount", "usedAt"],
+  "Volume": ["kind", "kindLabel", "path"],
+  "DirEntry": ["name", "path"],
+  "SourceItem": [
+    "ext",
+    "fileName",
+    "kind",
+    "mtimeMs",
+    "path",
+    "sizeBytes",
+    "takenAtMs",
+    "takenAtSource"
+  ],
+  "SourceScan": ["elapsedMs", "items", "problems", "root", "skipped"],
+  "TimeEntry": ["path", "takenAtMs", "takenAtSource"],
+  "PhotoCount": ["photos", "skipped", "truncated"],
+  "FileExif": [
+    "cameraMake",
+    "cameraModel",
+    "exposureMs",
+    "ext",
+    "fNumber",
+    "focalMm",
+    "height",
+    "iso",
+    "kind",
+    "lens",
+    "orientation",
+    "takenAtMs",
+    "takenAtSource",
+    "width"
+  ],
+  "RepositoryView": [
+    "createdAt",
+    "displayPath",
+    "id",
+    "importTemplate",
+    "lastOpenedAt",
+    "name",
+    "online",
+    "paths",
+    "photoCount",
+    "root",
+    "triedPaths"
+  ],
+  "RepositoryPath": ["lastSeenAt", "path", "status"],
+  "RepositoryProbe": ["kind", "message", "name", "registered", "repositoryId"],
+  "ThumbCacheStats": ["bySize", "bytes", "entries", "pinned"]
+}

@@ -31,7 +31,6 @@ import {
   IconPhoto,
   IconPlus,
 } from "@tabler/icons-solidjs";
-import { Splitter as ArkSplitter } from "@ark-ui/solid";
 import { t } from "../i18n";
 import { LOCALE_IDS, locale, setLocale, type LocaleId } from "../i18n";
 import { createAppearanceStore } from "../lib/appearance";
@@ -51,7 +50,8 @@ import { PathText } from "../components/ui/PathText";
 import { Tile } from "../components/ui/Tile";
 import { TreeNode } from "../components/ui/TreeNode";
 import { Panel } from "../components/ui/Panel";
-import { SplitHandle, SplitHandleDots } from "../components/ui/SplitHandle";
+import { SplitHandle } from "../components/ui/SplitHandle";
+import { SplitStack } from "../components/ui/SplitStack";
 import { ScrollBox } from "../components/ui/ScrollBar";
 import { ToggleBlock } from "../components/ui/ToggleBlock";
 import { RemoveButton } from "../components/ui/RemoveButton";
@@ -697,95 +697,89 @@ export default function KitchenSink() {
               </div>
             </Row>
 
-            <Row label="三段式 + Splitter">
-              <ArkSplitter.Root
-                orientation="vertical"
-                panels={[
-                  { id: "recent", minSize: 15 },
-                  { id: "source", minSize: 20 },
-                  { id: "selected", minSize: 15 },
-                ]}
-                defaultSize={[25, 45, 30]}
-                class="flex h-64 w-80 flex-col overflow-hidden rounded-ui bg-surface-main p-1"
-              >
-                <ArkSplitter.Panel id="recent" class="min-h-0 overflow-hidden">
-                  <Panel title={t("source.recent")} scroll>
-                    <For each={["D:\\Photos", "E:\\2024"]}>
-                      {(path) => (
-                        <PathText
-                          path={path}
-                          maxLength={20}
-                          icon={<IconFolder size={14} />}
-                          class="h-row-h"
-                        />
-                      )}
-                    </For>
-                  </Panel>
-                </ArkSplitter.Panel>
-                <ArkSplitter.ResizeTrigger
-                  id="recent:source"
-                  class="group/split flex h-2 shrink-0 items-center justify-center hover:bg-state-hover data-[state=dragging]:bg-state-selected"
-                >
-                  <SplitHandleDots />
-                </ArkSplitter.ResizeTrigger>
-                <ArkSplitter.Panel id="source" class="min-h-0 overflow-hidden">
-                  <Panel title={t("source.tree")} scroll>
-                    <For
-                      each={[
-                        "D:\\",
-                        "E:\\",
-                        "//nas/photos",
-                        "C:\\Users\\me\\Pictures",
-                      ]}
-                    >
-                      {(path) => (
-                        <TreeNode
-                          label={path}
-                          depth={0}
-                          icon={<IconFolder size={14} />}
-                          onClick={() => {}}
-                        />
-                      )}
-                    </For>
-                  </Panel>
-                </ArkSplitter.Panel>
-                <ArkSplitter.ResizeTrigger
-                  id="source:selected"
-                  class="group/split flex h-2 shrink-0 items-center justify-center hover:bg-state-hover data-[state=dragging]:bg-state-selected"
-                >
-                  <SplitHandleDots />
-                </ArkSplitter.ResizeTrigger>
-                <ArkSplitter.Panel
-                  id="selected"
-                  class="min-h-0 overflow-hidden"
-                >
-                  <Panel title={t("source.selected")} scroll>
-                    <For
-                      each={[
-                        "D:\\Photos",
-                        "E:\\2024",
-                        "//nas/photos",
-                        "D:\\照片\\2024 秋",
-                      ]}
-                    >
-                      {(path) => (
-                        <Show when={!removedBars().includes(path)}>
-                          <div class="flex h-selected-bar-h items-center gap-2 rounded-ui bg-surface-track px-2">
-                            <IconFolder size={20} />
-                            <PathText path={path} class="min-w-0 flex-1" />
-                            <EasyDestroyButton
-                              label={`移除 ${path}`}
-                              onRemove={() => {
-                                setRemovedBars((prev) => [...prev, path]);
-                              }}
+            <Row label="三段式 + Splitter（用 SplitStack 包装，见 components/ui/SplitStack.tsx）">
+              <SplitStack
+                class="h-64 w-80 rounded-ui bg-surface-main p-1"
+                segments={[
+                  {
+                    id: "recent",
+                    defaultSize: 25,
+                    minSize: 15,
+                    content: (
+                      <Panel title={t("source.recent")} scroll>
+                        <For each={["D:\\Photos", "E:\\2024"]}>
+                          {(path) => (
+                            <PathText
+                              path={path}
+                              maxLength={20}
+                              icon={<IconFolder size={14} />}
+                              class="h-row-h"
                             />
-                          </div>
-                        </Show>
-                      )}
-                    </For>
-                  </Panel>
-                </ArkSplitter.Panel>
-              </ArkSplitter.Root>
+                          )}
+                        </For>
+                      </Panel>
+                    ),
+                  },
+                  {
+                    id: "source",
+                    defaultSize: 45,
+                    minSize: 20,
+                    content: (
+                      <Panel title={t("source.tree")} scroll>
+                        <For
+                          each={[
+                            "D:\\",
+                            "E:\\",
+                            "//nas/photos",
+                            "C:\\Users\\me\\Pictures",
+                          ]}
+                        >
+                          {(path) => (
+                            <TreeNode
+                              label={path}
+                              depth={0}
+                              icon={<IconFolder size={14} />}
+                              onClick={() => {}}
+                            />
+                          )}
+                        </For>
+                      </Panel>
+                    ),
+                  },
+                  {
+                    id: "selected",
+                    defaultSize: 30,
+                    minSize: 15,
+                    content: (
+                      <Panel title={t("source.selected")} scroll>
+                        <For
+                          each={[
+                            "D:\\Photos",
+                            "E:\\2024",
+                            "//nas/photos",
+                            "D:\\照片\\2024 秋",
+                          ]}
+                        >
+                          {(path) => (
+                            <Show when={!removedBars().includes(path)}>
+                              <div class="flex h-selected-bar-h items-center gap-2 rounded-ui bg-surface-track px-2">
+                                <IconFolder size={20} />
+                                <PathText path={path} class="min-w-0 flex-1" />
+                                <EasyDestroyButton
+                                  label={`移除 ${path}`}
+                                  onRemove={() => {
+                                    setRemovedBars((prev) => [...prev, path]);
+                                  }}
+                                />
+                              </div>
+                            </Show>
+                          )}
+                        </For>
+                      </Panel>
+                    ),
+                  },
+                ]}
+              />
 
               <div class="flex h-64 w-40 flex-col">
                 <SplitHandle />

@@ -12,6 +12,10 @@ pub mod repo;
 pub mod source;
 pub mod thumbs;
 
+/// IPC 契约测试（拉把 Rust 序列化出的键名与前端 ts 镜像对齐）。
+#[cfg(test)]
+mod contract;
+
 /// 主窗口标签（与 `tauri.conf.json` 的窗口配置、`capabilities/default.json` 对应）。
 pub const MAIN_WINDOW_LABEL: &str = "main";
 

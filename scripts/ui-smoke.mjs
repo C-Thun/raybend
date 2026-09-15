@@ -318,8 +318,7 @@ try {
   if (shell) {
     if (!shell.hasToolsOnImport) {
       problems.push("「导入」工作流下没看到工具行（批量排除）");
-    }
-    if (shell.hasToolsOnBrowse) {
+    }    if (shell.hasToolsOnBrowse) {
       problems.push(
         "切到「浏览」后工具行还在 —— 设计稿要求整行消失（design/main.md §2.3）",
       );
@@ -334,9 +333,49 @@ try {
     }
   }
 
+  /*
+   * 分段拖拽冒烟（M1-5）：Ark 的 `Splitter` 只给变量，消费方必须自己接上；
+   * 接错了**不报错、面板高度是 0** —— 看起来「渲染了」其实什么也看不到。
+   * 所以这里真量一遍几何：分隔条存在、每个分隔条旁边有非零高度的面板。
+   * 页面上没有分隔条时返回 null（例如陈列室的其它页面）。
+   */
+  const splitter = await evaluate(`(() => {
+    // Ark 的分隔条是 role=separator（Splitter.ResizeTrigger 自己带的语义）
+    const triggers = [...document.querySelectorAll('[role="separator"]')];
+    if (triggers.length === 0) return null;
+    const triggerBoxes = triggers.map((el) => {
+      const rect = el.getBoundingClientRect();
+      return { role: el.getAttribute("aria-orientation"), h: Math.round(rect.height), w: Math.round(rect.width) };
+    });
+    // 分隔条两侧的面板：用**相邻兄弟**量高度，不依赖 Ark 内部的属性命名
+    const paneHeights = triggers.flatMap((el) =>
+      [el.previousElementSibling, el.nextElementSibling]
+        .filter(Boolean)
+        .map((node) => Math.round(node.getBoundingClientRect().height)),
+    );
+    return { triggerCount: triggers.length, triggerBoxes, paneHeights };
+  })()`);
+
+  if (splitter) {
+    if (splitter.triggerCount < 1) {
+      problems.push("分段布局里一个分隔条都没有");
+    }
+    if (splitter.paneHeights.length > 0 && splitter.paneHeights.some((h) => h <= 0)) {
+      problems.push(
+        `分段面板高度为 0（${splitter.paneHeights.join("/")}）—— 分隔条的尺寸没接上（Ark 只给变量）`,
+      );
+    }
+    if (
+      splitter.triggerBoxes.every((box) => box.h === 0 || box.w === 0) &&
+      splitter.triggerBoxes.length > 0
+    ) {
+      problems.push("分隔条没有可点击的尺寸（拖不动）");
+    }
+  }
+
   console.log(
     JSON.stringify(
-      { url, chrome: chromePath, snapshot, interact, shell, problems },
+      { url, chrome: chromePath, snapshot, interact, shell, splitter, problems },
       null,
       2,
     ),

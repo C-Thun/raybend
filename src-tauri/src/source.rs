@@ -43,7 +43,7 @@ where
 // ---------------------------------------------------------------------------
 
 /// 最近导入过的一个目录。
-#[derive(Debug, Serialize)]
+#[derive(Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RecentDirView {
     pub path: String,
@@ -64,7 +64,7 @@ impl From<recent::RecentDir> for RecentDirView {
 }
 
 /// 一个可选来源（驱动器 / 挂载点）。
-#[derive(Debug, Serialize)]
+#[derive(Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VolumeView {
     pub path: String,
@@ -75,7 +75,7 @@ pub struct VolumeView {
 }
 
 /// 目录树里的一个子目录。
-#[derive(Debug, Serialize)]
+#[derive(Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DirEntryView {
     pub name: String,
@@ -83,7 +83,7 @@ pub struct DirEntryView {
 }
 
 /// 中列里的一张照片。
-#[derive(Debug, Serialize)]
+#[derive(Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SourceItemView {
     pub path: String,
@@ -100,7 +100,7 @@ pub struct SourceItemView {
 }
 
 /// 一次目录列取的结果。
-#[derive(Debug, Serialize)]
+#[derive(Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SourceScanView {
     pub root: String,
@@ -111,7 +111,7 @@ pub struct SourceScanView {
 }
 
 /// 一个文件的精确拍摄时间。
-#[derive(Debug, Serialize)]
+#[derive(Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TimeEntryView {
     pub path: String,
@@ -120,7 +120,7 @@ pub struct TimeEntryView {
 }
 
 /// 照片计数。
-#[derive(Debug, Serialize)]
+#[derive(Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PhotoCountView {
     pub photos: usize,

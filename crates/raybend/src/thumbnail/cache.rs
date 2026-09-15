@@ -74,7 +74,12 @@ pub struct ThumbMeta {
 }
 
 /// 缓存的总体统计（给设置里的「缓存」面板用）。
+///
+/// `rename_all = "camelCase"`：它直接从 Tauri 命令返回给前端，
+/// 若不加就会序列化成 `by_size` —— 而前端镜像里写的是 `bySize`。
+/// （这个问题真被契约测试抓到过一次，见 `src-tauri/src/contract.rs`。）
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CacheStats {
     pub entries: i64,
     pub bytes: i64,
