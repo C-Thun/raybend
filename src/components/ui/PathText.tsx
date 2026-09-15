@@ -79,7 +79,10 @@ export function PathText(props: PathTextProps) {
             .join(" ")}
         >
           <Show when={local.icon}>
-            <span class="flex size-4 shrink-0 items-center justify-center" aria-hidden="true">
+            <span
+              class="flex size-4 shrink-0 items-center justify-center"
+              aria-hidden="true"
+            >
               {local.icon}
             </span>
           </Show>
@@ -89,7 +92,7 @@ export function PathText(props: PathTextProps) {
           */}
           <span
             dir="ltr"
-            class="min-w-0 flex-1 truncate text-[12px]"
+            class="min-w-0 flex-1 truncate text-fs-2"
             title={isAbbreviated() ? undefined : local.path}
           >
             {display()}

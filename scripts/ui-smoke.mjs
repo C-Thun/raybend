@@ -11,6 +11,13 @@
  * 它已经抓到过一次真问题：`@solidjs/router` 1.0 下把 `RouteDefinition[]` 数组
  * 直接喂给 `<Router>` 会让所有路由静默不匹配 —— 页面空白、控制台一句报错都没有。
  *
+ * 目前断言的内容：
+ *   1. 页面**真的画出了东西**（不是白屏）
+ *   2. 切主题 / 切密度真的换了 `<html>` 上的 data 属性与令牌值
+ *   3. 控制台无 error / warning
+ *   4. 外壳规则（若页面上有工作流控件）：工具行**跟着工作流显隐**、
+ *      无选中时「批量排除」是禁用态（`DESIGN.md` §12.2、`design/main.md` §2.3）
+ *
  * 用法：
  *   pnpm dev                       # 另开一个终端起开发服务器
  *   pnpm smoke:ui                  # 默认打 http://localhost:1420/dev/kitchen-sink
@@ -45,7 +52,12 @@ function findChrome() {
   for (const dir of readdirSync(cache)) {
     if (dir.startsWith("chromium_headless_shell-")) {
       candidates.push(
-        join(cache, dir, "chrome-headless-shell-linux64", "chrome-headless-shell"),
+        join(
+          cache,
+          dir,
+          "chrome-headless-shell-linux64",
+          "chrome-headless-shell",
+        ),
       );
     }
     if (dir.startsWith("chromium-")) {
@@ -209,16 +221,36 @@ try {
       return clicked;
     };
     const root = document.documentElement;
-    const switchedTheme = await pick("浅色");
+
+    // 主题开关是 titlebar 上的图标按钮（无文字），按 aria-label 找
+    const themeButton = document.querySelector(
+      'button[aria-label="切换主题"], button[aria-label="Toggle theme"]',
+    );
+    const switchedTheme = themeButton
+      ? (themeButton.click(), await new Promise((r) => setTimeout(r, 250)), true)
+      : false;
     const theme = root.dataset.theme;
     const switchedDensity = await pick("宽松");
     const density = root.dataset.density;
+    // 浏览器里没有窗口 API：三键必须整组不存在（否则点了就报错）
+    const windowControlCount = [
+      "最小化",
+      "Maximize",
+      "最大化",
+      "还原",
+      "关闭",
+      "Close",
+    ].filter((label) =>
+      document.querySelector('button[aria-label="' + label + '"]'),
+    ).length;
+
     return {
       switchedTheme,
       theme,
       switchedDensity,
       density,
       barTitleHeight: getComputedStyle(root).getPropertyValue("--bar-title-h").trim(),
+      windowControlCount,
     };
   })()`);
 
@@ -227,6 +259,11 @@ try {
   }
   if (interact.switchedDensity && interact.density !== "loose") {
     problems.push(`切密度没生效：data-density=${interact.density}`);
+  }
+  if (interact.windowControlCount > 0) {
+    problems.push(
+      `浏览器里出现了 ${interact.windowControlCount} 个窗口三键按钮 —— 同环境降级失效（src/api/window.ts）`,
+    );
   }
   if (
     interact.switchedDensity &&
@@ -238,8 +275,71 @@ try {
     );
   }
 
+  /*
+   * 外壳规则冒烟（M1-4）：切到「没有工具」的工作流时，工具行必须**整行消失**。
+   * 这条规则肉眼很容易漏（不看就不知道它是不是还占着一条空条），所以用 DOM 断言钉住。
+   * 页面上没有工作流控件（例如陈列室自己）时返回 null，跳过这部分。
+   */
+  const shell = await evaluate(`(async () => {
+    const labelFor = (text) =>
+      [...document.querySelectorAll("label")].find(
+        (node) => node.textContent.trim() === text,
+      );
+    if (!labelFor("导入") && !labelFor("Import")) return null;
+
+    // 只看按钮元素：页面上的解释性文字也可能含这两个词（陈列室里就有一句），
+    // 用文本匹配会误判成「工具行还在」
+    const hasTools = () =>
+      [...document.querySelectorAll("button")].some((node) =>
+        /批量排除|Exclude selected/.test(node.textContent),
+      );
+
+    const before = hasTools();
+    (labelFor("浏览") ?? labelFor("Browse"))?.click();
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    const onBrowse = hasTools();
+
+    (labelFor("导入") ?? labelFor("Import"))?.click();
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    const restored = hasTools();
+
+    const exclude = [...document.querySelectorAll("button")].find((node) =>
+      /批量排除|Exclude selected/.test(node.textContent),
+    );
+
+    return {
+      hasToolsOnImport: before,
+      hasToolsOnBrowse: onBrowse,
+      restoredOnImport: restored,
+      excludeDisabled: exclude ? exclude.disabled : null,
+    };
+  })()`);
+
+  if (shell) {
+    if (!shell.hasToolsOnImport) {
+      problems.push("「导入」工作流下没看到工具行（批量排除）");
+    }
+    if (shell.hasToolsOnBrowse) {
+      problems.push(
+        "切到「浏览」后工具行还在 —— 设计稿要求整行消失（design/main.md §2.3）",
+      );
+    }
+    if (!shell.restoredOnImport) {
+      problems.push("切回「导入」后工具行没回来");
+    }
+    if (shell.excludeDisabled === false) {
+      problems.push(
+        "没有选中照片时「批量排除」竟然可点（DESIGN.md §12.2 要求禁用）",
+      );
+    }
+  }
+
   console.log(
-    JSON.stringify({ url, chrome: chromePath, snapshot, interact, problems }, null, 2),
+    JSON.stringify(
+      { url, chrome: chromePath, snapshot, interact, shell, problems },
+      null,
+      2,
+    ),
   );
 } catch (error) {
   problems.push(`冒烟脚本自身失败：${error.message}`);

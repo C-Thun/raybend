@@ -65,7 +65,12 @@ export interface RemoveButtonProps
 }
 
 export function RemoveButton(props: RemoveButtonProps) {
-  const [local, rest] = splitProps(props, ["label", "size", "class", "disabled"]);
+  const [local, rest] = splitProps(props, [
+    "label",
+    "size",
+    "class",
+    "disabled",
+  ]);
 
   return (
     <button

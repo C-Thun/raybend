@@ -49,8 +49,8 @@ function variantClasses(variant: ButtonVariant, selected: boolean): string {
 }
 
 const SIZE_CLASSES: Record<ButtonSize, string> = {
-  sm: "h-6 gap-1 px-2 text-[11px]",
-  md: "gap-1.5 px-3 py-1 text-[12px]",
+  sm: "h-6 gap-1 px-2 text-fs-1",
+  md: "gap-1.5 px-3 py-1 text-fs-2",
 };
 
 export function Button(props: ButtonProps) {

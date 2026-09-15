@@ -15,6 +15,24 @@
  */
 
 /* ══════════════════════════════════════════════════════════════
+ * 字号阶梯（DESIGN.md §7.2）
+ *
+ * 用户 2026-09-15 明确反馈：**「工业化不是字小」**，字号至少加大 2 号，
+ * 何况现在是高 DPI 时代。所以这一档比初版整体 +2px，并且**收进令牌**：
+ * 以后要调只改这里，不再散落在组件的 `text-[11px]` 里。
+ * 字号**不随密度变化**（§8.1：密度只影响间距类尺寸）。
+ * ══════════════════════════════════════════════════════════════ */
+
+:root {
+  --fs-0: 12px; /* 极小：单位、角标 */
+  --fs-1: 13px; /* 注释、标签、列表次要行 */
+  --fs-2: 14px; /* 控件文字、次级正文 */
+  --fs-3: 15px; /* 正文基准（应用名、菜单、EXIF 值） */
+  --fs-4: 17px; /* 区块标题 */
+  --fs-5: 20px; /* 大标题、弹窗主标题 */
+}
+
+/* ══════════════════════════════════════════════════════════════
  * 1. 颜色：四级中性面 + 前景 + 品牌 + 状态
  *    DESIGN.md §1.1（用户色板）/ §1.2（派生阶梯）/ §5（状态）
  * ══════════════════════════════════════════════════════════════ */
@@ -64,10 +82,26 @@
   color-scheme: light;
 }
 
-/* 品牌色：两主题共用（DESIGN.md §1.1，待用户按效果微调） */
+/* 品牌色：两主题共用（DESIGN.md §1.1，2026-09-15 用户微调后的定稿） */
 :root {
-  --brand: #8db8aa;
-  --brand-2: #eecc55;
+  --brand: #52c6ab; /* 主色：更亮更清的一档薄荷绿 */
+  --brand-2: #f0b033; /* 辅色：琥珀金 */
+}
+
+/* ══════════════════════════════════════════════════════════════
+ * 危险色（DESIGN.md §9.2）
+ *
+ * 目前**唯一用途是窗口关闭键的悬停底**（Windows 平台惯例）。
+ * 取值是「微微偏橙的鍀红」，用户指定；两主题共用同一个值，因为它是靠自己
+ * 与条带面的**色相/饱和度差异**跳出来的，而不是靠明度：
+ *   - 与深色条带 #2a2d33 对比 2.86 : 1
+ *   - 与浅色条带 #edf0e9 对比 4.20 : 1
+ *   - 其上的浅色图标 #f6f8f4 对比 4.52 : 1（过 AA）
+ * ══════════════════════════════════════════════════════════════ */
+
+:root {
+  --danger: #bf4e30;
+  --fg-on-danger: #f6f8f4;
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -114,14 +148,14 @@
 :root[data-density="compact"] {
   --space-unit: 4px;
 
-  --bar-title-h: 32px;
-  --bar-flow-h: 44px;
-  --bar-tool-h: 32px;
+  --bar-title-h: 40px;
+  --bar-flow-h: 52px;
+  --bar-tool-h: 40px;
 
   --pad-x: 8px;
   --pad-y: 4px;
   --gap: 4px;
-  --row-h: 24px; /* 列表行高 */
+  --row-h: 28px; /* 列表行高 */
   --row-indent: 10px; /* 列表行起始缩进 */
   --panel-pad: 8px;
   --radius: 4px;
@@ -133,42 +167,47 @@
   --btn-pad-y: 4px;
 
   --seg-track-pad: 3px;
-  --seg-chip-h: 28px;
+  --flow-chip-h: 34px;
+  --flow-chip-pad-x: 18px;
+  --seg-chip-h: 30px;
   --seg-chip-pad-x: 14px;
 
-  --checkbox-size: 14px;
+  --checkbox-size: 16px;
 
   /* 移除/排除类按钮：点击区不得小于 22×22（DESIGN.md §8.3） */
-  --remove-hit: 22px;
+  --remove-hit: 24px;
   --remove-icon: 18px;
 
-  --selected-bar-h: 56px;
+  --selected-bar-h: 60px;
 
-  --switch-w: 24px;
-  --switch-h: 14px;
-  --switch-knob: 10px;
+  --switch-w: 28px;
+  --switch-h: 16px;
+  --switch-knob: 12px;
 
-  --toggle-block: 28px;
+  --toggle-block: 32px;
   --toggle-block-icon: 16px;
 
-  --caption-h: 22px; /* 图片 tile 字幕条高 */
+  /* 窗口三键（`design/main.md` §2.1 的 46×32，尺寸随密度档） */
+  --win-ctl-w: 52px;
+
+  --caption-h: 26px; /* 图片 tile 字幕条高 */
   --scrollbar-w: 8px; /* 细滚动条宽/高 */
 
-  --action-btn-h: 32px; /* 导入按钮等 */
-  --card-h: 56px; /* 库卡片 */
+  --action-btn-h: 36px; /* 导入按钮等 */
+  --card-h: 60px; /* 库卡片 */
 }
 
 :root[data-density="loose"] {
   --space-unit: 8px;
 
-  --bar-title-h: 40px;
-  --bar-flow-h: 60px;
-  --bar-tool-h: 40px;
+  --bar-title-h: 48px;
+  --bar-flow-h: 68px;
+  --bar-tool-h: 48px;
 
   --pad-x: 16px;
   --pad-y: 8px;
   --gap: 8px;
-  --row-h: 32px;
+  --row-h: 36px;
   --row-indent: 16px;
   --panel-pad: 16px;
   --radius: 6px;
@@ -180,28 +219,31 @@
   --btn-pad-y: 8px;
 
   --seg-track-pad: 4px;
-  --seg-chip-h: 34px;
+  --flow-chip-h: 40px;
+  --flow-chip-pad-x: 24px;
+  --seg-chip-h: 36px;
   --seg-chip-pad-x: 20px;
 
-  --checkbox-size: 16px;
+  --checkbox-size: 18px;
 
-  --remove-hit: 26px;
+  --remove-hit: 30px;
   --remove-icon: 20px;
 
-  --selected-bar-h: 68px;
+  --selected-bar-h: 72px;
 
-  --switch-w: 30px;
-  --switch-h: 18px;
-  --switch-knob: 14px;
+  --switch-w: 34px;
+  --switch-h: 20px;
+  --switch-knob: 16px;
 
-  --toggle-block: 34px;
+  --toggle-block: 38px;
   --toggle-block-icon: 18px;
 
-  --caption-h: 28px;
+  --caption-h: 32px;
+  --win-ctl-w: 62px;
   --scrollbar-w: 10px;
 
-  --action-btn-h: 40px;
-  --card-h: 68px;
+  --action-btn-h: 44px;
+  --card-h: 72px;
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -236,6 +278,10 @@
   /* 品牌 */
   --color-brand: var(--brand);
   --color-brand-2: var(--brand-2);
+
+  /* 危险（窗口关闭键悬停底） */
+  --color-danger: var(--danger);
+  --color-fg-on-danger: var(--fg-on-danger);
 
   /* 状态 */
   --color-state-hover: var(--state-hover);
@@ -276,9 +322,22 @@
   --spacing-switch-knob: var(--switch-knob);
   --spacing-toggle-block: var(--toggle-block);
   --spacing-caption-h: var(--caption-h);
+  --spacing-win-ctl-w: var(--win-ctl-w);
   --spacing-scrollbar-w: var(--scrollbar-w);
   --spacing-action-btn-h: var(--action-btn-h);
   --spacing-card-h: var(--card-h);
+
+  /* 字号（text-fs-0 … text-fs-5） */
+  --text-fs-0: var(--fs-0);
+  --text-fs-1: var(--fs-1);
+  --text-fs-2: var(--fs-2);
+  --text-fs-3: var(--fs-3);
+  --text-fs-4: var(--fs-4);
+  --text-fs-5: var(--fs-5);
+
+  /* 工作流切换器（flowbar 专属，比通用分段控件更大更醒目） */
+  --spacing-flow-chip-h: var(--flow-chip-h);
+  --spacing-flow-chip-pad-x: var(--flow-chip-pad-x);
 
   /* 小倒角：两档（DESIGN.md §8.2） */
   --radius-ui: var(--radius);

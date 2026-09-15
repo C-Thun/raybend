@@ -11,10 +11,13 @@ import {
   DEFAULT_APPEARANCE,
   DENSITY_STORAGE_KEY,
   THEME_STORAGE_KEY,
+  createAppearanceStore,
   normalizeDensity,
   normalizeTheme,
   readAppearance,
+  readAppearanceOverride,
   writeAppearance,
+  type Appearance,
   type AppearanceStorage,
 } from "./appearance.ts";
 
@@ -45,7 +48,11 @@ test("normalize：只接受两个合法值，其余一律回落默认", () => {
   assert.equal(normalizeDensity("loose"), "loose");
   assert.equal(normalizeDensity("compact"), "compact");
   for (const bad of ["Loose", "", null, undefined, 1, "medium"]) {
-    assert.equal(normalizeDensity(bad), "compact", `非法密度 ${String(bad)} 应回落`);
+    assert.equal(
+      normalizeDensity(bad),
+      "compact",
+      `非法密度 ${String(bad)} 应回落`,
+    );
   }
 });
 
@@ -62,7 +69,10 @@ test("读取：存了合法值 → 如实取回", () => {
     [THEME_STORAGE_KEY]: "light",
     [DENSITY_STORAGE_KEY]: "loose",
   });
-  assert.deepEqual(readAppearance(storage), { theme: "light", density: "loose" });
+  assert.deepEqual(readAppearance(storage), {
+    theme: "light",
+    density: "loose",
+  });
 });
 
 test("读取：部分缺失 → 缺的那一项回落，另一项保留", () => {
@@ -108,4 +118,148 @@ test("存储抛错（配额 / 被禁用）时不冒泡", () => {
   assert.doesNotThrow(() =>
     writeAppearance({ theme: "light", density: "loose" }, hostile),
   );
+});
+
+/* ══════════════════════════════════════════════════════════════
+ * readAppearanceOverride：开发期用 URL 切外观（截图自查的支点）
+ * ══════════════════════════════════════════════════════════════ */
+
+test("URL 覆盖：认 theme / density 两个参数", () => {
+  assert.deepEqual(readAppearanceOverride("?theme=light&density=loose"), {
+    theme: "light",
+    density: "loose",
+  });
+  assert.deepEqual(readAppearanceOverride("?theme=dark"), { theme: "dark" });
+  assert.deepEqual(readAppearanceOverride(""), {});
+});
+
+test("URL 覆盖：非法值一律忽略（不能因为手快打了个错参数就白屏）", () => {
+  assert.deepEqual(readAppearanceOverride("?theme=solarized&density=medium"), {});
+  assert.deepEqual(readAppearanceOverride("?theme=LIGHT"), {}, "大小写必须严格");
+  assert.deepEqual(readAppearanceOverride("?theme=&density="), {});
+});
+
+test("URL 覆盖：多余参数不影响（带 ?a=1&theme=light 也认）", () => {
+  assert.deepEqual(readAppearanceOverride("?a=1&theme=light&b=2"), { theme: "light" });
+});
+
+test("URL 覆盖：没有前导 ? 也能解析（手工拼字符串的容错）", () => {
+  assert.deepEqual(readAppearanceOverride("theme=light"), { theme: "light" });
+});
+
+/* ══════════════════════════════════════════════════════════════
+ * createAppearanceStore：改一下就要「同时」落到 DOM 与存储
+ * ══════════════════════════════════════════════════════════════ */
+
+/** 测试用：记录每次「落到 DOM」的值 */
+function tracker() {
+  const applied: Appearance[] = [];
+  return {
+    applied,
+    apply: (appearance: Appearance) => {
+      applied.push(appearance);
+    },
+  };
+}
+
+test("建店时就落一次 DOM：首帧必须与 store 一致", () => {
+  const seen = tracker();
+  createAppearanceStore({ storage: memoryStorage(), apply: seen.apply });
+  assert.deepEqual(seen.applied, [DEFAULT_APPEARANCE]);
+});
+
+test("初值可从存储读：上次选的主题与密度会延续", () => {
+  const seen = tracker();
+  const storage = memoryStorage({
+    [THEME_STORAGE_KEY]: "light",
+    [DENSITY_STORAGE_KEY]: "loose",
+  });
+  const store = createAppearanceStore({ storage, apply: seen.apply });
+
+  assert.equal(store.theme(), "light");
+  assert.equal(store.density(), "loose");
+  assert.deepEqual(seen.applied[0], { theme: "light", density: "loose" });
+});
+
+test("显式初值优先于存储（kitchen-sink 这类场景）", () => {
+  const store = createAppearanceStore({
+    storage: memoryStorage({ [THEME_STORAGE_KEY]: "light" }),
+    initial: { theme: "dark" },
+    apply: tracker().apply,
+  });
+  assert.equal(store.theme(), "dark");
+  assert.equal(store.density(), DEFAULT_APPEARANCE.density);
+});
+
+test("切主题：状态、DOM、存储三处同时变", () => {
+  const seen = tracker();
+  const storage = memoryStorage();
+  const store = createAppearanceStore({ storage, apply: seen.apply });
+  seen.applied.length = 0;
+
+  store.setTheme("light");
+  assert.equal(store.theme(), "light");
+  assert.deepEqual(seen.applied, [{ theme: "light", density: "compact" }]);
+  assert.equal(
+    storage.data[THEME_STORAGE_KEY],
+    "light",
+    "不持久化的话重启就回去了",
+  );
+});
+
+test("toggleTheme：深↔浅来回切", () => {
+  const store = createAppearanceStore({
+    storage: memoryStorage(),
+    apply: () => {},
+  });
+  assert.equal(store.theme(), "dark");
+  store.toggleTheme();
+  assert.equal(store.theme(), "light");
+  store.toggleTheme();
+  assert.equal(store.theme(), "dark");
+});
+
+test("切密度不影响主题（两轴独立）", () => {
+  const seen = tracker();
+  const store = createAppearanceStore({
+    storage: memoryStorage(),
+    apply: seen.apply,
+  });
+  store.setTheme("light");
+  store.setDensity("loose");
+
+  assert.deepEqual(store.appearance(), { theme: "light", density: "loose" });
+  assert.deepEqual(seen.applied[seen.applied.length - 1], {
+    theme: "light",
+    density: "loose",
+  });
+});
+
+test("非法输入被规范化，不会把非法值写进存储 / DOM", () => {
+  const seen = tracker();
+  const storage = memoryStorage();
+  const store = createAppearanceStore({ storage, apply: seen.apply });
+  seen.applied.length = 0;
+
+  store.setTheme("solarized" as never);
+  store.setDensity("medium" as never);
+
+  assert.equal(store.theme(), DEFAULT_APPEARANCE.theme);
+  assert.equal(store.density(), DEFAULT_APPEARANCE.density);
+  assert.equal(storage.data[THEME_STORAGE_KEY], DEFAULT_APPEARANCE.theme);
+  assert.deepEqual(seen.applied[seen.applied.length - 1], DEFAULT_APPEARANCE);
+});
+
+test("没有存储（隐私模式）时依然可用，只是不持久化", () => {
+  const seen = tracker();
+  const store = createAppearanceStore({
+    storage: undefined,
+    apply: seen.apply,
+  });
+  assert.doesNotThrow(() => store.toggleTheme());
+  assert.equal(store.theme(), "light");
+  assert.deepEqual(seen.applied[seen.applied.length - 1], {
+    theme: "light",
+    density: "compact",
+  });
 });

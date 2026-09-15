@@ -46,17 +46,18 @@ test("小数按四舍五入到整数", () => {
 });
 
 test("非法值不传播：NaN / ±Infinity 都按 0 处理", () => {
-  for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+  for (const bad of [
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    Number.NEGATIVE_INFINITY,
+  ]) {
     assert.equal(formatCount(bad, "zh-CN"), "0");
     assert.equal(formatCountCapped(bad, 999, "zh-CN"), "0");
   }
 });
 
 test("超大值不丢位数（不产出 1e+21 这种写法）", () => {
-  assert.equal(
-    formatCount(1e21, "zh-CN"),
-    "1 000 000 000 000 000 000 000",
-  );
+  assert.equal(formatCount(1e21, "zh-CN"), "1 000 000 000 000 000 000 000");
   assert.equal(formatCount(1e21, "en-US").includes("e"), false);
   assert.equal(
     formatCount(Number.MAX_SAFE_INTEGER, "en-US"),

@@ -1,23 +1,26 @@
 /**
- * SegmentedControl —— 凹槽 + 移动色块（DESIGN.md §10.1 #5）。
+ * SegmentedControl —— 「小而安静」的分段控件（DESIGN.md §10.1 #5）。
  *
- * 两个用途共用它：**工作流切换**（导入/浏览/编辑/导出）与**密度切换**（紧凑/宽松）。
+ * **它不再是 flowbar 的牌子。** 用户 2026-09-15 明确：
+ * 「横向选择器不要复用 flowbar 上的，flowbar 是非常特殊的部分……这种大模块切换的概念
+ * 不应该跟一个小小的界面松紧调整挂钩」。所以：
+ *
+ * | 用途 | 用谁 | 形态 |
+ * | --- | --- | --- |
+ * | 工作流（导入/浏览/编辑/导出） | `src/shell/FlowSwitcher.tsx` | 大胶囊 + 图标 + 文字，品牌实色块 |
+ * | 密度（紧凑/宽松）、语言这类小开关 | **本组件** | 小、方一些的圆角、更安静，不与前者混淆 |
  *
  * 状态：
- *   默认      凹槽 `surface-track`，选中项文字 = `fg-on-brand`（坐在主色块上）
+ *   默认      凹槽 `surface-track`，未选中项次要色
  *   指向      未选中项叠**辅色底**（§5）
- *   选中      色块 = **主色实色**（小控件用实色，§5.1），文字转 `fg-on-brand`
+ *   选中      **主色实色块**（§5.1：小控件用实色），文字 `fg-on-brand`
  *   选中+指向 保持主色块，不回落成辅色底
  *   禁用      前景降次级，不响应
  *
- * 语义是**单选**：同一时刻只有一个工作流、一个密度。
- * 「横向多选」在设计文档里指的是**横向排列的一组选项**，不是可以同时选中多个。
- *
- * 色块的位置与宽度交给 Ark 的 `Indicator`（它内部量测每个 item 并给出 transform）——
- * 自己算就得处理字体加载、缩放、文案变化后的重新测量，全是白费力气。
- *
- * 尺寸随密度档（`--seg-track-pad` / `--seg-chip-h` / `--seg-chip-pad-x`），
- * **字号不随密度变**（§8.1）。
+ * ⚠️ **教训（实测踩过）**：Ark（Zag）的指示块只给 `--left/--top/--width/--height` 变量，
+ * **不写 width / height 本身**。消费方不接的话它塌成 0 宽 —— 选中项就变成
+ * 「深色文字落在深色轨道上」，肉眼完全看不见（用户报的「选中字体全黑背景全黑」）。
+ * 所以 `Indicator` 上必须写 `h-[var(--height)] w-[var(--width)]` 与 `top/left`。
  */
 
 import { SegmentGroup as ArkSegmentGroup } from "@ark-ui/solid";
@@ -27,7 +30,6 @@ export interface SegmentOption<TValue extends string> {
   value: TValue;
   /** 文字标签（已经是翻译后的文案） */
   label: string;
-  /** 可选图标 */
   icon?: JSX.Element;
   disabled?: boolean;
 }
@@ -36,7 +38,7 @@ export interface SegmentedControlProps<TValue extends string> {
   value: TValue;
   options: readonly SegmentOption<TValue>[];
   onValueChange: (value: TValue) => void;
-  /** 无障碍名（如「工作流」「密度」）。必填：纯图形分组对读屏是空白 */
+  /** 无障碍名（如「密度」）。必填：纯图形分组对读屏是空白 */
   label: string;
   class?: string;
 }
@@ -53,13 +55,14 @@ export function SegmentedControl<TValue extends string>(
       }}
       aria-label={props.label}
       class={[
-        "relative inline-flex shrink-0 items-center rounded-full bg-surface-track p-seg-track-pad",
+        "relative inline-flex shrink-0 items-center rounded-ui bg-surface-track p-seg-track-pad",
         props.class ?? "",
       ]
         .filter(Boolean)
         .join(" ")}
     >
-      <ArkSegmentGroup.Indicator class="absolute top-seg-track-pad bottom-seg-track-pad left-0 rounded-full bg-brand transition-all duration-150" />
+      {/* 指示块：必须自己接上 Ark 给的四个变量，否则 0 宽不可见（见文件头注释） */}
+      <ArkSegmentGroup.Indicator class="absolute top-[var(--top)] left-[var(--left)] h-[var(--height)] w-[var(--width)] rounded-ui bg-brand transition-all duration-150" />
       <For each={props.options}>
         {(option) => (
           <ArkSegmentGroup.Item
@@ -67,20 +70,20 @@ export function SegmentedControl<TValue extends string>(
             disabled={option.disabled}
             class={[
               "relative z-10 flex h-seg-chip-h shrink-0 items-center justify-center",
-              "rounded-full px-seg-chip-pad-x transition-colors",
+              "rounded-ui px-seg-chip-pad-x transition-colors",
               option.disabled ? "cursor-default" : "cursor-pointer",
             ].join(" ")}
           >
             <ArkSegmentGroup.ItemControl
               class={[
-                "flex items-center gap-1.5 text-[12px] font-medium whitespace-nowrap",
+                "flex items-center gap-1.5 text-fs-2 font-medium whitespace-nowrap",
                 "text-fg-2 transition-colors",
                 "data-[state=checked]:text-fg-on-brand",
                 "data-[disabled]:text-fg-3 data-[disabled]:opacity-60",
               ].join(" ")}
             >
               <Show when={option.icon}>
-                <span class="flex size-3.5 items-center justify-center" aria-hidden="true">
+                <span class="flex size-4 items-center justify-center" aria-hidden="true">
                   {option.icon}
                 </span>
               </Show>

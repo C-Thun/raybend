@@ -23,6 +23,7 @@ export const enUS: Record<MessageKey, string> = {
  "titlebar.window.restore": "Restore",
  "titlebar.window.close": "Close",
 
+ "flow.label": "Workflow",
  "flow.import": "Import",
  "flow.browse": "Browse",
  "flow.edit": "Edit",
@@ -77,4 +78,17 @@ export const enUS: Record<MessageKey, string> = {
  "repo.import": "Import",
  "repo.avoid_duplicates": "Skip duplicates",
  "repo.empty": "No libraries yet — create one first",
+
+ // ── About (Help → About) ───────────────────────────────
+ // Wording note: "Repository" is what users look for; keep the URL text itself
+ // (the About dialog renders the host without the scheme).
+ "about.title": "About",
+ "about.version": "Version",
+ "about.license": "License",
+ "about.repository": "Repository",
+ "about.privacy": "Your photos and folders are never modified",
+ "about.debug": "Debug info",
+ "about.build_time": "Built",
+ "about.runtime": "Runtime",
+ "about.runtime_browser": "Browser (dev preview)",
 };

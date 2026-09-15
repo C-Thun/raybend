@@ -12,7 +12,14 @@
  * 产品界面的文案仍然零硬编码（§11.1）。
  */
 
-import { createEffect, createSignal, For, onMount, Show, type JSX } from "solid-js";
+import {
+  createEffect,
+  createSignal,
+  For,
+  onMount,
+  Show,
+  type JSX,
+} from "solid-js";
 import {
   IconAlertTriangle,
   IconCircleCheck,
@@ -27,7 +34,12 @@ import {
 import { Splitter as ArkSplitter } from "@ark-ui/solid";
 import { t } from "../i18n";
 import { LOCALE_IDS, locale, setLocale, type LocaleId } from "../i18n";
-import { applyAppearance, DEFAULT_APPEARANCE, writeAppearance } from "../lib/appearance";
+import { createAppearanceStore } from "../lib/appearance";
+import { createShellStore } from "../shell/store.ts";
+import { TitleBar } from "../shell/TitleBar.tsx";
+import { FlowBar } from "../shell/FlowBar.tsx";
+import { ToolsBar } from "../shell/ToolsBar.tsx";
+import type { ExifData } from "../features/exif-strip/index.ts";
 import { Badge, CountBadge } from "../components/ui/Badge";
 import { Button, IconButton } from "../components/ui/Button";
 import { Checkbox, Input, RadioCircle, Switch } from "../components/ui/Form";
@@ -46,15 +58,32 @@ import { RemoveButton } from "../components/ui/RemoveButton";
 import { EasyCopy } from "../components/ui/EasyCopy";
 import { EasyDestroyButton } from "../components/ui/EasyDestroy";
 
+/** 演示用的 EXIF：三组都有值（对应 design/main.md §2.2 的示例） */
+const DEMO_EXIF: ExifData = {
+  camera: "DC-G9",
+  lens: "LEICA DG 12-60mm F2.8-4.0",
+  focalLengthMm: 12,
+  fNumber: 2.8,
+  exposureSeconds: 1 / 125,
+  iso: 200,
+  widthPx: 5184,
+  heightPx: 3888,
+  format: "RAW",
+};
+
 /* ── 布局小工具（只服务于本页） ───────────────────────────── */
 
-function Section(props: { title: string; note?: string; children: JSX.Element }) {
+function Section(props: {
+  title: string;
+  note?: string;
+  children: JSX.Element;
+}) {
   return (
     <section class="flex flex-col gap-2 pb-6">
       <div>
-        <h2 class="text-[13px] font-semibold text-fg-1">{props.title}</h2>
+        <h2 class="text-fs-3 font-semibold text-fg-1">{props.title}</h2>
         <Show when={props.note}>
-          <p class="text-[11px] text-fg-3">{props.note}</p>
+          <p class="text-fs-1 text-fg-3">{props.note}</p>
         </Show>
       </div>
       <div class="flex flex-col gap-2">{props.children}</div>
@@ -65,7 +94,9 @@ function Section(props: { title: string; note?: string; children: JSX.Element })
 function Row(props: { label: string; children: JSX.Element }) {
   return (
     <div class="flex items-start gap-4">
-      <span class="w-36 shrink-0 pt-1 text-[11px] text-fg-3">{props.label}</span>
+      <span class="w-36 shrink-0 pt-1 text-fs-1 text-fg-3">
+        {props.label}
+      </span>
       <div class="flex min-w-0 flex-1 flex-wrap items-center gap-2">
         {props.children}
       </div>
@@ -76,10 +107,14 @@ function Row(props: { label: string; children: JSX.Element }) {
 /* ── 页面 ─────────────────────────────────────────────────── */
 
 export default function KitchenSink() {
-  const [theme, setTheme] = createSignal<"dark" | "light">(DEFAULT_APPEARANCE.theme);
-  const [density, setDensity] = createSignal<"compact" | "loose">(
-    DEFAULT_APPEARANCE.density,
-  );
+  /*
+   * 主题/密度直接复用**真实的外壳状态**（`lib/appearance.ts` 的 store）。
+   * 这样陈列室里切主题与产品里切主题走的是同一条路径 —— 演示不会与实物脱节。
+   */
+  const appearance = createAppearanceStore();
+  /** 外壳状态：演示 flowbar/toolsbar 的显隐规则（与 App 用的是同一个 store 实现） */
+  const shell = createShellStore();
+  const [exifDemo, setExifDemo] = createSignal<ExifData | null>(DEMO_EXIF);
 
   const [checked, setChecked] = createSignal(true);
   const [radio, setRadio] = createSignal(true);
@@ -93,9 +128,14 @@ export default function KitchenSink() {
   const [confirmOpen, setConfirmOpen] = createSignal(false);
   const [collapsed, setCollapsed] = createSignal(false);
   const [selectedTile, setSelectedTile] = createSignal(1);
-  const [expandedNodes, setExpandedNodes] = createSignal<string[]>(["d", "d/photo"]);
+  const [expandedNodes, setExpandedNodes] = createSignal<string[]>([
+    "d",
+    "d/photo",
+  ]);
   const [selectedNode, setSelectedNode] = createSignal("d/photo");
-  const [checkedNodes, setCheckedNodes] = createSignal<string[]>(["d/photo/2024"]);
+  const [checkedNodes, setCheckedNodes] = createSignal<string[]>([
+    "d/photo/2024",
+  ]);
   const [removedBars, setRemovedBars] = createSignal<string[]>([]);
 
   /**
@@ -117,45 +157,27 @@ export default function KitchenSink() {
   };
   onMount(buildDemoImage);
 
-  // 主题/密度落到 <html> 上（令牌选择器由此生效），同时重算演示图
+  // 主题换了 → 演示图的取色跟着换（落 DOM 与持久化已由 appearance store 负责）
   createEffect(() => {
-    const appearance = { theme: theme(), density: density() };
-    applyAppearance(appearance);
-    writeAppearance(appearance);
-    // 主题换了 → 演示图的取色也要跟着换
-    if (typeof document !== "undefined") buildDemoImage();
+    appearance.theme();
+    buildDemoImage();
   });
 
   const treeChecked = (id: string) => checkedNodes().includes(id);
 
   return (
     <div class="flex h-full flex-col bg-surface-main text-fg-1">
-      {/* ── 顶部控制条：主题 / 密度 / 语言 ─────────────────── */}
-      <header class="flex h-bar-title-h shrink-0 items-center gap-4 bg-surface-bar px-pad-x">
-        <span class="text-[13px] font-semibold">组件陈列室</span>
-        <span class="text-[11px] text-fg-3">
-          对齐 design/main.pen 逐项目视比对（Agent 只保证能跑）
-        </span>
-        <div class="h-px flex-1" />
+      {/* ── 真实外壳（M1-4）：陈列室直接用实物，不另画一套 ─── */}
+      <TitleBar store={shell} appearance={appearance} />
 
-        <SegmentedControl
-          label="主题"
-          value={theme()}
-          onValueChange={setTheme}
-          options={[
-            { value: "dark", label: "深色" },
-            { value: "light", label: "浅色" },
-          ]}
-        />
-        <SegmentedControl
-          label={t("titlebar.density.compact")}
-          value={density()}
-          onValueChange={setDensity}
-          options={[
-            { value: "compact", label: t("titlebar.density.compact") },
-            { value: "loose", label: t("titlebar.density.loose") },
-          ]}
-        />
+      {/* ── 开发期控制条（产品界面里没有这一行）───────────── */}
+      <header class="flex h-bar-tool-h shrink-0 items-center gap-3 bg-surface-bar px-pad-x">
+        <span class="text-fs-3 font-semibold">组件陈列室</span>
+        <span class="text-fs-1 text-fg-3">
+          对齐 design/main.pen 逐项目视比对（Agent
+          只保证能跑）；主题与密度用上面 titlebar 的开关切
+        </span>
+        <div class="flex-1" />
         <SegmentedControl
           label="语言"
           value={locale()}
@@ -173,34 +195,65 @@ export default function KitchenSink() {
           >
             <div class="flex flex-wrap gap-3">
               <div class="flex h-20 w-40 flex-col justify-center rounded-ui bg-surface-track px-3">
-                <span class="text-[11px] text-fg-2">surface-track</span>
-                <span class="text-[11px] text-fg-3">凹槽轨道</span>
+                <span class="text-fs-1 text-fg-2">surface-track</span>
+                <span class="text-fs-1 text-fg-3">凹槽轨道</span>
               </div>
               <div class="flex h-20 w-40 flex-col justify-center rounded-ui bg-surface-main px-3">
-                <span class="text-[11px] text-fg-2">surface-main</span>
-                <span class="text-[11px] text-fg-3">基础面</span>
+                <span class="text-fs-1 text-fg-2">surface-main</span>
+                <span class="text-fs-1 text-fg-3">基础面</span>
               </div>
               <div class="flex h-20 w-40 flex-col justify-center rounded-ui bg-surface-bar px-3">
-                <span class="text-[11px] text-fg-2">surface-bar</span>
-                <span class="text-[11px] text-fg-3">第二层</span>
+                <span class="text-fs-1 text-fg-2">surface-bar</span>
+                <span class="text-fs-1 text-fg-3">第二层</span>
               </div>
               <div class="flex h-20 w-40 flex-col justify-center rounded-ui bg-surface-layer px-3">
-                <span class="text-[11px] text-fg-2">surface-layer</span>
-                <span class="text-[11px] text-fg-3">浮层</span>
+                <span class="text-fs-1 text-fg-2">surface-layer</span>
+                <span class="text-fs-1 text-fg-3">浮层</span>
               </div>
             </div>
             <Row label="文字与状态">
-              <span class="text-[12px] text-fg-1">fg-1 正文</span>
-              <span class="text-[12px] text-fg-2">fg-2 次级</span>
-              <span class="text-[12px] text-fg-3">fg-3 注释</span>
-              <span class="rounded-ui bg-brand px-2 py-0.5 text-[12px] text-fg-on-brand">
+              <span class="text-fs-2 text-fg-1">fg-1 正文</span>
+              <span class="text-fs-2 text-fg-2">fg-2 次级</span>
+              <span class="text-fs-2 text-fg-3">fg-3 注释</span>
+              <span class="rounded-ui bg-brand px-2 py-0.5 text-fs-2 text-fg-on-brand">
                 on-brand
               </span>
-              <span class="rounded-ui bg-state-hover px-2 py-0.5 text-[12px]">
+              <span class="rounded-ui bg-state-hover px-2 py-0.5 text-fs-2">
                 state-hover 辅色底
               </span>
-              <span class="rounded-ui bg-state-selected px-2 py-0.5 text-[12px]">
+              <span class="rounded-ui bg-state-selected px-2 py-0.5 text-fs-2">
                 state-selected 主色底
+              </span>
+            </Row>
+          </Section>
+
+          {/* ── 外壳（M1-4）：flowbar + toolsbar ───────────── */}
+          <Section
+            title="外壳（M1-4）"
+            note="切到「浏览 / 编辑 / 导出」时工具行整行消失（design/main.md §2.3）"
+          >
+            <div class="flex flex-col overflow-hidden rounded-ui bg-surface-main">
+              <FlowBar store={shell} exif={exifDemo()} />
+              <ToolsBar
+                store={shell}
+                hasSelection={false}
+                onBatchExclude={() => {}}
+              />
+            </div>
+            <Row label="EXIF 数据">
+              <Switch
+                checked={exifDemo() !== null}
+                onCheckedChange={(on) => setExifDemo(on ? DEMO_EXIF : null)}
+                label="有 EXIF"
+              />
+              <span class="text-fs-1 text-fg-3">
+                关掉就是空态（未选择照片）；字段名在悬停时以原生提示给出
+              </span>
+            </Row>
+            <Row label="工具行">
+              <span class="text-fs-1 text-fg-3">
+                「批量排除」在没有选中照片时是禁用态 —— M1-5
+                接上照片网格后才会真的可点
               </span>
             </Row>
           </Section>
@@ -264,7 +317,11 @@ export default function KitchenSink() {
                 onCheckedChange={setChecked}
                 label="包含子目录"
               />
-              <Checkbox checked={false} onCheckedChange={() => {}} label="未勾选" />
+              <Checkbox
+                checked={false}
+                onCheckedChange={() => {}}
+                label="未勾选"
+              />
               <Checkbox
                 checked
                 onCheckedChange={() => {}}
@@ -273,8 +330,16 @@ export default function KitchenSink() {
               />
             </Row>
             <Row label="RadioCircle">
-              <RadioCircle checked={radio()} onCheckedChange={setRadio} label="勾选" />
-              <RadioCircle checked={false} onCheckedChange={() => {}} label="未勾选" />
+              <RadioCircle
+                checked={radio()}
+                onCheckedChange={setRadio}
+                label="勾选"
+              />
+              <RadioCircle
+                checked={false}
+                onCheckedChange={() => {}}
+                label="未勾选"
+              />
               <RadioCircle
                 checked
                 onCheckedChange={() => {}}
@@ -288,7 +353,12 @@ export default function KitchenSink() {
                 onCheckedChange={setSwitchOn}
                 label="包含子目录"
               />
-              <Switch checked onCheckedChange={() => {}} label="开（禁用）" disabled />
+              <Switch
+                checked
+                onCheckedChange={() => {}}
+                label="开（禁用）"
+                disabled
+              />
             </Row>
             <Row label="Input">
               <Input placeholder="库名称" class="w-40" />
@@ -361,7 +431,10 @@ export default function KitchenSink() {
           </Section>
 
           {/* ── Badge ────────────────────────────────────── */}
-          <Section title="Badge / CountBadge（#16）" note="计数必须 tabular-nums">
+          <Section
+            title="Badge / CountBadge（#16）"
+            note="计数必须 tabular-nums"
+          >
             <Row label="Badge">
               <Badge>已排除</Badge>
               <Badge tone="brand" icon={<IconCircleCheck size={12} />}>
@@ -402,7 +475,11 @@ export default function KitchenSink() {
               <Menu
                 label="帮助"
                 items={[
-                  { value: "about", label: t("titlebar.menu.help.about"), icon: <IconInfoCircle size={14} /> },
+                  {
+                    value: "about",
+                    label: t("titlebar.menu.help.about"),
+                    icon: <IconInfoCircle size={14} />,
+                  },
                   {
                     value: "docs",
                     label: "文档",
@@ -451,12 +528,19 @@ export default function KitchenSink() {
                 />
               </span>
               <span class="w-64">
-                <PathText path="D:\\Photos\\2024" full icon={<IconFolder size={14} />} />
+                <PathText
+                  path="D:\\Photos\\2024"
+                  full
+                  icon={<IconFolder size={14} />}
+                />
               </span>
             </Row>
             <Row label="POSIX 与新路径">
               <span class="w-64">
-                <PathText path="/home/andares/Pictures/Wallpapers" maxLength={22} />
+                <PathText
+                  path="/home/andares/Pictures/Wallpapers"
+                  maxLength={22}
+                />
               </span>
               <span class="w-64">
                 <PathText path="" />
@@ -499,16 +583,28 @@ export default function KitchenSink() {
             note="勾选（圈）与选中（整行主色底）是两套独立状态；展开只跟用户操作有关"
           >
             <div class="w-full max-w-md rounded-ui bg-surface-main p-1">
-              <TreeNode label="D:\\" depth={0} hasChildren expanded={expandedNodes().includes("d")} icon={<IconFolder size={14} />}
+              <TreeNode
+                label="D:\\"
+                depth={0}
+                hasChildren
+                expanded={expandedNodes().includes("d")}
+                icon={<IconFolder size={14} />}
                 onToggleExpand={() =>
                   setExpandedNodes((prev) =>
-                    prev.includes("d") ? prev.filter((x) => x !== "d") : [...prev, "d"],
+                    prev.includes("d")
+                      ? prev.filter((x) => x !== "d")
+                      : [...prev, "d"],
                   )
                 }
                 onClick={() => setSelectedNode("d")}
                 selected={selectedNode() === "d"}
               />
-              <TreeNode label="Photos" depth={1} hasChildren expanded={expandedNodes().includes("d/photo")} icon={<IconFolder size={14} />}
+              <TreeNode
+                label="Photos"
+                depth={1}
+                hasChildren
+                expanded={expandedNodes().includes("d/photo")}
+                icon={<IconFolder size={14} />}
                 onToggleExpand={() =>
                   setExpandedNodes((prev) =>
                     prev.includes("d/photo")
@@ -519,7 +615,11 @@ export default function KitchenSink() {
                 onClick={() => setSelectedNode("d/photo")}
                 selected={selectedNode() === "d/photo"}
               />
-              <TreeNode label="2024" depth={2} hasChildren={false} icon={<IconFolder size={14} />}
+              <TreeNode
+                label="2024"
+                depth={2}
+                hasChildren={false}
+                icon={<IconFolder size={14} />}
                 checked={treeChecked("d/photo/2024")}
                 checkLabel="勾选 2024"
                 onCheckedChange={() =>
@@ -533,7 +633,11 @@ export default function KitchenSink() {
                 selected={selectedNode() === "d/photo/2024"}
                 trailing="1 248"
               />
-              <TreeNode label="2025" depth={2} hasChildren={false} icon={<IconFolder size={14} />}
+              <TreeNode
+                label="2025"
+                depth={2}
+                hasChildren={false}
+                icon={<IconFolder size={14} />}
                 checked={false}
                 checkLabel="勾选 2025"
                 onCheckedChange={() => {}}
@@ -541,7 +645,12 @@ export default function KitchenSink() {
                 selected={selectedNode() === "d/photo/2025"}
                 trailing="76"
               />
-              <TreeNode label="只读卷" depth={1} icon={<IconFolder size={14} />} disabled />
+              <TreeNode
+                label="只读卷"
+                depth={1}
+                icon={<IconFolder size={14} />}
+                disabled
+              />
             </div>
           </Section>
 
@@ -564,7 +673,14 @@ export default function KitchenSink() {
                     </IconButton>
                   }
                 >
-                  <For each={["D:\\Photos", "E:\\2024", "//nas/photos", "D:\\照片\\2024 秋"]}>
+                  <For
+                    each={[
+                      "D:\\Photos",
+                      "E:\\2024",
+                      "//nas/photos",
+                      "D:\\照片\\2024 秋",
+                    ]}
+                  >
                     {(path) => (
                       <PathText
                         path={path}
@@ -596,7 +712,12 @@ export default function KitchenSink() {
                   <Panel title={t("source.recent")} scroll>
                     <For each={["D:\\Photos", "E:\\2024"]}>
                       {(path) => (
-                        <PathText path={path} maxLength={20} icon={<IconFolder size={14} />} class="h-row-h" />
+                        <PathText
+                          path={path}
+                          maxLength={20}
+                          icon={<IconFolder size={14} />}
+                          class="h-row-h"
+                        />
                       )}
                     </For>
                   </Panel>
@@ -609,7 +730,14 @@ export default function KitchenSink() {
                 </ArkSplitter.ResizeTrigger>
                 <ArkSplitter.Panel id="source" class="min-h-0 overflow-hidden">
                   <Panel title={t("source.tree")} scroll>
-                    <For each={["D:\\", "E:\\", "//nas/photos", "C:\\Users\\me\\Pictures"]}>
+                    <For
+                      each={[
+                        "D:\\",
+                        "E:\\",
+                        "//nas/photos",
+                        "C:\\Users\\me\\Pictures",
+                      ]}
+                    >
                       {(path) => (
                         <TreeNode
                           label={path}
@@ -627,9 +755,19 @@ export default function KitchenSink() {
                 >
                   <SplitHandleDots />
                 </ArkSplitter.ResizeTrigger>
-                <ArkSplitter.Panel id="selected" class="min-h-0 overflow-hidden">
+                <ArkSplitter.Panel
+                  id="selected"
+                  class="min-h-0 overflow-hidden"
+                >
                   <Panel title={t("source.selected")} scroll>
-                    <For each={["D:\\Photos", "E:\\2024", "//nas/photos", "D:\\照片\\2024 秋"]}>
+                    <For
+                      each={[
+                        "D:\\Photos",
+                        "E:\\2024",
+                        "//nas/photos",
+                        "D:\\照片\\2024 秋",
+                      ]}
+                    >
                       {(path) => (
                         <Show when={!removedBars().includes(path)}>
                           <div class="flex h-selected-bar-h items-center gap-2 rounded-ui bg-surface-track px-2">
@@ -658,9 +796,11 @@ export default function KitchenSink() {
                 <ScrollBox class="h-full">
                   <For each={Array.from({ length: 40 }, (_, i) => i + 1)}>
                     {(n) => (
-                      <div class="flex h-row-h items-center gap-2 px-2 text-[12px] text-fg-2 hover:bg-state-hover">
+                      <div class="flex h-row-h items-center gap-2 px-2 text-fs-2 text-fg-2 hover:bg-state-hover">
                         <IconPhoto size={14} />
-                        <span class="tnum">DSC_{String(n).padStart(4, "0")}.NEF</span>
+                        <span class="tnum">
+                          DSC_{String(n).padStart(4, "0")}.NEF
+                        </span>
                       </div>
                     )}
                   </For>
@@ -675,8 +815,10 @@ export default function KitchenSink() {
             note="悬停出细边框 + 点击复制；点完弹「已复制」。移除默认确认，按住 Shift 跳过"
           >
             <Row label="easy copy（EXIF 三组）">
-              <div class="flex flex-wrap items-center gap-4 text-[12px]">
-                <EasyCopy value={"机型 NIKON Z 7II\n镜头 NIKKOR Z 24-70mm f/2.8 S"}>
+              <div class="flex flex-wrap items-center gap-4 text-fs-2">
+                <EasyCopy
+                  value={"机型 NIKON Z 7II\n镜头 NIKKOR Z 24-70mm f/2.8 S"}
+                >
                   <span class="text-fg-2">机型</span>
                   <span>NIKON Z 7II</span>
                   <span class="text-fg-2">镜头</span>
@@ -708,7 +850,7 @@ export default function KitchenSink() {
                   setRemovedBars((prev) => [...prev, "demo"]);
                 }}
               />
-              <span class="text-[11px] text-fg-3">
+              <span class="text-fs-1 text-fg-3">
                 普通点击弹确认；按住 Shift 点击直接移除
               </span>
             </Row>

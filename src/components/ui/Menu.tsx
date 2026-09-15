@@ -39,7 +39,21 @@ export interface MenuProps {
   children: TriggerRender;
   /** 无障碍名（如「帮助」菜单） */
   label?: string;
-  placement?: "top" | "bottom" | "left" | "right" | "bottom-start" | "bottom-end";
+  placement?:
+    | "top"
+    | "bottom"
+    | "left"
+    | "right"
+    | "bottom-start"
+    | "bottom-end";
+  /**
+   * 菜单开关状态变化。
+   *
+   * 调用方真会用到：菜单挂在 portal 里，鼠标移进菜单会触发标题行的 `pointerleave`
+   * —— 外壳靠这个回调把菜单「钉住」，否则菜单会在用户点它的瞬间自己关掉
+   * （详细说明见 `src/shell/store.ts`）。
+   */
+  onOpenChange?: (open: boolean) => void;
 }
 
 export function Menu(props: MenuProps) {
@@ -47,6 +61,7 @@ export function Menu(props: MenuProps) {
     <ArkMenu.Root
       positioning={{ placement: props.placement ?? "bottom-start" }}
       onSelect={(details) => props.onSelect(String(details.value))}
+      onOpenChange={(details) => props.onOpenChange?.(details.open)}
       lazyMount
       unmountOnExit
     >
@@ -69,7 +84,7 @@ export function Menu(props: MenuProps) {
                     value={item.value}
                     disabled={item.disabled}
                     class={[
-                      "flex h-row-h cursor-pointer items-center gap-1.5 px-2 text-[12px]",
+                      "flex h-row-h cursor-pointer items-center gap-1.5 px-2 text-fs-2",
                       "outline-none transition-colors",
                       item.selected
                         ? "bg-state-selected text-fg-1"

@@ -99,7 +99,10 @@ export function SplitHandle(props: SplitHandleProps) {
         .join(" ")}
     >
       <Show when={!local.disabled}>
-        <SplitHandleDots orientation={local.orientation} active={local.active} />
+        <SplitHandleDots
+          orientation={local.orientation}
+          active={local.active}
+        />
       </Show>
     </div>
   );

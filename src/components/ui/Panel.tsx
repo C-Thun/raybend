@@ -83,7 +83,7 @@ export function Panel(props: PanelProps) {
             </button>
           </Show>
           <Show when={local.title}>
-            <h2 class="min-w-0 flex-1 truncate text-[11px] font-medium tracking-wide text-fg-2 uppercase">
+            <h2 class="min-w-0 flex-1 truncate text-fs-1 font-medium tracking-wide text-fg-2 uppercase">
               {local.title}
             </h2>
           </Show>
@@ -107,7 +107,7 @@ export function Panel(props: PanelProps) {
             .join(" ")}
         >
           <Show when={local.empty} fallback={local.children}>
-            <div class="flex flex-1 items-center justify-center p-panel-pad text-center text-[11px] text-fg-3">
+            <div class="flex flex-1 items-center justify-center p-panel-pad text-center text-fs-1 text-fg-3">
               {local.empty}
             </div>
           </Show>

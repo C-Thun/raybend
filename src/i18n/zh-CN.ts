@@ -27,6 +27,7 @@ export const zhCN = {
  "titlebar.window.close": "关闭",
 
  // ── flowbar：工作流（design/main.md §2.2）──────────────
+ "flow.label": "工作流",
  "flow.import": "导入",
  "flow.browse": "浏览",
  "flow.edit": "编辑",
@@ -87,4 +88,15 @@ export const zhCN = {
  "repo.import": "导入",
  "repo.avoid_duplicates": "避免重复导入",
  "repo.empty": "还没有库，先建一个",
+
+ // ── 关于（帮助 → 关于）─────────────────────────────
+ "about.title": "关于",
+ "about.version": "版本",
+ "about.license": "许可",
+ "about.repository": "仓库",
+ "about.privacy": "你的照片与目录永远不会被改动",
+ "about.debug": "调试信息",
+ "about.build_time": "构建时间",
+ "about.runtime": "运行环境",
+ "about.runtime_browser": "浏览器（开发预览）",
 } as const;

@@ -25,13 +25,20 @@ const branch = (id: string, ...children: Node[]): Node => ({ id, children });
 // ─── flattenVisible ──────────────────────────────────────
 
 test("空树 → 空行", () => {
-  assert.deepEqual(flattenVisible([], () => true), []);
+  assert.deepEqual(
+    flattenVisible([], () => true),
+    [],
+  );
 });
 
 test("单节点：深度 0、无子节点", () => {
   const rows = flattenVisible([leaf("a")], () => true);
   assert.equal(rows.length, 1);
-  assert.deepEqual(rows[0], { node: { id: "a" }, depth: 0, hasChildren: false });
+  assert.deepEqual(rows[0], {
+    node: { id: "a" },
+    depth: 0,
+    hasChildren: false,
+  });
 });
 
 test("展开的父节点：子节点紧随其后且深度 +1", () => {
@@ -55,7 +62,11 @@ test("折叠的父节点：子树整棵不出现（不是隐藏，是不存在�
     rows.map((r) => r.node.id),
     ["a"],
   );
-  assert.equal(rows[0].hasChildren, true, "折叠不影响 hasChildren（箭头仍要画）");
+  assert.equal(
+    rows[0].hasChildren,
+    true,
+    "折叠不影响 hasChildren（箭头仍要画）",
+  );
 });
 
 test("展开与否只取决于 isExpanded —— 别的状态传进来也不该影响行集", () => {
@@ -136,7 +147,11 @@ test("缩进：非法输入不产出 NaN / 负数", () => {
     assert.ok(Number.isFinite(px), `indentPx(${d}, ${u}) 不应是 ${px}`);
     assert.ok(px >= 0, "缩进不应为负");
   }
-  assert.equal(indentPx(2.7, 10.9), 21.8, "深度取整（2），单位是可带小数的长度，原样保留");
+  assert.equal(
+    indentPx(2.7, 10.9),
+    21.8,
+    "深度取整（2），单位是可带小数的长度，原样保留",
+  );
 });
 
 // ─── pathKey / samePath ──────────────────────────────────
@@ -153,7 +168,10 @@ test("路径键：可以关掉大小写折叠（Linux 语义 —— /A 与 /a �
 
 test("路径键：两种分隔符等价", () => {
   assert.equal(pathKey("D:\\A\\B\\C"), pathKey("D:/A/B/C"));
-  assert.equal(pathKey("\\\\server\\share\\dir"), pathKey("//server/share/dir"));
+  assert.equal(
+    pathKey("\\\\server\\share\\dir"),
+    pathKey("//server/share/dir"),
+  );
 });
 
 test("路径键：尾部分隔符与重复分隔符不影响身份", () => {
@@ -173,11 +191,17 @@ test("路径键：Unicode 规范化（macOS 的 NFD 与 Windows 的 NFC 视为�
   const nfc = "/Users/me/Pictures/caf\u00e9"; // é 单码点
   const nfd = "/Users/me/Pictures/cafe\u0301"; // e + 组合重音
   assert.notEqual(nfc, nfd, "原始字符串确实不同（否则这条测试没意义）");
-  assert.equal(pathKey(nfc, { caseFold: false }), pathKey(nfd, { caseFold: false }));
+  assert.equal(
+    pathKey(nfc, { caseFold: false }),
+    pathKey(nfd, { caseFold: false }),
+  );
 });
 
 test("路径键：中文与特殊字符原样保留", () => {
-  assert.equal(pathKey("D:\\照片\\2024 秋\\北京"), "d:/照片/2024 秋/北京".toLowerCase());
+  assert.equal(
+    pathKey("D:\\照片\\2024 秋\\北京"),
+    "d:/照片/2024 秋/北京".toLowerCase(),
+  );
   assert.equal(samePath("D:\\照片", "d:/照片"), true);
 });
 

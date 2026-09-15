@@ -29,7 +29,7 @@ body {
  font-family:
   "Inter Variable", "Noto Sans SC Variable", system-ui, -apple-system,
   "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei", sans-serif;
- font-size: 13px;
+ font-size: var(--fs-3); /* 正文基准：见 tokens.css 的字号阶梯 */
  line-height: 1.45;
  -webkit-font-smoothing: antialiased;
 

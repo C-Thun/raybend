@@ -36,19 +36,27 @@ export interface BadgeProps {
 }
 
 export function Badge(props: BadgeProps) {
-  const [local, rest] = splitProps(props, ["tone", "icon", "class", "children"]);
+  const [local, rest] = splitProps(props, [
+    "tone",
+    "icon",
+    "class",
+    "children",
+  ]);
 
   return (
     <span
       {...rest}
       class={[
-        "inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-px text-[11px] leading-4 font-medium",
+        "inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-px text-fs-1 leading-4 font-medium",
         TONE_CLASSES[local.tone ?? "neutral"],
         local.class ?? "",
       ].join(" ")}
     >
       <Show when={local.icon}>
-        <span class="flex size-3 items-center justify-center" aria-hidden="true">
+        <span
+          class="flex size-3 items-center justify-center"
+          aria-hidden="true"
+        >
           {local.icon}
         </span>
       </Show>
@@ -97,7 +105,10 @@ export function CountBadge(props: CountBadgeProps) {
       icon={local.icon}
       class={["tnum", local.class ?? ""].join(" ")}
     >
-      <span aria-label={local.label} aria-hidden={local.label ? undefined : "true"}>
+      <span
+        aria-label={local.label}
+        aria-hidden={local.label ? undefined : "true"}
+      >
         {text()}
       </span>
     </Badge>

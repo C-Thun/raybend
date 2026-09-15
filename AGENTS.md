@@ -136,6 +136,21 @@ pnpm install
 pnpm tauri dev            # Linux/webkit2gtk 版窗口（经 WSLg 显示）
 cargo check --workspace   # Rust 侧快速检查（WSL 侧 target/）
 
+# —— 前端质量门（改完就跑这几条；CI 尚未建立，先靠习惯）——
+pnpm typecheck            # 类型检查
+pnpm test                 # 单元测试（node --test，零依赖，应当保持在秒级）
+pnpm lint:colors          # 色值只允许出现在 tokens.css
+pnpm lint:arch            # 分层依赖方向（ARCHITECTURE.md §1/§2）
+pnpm build                # 生产构建
+
+# —— 运行时冒烟（需另一个终端先 `pnpm dev`）——
+pnpm smoke:ui                  # 默认打应用外壳；也可传 URL
+pnpm smoke:ui http://localhost:1420/dev/kitchen-sink
+
+# —— 发版（只准备产物；**不** commit / tag / push，那些由人做）——
+pnpm release test              # 自测包（版本号不变）
+pnpm release patch --dry-run   # 先看计划
+
 # —— Windows 侧（真实产品环境：WebView2）——
 # 前端在 WSL 构建，Windows 只跑 Rust，不需要在 Windows 装 Node。
 pnpm build                              # ① WSL 里产出 dist/
@@ -160,6 +175,12 @@ cmd.exe /c 'pushd \\wsl.localhost\Ubuntu-24.04\home\andares\repos\c-thun\raybend
    ```
 
    （若确实需要用 `start`，就得接受这层引号嵌套很难写对；直接执行免去全部转义问题。）
+
+6. **`src-tauri/tauri.linux.conf.json` 是开发期便利，不是最终形态**（M1-4 加的）：
+   它保留系统标题栏，只为 WSLg 下还能拖边缩放（产品在 Windows 上是沉浸式 `decorations: false`）。
+   **发布 Linux 版之前必须处理**（`FUTURE.md` G11）。
+   另：Tauri 的平台配置合并是 **RFC 7396 merge patch** —— **数组会被整体替换**，
+   所以那个文件必须重复整份窗口配置，改主配置的窗口尺寸时别忘了同步它。
 
 ### 5.3.1 为什么必须加 `--features custom-protocol`（重要，别拆掉）
 

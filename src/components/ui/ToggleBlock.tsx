@@ -64,14 +64,17 @@ export function ToggleBlock(props: ToggleBlockProps) {
       <Show when={local.icon}>
         <span
           class="flex items-center justify-center"
-          style={{ width: "var(--toggle-block-icon)", height: "var(--toggle-block-icon)" }}
+          style={{
+            width: "var(--toggle-block-icon)",
+            height: "var(--toggle-block-icon)",
+          }}
           aria-hidden="true"
         >
           {local.icon}
         </span>
       </Show>
       <Show when={local.children}>
-        <span class="text-[12px] whitespace-nowrap">{local.children}</span>
+        <span class="text-fs-2 whitespace-nowrap">{local.children}</span>
       </Show>
     </button>
   );

@@ -139,7 +139,7 @@ export function Tile(props: TileProps) {
         {/* 空态标记：唯一的视觉差异是图标更淡 —— 不额外加描边或底色（§6 无边线） */}
         <Show when={local.empty && !local.loading}>
           <span class="absolute inset-0 flex items-center justify-center">
-            <span class="text-[11px] text-fg-3">—</span>
+            <span class="text-fs-1 text-fg-3">—</span>
           </span>
         </Show>
 
@@ -158,7 +158,7 @@ export function Tile(props: TileProps) {
       >
         <span
           class={[
-            "truncate text-[11px] leading-tight",
+            "truncate text-fs-1 leading-tight",
             local.selected ? "text-fg-1" : "text-fg-2",
             local.loading ? "opacity-40" : "",
           ].join(" ")}
@@ -167,7 +167,7 @@ export function Tile(props: TileProps) {
           {local.label}
         </span>
         <Show when={local.sublabel}>
-          <span class="truncate text-[10px] leading-tight text-fg-3 tnum">
+          <span class="truncate text-fs-0 leading-tight text-fg-3 tnum">
             {local.sublabel}
           </span>
         </Show>

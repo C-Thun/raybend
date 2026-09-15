@@ -1,66 +1,55 @@
-import { A } from "@solidjs/router";
-
 /**
- * 应用外壳骨架 —— 按 design/main.md §2 的三行结构实现。
+ * 应用组装（`ARCHITECTURE.md` §1 的最上层）。
  *
- * 本阶段的职责：
- *   1. 验证语义工具类（bg-surface-bar / text-fg-1 / h-bar-title-h …）确实生成且可切主题与密度
- *   2. 确立表面分层（DESIGN.md §2）：titlebar=bar / flowbar+toolsbar=main / 工作区两侧=main、中央=bar
- *   3. 确立「无边线设计」：块与块之间不加分隔线，只靠面色差
+ * 结构就是设计稿的三行 + 工作区：
+ *   titlebar   (bar)   —— 沉浸式，接管窗口拖动与三键
+ *   flowbar    (main)  —— 工作流 + EXIF + 吸附
+ *   toolsbar   (main)  —— 随工作流装配，**无内容时整行不存在**
+ *   workspace          —— 两侧 main / 中央 bar
  *
- * 尚未实现（后续步骤）：菜单、主题/密度开关、窗口三键、EXIF 区、三列内容。
+ * 两条状态在这里创建、往下传（`ARCHITECTURE.md` §3 的状态归属）：
+ *   - **外壳状态**（当前工作流、菜单可见性）→ `shell/store.ts`
+ *   - **外观状态**（主题、密度）→ `lib/appearance.ts`（建店时就会落到 `<html>` 上）
+ *
+ * 工作区目前仍是占位：三列内容属于 M1-5，届时这里换成 `src/workspaces/import/`。
+ * 现在就把外壳接上真东西，是因为外壳的显隐规则（toolsbar 跟随工作流）**必须现在就能看到** ——
+ * 等到 M1-5 再验证，问题会混在照片网格里，分不清是谁的。
  */
+
+import { createAppearanceStore } from "./lib/appearance.ts";
+import { FlowBar } from "./shell/FlowBar.tsx";
+import { createShellStore } from "./shell/store.ts";
+import { TitleBar } from "./shell/TitleBar.tsx";
+import { ToolsBar } from "./shell/ToolsBar.tsx";
+
 export default function App() {
+  const shell = createShellStore();
+  const appearance = createAppearanceStore();
+
   return (
     <div class="flex h-full w-full flex-col bg-surface-main text-fg-1">
-      {/* ── titlebar：沉浸式，无系统标题行 ───────────────────────── */}
-      <header
-        data-tauri-drag-region
-        class="flex h-bar-title-h shrink-0 items-center gap-0 bg-surface-bar px-pad-x"
-      >
-        {/* 应用图标（占位：品牌色圆角块） */}
-        <div class="flex size-5 items-center justify-center rounded-ui bg-brand">
-          <span class="text-[11px] leading-none text-fg-on-brand">光</span>
-        </div>
-        <div class="w-2" />
-        <span class="text-[13px] font-semibold">光伴</span>
+      <TitleBar store={shell} appearance={appearance} />
 
-        {/* 拖拽区：撑开中间空白，窗口由此拖动（双击自动最大化，免权限） */}
-        <div class="h-px flex-1" />
+      {/* EXIF 数据来自 M1-3 的扫描管线；在此之前一律是空态 */}
+      <FlowBar store={shell} exif={null} />
 
-        {/* 开发期入口：用三元而不是 `Show` —— 生产构建下整条分支会被摇掉（连字符串都不留） */}
-        {import.meta.env.DEV ? (
-          <A
-            href="/dev/kitchen-sink"
-            class="rounded-ui px-2 py-0.5 text-[11px] text-fg-2 hover:bg-state-hover hover:text-fg-1"
-          >
-            组件陈列室
-          </A>
-        ) : null}
-      </header>
+      {/*
+        批量排除（DESIGN.md §12.2 的**反转**语义）：M1-4 阶段还没有照片可选，
+        所以它一直是禁用态 —— 这是**正确**的表现，不是没做完。
+        M1-5 会把 `hasSelection` 与回调接到照片网格上。
+      */}
+      <ToolsBar store={shell} hasSelection={false} />
 
-      {/* ── flowbar：工作流 + 图片信息 + 开关组 ──────────────────── */}
-      <div class="flex h-[var(--bar-flow-h)] shrink-0 items-center bg-surface-main px-pad-x">
-        <span class="text-[11px] text-fg-3">工作流切换（待实现）</span>
-        <div class="h-px flex-1" />
-        <span class="text-[11px] text-fg-2 tnum">EXIF 信息区（待实现）</span>
-      </div>
-
-      {/* ── toolsbar：无内容时整行隐藏 ───────────────────────────── */}
-      <div class="flex h-[var(--bar-tool-h)] shrink-0 items-center justify-center bg-surface-main">
-        <span class="text-[11px] text-fg-3">批量排除（待实现）</span>
-      </div>
-
-      {/* ── workspace：两侧 main / 中央 bar（中央聚焦，无需分隔线）── */}
+      {/* ── workspace（M1-5 换掉）───────────────────────────── */}
       <div class="flex min-h-0 flex-1">
         <aside class="w-panel-w-left shrink-0 bg-surface-main p-panel-pad">
-          <p class="text-[11px] tracking-wide text-fg-2 uppercase">来源</p>
+          <p class="text-fs-1 tracking-wide text-fg-2 uppercase">来源</p>
         </aside>
         <main class="flex min-w-0 flex-1 items-center justify-center bg-surface-bar">
-          <p class="text-fg-3">照片区（待实现）</p>
+          <p class="text-fg-3">照片区（M1-5）</p>
         </main>
         <aside class="w-panel-w-right shrink-0 bg-surface-main p-panel-pad">
-          <p class="text-[11px] tracking-wide text-fg-2 uppercase">库</p>
+          <p class="text-fs-1 tracking-wide text-fg-2 uppercase">库</p>
         </aside>
       </div>
     </div>

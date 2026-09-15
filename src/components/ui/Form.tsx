@@ -53,7 +53,7 @@ export function Checkbox(props: CheckboxProps) {
         </ArkCheckbox.Indicator>
       </ArkCheckbox.Control>
       <Show when={props.label}>
-        <ArkCheckbox.Label class="cursor-pointer text-[11px] text-fg-2">
+        <ArkCheckbox.Label class="cursor-pointer text-fs-1 text-fg-2">
           {props.label}
         </ArkCheckbox.Label>
       </Show>
@@ -180,7 +180,7 @@ export function Input(props: InputProps) {
     <input
       {...rest}
       class={[
-        "h-6 rounded-ui bg-surface-track px-2 text-[12px] text-fg-1 transition-colors",
+        "h-6 rounded-ui bg-surface-track px-2 text-fs-2 text-fg-1 transition-colors",
         "border border-transparent outline-none",
         "placeholder:text-fg-3",
         "hover:border-fg-3 focus:border-brand",

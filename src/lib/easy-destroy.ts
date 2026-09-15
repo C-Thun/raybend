@@ -86,7 +86,9 @@ export function createEasyDestroy(): EasyDestroyController {
   return {
     pending: () => {
       const current = pending();
-      return current ? { message: current.message, title: current.title } : null;
+      return current
+        ? { message: current.message, title: current.title }
+        : null;
     },
 
     request: (message, run, event, title) => {

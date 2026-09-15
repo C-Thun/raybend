@@ -87,7 +87,9 @@ export function TreeNode(props: TreeNodeProps) {
         local.selected
           ? "bg-state-selected text-fg-1"
           : "text-fg-2 hover:bg-state-hover hover:text-fg-1",
-        local.disabled ? "pointer-events-none text-fg-3 opacity-60" : "cursor-pointer",
+        local.disabled
+          ? "pointer-events-none text-fg-3 opacity-60"
+          : "cursor-pointer",
         local.class ?? "",
       ]
         .filter(Boolean)
@@ -130,14 +132,17 @@ export function TreeNode(props: TreeNodeProps) {
       </Show>
 
       <Show when={local.icon}>
-        <span class="flex size-4 shrink-0 items-center justify-center" aria-hidden="true">
+        <span
+          class="flex size-4 shrink-0 items-center justify-center"
+          aria-hidden="true"
+        >
           {local.icon}
         </span>
       </Show>
 
       <span
         class={[
-          "min-w-0 flex-1 truncate text-[12px]",
+          "min-w-0 flex-1 truncate text-fs-2",
           local.selected ? "text-fg-1" : "",
         ]
           .filter(Boolean)
@@ -148,7 +153,9 @@ export function TreeNode(props: TreeNodeProps) {
       </span>
 
       <Show when={local.trailing}>
-        <span class="shrink-0 text-[11px] text-fg-3 tnum">{local.trailing}</span>
+        <span class="shrink-0 text-fs-1 text-fg-3 tnum">
+          {local.trailing}
+        </span>
       </Show>
     </div>
   );
