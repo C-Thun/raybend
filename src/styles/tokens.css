@@ -1,0 +1,252 @@
+/*
+ * raybend 设计令牌层 —— 唯一事实来源是 DESIGN.md
+ *
+ * 三层链路（DESIGN.md §9.1）：
+ *   DESIGN.md  →  本文件（CSS 变量）  →  Tailwind 语义工具类
+ *
+ * 纪律：
+ *   1. 色值只允许出现在本文件与 DESIGN.md 两处；组件代码禁止硬编码色值。
+ *   2. 令牌名与 DESIGN.md、Pencil 变量名逐字一致（去掉前缀后）。
+ *   3. 选中/悬停的颜色用具名令牌 + color-mix 实时合成，
+ *      浓度（--tint-*）是独立参数 —— 主色改动时浓度不变（DESIGN.md §5.2）。
+ *
+ * 切换方式：
+ *   <html data-theme="dark|light" data-density="compact|loose">
+ */
+
+/* ══════════════════════════════════════════════════════════════
+ * 1. 颜色：四级中性面 + 前景 + 品牌 + 状态
+ *    DESIGN.md §1.1（用户色板）/ §1.2（派生阶梯）/ §5（状态）
+ * ══════════════════════════════════════════════════════════════ */
+
+:root,
+:root[data-theme="dark"] {
+  /* 四级面：track < main < bar < layer（「更深」= 沿同色相远离中间灰） */
+  --surface-track: #17191c;
+  --surface-main: #202226; /* 深色 */
+  --surface-bar: #2a2d33; /* 浅深色 */
+  --surface-layer: #33373e;
+
+  /* 前景 */
+  --fg-1: #f6f8f4; /* 正文/标题 */
+  --fg-2: #b6b0af; /* 次级（EXIF 值、单位） */
+  --fg-3: #7c7876; /* 注释/禁用 */
+  --fg-on-brand: #202226; /* 品牌色底上的文字（DESIGN.md §4.5） */
+
+  /* 浓度参数：与颜色解耦，改色不影响浓度 */
+  --tint-hover: 0.16;
+  --tint-selected: 0.22;
+
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --surface-track: #e1e5db;
+  --surface-main: #f6f8f4; /* 浅色 */
+  --surface-bar: #edf0e9; /* 深浅色 */
+  --surface-layer: #ffffff;
+
+  --fg-1: #202226;
+  --fg-2: #6e6866; /* 中间色的深变体，过 WCAG AA（DESIGN.md §13） */
+  --fg-3: #a9a3a1;
+  --fg-on-brand: #202226;
+
+  --tint-hover: 0.18;
+  --tint-selected: 0.25;
+
+  color-scheme: light;
+}
+
+/* 品牌色：两主题共用（DESIGN.md §1.1，待用户按效果微调） */
+:root {
+  --brand: #8db8aa;
+  --brand-2: #eecc55;
+}
+
+/* ══════════════════════════════════════════════════════════════
+ * 2. 状态底色：实时合成，不写字面色值
+ *    全局反馈规则（DESIGN.md §5）：
+ *      指向 → 辅色底；切实点击后 → 主色底；已有主色底时指向不变
+ * ══════════════════════════════════════════════════════════════ */
+
+:root {
+  --state-hover: color-mix(
+    in oklab,
+    var(--brand-2) calc(var(--tint-hover) * 100%),
+    transparent
+  );
+  --state-selected: color-mix(
+    in oklab,
+    var(--brand) calc(var(--tint-selected) * 100%),
+    transparent
+  );
+  /* 按下瞬间，比 hover 再深一档 */
+  --state-active: color-mix(in oklab, var(--brand) calc(var(--tint-selected) * 130%), transparent);
+}
+
+/* ══════════════════════════════════════════════════════════════
+ * 3. 密度：两档，只影响间距类尺寸，不影响字号与图标（DESIGN.md §8.1/§8.3）
+ * ══════════════════════════════════════════════════════════════ */
+
+:root,
+:root[data-density="compact"] {
+  --space-unit: 4px;
+
+  --bar-title-h: 32px;
+  --bar-flow-h: 44px;
+  --bar-tool-h: 32px;
+
+  --pad-x: 8px;
+  --pad-y: 4px;
+  --gap: 4px;
+  --row-h: 24px; /* 列表行高 */
+  --row-indent: 10px; /* 列表行起始缩进 */
+  --panel-pad: 8px;
+  --radius: 4px;
+
+  --panel-w-left: 320px;
+  --panel-w-right: 300px;
+
+  --btn-pad-x: 6px;
+  --btn-pad-y: 4px;
+
+  --seg-track-pad: 3px;
+  --seg-chip-h: 28px;
+  --seg-chip-pad-x: 14px;
+
+  --checkbox-size: 14px;
+
+  /* 移除/排除类按钮：点击区不得小于 22×22（DESIGN.md §8.3） */
+  --remove-hit: 22px;
+  --remove-icon: 18px;
+
+  --selected-bar-h: 56px;
+
+  --switch-w: 24px;
+  --switch-h: 14px;
+  --switch-knob: 10px;
+
+  --toggle-block: 28px;
+  --toggle-block-icon: 16px;
+
+  --caption-h: 22px; /* 图片 tile 字幕条高 */
+
+  --action-btn-h: 32px; /* 导入按钮等 */
+  --card-h: 56px; /* 库卡片 */
+}
+
+:root[data-density="loose"] {
+  --space-unit: 8px;
+
+  --bar-title-h: 40px;
+  --bar-flow-h: 60px;
+  --bar-tool-h: 40px;
+
+  --pad-x: 16px;
+  --pad-y: 8px;
+  --gap: 8px;
+  --row-h: 32px;
+  --row-indent: 16px;
+  --panel-pad: 16px;
+  --radius: 6px;
+
+  --panel-w-left: 360px;
+  --panel-w-right: 340px;
+
+  --btn-pad-x: 12px;
+  --btn-pad-y: 8px;
+
+  --seg-track-pad: 4px;
+  --seg-chip-h: 34px;
+  --seg-chip-pad-x: 20px;
+
+  --checkbox-size: 16px;
+
+  --remove-hit: 26px;
+  --remove-icon: 20px;
+
+  --selected-bar-h: 68px;
+
+  --switch-w: 30px;
+  --switch-h: 18px;
+  --switch-knob: 14px;
+
+  --toggle-block: 34px;
+  --toggle-block-icon: 18px;
+
+  --caption-h: 28px;
+
+  --action-btn-h: 40px;
+  --card-h: 68px;
+}
+
+/* ══════════════════════════════════════════════════════════════
+ * 4. 图片网格：tile 尺寸档位由 JS 拥有（要参与换行数学），
+ *    这里只声明运行时会被组件改写的两个变量（DESIGN.md §12.6）
+ * ══════════════════════════════════════════════════════════════ */
+
+:root {
+  --tile-cell-w: 208px; /* 9 档默认：中间档 */
+  --tile-cell-h: 139px; /* 3:2 */
+}
+
+/* ══════════════════════════════════════════════════════════════
+ * 5. Tailwind v4 语义工具类映射
+ *    用 `inline` 让工具类直接引用 var(...)，从而使主题切换在运行时生效
+ *    （非 inline 会在构建期把值解析成字面量，主题就切不动了）
+ * ══════════════════════════════════════════════════════════════ */
+
+@theme inline {
+  /* 面 */
+  --color-surface-main: var(--surface-main);
+  --color-surface-bar: var(--surface-bar);
+  --color-surface-track: var(--surface-track);
+  --color-surface-layer: var(--surface-layer);
+
+  /* 前景 */
+  --color-fg-1: var(--fg-1);
+  --color-fg-2: var(--fg-2);
+  --color-fg-3: var(--fg-3);
+  --color-fg-on-brand: var(--fg-on-brand);
+
+  /* 品牌 */
+  --color-brand: var(--brand);
+  --color-brand-2: var(--brand-2);
+
+  /* 状态 */
+  --color-state-hover: var(--state-hover);
+  --color-state-selected: var(--state-selected);
+  --color-state-active: var(--state-active);
+
+  /*
+   * 密度令牌投到 `--spacing-*` 命名空间，
+   * 这样 `h-bar-title-h` / `w-panel-w-left` / `p-panel-pad` / `gap-gap` 等都能直接用。
+   * 值仍是 var(...) 引用，所以切 data-density 时运行时生效。
+   */
+  --spacing-bar-title-h: var(--bar-title-h);
+  --spacing-bar-flow-h: var(--bar-flow-h);
+  --spacing-bar-tool-h: var(--bar-tool-h);
+  --spacing-pad-x: var(--pad-x);
+  --spacing-pad-y: var(--pad-y);
+  --spacing-gap: var(--gap);
+  --spacing-row-h: var(--row-h);
+  --spacing-row-indent: var(--row-indent);
+  --spacing-panel-pad: var(--panel-pad);
+  --spacing-panel-w-left: var(--panel-w-left);
+  --spacing-panel-w-right: var(--panel-w-right);
+  --spacing-seg-track-pad: var(--seg-track-pad);
+  --spacing-seg-chip-h: var(--seg-chip-h);
+  --spacing-seg-chip-pad-x: var(--seg-chip-pad-x);
+  --spacing-remove-hit: var(--remove-hit);
+  --spacing-selected-bar-h: var(--selected-bar-h);
+  --spacing-switch-w: var(--switch-w);
+  --spacing-switch-h: var(--switch-h);
+  --spacing-switch-knob: var(--switch-knob);
+  --spacing-toggle-block: var(--toggle-block);
+  --spacing-caption-h: var(--caption-h);
+  --spacing-action-btn-h: var(--action-btn-h);
+  --spacing-card-h: var(--card-h);
+
+  /* 小倒角：两档（DESIGN.md §8.2） */
+  --radius-ui: var(--radius);
+}

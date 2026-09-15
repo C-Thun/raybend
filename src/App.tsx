@@ -1,43 +1,56 @@
 /**
- * 应用外壳（M0 阶段的最小骨架）。
+ * 应用外壳骨架 —— 按 design/main.md §2 的三行结构实现。
  *
- * 这里只验证两件事：Tailwind 令牌生效、三栏布局基线可用。
- * 真正的界面在 UI 设计阶段产出 `.pen` 设计稿后再实现。
+ * 本阶段的职责：
+ *   1. 验证语义工具类（bg-surface-bar / text-fg-1 / h-bar-title-h …）确实生成且可切主题与密度
+ *   2. 确立表面分层（DESIGN.md §2）：titlebar=bar / flowbar+toolsbar=main / 工作区两侧=main、中央=bar
+ *   3. 确立「无边线设计」：块与块之间不加分隔线，只靠面色差
  *
- * 布局对应未来的工作面：左侧相片仓 / 文件夹树、中间视口（M0-2 之后
- * 由原生 wgpu 直绘的挖洞区域）、右侧元数据与直方图、底部状态栏与提示行。
+ * 尚未实现（后续步骤）：菜单、主题/密度开关、窗口三键、EXIF 区、三列内容。
  */
 export default function App() {
   return (
-    <div class="flex h-full w-full flex-col bg-ui-bg-1 text-fg-1">
-      {/* 顶部：占位工具条（未来的命令面板与视图切换） */}
-      <header class="flex h-9 shrink-0 items-center gap-2 border-b border-ui-line bg-ui-bg-2 px-3">
-        <span class="text-[13px] font-medium">RayBend</span>
-        <span class="text-[11px] text-fg-3">M0 骨架</span>
+    <div class="flex h-full w-full flex-col bg-surface-main text-fg-1">
+      {/* ── titlebar：沉浸式，无系统标题行 ───────────────────────── */}
+      <header
+        data-tauri-drag-region
+        class="flex h-bar-title-h shrink-0 items-center gap-0 bg-surface-bar px-pad-x"
+      >
+        {/* 应用图标（占位：品牌色圆角块） */}
+        <div class="flex size-5 items-center justify-center rounded-ui bg-brand">
+          <span class="text-[11px] leading-none text-fg-on-brand">光</span>
+        </div>
+        <div class="w-2" />
+        <span class="text-[13px] font-semibold">光伴</span>
+
+        {/* 拖拽区：撑开中间空白，窗口由此拖动（双击自动最大化，免权限） */}
+        <div class="h-px flex-1" />
       </header>
 
-      <div class="flex min-h-0 flex-1">
-        {/* 左侧：占位面板 */}
-        <aside class="w-56 shrink-0 border-r border-ui-line bg-ui-bg-2 p-3">
-          <p class="text-[11px] tracking-wide text-fg-3 uppercase">相片仓</p>
-        </aside>
-
-        {/* 中间：空视口 */}
-        <main class="flex min-w-0 flex-1 items-center justify-center bg-ui-bg-1">
-          <p class="text-fg-3">视口（M0-2 渲染验证后接入）</p>
-        </main>
-
-        {/* 右侧：占位面板 */}
-        <aside class="w-64 shrink-0 border-l border-ui-line bg-ui-bg-2 p-3">
-          <p class="text-[11px] tracking-wide text-fg-3 uppercase">信息</p>
-        </aside>
+      {/* ── flowbar：工作流 + 图片信息 + 开关组 ──────────────────── */}
+      <div class="flex h-[var(--bar-flow-h)] shrink-0 items-center bg-surface-main px-pad-x">
+        <span class="text-[11px] text-fg-3">工作流切换（待实现）</span>
+        <div class="h-px flex-1" />
+        <span class="text-[11px] text-fg-2 tnum">EXIF 信息区（待实现）</span>
       </div>
 
-      {/* 底部：状态栏 + 提示行（弱化菜单的关键承载） */}
-      <footer class="flex h-6 shrink-0 items-center justify-between border-t border-ui-line bg-ui-bg-2 px-3 text-[11px] text-fg-3">
-        <span>就绪</span>
-        <span>M0 · 可行性验证与项目骨架</span>
-      </footer>
+      {/* ── toolsbar：无内容时整行隐藏 ───────────────────────────── */}
+      <div class="flex h-[var(--bar-tool-h)] shrink-0 items-center justify-center bg-surface-main">
+        <span class="text-[11px] text-fg-3">批量排除（待实现）</span>
+      </div>
+
+      {/* ── workspace：两侧 main / 中央 bar（中央聚焦，无需分隔线）── */}
+      <div class="flex min-h-0 flex-1">
+        <aside class="w-panel-w-left shrink-0 bg-surface-main p-panel-pad">
+          <p class="text-[11px] tracking-wide text-fg-2 uppercase">来源</p>
+        </aside>
+        <main class="flex min-w-0 flex-1 items-center justify-center bg-surface-bar">
+          <p class="text-fg-3">照片区（待实现）</p>
+        </main>
+        <aside class="w-panel-w-right shrink-0 bg-surface-main p-panel-pad">
+          <p class="text-[11px] tracking-wide text-fg-2 uppercase">库</p>
+        </aside>
+      </div>
     </div>
   );
 }

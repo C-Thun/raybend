@@ -1,0 +1,19 @@
+/*
+ * 字体接入（DESIGN.md §7）。
+ *
+ *   Latin / 数字 → Inter Variable
+ *   CJK         → Noto Sans SC Variable
+ *
+ * 两者均为 **SIL OFL 1.1**，可自由嵌入分发，无授权风险。
+ * （MiSans 观感更新，但其协议限制再分发字体文件，见 DESIGN.md §7.1 与 ASSISTANCE.md A6。）
+ *
+ * 只引入 **wght 轴**（不要 italic / opsz）：
+ *   - 界面不需要斜体，省掉一半体积
+ *   - 字重范围 100–900 覆盖 DESIGN.md §7.2 要求的 400/500/600 三档
+ *
+ * 两个包都按 unicode-range 分片，WebView 只会请求实际用到的片；
+ * 分片本身带 `font-display: swap`，不会阻塞首屏。
+ */
+
+@import "@fontsource-variable/inter/wght.css";
+@import "@fontsource-variable/noto-sans-sc/wght.css";
