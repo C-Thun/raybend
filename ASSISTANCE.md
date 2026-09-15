@@ -32,9 +32,9 @@
 
 - **默认已定**：**Inter（拉丁/数字）+ Noto Sans SC（中文）**，均为 SIL OFL 1.1，可自由嵌入分发，无授权风险。
 - **待你定**：是否改用 **MiSans**（观感更新、更现代）。
-  - MiSans 声明「全球免费商用」（https://hyperos.mi.com/font/zh/faq/），
+  - MiSans 声明「全球免费商用」（<https://hyperos.mi.com/font/zh/faq/），>
     但其协议同时禁止**「单独将字体或其组件对外租赁、再许可、给予、出借或进一步分发字体软件」**
-    （协议全文：https://hyperos.mi.com/font-download/MiSans字体知识产权许可协议.pdf ）。
+    （协议全文：<https://hyperos.mi.com/font-download/MiSans字体知识产权许可协议.pdf> ）。
   - **风险点**：桌面应用**内嵌字体**是否构成「再分发字体软件」，存在解释空间。
   - **选项**：① 用 OFL 字体（稳妥，推荐）；② 用 MiSans 并接受解释风险；
     ③ 折中：优先用用户系统已安装的 MiSans，否则回退 OFL 字体。
