@@ -548,6 +548,9 @@
 | **flexbox 容器里 `x` / `y` 被忽略** | 手工定位没用（工具会明确提示 `x/y is ignored … inside a flexbox layout`）。要改位置只能靠布局（顺序、间距、填充）或把父级改成非布局容器 |
 | **`bounds` / `problems` 可能是布局前的陈旧值** | 同一轮 `Insert` 后立刻读，几何数字与「被裁」判断都不可信；**结论以截图为准**，必要时下一轮再读 |
 | 新变量**当场可用** | `SetVariables` 加的色值在同一次会话里立刻能渲染（实测未出现「要重开编辑器」） |
+| **变量必须先于节点创建** | 实测踩坑：节点创建时若变量还不存在，`$surface-main` 这类引用会被**烤成 `#000000`**（不是报错、是静默变黑）。补救＝变量建好后再 `Update(id, {fill: "$..."})` 重挂一次（本轮一次性重挂了 162 处）。**新画布的固定顺序：先 `SetVariables` → 再画节点** |
+| **画布没有 Tabler 图标集** | 画布只支持 `lucide` / `feather` / `Material Symbols Outlined·Rounded·Sharp` / `phosphor` —— 而**实现用的是 Tabler**。做法：**画布上用 lucide 当替身**（同为 24px/2px 描边，风格最接近），并在设计文档里写出**到 Tabler 的名字映射**，避免误导实现。另：Tabler 有 `-filled` 变体，画布上的 lucide 没有，点亮态只能靠颜色表达 |
+| **帧可以用 `theme` 属性挂主题轴** | `theme: {mode: "dark", density: "compact"}` 是合法节点属性（schema `Entity.theme`），子树继承。但**它只解决「解析哪一个变体」，不能救被烤死的引用**（见上一条） |
 
 ### 6.2 令牌的两个限制（重要）
 
