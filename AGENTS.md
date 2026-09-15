@@ -141,15 +141,74 @@ cargo check --workspace   # Rust 侧快速检查（WSL 侧 target/）
 pnpm build                              # ① WSL 里产出 dist/
 export CARGO_TARGET_DIR='C:\rb-target\raybend'
 export WSLENV='CARGO_TARGET_DIR'        # ② 跨 WSL→Windows 透传环境变量（cmd 的 set 经互操作不可靠）
-cmd.exe /c 'pushd \\wsl.localhost\Ubuntu-24.04\home\andares\repos\c-thun\raybend & cargo build --workspace'
+cmd.exe /c 'pushd \\wsl.localhost\Ubuntu-24.04\home\andares\repos\c-thun\raybend & cargo build -p raybend-desktop --features custom-protocol'
 /mnt/c/rb-target/raybend/debug/raybend-desktop.exe   # ③ 运行（产物在 C: 本地）
 ```
 
-**三条硬规矩（实测踩坑）：**
+**四条硬规矩（实测踩坑）：**
 
 1. **Windows 构建的产物必须落在 Windows 本地盘**（`C:\rb-target\...`）。9p 共享（`\\wsl.localhost`）不支持 rustc 增量编译的锁文件语义，会报 `os error -2147024895`，且会把 Windows 产物污染进 WSL 的 `target/`。
 2. **跨 WSL→Windows 传环境变量用 `WSLENV`**，不要用 cmd 的 `set VAR=x & ...`（`&` 前的空格会进值，且引号经互操作会丢）。
 3. 前端改动后必须重新 `pnpm build`（dist 是编译期嵌入的）；Rust 改动则只需重跑 cargo。
+4. **`--features custom-protocol` 必须加，否则 Windows 版会白屏/页面打不开**。
+5. **启动 Windows 的 exe 直接用 `/mnt/c/...` 路径跑，不要经 `cmd.exe /c "start \"标题\" 路径"`**。
+   实测：那种写法的引号会被 WSL→cmd 的互操作吃掉，结果弹出 **「Windows 找不到文件 '\RayBend\'」**——
+   参数被切碎，一个标题字串被当成了文件路径。直接跑最稳：
+
+   ```bash
+   (cd /mnt/c/rb-target/raybend/debug && ./raybend-desktop.exe >/dev/null 2>&1 &)
+   ```
+
+   （若确实需要用 `start`，就得接受这层引号嵌套很难写对；直接执行免去全部转义问题。）
+
+### 5.3.1 为什么必须加 `--features custom-protocol`（重要，别拆掉）
+
+已定位到源码级。`tauri` 的 `build.rs`：
+
+```rust
+let custom_protocol = has_feature("custom-protocol");
+let dev = !custom_protocol;        // ← dev 由 feature 决定，不是 debug/release！
+```
+
+而 `tauri-codegen` 在 `dev == true` 且配置了 `devUrl` 时，**产出的嵌入资源是空的**：
+
+```rust
+} else if dev && config.build.dev_url.is_some() {
+    let assets = EmbeddedAssets::default();   // ← 空资源
+```
+
+于是 webview 只能去连 `devUrl`（`http://localhost:1420`）—— 本机没服务时就报「无法访问此页面」。
+
+**表现对照**：
+
+| 路径 | 命令 | 结果 |
+| --- | --- | --- |
+| WSL 开发 | `pnpm tauri dev` | ✅ 正常（Vite 在 1420 上服务，且 CLI 不加该 feature → `dev=true` 是对的） |
+| WSL 开发 | `cargo run` | 同上（**也会去连 1420**，所以不走这条） |
+| Windows 裸 `cargo build` | 无 feature | ❌ 窗口出来了但页面打不开 |
+| Windows 生产 | `--features custom-protocol` | ✅ 嵌入真实资源 |
+
+> Tauri CLI 的 `tauri build` 会自动加这个 feature；**但我们的 Windows 构建路径不走 CLI**，必须手写。
+> `src-tauri/Cargo.toml` 的 `[features]` 段里已注明这一点 —— **不要当模板残留删掉**
+> （M0-1 “删净模板演示”时曾把它误删，直接导致了这个 bug）。
+
+### 5.3.2 Windows 侧验证纪律
+
+**“窗口出现了”不等于“功能对了”。** Windows 侧跑完必须至少确认：
+
+1. 页面**真的画出来了**（不是白屏/错误页）—— **由人类目视**（`AGENTS.md` §2.8）
+2. 产物**比 `dist/` 新**（否则跑的可能是旧前端）
+3. Agent 侧可做的程序化冒烟：检查 exe 里含的是 **`dist/assets/` 当前的资源文件名**
+   （含则说明资源确实被嵌入；内容字节是 brotli 压缩的，搜原始字符串搜不到是正常的）
+
+### 5.3.3 本次「吃一堑」汇总（2026-09-15）
+
+| # | 坑 | 后果 | 教训 |
+| --- | --- | --- | --- |
+| 1 | M0-1 清理模板时把 `[features] custom-protocol` 当成模板残留删了 | **Windows 版一直是白屏**，而 WSL 侧因为走 `pnpm tauri dev` 完全正常，所以问题被掩盖了很久 | **「模板自带」不等于「模板残留」**。删配置性代码前先搞清它的用途；`tauri build` 才注入的东西，我们走裸 cargo 就必须自己写明 |
+| 2 | 验证只看 `MainWindowHandle` / `MainWindowTitle` | 声称「Windows 运行验证通过」，而实际页面根本打不开 | **“窗口出现了”不等于“功能对了”**（§2.8）。验证清单必须包含「内容看得见」 |
+| 3 | 用 `cmd.exe /c "start \"标题\" 路径"` 启动 exe | 弹「找不到文件 `\RayBend\`」，干扰用户 | WSL→Windows 的**引号嵌套不可靠**；直接用 `/mnt/c/...` 跑 |
+| 4 | exe（02:50）比 `dist/`（10:28）旧 | 即使逻辑正确，跑的也是旧前端 | **产物时间戳必须晚于 `dist/`**，构建前先 `pnpm build` |
 
 实测参考：首次 Windows 全量构建约 3–4 分钟；WSL 侧 `cargo check` 首次约 2–3 分钟。
 

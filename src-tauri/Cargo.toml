@@ -19,6 +19,18 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+[features]
+# 生产构建必须启用此项。
+#
+# 原因（已定位到源码）：tauri 的 build.rs 用 `dev = !custom-protocol` 决定是否为开发模式；
+# 而 tauri-codegen 在 `dev && devUrl.is_some()` 时会产出**空的嵌入资源**，
+# 于是 webview 只能去连 devUrl（http://localhost:1420）—— 本机没服务时页面就打不开。
+#
+# Tauri CLI 的 `tauri build` 会自动加这个 feature；但本项目的 Windows 构建路径不走 CLI
+# （见 AGENTS.md §5.3），必须手动 `--features custom-protocol`。
+# 注意：`tauri dev` 路径不要加，否则嵌入资源会取代热重载。
+custom-protocol = ["tauri/custom-protocol"]
+
 [dependencies]
 tauri = { version = "2", features = [] }
 raybend.workspace = true
