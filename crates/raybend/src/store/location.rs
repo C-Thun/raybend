@@ -168,7 +168,10 @@ pub fn cloud_sync_provider(path: &str) -> Option<String> {
         }
         let lower = segment.to_lowercase();
         for (marker, name) in CLOUD_MARKERS {
-            if lower == *marker || lower.starts_with(&format!("{marker} ")) || lower.starts_with(&format!("{marker}-")) {
+            if lower == *marker
+                || lower.starts_with(&format!("{marker} "))
+                || lower.starts_with(&format!("{marker}-"))
+            {
                 return Some((*name).to_string());
             }
         }
@@ -215,9 +218,9 @@ const NETWORK_FS_TYPES: &[&str] = &[
 
 /// 本地文件系统类型（**白名单**：不在这两个表里的都算 Unknown → 不报警）。
 const LOCAL_FS_TYPES: &[&str] = &[
-    "ext2", "ext3", "ext4", "btrfs", "xfs", "f2fs", "jfs", "reiserfs", "zfs", "bcachefs", "overlay",
-    "tmpfs", "devtmpfs", "vfat", "exfat", "ntfs", "ntfs3", "fuseblk", "hfs", "hfsplus", "apfs",
-    "squashfs", "ramfs", "ubifs",
+    "ext2", "ext3", "ext4", "btrfs", "xfs", "f2fs", "jfs", "reiserfs", "zfs", "bcachefs",
+    "overlay", "tmpfs", "devtmpfs", "vfat", "exfat", "ntfs", "ntfs3", "fuseblk", "hfs", "hfsplus",
+    "apfs", "squashfs", "ramfs", "ubifs",
 ];
 
 /// 解析 `/proc/mounts` 风格的内容。
@@ -373,8 +376,14 @@ mod tests {
 
     #[test]
     fn cloud_detection_is_case_insensitive_and_unicode_aware() {
-        assert_eq!(cloud_sync_provider(r"c:\users\ME\onedrive\x").as_deref(), Some("OneDrive"));
-        assert_eq!(cloud_sync_provider("E:/坚果云/x").as_deref(), Some("坚果云"));
+        assert_eq!(
+            cloud_sync_provider(r"c:\users\ME\onedrive\x").as_deref(),
+            Some("OneDrive")
+        );
+        assert_eq!(
+            cloud_sync_provider("E:/坚果云/x").as_deref(),
+            Some("坚果云")
+        );
     }
 
     #[test]
@@ -392,7 +401,10 @@ mod tests {
     #[test]
     fn a_cloud_folder_inside_a_network_share_is_still_network() {
         // UNC 优先：`\\nas\share\OneDrive` 的网络属性比云同步更重要
-        assert_eq!(classify(r"\\nas\share\OneDrive\照片"), LocationKind::Network);
+        assert_eq!(
+            classify(r"\\nas\share\OneDrive\照片"),
+            LocationKind::Network
+        );
     }
 
     // ---------- 挂载表（Linux） ----------
@@ -436,13 +448,19 @@ weirdfs /mnt/weird weirdfs rw 0 0
             );
         }
         // WSL 下的 Windows 盘走 9p：属于跨系统共享，按网络位置提示
-        assert_eq!(mount_kind_from_table(&mounts(), "/mnt/c/照片"), MountKind::Network);
+        assert_eq!(
+            mount_kind_from_table(&mounts(), "/mnt/c/照片"),
+            MountKind::Network
+        );
     }
 
     #[test]
     fn unknown_filesystem_is_not_flagged() {
         // 白名单之外的文件系统不报警（宁可漏报）
-        assert_eq!(mount_kind_from_table(&mounts(), "/mnt/weird/x"), MountKind::Unknown);
+        assert_eq!(
+            mount_kind_from_table(&mounts(), "/mnt/weird/x"),
+            MountKind::Unknown
+        );
         assert_eq!(
             classify("/mnt/weird/照片"),
             LocationKind::Local,
@@ -458,7 +476,10 @@ weirdfs /mnt/weird weirdfs rw 0 0
 server:/x /media/disk/远程 nfs rw 0 0
 ",
         );
-        assert_eq!(mount_kind_from_table(&m, "/media/disk/照片"), MountKind::Local);
+        assert_eq!(
+            mount_kind_from_table(&m, "/media/disk/照片"),
+            MountKind::Local
+        );
         assert_eq!(
             mount_kind_from_table(&m, "/media/disk/远程/照片"),
             MountKind::Network
@@ -471,7 +492,10 @@ server:/x /media/disk/远程 nfs rw 0 0
         let m = parse_mounts("server:/x /mnt/data nfs rw 0 0\n");
         assert_eq!(mount_kind_from_table(&m, "/mnt/da/x"), MountKind::Unknown);
         assert_eq!(mount_kind_from_table(&m, "/mnt/data"), MountKind::Network);
-        assert_eq!(mount_kind_from_table(&m, "/mnt/data/照片"), MountKind::Network);
+        assert_eq!(
+            mount_kind_from_table(&m, "/mnt/data/照片"),
+            MountKind::Network
+        );
     }
 
     #[test]
@@ -505,7 +529,13 @@ server:/x /media/disk/远程 nfs rw 0 0
     fn code_and_provider_helpers() {
         assert_eq!(LocationKind::Network.code(), "network");
         assert_eq!(LocationKind::Unknown.code(), "unknown");
-        assert!(LocationKind::CloudSync { provider: "OneDrive".into() }.provider().is_some());
+        assert!(
+            LocationKind::CloudSync {
+                provider: "OneDrive".into()
+            }
+            .provider()
+            .is_some()
+        );
         assert!(LocationKind::Local.provider().is_none());
     }
 
@@ -514,7 +544,8 @@ server:/x /media/disk/远程 nfs rw 0 0
         assert!(catalog_suitability(r"C:\照片").is_none());
         assert!(catalog_suitability(r"\\nas\share").is_some());
         assert_eq!(
-            catalog_suitability(r"C:\Users\me\OneDrive\照片").map(|k| k.provider().unwrap().to_string()),
+            catalog_suitability(r"C:\Users\me\OneDrive\照片")
+                .map(|k| k.provider().unwrap().to_string()),
             Some("OneDrive".to_string())
         );
     }

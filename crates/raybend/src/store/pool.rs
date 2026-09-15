@@ -134,10 +134,7 @@ impl ReadPool {
                     }
                 }
             }
-            st = self
-                .cv
-                .wait(st)
-                .unwrap_or_else(PoisonError::into_inner);
+            st = self.cv.wait(st).unwrap_or_else(PoisonError::into_inner);
         }
     }
 
@@ -216,8 +213,8 @@ fn _assert_error_is_used(_: Error) {}
 mod tests {
     use super::*;
     use crate::store::migration::{self, Backups, DbKind};
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::{Duration, Instant};
 
     /// 建一个有真实表的文件库（池子测的都是文件库，内存库语义不同）。
@@ -283,7 +280,10 @@ mod tests {
         let dir = file_db();
         let pool = ReadPool::open(dir.path().join("catalog.db")).unwrap();
         let err: Result<()> = pool.with(|c| {
-            c.execute("INSERT INTO assets(imported_at, updated_at) VALUES (1,1)", [])?;
+            c.execute(
+                "INSERT INTO assets(imported_at, updated_at) VALUES (1,1)",
+                [],
+            )?;
             Ok(())
         });
         assert!(err.is_err(), "读池的连接必须拒绝写（query_only）");
@@ -312,7 +312,9 @@ mod tests {
         assert_eq!(pool.stats().1, 1, "等待期间不该多开连接");
 
         drop(held); // 释放名额
-        let waited = rx.recv_timeout(Duration::from_secs(5)).expect("应当拿到连接");
+        let waited = rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("应当拿到连接");
         assert!(waited >= Duration::from_millis(100), "确实等了：{waited:?}");
         t.join().unwrap();
         assert_eq!(pool.stats(), (1, 1));
@@ -338,7 +340,11 @@ mod tests {
                 s.spawn(move || {
                     for _ in 0..10 {
                         let n: i64 = pool
-                            .with(|c| Ok(c.query_row("SELECT count(*) FROM asset_files", [], |r| r.get(0))?))
+                            .with(|c| {
+                                Ok(c.query_row("SELECT count(*) FROM asset_files", [], |r| {
+                                    r.get(0)
+                                })?)
+                            })
                             .unwrap();
                         assert_eq!(n, 20);
                         seen.fetch_add(1, Ordering::Relaxed);

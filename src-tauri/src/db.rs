@@ -34,7 +34,8 @@ impl DbState {
             }
         }
         let path = data_dir(app)?;
-        let db = AppDb::open(&path, raybend::store::time::now_millis()).map_err(|e| e.to_string())?;
+        let db =
+            AppDb::open(&path, raybend::store::time::now_millis()).map_err(|e| e.to_string())?;
         let mut guard = self.inner.lock().map_err(|_| "内部锁已损坏".to_string())?;
         *guard = Some(db);
         Ok(())
@@ -125,7 +126,10 @@ pub struct DbStatus {
 
 /// 打开（必要时创建）`app.db` 并返回状态。
 #[tauri::command]
-pub fn db_status<R: Runtime>(app: AppHandle<R>, state: State<'_, DbState>) -> Result<DbStatus, String> {
+pub fn db_status<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, DbState>,
+) -> Result<DbStatus, String> {
     let data_kind = location::classify(data_dir(&app)?.to_string_lossy().as_ref())
         .code()
         .to_string();
@@ -161,7 +165,9 @@ pub fn setting_set<R: Runtime>(
     key: String,
     value: String,
 ) -> Result<(), String> {
-    state.with(&app, |db| db.set_setting(&key, &value).map_err(|e| e.to_string()))
+    state.with(&app, |db| {
+        db.set_setting(&key, &value).map_err(|e| e.to_string())
+    })
 }
 
 /// 启动时尝试打开一次（失败只记日志，不阻止窗口出现）。
@@ -197,6 +203,9 @@ mod tests {
     fn app_db_lives_at_the_data_dir_root() {
         // 与 AGENTS.md §6.4 的布局绑死：改这里等于改磁盘布局，要有意识
         assert_eq!(APP_DB_FILE, "app.db");
-        assert_eq!(app_db_path(Path::new("/data/raybend")), PathBuf::from("/data/raybend/app.db"));
+        assert_eq!(
+            app_db_path(Path::new("/data/raybend")),
+            PathBuf::from("/data/raybend/app.db")
+        );
     }
 }

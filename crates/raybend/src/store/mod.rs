@@ -18,17 +18,19 @@
 //! | [`writer`] | 单写者 actor：所有写串行到一条连接上，退出时把队列跑干 |
 //! | [`ids`] | 库 ID：可排序的定长 base62（时间 + 随机） |
 //! | [`repository`] | 库身份、元信息、`app.db` 登记与在线/离线解析 |
+//! | [`tags`] | 标签：全局词典（`app.db`）+ 每库关联（`catalog.db`），`BROWSE.md` §7 |
 //! | [`db`] | 门面：`AppDb`（全局库）与 `CatalogDb`（每库），上层只用这一层 |
 //! | [`location`] | 位置判定：本地 / 网络 / 云同步（放 catalog 的风险提示） |
 
 pub mod db;
 pub mod file_id;
 pub mod ids;
-pub mod repository;
 pub mod location;
 pub mod migration;
 pub mod path_semantics;
 pub mod pool;
 pub mod pragma;
+pub mod repository;
+pub mod tags;
 pub mod time;
 pub mod writer;

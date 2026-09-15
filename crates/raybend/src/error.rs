@@ -57,7 +57,7 @@ pub enum Error {
 
     /// 目录不是一个库（缺少 `catalog.db`，或其中的库 ID 与预期不符）。
     #[error("不是有效的库目录：{}（{reason}）", .path.display())]
-    NotALibrary { path: PathBuf, reason: String },
+    NotARepository { path: PathBuf, reason: String },
 
     /// 拿不到系统随机数（沙箱/容器里极少见）。
     #[error("无法获取系统随机数：{0}")]
@@ -96,7 +96,10 @@ mod tests {
             supported: 3,
         };
         let msg = e.to_string();
-        assert!(msg.contains('7') && msg.contains('3'), "信息里要有两个版本号");
+        assert!(
+            msg.contains('7') && msg.contains('3'),
+            "信息里要有两个版本号"
+        );
         assert!(!e.is_retryable(), "版本不匹配重试也不会好");
     }
 
@@ -127,7 +130,7 @@ mod tests {
 
     #[test]
     fn not_a_library_has_path_and_reason() {
-        let e = Error::NotALibrary {
+        let e = Error::NotARepository {
             path: PathBuf::from("/mnt/d/库"),
             reason: "缺少 catalog.db".into(),
         };

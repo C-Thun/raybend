@@ -55,7 +55,9 @@ pub fn new_repository_id_at(now_millis: i64) -> Result<String> {
 /// 时间 + 随机字节 → 16 位 ID。
 fn encode(now_millis: i64, random: &[u8; 5]) -> String {
     let ticks = ticks_from_millis(now_millis);
-    let rnd = u64::from_be_bytes([0, 0, 0, random[0], random[1], random[2], random[3], random[4]]);
+    let rnd = u64::from_be_bytes([
+        0, 0, 0, random[0], random[1], random[2], random[3], random[4],
+    ]);
     #[allow(clippy::cast_lossless)]
     let value: u128 = (u128::from(ticks) << RANDOM_BITS) | u128::from(rnd);
     base62_fixed(value, ID_LEN)
@@ -131,12 +133,12 @@ pub fn created_at_millis(id: &str) -> Option<i64> {
     i64::try_from(millis).ok()
 }
 
-/// 校验并要求「是合法库 ID」，否则报 [`Error::NotALibrary`]（调用方给路径）。
+/// 校验并要求「是合法库 ID」，否则报 [`Error::NotARepository`]（调用方给路径）。
 pub fn require_valid(id: &str, path: &std::path::Path) -> Result<()> {
     if is_valid(id) {
         return Ok(());
     }
-    Err(Error::NotALibrary {
+    Err(Error::NotARepository {
         path: path.to_path_buf(),
         reason: format!("库 ID 格式不合法：{id:?}"),
     })
@@ -209,11 +211,7 @@ mod tests {
 
     #[test]
     fn created_at_roundtrips() {
-        for t in [
-            1_789_430_400_000_i64,
-            1_789_430_400_123,
-            2_000_000_000_000,
-        ] {
+        for t in [1_789_430_400_000_i64, 1_789_430_400_123, 2_000_000_000_000] {
             let id = new_repository_id_at(t).unwrap();
             let back = created_at_millis(&id).expect("应当能解出时间");
             // 刻度是 10µs，毫秒级必须完全一致
@@ -244,9 +242,9 @@ mod tests {
         for bad in [
             "",
             "短",
-            "123456789012345",     // 15 位
-            "12345678901234567",   // 17 位
-            "123456789012345-",    // 非法字符
+            "123456789012345",   // 15 位
+            "12345678901234567", // 17 位
+            "123456789012345-",  // 非法字符
             "123456789012345_",
             "中文中文中文中文中文中文中文中", // 长度虽然接近，但字符非法
             "0000000000000000 ",
@@ -264,7 +262,7 @@ mod tests {
         let err = require_valid("坏ID", p).unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("照片库"), "{msg}");
-        assert!(matches!(err, Error::NotALibrary { .. }));
+        assert!(matches!(err, Error::NotARepository { .. }));
     }
 
     #[test]

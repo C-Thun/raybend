@@ -72,18 +72,39 @@ pub struct Migration {
 }
 
 /// `app.db` 的迁移列表。**版本必须从 1 开始连续递增**（有测试守着）。
-pub const APP_MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    name: "init",
-    sql: include_str!("migrations/app_0001_init.sql"),
-}];
+///
+/// * v1 `init`：库注册表 / 路径 / 设置 / 任务队列 / 应用元信息
+/// * v2 `tags`：**标签词典**（跨库公用，BROWSE.md §7.1）
+pub const APP_MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        name: "init",
+        sql: include_str!("migrations/app_0001_init.sql"),
+    },
+    Migration {
+        version: 2,
+        name: "tags",
+        sql: include_str!("migrations/app_0002_tags.sql"),
+    },
+];
 
 /// `catalog.db` 的迁移列表。**版本必须从 1 开始连续递增**。
-pub const CATALOG_MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    name: "init",
-    sql: include_str!("migrations/catalog_0001_init.sql"),
-}];
+///
+/// * v1 `init`：库元信息 / 资产 / 文件 / 全文索引 / 序号 / 导入批次
+/// * v2 `marking_tags_geo`：色标·喜欢·锁 / 作者·描述·地理 / EXIF 时区 /
+///   资产↔标签关联 / 全文索引加 `description`（BROWSE.md §3·§7·§9）
+pub const CATALOG_MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        name: "init",
+        sql: include_str!("migrations/catalog_0001_init.sql"),
+    },
+    Migration {
+        version: 2,
+        name: "marking_tags_geo",
+        sql: include_str!("migrations/catalog_0002_marking_tags_geo.sql"),
+    },
+];
 
 /// 每类库保留的快照份数（`AGENTS.md` §6.4：保留 7 份）。**按库分别保留**。
 pub const BACKUP_KEEP: usize = 7;
@@ -132,7 +153,7 @@ impl<'a> Backups<'a> {
     /// 文件名前缀（形如 `app` / `catalog` / `catalog_Ab3xY9zQ`）。
     fn group(&self, kind: DbKind) -> String {
         match self.label {
-            Some(l) if !l.is_empty() => format!("{}_{}" , kind.prefix(), l),
+            Some(l) if !l.is_empty() => format!("{}_{}", kind.prefix(), l),
             _ => kind.prefix().to_string(),
         }
     }
@@ -167,7 +188,11 @@ pub fn schema_version(conn: &Connection) -> Result<i64> {
 /// 本程序对该类库支持的 schema 版本（迁移列表里的最大值）。
 #[must_use]
 pub fn supported_version(kind: DbKind) -> i64 {
-    kind.migrations().iter().map(|m| m.version).max().unwrap_or(0)
+    kind.migrations()
+        .iter()
+        .map(|m| m.version)
+        .max()
+        .unwrap_or(0)
 }
 
 /// 按种类执行迁移。这是生产路径的唯一入口。
@@ -241,11 +266,10 @@ fn run_all(conn: &mut Connection, migrations: &[Migration], current: i64) -> Res
     let mut applied = Vec::new();
     for m in migrations.iter().filter(|m| m.version > current) {
         let tx = conn.transaction()?;
-        tx.execute_batch(m.sql)
-            .map_err(|e| Error::Migration {
-                version: m.version,
-                source: e,
-            })?;
+        tx.execute_batch(m.sql).map_err(|e| Error::Migration {
+            version: m.version,
+            source: e,
+        })?;
         tx.pragma_update(None, "user_version", m.version)?;
         tx.commit()?;
         applied.push(m.version);
@@ -407,16 +431,23 @@ mod tests {
     }
 
     #[test]
-    fn fresh_app_db_applies_init() {
+    fn fresh_app_db_applies_all_migrations() {
         let mut conn = mem();
         let out = apply(&mut conn, DbKind::App, Backups::none(), 1_789_516_800_000).unwrap();
-        assert_eq!((out.from, out.to), (0, 1));
-        assert_eq!(out.applied, vec![1]);
+        assert_eq!((out.from, out.to), (0, 2));
+        assert_eq!(out.applied, vec![1, 2]);
         assert!(out.snapshot.is_none(), "全新库不需要快照");
         assert!(out.changed());
 
         // 表都建出来了
-        for table in ["repositories", "repository_paths", "settings", "jobs", "app_meta"] {
+        for table in [
+            "repositories",
+            "repository_paths",
+            "settings",
+            "jobs",
+            "app_meta",
+            "tags",
+        ] {
             let n: i64 = conn
                 .query_row(
                     "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?1",
@@ -429,10 +460,17 @@ mod tests {
     }
 
     #[test]
-    fn fresh_catalog_db_applies_init() {
+    fn fresh_catalog_db_applies_all_migrations() {
         let mut conn = mem();
-        let out = apply(&mut conn, DbKind::Catalog, Backups::none(), 1_789_516_800_000).unwrap();
-        assert_eq!((out.from, out.to), (0, 1));
+        let out = apply(
+            &mut conn,
+            DbKind::Catalog,
+            Backups::none(),
+            1_789_516_800_000,
+        )
+        .unwrap();
+        assert_eq!((out.from, out.to), (0, 2));
+        assert_eq!(out.applied, vec![1, 2]);
         for table in [
             "repository_meta",
             "assets",
@@ -441,6 +479,7 @@ mod tests {
             "import_runs",
             "import_items",
             "assets_fts",
+            "asset_tags",
         ] {
             let n: i64 = conn
                 .query_row(
@@ -460,7 +499,11 @@ mod tests {
         let again = apply(&mut conn, DbKind::Catalog, Backups::none(), 0).unwrap();
         assert_eq!(again.applied, Vec::<i64>::new());
         assert!(!again.changed());
-        assert_eq!(schema_version(&conn).unwrap(), 1);
+        // 不写死版本号：以后再加迁移，这条测试不该跟着改
+        assert_eq!(
+            schema_version(&conn).unwrap(),
+            supported_version(DbKind::Catalog)
+        );
     }
 
     #[test]
@@ -472,7 +515,7 @@ mod tests {
         let err = apply(&mut conn, DbKind::Catalog, Backups::none(), 0).unwrap_err();
         match err {
             Error::SchemaTooNew { found, supported } => {
-                assert_eq!((found, supported), (99, 1));
+                assert_eq!((found, supported), (99, supported_version(DbKind::Catalog)));
             }
             other => panic!("应当是 SchemaTooNew，实际是 {other:?}"),
         }
@@ -509,13 +552,9 @@ mod tests {
 
         let mut conn = Connection::open(&db).unwrap();
         pragma::apply(&conn, false).unwrap();
-        apply_list(
-            &mut conn,
-            DbKind::Catalog,
-            &[FAKE_V1],
-            Backups::none(),
-            0).unwrap();
-        conn.execute("INSERT INTO t1(name) VALUES ('a')", []).unwrap();
+        apply_list(&mut conn, DbKind::Catalog, &[FAKE_V1], Backups::none(), 0).unwrap();
+        conn.execute("INSERT INTO t1(name) VALUES ('a')", [])
+            .unwrap();
 
         let out = apply_list(
             &mut conn,
@@ -542,10 +581,16 @@ mod tests {
         assert_eq!(cols, vec!["id", "name"], "快照应是升级前的结构");
         // 原库已升级，且数据还在
         let extra: i64 = conn
-            .query_row("SELECT count(*) FROM pragma_table_info('t1') WHERE name='extra'", [], |r| r.get(0))
+            .query_row(
+                "SELECT count(*) FROM pragma_table_info('t1') WHERE name='extra'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(extra, 1);
-        let n: i64 = conn.query_row("SELECT count(*) FROM t1", [], |r| r.get(0)).unwrap();
+        let n: i64 = conn
+            .query_row("SELECT count(*) FROM t1", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(n, 1);
     }
 
@@ -555,17 +600,19 @@ mod tests {
         let db = dir.path().join("catalog.db");
         let mut conn = Connection::open(&db).unwrap();
         pragma::apply(&conn, false).unwrap();
-        apply_list(
-            &mut conn,
-            DbKind::Catalog,
-            &[FAKE_V1],
-            Backups::none(),
-            0).unwrap();
+        apply_list(&mut conn, DbKind::Catalog, &[FAKE_V1], Backups::none(), 0).unwrap();
 
         let err = apply_list(
             &mut conn,
             DbKind::Catalog,
-            &[FAKE_V1, Migration { version: 2, name: "bad", sql: FAKE_BAD.sql }],
+            &[
+                FAKE_V1,
+                Migration {
+                    version: 2,
+                    name: "bad",
+                    sql: FAKE_BAD.sql,
+                },
+            ],
             Backups::none(),
             0,
         )
@@ -596,24 +643,15 @@ mod tests {
             sql: "CREATE TABLE parent(id INTEGER PRIMARY KEY);
                   CREATE TABLE child(id INTEGER PRIMARY KEY, pid INTEGER REFERENCES parent(id));",
         };
-        apply_list(
-            &mut conn,
-            DbKind::Catalog,
-            &[V1],
-            Backups::none(),
-            0).unwrap();
+        apply_list(&mut conn, DbKind::Catalog, &[V1], Backups::none(), 0).unwrap();
 
         const V2: Migration = Migration {
             version: 2,
             name: "v2",
             sql: "INSERT INTO child(id, pid) VALUES (1, 4242);", // 指向不存在的 parent
         };
-        let err = apply_list(
-            &mut conn,
-            DbKind::Catalog,
-            &[V1, V2],
-            Backups::none(),
-            0).unwrap_err();
+        let err =
+            apply_list(&mut conn, DbKind::Catalog, &[V1, V2], Backups::none(), 0).unwrap_err();
         assert!(
             matches!(err, Error::IntegrityCheck(_)),
             "应当报外键完整性错误，实际是 {err:?}"
@@ -631,13 +669,10 @@ mod tests {
             sql: "CREATE TABLE parent(id INTEGER PRIMARY KEY);
                   CREATE TABLE child(id INTEGER PRIMARY KEY, pid INTEGER REFERENCES parent(id));",
         };
-        apply_list(
-            &mut conn,
-            DbKind::Catalog,
-            &[V1],
-            Backups::none(),
-            0).unwrap();
-        let fk: i64 = conn.query_row("PRAGMA foreign_keys", [], |r| r.get(0)).unwrap();
+        apply_list(&mut conn, DbKind::Catalog, &[V1], Backups::none(), 0).unwrap();
+        let fk: i64 = conn
+            .query_row("PRAGMA foreign_keys", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(fk, 1, "迁移结束后外键必须重新打开");
     }
 
@@ -677,7 +712,10 @@ mod tests {
         assert_eq!(left.len(), 7);
         // 新的还在，最老的两份没了
         assert!(left[0].to_string_lossy().contains("20260918"));
-        assert!(left.iter().all(|p| !p.to_string_lossy().contains("20260910-000000Z")));
+        assert!(
+            left.iter()
+                .all(|p| !p.to_string_lossy().contains("20260910-000000Z"))
+        );
         // 别的种类与无关文件不受影响
         assert!(dir.path().join("app_v1_20260910-000000Z.db").exists());
         assert!(dir.path().join("随便一个文件.txt").exists());
@@ -698,7 +736,10 @@ mod tests {
             }
         }
         // 只轮转 A 组，保留 2 份
-        assert_eq!(rotate_backups(dir.path(), DbKind::Catalog, "catalog_AAAA", 2).unwrap(), 1);
+        assert_eq!(
+            rotate_backups(dir.path(), DbKind::Catalog, "catalog_AAAA", 2).unwrap(),
+            1
+        );
 
         let a = list_backups(dir.path(), DbKind::Catalog)
             .into_iter()
@@ -738,7 +779,10 @@ mod tests {
     fn rotation_is_a_noop_when_under_limit() {
         let dir = tmp();
         std::fs::write(dir.path().join("catalog_v1_20260915-000000Z.db"), b"x").unwrap();
-        assert_eq!(rotate_backups(dir.path(), DbKind::Catalog, "catalog", 7).unwrap(), 0);
+        assert_eq!(
+            rotate_backups(dir.path(), DbKind::Catalog, "catalog", 7).unwrap(),
+            0
+        );
         assert_eq!(list_backups(dir.path(), DbKind::Catalog).len(), 1);
     }
 
@@ -757,17 +801,24 @@ mod tests {
         let backups = dir.path().join("backups");
         let mut conn = Connection::open(&db).unwrap();
         pragma::apply(&conn, false).unwrap();
-        apply_list(
-            &mut conn,
-            DbKind::Catalog,
-            &[FAKE_V1],
-            Backups::none(),
-            0).unwrap();
+        apply_list(&mut conn, DbKind::Catalog, &[FAKE_V1], Backups::none(), 0).unwrap();
 
         // 同一时刻（同一毫秒）连做三次升级 → 不能因为同名而失败
-        const V2A: Migration = Migration { version: 2, name: "a", sql: "CREATE TABLE a(x);" };
-        const V2B: Migration = Migration { version: 2, name: "b", sql: "CREATE TABLE b(x);" };
-        const V2C: Migration = Migration { version: 2, name: "c", sql: "CREATE TABLE c(x);" };
+        const V2A: Migration = Migration {
+            version: 2,
+            name: "a",
+            sql: "CREATE TABLE a(x);",
+        };
+        const V2B: Migration = Migration {
+            version: 2,
+            name: "b",
+            sql: "CREATE TABLE b(x);",
+        };
+        const V2C: Migration = Migration {
+            version: 2,
+            name: "c",
+            sql: "CREATE TABLE c(x);",
+        };
         for v in [V2A, V2B, V2C] {
             // 每次先把版本退回去，模拟「另一个库」
             conn.pragma_update(None, "user_version", 1_i64).unwrap();
@@ -778,7 +829,7 @@ mod tests {
                 Backups::at(&backups),
                 1_789_516_800_000,
             )
-                .unwrap();
+            .unwrap();
         }
         let snaps = list_backups(&backups, DbKind::Catalog);
         assert_eq!(snaps.len(), 3, "同一秒的三次快照都要保留：{snaps:?}");
@@ -815,7 +866,11 @@ mod tests {
             .unwrap();
         }
         let n: i64 = conn
-            .query_row("SELECT count(*) FROM asset_files WHERE asset_id=?1", [asset_id], |r| r.get(0))
+            .query_row(
+                "SELECT count(*) FROM asset_files WHERE asset_id=?1",
+                [asset_id],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(n, 2, "位图与 RAW 都要在，且挂在同一个资产下");
     }
@@ -845,8 +900,11 @@ mod tests {
     fn catalogue_marks_missing_files_and_identity() {
         let mut conn = mem();
         apply(&mut conn, DbKind::Catalog, Backups::none(), 0).unwrap();
-        conn.execute("INSERT INTO assets(imported_at, updated_at) VALUES (1,1)", [])
-            .unwrap();
+        conn.execute(
+            "INSERT INTO assets(imported_at, updated_at) VALUES (1,1)",
+            [],
+        )
+        .unwrap();
         conn.execute(
             "INSERT INTO asset_files(asset_id, role, rel_path, rel_path_folded, ext,
                                      volume_serial, file_id, missing_since, created_at, updated_at)
@@ -881,7 +939,9 @@ mod tests {
             "INSERT INTO seq_counters(directory, width, value, updated_at) VALUES ('photos/2026-08-15', 4, 8, 1)",
             []
         ).is_err(), "同一目录同一宽度只能有一条计数");
-        let n: i64 = conn.query_row("SELECT count(*) FROM seq_counters", [], |r| r.get(0)).unwrap();
+        let n: i64 = conn
+            .query_row("SELECT count(*) FROM seq_counters", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(n, 3);
     }
 
@@ -908,7 +968,11 @@ mod tests {
         assert_eq!(hit("婚礼现场"), 1, "中文子串应当搜得到");
         assert_eq!(hit("婚礼现"), 1, "三字是 trigram 的下限");
         assert_eq!(hit("婚礼现场合影"), 1, "更长的子串也搜得到");
-        assert_eq!(hit("合影"), 0, "**两字查询用 trigram 搜不到** → 短词必须走 LIKE 兜底");
+        assert_eq!(
+            hit("合影"),
+            0,
+            "**两字查询用 trigram 搜不到** → 短词必须走 LIKE 兜底"
+        );
         assert_eq!(hit("现场"), 0, "同上");
         assert_eq!(hit("EOS"), 1, "英文型号应当搜得到");
         assert_eq!(hit("eos"), 1, "大小写不敏感");
@@ -924,9 +988,14 @@ mod tests {
             [],
         )
         .unwrap();
-        conn.execute("DELETE FROM assets_fts WHERE rowid = 1", []).unwrap();
+        conn.execute("DELETE FROM assets_fts WHERE rowid = 1", [])
+            .unwrap();
         let n: i64 = conn
-            .query_row("SELECT count(*) FROM assets_fts WHERE assets_fts MATCH '婚礼现场'", [], |r| r.get(0))
+            .query_row(
+                "SELECT count(*) FROM assets_fts WHERE assets_fts MATCH '婚礼现场'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(n, 0);
     }
@@ -950,12 +1019,19 @@ mod tests {
         }
         // 同一个库的两条不同路径都记得住（同库多路径）
         let n: i64 = conn
-            .query_row("SELECT count(*) FROM repository_paths WHERE repository_id='lib1'", [], |r| r.get(0))
+            .query_row(
+                "SELECT count(*) FROM repository_paths WHERE repository_id='lib1'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(n, 2);
         // 删库时路径记录跟着走（外键级联）
-        conn.execute("DELETE FROM repositories WHERE id='lib1'", []).unwrap();
-        let left: i64 = conn.query_row("SELECT count(*) FROM repository_paths", [], |r| r.get(0)).unwrap();
+        conn.execute("DELETE FROM repositories WHERE id='lib1'", [])
+            .unwrap();
+        let left: i64 = conn
+            .query_row("SELECT count(*) FROM repository_paths", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(left, 0, "删库必须级联清掉路径记录");
     }
 
@@ -977,7 +1053,9 @@ mod tests {
             )
             .unwrap();
         }
-        let n: i64 = conn.query_row("SELECT count(*) FROM repository_paths", [], |r| r.get(0)).unwrap();
+        let n: i64 = conn
+            .query_row("SELECT count(*) FROM repository_paths", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(n, 2, "同一路径可以属于两个库");
     }
 }

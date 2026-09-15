@@ -34,8 +34,8 @@
 //! 写队列是单线程的，把读塞进来会拖慢所有人的写。
 
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Mutex;
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::JoinHandle;
 
 use rusqlite::Connection;
@@ -201,8 +201,8 @@ mod tests {
     use super::*;
     use crate::store::migration::{self, Backups, DbKind};
     use crate::store::pool::ReadPool;
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     /// 建一个有 schema 的文件库。
     fn file_db() -> tempfile::TempDir {
@@ -237,9 +237,11 @@ mod tests {
 
         let id: String = w
             .run(|conn| {
-                Ok(conn.query_row("SELECT value FROM repository_meta WHERE key='repository_id'", [], |r| {
-                    r.get(0)
-                })?)
+                Ok(conn.query_row(
+                    "SELECT value FROM repository_meta WHERE key='repository_id'",
+                    [],
+                    |r| r.get(0),
+                )?)
             })
             .unwrap();
         assert_eq!(id, "abc");
@@ -251,7 +253,10 @@ mod tests {
         let path = dir.path().join("catalog.db");
         let w = Writer::open(&path).unwrap();
         w.run(|conn| {
-            conn.execute("INSERT INTO repository_meta(key, value) VALUES ('a','1')", [])?;
+            conn.execute(
+                "INSERT INTO repository_meta(key, value) VALUES ('a','1')",
+                [],
+            )?;
             Ok(())
         })
         .unwrap();
@@ -287,13 +292,22 @@ mod tests {
         let w = Writer::open(&path).unwrap();
         let err = w
             .transaction(|tx| {
-                tx.execute("INSERT INTO repository_meta(key, value) VALUES ('good','1')", [])?;
+                tx.execute(
+                    "INSERT INTO repository_meta(key, value) VALUES ('good','1')",
+                    [],
+                )?;
                 // 主键冲突：整批都要回滚
-                tx.execute("INSERT INTO repository_meta(key, value) VALUES ('good','2')", [])?;
+                tx.execute(
+                    "INSERT INTO repository_meta(key, value) VALUES ('good','2')",
+                    [],
+                )?;
                 Ok(())
             })
             .unwrap_err();
-        assert!(matches!(err, Error::Database(_)), "应当是数据库错误：{err:?}");
+        assert!(
+            matches!(err, Error::Database(_)),
+            "应当是数据库错误：{err:?}"
+        );
 
         let pool = ReadPool::open(&path).unwrap();
         assert_eq!(count_meta(&pool), 0, "失败的事务必须整批回滚");
@@ -399,7 +413,10 @@ mod tests {
         let dir = file_db();
         let w = Writer::open(dir.path().join("catalog.db")).unwrap();
         w.run(|conn| {
-            conn.execute("INSERT INTO repository_meta(key, value) VALUES ('a','1')", [])?;
+            conn.execute(
+                "INSERT INTO repository_meta(key, value) VALUES ('a','1')",
+                [],
+            )?;
             Ok(())
         })
         .unwrap();

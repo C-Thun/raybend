@@ -36,9 +36,9 @@ use rusqlite::Connection;
 
 use crate::error::{Error, Result};
 
-use super::repository::{self, RepositoryMeta};
 use super::migration::{self, Backups, DbKind, MigrationOutcome};
 use super::pool::ReadPool;
+use super::repository::{self, RepositoryMeta};
 use super::writer::Writer;
 use super::{pragma, time};
 
@@ -203,7 +203,12 @@ impl AppDb {
     // ---------- 库注册表 ----------
 
     /// 登记（或更新）一个库。
-    pub fn register_repository(&self, meta: &RepositoryMeta, root: &Path, now_ms: i64) -> Result<()> {
+    pub fn register_repository(
+        &self,
+        meta: &RepositoryMeta,
+        root: &Path,
+        now_ms: i64,
+    ) -> Result<()> {
         let meta = meta.clone();
         let root = root.to_string_lossy().into_owned();
         self.write_tx(move |tx| {
@@ -248,7 +253,7 @@ impl CatalogDb {
         let root = root.as_ref();
         let path = root.join(repository::CATALOG_FILE_NAME);
         if !path.is_file() {
-            return Err(Error::NotALibrary {
+            return Err(Error::NotARepository {
                 path: root.to_path_buf(),
                 reason: format!("目录下没有 {}", repository::CATALOG_FILE_NAME),
             });
@@ -316,10 +321,7 @@ impl CatalogDb {
     /// 库根目录（`catalog.db` 所在目录）。
     #[must_use]
     pub fn root(&self) -> &Path {
-        self.report
-            .path
-            .parent()
-            .unwrap_or_else(|| Path::new("."))
+        self.report.path.parent().unwrap_or_else(|| Path::new("."))
     }
 
     /// 库文件路径。
@@ -365,7 +367,9 @@ impl CatalogDb {
     /// 改导入模版（写进库内元信息；`app.db` 的缓存由调用方决定是否同步）。
     pub fn set_import_template(&self, template: &str) -> Result<()> {
         let template = template.to_string();
-        self.write(move |conn| repository::write_meta(conn, repository::META_IMPORT_TEMPLATE, &template))
+        self.write(move |conn| {
+            repository::write_meta(conn, repository::META_IMPORT_TEMPLATE, &template)
+        })
     }
 }
 
@@ -437,7 +441,12 @@ mod tests {
         assert!(app.path().is_file());
         assert!(dir.path().join(BACKUPS_DIR).is_dir(), "备份目录要建好");
         let m = app.report().migration.as_ref().unwrap();
-        assert_eq!((m.from, m.to), (0, 1));
+        assert_eq!(m.from, 0, "全新库从 0 开始");
+        assert_eq!(
+            m.to,
+            migration::supported_version(DbKind::App),
+            "一路迁到当前版本"
+        );
     }
 
     #[test]
@@ -448,7 +457,8 @@ mod tests {
             assert_eq!(app.get_setting("theme").unwrap(), None);
             app.set_setting("theme", "dark").unwrap();
             app.set_setting("theme", "light").unwrap(); // 覆盖
-            app.set_setting_json("recent", &vec!["D:\\a", "D:\\b"]).unwrap();
+            app.set_setting_json("recent", &vec!["D:\\a", "D:\\b"])
+                .unwrap();
             assert_eq!(app.get_setting("theme").unwrap().as_deref(), Some("light"));
         }
         // 重开：数据还在（说明写线程的队列在 Drop 时跑干了）
@@ -457,7 +467,10 @@ mod tests {
         let recent: Vec<String> = app.get_setting_json("recent").unwrap().unwrap();
         assert_eq!(recent, vec!["D:\\a", "D:\\b"]);
         // 已经是当前版本 → 不再迁移
-        assert_eq!(app.report().migration.as_ref().unwrap().to, 1);
+        assert_eq!(
+            app.report().migration.as_ref().unwrap().to,
+            migration::supported_version(DbKind::App)
+        );
     }
 
     #[test]
@@ -487,7 +500,10 @@ mod tests {
             conn.pragma_update(None, "user_version", 99_i64).unwrap();
         }
         let err = AppDb::open(dir.path(), T0).unwrap_err();
-        assert!(matches!(err, Error::SchemaTooNew { found: 99, .. }), "{err:?}");
+        assert!(
+            matches!(err, Error::SchemaTooNew { found: 99, .. }),
+            "{err:?}"
+        );
         assert!(err.to_string().contains("升级"), "提示要说清怎么办：{err}");
     }
 
@@ -496,7 +512,10 @@ mod tests {
         let dir = tmp();
         let blocker = dir.path().join("挡路的文件");
         std::fs::write(&blocker, b"x").unwrap();
-        assert!(AppDb::open(&blocker, T0).is_err(), "路径被文件占住时必须报错");
+        assert!(
+            AppDb::open(&blocker, T0).is_err(),
+            "路径被文件占住时必须报错"
+        );
     }
 
     // ---------- CatalogDb ----------
@@ -524,10 +543,10 @@ mod tests {
         let dir = tmp();
         let err = CatalogDb::open(dir.path(), opts(dir.path(), T0)).unwrap_err();
         match err {
-            Error::NotALibrary { reason, .. } => {
+            Error::NotARepository { reason, .. } => {
                 assert!(reason.contains("catalog.db"), "{reason}");
             }
-            other => panic!("应当是 NotALibrary，实际 {other:?}"),
+            other => panic!("应当是 NotARepository，实际 {other:?}"),
         }
     }
 
@@ -570,7 +589,10 @@ mod tests {
             conn.pragma_update(None, "user_version", 42_i64).unwrap();
         }
         let err = CatalogDb::open(&root, opts(&root, T0)).unwrap_err();
-        assert!(matches!(err, Error::SchemaTooNew { found: 42, .. }), "{err:?}");
+        assert!(
+            matches!(err, Error::SchemaTooNew { found: 42, .. }),
+            "{err:?}"
+        );
     }
 
     #[test]
@@ -601,7 +623,10 @@ mod tests {
             .unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
             .collect();
-        assert!(!entries.contains(&BACKUPS_DIR.to_string()), "库根不该出现 backups：{entries:?}");
+        assert!(
+            !entries.contains(&BACKUPS_DIR.to_string()),
+            "库根不该出现 backups：{entries:?}"
+        );
         assert!(entries.contains(&"catalog.db".to_string()));
         assert!(entries.contains(&"photos".to_string()));
     }
@@ -616,7 +641,11 @@ mod tests {
         let o = opts(dir, 0);
         let b = backups_for(&o, "Ab3xY9zQ1mNp7Kd2");
         assert_eq!(b.dir, Some(dir));
-        assert_eq!(b.label, Some("Ab3xY9zQ"), "catalog 的快照文件名要能区分是哪个库");
+        assert_eq!(
+            b.label,
+            Some("Ab3xY9zQ"),
+            "catalog 的快照文件名要能区分是哪个库"
+        );
 
         let unbacked = backups_for(&OpenOpts::unbacked_up(0), "Ab3xY9zQ1mNp7Kd2");
         assert!(unbacked.dir.is_none() && unbacked.label.is_none());

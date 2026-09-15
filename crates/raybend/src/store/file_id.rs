@@ -129,7 +129,9 @@ mod platform {
         let file = std::fs::File::open(path)?;
         let mut info: FILE_ID_INFO = FILE_ID_INFO {
             VolumeSerialNumber: 0,
-            FileId: windows_sys::Win32::Storage::FileSystem::FILE_ID_128 { Identifier: [0; 16] },
+            FileId: windows_sys::Win32::Storage::FileSystem::FILE_ID_128 {
+                Identifier: [0; 16],
+            },
         };
         // SAFETY: 句柄来自刚打开的 File（生命周期覆盖本次调用），
         // info 是栈上正确对齐的 FILE_ID_INFO，长度用 size_of 传入，符合 API 契约。
@@ -233,7 +235,10 @@ mod tests {
         if fs::hard_link(&p1, &p2).is_err() {
             return; // 该文件系统不支持硬链接（例如某些容器/网络盘）→ 跳过
         }
-        assert_eq!(FileId::try_read(&p1).unwrap(), FileId::try_read(&p2).unwrap());
+        assert_eq!(
+            FileId::try_read(&p1).unwrap(),
+            FileId::try_read(&p2).unwrap()
+        );
     }
 
     #[test]
@@ -243,7 +248,10 @@ mod tests {
         let p2 = d.path().join("b.jpg");
         fs::write(&p1, b"a").unwrap();
         fs::write(&p2, b"b").unwrap();
-        assert_ne!(FileId::try_read(&p1).unwrap(), FileId::try_read(&p2).unwrap());
+        assert_ne!(
+            FileId::try_read(&p1).unwrap(),
+            FileId::try_read(&p2).unwrap()
+        );
     }
 
     #[test]

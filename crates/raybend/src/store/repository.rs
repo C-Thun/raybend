@@ -15,9 +15,9 @@ use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::error::{Error, Result};
 
-use super::path_semantics::PathForms;
-use super::migration::{self, Backups};
 use super::ids;
+use super::migration::{self, Backups};
+use super::path_semantics::PathForms;
 
 /// `repository_meta` 里「库身份」的键名。
 pub const META_REPOSITORY_ID: &str = "repository_id";
@@ -53,21 +53,20 @@ pub struct RepositoryMeta {
 impl RepositoryMeta {
     /// 从 `catalog.db` 的 `repository_meta` 表读出。
     ///
-    /// 缺 `repository_id` 或格式不合法 → [`Error::NotALibrary`]（带上路径，便于提示用户）。
+    /// 缺 `repository_id` 或格式不合法 → [`Error::NotARepository`]（带上路径，便于提示用户）。
     pub fn read(conn: &Connection, db_path: &Path) -> Result<Self> {
         // 「目录里有个 catalog.db，但不是我们的库」要有可读的提示，
         // 而不是把 SQLite 的 `no such table: repository_meta` 抛给用户。
         if !has_meta_table(conn)? {
-            return Err(Error::NotALibrary {
+            return Err(Error::NotARepository {
                 path: db_path.to_path_buf(),
                 reason: "文件不是 raybend 的库（没有 repository_meta 表）".to_string(),
             });
         }
-        let id = read_meta(conn, META_REPOSITORY_ID)?
-            .ok_or_else(|| Error::NotALibrary {
-                path: db_path.to_path_buf(),
-                reason: "catalog.db 里没有库身份（repository_id）".to_string(),
-            })?;
+        let id = read_meta(conn, META_REPOSITORY_ID)?.ok_or_else(|| Error::NotARepository {
+            path: db_path.to_path_buf(),
+            reason: "catalog.db 里没有库身份（repository_id）".to_string(),
+        })?;
         ids::require_valid(&id, db_path)?;
         Ok(Self {
             id,
@@ -114,9 +113,11 @@ fn has_meta_table(conn: &Connection) -> Result<bool> {
 /// 读一条库元信息。
 pub fn read_meta(conn: &Connection, key: &str) -> Result<Option<String>> {
     Ok(conn
-        .query_row("SELECT value FROM repository_meta WHERE key = ?1", [key], |r| {
-            r.get::<_, String>(0)
-        })
+        .query_row(
+            "SELECT value FROM repository_meta WHERE key = ?1",
+            [key],
+            |r| r.get::<_, String>(0),
+        )
         .optional()?)
 }
 
@@ -146,7 +147,7 @@ pub fn read_repository_meta(db_path: &Path) -> Result<RepositoryMeta> {
 ///
 /// * 目标不存在 → 建库：跑迁移、写库身份（**新生成的 ID**）、建 `photos/` 目录；
 /// * 目标已存在且是合法库 → **原样返回**（绝不重新生成 ID —— 那会让旧登记全部失联）；
-/// * 目标已存在但不是库（缺库身份）→ 报 [`Error::NotALibrary`]，让调用方决定怎么办。
+/// * 目标已存在但不是库（缺库身份）→ 报 [`Error::NotARepository`]，让调用方决定怎么办。
 pub fn create_or_open_catalog(
     db_path: &Path,
     name: &str,
@@ -162,7 +163,12 @@ pub fn create_or_open_catalog(
 
     let mut conn = Connection::open(db_path)?;
     super::pragma::apply(&conn, false)?;
-    migration::apply(&mut conn, migration::DbKind::Catalog, Backups::none(), now_ms)?;
+    migration::apply(
+        &mut conn,
+        migration::DbKind::Catalog,
+        Backups::none(),
+        now_ms,
+    )?;
 
     let meta = RepositoryMeta {
         id: ids::new_repository_id_at(now_ms)?,
@@ -296,7 +302,12 @@ pub fn register_repository(conn: &Connection, meta: &RepositoryMeta, now_ms: i64
 /// 给一个库登记一条路径（`REPOSITORY.md` §2.4：同库多路径）。
 ///
 /// 同一路径重复登记是安全的（幂等）。
-pub fn add_repository_path(conn: &Connection, repository_id: &str, path: &str, now_ms: i64) -> Result<()> {
+pub fn add_repository_path(
+    conn: &Connection,
+    repository_id: &str,
+    path: &str,
+    now_ms: i64,
+) -> Result<()> {
     let forms = PathForms::new(path);
     conn.execute(
         // 冲突时只刷新 last_seen：**保留第一次登记时的原始拼写**（那是用户认得的写法）
@@ -317,7 +328,11 @@ pub fn set_path_status(
     now_ms: i64,
 ) -> Result<bool> {
     let folded = PathForms::new(path).folded().to_string();
-    let seen = if status == "online" { Some(now_ms) } else { None };
+    let seen = if status == "online" {
+        Some(now_ms)
+    } else {
+        None
+    };
     let n = conn.execute(
         "UPDATE repository_paths
             SET status = ?3,
@@ -455,14 +470,14 @@ mod tests {
 
         let err = read_repository_meta(&db).unwrap_err();
         match err {
-            Error::NotALibrary { path, reason } => {
+            Error::NotARepository { path, reason } => {
                 assert_eq!(path, db);
                 assert!(
                     reason.contains("不是 raybend 的库"),
                     "要能看出这是「长得像库但不是库」：{reason}"
                 );
             }
-            other => panic!("应当是 NotALibrary，实际 {other:?}"),
+            other => panic!("应当是 NotARepository，实际 {other:?}"),
         }
     }
 
@@ -474,11 +489,11 @@ mod tests {
 
         let err = read_repository_meta(&db).unwrap_err();
         match err {
-            Error::NotALibrary { path, reason } => {
+            Error::NotARepository { path, reason } => {
                 assert_eq!(path, db);
                 assert!(reason.contains("不是 raybend 的库"), "{reason}");
             }
-            other => panic!("应当是 NotALibrary，实际 {other:?}"),
+            other => panic!("应当是 NotARepository，实际 {other:?}"),
         }
     }
 
@@ -493,7 +508,7 @@ mod tests {
         drop(conn);
 
         let err = read_repository_meta(&db).unwrap_err();
-        assert!(matches!(err, Error::NotALibrary { .. }), "{err:?}");
+        assert!(matches!(err, Error::NotARepository { .. }), "{err:?}");
         assert!(err.to_string().contains("格式不合法"), "{err}");
     }
 
@@ -526,7 +541,11 @@ mod tests {
         write_meta(&conn, META_NAME, "新名").unwrap();
         write_meta(&conn, META_NAME, "更新名").unwrap();
         let n: i64 = conn
-            .query_row("SELECT count(*) FROM repository_meta WHERE key='name'", [], |r| r.get(0))
+            .query_row(
+                "SELECT count(*) FROM repository_meta WHERE key='name'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(n, 1, "同一个键只能有一条");
         assert_eq!(read_meta(&conn, META_NAME).unwrap().unwrap(), "更新名");
@@ -552,7 +571,11 @@ mod tests {
 
         let list = list_repositories(&app).unwrap();
         assert_eq!(list.len(), 1);
-        assert_eq!(list[0].paths.len(), 2, "两条路径（大小写不同的那条算同一条）");
+        assert_eq!(
+            list[0].paths.len(),
+            2,
+            "两条路径（大小写不同的那条算同一条）"
+        );
         assert!(list[0].paths.iter().any(|p| p.path == r"D:\照片"));
         assert!(list[0].import_template.is_some(), "模版要在 app.db 留缓存");
     }
@@ -619,7 +642,10 @@ mod tests {
             db.is_file(),
             "「忘记库」绝不能删磁盘上的东西（那是另一件事，需要用户明确同意）"
         );
-        assert!(!forget_repository(&app, &meta.id).unwrap(), "重复忘记返回 false");
+        assert!(
+            !forget_repository(&app, &meta.id).unwrap(),
+            "重复忘记返回 false"
+        );
     }
 
     #[test]

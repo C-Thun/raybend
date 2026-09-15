@@ -37,7 +37,11 @@ pub fn civil(millis: i64) -> (i64, u32, u32, u32, u32, u32) {
     let sod = secs.rem_euclid(86_400);
     let (y, m, d) = civil_from_days(days);
     #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-    let (hh, mm, ss) = ((sod / 3600) as u32, ((sod % 3600) / 60) as u32, (sod % 60) as u32);
+    let (hh, mm, ss) = (
+        (sod / 3600) as u32,
+        ((sod % 3600) / 60) as u32,
+        (sod % 60) as u32,
+    );
     let _ = ms;
     (y, m, d, hh, mm, ss)
 }
@@ -57,11 +61,7 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
     let d = doy - (153 * mp + 2) / 5 + 1; // [1, 31]
     let m = if mp < 10 { mp + 3 } else { mp - 9 }; // [1, 12]
     #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-    (
-        if m <= 2 { y + 1 } else { y },
-        m as u32,
-        d as u32,
-    )
+    (if m <= 2 { y + 1 } else { y }, m as u32, d as u32)
 }
 
 /// `20260915-143002Z`（UTC，定宽 → 字典序即时间序，用于快照文件名）。

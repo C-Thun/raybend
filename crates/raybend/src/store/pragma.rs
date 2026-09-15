@@ -68,11 +68,17 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         apply(&conn, false).unwrap();
 
-        let fk: i64 = conn.query_row("PRAGMA foreign_keys", [], |r| r.get(0)).unwrap();
+        let fk: i64 = conn
+            .query_row("PRAGMA foreign_keys", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(fk, 1);
-        let bt: i64 = conn.query_row("PRAGMA busy_timeout", [], |r| r.get(0)).unwrap();
+        let bt: i64 = conn
+            .query_row("PRAGMA busy_timeout", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(bt, i64::from(BUSY_TIMEOUT_MS));
-        let sync: i64 = conn.query_row("PRAGMA synchronous", [], |r| r.get(0)).unwrap();
+        let sync: i64 = conn
+            .query_row("PRAGMA synchronous", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(sync, 1, "NORMAL == 1");
     }
 
@@ -102,7 +108,9 @@ mod tests {
         // 只读连接不该因为设置 journal_mode 而失败
         let conn = Connection::open_in_memory().unwrap();
         apply(&conn, true).unwrap();
-        let fk: i64 = conn.query_row("PRAGMA foreign_keys", [], |r| r.get(0)).unwrap();
+        let fk: i64 = conn
+            .query_row("PRAGMA foreign_keys", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(fk, 1);
     }
 }
