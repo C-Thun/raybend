@@ -12,7 +12,3708 @@
       "height": 600,
       "fill": "#FFFFFF",
       "layout": "none"
+    },
+    {
+      "type": "frame",
+      "id": "o2OJy2",
+      "x": 1980,
+      "y": 0,
+      "name": "Shell / Browse / Tiles",
+      "theme": {
+        "mode": "dark",
+        "density": "compact"
+      },
+      "clip": true,
+      "width": 1600,
+      "height": 1000,
+      "fill": "$surface-main",
+      "layout": "vertical",
+      "children": [
+        {
+          "type": "frame",
+          "id": "r4Yly",
+          "name": "TitleBar",
+          "width": "fill_container",
+          "height": 40,
+          "fill": "$surface-bar",
+          "padding": [
+            0,
+            0,
+            0,
+            8
+          ],
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "RFL2M",
+              "name": "AppIcon",
+              "width": 20,
+              "height": 20,
+              "fill": "$brand",
+              "cornerRadius": 4,
+              "layout": "vertical",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "TyGWu",
+                  "name": "Glyph / aperture",
+                  "width": 12,
+                  "height": 12,
+                  "icon": "aperture",
+                  "library": "lucide",
+                  "fill": "$fg-on-brand"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "ZmKe3",
+              "name": "Sp8",
+              "width": 8,
+              "height": 1
+            },
+            {
+              "type": "text",
+              "id": "FTcHx",
+              "name": "AppName",
+              "fill": "$fg-1",
+              "content": "光伴",
+              "fontFamily": "Inter",
+              "fontSize": 15,
+              "fontWeight": "600"
+            },
+            {
+              "type": "frame",
+              "id": "t8BbbF",
+              "name": "Sp16",
+              "width": 16,
+              "height": 1
+            },
+            {
+              "type": "frame",
+              "id": "nlNSk",
+              "name": "Sp8b",
+              "width": 8,
+              "height": 1
+            },
+            {
+              "type": "frame",
+              "id": "T2jt1b",
+              "name": "Sp8c",
+              "width": 8,
+              "height": 1
+            },
+            {
+              "type": "frame",
+              "id": "u7RSn",
+              "name": "IconButton / 主题切换",
+              "width": 24,
+              "height": 24,
+              "cornerRadius": 4,
+              "layout": "vertical",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "UXdR5",
+                  "name": "Glyph / moon",
+                  "width": 15,
+                  "height": 15,
+                  "icon": "moon",
+                  "library": "lucide",
+                  "fill": "$fg-2"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "QJRyP",
+              "name": "SegmentedControl / 密度",
+              "width": 96,
+              "height": 24,
+              "fill": "$surface-track",
+              "cornerRadius": 4,
+              "layout": "vertical",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "xUPW8",
+                  "name": "SegChip / 紧凑",
+                  "height": 20,
+                  "fill": "$surface-layer",
+                  "cornerRadius": 3,
+                  "padding": [
+                    0,
+                    8
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "Yd7rN",
+                      "name": "SegLabel / 紧凑",
+                      "fill": "$fg-1",
+                      "content": "紧凑",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "qMosC",
+                  "name": "SegChip / 宽松",
+                  "height": 20,
+                  "cornerRadius": 3,
+                  "padding": [
+                    0,
+                    8
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "Z3uFQ",
+                      "name": "SegLabel / 宽松",
+                      "fill": "$fg-3",
+                      "content": "宽松",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "nQfOK",
+              "name": "WindowControls",
+              "width": 156,
+              "height": 40,
+              "cornerRadius": 4,
+              "layout": "vertical",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "Hv3XG",
+                  "name": "WinBtn / minus",
+                  "width": 52,
+                  "height": 40,
+                  "layout": "vertical",
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "nbcWm",
+                      "name": "Glyph / minus",
+                      "width": 14,
+                      "height": 14,
+                      "icon": "minus",
+                      "library": "lucide",
+                      "fill": "$fg-2"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "Y2ppZa",
+                  "name": "WinBtn / square",
+                  "width": 52,
+                  "height": 40,
+                  "layout": "vertical",
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "D6QOYN",
+                      "name": "Glyph / square",
+                      "width": 14,
+                      "height": 14,
+                      "icon": "square",
+                      "library": "lucide",
+                      "fill": "$fg-2"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "CjTZG",
+                  "name": "WinBtn / x",
+                  "width": 52,
+                  "height": 40,
+                  "layout": "vertical",
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "tQcWX",
+                      "name": "Glyph / x",
+                      "width": 14,
+                      "height": 14,
+                      "icon": "x",
+                      "library": "lucide",
+                      "fill": "$fg-2"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "m5pm9",
+              "name": "DragArea",
+              "width": "fill_container",
+              "height": 1
+            },
+            {
+              "type": "frame",
+              "id": "v0nj4q",
+              "name": "MenuItem / 帮助 / hover",
+              "height": 26,
+              "fill": "$state-hover",
+              "cornerRadius": 4,
+              "padding": [
+                0,
+                8
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "tYJpH",
+                  "name": "MenuLabel / 帮助",
+                  "fill": "$fg-2",
+                  "content": "帮助",
+                  "fontFamily": "Inter",
+                  "fontSize": 14,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "DIZRv",
+          "name": "FlowBar",
+          "width": "fill_container",
+          "height": 52,
+          "fill": "$surface-main",
+          "gap": 8,
+          "padding": [
+            0,
+            8
+          ],
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "H9RB5",
+              "name": "FlowSwitcher / 工作流",
+              "height": 42,
+              "fill": "$surface-track",
+              "cornerRadius": 999,
+              "gap": 2,
+              "padding": 4,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "DL2P8",
+                  "name": "FlowChip / 导入",
+                  "height": 34,
+                  "cornerRadius": 999,
+                  "gap": 6,
+                  "padding": [
+                    0,
+                    18
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "xq5lM",
+                      "name": "Glyph / 导入",
+                      "width": 16,
+                      "height": 16,
+                      "icon": "folder-down",
+                      "library": "lucide",
+                      "fill": "$fg-2"
+                    },
+                    {
+                      "type": "text",
+                      "id": "x1WbS",
+                      "name": "FlowLabel / 导入",
+                      "fill": "$fg-2",
+                      "content": "导入",
+                      "fontFamily": "Inter",
+                      "fontSize": 15,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "D2U89p",
+                  "name": "FlowChip / 浏览",
+                  "height": 34,
+                  "fill": "$brand",
+                  "cornerRadius": 999,
+                  "gap": 6,
+                  "padding": [
+                    0,
+                    18
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "pJRcw",
+                      "name": "Glyph / 浏览",
+                      "width": 16,
+                      "height": 16,
+                      "icon": "image",
+                      "library": "lucide",
+                      "fill": "$fg-on-brand"
+                    },
+                    {
+                      "type": "text",
+                      "id": "S2Ke0X",
+                      "name": "FlowLabel / 浏览",
+                      "fill": "$fg-on-brand",
+                      "content": "浏览",
+                      "fontFamily": "Inter",
+                      "fontSize": 15,
+                      "fontWeight": "500"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "sFtz8",
+                  "name": "FlowChip / 编辑",
+                  "height": 34,
+                  "cornerRadius": 999,
+                  "gap": 6,
+                  "padding": [
+                    0,
+                    18
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "ksPKm",
+                      "name": "Glyph / 编辑",
+                      "width": 16,
+                      "height": 16,
+                      "icon": "sliders-horizontal",
+                      "library": "lucide",
+                      "fill": "$fg-2"
+                    },
+                    {
+                      "type": "text",
+                      "id": "Y1iI7",
+                      "name": "FlowLabel / 编辑",
+                      "fill": "$fg-2",
+                      "content": "编辑",
+                      "fontFamily": "Inter",
+                      "fontSize": 15,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "mYAPr",
+                  "name": "FlowChip / 导出",
+                  "height": 34,
+                  "cornerRadius": 999,
+                  "gap": 6,
+                  "padding": [
+                    0,
+                    18
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "HxMVZ",
+                      "name": "Glyph / 导出",
+                      "width": 16,
+                      "height": 16,
+                      "icon": "upload",
+                      "library": "lucide",
+                      "fill": "$fg-2"
+                    },
+                    {
+                      "type": "text",
+                      "id": "Aid2m",
+                      "name": "FlowLabel / 导出",
+                      "fill": "$fg-2",
+                      "content": "导出",
+                      "fontFamily": "Inter",
+                      "fontSize": 15,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "d81cjW",
+              "name": "SpacerFlex",
+              "width": "fill_container",
+              "height": 1
+            },
+            {
+              "type": "frame",
+              "id": "kGS2d",
+              "name": "ExifStrip",
+              "gap": 12,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "jHCot",
+                  "name": "ExifGroup / 机身镜头",
+                  "fill": "$state-selected",
+                  "cornerRadius": 4,
+                  "gap": 6,
+                  "padding": [
+                    4,
+                    8
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "Pq9Qf",
+                      "name": "ExifVal / 机型",
+                      "fill": "$fg-1",
+                      "content": "DC-G9",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "KHhop",
+                      "name": "ExifSep1",
+                      "fill": "$fg-3",
+                      "content": "·",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "wfKtH",
+                      "name": "ExifVal / 镜头",
+                      "fill": "$fg-2",
+                      "content": "LEICA DG 12-60mm F2.8-4.0",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "rBuWz",
+                  "name": "ExifGroup / 曝光",
+                  "cornerRadius": 4,
+                  "gap": 6,
+                  "padding": [
+                    4,
+                    8
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "hgNpx",
+                      "name": "ExifVal / 12mm",
+                      "fill": "$fg-2",
+                      "content": "12mm",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "O0jdSJ",
+                      "name": "ExifVal / ƒ/2.8",
+                      "fill": "$fg-2",
+                      "content": "ƒ/2.8",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "Jw420",
+                      "name": "ExifVal / 1/125s",
+                      "fill": "$fg-2",
+                      "content": "1/125s",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "GPUoZ",
+                      "name": "ExifVal / ISO 200",
+                      "fill": "$fg-2",
+                      "content": "ISO 200",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "tFsme",
+                  "name": "ExifGroup / 尺寸",
+                  "cornerRadius": 4,
+                  "gap": 6,
+                  "padding": [
+                    4,
+                    8
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "ltkHG",
+                      "name": "ExifVal / 5184 × 3888",
+                      "fill": "$fg-2",
+                      "content": "5184 × 3888",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "e18w71",
+                      "name": "ExifVal / 20.2 MP",
+                      "fill": "$fg-2",
+                      "content": "20.2 MP",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "DISwH",
+                      "name": "ExifVal / RAW",
+                      "fill": "$fg-2",
+                      "content": "RAW",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "SpCgJ",
+              "name": "ToggleBlock / 吸附 / 未开启",
+              "width": 32,
+              "height": 32,
+              "cornerRadius": 4,
+              "layout": "vertical",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "siS0o",
+                  "name": "Glyph / magnet",
+                  "width": 16,
+                  "height": 16,
+                  "icon": "magnet",
+                  "library": "lucide",
+                  "fill": "$fg-2"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "JfB4a",
+          "name": "ToolsBar",
+          "width": "fill_container",
+          "height": 40,
+          "fill": "$surface-main",
+          "gap": 6,
+          "justifyContent": "center",
+          "alignItems": "center"
+        },
+        {
+          "type": "frame",
+          "id": "j57Wc",
+          "name": "Workspace / Browse",
+          "clip": true,
+          "width": "fill_container",
+          "height": 868,
+          "children": [
+            {
+              "type": "frame",
+              "id": "gFCu2",
+              "name": "Panel / 库与目录",
+              "clip": true,
+              "width": 320,
+              "height": "fill_container",
+              "fill": "$surface-main",
+              "layout": "vertical",
+              "gap": 8,
+              "padding": 8,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "X7sCIN",
+                  "name": "SearchBar",
+                  "width": "fill_container",
+                  "height": 32,
+                  "fill": "$surface-track",
+                  "cornerRadius": 4,
+                  "gap": 6,
+                  "padding": [
+                    0,
+                    8
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "z84AX",
+                      "name": "Glyph / search",
+                      "width": 14,
+                      "height": 14,
+                      "icon": "search",
+                      "library": "lucide",
+                      "fill": "$fg-3"
+                    },
+                    {
+                      "type": "text",
+                      "id": "L3BvJi",
+                      "name": "SearchPlaceholder",
+                      "fill": "$fg-3",
+                      "content": "搜索库 / 目录",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "q3iNQ",
+                  "name": "LibraryList / 紧缩",
+                  "clip": true,
+                  "width": "fill_container",
+                  "height": 226,
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "XafAb",
+                      "name": "RepoCard / Kowloon Studio",
+                      "width": "fill_container",
+                      "height": 60,
+                      "fill": "$state-selected",
+                      "cornerRadius": 4,
+                      "gap": 10,
+                      "padding": [
+                        0,
+                        10
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "m8s2RL",
+                          "name": "RepoIconBox",
+                          "width": 28,
+                          "height": 28,
+                          "fill": "$brand",
+                          "cornerRadius": 4,
+                          "layout": "vertical",
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "k35Rj",
+                              "name": "Glyph / library",
+                              "width": 16,
+                              "height": 16,
+                              "icon": "library",
+                              "library": "lucide",
+                              "fill": "$fg-on-brand"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "IpVXU",
+                          "name": "RepoTextCol",
+                          "width": "fill_container",
+                          "layout": "vertical",
+                          "gap": 2,
+                          "justifyContent": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "jHEI8",
+                              "name": "RepoName / Kowloon Studio",
+                              "fill": "$fg-1",
+                              "content": "Kowloon Studio",
+                              "fontFamily": "Inter",
+                              "fontSize": 14,
+                              "fontWeight": "500"
+                            },
+                            {
+                              "type": "text",
+                              "id": "LSCai",
+                              "name": "RepoPath / D:\\Libraries\\Main",
+                              "fill": "$fg-3",
+                              "content": "D:\\Libraries\\Main",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "id": "A7ksEs",
+                          "name": "RepoCount / 12 480 张",
+                          "fill": "$fg-3",
+                          "content": "12 480 张",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "PiCYQ",
+                          "name": "RepoGear / 库设置",
+                          "width": 24,
+                          "height": 24,
+                          "cornerRadius": 4,
+                          "layout": "vertical",
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "ASwH7",
+                              "name": "Glyph / settings",
+                              "width": 14,
+                              "height": 14,
+                              "icon": "settings",
+                              "library": "lucide",
+                              "fill": "$fg-3"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "g2xg1n",
+                      "name": "RepoCard / 个人相册",
+                      "width": "fill_container",
+                      "height": 60,
+                      "fill": "#000000",
+                      "cornerRadius": 4,
+                      "gap": 10,
+                      "padding": [
+                        0,
+                        10
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "zdAnd",
+                          "name": "RepoIconBox",
+                          "width": 28,
+                          "height": 28,
+                          "fill": "$surface-bar",
+                          "cornerRadius": 4,
+                          "layout": "vertical",
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "of7E4",
+                              "name": "Glyph / library",
+                              "width": 16,
+                              "height": 16,
+                              "icon": "library",
+                              "library": "lucide",
+                              "fill": "$fg-3"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "jmuHe",
+                          "name": "RepoTextCol",
+                          "width": "fill_container",
+                          "layout": "vertical",
+                          "gap": 2,
+                          "justifyContent": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "UnGkw",
+                              "name": "RepoName / 个人相册",
+                              "fill": "$fg-1",
+                              "content": "个人相册",
+                              "fontFamily": "Inter",
+                              "fontSize": 14,
+                              "fontWeight": "500"
+                            },
+                            {
+                              "type": "text",
+                              "id": "QO0PV",
+                              "name": "RepoPath / E:\\Photos",
+                              "fill": "$fg-3",
+                              "content": "E:\\Photos",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "id": "jrMCP",
+                          "name": "RepoCount / 3 210 张",
+                          "fill": "$fg-3",
+                          "content": "3 210 张",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "f75Qoa",
+                          "name": "RepoGear / 库设置",
+                          "width": 24,
+                          "height": 24,
+                          "cornerRadius": 4,
+                          "layout": "vertical",
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "jeiRh",
+                              "name": "Glyph / settings",
+                              "width": 14,
+                              "height": 14,
+                              "icon": "settings",
+                              "library": "lucide",
+                              "fill": "$fg-3"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "deslv",
+                      "name": "RepoCard / 婚礼项目",
+                      "width": "fill_container",
+                      "height": 60,
+                      "fill": "#000000",
+                      "cornerRadius": 4,
+                      "gap": 10,
+                      "padding": [
+                        0,
+                        10
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "U21Ze",
+                          "name": "RepoIconBox",
+                          "width": 28,
+                          "height": 28,
+                          "fill": "$surface-bar",
+                          "cornerRadius": 4,
+                          "layout": "vertical",
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "j70cd",
+                              "name": "Glyph / library",
+                              "width": 16,
+                              "height": 16,
+                              "icon": "library",
+                              "library": "lucide",
+                              "fill": "$fg-3"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "snh4J",
+                          "name": "RepoTextCol",
+                          "width": "fill_container",
+                          "layout": "vertical",
+                          "gap": 2,
+                          "justifyContent": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "aNck9",
+                              "name": "RepoName / 婚礼项目",
+                              "fill": "$fg-1",
+                              "content": "婚礼项目",
+                              "fontFamily": "Inter",
+                              "fontSize": 14,
+                              "fontWeight": "500"
+                            },
+                            {
+                              "type": "text",
+                              "id": "yYOUa",
+                              "name": "RepoPath / D:\\Libraries\\Wedding",
+                              "fill": "$fg-3",
+                              "content": "D:\\Libraries\\Wedding",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "id": "xZPEM",
+                          "name": "RepoCount / 1 872 张",
+                          "fill": "$fg-3",
+                          "content": "1 872 张",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "cMZgk",
+                          "name": "RepoGear / 库设置",
+                          "width": 24,
+                          "height": 24,
+                          "cornerRadius": 4,
+                          "layout": "vertical",
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "yATPb",
+                              "name": "Glyph / settings",
+                              "width": 14,
+                              "height": 14,
+                              "icon": "settings",
+                              "library": "lucide",
+                              "fill": "$fg-3"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "TZaLp",
+                      "name": "LibMore / 查看所有库",
+                      "clip": true,
+                      "width": "fill_container",
+                      "height": 30,
+                      "fill": "$surface-track",
+                      "cornerRadius": 4,
+                      "layout": "vertical",
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "nFH6o",
+                          "name": "LibMoreLabel",
+                          "fill": "$fg-2",
+                          "content": "查看所有库",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "e0Vk0W",
+                  "name": "DirTree / 库内目录",
+                  "clip": true,
+                  "width": "fill_container",
+                  "height": "fill_container",
+                  "layout": "vertical",
+                  "gap": 2,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "uBick",
+                      "name": "TreeTitle",
+                      "fill": "$fg-3",
+                      "content": "Kowloon Studio 的目录",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "u8cLr",
+                      "name": "TreeRow / 2026",
+                      "width": "fill_container",
+                      "height": 28,
+                      "fill": "$state-selected",
+                      "cornerRadius": 4,
+                      "gap": 4,
+                      "padding": [
+                        0,
+                        4
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "PHBxO",
+                          "name": "Glyph / chevron-down",
+                          "width": 14,
+                          "height": 14,
+                          "icon": "chevron-down",
+                          "library": "lucide",
+                          "fill": "$fg-3"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "QkBaw",
+                          "name": "Glyph / folder",
+                          "width": 14,
+                          "height": 14,
+                          "icon": "folder",
+                          "library": "lucide",
+                          "fill": "$brand"
+                        },
+                        {
+                          "type": "text",
+                          "id": "J7yLB",
+                          "name": "TreeLabel / 2026",
+                          "fill": "$fg-1",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "2026",
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "gmUjm",
+                          "name": "Glyph / more-horizontal",
+                          "width": 14,
+                          "height": 14,
+                          "icon": "ellipsis",
+                          "library": "lucide",
+                          "fill": "$fg-3"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "NWm2o",
+                      "name": "TreeRow / 08-15 婚礼",
+                      "width": "fill_container",
+                      "height": 28,
+                      "cornerRadius": 4,
+                      "gap": 4,
+                      "padding": [
+                        0,
+                        4,
+                        0,
+                        16
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "d0G4Go",
+                          "name": "Sp14",
+                          "width": 14,
+                          "height": 1
+                        },
+                        {
+                          "type": "icon",
+                          "id": "KPqdP",
+                          "name": "Glyph / folder",
+                          "width": 14,
+                          "height": 14,
+                          "icon": "folder",
+                          "library": "lucide",
+                          "fill": "$fg-2"
+                        },
+                        {
+                          "type": "text",
+                          "id": "fezAe",
+                          "name": "TreeLabel / 08-15 婚礼",
+                          "fill": "$fg-2",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "08-15 婚礼",
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "Y6IloA",
+                          "name": "Glyph / more-horizontal",
+                          "width": 14,
+                          "height": 14,
+                          "icon": "ellipsis",
+                          "library": "lucide",
+                          "fill": "$fg-3"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "k8LfU",
+                      "name": "TreeRow / 09-02 外景",
+                      "width": "fill_container",
+                      "height": 28,
+                      "cornerRadius": 4,
+                      "gap": 4,
+                      "padding": [
+                        0,
+                        4,
+                        0,
+                        16
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "PHv7H",
+                          "name": "Sp14",
+                          "width": 14,
+                          "height": 1
+                        },
+                        {
+                          "type": "icon",
+                          "id": "RzHLM",
+                          "name": "Glyph / folder",
+                          "width": 14,
+                          "height": 14,
+                          "icon": "folder",
+                          "library": "lucide",
+                          "fill": "$fg-2"
+                        },
+                        {
+                          "type": "text",
+                          "id": "O60Q9",
+                          "name": "TreeLabel / 09-02 外景",
+                          "fill": "$fg-2",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "09-02 外景",
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "i5rMl",
+                          "name": "Glyph / more-horizontal",
+                          "width": 14,
+                          "height": 14,
+                          "icon": "ellipsis",
+                          "library": "lucide",
+                          "fill": "$fg-3"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "epy8K",
+                      "name": "TreeRow / 2025",
+                      "width": "fill_container",
+                      "height": 28,
+                      "cornerRadius": 4,
+                      "gap": 4,
+                      "padding": [
+                        0,
+                        4
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "r09Ac0",
+                          "name": "Glyph / chevron-down",
+                          "width": 14,
+                          "height": 14,
+                          "icon": "chevron-down",
+                          "library": "lucide",
+                          "fill": "$fg-3"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "u38ibx",
+                          "name": "Glyph / folder",
+                          "width": 14,
+                          "height": 14,
+                          "icon": "folder",
+                          "library": "lucide",
+                          "fill": "$fg-2"
+                        },
+                        {
+                          "type": "text",
+                          "id": "yBmHm",
+                          "name": "TreeLabel / 2025",
+                          "fill": "$fg-2",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "2025",
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "nm3om",
+                          "name": "Glyph / more-horizontal",
+                          "width": 14,
+                          "height": 14,
+                          "icon": "ellipsis",
+                          "library": "lucide",
+                          "fill": "$fg-3"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "M1LjM0",
+                      "name": "TreeRow / 12-31 跨年",
+                      "width": "fill_container",
+                      "height": 28,
+                      "cornerRadius": 4,
+                      "gap": 4,
+                      "padding": [
+                        0,
+                        4,
+                        0,
+                        16
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "B0SGWm",
+                          "name": "Sp14",
+                          "width": 14,
+                          "height": 1
+                        },
+                        {
+                          "type": "icon",
+                          "id": "Q64xq7",
+                          "name": "Glyph / folder",
+                          "width": 14,
+                          "height": 14,
+                          "icon": "folder",
+                          "library": "lucide",
+                          "fill": "$fg-2"
+                        },
+                        {
+                          "type": "text",
+                          "id": "RZp0c",
+                          "name": "TreeLabel / 12-31 跨年",
+                          "fill": "$fg-2",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "12-31 跨年",
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "w00Jn",
+                          "name": "Glyph / more-horizontal",
+                          "width": 14,
+                          "height": 14,
+                          "icon": "ellipsis",
+                          "library": "lucide",
+                          "fill": "$fg-3"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "JbhVM",
+              "name": "Panel / PhotoGrid 中列",
+              "clip": true,
+              "width": "fill_container",
+              "height": "fill_container",
+              "fill": "#000000",
+              "layout": "vertical",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "f2DkNr",
+                  "name": "GridBody",
+                  "clip": true,
+                  "width": "fill_container",
+                  "height": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "padding": 8,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "GTvBx",
+                      "name": "GridRow / 1",
+                      "clip": true,
+                      "width": "fill_container",
+                      "gap": 8,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "XexdV",
+                          "name": "Tile / 1",
+                          "clip": true,
+                          "width": 150,
+                          "height": 138,
+                          "cornerRadius": 4,
+                          "stroke": "$brand",
+                          "strokeWidth": 1,
+                          "strokeAlignment": "inner",
+                          "layout": "vertical",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "AjEoR",
+                              "name": "TileImage",
+                              "width": "fill_container",
+                              "height": 112,
+                              "fill": "$surface-track"
+                            },
+                            {
+                              "type": "frame",
+                              "id": "F80Ga",
+                              "name": "TileCaption",
+                              "width": "fill_container",
+                              "height": 26,
+                              "gap": 4,
+                              "padding": [
+                                0,
+                                6
+                              ],
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "JnhoH",
+                                  "name": "TileName",
+                                  "fill": "$fg-2",
+                                  "textGrowth": "fixed-width",
+                                  "width": "fill_container",
+                                  "content": "P0001.RW2",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 12,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "fC5vo",
+                          "name": "Tile / 2",
+                          "clip": true,
+                          "width": 150,
+                          "height": 138,
+                          "fill": "$state-selected",
+                          "cornerRadius": 4,
+                          "layout": "vertical",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "cGVRi",
+                              "name": "TileImage",
+                              "width": "fill_container",
+                              "height": 112,
+                              "fill": "$surface-track",
+                              "children": [
+                                {
+                                  "type": "frame",
+                                  "id": "Q2KP2x",
+                                  "layoutPosition": "absolute",
+                                  "x": 6,
+                                  "y": 6,
+                                  "name": "ColorLabel / 红",
+                                  "width": 10,
+                                  "height": 10,
+                                  "fill": "$label-red",
+                                  "cornerRadius": 999
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "XxUzt",
+                              "name": "TileCaption",
+                              "width": "fill_container",
+                              "height": 26,
+                              "gap": 4,
+                              "padding": [
+                                0,
+                                6
+                              ],
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "xHCTS",
+                                  "name": "TileName",
+                                  "fill": "$fg-2",
+                                  "textGrowth": "fixed-width",
+                                  "width": "fill_container",
+                                  "content": "P0002.RW2",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 12,
+                                  "fontWeight": "normal"
+                                },
+                                {
+                                  "type": "icon",
+                                  "id": "y2dbu8",
+                                  "name": "Glyph / star",
+                                  "width": 10,
+                                  "height": 10,
+                                  "icon": "star",
+                                  "library": "lucide",
+                                  "fill": "$brand"
+                                },
+                                {
+                                  "type": "icon",
+                                  "id": "qwLW3",
+                                  "name": "Glyph / star",
+                                  "width": 10,
+                                  "height": 10,
+                                  "icon": "star",
+                                  "library": "lucide",
+                                  "fill": "$brand"
+                                },
+                                {
+                                  "type": "icon",
+                                  "id": "fSXwX",
+                                  "name": "Glyph / star",
+                                  "width": 10,
+                                  "height": 10,
+                                  "icon": "star",
+                                  "library": "lucide",
+                                  "fill": "$brand"
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "fo0BR",
+                          "name": "Tile / 3",
+                          "clip": true,
+                          "width": 150,
+                          "height": 138,
+                          "fill": "$state-selected",
+                          "cornerRadius": 4,
+                          "layout": "vertical",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "OT6az",
+                              "name": "TileImage",
+                              "width": "fill_container",
+                              "height": 112,
+                              "fill": "$surface-track",
+                              "children": [
+                                {
+                                  "type": "frame",
+                                  "id": "ZLQXr",
+                                  "layoutPosition": "absolute",
+                                  "x": 6,
+                                  "y": 6,
+                                  "name": "ColorLabel / 绿",
+                                  "width": 10,
+                                  "height": 10,
+                                  "fill": "$label-green",
+                                  "cornerRadius": 999
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "uDlVL",
+                              "name": "TileCaption",
+                              "width": "fill_container",
+                              "height": 26,
+                              "gap": 4,
+                              "padding": [
+                                0,
+                                6
+                              ],
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "aOm0m",
+                                  "name": "TileName",
+                                  "fill": "$fg-2",
+                                  "textGrowth": "fixed-width",
+                                  "width": "fill_container",
+                                  "content": "P0003.RW2",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 12,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "r7Sq7y",
+                          "name": "Tile / 4",
+                          "clip": true,
+                          "width": 150,
+                          "height": 138,
+                          "cornerRadius": 4,
+                          "layout": "vertical",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "njZC3",
+                              "name": "TileImage",
+                              "width": "fill_container",
+                              "height": 112,
+                              "fill": "$surface-track"
+                            },
+                            {
+                              "type": "frame",
+                              "id": "NJFmH",
+                              "name": "TileCaption",
+                              "width": "fill_container",
+                              "height": 26,
+                              "gap": 4,
+                              "padding": [
+                                0,
+                                6
+                              ],
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "C6lNiN",
+                                  "name": "TileName",
+                                  "fill": "$fg-2",
+                                  "textGrowth": "fixed-width",
+                                  "width": "fill_container",
+                                  "content": "P0004.RW2",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 12,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "qsBHY",
+                          "name": "Tile / 5",
+                          "clip": true,
+                          "width": 150,
+                          "height": 138,
+                          "cornerRadius": 4,
+                          "layout": "vertical",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "cAYHp",
+                              "name": "TileImage",
+                              "width": "fill_container",
+                              "height": 112,
+                              "fill": "$surface-track",
+                              "children": [
+                                {
+                                  "type": "frame",
+                                  "id": "smfxN",
+                                  "layoutPosition": "absolute",
+                                  "x": 126,
+                                  "y": 6,
+                                  "name": "TileLock / 一级锁",
+                                  "width": 18,
+                                  "height": 18,
+                                  "fill": "$surface-layer",
+                                  "cornerRadius": 4,
+                                  "layout": "vertical",
+                                  "justifyContent": "center",
+                                  "alignItems": "center",
+                                  "children": [
+                                    {
+                                      "type": "icon",
+                                      "id": "UNjBi",
+                                      "name": "Glyph / lock",
+                                      "width": 11,
+                                      "height": 11,
+                                      "icon": "lock",
+                                      "library": "lucide",
+                                      "fill": "$fg-2"
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "K9sQGa",
+                              "name": "TileCaption",
+                              "width": "fill_container",
+                              "height": 26,
+                              "gap": 4,
+                              "padding": [
+                                0,
+                                6
+                              ],
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "ard9a",
+                                  "name": "TileName",
+                                  "fill": "$fg-2",
+                                  "textGrowth": "fixed-width",
+                                  "width": "fill_container",
+                                  "content": "P0005.RW2",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 12,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "SsQOX",
+                          "name": "Tile / 6",
+                          "clip": true,
+                          "width": 150,
+                          "height": 138,
+                          "cornerRadius": 4,
+                          "layout": "vertical",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "n9sQZj",
+                              "name": "TileImage",
+                              "width": "fill_container",
+                              "height": 112,
+                              "fill": "$surface-track"
+                            },
+                            {
+                              "type": "frame",
+                              "id": "D4O04",
+                              "name": "TileCaption",
+                              "width": "fill_container",
+                              "height": 26,
+                              "gap": 4,
+                              "padding": [
+                                0,
+                                6
+                              ],
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "sbD8v",
+                                  "name": "TileName",
+                                  "fill": "$fg-2",
+                                  "textGrowth": "fixed-width",
+                                  "width": "fill_container",
+                                  "content": "P0006.RW2",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 12,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "ERBOO",
+                      "name": "GridRow / 2",
+                      "clip": true,
+                      "width": "fill_container",
+                      "gap": 8,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "r4Xv5",
+                          "name": "Tile / 7",
+                          "clip": true,
+                          "width": 150,
+                          "height": 138,
+                          "cornerRadius": 4,
+                          "layout": "vertical",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "D4m1B",
+                              "name": "TileImage",
+                              "width": "fill_container",
+                              "height": 112,
+                              "fill": "$surface-track"
+                            },
+                            {
+                              "type": "frame",
+                              "id": "fNGOT",
+                              "name": "TileCaption",
+                              "width": "fill_container",
+                              "height": 26,
+                              "gap": 4,
+                              "padding": [
+                                0,
+                                6
+                              ],
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "xamM2",
+                                  "name": "TileName",
+                                  "fill": "$fg-2",
+                                  "textGrowth": "fixed-width",
+                                  "width": "fill_container",
+                                  "content": "P0007.RW2",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 12,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "xLfnK",
+                          "name": "Tile / 8",
+                          "clip": true,
+                          "width": 150,
+                          "height": 138,
+                          "cornerRadius": 4,
+                          "layout": "vertical",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "fXXEZ",
+                              "name": "TileImage",
+                              "width": "fill_container",
+                              "height": 112,
+                              "fill": "$surface-track"
+                            },
+                            {
+                              "type": "frame",
+                              "id": "eWMxd",
+                              "name": "TileCaption",
+                              "width": "fill_container",
+                              "height": 26,
+                              "gap": 4,
+                              "padding": [
+                                0,
+                                6
+                              ],
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "ukBYf",
+                                  "name": "TileName",
+                                  "fill": "$fg-2",
+                                  "textGrowth": "fixed-width",
+                                  "width": "fill_container",
+                                  "content": "P0008.RW2",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 12,
+                                  "fontWeight": "normal"
+                                },
+                                {
+                                  "type": "icon",
+                                  "id": "unLII",
+                                  "name": "Glyph / star",
+                                  "width": 10,
+                                  "height": 10,
+                                  "icon": "star",
+                                  "library": "lucide",
+                                  "fill": "$brand"
+                                },
+                                {
+                                  "type": "icon",
+                                  "id": "MLgp5",
+                                  "name": "Glyph / star",
+                                  "width": 10,
+                                  "height": 10,
+                                  "icon": "star",
+                                  "library": "lucide",
+                                  "fill": "$brand"
+                                },
+                                {
+                                  "type": "icon",
+                                  "id": "v8pHB",
+                                  "name": "Glyph / star",
+                                  "width": 10,
+                                  "height": 10,
+                                  "icon": "star",
+                                  "library": "lucide",
+                                  "fill": "$brand"
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "Sg11b",
+                          "name": "Tile / 9",
+                          "clip": true,
+                          "width": 150,
+                          "height": 138,
+                          "cornerRadius": 4,
+                          "layout": "vertical",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "ATOur",
+                              "name": "TileImage",
+                              "width": "fill_container",
+                              "height": 112,
+                              "fill": "$surface-track"
+                            },
+                            {
+                              "type": "frame",
+                              "id": "nVMvT",
+                              "name": "TileCaption",
+                              "width": "fill_container",
+                              "height": 26,
+                              "gap": 4,
+                              "padding": [
+                                0,
+                                6
+                              ],
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "kdz9V",
+                                  "name": "TileName",
+                                  "fill": "$fg-2",
+                                  "textGrowth": "fixed-width",
+                                  "width": "fill_container",
+                                  "content": "P0009.RW2",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 12,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "CIN3W",
+                          "name": "Tile / 10",
+                          "clip": true,
+                          "width": 150,
+                          "height": 138,
+                          "cornerRadius": 4,
+                          "layout": "vertical",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "zY4u5",
+                              "name": "TileImage",
+                              "width": "fill_container",
+                              "height": 112,
+                              "fill": "$surface-track"
+                            },
+                            {
+                              "type": "frame",
+                              "id": "b4ggak",
+                              "name": "TileCaption",
+                              "width": "fill_container",
+                              "height": 26,
+                              "gap": 4,
+                              "padding": [
+                                0,
+                                6
+                              ],
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "XekYH",
+                                  "name": "TileName",
+                                  "fill": "$fg-2",
+                                  "textGrowth": "fixed-width",
+                                  "width": "fill_container",
+                                  "content": "P00010.RW2",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 12,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "sSuy2",
+                          "name": "Tile / 11",
+                          "clip": true,
+                          "width": 150,
+                          "height": 138,
+                          "cornerRadius": 4,
+                          "layout": "vertical",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "b937Y7",
+                              "name": "TileImage",
+                              "width": "fill_container",
+                              "height": 112,
+                              "fill": "$surface-track"
+                            },
+                            {
+                              "type": "frame",
+                              "id": "G1M2Kx",
+                              "name": "TileCaption",
+                              "width": "fill_container",
+                              "height": 26,
+                              "gap": 4,
+                              "padding": [
+                                0,
+                                6
+                              ],
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "b3KyG",
+                                  "name": "TileName",
+                                  "fill": "$fg-2",
+                                  "textGrowth": "fixed-width",
+                                  "width": "fill_container",
+                                  "content": "P00011.RW2",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 12,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "P9Zyhr",
+                          "name": "Tile / 12",
+                          "clip": true,
+                          "width": 150,
+                          "height": 138,
+                          "cornerRadius": 4,
+                          "layout": "vertical",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "iVRV0",
+                              "name": "TileImage",
+                              "width": "fill_container",
+                              "height": 112,
+                              "fill": "$surface-track"
+                            },
+                            {
+                              "type": "frame",
+                              "id": "zsg5y",
+                              "name": "TileCaption",
+                              "width": "fill_container",
+                              "height": 26,
+                              "gap": 4,
+                              "padding": [
+                                0,
+                                6
+                              ],
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "TMz5k",
+                                  "name": "TileName",
+                                  "fill": "$fg-2",
+                                  "textGrowth": "fixed-width",
+                                  "width": "fill_container",
+                                  "content": "P00012.RW2",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 12,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "C5uFh",
+                      "name": "GridRow / 3",
+                      "clip": true,
+                      "width": "fill_container",
+                      "gap": 8,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "e8A3Ps",
+                          "name": "Tile / 13",
+                          "clip": true,
+                          "width": 150,
+                          "height": 138,
+                          "cornerRadius": 4,
+                          "layout": "vertical",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "A0eTZ",
+                              "name": "TileImage",
+                              "width": "fill_container",
+                              "height": 112,
+                              "fill": "$surface-track"
+                            },
+                            {
+                              "type": "frame",
+                              "id": "CYEHB",
+                              "name": "TileCaption",
+                              "width": "fill_container",
+                              "height": 26,
+                              "gap": 4,
+                              "padding": [
+                                0,
+                                6
+                              ],
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "dvczf",
+                                  "name": "TileName",
+                                  "fill": "$fg-2",
+                                  "textGrowth": "fixed-width",
+                                  "width": "fill_container",
+                                  "content": "P00013.RW2",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 12,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "tgcBM",
+                          "name": "Tile / 14",
+                          "clip": true,
+                          "width": 150,
+                          "height": 138,
+                          "cornerRadius": 4,
+                          "layout": "vertical",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "uNIzN",
+                              "name": "TileImage",
+                              "width": "fill_container",
+                              "height": 112,
+                              "fill": "$surface-track"
+                            },
+                            {
+                              "type": "frame",
+                              "id": "J7cga",
+                              "name": "TileCaption",
+                              "width": "fill_container",
+                              "height": 26,
+                              "gap": 4,
+                              "padding": [
+                                0,
+                                6
+                              ],
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "F0SFO",
+                                  "name": "TileName",
+                                  "fill": "$fg-2",
+                                  "textGrowth": "fixed-width",
+                                  "width": "fill_container",
+                                  "content": "P00014.RW2",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 12,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "MinFZ",
+                          "name": "Tile / 15",
+                          "clip": true,
+                          "width": 150,
+                          "height": 138,
+                          "cornerRadius": 4,
+                          "layout": "vertical",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "rGcJD",
+                              "name": "TileImage",
+                              "width": "fill_container",
+                              "height": 112,
+                              "fill": "$surface-track"
+                            },
+                            {
+                              "type": "frame",
+                              "id": "lTgsN",
+                              "name": "TileCaption",
+                              "width": "fill_container",
+                              "height": 26,
+                              "gap": 4,
+                              "padding": [
+                                0,
+                                6
+                              ],
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "S2K8i",
+                                  "name": "TileName",
+                                  "fill": "$fg-2",
+                                  "textGrowth": "fixed-width",
+                                  "width": "fill_container",
+                                  "content": "P00015.RW2",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 12,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "t1CrY",
+                          "name": "Tile / 16",
+                          "clip": true,
+                          "width": 150,
+                          "height": 138,
+                          "cornerRadius": 4,
+                          "layout": "vertical",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "gP1yM",
+                              "name": "TileImage",
+                              "width": "fill_container",
+                              "height": 112,
+                              "fill": "$surface-track"
+                            },
+                            {
+                              "type": "frame",
+                              "id": "Jlhuz",
+                              "name": "TileCaption",
+                              "width": "fill_container",
+                              "height": 26,
+                              "gap": 4,
+                              "padding": [
+                                0,
+                                6
+                              ],
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "ArVrd",
+                                  "name": "TileName",
+                                  "fill": "$fg-2",
+                                  "textGrowth": "fixed-width",
+                                  "width": "fill_container",
+                                  "content": "P00016.RW2",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 12,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "otuMi",
+                          "name": "Tile / 17",
+                          "clip": true,
+                          "width": 150,
+                          "height": 138,
+                          "cornerRadius": 4,
+                          "layout": "vertical",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "La2id",
+                              "name": "TileImage",
+                              "width": "fill_container",
+                              "height": 112,
+                              "fill": "$surface-track"
+                            },
+                            {
+                              "type": "frame",
+                              "id": "WLQWQ",
+                              "name": "TileCaption",
+                              "width": "fill_container",
+                              "height": 26,
+                              "gap": 4,
+                              "padding": [
+                                0,
+                                6
+                              ],
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "Z2C83V",
+                                  "name": "TileName",
+                                  "fill": "$fg-2",
+                                  "textGrowth": "fixed-width",
+                                  "width": "fill_container",
+                                  "content": "P00017.RW2",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 12,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "LgSNH",
+                          "name": "Tile / 18",
+                          "clip": true,
+                          "width": 150,
+                          "height": 138,
+                          "cornerRadius": 4,
+                          "layout": "vertical",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "V7Ae1U",
+                              "name": "TileImage",
+                              "width": "fill_container",
+                              "height": 112,
+                              "fill": "$surface-track"
+                            },
+                            {
+                              "type": "frame",
+                              "id": "bj3DZ",
+                              "name": "TileCaption",
+                              "width": "fill_container",
+                              "height": 26,
+                              "gap": 4,
+                              "padding": [
+                                0,
+                                6
+                              ],
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "GuR4V",
+                                  "name": "TileName",
+                                  "fill": "$fg-2",
+                                  "textGrowth": "fixed-width",
+                                  "width": "fill_container",
+                                  "content": "P00018.RW2",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 12,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "UXJHr",
+                  "name": "GridControlBar",
+                  "width": "fill_container",
+                  "height": 36,
+                  "fill": "$surface-bar",
+                  "gap": 8,
+                  "padding": [
+                    0,
+                    8
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "OpmLB",
+                      "name": "GridCount",
+                      "fill": "$fg-2",
+                      "content": "248 张 · 已选 2",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "KtILM",
+                      "name": "SpacerL",
+                      "width": "fill_container",
+                      "height": 1
+                    },
+                    {
+                      "type": "frame",
+                      "id": "HYoUR",
+                      "name": "ToggleBlock / 按时间 / 未开启",
+                      "height": 24,
+                      "cornerRadius": 4,
+                      "gap": 4,
+                      "padding": [
+                        0,
+                        6
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "K4dFFt",
+                          "name": "Glyph / 按时间",
+                          "width": 13,
+                          "height": 13,
+                          "icon": "schedule",
+                          "library": "Material Symbols Rounded",
+                          "fill": "$fg-2"
+                        },
+                        {
+                          "type": "text",
+                          "id": "lfK1D",
+                          "name": "TimeGroupLabel",
+                          "fill": "$fg-2",
+                          "content": "按时间",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "oeBfm",
+                      "name": "GridCurrentDir",
+                      "fill": "$fg-3",
+                      "content": "Kowloon Studio / 08-15 婚礼",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "e3TMMV",
+                      "name": "SpacerR",
+                      "width": "fill_container",
+                      "height": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "u9vEg",
+                      "name": "GridCurrentFile",
+                      "fill": "$fg-2",
+                      "content": "· P0002.RW2",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "F8n94",
+                      "name": "ZoomSlider",
+                      "width": 120,
+                      "height": 4,
+                      "fill": "$surface-track",
+                      "cornerRadius": 999,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "Xvsuz",
+                          "name": "ZoomKnob",
+                          "width": 46,
+                          "height": 4,
+                          "fill": "$brand",
+                          "cornerRadius": 999
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "r7AR80",
+              "name": "Panel / Info 右列",
+              "clip": true,
+              "width": 300,
+              "height": "fill_container",
+              "fill": "$surface-main",
+              "layout": "vertical",
+              "gap": 20,
+              "padding": 8,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "L8EQGZ",
+                  "name": "InfoSection / EXIF",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 6,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "A6iZ7",
+                      "name": "InfoTitle / EXIF",
+                      "fill": "$fg-2",
+                      "content": "EXIF",
+                      "fontFamily": "Inter",
+                      "fontSize": 15,
+                      "fontWeight": "600"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "wJGzJ",
+                      "name": "InfoRow / 机型",
+                      "width": "fill_container",
+                      "gap": 8,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "KNuOa",
+                          "name": "InfoLabel / 机型",
+                          "fill": "$fg-3",
+                          "textGrowth": "fixed-width",
+                          "width": 76,
+                          "content": "机型",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "yS949",
+                          "name": "InfoVal / 机型",
+                          "fill": "$fg-1",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "DC-G9",
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "f4Jpe",
+                      "name": "InfoRow / 镜头",
+                      "width": "fill_container",
+                      "gap": 8,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "ge9MU",
+                          "name": "InfoLabel / 镜头",
+                          "fill": "$fg-3",
+                          "textGrowth": "fixed-width",
+                          "width": 76,
+                          "content": "镜头",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "G7ffFx",
+                          "name": "InfoVal / 镜头",
+                          "fill": "$fg-1",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "LEICA DG 12-60",
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "Aav24",
+                      "name": "InfoRow / 焦段",
+                      "width": "fill_container",
+                      "gap": 8,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "gZhRZ",
+                          "name": "InfoLabel / 焦段",
+                          "fill": "$fg-3",
+                          "textGrowth": "fixed-width",
+                          "width": 76,
+                          "content": "焦段",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "S6y8XW",
+                          "name": "InfoVal / 焦段",
+                          "fill": "$fg-1",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "12mm",
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "teQxQ",
+                      "name": "InfoRow / 光圈",
+                      "width": "fill_container",
+                      "gap": 8,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "XsUTz",
+                          "name": "InfoLabel / 光圈",
+                          "fill": "$fg-3",
+                          "textGrowth": "fixed-width",
+                          "width": 76,
+                          "content": "光圈",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "P6PjBm",
+                          "name": "InfoVal / 光圈",
+                          "fill": "$fg-1",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "ƒ/2.8",
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "B0m5af",
+                      "name": "InfoRow / 快门",
+                      "width": "fill_container",
+                      "gap": 8,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "ttZSL",
+                          "name": "InfoLabel / 快门",
+                          "fill": "$fg-3",
+                          "textGrowth": "fixed-width",
+                          "width": 76,
+                          "content": "快门",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "UK0Y8",
+                          "name": "InfoVal / 快门",
+                          "fill": "$fg-1",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "1/125s",
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "FuWHX",
+                      "name": "InfoRow / 感光度",
+                      "width": "fill_container",
+                      "gap": 8,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "B0jZrU",
+                          "name": "InfoLabel / 感光度",
+                          "fill": "$fg-3",
+                          "textGrowth": "fixed-width",
+                          "width": 76,
+                          "content": "感光度",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "vzP5F",
+                          "name": "InfoVal / 感光度",
+                          "fill": "$fg-1",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "ISO 200",
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "ofI3z",
+                      "name": "InfoRow / 尺寸",
+                      "width": "fill_container",
+                      "gap": 8,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "Db8cu",
+                          "name": "InfoLabel / 尺寸",
+                          "fill": "$fg-3",
+                          "textGrowth": "fixed-width",
+                          "width": 76,
+                          "content": "尺寸",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "pYYT9",
+                          "name": "InfoVal / 尺寸",
+                          "fill": "$fg-1",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "5184 × 3888",
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "Dudvg",
+                      "name": "InfoRow / 格式",
+                      "width": "fill_container",
+                      "gap": 8,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "tPI4I",
+                          "name": "InfoLabel / 格式",
+                          "fill": "$fg-3",
+                          "textGrowth": "fixed-width",
+                          "width": 76,
+                          "content": "格式",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "R0Ljnm",
+                          "name": "InfoVal / 格式",
+                          "fill": "$fg-1",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "RAW + JPG",
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "gYvBK",
+                  "name": "InfoSection / 标签",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 6,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "MRL9S",
+                      "name": "InfoTitle / 标签",
+                      "fill": "$fg-2",
+                      "content": "标签",
+                      "fontFamily": "Inter",
+                      "fontSize": 15,
+                      "fontWeight": "600"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "PnDIu",
+                      "name": "InfoRow / 已打",
+                      "width": "fill_container",
+                      "gap": 8,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "o1Kfhs",
+                          "name": "InfoLabel / 已打",
+                          "fill": "$fg-3",
+                          "textGrowth": "fixed-width",
+                          "width": 76,
+                          "content": "已打",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "B2PXs6",
+                          "name": "InfoVal / 已打",
+                          "fill": "$fg-1",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "婚礼 · 外景",
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "ikMcK",
+                  "name": "InfoSection / 文件",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 6,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "uq5rn",
+                      "name": "InfoTitle / 文件",
+                      "fill": "$fg-2",
+                      "content": "文件",
+                      "fontFamily": "Inter",
+                      "fontSize": 15,
+                      "fontWeight": "600"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "uPCkp",
+                      "name": "InfoRow / 文件名",
+                      "width": "fill_container",
+                      "gap": 8,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "Tv0Ie",
+                          "name": "InfoLabel / 文件名",
+                          "fill": "$fg-3",
+                          "textGrowth": "fixed-width",
+                          "width": 76,
+                          "content": "文件名",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "B6UzWL",
+                          "name": "InfoVal / 文件名",
+                          "fill": "$fg-1",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "P0002.RW2",
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "L5Tsg",
+                      "name": "InfoRow / 创建日期",
+                      "width": "fill_container",
+                      "gap": 8,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "IVg6h",
+                          "name": "InfoLabel / 创建日期",
+                          "fill": "$fg-3",
+                          "textGrowth": "fixed-width",
+                          "width": 76,
+                          "content": "创建日期",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "P9C1cY",
+                          "name": "InfoVal / 创建日期",
+                          "fill": "$fg-1",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "2026-08-15 14:32",
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "S6mMO",
+                      "name": "InfoRow / 所在路径",
+                      "width": "fill_container",
+                      "gap": 8,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "wJqIK",
+                          "name": "InfoLabel / 所在路径",
+                          "fill": "$fg-3",
+                          "textGrowth": "fixed-width",
+                          "width": 76,
+                          "content": "所在路径",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "SIsVa",
+                          "name": "InfoVal / 所在路径",
+                          "fill": "$fg-1",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "…/2026/08-15 婚礼",
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "dZD4f",
+                      "name": "InfoRow / 所属库",
+                      "width": "fill_container",
+                      "gap": 8,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "AsIC9",
+                          "name": "InfoLabel / 所属库",
+                          "fill": "$fg-3",
+                          "textGrowth": "fixed-width",
+                          "width": 76,
+                          "content": "所属库",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "K6DplO",
+                          "name": "InfoVal / 所属库",
+                          "fill": "$fg-1",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "Kowloon Studio",
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "U4aVAG",
+                      "name": "InfoRow / 作者",
+                      "width": "fill_container",
+                      "gap": 8,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "ZlIma",
+                          "name": "InfoLabel / 作者",
+                          "fill": "$fg-3",
+                          "textGrowth": "fixed-width",
+                          "width": 76,
+                          "content": "作者",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "FvVXe",
+                          "name": "InfoVal / 作者",
+                          "fill": "$fg-1",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "（可编辑）",
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "BK9Z5",
+                      "name": "InfoRow / 描述",
+                      "width": "fill_container",
+                      "gap": 8,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "HCfJ8",
+                          "name": "InfoLabel / 描述",
+                          "fill": "$fg-3",
+                          "textGrowth": "fixed-width",
+                          "width": 76,
+                          "content": "描述",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "wxMwA",
+                          "name": "InfoVal / 描述",
+                          "fill": "$fg-1",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "（可编辑）",
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "WV6PP",
+                  "name": "InfoSection / 地理",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 6,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "lrdM7",
+                      "name": "InfoTitle / 地理",
+                      "fill": "$fg-2",
+                      "content": "地理",
+                      "fontFamily": "Inter",
+                      "fontSize": 15,
+                      "fontWeight": "600"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "rHeBz",
+                      "name": "InfoRow / GPS",
+                      "width": "fill_container",
+                      "gap": 8,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "BSSXP",
+                          "name": "InfoLabel / GPS",
+                          "fill": "$fg-3",
+                          "textGrowth": "fixed-width",
+                          "width": 76,
+                          "content": "GPS",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "pD4pN",
+                          "name": "InfoVal / GPS",
+                          "fill": "$fg-1",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "31.2304, 121.4737",
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "k11F7j",
+                      "name": "InfoRow / 国家",
+                      "width": "fill_container",
+                      "gap": 8,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "cQLAu",
+                          "name": "InfoLabel / 国家",
+                          "fill": "$fg-3",
+                          "textGrowth": "fixed-width",
+                          "width": 76,
+                          "content": "国家",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "B94liM",
+                          "name": "InfoVal / 国家",
+                          "fill": "$fg-1",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "中国",
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "JWA2Q",
+                      "name": "InfoRow / 省/州",
+                      "width": "fill_container",
+                      "gap": 8,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "Nsojv",
+                          "name": "InfoLabel / 省/州",
+                          "fill": "$fg-3",
+                          "textGrowth": "fixed-width",
+                          "width": 76,
+                          "content": "省/州",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "rcFtG",
+                          "name": "InfoVal / 省/州",
+                          "fill": "$fg-1",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "上海市",
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "n1pzZ",
+                      "name": "InfoRow / 城市",
+                      "width": "fill_container",
+                      "gap": 8,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "FiyQX",
+                          "name": "InfoLabel / 城市",
+                          "fill": "$fg-3",
+                          "textGrowth": "fixed-width",
+                          "width": 76,
+                          "content": "城市",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "ZeeG6",
+                          "name": "InfoVal / 城市",
+                          "fill": "$fg-1",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "上海",
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "Uy71d",
+                      "name": "InfoRow / 地点",
+                      "width": "fill_container",
+                      "gap": 8,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "dYNX9",
+                          "name": "InfoLabel / 地点",
+                          "fill": "$fg-3",
+                          "textGrowth": "fixed-width",
+                          "width": 76,
+                          "content": "地点",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "CaLBV",
+                          "name": "InfoVal / 地点",
+                          "fill": "$fg-1",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "外滩",
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
     }
   ],
+  "themes": {
+    "mode": [
+      "dark",
+      "light"
+    ],
+    "density": [
+      "compact",
+      "loose"
+    ]
+  },
+  "variables": {
+    "surface-main": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#202226",
+          "theme": {
+            "mode": "dark"
+          }
+        },
+        {
+          "value": "#F6F8F4",
+          "theme": {
+            "mode": "light"
+          }
+        }
+      ]
+    },
+    "surface-bar": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#2A2D33",
+          "theme": {
+            "mode": "dark"
+          }
+        },
+        {
+          "value": "#EDF0E9",
+          "theme": {
+            "mode": "light"
+          }
+        }
+      ]
+    },
+    "surface-track": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#17191C",
+          "theme": {
+            "mode": "dark"
+          }
+        },
+        {
+          "value": "#E1E5DB",
+          "theme": {
+            "mode": "light"
+          }
+        }
+      ]
+    },
+    "surface-layer": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#33373E",
+          "theme": {
+            "mode": "dark"
+          }
+        },
+        {
+          "value": "#FFFFFF",
+          "theme": {
+            "mode": "light"
+          }
+        }
+      ]
+    },
+    "fg-1": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#F6F8F4",
+          "theme": {
+            "mode": "dark"
+          }
+        },
+        {
+          "value": "#202226",
+          "theme": {
+            "mode": "light"
+          }
+        }
+      ]
+    },
+    "fg-2": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#B6B0AF",
+          "theme": {
+            "mode": "dark"
+          }
+        },
+        {
+          "value": "#6E6866",
+          "theme": {
+            "mode": "light"
+          }
+        }
+      ]
+    },
+    "fg-3": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#7C7876",
+          "theme": {
+            "mode": "dark"
+          }
+        },
+        {
+          "value": "#A9A3A1",
+          "theme": {
+            "mode": "light"
+          }
+        }
+      ]
+    },
+    "fg-on-brand": {
+      "type": "color",
+      "value": "#202226"
+    },
+    "brand": {
+      "type": "color",
+      "value": "#52C6AB"
+    },
+    "brand-2": {
+      "type": "color",
+      "value": "#F0B033"
+    },
+    "state-hover": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#F0B03329",
+          "theme": {
+            "mode": "dark"
+          }
+        },
+        {
+          "value": "#F0B0332E",
+          "theme": {
+            "mode": "light"
+          }
+        }
+      ]
+    },
+    "state-selected": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#52C6AB38",
+          "theme": {
+            "mode": "dark"
+          }
+        },
+        {
+          "value": "#52C6AB40",
+          "theme": {
+            "mode": "light"
+          }
+        }
+      ]
+    },
+    "state-active": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#52C6AB49",
+          "theme": {
+            "mode": "dark"
+          }
+        },
+        {
+          "value": "#52C6AB53",
+          "theme": {
+            "mode": "light"
+          }
+        }
+      ]
+    },
+    "danger": {
+      "type": "color",
+      "value": "#BF4E30"
+    },
+    "fg-on-danger": {
+      "type": "color",
+      "value": "#F6F8F4"
+    },
+    "scrim": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#17191CB8",
+          "theme": {
+            "mode": "dark"
+          }
+        },
+        {
+          "value": "#2022266B",
+          "theme": {
+            "mode": "light"
+          }
+        }
+      ]
+    },
+    "label-red": {
+      "type": "color",
+      "value": "#D9635C"
+    },
+    "label-yellow": {
+      "type": "color",
+      "value": "#E8B93E"
+    },
+    "label-green": {
+      "type": "color",
+      "value": "#6FBF73"
+    },
+    "label-blue": {
+      "type": "color",
+      "value": "#5B9BD5"
+    },
+    "label-purple": {
+      "type": "color",
+      "value": "#9B7FD4"
+    },
+    "space-unit": {
+      "type": "number",
+      "value": [
+        {
+          "value": 4,
+          "theme": {
+            "density": "compact"
+          }
+        },
+        {
+          "value": 8,
+          "theme": {
+            "density": "loose"
+          }
+        }
+      ]
+    },
+    "gap": {
+      "type": "number",
+      "value": [
+        {
+          "value": 4,
+          "theme": {
+            "density": "compact"
+          }
+        },
+        {
+          "value": 8,
+          "theme": {
+            "density": "loose"
+          }
+        }
+      ]
+    },
+    "pad-x": {
+      "type": "number",
+      "value": [
+        {
+          "value": 8,
+          "theme": {
+            "density": "compact"
+          }
+        },
+        {
+          "value": 16,
+          "theme": {
+            "density": "loose"
+          }
+        }
+      ]
+    },
+    "pad-y": {
+      "type": "number",
+      "value": [
+        {
+          "value": 4,
+          "theme": {
+            "density": "compact"
+          }
+        },
+        {
+          "value": 8,
+          "theme": {
+            "density": "loose"
+          }
+        }
+      ]
+    },
+    "bar-title-h": {
+      "type": "number",
+      "value": [
+        {
+          "value": 40,
+          "theme": {
+            "density": "compact"
+          }
+        },
+        {
+          "value": 48,
+          "theme": {
+            "density": "loose"
+          }
+        }
+      ]
+    },
+    "bar-flow-h": {
+      "type": "number",
+      "value": [
+        {
+          "value": 52,
+          "theme": {
+            "density": "compact"
+          }
+        },
+        {
+          "value": 68,
+          "theme": {
+            "density": "loose"
+          }
+        }
+      ]
+    },
+    "bar-tool-h": {
+      "type": "number",
+      "value": [
+        {
+          "value": 40,
+          "theme": {
+            "density": "compact"
+          }
+        },
+        {
+          "value": 48,
+          "theme": {
+            "density": "loose"
+          }
+        }
+      ]
+    },
+    "row-h": {
+      "type": "number",
+      "value": [
+        {
+          "value": 28,
+          "theme": {
+            "density": "compact"
+          }
+        },
+        {
+          "value": 36,
+          "theme": {
+            "density": "loose"
+          }
+        }
+      ]
+    },
+    "radius": {
+      "type": "number",
+      "value": [
+        {
+          "value": 4,
+          "theme": {
+            "density": "compact"
+          }
+        },
+        {
+          "value": 6,
+          "theme": {
+            "density": "loose"
+          }
+        }
+      ]
+    },
+    "panel-pad": {
+      "type": "number",
+      "value": [
+        {
+          "value": 8,
+          "theme": {
+            "density": "compact"
+          }
+        },
+        {
+          "value": 16,
+          "theme": {
+            "density": "loose"
+          }
+        }
+      ]
+    }
+  },
   "fileToken": "447bd72b-1425-4719-a541-1a320abbef6f"
 }
