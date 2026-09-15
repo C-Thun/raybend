@@ -14,6 +14,11 @@
 //! 3. **路径特征**（`OneDrive`、`Dropbox`…）—— 只能认出「主流同步客户端默认放哪」，
 //!    用户改过目录名就认不出。**它是提示，不是保证。**
 
+// Linux 专属的 `/proc/mounts` 解析（Windows 走 `GetDriveTypeW`，那些函数不会被调用）。
+// 它们本身是**纯字符串逻辑**，测试在所有平台都跑；这里只关掉非 Linux 平台上的
+// 「never used」警告 —— 不要因此把它们删掉或 gate 掉（那样会丢掉这半边测试）。
+#![cfg_attr(not(target_os = "linux"), allow(dead_code))]
+
 use std::path::Path;
 
 use super::path_semantics::{self, PathForms};
