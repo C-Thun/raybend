@@ -19,9 +19,11 @@
 //! | [`ids`] | 库 ID：可排序的定长 base62（时间 + 随机） |
 //! | [`repository`] | 库身份、元信息、`app.db` 登记与在线/离线解析 |
 //! | [`tags`] | 标签：全局词典（`app.db`）+ 每库关联（`catalog.db`），`BROWSE.md` §7 |
+//! | [`assets`] | 资产与文件记录的读写：差分计划的落库、配对、缺失标记 |
 //! | [`db`] | 门面：`AppDb`（全局库）与 `CatalogDb`（每库），上层只用这一层 |
 //! | [`location`] | 位置判定：本地 / 网络 / 云同步（放 catalog 的风险提示） |
 
+pub mod assets;
 pub mod db;
 pub mod file_id;
 pub mod ids;
