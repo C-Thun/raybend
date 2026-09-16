@@ -607,11 +607,15 @@ mod availability_tests {
         let root = dir.path().join("testrepos");
         std::fs::create_dir_all(&root).unwrap();
         let path = root.to_string_lossy().to_string();
-        assert_eq!(paths_are_dirs(&[path.clone()]), vec![true]);
+        assert_eq!(paths_are_dirs(std::slice::from_ref(&path)), vec![true]);
 
         let unplugged = dir.path().join("testrepos-unplugged");
         std::fs::rename(&root, &unplugged).unwrap();
-        assert_eq!(paths_are_dirs(&[path.clone()]), vec![false], "改名 → 不可用");
+        assert_eq!(
+            paths_are_dirs(std::slice::from_ref(&path)),
+            vec![false],
+            "改名 → 不可用"
+        );
 
         std::fs::rename(&unplugged, &root).unwrap();
         assert_eq!(paths_are_dirs(&[path]), vec![true], "改回来 → 又可用");
