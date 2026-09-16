@@ -36,6 +36,10 @@ kamadak-exif = "0.6"
 # 且必须在 worker 进程里调用（上游明说不要拿它处理不可信文件）。
 rawler = "0.8.0"
 
+# 删除到系统回收站（M2-W1）：**只做「移到回收站」，不提供永久删除**。
+# MIT；Windows 上带 COM 初始化（default feature `coinit_apartmentthreaded`）。
+trash = "5.2"
+
 # 缩略图（M1-3）：只开需要的解码/编码格式，不开 avif/hdr 等大件
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "tiff"] }
 # Windows 平台调用：文件身份（GetFileInformationByHandleEx）/ 驱动器类型（GetDriveTypeW）

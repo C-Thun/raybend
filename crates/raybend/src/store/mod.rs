@@ -18,6 +18,9 @@
 //! | [`writer`] | 单写者 actor：所有写串行到一条连接上，退出时把队列跑干 |
 //! | [`ids`] | 库 ID：可排序的定长 base62（时间 + 随机） |
 //! | [`repository`] | 库身份、元信息、`app.db` 登记与在线/离线解析 |
+//! | [`marking`] | 标记写入（评分/色标/喜欢/锁/标签）+ 撤销栈 |
+//! | [`flags`] | 旗标：内存态、跨库跨目录的临时工作集（`BROWSE.md` §3.2） |
+//! | [`delete`] | 删除：只到系统回收站，一级锁挡住（`BROWSE.md` §5.9） |
 //! | [`query`] | 资产查询：范围 + 筛选 + 排序 + 分页（浏览网格的数据源） |
 //! | [`fts`] | 全文检索索引的维护（派生索引，过期即在查询前重建） |
 //! | [`tags`] | 标签：全局词典（`app.db`）+ 每库关联（`catalog.db`），`BROWSE.md` §7 |
@@ -29,7 +32,10 @@
 
 pub mod assets;
 pub mod db;
+pub mod delete;
 pub mod file_id;
+pub mod flags;
+pub mod marking;
 pub mod fts;
 pub mod ids;
 pub mod location;
