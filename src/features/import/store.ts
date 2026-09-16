@@ -10,6 +10,7 @@
  *    这里只做「取当前 run、拼 `[2/3] 目录名`」这类展示层的事 —— 两边都算一遍迟早会不一致。
  */
 
+import { createSignal } from "solid-js";
 import type { ImportSource } from "../../api/import.ts";
 import type {
   ImportBatchProgress,
@@ -108,11 +109,16 @@ function isFinal(state: ImportState): boolean {
 }
 
 export function createImportStore(deps: { api: ImportApi }): ImportStore {
-  let progress: ImportBatchProgress | null = null;
-  let batchId: string | null = null;
-  let error: string | null = null;
-  let busy = false;
-  let open = false;
+  // 界面要读的这五个必须是 **signal**（文件头那条只禁 `createMemo`，不禁 `createSignal`）：
+  // `<Dialog open={store.open()}>` 里 Solid 只在读到 props 时求值 —— 普通变量读一次就定死，
+  // 弹窗永远弹不出来（步骤 15 的冒烟抓到的正是这个，且它在真机上同样弹不出来）。
+  // `createSignal` 在 Node 的 SSR 构建里就是 `[() => value, setter]`，读写语义与真机一致，
+  // 所以单测依旧是同步可断言的。
+  const [progress, setProgress] = createSignal<ImportBatchProgress | null>(null);
+  const [batchId, setBatchId] = createSignal<string | null>(null);
+  const [error, setError] = createSignal<string | null>(null);
+  const [busy, setBusy] = createSignal(false);
+  const [open, setOpen] = createSignal(false);
   let unlisten: (() => void) | null = null;
 
   function unsubscribe(): void {
@@ -123,38 +129,40 @@ export function createImportStore(deps: { api: ImportApi }): ImportStore {
   }
 
   function fail(caught: unknown): void {
-    error = caught instanceof Error ? caught.message : String(caught);
+    setError(caught instanceof Error ? caught.message : String(caught));
   }
 
   /** 命令的统一走法：置忙 → 跑 → 更新快照 → 清忙。 */
   async function command(
     run: (id: string) => Promise<ImportBatchProgress>,
   ): Promise<void> {
-    if (batchId === null || busy) return;
-    busy = true;
-    error = null;
+    // 取一次 id 再判空：TS 不会把 `batchId()` 的收窄带过 await
+    const id = batchId();
+    if (id === null || busy()) return;
+    setBusy(true);
+    setError(null);
     try {
-      const snapshot = await run(batchId);
+      const snapshot = await run(id);
       apply(snapshot);
     } catch (caught) {
       fail(caught);
     } finally {
-      busy = false;
+      setBusy(false);
     }
   }
 
   function apply(snapshot: ImportBatchProgress): void {
-    progress = snapshot;
+    setProgress(snapshot);
     // 终态到了就退订：后端不会再发有意义的事件了
     if (isFinal(snapshot.state)) unsubscribe();
   }
 
   async function begin(request: ImportRequest): Promise<void> {
-    if (busy) return;
-    busy = true;
-    error = null;
-    progress = null;
-    open = true;
+    if (busy()) return;
+    setBusy(true);
+    setError(null);
+    setProgress(null);
+    setOpen(true);
     unsubscribe();
     try {
       const started = await deps.api.start(
@@ -165,52 +173,52 @@ export function createImportStore(deps: { api: ImportApi }): ImportStore {
       if (started.batchId === "") {
         // 浏览器降级（`api/import.ts` 在没有 Tauri 时返回空批次）：
         // 这不是「运行中」，也不该让弹窗永远转圈 —— 说清是环境问题
-        error = "当前环境没有导入后端（开发预览里只有界面）";
-        batchId = null;
+        setError("当前环境没有导入后端（开发预览里只有界面）");
+        setBatchId(null);
         return;
       }
-      batchId = started.batchId;
+      setBatchId(started.batchId);
       // 先订阅再取一次快照：两者之间的空档不会漏事件
       unlisten = await deps.api.subscribe((incoming) => {
         // 只认自己这一批（理论上只有一个批次在跑，但别留隐患）
-        if (incoming.batchId === batchId) apply(incoming);
+        if (incoming.batchId === batchId()) apply(incoming);
       });
       apply(await deps.api.status(started.batchId));
     } catch (caught) {
       fail(caught);
-      batchId = null;
+      setBatchId(null);
     } finally {
-      busy = false;
+      setBusy(false);
     }
   }
 
   const counts = (): ImportCounts => ({
-    total: progress?.total ?? 0,
-    done: progress?.done ?? 0,
-    imported: progress?.imported ?? 0,
-    skipped: progress?.skipped ?? 0,
-    duplicates: progress?.duplicates ?? 0,
-    failed: progress?.failed ?? 0,
+    total: progress()?.total ?? 0,
+    done: progress()?.done ?? 0,
+    imported: progress()?.imported ?? 0,
+    skipped: progress()?.skipped ?? 0,
+    duplicates: progress()?.duplicates ?? 0,
+    failed: progress()?.failed ?? 0,
   });
 
   return {
-    open: () => open,
+    open,
     openDialog: () => {
-      open = true;
+      setOpen(true);
     },
     dismiss: () => {
-      open = false;
+      setOpen(false);
     },
 
-    progress: () => progress,
-    batchId: () => batchId,
-    error: () => error,
-    busy: () => busy,
+    progress,
+    batchId,
+    error,
+    busy,
 
-    stage: () => progress?.stage ?? "scan",
-    state: () => progress?.state ?? "running",
+    stage: () => progress()?.stage ?? "scan",
+    state: () => progress()?.state ?? "running",
     percent: () => {
-      const snapshot = progress;
+      const snapshot = progress();
       if (snapshot === null) return null;
       if (snapshot.stage === "scan" || snapshot.stage === "plan") return null;
       if (snapshot.stage === "thumbs" || snapshot.stage === "done") return 100;
@@ -219,7 +227,7 @@ export function createImportStore(deps: { api: ImportApi }): ImportStore {
     },
     counts,
     currentLabel: () => {
-      const current = progress?.runs
+      const current = progress()?.runs
         .map((run) => run.current)
         .find((item) => item !== null && item !== undefined);
       if (current === null || current === undefined) return null;
@@ -228,32 +236,36 @@ export function createImportStore(deps: { api: ImportApi }): ImportStore {
         : `${current.source} → ${current.target}`;
     },
     runLabel: () => {
-      const snapshot = progress;
+      const snapshot = progress();
       if (snapshot === null || snapshot.runs.length <= 1) return null;
       const index = snapshot.currentRun ?? 0;
       const run = snapshot.runs[index];
       if (run === undefined) return null;
       return `[${index + 1}/${snapshot.runs.length}] ${run.sourceRoot}`;
     },
-    errors: () => progress?.errors ?? [],
+    errors: () => progress()?.errors ?? [],
     runNote: () => {
-      const snapshot = progress;
+      const snapshot = progress();
       if (snapshot === null) return null;
       for (const run of snapshot.runs) {
         if (run.note !== null && run.note !== "") return run.note;
       }
       return null;
     },
-    finished: () => progress !== null && isFinal(progress.state),
+    finished: () => {
+      const snapshot = progress();
+      return snapshot !== null && isFinal(snapshot.state);
+    },
 
     begin,
     pause: () => command((id) => deps.api.pause(id)),
     resume: () => command((id) => deps.api.resume(id)),
     cancel: () => command((id) => deps.api.cancel(id)),
     exportErrors: async (path: string) => {
-      if (batchId === null) return 0;
+      const id = batchId();
+      if (id === null) return 0;
       try {
-        return await deps.api.exportErrors(batchId, path);
+        return await deps.api.exportErrors(id, path);
       } catch (caught) {
         fail(caught);
         return 0;
