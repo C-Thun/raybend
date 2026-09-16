@@ -375,6 +375,32 @@ test("开始导入失败：记原因、没有批次、不订阅", async () => {
   assert.equal(fake.state.calls.includes("subscribe"), false);
 });
 
+test("浏览器降级：没有后端时给一句人话，不订阅、不空转", async () => {
+  const fake = fakeApi();
+  const store = createImportStore({
+    api: {
+      ...fake.api,
+      // 浏览器里 `api/import.ts` 就是这么返回的
+      async start() {
+        return { batchId: "", runs: [] };
+      },
+    },
+  });
+  await store.begin({
+    repositoryId: "repo-1",
+    sourceDirs: ["/src/a"],
+    includeSubdirs: true,
+    avoidDuplicates: true,
+  });
+  assert.equal(store.batchId(), null);
+  assert.match(store.error() ?? "", /开发预览/);
+  assert.equal(fake.state.calls.includes("subscribe"), false, "没有后端就别订阅");
+  assert.equal(fake.state.calls.includes("status:"), false);
+  // 快照仍是空的：弹窗该显示「原因」，而不是一个永远转圈的进度条
+  assert.equal(store.progress(), null);
+  assert.equal(store.finished(), false, "不是「完成」，是「没法开始」");
+});
+
 test("只认自己那一批的事件（别的批次的快照被忽略）", async () => {
   const { store, emit } = await startedStore();
   emit(snapshot({ batchId: "别的批次", stage: "done", state: "done", imported: 99 }));

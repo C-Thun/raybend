@@ -163,6 +163,13 @@ export function createImportStore(deps: { api: ImportApi }): ImportStore {
         request.includeSubdirs,
         request.avoidDuplicates,
       );
+      if (started.batchId === "") {
+        // 浏览器降级（`api/import.ts` 在没有 Tauri 时返回空批次）：
+        // 这不是「运行中」，也不该让弹窗永远转圈 —— 说清是环境问题
+        error = "当前环境没有导入后端（开发预览里只有界面）";
+        batchId = null;
+        return;
+      }
       batchId = started.batchId;
       // 先订阅再取一次快照：两者之间的空档不会漏事件
       unlisten = await deps.api.subscribe((incoming) => {
