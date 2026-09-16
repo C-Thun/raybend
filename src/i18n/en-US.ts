@@ -126,6 +126,7 @@ export const enUS: Record<MessageKey, string> = {
  "grid.select_all_day": "Select whole day",
  "grid.select_all_range": "Select this range",
   "viewer.back": "Back",
+ "viewer.fit_label": "Fit",
  "viewer.zoom_in": "Zoom in",
  "viewer.zoom_out": "Zoom out",
  "viewer.fit": "Fit / 100%",

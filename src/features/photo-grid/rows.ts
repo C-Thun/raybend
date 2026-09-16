@@ -84,6 +84,10 @@ export interface GridRowsInput {
   cellWidth: number;
   /** 字幕条高（读 `--caption-h` 令牌） */
   captionHeight: number;
+  /** tile 四周内边距（读 `--tile-pad`）—— 图片四角圆角就是它让出来的 */
+  tilePad: number;
+  /** 图片与文件名之间的间距（读 `--tile-gap`） */
+  tileGap: number;
   /**
    * 按时间分组的结果；**省略 = 平铺模式**。
    * 由调用方用 `groupByTime` 算好传进来（本函数保持纯函数，不自己算分组）。
@@ -100,7 +104,16 @@ export function buildGridRows(input: GridRowsInput): GridRowModel[] {
     Number.isFinite(input.captionHeight) && input.captionHeight > 0
       ? input.captionHeight
       : 0;
-  const rowHeight = tileImageHeight(input.cellWidth) + captionHeight;
+  const positive = (value: number): number =>
+    Number.isFinite(value) && value > 0 ? value : 0;
+  const tilePad = positive(input.tilePad);
+  const tileGap = positive(input.tileGap);
+  /*
+   * 一行 tile 的总高 = 上内边距 + 画面高 + 图文间距 + 字幕条 + 下内边距。
+   * 少算任何一项，字幕条都会被下一行**切掉一半**（2026-09-16 人类截图报的就是这个）。
+   */
+  const rowHeight =
+    tilePad * 2 + tileImageHeight(input.cellWidth) + tileGap + captionHeight;
 
   if (!input.grouping) {
     return chunkTiles(input.items, columns, rowHeight, "tiles");

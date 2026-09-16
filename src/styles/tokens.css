@@ -259,6 +259,8 @@
   --win-ctl-w: 52px;
 
   --caption-h: 24px; /* 图片 tile 字幕条高 */
+  --tile-pad: 3px; /* tile 四周内边距（图片因此四角都有圆角，而不是只圆上面两角） */
+  --tile-gap: 3px; /* 图片与文件名之间的间距 —— 太挤会看不成字 */
   --scrollbar-w: 8px; /* 细滚动条宽/高 */
 
   --action-btn-h: 34px; /* 导入按钮等 */
@@ -309,6 +311,8 @@
   --toggle-block-icon: 18px;
 
   --caption-h: 28px;
+  --tile-pad: 4px;
+  --tile-gap: 6px;
   --win-ctl-w: 62px;
   --scrollbar-w: 10px;
 

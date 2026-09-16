@@ -585,14 +585,14 @@ export default function KitchenSink() {
             <Row label="有图 / 选中 / 悬停">
               <Tile
                 label="DSC_0192.NEF"
-                sublabel="NEF · 45.7 MP"
+                tag="NEF"
                 src={demoImage()}
                 selected={selectedTile() === 1}
                 onClick={() => setSelectedTile(1)}
               />
               <Tile
                 label="DSC_0193.NEF"
-                sublabel="NEF · 45.7 MP"
+                tag="NEF"
                 src={demoImage()}
                 selected={selectedTile() === 2}
                 onClick={() => setSelectedTile(2)}
@@ -602,7 +602,7 @@ export default function KitchenSink() {
               <Tile label="DSC_0194.NEF" loading />
               <Tile label="损坏文件" empty src={demoImage()} />
               <Tile label="文件夹" icon={<IconFolderFilled size={20} />} />
-              <Tile label="不可用" sublabel="离线卷" disabled />
+              <Tile label="不可用" tag="离线卷" disabled />
             </Row>
           </Section>
 

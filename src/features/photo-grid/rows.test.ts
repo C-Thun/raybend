@@ -65,6 +65,8 @@ test("平铺：按列数切行，行高 = 画面高 + 字幕条高", () => {
     columns: 3,
     cellWidth: 200,
     captionHeight: CAPTION,
+      tilePad: 0,
+      tileGap: 0,
   });
   assert.equal(rows.length, 3, "7 张按 3 列切成 3 行");
   const expectedHeight = tileImageHeight(200) + CAPTION;
@@ -87,6 +89,8 @@ test("平铺：列数非法时按一行一张（不产出空行）", () => {
       columns,
       cellWidth: 200,
       captionHeight: CAPTION,
+      tilePad: 0,
+      tileGap: 0,
     });
     assert.equal(tileRows(rows).length, 2, `columns=${columns}`);
   }
@@ -98,6 +102,8 @@ test("空列表：没有行", () => {
     columns: 4,
     cellWidth: 200,
     captionHeight: CAPTION,
+      tilePad: 0,
+      tileGap: 0,
   });
   assert.deepEqual(rows, []);
   assert.equal(countRowPhotos(rows), 0);
@@ -109,6 +115,8 @@ test("字幕条高为 0 / 非法：行高退化但不能是 NaN", () => {
     columns: 1,
     cellWidth: 200,
     captionHeight: Number.NaN,
+      tilePad: 0,
+      tileGap: 0,
   });
   assert.equal(rows[0].height, tileImageHeight(200));
   assert.ok(Number.isFinite(rows[0].height));
@@ -133,6 +141,8 @@ test("按时间：日标题 + 片标题 + tile 行，顺序正确", () => {
     columns: 2,
     cellWidth: 200,
     captionHeight: CAPTION,
+      tilePad: 0,
+      tileGap: 0,
     grouping,
   });
 
@@ -172,6 +182,8 @@ test("按时间：一天里两段，各自从新的一行开始（不跨片拼�
     columns: 2,
     cellWidth: 200,
     captionHeight: CAPTION,
+      tilePad: 0,
+      tileGap: 0,
     grouping,
   });
   const tiles = tileRows(rows);
@@ -197,6 +209,8 @@ test("按时间：未知时间组排在最后，且没有任何时间范围", ()
     columns: 4,
     cellWidth: 200,
     captionHeight: CAPTION,
+      tilePad: 0,
+      tileGap: 0,
     grouping,
   });
   const days = dayGroups(rows);
@@ -222,6 +236,8 @@ test("按时间：多个日组，最近的在前", () => {
     columns: 1,
     cellWidth: 200,
     captionHeight: CAPTION,
+      tilePad: 0,
+      tileGap: 0,
     grouping,
   });
   assert.deepEqual(
@@ -244,6 +260,8 @@ test("按时间：分组里出现了列表里没有的 id → 跳过，不产出
     columns: 4,
     cellWidth: 200,
     captionHeight: CAPTION,
+      tilePad: 0,
+      tileGap: 0,
     grouping,
   });
   assert.equal(countRowPhotos(rows), 1, "幽灵 id 不该变成一张空 tile");
@@ -263,12 +281,16 @@ test("行键唯一（虚拟列表靠它复用 DOM）", () => {
     columns: 3,
     cellWidth: 200,
     captionHeight: CAPTION,
+      tilePad: 0,
+      tileGap: 0,
   });
   const grouped = buildGridRows({
     items,
     columns: 3,
     cellWidth: 200,
     captionHeight: CAPTION,
+      tilePad: 0,
+      tileGap: 0,
     grouping,
   });
   for (const rows of [flat, grouped]) {
@@ -288,6 +310,8 @@ test("按时间：空分组结果 → 只有未知组时才出行", () => {
     columns: 2,
     cellWidth: 200,
     captionHeight: CAPTION,
+      tilePad: 0,
+      tileGap: 0,
     grouping,
   });
   assert.deepEqual(

@@ -37,6 +37,47 @@ export function Viewer(props: ViewerProps) {
 
   const state = () => props.store.state();
 
+  /*
+   * 两个悬浮控件都**只在鼠标靠近各自的角时才出现**（人类 2026-09-16）：
+   *   左上角 → 返回按钮；右下角 → 缩放指示。
+   * 判据是「离角落多少像素以内」，不是「有没有悬停在按钮上」—— 按钮本身很小时，
+   * 要求精确悬停等于找不到。键盘用户靠 `:focus-within` 兜住（Tab 能到）。
+   */
+  const [cursor, setCursor] = createSignal<{ x: number; y: number } | null>(null);
+  const CORNER_BACK = 120;
+  const CORNER_ZOOM = 200;
+  const nearTopLeft = (): boolean => {
+    const at = cursor();
+    return at !== null && at.x <= CORNER_BACK && at.y <= CORNER_BACK;
+  };
+  const nearBottomRight = (): boolean => {
+    const at = cursor();
+    if (at === null) return false;
+    const width = host?.clientWidth ?? 0;
+    const height = host?.clientHeight ?? 0;
+    return width - at.x <= CORNER_ZOOM && height - at.y <= CORNER_ZOOM;
+  };
+
+  /*
+   * 显示哪个数字，这里有个坑（人类 2026-09-16 报的「打开瞬间比例很大、有时卡住」）：
+   * 大图没到之前，画面用的是网格小图（长边 384），以它为基准算出来的比例会是个很大的数
+   * （1200px 视口 ≈ 312%），大图一到又变成正常值 —— 看着就是「先闪一个错数」。
+   * 所以：**适配状态只说「适配」**（不报数字），大图到了再补上百分比；
+   * 用户自己缩放之后报的就是「相对当前显示这张图」的比例，始终是真的。
+   */
+  const zoomLabel = (): string => {
+    const zoom = state().zoom;
+    if (!state().fit) return `${Math.round(zoom * 100)}%`;
+    const fitText = t("viewer.fit_label");
+    return props.store.sharp() ? `${fitText} · ${Math.round(zoom * 100)}%` : fitText;
+  };
+
+  function trackCursor(event: PointerEvent): void {
+    const rect = host?.getBoundingClientRect();
+    if (rect === undefined) return;
+    setCursor({ x: event.clientX - rect.left, y: event.clientY - rect.top });
+  }
+
   /** 视口尺寸：`ResizeObserver` 通知（store 里已去重，尺寸没变不会重渲染） */
   onMount(() => {
     if (host === undefined) return;
@@ -64,6 +105,11 @@ export function Viewer(props: ViewerProps) {
       if (!state().active) return;
       switch (event.key) {
         case "Escape":
+          event.preventDefault();
+          close();
+          break;
+        case "Enter":
+          // 设计稿 §3.2：选中后回车进来，**再按一次回车出去**（进胶片带/对比模式后再另说）
           event.preventDefault();
           close();
           break;
@@ -138,6 +184,15 @@ export function Viewer(props: ViewerProps) {
 
   function onPointerDown(event: PointerEvent): void {
     if (event.button !== 0) return;
+    /*
+     * 点在按钮之类的控件上时**不要**开始拖动：`setPointerCapture` 会把后续的 click
+     * 从按钮手里抢走 —— 人类实测「左上角返回按钮点了没反应」就是这个原因
+     * （放大/缩小按钮同理）。判据用 `closest`，这样按钮里的图标也算控件。
+     */
+    const target = event.target;
+    if (target instanceof Element && target.closest("button, a, input, [role='button']") !== null) {
+      return;
+    }
     dragFrom = { x: event.clientX, y: event.clientY };
     setDragging(true);
     (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
@@ -170,7 +225,11 @@ export function Viewer(props: ViewerProps) {
       data-viewer="open"
       onWheel={onWheel}
       onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
+      onPointerMove={(event) => {
+        onPointerMove(event);
+        trackCursor(event);
+      }}
+      onPointerLeave={() => setCursor(null)}
       onPointerUp={endDrag}
       onPointerCancel={endDrag}
       onDblClick={() => props.store.toggleFit()}
@@ -201,7 +260,12 @@ export function Viewer(props: ViewerProps) {
       {/* 左上角返回（设计稿：浮在左上角；悬停才浮出是后续细节） */}
       <button
         type="button"
-        class="absolute start-3 top-3 flex cursor-pointer items-center gap-1 rounded-ui bg-surface-layer px-2 py-1 text-fs-1 text-fg-1"
+        class={[
+          "absolute start-3 top-3 flex cursor-pointer items-center gap-1 rounded-ui bg-surface-layer px-2 py-1 text-fs-1 text-fg-1",
+          "transition-opacity",
+          "opacity-0 focus-visible:opacity-100 focus-within:opacity-100",
+          nearTopLeft() ? "opacity-100" : "",
+        ].join(" ")}
         onClick={close}
         aria-label={t("viewer.back")}
       >
@@ -210,7 +274,14 @@ export function Viewer(props: ViewerProps) {
       </button>
 
       {/* 右下角：缩放控件 + 百分比（基础版：给鼠标用户一个不靠滚轮的入口） */}
-      <div class="absolute end-3 bottom-3 flex items-center gap-1 rounded-ui bg-surface-layer px-1.5 py-1">
+      <div
+        class={[
+          "absolute end-3 bottom-3 flex items-center gap-1 rounded-ui bg-surface-layer px-1.5 py-1",
+          "transition-opacity",
+          "opacity-0 focus-within:opacity-100",
+          nearBottomRight() ? "opacity-100" : "",
+        ].join(" ")}
+      >
         <button
           type="button"
           class="flex size-6 cursor-pointer items-center justify-center rounded-ui text-fg-2 hover:bg-state-hover hover:text-fg-1"
@@ -221,11 +292,11 @@ export function Viewer(props: ViewerProps) {
         </button>
         <button
           type="button"
-          class="min-w-12 cursor-pointer rounded-ui px-1 text-center text-fs-1 text-fg-2 hover:bg-state-hover hover:text-fg-1 tnum"
+          class="min-w-16 cursor-pointer rounded-ui px-1 text-center text-fs-1 text-fg-2 hover:bg-state-hover hover:text-fg-1 tnum"
           aria-label={t("viewer.fit")}
           onClick={() => props.store.toggleFit()}
         >
-          {Math.round(state().zoom * 100)}%
+          {zoomLabel()}
         </button>
         <button
           type="button"

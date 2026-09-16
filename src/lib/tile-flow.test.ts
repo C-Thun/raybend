@@ -19,6 +19,7 @@ import {
   tileRowCount,
   tileSizeAt,
   tileTotalHeight,
+  nextIndexForArrow,
 } from "./tile-flow.ts";
 
 // ─── computeTileFlow：正常路径 ────────────────────────────
@@ -252,4 +253,25 @@ test("不变式：行数 × 列数 ≥ 总数，且 (行数−1) × 列数 < 总
       }
     }
   }
+});
+
+test("方向键：左右一格、上下整行；到头停在原地", () => {
+  const base = { count: 10, columns: 4 } as const;
+  assert.equal(nextIndexForArrow({ ...base, from: 5, key: "ArrowRight" }), 6);
+  assert.equal(nextIndexForArrow({ ...base, from: 5, key: "ArrowLeft" }), 4);
+  assert.equal(nextIndexForArrow({ ...base, from: 5, key: "ArrowDown" }), 9);
+  assert.equal(nextIndexForArrow({ ...base, from: 5, key: "ArrowUp" }), 1);
+  // 越界不动（不绕到另一端：绕过去像是选中莫名跳走）
+  assert.equal(nextIndexForArrow({ ...base, from: 0, key: "ArrowLeft" }), null);
+  assert.equal(nextIndexForArrow({ ...base, from: 0, key: "ArrowUp" }), null);
+  assert.equal(nextIndexForArrow({ ...base, from: 9, key: "ArrowRight" }), null);
+  assert.equal(nextIndexForArrow({ ...base, from: 9, key: "ArrowDown" }), null);
+});
+
+test("方向键：空列表 / 无效起点 / 列数为 0 都不炸", () => {
+  assert.equal(nextIndexForArrow({ from: 0, count: 0, columns: 4, key: "ArrowRight" }), null);
+  assert.equal(nextIndexForArrow({ from: -1, count: 5, columns: 4, key: "ArrowRight" }), null);
+  assert.equal(nextIndexForArrow({ from: 9, count: 5, columns: 4, key: "ArrowRight" }), null);
+  // 列数 0（还没算出来）时上下按 1 步走，至少不会跳飞
+  assert.equal(nextIndexForArrow({ from: 2, count: 5, columns: 0, key: "ArrowDown" }), 3);
 });

@@ -267,7 +267,16 @@ where
             };
 
             // 隐藏项（`include_hidden` 关时直接跳过，目录也一样）
-            if !opts.include_hidden && name.starts_with('.') {
+            #[cfg(windows)]
+            let hidden_by_attribute = !opts.include_hidden
+                && entry
+                    .metadata()
+                    .map(|meta| kind::has_hidden_attribute(&meta))
+                    .unwrap_or(false);
+            #[cfg(not(windows))]
+            let hidden_by_attribute = false;
+
+            if !opts.include_hidden && (name.starts_with('.') || hidden_by_attribute) {
                 outcome.skip(SkipReason::Hidden);
                 continue;
             }

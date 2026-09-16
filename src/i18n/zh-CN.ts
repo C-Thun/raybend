@@ -133,6 +133,7 @@ export const zhCN = {
  "grid.select_all_day": "全选当天",
  "grid.select_all_range": "全选此段",
   "viewer.back": "返回",
+ "viewer.fit_label": "适配",
  "viewer.zoom_in": "放大",
  "viewer.zoom_out": "缩小",
  "viewer.fit": "适配窗口 / 100%",

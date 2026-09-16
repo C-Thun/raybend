@@ -103,9 +103,19 @@ pub fn list_dirs(root: &Path) -> Result<Vec<DirEntry>> {
         let entry = entry?;
         let name = entry.file_name().to_string_lossy().into_owned();
 
-        // 隐藏项：与 `scan` 的默认口径一致（`.` 开头一律不列）
-        if name.starts_with('.') {
+        // 隐藏项：`.` 开头 / Windows 隐藏属性（人类 2026-09-16：目录树里不显示隐藏目录）
+        if kind::is_hidden_name(&name) {
             continue;
+        }
+        #[cfg(windows)]
+        {
+            if entry
+                .metadata()
+                .map(|meta| kind::has_hidden_attribute(&meta))
+                .unwrap_or(false)
+            {
+                continue;
+            }
         }
         // 系统目录 / 垃圾名：`$RECYCLE.BIN`、`System Volume Information` …
         if kind::junk_kind(&name).is_some() {

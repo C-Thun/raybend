@@ -33,7 +33,12 @@ import { createTokenPx } from "../../components/ui/tokens.ts";
 import { locale, t } from "../../i18n/index.ts";
 import { formatDayLabel, formatTimeRange } from "../../lib/datetime.ts";
 import { formatCount, type GroupingLocale } from "../../lib/format.ts";
-import { computeTileFlow, tileImageHeight, tileSizeAt } from "../../lib/tile-flow.ts";
+import {
+  computeTileFlow,
+  nextIndexForArrow,
+  tileImageHeight,
+  tileSizeAt,
+} from "../../lib/tile-flow.ts";
 import type { SourceItem } from "../../api/types.ts";
 import { GridControlBar } from "./GridControlBar.tsx";
 import { createViewerStore, Viewer } from "./viewer/index.ts";
@@ -60,6 +65,8 @@ export function PhotoGrid(props: PhotoGridProps) {
 
   // 密度相关的高度/间距从令牌读（切档时重读，见 components/ui/tokens.ts）
   const captionHeight = createTokenPx("--caption-h", 26);
+  const tilePad = createTokenPx("--tile-pad", 3);
+  const tileGap = createTokenPx("--tile-gap", 3);
   const gap = createTokenPx("--gap", 4);
 
   onMount(() => {
@@ -92,6 +99,8 @@ export function PhotoGrid(props: PhotoGridProps) {
       columns: flow().columns,
       cellWidth: cellWidth(),
       captionHeight: captionHeight(),
+      tilePad: tilePad(),
+      tileGap: tileGap(),
       grouping: store.grouping(),
     });
 
@@ -115,8 +124,41 @@ export function PhotoGrid(props: PhotoGridProps) {
       fileName: item.fileName,
     }));
 
-  /** 选中后按回车 → 进看图（设计稿 §3.2） */
+  /** 选中后按回车 → 进看图（设计稿 §3.2）；方向键在网格里移动选中 */
   function onGridKeyDown(event: KeyboardEvent): void {
+    /*
+     * 方向键移动选中（人类 2026-09-16）：左右一格、上下**整行**。
+     * 不支持 `Ctrl`/`Shift` 组合（不加选、不扩区间）—— 那是后面再说的事。
+     * 到头就停住（`nextIndexForArrow` 返回 `null`）。
+     */
+    if (
+      event.key === "ArrowLeft" ||
+      event.key === "ArrowRight" ||
+      event.key === "ArrowUp" ||
+      event.key === "ArrowDown"
+    ) {
+      const list = store.displayItems();
+      const currentId = [...store.selectedIds()][0];
+      if (currentId === undefined) return;
+      const at = list.findIndex((item) => itemId(item) === currentId);
+      const next = nextIndexForArrow({
+        from: at,
+        count: list.length,
+        columns: flow().columns,
+        key: event.key,
+      });
+      const target = next === null ? undefined : list[next];
+      if (target === undefined) return;
+      event.preventDefault();
+      // 走 clickItem("replace")：选中与锚点一起更新（接着按 Shift 的语义才对得上）
+      store.clickItem(itemId(target), "replace");
+      // 键盘移动后把焦点带过去，免得焦点留在旧的 tile 上、方向键失灵
+      queueMicrotask(() => {
+        const node = container?.querySelector<HTMLElement>('[role="option"][aria-selected="true"]');
+        node?.focus();
+      });
+      return;
+    }
     if (event.key !== "Enter") return;
     const selected = [...store.selectedIds()];
     const only = selected[0];
@@ -275,7 +317,7 @@ function TileCell(props: {
     >
       <Tile
         label={props.item.fileName}
-        sublabel={props.item.ext?.toUpperCase() ?? undefined}
+        tag={props.item.ext?.toUpperCase() ?? undefined}
         src={thumb().url ?? undefined}
         selected={selected()}
         loading={thumb().status === "loading" || thumb().status === "idle"}

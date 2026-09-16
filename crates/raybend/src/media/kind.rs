@@ -367,3 +367,58 @@ mod tests {
         }
     }
 }
+
+/// 这个条目算「隐藏」吗？—— 目录树与照片列表默认都跳过（人类 2026-09-16：
+/// 「目录查看器里不显示隐藏目录」）。
+///
+/// 两条判据：
+/// 1. **名字以 `.` 开头**（跨平台都常见：`.git`、`.thumbnails`、`.DS_Store`）；
+/// 2. **Windows 的隐藏属性**（`FILE_ATTRIBUTE_HIDDEN`）——
+///    在 Windows 上「隐藏」多半是靠属性而不是点前缀，只看名字会漏。
+///
+/// 没有「显示隐藏项」的开关：需要时再加（`ScanOptions::include_hidden` 管的是照片扫描那一侧）。
+#[must_use]
+pub fn is_hidden_name(name: &str) -> bool {
+    name.starts_with('.')
+}
+
+/// Windows 隐藏属性；其它平台恒为 `false`（那边靠点前缀）。
+#[must_use]
+pub fn has_hidden_attribute(metadata: &std::fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
+        metadata.file_attributes() & FILE_ATTRIBUTE_HIDDEN != 0
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = metadata;
+        false
+    }
+}
+
+#[cfg(test)]
+mod hidden_tests {
+    use super::{has_hidden_attribute, is_hidden_name};
+
+    #[test]
+    fn 点开头的算隐藏() {
+        assert!(is_hidden_name(".git"));
+        assert!(is_hidden_name(".DS_Store"));
+        assert!(!is_hidden_name("photos"));
+        assert!(!is_hidden_name("我的照片"));
+        // 点不在开头不算（`..` 之类本来也不会出现在 read_dir 里）
+        assert!(!is_hidden_name("a.b"));
+    }
+
+    #[test]
+    fn 普通文件没有隐藏属性() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("a.txt");
+        std::fs::write(&file, b"x").unwrap();
+        let metadata = std::fs::metadata(&file).unwrap();
+        // Windows 上新建的文件默认没有隐藏属性；其它平台恒 false
+        assert!(!has_hidden_attribute(&metadata));
+    }
+}

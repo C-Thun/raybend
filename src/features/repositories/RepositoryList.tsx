@@ -178,7 +178,12 @@ function RepositoryCard(props: {
       aria-selected={props.selected}
       tabindex={0}
       class={[
-        "flex cursor-pointer flex-col justify-center gap-(--gap) rounded-ui px-(--pad-x)",
+        /*
+         * 上下内边距**显式给**（`py-(--pad-y)`）：只靠 `justify-center` 撑的话，
+         * 字行盒与图标块的高度差会让上下的留白看起来不一样（人类 2026-09-16 报的
+         * 「顶部几乎没有 padding，和底部有明显差异」）。
+         */
+        "flex cursor-pointer flex-col justify-center gap-(--gap) rounded-ui px-(--pad-x) py-(--pad-y)",
         "transition-colors",
         props.selected
           ? "bg-state-selected"

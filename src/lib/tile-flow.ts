@@ -124,3 +124,30 @@ export function tileRowCount(count: number, columns: number): number {
  const cols = Number.isFinite(columns) ? Math.max(1, Math.floor(columns)) : 1;
  return Math.ceil(count / cols);
 }
+
+/** 网格里按方向键时，选中应当落到第几项（`null` = 不动） */
+export function nextIndexForArrow(input: {
+  /** 当前选中的下标（不在列表里时传 -1） */
+  from: number;
+  count: number;
+  columns: number;
+  key: "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown";
+}): number | null {
+  const { from, count, columns, key } = input;
+  if (count <= 0 || from < 0 || from >= count) return null;
+  const step =
+    key === "ArrowLeft"
+      ? -1
+      : key === "ArrowRight"
+        ? 1
+        : key === "ArrowUp"
+          ? -Math.max(1, columns)
+          : Math.max(1, columns);
+  /*
+   * 上下移动按**整行**跳（列数由换行算法给出）。越界就**停在原地**：
+   * 从第一张按左、从最后一张按右都不动 —— 不绕到另一端（绕过去像是选中莫名跳走了）。
+   */
+  const next = from + step;
+  if (next < 0 || next >= count) return null;
+  return next;
+}

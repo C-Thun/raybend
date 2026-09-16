@@ -917,11 +917,44 @@ try {
     out.wheelChangedZoom = out.zoomAfterWheel !== out.zoomAfterDblBack;
     out.transformAfterWheel = transformOf();
 
-    // Esc 返回
+    /*
+     * 悬浮件**默认不显示**（人类 2026-09-16：返回按钮与缩放指示都该「鼠标靠近角落才出现」）。
+     * 判据用计算后的 opacity —— 没有指针靠近角的时候必须是 0。
+     */
+    const backButton = [...host.querySelectorAll("button")].find(
+      (el) => (el.getAttribute("aria-label") ?? "") === "返回",
+    );
+    out.backHiddenByDefault =
+      backButton !== undefined && getComputedStyle(backButton).opacity === "0";
+
+    // **返回按钮必须点得动**（人类实测点了没反应：拖动用的 setPointerCapture
+    // 把按钮的 click 抢走了）
+    backButton?.click();
+    await sleep(300);
+    out.closedByButton = document.querySelector('[data-viewer="open"]') === null;
+
+    if (!out.closedByButton) {
+      // 按钮点不动时，用 Esc 兜底继续测回车那条
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      );
+      await sleep(250);
+    }
+
+    // 重新打开，验证**回车能返回**（设计稿 §3.2：进去用回车，出来也用回车）
+    open.click();
+    await sleep(500);
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+    );
+    await sleep(300);
+    out.closedByEnter = document.querySelector('[data-viewer="open"]') === null;
+
+    // Esc 兜底关掉（万一上面两条都没关成功）
     window.dispatchEvent(
       new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
     );
-    await sleep(300);
+    await sleep(250);
     out.closed = document.querySelector('[data-viewer="open"]') === null;
     return out;
   })()`);
@@ -946,6 +979,15 @@ try {
       problems.push(
         `再双击没有回到适配（${viewerDemo.zoomAfterDbl} → ${viewerDemo.zoomAfterDblBack}，期望 ${viewerDemo.zoomBefore}）`,
       );
+    }
+    if (!viewerDemo.backHiddenByDefault) {
+      problems.push("看图的返回按钮默认就亮着 —— 应当鼠标靠近左上角才出现");
+    }
+    if (!viewerDemo.closedByButton) {
+      problems.push("看图左上角的返回按钮点了没反应（拖动用的指针捕获把 click 抢走了？）");
+    }
+    if (!viewerDemo.closedByEnter) {
+      problems.push("看图时按回车没能返回（设计稿 §3.2：再按一次回车回网格）");
     }
     if (!viewerDemo.closed) {
       problems.push("Esc 没能退出看图");
