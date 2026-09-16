@@ -217,6 +217,45 @@ impl KnownSources {
     }
 }
 
+/// 「这些目标路径是我们自己以前留下的」——续跑时用（`plans/M1-6.md` §3.3）。
+///
+/// 场景：上次导入在「复制完了但还没登记」那一步被杀，库里留下了文件
+/// 与一条 `pending` 记录。这次再导同一批源时，规划**必须算出同一个目标路径**
+/// （否则重名规则会给它加 `_01`，等于把同一张照片导了两份）。
+///
+/// 所以这些路径在规划眼里是**可用的**（哪怕盘上已经有了）：
+/// 执行器会认出「这条是我们自己的」，直接补登记而不是重拷。
+/// 只有**大小相符**的那些才会被放进来 —— 大小不符说明那文件不是我们写的。
+#[derive(Debug, Default, Clone)]
+pub struct Reserved {
+    paths: HashSet<String>,
+}
+
+impl Reserved {
+    /// 空集。
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// 记一条（内部按折叠比较，跟重名规则一致）。
+    pub fn insert(&mut self, target_rel: &str) {
+        self.paths.insert(fold(target_rel));
+    }
+
+    /// 是不是我们自己留下的。
+    #[must_use]
+    pub fn contains(&self, target_rel: &str) -> bool {
+        self.paths.contains(&fold(target_rel))
+    }
+
+    /// 有没有。
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.paths.is_empty()
+    }
+}
+
 /// 目标路径规划要问磁盘的一件事：**这条库内相对路径在盘上已经有了吗**。
 pub trait FsProbe {
     /// 库内相对路径（含 `photos/`）是否已存在。
@@ -439,6 +478,7 @@ pub fn plan(
     fs: &dyn FsProbe,
     known: &KnownSources,
     seq: &mut Sequences,
+    reserved: &Reserved,
 ) -> PlanResult {
     let mut outcomes: Vec<Option<ItemOutcome>> = vec![None; files.len()];
     let mut counts = PlanCounts::default();
@@ -529,7 +569,7 @@ pub fn plan(
                 _ => dir.clone(),
             };
 
-            let target_rel = resolve_conflict(&target_dir, &stem, &file.ext, fs, &claimed);
+            let target_rel = resolve_conflict(&target_dir, &stem, &file.ext, fs, &claimed, reserved);
             claimed.insert(fold(&target_rel));
             if !dirs.contains(&target_dir) {
                 dirs.push(target_dir);
@@ -667,9 +707,10 @@ fn resolve_conflict(
     ext: &str,
     fs: &dyn FsProbe,
     claimed: &HashSet<String>,
+    reserved: &Reserved,
 ) -> String {
     let candidate = compose(dir, stem, ext);
-    if is_free(&candidate, fs, claimed) {
+    if is_free(&candidate, fs, claimed, reserved) {
         return candidate;
     }
     // 上限是防御性的：真到了十万张同名文件，用户面对的是别的问题。
@@ -677,15 +718,24 @@ fn resolve_conflict(
     // 会以「目标已存在」失败，**不会静默覆盖**。
     for i in 1..=99_999u64 {
         let candidate = compose(dir, &format!("{stem}_{i:02}"), ext);
-        if is_free(&candidate, fs, claimed) {
+        if is_free(&candidate, fs, claimed, reserved) {
             return candidate;
         }
     }
     compose(dir, stem, ext)
 }
 
-fn is_free(candidate: &str, fs: &dyn FsProbe, claimed: &HashSet<String>) -> bool {
-    !claimed.contains(&fold(candidate)) && !fs.file_exists(candidate)
+fn is_free(
+    candidate: &str,
+    fs: &dyn FsProbe,
+    claimed: &HashSet<String>,
+    reserved: &Reserved,
+) -> bool {
+    if claimed.contains(&fold(candidate)) {
+        return false;
+    }
+    // 自己留下的半成品算「可用」（续跑要落回同一个名字）
+    reserved.contains(candidate) || !fs.file_exists(candidate)
 }
 
 fn compose(dir: &str, stem: &str, ext: &str) -> String {
@@ -802,7 +852,30 @@ mod tests {
     ) -> PlanResult {
         let tpl = parse_template(template).expect("模版应当能解析");
         let mut seq = Sequences::new();
-        plan(files, &tpl, opts, fs, known, &mut seq)
+        plan(files, &tpl, opts, fs, known, &mut seq, &Reserved::new())
+    }
+
+    fn plan_reserved(
+        files: &[SourceFile],
+        template: &str,
+        fs: &FakeFs,
+        reserved: &[&str],
+    ) -> PlanResult {
+        let tpl = parse_template(template).expect("模版应当能解析");
+        let mut seq = Sequences::new();
+        let mut set = Reserved::new();
+        for path in reserved {
+            set.insert(path);
+        }
+        plan(
+            files,
+            &tpl,
+            &PlanOptions::default(),
+            fs,
+            &KnownSources::new(),
+            &mut seq,
+            &set,
+        )
     }
 
     fn targets(result: &PlanResult) -> Vec<String> {
@@ -1123,6 +1196,29 @@ mod tests {
             &fs,
         );
         assert_eq!(targets(&result), vec!["photos/2026-08-15/MYP0001_01.JPG"]);
+    }
+
+    #[test]
+    fn reserved_paths_from_a_previous_run_are_reused_not_suffixed() {
+        // 上次「复制完没登记」留下的文件：续跑要落回同一个名字，
+        // 否则重名规则会给它加 _01 —— 同一张照片就有两份了
+        let fs = FakeFs::with(&["photos/2026-08-15/MYa.jpg"]);
+        let files = [bitmap("a.jpg")];
+        assert_eq!(
+            targets(&plan_default(&files, DEFAULT_TPL, &PlanOptions::default(), &fs)),
+            vec!["photos/2026-08-15/MYa_01.jpg"],
+            "正常情况下确实要避让已存在的文件"
+        );
+        assert_eq!(
+            targets(&plan_reserved(
+                &files,
+                DEFAULT_TPL,
+                &fs,
+                &["photos/2026-08-15/MYa.jpg"]
+            )),
+            vec!["photos/2026-08-15/MYa.jpg"],
+            "但它如果是我们自己留的，就该复用"
+        );
     }
 
     #[test]
