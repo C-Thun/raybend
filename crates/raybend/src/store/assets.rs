@@ -145,6 +145,42 @@ pub fn insert_file(
     Ok(conn.last_insert_rowid())
 }
 
+/// 补写一个文件的「来源」列（`REPOSITORY.md` §4.3 的判重靠它）。
+///
+/// * `source_path`：源文件的**绝对路径**（溯源 + 兜底判重）；
+/// * `source_identity`：源文件身份 `(卷序列号, 文件 ID)`（读不到就传 `None`）。
+///
+/// 与 `volume_serial` / `file_id` 分开存：那两列是**库内副本**的身份，
+/// 差分与缺失检测靠它，不能被源身份占用（`catalog_0003` 迁移里写了原因）。
+pub fn set_source(
+    conn: &Connection,
+    rel_path_folded: &str,
+    source_path: &str,
+    source_identity: Option<FileId>,
+    now_ms: i64,
+) -> Result<usize> {
+    let forms = PathForms::new(source_path);
+    let (volume, blob): (Option<i64>, Option<Vec<u8>>) = match source_identity {
+        Some(id) if !id.is_zero() => (Some(id.volume_serial as i64), Some(id.file_id.to_vec())),
+        _ => (None, None),
+    };
+    let updated = conn.execute(
+        "UPDATE asset_files
+            SET source_path = ?2, source_path_folded = ?3,
+                source_volume_serial = ?4, source_file_id = ?5, updated_at = ?6
+          WHERE rel_path_folded = ?1",
+        params![
+            rel_path_folded,
+            forms.raw(),
+            forms.folded(),
+            volume,
+            blob,
+            now_ms
+        ],
+    )?;
+    Ok(updated)
+}
+
 /// 更新文件路径（改名/移动）。展示路径与折叠路径都要更新。
 pub fn update_path(conn: &Connection, row_id: i64, new_path: &str, now_ms: i64) -> Result<()> {
     let forms = PathForms::new(new_path);
@@ -315,7 +351,12 @@ fn group_new_files(plan: &DiffPlan, disk: &[DiskFile]) -> Vec<NewGroup> {
 }
 
 /// 找一个已经存在的资产：同目录下已经有同名主体的文件（位图 ↔ RAW 配对）。
-fn find_asset_for_group(
+///
+/// **`_RAW/` 折算**（`REPOSITORY.md` §4.1）：RAW 落在 `<目录>/_RAW/` 里，
+/// 与位图天生不同目录 —— 两边都折算掉最后那段 `_RAW` 再比，
+/// 否则同一张照片会变成两条资产（网格里出现两个格子）。
+/// 于是「先导 RAW 再导位图」与「先导位图再导 RAW」都能配上对。
+pub fn find_asset_for_group(
     conn: &Connection,
     dir_folded: &str,
     stem_folded: &str,
@@ -337,13 +378,30 @@ fn find_asset_for_group(
     while let Some(row) = rows.next()? {
         let asset_id: i64 = row.get(0)?;
         let path: String = row.get(1)?;
-        // 只在同一层目录里比（LIKE 会带上更深的子目录）
+        // 只在同一层目录里比（LIKE 会带上更深的子目录）；
+        // 候选行如果在 `_RAW/` 里，折算回上一层再比
         let (dir, name) = path.rsplit_once('/').unwrap_or(("", path.as_str()));
-        if dir == dir_folded && crate::media::kind::stem_folded(name) == stem_folded {
+        let dir = normalize_raw_dir(dir);
+        if dir == normalize_raw_dir(dir_folded) && crate::media::kind::stem_folded(name) == stem_folded
+        {
             return Ok(Some(asset_id));
         }
     }
     Ok(None)
+}
+
+/// 把「RAW 分流目录」折算掉：`photos/2026/_RAW` → `photos/2026`。
+///
+/// 只有**最后一段**是 `_RAW` 才折算（中间叫 `_RAW` 的目录是用户自己的命名）。
+/// **大小写不敏感**：库里存的是折叠路径（`photos/2026/_raw`），
+/// 而调用方手里可能是原文（`photos/2026/_RAW`）—— 两头都得认（这里踩过一次坑）。
+fn normalize_raw_dir(dir: &str) -> &str {
+    const SUFFIX: &str = "/_RAW";
+    let start = dir.len().checked_sub(SUFFIX.len());
+    match start {
+        Some(at) if dir[at..].eq_ignore_ascii_case(SUFFIX) => &dir[..at],
+        _ => dir,
+    }
 }
 
 /// 把一个资产的 EXIF 元数据写进去。

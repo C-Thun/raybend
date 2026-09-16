@@ -8,6 +8,8 @@
 //! | `plan` | 目标路径规划：目录透传、位图/RAW 分流、重名后缀、序号分配（可注入 FS） |
 //! | [`fsops`] | 真实文件操作 + 内存假实现（测试用） |
 //! | [`progress`] | 进度快照（阶段、计数、当前项、错误） |
+//! | [`sink`] | `catalog.db` 侧的落库出口（runs / items / 资产登记 / 序号） |
+//! | [`space`] | 开工前的空间预检（纯判断 + 轻量估算） |
 //! | [`runner`] | 后台执行：阶段机、暂停/取消、逐文件复制与登记 |
 //!
 //! **本模块不依赖 Tauri**（`AGENTS.md` §2.4/§4）：文件系统之外的东西（`app.db` 的任务队列、
@@ -15,6 +17,8 @@
 
 pub mod fsops;
 pub mod progress;
+pub mod sink;
+pub mod space;
 pub mod runner;
 pub mod plan;
 pub mod template;

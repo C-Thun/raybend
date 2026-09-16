@@ -169,8 +169,11 @@ impl Role {
 
 /// 「这张源文件之前导进来过吗」——判重用（`REPOSITORY.md` §4.3）。
 ///
-/// 两层：**源身份**优先，**源路径折叠 + 大小 + mtime** 兜底
+/// 两层：**源身份**优先，**源绝对路径折叠 + 大小 + mtime** 兜底
 /// （网络盘/权限不足时读不到身份，那也不能退化成「每张都当新的」）。
+///
+/// 兜底键用**绝对路径**：库里存的 `source_path` 就是它（顺带能回答「这张照片从哪来的」），
+/// 而且用相对路径的话，两个不同源根里的同名文件会互相撞。
 #[derive(Debug, Default, Clone)]
 pub struct KnownSources {
     identities: HashSet<FileId>,
@@ -206,8 +209,11 @@ impl KnownSources {
         {
             return true;
         }
-        self.fallback
-            .contains(&(fold(&file.rel_path), file.size_bytes, file.mtime_ms))
+        self.fallback.contains(&(
+            fold(&file.abs_path.to_string_lossy()),
+            file.size_bytes,
+            file.mtime_ms,
+        ))
     }
 
     /// 是不是空的（空的话判重可以整个跳过）。
@@ -1090,7 +1096,7 @@ mod tests {
     #[test]
     fn skipped_files_do_not_consume_sequence_numbers() {
         let mut known = KnownSources::new();
-        known.insert_fallback("a.jpg", 1000, Some(1_700_000_000_000));
+        known.insert_fallback("/src/a.jpg", 1000, Some(1_700_000_000_000));
         let files = [bitmap("a.jpg"), bitmap("b.jpg")];
         let result = plan_full(
             &files,
@@ -1268,7 +1274,7 @@ mod tests {
     #[test]
     fn fallback_key_matches_path_size_and_mtime() {
         let mut known = KnownSources::new();
-        known.insert_fallback("sub/a.jpg", 1000, Some(1_700_000_000_000));
+        known.insert_fallback("/src/sub/a.jpg", 1000, Some(1_700_000_000_000));
         let hit = bitmap("sub/a.jpg");
         let miss_size = SourceFile {
             size_bytes: 2000,
@@ -1299,7 +1305,7 @@ mod tests {
     #[test]
     fn fallback_key_is_case_folded() {
         let mut known = KnownSources::new();
-        known.insert_fallback("SUB/A.JPG", 1000, Some(1_700_000_000_000));
+        known.insert_fallback("/SRC/SUB/A.JPG", 1000, Some(1_700_000_000_000));
         let result = plan_full(
             &[bitmap("sub/a.jpg")],
             DEFAULT_TPL,
@@ -1313,7 +1319,7 @@ mod tests {
     #[test]
     fn avoid_duplicates_off_imports_everything_again() {
         let mut known = KnownSources::new();
-        known.insert_fallback("a.jpg", 1000, Some(1_700_000_000_000));
+        known.insert_fallback("/src/a.jpg", 1000, Some(1_700_000_000_000));
         let fs = FakeFs::with(&["photos/2026-08-15/MYa.jpg"]);
         let opts = PlanOptions {
             avoid_duplicates: false,

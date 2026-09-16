@@ -1164,7 +1164,7 @@ mod tests {
         let fs = world(&[("a.jpg", 5)]);
         let mut h = Harness::new(fs);
         let mut known = KnownSources::new();
-        known.insert_fallback("a.jpg", 5, Some(1_700_000_000_000));
+        known.insert_fallback("/src/root/a.jpg", 5, Some(1_700_000_000_000));
         h.sink.known = known;
 
         let outcome = h.run(&[h.job(TPL)]);
@@ -1183,7 +1183,7 @@ mod tests {
         let fs = world(&[("a.jpg", 5)]);
         let mut h = Harness::new(fs);
         let mut known = KnownSources::new();
-        known.insert_fallback("a.jpg", 5, Some(1_700_000_000_000));
+        known.insert_fallback("/src/root/a.jpg", 5, Some(1_700_000_000_000));
         h.sink.known = known;
         let mut job = h.job(TPL);
         job.avoid_duplicates = false;
