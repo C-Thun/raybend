@@ -443,11 +443,21 @@ impl Deps<'_> {
         // 同一张照片就有两份了（`plans/M1-6.md` §7 风险 10）。
         let stale = self.sink.stale_pending()?;
         let mut resumable: Reserved = Reserved::new();
-        for (target, source_rel) in &stale {
-            if let Some(file) = files.iter().find(|f| f.rel_path == *source_rel)
-                && self.ops.size_of(target) == Some(file.size_bytes)
-            {
+        let mut adopt: plan::Adopt = plan::Adopt::new();
+        for (target, source_abs) in &stale {
+            // 比对的是**绝对路径**：`import_items.source_path` 存的是绝对路径（`sink.rs` 写的），
+            // 曾经拿它跟 `rel_path` 比 —— 于是这段「续跑要落回原名字」的逻辑在真机上一直是空转的。
+            let Some(file) = files
+                .iter()
+                .find(|f| f.abs_path.display().to_string() == *source_abs)
+            else {
+                continue;
+            };
+            // 只有「上次真的把文件放到那儿了（大小相符）」才认 —— 光有条 pending 行不算，
+            // 那种情况照常编号即可（计数器是单调的，不会撞名）。
+            if self.ops.size_of(target) == Some(file.size_bytes) {
                 resumable.insert(target);
+                adopt.insert(file.rel_path.clone(), target.clone());
             }
         }
 
@@ -460,6 +470,7 @@ impl Deps<'_> {
             &known,
             &mut sequences,
             &resumable,
+            &adopt,
         );
         self.sink.record_plan(run_id, &files, &planned.items)?;
         self.sink.save_sequences(&sequences)?;
@@ -1284,15 +1295,23 @@ mod tests {
         let fs = world(&[("a.jpg", 5)]);
         let mut h = Harness::new(fs);
         h.fs.add_existing("photos/2026-08-15/MYa.jpg", &[0u8; 5]);
+        // `import_items.source_path` 存的是**绝对路径**（`sink.rs` 写的），
+        // 所以这里的夹具也得是绝对路径 —— 曾经这里是相对路径，于是「续跑落回原名字」
+        // 在真机上一直是空转的（比较永远不成立）。
         h.sink.stale.insert(
             "photos/2026-08-15/MYa.jpg".to_string(),
-            "a.jpg".to_string(),
+            format!("{SRC}/root/a.jpg"),
         );
 
         let outcome = h.run(&[h.job(TPL)]);
         assert_eq!(outcome.counts.imported, 1, "续跑要把它补登记上");
         assert!(h.fs.copied().is_empty(), "不该重拷一份");
         assert_eq!(h.sink.item("a.jpg").status, "imported");
+        assert_eq!(
+            h.fs.paths(),
+            vec!["photos/2026-08-15/MYa.jpg".to_string()],
+            "要落回上次那个名字；编个新号就会在磁盘上多出一份没人认识的副本"
+        );
     }
 
     #[test]
@@ -1303,7 +1322,7 @@ mod tests {
         h.fs.add_existing("photos/2026-08-15/MYa.jpg", &[0u8; 3]);
         h.sink.stale.insert(
             "photos/2026-08-15/MYa.jpg".to_string(),
-            "a.jpg".to_string(),
+            format!("{SRC}/root/a.jpg"),
         );
 
         let outcome = h.run(&[h.job(TPL)]);

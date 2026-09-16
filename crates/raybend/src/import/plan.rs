@@ -463,6 +463,16 @@ impl Skip {
     }
 }
 
+/// 续跑时要「落回上次那个名字」的目标：源文件（`rel_path`）→ 上次计划的目标。
+///
+/// 崩溃可能正好停在「复制完了、还没登记」之间：文件已经在 `photos/` 里，
+/// 而 `import_items` 那行还是 `pending`。这时若照常编号，同一张照片就会在磁盘上
+/// 出现**两份**（一份没人认识）——`plans/M1-7.md` 步骤 2 的崩溃演练抓到的就是这个。
+///
+/// runner 见到「目标在且大小相符」会直接登记、不重拷（`runner.rs` ④），
+/// 所以这里只要把名字复用上，重复副本就不会产生。
+pub type Adopt = HashMap<String, String>;
+
 /// 同一张照片的一组文件（位图 + RAW）。分组键是「源目录 + 折叠主体」。
 #[derive(Debug, Default)]
 struct Group {
@@ -485,6 +495,7 @@ pub fn plan(
     known: &KnownSources,
     seq: &mut Sequences,
     reserved: &Reserved,
+    adopt: &Adopt,
 ) -> PlanResult {
     let mut outcomes: Vec<Option<ItemOutcome>> = vec![None; files.len()];
     let mut counts = PlanCounts::default();
@@ -552,7 +563,13 @@ pub fn plan(
             let missing = match &shared {
                 Some((_, _, missing)) => missing.clone(),
                 None => {
-                    match render_target(file, tpl, opts, seq) {
+                    // 续跑且上次已经把这个文件放过位置了：沿用那个名字（**不再编新号**），
+                    // 于是 runner 会直接登记它 —— 磁盘上不会多出第二份。
+                    let rendered = match adopt.get(&file.rel_path) {
+                        Some(target) => Ok(adopted_target(target)),
+                        None => render_target(file, tpl, opts, seq),
+                    };
+                    match rendered {
                         Ok(rendered) => {
                             shared = Some((rendered.dir.clone(), rendered.stem.clone(), rendered.missing.clone()));
                             rendered.missing
@@ -640,6 +657,18 @@ struct RenderedTarget {
     stem: String,
     /// 缺值的模版变量。
     missing: Vec<Var>,
+}
+
+/// 从「上次留下的目标路径」反推目录与主干名（扩展名一律取自源文件，
+/// 与 `render_target` 的口径一致：名字主体不含扩展名）。
+fn adopted_target(target: &str) -> RenderedTarget {
+    let (dir, name) = target.rsplit_once('/').unwrap_or(("", target));
+    let stem = name.rsplit_once('.').map_or(name, |(stem, _)| stem);
+    RenderedTarget {
+        dir: dir.to_string(),
+        stem: stem.to_string(),
+        missing: Vec::new(),
+    }
 }
 
 /// 把一张源文件渲染成目标目录 + 文件名主体（**只给组长用**）。
@@ -858,7 +887,7 @@ mod tests {
     ) -> PlanResult {
         let tpl = parse_template(template).expect("模版应当能解析");
         let mut seq = Sequences::new();
-        plan(files, &tpl, opts, fs, known, &mut seq, &Reserved::new())
+        plan(files, &tpl, opts, fs, known, &mut seq, &Reserved::new(), &Adopt::new())
     }
 
     fn plan_reserved(
@@ -881,6 +910,7 @@ mod tests {
             &KnownSources::new(),
             &mut seq,
             &set,
+            &Adopt::new(),
         )
     }
 

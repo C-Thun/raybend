@@ -10,6 +10,11 @@
 
 import type { MessageKey } from "./index";
 
+/*
+ * 键必须与 `zh-CN.ts` 一一对应（`MessageKey = keyof typeof zhCN`）：
+ * 这里多一个键会类型报错，少一个键会让英文界面显示成 key。
+ * `locale-parity.test.ts` 双向断言，`pnpm test` 时就会炸。
+ */
 export const enUS: Record<MessageKey, string> = {
  "import.title": "Importing",
  "import.done_title": "Import finished",
