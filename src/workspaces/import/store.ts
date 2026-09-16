@@ -59,6 +59,8 @@ export interface ImportApi extends RepositoryStateApi {
   setSetting: (key: string, value: string) => Promise<void>;
   listDirs: (path: string) => Promise<DirEntry[]>;
   listVolumes: () => Promise<Volume[]>;
+  /** 一批路径现在还是不是目录（「最近」标灰用） */
+  pathsStatus: (paths: string[]) => Promise<boolean[]>;
 }
 
 export interface ImportStore {
@@ -71,6 +73,8 @@ export interface ImportStore {
   /* ── 勾选（多选）──────────────────────────── */
   checkedDirs: () => readonly CheckedDir[];
   isChecked: (path: string) => boolean;
+  /** 这个目录**现在**找不到（盘没插 / 目录被改名）—— 「最近」据此标灰 */
+  isUnavailable: (path: string) => boolean;
   /**
    * 勾选 / 取消勾选一条目录。
    *
@@ -190,7 +194,9 @@ export function createImportStore(deps: ImportStoreDeps): ImportStore {
 
   const selectDir = (path: string | null): void => {
     setSelectedDir(path);
-  };
+    // **每次重新选中都重查一次**（人类 2026-09-16）：盘可能刚插上/刚拔掉
+    if (path !== null) void recheckAvailability(path);
+  }
 
   /* ══════════════════════════════════════════════════════════
    * 勾选
@@ -326,6 +332,8 @@ export function createImportStore(deps: ImportStoreDeps): ImportStore {
   };
 
   async function hydratePreferences(): Promise<void> {
+    // 启动就把「最近」的挂载情况认一遍（不等用户点）
+    void refreshRecentAvailability();
     try {
       const raw = await deps.api.getSetting(IMPORT_AVOID_DUPLICATES_KEY);
       if (raw === null) return;
@@ -349,6 +357,63 @@ export function createImportStore(deps: ImportStoreDeps): ImportStore {
     } catch (error) {
       setVolumesError(errorText(error));
       setVolumesStatus("error");
+    }
+  }
+
+  /* ══════════════════════════════════════════════════════════
+   * 「最近目录」还在不在（盘没插 → 标灰）
+   *
+   * 人类 2026-09-16：*「recent 目录也有可能未挂载……除了启动时要识别出哪些未挂载把颜色标灰，
+   * 每次重新选中时也要检测一遍有没有挂载」*。
+   * 判据在后端很轻（`is_dir`，不读目录内容）；这里只存一份路径集合。
+   * ══════════════════════════════════════════════════════════ */
+
+  const [unavailable, setUnavailable] = createSignal<ReadonlySet<string>>(
+    new Set(),
+  );
+
+  /** 比路径用的键：与 `samePath` 同口径（大小写折叠），但集合键要的是稳定字符串 */
+  const availabilityKey = (path: string): string => path.toLowerCase();
+
+  const isUnavailable = (path: string): boolean =>
+    unavailable().has(availabilityKey(path));
+
+  function setAvailability(paths: readonly string[], available: boolean[]): void {
+    setUnavailable((prev) => {
+      const next = new Set(prev);
+      let touched = false;
+      paths.forEach((path, index) => {
+        const key = availabilityKey(path);
+        const ok = available[index] ?? true;
+        if (ok && next.delete(key)) touched = true;
+        else if (!ok && !next.has(key)) {
+          next.add(key);
+          touched = true;
+        }
+      });
+      return touched ? next : prev;
+    });
+  }
+
+  /** 启动时（`hydrate`）把整份「最近」查一遍 */
+  async function refreshRecentAvailability(): Promise<void> {
+    const paths = recentDirs().map((row) => row.path);
+    if (paths.length === 0) return;
+    try {
+      const available = await deps.api.pathsStatus(paths);
+      setAvailability(paths, available);
+    } catch {
+      // 查不了不该打扰用户：保持上一次的判断（新装的盘顶多显示成旧的灰）
+    }
+  }
+
+  /** 选中某个目录时**重查这一条** —— 盘可能刚插上，也可能刚拔掉 */
+  async function recheckAvailability(path: string): Promise<void> {
+    try {
+      const [available] = await deps.api.pathsStatus([path]);
+      setAvailability([path], [available ?? true]);
+    } catch {
+      // 同上：查不动就不动
     }
   }
 
@@ -400,6 +465,7 @@ export function createImportStore(deps: ImportStoreDeps): ImportStore {
     isSelected,
     checkedDirs,
     isChecked,
+    isUnavailable,
     toggleChecked,
     setIncludeSubdirs,
     removeChecked,

@@ -51,6 +51,7 @@ pub fn run() {
             source::source_scan,
             source::source_count,
             source::source_times,
+            source::source_paths_status,
             source::file_exif,
             // ── 缩略图（未入库的源文件也要能出图）──
             thumbs::thumb_get,

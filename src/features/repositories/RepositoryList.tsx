@@ -115,7 +115,7 @@ export function RepositoryList(props: RepositoryListProps) {
             type="button"
             class={[
               "mt-1 flex w-full cursor-pointer items-center gap-2 rounded-ui",
-              "px-2 text-fs-2 text-fg-2 transition-colors",
+              "px-(--pad-x) text-fs-2 text-fg-2 transition-colors",
               "hover:bg-state-hover hover:text-fg-1",
             ].join(" ")}
             style={{ height: "var(--card-h)" }}
@@ -178,7 +178,7 @@ function RepositoryCard(props: {
       aria-selected={props.selected}
       tabindex={0}
       class={[
-        "flex cursor-pointer flex-col justify-center gap-0.5 rounded-ui px-2",
+        "flex cursor-pointer flex-col justify-center gap-(--gap) rounded-ui px-(--pad-x)",
         "transition-colors",
         props.selected
           ? "bg-state-selected"

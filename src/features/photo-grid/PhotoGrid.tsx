@@ -36,6 +36,8 @@ import { formatCount, type GroupingLocale } from "../../lib/format.ts";
 import { computeTileFlow, tileImageHeight, tileSizeAt } from "../../lib/tile-flow.ts";
 import type { SourceItem } from "../../api/types.ts";
 import { GridControlBar } from "./GridControlBar.tsx";
+import { createViewerStore, Viewer } from "./viewer/index.ts";
+import { getThumbBytes } from "../../api/db.ts";
 import {
   buildGridRows,
   DAY_HEADER,
@@ -93,6 +95,43 @@ export function PhotoGrid(props: PhotoGridProps) {
       grouping: store.grouping(),
     });
 
+  /*
+   * 看图（`features/viewer`）：**状态与视图都在那个模块**，这里只负责
+   * 「谁触发打开」与「打开时把网格区域换成它」。
+   *
+   * 大图（屏幕档，长边 1920）**按需**取；网格小图作为秒显的底（渐进显示）。
+   * 浏览器里两者都取不到 → 查看器自己落到错误态，不会白屏。
+   */
+  const viewer = createViewerStore({
+    loadScreen: (path) => getThumbBytes(path, "screen"),
+    loadThumb: (path) => getThumbBytes(path, "grid"),
+  });
+
+  /** 网格里的照片（顺序即视图顺序）→ 查看器要的形态 */
+  const viewerPhotos = () =>
+    store.displayItems().map((item) => ({
+      id: itemId(item),
+      path: item.path,
+      fileName: item.fileName,
+    }));
+
+  /** 选中后按回车 → 进看图（设计稿 §3.2） */
+  function onGridKeyDown(event: KeyboardEvent): void {
+    if (event.key !== "Enter") return;
+    const selected = [...store.selectedIds()];
+    const only = selected[0];
+    if (selected.length === 1 && only !== undefined) {
+      event.preventDefault();
+      openViewer(only);
+    }
+  }
+
+  function openViewer(byId: string): void {
+    const list = viewerPhotos();
+    const at = list.findIndex((photo) => photo.id === byId);
+    if (at >= 0) viewer.show(list, at);
+  }
+
   const groupingLocale = (): GroupingLocale =>
     locale() === "en-US" ? "en-US" : "zh-CN";
 
@@ -101,6 +140,7 @@ export function PhotoGrid(props: PhotoGridProps) {
       {/* 画面区：全部状态都在这里切换 */}
       <div
         ref={container}
+        onKeyDown={onGridKeyDown}
         class="flex min-h-0 flex-1 flex-col px-3 pt-2"
         style={{
           // Tile 组件读这两个变量画画面区 —— 档位切换就是改它们
@@ -108,6 +148,10 @@ export function PhotoGrid(props: PhotoGridProps) {
           "--tile-cell-h": `${tileImageHeight(cellWidth())}px`,
         }}
       >
+        <Show when={viewer.state().active}>
+          <Viewer store={viewer} />
+        </Show>
+        <Show when={!viewer.state().active}>
         <Show when={store.dir()} fallback={<Hint text={t("grid.pick_dir")} />}>
           <Show when={store.status() !== "error"} fallback={
             <Hint
@@ -124,7 +168,12 @@ export function PhotoGrid(props: PhotoGridProps) {
                   resetKey={store.dir() ?? ""}
                   renderRow={(row) =>
                     row.kind === "tiles" ? (
-                      <TileRow store={store} row={row} gap={gap()} />
+                      <TileRow
+                        store={store}
+                        row={row}
+                        gap={gap()}
+                        onOpen={openViewer}
+                      />
                     ) : (
                       <GroupHeader
                         store={store}
@@ -137,6 +186,7 @@ export function PhotoGrid(props: PhotoGridProps) {
               </Show>
             </Show>
           </Show>
+        </Show>
         </Show>
       </div>
 
@@ -187,6 +237,8 @@ function TileRow(props: {
   store: PhotoGridStore;
   row: TileRowModel;
   gap: number;
+  /** 双击一张 → 打开看图 */
+  onOpen: (id: string) => void;
 }) {
   return (
     <div
@@ -194,14 +246,18 @@ function TileRow(props: {
       style={{ gap: `${props.gap}px`, height: `${props.row.height}px` }}
     >
       {props.row.items.map((item) => (
-        <TileCell store={props.store} item={item} />
+        <TileCell store={props.store} item={item} onOpen={props.onOpen} />
       ))}
     </div>
   );
 }
 
 /** 一张照片（负责请求自己的缩略图） */
-function TileCell(props: { store: PhotoGridStore; item: SourceItem }) {
+function TileCell(props: {
+  store: PhotoGridStore;
+  item: SourceItem;
+  onOpen: (id: string) => void;
+}) {
   const id = () => itemId(props.item);
   const thumb = () => props.store.thumb(id());
   const selected = () => props.store.selectedIds().has(id());
@@ -211,7 +267,12 @@ function TileCell(props: { store: PhotoGridStore; item: SourceItem }) {
   createEffect(() => props.store.requestThumb(id()));
 
   return (
-    <div class="relative" style={{ width: "var(--tile-cell-w)" }}>
+    <div
+      class="relative"
+      style={{ width: "var(--tile-cell-w)" }}
+      // 双击进看图（设计稿 §3.2 的第一条）；单击仍是选中
+      onDblClick={() => props.onOpen(id())}
+    >
       <Tile
         label={props.item.fileName}
         sublabel={props.item.ext?.toUpperCase() ?? undefined}

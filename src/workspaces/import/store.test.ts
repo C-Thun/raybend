@@ -39,6 +39,8 @@ interface FakeState {
   failRemount: boolean;
   /** 设置表 */
   settings: Map<string, string>;
+  /** 这些路径「找不到」（模拟盘没插） */
+  unavailable: string[];
 }
 
 function fakeApi(overrides: Partial<FakeState> = {}) {
@@ -56,6 +58,7 @@ function fakeApi(overrides: Partial<FakeState> = {}) {
     remountFinds: false,
     failRemount: false,
     settings: new Map(),
+    unavailable: [],
     ...overrides,
   };
   const pending: Array<() => void> = [];
@@ -84,6 +87,10 @@ function fakeApi(overrides: Partial<FakeState> = {}) {
           useCount: 1,
         });
       }
+    },
+    async pathsStatus(paths) {
+      state.calls.push(`pathsStatus:${paths.length}`);
+      return paths.map((path) => !state.unavailable.includes(path));
     },
     async setRepositoryTemplate(repositoryId, templateSource) {
       state.calls.push(`setTemplate:${repositoryId}:${templateSource}`);

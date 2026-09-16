@@ -100,6 +100,7 @@ export const zhCN = {
  "source.recent": "最近",
  "source.tree": "来源",
  "source.selected": "已选目录",
+ "source.recent_unmounted": "这个目录现在找不到（盘没插，或被改名）",
  "source.include_subdirs": "包含子目录",
 
  // ── 左列：状态与提示（M1-5）──────────────────────
@@ -131,6 +132,10 @@ export const zhCN = {
  "grid.by_time": "按时间",
  "grid.select_all_day": "全选当天",
  "grid.select_all_range": "全选此段",
+  "viewer.back": "返回",
+ "viewer.zoom_in": "放大",
+ "viewer.zoom_out": "缩小",
+ "viewer.fit": "适配窗口 / 100%",
  "grid.unknown_time": "未知时间",
  "grid.excluded": "已排除",
  "grid.pick_dir": "从左侧选一个目录",

@@ -94,6 +94,7 @@ export const enUS: Record<MessageKey, string> = {
  "source.recent": "Recent",
  "source.tree": "Source",
  "source.selected": "Selected",
+ "source.recent_unmounted": "This folder cannot be found right now (drive unplugged or renamed)",
  "source.include_subdirs": "Include subdirectories",
 
  // ── Left column: states and hints (M1-5) ─────────
@@ -124,6 +125,10 @@ export const enUS: Record<MessageKey, string> = {
  "grid.by_time": "By time",
  "grid.select_all_day": "Select whole day",
  "grid.select_all_range": "Select this range",
+  "viewer.back": "Back",
+ "viewer.zoom_in": "Zoom in",
+ "viewer.zoom_out": "Zoom out",
+ "viewer.fit": "Fit / 100%",
  "grid.unknown_time": "Unknown time",
  "grid.excluded": "Excluded",
  "grid.pick_dir": "Pick a folder on the left",

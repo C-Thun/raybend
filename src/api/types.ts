@@ -29,7 +29,11 @@ export type MediaKind = "raw" | "image" | "other";
 export type TakenAtSource = "exif" | "filename" | "file_mtime";
 
 /** 缩略图尺度（`raybend::thumbnail::render::SizeClass`） */
-export type ThumbSize = "grid" | "strip";
+/**
+ * 缩略图尺度档（与 Rust 的 `thumbnail::SizeClass` 一一对应）。
+ * `screen` 是看图用的大图（长边 1920），比网格大一档、比原图便宜得多。
+ */
+export type ThumbSize = "grid" | "strip" | "screen";
 
 /** 最近导入过的一个目录（`store::recent::RecentDir`）。 */
 export interface RecentDir {

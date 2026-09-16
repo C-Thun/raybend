@@ -317,6 +317,12 @@ pub async fn source_count(path: String, recursive: bool) -> Result<PhotoCountVie
 }
 
 /// 并行读一批文件的**真实**拍摄时间（用户按下「按时间」时才调）。
+/// 一批路径现在还是不是目录（给「最近目录」标灰用；判据轻、可批量）。
+#[tauri::command]
+pub async fn source_paths_status(paths: Vec<String>) -> Result<Vec<bool>, String> {
+    blocking(move || Ok(raybend::media::source::paths_are_dirs(&paths))).await
+}
+
 #[tauri::command]
 pub async fn source_times(paths: Vec<String>) -> Result<Vec<TimeEntryView>, String> {
     blocking(move || {

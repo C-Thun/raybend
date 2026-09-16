@@ -15,7 +15,11 @@
  */
 
 import { For, Show } from "solid-js";
-import { IconAlertTriangle, IconFolder } from "@tabler/icons-solidjs";
+import {
+  IconAlertTriangle,
+  IconFolder,
+  IconFolderOff,
+} from "@tabler/icons-solidjs";
 import type { RecentDir } from "../../api/types.ts";
 import { EasyDestroyButton } from "../../components/ui/EasyDestroy.tsx";
 import { PathText } from "../../components/ui/PathText.tsx";
@@ -37,6 +41,13 @@ export interface RecentListProps {
   /** 点圆圈 → 勾选 / 取消勾选（不选中） */
   onToggleCheck: (path: string, checked: boolean) => void;
   onRemove: (path: string) => void;
+  /**
+   * 这个目录**现在**找不到（盘没插 / 被改名）。
+   *
+   * 判断来自 `workspaces/import/store.ts`：启动时查一遍、**每次重新选中再查一遍**
+   * （人类 2026-09-16 的要求）。这里只管把它画出来。
+   */
+  isUnavailable?: (path: string) => boolean;
   onRetry?: () => void;
   class?: string;
 }
@@ -78,16 +89,38 @@ function Rows(props: RecentListProps) {
       }
     >
       <For each={props.entries}>
-        {(entry) => (
+        {(entry) => {
+          const unavailable = (): boolean =>
+            props.isUnavailable?.(entry.path) ?? false;
+          return (
           <TreeNode
             label={entry.path}
             labelNode={
-              <PathText
-                path={entry.path}
-                maxLength={36}
-                icon={<IconFolder size={14} />}
-                selected={props.isSelected(entry.path)}
-              />
+              /*
+               * 「找不到」是**常显**的（灰化 + 图标）：它得在用户点之前就看见 ——
+               * 放进下面那个悬停才出现的区域就等于没有（人类要的是「标灰」）。
+               */
+              <span
+                class={[
+                  "flex min-w-0 items-center gap-1",
+                  unavailable() ? "opacity-50" : "",
+                ].join(" ")}
+                title={unavailable() ? t("source.recent_unmounted") : undefined}
+              >
+                <PathText
+                  path={entry.path}
+                  maxLength={36}
+                  icon={<IconFolder size={14} />}
+                  selected={props.isSelected(entry.path)}
+                />
+                <Show when={unavailable()}>
+                  <IconFolderOff
+                    size={14}
+                    class="shrink-0 text-fg-3"
+                    aria-label={t("source.recent_unmounted")}
+                  />
+                </Show>
+              </span>
             }
             depth={0}
             checked={props.isChecked(entry.path)}
@@ -107,7 +140,8 @@ function Rows(props: RecentListProps) {
               </span>
             }
           />
-        )}
+          );
+        }}
       </For>
     </Show>
   );

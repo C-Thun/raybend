@@ -40,6 +40,7 @@ import { FlowBar } from "../shell/FlowBar.tsx";
 import { ToolsBar } from "../shell/ToolsBar.tsx";
 import type { ExifData } from "../features/exif-strip/index.ts";
 import { RepositoryList } from "../features/repositories/index.ts";
+import { ViewerDemo } from "./viewer-demo.tsx";
 import type { RepositoryView } from "../api/types.ts";
 import { Badge, CountBadge } from "../components/ui/Badge";
 import { Button, IconButton } from "../components/ui/Button";
@@ -381,6 +382,9 @@ export default function KitchenSink() {
                 label="开（禁用）"
                 disabled
               />
+            </Row>
+            <Row label="看图">
+              <ViewerDemo />
             </Row>
             <Row label="库卡片">
               <RepositoryCardsDemo />

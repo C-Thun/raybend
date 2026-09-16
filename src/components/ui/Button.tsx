@@ -57,8 +57,9 @@ function variantClasses(variant: ButtonVariant, selected: boolean): string {
  * 把行高钉成 `1` + 高度写死：居中的就是字形盒本身，位置可预期、不随字重漂移。
  */
 const SIZE_CLASSES: Record<ButtonSize, string> = {
-  sm: "h-6 gap-1 px-2 text-fs-1 leading-none",
-  md: "h-7 gap-1.5 px-3 text-fs-2 leading-none",
+  // 高度与横向内边距都走**密度令牌** —— 写死 `h-6/h-7` 时两档一模一样（2026-09-16 取证）
+  sm: "h-(--btn-h-sm) gap-1 px-(--btn-pad-x) text-fs-1 leading-none",
+  md: "h-(--btn-h-md) gap-1.5 px-(--btn-pad-x) text-fs-2 leading-none",
 };
 
 export function Button(props: ButtonProps) {

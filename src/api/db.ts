@@ -86,6 +86,17 @@ export async function forgetRecentDir(path: string): Promise<boolean> {
  * 来源（驱动器 / 目录 / 照片）
  * ══════════════════════════════════════════════════════════════ */
 
+/**
+ * 一批路径现在还是不是目录（给「最近目录」标灰用）。
+ *
+ * 浏览器里没有文件系统 → 一律当「可用」（标灰是给真机用的提示，
+ * 在浏览器里猜错反而会误导）。
+ */
+export async function pathsStatus(paths: string[]): Promise<boolean[]> {
+  if (!isTauriRuntime()) return paths.map(() => true);
+  return call<boolean[]>("source_paths_status", { paths });
+}
+
 export async function listVolumes(): Promise<Volume[]> {
   if (!isTauriRuntime()) return [];
   return call<Volume[]>("volumes_list");

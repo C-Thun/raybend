@@ -280,7 +280,18 @@ try {
       ? (themeButton.click(), await new Promise((r) => setTimeout(r, 250)), true)
       : false;
     const theme = root.dataset.theme;
+    /*
+     * 库卡片高度：紧接着切密度前后各量一次 —— 人类 2026-09-16 报的是
+     * 「库卡片没有实现紧凑和宽松的变化」。卡片的行高/内边距都走令牌，
+     * 两档不一样；这里只要求**量得出来差异**（具体数值由令牌决定）。
+     */
+    const cardHeight = () => {
+      const card = document.querySelector('[data-demo="repo-cards"] [role="option"]');
+      return card ? Math.round(card.getBoundingClientRect().height) : -1;
+    };
+    const cardBefore = cardHeight();
     const switchedDensity = await pick("宽松");
+    const cardAfter = cardHeight();
     const density = root.dataset.density;
     // 浏览器里没有窗口 API：三键必须整组不存在（否则点了就报错）
     const windowControlCount = [
@@ -298,6 +309,8 @@ try {
       switchedTheme,
       theme,
       switchedDensity,
+      cardBefore,
+      cardAfter,
       density,
       barTitleHeight: getComputedStyle(root).getPropertyValue("--bar-title-h").trim(),
       windowControlCount,
@@ -309,6 +322,11 @@ try {
   }
   if (interact.switchedDensity && interact.density !== "loose") {
     problems.push(`切密度没生效：data-density=${interact.density}`);
+  }
+  if (interact.cardBefore > 0 && interact.cardAfter > 0 && interact.cardBefore === interact.cardAfter) {
+    problems.push(
+      `切密度后库卡片高度没变（${interact.cardBefore}px）—— 卡片没跟着密度档走`,
+    );
   }
   if (interact.windowControlCount > 0) {
     problems.push(
@@ -836,6 +854,104 @@ try {
     } else if (!repoCards.hasTemplateInput || !repoCards.templateValue) {
       problems.push("库设置弹窗里没有导入模版输入框（或没读到当前模版）");
     }
+  }
+
+  /*
+   * 看图（M1-9 之后的基础版）：交互在浏览器里就能实测 ——
+   * 打开、滚轮以鼠标为锚缩放、双击在「适配 ↔ 100%」之间切换、Esc 返回。
+   * 图片是**尺寸真实**的 SVG（1600×1000），所以比例算得出来、量得到。
+   */
+  const viewerDemo = await evaluate(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const demo = document.querySelector('[data-demo="viewer"]');
+    if (!demo) return null;
+    const open = demo.querySelector('[data-demo-action="open-viewer"]');
+    if (!open) return null;
+    open.click();
+    await sleep(600);
+
+    const host = demo.querySelector('[data-viewer="open"]');
+    if (host === null) return { opened: false };
+    const img = host.querySelector("img");
+    const zoomLabel = () => {
+      const button = [...host.querySelectorAll("button")].find((el) =>
+        /%$/.test(el.textContent.trim()),
+      );
+      return button ? button.textContent.trim() : null;
+    };
+    const transformOf = () =>
+      img === null ? null : getComputedStyle(img).transform;
+
+    const out = {
+      opened: true,
+      naturalWidth: img === null ? 0 : img.naturalWidth,
+      zoomBefore: zoomLabel(),
+      transformBefore: transformOf(),
+    };
+
+    // 双击 = 适配 → 100%
+    host.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    await sleep(250);
+    out.zoomAfterDbl = zoomLabel();
+    out.dblReachedHundred = out.zoomAfterDbl === "100%";
+
+    // 再双击 = 100% → 适配（回到打开时那个比例）
+    host.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    await sleep(250);
+    out.zoomAfterDblBack = zoomLabel();
+    out.dblBackToFit = out.zoomAfterDblBack === out.zoomBefore;
+
+    // 滚轮：必须带坐标（锚点就是鼠标位置），并且会让缩放真的变
+    const rect = host.getBoundingClientRect();
+    host.dispatchEvent(
+      new WheelEvent("wheel", {
+        bubbles: true,
+        cancelable: true,
+        deltaY: -240,
+        clientX: Math.round(rect.left + rect.width * 0.7),
+        clientY: Math.round(rect.top + rect.height * 0.3),
+      }),
+    );
+    await sleep(300);
+    out.zoomAfterWheel = zoomLabel();
+    out.wheelChangedZoom = out.zoomAfterWheel !== out.zoomAfterDblBack;
+    out.transformAfterWheel = transformOf();
+
+    // Esc 返回
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+    );
+    await sleep(300);
+    out.closed = document.querySelector('[data-viewer="open"]') === null;
+    return out;
+  })()`);
+
+  if (viewerDemo === null) {
+    problems.push("画廊里没有看图演示（src/dev/viewer-demo.tsx 没挂上？）");
+  } else if (viewerDemo.opened) {
+    if (viewerDemo.naturalWidth !== 1600) {
+      problems.push(
+        `看图的图片没加载出来（naturalWidth=${viewerDemo.naturalWidth}，期望 1600）`,
+      );
+    }
+    if (!viewerDemo.wheelChangedZoom) {
+      problems.push(
+        `滚轮没有改变缩放（${viewerDemo.zoomBefore} → ${viewerDemo.zoomAfterWheel}）`,
+      );
+    }
+    if (!viewerDemo.dblReachedHundred) {
+      problems.push(`双击没有切到 100%（当前 ${viewerDemo.zoomAfterDbl}）`);
+    }
+    if (!viewerDemo.dblBackToFit) {
+      problems.push(
+        `再双击没有回到适配（${viewerDemo.zoomAfterDbl} → ${viewerDemo.zoomAfterDblBack}，期望 ${viewerDemo.zoomBefore}）`,
+      );
+    }
+    if (!viewerDemo.closed) {
+      problems.push("Esc 没能退出看图");
+    }
+  } else {
+    problems.push("点「打开看图」没打开看图视图");
   }
 
   const appUrl = new URL("/", url).href;
@@ -1380,6 +1496,7 @@ try {
         widthHandle,
         dialogFrame,
         repoCards,
+        viewerDemo,
         switchBar,
         layers,
         resizeProbe,

@@ -94,6 +94,7 @@ export function LeftColumn(props: LeftColumnProps) {
                     }
                   }}
                   onRemove={(path) => void store.forgetRecent(path)}
+                  isUnavailable={store.isUnavailable}
                   onRetry={() => void store.reloadRecent()}
                 />
               </Panel>

@@ -31,6 +31,11 @@ use crate::media::kind::MediaKind;
 pub const GRID_LONG_EDGE: u32 = 384;
 /// 胶片带缩略图长边。
 pub const STRIP_LONG_EDGE: u32 = 192;
+/// 屏幕（看图用；`AGENTS.md` §6.5 的 SCREEN 档 —— 视口级别，比网格大一档）。
+///
+/// 1920 是个折中：绝大多数显示器 1:1 看已经够清楚，解码与缓存代价又远小于原图。
+/// 真正的 1:1 原图（FULL 档）属于后续里程碑，这一版看图先用它。
+pub const SCREEN_LONG_EDGE: u32 = 1920;
 /// JPEG 质量（用户 2026-09-15 定：q82）。
 pub const JPEG_QUALITY: u8 = 82;
 /// 渲染管线版本：**算法一改就 +1**（缓存靠它自动失效）。
@@ -44,6 +49,8 @@ pub enum SizeClass {
     Grid,
     /// 胶片带（长边 [`STRIP_LONG_EDGE`]）。
     Strip,
+    /// 看图（长边 [`SCREEN_LONG_EDGE`]）。
+    Screen,
 }
 
 impl SizeClass {
@@ -53,6 +60,7 @@ impl SizeClass {
         match self {
             Self::Grid => "grid",
             Self::Strip => "strip",
+            Self::Screen => "screen",
         }
     }
 
@@ -61,13 +69,14 @@ impl SizeClass {
         match self {
             Self::Grid => GRID_LONG_EDGE,
             Self::Strip => STRIP_LONG_EDGE,
+            Self::Screen => SCREEN_LONG_EDGE,
         }
     }
 
     /// 所有尺度（GC、预热、统计遍历用）。
     #[must_use]
-    pub const fn all() -> [Self; 2] {
-        [Self::Grid, Self::Strip]
+    pub const fn all() -> [Self; 3] {
+        [Self::Grid, Self::Strip, Self::Screen]
     }
 
     #[must_use]
@@ -75,6 +84,7 @@ impl SizeClass {
         match s {
             "grid" => Some(Self::Grid),
             "strip" => Some(Self::Strip),
+            "screen" => Some(Self::Screen),
             _ => None,
         }
     }
@@ -86,6 +96,7 @@ pub const fn render_sig(size: SizeClass) -> &'static str {
     match size {
         SizeClass::Grid => "jpeg-q82-grid-v1",
         SizeClass::Strip => "jpeg-q82-strip-v1",
+        SizeClass::Screen => "jpeg-q86-screen-v1",
     }
 }
 
@@ -350,13 +361,15 @@ mod tests {
     fn size_class_contract() {
         assert_eq!(SizeClass::Grid.long_edge(), 384);
         assert_eq!(SizeClass::Strip.long_edge(), 192);
-        assert_eq!(SizeClass::all().len(), 2);
+        // 看图档（M1-9 之后加）：屏幕级别的大图
+        assert_eq!(SizeClass::Screen.long_edge(), 1920);
+        assert_eq!(SizeClass::all().len(), 3);
         for s in SizeClass::all() {
             assert_eq!(SizeClass::parse(s.as_str()), Some(s));
             assert!(render_sig(s).contains(s.as_str()), "签名里要能看出尺度");
         }
-        assert_eq!(SizeClass::parse("screen"), None);
         assert_eq!(SizeClass::parse(""), None);
+        assert_eq!(SizeClass::parse("不认识的档"), None);
     }
 
     #[test]

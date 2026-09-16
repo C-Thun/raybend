@@ -556,3 +556,54 @@ mod tests {
         );
     }
 }
+
+/// 一批路径**现在**还是不是目录 —— 用来把「盘没插」的最近目录标灰
+/// （人类 2026-09-16：启动时要认出来，每次重新选中时也要再查一遍）。
+///
+/// * **一次问一批**：启动时几十条最近目录，一条一个 IPC 纯属浪费；
+/// * **判据很轻**：`metadata` + `is_dir`，**不读目录内容** —— 网络盘掉线时
+///   `is_dir` 会立刻失败（或很快超时），不会像 `read_dir` 那样卡住；
+/// * 路径不存在、权限不足、盘没挂：一律算「不可用」（这正是界面要的语义，
+///   具体原因不重要 —— 用户能做的都是「把盘插上再试」）。
+pub fn paths_are_dirs(paths: &[String]) -> Vec<bool> {
+    paths.iter().map(|path| Path::new(path).is_dir()).collect()
+}
+
+#[cfg(test)]
+mod availability_tests {
+    use super::paths_are_dirs;
+
+    #[test]
+    fn 存在的目录为真_不存在或不是目录为假() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("testrepos");
+        std::fs::create_dir_all(&root).unwrap();
+        let file = dir.path().join("a.txt");
+        std::fs::write(&file, b"x").unwrap();
+
+        let paths = vec![
+            root.to_string_lossy().to_string(),
+            file.to_string_lossy().to_string(), // 是文件，不是目录
+            dir.path().join("没有这个").to_string_lossy().to_string(),
+            String::new(), // 空串也不能 panic
+        ];
+        assert_eq!(paths_are_dirs(&paths), vec![true, false, false, false]);
+    }
+
+    #[test]
+    fn 改名等于拔盘_改回去等于插回() {
+        // 人类给的测法：本地磁盘上直接改名，就等价于设备插拔
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("testrepos");
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.to_string_lossy().to_string();
+        assert_eq!(paths_are_dirs(&[path.clone()]), vec![true]);
+
+        let unplugged = dir.path().join("testrepos-unplugged");
+        std::fs::rename(&root, &unplugged).unwrap();
+        assert_eq!(paths_are_dirs(&[path.clone()]), vec![false], "改名 → 不可用");
+
+        std::fs::rename(&unplugged, &root).unwrap();
+        assert_eq!(paths_are_dirs(&[path]), vec![true], "改回来 → 又可用");
+    }
+}
