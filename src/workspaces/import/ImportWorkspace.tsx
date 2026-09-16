@@ -33,7 +33,7 @@ import {
   RepositoryList,
 } from "../../features/repositories/index.ts";
 import type { ImportStore } from "./store.ts";
-import { SplitStack } from "../../components/ui/SplitStack.tsx";
+import { SplitHandleDots } from "../../components/ui/SplitHandle.tsx";
 import { withTimeout } from "../../lib/timeout.ts";
 import { LeftColumn } from "./LeftColumn.tsx";
 
@@ -149,47 +149,115 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
   // 左列选中哪个目录，中列就跟着换（选中是**一个**状态，跨面板同步）
   createEffect(() => grid.setSourceDir(store.selectedDir()));
 
+  /*
+   * ── 左列宽度：**自己写的把手**，不用 Ark 的 Splitter ──────────────────────
+   *
+   * 为什么不用 Ark（2026-09-16 真机事故的结论）：外层横向 splitter 套内层竖向 splitter
+   * （左列内部那几段）时，拖外层会让内层不断收到 ResizeObserver 回调 ——
+   * 内层量到的是**过渡中的尺寸**（症状：「目录树很矮、下面还空着一块」），
+   * 极端情况下两边互相触发就是**卡死**（症状：「一拖就死」）。
+   *
+   * 这里的把手只做一件事：pointermove → 改一个百分比。没有 observer、没有嵌套，
+   * 行为完全可预期；可访问性靠 `role="separator"` + 左右方向键自己补。
+   */
+  const [leftRatio, setLeftRatio] = createSignal(props.leftRatio ?? 0.22);
+  const [dragging, setDragging] = createSignal(false);
+
+  /** 左列宽度的上下限（比例）：与 `lib/layout-prefs.ts` 的范围一致，再加一道像素下限 */
+  const clampLeftRatio = (ratio: number): number =>
+    Math.min(0.5, Math.max(0.12, ratio));
+
+  function beginResize(event: PointerEvent & { currentTarget: HTMLDivElement }): void {
+    const handle = event.currentTarget;
+    const container = handle.parentElement;
+    if (!container) return;
+    const width = container.getBoundingClientRect().width;
+    if (width <= 0) return;
+
+    const startX = event.clientX;
+    const startRatio = leftRatio();
+    setDragging(true);
+    try {
+      handle.setPointerCapture(event.pointerId);
+    } catch {
+      // 合成事件（冒烟脚本）或异常指针 id 时可能拿不到捕获：
+      // 拿不到也照样能用下面挂在元素上的监听拖 —— 不要因此把整个拖动搞崩
+    }
+
+    const onMove = (move: PointerEvent): void => {
+      setLeftRatio(clampLeftRatio(startRatio + (move.clientX - startX) / width));
+    };
+    const finish = (): void => {
+      handle.removeEventListener("pointermove", onMove);
+      handle.removeEventListener("pointerup", finish);
+      handle.removeEventListener("pointercancel", finish);
+      setDragging(false);
+      // **松手才落盘**（拖拽中间写存储既是浪费也会引起无谓的重渲染）
+      props.onLeftRatioChange?.(leftRatio());
+    };
+    handle.addEventListener("pointermove", onMove);
+    handle.addEventListener("pointerup", finish);
+    handle.addEventListener("pointercancel", finish);
+  }
+
+  /** 键盘调整：左右方向键各 2%，立刻落盘（一次按键就是一次「结束」） */
+  function nudgeLeftRatio(delta: number): void {
+    const next = clampLeftRatio(leftRatio() + delta);
+    setLeftRatio(next);
+    props.onLeftRatioChange?.(next);
+  }
+
   return (
     /*
-     * 工作区 = 横向 splitter：**左列可拖、右侧不给把手**（原则见 DESIGN.md §8.6）。
-     * 右侧（中列 + 右列）整块作为第二个 pane —— 右列自己的宽度由内容决定，不参与拖拽。
-     * 两个比例都在拖拽结束落盘到 `lib/layout-prefs.ts`（设备级偏好），下次启动还原。
+     * 工作区 = 普通 flex 行 + **自写的宽度把手**（原则见 DESIGN.md §8.6：只给左边）。
+     * 右列宽度固定（`--panel-w-right`），不参与拖拽。
      */
-    <SplitStack
-      orientation="horizontal"
-      class="min-h-0 flex-1"
-      keyboardResizeBy={16}
-      onResizeEnd={(sizes) => {
-        const first = sizes[0];
-        if (typeof first === "number") props.onLeftRatioChange?.(first / 100);
-      }}
-      segments={[
-        {
-          id: "left",
-          defaultSize: (props.leftRatio ?? 0.22) * 100,
-          // 比例之外再加一道**像素闸门**：窗口很小时，左列也不许被压到看不见
-          minSize: "220px",
-          content: (
-            <aside class="flex min-h-0 flex-col bg-surface-main p-panel-pad">
-              <LeftColumn
-                store={store}
-                {...(props.recentRatio === undefined
-                  ? {}
-                  : { recentRatio: props.recentRatio })}
-                {...(props.onRecentRatioChange === undefined
-                  ? {}
-                  : { onRecentRatioChange: props.onRecentRatioChange })}
-              />
-            </aside>
-          ),
-        },
-        {
-          id: "rest",
-          // 中列 + 右列 = 剩下的全部宽度（右列自己再按令牌固定宽度）
-          defaultSize: (1 - (props.leftRatio ?? 0.22)) * 100,
-          minSize: "480px",
-          content: (
-            <div class="flex min-h-0 min-w-0 flex-1">
+    <div class="flex min-h-0 flex-1">
+      <aside
+        class="flex min-h-0 shrink-0 flex-col bg-surface-main p-panel-pad"
+        // 用百分比而不是像素：窗口大小变了之后比例仍然对（与持久化的口径一致）
+        style={{ "flex-basis": `${leftRatio() * 100}%`, "min-width": "220px" }}
+      >
+        <LeftColumn
+          store={store}
+          {...(props.recentRatio === undefined
+            ? {}
+            : { recentRatio: props.recentRatio })}
+          {...(props.onRecentRatioChange === undefined
+            ? {}
+            : { onRecentRatioChange: props.onRecentRatioChange })}
+        />
+      </aside>
+
+      {/* 三点把手：拖它只改上面那个百分比 */}
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label={t("common.resize_left")}
+        aria-valuenow={Math.round(leftRatio() * 100)}
+        aria-valuemin={12}
+        aria-valuemax={50}
+        tabindex="0"
+        class={[
+          "group/split flex h-full w-2 shrink-0 cursor-col-resize items-center justify-center outline-none",
+          dragging() ? "bg-state-selected" : "hover:bg-state-hover",
+        ].join(" ")}
+        onPointerDown={beginResize}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowLeft") {
+            event.preventDefault();
+            nudgeLeftRatio(-0.02);
+          } else if (event.key === "ArrowRight") {
+            event.preventDefault();
+            nudgeLeftRatio(0.02);
+          }
+        }}
+      >
+        <SplitHandleDots orientation="vertical" active={dragging()} />
+      </div>
+
+      {/* 中列 + 右列：右列宽度固定，不参与拖拽 */}
+      <div class="flex min-h-0 min-w-0 flex-1">
               {/* ── 中列：照片网格 ─────────────────────────────── */}
               <main class="flex min-w-0 flex-1 flex-col bg-surface-bar">
                 <PhotoGrid store={grid} />
@@ -270,11 +338,8 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
             store.selectRepository(view.id);
           }}
                 />
-              </aside>
-            </div>
-          ),
-        },
-      ]}
-    />
+      </aside>
+      </div>
+    </div>
   );
 }

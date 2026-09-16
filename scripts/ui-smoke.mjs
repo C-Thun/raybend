@@ -865,6 +865,61 @@ try {
    * 在「菜单面板」与「工作流条」的重叠区中心调 `elementFromPoint`，命中的必须落在菜单内部。
    * 顺带把双方的 `z-index / position` 与各自的层叠上下文祖先报回来 —— 一旦红了，直接能看出是哪一层。
    */
+  /*
+   * 左列宽度把手（**自写，不用 Ark** —— 2026-09-16 真机事故后的替代方案）：
+   * 拖它能改宽度、松手写进 localStorage、**刷新之后还原**。
+   * 这条断言的另一半价值是「拖的时候不能卡」：页面真卡住的话下面的 evaluate 会超时报错。
+   */
+  const widthHandle = await evaluate(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const handle = document.querySelector('[role="separator"][aria-label="调整左列宽度"]');
+    if (!handle) return null;
+    const aside = handle.previousElementSibling;
+    if (!aside) return null;
+
+    const before = Math.round(aside.getBoundingClientRect().width);
+    const rect = handle.getBoundingClientRect();
+    const startX = Math.round(rect.left + rect.width / 2);
+    const y = Math.round(rect.top + 20);
+    const fire = (type, clientX) =>
+      handle.dispatchEvent(
+        new PointerEvent(type, {
+          bubbles: true,
+          clientX,
+          clientY: y,
+          pointerId: 1,
+          isPrimary: true,
+        }),
+      );
+
+    fire("pointerdown", startX);
+    for (let step = 1; step <= 5; step += 1) fire("pointermove", startX + step * 24);
+    fire("pointerup", startX + 120);
+    await sleep(200);
+
+    const after = Math.round(aside.getBoundingClientRect().width);
+    let stored = null;
+    try {
+      stored = JSON.parse(localStorage.getItem("raybend.layout.v1") ?? "null");
+    } catch {
+      stored = null;
+    }
+    return { before, after, storedLeftRatio: stored ? stored.leftRatio : null };
+  })()`);
+
+  if (widthHandle === null) {
+    problems.push("找不到左列宽度把手（role=separator + aria-label=调整左列宽度）");
+  } else {
+    if (!(widthHandle.after > widthHandle.before)) {
+      problems.push(
+        `拖左列把手没有改宽度：${widthHandle.before} → ${widthHandle.after}`,
+      );
+    }
+    if (!(typeof widthHandle.storedLeftRatio === "number")) {
+      problems.push("拖完没有把比例写进 localStorage（重启还原就无从谈起）");
+    }
+  }
+
   const layers = await evaluate(`(async () => {
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     const header = document.querySelector("header");
@@ -1070,6 +1125,44 @@ try {
   }
 
   // 外壳页自己加载出来的报错也要算上
+  /*
+   * 刷新之后宽度比例要还原：这是「重启还原」在浏览器里能做到的最接近的验证
+   * （真机上是关掉程序再开）。
+   */
+  if (widthHandle && typeof widthHandle.storedLeftRatio === "number") {
+    await send("Page.reload", { ignoreCache: false });
+    if ((await waitForContent(send))) {
+      const restored = await evaluate(`(() => {
+        const handle = document.querySelector('[role="separator"][aria-label="调整左列宽度"]');
+        if (!handle) return null;
+        const aside = handle.previousElementSibling;
+        const container = handle.parentElement;
+        if (!aside || !container) return null;
+        return {
+          ratio:
+            Math.round(
+              (aside.getBoundingClientRect().width /
+                container.getBoundingClientRect().width) *
+                1000,
+            ) / 1000,
+          expected: ${JSON.stringify(1)},
+        };
+      })()`);
+      if (restored === null) {
+        problems.push("刷新之后找不到左列把手");
+      } else {
+        const expected = widthHandle.storedLeftRatio;
+        if (Math.abs(restored.ratio - expected) > 0.03) {
+          problems.push(
+            `刷新之后左列宽度没有还原：实际 ${restored.ratio}，存的 ${expected}`,
+          );
+        }
+      }
+    } else {
+      problems.push("刷新之后页面没渲染出来（白屏）");
+    }
+  }
+
   collectConsoleProblems(events.slice(workspaceEventsFrom));
 
   console.log(
@@ -1084,6 +1177,7 @@ try {
         importDialog,
         deadBackend,
         leftColumn,
+        widthHandle,
         layers,
         resizeProbe,
         dirTree,

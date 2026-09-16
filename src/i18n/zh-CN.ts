@@ -92,6 +92,7 @@ export const zhCN = {
  "common.loading": "加载中",
  "common.empty": "暂无内容",
  "common.refresh": "刷新",
+ "common.resize_left": "调整左列宽度",
  "common.retry": "重试",
  "common.selected_summary": "已选择 {dirs} 个目录 · {photos} 张照片",
 
