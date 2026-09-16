@@ -8,6 +8,7 @@
 //! 主窗口保持不透明、不受影响。
 
 pub mod db;
+mod import;
 pub mod repo;
 pub mod source;
 pub mod thumbs;
@@ -55,6 +56,14 @@ pub fn run() {
             repo::repository_create,
             repo::repository_remount,
             repo::repository_counts,
+            import::import_precheck,
+            import::import_start,
+            import::import_pause,
+            import::import_resume,
+            import::import_cancel,
+            import::import_status,
+            import::import_errors_export,
+            import::import_interrupted,
         ])
         .setup(|app| {
             use tauri::Manager;
