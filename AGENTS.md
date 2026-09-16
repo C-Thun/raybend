@@ -202,6 +202,13 @@ cmd.exe /c 'pushd \\wsl.localhost\Ubuntu-24.04\home\andares\repos\c-thun\raybend
    另：Tauri 的平台配置合并是 **RFC 7396 merge patch** —— **数组会被整体替换**，
    所以那个文件必须重复整份窗口配置，改主配置的窗口尺寸时别忘了同步它。
 
+7. **先 `pnpm build` 再构建 Windows，构建完必须 `pnpm check:win`**（2026-09-16 血的教训）：
+   `dist/` 是**编译期嵌进 exe** 的，改了前端不重建 dist，产物里就是旧界面 ——
+   而当时「exe 里有资源名」的核对是**假绿**（dist 自己旧，旧名字当然对得上），
+   结果让人类拿着「没有修复的版本」白测一轮。
+   `pnpm check:win` 既比**时间**（exe 必须比 dist 新）也比**内容**（资源名逐个命中），
+   不合格会直接打印补救命令。
+
 ### 5.3.1 为什么必须加 `--features custom-protocol`（重要，别拆掉）
 
 已定位到源码级。`tauri` 的 `build.rs`：
