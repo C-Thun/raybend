@@ -127,6 +127,8 @@ fn start_import(args: &[String]) {
                 .unwrap_or(0);
             if imported >= kill_after {
                 eprintln!("[杀手] 库里已经有 {imported} 张 → 立刻杀进程（模拟崩溃）");
+                // SAFETY: `_exit` 只接受一个状态码、没有前置条件；这里**就是要**它立刻
+                // 终止进程（跳过析构、缓冲与 SQLite 收尾），与 SIGKILL 等价。之后不会再有代码执行。
                 unsafe { libc::_exit(137) };
             }
         }

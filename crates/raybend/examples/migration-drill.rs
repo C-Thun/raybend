@@ -241,8 +241,8 @@ fn retention(args: &[String], check: &mut Checks) {
         names.push(name);
     }
     // 再塞一份**别的库**的，它不该被牵连
-    let other = format!("catalog_OTHERXX_v1_20260915-143000Z.db");
-    std::fs::write(backups.join(&other), b"other repo").expect("造别的库的快照");
+    let other = "catalog_OTHERXX_v1_20260915-143000Z.db";
+    std::fs::write(backups.join(other), b"other repo").expect("造别的库的快照");
 
     let before = std::fs::read_dir(&backups)
         .expect("读 backups")
@@ -263,7 +263,7 @@ fn retention(args: &[String], check: &mut Checks) {
     check.is("这组只留 7 份", left.len() == 7);
     check.is("最旧的三份被删掉", !left.contains(&names[0]) && !left.contains(&names[2]));
     check.is("最新的那份还在", left.contains(&names[9]));
-    check.is("别的库的快照没被牵连", backups.join(&other).exists());
+    check.is("别的库的快照没被牵连", backups.join(other).exists());
 }
 
 // ── snapshot / corrupt / future / restore ────────────────
