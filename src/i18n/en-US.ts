@@ -196,6 +196,8 @@ export const enUS: Record<MessageKey, string> = {
  "about.runtime_browser": "Browser (dev preview)",
 
  // ── 浏览 / Browse（M2-W1）─────────────────────
+ "browse.count": "{n} photos",
+ "browse.selected": "{n} selected",
  "browse.searchPlaceholder": "Search libraries or folders",
  "browse.noRepository": "No library yet. Create one in the Import workflow first.",
  "browse.allRepositories": "Show all libraries",
@@ -222,6 +224,4 @@ export const enUS: Record<MessageKey, string> = {
  "browse.fieldFileSize": "Size",
  "browse.raw": "RAW",
  "browse.missingFile": "This file is no longer on disk",
- "browse.count": "{n} photos",
- "browse.selected": "{n} selected",
 };

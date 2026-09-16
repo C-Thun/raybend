@@ -203,6 +203,8 @@ export const zhCN = {
  "about.runtime_browser": "浏览器（开发预览）",
 
  // ── 浏览 / Browse（M2-W1）─────────────────────
+ "browse.count": "共 {n} 张",
+ "browse.selected": "已选 {n} 张",
  "browse.searchPlaceholder": "搜索库或目录",
  "browse.noRepository": "还没有库。先在导入工作流里建一个库。",
  "browse.allRepositories": "查看所有库",
@@ -229,6 +231,4 @@ export const zhCN = {
  "browse.fieldFileSize": "大小",
  "browse.raw": "RAW",
  "browse.missingFile": "这个文件已经不在磁盘上了",
- "browse.count": "共 {n} 张",
- "browse.selected": "已选 {n} 张",
 } as const;

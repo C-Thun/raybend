@@ -202,7 +202,10 @@ pub struct BrowseQueryDto {
 }
 
 impl BrowseQueryDto {
-    fn into_query(&self) -> Query {
+    /// 按当前的 DTO 造一个 store 层的查询。
+    ///
+    /// 名字不用 `into_*`：那个约定是「消耗 self 的转换」，这里是**借用着造一份新的**。
+    fn to_query(&self) -> Query {
         let scope = match self.scope_path.as_deref().map(str::trim) {
             Some(path) if !path.is_empty() => Scope::subtree(path),
             _ => Scope::Repository,
@@ -425,7 +428,7 @@ pub async fn browse_page<R: Runtime>(
     let handle = app.clone();
     blocking(move || {
         let state = handle.state::<BrowseState>();
-        let q = query.into_query();
+        let q = query.to_query();
         state.with_catalog(&handle, &query.repository_id, move |db| {
             let total = db
                 .read(|conn| query::count(conn, &q))
@@ -455,7 +458,7 @@ pub async fn browse_timeline<R: Runtime>(
     let handle = app.clone();
     blocking(move || {
         let state = handle.state::<BrowseState>();
-        let q = query.into_query();
+        let q = query.to_query();
         state.with_catalog(&handle, &query.repository_id, move |db| {
             let total = db
                 .read(|conn| query::count(conn, &q))
@@ -485,7 +488,7 @@ pub async fn browse_facets<R: Runtime>(
     let handle = app.clone();
     blocking(move || {
         let state = handle.state::<BrowseState>();
-        let q = query.into_query();
+        let q = query.to_query();
         state.with_catalog(&handle, &query.repository_id, move |db| {
             let facets = db
                 .read(|conn| query::facets(conn, &q))
