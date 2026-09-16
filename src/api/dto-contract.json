@@ -163,5 +163,15 @@
     "sourceRoot",
     "startedAt",
     "template"
+  ],
+  "RepositorySettings": [
+    "importTemplate",
+    "repositoryId"
+  ],
+  "TemplatePreview": [
+    "error",
+    "ok",
+    "paths",
+    "warnings"
   ]
 }

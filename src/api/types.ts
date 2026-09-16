@@ -277,6 +277,25 @@ export interface ImportStart {
   runs: ImportPlannedRun[];
 }
 
+/* ══════════════════════════════════════════════════════════════
+ * 库设置（导入模版）
+ * ══════════════════════════════════════════════════════════════ */
+
+/** 一个库当前设置（M1 里只有导入模版）。 */
+export interface RepositorySettings {
+  repositoryId: string;
+  importTemplate: string;
+}
+
+/** 模版预览：几张示例照片按这个模版会落到哪。 */
+export interface TemplatePreview {
+  ok: boolean;
+  error: string | null;
+  /** 能用但值得提醒（例如不认识的变量）。 */
+  warnings: string[];
+  paths: string[];
+}
+
 /** 上次被中断的导入（应用重启后提示「可继续」）。 */
 export interface InterruptedRun {
   runId: number;

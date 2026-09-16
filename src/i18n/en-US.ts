@@ -36,6 +36,11 @@ export const enUS: Record<MessageKey, string> = {
  "import.reveal": "Show these photos in the library",
  "import.space_warning": "Target volume may be too small: need about {needed}, {free} free",
  "import.space_continue": "Continue anyway",
+ "common.save": "Save",
+ "repo.settings_title": "Library settings",
+ "repo.settings_hint": "Only one setting in M1: the import template (where photos land in the library)",
+ "repo.settings_hint_named": "Import template for \"{name}\" — decides where future imports land",
+ "repo.template_label": "Import template",
  "app.name": "RayBend",
 
  "titlebar.menu.help": "Help",

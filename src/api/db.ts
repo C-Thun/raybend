@@ -16,6 +16,8 @@
 import { isTauriRuntime } from "./tauri-env.ts";
 import type {
   DirEntry,
+  RepositorySettings,
+  TemplatePreview,
   FileExif,
   PhotoCount,
   RecentDir,
@@ -209,6 +211,40 @@ export async function probeRepository(path: string): Promise<RepositoryProbe> {
     };
   }
   return call<RepositoryProbe>("repository_probe", { path });
+}
+
+/** 一个库的设置（离线/打不开会抛错 —— 设置必须在线改）。 */
+export async function repositorySettings(
+  repositoryId: string,
+): Promise<RepositorySettings> {
+  if (!isTauriRuntime()) {
+    return { repositoryId, importTemplate: ":CYEAR-:CMONTH-:CDAY/MY:FILENAME" };
+  }
+  return call<RepositorySettings>("repository_settings", { repositoryId });
+}
+
+/** 改一个库的导入模版（写库内真相源 + app.db 缓存）。 */
+export async function setRepositoryTemplate(
+  repositoryId: string,
+  templateSource: string,
+): Promise<RepositorySettings> {
+  if (!isTauriRuntime()) {
+    return { repositoryId, importTemplate: templateSource };
+  }
+  return call<RepositorySettings>("repository_set_template", {
+    repositoryId,
+    templateSource,
+  });
+}
+
+/** 模版预览（纯函数命令：用户打字时随手调，不碰库）。 */
+export async function previewTemplate(
+  templateSource: string,
+): Promise<TemplatePreview> {
+  if (!isTauriRuntime()) {
+    return { ok: true, error: null, warnings: [], paths: [] };
+  }
+  return call<TemplatePreview>("repository_template_preview", { templateSource });
 }
 
 /** 建库，或把一个已有库登记进来（分支判定在 Rust 侧，见 `repo.rs`）。 */

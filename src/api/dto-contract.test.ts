@@ -35,7 +35,9 @@ import type {
   RecentDir,
   RepositoryPath,
   RepositoryProbe,
+  RepositorySettings,
   RepositoryView,
+  TemplatePreview,
   SourceItem,
   SourceScan,
   ThumbCacheStats,
@@ -219,6 +221,17 @@ const INTERRUPTED_RUN_KEYS = [
   "template",
 ] as const satisfies readonly (keyof InterruptedRun)[];
 
+const REPOSITORY_SETTINGS_KEYS = [
+  "importTemplate",
+  "repositoryId",
+] as const satisfies readonly (keyof RepositorySettings)[];
+const TEMPLATE_PREVIEW_KEYS = [
+  "error",
+  "ok",
+  "paths",
+  "warnings",
+] as const satisfies readonly (keyof TemplatePreview)[];
+
 /** 手写的键表 → 覆盖检查（跑一遍，顺便让 `noUnusedLocals` 满意） */
 const KEY_TABLES = {
   RecentDir: checkKeys<RecentDir, typeof RECENT_DIR_KEYS>(RECENT_DIR_KEYS),
@@ -260,6 +273,12 @@ const KEY_TABLES = {
   ),
   InterruptedRun: checkKeys<InterruptedRun, typeof INTERRUPTED_RUN_KEYS>(
     INTERRUPTED_RUN_KEYS,
+  ),
+  RepositorySettings: checkKeys<RepositorySettings, typeof REPOSITORY_SETTINGS_KEYS>(
+    REPOSITORY_SETTINGS_KEYS,
+  ),
+  TemplatePreview: checkKeys<TemplatePreview, typeof TEMPLATE_PREVIEW_KEYS>(
+    TEMPLATE_PREVIEW_KEYS,
   ),
 } as const;
 

@@ -38,6 +38,11 @@ export const zhCN = {
  "import.reveal": "在库中查看这些照片",
  "import.space_warning": "目标卷空间可能不够：需要约 {needed}，可用 {free}",
  "import.space_continue": "仍然继续",
+ "common.save": "保存",
+ "repo.settings_title": "库设置",
+ "repo.settings_hint": "M1 里只有一项：导入模版（决定照片在库里的落法）",
+ "repo.settings_hint_named": "「{name}」的导入模版 —— 决定以后导入的照片落在库里的哪条路径",
+ "repo.template_label": "导入模版",
  "app.name": "光伴",
 
  // ── titlebar（应用标题行，design/main.md §2.1）──────────

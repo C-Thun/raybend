@@ -15,6 +15,7 @@
 use serde::Serialize;
 
 use crate::import::{ImportPrecheckDto, ImportStartDto, InterruptedRunDto, PlannedRunDto};
+use crate::repo::{RepositorySettingsDto, TemplatePreviewDto};
 use crate::repo::{RepositoryPathDto, RepositoryProbeDto, RepositoryViewDto};
 use crate::source::{
     DirEntryView, FileExifView, PhotoCountView, RecentDirView, SourceItemView, SourceScanView,
@@ -148,6 +149,26 @@ fn interrupted_run_keys_match_contract() {
     assert_eq!(keys_of_value(&dto), contract_keys("InterruptedRun"));
 }
 
+#[test]
+fn repository_settings_keys_match_contract() {
+    let dto = RepositorySettingsDto {
+        repository_id: "r".to_string(),
+        import_template: ":FILENAME".to_string(),
+    };
+    assert_eq!(keys_of_value(&dto), contract_keys("RepositorySettings"));
+}
+
+#[test]
+fn template_preview_keys_match_contract() {
+    let dto = TemplatePreviewDto {
+        ok: true,
+        error: None,
+        warnings: vec![],
+        paths: vec![],
+    };
+    assert_eq!(keys_of_value(&dto), contract_keys("TemplatePreview"));
+}
+
 // 每条断言都是「Rust 真实序列化 vs 契约文件」，逐个列出（函数名即断言名）。
 #[test]
 fn recent_dir_keys_match_contract() {
@@ -238,6 +259,8 @@ fn every_contract_entry_has_a_test() {
         "ImportStart",
         "ImportPlannedRun",
         "InterruptedRun",
+        "RepositorySettings",
+        "TemplatePreview",
     ];
     for key in value.as_object().unwrap().keys() {
         if key.starts_with('_') {

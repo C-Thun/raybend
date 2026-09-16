@@ -13,6 +13,8 @@ use raybend::store::{assets, pool, repository, time};
 use serde::Serialize;
 use tauri::{AppHandle, Manager, Runtime};
 
+use raybend::import::template;
+
 use crate::db::DbState;
 use crate::source::blocking;
 
@@ -257,4 +259,163 @@ pub async fn repository_counts<R: Runtime>(
         Ok(root.and_then(|root| count_photos_in(&root)))
     })
     .await
+}
+
+
+/* ══════════════════════════════════════════════════════════════
+ * 库设置：导入模版（M1-6 的「齿轮」）
+ * ══════════════════════════════════════════════════════════════ */
+
+/// 库设置里可改的东西（M1 里只有导入模版）。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositorySettingsDto {
+    /// 库 id。
+    pub repository_id: String,
+    /// 当前导入模版。
+    pub import_template: String,
+}
+
+/// 模版预览（**纯函数命令**：不碰库、不碰盘，所以可以在用户打字时随手调）。
+///
+/// 预览的是「几张示例照片按这个模版会落到哪」—— 包括 `_RAW/` 那条分流规则
+/// （它不属于模版本身，但用户看预览时就是想看这个）。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TemplatePreviewDto {
+    /// 模版能不能用。
+    pub ok: bool,
+    /// 不能用时的原因（给用户看的一句话）。
+    pub error: Option<String>,
+    /// 能用但值得提醒（例如不认识的变量）。
+    pub warnings: Vec<String>,
+    /// 示例照片的落盘路径（用不了时是空的）。
+    pub paths: Vec<String>,
+}
+
+/// 一个库当前设置（打不开/离线就报错 —— 设置必须在线改）。
+#[tauri::command]
+pub async fn repository_settings<R: Runtime>(
+    app: AppHandle<R>,
+    repository_id: String,
+) -> Result<RepositorySettingsDto, String> {
+    let handle = app.clone();
+    blocking(move || {
+        let root = online_root(&handle, &repository_id)?;
+        let now = time::now_millis();
+        let catalog = CatalogDb::open(&root, OpenOpts::new(backups(&handle).as_deref(), now))
+            .map_err(|e| e.to_string())?;
+        Ok(RepositorySettingsDto {
+            repository_id: repository_id.clone(),
+            import_template: catalog.meta().import_template.clone(),
+        })
+    })
+    .await
+}
+
+/// 改一个库的导入模版。
+///
+/// 两处都要写：库自己的 `catalog.db`（真相源）与 `app.db` 的缓存
+/// （离线时界面也要能显示它是什么模版）。
+#[tauri::command]
+pub async fn repository_set_template<R: Runtime>(
+    app: AppHandle<R>,
+    repository_id: String,
+    template_source: String,
+) -> Result<RepositorySettingsDto, String> {
+    let handle = app.clone();
+    blocking(move || {
+        // 先校验：模版坏了就别写进库（否则下次导入才发现）
+        template::parse(&template_source).map_err(|e| e.to_string())?;
+        let root = online_root(&handle, &repository_id)?;
+        let now = time::now_millis();
+        let catalog = CatalogDb::open(&root, OpenOpts::new(backups(&handle).as_deref(), now))
+            .map_err(|e| e.to_string())?;
+        catalog
+            .set_import_template(&template_source)
+            .map_err(|e| e.to_string())?;
+        let mut meta = catalog.meta().clone();
+        meta.import_template = template_source.clone();
+        drop(catalog);
+
+        let state = handle.state::<DbState>();
+        state.with(&handle, |db| {
+            db.register_repository(&meta, &root, now)
+                .map_err(|e| e.to_string())
+        })?;
+        Ok(RepositorySettingsDto {
+            repository_id,
+            import_template: template_source,
+        })
+    })
+    .await
+}
+
+/// 模版预览（纯函数：拿几张示例照片渲染一遍）。
+#[tauri::command]
+#[must_use]
+pub fn repository_template_preview(template_source: String) -> TemplatePreviewDto {
+    let parsed = match template::parse(&template_source) {
+        Ok(parsed) => parsed,
+        Err(error) => {
+            return TemplatePreviewDto {
+                ok: false,
+                error: Some(error.to_string()),
+                warnings: Vec::new(),
+                paths: Vec::new(),
+            };
+        }
+    };
+    // 示例照片：同一天的 3 张位图 + 1 张 RAW（后者演示 `_RAW/` 分流）
+    let day = time::from_civil(2026, 8, 15, 12, 0, 0).unwrap_or(0);
+    let samples = [
+        ("P0001", "jpg", 1u64),
+        ("P0002", "jpg", 2),
+        ("P0003", "JPG", 3),
+        ("P0004", "ORF", 4),
+    ];
+    let mut paths: Vec<String> = Vec::new();
+    for (stem, ext, seq) in samples {
+        let values = [(3usize, seq)];
+        let ctx = raybend::import::template::RenderCtx {
+            taken_at: Some(day),
+            stem,
+            brand: Some("NIKON"),
+            model: Some("Z7II"),
+            seqs: raybend::import::template::SeqValues::new(&values),
+        };
+        let rendered = parsed.render(&ctx);
+        let (dir, name) = rendered.split_dir_name();
+        let dir = dir.map_or(String::from("photos"), |d| format!("photos/{d}"));
+        let path = match ext.eq_ignore_ascii_case("ORF") {
+            // RAW 有同名位图时进 `_RAW/`（`REPOSITORY.md` §4.1）
+            true => format!("{dir}/_RAW/{name}.{ext}"),
+            false => format!("{dir}/{name}.{ext}"),
+        };
+        paths.push(path);
+    }
+    TemplatePreviewDto {
+        ok: true,
+        error: None,
+        warnings: parsed.warnings().iter().map(ToString::to_string).collect(),
+        paths,
+    }
+}
+
+/// 在线库的根目录（离线给一句人话）。
+fn online_root<R: Runtime>(app: &AppHandle<R>, repository_id: &str) -> Result<std::path::PathBuf, String> {
+    let state = app.state::<DbState>();
+    state.with(app, |db| {
+        match db.resolve_repository(repository_id).map_err(|e| e.to_string())? {
+            repository::RepositoryState::Online { root } => Ok(root),
+            repository::RepositoryState::Offline { tried } => Err(format!(
+                "库当前离线：登记过的 {tried} 个路径下都没有找到它"
+            )),
+        }
+    })
+}
+
+/// 迁移前快照目录。
+fn backups<R: Runtime>(app: &AppHandle<R>) -> Option<std::path::PathBuf> {
+    crate::db::data_dir(app).ok().map(|dir| dir.join(raybend::store::db::BACKUPS_DIR))
 }
