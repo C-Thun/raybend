@@ -45,6 +45,7 @@ fn main() {
     match mode {
         "seed" => seed(rest, &mut check),
         "import" => start_import(rest),
+        "import-once" => import_once(rest),
         "inspect" => inspect(rest, &mut check),
         "rerun" => rerun(rest, &mut check),
         _ => {
@@ -137,6 +138,29 @@ fn start_import(args: &[String]) {
     println!("⚠️  导入没被杀掉就跑完了：{counts:?}（缩略图入队 {thumbs}）");
     println!("    把「已入库到第几张时自杀」调小，或把张数调大");
     std::process::exit(3);
+}
+
+// ── import-once：一次跑到完，顺便量吞吐（性能基线的载荷）────
+
+fn import_once(args: &[String]) {
+    let repo = PathBuf::from(args.first().expect("库根"));
+    let src = PathBuf::from(args.get(1).expect("源目录"));
+    let now = time::now_millis();
+    let catalog = CatalogDb::open(&repo, OpenOpts::unbacked_up(now)).expect("打开库");
+
+    let started = std::time::Instant::now();
+    let (counts, thumbs) = run_once(&catalog, &src, true, now);
+    let elapsed = started.elapsed().as_secs_f64().max(0.001);
+
+    let processed = counts.imported + counts.skipped;
+    let megabytes = counts.bytes as f64 / 1_048_576.0;
+    println!("跑完：{counts:?}（缩略图入队 {thumbs}）");
+    println!(
+        "耗时 {elapsed:.2} 秒 → 处理 {processed} 张（{:.1} 张/秒），导入 {:.1} MB（{:.1} MB/秒）",
+        processed as f64 / elapsed,
+        megabytes,
+        megabytes / elapsed
+    );
 }
 
 // ── inspect：崩溃之后，库与磁盘还自洽吗 ───────────────────
