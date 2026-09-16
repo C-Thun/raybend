@@ -349,12 +349,30 @@ export default function KitchenSink() {
                 disabled
               />
             </Row>
+            {/*
+              「已选目录」条的同构样例（卡片 = `surface-track`，与真身一致）。
+              放在**卡片上**而不是裸在宿主面上，是因为开关的关闭态轨道就是 `surface-main`：
+              它要贴在比 main 亮的面上（设计稿 `SelectedBar` 正是这样）。
+              冒烟会断言「轨道颜色 ≠ 卡片颜色」「标签文字的颜色 ≠ 卡片颜色」——
+              2026-09-16 报回来的原样是「整个开关只剩一个灰点、文字也看不见」。
+            */}
             <Row label="Switch">
-              <Switch
-                checked={switchOn()}
-                onCheckedChange={setSwitchOn}
-                label="包含子目录"
-              />
+              <div
+                data-demo="selected-bar"
+                class="flex w-80 min-w-0 flex-col gap-1 rounded-ui bg-surface-track px-2 py-1"
+              >
+                <span class="text-fs-2 text-fg-2">D:\P\2\V\J\Kyoto</span>
+                <div class="flex items-center justify-end gap-1.5">
+                  <span class="text-fs-1 text-fg-3" aria-hidden="true">
+                    包含子目录
+                  </span>
+                  <Switch
+                    checked={switchOn()}
+                    onCheckedChange={setSwitchOn}
+                    label="包含子目录"
+                  />
+                </div>
+              </div>
               <Switch
                 checked
                 onCheckedChange={() => {}}

@@ -66,8 +66,16 @@ export function SelectedDirs(props: SelectedDirsProps) {
                 />
               </div>
 
-              {/* 第二行：包含子目录（默认关） */}
-              <div class="flex items-center justify-end">
+              {/*
+                第二行：包含子目录（默认关）。
+                **文字必须真的渲染出来** —— 设计稿里它是 `SubdirLabel`（`$fg-3` / 13px），
+                只给 `aria-label` 的话屏幕上什么都没有（2026-09-16 人类报的「文字看不见」）。
+                `aria-hidden`：读屏交给 Switch 自己的无障碍名，避免念两遍。
+              */}
+              <div class="flex items-center justify-end gap-1.5">
+                <span class="text-fs-1 text-fg-3" aria-hidden="true">
+                  {t("source.include_subdirs")}
+                </span>
                 <Switch
                   checked={entry.includeSubdirs}
                   onCheckedChange={(value) =>

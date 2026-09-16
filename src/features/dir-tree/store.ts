@@ -26,14 +26,18 @@ export interface DirTreeStore {
   errorOf: (path: string) => string | undefined;
   /** 展开（没读过就加载；并发调用只会真的读一次） */
   expand: (path: string) => Promise<void>;
-  /** 折叠（**保留**已读到的子目录，下次展开是秒开） */
+  /** 折叠（保留已读到的子目录：下次展开先秒现旧内容，同时重读那一级） */
   collapse: (path: string) => void;
   /** 切换展开 / 折叠 */
   toggle: (path: string) => Promise<void>;
   /** 重新读一个目录（行内「重试」用） */
   refresh: (path: string) => Promise<void>;
   /**
-   * 重新读**当前所有展开着的目录**（含根部的卷）—— 「运行期刷新」的入口。
+   * 重读**当前所有展开着的目录**。
+   *
+   * 这不是「刷新按钮」的后台（展开本来就会重读）—— 它给「窗口重新获得焦点」用：
+   * 用户切走一会儿再切回来，磁盘/U 盘/网络盘上的东西可能已经变了，
+   * 展开着的分支应当跟着对上现实（文件管理器都是这个行为）。
    */
   refreshAll: () => Promise<void>;
 }
@@ -90,7 +94,17 @@ export function createDirTreeStore(deps: DirTreeDeps): DirTreeStore {
 
   async function expand(path: string): Promise<void> {
     setFlag(setExpanded, path, true);
-    if (childrenOf(path) !== undefined) return; // 读过就不再读（折叠是秒开的）
+    /*
+     * **展开就重读这一级**（只这一级的直接子目录，**不递归**）。
+     *
+     * 2026-09-16 人类定的原则：缓存是为了「展开时立刻有东西看、慢盘/网络盘也不卡手感」，
+     * **不是**为了少读磁盘 —— 没有哪个文件管理器要求用户按「刷新」才看得到真实内容，
+     * 那等于把正确性推给用户。一级 `readdir` 是整个设计里最便宜的一环
+     * （对比：导入前的整库扫描要读成千上万个目录）。
+     *
+     * 重读期间**旧内容留着不动**（`load` 只在成功时覆盖）：熟悉的内容秒现，
+     * 新数据到了悄悄替换；读失败也不会把已经看到的内容清空。
+     */
     const existing = inFlight.get(path);
     if (existing) return existing;
     const task = load(path).finally(() => inFlight.delete(path));

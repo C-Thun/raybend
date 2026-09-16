@@ -686,6 +686,63 @@ try {
     }
   }
 
+  /*
+   * 开关的**可见性**（2026-09-16 人类截图报回来的原样：关闭态的轨道与卡片同色，
+   * 整个开关只剩一个灰点；「包含子目录」那行文字也没渲染出来）。
+   *
+   * 这类「同色不可见」的 bug 单元测试抓不到 —— 颜色是令牌算出来的，只有真的渲染出来
+   * 再量计算样式才看得见。判据刻意很松（分得出来就算过），目标只是钉死「完全同色」。
+   */
+  const switchBar = await evaluate(`(() => {
+    const demo = document.querySelector('[data-demo="selected-bar"]');
+    if (!demo) return null;
+    const control = demo.querySelector('[data-part="control"]');
+    const label = demo.querySelector('span[aria-hidden="true"]');
+    const css = (el) => (el ? getComputedStyle(el) : null);
+    const parse = (value) => {
+      const m = /rgb\\((\\d+)[,\\s]+(\\d+)[,\\s]+(\\d+)/.exec(value ?? "");
+      return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+    };
+    const cardEl = css(demo);
+    const trackEl = css(control);
+    const labelEl = css(label);
+    const bg = parse(cardEl ? cardEl.backgroundColor : null);
+    const distance = (other) =>
+      bg && other
+        ? Math.abs(bg[0] - other[0]) + Math.abs(bg[1] - other[1]) + Math.abs(bg[2] - other[2])
+        : -1;
+
+    return {
+      cardBg: cardEl ? cardEl.backgroundColor : null,
+      trackBg: trackEl ? trackEl.backgroundColor : null,
+      trackDistance: distance(parse(trackEl ? trackEl.backgroundColor : null)),
+      labelText: label ? label.textContent.trim() : null,
+      labelDistance: distance(parse(labelEl ? labelEl.color : null)),
+    };
+  })()`);
+
+  if (switchBar === null) {
+    problems.push("画廊里没有「已选目录」条的样例（data-demo=selected-bar）");
+  } else {
+    if (!(switchBar.trackDistance > 18)) {
+      problems.push(
+        "开关关闭态的轨道与卡片几乎同色（" +
+          switchBar.trackBg +
+          " vs " +
+          switchBar.cardBg +
+          "）—— 开关会看不见",
+      );
+    }
+    if (switchBar.labelText !== "包含子目录") {
+      problems.push(
+        "开关的标签文字没渲染出来（读到 " + JSON.stringify(switchBar.labelText) + "）",
+      );
+    }
+    if (!(switchBar.labelDistance > 18)) {
+      problems.push("开关标签文字与卡片几乎同色 —— 文字会看不见");
+    }
+  }
+
   const appUrl = new URL("/", url).href;
   await send("Page.navigate", { url: appUrl });
   if (!(await waitForContent(send))) {
@@ -812,20 +869,60 @@ try {
     };
   })()`);
 
-  const refreshButton = await evaluate(`(() => {
-    const treePanel = [...document.querySelectorAll("section")].find((el) => {
-      const heading = el.querySelector("h2");
-      return heading && heading.textContent.trim() === "来源";
-    });
-    if (!treePanel) return null;
-    return {
-      hasRefresh: [...treePanel.querySelectorAll("button")].some(
-        (el) => (el.getAttribute("aria-label") ?? "") === "刷新",
-      ),
+  /*
+   * 弹窗骨架（2026-09-16 人类反馈：内边距太小、标题与右上角的叉没对齐）。
+   * 这里是**同一份** Dialog 组件，所以量一次就够；数值取自设计稿
+   * （padding 16 / 标题 17 / 底部按钮 32）。改成小数会立刻红。
+   */
+  const dialogFrame = await evaluate(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const trigger = [...document.querySelectorAll("button")].find((el) =>
+      el.textContent.includes("新建库"),
+    );
+    if (!trigger) return null;
+    trigger.click();
+    await sleep(400);
+    const content = document.querySelector('[data-scope="dialog"][data-part="content"]');
+    if (!content) return null;
+    const title = content.querySelector('[data-part="title"]');
+    const close = content.querySelector('button[aria-label="关闭"]');
+    const cs = getComputedStyle(content);
+    const center = (el) => {
+      const rect = el.getBoundingClientRect();
+      return Math.round(rect.top + rect.height / 2);
     };
+    const out = {
+      padTop: Math.round(Number.parseFloat(cs.paddingTop)),
+      padLeft: Math.round(Number.parseFloat(cs.paddingLeft)),
+      gap: Math.round(Number.parseFloat(cs.rowGap || cs.gap)),
+      titleSize: title ? Math.round(Number.parseFloat(getComputedStyle(title).fontSize)) : null,
+      titleCenter: title ? center(title) : null,
+      closeCenter: close ? center(close) : null,
+    };
+    document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    return out;
   })()`);
-  if (refreshButton !== null && !refreshButton.hasRefresh) {
-    problems.push("「来源」面板上没有刷新按钮 —— 目录在程序外面变了就没法刷新");
+
+  if (dialogFrame !== null) {
+    if (dialogFrame.padTop < 16 || dialogFrame.padLeft < 16) {
+      problems.push(
+        "弹窗内边距太小（top " + dialogFrame.padTop + " / left " + dialogFrame.padLeft + "，设计稿是 16）",
+      );
+    }
+    if (dialogFrame.titleSize !== null && dialogFrame.titleSize < 16) {
+      problems.push("弹窗标题字号太小（" + dialogFrame.titleSize + "，设计稿是 17）");
+    }
+    if (
+      dialogFrame.titleCenter !== null &&
+      dialogFrame.closeCenter !== null &&
+      Math.abs(dialogFrame.titleCenter - dialogFrame.closeCenter) > 2
+    ) {
+      problems.push(
+        "弹窗标题与右上角的叉没对齐（中心相差 " +
+          Math.abs(dialogFrame.titleCenter - dialogFrame.closeCenter) +
+          "px）",
+      );
+    }
   }
 
   if (leftColumn === null) {
@@ -1178,6 +1275,8 @@ try {
         deadBackend,
         leftColumn,
         widthHandle,
+        dialogFrame,
+        switchBar,
         layers,
         resizeProbe,
         dirTree,

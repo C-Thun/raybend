@@ -24,7 +24,7 @@
  * 3. **子目录懒加载**：展开才读（读过的会记住，折叠再展开是秒开）。
  */
 
-import { createEffect, createMemo, For, Show } from "solid-js";
+import { createMemo, For, onCleanup, onMount, Show } from "solid-js";
 import {
   IconAlertTriangle,
   IconCloud,
@@ -60,13 +60,6 @@ export interface DirTreeProps {
   /** 读子目录（默认走 `src/api/db.ts`；测试可注入） */
   loadDirs: (path: string) => Promise<DirEntry[]>;
   onRetry?: () => void;
-  /**
-   * 「运行期刷新」令牌：**值一变，就把当前展开着的目录全部重读一遍**（保留展开状态）。
-   *
-   * 用令牌而不是回调注册：刷新按钮在调用方（面板头部），缓存住在树内部 ——
-   * 令牌让两边都不用拿对方的引用。第一次渲染不触发。
-   */
-  refreshKey?: number;
   class?: string;
 }
 
@@ -74,13 +67,17 @@ export function DirTree(props: DirTreeProps) {
   // 树自己的状态（展开 / 已读子目录 / 加载与错误）—— 不进共享 store
   const tree = createDirTreeStore({ loadDirs: (path) => props.loadDirs(path) });
 
-  // 刷新令牌：变了才重读（首次渲染跳过）；展开状态由 store 保留
-  let lastRefreshKey = props.refreshKey;
-  createEffect(() => {
-    const key = props.refreshKey;
-    if (key === undefined || key === lastRefreshKey) return;
-    lastRefreshKey = key;
-    void tree.refreshAll();
+  /*
+   * 窗口重新获得焦点 → 把展开着的目录重读一遍。
+   *
+   * 这**不是**「刷新按钮」的替代品：展开本来就会重读那一级（见 store 的 `expand`）。
+   * 这里管的是另一种情形 —— 树开着不动，用户在程序外面改了东西又切回来，
+   * 文件管理器都会在重新激活时对一遍现实，我们也对一遍。成本 = 展开着的那几级。
+   */
+  onMount(() => {
+    const onFocus = (): void => void tree.refreshAll();
+    window.addEventListener("focus", onFocus);
+    onCleanup(() => window.removeEventListener("focus", onFocus));
   });
 
   /**

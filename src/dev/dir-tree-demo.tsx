@@ -42,13 +42,30 @@ export function DirTreeDemo() {
   const [selected, setSelected] = createSignal<string | null>("D:\\");
   const [checked, setChecked] = createSignal<Record<string, boolean>>({});
 
+  /**
+   * 程序**外面**新增的目录（模拟别的程序在磁盘上动文件）。
+   *
+   * 它存在的意义是给冒烟一个可断言的场景：点「外部新增」，然后**展开**那一级 ——
+   * 新目录必须自己出现，不需要谁去按「刷新」（人类 2026-09-16 定的原则）。
+   */
+  const [external, setExternal] = createSignal<Record<string, DirEntry[]>>({});
+
   // 假的后端：15ms 之后给出子目录（真实实现走 `dir_list` 命令）
   const loadDirs = (path: string): Promise<DirEntry[]> =>
     new Promise((resolve) => {
       setTimeout(() => {
-        resolve(demoChildren(path));
+        resolve([...demoChildren(path), ...(external()[path] ?? [])]);
       }, 15);
     });
+
+  const addExternal = (): void => {
+    const root = "D:\\";
+    setExternal((prev) => {
+      const at = prev[root] ?? [];
+      const name = `外部新增-${at.length + 1}`;
+      return { ...prev, [root]: [...at, { name, path: `${root}${name}` }] };
+    });
+  };
 
   const shared = () => ({
     volumes: DEMO_VOLUMES,
@@ -61,6 +78,14 @@ export function DirTreeDemo() {
 
   return (
     <div class="grid grid-cols-2 gap-gap" data-demo="dir-tree">
+      <button
+        type="button"
+        data-demo-action="external-add"
+        onClick={addExternal}
+        class="col-span-2 justify-self-start rounded-ui bg-surface-layer px-2 py-1 text-fs-0 text-fg-1"
+      >
+        模拟外部新增目录（展开那一级就能看到，不需要刷新）
+      </button>
       <div
         data-variant="checkable"
         class="flex h-72 min-h-0 flex-col rounded-ui bg-surface-main p-1"

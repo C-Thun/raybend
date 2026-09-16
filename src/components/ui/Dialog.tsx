@@ -68,19 +68,29 @@ export function Dialog(props: DialogProps) {
         <ArkDialog.Positioner class="fixed inset-0 flex items-center justify-center p-4">
           <ArkDialog.Content
             class={[
-              "flex w-full min-w-72 max-w-md flex-col gap-3 rounded-ui bg-surface-layer p-panel-pad outline-none",
+              /*
+               * 骨架照设计稿（main.pen `Dialog / 新建库`）：**padding 16 / gap 12**，
+               * 且内边距**不吃密度档**（`--dialog-pad`）—— 紧凑档缩到 6px 会「贴边」。
+               */
+              "flex w-full min-w-72 max-w-md flex-col gap-3 rounded-ui bg-surface-layer p-(--dialog-pad) outline-none",
               local.class ?? "",
             ].join(" ")}
           >
+            {/*
+              标题与右上角的叉**要对齐**：给标题一个 24px 的行盒（`leading-6`），
+              和叉的图标按钮同高，`items-start` 下两者的中心就重合了。
+              （2026-09-16 人类反馈：之前标题比叉低一截。标题字号也照设计稿
+              从 13px 提到 **17px semibold** —— 设计稿里的弹窗标题就是 17。）
+            */}
             <div class="flex items-start gap-2">
               <div class="min-w-0 flex-1">
                 <Show when={local.title}>
-                  <ArkDialog.Title class="text-[13px] font-semibold text-fg-1">
+                  <ArkDialog.Title class="text-[17px] leading-6 font-semibold text-fg-1">
                     {local.title}
                   </ArkDialog.Title>
                 </Show>
                 <Show when={local.description}>
-                  <ArkDialog.Description class="mt-0.5 text-[12px] text-fg-2">
+                  <ArkDialog.Description class="mt-1 text-[13px] leading-normal text-fg-2">
                     {local.description}
                   </ArkDialog.Description>
                 </Show>
@@ -96,11 +106,20 @@ export function Dialog(props: DialogProps) {
             </div>
 
             <Show when={local.children}>
-              <div class="min-w-0 text-[12px] text-fg-1">{local.children}</div>
+              <div class="min-w-0 text-[13px] leading-normal text-fg-1">
+                {local.children}
+              </div>
             </Show>
 
             <Show when={local.footer}>
-              <div class="flex items-center justify-end gap-2">{local.footer}</div>
+              {/*
+                底部按钮按设计稿高 **32px**（`Dialog Footer` 里的 `Button` 就是 32 高）。
+                用后代选择器统一抬高，而不是让每个调用点自己写 `size` ——
+                弹窗底部的按钮理应一律同高，散在各处迟早会不一致。
+              */}
+              <div class="flex items-center justify-end gap-2 [&>button]:h-8 [&>button]:px-4 [&>button]:leading-none">
+                {local.footer}
+              </div>
             </Show>
           </ArkDialog.Content>
         </ArkDialog.Positioner>

@@ -2,7 +2,8 @@
  * 目录树内部状态的测试。
  *
  * 两条最要紧的性质：
- *   1. **展开 = 加载一次**（并发的两次展开不会读两遍；折叠再展开是秒开）；
+ *   1. **展开总会重读那一级**（缓存只为秒开，不为省读磁盘 —— 没有哪个文件管理器
+ *      要用户按「刷新」才看得到真实内容）；并发的两次展开不会读两遍；
  *   2. **读失败要说清楚**，而且不能把「失败」表现成「这个目录是空的」。
  *
  * 另外这里**没有**「选中」这个输入 —— 「选中不触发展开」这条规则
@@ -60,7 +61,7 @@ test("展开会读一次子目录，并记在状态里", async () => {
   assert.equal(loader.calls.length, 1);
 });
 
-test("折叠再展开是秒开（不重复读）", async () => {
+test("折叠再展开：旧内容先秒现（不闪空），同时照常重读那一级", async () => {
   const loader = fakeLoader({ "/a": [dir("/a/b")] });
   const store = createDirTreeStore({ loadDirs: loader.loadDirs });
 
@@ -69,8 +70,11 @@ test("折叠再展开是秒开（不重复读）", async () => {
   assert.equal(store.isExpanded("/a"), false);
   assert.ok(store.childrenOf("/a"), "折叠不该把读到的东西丢掉");
 
-  await store.expand("/a");
-  assert.equal(loader.calls.length, 1, "第二次展开不该再读一遍");
+  const again = store.expand("/a");
+  // 重建读还没回来，缓存里的内容**已经在**了 —— 这就是「秒开」的机制
+  assert.ok(store.childrenOf("/a"), "重新读的过程中也要有内容可看");
+  await again;
+  assert.equal(loader.calls.length, 2, "重新展开要重读那一级（缓存不是用来省读磁盘的）");
 });
 
 test("并发的两次展开只读一次", async () => {
@@ -174,7 +178,47 @@ test("refreshAll：只重读展开着的目录，且保留展开状态", async (
   assert.equal(store.isExpanded("/b"), true);
 });
 
-test("refreshAll：外部新增的目录，刷新之后能看到（这就是「运行期刷新」的意义）", async () => {
+test("展开总是重读那一级：缓存是为秒开，不是为省读磁盘", async () => {
+  let calls = 0;
+  let listing: DirEntry[] = [{ name: "a", path: "/root/a" }];
+  const store = createDirTreeStore({
+    loadDirs: async () => {
+      calls += 1;
+      return [...listing];
+    },
+  });
+
+  await store.expand("/root");
+  assert.equal(calls, 1);
+
+  store.collapse("/root");
+  // 程序外面新建了一个目录：我们不监听，但**展开**必须自己重读，不该等谁按「刷新」
+  listing = [...listing, { name: "外部新建", path: "/root/外部新建" }];
+  await store.expand("/root");
+
+  assert.equal(calls, 2, "再次展开必须重新读，即使缓存里已经有内容");
+  assert.equal(store.childrenOf("/root")?.length, 2, "展开之后就看到外部新增的目录");
+});
+
+test("重读失败不清空已看到的内容（失败不能表现成「这个目录是空的」）", async () => {
+  let failing = false;
+  const store = createDirTreeStore({
+    loadDirs: async () => {
+      if (failing) throw new Error("盘掉了");
+      return [{ name: "a", path: "/root/a" }];
+    },
+  });
+
+  await store.expand("/root");
+  assert.equal(store.childrenOf("/root")?.length, 1);
+
+  failing = true;
+  await store.expand("/root");
+  assert.equal(store.childrenOf("/root")?.length, 1, "重读失败不该清空已经看到的内容");
+  assert.ok(store.errorOf("/root"), "失败要有说明");
+});
+
+test("refreshAll：重读展开着的目录，能拿到程序外面新增的内容", async () => {
   let extra: DirEntry | null = null;
   const store = createDirTreeStore({
     loadDirs: async () => [
@@ -186,10 +230,7 @@ test("refreshAll：外部新增的目录，刷新之后能看到（这就是「�
   await store.expand("/a");
   assert.equal(store.childrenOf("/a")?.length, 1);
 
-  // 程序外面新建了一个目录：我们不监听，所以**不刷新就看不到**（这是明说的取舍）
   extra = { name: "外部新建", path: "/a/外部新建" };
-  assert.equal(store.childrenOf("/a")?.length, 1, "没刷新时仍是缓存的旧结果");
-
   await store.refreshAll();
-  assert.equal(store.childrenOf("/a")?.length, 2, "刷新之后应当看到新目录");
+  assert.equal(store.childrenOf("/a")?.length, 2, "重读之后应当看到新目录");
 });

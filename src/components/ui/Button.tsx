@@ -48,9 +48,17 @@ function variantClasses(variant: ButtonVariant, selected: boolean): string {
   }
 }
 
+/*
+ * 尺寸：**高度显式写死**，并配 `leading-none`。
+ *
+ * 为什么不留 `py-*` 让内容撑高（2026-09-16 人类反馈「按钮里的文字明显往上偏」）：
+ * 行高是继承来的（1.5 那种），行盒比字形盒高，flex 居中的是**行盒** ——
+ * 拉丁字体的 ascent / descent 不对称，于是文字看上去就偏上。
+ * 把行高钉成 `1` + 高度写死：居中的就是字形盒本身，位置可预期、不随字重漂移。
+ */
 const SIZE_CLASSES: Record<ButtonSize, string> = {
-  sm: "h-6 gap-1 px-2 text-fs-1",
-  md: "gap-1.5 px-3 py-1 text-fs-2",
+  sm: "h-6 gap-1 px-2 text-fs-1 leading-none",
+  md: "h-7 gap-1.5 px-3 text-fs-2 leading-none",
 };
 
 export function Button(props: ButtonProps) {

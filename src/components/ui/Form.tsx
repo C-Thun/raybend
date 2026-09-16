@@ -147,7 +147,17 @@ export function Switch(props: SwitchProps) {
         class={[
           "flex shrink-0 cursor-pointer items-center rounded-full p-[2px] transition-colors",
           "h-switch-h w-switch-w",
-          "bg-surface-track data-[state=checked]:bg-brand",
+          /*
+           * 关闭态轨道 = **`surface-main`**（设计稿 main.pen 的 `Switch / 包含子目录 / off`
+           * 就是 `$surface-main`）。
+           *
+           * 曾经写的是 `surface-track` —— 而「已选目录」的卡片**本身就是** `surface-track`
+           * （设计稿 `SelectedBar` 同样如此），于是关闭态的轨道与卡片**完全同色、整个开关只剩
+           * 一个灰点**（2026-09-16 人类截图报回来的就是这个）。
+           * 用法约束：开关要放在比 `surface-main` 亮的面里（`surface-track` 卡片上），
+           * 这与设计稿一致。
+           */
+          "bg-surface-main data-[state=checked]:bg-brand",
           "data-[disabled]:cursor-default data-[disabled]:opacity-60",
         ].join(" ")}
       >

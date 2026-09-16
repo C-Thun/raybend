@@ -23,9 +23,7 @@
  * 自己不做数据加载、不做业务判断。
  */
 
-import { createSignal, Show } from "solid-js";
-import { IconRefresh } from "@tabler/icons-solidjs";
-import { IconButton } from "../../components/ui/Button.tsx";
+import { onCleanup, onMount, Show } from "solid-js";
 import { Panel } from "../../components/ui/Panel.tsx";
 import { SplitStack } from "../../components/ui/SplitStack.tsx";
 import { RecentList } from "../../features/recent/index.ts";
@@ -47,17 +45,18 @@ export function LeftColumn(props: LeftColumnProps) {
   const store = props.store;
   const recentRatio = (): number => props.recentRatio ?? 0.32;
 
-  /**
-   * 「运行期刷新」：目录会在程序外面被创建/改名/删除，而我们**不做文件系统监听**
-   * （明确取舍，见 `FUTURE.md` 的 `notify`）—— 所以要给一个手动刷新的入口。
-   * 令牌一变，`DirTree` 就把展开着的目录全部重读（保留展开状态）。
+  /*
+   * 卷列表会在程序外面变（插 U 盘、挂网络盘）：窗口重新获得焦点时重列一次。
+   *
+   * **刻意不做「刷新」按钮**（2026-09-16 人类定的原则）：目录树的每一级在**展开时**
+   * 都会重读（见 `features/dir-tree/store.ts` 的 `expand`），不需要用户去按什么；
+   * 把正确性推给用户是设计错误 —— 没有哪个文件管理器是这样的。
    */
-  const [refreshKey, setRefreshKey] = createSignal(0);
-  const refreshAll = (): void => {
-    setRefreshKey((key) => key + 1);
-    // 卷本身也可能变（插上 U 盘、挂载网络盘），一起刷新
-    void store.reloadVolumes();
-  };
+  onMount(() => {
+    const onFocus = (): void => void store.reloadVolumes();
+    window.addEventListener("focus", onFocus);
+    onCleanup(() => window.removeEventListener("focus", onFocus));
+  });
 
   return (
     <div class={["flex min-h-0 flex-1 flex-col", props.class ?? ""].join(" ")}>
@@ -105,19 +104,7 @@ export function LeftColumn(props: LeftColumnProps) {
             defaultSize: (1 - recentRatio()) * 100,
             minSize: "160px",
             content: (
-              <Panel
-                title={t("source.tree")}
-                scroll
-                pad={false}
-                actions={
-                  <IconButton
-                    label={t("common.refresh")}
-                    onClick={refreshAll}
-                  >
-                    <IconRefresh size={14} />
-                  </IconButton>
-                }
-              >
+              <Panel title={t("source.tree")} scroll pad={false}>
                 <DirTree
                   volumes={store.volumes()}
                   status={store.volumesStatus()}
@@ -131,7 +118,6 @@ export function LeftColumn(props: LeftColumnProps) {
                   }}
                   loadDirs={store.loadDirs}
                   onRetry={() => void store.reloadVolumes()}
-                  refreshKey={refreshKey()}
                 />
               </Panel>
             ),
