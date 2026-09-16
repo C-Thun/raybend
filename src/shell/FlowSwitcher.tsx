@@ -64,7 +64,7 @@ export function FlowSwitcher<TValue extends string>(props: FlowSwitcherProps<TVa
             value={option.value}
             disabled={option.disabled}
             class={[
-              "relative z-10 flex h-flow-chip-h shrink-0 cursor-pointer items-center justify-center",
+              "relative z-(--z-bar) flex h-flow-chip-h shrink-0 cursor-pointer items-center justify-center",
               "rounded-full px-flow-chip-pad-x",
             ].join(" ")}
           >

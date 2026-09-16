@@ -71,7 +71,9 @@ export function Menu(props: MenuProps) {
       */}
       <ArkMenu.Trigger asChild={props.children} />
       <Portal>
-        <ArkMenu.Positioner class="z-50">
+        {/* z 轴由**基础层统一赋值**（`index.css` 里按 Ark 的 data 属性给 `--z-index`），
+        不在这里写 z 类 —— 原因见那里的注释（Ark 的内联 `z-index: var(--z-index)` 压过一切 class）。 */}
+      <ArkMenu.Positioner>
           <ArkMenu.Content class="flex min-w-32 flex-col rounded-ui bg-surface-layer py-1 outline-none">
             <For each={props.items}>
               {(item) => (

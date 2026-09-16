@@ -516,21 +516,21 @@ export default function KitchenSink() {
             <Row label="不同长度上限">
               <span class="w-64">
                 <PathText
-                  path="D:\\Photos\\2024\\Vacation\\Japan\\Kyoto"
+                  path={"D:\\Photos\\2024\\Vacation\\Japan\\Kyoto"}
                   maxLength={18}
                   icon={<IconFolder size={14} />}
                 />
               </span>
               <span class="w-64">
                 <PathText
-                  path="D:\\Photos\\2024\\Vacation\\Japan\\Kyoto"
+                  path={"D:\\Photos\\2024\\Vacation\\Japan\\Kyoto"}
                   maxLength={30}
                   icon={<IconFolderFilled size={14} />}
                 />
               </span>
               <span class="w-64">
                 <PathText
-                  path="D:\\Photos\\2024"
+                  path={"D:\\Photos\\2024"}
                   full
                   icon={<IconFolder size={14} />}
                 />
@@ -585,7 +585,7 @@ export default function KitchenSink() {
           >
             <div class="w-full max-w-md rounded-ui bg-surface-main p-1">
               <TreeNode
-                label="D:\\"
+                label={"D:\\"}
                 depth={0}
                 hasChildren
                 expanded={expandedNodes().includes("d")}

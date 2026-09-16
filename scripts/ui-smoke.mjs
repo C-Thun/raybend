@@ -561,6 +561,215 @@ try {
     return result;
   })()`);
 
+  /*
+   * 左列结构（M1-8 的新形态）：**两段可拖 + 底部自适应「已选目录」**。
+   *
+   * 浏览器里没有后端（卷与最近都是空的），所以这里量的是**几何不变量** ——
+   * 恰好也是人类报回来的那几个症状：
+   *   * 只剩**一根**分隔条（第三根已随「已选目录」自动高度一起撤掉）；
+   *   * 两段各自 ≥ 自己的像素下限（`minSize` 必须写成 `"120px"` —— 写成数字是百分比，
+   *     上一版就是那样畸变的）；
+   *   * 两段 + 分隔条 = 容器高（不许溢出）；
+   *   * 树面板（pane）**底部不超过容器底部**（「滚到底也只看到 mnt」就是这个溢出的症状）；
+   *   * 没勾任何来源时「已选目录」整块不存在。
+   *
+   * 选择器用 **Ark 自己的 DOM 契约**（`data-scope="splitter"` + `data-part="panel"/"resize-trigger"`），
+   * 不靠「往上找祖先」那种脆招 —— 上一版就是那么找错的（找到 pane 上去了）。
+   */
+  const leftColumn = await evaluate(`(async () => {
+    const rect = (el) => el.getBoundingClientRect();
+    const titleOf = (pane) => {
+      const heading = pane.querySelector("h2");
+      return heading ? heading.textContent.trim() : "";
+    };
+
+    // 工作区里可能不止一个 splitter（左右分栏也是一个）——按 pane 标题认出左列那个
+    const splitters = [...document.querySelectorAll('[data-scope="splitter"]')];
+    const root = splitters.find((el) => {
+      const titles = [...el.querySelectorAll('[data-part="panel"]')].map(titleOf);
+      return titles.includes("最近") && titles.includes("来源");
+    });
+    if (!root) return null;
+
+    const panes = [...root.querySelectorAll('[data-part="panel"]')].map((pane) => ({
+      title: titleOf(pane),
+      h: Math.round(rect(pane).height),
+      bottom: Math.round(rect(pane).bottom),
+    }));
+    const triggers = [...root.querySelectorAll('[data-part="resize-trigger"]')];
+    const selectedPanel = [...document.querySelectorAll("section")].find((el) => {
+      const heading = el.querySelector("h2");
+      return heading && heading.textContent.trim() === "已选目录";
+    });
+
+    return {
+      viewportH: window.innerHeight,
+      rootH: Math.round(rect(root).height),
+      rootBottom: Math.round(rect(root).bottom),
+      panes,
+      triggerCount: triggers.length,
+      recentH: panes.find((pane) => pane.title === "最近")?.h ?? -1,
+      sourceH: panes.find((pane) => pane.title === "来源")?.h ?? -1,
+      sourceOverflow: (panes.find((pane) => pane.title === "来源")?.bottom ?? 0) - Math.round(rect(root).bottom),
+      // 注意 find() 没找到时返回的是 undefined —— 必须按 undefined 判（写 !== null 会恒真）
+      selectedPanel: selectedPanel !== undefined,
+      h2s: [...document.querySelectorAll("h2")].map((el) => el.textContent.trim()),
+    };
+  })()`);
+
+  if (leftColumn === null) {
+    problems.push("应用外壳里找不到左列的 splitter（最近 / 来源 两个 pane）");
+  } else {
+    if (leftColumn.triggerCount !== 1) {
+      problems.push(
+        `左列应当只有一根分隔条（已选目录改成自动高度、不再有把手），实际 ${leftColumn.triggerCount} 根`,
+      );
+    }
+    if (leftColumn.recentH < 119) {
+      problems.push(`「最近」高 ${leftColumn.recentH}px，低于 120px 的像素下限`);
+    }
+    if (leftColumn.sourceH < 159) {
+      problems.push(`「来源」高 ${leftColumn.sourceH}px，低于 160px 的像素下限`);
+    }
+    if (leftColumn.recentH + leftColumn.sourceH > leftColumn.rootH + 2) {
+      problems.push(
+        `两段加起来（${leftColumn.recentH}+${leftColumn.sourceH}）超过了左列可视高 ${leftColumn.rootH}px`,
+      );
+    }
+    if (leftColumn.sourceOverflow > 1) {
+      problems.push(
+        `树面板底部超出容器 ${leftColumn.sourceOverflow}px —— 滚到底也会看不全`,
+      );
+    }
+    if (leftColumn.selectedPanel) {
+      problems.push("没勾任何来源时不该出现「已选目录」面板");
+    }
+  }
+
+  /*
+   * 浮层层级（M1-8 第 9 条反馈）：**菜单弹出来时不许被下面的元素压住**。
+   *
+   * 人类报的是「帮助菜单弹出来时，工作流切换按钮的文字浮在菜单面板之上」。
+   * 静态看 `z-50`（菜单门户）> `z-10`（chip 文字）本该没事 —— 所以这里**实测**：
+   * 在「菜单面板」与「工作流条」的重叠区中心调 `elementFromPoint`，命中的必须落在菜单内部。
+   * 顺带把双方的 `z-index / position` 与各自的层叠上下文祖先报回来 —— 一旦红了，直接能看出是哪一层。
+   */
+  const layers = await evaluate(`(async () => {
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const header = document.querySelector("header");
+    if (!header) return null;
+
+    // 菜单只在鼠标指向标题行时出现（设计如此）—— 直接派发 pointerenter 把它请出来
+    header.dispatchEvent(new PointerEvent("pointerenter", { bubbles: false }));
+    await sleep(200);
+    const trigger = [...header.querySelectorAll("button")].find(
+      (el) => el.textContent.trim() === "帮助",
+    );
+    if (!trigger) return { triggerFound: false };
+
+    trigger.click();
+    await sleep(300);
+
+    const menu = [...document.querySelectorAll('[data-scope="menu"][data-part="content"]')].at(-1);
+    const menuItem = [...document.querySelectorAll('[data-scope="menu"][data-part="item"]')].at(-1);
+    // 菜单面板所在的那一层（Positioner）：它就是决定 z 的那个元素
+    const positioner = menu ? menu.closest('[data-scope="menu"][data-part="positioner"]') : null;
+    const flowBar = [...document.querySelectorAll("div")].find((el) =>
+      el.textContent.includes("导入") && el.textContent.includes("浏览") && el.clientHeight > 0,
+    );
+
+    const describe = (el) => {
+      if (!el) return null;
+      const cs = getComputedStyle(el);
+      return {
+        tag: el.tagName.toLowerCase(),
+        cls: (el.getAttribute("class") ?? "").slice(0, 80),
+        z: cs.zIndex,
+        position: cs.position,
+      };
+    };
+    // 往上收集「造出层叠上下文」的祖先：z-index 非 auto / transform / filter / isolation
+    const contextChain = (el) => {
+      const out = [];
+      let node = el;
+      while (node && node !== document.documentElement) {
+        const cs = getComputedStyle(node);
+        if (
+          cs.zIndex !== "auto" ||
+          cs.transform !== "none" ||
+          cs.filter !== "none" ||
+          (cs.isolation !== undefined && cs.isolation !== "auto")
+        ) {
+          out.push({ tag: node.tagName.toLowerCase(), z: cs.zIndex, transform: cs.transform, isolation: cs.isolation });
+        }
+        node = node.parentElement;
+      }
+      return out;
+    };
+
+    // 诊断：内联样式（Ark 会写 style）
+    const inlineStyle = positioner ? (positioner.getAttribute("style") ?? "") : "";
+
+    const result = {
+      triggerFound: true,
+      menuFound: Boolean(menu),
+      positioner: describe(positioner),
+      inlineStyle: inlineStyle.slice(0, 240),
+      // 变量解析值：--z-index 到底是多少、--z-popover 认不认得、我们的规则匹配上了吗
+      zVar: positioner ? getComputedStyle(positioner).getPropertyValue("--z-index").trim() : null,
+      zPopoverVar: positioner
+        ? getComputedStyle(positioner).getPropertyValue("--z-popover").trim()
+        : null,
+      matchesRule: positioner
+        ? positioner.matches('[data-scope="menu"][data-part="positioner"]')
+        : null,
+      zRuleInSheets,
+    };
+    if (!menu) return result;
+
+    const menuRect = menu.getBoundingClientRect();
+    result.menuRect = { top: Math.round(menuRect.top), bottom: Math.round(menuRect.bottom), left: Math.round(menuRect.left), height: Math.round(menuRect.height) };
+
+    if (flowBar) {
+      const flowRect = flowBar.getBoundingClientRect();
+      const top = Math.max(menuRect.top, flowRect.top);
+      const bottom = Math.min(menuRect.bottom, flowRect.bottom);
+      result.overlapH = Math.round(bottom - top);
+      if (bottom - top > 1) {
+        const x = Math.round(menuRect.left + Math.min(20, menuRect.width / 2));
+        const y = Math.round((top + bottom) / 2);
+        const hit = document.elementFromPoint(x, y);
+        result.probe = { x, y };
+        result.hit = describe(hit);
+        result.hitInsideMenu = Boolean(hit && menu.contains(hit));
+        result.hitInsideFlow = Boolean(hit && flowBar.contains(hit));
+        result.hitChain = contextChain(hit ?? document.body);
+        result.menuChain = contextChain(menu);
+      }
+    }
+
+    // 关掉菜单，别影响后面的断言
+    document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    await sleep(200);
+    return result;
+  })()`);
+
+  if (layers === null) {
+    problems.push("应用外壳里找不到标题行（header）");
+  } else if (layers.triggerFound === false) {
+    problems.push("标题行里找不到「帮助」菜单入口");
+  } else if (!layers.menuFound) {
+    problems.push("点了「帮助」但菜单没出来");
+  } else if (layers.overlapH !== undefined && layers.overlapH > 1) {
+    if (layers.hitInsideMenu !== true) {
+      problems.push(
+        "帮助菜单被下面的元素压住了：重叠区中心命中的是 " +
+          JSON.stringify(layers.hit) +
+          "（应当是菜单内部）",
+      );
+    }
+  }
+
   if (workspace) {
     if (workspace.width <= 0) {
       problems.push("右列（库）宽度为 0 —— 面板尺寸没接上");
@@ -614,6 +823,8 @@ try {
         shell,
         splitter,
         importDialog,
+        leftColumn,
+        layers,
         workspace,
         problems,
       },

@@ -69,7 +69,7 @@ export function SegmentedControl<TValue extends string>(
             value={option.value}
             disabled={option.disabled}
             class={[
-              "relative z-10 flex h-seg-chip-h shrink-0 items-center justify-center",
+              "relative z-(--z-bar) flex h-seg-chip-h shrink-0 items-center justify-center",
               "rounded-ui px-seg-chip-pad-x transition-colors",
               option.disabled ? "cursor-default" : "cursor-pointer",
             ].join(" ")}

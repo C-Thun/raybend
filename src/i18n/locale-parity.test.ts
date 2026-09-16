@@ -48,3 +48,26 @@ test("插值占位符两边对得上（少一个 {name} 文案就成了半句话
     assert.deepEqual(en, zh, `${String(key)} 的占位符不一致：中文 ${zh} / 英文 ${en}`);
   }
 });
+
+test("文案里不出现「双反斜杠」（那是转义漏在了字符串里）", () => {
+  // 由来：新建库的示例路径曾经写成 JSX 属性 `placeholder="D:\\Photos\\Library"` ——
+  // JSX 属性字符串**不处理反斜杠转义**，用户看到的就是两个反斜杠。
+  // 现在示例路径改走 i18n，这条守住「以后别再写错一层转义」。
+  for (const [locale, table] of [
+    ["zh-CN", zhCN],
+    ["en-US", enUS],
+  ] as const) {
+    for (const [key, value] of Object.entries(table)) {
+      assert.ok(
+        !String(value).includes("\\\\"),
+        `${locale} 的 ${key} 里有双反斜杠：${String(value)}`,
+      );
+    }
+  }
+});
+
+test("示例路径长得像一条真路径（单反斜杠、有盘符）", () => {
+  const hint = zhCN["repo.create.path_hint" as keyof typeof zhCN];
+  assert.equal(hint, "D:\\Photos\\Library");
+  assert.equal(enUS["repo.create.path_hint" as keyof typeof enUS], hint);
+});

@@ -144,6 +144,7 @@ export const enUS: Record<MessageKey, string> = {
  "repo.count_unknown": "—",
  "repo.create.name": "Name",
  "repo.create.path": "Library root",
+ "repo.create.path_hint": "D:\\Photos\\Library",
  "repo.create.browse": "Browse…",
  "repo.create.browse_unavailable": "No folder picker in this environment — type the path instead",
  "repo.create.intro": "The library creates catalog.db and photos/ here; imported photos land under photos/ following the template.",

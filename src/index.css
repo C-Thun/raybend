@@ -65,3 +65,54 @@ textarea,
 [data-tauri-drag-region] {
  cursor: default;
 }
+
+/*
+ * 浮层的 z 轴（DESIGN.md §8.5）。
+ *
+ * ⚠️ **为什么是「赋变量」而不是给元素写 `z-50` 这类工具类**（2026-09-16 实测）：
+ * Ark/Zag 的 Positioner 会写**内联**样式 `z-index: var(--z-index)`；内联压过一切 class，
+ * 而 `--z-index` 没人赋值时整条声明解析失败、计算值退回 `auto` ——
+ * 结果就是「菜单被下面 `z-10` 的工作流按钮压住」，而且**换任何 z 工具类都没用**
+ * （试过 `z-50`、`z-(--z-popover)`、`[--z-index:var(--z-popover)]`，计算值都还是 auto）。
+ *
+ * 所以这里按 Ark 的 data 属性集中赋值一次，值取自 tokens.css 的 z 轴阶梯。
+ * 新增浮层组件时，**到这里加一行**，别在组件里写 z。
+ */
+/*
+ * ⚠️ **必须带 `!important`**（2026-09-16 实测）：`@zag-js/popper` 把浮动元素的
+ * `zIndex` 写成 `"var(--z-index)"`，而 `--z-index` 的值来自 Zag 自己的**层级栈**
+ * （没有栈时是无效值 → 计算成 `auto`）。关键是它把 `--z-index` 也写成了**内联变量**，
+ * 而内联的自定义属性**压过样式表**——所以不带 `!important` 的话这三条规则等于没写
+ * （试过 `z-50`、`z-(--z-popover)`、任意属性、普通声明，计算值全是 `auto`）。
+ *
+ * `!important` 在这里是**有正当理由的破例**：对面是内联变量，除此之外没有别的入口
+ * （Ark 没暴露 z 轴配置），而我们需要的是「一条可审计的阶梯」而不是随栈自增的数字。
+ */
+[data-scope="menu"][data-part="positioner"],
+[data-scope="tooltip"][data-part="positioner"],
+[data-scope="select"][data-part="positioner"],
+[data-scope="combobox"][data-part="positioner"],
+[data-scope="date-picker"][data-part="positioner"] {
+ --z-index: var(--z-popover) !important;
+}
+
+[data-scope="dialog"][data-part="backdrop"] {
+ --z-index: var(--z-scrim) !important;
+}
+
+[data-scope="dialog"][data-part="positioner"] {
+ --z-index: var(--z-modal) !important;
+}
+
+/*
+ * 真键盘焦点的圈：用**辅色**（`--focus-ring` 指向 `--brand-2`）。
+ * 主色留给「选中」语义 —— 键盘焦点与选中是两回事，用人 2026-09-16 明确要求分开。
+ *
+ * ⚠️ 这里**不负责**「幽灵圈」（点遮罩关窗后留在触发按钮上的那一圈）：那是焦点管理问题，
+ * 由 `lib/dom-focus.ts` 在关闭前把焦点摘掉 —— **不要**在 CSS 里用「输入模态」之类的办法去压，
+ * 那治不了它（试过：那圈不是鼠标点击画出来的）。
+ */
+:focus-visible {
+ outline: var(--focus-ring-w) solid var(--focus-ring);
+ outline-offset: 1px;
+}

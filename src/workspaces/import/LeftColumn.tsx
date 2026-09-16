@@ -1,24 +1,29 @@
 /**
- * 左列：三段可拖拽（`design/main.md` §3.1）。
+ * 左列：**两段可拖 + 底部自适应**（`design/main.md` §3.1；2026-09-16 按人类验收反馈重排）。
  *
  * ```text
- * ┌ 最近 ────────┐   ← 自动记录的最近 50 个导入目录
- * │ ...          │
- * ├ ── ... ──────┤   ← SplitHandle（拖拽改高度）
- * │ 来源 (树)     │   ← 驱动器 + 目录（只列目录、逐级展开）
+ * ┌ 最近 ────────┐   ← SplitHandle（拖拽改高度）；minSize = "120px"
  * ├ ── ... ──────┤
- * │ 已选目录      │   ← 勾选进来、准备导入的那些（横条）
+ * │ 来源 (树)     │   ← 驱动器 + 目录（只列目录、逐级展开）；minSize = "160px"
+ * ├──────────────┤   ← **没有把手**：显隐与高度由勾选数量决定
+ * │ 已选目录      │   ← 勾 0 个 → 整块不存在；勾 n 个 → 高约 n 条；超上限 → 内部滚动
  * └──────────────┘
  * ```
  *
- * 三段的高度是**初始值**（`defaultSize`，百分比），拖过之后以用户的为准 ——
- * 这是 Ark `Splitter` 的行为，也正是我们要的：M1 不做尺寸持久化
- * （`FUTURE.md` 里也没有这条，等有人真抱怨了再说）。
+ * 两条纪律（都是验收反馈里点名要求的，别再改回去）：
  *
- * 这一段是**组装层**（`ARCHITECTURE.md` §2）：它只把三个 feature 与工作区的
- * 共享状态接起来，自己不做数据加载、不做业务判断。
+ *   1. **`minSize` 必须写带单位的字符串**（`"120px"`）。数字在 Ark/Zag 里是**百分比** ——
+ *      上一版写成 `80 / 100` 意思是「最近至少 80%、来源至少 100%」，布局直接畸变：
+ *      最近降不下来、来源拖不高、第三段被挤没。详见 `SplitStack` 的注释。
+ *   2. **「已选目录」是「挤」不是「盖」**：它不 `absolute`、不浮在别人上面，而是 flex 里的
+ *      一个兄弟段 —— 它长高，上面的段就**真的变矮**（内部照常滚动）。
+ *      反过来也成立：它不能遮住来源树，更不能出现「面板实际高度比可视区大、滚到底也看不全」。
+ *
+ * 这一段是**组装层**（`ARCHITECTURE.md` §2）：只把三个 feature 与工作区的共享状态接起来，
+ * 自己不做数据加载、不做业务判断。
  */
 
+import { Show } from "solid-js";
 import { Panel } from "../../components/ui/Panel.tsx";
 import { SplitStack } from "../../components/ui/SplitStack.tsx";
 import { RecentList } from "../../features/recent/index.ts";
@@ -36,79 +41,86 @@ export function LeftColumn(props: LeftColumnProps) {
   const store = props.store;
 
   return (
-    <SplitStack
-      class={["min-h-0 flex-1", props.class ?? ""].join(" ")}
-      keyboardResizeBy={16}
-      segments={[
-        {
-          id: "recent",
-          defaultSize: "28%",
-          minSize: 80,
-          content: (
-            <Panel title={t("source.recent")} scroll pad={false}>
-              <RecentList
-                entries={store.recentDirs()}
-                status={store.recentStatus()}
-                error={store.recentError()}
-                isSelected={store.isSelected}
-                isChecked={store.isChecked}
-                onSelect={store.selectDir}
-                onToggleCheck={(path, checked) => {
-                  // 点圆圈：勾选就加入待导入（并把「包含子目录」按上次的选择带上）
-                  if (checked) {
-                    const known = store
-                      .recentDirs()
-                      .find((row) => row.path === path)?.includeSubdirs;
-                    store.toggleChecked(path, known ?? false);
-                  } else {
-                    store.removeChecked(path);
-                  }
-                }}
-                onRemove={(path) => void store.forgetRecent(path)}
-                onRetry={() => void store.reloadRecent()}
-              />
-            </Panel>
-          ),
-        },
-        {
-          id: "source",
-          defaultSize: "42%",
-          minSize: 100,
-          content: (
-            <Panel title={t("source.tree")} scroll pad={false}>
-              <SourceTree
-                volumes={store.volumes()}
-                status={store.volumesStatus()}
-                error={store.volumesError()}
-                isSelected={store.isSelected}
-                isChecked={store.isChecked}
-                onSelect={store.selectDir}
-                onToggleCheck={(path, checked) => {
-                  if (checked) store.toggleChecked(path, false);
-                  else store.removeChecked(path);
-                }}
-                loadDirs={store.loadDirs}
-                onRetry={() => void store.reloadVolumes()}
-              />
-            </Panel>
-          ),
-        },
-        {
-          id: "selected",
-          defaultSize: "30%",
-          minSize: 80,
-          content: (
-            <Panel title={t("source.selected")} scroll pad={false}>
-              <SelectedDirs
-                entries={store.checkedDirs()}
-                onSelect={store.selectDir}
-                onRemove={store.removeChecked}
-                onIncludeSubdirsChange={store.setIncludeSubdirs}
-              />
-            </Panel>
-          ),
-        },
-      ]}
-    />
+    <div class={["flex min-h-0 flex-1 flex-col", props.class ?? ""].join(" ")}>
+      <SplitStack
+        class="min-h-0 flex-1"
+        keyboardResizeBy={16}
+        segments={[
+          {
+            id: "recent",
+            // 初始三成、最矮 120px（约 3~4 行）：够用且**降得下来** —— 它自己会滚
+            defaultSize: "32%",
+            minSize: "120px",
+            content: (
+              <Panel title={t("source.recent")} scroll pad={false}>
+                <RecentList
+                  entries={store.recentDirs()}
+                  status={store.recentStatus()}
+                  error={store.recentError()}
+                  isSelected={store.isSelected}
+                  isChecked={store.isChecked}
+                  onSelect={store.selectDir}
+                  onToggleCheck={(path, checked) => {
+                    // 点圆圈：勾选就加入待导入（并把「包含子目录」按上次的选择带上）
+                    if (checked) {
+                      const known = store
+                        .recentDirs()
+                        .find((row) => row.path === path)?.includeSubdirs;
+                      store.toggleChecked(path, known ?? false);
+                    } else {
+                      store.removeChecked(path);
+                    }
+                  }}
+                  onRemove={(path) => void store.forgetRecent(path)}
+                  onRetry={() => void store.reloadRecent()}
+                />
+              </Panel>
+            ),
+          },
+          {
+            id: "source",
+            defaultSize: "68%",
+            minSize: "160px",
+            content: (
+              <Panel title={t("source.tree")} scroll pad={false}>
+                <SourceTree
+                  volumes={store.volumes()}
+                  status={store.volumesStatus()}
+                  error={store.volumesError()}
+                  isSelected={store.isSelected}
+                  isChecked={store.isChecked}
+                  onSelect={store.selectDir}
+                  onToggleCheck={(path, checked) => {
+                    if (checked) store.toggleChecked(path, false);
+                    else store.removeChecked(path);
+                  }}
+                  loadDirs={store.loadDirs}
+                  onRetry={() => void store.reloadVolumes()}
+                />
+              </Panel>
+            ),
+          },
+        ]}
+      />
+
+      {/*
+        已选目录：**自动高度**。
+        勾选 0 个 → 整块不存在（连标题都不留）；勾 n 个 → 自然长到约 n 条；
+        到上限（40% 列高）后不再长，改为内部滚动 —— 上面的段被**挤压**而不是被盖住。
+        上限是 `--selected-max-h`（四成列高，见 tokens.css）：勾 20 个来源也不能把上面的树挤没。
+      */}
+      <Show when={store.checkedDirs().length > 0}>
+        <div class="flex max-h-(--selected-max-h) min-h-0 shrink-0 flex-col overflow-hidden">
+          <Panel title={t("source.selected")} scroll pad={false}>
+            <SelectedDirs
+              entries={store.checkedDirs()}
+              onSelect={store.selectDir}
+              onRemove={store.removeChecked}
+              onIncludeSubdirsChange={store.setIncludeSubdirs}
+            />
+          </Panel>
+        </div>
+      </Show>
+    </div>
   );
 }

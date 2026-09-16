@@ -4,6 +4,7 @@ import { render } from "solid-js/web";
 import { Route, Router } from "@solidjs/router";
 import App from "./App";
 import "./index.css";
+import { installEscapeBlur } from "./lib/dom-focus.ts";
 
 /**
  * 组件陈列室（`src/dev/`）**只在开发期注册**，而且 `import()` 必须留在
@@ -18,6 +19,13 @@ import "./index.css";
  * 只有写成下面这种「模块级三元」时，生产构建才会把 `DEV` 替成 `false`、
  * 把整个 `import()` 摇掉（验证方式：`pnpm build` 后 `ls dist/assets/*.js` 只有入口一个）。
  */
+/*
+ * 「按 Esc 一律先清焦点」——一处收口，不用在每个弹窗里各写一遍
+ * （根因与顺序纪律见 `lib/dom-focus.ts`）。热重载时先卸再装，免得越挂越多。
+ */
+const disposeEscapeBlur = installEscapeBlur();
+import.meta.hot?.dispose(() => disposeEscapeBlur());
+
 const KitchenSink = import.meta.env.DEV
   ? lazy(() => import("./dev/KitchenSink.tsx"))
   : undefined;

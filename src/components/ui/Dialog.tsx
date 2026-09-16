@@ -21,6 +21,7 @@ import { IconX } from "@tabler/icons-solidjs";
 import { Show, splitProps, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 import { t } from "../../i18n";
+import { blurActive } from "../../lib/dom-focus.ts";
 import { Button, IconButton } from "./Button.tsx";
 
 export interface DialogProps {
@@ -53,13 +54,18 @@ export function Dialog(props: DialogProps) {
     <ArkDialog.Root
       open={local.open}
       onOpenChange={(details) => local.onOpenChange?.(details.open)}
+      // 点遮罩（外点）与按 Esc 都会关窗：**关之前先把焦点摘掉**。
+      // 否则焦点一直留在触发按钮上，WebView2 会把它当键盘焦点画一圈（`lib/dom-focus.ts` 有完整根因）。
+      // 顺序不能反 —— 反了会看着圈闪一下。
+      onInteractOutside={() => blurActive()}
+      onEscapeKeyDown={() => blurActive()}
       lazyMount
       unmountOnExit
       role="dialog"
     >
       <Portal>
-        <ArkDialog.Backdrop class="fixed inset-0 z-40 bg-scrim" />
-        <ArkDialog.Positioner class="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <ArkDialog.Backdrop class="fixed inset-0 bg-scrim" />
+        <ArkDialog.Positioner class="fixed inset-0 flex items-center justify-center p-4">
           <ArkDialog.Content
             class={[
               "flex w-full min-w-72 max-w-md flex-col gap-3 rounded-ui bg-surface-layer p-panel-pad outline-none",

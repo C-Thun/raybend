@@ -186,7 +186,9 @@ export function CreateRepositoryDialog(props: CreateRepositoryDialogProps) {
             <Input
               value={path()}
               class="min-w-0 flex-1"
-              placeholder="D:\\Photos\\Library"
+              // 示例路径走 i18n：JSX 属性字符串**不处理反斜杠转义**，
+              // 直接写 "D:\\Photos\\Library" 会原样显示出两个反斜杠（2026-09-16 验收反馈）
+              placeholder={t("repo.create.path_hint")}
               onInput={(event) => setPath(event.currentTarget.value)}
               onKeyDown={(event) => {
                 if (event.key === "Enter") void submit();

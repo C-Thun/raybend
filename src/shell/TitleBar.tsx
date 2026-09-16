@@ -81,7 +81,7 @@ export function TitleBar(props: TitleBarProps) {
         }}
       >
         {/* ── 应用图标 + 名称 ───────────────────────────── */}
-        <div class="flex shrink-0 items-center gap-2 ps-pad-x">
+        <div data-tauri-drag-region class="flex shrink-0 items-center gap-2 ps-pad-x">
           <div
             class="flex size-5 items-center justify-center rounded-ui bg-brand text-fg-on-brand"
             aria-hidden="true"
@@ -123,8 +123,11 @@ export function TitleBar(props: TitleBarProps) {
           </Show>
         </div>
 
-        {/* ── 空白拖拽区 ────────────────────────────────── */}
-        <div class="h-full min-w-4 flex-1" />
+        {/* ── 空白拖拽区 ──────────────────────────────────
+            这里的 `data-tauri-drag-region` **必须有**：Tauri 只认「带属性的元素自身」，
+            header 上的那一个管不到子元素 —— 去掉它中间这片就按不住（2026-09-16 的实测反馈）。
+            它 `flex-1`，所以宽度天然吃满「左侧控件」与「右侧主题/密度/三键」之间的全部空白。 */}
+        <div data-tauri-drag-region class="h-full min-w-4 flex-1" />
 
         {/* ── 开发期入口（生产构建整条分支被摇掉） ──────── */}
         <Show when={import.meta.env.DEV}>

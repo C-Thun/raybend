@@ -149,10 +149,84 @@ pub fn list() -> Vec<Volume> {
     }
 }
 
+/// 系统自留的挂载点：列出来只是噪声。
+///
+/// **为什么需要这条规则**（`plans/M1-8.md` §F，2026-09-16 的真机反馈）：
+/// Linux 侧的卷来自 `/proc/mounts`，其中**必然**有根分区 `/`。在 `/` 上展开一次，
+/// 看到的就是 `mnt`、`home`、`usr`、`etc` 这一堆 —— 用户会以为「来源树在读一个莫名其妙的合集」。
+/// 真正有用的来源只有两类：**用户主目录**与**外挂/可移动盘**（含 WSL 里的 `/mnt/c`）。
+const SYSTEM_MOUNTS: &[&str] = &[
+    "/bin",
+    "/boot",
+    "/dev",
+    "/etc",
+    "/lib",
+    "/lib32",
+    "/lib64",
+    "/libx32",
+    "/lost+found",
+    "/opt",
+    "/proc",
+    "/root",
+    "/run",
+    "/sbin",
+    "/snap",
+    "/srv",
+    "/sys",
+    "/tmp",
+    "/usr",
+    "/var",
+];
+
+/// 落在[系统目录](SYSTEM_MOUNTS)之下、但**确实是来源**的例外。
+///
+/// * `/run/media/<用户>/<卷>` —— udisks 挂可移动介质的地方（U 盘、SD 卡）；
+/// * `/run/user/<uid>/gvfs` —— GNOME 的 GVfs：手机、云盘、网络位置都挂在这里。
+///
+/// 没有这两条例外，`/run` 那条规则会把「刚插上的 U 盘」也一起挡掉 ——
+/// 那正是用户最想导入的来源。
+const ALLOWED_UNDER_SYSTEM: &[&str] = &["/run/media", "/run/user"];
+
+/// WSL 自己的内部挂载（`/mnt/wsl` 家族）：对用户没有意义。
+const WSL_INTERNAL_MOUNTS: &[&str] = &["/mnt/host", "/mnt/wsl", "/mnt/wslg"];
+
+/// 这个挂载点值得出现在「来源」里吗？
+///
+/// * 根分区 `/` 不算「一个来源」—— 展开它只会看到系统目录；
+/// * 各发行版的系统目录（[`SYSTEM_MOUNTS`]）不算；
+/// * **其余一律保留**：`/home/...`、`/mnt/*`、`/media/*`、`/run/media/*`，
+///   以及用户自己挂的 `/data`、`/storage` 这类非常规位置 —— 宁可多留，
+///   也不要在用户真把照片放在那里时把它藏起来。
+#[must_use]
+pub fn is_useful_source_mount(mount_point: &str) -> bool {
+    let path = mount_point.trim();
+    if path.is_empty() {
+        return false;
+    }
+    let trimmed = path.trim_end_matches('/');
+    if trimmed.is_empty() {
+        return false; // 只有斜杠 = 根
+    }
+    let under = |skip: &str| -> bool {
+        trimmed
+            .strip_prefix(skip)
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+    };
+    if WSL_INTERNAL_MOUNTS.iter().any(|skip| under(skip)) {
+        return false;
+    }
+    // 先看例外：`/run/media/...` 与 `/run/user/...` 是**真的有来源**的地方
+    if ALLOWED_UNDER_SYSTEM.iter().any(|allow| under(allow)) {
+        return true;
+    }
+    !SYSTEM_MOUNTS.iter().any(|skip| under(skip))
+}
+
 /// 从挂载表挑出可作为来源的条目（纯函数，任何平台都能测）。
 ///
 /// 规则：
 /// * 只认 [`VOLUME_FS_TYPES`] 里的类型（伪文件系统一律跳过）；
+/// * 只要[值得作为来源](is_useful_source_mount)的挂载点（`/` 与系统目录不算，见那里的说明）；
 /// * 同一个挂载点只留一条（`/proc/mounts` 里同一处可能被挂多次）；
 /// * 空挂载点跳过；
 /// * 结果按路径排序（稳定、可断言）。
@@ -161,6 +235,10 @@ pub(crate) fn volumes_from_mounts(mounts: &[MountEntry]) -> Vec<Volume> {
     let mut out: Vec<Volume> = Vec::new();
     for entry in mounts {
         if entry.mount_point.is_empty() || !is_volume_fs(&entry.fs_type) {
+            continue;
+        }
+        // 系统挂载点与根分区不进来源列表（否则用户会看到 `/mnt`、`/home` 这种「奇怪的合集」）
+        if !is_useful_source_mount(&entry.mount_point) {
             continue;
         }
         if out.iter().any(|v| v.path == entry.mount_point) {
@@ -313,8 +391,66 @@ mod tests {
         ];
         let out = volumes_from_mounts(&mounts);
         let paths: Vec<&str> = out.iter().map(|v| v.path.as_str()).collect();
-        assert_eq!(paths, vec!["/", "/boot/efi", "/mnt/data"]);
+        // 根分区与 `/boot/efi` 被 `is_useful_source_mount` 挡掉：它们是系统盘的一部分，
+        // 不是「某个来源」（展开只会看到 mnt/home/usr 那一堆）
+        assert_eq!(paths, vec!["/mnt/data"]);
         assert!(out.iter().all(|v| v.kind == VolumeKind::Local));
+    }
+
+    #[test]
+    fn root_and_system_mounts_are_not_sources() {
+        // 根分区：用户在 `plans/M1-8.md` §F 里报的那个「奇怪的合集」就是它
+        assert!(!is_useful_source_mount("/"));
+        assert!(!is_useful_source_mount(""));
+        assert!(!is_useful_source_mount("   "));
+        // 系统目录（含它们的子挂载）
+        for path in [
+            "/boot",
+            "/boot/efi",
+            "/usr",
+            "/usr/local",
+            "/var",
+            "/var/lib/docker",
+            "/etc",
+            "/proc",
+            "/sys",
+            "/dev",
+            "/run",
+            "/snap/foo",
+            "/tmp",
+            "/opt/app",
+            "/srv",
+            "/root",
+            "/lost+found",
+        ] {
+            assert!(!is_useful_source_mount(path), "{path} 不该作为来源");
+        }
+        // `/run` 本身排除，但它下面的两类例外要放行（U 盘与 GVfs）
+        assert!(!is_useful_source_mount("/run"));
+        assert!(!is_useful_source_mount("/run/lock"));
+        assert!(is_useful_source_mount("/run/media/andares/CARD"));
+        assert!(is_useful_source_mount("/run/user/1000/gvfs"));
+        assert!(is_useful_source_mount("/run/user/1000/gvfs/mtp:host=phone"));
+        // WSL 的内部挂载
+        assert!(!is_useful_source_mount("/mnt/wslg"));
+        assert!(!is_useful_source_mount("/mnt/wsl/distro"));
+        assert!(!is_useful_source_mount("/mnt/host"));
+    }
+
+    #[test]
+    fn user_homes_and_external_mounts_stay() {
+        for path in [
+            "/home/andares",
+            "/home/andares/Pictures/",  // 尾斜杠不影响
+            "/mnt/c",                   // WSL 里的 Windows 盘 —— 最常用的那个
+            "/mnt/data",
+            "/media/andares/USB",
+            "/run/media/andares/CARD",
+            "/data/photos", // 非常规位置：宁可多留，也不要把用户的照片藏起来
+            "/storage",
+        ] {
+            assert!(is_useful_source_mount(path), "{path} 应当保留");
+        }
     }
 
     #[test]

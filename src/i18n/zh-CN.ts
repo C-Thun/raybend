@@ -153,6 +153,7 @@ export const zhCN = {
  "repo.count_unknown": "—",
  "repo.create.name": "名称",
  "repo.create.path": "库根目录",
+ "repo.create.path_hint": "D:\\Photos\\Library",
  "repo.create.browse": "浏览…",
  "repo.create.browse_unavailable": "这个环境没有目录选择器，手动填写路径即可",
  "repo.create.intro": "库会在这个目录里建立 catalog.db 与 photos/，导入的照片按模版落在 photos/ 之下。",

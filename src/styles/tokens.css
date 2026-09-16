@@ -89,6 +89,21 @@
 }
 
 /* ══════════════════════════════════════════════════════════════
+ * z 轴阶梯（`DESIGN.md` §8.5）
+ *
+ * 为什么要有阶梯（2026-09-16 的真机反馈）：菜单弹出时被下面的工作流按钮压住了。
+ * 查下来是「浮层的 z 值都是散落的字面量」，谁在谁上面没有体系、也不好验。
+ * 现在起：**浮层一律用这里的令牌**，不再写字面量。
+ * ══════════════════════════════════════════════════════════════ */
+:root {
+  --z-bar: 10; /* 外壳三条（titlebar / flowbar / toolsbar）内部的分层 */
+  --z-popover: 40; /* 菜单、提示气泡、下拉、日期选择器……跟着触发器的浮层 */
+  --z-scrim: 60; /* 模态遮罩：盖住一切浮层 */
+  --z-modal: 70; /* 模态本体：在遮罩之上 */
+  --z-toast: 80; /* 右上角提示：永远最上面 */
+}
+
+/* ══════════════════════════════════════════════════════════════
  * 危险色（DESIGN.md §9.2）
  *
  * 目前**唯一用途是窗口关闭键的悬停底**（Windows 平台惯例）。
@@ -157,7 +172,8 @@
   --ring-easy-copy: color-mix(in oklab, var(--brand) 40%, transparent);
 
   /* 焦点环：品牌主色、1px（DESIGN.md §5） */
-  --focus-ring: var(--brand);
+  /* 焦点圈用**辅色**（人类 2026-09-16 反馈：键盘焦点不要用主色，主色留给「选中」语义） */
+  --focus-ring: var(--brand-2);
   --focus-ring-w: 1px;
 
   /* 细滚动条（DESIGN.md §10.1 #15）：滑块色彩由前景色派生 */
@@ -173,29 +189,36 @@
 :root[data-density="compact"] {
   --space-unit: 4px;
 
-  --bar-title-h: 40px;
-  --bar-flow-h: 52px;
-  --bar-tool-h: 40px;
+  /* 2026-09-16 验收反馈：两档都「温和收紧」约 10%（用户挑的那套）。
+     下面是**不参与缩放**的几项，理由各异，别顺手改小：
+       --radius / --switch-* / --checkbox-size / --remove-hit/-icon / --scrollbar-w
+         —— 圆角是观感基准，开关与勾选框有「点得中、看得清」的下限（DESIGN.md §8.3），
+            滚动条太细会变成难抓的目标；
+       --panel-w-* —— 那是**信息宽度**不是间距，收窄只会让树少看一列。 */
 
-  --pad-x: 8px;
-  --pad-y: 4px;
-  --gap: 4px;
-  --row-h: 28px; /* 列表行高 */
-  --row-indent: 10px; /* 列表行起始缩进 */
-  --panel-pad: 8px;
+  --bar-title-h: 36px;
+  --bar-flow-h: 48px;
+  --bar-tool-h: 36px;
+
+  --pad-x: 6px;
+  --pad-y: 3px;
+  --gap: 3px;
+  --row-h: 24px; /* 列表行高 */
+  --row-indent: 8px; /* 列表行起始缩进 */
+  --panel-pad: 6px;
   --radius: 4px;
 
   --panel-w-left: 320px;
   --panel-w-right: 300px;
 
-  --btn-pad-x: 6px;
-  --btn-pad-y: 4px;
+  --btn-pad-x: 5px;
+  --btn-pad-y: 3px;
 
   --seg-track-pad: 3px;
-  --flow-chip-h: 34px;
-  --flow-chip-pad-x: 18px;
-  --seg-chip-h: 30px;
-  --seg-chip-pad-x: 14px;
+  --flow-chip-h: 32px;
+  --flow-chip-pad-x: 16px;
+  --seg-chip-h: 28px;
+  --seg-chip-pad-x: 12px;
 
   --checkbox-size: 16px;
 
@@ -203,72 +226,73 @@
   --remove-hit: 24px;
   --remove-icon: 18px;
 
-  --selected-bar-h: 60px;
+  --selected-bar-h: 52px;
+  --selected-max-h: 40%; /* 「已选目录」最多占左列的四成高，超出改为内部滚动（比例，不随密度变） */
 
   --switch-w: 28px;
   --switch-h: 16px;
   --switch-knob: 12px;
 
-  --toggle-block: 32px;
+  --toggle-block: 30px;
   --toggle-block-icon: 16px;
 
   /* 窗口三键（`design/main.md` §2.1 的 46×32，尺寸随密度档） */
   --win-ctl-w: 52px;
 
-  --caption-h: 26px; /* 图片 tile 字幕条高 */
+  --caption-h: 24px; /* 图片 tile 字幕条高 */
   --scrollbar-w: 8px; /* 细滚动条宽/高 */
 
-  --action-btn-h: 36px; /* 导入按钮等 */
-  --card-h: 60px; /* 库卡片 */
+  --action-btn-h: 34px; /* 导入按钮等 */
+  --card-h: 52px; /* 库卡片 */
 }
 
 :root[data-density="loose"] {
   --space-unit: 8px;
 
-  --bar-title-h: 48px;
-  --bar-flow-h: 68px;
-  --bar-tool-h: 48px;
+  --bar-title-h: 44px;
+  --bar-flow-h: 62px;
+  --bar-tool-h: 44px;
 
-  --pad-x: 16px;
-  --pad-y: 8px;
-  --gap: 8px;
-  --row-h: 36px;
-  --row-indent: 16px;
-  --panel-pad: 16px;
+  --pad-x: 12px;
+  --pad-y: 6px;
+  --gap: 6px;
+  --row-h: 30px;
+  --row-indent: 12px;
+  --panel-pad: 12px;
   --radius: 6px;
 
   --panel-w-left: 360px;
   --panel-w-right: 340px;
 
-  --btn-pad-x: 12px;
-  --btn-pad-y: 8px;
+  --btn-pad-x: 10px;
+  --btn-pad-y: 6px;
 
   --seg-track-pad: 4px;
-  --flow-chip-h: 40px;
-  --flow-chip-pad-x: 24px;
-  --seg-chip-h: 36px;
-  --seg-chip-pad-x: 20px;
+  --flow-chip-h: 36px;
+  --flow-chip-pad-x: 20px;
+  --seg-chip-h: 32px;
+  --seg-chip-pad-x: 16px;
 
   --checkbox-size: 18px;
 
   --remove-hit: 30px;
   --remove-icon: 20px;
 
-  --selected-bar-h: 72px;
+  --selected-bar-h: 60px;
 
   --switch-w: 34px;
   --switch-h: 20px;
   --switch-knob: 16px;
 
-  --toggle-block: 38px;
+  --toggle-block: 34px;
   --toggle-block-icon: 18px;
 
-  --caption-h: 32px;
+  --caption-h: 28px;
   --win-ctl-w: 62px;
   --scrollbar-w: 10px;
 
-  --action-btn-h: 44px;
-  --card-h: 72px;
+  --action-btn-h: 40px;
+  --card-h: 60px;
 }
 
 /* ══════════════════════════════════════════════════════════════
