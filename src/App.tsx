@@ -36,6 +36,14 @@ export default function App() {
   const appearance = createAppearanceStore();
   // 布局偏好（设备级）：左列宽度与左列内部的比例，拖拽结束落盘、下次启动还原
   const layout = createLayoutStore();
+  /*
+   * ⚠️ 比例**只在启动时读一次**（故意不放在 JSX 里，避开响应式跟踪）：
+   * 如果让 `layout.prefs()` 参与渲染，就会形成回路 ——
+   *   拖动/窗口缩放 → `onResizeEnd` 写 store → App 重渲染 → splitter 收到新的 `defaultSize`
+   *   → Ark 重新布局 → 又一次 resize …… 真机症状就是「启动卡几秒、一最大化直接卡死」。
+   * 比例本来就是**初始值**（Ark 只在首次渲染用它），所以读一次就够。
+   */
+  const initialLayout = layout.prefs();
   const importStore = createImportStore({ api: db });
   const grid = createPhotoGridStore({ api: db });
 
@@ -84,9 +92,9 @@ export default function App() {
         store={importStore}
         grid={grid}
         onRevealInLibrary={() => shell.setWorkflow("browse")}
-        leftRatio={layout.prefs().leftRatio}
+        leftRatio={initialLayout.leftRatio}
         onLeftRatioChange={layout.setLeftRatio}
-        recentRatio={layout.prefs().recentRatio}
+        recentRatio={initialLayout.recentRatio}
         onRecentRatioChange={layout.setRecentRatio}
       />
     </div>

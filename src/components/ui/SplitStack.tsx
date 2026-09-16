@@ -30,7 +30,7 @@
  */
 
 import { Splitter } from "@ark-ui/solid";
-import { For, type JSX } from "solid-js";
+import { createMemo, For, type JSX } from "solid-js";
 import { SplitHandleDots } from "./SplitHandle.tsx";
 
 export interface SplitSegment {
@@ -74,15 +74,49 @@ export interface SplitStackProps {
 export function SplitStack(props: SplitStackProps) {
   const vertical = (): boolean => (props.orientation ?? "vertical") === "vertical";
 
-  // Ark 要求 panels 是一个数组，且每个 pane 的 id 与下面 Panel 的 id 对应
-  const panels = () =>
-    props.segments.map((segment) => ({
-      id: segment.id,
-      minSize: segment.minSize,
-      collapsible: segment.collapsible ?? false,
-    }));
+  /*
+   * ⚠️ **同一个尺寸只喂 Ark 一次**（2026-09-16 真机回归的教训）。
+   *
+   * 调用方（比如 `ImportWorkspace`）会因为自己的信号变化而重渲染，`segments` 是
+   * 每次渲染都新建的数组 —— 值一样、**引用不同**。Ark 的 `Splitter` 看到 props 变了
+   * 就可能重新套用尺寸 → 又一次布局 → `ResizeObserver` 再触发 → 上层再写状态……
+   * 真机症状：**启动抖几秒、一最大化就卡死**（最大化本身就是一次尺寸变化，正好踩进回路）。
+   *
+   * 所以这里按「值的形态」做记忆：数组内容没变，就继续用**同一个数组对象**。
+   */
+  const sameContents = (a: unknown, b: unknown): boolean =>
+    JSON.stringify(a) === JSON.stringify(b);
 
-  const defaultSize = () => props.segments.map((segment) => segment.defaultSize);
+  const shapeKey = () =>
+    props.segments
+      .map(
+        (segment) =>
+          `${segment.id}|${String(segment.defaultSize)}|${String(segment.minSize ?? "")}|${String(segment.collapsible ?? false)}`,
+      )
+      .join(";");
+
+  // Ark 要求 panels 是一个数组，且每个 pane 的 id 与下面 Panel 的 id 对应
+  const panels = createMemo(
+    () => {
+      shapeKey(); // 只在形态变化时重算
+      return props.segments.map((segment) => ({
+        id: segment.id,
+        minSize: segment.minSize,
+        collapsible: segment.collapsible ?? false,
+      }));
+    },
+    [],
+    { equals: sameContents },
+  );
+
+  const defaultSize = createMemo(
+    () => {
+      shapeKey();
+      return props.segments.map((segment) => segment.defaultSize);
+    },
+    [],
+    { equals: sameContents },
+  );
 
   return (
     <div class={["flex min-h-0 flex-col", props.class ?? ""].join(" ")}>

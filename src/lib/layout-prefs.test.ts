@@ -104,3 +104,20 @@ test("店：换一个实例能读回上一个实例写的比例（模拟重启�
   const restarted = createLayoutStore({ storage });
   assert.equal(restarted.prefs().leftRatio, 0.33);
 });
+
+test("值没变时不写、也不更新信号（防 resize 回路：真机启动卡顿 + 最大化卡死）", () => {
+  const storage = memoryStorage();
+  const store = createLayoutStore({ storage });
+  store.setLeftRatio(0.31);
+  const before = store.prefs();
+
+  // 同一个值再写：引用必须**不变**（信号没更新，上层就不会重渲染）
+  store.setLeftRatio(0.31);
+  assert.equal(store.prefs(), before, "同一个比例不该触发新的对象");
+
+  // 越界值被夹到边界后与当前相同，同样不该动
+  store.setLeftRatio(0.5);
+  const atMax = store.prefs();
+  store.setLeftRatio(9);
+  assert.equal(store.prefs(), atMax, "夹取后仍是同一个值，就不该动");
+});

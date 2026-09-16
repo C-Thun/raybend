@@ -145,14 +145,23 @@ try {
     ws.addEventListener("error", reject);
   });
 
+  /*
+   * CDP 调用加时限：页面**卡死**（渲染器忙循环）时，CDP 也会一起不应答 ——
+   * 没有时限的话整个冒烟脚本就永远挂在那里，看不出出了什么事。
+   * 20 秒对任何一条 CDP 调用都绰绰有余。
+   */
   const send = (method, params = {}) => {
     const id = nextId++;
     return new Promise((resolve, reject) => {
-      pending.set(id, (msg) =>
-        msg.error
-          ? reject(new Error(`${method}: ${msg.error.message}`))
-          : resolve(msg.result),
-      );
+      const timer = setTimeout(() => {
+        pending.delete(id);
+        reject(new Error(`${method}: 20 秒没有回应（页面可能卡死了）`));
+      }, 20_000);
+      pending.set(id, (msg) => {
+        clearTimeout(timer);
+        if (msg.error) reject(new Error(`${method}: ${msg.error.message}`));
+        else resolve(msg.result);
+      });
       ws.send(JSON.stringify({ id, method, params }));
     });
   };
@@ -971,6 +980,55 @@ try {
     }
   }
 
+  /*
+   * **改窗口尺寸不许卡死**（2026-09-16 真机回归的断言）。
+   *
+   * 真机症状：一最大化就卡死、界面乱缩。根因是「resize → 写状态 → 重渲染 →
+   * splitter 收到新 props → 又一次 resize」的回路。这里把窗口从 1440×900 改到
+   * 1100×700 再改回来：只要页面还答得上话、面板尺寸还正常，就说明没有回路。
+   * 页面真卡死的话，上面的 CDP 时限会先报出来（不会静默挂住）。
+   */
+  let resizeProbe = null;
+  try {
+    await send("Emulation.setDeviceMetricsOverride", {
+      width: 1100,
+      height: 700,
+      deviceScaleFactor: 1,
+      mobile: false,
+    });
+    await sleep(400);
+    resizeProbe = await evaluate(`(() => {
+      const panes = [...document.querySelectorAll('[data-scope="splitter"] [data-part="panel"]')];
+      const triggers = document.querySelectorAll('[data-part="resize-trigger"]');
+      return {
+        responsive: true,
+        paneCount: panes.length,
+        // 面板被压成 0 高/0 宽就是「异常缩放」的样子
+        minSize: panes.length === 0
+          ? -1
+          : Math.min(...panes.map((el) => {
+              const rect = el.getBoundingClientRect();
+              return Math.round(Math.min(rect.width, rect.height));
+            })),
+        triggerCount: triggers.length,
+      };
+    })()`);
+    await send("Emulation.clearDeviceMetricsOverride");
+  } catch (error) {
+    problems.push(`改窗口尺寸后页面没有回应：${error.message} —— 可能是 resize 回路（真机症状：最大化卡死）`);
+  }
+
+  if (resizeProbe) {
+    if (resizeProbe.paneCount === 0 || resizeProbe.triggerCount === 0) {
+      problems.push("改尺寸之后 splitter 不见了");
+    }
+    if (resizeProbe.minSize <= 0) {
+      problems.push(
+        `改尺寸之后有面板的宽/高塌成 0（最小 ${resizeProbe.minSize}px）—— 异常缩放`,
+      );
+    }
+  }
+
   if (workspace) {
     if (workspace.width <= 0) {
       problems.push("右列（库）宽度为 0 —— 面板尺寸没接上");
@@ -1027,6 +1085,7 @@ try {
         deadBackend,
         leftColumn,
         layers,
+        resizeProbe,
         dirTree,
         workspace,
         problems,

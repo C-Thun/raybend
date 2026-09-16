@@ -121,7 +121,17 @@ export function createLayoutStore(
   const storage = "storage" in deps ? deps.storage : defaultStorage();
   const [prefs, setPrefs] = createSignal<LayoutPrefs>(readLayout(storage));
 
+  /**
+   * 落盘 + 更新信号。**值没变就什么都不做** —— 这不是省事，是**防回路**：
+   * `onResizeEnd` 在窗口缩放/最大化时也会被 Ark 触发，若每次都写信号，
+   * 上层就会重渲染 → splitter 收到新的 `defaultSize` → 再触发一次 resize……
+   * （真机症状：启动时抖几秒、一最大化就卡死。见 `App.tsx` 的注释。）
+   */
   const commit = (next: LayoutPrefs): void => {
+    const current = prefs();
+    if (current.leftRatio === next.leftRatio && current.recentRatio === next.recentRatio) {
+      return;
+    }
     setPrefs(next);
     writeLayout(next, storage);
   };
