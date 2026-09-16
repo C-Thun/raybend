@@ -37,3 +37,23 @@ export async function pickDirectory(
   }
   return null;
 }
+
+/**
+ * 选一个「保存到」的路径（导出错误清单用）。
+ *
+ * 与 [`pickDirectory`] 同样的降级：浏览器里返回 `null`，
+ * 调用方据此提示「这个环境没有保存对话框」而不是崩掉。
+ */
+export async function pickSaveFile(
+  options: { title?: string; defaultName?: string; filters?: { name: string; extensions: string[] }[] } = {},
+): Promise<string | null> {
+  if (!isTauriRuntime()) return null;
+  dialogModule ??= import("@tauri-apps/plugin-dialog");
+  const { save } = await dialogModule;
+  const picked = await save({
+    ...(options.title === undefined ? {} : { title: options.title }),
+    ...(options.defaultName === undefined ? {} : { defaultPath: options.defaultName }),
+    ...(options.filters === undefined ? {} : { filters: options.filters }),
+  });
+  return typeof picked === "string" ? picked : null;
+}

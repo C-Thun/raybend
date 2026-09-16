@@ -99,14 +99,14 @@ function fakeApi() {
   };
 
   const api: ImportApi = {
-    async start(_repositoryId, sourceDirs, includeSubdirs, avoidDuplicates) {
+    async start(_repositoryId, sources, avoidDuplicates) {
       state.calls.push(
-        `start:${sourceDirs.join(",")}:${String(includeSubdirs)}:${String(avoidDuplicates)}`,
+        `start:${sources.map((s) => s.path).join(",")}:${String(avoidDuplicates)}`,
       );
       if (state.startFails) throw new Error("库离线了");
       return {
         batchId: "b1",
-        runs: sourceDirs.map((dir, index) => ({ index, sourceRoot: dir })),
+        runs: sources.map((source, index) => ({ index, sourceRoot: source.path })),
       };
     },
     async pause() {
@@ -153,8 +153,7 @@ async function startedStore() {
   const store = createImportStore({ api: fake.api });
   await store.begin({
     repositoryId: "repo-1",
-    sourceDirs: ["/src/a"],
-    includeSubdirs: true,
+    sources: [{ path: "/src/a", includeSubdirs: true }],
     avoidDuplicates: true,
   });
   return { ...fake, store };
@@ -166,7 +165,7 @@ async function startedStore() {
 
 test("begin：调 start、订阅事件、取一次快照", async () => {
   const { state, store } = await startedStore();
-  assert.deepEqual(state.calls, ["start:/src/a:true:true", "subscribe", "status:b1"]);
+  assert.deepEqual(state.calls, ["start:/src/a:true", "subscribe", "status:b1"]);
   assert.equal(store.batchId(), "b1");
   assert.equal(store.open(), true);
   assert.equal(store.error(), null);
@@ -223,8 +222,11 @@ test("多源目录：计数是聚合值，标签给 [2/3] 目录名", async () =
   const store = createImportStore({ api: fake.api });
   await store.begin({
     repositoryId: "repo-1",
-    sourceDirs: ["/src/a", "/src/b", "/src/c"],
-    includeSubdirs: true,
+    sources: [
+      { path: "/src/a", includeSubdirs: true },
+      { path: "/src/b", includeSubdirs: true },
+      { path: "/src/c", includeSubdirs: false },
+    ],
     avoidDuplicates: true,
   });
 
@@ -344,8 +346,7 @@ test("命令失败：记下原因，但不清掉已有进度", async () => {
   });
   await store.begin({
     repositoryId: "repo-1",
-    sourceDirs: ["/src/a"],
-    includeSubdirs: true,
+    sources: [{ path: "/src/a", includeSubdirs: true }],
     avoidDuplicates: true,
   });
   fake.emit(
@@ -365,8 +366,7 @@ test("开始导入失败：记原因、没有批次、不订阅", async () => {
   const store = createImportStore({ api: fake.api });
   await store.begin({
     repositoryId: "repo-1",
-    sourceDirs: ["/src/a"],
-    includeSubdirs: true,
+    sources: [{ path: "/src/a", includeSubdirs: true }],
     avoidDuplicates: false,
   });
   assert.equal(store.error(), "库离线了");
@@ -388,8 +388,7 @@ test("浏览器降级：没有后端时给一句人话，不订阅、不空转",
   });
   await store.begin({
     repositoryId: "repo-1",
-    sourceDirs: ["/src/a"],
-    includeSubdirs: true,
+    sources: [{ path: "/src/a", includeSubdirs: true }],
     avoidDuplicates: true,
   });
   assert.equal(store.batchId(), null);
@@ -433,8 +432,7 @@ test("导出错误清单：拿到条数；失败时返回 0 并记原因", async
   });
   await broken.begin({
     repositoryId: "repo-1",
-    sourceDirs: ["/src/a"],
-    includeSubdirs: true,
+    sources: [{ path: "/src/a", includeSubdirs: true }],
     avoidDuplicates: true,
   });
   assert.equal(await broken.exportErrors("/root/errors.json"), 0);

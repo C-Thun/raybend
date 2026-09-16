@@ -116,6 +116,17 @@ pub struct ImportPrecheckDto {
     pub needed_bytes: u64,
 }
 
+/// 一个待导入的源目录（「包含子目录」是**每个目录各一份**的开关，
+/// 界面上的来源树就是这么给的 —— 不能拿一个布尔值糊弄整批）。
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportSourceArg {
+    /// 源根目录。
+    pub path: String,
+    /// 是否包含子目录。
+    pub include_subdirs: bool,
+}
+
 /// `import_start` 的结果。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -161,16 +172,25 @@ pub struct InterruptedRunDto {
 pub async fn import_precheck<R: Runtime>(
     app: AppHandle<R>,
     repository_id: String,
-    source_dirs: Vec<String>,
-    include_subdirs: bool,
+    sources: Vec<ImportSourceArg>,
 ) -> Result<ImportPrecheckDto, String> {
     let handle = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let root = resolve_root(&handle, &repository_id)?;
         let scanner = FsScanner;
-        let roots: Vec<PathBuf> = source_dirs.iter().map(PathBuf::from).collect();
-        let total_bytes = space::estimate_bytes(&scanner, &roots, include_subdirs, &Cancel::new())
-            .map_err(|e| e.to_string())?;
+        // 一个目录一个开关，所以逐个估（源的规模远比库小，重复走一遍不肉疼）
+        let mut total_bytes = 0u64;
+        for source in &sources {
+            total_bytes = total_bytes.saturating_add(
+                space::estimate_bytes(
+                    &scanner,
+                    &[PathBuf::from(&source.path)],
+                    source.include_subdirs,
+                    &Cancel::new(),
+                )
+                .map_err(|e| e.to_string())?,
+            );
+        }
         let free_bytes = raybend::import::fsops::free_bytes_of(&root);
         let verdict = space::check_space(total_bytes, free_bytes);
         let needed_bytes = space::needed_with_margin(total_bytes);
@@ -191,11 +211,10 @@ pub async fn import_precheck<R: Runtime>(
 pub async fn import_start<R: Runtime>(
     app: AppHandle<R>,
     repository_id: String,
-    source_dirs: Vec<String>,
-    include_subdirs: bool,
+    sources: Vec<ImportSourceArg>,
     avoid_duplicates: bool,
 ) -> Result<ImportStartDto, String> {
-    if source_dirs.is_empty() {
+    if sources.is_empty() {
         return Err("没有选中任何源目录".to_string());
     }
 
@@ -221,16 +240,16 @@ pub async fn import_start<R: Runtime>(
     let batch_handle = BatchHandle::new(progress);
     let control = Control::new();
 
-    let jobs: Vec<RunRequest> = source_dirs
+    let jobs: Vec<RunRequest> = sources
         .iter()
         .enumerate()
-        .map(|(index, dir)| RunRequest {
+        .map(|(index, source)| RunRequest {
             index,
-            source_root: PathBuf::from(dir),
+            source_root: PathBuf::from(&source.path),
             photos_dir: repository::DEFAULT_PHOTOS_DIR.to_string(),
             template: parsed.clone(),
             template_source: template_source.clone(),
-            include_subdirs,
+            include_subdirs: source.include_subdirs,
             avoid_duplicates,
         })
         .collect();

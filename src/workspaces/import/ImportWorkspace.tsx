@@ -19,8 +19,14 @@
  */
 
 import { createEffect, createSignal, onMount, Show } from "solid-js";
+import * as importCommands from "../../api/import.ts";
+import { importPrecheck, onImportProgress, type ImportSource } from "../../api/import.ts";
 import { locale, t } from "../../i18n/index.ts";
 import { PhotoGrid, type PhotoGridStore } from "../../features/photo-grid/index.ts";
+import {
+  createImportStore,
+  ImportProgressDialog,
+} from "../../features/import/index.ts";
 import {
   CreateRepositoryDialog,
   RepositoryFooter,
@@ -35,12 +41,70 @@ export interface ImportWorkspaceProps {
   grid: PhotoGridStore;
 }
 
+/** 字节数 → 「1.2 GB」这种人话（预检提示用）。 */
+function formatGiB(bytes: number): string {
+  const gb = bytes / (1024 * 1024 * 1024);
+  if (gb >= 1) return `${gb.toFixed(1)} GB`;
+  return `${Math.round(bytes / (1024 * 1024))} MB`;
+}
+
 export function ImportWorkspace(props: ImportWorkspaceProps) {
   const store = props.store;
   const grid = props.grid;
   const [creating, setCreating] = createSignal(false);
-  const [importStubShown, setImportStubShown] = createSignal(false);
   const groupingLocale = () => (locale() === "en-US" ? "en-US" : "zh-CN");
+
+  // 导入：进度弹窗的状态机（api 从 `src/api/` 注入，浏览器里自动降级）
+  const importStore = createImportStore({
+    api: {
+      start: importCommands.importStart,
+      pause: importCommands.importPause,
+      resume: importCommands.importResume,
+      cancel: importCommands.importCancel,
+      status: importCommands.importStatus,
+      exportErrors: importCommands.importErrorsExport,
+      subscribe: onImportProgress,
+    },
+  });
+  // 空间预检的结论：偏紧就先问一句再开工（`plans/M1-6.md` §3.3）
+  const [spaceWarning, setSpaceWarning] = createSignal<string | null>(null);
+
+  /** 已勾选目录 → 每个目录带自己的「包含子目录」开关。 */
+  const sources = (): ImportSource[] =>
+    store.checkedDirs().map((dir) => ({
+      path: dir.path,
+      includeSubdirs: dir.includeSubdirs,
+    }));
+
+  /** 真正开始导入（`avoidDuplicates` 用右列那个复选框的状态）。 */
+  async function startImport(): Promise<void> {
+    const repository = store.selectedRepository();
+    if (repository === null || sources().length === 0) return;
+    try {
+      const precheck = await importPrecheck(repository.id, sources());
+      if (precheck.tight) {
+        setSpaceWarning(
+          t("import.space_warning", {
+            needed: formatGiB(precheck.neededBytes),
+            free: formatGiB(precheck.freeBytes ?? 0),
+          }),
+        );
+        return;
+      }
+    } catch {
+      // 预检失败不该拦住导入（例如网络盘读不到可用空间）
+    }
+    await beginImport(repository.id);
+  }
+
+  async function beginImport(repositoryId: string): Promise<void> {
+    setSpaceWarning(null);
+    await importStore.begin({
+      repositoryId,
+      sources: sources(),
+      avoidDuplicates: store.avoidDuplicates(),
+    });
+  }
 
   onMount(() => {
     // 三个列表各拉一次；互不依赖，失败各自记状态（不阻塞其它面板）
@@ -95,14 +159,39 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
           repositoryOnline={store.selectedRepository()?.online ?? false}
           avoidDuplicates={store.avoidDuplicates()}
           onAvoidDuplicatesChange={store.setAvoidDuplicates}
-          onImport={() => setImportStubShown(true)}
+          onImport={() => void startImport()}
           locale={groupingLocale()}
         />
 
-        {/* M1-5 只做到「按钮可点」；真正的执行与进度弹窗属 M1-6 */}
-        <Show when={importStubShown()}>
-          <p class="text-fs-0 text-fg-3">{t("repo.import_running")}</p>
+        {/* 空间偏紧：问一句再开工（不做成弹窗套弹窗，就一行） */}
+        <Show when={spaceWarning()}>
+          {(message) => (
+            <div class="flex flex-col gap-1 rounded-ui bg-surface-track p-2">
+              <p class="text-fs-1 text-danger">{message()}</p>
+              <div class="flex justify-end gap-2">
+                <button
+                  type="button"
+                  class="cursor-pointer text-fs-1 text-fg-2 underline"
+                  onClick={() => setSpaceWarning(null)}
+                >
+                  {t("common.cancel")}
+                </button>
+                <button
+                  type="button"
+                  class="cursor-pointer text-fs-1 text-brand"
+                  onClick={() => {
+                    const repository = store.selectedRepository();
+                    if (repository !== null) void beginImport(repository.id);
+                  }}
+                >
+                  {t("import.space_continue")}
+                </button>
+              </div>
+            </div>
+          )}
         </Show>
+
+        <ImportProgressDialog store={importStore} />
 
         <CreateRepositoryDialog
           open={creating()}

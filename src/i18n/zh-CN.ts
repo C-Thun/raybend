@@ -13,6 +13,31 @@
 
 export const zhCN = {
  // ── 应用 ───────────────────────────────────────────────
+ "import.title": "导入中",
+ "import.done_title": "导入完成",
+ "import.preparing": "正在准备…",
+ "import.summary": "{dirs} 个目录 · 共 {total} 张 —— 已导入的会留在库里",
+ "import.stage.scan": "扫描",
+ "import.stage.plan": "规划",
+ "import.stage.import": "导入",
+ "import.stage.thumbs": "缩略图",
+ "import.stage.done": "完成",
+ "import.imported": "已导入",
+ "import.skipped": "跳过",
+ "import.duplicates": "其中重复",
+ "import.failed": "失败",
+ "import.pause": "暂停",
+ "import.resume": "继续",
+ "import.cancel_button": "取消导入",
+ "import.cancel_confirm": "取消这次导入？",
+ "import.keep_running": "继续导入",
+ "import.keep_partial": "已经导入的照片会保留在库里，取消不会回滚",
+ "import.export_errors": "导出错误清单",
+ "import.exported_to": "已导出到 {path}",
+ "import.errors_truncated": "只显示了最后 {shown} 条（共 {total} 条）",
+ "import.reveal": "在库中查看这些照片",
+ "import.space_warning": "目标卷空间可能不够：需要约 {needed}，可用 {free}",
+ "import.space_continue": "仍然继续",
  "app.name": "光伴",
 
  // ── titlebar（应用标题行，design/main.md §2.1）──────────

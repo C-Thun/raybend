@@ -10,6 +10,7 @@
  *    这里只做「取当前 run、拼 `[2/3] 目录名`」这类展示层的事 —— 两边都算一遍迟早会不一致。
  */
 
+import type { ImportSource } from "../../api/import.ts";
 import type {
   ImportBatchProgress,
   ImportError,
@@ -22,8 +23,7 @@ import type {
 export interface ImportApi {
   start: (
     repositoryId: string,
-    sourceDirs: readonly string[],
-    includeSubdirs: boolean,
+    sources: readonly ImportSource[],
     avoidDuplicates: boolean,
   ) => Promise<ImportStart>;
   pause: (batchId: string) => Promise<ImportBatchProgress>;
@@ -40,8 +40,8 @@ export interface ImportApi {
 /** 一次导入请求。 */
 export interface ImportRequest {
   repositoryId: string;
-  sourceDirs: readonly string[];
-  includeSubdirs: boolean;
+  /** 每个源目录带自己的「包含子目录」开关。 */
+  sources: readonly ImportSource[];
   avoidDuplicates: boolean;
 }
 
@@ -159,8 +159,7 @@ export function createImportStore(deps: { api: ImportApi }): ImportStore {
     try {
       const started = await deps.api.start(
         request.repositoryId,
-        request.sourceDirs,
-        request.includeSubdirs,
+        request.sources,
         request.avoidDuplicates,
       );
       if (started.batchId === "") {

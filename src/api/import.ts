@@ -22,6 +22,12 @@ import type {
   InterruptedRun,
 } from "./types.ts";
 
+/** 一个待导入的源目录（「包含子目录」是每个目录各一份的开关）。 */
+export interface ImportSource {
+  path: string;
+  includeSubdirs: boolean;
+}
+
 /** 进度事件名（与 `src-tauri/src/import.rs` 的 `PROGRESS_EVENT` 一致）。 */
 export const IMPORT_PROGRESS_EVENT = "import://progress";
 
@@ -41,24 +47,21 @@ function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
  */
 export async function importPrecheck(
   repositoryId: string,
-  sourceDirs: readonly string[],
-  includeSubdirs: boolean,
+  sources: readonly ImportSource[],
 ): Promise<ImportPrecheck> {
   if (!isTauriRuntime()) {
     return { totalBytes: 0, freeBytes: null, tight: false, neededBytes: 0 };
   }
   return call<ImportPrecheck>("import_precheck", {
     repositoryId,
-    sourceDirs: [...sourceDirs],
-    includeSubdirs,
+    sources: sources.map((source) => ({ ...source })),
   });
 }
 
 /** 开始导入（每个源目录一个 run，整批一个 batchId）。 */
 export async function importStart(
   repositoryId: string,
-  sourceDirs: readonly string[],
-  includeSubdirs: boolean,
+  sources: readonly ImportSource[],
   avoidDuplicates: boolean,
 ): Promise<ImportStart> {
   if (!isTauriRuntime()) {
@@ -66,8 +69,7 @@ export async function importStart(
   }
   return call<ImportStart>("import_start", {
     repositoryId,
-    sourceDirs: [...sourceDirs],
-    includeSubdirs,
+    sources: sources.map((source) => ({ ...source })),
     avoidDuplicates,
   });
 }
