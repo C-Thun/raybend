@@ -235,6 +235,35 @@ impl TemplateError {
     }
 }
 
+/// 各宽度序号的值（`(宽度, 值)` 对）—— 缺的宽度按 0 渲染。
+///
+/// 用「宽度 → 值」而不是单个数字：`:SEQ000` 与 `:SEQ0000` 是两个独立的计数器
+/// （`REPOSITORY.md` §3.3），一个模版里同时出现时各自的当前值不一样。
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SeqValues<'a> {
+    pairs: &'a [(usize, u64)],
+}
+
+impl<'a> SeqValues<'a> {
+    /// 一个都没有（渲染成 0 占位）。
+    pub const NONE: Self = Self { pairs: &[] };
+
+    /// 由 `(宽度, 值)` 对构造。
+    #[must_use]
+    pub const fn new(pairs: &'a [(usize, u64)]) -> Self {
+        Self { pairs }
+    }
+
+    /// 取某个宽度的值（没有就当 0）。
+    #[must_use]
+    pub fn get(&self, width: usize) -> u64 {
+        self.pairs
+            .iter()
+            .find(|(w, _)| *w == width)
+            .map_or(0, |(_, v)| *v)
+    }
+}
+
 /// 渲染一张照片需要的值。
 #[derive(Debug, Clone, Copy, Default)]
 pub struct RenderCtx<'a> {
@@ -246,8 +275,8 @@ pub struct RenderCtx<'a> {
     pub brand: Option<&'a str>,
     /// 相机型号。
     pub model: Option<&'a str>,
-    /// 序号的值（由分配器给；模版里没用序号时忽略）。
-    pub seq: Option<u64>,
+    /// 各宽度序号的值（由分配器给；模版里没用序号时是空的）。
+    pub seqs: SeqValues<'a>,
 }
 
 /// 渲染结果。
@@ -455,7 +484,7 @@ impl Template {
             match part {
                 Part::Literal(s) => text.push_str(s),
                 Part::Seq { width } => {
-                    let value = ctx.seq.unwrap_or(0);
+                    let value = ctx.seqs.get(*width);
                     // `{:0width$}` 不足位补零；超出位数就原样展开（宁可长，不可截断）
                     text.push_str(&format!("{value:0width$}"));
                 }
@@ -648,7 +677,7 @@ mod tests {
             stem,
             brand: Some("NIKON CORPORATION"),
             model: Some("Z7II"),
-            seq: Some(1),
+            seqs: SeqValues::NONE,
         }
     }
 
@@ -722,8 +751,11 @@ mod tests {
 
     #[test]
     fn sequence_pads_to_its_width() {
-        let mut c = ctx("P0001");
-        c.seq = Some(7);
+        let values = [(3usize, 7u64), (4, 7), (5, 7), (1, 7)];
+        let c = RenderCtx {
+            seqs: SeqValues::new(&values),
+            ..ctx("P0001")
+        };
         assert_eq!(render(":SEQ000", &c), "007");
         assert_eq!(render(":SEQ0000", &c), "0007");
         assert_eq!(render(":SEQ00000", &c), "00007");
@@ -732,9 +764,25 @@ mod tests {
     }
 
     #[test]
+    fn each_width_has_its_own_value() {
+        // 同一张照片、同一个模版：两个宽度的计数器各走各的（REPOSITORY.md §3.3）
+        let values = [(3usize, 12u64), (4, 345)];
+        let c = RenderCtx {
+            seqs: SeqValues::new(&values),
+            ..ctx("P0001")
+        };
+        assert_eq!(render(":SEQ000-:SEQ0000", &c), "012-0345");
+        // 没给的宽度按 0 顶
+        assert_eq!(render(":SEQ00000", &c), "00000");
+    }
+
+    #[test]
     fn sequence_keeps_growing_past_its_width() {
-        let mut c = ctx("P0001");
-        c.seq = Some(1234);
+        let values = [(3usize, 1234u64)];
+        let c = RenderCtx {
+            seqs: SeqValues::new(&values),
+            ..ctx("P0001")
+        };
         assert_eq!(
             render(":SEQ000", &c),
             "1234",
@@ -770,7 +818,12 @@ mod tests {
     #[test]
     fn sequence_is_matched_before_variables() {
         // `:SEQ000` 不能因为「以 S 开头的变量」之类的原因被拆错
-        assert_eq!(render(":SEQ000:FILENAME", &ctx("P0001")), "001P0001");
+        let values = [(3usize, 1u64)];
+        let c = RenderCtx {
+            seqs: SeqValues::new(&values),
+            ..ctx("P0001")
+        };
+        assert_eq!(render(":SEQ000:FILENAME", &c), "001P0001");
     }
 
     /* ── 规则 3：值来自每张照片自己 ────────────────────────────────── */
@@ -859,7 +912,6 @@ mod tests {
         let tpl = parse(":CYEAR-:CMONTH-:CDAY/:FILENAME").expect("能解析");
         let out = tpl.render(&RenderCtx {
             taken_at: None,
-            seq: None,
             ..ctx("P0001")
         });
         assert_eq!(out.text, "0000-00-00/P0001");

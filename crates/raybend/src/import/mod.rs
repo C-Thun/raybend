@@ -13,4 +13,5 @@
 //! **本模块不依赖 Tauri**（`AGENTS.md` §2.4/§4）：文件系统之外的东西（`app.db` 的任务队列、
 //! 往界面推进度）都通过注入的回调/接口拿进来，由 `src-tauri` 提供实现。
 
+pub mod plan;
 pub mod template;
