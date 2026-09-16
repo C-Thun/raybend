@@ -100,7 +100,7 @@ export function Tile(props: TileProps) {
     >
       {/* ── 画面区 ─────────────────────────────────────────── */}
       <div
-        class="relative flex items-center justify-center overflow-hidden bg-surface-track"
+        class="relative flex items-center justify-center overflow-hidden bg-surface-main"
         style={{
           width: "var(--tile-cell-w)",
           height: "var(--tile-cell-h)",
