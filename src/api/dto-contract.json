@@ -184,5 +184,82 @@
     "ok",
     "paths",
     "warnings"
+  ],
+  "AssetItem": [
+    "cameraMake",
+    "cameraModel",
+    "colorLabel",
+    "exposureMs",
+    "ext",
+    "fNumber",
+    "fileName",
+    "focalMm",
+    "height",
+    "id",
+    "isRaw",
+    "iso",
+    "lens",
+    "likeState",
+    "lockLevel",
+    "missing",
+    "orientation",
+    "rating",
+    "relPath",
+    "sizeBytes",
+    "takenAt",
+    "width"
+  ],
+  "BrowseWindow": [
+    "items",
+    "offset",
+    "total"
+  ],
+  "TimelineEntry": [
+    "id",
+    "takenAt"
+  ],
+  "BrowseTimeline": [
+    "entries",
+    "total"
+  ],
+  "FacetCount": [
+    "count",
+    "value"
+  ],
+  "BrowseFacets": [
+    "colors",
+    "likes",
+    "locks",
+    "ratings"
+  ],
+  "MarkingItem": [
+    "colorLabel",
+    "id",
+    "likeState",
+    "lockLevel",
+    "rating"
+  ],
+  "MarkResult": [
+    "canRedo",
+    "canUndo",
+    "changed",
+    "redoLabel",
+    "skippedLocked",
+    "undoLabel"
+  ],
+  "DeleteFailure": [
+    "path",
+    "reason"
+  ],
+  "DeleteResult": [
+    "alreadyGone",
+    "blockedLocked",
+    "deleted",
+    "failed"
+  ],
+  "FlagsView": [
+    "picks",
+    "rejects",
+    "total"
   ]
 }

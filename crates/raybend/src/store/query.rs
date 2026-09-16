@@ -133,7 +133,11 @@ impl Filter {
 
         if !self.ratings.is_empty() {
             let placeholders = placeholders(self.ratings.len());
-            let params = self.ratings.iter().map(|r| Value::Integer(i64::from(*r))).collect();
+            let params = self
+                .ratings
+                .iter()
+                .map(|r| Value::Integer(i64::from(*r)))
+                .collect();
             out.push((format!("a.rating IN ({placeholders})"), params));
         }
 
@@ -147,7 +151,11 @@ impl Filter {
 
         if !self.locks.is_empty() {
             let placeholders = placeholders(self.locks.len());
-            let params = self.locks.iter().map(|l| Value::Integer(i64::from(*l))).collect();
+            let params = self
+                .locks
+                .iter()
+                .map(|l| Value::Integer(i64::from(*l)))
+                .collect();
             out.push((format!("a.lock_level IN ({placeholders})"), params));
         }
 
@@ -191,7 +199,12 @@ impl Filter {
             ));
         }
 
-        if let Some(text) = self.text.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
+        if let Some(text) = self
+            .text
+            .as_deref()
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+        {
             out.push(text_condition(text));
         }
 
@@ -214,7 +227,9 @@ fn nullable_in(column: &str, values: &[String]) -> Option<(String, Vec<Value>)> 
     if values.is_empty() {
         return None;
     }
-    let wants_null = values.iter().any(|v| v == NO_COLOR || v == NO_LIKE || v == NO_CAMERA);
+    let wants_null = values
+        .iter()
+        .any(|v| v == NO_COLOR || v == NO_LIKE || v == NO_CAMERA);
     let concrete: Vec<&String> = values
         .iter()
         .filter(|v| !(v.as_str() == NO_COLOR || v.as_str() == NO_LIKE || v.as_str() == NO_CAMERA))
@@ -223,10 +238,7 @@ fn nullable_in(column: &str, values: &[String]) -> Option<(String, Vec<Value>)> 
     let mut sql = String::new();
     let mut params: Vec<Value> = Vec::new();
     if !concrete.is_empty() {
-        sql.push_str(&format!(
-            "{column} IN ({})",
-            placeholders(concrete.len())
-        ));
+        sql.push_str(&format!("{column} IN ({})", placeholders(concrete.len())));
         params.extend(concrete.into_iter().map(|v| Value::Text(v.clone())));
     }
     if wants_null {
@@ -552,7 +564,12 @@ pub fn count(conn: &Connection, query: &Query) -> Result<i64> {
 }
 
 /// 取可视窗口那一页（虚拟网格只要这几十行）。
-pub fn page(conn: &Connection, query: &Query, offset: usize, limit: usize) -> Result<Vec<AssetRow>> {
+pub fn page(
+    conn: &Connection,
+    query: &Query,
+    offset: usize,
+    limit: usize,
+) -> Result<Vec<AssetRow>> {
     prepare(conn, query)?;
     let (where_sql, mut params) = query.where_clause();
     let order = query.sort.key.order_by(query.sort.desc);
@@ -906,7 +923,11 @@ mod tests {
             "  photos/2026-08-15  ",
         ] {
             let query = Query::new(Scope::subtree(raw));
-            assert_eq!(ids_of(&page(&conn, &query, 0, 10).unwrap()), vec![id], "{raw}");
+            assert_eq!(
+                ids_of(&page(&conn, &query, 0, 10).unwrap()),
+                vec![id],
+                "{raw}"
+            );
         }
     }
 
@@ -1042,7 +1063,13 @@ mod tests {
     #[test]
     fn photos_without_a_taken_at_never_match_a_date_range() {
         let conn = catalog();
-        add(&conn, Spec { taken_at: None, ..Spec::default() });
+        add(
+            &conn,
+            Spec {
+                taken_at: None,
+                ..Spec::default()
+            },
+        );
         let mut query = Query::new(Scope::Repository);
         query.filter.taken_from = Some(0);
         assert_eq!(count(&conn, &query).unwrap(), 0);
@@ -1185,7 +1212,13 @@ mod tests {
     #[test]
     fn default_sort_is_newest_first_with_unknown_times_last() {
         let conn = catalog();
-        let unknown = add(&conn, Spec { taken_at: None, ..Spec::default() });
+        let unknown = add(
+            &conn,
+            Spec {
+                taken_at: None,
+                ..Spec::default()
+            },
+        );
         let old = add(
             &conn,
             Spec {
@@ -1313,7 +1346,11 @@ mod tests {
         query.filter.text = Some("myp".to_string());
         assert_eq!(ids_of(&page(&conn, &query, 0, 10).unwrap()), vec![id]);
         query.filter.text = Some("MYP".to_string());
-        assert_eq!(ids_of(&page(&conn, &query, 0, 10).unwrap()), vec![id], "大小写不敏感");
+        assert_eq!(
+            ids_of(&page(&conn, &query, 0, 10).unwrap()),
+            vec![id],
+            "大小写不敏感"
+        );
     }
 
     #[test]
@@ -1351,9 +1388,28 @@ mod tests {
     #[test]
     fn facets_count_each_value_and_respect_the_scope() {
         let conn = catalog();
-        add(&conn, Spec { rating: 3, ..Spec::default() });
-        add(&conn, Spec { rating: 3, ..Spec::default() });
-        add(&conn, Spec { rating: 0, color: Some("blue"), ..Spec::default() });
+        add(
+            &conn,
+            Spec {
+                rating: 3,
+                ..Spec::default()
+            },
+        );
+        add(
+            &conn,
+            Spec {
+                rating: 3,
+                ..Spec::default()
+            },
+        );
+        add(
+            &conn,
+            Spec {
+                rating: 0,
+                color: Some("blue"),
+                ..Spec::default()
+            },
+        );
         add(
             &conn,
             Spec {

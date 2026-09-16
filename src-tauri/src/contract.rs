@@ -286,6 +286,18 @@ fn every_contract_entry_has_a_test() {
         "InterruptedRun",
         "RepositorySettings",
         "TemplatePreview",
+        // 浏览（M2-W1）
+        "AssetItem",
+        "BrowseWindow",
+        "TimelineEntry",
+        "BrowseTimeline",
+        "FacetCount",
+        "BrowseFacets",
+        "MarkingItem",
+        "MarkResult",
+        "DeleteResult",
+        "DeleteFailure",
+        "FlagsView",
     ];
     for key in value.as_object().unwrap().keys() {
         if key.starts_with('_') {
@@ -296,4 +308,34 @@ fn every_contract_entry_has_a_test() {
             "契约文件里的 {key} 没有对应的断言"
         );
     }
+}
+
+// ── 浏览（M2-W1）────────────────────────────────────────────
+//
+// 浏览的响应结构数量多、字段也多（一张照片的元信息 + 筛选分面 + 标记结果），
+// 少写一个键就是「界面上永远空着」那类静默故障 —— 全部进契约。
+
+#[test]
+fn browse_assets_dtos_match_contract() {
+    use crate::browse::{
+        AssetItem, BrowseFacets, BrowseTimeline, BrowseWindow, DeleteResult, FacetCount, FlagsView,
+        MarkResult, MarkingItem, TimelineEntry,
+    };
+
+    assert_eq!(keys_of::<AssetItem>(), contract_keys("AssetItem"));
+    assert_eq!(keys_of::<BrowseWindow>(), contract_keys("BrowseWindow"));
+    assert_eq!(keys_of::<TimelineEntry>(), contract_keys("TimelineEntry"));
+    assert_eq!(keys_of::<BrowseTimeline>(), contract_keys("BrowseTimeline"));
+    assert_eq!(keys_of::<FacetCount>(), contract_keys("FacetCount"));
+    assert_eq!(keys_of::<BrowseFacets>(), contract_keys("BrowseFacets"));
+    assert_eq!(keys_of::<MarkingItem>(), contract_keys("MarkingItem"));
+    assert_eq!(keys_of::<MarkResult>(), contract_keys("MarkResult"));
+    assert_eq!(keys_of::<DeleteResult>(), contract_keys("DeleteResult"));
+    assert_eq!(keys_of::<FlagsView>(), contract_keys("FlagsView"));
+}
+
+#[test]
+fn delete_failure_is_a_nested_dto_too() {
+    use crate::browse::DeleteFailure;
+    assert_eq!(keys_of::<DeleteFailure>(), contract_keys("DeleteFailure"));
 }

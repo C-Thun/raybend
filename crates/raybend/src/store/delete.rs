@@ -314,7 +314,8 @@ mod tests {
         conn.execute("UPDATE assets SET lock_level = 1 WHERE id = ?1", [locked])
             .unwrap();
 
-        let report = delete_assets_with(&MovingTrasher::new(), &conn, root, &[free, locked]).unwrap();
+        let report =
+            delete_assets_with(&MovingTrasher::new(), &conn, root, &[free, locked]).unwrap();
         assert_eq!(report.deleted, 1);
         assert_eq!(report.blocked_locked, vec![locked]);
         assert!(!asset_exists(&conn, free));
@@ -407,7 +408,10 @@ mod tests {
     #[test]
     fn absolute_paths_handle_separators() {
         let root = Path::new("/lib");
-        assert_eq!(absolute(root, "photos/a.jpg"), PathBuf::from("/lib/photos/a.jpg"));
+        assert_eq!(
+            absolute(root, "photos/a.jpg"),
+            PathBuf::from("/lib/photos/a.jpg")
+        );
         assert_eq!(
             absolute(root, "photos\\a.jpg"),
             PathBuf::from("/lib/photos/a.jpg")

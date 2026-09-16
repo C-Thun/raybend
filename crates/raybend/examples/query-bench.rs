@@ -15,10 +15,10 @@
 
 use std::time::Instant;
 
-use rusqlite::Connection;
 use raybend::store::migration::{self, DbKind};
 use raybend::store::pragma;
 use raybend::store::query::{Combinator, Query, Scope, Sort, SortKey};
+use rusqlite::Connection;
 
 const T0: i64 = 1_789_516_800_000; // 2026-09 前后
 
@@ -74,10 +74,7 @@ fn main() {
         }
         println!(
             "{:<28} 命中 {:>7} 张  计数 P50 {:>7.2} ms  P95 {:>7.2} ms",
-            name,
-            total,
-            p50,
-            p95
+            name, total, p50, p95
         );
     }
 
@@ -242,7 +239,10 @@ fn open_and_fill(rows: usize) -> Connection {
 
     // 全文索引：整份重建（与生产路径一致）
     let n = raybend::store::fts::rebuild(&conn).expect("建索引");
-    println!("建库耗时 {:.1} 秒（含全文索引 {n} 行）", started.elapsed().as_secs_f64());
+    println!(
+        "建库耗时 {:.1} 秒（含全文索引 {n} 行）",
+        started.elapsed().as_secs_f64()
+    );
     conn
 }
 
@@ -300,10 +300,7 @@ fn time_it<F: FnMut()>(runs: usize, mut f: F) -> (f64, f64) {
         samples.push(started.elapsed().as_secs_f64() * 1000.0);
     }
     samples.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    (
-        percentile(&samples, 50.0),
-        percentile(&samples, 95.0),
-    )
+    (percentile(&samples, 50.0), percentile(&samples, 95.0))
 }
 
 fn percentile(sorted: &[f64], p: f64) -> f64 {

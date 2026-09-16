@@ -21,14 +21,24 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import type {
+  AssetItem,
+  BrowseFacets,
+  BrowseTimeline,
+  BrowseWindow,
+  DeleteFailure,
+  DeleteResult,
   DirEntry,
+  FacetCount,
   FileExif,
+  FlagsView,
   ImportBatchProgress,
   ImportCurrentItem,
   ImportError,
   ImportPrecheck,
   ImportRunProgress,
   ImportStart,
+  MarkingItem,
+  MarkResult,
   MetaFile,
   ImportPlannedRun,
   InterruptedRun,
@@ -44,6 +54,7 @@ import type {
   SourceScan,
   ThumbCacheStats,
   TimeEntry,
+  TimelineEntry,
   Volume,
 } from "./types.ts";
 
@@ -245,6 +256,61 @@ const TEMPLATE_PREVIEW_KEYS = [
   "warnings",
 ] as const satisfies readonly (keyof TemplatePreview)[];
 
+/* ── 浏览（M2-W1）── */
+
+const ASSET_ITEM_KEYS = [
+  "cameraMake",
+  "cameraModel",
+  "colorLabel",
+  "exposureMs",
+  "ext",
+  "fNumber",
+  "fileName",
+  "focalMm",
+  "height",
+  "id",
+  "isRaw",
+  "iso",
+  "lens",
+  "likeState",
+  "lockLevel",
+  "missing",
+  "orientation",
+  "rating",
+  "relPath",
+  "sizeBytes",
+  "takenAt",
+  "width",
+] as const satisfies readonly (keyof AssetItem)[];
+const BROWSE_WINDOW_KEYS = ["items", "offset", "total"] as const satisfies readonly (keyof BrowseWindow)[];
+const TIMELINE_ENTRY_KEYS = ["id", "takenAt"] as const satisfies readonly (keyof TimelineEntry)[];
+const BROWSE_TIMELINE_KEYS = ["entries", "total"] as const satisfies readonly (keyof BrowseTimeline)[];
+const FACET_COUNT_KEYS = ["count", "value"] as const satisfies readonly (keyof FacetCount)[];
+const BROWSE_FACETS_KEYS = ["colors", "likes", "locks", "ratings"] as const satisfies readonly (keyof BrowseFacets)[];
+const MARKING_ITEM_KEYS = [
+  "colorLabel",
+  "id",
+  "likeState",
+  "lockLevel",
+  "rating",
+] as const satisfies readonly (keyof MarkingItem)[];
+const MARK_RESULT_KEYS = [
+  "canRedo",
+  "canUndo",
+  "changed",
+  "redoLabel",
+  "skippedLocked",
+  "undoLabel",
+] as const satisfies readonly (keyof MarkResult)[];
+const DELETE_FAILURE_KEYS = ["path", "reason"] as const satisfies readonly (keyof DeleteFailure)[];
+const DELETE_RESULT_KEYS = [
+  "alreadyGone",
+  "blockedLocked",
+  "deleted",
+  "failed",
+] as const satisfies readonly (keyof DeleteResult)[];
+const FLAGS_VIEW_KEYS = ["picks", "rejects", "total"] as const satisfies readonly (keyof FlagsView)[];
+
 /** 手写的键表 → 覆盖检查（跑一遍，顺便让 `noUnusedLocals` 满意） */
 const KEY_TABLES = {
   RecentDir: checkKeys<RecentDir, typeof RECENT_DIR_KEYS>(RECENT_DIR_KEYS),
@@ -295,6 +361,17 @@ const KEY_TABLES = {
   TemplatePreview: checkKeys<TemplatePreview, typeof TEMPLATE_PREVIEW_KEYS>(
     TEMPLATE_PREVIEW_KEYS,
   ),
+  AssetItem: checkKeys<AssetItem, typeof ASSET_ITEM_KEYS>(ASSET_ITEM_KEYS),
+  BrowseWindow: checkKeys<BrowseWindow, typeof BROWSE_WINDOW_KEYS>(BROWSE_WINDOW_KEYS),
+  TimelineEntry: checkKeys<TimelineEntry, typeof TIMELINE_ENTRY_KEYS>(TIMELINE_ENTRY_KEYS),
+  BrowseTimeline: checkKeys<BrowseTimeline, typeof BROWSE_TIMELINE_KEYS>(BROWSE_TIMELINE_KEYS),
+  FacetCount: checkKeys<FacetCount, typeof FACET_COUNT_KEYS>(FACET_COUNT_KEYS),
+  BrowseFacets: checkKeys<BrowseFacets, typeof BROWSE_FACETS_KEYS>(BROWSE_FACETS_KEYS),
+  MarkingItem: checkKeys<MarkingItem, typeof MARKING_ITEM_KEYS>(MARKING_ITEM_KEYS),
+  MarkResult: checkKeys<MarkResult, typeof MARK_RESULT_KEYS>(MARK_RESULT_KEYS),
+  DeleteFailure: checkKeys<DeleteFailure, typeof DELETE_FAILURE_KEYS>(DELETE_FAILURE_KEYS),
+  DeleteResult: checkKeys<DeleteResult, typeof DELETE_RESULT_KEYS>(DELETE_RESULT_KEYS),
+  FlagsView: checkKeys<FlagsView, typeof FLAGS_VIEW_KEYS>(FLAGS_VIEW_KEYS),
 } as const;
 
 const HERE = dirname(fileURLToPath(import.meta.url));

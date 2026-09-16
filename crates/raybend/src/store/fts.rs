@@ -122,11 +122,7 @@ pub fn rebuild(conn: &Connection) -> Result<usize> {
             let lens: Option<String> = row.get(4)?;
             let description: Option<String> = row.get(5)?;
 
-            let file_name = rel_path
-                .rsplit('/')
-                .next()
-                .unwrap_or(&rel_path)
-                .to_string();
+            let file_name = rel_path.rsplit('/').next().unwrap_or(&rel_path).to_string();
             let camera = format!(
                 "{} {}",
                 make.unwrap_or_default().trim(),
@@ -164,12 +160,18 @@ pub fn rebuild(conn: &Connection) -> Result<usize> {
 }
 
 /// 索引一行的一手材料：`(相对路径, 品牌, 型号, 镜头, 描述)`。
-type IndexSource = (String, Option<String>, Option<String>, Option<String>, Option<String>);
+type IndexSource = (
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
 
 /// 只刷新一张照片的索引行（改描述 / 镜头时用，比重建快得多）。
 pub fn refresh_asset(conn: &Connection, asset_id: i64) -> Result<()> {
-    let row: Option<IndexSource> =
-        conn.query_row(
+    let row: Option<IndexSource> = conn
+        .query_row(
             "SELECT COALESCE((SELECT f.rel_path FROM asset_files f
                                WHERE f.asset_id = a.id AND f.role = 'bitmap' LIMIT 1),
                              (SELECT f.rel_path FROM asset_files f
@@ -313,8 +315,11 @@ mod tests {
         let id = add(&conn, "a/one.jpg");
         rebuild(&conn).unwrap();
 
-        conn.execute("UPDATE assets SET description = '海边的黄昏' WHERE id = ?1", [id])
-            .unwrap();
+        conn.execute(
+            "UPDATE assets SET description = '海边的黄昏' WHERE id = ?1",
+            [id],
+        )
+        .unwrap();
         // 直接改库（绕过 refresh）会让签名仍然「看起来新」——
         // 所以单行编辑的路径**必须**自己调 refresh_asset
         refresh_asset(&conn, id).unwrap();
@@ -327,7 +332,8 @@ mod tests {
         let conn = catalog();
         let id = add(&conn, "a/one.jpg");
         rebuild(&conn).unwrap();
-        conn.execute("DELETE FROM assets WHERE id = ?1", [id]).unwrap();
+        conn.execute("DELETE FROM assets WHERE id = ?1", [id])
+            .unwrap();
         refresh_asset(&conn, id).unwrap();
         assert_eq!(hits(&conn, "one"), Vec::<i64>::new());
         assert!(is_fresh(&conn).unwrap(), "删掉之后签名应当重新对上");
@@ -398,9 +404,11 @@ mod tests {
         rebuild(&conn).unwrap();
         assert_eq!(hits(&conn, "MYP0001"), vec![id]);
         let name: String = conn
-            .query_row("SELECT file_name FROM assets_fts WHERE rowid = ?1", [id], |r| {
-                r.get(0)
-            })
+            .query_row(
+                "SELECT file_name FROM assets_fts WHERE rowid = ?1",
+                [id],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(name, "MYP0001.png", "展示用文件名取位图那份");
     }
@@ -414,7 +422,15 @@ mod tests {
         // （`AGENTS.md` §7.2；查询侧对短词会回退 LIKE，这里测的是索引本身）
         assert_eq!(hits(&conn, "海边\"日"), vec![1], "带引号的片段要能搜到");
         assert_eq!(hits(&conn, "\"日落\""), vec![1], "整段（含引号）也要能搜到");
-        assert_eq!(hits(&conn, "落\".j"), vec![1], "跨引号与扩展名的三字串也命中");
-        assert_eq!(hits(&conn, "日落"), Vec::<i64>::new(), "两字词确实搜不到（查询侧会回退 LIKE）");
+        assert_eq!(
+            hits(&conn, "落\".j"),
+            vec![1],
+            "跨引号与扩展名的三字串也命中"
+        );
+        assert_eq!(
+            hits(&conn, "日落"),
+            Vec::<i64>::new(),
+            "两字词确实搜不到（查询侧会回退 LIKE）"
+        );
     }
 }

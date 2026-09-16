@@ -123,7 +123,10 @@ impl WorkerError {
     /// 这次失败之后能不能立刻重试下一张？（进程崩溃/超时要重建，解码失败不用）
     #[must_use]
     pub const fn needs_respawn(&self) -> bool {
-        matches!(self, Self::Timeout(_) | Self::Crashed(_) | Self::Protocol(_))
+        matches!(
+            self,
+            Self::Timeout(_) | Self::Crashed(_) | Self::Protocol(_)
+        )
     }
 }
 
@@ -215,7 +218,10 @@ impl RawWorker {
     }
 
     /// 解码一张 RAW。失败时**不需要**调用方做清理（下次请求会自动重建进程）。
-    pub fn decode(&mut self, req: &super::backend::DecodeRequest) -> Result<RawImage8, WorkerError> {
+    pub fn decode(
+        &mut self,
+        req: &super::backend::DecodeRequest,
+    ) -> Result<RawImage8, WorkerError> {
         let (head, payload) = match self.round_trip(req) {
             Ok(pair) => pair,
             Err(e) => {
@@ -443,9 +449,7 @@ fn exchange(
     match result {
         Ok(v) => Ok(v),
         // 超时：错误归档成 Timeout（真实的读取错误对用户没意义，超时才是）
-        Err(_) if timed_out.load(Ordering::Relaxed) => {
-            Err(WorkerError::Timeout(timeout.as_secs()))
-        }
+        Err(_) if timed_out.load(Ordering::Relaxed) => Err(WorkerError::Timeout(timeout.as_secs())),
         Err(e) => {
             // 读失败时顺手看一眼子进程死没死 —— “退出码 101”比
             // “failed to fill whole buffer”有用得多
@@ -518,8 +522,7 @@ fn spawn_watchdog(
 // ─────────────────────────── 帧读写 ───────────────────────────
 
 fn write_frame<W: Write>(w: &mut W, body: &[u8]) -> std::io::Result<()> {
-    let len = u32::try_from(body.len())
-        .map_err(|_| std::io::Error::other("请求体过大"))?;
+    let len = u32::try_from(body.len()).map_err(|_| std::io::Error::other("请求体过大"))?;
     w.write_all(&len.to_le_bytes())?;
     w.write_all(body)?;
     w.flush()
@@ -734,11 +737,7 @@ fn handle(request: Request) -> (Response, Vec<u8>) {
     }
 }
 
-fn write_response<W: Write>(
-    out: &mut W,
-    resp: &Response,
-    payload: &[u8],
-) -> std::io::Result<()> {
+fn write_response<W: Write>(out: &mut W, resp: &Response, payload: &[u8]) -> std::io::Result<()> {
     let body = serde_json::to_vec(resp).unwrap_or_else(|_| b"{\"ok\":false}".to_vec());
     write_frame(out, &body)?;
     if !payload.is_empty() {

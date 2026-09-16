@@ -100,9 +100,7 @@ fn shutdown_makes_the_next_request_start_a_new_process() {
 fn a_stuck_worker_is_killed_by_the_watchdog() {
     let mut w = RawWorker::with_bin(WORKER_BIN).with_timeout_of(Duration::from_secs(2));
     let started = std::time::Instant::now();
-    let err = w
-        .sleep_for_test(60)
-        .expect_err("卡住的请求不该成功返回");
+    let err = w.sleep_for_test(60).expect_err("卡住的请求不该成功返回");
     let elapsed = started.elapsed();
 
     assert!(matches!(err, WorkerError::Timeout(_)), "{err:?}");

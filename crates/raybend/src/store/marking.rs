@@ -441,7 +441,12 @@ pub fn set_lock(conn: &Connection, ids: &[i64], level: u8, label: &str) -> Resul
 }
 
 /// 批量挂标签（批量只能加，`BROWSE.md` §3.3）。
-pub fn attach_tags(conn: &Connection, ids: &[i64], tag_ids: &[i64], label: &str) -> Result<ChangeSet> {
+pub fn attach_tags(
+    conn: &Connection,
+    ids: &[i64],
+    tag_ids: &[i64],
+    label: &str,
+) -> Result<ChangeSet> {
     let mut ops = Vec::new();
     for id in ids {
         for tag_id in tag_ids {
@@ -463,7 +468,12 @@ pub fn attach_tags(conn: &Connection, ids: &[i64], tag_ids: &[i64], label: &str)
 }
 
 /// 批量摘标签（单张编辑标签弹窗里用）。
-pub fn detach_tags(conn: &Connection, ids: &[i64], tag_ids: &[i64], label: &str) -> Result<ChangeSet> {
+pub fn detach_tags(
+    conn: &Connection,
+    ids: &[i64],
+    tag_ids: &[i64],
+    label: &str,
+) -> Result<ChangeSet> {
     let mut ops = Vec::new();
     for id in ids {
         for tag_id in tag_ids {
@@ -542,26 +552,85 @@ impl UndoStack {
         self.undone.last().map(|c| c.label.as_str())
     }
 
-    /// 撤销一步（内部真的写库）。返回这次撤掉的标签。
-    pub fn undo(&mut self, conn: &Connection) -> Result<Option<String>> {
-        let Some(change) = self.done.pop() else {
-            return Ok(None);
-        };
-        apply(conn, &change.invert())?;
-        let label = change.label.clone();
-        self.undone.push(change);
-        Ok(Some(label))
+    /*
+     * 分成「取出 → 执行 → 归位」三步，是为了让**外壳侧**能在数据库写事务里执行：
+     * 写事务要求闭包 `Send + 'static`，闭包里不能借用栈；所以先把要执行的补丁
+     * 取出来（拥有一份），执行完再把记录归位。
+     *
+     * 中途失败（数据库写不进去）要把记录**放回原位** —— 否则用户会看到
+     * 「撤销栈空了一步、照片却没变」这种对不上的状态。
+     */
+
+    /// 取出「下次撤销要执行的反向补丁」以及原记录（还没执行）。
+    pub fn take_undo(&mut self) -> Option<(ChangeSet, ChangeSet)> {
+        let change = self.done.pop()?;
+        let patch = change.invert();
+        Some((patch, change))
     }
 
-    /// 重做一步。
-    pub fn redo(&mut self, conn: &Connection) -> Result<Option<String>> {
-        let Some(change) = self.undone.pop() else {
+    /// 撤销执行成功：把原记录移进重做栈。
+    pub fn commit_undo(&mut self, change: ChangeSet) {
+        self.undone.push(change);
+    }
+
+    /// 撤销执行失败：把记录放回撤销栈。
+    pub fn give_back_undo(&mut self, change: ChangeSet) {
+        self.done.push(change);
+    }
+
+    /// 取出「下次重做要执行的补丁」以及原记录。
+    pub fn take_redo(&mut self) -> Option<(ChangeSet, ChangeSet)> {
+        let change = self.undone.pop()?;
+        let patch = change.clone();
+        Some((patch, change))
+    }
+
+    /// 重做成功：把记录移回撤销栈。
+    pub fn commit_redo(&mut self, change: ChangeSet) {
+        self.done.push(change);
+    }
+
+    /// 重做失败：放回重做栈。
+    pub fn give_back_redo(&mut self, change: ChangeSet) {
+        self.undone.push(change);
+    }
+
+    /// 撤销一步（**自带连接**的便捷入口：单测与批处理用）。
+    ///
+    /// 外壳侧走 `take_undo` / `commit_undo` —— 那里要在写事务里执行。
+    pub fn undo(&mut self, conn: &Connection) -> Result<Option<String>> {
+        let Some((patch, change)) = self.take_undo() else {
             return Ok(None);
         };
-        apply(conn, &change)?;
-        let label = change.label.clone();
-        self.done.push(change);
-        Ok(Some(label))
+        match apply(conn, &patch) {
+            Ok(_) => {
+                let label = change.label.clone();
+                self.commit_undo(change);
+                Ok(Some(label))
+            }
+            Err(e) => {
+                self.give_back_undo(change);
+                Err(e)
+            }
+        }
+    }
+
+    /// 重做一步（同上）。
+    pub fn redo(&mut self, conn: &Connection) -> Result<Option<String>> {
+        let Some((patch, change)) = self.take_redo() else {
+            return Ok(None);
+        };
+        match apply(conn, &patch) {
+            Ok(_) => {
+                let label = change.label.clone();
+                self.commit_redo(change);
+                Ok(Some(label))
+            }
+            Err(e) => {
+                self.give_back_redo(change);
+                Err(e)
+            }
+        }
     }
 
     pub fn clear(&mut self) {
@@ -637,7 +706,10 @@ mod tests {
         let conn = catalog();
         let id = asset(&conn);
         let change = set_rating(&conn, &[id], 0, "标 0 星").unwrap();
-        assert!(change.is_empty(), "值没变就不该产生补丁（否则撤销栈里全是空动作）");
+        assert!(
+            change.is_empty(),
+            "值没变就不该产生补丁（否则撤销栈里全是空动作）"
+        );
         assert!(!apply(&conn, &change).unwrap().touched_anything());
     }
 
@@ -647,7 +719,10 @@ mod tests {
         let id = asset(&conn);
         let red = set_color(&conn, &[id], Some("red".to_string()), "标红").unwrap();
         apply(&conn, &red).unwrap();
-        assert_eq!(value::<Option<String>>(&conn, id, "color_label").as_deref(), Some("red"));
+        assert_eq!(
+            value::<Option<String>>(&conn, id, "color_label").as_deref(),
+            Some("red")
+        );
 
         let none = set_color(&conn, &[id], None, "去掉颜色").unwrap();
         assert_eq!(none.ops.len(), 1);
@@ -659,10 +734,24 @@ mod tests {
     fn like_has_three_states() {
         let conn = catalog();
         let id = asset(&conn);
-        apply(&conn, &set_like(&conn, &[id], Some("like".into()), "喜欢").unwrap()).unwrap();
-        assert_eq!(value::<Option<String>>(&conn, id, "like_state").as_deref(), Some("like"));
-        apply(&conn, &set_like(&conn, &[id], Some("dislike".into()), "不喜欢").unwrap()).unwrap();
-        assert_eq!(value::<Option<String>>(&conn, id, "like_state").as_deref(), Some("dislike"));
+        apply(
+            &conn,
+            &set_like(&conn, &[id], Some("like".into()), "喜欢").unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            value::<Option<String>>(&conn, id, "like_state").as_deref(),
+            Some("like")
+        );
+        apply(
+            &conn,
+            &set_like(&conn, &[id], Some("dislike".into()), "不喜欢").unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            value::<Option<String>>(&conn, id, "like_state").as_deref(),
+            Some("dislike")
+        );
         apply(&conn, &set_like(&conn, &[id], None, "取消").unwrap()).unwrap();
         assert_eq!(value::<Option<String>>(&conn, id, "like_state"), None);
     }
@@ -751,7 +840,10 @@ mod tests {
         let change = attach_tags(&conn, &[id], &[7, 8], "加标签").unwrap();
         assert_eq!(change.ops.len(), 2);
         apply(&conn, &change).unwrap();
-        assert_eq!(super::super::tags::tags_of_asset(&conn, id).unwrap(), vec![7, 8]);
+        assert_eq!(
+            super::super::tags::tags_of_asset(&conn, id).unwrap(),
+            vec![7, 8]
+        );
 
         // 再挂一次：不产生 op
         let again = attach_tags(&conn, &[id], &[7], "加标签").unwrap();
@@ -766,7 +858,11 @@ mod tests {
         let detach = detach_tags(&conn, &[id], &[7, 9], "摘").unwrap();
         assert_eq!(detach.ops.len(), 1, "没挂过的标签不该产生 op");
         apply(&conn, &detach).unwrap();
-        assert!(super::super::tags::tags_of_asset(&conn, id).unwrap().is_empty());
+        assert!(
+            super::super::tags::tags_of_asset(&conn, id)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -912,9 +1008,16 @@ mod tests {
         let change = attach_tags(&conn, &[id], &[5], "加标签").unwrap();
         apply(&conn, &change).unwrap();
         stack.push(change);
-        assert_eq!(super::super::tags::tags_of_asset(&conn, id).unwrap(), vec![5]);
+        assert_eq!(
+            super::super::tags::tags_of_asset(&conn, id).unwrap(),
+            vec![5]
+        );
         stack.undo(&conn).unwrap();
-        assert!(super::super::tags::tags_of_asset(&conn, id).unwrap().is_empty());
+        assert!(
+            super::super::tags::tags_of_asset(&conn, id)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]

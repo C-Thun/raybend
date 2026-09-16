@@ -7,6 +7,7 @@
 //! M0-2 的渲染可行性验证会在这里另开一个 `spike-viewport` 调试窗口，
 //! 主窗口保持不透明、不受影响。
 
+pub mod browse;
 pub mod db;
 mod import;
 pub mod repo;
@@ -133,6 +134,8 @@ pub fn run() {
         // 导入点下去没反应、弹窗空着、连「取消导入」都卡住（命令 panic 后 JS 的 promise
         // 永远不 settle）。下面 `every_state_type_is_managed` 那个测试就是用来防复发的。
         .manage(import::ImportBatches::default())
+        // 浏览会话态：撤销栈（每库一份）+ 旗标（跨库，内存）+ 当前打开的库缓存
+        .manage(browse::BrowseState::default())
         .invoke_handler(tauri::generate_handler![
             // ── 数据底座的诊断与设置（M1-2）──
             db::app_paths,
@@ -171,6 +174,18 @@ pub fn run() {
             import::import_status,
             import::import_errors_export,
             import::import_interrupted,
+            // ── 浏览（M2-W1：查询 / 标记 / 撤销 / 旗标 / 删除）──
+            browse::browse_page,
+            browse::browse_timeline,
+            browse::browse_facets,
+            browse::browse_markings,
+            browse::browse_mark,
+            browse::browse_undo,
+            browse::browse_redo,
+            browse::browse_delete,
+            browse::flags_get,
+            browse::flags_set,
+            browse::flags_clear,
             // ── 启动流程 ──
             ui_ready,
         ])

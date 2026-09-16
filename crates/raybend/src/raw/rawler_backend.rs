@@ -164,7 +164,10 @@ fn pick_embedded(
     let mut best: Option<DynamicImage> = None;
 
     // `thumbnail_image` 通常是几百像素的小图；先问它，命中就完全不必解码大预览
-    for candidate in [decoder.thumbnail_image(source, params), decoder.preview_image(source, params)] {
+    for candidate in [
+        decoder.thumbnail_image(source, params),
+        decoder.preview_image(source, params),
+    ] {
         let Ok(Some(img)) = candidate else { continue };
         let long = long_edge(&img);
         if long >= need {
@@ -266,7 +269,9 @@ fn classify(message: String) -> RawError {
 /// `RawSource` 在 Windows 上用 mmap；这里只核对文件确实存在（预检已做，这里是兜底）。
 #[must_use]
 pub fn is_readable(path: &Path) -> bool {
-    std::fs::metadata(path).map(|m| m.is_file()).unwrap_or(false)
+    std::fs::metadata(path)
+        .map(|m| m.is_file())
+        .unwrap_or(false)
 }
 
 #[cfg(test)]

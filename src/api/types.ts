@@ -335,3 +335,153 @@ export interface InterruptedRun {
   skipped: number;
   failed: number;
 }
+
+
+/* ══════════════════════════════════════════════════════════════
+ * 浏览（M2-W1）：查询、标记、撤销、旗标、删除
+ * ══════════════════════════════════════════════════════════════ */
+
+/** 网格里的一张照片（`src-tauri/src/browse.rs` 的 `AssetItem`）。 */
+export interface AssetItem {
+  id: number;
+  relPath: string;
+  fileName: string;
+  ext: string;
+  isRaw: boolean;
+  takenAt: number | null;
+  rating: number;
+  colorLabel: string | null;
+  likeState: string | null;
+  lockLevel: number;
+  cameraMake: string | null;
+  cameraModel: string | null;
+  lens: string | null;
+  focalMm: number | null;
+  fNumber: number | null;
+  exposureMs: number | null;
+  iso: number | null;
+  width: number | null;
+  height: number | null;
+  orientation: number | null;
+  sizeBytes: number | null;
+  missing: boolean;
+}
+
+/** 一页结果。 */
+export interface BrowseWindow {
+  total: number;
+  offset: number;
+  items: AssetItem[];
+}
+
+/** 时间线上的一项。 */
+export interface TimelineEntry {
+  id: number;
+  takenAt: number | null;
+}
+
+/** 时间线（分组与键盘导航的确定顺序）。 */
+export interface BrowseTimeline {
+  total: number;
+  entries: TimelineEntry[];
+}
+
+/** 一个取值有几张。 */
+export interface FacetCount {
+  /** 评分 / 锁是数字的字符串形式；色标 / 喜欢是名字；`null` = 无值。 */
+  value: string | null;
+  count: number;
+}
+
+/** 筛选面板要的分布。 */
+export interface BrowseFacets {
+  ratings: FacetCount[];
+  colors: FacetCount[];
+  likes: FacetCount[];
+  locks: FacetCount[];
+}
+
+/** 一组照片当前的标记（三态控件显示谁的值）。 */
+export interface MarkingItem {
+  id: number;
+  rating: number;
+  colorLabel: string | null;
+  likeState: string | null;
+  lockLevel: number;
+}
+
+/** 改完之后的状态。 */
+export interface MarkResult {
+  changed: number;
+  skippedLocked: number[];
+  undoLabel: string | null;
+  redoLabel: string | null;
+  canUndo: boolean;
+  canRedo: boolean;
+}
+
+/** 删除失败的一个文件。 */
+export interface DeleteFailure {
+  path: string;
+  reason: string;
+}
+
+/** 删除结果。 */
+export interface DeleteResult {
+  deleted: number;
+  blockedLocked: number[];
+  alreadyGone: number;
+  failed: DeleteFailure[];
+}
+
+/** 旗标快照（当前库的）。 */
+export interface FlagsView {
+  total: number;
+  picks: number[];
+  rejects: number[];
+}
+
+/* ── 输入侧（前端 → Rust；不进契约文件，因为没有返回值那种「静默漂移」风险）── */
+
+/** 筛选条件（字段都可省 = 不限）。 */
+export interface BrowseFilter {
+  ratings?: number[];
+  colors?: string[];
+  likes?: string[];
+  locks?: number[];
+  takenFrom?: number | null;
+  takenTo?: number | null;
+  cameras?: string[];
+  lenses?: string[];
+  isoFrom?: number | null;
+  isoTo?: number | null;
+  focalFrom?: number | null;
+  focalTo?: number | null;
+  tags?: number[];
+  text?: string | null;
+  /** `"and"` / `"or"`（缺省 = `"or"`）。 */
+  combinator?: "and" | "or";
+}
+
+/** 排序。 */
+export interface BrowseSort {
+  key?: "takenAt" | "importedAt" | "fileName" | "rating" | "camera";
+  desc?: boolean;
+}
+
+/** 一次浏览查询。 */
+export interface BrowseQuery {
+  repositoryId: string;
+  scopePath?: string | null;
+  filter?: BrowseFilter;
+  sort?: BrowseSort;
+}
+
+/** 标记动作（对应 Rust 的 `MarkActionDto`，serde 用 `kind` 做标签）。 */
+export type MarkAction =
+  | { kind: "rating"; value: number }
+  | { kind: "color"; value: string | null }
+  | { kind: "like"; value: string | null }
+  | { kind: "lock"; value: number }
+  | { kind: "attachTags"; tagIds: number[] }
+  | { kind: "detachTags"; tagIds: number[] };

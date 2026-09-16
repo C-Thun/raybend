@@ -72,7 +72,10 @@ fn main() {
 fn collect_raw(root: &Path, limit: usize) -> Vec<PathBuf> {
     let mut files: Vec<(u64, PathBuf)> = Vec::new();
     if root.is_file() {
-        files.push((std::fs::metadata(root).map(|m| m.len()).unwrap_or(0), root.to_path_buf()));
+        files.push((
+            std::fs::metadata(root).map(|m| m.len()).unwrap_or(0),
+            root.to_path_buf(),
+        ));
     } else {
         let mut stack = vec![root.to_path_buf()];
         while let Some(dir) = stack.pop() {

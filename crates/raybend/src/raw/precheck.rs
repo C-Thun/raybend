@@ -171,7 +171,10 @@ mod tests {
         // 真实样本的第一手事实（`/mnt/c/src/tmp/pic/*.RW2`）：
         // `49 49 55 00` = “IIU\0” —— 魔数是 0x55，不是标准 TIFF 的 0x2A。
         // 只认 0x2A 的话**全部 RW2 都会被挡在门外**（这就是当时冒烟报的错）。
-        assert_eq!(sniff(&[0x49, 0x49, 0x55, 0x00, 0x18, 0x00]), Some(Container::Rw2));
+        assert_eq!(
+            sniff(&[0x49, 0x49, 0x55, 0x00, 0x18, 0x00]),
+            Some(Container::Rw2)
+        );
         assert_eq!(sniff(b"MM\x00U"), Some(Container::Rw2), "大端变体也要认");
         assert_eq!(sniff(b"IIRO\x08\x00"), Some(Container::Orf));
         assert_eq!(sniff(b"MMOR"), Some(Container::Orf));
