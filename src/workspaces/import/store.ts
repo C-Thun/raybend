@@ -5,13 +5,13 @@
  *
  * | 状态 | 谁在用 |
  * | --- | --- |
- * | `selectedDir`（选中，全局唯一） | `recent` / `source-tree` / `photo-grid` / 控制条 |
- * | `checkedDirs`（勾选，多选） | `recent` / `source-tree` / `selected-dirs` / 右列的导入统计 |
+ * | `selectedDir`（选中，全局唯一） | `recent` / `dir-tree` / `photo-grid` / 控制条 |
+ * | `checkedDirs`（勾选，多选） | `recent` / `dir-tree` / `selected-dirs` / 右列的导入统计 |
  * | `repositories` + `selectedRepositoryId` | 右列库列表 / 底部的导入按钮可用性 |
  * | 照片选择与排除 | `photo-grid` / 外壳的 `toolsbar` |
  *
  * 而「展开集合」「最近列表的加载态」这类**只属于一个模块**的状态留在各自 feature 里
- * （见 `features/source-tree/store.ts`），免得这个店变成一个什么都往里塞的垃圾抽屉。
+ * （见 `features/dir-tree/store.ts`），免得这个店变成一个什么都往里塞的垃圾抽屉。
  *
  * ⚠️ **选中与勾选是两件事**（`AGENTS.md` §11.2）：
  *   - **选中**：当前正在浏览哪个目录 —— 同一时间只有一个，跨面板同步；

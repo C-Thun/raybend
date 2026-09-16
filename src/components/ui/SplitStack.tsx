@@ -36,7 +36,12 @@ import { SplitHandleDots } from "./SplitHandle.tsx";
 export interface SplitSegment {
   /** 段的 id（同时是 Ark 的 pane id，必须唯一且稳定） */
   id: string;
-  /** 初始高度：**数字=百分比**，像素请写 `"120px"` */
+  /**
+   * 初始尺寸：**数字=百分比**，像素请写 `"120px"`。
+   *
+   * ⚠️ **必填**：Ark 的 `defaultSize` 是 `PanelSize[]`，数组里不接受 `undefined`
+   * （想「这段吃剩余空间」就自己算：`100 - 前几段之和`）。
+   */
   defaultSize: number | string;
   /**
    * 最小高度：**数字=百分比**，像素请写 `"120px"`（不填则用 Ark 的默认 0）。
@@ -52,16 +57,23 @@ export interface SplitSegment {
 }
 
 export interface SplitStackProps {
-  /** 从上到下的各段（顺序即布局顺序） */
+  /** 各段（顺序即布局顺序） */
   segments: readonly SplitSegment[];
+  /**
+   * 分段方向：`vertical`（默认，分段上下叠，拖拽改**高度**）
+   * / `horizontal`（分段左右排，拖拽改**宽度**）。
+   */
+  orientation?: "vertical" | "horizontal";
   /** 键盘方向键每次调整的像素（默认 16；无障碍要求这条必须有） */
   keyboardResizeBy?: number;
-  /** 拖拽结束时的回调（用于持久化尺寸等；M1 不需要） */
-  onResizeEnd?: () => void;
+  /** 拖拽结束：给出**各段的百分比**（与 `segments` 顺序一致）—— 持久化比例用它 */
+  onResizeEnd?: (sizes: number[]) => void;
   class?: string;
 }
 
 export function SplitStack(props: SplitStackProps) {
+  const vertical = (): boolean => (props.orientation ?? "vertical") === "vertical";
+
   // Ark 要求 panels 是一个数组，且每个 pane 的 id 与下面 Panel 的 id 对应
   const panels = () =>
     props.segments.map((segment) => ({
@@ -75,14 +87,17 @@ export function SplitStack(props: SplitStackProps) {
   return (
     <div class={["flex min-h-0 flex-col", props.class ?? ""].join(" ")}>
       <Splitter.Root
-        orientation="vertical"
+        orientation={vertical() ? "vertical" : "horizontal"}
         panels={panels()}
         // `defaultSize` 只在首次渲染生效；之后再改它不会强行把用户拖过的位置改回去。
         // 数字是**百分比**（Zag 的 `toCssPanelSize`：number → `N%`）。
         defaultSize={defaultSize()}
         keyboardResizeBy={props.keyboardResizeBy ?? 16}
-        onResizeEnd={() => props.onResizeEnd?.()}
-        class="flex min-h-0 flex-1 flex-col"
+        onResizeEnd={(details) => props.onResizeEnd?.(details.size)}
+        class={[
+          "flex min-h-0 min-w-0 flex-1",
+          vertical() ? "flex-col" : "flex-row",
+        ].join(" ")}
       >
         <For each={props.segments}>
           {(segment, index) => (
@@ -98,13 +113,15 @@ export function SplitStack(props: SplitStackProps) {
                 <Splitter.ResizeTrigger
                   id={`${segment.id}:${props.segments[index() + 1].id}`}
                   class={[
-                    "group/split flex h-2 w-full shrink-0 cursor-row-resize items-center justify-center",
+                    "group/split flex shrink-0 items-center justify-center",
+                    vertical() ? "h-2 w-full cursor-row-resize" : "h-full w-2 cursor-col-resize",
                     "transition-colors outline-none",
                     // 指向 = 辅色底；拖拽中 = 主色底（DESIGN.md §5）；键盘聚焦也要看得见
                     "hover:bg-state-hover focus-visible:bg-state-hover data-[dragging]:bg-state-selected",
                   ].join(" ")}
                 >
-                  <SplitHandleDots orientation="horizontal" />
+                  {/* 点的排列方向与拖拽方向垂直：竖直分段用横躺的三点，横向分段用竖着的 */}
+                  <SplitHandleDots orientation={vertical() ? "horizontal" : "vertical"} />
                 </Splitter.ResizeTrigger>
               ) : null}
             </>

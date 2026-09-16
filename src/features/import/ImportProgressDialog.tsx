@@ -46,11 +46,19 @@ export function ImportProgressDialog(props: ImportProgressDialogProps) {
   const stageIndex = () => STAGES.indexOf(store.stage());
 
   const requestCancel = () => {
-    // 还在跑：先问一次（已导入的部分保留，这句要写在确认里）
+    // ① **错误态直接关掉**（2026-09-16 真机踩坑）：后端挂了的时候，「取消」这条命令
+    //    本身也可能永远等不到回应 —— 用户点了确认取消，弹窗却还是弹回来，等于没有出口。
+    //    这时唯一正确的动作就是「关掉窗口」，不再跟后端说话。
+    if (store.error() !== null) {
+      props.store.dismiss();
+      return;
+    }
+    // ② 还在跑：先问一次（已导入的部分保留，这句要写在确认里）
     if (!store.finished()) {
       setConfirmingCancel(true);
       return;
     }
+    // ③ 已经结束：直接关
     props.store.dismiss();
   };
 
@@ -93,7 +101,7 @@ export function ImportProgressDialog(props: ImportProgressDialogProps) {
                   fallback={
                     <Button
                       variant="secondary"
-                      disabled={store.busy()}
+                      disabled={store.busy() || store.error() !== null}
                       onClick={() => void store.pause()}
                     >
                       {t("import.pause")}
@@ -102,15 +110,25 @@ export function ImportProgressDialog(props: ImportProgressDialogProps) {
                 >
                   <Button
                     variant="secondary"
-                    disabled={store.busy()}
+                    disabled={store.busy() || store.error() !== null}
                     onClick={() => void store.resume()}
                   >
                     {t("import.resume")}
                   </Button>
                 </Show>
-                <Button variant="secondary" onClick={requestCancel}>
-                  {t("import.cancel_button")}
-                </Button>
+                {/* 错误态：只给「关闭」—— 这时「取消」既没有意义（没在跑）也可能发不出去 */}
+                <Show
+                  when={store.error() === null}
+                  fallback={
+                    <Button variant="secondary" onClick={() => store.dismiss()}>
+                      {t("common.close")}
+                    </Button>
+                  }
+                >
+                  <Button variant="secondary" onClick={requestCancel}>
+                    {t("import.cancel_button")}
+                  </Button>
+                </Show>
               </>
             }
           >

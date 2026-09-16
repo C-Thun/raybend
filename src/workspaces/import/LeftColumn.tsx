@@ -23,33 +23,56 @@
  * 自己不做数据加载、不做业务判断。
  */
 
-import { Show } from "solid-js";
+import { createSignal, Show } from "solid-js";
+import { IconRefresh } from "@tabler/icons-solidjs";
+import { IconButton } from "../../components/ui/Button.tsx";
 import { Panel } from "../../components/ui/Panel.tsx";
 import { SplitStack } from "../../components/ui/SplitStack.tsx";
 import { RecentList } from "../../features/recent/index.ts";
 import { SelectedDirs } from "../../features/selected-dirs/index.ts";
-import { SourceTree } from "../../features/source-tree/index.ts";
+import { DirTree } from "../../features/dir-tree/index.ts";
 import { t } from "../../i18n/index.ts";
 import type { ImportStore } from "./store.ts";
 
 export interface LeftColumnProps {
   store: ImportStore;
+  /** 「最近」段的高度比例（0–1）；只在首次渲染生效（拖过之后以 Ark 的为准） */
+  recentRatio?: number;
+  /** 拖拽结束时的比例 —— 交给布局偏好店落盘（`lib/layout-prefs.ts`） */
+  onRecentRatioChange?: (ratio: number) => void;
   class?: string;
 }
 
 export function LeftColumn(props: LeftColumnProps) {
   const store = props.store;
+  const recentRatio = (): number => props.recentRatio ?? 0.32;
+
+  /**
+   * 「运行期刷新」：目录会在程序外面被创建/改名/删除，而我们**不做文件系统监听**
+   * （明确取舍，见 `FUTURE.md` 的 `notify`）—— 所以要给一个手动刷新的入口。
+   * 令牌一变，`DirTree` 就把展开着的目录全部重读（保留展开状态）。
+   */
+  const [refreshKey, setRefreshKey] = createSignal(0);
+  const refreshAll = (): void => {
+    setRefreshKey((key) => key + 1);
+    // 卷本身也可能变（插上 U 盘、挂载网络盘），一起刷新
+    void store.reloadVolumes();
+  };
 
   return (
     <div class={["flex min-h-0 flex-1 flex-col", props.class ?? ""].join(" ")}>
       <SplitStack
         class="min-h-0 flex-1"
         keyboardResizeBy={16}
+        onResizeEnd={(sizes) => {
+          const first = sizes[0];
+          if (typeof first === "number") props.onRecentRatioChange?.(first / 100);
+        }}
         segments={[
           {
             id: "recent",
-            // 初始三成、最矮 120px（约 3~4 行）：够用且**降得下来** —— 它自己会滚
-            defaultSize: "32%",
+            // 初始比例来自布局偏好（拖过就记住），最矮 120px：够用且**降得下来** —— 它自己会滚
+            defaultSize: recentRatio() * 100,
             minSize: "120px",
             content: (
               <Panel title={t("source.recent")} scroll pad={false}>
@@ -79,11 +102,23 @@ export function LeftColumn(props: LeftColumnProps) {
           },
           {
             id: "source",
-            defaultSize: "68%",
+            defaultSize: (1 - recentRatio()) * 100,
             minSize: "160px",
             content: (
-              <Panel title={t("source.tree")} scroll pad={false}>
-                <SourceTree
+              <Panel
+                title={t("source.tree")}
+                scroll
+                pad={false}
+                actions={
+                  <IconButton
+                    label={t("common.refresh")}
+                    onClick={refreshAll}
+                  >
+                    <IconRefresh size={14} />
+                  </IconButton>
+                }
+              >
+                <DirTree
                   volumes={store.volumes()}
                   status={store.volumesStatus()}
                   error={store.volumesError()}
@@ -96,6 +131,7 @@ export function LeftColumn(props: LeftColumnProps) {
                   }}
                   loadDirs={store.loadDirs}
                   onRetry={() => void store.reloadVolumes()}
+                  refreshKey={refreshKey()}
                 />
               </Panel>
             ),

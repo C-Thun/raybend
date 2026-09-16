@@ -2,11 +2,13 @@
  * `GridControlBar` —— 照片网格底部的控制条（`design/main.md` §3.2）。
  *
  * ```text
- * [ 1 248 张 ]  ←弹性→  [按时间]  [D:\Photos]  ←弹性→  [缩放滑块]
+ * [ 1 248 张 ]  ←弹性→  [D:\Photos]  ←弹性→  [加载提示] [按时间] [缩放滑块]
  * ```
  *
- * 三个细节都是设计明确要求的：
+ * 四个细节都是设计明确要求的：
  *   - 中间那一段**真正居中** → 两侧各一个弹性 spacer；
+ *   - **中间只放「当前目录」**，「按时间」归到右侧的控件组（2026-09-16 人类要求：
+ *     它是视图选项，应当挨着缩放，而不是和目录名凑一起）；
  *   - `按时间` 是**可按下式**按钮（与吸附磁铁同款），不是圆点开关；
  *   - 计数用 `formatCount`（中文空格分组：`1 248 张`）。
  */
@@ -55,17 +57,7 @@ export function GridControlBar(props: GridControlBarProps) {
 
       <span class="min-w-0 flex-1" />
 
-      {/* 按时间（可按下式，见 design/main.md §4.8.1） */}
-      <ToggleBlock
-        pressed={props.byTime}
-        onPressedChange={props.onByTimeChange}
-        label={t("grid.by_time")}
-        icon={<IconClock size={16} />}
-      >
-        <span class="whitespace-nowrap">{t("grid.by_time")}</span>
-      </ToggleBlock>
-
-      {/* 当前目录（缩写 + 悬停看全路径） */}
+      {/* 当前目录（缩写 + 悬停看全路径）—— 中间只留这一项，真正居中 */}
       <Show when={props.dir}>
         {(dir) => (
           <PathText
@@ -83,6 +75,17 @@ export function GridControlBar(props: GridControlBarProps) {
       <Show when={props.loadingTimes}>
         <span class="shrink-0 text-fs-0 text-fg-3">{t("common.loading")}</span>
       </Show>
+
+      {/* 按时间（可按下式，见 design/main.md §4.8.1）——
+          放在**缩放组件的左边**：它是视图选项，跟缩放是一类东西 */}
+      <ToggleBlock
+        pressed={props.byTime}
+        onPressedChange={props.onByTimeChange}
+        label={t("grid.by_time")}
+        icon={<IconClock size={16} />}
+      >
+        <span class="whitespace-nowrap">{t("grid.by_time")}</span>
+      </ToggleBlock>
 
       {/* 缩放：9 档，离散 */}
       <Slider

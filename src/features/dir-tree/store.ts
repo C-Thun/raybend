@@ -12,12 +12,12 @@
 import { createSignal } from "solid-js";
 import type { DirEntry } from "../../api/types.ts";
 
-export interface SourceTreeDeps {
+export interface DirTreeDeps {
   /** 读一个目录的直接子目录（失败时抛错） */
   loadDirs: (path: string) => Promise<DirEntry[]>;
 }
 
-export interface SourceTreeStore {
+export interface DirTreeStore {
   isExpanded: (path: string) => boolean;
   /** 子目录；`undefined` = 还没读过 */
   childrenOf: (path: string) => readonly DirEntry[] | undefined;
@@ -30,11 +30,15 @@ export interface SourceTreeStore {
   collapse: (path: string) => void;
   /** 切换展开 / 折叠 */
   toggle: (path: string) => Promise<void>;
-  /** 重新读（刷新按钮或外部变化时用） */
+  /** 重新读一个目录（行内「重试」用） */
   refresh: (path: string) => Promise<void>;
+  /**
+   * 重新读**当前所有展开着的目录**（含根部的卷）—— 「运行期刷新」的入口。
+   */
+  refreshAll: () => Promise<void>;
 }
 
-export function createSourceTreeStore(deps: SourceTreeDeps): SourceTreeStore {
+export function createDirTreeStore(deps: DirTreeDeps): DirTreeStore {
   const [expanded, setExpanded] = createSignal<Record<string, true>>({});
   const [children, setChildren] = createSignal<Record<string, DirEntry[]>>({});
   const [loading, setLoading] = createSignal<Record<string, true>>({});
@@ -110,6 +114,22 @@ export function createSourceTreeStore(deps: SourceTreeDeps): SourceTreeStore {
     await load(path);
   }
 
+  /**
+   * 重新读所有**展开着**的目录。
+   *
+   * 为什么需要它（2026-09-16 人类反馈）：目录会在程序外面被创建 / 改名 / 删除，
+   * 而我们**故意不做文件系统监听**（`FUTURE.md` 里 `notify` 是后续里程碑）——
+   * 那就必须留一个「运行期间刷新」的入口，否则用户只能重启程序才看得到变化。
+   *
+   * 两个刻意的取舍：
+   *   * **保留展开状态**：按刷新是为了看新内容，不是为了把树折叠回去；
+   *   * **只刷展开着的**：没展开的分支用户看不到，刷它纯属白读磁盘。
+   */
+  async function refreshAll(): Promise<void> {
+    const paths = Object.keys(expanded());
+    await Promise.all(paths.map((path) => load(path)));
+  }
+
   return {
     isExpanded,
     childrenOf,
@@ -119,6 +139,7 @@ export function createSourceTreeStore(deps: SourceTreeDeps): SourceTreeStore {
     collapse,
     toggle,
     refresh,
+    refreshAll,
   };
 }
 

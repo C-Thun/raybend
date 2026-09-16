@@ -54,6 +54,11 @@ export interface TreeNodeProps {
   /** 无障碍名（如「勾选 D:\\Photos」） */
   checkLabel?: string;
   onClick?: JSX.EventHandlerUnion<HTMLDivElement, MouseEvent>;
+  /**
+   * 双击整行。目前唯一的用法是**双击名字展开/折叠**（与点箭头同效，`DirTree` 接的）。
+   * 注意双击会**先**触发两次 `onClick`（选中）再触发它 —— 所以「选中」必须是幂等的。
+   */
+  onDoubleClick?: JSX.EventHandlerUnion<HTMLDivElement, MouseEvent>;
   onToggleExpand?: () => void;
   onCheckedChange?: (checked: boolean) => void;
   class?: string;
@@ -73,6 +78,7 @@ export function TreeNode(props: TreeNodeProps) {
     "trailing",
     "checkLabel",
     "onClick",
+    "onDoubleClick",
     "onToggleExpand",
     "onCheckedChange",
     "class",
@@ -91,7 +97,11 @@ export function TreeNode(props: TreeNodeProps) {
       style={{ "padding-left": `${indentPx(local.depth, 1)}em` }}
       class={[
         "group/row flex h-row-h min-w-0 items-center gap-1 rounded-ui ps-row-indent pe-1",
-        "transition-colors outline-none",
+        // ⚠️ **刻意不加 `transition-colors`**（2026-09-16 人类反馈「目录滚动有 0.2 秒延迟感」）：
+        // 行是**连续排列**的，鼠标停在列表上滚动时每一行都会经过指针 → 每行都跑一次 150ms
+        // 颜色过渡 = 持续重绘，手感就是「粘」。行的高亮要**立刻**（`motion.css` 的纪律：
+        // 超过 150ms 就开始像卡顿）。按钮那类孤立元素保留过渡，行与列表行一律不要。
+        "outline-none",
         local.selected
           ? "bg-state-selected text-fg-1"
           : "text-fg-2 hover:bg-state-hover hover:text-fg-1",
@@ -103,6 +113,9 @@ export function TreeNode(props: TreeNodeProps) {
         .filter(Boolean)
         .join(" ")}
       onClick={local.onClick}
+      // Solid 的 DOM 事件名是 `onDblClick`（不是 React 的 onDoubleClick）——
+      // 对外的 prop 仍叫 `onDoubleClick`，更好念
+      onDblClick={local.onDoubleClick}
     >
       {/* ── 展开箭头：点它只展开，不选中 ─────────────────── */}
       <Show

@@ -1,19 +1,30 @@
 /**
- * `SourceTree` —— 左列第二段「来源」目录树（`design/main.md` §3.1.2）。
+ * `DirTree` —— 目录树（**通用组件**：导入工作区与将来的浏览侧共用一份）。
  *
- * 结构：**第一层是驱动器/挂载点**（前方必须有来源类型图标，不能只标盘符 ——
- * 将来要扩展到 NAS、云盘），往下逐级展开**只列目录、不列文件**。
+ * `design/main.md` §3.1.2 定义了它的形态：**第一层是驱动器/挂载点**（前方必须有来源类型图标，
+ * 不能只标盘符 —— 将来要扩展到 NAS、云盘），往下逐级展开**只列目录、不列文件**。
  *
- * 两条容易做错的规则（都靠结构而不是自觉保证）：
+ * ## 两种用法（差别只在「能不能勾选」）
  *
- * 1. **点行 = 选中；点箭头 = 展开发**。箭头 `stopPropagation`，
- *    所以「点箭头顺带选中」这种事不会发生；反过来，
- *    「选中某行就把它展开」在 `source-tree/store.ts` 里**根本做不到** ——
+ * | 用法 | 传参 | 勾选圈 |
+ * | --- | --- | --- |
+ * | 导入工作区 | 传 `isChecked` + `onToggleCheck` | 有（勾选 = 加入待导入集合） |
+ * | 浏览侧（`BROWSE.md`） | **不传** `onToggleCheck` | **没有**（浏览时勾选毫无意义） |
+ *
+ * 这一层刻意用**「回调传没传」**来决定，而不是再加一个 `checkable` 布尔：
+ * 少一个可能与回调矛盾的开关（`TreeNode` 也是同样的口径）。
+ *
+ * ## 三条容易做错的规则（都靠结构而不是自觉保证）
+ *
+ * 1. **点行 = 选中；点箭头 = 展开**。箭头 `stopPropagation`，所以「点箭头顺带选中」不会发生；
+ *    反过来，「选中某行就把它展开」在 `dir-tree/store.ts` 里**根本做不到** ——
  *    那个 store 里没有「选中」这个输入（`DESIGN.md` §12.4.1）；
- * 2. **子目录懒加载**：展开才读（读过的会记住，折叠再展开是秒开）。
+ * 2. **双击行名 = 展开/折叠**（与点箭头同效，2026-09-16 人类要求）。只对**可展开**的行生效 ——
+ *    空目录双击不做无意义的加载；
+ * 3. **子目录懒加载**：展开才读（读过的会记住，折叠再展开是秒开）。
  */
 
-import { createMemo, For, Show } from "solid-js";
+import { createEffect, createMemo, For, Show } from "solid-js";
 import {
   IconAlertTriangle,
   IconCloud,
@@ -29,35 +40,82 @@ import { ScrollBox } from "../../components/ui/ScrollBar.tsx";
 import { TreeNode } from "../../components/ui/TreeNode.tsx";
 import { t } from "../../i18n/index.ts";
 import type { LoadStatus } from "../../lib/load-status.ts";
-import { buildTreeRows } from "./rows.ts";
-import { createSourceTreeStore } from "./store.ts";
+import { buildTreeRows, type TreeRow } from "./rows.ts";
+import { createDirTreeStore } from "./store.ts";
 
-export interface SourceTreeProps {
+export interface DirTreeProps {
   /** 驱动器 / 挂载点（第一层） */
   volumes: readonly Volume[];
   status: LoadStatus;
   error: string | null;
   isSelected: (path: string) => boolean;
-  isChecked: (path: string) => boolean;
+  /** 勾选态查询（不传 `onToggleCheck` 时用不到） */
+  isChecked?: (path: string) => boolean;
   onSelect: (path: string) => void;
-  onToggleCheck: (path: string, checked: boolean) => void;
+  /**
+   * 勾选变化。**不传它就没有勾选圈** —— 浏览侧正是这么用的（`BROWSE.md`）。
+   * 传了它，导入侧才有「勾选 = 加入待导入集合」这套交互。
+   */
+  onToggleCheck?: (path: string, checked: boolean) => void;
   /** 读子目录（默认走 `src/api/db.ts`；测试可注入） */
   loadDirs: (path: string) => Promise<DirEntry[]>;
   onRetry?: () => void;
+  /**
+   * 「运行期刷新」令牌：**值一变，就把当前展开着的目录全部重读一遍**（保留展开状态）。
+   *
+   * 用令牌而不是回调注册：刷新按钮在调用方（面板头部），缓存住在树内部 ——
+   * 令牌让两边都不用拿对方的引用。第一次渲染不触发。
+   */
+  refreshKey?: number;
   class?: string;
 }
 
-export function SourceTree(props: SourceTreeProps) {
+export function DirTree(props: DirTreeProps) {
   // 树自己的状态（展开 / 已读子目录 / 加载与错误）—— 不进共享 store
-  const tree = createSourceTreeStore({ loadDirs: (path) => props.loadDirs(path) });
+  const tree = createDirTreeStore({ loadDirs: (path) => props.loadDirs(path) });
 
-  const rows = createMemo(() =>
-    buildTreeRows({
+  // 刷新令牌：变了才重读（首次渲染跳过）；展开状态由 store 保留
+  let lastRefreshKey = props.refreshKey;
+  createEffect(() => {
+    const key = props.refreshKey;
+    if (key === undefined || key === lastRefreshKey) return;
+    lastRefreshKey = key;
+    void tree.refreshAll();
+  });
+
+  /**
+   * 行对象缓存：`<For>` 是按**对象身份**做 key 的，每次摊平都造新对象就会把**所有行**的
+   * DOM 拆掉重建 —— 展开一个目录时整棵树闪一下，行多了还会明显变慢。
+   * 这里按路径缓存，只有「路径 + 展开状态 + 可展开性 + 深度」真变了才换对象。
+   */
+  const rowCache = new Map<string, { key: string; row: TreeRow }>();
+
+  const rows = createMemo(() => {
+    const built = buildTreeRows({
       volumes: props.volumes,
       childrenOf: tree.childrenOf,
       isExpanded: tree.isExpanded,
-    }),
-  );
+    });
+    const next: TreeRow[] = [];
+    for (const row of built) {
+      const key = `${row.depth}|${row.expanded}|${row.expandable}|${row.volumeKind ?? ""}`;
+      const cached = rowCache.get(row.path);
+      if (cached && cached.key === key) {
+        next.push(cached.row);
+      } else {
+        rowCache.set(row.path, { key, row });
+        next.push(row);
+      }
+    }
+    // 已经折叠掉的分支要清出去，别让缓存随着浏览历史无限长
+    if (rowCache.size > built.length * 2 + 16) {
+      const alive = new Set(built.map((row) => row.path));
+      for (const path of [...rowCache.keys()]) {
+        if (!alive.has(path)) rowCache.delete(path);
+      }
+    }
+    return next;
+  });
 
   return (
     <div class={["flex min-h-0 flex-col", props.class ?? ""].join(" ")}>
@@ -104,7 +162,7 @@ export function SourceTree(props: SourceTreeProps) {
                     depth={row.depth}
                     hasChildren={row.expandable}
                     expanded={row.expanded}
-                    checked={props.isChecked(row.path)}
+                    checked={props.isChecked?.(row.path) ?? false}
                     selected={props.isSelected(row.path)}
                     icon={
                       row.volumeKind === null ? (
@@ -121,8 +179,18 @@ export function SourceTree(props: SourceTreeProps) {
                     checkLabel={`${t("source.check")} ${row.path}`}
                     onClick={() => props.onSelect(row.path)}
                     onToggleExpand={() => void tree.toggle(row.path)}
-                    onCheckedChange={(checked) =>
-                      props.onToggleCheck(row.path, checked)
+                    // 双击行名 = 展开/折叠（只对可展开的行；空目录不白跑一次加载）。
+                    // 双击落在勾选圈上时不算 —— 那是「勾选」的地盘，不是展开。
+                    onDoubleClick={(event) => {
+                      const target = event.target as HTMLElement | null;
+                      if (target?.closest('[role="checkbox"]')) return;
+                      if (row.expandable) void tree.toggle(row.path);
+                    }}
+                    // 不传回调 = 不渲染勾选圈（浏览侧）
+                    onCheckedChange={
+                      props.onToggleCheck
+                        ? (checked) => props.onToggleCheck?.(row.path, checked)
+                        : undefined
                     }
                   />
                   {/* 读不了这一层时，在它下面挂一句可读的错误（而不是静默不出东西） */}

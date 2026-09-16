@@ -39,9 +39,34 @@
  */
 
 import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+
+/*
+ * 自检：本脚本大量用 `evaluate(\`...\`)` 把代码送到页面里跑，而那些模板串里
+ * **不能出现反引号** —— 一个写在注释里的反引号就会把模板串截断，后面的内容跑到
+ * Node 这边来，报出一个跟真正原因毫不相干的错（比如「dialog is not defined」）。
+ *
+ * 这个坑踩过三次，而 `node --check` **抓不到**（截断后剩下的往往还是合法 JS）。
+ * 所以自己扫一遍源码，早失败、说清楚。
+ */
+{
+  const source = readFileSync(fileURLToPath(import.meta.url), "utf8");
+  const offenders = source
+    .split("\n")
+    .map((line, index) => ({ line: line.trim(), number: index + 1 }))
+    .filter((entry) => entry.line.startsWith("//") && entry.line.includes("\u0060"));
+  if (offenders.length > 0) {
+    console.error(
+      `✗ 冒烟脚本里有 ${offenders.length} 处注释带反引号（会把 evaluate 的模板串截断）：\n` +
+        offenders.map((entry) => `  L${entry.number}: ${entry.line}`).join("\n"),
+    );
+    process.exit(2);
+  }
+}
 
 const url = process.argv[2] ?? "http://localhost:1420/dev/kitchen-sink";
 const PORT = Number(process.env.CDP_PORT ?? 9333);
@@ -158,7 +183,7 @@ try {
    * 「白屏」这个诊断就成了误报 —— 而误报比不报更消耗信任。
    */
   const mounted = await waitForContent(send);
-  if (!mounted) problems.push("等待 30 秒后 #root 仍为空（白屏）");
+  if (!mounted) problems.push("等待 60 秒后 #root 仍为空（白屏）");
 
   /**
    * 把浏览器日志里的「未捕获异常 / console.error / console.warning」收进 problems。
@@ -470,6 +495,65 @@ try {
     return result;
   })()`);
 
+  /*
+   * 后端挂掉时的**逃生路径**（2026-09-16 真机 bug 的永久断言）：
+   * Rust 命令 panic → 前端 promise 永远不 settle → 弹窗卡在忙碌态、连「取消」都发不出去。
+   * 现在：命令有时限（演示里 300ms）→ 落到错误态 → 底部按钮变成「关闭」→ 点它能关掉。
+   */
+  const deadBackend = await evaluate(`(async () => {
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const byText = (label) =>
+      [...document.querySelectorAll("button")].find((el) => el.textContent.trim() === label);
+    if (!byText("打开导入弹窗")) return null;
+    byText("打开导入弹窗").click();
+    await sleep(200);
+    // 先重新开一批：上一段断言点过「推到结束」，终态之后 store 会退订，
+    // 不退订的话后面的「推一条」没人听，一条断言就白测了（踩过）
+    document.querySelector('[data-demo-action="restart"]')?.click();
+    await sleep(300);
+
+    // 打开「后端挂掉」，再点暂停 —— 这次命令会挂住，等着被时限打断
+    document.querySelector('[data-demo-action="break-backend"]')?.click();
+    const pauseButton = byText("暂停");
+    pauseButton?.click();
+    await sleep(800); // 时限 300ms + 一点余量
+
+    // 诊断：Ark 的弹窗内容在 data-part="content" 上（[role=dialog] 命中的是外层，innerText 常为空）
+    const content = document.querySelector('[data-scope="dialog"][data-part="content"]');
+
+    // 查**整页**文本：[role=dialog] 命中的可能是 Portal 外壳（它的 innerText 是空的），
+    // 这个坑在导入弹窗那组断言里踩过一次
+    const text = document.body.innerText.replace(/\\s+/g, " ");
+    const contentText = content ? content.innerText.replace(/\\s+/g, " ") : "";
+    const result = {
+      showsError: /秒内回应|挂了/.test(text) || /秒内回应|挂了/.test(contentText),
+      closeOffered: byText("关闭") !== undefined,
+      cancelHidden: byText("取消导入") === undefined,
+      // 诊断：点了没有、内容是什么，红了直接看得出卡在哪一步
+      pauseFound: pauseButton !== undefined,
+      contentFound: content !== null,
+      contentText: contentText.slice(0, 200),
+    };
+    byText("关闭")?.click();
+    await sleep(250);
+    result.closed = document.querySelector('[role="dialog"]') === null;
+    return result;
+  })()`);
+
+  if (deadBackend !== null) {
+    if (!deadBackend.showsError) {
+      problems.push("后端挂掉时弹窗没报错（命令时限没生效？）");
+    }
+    if (!deadBackend.closeOffered || !deadBackend.cancelHidden) {
+      problems.push(
+        "后端挂掉时底部应当只给「关闭」（不然用户会去点一个同样发不出去的「取消导入」）",
+      );
+    }
+    if (!deadBackend.closed) {
+      problems.push("后端挂掉时点「关闭」关不掉弹窗 —— 逃生路径断了");
+    }
+  }
+
   if (importDialog === null) {
     problems.push("画廊里没有「导入进度」演示（src/dev/import-progress-demo.tsx 没挂上？）");
   } else {
@@ -500,10 +584,103 @@ try {
    * 导入工作区在**应用外壳**页上（厨房水槽里没有它），所以这里自己导航过去 ——
    * 脚本无论被传入哪个 URL，都会把两页都过一遍。
    */
+  /*
+   * 通用目录树（`DirTree`）：两种配置 + 双击展开 + 滚动开销。
+   *
+   * 浏览器里没有真文件系统，所以画廊用**假目录树**驱动（`src/dev/dir-tree-demo.tsx`）。
+   * 这里验三件事：勾选圈的有无确实由「传没传回调」决定；双击行名能展开/折叠；
+   * 滚动时的样式/布局开销（盯住「滚动发粘」这类回归 —— 起因通常是行上的颜色过渡）。
+   */
+  const dirTree = await evaluate(`(async () => {
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const demo = document.querySelector('[data-demo="dir-tree"]');
+    if (!demo) return null;
+    const panel = (variant) => demo.querySelector('[data-variant="' + variant + '"]');
+    const rowsIn = (el) => [...el.querySelectorAll('[role="treeitem"]')];
+    const boxesIn = (el) => el.querySelectorAll('[role="checkbox"]').length;
+
+    const plain = panel("plain");
+    const checkable = panel("checkable");
+    if (!plain || !checkable) return null;
+
+    const result = {
+      checkableBoxes: boxesIn(checkable),
+      plainBoxes: boxesIn(plain),
+      rowsAtStart: rowsIn(plain).length,
+    };
+
+    // ① 双击第一行（卷）→ 展开；再双击 → 折叠
+    // 注意：展开会让行列表重建，**节点引用会失效** —— 每次都重新取第一个节点
+    const firstRow = () => rowsIn(plain)[0];
+    if (firstRow()) {
+      firstRow()?.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+      await sleep(500);
+      result.rowsAfterExpand = rowsIn(plain).length;
+      firstRow()?.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+      await sleep(250);
+      result.rowsAfterCollapse = rowsIn(plain).length;
+    }
+
+    // ② 展开到几十行，量滚动开销
+    for (let round = 0; round < 3; round++) {
+      const collapsed = rowsIn(plain).filter(
+        (row) => row.getAttribute("aria-expanded") === "false",
+      );
+      for (const row of collapsed.slice(0, 3)) {
+        row.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+        await sleep(150);
+      }
+    }
+    result.rowsExpanded = rowsIn(plain).length;
+
+    const scroller = [...plain.querySelectorAll("div")].find(
+      (el) => getComputedStyle(el).overflowY === "auto",
+    );
+    if (scroller) {
+      const before = performance.now();
+      for (let step = 0; step < 20; step++) {
+        scroller.scrollTop = step * 24;
+        // 读一次 scrollHeight：逼出这次滚动的样式/布局工作，否则量到的是空转
+        void scroller.scrollHeight;
+      }
+      result.scrollMs = Math.round(performance.now() - before);
+      result.scrolledTo = Math.round(scroller.scrollTop);
+    }
+    return result;
+  })()`);
+
+  if (dirTree === null) {
+    problems.push("画廊里没有「目录树」演示（src/dev/dir-tree-demo.tsx 没挂上？）");
+  } else {
+    if (!(dirTree.checkableBoxes > 0)) {
+      problems.push("导入变体的目录树应当有勾选圈（传了 onToggleCheck）");
+    }
+    if (dirTree.plainBoxes !== 0) {
+      problems.push(
+        `浏览变体的目录树不该有勾选圈（未传 onToggleCheck），实际 ${dirTree.plainBoxes} 个`,
+      );
+    }
+    if (!(dirTree.rowsAfterExpand > dirTree.rowsAtStart)) {
+      problems.push(
+        `双击目录名没有展开：行数 ${dirTree.rowsAtStart} → ${dirTree.rowsAfterExpand}`,
+      );
+    }
+    if (dirTree.rowsAfterCollapse !== dirTree.rowsAtStart) {
+      problems.push(
+        `再次双击没有折叠回来：行数 ${dirTree.rowsAfterCollapse}（期望 ${dirTree.rowsAtStart}）`,
+      );
+    }
+    if (typeof dirTree.scrollMs === "number" && dirTree.scrollMs > 500) {
+      problems.push(
+        `滚动 ${dirTree.rowsExpanded} 行用了 ${dirTree.scrollMs}ms —— 行上可能有过渡/重绘（历史上就是它让滚动发粘）`,
+      );
+    }
+  }
+
   const appUrl = new URL("/", url).href;
   await send("Page.navigate", { url: appUrl });
   if (!(await waitForContent(send))) {
-    problems.push("导航到应用外壳后 30 秒仍没渲染出内容（白屏）");
+    problems.push("导航到应用外壳后 60 秒仍没渲染出内容（白屏）");
   }
   const workspaceEventsFrom = events.length;
 
@@ -584,19 +761,28 @@ try {
     };
 
     // 工作区里可能不止一个 splitter（左右分栏也是一个）——按 pane 标题认出左列那个
+    // 工作区现在有**两个** splitter：外层横向（左列宽度）与左列内部竖直（最近/来源）。
+    // 判据必须只看**直接子元素**：querySelectorAll 会把嵌套 splitter 的 pane 一起捞进来
+    // （那样两个都会命中）。也别用 aria-orientation —— 分隔条的 ARIA 方向与 splitter 的
+    // 方向是**反的**（左右分栏的分隔条是 vertical），按它挑会挑到外层那个。
+    const directPanels = (el) =>
+      [...el.children].filter((child) => child.getAttribute("data-part") === "panel");
     const splitters = [...document.querySelectorAll('[data-scope="splitter"]')];
     const root = splitters.find((el) => {
-      const titles = [...el.querySelectorAll('[data-part="panel"]')].map(titleOf);
+      const titles = directPanels(el).map(titleOf);
       return titles.includes("最近") && titles.includes("来源");
     });
     if (!root) return null;
 
-    const panes = [...root.querySelectorAll('[data-part="panel"]')].map((pane) => ({
+    const panes = directPanels(root).map((pane) => ({
       title: titleOf(pane),
       h: Math.round(rect(pane).height),
       bottom: Math.round(rect(pane).bottom),
     }));
-    const triggers = [...root.querySelectorAll('[data-part="resize-trigger"]')];
+    // 只数直接子元素里的手柄：嵌套在里面的别的 splitter（外层横向那个）不算
+    const triggers = [...root.children].filter(
+      (el) => el.getAttribute("data-part") === "resize-trigger",
+    );
     const selectedPanel = [...document.querySelectorAll("section")].find((el) => {
       const heading = el.querySelector("h2");
       return heading && heading.textContent.trim() === "已选目录";
@@ -616,6 +802,22 @@ try {
       h2s: [...document.querySelectorAll("h2")].map((el) => el.textContent.trim()),
     };
   })()`);
+
+  const refreshButton = await evaluate(`(() => {
+    const treePanel = [...document.querySelectorAll("section")].find((el) => {
+      const heading = el.querySelector("h2");
+      return heading && heading.textContent.trim() === "来源";
+    });
+    if (!treePanel) return null;
+    return {
+      hasRefresh: [...treePanel.querySelectorAll("button")].some(
+        (el) => (el.getAttribute("aria-label") ?? "") === "刷新",
+      ),
+    };
+  })()`);
+  if (refreshButton !== null && !refreshButton.hasRefresh) {
+    problems.push("「来源」面板上没有刷新按钮 —— 目录在程序外面变了就没法刷新");
+  }
 
   if (leftColumn === null) {
     problems.push("应用外壳里找不到左列的 splitter（最近 / 来源 两个 pane）");
@@ -723,7 +925,6 @@ try {
       matchesRule: positioner
         ? positioner.matches('[data-scope="menu"][data-part="positioner"]')
         : null,
-      zRuleInSheets,
     };
     if (!menu) return result;
 
@@ -823,8 +1024,10 @@ try {
         shell,
         splitter,
         importDialog,
+        deadBackend,
         leftColumn,
         layers,
+        dirTree,
         workspace,
         problems,
       },
@@ -834,6 +1037,8 @@ try {
   );
 } catch (error) {
   problems.push(`冒烟脚本自身失败：${error.message}`);
+  // 带上堆栈：脚本自身的错（比如某段 evaluate 里的变量名写错）光看消息定不了位
+  console.error(error.stack ?? String(error));
   console.error(JSON.stringify({ url, problems }, null, 2));
 } finally {
   ws?.close();
@@ -859,7 +1064,11 @@ async function findTarget() {
 }
 
 /** 轮询等 `#root` 真的长出内容；返回是否等到 */
-async function waitForContent(send, timeoutMs = 30_000) {
+/*
+ * 等页面渲染出内容。**给到 60 秒**：改完代码后 dev server 要重新编译并重新预打包依赖，
+ * 冷启动实测能到十几秒 —— 阈值太紧会把「慢」误报成「白屏」，而误报比不报更消耗信任。
+ */
+async function waitForContent(send, timeoutMs = 60_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {

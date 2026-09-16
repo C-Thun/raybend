@@ -86,6 +86,7 @@ export const enUS: Record<MessageKey, string> = {
  "common.confirm": "OK",
  "common.loading": "Loading",
  "common.empty": "Nothing here",
+ "common.refresh": "Refresh",
  "common.retry": "Retry",
  "common.selected_summary": "{dirs} folders · {photos} photos selected",
 

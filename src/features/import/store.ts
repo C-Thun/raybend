@@ -11,6 +11,7 @@
  */
 
 import { createSignal } from "solid-js";
+import { withTimeout } from "../../lib/timeout.ts";
 import type { ImportSource } from "../../api/import.ts";
 import type {
   ImportBatchProgress,
@@ -108,7 +109,24 @@ function isFinal(state: ImportState): boolean {
   return state === "cancelled" || state === "done" || state === "failed";
 }
 
-export function createImportStore(deps: { api: ImportApi }): ImportStore {
+export interface ImportStoreDeps {
+  api: ImportApi;
+  /**
+   * 每条命令的时限（毫秒；不传用 `DEFAULT_COMMAND_TIMEOUT_MS`）。
+   *
+   * 存在的理由见 `lib/timeout.ts`：后端 panic 时命令的 promise **永远不会 settle**，
+   * 没有时限的话界面会卡在忙碌态、连「取消」都发不出去。时限把它变成一条错误消息。
+   */
+  timeoutMs?: number;
+}
+
+/** 命令时限默认 15 秒：正常命令都是毫秒级，15 秒只可能是「后端挂了」。 */
+export const DEFAULT_COMMAND_TIMEOUT_MS = 15_000;
+
+/** 暂停 / 继续 / 取消 这三个命令超时时的说法（拼进错误消息） */
+const DANG_WHAT = "导入命令";
+
+export function createImportStore(deps: ImportStoreDeps): ImportStore {
   // 界面要读的这五个必须是 **signal**（文件头那条只禁 `createMemo`，不禁 `createSignal`）：
   // `<Dialog open={store.open()}>` 里 Solid 只在读到 props 时求值 —— 普通变量读一次就定死，
   // 弹窗永远弹不出来（步骤 15 的冒烟抓到的正是这个，且它在真机上同样弹不出来）。
@@ -120,6 +138,7 @@ export function createImportStore(deps: { api: ImportApi }): ImportStore {
   const [busy, setBusy] = createSignal(false);
   const [open, setOpen] = createSignal(false);
   let unlisten: (() => void) | null = null;
+  const timeout = deps.timeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
 
   function unsubscribe(): void {
     if (unlisten) {
@@ -142,7 +161,7 @@ export function createImportStore(deps: { api: ImportApi }): ImportStore {
     setBusy(true);
     setError(null);
     try {
-      const snapshot = await run(id);
+      const snapshot = await withTimeout(run(id), timeout, DANG_WHAT);
       apply(snapshot);
     } catch (caught) {
       fail(caught);
@@ -165,10 +184,10 @@ export function createImportStore(deps: { api: ImportApi }): ImportStore {
     setOpen(true);
     unsubscribe();
     try {
-      const started = await deps.api.start(
-        request.repositoryId,
-        request.sources,
-        request.avoidDuplicates,
+      const started = await withTimeout(
+        deps.api.start(request.repositoryId, request.sources, request.avoidDuplicates),
+        timeout,
+        "启动导入",
       );
       if (started.batchId === "") {
         // 浏览器降级（`api/import.ts` 在没有 Tauri 时返回空批次）：
@@ -179,11 +198,11 @@ export function createImportStore(deps: { api: ImportApi }): ImportStore {
       }
       setBatchId(started.batchId);
       // 先订阅再取一次快照：两者之间的空档不会漏事件
-      unlisten = await deps.api.subscribe((incoming) => {
+      unlisten = await withTimeout(deps.api.subscribe((incoming) => {
         // 只认自己这一批（理论上只有一个批次在跑，但别留隐患）
         if (incoming.batchId === batchId()) apply(incoming);
-      });
-      apply(await deps.api.status(started.batchId));
+      }), timeout, "订阅导入进度");
+      apply(await withTimeout(deps.api.status(started.batchId), timeout, "读导入状态"));
     } catch (caught) {
       fail(caught);
       setBatchId(null);
@@ -265,7 +284,7 @@ export function createImportStore(deps: { api: ImportApi }): ImportStore {
       const id = batchId();
       if (id === null) return 0;
       try {
-        return await deps.api.exportErrors(id, path);
+        return await withTimeout(deps.api.exportErrors(id, path), timeout, "导出错误清单");
       } catch (caught) {
         fail(caught);
         return 0;

@@ -12,7 +12,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { DirEntry } from "../../api/types.ts";
-import { createSourceTreeStore } from "./store.ts";
+import { createDirTreeStore } from "./store.ts";
 
 function dir(path: string): DirEntry {
   return { path, name: path };
@@ -46,7 +46,7 @@ function fakeLoader(entries: Record<string, DirEntry[]> = {}) {
 
 test("展开会读一次子目录，并记在状态里", async () => {
   const loader = fakeLoader({ "/a": [dir("/a/b"), dir("/a/c")] });
-  const store = createSourceTreeStore({ loadDirs: loader.loadDirs });
+  const store = createDirTreeStore({ loadDirs: loader.loadDirs });
 
   assert.equal(store.isExpanded("/a"), false);
   assert.equal(store.childrenOf("/a"), undefined, "没展开过就没读过");
@@ -62,7 +62,7 @@ test("展开会读一次子目录，并记在状态里", async () => {
 
 test("折叠再展开是秒开（不重复读）", async () => {
   const loader = fakeLoader({ "/a": [dir("/a/b")] });
-  const store = createSourceTreeStore({ loadDirs: loader.loadDirs });
+  const store = createDirTreeStore({ loadDirs: loader.loadDirs });
 
   await store.expand("/a");
   store.collapse("/a");
@@ -76,7 +76,7 @@ test("折叠再展开是秒开（不重复读）", async () => {
 test("并发的两次展开只读一次", async () => {
   const loader = fakeLoader({ "/a": [dir("/a/b")] });
   loader.state.hold = true;
-  const store = createSourceTreeStore({ loadDirs: loader.loadDirs });
+  const store = createDirTreeStore({ loadDirs: loader.loadDirs });
 
   const first = store.expand("/a");
   const second = store.expand("/a");
@@ -91,7 +91,7 @@ test("并发的两次展开只读一次", async () => {
 
 test("toggle：展开与折叠交替", async () => {
   const loader = fakeLoader({ "/a": [] });
-  const store = createSourceTreeStore({ loadDirs: loader.loadDirs });
+  const store = createDirTreeStore({ loadDirs: loader.loadDirs });
 
   await store.toggle("/a");
   assert.equal(store.isExpanded("/a"), true);
@@ -102,7 +102,7 @@ test("toggle：展开与折叠交替", async () => {
 test("读失败：记下原因、不当成「空目录」", async () => {
   const loader = fakeLoader();
   loader.state.fail = true;
-  const store = createSourceTreeStore({ loadDirs: loader.loadDirs });
+  const store = createDirTreeStore({ loadDirs: loader.loadDirs });
 
   await store.expand("/a");
   assert.match(store.errorOf("/a") ?? "", /读不了 \/a/);
@@ -118,7 +118,7 @@ test("读失败：记下原因、不当成「空目录」", async () => {
 test("refresh 会重新读并清掉上一次的错误", async () => {
   const loader = fakeLoader({ "/a": [dir("/a/b")] });
   loader.state.fail = true;
-  const store = createSourceTreeStore({ loadDirs: loader.loadDirs });
+  const store = createDirTreeStore({ loadDirs: loader.loadDirs });
 
   await store.expand("/a");
   assert.ok(store.errorOf("/a"));
@@ -132,7 +132,7 @@ test("refresh 会重新读并清掉上一次的错误", async () => {
 
 test("多个目录各自独立（状态不串）", async () => {
   const loader = fakeLoader({ "/a": [dir("/a/1")], "/b": [dir("/b/1"), dir("/b/2")] });
-  const store = createSourceTreeStore({ loadDirs: loader.loadDirs });
+  const store = createDirTreeStore({ loadDirs: loader.loadDirs });
 
   await store.expand("/a");
   await store.expand("/b");
@@ -144,9 +144,52 @@ test("多个目录各自独立（状态不串）", async () => {
 
 test("空目录：读回来是空数组（而不是 undefined）", async () => {
   const loader = fakeLoader({ "/empty": [] });
-  const store = createSourceTreeStore({ loadDirs: loader.loadDirs });
+  const store = createDirTreeStore({ loadDirs: loader.loadDirs });
 
   await store.expand("/empty");
   assert.deepEqual(store.childrenOf("/empty"), []);
   assert.notEqual(store.childrenOf("/empty"), undefined);
+});
+
+test("refreshAll：只重读展开着的目录，且保留展开状态", async () => {
+  const calls: string[] = [];
+  const listings: Record<string, DirEntry[]> = {
+    "/a": [{ name: "b", path: "/a/b" }],
+    "/b": [{ name: "c", path: "/b/c" }],
+  };
+  const store = createDirTreeStore({
+    loadDirs: async (path) => {
+      calls.push(path);
+      return listings[path] ?? [];
+    },
+  });
+
+  await store.expand("/a");
+  await store.expand("/b");
+  calls.length = 0;
+
+  await store.refreshAll();
+  assert.deepEqual(calls.sort(), ["/a", "/b"], "展开着的两个都要重读");
+  assert.equal(store.isExpanded("/a"), true, "刷新不该把展开状态弄丢");
+  assert.equal(store.isExpanded("/b"), true);
+});
+
+test("refreshAll：外部新增的目录，刷新之后能看到（这就是「运行期刷新」的意义）", async () => {
+  let extra: DirEntry | null = null;
+  const store = createDirTreeStore({
+    loadDirs: async () => [
+      { name: "原有", path: "/a/原有" },
+      ...(extra === null ? [] : [extra]),
+    ],
+  });
+
+  await store.expand("/a");
+  assert.equal(store.childrenOf("/a")?.length, 1);
+
+  // 程序外面新建了一个目录：我们不监听，所以**不刷新就看不到**（这是明说的取舍）
+  extra = { name: "外部新建", path: "/a/外部新建" };
+  assert.equal(store.childrenOf("/a")?.length, 1, "没刷新时仍是缓存的旧结果");
+
+  await store.refreshAll();
+  assert.equal(store.childrenOf("/a")?.length, 2, "刷新之后应当看到新目录");
 });

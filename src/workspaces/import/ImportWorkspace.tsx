@@ -33,6 +33,8 @@ import {
   RepositoryList,
 } from "../../features/repositories/index.ts";
 import type { ImportStore } from "./store.ts";
+import { SplitStack } from "../../components/ui/SplitStack.tsx";
+import { withTimeout } from "../../lib/timeout.ts";
 import { LeftColumn } from "./LeftColumn.tsx";
 
 export interface ImportWorkspaceProps {
@@ -46,6 +48,13 @@ export interface ImportWorkspaceProps {
    * 不给就不显示这个按钮（M1-6 之前的那版就是这样）。
    */
   onRevealInLibrary?: () => void;
+  /** 左列宽度比例（0–1；来自 `lib/layout-prefs.ts`，只在首次渲染生效） */
+  leftRatio?: number;
+  /** 左列拖拽结束 —— 交给布局偏好店落盘 */
+  onLeftRatioChange?: (ratio: number) => void;
+  /** 左列里「最近」段的高度比例（0–1） */
+  recentRatio?: number;
+  onRecentRatioChange?: (ratio: number) => void;
 }
 
 /** 字节数 → 「1.2 GB」这种人话（预检提示用）。 */
@@ -88,7 +97,12 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
     const repository = store.selectedRepository();
     if (repository === null || sources().length === 0) return;
     try {
-      const precheck = await importPrecheck(repository.id, sources());
+      // 预检也限时：后端要是挂了，这一句同样会永远不回来（按钮就一直转）
+      const precheck = await withTimeout(
+        importPrecheck(repository.id, sources()),
+        15_000,
+        "空间预检",
+      );
       if (precheck.tight) {
         setSpaceWarning(
           t("import.space_warning", {
@@ -136,18 +150,53 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
   createEffect(() => grid.setSourceDir(store.selectedDir()));
 
   return (
-    <div class="flex min-h-0 flex-1">
-      <aside class="flex w-panel-w-left shrink-0 flex-col bg-surface-main p-panel-pad">
-        <LeftColumn store={store} />
-      </aside>
+    /*
+     * 工作区 = 横向 splitter：**左列可拖、右侧不给把手**（原则见 DESIGN.md §8.6）。
+     * 右侧（中列 + 右列）整块作为第二个 pane —— 右列自己的宽度由内容决定，不参与拖拽。
+     * 两个比例都在拖拽结束落盘到 `lib/layout-prefs.ts`（设备级偏好），下次启动还原。
+     */
+    <SplitStack
+      orientation="horizontal"
+      class="min-h-0 flex-1"
+      keyboardResizeBy={16}
+      onResizeEnd={(sizes) => {
+        const first = sizes[0];
+        if (typeof first === "number") props.onLeftRatioChange?.(first / 100);
+      }}
+      segments={[
+        {
+          id: "left",
+          defaultSize: (props.leftRatio ?? 0.22) * 100,
+          // 比例之外再加一道**像素闸门**：窗口很小时，左列也不许被压到看不见
+          minSize: "220px",
+          content: (
+            <aside class="flex min-h-0 flex-col bg-surface-main p-panel-pad">
+              <LeftColumn
+                store={store}
+                {...(props.recentRatio === undefined
+                  ? {}
+                  : { recentRatio: props.recentRatio })}
+                {...(props.onRecentRatioChange === undefined
+                  ? {}
+                  : { onRecentRatioChange: props.onRecentRatioChange })}
+              />
+            </aside>
+          ),
+        },
+        {
+          id: "rest",
+          // 中列 + 右列 = 剩下的全部宽度（右列自己再按令牌固定宽度）
+          defaultSize: (1 - (props.leftRatio ?? 0.22)) * 100,
+          minSize: "480px",
+          content: (
+            <div class="flex min-h-0 min-w-0 flex-1">
+              {/* ── 中列：照片网格 ─────────────────────────────── */}
+              <main class="flex min-w-0 flex-1 flex-col bg-surface-bar">
+                <PhotoGrid store={grid} />
+              </main>
 
-      {/* ── 中列：照片网格 ─────────────────────────────── */}
-      <main class="flex min-w-0 flex-1 flex-col bg-surface-bar">
-        <PhotoGrid store={grid} />
-      </main>
-
-      {/* ── 右列：库 ─────────────────────────────────── */}
-      <aside class="flex w-panel-w-right shrink-0 flex-col gap-2 bg-surface-main p-panel-pad">
+              {/* ── 右列：库（固定宽，不可拖）─────────────────── */}
+              <aside class="flex w-panel-w-right shrink-0 flex-col gap-2 bg-surface-main p-panel-pad">
         <p class="text-fs-1 tracking-wide text-fg-2 uppercase">
           {t("repo.title")}
         </p>
@@ -220,8 +269,12 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
             store.upsertRepository(view);
             store.selectRepository(view.id);
           }}
-        />
-      </aside>
-    </div>
+                />
+              </aside>
+            </div>
+          ),
+        },
+      ]}
+    />
   );
 }

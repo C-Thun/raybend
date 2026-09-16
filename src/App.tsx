@@ -24,6 +24,7 @@ import type { ExifData } from "./features/exif-strip/index.ts";
 import { toExifData } from "./features/exif-strip/index.ts";
 import { createPhotoGridStore } from "./features/photo-grid/index.ts";
 import { createAppearanceStore } from "./lib/appearance.ts";
+import { createLayoutStore } from "./lib/layout-prefs.ts";
 import { FlowBar } from "./shell/FlowBar.tsx";
 import { createShellStore } from "./shell/store.ts";
 import { TitleBar } from "./shell/TitleBar.tsx";
@@ -33,6 +34,8 @@ import { createImportStore, ImportWorkspace } from "./workspaces/import/index.ts
 export default function App() {
   const shell = createShellStore();
   const appearance = createAppearanceStore();
+  // 布局偏好（设备级）：左列宽度与左列内部的比例，拖拽结束落盘、下次启动还原
+  const layout = createLayoutStore();
   const importStore = createImportStore({ api: db });
   const grid = createPhotoGridStore({ api: db });
 
@@ -81,6 +84,10 @@ export default function App() {
         store={importStore}
         grid={grid}
         onRevealInLibrary={() => shell.setWorkflow("browse")}
+        leftRatio={layout.prefs().leftRatio}
+        onLeftRatioChange={layout.setLeftRatio}
+        recentRatio={layout.prefs().recentRatio}
+        onRecentRatioChange={layout.setRecentRatio}
       />
     </div>
   );

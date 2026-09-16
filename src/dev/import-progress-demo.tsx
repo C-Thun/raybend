@@ -146,6 +146,12 @@ const SCRIPTS = {
 
 export function ImportProgressDemo() {
   const [revealCount, setRevealCount] = createSignal(0);
+  /**
+   * 「后端挂掉」开关：打开之后 pause / cancel 返回一个**永远不 settle** 的 promise ——
+   * 正是真机上「Rust panic 之后命令的 promise 永远不回来」的样子。
+   * 配合下面 300ms 的短时限，冒烟能在半秒内验完「卡死 → 报错 → 关得掉」这条链路。
+   */
+  let broken = false;
   let handlers: ((progress: ImportBatchProgress) => void)[] = [];
   let latest: ImportBatchProgress = snapshot();
 
@@ -154,12 +160,15 @@ export function ImportProgressDemo() {
       return { batchId: "demo", runs: [{ index: 0, sourceRoot: "D:\\照片\\2026 旅行" }] };
     },
     async pause() {
+      if (broken) return new Promise(() => {});
       return SCRIPTS.paused();
     },
     async resume() {
+      if (broken) return new Promise(() => {});
       return SCRIPTS.running();
     },
     async cancel() {
+      if (broken) return new Promise(() => {});
       return { ...SCRIPTS.paused(), state: "cancelled", finishedAt: T0 + 5_000 };
     },
     async status() {
@@ -176,7 +185,23 @@ export function ImportProgressDemo() {
     },
   };
 
-  const store = createImportStore({ api });
+  // 短时限：真机上是 15 秒，演示里 300ms 就能看到「卡死 → 报错」
+  const store = createImportStore({ api, timeoutMs: 300 });
+
+  /** 重新开一批：`begin()` 会重新订阅（终态之后 handler 会被摘掉，再推就没人听了）。 */
+  function restart(): void {
+    broken = false;
+    // 先把「最新快照」重置成运行中：`begin()` 内部会调一次 status()，而它读的是 latest ——
+    // 不重置的话新批次一开出来就顶着上一批的终态（「导入完成」），连暂停按钮都不会有
+    latest = SCRIPTS.running();
+    void store
+      .begin({
+        repositoryId: "demo",
+        sources: [{ path: "D:\\照片\\2026 旅行", includeSubdirs: true }],
+        avoidDuplicates: true,
+      })
+      .then(() => push(SCRIPTS.running()));
+  }
 
   function push(next: ImportBatchProgress): void {
     latest = next;
@@ -211,6 +236,18 @@ export function ImportProgressDemo() {
           {store.open() ? "关闭导入弹窗" : "打开导入弹窗"}
         </Button>
         <Show when={store.open()}>
+          <Button
+            variant="secondary"
+            data-demo-action="break-backend"
+            onClick={() => {
+              broken = true;
+            }}
+          >
+            模拟后端挂掉
+          </Button>
+          <Button variant="secondary" data-demo-action="restart" onClick={restart}>
+            重新开始
+          </Button>
           <Button variant="secondary" onClick={() => push(SCRIPTS.running())}>
             推一条「导入中」
           </Button>
