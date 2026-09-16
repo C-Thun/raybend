@@ -17,7 +17,8 @@ use unicode_normalization::UnicodeNormalization;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum MediaKind {
-    /// 相机 RAW：本阶段**用占位图**（`FUTURE.md` B8：RAW 后端与进程隔离在后续波次）。
+    /// 相机 RAW：走 [`crate::raw`] 的解码后端（**worker 进程隔离**，`AGENTS.md` §6.3）。
+    /// 解码失败（相机不支持、文件损坏）才退回程序画的占位图。
     Raw,
     /// 普通图像（JPEG / PNG / WebP / TIFF / HEIF 等），可直接解码。
     Image,

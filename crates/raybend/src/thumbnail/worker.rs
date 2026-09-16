@@ -239,7 +239,7 @@ pub enum Outcome {
     Rendered,
     /// 缓存已命中，什么都不用做。
     Cached,
-    /// 文件不可解码（RAW）→ 存了占位图。
+    /// 文件不可解码（相机不支持的 RAW、损坏文件）→ 存了占位图。
     Placeholder,
 }
 
@@ -300,7 +300,7 @@ pub fn produce(conn: &Connection, root: &Path, job: &ThumbJob, now_ms: i64) -> R
     let (thumb, outcome) = match render::render_file(&abs, size)? {
         Some(t) => (t, Outcome::Rendered),
         None => {
-            // 不可解码（RAW）：先用占位图兜住，之后有真实解码后端时再替换
+            // 不可解码（RAW 多数已经能解了；这里是相机不支持/文件损坏的情况）
             let p = render::placeholder(kind, size)?;
             (p, Outcome::Placeholder)
         }
@@ -326,7 +326,7 @@ pub fn produce(conn: &Connection, root: &Path, job: &ThumbJob, now_ms: i64) -> R
 ///
 /// 调用方负责控制并发（前端只同时发 4 个请求）；这里不做限流，超时/取消也不属于它。
 ///
-/// 文件不存在 / 读不了 → 报错（界面显示破图占位）；文件能读但解不了码（RAW）→ 占位图。
+/// 文件不存在 / 读不了 → 报错（界面显示破图占位）；文件能读但解不了码 → 占位图。
 pub fn render_now(
     thumbs: &ThumbsDb,
     abs_path: &Path,

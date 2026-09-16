@@ -17,15 +17,19 @@
 //!
 //! # RAW 与「只有 RAW」
 //!
-//! 本阶段 RAW **不做真实解码**（`FUTURE.md` B8 记录了原因与届时的要求），一律用
-//! [`placeholder`] 生成的占位图。占位图是程序画的，**不依赖任何字体文件**。
+//! RAW **不在本进程里解码** —— 走 [`crate::raw`] 的 worker 进程（内嵌预览优先，
+//! 完整解码留给 1:1；见 `AGENTS.md` §6.3）。本模块负责的是「拿到 8 位 RGB 之后」
+//! 的那一段：方向、夹取、缩放、编码。
+//!
+//! 真解不开时（相机不支持、文件损坏）才用 [`placeholder`] 生成的占位图 ——
+//! 占位图是程序画的，**不依赖任何字体文件**。
 
 use std::path::Path;
 
 use image::{DynamicImage, ExtendedColorType, ImageFormat, Rgb, RgbImage};
 
 use crate::error::{Error, Result};
-use crate::media::kind::MediaKind;
+use crate::media::kind::{MediaKind, kind_of_file};
 
 /// 网格缩略图长边。
 pub const GRID_LONG_EDGE: u32 = 384;
@@ -119,9 +123,20 @@ pub struct Thumb {
     pub placeholder: bool,
 }
 
-/// 渲染一个文件。**不是图像（比如 RAW）返回 `Ok(None)`** —— 由调用方决定用占位图
-/// 还是去读它的配对位图（`REPOSITORY.md` §4.1）。
+/// 渲染一个文件。
+///
+/// * **图像**（JPEG/PNG/TIFF…）直接解码；
+/// * **RAW** 走 [`crate::raw`] 的 worker 进程（内嵌预览优先，见 `render_raw_file`）；
+/// * **都不是**（或解不开）返回 `Ok(None)` —— 调用方据此用占位图
+///   （`REPOSITORY.md` §4.1）。
 pub fn render_file(path: &Path, size: SizeClass) -> Result<Option<Thumb>> {
+    let kind = path
+        .file_name()
+        .map_or(MediaKind::Other, |n| kind_of_file(&n.to_string_lossy()));
+    if kind == MediaKind::Raw {
+        return render_raw_file(path, size);
+    }
+
     let bytes = std::fs::read(path)?;
     /*
      * **方向必须在这里读**：竖拍照片（EXIF 方向 6/8）不摆正就会**躺着**显示 ——
@@ -134,6 +149,55 @@ pub fn render_file(path: &Path, size: SizeClass) -> Result<Option<Thumb>> {
         .and_then(|data| data.orientation)
         .map(|raw| crate::media::meta::normalize_orientation(Some(raw)));
     render_bytes(&bytes, size, orientation)
+}
+
+/// 给 RAW 缩放时多要的倍数：最终尺寸的 Lanczos 由 [`encode`] 在小图上做，
+/// 这里只要给出略大的源（两道降采样比一次大跨度缩放更干净）。
+const RAW_OVERSAMPLE: u32 = 2;
+
+/// RAW 的渲染
+fn render_raw_file(path: &Path, size: SizeClass) -> Result<Option<Thumb>> {
+    let want = size.long_edge().saturating_mul(RAW_OVERSAMPLE).max(1);
+    let request = crate::raw::DecodeRequest::thumb(path, want);
+
+    // 共享一条解码管道（理由见 `raw::worker::shared`）
+    let decoded = {
+        let mut worker = crate::raw::worker::shared()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        match worker.decode(&request) {
+            Ok(image) => image,
+            Err(e) => {
+                /*
+                 * 解不开就退回占位图（调用方拿到 `None` 会用 `placeholder`）——
+                 * 相机不支持、文件损坏、worker 崩了都走这里。
+                 * 注意：**这不是错误**，一张解不开的 RAW 不该让整个导入失败。
+                 */
+                eprintln!("[thumb] RAW 解码失败（改用占位图）：{} —— {e}", path.display());
+                return Ok(None);
+            }
+        }
+    };
+
+    let Some(buffer) = image::RgbImage::from_raw(decoded.width, decoded.height, decoded.rgb) else {
+        return Ok(None);
+    };
+    let img = DynamicImage::ImageRgb8(buffer);
+
+    /*
+     * 方向：worker 给了就用它（CR3 这类只能从容器内部拿），否则自己从文件头读
+     * （TIFF 家族的外层 EXIF 就够）。拿不到就当 1（不摆正）——
+     * 比「猜错方向」安全：老照片里方向标记乱写的情况不少。
+     */
+    let orientation = decoded.orientation.or_else(|| {
+        std::fs::read(path).ok().and_then(|bytes| {
+            crate::media::exif::read_bytes(&bytes)
+                .and_then(|data| data.orientation)
+                .map(|raw| crate::media::meta::normalize_orientation(Some(raw)))
+        })
+    });
+
+    encode(img, size, orientation, false).map(Some)
 }
 
 /// 从内存渲染；`orientation` 是 EXIF 的 1..8（给了就摆正）。
@@ -288,6 +352,9 @@ pub fn apply_orientation(img: &DynamicImage, orientation: u16) -> DynamicImage {
 }
 
 /// 生成占位图：深底 + 「RAW」字样，**不依赖字体文件**。
+///
+/// 现在只有「真解不开」才用得上（相机不支持、文件损坏）—— RAW 正常会走
+/// [`crate::raw`] 的 worker 解码（见 [`render_file`]）。
 ///
 /// 字体是手写的 5×7 点阵（只有 R / A / W 三个字母，够用）。
 pub fn placeholder(kind: MediaKind, size: SizeClass) -> Result<Thumb> {

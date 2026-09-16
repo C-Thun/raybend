@@ -12,6 +12,7 @@ repository.workspace = true
 getrandom.workspace = true
 rusqlite.workspace = true
 kamadak-exif.workspace = true
+rawler.workspace = true
 image.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true

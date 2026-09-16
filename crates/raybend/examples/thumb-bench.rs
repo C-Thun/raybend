@@ -11,7 +11,8 @@
 //! * **P50 / P95 单张耗时** —— 平均值会骗人，尾巴才决定体感；
 //! * **缩放算法对比**（Lanczos3 / 三角 / 盒式）—— 给「质量 vs 速度」的取舍提供数据；
 //! * **缓存写读吞吐** —— 确认 SQLite BLOB 这条路不是瓶颈；
-//! * **占位图路径** —— RAW 在本阶段走的就是它。
+//! * **RAW 路径** —— RAW 走 [`raybend::raw`] 的 worker（内嵌预览优先）；
+//!   只有「真解不开」才落到程序画的占位图。
 //!
 //! ⚠️ 在 WSL 下读 `/mnt/c` 走 9p，比 Windows 本地盘慢得多。所以**绝对值只能当
 //! 上界参考**，主要看「阶段占比」与「算法之间的相对差距」。
@@ -151,7 +152,7 @@ fn main() {
         ms(hit_wall) / files.len().max(1) as f64
     );
 
-    // ④ 分阶段耗时 + 算法对比（只在位图上做，RAW 走的是占位图）
+    // ④ 分阶段耗时 + 算法对比（只在位图上做：RAW 的解码在 worker 进程里，阶段拆不开）
     let sample: Vec<_> = jpgs.iter().take(30).collect();
     if sample.is_empty() {
         println!("\n（没有位图，跳过分阶段与算法对比）");
@@ -223,13 +224,13 @@ fn main() {
         );
     }
 
-    // ⑤ 占位图（RAW 路径）
+    // ⑤ 占位图（真解不开时的兜底路径）
     let t = Instant::now();
     for _ in 0..raws.len().max(1) {
         let _ = render::placeholder(MediaKind::Raw, SizeClass::Grid).unwrap();
     }
     println!(
-        "\n占位图（RAW）\n  {} 张 {:.0} ms（{:.3} ms/张）—— 只是画图 + 编码，没有解码",
+        "\n占位图（解不开时的兜底）\n  {} 张 {:.0} ms（{:.3} ms/张）—— 只是画图 + 编码，没有解码",
         raws.len(),
         ms(t.elapsed()),
         ms(t.elapsed()) / raws.len().max(1) as f64

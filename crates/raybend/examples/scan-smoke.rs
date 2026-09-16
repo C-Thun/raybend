@@ -117,7 +117,7 @@ fn main() {
         "配对    位图↔RAW 同名成对 {paired} 组 · 只有 RAW {raw_only} · 只有位图 {bitmap_only}"
     );
     if raw_only > 0 {
-        println!("        ⚠️ 「只有 RAW」的那些将来需要真实解码（现在是占位图，见 FUTURE.md B8）");
+        println!("        ℹ️ 「只有 RAW」的那些走 worker 解码（内嵌预览优先，见 AGENTS.md §6.3）");
     }
 
     if !outcome.problems.is_empty() {

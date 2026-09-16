@@ -2,7 +2,8 @@
 //!
 //! 模块划分：
 //!
-//! * [`render`]：解码 → 按 EXIF 朝向摆正 → 缩放 → 编码 JPEG；RAW 走程序画的占位图
+//! * [`render`]：解码 → 按 EXIF 朝向摆正 → 缩放 → 编码 JPEG；
+//!   RAW 先走 [`crate::raw`]（内嵌预览优先，worker 进程隔离），解不开才用占位图
 //! * [`cache`]：`<app data>/cache/<repository_id>/thumbs.db`（独立小库，派生数据）
 //! * [`worker`]：消费 `app.db` 的 `jobs` 队列，支持取消与崩溃续跑
 //!
