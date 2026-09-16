@@ -1014,6 +1014,74 @@ try {
     const tiles = [...demo.querySelectorAll('[role="option"]')];
     if (tiles.length === 0) return null;
 
+    /*
+     * 信息条底纹的**可读性实测**。
+     *
+     * 为什么要把对比度算出来：2026-09-16 真机报「悬停/选中的信息条没有背景条，字直接压在照片上」——
+     * 根因是 Tile.tsx 引用的 --tile-bar-scrim 没人定义，
+     * background-color: var(--未定义) 在计算值阶段失效成 transparent，不报错、日志里也看不到。
+     * 当时只量了 opacity（信息条确实「出现了」），所以漏了。
+     *
+     * 这里按**最坏情况的两端**（照片是纯白 / 纯黑像素）把蒙层叠上去，算文字的实际对比度，
+     * 取两者中差的那个：像素比文字亮、比文字暗，总有一端是最难的。
+     */
+    const parseRgb = (value) => {
+      const match = /rgba?\(([^)]+)\)/.exec(value ?? "");
+      if (!match) return null;
+      const parts = match[1].split(",").map((part) => Number(part.trim()));
+      return parts.length === 3 ? [...parts, 1] : parts;
+    };
+    // WCAG 相对亮度
+    const luminance = (rgb) => {
+      const channel = (value) => {
+        const c = value / 255;
+        return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+      };
+      return 0.2126 * channel(rgb[0]) + 0.7152 * channel(rgb[1]) + 0.0722 * channel(rgb[2]);
+    };
+    const contrast = (a, b) => {
+      const high = Math.max(luminance(a), luminance(b));
+      const low = Math.min(luminance(a), luminance(b));
+      return (high + 0.05) / (low + 0.05);
+    };
+
+    /*
+     * 合成靠 **canvas 真实画一遍**，不解析颜色字符串：
+     * color-mix() 的结果被 getComputedStyle 序列化成 oklab(... / 0.72) 这种形式，
+     * 手写解析很容易只支持到一半；交给浏览器自己画、再读回像素最实在。
+     */
+    const canvas = document.createElement("canvas");
+    canvas.width = 1;
+    canvas.height = 1;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    const over = (color, pixel) => {
+      ctx.globalCompositeOperation = "copy";
+      ctx.fillStyle = pixel === 255 ? "#ffffff" : "#000000";
+      ctx.fillRect(0, 0, 1, 1);
+      ctx.globalCompositeOperation = "source-over";
+      ctx.fillStyle = color;
+      ctx.fillRect(0, 0, 1, 1);
+      return [...ctx.getImageData(0, 0, 1, 1).data].slice(0, 3);
+    };
+
+    /*
+     * 取色也交给浏览器：getComputedStyle 的序列化形式不止一种
+     * （实测见过 rgb(32, 34, 38) 与 rgb(32 34 38) 两种写法，自己拆字符串会静默拿到 NaN ——
+     * NaN 在 JSON 里变成 null，看起来像「没测到」），
+     * 而 canvas 的 fillStyle 读回来是规范的 #rrggbb / rgba(...)。
+     */
+    const toRgb = (value) => {
+      ctx.fillStyle = "#000000";
+      ctx.fillStyle = value;
+      const normalized = ctx.fillStyle;
+      const hex = /^#([0-9a-f]{6})$/i.exec(normalized);
+      if (hex) {
+        const number = Number.parseInt(hex[1], 16);
+        return [(number >> 16) & 255, (number >> 8) & 255, number & 255, 1];
+      }
+      return parseRgb(normalized);
+    };
+
     const describe = (tile) => {
       const rect = tile.getBoundingClientRect();
       const picture = tile.querySelector("img");
@@ -1021,6 +1089,15 @@ try {
       const bars = [...tile.querySelectorAll("div")].filter((el) =>
         (el.getAttribute("style") ?? "").includes("--tile-bar-h"),
       );
+      const barStyle = bars.length > 0 ? getComputedStyle(bars[0]) : null;
+      const scrim = barStyle ? barStyle.backgroundColor : null;
+      const overWhite = scrim ? over(scrim, 255) : null;
+      const overBlack = scrim ? over(scrim, 0) : null;
+      const barText = barStyle ? toRgb(barStyle.color) : null;
+      // 蒙层透不透明：叠在黑上与叠在白上的差距 —— 完全透明时两者相等
+      const barAlpha = overWhite
+        ? 1 - Math.max(...[0, 1, 2].map((i) => overWhite[i] - overBlack[i])) / 255
+        : null;
       return {
         width: Math.round(rect.width),
         height: Math.round(rect.height),
@@ -1034,12 +1111,41 @@ try {
             ? Math.round((pictureBox.width / pictureBox.height) * 1000) / 1000
             : null,
         // 信息条：选中时常亮（opacity 1），否则默认隐藏（0）
-        barOpacity: bars.length > 0 ? getComputedStyle(bars[0]).opacity : null,
+        barOpacity: barStyle ? barStyle.opacity : null,
+        // 底纹必须真的存在（alpha > 0），且压得住照片：文字对**纯白/纯黑照片**都要过 AA
+        barScrim: scrim,
+        barAlpha: barAlpha === null ? null : Math.round(barAlpha * 1000) / 1000,
+        barContrast:
+          overWhite && barText
+            ? Math.round(Math.min(contrast(overWhite, barText), contrast(overBlack, barText)) * 100) /
+              100
+            : null,
         hasTopBar: bars.some((el) => (el.getAttribute("class") ?? "").includes("top-0")),
         selected: tile.getAttribute("aria-selected") === "true",
       };
     };
     const out = tiles.map(describe);
+    /*
+     * **两种主题都要量**：蒙层是主题相关的令牌（深色压暗 / 浅色提亮），
+     * 只量当前主题会漏掉最危险的那一半 —— 深色主题下亮照片上的文件名正是最早报的那张。
+     * 直接改 data-theme 属性量一遍（令牌就挂在这个属性上），量完还原，不影响后面的断言。
+     */
+    const root = document.documentElement;
+    const originalTheme = root.dataset.theme;
+    const scrim = {};
+    for (const theme of ["dark", "light"]) {
+      root.dataset.theme = theme;
+      const themeOut = tiles.map(describe);
+      scrim[theme] = {
+        alpha: themeOut.find((t) => t.barAlpha !== null)?.barAlpha ?? null,
+        contrast: Math.min(
+          ...themeOut.filter((t) => t.barContrast !== null).map((t) => t.barContrast),
+        ),
+        sample: themeOut.find((t) => t.barScrim)?.barScrim ?? null,
+      };
+    }
+    root.dataset.theme = originalTheme ?? "dark";
+
     return {
       count: out.length,
       tiles: out,
@@ -1051,6 +1157,7 @@ try {
       selectedBarsVisible: out.filter((t) => t.selected).every((t) => t.barOpacity === "1"),
       unselectedBarsHidden: out.filter((t) => !t.selected).every((t) => t.barOpacity === "0"),
       libraryTopBars: out.filter((t) => t.hasTopBar).length,
+      scrim,
     };
   })()`);
 
@@ -1088,6 +1195,21 @@ try {
       problems.push(
         `库内标记区出现了 ${tileGrid.libraryTopBars} 个（样例里放了 2 个库内 tile）—— 库外不该有`,
       );
+    }
+    for (const theme of ["dark", "light"]) {
+      const measured = tileGrid.scrim[theme];
+      if (!(measured.alpha > 0.5)) {
+        problems.push(
+          `${theme} 主题下信息条没有底纹（实测背景色：${measured.sample}）—— ` +
+            "`--tile-bar-scrim` 没定义？那样字就直直压在照片上（2026-09-16 踩过一次）",
+        );
+      }
+      if (!(measured.contrast >= 4.5)) {
+        problems.push(
+          `${theme} 主题下信息条文字对最坏情况照片（纯白/纯黑）的对比度只有 ` +
+            `${measured.contrast}:1，没过 AA 的 4.5:1 —— 蒙层浓度不够，或文字用了次级色阶`,
+        );
+      }
     }
   }
 
@@ -1597,7 +1719,6 @@ try {
         dialogFrame,
         repoCards,
         viewerDemo,
-        tileGrid,
         tileGrid,
         switchBar,
         layers,

@@ -27,7 +27,10 @@
  *    并且由外框的 `overflow: hidden` 裁出圆角。
  * 2. **信息条底纹 = 状态底纹（外框那层）+ 主题中性蒙层**（`--tile-bar-scrim`）：
  *    只用状态色改浓度的话，文字对比度会随状态漂（指向是辅色、选中是主色、
- *    颜色标记又是任意色），迟早出现读不清的组合。
+ *    颜色标记又是任意色），迟早出现读不清的组合。中性蒙层定义在 `tokens.css` 的**主题层**
+ *    （深色 65% 压暗 / 浅色 72% 提亮，浓度按「最坏情况是纯白（黑）照片」算过对比度）。
+ * 3. **信息条上的文字一律 `text-fg-1`**：底是**照片**，压了蒙层也只能保证一档对比度 ——
+ *    再用 `fg-2` 分次级色彩，在亮照片上就只有 2.4:1（实测过），层级改由**字号**表达。
  * 3. **加载中不要内框**：外框已经在那儿了，里面只给一个低存在感的占位形状，
  *    不要再来一个圆角矩形套圆角矩形（人类 2026-09-16 批注）。
  *
@@ -340,14 +343,10 @@ export function Tile(props: TileProps) {
           {displayName()}
         </span>
         <Show when={local.tag}>
-          <span class="shrink-0 text-fs-0 text-fg-2">{local.tag}</span>
+          <span class="shrink-0 text-fs-0">{local.tag}</span>
         </Show>
         <Show when={local.locked}>
-          <IconLock
-            size={11}
-            class="shrink-0 text-fg-2"
-            aria-label={t("grid.locked")}
-          />
+          <IconLock size={11} class="shrink-0" aria-label={t("grid.locked")} />
         </Show>
       </div>
     </div>

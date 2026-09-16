@@ -580,7 +580,7 @@ export default function KitchenSink() {
           {/* ── Tile ────────────────────────────────────── */}
           <Section
             title="Tile（#11）"
-            note="尺寸由 --tile-cell-w/h 决定（JS 可改）；Space=选中、Enter=打开"
+            note="边长由 --tile-cell 决定（JS 可改）；Space=选中、Enter=打开；指向/选中的信息条有底纹"
           >
             <div data-demo="tile" class="flex flex-wrap items-start gap-3">
               {/* 库内样例：顶部标记区（星标/颜色/旗标）+ 加锁；以及 4:3 的宽高比 */}

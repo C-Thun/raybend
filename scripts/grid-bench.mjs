@@ -85,8 +85,7 @@ for (const size of SIZES) {
     buildGridRows({
       items,
       columns: 6,
-      cellWidth: 208,
-      captionHeight: 26,
+      cellSize: 208,
       grouping,
     }),
   );

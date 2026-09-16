@@ -60,6 +60,17 @@
   /* 浮层遮罩：用池内最深的面派生，不引入新的字面黑 */
   --scrim: color-mix(in oklab, var(--surface-track) 72%, transparent);
 
+  /*
+   * tile 信息条的**主题中性蒙层**（`Tile.tsx` 顶部「为什么是两层」）。
+   * 照片内容是任意的，所以压一层固定浓度的中性色，保证其上的文字在任何照片上都读得清。
+   * 深色主题**压暗**（用池内最深的面派生，与 `--scrim` 同源）。
+   *
+   * 浓度 65%（计划里写的 55%）是**算过的**：照片最坏情况是纯白像素，
+   * 65% 下文字 `--fg-1` 的对比度 ≈ 5.2:1（过 AA 的 4.5:1，留了余量）；
+   * 55% 只有 ≈ 3.7:1 —— 亮天空的照片上文件名会糊。
+   */
+  --tile-bar-scrim: color-mix(in oklab, var(--surface-track) 65%, transparent);
+
   color-scheme: dark;
 }
 
@@ -80,6 +91,12 @@
   /* 浅色主题下遮罩要用**深色**（用户色板里的 `深色`）压暗，
      用浅面派生会把背景「洗白」而不是压暗 —— 那看起来像弹窗没出来。 */
   --scrim: color-mix(in oklab, var(--fg-1) 42%, transparent);
+
+  /*
+   * tile 信息条的中性蒙层 —— 浅色主题反过来**提亮**（用最亮的 `surface-layer` 派生），
+   * 深色文字压在上面。72% 下对纯黑照片的对比度 ≈ 8:1。
+   */
+  --tile-bar-scrim: color-mix(in oklab, var(--surface-layer) 72%, transparent);
 
   color-scheme: light;
 }
@@ -264,7 +281,6 @@
   /* 窗口三键（`design/main.md` §2.1 的 46×32，尺寸随密度档） */
   --win-ctl-w: 52px;
 
-  --caption-h: 24px; /* 图片 tile 字幕条高 */
   --tile-pad: 3px; /* 正方外框的内边距：照片在其中保比例居中，四周留出这点空隙 */
   --tile-bar-h: 18px; /* 覆盖在照片上的信息条高（文件名/类型/标记） */
   --scrollbar-w: 8px; /* 细滚动条宽/高 */
@@ -316,7 +332,6 @@
   --toggle-block: 34px;
   --toggle-block-icon: 18px;
 
-  --caption-h: 28px;
   --tile-pad: 4px;
   --tile-bar-h: 22px;
   --win-ctl-w: 62px;
@@ -328,12 +343,15 @@
 
 /* ══════════════════════════════════════════════════════════════
  * 4. 图片网格：tile 尺寸档位由 JS 拥有（要参与换行数学），
- *    这里只声明运行时会被组件改写的两个变量（DESIGN.md §12.6）
+ *    这里只声明运行时会被组件改写的那个变量（DESIGN.md §12.6）
+ *
+ * `--tile-cell` = **正方外框的边长**：由 `PhotoGrid` 按尺寸档内联赋值。
+ * 旧的 `--tile-cell-w` / `--tile-cell-h`（「宽 + 3:2 高」）已随「正方外框」方案退役 ——
+ * 留着它们会让人以为格子还是跟着照片比例走的。
  * ══════════════════════════════════════════════════════════════ */
 
 :root {
-  --tile-cell-w: 208px; /* 9 档默认：中间档 */
-  --tile-cell-h: 139px; /* 3:2 */
+  --tile-cell: 208px; /* 9 档里的中间档；运行时被 `PhotoGrid` 覆盖 */
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -401,7 +419,6 @@
   --spacing-switch-h: var(--switch-h);
   --spacing-switch-knob: var(--switch-knob);
   --spacing-toggle-block: var(--toggle-block);
-  --spacing-caption-h: var(--caption-h);
   --spacing-win-ctl-w: var(--win-ctl-w);
   --spacing-scrollbar-w: var(--scrollbar-w);
   --spacing-action-btn-h: var(--action-btn-h);
