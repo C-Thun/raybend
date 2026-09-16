@@ -57,6 +57,7 @@ import { ToggleBlock } from "../components/ui/ToggleBlock";
 import { RemoveButton } from "../components/ui/RemoveButton";
 import { EasyCopy } from "../components/ui/EasyCopy";
 import { EasyDestroyButton } from "../components/ui/EasyDestroy";
+import { ImportProgressDemo } from "./import-progress-demo.tsx";
 
 /** 演示用的 EXIF：三组都有值（对应 design/main.md §2.2 的示例） */
 const DEMO_EXIF: ExifData = {
@@ -878,6 +879,11 @@ export default function KitchenSink() {
         onConfirm={() => setConfirmOpen(false)}
         onCancel={() => setConfirmOpen(false)}
       />
-    </div>
+    
+      <Section title="导入进度（M1-6）" note="真 store + 假后端：按钮把快照推进订阅里，结构与生产一致">
+        <ImportProgressDemo />
+      </Section>
+
+</div>
   );
 }

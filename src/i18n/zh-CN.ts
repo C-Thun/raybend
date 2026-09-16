@@ -11,6 +11,10 @@
  * 所以不需要额外的运行时完整性测试。
  */
 
+/*
+ * 键必须与 `en-US.ts` **一一对应**：`MessageKey = keyof typeof zhCN`，
+ * 少了哪边都会在切语言时才暴露 —— `locale-parity.test.ts` 会在 `pnpm test` 里当场炸。
+ */
 export const zhCN = {
  // ── 应用 ───────────────────────────────────────────────
  "import.title": "导入中",

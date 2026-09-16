@@ -20,6 +20,8 @@
  *   5. 分段（Ark `Splitter`）的面板高度不为 0
  *   6. **导入工作区**（总会导航到应用外壳跑一遍）：右列库区有宽度、
  *      没勾选目录时「导入」禁用且给出原因、建库弹窗能打开且空路径时不可提交
+ *   7. **导入进度弹窗**（画廊里的真 store + 假后端演示）：阶段条 / 计数 / 当前项 /
+ *      错误清单 / 取消的二次确认 / 结束摘要 / 关得掉
  *
  * 用法：
  *   pnpm dev                       # 另开一个终端起开发服务器
@@ -395,6 +397,105 @@ try {
    * （左边没勾选目录时「导入」**必须**是禁用的）。
    * 页面上没有导入工作区时返回 null（陈列室等其它路由）。
    */
+
+  /*
+   * 导入进度弹窗（M1-6）：只在「真有库 + 真勾了目录」时才打得开，
+   * 所以画廊里放了一个**真 store + 假后端**的演示（`src/dev/import-progress-demo.tsx`），
+   * 这里对它的结构做断言 —— 阶段条、计数、当前项、取消的二次确认、结束摘要。
+   */
+  const importDialog = await evaluate(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const button = (label) =>
+      [...document.querySelectorAll("button")].find(
+        (node) => node.textContent.trim() === label,
+      );
+    const pageText = () => document.body.innerText.replace(/\\s+/g, " ");
+
+    // ① 演示区块在不在（真 store + 假后端；见 src/dev/import-progress-demo.tsx）
+    if (!document.body.innerText.includes("导入进度（M1-6）")) return null;
+    // 两种标签任取：演示挂载时是收起的（「打开…」），被点开后就变成「关闭…」
+    const openButton = button("打开导入弹窗") ?? button("关闭导入弹窗");
+    if (!openButton) return null;
+
+    // ② **回归守卫**：点开之后按钮标签必须翻面 ——
+    //    store 的 open 若不是响应式，这里永远翻不过来（M1-6 真的踩过：弹窗弹不出来）
+    if (button("打开导入弹窗")) {
+      openButton.click();
+      await sleep(250);
+    }
+    const reactive = button("关闭导入弹窗") !== undefined;
+
+    button("推一条「导入中」")?.click();
+    await sleep(250);
+    const text = pageText();
+    const result = {
+      reactive,
+      arkRendered: document.querySelectorAll('[data-scope="dialog"]').length > 0,
+      pushButtons: [...document.querySelectorAll("button")].filter((n) =>
+        n.textContent.trim().startsWith("推"),
+      ).length,
+      stageChips: ["扫描", "规划", "导入", "缩略图"].filter((name) => text.includes(name)).length,
+      counts: /已导入\\s*82/.test(text) && /跳过\\s*3/.test(text) && /失败\\s*1/.test(text),
+      currentItem: text.includes("P1040733.ORF") && text.includes("_RAW/MYP0733.ORF"),
+      errorRow: text.includes("磁盘写满"),
+      keepPartial: text.includes("已经导入的照片会保留在库里"),
+      cancelConfirm: false,
+      doneSummary: false,
+      revealButton: false,
+      closed: false,
+    };
+
+    // ③ 弹窗内容只在 Ark 真的把它渲染出来时才严查（画廊里目前渲染不出来，见 ASSISTANCE.md §二）
+    if (result.arkRendered) {
+      button("取消导入")?.click();
+      await sleep(250);
+      result.cancelConfirm = pageText().includes("取消这次导入");
+      button("继续导入")?.click();
+      await sleep(250);
+
+      button("推到「结束」")?.click();
+      await sleep(300);
+      const doneText = pageText();
+      result.doneSummary = doneText.includes("导入完成") && /已导入\\s*117/.test(doneText);
+      result.revealButton = doneText.includes("在库中查看这些照片");
+
+      result.afterDoneButtons = [...document.querySelectorAll("button")]
+        .map((n) => n.textContent.trim())
+        .filter((label) => label !== "");
+
+      button("关闭")?.click();
+      await sleep(300);
+      result.closed = button("打开导入弹窗") !== undefined;
+    }
+    return result;
+  })()`);
+
+  if (importDialog === null) {
+    problems.push("画廊里没有「导入进度」演示（src/dev/import-progress-demo.tsx 没挂上？）");
+  } else {
+    if (importDialog.pushButtons !== 3) {
+      problems.push(`演示的推进按钮不齐（应有 3 个，看到 ${importDialog.pushButtons} 个）`);
+    }
+    if (!importDialog.reactive) {
+      problems.push(
+        "store 的 open 不响应界面：点了「打开导入弹窗」按钮标签没翻面（弹窗也就永远弹不出来）",
+      );
+    }
+    if (importDialog.arkRendered) {
+      if (importDialog.stageChips !== 4) {
+        problems.push(`阶段条不完整（只看到 ${importDialog.stageChips}/4）`);
+      }
+      if (!importDialog.counts) problems.push("计数不对（已导入 82 / 跳过 3 / 失败 1）");
+      if (!importDialog.currentItem) problems.push("没显示当前项（源文件名 → 库内目标路径）");
+      if (!importDialog.errorRow) problems.push("错误清单里没有失败原因");
+      if (!importDialog.keepPartial) problems.push("缺「已导入的会保留」那句");
+      if (!importDialog.cancelConfirm) problems.push("点「取消导入」没有二次确认");
+      if (!importDialog.doneSummary) problems.push("结束态摘要不对（导入完成 + 已导入 117）");
+      if (!importDialog.revealButton) problems.push("结束态缺「在库中查看这些照片」");
+      if (!importDialog.closed) problems.push("点「关闭」弹窗没关上");
+    }
+  }
+
   /*
    * 导入工作区在**应用外壳**页上（厨房水槽里没有它），所以这里自己导航过去 ——
    * 脚本无论被传入哪个 URL，都会把两页都过一遍。
@@ -505,7 +606,17 @@ try {
 
   console.log(
     JSON.stringify(
-      { url, chrome: chromePath, snapshot, interact, shell, splitter, workspace, problems },
+      {
+        url,
+        chrome: chromePath,
+        snapshot,
+        interact,
+        shell,
+        splitter,
+        importDialog,
+        workspace,
+        problems,
+      },
       null,
       2,
     ),
