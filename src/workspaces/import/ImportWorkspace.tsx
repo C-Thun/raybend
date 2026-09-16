@@ -39,6 +39,13 @@ export interface ImportWorkspaceProps {
   store: ImportStore;
   /** 照片网格的状态（在组装层创建，因为外壳的 `toolsbar` 也要读它的选择） */
   grid: PhotoGridStore;
+  /**
+   * 「在库中查看这些照片」—— 切到浏览工作流。
+   *
+   * 由组装层给（工作流是外壳的状态，工作区不该自己去动它）；
+   * 不给就不显示这个按钮（M1-6 之前的那版就是这样）。
+   */
+  onRevealInLibrary?: () => void;
 }
 
 /** 字节数 → 「1.2 GB」这种人话（预检提示用）。 */
@@ -117,6 +124,14 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
     void store.hydratePreferences();
   });
 
+  /*
+   * 导入结束后刷新右列：库卡片的照片数变了。
+   * （中列网格列的是**来源**目录，导入不改它，所以不用动。）
+   */
+  createEffect(() => {
+    if (importStore.finished()) void store.reloadRepositories();
+  });
+
   // 左列选中哪个目录，中列就跟着换（选中是**一个**状态，跨面板同步）
   createEffect(() => grid.setSourceDir(store.selectedDir()));
 
@@ -191,7 +206,12 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
           )}
         </Show>
 
-        <ImportProgressDialog store={importStore} />
+        <ImportProgressDialog
+          store={importStore}
+          {...(props.onRevealInLibrary === undefined
+            ? {}
+            : { onRevealInLibrary: props.onRevealInLibrary })}
+        />
 
         <CreateRepositoryDialog
           open={creating()}

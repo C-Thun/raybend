@@ -77,7 +77,11 @@ export default function App() {
         onBatchExclude={grid.toggleExcludedSelected}
       />
 
-      <ImportWorkspace store={importStore} grid={grid} />
+      <ImportWorkspace
+        store={importStore}
+        grid={grid}
+        onRevealInLibrary={() => shell.setWorkflow("browse")}
+      />
     </div>
   );
 }
