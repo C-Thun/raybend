@@ -11,7 +11,9 @@
 import { createEffect, createSignal, For, Show } from "solid-js";
 import * as db from "../../api/db.ts";
 import type { TemplatePreview } from "../../api/types.ts";
+import type { RepositoryView } from "../../api/types.ts";
 import { Button } from "../../components/ui/Button.tsx";
+import { IconCloudOff } from "@tabler/icons-solidjs";
 import { Dialog } from "../../components/ui/Dialog.tsx";
 import { Input } from "../../components/ui/Form.tsx";
 import { t } from "../../i18n/index.ts";
@@ -33,7 +35,22 @@ export interface LibrarySettingsDialogProps {
   onOpenChange: (open: boolean) => void;
   repositoryId: string | null;
   repositoryName?: string;
+  /**
+   * 这个库**当前的状态行**（来自中央状态，`features/repositories/state.ts`）。
+   *
+   * 传进来而不是自己再存一份 —— 外面列表和这里读的是同一份数据，
+   * 谁发现的离线都会同步（人类 2026-09-16：「一个地方变更了状态，
+   * 所有挂在这套数据上的界面都会同步变更」）。
+   */
+  repository?: RepositoryView;
   onSaved?: (template: string) => void;
+  /**
+   * **发现它其实读不到**（读 `catalog.db` 失败）时调一次。
+   *
+   * 调用方把它转给中央状态的 `markOffline` —— 于是「弹窗里发现离线」会立刻
+   * 反映到外面的库卡片上，不需要谁去挨个同步。
+   */
+  onStale?: (repositoryId: string) => void;
 }
 
 export function LibrarySettingsDialog(props: LibrarySettingsDialogProps) {
@@ -58,9 +75,11 @@ export function LibrarySettingsDialog(props: LibrarySettingsDialogProps) {
         return db.previewTemplate(settings.importTemplate);
       })
       .then(setPreview)
-      .catch((caught: unknown) =>
-        setError(caught instanceof Error ? caught.message : String(caught)),
-      )
+      .catch((caught: unknown) => {
+        setError(caught instanceof Error ? caught.message : String(caught));
+        // 读不到它的 catalog，基本就是离线了 —— 立刻把这条状态同步给所有界面
+        props.onStale?.(id);
+      })
       .finally(() => setLoading(false));
   });
 
@@ -108,8 +127,14 @@ export function LibrarySettingsDialog(props: LibrarySettingsDialogProps) {
     }
   }
 
+  /** 离线时不给保存：改了也写不进去（`repository_settings` 本身就会失败） */
+  const offline = (): boolean => props.repository?.online === false;
+
   const canSave = () =>
-    !saving() && template().trim() !== "" && (preview()?.ok ?? false);
+    !saving() &&
+    !offline() &&
+    template().trim() !== "" &&
+    (preview()?.ok ?? false);
 
   return (
     <Dialog
@@ -133,6 +158,17 @@ export function LibrarySettingsDialog(props: LibrarySettingsDialogProps) {
       }
     >
       <div class="flex flex-col gap-3">
+        {/*
+          离线：一行说明 + 保存按钮禁用。
+          这条状态**不是这里自己判断的** —— 它来自中央状态里那一份（外面列表读的是同一份），
+          所以「弹窗说离线、列表说在线」这种自相矛盾不会出现。
+        */}
+        <Show when={offline()}>
+          <p class="flex items-start gap-1.5 text-fs-1 text-fg-2">
+            <IconCloudOff size={14} class="mt-0.5 shrink-0" aria-hidden="true" />
+            <span class="min-w-0">{t("repo.settings_offline")}</span>
+          </p>
+        </Show>
         <p class="text-fs-1 text-fg-2">
           {props.repositoryName === undefined
             ? t("repo.settings_hint")

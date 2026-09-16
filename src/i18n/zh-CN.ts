@@ -45,6 +45,7 @@ export const zhCN = {
  "common.save": "保存",
  "repo.settings_title": "库设置",
  "repo.settings_hint": "M1 里只有一项：导入模版（决定照片在库里的落法）",
+ "repo.settings_offline": "这个库现在不在线 —— 模版改不了，先把它挂上（插好盘，或点列表上的离线图标）",
  "repo.settings_hint_named": "「{name}」的导入模版 —— 决定以后导入的照片落在库里的哪条路径",
  "repo.template_label": "导入模版",
  "app.name": "光伴",

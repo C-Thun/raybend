@@ -25,6 +25,13 @@ export interface SliderProps {
   /** 步长（默认 1 —— 档位滑块就是要离散） */
   step?: number;
   onValueChange: (value: number) => void;
+  /**
+   * **拖拽结束**时给一次（键盘调整也会给）。
+   *
+   * 用来做「只在结束时落盘/做重活」——拖动过程中每动一格都写一次设置，
+   * 一拖就是几百次 IPC + 几百次数据库写（2026-09-16 实测「尺寸调节非常卡」的原因之一）。
+   */
+  onValueCommit?: (value: number) => void;
   /** 无障碍名（如「照片大小」） */
   label: string;
   disabled?: boolean;
@@ -50,6 +57,10 @@ export function Slider(props: SliderProps) {
         if (typeof next === "number" && next !== props.value) {
           props.onValueChange(next);
         }
+      }}
+      onValueChangeEnd={(details) => {
+        const next = details.value[0];
+        if (typeof next === "number") props.onValueCommit?.(next);
       }}
       class={[
         "flex min-w-0 items-center gap-1.5 select-none",

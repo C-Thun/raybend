@@ -280,6 +280,8 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
           onRemount={(id) => void store.remount(id)}
           onCreate={() => setCreating(true)}
           onRetry={() => void store.reloadRepositories()}
+          onTemplateSaved={store.applyRepositoryTemplate}
+          onRepositoryStale={store.markRepositoryOffline}
           locale={groupingLocale()}
           class="min-h-0 flex-1"
         />

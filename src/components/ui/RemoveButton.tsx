@@ -58,10 +58,20 @@ export function RemoveGlyph(props: RemoveGlyphProps) {
 }
 
 export interface RemoveButtonProps
-  extends Omit<JSX.ButtonHTMLAttributes<HTMLButtonElement>, "children"> {
+  extends Omit<
+    JSX.ButtonHTMLAttributes<HTMLButtonElement>,
+    "children" | "onClick"
+  > {
   /** 无障碍名。默认「移除」（走 i18n），排除场景传入「排除」 */
   label: string;
   size?: number | string;
+  /**
+   * 点击。**类型刻意收窄成普通函数**：本组件要替调用方 `stopPropagation`
+   * （移除就是移除，不该顺带把这一行选中 —— 人类 2026-09-16 反馈），
+   * 而原生 `onClick` 的联合类型（函数或 `[handler, data]` 绑定数组）在包一层之后
+   * 没法安全调用；实际调用方传的都是函数。
+   */
+  onClick?: (event: MouseEvent) => void;
 }
 
 export function RemoveButton(props: RemoveButtonProps) {
@@ -70,6 +80,7 @@ export function RemoveButton(props: RemoveButtonProps) {
     "size",
     "class",
     "disabled",
+    "onClick",
   ]);
 
   return (
@@ -77,6 +88,13 @@ export function RemoveButton(props: RemoveButtonProps) {
       {...rest}
       type={rest.type ?? "button"}
       disabled={local.disabled}
+      // 移除**只是移除**：点它不该顺带把这一行选中（人类 2026-09-16 反馈）。
+      // 放在这个原语里而不是每个调用点 —— 这类按钮出现在行内、卡片标题旁，
+      // 漏一个地方就复发一次。
+      onClick={(event) => {
+        event.stopPropagation();
+        local.onClick?.(event);
+      }}
       aria-label={local.label}
       title={rest.title ?? local.label}
       class={[

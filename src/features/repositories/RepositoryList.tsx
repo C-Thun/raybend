@@ -45,6 +45,8 @@ export interface RepositoryListProps {
   onRemount: (id: string) => void;
   /** 模版保存成功后通知外面（列表拿到的是缓存的模版，要重新读一遍） */
   onTemplateSaved?: (id: string, template: string) => void;
+  /** 库设置里发现这个库读不到了 → 交给中央状态降级（所有界面同步） */
+  onRepositoryStale?: (id: string) => void;
   onCreate: () => void;
   onRetry?: () => void;
   locale?: GroupingLocale;
@@ -55,6 +57,9 @@ export function RepositoryList(props: RepositoryListProps) {
   const locale = (): GroupingLocale => props.locale ?? "zh-CN";
   /** 正在看设置的库（`null` = 没开）；对话框由列表自己持有，调用方不必管 */
   const [settingsId, setSettingsId] = createSignal<string | null>(null);
+  /** 正在看设置的那个库**当前的状态行**（中央状态里那一份，不是副本） */
+  const repository = (): RepositoryView | undefined =>
+    props.repositories.find((row) => row.id === settingsId());
 
   return (
     <div class={["flex min-h-0 flex-col gap-1", props.class ?? ""].join(" ")}>
@@ -133,9 +138,8 @@ export function RepositoryList(props: RepositoryListProps) {
       <LibrarySettingsDialog
         open={settingsId() !== null}
         repositoryId={settingsId()}
-        repositoryName={
-          props.repositories.find((repo) => repo.id === settingsId())?.name
-        }
+        repositoryName={repository()?.name}
+        {...(repository() === undefined ? {} : { repository: repository() })}
         onOpenChange={(open) => {
           if (!open) setSettingsId(null);
         }}
@@ -143,6 +147,9 @@ export function RepositoryList(props: RepositoryListProps) {
           const id = settingsId();
           if (id !== null) props.onTemplateSaved?.(id, template);
         }}
+        {...(props.onRepositoryStale === undefined
+          ? {}
+          : { onStale: (id: string) => props.onRepositoryStale?.(id) })}
       />
     </div>
   );

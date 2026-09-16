@@ -34,9 +34,18 @@ import {
 } from "../../lib/checked-dir.ts";
 import type { LoadStatus } from "../../lib/load-status.ts";
 import { samePath } from "../../lib/tree.ts";
+import {
+  createRepositoryState,
+  type RepositoryStateApi,
+} from "../../features/repositories/state.ts";
 
-/** 本模块用到的 `src/api/db.ts` 子集（注入以便测试）。 */
-export interface ImportApi {
+/**
+ * 本模块用到的 `src/api/db.ts` 子集（注入以便测试）。
+ *
+ * 继承 `RepositoryStateApi`：**库的状态不在这里实现**，见 `createRepositoryState`
+ * （中央状态，所有界面共读一份）。
+ */
+export interface ImportApi extends RepositoryStateApi {
   listRecentDirs: () => Promise<RecentDir[]>;
   rememberRecentDir: (path: string, includeSubdirs: boolean) => Promise<void>;
   forgetRecentDir: (path: string) => Promise<boolean>;
@@ -108,6 +117,10 @@ export interface ImportStore {
   selectedRepository: () => RepositoryView | null;
   /** 替换一个库的视图（建库/重挂载后局部刷新，不必重载整张表） */
   upsertRepository: (view: RepositoryView) => void;
+  /** 有地方发现这个库读不到了（如库设置读 catalog 失败）→ 立刻降级为离线 */
+  markRepositoryOffline: (repositoryId: string) => void;
+  /** 模版改了 → 就地同步进列表 */
+  applyRepositoryTemplate: (repositoryId: string, template: string) => void;
   /** 正在重新查找的库 id */
   remountingId: () => string | null;
   /** 重新查找失败的原因（库 id → 文案；成功则清掉） */
@@ -157,21 +170,15 @@ export function createImportStore(deps: ImportStoreDeps): ImportStore {
   const [volumesError, setVolumesError] = createSignal<string | null>(null);
 
   /* ── 库 ──────────────────────────────────── */
-  const [repositories, setRepositories] = createSignal<readonly RepositoryView[]>(
-    [],
-  );
-  const [repositoriesStatus, setRepositoriesStatus] =
-    createSignal<LoadStatus>("idle");
-  const [repositoriesError, setRepositoriesError] = createSignal<string | null>(
-    null,
-  );
+  /*
+   * 库的**中央状态**：列表、在线/离线、重挂载状态、模版都在一份里。
+   * 这里只做转发（这层的公开 API 不变），好处是别的地方（库设置弹窗、
+   * 将来的浏览侧）可以直接读写同一份 —— 一个地方变了，所有界面都跟着变。
+   */
+  const repos = createRepositoryState({ api: deps.api });
   const [selectedRepositoryId, setSelectedRepositoryId] = createSignal<
     string | null
   >(null);
-  const [remountingId, setRemountingId] = createSignal<string | null>(null);
-  const [remountErrors, setRemountErrors] = createSignal<Record<string, string>>(
-    {},
-  );
   const [avoidDuplicates, setAvoidDuplicatesSignal] = createSignal(true);
 
   /* ══════════════════════════════════════════════════════════
@@ -304,39 +311,9 @@ export function createImportStore(deps: ImportStoreDeps): ImportStore {
     setRecentDirs((prev) => prev.filter((row) => !samePath(row.path, path)));
   }
 
-  async function remount(repositoryId: string): Promise<void> {
-    if (remountingId() !== null) return;
-    setRemountingId(repositoryId);
-    try {
-      const view = await deps.api.remountRepository(repositoryId);
-      upsertRepository(view);
-      clearRemountError(repositoryId);
-      // 没找到**不是错误**（`REPOSITORY.md` §2.3），但要说清楚
-      if (!view.online) {
-        setRemountError(
-          repositoryId,
-          `未找到该库（已试过 ${view.triedPaths} 处已登记路径）`,
-        );
-      }
-    } catch (error) {
-      setRemountError(repositoryId, errorText(error));
-    } finally {
-      setRemountingId(null);
-    }
-  }
-
-  function setRemountError(repositoryId: string, message: string): void {
-    setRemountErrors((prev) => ({ ...prev, [repositoryId]: message }));
-  }
-
-  function clearRemountError(repositoryId: string): void {
-    setRemountErrors((prev) => {
-      if (!(repositoryId in prev)) return prev;
-      const next = { ...prev };
-      delete next[repositoryId];
-      return next;
-    });
-  }
+  /** 重挂载：实现在中央状态里（它要就地把结果同步给所有界面） */
+  const remount = (repositoryId: string): Promise<void> =>
+    repos.remount(repositoryId);
 
   const setAvoidDuplicates = (value: boolean): void => {
     if (value === avoidDuplicates()) return;
@@ -380,20 +357,11 @@ export function createImportStore(deps: ImportStoreDeps): ImportStore {
    * ══════════════════════════════════════════════════════════ */
 
   async function reloadRepositories(): Promise<void> {
-    setRepositoriesStatus("loading");
-    try {
-      const rows = await deps.api.listRepositories();
-      setRepositories(rows);
-      setRepositoriesError(null);
-      setRepositoriesStatus("ready");
-      // 选中的库如果已经不在了（被移除/改名），把选中清掉
-      const current = selectedRepositoryId();
-      if (current !== null && !rows.some((row) => row.id === current)) {
-        setSelectedRepositoryId(null);
-      }
-    } catch (error) {
-      setRepositoriesError(errorText(error));
-      setRepositoriesStatus("error");
+    await repos.load();
+    // 选中的库如果已经不在了（被移除/改名），把选中清掉
+    const current = selectedRepositoryId();
+    if (current !== null && repos.byId(current) === undefined) {
+      setSelectedRepositoryId(null);
     }
   }
 
@@ -405,17 +373,25 @@ export function createImportStore(deps: ImportStoreDeps): ImportStore {
   const selectedRepository = (): RepositoryView | null => {
     const id = selectedRepositoryId();
     if (id === null) return null;
-    return repositories().find((row) => row.id === id) ?? null;
+    return repos.byId(id) ?? null;
   };
 
+  /** 就地更新一条库（走中央状态，所有挂着的界面同步） */
   const upsertRepository = (view: RepositoryView): void => {
-    setRepositories((prev) => {
-      const index = prev.findIndex((row) => row.id === view.id);
-      if (index === -1) return [...prev, view];
-      const next = [...prev];
-      next[index] = view;
-      return next;
-    });
+    repos.upsert(view);
+  };
+
+  /** 有地方发现这个库读不到了（如库设置读 catalog 失败）→ 立刻降级为离线 */
+  const markRepositoryOffline = (repositoryId: string): void => {
+    repos.markOffline(repositoryId);
+  };
+
+  /** 模版改了 → 就地同步进列表（不用整表重拉） */
+  const applyRepositoryTemplate = (
+    repositoryId: string,
+    template: string,
+  ): void => {
+    repos.patch(repositoryId, { importTemplate: template });
   };
 
   return {
@@ -439,16 +415,18 @@ export function createImportStore(deps: ImportStoreDeps): ImportStore {
     recentError,
     reloadRecent,
     forgetRecent,
-    repositories,
-    repositoriesStatus,
-    repositoriesError,
+    repositories: repos.list,
+    repositoriesStatus: repos.status,
+    repositoriesError: repos.error,
     reloadRepositories,
     selectedRepositoryId,
     selectRepository,
     selectedRepository,
     upsertRepository,
-    remountingId,
-    remountErrors,
+    markRepositoryOffline,
+    applyRepositoryTemplate,
+    remountingId: repos.remountingId,
+    remountErrors: repos.remountErrors,
     remount,
     avoidDuplicates,
     setAvoidDuplicates,

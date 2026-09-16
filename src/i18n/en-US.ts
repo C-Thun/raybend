@@ -44,6 +44,7 @@ export const enUS: Record<MessageKey, string> = {
  "common.save": "Save",
  "repo.settings_title": "Library settings",
  "repo.settings_hint": "Only one setting in M1: the import template (where photos land in the library)",
+ "repo.settings_offline": "This library is offline — the template cannot be changed until it is mounted (plug the drive in, or click the offline icon in the list)",
  "repo.settings_hint_named": "Import template for \"{name}\" — decides where future imports land",
  "repo.template_label": "Import template",
  "app.name": "RayBend",

@@ -85,6 +85,12 @@ function fakeApi(overrides: Partial<FakeState> = {}) {
         });
       }
     },
+    async setRepositoryTemplate(repositoryId, templateSource) {
+      state.calls.push(`setTemplate:${repositoryId}:${templateSource}`);
+      const row = state.repositories.find((item) => item.id === repositoryId);
+      if (row) row.importTemplate = templateSource;
+      return { importTemplate: templateSource };
+    },
     async forgetRecentDir(path) {
       state.calls.push(`forget:${path}`);
       const before = state.recent.length;

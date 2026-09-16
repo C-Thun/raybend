@@ -147,6 +147,7 @@ export function PhotoGrid(props: PhotoGridProps) {
         onByTimeChange={store.setByTime}
         tileStep={store.tileStep()}
         onTileStepChange={store.setTileStep}
+        onTileStepCommit={store.commitTileStep}
         locale={groupingLocale()}
         loadingTimes={store.loadingTimes()}
       />

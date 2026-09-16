@@ -90,6 +90,8 @@ export interface PhotoGridStore {
   /* ── 展示偏好 ─────────────────────────── */
   tileStep: () => number;
   setTileStep: (step: number) => void;
+  /** 把当前 tile 档位落盘（拖拽结束时调一次） */
+  commitTileStep: () => void;
   byTime: () => boolean;
   setByTime: (value: boolean) => void;
   gapMinutes: () => number;
@@ -241,11 +243,21 @@ export function createPhotoGridStore(deps: PhotoGridDeps): PhotoGridStore {
    * 展示偏好
    * ══════════════════════════════════════════════════════════ */
 
+  /**
+   * 改 tile 尺寸档位。**只改状态，不写设置** ——
+   * 拖动滑块时每动一格都写一次设置，一拖就是几百次 IPC 加几百次数据库写，
+   * 手感直接卡住（2026-09-16 人类反馈「尺寸调节非常卡」）。落盘走 `commitTileStep`，
+   * 由滑块在**拖拽结束**时调一次。
+   */
   const setTileStep = (step: number): void => {
     const next = clampTileStepIndex(step);
     if (next === tileStep()) return;
     setTileStepSignal(next);
-    void writeSetting(GRID_SETTING_KEYS.tileStep, String(next));
+  };
+
+  /** 把当前档位写进设置（滑块拖拽结束时调一次） */
+  const commitTileStep = (): void => {
+    void writeSetting(GRID_SETTING_KEYS.tileStep, String(tileStep()));
   };
 
   const setByTime = (value: boolean): void => {
@@ -381,6 +393,7 @@ export function createPhotoGridStore(deps: PhotoGridDeps): PhotoGridStore {
 
     tileStep,
     setTileStep,
+    commitTileStep,
     byTime,
     setByTime,
     gapMinutes,

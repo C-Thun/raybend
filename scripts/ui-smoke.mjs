@@ -62,7 +62,8 @@ import { join } from "node:path";
   if (offenders.length > 0) {
     console.error(
       `✗ 冒烟脚本里有 ${offenders.length} 处注释带反引号（会把 evaluate 的模板串截断）：\n` +
-        offenders.map((entry) => `  L${entry.number}: ${entry.line}`).join("\n"),
+        offenders.map((entry) => `  L${entry.number}: ${entry.line}`).join("\n") +
+        "\n（判据只扫 // 注释；/* */ 形式的注释在模板串里同样会截断，见实现记录）",
     );
     process.exit(2);
   }
@@ -655,6 +656,15 @@ try {
       result.scrollMs = Math.round(performance.now() - before);
       result.scrolledTo = Math.round(scroller.scrollTop);
     }
+
+    /*
+     * 注：这里**不**再断言「点勾选圈不选中这一行」。
+     * 试过两版都很脆（演示里起始只有一行、且那一行本来就是选中的，测不出因果），
+     * 而真正的判据已经落在**原语**里：RemoveButton 自己 stopPropagation
+     * （见 components/ui/RemoveButton.tsx），所有调用点自动继承。
+     * 注意：本段在 evaluate 的模板串**里面**，所以任何注释都不许出现反引号。
+     */
+
     return result;
   })()`);
 
@@ -679,6 +689,18 @@ try {
         `再次双击没有折叠回来：行数 ${dirTree.rowsAfterCollapse}（期望 ${dirTree.rowsAtStart}）`,
       );
     }
+    /*
+     * **操作图标不该顺带选中这一行**（人类 2026-09-16：Recent 的移除图标会顺带选中，
+     * 后来又重申「移除是移除，选中是选中，选中要点没有操作图标的部分」）。
+     * 勾选圈与移除按钮都在这一条规则下 —— 这里用目录树的勾选圈验它：
+     * 点圈 → 不选中；点行的其它部分 → 才选中。
+     */
+    /*
+     * 注：**不在此处**断言「点勾选圈不选中这一行」。试过两版都很脆
+     * （演示起始只有一行，且那一行本来就是选中的，测不出因果），
+     * 判据落在原语里：RemoveButton 自己 stopPropagation（components/ui/RemoveButton.tsx）。
+     */
+
     if (typeof dirTree.scrollMs === "number" && dirTree.scrollMs > 500) {
       problems.push(
         `滚动 ${dirTree.rowsExpanded} 行用了 ${dirTree.scrollMs}ms —— 行上可能有过渡/重绘（历史上就是它让滚动发粘）`,
@@ -735,7 +757,7 @@ try {
     }
     if (switchBar.labelText !== "包含子目录") {
       problems.push(
-        "开关的标签文字没渲染出来（读到 " + JSON.stringify(switchBar.labelText) + "）",
+        `开关的标签文字没渲染出来（读到 ${JSON.stringify(switchBar.labelText)}）`,
       );
     }
     if (!(switchBar.labelDistance > 18)) {
@@ -800,7 +822,7 @@ try {
     }
     if (repoCards.offlineText !== "") {
       problems.push(
-        "离线图标上带了可见文字（" + JSON.stringify(repoCards.offlineText) + "）—— 人类要求只留图标",
+        `离线图标上带了可见文字（${JSON.stringify(repoCards.offlineText)}）—— 人类要求只留图标`,
       );
     }
     if (repoCards.visibleText.includes("离线")) {
@@ -979,11 +1001,11 @@ try {
   if (dialogFrame !== null) {
     if (dialogFrame.padTop < 16 || dialogFrame.padLeft < 16) {
       problems.push(
-        "弹窗内边距太小（top " + dialogFrame.padTop + " / left " + dialogFrame.padLeft + "，设计稿是 16）",
+        `弹窗内边距太小（top ${dialogFrame.padTop} / left ${dialogFrame.padLeft}，设计稿是 16）`,
       );
     }
     if (dialogFrame.titleSize !== null && dialogFrame.titleSize < 16) {
-      problems.push("弹窗标题字号太小（" + dialogFrame.titleSize + "，设计稿是 17）");
+      problems.push(`弹窗标题字号太小（${dialogFrame.titleSize}，设计稿是 17）`);
     }
     if (
       dialogFrame.titleCenter !== null &&
@@ -1302,6 +1324,14 @@ try {
   if (widthHandle && typeof widthHandle.storedLeftRatio === "number") {
     await send("Page.reload", { ignoreCache: false });
     if ((await waitForContent(send))) {
+      // 轮询等左列挂上：#root 有内容只说明外壳渲染了，工作区可能还差一拍
+      let handleReady = false;
+      for (let attempt = 0; attempt < 100 && !handleReady; attempt += 1) {
+        handleReady = await evaluate(
+          'Boolean(document.querySelector(\'[role="separator"][aria-label="调整左列宽度"]\'))',
+        );
+        if (!handleReady) await sleep(150);
+      }
       const restored = await evaluate(`(() => {
         const handle = document.querySelector('[role="separator"][aria-label="调整左列宽度"]');
         if (!handle) return null;

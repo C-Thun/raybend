@@ -33,6 +33,8 @@ export interface GridControlBarProps {
   /** 档位下标（`lib/tile-flow.ts` 的 9 档） */
   tileStep: number;
   onTileStepChange: (step: number) => void;
+  /** 拖拽结束（用于落盘，别在拖动过程中写设置） */
+  onTileStepCommit?: (step: number) => void;
   /** 语言（数字分组与日期都用它） */
   locale: GroupingLocale;
   /** 正在补读拍摄时间（按时间模式下给个提示） */
@@ -94,6 +96,9 @@ export function GridControlBar(props: GridControlBarProps) {
         max={TILE_SIZE_STEPS.length - 1}
         label={t("grid.zoom")}
         onValueChange={props.onTileStepChange}
+        {...(props.onTileStepCommit === undefined
+          ? {}
+          : { onValueCommit: props.onTileStepCommit })}
         startIcon={<IconZoomOut size={14} />}
         endIcon={<IconZoomIn size={14} />}
         class="w-40 shrink-0"

@@ -418,7 +418,14 @@ test("档位：夹到合法范围并写回设置", async () => {
   store.setTileStep(-5);
   assert.equal(store.tileStep(), 0);
   await flush();
-  assert.equal(state.settings.get("grid.tile_step"), "0");
+  assert.equal(
+    state.settings.get("grid.tile_step"),
+    undefined,
+    "拖动过程中**不写设置**（一拖几百次 IPC + 数据库写正是卡的原因）",
+  );
+  store.commitTileStep();
+  await flush();
+  assert.equal(state.settings.get("grid.tile_step"), "0", "拖拽结束才落盘一次");
 
   store.setTileStep(Number.NaN);
   assert.equal(store.tileStep(), 4, "非法值回到默认档（正中间）");
