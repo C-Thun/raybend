@@ -36,7 +36,6 @@ import { formatCount, type GroupingLocale } from "../../lib/format.ts";
 import {
   computeTileFlow,
   nextIndexForArrow,
-  tileImageHeight,
   tileSizeAt,
 } from "../../lib/tile-flow.ts";
 import type { SourceItem } from "../../api/types.ts";
@@ -185,9 +184,11 @@ export function PhotoGrid(props: PhotoGridProps) {
         onKeyDown={onGridKeyDown}
         class="flex min-h-0 flex-1 flex-col px-3 pt-2"
         style={{
-          // Tile 组件读这两个变量画画面区 —— 档位切换就是改它们
+          /*
+           * 只给**宽度**：画面区高度由 `Tile` 里的 `aspect-ratio` 自己排
+           * （`--tile-cell-h` 已废除 —— 那个「JS 算好的像素高」正是上一版错位的来源）。
+           */
           "--tile-cell-w": `${cellWidth()}px`,
-          "--tile-cell-h": `${tileImageHeight(cellWidth())}px`,
         }}
       >
         <Show when={viewer.state().active}>

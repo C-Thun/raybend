@@ -148,12 +148,19 @@ export function Tile(props: TileProps) {
     >
       {/* ── 画面区 ─────────────────────────────────────────── */}
       <div
-        // 四角都圆：图片不再与容器边缘平齐，所以不会出现「上圆下方」
-        class="relative flex items-center justify-center overflow-hidden rounded-ui bg-surface-main"
-        style={{
-          width: "var(--tile-cell-w)",
-          height: "var(--tile-cell-h)",
-        }}
+        /*
+         * 画面区：**宽 100% + 比例交给 CSS**（不再用 JS 算好的像素宽/高）。
+         *
+         * 上一版这里写 `width: var(--tile-cell-w)` —— 那是**整个单元格**的宽，
+         * 而外层容器有 `p-(--tile-pad)` 内边距，于是图片比内容盒宽、往右溢出：
+         * 人类截图里「图片被顶到右边、左边空一条」就是这个（2026-09-16）。
+         * 自然布局下：宽度由内容盒决定，高度由 `aspect-ratio` 决定，四周必然对齐。
+         *
+         * `3 / 2` 与 `lib/tile-flow.ts` 的 `TILE_IMAGE_ASPECT` 是同一个值 ——
+         * 冒烟会实测渲染出来的比例，漂了会红。
+         */
+        class="relative flex w-full items-center justify-center overflow-hidden rounded-ui bg-surface-main"
+        style={{ "aspect-ratio": "3 / 2" }}
       >
         <Show
           when={local.src && !local.loading}

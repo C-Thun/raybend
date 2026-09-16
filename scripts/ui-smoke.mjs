@@ -996,6 +996,55 @@ try {
     problems.push("点「打开看图」没打开看图视图");
   }
 
+  /*
+   * tile 的**对齐与比例**（2026-09-16 人类截图报的「图片被顶到右边」）。
+   *
+   * 病根是画面区写死了「整个单元格宽」而当容器有内边距 → 图片比内容盒宽、往右溢出。
+   * 现在画面区是 `w-full + aspect-ratio` 自然排的，所以这里实测三件事：
+   * 左右内边距**相等**、图片没有溢出、渲染出来的比例与 `TILE_IMAGE_ASPECT` 一致
+   * （CSS 与 JS 两处口径漂了就会红）。
+   */
+  const tile = await evaluate(`(() => {
+    const demo = document.querySelector('[data-demo="tile"]');
+    if (!demo) return null;
+    const cell = demo.querySelector('[role="option"]');
+    if (!cell) return null;
+    const picture = cell.querySelector("div");
+    if (!picture) return null;
+    const cellBox = cell.getBoundingClientRect();
+    const pictureBox = picture.getBoundingClientRect();
+    const style = getComputedStyle(cell);
+    return {
+      padLeft: Math.round(Number.parseFloat(style.paddingLeft)),
+      padRight: Math.round(Number.parseFloat(style.paddingRight)),
+      gapLeft: Math.round(pictureBox.left - cellBox.left),
+      gapRight: Math.round(cellBox.right - pictureBox.right),
+      pictureWidth: Math.round(pictureBox.width),
+      pictureHeight: Math.round(pictureBox.height),
+      aspect: Math.round((pictureBox.width / pictureBox.height) * 100) / 100,
+    };
+  })()`);
+
+  if (tile === null) {
+    problems.push("画廊里没有 tile 样例（data-demo=tile）");
+  } else {
+    if (Math.abs(tile.gapLeft - tile.gapRight) > 1) {
+      problems.push(
+        `tile 里图片左右留白不等（左 ${tile.gapLeft} / 右 ${tile.gapRight}）—— 图片被挤到一边了`,
+      );
+    }
+    if (tile.gapLeft < tile.padLeft - 1) {
+      problems.push(
+        `tile 里图片顶到了内边距里（留白 ${tile.gapLeft} < padding ${tile.padLeft}）`,
+      );
+    }
+    if (Math.abs(tile.aspect - 1.5) > 0.05) {
+      problems.push(
+        `tile 画面区的渲染比例是 ${tile.aspect}，与 TILE_IMAGE_ASPECT（1.5）不一致 —— CSS 与 JS 两处口径漂了`,
+      );
+    }
+  }
+
   const appUrl = new URL("/", url).href;
   await send("Page.navigate", { url: appUrl });
   if (!(await waitForContent(send))) {
@@ -1539,6 +1588,7 @@ try {
         dialogFrame,
         repoCards,
         viewerDemo,
+        tile,
         switchBar,
         layers,
         resizeProbe,

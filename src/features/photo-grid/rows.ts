@@ -112,8 +112,14 @@ export function buildGridRows(input: GridRowsInput): GridRowModel[] {
    * 一行 tile 的总高 = 上内边距 + 画面高 + 图文间距 + 字幕条 + 下内边距。
    * 少算任何一项，字幕条都会被下一行**切掉一半**（2026-09-16 人类截图报的就是这个）。
    */
+  /*
+   * 画面高要按**内容盒**宽度算（单元格宽减去左右内边距）—— 画面区现在是
+   * `w-full + aspect-ratio` 由 CSS 排的，宽度就是内容盒宽。两边用同一个口径，
+   * 行高才会等于实际渲染出来的高度（不一致就会被行边界切掉）。
+   */
+  const contentWidth = Math.max(1, input.cellWidth - tilePad * 2);
   const rowHeight =
-    tilePad * 2 + tileImageHeight(input.cellWidth) + tileGap + captionHeight;
+    tilePad * 2 + tileImageHeight(contentWidth) + tileGap + captionHeight;
 
   if (!input.grouping) {
     return chunkTiles(input.items, columns, rowHeight, "tiles");

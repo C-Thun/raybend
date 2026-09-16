@@ -582,6 +582,7 @@ export default function KitchenSink() {
             title="Tile（#11）"
             note="尺寸由 --tile-cell-w/h 决定（JS 可改）；Space=选中、Enter=打开"
           >
+            <div data-demo="tile" class="flex flex-wrap items-start gap-3">
             <Row label="有图 / 选中 / 悬停">
               <Tile
                 label="DSC_0192.NEF"
@@ -598,6 +599,7 @@ export default function KitchenSink() {
                 onClick={() => setSelectedTile(2)}
               />
             </Row>
+            </div>
             <Row label="加载 / 空 / 图标 / 禁用">
               <Tile label="DSC_0194.NEF" loading />
               <Tile label="损坏文件" empty src={demoImage()} />
