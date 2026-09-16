@@ -39,6 +39,8 @@ import { TitleBar } from "../shell/TitleBar.tsx";
 import { FlowBar } from "../shell/FlowBar.tsx";
 import { ToolsBar } from "../shell/ToolsBar.tsx";
 import type { ExifData } from "../features/exif-strip/index.ts";
+import { RepositoryList } from "../features/repositories/index.ts";
+import type { RepositoryView } from "../api/types.ts";
 import { Badge, CountBadge } from "../components/ui/Badge";
 import { Button, IconButton } from "../components/ui/Button";
 import { Checkbox, Input, RadioCircle, Switch } from "../components/ui/Form";
@@ -379,6 +381,9 @@ export default function KitchenSink() {
                 label="开（禁用）"
                 disabled
               />
+            </Row>
+            <Row label="库卡片">
+              <RepositoryCardsDemo />
             </Row>
             <Row label="Input">
               <Input placeholder="库名称" class="w-40" />
@@ -909,5 +914,63 @@ export default function KitchenSink() {
       </Section>
 
 </div>
+  );
+}
+
+/** 库卡片演示数据：一张在线、一张离线 —— 冒烟据此断言「齿轮 / 离线图标」两态。 */
+const DEMO_REPOS: RepositoryView[] = [
+  {
+    id: "lib-demo-online",
+    name: "Kowloon Studio",
+    importTemplate: ":CYEAR-:CMONTH-:CDAY/MY:FILENAME",
+    createdAt: 0,
+    lastOpenedAt: 0,
+    online: true,
+    root: "D:\\Photos\\Library",
+    displayPath: "D:\\Photos\\Library",
+    paths: [{ path: "D:\\Photos\\Library", lastSeenAt: 0, status: "online" }],
+    triedPaths: 0,
+    photoCount: 1248,
+  },
+  {
+    id: "lib-demo-offline",
+    name: "个人相册",
+    importTemplate: null,
+    createdAt: 0,
+    lastOpenedAt: null,
+    online: false,
+    root: null,
+    displayPath: "E:\\Backup\\Photos",
+    paths: [{ path: "E:\\Backup\\Photos", lastSeenAt: 0, status: "offline" }],
+    triedPaths: 1,
+    photoCount: null,
+  },
+];
+
+/**
+ * 库卡片的两种状态（`M1-9`）。
+ *
+ * 为什么放这里：真机上「离线」只有把盘拔了才看得到，而冒烟要断言的是**呈现规则** ——
+ * 在线 = 齿轮（开库设置）、离线 = 离线图标（点它重新查找）、**两者都不带可见文字**。
+ * `data-remounts` 让脚本能看出离线图标真的被点了。
+ */
+function RepositoryCardsDemo() {
+  const [remounts, setRemounts] = createSignal(0);
+  return (
+    <div
+      class="flex h-40 w-80 flex-col"
+      data-demo="repo-cards"
+      data-remounts={remounts()}
+    >
+      <RepositoryList
+        repositories={DEMO_REPOS}
+        status="ready"
+        error={null}
+        selectedId="lib-demo-online"
+        onSelect={() => {}}
+        onRemount={() => setRemounts((count) => count + 1)}
+        onCreate={() => {}}
+      />
+    </div>
   );
 }

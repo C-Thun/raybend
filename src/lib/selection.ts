@@ -7,10 +7,12 @@
  * | --- | --- |
  * | 单张点选 | 只选这张（替换掉之前的选择） |
  * | `Ctrl` / `Cmd` 点击 | 增减这一张（其余不动） |
- * | `Shift` 点击 | 从**锚点**到这张之间的区间（含两端），替换掉之前的选择 |
+ * | `Shift` 点击 | **翻转**「上一次的图（不含）」到「这次点的图（含）」之间每一项的选中状态；区间外一律不动 |
  * | 点日组 / 时间片标题 | 把那一组**全部**加进选择（`全选当天` / `全选此段`） |
  *
- * 锚点（anchor）是「上一次单点/增减的那张」—— `Shift` 区间从它开始算。
+ * 锚点（anchor）是「上一次点过的那张」—— `Shift` 翻转从它**之后**一张开始算
+ * （`BROWSE.md` §5.2 的严格语义，用户逐字描述：**不含**上一次的图、**含**这次点的图，
+ * 且**不需要保存任何区间状态** —— 逻辑简单、每步都是纯粹的翻转）。
  * 锚点不在当前列表里时（换了目录、列表被筛过）**退化成单张选中**，
  * 而不是猜一个位置：猜错会让用户一次选中一大片不该选的照片。
  *
@@ -62,7 +64,27 @@ export function applySelection(
       }
       const from = Math.min(anchorIndex, targetIndex);
       const to = Math.max(anchorIndex, targetIndex);
-      return { ids: new Set(orderedIds.slice(from, to + 1)), anchor: target };
+
+      /*
+       * **每一步都是纯粹的翻转**（`BROWSE.md` §5.2 的严格语义）：
+       *   * **不含**锚点（上一次的图）—— 它已经是用户想要的样子了；
+       *   * **含**这次点的图 —— 它必须跟着翻转；
+       *   * 区间外的每一项**原样不动**。
+       *
+       * 这里刻意**不保存「上一次的区间」**：人类明确要求「逻辑简单、无需保存复杂状态」。
+       * 曾经的实现是把区间**替换**进选择（`new Set(slice)`）—— 那会把区间外**已经选中**的
+       * 照片一并清掉（人类 2026-09-16 报的正是这个：「不在反转范围内的选择状态，
+       * 原来是什么现在还是什么，不改」）。
+       */
+      const ids = new Set(state.ids);
+      for (let index = from; index <= to; index += 1) {
+        if (index === anchorIndex) continue;
+        const id = orderedIds[index];
+        if (id === undefined) continue;
+        if (ids.has(id)) ids.delete(id);
+        else ids.add(id);
+      }
+      return { ids, anchor: target };
     }
     default: {
       return { ids: new Set([target]), anchor: target };

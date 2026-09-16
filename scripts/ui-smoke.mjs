@@ -743,6 +743,79 @@ try {
     }
   }
 
+  /*
+   * 库卡片（M1-9）：**在线 = 齿轮**（开库设置）、**离线 = 离线图标**（点它重新查找），
+   * 而且**两者都不带可见文字** —— 人类 2026-09-16 的原话：
+   * 「离线不要做成现在这样带文字的……点击离线图标检查是否上线」。
+   * 顺带在这里证明「库设置」真的接线了：点齿轮必须弹出弹窗、里面有模版输入框。
+   */
+  const repoCards = await evaluate(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const demo = document.querySelector('[data-demo="repo-cards"]');
+    if (!demo) return null;
+    const byLabel = (label) =>
+      [...demo.querySelectorAll("button")].filter(
+        (el) => (el.getAttribute("aria-label") ?? "") === label,
+      );
+    const gear = byLabel("库设置");
+    const offline = byLabel("重新查找");
+
+    const out = {
+      gearCount: gear.length,
+      offlineCount: offline.length,
+      offlineText: offline.length > 0 ? offline[0].textContent.trim() : null,
+      visibleText: demo.innerText.replace(/\\s+/g, " ").trim().slice(0, 120),
+      remountsBefore: demo.getAttribute("data-remounts"),
+    };
+
+    // 点离线图标 → 重新查找（真机上就是「插上盘再点它」）
+    offline[0]?.click();
+    await sleep(200);
+    out.remountsAfter = demo.getAttribute("data-remounts");
+
+    // 点齿轮 → 库设置弹窗必须真的开
+    gear[0]?.click();
+    await sleep(500);
+    const content = document.querySelector('[data-scope="dialog"][data-part="content"]');
+    out.settingsOpen = content !== null;
+    out.settingsText = content ? content.innerText.replace(/\\s+/g, " ").slice(0, 80) : null;
+    const input = content ? content.querySelector("input") : null;
+    out.hasTemplateInput = Boolean(input);
+    out.templateValue = input ? input.value : null;
+
+    document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    await sleep(300);
+    out.settingsClosed = document.querySelector('[data-scope="dialog"][data-part="content"]') === null;
+    return out;
+  })()`);
+
+  if (repoCards === null) {
+    problems.push("画廊里没有库卡片样例（data-demo=repo-cards）");
+  } else {
+    if (repoCards.gearCount < 1) {
+      problems.push("在线的库卡片上没有齿轮（库设置入口）——「配置功能没实装」就是这个症状");
+    }
+    if (repoCards.offlineCount < 1) {
+      problems.push("离线的库卡片上没有离线图标");
+    }
+    if (repoCards.offlineText !== "") {
+      problems.push(
+        "离线图标上带了可见文字（" + JSON.stringify(repoCards.offlineText) + "）—— 人类要求只留图标",
+      );
+    }
+    if (repoCards.visibleText.includes("离线")) {
+      problems.push("库卡片上出现了「离线」二字 —— 该只进无障碍名与悬停提示");
+    }
+    if (repoCards.remountsAfter === repoCards.remountsBefore) {
+      problems.push("点离线图标没有触发重新查找");
+    }
+    if (!repoCards.settingsOpen) {
+      problems.push("点齿轮没有打开库设置弹窗");
+    } else if (!repoCards.hasTemplateInput || !repoCards.templateValue) {
+      problems.push("库设置弹窗里没有导入模版输入框（或没读到当前模版）");
+    }
+  }
+
   const appUrl = new URL("/", url).href;
   await send("Page.navigate", { url: appUrl });
   if (!(await waitForContent(send))) {
@@ -1276,6 +1349,7 @@ try {
         leftColumn,
         widthHandle,
         dialogFrame,
+        repoCards,
         switchBar,
         layers,
         resizeProbe,

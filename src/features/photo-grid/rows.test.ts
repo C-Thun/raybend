@@ -13,9 +13,9 @@ import { tileImageHeight } from "../../lib/tile-flow.ts";
 import {
   buildGridRows,
   countRowPhotos,
-  DAY_HEADER_HEIGHT,
+  DAY_HEADER,
   itemId,
-  SLICE_HEADER_HEIGHT,
+  SLICE_HEADER,
   type GroupRowModel,
   type TileRowModel,
 } from "./rows.ts";
@@ -144,7 +144,7 @@ test("按时间：日标题 + 片标题 + tile 行，顺序正确", () => {
   assert.equal(groups[0].level, "day");
   assert.equal(groups[0].dayId, "2026-08-15");
   assert.equal(groups[0].count, 3);
-  assert.equal(groups[0].height, DAY_HEADER_HEIGHT);
+  assert.equal(groups[0].height, DAY_HEADER.rowHeight);
   assert.deepEqual(
     groups.slice(1).map((row) => [row.startMs, row.endMs, row.count]),
     [
@@ -152,7 +152,7 @@ test("按时间：日标题 + 片标题 + tile 行，顺序正确", () => {
       [at(20, 0), at(20, 0), 1],
     ],
   );
-  assert.equal(groups[1].height, SLICE_HEADER_HEIGHT);
+  assert.equal(groups[1].height, SLICE_HEADER.rowHeight);
   assert.equal(countRowPhotos(rows), 3);
 });
 

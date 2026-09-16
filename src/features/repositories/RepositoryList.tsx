@@ -12,17 +12,20 @@
  *
  * 三条规则（都在 `REPOSITORY.md` §2 / §5 里）：
  *   * **一个库可能有多条路径**：卡片显示**当前在线的那条**；离线时显示上次已知路径 + 徽标；
- *   * **离线徽标可点** = 对所有登记路径做一次重新查找（找不到不是错误）；
+ *   * **在线时那一格是齿轮**（开库设置）、**离线时是离线图标**（点它 = 对所有登记路径
+ *     重新查找一次，找不到不是错误）—— **一律图标化，不写「离线」二字**（人类 2026-09-16）；
  *   * **照片数读不到时显示「—」而不是 0** —— 0 会让用户以为库是空的。
  */
 
-import { For, Show } from "solid-js";
+import { createSignal, For, Show } from "solid-js";
 import {
   IconAlertTriangle,
+  IconCloudOff,
   IconFolder,
   IconLoader2,
-  IconRefresh,
+  IconSettings,
 } from "@tabler/icons-solidjs";
+import { LibrarySettingsDialog } from "./LibrarySettingsDialog.tsx";
 import type { RepositoryView } from "../../api/types.ts";
 import { ScrollBox } from "../../components/ui/ScrollBar.tsx";
 import { t } from "../../i18n/index.ts";
@@ -40,6 +43,8 @@ export interface RepositoryListProps {
   remountErrors?: Record<string, string>;
   onSelect: (id: string) => void;
   onRemount: (id: string) => void;
+  /** 模版保存成功后通知外面（列表拿到的是缓存的模版，要重新读一遍） */
+  onTemplateSaved?: (id: string, template: string) => void;
   onCreate: () => void;
   onRetry?: () => void;
   locale?: GroupingLocale;
@@ -48,6 +53,8 @@ export interface RepositoryListProps {
 
 export function RepositoryList(props: RepositoryListProps) {
   const locale = (): GroupingLocale => props.locale ?? "zh-CN";
+  /** 正在看设置的库（`null` = 没开）；对话框由列表自己持有，调用方不必管 */
+  const [settingsId, setSettingsId] = createSignal<string | null>(null);
 
   return (
     <div class={["flex min-h-0 flex-col gap-1", props.class ?? ""].join(" ")}>
@@ -92,6 +99,7 @@ export function RepositoryList(props: RepositoryListProps) {
                   locale={locale()}
                   onSelect={props.onSelect}
                   onRemount={props.onRemount}
+                  onOpenSettings={(id) => setSettingsId(id)}
                 />
               )}
             </For>
@@ -120,6 +128,22 @@ export function RepositoryList(props: RepositoryListProps) {
           </button>
         </ScrollBox>
       </Show>
+
+      {/* 库设置：整个列表共用**一个**对话框实例（同一时刻只会看一个库） */}
+      <LibrarySettingsDialog
+        open={settingsId() !== null}
+        repositoryId={settingsId()}
+        repositoryName={
+          props.repositories.find((repo) => repo.id === settingsId())?.name
+        }
+        onOpenChange={(open) => {
+          if (!open) setSettingsId(null);
+        }}
+        onSaved={(template) => {
+          const id = settingsId();
+          if (id !== null) props.onTemplateSaved?.(id, template);
+        }}
+      />
     </div>
   );
 }
@@ -132,6 +156,7 @@ function RepositoryCard(props: {
   locale: GroupingLocale;
   onSelect: (id: string) => void;
   onRemount: (id: string) => void;
+  onOpenSettings: (id: string) => void;
 }) {
   const countLabel = () =>
     props.repository.photoCount === null
@@ -177,24 +202,48 @@ function RepositoryCard(props: {
           {props.repository.name}
         </span>
 
-        {/* 离线徽标：可点 = 对所有登记路径重新查找一次 */}
-        <Show when={!props.repository.online}>
+        {/*
+          右侧那一格：**在线 = 齿轮**（开库设置）、**离线 = 离线图标**（点它重新查找）。
+          设计稿（`RepoGear` / `RepoOffline`）给了两个形态，但**不带文字** ——
+          「离线」二字只进无障碍名与悬停提示（人类 2026-09-16 明确要求）。
+          点它自己 `stopPropagation`：卡片整块是「选中这个库」，不能顺带把设置也开了。
+        */}
+        <Show
+          when={props.repository.online}
+          fallback={
+            <button
+              type="button"
+              aria-label={t("repo.remount")}
+              title={t("repo.remount")}
+              class={[
+                "flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-ui",
+                "bg-surface-bar text-fg-2 hover:text-fg-1",
+              ].join(" ")}
+              onClick={(event) => {
+                event.stopPropagation();
+                props.onRemount(props.repository.id);
+              }}
+            >
+              <Show
+                when={props.remounting}
+                fallback={<IconCloudOff size={14} aria-hidden="true" />}
+              >
+                <IconLoader2 size={14} class="animate-spin" aria-hidden="true" />
+              </Show>
+            </button>
+          }
+        >
           <button
             type="button"
-            class="flex shrink-0 cursor-pointer items-center gap-0.5 rounded-ui bg-surface-track px-1 text-fs-0 text-fg-2 hover:text-fg-1"
+            aria-label={t("repo.settings_title")}
+            title={t("repo.settings_title")}
+            class="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-ui text-fg-2 hover:bg-state-hover hover:text-fg-1"
             onClick={(event) => {
               event.stopPropagation();
-              props.onRemount(props.repository.id);
+              props.onOpenSettings(props.repository.id);
             }}
-            title={t("repo.remount")}
           >
-            <Show
-              when={props.remounting}
-              fallback={<IconRefresh size={12} aria-hidden="true" />}
-            >
-              <IconLoader2 size={12} class="animate-spin" aria-hidden="true" />
-            </Show>
-            {t("repo.offline")}
+            <IconSettings size={14} aria-hidden="true" />
           </button>
         </Show>
 

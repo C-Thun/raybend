@@ -47,20 +47,41 @@ test("Ctrl 增减：只影响这一张，其余不动", () => {
   assert.equal(removed.anchor, "a", "取消选中也要留下锚点（接着 Shift 才顺");
 });
 
-test("Shift 区间：从锚点到目标（含两端），替换旧选择", () => {
-  const next = applySelection(state(["a"], "b"), LIST, "d", "range");
-  assert.deepEqual(sorted(next), ["b", "c", "d"]);
+test("Shift 区间：翻转「不含锚点、含本次点击」，区间外一律不动", () => {
+  // 锚点是 b（刚点过的那张），另外 a 与 z 是散在外面的选中项
+  const next = applySelection(state(["a", "b", "z"], "b"), LIST, "d", "range");
+  assert.deepEqual(
+    sorted(next),
+    ["a", "b", "c", "d", "z"],
+    "c / d 被翻进来，锚点 b 不动，区间外的 a / z 原样",
+  );
   assert.equal(next.anchor, "d");
 });
 
 test("Shift 区间：目标在锚点之前也能算（反向）", () => {
-  const next = applySelection(state([], "d"), LIST, "b", "range");
-  assert.deepEqual(sorted(next), ["b", "c", "d"]);
+  const next = applySelection(state(["d"], "d"), LIST, "b", "range");
+  assert.deepEqual(sorted(next), ["b", "c", "d"], "锚点 d 保留，b / c 被翻进来");
 });
 
-test("Shift 区间：锚点与目标相同 → 只选它自己", () => {
+test("Shift 区间：锚点与目标相同 → 什么都不翻转", () => {
   const next = applySelection(state(["a", "b"], "c"), LIST, "c", "range");
-  assert.deepEqual(sorted(next), ["c"]);
+  assert.deepEqual(sorted(next), ["a", "b"], "锚点就是自己，中间没有别人");
+});
+
+test("Shift 区间：`BROWSE.md` §5.2 的 ABCDE 走查（用户逐字描述）", () => {
+  const letters = ["a", "b", "c", "d", "e"];
+  // 1. 点 A
+  let state2 = applySelection(state([], null), letters, "a", "replace");
+  assert.deepEqual(sorted(state2), ["a"]);
+  // 2. Shift 点 C → B 和 C 翻转（**不含** A）
+  state2 = applySelection(state2, letters, "c", "range");
+  assert.deepEqual(sorted(state2), ["a", "b", "c"]);
+  // 3. Shift 点 E → 从 C 开始计，D 和 E 翻转（B 不能被清掉）
+  state2 = applySelection(state2, letters, "e", "range");
+  assert.deepEqual(sorted(state2), ["a", "b", "c", "d", "e"], "之前选中的不能被清掉");
+  // 4. Shift 再点 A → A B C D 全部翻转（E 不动）
+  state2 = applySelection(state2, letters, "a", "range");
+  assert.deepEqual(sorted(state2), ["e"], "只翻 A..D，锚点 E 自己不动");
 });
 
 test("Shift 区间：没有锚点 → 退化成单张（不猜位置）", () => {

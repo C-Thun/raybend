@@ -863,6 +863,54 @@ mod tests {
     }
 
     #[test]
+    fn renaming_the_library_folder_simulates_unplugging_the_drive() {
+        // 人类 2026-09-16 指定的测法：本地磁盘上直接**改名**，就等于把设备拔了/插了
+        let dir = tmp();
+        let root = dir.path().join("testrepos");
+        std::fs::create_dir_all(&root).unwrap();
+        let meta =
+            create_or_open_catalog(&root.join(CATALOG_FILE_NAME), "测试库", None, T0).unwrap();
+
+        let app = app_db();
+        register_repository(&app, &meta, T0).unwrap();
+        add_repository_path(&app, &meta.id, root.to_string_lossy().as_ref(), T0).unwrap();
+        assert!(
+            resolve_repository(&app, &meta.id).unwrap().is_online(),
+            "刚登记的库应当在线"
+        );
+
+        // ① 拔掉（改名）：一律转**离线**而不是报错
+        let unplugged = dir.path().join("testrepos-unplugged");
+        std::fs::rename(&root, &unplugged).unwrap();
+        assert!(
+            !resolve_repository(&app, &meta.id).unwrap().is_online(),
+            "目录不在原处 → 离线"
+        );
+
+        // ② 插回原处：自己就恢复了，界面不需要做别的事
+        std::fs::rename(&unplugged, &root).unwrap();
+        assert!(
+            resolve_repository(&app, &meta.id).unwrap().is_online(),
+            "插回原处 → 在线"
+        );
+
+        // ③ 插到**别的**位置：登记这条新路径之后同样能挂上（「换挂载点」）
+        std::fs::rename(&root, &unplugged).unwrap();
+        assert!(!resolve_repository(&app, &meta.id).unwrap().is_online());
+        add_repository_path(
+            &app,
+            &meta.id,
+            unplugged.to_string_lossy().as_ref(),
+            T0 + 1,
+        )
+        .unwrap();
+        match resolve_repository(&app, &meta.id).unwrap() {
+            RepositoryState::Online { root } => assert_eq!(root, unplugged),
+            other => panic!("登记新路径之后应当在线，实际 {other:?}"),
+        }
+    }
+
+    #[test]
     fn finds_library_after_it_moves_to_another_registered_path() {
         // 「离线库换挂载点」：登记过的另一条路径上有它 → 应当找到
         let dir = tmp();

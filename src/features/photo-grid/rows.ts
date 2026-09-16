@@ -60,10 +60,21 @@ export interface GroupRowModel {
 
 export type GridRowModel = TileRowModel | GroupRowModel;
 
-/** 日组标题行高（px）—— 比时间片高一点，层次才分得开 */
-export const DAY_HEADER_HEIGHT = 34;
-/** 时间片标题行高 */
-export const SLICE_HEADER_HEIGHT = 26;
+/*
+ * 分组标题的排版（`DESIGN.md` §12.7）：**没有横线、没有色块，全靠留白与大小的层次**。
+ *
+ * `rowHeight = contentHeight + 上方留白` —— 留白只加在上面，标题就贴着自己这一组、
+ * 与上一组拉开距离。**单一事实源**：渲染方从这两个对象里同时取行高与留白，
+ * 不另写一套 `pt-*`（两处各写会悄悄漂开，标题就偏了）。
+ *
+ * 数值来历（2026-09-16 人类截图反馈「按时间样式下排版过于紧凑，叫人怎么区分」）：
+ * 原来日组 34、时间片 26 且都居中，看起来就是两行小字。现在：
+ *   * 日标题 14px **semibold** + `fg-1` + 日历图标（设计稿 `DayHeader`）—— 一级标题；
+ *   * 时间片 13px `fg-2` —— 二级标题；
+ *   * 上方留白 20 / 10，与字号一起表达层级。
+ */
+export const DAY_HEADER = { rowHeight: 46, contentHeight: 26 } as const;
+export const SLICE_HEADER = { rowHeight: 32, contentHeight: 22 } as const;
 
 export interface GridRowsInput {
   items: readonly SourceItem[];
@@ -103,7 +114,7 @@ export function buildGridRows(input: GridRowsInput): GridRowModel[] {
       kind: "group",
       key: `day:${day.id}`,
       level: "day",
-      height: DAY_HEADER_HEIGHT,
+      height: DAY_HEADER.rowHeight,
       photoIds: day.photoIds,
       dayId: day.id,
       startMs: day.slices.length > 0 ? day.slices[0].startMs : null,
@@ -121,7 +132,7 @@ export function buildGridRows(input: GridRowsInput): GridRowModel[] {
         kind: "group",
         key: `slice:${slice.id}`,
         level: "slice",
-        height: SLICE_HEADER_HEIGHT,
+        height: SLICE_HEADER.rowHeight,
         photoIds: slice.photoIds,
         dayId: day.id,
         startMs: slice.startMs,
@@ -145,7 +156,7 @@ export function buildGridRows(input: GridRowsInput): GridRowModel[] {
       kind: "group",
       key: "day:unknown",
       level: "day",
-      height: DAY_HEADER_HEIGHT,
+      height: DAY_HEADER.rowHeight,
       photoIds,
       dayId: "unknown",
       startMs: null,

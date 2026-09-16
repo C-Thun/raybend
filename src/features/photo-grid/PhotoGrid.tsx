@@ -25,7 +25,7 @@ import {
   onMount,
   Show,
 } from "solid-js";
-import { IconAlertTriangle } from "@tabler/icons-solidjs";
+import { IconAlertTriangle, IconCalendar } from "@tabler/icons-solidjs";
 import { Badge } from "../../components/ui/Badge.tsx";
 import { Tile } from "../../components/ui/Tile.tsx";
 import { VirtualGrid } from "../../components/ui/VirtualGrid.tsx";
@@ -38,7 +38,9 @@ import type { SourceItem } from "../../api/types.ts";
 import { GridControlBar } from "./GridControlBar.tsx";
 import {
   buildGridRows,
+  DAY_HEADER,
   itemId,
+  SLICE_HEADER,
   type TileRowModel,
   type GroupRowModel,
 } from "./rows.ts";
@@ -257,16 +259,34 @@ function GroupHeader(props: {
   const selectLabel = () =>
     props.row.level === "day" ? t("grid.select_all_day") : t("grid.select_all_range");
 
+  const isDay = (): boolean => props.row.level === "day";
+
   return (
+    /*
+     * 留白只加在**上方**（行高里已经含了它）：标题贴着自己这一组、与上一组拉开。
+     * 层级靠三样一起表达：留白（20 vs 10）、字号字重（14 semibold vs 13 normal）、
+     * 颜色（`fg-1` vs `fg-2`）—— 设计稿里这一块本来就没有横线也没有色块。
+     */
     <div
       class="flex items-center gap-2"
-      style={{ height: `${props.row.height}px` }}
+      style={{
+        height: `${props.row.height}px`,
+        // 留白**从同一个事实源里推导**（行高 − 内容高）—— 见 rows.ts 的 DAY_HEADER
+        "padding-top": `${props.row.height - (isDay() ? DAY_HEADER.contentHeight : SLICE_HEADER.contentHeight)}px`,
+      }}
     >
+      <Show when={isDay()}>
+        <IconCalendar
+          size={14}
+          class="shrink-0 text-fg-1"
+          aria-hidden="true"
+        />
+      </Show>
       <span
         class={[
           "truncate",
-          props.row.level === "day"
-            ? "text-fs-2 font-medium text-fg-1"
+          isDay()
+            ? "text-fs-2 font-semibold text-fg-1"
             : "text-fs-1 text-fg-2",
         ].join(" ")}
       >
@@ -275,9 +295,15 @@ function GroupHeader(props: {
       <span class="shrink-0 text-fs-0 text-fg-3 tnum">
         {t("grid.count", { n: formatCount(props.row.count, props.locale) })}
       </span>
+      {/* 药丸（设计稿：日组 `$state-selected` 高 20 / 时间片 `$state-hover` 高 18） */}
       <button
         type="button"
-        class="shrink-0 cursor-pointer rounded-ui px-1 text-fs-0 text-fg-3 hover:bg-state-hover hover:text-fg-1"
+        class={[
+          "flex shrink-0 cursor-pointer items-center rounded-ui px-1.5 text-fs-0",
+          isDay()
+            ? "h-5 bg-state-selected text-fg-2 hover:text-fg-1"
+            : "h-4.5 bg-state-hover text-fg-3 hover:text-fg-1",
+        ].join(" ")}
         onClick={() => props.store.selectGroup(props.row.photoIds)}
       >
         {selectLabel()}
