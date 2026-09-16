@@ -16,7 +16,17 @@
 >
 > 规则见 `AGENTS.md` §2.12。
 
-（当前：**无**）
+1. **中文在小控件里看着偏高（0.5–0.8px）** —— 已做度量修正（`vite.config.ts` 的
+   `cjkMetricsOverride` 把 CJK 字体的 ascent/descent 改成方块字 em 盒，实测已生效），
+   但**像素偏移一点没变**，判断是光栅化/基线吸格（本环境测不出来源）。
+   → 你在真机上看一眼：**如果还是偏高就说一声**，那条改动一条 revert 就能撤
+   （涉及三处：`vite.config.ts` 的插件、`src/index.tsx` 的字体 import、`scripts/ui-smoke.mjs` 的两条断言）。
+   量法与数据见 `implementations/2026-09-17_exclude-chain_radius_language_font-metrics.md` §二。
+
+2. **`cargo test` 偶发链接失败**：`rust-lld: error: undefined hidden symbol ... .llvm.*` ——
+   增量编译的陈旧目标文件所致（本次遇到两次，都是改完代码之后）。
+   绕法：`cargo clean -p raybend` 后重跑即可（约 1 分钟）。
+   若你觉得太频繁，我可以把 `[profile.test]` 的 `incremental` 关掉（代价是每次改完重编稍慢）。
 
 ---
 

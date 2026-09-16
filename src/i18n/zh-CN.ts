@@ -48,6 +48,14 @@ export const zhCN = {
  "repo.settings_offline": "这个库现在不在线 —— 模版改不了，先把它挂上（插好盘，或点列表上的离线图标）",
  "repo.settings_hint_named": "「{name}」的导入模版 —— 决定以后导入的照片落在库里的哪条路径",
  "repo.template_label": "导入模版",
+ /**
+  * 语言自己的名字（**endonym**）—— 只给帮助菜单里的那条语言切换用。
+  *
+  * ⚠️ 它**不能**走 `t()` 取当前语言包：那条菜单项要显示的是**目标语言**的名字
+  * （中文界面显示 `English`、英文界面显示 `中文`），这才是「切过去会变成什么」的意义。
+  * 所以调用方直接用**目标语言的包**取这一条：`LOCALES[next]["locale.name"]`。
+  */
+ "locale.name": "中文",
  "app.name": "光伴",
 
  // ── titlebar（应用标题行，design/main.md §2.1）──────────
@@ -152,6 +160,12 @@ export const zhCN = {
  // ── 右列：库（design/main.md §3.3）────────────────────
  "repo.title": "库",
  "repo.create": "新建库",
+ /**
+  * 「已排除 N 张」—— 与「已选择 M 张照片」同一行、靠右显示。
+  * 为什么要单独说一句：导入时用户心里算的是「我这次要带进去几张」，
+  * 而排除是**跨源**的（切目录不丢），不显式说出来就会显得总数对不上。
+  */
+ "import.excluded_count": "已排除 {n} 张",
  "repo.import": "导入",
  "repo.avoid_duplicates": "避免重复导入",
  "repo.empty": "还没有库，先建一个",

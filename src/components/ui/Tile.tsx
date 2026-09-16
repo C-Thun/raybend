@@ -44,6 +44,7 @@
  */
 
 import {
+  IconBan,
   IconLock,
   IconStar,
   IconStarFilled,
@@ -75,6 +76,16 @@ export interface TileProps
   disabled?: boolean;
   loading?: boolean;
   empty?: boolean;
+  /**
+   * 被**排除**（`AGENTS.md` §11.3：本次导入不带这张，但不动库、不动磁盘）。
+   *
+   * 表现 = 照片变透明 + 中央一个禁行图标。两条纪律：
+   *   1. **不能只靠置灰**（旧实现只把整块调到 40% 不透明度）：一张本身就暗的照片调完看不出区别，
+   *      而「这张不要」是个强语义 —— 人得一眼看得出来；
+   *   2. **颜色要克制**：加上图标之后意思已经够明确了，再用红/黄这种高饱和色就成了叫卖。
+   *      所以用中性的 `fg-2`，并且**压在照片上**（中心）而不是挂在角上。
+   */
+  excluded?: boolean;
   /** 动作槽（照片右上角，指向/聚焦时出现） */
   actions?: JSX.Element;
   /** 库内才有的信息（导入工作流里这些事都不存在，槽位直接不渲染） */
@@ -119,6 +130,7 @@ export function Tile(props: TileProps) {
     "disabled",
     "loading",
     "empty",
+    "excluded",
     "actions",
     "context",
     "rating",
@@ -251,13 +263,37 @@ export function Tile(props: TileProps) {
             {/*
               `draggable=false`：桌面应用里拖拽图片会把 webview 变成「拖文件」状态，
               与后续要做的 tile 拖选冲突。
+
+              排除态：照片**变透明**（`opacity-35`）—— 不是把整个 tile 调淡，
+              这样外框的选中/指向底色还在，两种状态能同时读出来。
             */}
             <img
               src={local.src ?? ""}
               alt={local.label}
               draggable={false}
-              class="size-full object-cover"
+              class={[
+                "size-full object-cover",
+                local.excluded ? "opacity-35" : "",
+              ]
+                .filter(Boolean)
+                .join(" ")}
             />
+
+            {/*
+              排除的标识：**照片正中央**一个禁行图标（圈 + 斜线，与 `toolsbar` 的批量排除同一套）。
+              用 `pointer-events-none`：它不是按钮 —— 排除/恢复都走「先选中、再按批量排除」，
+              在这里再挂一个可点图标，会给「轻点一下」赋予两种含义。
+            */}
+            <Show when={local.excluded}>
+              <span class="pointer-events-none absolute inset-0 flex items-center justify-center">
+                <IconBan
+                  size={28}
+                  stroke-width={1.5}
+                  class="text-fg-2"
+                  aria-label={t("grid.excluded")}
+                />
+              </span>
+            </Show>
 
             {/* 动作槽：照片右上角，指向 / 键盘聚焦时出现 */}
             <Show when={local.actions}>

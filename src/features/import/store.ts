@@ -27,6 +27,7 @@ export interface ImportApi {
     repositoryId: string,
     sources: readonly ImportSource[],
     avoidDuplicates: boolean,
+    excluded: readonly string[],
   ) => Promise<ImportStart>;
   pause: (batchId: string) => Promise<ImportBatchProgress>;
   resume: (batchId: string) => Promise<ImportBatchProgress>;
@@ -45,6 +46,11 @@ export interface ImportRequest {
   /** 每个源目录带自己的「包含子目录」开关。 */
   sources: readonly ImportSource[];
   avoidDuplicates: boolean;
+  /**
+   * 用户**排除**掉的文件（绝对路径）。默认空 —— 老的调用点不必改。
+   * 后端会把它们整批剔掉（见 `import/runner.rs`）：不进规划、不计入 total/skipped。
+   */
+  excluded?: readonly string[];
 }
 
 /** 计数（界面上那几栏）。 */
@@ -185,7 +191,12 @@ export function createImportStore(deps: ImportStoreDeps): ImportStore {
     unsubscribe();
     try {
       const started = await withTimeout(
-        deps.api.start(request.repositoryId, request.sources, request.avoidDuplicates),
+        deps.api.start(
+          request.repositoryId,
+          request.sources,
+          request.avoidDuplicates,
+          request.excluded ?? [],
+        ),
         timeout,
         "启动导入",
       );

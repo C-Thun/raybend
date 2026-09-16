@@ -124,6 +124,9 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
       repositoryId,
       sources: sources(),
       avoidDuplicates: store.avoidDuplicates(),
+      // 排除清单只带**落在已勾选目录里**的那些：用户排过、随后又把那个目录取消勾选的，
+      // 不该再跟着这批走（排除本身还留在内存里，再勾回来就还在）
+      excluded: store.excludedForImport(),
     });
   }
 
@@ -260,7 +263,8 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
       <div class="flex min-h-0 min-w-0 flex-1">
               {/* ── 中列：照片网格 ─────────────────────────────── */}
               <main class="flex min-w-0 flex-1 flex-col bg-surface-bar">
-                <PhotoGrid store={grid} />
+                {/* 排除状态住在工作区 store（跨目录、跨源一份），网格只负责显示 */}
+                <PhotoGrid store={grid} isExcluded={store.isExcluded} />
               </main>
 
               {/* ── 右列：库（固定宽，不可拖）─────────────────── */}
@@ -289,6 +293,7 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
         <RepositoryFooter
           checkedDirs={store.checkedDirs()}
           photoCount={store.checkedPhotoCount()}
+          excludedCount={store.excludedInChecked()}
           hasRepository={store.selectedRepository() !== null}
           repositoryOnline={store.selectedRepository()?.online ?? false}
           avoidDuplicates={store.avoidDuplicates()}

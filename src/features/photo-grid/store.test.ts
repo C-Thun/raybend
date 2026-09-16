@@ -160,7 +160,7 @@ test("同一个目录重复设置是空操作（不重新扫描）", async () =>
   assert.equal(state.calls.filter((call) => call.startsWith("scan:")).length, 1);
 });
 
-test("换目录：选择与排除都被清空", async () => {
+test("换目录：选择被清空（排除不归它管，见 workspaces/import/store.ts）", async () => {
   const { api, state } = fakeApi();
   state.items = [item("a.jpg"), item("b.jpg")];
   const store = createPhotoGridStore({ api });
@@ -168,14 +168,11 @@ test("换目录：选择与排除都被清空", async () => {
   await flush();
 
   store.clickItem(itemId(state.items[0]), "replace");
-  store.toggleExcludedSelected();
   assert.equal(store.selectedCount(), 1);
-  assert.equal(store.excludedCount(), 1);
 
   store.setSourceDir("/other");
   await flush();
   assert.equal(store.selectedCount(), 0);
-  assert.equal(store.excludedCount(), 0, "上一个目录的排除不能带过来");
 });
 
 test("迟到的扫描结果被丢掉（用户已经换了目录）", async () => {
@@ -383,34 +380,12 @@ test("全选一组：日 / 时间片的「全选当天」「全选此段」", as
   assert.equal(store.selectedCount(), 1, "空组不动选择");
 });
 
-test("批量排除：只反转**选中项**，且是可逆的", async () => {
-  const { api, state } = fakeApi();
-  state.items = [item("a.jpg"), item("b.jpg"), item("c.jpg")];
-  const store = createPhotoGridStore({ api });
-  store.setSourceDir("/src");
-  await flush();
-  const ids = store.items().map(itemId);
-
-  store.clickItem(ids[0], "replace");
-  store.toggleExcludedSelected();
-  assert.deepEqual([...store.excluded()], [ids[0]]);
-  assert.equal(store.excludedCount(), 1);
-
-  // 换一张再排除：原来的还在
-  store.clickItem(ids[1], "replace");
-  store.toggleExcludedSelected();
-  assert.equal(store.excludedCount(), 2);
-
-  // 把两张都选上再反转一次：都恢复
-  store.selectAll();
-  store.toggleExcludedSelected();
-  assert.equal(store.excludedCount(), 1, "第二张恢复，第一张未选中所以不动");
-
-  // 没有选中项时是空操作（buttons 侧也会禁用，这里再兜一层）
-  store.clearSelection();
-  store.toggleExcludedSelected();
-  assert.equal(store.excludedCount(), 1);
-});
+/*
+ * 批量排除的用例**搬走了**（2026-09-16）：排除不再住在网格 store 里 ——
+ * 它换目录时会被清空（用户切一圈回来发现排除全丢了）。
+ * 现在住在导入工作区的 store：见 `workspaces/import/store.test.ts`
+ * 的「排除」一节，纯函数在 `lib/excluded.test.ts`。
+ */
 
 /* ══════════════════════════════════════════════════════════════
  * 偏好与缩略图

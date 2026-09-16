@@ -32,6 +32,7 @@ import {
   sumPhotoCounts,
   type CheckedDir,
 } from "../../lib/checked-dir.ts";
+import { countExcludedInDirs, invertExcluded, isUnderDir } from "../../lib/excluded.ts";
 import type { LoadStatus } from "../../lib/load-status.ts";
 import { samePath } from "../../lib/tree.ts";
 import {
@@ -88,6 +89,26 @@ export interface ImportStore {
   checkedPhotoCount: () => number | null;
   /** 还有目录在数照片 */
   countingPhotos: () => boolean;
+
+  /* ── 排除（跨目录、跨源，会话级内存）────────── */
+  /**
+   * 被排除的照片（**绝对路径**集合）。
+   *
+   * 它是**跨源**的一份：多源导入时用户来回切目录，排除不能跟着丢
+   * （旧实现活在照片网格的 store 里，换目录就清空了）。
+   * 只在内存里 —— 关掉应用就没了，这是刻意的（同人类的说法：「总的内存列表」）。
+   */
+  excluded: () => ReadonlySet<string>;
+  isExcluded: (path: string) => boolean;
+  /** 反转一批文件的排除状态（`DESIGN.md` §12.2 的批量排除就这么来的） */
+  toggleExcluded: (paths: readonly string[]) => void;
+  /**
+   * 落在**已勾选目录**范围内的排除张数 —— 右列底部的统计与真正传给后端的清单都用它。
+   * 已勾选目录之外的排除不算数（用户可能排了一张、随后又把那个目录取消勾选了）。
+   */
+  excludedInChecked: () => number;
+  /** 真正要传给后端的排除清单（只要落在已勾选目录里的那些） */
+  excludedForImport: () => string[];
 
   /* ── 最近 ─────────────────────────────────── */
   recentDirs: () => readonly RecentDir[];
@@ -290,6 +311,35 @@ export function createImportStore(deps: ImportStoreDeps): ImportStore {
   const countingPhotos = (): boolean => hasUncounted(checkedDirs());
 
   /* ══════════════════════════════════════════════════════════
+   * 排除
+   *
+   * 为什么放在**工作区**的 store 而不是照片网格的 store：
+   * 排除是「这批导入不带哪些」的事，与「正在看哪个目录」无关。
+   * 放进网格 store 的后果实测过 —— 换目录时 `resetDirState` 把它一起清了，
+   * 用户切一圈回来发现排除全没了。
+   * ══════════════════════════════════════════════════════════ */
+
+  const [excluded, setExcluded] = createSignal<ReadonlySet<string>>(new Set());
+
+  const isExcluded = (path: string): boolean => excluded().has(path);
+
+  const toggleExcluded = (paths: readonly string[]): void => {
+    setExcluded((current) => invertExcluded(current, paths));
+  };
+
+  /** 落在已勾选目录里的排除项（计数与传给后端的清单是同一份口径） */
+  const excludedInCheckedList = (): string[] => {
+    const dirs = checkedDirs();
+    if (dirs.length === 0) return [];
+    return [...excluded()].filter((path) =>
+      dirs.some((dir) => isUnderDir(path, dir.path, dir.includeSubdirs)),
+    );
+  };
+
+  const excludedInChecked = (): number =>
+    countExcludedInDirs(excluded(), checkedDirs());
+
+  /* ══════════════════════════════════════════════════════════
    * 最近
    * ══════════════════════════════════════════════════════════ */
 
@@ -471,6 +521,11 @@ export function createImportStore(deps: ImportStoreDeps): ImportStore {
     removeChecked,
     checkedPhotoCount,
     countingPhotos,
+    excluded,
+    isExcluded,
+    toggleExcluded,
+    excludedInChecked,
+    excludedForImport: excludedInCheckedList,
     volumes,
     volumesStatus,
     volumesError,

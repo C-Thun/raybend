@@ -58,11 +58,18 @@ export async function importPrecheck(
   });
 }
 
-/** 开始导入（每个源目录一个 run，整批一个 batchId）。 */
+/**
+ * 开始导入（每个源目录一个 run，整批一个 batchId）。
+ *
+ * `excluded` = 用户排除掉的文件（**绝对路径**，跨目录、跨源共用一份）。
+ * 后端会把它们从扫描结果里剔除：不进规划、不计入 total/skipped ——
+ * 「不导入这张」与「试过了、跳过」不是一回事。
+ */
 export async function importStart(
   repositoryId: string,
   sources: readonly ImportSource[],
   avoidDuplicates: boolean,
+  excluded: readonly string[] = [],
 ): Promise<ImportStart> {
   if (!isTauriRuntime()) {
     return { batchId: "", runs: [] };
@@ -71,6 +78,7 @@ export async function importStart(
     repositoryId,
     sources: sources.map((source) => ({ ...source })),
     avoidDuplicates,
+    excluded: [...excluded],
   });
 }
 

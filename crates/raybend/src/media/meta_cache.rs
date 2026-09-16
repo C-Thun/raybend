@@ -261,16 +261,6 @@ mod tests {
     use std::path::Path;
     use std::time::{Duration, Instant};
 
-    fn meta(file_size: u64, mtime_ms: i64) -> PhotoMeta {
-        PhotoMeta {
-            width: 4000,
-            height: 3000,
-            orientation: 1,
-            file_size,
-            mtime_ms,
-        }
-    }
-
     fn input(name: &str, file_size: u64, mtime_ms: i64) -> MetaInput {
         MetaInput {
             relative: name.to_string(),
@@ -462,11 +452,11 @@ mod tests {
         let calls = Cell::new(0);
         let files: Vec<MetaInput> = (0..3).map(|i| input(&format!("{i}.jpg"), 1, 1)).collect();
         cache
-            .ensure_dir(&Path::new(r"D:\A"), &files, now, reader(&calls, None))
+            .ensure_dir(Path::new(r"D:\A"), &files, now, reader(&calls, None))
             .unwrap();
         cache
             .ensure_dir(
-                &Path::new(r"D:\B"),
+                Path::new(r"D:\B"),
                 &files,
                 now + Duration::from_secs(1),
                 reader(&calls, None),
@@ -551,11 +541,9 @@ mod tests {
                 orientation: 1,
                 file_size: 1024,
                 mtime_ms: 1_700_000_000_000,
-                ..PhotoMeta::default()
             })
-            .map(|meta: PhotoMeta| {
+            .inspect(|_meta: &PhotoMeta| {
                 let _ = name;
-                meta
             })
         };
 

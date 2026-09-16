@@ -494,6 +494,7 @@ mod tests {
             template_source: ":CYEAR/:FILENAME".to_string(),
             include_subdirs: true,
             avoid_duplicates: true,
+            excluded: std::sync::Arc::new(std::collections::HashSet::new()),
         }
     }
 

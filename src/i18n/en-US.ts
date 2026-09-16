@@ -47,6 +47,14 @@ export const enUS: Record<MessageKey, string> = {
  "repo.settings_offline": "This library is offline — the template cannot be changed until it is mounted (plug the drive in, or click the offline icon in the list)",
  "repo.settings_hint_named": "Import template for \"{name}\" — decides where future imports land",
  "repo.template_label": "Import template",
+ /**
+  * 语言自己的名字（**endonym**）—— 只给帮助菜单里的那条语言切换用。
+  *
+  * ⚠️ 它**不能**走 `t()` 取当前语言包：那条菜单项要显示的是**目标语言**的名字
+  * （中文界面显示 `English`、英文界面显示 `中文`），这才是「切过去会变成什么」的意义。
+  * 所以调用方直接用**目标语言的包**取这一条：`LOCALES[next]["locale.name"]`。
+  */
+ "locale.name": "English",
  "app.name": "RayBend",
 
  "titlebar.menu.help": "Help",
@@ -143,6 +151,12 @@ export const enUS: Record<MessageKey, string> = {
 
  "repo.title": "Libraries",
  "repo.create": "New library",
+ /**
+  * 「已排除 N 张」—— 与「已选择 M 张照片」同一行、靠右显示。
+  * 为什么要单独说一句：导入时用户心里算的是「我这次要带进去几张」，
+  * 而排除是**跨源**的（切目录不丢），不显式说出来就会显得总数对不上。
+  */
+ "import.excluded_count": "{n} excluded",
  "repo.import": "Import",
  "repo.avoid_duplicates": "Skip duplicates",
  "repo.empty": "No libraries yet — create one first",

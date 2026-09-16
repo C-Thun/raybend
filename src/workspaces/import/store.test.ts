@@ -400,6 +400,68 @@ test("驱动器：加载、失败要有错误信息（树显示空态而不是�
 });
 
 /* ══════════════════════════════════════════════════════════════
+ * 排除（跨目录、跨源的一份内存列表）
+ *
+ * 为什么这块重要：旧实现把排除放在照片网格的 store 里，换目录时
+ * 被 `resetDirState` 一起清掉 —— 用户切一圈回来排除全丢，
+ * 而这种事只有真的来回切一次才看得出来。
+ * ══════════════════════════════════════════════════════════════ */
+
+test("排除：反转语义，且**换目录不丢**", () => {
+  const { api } = fakeApi();
+  const store = createImportStore({ api });
+  store.selectDir("/src/a");
+
+  store.toggleExcluded(["/src/a/1.jpg", "/src/a/2.jpg"]);
+  assert.deepEqual(
+    [...store.excluded()].sort((a, b) => a.localeCompare(b)),
+    ["/src/a/1.jpg", "/src/a/2.jpg"],
+  );
+
+  // 再反转一次：这一张恢复（`DESIGN.md` §12.2：批量排除是个反转动作）
+  store.toggleExcluded(["/src/a/1.jpg"]);
+  assert.deepEqual([...store.excluded()], ["/src/a/2.jpg"]);
+
+  // 换到别的目录转一圈：排除不该跟着动
+  store.selectDir("/src/b");
+  assert.deepEqual([...store.excluded()], ["/src/a/2.jpg"]);
+
+  // 空输入是空操作（界面在没选中照片时禁用按钮，这里再兜一层）
+  store.toggleExcluded([]);
+  assert.deepEqual([...store.excluded()], ["/src/a/2.jpg"]);
+});
+
+test("排除：只有落在**已勾选目录**里的才算数（取消勾选就不再影响这批）", () => {
+  const { api } = fakeApi();
+  const store = createImportStore({ api });
+
+  store.toggleExcluded([
+    "/src/a/1.jpg",
+    "/src/a/_RAW/1.orf",
+    "/src/b/1.jpg",
+    "/other/1.jpg",
+  ]);
+
+  // 还没勾任何目录：一条都不算（排除集合还在，只是与这次导入无关）
+  assert.equal(store.excludedInChecked(), 0);
+  assert.deepEqual(store.excludedForImport(), []);
+
+  // 勾 a（不含子目录）：只有直属那张
+  store.toggleChecked("/src/a", false);
+  assert.equal(store.excludedInChecked(), 1);
+  assert.deepEqual(store.excludedForImport(), ["/src/a/1.jpg"]);
+
+  // 勾上 b：再加上 b 那张
+  store.toggleChecked("/src/b", false);
+  assert.equal(store.excludedInChecked(), 2);
+
+  // 取消勾选 a：只剩 b 那张（排除本身不丢，再勾回来还在）
+  store.removeChecked("/src/a");
+  assert.equal(store.excludedInChecked(), 1);
+  assert.deepEqual(store.excludedForImport(), ["/src/b/1.jpg"]);
+});
+
+/* ══════════════════════════════════════════════════════════════
  * 库
  * ══════════════════════════════════════════════════════════════ */
 

@@ -29,12 +29,66 @@ export const LOCALE_IDS = Object.keys(LOCALES) as LocaleId[];
 const [locale, setLocaleSignal] = createSignal<LocaleId>("zh-CN");
 export { locale };
 
+/**
+ * 语言选择的存储键（`localStorage`）。
+ *
+ * 为什么走 localStorage 而不是 `app.db`：与主题/密度同一类 —— **设备级偏好**
+ * （换台机器重新选一次是合理的），而且要在首次渲染前就能拿到，走 IPC 进库会闪一帧。
+ */
+export const LOCALE_STORAGE_KEY = "raybend.locale";
+
+/** 非法值一律回落到默认 —— 存储里的垃圾不能让界面起不来 */
+export function normalizeLocale(value: unknown): LocaleId {
+ return value === "en-US" || value === "zh-CN" ? value : "zh-CN";
+}
+
 export function setLocale(next: LocaleId): void {
  setLocaleSignal(next);
  // 让浏览器/WebView 知道当前语言（影响断行规则、字体回退与无障碍朗读）
  if (typeof document !== "undefined") {
   document.documentElement.lang = next;
  }
+ try {
+  globalThis.localStorage?.setItem(LOCALE_STORAGE_KEY, next);
+ } catch {
+  // 隐私模式 / 禁用存储：不记就不记，不影响本次使用
+ }
+}
+
+/**
+ * 启动时读回上次选的语言。
+ *
+ * 必须在首次渲染前调（`src/index.tsx`）—— 否则会先渲一遍中文再跳成英文。
+ */
+export function hydrateLocale(
+ storage: { getItem: (key: string) => string | null } | undefined = globalThis.localStorage,
+): LocaleId {
+ let stored: string | null = null;
+ try {
+  stored = storage?.getItem(LOCALE_STORAGE_KEY) ?? null;
+ } catch {
+  stored = null;
+ }
+ const next = normalizeLocale(stored);
+ setLocale(next);
+ return next;
+}
+
+/** 另一种语言（目前只有中/英两种，所以就是「翻转」） */
+export function nextLocale(current: LocaleId): LocaleId {
+ return current === "zh-CN" ? "en-US" : "zh-CN";
+}
+
+/**
+ * 语言**自己的名字**（endonym）：中文页包说 `中文`、英文包说 `English`。
+ *
+ * ⚠️ 帮帮助菜单里的那条切换**必须**从**目标语言的包**里取这一条，
+ * 而不是用 `t()` 取当前语言包 —— 菜单上要写的是「切过去会变成什么」：
+ * 中文界面显示 `English`、英文界面显示 `中文`。用 `t()` 会让两种界面都写自己的名字，
+ * 那条菜单就失去了意义（用户不知道点了会变成什么）。
+ */
+export function localeLabel(id: LocaleId): string {
+ return LOCALES[id]["locale.name"];
 }
 
 export type TParams = Record<string, string | number>;

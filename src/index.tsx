@@ -4,7 +4,15 @@ import { render } from "solid-js/web";
 import { Route, Router } from "@solidjs/router";
 import App from "./App";
 import "./index.css";
+/*
+ * CJK 字体包从 **JS** 引入（而不是在 `index.css` / `styles/fonts.css` 里 `@import`）：
+ * 编译期有个插件要给它的每个 `@font-face` 补 metrics 覆盖（`vite.config.ts` 的
+ * `cjkMetricsOverride`，治「中文上飘」），而 CSS 的 `@import` 由 postcss 直接读盘内联、
+ * **不过插件管线** —— 那样补好的东西进不了浏览器真正生效的那张表（实测踩过）。
+ */
+import "@fontsource-variable/noto-sans-sc/wght.css";
 import { installEscapeBlur } from "./lib/dom-focus.ts";
+import { hydrateLocale } from "./i18n/index.ts";
 
 /**
  * 组件陈列室（`src/dev/`）**只在开发期注册**，而且 `import()` 必须留在
@@ -24,6 +32,11 @@ import { installEscapeBlur } from "./lib/dom-focus.ts";
  * （根因与顺序纪律见 `lib/dom-focus.ts`）。热重载时先卸再装，免得越挂越多。
  */
 const disposeEscapeBlur = installEscapeBlur();
+/*
+ * 语言必须在**首次渲染前**读回来：它是设备级偏好（localStorage），
+ * 放渲染后再读会先闪一帧中文再跳成英文。
+ */
+hydrateLocale();
 import.meta.hot?.dispose(() => disposeEscapeBlur());
 
 const KitchenSink = import.meta.env.DEV

@@ -619,6 +619,18 @@ export default function KitchenSink() {
                 selected={selectedTile() === 2}
                 onClick={() => setSelectedTile(2)}
               />
+              {/*
+                排除态（`AGENTS.md` §11.3）：照片变透明 + 中央一个克制的禁行图标。
+                冒烟会量这两件事（照片 opacity < 1、图标在照片正中且不是红/黄这类高饱和色）。
+              */}
+              <Tile
+                label="DSC_0195.NEF"
+                tag="NEF"
+                src={demoImage()}
+                selected={selectedTile() === 3}
+                excluded
+                onClick={() => setSelectedTile(3)}
+              />
             </Row>
             </div>
             <Row label="加载 / 空 / 图标 / 禁用">

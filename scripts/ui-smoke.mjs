@@ -1026,7 +1026,7 @@ try {
      * 取两者中差的那个：像素比文字亮、比文字暗，总有一端是最难的。
      */
     const parseRgb = (value) => {
-      const match = /rgba?\(([^)]+)\)/.exec(value ?? "");
+      const match = /rgba?(([^)]+))/.exec(value ?? "");
       if (!match) return null;
       const parts = match[1].split(",").map((part) => Number(part.trim()));
       return parts.length === 3 ? [...parts, 1] : parts;
@@ -1098,10 +1098,31 @@ try {
       const barAlpha = overWhite
         ? 1 - Math.max(...[0, 1, 2].map((i) => overWhite[i] - overBlack[i])) / 255
         : null;
+      /*
+       * 排除态（AGENTS.md §11.3）：照片要**变透明**，而且照片正中要有一个
+       * **克制**的禁行图标（不是红黄这类高饱和色 —— 图标本身已经把意思说清楚了）。
+       */
+      const excludeIcon = tile.querySelector('[aria-label="已排除"], [aria-label="Excluded"]');
+      const iconBox = excludeIcon ? excludeIcon.getBoundingClientRect() : null;
+      const iconCentered =
+        iconBox && pictureBox
+          ? Math.abs(
+              iconBox.left + iconBox.width / 2 - (pictureBox.left + pictureBox.width / 2),
+            ) <= 2 &&
+            Math.abs(
+              iconBox.top + iconBox.height / 2 - (pictureBox.top + pictureBox.height / 2),
+            ) <= 2
+          : null;
+
       return {
         width: Math.round(rect.width),
         height: Math.round(rect.height),
         square: Math.abs(rect.width - rect.height) <= 1,
+        excluded: tile.querySelector("img")?.className.includes("opacity-35") ?? false,
+        photoOpacity: picture ? getComputedStyle(picture).opacity : null,
+        excludeIcon: excludeIcon !== null,
+        iconCentered,
+        iconColor: excludeIcon ? getComputedStyle(excludeIcon).color : null,
         gapLeft: pictureBox ? Math.round(pictureBox.left - rect.left) : null,
         gapRight: pictureBox ? Math.round(rect.right - pictureBox.right) : null,
         gapTop: pictureBox ? Math.round(pictureBox.top - rect.top) : null,
@@ -1130,6 +1151,13 @@ try {
      * 只量当前主题会漏掉最危险的那一半 —— 深色主题下亮照片上的文件名正是最早报的那张。
      * 直接改 data-theme 属性量一遍（令牌就挂在这个属性上），量完还原，不影响后面的断言。
      */
+    // 中性次级色的期望值（图标必须是它 —— 不是红/黄这类高饱和色）
+    const probe = document.createElement("span");
+    probe.style.color = "var(--fg-2)";
+    document.body.append(probe);
+    const neutralColor = getComputedStyle(probe).color;
+    probe.remove();
+
     const root = document.documentElement;
     const originalTheme = root.dataset.theme;
     const scrim = {};
@@ -1157,6 +1185,8 @@ try {
       selectedBarsVisible: out.filter((t) => t.selected).every((t) => t.barOpacity === "1"),
       unselectedBarsHidden: out.filter((t) => !t.selected).every((t) => t.barOpacity === "0"),
       libraryTopBars: out.filter((t) => t.hasTopBar).length,
+      neutralColor,
+      excludedTiles: out.filter((t) => t.excluded),
       scrim,
     };
   })()`);
@@ -1196,6 +1226,31 @@ try {
         `库内标记区出现了 ${tileGrid.libraryTopBars} 个（样例里放了 2 个库内 tile）—— 库外不该有`,
       );
     }
+    /*
+     * 排除的视觉：样例里有一张排除态 —— 它必须**变透明**、图标在照片正中、
+     * 颜色是中性次级色（「克制」那条要求的可测形式）。
+     */
+    if (tileGrid.excludedTiles.length !== 1) {
+      problems.push(
+        `画廊里应当有 1 张排除态样例，实际量到 ${tileGrid.excludedTiles.length} 张`,
+      );
+    }
+    for (const tile of tileGrid.excludedTiles) {
+      if (!(Number(tile.photoOpacity) < 1)) {
+        problems.push(
+          `排除态的照片没有变透明（opacity=${tile.photoOpacity}）—— 只靠置灰看不出区别`,
+        );
+      }
+      if (!tile.excludeIcon || tile.iconCentered !== true) {
+        problems.push("排除态的禁行图标不在照片正中（或者根本没渲染）");
+      }
+      if (tile.iconColor !== tileGrid.neutralColor) {
+        problems.push(
+          `排除图标用了 ${tile.iconColor}，不是中性的 ${tileGrid.neutralColor} —— ` +
+            "图标已经把意思说清了，颜色要克制",
+        );
+      }
+    }
     for (const theme of ["dark", "light"]) {
       const measured = tileGrid.scrim[theme];
       if (!(measured.alpha > 0.5)) {
@@ -1210,6 +1265,160 @@ try {
             `${measured.contrast}:1，没过 AA 的 4.5:1 —— 蒙层浓度不够，或文字用了次级色阶`,
         );
       }
+    }
+  }
+
+  /*
+   * 字到底居中不居中（2026-09-16 人类报「字体上飘」）。
+   *
+   * 为什么不靠肉眼：肉眼看不出 0.5px 还是 1.5px，也看不出到底是
+   * 「行的盒子没居中」还是「字体自己的墨水偏上」——而这两种的修法完全不同。
+   *
+   * 量法：把「行盒」（Range 拿到的文本行矩形）与「墨水盒」分开算。
+   *   · 基线在行盒内的位置由 CSS 行盒模型给出：`(行高 - (A+D)) / 2 + A`，
+   *     `A/D` 是字体的 ascent/descent —— 从 canvas 的 fontBoundingBox 拿；
+   *   · 墨水（真正看得见的笔画）在基线上下多少，用 canvas 的 actualBoundingBox；
+   * → 墨水盒中心 - 容器盒中心 = **字看起来偏了多少**（正 = 偏下，负 = 上飘）。
+   */
+  const textFit = await evaluate(`(() => {
+    const ctx = document.createElement("canvas").getContext("2d");
+
+    const measure = (el) => {
+      const text = (el.innerText ?? "").trim();
+      if (text.length === 0 || text.length > 40) return null;
+      const style = getComputedStyle(el);
+      const box = el.getBoundingClientRect();
+      if (box.width < 2 || box.height < 2) return null;
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const line = range.getBoundingClientRect();
+      if (line.height <= 0) return null;
+
+      ctx.font = "10px sans-serif";
+      ctx.font = style.fontWeight + " " + style.fontSize + " " + style.fontFamily;
+      const fontOk = ctx.font.includes(style.fontSize);
+      const m = ctx.measureText(text);
+      const fontA = m.fontBoundingBoxAscent;
+      const fontD = m.fontBoundingBoxDescent;
+      const inkA = m.actualBoundingBoxAscent;
+      const inkD = m.actualBoundingBoxDescent;
+      const baseline = line.top + (line.height - (fontA + fontD)) / 2 + fontA;
+      const inkCenter = baseline + (inkD - inkA) / 2;
+      const round = (value) => Math.round(value * 100) / 100;
+      return {
+        text,
+        box: round(box.height),
+        line: round(line.height),
+        font: style.fontSize + "/" + style.lineHeight + " w" + style.fontWeight,
+        metrics: round(fontA) + "/" + round(fontD) + " ink " + round(inkA) + "/" + round(inkD),
+        fontOk,
+        offset: round(inkCenter - (box.top + box.bottom) / 2),
+      };
+    };
+
+    /* 现成控件：标题栏、分段控件、按钮 —— 都取前几个可见的 */
+    const selectors = [
+      'header span',
+      '[data-scope="segment-group"] [data-part="item-control"]',
+      '[data-scope="segment-group"] [data-part="item"]',
+      'button',
+    ];
+    const seen = new Set();
+    const found = [];
+    for (const selector of selectors) {
+      for (const el of [...document.querySelectorAll(selector)].slice(0, 14)) {
+        if (seen.has(el)) continue;
+        seen.add(el);
+        const row = measure(el);
+        if (row) found.push({ where: selector, ...row });
+      }
+    }
+
+    /*
+     * 再造几个**照抄真实类名**的样本：人类点名的「全选当天 / 全选此段」药丸
+     * 只在按时间模式 + 有照片时渲染，例行冒烟碰不到，所以直接把它的类名抄过来量。
+     */
+    const host = document.createElement("div");
+    host.className = "flex items-center gap-2 bg-surface-bar p-2";
+    document.body.append(host);
+    const synth = [
+      { name: "日组药丸（全选当天）", text: "全选当天", cls: "flex shrink-0 cursor-pointer items-center rounded-ui px-1.5 text-fs-0 h-5 bg-state-selected text-fg-2" },
+      { name: "时间片药丸（全选此段）", text: "全选此段", cls: "flex shrink-0 cursor-pointer items-center rounded-ui px-1.5 text-fs-0 h-4.5 bg-state-hover text-fg-3" },
+      { name: "正文行（auto 高）", text: "全选此段", cls: "text-fs-0 bg-surface-main px-1" },
+    ];
+    for (const item of synth) {
+      const el = document.createElement("span");
+      el.className = item.cls;
+      el.textContent = item.text;
+      host.append(el);
+      const row = measure(el);
+      if (row) found.push({ where: item.name, ...row });
+    }
+    const worst = [...found].sort((a, b) => Math.abs(b.offset) - Math.abs(a.offset));
+    /* CJK 字体的度量必须是我们覆盖过的那一套（方块字 em 盒 88/12）——
+       见 vite.config.ts 的 cjkMetricsOverride：它没生效的话中文就会重新上飘。 */
+    const cjk = (() => {
+      ctx.font = "10px sans-serif";
+      ctx.font = '400 100px "Noto Sans SC Variable"';
+      const m = ctx.measureText("紧凑");
+      return { A: Math.round(m.fontBoundingBoxAscent), D: Math.round(m.fontBoundingBoxDescent) };
+    })();
+    return {
+      density: document.documentElement.dataset.density,
+      chromeFont: getComputedStyle(document.body).fontFamily.slice(0, 60),
+      bodyLineHeight: getComputedStyle(document.body).lineHeight,
+      count: found.length,
+      cjkMetrics: cjk,
+      cjkLineBox: (() => {
+        const el = document.createElement("div");
+        el.style.cssText = 'position:fixed;left:-9999px;font-size:100px;line-height:normal;font-family:"Noto Sans SC Variable"';
+        el.textContent = "紧凑";
+        document.body.append(el);
+        const h = Math.round(el.getBoundingClientRect().height);
+        el.remove();
+        return h;
+      })(),
+      worst,
+      synth: found.filter((row) => row.where.includes("药丸") || row.where.includes("正文行")),
+    };
+  })()`);
+
+  if (textFit !== null) {
+    if (textFit.worst.some((row) => !row.fontOk)) {
+      problems.push("量文字的字体解析失败（canvas 不认这个 font），测量结果不可信");
+    }
+    /*
+     * CJK 度量的守卫：`vite.config.ts` 的 `cjkMetricsOverride` 会把 Noto Sans SC 的
+     * ascent/descent 换成方块字的 em 盒（88% / 12%，行盒高 ≈ 1.0em）。
+     * 一旦 @fontsource 改产物形状、或那条 JS 引入被改回 CSS `@import`（postcss 直接读盘、
+     * 不过插件管线），覆盖就会静默失效 —— 这里把它钉住。
+     */
+    if (textFit.cjkMetrics.A !== 88 || textFit.cjkMetrics.D !== 12) {
+      problems.push(
+        `CJK 字体的度量不是 88/12（实测 ${textFit.cjkMetrics.A}/${textFit.cjkMetrics.D}）—— ` +
+          "metrics 覆盖没生效，中文会重新上飘（见 vite.config.ts 的 cjkMetricsOverride）",
+      );
+    }
+    if (Math.abs(textFit.cjkLineBox - 100) > 2) {
+      problems.push(
+        `CJK 文本在 line-height:normal 下的行盒是 ${textFit.cjkLineBox}px（期望 ≈100）—— ` +
+          "度量覆盖没作用到布局上",
+      );
+    }
+    /*
+     * 墨水居中：当前实测最差 ≈0.9px（偏上）。这个量级在本环境里主要是
+     * **光栅化/基线吸格**造成的（度量修正前后像素位置没变，已测）。
+     * 阈值放在 1.2px：一是钉住「不要再变差」，二是等真机截图确认后再收紧。
+     */
+    const off = textFit.worst.filter((row) => Math.abs(row.offset) > 1.2);
+    if (off.length > 0) {
+      problems.push(
+        `有 ${off.length} 处文字在盒子里偏了（阈值 1.2px）：` +
+          off
+            .slice(0, 4)
+            .map((row) => `${row.text}(${row.where}) ${row.offset}px`)
+            .join("、"),
+      );
     }
   }
 
@@ -1720,6 +1929,7 @@ try {
         repoCards,
         viewerDemo,
         tileGrid,
+        textFit,
         switchBar,
         layers,
         resizeProbe,

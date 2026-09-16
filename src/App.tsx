@@ -85,7 +85,9 @@ export default function App() {
       <ToolsBar
         store={shell}
         hasSelection={grid.hasSelection()}
-        onBatchExclude={grid.toggleExcludedSelected}
+        // 批量排除是**反转**语义（DESIGN.md §12.2）：排除集合住在导入工作区，
+        // 选中的照片清单来自网格 —— 外壳只负责把两边接起来
+        onBatchExclude={() => importStore.toggleExcluded([...grid.selectedIds()])}
       />
 
       <ImportWorkspace

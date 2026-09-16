@@ -207,12 +207,16 @@ pub async fn import_precheck<R: Runtime>(
 }
 
 /// 开始导入：每个源目录一个 run，整批一个 `batchId`。
+///
+/// `excluded` = 用户在网格里**排除掉的文件**（绝对路径，跨目录、跨源共用一份）。
+/// 它们不会进规划、不会计入任何计数 —— 与「尝试过但跳过」不是一回事（见 runner）。
 #[tauri::command]
 pub async fn import_start<R: Runtime>(
     app: AppHandle<R>,
     repository_id: String,
     sources: Vec<ImportSourceArg>,
     avoid_duplicates: bool,
+    excluded: Option<Vec<String>>,
 ) -> Result<ImportStartDto, String> {
     if sources.is_empty() {
         return Err("没有选中任何源目录".to_string());
@@ -240,6 +244,9 @@ pub async fn import_start<R: Runtime>(
     let batch_handle = BatchHandle::new(progress);
     let control = Control::new();
 
+    let excluded: std::sync::Arc<std::collections::HashSet<String>> =
+        std::sync::Arc::new(excluded.unwrap_or_default().into_iter().collect());
+
     let jobs: Vec<RunRequest> = sources
         .iter()
         .enumerate()
@@ -251,6 +258,7 @@ pub async fn import_start<R: Runtime>(
             template_source: template_source.clone(),
             include_subdirs: source.include_subdirs,
             avoid_duplicates,
+            excluded: excluded.clone(),
         })
         .collect();
 

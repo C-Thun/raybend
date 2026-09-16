@@ -1,14 +1,18 @@
 /**
  * 照片网格的状态（`features/photo-grid/` 自己的 store）。
  *
- * 它管四件事：**当前目录的照片清单**、**展示偏好**（档位 / 按时间）、
- * **选择与排除**、**缩略图队列**。跨面板要用的那部分（选择与排除）
- * 通过 store 的方法往上暴露给外壳的 `toolsbar`（由 `App.tsx` 接线），
- * 而不是塞进模块内部藏起来。
+ * 它管三件事：**当前目录的照片清单**、**展示偏好**（档位 / 按时间）、
+ * **选择**、以及**缩略图队列**。选择通过 store 的方法往上暴露给外壳的
+ * `toolsbar`（由 `App.tsx` 接线），而不是塞进模块内部藏起来。
+ *
+ * ⚠️ **排除不在这里**（2026-09-16 修）：它曾经是这个 store 的一份 `Set`，
+ * 于是换目录（`resetDirState`）时被一起清掉 —— 用户切一圈回来发现排除全丢了。
+ * 排除是「跨目录、跨源」的事，现在住在导入工作区的 store 里（见 `workspaces/import/store.ts`），
+ * 网格只负责**显示**（由 `PhotoGrid` 的 `isExcluded` 入参给）。
  *
  * 三条在实现里很容易做错、这里显式处理掉的：
  *
- * 1. **换目录要清干净**：选择、排除、缩略图缓存都要重置 ——
+ * 1. **换目录要清干净**：选择与缩略图缓存都要重置 ——
  *    否则用户在新目录里会看到上一个目录的选中状态（也点不动）；
  * 2. **迟到的结果必须丢掉**：扫描慢、用户又换了目录时，旧结果不能覆盖新列表
  *    （用「代号」判断，与缩略图队列同一套做法）；
@@ -39,7 +43,6 @@ import {
   EMPTY_SELECTION,
   extendSelection,
   hasSelection as anySelected,
-  invertSet,
   selectAll as selectAllIds,
   selectionCount,
   type SelectionState,
@@ -113,7 +116,7 @@ export interface PhotoGridStore {
   /** 从设置里读回偏好（工作区挂载时调一次） */
   hydrate: () => Promise<void>;
 
-  /* ── 选择与排除 ───────────────────────── */
+  /* ── 选择 ─────────────────────────────── */
   selection: () => SelectionState;
   selectedIds: () => ReadonlySet<string>;
   hasSelection: () => boolean;
@@ -124,11 +127,6 @@ export interface PhotoGridStore {
   selectGroup: (ids: readonly string[], additive?: boolean) => void;
   selectAll: () => void;
   clearSelection: () => void;
-
-  excluded: () => ReadonlySet<string>;
-  excludedCount: () => number;
-  /** `toolsbar` 的「批量排除」：对**选中项**做反转（`DESIGN.md` §12.2） */
-  toggleExcludedSelected: () => void;
 
   /* ── 缩略图 ───────────────────────────── */
   thumb: (path: string) => ThumbEntry;
@@ -148,7 +146,6 @@ export function createPhotoGridStore(deps: PhotoGridDeps): PhotoGridStore {
   const [loadingTimes, setLoadingTimes] = createSignal(false);
 
   const [selection, setSelection] = createSignal<SelectionState>(EMPTY_SELECTION);
-  const [excluded, setExcluded] = createSignal<ReadonlySet<string>>(new Set());
 
   /** 换目录 / 重新扫描时推进它，迟到的结果直接丢掉 */
   let generation = 0;
@@ -198,7 +195,6 @@ export function createPhotoGridStore(deps: PhotoGridDeps): PhotoGridStore {
     setProblems([]);
     setError(null);
     setSelection(EMPTY_SELECTION);
-    setExcluded(new Set<string>());
     thumbs.clear();
   }
 
@@ -313,7 +309,6 @@ export function createPhotoGridStore(deps: PhotoGridDeps): PhotoGridStore {
     generation += 1;
     thumbs.clear();
     setSelection(EMPTY_SELECTION);
-    setExcluded(new Set<string>());
     void load(current);
   };
 
@@ -422,7 +417,9 @@ export function createPhotoGridStore(deps: PhotoGridDeps): PhotoGridStore {
   }
 
   /* ══════════════════════════════════════════════════════════
-   * 选择与排除
+   * 选择
+   *
+   * （排除不在这里 —— 它住在导入工作区的 store，见文件头注释。）
    * ══════════════════════════════════════════════════════════ */
 
   const clickItem = (
@@ -447,12 +444,6 @@ export function createPhotoGridStore(deps: PhotoGridDeps): PhotoGridStore {
 
   const clearSelection = (): void => {
     setSelection(EMPTY_SELECTION);
-  };
-
-  const toggleExcludedSelected = (): void => {
-    const selected = selection().ids;
-    if (selected.size === 0) return;
-    setExcluded((prev) => invertSet(prev, selected));
   };
 
   /* ══════════════════════════════════════════════════════════
@@ -489,10 +480,6 @@ export function createPhotoGridStore(deps: PhotoGridDeps): PhotoGridStore {
     selectGroup,
     selectAll,
     clearSelection,
-
-    excluded,
-    excludedCount: () => excluded().size,
-    toggleExcludedSelected,
 
     thumb: (path) => thumbs.get(path),
     requestThumb: (path) => thumbs.request(path),

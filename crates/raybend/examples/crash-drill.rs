@@ -516,6 +516,7 @@ fn run_once(
         template_source: TEMPLATE.to_string(),
         include_subdirs: true,
         avoid_duplicates,
+        excluded: std::sync::Arc::new(std::collections::HashSet::new()),
     };
     let mut sink = CatalogSink::new(catalog, now);
     let ops = RepoFs::new(catalog.root());

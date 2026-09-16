@@ -13,7 +13,12 @@
  *
  * 两个包都按 unicode-range 分片，WebView 只会请求实际用到的片；
  * 分片本身带 `font-display: swap`，不会阻塞首屏。
+ *
+ * ⚠️ **CJK 那个包故意不在这里 `@import`**（而是从 `src/index.tsx` 用 JS `import`）：
+ * 项目里有一个编译期插件（`vite.config.ts` 的 `cjkMetricsOverride`）会给 CJK 的每个
+ * `@font-face` 补上 metrics 覆盖 —— 而 CSS 里的 `@import` 是 **postcss 直接读盘**内联的，
+ * 不走插件管线，于是补好的内容根本进不了最终生效的那张表（实测踩过：文件里 108 个块
+ * 都补上了，浏览器量出来依旧是旧度量）。走 JS import 就会当成模块过插件管线。
  */
 
 @import "@fontsource-variable/inter/wght.css";
-@import "@fontsource-variable/noto-sans-sc/wght.css";

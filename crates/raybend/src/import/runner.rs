@@ -71,6 +71,14 @@ pub struct RunRequest {
     pub include_subdirs: bool,
     /// 是否避免重复导入。
     pub avoid_duplicates: bool,
+    /// **本次不导入的文件**（绝对路径，用户在网格里排除掉的）。
+    ///
+    /// 为什么用绝对路径而不是「源目录 + 相对路径」：排除是**跨目录、跨源**的
+    /// 一件事（多源导入时用户来回切目录，排除不能丢），而界面里的照片 id 本来就是
+    /// 后端给的绝对路径 —— 直接用它，前后端不会有两套口径。
+    ///
+    /// 用 `Arc` 而不是每个源克隆一份：排除清单可能上千条，而它整批只读。
+    pub excluded: std::sync::Arc<std::collections::HashSet<String>>,
 }
 
 impl RunRequest {
@@ -407,6 +415,21 @@ impl Deps<'_> {
 
         if walk.cancelled || self.control.is_cancelling() {
             return self.finish(run_id, job, ImportState::Cancelled, counts, Vec::new());
+        }
+
+        /*
+         * ①′ 把用户**排除**的文件丢掉。
+         *
+         * 位置选在扫描之后、读元数据之前：既不用改扫描器（`on_file` 返回 false 是
+         * 「中止扫描」，不是「跳过这张」—— 语义差得远），也省掉了对排除项的白读元数据。
+         * 剔除后**不计入 total / skipped** —— 它们本来就不属于这一批
+         * （「不导入这张」不等于「尝试过但跳过了」）。
+         */
+        if !job.excluded.is_empty() {
+            scanned.retain(|file| !job.excluded.contains(file.abs_path.to_string_lossy().as_ref()));
+            let kept = scanned.len() as u64;
+            self.set_run(run_id, |run| run.scanned = kept);
+            self.emit(true);
         }
 
         /* ── ② 读元数据（模版要用才读）─────────────────── */
@@ -1025,6 +1048,7 @@ mod tests {
                 template_source: template.to_string(),
                 include_subdirs: true,
                 avoid_duplicates: true,
+                excluded: std::sync::Arc::new(std::collections::HashSet::new()),
             }
         }
 
@@ -1389,6 +1413,24 @@ mod tests {
         assert_eq!(snap.current_run, Some(1), "最后停在第二个目录");
         assert_eq!(h.sink.run(1).state, "done");
         assert_eq!(h.sink.run(2).state, "done");
+    }
+
+    #[test]
+    fn excluded_files_are_dropped_before_planning() {
+        // 两张照片，用户排除了其中一张：它不该被登记、也不该进任何计数。
+        let mut h = Harness::new(world(&[("a.jpg", 5), ("b.jpg", 6)]));
+        let mut job = h.job(":FILENAME");
+        job.excluded = std::sync::Arc::new(["/src/root/b.jpg".to_string()].into_iter().collect());
+
+        let outcome = h.run(&[job]);
+
+        assert_eq!(h.sink.sources(), vec!["a.jpg"], "被排除的文件不该被登记");
+        assert_eq!(outcome.counts.imported, 1);
+        assert_eq!(outcome.counts.total, 1, "被排除的不计入 total");
+        assert_eq!(outcome.counts.skipped, 0, "排除不是「跳过」——它本来就不属于这批");
+        let snap = h.handle.snapshot();
+        assert_eq!(snap.total, 1);
+        assert_eq!(snap.runs[0].scanned, 1, "扫描计数也按剔除后的算");
     }
 
     #[test]

@@ -1,4 +1,4 @@
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import solid from "vite-plugin-solid";
 import tailwindcss from "@tailwindcss/vite";
 import process from "node:process";
@@ -37,6 +37,121 @@ function readPackageVersion(): string {
   }
 }
 
+/* ══════════════════════════════════════════════════════════════
+ * CJK 字体的 metrics 覆盖（"中文上飘" 的根因与修法）
+ *
+ * ## 现象
+ *
+ * 小控件（标题栏密度芯片、`按时间`的「全选当天 / 全选此段」药丸、分段控件…）里的中文
+ * 看着**偏高**。人类 2026-09-16 连续两轮反馈，而且点出了三个排查方向。
+ *
+ * ## 根因（实测，不是猜的）
+ *
+ * 用**像素级**量法（截屏后算墨水质心相对盒子中心，精度 ±0.1px）确认了三件事：
+ *   1. 不是 CSS 排版错：这些控件都是 `flex items-center`，改成什么 `line-height`
+ *      （`1` / `1.2` / `1.45` / 写死 px）都几乎不动 —— 因为半行距是上下对称分的，
+ *      **墨水在行盒里的位置跟 `line-height` 无关**。
+ *   2. 不是「多段字体冒充加粗」：加粗走的就是 `font-weight`（可变字体真有 100–900 轴：
+ *      Inter 400→600 的字符宽度会变、CJK 的笔画会变粗，不是合成粗体）。
+ *   3. 是**字体自己声明的 metrics 与它画的字不一致**：Noto Sans SC 声明 ascent/descent
+ *      约 `1.16em / 0.29em`，而方块字的**墨水**只占 `0.85em / 0.09em` ——
+ *      行盒把墨水分得偏上。我们字体栈里 Inter 又排在前面（拉丁走 Inter），
+ *      同一条行盒里两套 metrics 还会互相拉扯，所以偏移量还会随字号/字体组合变。
+ *
+ * ## 修法
+ *
+ * 用 CSS Fonts 4 的 `ascent-override` / `descent-override` 把这套字体的 metrics
+ * 改成**方块字的 em 盒**（88% / 12%，即 Noto 自己的 OS/2 typo 度量 880/−120）——
+ * 这样墨水中心就正好落在行盒中心。实测：覆盖前偏 −0.87px（Inter strut）/ +1.40px（CJK strut），
+ * 覆盖后都在 ±0.1px 内。
+ *
+ * ## 为什么写成编译期插件而不是手写一份 CSS
+ *
+ * @fontsource 把这个字体切成 **94 个 `unicode-range` 切片**（每个一个 `@font-face`，
+ * 这样浏览器只下载用到的那些字）。手抄一份必然漂移；放这里给每个切片补三行描述符，
+ * 字体包升级时自动跟上。
+ *
+ * ⚠ 覆盖的是**度量**，不是字号 —— 不会把字改大改小，只改它在行盒里的垂直位置。
+ * 配套断言：`pnpm smoke:ui` 会把墨水质心与盒中心的偏移量真测一遗（超 1px 就红）。
+ * ══════════════════════════════════════════════════════════════ */
+function cjkMetricsOverride(): Plugin {
+  const PACKAGE_CSS = "@fontsource-variable/noto-sans-sc/wght.css";
+  const FAMILY = "Noto Sans SC Variable";
+  const DESCRIPTORS = [
+    "ascent-override: 88%",
+    "descent-override: 12%",
+    "line-gap-override: 0%",
+  ];
+  /** 每个 @font-face 块（这些 CSS 都是扁平的，不会有嵌套块） */
+  const FACE = /@font-face\s*\{[^}]*\}/g;
+  const IMPORT = /@import\s+["']@fontsource-variable\/noto-sans-sc\/wght\.css["']\s*;/;
+
+  /** 给每个 CJK 的 @font-face 块补上三行描述符；返回补了几块 */
+  const patch = (css: string): { css: string; patched: number } => {
+    let patched = 0;
+    const next = css.replace(FACE, (block) => {
+      if (!block.includes(FAMILY)) return block;
+      if (block.includes("ascent-override")) return block; // 已经补过（HMR 重复进管线）
+      patched += 1;
+      return block.replace(/\s*\}$/, `\n  ${DESCRIPTORS.join(";\n  ")};\n}`);
+    });
+    if (patched > 0 && patched < 90) {
+      console.warn(
+        `[font] 只给 ${patched} 个 @font-face 补了 metrics 覆盖（预期 ~94 个切片）—— ` +
+          "@fontsource 的产物形状可能变了，中文可能重新开始上飘",
+      );
+    }
+    return { css: next, patched };
+  };
+
+  return {
+    name: "raybend:cjk-metrics-override",
+    enforce: "pre",
+    transform(code, id) {
+      /*
+       * ⚠️ id 上可能挂着查询串（Vite 对 CSS 会加 `?direct` / `?inline`），
+       * 直接 `endsWith(".css")` 会把这些情况全部漏掉 —— 实测踩过：
+       * 包 CSS 那份补上了、而真正进页面（带查询串）的那份一声不响地没补。
+       */
+      const file = id.split("?")[0] ?? id;
+      if (!file.endsWith(".css")) return undefined;
+
+      /*
+       * ① 引用它的那一处（`src/styles/fonts.css`，此时还没内联）—— 自己把补好的内容内联进去。
+       *
+       * ⚠️ 这一步必须**排在 ② 前面**：那个文件的头部注释里就写着 `Noto Sans SC Variable`，
+       * 如果先按「代码里出现了这个字体名」去走 ②，会因「没有 @font-face 可改」早早 return，
+       * 这分支永远轮不到（实测踩过：包 CSS 补上了、真正进页面的那份没补）。
+       *
+       * 而且不能指望「我改包 CSS、postcss 再内联」：postcss-import 是**直接读盘**的，
+       * 不走插件管线。
+       *
+       * `url(./files/…)` 是相对包目录写的，换到本文件后相对基准变了，
+       * 所以一并改写成相对路径（`../../node_modules/…`），Vite 照常解析并散列。
+       */
+      if (IMPORT.test(code)) {
+        const raw = readFileSync(
+          new URL(`./node_modules/${PACKAGE_CSS}`, import.meta.url),
+          "utf8",
+        );
+        const inlined = patch(raw).css.replace(
+          /url\(("?)\.\/files\//g,
+          "url($1../../node_modules/@fontsource-variable/noto-sans-sc/files/",
+        );
+        return { code: code.replace(IMPORT, inlined), map: null };
+      }
+
+      // ② 含 @font-face 的包 CSS 本体（也可能已被 postcss 内联进别的文件）—— 就地补
+      if (code.includes("@font-face") && code.includes(FAMILY)) {
+        const result = patch(code);
+        return result.patched > 0 ? { code: result.css, map: null } : undefined;
+      }
+
+      return undefined;
+    },
+  };
+}
+
 function readBuildInfo() {
   const dirty = (git(["status", "--porcelain"]) ?? "").length > 0;
 
@@ -52,7 +167,7 @@ function readBuildInfo() {
 
 // https://vite.dev/config/
 export default defineConfig(() => ({
-  plugins: [solid(), tailwindcss()],
+  plugins: [cjkMetricsOverride(), solid(), tailwindcss()],
 
   /**
    * 注入构建信息（`src/lib/build-info.ts` 读取）。

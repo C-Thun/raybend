@@ -413,6 +413,7 @@ fn run_once(catalog: &CatalogDb, source: &Path, now: i64) -> (raybend::import::r
         template_source: TEMPLATE.to_string(),
         include_subdirs: true,
         avoid_duplicates: true,
+        excluded: std::sync::Arc::new(std::collections::HashSet::new()),
     };
     let mut sink = CatalogSink::new(catalog, now);
     let ops = RepoFs::new(catalog.root());

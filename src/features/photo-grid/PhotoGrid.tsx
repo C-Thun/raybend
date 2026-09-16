@@ -53,6 +53,14 @@ import type { PhotoGridStore } from "./store.ts";
 
 export interface PhotoGridProps {
   store: PhotoGridStore;
+  /**
+   * 这张照片是不是被**排除**了（`AGENTS.md` §11.3）。
+   *
+   * 排除状态**不住在这个模块**里：它是「这批导入不带哪些」的事，
+   * 跨目录、跨源共用一份，持有者在导入工作区的 store（见 `lib/excluded.ts` 的说明）。
+   * 网格只负责**显示**它 —— 所以这里收一个判定函数，不自己去存。
+   */
+  isExcluded?: (id: string) => boolean;
   class?: string;
 }
 
@@ -209,6 +217,9 @@ export function PhotoGrid(props: PhotoGridProps) {
                         row={row}
                         gap={gap()}
                         onOpen={openViewer}
+                        {...(props.isExcluded === undefined
+                          ? {}
+                          : { isExcluded: props.isExcluded })}
                       />
                     ) : (
                       <GroupHeader
@@ -275,6 +286,7 @@ function TileRow(props: {
   gap: number;
   /** 双击一张 → 打开看图 */
   onOpen: (id: string) => void;
+  isExcluded?: (id: string) => boolean;
 }) {
   return (
     <div
@@ -282,7 +294,14 @@ function TileRow(props: {
       style={{ gap: `${props.gap}px`, height: `${props.row.height}px` }}
     >
       {props.row.items.map((item) => (
-        <TileCell store={props.store} item={item} onOpen={props.onOpen} />
+        <TileCell
+          store={props.store}
+          item={item}
+          onOpen={props.onOpen}
+          {...(props.isExcluded === undefined
+            ? {}
+            : { isExcluded: props.isExcluded })}
+        />
       ))}
     </div>
   );
@@ -293,11 +312,12 @@ function TileCell(props: {
   store: PhotoGridStore;
   item: SourceItem;
   onOpen: (id: string) => void;
+  isExcluded?: (id: string) => boolean;
 }) {
   const id = () => itemId(props.item);
   const thumb = () => props.store.thumb(id());
   const selected = () => props.store.selectedIds().has(id());
-  const excluded = () => props.store.excluded().has(id());
+  const excluded = () => props.isExcluded?.(id()) ?? false;
 
   // 被渲染（= 可见）时才请求 —— 虚拟化保证了这一点
   createEffect(() => props.store.requestThumb(id()));
@@ -319,7 +339,7 @@ function TileCell(props: {
         src={thumb().url ?? undefined}
         selected={selected()}
         loading={thumb().status === "loading" || thumb().status === "idle"}
-        class={excluded() ? "opacity-40" : ""}
+        excluded={excluded()}
         onClick={(event) => {
           const mode =
             event.shiftKey && !event.ctrlKey && !event.metaKey

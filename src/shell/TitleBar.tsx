@@ -27,6 +27,7 @@ import {
   IconAperture,
   IconArrowsMinimize,
   IconInfoCircle,
+  IconLanguage,
   IconMinus,
   IconMoon,
   IconSquare,
@@ -39,7 +40,7 @@ import { IconButton } from "../components/ui/Button.tsx";
 import { Menu } from "../components/ui/Menu.tsx";
 import { SegmentedControl } from "../components/ui/SegmentedControl.tsx";
 import { Tooltip } from "../components/ui/Tooltip.tsx";
-import { t } from "../i18n";
+import { locale, localeLabel, nextLocale, setLocale, t } from "../i18n";
 import type { AppearanceStore } from "../lib/appearance.ts";
 import { AboutDialog } from "./AboutDialog.tsx";
 import type { ShellStore } from "./store.ts";
@@ -100,6 +101,21 @@ export function TitleBar(props: TitleBarProps) {
               label={t("titlebar.menu.help")}
               placement="bottom-start"
               items={[
+                /*
+                 * 语言切换（人类 2026-09-16 要求，放在「关于」**上面**）。
+                 *
+                 * ⚠️ **这一条的文字是特例，不能用 `t()` 取**：
+                 * 它要显示的是**目标语言自己的名字**（endonym）—— 中文界面显示 `English`、
+                 * 英文界面显示 `中文`，也就是「点下去会变成什么」。
+                 * 用 `t()` 会让两种界面都写自己的名字（中文界面写「中文」），
+                 * 那条菜单就完全失去了意义。
+                 * 所以从**目标语言的包**里取：`localeLabel(nextLocale(...))`。
+                 */
+                {
+                  value: "language",
+                  label: localeLabel(nextLocale(locale())),
+                  icon: <IconLanguage size={14} />,
+                },
                 {
                   value: "about",
                   label: t("titlebar.menu.help.about"),
@@ -108,6 +124,9 @@ export function TitleBar(props: TitleBarProps) {
               ]}
               onSelect={(value) => {
                 if (value === "about") setAboutOpen(true);
+                if (value === "language") {
+                  setLocale(nextLocale(locale()));
+                }
               }}
               onOpenChange={(open) => props.store.pinMenus(open)}
             >
