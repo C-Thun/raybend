@@ -917,10 +917,14 @@ mod tests {
         .unwrap();
         conn.pragma_update(None, "user_version", 1_i64).unwrap();
 
-        // 再走正常迁移路径升到 v2
+        // 再走正常迁移路径升级（**不写死到哪一版**：以后再加迁移这条测试不该跟着改）
         let out =
             migration::apply(&mut conn, DbKind::Catalog, migration::Backups::none(), T0).unwrap();
-        assert_eq!(out.applied, vec![2]);
+        assert!(
+            out.applied.contains(&2),
+            "v2 必须跑过，实际跑了 {:?}",
+            out.applied
+        );
 
         let n: i64 = conn
             .query_row(

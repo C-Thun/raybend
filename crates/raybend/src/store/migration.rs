@@ -104,6 +104,7 @@ pub const APP_MIGRATIONS: &[Migration] = &[
 /// * v1 `init`：库元信息 / 资产 / 文件 / 全文索引 / 序号 / 导入批次
 /// * v2 `marking_tags_geo`：色标·喜欢·锁 / 作者·描述·地理 / EXIF 时区 /
 ///   资产↔标签关联 / 全文索引加 `description`（BROWSE.md §3·§7·§9）
+/// * v3 `source_identity`：`asset_files` 的**源身份**列（判重用，REPOSITORY.md §4.3）
 pub const CATALOG_MIGRATIONS: &[Migration] = &[
     Migration {
         version: 1,
@@ -114,6 +115,11 @@ pub const CATALOG_MIGRATIONS: &[Migration] = &[
         version: 2,
         name: "marking_tags_geo",
         sql: include_str!("migrations/catalog_0002_marking_tags_geo.sql"),
+    },
+    Migration {
+        version: 3,
+        name: "source_identity",
+        sql: include_str!("migrations/catalog_0003_source_identity.sql"),
     },
 ];
 
@@ -490,8 +496,8 @@ mod tests {
             1_789_516_800_000,
         )
         .unwrap();
-        assert_eq!((out.from, out.to), (0, 2));
-        assert_eq!(out.applied, vec![1, 2]);
+        assert_eq!((out.from, out.to), (0, 3));
+        assert_eq!(out.applied, vec![1, 2, 3]);
         for table in [
             "repository_meta",
             "assets",
@@ -501,6 +507,7 @@ mod tests {
             "import_items",
             "assets_fts",
             "asset_tags",
+            "idx_asset_files_source_identity",
         ] {
             let n: i64 = conn
                 .query_row(
@@ -552,6 +559,92 @@ mod tests {
         .unwrap();
         // 没被重复执行（不然这里会因主键冲突报错）
         let again = apply(&mut conn, DbKind::App, Backups::none(), 0).unwrap();
+        assert_eq!(again.applied, Vec::<i64>::new());
+    }
+
+    #[test]
+    fn existing_catalog_db_upgrades_from_v2_to_v3_without_losing_data() {
+        // 真实升级路径：一个已经导入过照片的库（v2），升级后旧记录必须原样还在 ——
+        // 用户最不可原谅的失败就是升级把库写坏（AGENTS.md §8 #5）
+        let mut conn = mem();
+        let old = apply_list(
+            &mut conn,
+            DbKind::Catalog,
+            &CATALOG_MIGRATIONS[..2],
+            Backups::none(),
+            1_789_516_800_000,
+        )
+        .unwrap();
+        assert_eq!((old.from, old.to), (0, 2));
+
+        conn.execute(
+            "INSERT INTO assets(id, taken_at, imported_at, updated_at)
+             VALUES (1, 1786795200000, 1786795200000, 1786795200000)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO asset_files(asset_id, role, rel_path, rel_path_folded, ext,
+                                     size_bytes, mtime_ms, volume_serial, file_id,
+                                     created_at, updated_at)
+             VALUES (1, 'bitmap', 'photos/2026-08-15/MYP0001.jpg', 'photos/2026-08-15/myp0001.jpg',
+                     'jpg', 12345, 1786795200000, 42, x'0102030405060708090a0b0c0d0e0f10',
+                     1786795200000, 1786795200000)",
+            [],
+        )
+        .unwrap();
+
+        let out = apply(&mut conn, DbKind::Catalog, Backups::none(), 1_789_516_800_001).unwrap();
+        assert_eq!((out.from, out.to), (2, 3), "只补跑 v3");
+        assert_eq!(out.applied, vec![3]);
+
+        // 旧行还在，且新列是 NULL（不是被填了垃圾值）
+        let (path, size, src_vol): (String, i64, Option<i64>) = conn
+            .query_row(
+                "SELECT rel_path, size_bytes, source_volume_serial FROM asset_files WHERE id = 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(path, "photos/2026-08-15/MYP0001.jpg");
+        assert_eq!(size, 12345);
+        assert_eq!(src_vol, None);
+
+        // 新列能写、能按源身份查回来
+        conn.execute(
+            "UPDATE asset_files
+                SET source_path = 'D:\\pic\\P0001.jpg',
+                    source_path_folded = 'd:\\pic\\p0001.jpg',
+                    source_volume_serial = 7,
+                    source_file_id = x'0f0e0d0c0b0a09080706050403020100'
+              WHERE id = 1",
+            [],
+        )
+        .unwrap();
+        let hit: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM asset_files
+                  WHERE source_volume_serial = 7
+                    AND source_file_id = x'0f0e0d0c0b0a09080706050403020100'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(hit, 1);
+
+        // 索引真的建了（判重要靠它，别让查询退化成全表扫描）
+        let idx: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master
+                  WHERE type = 'index' AND name = 'idx_asset_files_source_identity'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(idx, 1);
+
+        // 重复应用是空操作（不然 ALTER 会因重复列名报错）
+        let again = apply(&mut conn, DbKind::Catalog, Backups::none(), 0).unwrap();
         assert_eq!(again.applied, Vec::<i64>::new());
     }
 
