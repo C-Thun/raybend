@@ -70,6 +70,13 @@ export function computeTileFlow(input: TileFlowInput): TileFlow {
  * 取值按约 1.25 倍递增，并取整齐的数字，便于在界面上显示与记忆。
  * ══════════════════════════════════════════════════════════════ */
 
+/**
+ * 9 档尺寸 —— **正方外框的边长**（2026-09-16 起格子是正方形）。
+ *
+ * 之所以是正方：照片宽高比千差万别（M43 是 4:3、竖拍是 3:4、还有全景），
+ * 而「tile 尺寸可调 + 左列宽度可拖」要求**行高必须恒定** —— 否则拖动时行内成员一变，
+ * 界面会扭成迪斯科舞厅。于是：**格子定形状（正方），照片在里面保比例居中**。
+ */
 export const TILE_SIZE_STEPS = [
  96, 120, 144, 176, 208, 256, 320, 400, 512,
 ] as const;
@@ -90,26 +97,49 @@ export function tileSizeAt(index: number): TileSizeStep {
  return TILE_SIZE_STEPS[clampTileStepIndex(index)];
 }
 
-/** 图片区宽高比 3:2 —— 主流相机的横构图比例 */
-export const TILE_IMAGE_ASPECT = 3 / 2;
+/**
+ * 元信息还没到时的**占位比例**（3:2，主流横构图）。
+ *
+ * 元信息迟到不会重排网格：外框是正方、边长由档位决定，照片只是在框里长大/缩小。
+ */
+export const DEFAULT_DISPLAY_ASPECT = 3 / 2;
 
 /**
- * 图片区高度（不含字幕条）。
- * 取整到像素，避免半像素导致的图片发虚。
+ * 展示用的最大宽高比（3:1 与 1:3）—— **必须与 Rust 侧 `MAX_DISPLAY_ASPECT` 一致**。
+ *
+ * 超出这个范围的照片（全景、接片）在网格里按 3:1 居中截取显示；
+ * 原图不受影响，看图（`Screen` 档）永远看完整的。
  */
-export function tileImageHeight(cellWidth: number): number {
- if (!Number.isFinite(cellWidth) || cellWidth <= 0) return 0;
- return Math.round(cellWidth / TILE_IMAGE_ASPECT);
+export const MAX_DISPLAY_ASPECT = 3;
+
+/**
+ * 算出「展示用」的宽高比：方向已由后端应用（竖图就是 w < h），
+ * 超出 3:1 / 1:3 的按 3:1 夹取；尺寸未知（`0`）时退回默认占位比例。
+ */
+export function clampDisplayAspect(width: number, height: number): number {
+ if (
+  !Number.isFinite(width) ||
+  !Number.isFinite(height) ||
+  width <= 0 ||
+  height <= 0
+ ) {
+  return DEFAULT_DISPLAY_ASPECT;
+ }
+ const aspect = width / height;
+ if (aspect > MAX_DISPLAY_ASPECT) return MAX_DISPLAY_ASPECT;
+ if (aspect < 1 / MAX_DISPLAY_ASPECT) return 1 / MAX_DISPLAY_ASPECT;
+ return aspect;
 }
 
-/** 整块 tile 的高度 = 图片区 + 字幕条（字幕条高度由密度档位给出） */
-export function tileTotalHeight(
- cellWidth: number,
- captionHeight: number,
-): number {
- const caption =
-  Number.isFinite(captionHeight) && captionHeight > 0 ? captionHeight : 0;
- return tileImageHeight(cellWidth) + caption;
+/**
+ * 一行 tile 的高度 = **正方外框的边长**（信息条是覆盖层，不占高度）。
+ *
+ * 保留成函数是为了让「行高从哪来」只有一个出处：视图、虚拟化、
+ * 以及测试都读它，别各自算。
+ */
+export function tileRowHeight(cellSize: number): number {
+ if (!Number.isFinite(cellSize) || cellSize <= 0) return 0;
+ return Math.round(cellSize);
 }
 
 /**

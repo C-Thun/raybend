@@ -21,6 +21,9 @@
  */
 
 import { createSignal } from "solid-js";
+import {
+  clampDisplayAspect,
+} from "../../lib/tile-flow.ts";
 import type {
   SettingsApi,
   SourceItem,
@@ -28,6 +31,7 @@ import type {
   ThumbSize,
   TimeEntry,
 } from "./types.ts";
+import type { MetaFile, PhotoMeta } from "../../api/types.ts";
 import { itemId } from "./rows.ts";
 import type { LoadStatus } from "../../lib/load-status.ts";
 import {
@@ -63,6 +67,8 @@ export const GRID_SETTING_KEYS = {
 
 export interface PhotoGridApi extends SettingsApi {
   scanSourceDir: (path: string) => Promise<SourceScan>;
+  /** 一批文件的展示元信息（宽高 + 方向）。走 Rust 侧的会话级内存缓存，命中时几乎不花时间 */
+  dirMetaEnsure: (dir: string, files: readonly MetaFile[]) => Promise<PhotoMeta[]>;
   readSourceTimes: (paths: string[]) => Promise<TimeEntry[]>;
   getThumbBytes: (path: string, size?: ThumbSize) => Promise<Uint8Array | null>;
 }
@@ -79,6 +85,11 @@ export interface PhotoGridStore {
   items: () => readonly SourceItem[];
   /** 按**显示顺序**排好的照片（按时间模式下跟着分组走） */
   displayItems: () => readonly SourceItem[];
+  /**
+   * 某张照片的**展示用宽高比**（已应用方向、已按 3:1 夹取）。
+   * 元信息还没到时返回默认占位比例 —— 界面据此决定照片在正方外框里长什么样。
+   */
+  aspectOf: (id: string) => number;
   status: () => LoadStatus;
   error: () => string | null;
   /** 扫描时读不了的位置（不致命） */
@@ -148,6 +159,32 @@ export function createPhotoGridStore(deps: PhotoGridDeps): PhotoGridStore {
   });
 
   /* ══════════════════════════════════════════════════════════
+   * 展示元信息（宽高 + 方向）
+   *
+   * 它决定每张照片在正方外框里长什么样。来源是 Rust 侧的**会话级内存缓存**
+   * （`dir_meta_ensure`）—— 相机五花八门，M43 是 4:3、竖拍是 3:4，
+   * 不读方向的话所有竖图都会躺着显示（2026-09-16 人类报的现象）。
+   *
+   * 拿不到不是错误：界面按默认占位比例显示，照片只是「长得不精确」而已。
+   * ══════════════════════════════════════════════════════════ */
+
+  const [photoMeta, setPhotoMeta] = createSignal<ReadonlyMap<string, PhotoMeta>>(
+    new Map(),
+  );
+
+  /** 这条路径的展示比例（没读到元信息时给默认占位比例） */
+  const aspectOf = (id: string): number => {
+    const meta = photoMeta().get(id);
+    if (meta === undefined) return clampDisplayAspect(0, 0);
+    return clampDisplayAspect(meta.width, meta.height);
+  };
+
+  /** 目录切换时把旧元信息丢掉（不同目录的文件名可能一样） */
+  function clearPhotoMeta(): void {
+    setPhotoMeta(new Map());
+  }
+
+  /* ══════════════════════════════════════════════════════════
    * 数据加载
    * ══════════════════════════════════════════════════════════ */
 
@@ -157,6 +194,7 @@ export function createPhotoGridStore(deps: PhotoGridDeps): PhotoGridStore {
     generation += 1;
     setDir(next);
     setItems([]);
+    clearPhotoMeta();
     setProblems([]);
     setError(null);
     setSelection(EMPTY_SELECTION);
@@ -174,6 +212,11 @@ export function createPhotoGridStore(deps: PhotoGridDeps): PhotoGridStore {
       setItems(scan.items);
       setProblems(scan.problems);
       setStatus("ready");
+      /*
+       * 元信息**不阻塞**出网格：先按默认比例把照片铺出来，宽高到了再各自修正
+       * （外框是正方，所以迟到不会重排布局，只是照片在框里长大）。
+       */
+      void loadPhotoMeta(next, scan.items, token);
       if (byTime()) void loadTimes();
     } catch (caught) {
       if (token !== generation) return;
@@ -188,6 +231,41 @@ export function createPhotoGridStore(deps: PhotoGridDeps): PhotoGridStore {
    * 只补**还没读到真相**的那些（`takenAtSource !== "exif"`）——
    * 换目录后重新读一遍时，已经准确的不用再读。
    */
+  /**
+   * 取这一批照片的展示元信息（宽高 + 方向）。失败**不打扰用户** —— 只是比例退化成默认占位。
+   */
+  async function loadPhotoMeta(
+    dir: string,
+    items: readonly SourceItem[],
+    token: number,
+  ): Promise<void> {
+    if (items.length === 0) return;
+    try {
+      const metas = await deps.api.dirMetaEnsure(
+        dir,
+        items.map((item) => ({
+          relative: item.fileName,
+          fileSize: item.sizeBytes,
+          mtimeMs: item.mtimeMs ?? 0,
+        })),
+      );
+      if (token !== generation) return; // 用户又换了目录，迟到的结果丢掉
+      /*
+       * **按顺序一一对应**（后端契约：返回顺序与传入的 `files` 一致）。
+       * 不用「目录 + 文件名」拼 key —— Windows 与 POSIX 的分隔符不同，
+       * 拼出来的字符串一旦不一致就会静默查不到（比例永远是占位）。
+       */
+      const next = new Map<string, PhotoMeta>();
+      items.forEach((item, index) => {
+        const meta = metas[index];
+        if (meta !== undefined) next.set(itemId(item), meta);
+      });
+      setPhotoMeta(next);
+    } catch {
+      // 读不到元信息不是错误：按默认比例显示就是了
+    }
+  }
+
   async function loadTimes(): Promise<void> {
     const token = generation;
     const pending = items()
@@ -385,6 +463,7 @@ export function createPhotoGridStore(deps: PhotoGridDeps): PhotoGridStore {
     dir,
     items,
     displayItems,
+    aspectOf,
     status,
     error,
     problems,

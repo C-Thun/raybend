@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { SourceItem } from "../../api/types.ts";
 import { groupByTime } from "../../lib/time-group.ts";
-import { tileImageHeight } from "../../lib/tile-flow.ts";
+import { tileRowHeight } from "../../lib/tile-flow.ts";
 import {
   buildGridRows,
   countRowPhotos,
@@ -21,7 +21,6 @@ import {
 } from "./rows.ts";
 
 const CST = 480;
-const CAPTION = 26;
 
 function item(name: string, takenAtMs: number | null = null): SourceItem {
   return {
@@ -63,13 +62,10 @@ test("平铺：按列数切行，行高 = 画面高 + 字幕条高", () => {
   const rows = buildGridRows({
     items,
     columns: 3,
-    cellWidth: 200,
-    captionHeight: CAPTION,
-      tilePad: 0,
-      tileGap: 0,
+    cellSize: 200,
   });
   assert.equal(rows.length, 3, "7 张按 3 列切成 3 行");
-  const expectedHeight = tileImageHeight(200) + CAPTION;
+  const expectedHeight = tileRowHeight(200);
   for (const row of rows) {
     assert.equal(row.kind, "tiles");
     assert.equal(row.height, expectedHeight);
@@ -87,10 +83,7 @@ test("平铺：列数非法时按一行一张（不产出空行）", () => {
     const rows = buildGridRows({
       items,
       columns,
-      cellWidth: 200,
-      captionHeight: CAPTION,
-      tilePad: 0,
-      tileGap: 0,
+      cellSize: 200,
     });
     assert.equal(tileRows(rows).length, 2, `columns=${columns}`);
   }
@@ -100,10 +93,7 @@ test("空列表：没有行", () => {
   const rows = buildGridRows({
     items: [],
     columns: 4,
-    cellWidth: 200,
-    captionHeight: CAPTION,
-      tilePad: 0,
-      tileGap: 0,
+    cellSize: 200,
   });
   assert.deepEqual(rows, []);
   assert.equal(countRowPhotos(rows), 0);
@@ -113,12 +103,9 @@ test("字幕条高为 0 / 非法：行高退化但不能是 NaN", () => {
   const rows = buildGridRows({
     items: [item("a.jpg")],
     columns: 1,
-    cellWidth: 200,
-    captionHeight: Number.NaN,
-      tilePad: 0,
-      tileGap: 0,
+    cellSize: 200,
   });
-  assert.equal(rows[0].height, tileImageHeight(200));
+  assert.equal(rows[0].height, tileRowHeight(200));
   assert.ok(Number.isFinite(rows[0].height));
 });
 
@@ -139,10 +126,7 @@ test("按时间：日标题 + 片标题 + tile 行，顺序正确", () => {
   const rows = buildGridRows({
     items,
     columns: 2,
-    cellWidth: 200,
-    captionHeight: CAPTION,
-      tilePad: 0,
-      tileGap: 0,
+    cellSize: 200,
     grouping,
   });
 
@@ -180,10 +164,7 @@ test("按时间：一天里两段，各自从新的一行开始（不跨片拼�
   const rows = buildGridRows({
     items,
     columns: 2,
-    cellWidth: 200,
-    captionHeight: CAPTION,
-      tilePad: 0,
-      tileGap: 0,
+    cellSize: 200,
     grouping,
   });
   const tiles = tileRows(rows);
@@ -207,10 +188,7 @@ test("按时间：未知时间组排在最后，且没有任何时间范围", ()
   const rows = buildGridRows({
     items,
     columns: 4,
-    cellWidth: 200,
-    captionHeight: CAPTION,
-      tilePad: 0,
-      tileGap: 0,
+    cellSize: 200,
     grouping,
   });
   const days = dayGroups(rows);
@@ -234,10 +212,7 @@ test("按时间：多个日组，最近的在前", () => {
   const rows = buildGridRows({
     items,
     columns: 1,
-    cellWidth: 200,
-    captionHeight: CAPTION,
-      tilePad: 0,
-      tileGap: 0,
+    cellSize: 200,
     grouping,
   });
   assert.deepEqual(
@@ -258,10 +233,7 @@ test("按时间：分组里出现了列表里没有的 id → 跳过，不产出
   const rows = buildGridRows({
     items,
     columns: 4,
-    cellWidth: 200,
-    captionHeight: CAPTION,
-      tilePad: 0,
-      tileGap: 0,
+    cellSize: 200,
     grouping,
   });
   assert.equal(countRowPhotos(rows), 1, "幽灵 id 不该变成一张空 tile");
@@ -279,18 +251,12 @@ test("行键唯一（虚拟列表靠它复用 DOM）", () => {
   const flat = buildGridRows({
     items,
     columns: 3,
-    cellWidth: 200,
-    captionHeight: CAPTION,
-      tilePad: 0,
-      tileGap: 0,
+    cellSize: 200,
   });
   const grouped = buildGridRows({
     items,
     columns: 3,
-    cellWidth: 200,
-    captionHeight: CAPTION,
-      tilePad: 0,
-      tileGap: 0,
+    cellSize: 200,
     grouping,
   });
   for (const rows of [flat, grouped]) {
@@ -308,10 +274,7 @@ test("按时间：空分组结果 → 只有未知组时才出行", () => {
   const rows = buildGridRows({
     items,
     columns: 2,
-    cellWidth: 200,
-    captionHeight: CAPTION,
-      tilePad: 0,
-      tileGap: 0,
+    cellSize: 200,
     grouping,
   });
   assert.deepEqual(

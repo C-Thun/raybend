@@ -12,13 +12,14 @@ import { test } from "node:test";
 import {
   computeTileFlow,
   DEFAULT_TILE_STEP_INDEX,
-  TILE_IMAGE_ASPECT,
+  DEFAULT_DISPLAY_ASPECT,
+  MAX_DISPLAY_ASPECT,
   TILE_SIZE_STEPS,
+  clampDisplayAspect,
   clampTileStepIndex,
-  tileImageHeight,
   tileRowCount,
+  tileRowHeight,
   tileSizeAt,
-  tileTotalHeight,
   nextIndexForArrow,
 } from "./tile-flow.ts";
 
@@ -196,28 +197,34 @@ test("tileSizeAt 对越界与非法下标都返回合法档位", () => {
   assert.equal(tileSizeAt(Number.NaN), tileSizeAt(DEFAULT_TILE_STEP_INDEX));
 });
 
-// ─── 高度计算 ─────────────────────────────────────────────
+// ─── 展示比例（3:1 夹取）与行高 ──────────────────────────
 
-test("图片区按 3:2 取高并对齐到整像素", () => {
-  assert.equal(TILE_IMAGE_ASPECT, 1.5);
-  assert.equal(tileImageHeight(150), 100);
-  assert.equal(tileImageHeight(208), 139); // 138.67 → 139
-  assert.equal(tileImageHeight(96), 64);
-  assert.ok(Number.isInteger(tileImageHeight(120)));
+test("展示比例：未知尺寸退回默认占位比例", () => {
+  assert.equal(clampDisplayAspect(0, 0), DEFAULT_DISPLAY_ASPECT);
+  assert.equal(clampDisplayAspect(4000, 0), DEFAULT_DISPLAY_ASPECT);
+  assert.equal(clampDisplayAspect(Number.NaN, 100), DEFAULT_DISPLAY_ASPECT);
 });
 
-test("图片区高度对非法输入返回 0（不发散）", () => {
-  for (const bad of [0, -150, Number.NaN, Number.POSITIVE_INFINITY]) {
-    assert.equal(tileImageHeight(bad), 0);
+test("展示比例：范围内的原样保留（4:3、3:2、竖拍、正方）", () => {
+  assert.equal(clampDisplayAspect(4000, 3000), 4 / 3);
+  assert.equal(clampDisplayAspect(6000, 4000), 1.5);
+  assert.equal(clampDisplayAspect(3000, 4000), 0.75, "竖拍就是竖的");
+  assert.equal(clampDisplayAspect(1000, 1000), 1);
+});
+
+test("展示比例：超出 3:1 / 1:3 的夹到边界（与 Rust 侧同一个口径）", () => {
+  assert.equal(MAX_DISPLAY_ASPECT, 3);
+  assert.equal(clampDisplayAspect(8000, 1000), 3, "8:1 的全景 → 3:1");
+  assert.equal(clampDisplayAspect(1000, 8000), 1 / 3, "1:8 的竖全景 → 1:3");
+  assert.equal(clampDisplayAspect(3840, 1080), 3, "约 3.56:1 → 3:1");
+});
+
+test("行高 = 正方外框的边长（信息条是覆盖层，不占高度）", () => {
+  assert.equal(tileRowHeight(208), 208);
+  assert.equal(tileRowHeight(96), 96);
+  for (const bad of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+    assert.equal(tileRowHeight(bad), 0, "非法输入不发散");
   }
-});
-
-test("整块高度 = 图片区 + 字幕条", () => {
-  assert.equal(tileTotalHeight(150, 22), 122);
-  assert.equal(tileTotalHeight(150, 28), 128);
-  // 字幕高非法时按 0 处理，不产生 NaN
-  assert.equal(tileTotalHeight(150, Number.NaN), 100);
-  assert.equal(tileTotalHeight(150, -10), 100);
 });
 
 // ─── 行数 ─────────────────────────────────────────────────

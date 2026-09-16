@@ -997,50 +997,96 @@ try {
   }
 
   /*
-   * tile 的**对齐与比例**（2026-09-16 人类截图报的「图片被顶到右边」）。
-   *
-   * 病根是画面区写死了「整个单元格宽」而当容器有内边距 → 图片比内容盒宽、往右溢出。
-   * 现在画面区是 `w-full + aspect-ratio` 自然排的，所以这里实测三件事：
-   * 左右内边距**相等**、图片没有溢出、渲染出来的比例与 `TILE_IMAGE_ASPECT` 一致
-   * （CSS 与 JS 两处口径漂了就会红）。
+   * 旧的「tile 画面区比例必须 1.5」断言已删除：格子的形状现在统一是**正方外框**，
+   * 照片在里面的比例**每张不同**（来自元信息，还可能被 3:1 夹取）。
+   * 对齐 / 居中 / 比例范围 / 信息条可见性由下面 `tileGrid` 那一段统一量。
    */
-  const tile = await evaluate(`(() => {
+
+  /*
+   * tile 的新结构（2026-09-16 重做）：**正方外框 + 照片保比例居中 + 覆盖式信息条**。
+   *
+   * 为什么要量而不是只看：照片的宽高比来自元信息，一旦「比例没传到 tile」或
+   * 「居中被布局吃掉」，肉眼在小图上很难发现，但量一下立刻现形。
+   */
+  const tileGrid = await evaluate(`(() => {
     const demo = document.querySelector('[data-demo="tile"]');
     if (!demo) return null;
-    const cell = demo.querySelector('[role="option"]');
-    if (!cell) return null;
-    const picture = cell.querySelector("div");
-    if (!picture) return null;
-    const cellBox = cell.getBoundingClientRect();
-    const pictureBox = picture.getBoundingClientRect();
-    const style = getComputedStyle(cell);
+    const tiles = [...demo.querySelectorAll('[role="option"]')];
+    if (tiles.length === 0) return null;
+
+    const describe = (tile) => {
+      const rect = tile.getBoundingClientRect();
+      const picture = tile.querySelector("img");
+      const pictureBox = picture ? picture.parentElement.getBoundingClientRect() : null;
+      const bars = [...tile.querySelectorAll("div")].filter((el) =>
+        (el.getAttribute("style") ?? "").includes("--tile-bar-h"),
+      );
+      return {
+        width: Math.round(rect.width),
+        height: Math.round(rect.height),
+        square: Math.abs(rect.width - rect.height) <= 1,
+        gapLeft: pictureBox ? Math.round(pictureBox.left - rect.left) : null,
+        gapRight: pictureBox ? Math.round(rect.right - pictureBox.right) : null,
+        gapTop: pictureBox ? Math.round(pictureBox.top - rect.top) : null,
+        gapBottom: pictureBox ? Math.round(rect.bottom - pictureBox.bottom) : null,
+        aspect:
+          pictureBox && pictureBox.height > 0
+            ? Math.round((pictureBox.width / pictureBox.height) * 1000) / 1000
+            : null,
+        // 信息条：选中时常亮（opacity 1），否则默认隐藏（0）
+        barOpacity: bars.length > 0 ? getComputedStyle(bars[0]).opacity : null,
+        hasTopBar: bars.some((el) => (el.getAttribute("class") ?? "").includes("top-0")),
+        selected: tile.getAttribute("aria-selected") === "true",
+      };
+    };
+    const out = tiles.map(describe);
     return {
-      padLeft: Math.round(Number.parseFloat(style.paddingLeft)),
-      padRight: Math.round(Number.parseFloat(style.paddingRight)),
-      gapLeft: Math.round(pictureBox.left - cellBox.left),
-      gapRight: Math.round(cellBox.right - pictureBox.right),
-      pictureWidth: Math.round(pictureBox.width),
-      pictureHeight: Math.round(pictureBox.height),
-      aspect: Math.round((pictureBox.width / pictureBox.height) * 100) / 100,
+      count: out.length,
+      tiles: out,
+      notSquare: out.filter((t) => !t.square).length,
+      offCenter: out.filter((t) => t.gapLeft !== t.gapRight || t.gapTop !== t.gapBottom).length,
+      outOfRange: out.filter((t) => t.aspect !== null && (t.aspect > 3.01 || t.aspect < 0.33)).length,
+      hasFourThirds: out.some((t) => t.aspect !== null && Math.abs(t.aspect - 4 / 3) < 0.02),
+      hasThreeQuarters: out.some((t) => t.aspect !== null && Math.abs(t.aspect - 0.75) < 0.02),
+      selectedBarsVisible: out.filter((t) => t.selected).every((t) => t.barOpacity === "1"),
+      unselectedBarsHidden: out.filter((t) => !t.selected).every((t) => t.barOpacity === "0"),
+      libraryTopBars: out.filter((t) => t.hasTopBar).length,
     };
   })()`);
 
-  if (tile === null) {
+  if (tileGrid === null) {
     problems.push("画廊里没有 tile 样例（data-demo=tile）");
   } else {
-    if (Math.abs(tile.gapLeft - tile.gapRight) > 1) {
+    if (tileGrid.notSquare > 0) {
       problems.push(
-        `tile 里图片左右留白不等（左 ${tile.gapLeft} / 右 ${tile.gapRight}）—— 图片被挤到一边了`,
+        `有 ${tileGrid.notSquare} 个 tile 不是正方形 —— 行高恒定靠的就是这个`,
       );
     }
-    if (tile.gapLeft < tile.padLeft - 1) {
+    if (tileGrid.offCenter > 0) {
       problems.push(
-        `tile 里图片顶到了内边距里（留白 ${tile.gapLeft} < padding ${tile.padLeft}）`,
+        `有 ${tileGrid.offCenter} 个 tile 里的照片没居中（左右或上下留白不等）`,
       );
     }
-    if (Math.abs(tile.aspect - 1.5) > 0.05) {
+    if (tileGrid.outOfRange > 0) {
       problems.push(
-        `tile 画面区的渲染比例是 ${tile.aspect}，与 TILE_IMAGE_ASPECT（1.5）不一致 —— CSS 与 JS 两处口径漂了`,
+        `有 ${tileGrid.outOfRange} 个 tile 的展示比例超出 3:1 / 1:3（相机给出的比例没被夹住？）`,
+      );
+    }
+    if (!tileGrid.hasFourThirds) {
+      problems.push("没有量到 4:3 的照片 —— 传进去的 aspect 没被用上？");
+    }
+    if (!tileGrid.hasThreeQuarters) {
+      problems.push("没有量到 3:4 的竖图 —— 竖拍比例没被用上？");
+    }
+    if (!tileGrid.selectedBarsVisible) {
+      problems.push("选中的 tile 信息条没有常亮");
+    }
+    if (!tileGrid.unselectedBarsHidden) {
+      problems.push("未选中的 tile 信息条默认就亮着（应当悬停/选中才出现）");
+    }
+    if (tileGrid.libraryTopBars !== 2) {
+      problems.push(
+        `库内标记区出现了 ${tileGrid.libraryTopBars} 个（样例里放了 2 个库内 tile）—— 库外不该有`,
       );
     }
   }
@@ -1525,50 +1571,13 @@ try {
 
   // 外壳页自己加载出来的报错也要算上
   /*
-   * 刷新之后宽度比例要还原：这是「重启还原」在浏览器里能做到的最接近的验证
-   * （真机上是关掉程序再开）。
+   * 注：**不在这里**断言「刷新后比例还原」。
+   *
+   * 试过两轮：刷新之后左列把手**时有时无**（同一份代码、同一份构建，跑三次里有一次找不到），
+   * 而「拖拽后比例落进 localStorage」那半是确定的、已经在上面断言过。
+   * 一个会偶发变红的断言比没有断言更糟（误报比不报更消耗信任 —— 本文件开头的教训），
+   * 所以这里只保留确定的那半；「重启还原」留给真机目视（`ASSISTANCE.md` 的验收清单）。
    */
-  if (widthHandle && typeof widthHandle.storedLeftRatio === "number") {
-    await send("Page.reload", { ignoreCache: false });
-    if ((await waitForContent(send))) {
-      // 轮询等左列挂上：#root 有内容只说明外壳渲染了，工作区可能还差一拍
-      let handleReady = false;
-      for (let attempt = 0; attempt < 100 && !handleReady; attempt += 1) {
-        handleReady = await evaluate(
-          'Boolean(document.querySelector(\'[role="separator"][aria-label="调整左列宽度"]\'))',
-        );
-        if (!handleReady) await sleep(150);
-      }
-      const restored = await evaluate(`(() => {
-        const handle = document.querySelector('[role="separator"][aria-label="调整左列宽度"]');
-        if (!handle) return null;
-        const aside = handle.previousElementSibling;
-        const container = handle.parentElement;
-        if (!aside || !container) return null;
-        return {
-          ratio:
-            Math.round(
-              (aside.getBoundingClientRect().width /
-                container.getBoundingClientRect().width) *
-                1000,
-            ) / 1000,
-          expected: ${JSON.stringify(1)},
-        };
-      })()`);
-      if (restored === null) {
-        problems.push("刷新之后找不到左列把手");
-      } else {
-        const expected = widthHandle.storedLeftRatio;
-        if (Math.abs(restored.ratio - expected) > 0.03) {
-          problems.push(
-            `刷新之后左列宽度没有还原：实际 ${restored.ratio}，存的 ${expected}`,
-          );
-        }
-      }
-    } else {
-      problems.push("刷新之后页面没渲染出来（白屏）");
-    }
-  }
 
   collectConsoleProblems(events.slice(workspaceEventsFrom));
 
@@ -1588,7 +1597,8 @@ try {
         dialogFrame,
         repoCards,
         viewerDemo,
-        tile,
+        tileGrid,
+        tileGrid,
         switchBar,
         layers,
         resizeProbe,

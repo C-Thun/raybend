@@ -21,6 +21,8 @@ import type {
   FileExif,
   PhotoCount,
   RecentDir,
+  MetaFile,
+  PhotoMeta,
   RepositoryProbe,
   RepositoryView,
   SourceScan,
@@ -92,6 +94,27 @@ export async function forgetRecentDir(path: string): Promise<boolean> {
  * 浏览器里没有文件系统 → 一律当「可用」（标灰是给真机用的提示，
  * 在浏览器里猜错反而会误导）。
  */
+/**
+ * 确保一批文件的展示元信息（宽高 + 方向）是新鲜的。
+ *
+ * 缓存活在 Rust 进程里（会话级、不落盘）：同一目录反复进出不会重复扫盘。
+ * 浏览器里没有文件系统 → 一律返回「尺寸未知」（`0×0`），界面按默认比例占位。
+ */
+export async function dirMetaEnsure(
+  dir: string,
+  files: readonly MetaFile[],
+): Promise<PhotoMeta[]> {
+  if (!isTauriRuntime()) {
+    return files.map((file) => ({
+      relative: file.relative,
+      width: 0,
+      height: 0,
+      orientation: 1,
+    }));
+  }
+  return call<PhotoMeta[]>("dir_meta_ensure", { path: dir, files });
+}
+
 export async function pathsStatus(paths: string[]): Promise<boolean[]> {
   if (!isTauriRuntime()) return paths.map(() => true);
   return call<boolean[]>("source_paths_status", { paths });

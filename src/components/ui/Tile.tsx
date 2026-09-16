@@ -1,85 +1,115 @@
 /**
- * Tile —— 网格基本单元（DESIGN.md §10.1 #11）。
+ * Tile —— 照片网格里的一个格子（`design/main.md` §3.2.1 的排版口径）。
  *
- * 是**图标 tile 与图片 tile 的公共骨架**：上方一个定尺寸的画面区，下方一条字幕。
- * 它只负责「一个格子长什么样」，不含虚拟化、不含批量选择逻辑（那些在 `PhotoGrid` 里）。
- *
- * ## 排版口径（2026-09-16 人类反馈后重做）
+ * ## 结构（2026-09-16 重做，**正方外框 + 保比例居中**）
  *
  * ```text
- * ┌──────────────────────────────┐  ← 整块一个圆角容器，四周有 --tile-pad 内边距
- * │  ╭────────────────────────╮  │
- * │  │        画面            │  │  ← 图片**四角都圆**（不是只圆上面两角：
- * │  │              [动作槽]  │  │     上一版图片下缘是直角，看着像被切开）
- * │  ╰────────────────────────╯  │
- * │  P1000156            [ORF]   │  ← 文件名（**去掉后缀**）+ 扩展名做成标签
- * └──────────────────────────────┘     下缘圆角由容器给出
+ * ┌────────────────────┐  ← 外框：正方形圆角矩形，边长 = 尺寸档（9 档）
+ * │   ╭──────────────╮ │     默认无底纹；库内打了颜色标记 → 该色低浓底纹
+ * │   │              │ │
+ * │   │     照片     │ │  ← 照片按自己的宽高比居中，四角圆角，四周留 --tile-pad
+ * │   │              │ │     超过 3:1 / 1:3 的由**后端**居中截取（原图不受影响）
+ * │   ╰──────────────╯ │
+ * │ ▒ 文件名      ORF ▒ │  ← 底部信息条：**覆盖在照片上**，默认隐藏
+ * └────────────────────┘     指向/聚焦/选中时出现；选中时常亮
  * ```
  *
- * * **边角**：容器 `rounded-ui` + 图片自己也 `rounded-ui` —— 图片不再与容器边缘平齐，
- *   所以四角一致；容器下缘的圆角也就顺理成章。
- * * **间距**：四周 `--tile-pad`、图与字之间 `--tile-gap`（都在 `tokens.css`，两档密度不同）。
- * * **信息**：只显示文件名（去后缀）+ **扩展名标签**；不再把后缀重复写两遍。
- *   扩展名是 RAW/JPG 配对的唯一线索，所以留着，但做成小标签而不是第二行小字。
- * * **选中**：容器主色低透明度底 + 画面外一圈主色细环（图片本身就是内容，
- *   只靠底色在照片上分不出来）。指向用辅色底（§5 全局规则）。
- * * **扩展位**（现在不显示，位置先留好）：画面**右上角**是动作槽（排除等，指向/聚焦/选中时出现）；
- *   文件名那一行的**右端**留给星标/旗标这类「属性」；画面**左下角**留给以后要叠在图上
- *   的信息（评级、RAW 配对角标）。三处都写在这里，免得以后到处试位置。
+ * ## 为什么是正方外框（而不是让格子跟着照片比例走）
  *
- * 尺寸来自 `--tile-cell-w` / `--tile-cell-h` / `--caption-h` ——
- * 这三个是**运行时会被 JS 改写的变量**（缩放滑块决定 tile 宽，见 §12.6 的换行数学），
- * 所以这里不写死像素。
+ * 「tile 尺寸可调 + 左列宽度可拖」要求**行高恒定** —— 否则拖动时行内成员一变，
+ * 界面会扭成迪斯科舞厅（人类 2026-09-16）。所以：**格子定形状，照片在里面保比例**。
+ * 附带的好处：元信息（宽高）迟到时**不会重排网格**，照片只是在自己的框里长大/缩小。
  *
- * 状态：
- *   默认     画面区 = 中间调占位面，字幕 = 次级色
- *   指向     **辅色底**叠加在整块上（§5：指向 = 辅色底）
- *   选中     **主色低透明度底**（大面积用低浓度，§5.1），字幕提到 fg-1
- *   空态     画面区居中显示图标（该格没有可显示的图）
- *   加载中   骨架呼吸 + 不显示字幕内容（尺寸不跳 —— 画面区高宽由令牌固定）
- *   禁用     前景降次级，不响应指针
+ * ## 三条纪律
  *
- * 键盘：`Space` = 选中（同点击），`Enter` = 打开（同双击）。
- * 这与列表的通用约定一致 —— `Enter` 是「进去看」，不是「选中」。
+ * 1. **信息条是覆盖层**：贴在照片之上，照片尺寸**不因选中/指向而改变**；
+ *    它锚在**外框**的上下边缘（不是照片边缘），所以同一行的信息条始终在一条线上；
+ *    并且由外框的 `overflow: hidden` 裁出圆角。
+ * 2. **信息条底纹 = 状态底纹（外框那层）+ 主题中性蒙层**（`--tile-bar-scrim`）：
+ *    只用状态色改浓度的话，文字对比度会随状态漂（指向是辅色、选中是主色、
+ *    颜色标记又是任意色），迟早出现读不清的组合。
+ * 3. **加载中不要内框**：外框已经在那儿了，里面只给一个低存在感的占位形状，
+ *    不要再来一个圆角矩形套圆角矩形（人类 2026-09-16 批注）。
+ *
+ * ## 扩展位（现在不显示，位置先留好）
+ *
+ * | 位置 | 将来放什么 |
+ * | --- | --- |
+ * | 照片右上角 | 动作槽（排除等，指向/聚焦时出现）—— `actions` |
+ * | 顶部条（**库内**） | 星标 / 颜色 / 旗标 —— `rating` / `colorLabel` / `flag` |
+ * | 底部条右端 | 加锁标记 `locked`；再往后还有别的属性也往这放 |
  */
 
-import type { JSX } from "solid-js";
-import { Show, splitProps } from "solid-js";
+import {
+  IconLock,
+  IconStar,
+  IconStarFilled,
+} from "@tabler/icons-solidjs";
+import { Show, splitProps, type JSX } from "solid-js";
+import { t } from "../../i18n/index.ts";
+import {
+  DEFAULT_DISPLAY_ASPECT,
+  MAX_DISPLAY_ASPECT,
+} from "../../lib/tile-flow.ts";
 
-export interface TileProps {
-  /** 文件名（字幕主行） */
+/** 颜色标记（库内才有）—— 名字对应 `tokens.css` 里的 `--label-*` */
+export type TileColorLabel = "red" | "yellow" | "green" | "blue" | "purple";
+
+export interface TileProps
+  extends Omit<JSX.HTMLAttributes<HTMLDivElement>, "children"> {
+  /** 完整文件名（显示时会去掉后缀；`title` 与无障碍名用完整的） */
   label: string;
-  /** 字幕副行（如文件类型、尺寸） */
-  /**
-   * 文件名行右端的**标签**（现在放扩展名，如 `ORF`）。
-   * 不放第二行小字：后缀已经写在文件名里了，重复两遍正是上一版被指出的问题。
-   */
+  /** 文件名行右端的标签（现在放扩展名，如 `ORF`） */
   tag?: string;
-  /** 「属性」类信息的扩展位（星标等，未来的）。放在文件名行右端。 */
-  extra?: JSX.Element;
-  /** 图片地址（object URL / data URL / asset URL） */
-  src?: string;
-  /** 无图时的占位图标（如「文件夹」用文件夹图标） */
+  /**
+   * 展示用宽高比（**已应用方向、已按 3:1 夹取**；由 `clampDisplayAspect` 算好传进来）。
+   * 缺省 = 占位比例（元信息还没到）。
+   */
+  aspect?: number;
+  src?: string | null;
   icon?: JSX.Element;
   selected?: boolean;
   disabled?: boolean;
-  /** 缩略图还没就绪 */
   loading?: boolean;
-  /** 该格确实没有内容（与 loading 不同：一个在等，一个就是空的） */
   empty?: boolean;
-  /** 浮在右上角的动作区（悬停才由调用方显示，Tile 只留位置） */
+  /** 动作槽（照片右上角，指向/聚焦时出现） */
   actions?: JSX.Element;
+  /** 库内才有的信息（导入工作流里这些事都不存在，槽位直接不渲染） */
+  context?: "library" | "source";
+  /** 星标 0..5（0 = 什么都不显示） */
+  rating?: number;
+  flag?: "pick" | "reject" | null;
+  locked?: boolean;
+  colorLabel?: TileColorLabel | null;
+  /** 窄格子（小尺寸档）：星标退化成「一颗星 + 数字」，避免挤成一团 */
+  compact?: boolean;
   onClick?: JSX.EventHandlerUnion<HTMLDivElement, MouseEvent>;
-  /** 双击 / 回车触发（切到查看） */
   onActivate?: () => void;
-  class?: string;
 }
+
+/** 颜色标记 → 外框的低浓底纹（类名必须**字面写出**，Tailwind 才扫得到） */
+const LABEL_TINT: Record<TileColorLabel, string> = {
+  red: "bg-(--label-red)/15",
+  yellow: "bg-(--label-yellow)/15",
+  green: "bg-(--label-green)/15",
+  blue: "bg-(--label-blue)/15",
+  purple: "bg-(--label-purple)/15",
+};
+
+/** 颜色标记圆点的实色（悬停/选中时底纹被盖住，用它兜底显示标色） */
+const LABEL_DOT: Record<TileColorLabel, string> = {
+  red: "bg-(--label-red)",
+  yellow: "bg-(--label-yellow)",
+  green: "bg-(--label-green)",
+  blue: "bg-(--label-blue)",
+  purple: "bg-(--label-purple)",
+};
 
 export function Tile(props: TileProps) {
   const [local, rest] = splitProps(props, [
     "label",
     "tag",
-    "extra",
+    "aspect",
     "src",
     "icon",
     "selected",
@@ -87,18 +117,34 @@ export function Tile(props: TileProps) {
     "loading",
     "empty",
     "actions",
+    "context",
+    "rating",
+    "flag",
+    "locked",
+    "colorLabel",
+    "compact",
     "onClick",
     "onActivate",
     "class",
   ]);
 
-  const interactive = () => !local.disabled;
+  const interactive = (): boolean => !local.disabled;
+  const inLibrary = (): boolean => (local.context ?? "source") === "library";
+  const hasImage = (): boolean => Boolean(local.src) && !local.loading;
+
+  /** 展示用的比例：夹到 3:1 之内（真值来自后端；这里再兜一次） */
+  const aspect = (): number => {
+    const value = local.aspect ?? DEFAULT_DISPLAY_ASPECT;
+    if (!Number.isFinite(value) || value <= 0) return DEFAULT_DISPLAY_ASPECT;
+    return Math.min(MAX_DISPLAY_ASPECT, Math.max(1 / MAX_DISPLAY_ASPECT, value));
+  };
+
+  /** 横图贴满宽、竖图贴满高 —— 两个方向都「短边贴边」，剩下一维居中 */
+  const isWide = (): boolean => aspect() >= 1;
 
   /**
-   * 显示用的文件名：**去掉末尾的扩展名**。
-   *
-   * 判据刻意保守：只在「最后一个点后面是 1~5 位字母数字」时才当后缀 ——
-   * `IMG.2024.raw` 这类名字去掉 `.2024.raw` 就毁了（只去最后一段）。
+   * 显示用的文件名：**去掉末尾扩展名**（后缀已经在信息条右端做成标签了）。
+   * 判据保守：只有「点后 1~5 位字母数字」才当后缀 —— `IMG.2024.raw` 只去最后一段。
    */
   const displayName = (): string => {
     const name = local.label;
@@ -108,6 +154,15 @@ export function Tile(props: TileProps) {
     return /^[A-Za-z0-9]{1,5}$/.test(tail) ? name.slice(0, dot) : name;
   };
 
+  const rating = (): number => {
+    const value = local.rating ?? 0;
+    if (!Number.isFinite(value)) return 0;
+    return Math.min(5, Math.max(0, Math.round(value)));
+  };
+
+  /** 信息是否常亮（选中时不再依赖悬停） */
+  const infoAlwaysOn = (): boolean => Boolean(local.selected);
+
   return (
     <div
       {...rest}
@@ -115,17 +170,27 @@ export function Tile(props: TileProps) {
       aria-selected={Boolean(local.selected)}
       aria-disabled={local.disabled || undefined}
       tabindex={interactive() ? 0 : -1}
+      /*
+       * **外框自己撑成正方形**（边长 = 尺寸档；画廊里没定义 `--tile-cell` 时用回退值）。
+       * 放在组件内部而不是调用方：形状是 tile 自己的事，网格只需要下发边长，
+       * 谁渲染它都不会「忘了给尺寸」而导致高矮不一（画廊里就踩过一次）。
+       */
+      style={{
+        width: "var(--tile-cell, 208px)",
+        height: "var(--tile-cell, 208px)",
+      }}
       class={[
-        "group/tile relative flex shrink-0 flex-col rounded-ui transition-colors",
-        // 四周内边距与图文间距都走令牌（两档密度不同 —— 上一版写死，紧凑与宽松一个样）
-        "p-(--tile-pad) gap-(--tile-gap)",
+        "group/tile relative flex shrink-0 flex-col overflow-hidden",
+        "rounded-(--tile-radius) p-(--tile-pad) transition-colors",
         "outline-none focus-visible:ring-1 focus-visible:ring-focus-ring",
-        // 选中：主色低透明度底 + 画面外一圈主色细环（照片上只靠底色分不出来）
+        // 底色优先级：选中（主色）> 库内颜色标记 > 指向（辅色）> 无所谓（透明）
         local.selected
-          ? "bg-state-selected ring-2 ring-brand"
-          : "bg-transparent",
-        // 指向：辅色底；已选中时保持主色底不回落（§5）
-        interactive() && !local.selected ? "hover:bg-state-hover" : "",
+          ? "bg-state-selected"
+          : local.colorLabel == null
+            ? interactive()
+              ? "hover:bg-state-hover"
+              : ""
+            : LABEL_TINT[local.colorLabel],
         interactive() ? "cursor-pointer" : "cursor-default text-fg-3",
         local.class ?? "",
       ]
@@ -146,25 +211,15 @@ export function Tile(props: TileProps) {
         }
       }}
     >
-      {/* ── 画面区 ─────────────────────────────────────────── */}
-      <div
-        /*
-         * 画面区：**宽 100% + 比例交给 CSS**（不再用 JS 算好的像素宽/高）。
-         *
-         * 上一版这里写 `width: var(--tile-cell-w)` —— 那是**整个单元格**的宽，
-         * 而外层容器有 `p-(--tile-pad)` 内边距，于是图片比内容盒宽、往右溢出：
-         * 人类截图里「图片被顶到右边、左边空一条」就是这个（2026-09-16）。
-         * 自然布局下：宽度由内容盒决定，高度由 `aspect-ratio` 决定，四周必然对齐。
-         *
-         * `3 / 2` 与 `lib/tile-flow.ts` 的 `TILE_IMAGE_ASPECT` 是同一个值 ——
-         * 冒烟会实测渲染出来的比例，漂了会红。
-         */
-        class="relative flex w-full items-center justify-center overflow-hidden rounded-ui bg-surface-main"
-        style={{ "aspect-ratio": "3 / 2" }}
-      >
+      {/* ── 照片区：保比例、居中 ─────────────────────────────── */}
+      <div class="flex min-h-0 min-w-0 flex-1 items-center justify-center">
         <Show
-          when={local.src && !local.loading}
+          when={hasImage()}
           fallback={
+            /*
+             * 加载中 / 空态：**不要内框**（外框已经在了）。
+             * 低存在感的形状就够 —— 一张占位图不该抢眼，也不该看起来像「一张照片」。
+             */
             <span
               class={[
                 "flex items-center justify-center text-fg-3",
@@ -175,64 +230,125 @@ export function Tile(props: TileProps) {
               {local.loading ? (
                 <span class="size-4 animate-spin rounded-full border border-current border-t-transparent" />
               ) : (
-                (local.icon ?? <span class="size-5 rounded-ui bg-fg-3/20" />)
+                (local.icon ?? <span class="size-4 rounded-(--tile-radius) bg-fg-3/20" />)
               )}
             </span>
           }
         >
-          {/*
-            `draggable=false`：桌面应用里拖拽图片会把 webview 变成「拖文件」状态，
-            与后续要做的 tile 拖选冲突。
-          */}
-          <img
-            src={local.src}
-            alt={local.label}
-            draggable={false}
-            class="size-full object-cover"
-          />
-        </Show>
+          <div
+            class="relative overflow-hidden rounded-(--tile-radius) bg-surface-main"
+            style={{
+              "aspect-ratio": String(aspect()),
+              width: isWide() ? "100%" : "auto",
+              height: isWide() ? "auto" : "100%",
+              "max-width": "100%",
+              "max-height": "100%",
+            }}
+          >
+            {/*
+              `draggable=false`：桌面应用里拖拽图片会把 webview 变成「拖文件」状态，
+              与后续要做的 tile 拖选冲突。
+            */}
+            <img
+              src={local.src ?? ""}
+              alt={local.label}
+              draggable={false}
+              class="size-full object-cover"
+            />
 
-        {/* 空态标记：唯一的视觉差异是图标更淡 —— 不额外加描边或底色（§6 无边线） */}
-        <Show when={local.empty && !local.loading}>
-          <span class="absolute inset-0 flex items-center justify-center">
-            <span class="text-fs-1 text-fg-3">—</span>
-          </span>
-        </Show>
-
-        {/* 动作区：默认隐藏，指向或键盘聚焦时出现 */}
-        <Show when={local.actions}>
-          <div class="absolute top-1 right-1 hidden group-hover/tile:flex group-focus-within/tile:flex">
-            {local.actions}
+            {/* 动作槽：照片右上角，指向 / 键盘聚焦时出现 */}
+            <Show when={local.actions}>
+              <div class="absolute top-1 right-1 hidden group-hover/tile:flex group-focus-within/tile:flex">
+                {local.actions}
+              </div>
+            </Show>
           </div>
+        </Show>
+
+        {/* 空态：内容为空（不是没加载出来），给一个「—」 */}
+        <Show when={local.empty && !local.loading}>
+          <span class="absolute text-fs-1 text-fg-3">—</span>
         </Show>
       </div>
 
-      {/* ── 字幕条 ─────────────────────────────────────────── */}
-      <div
-        class="flex min-w-0 items-center gap-1"
-        style={{ height: "var(--caption-h)" }}
-      >
-        <span
+      {/* ── 顶部信息条（库内）：星标 / 颜色 / 旗标 ─────────────── */}
+      <Show when={inLibrary()}>
+        <div
           class={[
-            "min-w-0 flex-1 truncate text-fs-1 leading-tight",
-            local.selected ? "text-fg-1" : "text-fg-2",
-            local.loading ? "opacity-40" : "",
+            "pointer-events-none absolute inset-x-0 top-0 flex items-center gap-1",
+            "bg-(--tile-bar-scrim) px-(--tile-pad) text-fg-1 transition-opacity",
+            "opacity-0 group-hover/tile:opacity-100 group-focus-within/tile:opacity-100",
+            infoAlwaysOn() ? "opacity-100" : "",
           ].join(" ")}
-          // 悬停给完整名字（含后缀）—— 显示上省略后缀是为了不重复，不是要藏起来
-          title={local.label}
+          style={{ height: "var(--tile-bar-h)" }}
         >
+          {/* 星标：0 星什么都不显示；窄格子退化成「一颗星 + 数字」 */}
+          <Show when={rating() > 0}>
+            <span
+              class="flex shrink-0 items-center gap-0.5"
+              aria-label={t("grid.rating", { n: rating() })}
+            >
+              <Show
+                when={!local.compact}
+                fallback={
+                  <>
+                    <IconStarFilled size={12} aria-hidden="true" />
+                    <span class="text-fs-0 tnum">{rating()}</span>
+                  </>
+                }
+              >
+                {[1, 2, 3, 4, 5].map((index) =>
+                  index <= rating() ? (
+                    <IconStarFilled size={11} aria-hidden="true" />
+                  ) : (
+                    <IconStar size={11} class="opacity-50" aria-hidden="true" />
+                  ),
+                )}
+              </Show>
+            </span>
+          </Show>
+
+          <span class="min-w-0 flex-1" />
+
+          {/* 颜色标记：悬停/选中时底纹被盖住，用它兜底让人看到标色 */}
+          <Show when={local.colorLabel}>
+            {(label) => (
+              <span
+                class={["size-2 shrink-0 rounded-full", LABEL_DOT[label()]].join(" ")}
+                aria-label={t("grid.color_label")}
+              />
+            )}
+          </Show>
+
+          <Show when={local.flag === "pick"}>
+            <IconStarFilled size={11} aria-hidden="true" />
+          </Show>
+        </div>
+      </Show>
+
+      {/* ── 底部信息条：文件名 + 类型（+ 加锁）───────────────── */}
+      <div
+        class={[
+          "pointer-events-none absolute inset-x-0 bottom-0 flex items-center gap-1",
+          "bg-(--tile-bar-scrim) px-(--tile-pad) text-fg-1 transition-opacity",
+          "opacity-0 group-hover/tile:opacity-100 group-focus-within/tile:opacity-100",
+          infoAlwaysOn() ? "opacity-100" : "",
+        ].join(" ")}
+        style={{ height: "var(--tile-bar-h)" }}
+      >
+        <span class="min-w-0 flex-1 truncate text-fs-1" title={local.label}>
           {displayName()}
         </span>
         <Show when={local.tag}>
-          <span class="shrink-0 rounded-ui bg-surface-track px-1 text-fs-0 leading-tight text-fg-3">
-            {local.tag}
-          </span>
+          <span class="shrink-0 text-fs-0 text-fg-2">{local.tag}</span>
         </Show>
-        {/*
-          扩展位（将来）：星标 / 旗标 / 颜色标记放这一行的**右端**。
-          它们属于「这张照片的属性」，放在文件名行比叠在图上更好读，也不挡画面。
-        */}
-        <Show when={local.extra}>{local.extra}</Show>
+        <Show when={local.locked}>
+          <IconLock
+            size={11}
+            class="shrink-0 text-fg-2"
+            aria-label={t("grid.locked")}
+          />
+        </Show>
       </div>
     </div>
   );

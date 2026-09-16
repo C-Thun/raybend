@@ -31,6 +31,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(db::DbState::default())
         .manage(thumbs::SourcesThumbs::default())
+        // 浏览过的目录的元信息缓存（会话级内存，不落盘 —— 见 plans/photo-meta-and-tile-display.md）
+        .manage(source::SourcesMetaCache::default())
         // ⚠️ **导入批次表必须注册**：漏了它，`app.state::<ImportBatches>()` 一调用就 panic
         // （`state() called before manage()`），而且**编译期不报**。真机踩过：
         // 导入点下去没反应、弹窗空着、连「取消导入」都卡住（命令 panic 后 JS 的 promise
@@ -52,6 +54,7 @@ pub fn run() {
             source::source_count,
             source::source_times,
             source::source_paths_status,
+            source::dir_meta_ensure,
             source::file_exif,
             // ── 缩略图（未入库的源文件也要能出图）──
             thumbs::thumb_get,

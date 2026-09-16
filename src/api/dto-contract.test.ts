@@ -29,9 +29,11 @@ import type {
   ImportPrecheck,
   ImportRunProgress,
   ImportStart,
+  MetaFile,
   ImportPlannedRun,
   InterruptedRun,
   PhotoCount,
+  PhotoMeta,
   RecentDir,
   RepositoryPath,
   RepositoryProbe,
@@ -74,6 +76,17 @@ const RECENT_DIR_KEYS = [
   "usedAt",
 ] as const satisfies readonly (keyof RecentDir)[];
 const VOLUME_KEYS = ["kind", "kindLabel", "path"] as const satisfies readonly (keyof Volume)[];
+const META_FILE_KEYS = [
+  "fileSize",
+  "mtimeMs",
+  "relative",
+] as const satisfies readonly (keyof MetaFile)[];
+const PHOTO_META_KEYS = [
+  "height",
+  "orientation",
+  "relative",
+  "width",
+] as const satisfies readonly (keyof PhotoMeta)[];
 const DIR_ENTRY_KEYS = ["name", "path"] as const satisfies readonly (keyof DirEntry)[];
 const SOURCE_ITEM_KEYS = [
   "ext",
@@ -238,6 +251,8 @@ const KEY_TABLES = {
   Volume: checkKeys<Volume, typeof VOLUME_KEYS>(VOLUME_KEYS),
   DirEntry: checkKeys<DirEntry, typeof DIR_ENTRY_KEYS>(DIR_ENTRY_KEYS),
   SourceItem: checkKeys<SourceItem, typeof SOURCE_ITEM_KEYS>(SOURCE_ITEM_KEYS),
+  MetaFile: checkKeys<MetaFile, typeof META_FILE_KEYS>(META_FILE_KEYS),
+  PhotoMeta: checkKeys<PhotoMeta, typeof PHOTO_META_KEYS>(PHOTO_META_KEYS),
   SourceScan: checkKeys<SourceScan, typeof SOURCE_SCAN_KEYS>(SOURCE_SCAN_KEYS),
   TimeEntry: checkKeys<TimeEntry, typeof TIME_ENTRY_KEYS>(TIME_ENTRY_KEYS),
   PhotoCount: checkKeys<PhotoCount, typeof PHOTO_COUNT_KEYS>(PHOTO_COUNT_KEYS),

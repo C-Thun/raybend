@@ -19,6 +19,17 @@
     "name",
     "path"
   ],
+  "MetaFile": [
+    "fileSize",
+    "mtimeMs",
+    "relative"
+  ],
+  "PhotoMeta": [
+    "height",
+    "orientation",
+    "relative",
+    "width"
+  ],
   "SourceItem": [
     "ext",
     "fileName",

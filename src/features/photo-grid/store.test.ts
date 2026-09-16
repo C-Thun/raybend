@@ -48,6 +48,8 @@ interface FakeState {
   times: Map<string, TimeEntry>;
   settings: Map<string, string>;
   calls: string[];
+  /** 元信息命令要返回什么（不给就是空） */
+  dirMeta?: import("../../api/types.ts").PhotoMeta[];
   holdScan: boolean;
   failScan: boolean;
   scanRoots: string[];
@@ -67,6 +69,11 @@ function fakeApi(overrides: Partial<FakeState> = {}) {
   const pending: Array<() => void> = [];
 
   const api: PhotoGridApi = {
+    async dirMetaEnsure(_dir, files) {
+      state.calls.push(`dirMeta:${files.length}`);
+      // 默认什么都不给：比例退回占位（专门的用例会覆盖它）
+      return state.dirMeta ?? [];
+    },
     async scanSourceDir(path) {
       state.calls.push(`scan:${path}`);
       state.scanRoots.push(path);
@@ -467,4 +474,42 @@ test("缩略图：按需请求，命中后不再重复取", async () => {
     state.calls.filter((call) => call === "thumb:/src/a.jpg").length,
     1,
   );
+});
+
+test("元信息：拿到的宽高决定展示比例（竖图就是竖的）", async () => {
+  const { api, state } = fakeApi();
+  state.dirMeta = [
+    { relative: "a.jpg", width: 4000, height: 3000, orientation: 1 },
+    // 竖拍：后端已经应用过方向，所以这里宽高是反的
+    { relative: "b.jpg", width: 3000, height: 4000, orientation: 6 },
+    // 全景：超出 3:1 → 夹到 3:1
+    { relative: "c.jpg", width: 8000, height: 1000, orientation: 1 },
+  ];
+  state.items = [item("a.jpg"), item("b.jpg"), item("c.jpg")];
+  const store = createPhotoGridStore({ api });
+  store.setSourceDir("/photos");
+  await flush();
+  await flush(); // 元信息是「不阻塞出网格」的后台请求，多刷一次等它落地
+
+  const items = store.items();
+  const byName = new Map(items.map((item) => [item.fileName, item.path]));
+  assert.ok(Math.abs(store.aspectOf(byName.get("a.jpg")!) - 4 / 3) < 1e-9);
+  assert.ok(
+    Math.abs(store.aspectOf(byName.get("b.jpg")!) - 0.75) < 1e-9,
+    "竖拍比例要小于 1（说明方向被用上了）",
+  );
+  assert.equal(store.aspectOf(byName.get("c.jpg")!), 3, "全景夹到 3:1");
+});
+
+test("元信息：读不到就用默认占位比例，不报错", async () => {
+  const { api, state } = fakeApi(); // dirMeta 不给 → 空
+  state.items = [item("a.jpg")];
+  const store = createPhotoGridStore({ api });
+  store.setSourceDir("/photos");
+  await flush();
+  await flush();
+  const first = store.items()[0];
+  assert.ok(first !== undefined);
+  // 默认占位 3:2
+  assert.ok(Math.abs(store.aspectOf(store.items()[0]!.path) - 1.5) < 1e-9);
 });

@@ -21,7 +21,7 @@
  */
 
 import type { SourceItem } from "../../api/types.ts";
-import { tileImageHeight } from "../../lib/tile-flow.ts";
+import { tileRowHeight } from "../../lib/tile-flow.ts";
 import type { TimeGrouping } from "../../lib/time-group.ts";
 
 /** 照片在网格里的 id：直接用路径（唯一、稳定、与后端对齐） */
@@ -81,13 +81,8 @@ export interface GridRowsInput {
   /** 一行放几个（由 `computeTileFlow` 给出） */
   columns: number;
   /** 单元格宽（当前档位） */
-  cellWidth: number;
-  /** 字幕条高（读 `--caption-h` 令牌） */
-  captionHeight: number;
-  /** tile 四周内边距（读 `--tile-pad`）—— 图片四角圆角就是它让出来的 */
-  tilePad: number;
-  /** 图片与文件名之间的间距（读 `--tile-gap`） */
-  tileGap: number;
+  /** 正方外框的边长（读档位；信息条是覆盖层，不占高度） */
+  cellSize: number;
   /**
    * 按时间分组的结果；**省略 = 平铺模式**。
    * 由调用方用 `groupByTime` 算好传进来（本函数保持纯函数，不自己算分组）。
@@ -100,26 +95,11 @@ export function buildGridRows(input: GridRowsInput): GridRowModel[] {
   const columns = Number.isFinite(input.columns)
     ? Math.max(1, Math.floor(input.columns))
     : 1;
-  const captionHeight =
-    Number.isFinite(input.captionHeight) && input.captionHeight > 0
-      ? input.captionHeight
-      : 0;
-  const positive = (value: number): number =>
-    Number.isFinite(value) && value > 0 ? value : 0;
-  const tilePad = positive(input.tilePad);
-  const tileGap = positive(input.tileGap);
   /*
-   * 一行 tile 的总高 = 上内边距 + 画面高 + 图文间距 + 字幕条 + 下内边距。
-   * 少算任何一项，字幕条都会被下一行**切掉一半**（2026-09-16 人类截图报的就是这个）。
+   * 行高 = **正方外框的边长**。信息条（文件名那一条）是**覆盖层**：
+   * 它浮在外框底边上，不占高度 —— 这也是为什么行高能这么简单。
    */
-  /*
-   * 画面高要按**内容盒**宽度算（单元格宽减去左右内边距）—— 画面区现在是
-   * `w-full + aspect-ratio` 由 CSS 排的，宽度就是内容盒宽。两边用同一个口径，
-   * 行高才会等于实际渲染出来的高度（不一致就会被行边界切掉）。
-   */
-  const contentWidth = Math.max(1, input.cellWidth - tilePad * 2);
-  const rowHeight =
-    tilePad * 2 + tileImageHeight(contentWidth) + tileGap + captionHeight;
+  const rowHeight = tileRowHeight(input.cellSize);
 
   if (!input.grouping) {
     return chunkTiles(input.items, columns, rowHeight, "tiles");

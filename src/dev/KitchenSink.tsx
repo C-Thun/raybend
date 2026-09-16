@@ -583,6 +583,27 @@ export default function KitchenSink() {
             note="尺寸由 --tile-cell-w/h 决定（JS 可改）；Space=选中、Enter=打开"
           >
             <div data-demo="tile" class="flex flex-wrap items-start gap-3">
+              {/* 库内样例：顶部标记区（星标/颜色/旗标）+ 加锁；以及 4:3 的宽高比 */}
+              <Tile
+                label="P1000025.RW2"
+                tag="RW2"
+                src={demoImage()}
+                aspect={4 / 3}
+                context="library"
+                rating={4}
+                colorLabel="blue"
+                locked
+              />
+              <Tile
+                label="P1000026.JPG"
+                tag="JPG"
+                src={demoImage()}
+                aspect={3 / 4}
+                context="library"
+                rating={2}
+                colorLabel="red"
+                selected
+              />
             <Row label="有图 / 选中 / 悬停">
               <Tile
                 label="DSC_0192.NEF"

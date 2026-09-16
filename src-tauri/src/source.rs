@@ -11,10 +11,13 @@
 //! 真正的活在 `spawn_blocking` 里干（见 [`blocking`]）。
 
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
+use raybend::media::meta_cache::{MetaCache, MetaInput};
 
 use raybend::media::source;
 use raybend::store::{recent, volumes};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Runtime, State};
 
 use crate::db::DbState;
@@ -36,6 +39,88 @@ where
     tauri::async_runtime::spawn_blocking(f)
         .await
         .map_err(|e| format!("后台任务失败：{e}"))?
+}
+
+// ---------------------------------------------------------------------------
+// 目录元信息（宽高 + 方向）：会话级内存缓存
+// ---------------------------------------------------------------------------
+
+/// 前端传进来的一条「这个文件现在是什么样」——直接来自它已经拿到的目录清单，
+/// 因此**不需要再 read_dir 一次**（也不会与界面上的条目错位）。
+// 入参也要 ：契约测试靠它把**真实键名**取出来对 JSON 断言
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MetaFileView {
+    /// 目录内的相对名（非递归扫描下就是文件名）
+    pub relative: String,
+    pub file_size: u64,
+    pub mtime_ms: i64,
+}
+
+/// 一条照片元信息给前端的样子。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PhotoMetaView {
+    pub relative: String,
+    /// **已应用方向**的宽（竖图就是 width < height）
+    pub width: u32,
+    pub height: u32,
+    /// 原始 EXIF 方向（1..8）
+    pub orientation: u16,
+}
+
+/// 「浏览过的目录」的元信息缓存本体（会话级，进程退出即丢）。
+///
+/// 用 `Arc<Mutex<...>>` 而不是直接放 `Mutex<MetaCache>`：命令是异步的，
+/// 要把锁搬进 `spawn_blocking` 的闭包里 —— 那样闭包必须是 `'static`，
+/// 拿 `State` 借来的引用过不去（与 `SourcesThumbs` 用 `Arc` 的理由相同）。
+#[derive(Clone, Default)]
+pub struct SourcesMetaCache(pub Arc<Mutex<MetaCache>>);
+
+/// 确保某个目录下这批文件的元信息是新鲜的（宽高 + 方向）。
+///
+/// 读头是 I/O（慢卡上可能几百毫秒），所以走 `spawn_blocking`，**不占 UI 线程**。
+/// 缓存命中时几乎不花时间（一次哈希查找）。
+#[tauri::command]
+pub async fn dir_meta_ensure(
+    state: tauri::State<'_, SourcesMetaCache>,
+    path: String,
+    files: Vec<MetaFileView>,
+) -> Result<Vec<PhotoMetaView>, String> {
+    let cache = Arc::clone(&state.0);
+    blocking(move || {
+        let dir = PathBuf::from(&path);
+        let inputs: Vec<MetaInput> = files
+            .iter()
+            .map(|file| MetaInput {
+                relative: file.relative.clone(),
+                file_size: file.file_size,
+                mtime_ms: file.mtime_ms,
+            })
+            .collect();
+
+        let mut guard = cache
+            .lock()
+            .map_err(|_| "目录元信息缓存被污染（锁中毒）".to_string())?;
+        let batch = guard
+            .ensure_dir(&dir, &inputs, Instant::now(), |abs| {
+                raybend::media::meta::read_photo_meta(abs)
+            })
+            .map_err(|error| error.to_string())?;
+        drop(guard);
+
+        Ok(files
+            .iter()
+            .zip(batch.metas.iter())
+            .map(|(file, meta)| PhotoMetaView {
+                relative: file.relative.clone(),
+                width: meta.width,
+                height: meta.height,
+                orientation: meta.orientation,
+            })
+            .collect())
+    })
+    .await
 }
 
 // ---------------------------------------------------------------------------

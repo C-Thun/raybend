@@ -18,7 +18,8 @@ use crate::import::{ImportPrecheckDto, ImportStartDto, InterruptedRunDto, Planne
 use crate::repo::{RepositorySettingsDto, TemplatePreviewDto};
 use crate::repo::{RepositoryPathDto, RepositoryProbeDto, RepositoryViewDto};
 use crate::source::{
-    DirEntryView, FileExifView, PhotoCountView, RecentDirView, SourceItemView, SourceScanView,
+    DirEntryView, FileExifView, MetaFileView, PhotoCountView, PhotoMetaView, RecentDirView,
+    SourceItemView, SourceScanView,
     TimeEntryView, VolumeView,
 };
 
@@ -136,6 +137,27 @@ fn import_start_keys_match_contract() {
 }
 
 #[test]
+fn meta_file_keys_match_contract() {
+    let input = MetaFileView {
+        relative: "a.jpg".to_string(),
+        file_size: 10,
+        mtime_ms: 20,
+    };
+    assert_eq!(keys_of_value(&input), contract_keys("MetaFile"));
+}
+
+#[test]
+fn photo_meta_keys_match_contract() {
+    let meta = PhotoMetaView {
+        relative: "a.jpg".to_string(),
+        width: 4000,
+        height: 3000,
+        orientation: 1,
+    };
+    assert_eq!(keys_of_value(&meta), contract_keys("PhotoMeta"));
+}
+
+#[test]
 fn interrupted_run_keys_match_contract() {
     let dto = InterruptedRunDto {
         run_id: 1,
@@ -250,6 +272,9 @@ fn every_contract_entry_has_a_test() {
         "RepositoryPath",
         "RepositoryProbe",
         "ThumbCacheStats",
+        // 目录元信息（M1-10：宽高 + 方向）
+        "MetaFile",
+        "PhotoMeta",
         // 导入（M1-6）
         "ImportBatchProgress",
         "ImportRunProgress",

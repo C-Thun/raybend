@@ -58,6 +58,31 @@ export interface DirEntry {
 }
 
 /** 中列里的一张照片。 */
+/**
+ * 前端交给 Rust 的「这个文件现在是什么样」（来自它已经拿到的目录清单，
+ * 所以后端不需要再 read_dir 一次）。`dir_meta_ensure` 的入参。
+ */
+export interface MetaFile {
+  /** 目录内的相对名（非递归扫描下就是文件名） */
+  relative: string;
+  fileSize: number;
+  mtimeMs: number;
+}
+
+/**
+ * 一张照片的展示用元信息。
+ *
+ * `width` / `height` **已经应用过 EXIF 方向** —— 竖拍照片在这里就是 `width < height`。
+ * `0` 表示「读不出尺寸」（罕见格式 / 坏文件），界面按默认比例占位。
+ */
+export interface PhotoMeta {
+  relative: string;
+  width: number;
+  height: number;
+  /** 原始 EXIF 方向（1..8） */
+  orientation: number;
+}
+
 export interface SourceItem {
   path: string;
   fileName: string;

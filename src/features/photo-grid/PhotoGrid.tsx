@@ -26,7 +26,6 @@ import {
   Show,
 } from "solid-js";
 import { IconAlertTriangle, IconCalendar } from "@tabler/icons-solidjs";
-import { Badge } from "../../components/ui/Badge.tsx";
 import { Tile } from "../../components/ui/Tile.tsx";
 import { VirtualGrid } from "../../components/ui/VirtualGrid.tsx";
 import { createTokenPx } from "../../components/ui/tokens.ts";
@@ -63,9 +62,6 @@ export function PhotoGrid(props: PhotoGridProps) {
   const [width, setWidth] = createSignal(0);
 
   // 密度相关的高度/间距从令牌读（切档时重读，见 components/ui/tokens.ts）
-  const captionHeight = createTokenPx("--caption-h", 26);
-  const tilePad = createTokenPx("--tile-pad", 3);
-  const tileGap = createTokenPx("--tile-gap", 3);
   const gap = createTokenPx("--gap", 4);
 
   onMount(() => {
@@ -96,10 +92,7 @@ export function PhotoGrid(props: PhotoGridProps) {
     buildGridRows({
       items: store.displayItems(),
       columns: flow().columns,
-      cellWidth: cellWidth(),
-      captionHeight: captionHeight(),
-      tilePad: tilePad(),
-      tileGap: tileGap(),
+      cellSize: cellWidth(),
       grouping: store.grouping(),
     });
 
@@ -188,7 +181,7 @@ export function PhotoGrid(props: PhotoGridProps) {
            * 只给**宽度**：画面区高度由 `Tile` 里的 `aspect-ratio` 自己排
            * （`--tile-cell-h` 已废除 —— 那个「JS 算好的像素高」正是上一版错位的来源）。
            */
-          "--tile-cell-w": `${cellWidth()}px`,
+          "--tile-cell": `${cellWidth()}px`,
         }}
       >
         <Show when={viewer.state().active}>
@@ -312,13 +305,17 @@ function TileCell(props: {
   return (
     <div
       class="relative"
-      style={{ width: "var(--tile-cell-w)" }}
+      // **正方外框**：边长就是尺寸档。行高恒定才有得拖（见 Tile 的模块注释）
+      style={{ width: "var(--tile-cell)", height: "var(--tile-cell)" }}
       // 双击进看图（设计稿 §3.2 的第一条）；单击仍是选中
       onDblClick={() => props.onOpen(id())}
     >
       <Tile
         label={props.item.fileName}
         tag={props.item.ext?.toUpperCase() ?? undefined}
+        aspect={props.store.aspectOf(id())}
+        // 小尺寸档（96/120/144）星标退化成「一颗星 + 数字」
+        compact={props.store.tileStep() <= 2}
         src={thumb().url ?? undefined}
         selected={selected()}
         loading={thumb().status === "loading" || thumb().status === "idle"}
@@ -333,11 +330,6 @@ function TileCell(props: {
           props.store.clickItem(id(), mode);
         }}
       />
-      <Show when={excluded()}>
-        <span class="pointer-events-none absolute end-1 top-1">
-          <Badge tone="neutral">{t("grid.excluded")}</Badge>
-        </span>
-      </Show>
     </div>
   );
 }

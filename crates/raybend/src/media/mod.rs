@@ -16,6 +16,8 @@
 pub mod diff;
 pub mod exif;
 pub mod kind;
+pub mod meta;
+pub mod meta_cache;
 pub mod scan;
 pub mod source;
 

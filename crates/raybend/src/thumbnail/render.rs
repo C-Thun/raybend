@@ -39,7 +39,7 @@ pub const SCREEN_LONG_EDGE: u32 = 1920;
 /// JPEG 质量（用户 2026-09-15 定：q82）。
 pub const JPEG_QUALITY: u8 = 82;
 /// 渲染管线版本：**算法一改就 +1**（缓存靠它自动失效）。
-pub const PIPELINE_VERSION: u32 = 1;
+pub const PIPELINE_VERSION: u32 = 2;
 
 /// 缩略图尺度。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
@@ -79,6 +79,14 @@ impl SizeClass {
         [Self::Grid, Self::Strip, Self::Screen]
     }
 
+    /// 这一档要不要按 [`MAX_DISPLAY_ASPECT`] 夹取？
+    ///
+    /// 只有网格与胶片带夹取；看图档保持原始比例。
+    #[must_use]
+    pub const fn clamps_display_aspect(self) -> bool {
+        matches!(self, Self::Grid | Self::Strip)
+    }
+
     #[must_use]
     pub fn parse(s: &str) -> Option<Self> {
         match s {
@@ -94,9 +102,9 @@ impl SizeClass {
 #[must_use]
 pub const fn render_sig(size: SizeClass) -> &'static str {
     match size {
-        SizeClass::Grid => "jpeg-q82-grid-v1",
-        SizeClass::Strip => "jpeg-q82-strip-v1",
-        SizeClass::Screen => "jpeg-q86-screen-v1",
+        SizeClass::Grid => "jpeg-q82-grid-v2",
+        SizeClass::Strip => "jpeg-q82-strip-v2",
+        SizeClass::Screen => "jpeg-q86-screen-v2",
     }
 }
 
@@ -115,7 +123,17 @@ pub struct Thumb {
 /// 还是去读它的配对位图（`REPOSITORY.md` §4.1）。
 pub fn render_file(path: &Path, size: SizeClass) -> Result<Option<Thumb>> {
     let bytes = std::fs::read(path)?;
-    render_bytes(&bytes, size, None)
+    /*
+     * **方向必须在这里读**：竖拍照片（EXIF 方向 6/8）不摆正就会**躺着**显示 ——
+     * 这是 2026-09-16 人类报的现象（「所有纵拍图全显示成横过来了」）。
+     *
+     * 用**已经读进来的字节**解析（`exif::read_bytes`），不额外开文件；
+     * 而且这条路径只在缓存未命中时走，成本可以忽略（读头实测 ~0.02ms/张）。
+     */
+    let orientation = crate::media::exif::read_bytes(&bytes)
+        .and_then(|data| data.orientation)
+        .map(|raw| crate::media::meta::normalize_orientation(Some(raw)));
+    render_bytes(&bytes, size, orientation)
 }
 
 /// 从内存渲染；`orientation` 是 EXIF 的 1..8（给了就摆正）。
@@ -128,6 +146,52 @@ pub fn render_bytes(
         return Ok(None); // 不是能解码的图像（RAW、损坏文件…）
     };
     encode(img, size, orientation, false).map(Some)
+}
+
+/// 网格/胶片带小图的**最大展示宽高比**（两侧都算：3:1 与 1:3）。
+///
+/// 人类 2026-09-16 定的口径：**超出就居中截取**。理由是网格是「浏览」，
+/// 全景图按原始比例塞进正方外框会缩成一条细缝，谁也看不清；
+/// 截取到 3:1 之后至少看得出是全景、也有内容可看。
+///
+/// **只作用于小图**（`Grid` / `Strip`）—— 看图用的 `Screen` 档必须保持原始比例，
+/// 否则全景照片在查看器里就看不成完整的了。
+pub const MAX_DISPLAY_ASPECT: f64 = 3.0;
+
+/// 按最大宽高比算出**居中截取**的矩形（`x, y, w, h`）。
+///
+/// 比例在范围内 → 原样返回；超出 → 只砍长的那一边、两边各砍一半（居中）。
+/// 纯函数，好测；`u32` 进出，不碰像素。
+#[must_use]
+pub fn clamp_rect(width: u32, height: u32, max_aspect: f64) -> (u32, u32, u32, u32) {
+    if width == 0 || height == 0 || !max_aspect.is_finite() || max_aspect <= 0.0 {
+        return (0, 0, width, height);
+    }
+    let aspect = f64::from(width) / f64::from(height);
+    if aspect > max_aspect {
+        // 太宽：砍宽度
+        let target = (f64::from(height) * max_aspect).round() as u32;
+        let target = target.clamp(1, width);
+        return ((width - target) / 2, 0, target, height);
+    }
+    if aspect < 1.0 / max_aspect {
+        // 太高：砍高度。要让宽高比达到 1:max，高度取 `宽 × max`
+        //（这里曾经写成除以 max —— 纯函数测试当场抓到）
+        let target = (f64::from(width) * max_aspect).round() as u32;
+        let target = target.clamp(1, height);
+        return (0, (height - target) / 2, width, target);
+    }
+    (0, 0, width, height)
+}
+
+/// 按最大展示宽高比居中截取（`Grid` / `Strip` 用；`Screen` 不调它）。
+#[must_use]
+pub fn clamp_display_aspect(img: DynamicImage, max_aspect: f64) -> DynamicImage {
+    let (x, y, width, height) = clamp_rect(img.width(), img.height(), max_aspect);
+    if (width, height) == (img.width(), img.height()) {
+        return img;
+    }
+    img.crop_imm(x, y, width, height)
 }
 
 /// 缩放后编码成 JPEG。
@@ -144,6 +208,15 @@ pub fn encode(
     let img = match orientation {
         Some(o) if o != 1 => apply_orientation(&img, o),
         _ => img,
+    };
+    /*
+     * 小图（网格 / 胶片带）先按 3:1 居中截取，再缩放；
+     * `Screen`（看图）不截取 —— 查看器必须看到完整照片（2026-09-16 口径）。
+     */
+    let img = if size.clamps_display_aspect() {
+        clamp_display_aspect(img, MAX_DISPLAY_ASPECT)
+    } else {
+        img
     };
     let resized = resize_for_thumb(img, size.long_edge());
 
@@ -346,6 +419,34 @@ mod tests {
         buf
     }
 
+    /// 往一张真 JPEG 里插一段只含 `Orientation` 的 EXIF（APP1）——
+    /// 用来验「竖拍照片必须摆正」（人类 2026-09-16 报的现象）。
+    fn jpeg_with_orientation(jpeg: &[u8], orientation: u16) -> Vec<u8> {
+        let mut tiff: Vec<u8> = Vec::new();
+        tiff.extend_from_slice(b"MM\x00\x2a");
+        tiff.extend_from_slice(&8u32.to_be_bytes());
+        tiff.extend_from_slice(&1u16.to_be_bytes()); // 一个条目
+        tiff.extend_from_slice(&0x0112u16.to_be_bytes()); // Orientation
+        tiff.extend_from_slice(&3u16.to_be_bytes()); // SHORT
+        tiff.extend_from_slice(&1u32.to_be_bytes());
+        let mut slot = [0u8; 4];
+        slot[..2].copy_from_slice(&orientation.to_be_bytes());
+        tiff.extend_from_slice(&slot);
+        tiff.extend_from_slice(&0u32.to_be_bytes()); // 没有下一个 IFD
+
+        let mut payload = Vec::from(*b"Exif\x00\x00");
+        payload.extend_from_slice(&tiff);
+        let mut segment = vec![0xFF, 0xE1];
+        segment.extend_from_slice(&u16::try_from(payload.len() + 2).unwrap().to_be_bytes());
+        segment.extend_from_slice(&payload);
+
+        // APP1 要插在 SOI（FF D8）之后
+        let mut out = Vec::from(&jpeg[..2]);
+        out.extend_from_slice(&segment);
+        out.extend_from_slice(&jpeg[2..]);
+        out
+    }
+
     fn png_of(w: u32, h: u32) -> Vec<u8> {
         let img = RgbImage::from_pixel(w, h, Rgb([10, 20, 30]));
         let mut buf = std::io::Cursor::new(Vec::new());
@@ -374,10 +475,23 @@ mod tests {
 
     #[test]
     fn render_sig_changes_with_pipeline_version() {
-        // 这条测试的意义：提醒「改算法要改版本号」，否则旧缓存会被当新缓存用
-        assert!(render_sig(SizeClass::Grid).contains("v1"));
+        /*
+         * 这条测试的意义：提醒「改算法要改版本号」，否则旧缓存会被当新缓存用。
+         *
+         * 现在改成**互相校验**：签名串里的版本号必须等于 `PIPELINE_VERSION` ——
+         * 只改一处（改常量忘了改字面量，或反过来）就会红，比写死一个数字可靠。
+         * （2026-09-16 修「竖拍躺着」时就是这么发现的：改了 `render_file` 的像素输出，
+         * 必须同时升这两处，否则旧缓存会被当成新的用。）
+         */
+        let expected = format!("v{PIPELINE_VERSION}");
+        for size in SizeClass::all() {
+            assert!(
+                render_sig(size).contains(&expected),
+                "{size:?} 的签名里要带上 {expected}"
+            );
+        }
         assert_ne!(render_sig(SizeClass::Grid), render_sig(SizeClass::Strip));
-        assert_eq!(PIPELINE_VERSION, 1);
+        assert_ne!(render_sig(SizeClass::Grid), render_sig(SizeClass::Screen));
     }
 
     // ---------- 渲染 ----------
@@ -578,5 +692,118 @@ mod tests {
         // 占位图与原图走同一条编码路径 → 尺寸规则一致，UI 不用分情况
         let p = placeholder(MediaKind::Raw, SizeClass::Grid).unwrap();
         assert!(p.data.len() > 200, "JPEG 不该是空壳");
+    }
+
+    #[test]
+    fn portrait_photo_is_rotated_upright() {
+        /*
+         * 竖拍照片在文件里通常是「横着存的 + EXIF 方向 6」——
+         * 不摆正就会躺下显示（2026-09-16 人类报的现象）。
+         * 这里写一张 80×40 的图 + 方向 6 → 缩略图必须是**竖的**（高 > 宽）。
+         */
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("portrait.jpg");
+        std::fs::write(&path, jpeg_with_orientation(&jpeg_of(80, 40, [120, 90, 60]), 6)).unwrap();
+
+        let thumb = render_file(&path, SizeClass::Grid).unwrap().unwrap();
+        assert!(
+            thumb.height > thumb.width,
+            "方向 6 的竖拍图应当摆正成竖的，实际 {}×{}",
+            thumb.width,
+            thumb.height
+        );
+    }
+
+    #[test]
+    fn landscape_photo_is_left_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("landscape.jpg");
+        std::fs::write(&path, jpeg_with_orientation(&jpeg_of(80, 40, [30, 60, 90]), 1)).unwrap();
+
+        let thumb = render_file(&path, SizeClass::Grid).unwrap().unwrap();
+        assert!(
+            thumb.width > thumb.height,
+            "方向 1 的横拍图不该被转，实际 {}×{}",
+            thumb.width,
+            thumb.height
+        );
+    }
+
+
+    // ---------- 3:1 展示比例夹取（2026-09-16 口径）----------
+
+    #[test]
+    fn clamp_rect_centers_and_only_cuts_the_long_side() {
+        // 范围内 → 原样
+        assert_eq!(clamp_rect(4000, 3000, 3.0), (0, 0, 4000, 3000));
+        // 太宽（8:1 → 3:1）：砍宽度、居中
+        let (x, y, w, h) = clamp_rect(8000, 1000, 3.0);
+        assert_eq!((y, h), (0, 1000));
+        assert_eq!(w, 3000);
+        assert_eq!(x, (8000 - 3000) / 2, "居中：两边各砍一半");
+        // 太高（1:8 → 1:3）：砍高度、居中
+        let (x, y, w, h) = clamp_rect(1000, 8000, 3.0);
+        assert_eq!((x, w), (0, 1000));
+        assert_eq!(h, 3000);
+        assert_eq!(y, (8000 - 3000) / 2);
+        // 退化输入不炸（0 尺寸 / 非法比例）
+        assert_eq!(clamp_rect(0, 100, 3.0), (0, 0, 0, 100));
+        assert_eq!(clamp_rect(100, 100, 0.0), (0, 0, 100, 100));
+        assert_eq!(clamp_rect(100, 100, f64::NAN), (0, 0, 100, 100));
+    }
+
+    #[test]
+    fn grid_clamps_a_panorama_but_screen_keeps_it_whole() {
+        // 8:1 的全景
+        let panorama = jpeg_of(800, 100, [10, 120, 200]);
+        let grid = render_bytes(&panorama, SizeClass::Grid, None)
+            .unwrap()
+            .unwrap();
+        let grid_aspect = f64::from(grid.width) / f64::from(grid.height);
+        assert!(
+            (grid_aspect - 3.0).abs() < 0.05,
+            "小图应当夹到 ~3:1，实际 {}×{}（{grid_aspect:.2}）",
+            grid.width,
+            grid.height
+        );
+
+        let screen = render_bytes(&panorama, SizeClass::Screen, None)
+            .unwrap()
+            .unwrap();
+        let screen_aspect = f64::from(screen.width) / f64::from(screen.height);
+        assert!(
+            (screen_aspect - 8.0).abs() < 0.05,
+            "看图档必须保持原始 8:1（全景要看全），实际 {}×{}",
+            screen.width,
+            screen.height
+        );
+    }
+
+    #[test]
+    fn tall_photos_clamp_the_other_way() {
+        let tall = jpeg_of(100, 800, [200, 60, 60]);
+        let grid = render_bytes(&tall, SizeClass::Grid, None)
+            .unwrap()
+            .unwrap();
+        let aspect = f64::from(grid.height) / f64::from(grid.width);
+        assert!(
+            (aspect - 3.0).abs() < 0.05,
+            "竖全景应当夹到 1:3，实际 {}×{}",
+            grid.width,
+            grid.height
+        );
+    }
+
+    #[test]
+    fn normal_aspect_is_untouched_by_the_clamp() {
+        let four_thirds = jpeg_of(800, 600, [90, 90, 90]);
+        let grid = render_bytes(&four_thirds, SizeClass::Grid, None)
+            .unwrap()
+            .unwrap();
+        let aspect = f64::from(grid.width) / f64::from(grid.height);
+        assert!(
+            (aspect - 4.0 / 3.0).abs() < 0.02,
+            "4:3 在范围内，不该被裁，实际 {aspect:.3}"
+        );
     }
 }
