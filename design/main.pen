@@ -4225,7 +4225,6 @@
         "density": "compact"
       },
       "width": 760,
-      "height": 250,
       "fill": "$surface-main",
       "cornerRadius": 6,
       "layout": "vertical",
@@ -4508,6 +4507,62 @@
                   "name": "DemoLabel",
                   "fill": "$fg-3",
                   "content": "选中 Selected（主色底）",
+                  "fontFamily": "Inter",
+                  "fontSize": 14,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "V1kAy",
+          "name": "Row / 窗口三键",
+          "gap": 24,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "L3b92F",
+              "name": "RowDemo / 关闭键 Hover",
+              "layout": "vertical",
+              "gap": 6,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "U8MQZ4",
+                  "name": "DemoRow / 关闭键 Hover",
+                  "width": 120,
+                  "height": 28,
+                  "fill": "$danger",
+                  "cornerRadius": 4,
+                  "gap": 8,
+                  "padding": [
+                    0,
+                    10
+                  ],
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "KuF2J",
+                      "name": "DemoGlyph",
+                      "fill": "$fg-on-danger",
+                      "content": "×",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "xP0c7",
+                  "name": "DemoLabel",
+                  "fill": "$fg-3",
+                  "content": "关闭键 指向 Hover（danger）",
                   "fontFamily": "Inter",
                   "fontSize": 14,
                   "fontWeight": "normal"
@@ -10546,6 +10601,1656 @@
                       ]
                     }
                   ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "HFzJZ",
+      "x": 7216,
+      "y": -34,
+      "name": "Dialog / 新建库",
+      "width": 480,
+      "fill": "$surface-layer",
+      "cornerRadius": "$radius",
+      "layout": "vertical",
+      "gap": 12,
+      "padding": 16,
+      "children": [
+        {
+          "type": "text",
+          "id": "LkWid",
+          "name": "Dialog Title",
+          "fill": "$fg-1",
+          "content": "新建库",
+          "fontFamily": "Inter",
+          "fontSize": 17,
+          "fontWeight": "600"
+        },
+        {
+          "type": "text",
+          "id": "hb1pa",
+          "name": "Dialog Hint",
+          "fill": "$fg-2",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "库会在这个目录里建立 catalog.db 与 photos/，导入的照片按模版落在 photos/ 之下。",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "kefXK",
+          "name": "Field / 名称",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 4,
+          "children": [
+            {
+              "type": "text",
+              "id": "r4jJU",
+              "name": "Field Label",
+              "fill": "$fg-2",
+              "content": "名称",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "Nfquu",
+              "name": "Input / 名称",
+              "width": "fill_container",
+              "height": 32,
+              "fill": "$surface-track",
+              "cornerRadius": "$radius",
+              "layout": "vertical",
+              "padding": "$pad-x",
+              "justifyContent": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "S1v0HB",
+                  "name": "Input Value",
+                  "fill": "$fg-1",
+                  "content": "我的照片库",
+                  "fontFamily": "Inter",
+                  "fontSize": 14,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "Evjuh",
+          "name": "Field / 库根目录",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 4,
+          "children": [
+            {
+              "type": "text",
+              "id": "WDODH",
+              "name": "Field Label",
+              "fill": "$fg-2",
+              "content": "库根目录",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "ZQyLM",
+              "name": "Input Row",
+              "width": "fill_container",
+              "gap": 8,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "gWzGe",
+                  "name": "Input / 路径",
+                  "width": "fill_container",
+                  "height": 32,
+                  "fill": "$surface-track",
+                  "cornerRadius": "$radius",
+                  "layout": "vertical",
+                  "padding": "$pad-x",
+                  "justifyContent": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "fab9t",
+                      "name": "Input Value",
+                      "fill": "$fg-1",
+                      "content": "D:\\Photos\\Library",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "sem5e",
+                  "name": "Button / 浏览",
+                  "height": 32,
+                  "fill": "$surface-track",
+                  "cornerRadius": "$radius",
+                  "gap": 4,
+                  "padding": "$pad-x",
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "uDC0o",
+                      "name": "Button Label",
+                      "fill": "$fg-1",
+                      "content": "浏览…",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "yd8pv",
+          "name": "Divider",
+          "width": "fill_container",
+          "height": 1,
+          "fill": "$surface-track"
+        },
+        {
+          "type": "frame",
+          "id": "fMovw",
+          "name": "State / 分支提示",
+          "width": "fill_container",
+          "fill": "$surface-track",
+          "cornerRadius": "$radius",
+          "gap": 8,
+          "padding": "$pad-y",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "icon",
+              "id": "s7jnyN",
+              "name": "Icon / info",
+              "width": 14,
+              "height": 14,
+              "icon": "info",
+              "library": "Material Symbols Rounded",
+              "fill": "$fg-2"
+            },
+            {
+              "type": "text",
+              "id": "H3iUU",
+              "name": "State Text",
+              "fill": "$fg-2",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "该目录里已有库「Kowloon Studio」—— 将登记为已有库（不会覆盖）",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "XNtCn",
+          "name": "Dialog Footer",
+          "width": "fill_container",
+          "gap": 8,
+          "justifyContent": "end",
+          "children": [
+            {
+              "type": "frame",
+              "id": "o94p0c",
+              "name": "Button / 取消",
+              "height": 32,
+              "fill": "$surface-track",
+              "cornerRadius": "$radius",
+              "padding": "$pad-x",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "xtZzR",
+                  "name": "Button Label",
+                  "fill": "$fg-1",
+                  "content": "取消",
+                  "fontFamily": "Inter",
+                  "fontSize": 14,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "YGH5h",
+              "name": "Button / 新建库 (primary)",
+              "height": 32,
+              "fill": "$brand",
+              "cornerRadius": "$radius",
+              "padding": "$pad-x",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "NvYXn",
+                  "name": "Button Label",
+                  "fill": "$fg-on-brand",
+                  "content": "新建库",
+                  "fontFamily": "Inter",
+                  "fontSize": 14,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "sccht",
+      "x": 7776,
+      "y": -34,
+      "name": "Dialog / 新建库 · 错误态",
+      "width": 480,
+      "fill": "$surface-layer",
+      "cornerRadius": "$radius",
+      "layout": "vertical",
+      "gap": 12,
+      "padding": 16,
+      "children": [
+        {
+          "type": "text",
+          "id": "hv4j9",
+          "name": "Dialog Title",
+          "fill": "$fg-1",
+          "content": "新建库",
+          "fontFamily": "Inter",
+          "fontSize": 17,
+          "fontWeight": "600"
+        },
+        {
+          "type": "text",
+          "id": "y4Grp",
+          "name": "Dialog Hint",
+          "fill": "$fg-2",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "库会在这个目录里建立 catalog.db 与 photos/，导入的照片按模版落在 photos/ 之下。",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "tSKUZ",
+          "name": "Field / 名称",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 4,
+          "children": [
+            {
+              "type": "text",
+              "id": "u8s0a",
+              "name": "Field Label",
+              "fill": "$fg-2",
+              "content": "名称",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "iBqSs",
+              "name": "Input / 名称",
+              "width": "fill_container",
+              "height": 32,
+              "fill": "$surface-track",
+              "cornerRadius": "$radius",
+              "layout": "vertical",
+              "padding": "$pad-x",
+              "justifyContent": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "WfXYd",
+                  "name": "Input Value",
+                  "fill": "$fg-1",
+                  "content": "我的照片库",
+                  "fontFamily": "Inter",
+                  "fontSize": 14,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "VhsFJ",
+          "name": "Field / 库根目录",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 4,
+          "children": [
+            {
+              "type": "text",
+              "id": "Qg642",
+              "name": "Field Label",
+              "fill": "$fg-2",
+              "content": "库根目录",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "oFeJh",
+              "name": "Input Row",
+              "width": "fill_container",
+              "gap": 8,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "CrkCO",
+                  "name": "Input / 路径",
+                  "width": "fill_container",
+                  "height": 32,
+                  "fill": "$surface-track",
+                  "cornerRadius": "$radius",
+                  "layout": "vertical",
+                  "padding": "$pad-x",
+                  "justifyContent": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "eC0Jh",
+                      "name": "Input Value",
+                      "fill": "$fg-1",
+                      "content": "D:\\Photos\\2026",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "O81F4c",
+                  "name": "Button / 浏览",
+                  "height": 32,
+                  "fill": "$surface-track",
+                  "cornerRadius": "$radius",
+                  "gap": 4,
+                  "padding": "$pad-x",
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "g1ZEQ",
+                      "name": "Button Label",
+                      "fill": "$fg-1",
+                      "content": "浏览…",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "Dk3yG",
+          "name": "Divider",
+          "width": "fill_container",
+          "height": 1,
+          "fill": "$surface-track"
+        },
+        {
+          "type": "frame",
+          "id": "DbbyN",
+          "name": "State / 分支提示",
+          "width": "fill_container",
+          "fill": "$surface-track",
+          "cornerRadius": "$radius",
+          "gap": 8,
+          "padding": "$pad-y",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "icon",
+              "id": "u1wkq",
+              "name": "Icon / info",
+              "width": 14,
+              "height": 14,
+              "icon": "info",
+              "library": "Material Symbols Rounded",
+              "fill": "$danger"
+            },
+            {
+              "type": "text",
+              "id": "caEzY",
+              "name": "State Text",
+              "fill": "$danger",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "目录不存在，或没有写入权限 —— 请检查路径",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "U2WL4O",
+          "name": "Dialog Footer",
+          "width": "fill_container",
+          "gap": 8,
+          "justifyContent": "end",
+          "children": [
+            {
+              "type": "frame",
+              "id": "FwB4E",
+              "name": "Button / 取消",
+              "height": 32,
+              "fill": "$surface-track",
+              "cornerRadius": "$radius",
+              "padding": "$pad-x",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "V7Dfiq",
+                  "name": "Button Label",
+                  "fill": "$fg-1",
+                  "content": "取消",
+                  "fontFamily": "Inter",
+                  "fontSize": 14,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "Nydqo",
+              "name": "Button / 新建库 (primary)",
+              "height": 32,
+              "fill": "$brand",
+              "cornerRadius": "$radius",
+              "padding": "$pad-x",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "hXRk6",
+                  "name": "Button Label",
+                  "fill": "$fg-on-brand",
+                  "content": "新建库",
+                  "fontFamily": "Inter",
+                  "fontSize": 14,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "NPFmL",
+      "x": 8896,
+      "y": -34,
+      "name": "Dialog / 导入进度 · 错误清单",
+      "width": 480,
+      "fill": "$surface-layer",
+      "cornerRadius": "$radius",
+      "layout": "vertical",
+      "gap": 12,
+      "padding": 16,
+      "children": [
+        {
+          "type": "text",
+          "id": "oGV9q",
+          "name": "Dialog Title",
+          "fill": "$fg-1",
+          "content": "导入中 · 2 条失败",
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "text",
+          "id": "Zg7LI",
+          "name": "Dialog Hint",
+          "fill": "$fg-2",
+          "content": "单张失败不打断整批，其余照片照常导入",
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "U2xLj",
+          "name": "Stages",
+          "width": "fill_container",
+          "gap": 6,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "Yl06I",
+              "name": "Stage Chip / 扫描",
+              "fill": "$fg-3",
+              "content": "扫描",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "H0sOQs",
+              "name": "Stage Sep",
+              "fill": "$fg-3",
+              "content": "›",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "njjqH",
+              "name": "Stage Chip / 规划",
+              "fill": "$fg-3",
+              "content": "规划",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "d07mEa",
+              "name": "Stage Sep",
+              "fill": "$fg-3",
+              "content": "›",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "dNnXC",
+              "name": "Stage Chip / 导入",
+              "fill": "$brand",
+              "content": "导入",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "KGshD",
+              "name": "Stage Sep",
+              "fill": "$fg-3",
+              "content": "›",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "m0egW",
+              "name": "Stage Chip / 缩略图",
+              "fill": "$fg-3",
+              "content": "缩略图",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "UMz9W",
+          "name": "Progress Bar",
+          "width": "fill_container",
+          "height": 6,
+          "fill": "$surface-track",
+          "cornerRadius": "$radius",
+          "children": [
+            {
+              "type": "frame",
+              "id": "c5HWTU",
+              "name": "Progress Fill",
+              "width": 368,
+              "height": 6,
+              "fill": "$brand",
+              "cornerRadius": "$radius"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "Zc2Qp",
+          "name": "Counts",
+          "width": "fill_container",
+          "gap": 16,
+          "children": [
+            {
+              "type": "text",
+              "id": "Vipfr",
+              "name": "Count / 已导入",
+              "fill": "$fg-1",
+              "content": "已导入 111",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "Q3lkQk",
+              "name": "Count / 跳过",
+              "fill": "$fg-2",
+              "content": "跳过 3",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "xcRpF",
+              "name": "Count / 失败",
+              "fill": "$danger",
+              "content": "失败 2",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "iwi9G",
+          "name": "Error List",
+          "width": "fill_container",
+          "fill": "$surface-track",
+          "cornerRadius": "$radius",
+          "layout": "vertical",
+          "gap": 6,
+          "padding": 8,
+          "children": [
+            {
+              "type": "frame",
+              "id": "j6bnu",
+              "name": "Error Row",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 1,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "lbqAu",
+                  "name": "Error File",
+                  "fill": "$fg-1",
+                  "content": "P1040733.ORF",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "w9JCeO",
+                  "name": "Error Reason",
+                  "fill": "$danger",
+                  "content": "磁盘写满：只剩 12 MB",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "cWOuE",
+              "name": "Error Row",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 1,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "p7juu",
+                  "name": "Error File",
+                  "fill": "$fg-1",
+                  "content": "IMG_0042.CR3",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "lyRqO",
+                  "name": "Error Reason",
+                  "fill": "$danger",
+                  "content": "读不了源文件：权限不足",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "M5YwdZ",
+          "name": "Dialog Footer",
+          "width": "fill_container",
+          "gap": 8,
+          "justifyContent": "end",
+          "children": [
+            {
+              "type": "frame",
+              "id": "FrjvX",
+              "name": "Button / 导出清单",
+              "height": 32,
+              "fill": "$surface-track",
+              "cornerRadius": "$radius",
+              "padding": "$pad-x",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "Xeyiz",
+                  "name": "Button Label",
+                  "fill": "$fg-1",
+                  "content": "导出清单",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "AqW2T",
+              "name": "Button / 取消",
+              "height": 32,
+              "fill": "$surface-track",
+              "cornerRadius": "$radius",
+              "padding": "$pad-x",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "xO9pG",
+                  "name": "Button Label",
+                  "fill": "$fg-1",
+                  "content": "取消",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "bX8I9",
+              "name": "Button / 暂停",
+              "height": 32,
+              "fill": "$brand",
+              "cornerRadius": "$radius",
+              "padding": "$pad-x",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "nWN6P",
+                  "name": "Button Label",
+                  "fill": "$fg-on-brand",
+                  "content": "暂停",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "st3Fs",
+      "x": 8896,
+      "y": 346,
+      "name": "Dialog / 导入进度",
+      "width": 480,
+      "fill": "$surface-layer",
+      "cornerRadius": "$radius",
+      "layout": "vertical",
+      "gap": 12,
+      "padding": 16,
+      "children": [
+        {
+          "type": "text",
+          "id": "IeRyY",
+          "name": "Dialog Title",
+          "fill": "$fg-1",
+          "content": "导入中",
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "text",
+          "id": "bcdv2",
+          "name": "Dialog Hint",
+          "fill": "$fg-2",
+          "content": "3 个目录 · 共 120 张 —— 已导入的会留在库里",
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "o44hs",
+          "name": "Stages",
+          "width": "fill_container",
+          "gap": 6,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "V812F8",
+              "name": "Stage Chip / 扫描",
+              "fill": "$fg-3",
+              "content": "扫描",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "bv6DT",
+              "name": "Stage Sep",
+              "fill": "$fg-3",
+              "content": "›",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "DUJK8",
+              "name": "Stage Chip / 规划",
+              "fill": "$fg-3",
+              "content": "规划",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "E43NWh",
+              "name": "Stage Sep",
+              "fill": "$fg-3",
+              "content": "›",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "qCCj8",
+              "name": "Stage Chip / 导入",
+              "fill": "$brand",
+              "content": "导入",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "dmBFL",
+              "name": "Stage Sep",
+              "fill": "$fg-3",
+              "content": "›",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "Jq3bJ",
+              "name": "Stage Chip / 缩略图",
+              "fill": "$fg-3",
+              "content": "缩略图",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "YyfAf",
+          "name": "Progress Bar",
+          "width": "fill_container",
+          "height": 6,
+          "fill": "$surface-track",
+          "cornerRadius": "$radius",
+          "children": [
+            {
+              "type": "frame",
+              "id": "g9lfnR",
+              "name": "Progress Fill",
+              "width": 272,
+              "height": 6,
+              "fill": "$brand",
+              "cornerRadius": "$radius"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "eEmqv",
+          "name": "Counts",
+          "width": "fill_container",
+          "gap": 16,
+          "children": [
+            {
+              "type": "text",
+              "id": "FJWcU",
+              "name": "Count / 已导入",
+              "fill": "$fg-1",
+              "content": "已导入 82",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "D5gxvd",
+              "name": "Count / 跳过",
+              "fill": "$fg-2",
+              "content": "跳过 3",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "WU7o6",
+              "name": "Count / 失败",
+              "fill": "$danger",
+              "content": "失败 1",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "h0uAn",
+          "name": "Current Item",
+          "width": "fill_container",
+          "fill": "$surface-track",
+          "cornerRadius": "$radius",
+          "layout": "vertical",
+          "gap": 2,
+          "padding": 8,
+          "children": [
+            {
+              "type": "text",
+              "id": "b9nS0",
+              "name": "Current File",
+              "fill": "$fg-1",
+              "content": "P1040733.ORF",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "JbhOU",
+              "name": "Current Target",
+              "fill": "$fg-3",
+              "content": "photos/2026-08-15/_RAW/MYP0733.ORF",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "SYDFt",
+          "name": "Dialog Footer",
+          "width": "fill_container",
+          "gap": 8,
+          "justifyContent": "end",
+          "children": [
+            {
+              "type": "frame",
+              "id": "mzQtS",
+              "name": "Button / 取消",
+              "height": 32,
+              "fill": "$surface-track",
+              "cornerRadius": "$radius",
+              "padding": "$pad-x",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "e5QQek",
+                  "name": "Button Label",
+                  "fill": "$fg-1",
+                  "content": "取消",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "J0Z4D",
+              "name": "Button / 暂停",
+              "height": 32,
+              "fill": "$brand",
+              "cornerRadius": "$radius",
+              "padding": "$pad-x",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "gxipf",
+                  "name": "Button Label",
+                  "fill": "$fg-on-brand",
+                  "content": "暂停",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "oS1NL",
+      "x": 8896,
+      "y": 686,
+      "name": "Dialog / 导入进度 · 结束",
+      "width": 480,
+      "fill": "$surface-layer",
+      "cornerRadius": "$radius",
+      "layout": "vertical",
+      "gap": 12,
+      "padding": 16,
+      "children": [
+        {
+          "type": "text",
+          "id": "UYUnU",
+          "name": "Dialog Title",
+          "fill": "$fg-1",
+          "content": "导入完成",
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "text",
+          "id": "AF9H2",
+          "name": "Dialog Hint",
+          "fill": "$fg-2",
+          "content": "117 张已进库 · 3 张跳过 · 1 张失败 —— 缩略图在后台继续生成",
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "J4bBAd",
+          "name": "Counts",
+          "width": "fill_container",
+          "gap": 16,
+          "children": [
+            {
+              "type": "text",
+              "id": "UPDJm",
+              "name": "Count / 已导入",
+              "fill": "$fg-1",
+              "content": "已导入 117",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "sixnw",
+              "name": "Count / 跳过",
+              "fill": "$fg-2",
+              "content": "跳过 3",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "D51R8c",
+              "name": "Count / 失败",
+              "fill": "$danger",
+              "content": "失败 1",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "RBu53",
+          "name": "Dialog Footer",
+          "width": "fill_container",
+          "gap": 8,
+          "justifyContent": "end",
+          "children": [
+            {
+              "type": "frame",
+              "id": "Q89WDW",
+              "name": "Button / 导出错误清单",
+              "height": 32,
+              "fill": "$surface-track",
+              "cornerRadius": "$radius",
+              "padding": "$pad-x",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "iokg3",
+                  "name": "Button Label",
+                  "fill": "$fg-1",
+                  "content": "导出错误清单",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "o0Dvvo",
+              "name": "Button / 取消",
+              "height": 32,
+              "fill": "$surface-track",
+              "cornerRadius": "$radius",
+              "padding": "$pad-x",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "T76G6P",
+                  "name": "Button Label",
+                  "fill": "$fg-1",
+                  "content": "关闭",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "g2xfv",
+              "name": "Button / 暂停",
+              "height": 32,
+              "fill": "$brand",
+              "cornerRadius": "$radius",
+              "padding": "$pad-x",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "F0IyPF",
+                  "name": "Button Label",
+                  "fill": "$fg-on-brand",
+                  "content": "在库中查看这些照片",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "A9vPG",
+      "x": 8896,
+      "y": 919,
+      "name": "Dialog / 库设置",
+      "width": 480,
+      "fill": "$surface-layer",
+      "cornerRadius": "$radius",
+      "layout": "vertical",
+      "gap": 12,
+      "padding": 16,
+      "children": [
+        {
+          "type": "text",
+          "id": "aNk2S",
+          "name": "Dialog Title",
+          "fill": "$fg-1",
+          "content": "库设置",
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "text",
+          "id": "WxZiV",
+          "name": "Dialog Hint",
+          "fill": "$fg-2",
+          "content": "M1 里只有一项：导入模版（决定照片在库里的落法）",
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "text",
+          "id": "t6D5DB",
+          "name": "Field Label",
+          "fill": "$fg-2",
+          "content": "导入模版",
+          "fontFamily": "Inter",
+          "fontSize": 11,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "i17F0",
+          "name": "Input / 模版",
+          "width": "fill_container",
+          "height": 32,
+          "fill": "$surface-track",
+          "cornerRadius": "$radius",
+          "padding": "$pad-x",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "ifXsO",
+              "name": "Input Value",
+              "fill": "$fg-1",
+              "content": ":CYEAR-:CMONTH-:CDAY/MY:FILENAME",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "AZp5G",
+          "name": "Variable Hints",
+          "width": "fill_container",
+          "gap": 8,
+          "children": [
+            {
+              "type": "text",
+              "id": "deQjF",
+              "name": "Variable Chip",
+              "fill": "$fg-3",
+              "content": ":CYEAR",
+              "fontFamily": "Inter",
+              "fontSize": 11,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "ZhZAT",
+              "name": "Variable Chip",
+              "fill": "$fg-3",
+              "content": ":CMONTH",
+              "fontFamily": "Inter",
+              "fontSize": 11,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "eAvA7",
+              "name": "Variable Chip",
+              "fill": "$fg-3",
+              "content": ":CDAY",
+              "fontFamily": "Inter",
+              "fontSize": 11,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "vo9kx",
+              "name": "Variable Chip",
+              "fill": "$fg-3",
+              "content": ":CWEEK",
+              "fontFamily": "Inter",
+              "fontSize": 11,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "gAbzF",
+              "name": "Variable Chip",
+              "fill": "$fg-3",
+              "content": ":FILENAME",
+              "fontFamily": "Inter",
+              "fontSize": 11,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "RzFdq",
+              "name": "Variable Chip",
+              "fill": "$fg-3",
+              "content": ":BRAND",
+              "fontFamily": "Inter",
+              "fontSize": 11,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "ZsW8O",
+              "name": "Variable Chip",
+              "fill": "$fg-3",
+              "content": ":MODEL",
+              "fontFamily": "Inter",
+              "fontSize": 11,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "xApUT",
+              "name": "Variable Chip",
+              "fill": "$fg-3",
+              "content": ":SEQ000",
+              "fontFamily": "Inter",
+              "fontSize": 11,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "IjDYd",
+          "name": "Preview",
+          "width": "fill_container",
+          "fill": "$surface-track",
+          "cornerRadius": "$radius",
+          "layout": "vertical",
+          "gap": 4,
+          "padding": 8,
+          "children": [
+            {
+              "type": "text",
+              "id": "IuBII",
+              "name": "Preview Path",
+              "fill": "$fg-3",
+              "content": "photos/2026-08-15/MYP0001.jpg",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "wF3Pn",
+              "name": "Preview Path",
+              "fill": "$fg-3",
+              "content": "photos/2026-08-15/_RAW/MYP0001.ORF",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "c3x1IJ",
+              "name": "Preview Path",
+              "fill": "$fg-3",
+              "content": "photos/2026-08-16/Japan/Kyoto/MYP0002.jpg",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "Gim31",
+          "name": "Dialog Footer",
+          "width": "fill_container",
+          "gap": 8,
+          "justifyContent": "end",
+          "children": [
+            {
+              "type": "frame",
+              "id": "dYKQ7",
+              "name": "Button / 取消",
+              "height": 32,
+              "fill": "$surface-track",
+              "cornerRadius": "$radius",
+              "padding": "$pad-x",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "Ul1GQ",
+                  "name": "Button Label",
+                  "fill": "$fg-1",
+                  "content": "取消",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "G95bb",
+              "name": "Button / 暂停",
+              "height": 32,
+              "fill": "$brand",
+              "cornerRadius": "$radius",
+              "padding": "$pad-x",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "nYFty",
+                  "name": "Button Label",
+                  "fill": "$fg-on-brand",
+                  "content": "保存",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "FPU9M",
+      "x": 8896,
+      "y": 1301,
+      "name": "Dialog / 关于 About",
+      "width": 480,
+      "fill": "$surface-layer",
+      "cornerRadius": "$radius",
+      "layout": "vertical",
+      "gap": 12,
+      "padding": 16,
+      "children": [
+        {
+          "type": "text",
+          "id": "RSLKy",
+          "name": "Dialog Title",
+          "fill": "$fg-1",
+          "content": "关于 光伴 RayBend",
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "text",
+          "id": "u1gdpD",
+          "name": "Dialog Hint",
+          "fill": "$fg-2",
+          "content": "版本 0.1.0 · AGPL-3.0-only · 相片管理",
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "PX2vF",
+          "name": "About Info",
+          "width": "fill_container",
+          "fill": "$surface-track",
+          "cornerRadius": "$radius",
+          "layout": "vertical",
+          "gap": 4,
+          "padding": 8,
+          "children": [
+            {
+              "type": "text",
+              "id": "UDU1p",
+              "name": "About Row",
+              "fill": "$fg-2",
+              "content": "许可：AGPL-3.0-only（见 LICENSE）",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "jhT8b",
+              "name": "About Row",
+              "fill": "$fg-2",
+              "content": "第三方组件与参考项目：见 THIRD-PARTY-NOTICES.md",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "OEe4M",
+              "name": "About Row",
+              "fill": "$fg-2",
+              "content": "照片永远不会被写回原文件",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "hH0W2",
+          "name": "Dialog Footer",
+          "width": "fill_container",
+          "gap": 8,
+          "justifyContent": "end",
+          "children": [
+            {
+              "type": "frame",
+              "id": "S528l",
+              "name": "Button / 取消",
+              "height": 32,
+              "fill": "$surface-track",
+              "cornerRadius": "$radius",
+              "padding": "$pad-x",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "N2Ggg",
+                  "name": "Button Label",
+                  "fill": "$fg-1",
+                  "content": "关闭",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "Eep7d",
+              "name": "Button / 暂停",
+              "height": 32,
+              "fill": "$brand",
+              "cornerRadius": "$radius",
+              "padding": "$pad-x",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "xHOVx",
+                  "name": "Button Label",
+                  "fill": "$fg-on-brand",
+                  "content": "查看许可",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
                 }
               ]
             }
