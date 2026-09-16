@@ -6,7 +6,7 @@
 
 ## 一、现在需要你做（阻塞中）
 
-（当前：**无**）
+（当前：**无**。M2-W1 的阶段 1–6 已交付，下一步（渲染 spike）我自己能开，不需要你先动手。）
 
 ## 二、绕过去了的问题（攒着等外援）
 
@@ -23,12 +23,53 @@
    （涉及三处：`vite.config.ts` 的插件、`src/index.tsx` 的字体 import、`scripts/ui-smoke.mjs` 的两条断言）。
    量法与数据见 `implementations/2026-09-17_exclude-chain_radius_language_font-metrics.md` §二。
 
-2. **`cargo test` 偶发链接失败**：`rust-lld: error: undefined hidden symbol ... .llvm.*` ——
-   增量编译的陈旧目标文件所致（本次遇到两次，都是改完代码之后）。
-   绕法：`cargo clean -p raybend` 后重跑即可（约 1 分钟）。
-   若你觉得太频繁，我可以把 `[profile.test]` 的 `incremental` 关掉（代价是每次改完重编稍慢）。
+2. **RAW 缩略图 134 ms/张（目标曾是 <10ms）** —— 瓶颈在 rawler 的
+   `preview_image()` 实际走的是完整图像解码路径，拿不到「只抠 JPEG 段」的便宜。
+   绕法：接受现状（比 JPEG 的 53ms/张慢，但比完整解码 764ms 快得多），
+   缩略图队列本来就是后台跑、有缓存。
+   风险：RAW 占比高的库里，首次导入后的缩略图阶段会明显慢于 JPEG。
+   真要压到 10ms 级，得绕开 rawler 自己解析 TIFF/BMFF 里的预览偏移 —— 那是另一个工作量，
+   记在 `FUTURE.md` 待办里（尚未登记）。
+
+3. **契约/类型检查器偶发「陈旧快照」误报** —— 表现为报某个刚加的字段/键「不存在」，
+   而 `npx tsc --noEmit` 全项目 0 错。已用决定性实验证伪一次（把键从源文件删掉才复现），
+   并已用 `lens_diagnostic_mark` 标为误报。
+   绕法：**先跑权威编译器**，不一致就以编译器为准；必要时提交一次让快照刷新。
+
+4. **`cargo test` 偶发链接失败**（`rust-lld: undefined hidden symbol`）——
+   今天第三次之后已按早先的建议**关掉测试档的增量编译**（`[profile.test] incremental = false`），
+   根因是增量编译的陈旧目标文件。代价：改完源码后测试二进制整份重编。
+   若你嫌慢，可以改回增量 + 遇到时 `cargo clean -p raybend`。
 
 ---
 
-不属于这里的：设计取舍 → 各文档的「待决」小节；目视/真机验收 → `PLAN.md` 的「人类验收清单」；
+不属于这里的：设计取舍 → 各文档的「待决」小节；目视/真机验收 → 下面第三节；
 工具约束 → `design/main.md` §6.1。
+
+---
+
+## 三、人类验证清单（**不阻塞开发**，到点我会提醒）
+
+> 与 `PLAN.md` 的「人类验收清单」是一回事，但这里只放**当前这一波新产生的**。
+
+| # | 事项 | 怎么做 | 卡住什么 |
+| --- | --- | --- | --- |
+| 1 | **M1 验收**（`PLAN.md` 第 1–4 项，含 3b–3f） | 跑 `C:\rb-target\raybend\debug\raybend-desktop.exe`（**需先重建**，见下）逐项过 | M1 签字 |
+| 2 | **浏览工作区目视**（M2-W1 新交付） | 切到「浏览」工作流：左列能看到库与目录树、中列网格出真图（含 RAW！）、点照片右栏出信息；点目录切换范围；点「按时间」出分组标题 | W2 开工前确认地基可用 |
+| 3 | **Windows GPU 验证**（M0-2 全部项 + M0-6 帧率） | **暂不能做** —— 需要先有 spike 代码（W1 阶段 7，未做） | W2 的原生视口 |
+
+**重建 Windows 产物的命令**（照抄；细节见 `AGENTS.md` §5.3）：
+
+```bash
+pnpm build                                  # 必须先做：dist 是编译期嵌进 exe 的
+export CARGO_TARGET_DIR='C:\rb-target\raybend'
+export WSLENV='CARGO_TARGET_DIR'
+cd /home/andares/repos/c-thun/raybend
+cmd.exe /c 'pushd \\wsl.localhost\Ubuntu-24.04\home\andares\repos\c-thun\raybend & cargo build -p raybend-desktop -p raybend --features custom-protocol'
+pnpm check:win                              # 验产物比 dist 新、资源名对得上
+```
+
+> ⚠️ 这次构建要**同时构建 `raybend` crate 的 bin**（`-p raybend`）——
+> RAW 解码跑在独立的 `raybend-raw-worker` 进程里（`AGENTS.md` §6.3 的进程隔离）。
+> 只建 `raybend-desktop` 的话，主程序会回退成「用标记参数重启自己」那条路径（也能工作，
+> 但那是发布形态，开发期走独立 bin 更清楚）。
