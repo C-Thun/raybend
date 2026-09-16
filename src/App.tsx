@@ -18,7 +18,7 @@
  * 放进任何一边都会让另一边去钻内部实现。
  */
 
-import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
+import { createEffect, createSignal, onCleanup, onMount, Show } from "solid-js";
 import { uiReady } from "./api/window.ts";
 import * as db from "./api/db.ts";
 import type { ExifData } from "./features/exif-strip/index.ts";
@@ -31,6 +31,9 @@ import { createShellStore } from "./shell/store.ts";
 import { TitleBar } from "./shell/TitleBar.tsx";
 import { ToolsBar } from "./shell/ToolsBar.tsx";
 import { createImportStore, ImportWorkspace } from "./workspaces/import/index.ts";
+import { createBrowseStore } from "./features/browse/index.ts";
+import { browseDelete, browseFacets, browseMark, browseMarkings, browsePage, browseRedo, browseTimeline, browseUndo, flagsClear, flagsGet, flagsSet } from "./api/browse.ts";
+import { BrowseWorkspace } from "./workspaces/browse/index.ts";
 
 export default function App() {
   const shell = createShellStore();
@@ -47,6 +50,27 @@ export default function App() {
   const initialLayout = layout.prefs();
   const importStore = createImportStore({ api: db });
   const grid = createPhotoGridStore({ api: db });
+  /*
+   * 浏览工作区的状态（`features/browse/store.ts`）。
+   *
+   * 与网格 store 一样在组装层创建：**当前工作流要决定渲染谁**，
+   * 而 store 的生命周期不该跟着工作流开关走（切回来时窗口数据还在，不用重新加载）。
+   */
+  const browseStore = createBrowseStore({
+    api: {
+      page: browsePage,
+      timeline: browseTimeline,
+      facets: browseFacets,
+      markings: browseMarkings,
+      mark: browseMark,
+      undo: browseUndo,
+      redo: browseRedo,
+      remove: browseDelete,
+      flagsGet,
+      flagsSet,
+      flagsClear,
+    },
+  });
 
   /*
    * 启动闪屏的收尾（见 `src-tauri/src/lib.rs` 的 `ui_ready`）。
@@ -114,15 +138,24 @@ export default function App() {
         onBatchExclude={() => importStore.toggleExcluded([...grid.selectedIds()])}
       />
 
-      <ImportWorkspace
-        store={importStore}
-        grid={grid}
-        onRevealInLibrary={() => shell.setWorkflow("browse")}
-        leftRatio={initialLayout.leftRatio}
-        onLeftRatioChange={layout.setLeftRatio}
-        recentRatio={initialLayout.recentRatio}
-        onRecentRatioChange={layout.setRecentRatio}
-      />
+      {/*
+        工作区跟着工作流走（`AGENTS.md` §11.1）：导入 → 三列导入工作区；
+        浏览 → 三列浏览工作区（库目录选择器 / 网格 / 信息栏）。
+        编辑与导出还没做，落到导入那版（M1 的口径，切过去是空的）。
+      */}
+      <Show when={shell.workflow() === "browse"} fallback={
+        <ImportWorkspace
+          store={importStore}
+          grid={grid}
+          onRevealInLibrary={() => shell.setWorkflow("browse")}
+          leftRatio={initialLayout.leftRatio}
+          onLeftRatioChange={layout.setLeftRatio}
+          recentRatio={initialLayout.recentRatio}
+          onRecentRatioChange={layout.setRecentRatio}
+        />
+      }>
+        <BrowseWorkspace store={browseStore} />
+      </Show>
     </div>
   );
 }
