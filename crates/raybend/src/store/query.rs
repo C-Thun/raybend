@@ -466,6 +466,8 @@ pub struct AssetRow {
     /// 展示用文件是位图还是 RAW。
     pub is_raw: bool,
     pub taken_at: Option<i64>,
+    /// 拍摄时间用的时区偏移（分钟）；`None` = 相机没写，按 UTC 看。
+    pub taken_at_offset_min: Option<i64>,
     pub rating: u8,
     pub color_label: Option<String>,
     pub like_state: Option<String>,
@@ -496,7 +498,7 @@ const ROW_COLUMNS: &str = "\
     COALESCE(f.rel_path, '') AS rel_path, \
     COALESCE(f.ext, '') AS ext, \
     COALESCE(f.role, '') AS role, \
-    a.taken_at, a.rating, a.color_label, a.like_state, a.lock_level, \
+    a.taken_at, a.taken_at_offset_min, a.rating, a.color_label, a.like_state, a.lock_level, \
     a.camera_make, a.camera_model, a.lens, a.focal_mm, a.f_number, a.exposure_ms, a.iso, \
     a.width, a.height, a.orientation, f.size_bytes, f.missing_since";
 
@@ -518,22 +520,23 @@ fn row_from(row: &Row<'_>) -> rusqlite::Result<AssetRow> {
         ext: row.get(2)?,
         is_raw: role == "raw",
         taken_at: row.get(4)?,
-        rating: u8::try_from(row.get::<_, i64>(5)?).unwrap_or(0),
-        color_label: row.get(6)?,
-        like_state: row.get(7)?,
-        lock_level: u8::try_from(row.get::<_, i64>(8)?).unwrap_or(0),
-        camera_make: row.get(9)?,
-        camera_model: row.get(10)?,
-        lens: row.get(11)?,
-        focal_mm: row.get(12)?,
-        f_number: row.get(13)?,
-        exposure_ms: row.get(14)?,
-        iso: row.get(15)?,
-        width: row.get(16)?,
-        height: row.get(17)?,
-        orientation: row.get(18)?,
-        size_bytes: row.get(19)?,
-        missing: row.get::<_, Option<i64>>(20)?.is_some(),
+        taken_at_offset_min: row.get(5)?,
+        rating: u8::try_from(row.get::<_, i64>(6)?).unwrap_or(0),
+        color_label: row.get(7)?,
+        like_state: row.get(8)?,
+        lock_level: u8::try_from(row.get::<_, i64>(9)?).unwrap_or(0),
+        camera_make: row.get(10)?,
+        camera_model: row.get(11)?,
+        lens: row.get(12)?,
+        focal_mm: row.get(13)?,
+        f_number: row.get(14)?,
+        exposure_ms: row.get(15)?,
+        iso: row.get(16)?,
+        width: row.get(17)?,
+        height: row.get(18)?,
+        orientation: row.get(19)?,
+        size_bytes: row.get(20)?,
+        missing: row.get::<_, Option<i64>>(21)?.is_some(),
     })
 }
 

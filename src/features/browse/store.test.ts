@@ -34,6 +34,7 @@ function item(id: number, overrides: Partial<AssetItem> = {}): AssetItem {
     ext: "jpg",
     isRaw: false,
     takenAt: 1_789_516_800_000 + id * 1000,
+    takenAtOffsetMin: null,
     rating: 0,
     colorLabel: null,
     likeState: null,

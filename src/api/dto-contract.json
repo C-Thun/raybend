@@ -207,6 +207,7 @@
     "relPath",
     "sizeBytes",
     "takenAt",
+    "takenAtOffsetMin",
     "width"
   ],
   "BrowseWindow": [

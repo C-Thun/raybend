@@ -87,7 +87,13 @@ interface TimedPhoto {
 }
 
 /** 本地时区偏移（分钟，东为正），取给定时刻的偏移（能正确处理夏令时） */
-function localOffsetMinutes(ms: number): number {
+/**
+ * 本机在这个时刻的时区偏移（分钟，东八区 = 480）。
+ *
+ * 导出给浏览网格的分组用（`features/browse/rows.ts`）—— 口径必须与导入网格一致：
+ * 照片没带偏移时按**本机时区**看它的日期，而不是别的一厢情愿的默认值。
+ */
+export function localOffsetMinutes(ms: number): number {
   // `getTimezoneOffset()` 返回「UTC − 本地」，符号与直觉相反
   return -new Date(ms).getTimezoneOffset();
 }

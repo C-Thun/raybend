@@ -42,6 +42,13 @@ export interface VirtualGridProps<TRow extends VirtualGridRow> {
    * 传 `undefined` 表示不重置。
    */
   resetKey?: string | number;
+  /**
+   * 可见行区间变化时回调（`[start, end)`，含 overscan）。
+   *
+   * 用途：**按需取数据**。浏览网格的数据是从库里分页取的，只有知道
+   * 「现在看到哪几行」才能只补缺的那几页（`features/browse/store.ts` 的 `ensureRange`）。
+   */
+  onVisibleRange?: (start: number, end: number) => void;
   class?: string;
 }
 
@@ -79,6 +86,16 @@ export function VirtualGrid<TRow extends VirtualGridRow>(
       scrollTop: scrollTop(),
       overscan: props.overscan,
     });
+
+  // 可见区间变化 → 通知调用方（按需取数据）。只在真的变了的时候回调。
+  let lastRange = "";
+  createEffect(() => {
+    const w = window();
+    const key = `${w.startIndex}:${w.endIndex}`;
+    if (key === lastRange) return;
+    lastRange = key;
+    props.onVisibleRange?.(w.startIndex, w.endIndex);
+  });
 
   return (
     <div

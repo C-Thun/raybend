@@ -56,7 +56,7 @@ import {
   createThumbQueue,
   type ThumbEntry,
   type ThumbQueue,
-} from "./thumbnails.ts";
+} from "../../components/ui/thumb-queue.ts";
 
 /** 时间片阈值的默认值（分钟）——`DESIGN.md` §12.7 的「1 小时」 */
 export const DEFAULT_GAP_MINUTES = 60;

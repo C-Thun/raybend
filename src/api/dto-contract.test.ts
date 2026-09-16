@@ -280,6 +280,7 @@ const ASSET_ITEM_KEYS = [
   "relPath",
   "sizeBytes",
   "takenAt",
+  "takenAtOffsetMin",
   "width",
 ] as const satisfies readonly (keyof AssetItem)[];
 const BROWSE_WINDOW_KEYS = ["items", "offset", "total"] as const satisfies readonly (keyof BrowseWindow)[];

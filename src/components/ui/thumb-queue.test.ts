@@ -8,7 +8,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createThumbQueue } from "./thumbnails.ts";
+import { createThumbQueue } from "./thumb-queue.ts";
 
 /** 可挂起、可失败的假加载器；同时统计并发峰值 */
 function fakeLoader(options: { hold?: boolean; fail?: boolean } = {}) {

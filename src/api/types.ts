@@ -349,6 +349,8 @@ export interface AssetItem {
   ext: string;
   isRaw: boolean;
   takenAt: number | null;
+  /** 拍摄时间用的时区偏移（分钟）；`null` = 相机没写，按 UTC 看。 */
+  takenAtOffsetMin: number | null;
   rating: number;
   colorLabel: string | null;
   likeState: string | null;
