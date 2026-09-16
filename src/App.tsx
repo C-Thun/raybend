@@ -18,7 +18,8 @@
  * 放进任何一边都会让另一边去钻内部实现。
  */
 
-import { createEffect, createSignal, onCleanup } from "solid-js";
+import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
+import { uiReady } from "./api/window.ts";
 import * as db from "./api/db.ts";
 import type { ExifData } from "./features/exif-strip/index.ts";
 import { toExifData } from "./features/exif-strip/index.ts";
@@ -46,6 +47,29 @@ export default function App() {
   const initialLayout = layout.prefs();
   const importStore = createImportStore({ api: db });
   const grid = createPhotoGridStore({ api: db });
+
+  /*
+   * 启动闪屏的收尾（见 `src-tauri/src/lib.rs` 的 `ui_ready`）。
+   *
+   * 时机：**首屏挂载之后，并且等字体就绪**（限时 400ms）——
+   * 主窗口是藏着的，所以在这之前把字换掉，用户看到的第一眼就是成品；
+   * 但字体加载慢（或拿不到字体）也不能把闪屏拖住，所以给一个上限。
+   * `requestAnimationFrame` 再推一帧：确保这一次 DOM 改动已经画出来了。
+   *
+   * 浏览器里（`pnpm dev`）`uiReady()` 直接返回，什么也不做。
+   */
+  onMount(() => {
+    const fontsReady =
+      typeof document !== "undefined" && "fonts" in document
+        ? document.fonts.ready.catch(() => undefined)
+        : Promise.resolve();
+    void Promise.race([
+      fontsReady,
+      new Promise((resolve) => setTimeout(resolve, 400)),
+    ]).then(() => {
+      requestAnimationFrame(() => void uiReady());
+    });
+  });
 
   /*
    * flowbar 的图片信息区：**只选了一张**时才去读它的 EXIF。

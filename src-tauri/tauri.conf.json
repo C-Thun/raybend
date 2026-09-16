@@ -18,7 +18,25 @@
         "height": 1000,
         "minWidth": 1200,
         "minHeight": 800,
-        "decorations": false
+        "decorations": false,
+        "visible": false
+      },
+      {
+        "label": "splash",
+        "title": "RayBend",
+        "url": "splash.html",
+        "width": 800,
+        "height": 600,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "shadow": false,
+        "center": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "focus": false,
+        "focusable": false,
+        "visible": false
       }
     ],
     "security": {

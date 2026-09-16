@@ -66,6 +66,8 @@ export function readBuildInfo(raw: unknown): BuildInfo {
 /** 读取构建时注入的信息（生产/开发构建里一定存在；Node 测试里不会调用它） */
 export function currentBuildInfo(): BuildInfo {
  return readBuildInfo(
+  // pi-lens-ignore: no-typeof-undefined, — `__RAYBEND_BUILD__` 是构建期注入的全局，
+  // Node 测试里根本不存在；`typeof` 是唯一不会抛的检测方式
   typeof __RAYBEND_BUILD__ === "undefined" ? undefined : __RAYBEND_BUILD__,
  );
 }

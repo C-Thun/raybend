@@ -211,3 +211,22 @@ export async function tauriWindowHandle(): Promise<WindowHandle | null> {
     onResized: async (handler) => win.onResized(() => handler()),
   };
 }
+
+/**
+ * 告诉 Rust「界面好了」—— 它据此关掉启动闪屏并把主窗口显出来（`lib.rs` 的 `ui_ready`）。
+ *
+ * 为什么要前端来报：只有前端知道自己的第一帧什么时候画完。
+ * Rust 侧的 `on_page_load` 在脚本跑完前就发了，那时界面还是空的（会闪一下白底）。
+ *
+ * **不抛错**：闪屏收尾失败不该把启动流程带崩；浏览器里直接静默返回。
+ * 提醒：Rust 侧还有个 3 秒兜底（前端要是永远就绪不了，闪屏也不会变成墓碑）。
+ */
+export async function uiReady(): Promise<void> {
+  if (!isTauriRuntime()) return;
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("ui_ready");
+  } catch {
+    // 闪屏没关掉也无所谓：主窗口已经在那儿了，只是多一张图挡着
+  }
+}

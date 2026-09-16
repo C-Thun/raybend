@@ -12,6 +12,7 @@ import { test } from "node:test";
 import {
   createWindowChrome,
   INITIAL_WINDOW_CHROME,
+  uiReady,
   windowControlView,
   type WindowChromeState,
   type WindowHandle,
@@ -390,4 +391,28 @@ test("重复 dispose 与从未初始化就 dispose 都不抛错", async () => {
   chrome.dispose();
   await tick();
   assert.ok(true);
+});
+
+/*
+ * 启动闪屏的收尾（`uiReady`）。
+ *
+ * 它跑在**启动路径**上：一旦抛错，整个外壳的挂载都会被带崩 ——
+ * 而这条路径在正常开发里几乎不会被走到（浏览器里它直接返回）。
+ * 所以这里只钉两件事：**浏览器里静默返回**、**Tauri 里拿不到 API 也不抛**。
+ */
+test("uiReady：浏览器环境里静默返回，不做任何事", async () => {
+  // Node 里没有 Tauri 标记（`detectRuntime` 会判成 browser）
+  await uiReady(); // 不抛即为通过
+  assert.ok(true);
+});
+
+test("uiReady：真的在 Tauri 里但命令失败时也不抛（闪屏收尾不该带崩启动）", async () => {
+  const scope = globalThis as Record<string, unknown>;
+  scope["__TAURI_INTERNALS__"] = { invoke: () => Promise.reject(new Error("命令挂了")) };
+  try {
+    await uiReady();
+  } finally {
+    delete scope["__TAURI_INTERNALS__"];
+  }
+  assert.ok(true, "命令失败被吞掉 —— 主窗口已经在那儿了，只是多一张图挡着");
 });

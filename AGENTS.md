@@ -248,6 +248,14 @@ let dev = !custom_protocol;        // ← dev 由 feature 决定，不是 debug/
 2. 产物**比 `dist/` 新**（否则跑的可能是旧前端）
 3. Agent 侧可做的程序化冒烟：检查 exe 里含的是 **`dist/assets/` 当前的资源文件名**
    （含则说明资源确实被嵌入；内容字节是 brotli 压缩的，搜原始字符串搜不到是正常的）
+4. **换了图标后，「看起来没换」多半是 Windows 的图标缓存，不是产物没换**（2026-09-17 实测）：
+   同一个路径的 exe 被覆盖时，资源管理器/任务栏会继续显示旧图标。
+   判定要用**证据**，别用眼睛：
+   - 文件图标 = exe 的 `RT_ICON` 资源（6 张，与 `src-tauri/icons/icon.ico` 逐字节比对）；
+   - 窗口/任务栏图标 = `icons/icon.ico` 的**第 1 个条目**（tauri-codegen 取 `entries()[0]`）解码成 RGBA 后的字节；
+   - 想「眼见为实」就把 exe 复制成**新文件名**（新路径不撞缓存），或清缓存：`ie4uinit.exe -show`、
+     删 `%LOCALAPPDATA%\Microsoft\Windows\Explorer\iconcache_*.db` 后重启资源管理器。
+   已固定的任务栏图钉把图标缓存在 `.lnk` 里，要**取消固定再固定**。
 
 ### 5.3.3 本次「吃一堑」汇总（2026-09-15）
 

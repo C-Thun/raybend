@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>RayBend</title>
+    <!--
+      启动闪屏（`tauri.conf.json` 里的 `splash` 窗口）。
+
+      三条纪律（每一环都是为「快」服务的）：
+
+        1. **零依赖、零 bundle**：这页不进 Vite 的构建图（放在 `public/`），只有一个内联样式表
+           与一段内联脚本 —— 没有 JS 框架、没有请求（除了那张本地图）。
+        2. **透明**：`background: transparent`，配合窗口的 `transparent: true` +
+           `decorations: false`（见 `tauri.conf.json`）。图本身是**不规则边缘**的透明图，
+           所以整窗必须真的能透出桌面 —— 这也顺手验证了「Windows 上 webview 能不能透明」
+           （`AGENTS.md` §6.1 的渲染风险项）。
+        3. **随机中/英在首次绘制前决定**：脚本紧跟在 `<img>` 之后（元素已在、页面尚未绘制），
+           直接设 `src`。这样既不闪白、也不会把两张图都下载一遍，
+           还不需要 IPC 或任何窗口权限（`capabilities/` 不用动 —— 这页不碰 Tauri API）。
+
+      退出由 Rust 负责（`lib.rs` 的 `reveal_main`：前端就绪或 3 秒兜底）。
+      这页**没有任何按钮**，也不该有 —— 用户不需要在这里做任何决定。
+    -->
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        /* 关键：整窗透明，只有图自己画出来的像素可见 */
+        background: transparent;
+        overflow: hidden;
+      }
+      body {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      /* 图是 4:3，窗口也是 4:3 —— contain 只是兜底（窗口被系统拉伸时也不变形） */
+      #splash {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        -webkit-user-drag: none;
+        user-select: none;
+        /* 不吃事件：闪屏只是一张图，不参与交互（也不该有意外的悬停反馈） */
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <img id="splash" alt="" />
+    <script>
+      (function () {
+        // 每次启动随机 —— 中/英两张同构图
+        var lang = Math.random() < 0.5 ? "cn" : "en";
+        // 记在 <html> 上：排查 / 冒烟一眼能看出这次抽到哪张
+        document.documentElement.dataset.splash = lang;
+        var img = document.getElementById("splash");
+        img.src = "splash/splash-" + lang + ".webp";
+        img.alt = lang === "cn" ? "光伴" : "RayBend";
+      })();
+    </script>
+  </body>
+</html>

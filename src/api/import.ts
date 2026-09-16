@@ -150,9 +150,7 @@ export async function onImportProgress(
   if (!isTauriRuntime()) return () => {};
   eventModule ??= import("@tauri-apps/api/event");
   const { listen } = await eventModule;
-  const unlisten = await listen<ImportBatchProgress>(
-    IMPORT_PROGRESS_EVENT,
-    (event) => handler(event.payload),
+  return listen<ImportBatchProgress>(IMPORT_PROGRESS_EVENT, (event) =>
+    handler(event.payload),
   );
-  return unlisten;
 }

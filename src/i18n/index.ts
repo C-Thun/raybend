@@ -10,8 +10,8 @@
  */
 
 import { createSignal } from "solid-js";
-import { enUS } from "./en-US";
-import { zhCN } from "./zh-CN";
+import { enUS } from "./en-US.ts";
+import { zhCN } from "./zh-CN.ts";
 
 /** 以中文包为准推导 key 联合类型；新增文案只改 zh-CN.ts 即可 */
 export type MessageKey = keyof typeof zhCN;

@@ -1910,6 +1910,82 @@ try {
    * 所以这里只保留确定的那半；「重启还原」留给真机目视（`ASSISTANCE.md` 的验收清单）。
    */
 
+  /*
+   * 启动闪屏页（`public/splash.html`）。
+   *
+   * 闪屏**窗口**只在产物里弹（dev 下 `tauri::is_dev()` 会把它关掉，见 lib.rs），
+   * 但**页面本身**随时可以单独打开验 —— 这也正是这条断言有价值的地方：
+   * 它是纯静态页，四件事都能程序化量到：
+   *   ① 透明背景（`html`/`body` 都必须是 rgba(0,0,0,0)，否则图的不规则边缘会被矩形底包住）
+   *   ② 页面里**没有任何可交互元素**（人类明确要求「没有任何按钮」）
+   *   ③ 随机抽到的中/英与 `<img>` 的 src 一致（抽签与选图脱节就会红）
+   *   ④ 图真的加载出来了，并且铺满整窗
+   *
+   * 中/英「随机」本身按人类目视确认（连开几次看是不是两张都出过）——
+   * 断言里连开 3 次只是为了让「抽签 → src」这条链路被真的走过。
+   */
+  const splashEventsFrom = events.length;
+  const splash = [];
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await send("Page.navigate", { url: new URL("/splash.html", url).href });
+    let ready = false;
+    for (let i = 0; i < 40 && !ready; i += 1) {
+      ready = await evaluate(
+        '(() => { const el = document.getElementById("splash"); return Boolean(el && el.complete); })()',
+      );
+      if (!ready) await sleep(250);
+    }
+    splash.push(
+      await evaluate(`(() => {
+        const img = document.getElementById("splash");
+        const rect = img ? img.getBoundingClientRect() : null;
+        return {
+          lang: document.documentElement.dataset.splash ?? null,
+          src: img ? (img.getAttribute("src") ?? "") : null,
+          natural: img ? img.naturalWidth : 0,
+          fills:
+            rect !== null &&
+            Math.round(rect.width) === window.innerWidth &&
+            Math.round(rect.height) === window.innerHeight,
+          bodyBg: getComputedStyle(document.body).backgroundColor,
+          htmlBg: getComputedStyle(document.documentElement).backgroundColor,
+          interactive: document.querySelectorAll("button, input, a, select, textarea").length,
+        };
+      })()`),
+    );
+  }
+
+  for (const page of splash) {
+    if (page.lang !== "cn" && page.lang !== "en") {
+      problems.push(
+        `闪屏没有抽到中/英（data-splash=${JSON.stringify(page.lang)}）—— 随机选图那段没跑？`,
+      );
+      continue;
+    }
+    if (!page.src.endsWith("splash-" + page.lang + ".webp")) {
+      problems.push(
+        `闪屏抽到 ${page.lang}，但 <img> 指向 ${page.src} —— 抽签与选图脱节了`,
+      );
+    }
+    if (!(page.natural > 0)) {
+      problems.push("闪屏图没加载出来（naturalWidth = 0）—— 文件路径或格式不对？");
+    }
+    if (!page.fills) {
+      problems.push("闪屏图没有铺满窗口（窗口是 4:3，图也应等比铺满）");
+    }
+    if (!/rgba\(0, 0, 0, 0\)|transparent/.test(page.bodyBg) || !/rgba\(0, 0, 0, 0\)|transparent/.test(page.htmlBg)) {
+      problems.push(
+        `闪屏背景不透明（html ${page.htmlBg} / body ${page.bodyBg}）—— 图的不规则边缘会被矩形底包住`,
+      );
+    }
+    if (page.interactive !== 0) {
+      problems.push(
+        `闪屏页里有 ${page.interactive} 个可交互元素 —— 人类要求「没有任何按钮」`,
+      );
+    }
+  }
+  collectConsoleProblems(events.slice(splashEventsFrom));
+
   collectConsoleProblems(events.slice(workspaceEventsFrom));
 
   console.log(
@@ -1928,6 +2004,7 @@ try {
         dialogFrame,
         repoCards,
         viewerDemo,
+        splash,
         tileGrid,
         textFit,
         switchBar,

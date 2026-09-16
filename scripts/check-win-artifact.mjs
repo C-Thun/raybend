@@ -9,7 +9,9 @@
  *
  * 所以这里查两件事，缺一不可：
  *   1. **时间**：exe 必须比 `dist/` 里任何文件都新（dist 是编译期嵌进 exe 的）；
- *   2. **内容**：`dist/index.html` 引用到的每个 `assets/*` 都要能在 exe 里找到。
+ *   2. **内容**：`dist/index.html` 与 `dist/splash.html` 引用到的每个资源都要能在 exe 里找到。
+ *      （闪屏那页也要查：它的图要是没嵌进去，闪屏就是一个**透明空窗** —— 不报错、不明显，
+ *        正好是最难查的那种假绿。2026-09-17 加闪屏时补上。）
  *
  * 用法：pnpm check:win        （可用 WIN_EXE=/path/to/raybend-desktop.exe 覆盖路径）
  * 退出码：0 = 一致；1 = 产物过期或对不上（打印补救命令）。
@@ -60,12 +62,39 @@ if (exeTime <= distTime) {
   );
 }
 
-/** 资源清单要从 index.html 里读，而不是「拿 dist 里最新的 js」——后者会把没引用的文件当成必须项 */
-const html = readFileSync(join(DIST, "index.html"), "utf8");
-const referenced = [...new Set([...html.matchAll(/assets\/[A-Za-z0-9._-]+/g)].map((m) => m[0]))];
-if (referenced.length === 0) {
+/**
+ * 资源清单要从 HTML 与资源目录里读，而不是「拿 dist 里最新的文件」——后者会把没引用的文件当成必须项。
+ *
+ * 应用外壳：`index.html` 里引用到的每个 `assets/*`。
+ * 启动闪屏：`splash.html` 里的图片路径是**运行时拼**出来的（`"splash/splash-" + lang + ".webp"`，
+ * 因为要随机抽中/英），所以不按字面量匹配，改为查两件事：
+ *   ① 页面里确实有 `splash/splash-` 这个拼装前缀；② `dist/splash/` 下的**每一个**文件都嵌进了 exe。
+ * ②才是有分量的那条：少嵌一张，恰好抽到那张时闪屏就是个**透明空窗**（不报错、不明显）。
+ */
+const referencedFromShell = (() => {
+  const html = readFileSync(join(DIST, "index.html"), "utf8");
+  return [...new Set([...html.matchAll(/assets\/[A-Za-z0-9._-]+/g)].map((m) => m[0]))];
+})();
+if (referencedFromShell.length === 0) {
   fail(`${DIST}/index.html 里没有任何 assets/ 引用 —— 构建产物不对劲`, "  pnpm build");
 }
+
+const splashPage = join(DIST, "splash.html");
+if (!existsSync(splashPage)) fail(`找不到 ${DIST}/splash.html`, "  pnpm build");
+if (!readFileSync(splashPage, "utf8").includes("splash/splash-")) {
+  fail(
+    `${DIST}/splash.html 里没有拼装闪屏图片路径的代码 —— 闪屏会是个空窗`,
+    "  pnpm build",
+  );
+}
+const splashDir = join(DIST, "splash");
+if (!existsSync(splashDir)) fail(`找不到 ${DIST}/splash/`, "  pnpm build");
+const referencedSplash = readdirSync(splashDir).map((name) => `splash/${name}`);
+if (referencedSplash.length === 0) {
+  fail(`${DIST}/splash/ 里一张图都没有 —— 闪屏会是个空窗`, "  pnpm build");
+}
+
+const referenced = [...new Set([...referencedFromShell, ...referencedSplash])];
 const binary = readFileSync(exePath, "latin1");
 const missing = referenced.filter((name) => !binary.includes(name));
 if (missing.length > 0) {

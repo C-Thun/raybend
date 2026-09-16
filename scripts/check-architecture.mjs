@@ -9,6 +9,7 @@
  *   1. import 只能来自**允许的更低层**（见 LAYERS 的 mayImport）
  *   2. `src/features/` 下的模块**互不 import**（同一个模块内部怎么互相引都行）
  *   3. `src/dev/**` 是开发期陈列室，**豁免**（它天生要 import 一切）
+ *   4. `src/assets/**` 是**纯数据**（图片/字体），没有方向可言：除它自己外每层都允许 import
  *
  * 刻意不解析语法树：规则本身就是路径级的，正则足够；简单才不容易自己出错。
  *
@@ -23,31 +24,36 @@ const SRC = join(ROOT, "src");
 
 /** 层定义：`dir` 用相对 src 的路径表示；`mayImport` 是允许被依赖的层名 */
 const LAYERS = [
-  { name: "styles", dir: "styles", mayImport: [] },
-  { name: "lib", dir: "lib", mayImport: [] },
-  { name: "i18n", dir: "i18n", mayImport: [] },
-  { name: "api", dir: "api", mayImport: ["lib", "i18n", "styles"] },
-  { name: "ui", dir: "components/ui", mayImport: ["lib", "i18n", "styles"] },
+  // 素材层：**纯数据**（图片、字体…），它自己不 import 任何东西，
+  // 而**任何层**都可能用到它 —— 所以除它以外的每层都把它列进 mayImport。
+  // （反过来的例外情况见 MATERIAL_LAYERS：素材层自己不需要遵守方向。）
+  { name: "assets", dir: "assets", mayImport: [] },
+  { name: "styles", dir: "styles", mayImport: ["assets"] },
+  { name: "lib", dir: "lib", mayImport: ["assets"] },
+  { name: "i18n", dir: "i18n", mayImport: ["assets"] },
+  { name: "api", dir: "api", mayImport: ["assets", "lib", "i18n", "styles"] },
+  { name: "ui", dir: "components/ui", mayImport: ["assets", "lib", "i18n", "styles"] },
   {
     name: "features",
     dir: "features",
-    mayImport: ["lib", "i18n", "styles", "api", "ui"],
+    mayImport: ["assets", "lib", "i18n", "styles", "api", "ui"],
   },
   {
     name: "shell",
     dir: "shell",
-    mayImport: ["lib", "i18n", "styles", "api", "ui", "features"],
+    mayImport: ["assets", "lib", "i18n", "styles", "api", "ui", "features"],
   },
   {
     name: "workspaces",
     dir: "workspaces",
-    mayImport: ["lib", "i18n", "styles", "api", "ui", "features", "shell"],
+    mayImport: ["assets", "lib", "i18n", "styles", "api", "ui", "features", "shell"],
   },
   // 组装层：src/App.tsx、src/index.tsx（其余散落文件按此层处理）
   {
     name: "app",
     dir: ".",
     mayImport: [
+      "assets",
       "lib",
       "i18n",
       "styles",

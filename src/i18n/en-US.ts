@@ -8,7 +8,7 @@
  * translation of the Chinese. See DESIGN.md §11.
  */
 
-import type { MessageKey } from "./index";
+import type { MessageKey } from "./index.ts";
 
 /*
  * 键必须与 `zh-CN.ts` 一一对应（`MessageKey = keyof typeof zhCN`）：

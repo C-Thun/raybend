@@ -23,8 +23,9 @@
  */
 
 import { A } from "@solidjs/router";
+// Vite 会把图片当资源处理（哈希后进 dist），并给出类型（见 `src/vite-env.d.ts`）
+import logoSmall from "../assets/branding/logo-small.png";
 import {
-  IconAperture,
   IconArrowsMinimize,
   IconInfoCircle,
   IconLanguage,
@@ -40,7 +41,7 @@ import { IconButton } from "../components/ui/Button.tsx";
 import { Menu } from "../components/ui/Menu.tsx";
 import { SegmentedControl } from "../components/ui/SegmentedControl.tsx";
 import { Tooltip } from "../components/ui/Tooltip.tsx";
-import { locale, localeLabel, nextLocale, setLocale, t } from "../i18n";
+import { locale, localeLabel, nextLocale, setLocale, t } from "../i18n/index.ts";
 import type { AppearanceStore } from "../lib/appearance.ts";
 import { AboutDialog } from "./AboutDialog.tsx";
 import type { ShellStore } from "./store.ts";
@@ -83,12 +84,23 @@ export function TitleBar(props: TitleBarProps) {
       >
         {/* ── 应用图标 + 名称 ───────────────────────────── */}
         <div data-tauri-drag-region class="flex shrink-0 items-center gap-2 ps-pad-x">
-          <div
-            class="flex size-5 items-center justify-center rounded-ui bg-brand text-fg-on-brand"
+          {/*
+            真 logo —— 用 `logo-small.png`（**只有徽章、没有字**的那版）：
+            20px 下带字的版本糊成一团，这版才认得出，这是它存在的理由。
+            两条注意：
+              1. **不要**再加 `rounded-ui`：徽章自己的圆角在 20px 下约 2.4px，
+                 再套 4px 的 CSS 圆角会切进徽章边缘（露出底下的条带色）。
+              2. 图片要 `draggable={false}`（否则桌面应用里会触发 webview 的「拖文件」），
+                 并带上 `data-tauri-drag-region`：点图标也该能拖窗口。
+          */}
+          <img
+            src={logoSmall}
+            alt=""
             aria-hidden="true"
-          >
-            <IconAperture size={13} />
-          </div>
+            draggable={false}
+            data-tauri-drag-region
+            class="size-5 shrink-0 select-none"
+          />
           <span class="text-fs-3 font-semibold whitespace-nowrap">
             {t("app.name")}
           </span>

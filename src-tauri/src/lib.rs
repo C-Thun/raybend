@@ -20,6 +20,101 @@ mod contract;
 /// 主窗口标签（与 `tauri.conf.json` 的窗口配置、`capabilities/default.json` 对应）。
 pub const MAIN_WINDOW_LABEL: &str = "main";
 
+/// 启动闪屏的窗口标签（同上）。
+pub const SPLASH_WINDOW_LABEL: &str = "splash";
+
+/// 闪屏的**最短停留时长**：就算主窗口已经就绪，也要等它露满这么久（人类 2026-09-17 定）。
+///
+/// 这条不是技术限制，是观感：闪屏一闪而过反而像「卡了一下」或「闪屏坏了」，
+/// 等满 3 秒才像一次有意的开场。所以 `ui_ready` 只是「最快也要等到这时候」，不自成一条路径。
+const SPLASH_MIN_VISIBLE: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// 等「界面就绪」的上限（硬兜底）。
+///
+/// 超时就直接把主窗口显出来 —— **宁可少一个闪屏，也不能把用户卡在闪屏上**。
+/// 前端挂了（白屏、抛错、dev server 没起）时，这条路径就是「和以前一样，直接看到界面」。
+///
+/// **比最短停留多 1 秒是刻意的**：这样「是前端说好了、还是兜底放的行」从计时上就能分辨，
+/// 也让前两者不会在同一瞬间互相盖过去。
+/// （不写成 `SPLASH_MIN_VISIBLE + 1s`：常量里的 `Duration` 相加还不是稳定特性；
+/// 两者的大小关系由 `splash_fallback_is_later_than_min_visible` 这个单测盯着。）
+const SPLASH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(4);
+
+/// 闪屏是什么时候露出来的（`setup()` 里 `show()` 之后记一次；dev 不显示闪屏 ⇒ 永远为空）。
+///
+/// 它是「至少显示 3 秒」这条规则的锚点：为空 ⇒ 剩余时间算 0 ⇒ dev 下主窗口立刻显示。
+static SPLASH_SHOWN_AT: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+
+/// 闪屏还要再待多久（已经待够、或压根没显示过闪屏 ⇒ `ZERO`）。
+fn splash_remaining() -> std::time::Duration {
+    remaining_until_min_visible(SPLASH_SHOWN_AT.get().copied(), std::time::Instant::now())
+}
+
+/// 「还要再等多久」的**纯计算**：把时钟当入参，单测才能不靠 `sleep` 也覆盖边界。
+///
+/// `shown_at` 为 `None` 表示这次启动压根没露过闪屏（dev）⇒ 不等。
+/// 用 `saturating_sub`：闪屏已经露过头（慢机器、兜底已经放行）时返 `ZERO` 而不是 panic。
+fn remaining_until_min_visible(
+    shown_at: Option<std::time::Instant>,
+    now: std::time::Instant,
+) -> std::time::Duration {
+    match shown_at {
+        Some(shown_at) => SPLASH_MIN_VISIBLE.saturating_sub(now.saturating_duration_since(shown_at)),
+        None => std::time::Duration::ZERO,
+    }
+}
+
+/// 收尾：显示主窗口（并把焦点交给它）+ 关掉闪屏。
+///
+/// **幂等**：`ui_ready`（前端首屏就绪）、兜底线程、以及「等满最短停留」的那条路径都会调它，先后不定，
+/// 所以每一步都只关心「窗口还在不在」，调两次也不会出错。
+/// 窗口不存在时静默跳过：Linux 开发配置会整体替掉 `app.windows`（见 `tauri.linux.conf.json`），
+/// 那里本来就没有闪屏窗口。
+fn reveal_main(app: &tauri::AppHandle) {
+    use tauri::Manager;
+    if let Some(main) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+        let _ = main.show();
+        let _ = main.set_focus();
+    }
+    if let Some(splash) = app.get_webview_window(SPLASH_WINDOW_LABEL) {
+        let _ = splash.close();
+    }
+}
+
+/// 「界面好了」—— 由前端在首屏（含字体）就绪后调一次，见 `src/App.tsx`。
+///
+/// 为什么不让 Rust 自己判断：只有前端知道自己的第一帧什么时候画完
+/// （`on_page_load` 在脚本跑完前就发了，那时界面还是空的）。
+///
+/// **注意它不等于「立刻显示主窗口」**：闪屏至少要露满 `SPLASH_MIN_VISIBLE`
+/// （人类 2026-09-17 要求「准备好了也等 3 秒」），这条命令只是把「最早可以显示的时刻」
+/// 报上来，真正的收尾由 [`reveal_main_after_splash_min`] 对齐。
+#[tauri::command]
+fn ui_ready(app: tauri::AppHandle) {
+    reveal_main_after_splash_min(&app);
+}
+
+/// 「界面就绪」的收尾，但**不早于闪屏露满 `SPLASH_MIN_VISIBLE`**。
+///
+/// 已经等够了（慢机器、或 dev 下压根没闪屏）就直接收尾；否则睡剩下的那点时间再收尾。
+/// 多花一个线程是划算的：它把「等够 3 秒」这件事从命令处理里摘出来，前端不必为此阻塞。
+fn reveal_main_after_splash_min(app: &tauri::AppHandle) {
+    let remaining = splash_remaining();
+    if remaining.is_zero() {
+        reveal_main(app);
+        return;
+    }
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(remaining);
+        eprintln!(
+            "[raybend] 主窗口已就绪，等闪屏露满 {} 秒后显示",
+            SPLASH_MIN_VISIBLE.as_secs()
+        );
+        reveal_main(&handle);
+    });
+}
+
 /// 启动应用。
 ///
 /// # Panics
@@ -76,6 +171,8 @@ pub fn run() {
             import::import_status,
             import::import_errors_export,
             import::import_interrupted,
+            // ── 启动流程 ──
+            ui_ready,
         ])
         .setup(|app| {
             use tauri::Manager;
@@ -83,6 +180,43 @@ pub fn run() {
             // **失败不阻止启动**：窗口该出来还是要出来，错误让前端在需要时再报。
             let state = app.state::<db::DbState>();
             db::warm_up(app.handle(), &state);
+
+            /*
+             * 启动闪屏（见 `tauri.conf.json` 的 `splash` 窗口与 `public/splash.html`）。
+             *
+             * 两个窗口都是 `visible: false` 声明的：主窗口藏到「界面就绪」是刻意的
+             * —— 否则闪屏期间能看到它在下面一行一行地渲染。
+             *
+             * 时序：闪屏至少露 `SPLASH_MIN_VISIBLE`；前端更早就绪也等满它；
+             * 前端一直不就绪则走 `SPLASH_TIMEOUT` 兜底（人类 2026-09-17 要求最短 3 秒）。
+             *
+             * 开发模式下（`pnpm tauri dev`，定义就是 `!cfg!(feature = "custom-protocol")`）：
+             * **不弹闪屏，并且立刻显示主窗口** —— 否则每次起 dev 都要白等 3 秒兜底，
+             * 而且 `pnpm smoke:ui` 会在 CDP 目标列表里多看到一个窗口。
+             */
+            if tauri::is_dev() {
+                if let Some(splash) = app.get_webview_window(SPLASH_WINDOW_LABEL) {
+                    let _ = splash.close();
+                }
+                if let Some(main) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+                    let _ = main.show();
+                }
+            } else {
+                if let Some(splash) = app.get_webview_window(SPLASH_WINDOW_LABEL) {
+                    let _ = splash.show();
+                    // 「至少露满 3 秒」从**这一刻**算起（不是从 setup 进来说起）。
+                    let _ = SPLASH_SHOWN_AT.set(std::time::Instant::now());
+                }
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(SPLASH_TIMEOUT);
+                    eprintln!(
+                        "[raybend] 闪屏已露满 {} 秒但前端仍未报就绪，按兜底显示主窗口",
+                        SPLASH_TIMEOUT.as_secs()
+                    );
+                    reveal_main(&handle);
+                });
+            }
             Ok(())
         })
         .run(tauri::generate_context!())
@@ -146,6 +280,44 @@ mod tests {
             }
         }
         out
+    }
+
+    /// 闪屏「至少露满 3 秒」的边界：没露过 / 刚露 / 露了一半 / 正好够 / 超了很久。
+    ///
+    /// 纯计算（时钟当入参），所以不靠 `sleep` 也不会有 3 秒的测试耗时。
+    #[test]
+    fn splash_min_visible_boundaries() {
+        use std::time::{Duration, Instant};
+
+        let shown = Instant::now();
+        let remaining = super::remaining_until_min_visible;
+
+        // 没显示过闪屏（dev）⇒ 一点都不等，主窗口立刻显示
+        assert_eq!(remaining(None, shown), Duration::ZERO);
+        // 刚露出来 ⇒ 还得等满最短停留
+        assert_eq!(remaining(Some(shown), shown), super::SPLASH_MIN_VISIBLE);
+        // 露了 1 秒 ⇒ 还差 2 秒
+        assert_eq!(
+            remaining(Some(shown), shown + Duration::from_secs(1)),
+            Duration::from_secs(2)
+        );
+        // 正好够 ⇒ 0（不是负数，也不 panic）
+        assert_eq!(
+            remaining(Some(shown), shown + super::SPLASH_MIN_VISIBLE),
+            Duration::ZERO
+        );
+        // 超了很久（慢机器 / 兜底已经放行）⇒ 0
+        assert_eq!(
+            remaining(Some(shown), shown + Duration::from_secs(86_400)),
+            Duration::ZERO
+        );
+    }
+
+    /// 兜底必须**晚于**最短停留：否则它会抢在「等满 3 秒」前面把闪屏关掉，
+    /// 那条人类要求就成了摆设。
+    #[test]
+    fn splash_fallback_is_later_than_min_visible() {
+        assert!(super::SPLASH_TIMEOUT > super::SPLASH_MIN_VISIBLE);
     }
 
     /// 每条命令用 `app.state::<T>()` 取的状态，**都必须在 builder 里 manage 过**。

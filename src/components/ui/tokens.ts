@@ -28,6 +28,8 @@ export function createTokenPx(name: string, fallback: number): Accessor<number> 
   const [value, setValue] = createSignal(readTokenPx(name, fallback));
 
   onMount(() => {
+    // pi-lens-ignore: no-typeof-undefined, — 这里检测的是**可能不存在的全局**（Node/无 DOM 环境），
+    // 直接写 `=== undefined` 会 ReferenceError；typeof 才是唯一安全的写法
     if (typeof MutationObserver === "undefined") return;
     const observer = new MutationObserver(() => {
       setValue(readTokenPx(name, fallback));

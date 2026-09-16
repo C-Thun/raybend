@@ -36,6 +36,8 @@ Web 应用里成立的层（BFF、加载器编排、页面级数据预取…）�
 │  src/lib/                 无框架、无 DOM 的算法与模型  │
 ├─ 令牌层 ─────────────────────────────────────────────┤
 │  src/styles/              tokens / scrollbar / motion  │
+├─ 素材层 ─────────────────────────────────────────────┤
+│  src/assets/              图片、字体等**纯数据**        │
 └──────────────────────────────────────────────────────┘
 ```
 
@@ -47,6 +49,7 @@ Web 应用里成立的层（BFF、加载器编排、页面级数据预取…）�
 | 层 | 放什么 | 禁令 |
 | --- | --- | --- |
 | `src/styles/` | CSS 变量、`@theme` 映射、全局滚动条与动效 | 禁止写组件样式；色值只在这里（`tokens.css`）与 `DESIGN.md` |
+| `src/assets/` | **纯数据**：logo 等图片素材（经 Vite import，走上哈希与「文件不存在就构建失败」） | 禁止放代码（`.ts`/`.tsx`）；它自己不 import 任何东西 |
 | `src/lib/` | 纯函数与领域模型：`shortpath` / `tile-flow` / `format` / `tree` / `clipboard` / `easy-destroy` / `appearance` | **禁止 import solid-js 的渲染 API、禁止碰 DOM**（`createSignal` 这类响应式原语可以，它不依赖 DOM）；每个文件**必须**有同名 `*.test.ts` |
 | `src/components/ui/` | 无业务含义的基础元素（16 个原语）与横切范式组件（`EasyCopy` / `EasyDestroy`） | 禁止 import `features/`；禁止硬编码色值；文案必须走 i18n |
 | `src/features/<domain>/` | 一级模块：自己的类型、state、视图、单元测试 | **禁止 import 其它 `features/`**；禁止直接 `invoke`；禁止自带令牌或色值 |
@@ -135,3 +138,4 @@ src/features/recent/
 | 日期 | 变更 |
 | --- | --- |
 | 2026-09-15 | 初版：分层与依赖方向、一级模块清单（对应 `DESIGN.md` §10.2）、状态归属、两条可执行检查 |
+| 2026-09-17 | 新增**素材层 `src/assets/`**（纯数据，任何层可 import；不带方向约束）—— 品牌资产入场时 `shell → app` 的误报暴露了它原本无处可归 |
