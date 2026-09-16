@@ -22,7 +22,8 @@
         "smoke:ui": "node scripts/ui-smoke.mjs",
         "test": "node --test \"src/**/*.test.ts\"",
         "shot": "node scripts/shot.mjs",
-        "crash:drill": "bash scripts/crash-drill.sh"
+        "crash:drill": "bash scripts/crash-drill.sh",
+        "migrate:drill": "bash scripts/migration-drill.sh"
     },
     "dependencies": {
         "@ark-ui/solid": "^5.39.2",
