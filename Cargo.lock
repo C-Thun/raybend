@@ -2561,6 +2561,7 @@ dependencies = [
  "getrandom 0.4.3",
  "image",
  "kamadak-exif",
+ "libc",
  "rusqlite",
  "serde",
  "serde_json",

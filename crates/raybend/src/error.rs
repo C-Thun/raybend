@@ -47,6 +47,12 @@ pub enum Error {
     #[error("磁盘空间不足：{0}")]
     OutOfSpace(String),
 
+    /// 目标文件已经存在 —— 导入**绝不覆盖**已存在的文件（`REPOSITORY.md` §3.4）。
+    ///
+    /// 规划阶段已经用重名后缀尽量避开，这条是最后一道闸：撞上就当这一条失败。
+    #[error("目标已存在：{0}")]
+    TargetExists(String),
+
     /// JSON 解析/序列化错误（`repo.json`、任务载荷、设置值等）。
     #[error("JSON 错误：{0}")]
     Json(#[from] serde_json::Error),

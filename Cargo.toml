@@ -11,6 +11,7 @@ authors = ["raybend contributors"]
 repository = "https://github.com/C-Thun/raybend"
 
 [workspace.dependencies]
+libc = "0.2"
 # 内部 crate
 raybend = { path = "crates/raybend" }
 
