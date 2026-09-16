@@ -18,6 +18,8 @@
 //! | [`writer`] | 单写者 actor：所有写串行到一条连接上，退出时把队列跑干 |
 //! | [`ids`] | 库 ID：可排序的定长 base62（时间 + 随机） |
 //! | [`repository`] | 库身份、元信息、`app.db` 登记与在线/离线解析 |
+//! | [`query`] | 资产查询：范围 + 筛选 + 排序 + 分页（浏览网格的数据源） |
+//! | [`fts`] | 全文检索索引的维护（派生索引，过期即在查询前重建） |
 //! | [`tags`] | 标签：全局词典（`app.db`）+ 每库关联（`catalog.db`），`BROWSE.md` §7 |
 //! | [`assets`] | 资产与文件记录的读写：差分计划的落库、配对、缺失标记 |
 //! | [`recent`] | 最近导入过的目录（`app.db`）——「最近」列表的存取与裁剪 |
@@ -28,11 +30,13 @@
 pub mod assets;
 pub mod db;
 pub mod file_id;
+pub mod fts;
 pub mod ids;
 pub mod location;
 pub mod migration;
 pub mod path_semantics;
 pub mod pool;
+pub mod query;
 pub mod pragma;
 pub mod recent;
 pub mod repository;
