@@ -173,3 +173,117 @@ export interface ThumbCacheStats {
   pinned: number;
   bySize: Array<[string, number, number]>;
 }
+
+/* ══════════════════════════════════════════════════════════════
+ * 导入执行与进度（M1-6）
+ * ══════════════════════════════════════════════════════════════ */
+
+/**
+ * 导入阶段。**扫描与规划没有总数**，所以那两段的百分比是 `null`
+ * （界面用不确定进度条，而不是编一个数字）。
+ */
+export type ImportStage = "scan" | "plan" | "import" | "thumbs" | "done";
+
+/** 整批状态。`cancelled` / `done` / `failed` 是终态。 */
+export type ImportState =
+  | "running"
+  | "pausing"
+  | "paused"
+  | "cancelling"
+  | "cancelled"
+  | "done"
+  | "failed";
+
+/** 正在处理的文件（「它没卡住」这件事靠它证明）。 */
+export interface ImportCurrentItem {
+  source: string;
+  target: string | null;
+}
+
+/** 一条错误（失败；跳过不算错误，另有计数）。 */
+export interface ImportError {
+  source: string;
+  target: string | null;
+  reason: string;
+  /** `failed` / `skipped`。 */
+  status: string;
+}
+
+/** 一个源目录（一个 run）的进度。 */
+export interface ImportRunProgress {
+  runId: number;
+  sourceRoot: string;
+  stage: ImportStage;
+  state: ImportState;
+  /** 扫描/读元数据阶段就在涨。 */
+  scanned: number;
+  /** 要处理的条目总数（规划完才知道；之前是 0）。 */
+  total: number;
+  done: number;
+  imported: number;
+  skipped: number;
+  /** 跳过里有多少是「已在库中」。 */
+  duplicates: number;
+  failed: number;
+  bytes: number;
+  current: ImportCurrentItem | null;
+  note: string | null;
+}
+
+/** 整批快照（`import://progress` 事件的载荷、`import_status` 的返回）。 */
+export interface ImportBatchProgress {
+  batchId: string;
+  stage: ImportStage;
+  state: ImportState;
+  /** 每个源目录一条。 */
+  runs: ImportRunProgress[];
+  /** 正在跑第几个（`[2/3]` 那种提示用它）。 */
+  currentRun: number | null;
+  total: number;
+  done: number;
+  imported: number;
+  skipped: number;
+  duplicates: number;
+  failed: number;
+  bytes: number;
+  /** 错误清单（只留尾巴，最多 200 条）。 */
+  errors: ImportError[];
+  /** 错误总数（清单被截断了也知道有多少）。 */
+  errorsTotal: number;
+  freeBytes: number | null;
+  startedAt: number;
+  finishedAt: number | null;
+}
+
+/** 开工前的预检结果。 */
+export interface ImportPrecheck {
+  totalBytes: number;
+  freeBytes: number | null;
+  /** 目标卷空间偏紧（界面该问一句再开工）。 */
+  tight: boolean;
+  /** 判断里用的「需要多少」（含 5% 余量）。 */
+  neededBytes: number;
+}
+
+/** 这批要跑哪些源目录（`runId` 在该目录真的开始时才分配）。 */
+export interface ImportPlannedRun {
+  index: number;
+  sourceRoot: string;
+}
+
+/** `import_start` 的结果。 */
+export interface ImportStart {
+  batchId: string;
+  runs: ImportPlannedRun[];
+}
+
+/** 上次被中断的导入（应用重启后提示「可继续」）。 */
+export interface InterruptedRun {
+  runId: number;
+  sourceRoot: string;
+  template: string;
+  startedAt: number;
+  imported: number;
+  skipped: number;
+  failed: number;
+}

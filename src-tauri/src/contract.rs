@@ -14,6 +14,7 @@
 
 use serde::Serialize;
 
+use crate::import::{ImportPrecheckDto, ImportStartDto, InterruptedRunDto, PlannedRunDto};
 use crate::repo::{RepositoryPathDto, RepositoryProbeDto, RepositoryViewDto};
 use crate::source::{
     DirEntryView, FileExifView, PhotoCountView, RecentDirView, SourceItemView, SourceScanView,
@@ -26,6 +27,15 @@ const CONTRACT_JSON: &str = include_str!("../../src/api/dto-contract.json");
 /// 一个响应结构的**真实**键集合（排序后）。
 fn keys_of<T: Serialize + Default>() -> Vec<String> {
     let value = serde_json::to_value(T::default()).expect("响应结构必须能序列化");
+    let object = value.as_object().expect("响应结构必须序列化成对象");
+    let mut keys: Vec<String> = object.keys().cloned().collect();
+    keys.sort();
+    keys
+}
+
+/// 从一个**真实构造出来的值**取键集合（有的 DTO 没有 `Default`）。
+fn keys_of_value<T: Serialize>(value: &T) -> Vec<String> {
+    let value = serde_json::to_value(value).expect("响应结构必须能序列化");
     let object = value.as_object().expect("响应结构必须序列化成对象");
     let mut keys: Vec<String> = object.keys().cloned().collect();
     keys.sort();
@@ -59,6 +69,83 @@ fn contract_file_is_readable() {
     let value: serde_json::Value = serde_json::from_str(CONTRACT_JSON).unwrap();
     assert!(value.is_object());
     assert!(value.get("RepositoryView").is_some());
+}
+
+// ── 导入（M1-6）──────────────────────────────────────────────
+//
+// 进度快照是**事件载荷**，比命令返回值更容易漂（没有返回值类型提示），
+// 所以它也在契约里：字段名一改，前端拿到的就是 undefined，界面整块空着。
+
+#[test]
+fn import_batch_progress_keys_match_contract() {
+    use raybend::import::progress::{BatchProgress, CurrentItem, ImportError, RunProgress};
+
+    let mut progress = BatchProgress::new("b1", 1);
+    let mut run = RunProgress::new(7, "/src");
+    run.current = Some(CurrentItem {
+        source: "a.jpg".to_string(),
+        target: None,
+    });
+    progress.runs.push(run);
+    progress.push_error(ImportError {
+        source: "b.jpg".to_string(),
+        target: None,
+        reason: "读不了".to_string(),
+        status: "failed".to_string(),
+    });
+    progress.recompute();
+
+    assert_eq!(
+        keys_of_value(&progress),
+        contract_keys("ImportBatchProgress")
+    );
+    assert_eq!(
+        keys_of_value(&progress.runs[0]),
+        contract_keys("ImportRunProgress")
+    );
+    assert_eq!(
+        keys_of_value(progress.runs[0].current.as_ref().unwrap()),
+        contract_keys("ImportCurrentItem")
+    );
+    assert_eq!(keys_of_value(&progress.errors[0]), contract_keys("ImportError"));
+}
+
+#[test]
+fn import_precheck_keys_match_contract() {
+    let dto = ImportPrecheckDto {
+        total_bytes: 1,
+        free_bytes: Some(2),
+        tight: false,
+        needed_bytes: 3,
+    };
+    assert_eq!(keys_of_value(&dto), contract_keys("ImportPrecheck"));
+}
+
+#[test]
+fn import_start_keys_match_contract() {
+    let dto = ImportStartDto {
+        batch_id: "b1".to_string(),
+        runs: vec![PlannedRunDto {
+            index: 0,
+            source_root: "/src".to_string(),
+        }],
+    };
+    assert_eq!(keys_of_value(&dto), contract_keys("ImportStart"));
+    assert_eq!(keys_of_value(&dto.runs[0]), contract_keys("ImportPlannedRun"));
+}
+
+#[test]
+fn interrupted_run_keys_match_contract() {
+    let dto = InterruptedRunDto {
+        run_id: 1,
+        source_root: "/src".to_string(),
+        template: ":FILENAME".to_string(),
+        started_at: 2,
+        imported: 3,
+        skipped: 4,
+        failed: 5,
+    };
+    assert_eq!(keys_of_value(&dto), contract_keys("InterruptedRun"));
 }
 
 // 每条断言都是「Rust 真实序列化 vs 契约文件」，逐个列出（函数名即断言名）。
@@ -142,6 +229,15 @@ fn every_contract_entry_has_a_test() {
         "RepositoryPath",
         "RepositoryProbe",
         "ThumbCacheStats",
+        // 导入（M1-6）
+        "ImportBatchProgress",
+        "ImportRunProgress",
+        "ImportCurrentItem",
+        "ImportError",
+        "ImportPrecheck",
+        "ImportStart",
+        "ImportPlannedRun",
+        "InterruptedRun",
     ];
     for key in value.as_object().unwrap().keys() {
         if key.starts_with('_') {

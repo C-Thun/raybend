@@ -23,6 +23,14 @@ import { fileURLToPath } from "node:url";
 import type {
   DirEntry,
   FileExif,
+  ImportBatchProgress,
+  ImportCurrentItem,
+  ImportError,
+  ImportPrecheck,
+  ImportRunProgress,
+  ImportStart,
+  ImportPlannedRun,
+  InterruptedRun,
   PhotoCount,
   RecentDir,
   RepositoryPath,
@@ -147,6 +155,70 @@ const THUMB_CACHE_STATS_KEYS = [
  * 测试
  * ══════════════════════════════════════════════════════════════ */
 
+/* 导入（M1-6）：进度事件的载荷是最大的一份 DTO，键名漂了界面就整块空着 */
+const IMPORT_BATCH_KEYS = [
+  "batchId",
+  "bytes",
+  "currentRun",
+  "done",
+  "duplicates",
+  "errors",
+  "errorsTotal",
+  "failed",
+  "finishedAt",
+  "freeBytes",
+  "imported",
+  "runs",
+  "skipped",
+  "stage",
+  "startedAt",
+  "state",
+  "total",
+] as const satisfies readonly (keyof ImportBatchProgress)[];
+const IMPORT_RUN_KEYS = [
+  "bytes",
+  "current",
+  "done",
+  "duplicates",
+  "failed",
+  "imported",
+  "note",
+  "runId",
+  "scanned",
+  "skipped",
+  "sourceRoot",
+  "stage",
+  "state",
+  "total",
+] as const satisfies readonly (keyof ImportRunProgress)[];
+const IMPORT_CURRENT_KEYS = ["source", "target"] as const satisfies readonly (keyof ImportCurrentItem)[];
+const IMPORT_ERROR_KEYS = [
+  "reason",
+  "source",
+  "status",
+  "target",
+] as const satisfies readonly (keyof ImportError)[];
+const IMPORT_PRECHECK_KEYS = [
+  "freeBytes",
+  "neededBytes",
+  "tight",
+  "totalBytes",
+] as const satisfies readonly (keyof ImportPrecheck)[];
+const IMPORT_START_KEYS = ["batchId", "runs"] as const satisfies readonly (keyof ImportStart)[];
+const IMPORT_PLANNED_RUN_KEYS = [
+  "index",
+  "sourceRoot",
+] as const satisfies readonly (keyof ImportPlannedRun)[];
+const INTERRUPTED_RUN_KEYS = [
+  "failed",
+  "imported",
+  "runId",
+  "skipped",
+  "sourceRoot",
+  "startedAt",
+  "template",
+] as const satisfies readonly (keyof InterruptedRun)[];
+
 /** 手写的键表 → 覆盖检查（跑一遍，顺便让 `noUnusedLocals` 满意） */
 const KEY_TABLES = {
   RecentDir: checkKeys<RecentDir, typeof RECENT_DIR_KEYS>(RECENT_DIR_KEYS),
@@ -168,6 +240,26 @@ const KEY_TABLES = {
   ),
   ThumbCacheStats: checkKeys<ThumbCacheStats, typeof THUMB_CACHE_STATS_KEYS>(
     THUMB_CACHE_STATS_KEYS,
+  ),
+  ImportBatchProgress: checkKeys<ImportBatchProgress, typeof IMPORT_BATCH_KEYS>(
+    IMPORT_BATCH_KEYS,
+  ),
+  ImportRunProgress: checkKeys<ImportRunProgress, typeof IMPORT_RUN_KEYS>(
+    IMPORT_RUN_KEYS,
+  ),
+  ImportCurrentItem: checkKeys<ImportCurrentItem, typeof IMPORT_CURRENT_KEYS>(
+    IMPORT_CURRENT_KEYS,
+  ),
+  ImportError: checkKeys<ImportError, typeof IMPORT_ERROR_KEYS>(IMPORT_ERROR_KEYS),
+  ImportPrecheck: checkKeys<ImportPrecheck, typeof IMPORT_PRECHECK_KEYS>(
+    IMPORT_PRECHECK_KEYS,
+  ),
+  ImportStart: checkKeys<ImportStart, typeof IMPORT_START_KEYS>(IMPORT_START_KEYS),
+  ImportPlannedRun: checkKeys<ImportPlannedRun, typeof IMPORT_PLANNED_RUN_KEYS>(
+    IMPORT_PLANNED_RUN_KEYS,
+  ),
+  InterruptedRun: checkKeys<InterruptedRun, typeof INTERRUPTED_RUN_KEYS>(
+    INTERRUPTED_RUN_KEYS,
   ),
 } as const;
 

@@ -95,5 +95,73 @@
     "bytes",
     "entries",
     "pinned"
+  ],
+  "ImportBatchProgress": [
+    "batchId",
+    "bytes",
+    "currentRun",
+    "done",
+    "duplicates",
+    "errors",
+    "errorsTotal",
+    "failed",
+    "finishedAt",
+    "freeBytes",
+    "imported",
+    "runs",
+    "skipped",
+    "stage",
+    "startedAt",
+    "state",
+    "total"
+  ],
+  "ImportRunProgress": [
+    "bytes",
+    "current",
+    "done",
+    "duplicates",
+    "failed",
+    "imported",
+    "note",
+    "runId",
+    "scanned",
+    "skipped",
+    "sourceRoot",
+    "stage",
+    "state",
+    "total"
+  ],
+  "ImportCurrentItem": [
+    "source",
+    "target"
+  ],
+  "ImportError": [
+    "reason",
+    "source",
+    "status",
+    "target"
+  ],
+  "ImportPrecheck": [
+    "freeBytes",
+    "neededBytes",
+    "tight",
+    "totalBytes"
+  ],
+  "ImportStart": [
+    "batchId",
+    "runs"
+  ],
+  "ImportPlannedRun": [
+    "index",
+    "sourceRoot"
+  ],
+  "InterruptedRun": [
+    "failed",
+    "imported",
+    "runId",
+    "skipped",
+    "sourceRoot",
+    "startedAt",
+    "template"
   ]
 }
