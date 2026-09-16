@@ -14,7 +14,9 @@
 //! - [`thumbnail`]：缩略图与预览（M0-5）
 //! - [`render`]：wgpu 渲染与视口变换（M0-2）
 //! - [`store`]：数据底座（SQLite 打开/迁移/备份/写并发，M1-2）
+//! - [`import`]：导入（模版求值、目标路径规划、执行与进度，M1-6）
 
+pub mod import;
 pub mod index;
 pub mod media;
 pub mod raw;

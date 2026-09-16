@@ -79,7 +79,11 @@ pub fn format_human(millis: i64) -> String {
 }
 
 /// 由年月日（公历）算「距 1970-01-01 的天数」。Howard Hinnant 的算法。
-fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
+///
+/// 公开是因为导入模版的 ISO 周号（`:CWEEK`）要从它推 —— 与其再抄一份日期算法，
+/// 不如让两边共用同一个（日历算法抄错的代价是跨年那几天落到错的目录里）。
+#[must_use]
+pub fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
     let y = if m <= 2 { y - 1 } else { y };
     let era = if y >= 0 { y } else { y - 399 } / 400;
     let yoe = y - era * 400; // [0, 399]
