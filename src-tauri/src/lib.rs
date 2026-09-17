@@ -17,6 +17,7 @@ pub mod thumbs;
 /// IPC 契约测试（拉把 Rust 序列化出的键名与前端 ts 镜像对齐）。
 #[cfg(test)]
 mod contract;
+pub mod dirs;
 
 /// 主窗口标签（与 `tauri.conf.json` 的窗口配置、`capabilities/default.json` 对应）。
 pub const MAIN_WINDOW_LABEL: &str = "main";
@@ -186,6 +187,10 @@ pub fn run() {
             browse::flags_get,
             browse::flags_set,
             browse::flags_clear,
+            // ── 库内目录树的菜单（新建子目录 / 删除空目录，BROWSE.md §4.3）──
+            dirs::dir_empty_check,
+            dirs::dir_remove_empty,
+            dirs::dir_create,
             // ── 启动流程 ──
             ui_ready,
         ])

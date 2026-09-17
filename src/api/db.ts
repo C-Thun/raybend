@@ -16,6 +16,7 @@
 import { isTauriRuntime } from "./tauri-env.ts";
 import { t } from "../i18n/index.ts";
 import type {
+  DirEmptyView,
   DirEntry,
   RepositorySettings,
   TemplatePreview,
@@ -129,6 +130,35 @@ export async function listVolumes(): Promise<Volume[]> {
 export async function listDirs(path: string): Promise<DirEntry[]> {
   if (!isTauriRuntime()) return [];
   return call<DirEntry[]>("dir_list", { path });
+}
+
+/*
+ * 库内目录的菜单动作（`BROWSE.md` §4.3 行尾 `⋯`）。
+ *
+ * 传的是 `root + rel`（**库根 + 库内相对路径**），不是绝对路径：
+ * Rust 侧会拿 `rel` 过一遍越界检查（`..`、绝对路径、盘符一律拒）——
+ * 界面上一层笔误不该能碰到库外面去。
+ */
+
+/** 深度检查这个目录的整棵子树里有没有文件（决定「删除空目录」能不能点）。 */
+export async function dirEmptyCheck(root: string, rel: string): Promise<DirEmptyView> {
+  // 浏览器里没有真目录：按「不空」处理，菜单项于是是禁用的（而不是假装能删）
+  if (!isTauriRuntime()) {
+    return { empty: false, fileCount: 0, dirCount: 0, emptyDirCount: 0, hasUnresolvedLink: false };
+  }
+  return call<DirEmptyView>("dir_empty_check", { root, rel });
+}
+
+/** 删除空目录（连同其下所有空子目录），返回删掉的目录个数。 */
+export async function dirRemoveEmpty(root: string, rel: string): Promise<number> {
+  if (!isTauriRuntime()) return 0;
+  return call<number>("dir_remove_empty", { root, rel });
+}
+
+/** 建一个子目录，返回它的库内相对路径。 */
+export async function dirCreate(root: string, rel: string, name: string): Promise<string> {
+  if (!isTauriRuntime()) return rel === "" ? name : `${rel}/${name}`;
+  return call<string>("dir_create", { root, rel, name });
 }
 
 /** 列一个目录里的照片（**不下钻子目录**）。 */

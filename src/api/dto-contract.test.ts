@@ -27,6 +27,7 @@ import type {
   BrowseWindow,
   DeleteFailure,
   DeleteResult,
+  DirEmptyView,
   DirEntry,
   FacetCount,
   FileExif,
@@ -311,6 +312,13 @@ const DELETE_RESULT_KEYS = [
   "failed",
 ] as const satisfies readonly (keyof DeleteResult)[];
 const FLAGS_VIEW_KEYS = ["picks", "rejects", "total"] as const satisfies readonly (keyof FlagsView)[];
+const DIR_EMPTY_VIEW_KEYS = [
+  "empty",
+  "fileCount",
+  "dirCount",
+  "emptyDirCount",
+  "hasUnresolvedLink",
+] as const satisfies readonly (keyof DirEmptyView)[];
 
 /** 手写的键表 → 覆盖检查（跑一遍，顺便让 `noUnusedLocals` 满意） */
 const KEY_TABLES = {
@@ -373,6 +381,7 @@ const KEY_TABLES = {
   DeleteFailure: checkKeys<DeleteFailure, typeof DELETE_FAILURE_KEYS>(DELETE_FAILURE_KEYS),
   DeleteResult: checkKeys<DeleteResult, typeof DELETE_RESULT_KEYS>(DELETE_RESULT_KEYS),
   FlagsView: checkKeys<FlagsView, typeof FLAGS_VIEW_KEYS>(FLAGS_VIEW_KEYS),
+  DirEmptyView: checkKeys<DirEmptyView, typeof DIR_EMPTY_VIEW_KEYS>(DIR_EMPTY_VIEW_KEYS),
 } as const;
 
 const HERE = dirname(fileURLToPath(import.meta.url));

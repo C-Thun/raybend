@@ -9,9 +9,14 @@
  */
 
 import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
+import { IconDots, IconFolderMinus, IconFolderPlus } from "@tabler/icons-solidjs";
 
-import { listDirs } from "../../api/db.ts";
-import type { AssetItem, RepositoryView } from "../../api/types.ts";
+import { dirCreate, dirEmptyCheck, dirRemoveEmpty, listDirs } from "../../api/db.ts";
+import { Button } from "../../components/ui/Button.tsx";
+import { ConfirmDialog, Dialog } from "../../components/ui/Dialog.tsx";
+import { Input } from "../../components/ui/Form.tsx";
+import { Menu } from "../../components/ui/Menu.tsx";
+import type { AssetItem, DirEmptyView, RepositoryView } from "../../api/types.ts";
 import { t } from "../../i18n/index.ts";
 import { shortPath } from "../../lib/shortpath.ts";
 import type { BrowseStore } from "./store.ts";
@@ -50,6 +55,18 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
   const [children, setChildren] = createSignal<ReadonlyMap<string, string[]>>(new Map());
   /** 本次会话里的库顺序（点库移顶）。 */
   const [order, setOrder] = createSignal<readonly string[]>([]);
+
+  /* ══ 行尾 `⋯` 菜单的两个动作（`BROWSE.md` §4.3）══ */
+
+  /** 每个目录的**深度**空检查结果，菜单打开时查一次。 */
+  const [emptyInfo, setEmptyInfo] = createSignal<ReadonlyMap<string, DirEmptyView>>(new Map());
+  /** 待确认删除的目录（null = 没弹） */
+  const [confirmRel, setConfirmRel] = createSignal<string | null>(null);
+  /** 正在建子目录的**父**目录（null = 没弹） */
+  const [createRel, setCreateRel] = createSignal<string | null>(null);
+  const [newName, setNewName] = createSignal("");
+  const [busy, setBusy] = createSignal(false);
+  const [formError, setFormError] = createSignal<string | null>(null);
 
   const root = createMemo(
     () => props.repositories.find((r) => r.id === store.repositoryId())?.root ?? null,
@@ -165,6 +182,104 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
   const visibleRepos = () => filtered().slice(0, expandedLibs() ? undefined : COMPACT_REPO_LIMIT);
   const hasMore = () => !expandedLibs() && filtered().length > COMPACT_REPO_LIMIT;
 
+  /* ══ 行尾 `⋯` 的实际动作 ══ */
+
+  /**
+   * 查一次这棵子树里有没有文件 —— 「删除空目录」能不能点**由它决定**。
+   *
+   * 查不动（离线、权限、目录刚被别人删了）时按**不空**处理：菜单项禁用，
+   * 总比让人点了再报错好。
+   */
+  async function checkEmpty(relPath: string): Promise<void> {
+    const base = root();
+    if (base === null) return;
+    try {
+      const info = await dirEmptyCheck(base, relPath);
+      setEmptyInfo((prev) => new Map(prev).set(relPath, info));
+    } catch {
+      setEmptyInfo((prev) =>
+        new Map(prev).set(relPath, {
+          empty: false,
+          fileCount: 0,
+          dirCount: 0,
+          emptyDirCount: 0,
+          hasUnresolvedLink: false,
+        }),
+      );
+    }
+  }
+
+  /** 父目录的库内相对路径（`photos/2026` → `photos`；根级 → `""`）。 */
+  function parentOf(relPath: string): string {
+    const cut = relPath.lastIndexOf("/");
+    return cut === -1 ? "" : relPath.slice(0, cut);
+  }
+
+  /** 把这个目录（及其后代）从展开态与子目录缓存里清掉 —— 它已经不在磁盘上了。 */
+  function forget(relPath: string): void {
+    const gone = (key: string): boolean => key === relPath || key.startsWith(`${relPath}/`);
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      for (const key of [...next]) if (gone(key)) next.delete(key);
+      return next;
+    });
+    setChildren((prev) => {
+      const next = new Map(prev);
+      for (const key of [...next.keys()]) if (gone(key)) next.delete(key);
+      return next;
+    });
+  }
+
+  /** 删掉一棵空目录树，然后把树刷成新的样子。 */
+  async function doDeleteEmpty(): Promise<void> {
+    const relPath = confirmRel();
+    const base = root();
+    if (relPath === null || base === null) return;
+    setBusy(true);
+    setFormError(null);
+    try {
+      await dirRemoveEmpty(base, relPath);
+      const parent = parentOf(relPath);
+      forget(relPath);
+      // 正在看的目录被删了 ⇒ 退回「整个库」，否则网格会停在一个不存在的范围上
+      const scope = store.scopePath();
+      if (scope !== null && (scope === relPath || scope.startsWith(`${relPath}/`))) {
+        store.setScope(null);
+      }
+      await loadChildren(parent);
+      setConfirmRel(null);
+    } catch (error) {
+      setFormError(t("browse.deleteDirFailed", { message: String(error) }));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** 建一个子目录：展开父目录、读出那一级、并选中新建的目录。 */
+  async function doCreateSubdir(): Promise<void> {
+    const parentRel = createRel();
+    const base = root();
+    if (parentRel === null || base === null) return;
+    setBusy(true);
+    setFormError(null);
+    try {
+      const created = await dirCreate(base, parentRel, newName().trim());
+      if (parentRel !== "") setExpanded((prev) => new Set(prev).add(parentRel));
+      await loadChildren(parentRel);
+      store.setScope(created);
+      setCreateRel(null);
+      setNewName("");
+    } catch (error) {
+      setFormError(t("browse.createFailed", { message: String(error) }));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** `⋯` 菜单里那一行给菜单项用的禁用判定。 */
+  const canDeleteEmpty = (relPath: string): boolean =>
+    emptyInfo().get(relPath)?.empty === true;
+
   return (
     <div class={["flex min-h-0 flex-col gap-2 p-2", props.class ?? ""].filter(Boolean).join(" ")}>
       {/* 搜索条 */}
@@ -279,11 +394,137 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
                 >
                   {row.name}
                 </button>
+
+                {/*
+                  行尾 `⋯`（`BROWSE.md` §4.3）：删除空目录 / 创建子目录。
+
+                  空检查是**打开菜单时**才做的（深度检索要碰盘），结果缓存起来决定
+                  「删除空目录」能不能点；非空时菜单项在，但是暗的。
+                */}
+                <Menu
+                  label={t("browse.dirMenu")}
+                  placement="bottom-end"
+                  items={[
+                    {
+                      value: "delete-empty",
+                      label: t("browse.deleteEmptyDir"),
+                      icon: <IconFolderMinus size={14} />,
+                      disabled: !canDeleteEmpty(row.relPath),
+                    },
+                    {
+                      value: "create-subdir",
+                      label: t("browse.createSubdir"),
+                      icon: <IconFolderPlus size={14} />,
+                    },
+                  ]}
+                  onSelect={(value) => {
+                    setFormError(null);
+                    if (value === "delete-empty") setConfirmRel(row.relPath);
+                    if (value === "create-subdir") {
+                      setNewName("");
+                      setCreateRel(row.relPath);
+                    }
+                  }}
+                  onOpenChange={(open) => {
+                    if (open) void checkEmpty(row.relPath);
+                  }}
+                >
+                  {(triggerProps) => (
+                    <button
+                      {...triggerProps()}
+                      aria-label={t("browse.dirMenu")}
+                      class="shrink-0 rounded-(--radius) px-1 text-fg-3 hover:bg-state-hover hover:text-fg-1"
+                    >
+                      <IconDots size={14} />
+                    </button>
+                  )}
+                </Menu>
               </div>
             )}
           </For>
         </div>
       </Show>
+
+      {/*
+        删除空目录的确认。
+
+        这里是**真的在磁盘上删目录**（不是「从集合里移除」），所以刻意**不做**
+        `easy destroy` 的 Shift 快通道（`DESIGN.md` §12.2 那条是为移除类操作定的）。
+        能删的东西本身无害（目录里一个文件都没有 → 删了不影响照片），
+        但一旦删错就无法撤销，弹一次值得。
+      */}
+      <ConfirmDialog
+        open={confirmRel() !== null}
+        title={t("browse.deleteEmptyTitle")}
+        message={[
+          t("browse.deleteEmptyBody", {
+            n: confirmRel() === null ? 0 : (emptyInfo().get(confirmRel()!)?.emptyDirCount ?? 0),
+          }),
+          // 删除失败（目录被别人占用/中途冒出了文件）时把话接在正文后面：
+          // 这个弹窗没有单独的错误行，报错不能没地方去
+          formError(),
+        ]
+          .filter((line): line is string => line !== null && line !== "")
+          .join("\n\n")}
+        confirmLabel={t("browse.deleteEmptyDir")}
+        onConfirm={() => void doDeleteEmpty()}
+        onCancel={() => {
+          setConfirmRel(null);
+          setFormError(null);
+        }}
+      />
+
+      {/* 创建子目录（重名/非法名字的错误由 Rust 侧挡住，这里只把话说给用户） */}
+      <Dialog
+        open={createRel() !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setCreateRel(null);
+            setFormError(null);
+          }
+        }}
+        title={t("browse.createSubdirTitle")}
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setCreateRel(null);
+                setFormError(null);
+              }}
+            >
+              {t("common.cancel")}
+            </Button>
+            <Button
+              variant="primary"
+              disabled={busy() || newName().trim() === ""}
+              onClick={() => void doCreateSubdir()}
+            >
+              {t("browse.createSubdir")}
+            </Button>
+          </>
+        }
+      >
+        <label class="flex flex-col gap-1">
+          <span class="text-fs-0 text-fg-2">{t("browse.subdirName")}</span>
+          <Input
+            value={newName()}
+            placeholder={t("browse.subdirNamePlaceholder")}
+            onInput={(event) => setNewName(event.currentTarget.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && newName().trim() !== "") void doCreateSubdir();
+            }}
+          />
+        </label>
+        <Show when={createRel() !== null}>
+          <p class="text-fs-0 text-fg-3">
+            {createRel() === "" ? t("browse.wholeRepository") : createRel()}
+          </p>
+        </Show>
+        <Show when={formError() !== null}>
+          <p class="text-fs-0 text-fg-2">{formError()}</p>
+        </Show>
+      </Dialog>
     </div>
   );
 }

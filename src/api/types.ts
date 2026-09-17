@@ -443,6 +443,19 @@ export interface FlagsView {
   rejects: number[];
 }
 
+/**
+ * 深度空检查的结果（库内目录树 `⋯` 菜单：删除空目录）。
+ *
+ * `emptyDirCount` 是**递归**口径：`a/b/c` 全空时算 3 个（它们会一起被删掉）。
+ */
+export interface DirEmptyView {
+  empty: boolean;
+  fileCount: number;
+  dirCount: number;
+  emptyDirCount: number;
+  hasUnresolvedLink: boolean;
+}
+
 /* ── 输入侧（前端 → Rust；不进契约文件，因为没有返回值那种「静默漂移」风险）── */
 
 /** 筛选条件（字段都可省 = 不限）。 */

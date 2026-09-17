@@ -262,5 +262,12 @@
     "picks",
     "rejects",
     "total"
+  ],
+  "DirEmptyView": [
+    "empty",
+    "fileCount",
+    "dirCount",
+    "emptyDirCount",
+    "hasUnresolvedLink"
   ]
 }

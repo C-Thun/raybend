@@ -298,6 +298,7 @@ fn every_contract_entry_has_a_test() {
         "DeleteResult",
         "DeleteFailure",
         "FlagsView",
+        "DirEmptyView",
     ];
     for key in value.as_object().unwrap().keys() {
         if key.starts_with('_') {
@@ -317,6 +318,7 @@ fn every_contract_entry_has_a_test() {
 
 #[test]
 fn browse_assets_dtos_match_contract() {
+    use crate::dirs::DirEmptyView;
     use crate::browse::{
         AssetItem, BrowseFacets, BrowseTimeline, BrowseWindow, DeleteResult, FacetCount, FlagsView,
         MarkResult, MarkingItem, TimelineEntry,
@@ -332,6 +334,7 @@ fn browse_assets_dtos_match_contract() {
     assert_eq!(keys_of::<MarkResult>(), contract_keys("MarkResult"));
     assert_eq!(keys_of::<DeleteResult>(), contract_keys("DeleteResult"));
     assert_eq!(keys_of::<FlagsView>(), contract_keys("FlagsView"));
+    assert_eq!(keys_of::<DirEmptyView>(), contract_keys("DirEmptyView"));
 }
 
 #[test]
