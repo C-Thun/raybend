@@ -102,6 +102,22 @@
 
 ---
 
+### C6　wgpu 版本锁定与升级路径（**M2-W1 落定 30.0.1**）
+
+* **现状**：锁定 `wgpu 30.0.1`（上游最新），配 `pollster 0.4` 在渲染线程里跑 async 初始化。
+* **记一笔前例**：`AGENTS.md` §3 记着 RapidRAW 把 wgpu **降到 29.0** 以规避 Apple 设备上的 P3 色偏。
+  那是 macOS/色彩管理的问题，本项目 Windows 优先、且第一阶段不做色彩管理，所以**从最新版起步**；
+  真在 macOS 上踩到再降，且到那时我们本来也要自己接色彩管理（C1）。
+* **升级纪律**：分辨率与呈现路径（surface 配置、alpha 模式、device lost 恢复）是 spike 的核心观测对象，
+  升级 wgpu 时这些行为要**重跑一遍 spike**（`pnpm spike:win`），不要只看编译过不过。
+* **已知的 API 变动教训**（30.0.1 实测，写下来免得下次又猜）：
+  `Instance::new` 收**值**不是引用；`InstanceDescriptor` 没有 `default()`（用 `new_without_display_handle_from_env()` 那一族才会读 `WGPU_BACKEND`）；
+  `Surface::get_current_texture` 返回 `CurrentSurfaceTexture` 枚举（不再是 `Result`）；呈现走 `queue.present(texture)`；
+  `Device` 上取不到 `queue`；`PipelineLayoutDescriptor` 用 `immediate_size`（不再有 `push_constant_ranges`）且布局要裹 `Some`；
+  管线与 render pass 的 `multiview` 改名 `multiview_mask`；`SurfaceConfiguration` 新增 `color_space`。
+
+---
+
 ## D. 编辑与显影模块（第二阶段主战场）
 
 > 用户明确：**编辑不是第一阶段的重点**。这里只登记方向与前提条件。

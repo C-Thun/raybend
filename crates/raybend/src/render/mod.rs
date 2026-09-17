@@ -8,5 +8,21 @@
 //!    禁止前端自行推导像素对齐；
 //! 3. WGSL 源码与 uniform 结构体属于本模块，前端不接触像素格式与色彩空间。
 //!
-//! **本模块目前只有说明** —— M0-1 阶段不引入 `wgpu` 依赖；
-//! M0-2 的渲染可行性验证会在此落地（调试窗口开在 `src-tauri/src/spike_viewport.rs`）。
+//! # 模块内容（M2-W1 spike）
+//!
+//! - [`viewport`]：视口状态与坐标变换（图像/物理/CSS 三套坐标，一处收口；纯数学 + 测试）
+//! - [`gpu`]：wgpu 上下文（surface 挂窗口、resize、设备丢失与恢复、后端探测）
+//! - [`scene`]：spike 用的合成测试图（含 1px 棋盘格与方位标记，用来目视判画质）
+//! - [`stats`]：帧时间统计与 spike 报告（自记录，供 `pnpm spike:win` 落盘）
+//!
+//! 调试窗口开在 `src-tauri/src/spike_viewport.rs`（`label = "spike-viewport"`），
+//! **不动主窗口** —— 即使透明挖洞彻底失败也不影响别的部分（`PLAN.md` A.2 的窗口策略）。
+
+pub mod gpu;
+pub mod scene;
+pub mod stats;
+pub mod viewport;
+
+pub use gpu::{GpuContext, GpuError, RawHandles, RenderOutcome, SurfaceDetails};
+pub use stats::{FrameStats, SpikeReport};
+pub use viewport::{AlphaMode, ClipRect, FitMode, Viewport};

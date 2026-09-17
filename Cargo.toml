@@ -42,6 +42,16 @@ trash = "5.2"
 
 # 缩略图（M1-3）：只开需要的解码/编码格式，不开 avif/hdr 等大件
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "tiff"] }
+# 渲染（M2-W1 spike；AGENTS.md §6.1 定的方案 B = webview 挖洞 + wgpu 直绘到窗口表面）。
+# 版本 30.0.1：**上游最新**。AGENTS.md §3 记着 RapidRAW 曾把 wgpu 降到 29.0 以规避
+# Apple 设备上的 P3 色偏 —— 那是 macOS 的问题，本项目 Windows 优先，先从最新版起步
+# （真在 macOS 上踩到再降，且那时我们本来也要自己接色彩管理）。
+# 依赖位只允许 `crates/raybend/src/render/` 与 `src-tauri` 的 spike 壳使用。
+wgpu = "30.0.1"
+# 在**同步**代码里跑 wgpu 的 async 初始化（渲染线程不是 async 的）。
+# 用它而不是 `tauri::async_runtime`：业务 crate 不许依赖 tauri（AGENTS.md §4）。
+pollster = "0.4"
+
 # Windows 平台调用：文件身份（GetFileInformationByHandleEx）/ 驱动器类型（GetDriveTypeW）
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
 

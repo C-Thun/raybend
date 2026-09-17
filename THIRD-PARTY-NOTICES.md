@@ -17,7 +17,8 @@
 | --- | --- | --- | --- | --- |
 | 【待 M0-3 落定】rawler（上游 [dnglab](https://github.com/dnglab/dnglab)） | 0.8.0 | **LGPL-2.1-only** | RAW 解码 | **兼容**：LGPL v2.1 可经 GPLv2-or-later / GPLv3 路径与本项目组合（FSF 许可说明：LGPL v2.1「compatible with GPLv2 and GPLv3」；AGPL-3.0 §13 允许与 GPL-3.0 作品组成单一作品） |
 | 【待 M0-1 落定】Tauri 及其官方插件 | 2.x | MIT / Apache-2.0 | 应用外壳 | 兼容（宽松许可） |
-| 【待 M0-1 落定】wgpu / naga | 29.x 或 30.x | MIT / Apache-2.0 | GPU 渲染 | 兼容 |
+| wgpu / naga | **30.0.1**（2026-09-17 落定，见 `FUTURE.md` C6） | MIT / Apache-2.0 | GPU 渲染（方案 B：webview 挖洞 + 直绘） | 兼容 |
+| pollster | 0.4 | MIT / Apache-2.0 | 在渲染线程里跑 wgpu 的 async 初始化 | 兼容 |
 | 【待 M0-1 落定】Solid / Vite / Tailwind CSS | 见 `package.json` | MIT | 前端框架与构建 | 兼容 |
 | 【待 UI 设计阶段引入】Ark UI（`@ark-ui/solid`） | 5.x | MIT | UI 组件原语 | 兼容 |
 | 【待 UI 设计阶段引入】Tabler Icons（`@tabler/icons-solidjs`） | 3.x | MIT | 图标 | 兼容 |
@@ -63,4 +64,5 @@
 | 日期 | 变更 |
 | --- | --- |
 | 2026-09-15 | 初版：建立清单骨架，登记 rawler(LGPL-2.1) 与参考项目；详细依赖清单待 M0 各波次落定后补齐 |
+| 2026-09-17 | wgpu 版本落定为 30.0.1（上游最新）+ 新增 pollster 0.4（渲染 spike 引入，M2-W1） |
 | 2026-09-17 | 新增 §1b「品牌素材」：logo 与闪屏图**自研**，随项目 AGPL-3.0-only（人类确认） |
