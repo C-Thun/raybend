@@ -29,3 +29,6 @@ Thumbs.db
 
 # Windows 拷贝带来的 NTFS 附加流残留（文件名里真带冒号，Windows 上无法 checkout）
 *:Zone.Identifier
+
+# 品牌字矢量预览页（由 scripts/generate-marks.mjs 生成，自包含大文件）
+marks/preview.html

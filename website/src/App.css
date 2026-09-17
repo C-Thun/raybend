@@ -101,6 +101,9 @@
    * 二是它们全是 kebab-case 属性名（`stroke-width`…）—— 放在 JSX 里会被 lint 当成驼峰建议误报。
    */
   .rb-mark-path {
+    /* potrace 把「孔洞」输出成绕向相反的**子路径**，必须用 evenodd 才会被挖空；
+       用默认的 nonzero 就会把「光/伴/RayBend」的封闭部件填实（曾经踩过）。 */
+    fill-rule: evenodd;
     paint-order: stroke;
     stroke-linejoin: round;
     vector-effect: non-scaling-stroke;
