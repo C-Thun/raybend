@@ -32,7 +32,11 @@ export function BrandMark(props: BrandMarkProps) {
       viewBox={mark().viewBox}
       role="img"
       aria-label={props.label}
-      class={['block h-auto', props.class]}
+      // `overflow-visible` —— **别删**：viewBox 是 potrace 按**墨迹紧框**输出的，
+      // 而外扩白边（描边）出**框外**的那一半，默认会被 svg 自己的画布裁掉。
+      // 裁白边的不是外层哪个 div，是这个元素的默认 `overflow: hidden`。
+      // 放开它对布局零影响（画布尺寸不变、白边不进文档流），正是「出血边」要的效果。
+      class={['block h-auto overflow-visible', props.class]}
       // 宽高比来自生成物的 viewBox（数据驱动），没有静态类名可写
       // pi-lens-ignore: inline-styles
       style={{ 'aspect-ratio': ratio() } as JSX.CSSProperties}
