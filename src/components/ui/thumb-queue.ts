@@ -18,7 +18,7 @@
  * 补进新列表里（那种串图很难查）。
  */
 
-import { createSignal } from "solid-js";
+import { createSignal, untrack } from "solid-js";
 
 export type ThumbStatus = "idle" | "loading" | "ready" | "error";
 
@@ -173,7 +173,12 @@ export function createThumbQueue(deps: ThumbQueueDeps): ThumbQueue {
 
     clear: () => {
       generation += 1;
-      for (const entry of Object.values(entries())) {
+      // 这一次读**必须** untrack：`clear()` 通常是在 effect 里被调的（换库 / 换目录时清缓存）。
+      // 若把 `entries()` 读进依赖，紧随其后的 `setEntries({})` 就会让**调用它的那个 effect 自我失效** →
+      // 重跑 → 再读再写（每次都是新对象，Solid 的等值判断短路不掉）→ 无限自激直到爆栈。
+      // 实测（2026-09-17）：人类机器上「库在线时进浏览」必爆 `Maximum call stack size exceeded`，
+      // 而浏览器冒烟抓不到 —— 那里没有库，`root` 恒为 null，调用方的 effect 提前 return 了。
+      for (const entry of Object.values(untrack(entries))) {
         if (entry.url) revokeUrl(entry.url);
       }
       queued = [];

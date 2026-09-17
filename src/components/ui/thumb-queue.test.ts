@@ -224,3 +224,12 @@ test("统计里的 queued / inflight 与实际进度一致", async () => {
   await flush(6);
   assert.deepEqual(queue.stats(), { entries: 3, inflight: 0, queued: 0 });
 });
+/* 关于「`clear()` 不能把 `entries` 读进依赖」这条（2026-09-17 爆栈事故）：
+ *
+ * 它**在 Node 里测不出来** —— `import "solid-js"` 解析到的是 SSR 构建（没有响应式），
+ * 那样的 `createEffect` 只跑一次，成不了环；就算显式引客户端构建，合成场景也不复现
+ * （实测三次都是假绿：把修复撤掉，测试照样过）。
+ * 真正能抓住它的是一次**端到端的界面对照**：库非空时进浏览。
+ * 那个场景的自动化在 `scripts/repro-browse.mjs`（假后端 + 真前端，可重复执行），
+ * `thumb-queue.ts` 的 `clear()` 上也留了说明。这条注释是给「想再加测试」的人看的：
+ * 别在 Node 里写这一条，写不出真的。 */

@@ -61,6 +61,9 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
         }
       } catch (error) {
         // 拿不到库列表不该让工作区崩掉；但**不能装作「你没有库」** —— 把原因显示在左列。
+        // 同时打一条控制台：只上界面、日志里查不到，排障时只能靠人转述一句文案。
+        // 这是**控制台诊断**，不走语言包（`DESIGN.md` §11.1 的豁免项：终端/控制台输出）。
+        console.error("[browse] 读库列表失败", error); // i18n-exempt: 控制台诊断，不是界面文案
         setRepositories([]);
         setReposError(error instanceof Error ? error.message : String(error));
       } finally {

@@ -297,6 +297,7 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
       />
 
       {/* 紧缩库列表 */}
+      {/* 三态：正在读 / 读失败 / 真的没有库 —— 见 `BrowseLeftColumnProps` 里的说明 */}
       <div class="shrink-0">
         <Show when={props.reposLoading === true}>
           <p class="px-1 py-2 text-fs-2 text-fg-3">{t("browse.reposLoading")}</p>

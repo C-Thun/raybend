@@ -242,8 +242,10 @@ export const zhCN = {
  "browse.clearRating": "清除评分",
  "browse.searchPlaceholder": "搜索库或目录",
  "browse.noRepository": "还没有库。先在导入工作流里建一个库。",
-  "browse.reposLoading": "正在读库…",
-  "browse.reposError": "读库失败，左侧暂时是空的（鼠标悬停看原因）",
+ // 「还没读到」与「真的没有库」在界面上长得一样，必须分开说：
+ // 取库列表要对每个库开一次连接数照片，慢盘上可能好几秒
+ "browse.reposLoading": "正在读库…",
+ "browse.reposError": "读库失败，左侧暂时是空的（鼠标悬停看原因）",
  "browse.allRepositories": "查看所有库",
  "browse.collapseRepositories": "收起库列表",
  "browse.wholeRepository": "整个库",

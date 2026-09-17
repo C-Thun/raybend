@@ -21,6 +21,7 @@
     "lint:i18n": "node scripts/check-i18n.mjs",
     "release": "node scripts/release.mjs",
     "smoke:ui": "node --check scripts/ui-smoke.mjs && node scripts/ui-smoke.mjs",
+    "check:browse": "node --check scripts/check-browse-boot.mjs && node scripts/check-browse-boot.mjs",
     "test": "node --test \"src/**/*.test.ts\"",
     "shot": "node scripts/shot.mjs",
     "crash:drill": "bash scripts/crash-drill.sh",
