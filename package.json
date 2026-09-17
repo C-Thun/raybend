@@ -25,7 +25,8 @@
     "shot": "node scripts/shot.mjs",
     "crash:drill": "bash scripts/crash-drill.sh",
     "migrate:drill": "bash scripts/migration-drill.sh",
-    "check:win": "node scripts/check-win-artifact.mjs"
+    "check:win": "node scripts/check-win-artifact.mjs",
+    "spike:win": "node --check scripts/spike-win.mjs && node scripts/spike-win.mjs"
   },
   "dependencies": {
     "@ark-ui/solid": "^5.39.2",

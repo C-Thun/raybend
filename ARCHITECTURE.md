@@ -87,6 +87,18 @@ Web 应用里成立的层（BFF、加载器编排、页面级数据预取…）�
 | J `GridControlBar` | `src/features/photo-grid/`（同模块的子视图） | M1-5 |
 | K `RepositoryList` | `src/features/repositories/` | M1-5 |
 | —— | `src/features/import-queue/`（导入执行与进度） | M1-6 |
+| —— | `src/features/browse/`（浏览：查询 store、行模型、网格、标记工具栏、左右两列） | M2-W1 阶段 6 |
+| —— | `src/workspaces/browse/`（浏览工作区三列组合层） | M2-W1 阶段 6 |
+| —— | `src/dev/SpikeViewport.tsx` + `src/api/spike.ts`（**渲染 spike 诊断页**，`?spike=1` 才加载） | M2-W1 阶段 7 |
+
+**Rust 侧（M2-W1 新增）**：
+
+| 模块 | 位置 | 职责 |
+| --- | --- | --- |
+| 渲染 | `crates/raybend/src/render/`（`viewport` / `gpu` / `scene` / `stats`） | 视口变换与坐标口径（**Rust 独有**）、wgpu 上下文与离屏渲染、合成测试图、帧统计与报告 |
+| 库目录操作 | `crates/raybend/src/repo/dirs.rs` | 新建子目录 / 删除空目录（名字校验按 Windows 口径、深度空判定） |
+| 目录树菜单 IPC | `src-tauri/src/dirs.rs` | 上面三个动作的命令层（`root + rel`，越界在 Rust 挡） |
+| spike 调试窗口 | `src-tauri/src/spike_viewport.rs` | `label = "spike-viewport"` 的窗口 + 独立渲染线程 + 命令层（**不动主窗口**） |
 
 一个 feature 目录的固定形状：
 
@@ -139,3 +151,4 @@ src/features/recent/
 | --- | --- |
 | 2026-09-15 | 初版：分层与依赖方向、一级模块清单（对应 `DESIGN.md` §10.2）、状态归属、两条可执行检查 |
 | 2026-09-17 | 新增**素材层 `src/assets/`**（纯数据，任何层可 import；不带方向约束）—— 品牌资产入场时 `shell → app` 的误报暴露了它原本无处可归 |
+| 2026-09-17 | 补 M2-W1 的模块落点：浏览（`features/browse` + `workspaces/browse`）、渲染（`crates/raybend/src/render`）、库目录操作（`repo/dirs` + `src-tauri/dirs`）、spike 窗口与诊断页 |

@@ -75,6 +75,9 @@ raybend（中文名**「光伴」**，产品名 `RayBend`）是一个**相片管
 
 ## 3. 版本基线（2026-09-15 核实）
 
+> ⚠️ **下表只描述 raybend 软件本体。** `website/`（官方站点）走的是**另一套完全不同的选型**
+> （Solid 2.0 线、Tailwind v4、Lucide、纯静态站），对照见 §4 的「`website/` 是官网」。
+
 | 层 | 选型 | 当前版本 | 备注 |
 | --- | --- | --- | --- |
 | 外壳 | Tauri | `@tauri-apps/cli` 2.11.4（3.0 处于 alpha） | 分层为 3.0 迁移做准备，见 §6.2 |
@@ -114,12 +117,33 @@ raybend/
 ├── src-tauri/                 # Tauri 外壳（窗口 / 命令 / IPC 边界），package.name = "raybend-desktop"
 │   ├── tauri.conf.json        # productName = "RayBend"
 │   └── src/{main.rs, lib.rs}
+├── website/                   # ⚠️ 官方站点（**独立技术栈**，见下方「`website/` 是官网」）
 └── crates/
     └── raybend/               # 核心库（package.name = "raybend"，不依赖 Tauri）
         └── src/{lib.rs, error.rs, media/, index/, raw/, thumbnail/, render/}
 ```
 
 `crates/raybend-ipc`（IPC 契约与 specta 生成）在 M1 出现真实契约时再拆，不提前建空壳。
+
+### `website/` 是官网，不是应用本体（**不要弄错**）
+
+**`website/` 是本项目的官方站点**（官网）源码；**应用本体**是上面的 `src/` + `src-tauri/` + `crates/`。
+两者**技术栈不同、依赖各自独立、构建与发布流程也不同**：
+
+| 维度 | 应用本体 | 官网（`website/`） |
+| --- | --- | --- |
+| 框架 | SolidJS **1.9.x** + `@solidjs/router` 1.x | **SolidStart 2.0 + SolidJS 2.0**（`@solidjs/vite-plugin` 的 start 模式 + `filesystem-routing` + `@solidjs/router` 2.x） |
+| 样式 | Tailwind CSS 4.3 + CSS 变量令牌层 | Tailwind CSS v4（CSS-first，**没有** `tailwind.config.js`） |
+| 组件原语 / 图标 | Ark UI + **Tabler** | 不用组件原语库；图标用 **Lucide**（`lucide-solid`） |
+| 形态 | Tauri 2 桌面应用（Windows 优先） | **纯静态站点**，与 Tauri 无关 |
+| 发布 | 人类打安装包（NSIS / MSI） | **GitHub Actions 构建 → 发布到 GitHub Pages**（GitHub 的 pages 服务） |
+
+- **依赖各自独立**：官网有自己的 `package.json` / `pnpm-lock.yaml` / `pnpm-workspace.yaml` / `node_modules`，
+  **不在本仓的 pnpm 关系内** —— 根目录 `pnpm install` 不会装上它，改官网要在 `website/` 里单独跑命令。
+- **本文件其余部分（§3 版本基线、§5 纪律、§6 架构决定、§7 调研结论）默认只约束应用本体**，
+  不要把本体的选型或纪律硬套到官网（官网不用 Ark UI / Tabler，也不是 Tauri 应用）。
+- 官网编译产物是 `website/dist/client` 的**纯静态文件**，**不进** `pnpm release` / Tauri 发版流程。
+- 官网的细则（选型版本、目录约定、命令、部署、Solid 2 反应式纪律）见 **`website/AGENTS.md`**。
 
 **分层原则**：`src-tauri` 只做「窗口 + WebView + 命令转发」的薄壳，业务逻辑全部在 `crates/` 内，且**业务 crate 不依赖 tauri**。这是为了 Tauri 3.0 迁移（见 §6.2）与未来做 CLI/无头模式时不需要重写。
 
@@ -469,6 +493,7 @@ SQLite FTS5 默认 `unicode61` 分词器**对中文基本无效**；必须使用
 | --- | --- |
 | `AGENTS.md` | 本文件：定位、硬约束、版本基线、目录、纪律、架构决定、关键真相、问题清单 |
 | `ASSISTANCE.md` | **待人类协助事项清单**（有内容则先停下来处理它） |
+| `website/AGENTS.md` | **官网（`website/`）专属指南**：SolidStart 2.0 / Solid 2.0 选型、目录约定、命令、GitHub Pages 部署 —— 技术栈与本体不同，别混用 |
 | `BROWSE.md` | **浏览模式规格**：三列结构、toolsbar 的筛选/标记/标签/锁、选择逻辑（Shift 区间翻转）、看图与对比、胶片带、信息栏、标签体系、两个通用浮层（模态 + 右上角 toast） |
 | `REPOSITORY.md` | **库与导入规格**：库物理结构、库身份与多路径、在线/离线、导入模版与变量、序号、重名、RAW 分流、目录透传 |
 | `DESIGN.md` | 视觉与配色体系（唯一事实来源） |
@@ -514,9 +539,15 @@ SQLite FTS5 默认 `unicode61` 分词器**对中文基本无效**；必须使用
 | --- | --- | --- | --- |
 | **移除**（remove） | 从**当前集合**里拿掉（如从「最近」列表、已选目录中去掉） | **禁行图标**（填充圆 + 横杠） | 默认要，`Shift` 点击跳过 |
 | **排除**（exclude） | 本次导入**不带这张照片**（但不动库、不动磁盘） | **同一个禁行图标** | 同上 |
-| **删除**（delete） | 真的从磁盘删文件 | — | **第一阶段不做** |
+| **删除**（delete） | **移到系统回收站**（`trash` crate）—— **不提供永久删除** | 走 `⋯` / 右键菜单，不给常驻按钮 | 要（**不做 `Shift` 快通道**：它真在动磁盘） |
 
 > **统一用禁行图标，不用叉号** —— 因为它们都不是破坏性删除。
+>
+> **删除的定案（M2-W1 阶段 4 落地）**：第一阶段只做「移到系统回收站」，**不实现永久删除**。
+> 顺序是**先文件后记录**（回收失败就不动数据库，绝不出现「库里有、磁盘没」）；
+> 空目录的删除（目录树 `⋯` 菜单）同样只删**空**目录，底层只调 `remove_dir` ——
+> 那条路径不可能删到用户的照片。两边都**不走 `easy destroy` 的 `Shift` 快通道**：
+> 那条规则是给「从集合里移除」定的，而这两个动作真在磁盘上留痕。
 
 ### 11.4 其他常用术语
 

@@ -110,6 +110,10 @@
   真在 macOS 上踩到再降，且到那时我们本来也要自己接色彩管理（C1）。
 * **升级纪律**：分辨率与呈现路径（surface 配置、alpha 模式、device lost 恢复）是 spike 的核心观测对象，
   升级 wgpu 时这些行为要**重跑一遍 spike**（`pnpm spike:win`），不要只看编译过不过。
+* **发布前要处理的一件事**：spike 诊断页（`src/dev/SpikeViewport.tsx`，`?spike=1`）是**静态 import**、
+  会进产物 —— 这是刻意的（人类要在 Windows 打包版里验透明挖洞与 DPI，而那个产物跑的是 `dist/`）。
+  发布里程碑时二选一：① 用一个构建期常量把它摇掉；② 保留（它只有几 KB，且不打开就零开销）。
+  **不许**在没做选择的情况下让它悄悄进发布包。
 * **已知的 API 变动教训**（30.0.1 实测，写下来免得下次又猜）：
   `Instance::new` 收**值**不是引用；`InstanceDescriptor` 没有 `default()`（用 `new_without_display_handle_from_env()` 那一族才会读 `WGPU_BACKEND`）；
   `Surface::get_current_texture` 返回 `CurrentSurfaceTexture` 枚举（不再是 `Result`）；呈现走 `queue.present(texture)`；
