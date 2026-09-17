@@ -75,7 +75,10 @@ function Nav() {
             height={275}
             class="size-8 rounded-[0.6rem]"
           />
-          <span class="text-sm font-semibold tracking-wide">{t().brand}</span>
+          {/* 定宽（按**最长的那种语言**给足）：名字中英长度差很多（「光伴」两字 vs RayBend），
+              不定宽的话一切语言、右边的切换钮就跟着位移。短的内容靠左、右边留白。
+              改名字或字号时记得同步这个宽度（不够时文字会溢出盒但不会被裁，安全）。 */}
+          <span class="w-[4.5rem] text-sm font-semibold tracking-wide">{t().brand}</span>
         </a>
 
         <LangSwitch />
