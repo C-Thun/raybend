@@ -26,8 +26,12 @@ export function Hero() {
     <section id="top" class="relative overflow-hidden bg-accent text-ink">
       {/* 平面几何装饰（不含阴影/毛玻璃） */}
       <div aria-hidden="true" class="pointer-events-none absolute inset-0 overflow-hidden">
+        {/* 左下角：低浓度的品牌色圆角方块「切进来」（半透明感，不抢主体）——
+            胶片孔带压在它上面，看起来就是「打孔」。 */}
+        <div class="absolute -bottom-24 -left-16 size-72 rotate-12 rounded-[3rem] bg-brand/20" />
+        {/* 右上：与左下同色系的同心圆环（线条细，浓度略抬一点才看得出） */}
         <svg
-          class="rb-hero-rings absolute -top-32 -right-24 size-[30rem] text-paper sm:-top-40 sm:-right-16"
+          class="rb-hero-rings absolute -top-32 -right-24 size-[30rem] text-brand/35 sm:-top-40 sm:-right-16"
           viewBox="0 0 200 200"
           fill="none"
         >
@@ -36,13 +40,13 @@ export function Hero() {
           <circle cx="100" cy="100" r="46" stroke="currentColor" />
         </svg>
         <div class="absolute top-1/3 left-4 size-2.5 rounded-full bg-ink/20" />
-        {/* 底边一条「胶片孔」带：与下方浅色同色 —— 读起来像琥珀层被镂空，摄影味也更轻 */}
+        {/* 底边一条白色「胶片孔」带：过琥珀处像镂空，过绿块处像打孔 */}
         <div class="absolute bottom-0 left-0 flex w-full gap-3 px-6 pb-3.5">
           <For each={FILM_HOLES}>{() => <span class="h-3 w-6 shrink-0 rounded-[3px] bg-paper" />}</For>
         </div>
       </div>
 
-      <div class="relative mx-auto w-full max-w-6xl px-6 pt-10 pb-20 sm:pt-16 sm:pb-24">
+      <div class="relative mx-auto w-full max-w-6xl px-6 pt-8 pb-16 sm:pt-12 sm:pb-20">
         <div class="grid items-center gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] lg:gap-16">
           <div>
             <span
@@ -55,19 +59,19 @@ export function Hero() {
             <BrandMark
               kind="name"
               label={messages().nav.brand}
-              class="mt-7 w-[min(17rem,64vw)]"
+              class="mt-5 w-[min(15rem,58vw)]"
               outline={14}
             />
             <BrandMark
               kind="slogan"
               label={t().tagline}
-              class="mt-4 w-[min(24rem,80vw)]"
+              class="mt-2.5 w-[min(21rem,72vw)]"
               outline={10}
             />
 
-            <p class="mt-7 max-w-xl text-base/relaxed text-ink/80">{t().intro}</p>
+            <p class="mt-5 max-w-xl text-base/relaxed text-ink/80">{t().intro}</p>
 
-            <div class="mt-8 flex flex-wrap items-center gap-3">
+            <div class="mt-6 flex flex-wrap items-center gap-3">
               <Button
                 href={release().releaseUrl}
                 variant="ink"
@@ -87,7 +91,7 @@ export function Hero() {
               </Button>
             </div>
 
-            <ul class="mt-7 flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-ink/70">
+            <ul class="mt-5 flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-ink/70">
               <For each={t().facts}>
                 {(fact, index) => (
                   <>
@@ -102,7 +106,7 @@ export function Hero() {
               </For>
             </ul>
 
-            <p class="mt-6 max-w-xl text-xs/relaxed text-ink/60">{t().earlyNote}</p>
+            <p class="mt-5 max-w-xl text-xs/relaxed text-ink/60">{t().earlyNote}</p>
           </div>
 
           <div class="relative">

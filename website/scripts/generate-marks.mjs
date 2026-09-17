@@ -67,7 +67,10 @@ function prepareBitmap(file, out) {
     'off',
     '-negate',
     '-threshold',
-    '50%',
+    // 二值化阈值抬到 60%（不是默认的 50%）：
+    // 前面的 `-blur` 会把细笔画「泡胀」，阈值抬高一点正好抵消 —— 实测 slogan-en 的多余墨迹
+    // 从 +10.3% 降到 +9.6%，遗漏仍为 0.5%，路径体积不变。
+    '60%',
     '-strip',
     out,
   ]);
