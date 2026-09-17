@@ -1715,27 +1715,35 @@
                           "name": "Tile / 1",
                           "clip": true,
                           "width": 150,
-                          "height": 138,
-                          "cornerRadius": 4,
+                          "height": 150,
+                          "cornerRadius": 6,
                           "stroke": "$brand",
                           "strokeWidth": 1,
                           "strokeAlignment": "inner",
                           "layout": "vertical",
+                          "padding": 3,
+                          "justifyContent": "center",
+                          "alignItems": "center",
                           "children": [
                             {
                               "type": "frame",
                               "id": "AjEoR",
-                              "name": "TileImage",
-                              "width": "fill_container",
-                              "height": 112,
-                              "fill": "$surface-main"
+                              "name": "TilePhoto",
+                              "width": 144,
+                              "height": 96,
+                              "fill": "$surface-track",
+                              "cornerRadius": 6
                             },
                             {
                               "type": "frame",
                               "id": "F80Ga",
-                              "name": "TileCaption",
-                              "width": "fill_container",
+                              "layoutPosition": "absolute",
+                              "x": 0,
+                              "y": 124,
+                              "name": "TileBarBottom",
+                              "width": 150,
                               "height": 26,
+                              "fill": "$scrim",
                               "gap": 4,
                               "padding": [
                                 0,
@@ -1747,12 +1755,22 @@
                                   "type": "text",
                                   "id": "JnhoH",
                                   "name": "TileName",
-                                  "fill": "$fg-2",
+                                  "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P0001.RW2",
+                                  "content": "P0001.JPG",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
+                                  "fontWeight": "normal"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "NpK7t",
+                                  "name": "TileTag",
+                                  "fill": "$fg-1",
+                                  "content": "JPG",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 10,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -1765,18 +1783,22 @@
                           "name": "Tile / 2",
                           "clip": true,
                           "width": 150,
-                          "height": 138,
+                          "height": 150,
                           "fill": "$state-selected",
-                          "cornerRadius": 4,
+                          "cornerRadius": 6,
                           "layout": "vertical",
+                          "padding": 3,
+                          "justifyContent": "center",
+                          "alignItems": "center",
                           "children": [
                             {
                               "type": "frame",
                               "id": "cGVRi",
-                              "name": "TileImage",
-                              "width": "fill_container",
-                              "height": 112,
-                              "fill": "$state-selected",
+                              "name": "TilePhoto",
+                              "width": 96,
+                              "height": 144,
+                              "fill": "$surface-track",
+                              "cornerRadius": 6,
                               "children": [
                                 {
                                   "type": "frame",
@@ -1789,15 +1811,45 @@
                                   "height": 10,
                                   "fill": "$label-red",
                                   "cornerRadius": 999
+                                },
+                                {
+                                  "type": "frame",
+                                  "id": "bJXxp",
+                                  "layoutPosition": "absolute",
+                                  "x": 62,
+                                  "y": 126,
+                                  "name": "RawBadge",
+                                  "width": 30,
+                                  "height": 14,
+                                  "fill": "$brand",
+                                  "cornerRadius": 6,
+                                  "justifyContent": "center",
+                                  "alignItems": "center",
+                                  "children": [
+                                    {
+                                      "type": "text",
+                                      "id": "ymWH3",
+                                      "name": "RawBadgeText",
+                                      "fill": "$fg-on-brand",
+                                      "content": "RAW",
+                                      "fontFamily": "Inter",
+                                      "fontSize": 10,
+                                      "fontWeight": "normal"
+                                    }
+                                  ]
                                 }
                               ]
                             },
                             {
                               "type": "frame",
                               "id": "XxUzt",
-                              "name": "TileCaption",
-                              "width": "fill_container",
+                              "layoutPosition": "absolute",
+                              "x": 0,
+                              "y": 124,
+                              "name": "TileBarBottom",
+                              "width": 150,
                               "height": 26,
+                              "fill": "$scrim",
                               "gap": 4,
                               "padding": [
                                 0,
@@ -1809,7 +1861,7 @@
                                   "type": "text",
                                   "id": "xHCTS",
                                   "name": "TileName",
-                                  "fill": "$fg-2",
+                                  "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
                                   "content": "P0002.RW2",
@@ -1846,6 +1898,16 @@
                                   "icon": "star",
                                   "library": "lucide",
                                   "fill": "$brand"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "LRlcT",
+                                  "name": "TileTag",
+                                  "fill": "$fg-1",
+                                  "content": "RW2",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 10,
+                                  "fontWeight": "normal"
                                 }
                               ]
                             }
@@ -1857,18 +1919,22 @@
                           "name": "Tile / 3",
                           "clip": true,
                           "width": 150,
-                          "height": 138,
+                          "height": 150,
                           "fill": "$state-selected",
-                          "cornerRadius": 4,
+                          "cornerRadius": 6,
                           "layout": "vertical",
+                          "padding": 3,
+                          "justifyContent": "center",
+                          "alignItems": "center",
                           "children": [
                             {
                               "type": "frame",
                               "id": "OT6az",
-                              "name": "TileImage",
-                              "width": "fill_container",
-                              "height": 112,
-                              "fill": "$state-selected",
+                              "name": "TilePhoto",
+                              "width": 144,
+                              "height": 81,
+                              "fill": "$surface-track",
+                              "cornerRadius": 6,
                               "children": [
                                 {
                                   "type": "frame",
@@ -1881,15 +1947,45 @@
                                   "height": 10,
                                   "fill": "$label-green",
                                   "cornerRadius": 999
+                                },
+                                {
+                                  "type": "frame",
+                                  "id": "A5U1u",
+                                  "layoutPosition": "absolute",
+                                  "x": 110,
+                                  "y": 63,
+                                  "name": "RawBadge",
+                                  "width": 30,
+                                  "height": 14,
+                                  "fill": "$brand",
+                                  "cornerRadius": 6,
+                                  "justifyContent": "center",
+                                  "alignItems": "center",
+                                  "children": [
+                                    {
+                                      "type": "text",
+                                      "id": "MH88L",
+                                      "name": "RawBadgeText",
+                                      "fill": "$fg-on-brand",
+                                      "content": "RAW",
+                                      "fontFamily": "Inter",
+                                      "fontSize": 10,
+                                      "fontWeight": "normal"
+                                    }
+                                  ]
                                 }
                               ]
                             },
                             {
                               "type": "frame",
                               "id": "uDlVL",
-                              "name": "TileCaption",
-                              "width": "fill_container",
+                              "layoutPosition": "absolute",
+                              "x": 0,
+                              "y": 124,
+                              "name": "TileBarBottom",
+                              "width": 150,
                               "height": 26,
+                              "fill": "$scrim",
                               "gap": 4,
                               "padding": [
                                 0,
@@ -1901,12 +1997,22 @@
                                   "type": "text",
                                   "id": "aOm0m",
                                   "name": "TileName",
-                                  "fill": "$fg-2",
+                                  "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
                                   "content": "P0003.RW2",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
+                                  "fontWeight": "normal"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "cyL6N",
+                                  "name": "TileTag",
+                                  "fill": "$fg-1",
+                                  "content": "RW2",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 10,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -1919,24 +2025,32 @@
                           "name": "Tile / 4",
                           "clip": true,
                           "width": 150,
-                          "height": 138,
-                          "cornerRadius": 4,
+                          "height": 150,
+                          "cornerRadius": 6,
                           "layout": "vertical",
+                          "padding": 3,
+                          "justifyContent": "center",
+                          "alignItems": "center",
                           "children": [
                             {
                               "type": "frame",
                               "id": "njZC3",
-                              "name": "TileImage",
-                              "width": "fill_container",
-                              "height": 112,
-                              "fill": "$surface-main"
+                              "name": "TilePhoto",
+                              "width": 144,
+                              "height": 96,
+                              "fill": "$surface-track",
+                              "cornerRadius": 6
                             },
                             {
                               "type": "frame",
                               "id": "NJFmH",
-                              "name": "TileCaption",
-                              "width": "fill_container",
+                              "layoutPosition": "absolute",
+                              "x": 0,
+                              "y": 124,
+                              "name": "TileBarBottom",
+                              "width": 150,
                               "height": 26,
+                              "fill": "$scrim",
                               "gap": 4,
                               "padding": [
                                 0,
@@ -1948,12 +2062,22 @@
                                   "type": "text",
                                   "id": "C6lNiN",
                                   "name": "TileName",
-                                  "fill": "$fg-2",
+                                  "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P0004.RW2",
+                                  "content": "P0004.JPG",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
+                                  "fontWeight": "normal"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "A8JLU",
+                                  "name": "TileTag",
+                                  "fill": "$fg-1",
+                                  "content": "JPG",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 10,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -1966,17 +2090,21 @@
                           "name": "Tile / 5",
                           "clip": true,
                           "width": 150,
-                          "height": 138,
-                          "cornerRadius": 4,
+                          "height": 150,
+                          "cornerRadius": 6,
                           "layout": "vertical",
+                          "padding": 3,
+                          "justifyContent": "center",
+                          "alignItems": "center",
                           "children": [
                             {
                               "type": "frame",
                               "id": "cAYHp",
-                              "name": "TileImage",
-                              "width": "fill_container",
-                              "height": 112,
-                              "fill": "$surface-main",
+                              "name": "TilePhoto",
+                              "width": 96,
+                              "height": 144,
+                              "fill": "$surface-track",
+                              "cornerRadius": 6,
                               "children": [
                                 {
                                   "type": "frame",
@@ -2004,15 +2132,45 @@
                                       "fill": "$fg-2"
                                     }
                                   ]
+                                },
+                                {
+                                  "type": "frame",
+                                  "id": "MF70n",
+                                  "layoutPosition": "absolute",
+                                  "x": 62,
+                                  "y": 126,
+                                  "name": "RawBadge",
+                                  "width": 30,
+                                  "height": 14,
+                                  "fill": "$brand",
+                                  "cornerRadius": 6,
+                                  "justifyContent": "center",
+                                  "alignItems": "center",
+                                  "children": [
+                                    {
+                                      "type": "text",
+                                      "id": "Sr9Lb",
+                                      "name": "RawBadgeText",
+                                      "fill": "$fg-on-brand",
+                                      "content": "RAW",
+                                      "fontFamily": "Inter",
+                                      "fontSize": 10,
+                                      "fontWeight": "normal"
+                                    }
+                                  ]
                                 }
                               ]
                             },
                             {
                               "type": "frame",
                               "id": "K9sQGa",
-                              "name": "TileCaption",
-                              "width": "fill_container",
+                              "layoutPosition": "absolute",
+                              "x": 0,
+                              "y": 124,
+                              "name": "TileBarBottom",
+                              "width": 150,
                               "height": 26,
+                              "fill": "$scrim",
                               "gap": 4,
                               "padding": [
                                 0,
@@ -2024,12 +2182,22 @@
                                   "type": "text",
                                   "id": "ard9a",
                                   "name": "TileName",
-                                  "fill": "$fg-2",
+                                  "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
                                   "content": "P0005.RW2",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
+                                  "fontWeight": "normal"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "ktZtV",
+                                  "name": "TileTag",
+                                  "fill": "$fg-1",
+                                  "content": "RW2",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 10,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -2042,24 +2210,60 @@
                           "name": "Tile / 6",
                           "clip": true,
                           "width": 150,
-                          "height": 138,
-                          "cornerRadius": 4,
+                          "height": 150,
+                          "cornerRadius": 6,
                           "layout": "vertical",
+                          "padding": 3,
+                          "justifyContent": "center",
+                          "alignItems": "center",
                           "children": [
                             {
                               "type": "frame",
                               "id": "n9sQZj",
-                              "name": "TileImage",
-                              "width": "fill_container",
-                              "height": 112,
-                              "fill": "$surface-main"
+                              "name": "TilePhoto",
+                              "width": 144,
+                              "height": 81,
+                              "fill": "$surface-track",
+                              "cornerRadius": 6,
+                              "children": [
+                                {
+                                  "type": "frame",
+                                  "id": "n42Wo",
+                                  "layoutPosition": "absolute",
+                                  "x": 110,
+                                  "y": 63,
+                                  "name": "RawBadge",
+                                  "width": 30,
+                                  "height": 14,
+                                  "fill": "$brand",
+                                  "cornerRadius": 6,
+                                  "justifyContent": "center",
+                                  "alignItems": "center",
+                                  "children": [
+                                    {
+                                      "type": "text",
+                                      "id": "K9Uk6",
+                                      "name": "RawBadgeText",
+                                      "fill": "$fg-on-brand",
+                                      "content": "RAW",
+                                      "fontFamily": "Inter",
+                                      "fontSize": 10,
+                                      "fontWeight": "normal"
+                                    }
+                                  ]
+                                }
+                              ]
                             },
                             {
                               "type": "frame",
                               "id": "D4O04",
-                              "name": "TileCaption",
-                              "width": "fill_container",
+                              "layoutPosition": "absolute",
+                              "x": 0,
+                              "y": 124,
+                              "name": "TileBarBottom",
+                              "width": 150,
                               "height": 26,
+                              "fill": "$scrim",
                               "gap": 4,
                               "padding": [
                                 0,
@@ -2071,12 +2275,22 @@
                                   "type": "text",
                                   "id": "sbD8v",
                                   "name": "TileName",
-                                  "fill": "$fg-2",
+                                  "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
                                   "content": "P0006.RW2",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
+                                  "fontWeight": "normal"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "THJ6S",
+                                  "name": "TileTag",
+                                  "fill": "$fg-1",
+                                  "content": "RW2",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 10,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -2099,24 +2313,32 @@
                           "name": "Tile / 7",
                           "clip": true,
                           "width": 150,
-                          "height": 138,
-                          "cornerRadius": 4,
+                          "height": 150,
+                          "cornerRadius": 6,
                           "layout": "vertical",
+                          "padding": 3,
+                          "justifyContent": "center",
+                          "alignItems": "center",
                           "children": [
                             {
                               "type": "frame",
                               "id": "D4m1B",
-                              "name": "TileImage",
-                              "width": "fill_container",
-                              "height": 112,
-                              "fill": "$surface-main"
+                              "name": "TilePhoto",
+                              "width": 144,
+                              "height": 96,
+                              "fill": "$surface-track",
+                              "cornerRadius": 6
                             },
                             {
                               "type": "frame",
                               "id": "fNGOT",
-                              "name": "TileCaption",
-                              "width": "fill_container",
+                              "layoutPosition": "absolute",
+                              "x": 0,
+                              "y": 124,
+                              "name": "TileBarBottom",
+                              "width": 150,
                               "height": 26,
+                              "fill": "$scrim",
                               "gap": 4,
                               "padding": [
                                 0,
@@ -2128,12 +2350,22 @@
                                   "type": "text",
                                   "id": "xamM2",
                                   "name": "TileName",
-                                  "fill": "$fg-2",
+                                  "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P0007.RW2",
+                                  "content": "P0007.JPG",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
+                                  "fontWeight": "normal"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "VMAOY",
+                                  "name": "TileTag",
+                                  "fill": "$fg-1",
+                                  "content": "JPG",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 10,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -2146,24 +2378,60 @@
                           "name": "Tile / 8",
                           "clip": true,
                           "width": 150,
-                          "height": 138,
-                          "cornerRadius": 4,
+                          "height": 150,
+                          "cornerRadius": 6,
                           "layout": "vertical",
+                          "padding": 3,
+                          "justifyContent": "center",
+                          "alignItems": "center",
                           "children": [
                             {
                               "type": "frame",
                               "id": "fXXEZ",
-                              "name": "TileImage",
-                              "width": "fill_container",
-                              "height": 112,
-                              "fill": "$surface-main"
+                              "name": "TilePhoto",
+                              "width": 96,
+                              "height": 144,
+                              "fill": "$surface-track",
+                              "cornerRadius": 6,
+                              "children": [
+                                {
+                                  "type": "frame",
+                                  "id": "VyKY9",
+                                  "layoutPosition": "absolute",
+                                  "x": 62,
+                                  "y": 126,
+                                  "name": "RawBadge",
+                                  "width": 30,
+                                  "height": 14,
+                                  "fill": "$brand",
+                                  "cornerRadius": 6,
+                                  "justifyContent": "center",
+                                  "alignItems": "center",
+                                  "children": [
+                                    {
+                                      "type": "text",
+                                      "id": "r25gpu",
+                                      "name": "RawBadgeText",
+                                      "fill": "$fg-on-brand",
+                                      "content": "RAW",
+                                      "fontFamily": "Inter",
+                                      "fontSize": 10,
+                                      "fontWeight": "normal"
+                                    }
+                                  ]
+                                }
+                              ]
                             },
                             {
                               "type": "frame",
                               "id": "eWMxd",
-                              "name": "TileCaption",
-                              "width": "fill_container",
+                              "layoutPosition": "absolute",
+                              "x": 0,
+                              "y": 124,
+                              "name": "TileBarBottom",
+                              "width": 150,
                               "height": 26,
+                              "fill": "$scrim",
                               "gap": 4,
                               "padding": [
                                 0,
@@ -2175,7 +2443,7 @@
                                   "type": "text",
                                   "id": "ukBYf",
                                   "name": "TileName",
-                                  "fill": "$fg-2",
+                                  "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
                                   "content": "P0008.RW2",
@@ -2212,6 +2480,16 @@
                                   "icon": "star",
                                   "library": "lucide",
                                   "fill": "$brand"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "piqE2",
+                                  "name": "TileTag",
+                                  "fill": "$fg-1",
+                                  "content": "RW2",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 10,
+                                  "fontWeight": "normal"
                                 }
                               ]
                             }
@@ -2223,24 +2501,60 @@
                           "name": "Tile / 9",
                           "clip": true,
                           "width": 150,
-                          "height": 138,
-                          "cornerRadius": 4,
+                          "height": 150,
+                          "cornerRadius": 6,
                           "layout": "vertical",
+                          "padding": 3,
+                          "justifyContent": "center",
+                          "alignItems": "center",
                           "children": [
                             {
                               "type": "frame",
                               "id": "ATOur",
-                              "name": "TileImage",
-                              "width": "fill_container",
-                              "height": 112,
-                              "fill": "$surface-main"
+                              "name": "TilePhoto",
+                              "width": 144,
+                              "height": 81,
+                              "fill": "$surface-track",
+                              "cornerRadius": 6,
+                              "children": [
+                                {
+                                  "type": "frame",
+                                  "id": "L2SVD",
+                                  "layoutPosition": "absolute",
+                                  "x": 110,
+                                  "y": 63,
+                                  "name": "RawBadge",
+                                  "width": 30,
+                                  "height": 14,
+                                  "fill": "$brand",
+                                  "cornerRadius": 6,
+                                  "justifyContent": "center",
+                                  "alignItems": "center",
+                                  "children": [
+                                    {
+                                      "type": "text",
+                                      "id": "J7yXZ",
+                                      "name": "RawBadgeText",
+                                      "fill": "$fg-on-brand",
+                                      "content": "RAW",
+                                      "fontFamily": "Inter",
+                                      "fontSize": 10,
+                                      "fontWeight": "normal"
+                                    }
+                                  ]
+                                }
+                              ]
                             },
                             {
                               "type": "frame",
                               "id": "nVMvT",
-                              "name": "TileCaption",
-                              "width": "fill_container",
+                              "layoutPosition": "absolute",
+                              "x": 0,
+                              "y": 124,
+                              "name": "TileBarBottom",
+                              "width": 150,
                               "height": 26,
+                              "fill": "$scrim",
                               "gap": 4,
                               "padding": [
                                 0,
@@ -2252,12 +2566,22 @@
                                   "type": "text",
                                   "id": "kdz9V",
                                   "name": "TileName",
-                                  "fill": "$fg-2",
+                                  "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
                                   "content": "P0009.RW2",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
+                                  "fontWeight": "normal"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "AfAui",
+                                  "name": "TileTag",
+                                  "fill": "$fg-1",
+                                  "content": "RW2",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 10,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -2270,24 +2594,32 @@
                           "name": "Tile / 10",
                           "clip": true,
                           "width": 150,
-                          "height": 138,
-                          "cornerRadius": 4,
+                          "height": 150,
+                          "cornerRadius": 6,
                           "layout": "vertical",
+                          "padding": 3,
+                          "justifyContent": "center",
+                          "alignItems": "center",
                           "children": [
                             {
                               "type": "frame",
                               "id": "zY4u5",
-                              "name": "TileImage",
-                              "width": "fill_container",
-                              "height": 112,
-                              "fill": "$surface-main"
+                              "name": "TilePhoto",
+                              "width": 144,
+                              "height": 96,
+                              "fill": "$surface-track",
+                              "cornerRadius": 6
                             },
                             {
                               "type": "frame",
                               "id": "b4ggak",
-                              "name": "TileCaption",
-                              "width": "fill_container",
+                              "layoutPosition": "absolute",
+                              "x": 0,
+                              "y": 124,
+                              "name": "TileBarBottom",
+                              "width": 150,
                               "height": 26,
+                              "fill": "$scrim",
                               "gap": 4,
                               "padding": [
                                 0,
@@ -2299,12 +2631,22 @@
                                   "type": "text",
                                   "id": "XekYH",
                                   "name": "TileName",
-                                  "fill": "$fg-2",
+                                  "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P00010.RW2",
+                                  "content": "P0010.JPG",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
+                                  "fontWeight": "normal"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "E1wla",
+                                  "name": "TileTag",
+                                  "fill": "$fg-1",
+                                  "content": "JPG",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 10,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -2317,24 +2659,60 @@
                           "name": "Tile / 11",
                           "clip": true,
                           "width": 150,
-                          "height": 138,
-                          "cornerRadius": 4,
+                          "height": 150,
+                          "cornerRadius": 6,
                           "layout": "vertical",
+                          "padding": 3,
+                          "justifyContent": "center",
+                          "alignItems": "center",
                           "children": [
                             {
                               "type": "frame",
                               "id": "b937Y7",
-                              "name": "TileImage",
-                              "width": "fill_container",
-                              "height": 112,
-                              "fill": "$surface-main"
+                              "name": "TilePhoto",
+                              "width": 96,
+                              "height": 144,
+                              "fill": "$surface-track",
+                              "cornerRadius": 6,
+                              "children": [
+                                {
+                                  "type": "frame",
+                                  "id": "u2CtcG",
+                                  "layoutPosition": "absolute",
+                                  "x": 62,
+                                  "y": 126,
+                                  "name": "RawBadge",
+                                  "width": 30,
+                                  "height": 14,
+                                  "fill": "$brand",
+                                  "cornerRadius": 6,
+                                  "justifyContent": "center",
+                                  "alignItems": "center",
+                                  "children": [
+                                    {
+                                      "type": "text",
+                                      "id": "o6fVj",
+                                      "name": "RawBadgeText",
+                                      "fill": "$fg-on-brand",
+                                      "content": "RAW",
+                                      "fontFamily": "Inter",
+                                      "fontSize": 10,
+                                      "fontWeight": "normal"
+                                    }
+                                  ]
+                                }
+                              ]
                             },
                             {
                               "type": "frame",
                               "id": "G1M2Kx",
-                              "name": "TileCaption",
-                              "width": "fill_container",
+                              "layoutPosition": "absolute",
+                              "x": 0,
+                              "y": 124,
+                              "name": "TileBarBottom",
+                              "width": 150,
                               "height": 26,
+                              "fill": "$scrim",
                               "gap": 4,
                               "padding": [
                                 0,
@@ -2346,12 +2724,22 @@
                                   "type": "text",
                                   "id": "b3KyG",
                                   "name": "TileName",
-                                  "fill": "$fg-2",
+                                  "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P00011.RW2",
+                                  "content": "P0011.RW2",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
+                                  "fontWeight": "normal"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "Wnhmw",
+                                  "name": "TileTag",
+                                  "fill": "$fg-1",
+                                  "content": "RW2",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 10,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -2364,24 +2752,60 @@
                           "name": "Tile / 12",
                           "clip": true,
                           "width": 150,
-                          "height": 138,
-                          "cornerRadius": 4,
+                          "height": 150,
+                          "cornerRadius": 6,
                           "layout": "vertical",
+                          "padding": 3,
+                          "justifyContent": "center",
+                          "alignItems": "center",
                           "children": [
                             {
                               "type": "frame",
                               "id": "iVRV0",
-                              "name": "TileImage",
-                              "width": "fill_container",
-                              "height": 112,
-                              "fill": "$surface-main"
+                              "name": "TilePhoto",
+                              "width": 144,
+                              "height": 81,
+                              "fill": "$surface-track",
+                              "cornerRadius": 6,
+                              "children": [
+                                {
+                                  "type": "frame",
+                                  "id": "k9a5Xm",
+                                  "layoutPosition": "absolute",
+                                  "x": 110,
+                                  "y": 63,
+                                  "name": "RawBadge",
+                                  "width": 30,
+                                  "height": 14,
+                                  "fill": "$brand",
+                                  "cornerRadius": 6,
+                                  "justifyContent": "center",
+                                  "alignItems": "center",
+                                  "children": [
+                                    {
+                                      "type": "text",
+                                      "id": "V7wsV6",
+                                      "name": "RawBadgeText",
+                                      "fill": "$fg-on-brand",
+                                      "content": "RAW",
+                                      "fontFamily": "Inter",
+                                      "fontSize": 10,
+                                      "fontWeight": "normal"
+                                    }
+                                  ]
+                                }
+                              ]
                             },
                             {
                               "type": "frame",
                               "id": "zsg5y",
-                              "name": "TileCaption",
-                              "width": "fill_container",
+                              "layoutPosition": "absolute",
+                              "x": 0,
+                              "y": 124,
+                              "name": "TileBarBottom",
+                              "width": 150,
                               "height": 26,
+                              "fill": "$scrim",
                               "gap": 4,
                               "padding": [
                                 0,
@@ -2393,12 +2817,22 @@
                                   "type": "text",
                                   "id": "TMz5k",
                                   "name": "TileName",
-                                  "fill": "$fg-2",
+                                  "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P00012.RW2",
+                                  "content": "P0012.RW2",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
+                                  "fontWeight": "normal"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "af3AF",
+                                  "name": "TileTag",
+                                  "fill": "$fg-1",
+                                  "content": "RW2",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 10,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -2421,24 +2855,32 @@
                           "name": "Tile / 13",
                           "clip": true,
                           "width": 150,
-                          "height": 138,
-                          "cornerRadius": 4,
+                          "height": 150,
+                          "cornerRadius": 6,
                           "layout": "vertical",
+                          "padding": 3,
+                          "justifyContent": "center",
+                          "alignItems": "center",
                           "children": [
                             {
                               "type": "frame",
                               "id": "A0eTZ",
-                              "name": "TileImage",
-                              "width": "fill_container",
-                              "height": 112,
-                              "fill": "$surface-main"
+                              "name": "TilePhoto",
+                              "width": 144,
+                              "height": 96,
+                              "fill": "$surface-track",
+                              "cornerRadius": 6
                             },
                             {
                               "type": "frame",
                               "id": "CYEHB",
-                              "name": "TileCaption",
-                              "width": "fill_container",
+                              "layoutPosition": "absolute",
+                              "x": 0,
+                              "y": 124,
+                              "name": "TileBarBottom",
+                              "width": 150,
                               "height": 26,
+                              "fill": "$scrim",
                               "gap": 4,
                               "padding": [
                                 0,
@@ -2450,12 +2892,22 @@
                                   "type": "text",
                                   "id": "dvczf",
                                   "name": "TileName",
-                                  "fill": "$fg-2",
+                                  "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P00013.RW2",
+                                  "content": "P0013.JPG",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
+                                  "fontWeight": "normal"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "ihrbn",
+                                  "name": "TileTag",
+                                  "fill": "$fg-1",
+                                  "content": "JPG",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 10,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -2468,24 +2920,60 @@
                           "name": "Tile / 14",
                           "clip": true,
                           "width": 150,
-                          "height": 138,
-                          "cornerRadius": 4,
+                          "height": 150,
+                          "cornerRadius": 6,
                           "layout": "vertical",
+                          "padding": 3,
+                          "justifyContent": "center",
+                          "alignItems": "center",
                           "children": [
                             {
                               "type": "frame",
                               "id": "uNIzN",
-                              "name": "TileImage",
-                              "width": "fill_container",
-                              "height": 112,
-                              "fill": "$surface-main"
+                              "name": "TilePhoto",
+                              "width": 96,
+                              "height": 144,
+                              "fill": "$surface-track",
+                              "cornerRadius": 6,
+                              "children": [
+                                {
+                                  "type": "frame",
+                                  "id": "rmziq",
+                                  "layoutPosition": "absolute",
+                                  "x": 62,
+                                  "y": 126,
+                                  "name": "RawBadge",
+                                  "width": 30,
+                                  "height": 14,
+                                  "fill": "$brand",
+                                  "cornerRadius": 6,
+                                  "justifyContent": "center",
+                                  "alignItems": "center",
+                                  "children": [
+                                    {
+                                      "type": "text",
+                                      "id": "nesh4",
+                                      "name": "RawBadgeText",
+                                      "fill": "$fg-on-brand",
+                                      "content": "RAW",
+                                      "fontFamily": "Inter",
+                                      "fontSize": 10,
+                                      "fontWeight": "normal"
+                                    }
+                                  ]
+                                }
+                              ]
                             },
                             {
                               "type": "frame",
                               "id": "J7cga",
-                              "name": "TileCaption",
-                              "width": "fill_container",
+                              "layoutPosition": "absolute",
+                              "x": 0,
+                              "y": 124,
+                              "name": "TileBarBottom",
+                              "width": 150,
                               "height": 26,
+                              "fill": "$scrim",
                               "gap": 4,
                               "padding": [
                                 0,
@@ -2497,12 +2985,22 @@
                                   "type": "text",
                                   "id": "F0SFO",
                                   "name": "TileName",
-                                  "fill": "$fg-2",
+                                  "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P00014.RW2",
+                                  "content": "P0014.RW2",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
+                                  "fontWeight": "normal"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "ibWvo",
+                                  "name": "TileTag",
+                                  "fill": "$fg-1",
+                                  "content": "RW2",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 10,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -2515,24 +3013,60 @@
                           "name": "Tile / 15",
                           "clip": true,
                           "width": 150,
-                          "height": 138,
-                          "cornerRadius": 4,
+                          "height": 150,
+                          "cornerRadius": 6,
                           "layout": "vertical",
+                          "padding": 3,
+                          "justifyContent": "center",
+                          "alignItems": "center",
                           "children": [
                             {
                               "type": "frame",
                               "id": "rGcJD",
-                              "name": "TileImage",
-                              "width": "fill_container",
-                              "height": 112,
-                              "fill": "$surface-main"
+                              "name": "TilePhoto",
+                              "width": 144,
+                              "height": 81,
+                              "fill": "$surface-track",
+                              "cornerRadius": 6,
+                              "children": [
+                                {
+                                  "type": "frame",
+                                  "id": "Y8b89",
+                                  "layoutPosition": "absolute",
+                                  "x": 110,
+                                  "y": 63,
+                                  "name": "RawBadge",
+                                  "width": 30,
+                                  "height": 14,
+                                  "fill": "$brand",
+                                  "cornerRadius": 6,
+                                  "justifyContent": "center",
+                                  "alignItems": "center",
+                                  "children": [
+                                    {
+                                      "type": "text",
+                                      "id": "rXCna",
+                                      "name": "RawBadgeText",
+                                      "fill": "$fg-on-brand",
+                                      "content": "RAW",
+                                      "fontFamily": "Inter",
+                                      "fontSize": 10,
+                                      "fontWeight": "normal"
+                                    }
+                                  ]
+                                }
+                              ]
                             },
                             {
                               "type": "frame",
                               "id": "lTgsN",
-                              "name": "TileCaption",
-                              "width": "fill_container",
+                              "layoutPosition": "absolute",
+                              "x": 0,
+                              "y": 124,
+                              "name": "TileBarBottom",
+                              "width": 150,
                               "height": 26,
+                              "fill": "$scrim",
                               "gap": 4,
                               "padding": [
                                 0,
@@ -2544,12 +3078,22 @@
                                   "type": "text",
                                   "id": "S2K8i",
                                   "name": "TileName",
-                                  "fill": "$fg-2",
+                                  "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P00015.RW2",
+                                  "content": "P0015.RW2",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
+                                  "fontWeight": "normal"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "VsDhN",
+                                  "name": "TileTag",
+                                  "fill": "$fg-1",
+                                  "content": "RW2",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 10,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -2562,24 +3106,32 @@
                           "name": "Tile / 16",
                           "clip": true,
                           "width": 150,
-                          "height": 138,
-                          "cornerRadius": 4,
+                          "height": 150,
+                          "cornerRadius": 6,
                           "layout": "vertical",
+                          "padding": 3,
+                          "justifyContent": "center",
+                          "alignItems": "center",
                           "children": [
                             {
                               "type": "frame",
                               "id": "gP1yM",
-                              "name": "TileImage",
-                              "width": "fill_container",
-                              "height": 112,
-                              "fill": "$surface-main"
+                              "name": "TilePhoto",
+                              "width": 144,
+                              "height": 96,
+                              "fill": "$surface-track",
+                              "cornerRadius": 6
                             },
                             {
                               "type": "frame",
                               "id": "Jlhuz",
-                              "name": "TileCaption",
-                              "width": "fill_container",
+                              "layoutPosition": "absolute",
+                              "x": 0,
+                              "y": 124,
+                              "name": "TileBarBottom",
+                              "width": 150,
                               "height": 26,
+                              "fill": "$scrim",
                               "gap": 4,
                               "padding": [
                                 0,
@@ -2591,12 +3143,22 @@
                                   "type": "text",
                                   "id": "ArVrd",
                                   "name": "TileName",
-                                  "fill": "$fg-2",
+                                  "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P00016.RW2",
+                                  "content": "P0016.JPG",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
+                                  "fontWeight": "normal"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "jBPE6",
+                                  "name": "TileTag",
+                                  "fill": "$fg-1",
+                                  "content": "JPG",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 10,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -2609,24 +3171,60 @@
                           "name": "Tile / 17",
                           "clip": true,
                           "width": 150,
-                          "height": 138,
-                          "cornerRadius": 4,
+                          "height": 150,
+                          "cornerRadius": 6,
                           "layout": "vertical",
+                          "padding": 3,
+                          "justifyContent": "center",
+                          "alignItems": "center",
                           "children": [
                             {
                               "type": "frame",
                               "id": "La2id",
-                              "name": "TileImage",
-                              "width": "fill_container",
-                              "height": 112,
-                              "fill": "$surface-main"
+                              "name": "TilePhoto",
+                              "width": 96,
+                              "height": 144,
+                              "fill": "$surface-track",
+                              "cornerRadius": 6,
+                              "children": [
+                                {
+                                  "type": "frame",
+                                  "id": "b7xVf",
+                                  "layoutPosition": "absolute",
+                                  "x": 62,
+                                  "y": 126,
+                                  "name": "RawBadge",
+                                  "width": 30,
+                                  "height": 14,
+                                  "fill": "$brand",
+                                  "cornerRadius": 6,
+                                  "justifyContent": "center",
+                                  "alignItems": "center",
+                                  "children": [
+                                    {
+                                      "type": "text",
+                                      "id": "PoGqv",
+                                      "name": "RawBadgeText",
+                                      "fill": "$fg-on-brand",
+                                      "content": "RAW",
+                                      "fontFamily": "Inter",
+                                      "fontSize": 10,
+                                      "fontWeight": "normal"
+                                    }
+                                  ]
+                                }
+                              ]
                             },
                             {
                               "type": "frame",
                               "id": "WLQWQ",
-                              "name": "TileCaption",
-                              "width": "fill_container",
+                              "layoutPosition": "absolute",
+                              "x": 0,
+                              "y": 124,
+                              "name": "TileBarBottom",
+                              "width": 150,
                               "height": 26,
+                              "fill": "$scrim",
                               "gap": 4,
                               "padding": [
                                 0,
@@ -2638,12 +3236,22 @@
                                   "type": "text",
                                   "id": "Z2C83V",
                                   "name": "TileName",
-                                  "fill": "$fg-2",
+                                  "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P00017.RW2",
+                                  "content": "P0017.RW2",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
+                                  "fontWeight": "normal"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "Vek9P",
+                                  "name": "TileTag",
+                                  "fill": "$fg-1",
+                                  "content": "RW2",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 10,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -2656,24 +3264,60 @@
                           "name": "Tile / 18",
                           "clip": true,
                           "width": 150,
-                          "height": 138,
-                          "cornerRadius": 4,
+                          "height": 150,
+                          "cornerRadius": 6,
                           "layout": "vertical",
+                          "padding": 3,
+                          "justifyContent": "center",
+                          "alignItems": "center",
                           "children": [
                             {
                               "type": "frame",
                               "id": "V7Ae1U",
-                              "name": "TileImage",
-                              "width": "fill_container",
-                              "height": 112,
-                              "fill": "$surface-main"
+                              "name": "TilePhoto",
+                              "width": 144,
+                              "height": 81,
+                              "fill": "$surface-track",
+                              "cornerRadius": 6,
+                              "children": [
+                                {
+                                  "type": "frame",
+                                  "id": "u1Ams",
+                                  "layoutPosition": "absolute",
+                                  "x": 110,
+                                  "y": 63,
+                                  "name": "RawBadge",
+                                  "width": 30,
+                                  "height": 14,
+                                  "fill": "$brand",
+                                  "cornerRadius": 6,
+                                  "justifyContent": "center",
+                                  "alignItems": "center",
+                                  "children": [
+                                    {
+                                      "type": "text",
+                                      "id": "N8EgUe",
+                                      "name": "RawBadgeText",
+                                      "fill": "$fg-on-brand",
+                                      "content": "RAW",
+                                      "fontFamily": "Inter",
+                                      "fontSize": 10,
+                                      "fontWeight": "normal"
+                                    }
+                                  ]
+                                }
+                              ]
                             },
                             {
                               "type": "frame",
                               "id": "bj3DZ",
-                              "name": "TileCaption",
-                              "width": "fill_container",
+                              "layoutPosition": "absolute",
+                              "x": 0,
+                              "y": 124,
+                              "name": "TileBarBottom",
+                              "width": 150,
                               "height": 26,
+                              "fill": "$scrim",
                               "gap": 4,
                               "padding": [
                                 0,
@@ -2685,12 +3329,22 @@
                                   "type": "text",
                                   "id": "GuR4V",
                                   "name": "TileName",
-                                  "fill": "$fg-2",
+                                  "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P00018.RW2",
+                                  "content": "P0018.RW2",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
+                                  "fontWeight": "normal"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "K7GBn",
+                                  "name": "TileTag",
+                                  "fill": "$fg-1",
+                                  "content": "RW2",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 10,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -3618,7 +4272,7 @@
       },
       "clip": true,
       "width": 1200,
-      "height": 660,
+      "height": 700,
       "fill": "$surface-main",
       "layout": "vertical",
       "gap": 14,
@@ -3633,6 +4287,19 @@
           "fontFamily": "Inter",
           "fontSize": 15,
           "fontWeight": "600"
+        },
+        {
+          "type": "text",
+          "id": "WCIIP",
+          "name": "StaleNote",
+          "fill": "$fg-2",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "⚠ 本板的 tile 仍是旧外形（140×90 长方）：新规格是「正方外框 + 照片保比例居中 + 信息条覆盖在照片上 + RAW 角标」，见 Shell / Browse / Tiles 与 Libs Expanded（2026-09-17 已按实现重画）。本板的重画与补帧归 M2 阶段 0.2–0.3。",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "normal"
         },
         {
           "type": "frame",
@@ -12234,27 +12901,35 @@
                           "name": "Tile / 1",
                           "clip": true,
                           "width": 150,
-                          "height": 138,
-                          "cornerRadius": 4,
+                          "height": 150,
+                          "cornerRadius": 6,
                           "stroke": "$brand",
                           "strokeWidth": 1,
                           "strokeAlignment": "inner",
                           "layout": "vertical",
+                          "padding": 3,
+                          "justifyContent": "center",
+                          "alignItems": "center",
                           "children": [
                             {
                               "type": "frame",
                               "id": "Osjle",
-                              "name": "TileImage",
-                              "width": "fill_container",
-                              "height": 112,
-                              "fill": "$surface-main"
+                              "name": "TilePhoto",
+                              "width": 144,
+                              "height": 96,
+                              "fill": "$surface-track",
+                              "cornerRadius": 6
                             },
                             {
                               "type": "frame",
                               "id": "NBHeA",
-                              "name": "TileCaption",
-                              "width": "fill_container",
+                              "layoutPosition": "absolute",
+                              "x": 0,
+                              "y": 124,
+                              "name": "TileBarBottom",
+                              "width": 150,
                               "height": 26,
+                              "fill": "$scrim",
                               "gap": 4,
                               "padding": [
                                 0,
@@ -12266,12 +12941,22 @@
                                   "type": "text",
                                   "id": "sL0wN",
                                   "name": "TileName",
-                                  "fill": "$fg-2",
+                                  "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P0001.RW2",
+                                  "content": "P0001.JPG",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
+                                  "fontWeight": "normal"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "idQqx",
+                                  "name": "TileTag",
+                                  "fill": "$fg-1",
+                                  "content": "JPG",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 10,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -12284,18 +12969,22 @@
                           "name": "Tile / 2",
                           "clip": true,
                           "width": 150,
-                          "height": 138,
+                          "height": 150,
                           "fill": "$state-selected",
-                          "cornerRadius": 4,
+                          "cornerRadius": 6,
                           "layout": "vertical",
+                          "padding": 3,
+                          "justifyContent": "center",
+                          "alignItems": "center",
                           "children": [
                             {
                               "type": "frame",
                               "id": "LZgzt",
-                              "name": "TileImage",
-                              "width": "fill_container",
-                              "height": 112,
-                              "fill": "$surface-main",
+                              "name": "TilePhoto",
+                              "width": 96,
+                              "height": 144,
+                              "fill": "$surface-track",
+                              "cornerRadius": 6,
                               "children": [
                                 {
                                   "type": "frame",
@@ -12308,15 +12997,45 @@
                                   "height": 10,
                                   "fill": "$label-red",
                                   "cornerRadius": 999
+                                },
+                                {
+                                  "type": "frame",
+                                  "id": "a5vVn",
+                                  "layoutPosition": "absolute",
+                                  "x": 62,
+                                  "y": 126,
+                                  "name": "RawBadge",
+                                  "width": 30,
+                                  "height": 14,
+                                  "fill": "$brand",
+                                  "cornerRadius": 6,
+                                  "justifyContent": "center",
+                                  "alignItems": "center",
+                                  "children": [
+                                    {
+                                      "type": "text",
+                                      "id": "vOOyG",
+                                      "name": "RawBadgeText",
+                                      "fill": "$fg-on-brand",
+                                      "content": "RAW",
+                                      "fontFamily": "Inter",
+                                      "fontSize": 10,
+                                      "fontWeight": "normal"
+                                    }
+                                  ]
                                 }
                               ]
                             },
                             {
                               "type": "frame",
                               "id": "FxVhY",
-                              "name": "TileCaption",
-                              "width": "fill_container",
+                              "layoutPosition": "absolute",
+                              "x": 0,
+                              "y": 124,
+                              "name": "TileBarBottom",
+                              "width": 150,
                               "height": 26,
+                              "fill": "$scrim",
                               "gap": 4,
                               "padding": [
                                 0,
@@ -12328,7 +13047,7 @@
                                   "type": "text",
                                   "id": "uVFEH",
                                   "name": "TileName",
-                                  "fill": "$fg-2",
+                                  "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
                                   "content": "P0002.RW2",
@@ -12365,6 +13084,16 @@
                                   "icon": "star",
                                   "library": "lucide",
                                   "fill": "$brand"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "yc1ou",
+                                  "name": "TileTag",
+                                  "fill": "$fg-1",
+                                  "content": "RW2",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 10,
+                                  "fontWeight": "normal"
                                 }
                               ]
                             }
@@ -12376,18 +13105,22 @@
                           "name": "Tile / 3",
                           "clip": true,
                           "width": 150,
-                          "height": 138,
+                          "height": 150,
                           "fill": "$state-selected",
-                          "cornerRadius": 4,
+                          "cornerRadius": 6,
                           "layout": "vertical",
+                          "padding": 3,
+                          "justifyContent": "center",
+                          "alignItems": "center",
                           "children": [
                             {
                               "type": "frame",
                               "id": "SI6jB",
-                              "name": "TileImage",
-                              "width": "fill_container",
-                              "height": 112,
-                              "fill": "$surface-main",
+                              "name": "TilePhoto",
+                              "width": 144,
+                              "height": 81,
+                              "fill": "$surface-track",
+                              "cornerRadius": 6,
                               "children": [
                                 {
                                   "type": "frame",
@@ -12400,15 +13133,45 @@
                                   "height": 10,
                                   "fill": "$label-green",
                                   "cornerRadius": 999
+                                },
+                                {
+                                  "type": "frame",
+                                  "id": "oM9Ka",
+                                  "layoutPosition": "absolute",
+                                  "x": 110,
+                                  "y": 63,
+                                  "name": "RawBadge",
+                                  "width": 30,
+                                  "height": 14,
+                                  "fill": "$brand",
+                                  "cornerRadius": 6,
+                                  "justifyContent": "center",
+                                  "alignItems": "center",
+                                  "children": [
+                                    {
+                                      "type": "text",
+                                      "id": "K1OnPH",
+                                      "name": "RawBadgeText",
+                                      "fill": "$fg-on-brand",
+                                      "content": "RAW",
+                                      "fontFamily": "Inter",
+                                      "fontSize": 10,
+                                      "fontWeight": "normal"
+                                    }
+                                  ]
                                 }
                               ]
                             },
                             {
                               "type": "frame",
                               "id": "HWPnu",
-                              "name": "TileCaption",
-                              "width": "fill_container",
+                              "layoutPosition": "absolute",
+                              "x": 0,
+                              "y": 124,
+                              "name": "TileBarBottom",
+                              "width": 150,
                               "height": 26,
+                              "fill": "$scrim",
                               "gap": 4,
                               "padding": [
                                 0,
@@ -12420,12 +13183,22 @@
                                   "type": "text",
                                   "id": "eSBOx",
                                   "name": "TileName",
-                                  "fill": "$fg-2",
+                                  "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
                                   "content": "P0003.RW2",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
+                                  "fontWeight": "normal"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "bhsU2",
+                                  "name": "TileTag",
+                                  "fill": "$fg-1",
+                                  "content": "RW2",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 10,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -12438,24 +13211,32 @@
                           "name": "Tile / 4",
                           "clip": true,
                           "width": 150,
-                          "height": 138,
-                          "cornerRadius": 4,
+                          "height": 150,
+                          "cornerRadius": 6,
                           "layout": "vertical",
+                          "padding": 3,
+                          "justifyContent": "center",
+                          "alignItems": "center",
                           "children": [
                             {
                               "type": "frame",
                               "id": "NdmTj",
-                              "name": "TileImage",
-                              "width": "fill_container",
-                              "height": 112,
-                              "fill": "$surface-main"
+                              "name": "TilePhoto",
+                              "width": 144,
+                              "height": 96,
+                              "fill": "$surface-track",
+                              "cornerRadius": 6
                             },
                             {
                               "type": "frame",
                               "id": "U0peB5",
-                              "name": "TileCaption",
-                              "width": "fill_container",
+                              "layoutPosition": "absolute",
+                              "x": 0,
+                              "y": 124,
+                              "name": "TileBarBottom",
+                              "width": 150,
                               "height": 26,
+                              "fill": "$scrim",
                               "gap": 4,
                               "padding": [
                                 0,
@@ -12467,12 +13248,22 @@
                                   "type": "text",
                                   "id": "bBR6e",
                                   "name": "TileName",
-                                  "fill": "$fg-2",
+                                  "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P0004.RW2",
+                                  "content": "P0004.JPG",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
+                                  "fontWeight": "normal"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "p7J0p",
+                                  "name": "TileTag",
+                                  "fill": "$fg-1",
+                                  "content": "JPG",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 10,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -12485,17 +13276,21 @@
                           "name": "Tile / 5",
                           "clip": true,
                           "width": 150,
-                          "height": 138,
-                          "cornerRadius": 4,
+                          "height": 150,
+                          "cornerRadius": 6,
                           "layout": "vertical",
+                          "padding": 3,
+                          "justifyContent": "center",
+                          "alignItems": "center",
                           "children": [
                             {
                               "type": "frame",
                               "id": "PvZnK",
-                              "name": "TileImage",
-                              "width": "fill_container",
-                              "height": 112,
-                              "fill": "$surface-main",
+                              "name": "TilePhoto",
+                              "width": 96,
+                              "height": 144,
+                              "fill": "$surface-track",
+                              "cornerRadius": 6,
                               "children": [
                                 {
                                   "type": "frame",
@@ -12523,15 +13318,45 @@
                                       "fill": "$fg-2"
                                     }
                                   ]
+                                },
+                                {
+                                  "type": "frame",
+                                  "id": "WeUgI",
+                                  "layoutPosition": "absolute",
+                                  "x": 62,
+                                  "y": 126,
+                                  "name": "RawBadge",
+                                  "width": 30,
+                                  "height": 14,
+                                  "fill": "$brand",
+                                  "cornerRadius": 6,
+                                  "justifyContent": "center",
+                                  "alignItems": "center",
+                                  "children": [
+                                    {
+                                      "type": "text",
+                                      "id": "C6b2K8",
+                                      "name": "RawBadgeText",
+                                      "fill": "$fg-on-brand",
+                                      "content": "RAW",
+                                      "fontFamily": "Inter",
+                                      "fontSize": 10,
+                                      "fontWeight": "normal"
+                                    }
+                                  ]
                                 }
                               ]
                             },
                             {
                               "type": "frame",
                               "id": "O5oAEU",
-                              "name": "TileCaption",
-                              "width": "fill_container",
+                              "layoutPosition": "absolute",
+                              "x": 0,
+                              "y": 124,
+                              "name": "TileBarBottom",
+                              "width": 150,
                               "height": 26,
+                              "fill": "$scrim",
                               "gap": 4,
                               "padding": [
                                 0,
@@ -12543,12 +13368,22 @@
                                   "type": "text",
                                   "id": "HBhTb",
                                   "name": "TileName",
-                                  "fill": "$fg-2",
+                                  "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
                                   "content": "P0005.RW2",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
+                                  "fontWeight": "normal"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "DgvKn",
+                                  "name": "TileTag",
+                                  "fill": "$fg-1",
+                                  "content": "RW2",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 10,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -12561,24 +13396,60 @@
                           "name": "Tile / 6",
                           "clip": true,
                           "width": 150,
-                          "height": 138,
-                          "cornerRadius": 4,
+                          "height": 150,
+                          "cornerRadius": 6,
                           "layout": "vertical",
+                          "padding": 3,
+                          "justifyContent": "center",
+                          "alignItems": "center",
                           "children": [
                             {
                               "type": "frame",
                               "id": "DdJo0",
-                              "name": "TileImage",
-                              "width": "fill_container",
-                              "height": 112,
-                              "fill": "$surface-main"
+                              "name": "TilePhoto",
+                              "width": 144,
+                              "height": 81,
+                              "fill": "$surface-track",
+                              "cornerRadius": 6,
+                              "children": [
+                                {
+                                  "type": "frame",
+                                  "id": "jm7ac",
+                                  "layoutPosition": "absolute",
+                                  "x": 110,
+                                  "y": 63,
+                                  "name": "RawBadge",
+                                  "width": 30,
+                                  "height": 14,
+                                  "fill": "$brand",
+                                  "cornerRadius": 6,
+                                  "justifyContent": "center",
+                                  "alignItems": "center",
+                                  "children": [
+                                    {
+                                      "type": "text",
+                                      "id": "f4gWPM",
+                                      "name": "RawBadgeText",
+                                      "fill": "$fg-on-brand",
+                                      "content": "RAW",
+                                      "fontFamily": "Inter",
+                                      "fontSize": 10,
+                                      "fontWeight": "normal"
+                                    }
+                                  ]
+                                }
+                              ]
                             },
                             {
                               "type": "frame",
                               "id": "XAtIK",
-                              "name": "TileCaption",
-                              "width": "fill_container",
+                              "layoutPosition": "absolute",
+                              "x": 0,
+                              "y": 124,
+                              "name": "TileBarBottom",
+                              "width": 150,
                               "height": 26,
+                              "fill": "$scrim",
                               "gap": 4,
                               "padding": [
                                 0,
@@ -12590,12 +13461,22 @@
                                   "type": "text",
                                   "id": "OaGe6",
                                   "name": "TileName",
-                                  "fill": "$fg-2",
+                                  "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
                                   "content": "P0006.RW2",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
+                                  "fontWeight": "normal"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "fXfvb",
+                                  "name": "TileTag",
+                                  "fill": "$fg-1",
+                                  "content": "RW2",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 10,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -12618,24 +13499,32 @@
                           "name": "Tile / 7",
                           "clip": true,
                           "width": 150,
-                          "height": 138,
-                          "cornerRadius": 4,
+                          "height": 150,
+                          "cornerRadius": 6,
                           "layout": "vertical",
+                          "padding": 3,
+                          "justifyContent": "center",
+                          "alignItems": "center",
                           "children": [
                             {
                               "type": "frame",
                               "id": "rpwlE",
-                              "name": "TileImage",
-                              "width": "fill_container",
-                              "height": 112,
-                              "fill": "$surface-main"
+                              "name": "TilePhoto",
+                              "width": 144,
+                              "height": 96,
+                              "fill": "$surface-track",
+                              "cornerRadius": 6
                             },
                             {
                               "type": "frame",
                               "id": "bEG0G",
-                              "name": "TileCaption",
-                              "width": "fill_container",
+                              "layoutPosition": "absolute",
+                              "x": 0,
+                              "y": 124,
+                              "name": "TileBarBottom",
+                              "width": 150,
                               "height": 26,
+                              "fill": "$scrim",
                               "gap": 4,
                               "padding": [
                                 0,
@@ -12647,12 +13536,22 @@
                                   "type": "text",
                                   "id": "pvt5c",
                                   "name": "TileName",
-                                  "fill": "$fg-2",
+                                  "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P0007.RW2",
+                                  "content": "P0007.JPG",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
+                                  "fontWeight": "normal"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "OhhM3",
+                                  "name": "TileTag",
+                                  "fill": "$fg-1",
+                                  "content": "JPG",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 10,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -12665,24 +13564,60 @@
                           "name": "Tile / 8",
                           "clip": true,
                           "width": 150,
-                          "height": 138,
-                          "cornerRadius": 4,
+                          "height": 150,
+                          "cornerRadius": 6,
                           "layout": "vertical",
+                          "padding": 3,
+                          "justifyContent": "center",
+                          "alignItems": "center",
                           "children": [
                             {
                               "type": "frame",
                               "id": "fPbq8",
-                              "name": "TileImage",
-                              "width": "fill_container",
-                              "height": 112,
-                              "fill": "$surface-main"
+                              "name": "TilePhoto",
+                              "width": 96,
+                              "height": 144,
+                              "fill": "$surface-track",
+                              "cornerRadius": 6,
+                              "children": [
+                                {
+                                  "type": "frame",
+                                  "id": "q0i1C4",
+                                  "layoutPosition": "absolute",
+                                  "x": 62,
+                                  "y": 126,
+                                  "name": "RawBadge",
+                                  "width": 30,
+                                  "height": 14,
+                                  "fill": "$brand",
+                                  "cornerRadius": 6,
+                                  "justifyContent": "center",
+                                  "alignItems": "center",
+                                  "children": [
+                                    {
+                                      "type": "text",
+                                      "id": "n7afzr",
+                                      "name": "RawBadgeText",
+                                      "fill": "$fg-on-brand",
+                                      "content": "RAW",
+                                      "fontFamily": "Inter",
+                                      "fontSize": 10,
+                                      "fontWeight": "normal"
+                                    }
+                                  ]
+                                }
+                              ]
                             },
                             {
                               "type": "frame",
                               "id": "mcRhj",
-                              "name": "TileCaption",
-                              "width": "fill_container",
+                              "layoutPosition": "absolute",
+                              "x": 0,
+                              "y": 124,
+                              "name": "TileBarBottom",
+                              "width": 150,
                               "height": 26,
+                              "fill": "$scrim",
                               "gap": 4,
                               "padding": [
                                 0,
@@ -12694,7 +13629,7 @@
                                   "type": "text",
                                   "id": "v1kZdX",
                                   "name": "TileName",
-                                  "fill": "$fg-2",
+                                  "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
                                   "content": "P0008.RW2",
@@ -12731,6 +13666,16 @@
                                   "icon": "star",
                                   "library": "lucide",
                                   "fill": "$brand"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "yDkNb",
+                                  "name": "TileTag",
+                                  "fill": "$fg-1",
+                                  "content": "RW2",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 10,
+                                  "fontWeight": "normal"
                                 }
                               ]
                             }
@@ -12742,24 +13687,60 @@
                           "name": "Tile / 9",
                           "clip": true,
                           "width": 150,
-                          "height": 138,
-                          "cornerRadius": 4,
+                          "height": 150,
+                          "cornerRadius": 6,
                           "layout": "vertical",
+                          "padding": 3,
+                          "justifyContent": "center",
+                          "alignItems": "center",
                           "children": [
                             {
                               "type": "frame",
                               "id": "hON5v",
-                              "name": "TileImage",
-                              "width": "fill_container",
-                              "height": 112,
-                              "fill": "$surface-main"
+                              "name": "TilePhoto",
+                              "width": 144,
+                              "height": 81,
+                              "fill": "$surface-track",
+                              "cornerRadius": 6,
+                              "children": [
+                                {
+                                  "type": "frame",
+                                  "id": "P8XzN8",
+                                  "layoutPosition": "absolute",
+                                  "x": 110,
+                                  "y": 63,
+                                  "name": "RawBadge",
+                                  "width": 30,
+                                  "height": 14,
+                                  "fill": "$brand",
+                                  "cornerRadius": 6,
+                                  "justifyContent": "center",
+                                  "alignItems": "center",
+                                  "children": [
+                                    {
+                                      "type": "text",
+                                      "id": "S6Tjlu",
+                                      "name": "RawBadgeText",
+                                      "fill": "$fg-on-brand",
+                                      "content": "RAW",
+                                      "fontFamily": "Inter",
+                                      "fontSize": 10,
+                                      "fontWeight": "normal"
+                                    }
+                                  ]
+                                }
+                              ]
                             },
                             {
                               "type": "frame",
                               "id": "hTJ6M",
-                              "name": "TileCaption",
-                              "width": "fill_container",
+                              "layoutPosition": "absolute",
+                              "x": 0,
+                              "y": 124,
+                              "name": "TileBarBottom",
+                              "width": 150,
                               "height": 26,
+                              "fill": "$scrim",
                               "gap": 4,
                               "padding": [
                                 0,
@@ -12771,12 +13752,22 @@
                                   "type": "text",
                                   "id": "UrO6u",
                                   "name": "TileName",
-                                  "fill": "$fg-2",
+                                  "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
                                   "content": "P0009.RW2",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
+                                  "fontWeight": "normal"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "Yzxis",
+                                  "name": "TileTag",
+                                  "fill": "$fg-1",
+                                  "content": "RW2",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 10,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -12789,24 +13780,32 @@
                           "name": "Tile / 10",
                           "clip": true,
                           "width": 150,
-                          "height": 138,
-                          "cornerRadius": 4,
+                          "height": 150,
+                          "cornerRadius": 6,
                           "layout": "vertical",
+                          "padding": 3,
+                          "justifyContent": "center",
+                          "alignItems": "center",
                           "children": [
                             {
                               "type": "frame",
                               "id": "L5t7CL",
-                              "name": "TileImage",
-                              "width": "fill_container",
-                              "height": 112,
-                              "fill": "$surface-main"
+                              "name": "TilePhoto",
+                              "width": 144,
+                              "height": 96,
+                              "fill": "$surface-track",
+                              "cornerRadius": 6
                             },
                             {
                               "type": "frame",
                               "id": "x16iD",
-                              "name": "TileCaption",
-                              "width": "fill_container",
+                              "layoutPosition": "absolute",
+                              "x": 0,
+                              "y": 124,
+                              "name": "TileBarBottom",
+                              "width": 150,
                               "height": 26,
+                              "fill": "$scrim",
                               "gap": 4,
                               "padding": [
                                 0,
@@ -12818,12 +13817,22 @@
                                   "type": "text",
                                   "id": "iZuZn",
                                   "name": "TileName",
-                                  "fill": "$fg-2",
+                                  "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P00010.RW2",
+                                  "content": "P0010.JPG",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
+                                  "fontWeight": "normal"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "T8FuV5",
+                                  "name": "TileTag",
+                                  "fill": "$fg-1",
+                                  "content": "JPG",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 10,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -12836,24 +13845,60 @@
                           "name": "Tile / 11",
                           "clip": true,
                           "width": 150,
-                          "height": 138,
-                          "cornerRadius": 4,
+                          "height": 150,
+                          "cornerRadius": 6,
                           "layout": "vertical",
+                          "padding": 3,
+                          "justifyContent": "center",
+                          "alignItems": "center",
                           "children": [
                             {
                               "type": "frame",
                               "id": "kM4zu",
-                              "name": "TileImage",
-                              "width": "fill_container",
-                              "height": 112,
-                              "fill": "$surface-main"
+                              "name": "TilePhoto",
+                              "width": 96,
+                              "height": 144,
+                              "fill": "$surface-track",
+                              "cornerRadius": 6,
+                              "children": [
+                                {
+                                  "type": "frame",
+                                  "id": "w3cHJ",
+                                  "layoutPosition": "absolute",
+                                  "x": 62,
+                                  "y": 126,
+                                  "name": "RawBadge",
+                                  "width": 30,
+                                  "height": 14,
+                                  "fill": "$brand",
+                                  "cornerRadius": 6,
+                                  "justifyContent": "center",
+                                  "alignItems": "center",
+                                  "children": [
+                                    {
+                                      "type": "text",
+                                      "id": "W8ju7",
+                                      "name": "RawBadgeText",
+                                      "fill": "$fg-on-brand",
+                                      "content": "RAW",
+                                      "fontFamily": "Inter",
+                                      "fontSize": 10,
+                                      "fontWeight": "normal"
+                                    }
+                                  ]
+                                }
+                              ]
                             },
                             {
                               "type": "frame",
                               "id": "Q8MzL7",
-                              "name": "TileCaption",
-                              "width": "fill_container",
+                              "layoutPosition": "absolute",
+                              "x": 0,
+                              "y": 124,
+                              "name": "TileBarBottom",
+                              "width": 150,
                               "height": 26,
+                              "fill": "$scrim",
                               "gap": 4,
                               "padding": [
                                 0,
@@ -12865,12 +13910,22 @@
                                   "type": "text",
                                   "id": "HzFgm",
                                   "name": "TileName",
-                                  "fill": "$fg-2",
+                                  "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P00011.RW2",
+                                  "content": "P0011.RW2",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
+                                  "fontWeight": "normal"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "ZMuei",
+                                  "name": "TileTag",
+                                  "fill": "$fg-1",
+                                  "content": "RW2",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 10,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -12883,24 +13938,60 @@
                           "name": "Tile / 12",
                           "clip": true,
                           "width": 150,
-                          "height": 138,
-                          "cornerRadius": 4,
+                          "height": 150,
+                          "cornerRadius": 6,
                           "layout": "vertical",
+                          "padding": 3,
+                          "justifyContent": "center",
+                          "alignItems": "center",
                           "children": [
                             {
                               "type": "frame",
                               "id": "N7w9a",
-                              "name": "TileImage",
-                              "width": "fill_container",
-                              "height": 112,
-                              "fill": "$surface-main"
+                              "name": "TilePhoto",
+                              "width": 144,
+                              "height": 81,
+                              "fill": "$surface-track",
+                              "cornerRadius": 6,
+                              "children": [
+                                {
+                                  "type": "frame",
+                                  "id": "SbKb7",
+                                  "layoutPosition": "absolute",
+                                  "x": 110,
+                                  "y": 63,
+                                  "name": "RawBadge",
+                                  "width": 30,
+                                  "height": 14,
+                                  "fill": "$brand",
+                                  "cornerRadius": 6,
+                                  "justifyContent": "center",
+                                  "alignItems": "center",
+                                  "children": [
+                                    {
+                                      "type": "text",
+                                      "id": "gT4fn",
+                                      "name": "RawBadgeText",
+                                      "fill": "$fg-on-brand",
+                                      "content": "RAW",
+                                      "fontFamily": "Inter",
+                                      "fontSize": 10,
+                                      "fontWeight": "normal"
+                                    }
+                                  ]
+                                }
+                              ]
                             },
                             {
                               "type": "frame",
                               "id": "tM4rc",
-                              "name": "TileCaption",
-                              "width": "fill_container",
+                              "layoutPosition": "absolute",
+                              "x": 0,
+                              "y": 124,
+                              "name": "TileBarBottom",
+                              "width": 150,
                               "height": 26,
+                              "fill": "$scrim",
                               "gap": 4,
                               "padding": [
                                 0,
@@ -12912,12 +14003,22 @@
                                   "type": "text",
                                   "id": "yv9MW",
                                   "name": "TileName",
-                                  "fill": "$fg-2",
+                                  "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P00012.RW2",
+                                  "content": "P0012.RW2",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
+                                  "fontWeight": "normal"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "n994FL",
+                                  "name": "TileTag",
+                                  "fill": "$fg-1",
+                                  "content": "RW2",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 10,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -12940,24 +14041,32 @@
                           "name": "Tile / 13",
                           "clip": true,
                           "width": 150,
-                          "height": 138,
-                          "cornerRadius": 4,
+                          "height": 150,
+                          "cornerRadius": 6,
                           "layout": "vertical",
+                          "padding": 3,
+                          "justifyContent": "center",
+                          "alignItems": "center",
                           "children": [
                             {
                               "type": "frame",
                               "id": "wN9cE",
-                              "name": "TileImage",
-                              "width": "fill_container",
-                              "height": 112,
-                              "fill": "$surface-main"
+                              "name": "TilePhoto",
+                              "width": 144,
+                              "height": 96,
+                              "fill": "$surface-track",
+                              "cornerRadius": 6
                             },
                             {
                               "type": "frame",
                               "id": "P1yzX",
-                              "name": "TileCaption",
-                              "width": "fill_container",
+                              "layoutPosition": "absolute",
+                              "x": 0,
+                              "y": 124,
+                              "name": "TileBarBottom",
+                              "width": 150,
                               "height": 26,
+                              "fill": "$scrim",
                               "gap": 4,
                               "padding": [
                                 0,
@@ -12969,12 +14078,22 @@
                                   "type": "text",
                                   "id": "ozLa0",
                                   "name": "TileName",
-                                  "fill": "$fg-2",
+                                  "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P00013.RW2",
+                                  "content": "P0013.JPG",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
+                                  "fontWeight": "normal"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "GnY2O",
+                                  "name": "TileTag",
+                                  "fill": "$fg-1",
+                                  "content": "JPG",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 10,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -12987,24 +14106,60 @@
                           "name": "Tile / 14",
                           "clip": true,
                           "width": 150,
-                          "height": 138,
-                          "cornerRadius": 4,
+                          "height": 150,
+                          "cornerRadius": 6,
                           "layout": "vertical",
+                          "padding": 3,
+                          "justifyContent": "center",
+                          "alignItems": "center",
                           "children": [
                             {
                               "type": "frame",
                               "id": "vCKz8",
-                              "name": "TileImage",
-                              "width": "fill_container",
-                              "height": 112,
-                              "fill": "$surface-main"
+                              "name": "TilePhoto",
+                              "width": 96,
+                              "height": 144,
+                              "fill": "$surface-track",
+                              "cornerRadius": 6,
+                              "children": [
+                                {
+                                  "type": "frame",
+                                  "id": "khHo9",
+                                  "layoutPosition": "absolute",
+                                  "x": 62,
+                                  "y": 126,
+                                  "name": "RawBadge",
+                                  "width": 30,
+                                  "height": 14,
+                                  "fill": "$brand",
+                                  "cornerRadius": 6,
+                                  "justifyContent": "center",
+                                  "alignItems": "center",
+                                  "children": [
+                                    {
+                                      "type": "text",
+                                      "id": "LAnFc",
+                                      "name": "RawBadgeText",
+                                      "fill": "$fg-on-brand",
+                                      "content": "RAW",
+                                      "fontFamily": "Inter",
+                                      "fontSize": 10,
+                                      "fontWeight": "normal"
+                                    }
+                                  ]
+                                }
+                              ]
                             },
                             {
                               "type": "frame",
                               "id": "tHIZA",
-                              "name": "TileCaption",
-                              "width": "fill_container",
+                              "layoutPosition": "absolute",
+                              "x": 0,
+                              "y": 124,
+                              "name": "TileBarBottom",
+                              "width": 150,
                               "height": 26,
+                              "fill": "$scrim",
                               "gap": 4,
                               "padding": [
                                 0,
@@ -13016,12 +14171,22 @@
                                   "type": "text",
                                   "id": "LYGkq",
                                   "name": "TileName",
-                                  "fill": "$fg-2",
+                                  "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P00014.RW2",
+                                  "content": "P0014.RW2",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
+                                  "fontWeight": "normal"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "D1WaZv",
+                                  "name": "TileTag",
+                                  "fill": "$fg-1",
+                                  "content": "RW2",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 10,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -13034,24 +14199,60 @@
                           "name": "Tile / 15",
                           "clip": true,
                           "width": 150,
-                          "height": 138,
-                          "cornerRadius": 4,
+                          "height": 150,
+                          "cornerRadius": 6,
                           "layout": "vertical",
+                          "padding": 3,
+                          "justifyContent": "center",
+                          "alignItems": "center",
                           "children": [
                             {
                               "type": "frame",
                               "id": "pMpJk",
-                              "name": "TileImage",
-                              "width": "fill_container",
-                              "height": 112,
-                              "fill": "$surface-main"
+                              "name": "TilePhoto",
+                              "width": 144,
+                              "height": 81,
+                              "fill": "$surface-track",
+                              "cornerRadius": 6,
+                              "children": [
+                                {
+                                  "type": "frame",
+                                  "id": "DE7uI",
+                                  "layoutPosition": "absolute",
+                                  "x": 110,
+                                  "y": 63,
+                                  "name": "RawBadge",
+                                  "width": 30,
+                                  "height": 14,
+                                  "fill": "$brand",
+                                  "cornerRadius": 6,
+                                  "justifyContent": "center",
+                                  "alignItems": "center",
+                                  "children": [
+                                    {
+                                      "type": "text",
+                                      "id": "f1QNB",
+                                      "name": "RawBadgeText",
+                                      "fill": "$fg-on-brand",
+                                      "content": "RAW",
+                                      "fontFamily": "Inter",
+                                      "fontSize": 10,
+                                      "fontWeight": "normal"
+                                    }
+                                  ]
+                                }
+                              ]
                             },
                             {
                               "type": "frame",
                               "id": "ir5Kw",
-                              "name": "TileCaption",
-                              "width": "fill_container",
+                              "layoutPosition": "absolute",
+                              "x": 0,
+                              "y": 124,
+                              "name": "TileBarBottom",
+                              "width": 150,
                               "height": 26,
+                              "fill": "$scrim",
                               "gap": 4,
                               "padding": [
                                 0,
@@ -13063,12 +14264,22 @@
                                   "type": "text",
                                   "id": "O05RiT",
                                   "name": "TileName",
-                                  "fill": "$fg-2",
+                                  "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P00015.RW2",
+                                  "content": "P0015.RW2",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
+                                  "fontWeight": "normal"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "E4Uds0",
+                                  "name": "TileTag",
+                                  "fill": "$fg-1",
+                                  "content": "RW2",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 10,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -13081,24 +14292,32 @@
                           "name": "Tile / 16",
                           "clip": true,
                           "width": 150,
-                          "height": 138,
-                          "cornerRadius": 4,
+                          "height": 150,
+                          "cornerRadius": 6,
                           "layout": "vertical",
+                          "padding": 3,
+                          "justifyContent": "center",
+                          "alignItems": "center",
                           "children": [
                             {
                               "type": "frame",
                               "id": "fveMZ",
-                              "name": "TileImage",
-                              "width": "fill_container",
-                              "height": 112,
-                              "fill": "$surface-main"
+                              "name": "TilePhoto",
+                              "width": 144,
+                              "height": 96,
+                              "fill": "$surface-track",
+                              "cornerRadius": 6
                             },
                             {
                               "type": "frame",
                               "id": "hU4U2",
-                              "name": "TileCaption",
-                              "width": "fill_container",
+                              "layoutPosition": "absolute",
+                              "x": 0,
+                              "y": 124,
+                              "name": "TileBarBottom",
+                              "width": 150,
                               "height": 26,
+                              "fill": "$scrim",
                               "gap": 4,
                               "padding": [
                                 0,
@@ -13110,12 +14329,22 @@
                                   "type": "text",
                                   "id": "fsHfC",
                                   "name": "TileName",
-                                  "fill": "$fg-2",
+                                  "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P00016.RW2",
+                                  "content": "P0016.JPG",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
+                                  "fontWeight": "normal"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "jqqve",
+                                  "name": "TileTag",
+                                  "fill": "$fg-1",
+                                  "content": "JPG",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 10,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -13128,24 +14357,60 @@
                           "name": "Tile / 17",
                           "clip": true,
                           "width": 150,
-                          "height": 138,
-                          "cornerRadius": 4,
+                          "height": 150,
+                          "cornerRadius": 6,
                           "layout": "vertical",
+                          "padding": 3,
+                          "justifyContent": "center",
+                          "alignItems": "center",
                           "children": [
                             {
                               "type": "frame",
                               "id": "oegEn",
-                              "name": "TileImage",
-                              "width": "fill_container",
-                              "height": 112,
-                              "fill": "$surface-main"
+                              "name": "TilePhoto",
+                              "width": 96,
+                              "height": 144,
+                              "fill": "$surface-track",
+                              "cornerRadius": 6,
+                              "children": [
+                                {
+                                  "type": "frame",
+                                  "id": "ennOh",
+                                  "layoutPosition": "absolute",
+                                  "x": 62,
+                                  "y": 126,
+                                  "name": "RawBadge",
+                                  "width": 30,
+                                  "height": 14,
+                                  "fill": "$brand",
+                                  "cornerRadius": 6,
+                                  "justifyContent": "center",
+                                  "alignItems": "center",
+                                  "children": [
+                                    {
+                                      "type": "text",
+                                      "id": "Ylbea",
+                                      "name": "RawBadgeText",
+                                      "fill": "$fg-on-brand",
+                                      "content": "RAW",
+                                      "fontFamily": "Inter",
+                                      "fontSize": 10,
+                                      "fontWeight": "normal"
+                                    }
+                                  ]
+                                }
+                              ]
                             },
                             {
                               "type": "frame",
                               "id": "kdwAu",
-                              "name": "TileCaption",
-                              "width": "fill_container",
+                              "layoutPosition": "absolute",
+                              "x": 0,
+                              "y": 124,
+                              "name": "TileBarBottom",
+                              "width": 150,
                               "height": 26,
+                              "fill": "$scrim",
                               "gap": 4,
                               "padding": [
                                 0,
@@ -13157,12 +14422,22 @@
                                   "type": "text",
                                   "id": "MBLSZ",
                                   "name": "TileName",
-                                  "fill": "$fg-2",
+                                  "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P00017.RW2",
+                                  "content": "P0017.RW2",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
+                                  "fontWeight": "normal"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "dcQMD",
+                                  "name": "TileTag",
+                                  "fill": "$fg-1",
+                                  "content": "RW2",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 10,
                                   "fontWeight": "normal"
                                 }
                               ]
@@ -13175,24 +14450,60 @@
                           "name": "Tile / 18",
                           "clip": true,
                           "width": 150,
-                          "height": 138,
-                          "cornerRadius": 4,
+                          "height": 150,
+                          "cornerRadius": 6,
                           "layout": "vertical",
+                          "padding": 3,
+                          "justifyContent": "center",
+                          "alignItems": "center",
                           "children": [
                             {
                               "type": "frame",
                               "id": "D91Mjn",
-                              "name": "TileImage",
-                              "width": "fill_container",
-                              "height": 112,
-                              "fill": "$surface-main"
+                              "name": "TilePhoto",
+                              "width": 144,
+                              "height": 81,
+                              "fill": "$surface-track",
+                              "cornerRadius": 6,
+                              "children": [
+                                {
+                                  "type": "frame",
+                                  "id": "ryHG9",
+                                  "layoutPosition": "absolute",
+                                  "x": 110,
+                                  "y": 63,
+                                  "name": "RawBadge",
+                                  "width": 30,
+                                  "height": 14,
+                                  "fill": "$brand",
+                                  "cornerRadius": 6,
+                                  "justifyContent": "center",
+                                  "alignItems": "center",
+                                  "children": [
+                                    {
+                                      "type": "text",
+                                      "id": "HUQbn",
+                                      "name": "RawBadgeText",
+                                      "fill": "$fg-on-brand",
+                                      "content": "RAW",
+                                      "fontFamily": "Inter",
+                                      "fontSize": 10,
+                                      "fontWeight": "normal"
+                                    }
+                                  ]
+                                }
+                              ]
                             },
                             {
                               "type": "frame",
                               "id": "xoxck",
-                              "name": "TileCaption",
-                              "width": "fill_container",
+                              "layoutPosition": "absolute",
+                              "x": 0,
+                              "y": 124,
+                              "name": "TileBarBottom",
+                              "width": 150,
                               "height": 26,
+                              "fill": "$scrim",
                               "gap": 4,
                               "padding": [
                                 0,
@@ -13204,12 +14515,22 @@
                                   "type": "text",
                                   "id": "qb5cd",
                                   "name": "TileName",
-                                  "fill": "$fg-2",
+                                  "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P00018.RW2",
+                                  "content": "P0018.RW2",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
+                                  "fontWeight": "normal"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "IbBoM",
+                                  "name": "TileTag",
+                                  "fill": "$fg-1",
+                                  "content": "RW2",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 10,
                                   "fontWeight": "normal"
                                 }
                               ]
