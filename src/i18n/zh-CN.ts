@@ -242,6 +242,8 @@ export const zhCN = {
  "browse.clearRating": "清除评分",
  "browse.searchPlaceholder": "搜索库或目录",
  "browse.noRepository": "还没有库。先在导入工作流里建一个库。",
+  "browse.reposLoading": "正在读库…",
+  "browse.reposError": "读库失败，左侧暂时是空的（鼠标悬停看原因）",
  "browse.allRepositories": "查看所有库",
  "browse.collapseRepositories": "收起库列表",
  "browse.wholeRepository": "整个库",

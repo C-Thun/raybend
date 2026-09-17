@@ -39,6 +39,10 @@ export interface BrowseWorkspaceProps {
 export function BrowseWorkspace(props: BrowseWorkspaceProps) {
   const store = props.store;
   const [repositories, setRepositories] = createSignal<RepositoryView[]>([]);
+  /** 还在读库列表；用来把「还没读到」与「真的没有库」分开显示。 */
+  const [reposLoading, setReposLoading] = createSignal(true);
+  /** 读库列表失败时的原因（不再是静默空态）。 */
+  const [reposError, setReposError] = createSignal<string | null>(null);
   const [tileStep, setTileStep] = createSignal(DEFAULT_TILE_STEP_INDEX);
   const [grouped, setGrouped] = createSignal(false);
 
@@ -55,9 +59,12 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
             list[0];
           store.setRepository(preferred.id);
         }
-      } catch {
-        // 拿不到库列表不该让工作区崩掉：左列显示空态即可
+      } catch (error) {
+        // 拿不到库列表不该让工作区崩掉；但**不能装作「你没有库」** —— 把原因显示在左列。
         setRepositories([]);
+        setReposError(error instanceof Error ? error.message : String(error));
+      } finally {
+        setReposLoading(false);
       }
     })();
   });
@@ -91,7 +98,12 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
     <div class={["flex min-h-0 flex-1", props.class ?? ""].filter(Boolean).join(" ")}>
       {/* 左列 */}
       <aside class="flex w-[300px] shrink-0 flex-col border-r border-line-1 bg-surface-main">
-        <BrowseLeftColumn store={store} repositories={repositories()} />
+        <BrowseLeftColumn
+          store={store}
+          repositories={repositories()}
+          reposLoading={reposLoading()}
+          reposError={reposError()}
+        />
       </aside>
 
       {/* 中列 */}

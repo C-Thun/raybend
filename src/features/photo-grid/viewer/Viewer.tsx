@@ -216,7 +216,11 @@ export function Viewer(props: ViewerProps) {
         host = element;
       }}
       class={[
-        "relative min-h-0 flex-1 overflow-hidden bg-surface-bar",
+        // 覆盖层原生：网格保持挂载（滚动位置才留得住），看图盖在它上面。
+        // 这里**不能**写 `relative` —— 它与 `absolute` 同属 Tailwind 的一个工具组，
+        // 编译产物里 `relative` 在后，`relative` 会赢，于是 Viewer 退化成列里的普通
+        // flex 子项、只占住下半屏（2026-09-17 实测 bug）。定位交给调用方传 class。
+        "absolute inset-0 overflow-hidden bg-surface-bar",
         dragging() ? "cursor-grabbing" : "cursor-grab",
         props.class ?? "",
       ]

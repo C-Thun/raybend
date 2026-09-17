@@ -281,7 +281,7 @@ export function PhotoGrid(props: PhotoGridProps) {
           根因就是这里把网格卸载了，DOM 一没，滚动位置自然归零。）
         */}
         <Show when={viewer.state().active}>
-          <Viewer store={viewer} class="absolute inset-0 z-10" />
+          <Viewer store={viewer} class="z-10" />
         </Show>
       </div>
 

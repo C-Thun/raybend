@@ -235,6 +235,8 @@ export const enUS: Record<MessageKey, string> = {
  "browse.clearRating": "Clear rating",
  "browse.searchPlaceholder": "Search libraries or folders",
  "browse.noRepository": "No library yet. Create one in the Import workflow first.",
+  "browse.reposLoading": "Reading libraries…",
+  "browse.reposError": "Could not read libraries; the list is empty for now (hover for the reason)",
  "browse.allRepositories": "Show all libraries",
  "browse.collapseRepositories": "Collapse library list",
  "browse.wholeRepository": "Whole library",

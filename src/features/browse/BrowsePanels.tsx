@@ -32,6 +32,11 @@ export interface BrowseLeftColumnProps {
   store: BrowseStore;
   /** 库列表（由工作区提供，因为导入工作区也要用同一份数据）。 */
   repositories: readonly RepositoryView[];
+  /** 还在读库列表。**必须区分「还没读到」与「真的没有库」** —— 两者的空左列长得一样，
+   *  而数照片数要对每个库开一次连接，慢盘上可能好几秒（2026-09-17 人类反馈的坑）。 */
+  reposLoading?: boolean;
+  /** 读库列表失败了。以前这里是静默吞掉、只显示空态，等于把故障伪装成「你没有库」。 */
+  reposError?: string | null;
   class?: string;
 }
 
@@ -293,7 +298,21 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
 
       {/* 紧缩库列表 */}
       <div class="shrink-0">
-        <Show when={filtered().length === 0}>
+        <Show when={props.reposLoading === true}>
+          <p class="px-1 py-2 text-fs-2 text-fg-3">{t("browse.reposLoading")}</p>
+        </Show>
+        <Show when={(props.reposError ?? "") !== ""}>
+          <p class="px-1 py-2 text-fs-2 text-danger" title={props.reposError ?? ""}>
+            {t("browse.reposError")}
+          </p>
+        </Show>
+        <Show
+          when={
+            props.reposLoading !== true &&
+            (props.reposError ?? "") === "" &&
+            filtered().length === 0
+          }
+        >
           <p class="px-1 py-2 text-fs-2 text-fg-3">{t("browse.noRepository")}</p>
         </Show>
         <For each={visibleRepos()}>
