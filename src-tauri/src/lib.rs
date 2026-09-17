@@ -68,6 +68,43 @@ fn remaining_until_min_visible(
     }
 }
 
+/// 命令行标记：带上它启动就顺手把 spike 窗口开出来。
+///
+/// 为什么需要它：spike 窗口原先只能在**开发页**（`src/dev/SpikeViewport.tsx` 的按钮）里打开，
+/// 而打包版根本够不着开发页 —— 可「人类在真机上照 `plans/M2-W1-windows-gpu.md` 逐项验证 GPU」
+/// 这条路必须能一键起窗口。`scripts/spike-win.mjs` 就靠它。
+const SPIKE_ARG: &str = "--spike=1";
+
+/// 同上，**环境变量**形态。两个都认：脚本是经 WSL→Windows 起进程的，
+/// 环境变量能不能透传取决于互操作层，命令行参数则是硬的 —— 两个都给，哪个到了都行。
+const SPIKE_ENV: &str = "RAYBEND_SPIKE";
+
+/// 判定「这次启动要不要开 spike 窗口」的**纯函数**：`args` / `env` 当入参，
+/// 单测才不用去改进程环境（改环境变量的测试会互相打架）。
+///
+/// 环境变量按「非空且不是 `0`」算真：脚本传 `RAYBEND_SPIKE=1`，
+/// 但人手工写了空值或 `0` 时不该意外弹出一个调试窗口。
+fn spike_requested_from(args: &[String], env: Option<&str>) -> bool {
+    if args.iter().any(|arg| arg == SPIKE_ARG) {
+        return true;
+    }
+    matches!(env, Some(value) if !value.is_empty() && value != "0")
+}
+
+/// [`spike_requested_from`] 的真实入参版本（读进程的 args 与 env）。
+fn spike_requested() -> bool {
+    let args: Vec<String> = std::env::args().collect();
+    let env = std::env::var(SPIKE_ENV).ok();
+    spike_requested_from(&args, env.as_deref())
+}
+
+/// 前端是否已经报过「界面就绪」（`ui_ready`）。
+///
+/// 启动兜底线程用它决定**日志摸辞**：报过就绪之后，兜底只是保险，
+/// 不该再印「前端仍未报就绪」—— 那句话会把排障的人引向错方向
+/// （2026-09-17 我自己就被它误导过一轮：日志里同时出现「主窗口已就绪」与「仍未报就绪」）。
+static UI_READY_REPORTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// 收尾：显示主窗口（并把焦点交给它）+ 关掉闪屏。
 ///
 /// **幂等**：`ui_ready`（前端首屏就绪）、兜底线程、以及「等满最短停留」的那条路径都会调它，先后不定，
@@ -95,6 +132,7 @@ fn reveal_main(app: &tauri::AppHandle) {
 /// 报上来，真正的收尾由 [`reveal_main_after_splash_min`] 对齐。
 #[tauri::command]
 fn ui_ready(app: tauri::AppHandle) {
+    UI_READY_REPORTED.store(true, std::sync::atomic::Ordering::Relaxed);
     reveal_main_after_splash_min(&app);
 }
 
@@ -240,12 +278,28 @@ pub fn run() {
                 let handle = app.handle().clone();
                 std::thread::spawn(move || {
                     std::thread::sleep(SPLASH_TIMEOUT);
-                    eprintln!(
-                        "[raybend] 闪屏已露满 {} 秒但前端仍未报就绪，按兜底显示主窗口",
-                        SPLASH_TIMEOUT.as_secs()
-                    );
+                    // 只在**真的**没等到前端就绪时才这样印：报过就绪之后这里只是保险
+                    // （那时主窗口早该由 `reveal_main_after_splash_min` 显示过了）。
+                    if !UI_READY_REPORTED.load(std::sync::atomic::Ordering::Relaxed) {
+                        eprintln!(
+                            "[raybend] 闪屏已露满 {} 秒但前端仍未报就绪，按兜底显示主窗口",
+                            SPLASH_TIMEOUT.as_secs()
+                        );
+                    }
                     reveal_main(&handle);
                 });
+            }
+            // 渲染 spike 的调试窗口（`plans/M2-W1-windows-gpu.md` 那张清单要用它）。
+            // 位置放在闪屏逻辑**之后**：它是调试设施，正常启动路径不该受它影响。
+            //
+            // **成功也记一行**：这张日志是「窗口到底开没开」的**唯一外部证据** ——
+            // `tasklist /v` 只显示进程的**主窗口**标题，看不见第二个窗口（我最初就是靠它
+            // 误判成「没开」的）。开不起来也只记日志，不能让主程序起不来。
+            if spike_requested() {
+                match spike_viewport::open_window(app.handle()) {
+                    Ok(_) => eprintln!("[raybend] spike 调试窗口已打开"),
+                    Err(error) => eprintln!("[raybend] spike 窗口没能开起来：{error}"),
+                }
             }
             Ok(())
         })
@@ -255,7 +309,39 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
+    use crate::spike_requested_from;
     use std::collections::HashSet;
+
+    /// 启动标记的判定：命令行参数与环境变量两路都要认，
+    /// 而且**不能**把空值 / `0` / 形近参数误判成「要开 spike 窗口」。
+    ///
+    /// 漏接这根线的后果实测过（2026-09-17）：人类跑了 `pnpm spike:win`，
+    /// 起起来的却是**正常主界面**、中间没有镂空 GPU 区，那张 GPU 清单一步都走不下去 ——
+    /// 而脚本还在那儿印「已经开了」。
+    #[test]
+    fn spike_window_opens_only_on_an_explicit_marker() {
+        fn args(list: &[&str]) -> Vec<String> {
+            list.iter().map(|item| item.to_string()).collect()
+        }
+
+        // 两路各自都能单独触发
+        assert!(spike_requested_from(&args(&["raybend-desktop.exe", "--spike=1"]), None));
+        assert!(spike_requested_from(&args(&["raybend-desktop.exe"]), Some("1")));
+        assert!(spike_requested_from(&args(&["raybend-desktop.exe"]), Some("true")));
+
+        // 不给标记就不开
+        assert!(!spike_requested_from(&args(&["raybend-desktop.exe"]), None));
+        assert!(!spike_requested_from(&args(&["raybend-desktop.exe"]), Some("")));
+        assert!(!spike_requested_from(&args(&["raybend-desktop.exe"]), Some("0")));
+
+        // 形近参数不能误判（与 worker 标记那条测试同一个教训）
+        assert!(!spike_requested_from(&args(&["raybend-desktop.exe", "--spike"]), None));
+        assert!(!spike_requested_from(&args(&["raybend-desktop.exe", "--spike=0"]), None));
+        assert!(!spike_requested_from(
+            &args(&["raybend-desktop.exe", "--raybend-raw-worker"]),
+            None
+        ));
+    }
 
     /// 本 crate 里所有可能提到状态类型的源文件（新增文件时补进来）。
     const SOURCES: &[(&str, &str)] = &[

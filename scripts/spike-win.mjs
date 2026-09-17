@@ -30,7 +30,8 @@
  */
 
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, openSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 
@@ -41,6 +42,8 @@ const EXE = process.env.WIN_EXE ?? join(TARGET_DIR_WSL, "debug", "raybend-deskto
 const REPORT_DIR_WSL = "/mnt/c/rb-target/spike-report";
 
 const DRY_RUN = process.argv.includes("--dry-run");
+/** 追加模式打开日志文件，返回可写的 fd（给子进程的 stdout/stderr 用）。 */
+const logFd = (path) => openSync(path, "a");
 const TOTAL = DRY_RUN ? 3 : 4;
 const step = (n, text) => console.log(`\n[${n}/${TOTAL}] ${text}`);
 const fail = (message, remedy) => {
@@ -124,10 +127,18 @@ if (DRY_RUN) {
 ────────────────────────────────────────────────────────────────`);
   process.exit(0);
 }
-step(4, "启动应用（带 RAYBEND_SPIKE=1 —— 启动时就把 spike 窗口开出来）");
-const child = spawn(EXE, [], {
+step(4, "启动应用（带 --spike=1 与 RAYBEND_SPIKE=1 —— 启动时就把 spike 窗口开出来）");
+/*
+ * **两个标记都给**：脚本是经 WSL→Windows 起进程的，环境变量能不能透传看互操作层，
+ * 命令行参数则是硬的 —— 哪个到了都能开窗（判定见 `src-tauri/src/lib.rs` 的 `spike_requested_from`）。
+ *
+ * 子进程的 stdout/stderr 落到日志文件而不是丢掉：开窗失败时 Rust 侧只 `eprintln!` 一行，
+ * 丢了就只能猜（上一版就是这样：窗口没开出来，而脚本还在印「已经开了」）。
+ */
+const APP_LOG = join(tmpdir(), "raybend-desktop.log");
+const child = spawn(EXE, ["--spike=1"], {
   detached: true,
-  stdio: "ignore",
+  stdio: ["ignore", logFd(APP_LOG), logFd(APP_LOG)],
   env: { ...process.env, RAYBEND_SPIKE: "1" },
 });
 child.unref();
@@ -143,6 +154,8 @@ console.log(`
       spike-report.json ← 同数据的机器版
 
   从 WSL 看：  cat ${REPORT_DIR_WSL}/spike-report.md
+
+  窗口没出来时：  cat ${APP_LOG}   （Rust 侧把失败原因写在这儿）
 ────────────────────────────────────────────────────────────────
 
 提示：
