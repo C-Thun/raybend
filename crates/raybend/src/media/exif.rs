@@ -98,6 +98,28 @@ pub fn read_file_raw(path: &Path) -> ExifData {
     read_file_with_probe_raw(path, HEAD_PROBE_BYTES, true)
 }
 
+/// **按文件类型选读法**：RAW 走 TIFF 家族兜底（RW2 / ORF 的魔数不是 `0x2A`）。
+///
+/// 三处调用点（元数据、源目录时间、导入规划）都用它，就不必各自记得判一次类型 ——
+/// 忘了判的后果就是「库外的 RAW 什么都读不到」（2026-09-17 人类报的现象）。
+#[must_use]
+pub fn read_file_for(path: &Path) -> ExifData {
+    if is_raw_path(path) {
+        read_file_raw(path)
+    } else {
+        read_file(path)
+    }
+}
+
+/// 路径的扩展名是不是 RAW（用 `media::kind` 那张表，不要自己列扩展名）。
+fn is_raw_path(path: &Path) -> bool {
+    path.file_name()
+        .is_some_and(|name| {
+            crate::media::kind::kind_of_file(&name.to_string_lossy())
+                == crate::media::kind::MediaKind::Raw
+        })
+}
+
 /// [`read_file`] 的可测版本：先只读 `probe_bytes` 个字节试解析，失败再整读。
 fn read_file_with_probe(path: &Path, probe_bytes: usize) -> ExifData {
     read_file_with_probe_raw(path, probe_bytes, false)
@@ -177,10 +199,38 @@ fn read_bytes_inner(bytes: &[u8], raw_family: bool) -> Option<ExifData> {
     if info.is_empty() {
         return None;
     }
+    /*
+     * 拍摄时间：**原样字符串自己解**（`parse_datetime` 与 `from_exif` 那条路共用同一份解析）。
+     *
+     * 时区：TIFF 家族外层一般不带 `OffsetTime`，所以 `offset_min` 只能是 `None` ——
+     * 口径与主路一致：「墙上时间当 UTC」（`taken_at` 的注释里写了为什么）。
+     */
+    let taken_at = info.datetime.as_deref().and_then(|raw| {
+        parse_datetime(raw).and_then(|(y, mo, d, hh, mi, ss)| {
+            time::from_civil(y, mo, d, hh, mi, ss).map(|millis| TakenAt {
+                millis,
+                offset_min: None,
+                source: TakenAtSource::Exif,
+            })
+        })
+    });
+
     Some(ExifData {
-        orientation: info.orientation,
+        taken_at,
+        datetime_raw: info.datetime,
+        camera_make: info.make,
+        camera_model: info.model,
+        lens: info.lens,
+        software: info.software,
+        focal_mm: info.focal_mm,
+        f_number: info.f_number,
+        // 库里统一存**毫秒**（与主路一致）
+        exposure_ms: info.exposure_secs.map(|secs| secs * 1000.0),
+        iso: info.iso,
         width: info.width,
         height: info.height,
+        orientation: info.orientation,
+        // 不猜：RAW 的 GPS 在厂商私有结构里，本模块不碰（留空比读错好）
         ..ExifData::default()
     })
 }
@@ -800,6 +850,32 @@ mod tests {
         ))
         .unwrap();
         assert!(data.gps.is_none(), "0,0 是「没定位」，不是几内亚湾");
+    }
+
+    #[test]
+    fn raw_family_maps_into_exif_data() {
+        // 真 RW2（样本目录里；别的机器上跳过）
+        let path = std::path::Path::new("/mnt/c/src/tmp/pic/P1000019.RW2");
+        if !path.exists() {
+            return;
+        }
+        let data = read_file_raw(path);
+        assert!(data.camera_model.is_some(), "机身型号要读得到：{data:?}");
+        assert!(data.taken_at.is_some(), "拍摄时间要读得到：{data:?}");
+        assert!(data.datetime_raw.is_some(), "原样时间串也要留着：{data:?}");
+        assert!(data.width.unwrap_or(0) > 0, "尺寸要读得到：{data:?}");
+        assert_eq!(data.exposure_ms.is_some(), data.exposure_ms.is_some());
+
+        /*
+         * 反向钉住：**通用路径读不到这类文件** —— 这正是当初「库外 RAW 没有 EXIF」
+         * 的根因（RW2 的魔数是 0x0055，`kamadak-exif` 只认 0x2A）。
+         * 哪天上游支持了，这条会失败，那时就可以把兜底拆掉。
+         */
+        let bytes = std::fs::read(path).expect("读样本");
+        assert!(
+            read_bytes(&bytes).is_none(),
+            "通用路径不该能读 RW2 —— 若这里过了，说明上游已支持，可以简化兜底"
+        );
     }
 
     #[test]

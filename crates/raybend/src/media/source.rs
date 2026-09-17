@@ -259,7 +259,8 @@ pub fn read_times(paths: &[PathBuf]) -> Vec<TimeEntry> {
 }
 
 fn read_time_one(path: &Path) -> TimeEntry {
-    let data = exif::read_file(path);
+    // RAW 也要能读出拍摄时间（库外目录同样如此）
+    let data = exif::read_file_for(path);
     let file_name = path
         .file_name()
         .map_or_else(String::new, |n| n.to_string_lossy().into_owned());

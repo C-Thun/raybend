@@ -44,10 +44,28 @@ fn main() {
         ),
         Err(error) => println!("元数据：读不了 —— {error}"),
     }
-    let exif = raybend::media::exif::read_file(path);
+    // 与应用**同一条**读法（RAW 走 TIFF 家族兜底）
+    let exif = raybend::media::exif::read_file_for(path);
     println!(
-        "EXIF：方向={:?}，宽高={:?}×{:?}，时间={:?}",
-        exif.orientation, exif.width, exif.height, exif.taken_at
+        "EXIF：方向={:?}，宽高={:?}×{:?}",
+        exif.orientation, exif.width, exif.height
+    );
+    println!(
+        "      机身={:?}，镜头={:?}",
+        [exif.camera_make.as_deref(), exif.camera_model.as_deref()]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" "),
+        exif.lens
+    );
+    println!(
+        "      时间={:?}（原样 {:?}）",
+        exif.taken_at, exif.datetime_raw
+    );
+    println!(
+        "      快门={:?}ms，光圈={:?}，ISO={:?}，焦段={:?}mm",
+        exif.exposure_ms, exif.f_number, exif.iso, exif.focal_mm
     );
 
     match raybend::thumbnail::render_file(path, raybend::thumbnail::SizeClass::Grid) {

@@ -219,7 +219,8 @@ fn extras_for(file: &ScannedFile, needs: &ScanNeeds, cancel: &Cancel) -> SourceE
         return SourceExtras::default();
     }
     let (taken_at, brand, model) = if needs.taken_at || needs.camera {
-        let data = exif::read_file(&file.abs_path);
+        // RAW 的拍摄时间/机身也要读得到（否则导入落点会退回文件名/mtime）
+        let data = exif::read_file_for(&file.abs_path);
         let taken = if needs.taken_at {
             exif::resolve_taken_at(Some(&data), &file.file_name, file.mtime_ms).map(|t| t.millis)
         } else {

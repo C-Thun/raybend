@@ -1,10 +1,10 @@
-//! 最小 TIFF / RAW 头解析：**只取方向与尺寸**。
+//! 最小 TIFF / RAW 头解析：**只取我们真正要的那几样** —— 方向、尺寸、相机、镜头、拍摄时间、曝光参数。
 //!
 //! # 为什么要自己写这一小段
 //!
-//! `kamadak-exif` 只认标准 TIFF 魔数 `0x002A`（`tiff.rs` 里写死的 `TIFF_FORTY_TWO`）。
+//! `kamadak-exif` 只认标准 TIFF 魔数 `0x002A`（它的 `tiff.rs` 里写死成 `TIFF_FORTY_TWO`）。
 //! 而 **Panasonic 的 RW2 用的是 `IIU\0`（0x0055）**，Olympus 的 ORF 又有自己的一套 ——
-//! 结果就是：**整条 RAW 的 EXIF 读取静默失败**（方向丢成默认 1、尺寸变成 0×0）。
+//! 结果就是：**整类 RAW 的 EXIF 读取静默失败**（方向丢成默认 1、尺寸 0×0、相机/时间全空）。
 //! 实测（2026-09-17，`/mnt/c/src/tmp/pic/P1000019.RW2`）：
 //!
 //! ```text
@@ -12,19 +12,19 @@
 //! EXIF：方向=None，宽高=None×None，时间=None  ← kamadak 直接放弃
 //! ```
 //!
-//! 后果一是**竖拍 RAW 躺着显示**，二是 tile 比例退回占位值。
-//! 这里把「TIFF 家族但魔数不是 0x2A」的几种收进来，只解析我们真正要的两个字段。
+//! 后果：① 竖拍 RAW 躺着显示；② tile 比例退回占位；③ **库外的 RAW 读不到任何 EXIF**
+//! （导入工作流右栏与「按时间」分组都空着）。
 //!
 //! # 范围与边界
 //!
 //! - 覆盖：标准 TIFF（NEF / DNG / CR2 / ARW / PEF / SRW…）、**RW2（0x0055）**、ORF（`RO`/`RS`）。
 //! - **不覆盖 CR3**（ISO-BMFF 容器，EXIF 在 box 里）—— 那是 ExifTool 级的工作量，
-//!   而且 CR3 的尺寸/方向可以走 rawler（worker 进程）那条路拿。
-//! - 只读 IFD0 + EXIF IFD 两层，**不跟随任何其它偏移**，每一项都做边界检查：
+//!   而 CR3 的方向/尺寸可以走 rawler（worker 进程）那条路拿。
+//! - **只读 IFD0 与 EXIF IFD 两层**，不跟随任何其它偏移；每一项都做边界检查：
 //!   损坏文件必须返回 `None` 而不是 panic（RAW 是不可信输入，见 `AGENTS.md` §6.3）。
 
-/// 从 TIFF/RAW 头里能拿到的信息。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// 从 TIFF/RAW 头里能拿到的信息。**全部可空** —— 相机各异，缺什么是常态。
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct TiffInfo {
     /// EXIF 方向（1–8）；没有就是 `None`
     pub orientation: Option<i64>,
@@ -32,13 +32,24 @@ pub struct TiffInfo {
     pub width: Option<i64>,
     /// 高（同上）
     pub height: Option<i64>,
+    pub make: Option<String>,
+    pub model: Option<String>,
+    pub lens: Option<String>,
+    pub software: Option<String>,
+    /// 拍摄时间原样字符串：`DateTimeOriginal` 优先，退回 IFD0 的 `DateTime`
+    pub datetime: Option<String>,
+    /// 快门时间（**秒**；调用方按需换算成毫秒）
+    pub exposure_secs: Option<f64>,
+    pub f_number: Option<f64>,
+    pub iso: Option<i64>,
+    pub focal_mm: Option<f64>,
 }
 
 impl TiffInfo {
-    /// 三样都没拿到 —— 调用方据此当「没读出来」处理。
+    /// 一样都没拿到 —— 调用方据此当「没读出来」处理。
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.orientation.is_none() && self.width.is_none() && self.height.is_none()
+        self == &Self::default()
     }
 }
 
@@ -57,6 +68,28 @@ const MAGIC_ORF_RS_BE: u16 = 0x5253;
 /// 一个 IFD 最多看多少个条目（真实文件通常几十个；这是防损坏文件的护栏）。
 const MAX_ENTRIES: usize = 512;
 
+// 用到的标签（TIFF / EXIF 标准编号）
+const TAG_IMAGE_WIDTH: u16 = 0x0100;
+const TAG_IMAGE_LENGTH: u16 = 0x0101;
+const TAG_MAKE: u16 = 0x010f;
+const TAG_MODEL: u16 = 0x0110;
+const TAG_ORIENTATION: u16 = 0x0112;
+const TAG_SOFTWARE: u16 = 0x0131;
+const TAG_DATETIME: u16 = 0x0132;
+/// RW2（Panasonic）把宽高放在这里，标准标签根本不出现（实测 5264×3904）
+const TAG_RW2_WIDTH: u16 = 0x0002;
+const TAG_RW2_HEIGHT: u16 = 0x0003;
+const TAG_EXIF_IFD: u16 = 0x8769;
+// EXIF IFD 里的
+const TAG_EXPOSURE: u16 = 0x829a;
+const TAG_FNUMBER: u16 = 0x829d;
+const TAG_ISO: u16 = 0x8827;
+const TAG_DATETIME_ORIGINAL: u16 = 0x9003;
+const TAG_FOCAL: u16 = 0x920a;
+const TAG_PIXEL_X: u16 = 0xa002;
+const TAG_PIXEL_Y: u16 = 0xa003;
+const TAG_LENS: u16 = 0xa434;
+
 /// 解析头部。`bytes` 至少要含 8 字节的 TIFF 头；给一大段（比如前 1 MiB）也行。
 #[must_use]
 pub fn parse(bytes: &[u8]) -> Option<TiffInfo> {
@@ -72,37 +105,52 @@ pub fn parse(bytes: &[u8]) -> Option<TiffInfo> {
 
     let mut info = TiffInfo::default();
     let mut exif_ifd: Option<usize> = None;
+    let mut datetime_fallback: Option<String> = None;
 
     for entry in read_ifd(bytes, order, ifd0)? {
         match entry.tag {
-            0x0112 => info.orientation = entry.short_value(order),
+            TAG_ORIENTATION => info.orientation = entry.short_value(order),
             // 标准 TIFF 的宽高 …
-            0x0100 => info.width = entry.int_value(order),
-            0x0101 => info.height = entry.int_value(order),
-            /*
-             * …以及 RW2（Panasonic）那一套：实测 `P1000019.RW2` 的 IFD0 里
-             * 宽高在 **0x0002 / 0x0003**（5264×3904），标准标签 0x0100/0x0101 根本不出现。
-             * 只认标准标签的话，这张图的尺寸仍然是 0×0 —— 那就白修了。
-             */
-            0x0002 => info.width = info.width.or(entry.int_value(order)),
-            0x0003 => info.height = info.height.or(entry.int_value(order)),
-            // EXIF IFD 指针：尺寸的第二来源（`PixelXDimension` 才是裁剪后的真实尺寸）
-            0x8769 => exif_ifd = entry.int_value(order).and_then(|v| usize::try_from(v).ok()),
+            TAG_IMAGE_WIDTH => info.width = entry.int_value(order),
+            TAG_IMAGE_LENGTH => info.height = entry.int_value(order),
+            // …以及 RW2 那一套（见上面常量注释）
+            TAG_RW2_WIDTH => info.width = info.width.or(entry.int_value(order)),
+            TAG_RW2_HEIGHT => info.height = info.height.or(entry.int_value(order)),
+            TAG_MAKE => info.make = entry.ascii(bytes, order),
+            TAG_MODEL => info.model = entry.ascii(bytes, order),
+            TAG_SOFTWARE => info.software = entry.ascii(bytes, order),
+            TAG_DATETIME => datetime_fallback = entry.ascii(bytes, order),
+            // EXIF IFD 指针：尺寸的第二来源，也是绝大多数拍摄参数的所在地
+            TAG_EXIF_IFD => exif_ifd = entry.int_value(order).and_then(|v| usize::try_from(v).ok()),
             _ => {}
         }
     }
 
-    // EXIF IFD 里的尺寸优先（与 `kamadak` 那条路的口径一致：PixelX/YDimension 更准）
     if let Some(offset) = exif_ifd
         && let Some(entries) = read_ifd(bytes, order, offset) {
+            let mut datetime_original = None;
             for entry in entries {
                 match entry.tag {
-                    0xa002 => info.width = entry.int_value(order).or(info.width),
-                    0xa003 => info.height = entry.int_value(order).or(info.height),
+                    // EXIF IFD 里的尺寸更准（是裁剪后的），优先
+                    TAG_PIXEL_X => info.width = entry.int_value(order).or(info.width),
+                    TAG_PIXEL_Y => info.height = entry.int_value(order).or(info.height),
+                    TAG_DATETIME_ORIGINAL => datetime_original = entry.ascii(bytes, order),
+                    TAG_EXPOSURE => info.exposure_secs = entry.rational(bytes, order),
+                    TAG_FNUMBER => info.f_number = entry.rational(bytes, order),
+                    TAG_FOCAL => info.focal_mm = entry.rational(bytes, order),
+                    TAG_ISO => info.iso = entry.int_value(order),
+                    TAG_LENS => info.lens = entry.ascii(bytes, order),
                     _ => {}
                 }
             }
+            if let Some(original) = datetime_original {
+                info.datetime = Some(original);
+            }
         }
+    // DateTimeOriginal 没有就退回 IFD0 的 DateTime（**只在这一处 move**，别在分支里就搬走）
+    if info.datetime.is_none() {
+        info.datetime = datetime_fallback;
+    }
 
     Some(info)
 }
@@ -167,6 +215,55 @@ impl Entry {
             _ => None,
         }
     }
+
+    /// 取这条的**载荷字节**：≤4 字节就内联在值字段里，否则按偏移去文件里取。
+    fn data(self, bytes: &[u8], order: ByteOrder) -> Option<Vec<u8>> {
+        let size = match self.field_type {
+            1 | 2 | 6 | 7 => 1, // BYTE / ASCII / SBYTE / UNDEFINED
+            3 | 8 => 2,         // SHORT / SSHORT
+            4 | 9 | 11 => 4,    // LONG / SLONG / FLOAT
+            5 | 10 | 12 => 8,   // RATIONAL / SRATIONAL / DOUBLE
+            _ => return None,
+        };
+        let total = (self.count as usize).checked_mul(size)?;
+        if total == 0 {
+            return None;
+        }
+        if total <= 4 {
+            return Some(self.value_bytes[..total].to_vec());
+        }
+        let offset = order.u32(&self.value_bytes, 0)? as usize;
+        bytes
+            .get(offset..offset.checked_add(total)?)
+            .map(<[u8]>::to_vec)
+    }
+
+    /// ASCII（类型 2）：读到第一个 NUL 为止，去掉首尾空白。
+    fn ascii(self, bytes: &[u8], order: ByteOrder) -> Option<String> {
+        if self.field_type != 2 {
+            return None;
+        }
+        let data = self.data(bytes, order)?;
+        let end = data.iter().position(|b| *b == 0).unwrap_or(data.len());
+        // 相机字符串时不时带 Latin-1 / 全角空格：`from_utf8_lossy` 永不 panic
+        let text = String::from_utf8_lossy(&data[..end]).trim().to_string();
+        (!text.is_empty()).then_some(text)
+    }
+
+    /// RATIONAL（类型 5）：前 8 字节是分子/分母。分母为 0 或非有限值都当没读到。
+    fn rational(self, bytes: &[u8], order: ByteOrder) -> Option<f64> {
+        if self.field_type != 5 || self.count == 0 {
+            return None;
+        }
+        let data = self.data(bytes, order)?;
+        let numerator = f64::from(order.u32(&data, 0)?);
+        let denominator = f64::from(order.u32(&data, 4)?);
+        if denominator == 0.0 {
+            return None;
+        }
+        let value = numerator / denominator;
+        value.is_finite().then_some(value)
+    }
 }
 
 /// 读一个 IFD 的全部条目（只看前 [`MAX_ENTRIES`] 条，越界一律放弃）。
@@ -195,33 +292,124 @@ fn read_ifd(bytes: &[u8], order: ByteOrder, offset: usize) -> Option<Vec<Entry>>
 mod tests {
     use super::*;
 
-    /// 造一个最小的 TIFF：IFD0 里放给定的 (tag, type, count, value) 四项。
-    /// `magic` 用来模拟 RW2 / ORF 这些非 0x2A 的魔数。
-    fn build(magic: u16, big_endian: bool, entries: &[(u16, u16, u32, u32)]) -> Vec<u8> {
-        let mut out = Vec::new();
-        let u16b = |v: u16, out: &mut Vec<u8>| {
-            out.extend_from_slice(&if big_endian { v.to_be_bytes() } else { v.to_le_bytes() });
-        };
-        let u32b = |v: u32, out: &mut Vec<u8>| {
-            out.extend_from_slice(&if big_endian { v.to_be_bytes() } else { v.to_le_bytes() });
-        };
-        out.extend_from_slice(if big_endian { b"MM" } else { b"II" });
-        u16b(magic, &mut out);
-        u32b(8, &mut out); // IFD0 紧跟在头后面
-        u16b(entries.len() as u16, &mut out);
-        for (tag, field_type, count, value) in entries {
-            u16b(*tag, &mut out);
-            u16b(*field_type, &mut out);
-            u32b(*count, &mut out);
-            // 内联值：SHORT 要按字节序放在前两字节
-            if *field_type == 3 {
-                u16b(*value as u16, &mut out);
-                out.extend_from_slice(&[0, 0]);
+        /// 值形态（决定 type / count / 载荷怎么摆）。
+    #[derive(Debug, Clone)]
+    enum Val<'a> {
+        Short(u16),
+        Long(u32),
+        /// ASCII：字节进数据区（`count` = 长度 + 1，带结尾 NUL）
+        Ascii(&'a str),
+        /// RATIONAL：8 字节进数据区
+        Rational(u32, u32),
+    }
+
+    /// 造一个 TIFF：**两个 IFD**（IFD0 + EXIF IFD）。
+    ///
+    /// 为什么要支持两个：曝光/光圈/ISO/焦距/`DateTimeOriginal` 这些标签按规范**只活在
+    /// EXIF IFD 里** —— 把它们塞进 IFD0 的测试是**假测试**（解析器永远读不到，而测试还以为
+    /// 是解析器的错）。第一版构造器就是这么写的，栽了一次。
+    fn build(magic: u16, big_endian: bool, ifd0: &[(u16, Val)], exif: &[(u16, Val)]) -> Vec<u8> {
+        let u16b = |v: u16| {
+            if big_endian {
+                v.to_be_bytes()
             } else {
-                u32b(*value, &mut out);
+                v.to_le_bytes()
             }
+        };
+        let u32b = |v: u32| {
+            if big_endian {
+                v.to_be_bytes()
+            } else {
+                v.to_le_bytes()
+            }
+        };
+
+        // ── 布局（先把偏移算清楚，再写字节）──
+        let has_exif = !exif.is_empty();
+        let ifd0_entries = ifd0.len() + usize::from(has_exif);
+        let ifd0_start = 8usize;
+        let ifd0_size = 2 + ifd0_entries * 12 + 4;
+        let exif_start = ifd0_start + ifd0_size;
+        let exif_size = if has_exif { 2 + exif.len() * 12 + 4 } else { 0 };
+        let data_start = exif_start + exif_size;
+
+        // ── 数据区 + 每条的值字段 ──
+        let mut data: Vec<u8> = Vec::new();
+        let mut fields: Vec<[u8; 4]> = Vec::new();
+        let mut meta: Vec<(u16, u32)> = Vec::new(); // (type, count)
+        let push = |val: &Val,
+                        data: &mut Vec<u8>,
+                        fields: &mut Vec<[u8; 4]>,
+                        meta: &mut Vec<(u16, u32)>| {
+            let (field_type, count, field) = match val {
+                Val::Short(v) => {
+                    let mut f = [0u8; 4];
+                    f[..2].copy_from_slice(&u16b(*v));
+                    (3u16, 1u32, f)
+                }
+                Val::Long(v) => (4, 1, u32b(*v)),
+                Val::Ascii(text) => {
+                    let offset = (data_start + data.len()) as u32;
+                    data.extend_from_slice(text.as_bytes());
+                    data.push(0); // TIFF 的 ASCII 必须以 NUL 结尾
+                    (2, text.len() as u32 + 1, u32b(offset))
+                }
+                Val::Rational(num, den) => {
+                    let offset = (data_start + data.len()) as u32;
+                    data.extend_from_slice(&u32b(*num));
+                    data.extend_from_slice(&u32b(*den));
+                    (5, 1, u32b(offset))
+                }
+            };
+            meta.push((field_type, count));
+            fields.push(field);
+        };
+        for (_, val) in ifd0 {
+            push(val, &mut data, &mut fields, &mut meta);
         }
-        u32b(0, &mut out); // 没有下一个 IFD
+        if has_exif {
+            // 指针条目的值后填（那时才知道 exif_start）
+            fields.push(u32b(exif_start as u32));
+            meta.push((4, 1));
+        }
+        let ifd0_field_count = fields.len();
+        for (_, val) in exif {
+            push(val, &mut data, &mut fields, &mut meta);
+        }
+
+        // ── 拼出来 ──
+        let mut out = Vec::new();
+        out.extend_from_slice(if big_endian { b"MM" } else { b"II" });
+        out.extend_from_slice(&u16b(magic));
+        out.extend_from_slice(&u32b(ifd0_start as u32));
+
+        let write_ifd = |out: &mut Vec<u8>, tags: &[u16], field_slice: &[[u8; 4]], meta_slice: &[(u16, u32)]| {
+            out.extend_from_slice(&u16b(tags.len() as u16));
+            for (index, tag) in tags.iter().enumerate() {
+                let (field_type, count) = meta_slice[index];
+                out.extend_from_slice(&u16b(*tag));
+                out.extend_from_slice(&u16b(field_type));
+                out.extend_from_slice(&u32b(count));
+                out.extend_from_slice(&field_slice[index]);
+            }
+            out.extend_from_slice(&u32b(0)); // 没有下一个 IFD
+        };
+
+        let mut ifd0_tags: Vec<u16> = ifd0.iter().map(|(tag, _)| *tag).collect();
+        if has_exif {
+            ifd0_tags.push(TAG_EXIF_IFD);
+        }
+        write_ifd(&mut out, &ifd0_tags, &fields[..ifd0_field_count], &meta[..ifd0_field_count]);
+        if has_exif {
+            let exif_tags: Vec<u16> = exif.iter().map(|(tag, _)| *tag).collect();
+            write_ifd(
+                &mut out,
+                &exif_tags,
+                &fields[ifd0_field_count..],
+                &meta[ifd0_field_count..],
+            );
+        }
+        out.extend_from_slice(&data);
         out
     }
 
@@ -230,7 +418,12 @@ mod tests {
         let bytes = build(
             MAGIC_TIFF,
             false,
-            &[(0x0112, 3, 1, 6), (0x0100, 3, 1, 4000), (0x0101, 3, 1, 3000)],
+            &[
+                (TAG_ORIENTATION, Val::Short(6)),
+                (TAG_IMAGE_WIDTH, Val::Short(4000)),
+                (TAG_IMAGE_LENGTH, Val::Short(3000)),
+            ],
+            &[],
         );
         let info = parse(&bytes).expect("标准 TIFF 应当能解析");
         assert_eq!(info.orientation, Some(6));
@@ -240,35 +433,143 @@ mod tests {
     }
 
     #[test]
-    fn reads_rw2_magic_which_kamadak_rejects() {
-        // 这条就是这个模块存在的理由：RW2 的魔数是 0x0055
+    fn reads_rw2_magic_and_its_own_size_tags() {
+        // 这条就是这个模块存在的理由：RW2 的魔数是 0x0055，宽高在 0x0002/0x0003
         let bytes = build(
             MAGIC_RW2,
             false,
-            &[(0x0112, 3, 1, 8), (0x0100, 4, 1, 5184), (0x0101, 4, 1, 3888)],
+            &[
+                (TAG_RW2_WIDTH, Val::Short(5264)),
+                (TAG_RW2_HEIGHT, Val::Short(3904)),
+                (TAG_ORIENTATION, Val::Short(8)),
+            ],
+            &[],
         );
         let info = parse(&bytes).expect("RW2 必须能解析");
         assert_eq!(info.orientation, Some(8), "竖拍 RAW 的方向不能丢");
-        assert_eq!((info.width, info.height), (Some(5184), Some(3888)));
+        assert_eq!((info.width, info.height), (Some(5264), Some(3904)));
+    }
+
+    #[test]
+    fn reads_make_model_lens_software() {
+        // ASCII：**必须能读长字符串**（第一版构造器只塞得进 4 字节，测试假绿）
+        let bytes = build(
+            MAGIC_RW2,
+            false,
+            &[
+                (TAG_MAKE, Val::Ascii("Panasonic")),
+                (TAG_MODEL, Val::Ascii("DC-S5M2")),
+                (TAG_SOFTWARE, Val::Ascii("Ver.1.1")),
+            ],
+            &[(TAG_LENS, Val::Ascii("LUMIX S 20-60/F3.5-5.6"))],
+        );
+        let info = parse(&bytes).expect("应当能解析");
+        assert_eq!(info.make.as_deref(), Some("Panasonic"));
+        assert_eq!(info.model.as_deref(), Some("DC-S5M2"));
+        assert_eq!(info.software.as_deref(), Some("Ver.1.1"));
+        assert_eq!(info.lens.as_deref(), Some("LUMIX S 20-60/F3.5-5.6"));
+    }
+
+    #[test]
+    fn reads_exposure_fnumber_focal_and_iso_from_exif_ifd() {
+        // ⚠️ 这些标签按规范**只活在 EXIF IFD 里**：塞进 IFD0 的测试是假测试
+        let bytes = build(
+            MAGIC_RW2,
+            false,
+            &[],
+            &[
+                (TAG_EXPOSURE, Val::Rational(1, 250)),
+                (TAG_FNUMBER, Val::Rational(28, 10)),
+                (TAG_FOCAL, Val::Rational(50, 1)),
+                (TAG_ISO, Val::Short(800)),
+            ],
+        );
+        let info = parse(&bytes).expect("应当能解析");
+        assert_eq!(info.exposure_secs, Some(1.0 / 250.0));
+        assert_eq!(info.f_number, Some(2.8));
+        assert_eq!(info.focal_mm, Some(50.0));
+        assert_eq!(info.iso, Some(800));
+    }
+
+    #[test]
+    fn datetime_original_wins_over_ifd0_datetime() {
+        let bytes = build(
+            MAGIC_RW2,
+            false,
+            &[(TAG_DATETIME, Val::Ascii("2020:01:01 00:00:00"))],
+            &[(TAG_DATETIME_ORIGINAL, Val::Ascii("2026:08:15 12:34:56"))],
+        );
+        // 这条能过，说明 DateTimeOriginal 确实是从 EXIF IFD 里读的
+        assert_eq!(
+            parse(&bytes).unwrap().datetime.as_deref(),
+            Some("2026:08:15 12:34:56")
+        );
+    }
+
+    #[test]
+    fn ifd0_datetime_is_the_fallback() {
+        let bytes = build(
+            MAGIC_TIFF,
+            false,
+            &[(TAG_DATETIME, Val::Ascii("2026:08:15 12:34:56"))],
+            &[],
+        );
+        assert_eq!(
+            parse(&bytes).unwrap().datetime.as_deref(),
+            Some("2026:08:15 12:34:56")
+        );
+    }
+
+    #[test]
+    fn pixel_dimensions_from_exif_ifd_win_over_ifd0() {
+        let bytes = build(
+            MAGIC_RW2,
+            false,
+            &[
+                (TAG_RW2_WIDTH, Val::Short(5264)),
+                (TAG_RW2_HEIGHT, Val::Short(3904)),
+            ],
+            &[
+                (TAG_PIXEL_X, Val::Long(5184)),
+                (TAG_PIXEL_Y, Val::Long(3888)),
+            ],
+        );
+        let info = parse(&bytes).expect("应当能解析");
+        assert_eq!(
+            (info.width, info.height),
+            (Some(5184), Some(3888)),
+            "裁剪后的真实尺寸优先"
+        );
+    }
+
+    #[test]
+    fn zero_denominator_is_not_a_number() {
+        let bytes = build(MAGIC_TIFF, false, &[], &[(TAG_EXPOSURE, Val::Rational(1, 0))]);
+        let info = parse(&bytes).expect("应当能解析，只是快门读不到");
+        assert_eq!(info.exposure_secs, None);
     }
 
     #[test]
     fn reads_orf_magics() {
         for magic in [MAGIC_ORF_RO, MAGIC_ORF_RS] {
-            let bytes = build(magic, false, &[(0x0112, 3, 1, 3)]);
-            assert_eq!(parse(&bytes).map(|i| i.orientation), Some(Some(3)), "ORF 魔数 {magic:#06x}");
+            let bytes = build(magic, false, &[(TAG_ORIENTATION, Val::Short(3))], &[]);
+            assert_eq!(
+                parse(&bytes).map(|i| i.orientation),
+                Some(Some(3)),
+                "ORF 魔数 {magic:#06x}"
+            );
         }
     }
 
     #[test]
     fn reads_big_endian() {
-        let bytes = build(MAGIC_TIFF, true, &[(0x0112, 3, 1, 5)]);
+        let bytes = build(MAGIC_TIFF, true, &[(TAG_ORIENTATION, Val::Short(5))], &[]);
         assert_eq!(parse(&bytes).map(|i| i.orientation), Some(Some(5)));
     }
 
     #[test]
     fn rejects_unknown_magic_and_short_inputs() {
-        let bogus = build(0x1234, false, &[(0x0112, 3, 1, 6)]);
+        let bogus = build(0x1234, false, &[(TAG_ORIENTATION, Val::Short(6))], &[]);
         assert!(parse(&bogus).is_none(), "不是 TIFF 家族就别硬解析");
         assert!(parse(b"").is_none());
         assert!(parse(b"II").is_none());
@@ -280,41 +581,54 @@ mod tests {
 
     #[test]
     fn truncated_entry_table_does_not_panic() {
-        // 声明有 5 个条目但只给 1 个：必须返回 None（或至少不 panic）
-        let mut bytes = build(MAGIC_TIFF, false, &[(0x0112, 3, 1, 6)]);
+        let mut bytes = build(MAGIC_TIFF, false, &[(TAG_ORIENTATION, Val::Short(6))], &[]);
         bytes.truncate(12);
         let info = parse(&bytes);
         assert!(info.is_none() || info.expect("要么 None 要么空").orientation.is_none());
     }
 
     #[test]
-    fn absurd_offsets_do_not_panic() {
-        // IFD 偏移指到天上去
-        let mut bytes = build(MAGIC_TIFF, false, &[(0x0112, 3, 1, 6)]);
+    fn absurd_ifd0_offset_does_not_panic() {
+        let mut bytes = build(MAGIC_TIFF, false, &[(TAG_ORIENTATION, Val::Short(6))], &[]);
         bytes[4..8].copy_from_slice(&0xffff_ff00u32.to_le_bytes());
         assert!(parse(&bytes).is_none());
+    }
 
-        // EXIF IFD 指针越界：IFD0 仍然要能读出方向
+    #[test]
+    fn absurd_exif_ifd_pointer_still_reads_ifd0() {
+        // EXIF IFD 指针越界：IFD0 的字段仍然要读得到
         let bytes = build(
             MAGIC_TIFF,
             false,
-            &[(0x0112, 3, 1, 6), (0x8769, 4, 1, 0x00ff_ff00)],
+            &[
+                (TAG_ORIENTATION, Val::Short(6)),
+                (TAG_EXIF_IFD, Val::Long(0x00ff_ff00)),
+            ],
+            &[],
         );
         assert_eq!(parse(&bytes).map(|i| i.orientation), Some(Some(6)));
     }
 
     #[test]
+    fn ascii_offset_out_of_range_is_none_not_panic() {
+        let mut bytes = build(MAGIC_TIFF, false, &[(TAG_MAKE, Val::Ascii("Panasonic"))], &[]);
+        // 第一条的值字段（值区）在：头 8 + 条目表起点 2 + 8 = 18
+        bytes[18..22].copy_from_slice(&0x00ff_ff00u32.to_le_bytes());
+        let info = parse(&bytes).expect("整体仍应解析");
+        assert_eq!(info.make, None, "越界就当没读到，而不是 panic");
+    }
+
+    #[test]
     fn entry_count_is_capped() {
-        // 声称有 65535 个条目：不能因此分配巨大内存或长时间循环
-        let mut bytes = build(MAGIC_TIFF, false, &[(0x0112, 3, 1, 6)]);
+        let mut bytes = build(MAGIC_TIFF, false, &[(TAG_ORIENTATION, Val::Short(6))], &[]);
         bytes[8..10].copy_from_slice(&65535u16.to_le_bytes());
         let _ = parse(&bytes); // 不 panic 即可
     }
 
     #[test]
     fn wrong_type_is_ignored_not_guessed() {
-        // 方向字段写成 ASCII 类型（2）：不该当数字读
-        let bytes = build(MAGIC_TIFF, false, &[(0x0112, 2, 4, 0x3631_3233)]);
+        // 方向字段写成 ASCII 类型：不该当数字读
+        let bytes = build(MAGIC_TIFF, false, &[(TAG_ORIENTATION, Val::Ascii("abcd"))], &[]);
         assert_eq!(parse(&bytes).map(|i| i.orientation), Some(None));
     }
 
@@ -340,5 +654,10 @@ mod tests {
         let info = parse(&bytes).expect("真 RW2 应当能解析");
         assert!(info.orientation.is_some(), "样本的方向应当读得出来：{info:?}");
         assert!(info.width.unwrap_or(0) > 0, "样本的宽度应当读得出来：{info:?}");
+        assert!(info.model.is_some(), "样本的机身型号应当读得出来：{info:?}");
+        assert!(
+            info.datetime.is_some(),
+            "样本的拍摄时间应当读得出来：{info:?}"
+        );
     }
 }
