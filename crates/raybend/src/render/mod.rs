@@ -23,6 +23,8 @@ pub mod scene;
 pub mod stats;
 pub mod viewport;
 
-pub use gpu::{GpuContext, GpuError, RawHandles, RenderOutcome, SurfaceDetails};
+pub use gpu::{
+    GpuContext, GpuError, OffscreenRenderer, RawHandles, RenderOutcome, SurfaceDetails,
+};
 pub use stats::{FrameStats, SpikeReport};
 pub use viewport::{AlphaMode, ClipRect, FitMode, Viewport};

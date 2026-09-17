@@ -11,10 +11,15 @@
 struct Uniforms {
     /// 图像像素 → NDC（列主序，`Viewport::matrix()` 直接喂进来）
     transform: mat4x4<f32>,
-    /// 整体不透明度（spike 用它做「淡出」观察合成行为）
-    opacity: f32,
-    /// 对齐填充：uniform 的 16 字节规则
-    _pad: vec3<f32>,
+    /*
+     * `.x` = 整体不透明度，`.yzw` 未用。
+     *
+     * 刻意写成 `vec4` 而不是 `f32 + vec3`：**uniform 的 vec3 要 16 字节对齐**，
+     * 于是那个写法实际占 96 字节（f32 在 64、vec3 被迫挪到 80）——
+     * 而 Rust 侧按 80 分配，wgpu 在**绘制时**报「bound with size 80 where the shader expects 96」。
+     * 这个错就是离屏冒烟抓到的。用 vec4 则 64 + 16 = 80，两边一眼对得上。
+     */
+    params: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
@@ -44,5 +49,5 @@ fn vs_main(@builtin(vertex_index) index: u32) -> VsOut {
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // 纹理是 sRGB 格式：采样时硬件自动转成线性，写回 surface 时再转回去
     let texel = textureSample(image, image_sampler, in.uv);
-    return vec4<f32>(texel.rgb, texel.a) * uniforms.opacity;
+    return vec4<f32>(texel.rgb, texel.a) * uniforms.params.x;
 }

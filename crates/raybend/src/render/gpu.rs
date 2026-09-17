@@ -178,7 +178,9 @@ impl GpuContext {
         });
         let uniform = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("spike-uniforms"),
-            size: 80, // mat4x4 (64) + f32 + vec3 填充 (16)
+            // 80 = mat4x4(64) + vec4(16)。**别改成「f32 + vec3」**：vec3 要 16 字节对齐，
+            // 那样实际是 96，wgpu 会在绘制时报「expects 96」（WGSL 侧的注释里记着这个坑）
+            size: 80,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -198,7 +200,12 @@ impl GpuContext {
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    // ⚠️ 必须包含 **VERTEX**：顶点着色器要用 `textureDimensions(image, 0)`
+                    // 算出四个角的图像像素坐标（整块的「四角由 vertex_index 现算」就是靠它）。
+                    // 只给 FRAGMENT 的话，wgpu 会在**建管线时**报
+                    // 「binding 1 is not available in the pipeline layout」——
+                    // 这个错是离屏冒烟抓到的，否则会在 Windows 上当着人的面炸。
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Float { filterable: true },
                         view_dimension: wgpu::TextureViewDimension::D2,
@@ -379,16 +386,8 @@ impl GpuContext {
     }
 
     fn write_uniforms(&self) {
-        let matrix = self.viewport.matrix();
-        let mut bytes = [0u8; 80];
-        for (column, values) in matrix.iter().enumerate() {
-            for (row, value) in values.iter().enumerate() {
-                let offset = (column * 4 + row) * 4;
-                bytes[offset..offset + 4].copy_from_slice(&value.to_ne_bytes());
-            }
-        }
-        bytes[64..68].copy_from_slice(&1.0f32.to_ne_bytes()); // opacity
-        self.queue.write_buffer(&self.uniform, 0, &bytes);
+        // 与离屏那条路共用同一份布局写法人（矩阵只有一处推导，见 `Viewport::matrix`）
+        write_matrix(&self.queue, &self.uniform, &self.viewport);
     }
 
     /// 演练设备丢失：`device.destroy()`。
@@ -614,4 +613,259 @@ fn pick_format(caps: &wgpu::SurfaceCapabilities) -> wgpu::TextureFormat {
         .copied()
         .find(|f| f.is_srgb())
         .unwrap_or(caps.formats[0])
+}
+
+/* ══════════════════════════════════════════════════════════════
+ * 离屏渲染（不需要窗口/表面）
+ * ══════════════════════════════════════════════════════════════ */
+
+/// 离屏渲染器：把测试图按给定视口画进一张纹理并**回读像素**。
+///
+/// 存在的理由有三条，都不是「顺手加的」：
+///
+/// 1. **没有真窗口的环境里也能验证管线**（本机 WSL 只有 lavapipe，开不了 Tauri 窗口）——
+///    `GpuContext` 必须挂在一个真窗口上，而这一条不需要；
+/// 2. **产出可核对的像素证据**：报告里的「画没画出来」不再只能靠人眼；
+/// 3. 将来**导出/生成缩略图**本来就要走离屏路径（`FUTURE.md` C 段），
+///    现在写好过以后从 `GpuContext` 里拆。
+pub struct OffscreenRenderer {
+    device: wgpu::Device,
+    queue: wgpu::Queue,
+    pipeline: wgpu::RenderPipeline,
+    bind_group: wgpu::BindGroup,
+    uniform: wgpu::Buffer,
+    image: TestImage,
+    /// 回读用的缓冲区尺寸（跟随上一次渲染尺寸）
+    readback: Option<(u32, u32, wgpu::Buffer)>,
+}
+
+impl OffscreenRenderer {
+    /// 建离屏渲染器（默认把测试图放进纹理；`WGPU_BACKEND` 同样生效）。
+    pub fn new(handles_hint: Option<RawHandles>) -> Result<Self, GpuError> {
+        let _ = handles_hint;
+        let instance =
+            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            compatible_surface: None,
+            force_fallback_adapter: false,
+            apply_limit_buckets: false,
+        }))
+        .map_err(|e| GpuError::NoAdapter(e.to_string()))?;
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            label: Some("raybend-spike-offscreen"),
+            required_features: wgpu::Features::empty(),
+            required_limits: wgpu::Limits::default(),
+            memory_hints: wgpu::MemoryHints::Performance,
+            ..Default::default()
+        }))
+        .map_err(|e| GpuError::Device(e.to_string()))?;
+
+        let image = super::scene::make_test_image(6000, 4000);
+        let texture = create_image_texture(&device, &queue, &image);
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("spike-offscreen-sampler"),
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        let uniform = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("spike-offscreen-uniforms"),
+            size: 80,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("spike-offscreen-layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    // ⚠️ 必须包含 **VERTEX**：顶点着色器要用 `textureDimensions(image, 0)`
+                    // 算出四个角的图像像素坐标（整块的「四角由 vertex_index 现算」就是靠它）。
+                    // 只给 FRAGMENT 的话，wgpu 会在**建管线时**报
+                    // 「binding 1 is not available in the pipeline layout」——
+                    // 这个错是离屏冒烟抓到的，否则会在 Windows 上当着人的面炸。
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+        let bind_group = make_bind_group(&device, &layout, &texture, &sampler, &uniform);
+        let pipeline = create_pipeline(&device, &layout, wgpu::TextureFormat::Rgba8UnormSrgb);
+        Ok(Self {
+            device,
+            queue,
+            pipeline,
+            bind_group,
+            uniform,
+            image,
+            readback: None,
+        })
+    }
+
+    pub fn image(&self) -> &TestImage {
+        &self.image
+    }
+
+    /// 适配器信息（报告里要）。
+    pub fn adapter_info(&self) -> AdapterInfo {
+        // 离屏不保留适配器对象，这里返回类型名占位 —— 真窗口那条路才需要完整信息
+        AdapterInfo {
+            backend: "(离屏)".to_string(),
+            ..Default::default()
+        }
+    }
+
+    /// 按给定视口渲染一帧，回读 RGBA8 像素（行主序，尺寸 = `size`）。
+    ///
+    /// 注意**回读的是 sRGB 编码后的字节**（纹理是 `Rgba8UnormSrgb`），
+    /// 也就是「人眼看到的那个值」—— 断言里比对颜色时按这个口径。
+    pub fn render(&mut self, viewport: &Viewport, size: (u32, u32)) -> Vec<u8> {
+        let (width, height) = (size.0.max(1), size.1.max(1));
+        let format = wgpu::TextureFormat::Rgba8UnormSrgb;
+        let target = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("spike-offscreen-target"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = target.create_view(&wgpu::TextureViewDescriptor::default());
+
+        write_matrix(&self.queue, &self.uniform, viewport);
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("spike-offscreen-frame"),
+            });
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("spike-offscreen-pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    depth_slice: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            if let Some((x, y, w, h)) = viewport.scissor() {
+                pass.set_scissor_rect(x, y, w, h);
+                pass.set_pipeline(&self.pipeline);
+                pass.set_bind_group(0, &self.bind_group, &[]);
+                pass.draw(0..4, 0..1);
+            }
+        }
+
+        // 回读：每行必须按 256 字节对齐（wgpu 的 COPY_BYTES_PER_ROW_ALIGNMENT）
+        let unpadded = width * 4;
+        let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+        let padded = unpadded.div_ceil(align) * align;
+        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("spike-offscreen-readback"),
+            size: (padded as u64) * (height as u64),
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &target,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded),
+                    rows_per_image: Some(height),
+                },
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+        self.queue.submit(Some(encoder.finish()));
+
+        let slice = buffer.slice(..);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |result| {
+            let _ = sender.send(result);
+        });
+        // wgpu 30：`Wait` 是结构体变体（可指定 submission 与超时；都不给＝等最近一次提交）
+        let _ = self.device.poll(wgpu::PollType::Wait {
+            submission_index: None,
+            timeout: None,
+        });
+        match receiver.recv() {
+            Ok(Ok(())) => {}
+            _ => return Vec::new(),
+        }
+        // wgpu 30：`get_mapped_range` 返回 Result（映射失败要给出去，不能 unwrap）
+        let mapped = match slice.get_mapped_range() {
+            Ok(mapped) => mapped,
+            Err(_) => return Vec::new(),
+        };
+        let mut pixels = Vec::with_capacity((unpadded as usize) * (height as usize));
+        for row in 0..height as usize {
+            let start = row * padded as usize;
+            pixels.extend_from_slice(&mapped[start..start + unpadded as usize]);
+        }
+        drop(mapped);
+        buffer.unmap();
+        self.readback = Some((width, height, buffer));
+        pixels
+    }
+}
+
+/// 写 uniform（矩阵 + 不透明度）—— 与 `GpuContext::write_uniforms` 同一份布局。
+fn write_matrix(queue: &wgpu::Queue, uniform: &wgpu::Buffer, viewport: &Viewport) {
+    let matrix = viewport.matrix();
+    let mut bytes = [0u8; 80];
+    for (column, values) in matrix.iter().enumerate() {
+        for (row, value) in values.iter().enumerate() {
+            let offset = (column * 4 + row) * 4;
+            bytes[offset..offset + 4].copy_from_slice(&value.to_ne_bytes());
+        }
+    }
+    bytes[64..68].copy_from_slice(&1.0f32.to_ne_bytes());
+    queue.write_buffer(uniform, 0, &bytes);
 }

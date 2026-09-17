@@ -111,7 +111,7 @@ impl Default for Viewport {
 
 impl Viewport {
     /// 图像中心（图像像素）。
-    fn image_center(&self) -> (f32, f32) {
+    pub fn image_center(&self) -> (f32, f32) {
         (self.image_size.0 as f32 / 2.0, self.image_size.1 as f32 / 2.0)
     }
 

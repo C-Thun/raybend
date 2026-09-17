@@ -13,6 +13,7 @@ import "./index.css";
 import "@fontsource-variable/noto-sans-sc/wght.css";
 import { installEscapeBlur } from "./lib/dom-focus.ts";
 import { hydrateLocale } from "./i18n/index.ts";
+import SpikeViewport from "./dev/SpikeViewport.tsx";
 
 /**
  * 组件陈列室（`src/dev/`）**只在开发期注册**，而且 `import()` 必须留在
@@ -43,9 +44,25 @@ const KitchenSink = import.meta.env.DEV
   ? lazy(() => import("./dev/KitchenSink.tsx"))
   : undefined;
 
+/*
+ * 渲染 spike 页（`?spike=1`）。
+ *
+ * 与陈列室不同，它**不能**只留在开发期：`PLAN.md` A.2 要求人类在 **Windows 打包产物**里
+ * 验透明挖洞与 DPI，而那个产物跑的是 `dist/`。所以这里用**静态 import**（会进产物，
+ * 体积很小）而不是 DEV 三元里的 `lazy()`。
+ *
+ * 判据用查询串而不是路由：窗口是 `WebviewUrl::App("index.html?spike=1")` 开的，
+ * 查询串在 dev（`http://localhost:1420/`）与打包（`tauri://localhost/`）两种形态下
+ * 都不影响资源解析，比多一条路由稳。
+ */
+const SPIKE_MODE = new URLSearchParams(window.location.search).get("spike") === "1";
+
 render(
-  () => (
-    <Router>
+  () =>
+    SPIKE_MODE ? (
+      <SpikeViewport />
+    ) : (
+      <Router>
       {/*
         ⚠️ 路由**必须用 JSX 子节点形式**（`<Route …/>`）而不是把 `RouteDefinition[]`
         数组喂给 `<Router>` —— 实测数组形式下路由一条都不匹配，页面**静默空白**，
@@ -61,7 +78,7 @@ render(
         兜底路由可以避免 URL 形态差异导致白屏。
       */}
       <Route path="*" component={App} />
-    </Router>
-  ),
+      </Router>
+    ),
   document.getElementById("root") as HTMLElement,
 );

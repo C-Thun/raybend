@@ -32,6 +32,9 @@ tauri-build = { version = "2", features = [] }
 custom-protocol = ["tauri/custom-protocol"]
 
 [dependencies]
+# 取窗口裸句柄交给 wgpu（渲染 spike）。版本必须与 tauri / wgpu 用的一致 —— 
+# 都是 0.6（锁里只有一份 raw-window-handle 0.6.2），分叉的话 create_surface 会在运行时失败。
+raw-window-handle = "0.6"
 tauri = { version = "2", features = [] }
 raybend.workspace = true
 serde.workspace = true

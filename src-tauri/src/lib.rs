@@ -18,6 +18,8 @@ pub mod thumbs;
 #[cfg(test)]
 mod contract;
 pub mod dirs;
+/// 渲染可行性 spike 的调试窗口（`PLAN.md` A.2）。**按需建窗**，不影响主窗口。
+pub mod spike_viewport;
 
 /// 主窗口标签（与 `tauri.conf.json` 的窗口配置、`capabilities/default.json` 对应）。
 pub const MAIN_WINDOW_LABEL: &str = "main";
@@ -191,9 +193,17 @@ pub fn run() {
             dirs::dir_empty_check,
             dirs::dir_remove_empty,
             dirs::dir_create,
+            // ── 渲染 spike（M2-W1：透明挖洞 + wgpu 直绘的可行性验证）──
+            spike_viewport::spike_open,
+            spike_viewport::spike_close,
+            spike_viewport::spike_command,
+            spike_viewport::spike_snapshot,
+            spike_viewport::spike_hit_test,
+            spike_viewport::spike_write_report,
             // ── 启动流程 ──
             ui_ready,
         ])
+        .manage(spike_viewport::SpikeState::default())
         .setup(|app| {
             use tauri::Manager;
             // 先把数据底座打开（命令也可以懒打开，这里做一次是为了启动日志能立刻反映问题）。
