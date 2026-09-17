@@ -43,7 +43,18 @@ pub const SCREEN_LONG_EDGE: u32 = 1920;
 /// JPEG 质量（用户 2026-09-15 定：q82）。
 pub const JPEG_QUALITY: u8 = 82;
 /// 渲染管线版本：**算法一改就 +1**（缓存靠它自动失效）。
-pub const PIPELINE_VERSION: u32 = 2;
+///
+/// # v3（2026-09-17）：RAW 从占位图改成真解码
+///
+/// RAW 支持落地时**漏了抬版本号**，后果很隐蔽：早先导入的 RAW 已经把占位图按 `v2`
+/// 缓存住了，改完算法之后网格**仍然拿回那张占位块**（缓存命中，永远不会重渲染）——
+/// 现象就是「RAW 在预览列表里没有画面」，而且没有任何报错。抬到 v3 之后旧签名变成孤儿，
+/// 由缓存 GC 收走（`cache.rs` 的 `DELETE FROM thumbs WHERE render_sig NOT IN (…)`），
+/// 下次打开自然重新出图。
+///
+/// **纪律**：只要改动了「同一份输入会渲染出不同像素」的东西（解码路径、方向处理、编码参数、
+/// 叠加内容），就必须 +1 —— 否则用户看到的是**旧算法**的结果，而程序一切正常。
+pub const PIPELINE_VERSION: u32 = 3;
 
 /// 缩略图尺度。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
@@ -106,9 +117,9 @@ impl SizeClass {
 #[must_use]
 pub const fn render_sig(size: SizeClass) -> &'static str {
     match size {
-        SizeClass::Grid => "jpeg-q82-grid-v2",
-        SizeClass::Strip => "jpeg-q82-strip-v2",
-        SizeClass::Screen => "jpeg-q86-screen-v2",
+        SizeClass::Grid => "jpeg-q82-grid-v3",
+        SizeClass::Strip => "jpeg-q82-strip-v3",
+        SizeClass::Screen => "jpeg-q86-screen-v3",
     }
 }
 
