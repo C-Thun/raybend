@@ -10,11 +10,11 @@
 
 ## 1. 已有素材（不用动）
 
-| 文件（`website/public/`） | 用途 | 备注 |
+| 文件 | 用途 | 备注 |
 | --- | --- | --- |
 | `logo.webp` / `logo-small.webp` | 应用图标：导航、页脚、分享卡片（`og:image`） | 550×550 / 275×275，深底圆角方块 |
-| `name-cn.webp` / `name-en.webp` | 产品名书法字（hero 大字） | **白色墨迹 + 透明底**。⚠️ 官网渲染的不是这张位图，而是 `scripts/generate-marks.mjs` 描摹出的**矢量路径**（为了给字套「白色外扩边 + 绿色内芯」）；改了这些图要重跑 `pnpm marks:generate` |
-| `slogan-cn.webp` / `slogan-en.webp` | 口号书法字 | 同上 |
+| `marks/source/name-cn.webp` / `name-en.webp` | 产品名书法字（hero 大字） | **白色墨迹 + 透明底**（放在 `marks/source/`，不进部署产物）。⚠️ 官网渲染的不是这张位图，而是 `scripts/generate-marks.mjs` 描摹出的**矢量路径**；改了这些图要重跑 `pnpm marks:generate` |
+| `marks/source/slogan-cn.webp` / `slogan-en.webp` | 口号书法字 | 同上 |
 | `splash_v1-cn.webp` / `splash_v1-en.webp` | 下载区的主视觉（艺术合成图） | 1086×814，白底 + 透明边缘，放白卡片上正好 |
 | `favicon.ico` | 站点图标 | — |
 

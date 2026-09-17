@@ -56,7 +56,8 @@ website/
 │   ├── sections/         # Hero / Highlights / Workflows / Features / OpenSource / Download / Tutorials / Footer
 │   ├── routes/           # index.tsx（首页）/ [...404].tsx
 │   └── vite-env.d.ts     # 声明构建期注入的 import.meta.env.RB_RELEASE
-├── public/               # 原样拷贝的素材（品牌图 + 未来的截图/装饰图）
+├── marks/                # 品牌字：source/（描摹源位图）+ *.svg（矢量成果）+ preview.html（生成物）
+├── public/               # 会原样拷贝进产物的静态资源（logo / favicon / 未来的截图与装饰图）
 └── file-routes.d.ts      # 生成物，「Do not edit」
 ```
 
@@ -108,11 +109,11 @@ pnpm marks:generate  # 重新描摹品牌书法字 → src/components/mark-paths
 - **没有 `src` 的素材渲染成「版式正确的占位块」**（`components/Shot.tsx`）：与最终图同宽高比、同圆角，
   悬停能看到提示词，角标写着「待补」。**填上 `src` 即完成替换，版式不动。**
 - 要给人的清单（截什么图、AI 提示词原文）在 **`ASSETS.md`**。
-- 已有品牌素材（`logo*` / `name-*` / `slogan-*` / `splash_v1-*`）见 `ASSETS.md` §1。
+- 品牌图（`logo*` / `splash_v1-*`）在 `public/`；书法字的**源位图**在 `marks/source/`（不进产物）——见 `ASSETS.md` §1。
 
 ### 4.3 品牌字：矢量化 + 白色外扩边（**不是位图遮罩**）
 
-`name-*.webp` / `slogan-*.webp` 是「白色墨迹 + 透明底」的**源素材**；hero 上渲染的不是它们，
+`marks/source/name-*.webp` / `slogan-*.webp` 是「白色墨迹 + 透明底」的**源素材**（放 `marks/` 而不是 `public/`，是因为它只服务构建、不该进产物）；hero 上渲染的不是它们，
 而是 `scripts/generate-marks.mjs` 用 potrace 描摹出来的**矢量路径**（`src/components/mark-paths.ts`），
 由 `components/BrandMark.tsx` 渲染成「绿色内芯 + 白色外扩边」。
 

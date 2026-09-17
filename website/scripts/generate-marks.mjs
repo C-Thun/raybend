@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 把品牌书法字（`public/name-*.webp`、`public/slogan-*.webp`）**矢量化成路径**，
+ * 把品牌书法字（`marks/source/name-*.webp`、`marks/source/slogan-*.webp`）**矢量化成路径**，
  * 生成 `src/components/mark-paths.ts`。
  *
  * **为什么要矢量化**：hero 上要给产品名/口号套一圈「白色外扩边 + 绿色内芯」。
@@ -53,7 +53,7 @@ const tempDir = mkdtempSync(join(tmpdir(), 'rb-marks-'));
 function renderPreview(entries) {
   const cards = entries
     .map((entry) => {
-      const bitmap = readFileSync(join(ROOT, 'public', entry.source)).toString('base64');
+      const bitmap = readFileSync(join(ROOT, 'marks/source', entry.source)).toString('base64');
       return `
   <section class="card">
     <h2>${entry.id} <small>${entry.source}</small></h2>
@@ -113,7 +113,7 @@ ${cards}
 /** 源图（白墨 + 透明底）→ 放大 → 磨掉飞白 → 合成到黑底 → 反相 → 二值化 = 黑字白底的位图 */
 function prepareBitmap(file, out) {
   execFileSync('convert', [
-    join(ROOT, 'public', file),
+    join(ROOT, 'marks/source', file),
     '-filter',
     'Lanczos',
     '-resize',
