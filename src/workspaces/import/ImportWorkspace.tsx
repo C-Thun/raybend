@@ -35,6 +35,7 @@ import {
 import type { ImportStore } from "./store.ts";
 import { SplitHandleDots } from "../../components/ui/SplitHandle.tsx";
 import { withTimeout } from "../../lib/timeout.ts";
+import { timeoutMessage } from "../../i18n/index.ts";
 import { LeftColumn } from "./LeftColumn.tsx";
 
 export interface ImportWorkspaceProps {
@@ -56,6 +57,9 @@ export interface ImportWorkspaceProps {
   recentRatio?: number;
   onRecentRatioChange?: (ratio: number) => void;
 }
+
+/** 空间预检的时限：与导入命令同量级（15 秒只可能是「后端挂了」）。 */
+const PRECHECK_TIMEOUT_MS = 15_000;
 
 /** 字节数 → 「1.2 GB」这种人话（预检提示用）。 */
 function formatGiB(bytes: number): string {
@@ -100,8 +104,8 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
       // 预检也限时：后端要是挂了，这一句同样会永远不回来（按钮就一直转）
       const precheck = await withTimeout(
         importPrecheck(repository.id, sources()),
-        15_000,
-        "空间预检",
+        PRECHECK_TIMEOUT_MS,
+        timeoutMessage("import.timeout.precheck", PRECHECK_TIMEOUT_MS),
       );
       if (precheck.tight) {
         setSpaceWarning(

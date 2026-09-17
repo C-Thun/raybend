@@ -14,6 +14,7 @@
  * 所以这里不做去重；快照里永远是最新状态，界面直接渲染即可。
  */
 
+import { t } from "../i18n/index.ts";
 import { isTauriRuntime } from "./tauri-env.ts";
 import type {
   ImportBatchProgress,
@@ -87,7 +88,7 @@ export async function importPause(
   batchId: string,
 ): Promise<ImportBatchProgress> {
   if (!isTauriRuntime()) {
-    throw new Error("不在 Tauri 运行环境里");
+    throw new Error(t("common.desktop_only"));
   }
   return call<ImportBatchProgress>("import_pause", { batchId });
 }
@@ -97,7 +98,7 @@ export async function importResume(
   batchId: string,
 ): Promise<ImportBatchProgress> {
   if (!isTauriRuntime()) {
-    throw new Error("不在 Tauri 运行环境里");
+    throw new Error(t("common.desktop_only"));
   }
   return call<ImportBatchProgress>("import_resume", { batchId });
 }
@@ -107,7 +108,7 @@ export async function importCancel(
   batchId: string,
 ): Promise<ImportBatchProgress> {
   if (!isTauriRuntime()) {
-    throw new Error("不在 Tauri 运行环境里");
+    throw new Error(t("common.desktop_only"));
   }
   return call<ImportBatchProgress>("import_cancel", { batchId });
 }
@@ -117,7 +118,7 @@ export async function importStatus(
   batchId: string,
 ): Promise<ImportBatchProgress> {
   if (!isTauriRuntime()) {
-    throw new Error("不在 Tauri 运行环境里");
+    throw new Error(t("common.desktop_only"));
   }
   return call<ImportBatchProgress>("import_status", { batchId });
 }

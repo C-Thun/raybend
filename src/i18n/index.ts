@@ -107,3 +107,20 @@ export function t(key: MessageKey, params?: TParams): string {
   name in params ? String(params[name]) : match,
  );
 }
+
+/**
+ * 「超时」那句话的拼装（给 `lib/timeout.ts` 的调用方用）。
+ *
+ * 为什么拼装在**这里**而不是 `lib/timeout.ts`：那个文件在纯逻辑层，
+ * 而分层检查器不允许 `lib` import `i18n`（`ARCHITECTURE.md` §1）——
+ * 所以句子由应用层拼好再递给它，`TimeoutError.message` 就是成品。
+ *
+ * `whatKey` 是「哪个动作卡住了」（如 `import.timeout.start` =
+ * 「启动导入」），它自己也是一条文案，所以也得走语言包。
+ */
+export function timeoutMessage(whatKey: MessageKey, timeoutMs: number): string {
+ return t("common.timeout", {
+  what: t(whatKey),
+  seconds: Math.round(timeoutMs / 1000),
+ });
+}

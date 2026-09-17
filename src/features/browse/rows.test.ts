@@ -17,8 +17,13 @@ import {
   browseGroups,
   DEFAULT_GAP_MINUTES,
   GROUP_ROW_HEIGHT,
-  UNKNOWN_LABEL,
 } from "./rows.ts";
+
+/**
+ * 「未知时间」在测试里用的**占位标签**（生产实现里它是 `unknown: true` + 空 label，
+ * 真的标题由视图按当前语言渲染）。跨口径对比时两边都用它对齐。
+ */
+const UNKNOWN_KEY = "<unknown>";
 
 /** 东八区 2026-08-15 的某个时刻（UTC 毫秒）。 */
 function at(hour: number, minute = 0, day = 15): number {
@@ -61,15 +66,20 @@ test("分组模式：每组一个标题行，标题计数等于该组张数", ()
     columns: 2,
     cellSize: 100,
     groups: [
-      { start: 0, count: 3, label: "2026-08-15" },
-      { start: 3, count: 1, label: UNKNOWN_LABEL },
+      { start: 0, count: 3, label: "2026-08-15", unknown: false },
+      { start: 3, count: 1, label: "", unknown: true },
     ],
   });
   const groups = rows.filter((r) => r.kind === "group");
   assert.equal(groups.length, 2);
   assert.equal(groups[0].height, GROUP_ROW_HEIGHT);
   assert.equal(groups[0].kind === "group" ? groups[0].count : 0, 3);
-  assert.equal(groups[1].kind === "group" ? groups[1].label : "", UNKNOWN_LABEL);
+  assert.equal(groups[1].kind === "group" ? groups[1].unknown : false, true);
+  assert.equal(
+    groups[1].kind === "group" ? groups[1].label : "x",
+    "",
+    "未知时间组的 label 是空串 —— 标题由视图按语言渲染",
+  );
   // 标题行之后跟着该组的 tile 行
   assert.equal(rows[1].kind, "tiles");
   assert.equal(rows[1].kind === "tiles" ? rows[1].start : -1, 0);
@@ -81,9 +91,9 @@ test("分组越界或空组不会产出行", () => {
     columns: 2,
     cellSize: 100,
     groups: [
-      { start: 0, count: 0, label: "空组" },
-      { start: 10, count: 5, label: "越界" },
-      { start: 0, count: 2, label: "正常" },
+      { start: 0, count: 0, label: "空组", unknown: false },
+      { start: 10, count: 5, label: "越界", unknown: false },
+      { start: 0, count: 2, label: "正常", unknown: false },
     ],
   });
   assert.equal(rows.filter((r) => r.kind === "group").length, 1);
@@ -136,7 +146,7 @@ test("没有拍摄时间的归到最后一组「未知时间」", () => {
     { takenAt: null },
   ]);
   assert.equal(groups.length, 2);
-  assert.equal(groups[1].label, UNKNOWN_LABEL);
+  assert.equal(groups[1].unknown, true);
   assert.equal(groups[1].count, 2);
 });
 
@@ -195,7 +205,7 @@ test("分组划分与 lib/time-group 的 days/slices 一致", () => {
     }
   }
   if (grouping.unknown) {
-    theirs.push({ label: UNKNOWN_LABEL, count: grouping.unknown.photoIds.length });
+    theirs.push({ label: UNKNOWN_KEY, count: grouping.unknown.photoIds.length });
   }
 
   const canonical = (
@@ -204,7 +214,9 @@ test("分组划分与 lib/time-group 的 days/slices 一致", () => {
     [...list].sort((a, b) => a.label.localeCompare(b.label) || a.count - b.count);
 
   assert.deepEqual(
-    canonical(mine.map((g) => ({ label: g.label, count: g.count }))),
+    canonical(
+      mine.map((g) => ({ label: g.unknown ? UNKNOWN_KEY : g.label, count: g.count })),
+    ),
     canonical(theirs),
     "分组口径必须与 lib/time-group 一致（漂了就说明两处规则分家了）",
   );

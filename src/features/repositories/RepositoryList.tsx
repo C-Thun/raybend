@@ -26,6 +26,7 @@ import {
   IconSettings,
 } from "@tabler/icons-solidjs";
 import { LibrarySettingsDialog } from "./LibrarySettingsDialog.tsx";
+import type { RemountError } from "./state.ts";
 import type { RepositoryView } from "../../api/types.ts";
 import { ScrollBox } from "../../components/ui/ScrollBar.tsx";
 import { t } from "../../i18n/index.ts";
@@ -39,8 +40,8 @@ export interface RepositoryListProps {
   selectedId: string | null;
   /** 正在重新查找的库 id（按钮转圈） */
   remountingId?: string | null;
-  /** 重挂载失败时的提示（库 id → 文案） */
-  remountErrors?: Record<string, string>;
+  /** 重挂载失败时的提示（库 id → 原因；**句子在视图里拼**，见 `RemountError` 的说明） */
+  remountErrors?: Record<string, RemountError>;
   onSelect: (id: string) => void;
   onRemount: (id: string) => void;
   /** 模版保存成功后通知外面（列表拿到的是缓存的模版，要重新读一遍） */
@@ -155,11 +156,21 @@ export function RepositoryList(props: RepositoryListProps) {
   );
 }
 
+/**
+ * 重挂载失败的那句话：`not_found` 是可翻译的（已试过 N 处），
+ * `message` 是后端原话（本来就是人话，直出）。
+ */
+function remountText(error: RemountError): string {
+  return error.kind === "not_found"
+    ? t("repo.remount_failed", { tried: error.tried })
+    : error.text;
+}
+
 function RepositoryCard(props: {
   repository: RepositoryView;
   selected: boolean;
   remounting: boolean;
-  remountError: string | null;
+  remountError: RemountError | null;
   locale: GroupingLocale;
   onSelect: (id: string) => void;
   onRemount: (id: string) => void;
@@ -279,8 +290,8 @@ function RepositoryCard(props: {
       </div>
 
       <Show when={props.remountError}>
-        {(message) => (
-          <p class="ps-8 text-fs-0 text-fg-3">{message()}</p>
+        {(error) => (
+          <p class="ps-8 text-fs-0 text-fg-3">{remountText(error())}</p>
         )}
       </Show>
     </div>

@@ -105,7 +105,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
         />
 
         {/* 控制条（`design/browse.md` §2.3）：计数 — 当前目录/文件名 — 按时间 + 缩放 */}
-        <div class="flex h-8 shrink-0 items-center gap-3 px-2 text-3 text-fg-3">
+        <div class="flex h-8 shrink-0 items-center gap-3 px-2 text-fs-2 text-fg-3">
           <span>{t("browse.count").replace("{n}", String(store.total()))}</span>
           <Show when={store.selectedCount() > 0}>
             <span class="text-fg-2">

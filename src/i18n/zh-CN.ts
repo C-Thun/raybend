@@ -37,6 +37,7 @@ export const zhCN = {
  "import.keep_running": "继续导入",
  "import.keep_partial": "已经导入的照片会保留在库里，取消不会回滚",
  "import.export_errors": "导出错误清单",
+ "import.no_backend": "当前环境没有导入后端（开发预览里只有界面）",
  "import.exported_to": "已导出到 {path}",
  "import.errors_truncated": "只显示了最后 {shown} 条（共 {total} 条）",
  "import.reveal": "在库中查看这些照片",
@@ -99,9 +100,20 @@ export const zhCN = {
  "common.cancel": "取消",
  "common.confirm": "确定",
  "common.loading": "加载中",
+ /**
+  * 「超时」那句话 —— `{what}` 是卡住的那个动作（它自己也是一条文案）。
+  * 拼装入口是 `i18n/index.ts` 的 `timeoutMessage()`：`lib/timeout.ts` 在纯逻辑层，
+  * 不允许 import i18n，所以句子由应用层拼好再递进去。
+  */
+ "common.timeout": "{what}没有在 {seconds} 秒内回应（后端可能已经挂了）",
  "common.empty": "暂无内容",
  "common.resize_left": "调整左列宽度",
  "common.retry": "重试",
+ /**
+  * 浏览器预览（非 Tauri 运行时）里碰到只有桌面端才有的能力时的统一说法。
+  * 一律用这一句，不按命令分别写 —— 它能真正出现的地方只有开发预览。
+  */
+ "common.desktop_only": "这个功能要在桌面应用里运行（当前是浏览器预览）",
  "common.selected_summary": "已选择 {dirs} 个目录 · {photos} 张照片",
 
  // ── 左列：来源（design/main.md §3.1）──────────────────
@@ -151,6 +163,8 @@ export const zhCN = {
  "grid.unknown_time": "未知时间",
  "grid.excluded": "已排除",
  "grid.pick_dir": "从左侧选一个目录",
+ "grid.loading_dir": "正在读取目录…",
+ "grid.timeout.meta": "读取照片信息",
  "grid.empty_dir": "这个目录里没有照片",
  "grid.load_error": "读不了这个目录：{message}",
 
@@ -166,6 +180,13 @@ export const zhCN = {
   * 而排除是**跨源**的（切目录不丢），不显式说出来就会显得总数对不上。
   */
  "import.excluded_count": "已排除 {n} 张",
+ /** 超时句里的「卡住的那个动作」（见 `common.timeout`） */
+ "import.timeout.command": "导入命令",
+ "import.timeout.start": "启动导入",
+ "import.timeout.subscribe": "订阅导入进度",
+ "import.timeout.status": "读导入状态",
+ "import.timeout.export": "导出错误清单",
+ "import.timeout.precheck": "空间预检",
  "repo.import": "导入",
  "repo.avoid_duplicates": "避免重复导入",
  "repo.empty": "还没有库，先建一个",
@@ -214,6 +235,9 @@ export const zhCN = {
  "browse.expand": "展开",
  "browse.collapse": "收起",
  "browse.offline": "离线",
+ "browse.loading": "正在加载库…",
+ "browse.empty_lib": "这个库里还没有照片",
+ "browse.load_error": "读不了这个库：{message}",
  "browse.noSelection": "选中一张照片后，这里显示它的信息",
  "browse.exif": "拍摄信息",
  "browse.fileInfo": "文件信息",

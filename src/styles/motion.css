@@ -46,6 +46,82 @@
 }
 
 /*
+ * ── 状态水印（网格区的载入 / 空态 / 错误）───────────────────────
+ *
+ * ⚠️ **这是另一类动效，时长口径与上面的反馈类不同，别拿「≤150ms」套它**：
+ *
+ * | 类别 | 例子 | 时长 | 要什么 |
+ * | --- | --- | --- | --- |
+ * | 反馈类 | `rb-pop-up` / `rb-fade-in` | ≤ 150ms | 「我收到了」要**立刻** |
+ * | 状态指示类 | 这一组 | 秒级慢循环 | 「在忙，但别盯着我」——快反而像卡顿闪烁 |
+ *
+ * 三条纪律仍然一样：只动 `opacity` / `transform`（不触发布局与重绘）、
+ * 不用主色辅色（水印是背景上的一道印痕，不是控件）、尊重减少动态效果。
+ *
+ * 为什么用**两层**元素而不是一个动画：
+ *   * 延时出现（`rb-watermark-reveal`）与呼吸（`rb-watermark-breathe`）都要动 `opacity`，
+ *     写在同一个元素上会互相覆盖；套一层就没有这个问题。
+ *   * 分开之后「命中缓存这一帧就跳过」只靠外层的 `animation-delay` 实现，不需要 JS 计时器。
+ */
+
+/* 延时出现：命中会话缓存（很快）时整段动画还没开始就结束了，不闪一帧水印 */
+@keyframes rb-watermark-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.rb-watermark-reveal {
+  opacity: 0;
+  animation: rb-watermark-in 200ms ease-out 120ms forwards;
+}
+
+/* 缓慢呼吸：浓度在 0.55 ↔ 0.95 之间来回（不透明度乘在外层的显隐上） */
+@keyframes rb-watermark-breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 0.95;
+  }
+}
+
+.rb-watermark-breathe {
+  animation: rb-watermark-breathe 3.6s ease-in-out infinite;
+}
+
+/*
+ * 高光扫过：一条低浓度中性渐变，被水印块自己裁住（宿主给 `overflow: hidden`），
+ * 靠 `transform` 扫过 —— 观感是「光缓慢掠过印痕」，而不是一条亮带横穿整个网格。
+ *
+ * 浓度 14% 是刻意的：再浓就成了「loading 条纹」，与「别抢眼」相抵。
+ */
+@keyframes rb-watermark-sheen {
+  0% {
+    transform: translateX(-160%);
+  }
+  55%,
+  100% {
+    transform: translateX(260%);
+  }
+}
+
+.rb-watermark-sheen {
+  background-image: linear-gradient(
+    100deg,
+    transparent,
+    color-mix(in oklab, var(--fg-1) 14%, transparent),
+    transparent
+  );
+  animation: rb-watermark-sheen 5.2s ease-in-out infinite;
+  will-change: transform;
+}
+
+/*
  * 尊重系统的「减少动态效果」偏好。
  * 桌面软件里这一条尤其重要：前庭敏感的用户开了它之后，
  * 每个 hover 都在动会让界面变得不可用。
@@ -54,5 +130,20 @@
   .rb-pop-up,
   .rb-fade-in {
     animation: none;
+  }
+
+  /* 水印：停下来，但**不能停在「没显示」那一帧**（外层是 `opacity: 0` 起手） */
+  .rb-watermark-reveal {
+    opacity: 1;
+    animation: none;
+  }
+
+  .rb-watermark-breathe,
+  .rb-watermark-sheen {
+    animation: none;
+  }
+
+  .rb-watermark-sheen {
+    display: none;
   }
 }

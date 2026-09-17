@@ -166,6 +166,7 @@ export function TitleBar(props: TitleBarProps) {
             href="/dev/kitchen-sink"
             class="flex shrink-0 items-center rounded-ui px-2 text-fs-1 text-fg-3 transition-colors hover:bg-state-hover hover:text-fg-1"
           >
+            {/* i18n-exempt: 只在 DEV 构建里存在的陈列室入口，生产包没有这条分支 */}
             组件陈列室
           </A>
         </Show>

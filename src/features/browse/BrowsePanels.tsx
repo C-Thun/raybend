@@ -173,13 +173,13 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
         value={search()}
         onInput={(event) => setSearch(event.currentTarget.value)}
         placeholder={t("browse.searchPlaceholder")}
-        class="h-7 shrink-0 rounded-(--radius) bg-surface-bar px-2 text-3 text-fg-1 placeholder:text-fg-3"
+        class="h-7 shrink-0 rounded-(--radius) bg-surface-bar px-2 text-fs-2 text-fg-1 placeholder:text-fg-3"
       />
 
       {/* 紧缩库列表 */}
       <div class="shrink-0">
         <Show when={filtered().length === 0}>
-          <p class="px-1 py-2 text-3 text-fg-3">{t("browse.noRepository")}</p>
+          <p class="px-1 py-2 text-fs-2 text-fg-3">{t("browse.noRepository")}</p>
         </Show>
         <For each={visibleRepos()}>
           {(repo) => (
@@ -193,15 +193,15 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
                   : "text-fg-2 hover:bg-state-hover",
               ].join(" ")}
             >
-              <span class="shrink-0 text-4 text-brand">●</span>
+              <span class="shrink-0 text-fs-3 text-brand">●</span>
               <span class="min-w-0 flex-1">
-                <span class="block truncate text-3">{repo.name}</span>
-                <span class="block truncate text-2 text-fg-3">
+                <span class="block truncate text-fs-2">{repo.name}</span>
+                <span class="block truncate text-fs-0 text-fg-3">
                   {shortPath(repo.displayPath, { maxLength: 48 })}
                 </span>
               </span>
               <Show when={!repo.online}>
-                <span class="shrink-0 text-2 text-danger">{t("browse.offline")}</span>
+                <span class="shrink-0 text-fs-0 text-danger">{t("browse.offline")}</span>
               </Show>
             </button>
           )}
@@ -211,7 +211,7 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
           <button
             type="button"
             onClick={() => setExpandedLibs(true)}
-            class="flex h-6 w-full items-center justify-center rounded-(--radius) bg-surface-bar text-2 text-fg-2 hover:bg-state-hover"
+            class="flex h-6 w-full items-center justify-center rounded-(--radius) bg-surface-bar text-fs-0 text-fg-2 hover:bg-state-hover"
           >
             {t("browse.allRepositories")}
           </button>
@@ -220,7 +220,7 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
           <button
             type="button"
             onClick={() => setExpandedLibs(false)}
-            class="flex h-6 w-full items-center justify-center rounded-(--radius) text-2 text-fg-3 hover:bg-state-hover"
+            class="flex h-6 w-full items-center justify-center rounded-(--radius) text-fs-0 text-fg-3 hover:bg-state-hover"
           >
             {t("browse.collapseRepositories")}
           </button>
@@ -234,18 +234,18 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
             type="button"
             onClick={() => store.setScope(null)}
             class={[
-              "mb-1 flex w-full items-center gap-2 rounded-(--radius) px-2 py-1 text-left text-3",
+              "mb-1 flex w-full items-center gap-2 rounded-(--radius) px-2 py-1 text-left text-fs-2",
               store.scopePath() === null
                 ? "bg-state-selected text-fg-1"
                 : "text-fg-2 hover:bg-state-hover",
             ].join(" ")}
           >
-            <span class="text-4">◉</span>
+            <span class="text-fs-3">◉</span>
             {t("browse.wholeRepository")}
           </button>
 
           <Show when={treeRows().length === 0}>
-            <p class="px-1 py-2 text-3 text-fg-3">{t("browse.emptyTree")}</p>
+            <p class="px-1 py-2 text-fs-2 text-fg-3">{t("browse.emptyTree")}</p>
           </Show>
 
           <For each={treeRows()}>
@@ -267,14 +267,14 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
                     event.stopPropagation();
                     toggleExpand(row.relPath);
                   }}
-                  class="w-4 shrink-0 text-center text-2 text-fg-3 hover:text-fg-1"
+                  class="w-4 shrink-0 text-center text-fs-0 text-fg-3 hover:text-fg-1"
                 >
                   {row.hasChildren ? (row.expanded ? "▾" : "▸") : ""}
                 </button>
                 <button
                   type="button"
                   onClick={() => store.setScope(row.relPath)}
-                  class="min-w-0 flex-1 truncate py-1 text-left text-3"
+                  class="min-w-0 flex-1 truncate py-1 text-left text-fs-2"
                   title={row.relPath}
                 >
                   {row.name}
@@ -303,8 +303,8 @@ function Field(props: { label: string; value: string | null }) {
   return (
     <Show when={props.value !== null && props.value !== ""}>
       <div class="flex items-baseline gap-2">
-        <span class="w-16 shrink-0 text-2 text-fg-3">{props.label}</span>
-        <span class="min-w-0 flex-1 break-all text-3 text-fg-1">{props.value}</span>
+        <span class="w-16 shrink-0 text-fs-0 text-fg-3">{props.label}</span>
+        <span class="min-w-0 flex-1 break-all text-fs-2 text-fg-1">{props.value}</span>
       </div>
     </Show>
   );
@@ -354,11 +354,11 @@ export function AssetInfo(props: AssetInfoProps) {
     <div class={["min-h-0 flex-1 overflow-y-auto p-2", props.class ?? ""].filter(Boolean).join(" ")}>
       <Show
         when={item() !== null}
-        fallback={<p class="p-2 text-3 text-fg-3">{t("browse.noSelection")}</p>}
+        fallback={<p class="p-2 text-fs-2 text-fg-3">{t("browse.noSelection")}</p>}
       >
         {/* EXIF（BROWSE.md §6：tiles 模式下内容可能很长，要能滚） */}
         <section class="mb-5">
-          <h3 class="mb-1.5 text-4 font-semibold text-fg-2">{t("browse.exif")}</h3>
+          <h3 class="mb-1.5 text-fs-3 font-semibold text-fg-2">{t("browse.exif")}</h3>
           <div class="flex flex-col gap-1.5">
             <Field label={t("browse.fieldCamera")} value={camera()} />
             <Field label={t("browse.fieldLens")} value={item()!.lens} />
@@ -391,7 +391,7 @@ export function AssetInfo(props: AssetInfoProps) {
 
         {/* 文件信息（作者/描述/地理在 W2 接编辑） */}
         <section class="mb-5">
-          <h3 class="mb-1.5 text-4 font-semibold text-fg-2">{t("browse.fileInfo")}</h3>
+          <h3 class="mb-1.5 text-fs-3 font-semibold text-fg-2">{t("browse.fileInfo")}</h3>
           <div class="flex flex-col gap-1.5">
             <Field label={t("browse.fieldFileName")} value={item()!.fileName} />
             <Field
@@ -409,7 +409,7 @@ export function AssetInfo(props: AssetInfoProps) {
             />
             <Field label={t("browse.fieldFileSize")} value={humanSize(item()!.sizeBytes)} />
             <Show when={item()!.missing}>
-              <p class="text-3 text-danger">{t("browse.missingFile")}</p>
+              <p class="text-fs-2 text-danger">{t("browse.missingFile")}</p>
             </Show>
           </div>
         </section>

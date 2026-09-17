@@ -22,6 +22,19 @@ import { createSignal } from "solid-js";
 import type { RepositoryView } from "../../api/types.ts";
 import type { LoadStatus } from "../../lib/load-status.ts";
 
+/**
+ * 重挂载失败的原因。
+ *
+ * 为什么**不是一句拼好的中文**：文案归语言包，而这一层（状态模块）按纪律
+ * 不引 i18n（用 `pnpm lint:arch` 盯着的分层跟「所有 store/state 都不引 i18n」一致）。
+ * 所以这里只交出**事实**，句子由视图按当前语言渲染：
+ *   * `not_found` → 卡片上写「没找到这个库（已试过 N 处）」（`repo.remount_failed`）；
+ *   * `message` → 后端原话（已经是人话，直接展示）。
+ */
+export type RemountError =
+  | { kind: "not_found"; tried: number }
+  | { kind: "message"; text: string };
+
 /** 本模块用到的 `src/api/db.ts` 子集（注入以便测试） */
 export interface RepositoryStateApi {
   listRepositories: () => Promise<RepositoryView[]>;
@@ -50,7 +63,7 @@ export interface RepositoryStateStore {
    */
   markOffline: (repositoryId: string) => void;
   remountingId: () => string | null;
-  remountErrors: () => Readonly<Record<string, string>>;
+  remountErrors: () => Readonly<Record<string, RemountError>>;
   /** 对所有登记路径重新查找一次（离线库的「插上盘再点我」） */
   remount: (repositoryId: string) => Promise<void>;
   /** 改导入模版：写库成功后**就地把新模版同步进列表**，返回落定的模版 */
@@ -65,7 +78,7 @@ export function createRepositoryState(deps: {
   const [error, setError] = createSignal<string | null>(null);
   const [remountingId, setRemountingId] = createSignal<string | null>(null);
   const [remountErrors, setRemountErrors] = createSignal<
-    Record<string, string>
+    Record<string, RemountError>
   >({});
 
   const byId = (repositoryId: string): RepositoryView | undefined =>
@@ -114,8 +127,8 @@ export function createRepositoryState(deps: {
     }
   }
 
-  function setRemountError(repositoryId: string, message: string): void {
-    setRemountErrors((prev) => ({ ...prev, [repositoryId]: message }));
+  function setRemountError(repositoryId: string, error: RemountError): void {
+    setRemountErrors((prev) => ({ ...prev, [repositoryId]: error }));
   }
 
   function clearRemountError(repositoryId: string): void {
@@ -136,16 +149,16 @@ export function createRepositoryState(deps: {
       clearRemountError(repositoryId);
       // 没找到**不是错误**（`REPOSITORY.md` §2.3），但要给用户一句可读的话
       if (!view.online) {
-        setRemountError(
-          repositoryId,
-          `未找到该库（已试过 ${view.triedPaths} 处已登记路径）`,
-        );
+        setRemountError(repositoryId, {
+          kind: "not_found",
+          tried: view.triedPaths,
+        });
       }
     } catch (caught) {
-      setRemountError(
-        repositoryId,
-        caught instanceof Error ? caught.message : String(caught),
-      );
+      setRemountError(repositoryId, {
+        kind: "message",
+        text: caught instanceof Error ? caught.message : String(caught),
+      });
     } finally {
       setRemountingId(null);
     }

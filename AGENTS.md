@@ -161,6 +161,7 @@ pnpm typecheck            # 类型检查
 pnpm test                 # 单元测试（node --test，零依赖，应当保持在秒级）
 pnpm lint:colors          # 色值只允许出现在 tokens.css
 pnpm lint:arch            # 分层依赖方向（ARCHITECTURE.md §1/§2）
+pnpm lint:i18n            # 界面文案只允许出现在语言包（DESIGN.md §11.1）
 pnpm build                # 生产构建
 
 # —— 运行时冒烟（需另一个终端先 `pnpm dev`）——

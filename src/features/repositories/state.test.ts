@@ -140,7 +140,11 @@ test("remount：没找到**不是错误**，但要给一句可读的话", async 
   await store.load();
   await store.remount("lib1");
   assert.equal(store.byId("lib1")?.online, false);
-  assert.match(store.remountErrors()["lib1"] ?? "", /已试过 3 处/);
+  // 交出来的是**事实**（找不到 + 试过几处），句子由视图按语言拼
+  assert.deepEqual(store.remountErrors()["lib1"], {
+    kind: "not_found",
+    tried: 3,
+  });
 });
 
 test("remount：命令抛错 → 记在提示里，状态不变", async () => {
@@ -149,7 +153,13 @@ test("remount：命令抛错 → 记在提示里，状态不变", async () => {
   const store = createRepositoryState({ api });
   await store.load();
   await store.remount("lib1");
-  assert.match(store.remountErrors()["lib1"] ?? "", /盘没插/);
+  const error = store.remountErrors()["lib1"];
+  assert.equal(error?.kind, "message");
+  assert.match(
+    error?.kind === "message" ? error.text : "",
+    /盘没插/,
+    "后端原话要原样带出来（它本来就是给人看的）",
+  );
 });
 
 test("setTemplate：写库成功后**列表里的模版立刻同步**", async () => {

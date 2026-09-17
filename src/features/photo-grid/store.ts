@@ -25,6 +25,8 @@
  */
 
 import { createSignal } from "solid-js";
+import { withTimeout } from "../../lib/timeout.ts";
+import { timeoutMessage } from "../../i18n/index.ts";
 import {
   clampDisplayAspect,
 } from "../../lib/tile-flow.ts";
@@ -61,6 +63,18 @@ import {
 /** 时间片阈值的默认值（分钟）——`DESIGN.md` §12.7 的「1 小时」 */
 export const DEFAULT_GAP_MINUTES = 60;
 
+/**
+ * 等「文件头缓存」的时限（毫秒）。
+ *
+ * 网格现在**依赖** `dirMetaEnsure` 回来才铺 tile（见 `load`），所以它一旦不回来
+ * （后端命令 panic 时 promise 永远不 settle，见 `lib/timeout.ts` 文件头），
+ * 界面就会永远停在水印上。这道时限把那种情况变成「按占位比例照常铺照片」。
+ *
+ * 给得比普通命令（15s）宽：它扫的是整个目录的头，慢盘上本来就慢 ——
+ * 时限防的是「卡死」，不是「慢」。
+ */
+export const DEFAULT_META_TIMEOUT_MS = 20_000;
+
 /** 设置键（与 `src/api/db.ts` 的 `SETTING_KEYS` 保持一致） */
 export const GRID_SETTING_KEYS = {
   tileStep: "grid.tile_step",
@@ -80,6 +94,8 @@ export interface PhotoGridDeps {
   api: PhotoGridApi;
   /** 缩略图下载并发（默认 4，见 `thumbnails.ts`） */
   thumbConcurrency?: number;
+  /** 等头部缓存的时限（默认 {@link DEFAULT_META_TIMEOUT_MS}；测试用小值） */
+  metaTimeoutMs?: number;
 }
 
 export interface PhotoGridStore {
@@ -150,6 +166,9 @@ export function createPhotoGridStore(deps: PhotoGridDeps): PhotoGridStore {
   /** 换目录 / 重新扫描时推进它，迟到的结果直接丢掉 */
   let generation = 0;
 
+  /** 等头部缓存的时限（依赖注入，测试里给小值） */
+  const metaTimeout = deps.metaTimeoutMs ?? DEFAULT_META_TIMEOUT_MS;
+
   const thumbs: ThumbQueue = createThumbQueue({
     load: (path) => deps.api.getThumbBytes(path, "grid"),
     concurrency: deps.thumbConcurrency,
@@ -205,14 +224,21 @@ export function createPhotoGridStore(deps: PhotoGridDeps): PhotoGridStore {
     try {
       const scan = await deps.api.scanSourceDir(next);
       if (token !== generation) return; // 用户又换了目录
+      /*
+       * 清单一到手就先把 items 摆上：计数（控制条）与「已选 N 张」这类东西
+       * 不必等头部缓存 —— 它们在载入期间显示出来反而让人知道「目录读到了，
+       * 正在补每张的宽高」。
+       */
       setItems(scan.items);
       setProblems(scan.problems);
-      setStatus("ready");
       /*
-       * 元信息**不阻塞**出网格：先按默认比例把照片铺出来，宽高到了再各自修正
-       * （外框是正方，所以迟到不会重排布局，只是照片在框里长大）。
+       * **等头部缓存铺完再铺 tile**（人类 2026-09-17 定）：照片的比例一次到位，
+       * 不再先按 3:2 占位再各自「长大」。代价是首开大目录要多等这几秒 ——
+       * 同目录二次打开命中会话级缓存，几乎是瞬时的。
        */
-      void loadPhotoMeta(next, scan.items, token);
+      await loadPhotoMeta(next, scan.items, token);
+      if (token !== generation) return; // 等的时候用户又换了目录
+      setStatus("ready");
       if (byTime()) void loadTimes();
     } catch (caught) {
       if (token !== generation) return;
@@ -228,7 +254,13 @@ export function createPhotoGridStore(deps: PhotoGridDeps): PhotoGridStore {
    * 换目录后重新读一遍时，已经准确的不用再读。
    */
   /**
-   * 取这一批照片的展示元信息（宽高 + 方向）。失败**不打扰用户** —— 只是比例退化成默认占位。
+   * 取这一批照片的展示元信息（宽高 + 方向）。
+   *
+   * 失败**不打扰用户**：比例退化成默认占位，网格照铺（读不到一个头不该让整个目录列不出来）。
+   * 时限同理 —— 它防的是「后端卡死」，不是「慢盘」。
+   *
+   * ⚠️ 现在它是**阻塞 `ready`** 的一步（见 `load`），所以这里的每一条出路
+   * （成功 / 失败 / 超时）都必须把控制权交回去。
    */
   async function loadPhotoMeta(
     dir: string,
@@ -237,13 +269,17 @@ export function createPhotoGridStore(deps: PhotoGridDeps): PhotoGridStore {
   ): Promise<void> {
     if (items.length === 0) return;
     try {
-      const metas = await deps.api.dirMetaEnsure(
-        dir,
-        items.map((item) => ({
-          relative: item.fileName,
-          fileSize: item.sizeBytes,
-          mtimeMs: item.mtimeMs ?? 0,
-        })),
+      const metas = await withTimeout(
+        deps.api.dirMetaEnsure(
+          dir,
+          items.map((item) => ({
+            relative: item.fileName,
+            fileSize: item.sizeBytes,
+            mtimeMs: item.mtimeMs ?? 0,
+          })),
+        ),
+        metaTimeout,
+        timeoutMessage("grid.timeout.meta", metaTimeout),
       );
       if (token !== generation) return; // 用户又换了目录，迟到的结果丢掉
       /*

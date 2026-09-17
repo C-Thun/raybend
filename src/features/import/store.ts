@@ -12,6 +12,7 @@
 
 import { createSignal } from "solid-js";
 import { withTimeout } from "../../lib/timeout.ts";
+import { t, timeoutMessage } from "../../i18n/index.ts";
 import type { ImportSource } from "../../api/import.ts";
 import type {
   ImportBatchProgress,
@@ -130,7 +131,7 @@ export interface ImportStoreDeps {
 export const DEFAULT_COMMAND_TIMEOUT_MS = 15_000;
 
 /** 暂停 / 继续 / 取消 这三个命令超时时的说法（拼进错误消息） */
-const DANG_WHAT = "导入命令";
+const DANG_WHAT = "import.timeout.command" as const;
 
 export function createImportStore(deps: ImportStoreDeps): ImportStore {
   // 界面要读的这五个必须是 **signal**（文件头那条只禁 `createMemo`，不禁 `createSignal`）：
@@ -167,7 +168,7 @@ export function createImportStore(deps: ImportStoreDeps): ImportStore {
     setBusy(true);
     setError(null);
     try {
-      const snapshot = await withTimeout(run(id), timeout, DANG_WHAT);
+      const snapshot = await withTimeout(run(id), timeout, timeoutMessage(DANG_WHAT, timeout));
       apply(snapshot);
     } catch (caught) {
       fail(caught);
@@ -198,12 +199,12 @@ export function createImportStore(deps: ImportStoreDeps): ImportStore {
           request.excluded ?? [],
         ),
         timeout,
-        "启动导入",
+        timeoutMessage("import.timeout.start", timeout),
       );
       if (started.batchId === "") {
         // 浏览器降级（`api/import.ts` 在没有 Tauri 时返回空批次）：
         // 这不是「运行中」，也不该让弹窗永远转圈 —— 说清是环境问题
-        setError("当前环境没有导入后端（开发预览里只有界面）");
+        setError(t("import.no_backend"));
         setBatchId(null);
         return;
       }
@@ -212,8 +213,8 @@ export function createImportStore(deps: ImportStoreDeps): ImportStore {
       unlisten = await withTimeout(deps.api.subscribe((incoming) => {
         // 只认自己这一批（理论上只有一个批次在跑，但别留隐患）
         if (incoming.batchId === batchId()) apply(incoming);
-      }), timeout, "订阅导入进度");
-      apply(await withTimeout(deps.api.status(started.batchId), timeout, "读导入状态"));
+      }), timeout, timeoutMessage("import.timeout.subscribe", timeout));
+      apply(await withTimeout(deps.api.status(started.batchId), timeout, timeoutMessage("import.timeout.status", timeout)));
     } catch (caught) {
       fail(caught);
       setBatchId(null);
@@ -295,7 +296,7 @@ export function createImportStore(deps: ImportStoreDeps): ImportStore {
       const id = batchId();
       if (id === null) return 0;
       try {
-        return await withTimeout(deps.api.exportErrors(id, path), timeout, "导出错误清单");
+        return await withTimeout(deps.api.exportErrors(id, path), timeout, timeoutMessage("import.timeout.export", timeout));
       } catch (caught) {
         fail(caught);
         return 0;

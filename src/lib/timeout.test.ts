@@ -24,12 +24,13 @@ test("时限之内报错：原错误照常抛出（不能变成超时）", async
   );
 });
 
-test("永远不 settle 的任务：到点抛 TimeoutError，消息是给人看的", async () => {
+test("永远不 settle 的任务：到点抛 TimeoutError，消息**原样透传**（由应用层拼好）", async () => {
   const never = new Promise<never>(() => {});
-  await assert.rejects(withTimeout(never, 20, "启动导入"), (error: unknown) => {
+  const message = "启动导入没有在 15 秒内回应（后端可能已经挂了）";
+  await assert.rejects(withTimeout(never, 20, message), (error: unknown) => {
     assert.ok(error instanceof TimeoutError);
-    assert.match(error.message, /启动导入/);
-    assert.match(error.message, /秒内回应/);
+    assert.equal(error.message, message);
+    assert.equal(error.timeoutMs, 20);
     return true;
   });
 });

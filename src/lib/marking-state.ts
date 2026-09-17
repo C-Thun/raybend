@@ -87,19 +87,12 @@ export function ratingDisplay(rating: number, compact: boolean): RatingDisplay |
   return compact ? { filled: 1, compact: true } : { filled: clamped, compact: false };
 }
 
-/**
- * 色标的中文名（撤销提示、无障碍标签用）。
- *
- * 与 `src-tauri/src/browse.rs` 的 `color_name` 一一对应 —— 那边给的是
- * 「撤销：标红色」里的词，这里给界面用。
+/*
+ * 色标的**名字**不在这个文件里：它是界面文案，必须走语言包
+ * （W2 接线时用 `t("grid.color.red")` 这类 key，两边各自翻译）。
+ * 这里原本有一张中文名表（`COLOR_LABELS`）， 2026-09-17 的文案普查删掉了 ——
+ * 它当时无人引用，且是「中文硬编码进界面」的隐患。
  */
-export const COLOR_LABELS: Record<string, string> = {
-  red: "红",
-  yellow: "黄",
-  green: "绿",
-  blue: "蓝",
-  purple: "紫",
-};
 
 /** 色标的可选值（顺序 = 面板上的顺序；`null` = 无色，是那个空心圈）。 */
 export const COLOR_VALUES: readonly (string | null)[] = [

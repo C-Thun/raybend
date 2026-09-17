@@ -15,13 +15,21 @@
  *   （`context="library"` 才会渲染标记区）。
  */
 
-import { createEffect, createMemo, createSignal, For, onCleanup, onMount } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import {
+  IconAlertTriangle,
+  IconAlbumOff,
+  IconPhoto,
+  IconPhotoOff,
+} from "@tabler/icons-solidjs";
 
 import { getThumbBytes } from "../../api/db.ts";
+import { StateWatermark } from "../../components/ui/StateWatermark.tsx";
 import { Tile, type TileColorLabel } from "../../components/ui/Tile.tsx";
 import { VirtualGrid } from "../../components/ui/VirtualGrid.tsx";
 import { createTokenPx } from "../../components/ui/tokens.ts";
 import { createThumbQueue } from "../../components/ui/thumb-queue.ts";
+import { t } from "../../i18n/index.ts";
 import {
   computeTileFlow,
   clampTileStepIndex,
@@ -130,14 +138,62 @@ export function BrowseGrid(props: BrowseGridProps) {
     return `${root}${sep}${relPath}`;
   };
 
+  /*
+   * 没有内容可画时的那块水印（`null` = 该画网格）。
+   *
+   * 四个条件**按优先级**排 —— 顺序错了会出现「载入中却报空」这类假状态：
+   *   1. 还没选库（左列会告诉用户去哪建库，网格这边只做背景陈述）
+   *   2. 出错且什么都没拿到（有数据时不清屏：报错还要能接着看图）
+   *   3. 首次加载中（`total() === 0` 才算「首次」：翻页不置 loading，见 store 的说明）
+   *   4. 真的没有照片
+   */
+  const watermark = () => {
+    if (store.repositoryId() === null) {
+      return (
+        <StateWatermark
+          icon={<IconAlbumOff size={64} stroke-width={1} />}
+          text={t("browse.noRepository")}
+        />
+      );
+    }
+    if (store.error() !== null && store.total() === 0) {
+      return (
+        <StateWatermark
+          tone="error"
+          icon={<IconAlertTriangle size={64} stroke-width={1} />}
+          text={t("browse.load_error", { message: store.error() ?? "" })}
+          action={{ label: t("common.retry"), run: () => void store.reload() }}
+        />
+      );
+    }
+    if (store.loading() && store.total() === 0) {
+      return (
+        <StateWatermark
+          animate
+          icon={<IconPhoto size={64} stroke-width={1} />}
+          text={t("browse.loading")}
+        />
+      );
+    }
+    if (store.total() === 0) {
+      return (
+        <StateWatermark
+          icon={<IconPhotoOff size={64} stroke-width={1} />}
+          text={t("browse.empty_lib")}
+        />
+      );
+    }
+    return null;
+  };
+
   return (
     <div
       ref={container}
-      class={["min-h-0 flex-1 overflow-hidden px-2 py-2", props.class ?? ""]
+      class={["flex min-h-0 flex-1 flex-col overflow-hidden px-2 py-2", props.class ?? ""]
         .filter(Boolean)
         .join(" ")}
     >
-      <VirtualGrid
+      <Show when={watermark()} fallback={<VirtualGrid
         rows={rows()}
         resetKey={props.resetKey}
         onVisibleRange={(start, end) => {
@@ -151,8 +207,10 @@ export function BrowseGrid(props: BrowseGridProps) {
                 class="flex items-baseline gap-2 px-1"
                 style={{ height: `${row.height}px` }}
               >
-                <span class="text-3 font-semibold text-fg-2">{row.label}</span>
-                <span class="text-2 text-fg-3">{row.count}</span>
+                <span class="text-fs-2 font-semibold text-fg-2">
+                  {row.unknown ? t("grid.unknown_time") : row.label}
+                </span>
+                <span class="text-fs-0 text-fg-3">{row.count}</span>
               </div>
             );
           }
@@ -213,7 +271,9 @@ export function BrowseGrid(props: BrowseGridProps) {
             </div>
           );
         }}
-      />
+      />}>
+        {(node) => node()}
+      </Show>
     </div>
   );
 }

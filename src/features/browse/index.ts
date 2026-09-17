@@ -14,7 +14,6 @@ export {
   browseGroups,
   DEFAULT_GAP_MINUTES,
   GROUP_ROW_HEIGHT,
-  UNKNOWN_LABEL,
   type BrowseGroupBoundary,
   type BrowseGroupRow,
   type BrowseRowModel,

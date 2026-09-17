@@ -36,7 +36,13 @@ export interface BrowseGroupRow {
   kind: "group";
   key: string;
   height: number;
+  /**
+   * 标题文字。**「未知时间」那一组的 `label` 是空串** ——
+   * 它不是数据而是**文案**，得由视图按当前语言渲染（见 `unknown`）。
+   */
   label: string;
+  /** 这一组是不是「未知时间」那一组（视图据此换成 `t("grid.unknown_time")`） */
+  unknown: boolean;
   /** 这一组一共几张（标题右侧显示）。 */
   count: number;
   /** 这一组的起始下标。 */
@@ -49,7 +55,10 @@ export type BrowseRowModel = BrowseTileRow | BrowseGroupRow;
 export interface BrowseGroupBoundary {
   start: number;
   count: number;
+  /** 日键（`YYYY-MM-DD`）；「未知时间」组是空串 */
   label: string;
+  /** 「未知时间」组（没有拍摄时间的那些） */
+  unknown: boolean;
 }
 
 /** 分组标题行的高度（px）——比 tile 行矮得多，只是个带文字的间隔。 */
@@ -83,10 +92,10 @@ export function browseGroups(
     if (ms === null || !Number.isFinite(ms)) {
       // 未知时间：整段归一组（排序把没有时间的都排在最后）
       const last = groups[groups.length - 1];
-      if (last?.label === UNKNOWN_LABEL) {
+      if (last?.unknown === true) {
         last.count += 1;
       } else {
-        groups.push({ start: index, count: 1, label: UNKNOWN_LABEL });
+        groups.push({ start: index, count: 1, label: "", unknown: true });
       }
       previousMs = null;
       currentDay = null;
@@ -99,7 +108,7 @@ export function browseGroups(
     const dayBroken = day !== currentDay;
 
     if (groups.length === 0 || dayBroken || gapBroken) {
-      groups.push({ start: index, count: 1, label: day });
+      groups.push({ start: index, count: 1, label: day, unknown: false });
     } else {
       groups[groups.length - 1].count += 1;
     }
@@ -109,9 +118,6 @@ export function browseGroups(
 
   return groups;
 }
-
-/** 「未知时间」那一组的标题（与 `lib/time-group.ts` 的 `UNKNOWN_LABEL` 同一个串）。 */
-export const UNKNOWN_LABEL = "未知时间";
 
 /**
  * 按当地时间算这一天的键（`YYYY-MM-DD`）。
@@ -184,15 +190,18 @@ export function buildBrowseRows(input: BuildBrowseRowsInput): BrowseRowModel[] {
     const start = Math.max(0, Math.min(group.start, total));
     const end = Math.max(start, Math.min(group.start + group.count, total));
     if (end <= start) continue;
+    // 未知时间组的 label 是空串 —— 键里用 `unknown` 占位，否则多组会撞键
+    const groupKey = group.unknown ? "unknown" : group.label;
     rows.push({
       kind: "group",
-      key: `g:${group.label}:${start}`,
+      key: `g:${groupKey}:${start}`,
       height: GROUP_ROW_HEIGHT,
       label: group.label,
+      unknown: group.unknown,
       count: end - start,
       start,
     });
-    pushTiles(start, end, `g:${group.label}:${start}`);
+    pushTiles(start, end, `g:${groupKey}:${start}`);
   }
   return rows;
 }

@@ -13,23 +13,24 @@
  * 有这道时限之后，最坏情况会落到**错误态**：用户看到一句人话、能关掉弹窗、能重试。
  * 也就是说：**时限的作用不是让慢操作变快，而是让「卡死」变成「报错」**。
  *
- * 用法：`await withTimeout(deps.api.start(...), timeoutMs, "启动导入")`
+ * 用法：`await withTimeout(deps.api.start(...), timeoutMs, timeoutMessage("import.timeout.start", timeoutMs))`
+ *
+ * ⚠️ **第三个参数是「已经翻好的一句话」，不是动作名**。为什么这么定：
+ * 本文件在**纯逻辑层**（`ARCHITECTURE.md` §1），而分层检查器不允许 `lib` import `i18n` ——
+ * 所以句子的拼装交给**应用层**（`src/i18n/index.ts` 的 `timeoutMessage`）。
  */
 
-/** 超时错误：`instanceof` 可辨，消息已是可以直接给用户看的一句话 */
+/** 超时错误：`instanceof` 可辨，`message` 就是可以直接给用户看的那句话（由调用方拼好） */
 export class TimeoutError extends Error {
-  /** 被限时的那个动作（中文，用于拼消息） */
-  readonly what: string;
   /** 时限（毫秒） */
   readonly timeoutMs: number;
 
-  constructor(what: string, timeoutMs: number) {
-    super(`${what}没有在 ${(timeoutMs / 1000).toFixed(0)} 秒内回应（后端可能已经挂了）`);
+  constructor(message: string, timeoutMs: number) {
+    super(message);
     this.name = "TimeoutError";
     // ⚠️ 字段在这里**逐个赋值**，不用构造函数参数属性：项目的测试跑在 Node 的
     // strip-only TS 模式下（`--experimental-strip-types`），**不支持**参数属性
     // （`constructor(readonly x: T)`）—— 那样会整个测试文件语法报错。
-    this.what = what;
     this.timeoutMs = timeoutMs;
   }
 }
@@ -43,7 +44,7 @@ export class TimeoutError extends Error {
 export function withTimeout<T>(
   task: Promise<T>,
   timeoutMs: number,
-  what: string,
+  message: string,
 ): Promise<T> {
   // 时限非正数 = 不设限（测试与「用户自己关掉了保护」都用得上）
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return task;
@@ -53,7 +54,7 @@ export function withTimeout<T>(
       task.catch(() => {
         // 超时之后它才失败：与我们无关了，吞掉以免出现 unhandled rejection
       });
-      reject(new TimeoutError(what, timeoutMs));
+      reject(new TimeoutError(message, timeoutMs));
     }, timeoutMs);
 
     task.then(

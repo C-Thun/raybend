@@ -12,3 +12,4 @@ export type { LibrarySettingsDialogProps } from "./LibrarySettingsDialog.tsx";
 export type { CreateRepositoryDialogProps } from "./CreateRepositoryDialog.tsx";
 export { evaluateCreate, probeMatches } from "./create-logic.ts";
 export type { CreateGate, CreateHint } from "./create-logic.ts";
+export type { RemountError } from "./state.ts";

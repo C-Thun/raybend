@@ -14,6 +14,7 @@
  */
 
 import { isTauriRuntime } from "./tauri-env.ts";
+import { t } from "../i18n/index.ts";
 import type {
   DirEntry,
   RepositorySettings,
@@ -286,7 +287,7 @@ export async function createRepository(
   path: string,
   name?: string,
 ): Promise<RepositoryView> {
-  if (!isTauriRuntime()) throw new Error("浏览器里不能建库");
+  if (!isTauriRuntime()) throw new Error(t("common.desktop_only"));
   return call<RepositoryView>("repository_create", { path, name: name ?? null });
 }
 
@@ -294,7 +295,7 @@ export async function createRepository(
 export async function remountRepository(
   repositoryId: string,
 ): Promise<RepositoryView> {
-  if (!isTauriRuntime()) throw new Error("浏览器里不能重挂载库");
+  if (!isTauriRuntime()) throw new Error(t("common.desktop_only"));
   return call<RepositoryView>("repository_remount", { repositoryId });
 }
 

@@ -36,6 +36,7 @@ export const enUS: Record<MessageKey, string> = {
  "import.keep_running": "Keep importing",
  "import.keep_partial": "Photos already imported stay in the library — cancelling does not roll back",
  "import.export_errors": "Export error list",
+ "import.no_backend": "No import backend in this environment (the dev preview is UI-only)",
  "import.exported_to": "Exported to {path}",
  "import.errors_truncated": "Showing the last {shown} of {total}",
  "import.reveal": "Show these photos in the library",
@@ -94,9 +95,20 @@ export const enUS: Record<MessageKey, string> = {
  "common.cancel": "Cancel",
  "common.confirm": "OK",
  "common.loading": "Loading",
+ /**
+  * The timeout sentence — `{what}` is the action that hung (itself a message key).
+  * Composed by `timeoutMessage()` in `i18n/index.ts`: `lib/timeout.ts` lives in the
+  * pure-logic layer and may not import i18n.
+  */
+ "common.timeout": "{what} did not respond within {seconds}s (the backend may have crashed)",
  "common.empty": "Nothing here",
  "common.resize_left": "Resize left column",
  "common.retry": "Retry",
+ /**
+  * The one message for "this only exists in the desktop app" (browser preview).
+  * Deliberately generic: it can only really show up in the dev preview.
+  */
+ "common.desktop_only": "This needs the desktop app (browser preview here)",
  "common.selected_summary": "{dirs} folders · {photos} photos selected",
 
  "source.recent": "Recent",
@@ -144,6 +156,8 @@ export const enUS: Record<MessageKey, string> = {
  "grid.unknown_time": "Unknown time",
  "grid.excluded": "Excluded",
  "grid.pick_dir": "Pick a folder on the left",
+ "grid.loading_dir": "Reading folder…",
+ "grid.timeout.meta": "Reading photo info",
  "grid.empty_dir": "No photos in this folder",
  "grid.load_error": "Can't read this folder: {message}",
 
@@ -157,6 +171,13 @@ export const enUS: Record<MessageKey, string> = {
   * 而排除是**跨源**的（切目录不丢），不显式说出来就会显得总数对不上。
   */
  "import.excluded_count": "{n} excluded",
+ /** The hanging action in the timeout sentence (see `common.timeout`) */
+ "import.timeout.command": "Import command",
+ "import.timeout.start": "Start import",
+ "import.timeout.subscribe": "Progress subscription",
+ "import.timeout.status": "Reading import state",
+ "import.timeout.export": "Exporting the error list",
+ "import.timeout.precheck": "Space check",
  "repo.import": "Import",
  "repo.avoid_duplicates": "Skip duplicates",
  "repo.empty": "No libraries yet — create one first",
@@ -207,6 +228,9 @@ export const enUS: Record<MessageKey, string> = {
  "browse.expand": "Expand",
  "browse.collapse": "Collapse",
  "browse.offline": "Offline",
+ "browse.loading": "Loading library…",
+ "browse.empty_lib": "No photos in this library yet",
+ "browse.load_error": "Can't read this library: {message}",
  "browse.noSelection": "Select a photo to see its details here",
  "browse.exif": "Capture",
  "browse.fileInfo": "File",

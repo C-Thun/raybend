@@ -25,7 +25,14 @@ import {
   onMount,
   Show,
 } from "solid-js";
-import { IconAlertTriangle, IconCalendar } from "@tabler/icons-solidjs";
+import {
+  IconAlertTriangle,
+  IconCalendar,
+  IconFolderOpen,
+  IconPhoto,
+  IconPhotoOff,
+} from "@tabler/icons-solidjs";
+import { StateWatermark } from "../../components/ui/StateWatermark.tsx";
 import { Tile } from "../../components/ui/Tile.tsx";
 import { VirtualGrid } from "../../components/ui/VirtualGrid.tsx";
 import { createTokenPx } from "../../components/ui/tokens.ts";
@@ -196,16 +203,46 @@ export function PhotoGrid(props: PhotoGridProps) {
           <Viewer store={viewer} />
         </Show>
         <Show when={!viewer.state().active}>
-        <Show when={store.dir()} fallback={<Hint text={t("grid.pick_dir")} />}>
-          <Show when={store.status() !== "error"} fallback={
-            <Hint
+        <Show
+          when={store.dir()}
+          fallback={
+            <StateWatermark
+              icon={<IconFolderOpen size={64} stroke-width={1} />}
+              text={t("grid.pick_dir")}
+            />
+          }
+        >
+        <Show when={store.status() !== "error"} fallback={
+            <StateWatermark
               tone="error"
+              icon={<IconAlertTriangle size={64} stroke-width={1} />}
               text={t("grid.load_error", { message: store.error() ?? "" })}
               action={{ label: t("common.retry"), run: store.reload }}
             />
           }>
-            <Show when={store.status() !== "loading"} fallback={<Hint text={t("common.loading")} />}>
-              <Show when={rows().length > 0} fallback={<Hint text={t("grid.empty_dir")} />}>
+            {/*
+              载入态 = **扫描目录 + 读文件头缓存**两段（见 store.ts 的 `load`）：
+              等头部缓存铺完才铺 tile，照片的比例一次到位，不会先占位再「长大」。
+            */}
+            <Show
+              when={store.status() !== "loading"}
+              fallback={
+                <StateWatermark
+                  animate
+                  icon={<IconPhoto size={64} stroke-width={1} />}
+                  text={t("grid.loading_dir")}
+                />
+              }
+            >
+              <Show
+                when={rows().length > 0}
+                fallback={
+                  <StateWatermark
+                    icon={<IconPhotoOff size={64} stroke-width={1} />}
+                    text={t("grid.empty_dir")}
+                  />
+                }
+              >
                 <VirtualGrid
                   rows={rows()}
                   overscan={2}
@@ -248,33 +285,6 @@ export function PhotoGrid(props: PhotoGridProps) {
         locale={groupingLocale()}
         loadingTimes={store.loadingTimes()}
       />
-    </div>
-  );
-}
-
-/** 空态 / 加载态 / 错误态的统一外观 */
-function Hint(props: {
-  text: string;
-  tone?: "muted" | "error";
-  action?: { label: string; run: () => void };
-}) {
-  return (
-    <div class="flex min-h-0 flex-1 items-center justify-center gap-2 p-panel-pad">
-      <Show when={props.tone === "error"}>
-        <IconAlertTriangle size={14} class="text-fg-2" aria-hidden="true" />
-      </Show>
-      <p class="text-fs-1 text-fg-3">{props.text}</p>
-      <Show when={props.action}>
-        {(action) => (
-          <button
-            type="button"
-            class="cursor-pointer text-fs-1 underline"
-            onClick={() => action().run()}
-          >
-            {action().label}
-          </button>
-        )}
-      </Show>
     </div>
   );
 }

@@ -507,7 +507,9 @@ test("重挂载：找到就转在线并刷新视图；找不到只记一句提�
 
   await store.remount("a");
   assert.equal(store.remountingId(), null, "结束后要给放掉转圈状态");
-  assert.match(store.remountErrors()["a"] ?? "", /未找到该库/);
+  // 交出来的是事实（找不到 + 试过几处），句子由视图按语言拼；
+  // 替身的 triedPaths 默认是 0，这里只钉「事实」的形状
+  assert.deepEqual(store.remountErrors()["a"], { kind: "not_found", tried: 0 });
   assert.equal(store.repositories()[0].online, false);
 
   state.remountFinds = true;
@@ -525,7 +527,9 @@ test("重挂载失败（命令报错）：错误记在那一张卡片上，不�
   await store.reloadRepositories();
 
   await store.remount("a");
-  assert.match(store.remountErrors()["a"] ?? "", /重挂载炸了/);
+  const error = store.remountErrors()["a"];
+  assert.equal(error?.kind, "message");
+  assert.match(error?.kind === "message" ? error.text : "", /重挂载炸了/);
   assert.equal(store.remountErrors()["b"], undefined);
   assert.equal(store.remountingId(), null);
 });

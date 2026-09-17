@@ -37,6 +37,7 @@ import type { LoadStatus } from "../../lib/load-status.ts";
 import { samePath } from "../../lib/tree.ts";
 import {
   createRepositoryState,
+  type RemountError,
   type RepositoryStateApi,
 } from "../../features/repositories/state.ts";
 
@@ -148,8 +149,8 @@ export interface ImportStore {
   applyRepositoryTemplate: (repositoryId: string, template: string) => void;
   /** 正在重新查找的库 id */
   remountingId: () => string | null;
-  /** 重新查找失败的原因（库 id → 文案；成功则清掉） */
-  remountErrors: () => Readonly<Record<string, string>>;
+  /** 重新查找失败的原因（库 id → 原因；句子由视图拼，见 `RemountError`） */
+  remountErrors: () => Readonly<Record<string, RemountError>>;
   /** 对所有登记路径重新查找一次（离线徽标点它） */
   remount: (repositoryId: string) => Promise<void>;
 
