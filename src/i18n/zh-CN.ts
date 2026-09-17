@@ -172,7 +172,8 @@ export const zhCN = {
  "tools.batch_exclude": "批量排除",
 
  // ── 右列：库（design/main.md §3.3）────────────────────
- "repo.title": "库",
+ "import.dest_library": "导入目标库",
+  "repo.title": "库",
  "repo.create": "新建库",
  /**
   * 「已排除 N 张」—— 与「已选择 M 张照片」同一行、靠右显示。
@@ -189,13 +190,12 @@ export const zhCN = {
  "import.timeout.precheck": "空间预检",
  "repo.import": "导入",
  "repo.avoid_duplicates": "避免重复导入",
- "repo.empty": "还没有库，先建一个",
+ "repo.empty": "还没有库 —— 先新建一个作为导入目标",
  "repo.online": "在线",
  "repo.offline": "离线",
  "repo.remount": "重新查找",
  "repo.remount_failed": "没找到这个库（已试过 {tried} 处）",
  "repo.path_count": "{n} 条路径",
- "repo.card.selected": "已选中",
  "repo.count_unknown": "—",
  "repo.create.name": "名称",
  "repo.create.path": "库根目录",
@@ -209,7 +209,7 @@ export const zhCN = {
  "repo.create.hint_not_directory": "这个路径不是一个目录",
  "repo.create.submit": "新建库",
  "repo.create.failed": "建库失败：{message}",
- "repo.import_hint": "先在左边勾选目录、再选一个库",
+ "repo.import_hint": "先在左边勾选目录，再选一个导入目标库",
  "repo.import_running": "导入中…（M1-6 实现）",
 
  // ── 关于（帮助 → 关于）─────────────────────────────

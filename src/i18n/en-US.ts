@@ -163,7 +163,8 @@ export const enUS: Record<MessageKey, string> = {
 
  "tools.batch_exclude": "Exclude selected",
 
- "repo.title": "Libraries",
+ "import.dest_library": "Destination library",
+  "repo.title": "Libraries",
  "repo.create": "New library",
  /**
   * 「已排除 N 张」—— 与「已选择 M 张照片」同一行、靠右显示。
@@ -180,13 +181,12 @@ export const enUS: Record<MessageKey, string> = {
  "import.timeout.precheck": "Space check",
  "repo.import": "Import",
  "repo.avoid_duplicates": "Skip duplicates",
- "repo.empty": "No libraries yet — create one first",
+ "repo.empty": "No libraries yet — create one to import into",
  "repo.online": "Online",
  "repo.offline": "Offline",
  "repo.remount": "Find again",
  "repo.remount_failed": "Library not found (tried {tried} locations)",
  "repo.path_count": "{n} paths",
- "repo.card.selected": "Selected",
  "repo.count_unknown": "—",
  "repo.create.name": "Name",
  "repo.create.path": "Library root",
@@ -200,7 +200,7 @@ export const enUS: Record<MessageKey, string> = {
  "repo.create.hint_not_directory": "This path is not a folder",
  "repo.create.submit": "Create library",
  "repo.create.failed": "Couldn't create the library: {message}",
- "repo.import_hint": "Check folders on the left, then pick a library",
+ "repo.import_hint": "Check the folders on the left, then pick a destination library",
  "repo.import_running": "Importing… (lands in M1-6)",
 
  // ── About (Help → About) ───────────────────────────────

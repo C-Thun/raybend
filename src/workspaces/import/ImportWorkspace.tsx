@@ -274,7 +274,8 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
               {/* ── 右列：库（固定宽，不可拖）─────────────────── */}
               <aside class="flex w-panel-w-right shrink-0 flex-col gap-2 bg-surface-main p-panel-pad">
         <p class="text-fs-1 tracking-wide text-fg-2 uppercase">
-          {t("repo.title")}
+          {/* 面板标题说清是「导入到哪个库」—— 单说「库」太模糊 */}
+          {t("import.dest_library")}
         </p>
 
         <RepositoryList
