@@ -40,6 +40,16 @@ import {
 } from "../api/spike.ts";
 import { isTauriRuntime } from "../api/tauri-env.ts";
 
+/**
+ * 洞口距中列四边的边距（CSS 像素）。
+ *
+ * **两处必须一致**：这里的布局（洞口矩形、四周那圈不透明底）与
+ * `src-tauri/src/spike_viewport.rs` 的 `HOLE_MARGIN_CSS`（`setHole` 按边距推算时的退路）。
+ * 正常运行以**界面上的报的**矩形为准（DOM 是布局权威，Rust 是变换权威），
+ * 这个值只在两边都要各自“没收到对方消息”时兵分二路地落同一个数。
+ */
+const HOLE_MARGIN_PX = 190;
+
 const EMPTY: SpikeSnapshot = {
   open: false,
   adapter: { backend: "", name: "", deviceType: "", driver: "", driverInfo: "" },
@@ -319,8 +329,8 @@ export default function SpikeViewport() {
           <div
             ref={hole}
             // 四周留出面板的边距；这一块**没有背景**，靠窗口透明透出 wgpu 画的内容
-            class="absolute inset-[190px] cursor-grab active:cursor-grabbing"
-            style={{ "touch-action": "none" }}
+            class="absolute cursor-grab active:cursor-grabbing"
+            style={{ "touch-action": "none", inset: `${HOLE_MARGIN_PX}px` }}
             onWheel={onWheel}
             onPointerDown={(event) => {
               dragging = true;
@@ -334,11 +344,33 @@ export default function SpikeViewport() {
             }}
             onPointerMove={onPointerMove}
           />
-          {/* 洞口之外的四周保持不透明（真实产品里这里就是界面面板） */}
-          <div class="pointer-events-none absolute inset-0 -z-10 bg-surface-main" />
-          <div class="absolute inset-0 -z-20 bg-surface-main" />
+          {/*
+           * 洞口之外的四周保持不透明（真实产品里这里就是界面面板）。
+           *
+           * ⚠️ **只能画「环」，绝不能整块盖** —— 负 z-index 只决定页内堆叠顺序，
+           * **并不会**让页面像素变透明。早先这里是两块 `inset-0` 的底色，等于连洞口
+           * 一起刷成了不透明，于是「透明挖洞」根本没出现（人类 2026-09-17 看到的就是
+           * 中间一片暗色、wgpu 画的东西一点都看不见）。
+           */}
           <div
-            class="pointer-events-none absolute inset-[190px] border border-dashed border-line-2"
+            class="pointer-events-none absolute inset-x-0 top-0 -z-10 bg-surface-main"
+            style={{ height: `${HOLE_MARGIN_PX}px` }}
+          />
+          <div
+            class="pointer-events-none absolute inset-x-0 bottom-0 -z-10 bg-surface-main"
+            style={{ height: `${HOLE_MARGIN_PX}px` }}
+          />
+          <div
+            class="pointer-events-none absolute inset-y-0 start-0 -z-10 bg-surface-main"
+            style={{ width: `${HOLE_MARGIN_PX}px` }}
+          />
+          <div
+            class="pointer-events-none absolute inset-y-0 end-0 -z-10 bg-surface-main"
+            style={{ width: `${HOLE_MARGIN_PX}px` }}
+          />
+          <div
+            class="pointer-events-none absolute border border-dashed border-line-2"
+            style={{ inset: `${HOLE_MARGIN_PX}px` }}
             aria-hidden="true"
           />
         </main>

@@ -807,6 +807,14 @@ fn apply_command(
                 width: (width * dpr).max(1.0),
                 height: (height * dpr).max(1.0),
             });
+            // 洞口变了要按**新洞口**重新适配：适配的参照系是洞口而不是整窗
+            // （`fit_modes_use_the_hole_not_the_window` 就是这个口径）。
+            // 漏了这一步的后果实测过：首次上报洞口时适配已经按整窗算完了，zoom 停在 0.41，
+            // 而按洞口应该是 0.05 上下 —— 洞里看到的是一块放大的局部，不是「整张图适配在洞里」。
+            // `Free` 档不动：那时用户已经自己缩放过，重适配会把他的操作抹掉。
+            if context.viewport().fit_mode != FitMode::Free {
+                context.viewport_mut().refit();
+            }
             if let Ok(mut guard) = shared.lock() {
                 guard.hole_css = Some((x, y, width, height));
             }

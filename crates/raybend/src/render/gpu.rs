@@ -105,6 +105,12 @@ pub struct GpuContext {
     /// 设备丢失的记录（A.2 要）
     pub device_lost: Arc<std::sync::Mutex<Vec<String>>>,
     frames_drawn: u64,
+    /// 上一帧发现 surface 「次优」（尺寸/DPI 刚变）→ **下一帧开头**重配。
+    ///
+    /// 为什么不能就地重配：wgpu 要求「`get_current_texture()` 拿到的那个 SurfaceOutput
+    /// 必须先释放，才能 `configure()`」。而 `Suboptimal` 分支里那个帧**正活着** ——
+    /// 在那里顺手 `configure` 会直接校验失败 panic（见 `render()` 里的详细记录）。
+    reconfigure_pending: bool,
 }
 
 impl GpuContext {
@@ -253,6 +259,7 @@ impl GpuContext {
             viewport,
             device_lost,
             frames_drawn: 0,
+            reconfigure_pending: false,
         })
     }
 
@@ -321,13 +328,29 @@ impl GpuContext {
         if self.config.width == 0 || self.config.height == 0 {
             return Ok(RenderOutcome::Skipped);
         }
+        /*
+         * 补做上一帧挂起的重配 —— **位置很关键：必须在 `get_current_texture()` 之前**。
+         *
+         * 2026-09-17 实测事故：把 spike 窗口拖到另一块屏（触发 DPI 变化）→ surface 返回
+         * `Suboptimal` → 当时我在那个分支里就地 `configure`，而那一帧还活着 →
+         * `Validation Error: The SurfaceOutput ... must be dropped before re-configuring`。
+         * 更糟的是：解开 panic 时要释放那个帧，而 surface 已不再处于可呈现状态 →
+         * **第二次 panic** → 双重 panic 直接 abort（人类看到的就是「卡几秒直接崩掉」）。
+         *
+         * 所以规矩就一句：**持帧期间绝不 `configure`** —— 挂个标记，下一帧开头（此时无帧在手）再配。
+         */
+        if self.reconfigure_pending {
+            self.reconfigure_pending = false;
+            self.surface.configure(&self.device, &self.config);
+        }
         self.write_uniforms();
 
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame) => frame,
-            // 次优（比如尺寸刚变）：能画就画，下一帧再重配
+            // 次优（比如尺寸/DPI 刚变）：**这一帧仍然能画**，先画完呈现出去，
+            // 重配推到下一帧开头（见上）。
             wgpu::CurrentSurfaceTexture::Suboptimal(frame) => {
-                self.surface.configure(&self.device, &self.config);
+                self.reconfigure_pending = true;
                 frame
             }
             wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
