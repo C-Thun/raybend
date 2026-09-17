@@ -5,12 +5,35 @@ import { Button } from '../components/Button.tsx';
 import { GithubMark } from '../components/GithubMark.tsx';
 import { Shot } from '../components/Shot.tsx';
 import { WindowFrame } from '../components/WindowFrame.tsx';
-import { messages } from '../i18n/index.ts';
+import { locale, messages } from '../i18n/index.ts';
 import { currentRelease } from '../data/release.ts';
 import { REPO_URL } from '../data/site.ts';
 
 /** 胶片孔数量：够铺满最宽的屏幕（多出来的被 `overflow-hidden` 裁掉） */
 const FILM_HOLES = Array.from({ length: 64 }, (_, index) => index);
+
+/**
+ * 产品名的宽度**按语言分开定** —— 因为两种字形的比例差得很远：
+ *
+ * ```text
+ * 中文「光伴」    `marks/name-zh.svg` 的 viewBox 2172×1227 ⇒ 高/宽 ≈ 0.565
+ * 英文「RayBend」 `marks/name-en.svg` 的 viewBox 2799×1167 ⇒ 高/宽 ≈ 0.417
+ * ```
+ *
+ * 用**同一个宽度**，英文名会整整矮掉四分之一（实测 15rem 时中文高 ≈ 8.5rem、
+ * 英文只有 ≈ 6.3rem），而人看的是**高度**是否一致。所以要分开给的是宽度：
+ *
+ * ```text
+ * 中文 15rem → 高 ≈ 8.5rem ｜ 英文 19rem → 高 ≈ 7.9rem
+ * ```
+ *
+ * 英文略矮一点是刻意的（它本来就长得多）。**要调大小就改下面这两个 `w-[…]`**，
+ * 高度会自动跟着各自的比例走；改完 `pnpm dev` 看一眼。
+ */
+const NAME_WIDTH_CLASS: Record<string, string> = {
+  zh: 'w-[min(15rem,58vw)]',
+  en: 'w-[min(19rem,72vw)]',
+};
 
 /**
  * Hero：**贴顶**、辅色（琥珀）满铺、平面化。
@@ -59,7 +82,7 @@ export function Hero() {
             <BrandMark
               kind="name"
               label={messages().nav.brand}
-              class="mt-5 w-[min(15rem,58vw)]"
+              class={`mt-5 ${NAME_WIDTH_CLASS[locale()] ?? NAME_WIDTH_CLASS.zh}`}
               outline={10}
             />
             <BrandMark

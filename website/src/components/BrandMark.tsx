@@ -42,9 +42,11 @@ export function BrandMark(props: BrandMarkProps) {
         class="rb-mark-path"
         fill="var(--color-brand)"
         stroke={props.outline ? 'var(--color-white)' : 'none'}
-        // 外扩边宽度（可见值，屏幕像素）—— 传给 CSS，见 App.css 的 `.rb-mark-path`
+        // 外扩边宽度（可见值，屏幕像素）—— 传给 CSS，见 App.css 的 `.rb-mark-path`。
+        // **必须带 `px`**：这个值最终进 `calc(...)`，纯数字不是合法长度，
+        // 整条 `stroke-width` 会被丢掉、退回初始值 1（实测白边就剩细细一条）。
         // pi-lens-ignore: inline-styles
-        style={{ '--rb-mark-outline': props.outline ?? 0 } as JSX.CSSProperties}
+        style={{ '--rb-mark-outline': `${props.outline ?? 0}px` } as JSX.CSSProperties}
       />
     </svg>
   );

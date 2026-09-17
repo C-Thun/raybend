@@ -107,7 +107,11 @@
     paint-order: stroke;
     stroke-linejoin: round;
     vector-effect: non-scaling-stroke;
-    stroke-width: calc(var(--rb-mark-outline, 0) * 2);
+    /* ⚠️ 自定义属性里的值**必须带单位**：`calc(10 * 2)` 不是合法长度，
+       浏览器会把整条 `stroke-width` 丢掉、退回初始值 **1** ——
+       实测表现就是「白边只有细细一条，看着像 1px」（2026-09-17）。
+       所以 JSX 那边传的是 `10px`，这里的兜底也得写 `0px`。 */
+    stroke-width: calc(var(--rb-mark-outline, 0px) * 2);
   }
 
   /* hero 右上的同心圆环（线条粗细统一走这里） */
