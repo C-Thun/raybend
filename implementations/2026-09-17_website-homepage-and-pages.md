@@ -171,3 +171,16 @@ pnpm build                   # 818ms + 113ms；dist/client 6.0 MB
 **结论**：把仓库 `Settings → Pages` 的 Source 设成 GitHub Actions（并填自定义域名）之后 ——
 推 `master`、发**正式版** release、手动触发这三条都会自动构建并部署；第一个正式版发布后，
 官网的版本号与安装包直链会自动跟着变（预发布版不上官网）。
+
+**③ 域名实测（2026-09-17 15:2x，从本机查）：**
+
+| 查到的东西 | 结果 |
+| --- | --- |
+| DNS | `raybend.cthun.com` → `CNAME c-thun.github.io` → 四个 GitHub Pages IP —— **配得对** |
+| 证书 | `Let's Encrypt CN=raybend.cthun.com`，GitHub 已自动签发（09-17 06:05 UTC） |
+| HTTPS 强制 | `http://` → `301` 到 `https://` —— **已开** |
+| ⚠️ **发布源** | 域名现在服务的是**仓库根**（`/src/index.tsx`、`/package.json`、`/vite.config.ts` 都 200），即 Pages 的 `Source` 还停在 **`Deploy from a branch`**（启用 Pages 时的默认值，快照时间 04:51 UTC，早于 `website/` 存在） |
+
+**这一条必须先改**：`Source` 停在 `Deploy from a branch` 时，`actions/deploy-pages` 会直接失败
+（`Get Pages site failed … configured to build using GitHub Actions`）——
+见 `website/AGENTS.md` §5 新增的排查提示。改成 `GitHub Actions` 后，下一次 push 即上线。

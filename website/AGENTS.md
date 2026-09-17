@@ -165,6 +165,12 @@ JSON-LD `SoftwareApplication`）—— 这是**爬虫唯一能直接读到的东
 
 1. **打开 Pages**：仓库 → `Settings` → `Pages` → `Build and deployment` →
    `Source` 选 **GitHub Actions**。（工作流里的 `enablement: true` 若能自动开，这步已省。）
+
+   > ⚠️ **`Source` 不能停在 `Deploy from a branch`**（那是启用 Pages 时的默认值）。
+   > 分支发布模式下 `actions/deploy-pages` 会直接失败，日志里是
+   > `Error: Get Pages site failed… Please verify that the repository has Pages enabled and
+   > configured to build using GitHub Actions`（或 `Failed to create deployment (status: 400) …
+   > Deployments are only allowed from gh-pages`）。第一次部署遇到这类报错，先看这个开关。
 2. **先填自定义域名**：同一页 `Custom domain` 填 `raybend.cthun.com` → `Save`。
    ⚠️ GitHub 官方要求**先在仓库设置里填域名、再去配 DNS**（反了会有子域被抢注的风险）。
    ⚠️ 发布来源是 Actions 时**不需要 `CNAME` 文件**（官方原文：*"any existing CNAME file is ignored
