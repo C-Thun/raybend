@@ -93,7 +93,12 @@ function fakeApi(count: number) {
       calls.timeline += 1;
       return {
         total: all.length,
-        entries: all.map((a) => ({ id: a.id, takenAt: a.takenAt })),
+        entries: all.map((a) => ({
+          id: a.id,
+          // 路径用 id 合成：片内排序要按文件名自然序，测试里也给它一个真名字
+          relPath: `photos/P${String(a.id).padStart(4, "0")}.JPG`,
+          takenAt: a.takenAt,
+        })),
       };
     },
     async facets(): Promise<BrowseFacets> {
@@ -454,4 +459,59 @@ test("重复设同一个库不会重复加载", async () => {
   store.setRepository("RepoA");
   await tick();
   assert.deepEqual(calls.page, []);
+});
+
+// ─────────────────── 显示序映射（片内自然序交给 store）───────────────────
+
+/** `0..n-1` 的置换；`swap` 非空时交换这两位的映射（模拟片内重排） */
+function permutation(n: number, swap: [number, number] | null = null): number[] {
+  const order = Array.from({ length: n }, (_, index) => index);
+  if (swap) {
+    const [a, b] = swap;
+    order[a] = b;
+    order[b] = a;
+  }
+  return order;
+}
+
+test("显示序映射：itemAt 按显示序取，Shift 区间选择也按显示序走", async () => {
+  const { api } = fakeApi(6);
+  const store = createBrowseStore({ api });
+  store.setRepository("RepoA");
+  await tick();
+
+  store.setDisplayOrder(permutation(6, [0, 1]));
+  assert.equal(store.itemAt(0)?.id, 2);
+  assert.equal(store.itemAt(1)?.id, 1);
+  assert.equal(store.itemAt(2)?.id, 3);
+
+  /*
+   * 区间选择（Shift）走的就是「可见顺序」——它也必须按显示序，
+   * 否则用户在一个时间段里 Shift 连选，选中的会是他没看见的那些照片。
+   */
+  store.select(2, "replace");
+  store.select(1, "range");
+  assert.deepEqual(store.selectedIds().sort((a, b) => a - b), [1, 2]);
+
+  // 清掉映射（取消分组）→ 回到后端顺序
+  store.setDisplayOrder(null);
+  assert.equal(store.itemAt(0)?.id, 1);
+  assert.equal(store.itemAt(1)?.id, 2);
+});
+
+test("显示序映射：按需取数按**后端下标**算页（取的是可见区间的超集）", async () => {
+  const { api, calls } = fakeApi(600);
+  const store = createBrowseStore({ api });
+  store.setRepository("RepoA");
+  await tick();
+
+  // 显示第 0 位映射到后端第 599 位 → 该取第 2 页（512..767），而不是第 0 页
+  store.setDisplayOrder(permutation(600, [0, 599]));
+  calls.page = [];
+  await store.ensureRange(0, 1);
+  assert.ok(
+    calls.page.includes(512),
+    `应当取到第 2 页（offset 512），实际取了 ${calls.page.join(",")}`,
+  );
+  assert.ok(!calls.page.includes(0), "不该去取第 0 页（那里没有要显示的那张）");
 });

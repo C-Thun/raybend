@@ -12,6 +12,7 @@
  * 用同一个输入比对两者的边界 —— 口径一旦漂了测试就红。
  */
 
+import { compareNatural } from "../../lib/natural-order.ts";
 import { localOffsetMinutes } from "../../lib/time-group.ts";
 
 /** 一天有多少毫秒。 */
@@ -204,4 +205,46 @@ export function buildBrowseRows(input: BuildBrowseRowsInput): BrowseRowModel[] {
     pushTiles(start, end, `g:${groupKey}:${start}`);
   }
   return rows;
+}
+
+/**
+ * 片内按**文件名自然序**排的显示顺序：返回「显示位次 → 原下标」的映射。
+ *
+ * 为什么要它（人类 2026-09-17 定）：同一时间段内，一张照片的 JPG 与 RAW 可能因为
+ * 拍摄时间来源不同（EXIF / 文件名兜底 / mtime）差上几秒，于是按时间排就“按格式分了层”——
+ * 而人期望的是「一个时间段内就按文件名自然排」：`P1000019.JPG` 与 `P1000019.RW2` 挨着。
+ *
+ * 两条边界，别搞混：
+ * * **片的顺序与片的边界完全不动**（那是时间的事，见 {@link browseGroups}）；
+ * * 只在**每一片内部**重排 → 每片仍然是连续区间，分组不会被破坏。
+ *
+ * 返回的是置换（`0..n-1` 的一个排列），直接交给 `store.setDisplayOrder`。
+ */
+export function sliceOrder(
+  timeline: readonly { relPath?: string }[],
+  groups: readonly BrowseGroupBoundary[],
+): number[] {
+  const order: number[] = new Array(timeline.length);
+
+  for (const group of groups) {
+    const start = Math.max(0, Math.min(group.start, timeline.length));
+    const end = Math.max(start, Math.min(group.start + group.count, timeline.length));
+    if (end <= start) continue;
+
+    const indices: number[] = [];
+    for (let at = start; at < end; at += 1) indices.push(at);
+    // 稳定排序：比较器在“数值相等”时还有原始串兜底，而相同比较结果保持原顺序
+    indices.sort((a, b) =>
+      compareNatural(timeline[a]?.relPath ?? "", timeline[b]?.relPath ?? ""),
+    );
+    for (let at = start; at < end; at += 1) {
+      order[at] = indices[at - start] as number;
+    }
+  }
+
+  // 不在任何组里的下标（正常不该有）保持原位，免得置换里出现空洞
+  for (let at = 0; at < order.length; at += 1) {
+    if (order[at] === undefined) order[at] = at;
+  }
+  return order;
 }

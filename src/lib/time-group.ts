@@ -18,10 +18,19 @@
  * 测试里为了让结果确定，可以显式传 `offsetMinutes`（东八区 = 480）。
  */
 
-/** 参与分组的照片（只要 id、拍摄时间与它的时区偏移）。 */
+import { compareNatural } from "./natural-order.ts";
+
+/** 参与分组的照片（只要 id、拍摄时间、时区偏移，以及排序用的名字）。 */
 export interface TimePhotoLike {
   id: string;
   takenAtMs: number | null;
+  /**
+   * 决定**片内顺序**的名字（通常是库内相对路径或文件名）。
+   *
+   * 给了它就按**文件名自然序**排（`P1000019.JPG` 与 `P1000019.RW2` 挨着，
+   * 见 `lib/natural-order.ts`）；不给才退回「调用方传入的顺序」。
+   */
+  name?: string;
   /**
    * 该张照片的时区偏移（分钟）：
    *   * 数字 → 用它（EXIF 写了 `OffsetTime*`）
@@ -116,15 +125,19 @@ function dayStartMs(key: string, offsetMinutes: number): number {
 /**
  * 分组。
  *
- * **分组只看时间，片内顺序看调用方**：
+ * **分组只看时间，片内按文件名自然序**：
  *
  * - 片的**边界**与 `startMs` / `endMs` 完全由时间决定（相邻间隔 > 阈值就断开）；
- * - 片内照片保持**调用方传入的顺序** —— 导入网格按扫描顺序（文件名自然序）传进来，
- *   于是同一个时间段里 `P1000019.JPG` 与 `P1000019.RW2` 是**挨着**的。
+ * - 片内照片按 `name` 的**自然序**排（`lib/natural-order.ts`）；没给 `name` 时才退回
+ *   调用方传入的顺序。
  *
- * 为什么片内不按时间排（2026-09-17 人类报的问题）：同一张照片的 JPG 与 RAW，
+ * 为什么片内不按时间排（2026-09-17 人类报的问题，报了两次）：同一张照片的 JPG 与 RAW，
  * 时间来源可能不同（EXIF / 文件名兜底 / mtime），秒级差异就会让 RAW 整批沉到片尾，
- * 看起来像「按格式分了两层」——而人期望的是「一个时间段里就按文件名自然排」。
+ * 看起来像「按格式分了两层」。
+ *
+ * ⚠️ 第一次只修成「保持传入顺序」，而**浏览网格**的传入顺序恰恰就是后端的时间序
+ * （`ORDER BY taken_at DESC, id DESC`）—— 等于没修，问题照旧。现在明确按名字排：
+ * 两个网格传进来的都可能是时间序，片内让人看到的是文件名序。
  */
 export function groupByTime(
   photos: readonly TimePhotoLike[],
@@ -137,7 +150,11 @@ export function groupByTime(
 
   // 调用方的输入序号：片内按它排（见上面的说明）
   const inputOrder = new Map<string, number>();
-  photos.forEach((photo, index) => inputOrder.set(photo.id, index));
+  const nameOf = new Map<string, string>();
+  photos.forEach((photo, index) => {
+    inputOrder.set(photo.id, index);
+    if (typeof photo.name === "string" && photo.name !== "") nameOf.set(photo.id, photo.name);
+  });
 
   const timed: TimedPhoto[] = [];
   const untimed: string[] = [];
@@ -189,9 +206,16 @@ export function groupByTime(
       const first = current[0];
       const last = current[current.length - 1];
       const ids = current.map((photo) => photo.id);
-      ids.sort(
-        (a, b) => (inputOrder.get(a) ?? 0) - (inputOrder.get(b) ?? 0),
-      );
+      ids.sort((a, b) => {
+        // 片内：先按文件名自然序（给了名字的话），相同再用传入顺序兜底
+        const na = nameOf.get(a);
+        const nb = nameOf.get(b);
+        if (na !== undefined && nb !== undefined) {
+          const byName = compareNatural(na, nb);
+          if (byName !== 0) return byName;
+        }
+        return (inputOrder.get(a) ?? 0) - (inputOrder.get(b) ?? 0);
+      });
       slices.push({
         id: `${key} #${slices.length + 1}`,
         startMs: first.takenAtMs,

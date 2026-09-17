@@ -400,6 +400,8 @@ export function createPhotoGridStore(deps: PhotoGridDeps): PhotoGridStore {
         id: itemId(item),
         takenAtMs: item.takenAtMs,
         offsetMinutes: item.takenAtOffsetMin,
+        // 片内按文件名自然序 —— 用路径（含目录）比只比文件名更确定
+        name: item.path,
       })),
       { gapMinutes: gapMinutes() },
     );

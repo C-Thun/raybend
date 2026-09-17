@@ -146,7 +146,7 @@ test("阈值非法（0 / 负数 / NaN）：当天不切分", () => {
   }
 });
 
-test("片与日不受输入顺序影响，**片内顺序跟着输入走**", () => {
+test("片与日不受输入顺序影响；**没给名字时**片内退回输入顺序", () => {
   /*
    * 2026-09-17 改的契约（人类报「同一个时间段里 RAW 与 JPG 分成两层」）：
    * 分组只看时间，片内顺序**保持调用方给的顺序** —— 导入网格按扫描顺序
@@ -257,4 +257,34 @@ test("几百张跨多天：结构与张数对得上（也顺带当性能冒烟�
     // 每天两段（上午一段、晚上一段）—— 夜里 20 点那段跨小时但间隔 < 60 分钟
     assert.equal(day.slices.length, 2, `${day.id} 应当切成两段`);
   }
+});
+
+test("片内按文件名自然序排：同一张照片的 JPG 与 RAW 挨着（给了 name 就按它排）", () => {
+  /*
+   * 这是人类两次上报的那个问题：RAW 的拍摄时间可能来自 mtime 兜底，于是按时间排
+   * 会「按格式分层」。给了 name 之后，片内顺序由文件名决定 —— JPG 与 RAW 挨着。
+   */
+  const photos = [
+    { id: "raw19", takenAtMs: 9_000, name: "photos/P1000019.RW2" },
+    { id: "jpg19", takenAtMs: 1_000, name: "photos/P1000019.JPG" },
+    { id: "raw20", takenAtMs: 9_500, name: "photos/P1000020.RW2" },
+    { id: "jpg20", takenAtMs: 2_000, name: "photos/P1000020.JPG" },
+  ];
+  const grouping = groupByTime(photos, { gapMinutes: 60, offsetMinutes: 480 });
+  assert.equal(grouping.days.length, 1);
+  const slice = grouping.days[0]!.slices[0]!;
+  assert.deepEqual(slice.photoIds, ["jpg19", "raw19", "jpg20", "raw20"]);
+  // 片的边界仍由**时间**决定（4 张都在阈值内 → 一片）
+  assert.equal(slice.startMs, 1_000);
+  assert.equal(slice.endMs, 9_500);
+});
+
+test("片内排序：数字段按数值比（P1000009 在 P1000019 之前）", () => {
+  const photos = [
+    { id: "c", takenAtMs: 3_000, name: "P1000019.JPG" },
+    { id: "a", takenAtMs: 1_000, name: "P1000009.JPG" },
+    { id: "b", takenAtMs: 2_000, name: "P1000010.JPG" },
+  ];
+  const grouping = groupByTime(photos, { gapMinutes: 60, offsetMinutes: 480 });
+  assert.deepEqual(grouping.days[0]!.slices[0]!.photoIds, ["a", "b", "c"]);
 });

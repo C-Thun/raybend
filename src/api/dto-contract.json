@@ -217,6 +217,7 @@
   ],
   "TimelineEntry": [
     "id",
+    "relPath",
     "takenAt"
   ],
   "BrowseTimeline": [

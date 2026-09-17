@@ -285,7 +285,7 @@ const ASSET_ITEM_KEYS = [
   "width",
 ] as const satisfies readonly (keyof AssetItem)[];
 const BROWSE_WINDOW_KEYS = ["items", "offset", "total"] as const satisfies readonly (keyof BrowseWindow)[];
-const TIMELINE_ENTRY_KEYS = ["id", "takenAt"] as const satisfies readonly (keyof TimelineEntry)[];
+const TIMELINE_ENTRY_KEYS = ["id", "relPath", "takenAt"] as const satisfies readonly (keyof TimelineEntry)[];
 const BROWSE_TIMELINE_KEYS = ["entries", "total"] as const satisfies readonly (keyof BrowseTimeline)[];
 const FACET_COUNT_KEYS = ["count", "value"] as const satisfies readonly (keyof FacetCount)[];
 const BROWSE_FACETS_KEYS = ["colors", "likes", "locks", "ratings"] as const satisfies readonly (keyof BrowseFacets)[];

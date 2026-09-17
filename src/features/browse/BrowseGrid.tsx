@@ -36,7 +36,7 @@ import {
   DEFAULT_TILE_STEP_INDEX,
   tileSizeAt,
 } from "../../lib/tile-flow.ts";
-import { buildBrowseRows, browseGroups, type BrowseRowModel } from "./rows.ts";
+import { buildBrowseRows, browseGroups, sliceOrder, type BrowseRowModel } from "./rows.ts";
 import type { BrowseStore } from "./store.ts";
 
 /**
@@ -91,13 +91,28 @@ export function BrowseGrid(props: BrowseGridProps) {
   const flow = () =>
     computeTileFlow({ containerWidth: width(), cellWidth: cellWidth(), gap: gap() });
 
+  /** 分组边界（只有「按时间」模式下才有）。 */
+  const groups = createMemo(() => (props.grouped ? browseGroups(store.timeline()) : undefined));
+
+  /*
+   * 片内按文件名自然序 → 交给 store 当作**显示序**。
+   *
+   * 为什么要绕 store 一道：分页来自后端的时间序，而界面要按名字排 ——
+   * 两套顺序各说各话就会出现「取下来的页与屏幕上那一格错位」（显示错照片）。
+   * 把映射交给 store，`itemAt` / `ensureRange` 两个边界自己换算，
+   * 于是界面、选区、键盘导航都只用一套下标（详见 store 的 `setDisplayOrder`）。
+   */
+  createEffect(() => {
+    const list = groups();
+    store.setDisplayOrder(list ? sliceOrder(store.timeline(), list) : null);
+  });
+
   const rows = createMemo<BrowseRowModel[]>(() => {
-    const groups = props.grouped ? browseGroups(store.timeline()) : undefined;
     return buildBrowseRows({
       total: store.total(),
       columns: flow().columns,
       cellSize: cellWidth(),
-      groups: groups ?? undefined,
+      groups: groups(),
       gap: gap(),
     });
   });

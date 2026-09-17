@@ -112,6 +112,15 @@ export interface BrowseStore {
   total(): number;
   /** 第 `index` 张；还没加载到就是 `null`。 */
   itemAt(index: number): AssetItem | null;
+  /**
+   * 设置「**显示序 → 条目下标**」的映射（`null` = 两者一致）。
+   *
+   * 为什么要它：片内要按文件名自然序排（`features/browse/rows.ts` 的 `sliceOrder`），
+   * 而分页来自后端的时间序 —— 两套顺序不能各说各话，否则「按需取下来的页」
+   * 与「屏幕上那一格」会错位（显示错照片）。这里让**店面保持一套下标（显示序）**，
+   * 只在 `itemAt` / `ensureRange` 两个边界上做映射：界面、选区、键盘导航都只用一套。
+   */
+  setDisplayOrder(order: readonly number[] | null): void;
   timeline(): readonly TimelineEntry[];
   facets(): BrowseFacets | null;
   loading(): boolean;
@@ -150,14 +159,6 @@ export interface BrowseStore {
   clearFlags(): Promise<void>;
 }
 
-/** 可见顺序（选择模型要它）——已加载的那部分，按索引升序。 */
-function orderedIdsOf(entries: readonly (AssetItem | null)[]): string[] {
-  const ids: string[] = [];
-  for (const item of entries) {
-    if (item !== null) ids.push(String(item.id));
-  }
-  return ids;
-}
 
 export function createBrowseStore(deps: BrowseDeps): BrowseStore {
   const { api } = deps;
@@ -173,6 +174,16 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
   const [facets, setFacets] = createSignal<BrowseFacets | null>(null);
   const [loading, setLoading] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
+  /** 「显示序 → 条目下标」；`null` = 同一套顺序（未分组时的常态）。 */
+  const [displayOrder, setDisplayOrderSignal] = createSignal<readonly number[] | null>(null);
+
+  /** 显示位次 → 条目数组里的下标（没设映射时就是恒等）。 */
+  const at = (index: number): number => {
+    const order = displayOrder();
+    if (order === null) return index;
+    const mapped = order[index];
+    return mapped === undefined ? index : mapped;
+  };
 
   const [selection, setSelection] = createSignal<SelectionState>(EMPTY_SELECTION);
   const [markings, setMarkings] = createSignal<ReadonlyMap<number, MarkingItem>>(new Map());
@@ -262,8 +273,13 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
   const ensureRange = async (start: number, end: number): Promise<void> => {
     const q = query();
     if (q === null || end <= start) return;
-    const firstPage = Math.max(0, Math.floor(start / PAGE_SIZE));
-    const lastPage = Math.max(0, Math.floor((end - 1) / PAGE_SIZE));
+    // 显示序与后端序不一致时，先把可见区间映射回**条目下标**再算页号：
+    // 页是按后端顺序取的，直接拿显示位次当页号会取错数据。映射后取的是**超集**
+    // （可见区间的下标可能是散的），多取几张无所谓 —— 反正是同一批页。
+    const lo = Math.max(0, Math.min(at(start), at(end - 1)));
+    const hi = Math.max(at(start), at(end - 1));
+    const firstPage = Math.max(0, Math.floor(lo / PAGE_SIZE));
+    const lastPage = Math.max(0, Math.floor(hi / PAGE_SIZE));
     const mine = generation;
 
     const want: number[] = [];
@@ -293,7 +309,16 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
     }
   };
 
-  const orderedIds = (): string[] => orderedIdsOf(entries());
+  /** 选中/导航用的顺序：**按显示序**（片内是文件名自然序）。 */
+  const orderedIds = (): string[] => {
+    const list = entries();
+    const ids: string[] = [];
+    for (let index = 0; index < list.length; index += 1) {
+      const item = list[at(index)];
+      if (item !== null && item !== undefined) ids.push(String(item.id));
+    }
+    return ids;
+  };
 
   const selectedIds = (): number[] =>
     [...selection().ids].map((id) => Number(id)).filter((n) => Number.isFinite(n));
@@ -401,7 +426,10 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
 
     total,
     itemAt(index) {
-      return entries()[index] ?? null;
+      return entries()[at(index)] ?? null;
+    },
+    setDisplayOrder(order) {
+      setDisplayOrderSignal(order === null ? null : [...order]);
     },
     timeline,
     facets,

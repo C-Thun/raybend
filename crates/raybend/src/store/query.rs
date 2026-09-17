@@ -591,20 +591,28 @@ pub fn page(
     Ok(out)
 }
 
-/// 只要「id + 拍摄时间」的有序列表 —— 给分组、区间选择与键盘导航算顺序用。
+/// 时间线上的一行。
 ///
-/// 比 [`page`] 便宜得多：没有 join、没有文本列。10 万张大约 1.6MB（二进制）——
-/// 前端一次拿全，滚动与选择就都有确定的顺序。
-pub fn timeline(conn: &Connection, query: &Query, limit: usize) -> Result<Vec<(i64, Option<i64>)>> {
+/// `rel_path` 是**给排序用的**：片内要按「文件名自然序」排，而自然序不是 SQL 能表达的
+/// （`P1000019` 该排在 `P1000020` 前面，但字符串比较会反过来）—— 所以路径得跟回来前端排。
+/// 代价是多一列文本（10 万张约 +3–4MB）。它是「同一时间段内 JPG 与 RAW 接着」的前提，
+/// 而那是人看片时的实际期待。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TimelineRow {
+    pub id: i64,
+    pub taken_at: Option<i64>,
+    /// 库内相对路径（原始大小写）。只用于排序与展示回退。
+    pub rel_path: String,
+}
+
+/// 只要「id + 拍摄时间 + 相对路径」的有序列表 —— 给分组、区间选择与键盘导航算顺序用。
+pub fn timeline(conn: &Connection, query: &Query, limit: usize) -> Result<Vec<TimelineRow>> {
     prepare(conn, query)?;
     let (where_sql, mut params) = query.where_clause();
     let order = query.sort.key.order_by(query.sort.desc);
-    // ⚠️ 排序用了 `f.rel_path_folded`（文件名排序）时必须有 join，否则 SQL 报错
-    let join = if query.sort.key == SortKey::FileName {
-        DISPLAY_FILE_JOIN
-    } else {
-        ""
-    };
+    // join 现在**总是**要：`rel_path` 是选择的列之一
+    // （以前只有按文件名排序时才需要它 —— 那时 `ORDER BY` 里用到 `f.`）。
+    let join = DISPLAY_FILE_JOIN;
     let limit_sql = if limit == 0 {
         String::new()
     } else {
@@ -612,11 +620,16 @@ pub fn timeline(conn: &Connection, query: &Query, limit: usize) -> Result<Vec<(i
         " LIMIT ?".to_string()
     };
     let sql = format!(
-        "SELECT a.id, a.taken_at FROM assets a {join} {where_sql} ORDER BY {order}{limit_sql}"
+        "SELECT a.id, a.taken_at, COALESCE(f.rel_path, '') FROM assets a {join} {where_sql} \
+         ORDER BY {order}{limit_sql}"
     );
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(params_from_iter(params.iter()), |r| {
-        Ok((r.get::<_, i64>(0)?, r.get::<_, Option<i64>>(1)?))
+        Ok(TimelineRow {
+            id: r.get(0)?,
+            taken_at: r.get(1)?,
+            rel_path: r.get(2)?,
+        })
     })?;
     let mut out = Vec::new();
     for row in rows {

@@ -379,6 +379,14 @@ export interface BrowseWindow {
 /** 时间线上的一项。 */
 export interface TimelineEntry {
   id: number;
+  /**
+   * 库内相对路径。
+   *
+   * 它是**给片内排序用的**：同一时间段内按文件名自然序排（`P1000019.JPG` 与
+   * `P1000019.RW2` 会挨着），而自然序算不了 SQL（字符串比较下 `P1000019` 反而在
+   * `P1000020` 之后），所以路径得跟到前端来排。
+   */
+  relPath: string;
   takenAt: number | null;
 }
 

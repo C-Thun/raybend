@@ -315,12 +315,16 @@ pub struct BrowseWindow {
     pub items: Vec<AssetItem>,
 }
 
-/// 时间线上的一项（只有 id 与拍摄时间）。
+/// 时间线上的一项。
+///
+/// `relPath` 是**给片内排序用的**：同一时间段内要按文件名自然序排（这样 JPG 与 RAW
+/// 会按名字接着），而自然序只能在前端算（见 `raybend::store::query::TimelineRow`）。
 #[derive(Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TimelineEntry {
     pub id: i64,
     pub taken_at: Option<i64>,
+    pub rel_path: String,
 }
 
 /// 时间线（用于分组与键盘导航的确定顺序）。
@@ -471,7 +475,11 @@ pub async fn browse_timeline<R: Runtime>(
                 total,
                 entries: rows
                     .into_iter()
-                    .map(|(id, taken_at)| TimelineEntry { id, taken_at })
+                    .map(|row| TimelineEntry {
+                        id: row.id,
+                        taken_at: row.taken_at,
+                        rel_path: row.rel_path,
+                    })
                     .collect(),
             })
         })

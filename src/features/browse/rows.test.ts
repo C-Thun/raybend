@@ -14,6 +14,7 @@ import { test } from "node:test";
 import { groupByTime } from "../../lib/time-group.ts";
 import {
   buildBrowseRows,
+  sliceOrder,
   browseGroups,
   DEFAULT_GAP_MINUTES,
   GROUP_ROW_HEIGHT,
@@ -220,4 +221,55 @@ test("分组划分与 lib/time-group 的 days/slices 一致", () => {
     canonical(theirs),
     "分组口径必须与 lib/time-group 一致（漂了就说明两处规则分家了）",
   );
+});
+
+// ──────────────── 片内按文件名自然序（人类 2026-09-17 定的口径）────────────────
+
+test("sliceOrder：同一片内按文件名自然排，JPG 与 RAW 挨着", () => {
+  // 时间线是**后端的时间序**：RAW 因为拍摄时间来源不同（mtime 兜底）落在后面
+  const timeline = [
+    { relPath: "photos/P1000019.JPG" },
+    { relPath: "photos/P1000020.JPG" },
+    { relPath: "photos/P1000019.RW2" },
+    { relPath: "photos/P1000020.RW2" },
+  ];
+  const groups = [{ start: 0, count: 4, label: "2026-09-13", unknown: false }];
+  const order = sliceOrder(timeline, groups);
+  assert.deepEqual(
+    order.map((index) => timeline[index]?.relPath),
+    [
+      "photos/P1000019.JPG",
+      "photos/P1000019.RW2",
+      "photos/P1000020.JPG",
+      "photos/P1000020.RW2",
+    ],
+  );
+});
+
+test("sliceOrder：片与片的先后、每片的边界都不动，只有片内换位", () => {
+  const timeline = [{ relPath: "b.JPG" }, { relPath: "a.JPG" }, { relPath: "d.JPG" }, { relPath: "c.JPG" }];
+  const groups = [
+    { start: 0, count: 2, label: "2026-09-13", unknown: false },
+    { start: 2, count: 2, label: "2026-09-12", unknown: false },
+  ];
+  const order = sliceOrder(timeline, groups);
+  // 仍是一个置换，且每一片只在自己那段区间里换位
+  assert.deepEqual([...order].sort((a, b) => a - b), [0, 1, 2, 3]);
+  assert.deepEqual(order.slice(0, 2).sort((a, b) => a - b), [0, 1]);
+  assert.deepEqual(order.slice(2, 4).sort((a, b) => a - b), [2, 3]);
+  assert.deepEqual(order.map((i) => timeline[i]?.relPath), ["a.JPG", "b.JPG", "c.JPG", "d.JPG"]);
+});
+
+test("sliceOrder：未知时间组也按名字排；空输入、缺字段、越界区间都不许炸", () => {
+  assert.deepEqual(sliceOrder([], []), []);
+  const timeline = [{ relPath: "z.JPG" }, { relPath: "a.JPG" }];
+  const unknownGroup = [{ start: 0, count: 2, label: "", unknown: true }];
+  assert.deepEqual(
+    sliceOrder(timeline, unknownGroup).map((i) => timeline[i]?.relPath),
+    ["a.JPG", "z.JPG"],
+  );
+  // 没有 relPath（防御老数据）→ 退化成保持原顺序
+  assert.deepEqual(sliceOrder([{}, {}], unknownGroup), [0, 1]);
+  // 组区间越界：只重排交叠的那部分，且不越界写
+  assert.deepEqual(sliceOrder(timeline, [{ start: 1, count: 99, label: "", unknown: false }]), [0, 1]);
 });
