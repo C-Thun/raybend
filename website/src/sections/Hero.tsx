@@ -60,13 +60,13 @@ export function Hero() {
               kind="name"
               label={messages().nav.brand}
               class="mt-5 w-[min(15rem,58vw)]"
-              outline={14}
+              outline={10}
             />
             <BrandMark
               kind="slogan"
               label={t().tagline}
               class="mt-2.5 w-[min(21rem,72vw)]"
-              outline={10}
+              outline={8}
             />
 
             <p class="mt-5 max-w-xl text-base/relaxed text-ink/80">{t().intro}</p>
