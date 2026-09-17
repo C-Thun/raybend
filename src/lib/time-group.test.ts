@@ -146,32 +146,58 @@ test("阈值非法（0 / 负数 / NaN）：当天不切分", () => {
   }
 });
 
-test("输入顺序不影响结果（内部自己排序）", () => {
+test("片与日不受输入顺序影响，**片内顺序跟着输入走**", () => {
+  /*
+   * 2026-09-17 改的契约（人类报「同一个时间段里 RAW 与 JPG 分成两层」）：
+   * 分组只看时间，片内顺序**保持调用方给的顺序** —— 导入网格按扫描顺序
+   * （文件名自然序）传进来，RAW 才不会被按时间来源的秒级差异沉到片尾。
+   * 所以这里断言两件事：① 片切分不受输入顺序影响；② 片内顺序确实跟着输入。
+   */
   const photos = [
     photo("c", at(2026, 8, 15, 14)),
     photo("a", at(2026, 8, 15, 9)),
     photo("b", at(2026, 8, 15, 9, 30)),
   ];
   const first = groupByTime(photos, { gapMinutes: 60, offsetMinutes: CST });
-  const shuffled = groupByTime([...photos].reverse(), {
+  const shuffledInput = [...photos].reverse();
+  const shuffled = groupByTime(shuffledInput, {
     gapMinutes: 60,
     offsetMinutes: CST,
   });
-  assert.deepEqual(first.days[0].slices[0].photoIds, ["a", "b"]);
+
+  // ① 切分一致：日、片数量、片的时间范围、片 id
   assert.deepEqual(
-    first.days[0].photoIds,
-    shuffled.days[0].photoIds,
-    "换个顺序进来，分组结果必须一样",
+    first.days.map((day) => day.id),
+    shuffled.days.map((day) => day.id),
   );
+  assert.deepEqual(
+    first.days[0].slices.map((slice) => [slice.id, slice.startMs, slice.endMs]),
+    shuffled.days[0].slices.map((slice) => [slice.id, slice.startMs, slice.endMs]),
+    "换个顺序进来，片的切分必须一样",
+  );
+
+  // ② 片内顺序 = 各自的输入顺序
+  assert.deepEqual(first.days[0].slices[0].photoIds, ["a", "b"]);
+  assert.deepEqual(shuffled.days[0].slices[0].photoIds, ["b", "a"]);
 });
 
-test("同一时刻多张：顺序确定（按 id 兜底），不会随机抖", () => {
+test("同一时刻多张：全部落进同一片，顺序跟着输入（不随机抖）", () => {
   const same = at(2026, 8, 15, 9);
-  const grouping = groupByTime(
-    [photo("z", same), photo("a", same), photo("m", same)],
-    { gapMinutes: 60, offsetMinutes: CST },
-  );
-  assert.deepEqual(grouping.days[0].slices[0].photoIds, ["a", "m", "z"]);
+  const ids = ["z", "a", "m"];
+  const grouping = groupByTime(ids.map((id) => photo(id, same)), {
+    gapMinutes: 60,
+    offsetMinutes: CST,
+  });
+  const slice = grouping.days[0].slices[0];
+  assert.deepEqual(slice.photoIds, ids, "同一时刻：顺序就是传进来的顺序");
+  assert.equal(slice.startMs, same);
+  assert.equal(slice.endMs, same);
+  // 换个输入顺序仍然稳定（同一输入 → 同一输出）
+  const again = groupByTime(ids.map((id) => photo(id, same)), {
+    gapMinutes: 60,
+    offsetMinutes: CST,
+  });
+  assert.deepEqual(again.days[0].slices[0].photoIds, ids);
 });
 
 test("时区：偏移不同 → 「哪一天」也不同（同一时刻可以落在相邻两天）", () => {

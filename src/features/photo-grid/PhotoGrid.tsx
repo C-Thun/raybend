@@ -144,6 +144,8 @@ export function PhotoGrid(props: PhotoGridProps) {
      * 不支持 `Ctrl`/`Shift` 组合（不加选、不扩区间）—— 那是后面再说的事。
      * 到头就停住（`nextIndexForArrow` 返回 `null`）。
      */
+    // 看图打开时方向键归看图（网格在下面挂着，别让两边同时响应）
+    if (viewer.state().active) return;
     if (
       event.key === "ArrowLeft" ||
       event.key === "ArrowRight" ||
@@ -196,7 +198,7 @@ export function PhotoGrid(props: PhotoGridProps) {
       <div
         ref={container}
         onKeyDown={onGridKeyDown}
-        class="flex min-h-0 flex-1 flex-col px-3 pt-2"
+        class="relative flex min-h-0 flex-1 flex-col px-3 pt-2"
         style={{
           /*
            * 只给**宽度**：画面区高度由 `Tile` 里的 `aspect-ratio` 自己排
@@ -205,10 +207,6 @@ export function PhotoGrid(props: PhotoGridProps) {
           "--tile-cell": `${cellWidth()}px`,
         }}
       >
-        <Show when={viewer.state().active}>
-          <Viewer store={viewer} />
-        </Show>
-        <Show when={!viewer.state().active}>
         <Show
           when={store.dir()}
           fallback={
@@ -277,6 +275,13 @@ export function PhotoGrid(props: PhotoGridProps) {
             </Show>
           </Show>
         </Show>
+        {/*
+          看图是**覆盖层**，不是把网格换掉：网格一直挂着，退出时光标、选中与**滚动位置**
+          原地不动。（人类 2026-09-17 报：进看图再退出会回到列表开头 ——
+          根因就是这里把网格卸载了，DOM 一没，滚动位置自然归零。）
+        */}
+        <Show when={viewer.state().active}>
+          <Viewer store={viewer} class="absolute inset-0 z-10" />
         </Show>
       </div>
 

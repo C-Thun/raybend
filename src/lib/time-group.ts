@@ -116,8 +116,15 @@ function dayStartMs(key: string, offsetMinutes: number): number {
 /**
  * 分组。
  *
- * 输入顺序**不影响结果**（内部会按时间排序）—— 这样调用方不必关心
- * 扫描顺序，也不会出现「换个排序方式分组就变了」这种诡异现象。
+ * **分组只看时间，片内顺序看调用方**：
+ *
+ * - 片的**边界**与 `startMs` / `endMs` 完全由时间决定（相邻间隔 > 阈值就断开）；
+ * - 片内照片保持**调用方传入的顺序** —— 导入网格按扫描顺序（文件名自然序）传进来，
+ *   于是同一个时间段里 `P1000019.JPG` 与 `P1000019.RW2` 是**挨着**的。
+ *
+ * 为什么片内不按时间排（2026-09-17 人类报的问题）：同一张照片的 JPG 与 RAW，
+ * 时间来源可能不同（EXIF / 文件名兜底 / mtime），秒级差异就会让 RAW 整批沉到片尾，
+ * 看起来像「按格式分了两层」——而人期望的是「一个时间段里就按文件名自然排」。
  */
 export function groupByTime(
   photos: readonly TimePhotoLike[],
@@ -127,6 +134,10 @@ export function groupByTime(
     Number.isFinite(options.gapMinutes) && options.gapMinutes > 0
       ? options.gapMinutes * MS_PER_MINUTE
       : Number.POSITIVE_INFINITY;
+
+  // 调用方的输入序号：片内按它排（见上面的说明）
+  const inputOrder = new Map<string, number>();
+  photos.forEach((photo, index) => inputOrder.set(photo.id, index));
 
   const timed: TimedPhoto[] = [];
   const untimed: string[] = [];
@@ -173,13 +184,21 @@ export function groupByTime(
     let current: TimedPhoto[] = [];
     const flush = (): void => {
       if (current.length === 0) return;
+      // `current` 此刻是**时间序**（切分需要），先把两头的时间记下来（那是片的语义），
+      // 再把片内顺序换回调用方给的顺序（那是给人看的顺序）
+      const first = current[0];
+      const last = current[current.length - 1];
+      const ids = current.map((photo) => photo.id);
+      ids.sort(
+        (a, b) => (inputOrder.get(a) ?? 0) - (inputOrder.get(b) ?? 0),
+      );
       slices.push({
         id: `${key} #${slices.length + 1}`,
-        startMs: current[0].takenAtMs,
-        endMs: current[current.length - 1].takenAtMs,
+        startMs: first.takenAtMs,
+        endMs: last.takenAtMs,
         // 同一片内的偏移理论上一致（都来自同一台相机）；用第一张的即可
-        offsetMinutes: current[0].offset,
-        photoIds: current.map((photo) => photo.id),
+        offsetMinutes: first.offset,
+        photoIds: ids,
       });
       current = [];
     };

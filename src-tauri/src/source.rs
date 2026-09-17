@@ -432,7 +432,9 @@ pub async fn source_times(paths: Vec<String>) -> Result<Vec<TimeEntryView>, Stri
 pub async fn file_exif(path: String) -> Result<FileExifView, String> {
     blocking(move || {
         let abs = Path::new(&path);
-        let data = raybend::media::exif::read_file(abs);
+        // RAW 要走 TIFF 家族兜底（RW2/ORF 的魔数不是 0x2A）——
+        // 否则右上角参数栏对 RAW 只会显示一个「RAW」类型标，其余全空（2026-09-17 人类报）
+        let data = raybend::media::exif::read_file_for(abs);
         let file_name = abs
             .file_name()
             .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
