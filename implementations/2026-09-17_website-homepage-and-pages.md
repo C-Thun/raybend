@@ -184,3 +184,46 @@ pnpm build                   # 818ms + 113ms；dist/client 6.0 MB
 **这一条必须先改**：`Source` 停在 `Deploy from a branch` 时，`actions/deploy-pages` 会直接失败
 （`Get Pages site failed … configured to build using GitHub Actions`）——
 见 `website/AGENTS.md` §5 新增的排查提示。改成 `GitHub Actions` 后，下一次 push 即上线。
+
+---
+
+## 8. 追加（2026-09-17 15:42:19 CST）：hero 配色修正 + 品牌字矢量化
+
+**用户反馈**：青绿不能切在琥珀上（两者中明亮度相近，看不出）；hero 上的绿色圆环与「胶片带」
+改成与下方浅色同色（做成镂空感）；name / slogan 要「**白色宽幅外扩边 + 绿色内芯**」，
+并问「CSS 是不是无法对透明位图做到这点，能不能转 SVG」。
+
+### 8.1 hero 装饰改成镂空
+
+| 元素 | 之前 | 现在 |
+| --- | --- | --- |
+| 右上同心圆环 | `text-brand/30`（青绿 30%） | `text-paper`（与下方区块同色 ⇒ 像打孔） |
+| 底边胶片孔带 | `bg-brand/55` | `bg-paper`（与下一段连成一体） |
+| 右侧小青绿圆点 | `bg-brand/70` | **删掉** |
+
+### 8.2 品牌字：位图 → 矢量（回答“CSS 做不到”）
+
+位图 + CSS 确实做不到干净的「外扩白边」：`mask-image` 只能给**墨迹本身**上色，无法向外扩张；
+`drop-shadow` 叠出来的是模糊光晕；`feMorphology` 在部分浏览器不可靠。所以走矢量化：
+
+| 步骤 | 做法 |
+| --- | --- |
+| 描摹 | 新增 `website/scripts/generate-marks.mjs`：ImageMagick 放大 3× → **`-blur 0x3` 磨掉毛笔飞白/噪点** → 二值化 → potrace → 写 `src/components/mark-paths.ts`（4 条路径） |
+| 渲染 | `BrandMark.tsx` 改成渲染 `<path>`：`fill=var(--color-brand)` + `stroke=var(--color-white)` + `paint-order="stroke"`。描边居中、被填充盖住一半 ⇒ 只剩**向外那一半** = 外扩边；`vector-effect="non-scaling-stroke"` 让边宽以屏幕像素计（`outline` prop） |
+| 落地位置 | 这几个属性全是 kebab-case（`stroke-width` / `paint-order`…），写在 JSX 里会被 lint 当驼峰建议反复误报（而 Solid 2 的 JSX 类型**只认** kebab-case）——所以移到 `App.css` 的 `.rb-mark-path`，JSX 只传 `--rb-mark-outline` 一个变量；hero 的圆环同理（`.rb-hero-rings`） |
+
+**关键参数与代价**（实测）：
+
+- 磨飞白这一步不能省：不磨时路径 97 KB，磨完 19 KB（同一个字）。
+- 四条路径合计 **125 KB**（name-zh/en 各 19 KB、slogan-zh 56 KB、slogan-en 30 KB）；
+  打包后首页 JS 144.89 kB / **gzip 63.76 kB**。
+- `potrace`（`node-potrace`）是 **GPL-2.0 的开发期工具**，只产出坐标数字、**不进产物**；
+  已登记 `THIRD-PARTY-NOTICES.md` §1c，并写了想避开 GPL 工具时的退路（`imagetracerjs`）。
+- 源位图 `public/name-*.webp`、`slogan-*.webp` 保留 —— 它们现在是**描摹的源**，
+  改了要重跑 `pnpm marks:generate`（已写进 `website/AGENTS.md` §4.3 与 `ASSETS.md`）。
+
+### 8.3 验证
+
+`tsc --noEmit` 0 错、`oxlint` 0 条、`pnpm test:run` 20 项通过、`pnpm build` 563ms；
+目视了桌面（中/英）与 390px 窄屏三张截图：白边+绿芯在窄屏小尺寸下仍然清晰、
+胶片孔与下一段浅色连成一体（镂空感成立）；旧的 `.rb-mark`（位图遮罩）CSS 已成死代码，一并删除。

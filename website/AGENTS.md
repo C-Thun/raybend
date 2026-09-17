@@ -41,16 +41,18 @@ website/
 ├── vite.config.ts        # solid({start:true}) + fileRoutes() + tailwindcss() + 构建期注入发布信息
 ├── ASSETS.md             # 素材清单：要截的图 / 要 AI 生的图（给人看的）
 ├── scripts/
-│   └── generate-icons.mjs # 从 lucide-solid 的图标数据生成 src/components/icons.tsx
+│   ├── generate-icons.mjs # 从 lucide-solid 的图标数据生成 src/components/icons.tsx
+│   └── generate-marks.mjs # 用 potrace 把品牌书法字描摹成 src/components/mark-paths.ts
 ├── src/
 │   ├── App.tsx           # 站点外壳：吸顶导航 + <Loading> 包裹的路由内容 + 页脚
 │   ├── router.ts         # createRouter(fileRoutes(pageRoutes))
 │   ├── Document.tsx      # 文档外壳（「新的 index.html」）——**静态 head / SEO / JSON-LD 都在这**
-│   ├── App.css           # 唯一样式入口：字体 import + @import 'tailwindcss' + @theme 令牌 + .rb-mark
+│   ├── App.css           # 唯一样式入口：字体 import + @import 'tailwindcss' + @theme 令牌
 │   ├── i18n/             # zh.ts（形状源）/ en.ts / index.ts（检测·切换·持久化）
 │   ├── data/             # site.ts（外链常量）/ features.ts（结构）/ media.ts（素材+提示词）
 │   │                     # tutorials.ts（B 站，当前空）/ release.ts（下载信息纯逻辑 + 单测）
-│   ├── components/       # Button / BrandMark / Shot / WindowFrame / LangSwitch / Section / icons.tsx
+│   ├── components/       # Button / BrandMark / Shot / WindowFrame / LangSwitch / Section
+│   │                     # icons.tsx（生成物）/ mark-paths.ts（生成物）
 │   ├── sections/         # Hero / Highlights / Workflows / Features / OpenSource / Download / Tutorials / Footer
 │   ├── routes/           # index.tsx（首页）/ [...404].tsx
 │   └── vite-env.d.ts     # 声明构建期注入的 import.meta.env.RB_RELEASE
@@ -79,6 +81,7 @@ pnpm test            # Vitest（watch）
 pnpm test:run        # Vitest（跑一次，CI 用）
 pnpm lint            # oxlint src
 pnpm icons:generate  # 重新生成 src/components/icons.tsx
+pnpm marks:generate  # 重新描摹品牌书法字 → src/components/mark-paths.ts
 ```
 
 `RAYBEND_BASE=/raybend/ pnpm build` 可以产出「挂在 `https://c-thun.github.io/raybend/` 子路径下」的版本
@@ -107,11 +110,25 @@ pnpm icons:generate  # 重新生成 src/components/icons.tsx
 - 要给人的清单（截什么图、AI 提示词原文）在 **`ASSETS.md`**。
 - 已有品牌素材（`logo*` / `name-*` / `slogan-*` / `splash_v1-*`）见 `ASSETS.md` §1。
 
-### 4.3 品牌抠图的用法（CSS 遮罩染色）
+### 4.3 品牌字：矢量化 + 白色外扩边（**不是位图遮罩**）
 
-`name-*.webp` / `slogan-*.webp` 是**白色墨迹 + 透明底**。`components/BrandMark.tsx` 用
-`mask-image` + `currentColor` 渲染 —— 颜色由 Tailwind 的 `text-*` 决定，同一张图能在琥珀底上染深墨、
-也能在深底上染白，**换色不需要重新导出图片**。尺寸用 `w-[…]` 给，高度按素材原始比例自动。
+`name-*.webp` / `slogan-*.webp` 是「白色墨迹 + 透明底」的**源素材**；hero 上渲染的不是它们，
+而是 `scripts/generate-marks.mjs` 用 potrace 描摹出来的**矢量路径**（`src/components/mark-paths.ts`），
+由 `components/BrandMark.tsx` 渲染成「绿色内芯 + 白色外扩边」。
+
+**为什么不用位图遮罩**：`mask-image` 只能给墨迹本身上色，**做不到向外扩张的白边**；
+`drop-shadow` 叠出来只是模糊光晕，`feMorphology` 在部分浏览器上不可靠。矢量路径就简单了：
+
+```text
+fill=var(--color-brand) + stroke=var(--color-white) + paint-order="stroke"
+```
+
+描边是**居中**画的，`paint-order` 让描边压在填充下面 ⇒ 只剩向外那一半 = 外扩边；
+`vector-effect="non-scaling-stroke"` 让边宽以**屏幕像素**计（`outline` prop 就是它）。
+
+- 改了源素材要重跑：`pnpm marks:generate`（生成物 4 条路径共 ~125 KB，压缩后小得多）。
+- 生成前的 `-blur 0x3` 是关键：不磨掉毛笔飞白/扫描噪点，路径会大 5 倍（实测 97 KB → 19 KB）。
+- `potrace` 是 **GPL-2.0 的开发期工具**，只产坐标、不进产物；许可登记见根 `THIRD-PARTY-NOTICES.md` §1c。
 
 ### 4.4 下载信息（与发版同步）
 

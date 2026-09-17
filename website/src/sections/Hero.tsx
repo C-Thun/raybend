@@ -27,19 +27,18 @@ export function Hero() {
       {/* 平面几何装饰（不含阴影/毛玻璃） */}
       <div aria-hidden="true" class="pointer-events-none absolute inset-0 overflow-hidden">
         <svg
-          class="absolute -top-32 -right-24 size-[30rem] text-brand/30 sm:-top-40 sm:-right-16"
+          class="rb-hero-rings absolute -top-32 -right-24 size-[30rem] text-paper sm:-top-40 sm:-right-16"
           viewBox="0 0 200 200"
           fill="none"
         >
-          <circle cx="100" cy="100" r="98" stroke="currentColor" stroke-width="1.5" />
-          <circle cx="100" cy="100" r="72" stroke="currentColor" stroke-width="1.5" />
-          <circle cx="100" cy="100" r="46" stroke="currentColor" stroke-width="1.5" />
+          <circle cx="100" cy="100" r="98" stroke="currentColor" />
+          <circle cx="100" cy="100" r="72" stroke="currentColor" />
+          <circle cx="100" cy="100" r="46" stroke="currentColor" />
         </svg>
         <div class="absolute top-1/3 left-4 size-2.5 rounded-full bg-ink/20" />
-        <div class="absolute top-2/5 right-6 size-3 rounded-full bg-brand/70" />
-        {/* 底边一条「胶片孔」带：平面化的摄影暗示，也让 hero 有个收口 */}
+        {/* 底边一条「胶片孔」带：与下方浅色同色 —— 读起来像琥珀层被镂空，摄影味也更轻 */}
         <div class="absolute bottom-0 left-0 flex w-full gap-3 px-6 pb-3.5">
-          <For each={FILM_HOLES}>{() => <span class="h-3 w-6 shrink-0 rounded-[3px] bg-brand/55" />}</For>
+          <For each={FILM_HOLES}>{() => <span class="h-3 w-6 shrink-0 rounded-[3px] bg-paper" />}</For>
         </div>
       </div>
 
@@ -56,12 +55,14 @@ export function Hero() {
             <BrandMark
               kind="name"
               label={messages().nav.brand}
-              class="mt-7 w-[min(16rem,62vw)] text-ink"
+              class="mt-7 w-[min(17rem,64vw)]"
+              outline={14}
             />
             <BrandMark
               kind="slogan"
               label={t().tagline}
-              class="mt-3 w-[min(23rem,78vw)] text-ink/85"
+              class="mt-4 w-[min(24rem,80vw)]"
+              outline={10}
             />
 
             <p class="mt-7 max-w-xl text-base/relaxed text-ink/80">{t().intro}</p>

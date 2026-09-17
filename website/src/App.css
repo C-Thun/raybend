@@ -71,6 +71,10 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
+    /*
+     * 这里用 `!important` 是**故意的**：减弱动效是无障碍的硬要求，必须压过组件上
+     * 各自写的 transition/animation（包括内联样式），单靠提高选择器优先级做不稳。
+     */
     html {
       scroll-behavior: auto;
     }
@@ -87,20 +91,24 @@
 
 @layer components {
   /*
-   * 品牌抠图（`name-*.webp` / `slogan-*.webp` 是「白色墨迹 + 透明底」）。
-   * 用遮罩渲染，颜色由 currentColor（Tailwind 的 text-* 类）决定，所以同一张图
-   * 可以在琥珀底上染深墨、也可以在深底上染白。
+   * 品牌字（`BrandMark` 渲染的矢量路径）：绿色内芯 + **白色外扩边**。
+   *
+   * 外扩边的做法：描边是**居中**画的，`paint-order: stroke` 让描边压在填充下面 ⇒
+   * 只剩向外那一半；`vector-effect: non-scaling-stroke` 让宽度以**屏幕像素**计，
+   * 于是 `--rb-mark-outline` 就是「看得到的外扩宽度」（描边宽度得是它的两倍）。
+   *
+   * 写成 CSS 而不是 JSX 属性有两个原因：一是这些本来就是表现层的事，
+   * 二是它们全是 kebab-case 属性名（`stroke-width`…）—— 放在 JSX 里会被 lint 当成驼峰建议误报。
    */
-  .rb-mark {
-    display: block;
-    background-color: currentColor;
-    mask-image: var(--rb-mark-image);
-    mask-repeat: no-repeat;
-    mask-position: center;
-    mask-size: contain;
-    -webkit-mask-image: var(--rb-mark-image);
-    -webkit-mask-repeat: no-repeat;
-    -webkit-mask-position: center;
-    -webkit-mask-size: contain;
+  .rb-mark-path {
+    paint-order: stroke;
+    stroke-linejoin: round;
+    vector-effect: non-scaling-stroke;
+    stroke-width: calc(var(--rb-mark-outline, 0) * 2);
+  }
+
+  /* hero 右上的同心圆环（线条粗细统一走这里） */
+  .rb-hero-rings circle {
+    stroke-width: 1.5;
   }
 }

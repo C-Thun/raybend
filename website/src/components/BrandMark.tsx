@@ -1,59 +1,51 @@
 import type { JSX } from '@solidjs/web';
-import { asset } from '../lib/asset.ts';
-import { locale, type Locale } from '../i18n/index.ts';
+import { locale } from '../i18n/index.ts';
+import { MARK_PATHS, type MarkId } from './mark-paths.ts';
 
 /**
- * 品牌抠图（名称 / 口号）。
+ * 品牌书法字（产品名 / 口号）。
  *
- * 素材是**白色墨迹 + 透明底**的 webp，所以这里用 CSS 遮罩渲染：颜色跟着
- * `currentColor` 走（Tailwind 的 `text-*` 类），同一张图能在琥珀底上染深墨、
- * 也能在深底上染米白 —— 换色不需要重新导出图片。
+ * 素材是「白色墨迹 + 透明底」的位图，这里用 `scripts/generate-marks.mjs` 描摹出的
+ * **矢量路径**渲染（理由见那个脚本的注释）：位图只能给墨迹本身上色，做不到「向外扩的白边」；
+ * 矢量路径可以 —— `fill` 染绿、`stroke` 描白、`paint-order="stroke"` 把描边压到填充下面，
+ * 于是只剩**向外那一半**，就是外扩边。
  */
-
-type MarkKind = 'name' | 'slogan';
-
-interface MarkSpec {
-  file: string;
-  width: number;
-  height: number;
-}
-
-const MARKS = {
-  name: {
-    zh: { file: 'name-cn.webp', width: 724, height: 409 },
-    en: { file: 'name-en.webp', width: 933, height: 389 },
-  },
-  slogan: {
-    zh: { file: 'slogan-cn.webp', width: 1298, height: 265 },
-    en: { file: 'slogan-en.webp', width: 1300, height: 309 },
-  },
-} satisfies Record<MarkKind, Record<Locale, MarkSpec>>;
-
 export interface BrandMarkProps {
-  kind: MarkKind;
-  /** 宽高（高度按素材原始比例自动），例如 `w-[18rem]` */
+  kind: 'name' | 'slogan';
+  /** 宽度（如 `w-[16rem]`）；高度按生成物的 viewBox 比例自动 */
   class?: string;
-  /** 无障碍标签：抠图对读屏软件等于没有内容，必须给文字 */
+  /** 白色外扩边的宽度，单位是**屏幕像素**（描边居中，可见部分 ≈ 一半）；0/省略 = 不描边 */
+  outline?: number;
+  /** 无障碍标签：字形对读屏软件等于没有内容，必须给文字 */
   label: string;
 }
 
 export function BrandMark(props: BrandMarkProps) {
-  const spec = () => MARKS[props.kind][locale()];
+  const mark = () => MARK_PATHS[`${props.kind}-${locale()}` as MarkId];
+  const ratio = () => {
+    const [, , width, height] = mark().viewBox.split(' ');
+    return `${width} / ${height}`;
+  };
 
   return (
-    <span
-      class={['rb-mark', props.class]}
-      // 内联样式是刻意的：遮罩图地址是按语言算出来的运行时值，且 `aspect-ratio` 与
-      // 抠图原始比例绑定 —— 这两件事没有静态类名可写。
-      // pi-lens-ignore: inline-styles
-      style={
-        {
-          '--rb-mark-image': `url(${asset(spec().file)})`,
-          'aspect-ratio': `${spec().width} / ${spec().height}`,
-        } as JSX.CSSProperties
-      }
+    <svg
+      viewBox={mark().viewBox}
       role="img"
       aria-label={props.label}
-    />
+      class={['block h-auto', props.class]}
+      // 宽高比来自生成物的 viewBox（数据驱动），没有静态类名可写
+      // pi-lens-ignore: inline-styles
+      style={{ 'aspect-ratio': ratio() } as JSX.CSSProperties}
+    >
+      <path
+        d={mark().path}
+        class="rb-mark-path"
+        fill="var(--color-brand)"
+        stroke={props.outline ? 'var(--color-white)' : 'none'}
+        // 外扩边宽度（可见值，屏幕像素）—— 传给 CSS，见 App.css 的 `.rb-mark-path`
+        // pi-lens-ignore: inline-styles
+        style={{ '--rb-mark-outline': props.outline ?? 0 } as JSX.CSSProperties}
+      />
+    </svg>
   );
 }

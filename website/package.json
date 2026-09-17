@@ -14,6 +14,7 @@
     "test": "vitest",
     "test:run": "vitest run",
     "icons:generate": "node scripts/generate-icons.mjs",
+    "marks:generate": "node scripts/generate-marks.mjs",
     "lint": "oxlint src"
   },
   "license": "AGPL-3.0-only",
@@ -37,6 +38,7 @@
     "jsdom": "^25.0.1",
     "lucide-solid": "^1.46.0",
     "oxlint": "~1.79.0",
+    "potrace": "^2.1.8",
     "tailwindcss": "^4.1.13",
     "typescript": "^5.9.2",
     "vite": "^8.1.5",

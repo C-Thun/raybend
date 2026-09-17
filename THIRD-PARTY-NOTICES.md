@@ -54,6 +54,7 @@
 | Tailwind CSS 4（`tailwindcss` / `@tailwindcss/vite`） | 4.3.3 | MIT | 官网样式 | 兼容 |
 | `filesystem-routing` | 0.2.1 | MIT | 官网文件式路由 | 兼容 |
 | Vitest / jsdom / oxlint / TypeScript / Vite | 见 `website/package.json` | MIT / Apache-2.0 | 官网开发与测试（不进产物） | 兼容 |
+| **potrace**（`node-potrace`） | 2.1.8 | **GPL-2.0** | **开发期**把品牌书法字描摹成矢量路径（`scripts/generate-marks.mjs`） | **不进产物**：只产出一堆坐标数字（`src/components/mark-paths.ts`）；用工具跑一遍不构成对工具的衍生，与用 ImageMagick / ffmpeg 同类。若日后想避开 GPL 工具，可换零依赖的 `imagetracerjs`（描摹质量略逊） |
 
 > `lucide-solid`（ISC）只在**开发期**作为图标数据来源（与 `lucide-static` 同类用途）；
 > 它的组件代码**不会**进官网产物 —— 原因见 `website/AGENTS.md`（Solid 2 不兼容）。
@@ -86,3 +87,4 @@
 | 2026-09-17 | wgpu 版本落定为 30.0.1（上游最新）+ 新增 pollster 0.4（渲染 spike 引入，M2-W1） |
 | 2026-09-17 | 新增 §1b「品牌素材」：logo 与闪屏图**自研**，随项目 AGPL-3.0-only（人类确认） |
 | 2026-09-17 | 新增 §1c「官网依赖」：Lucide 图标数据(ISC)、Inter / Noto Sans SC(OFL-1.1)、官网的 Solid 2 线与构建/测试工具 |
+| 2026-09-17 | §1c 补 potrace(GPL-2.0，**开发期描摹工具**，只产坐标不进产物) |
