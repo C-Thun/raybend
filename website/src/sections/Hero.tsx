@@ -63,8 +63,14 @@ export function Hero() {
           <circle cx="100" cy="100" r="46" stroke="currentColor" />
         </svg>
         <div class="absolute top-1/3 left-4 size-2.5 rounded-full bg-ink/20" />
-        {/* 底边一条白色「胶片孔」带：过琥珀处像镂空，过绿块处像打孔 */}
-        <div class="absolute bottom-0 left-0 flex w-full gap-3 px-6 pb-3.5">
+        {/*
+          底边一条白色「胶片孔」带：过琥珀处像镂空，过绿块处像打孔。
+
+          **起点用负值**：`-left-6` 让第一个孔从屏幕外就开始，看起来才像一条真正
+          穿过去的胶片带。留 24px 起头会出现一段突兀的空白（人类点过名）。
+          多出来的孔被装饰层的 `overflow-hidden` 裁掉，不影响右侧布局。
+        */}
+        <div class="absolute bottom-0 -left-6 flex w-max gap-3 pb-3.5">
           <For each={FILM_HOLES}>{() => <span class="h-3 w-6 shrink-0 rounded-[3px] bg-paper" />}</For>
         </div>
       </div>
