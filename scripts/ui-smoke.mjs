@@ -366,7 +366,6 @@ try {
     (labelFor("浏览") ?? labelFor("Browse"))?.click();
     await new Promise((resolve) => setTimeout(resolve, 250));
     const onBrowse = hasTools();
-
     (labelFor("导入") ?? labelFor("Import"))?.click();
     await new Promise((resolve) => setTimeout(resolve, 250));
     const restored = hasTools();
@@ -377,7 +376,8 @@ try {
 
     return {
       hasToolsOnImport: before,
-      hasToolsOnBrowse: onBrowse,
+      // 陈列室里这只是演示控件：切过去不该再有「批量排除」那组工具（真工作区的断言在下面）
+      batchExcludeOnBrowse: onBrowse,
       restoredOnImport: restored,
       excludeDisabled: exclude ? exclude.disabled : null,
     };
@@ -386,10 +386,9 @@ try {
   if (shell) {
     if (!shell.hasToolsOnImport) {
       problems.push("「导入」工作流下没看到工具行（批量排除）");
-    }    if (shell.hasToolsOnBrowse) {
-      problems.push(
-        "切到「浏览」后工具行还在 —— 设计稿要求整行消失（design/main.md §2.3）",
-      );
+    }
+    if (shell.batchExcludeOnBrowse) {
+      problems.push("陈列室切到「浏览」后「批量排除」还在 —— 演示控件没跟着工作流走");
     }
     if (!shell.restoredOnImport) {
       problems.push("切回「导入」后工具行没回来");
@@ -1498,6 +1497,74 @@ try {
    * 选择器用 **Ark 自己的 DOM 契约**（`data-scope="splitter"` + `data-part="panel"/"resize-trigger"`），
    * 不靠「往上找祖先」那种脆招 —— 上一版就是那么找错的（找到 pane 上去了）。
    */
+  /*
+   * 浏览工作区（M2-W1）：切到「浏览」应当换成**三列** ——
+   * 左列库目录选择器、中列网格、右栏信息栏；工具行换成标记系列。
+   *
+   * 浏览器里没有后端 ⇒ 必然走到「还没有库」的空态 —— 这本身就是一条要守的行为：
+   * 空态**不能是一片空白**（载入/空态水印，`components/ui/StateWatermark.tsx`）。
+   */
+  const browseWorkspace = await evaluate(`(async () => {
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const labelFor = (text) =>
+      [...document.querySelectorAll("label")].find((node) => node.textContent.trim() === text);
+    if (!labelFor("导入") && !labelFor("Import")) return null;
+
+    (labelFor("浏览") ?? labelFor("Browse"))?.click();
+    await sleep(500);
+
+    const asides = [...document.querySelectorAll("aside")];
+    const main = document.querySelector("main");
+    const search = document.querySelector('input[type="search"]');
+    const text = (document.body.innerText ?? "").replace(/\\s+/g, " ");
+    const isFilter = (node) =>
+      /筛选|Filter/.test(node.getAttribute("aria-label") ?? "") ||
+      /筛选|Filter/.test(node.textContent ?? "");
+    const browseTools = [...document.querySelectorAll("button")].filter(isFilter).length;
+    // 左列库列表在浏览器里是空的 → 应当显示「还没有库」；网格该显示空/载入水印
+    const leftText = asides.map((el) => el.innerText ?? "").join(" ");
+    const mainText = main ? (main.innerText ?? "") : "";
+
+    const result = {
+      asides: asides.length,
+      hasMain: main !== null,
+      hasSearch: search !== null,
+      leftShowsNoRepository: /还没有库|No library yet/.test(leftText),
+      gridEmptyOrLoading: /还没有库|No library yet|正在加载库|Loading library|没有照片|No photos/.test(mainText),
+      browseTools,
+      searchPlaceholder: search ? (search.getAttribute("placeholder") ?? "") : null,
+    };
+
+    (labelFor("导入") ?? labelFor("Import"))?.click();
+    await sleep(300);
+    result.restoredImport = document.querySelector('input[type="search"]') === null;
+    return result;
+  })()`);
+
+  if (browseWorkspace) {
+    if (browseWorkspace.asides !== 2) {
+      problems.push(`浏览工作区应当是两列 aside（左列 + 右栏），实测 ${browseWorkspace.asides}`);
+    }
+    if (!browseWorkspace.hasMain) {
+      problems.push("浏览工作区缺中间那列（main）");
+    }
+    if (!browseWorkspace.hasSearch) {
+      problems.push("浏览左列没有搜索框（BROWSE.md §4.1）");
+    }
+    if (!browseWorkspace.leftShowsNoRepository) {
+      problems.push("浏览器里没有库时，左列应当显示「还没有库」的空态");
+    }
+    if (!browseWorkspace.gridEmptyOrLoading) {
+      problems.push("浏览网格既没显示空态也没显示载入态 —— 用户会看到一片空白");
+    }
+    if (browseWorkspace.browseTools === 0) {
+      problems.push("「浏览」工作流下没看到标记工具（筛选开关等，BROWSE.md §3）");
+    }
+    if (!browseWorkspace.restoredImport) {
+      problems.push("从「浏览」切回「导入」后，浏览左列的搜索框还在");
+    }
+  }
+
   const leftColumn = await evaluate(`(async () => {
     const rect = (el) => el.getBoundingClientRect();
     const titleOf = (pane) => {
@@ -2012,6 +2079,7 @@ try {
         resizeProbe,
         dirTree,
         workspace,
+        browseWorkspace,
         problems,
       },
       null,

@@ -15,7 +15,7 @@
  * 所以这里只接一个 `hasSelection` 布尔量与点击回调 —— M1-5 接上照片网格时不用改这里。
  */
 
-import { For, Show, type Component } from "solid-js";
+import { For, Show, type Component, type JSX } from "solid-js";
 import { Dynamic } from "solid-js/web";
 import { IconBan } from "@tabler/icons-solidjs";
 import { Button } from "../components/ui/Button.tsx";
@@ -29,13 +29,28 @@ export interface ToolsBarProps {
  hasSelection?: boolean;
  /** 点「批量排除」 */
  onBatchExclude?: () => void;
+ /*
+  * 各工作流自己的工具（浏览模式的标记系列在 `features/browse/BrowseToolbar.tsx`）。
+  *
+  * 为什么用插槽而不是往 `TOOL_CATALOG` 里塞：那张表描述的是「外壳认识的简单按钮」，
+  * 而浏览的标记控件带**三态**、要读选中照片的状态 —— 那是模块自己的事
+  * （`ARCHITECTURE.md` §3 的状态归属）。外壳只负责**条带与居中**，控件由模块给。
+  */
+ children?: JSX.Element;
+ /*
+  * 插槽里**到底有没有东西**。必须由调用方明说，不能靠 `props.children !== undefined` 判：
+  * JSX 子节点在 Solid 里是个 getter，里面套着 `<Show>` 时哪怕求值为假，`props.children`
+  * 本身仍然是真值 —— 于是「无内容时整行不渲染」这条规则会失效（编辑/导出工作流上
+  * 会留一条空条）。
+  */
+ hasExtraTools?: boolean;
 }
 
 export function ToolsBar(props: ToolsBarProps) {
  const tools = () => toolsFor(props.store.workflow());
 
  return (
-  <Show when={tools().length > 0}>
+  <Show when={tools().length > 0 || props.hasExtraTools}>
    <div class="flex h-bar-tool-h shrink-0 items-center justify-center gap-1 bg-surface-main px-pad-x">
     <For each={tools()}>
      {(tool) => (
@@ -48,10 +63,11 @@ export function ToolsBar(props: ToolsBarProps) {
        {t(tool.labelKey)}
       </Button>
      )}
-    </For>
-   </div>
-  </Show>
- );
+     </For>
+     {props.children}
+    </div>
+   </Show>
+  );
 }
 
 /**

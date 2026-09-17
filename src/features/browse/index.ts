@@ -3,6 +3,7 @@
  */
 
 export { BrowseGrid, type BrowseGridProps } from "./BrowseGrid.tsx";
+export { BrowseToolbar, type BrowseToolbarProps } from "./BrowseToolbar.tsx";
 export {
   AssetInfo,
   BrowseLeftColumn,

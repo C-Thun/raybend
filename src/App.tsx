@@ -31,7 +31,7 @@ import { createShellStore } from "./shell/store.ts";
 import { TitleBar } from "./shell/TitleBar.tsx";
 import { ToolsBar } from "./shell/ToolsBar.tsx";
 import { createImportStore, ImportWorkspace } from "./workspaces/import/index.ts";
-import { createBrowseStore } from "./features/browse/index.ts";
+import { BrowseToolbar, createBrowseStore } from "./features/browse/index.ts";
 import { browseDelete, browseFacets, browseMark, browseMarkings, browsePage, browseRedo, browseTimeline, browseUndo, flagsClear, flagsGet, flagsSet } from "./api/browse.ts";
 import { BrowseWorkspace } from "./workspaces/browse/index.ts";
 
@@ -132,11 +132,18 @@ export default function App() {
       */}
       <ToolsBar
         store={shell}
-        hasSelection={grid.hasSelection()}
+        hasSelection={shell.workflow() === "browse" ? browseStore.selectedCount() > 0 : grid.hasSelection()}
         // 批量排除是**反转**语义（DESIGN.md §12.2）：排除集合住在导入工作区，
         // 选中的照片清单来自网格 —— 外壳只负责把两边接起来
         onBatchExclude={() => importStore.toggleExcluded([...grid.selectedIds()])}
-      />
+        // 插槽里到底有没有东西，由这里明说（理由见 ToolsBar 的 hasExtraTools）
+        hasExtraTools={shell.workflow() === "browse"}
+      >
+        {/* 浏览模式的工具（标记系列 / 筛选开关 / 锁）由那个模块自己给 —— 见 ToolsBar 的说明 */}
+        <Show when={shell.workflow() === "browse"}>
+          <BrowseToolbar store={browseStore} />
+        </Show>
+      </ToolsBar>
 
       {/*
         工作区跟着工作流走（`AGENTS.md` §11.1）：导入 → 三列导入工作区；
