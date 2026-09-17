@@ -109,6 +109,8 @@ export interface PhotoGridStore {
    * 元信息还没到时返回默认占位比例 —— 界面据此决定照片在正方外框里长什么样。
    */
   aspectOf: (id: string) => number;
+  /** 元数据里的已换算宽高（给看图用：尺寸未知时拖动会被夹死，见 viewer/store 的 clampPan） */
+  naturalOf: (id: string) => { width: number; height: number } | null;
   status: () => LoadStatus;
   error: () => string | null;
   /** 扫描时读不了的位置（不致命） */
@@ -193,6 +195,19 @@ export function createPhotoGridStore(deps: PhotoGridDeps): PhotoGridStore {
     const meta = photoMeta().get(id);
     if (meta === undefined) return clampDisplayAspect(0, 0);
     return clampDisplayAspect(meta.width, meta.height);
+  };
+
+  /**
+   * 元数据里的已换算宽高 —— 给看图用。
+   *
+   * 与 [`aspectOf`] 的区别：那个是**展示用**的（夹到 3:1 之内，只用于排版），
+   * 这个是**真实尺寸**（拖动边界要拿它算，夹过就不准了）。
+   * 拿不到（元信息还没到）就返回 `null`，让看图侧自己退到旧行为。
+   */
+  const naturalOf = (id: string): { width: number; height: number } | null => {
+    const meta = photoMeta().get(id);
+    if (meta === undefined || meta.width <= 0 || meta.height <= 0) return null;
+    return { width: meta.width, height: meta.height };
   };
 
   /** 目录切换时把旧元信息丢掉（不同目录的文件名可能一样） */
@@ -491,6 +506,7 @@ export function createPhotoGridStore(deps: PhotoGridDeps): PhotoGridStore {
     items,
     displayItems,
     aspectOf,
+    naturalOf,
     status,
     error,
     problems,

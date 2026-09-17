@@ -36,6 +36,20 @@ fn main() {
     // 那不代表文件不存在，真伪以 `render_file` 的结果为准。
     println!("文件：{arg}（本进程看得见：{}）", path.exists());
 
+    // 元数据（方向/尺寸）：与网格铺 tile 用的是同一条路径
+    match raybend::media::meta::read_photo_meta(path) {
+        Ok(meta) => println!(
+            "元数据：{}×{}（已按方向换算），方向={}，{} 字节",
+            meta.width, meta.height, meta.orientation, meta.file_size
+        ),
+        Err(error) => println!("元数据：读不了 —— {error}"),
+    }
+    let exif = raybend::media::exif::read_file(path);
+    println!(
+        "EXIF：方向={:?}，宽高={:?}×{:?}，时间={:?}",
+        exif.orientation, exif.width, exif.height, exif.taken_at
+    );
+
     match raybend::thumbnail::render_file(path, raybend::thumbnail::SizeClass::Grid) {
         Ok(Some(thumb)) => println!(
             "✅ 出图：{}×{}，{} 字节，占位图={}",

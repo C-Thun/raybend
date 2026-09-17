@@ -32,6 +32,7 @@ use std::time::UNIX_EPOCH;
 
 use crate::error::{Error, Result};
 use crate::media::exif;
+use crate::media::kind::{self, MediaKind};
 
 /// 「尺寸未知」的哨兵值（`0` 而不是 `None`：调用方只关心「有没有一个能用的比例」）。
 pub const UNKNOWN_EDGE: u32 = 0;
@@ -97,8 +98,21 @@ pub fn read_photo_meta(path: &Path) -> Result<PhotoMeta> {
         .and_then(|since| i64::try_from(since.as_millis()).ok())
         .unwrap_or(0);
 
-    // EXIF：方向必读（栅格格式的尺寸不吃它，但**摆正**要用），RAW 的尺寸也只能靠它
-    let exif = exif::read_file(path);
+    /*
+     * EXIF：方向必读（栅格格式的尺寸不吃它，但**摆正**要用），RAW 的尺寸也只能靠它。
+     *
+     * RAW 走 `read_file_raw`：RW2 / ORF 的魔数不是 TIFF 的 `0x002A`，
+     * `kamadak-exif` 会**整体放弃**（实测 RW2 拿到的是方向 1 + 0×0 —— 竖拍躺着、比例退回占位）。
+     * 那个入口多一层 TIFF 家族兜底（见 `media::tiff`）。
+     */
+    let is_raw = path
+        .file_name()
+        .is_some_and(|name| kind::kind_of_file(&name.to_string_lossy()) == MediaKind::Raw);
+    let exif = if is_raw {
+        exif::read_file_raw(path)
+    } else {
+        exif::read_file(path)
+    };
     let orientation = normalize_orientation(exif.orientation);
 
     // 先试真栅格格式的头部（快、且比 EXIF 的尺寸字段可信）

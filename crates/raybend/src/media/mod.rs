@@ -17,6 +17,8 @@ pub mod diff;
 pub mod exif;
 pub mod kind;
 pub mod meta;
+/// 最小 TIFF/RAW 头解析（RW2 这类魔数不是 0x2A 的也要能读）
+pub mod tiff;
 pub mod meta_cache;
 pub mod scan;
 pub mod source;

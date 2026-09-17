@@ -86,8 +86,25 @@ pub fn read_file(path: &Path) -> ExifData {
     read_file_with_probe(path, HEAD_PROBE_BYTES)
 }
 
+/// **RAW 专用**的读法：在通用读法之外多一层「TIFF 家族兜底」（RW2 / ORF 的魔数不是 `0x2A`，
+/// `kamadak-exif` 直接放弃 —— 见 [`crate::media::tiff`]）。
+///
+/// 为什么不直接把它并进 `read_file`：兜底只解得出**方向与尺寸**，其它字段是空的。
+/// 通用的 `read_bytes` 若在「开头读到一半」时就靠兜底返回，会把「整读能拿到全部 EXIF」
+/// 这条更好的路堵掉（`read_file_probe_then_full_read_fallback` 那条测试正是钉这个的）。
+/// 所以：**确切知道是 RAW 的地方**才用这个入口。
+#[must_use]
+pub fn read_file_raw(path: &Path) -> ExifData {
+    read_file_with_probe_raw(path, HEAD_PROBE_BYTES, true)
+}
+
 /// [`read_file`] 的可测版本：先只读 `probe_bytes` 个字节试解析，失败再整读。
 fn read_file_with_probe(path: &Path, probe_bytes: usize) -> ExifData {
+    read_file_with_probe_raw(path, probe_bytes, false)
+}
+
+/// 共同实现。`raw_family = true` 时启用 TIFF 家族兜底。
+fn read_file_with_probe_raw(path: &Path, probe_bytes: usize, raw_family: bool) -> ExifData {
     use std::io::Read;
 
     // ① 只读开头一段试一次。EXIF 就在 JPEG 的 APP1 里（前几 KB），RAW 的 IFD 绝大多数
@@ -97,7 +114,7 @@ fn read_file_with_probe(path: &Path, probe_bytes: usize) -> ExifData {
         let mut head = vec![0u8; probe_bytes];
         if let Ok(n) = f.read(&mut head) {
             head.truncate(n);
-            if let Some(data) = read_bytes(&head) {
+            if let Some(data) = read_bytes_inner(&head, raw_family) {
                 return data;
             }
         }
@@ -107,7 +124,7 @@ fn read_file_with_probe(path: &Path, probe_bytes: usize) -> ExifData {
     let Ok(bytes) = std::fs::read(path) else {
         return ExifData::default();
     };
-    read_bytes(&bytes).unwrap_or_default()
+    read_bytes_inner(&bytes, raw_family).unwrap_or_default()
 }
 
 /// 探测时先读多少字节。1 MiB 足以覆盖 JPEG 的全部头部段与绝大多数 RAW 的主 IFD。
@@ -119,12 +136,53 @@ const HEAD_PROBE_BYTES: usize = 1 << 20;
 /// RW2 / NEF / CR2 / DNG 这些 RAW 都是 TIFF 家族，走的就是后一条路。
 #[must_use]
 pub fn read_bytes(bytes: &[u8]) -> Option<ExifData> {
+    read_bytes_inner(bytes, false)
+}
+
+/// [`read_bytes`] 的 RAW 版（多一层 TIFF 家族兜底，说明见 [`read_file_raw`]）。
+#[must_use]
+pub fn read_bytes_raw(bytes: &[u8]) -> Option<ExifData> {
+    read_bytes_inner(bytes, true)
+}
+
+fn read_bytes_inner(bytes: &[u8], raw_family: bool) -> Option<ExifData> {
+    if !raw_family {
+        // 通用路径：**保持原语义**（容器 → 裸 TIFF），不做任何兜底
+        let reader = exif::Reader::new();
+        let exif = std::io::Cursor::new(bytes)
+            .pipe(|mut c| reader.read_from_container(&mut c))
+            .or_else(|_| reader.read_raw(bytes.to_vec()))
+            .ok()?;
+        return Some(from_exif(&exif));
+    }
     let reader = exif::Reader::new();
     let exif = std::io::Cursor::new(bytes)
         .pipe(|mut c| reader.read_from_container(&mut c))
         .or_else(|_| reader.read_raw(bytes.to_vec()))
-        .ok()?;
-    Some(from_exif(&exif))
+        .ok();
+    if let Some(exif) = exif {
+        return Some(from_exif(&exif));
+    }
+
+    /*
+     * 兜底：**TIFF 家族但魔数不是 0x002A** 的那几种 RAW（Panasonic RW2 = `IIU\0` / 0x0055、
+     * Olympus ORF 的 `RO`/`RS`）。`kamadak-exif` 的 `tiff.rs` 把魔数写死成 `TIFF_FORTY_TWO`，
+     * 于是这些文件的 EXIF **整体静默读不到** —— 实测 RW2 的后果是方向丢成默认 1（竖拍躺着显示）
+     * 与尺寸 0×0（tile 比例退回占位）。
+     *
+     * 这里只取方向与尺寸（见 `media::tiff` 的范围说明），其余字段仍然留空 ——
+     * 那是刻意的：宁可少几项，也不去猜。
+     */
+    let info = crate::media::tiff::parse(bytes)?;
+    if info.is_empty() {
+        return None;
+    }
+    Some(ExifData {
+        orientation: info.orientation,
+        width: info.width,
+        height: info.height,
+        ..ExifData::default()
+    })
 }
 
 /// 把 `kamadak-exif` 的结果搬进我们自己的结构。

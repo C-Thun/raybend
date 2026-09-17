@@ -200,12 +200,18 @@ fn render_raw_file(path: &Path, size: SizeClass) -> Result<Option<Thumb>> {
      * （TIFF 家族的外层 EXIF 就够）。拿不到就当 1（不摆正）——
      * 比「猜错方向」安全：老照片里方向标记乱写的情况不少。
      */
+    /*
+     * 方向：worker 给了就用它（CR3 这类只能从容器内部拿），否则**读文件头**。
+     *
+     * 这里以前是 `std::fs::read(path)` 整读 —— 一张 RW2 是 24 MB，而 IFD 就在开头几 KB。
+     * 改用 `read_file_raw`（先读 1 MiB 头、失败才整读）之后，RAW 出图的磁盘读取量回到
+     * 「头」这个量级；顺带 RW2/ORF 的方向也终于读得到了（魔数不是 0x2A，通用读法会放弃，
+     * 见 `media::tiff`）。
+     */
     let orientation = decoded.orientation.or_else(|| {
-        std::fs::read(path).ok().and_then(|bytes| {
-            crate::media::exif::read_bytes(&bytes)
-                .and_then(|data| data.orientation)
-                .map(|raw| crate::media::meta::normalize_orientation(Some(raw)))
-        })
+        crate::media::exif::read_file_raw(path)
+            .orientation
+            .map(|raw| crate::media::meta::normalize_orientation(Some(raw)))
     });
 
     encode(img, size, orientation, false).map(Some)

@@ -99,6 +99,30 @@ test("zoomPanAt：锚点下的那一点**不动**（滚轮缩放的关键性质�
   assert.ok(Math.abs(screen.y - anchor.y) < 1e-9, `y 漂了：${screen.y}`);
 });
 
+test("clampPan：**原图尺寸未知时不夹取**（RAW 双击点开后拖不动的根因）", () => {
+  /*
+   * `natural` 是 0 时，原来的公式算出的上限是 0 —— 任何缩放下都拖不动。
+   * RAW 的尺寸以前读不到（EXIF 读不了 RW2 的魔数），于是「双击点开 RAW 拖不动」。
+   * 判据：尺寸未知时**原样放行**（不知道边界不等于不许移动）。
+   */
+  const viewport = { width: 1200, height: 800 };
+  const unknown = { width: 0, height: 0 };
+  assert.deepEqual(
+    clampPan({ pan: { x: 500, y: -300 }, zoom: 2, viewport, natural: unknown }),
+    { x: 500, y: -300 },
+  );
+  // 只有一个方向未知时也不夹（不能只修一半）
+  assert.deepEqual(
+    clampPan({
+      pan: { x: 250, y: 120 },
+      zoom: 1,
+      viewport,
+      natural: { width: 0, height: 3000 },
+    }),
+    { x: 250, y: 120 },
+  );
+});
+
 test("clampPan：图比视口大 → 边不许拖进来；比视口小 → 锁在中间", () => {
   const viewport = { width: 800, height: 600 };
   const natural = { width: 1000, height: 800 };

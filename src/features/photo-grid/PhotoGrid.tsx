@@ -125,11 +125,17 @@ export function PhotoGrid(props: PhotoGridProps) {
 
   /** 网格里的照片（顺序即视图顺序）→ 查看器要的形态 */
   const viewerPhotos = () =>
-    store.displayItems().map((item) => ({
-      id: itemId(item),
-      path: item.path,
-      fileName: item.fileName,
-    }));
+    store.displayItems().map((item) => {
+      const id = itemId(item);
+      const natural = store.naturalOf(id);
+      return {
+        id,
+        path: item.path,
+        fileName: item.fileName,
+        // 元数据里的真实宽高：看图靠它算拖动边界（RAW 以前读不到尺寸 → 拖不动）
+        ...(natural === null ? {} : { natural }),
+      };
+    });
 
   /** 选中后按回车 → 进看图（设计稿 §3.2）；方向键在网格里移动选中 */
   function onGridKeyDown(event: KeyboardEvent): void {
@@ -343,6 +349,8 @@ function TileCell(props: {
       <Tile
         label={props.item.fileName}
         tag={props.item.ext?.toUpperCase() ?? undefined}
+        // RAW 角标：未指向、未选中时才浮在右下角（后端已经分好类，不用前端认扩展名）
+        raw={props.item.kind === "raw"}
         aspect={props.store.aspectOf(id())}
         // 小尺寸档（96/120/144）星标退化成「一颗星 + 数字」
         compact={props.store.tileStep() <= 2}

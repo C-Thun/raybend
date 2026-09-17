@@ -30,6 +30,13 @@ export interface ViewerPhoto {
   id: string;
   path: string;
   fileName: string;
+  /**
+   * 元数据里的**已按方向换算**的宽高（可选）。
+   *
+   * 有它就能在 `onLoad` 之前把 `natural` 定下来 —— 对 RAW 尤其要紧：
+   * 尺寸未知时 `clampPan` 会把拖动锁死（见那个函数的说明）。
+   */
+  natural?: { width: number; height: number };
 }
 
 export interface ViewportSize {
@@ -142,6 +149,13 @@ export function zoomPanAt(args: {
 /**
  * 平移量夹取：图比视口大时不许拖出边界（边永远在视口外）；
  * 图比视口小时**锁在中间**（不给拖，免得用户以为图丢了）。
+ *
+ * ⚠️ **原图尺寸未知时不夹取**（2026-09-17 修）：`natural` 是 0 时，
+ * 上面两条规则算出来的上限都是 0 —— 于是**任何缩放下都拖不动**。
+ * 这正是「RAW 双击点开后鼠标拖不动」的机制：RAW 的尺寸以前读不到（EXIF 读不了
+ * RW2 那种魔数，见 `crates/raybend/src/media/tiff.rs`），`natural` 就一直是 0。
+ * 现在两头都补了：① 元数据能读到尺寸了；② 万一仍读不到，也**不许把拖动锁死** ——
+ * 「不知道边界」不等于「不许移动」。
  */
 export function clampPan(args: {
   pan: { x: number; y: number };
@@ -150,6 +164,10 @@ export function clampPan(args: {
   natural: NaturalSize;
 }): { x: number; y: number } {
   const { pan, zoom, viewport, natural } = args;
+  if (natural.width <= 0 || natural.height <= 0) {
+    // 尺寸未知：不猜边界，原样放行（拖动至少是可用的）
+    return { x: pan.x, y: pan.y };
+  }
   const limit = (scaled: number, available: number): number =>
     Math.max(0, (scaled - available) / 2);
   const maxX = limit(natural.width * zoom, viewport.width);
@@ -274,8 +292,17 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
       photos: nextPhotos,
       index: clamped,
       fit: true,
-      // 换图先按**旧的**原图尺寸估一下，等 onLoad 回填真实尺寸再修正（避免闪一下大白块）
-      ...refit({ ...prev, photos: nextPhotos, index: clamped }),
+      /*
+       * 尺寸的来路，按可信度排序：
+       *   1. 这张照片**元数据**里的宽高（有它就一步到位，RAW 靠它才拖得动）；
+       *   2. 旧图尺寸当估计（原来的行为，等 onLoad 回填真实尺寸再修正，避免闪一下大白块）。
+       */
+      ...refit({
+        ...prev,
+        natural: photo.natural ?? prev.natural,
+        photos: nextPhotos,
+        index: clamped,
+      }),
     }));
     void loadFor(photo, ticket);
   }
@@ -296,7 +323,15 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
     if (clamped === index()) return;
     generation += 1;
     const ticket = generation;
-    setState((prev) => ({ ...prev, index: clamped, fit: true, ...refit({ ...prev, index: clamped }) }));
+    setState((prev) => {
+      const photo = list[clamped];
+      return {
+        ...prev,
+        index: clamped,
+        fit: true,
+        ...refit({ ...prev, natural: photo?.natural ?? prev.natural, index: clamped }),
+      };
+    });
     void loadFor(list[clamped]!, ticket);
   }
 

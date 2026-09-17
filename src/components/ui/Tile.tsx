@@ -90,6 +90,14 @@ export interface TileProps
   actions?: JSX.Element;
   /** 库内才有的信息（导入工作流里这些事都不存在，槽位直接不渲染） */
   context?: "library" | "source";
+  /**
+   * 是不是 RAW（人类 2026-09-17 要求）：未指向、未选中时，照片**右下角**浮一个
+   * 主色底纹的圆角 `RAW` 标签；鼠标指向或选中时**消失**。
+   *
+   * 为什么只在没指向/没选中时显示：那两种状态下本来就有信息条与选中底色，
+   * 再挂一个角标就是噪声；而平时它解决的是「一眼看出这批里哪些是 RAW」。
+   */
+  raw?: boolean;
   /** 星标 0..5（0 = 什么都不显示） */
   rating?: number;
   flag?: "pick" | "reject" | null;
@@ -133,6 +141,7 @@ export function Tile(props: TileProps) {
     "excluded",
     "actions",
     "context",
+    "raw",
     "rating",
     "flag",
     "locked",
@@ -278,6 +287,28 @@ export function Tile(props: TileProps) {
                 .filter(Boolean)
                 .join(" ")}
             />
+
+            <Show when={local.raw}>
+              {/*
+                RAW 角标：**未指向、未选中**时才在照片右下角浮出。
+
+                实现要点：
+                * 圆角用 `--tile-radius` —— 与照片圆角、`--tile-pad` 同一套令牌，
+                  贴在同一块面上才不突兀（用外面那种大圆角会看着像浮在另一个层上）；
+                * 指向时用**淡出**而不是直接 `hidden`：它下面就是悬停才出现的信息条，
+                  硬切会有一下呼哧感；选中则是持续状态，直接不渲染。
+                * `pointer-events-none`：它不是按钮，不睿鼠标事件（否则点到它就算点到照片了）。
+              */}
+              <span
+                class={[
+                  "pointer-events-none absolute end-1 bottom-1 rounded-(--tile-radius) bg-brand px-1",
+                  "font-600 text-fs-0 text-fg-on-brand transition-opacity",
+                  local.selected ? "hidden" : "group-hover/tile:opacity-0",
+                ].join(" ")}
+              >
+                RAW
+              </span>
+            </Show>
 
             {/*
               排除的标识：**照片正中央**一个禁行图标（圈 + 斜线，与 `toolsbar` 的批量排除同一套）。
