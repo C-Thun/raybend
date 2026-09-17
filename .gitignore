@@ -12,5 +12,8 @@ target/
 .DS_Store
 *.log
 
+# Windows 拷贝带来的 NTFS 附加流残留（文件名里真带冒号，Windows 上无法 checkout）
+*:Zone.Identifier
+
 # 开发
 prompts/

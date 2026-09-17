@@ -404,6 +404,7 @@ wgpu 透明挖洞只服务于**查看器/显影视口**（M2-W3）。退路（�
 | 2026-09-15 | 初版：确立 7 个 milestone 与波次划分、决策记录表 |
 | 2026-09-15 | 新增 §0.1 规划纪律（一次规划只覆盖一个工作单元）；M0 章节收敛为工作单元索引表；原一次性铺开的 M0 波次规划归档到**附录 A** |
 | 2026-09-15 | **M0 重构**：spike 由「一次性门禁」改为「按模块按需前置」——M0-4/5/6/3 服务于 M1，M0-2 后移到 M2 前；新增「设计阶段」章节 |
+| 2026-09-17 | **官网支线落地（不在 milestone 序列内）**：`website/` 首页（双语 / 下载区 / 教程占位）+ `.github/workflows/website.yml`（push master / 正式版 release / 手动 → GitHub Pages）。**不属于应用本体的进度**，不给 milestone 排期；方案见 `plans/website-homepage.md`，约定见 `website/AGENTS.md`，待人做的事见 `website/ASSETS.md` |
 
 ---
 

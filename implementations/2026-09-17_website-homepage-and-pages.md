@@ -1,0 +1,173 @@
+# 官网首页 + GitHub Pages 发布流水线
+
+完成时间：2026-09-17 14:51:12 CST
+
+计划：`plans/website-homepage.md`（人类已批，含「SEO 可以在 html 模版开头加一点」这条反馈）。
+工作单元是 **`website/`（官网）**，与应用本体的进度无关（根 `AGENTS.md` §4：两套技术栈）。
+
+---
+
+## 1. 本次改动的范围
+
+| # | 交付物 | 状态 |
+| --- | --- | --- |
+| ① | 首页（琥珀贴顶 hero + 三卖点 + 四阶段工作流 + 三条功能细节 + 开源与技术 + 下载区 + 教程占位 + 页脚 + 404） | ✅ |
+| ② | 中英双语：浏览器语言识别 + 左上角切换 + `<html lang>`/meta 同步 | ✅ |
+| ③ | 下载信息：构建期注入版本与直链（现在无 release → 「即将发布」占位态） | ✅ |
+| ④ | 素材占位体系（`Shot` + `media.ts`）+ 给人看的清单 `website/ASSETS.md` | ✅ |
+| ⑤ | `website/AGENTS.md` 重写（结构 / i18n / 素材 / 下载注入 / **部署与自定义域名步骤** / Solid 2 纪律） | ✅ |
+| ⑥ | `.github/workflows/website.yml`（push master / 正式版 release / 手动 → GitHub Pages） | ✅ |
+| ⑦ | 单测 20 项（下载纯逻辑 11 + i18n 9）；`tsc` / `oxlint` / `build` 全绿 | ✅ |
+| ⑧ | pi-lens 收尾：把另一会话报的 **error 级**误报处理掉（见 §4） | ✅ |
+| ⑨ | 许可登记：`THIRD-PARTY-NOTICES.md` 新增 §1c「官网依赖」 | ✅ |
+
+**没有**做的事（计划内明确不做）：真图素材（要人给，见 `ASSETS.md`）、Pages 开关与域名（要人配）、B 站教程（还没录）。
+
+---
+
+## 2. 涉及文件
+
+**新增**
+
+| 文件 | 作用 |
+| --- | --- |
+| `.github/workflows/website.yml` | 构建 + 发布 Pages |
+| `.yamllint.yaml` | GitHub 工作流用的 yamllint 配置（见 §4） |
+| `knip.json` | 声明 `website` 是独立工作区（见 §4） |
+| `website/ASSETS.md` | 素材清单：4 张截图 + 2 张 AI 装饰图（含英文提示词） |
+| `website/scripts/generate-icons.mjs` | 从 lucide-solid 的图标数据生成图标组件 |
+| `website/src/components/icons.tsx` | **生成物**，16 个 Lucide 图标 |
+| `website/src/i18n/{zh.ts,en.ts,index.ts,index.test.ts}` | 文案（zh 为形状源）+ 检测/切换/持久化 + 单测 |
+| `website/src/data/{site.ts,features.ts,media.ts,tutorials.ts,release.ts,release.test.ts}` | 常量 / 结构 / 素材表 / 教程 / 下载逻辑 + 单测 |
+| `website/src/components/{BrandMark,LangSwitch,Button,Shot,WindowFrame,Section,GithubMark}.tsx` | 通用件 |
+| `website/src/sections/{Hero,Highlights,Workflows,Features,OpenSource,DownloadSection,Tutorials,Footer}.tsx` | 页面区块 |
+| `website/src/lib/asset.ts` | `public/` 资源的 base 感知 URL |
+| `website/src/vite-env.d.ts` | 注入量的类型声明（改为 `ImportMetaEnv` 增强） |
+
+**改动**：`website/vite.config.ts`（发布信息注入 + `RAYBEND_BASE`）、`App.tsx`（站点外壳 + Loading 边界 + i18n）、
+`App.css`（字体 + `@theme` 令牌）、`Document.tsx`（**静态 SEO head / OG / JSON-LD / noscript**）、
+`src/routes/{index,[...404]}.tsx`、`package.json`（`packageManager` / 脚本 / 依赖归位）、`tsconfig.json`、
+`oxlint.config.ts`（未改）、`website/AGENTS.md`；根 `.gitignore` + `website/.gitignore`（`*:Zone.Identifier`）、
+根 `AGENTS.md`、`PLAN.md`、`THIRD-PARTY-NOTICES.md`。
+
+**删除（模板残留）**：`src/routes/users.tsx`、`src/routes/users/[id].tsx`、`src/components/Counter*.tsx`、
+`src/logo.svg`、`public/users.json`、`public/*:Zone.Identifier`。
+
+---
+
+## 3. 关键决策与理由
+
+| 决策 | 理由 |
+| --- | --- |
+| hero **辅色琥珀 `#F0B033` 满铺** + 深墨字 | 用户在第一轮问答里选定；导航与 hero 同底色、贴顶（无白条/深色条） |
+| 名称/口号抠图用 **CSS `mask-image` + `currentColor`** | 素材是白色墨迹 + 透明底（实测）；遮罩染色后同一张图能在浅底染墨、深底染白，**换色不用重导图** |
+| 语言切换**纯客户端**（无路由、无 SSR） | 站点本就是客户端渲染，天然没有 hydration 问题；省掉一套 i18n 路由与两份 HTML |
+| 下载信息**构建期注入**（`import.meta.env.RB_RELEASE`） | 不在浏览器里请求 GitHub API：无限流、无闪烁、SEO head 也能带上；本地构建不联网 |
+| **只上正式版**（prerelease 跳过） | 用户选择；`release: published` 触发时若 `prerelease == true` 直接跳过 |
+| 预览版/正式版**不新开页面**，同一个首页两处消费 | 单页站，`resolveRelease()` 一处纯逻辑、两处渲染（hero CTA + 下载卡） |
+| **不用 `lucide-solid` 组件**，只取它的图标数据自己生成 | 它的 1.x 组件 import `solid-js` 的 `splitProps`，**Solid 2 已删除该 API**（连 `mergeProps` 都搬去了 `@solidjs/web`），实测浏览器报 `does not provide an export named 'splitProps'`；官方也还没有 Solid 2 版本（最新 1.46.0 的 peer 仍是 `^1.4.7`） |
+| 字体 **Inter + Noto Sans SC 全自托管** | 用户选择；与应用本体同一套选型，无外链（国内访问不受影响） |
+| Pages 发布来源 = **GitHub Actions**，**不放 `CNAME` 文件** | GitHub 官方文档原文：Actions 发布时 *"any existing CNAME file is ignored and is not required"*；域名只存仓库设置里 |
+
+---
+
+## 4. pi-lens 收尾（另一会话报的 error 级误报）
+
+用户转达：另一会话在 `website/tsconfig.json` 上收到 **error 级**「Comments are not permitted in JSON」。
+按「能真改的真改、刻意的写清理由」处理，现在**全项目 error 级为 0**：
+
+| 项 | 处理 |
+| --- | --- |
+| `tsconfig.json` JSON 注释（error） | **真改**：去掉注释（配置项一个没少），说明搬进 `website/AGENTS.md` §1。实测 `tsc -p` 退出码 0，`lens_diagnostics(source=lsp)` 复检 0 条 |
+| `knip: vitest unlisted` | **真改**：仓库根新增 `knip.json`，把 `website` 声明成独立工作区（它有自带的 `package.json`，根目录看不到 vitest 才误报） |
+| `prefer-structured-class`（4 处 warning） | **真改**成 Solid 2 的数组/对象 class 写法（`@solidjs/web` 支持，实测渲染正常） |
+| `solid/style-prop`（2 处 warning） | **真改**：`Document.tsx` 的 noscript 内联样式改成对象写法 |
+| `no-known-value-widening`（3 处 hint） | **真改**：`Record<...>` 注解改成 `satisfies`（顺便让字面量类型收窄） |
+| `hyphenated-svg-attribute`（3 处，生成物） | **压制**：Solid 2 的 JSX 类型**只认** kebab-case SVG 属性（写驼峰会 `TS2322`，实测），属类型定义的硬要求 → 生成器里逐行写 `pi-lens-ignore: hyphenated-svg-attribute` + 注释说明 |
+| `.github/workflows/website.yml` 的 yamllint error/warning | **真改 + 配置**：新增 `.yamllint.yaml`（GitHub 工作流的 `on:` 被 YAML 1.1 当布尔值是稳定误报、`---` 文档头不需要、行长放到 120），并把这行折短；`yamllint` 复检 0 条 |
+| `solid(prefer-for)`、`onMount→onSettled`、`<Loading>` 缺失 | 开发期由 pi-lens 报出/由类型检查挡下的真问题，已按 Solid 2 写法修掉 |
+
+> 仍留着的（**有意保留**，都是 hint 级）：`no-runtime-typeof` / `no-unknown-parameters` 出现在
+> `i18n/index.ts`、`data/media.ts`、`data/release.ts` —— 那些 `typeof` 全是**运行环境守卫**
+> （`localStorage` 可能抛、`navigator` 可能没有、注入值可能不存在），正是该在边界上做的运行时判断。
+
+---
+
+## 5. 验证方式（跑了什么、看到什么）
+
+**Agent 侧（冒烟，全绿）**
+
+```bash
+cd website
+pnpm install                 # 锁定文件不变；新增 @types/node、字体包
+npx tsc --noEmit             # 0 错误
+pnpm lint                    # oxlint src：0 条
+pnpm test:run                # 20 项通过（下载逻辑 11 + i18n 9），0.5–1.0s
+pnpm build                   # 818ms + 113ms；dist/client 6.0 MB
+```
+
+- **构造注入干跑**：`RAYBEND_TAG=v9.9.9 pnpm build` → 产物 JS 里出现 `9.9.9`（tag 查不到时退化为
+  「发布页链接」的路径也验证到了）；不带变量 → 注入 `null`，走「即将发布」态。
+- **生产产物 headless 复核**（`vite preview` + CDP）：
+
+  | 检查 | 结果 |
+  | --- | --- |
+  | `<title>` / `html lang` | `RayBend — Open-source photo ma…` / `en`（按浏览器语言切换成功） |
+  | 区块 | `top, why, workflow, features, open-source, download, tutorials` 七段齐全 |
+  | 下载按钮 | `https://github.com/C-Thun/raybend/releases`（pending 态） |
+  | 版本显示 | `Coming soon` |
+  | 字体 | `Inter Variable` + `Noto Sans SC Variable` 已加载（自托管） |
+  | **外部请求数** | **0**（无 CDN、无 Google Fonts） |
+- **视觉**：用 CDP 截图逐段看过（1440 宽桌面 + 390 宽手机 + 中英两版），hero/卡片/下载区/页脚版式与配色正常；
+  截图属开发过程产物，未入库。
+- **SEO**：预渲染的 `index.html` 里已含 title / description / keywords / canonical / og / twitter /
+  theme-color / JSON-LD（`SoftwareApplication`）/ favicon，以及 `<noscript>` 降级提示。
+
+**未经人类验证（按 `AGENTS.md` §2.8 归人类）**：真机浏览器观感、要不要调色/留白、Pages 开关与
+自定义域名 + HTTPS 的实际生效、**第一次发版后官网版本号与下载链接是否自动跟着变**（要等第一个正式版）。
+
+---
+
+## 6. 遗留问题
+
+1. **素材没到位**：4 张应用截图 + 2 张装饰图（可选）。清单、尺寸、取景要点、AI 提示词都在
+   `website/ASSETS.md`；到位后在 `src/data/media.ts` 填 `src` 即完成替换。
+2. **Pages 与自定义域名要人配**：步骤见 `website/AGENTS.md` §5（顺序：先仓库设置填域名 → 再配 DNS
+   `CNAME raybend → c-thun.github.io` → 等绿 → 勾 Enforce HTTPS）。用 Cloudflare 时配置期要灰云。
+3. **B 站教程**：录完把条目加进 `src/data/tutorials.ts`，教程区自动从占位变视频卡片。
+4. **深链接**：产物是「预渲染外壳 + 客户端路由」，现在只有 `/` 一个页面所以无碍；将来加多页时要在
+   Pages 上处理 404 回退（或改成逐页预渲染）。
+5. **深色主题未做**：站点目前只有浅色一版（用户没要求）。
+6. **部署体积**：`dist/client` 6 MB 里 5.6 MB 是字体全量分块（浏览器按 `unicode-range` 只取所需）。
+   在意 Pages 上传量时再考虑自定义子集，已在 `website/AGENTS.md` 记一笔。
+
+---
+
+## 7. 追加（2026-09-17 15:13:17 CST）：命名规则 + 发布配置复核
+
+**① 命名规则落地**（用户 2026-09-17 定）：开源/技术侧小写 `raybend`（仓库、路径、URL、存储键、包名），
+**对外产品宣称英文一律 `RayBend`**。已写进根 `AGENTS.md` §1 与 `website/AGENTS.md` §4.1。
+按这条改掉的对外展示位置（小写 → `RayBend`）：
+
+| 位置 | 改动 |
+| --- | --- |
+| 截图窗口框的标题栏（`WindowFrame` 默认值 + hero / 特性三条的 title） | `raybend — browse` → `RayBend — browse` 等 |
+| 页脚版权行（中英语言包） | `© 2026 raybend` → `© 2026 RayBend` |
+| `<meta name="author">` | `raybend` → `RayBend` |
+| JSON-LD 的 `alternateName` | 去掉小写项（搜索引擎本就不区分大小写），只留「光伴」 |
+
+保留小写的地方（**故意的**）：`REPO_URL` / 域名 / `og:url` / `RAYBEND_*` 环境变量 / `localStorage` 键 —— 那些是 URL 与标识符，不是产品宣称。
+
+**② 发布配置逐项复核**（回答「现在直接发版就会自动部署了是吧」）：
+
+| 检查 | 证据 |
+| --- | --- |
+| CI 步骤本地干跑 | `pnpm install --frozen-lockfile`（锁文件一致）→ `test:run`（20 项）→ `typecheck`（0 错）→ `lint`（0 条）→ `build` 全通 |
+| CI 路径的版本注入 | `CI=true pnpm build`（不传 tag）→ 走 API 查 `releases/latest` → 404（还没有 release）→ **注入 `null`** → 产物里是「即将发布 / Coming soon」占位态，构建不失败 |
+| 用到的 action 是否存在 | 逐个查 GitHub ref：`checkout@v7`、`setup-node@v7`、`configure-pages@v6`、`upload-pages-artifact@v5`、`deploy-pages@v5`、`pnpm/action-setup@v6` —— **全部存在** |
+| 产物路径一致 | 构建实出 `website/dist/client/index.html`，与 `upload-pages-artifact` 的 `path` 一致 |
+| YAML 规范 | `yamllint`（含新增的 `.yamllint.yaml`）0 条 |
+
+**结论**：把仓库 `Settings → Pages` 的 Source 设成 GitHub Actions（并填自定义域名）之后 ——
+推 `master`、发**正式版** release、手动触发这三条都会自动构建并部署；第一个正式版发布后，
+官网的版本号与安装包直链会自动跟着变（预发布版不上官网）。

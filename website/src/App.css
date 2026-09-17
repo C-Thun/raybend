@@ -1,0 +1,106 @@
+/* 自托管字体（与应用本体同一套选型，无外链）：拉丁 Inter → 中文 Noto Sans SC */
+@import '@fontsource-variable/inter';
+@import '@fontsource-variable/noto-sans-sc';
+@import 'tailwindcss';
+
+/*
+ * 站点视觉令牌。
+ * 品牌主色 / 辅色与应用本体同源（唯一事实来源：仓库根 `DESIGN.md` §1.1）——
+ * 组件里只引用令牌名（`bg-accent`、`text-ink`…），不要写死色值。
+ */
+@theme {
+  /* 品牌青绿（主色）：点缀、按钮、几何纹 */
+  --color-brand: #52c6ab;
+  --color-brand-dark: #37a98e;
+  --color-brand-soft: #e7f6f2;
+
+  /* 品牌琥珀（辅色）：hero 底色、重点强调 */
+  --color-accent: #f0b033;
+  --color-accent-dark: #d99a1b;
+  --color-accent-soft: #fdf2d8;
+
+  /* 中性面与文字 */
+  --color-ink: #202226;
+  --color-ink-2: #2a2d33;
+  --color-ink-soft: #4a4f57;
+  --color-muted: #71767e;
+  --color-paper: #f6f8f4;
+  --color-paper-2: #edf0e9;
+  --color-card: #ffffff;
+  --color-line: #dee2d8;
+
+  /* 字体：拉丁 Inter → 中文 Noto Sans SC（都已自托管，无外链） */
+  --font-sans:
+    'Inter Variable', 'Noto Sans SC Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI',
+    'PingFang SC', 'Microsoft YaHei', sans-serif;
+
+  /* 大标题：hero 用（跟随视口缩放） */
+  --text-display: clamp(2.5rem, 5.2vw, 4.25rem);
+  --text-display--line-height: 1.05;
+  --text-display--letter-spacing: -0.02em;
+
+  /* 区块标题 */
+  --text-title: clamp(1.75rem, 3vw, 2.5rem);
+  --text-title--line-height: 1.2;
+  --text-title--letter-spacing: -0.01em;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    scroll-behavior: smooth;
+    /* 顶部导航是吸顶的，锚点跳转留出它的高度 */
+    scroll-padding-top: 5.5rem;
+  }
+
+  body {
+    background-color: var(--color-paper);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection {
+    background-color: var(--color-accent);
+    color: var(--color-ink);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-ink);
+    outline-offset: 3px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer components {
+  /*
+   * 品牌抠图（`name-*.webp` / `slogan-*.webp` 是「白色墨迹 + 透明底」）。
+   * 用遮罩渲染，颜色由 currentColor（Tailwind 的 text-* 类）决定，所以同一张图
+   * 可以在琥珀底上染深墨、也可以在深底上染白。
+   */
+  .rb-mark {
+    display: block;
+    background-color: currentColor;
+    mask-image: var(--rb-mark-image);
+    mask-repeat: no-repeat;
+    mask-position: center;
+    mask-size: contain;
+    -webkit-mask-image: var(--rb-mark-image);
+    -webkit-mask-repeat: no-repeat;
+    -webkit-mask-position: center;
+    -webkit-mask-size: contain;
+  }
+}

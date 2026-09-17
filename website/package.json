@@ -1,0 +1,45 @@
+{
+  "name": "raybend-website",
+  "version": "0.0.0",
+  "private": true,
+  "description": "raybend（光伴）官方网站 —— 与应用本体技术栈不同的独立静态站",
+  "type": "module",
+  "packageManager": "pnpm@12.3.4",
+  "scripts": {
+    "start": "vite",
+    "dev": "vite",
+    "build": "vite build",
+    "serve": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "icons:generate": "node scripts/generate-icons.mjs",
+    "lint": "oxlint src"
+  },
+  "license": "AGPL-3.0-only",
+  "dependencies": {
+    "@fontsource-variable/inter": "^5.3.0",
+    "@fontsource-variable/noto-sans-sc": "^5.3.0",
+    "@solidjs/meta": "^1.0.0-next.2",
+    "@solidjs/router": "^2.0.0-next.21",
+    "@solidjs/web": "^2.0.0-rc.6",
+    "solid-js": "^2.0.0-rc.6"
+  },
+  "devDependencies": {
+    "@solidjs/diagnostics": "^2.0.0-rc.6",
+    "@solidjs/testing-library": "^1.0.0-beta.3",
+    "@solidjs/vite-plugin": "^3.0.0-next.38",
+    "@tailwindcss/vite": "^4.1.13",
+    "@testing-library/jest-dom": "^7.0.0",
+    "@types/node": "^26.5.1",
+    "eslint-plugin-solid": "~0.18.0",
+    "filesystem-routing": "0.2.1",
+    "jsdom": "^25.0.1",
+    "lucide-solid": "^1.46.0",
+    "oxlint": "~1.79.0",
+    "tailwindcss": "^4.1.13",
+    "typescript": "^5.9.2",
+    "vite": "^8.1.5",
+    "vitest": "^5.0.0"
+  }
+}

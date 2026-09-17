@@ -41,6 +41,25 @@
 
 ---
 
+## 1c. 官网（`website/`）的依赖
+
+官网与应用本体是**两个独立包**（见根 `AGENTS.md` §4），所以它的第三方组件单独登记在这里。
+
+| 组件 | 版本 | 许可 | 用途 | 与 AGPL-3.0 的关系 |
+| --- | --- | --- | --- | --- |
+| **Lucide**（只取图标数据，见 `website/scripts/generate-icons.mjs`） | — | **ISC** | 官网图标（生成到 `website/src/components/icons.tsx`） | 兼容（ISC 为宽松许可，保留版权声明即可） |
+| Inter（`@fontsource-variable/inter`） | 5.3.0 | **SIL OFL-1.1** | 官网拉丁字体（自托管 woff2） | 兼容（OFL 允许嵌入与再分发，保留许可证即可） |
+| Noto Sans SC（`@fontsource-variable/noto-sans-sc`） | 5.3.0 | **SIL OFL-1.1** | 官网中文字体（自托管，按 unicode-range 分块） | 同上 |
+| SolidJS 2 / `@solidjs/router` / `@solidjs/meta` / `@solidjs/vite-plugin` | 2.0-rc / 3.0-next | MIT | 官网框架与构建 | 兼容 |
+| Tailwind CSS 4（`tailwindcss` / `@tailwindcss/vite`） | 4.3.3 | MIT | 官网样式 | 兼容 |
+| `filesystem-routing` | 0.2.1 | MIT | 官网文件式路由 | 兼容 |
+| Vitest / jsdom / oxlint / TypeScript / Vite | 见 `website/package.json` | MIT / Apache-2.0 | 官网开发与测试（不进产物） | 兼容 |
+
+> `lucide-solid`（ISC）只在**开发期**作为图标数据来源（与 `lucide-static` 同类用途）；
+> 它的组件代码**不会**进官网产物 —— 原因见 `website/AGENTS.md`（Solid 2 不兼容）。
+
+---
+
 ## 2. 参考项目（未直接包含其代码）
 
 | 项目 | 许可 | 说明 |
@@ -66,3 +85,4 @@
 | 2026-09-15 | 初版：建立清单骨架，登记 rawler(LGPL-2.1) 与参考项目；详细依赖清单待 M0 各波次落定后补齐 |
 | 2026-09-17 | wgpu 版本落定为 30.0.1（上游最新）+ 新增 pollster 0.4（渲染 spike 引入，M2-W1） |
 | 2026-09-17 | 新增 §1b「品牌素材」：logo 与闪屏图**自研**，随项目 AGPL-3.0-only（人类确认） |
+| 2026-09-17 | 新增 §1c「官网依赖」：Lucide 图标数据(ISC)、Inter / Noto Sans SC(OFL-1.1)、官网的 Solid 2 线与构建/测试工具 |

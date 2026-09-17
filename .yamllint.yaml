@@ -1,0 +1,17 @@
+# yamllint 配置（给 GitHub Actions 工作流用）
+#
+# 为什么要有这个文件：默认规则集是按「通用 YAML」定的，套在 GitHub 工作流上会稳定误报 ——
+# 典型两条：`on:` 被按 YAML 1.1 的布尔值判成 truthy、以及 `---` 文档头（工作流不需要）。
+# 与其每次编辑工作流都被报一遍，不如把这三条按 GitHub 的实际情况定死。
+extends: default
+
+rules:
+  document-start: disable
+  truthy:
+    allowed-values: ['true', 'false', 'on']
+  line-length:
+    max: 120
+
+ignore: |
+  pnpm-lock.yaml
+  website/pnpm-lock.yaml

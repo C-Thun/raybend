@@ -1,0 +1,14 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "workspaces": {
+    ".": {
+      "entry": ["src/main.tsx", "src/**/*.test.ts", "scripts/**/*.mjs", "vite.config.ts"],
+      "project": ["src/**/*.{ts,tsx}", "scripts/**/*.mjs"]
+    },
+    "website": {
+      "entry": ["src/**/*.{ts,tsx}", "scripts/**/*.mjs", "vite.config.ts"],
+      "project": ["src/**/*.{ts,tsx}", "scripts/**/*.mjs", "vite.config.ts", "*.ts"]
+    }
+  },
+  "ignoreExportsUsedInFile": true
+}

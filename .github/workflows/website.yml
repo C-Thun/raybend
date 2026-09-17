@@ -1,0 +1,106 @@
+# 官网（website/）构建 + 发布到 GitHub Pages
+#
+# 三条触发路径：
+#   - 推送到默认分支（改官网内容就自动上线；只有 website/ 的改动会触发）
+#   - **发布正式版**（release published）→ 重新构建，把最新版本号与下载直链刷到官网上
+#   - 手动（workflow_dispatch，可选填一个 tag 覆盖版本号）
+#
+# 纪律对齐（根 `AGENTS.md` §2.1）：这套流水线**只发布官网**，不 push、不打 tag、不产安装包。
+# 触发源也都是人的动作（推分支 / 发布 release / 手动点）。
+#
+# ⚠️ 发布来源是 **GitHub Actions** 时，仓库里不需要 `CNAME` 文件（GitHub 官方文档：
+#    "any existing CNAME file is ignored and is not required"）—— 自定义域名在
+#    仓库 Settings → Pages 里配置，见 `website/AGENTS.md` 的部署一节。
+
+name: website
+
+on:
+  push:
+    # 本仓默认分支就是 master（不是 main）；显式写死，不用模板占位符 `$default-branch`
+    branches: [master]
+    paths:
+      - 'website/**'
+      - '.github/workflows/website.yml'
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要展示的版本 tag（留空则用仓库里最新的正式版）'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同一时间只跑一条 Pages 发布，且不打断正在进行的部署
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    # 预发布版不上官网（页面只展示正式版）
+    if: ${{ github.event_name != 'release' || github.event.release.prerelease == false }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # release 事件默认检出 tag，但官网内容要最新的 → 显式检出默认分支；
+          # 版本号由下面的 RAYBEND_TAG 传入，与代码来自哪个 commit 无关。
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: website/pnpm-lock.yaml
+
+      # 官网是独立包（不在根 pnpm 关系内）—— 所有命令都必须在 website/ 里跑
+      - name: Install
+        working-directory: website
+        run: pnpm install --frozen-lockfile
+
+      - name: Check
+        working-directory: website
+        run: |
+          pnpm test:run
+          pnpm typecheck
+          pnpm lint
+
+      - name: Build
+        working-directory: website
+        env:
+          # 发布事件带来 tag；手动触发可用 inputs.tag 覆盖；都没有则查「最新正式版」
+          RAYBEND_TAG: ${{ inputs.tag || github.event.release.tag_name }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: pnpm build
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v6
+        with:
+          # 仓库还没开 Pages 时尝试自动开启（失败就让人类按文档手动开，见 website/AGENTS.md）
+          enablement: true
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: website/dist/client
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
