@@ -15765,6 +15765,360 @@
           ]
         }
       ]
+    },
+    {
+      "type": "frame",
+      "id": "eBhqc",
+      "x": 1980,
+      "y": 1060,
+      "name": "Components / Tile 两态对照",
+      "clip": true,
+      "width": 900,
+      "height": 430,
+      "fill": "$surface-main",
+      "cornerRadius": 8,
+      "layout": "vertical",
+      "gap": 14,
+      "padding": 20,
+      "children": [
+        {
+          "type": "text",
+          "id": "Na4vy",
+          "name": "Title",
+          "fill": "$fg-1",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "Tile 两态：库内 / 库外（导入）—— 差在「顶部标记条」与「锁位」（M2 阶段 0.3）",
+          "fontFamily": "Inter",
+          "fontSize": 16,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "text",
+          "id": "nFoni",
+          "name": "Intro",
+          "fill": "$fg-2",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "同一张 tile，只差「这张照片有没有库内属性」：库外（正在扫描的外部目录）的照片还没有评级/标签/旗标/锁，所以那两处**整个不渲染**（不是渲染成空条）。",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "QNPqA",
+          "name": "Row / 两态",
+          "width": "fill_container",
+          "gap": 48,
+          "children": [
+            {
+              "type": "frame",
+              "id": "E6lj69",
+              "name": "Col / 库内",
+              "layout": "vertical",
+              "gap": 10,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "vUkaE",
+                  "name": "LabelA",
+                  "fill": "$fg-1",
+                  "content": "库内（有评级 / 标签 / 锁）",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "zEULj",
+                  "name": "Tile / 库内",
+                  "clip": true,
+                  "width": 150,
+                  "height": 150,
+                  "cornerRadius": 6,
+                  "stroke": "$brand",
+                  "strokeWidth": 1,
+                  "strokeAlignment": "inner",
+                  "layout": "vertical",
+                  "padding": 3,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "ZJAdt",
+                      "name": "TilePhoto",
+                      "width": 144,
+                      "height": 96,
+                      "fill": "$surface-track",
+                      "cornerRadius": 6,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "aLDEs",
+                          "layoutPosition": "absolute",
+                          "x": 110,
+                          "y": 78,
+                          "name": "RawBadge",
+                          "width": 30,
+                          "height": 14,
+                          "fill": "$brand",
+                          "cornerRadius": 6,
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "b3dp3",
+                              "name": "RawBadgeText",
+                              "fill": "$fg-on-brand",
+                              "content": "RAW",
+                              "fontFamily": "Inter",
+                              "fontSize": 10,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "zOk0B",
+                      "layoutPosition": "absolute",
+                      "x": 0,
+                      "y": 124,
+                      "name": "TileBarBottom",
+                      "width": 150,
+                      "height": 26,
+                      "fill": "$scrim",
+                      "gap": 4,
+                      "padding": [
+                        0,
+                        6
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "eH5Xz",
+                          "name": "TileName",
+                          "fill": "$fg-1",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "P0001.RW2",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "jJ6QW",
+                          "name": "TileTag",
+                          "fill": "$fg-1",
+                          "content": "RW2",
+                          "fontFamily": "Inter",
+                          "fontSize": 10,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "kWmdm",
+                          "name": "LockGlyph",
+                          "fill": "$fg-1",
+                          "content": "🔒",
+                          "fontFamily": "Inter",
+                          "fontSize": 9,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "Ud0V6",
+                      "layoutPosition": "absolute",
+                      "x": 0,
+                      "y": 0,
+                      "name": "TileBarTop",
+                      "width": 150,
+                      "height": 26,
+                      "fill": "$scrim",
+                      "gap": 4,
+                      "padding": [
+                        0,
+                        6
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "rg2zl",
+                          "name": "Stars",
+                          "fill": "$fg-1",
+                          "content": "★★★★☆",
+                          "fontFamily": "Inter",
+                          "fontSize": 10,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "nZ8fR",
+                          "name": "ColorDot",
+                          "width": 8,
+                          "height": 8,
+                          "fill": "$label-red",
+                          "cornerRadius": 4
+                        },
+                        {
+                          "type": "text",
+                          "id": "K7jgE",
+                          "name": "Flag",
+                          "fill": "$fg-1",
+                          "content": "🚩",
+                          "fontFamily": "Inter",
+                          "fontSize": 10,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "f5r1H",
+              "name": "Col / 库外",
+              "layout": "vertical",
+              "gap": 10,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "G2e2r",
+                  "name": "LabelB",
+                  "fill": "$fg-1",
+                  "content": "库外 / 导入（只有文件名与类型）",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "z2T4R",
+                  "name": "Tile / 库外",
+                  "clip": true,
+                  "width": 150,
+                  "height": 150,
+                  "cornerRadius": 6,
+                  "stroke": "$brand",
+                  "strokeWidth": 1,
+                  "strokeAlignment": "inner",
+                  "layout": "vertical",
+                  "padding": 3,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "BzJyH",
+                      "name": "TilePhoto",
+                      "width": 144,
+                      "height": 96,
+                      "fill": "$surface-track",
+                      "cornerRadius": 6,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "GmQIc",
+                          "layoutPosition": "absolute",
+                          "x": 110,
+                          "y": 78,
+                          "name": "RawBadge",
+                          "width": 30,
+                          "height": 14,
+                          "fill": "$brand",
+                          "cornerRadius": 6,
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "p7ypX",
+                              "name": "RawBadgeText",
+                              "fill": "$fg-on-brand",
+                              "content": "RAW",
+                              "fontFamily": "Inter",
+                              "fontSize": 10,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "d8IVQ",
+                      "layoutPosition": "absolute",
+                      "x": 0,
+                      "y": 124,
+                      "name": "TileBarBottom",
+                      "width": 150,
+                      "height": 26,
+                      "fill": "$scrim",
+                      "gap": 4,
+                      "padding": [
+                        0,
+                        6
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "z4mtCb",
+                          "name": "TileName",
+                          "fill": "$fg-1",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "P0002.RW2",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "vdkHG",
+                          "name": "TileTag",
+                          "fill": "$fg-1",
+                          "content": "RW2",
+                          "fontFamily": "Inter",
+                          "fontSize": 10,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "A3bVix",
+          "name": "FootNote",
+          "fill": "$fg-2",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "两态共有：正方外框（圆角 --tile-radius、内边距 --tile-pad）/ 照片保比例居中 / 覆盖式底部信息条（文件名 + 类型）/ RAW 角标（仅在未指向、未选中时出现）。顶部标记条与底部信息条都只在指向/聚焦/选中时出现 —— 画布为了交代几何，把它们画成常显。",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "normal"
+        }
+      ]
     }
   ],
   "themes": {
