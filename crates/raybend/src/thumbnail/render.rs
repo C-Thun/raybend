@@ -210,25 +210,39 @@ fn render_raw_file(path: &Path, size: SizeClass) -> Result<Option<Thumb>> {
     let img = DynamicImage::ImageRgb8(buffer);
 
     /*
-     * 方向：worker 给了就用它（CR3 这类只能从容器内部拿），否则自己从文件头读
-     * （TIFF 家族的外层 EXIF 就够）。拿不到就当 1（不摆正）——
-     * 比「猜错方向」安全：老照片里方向标记乱写的情况不少。
-     */
-    /*
-     * 方向：worker 给了就用它（CR3 这类只能从容器内部拿），否则**读文件头**。
+     * 方向：**文件头优先**，读不到才用 worker 报的。
      *
-     * 这里以前是 `std::fs::read(path)` 整读 —— 一张 RW2 是 24 MB，而 IFD 就在开头几 KB。
-     * 改用 `read_file_raw`（先读 1 MiB 头、失败才整读）之后，RAW 出图的磁盘读取量回到
-     * 「头」这个量级；顺带 RW2/ORF 的方向也终于读得到了（魔数不是 0x2A，通用读法会放弃，
-     * 见 `media::tiff`）。
+     * 为什么读文件头（`media::tiff`，先读 1 MiB 头、失败才整读 —— 一张 RW2 有 24 MB，
+     * 而 IFD 就在开头几 KB）：TIFF 家族（RW2/ORF）的魔数不是 0x002A，通用读法会放弃，
+     * 自己的 TIFF 解析器能把方向读出来。
+     *
+     * ⚠️ 优先级不能反（2026-09-18 修，人类：「双击进 view 看 RAW 原图是歪的，而 tiles 是正的」）：
+     * 这里原是 `decoded.orientation.or_else(…读文件头)` —— **worker 的值压过文件头** ✗。
+     * 而解码器从不代为摆正（`PixelSource::applies_orientation` 恒为 `false`），
+     * 它报的方向对 TIFF 家族并不可靠：实测 Panasonic RW2 报 1，而文件头里明明写着 8 ——
+     * 于是 `Some(1)` 把真正的 8 盖掉 → **不转**。tiles 走内嵌预览那条路时 worker 给的是 `None`，
+     * 回退到文件头 → 反而转了 —— 这就是「tiles 正、view 歪」的由来。
+     *
+     * CR3 这类方向只活在容器内部的格式，文件头读不到，`or` 之后仍然用得上 worker 的值。
      */
-    let orientation = decoded.orientation.or_else(|| {
+    let orientation = pick_orientation(
         crate::media::exif::read_file_raw(path)
             .orientation
-            .map(|raw| crate::media::meta::normalize_orientation(Some(raw)))
-    });
+            .map(|raw| crate::media::meta::normalize_orientation(Some(raw))),
+        decoded.orientation,
+    );
 
     encode(img, size, orientation, false).map(Some)
+}
+
+/// 方向取哪一边：**文件头优先**，读不到才用解码器报的。
+///
+/// 单独抽出来是因为这条优先级反过一次（见 `render_raw_file` 里的记录）：
+/// 反了之后 tiles 正、view 歪，而且看上去一切正常 —— 这种错不该靠人眼发现。
+/// 测试里钉住三件事：文件头赢了、读不到时回退、两边都没有就是 `None`（不猜）。
+#[must_use]
+fn pick_orientation(from_file: Option<u16>, from_decoder: Option<u16>) -> Option<u16> {
+    from_file.or(from_decoder)
 }
 
 /// 从内存渲染；`orientation` 是 EXIF 的 1..8（给了就摆正）。
@@ -569,6 +583,21 @@ mod tests {
         }
         assert_eq!(SizeClass::parse(""), None);
         assert_eq!(SizeClass::parse("不认识的档"), None);
+    }
+
+    #[test]
+    fn pick_orientation_prefers_the_file_over_the_decoder() {
+        /*
+         * 这条优先级反过一次（2026-09-18）：原本是 `decoded.orientation.or_else(读文件头)`，
+         * 而 Panasonic RW2 的解码器报 1、文件头里写着 8 → `Some(1)` 盖掉真方向 → view 里原图歪着。
+         * 反过来（文件头优先）之后：tiles 与 view 两条路都用同一个权威值。
+         */
+        assert_eq!(pick_orientation(Some(8), Some(1)), Some(8), "文件头赢");
+        assert_eq!(pick_orientation(Some(6), None), Some(6));
+        // 文件头读不到（CR3 这类方向只在容器内部）→ 才用解码器报的
+        assert_eq!(pick_orientation(None, Some(6)), Some(6));
+        // 两边都没有 → 不猜，交给 `encode` 当 1 处理
+        assert_eq!(pick_orientation(None, None), None);
     }
 
     #[test]
