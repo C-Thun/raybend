@@ -1494,7 +1494,8 @@ try {
    *   * 树面板（pane）**底部不超过容器底部**（「滚到底也只看到 mnt」就是这个溢出的症状）；
    *   * 没勾任何来源时「已选目录」整块不存在。
    *
-   * 选择器用 **Ark 自己的 DOM 契约**（`data-scope="splitter"` + `data-part="panel"/"resize-trigger"`），
+   * 选择器用 **`SplitStack` 自己的 DOM 钩子**（`data-split-root` + `data-split-pane`/`data-split-handle`；
+   * 2026-09-19 之前是 Ark Splitter 的 `data-scope`/`data-part` —— 那套已经拆掉了），
    * 不靠「往上找祖先」那种脆招 —— 上一版就是那么找错的（找到 pane 上去了）。
    */
   /*
@@ -1577,9 +1578,12 @@ try {
     // 判据必须只看**直接子元素**：querySelectorAll 会把嵌套 splitter 的 pane 一起捞进来
     // （那样两个都会命中）。也别用 aria-orientation —— 分隔条的 ARIA 方向与 splitter 的
     // 方向是**反的**（左右分栏的分隔条是 vertical），按它挑会挑到外层那个。
+    //
+    // 属性口径：2026-09-19 把 Ark 的 Splitter 换成了自写的 SplitStack
+    // （Ark 量了又写、写了又量，拖起来卡）—— 选择器随之换成我们自己的稳定钩子。
     const directPanels = (el) =>
-      [...el.children].filter((child) => child.getAttribute("data-part") === "panel");
-    const splitters = [...document.querySelectorAll('[data-scope="splitter"]')];
+      [...el.children].filter((child) => child.hasAttribute("data-split-pane"));
+    const splitters = [...document.querySelectorAll("[data-split-root]")];
     const root = splitters.find((el) => {
       const titles = directPanels(el).map(titleOf);
       return titles.includes("最近") && titles.includes("来源");
@@ -1592,8 +1596,8 @@ try {
       bottom: Math.round(rect(pane).bottom),
     }));
     // 只数直接子元素里的手柄：嵌套在里面的别的 splitter（外层横向那个）不算
-    const triggers = [...root.children].filter(
-      (el) => el.getAttribute("data-part") === "resize-trigger",
+    const triggers = [...root.children].filter((el) =>
+      el.hasAttribute("data-split-handle"),
     );
     const selectedPanel = [...document.querySelectorAll("section")].find((el) => {
       const heading = el.querySelector("h2");
@@ -1896,8 +1900,9 @@ try {
     });
     await sleep(400);
     resizeProbe = await evaluate(`(() => {
-      const panes = [...document.querySelectorAll('[data-scope="splitter"] [data-part="panel"]')];
-      const triggers = document.querySelectorAll('[data-part="resize-trigger"]');
+      // 2026-09-19 起 splitter 是自写的 SplitStack：用我们自己的稳定钩子（不再是 Ark 的 data-scope/data-part）
+      const panes = [...document.querySelectorAll("[data-split-root] [data-split-pane]")];
+      const triggers = document.querySelectorAll("[data-split-handle]");
       return {
         responsive: true,
         paneCount: panes.length,
