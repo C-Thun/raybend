@@ -19,14 +19,13 @@ function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
 
 /** 前端发去的交互意图（只有意图，没有坐标数学 —— `AGENTS.md` §6.1 红线 #1）。 */
 export type SpikeCommand =
-  | { kind: "zoom"; x: number; y: number; factor: number }
-  | { kind: "hitTest"; x: number; y: number }
-  | { kind: "pan"; dx: number; dy: number }
+  | { kind: "zoom"; x: number; y: number; factor: number; dpr: number }
+  | { kind: "hitTest"; x: number; y: number; dpr: number }
+  | { kind: "pan"; dx: number; dy: number; dpr: number }
   | { kind: "fit"; mode: "fit" | "fill" | "oneToOne" | "free" }
   | { kind: "rotate"; degrees: number }
   | { kind: "setHole"; on: boolean }
-  | { kind: "holeRect"; x: number; y: number; width: number; height: number }
-  | { kind: "webviewOrigin"; screenX: number; screenY: number; dpr: number }
+  | { kind: "holeRect"; x: number; y: number; width: number; height: number; dpr: number; viewportWidth: number; viewportHeight: number }
   | { kind: "reset" }
   | { kind: "scripted"; name: string; seconds: number }
   | { kind: "scenario"; name: string | null }
@@ -68,6 +67,9 @@ export interface ScenarioView {
 }
 
 export interface HitView {
+  cssX: number;
+  cssY: number;
+  centerCss: [number, number];
   imageX: number;
   imageY: number;
   inside: boolean;
@@ -102,13 +104,9 @@ export interface SpikeSnapshot {
   clientOrigin: [number, number];
   /** 窗口（含边框）在屏幕上的原点（物理像素） */
   windowOrigin: [number, number];
-  /** webview 在屏幕上的原点（物理像素，= `screenX × dpr`） */
+  /** 原生 WebView bounds 推得的屏幕原点（物理像素）；未知时为 null。 */
   webviewOrigin: [number, number] | null;
-  /**
-   * `webview 原点 − 客户区原点`（物理像素）。
-   * **非零就是「图看着对、鼠标读出的坐标却差一截」的根因** —— 输入的 CSS 坐标
-   * 与 wgpu 表面的坐标系差这一截。
-   */
+  /** 原生容器相对客户区的偏移；不代表最终 GPU 呈现偏移。 */
   inputOffset: [number, number] | null;
 }
 

@@ -38,16 +38,10 @@ import {
   type HumanNotes,
   type SpikeSnapshot,
 } from "../api/spike.ts";
+import { latestSample } from "./latest-sample.ts";
 import { isTauriRuntime } from "../api/tauri-env.ts";
 
-/**
- * 洞口距中列四边的边距（CSS 像素）。
- *
- * **两处必须一致**：这里的布局（洞口矩形、四周那圈不透明底）与
- * `src-tauri/src/spike_viewport.rs` 的 `HOLE_MARGIN_CSS`（`setHole` 按边距推算时的退路）。
- * 正常运行以**界面上的报的**矩形为准（DOM 是布局权威，Rust 是变换权威），
- * 这个值只在两边都要各自“没收到对方消息”时兵分二路地落同一个数。
- */
+/** 洞口覆盖整个中间列；实际矩形与 WebView DPR 一起上报，Rust 不猜面板尺寸。 */
 const HOLE_MARGIN_PX = 0;
 
 const EMPTY: SpikeSnapshot = {
@@ -112,7 +106,17 @@ export default function SpikeViewport() {
   let hole: HTMLDivElement | undefined;
   let dragging = false;
   let lastPointer: { x: number; y: number } | null = null;
-  let lastHitAt = 0;
+  const pointerSamples = latestSample<{ x: number; y: number; dpr: number }>(
+    (point) => {
+      void spikeCommand({ kind: "hitTest", ...point }).then(apply)
+        .catch((error) => setMessage(`坐标上报失败：${String(error)}`));
+    },
+    (callback) => {
+      const timer = window.setTimeout(callback, 60);
+      return () => window.clearTimeout(timer);
+    },
+  );
+  onCleanup(() => pointerSamples.dispose());
 
   const apply = (next: SpikeSnapshot) => setSnap(next);
 
@@ -150,78 +154,56 @@ export default function SpikeViewport() {
       reportHole();
     }
 
-    /*
-     * webview 原点（屏幕 CSS 像素）→ Rust。
-     *
-     * 为什么需要它：输入的 `clientX/clientY` 是**相对 webview** 的，而 wgpu 表面挂在
-     * 窗口句柄上；两者原点若不同（带边框的窗口就常差一个标题栏），就会出现
-     * 「图看着是对的、鼠标读出的图像坐标却差一截」（人类 2026-09-18 报的）。
-     * 这里把 webview 的原点也报上去，Rust 侧与 `inner_position()` 一比就知道差多少。
-     */
-    let lastOrigin = "";
-    const reportOrigin = (): void => {
-      if (!isTauriRuntime()) return;
-      const key = `${window.screenX},${window.screenY},${window.devicePixelRatio}`;
-      if (key === lastOrigin) return;
-      lastOrigin = key;
-      void spikeCommand({
-        kind: "webviewOrigin",
-        screenX: window.screenX,
-        screenY: window.screenY,
-        dpr: window.devicePixelRatio,
-      }).then(apply).catch(() => {});
-    };
-    reportOrigin();
-    window.addEventListener("resize", reportOrigin);
-
     // 轮询状态：渲染线程在跑，界面跟着看
     const timer = window.setInterval(() => {
       if (!isTauriRuntime()) return;
       void spikeSnapshot().then(apply).catch(() => {});
-      reportOrigin();
+      reportHole(); // DPR/浏览器缩放/仅位置变化也要上报，不能只依赖 ResizeObserver。
     }, 300);
     onCleanup(() => window.clearInterval(timer));
-    onCleanup(() => window.removeEventListener("resize", reportOrigin));
   });
 
+  let lastLayout = "";
   function reportHole(): void {
     if (!hole || !isTauriRuntime()) return;
     const rect = hole.getBoundingClientRect();
+    const key = [rect.x, rect.y, rect.width, rect.height, window.devicePixelRatio, window.innerWidth, window.innerHeight].join(",");
+    if (key === lastLayout) return;
     void spikeCommand({
       kind: "holeRect",
       x: rect.x,
       y: rect.y,
       width: rect.width,
       height: rect.height,
+      dpr: window.devicePixelRatio,
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
     })
-      .then(apply)
-      .catch(() => {});
+      .then((snapshot) => { lastLayout = key; apply(snapshot); })
+      .catch((error) => setMessage(`洞口上报失败：${String(error)}`));
   }
 
   function onWheel(event: WheelEvent): void {
     event.preventDefault();
+    pointerSamples.push({ x: event.clientX, y: event.clientY, dpr: window.devicePixelRatio });
+    pointerSamples.flush();
     const factor = event.deltaY < 0 ? 1.12 : 1 / 1.12;
     void run(() =>
-      spikeCommand({ kind: "zoom", x: event.clientX, y: event.clientY, factor }),
+      spikeCommand({ kind: "zoom", x: event.clientX, y: event.clientY, factor, dpr: window.devicePixelRatio }),
     );
   }
 
   function onPointerMove(event: PointerEvent): void {
     if (!isTauriRuntime()) return;
+    pointerSamples.push({ x: event.clientX, y: event.clientY, dpr: window.devicePixelRatio });
     if (dragging && lastPointer) {
       const dx = event.clientX - lastPointer.x;
       const dy = event.clientY - lastPointer.y;
       lastPointer = { x: event.clientX, y: event.clientY };
-      void run(() => spikeCommand({ kind: "pan", dx, dy }));
+      void run(() => spikeCommand({ kind: "pan", dx, dy, dpr: window.devicePixelRatio }));
       return;
     }
-    // 命中测试限流：每 60ms 一次，够看数又不会把 IPC 打满
-    const now = performance.now();
-    if (now - lastHitAt < 60) return;
-    lastHitAt = now;
-    void run(() =>
-      spikeCommand({ kind: "hitTest", x: event.clientX, y: event.clientY }),
-    );
+
   }
 
   const view = () => snap().viewport;
@@ -296,7 +278,7 @@ export default function SpikeViewport() {
             <dd>
               {snap().cssSize[0]}×{snap().cssSize[1]}
             </dd>
-            <dt class="text-fg-3">dpr</dt>
+            <dt class="text-fg-3">WebView DPR</dt>
             <dd>{view().dpr.toFixed(3)}</dd>
             <dt class="text-fg-3">显示器</dt>
             <dd>
@@ -308,11 +290,7 @@ export default function SpikeViewport() {
               {snap().fullscreen ? "全屏 " : ""}
               {snap().decorated ? "有边框" : "无边框"}
             </dd>
-            {/*
-              三个屏幕原点对照 —— 「图看着对、鼠标坐标却差一截」的判据就是最后一行。
-              webview 与客户区重合（输入偏移 = 0,0）时，输入的 CSS 坐标与 wgpu
-              表面用的是同一套坐标系；不重合就是差多少补多少。
-            */}
+            {/* 原点由原生 WebView bounds 取得；只证明容器重合，不证明最终 GPU 合成正确。 */}
             <dt class="text-fg-3">窗口原点</dt>
             <dd>
               {snap().windowOrigin[0]}, {snap().windowOrigin[1]}
@@ -327,7 +305,7 @@ export default function SpikeViewport() {
                 ? `${snap().webviewOrigin![0]}, ${snap().webviewOrigin![1]}`
                 : "—"}
             </dd>
-            <dt class="text-fg-3">输入偏移</dt>
+            <dt class="text-fg-3">容器偏移</dt>
             <dd class={snap().inputOffset ? "font-600 text-fg-1" : "text-fg-2"}>
               {snap().inputOffset
                 ? `${snap().inputOffset![0]}, ${snap().inputOffset![1]}`
@@ -335,7 +313,7 @@ export default function SpikeViewport() {
               {snap().inputOffset &&
               snap().inputOffset![0] === 0 &&
               snap().inputOffset![1] === 0
-                ? " ✓ 对齐"
+                ? "（容器重合）"
                 : ""}
             </dd>
           </dl>
@@ -360,12 +338,7 @@ export default function SpikeViewport() {
                     .join(", ")
                 : "整窗"}
             </dd>
-            {/*
-              洞口的物理像素矩形。与上一行一比就知道单位错没错：1.25 缩放下
-              (490,227,144,327) 应当对应 (612,284,180,409)。若这里仍是 144×327，
-              就是漏了 dpr；若数值对、画面仍偏，那偏的是**表面原点**（wgpu 表面挂在
-              窗口 HWND 上），而不是这里的数学。
-            */}
+            {/* 使用 WebView DPR（含文字/页面缩放），不是显示器 DPI；图像变换由 Rust 统一处理。 */}
             <dt class="text-fg-3">洞口(物理)</dt>
             <dd>
               {view().holePhysical
@@ -385,7 +358,8 @@ export default function SpikeViewport() {
           <h2 class="mb-1 text-fs-1 tracking-wide text-fg-2 uppercase">
             命中测试（把鼠标放到白块上）
           </h2>
-          <div class="mb-1 rounded-(--radius) bg-surface-track p-2">
+          <div class="mb-1 rounded-(--radius) bg-surface-track p-2"
+            title={hit() ? `采样 CSS：${hit()!.cssX}, ${hit()!.cssY}；预测图心 CSS：${hit()!.centerCss[0]}, ${hit()!.centerCss[1]}` : ""}>
             <Show when={hit()} fallback={<span class="text-fg-3">把鼠标移到洞口里</span>}>
               <div>
                 图像坐标 {fmt(hit()!.imageX, 1)}, {fmt(hit()!.imageY, 1)}
@@ -394,12 +368,12 @@ export default function SpikeViewport() {
                 {hit()!.inside ? "在图像内" : "不在图像内（洞口外或图外）"}
               </div>
               <div class={hit()!.atCenter ? "font-600" : "text-fg-3"}>
-                {hit()!.atCenter ? "✅ 命中图像中心（坐标同步正确）" : "（还没到中心）"}
+                {hit()!.atCenter ? "✅ 数学命中中心（仍需与十字对照）" : "（还没到中心）"}
               </div>
             </Show>
           </div>
           <div class="text-fg-3">
-            程序化往返最大偏差：{snap().coordMaxError.toFixed(6)} 物理像素
+            数学往返偏差（不代表画面对齐）：{snap().coordMaxError.toFixed(6)} 物理像素
           </div>
         </aside>
 
@@ -424,10 +398,14 @@ export default function SpikeViewport() {
               event.currentTarget.setPointerCapture(event.pointerId);
             }}
             onPointerUp={(event) => {
+              pointerSamples.push({ x: event.clientX, y: event.clientY, dpr: window.devicePixelRatio });
+              pointerSamples.flush();
               dragging = false;
               lastPointer = null;
               event.currentTarget.releasePointerCapture(event.pointerId);
             }}
+            onPointerCancel={() => { dragging = false; lastPointer = null; }}
+            onLostPointerCapture={() => { dragging = false; lastPointer = null; }}
             onPointerMove={onPointerMove}
           />
           {/*
@@ -483,8 +461,7 @@ export default function SpikeViewport() {
                 onClick={() =>
                   void run(async () => {
                     const snapshot = await spikeCommand({ kind: "setHole", on: false });
-                    // 洞口关掉是「整窗出图」的对照档；开回来时要把**真实洞口**重报一遍，
-                    // 否则 Rust 侧会停在按边距推算的兜底矩形上（旧的 190px 那一版就这么错过）。
+                    // Rust 保留最后的 CSS 洞口；布局更新不会偷偷重新开启裁剪。
                     reportHole();
                     return snapshot;
                   })

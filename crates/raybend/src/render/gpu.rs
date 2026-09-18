@@ -191,42 +191,7 @@ impl GpuContext {
             mapped_at_creation: false,
         });
 
-        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("spike-bind-layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    // ⚠️ 必须包含 **VERTEX**：顶点着色器要用 `textureDimensions(image, 0)`
-                    // 算出四个角的图像像素坐标（整块的「四角由 vertex_index 现算」就是靠它）。
-                    // 只给 FRAGMENT 的话，wgpu 会在**建管线时**报
-                    // 「binding 1 is not available in the pipeline layout」——
-                    // 这个错是离屏冒烟抓到的，否则会在 Windows 上当着人的面炸。
-                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-            ],
-        });
+        let layout = create_bind_group_layout(&device);
         let bind_group = make_bind_group(&device, &layout, &texture, &sampler, &uniform);
         let pipeline = create_pipeline(&device, &layout, config.format);
 
@@ -444,7 +409,23 @@ impl GpuContext {
 
         // 纹理与绑定组跟着设备走，必须重建；图还在内存里，重新上传即可
         self.texture = create_image_texture(&self.device, &self.queue, &self.image);
-        let layout = self.pipeline.get_bind_group_layout(0);
+        /*
+         * ⚠️ layout 必须**用新设备重新建**，不能从旧管线里拿。
+         *
+         * 2026-09-19 真机事故（崔总点「演练丢失」→「恢复」后图再也不回来，
+         * 日志里是一句 panic，`/tmp/raybend-desktop.log`）：
+         *
+         *   thread 'spike-render' panicked at wgpu-30.0.1/src/backend/wgpu_core.rs:1280:
+         *   wgpu error: Validation Error
+         *   Caused by: In Device::create_bind_group, label = 'spike-bind-group'
+         *     Device with 'raybend-spike' label of BindGroupLayout with 'spike-bind-layout' label
+         *     doesn't match Device with 'raybend-spike-recovered' label
+         *
+         * 即：**wgpu 的 layout 记录着它属于哪个设备**，拿旧设备的 layout 去新设备建绑定组是校验错误。
+         * 这里的 panic 直接把渲染线程打死了（主线程还活着、界面照旧响应），
+         * 表现就是「点恢复之后毫无动静」—— 所以这条不能退回 `self.pipeline.get_bind_group_layout(0)`。
+         */
+        let layout = create_bind_group_layout(&self.device);
         self.bind_group = make_bind_group(
             &self.device,
             &layout,
@@ -475,6 +456,49 @@ impl GpuContext {
         self.surface.configure(&self.device, &self.config);
         Ok(())
     }
+}
+
+/// 绑定组布局。
+///
+/// **抽成函数是为了 `recover()`**：layout 与设备绑定（跨设备复用会校验失败），
+/// 设备重建时必须跟着重建，不能从旧管线里取 —— 见 `recover()` 里记的那次真机 panic。
+fn create_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("spike-bind-layout"),
+        entries: &[
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                // ⚠️ 必须包含 **VERTEX**：顶点着色器要用 `textureDimensions(image, 0)`
+                // 算出四个角的图像像素坐标（整块的「四角由 vertex_index 现算」就是靠它）。
+                // 只给 FRAGMENT 的话，wgpu 会在**建管线时**报
+                // 「binding 1 is not available in the pipeline layout」——
+                // 这个错是离屏冒烟抓到的，否则会在 Windows 上当着人的面炸。
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 2,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
+        ],
+    })
 }
 
 /// 设备丢失回调：把原因记下来（A.2 的报告要它）。

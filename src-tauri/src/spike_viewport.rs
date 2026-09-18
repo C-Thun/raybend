@@ -31,9 +31,6 @@ use tauri::{AppHandle, Manager, Runtime, WebviewUrl, WebviewWindowBuilder};
 /// 调试窗口的 label（`tauri.conf.json` 里没有它 —— 它是按需建的）。
 pub const SPIKE_LABEL: &str = "spike-viewport";
 
-/// 洞口的默认内边距（CSS 像素）：四周留出来给界面面板。
-const HOLE_MARGIN_CSS: f32 = 0.0;
-
 /// 脚本化缩放的折返上下限（不跑到视口的极端值上，免得量到「只剩一格像素」那种情况）。
 const MIN_SCRIPT_ZOOM: f32 = 0.05;
 const MAX_SCRIPT_ZOOM: f32 = 4.0;
@@ -44,32 +41,29 @@ const MAX_SCRIPT_ZOOM: f32 = 4.0;
 
 /// 前端发来的交互意图（**只有意图，没有坐标数学** —— `AGENTS.md` §6.1 红线 #1）。
 #[derive(Debug, Clone, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum SpikeCommand {
     /// 以某个 CSS 像素点为锚点缩放
-    Zoom { x: f32, y: f32, factor: f32 },
+    Zoom { x: f32, y: f32, factor: f32, dpr: f32 },
     /// 命中测试：把鼠标位置交给 Rust 换算成图像像素（**不动视口**，坐标同步的判据）
-    HitTest { x: f32, y: f32 },
+    HitTest { x: f32, y: f32, dpr: f32 },
     /// 平移（CSS 像素位移）
-    Pan { dx: f32, dy: f32 },
+    Pan { dx: f32, dy: f32, dpr: f32 },
     /// 档位：`fit` / `fill` / `oneToOne` / `free`
     Fit { mode: String },
     /// 旋转（度）
     Rotate { degrees: f32 },
     /// 洞口开关（关掉就是整窗出图，用来对照）
     SetHole { on: bool },
-    /// webview 原点（CSS 屏幕像素 + dpr）—— 判「输入坐标系的原点在哪」
-    WebviewOrigin {
-        screen_x: f64,
-        screen_y: f64,
-        dpr: f64,
-    },
     /// 界面把洞口矩形的当前布局报上来（CSS 像素）—— DOM 是布局权威，Rust 是变换权威
     HoleRect {
         x: f32,
         y: f32,
         width: f32,
         height: f32,
+        dpr: f32,
+        viewport_width: u32,
+        viewport_height: u32,
     },
     /// 复位（适配 + 零旋转）
     Reset,
@@ -148,6 +142,9 @@ pub struct ScenarioView {
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HitView {
+    pub css_x: f32,
+    pub css_y: f32,
+    pub center_css: (f32, f32),
     pub image_x: f32,
     pub image_y: f32,
     pub inside: bool,
@@ -174,6 +171,12 @@ pub struct Shared {
     pub rendered: u64,
     pub viewport: Viewport,
     pub hole_css: Option<(f32, f32, f32, f32)>,
+    /// 保存布局真相；关闭裁剪时也保留，以便恢复与 DPI 重算。
+    pub layout_hole_css: Option<(f32, f32, f32, f32)>,
+    pub hole_disabled: bool,
+    pub last_pointer_css: Option<(f32, f32)>,
+    /// devicePixelRatio 包含系统文字/页面缩放，不能用 OS scale_factor 替代。
+    pub webview_dpr: Option<f32>,
     pub scenarios: Vec<(String, String, FrameStats, FrameStats)>,
     pub active_scenario: Option<usize>,
     pub device_lost: Vec<String>,
@@ -186,7 +189,7 @@ pub struct Shared {
     pub client_origin: (i32, i32),
     /// 窗口原点（物理屏幕像素，含边框）
     pub window_origin: (i32, i32),
-    /// 前端报上来的 webview 原点（物理屏幕像素，= `screenX × dpr`）
+    /// 原生 WebView bounds 换算的屏幕原点（物理像素）
     pub webview_origin: Option<(i32, i32)>,
     /// 最近一次的帧间隔与 CPU 时长（界面上实时看）
     pub last_frame_ms: f32,
@@ -201,17 +204,53 @@ impl Shared {
     fn apply_window_facts(&mut self, facts: &WindowFacts) {
         let dpr = facts.dpr.max(0.01);
         self.surface_size = facts.surface_size;
-        self.css_size = (
-            (facts.surface_size.0 as f32 / dpr) as u32,
-            (facts.surface_size.1 as f32 / dpr) as u32,
-        );
+        if self.webview_dpr.is_none() {
+            self.css_size = (
+                (facts.surface_size.0 as f32 / dpr) as u32,
+                (facts.surface_size.1 as f32 / dpr) as u32,
+            );
+        }
         self.monitor_scale = facts.monitor_scale;
         self.maximized = facts.maximized;
         self.fullscreen = facts.fullscreen;
         self.decorated = facts.decorated;
         self.client_origin = facts.client_origin;
         self.window_origin = facts.window_origin;
+        self.webview_origin = facts.webview_origin;
     }
+    fn sync_webview_dpr(&mut self, viewport: &mut Viewport, dpr: f32) -> Result<(), String> {
+        if !dpr.is_finite() || dpr <= 0.0 {
+            return Err("WebView DPR 必须是有限正数".into());
+        }
+        self.webview_dpr = Some(dpr);
+        if viewport.dpr != dpr {
+            viewport.dpr = dpr;
+            self.sync_hole(viewport);
+        }
+        Ok(())
+    }
+
+    /// CSS 洞口与 DPI 在同一处换算；布局消息和 DPI 消息无论谁先到，最终一致。
+    fn sync_hole(&mut self, viewport: &mut Viewport) {
+        self.hole_css = if self.hole_disabled { None } else { self.layout_hole_css };
+        viewport.clip_rect = self.hole_css.map(|(x, y, width, height)| raybend::render::ClipRect {
+            x: x * viewport.dpr,
+            y: y * viewport.dpr,
+            width: width * viewport.dpr,
+            height: height * viewport.dpr,
+        });
+        self.hole_physical = viewport.clip_rect.map(|r| (r.x, r.y, r.width, r.height));
+        if viewport.fit_mode != FitMode::Free {
+            viewport.refit();
+        }
+    }
+
+    fn publish_viewport(&mut self, viewport: &Viewport) {
+        self.viewport = *viewport;
+        self.coord_max_error = coord_roundtrip_error(viewport);
+        self.last_hit = self.last_pointer_css.map(|css| hit_view(viewport, css));
+    }
+
     fn snapshot(&self) -> SpikeSnapshot {
         SpikeSnapshot {
             open: self.open,
@@ -323,11 +362,11 @@ pub struct SpikeSnapshot {
     pub last_frame_ms: f32,
     pub last_cpu_ms: f32,
     pub last_error: Option<String>,
-    /// 客户区 / 窗口 / webview 三个原点（物理屏幕像素）与推导出的**输入偏移**
+    /// 客户区 / 窗口 / webview 三个原点（物理屏幕像素）与容器偏移
     pub client_origin: (i32, i32),
     pub window_origin: (i32, i32),
     pub webview_origin: Option<(i32, i32)>,
-    /// `webview 原点 − 客户区原点`：非零就意味着输入的 CSS 坐标与表面坐标系差这一截
+    /// `webview 原点 − 客户区原点`；只用于容器诊断，不据此宣称呈现已经对齐
     pub input_offset: Option<(i32, i32)>,
     /// 视口自查（`Viewport::sanity_problems`）—— 界面上要显眼
     pub viewport_problems: Vec<String>,
@@ -385,9 +424,8 @@ pub fn open_window<R: Runtime>(app: &AppHandle<R>) -> Result<SpikeSnapshot, Stri
      * 顶栏几乎被文字与按钮铺满，人抓不到能拖的地方；窗口又默认开在屏幕边缘之外，
      * 于是连测试都没法进行。**测试工具首先要能用**，其次才是与被测对象同形。
      *
-     * 「输入坐标与 wgpu 表面不同原点」这个问题**不靠去边框来回避**，而是靠左栏那几个
-     * 原点读数把它**量出来**（见 `ViewportView::hole_physical` 一带的说明）：
-     * 带边框时 `inner_position()` 与 `outer_position()` 的差就是嫌疑量本身。
+     * 2026-09-19 根因：WebView 有效比例包含系统文字缩放，不能用 native scale 代替。
+     * 保留系统标题栏，按测得的 WebView DPR 换算；不再猜测或补偿标题栏偏移。
      */
     .center()
     // 透明是**这一条 spike 的主角**：webview 中间挖洞，wgpu 在洞里出图
@@ -448,6 +486,10 @@ pub fn open_window<R: Runtime>(app: &AppHandle<R>) -> Result<SpikeSnapshot, Stri
                 if let Ok(mut staged) = pending_for_events.lock() {
                     *staged = Some(facts);
                 }
+            }
+            tauri::WindowEvent::Moved(_) => {
+                let facts = read_window_facts(&window_for_events);
+                if let Ok(mut staged) = pending_for_events.lock() { *staged = Some(facts); }
             }
             other => {
                 note_window_event("other", format!("{other:?}"));
@@ -563,9 +605,10 @@ pub async fn spike_hit_test<R: Runtime>(
     app: AppHandle<R>,
     x: f32,
     y: f32,
+    dpr: f32,
 ) -> Result<SpikeSnapshot, String> {
     let shared = with_session(&app, |session| {
-        let _ = session.commands.send(SpikeCommand::HitTest { x, y });
+        let _ = session.commands.send(SpikeCommand::HitTest { x, y, dpr });
         session.shared.clone()
     })?;
     Ok(shared.lock().map_err(|e| e.to_string())?.snapshot())
@@ -620,14 +663,19 @@ pub async fn spike_write_report<R: Runtime>(
         coord_roundtrip_max_error_px: guard.coord_max_error,
         human: notes,
     };
+    let diagnostics = guard.snapshot();
     drop(guard);
 
     let path = std::path::PathBuf::from(&dir);
     let (json, md) = report
         .write_to(&path)
         .map_err(|e| format!("写报告失败（{}）：{e}", path.display()))?;
+    let diagnostics_path = path.join("spike-coordinates.json");
+    let diagnostics_json = serde_json::to_vec_pretty(&diagnostics).map_err(|e| e.to_string())?;
+    std::fs::write(&diagnostics_path, diagnostics_json).map_err(|e| e.to_string())?;
     let _ = window;
     Ok(vec![
+        diagnostics_path.to_string_lossy().into_owned(),
         json.to_string_lossy().into_owned(),
         md.to_string_lossy().into_owned(),
     ])
@@ -695,7 +743,7 @@ fn render_loop<R: Runtime>(
         GpuContext::new(handles, (size.width, size.height), dpr).map_err(|e| e.to_string())?;
     let upload_ms = started.elapsed().as_secs_f32() * 1000.0;
 
-    // 坐标往返自查：拿一圈点走一遍 CSS → 图像 → CSS，取最大偏差
+    // 纯数学自查；不能用于证明 DOM 与 GPU 最终呈现对齐。
     let coord_max_error = coord_roundtrip_error(context.viewport());
     let mut last_present: Option<Instant> = None;
     let mut script: Option<Script> = None;
@@ -732,6 +780,9 @@ fn render_loop<R: Runtime>(
                 log_slow("apply_command", t_command.elapsed());
                 if let Some(error) = failed
                     && let Some(mut guard) = lock_shared(&shared, "apply_command 结果回写") {
+                        // 命令自己的失败也进历史：横幅会在下一帧成功出图时被撤掉（见下面那个 match），
+                        // 只写横幅的话，过一会儿就查无此事了。
+                        guard.device_lost.push(format!("命令失败：{error}"));
                         guard.last_error = Some(error);
                     }
             }
@@ -772,7 +823,7 @@ fn render_loop<R: Runtime>(
 
         if let Some(mut guard) = lock_shared(&shared, "每帧写统计数据") {
             guard.rendered = context.frames_drawn();
-            guard.viewport = *context.viewport();
+            guard.publish_viewport(context.viewport());
             guard.last_frame_ms = interval_ms;
             guard.last_cpu_ms = cpu_ms;
             // 采集只在「有间隔样本」时记（第一帧没有间隔）
@@ -804,7 +855,25 @@ fn render_loop<R: Runtime>(
         }
 
         match outcome {
-            Ok(RenderOutcome::Drawn) | Ok(RenderOutcome::Skipped) => {}
+            Ok(RenderOutcome::Drawn) | Ok(RenderOutcome::Skipped) => {
+                /*
+                 * 出图正常就把横幅撤掉：`last_error` 描述的是**当前**状态，不是历史。
+                 *
+                 * 2026-09-19 真机留的教训：`last_error` 只写不清，于是「演练丢失」留下的那句红字
+                 * 永远挂在顶上 —— 人类点「恢复」时看到**一模一样的一句**，据此判断「恢复也失败了」。
+                 * 实际上那一刻渲染线程已经被 `recover()` 里的 panic 打死（布局跨设备复用），
+                 * 真正的错误只在 `/tmp/raybend-desktop.log` 的 panic 里。
+                 * 撤横幅 + 把「第 N 帧重新出图」记进历史，这两个动作才让「恢复成没成」一眼可判。
+                 */
+                if let Some(mut guard) = lock_shared(&shared, "清除已恢复的错误")
+                    && let Some(previous) = guard.last_error.take()
+                {
+                    guard.device_lost.push(format!(
+                        "已恢复：第 {} 帧起重新出图（清掉横幅：{previous}）",
+                        context.frames_drawn()
+                    ));
+                }
+            }
             Ok(RenderOutcome::Reconfigured(reason)) => {
                 if let Some(mut guard) = lock_shared(&shared, "记录 surface 重配") {
                     guard.device_lost.push(format!("{reason}（第 {} 帧）", context.frames_drawn()));
@@ -812,7 +881,22 @@ fn render_loop<R: Runtime>(
             }
             Err(error) => {
                 if let Some(mut guard) = lock_shared(&shared, "记录渲染错误") {
-                    guard.last_error = Some(error.to_string());
+                    let text = error.to_string();
+                    /*
+                     * 带帧号进历史：恢复之后到底是「继续出图」还是「同一句错一直刷」，靠它分辨。
+                     * 每帧都会重试，所以同一个错误连续出现时**只记第一条**（否则历史被刷屏淹没）。
+                     */
+                    let repeated = guard
+                        .device_lost
+                        .last()
+                        .is_some_and(|last| last.starts_with("渲染错误") && last.contains(&text));
+                    if !repeated {
+                        guard.device_lost.push(format!(
+                            "渲染错误（第 {} 帧）：{text}",
+                            context.frames_drawn()
+                        ));
+                    }
+                    guard.last_error = Some(text);
                 }
             }
         }
@@ -878,19 +962,29 @@ fn apply_command(
     shared: &Arc<Mutex<Shared>>,
 ) -> Option<String> {
     let how = match command {
-        SpikeCommand::Zoom { x, y, factor } => {
+        SpikeCommand::Zoom { x, y, factor, dpr } => {
+            if let Ok(mut guard) = shared.lock() {
+                if let Err(error) = guard.sync_webview_dpr(context.viewport_mut(), dpr) { return Some(error); }
+                guard.last_pointer_css = Some((x, y));
+            }
             let anchor = context.viewport().css_to_physical((x, y));
             context.viewport_mut().zoom_at(anchor, factor);
             "以光标为锚点缩放"
         }
-        SpikeCommand::HitTest { x, y } => {
-            let hit = hit_view(context.viewport(), (x, y));
+        SpikeCommand::HitTest { x, y, dpr } => {
+            if !x.is_finite() || !y.is_finite() { return Some("指针坐标必须为有限数".into()); }
             if let Ok(mut guard) = shared.lock() {
-                guard.last_hit = Some(hit);
+                if let Err(error) = guard.sync_webview_dpr(context.viewport_mut(), dpr) { return Some(error); }
+                guard.last_pointer_css = Some((x, y));
             }
             return None;
         }
-        SpikeCommand::Pan { dx, dy } => {
+        SpikeCommand::Pan { dx, dy, dpr } => {
+            if let Ok(mut guard) = shared.lock()
+                && let Err(error) = guard.sync_webview_dpr(context.viewport_mut(), dpr)
+            {
+                return Some(error);
+            }
             // 前端给的是 CSS 像素位移 → 换算成物理像素（乘 dpr）
             let dpr = context.viewport().dpr;
             context.viewport_mut().pan_by((dx * dpr, dy * dpr));
@@ -912,75 +1006,21 @@ fn apply_command(
             "旋转"
         }
         SpikeCommand::SetHole { on } => {
-            if on {
-                let (w, h) = context.viewport().viewport_size;
-                let dpr = context.viewport().dpr;
-                let margin = HOLE_MARGIN_CSS * dpr;
-                let rect = raybend::render::ClipRect {
-                    x: margin,
-                    y: margin,
-                    width: (w - margin * 2.0).max(1.0),
-                    height: (h - margin * 2.0).max(1.0),
-                };
-                context.viewport_mut().clip_rect = Some(rect);
-                if let Ok(mut guard) = shared.lock() {
-                    guard.hole_css = Some((
-                        HOLE_MARGIN_CSS,
-                        HOLE_MARGIN_CSS,
-                        (rect.width / dpr).max(1.0),
-                        (rect.height / dpr).max(1.0),
-                    ));
-                    guard.hole_physical = Some((rect.x, rect.y, rect.width, rect.height));
-                }
-            } else {
-                context.viewport_mut().clip_rect = None;
-                if let Ok(mut guard) = shared.lock() {
-                    guard.hole_css = None;
-                    guard.hole_physical = None;
-                }
+            if let Ok(mut guard) = shared.lock() {
+                guard.hole_disabled = !on;
+                guard.sync_hole(context.viewport_mut());
             }
-            context.viewport_mut().refit();
             "洞口开关"
         }
-        SpikeCommand::WebviewOrigin {
-            screen_x,
-            screen_y,
-            dpr,
-        } => {
-            let dpr = if dpr.is_finite() && dpr > 0.0 { dpr } else { 1.0 };
-            if let Ok(mut guard) = shared.lock() {
-                guard.webview_origin = Some((
-                    (screen_x * dpr).round() as i32,
-                    (screen_y * dpr).round() as i32,
-                ));
-            }
-            return None;
-        }
-        SpikeCommand::HoleRect {
-            x,
-            y,
-            width,
-            height,
-        } => {
-            let dpr = context.viewport().dpr;
-            let rect = raybend::render::ClipRect {
-                x: x * dpr,
-                y: y * dpr,
-                width: (width * dpr).max(1.0),
-                height: (height * dpr).max(1.0),
-            };
-            context.viewport_mut().clip_rect = Some(rect);
-            // 洞口变了要按**新洞口**重新适配：适配的参照系是洞口而不是整窗
-            // （`fit_modes_use_the_hole_not_the_window` 就是这个口径）。
-            // 漏了这一步的后果实测过：首次上报洞口时适配已经按整窗算完了，zoom 停在 0.41，
-            // 而按洞口应该是 0.05 上下 —— 洞里看到的是一块放大的局部，不是「整张图适配在洞里」。
-            // `Free` 档不动：那时用户已经自己缩放过，重适配会把他的操作抹掉。
-            if context.viewport().fit_mode != FitMode::Free {
-                context.viewport_mut().refit();
+        SpikeCommand::HoleRect { x, y, width, height, dpr, viewport_width, viewport_height } => {
+            if ![x, y, width, height].iter().all(|n| n.is_finite()) || width < 0.0 || height < 0.0 {
+                return Some("洞口矩形必须是有限数，宽高不得为负".into());
             }
             if let Ok(mut guard) = shared.lock() {
-                guard.hole_css = Some((x, y, width, height));
-                guard.hole_physical = Some((rect.x, rect.y, rect.width, rect.height));
+                if let Err(error) = guard.sync_webview_dpr(context.viewport_mut(), dpr) { return Some(error); }
+                guard.css_size = (viewport_width, viewport_height);
+                guard.layout_hole_css = Some((x, y, width, height));
+                guard.sync_hole(context.viewport_mut());
             }
             "洞口跟随界面布局"
         }
@@ -1046,15 +1086,14 @@ fn apply_command(
             height,
             dpr,
         } => {
-            // 窗口尺寸变了：洞口跟着界面走，所以只重算「按内边距」的那种默认洞口
-            context.resize(width, height, dpr);
+            // 即使 DOM 的 CSS 尺寸不变、ResizeObserver 不触发，也按新 DPR 重算洞口。
+            if !dpr.is_finite() || dpr <= 0.0 { return Some("DPR 必须为有限正数".into()); }
+            let css_dpr = shared.lock().ok().and_then(|guard| guard.webview_dpr).unwrap_or(dpr);
+            context.resize(width, height, css_dpr);
             if let Ok(mut guard) = shared.lock() {
+                guard.sync_hole(context.viewport_mut());
                 guard.surface_size = (width, height);
-                guard.css_size = (
-                    (width as f32 / dpr) as u32,
-                    (height as f32 / dpr) as u32,
-                );
-                guard.viewport = *context.viewport();
+                guard.publish_viewport(context.viewport());
             }
             "窗口尺寸变化"
         }
@@ -1068,6 +1107,9 @@ fn hit_view(viewport: &Viewport, css: (f32, f32)) -> HitView {
     let image = viewport.pointer_to_image(css);
     let center = viewport.image_center();
     HitView {
+        css_x: css.0,
+        css_y: css.1,
+        center_css: viewport.physical_to_css(viewport.image_to_physical(center)),
         image_x: image.0,
         image_y: image.1,
         inside: viewport.hit_test_css(css).is_some(),
@@ -1077,8 +1119,7 @@ fn hit_view(viewport: &Viewport, css: (f32, f32)) -> HitView {
 
 /// 坐标往返最大偏差：CSS → 图像 → 物理 → CSS，绕一圈回来差多少。
 ///
-/// 这是**程序化**的坐标同步检查（人眼那条另说）：屏幕上换算回来必须几乎为 0，
-/// 否则就是「图跟不上鼠标」那类漂移。
+/// 只验证数学互逆，按物理像素报告误差；不能据此排除 DOM 比例或呈现链路错误。
 fn coord_roundtrip_error(viewport: &Viewport) -> f32 {
     let (w, h) = viewport.viewport_size;
     let mut worst = 0.0f32;
@@ -1087,7 +1128,7 @@ fn coord_roundtrip_error(viewport: &Viewport) -> f32 {
             let css = (w / 8.0 * gx as f32 / viewport.dpr, h / 8.0 * gy as f32 / viewport.dpr);
             let image = viewport.pointer_to_image(css);
             let back = viewport.physical_to_css(viewport.image_to_physical(image));
-            worst = worst.max((back.0 - css.0).abs()).max((back.1 - css.1).abs());
+            worst = worst.max((back.0 - css.0).abs() * viewport.dpr).max((back.1 - css.1).abs() * viewport.dpr);
         }
     }
     worst
@@ -1174,6 +1215,7 @@ struct WindowFacts {
     client_origin: (i32, i32),
     /// 窗口（含边框）在屏幕上的原点（物理像素）
     window_origin: (i32, i32),
+    webview_origin: Option<(i32, i32)>,
 }
 
 /*
@@ -1207,19 +1249,25 @@ fn read_window_facts<R: Runtime>(window: &tauri::WebviewWindow<R>) -> WindowFact
         .map(|size| (size.width, size.height))
         .unwrap_or((1280, 820));
     let monitor = window.current_monitor().ok().flatten();
+    let client_origin = window.inner_position().ok();
+    // WebView bounds 是相对父客户区的位置，screenX/Y 是浏览器窗口的屏幕坐标，不能混用。
+    let webview: &tauri::Webview<R> = window.as_ref();
+    let dpr = window.scale_factor().unwrap_or(1.0);
+    let webview_origin = client_origin.and_then(|client| {
+        webview.bounds().ok().map(|bounds| {
+            let offset = bounds.position.to_physical::<i32>(dpr);
+            (client.x + offset.x, client.y + offset.y)
+        })
+    });
     WindowFacts {
+        webview_origin,
         surface_size,
-        dpr: window.scale_factor().unwrap_or(1.0) as f32,
+        dpr: dpr as f32,
         maximized: window.is_maximized().unwrap_or(false),
         fullscreen: window.is_fullscreen().unwrap_or(false),
         decorated: window.is_decorated().unwrap_or(false),
         monitor_scale: monitor.as_ref().map_or(1.0, |m| m.scale_factor() as f32),
-        // 两个原点用来判「输入坐标的原点在哪」：只有 webview 的 CSS 原点 == 客户区
-        // 左上角，输入的坐标才与 wgpu 表面坐标系对齐；带边框时两者可能差一个标题栏。
-        client_origin: window
-            .inner_position()
-            .map(|p| (p.x, p.y))
-            .unwrap_or((0, 0)),
+        client_origin: client_origin.map(|p| (p.x, p.y)).unwrap_or((0, 0)),
         window_origin: window
             .outer_position()
             .map(|p| (p.x, p.y))
@@ -1261,6 +1309,111 @@ mod tests {
         // 视口外面（负坐标）不命中
         let outside = hit_view(&viewport, (-10.0, -10.0));
         assert!(!outside.inside);
+    }
+
+    #[test]
+    fn screenshot_regression_os_125_percent_and_webview_110_percent() {
+        // QQ_1789714051780.png：原代码洞口右边为 1030，DOM 实际约为 1133（均相对客户区）。
+        let mut shared = Shared {
+            layout_hole_css: Some((300.0, 37.0, 524.0, 707.0)),
+            ..Default::default()
+        };
+        let mut viewport = Viewport {
+            image_size: (6000, 4000), viewport_size: (1598.0, 1022.0),
+            dpr: 1.25, fit_mode: FitMode::OneToOne, ..Default::default()
+        };
+        shared.sync_hole(&mut viewport);
+        let old = viewport.clip_rect.unwrap();
+        assert_eq!(old.x + old.width, 1030.0);
+        shared.sync_webview_dpr(&mut viewport, 1.375).unwrap();
+        let rect = viewport.clip_rect.unwrap();
+        assert_eq!((rect.x, rect.y, rect.width, rect.height), (412.5, 50.875, 720.5, 972.125));
+        assert_eq!(rect.x + rect.width, 1133.0);
+        // 灰块中心、鼠标命中和矩阵投影要用同一个有效 DPR。
+        let css_center = (562.0, 390.5);
+        assert!(hit_view(&viewport, css_center).at_center);
+        let anchor = viewport.css_to_physical(css_center);
+        viewport.zoom_at(anchor, 1.12);
+        let actual = viewport.image_to_physical(viewport.image_center());
+        assert!((actual.0 - anchor.0).abs() < 0.001);
+        assert!((actual.1 - anchor.1).abs() < 0.001);
+        let before = viewport;
+        for invalid in [0.0, -1.0, f32::NAN, f32::INFINITY] {
+            assert!(shared.sync_webview_dpr(&mut viewport, invalid).is_err());
+            assert_eq!(viewport, before);
+        }
+    }
+
+    #[test]
+    fn layout_ipc_uses_camel_case_fields_and_requires_actual_dpr() {
+        let command: SpikeCommand = serde_json::from_value(serde_json::json!({
+            "kind": "holeRect", "x": 300, "y": 37, "width": 524, "height": 707,
+            "dpr": 1.375, "viewportWidth": 1162, "viewportHeight": 743
+        })).unwrap();
+        assert!(matches!(command, SpikeCommand::HoleRect { dpr: 1.375, viewport_width: 1162, .. }));
+        assert!(serde_json::from_value::<SpikeCommand>(serde_json::json!({
+            "kind": "zoom", "x": 1, "y": 2, "factor": 1.12
+        })).is_err());
+    }
+
+    #[test]
+    fn css_hole_reprojects_on_dpi_change_and_stays_disabled() {
+        let mut shared = Shared {
+            layout_hole_css: Some((300.0, 37.0, 524.0, 707.0)),
+            ..Default::default()
+        };
+        let mut viewport = Viewport {
+            image_size: (6000, 4000),
+            viewport_size: (1598.0, 1022.0),
+            dpr: 1.0,
+            fit_mode: FitMode::OneToOne,
+            ..Default::default()
+        };
+        for dpr in [1.0, 1.25, 1.5, 2.0, 1.0] {
+            viewport.dpr = dpr;
+            shared.sync_hole(&mut viewport);
+            let rect = viewport.clip_rect.unwrap();
+            assert_eq!((rect.x, rect.y), (300.0 * dpr, 37.0 * dpr));
+            assert_eq!((rect.width, rect.height), (524.0 * dpr, 707.0 * dpr));
+            assert!(hit_view(&viewport, (562.0, 390.5)).at_center);
+        }
+        shared.hole_disabled = true;
+        shared.sync_hole(&mut viewport);
+        viewport.dpr = 1.5;
+        shared.layout_hole_css = Some((310.0, 40.0, 500.0, 700.0));
+        shared.sync_hole(&mut viewport);
+        assert!(viewport.clip_rect.is_none());
+        assert!(shared.hole_css.is_none());
+        shared.hole_disabled = false;
+        shared.sync_hole(&mut viewport);
+        assert_eq!(viewport.clip_rect.unwrap().x, 465.0);
+    }
+
+    #[test]
+    fn stationary_pointer_is_recomputed_after_view_changes() {
+        let mut shared = Shared { last_pointer_css: Some((640.0, 410.0)), ..Default::default() };
+        let mut viewport = Viewport {
+            image_size: (6000, 4000), viewport_size: (1280.0, 820.0),
+            fit_mode: FitMode::OneToOne, ..Default::default()
+        };
+        viewport.refit();
+        shared.publish_viewport(&viewport);
+        assert!(shared.last_hit.as_ref().unwrap().at_center);
+        viewport.pan_by((40.0, 30.0));
+        shared.publish_viewport(&viewport);
+        let hit = shared.last_hit.as_ref().unwrap();
+        assert_eq!((hit.image_x, hit.image_y), (2960.0, 1970.0));
+        assert_eq!(hit.center_css, (680.0, 440.0));
+        assert_eq!((hit.css_x, hit.css_y), (640.0, 410.0));
+    }
+
+    #[test]
+    fn layout_change_keeps_free_pan_and_zero_hole_does_not_draw() {
+        let mut shared = Shared { layout_hole_css: Some((300.0, 37.0, 0.0, 0.0)), ..Default::default() };
+        let mut viewport = Viewport { fit_mode: FitMode::Free, pan_px: (33.8, 44.0), ..Default::default() };
+        shared.sync_hole(&mut viewport);
+        assert_eq!(viewport.pan_px, (33.8, 44.0));
+        assert!(viewport.scissor().is_none());
     }
 
     #[test]

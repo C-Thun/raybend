@@ -188,10 +188,45 @@ fn main() -> Result<(), String> {
         }
     }
 
+    /* ── ⑤ 截图回归：系统 125% × Windows 文字大小 110% ── */
+    // 固定样本来自 QQ_1789714051780.png。错用 1.25 时右边停在 1030，
+    // DOM 的实际右边是 1133；这里检查原来那条漏出的明条现在确实有 GPU 像素。
+    let screenshot_size = (1598, 1022);
+    let actual_dpr = 1.375;
+    let mut scaled = Viewport {
+        image_size: (image_w, image_h),
+        viewport_size: (1598.0, 1022.0),
+        dpr: actual_dpr,
+        fit_mode: FitMode::OneToOne,
+        clip_rect: Some(ClipRect {
+            x: 300.0 * actual_dpr, y: 37.0 * actual_dpr,
+            width: 524.0 * actual_dpr, height: 707.0 * actual_dpr,
+        }),
+        ..Default::default()
+    };
+    scaled.refit();
+    let anchor = scaled.css_to_physical((562.0, 390.5));
+    for (name, factor) in [("05-text-scale-110.png", 1.0), ("06-text-scale-zoom.png", 1.12)] {
+        scaled.zoom_at(anchor, factor);
+        let pixels = renderer.render(&scaled, screenshot_size);
+        write_png(&out_dir.join(name), &pixels, screenshot_size)?;
+        // 固定像素坐标作为外部判据，不用被测 image_to_physical 自己算自己。
+        if !near(rgba(&pixels, screenshot_size.0, 773, 537), [255, 255, 255], 12) {
+            failures.push(format!("{name}：实际 CSS 图心对应的物理位置应当是白块"));
+        }
+        if rgba(&pixels, screenshot_size.0, 1120, 500)[3] != 255 {
+            failures.push(format!("{name}：原明条位置必须已被图像填满"));
+        }
+        if rgba(&pixels, screenshot_size.0, 1140, 500)[3] != 0 {
+            failures.push(format!("{name}：洞口右侧外面必须仍然透明"));
+        }
+    }
+    println!("⑤ 系统 125% × 文字 110%：DPR=1.375，覆盖原明条且缩放锚点保持不动");
+
     /* ── 汇总 ───────────────────────────────────────────── */
     println!("\nPNG 写到：{}", out_dir.display());
     if failures.is_empty() {
-        println!("✅ 离屏冒烟全部通过（{} 项断言组）", 4);
+        println!("✅ 离屏冒烟全部通过（{} 项断言组）", 5);
         Ok(())
     } else {
         for failure in &failures {

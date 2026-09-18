@@ -329,6 +329,10 @@ let dev = !custom_protocol;        // ← dev 由 feature 决定，不是 debug/
 - **分类使用**：Library/网格视图用 DOM 虚拟化（webview 内，便于选中/键盘/拖拽）；Develop 视口用原生 wgpu 直绘。
 - **风险与退路**：Tauri 官方未一级支持「webview 上叠加原生 GPU 内容」（相关 issue #8246、#13740），但社区已有多例可用实现（RapidRAW 的 WGPU 直绘、`clearlysid/tauri-wgpu-cam`）。若 Windows 上出现不可解的合成/DWM 问题，退路是切换 Tauri 的 CEF 运行时（自带宽高一致的 Chromium），已登记 `FUTURE.md`。
 - 色彩管理**预留不做**：第一阶段只保证 SDR 下不变形，ICC/HDR 在后期里程碑接入。
+- **坐标契约（原生视口开工前必读）**：见 §7.9 与 `docs/native-viewport-coordinate-guide.md`。
+  三条真机踩出来的铁律：**WebView DPR ≠ 系统缩放**（文字缩放 110% 会叠加）、
+  **wgpu 的 layout 与设备绑定**（设备重建必须连 layout 一起重建）、
+  **渲染线程的 panic 会静默冻住画面**（界面照旧响应 —— 必须捕获并重启）。
 
 ### 6.2 为 Tauri 3.0 迁移做准备（现在就要遵守）
 
@@ -479,6 +483,62 @@ SQLite FTS5 默认 `unicode61` 分词器**对中文基本无效**；必须使用
 
 ---
 
+### 7.9 原生视口的坐标契约（2026-09-19 真机血泪）
+
+> 完整推导、证据与验证方法见 **`docs/native-viewport-coordinate-guide.md`**（Astro 的报告）。
+> 这一节只留**必须记住的结论**，防止重犯。
+
+**事故**：spike 把 Windows 的**显示缩放**当成 WebView 的 CSS 像素比例。本机显示缩放 125%、
+辅助功能文字大小 110% → WebView2 的有效比例是 **1.25 × 1.10 = 1.375**，而旧代码只取了
+`scale_factor() = 1.25` → 洞口、命中测试、拖动、缩放锚点**共用错比例** → 灰块、裁剪边界、
+鼠标集体错位。**这不是「差一个标题栏」也不是「减固定偏移」能修的**：比例错造成的偏差随位置增大，
+固定平移只能碰巧修好一个点。
+
+**四条铁律**：
+
+1. **四种量不能混用**：
+
+   | 量 | 来源 | 用途 |
+   | --- | --- | --- |
+   | native scale | Tauri `scale_factor()` / 显示器 DPI | 原生窗口逻辑尺寸、环境诊断 |
+   | **WebView DPR** | `window.devicePixelRatio` | **DOM client/CSS → surface 物理像素** |
+   | DOM viewport | `window.innerWidth/innerHeight` | WebView 实际 CSS 视口（别拿 native 尺寸÷native scale 冒充） |
+   | image zoom | Rust `Viewport.zoom` | 图像像素 → 物理像素（1:1 永远是 1.0） |
+
+2. **前端只上报原始事实**（`getBoundingClientRect()`、`clientX/Y`、CSS 位移、DPR）——
+   **物理换算全部在 Rust**。上报 DPR ≠ 把变换数学搬到前端。
+3. **DPR 必须读运行时值**：`devicePixelRatio` 已经含显示器 DPI + 系统文字缩放 + 页面缩放，
+   不要写死乘 1.1，也**不许**用「强制文字缩放 100%」来掩盖问题（那正是本次 bug 的成因）。
+4. **别用 `screenX/Y × dpr` 猜容器偏移**：屏幕坐标、窗口外框、客户区、混合 DPI 桌面不是同一坐标域。
+
+**诊断红旗（这些「通过」全是假的）**：「物理洞口 = CSS × 左栏 DPR」（程序用了自己的 DPR，
+证明不了 DPR 对）；「CSS = 客户区 ÷ native scale」（算出来的，不是量的）；
+「数学往返误差 = 0」（只证明互逆，**共同用错单位也是 0**）；「命中中心 ✅」（只证明自洽）；
+节流上报必须**保留尾样本**（停手那一次也要发）。
+
+**变化要收口**：CSS 洞口是布局真相，DPR 变了就**按新 DPR 重建**物理洞口（别反复缩放上次整数化过的矩形）；
+跨屏/过渡用**带递增 revision 的整包布局事务**，别让旧输入套用新布局。
+
+**验证顺序（便宜→贵）**：纯状态单测（把 OS 1.25 与 WebView 1.375 当**不同输入**，别只测两者相等的档）→
+IPC 单测（用**真实字段名**反序列化；缺 DPR 必须报错，不许静默回退）→
+离屏 GPU 像素回读（**期望值必须外部给定**，别让被测函数自己生成）→ 构建核对 →
+**最短真机门槛**（复位 → 1:1 → 十字缩放，这三步不过就停，别做完 25 分钟全套才发现第一步就错）。
+
+**工程侧的血（同样记牢）**：
+
+- **wgpu 的 `BindGroupLayout` 与设备绑定**：设备重建后**必须重建 layout**，跨设备复用会在
+  `create_bind_group` 抛校验错 —— 在 spike 里表现为 **panic 打死渲染线程**：界面照旧响应、
+  图永远冻住（逐字日志见 `implementations/2026-09-19_windows-spike-verified-and-device-loss.md` §3.4）。
+  → **编辑模块的渲染线程必须「捕获 panic + 重启 + 上报」**。
+- **`Surface::configure()` 返回 `()`**：失败只能靠 `push_error_scope` 或 panic 看见。
+- **`device.destroy()` 之后** surface 的 presentation 仍指向已销毁设备 → 下次取帧必报 `Validation`
+  （`wgpu-core` 的 `present.rs:168` `check_is_valid()`）—— 这是「演练丢失」应有的样子，**不是 bug**。
+- **日志**：本仓曾经**没装任何 logger**（wgpu 的 `log::*` 全被丢弃），所以「去看 wgpu 报错日志」
+  是张空头支票。要原文就得装 logger（`RUST_LOG`）或走 error scope。
+- **`WSLENV`**：WSL→Windows **只转发 `WSLENV` 里列出的变量**（§5.3 第 2 条）。
+  `WGPU_BACKEND=dx12 pnpm spike:win` 曾经是假的（变量被丢掉，窗口照旧跑 Vulkan）；
+  脚本已把 `WGPU_BACKEND` 并进 `WSLENV`。
+
 ## 8. 必须处理的问题清单（按优先级）
 
 | # | 问题 | 影响 | 处理时机 |
@@ -509,6 +569,7 @@ SQLite FTS5 默认 `unicode61` 分词器**对中文基本无效**；必须使用
 | `ASSISTANCE.md` | **待人类协助事项清单**（有内容则先停下来处理它） |
 | `website/AGENTS.md` | **官网（`website/`）专属指南**：SolidStart 2.0 / Solid 2.0 选型、目录约定、命令、站点实现约定（i18n / 素材占位 / 下载信息注入）、**GitHub Pages 部署 + 自定义域名步骤** —— 技术栈与本体不同，别混用 |
 | `website/ASSETS.md` | **官网素材清单**：要人出手的截图（尺寸/取景要点/放哪）与 AI 生图提示词；给完图在 `src/data/media.ts` 填 `src` 即自动替换占位 |
+| `docs/native-viewport-coordinate-guide.md` | **原生视口的坐标契约**（2026-09-19 真机事故的完整报告）：四种量的区分、诊断红旗、验证顺序、`recover()` 的 panic 真因 —— 动原生视口前必读，摘要见 §7.9 |
 | `BROWSE.md` | **浏览模式规格**：三列结构、toolsbar 的筛选/标记/标签/锁、选择逻辑（Shift 区间翻转）、看图与对比、胶片带、信息栏、标签体系、两个通用浮层（模态 + 右上角 toast） |
 | `REPOSITORY.md` | **库与导入规格**：库物理结构、库身份与多路径、在线/离线、导入模版与变量、序号、重名、RAW 分流、目录透传 |
 | `DESIGN.md` | 视觉与配色体系（唯一事实来源） |

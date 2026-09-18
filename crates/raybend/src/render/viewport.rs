@@ -84,7 +84,8 @@ pub struct Viewport {
     pub rotation: f32,
     pub fit_mode: FitMode,
     pub clip_rect: Option<ClipRect>,
-    /// 设备像素比（Tauri 的 `scale_factor`）：100% → 1.0，125% → 1.25，150% → 1.5
+    /// CSS → surface 物理像素的有效比例（WebView `devicePixelRatio`）。
+    /// 包含页面缩放：系统 125% × 页面 110% = 1.375，不能仅用 Tauri `scale_factor`。
     pub dpr: f32,
     pub alpha_mode: AlphaMode,
 }

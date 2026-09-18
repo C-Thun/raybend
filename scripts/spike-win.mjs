@@ -136,10 +136,19 @@ step(4, "启动应用（带 --spike=1 与 RAYBEND_SPIKE=1 —— 启动时就把
  * 丢了就只能猜（上一版就是这样：窗口没开出来，而脚本还在印「已经开了」）。
  */
 const APP_LOG = join(tmpdir(), "raybend-desktop.log");
+/*
+ * ⚠️ WSL→Windows **只转 `WSLENV` 里列出的变量**（本仓血的教训，AGENTS.md §5.3 第 2 条）。
+ *
+ * 2026-09-19 实测：`WGPU_BACKEND=dx12 pnpm spike:win` 起出来的窗口仍是 Vulkan，
+ * 报告里写着「`WGPU_BACKEND`：(未设置 → 走默认优先级)」—— 变量在互操作层被丢了，
+ * 而下面那段帮助文字还在教人这么用。所以把后端实验要用的变量显式并进 `WSLENV`。
+ * （`RAYBEND_SPIKE` 不需要：脚本同时传了 `--spike=1` 这个**参数**，参数不受互操作限制。）
+ */
+const wslEnv = ["WGPU_BACKEND", process.env.WSLENV].filter(Boolean).join(":");
 const child = spawn(EXE, ["--spike=1"], {
   detached: true,
   stdio: ["ignore", logFd(APP_LOG), logFd(APP_LOG)],
-  env: { ...process.env, RAYBEND_SPIKE: "1" },
+  env: { ...process.env, RAYBEND_SPIKE: "1", ...(wslEnv ? { WSLENV: wslEnv } : {}) },
 });
 child.unref();
 
@@ -160,6 +169,7 @@ console.log(`
 
 提示：
   · 换后端重测（A.2 的回退实验）：先设 WGPU_BACKEND，再重跑本脚本
+  ·    （WSL 侧设的变量经互操作会丢，脚本已把 WGPU_BACKEND 并进 WSLENV 转发，故这三条有效）：
       WGPU_BACKEND=dx12 pnpm spike:win
       WGPU_BACKEND=vulkan pnpm spike:win
       WGPU_BACKEND=gl pnpm spike:win
