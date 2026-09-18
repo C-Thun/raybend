@@ -85,6 +85,10 @@ const EMPTY: SpikeSnapshot = {
   lastCpuMs: 0,
   lastError: null,
   viewportProblems: [],
+  clientOrigin: [0, 0],
+  windowOrigin: [0, 0],
+  webviewOrigin: null,
+  inputOffset: null,
 };
 
 function fmt(value: number | null | undefined, digits = 2, suffix = ""): string {
@@ -146,12 +150,38 @@ export default function SpikeViewport() {
       reportHole();
     }
 
+    /*
+     * webview 原点（屏幕 CSS 像素）→ Rust。
+     *
+     * 为什么需要它：输入的 `clientX/clientY` 是**相对 webview** 的，而 wgpu 表面挂在
+     * 窗口句柄上；两者原点若不同（带边框的窗口就常差一个标题栏），就会出现
+     * 「图看着是对的、鼠标读出的图像坐标却差一截」（人类 2026-09-18 报的）。
+     * 这里把 webview 的原点也报上去，Rust 侧与 `inner_position()` 一比就知道差多少。
+     */
+    let lastOrigin = "";
+    const reportOrigin = (): void => {
+      if (!isTauriRuntime()) return;
+      const key = `${window.screenX},${window.screenY},${window.devicePixelRatio}`;
+      if (key === lastOrigin) return;
+      lastOrigin = key;
+      void spikeCommand({
+        kind: "webviewOrigin",
+        screenX: window.screenX,
+        screenY: window.screenY,
+        dpr: window.devicePixelRatio,
+      }).then(apply).catch(() => {});
+    };
+    reportOrigin();
+    window.addEventListener("resize", reportOrigin);
+
     // 轮询状态：渲染线程在跑，界面跟着看
     const timer = window.setInterval(() => {
       if (!isTauriRuntime()) return;
       void spikeSnapshot().then(apply).catch(() => {});
+      reportOrigin();
     }, 300);
     onCleanup(() => window.clearInterval(timer));
+    onCleanup(() => window.removeEventListener("resize", reportOrigin));
   });
 
   function reportHole(): void {
@@ -200,7 +230,11 @@ export default function SpikeViewport() {
   return (
     <div class="flex h-screen w-screen flex-col overflow-hidden text-fs-2 text-fg-1">
       {/* ── 顶栏（不透明）──────────────────────────────── */}
-      <header class="flex shrink-0 items-center gap-2 border-b border-line-1 bg-surface-bar px-3 py-1.5">
+      {/* 无边框窗口靠这一行拖（`data-tauri-drag-region` 由 Tauri 接管为原生拖动） */}
+      <header
+        data-tauri-drag-region
+        class="flex shrink-0 items-center gap-2 border-b border-line-1 bg-surface-bar px-3 py-1.5"
+      >
         <span class="font-600">渲染 spike（M2-W1 · PLAN.md A.2）</span>
         <span class="text-fg-3">
           {isTauriRuntime() ? "Tauri 环境" : "浏览器预览（没有后端，数据全空）"}
@@ -273,6 +307,36 @@ export default function SpikeViewport() {
               {snap().maximized ? "最大化 " : ""}
               {snap().fullscreen ? "全屏 " : ""}
               {snap().decorated ? "有边框" : "无边框"}
+            </dd>
+            {/*
+              三个屏幕原点对照 —— 「图看着对、鼠标坐标却差一截」的判据就是最后一行。
+              webview 与客户区重合（输入偏移 = 0,0）时，输入的 CSS 坐标与 wgpu
+              表面用的是同一套坐标系；不重合就是差多少补多少。
+            */}
+            <dt class="text-fg-3">窗口原点</dt>
+            <dd>
+              {snap().windowOrigin[0]}, {snap().windowOrigin[1]}
+            </dd>
+            <dt class="text-fg-3">客户区原点</dt>
+            <dd>
+              {snap().clientOrigin[0]}, {snap().clientOrigin[1]}
+            </dd>
+            <dt class="text-fg-3">webview 原点</dt>
+            <dd>
+              {snap().webviewOrigin
+                ? `${snap().webviewOrigin![0]}, ${snap().webviewOrigin![1]}`
+                : "—"}
+            </dd>
+            <dt class="text-fg-3">输入偏移</dt>
+            <dd class={snap().inputOffset ? "font-600 text-fg-1" : "text-fg-2"}>
+              {snap().inputOffset
+                ? `${snap().inputOffset![0]}, ${snap().inputOffset![1]}`
+                : "—"}
+              {snap().inputOffset &&
+              snap().inputOffset![0] === 0 &&
+              snap().inputOffset![1] === 0
+                ? " ✓ 对齐"
+                : ""}
             </dd>
           </dl>
 

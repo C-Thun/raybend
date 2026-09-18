@@ -58,6 +58,12 @@ pub enum SpikeCommand {
     Rotate { degrees: f32 },
     /// 洞口开关（关掉就是整窗出图，用来对照）
     SetHole { on: bool },
+    /// webview 原点（CSS 屏幕像素 + dpr）—— 判「输入坐标系的原点在哪」
+    WebviewOrigin {
+        screen_x: f64,
+        screen_y: f64,
+        dpr: f64,
+    },
     /// 界面把洞口矩形的当前布局报上来（CSS 像素）—— DOM 是布局权威，Rust 是变换权威
     HoleRect {
         x: f32,
@@ -176,6 +182,12 @@ pub struct Shared {
     pub last_error: Option<String>,
     /// 洞口矩形的物理像素版本（前端显示用，见 `ViewportView::hole_physical`）
     pub hole_physical: Option<(f32, f32, f32, f32)>,
+    /// 客户区原点（物理屏幕像素）
+    pub client_origin: (i32, i32),
+    /// 窗口原点（物理屏幕像素，含边框）
+    pub window_origin: (i32, i32),
+    /// 前端报上来的 webview 原点（物理屏幕像素，= `screenX × dpr`）
+    pub webview_origin: Option<(i32, i32)>,
     /// 最近一次的帧间隔与 CPU 时长（界面上实时看）
     pub last_frame_ms: f32,
     pub last_cpu_ms: f32,
@@ -197,6 +209,8 @@ impl Shared {
         self.maximized = facts.maximized;
         self.fullscreen = facts.fullscreen;
         self.decorated = facts.decorated;
+        self.client_origin = facts.client_origin;
+        self.window_origin = facts.window_origin;
     }
     fn snapshot(&self) -> SpikeSnapshot {
         SpikeSnapshot {
@@ -246,6 +260,12 @@ impl Shared {
             last_frame_ms: self.last_frame_ms,
             last_cpu_ms: self.last_cpu_ms,
             last_error: self.last_error.clone(),
+            client_origin: self.client_origin,
+            window_origin: self.window_origin,
+            webview_origin: self.webview_origin,
+            input_offset: self
+                .webview_origin
+                .map(|w| (w.0 - self.client_origin.0, w.1 - self.client_origin.1)),
             viewport_problems: self.viewport.sanity_problems(),
         }
     }
@@ -303,6 +323,12 @@ pub struct SpikeSnapshot {
     pub last_frame_ms: f32,
     pub last_cpu_ms: f32,
     pub last_error: Option<String>,
+    /// 客户区 / 窗口 / webview 三个原点（物理屏幕像素）与推导出的**输入偏移**
+    pub client_origin: (i32, i32),
+    pub window_origin: (i32, i32),
+    pub webview_origin: Option<(i32, i32)>,
+    /// `webview 原点 − 客户区原点`：非零就意味着输入的 CSS 坐标与表面坐标系差这一截
+    pub input_offset: Option<(i32, i32)>,
     /// 视口自查（`Viewport::sanity_problems`）—— 界面上要显眼
     pub viewport_problems: Vec<String>,
 }
@@ -353,6 +379,13 @@ pub fn open_window<R: Runtime>(app: &AppHandle<R>) -> Result<SpikeSnapshot, Stri
     )
     .title("raybend 渲染 spike（M2-W1）")
     .inner_size(1280.0, 820.0)
+    /*
+     * **无边框**，与产品一致 —— 这同时是坐标对齐的前提：带边框时「webview 的 CSS 原点」
+     * 「客户区原点」「wgpu 表面原点」可能各差一个标题栏，表现就是「图看着是对的、
+     * 鼠标读出的坐标却差一截」（人类 2026-09-18 报的正是这个）。无边框后三者重合，
+     * 输入与绘制用同一套坐标系。无边框窗口照样能拖：前端顶栏挂了 `data-tauri-drag-region`。
+     */
+    .decorations(false)
     // 透明是**这一条 spike 的主角**：webview 中间挖洞，wgpu 在洞里出图
     .transparent(true)
     .resizable(true)
@@ -905,6 +938,20 @@ fn apply_command(
             context.viewport_mut().refit();
             "洞口开关"
         }
+        SpikeCommand::WebviewOrigin {
+            screen_x,
+            screen_y,
+            dpr,
+        } => {
+            let dpr = if dpr.is_finite() && dpr > 0.0 { dpr } else { 1.0 };
+            if let Ok(mut guard) = shared.lock() {
+                guard.webview_origin = Some((
+                    (screen_x * dpr).round() as i32,
+                    (screen_y * dpr).round() as i32,
+                ));
+            }
+            return None;
+        }
         SpikeCommand::HoleRect {
             x,
             y,
@@ -1119,6 +1166,10 @@ struct WindowFacts {
     fullscreen: bool,
     decorated: bool,
     monitor_scale: f32,
+    /// 客户区在屏幕上的原点（物理像素）
+    client_origin: (i32, i32),
+    /// 窗口（含边框）在屏幕上的原点（物理像素）
+    window_origin: (i32, i32),
 }
 
 /*
@@ -1159,6 +1210,16 @@ fn read_window_facts<R: Runtime>(window: &tauri::WebviewWindow<R>) -> WindowFact
         fullscreen: window.is_fullscreen().unwrap_or(false),
         decorated: window.is_decorated().unwrap_or(false),
         monitor_scale: monitor.as_ref().map_or(1.0, |m| m.scale_factor() as f32),
+        // 两个原点用来判「输入坐标的原点在哪」：只有 webview 的 CSS 原点 == 客户区
+        // 左上角，输入的坐标才与 wgpu 表面坐标系对齐；带边框时两者可能差一个标题栏。
+        client_origin: window
+            .inner_position()
+            .map(|p| (p.x, p.y))
+            .unwrap_or((0, 0)),
+        window_origin: window
+            .outer_position()
+            .map(|p| (p.x, p.y))
+            .unwrap_or((0, 0)),
     }
 }
 

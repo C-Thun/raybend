@@ -26,6 +26,7 @@ export type SpikeCommand =
   | { kind: "rotate"; degrees: number }
   | { kind: "setHole"; on: boolean }
   | { kind: "holeRect"; x: number; y: number; width: number; height: number }
+  | { kind: "webviewOrigin"; screenX: number; screenY: number; dpr: number }
   | { kind: "reset" }
   | { kind: "scripted"; name: string; seconds: number }
   | { kind: "scenario"; name: string | null }
@@ -97,6 +98,18 @@ export interface SpikeSnapshot {
   lastCpuMs: number;
   lastError: string | null;
   viewportProblems: string[];
+  /** 客户区在屏幕上的原点（物理像素） */
+  clientOrigin: [number, number];
+  /** 窗口（含边框）在屏幕上的原点（物理像素） */
+  windowOrigin: [number, number];
+  /** webview 在屏幕上的原点（物理像素，= `screenX × dpr`） */
+  webviewOrigin: [number, number] | null;
+  /**
+   * `webview 原点 − 客户区原点`（物理像素）。
+   * **非零就是「图看着对、鼠标读出的坐标却差一截」的根因** —— 输入的 CSS 坐标
+   * 与 wgpu 表面的坐标系差这一截。
+   */
+  inputOffset: [number, number] | null;
 }
 
 /** 人填的那几项（报告里唯一不是程序算出来的部分）。 */
@@ -142,6 +155,10 @@ const EMPTY: SpikeSnapshot = {
   lastFrameMs: 0,
   lastCpuMs: 0,
   lastError: null,
+  clientOrigin: [0, 0],
+  windowOrigin: [0, 0],
+  webviewOrigin: null,
+  inputOffset: null,
   viewportProblems: [],
 };
 
