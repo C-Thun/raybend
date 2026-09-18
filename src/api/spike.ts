@@ -48,6 +48,8 @@ export interface ViewportView {
   rotation: number;
   fitMode: string;
   holeCss: [number, number, number, number] | null;
+  /** 洞口的物理像素矩形（Rust 实际用来摆图/裁剪的那个）—— 与 CSS 值一比就知道单位对不对 */
+  holePhysical: [number, number, number, number] | null;
   dpr: number;
   imageWidth: number;
   imageHeight: number;
@@ -128,6 +130,7 @@ const EMPTY: SpikeSnapshot = {
     rotation: 0,
     fitMode: "",
     holeCss: null,
+    holePhysical: null,
     dpr: 1,
     imageWidth: 0,
     imageHeight: 0,

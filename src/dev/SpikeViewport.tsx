@@ -48,7 +48,7 @@ import { isTauriRuntime } from "../api/tauri-env.ts";
  * 正常运行以**界面上的报的**矩形为准（DOM 是布局权威，Rust 是变换权威），
  * 这个值只在两边都要各自“没收到对方消息”时兵分二路地落同一个数。
  */
-const HOLE_MARGIN_PX = 190;
+const HOLE_MARGIN_PX = 0;
 
 const EMPTY: SpikeSnapshot = {
   open: false,
@@ -72,6 +72,7 @@ const EMPTY: SpikeSnapshot = {
     rotation: 0,
     fitMode: "",
     holeCss: null,
+    holePhysical: null,
     dpr: 1,
     imageWidth: 0,
     imageHeight: 0,
@@ -295,6 +296,20 @@ export default function SpikeViewport() {
                     .join(", ")
                 : "整窗"}
             </dd>
+            {/*
+              洞口的物理像素矩形。与上一行一比就知道单位错没错：1.25 缩放下
+              (490,227,144,327) 应当对应 (612,284,180,409)。若这里仍是 144×327，
+              就是漏了 dpr；若数值对、画面仍偏，那偏的是**表面原点**（wgpu 表面挂在
+              窗口 HWND 上），而不是这里的数学。
+            */}
+            <dt class="text-fg-3">洞口(物理)</dt>
+            <dd>
+              {view().holePhysical
+                ? view()
+                    .holePhysical!.map((v) => Math.round(v))
+                    .join(", ")
+                : "整窗"}
+            </dd>
             <dt class="text-fg-3">图像</dt>
             <dd>
               {view().imageWidth}×{view().imageHeight}
@@ -328,8 +343,15 @@ export default function SpikeViewport() {
         <main class="relative min-h-0 min-w-0 flex-1">
           <div
             ref={hole}
-            // 四周留出面板的边距；这一块**没有背景**，靠窗口透明透出 wgpu 画的内容
-            class="absolute cursor-grab active:cursor-grabbing"
+            /*
+             * 这一块**没有背景**，靠窗口透明透出 wgpu 画的内容；它同时是鼠标事件的
+             * 接收面（滚轮缩放 / 拖动平移 / 位置上报）。
+             *
+             * ⚠️ 光标必须是**十字准星**而不是手形：本项判据是「鼠标压在哪一块像素上」，
+             * 手形的图形会把瞄准点整个盖住（人类 2026-09-18 报「没法确定鼠标在哪」）。
+             * 拖动时给 `grabbing` 作为「正在拖」的反馈，松开即回到准星。
+             */
+            class="absolute cursor-crosshair active:cursor-grabbing"
             style={{ "touch-action": "none", inset: `${HOLE_MARGIN_PX}px` }}
             onWheel={onWheel}
             onPointerDown={(event) => {
@@ -345,29 +367,19 @@ export default function SpikeViewport() {
             onPointerMove={onPointerMove}
           />
           {/*
-           * 洞口之外的四周保持不透明（真实产品里这里就是界面面板）。
+           * 洞口 = **整个中间列**（`HOLE_MARGIN_PX = 0`），这里一个字节都不画。
            *
-           * ⚠️ **只能画「环」，绝不能整块盖** —— 负 z-index 只决定页内堆叠顺序，
-           * **并不会**让页面像素变透明。早先这里是两块 `inset-0` 的底色，等于连洞口
-           * 一起刷成了不透明，于是「透明挖洞」根本没出现（人类 2026-09-17 看到的就是
-           * 中间一片暗色、wgpu 画的东西一点都看不见）。
+           * ⚠️ **绝不能整块盖底色** —— 负 z-index 只决定页内堆叠顺序，**并不会**让页面
+           * 像素变透明。早先这里是两块 `inset-0` 的底色，等于连洞口一起刷成不透明，
+           * 「透明挖洞」根本没出现（人类 2026-09-17 看到中间一片暗色、wgpu 画的东西
+           * 一点都看不见）。
+           *
+           * 后来改成「留 190px 的环」是**过度纠正**：左右面板本来就是分开的列，中间列
+           * 再缩 190px 只剩 144×327 的一条竖缝 —— Fit 档下 6000×4000 被压成 144×96 的
+           * 小条、四角标记缩到 3~4px 根本看不见、鼠标一挪就「不在图像内」。
+           * 人类 2026-09-18 报的正是这一串。现在不缩：中间列多大，洞口就多大。
+           * 两侧面板自带底色，遮光不靠这里的环。
            */}
-          <div
-            class="pointer-events-none absolute inset-x-0 top-0 -z-10 bg-surface-main"
-            style={{ height: `${HOLE_MARGIN_PX}px` }}
-          />
-          <div
-            class="pointer-events-none absolute inset-x-0 bottom-0 -z-10 bg-surface-main"
-            style={{ height: `${HOLE_MARGIN_PX}px` }}
-          />
-          <div
-            class="pointer-events-none absolute inset-y-0 start-0 -z-10 bg-surface-main"
-            style={{ width: `${HOLE_MARGIN_PX}px` }}
-          />
-          <div
-            class="pointer-events-none absolute inset-y-0 end-0 -z-10 bg-surface-main"
-            style={{ width: `${HOLE_MARGIN_PX}px` }}
-          />
           <div
             class="pointer-events-none absolute border border-dashed border-line-2"
             style={{ inset: `${HOLE_MARGIN_PX}px` }}
@@ -404,7 +416,15 @@ export default function SpikeViewport() {
               <button
                 type="button"
                 class="rounded-(--radius) bg-surface-track px-2 py-0.5 hover:bg-state-hover"
-                onClick={() => void run(() => spikeCommand({ kind: "setHole", on: false }))}
+                onClick={() =>
+                  void run(async () => {
+                    const snapshot = await spikeCommand({ kind: "setHole", on: false });
+                    // 洞口关掉是「整窗出图」的对照档；开回来时要把**真实洞口**重报一遍，
+                    // 否则 Rust 侧会停在按边距推算的兜底矩形上（旧的 190px 那一版就这么错过）。
+                    reportHole();
+                    return snapshot;
+                  })
+                }
               >
                 洞口：关（整窗出图）
               </button>
@@ -413,7 +433,13 @@ export default function SpikeViewport() {
               <button
                 type="button"
                 class="rounded-(--radius) bg-surface-track px-2 py-0.5 hover:bg-state-hover"
-                onClick={() => void run(() => spikeCommand({ kind: "setHole", on: true }))}
+                onClick={() =>
+                  void run(async () => {
+                    const snapshot = await spikeCommand({ kind: "setHole", on: true });
+                    reportHole();
+                    return snapshot;
+                  })
+                }
               >
                 洞口：开
               </button>

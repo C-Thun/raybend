@@ -32,7 +32,7 @@ use tauri::{AppHandle, Manager, Runtime, WebviewUrl, WebviewWindowBuilder};
 pub const SPIKE_LABEL: &str = "spike-viewport";
 
 /// 洞口的默认内边距（CSS 像素）：四周留出来给界面面板。
-const HOLE_MARGIN_CSS: f32 = 190.0;
+const HOLE_MARGIN_CSS: f32 = 0.0;
 
 /// 脚本化缩放的折返上下限（不跑到视口的极端值上，免得量到「只剩一格像素」那种情况）。
 const MIN_SCRIPT_ZOOM: f32 = 0.05;
@@ -118,6 +118,7 @@ pub struct ViewportView {
     pub rotation: f32,
     pub fit_mode: String,
     pub hole_css: Option<(f32, f32, f32, f32)>,
+    pub hole_physical: Option<(f32, f32, f32, f32)>,
     pub dpr: f32,
     pub image_width: u32,
     pub image_height: u32,
@@ -173,6 +174,8 @@ pub struct Shared {
     pub coord_max_error: f32,
     pub last_hit: Option<HitView>,
     pub last_error: Option<String>,
+    /// 洞口矩形的物理像素版本（前端显示用，见 `ViewportView::hole_physical`）
+    pub hole_physical: Option<(f32, f32, f32, f32)>,
     /// 最近一次的帧间隔与 CPU 时长（界面上实时看）
     pub last_frame_ms: f32,
     pub last_cpu_ms: f32,
@@ -218,6 +221,7 @@ impl Shared {
                 rotation: self.viewport.rotation,
                 fit_mode: format!("{:?}", self.viewport.fit_mode),
                 hole_css: self.hole_css,
+                hole_physical: self.hole_physical,
                 dpr: self.viewport.dpr,
                 image_width: self.viewport.image_size.0,
                 image_height: self.viewport.image_size.1,
@@ -889,11 +893,13 @@ fn apply_command(
                         (rect.width / dpr).max(1.0),
                         (rect.height / dpr).max(1.0),
                     ));
+                    guard.hole_physical = Some((rect.x, rect.y, rect.width, rect.height));
                 }
             } else {
                 context.viewport_mut().clip_rect = None;
                 if let Ok(mut guard) = shared.lock() {
                     guard.hole_css = None;
+                    guard.hole_physical = None;
                 }
             }
             context.viewport_mut().refit();
@@ -906,12 +912,13 @@ fn apply_command(
             height,
         } => {
             let dpr = context.viewport().dpr;
-            context.viewport_mut().clip_rect = Some(raybend::render::ClipRect {
+            let rect = raybend::render::ClipRect {
                 x: x * dpr,
                 y: y * dpr,
                 width: (width * dpr).max(1.0),
                 height: (height * dpr).max(1.0),
-            });
+            };
+            context.viewport_mut().clip_rect = Some(rect);
             // 洞口变了要按**新洞口**重新适配：适配的参照系是洞口而不是整窗
             // （`fit_modes_use_the_hole_not_the_window` 就是这个口径）。
             // 漏了这一步的后果实测过：首次上报洞口时适配已经按整窗算完了，zoom 停在 0.41，
@@ -922,6 +929,7 @@ fn apply_command(
             }
             if let Ok(mut guard) = shared.lock() {
                 guard.hole_css = Some((x, y, width, height));
+                guard.hole_physical = Some((rect.x, rect.y, rect.width, rect.height));
             }
             "洞口跟随界面布局"
         }
