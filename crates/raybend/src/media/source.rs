@@ -255,6 +255,42 @@ pub fn read_times(paths: &[PathBuf]) -> Vec<TimeEntry> {
             taken_at: None,
         });
     }
+
+    /*
+     * 配对继承：RAW 自己没读到时间时，从**同名的位图**那里借（见 `media::pairing`）。
+     *
+     * 少了这一步的后果不是「时间不准」那么轻：按时间分组时，同一张照片的 JPG 与 RAW
+     * 会落进**不同的时间片**，界面上就是「同一天的分组标题出现两次、一遍纯位图一遍纯 RAW」
+     * （人类 2026-09-17/18 两次上报）。放在整批读完之后做 —— 配对要看得见同批的位图。
+     */
+    let mut pairs: Vec<super::pairing::TimePair> = out
+        .iter()
+        .map(|entry| {
+            let name = entry
+                .path
+                .file_name()
+                .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+            super::pairing::TimePair::new(
+                &entry.path,
+                kind::kind_of_file(&name) == MediaKind::Raw,
+                entry.taken_at.map(|t| t.millis),
+            )
+        })
+        .collect();
+    if super::pairing::inherit_times_from_bitmaps(&mut pairs) > 0 {
+        for (entry, pair) in out.iter_mut().zip(pairs.iter()) {
+            let Some(millis) = pair.taken_at else { continue };
+            if entry.taken_at.map(|t| t.millis) == Some(millis) {
+                continue;
+            }
+            entry.taken_at = Some(TakenAt {
+                millis,
+                // 同一台相机同一批照片，时区偏移沿用本文件已有的（没有就是没有）
+                offset_min: entry.taken_at.and_then(|t| t.offset_min),
+                source: exif::TakenAtSource::Sibling,
+            });
+        }
+    }
     out
 }
 
@@ -448,6 +484,7 @@ mod tests {
                         exif::TakenAtSource::Exif => "exif",
                         exif::TakenAtSource::Filename => "filename",
                         exif::TakenAtSource::FileMtime => "mtime",
+                        exif::TakenAtSource::Sibling => "sibling",
                     }),
                 )
             })

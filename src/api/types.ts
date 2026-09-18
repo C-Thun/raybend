@@ -26,7 +26,7 @@ export type VolumeKind =
 export type MediaKind = "raw" | "image" | "other";
 
 /** 拍摄时间的来源（`raybend::media::exif::TakenAtSource`） */
-export type TakenAtSource = "exif" | "filename" | "file_mtime";
+export type TakenAtSource = "exif" | "filename" | "file_mtime" | "sibling";
 
 /** 缩略图尺度（`raybend::thumbnail::render::SizeClass`） */
 /**

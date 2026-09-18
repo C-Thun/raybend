@@ -181,10 +181,10 @@ impl Scanner for FsScanner {
             .map_or(1, std::num::NonZeroUsize::get)
             .clamp(1, 4);
         if workers == 1 || files.len() < 2 {
-            return files
-                .iter()
-                .map(|f| extras_for(f, needs, cancel))
-                .collect();
+            let mut out: Vec<SourceExtras> =
+                files.iter().map(|f| extras_for(f, needs, cancel)).collect();
+            inherit_from_bitmap_siblings(files, &mut out);
+            return out;
         }
 
         let chunk = files.len().div_ceil(workers);
@@ -209,7 +209,34 @@ impl Scanner for FsScanner {
         });
         // 线程 panic 时长度可能对不上：补齐，绝不留下「下标错位」的隐患
         out.resize(files.len(), SourceExtras::default());
+        inherit_from_bitmap_siblings(files, &mut out);
         out
+    }
+}
+
+/// 配对继承（`media::pairing`）：RAW 自己没读到拍摄时间时，从**同名的位图**借。
+///
+/// 放在整批读完之后做 —— 配对要看得见同一批里的位图。少了这一步，导入进库的照片里
+/// RAW 会退到 mtime（拷贝时间），按时间分组就和同名的 JPG 分了家。
+fn inherit_from_bitmap_siblings(files: &[ScannedFile], extras: &mut [SourceExtras]) {
+    let mut pairs: Vec<crate::media::pairing::TimePair> = files
+        .iter()
+        .zip(extras.iter())
+        .map(|(file, extra)| {
+            crate::media::pairing::TimePair::new(
+                &file.abs_path,
+                file.kind == crate::media::kind::MediaKind::Raw,
+                extra.taken_at,
+            )
+        })
+        .collect();
+    if crate::media::pairing::inherit_times_from_bitmaps(&mut pairs) == 0 {
+        return;
+    }
+    for (extra, pair) in extras.iter_mut().zip(pairs.iter()) {
+        if let Some(millis) = pair.taken_at {
+            extra.taken_at = Some(millis);
+        }
     }
 }
 

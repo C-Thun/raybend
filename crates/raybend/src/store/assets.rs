@@ -423,6 +423,9 @@ pub fn apply_exif(
                 crate::media::exif::TakenAtSource::Exif => "exif",
                 crate::media::exif::TakenAtSource::Filename => "filename",
                 crate::media::exif::TakenAtSource::FileMtime => "file_mtime",
+                // 从同名姊妹文件（位图）继承来的（见 `media::pairing`）。
+                // 列是自由文本（`catalog_0001_init.sql` 里的枚举只是注释），所以不需要迁移。
+                crate::media::exif::TakenAtSource::Sibling => "sibling",
             }),
             t.offset_min,
         ),

@@ -249,6 +249,7 @@ fn taken_source_code(source: raybend::media::exif::TakenAtSource) -> &'static st
         TakenAtSource::Exif => "exif",
         TakenAtSource::Filename => "filename",
         TakenAtSource::FileMtime => "file_mtime",
+        TakenAtSource::Sibling => "sibling",
     }
 }
 
