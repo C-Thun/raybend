@@ -107,3 +107,11 @@ pnpm check:browse                    ✓ 库非空时进浏览正常
   后续导出也会用同一模式）。`design/browse.md` 里记过「tiles 按实现同步」的口径，
   但**组件分层**这件事还没有落纸；人类还报了浏览网格「两条显眼的白色竖线」。
   这两件并成一轮「tiles 组件重构」来做，单独立计划。
+
+---
+
+> **⚠️ 2026-09-18 更正（13:5x 发现）**：本记录描述的 `WindowFacts` 重构，**当时并未编译通过** ——
+> `render_loop` 的签名改了（多了 `initial` / `pending_facts`），但**调用点没跟上**、
+> `Shared::apply_window_facts()` **根本没定义**，暂存区也没建。
+> 记录写了、代码半截：这是「只记了没做」的同类问题，已由 `2531bdf` 接完并验收
+> （`render_loop` 体内零窗口查询），详见 `implementations/2026-09-18_cross-monitor-dpi-hang.md`。
