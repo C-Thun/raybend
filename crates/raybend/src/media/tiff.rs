@@ -38,6 +38,10 @@ pub struct TiffInfo {
     pub software: Option<String>,
     /// 拍摄时间原样字符串：`DateTimeOriginal` 优先，退回 IFD0 的 `DateTime`
     pub datetime: Option<String>,
+    /// 时区偏移原样字符串（`OffsetTimeOriginal` → `OffsetTime` → `OffsetTimeDigitized`），
+    /// 形如 `+08:00` / `-05:30` / `Z`。**必须读** —— 见 `media::exif` 兜底那段的事故记录：
+    /// 不读它，同一张照片的 RAW 会比 JPG 差一整个时区，按时间分组就会分成两片。
+    pub offset_time: Option<String>,
     /// 快门时间（**秒**；调用方按需换算成毫秒）
     pub exposure_secs: Option<f64>,
     pub f_number: Option<f64>,
@@ -76,6 +80,10 @@ const TAG_MODEL: u16 = 0x0110;
 const TAG_ORIENTATION: u16 = 0x0112;
 const TAG_SOFTWARE: u16 = 0x0131;
 const TAG_DATETIME: u16 = 0x0132;
+// 时区偏移（EXIF 2.31）；三个都在 EXIF 子 IFD 里
+const TAG_OFFSET_TIME: u16 = 0x9010;
+const TAG_OFFSET_TIME_ORIGINAL: u16 = 0x9011;
+const TAG_OFFSET_TIME_DIGITIZED: u16 = 0x9012;
 /// RW2（Panasonic）把宽高放在这里，标准标签根本不出现（实测 5264×3904）
 const TAG_RW2_WIDTH: u16 = 0x0002;
 const TAG_RW2_HEIGHT: u16 = 0x0003;
@@ -129,12 +137,17 @@ pub fn parse(bytes: &[u8]) -> Option<TiffInfo> {
     if let Some(offset) = exif_ifd
         && let Some(entries) = read_ifd(bytes, order, offset) {
             let mut datetime_original = None;
+            // 三个偏移标签按偏好挑：Original > 通用 > Digitized（与 `exif.rs` 主路同序）
+            let (mut off_original, mut off_plain, mut off_digitized) = (None, None, None);
             for entry in entries {
                 match entry.tag {
                     // EXIF IFD 里的尺寸更准（是裁剪后的），优先
                     TAG_PIXEL_X => info.width = entry.int_value(order).or(info.width),
                     TAG_PIXEL_Y => info.height = entry.int_value(order).or(info.height),
                     TAG_DATETIME_ORIGINAL => datetime_original = entry.ascii(bytes, order),
+                    TAG_OFFSET_TIME_ORIGINAL => off_original = entry.ascii(bytes, order),
+                    TAG_OFFSET_TIME => off_plain = entry.ascii(bytes, order),
+                    TAG_OFFSET_TIME_DIGITIZED => off_digitized = entry.ascii(bytes, order),
                     TAG_EXPOSURE => info.exposure_secs = entry.rational(bytes, order),
                     TAG_FNUMBER => info.f_number = entry.rational(bytes, order),
                     TAG_FOCAL => info.focal_mm = entry.rational(bytes, order),
@@ -146,6 +159,7 @@ pub fn parse(bytes: &[u8]) -> Option<TiffInfo> {
             if let Some(original) = datetime_original {
                 info.datetime = Some(original);
             }
+            info.offset_time = off_original.or(off_plain).or(off_digitized);
         }
     // DateTimeOriginal 没有就退回 IFD0 的 DateTime（**只在这一处 move**，别在分支里就搬走）
     if info.datetime.is_none() {
@@ -430,6 +444,64 @@ mod tests {
         assert_eq!(info.width, Some(4000));
         assert_eq!(info.height, Some(3000));
         assert!(!info.is_empty());
+    }
+
+    #[test]
+    fn reads_offset_time_from_the_exif_ifd() {
+        /*
+         * 回归（2026-09-18 的事故，人类两次上报的那个现象，根因就在这条标签上）：
+         * RAW 的 `OffsetTimeOriginal` 原先**根本没读**，注释还写着「TIFF 家族外层一般不带
+         * OffsetTime，所以只能是 None」—— 对 Panasonic RW2 是错的：它的 EXIF 子 IFD 里
+         * 明明写着 `+08:00`。
+         *
+         * 后果：同一张照片的 JPG 按 `+08:00` 换算、RW2 把墙上时间当 UTC，**整整差 8 小时**；
+         * 按时间分组时两种格式落进不同的片，8 小时还会跨天 —— 界面上就是
+         * 「同一天的分组标题出现两次、一次纯位图一次纯 RAW」。
+         *
+         * 真实数据（`C:\src\tmp\pic`）：142 个 RW2 里 22 个是方向 8 的竖拍，全都带这个标签。
+         */
+        let bytes = build(
+            MAGIC_RW2,
+            false,
+            &[(TAG_RW2_WIDTH, Val::Short(5264)), (TAG_RW2_HEIGHT, Val::Short(3904))],
+            &[
+                (TAG_DATETIME_ORIGINAL, Val::Ascii("2026:09:13 00:54:28")),
+                (TAG_OFFSET_TIME_ORIGINAL, Val::Ascii("+08:00")),
+            ],
+        );
+        let info = parse(&bytes).expect("RW2 必须能解析");
+        assert_eq!(info.datetime.as_deref(), Some("2026:09:13 00:54:28"));
+        assert_eq!(info.offset_time.as_deref(), Some("+08:00"), "时区偏移不能丢");
+    }
+
+    #[test]
+    fn offset_time_prefers_original_and_falls_back_to_plain() {
+        // 偏好顺序与 `exif.rs` 主路一致：Original > 通用 > Digitized
+        let both = build(
+            MAGIC_RW2,
+            false,
+            &[],
+            &[
+                (TAG_OFFSET_TIME, Val::Ascii("-05:30")),
+                (TAG_OFFSET_TIME_ORIGINAL, Val::Ascii("+08:00")),
+            ],
+        );
+        assert_eq!(
+            parse(&both).and_then(|i| i.offset_time).as_deref(),
+            Some("+08:00"),
+            "Original 优先于通用"
+        );
+
+        // 只有通用那个时也要认
+        let plain = build(MAGIC_RW2, false, &[], &[(TAG_OFFSET_TIME, Val::Ascii("-05:30"))]);
+        assert_eq!(
+            parse(&plain).and_then(|i| i.offset_time).as_deref(),
+            Some("-05:30")
+        );
+
+        // 一个都没有 → None（不许猜）
+        let none = build(MAGIC_RW2, false, &[], &[]);
+        assert_eq!(parse(&none).and_then(|i| i.offset_time), None);
     }
 
     #[test]

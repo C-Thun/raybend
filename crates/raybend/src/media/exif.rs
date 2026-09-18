@@ -208,14 +208,24 @@ fn read_bytes_inner(bytes: &[u8], raw_family: bool) -> Option<ExifData> {
     /*
      * 拍摄时间：**原样字符串自己解**（`parse_datetime` 与 `from_exif` 那条路共用同一份解析）。
      *
-     * 时区：TIFF 家族外层一般不带 `OffsetTime`，所以 `offset_min` 只能是 `None` ——
-     * 口径与主路一致：「墙上时间当 UTC」（`taken_at` 的注释里写了为什么）。
+     * ⚠️ 时区**必须与主路同口径** —— 这里原先写死了 `None`，理由是
+     * 「TIFF 家族外层一般不带 `OffsetTime`」。对 Panasonic RW2 这个假设是**错的**：
+     * 它的 EXIF 子 IFD 里明明写着 `OffsetTimeOriginal = +08:00`。后果实测（2026-09-18）：
+     * 同一张照片的 JPG 走主路按 +08:00 换算，RW2 走这里把墙上时间当 UTC ——
+     * 两者**整整差 8 小时**，于是按时间分组时两种格式落进不同的片，
+     * 8 小时还会跨天 → 「同一天的分组标题出现两次、一次纯位图一次纯 RAW」
+     * （人类两次上报的那个现象，根源就在这几行）。
      */
     let taken_at = info.datetime.as_deref().and_then(|raw| {
         parse_datetime(raw).and_then(|(y, mo, d, hh, mi, ss)| {
-            time::from_civil(y, mo, d, hh, mi, ss).map(|millis| TakenAt {
+            let offset_min = info.offset_time.as_deref().and_then(parse_offset);
+            let millis = match offset_min {
+                Some(offset) => time::from_civil_with_offset(y, mo, d, hh, mi, ss, offset),
+                None => time::from_civil(y, mo, d, hh, mi, ss),
+            };
+            millis.map(|millis| TakenAt {
                 millis,
-                offset_min: None,
+                offset_min,
                 source: TakenAtSource::Exif,
             })
         })
