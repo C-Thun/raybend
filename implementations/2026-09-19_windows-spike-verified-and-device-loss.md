@@ -157,10 +157,14 @@ layout / bind group / pipeline）收进 `build_device_resources(device, queue, i
    本机（WSL + lavapipe 软件 Vulkan）**真跑过**：`cargo test -p raybend` 799 通过（1 ignored）。
 2. ✅ 离屏冒烟五组断言全过（`cargo run -p raybend --example spike-offscreen -- /tmp/raybend-spike-fix`），
    证明重构没破坏共用路径。
-3. ⏳ **surface 侧仍未验证**：上面的 panic 都在 `create_bind_group`（无窗口也能验），
-   而「用新设备 `configure` 一块曾绑给死设备的 surface」只能在真机试 ——
-   下次真机跑，右栏历史里应当出现「**已恢复：第 N 帧起重新出图**」；
-   若出现「渲染错误（第 N 帧）：…」，那句就是 wgpu 的原始错误（这次诊断已经能把它带出来）。
+3. ✅ **surface 侧已在真机验证（2026-09-19 复跑，人类确认"成功"）**。判据是应用日志里的帧数轨迹：
+   演练后心跳帧数**停在 42**（取帧报 `Validation`、不出图 —— 这正是演练应有的样子），
+   `apply_command` 用 **240ms** 完成恢复（建设备 + 重传 6000×4000 纹理 + 重建管线），
+   随后 **#20 → 92 帧、#21 → 126 帧**持续增长 —— **渲染线程活着、画面回来了**。
+   → 结论：`recover()` 的两半（资源重建、surface 重配）都成立，**设备恢复闭环**。
+
+   > 附带确认：上一次那种「panic 打死渲染线程」没有再出现（日志里全程只有最初那两次历史 panic）。
+   > 写报告按钮没再点，所以 `spike-report.json` 还是旧的 —— 这次的证据在应用日志，不在报告里。
 
 **仍未做**（都不阻塞）：
 
