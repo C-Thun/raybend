@@ -475,7 +475,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
         {/* 左列（宽度可拖拽：手柄在它右边） */}
         <aside
           class={[
-            "flex shrink-0 flex-col border-r border-line-1 bg-surface-main",
+            "flex shrink-0 flex-col bg-surface-main",
             // 看图 ②「关左右」时**藏起来但不卸载**：卸载会把目录树的展开状态与滚动位置清掉，
             // 按一下 Tab 就白跑一趟（而且回来要重新读盘）。
             chromeShowsSides(chrome()) ? "" : "hidden",
@@ -685,7 +685,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
       {/* 右列 */}
       <aside
         class={[
-          "flex shrink-0 flex-col border-l border-line-1 bg-surface-main",
+          "flex shrink-0 flex-col bg-surface-main",
           chromeShowsSides(chrome()) ? "" : "hidden",
         ]
           .filter(Boolean)

@@ -50,7 +50,8 @@ export function ViewerStatusBar(props: ViewerStatusBarProps) {
   return (
     <div
       class={[
-        "flex h-8 shrink-0 items-center gap-3 border-t border-line-1 bg-surface-bar px-2",
+        // **无边线设计**（DESIGN.md §6）：状态条与照片区靠面色区分，不上分隔线
+        "flex h-8 shrink-0 items-center gap-3 bg-surface-bar px-2",
         "text-fs-2 text-fg-3",
         props.class ?? "",
       ]

@@ -58,7 +58,8 @@ export function FilterBar(props: FilterBarProps): JSX.Element {
       <div
         data-filter-bar="open"
         class={[
-          "flex min-h-8 shrink-0 flex-wrap items-center gap-1.5 border-b border-line-1 px-2 py-1",
+          // **无边线设计**（DESIGN.md §6）：面板之间靠面色区分，不上分隔线
+        "flex min-h-8 shrink-0 flex-wrap items-center gap-1.5 px-2 py-1",
           props.class ?? "",
         ]
           .filter(Boolean)
