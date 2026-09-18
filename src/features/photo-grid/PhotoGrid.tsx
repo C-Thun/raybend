@@ -46,8 +46,8 @@ import {
 } from "../../lib/tile-flow.ts";
 import type { SourceItem } from "../../api/types.ts";
 import { GridControlBar } from "./GridControlBar.tsx";
-import { createViewerStore, Viewer } from "./viewer/index.ts";
-import { getThumbBytes } from "../../api/db.ts";
+import { createViewerStore, Viewer } from "../../components/ui/viewer/index.ts";
+import { getThumbBytes, getViewImage } from "../../api/db.ts";
 import {
   buildGridRows,
   DAY_HEADER,
@@ -119,7 +119,9 @@ export function PhotoGrid(props: PhotoGridProps) {
    * 浏览器里两者都取不到 → 查看器自己落到错误态，不会白屏。
    */
   const viewer = createViewerStore({
-    loadScreen: (path) => getThumbBytes(path, "screen"),
+    // 屏幕档走**统一取图口**（`plans/M2-W2.md` §2.1）：位图没编辑过时它可以直接给原图，
+    // RAW 则由 `display` 模块走内嵌预览 / 解码 —— 这里不必再关心是哪种。
+    loadScreen: (path) => getViewImage(path, "screen"),
     loadThumb: (path) => getThumbBytes(path, "grid"),
   });
 

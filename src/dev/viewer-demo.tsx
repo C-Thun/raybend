@@ -9,7 +9,7 @@
  */
 
 import { createSignal, Show } from "solid-js";
-import { createViewerStore, Viewer } from "../features/photo-grid/viewer/index.ts";
+import { createViewerStore, Viewer } from "../components/ui/viewer/index.ts";
 
 /** 一张 1600×1000 的图（SVG data URL：尺寸是真的、字节很小） */
 function fakeImageUrl(): string {

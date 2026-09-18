@@ -198,6 +198,9 @@ pub fn run() {
             // ── 缩略图（未入库的源文件也要能出图）──
             thumbs::thumb_get,
             thumbs::thumb_sources_stats,
+            // ── 统一取图口（view 与缩略图共用的总入口，M2-W2）──
+            thumbs::view_image,
+            thumbs::image_histogram,
             // ── 库（相片仓）──
             repo::repositories_list,
             repo::repository_probe,

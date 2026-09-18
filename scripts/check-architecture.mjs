@@ -10,6 +10,7 @@
  *   2. `src/features/` 下的模块**互不 import**（同一个模块内部怎么互相引都行）
  *   3. `src/dev/**` 是开发期陈列室，**豁免**（它天生要 import 一切）
  *   4. `src/assets/**` 是**纯数据**（图片/字体），没有方向可言：除它自己外每层都允许 import
+ *   5. **前端不碰像素**（`AGENTS.md` §6.1 的红线）：`src/` 下不许出现读/写像素的浏览器 API
  *
  * 刻意不解析语法树：规则本身就是路径级的，正则足够；简单才不容易自己出错。
  *
@@ -108,12 +109,50 @@ function isExempt(absPath) {
 
 const IMPORT_RE = /^\s*import\s[^"']*["']([^"']+)["']/gm;
 
+/**
+ * 规则 5：**前端不碰像素**（`AGENTS.md` §6.1）。
+ *
+ * 为什么单独拦一条：读像素这件事**写起来太容易了** —— 一个 `getContext("2d")` 加上
+ * 十几行就能在浏览器里算出直方图，而一旦开了这个头，色彩空间、缩放插值、视口变换
+ * 就会慢慢都搬到前端，等到做 RAW/广色域/GPU 渲染时要回头拆掉一大堆。
+ * 像素属于 Rust，前端只收字节与 URL。
+ *
+ * 命中范围：读/写像素与色彩空间相关的浏览器 API，以及 canvas 上下文。
+ * 文案里（注释、字符串）提到这些名字不算 —— 所以匹配前先去注释。
+ */
+const PIXEL_API_RE =
+  /getImageData|createImageData|putImageData|ImageData|Uint8ClampedArray|drawImage|createImageBitmap|getContext\(|OffscreenCanvas|HTMLCanvasElement|colorSpace|colorProfile|iccProfile/;
+
+/**
+ * 去掉注释再查（只查「真代码」）。
+ *
+ * `://` 的行不做截断，否则 `https://…` 后面的真代码会被当成注释吃掉。
+ */
+function stripComments(source) {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .split("\n")
+    .map((line) => (line.includes("://") ? line : line.split("//")[0]))
+    .join("\n");
+}
+
 const violations = [];
 for (const file of walk(SRC)) {
   if (isExempt(file)) continue;
   const source = readFileSync(file, "utf8");
   const fromLayer = layerOf(file);
   const fromFeature = featureOf(file);
+
+  const code = stripComments(source);
+  const pixelMatch = PIXEL_API_RE.exec(code);
+  if (pixelMatch) {
+    violations.push({
+      file: relative(ROOT, file),
+      line: code.slice(0, pixelMatch.index).split("\n").length,
+      rule: "前端不碰像素",
+      detail: `${pixelMatch[0]}（像素处理属于 Rust：AGENTS.md §6.1，前端只拿字节与 URL）`,
+    });
+  }
 
   for (const match of source.matchAll(IMPORT_RE)) {
     const specifier = match[1];
@@ -165,5 +204,8 @@ for (const v of violations) {
 console.error(`
 允许的依赖方向见 ARCHITECTURE.md §1；一级模块之间要通信，请经过
 src/workspaces/ 的组合层或 App 提供的 app store，不要在模块之间直接 import。
+
+如果命中的是「前端不碰像素」：像素/色彩的处理属于 Rust 侧（AGENTS.md §6.1 的红线），
+前端只应该拿到**字节**（走统一取图口）或**对象 URL**，判读与统计交给 Rust。
 `);
 process.exit(1);

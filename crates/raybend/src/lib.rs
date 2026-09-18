@@ -16,7 +16,9 @@
 //! - [`store`]：数据底座（SQLite 打开/迁移/备份/写并发，M1-2）
 //! - [`import`]：导入（模版求值、目标路径规划、执行与进度，M1-6）
 //! - [`repo`]：库根目录层面的目录操作（新建子目录 / 删除空目录，M2-W1）
+//! - [`display`]：**统一取图口**（位图 / RAW 两个后端，服务 view 与缩略图缓存，M2-W2）
 
+pub mod display;
 pub mod import;
 pub mod index;
 pub mod media;

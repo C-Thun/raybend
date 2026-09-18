@@ -8,7 +8,15 @@
  * 而各自的逻辑都很薄（都是「把状态摆出来 + 把点击转成回调」）。
  */
 
-import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
+import {
+  createEffect,
+  createMemo,
+  createSignal,
+  For,
+  onCleanup,
+  Show,
+  type JSX,
+} from "solid-js";
 import { IconDots, IconFolderMinus, IconFolderPlus } from "@tabler/icons-solidjs";
 
 import { dirCreate, dirEmptyCheck, dirRemoveEmpty, listDirs } from "../../api/db.ts";
@@ -18,7 +26,16 @@ import { Input } from "../../components/ui/Form.tsx";
 import { Menu } from "../../components/ui/Menu.tsx";
 import type { AssetItem, DirEmptyView, RepositoryView } from "../../api/types.ts";
 import { t } from "../../i18n/index.ts";
+import type { ViewerStore } from "../../components/ui/viewer/index.ts";
 import { shortPath } from "../../lib/shortpath.ts";
+import { dirDisplayName, PHOTOS_DIR, visibleChildDirs } from "./dirs.ts";
+import { ViewerReadout } from "./ViewerReadout.tsx";
+import {
+  compactList,
+  EXPANDED_IDLE_MS,
+  listHeightStyle,
+  TREE_MIN_HEIGHT_PX,
+} from "./libs.ts";
 import type { BrowseStore } from "./store.ts";
 
 /* ══════════════════════════════════════════════════════════════
@@ -27,6 +44,9 @@ import type { BrowseStore } from "./store.ts";
 
 /** 紧缩库列表最多显示几个（第 4 个只露半截，见 `BROWSE.md` §4.2）。 */
 export const COMPACT_REPO_LIMIT = 3;
+
+/* 目录树的显示口径（树的根 = `photos/` 之内、`_RAW` 不显示）在 `dirs.ts` ——
+ * 那边是纯函数，有单测；这里只管拿它去读盘与渲染。 */
 
 export interface BrowseLeftColumnProps {
   store: BrowseStore;
@@ -37,6 +57,17 @@ export interface BrowseLeftColumnProps {
   reposLoading?: boolean;
   /** 读库列表失败了。以前这里是静默吞掉、只显示空态，等于把故障伪装成「你没有库」。 */
   reposError?: string | null;
+  /**
+   * 库列表处于展开态（受控）。
+   *
+   * 为什么由外面管：**收起要由「用户在 browse mid 里点了一下」触发**（`BROWSE.md` §4.2），
+   * 而那个点击发生在网格/看图那边 —— 状态住在这里就没法从外面收。
+   */
+  libsExpanded?: boolean;
+  /** 点伪卡片（`查看所有库`）→ 展开。 */
+  onExpandLibs?: () => void;
+  /** 到点自动收（15 秒没再点库）。 */
+  onCollapseLibs?: () => void;
   class?: string;
 }
 
@@ -53,7 +84,6 @@ interface TreeRow {
 export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
   const store = props.store;
   const [search, setSearch] = createSignal("");
-  const [expandedLibs, setExpandedLibs] = createSignal(false);
   /** 展开的目录（库内相对路径）。 */
   const [expanded, setExpanded] = createSignal<ReadonlySet<string>>(new Set<string>());
   /** 每个目录的子目录（懒加载：展开时才读那一级）。 */
@@ -77,6 +107,10 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
     () => props.repositories.find((r) => r.id === store.repositoryId())?.root ?? null,
   );
 
+  /** 展开态（受控；没传就当缩起态 —— 这是常态）。
+   *  名字别叫 `expanded`：那个名字已经被目录树的展开集合占了。 */
+  const libsOpen = (): boolean => props.libsExpanded === true;
+
   /** 当前库的卡片（别的库不显示在紧缩视图里）。 */
   const ordered = createMemo(() => {
     const byId = new Map(props.repositories.map((r) => [r.id, r]));
@@ -95,6 +129,30 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
   /** 目录名搜索命中的路径（用于目录树过滤）。 */
   const needle = () => search().trim().toLowerCase();
 
+  /*
+   * 缩起态的截断（`BROWSE.md` §4.2）：≤3 个库不显示「查看所有库」、留白也不要；
+   * >3 个时第 4 位是伪卡片，容器钉成 3.5 张卡片高、被 `overflow: hidden` 切掉下半截。
+   * 判定全在 `libs.ts`（有单测），这里只管摆。
+   */
+  const compact = () => compactList(filtered(), libsOpen());
+
+  /*
+   * 展开态的自动收起：**15 秒内没再点任何一个库**就收。
+   * 另外两个触发条件（点 browse mid / 节切 flow）由外面叫：前者走 `onCollapseLibs`，
+   * 后者——切走时整个工作区卸载，状态自然回到缩起态。
+   */
+  let idleTimer: ReturnType<typeof setTimeout> | undefined;
+  function armIdleTimer(): void {
+    if (idleTimer !== undefined) clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      idleTimer = undefined;
+      props.onCollapseLibs?.();
+    }, EXPANDED_IDLE_MS);
+  }
+  onCleanup(() => {
+    if (idleTimer !== undefined) clearTimeout(idleTimer);
+  });
+
   /** 把绝对路径换算成库内相对路径（统一用 `/`）。 */
   function toRelPath(abs: string): string {
     const base = root();
@@ -106,18 +164,21 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
       : normalized;
   }
 
-  /** 读某一级的子目录（懒加载，读到的存进 `children`）。 */
+  /** 读某一级的子目录（懒加载，读到的存进 `children`）。
+   *  `relPath` 是**库内相对路径**：树的根那一级传 `PHOTOS_DIR`（即 `photos`）。 */
   async function loadChildren(relPath: string): Promise<void> {
     const base = root();
     if (base === null) return;
     const abs = relPath === "" ? base : `${base.replace(/\/+$/, "")}/${relPath}`;
     try {
       const entries = await listDirs(abs);
+      // 保留目录 `_RAW` 不进树（`REPOSITORY.md` §4.1），别的原样
+      const visible = visibleChildDirs(entries);
       setChildren((prev) => {
         const next = new Map(prev);
         next.set(
           relPath,
-          entries.map((e) => toRelPath(e.path)),
+          visible.map((e) => toRelPath(e.path)),
         );
         return next;
       });
@@ -127,12 +188,12 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
     }
   }
 
-  // 换库：清空展开状态并读根级目录
+  // 换库：清空展开状态并从 **`photos/`** 读起（库根不算树的根，见 `PHOTOS_DIR`）
   createEffect(() => {
     const base = root();
     setExpanded(new Set<string>());
     setChildren(new Map());
-    if (base !== null) void loadChildren("");
+    if (base !== null) void loadChildren(PHOTOS_DIR);
   });
 
   /** 展开的树（前序遍历）。 */
@@ -141,7 +202,7 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
     const walk = (parent: string, depth: number): void => {
       const kids = children().get(parent) ?? [];
       for (const rel of kids) {
-        const name = rel.split("/").pop() ?? rel;
+        const name = dirDisplayName(rel);
         const isExpanded = expanded().has(rel);
         const known = children().get(rel);
         rows.push({
@@ -155,7 +216,7 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
         if (isExpanded) walk(rel, depth + 1);
       }
     };
-    walk("", 0);
+    walk(PHOTOS_DIR, 0);
     const filter = needle();
     if (filter === "") return rows;
     // 目录名过滤：命中即显示（父链在树里天然保留）
@@ -177,15 +238,17 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
   }
 
   function selectRepository(id: string): void {
-    // 展开态下点库会移顶（`BROWSE.md` §4.2）；收缩态下不动位置
-    if (expandedLibs()) {
+    // 移顶**只在展开态**发生（`BROWSE.md` §4.2）：缩起态在顶部三张之间来回切不该移位
+    if (libsOpen()) {
       setOrder((prev) => [id, ...prev.filter((x) => x !== id)]);
     }
     store.setRepository(id);
+    // 点库是「还在选库」的信号：把 15 秒的自动收起往后推（展开态才需要）
+    if (libsOpen()) armIdleTimer();
   }
 
-  const visibleRepos = () => filtered().slice(0, expandedLibs() ? undefined : COMPACT_REPO_LIMIT);
-  const hasMore = () => !expandedLibs() && filtered().length > COMPACT_REPO_LIMIT;
+  const visibleRepos = () => compact().visible;
+  const hasMore = () => compact().showAll;
 
   /* ══ 行尾 `⋯` 的实际动作 ══ */
 
@@ -296,9 +359,17 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
         class="h-7 shrink-0 rounded-(--radius) bg-surface-bar px-2 text-fs-2 text-fg-1 placeholder:text-fg-3"
       />
 
-      {/* 紧缩库列表 */}
-      {/* 三态：正在读 / 读失败 / 真的没有库 —— 见 `BrowseLeftColumnProps` 里的说明 */}
-      <div class="shrink-0">
+      {/*
+        库列表（`BROWSE.md` §4.2 的紧缩 / 展开）：
+        * 缩起态：≤3 张就只占它需要的高度；>3 张时第 4 位放伪卡片、容器钉成 3.5 张卡高（下半截被切掉）；
+        * 展开态：占据剩余空间、自己滚，目录树缩到最小值。
+      */}
+      <div
+        class={[
+          libsOpen() ? "min-h-0 flex-1 overflow-y-auto" : "shrink-0 overflow-hidden",
+        ].join(" ")}
+        style={!libsOpen() && compact().clipped ? { height: listHeightStyle(true) } : undefined}
+      >
         <Show when={props.reposLoading === true}>
           <p class="px-1 py-2 text-fs-2 text-fg-3">{t("browse.reposLoading")}</p>
         </Show>
@@ -322,7 +393,7 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
               type="button"
               onClick={() => selectRepository(repo.id)}
               class={[
-                "mb-1 flex w-full items-center gap-2 rounded-(--radius) px-2 py-1 text-left",
+                "mb-2 flex h-(--card-h) w-full items-center gap-2 rounded-(--radius) px-2 text-left",
                 store.repositoryId() === repo.id
                   ? "bg-state-selected text-fg-1"
                   : "text-fg-2 hover:bg-state-hover",
@@ -342,43 +413,32 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
           )}
         </For>
         <Show when={hasMore()}>
-          {/* 3.5 截断的那半截条：只写「查看所有库」 */}
+          {/*
+            第 4 位的**伪卡片**（`BROWSE.md` §4.2）：与真卡片同宽同高、同样的圆角与面，
+            内容只有一行「查看所有库」并**靠卡片顶部** —— 下半截会被容器切掉，
+            于是看起来是「上圆角、下直角」的半张卡。
+          */}
           <button
             type="button"
-            onClick={() => setExpandedLibs(true)}
-            class="flex h-6 w-full items-center justify-center rounded-(--radius) bg-surface-bar text-fs-0 text-fg-2 hover:bg-state-hover"
+            onClick={() => props.onExpandLibs?.()}
+            class="mb-2 flex h-(--card-h) w-full items-start justify-center rounded-(--radius) bg-surface-bar px-2 pt-2 text-fs-2 text-fg-2 hover:bg-state-hover"
           >
             {t("browse.allRepositories")}
           </button>
         </Show>
-        <Show when={expandedLibs()}>
-          <button
-            type="button"
-            onClick={() => setExpandedLibs(false)}
-            class="flex h-6 w-full items-center justify-center rounded-(--radius) text-fs-0 text-fg-3 hover:bg-state-hover"
-          >
-            {t("browse.collapseRepositories")}
-          </button>
-        </Show>
       </div>
 
-      {/* 库内目录树（展开库列表时让位，见 BROWSE.md §4.2） */}
-      <Show when={!expandedLibs() && root() !== null}>
-        <div class="min-h-0 flex-1 overflow-y-auto">
-          <button
-            type="button"
-            onClick={() => store.setScope(null)}
-            class={[
-              "mb-1 flex w-full items-center gap-2 rounded-(--radius) px-2 py-1 text-left text-fs-2",
-              store.scopePath() === null
-                ? "bg-state-selected text-fg-1"
-                : "text-fg-2 hover:bg-state-hover",
-            ].join(" ")}
-          >
-            <span class="text-fs-3">◉</span>
-            {t("browse.wholeRepository")}
-          </button>
+      {/*
+        库内目录树。
 
+        展开库列表时**不是把它藏掉，而是缩到最小值**（人类 2026-09-18 定）：
+        不逼用户在「选目录」与「管库」之间二选一。
+      */}
+      <Show when={root() !== null}>
+        <div
+          class={["overflow-y-auto", libsOpen() ? "shrink-0" : "min-h-0 flex-1"].join(" ")}
+          style={libsOpen() ? { height: `${TREE_MIN_HEIGHT_PX}px` } : undefined}
+        >
           <Show when={treeRows().length === 0}>
             <p class="px-1 py-2 text-fs-2 text-fg-3">{t("browse.emptyTree")}</p>
           </Show>
@@ -537,9 +597,7 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
           />
         </label>
         <Show when={createRel() !== null}>
-          <p class="text-fs-0 text-fg-3">
-            {createRel() === "" ? t("browse.wholeRepository") : createRel()}
-          </p>
+          <p class="text-fs-0 text-fg-3">{createRel()}</p>
         </Show>
         <Show when={formError() !== null}>
           <p class="text-fs-0 text-fg-2">{formError()}</p>
@@ -556,6 +614,11 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
 export interface AssetInfoProps {
   /** 当前锚点那张（多选时是它，见 `BROWSE.md` §5.10）。 */
   item: AssetItem | null;
+  /**
+   * 看图态下把看图件的 store 传进来：右栏的**拍摄信息让位给预览 + 直方图**
+   * （`BROWSE.md` §5.9）；tiles 模式下传 `null`，保持原来的 EXIF。
+   */
+  viewer?: ViewerStore | null;
   class?: string;
 }
 
@@ -602,14 +665,57 @@ function exposureText(ms: number | null): string | null {
   return `1/${Math.round(1000 / ms)} s`;
 }
 
+/** 机身：厂商 + 型号拼一条（两个都空就不显示这行） */
+function cameraText(item: AssetItem): string | null {
+  const text = [item.cameraMake, item.cameraModel].filter(Boolean).join(" ").trim();
+  return text === "" ? null : text;
+}
+
+/**
+ * 拍摄信息（EXIF 那一段）。
+ *
+ * 抽成独立组件是为了让 `AssetInfo` 能在**看图态把它换成预览 + 直方图**
+ * （`BROWSE.md` §5.9）—— 内容一个字没变，只是换了位置。
+ */
+function ExifSection(props: { item: AssetItem }): JSX.Element {
+  return (
+    /* EXIF（BROWSE.md §6：tiles 模式下内容可能很长，要能滚） */
+    <section class="mb-5">
+      <h3 class="mb-1.5 text-fs-3 font-semibold text-fg-2">{t("browse.exif")}</h3>
+      <div class="flex flex-col gap-1.5">
+        <Field label={t("browse.fieldCamera")} value={cameraText(props.item)} />
+        <Field label={t("browse.fieldLens")} value={props.item.lens} />
+        <Field
+          label={t("browse.fieldFocal")}
+          value={props.item.focalMm === null ? null : `${props.item.focalMm} mm`}
+        />
+        <Field
+          label={t("browse.fieldAperture")}
+          value={props.item.fNumber === null ? null : `f/${props.item.fNumber}`}
+        />
+        <Field
+          label={t("browse.fieldExposure")}
+          value={exposureText(props.item.exposureMs)}
+        />
+        <Field
+          label={t("browse.fieldIso")}
+          value={props.item.iso === null ? null : `ISO ${props.item.iso}`}
+        />
+        <Field
+          label={t("browse.fieldSize")}
+          value={
+            props.item.width === null || props.item.height === null
+              ? null
+              : `${props.item.width} × ${props.item.height}`
+          }
+        />
+      </div>
+    </section>
+  );
+}
+
 export function AssetInfo(props: AssetInfoProps) {
   const item = () => props.item;
-  const camera = () => {
-    const it = item();
-    if (it === null) return null;
-    const text = [it.cameraMake, it.cameraModel].filter(Boolean).join(" ").trim();
-    return text === "" ? null : text;
-  };
 
   return (
     <div class={["min-h-0 flex-1 overflow-y-auto p-2", props.class ?? ""].filter(Boolean).join(" ")}>
@@ -617,38 +723,14 @@ export function AssetInfo(props: AssetInfoProps) {
         when={item() !== null}
         fallback={<p class="p-2 text-fs-2 text-fg-3">{t("browse.noSelection")}</p>}
       >
-        {/* EXIF（BROWSE.md §6：tiles 模式下内容可能很长，要能滚） */}
-        <section class="mb-5">
-          <h3 class="mb-1.5 text-fs-3 font-semibold text-fg-2">{t("browse.exif")}</h3>
-          <div class="flex flex-col gap-1.5">
-            <Field label={t("browse.fieldCamera")} value={camera()} />
-            <Field label={t("browse.fieldLens")} value={item()!.lens} />
-            <Field
-              label={t("browse.fieldFocal")}
-              value={item()!.focalMm === null ? null : `${item()!.focalMm} mm`}
-            />
-            <Field
-              label={t("browse.fieldAperture")}
-              value={item()!.fNumber === null ? null : `f/${item()!.fNumber}`}
-            />
-            <Field
-              label={t("browse.fieldExposure")}
-              value={exposureText(item()!.exposureMs)}
-            />
-            <Field
-              label={t("browse.fieldIso")}
-              value={item()!.iso === null ? null : `ISO ${item()!.iso}`}
-            />
-            <Field
-              label={t("browse.fieldSize")}
-              value={
-                item()!.width === null || item()!.height === null
-                  ? null
-                  : `${item()!.width} × ${item()!.height}`
-              }
-            />
-          </div>
-        </section>
+        {/*
+          看图态：拍摄信息**让位**给预览 + 直方图（`BROWSE.md` §5.9）——
+          看片时关心的是「这块亮不亮」而不是「光圈多少」；退出看图就换回来。
+          文件信息两块都不动（它下面还在）。
+        */}
+        <Show when={props.viewer} fallback={<ExifSection item={item()!} />}>
+          {(store) => <ViewerReadout store={store()} />}
+        </Show>
 
         {/* 文件信息（作者/描述/地理在 W2 接编辑） */}
         <section class="mb-5">

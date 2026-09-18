@@ -137,6 +137,26 @@ export function invertSet(
   return next;
 }
 
+/**
+ * 鼠标事件的**修饰键 → 选择模式**（`BROWSE.md` §5.2 的那张表）。
+ *
+ * 抽出来的原因：**tiles 与胶片带必须完全一致**（人类在 M2-W2 的口述里三次强调
+ * 「选择逻辑所有工作流通用」）。两处各写一遍 `event.shiftKey ? … : …` 看起来无害，
+ * 但改一处忘一处就是「网格里 Shift 是区间、胶片带里 Shift 是替换」这种人肉 bug ——
+ * 而那类 bug 只有用户按下去才会发现。
+ *
+ * 判定顺序也是规范的一部分：**Shift 优先于 Ctrl**（两个一起按时按区间算）。
+ */
+export function clickMode(event: {
+  shiftKey: boolean;
+  ctrlKey: boolean;
+  metaKey: boolean;
+}): SelectMode {
+  if (event.shiftKey) return "range";
+  if (event.ctrlKey || event.metaKey) return "toggle";
+  return "replace";
+}
+
 /** 选择状态是否为空（`toolsbar` 的批量排除据此禁用） */
 export function hasSelection(state: SelectionState): boolean {
   return state.ids.size > 0;

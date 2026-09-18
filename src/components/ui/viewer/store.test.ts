@@ -16,6 +16,8 @@ import {
   MIN_ZOOM,
   zoomPanAt,
   type ViewerPhoto,
+  type ViewerState,
+  visibleRect,
 } from "./store.ts";
 
 const PHOTOS: ViewerPhoto[] = [
@@ -260,4 +262,67 @@ test("close：复位并回收 URL（不泄漏 blob）", async () => {
   assert.equal(store.state().active, false);
   assert.equal(store.imageUrl(), null);
   assert.ok(fake.revoked.includes(used!), `应当回收 ${used}`);
+});
+
+// ─────────────────── 视野框（右栏预览上的那块矩形）───────────────────
+
+function viewerState(overrides: Partial<ViewerState> = {}): ViewerState {
+  return {
+    active: true,
+    photos: [],
+    index: 0,
+    zoom: 1,
+    pan: { x: 0, y: 0 },
+    fit: false,
+    viewport: { width: 500, height: 250 },
+    natural: { width: 1000, height: 500 },
+    ...overrides,
+  };
+}
+
+test("visibleRect：适配窗口时框就是整张", () => {
+  const rect = visibleRect(viewerState({ zoom: 0.5 }));
+  assert.deepEqual(rect, { x: 0, y: 0, width: 1000, height: 500 });
+});
+
+test("visibleRect：缩到比适配还小时也是整张（夹取的结果）", () => {
+  const rect = visibleRect(viewerState({ zoom: 0.25 }));
+  assert.deepEqual(rect, { x: 0, y: 0, width: 1000, height: 500 });
+});
+
+test("visibleRect：100% 居中时是视口那么大的一块，且居中", () => {
+  const rect = visibleRect(viewerState({ zoom: 1 }));
+  assert.deepEqual(rect, { x: 250, y: 125, width: 500, height: 250 });
+});
+
+test("visibleRect：往右下拖（pan 为正）时看到的是图像更靠左上的一块", () => {
+  const rect = visibleRect(viewerState({ zoom: 1, pan: { x: 100, y: 50 } }));
+  assert.deepEqual(rect, { x: 150, y: 75, width: 500, height: 250 });
+});
+
+test("visibleRect：拖出边界时被夹在图像内（不会出现负数或超界）", () => {
+  const rect = visibleRect(viewerState({ zoom: 1, pan: { x: -10_000, y: -10_000 } }));
+  assert.ok(rect !== null);
+  assert.ok(rect.x >= 0 && rect.y >= 0);
+  assert.ok(rect.x + rect.width <= 1000);
+  assert.ok(rect.y + rect.height <= 500);
+});
+
+test("visibleRect：尺寸不全时返回 null（不画一个乱跳的框）", () => {
+  assert.equal(visibleRect(viewerState({ viewport: { width: 0, height: 250 } })), null);
+  assert.equal(visibleRect(viewerState({ natural: { width: 0, height: 0 } })), null);
+  assert.equal(visibleRect(viewerState({ zoom: 0 })), null);
+  assert.equal(visibleRect(viewerState({ zoom: Number.NaN })), null);
+});
+
+test("visibleRect：与适配倍率一致（fit 状态下框正好等于整张）", () => {
+  const viewport = { width: 800, height: 600 };
+  const natural = { width: 4000, height: 3000 };
+  const fit = computeFitScale(viewport, natural);
+  const rect = visibleRect(
+    viewerState({ viewport, natural, zoom: fit, pan: { x: 0, y: 0 } }),
+  );
+  assert.ok(rect !== null);
+  assert.equal(Math.round(rect.width), natural.width);
+  assert.equal(Math.round(rect.height), natural.height);
 });

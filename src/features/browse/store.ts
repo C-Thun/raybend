@@ -97,6 +97,8 @@ export interface BrowseDeps {
 export interface BrowseStore {
   // ── 查询 ──
   repositoryId(): string | null;
+  /** 查询范围（**库内相对路径**，如 `photos/2026-08-15`）。
+   *  `null` = 还没选目录 —— 网格是空态、**不发查询**（口径见 `query` 的说明）。 */
   scopePath(): string | null;
   filter(): BrowseFilter;
   sort(): BrowseSort;
@@ -128,6 +130,17 @@ export interface BrowseStore {
   selectedItems(): AssetItem[];
   anchorId(): number | null;
   select(id: number, mode: "replace" | "toggle" | "range", order?: readonly string[]): void;
+  /**
+   * **只把「当前那张」（锚点）挪过去**，不动选择集合。
+   *
+   * 对比视图里点某一幅画幅就是这件事（`BROWSE.md` §5.7：点哪张图就是当前实际选中的图，
+   * 决定右栏与状态栏显示谁）—— 那里**不能**走 `select()`：那会把选择改成只剩这一张，
+   * 对比当场散掉。
+   *
+   * 纪律：锚点**必须在选择集合里**（`§1.12`：锚点就是「选了一堆里的那一张」）。
+   * 不在就不动 —— 静默把锚点挪到没被选中的图上，会让右栏显示一张「没被选中」的照片。
+   */
+  setAnchor(id: number): void;
   /**
    * 「可见顺序」由**显示层**给：区间选择（Shift）与「全选本片」都要按用户看到的顺序走。
    *
@@ -188,9 +201,13 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
   const query = (): BrowseQuery | null => {
     const id = repositoryId();
     if (id === null) return null;
+    const scope = scopePath();
+    // **没选目录就不查**（人类 2026-09-18 定的口径）：浏览的范围必须是库下的一个目录，
+    // 点库本身不铺出整库照片 —— 后端把 `scopePath: null` 当「整个库」，所以这里根本不能发。
+    if (scope === null) return null;
     return {
       repositoryId: id,
-      scopePath: scopePath(),
+      scopePath: scope,
       filter: filter(),
       sort: sort(),
     };
@@ -232,6 +249,9 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
     const q = query();
     if (q === null) {
       resetForNewQuery();
+      // 没选库/没选目录时别把「加载中」留在屏幕上（空态自己会说话）
+      setLoading(false);
+      setError(null);
       return;
     }
     resetForNewQuery();
@@ -387,7 +407,7 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
     setRepository(id) {
       if (repositoryId() === id) return;
       setRepositoryIdSignal(id);
-      // 换库：范围也回到整库
+      // 换库：范围回到「还没选目录」—— 浏览范围一定是库下的某个目录（见 `query`）
       setScopePathSignal(null);
       void reload().then(() => refreshFlags());
     },
@@ -433,6 +453,12 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
         applySelection(selection(), orderedIds(order), String(id), mode),
       );
       void refreshMarkings();
+    },
+    setAnchor(id) {
+      const key = String(id);
+      setSelection((current) =>
+        current.ids.has(key) ? { ...current, anchor: key } : current,
+      );
     },
     selectAll(order) {
       setSelection(selectAllIds(orderedIds(order)));

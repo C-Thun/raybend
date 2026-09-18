@@ -103,6 +103,14 @@ export function Viewer(props: ViewerProps) {
   onMount(() => {
     const onKey = (event: KeyboardEvent): void => {
       if (!state().active) return;
+      /*
+       * 已经被别人用掉的事件不处理（`preventDefault` 是个通用信号）：
+       * 实测事故 —— 网格里按回车打开看图时，**同一个仍在冒泡的事件**会接着到达这里，
+       * 被当成「回车＝退出」把刚开的看图又关掉（2026-09-18 冒烟：active 同一个 tick 变回 false）。
+       * 网格那边现在也 `stopPropagation` 了，但这里再加一道 —— 以后别的入口（胶片带、命令面板）
+       * 用回车打开看图时不会重踩。
+       */
+      if (event.defaultPrevented) return;
       switch (event.key) {
         case "Escape":
           event.preventDefault();

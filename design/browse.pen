@@ -1022,7 +1022,7 @@
                   "name": "LibraryList / 紧缩",
                   "clip": true,
                   "width": "fill_container",
-                  "height": 226,
+                  "height": 234,
                   "layout": "vertical",
                   "gap": 8,
                   "children": [
@@ -1347,11 +1347,14 @@
                       "name": "LibMore / 查看所有库",
                       "clip": true,
                       "width": "fill_container",
-                      "height": 30,
+                      "height": 60,
                       "fill": "$surface-bar",
                       "cornerRadius": 4,
                       "layout": "vertical",
-                      "justifyContent": "center",
+                      "padding": [
+                        8,
+                        10
+                      ],
                       "alignItems": "center",
                       "children": [
                         {
@@ -1731,7 +1734,7 @@
                               "name": "TilePhoto",
                               "width": 144,
                               "height": 96,
-                              "fill": "$surface-track",
+                              "fill": "$surface-main",
                               "cornerRadius": 6
                             },
                             {
@@ -1758,7 +1761,7 @@
                                   "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P0001.JPG",
+                                  "content": "P0001",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
                                   "fontWeight": "normal"
@@ -1797,7 +1800,7 @@
                               "name": "TilePhoto",
                               "width": 96,
                               "height": 144,
-                              "fill": "$surface-track",
+                              "fill": "$surface-main",
                               "cornerRadius": 6,
                               "children": [
                                 {
@@ -1864,7 +1867,7 @@
                                   "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P0002.RW2",
+                                  "content": "P0002",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
                                   "fontWeight": "normal"
@@ -1933,7 +1936,7 @@
                               "name": "TilePhoto",
                               "width": 144,
                               "height": 81,
-                              "fill": "$surface-track",
+                              "fill": "$surface-main",
                               "cornerRadius": 6,
                               "children": [
                                 {
@@ -2000,7 +2003,7 @@
                                   "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P0003.RW2",
+                                  "content": "P0003",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
                                   "fontWeight": "normal"
@@ -2038,7 +2041,7 @@
                               "name": "TilePhoto",
                               "width": 144,
                               "height": 96,
-                              "fill": "$surface-track",
+                              "fill": "$surface-main",
                               "cornerRadius": 6
                             },
                             {
@@ -2065,7 +2068,7 @@
                                   "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P0004.JPG",
+                                  "content": "P0004",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
                                   "fontWeight": "normal"
@@ -2103,7 +2106,7 @@
                               "name": "TilePhoto",
                               "width": 96,
                               "height": 144,
-                              "fill": "$surface-track",
+                              "fill": "$surface-main",
                               "cornerRadius": 6,
                               "children": [
                                 {
@@ -2185,7 +2188,7 @@
                                   "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P0005.RW2",
+                                  "content": "P0005",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
                                   "fontWeight": "normal"
@@ -2223,7 +2226,7 @@
                               "name": "TilePhoto",
                               "width": 144,
                               "height": 81,
-                              "fill": "$surface-track",
+                              "fill": "$surface-main",
                               "cornerRadius": 6,
                               "children": [
                                 {
@@ -2278,7 +2281,7 @@
                                   "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P0006.RW2",
+                                  "content": "P0006",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
                                   "fontWeight": "normal"
@@ -2326,7 +2329,7 @@
                               "name": "TilePhoto",
                               "width": 144,
                               "height": 96,
-                              "fill": "$surface-track",
+                              "fill": "$surface-main",
                               "cornerRadius": 6
                             },
                             {
@@ -2353,7 +2356,7 @@
                                   "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P0007.JPG",
+                                  "content": "P0007",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
                                   "fontWeight": "normal"
@@ -2391,7 +2394,7 @@
                               "name": "TilePhoto",
                               "width": 96,
                               "height": 144,
-                              "fill": "$surface-track",
+                              "fill": "$surface-main",
                               "cornerRadius": 6,
                               "children": [
                                 {
@@ -2446,7 +2449,7 @@
                                   "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P0008.RW2",
+                                  "content": "P0008",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
                                   "fontWeight": "normal"
@@ -2514,7 +2517,7 @@
                               "name": "TilePhoto",
                               "width": 144,
                               "height": 81,
-                              "fill": "$surface-track",
+                              "fill": "$surface-main",
                               "cornerRadius": 6,
                               "children": [
                                 {
@@ -2569,7 +2572,7 @@
                                   "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P0009.RW2",
+                                  "content": "P0009",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
                                   "fontWeight": "normal"
@@ -2607,7 +2610,7 @@
                               "name": "TilePhoto",
                               "width": 144,
                               "height": 96,
-                              "fill": "$surface-track",
+                              "fill": "$surface-main",
                               "cornerRadius": 6
                             },
                             {
@@ -2634,7 +2637,7 @@
                                   "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P0010.JPG",
+                                  "content": "P0010",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
                                   "fontWeight": "normal"
@@ -2672,7 +2675,7 @@
                               "name": "TilePhoto",
                               "width": 96,
                               "height": 144,
-                              "fill": "$surface-track",
+                              "fill": "$surface-main",
                               "cornerRadius": 6,
                               "children": [
                                 {
@@ -2727,7 +2730,7 @@
                                   "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P0011.RW2",
+                                  "content": "P0011",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
                                   "fontWeight": "normal"
@@ -2765,7 +2768,7 @@
                               "name": "TilePhoto",
                               "width": 144,
                               "height": 81,
-                              "fill": "$surface-track",
+                              "fill": "$surface-main",
                               "cornerRadius": 6,
                               "children": [
                                 {
@@ -2820,7 +2823,7 @@
                                   "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P0012.RW2",
+                                  "content": "P0012",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
                                   "fontWeight": "normal"
@@ -2868,7 +2871,7 @@
                               "name": "TilePhoto",
                               "width": 144,
                               "height": 96,
-                              "fill": "$surface-track",
+                              "fill": "$surface-main",
                               "cornerRadius": 6
                             },
                             {
@@ -2895,7 +2898,7 @@
                                   "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P0013.JPG",
+                                  "content": "P0013",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
                                   "fontWeight": "normal"
@@ -2933,7 +2936,7 @@
                               "name": "TilePhoto",
                               "width": 96,
                               "height": 144,
-                              "fill": "$surface-track",
+                              "fill": "$surface-main",
                               "cornerRadius": 6,
                               "children": [
                                 {
@@ -2988,7 +2991,7 @@
                                   "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P0014.RW2",
+                                  "content": "P0014",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
                                   "fontWeight": "normal"
@@ -3026,7 +3029,7 @@
                               "name": "TilePhoto",
                               "width": 144,
                               "height": 81,
-                              "fill": "$surface-track",
+                              "fill": "$surface-main",
                               "cornerRadius": 6,
                               "children": [
                                 {
@@ -3081,7 +3084,7 @@
                                   "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P0015.RW2",
+                                  "content": "P0015",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
                                   "fontWeight": "normal"
@@ -3119,7 +3122,7 @@
                               "name": "TilePhoto",
                               "width": 144,
                               "height": 96,
-                              "fill": "$surface-track",
+                              "fill": "$surface-main",
                               "cornerRadius": 6
                             },
                             {
@@ -3146,7 +3149,7 @@
                                   "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P0016.JPG",
+                                  "content": "P0016",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
                                   "fontWeight": "normal"
@@ -3184,7 +3187,7 @@
                               "name": "TilePhoto",
                               "width": 96,
                               "height": 144,
-                              "fill": "$surface-track",
+                              "fill": "$surface-main",
                               "cornerRadius": 6,
                               "children": [
                                 {
@@ -3239,7 +3242,7 @@
                                   "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P0017.RW2",
+                                  "content": "P0017",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
                                   "fontWeight": "normal"
@@ -3277,7 +3280,7 @@
                               "name": "TilePhoto",
                               "width": 144,
                               "height": 81,
-                              "fill": "$surface-track",
+                              "fill": "$surface-main",
                               "cornerRadius": 6,
                               "children": [
                                 {
@@ -3332,7 +3335,7 @@
                                   "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P0018.RW2",
+                                  "content": "P0018",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
                                   "fontWeight": "normal"
@@ -4295,7 +4298,7 @@
           "fill": "$fg-2",
           "textGrowth": "fixed-width",
           "width": "fill_container",
-          "content": "⚠ 本板的 tile 仍是旧外形（140×90 长方）：新规格是「正方外框 + 照片保比例居中 + 信息条覆盖在照片上 + RAW 角标」，见 Shell / Browse / Tiles 与 Libs Expanded（2026-09-17 已按实现重画）。本板的重画与补帧归 M2 阶段 0.2–0.3。",
+          "content": "本板的 7 格选择态已按实现重画（正方外框 150×150 + 照片保比例居中 + 覆盖式信息条，2026-09-18）。信息条在实现里只在指向/选中时出现，画布是静态的所以 7 格都画了；尺寸以实现 + tokens.css 为准（DESIGN.md §8.4）。",
           "lineHeight": 1.5,
           "fontFamily": "Inter",
           "fontSize": 13,
@@ -5266,35 +5269,91 @@
           "id": "J9zibw",
           "name": "SelRow",
           "width": "fill_container",
-          "height": 120,
           "gap": 14,
           "alignItems": "center",
           "children": [
             {
               "type": "frame",
-              "id": "ZinBQ",
+              "id": "v8XeFf",
               "name": "SelTile / 未选",
-              "width": 140,
+              "width": 150,
               "layout": "vertical",
               "gap": 6,
               "children": [
                 {
                   "type": "frame",
-                  "id": "pSwUc",
+                  "id": "zRjs9",
                   "name": "Tile",
-                  "width": 140,
-                  "height": 90,
-                  "fill": "$surface-bar",
-                  "cornerRadius": 4
+                  "clip": true,
+                  "width": 150,
+                  "height": 150,
+                  "cornerRadius": 6,
+                  "layout": "vertical",
+                  "padding": 3,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "tNCXZ",
+                      "name": "TilePhoto",
+                      "width": 144,
+                      "height": 96,
+                      "fill": "$surface-main",
+                      "cornerRadius": 6
+                    },
+                    {
+                      "type": "frame",
+                      "id": "qL6QS",
+                      "layoutPosition": "absolute",
+                      "x": 0,
+                      "y": 124,
+                      "name": "TileBarBottom",
+                      "width": 150,
+                      "height": 26,
+                      "fill": "$scrim",
+                      "gap": 4,
+                      "padding": [
+                        0,
+                        6
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "iXO3u",
+                          "name": "TileName",
+                          "fill": "$fg-1",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "P1000156",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "w33AS6",
+                          "name": "TileTag",
+                          "fill": "$fg-1",
+                          "content": "JPG",
+                          "fontFamily": "Inter",
+                          "fontSize": 10,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
                 },
                 {
                   "type": "text",
-                  "id": "GTh9r",
+                  "id": "HrJPL",
                   "name": "SelCaption",
                   "fill": "$fg-3",
                   "textGrowth": "fixed-width",
-                  "width": "fill_container",
+                  "width": 150,
                   "content": "未选",
+                  "textAlign": "center",
                   "fontFamily": "Inter",
                   "fontSize": 12,
                   "fontWeight": "normal"
@@ -5303,29 +5362,87 @@
             },
             {
               "type": "frame",
-              "id": "wgeqd",
+              "id": "IHX0m",
               "name": "SelTile / 选中",
-              "width": 140,
+              "width": 150,
               "layout": "vertical",
               "gap": 6,
               "children": [
                 {
                   "type": "frame",
-                  "id": "VzHoz",
+                  "id": "HOokw",
                   "name": "Tile",
-                  "width": 140,
-                  "height": 90,
+                  "clip": true,
+                  "width": 150,
+                  "height": 150,
                   "fill": "$state-selected",
-                  "cornerRadius": 4
+                  "cornerRadius": 6,
+                  "layout": "vertical",
+                  "padding": 3,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "ShEmg",
+                      "name": "TilePhoto",
+                      "width": 144,
+                      "height": 96,
+                      "fill": "$surface-main",
+                      "cornerRadius": 6
+                    },
+                    {
+                      "type": "frame",
+                      "id": "nXehS",
+                      "layoutPosition": "absolute",
+                      "x": 0,
+                      "y": 124,
+                      "name": "TileBarBottom",
+                      "width": 150,
+                      "height": 26,
+                      "fill": "$scrim",
+                      "gap": 4,
+                      "padding": [
+                        0,
+                        6
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "HDwwt",
+                          "name": "TileName",
+                          "fill": "$fg-1",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "P1000156",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "CCHdc",
+                          "name": "TileTag",
+                          "fill": "$fg-1",
+                          "content": "JPG",
+                          "fontFamily": "Inter",
+                          "fontSize": 10,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
                 },
                 {
                   "type": "text",
-                  "id": "QsKYO",
+                  "id": "jeRQy",
                   "name": "SelCaption",
                   "fill": "$fg-3",
                   "textGrowth": "fixed-width",
-                  "width": "fill_container",
+                  "width": 150,
                   "content": "选中",
+                  "textAlign": "center",
                   "fontFamily": "Inter",
                   "fontSize": 12,
                   "fontWeight": "normal"
@@ -5334,32 +5451,90 @@
             },
             {
               "type": "frame",
-              "id": "XbkgC",
+              "id": "hlsMC",
               "name": "SelTile / 锚点（最后点中）",
-              "width": 140,
+              "width": 150,
               "layout": "vertical",
               "gap": 6,
               "children": [
                 {
                   "type": "frame",
-                  "id": "O3doEv",
+                  "id": "qGBnj",
                   "name": "Tile",
-                  "width": 140,
-                  "height": 90,
+                  "clip": true,
+                  "width": 150,
+                  "height": 150,
                   "fill": "$state-selected",
-                  "cornerRadius": 4,
+                  "cornerRadius": 6,
                   "stroke": "$brand",
                   "strokeWidth": 1,
-                  "strokeAlignment": "inner"
+                  "strokeAlignment": "inner",
+                  "layout": "vertical",
+                  "padding": 3,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "t8NUu",
+                      "name": "TilePhoto",
+                      "width": 144,
+                      "height": 96,
+                      "fill": "$surface-main",
+                      "cornerRadius": 6
+                    },
+                    {
+                      "type": "frame",
+                      "id": "acsDE",
+                      "layoutPosition": "absolute",
+                      "x": 0,
+                      "y": 124,
+                      "name": "TileBarBottom",
+                      "width": 150,
+                      "height": 26,
+                      "fill": "$scrim",
+                      "gap": 4,
+                      "padding": [
+                        0,
+                        6
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "E5mc6u",
+                          "name": "TileName",
+                          "fill": "$fg-1",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "P1000156",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "RS4yR",
+                          "name": "TileTag",
+                          "fill": "$fg-1",
+                          "content": "JPG",
+                          "fontFamily": "Inter",
+                          "fontSize": 10,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
                 },
                 {
                   "type": "text",
-                  "id": "Y7XZBh",
+                  "id": "rGWUw",
                   "name": "SelCaption",
                   "fill": "$fg-3",
                   "textGrowth": "fixed-width",
-                  "width": "fill_container",
+                  "width": 150,
                   "content": "锚点（最后点中）",
+                  "textAlign": "center",
                   "fontFamily": "Inter",
                   "fontSize": 12,
                   "fontWeight": "normal"
@@ -5368,29 +5543,87 @@
             },
             {
               "type": "frame",
-              "id": "bNLSd",
+              "id": "t4whg",
               "name": "SelTile / Shift 区间翻转中",
-              "width": 140,
+              "width": 150,
               "layout": "vertical",
               "gap": 6,
               "children": [
                 {
                   "type": "frame",
-                  "id": "H0fpK",
+                  "id": "JIOyC",
                   "name": "Tile",
-                  "width": 140,
-                  "height": 90,
+                  "clip": true,
+                  "width": 150,
+                  "height": 150,
                   "fill": "$state-selected",
-                  "cornerRadius": 4
+                  "cornerRadius": 6,
+                  "layout": "vertical",
+                  "padding": 3,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "ufU8d",
+                      "name": "TilePhoto",
+                      "width": 96,
+                      "height": 144,
+                      "fill": "$surface-main",
+                      "cornerRadius": 6
+                    },
+                    {
+                      "type": "frame",
+                      "id": "z3qT9E",
+                      "layoutPosition": "absolute",
+                      "x": 0,
+                      "y": 124,
+                      "name": "TileBarBottom",
+                      "width": 150,
+                      "height": 26,
+                      "fill": "$scrim",
+                      "gap": 4,
+                      "padding": [
+                        0,
+                        6
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "XZsPv",
+                          "name": "TileName",
+                          "fill": "$fg-1",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "P1000157",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "k4QK8",
+                          "name": "TileTag",
+                          "fill": "$fg-1",
+                          "content": "ORF",
+                          "fontFamily": "Inter",
+                          "fontSize": 10,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
                 },
                 {
                   "type": "text",
-                  "id": "KVYs2",
+                  "id": "DJnAP",
                   "name": "SelCaption",
                   "fill": "$fg-3",
                   "textGrowth": "fixed-width",
-                  "width": "fill_container",
+                  "width": 150,
                   "content": "Shift 区间翻转中",
+                  "textAlign": "center",
                   "fontFamily": "Inter",
                   "fontSize": 12,
                   "fontWeight": "normal"
@@ -5399,29 +5632,86 @@
             },
             {
               "type": "frame",
-              "id": "pgdZE",
+              "id": "YZw6w",
               "name": "SelTile / Shift 翻转掉的那个",
-              "width": 140,
+              "width": 150,
               "layout": "vertical",
               "gap": 6,
               "children": [
                 {
                   "type": "frame",
-                  "id": "cjnlZ",
+                  "id": "m4rFkt",
                   "name": "Tile",
-                  "width": 140,
-                  "height": 90,
-                  "fill": "$surface-bar",
-                  "cornerRadius": 4
+                  "clip": true,
+                  "width": 150,
+                  "height": 150,
+                  "cornerRadius": 6,
+                  "layout": "vertical",
+                  "padding": 3,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "kUZeH",
+                      "name": "TilePhoto",
+                      "width": 96,
+                      "height": 144,
+                      "fill": "$surface-main",
+                      "cornerRadius": 6
+                    },
+                    {
+                      "type": "frame",
+                      "id": "kf2Ey",
+                      "layoutPosition": "absolute",
+                      "x": 0,
+                      "y": 124,
+                      "name": "TileBarBottom",
+                      "width": 150,
+                      "height": 26,
+                      "fill": "$scrim",
+                      "gap": 4,
+                      "padding": [
+                        0,
+                        6
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "AbVsj",
+                          "name": "TileName",
+                          "fill": "$fg-1",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "P1000157",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "t81DNu",
+                          "name": "TileTag",
+                          "fill": "$fg-1",
+                          "content": "ORF",
+                          "fontFamily": "Inter",
+                          "fontSize": 10,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
                 },
                 {
                   "type": "text",
-                  "id": "NoGft",
+                  "id": "OLpZY",
                   "name": "SelCaption",
                   "fill": "$fg-3",
                   "textGrowth": "fixed-width",
-                  "width": "fill_container",
+                  "width": 150,
                   "content": "Shift 翻转掉的那个",
+                  "textAlign": "center",
                   "fontFamily": "Inter",
                   "fontSize": 12,
                   "fontWeight": "normal"
@@ -5430,29 +5720,87 @@
             },
             {
               "type": "frame",
-              "id": "WnXtj",
+              "id": "L89aW",
               "name": "SelTile / Ctrl 加选",
-              "width": 140,
+              "width": 150,
               "layout": "vertical",
               "gap": 6,
               "children": [
                 {
                   "type": "frame",
-                  "id": "P0U0Sf",
+                  "id": "vl7AU",
                   "name": "Tile",
-                  "width": 140,
-                  "height": 90,
+                  "clip": true,
+                  "width": 150,
+                  "height": 150,
                   "fill": "$state-selected",
-                  "cornerRadius": 4
+                  "cornerRadius": 6,
+                  "layout": "vertical",
+                  "padding": 3,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "ZRSKC",
+                      "name": "TilePhoto",
+                      "width": 144,
+                      "height": 81,
+                      "fill": "$surface-main",
+                      "cornerRadius": 6
+                    },
+                    {
+                      "type": "frame",
+                      "id": "AAeC0",
+                      "layoutPosition": "absolute",
+                      "x": 0,
+                      "y": 124,
+                      "name": "TileBarBottom",
+                      "width": 150,
+                      "height": 26,
+                      "fill": "$scrim",
+                      "gap": 4,
+                      "padding": [
+                        0,
+                        6
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "Z7SNs7",
+                          "name": "TileName",
+                          "fill": "$fg-1",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "P1000158",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "yxNuZ",
+                          "name": "TileTag",
+                          "fill": "$fg-1",
+                          "content": "JPG",
+                          "fontFamily": "Inter",
+                          "fontSize": 10,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
                 },
                 {
                   "type": "text",
-                  "id": "j1m15J",
+                  "id": "Ioo5T",
                   "name": "SelCaption",
                   "fill": "$fg-3",
                   "textGrowth": "fixed-width",
-                  "width": "fill_container",
+                  "width": 150,
                   "content": "Ctrl 加选",
+                  "textAlign": "center",
                   "fontFamily": "Inter",
                   "fontSize": 12,
                   "fontWeight": "normal"
@@ -5461,29 +5809,87 @@
             },
             {
               "type": "frame",
-              "id": "IgezC",
+              "id": "PgUPs",
               "name": "SelTile / 日期区间选中",
-              "width": 140,
+              "width": 150,
               "layout": "vertical",
               "gap": 6,
               "children": [
                 {
                   "type": "frame",
-                  "id": "Ik4hA",
+                  "id": "Ht7y7",
                   "name": "Tile",
-                  "width": 140,
-                  "height": 90,
+                  "clip": true,
+                  "width": 150,
+                  "height": 150,
                   "fill": "$state-selected",
-                  "cornerRadius": 4
+                  "cornerRadius": 6,
+                  "layout": "vertical",
+                  "padding": 3,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "o839UL",
+                      "name": "TilePhoto",
+                      "width": 144,
+                      "height": 81,
+                      "fill": "$surface-main",
+                      "cornerRadius": 6
+                    },
+                    {
+                      "type": "frame",
+                      "id": "JY68t",
+                      "layoutPosition": "absolute",
+                      "x": 0,
+                      "y": 124,
+                      "name": "TileBarBottom",
+                      "width": 150,
+                      "height": 26,
+                      "fill": "$scrim",
+                      "gap": 4,
+                      "padding": [
+                        0,
+                        6
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "ZawYX",
+                          "name": "TileName",
+                          "fill": "$fg-1",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "P1000158",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "R7jDf",
+                          "name": "TileTag",
+                          "fill": "$fg-1",
+                          "content": "JPG",
+                          "fontFamily": "Inter",
+                          "fontSize": 10,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
                 },
                 {
                   "type": "text",
-                  "id": "x9iL5",
+                  "id": "FSzpK",
                   "name": "SelCaption",
                   "fill": "$fg-3",
                   "textGrowth": "fixed-width",
-                  "width": "fill_container",
+                  "width": 150,
                   "content": "日期区间选中",
+                  "textAlign": "center",
                   "fontFamily": "Inter",
                   "fontSize": 12,
                   "fontWeight": "normal"
@@ -6466,7 +6872,7 @@
                   "name": "SearchBar",
                   "width": "fill_container",
                   "height": 32,
-                  "fill": "$surface-track",
+                  "fill": "$surface-bar",
                   "cornerRadius": 4,
                   "gap": 6,
                   "padding": [
@@ -6829,7 +7235,7 @@
                       "clip": true,
                       "width": "fill_container",
                       "height": 30,
-                      "fill": "$surface-track",
+                      "fill": "$surface-bar",
                       "cornerRadius": 4,
                       "layout": "vertical",
                       "justifyContent": "center",
@@ -8141,7 +8547,7 @@
               "id": "mTJJB",
               "name": "StatusLock / 一级锁",
               "height": 22,
-              "fill": "$surface-track",
+              "fill": "$surface-layer",
               "cornerRadius": 4,
               "gap": 4,
               "padding": [
@@ -9244,7 +9650,7 @@
                   "name": "SearchBar",
                   "width": "fill_container",
                   "height": 32,
-                  "fill": "$surface-track",
+                  "fill": "$surface-bar",
                   "cornerRadius": 4,
                   "gap": 6,
                   "padding": [
@@ -9607,7 +10013,7 @@
                       "clip": true,
                       "width": "fill_container",
                       "height": 30,
-                      "fill": "$surface-track",
+                      "fill": "$surface-bar",
                       "cornerRadius": 4,
                       "layout": "vertical",
                       "justifyContent": "center",
@@ -10063,44 +10469,8 @@
                   "children": [
                     {
                       "type": "frame",
-                      "id": "Srkhf",
-                      "name": "StripThumb / 1",
-                      "width": 96,
-                      "height": 80,
-                      "fill": "$surface-main",
-                      "cornerRadius": 4
-                    },
-                    {
-                      "type": "frame",
-                      "id": "zj3R1",
-                      "name": "StripThumb / 2",
-                      "width": 96,
-                      "height": 80,
-                      "fill": "$surface-main",
-                      "cornerRadius": 4
-                    },
-                    {
-                      "type": "frame",
-                      "id": "uXOoY",
-                      "name": "StripThumb / 3",
-                      "width": 96,
-                      "height": 80,
-                      "fill": "$surface-main",
-                      "cornerRadius": 4
-                    },
-                    {
-                      "type": "frame",
-                      "id": "yOXog",
-                      "name": "StripThumb / 4",
-                      "width": 96,
-                      "height": 80,
-                      "fill": "$surface-main",
-                      "cornerRadius": 4
-                    },
-                    {
-                      "type": "frame",
                       "id": "iD3rp",
-                      "name": "StripThumb / 5",
+                      "name": "StripThumb / 1",
                       "width": 96,
                       "height": 80,
                       "fill": "$state-selected",
@@ -10111,66 +10481,14 @@
                     },
                     {
                       "type": "frame",
-                      "id": "ol1Mq",
-                      "name": "StripThumb / 6",
-                      "width": 96,
-                      "height": 80,
-                      "fill": "$surface-main",
-                      "cornerRadius": 4
-                    },
-                    {
-                      "type": "frame",
-                      "id": "uOaqA",
-                      "name": "StripThumb / 7",
+                      "id": "bdRqA",
+                      "name": "StripThumb / 2",
                       "width": 96,
                       "height": 80,
                       "fill": "$state-selected",
-                      "cornerRadius": 4
-                    },
-                    {
-                      "type": "frame",
-                      "id": "L4WC7A",
-                      "name": "StripThumb / 8",
-                      "width": 96,
-                      "height": 80,
-                      "fill": "$surface-main",
-                      "cornerRadius": 4
-                    },
-                    {
-                      "type": "frame",
-                      "id": "JZW4f",
-                      "name": "StripThumb / 9",
-                      "width": 96,
-                      "height": 80,
-                      "fill": "$surface-main",
-                      "cornerRadius": 4
-                    },
-                    {
-                      "type": "frame",
-                      "id": "ImqQP",
-                      "name": "StripThumb / 10",
-                      "width": 96,
-                      "height": 80,
-                      "fill": "$surface-main",
-                      "cornerRadius": 4
-                    },
-                    {
-                      "type": "frame",
-                      "id": "QQCrT",
-                      "name": "StripThumb / 11",
-                      "width": 96,
-                      "height": 80,
-                      "fill": "$surface-main",
-                      "cornerRadius": 4
-                    },
-                    {
-                      "type": "frame",
-                      "id": "N5aR6H",
-                      "name": "StripThumb / 12",
-                      "width": 96,
-                      "height": 80,
-                      "fill": "$surface-main",
-                      "cornerRadius": 4
+                      "cornerRadius": 4,
+                      "stroke": "$brand",
+                      "strokeAlignment": "inner"
                     }
                   ]
                 }
@@ -10212,7 +10530,7 @@
                       "name": "FullThumb",
                       "width": "fill_container",
                       "height": 180,
-                      "fill": "$surface-track",
+                      "fill": "$surface-bar",
                       "cornerRadius": 4,
                       "children": [
                         {
@@ -10256,7 +10574,7 @@
                       "name": "Histogram",
                       "width": "fill_container",
                       "height": 96,
-                      "fill": "$surface-track",
+                      "fill": "$surface-bar",
                       "cornerRadius": 4,
                       "gap": 2,
                       "padding": 6,
@@ -10983,7 +11301,7 @@
               "id": "i4O8s",
               "name": "StatusLock / 一级锁",
               "height": 22,
-              "fill": "$surface-track",
+              "fill": "$surface-layer",
               "cornerRadius": 4,
               "gap": 4,
               "padding": [
@@ -12086,7 +12404,7 @@
                   "name": "SearchBar",
                   "width": "fill_container",
                   "height": 32,
-                  "fill": "$surface-track",
+                  "fill": "$surface-bar",
                   "cornerRadius": 4,
                   "gap": 6,
                   "padding": [
@@ -12863,6 +13181,144 @@
                       ]
                     }
                   ]
+                },
+                {
+                  "type": "frame",
+                  "id": "oB4FQ",
+                  "name": "DirTree / 缩到最小",
+                  "clip": true,
+                  "width": "fill_container",
+                  "height": 88,
+                  "layout": "vertical",
+                  "gap": 2,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "iWbnj",
+                      "name": "TreeHint",
+                      "fill": "$fg-3",
+                      "content": "目录树（展开库列表时缩到最小，可滚动）",
+                      "fontFamily": "Inter",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "TRVU6",
+                      "name": "TreeRow / 2026",
+                      "width": "fill_container",
+                      "height": 28,
+                      "fill": "$state-selected",
+                      "cornerRadius": 4,
+                      "gap": 4,
+                      "padding": [
+                        0,
+                        4
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "EuLxb",
+                          "name": "Glyph / chevron-down",
+                          "width": 14,
+                          "height": 14,
+                          "icon": "chevron-down",
+                          "library": "lucide",
+                          "fill": "$fg-3"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "eMShv",
+                          "name": "Glyph / folder",
+                          "width": 14,
+                          "height": 14,
+                          "icon": "folder",
+                          "library": "lucide",
+                          "fill": "$brand"
+                        },
+                        {
+                          "type": "text",
+                          "id": "L4J4wo",
+                          "name": "TreeLabel / 2026",
+                          "fill": "$fg-1",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "2026",
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "OA3Or",
+                          "name": "Glyph / more-horizontal",
+                          "width": 14,
+                          "height": 14,
+                          "icon": "ellipsis",
+                          "library": "lucide",
+                          "fill": "$fg-3"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "KMOKl",
+                      "name": "TreeRow / 08-15 婚礼",
+                      "width": "fill_container",
+                      "height": 28,
+                      "cornerRadius": 4,
+                      "gap": 4,
+                      "padding": [
+                        0,
+                        4,
+                        0,
+                        16
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "b1utX",
+                          "name": "Sp14",
+                          "width": 14,
+                          "height": 1
+                        },
+                        {
+                          "type": "icon",
+                          "id": "LiNdh",
+                          "name": "Glyph / folder",
+                          "width": 14,
+                          "height": 14,
+                          "icon": "folder",
+                          "library": "lucide",
+                          "fill": "$fg-2"
+                        },
+                        {
+                          "type": "text",
+                          "id": "odLEk",
+                          "name": "TreeLabel / 08-15 婚礼",
+                          "fill": "$fg-2",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "08-15 婚礼",
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "muIpV",
+                          "name": "Glyph / more-horizontal",
+                          "width": 14,
+                          "height": 14,
+                          "icon": "ellipsis",
+                          "library": "lucide",
+                          "fill": "$fg-3"
+                        }
+                      ]
+                    }
+                  ]
                 }
               ]
             },
@@ -12917,7 +13373,7 @@
                               "name": "TilePhoto",
                               "width": 144,
                               "height": 96,
-                              "fill": "$surface-track",
+                              "fill": "$surface-main",
                               "cornerRadius": 6
                             },
                             {
@@ -12944,7 +13400,7 @@
                                   "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P0001.JPG",
+                                  "content": "P0001",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
                                   "fontWeight": "normal"
@@ -12983,7 +13439,7 @@
                               "name": "TilePhoto",
                               "width": 96,
                               "height": 144,
-                              "fill": "$surface-track",
+                              "fill": "$surface-main",
                               "cornerRadius": 6,
                               "children": [
                                 {
@@ -13050,7 +13506,7 @@
                                   "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P0002.RW2",
+                                  "content": "P0002",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
                                   "fontWeight": "normal"
@@ -13119,7 +13575,7 @@
                               "name": "TilePhoto",
                               "width": 144,
                               "height": 81,
-                              "fill": "$surface-track",
+                              "fill": "$surface-main",
                               "cornerRadius": 6,
                               "children": [
                                 {
@@ -13186,7 +13642,7 @@
                                   "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P0003.RW2",
+                                  "content": "P0003",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
                                   "fontWeight": "normal"
@@ -13224,7 +13680,7 @@
                               "name": "TilePhoto",
                               "width": 144,
                               "height": 96,
-                              "fill": "$surface-track",
+                              "fill": "$surface-main",
                               "cornerRadius": 6
                             },
                             {
@@ -13251,7 +13707,7 @@
                                   "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P0004.JPG",
+                                  "content": "P0004",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
                                   "fontWeight": "normal"
@@ -13289,7 +13745,7 @@
                               "name": "TilePhoto",
                               "width": 96,
                               "height": 144,
-                              "fill": "$surface-track",
+                              "fill": "$surface-main",
                               "cornerRadius": 6,
                               "children": [
                                 {
@@ -13371,7 +13827,7 @@
                                   "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P0005.RW2",
+                                  "content": "P0005",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
                                   "fontWeight": "normal"
@@ -13409,7 +13865,7 @@
                               "name": "TilePhoto",
                               "width": 144,
                               "height": 81,
-                              "fill": "$surface-track",
+                              "fill": "$surface-main",
                               "cornerRadius": 6,
                               "children": [
                                 {
@@ -13464,7 +13920,7 @@
                                   "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P0006.RW2",
+                                  "content": "P0006",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
                                   "fontWeight": "normal"
@@ -13512,7 +13968,7 @@
                               "name": "TilePhoto",
                               "width": 144,
                               "height": 96,
-                              "fill": "$surface-track",
+                              "fill": "$surface-main",
                               "cornerRadius": 6
                             },
                             {
@@ -13539,7 +13995,7 @@
                                   "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P0007.JPG",
+                                  "content": "P0007",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
                                   "fontWeight": "normal"
@@ -13577,7 +14033,7 @@
                               "name": "TilePhoto",
                               "width": 96,
                               "height": 144,
-                              "fill": "$surface-track",
+                              "fill": "$surface-main",
                               "cornerRadius": 6,
                               "children": [
                                 {
@@ -13632,7 +14088,7 @@
                                   "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P0008.RW2",
+                                  "content": "P0008",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
                                   "fontWeight": "normal"
@@ -13700,7 +14156,7 @@
                               "name": "TilePhoto",
                               "width": 144,
                               "height": 81,
-                              "fill": "$surface-track",
+                              "fill": "$surface-main",
                               "cornerRadius": 6,
                               "children": [
                                 {
@@ -13755,7 +14211,7 @@
                                   "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P0009.RW2",
+                                  "content": "P0009",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
                                   "fontWeight": "normal"
@@ -13793,7 +14249,7 @@
                               "name": "TilePhoto",
                               "width": 144,
                               "height": 96,
-                              "fill": "$surface-track",
+                              "fill": "$surface-main",
                               "cornerRadius": 6
                             },
                             {
@@ -13820,7 +14276,7 @@
                                   "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P0010.JPG",
+                                  "content": "P0010",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
                                   "fontWeight": "normal"
@@ -13858,7 +14314,7 @@
                               "name": "TilePhoto",
                               "width": 96,
                               "height": 144,
-                              "fill": "$surface-track",
+                              "fill": "$surface-main",
                               "cornerRadius": 6,
                               "children": [
                                 {
@@ -13913,7 +14369,7 @@
                                   "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P0011.RW2",
+                                  "content": "P0011",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
                                   "fontWeight": "normal"
@@ -13951,7 +14407,7 @@
                               "name": "TilePhoto",
                               "width": 144,
                               "height": 81,
-                              "fill": "$surface-track",
+                              "fill": "$surface-main",
                               "cornerRadius": 6,
                               "children": [
                                 {
@@ -14006,7 +14462,7 @@
                                   "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P0012.RW2",
+                                  "content": "P0012",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
                                   "fontWeight": "normal"
@@ -14054,7 +14510,7 @@
                               "name": "TilePhoto",
                               "width": 144,
                               "height": 96,
-                              "fill": "$surface-track",
+                              "fill": "$surface-main",
                               "cornerRadius": 6
                             },
                             {
@@ -14081,7 +14537,7 @@
                                   "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P0013.JPG",
+                                  "content": "P0013",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
                                   "fontWeight": "normal"
@@ -14119,7 +14575,7 @@
                               "name": "TilePhoto",
                               "width": 96,
                               "height": 144,
-                              "fill": "$surface-track",
+                              "fill": "$surface-main",
                               "cornerRadius": 6,
                               "children": [
                                 {
@@ -14174,7 +14630,7 @@
                                   "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P0014.RW2",
+                                  "content": "P0014",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
                                   "fontWeight": "normal"
@@ -14212,7 +14668,7 @@
                               "name": "TilePhoto",
                               "width": 144,
                               "height": 81,
-                              "fill": "$surface-track",
+                              "fill": "$surface-main",
                               "cornerRadius": 6,
                               "children": [
                                 {
@@ -14267,7 +14723,7 @@
                                   "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P0015.RW2",
+                                  "content": "P0015",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
                                   "fontWeight": "normal"
@@ -14305,7 +14761,7 @@
                               "name": "TilePhoto",
                               "width": 144,
                               "height": 96,
-                              "fill": "$surface-track",
+                              "fill": "$surface-main",
                               "cornerRadius": 6
                             },
                             {
@@ -14332,7 +14788,7 @@
                                   "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P0016.JPG",
+                                  "content": "P0016",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
                                   "fontWeight": "normal"
@@ -14370,7 +14826,7 @@
                               "name": "TilePhoto",
                               "width": 96,
                               "height": 144,
-                              "fill": "$surface-track",
+                              "fill": "$surface-main",
                               "cornerRadius": 6,
                               "children": [
                                 {
@@ -14425,7 +14881,7 @@
                                   "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P0017.RW2",
+                                  "content": "P0017",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
                                   "fontWeight": "normal"
@@ -14463,7 +14919,7 @@
                               "name": "TilePhoto",
                               "width": 144,
                               "height": 81,
-                              "fill": "$surface-track",
+                              "fill": "$surface-main",
                               "cornerRadius": 6,
                               "children": [
                                 {
@@ -14518,7 +14974,7 @@
                                   "fill": "$fg-1",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "P0018.RW2",
+                                  "content": "P0018",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
                                   "fontWeight": "normal"
@@ -15725,7 +16181,7 @@
                           "type": "text",
                           "id": "ISRyw",
                           "name": "CancelLabel",
-                          "fill": "$fg-2",
+                          "fill": "$fg-1",
                           "content": "取消",
                           "fontFamily": "Inter",
                           "fontSize": 14,
@@ -15853,7 +16309,7 @@
                       "name": "TilePhoto",
                       "width": 144,
                       "height": 96,
-                      "fill": "$surface-track",
+                      "fill": "$surface-main",
                       "cornerRadius": 6,
                       "children": [
                         {
@@ -15908,7 +16364,7 @@
                           "fill": "$fg-1",
                           "textGrowth": "fixed-width",
                           "width": "fill_container",
-                          "content": "P0001.RW2",
+                          "content": "P0001",
                           "fontFamily": "Inter",
                           "fontSize": 12,
                           "fontWeight": "normal"
@@ -16027,7 +16483,7 @@
                       "name": "TilePhoto",
                       "width": 144,
                       "height": 96,
-                      "fill": "$surface-track",
+                      "fill": "$surface-main",
                       "cornerRadius": 6,
                       "children": [
                         {
@@ -16082,7 +16538,7 @@
                           "fill": "$fg-1",
                           "textGrowth": "fixed-width",
                           "width": "fill_container",
-                          "content": "P0002.RW2",
+                          "content": "P0002",
                           "fontFamily": "Inter",
                           "fontSize": 12,
                           "fontWeight": "normal"
@@ -16117,6 +16573,2038 @@
           "fontFamily": "Inter",
           "fontSize": 12,
           "fontWeight": "normal"
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "soBb6",
+      "x": 3000,
+      "y": 1060,
+      "name": "States / 浏览状态（命令面板 / 筛选 / Tab / 空态）",
+      "clip": true,
+      "width": 1340,
+      "fill": "$surface-main",
+      "cornerRadius": 8,
+      "layout": "vertical",
+      "gap": 14,
+      "padding": 20,
+      "children": [
+        {
+          "type": "text",
+          "id": "q4Dwaa",
+          "name": "Title",
+          "fill": "$fg-1",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "浏览状态：命令面板 / 筛选开启 / Tab 的两态 / 未选目录的空态",
+          "fontFamily": "Inter",
+          "fontSize": 16,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "text",
+          "id": "h2sOS",
+          "name": "Intro",
+          "fill": "$fg-2",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "每格只画该状态特有的部分与它相对网格的位置关系；尺寸一律以实现为准（DESIGN.md §8.4）。",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "r8mUCr",
+          "name": "Row / 三态",
+          "width": "fill_container",
+          "gap": 28,
+          "children": [
+            {
+              "type": "frame",
+              "id": "dHqll",
+              "name": "Col / 命令面板",
+              "width": 300,
+              "layout": "vertical",
+              "gap": 8,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "j5oDto",
+                  "name": "Label1",
+                  "fill": "$fg-1",
+                  "content": "① 命令面板（⌘K / Ctrl+K）",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "kuscA",
+                  "name": "Palette",
+                  "clip": true,
+                  "width": 280,
+                  "fill": "$surface-layer",
+                  "cornerRadius": 8,
+                  "layout": "vertical",
+                  "gap": 4,
+                  "padding": 8,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "wHrSB",
+                      "name": "SearchRow",
+                      "width": "fill_container",
+                      "fill": "$surface-bar",
+                      "cornerRadius": 6,
+                      "gap": 6,
+                      "padding": [
+                        6,
+                        8
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "X5K9qT",
+                          "name": "Key",
+                          "fill": "$fg-3",
+                          "content": "⌘K",
+                          "fontFamily": "Inter",
+                          "fontSize": 10,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "W8HxfF",
+                          "name": "Hint",
+                          "fill": "$fg-3",
+                          "content": "输入命令，或直接搜照片…",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "ASxst",
+                      "name": "Cmd / 导入照片…",
+                      "width": "fill_container",
+                      "cornerRadius": 4,
+                      "gap": 6,
+                      "padding": [
+                        5,
+                        8
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "BlSNl",
+                          "name": "Label",
+                          "fill": "$fg-2",
+                          "content": "导入照片…",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "xoZia",
+                      "name": "Cmd / 切换到浏览 / 编辑 / 导出",
+                      "width": "fill_container",
+                      "fill": "$state-hover",
+                      "cornerRadius": 4,
+                      "gap": 6,
+                      "padding": [
+                        5,
+                        8
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "NqbNO",
+                          "name": "Label",
+                          "fill": "$fg-1",
+                          "content": "切换到浏览 / 编辑 / 导出",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "h3ii3y",
+                      "name": "Cmd / 给选中打 3 星",
+                      "width": "fill_container",
+                      "cornerRadius": 4,
+                      "gap": 6,
+                      "padding": [
+                        5,
+                        8
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "z6Bq7p",
+                          "name": "Label",
+                          "fill": "$fg-2",
+                          "content": "给选中打 3 星",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "w0lTy",
+                      "name": "Cmd / 筛选：只看 RAW",
+                      "width": "fill_container",
+                      "cornerRadius": 4,
+                      "gap": 6,
+                      "padding": [
+                        5,
+                        8
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "YVcck",
+                          "name": "Label",
+                          "fill": "$fg-2",
+                          "content": "筛选：只看 RAW",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "EsGHh",
+                      "name": "Cmd / 清理缩略图缓存",
+                      "width": "fill_container",
+                      "cornerRadius": 4,
+                      "gap": 6,
+                      "padding": [
+                        5,
+                        8
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "l58Kw",
+                          "name": "Label",
+                          "fill": "$fg-2",
+                          "content": "清理缩略图缓存",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "uWSU0",
+                  "name": "Note1",
+                  "fill": "$fg-2",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "指向项 = 辅色底（state-hover）；Enter 执行 / Esc 关闭；输入即筛。面板浮在网格上方居中，不改变后面网格的状态。",
+                  "lineHeight": 1.5,
+                  "fontFamily": "Inter",
+                  "fontSize": 11,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "JbSUi",
+              "name": "Col / 筛选结果区",
+              "width": 300,
+              "layout": "vertical",
+              "gap": 8,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "tqnsM",
+                  "name": "Label2",
+                  "fill": "$fg-1",
+                  "content": "② 筛选开启后的结果区",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "v6uCM",
+                  "name": "ToolsBar / 筛选开",
+                  "width": "fill_container",
+                  "fill": "$surface-main",
+                  "cornerRadius": 6,
+                  "gap": 6,
+                  "padding": [
+                    0,
+                    6
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "wZQis",
+                      "name": "FilterOn",
+                      "fill": "$brand",
+                      "cornerRadius": 6,
+                      "gap": 4,
+                      "padding": [
+                        4,
+                        8
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "B04vp",
+                          "name": "FilterLabel",
+                          "fill": "$fg-on-brand",
+                          "content": "筛选",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "cXTsx",
+                      "name": "Ctl / 留下",
+                      "fill": "$fg-2",
+                      "content": "留下",
+                      "fontFamily": "Inter",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "LtkbK",
+                      "name": "Ctl / 弃掉",
+                      "fill": "$fg-2",
+                      "content": "弃掉",
+                      "fontFamily": "Inter",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "EQIyg",
+                      "name": "Ctl / ★★★☆☆",
+                      "fill": "$fg-2",
+                      "content": "★★★☆☆",
+                      "fontFamily": "Inter",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "ntKnt",
+                      "name": "Ctl / 色标",
+                      "fill": "$fg-2",
+                      "content": "色标",
+                      "fontFamily": "Inter",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "NkENh",
+                      "name": "Ctl / 喜欢",
+                      "fill": "$fg-2",
+                      "content": "喜欢",
+                      "fontFamily": "Inter",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "WTTge",
+                  "name": "Chips",
+                  "width": "fill_container",
+                  "gap": 6,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "XX2SP",
+                      "name": "Chip / 3★ 以上 ×",
+                      "fill": "$surface-bar",
+                      "cornerRadius": 6,
+                      "padding": [
+                        2,
+                        6
+                      ],
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "w73Qg",
+                          "name": "Text",
+                          "fill": "$fg-1",
+                          "content": "3★ 以上 ×",
+                          "fontFamily": "Inter",
+                          "fontSize": 10,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "JCx1r",
+                      "name": "Chip / 红色 ×",
+                      "fill": "$surface-bar",
+                      "cornerRadius": 6,
+                      "padding": [
+                        2,
+                        6
+                      ],
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "w0DME",
+                          "name": "Text",
+                          "fill": "$fg-1",
+                          "content": "红色 ×",
+                          "fontFamily": "Inter",
+                          "fontSize": 10,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "Ru4Cv",
+                      "name": "Chip / 已喜欢 ×",
+                      "fill": "$surface-bar",
+                      "cornerRadius": 6,
+                      "padding": [
+                        2,
+                        6
+                      ],
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "tfZpz",
+                          "name": "Text",
+                          "fill": "$fg-1",
+                          "content": "已喜欢 ×",
+                          "fontFamily": "Inter",
+                          "fontSize": 10,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "XzLPT",
+                      "name": "Count",
+                      "fill": "$fg-2",
+                      "content": "共 42 张",
+                      "fontFamily": "Inter",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "MCbNC",
+                  "name": "SortBar",
+                  "width": "fill_container",
+                  "height": 24,
+                  "gap": 8,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "bjPmS",
+                      "name": "SortLabel",
+                      "fill": "$fg-3",
+                      "content": "排序",
+                      "fontFamily": "Inter",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "qTCbQ",
+                      "name": "SortSelect",
+                      "height": 24,
+                      "fill": "$surface-bar",
+                      "cornerRadius": 4,
+                      "gap": 4,
+                      "padding": [
+                        0,
+                        8
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "cCBPt",
+                          "name": "SortValue",
+                          "fill": "$fg-1",
+                          "content": "拍摄时间",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "MELor",
+                          "name": "Glyph / chevron-down",
+                          "width": 11,
+                          "height": 11,
+                          "icon": "chevron-down",
+                          "library": "lucide",
+                          "fill": "$fg-3"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "khVPh",
+                      "name": "Combinator / 与或",
+                      "height": 24,
+                      "fill": "$surface-track",
+                      "cornerRadius": 4,
+                      "gap": 2,
+                      "padding": 2,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "e7YkMt",
+                          "name": "Seg / 任一",
+                          "height": 20,
+                          "fill": "$surface-bar",
+                          "cornerRadius": 3,
+                          "padding": [
+                            0,
+                            8
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "cythn",
+                              "name": "SegLabel / 任一",
+                              "fill": "$fg-1",
+                              "content": "任一",
+                              "fontFamily": "Inter",
+                              "fontSize": 11,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "N0cLE",
+                          "name": "Seg / 全部",
+                          "height": 20,
+                          "padding": [
+                            0,
+                            8
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "aHsLw",
+                              "name": "SegLabel / 全部",
+                              "fill": "$fg-3",
+                              "content": "全部",
+                              "fontFamily": "Inter",
+                              "fontSize": 11,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "uyPcs",
+                  "name": "ResultStrip",
+                  "width": "fill_container",
+                  "height": 64,
+                  "fill": "$surface-bar",
+                  "cornerRadius": 6,
+                  "gap": 4,
+                  "padding": 6,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "qFwZl",
+                      "name": "T0",
+                      "width": 30,
+                      "height": 30,
+                      "fill": "$surface-main",
+                      "cornerRadius": 4
+                    },
+                    {
+                      "type": "frame",
+                      "id": "rmoHL",
+                      "name": "T1",
+                      "width": 30,
+                      "height": 30,
+                      "fill": "$surface-main",
+                      "cornerRadius": 4
+                    },
+                    {
+                      "type": "frame",
+                      "id": "cz7bE",
+                      "name": "T2",
+                      "width": 30,
+                      "height": 30,
+                      "fill": "$surface-main",
+                      "cornerRadius": 4
+                    },
+                    {
+                      "type": "frame",
+                      "id": "LbtSa",
+                      "name": "T3",
+                      "width": 30,
+                      "height": 30,
+                      "fill": "$surface-main",
+                      "cornerRadius": 4
+                    },
+                    {
+                      "type": "frame",
+                      "id": "huYrX",
+                      "name": "T4",
+                      "width": 30,
+                      "height": 30,
+                      "fill": "$surface-main",
+                      "cornerRadius": 4
+                    },
+                    {
+                      "type": "frame",
+                      "id": "l4qvIh",
+                      "name": "T5",
+                      "width": 30,
+                      "height": 30,
+                      "fill": "$surface-main",
+                      "cornerRadius": 4
+                    },
+                    {
+                      "type": "frame",
+                      "id": "nMcYP",
+                      "name": "T6",
+                      "width": 30,
+                      "height": 30,
+                      "fill": "$surface-main",
+                      "cornerRadius": 4
+                    },
+                    {
+                      "type": "frame",
+                      "id": "zrYIa",
+                      "name": "T7",
+                      "width": 30,
+                      "height": 30,
+                      "fill": "$surface-main",
+                      "cornerRadius": 4
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "R4puY9",
+                  "name": "Note2",
+                  "fill": "$fg-2",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "筛选开关一开，后面的标记/标签/锁从「设置」变成「筛选」（点 3 星＝只看 3 星），中列换成该条件的结果集。条件间默认「任一」（或）；右侧那个分段控件就是与/或的切换件（引擎两种都支持，M2-W2 口述范围）。排序控件与「按时间」并列，在网格控制条上。关掉开关会清空条件，免得「看着没筛却少着照片」。",
+                  "lineHeight": 1.5,
+                  "fontFamily": "Inter",
+                  "fontSize": 11,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "R7E1K",
+              "name": "Col / Focus",
+              "width": 300,
+              "layout": "vertical",
+              "gap": 8,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "H6OyO",
+                  "name": "Label3",
+                  "fill": "$fg-1",
+                  "content": "② Tab 关左右（留胶片带）",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "ZQCgj",
+                  "name": "Shell / Focus",
+                  "clip": true,
+                  "width": 280,
+                  "fill": "$surface-bar",
+                  "cornerRadius": 8,
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "HFHX5",
+                      "name": "TitleBar",
+                      "width": "fill_container",
+                      "height": 22,
+                      "fill": "$surface-main",
+                      "gap": 6,
+                      "padding": [
+                        0,
+                        8
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "kvyEA",
+                          "name": "T",
+                          "fill": "$fg-3",
+                          "content": "光伴 · 帮助",
+                          "fontFamily": "Inter",
+                          "fontSize": 9,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "sZdv0",
+                      "name": "FlowBar",
+                      "width": "fill_container",
+                      "height": 22,
+                      "fill": "$surface-main",
+                      "gap": 6,
+                      "padding": [
+                        0,
+                        8
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "w7Mait",
+                          "name": "T",
+                          "fill": "$fg-3",
+                          "content": "导入 · 浏览 · 编辑 · 导出",
+                          "fontFamily": "Inter",
+                          "fontSize": 9,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "fxSrq",
+                      "name": "ToolsBar",
+                      "width": "fill_container",
+                      "height": 20,
+                      "fill": "$surface-main",
+                      "gap": 6,
+                      "padding": [
+                        0,
+                        8
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "kKixj",
+                          "name": "T",
+                          "fill": "$fg-3",
+                          "content": "筛选  留下  弃掉  ★★★  ● 色标",
+                          "fontFamily": "Inter",
+                          "fontSize": 9,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "PyGqP",
+                      "name": "GridArea",
+                      "width": "fill_container",
+                      "height": 110,
+                      "fill": "$surface-bar",
+                      "gap": 4,
+                      "padding": 6,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "J3jj6",
+                          "name": "T0",
+                          "width": 30,
+                          "height": 30,
+                          "fill": "$surface-main",
+                          "cornerRadius": 4
+                        },
+                        {
+                          "type": "frame",
+                          "id": "TDLYo",
+                          "name": "T1",
+                          "width": 30,
+                          "height": 30,
+                          "fill": "$surface-main",
+                          "cornerRadius": 4
+                        },
+                        {
+                          "type": "frame",
+                          "id": "SLul2",
+                          "name": "T2",
+                          "width": 30,
+                          "height": 30,
+                          "fill": "$surface-main",
+                          "cornerRadius": 4
+                        },
+                        {
+                          "type": "frame",
+                          "id": "VxDiI",
+                          "name": "T3",
+                          "width": 30,
+                          "height": 30,
+                          "fill": "$surface-main",
+                          "cornerRadius": 4
+                        },
+                        {
+                          "type": "frame",
+                          "id": "EZuMC",
+                          "name": "T4",
+                          "width": 30,
+                          "height": 30,
+                          "fill": "$surface-main",
+                          "cornerRadius": 4
+                        },
+                        {
+                          "type": "frame",
+                          "id": "UoEaf",
+                          "name": "T5",
+                          "width": 30,
+                          "height": 30,
+                          "fill": "$surface-main",
+                          "cornerRadius": 4
+                        },
+                        {
+                          "type": "frame",
+                          "id": "YhOjc",
+                          "name": "T6",
+                          "width": 30,
+                          "height": 30,
+                          "fill": "$surface-main",
+                          "cornerRadius": 4
+                        },
+                        {
+                          "type": "frame",
+                          "id": "S2Px90",
+                          "name": "T7",
+                          "width": 30,
+                          "height": 30,
+                          "fill": "$surface-main",
+                          "cornerRadius": 4
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "SxrUN",
+                  "name": "Note3",
+                  "fill": "$fg-2",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "Tab 第 2 态：左右两列隐藏、网格铺满整宽（顶部三条不变）。与第 3 态（关胶片带）到底是**并列**还是**叠加**仍未定（BROWSE.md §10 问题 3）—— 定了再画 Tab 的循环顺序。",
+                  "lineHeight": 1.5,
+                  "fontFamily": "Inter",
+                  "fontSize": 11,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "PhDGe",
+              "name": "Col / 关胶片带",
+              "width": 300,
+              "layout": "vertical",
+              "gap": 8,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "rYWty",
+                  "name": "Label3",
+                  "fill": "$fg-1",
+                  "content": "③ Tab 关胶片带（左右两列在）",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "kZpBd",
+                  "name": "Shell / 无胶片带",
+                  "clip": true,
+                  "width": 280,
+                  "fill": "$surface-bar",
+                  "cornerRadius": 8,
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "f1EoP",
+                      "name": "TitleBar",
+                      "width": "fill_container",
+                      "height": 22,
+                      "fill": "$surface-main",
+                      "gap": 6,
+                      "padding": [
+                        0,
+                        8
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "FHtv8",
+                          "name": "T",
+                          "fill": "$fg-3",
+                          "content": "光伴 · 帮助",
+                          "fontFamily": "Inter",
+                          "fontSize": 9,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "N2Ghek",
+                      "name": "FlowBar",
+                      "width": "fill_container",
+                      "height": 22,
+                      "fill": "$surface-main",
+                      "gap": 6,
+                      "padding": [
+                        0,
+                        8
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "zx4Lz",
+                          "name": "T",
+                          "fill": "$fg-3",
+                          "content": "导入 · 浏览 · 编辑 · 导出",
+                          "fontFamily": "Inter",
+                          "fontSize": 9,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "m8o9g",
+                      "name": "ToolsBar",
+                      "width": "fill_container",
+                      "height": 20,
+                      "fill": "$surface-main",
+                      "gap": 6,
+                      "padding": [
+                        0,
+                        8
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "C904t",
+                          "name": "T",
+                          "fill": "$fg-3",
+                          "content": "筛选  留下  弃掉  ★★★  ● 色标",
+                          "fontFamily": "Inter",
+                          "fontSize": 9,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "oRZQZ",
+                      "name": "Body",
+                      "width": "fill_container",
+                      "height": 110,
+                      "fill": "$surface-bar",
+                      "gap": 4,
+                      "padding": 6,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "I6q2uI",
+                          "name": "LeftCol",
+                          "width": 52,
+                          "height": 98,
+                          "fill": "$surface-main",
+                          "cornerRadius": 4
+                        },
+                        {
+                          "type": "frame",
+                          "id": "Wunc1",
+                          "name": "Photo",
+                          "width": 150,
+                          "height": 98,
+                          "fill": "$surface-main",
+                          "cornerRadius": 4
+                        },
+                        {
+                          "type": "frame",
+                          "id": "QJdfa",
+                          "name": "RightCol",
+                          "width": 52,
+                          "height": 98,
+                          "fill": "$surface-main",
+                          "cornerRadius": 4
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "CyfBe",
+                  "name": "Note3",
+                  "fill": "$fg-2",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "Tab 第 3 态：只关胶片带，左右两列仍在。三态并列循环：①默认 → ②关左右 → ③关胶片带 → ①（2026-09-18 定）；①默认见 Shell / Browse / View。回车退回 tiles 时左右栏必定回来。",
+                  "lineHeight": 1.5,
+                  "fontFamily": "Inter",
+                  "fontSize": 11,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "alrwb",
+          "name": "Row / 空态",
+          "width": "fill_container",
+          "gap": 24,
+          "children": [
+            {
+              "type": "frame",
+              "id": "auQgN",
+              "name": "Col / 未选目录",
+              "width": 300,
+              "layout": "vertical",
+              "gap": 8,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "G1nBK",
+                  "name": "Label / 未选目录",
+                  "fill": "$fg-1",
+                  "content": "④ 未选目录：中列是「挑一个目录」的空态",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "wnIIh",
+                  "name": "Shell / 未选目录",
+                  "clip": true,
+                  "width": 280,
+                  "fill": "$surface-bar",
+                  "cornerRadius": 8,
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "jyPv1",
+                      "name": "TitleBar",
+                      "width": "fill_container",
+                      "height": 22,
+                      "fill": "$surface-main",
+                      "gap": 6,
+                      "padding": [
+                        0,
+                        8
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "T36L5",
+                          "name": "T",
+                          "fill": "$fg-3",
+                          "content": "光伴 · 帮助",
+                          "fontFamily": "Inter",
+                          "fontSize": 9,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "EvR2p",
+                      "name": "FlowBar",
+                      "width": "fill_container",
+                      "height": 22,
+                      "fill": "$surface-main",
+                      "gap": 6,
+                      "padding": [
+                        0,
+                        8
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "s4nctf",
+                          "name": "T",
+                          "fill": "$fg-3",
+                          "content": "导入 · 浏览 · 编辑 · 导出",
+                          "fontFamily": "Inter",
+                          "fontSize": 9,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "lJCcv",
+                      "name": "ToolsBar",
+                      "width": "fill_container",
+                      "height": 20,
+                      "fill": "$surface-main",
+                      "gap": 6,
+                      "padding": [
+                        0,
+                        8
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "VXrM4",
+                          "name": "T",
+                          "fill": "$fg-3",
+                          "content": "筛选  留下  弃掉  ★★★  ● 色标",
+                          "fontFamily": "Inter",
+                          "fontSize": 9,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "Jip0s",
+                      "name": "Body",
+                      "width": "fill_container",
+                      "height": 110,
+                      "fill": "$surface-bar",
+                      "gap": 4,
+                      "padding": 6,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "sk79O",
+                          "name": "LeftCol",
+                          "width": 52,
+                          "height": 98,
+                          "fill": "$surface-main",
+                          "cornerRadius": 4
+                        },
+                        {
+                          "type": "frame",
+                          "id": "tFkIp",
+                          "name": "CenterHint",
+                          "width": "fill_container",
+                          "height": 98,
+                          "fill": "$surface-main",
+                          "cornerRadius": 4,
+                          "layout": "vertical",
+                          "gap": 4,
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "xB7NC",
+                              "name": "Glyph / folder",
+                              "width": 24,
+                              "height": 24,
+                              "icon": "folder",
+                              "library": "lucide",
+                              "fill": "$fg-3"
+                            },
+                            {
+                              "type": "text",
+                              "id": "i9xSpJ",
+                              "name": "HintText",
+                              "fill": "$fg-2",
+                              "content": "在左边挑一个目录",
+                              "fontFamily": "Inter",
+                              "fontSize": 10,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "LrarH",
+                  "name": "Note / 未选目录",
+                  "fill": "$fg-2",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "点库只是选中库（不铺整库照片）；库内目录树的根是 photos/ 之内（不出现 photos 这一层），保留目录 _RAW 不显示（RAW 在网格里怎么呈现待定）。回车退回 tiles 时左右栏必定回来。",
+                  "lineHeight": 1.5,
+                  "fontFamily": "Inter",
+                  "fontSize": 11,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "o4M2cF",
+      "x": 1980,
+      "y": 1570,
+      "name": "Components / 标签弹窗",
+      "clip": true,
+      "width": 980,
+      "height": 620,
+      "fill": "$surface-main",
+      "layout": "vertical",
+      "gap": 14,
+      "padding": 20,
+      "children": [
+        {
+          "type": "text",
+          "id": "H1tohl",
+          "name": "Title",
+          "fill": "$fg-1",
+          "content": "Components / 标签弹窗（设置标签）",
+          "fontFamily": "Inter",
+          "fontSize": 15,
+          "fontWeight": "600"
+        },
+        {
+          "type": "text",
+          "id": "eLkIZ",
+          "name": "Intro",
+          "fill": "$fg-2",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "BROWSE.md §3.3：单张弹窗可增可删（每个标签右边带叉）；批量只能添加（自动去重）。标签输入组件输入即搜、0.6 秒防抖，不选而直接回车 = 创建新标签。 ",
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "DTAOc",
+          "name": "Row / 两态",
+          "gap": 24,
+          "children": [
+            {
+              "type": "frame",
+              "id": "JooGU",
+              "name": "Col / 单张",
+              "width": 440,
+              "layout": "vertical",
+              "gap": 8,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "sfaxs",
+                  "name": "Label / 单张",
+                  "fill": "$fg-1",
+                  "content": "① 单张：可增可删（每个标签右边带叉）",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "PGvh4",
+                  "name": "Modal / 标签（单张）",
+                  "width": 420,
+                  "fill": "$surface-layer",
+                  "cornerRadius": 6,
+                  "layout": "vertical",
+                  "gap": 14,
+                  "padding": 20,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "w10FXr",
+                      "name": "ModalTitle",
+                      "fill": "$fg-1",
+                      "content": "标签",
+                      "fontFamily": "Inter",
+                      "fontSize": 17,
+                      "fontWeight": "600"
+                    },
+                    {
+                      "type": "text",
+                      "id": "w1cn5",
+                      "name": "ModalDesc",
+                      "fill": "$fg-3",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "P1000156.JPG · 已有 3 个标签",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "iUdRI",
+                      "name": "TextField",
+                      "width": "fill_container",
+                      "height": 32,
+                      "fill": "$surface-bar",
+                      "cornerRadius": 4,
+                      "padding": [
+                        0,
+                        8
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "mDKgG",
+                          "name": "FieldText",
+                          "fill": "$fg-1",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "wed",
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "qt0ED",
+                      "name": "SearchResults",
+                      "width": "fill_container",
+                      "fill": "$surface-bar",
+                      "cornerRadius": 4,
+                      "layout": "vertical",
+                      "gap": 4,
+                      "padding": 8,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "TLpoj",
+                          "name": "Result / 婚礼",
+                          "width": "fill_container",
+                          "height": 24,
+                          "gap": 6,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "QRqTJ",
+                              "name": "ResultLabel",
+                              "fill": "$fg-1",
+                              "content": "婚礼",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "text",
+                              "id": "unzWu",
+                              "name": "ResultHint",
+                              "fill": "$fg-3",
+                              "content": "已有实例 12",
+                              "fontFamily": "Inter",
+                              "fontSize": 11,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "m2W3zS",
+                          "name": "Result / wedding 外景",
+                          "width": "fill_container",
+                          "height": 24,
+                          "gap": 6,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "u16WbJ",
+                              "name": "ResultLabel",
+                              "fill": "$fg-1",
+                              "content": "wedding 外景",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "text",
+                              "id": "GYVBF",
+                              "name": "ResultHint",
+                              "fill": "$fg-3",
+                              "content": "已有实例 3",
+                              "fontFamily": "Inter",
+                              "fontSize": 11,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "HjVw0",
+                          "name": "Result / 创建「wed」",
+                          "width": "fill_container",
+                          "height": 24,
+                          "gap": 6,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "GgRzy",
+                              "name": "ResultLabel",
+                              "fill": "$fg-1",
+                              "content": "创建「wed」",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "text",
+                              "id": "fVsfR",
+                              "name": "ResultHint",
+                              "fill": "$fg-3",
+                              "content": "回车新建",
+                              "fontFamily": "Inter",
+                              "fontSize": 11,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "zxucz",
+                      "name": "ChipRow",
+                      "width": "fill_container",
+                      "gap": 6,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "Prext",
+                          "name": "Chip / 婚礼",
+                          "height": 24,
+                          "fill": "$surface-bar",
+                          "cornerRadius": 999,
+                          "gap": 4,
+                          "padding": [
+                            0,
+                            10
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "hwjLh",
+                              "name": "ChipLabel",
+                              "fill": "$fg-1",
+                              "content": "婚礼",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "icon",
+                              "id": "h9itCQ",
+                              "name": "Glyph / x",
+                              "width": 11,
+                              "height": 11,
+                              "icon": "x",
+                              "library": "lucide",
+                              "fill": "$fg-3"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "nXXMs",
+                          "name": "Chip / 外景",
+                          "height": 24,
+                          "fill": "$surface-bar",
+                          "cornerRadius": 999,
+                          "gap": 4,
+                          "padding": [
+                            0,
+                            10
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "OPPDN",
+                              "name": "ChipLabel",
+                              "fill": "$fg-1",
+                              "content": "外景",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "icon",
+                              "id": "gQeIe",
+                              "name": "Glyph / x",
+                              "width": 11,
+                              "height": 11,
+                              "icon": "x",
+                              "library": "lucide",
+                              "fill": "$fg-3"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "fDEmG",
+                          "name": "Chip / 朋友",
+                          "height": 24,
+                          "fill": "$surface-bar",
+                          "cornerRadius": 999,
+                          "gap": 4,
+                          "padding": [
+                            0,
+                            10
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "lZTqe",
+                              "name": "ChipLabel",
+                              "fill": "$fg-1",
+                              "content": "朋友",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "icon",
+                              "id": "Ukn5F",
+                              "name": "Glyph / x",
+                              "width": 11,
+                              "height": 11,
+                              "icon": "x",
+                              "library": "lucide",
+                              "fill": "$fg-3"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "BkURJ",
+                      "name": "ChipRow",
+                      "width": "fill_container",
+                      "gap": 6,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "jYsvO",
+                          "name": "Chip / 夏天",
+                          "height": 24,
+                          "fill": "$surface-bar",
+                          "cornerRadius": 999,
+                          "gap": 4,
+                          "padding": [
+                            0,
+                            10
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "GXRrW",
+                              "name": "ChipLabel",
+                              "fill": "$fg-1",
+                              "content": "夏天",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "icon",
+                              "id": "LLaXq",
+                              "name": "Glyph / x",
+                              "width": 11,
+                              "height": 11,
+                              "icon": "x",
+                              "library": "lucide",
+                              "fill": "$fg-3"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "bFhQV",
+                          "name": "Chip / 2026",
+                          "height": 24,
+                          "fill": "$surface-bar",
+                          "cornerRadius": 999,
+                          "gap": 4,
+                          "padding": [
+                            0,
+                            10
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "E65cRN",
+                              "name": "ChipLabel",
+                              "fill": "$fg-1",
+                              "content": "2026",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "icon",
+                              "id": "rIDWA",
+                              "name": "Glyph / x",
+                              "width": 11,
+                              "height": 11,
+                              "icon": "x",
+                              "library": "lucide",
+                              "fill": "$fg-3"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "skDQF",
+                      "name": "ModalButtons",
+                      "width": "fill_container",
+                      "height": 32,
+                      "gap": 8,
+                      "justifyContent": "end",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "AyC1V",
+                          "name": "Button / 取消",
+                          "height": 32,
+                          "fill": "$surface-track",
+                          "cornerRadius": 4,
+                          "padding": [
+                            0,
+                            14
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "n2aAZ0",
+                              "name": "ButtonLabel",
+                              "fill": "$fg-1",
+                              "content": "取消",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "ci43l",
+                          "name": "Button / 保存",
+                          "height": 32,
+                          "fill": "$brand",
+                          "cornerRadius": 4,
+                          "padding": [
+                            0,
+                            14
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "a4e9X",
+                              "name": "ButtonLabel",
+                              "fill": "$fg-on-brand",
+                              "content": "保存",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "nBQCZ",
+              "name": "Col / 批量",
+              "width": 440,
+              "layout": "vertical",
+              "gap": 8,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "qz9P3",
+                  "name": "Label / 批量",
+                  "fill": "$fg-1",
+                  "content": "② 批量（12 张）：只能添加，不能移除",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "ZRANP",
+                  "name": "Modal / 标签（批量）",
+                  "width": 420,
+                  "fill": "$surface-layer",
+                  "cornerRadius": 6,
+                  "layout": "vertical",
+                  "gap": 14,
+                  "padding": 20,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "sHPRV",
+                      "name": "ModalTitle",
+                      "fill": "$fg-1",
+                      "content": "给 12 张照片加标签",
+                      "fontFamily": "Inter",
+                      "fontSize": 17,
+                      "fontWeight": "600"
+                    },
+                    {
+                      "type": "text",
+                      "id": "ARo4S",
+                      "name": "ModalDesc",
+                      "fill": "$fg-3",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "批量只会添加：已有标签不会被移除，重复的自动去重",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "TGqqH",
+                      "name": "TextField",
+                      "width": "fill_container",
+                      "height": 32,
+                      "fill": "$surface-bar",
+                      "cornerRadius": 4,
+                      "padding": [
+                        0,
+                        8
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "knWkk",
+                          "name": "FieldText",
+                          "fill": "$fg-1",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "外景",
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "o2YnTN",
+                      "name": "ChipRow",
+                      "width": "fill_container",
+                      "gap": 6,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "K7QWNb",
+                          "name": "Chip / 婚礼",
+                          "height": 24,
+                          "fill": "$surface-bar",
+                          "cornerRadius": 999,
+                          "gap": 4,
+                          "padding": [
+                            0,
+                            10
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "hz0Bk",
+                              "name": "ChipLabel",
+                              "fill": "$fg-1",
+                              "content": "婚礼",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "grEiv",
+                          "name": "Chip / 外景",
+                          "height": 24,
+                          "fill": "$surface-bar",
+                          "cornerRadius": 999,
+                          "gap": 4,
+                          "padding": [
+                            0,
+                            10
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "DWzt5",
+                              "name": "ChipLabel",
+                              "fill": "$fg-1",
+                              "content": "外景",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "hyjnT",
+                          "name": "Chip / 朋友",
+                          "height": 24,
+                          "fill": "$surface-bar",
+                          "cornerRadius": 999,
+                          "gap": 4,
+                          "padding": [
+                            0,
+                            10
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "unW0F",
+                              "name": "ChipLabel",
+                              "fill": "$fg-1",
+                              "content": "朋友",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "TwFPO",
+                      "name": "ChipRow",
+                      "width": "fill_container",
+                      "gap": 6,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "vJMEw",
+                          "name": "Chip / 夏天",
+                          "height": 24,
+                          "fill": "$surface-bar",
+                          "cornerRadius": 999,
+                          "gap": 4,
+                          "padding": [
+                            0,
+                            10
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "Rn8rT",
+                              "name": "ChipLabel",
+                              "fill": "$fg-1",
+                              "content": "夏天",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "oJATh",
+                          "name": "Chip / 2026",
+                          "height": 24,
+                          "fill": "$surface-bar",
+                          "cornerRadius": 999,
+                          "gap": 4,
+                          "padding": [
+                            0,
+                            10
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "FzI3C",
+                              "name": "ChipLabel",
+                              "fill": "$fg-1",
+                              "content": "2026",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "ankZW",
+                      "name": "FieldHint",
+                      "fill": "$fg-3",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "标签右边没有叉 —— 想移除请切回单张编辑",
+                      "fontFamily": "Inter",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "U9H6ow",
+                      "name": "ModalButtons",
+                      "width": "fill_container",
+                      "height": 32,
+                      "gap": 8,
+                      "justifyContent": "end",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "qzPVK",
+                          "name": "Button / 取消",
+                          "height": 32,
+                          "fill": "$surface-track",
+                          "cornerRadius": 4,
+                          "padding": [
+                            0,
+                            14
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "MpueF",
+                              "name": "ButtonLabel",
+                              "fill": "$fg-1",
+                              "content": "取消",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "eBfQv",
+                          "name": "Button / 添加标签",
+                          "height": 32,
+                          "fill": "$brand",
+                          "cornerRadius": 4,
+                          "padding": [
+                            0,
+                            14
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "qKGQC",
+                              "name": "ButtonLabel",
+                              "fill": "$fg-on-brand",
+                              "content": "添加标签",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
         }
       ]
     }

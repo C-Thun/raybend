@@ -30,6 +30,7 @@ use crate::error::Result;
 use crate::import::plan::{KnownSources, PlannedItem, Sequences, SourceFile};
 use crate::import::runner::{ImportSink, RunCounts, RunRequest};
 use crate::media::diff::DiskFile;
+use crate::media::exif::{self, ExifData, TakenAt, TakenAtSource};
 use crate::media::kind::MediaKind;
 use crate::store::assets;
 use crate::store::db::CatalogDb;
@@ -37,7 +38,7 @@ use crate::store::file_id::FileId;
 use crate::store::path_semantics::PathForms;
 
 /// 攒下来、等 `commit()` 一起做的一条动作。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 enum Op {
     /// 规划结果落成 `import_items` 行（pending / skipped / failed）。
     InsertItem {
@@ -60,6 +61,13 @@ enum Op {
         source_path: String,
         /// 源文件身份。
         source_identity: Option<FileId>,
+        /// 从**库内副本**读到的 EXIF（读不到时是默认值 —— 那就什么都不写）。
+        ///
+        /// 装箱：`ExifData` 比这条枚举里别的载荷大一大截，直接放进去会让所有
+        /// `Op` 都跟着变大（clippy 的 `large_enum_variant`）。
+        exif: Box<ExifData>,
+        /// 由那份 EXIF 定出的拍摄时间（含来源与时区偏移）。
+        taken: Option<TakenAt>,
     },
     /// 更新一条的状态。
     Mark {
@@ -203,6 +211,19 @@ impl ImportSink for CatalogSink<'_> {
         let Some(target_rel) = item.target_rel() else {
             return Ok(());
         };
+        /*
+         * 元数据在这里读（**库内副本**、在写事务之外）——
+         * 以前这一块根本没做，于是导入进库的照片 `taken_at` 永远是 NULL
+         * （人类 2026-09-18 上报「库里的时间全是 NULL」，根因就在这里）。
+         *
+         * 读的是**库里那份**：源文件可能在导入后被移走，而用户看到的就是库里这份。
+         * 兜底用的 mtime 要传**源文件的**（`file.mtime_ms`）—— 副本的 mtime 是复制时间，
+         * 拿它当拍摄时间是错的（而且与导入网格显示的那个值对不上）。
+         */
+        let abs = self.catalog.root().join(target_rel);
+        let exif = exif::read_file_for(&abs);
+        let file_name = target_rel.rsplit('/').next().unwrap_or(target_rel);
+        let taken = exif::resolve_taken_at(Some(&exif), file_name, file.mtime_ms);
         self.ops.push(Op::Register {
             run_id,
             target_rel: target_rel.to_string(),
@@ -212,6 +233,8 @@ impl ImportSink for CatalogSink<'_> {
             copy_identity,
             source_path: file.abs_path.display().to_string(),
             source_identity: file.identity,
+            exif: Box::new(exif),
+            taken,
         });
         Ok(())
     }
@@ -275,6 +298,8 @@ fn apply(conn: &rusqlite::Connection, op: &Op, now_ms: i64) -> Result<()> {
             copy_identity,
             source_path,
             source_identity,
+            exif,
+            taken,
         } => {
             let forms = PathForms::new(target_rel);
             let asset_id = find_or_create_asset(conn, target_rel, now_ms)?;
@@ -294,6 +319,22 @@ fn apply(conn: &rusqlite::Connection, op: &Op, now_ms: i64) -> Result<()> {
                 *source_identity,
                 now_ms,
             )?;
+            /*
+             * EXIF 只由**位图**写，RAW 只在「这个资产没有位图」时才写。
+             *
+             * 为什么：同一张照片的位图与 RAW 共用一个 `assets` 行，而 RAW 那边
+             * 能读到的字段往往更少（镜头名、部分曝光字段）—— 让后登记的那个去覆盖，
+             * 会把位图读到的信息冲成空。时间同理，只是多一层「不许降级」（见下）。
+             */
+            let has_bitmap: i64 = conn.query_row(
+                "SELECT count(*) FROM asset_files WHERE asset_id = ?1 AND role = 'bitmap'",
+                [asset_id],
+                |row| row.get(0),
+            )?;
+            if matches!(kind, MediaKind::Image) || has_bitmap == 0 {
+                let effective = keep_better_taken(conn, asset_id, *taken)?;
+                assets::apply_exif(conn, asset_id, exif, effective, now_ms)?;
+            }
             conn.execute(
                 "UPDATE import_items
                     SET asset_id = ?1, status = 'copied', reason = NULL
@@ -350,6 +391,50 @@ fn apply(conn: &rusqlite::Connection, op: &Op, now_ms: i64) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// 时间的「**不许降级**」规则：现有时间比这次读到的好，就保留现有的。
+///
+/// 位图与 RAW 共用一个 `assets` 行，而登记顺序由规划决定、并不保证；
+/// 若 RAW 那侧只读到 mtime（相机没给 RAW 写时间）而位图那侧读到了真 EXIF 时间，
+/// 「后写的赢」就会把好时间冲掉。所以按来源定级，只允许往上换：
+///
+/// `EXIF(3) > 同名位图继承(2) > 文件名(1) > 文件 mtime(0)`。
+/// 来源列缺失的老数据（早期版本写过的行）按最可信处理 —— 不确定就不动它。
+fn keep_better_taken(
+    conn: &rusqlite::Connection,
+    asset_id: i64,
+    incoming: Option<TakenAt>,
+) -> Result<Option<TakenAt>> {
+    use rusqlite::OptionalExtension;
+
+    let current: Option<(Option<i64>, Option<String>, Option<i64>)> = conn
+        .query_row(
+            "SELECT taken_at, taken_at_source, taken_at_offset_min FROM assets WHERE id = ?1",
+            [asset_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()?;
+    let Some((Some(millis), source, offset_min)) = current else {
+        return Ok(incoming);
+    };
+    let current = TakenAt {
+        millis,
+        offset_min: offset_min.and_then(|v| i32::try_from(v).ok()),
+        source: match source.as_deref() {
+            Some("file_mtime") => TakenAtSource::FileMtime,
+            Some("filename") => TakenAtSource::Filename,
+            Some("sibling") => TakenAtSource::Sibling,
+            // `exif` 与认不出来的写法（含 NULL）都当最可信
+            _ => TakenAtSource::Exif,
+        },
+    };
+    let rank = exif::source_rank;
+    if rank(current.source) >= incoming.map_or(-1, |t| rank(t.source)) {
+        Ok(Some(current))
+    } else {
+        Ok(incoming)
+    }
 }
 
 /// 找这张照片的资产：**把 `_RAW/` 折算回位图那个目录**再找；没有就新建一个。

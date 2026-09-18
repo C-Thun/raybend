@@ -230,6 +230,52 @@ export async function getThumbBytes(
   return toBytes(await call<unknown>("thumb_get", { path, size }));
 }
 
+/** "取一张能显示的图"的用途（`crates/raybend/src/display` 的 `ImagePurpose`）。 */
+export type ImagePurpose = "grid" | "strip" | "screen" | "original";
+
+/**
+ * **统一取图口**（`plans/M2-W2.md` §2.1）：view 与缩略图共用。
+ *
+ * 调用方只说「哪张、要多大」，**不需要知道它是 RAW 还是位图** ——
+ * 分派（以及「位图 + 原图 + 没编辑 ⇒ 直接给原文件」）都在 Rust 侧（`display` 模块）。
+ * 现在 view 还走在 `getViewImage` 之外的旧路上（`getThumbBytes`），1.5 接过来。
+ *
+ * 浏览器里返回 `null`（没有后端），界面自然走占位。
+ */
+export async function getViewImage(
+  path: string,
+  purpose: ImagePurpose = "screen",
+): Promise<Uint8Array | null> {
+  if (!isTauriRuntime()) return null;
+  return toBytes(await call<unknown>("view_image", { path, purpose }));
+}
+
+/**
+ * 看图态右栏的**直方图**（24 柱 RGB 合成，`plans/M2-W2.md` 1.6）。
+ *
+ * 统计在 Rust 侧做 —— `AGENTS.md` §6.1 的红线：**前端不碰像素**。
+ * 前端只拿回 24 个整数画柱子。取不到（浏览器里、认不出的文件）返回 `null`，
+ * 界面画一条空直方图。
+ */
+export interface Histogram {
+  bins: number;
+  r: number[];
+  g: number[];
+  b: number[];
+  /** 三通道合并后的峰值（归一化柱高用） */
+  max: number;
+}
+
+export async function getHistogram(
+  path: string,
+  bins = 24,
+): Promise<Histogram | null> {
+  if (!isTauriRuntime()) return null;
+  const value = await call<Histogram>("image_histogram", { path, bins });
+  if (value === null || typeof value !== "object") return null;
+  return value;
+}
+
 /**
  * 把 IPC 回来的原始字节统一成 `Uint8Array`。
  *

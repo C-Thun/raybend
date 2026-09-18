@@ -37,6 +37,21 @@ pub enum TakenAtSource {
     Sibling,
 }
 
+/// 拍摄时间来源的可信度分级（**只用于「不许降级」的判断**，别拿它当用户可见的文案）。
+///
+/// 位图与 RAW 共用一个 `assets` 行，而两侧各自读到的来源可能不同
+/// （例如 RAW 只能退到 mtime）—— 后写的那个不该把好时间冲掉，
+/// 靠这个分级决定「能不能换」（`import/sink.rs` 的 `keep_better_taken`）。
+#[must_use]
+pub const fn source_rank(source: TakenAtSource) -> i32 {
+    match source {
+        TakenAtSource::Exif => 3,
+        TakenAtSource::Sibling => 2,
+        TakenAtSource::Filename => 1,
+        TakenAtSource::FileMtime => 0,
+    }
+}
+
 /// 解析出来的拍摄时间。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub struct TakenAt {

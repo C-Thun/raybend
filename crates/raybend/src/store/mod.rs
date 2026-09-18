@@ -25,12 +25,14 @@
 //! | [`fts`] | 全文检索索引的维护（派生索引，过期即在查询前重建） |
 //! | [`tags`] | 标签：全局词典（`app.db`）+ 每库关联（`catalog.db`），`BROWSE.md` §7 |
 //! | [`assets`] | 资产与文件记录的读写：差分计划的落库、配对、缺失标记 |
+//! | [`backfill`] | 老库的元数据回填（`taken_at IS NULL` 的资产重读 EXIF） |
 //! | [`recent`] | 最近导入过的目录（`app.db`）——「最近」列表的存取与裁剪 |
 //! | [`volumes`] | 可选来源的枚列（Windows 驱动器 / Linux 挂载点）+ 来源类型判定 |
 //! | [`db`] | 门面：`AppDb`（全局库）与 `CatalogDb`（每库），上层只用这一层 |
 //! | [`location`] | 位置判定：本地 / 网络 / 云同步（放 catalog 的风险提示） |
 
 pub mod assets;
+pub mod backfill;
 pub mod db;
 pub mod delete;
 pub mod file_id;

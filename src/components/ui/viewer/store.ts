@@ -21,6 +21,34 @@
  * 网格（`photo-grid`）拥有缩略图队列；看图**不抢**它的小图，而是自己再要一份
  * 「屏幕档」（长边 1920，`ThumbSize = "screen"`），并且**渐进显示**：
  * 网格里已有小图 → 立刻显示 → 大图到了再换上去（顺带把缩放换算好，画面不跳）。
+ *
+ * ## 视口状态归谁（`AGENTS.md` §6.1 的第一条红线，2026-09-18 定）
+ *
+ * **缩放 / 平移 / 适配 / 看得到哪一块，只有这一个地方说了算** ——
+ * 就是这里的 `ViewerState`（`zoom` / `pan` / `fit` / `viewport` / `natural`）：
+ *
+ * * 视图层（`Viewer.tsx`）只把 `state()` 翻译成一条 `transform`，不做任何坐标数学；
+ * * 右栏的**预览与视野框**（`features/browse/ViewerReadout.tsx`）读的也是同一个 state，
+ *   并且调同一个 `visibleRect()` —— 不许自己再推一遍（推两遍就一定会错开）；
+ * * 交互（滚轮、拖动、双击、快捷键）只表达**意图**（我要放大到 200%、我要适配窗口），
+ *   换算全部落在这里的纯函数里（它们都有单测）。
+ *
+ * 将来接 Rust 原生视口（M2-W3 的 wgpu 直绘）时：**状态搬去 Rust 独有**
+ * （`AGENTS.md` §6.1 的接口纪律），前端这份退化成一份镜像；
+ * 那时这个 store 的函数就是「前端镜像」的更新器，`visibleRect()` 这类纯函数
+ * 会因为「同一变换、两处使用」而变得更要紧 —— 所以它们**现在就是纯的、有测的**。
+ *
+ * ## 前端不碰像素（同一节的红线）
+ *
+ * 这个 store 与它的视图**只处理尺寸、位置、倍率**（数字），不碰像素：
+ *
+ * * 取图走**统一取图口**（`ViewerStoreDeps.loadScreen` / `loadThumb`，由调用方注入）；
+ * * 拿到的字节只做一件事：`URL.createObjectURL` 交给 `<img>` —— 不解码、不读像素、不管色彩空间；
+ * * 直方图/色彩/缩放插值这类的统计与处理全在 Rust 侧（`raybend::display::histogram`）。
+ *
+ * 这条有机器守着：`scripts/check-architecture.mjs` 的**规则 5「前端不碰像素」**
+ * （`pnpm lint:arch`）—— `src/` 下出现 `getContext(` / `getImageData` / `colorSpace`
+ * 这类 API 会直接报错（注释里提到不算）。
  */
 
 import { createSignal } from "solid-js";
@@ -37,6 +65,21 @@ export interface ViewerPhoto {
    * 尺寸未知时 `clampPan` 会把拖动锁死（见那个函数的说明）。
    */
   natural?: { width: number; height: number };
+  /**
+   * 这张照片当前的标记（**壳层用**）。
+   *
+   * 看图件自己**不读它**（它只管显示照片），但看图态的底部状态栏要「左文件名 + 锁、
+   * 右标记」（`BROWSE.md` §5.8）—— 那些字段调用方本来就有（`AssetItem` 里就在），
+   * 顺手带进来，省掉一次「为了显示四个数再问一次后端」的往返。
+   */
+  marks?: {
+    rating: number;
+    colorLabel: string | null;
+    likeState: string | null;
+    lockLevel: number;
+  };
+  /** 旗标（内存态，不在 `AssetItem` 里，所以由调用方从 store 取）。 */
+  flag?: "pick" | "reject" | null;
 }
 
 export interface ViewportSize {
@@ -191,6 +234,13 @@ export interface ViewerStore {
   close: () => void;
   next: () => void;
   prev: () => void;
+  /**
+   * 跳到列表里的**任意一张**（胶片带点击、对比态定位都走它）。
+   *
+   * 与 `next` / `prev` 共用同一条路径：**重置成「适配窗口」**并只换图不换列表 ——
+   * 所以从胶片带点过去不会继承上一张的缩放，也不会把列表换掉。
+   */
+  goTo: (index: number) => void;
   setViewport: (size: ViewportSize) => void;
   setNatural: (size: NaturalSize) => void;
   zoomBy: (factor: number, anchor?: { x: number; y: number }) => void;
@@ -436,6 +486,7 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
     sharp,
     show,
     close,
+    goTo,
     next: () => goTo(index() + 1),
     prev: () => goTo(index() - 1),
     setViewport,
@@ -444,5 +495,56 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
     zoomTo: (zoom, anchor) => applyZoom(zoom, anchor),
     panBy,
     toggleFit,
+  };
+}
+
+/**
+ * 当前**看得见的那块图像区域**（图像像素坐标）—— 右栏预览上的「视野框」用它。
+ *
+ * 约定的变换（与视图里那条 `transform` 一字不差）：
+ *
+ * ```text
+ * 屏幕坐标 = 视口中心 + pan + (图像坐标 − 图像中心) × zoom
+ * ```
+ *
+ * 反过来解出「屏幕的四个角对应图像里的哪一块」，再夹进图像范围。
+ * 放大到超过整张时框会小于整张（正常）；缩到比适配还小时框就是整张（夹取的结果）。
+ *
+ * 尺寸不全（没量到视口、还没拿到原图尺寸）时返回 `null` —— 调用方据此不画框，
+ * 而不是画一个乱跳的矩形。
+ */
+export function visibleRect(state: ViewerState): {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+} | null {
+  const { natural, viewport, zoom, pan } = state;
+  if (
+    natural.width <= 0 ||
+    natural.height <= 0 ||
+    viewport.width <= 0 ||
+    viewport.height <= 0 ||
+    !Number.isFinite(zoom) ||
+    zoom <= 0
+  ) {
+    return null;
+  }
+  const centerX = viewport.width / 2 + pan.x;
+  const centerY = viewport.height / 2 + pan.y;
+  const toImageX = (screenX: number): number =>
+    (screenX - centerX) / zoom + natural.width / 2;
+  const toImageY = (screenY: number): number =>
+    (screenY - centerY) / zoom + natural.height / 2;
+
+  const left = Math.min(Math.max(toImageX(0), 0), natural.width);
+  const right = Math.min(Math.max(toImageX(viewport.width), 0), natural.width);
+  const top = Math.min(Math.max(toImageY(0), 0), natural.height);
+  const bottom = Math.min(Math.max(toImageY(viewport.height), 0), natural.height);
+  return {
+    x: left,
+    y: top,
+    width: Math.max(0, right - left),
+    height: Math.max(0, bottom - top),
   };
 }

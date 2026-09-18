@@ -24,7 +24,7 @@ import type {
   MarkingItem,
   TimelineEntry,
 } from "../../api/types.ts";
-import { createBrowseStore, PAGE_SIZE, type BrowseApi } from "./store.ts";
+import { createBrowseStore, PAGE_SIZE, type BrowseApi, type BrowseStore } from "./store.ts";
 
 function item(id: number, overrides: Partial<AssetItem> = {}): AssetItem {
   return {
@@ -180,6 +180,15 @@ async function tick(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+/**
+ * 选库 + 选目录 —— 进入浏览是**两步**（人类 2026-09-18 定：点库不铺整库照片，
+ * 必须再点库下的一个目录）。`scope` 是库内相对路径（`photos/2026-08-15`）。
+ */
+function open(store: BrowseStore, id = "RepoA", scope = "photos/2026-08-15"): void {
+  store.setRepository(id);
+  store.setScope(scope);
+}
+
 // ─────────────────────────── 空态与边界 ───────────────────────────
 
 test("没有库时不发任何请求", async () => {
@@ -194,7 +203,7 @@ test("没有库时不发任何请求", async () => {
 test("空库：total 为 0，没有条目，也不算错误", async () => {
   const { api } = fakeApi(0);
   const store = createBrowseStore({ api });
-  store.setRepository("RepoA");
+  open(store);
   await tick();
   assert.equal(store.total(), 0);
   assert.equal(store.itemAt(0), null);
@@ -203,10 +212,29 @@ test("空库：total 为 0，没有条目，也不算错误", async () => {
 
 // ─────────────────────────── 加载与分页 ───────────────────────────
 
-test("setRepository 会加载第一页、时间线与分面", async () => {
+test("选了库但还没选目录：不发任何查询，网格是「请选目录」的空态", async () => {
   const { api, calls } = fakeApi(10);
   const store = createBrowseStore({ api });
   store.setRepository("RepoA");
+  await tick();
+
+  assert.equal(store.query(), null, "没选目录就不该构造查询");
+  assert.equal(store.total(), 0);
+  assert.equal(store.timeline().length, 0);
+  assert.deepEqual(calls.page, [], "点库本身不该把整库照片铺出来");
+  assert.equal(calls.timeline, 0);
+
+  // 再点一个目录 —— 这时才真的去读库
+  store.setScope("photos/2026-08-15");
+  await tick();
+  assert.equal(store.total(), 10);
+  assert.deepEqual(calls.page, [0]);
+});
+
+test("setRepository 会加载第一页、时间线与分面", async () => {
+  const { api, calls } = fakeApi(10);
+  const store = createBrowseStore({ api });
+  open(store);
   await tick();
   assert.equal(store.total(), 10);
   assert.equal(store.itemAt(0)?.id, 1);
@@ -219,7 +247,7 @@ test("setRepository 会加载第一页、时间线与分面", async () => {
 test("ensureRange 只请求缺的那几页，且同一页不重复请求", async () => {
   const { api, calls } = fakeApi(2000);
   const store = createBrowseStore({ api });
-  store.setRepository("RepoA");
+  open(store);
   await tick();
   calls.page = [];
 
@@ -237,7 +265,7 @@ test("ensureRange 只请求缺的那几页，且同一页不重复请求", async
 test("分页数据合进稀疏表：未加载的位置是 null", async () => {
   const { api } = fakeApi(1000);
   const store = createBrowseStore({ api });
-  store.setRepository("RepoA");
+  open(store);
   await tick();
   await store.ensureRange(PAGE_SIZE * 3, PAGE_SIZE * 3 + 4);
 
@@ -262,9 +290,9 @@ test("换库之后，旧库迟到的结果会被丢掉", async () => {
     return originalPage(query, offset, limit);
   };
 
-  store.setRepository("Slow");
+  open(store, "Slow");
   await tick();
-  store.setRepository("Fast");
+  open(store, "Fast");
   await tick();
 
   // 放行所有挂起的请求（此时 Slow 的结果已经过期）
@@ -279,7 +307,7 @@ test("换库之后，旧库迟到的结果会被丢掉", async () => {
 test("换筛选会清空已加载的窗口与选择", async () => {
   const { api } = fakeApi(20);
   const store = createBrowseStore({ api });
-  store.setRepository("RepoA");
+  open(store);
   await tick();
   store.select(3, "replace");
   assert.equal(store.selectedCount(), 1);
@@ -293,10 +321,10 @@ test("换筛选会清空已加载的窗口与选择", async () => {
 test("换范围（目录）也会清选择", async () => {
   const { api } = fakeApi(20);
   const store = createBrowseStore({ api });
-  store.setRepository("RepoA");
+  open(store);
   await tick();
   store.select(2, "replace");
-  store.setScope("photos/2026-08-15");
+  store.setScope("photos/2026-08-16");
   assert.equal(store.selectedCount(), 0);
 });
 
@@ -305,7 +333,7 @@ test("换范围（目录）也会清选择", async () => {
 test("点击 / Ctrl / Shift 三种模式按 BROWSE.md 的语义走", async () => {
   const { api } = fakeApi(5);
   const store = createBrowseStore({ api });
-  store.setRepository("RepoA");
+  open(store);
   await tick();
 
   store.select(1, "replace");
@@ -334,7 +362,7 @@ test("点击 / Ctrl / Shift 三种模式按 BROWSE.md 的语义走", async () =>
 test("选不了没加载到的照片（选择模型只看得到当前列表）", async () => {
   const { api } = fakeApi(1000);
   const store = createBrowseStore({ api });
-  store.setRepository("RepoA");
+  open(store);
   await tick();
   // 只补第 3 页；第 1、2 页仍然是「没请求过」
   await store.ensureRange(PAGE_SIZE * 3, PAGE_SIZE * 3 + 2);
@@ -359,7 +387,7 @@ test("选不了没加载到的照片（选择模型只看得到当前列表）",
 test("标记之后本地条目与标记缓存都跟着更新", async () => {
   const { api, calls } = fakeApi(5);
   const store = createBrowseStore({ api });
-  store.setRepository("RepoA");
+  open(store);
   await tick();
 
   store.select(2, "replace");
@@ -374,7 +402,7 @@ test("标记之后本地条目与标记缓存都跟着更新", async () => {
 test("没选中任何照片时打标记是无操作", async () => {
   const { api, calls } = fakeApi(5);
   const store = createBrowseStore({ api });
-  store.setRepository("RepoA");
+  open(store);
   await tick();
   const result = await store.mark({ kind: "rating", value: 3 });
   assert.equal(result, null);
@@ -385,7 +413,7 @@ test("标记会把后端返回的「被锁跳过」原样带回来", async () =>
   const { api } = fakeApi(5);
   api.mark = async () => ({ ...EMPTY_MARK, changed: 1, skippedLocked: [3] });
   const store = createBrowseStore({ api });
-  store.setRepository("RepoA");
+  open(store);
   await tick();
   store.selectAll();
   const result = await store.mark({ kind: "rating", value: 5 });
@@ -397,7 +425,7 @@ test("标记会把后端返回的「被锁跳过」原样带回来", async () =>
 test("旗标是内存态：打上、读回、清空", async () => {
   const { api } = fakeApi(5);
   const store = createBrowseStore({ api });
-  store.setRepository("RepoA");
+  open(store);
   await tick();
 
   await store.setFlag([1, 2], "pick");
@@ -419,11 +447,11 @@ test("旗标是内存态：打上、读回、清空", async () => {
 test("换库会重新拉旗标（旗标跨库，但界面只看当前库）", async () => {
   const { api } = fakeApi(5);
   const store = createBrowseStore({ api });
-  store.setRepository("RepoA");
+  open(store);
   await tick();
   await store.setFlag([1], "pick");
 
-  store.setRepository("RepoB");
+  open(store, "RepoB");
   await tick();
   await tick();
   assert.equal(store.repositoryId(), "RepoB");
@@ -436,7 +464,7 @@ test("换库会重新拉旗标（旗标跨库，但界面只看当前库）", as
 test("setFilter / setSort 会带上完整查询重新加载", async () => {
   const { api, calls } = fakeApi(5);
   const store = createBrowseStore({ api });
-  store.setRepository("RepoA");
+  open(store);
   await tick();
   calls.page = [];
 
@@ -453,10 +481,10 @@ test("setFilter / setSort 会带上完整查询重新加载", async () => {
 test("重复设同一个库不会重复加载", async () => {
   const { api, calls } = fakeApi(5);
   const store = createBrowseStore({ api });
-  store.setRepository("RepoA");
+  open(store);
   await tick();
   calls.page = [];
-  store.setRepository("RepoA");
+  open(store);
   await tick();
   assert.deepEqual(calls.page, []);
 });
@@ -471,7 +499,7 @@ test("可见顺序由调用方给：Shift 区间选择跟着它走（数据层�
    */
   const { api } = fakeApi(6);
   const store = createBrowseStore({ api });
-  store.setRepository("RepoA");
+  open(store);
   await tick();
 
   const visible = ["2", "1", "3", "4", "5", "6"];
@@ -490,7 +518,7 @@ test("按需取数只认数据下标：可见区间给什么就取什么页", as
   // store 这边只按数据下标算页 —— 它不知道也不该知道显示顺序。
   const { api, calls } = fakeApi(600);
   const store = createBrowseStore({ api });
-  store.setRepository("RepoA");
+  open(store);
   await tick();
 
   calls.page = [];
@@ -500,4 +528,67 @@ test("按需取数只认数据下标：可见区间给什么就取什么页", as
     `第 599 个数据下标落在第 2 页（offset 512），实际取了 ${calls.page.join(",")}`,
   );
   assert.ok(!calls.page.includes(0), "第 0 页已经加载过，不该重复取");
+});
+
+// ─────────────────── 边界：显示规则不许长回数据层（人类 2026-09-18 定）───────────────────
+
+test("数据层只剩「查询顺序」：没有显示序的入口（分组/排序归显示层）", async () => {
+  /*
+   * 人类原话：「排序在显示端做是正确的，数据源怎么可能需要去理解展示的逻辑。」
+   * 上一版为了实现「片内按文件名自然序」，在 store 里塞过 `setDisplayOrder()` / `at()`，
+   * 于是「取下来的页」与「屏幕上那一格」可能错位。这两条断言把它钉住：
+   * 谁要再加，先回来看这段注释。
+   */
+  const { api } = fakeApi(5);
+  const store = createBrowseStore({ api });
+  const surface = store as unknown as Record<string, unknown>;
+  assert.equal(surface["setDisplayOrder"], undefined, "不许把显示序灌进数据层");
+  assert.equal(surface["at"], undefined, "不许在数据层按下标取「显示用的那一张」");
+  // 显示层要的顺序由调用方显式传（`select(id, mode, order)` / `ensureRange(数据下标)`）
+  assert.equal(typeof store.ensureRange, "function");
+  assert.equal(typeof store.itemAt, "function");
+});
+
+// ─────────────────── 只挪锚点（对比视图点某一幅画幅） ───────────────────
+
+test("setAnchor：锚点挪到**已选中**的那张上，选择集合一点不动", async () => {
+  const { api } = fakeApi(5);
+  const store = createBrowseStore({ api });
+  open(store);
+  await tick();
+
+  store.select(1, "replace");
+  store.select(2, "toggle");
+  store.select(3, "toggle");
+  assert.deepEqual(store.selectedIds(), [1, 2, 3]);
+  assert.equal(store.anchorId(), 3, "最后一次点中的是锚点");
+
+  store.setAnchor(1);
+  assert.equal(store.anchorId(), 1);
+  assert.deepEqual(store.selectedIds(), [1, 2, 3], "选择集合保持不变（否则对比会散掉）");
+});
+
+test("setAnchor：目标不在选择集合里就**不动**（锚点必须是被选中的那张）", async () => {
+  const { api } = fakeApi(5);
+  const store = createBrowseStore({ api });
+  open(store);
+  await tick();
+
+  store.select(2, "replace");
+  assert.equal(store.anchorId(), 2);
+  store.setAnchor(4);
+  assert.equal(store.anchorId(), 2, "没被选中的图不能当锚点");
+  assert.deepEqual(store.selectedIds(), [2]);
+});
+
+test("setAnchor：没有选择时也不动", async () => {
+  const { api } = fakeApi(3);
+  const store = createBrowseStore({ api });
+  open(store);
+  await tick();
+
+  store.clearSelection();
+  store.setAnchor(1);
+  assert.equal(store.anchorId(), null);
+  assert.deepEqual(store.selectedIds(), []);
 });

@@ -17,6 +17,9 @@
 
 import { Show, splitProps, type JSX } from "solid-js";
 
+/** 按钮上的鼠标事件（Solid 会把 `currentTarget` 收窄成这个元素） */
+type ButtonMouseEvent = MouseEvent & { currentTarget: HTMLButtonElement; target: Element };
+
 export interface ToggleBlockProps
   extends Omit<JSX.ButtonHTMLAttributes<HTMLButtonElement>, "children"> {
   pressed: boolean;
@@ -32,12 +35,31 @@ export function ToggleBlock(props: ToggleBlockProps) {
   const [local, rest] = splitProps(props, [
     "pressed",
     "onPressedChange",
+    "onClick",
     "icon",
     "children",
     "label",
     "class",
     "disabled",
   ]);
+
+  /**
+   * 调用调用方传的 `onClick`。
+   *
+   * Solid 的 `onClick` 类型是「单个函数 **或函数数组**」（`EventHandlerUnion`），
+   * 而且它给的是**带 `currentTarget` 收窄**的事件类型 —— 所以参数类型要跟它对齐，
+   * 直接把两种形状都照顾到。
+   */
+  const callOuterClick = (event: ButtonMouseEvent): void => {
+    const handler = local.onClick;
+    if (Array.isArray(handler)) {
+      for (const one of handler) {
+        if (typeof one === "function") one(event);
+      }
+    } else if (typeof handler === "function") {
+      handler(event);
+    }
+  };
 
   return (
     <button
@@ -47,7 +69,17 @@ export function ToggleBlock(props: ToggleBlockProps) {
       aria-pressed={local.pressed}
       aria-label={local.label}
       title={rest.title ?? local.label}
-      onClick={() => local.onPressedChange?.(!local.pressed)}
+      /*
+       * 两个回调**都要调**：本组件的语义是 `onPressedChange`（模式切换），
+       * 但调用方如果想在点击时顺手做点别的（切旗标、打锁），传 `onClick` 是自然的写法。
+       * 2026-09-19：早先只调 `onPressedChange` 且把 `onClick` 放在 `{...rest}` 里 ——
+       * 结果调用方传的 `onClick` 被**静默覆盖**，工具条里的旗标/喜欢/锁按钮全是死的
+       * （冒烟里 invoke 日志一条都没有，才把这个揪出来）。
+       */
+      onClick={(event) => {
+        local.onPressedChange?.(!local.pressed);
+        callOuterClick(event);
+      }}
       class={[
         "inline-flex shrink-0 cursor-pointer select-none items-center justify-center gap-1.5 rounded-ui transition-colors",
         // 方块尺寸随密度档变化，图标尺寸也跟着档位但**不随字号**（§8.1）

@@ -21,6 +21,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use raybend::display::{self, ImagePurpose, ImageRequest, DEFAULT_BINS};
 use raybend::store::time;
 use raybend::thumbnail::{SizeClass, ThumbsDb, render_now};
 use tauri::{AppHandle, Manager, Runtime};
@@ -85,6 +86,72 @@ pub async fn thumb_get<R: Runtime>(
     .await?;
 
     Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// **统一取图口**（`crates/raybend/src/display`，口径见 `plans/M2-W2.md` §2.1）。
+///
+/// 与 `thumb_get` 的区别：那个是「给我一张源文件的网格/胶片带小图」的专用命令；
+/// 这个是 **view 与缩略图共用的总入口** —— 调用方只说「哪张、要多大、有没有编辑」，
+/// 由 `display` 决定它是 RAW 还是位图、该给原图还是该渲染。
+///
+/// `purpose`：`"grid"` / `"strip"` / `"screen"` / `"original"`；缺省 `screen`（看图）。
+/// 位图 + `original` + 没编辑过 ⇒ **直接给原文件字节**（不经渲染管线）。
+#[tauri::command]
+pub async fn view_image(path: String, purpose: Option<String>) -> Result<tauri::ipc::Response, String> {
+    let text = purpose.as_deref().unwrap_or("screen");
+    let purpose = ImagePurpose::parse(text)
+        .ok_or_else(|| format!("未知的取图用途：{text}"))?;
+    let bytes = crate::source::blocking(move || {
+        let request = ImageRequest::plain(Path::new(&path), purpose);
+        let image = display::display_image(&request)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "取不到这张图（类型认不出或解不开）".to_string())?;
+        Ok(image.bytes)
+    })
+    .await?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// 看图态右栏的**直方图**（24 柱 RGB 合成；`plans/M2-W2.md` 1.6）。
+///
+/// 统计在 Rust 侧做（`AGENTS.md` §6.1 的红线：前端不碰像素）——
+/// 前端只拿到 24 个整数去画柱子。取的是 `grid` 档（长边 384）的字节，
+/// 快且足够稳（直方图看形状，不看精确计数）。
+#[tauri::command]
+pub async fn image_histogram(path: String, bins: Option<usize>) -> Result<HistogramDto, String> {
+    let bins = bins.filter(|b| *b > 0).unwrap_or(DEFAULT_BINS);
+    crate::source::blocking(move || {
+        let histogram = raybend::display::histogram_of_file(Path::new(&path), bins)
+            .map_err(|e| e.to_string())?
+            .unwrap_or_else(|| raybend::display::Histogram::empty(bins));
+        Ok(HistogramDto::from(histogram))
+    })
+    .await
+}
+
+/// 直方图的传输形状（前端画柱子用）。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistogramDto {
+    pub bins: usize,
+    /// 每个桶的计数（长度都等于 `bins`）
+    pub r: Vec<u32>,
+    pub g: Vec<u32>,
+    pub b: Vec<u32>,
+    /// 三通道合并后的峰值（前端按它归一化柱高）
+    pub max: u32,
+}
+
+impl From<raybend::display::Histogram> for HistogramDto {
+    fn from(h: raybend::display::Histogram) -> Self {
+        Self {
+            bins: h.bins,
+            r: h.r,
+            g: h.g,
+            b: h.b,
+            max: h.max,
+        }
+    }
 }
 
 /// 源文件缩略图缓存的统计（设置面板与排错用）。

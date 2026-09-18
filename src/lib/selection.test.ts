@@ -11,6 +11,7 @@ import { test } from "node:test";
 import {
   applySelection,
   clearSelection,
+  clickMode,
   EMPTY_SELECTION,
   extendSelection,
   hasSelection,
@@ -163,4 +164,22 @@ test("反转：空基准、空 key、重复 key 都不出错", () => {
   assert.deepEqual([...invertSet(new Set(), [])], []);
   assert.deepEqual([...invertSet(new Set(), ["a", "a"])], [], "同一个 id 反转两次 = 没变");
   assert.deepEqual([...invertSet(new Set(["a"]), [])], ["a"]);
+});
+
+// ─────────────────── 修饰键 → 选择模式（tiles 与胶片带共用）───────────────────
+
+test("clickMode：不加修饰键 = 替换（先清掉原选中）", () => {
+  assert.equal(clickMode({ shiftKey: false, ctrlKey: false, metaKey: false }), "replace");
+});
+
+test("clickMode：Shift = 区间翻转，Ctrl / Cmd = 自由多选", () => {
+  assert.equal(clickMode({ shiftKey: true, ctrlKey: false, metaKey: false }), "range");
+  assert.equal(clickMode({ shiftKey: false, ctrlKey: true, metaKey: false }), "toggle");
+  assert.equal(clickMode({ shiftKey: false, ctrlKey: false, metaKey: true }), "toggle");
+});
+
+test("clickMode：Shift 与 Ctrl 一起按时**Shift 优先**（规范里写明的顺序）", () => {
+  assert.equal(clickMode({ shiftKey: true, ctrlKey: true, metaKey: false }), "range");
+  assert.equal(clickMode({ shiftKey: true, ctrlKey: false, metaKey: true }), "range");
+  assert.equal(clickMode({ shiftKey: true, ctrlKey: true, metaKey: true }), "range");
 });

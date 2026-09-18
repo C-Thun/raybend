@@ -19,6 +19,7 @@ import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show }
 import {
   IconAlertTriangle,
   IconAlbumOff,
+  IconFolder,
   IconPhoto,
   IconPhotoOff,
 } from "@tabler/icons-solidjs";
@@ -26,9 +27,11 @@ import {
 import { getThumbBytes } from "../../api/db.ts";
 import { StateWatermark } from "../../components/ui/StateWatermark.tsx";
 import { Tile, type TileColorLabel } from "../../components/ui/Tile.tsx";
+import type { ViewerPhoto } from "../../components/ui/viewer/index.ts";
 import { VirtualGrid } from "../../components/ui/VirtualGrid.tsx";
 import { createTokenPx } from "../../components/ui/tokens.ts";
-import { createThumbQueue } from "../../components/ui/thumb-queue.ts";
+import { createThumbQueue, type ThumbQueue } from "../../components/ui/thumb-queue.ts";
+import { clickMode } from "../../lib/selection.ts";
 import { t } from "../../i18n/index.ts";
 import {
   computeTileFlow,
@@ -57,6 +60,13 @@ export interface BrowseGridProps {
   store: BrowseStore;
   /** 库根目录（缩略图要绝对路径）。 */
   root: string | null;
+  /**
+   * **与胶片带共用**的缩略图队列（`plans/M2-W2.md` 2.1）。
+   *
+   * 由工作区建、传给两边：网格里已经缓存的照片，胶片带里立刻就有。
+   * 不传就自己建一个（组件独立可用，`dev/` 陈列室与单测不必关心这件事）。
+   */
+  thumbs?: ThumbQueue;
   /** 网格滚动位置的复位键（换库/换目录时用）。 */
   resetKey?: string;
   class?: string;
@@ -64,6 +74,20 @@ export interface BrowseGridProps {
   tileStep?: number;
   /** 按时间分组（受控）。 */
   grouped?: boolean;
+  /**
+   * 用户在网格里真的点了一下（选中某张照片）。
+   *
+   * 展开的库列表靠它自动收起（`BROWSE.md` §4.2 的三个条件之一：
+   * 「从用户体感来说就是在 browse mid 里随便点了一下」）。
+   */
+  onInteract?: () => void;
+  /**
+   * 要进看图（双击某张、或在选中一张时回车）。
+   *
+   * 传的是**显示顺序下的完整清单**与当前那张的位置 —— 「下一张」要按用户看到的顺序走
+   * （含按时间分组后的片内顺序），所以顺序在这一层算好（显示层），别人不重复推导。
+   */
+  onOpenViewer?: (photos: ViewerPhoto[], index: number) => void;
 }
 
 export function BrowseGrid(props: BrowseGridProps) {
@@ -135,6 +159,68 @@ export function BrowseGrid(props: BrowseGridProps) {
     });
   });
 
+  /**
+   * 显示顺序下的全部已加载照片（看图要用）。
+   *
+   * 只含**已加载**的格子：看图是「从这一屏往下翻」，没取回来的页不在列表里
+   * （滚动时会把它们取回来，所以不会卡在首页）。
+   */
+  const orderedPhotos = (): ViewerPhoto[] => {
+    const out: ViewerPhoto[] = [];
+    for (const row of rows()) {
+      if (row.kind !== "tiles") continue;
+      for (const slot of row.slots) {
+        const item = store.itemAt(slot);
+        if (item === null) continue;
+        const path = absPath(item.relPath);
+        if (path === null) continue;
+        out.push({
+          id: String(item.id),
+          path,
+          fileName: item.fileName,
+          // 元数据里的真实宽高：看图靠它算拖动边界（RAW 尤其要紧，见 viewer/store.ts）
+          ...(item.width !== null && item.height !== null
+            ? { natural: { width: item.width, height: item.height } }
+            : {}),
+          // 看图态的底部状态栏要显示这些（省一次为了四个数问后端的往返）
+          marks: {
+            rating: item.rating,
+            colorLabel: item.colorLabel,
+            likeState: item.likeState,
+            lockLevel: item.lockLevel,
+          },
+          flag: store.picks().has(item.id)
+            ? "pick"
+            : store.rejects().has(item.id)
+              ? "reject"
+              : null,
+        });
+      }
+    }
+    return out;
+  };
+
+  /** 双击 / 回车进看图。 */
+  function openViewerAt(id: number): void {
+    const list = orderedPhotos();
+    const at = list.findIndex((photo) => photo.id === String(id));
+    if (at >= 0) props.onOpenViewer?.(list, at);
+  }
+
+  /** 网格里的键盘：只接「回车进看图」（方向键与区间选本来就在 tile 的点击语义里）。 */
+  function onGridKeyDown(event: KeyboardEvent): void {
+    if (event.key !== "Enter") return;
+    const selected = store.selectedIds();
+    const only = selected[0];
+    if (selected.length !== 1 || only === undefined) return;
+    event.preventDefault();
+    // **这个回车已经被我们用掉了**：不让它继续冒泡到 window ——
+    // 否则刚打开的看图件会在同一个事件里又收到一次「回车＝退出」，闪一下就关
+    // （2026-09-18 冒烟实测：active 在同一个 tick 里变回 false）。
+    event.stopPropagation();
+    openViewerAt(only);
+  }
+
   /** 行 → 下标区间（按需取数用）。 */
   const rowIndexRange = (start: number, end: number): [number, number] => {
     const list = rows();
@@ -168,18 +254,22 @@ export function BrowseGrid(props: BrowseGridProps) {
    * 缩略图队列：与导入网格共用同一个实现（`components/ui/thumb-queue.ts`）。
    * 浏览的路径是「库根 + 库内相对路径」；换库时清空（否则会串图）。
    */
-  const thumbs = createThumbQueue({
-    load: async (path) => {
-      const bytes = await getThumbBytes(path, "grid");
-      return bytes ?? null;
-    },
-  });
+  /** 没人给队列时自己建一个（自己建的才由自己回收 —— 共用的那个归工作区管） */
+  const ownThumbs = props.thumbs === undefined
+    ? createThumbQueue({
+        load: async (path) => {
+          const bytes = await getThumbBytes(path, "grid");
+          return bytes ?? null;
+        },
+      })
+    : null;
+  const thumbs = props.thumbs ?? ownThumbs!;
   createEffect(() => {
     const root = props.root;
     if (root === null) return;
     thumbs.clear();
   });
-  onCleanup(() => thumbs.clear());
+  onCleanup(() => ownThumbs?.clear());
 
   /** 库里照片的绝对路径。 */
   const absPath = (relPath: string): string | null => {
@@ -194,9 +284,10 @@ export function BrowseGrid(props: BrowseGridProps) {
    *
    * 四个条件**按优先级**排 —— 顺序错了会出现「载入中却报空」这类假状态：
    *   1. 还没选库（左列会告诉用户去哪建库，网格这边只做背景陈述）
-   *   2. 出错且什么都没拿到（有数据时不清屏：报错还要能接着看图）
-   *   3. 首次加载中（`total() === 0` 才算「首次」：翻页不置 loading，见 store 的说明）
-   *   4. 真的没有照片
+   *   2. **选了库但还没选目录**（人类 2026-09-18 定：点库不铺整库照片，要再点一个目录）
+   *   3. 出错且什么都没拿到（有数据时不清屏：报错还要能接着看图）
+   *   4. 首次加载中（`total() === 0` 才算「首次」：翻页不置 loading，见 store 的说明）
+   *   5. 真的没有照片
    */
   const watermark = () => {
     if (store.repositoryId() === null) {
@@ -204,6 +295,14 @@ export function BrowseGrid(props: BrowseGridProps) {
         <StateWatermark
           icon={<IconAlbumOff size={64} stroke-width={1} />}
           text={t("browse.noRepository")}
+        />
+      );
+    }
+    if (store.scopePath() === null) {
+      return (
+        <StateWatermark
+          icon={<IconFolder size={64} stroke-width={1} />}
+          text={t("browse.pickDirectory")}
         />
       );
     }
@@ -243,8 +342,18 @@ export function BrowseGrid(props: BrowseGridProps) {
       class={["flex min-h-0 flex-1 flex-col overflow-hidden px-2 py-2", props.class ?? ""]
         .filter(Boolean)
         .join(" ")}
+      // 回车进看图（方向键/区间选在 tile 自己的点击语义里，不在这里重复实现）
+      onKeyDown={onGridKeyDown}
     >
-      <Show when={watermark()} fallback={<VirtualGrid
+      {/*
+        ⚠️ **`keyed` 不能删**（2026-09-18 实测踩到）：`Show` 在非 `keyed` 模式下
+        比的是**真值**（`!a === !b`），而这里的 `when` 是**水印元素本身** ——
+        两个不同的水印（如「还没有库」→「挑一个目录」）都是真值，于是它认为「没变」、
+        不重渲染，界面上就永远停在第一个水印上。`keyed` 改成按对象比较，才能换掉。
+        （同类先例：`components/ui/EasyCopy.tsx` 的 `popKey`。判据：所有 "两个非空值互换" 的
+        水印切换都靠它。）
+      */}
+      <Show when={watermark()} keyed fallback={<VirtualGrid
         rows={rows()}
         resetKey={props.resetKey}
         onVisibleRange={(start, end) => {
@@ -283,7 +392,21 @@ export function BrowseGrid(props: BrowseGridProps) {
                   };
 
                   return (
-                    <Tile
+                    /*
+                     * 双击进看图挂在**外面这层**：`Tile` 自己会接管 `onClick`（它有一套激活语义），
+                     * 实测把 `onDblClick` 传给它**不会被挂到 DOM 上**（2026-09-18 冒烟抓到的）。
+                     * 导入网格也是这么做的（`PhotoGrid` 的 `onOpen`），两边保持一致。
+                     *
+                     * `contents` = 这层不产生盒子，网格布局与「Tile 直接当 flex 子项」完全一致。
+                     */
+                    <div
+                      class="contents"
+                      onDblClick={() => {
+                        const it = item();
+                        if (it !== null) openViewerAt(it.id);
+                      }}
+                    >
+                      <Tile
                       selected={
                         item() !== null &&
                         store.selection().ids.has(String(item()?.id))
@@ -308,14 +431,13 @@ export function BrowseGrid(props: BrowseGridProps) {
                       onClick={(event) => {
                         const it = item();
                         if (it === null) return;
-                        const mode = event.shiftKey
-                          ? "range"
-                          : event.ctrlKey || event.metaKey
-                            ? "toggle"
-                            : "replace";
-                        store.select(it.id, mode, visibleIds());
+                        // 修饰键 → 模式：与胶片带**共用同一个函数**（`lib/selection.ts`）
+                        store.select(it.id, clickMode(event), visibleIds());
+                        // 「去看照片了」——展开的库列表该收了（BROWSE.md §4.2）
+                        props.onInteract?.();
                       }}
-                    />
+                      />
+                    </div>
                   );
                 }}
               </For>
@@ -323,7 +445,8 @@ export function BrowseGrid(props: BrowseGridProps) {
           );
         }}
       />}>
-        {(node) => node()}
+        {/* `keyed` 模式给的是**水印元素本身**（不是 getter），直接渲染它 */}
+        {(node) => node}
       </Show>
     </div>
   );

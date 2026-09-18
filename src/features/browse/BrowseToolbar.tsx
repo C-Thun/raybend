@@ -30,7 +30,7 @@
  * 属 W2（`plans/M2.md` 的阶段 6 只出控件本身）。
  */
 
-import { For, Show, createSignal } from "solid-js";
+import { createEffect, For, Show, createSignal } from "solid-js";
 import {
   IconBan,
   IconFlag,
@@ -42,6 +42,9 @@ import {
 } from "@tabler/icons-solidjs";
 
 import { ToggleBlock } from "../../components/ui/ToggleBlock.tsx";
+import { ConfirmDialog } from "../../components/ui/Dialog.tsx";
+import { createEasyDestroy } from "../../lib/easy-destroy.ts";
+import { markNotice, type MarkNotice } from "./mark-feedback.ts";
 import { Button } from "../../components/ui/Button.tsx";
 import { t } from "../../i18n/index.ts";
 import {
@@ -80,6 +83,16 @@ function MixedMark() {
 export function BrowseToolbar(props: BrowseToolbarProps) {
   const store = props.store;
   const [filterMode, setFilterMode] = createSignal(false);
+  /**
+   * 「移除所有旗标」的确认（`easy destroy` 范式：默认弹确认，按住 `Shift` 跳过）。
+   *
+   * 为什么它用 `easy destroy` 而**删照片不用**（人类 2026-09-19 的批注）：
+   * `easy destroy` 是给「不为了批量而把界面变拥挤、又要能连续快速处理单张」准备的 ——
+   * 清旗标是个全局开关动作，值一次确认；删照片本身支持多选批量，不需要它。
+   */
+  const clearFlags = createEasyDestroy();
+  /** 标记之后要说的话（被锁挡住 / 什么都没改）—— `plans/M2-W2-tail.md` 3.1 */
+  const [notice, setNotice] = createSignal<MarkNotice | null>(null);
 
   const selected = () => store.selectedItems();
   const hasSelection = () => selected().length > 0;
@@ -101,6 +114,22 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
   /** 选中的 id（打标记用）。 */
   const ids = () => store.selectedIds();
 
+  /**
+   * 走一次标记动作，并把「该说的话」收下来。
+   *
+   * 所有入口（星/色/喜欢/锁）都经过它 —— 否则总有一条路径忘了提示，
+   * 而「被锁挡住」恰恰是最需要说话的那种（照片上一个像素都不会变）。
+   */
+  async function runMark(action: Parameters<typeof store.mark>[0]): Promise<void> {
+    setNotice(markNotice(await store.mark(action)));
+  }
+
+  // 换了选择就把上一句收起来（它说的是上一批照片的事）
+  createEffect(() => {
+    store.selection().ids;
+    setNotice(null);
+  });
+
   /** 有选中照片时才让标记控件可用。 */
   const markDisabled = () => !hasSelection();
 
@@ -113,7 +142,7 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
       return;
     }
     const values = selected().map((item) => item.rating);
-    await store.mark({ kind: "rating", value: nextRating(values, star) });
+    await runMark({ kind: "rating", value: nextRating(values, star) });
   }
 
   async function markColor(color: string | null): Promise<void> {
@@ -124,7 +153,7 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
       store.patchFilter({ colors: next });
       return;
     }
-    await store.mark({ kind: "color", value: color });
+    await runMark({ kind: "color", value: color });
   }
 
   async function markLike(value: "like" | "dislike" | null): Promise<void> {
@@ -135,7 +164,7 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
       store.patchFilter({ likes: next });
       return;
     }
-    await store.mark({ kind: "like", value });
+    await runMark({ kind: "like", value });
   }
 
   async function markLock(level: number): Promise<void> {
@@ -149,7 +178,7 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
     const current = lockState();
     const target =
       current.kind === "value" && current.value === level ? LOCK_LEVELS.none : level;
-    await store.mark({ kind: "lock", value: target });
+    await runMark({ kind: "lock", value: target });
   }
 
   return (
@@ -174,7 +203,7 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
       <ToggleBlock
         pressed={false}
         disabled={markDisabled()}
-        onClick={() => void store.setFlag(ids(), "pick")}
+        onPressedChange={() => void store.setFlag(ids(), "pick")}
         icon={<IconFlag size={14} />}
         label={t("browse.pick")}
       >
@@ -183,7 +212,7 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
       <ToggleBlock
         pressed={false}
         disabled={markDisabled()}
-        onClick={() => void store.setFlag(ids(), "reject")}
+        onPressedChange={() => void store.setFlag(ids(), "reject")}
         icon={<IconBan size={14} />}
         label={t("browse.reject")}
       >
@@ -193,7 +222,16 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
         variant="ghost"
         disabled={store.picks().size + store.rejects().size === 0}
         icon={<IconBan size={14} />}
-        onClick={() => void store.clearFlags()}
+        onClick={(event) => {
+          clearFlags.request(
+            t("browse.flagClearConfirm"),
+            () => {
+              setNotice(null);
+              void store.clearFlags();
+            },
+            event,
+          );
+        }}
       >
         {t("browse.flagClear")}
       </Button>
@@ -281,14 +319,14 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
         <ToggleBlock
           pressed={isExactly(likeState(), "like")}
           disabled={markDisabled()}
-          onClick={() => void markLike("like")}
+          onPressedChange={() => void markLike("like")}
           icon={<IconThumbUp size={14} />}
           label={t("browse.like")}
         />
         <ToggleBlock
           pressed={isExactly(likeState(), "dislike")}
           disabled={markDisabled()}
-          onClick={() => void markLike("dislike")}
+          onPressedChange={() => void markLike("dislike")}
           icon={<IconThumbDown size={14} />}
           label={t("browse.reject")}
         />
@@ -318,7 +356,7 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
               <ToggleBlock
                 pressed={isSet() || filtered()}
                 disabled={markDisabled()}
-                onClick={() => void markLock(level)}
+                onPressedChange={() => void markLock(level)}
                 icon={<IconLock size={14} />}
                 label={
                   level === LOCK_LEVELS.noDelete
@@ -332,6 +370,22 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
           }}
         </For>
       </div>
+
+      {/* 标记后的边界提示（3.1）：只在出问题时说话 */}
+      <Show when={notice()}>{(n) => (
+        <span class="ml-2 shrink-0 text-fs-2 text-fg-3" data-mark-notice={n().key}>
+          {t(n().key).replace("{n}", String(n().count))}
+        </span>
+      )}</Show>
+
+      {/* 「移除所有旗标」的确认弹窗（Shift 可跳过，提示语在弹窗里） */}
+      <ConfirmDialog
+        open={clearFlags.pending() !== null}
+        title={clearFlags.pending()?.title}
+        message={clearFlags.pending()?.message ?? ""}
+        onConfirm={clearFlags.confirm}
+        onCancel={clearFlags.cancel}
+      />
     </div>
   );
 }
