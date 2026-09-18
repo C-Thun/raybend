@@ -174,26 +174,7 @@ impl GpuContext {
         surface.configure(&device, &config);
 
         let image = super::scene::make_test_image(6000, 4000);
-        let texture = create_image_texture(&device, &queue, &image);
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("spike-sampler"),
-            // 放大用最近邻：1:1 档位要能看出「一个图像像素就是一个屏幕像素」
-            mag_filter: wgpu::FilterMode::Nearest,
-            min_filter: wgpu::FilterMode::Linear,
-            ..Default::default()
-        });
-        let uniform = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("spike-uniforms"),
-            // 80 = mat4x4(64) + vec4(16)。**别改成「f32 + vec3」**：vec3 要 16 字节对齐，
-            // 那样实际是 96，wgpu 会在绘制时报「expects 96」（WGSL 侧的注释里记着这个坑）
-            size: 80,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        let layout = create_bind_group_layout(&device);
-        let bind_group = make_bind_group(&device, &layout, &texture, &sampler, &uniform);
-        let pipeline = create_pipeline(&device, &layout, config.format);
+        let resources = build_device_resources(&device, &queue, &image, config.format, "spike");
 
         let mut viewport = Viewport {
             image_size: (image.width, image.height),
@@ -215,11 +196,11 @@ impl GpuContext {
             device,
             queue,
             config,
-            pipeline,
-            bind_group,
-            uniform,
-            texture,
-            sampler,
+            pipeline: resources.pipeline,
+            bind_group: resources.bind_group,
+            uniform: resources.uniform,
+            texture: resources.texture,
+            sampler: resources.sampler,
             image,
             viewport,
             device_lost,
@@ -407,33 +388,23 @@ impl GpuContext {
         self.queue = queue;
         self.surface.configure(&self.device, &self.config);
 
-        // 纹理与绑定组跟着设备走，必须重建；图还在内存里，重新上传即可
-        self.texture = create_image_texture(&self.device, &self.queue, &self.image);
-        /*
-         * ⚠️ layout 必须**用新设备重新建**，不能从旧管线里拿。
-         *
-         * 2026-09-19 真机事故（崔总点「演练丢失」→「恢复」后图再也不回来，
-         * 日志里是一句 panic，`/tmp/raybend-desktop.log`）：
-         *
-         *   thread 'spike-render' panicked at wgpu-30.0.1/src/backend/wgpu_core.rs:1280:
-         *   wgpu error: Validation Error
-         *   Caused by: In Device::create_bind_group, label = 'spike-bind-group'
-         *     Device with 'raybend-spike' label of BindGroupLayout with 'spike-bind-layout' label
-         *     doesn't match Device with 'raybend-spike-recovered' label
-         *
-         * 即：**wgpu 的 layout 记录着它属于哪个设备**，拿旧设备的 layout 去新设备建绑定组是校验错误。
-         * 这里的 panic 直接把渲染线程打死了（主线程还活着、界面照旧响应），
-         * 表现就是「点恢复之后毫无动静」—— 所以这条不能退回 `self.pipeline.get_bind_group_layout(0)`。
-         */
-        let layout = create_bind_group_layout(&self.device);
-        self.bind_group = make_bind_group(
+        // 纹理 / 采样器 / uniform / layout / 绑定组 / 管线**跟着设备走，必须整套重建**；
+        // 图还在内存里，重新上传即可。
+        //
+        // ⚠️ 以前这里是手写的重建，而且漏项 —— 结果就是本段注释上面记的那类 panic。
+        // 现在只有 `build_device_resources` 一个入口，改什么都在那里改。
+        let resources = build_device_resources(
             &self.device,
-            &layout,
-            &self.texture,
-            &self.sampler,
-            &self.uniform,
+            &self.queue,
+            &self.image,
+            self.config.format,
+            "spike",
         );
-        self.pipeline = create_pipeline(&self.device, &layout, self.config.format);
+        self.pipeline = resources.pipeline;
+        self.bind_group = resources.bind_group;
+        self.uniform = resources.uniform;
+        self.texture = resources.texture;
+        self.sampler = resources.sampler;
 
         if let Ok(mut log) = self.device_lost.lock() {
             log.push("恢复：设备/管线/纹理已重建".to_string());
@@ -455,6 +426,65 @@ impl GpuContext {
         self.surface = surface;
         self.surface.configure(&self.device, &self.config);
         Ok(())
+    }
+}
+
+/// 离屏渲染器建的那套资源（与 `OffscreenRenderer::new` 里手写的部分对应）。
+///
+/// **一套与设备绑定的资源**。三处（`GpuContext::new` / `GpuContext::recover` / `OffscreenRenderer::new`）
+/// 都必须走 [`build_device_resources`]，不要再手抄。
+///
+/// 为什么把这件事写成规矩（2026-09-19 真机连续两次 panic，都在 `create_bind_group`）：
+/// wgpu 的 layout / buffer / sampler / texture **都记着自己属于哪个设备**，
+/// 拿旧设备的任何一件去新设备上建绑定组都会报
+/// 「Device with 'raybend-spike' label of X doesn't match Device with 'raybend-spike-recovered'」，
+/// 而这个 panic **会打死渲染线程**（主线程照旧响应、图永远冻住）。
+/// 第一次漏的是 bind group layout，补上之后第二次漏的是 uniform buffer —— 都是「手写重建」惹的。
+/// 所以现在只剩一个入口：资源集合是设备局部的，**换个设备就整套重建**。
+struct DeviceResources {
+    pipeline: wgpu::RenderPipeline,
+    bind_group: wgpu::BindGroup,
+    uniform: wgpu::Buffer,
+    texture: wgpu::Texture,
+    sampler: wgpu::Sampler,
+}
+
+/// 在一台设备上建齐所有与设备绑定的资源。
+///
+/// `label_prefix` 只影响调试标签（`spike` / `spike-offscreen`）——wgpu 的报错会带上它，
+/// 真机排错时很有用（本文件里两次事故的全靠标签认出来是「旧设备的那一件」）。
+fn build_device_resources(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    image: &TestImage,
+    format: wgpu::TextureFormat,
+    label_prefix: &str,
+) -> DeviceResources {
+    let texture = create_image_texture(device, queue, image);
+    let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        label: Some(&format!("{label_prefix}-sampler")),
+        // 放大用最近邻：1:1 档位要能看出「一个图像像素就是一个屏幕像素」
+        mag_filter: wgpu::FilterMode::Nearest,
+        min_filter: wgpu::FilterMode::Linear,
+        ..Default::default()
+    });
+    let uniform = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some(&format!("{label_prefix}-uniforms")),
+        // 80 = mat4x4(64) + vec4(16)。**别改成「f32 + vec3」**：vec3 要 16 字节对齐，
+        // 那样实际是 96，wgpu 会在绘制时报「expects 96」（WGSL 侧的注释里记着这个坑）
+        size: 80,
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let layout = create_bind_group_layout(device);
+    let bind_group = make_bind_group(device, &layout, &texture, &sampler, &uniform);
+    let pipeline = create_pipeline(device, &layout, format);
+    DeviceResources {
+        pipeline,
+        bind_group,
+        uniform,
+        texture,
+        sampler,
     }
 }
 
@@ -709,63 +739,20 @@ impl OffscreenRenderer {
         .map_err(|e| GpuError::Device(e.to_string()))?;
 
         let image = super::scene::make_test_image(6000, 4000);
-        let texture = create_image_texture(&device, &queue, &image);
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("spike-offscreen-sampler"),
-            mag_filter: wgpu::FilterMode::Nearest,
-            min_filter: wgpu::FilterMode::Linear,
-            ..Default::default()
-        });
-        let uniform = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("spike-offscreen-uniforms"),
-            size: 80,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("spike-offscreen-layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    // ⚠️ 必须包含 **VERTEX**：顶点着色器要用 `textureDimensions(image, 0)`
-                    // 算出四个角的图像像素坐标（整块的「四角由 vertex_index 现算」就是靠它）。
-                    // 只给 FRAGMENT 的话，wgpu 会在**建管线时**报
-                    // 「binding 1 is not available in the pipeline layout」——
-                    // 这个错是离屏冒烟抓到的，否则会在 Windows 上当着人的面炸。
-                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-            ],
-        });
-        let bind_group = make_bind_group(&device, &layout, &texture, &sampler, &uniform);
-        let pipeline = create_pipeline(&device, &layout, wgpu::TextureFormat::Rgba8UnormSrgb);
+        // 与真窗口那条路共用同一份资源建法（见 `build_device_resources` 的说明）
+        let resources = build_device_resources(
+            &device,
+            &queue,
+            &image,
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+            "spike-offscreen",
+        );
         Ok(Self {
             device,
             queue,
-            pipeline,
-            bind_group,
-            uniform,
+            pipeline: resources.pipeline,
+            bind_group: resources.bind_group,
+            uniform: resources.uniform,
             image,
             readback: None,
         })
@@ -915,4 +902,75 @@ fn write_matrix(queue: &wgpu::Queue, uniform: &wgpu::Buffer, viewport: &Viewport
     }
     bytes[64..68].copy_from_slice(&1.0f32.to_ne_bytes());
     queue.write_buffer(uniform, 0, &bytes);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 拿一台可用的设备。没有适配器的环境（纯容器 / 无 GPU 的 CI）返回 `None` ——
+    /// 那种情况**跳过**，但会说明原因，不给「不明不白的绿」。
+    fn try_device(label: &str) -> Option<(wgpu::Device, wgpu::Queue)> {
+        let instance =
+            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            compatible_surface: None,
+            force_fallback_adapter: false,
+            apply_limit_buckets: false,
+        }))
+        .ok()?;
+        pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            label: Some(label),
+            required_features: wgpu::Features::empty(),
+            required_limits: wgpu::Limits::default(),
+            memory_hints: wgpu::MemoryHints::Performance,
+            ..Default::default()
+        }))
+        .ok()
+    }
+
+    /// 回归（2026-09-19 真机**连续两次** panic）：整套设备资源必须能在任意设备上重建。
+    ///
+    /// 故障现象是 `create_bind_group` 报
+    /// 「Device with 'raybend-spike' label of X doesn't match Device with 'raybend-spike-recovered'」
+    /// 然后 **panic 打死渲染线程**（界面照旧响应、图永远冻住）：
+    /// 第一次漏的是 bind group layout，补上之后第二次漏的是 uniform buffer。
+    ///
+    /// 这里守住的不变量是「**资源集合是设备局部的**」：
+    /// 以后谁把某项做成 `static`/`OnceLock`、或图省事复用旧设备的那一份，
+    /// 就会在第二台设备上当场炸出来。
+    #[test]
+    fn device_resources_rebuild_on_a_second_device() {
+        let Some((device_a, queue_a)) = try_device("test-device-a") else {
+            eprintln!("跳过 device_resources_rebuild_on_a_second_device：本环境没有可用的 wgpu 适配器");
+            return;
+        };
+        // 小图即可：验的是资源归属，不是图像内容（6000×4000 光上传就要 1 秒，没必要）
+        let image = crate::render::scene::make_test_image(32, 32);
+        drop(build_device_resources(
+            &device_a,
+            &queue_a,
+            &image,
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+            "test",
+        ));
+
+        // 旧设备销毁（真机上就是驱动重启，或人点「演练丢失」），换一台设备整套重来
+        device_a.destroy();
+        let Some((device_b, queue_b)) = try_device("test-device-b") else {
+            eprintln!("跳过：本环境只能给出一台适配器");
+            return;
+        };
+        let rebuilt = build_device_resources(
+            &device_b,
+            &queue_b,
+            &image,
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+            "test",
+        );
+        // 能走到这里就说明 layout / uniform / sampler / texture / bind group / pipeline
+        // **全是新设备的**（否则 wgpu 在 `create_bind_group` 就抛了）。
+        assert_eq!(rebuilt.uniform.size(), 80);
+    }
 }

@@ -69,10 +69,12 @@
    若你嫌慢，可以改回增量 + 遇到时 `cargo clean -p raybend`。
 
 5. **渲染线程的 panic 会静默冻住画面**（2026-09-19 真机发现，主因已修）——
-   设备恢复时 `recover()` 复用旧设备的 bind group layout → wgpu 校验错 → panic 打死渲染线程；
-   表现是「界面照常响应、图永远不动」。主因已修（layout 用新设备重建）、诊断已改良
-   （出图即撤横幅 + 错误带帧号进历史）；**仍未做**：装 logger、`recreate_surface()` 兜底、
-   `configure` 的 error scope。风险：**编辑模块必须给渲染线程加「panic 捕获 + 重启 + 上报」**，
+   设备恢复时 `recover()` 复用旧设备的资源（第一次是 bind group layout、补掉之后又暴露
+   uniform buffer）→ wgpu 校验错 → panic 打死渲染线程；表现是「界面照常响应、图永远不动」。
+   **已按结构性方式修完**：跟设备绑定的资源收进单一入口 `build_device_resources`，
+   `new()` / `recover()` / 离屏三处共用；并加了离屏回归测试（两块真实设备上各建一整套）。
+   **仍未做**：装 logger、`recreate_surface()` 兜底、`configure` 的 error scope；
+   surface 侧（用新设备重配曾绑给死设备的 surface）只能在真机复跑确认。风险：**编辑模块必须给渲染线程加「panic 捕获 + 重启 + 上报」**，
    否则用户看到的就是一张冻住的图。
 
 6. **跨屏/DPI 过渡有闪烁**（2026-09-19 真机确认）——原生窗口事件与 DOM 事件是两条独立队列，

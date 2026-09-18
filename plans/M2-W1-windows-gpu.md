@@ -184,9 +184,14 @@ WGPU_BACKEND=gl     RAYBEND_SPIKE=1 /mnt/c/rb-target/raybend/debug/raybend-deskt
 
 | 后端 | 起来了吗 | 左栏显示 | 备注 |
 | --- | --- | --- | --- |
-| dx12 | | | |
-| vulkan | | | |
-| gl | | | |
+| dx12 | ⚠️ 窗口起来了，GPU 区域不出图 | 大量空划线（拿不到适配器） | **强制后端 = 不做回退**，这台机器上 dx12 不可用 |
+| vulkan | ✅ | Vulkan · Intel(R) Arc(TM) Graphics · 驱动 101.8243 | 支持路径（不设 `WGPU_BACKEND` 时也是它） |
+| gl | ⚠️ 同 dx12 | 同 dx12 | 同 dx12 |
+
+> **结论**：`WGPU_BACKEND` 是「强制」开关，强制就意味着**不回退** —— 所以另两条失败是**预期**的，
+> 不是 harness 的 bug（2026-09-19 首次跑之所以「三条全是 Vulkan」，是脚本没把变量转发进 Windows，
+> 见上；已修）。**产品不该强制后端**（现有代码不强制，走 wgpu 默认优先级）；
+> 将来若在设置里放后端选项，必须处理强制失败：**报错 + 回落自动**，而不是留一个白板窗口。
 
 答: `试了类似 WGPU_BACKEND=dx12 pnpm spike:win 这种方法启动，上面提供的启动方法接收不到信息根本不启动gpu调试界面，但是即使用这种方法启动gpu调试界面，也全部是Vulkan后端，并不能切到其他后端`
 

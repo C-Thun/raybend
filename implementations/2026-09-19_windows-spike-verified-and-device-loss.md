@@ -132,15 +132,42 @@ Caused by:
 帧数停在 2861 不动。所以「点恢复之后毫无动静」的真相是：**没人再出图了**，
 而横幅之所以还写着那句 `创建 surface 失败`，是因为它本来就是演练那一刻留下的残留（§3.3）。
 
-**修法（本批次已做前三条）**：
+**第一版修复不完整（2026-09-19 04:03 复测）**：只补了 layout，`recover()` 仍然漏掉
+**uniform buffer 与 sampler** —— 两者同样跟设备绑定。复测日志里是同一位置的**第二次 panic**：
 
-1. ✅ layout 抽成 `create_bind_group_layout(&device)`，`recover()` 用**新设备**重建（`gpu.rs`）；
-2. ✅ 出图正常就撤横幅，并把「已恢复：第 N 帧起重新出图」记进历史（`spike_viewport.rs`）；
-3. ✅ 渲染错误按**帧号**进历史（同一错误连续出现只记第一条，免得刷屏）；
-4. ⏳ 仍未做：装 logger（`RUST_LOG` 可控）—— 这次是因为 panic 才留下痕迹，
+```text
+In Device::create_bind_group, label = 'spike-bind-group'
+  Device with 'raybend-spike' label of Buffer with 'spike-uniforms' label
+  doesn't match Device with 'raybend-spike-recovered' label
+```
+
+**所以改成结构性修法，不再逐个补洞**：所有跟设备绑定的资源（texture / sampler / uniform /
+layout / bind group / pipeline）收进 `build_device_resources(device, queue, image, format, prefix)`，
+**`GpuContext::new` / `GpuContext::recover` / `OffscreenRenderer::new` 三处共用这一个入口**。
+
+> 顺带消掉了三份手抄的重复：原来 `new()`、`recover()`、离屏各写一份，
+> 其中离屏那份连 bind group layout 都是复制粘贴的（改一处不会同步到另两处）。
+> 这个 bug 的本质就是「手写重建 + 多处重复」，所以修法必须落在结构上。
+
+**验证（可复跑）**：
+
+1. ✅ 新增离屏回归测试 `render::gpu::tests::device_resources_rebuild_on_a_second_device` ——
+   在**两块真实设备**上各建一整套资源（含建管线），守住「资源集合是设备局部的」这条不变量；
+   以后谁把某项做成 `static`/`OnceLock` 或复用旧设备那一份，会在第二台设备上当场炸。
+   本机（WSL + lavapipe 软件 Vulkan）**真跑过**：`cargo test -p raybend` 799 通过（1 ignored）。
+2. ✅ 离屏冒烟五组断言全过（`cargo run -p raybend --example spike-offscreen -- /tmp/raybend-spike-fix`），
+   证明重构没破坏共用路径。
+3. ⏳ **surface 侧仍未验证**：上面的 panic 都在 `create_bind_group`（无窗口也能验），
+   而「用新设备 `configure` 一块曾绑给死设备的 surface」只能在真机试 ——
+   下次真机跑，右栏历史里应当出现「**已恢复：第 N 帧起重新出图**」；
+   若出现「渲染错误（第 N 帧）：…」，那句就是 wgpu 的原始错误（这次诊断已经能把它带出来）。
+
+**仍未做**（都不阻塞）：
+
+1. 装 logger（`RUST_LOG` 可控）—— 这次全靠 panic 才留下痕迹，
    纯 `log::error!` 的路径仍然查不到；
-5. ⏳ 仍未做：`recreate_surface()` 仍是零调用（surface 彻底坏掉时的退路），
-   `recover()` 里也没有 error scope 兜 `configure`（`configure` 返回 `()`，失败只体现在 panic 上）。
+2. `recreate_surface()` 仍是零调用（surface 彻底坏掉时的退路）；
+   `recover()` 里也没有 error scope 兜 `configure`（它返回 `()`，失败只体现在 panic 上）。
 
 **给产品阶段的一条重要结论**：渲染线程的 panic 会**静默**杀死出图（主线程照常响应），
 编辑模块必须给渲染线程加「panic 捕获 + 重启 + 上报」，否则用户看到的就是一张永远冻住的图。
@@ -151,6 +178,12 @@ Caused by:
 
 - **空闲时仍在重绘**：截图里「已画 4297 帧」，而空闲唤醒间隔是 200 ms →
   没操作时也在以 ~5 Hz 出帧。指南 §7 已把「空闲无重绘」列为待办。
+- **强制 dx12 / gl 起不来**（2026-09-19 复测）：窗口能起，但中间 GPU 区域不出图，
+  左栏大量划线（拿不到适配器数据）。**这是预期行为**：`WGPU_BACKEND` 是「**强制**某后端」，
+  强制就意味着**不做回退** —— Vulkan 能跑、另两条不行，说明这台机器只有 Vulkan 可用。
+  **产品不该强制后端**（今天的代码本来就不强制，走 wgpu 默认优先级）；
+  将来若在设置里放后端选项，必须处理「强制失败」：报错 + 回落到自动，
+  而不是留一个白板窗口。→ 已登记到 `plans/M2-W1-windows-gpu.md` §1.8 的表下。
 - **`alpha: Inherit`** 只表示「用平台合成语义」，**不等于透明已验证**；
   透明的判据是「Fit 留白处看得见下层窗口、无黑底白边」——崔总确认成立 ✓。
 
