@@ -179,6 +179,22 @@ pub struct Shared {
 }
 
 impl Shared {
+    /// 把主线程推过来的窗口事实搬进共享状态（见 [`WindowFacts`] 上的说明）。
+    ///
+    /// ⚠️ **不碰 `viewport`**：尺寸/DPR 对渲染数学的影响由渲染线程自己按 context 走
+    /// （`SpikeCommand::Resize` 的处理里已经做了），这里只搬「窗口是什么样」。
+    fn apply_window_facts(&mut self, facts: &WindowFacts) {
+        let dpr = facts.dpr.max(0.01);
+        self.surface_size = facts.surface_size;
+        self.css_size = (
+            (facts.surface_size.0 as f32 / dpr) as u32,
+            (facts.surface_size.1 as f32 / dpr) as u32,
+        );
+        self.monitor_scale = facts.monitor_scale;
+        self.maximized = facts.maximized;
+        self.fullscreen = facts.fullscreen;
+        self.decorated = facts.decorated;
+    }
     fn snapshot(&self) -> SpikeSnapshot {
         SpikeSnapshot {
             open: self.open,
@@ -353,39 +369,44 @@ pub fn open_window<R: Runtime>(app: &AppHandle<R>) -> Result<SpikeSnapshot, Stri
         guard.viewport.refit();
     }
 
-    // 窗口事件 → 命令：尺寸/DPR 变化必须通知渲染线程（否则 surface 与坐标全错）
-    //
-    // 这里还挂两件事：① 标记「窗口事实脏了」（渲染线程据此刷新，见循环里的说明）；
-    // ② 记一笔事件日志 —— 拖动跨屏时这里会爆量，卡死时的日志就是第一手证据。
-    let facts_dirty = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    /*
+     * 窗口事实的**唯一**来源（见 [`WindowFacts`] 与 `read_window_facts` 的说明）：
+     * 回调在**主线程**上跑，只有在这里问窗口才安全；问到的纯数据塞进暂存区，
+     * 渲染线程自己来取 —— 它一个窗口查询都不做。
+     *
+     * ❗ 回调里**不许锁 `shared`**：渲染线程一旦僵住，主线程锁它就会跟着僵，
+     * 那正是 2026-09-18 那次「拖动跨屏 → 未响应、松手也不恢复」的链条。
+     * 暂存区只存纯数据（`Mutex<Option<WindowFacts>>`），让两个线程永远不互相等。
+     */
+    let pending_facts = Arc::new(Mutex::new(None::<WindowFacts>));
     {
         let tx = tx.clone();
-        let shared_for_events = shared.clone();
-        let facts_dirty_for_events = facts_dirty.clone();
+        let pending_for_events = pending_facts.clone();
+        let window_for_events = window.clone();
         window.on_window_event(move |event| match event {
             tauri::WindowEvent::Resized(size) => {
-                facts_dirty_for_events.store(true, std::sync::atomic::Ordering::Relaxed);
                 note_window_event("Resized", format!("{}×{}", size.width, size.height));
-                let dpr = lock_shared(&shared_for_events, "事件·Resized 取 dpr")
-                    .map(|guard| guard.viewport.dpr)
-                    .unwrap_or(1.0);
+                let facts = read_window_facts(&window_for_events);
                 let _ = tx.send(SpikeCommand::Resize {
-                    width: size.width,
-                    height: size.height,
-                    dpr,
+                    width: facts.surface_size.0,
+                    height: facts.surface_size.1,
+                    dpr: facts.dpr,
                 });
+                if let Ok(mut staged) = pending_for_events.lock() {
+                    *staged = Some(facts);
+                }
             }
             tauri::WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
-                facts_dirty_for_events.store(true, std::sync::atomic::Ordering::Relaxed);
                 note_window_event("ScaleFactorChanged", format!("dpr={scale_factor}"));
-                let size = lock_shared(&shared_for_events, "事件·ScaleFactorChanged 取尺寸")
-                    .map(|guard| guard.surface_size)
-                    .unwrap_or((1280, 820));
+                let facts = read_window_facts(&window_for_events);
                 let _ = tx.send(SpikeCommand::Resize {
-                    width: size.0,
-                    height: size.1,
-                    dpr: *scale_factor as f32,
+                    width: facts.surface_size.0,
+                    height: facts.surface_size.1,
+                    dpr: facts.dpr,
                 });
+                if let Ok(mut staged) = pending_for_events.lock() {
+                    *staged = Some(facts);
+                }
             }
             other => {
                 note_window_event("other", format!("{other:?}"));
@@ -393,10 +414,41 @@ pub fn open_window<R: Runtime>(app: &AppHandle<R>) -> Result<SpikeSnapshot, Stri
         });
     }
 
+    /*
+     * 主线程回显心跳（**诊断用**，见 `ASSISTANCE.md` A′）。
+     *
+     * 跨屏拖动会把主线程卡在原生调用里（现象：「未响应」、CPU 不涨、日志安静）。
+     * 但日志安静本身分不清「渲染线程也停了」还是「只有主线程停了」——
+     * 这里用一个**独立小线程**每 5 秒往主线程投一次回显：投递不等待
+     * （`run_on_main_thread` 只是把闭包塞进事件队列就返回），所以卡住时
+     * 日志会停在「派发…」而永远等不到「回显」。
+     */
+    {
+        let echo_app = app.clone();
+        std::thread::Builder::new()
+            .name("spike-heartbeat".into())
+            .spawn(move || {
+                let mut beat = 0u32;
+                loop {
+                    std::thread::sleep(Duration::from_secs(5));
+                    beat += 1;
+                    eprintln!("[spike] 心跳 #{beat}：派发主线程回显…");
+                    let posted = echo_app.run_on_main_thread(move || {
+                        eprintln!("[spike] 心跳 #{beat}：主线程回显到了");
+                    });
+                    if let Err(error) = posted {
+                        eprintln!("[spike] 心跳 #{beat}：派发失败（{error}）");
+                    }
+                }
+            })
+            .map_err(|e| format!("起心跳线程失败：{e}"))?;
+    }
+
     let thread_window = window.clone();
     let thread_shared = shared.clone();
-    // 事件处理器已经在用克隆的那份；这份原件移动进渲染线程（它负责刷新窗口事实）
-    let facts_dirty_for_thread = facts_dirty.clone();
+    // 建窗之后、渲染线程启动之前，在主线程上拿一次初值（安全时刻，见 `read_window_facts`）
+    let initial_facts = read_window_facts(&window);
+    let pending_facts_for_thread = pending_facts.clone();
     std::thread::Builder::new()
         .name("spike-render".into())
         .spawn(move || {
@@ -404,7 +456,8 @@ pub fn open_window<R: Runtime>(app: &AppHandle<R>) -> Result<SpikeSnapshot, Stri
                 thread_window,
                 rx,
                 thread_shared.clone(),
-                facts_dirty_for_thread,
+                initial_facts,
+                pending_facts_for_thread,
             )
                 && let Ok(mut guard) = thread_shared.lock() {
                     guard.last_error = Some(error);
@@ -584,12 +637,16 @@ fn render_loop<R: Runtime>(
     window: tauri::WebviewWindow<R>,
     rx: Receiver<SpikeCommand>,
     shared: Arc<Mutex<Shared>>,
-    facts_dirty: Arc<std::sync::atomic::AtomicBool>,
+    initial: WindowFacts,
+    pending_facts: Arc<Mutex<Option<WindowFacts>>>,
 ) -> Result<(), String> {
-    let size = window
-        .inner_size()
-        .map_err(|e| format!("拿窗口尺寸失败：{e}"))?;
-    let dpr = window.scale_factor().unwrap_or(1.0) as f32;
+    /*
+     * ⚠️ `size` / `dpr` 用调用方（主线程）取好的 `initial`，**不在这里问窗口** ——
+     * 见 [`WindowFacts`] 上面那段：渲染线程查窗口会在拖动时永久阻塞。
+     * 这里唯一调的窗口 API 是 `raw_handles()`（一次性取原生 HWND），不查窗口状态。
+     */
+    let size = tauri::PhysicalSize::new(initial.surface_size.0, initial.surface_size.1);
+    let dpr = initial.dpr;
     let handles = raw_handles(&window)?;
 
     let started = Instant::now();
@@ -601,8 +658,8 @@ fn render_loop<R: Runtime>(
     let coord_max_error = coord_roundtrip_error(context.viewport());
     let mut last_present: Option<Instant> = None;
     let mut script: Option<Script> = None;
-    // 上次刷新窗口事实的时刻（不再每帧去问窗口，见循环里的说明）
-    let mut facts_last = Instant::now();
+    let mut last_beat: Option<Instant> = None;
+    let mut beats = 0u32;
 
     {
         let mut guard = shared.lock().map_err(|e| e.to_string())?;
@@ -613,7 +670,7 @@ fn render_loop<R: Runtime>(
         guard.surface_size = details.size;
         guard.upload_ms = upload_ms;
         guard.coord_max_error = coord_max_error;
-        refresh_window_facts(&window, &mut guard);
+        guard.apply_window_facts(&initial);
         guard.viewport = *context.viewport();
     }
 
@@ -639,6 +696,17 @@ fn render_loop<R: Runtime>(
             }
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => break,
+        }
+
+        /*
+         * 心跳：只说明「渲染线程还在转」，**不碰窗口**（这条原则见本文件上面那段：
+         * 渲染线程零窗口查询）。冻结时日志安静，只有这条能区分「渲染线程也停了」
+         * 与「只有主线程停了」—— 配合下面那条主线程回显用。
+         */
+        if last_beat.is_none_or(|at| at.elapsed() >= Duration::from_secs(5)) {
+            last_beat = Some(Instant::now());
+            beats += 1;
+            eprintln!("[spike] 心跳 #{beats}（渲染线程在转，已出 {} 帧）", context.frames_drawn());
         }
 
         // 脚本化运动推进（不经过 IPC —— 量的是渲染本身，不是 IPC 往返）
@@ -677,24 +745,21 @@ fn render_loop<R: Runtime>(
                     cpu.push(cpu_ms);
                 }
             }
-            refresh_window_facts(&window, &mut guard);
         }
 
         /*
-         * 窗口事实（尺寸 / dpr / 显示器 / 最大化 / 边框）**不再每帧去问窗口**。
+         * 窗口事实**完全由事件推过来**（渲染线程零窗口查询，见 [`WindowFacts`] 上面那段）。
+         * 这里的职责只剩：把事件暂存区里攒下的最新事实搬进共享状态。
          *
-         * 为什么：`inner_size()` / `scale_factor()` / `current_monitor()` 这些都要跨线程回主线程 ——
-         * 而 Windows **拖动窗口时跑的是模态消息循环**，这些调用会被拖住。每帧都问就等于
-         * 每帧去碰一次那个循环（人类报的「拖到另一块屏就卡几秒」机理吻合）。
-         * 现在改成**事件驱动**（`Resized` / `ScaleFactorChanged` 置脏）+ 1 秒兑底。
+         * 暂存区是 `Mutex<Option<WindowFacts>>` 而不是直接写 `shared` —— 事件回调在
+         * **主线程**上跑，它只做「存一个纯数据快照」这种极短的操作，绝不碰 `shared`，
+         * 这样即便渲染线程正拿着 `shared` 也不会互相等。
          */
-        if facts_dirty.swap(false, std::sync::atomic::Ordering::Relaxed)
-            || facts_last.elapsed() >= Duration::from_secs(1)
+        if let Ok(mut staged) = pending_facts.lock()
+            && let Some(facts) = staged.take()
+            && let Some(mut guard) = lock_shared(&shared, "应用窗口事实")
         {
-            facts_last = Instant::now();
-            if let Some(mut guard) = lock_shared(&shared, "刷新窗口事实") {
-                refresh_window_facts(&window, &mut guard);
-            }
+            guard.apply_window_facts(&facts);
         }
 
         match outcome {
@@ -1027,26 +1092,66 @@ fn note_window_event(kind: &str, detail: String) {
     }
 }
 
-fn refresh_window_facts<R: Runtime>(window: &tauri::WebviewWindow<R>, shared: &mut Shared) {
-    shared.maximized = window.is_maximized().unwrap_or(false);
-    shared.fullscreen = window.is_fullscreen().unwrap_or(false);
-    shared.decorated = window.is_decorated().unwrap_or(false);
-    if let Ok(Some(monitor)) = window.current_monitor() {
-        shared.monitor_scale = monitor.scale_factor() as f32;
-        shared.monitor_name = monitor
-            .name()
-            .cloned()
-            .unwrap_or_else(|| "(未命名显示器)".to_string());
+/// 从窗口问出来的「事实」快照。
+///
+/// 存在的理由（2026-09-18 卡死事故的修法）：这些查询**都要跨线程回主线程**，
+/// 而 Windows 拖动窗口/跨屏时主线程跑的是**模态消息循环**，查询会被卡住不返回。
+/// 所以规矩是两条：
+///
+/// 1. **问窗口时绝不持有 `shared` 锁** —— 先把事实读进这个纯数据快照，再拿锁写回；
+/// 2. **只在事件驱动 + 兜底时问**（见渲染循环），不是每帧。
+///
+/// 持锁去问窗口的后果是死锁：渲染线程持锁等主线程，主线程等锁（抢 `shared` 的地方
+/// 在主线程上也有）→ 窗口 `Not Responding`。
+#[derive(Debug, Clone, Copy)]
+struct WindowFacts {
+    surface_size: (u32, u32),
+    dpr: f32,
+    maximized: bool,
+    fullscreen: bool,
+    decorated: bool,
+    monitor_scale: f32,
+}
+
+/*
+ * ── 为什么事实必须由「事件」推给渲染线程，而不是渲染线程自己去问 ──────────
+ *
+ * 2026-09-18 第二次事故（人类把窗口从笔记本屏拖到外接屏 → 卡死、`Not Responding`，
+ * 且**松手后也不恢复**）复盘：
+ *
+ * · Tao/Win32 的 `inner_size()` / `scale_factor()` / `current_monitor()` / `is_maximized()`
+ *   都要**跨线程回主线程**取窗口状态；
+ * · 拖动窗口时主线程跑的是 Win32 的**模态移动循环**（`WM_ENTERSIZEMOVE` 之后由系统接管）；
+ * · 在这个循环里从**别的线程**发起的窗口查询不会返回 —— 它不是「慢」，是**永久阻塞**；
+ * · 渲染线程于是僵在那里，`shared` 的统计也不再更新，主线程任何要拿 `shared` 的路径
+ *   （命令、事件回调）跟着一起僵 → 窗口 `Not Responding`。
+ *
+ * 所以纪律升级为：**渲染线程对这四类查询实行零调用**。它需要的窗口事实全部由
+ * 主线程的窗口事件推过来（`Resized` / `ScaleFactorChanged` 的 payload 里就带着值，
+ * 其余开关量在事件回调里于主线程上问一次）。
+ */
+
+/// 问窗口当前事实。**只允许在「不会卡住」的时刻调用**（见 [`WindowFacts`]）。
+///
+/// ❗ 2026-09-18 第二次卡死事故后的结论：**渲染线程一律不再调这个函数**。
+/// 它现在只有两个调用点，都在主线程、且都发生在窗口不处于模态移动/缩放循环时：
+///   1. 建窗之后、渲染线程启动之前（拿一次初值）；
+///   2. 窗口事件回调里（此时主线程正跑消息循环，这些查询是安全的 —— 而**渲染线程**
+///      在那个时刻去查就会永久阻塞，`Not Responding` 就是这么来的）。
+fn read_window_facts<R: Runtime>(window: &tauri::WebviewWindow<R>) -> WindowFacts {
+    let surface_size = window
+        .inner_size()
+        .map(|size| (size.width, size.height))
+        .unwrap_or((1280, 820));
+    let monitor = window.current_monitor().ok().flatten();
+    WindowFacts {
+        surface_size,
+        dpr: window.scale_factor().unwrap_or(1.0) as f32,
+        maximized: window.is_maximized().unwrap_or(false),
+        fullscreen: window.is_fullscreen().unwrap_or(false),
+        decorated: window.is_decorated().unwrap_or(false),
+        monitor_scale: monitor.as_ref().map_or(1.0, |m| m.scale_factor() as f32),
     }
-    if let Ok(size) = window.inner_size() {
-        shared.surface_size = (size.width, size.height);
-    }
-    let dpr = window.scale_factor().unwrap_or(1.0) as f32;
-    shared.viewport.dpr = dpr;
-    shared.css_size = (
-        (shared.surface_size.0 as f32 / dpr) as u32,
-        (shared.surface_size.1 as f32 / dpr) as u32,
-    );
 }
 
 #[cfg(test)]
