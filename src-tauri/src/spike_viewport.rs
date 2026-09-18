@@ -380,12 +380,16 @@ pub fn open_window<R: Runtime>(app: &AppHandle<R>) -> Result<SpikeSnapshot, Stri
     .title("raybend 渲染 spike（M2-W1）")
     .inner_size(1280.0, 820.0)
     /*
-     * **无边框**，与产品一致 —— 这同时是坐标对齐的前提：带边框时「webview 的 CSS 原点」
-     * 「客户区原点」「wgpu 表面原点」可能各差一个标题栏，表现就是「图看着是对的、
-     * 鼠标读出的坐标却差一截」（人类 2026-09-18 报的正是这个）。无边框后三者重合，
-     * 输入与绘制用同一套坐标系。无边框窗口照样能拖：前端顶栏挂了 `data-tauri-drag-region`。
+     * ❗ **保留系统标题栏**（2026-09-18 回退）：去边框那版把窗口变成了「拿不动的盒子」——
+     * `data-tauri-drag-region` 只在**挂了该属性的元素本身**上生效（子元素不继承），
+     * 顶栏几乎被文字与按钮铺满，人抓不到能拖的地方；窗口又默认开在屏幕边缘之外，
+     * 于是连测试都没法进行。**测试工具首先要能用**，其次才是与被测对象同形。
+     *
+     * 「输入坐标与 wgpu 表面不同原点」这个问题**不靠去边框来回避**，而是靠左栏那几个
+     * 原点读数把它**量出来**（见 `ViewportView::hole_physical` 一带的说明）：
+     * 带边框时 `inner_position()` 与 `outer_position()` 的差就是嫌疑量本身。
      */
-    .decorations(false)
+    .center()
     // 透明是**这一条 spike 的主角**：webview 中间挖洞，wgpu 在洞里出图
     .transparent(true)
     .resizable(true)
