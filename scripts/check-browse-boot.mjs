@@ -810,8 +810,11 @@ try {
     returnByValue: true,
   });
   const beforeResize = widthBefore.result?.value ?? {};
-  if (beforeResize.handles?.left !== true || beforeResize.handles?.right !== true) {
-    problems.push(`左右列都应当有拖拽手柄（实测 ${JSON.stringify(beforeResize.handles)}）`);
+  if (beforeResize.handles?.left !== true) {
+    problems.push(`左列应当有拖拽手柄（实测 ${JSON.stringify(beforeResize.handles)}）`);
+  } else if (beforeResize.handles?.right === true) {
+    // 人类 2026-09-19 定：**右列宽度固定，不给把手** —— 回归时应当报出来
+    problems.push("右列不该有拖拽手柄（右列宽度固定，人类 2026-09-19 定）");
   } else {
     await send("Runtime.evaluate", {
       expression: `(() => {

@@ -56,7 +56,7 @@ import { Button } from "../../components/ui/Button.tsx";
 import { ConfirmDialog, Dialog } from "../../components/ui/Dialog.tsx";
 import type { ToastStore } from "../../components/ui/Toast.tsx";
 import { browseKeyIntent, shouldHandleKey } from "../../features/browse/keys.ts";
-import { SplitHandleDots } from "../../components/ui/SplitHandle.tsx";
+import { SplitHandle } from "../../components/ui/SplitHandle.tsx";
 import { nudgeWidth, resizeWidth } from "../../lib/column-resize.ts";
 
 /** 侧栏宽度的上下限（与 `lib/layout-prefs.ts` 的 LAYOUT_BOUNDS 一致；两处都要有：
@@ -81,42 +81,34 @@ export interface BrowseWorkspaceProps {
   class?: string;
 }
 
-/** 侧栏手柄的三点（与导入工作区同一套外观） */
+/** 左列把手：外面只给尺寸数学，拖动/节流/外观全在 `SplitHandle` 里（全项目唯一实现） */
 function ColumnHandle(props: {
-  side: "left" | "right";
-  width: number;
-  dragging: boolean;
-  onBegin: (event: PointerEvent) => void;
+  onDragStart: () => void;
+  onDrag: (dx: number) => void;
+  onDragEnd: () => void;
   onNudge: (delta: number) => void;
 }): JSX.Element {
   return (
-    <div
-      role="separator"
-      aria-orientation="vertical"
-      aria-label={props.side === "left" ? t("common.resize_left") : t("common.resize_right")}
-      aria-valuenow={props.width}
-      aria-valuemin={220}
-      aria-valuemax={520}
+    <SplitHandle
+      orientation="vertical"
+      /* 冒烟脚本（`scripts/check-browse-boot.mjs`）靠这个属性找它 */
+      data-col-resizer="left"
+      aria-label={t("common.resize_left")}
       tabindex="0"
-      data-col-resizer={props.side}
-      class={[
-        "group/split flex h-full w-2 shrink-0 cursor-col-resize items-center justify-center outline-none",
-        props.dragging ? "bg-state-selected" : "hover:bg-state-hover",
-      ].join(" ")}
-      onPointerDown={props.onBegin}
+      onDragStart={props.onDragStart}
+      onDrag={props.onDrag}
+      onDragEnd={props.onDragEnd}
       onKeyDown={(event) => {
         if (event.key === "ArrowLeft") {
           event.preventDefault();
           // 键盘调整：左右方向键各 8px，立刻落盘（一次按键就是一次「结束」）
-          props.onNudge(props.side === "left" ? -8 : 8);
+          props.onNudge(-8);
         } else if (event.key === "ArrowRight") {
           event.preventDefault();
-          props.onNudge(props.side === "left" ? 8 : -8);
+          props.onNudge(8);
         }
       }}
-    >
-      <SplitHandleDots orientation="vertical" active={props.dragging} />
-    </div>
+    />
   );
 }
 
@@ -152,58 +144,35 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
   };
 
   /*
-   * 侧栏拖拽（`plans/M2-W2-tail.md` 6.1）：与导入工作区同一套做法 ——
-   * 原生 pointer 事件 + 指针捕获、**松手才落盘**（拖拽中间写存储既是浪费也会引起无谓重渲染）、
-   * 键盘方向键微调也走同一条夹取逻辑（数学在 `lib/column-resize.ts`，有单测）。
+   * 左列拖拽：用全项目**唯一的**把手组件 `SplitHandle`（拖动、指针捕获、rAF 节流、
+   * 拖动期禁选择都在它里面）。这里只管尺寸数学与落盘时机：
+   * 数学在 `lib/column-resize.ts`（有单测），**松手才落盘**。
+   *
+   * 2026-09-19 统一：这里与导入工作区本来是两份手写副本，另一份还走了 Ark 的 Splitter
+   * （量了又写、写了又量 → 拖起来卡死）。现在两处都只是「把手 + 尺寸数学」。
    */
   const [leftWidth, setLeftWidth] = createSignal(props.leftWidth ?? 300);
-  const [rightWidth, setRightWidth] = createSignal(props.rightWidth ?? 300);
-  const [draggingSide, setDraggingSide] = createSignal<"left" | "right" | null>(null);
+  /**
+   * 右列宽度**固定**，不参与拖拽（人类 2026-09-19 定：右列之后另有安排）。
+   * 左列才需要可调 —— 用户改 tile 尺寸时，右列固定会冒出"网格撑不满"的空档。
+   */
+  const rightWidth = (): number => props.rightWidth ?? 300;
+  /** 拖动起点的左列宽度（用「起点 + dx」而不是逐帧累加，丢帧时不会漂移） */
+  let leftDragStart = 0;
 
-  function beginResize(side: "left" | "right", event: PointerEvent): void {
-    const read = side === "left" ? leftWidth : rightWidth;
-    const write = side === "left" ? setLeftWidth : setRightWidth;
-    const commit =
-      side === "left" ? props.onLeftWidthChange : props.onRightWidthChange;
-    const start = read();
-    const startX = event.clientX;
-    setDraggingSide(side);
-    const handle = event.currentTarget as HTMLElement;
-    try {
-      handle.setPointerCapture(event.pointerId);
-    } catch {
-      // 合成事件（冒烟脚本）拿不到捕获也能用下面挂在元素上的监听拖
-    }
-    const onMove = (move: PointerEvent): void => {
-      write(
-        resizeWidth({
-          start,
-          dx: move.clientX - startX,
-          invert: side === "right",
-          bounds: SIDEBAR_BOUNDS,
-        }),
-      );
-    };
-    const finish = (): void => {
-      handle.removeEventListener("pointermove", onMove);
-      handle.removeEventListener("pointerup", finish);
-      handle.removeEventListener("pointercancel", finish);
-      setDraggingSide(null);
-      commit?.(read());
-    };
-    handle.addEventListener("pointermove", onMove);
-    handle.addEventListener("pointerup", finish);
-    handle.addEventListener("pointercancel", finish);
+  function beginLeftResize(): void {
+    leftDragStart = leftWidth();
   }
-
-  function nudgeResize(side: "left" | "right", delta: number): void {
-    const read = side === "left" ? leftWidth : rightWidth;
-    const write = side === "left" ? setLeftWidth : setRightWidth;
-    const commit =
-      side === "left" ? props.onLeftWidthChange : props.onRightWidthChange;
-    const next = nudgeWidth(read(), delta, SIDEBAR_BOUNDS);
-    write(next);
-    commit?.(next);
+  function dragLeft(dx: number): void {
+    setLeftWidth(resizeWidth({ start: leftDragStart, dx, bounds: SIDEBAR_BOUNDS }));
+  }
+  function endLeftResize(): void {
+    props.onLeftWidthChange?.(leftWidth());
+  }
+  function nudgeLeft(delta: number): void {
+    const next = nudgeWidth(leftWidth(), delta, SIDEBAR_BOUNDS);
+    setLeftWidth(next);
+    props.onLeftWidthChange?.(next);
   }
 
   /** 「当前那张」在列表里的下标 —— 键盘导航与「把它滚进视野」都靠它 */
@@ -529,11 +498,10 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
         {/* 拖拽手柄：左列 ↔ 中列（看图「关左右」时手柄一起收起来） */}
         <Show when={chromeShowsSides(chrome())}>
           <ColumnHandle
-            side="left"
-            width={leftWidth()}
-            dragging={draggingSide() === "left"}
-            onBegin={(event) => beginResize("left", event)}
-            onNudge={(delta) => nudgeResize("left", delta)}
+            onDragStart={beginLeftResize}
+            onDrag={dragLeft}
+            onDragEnd={endLeftResize}
+            onNudge={nudgeLeft}
           />
         </Show>
 
@@ -712,16 +680,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
         </Show>
       </main>
 
-      {/* 拖拽手柄：中列 ↔ 右列 */}
-      <Show when={chromeShowsSides(chrome())}>
-        <ColumnHandle
-          side="right"
-          width={rightWidth()}
-          dragging={draggingSide() === "right"}
-          onBegin={(event) => beginResize("right", event)}
-          onNudge={(delta) => nudgeResize("right", delta)}
-        />
-      </Show>
+      {/* 右列**没有把手**：宽度固定（人类 2026-09-19 定，之后另有安排） */}
 
       {/* 右列 */}
       <aside
