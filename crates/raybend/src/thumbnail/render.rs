@@ -62,9 +62,14 @@ pub const JPEG_QUALITY: u8 = 82;
 /// 实测证据：拿同一张 `P1000023.RW2` 跑 `thumb-probe`，现管线输出的是 **288×384（纵）** ✓，
 /// 说明代码没问题、就是缓存没作废。
 ///
+/// **第三次（v4 → v5，2026-09-18）**：改「方向优先级」那次（worker 的值不该压过文件头）
+/// 我**没有**一起抬版本 —— 于是 11:44–12:57 之间渲染出的 v4 缩略图带着旧行为却仍然有效，
+/// 人类看 view 里的纵拍 RAW 依旧是歪的（「感觉和以前一样」）。教训照旧：
+/// **改渲染行为必须和抬版本号在同一个改动里完成**，中间任何一段产出的缓存都会变成毒缓存。
+///
 /// ⇒ 所以这条纪律的正确用法是：**同一个改动里，改了渲染行为就顺手抬版本**，
 /// 不要「先合并渲染改动、之后再抬」（中间那段时间产出的缓存会带着旧行为却持有新签名）。
-pub const PIPELINE_VERSION: u32 = 4;
+pub const PIPELINE_VERSION: u32 = 5;
 
 /// 缩略图尺度。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
@@ -131,9 +136,9 @@ impl SizeClass {
 #[must_use]
 pub const fn render_sig(size: SizeClass) -> &'static str {
     match size {
-        SizeClass::Grid => "jpeg-q82-grid-v4",
-        SizeClass::Strip => "jpeg-q82-strip-v4",
-        SizeClass::Screen => "jpeg-q86-screen-v4",
+        SizeClass::Grid => "jpeg-q82-grid-v5",
+        SizeClass::Strip => "jpeg-q82-strip-v5",
+        SizeClass::Screen => "jpeg-q86-screen-v5",
     }
 }
 
