@@ -12,6 +12,7 @@ pub mod db;
 mod import;
 pub mod repo;
 pub mod source;
+pub mod tags;
 pub mod thumbs;
 
 /// IPC 契约测试（拉把 Rust 序列化出的键名与前端 ts 镜像对齐）。
@@ -201,6 +202,8 @@ pub fn run() {
             // ── 统一取图口（view 与缩略图共用的总入口，M2-W2）──
             thumbs::view_image,
             thumbs::image_histogram,
+            tags::tag_list,
+            tags::tag_ensure,
             // ── 库（相片仓）──
             repo::repositories_list,
             repo::repository_probe,

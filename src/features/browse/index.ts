@@ -5,6 +5,7 @@
 export { BrowseGrid, type BrowseGridProps } from "./BrowseGrid.tsx";
 export { ViewerStatusBar, type ViewerStatusBarProps } from "./ViewerStatusBar.tsx";
 export { BrowseToolbar, type BrowseToolbarProps } from "./BrowseToolbar.tsx";
+export { TagDialog, type TagDialogProps } from "./TagDialog.tsx";
 export {
   AssetInfo,
   BrowseLeftColumn,

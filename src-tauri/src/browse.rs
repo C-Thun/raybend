@@ -21,6 +21,7 @@ use raybend::store::flags::{Flag, FlagKey, FlagSet};
 use raybend::store::marking::{self, UndoStack};
 use raybend::store::query::{self, AssetRow, Combinator, Filter, Query, Scope, Sort, SortKey};
 use raybend::store::repository;
+use raybend::store::tags;
 use raybend::store::time;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, Runtime};
@@ -363,6 +364,12 @@ pub struct MarkingItem {
     pub color_label: Option<String>,
     pub like_state: Option<String>,
     pub lock_level: i64,
+    /// 这张照片身上的**标签 id**（升序）。
+    ///
+    /// 只给 id、不给名字：名字在**全局词典**（`app.db`）里，而这条记录来自某个库的
+    /// catalog；前端手上本来就有一份词典（标签弹窗要用），拿 id 去查名字即可 ——
+    /// 免得每个库的标记接口都要跨界读一次 app.db（见 `tags.rs` 的文件头）。
+    pub tag_ids: Vec<i64>,
 }
 
 /// 改完之后的状态（前端据此更新按钮与撤销提示）。
@@ -544,21 +551,56 @@ pub async fn browse_markings<R: Runtime>(
         let state = handle.state::<BrowseState>();
         state.with_catalog(&handle, &repository_id, move |db| {
             let markings = db
-                .read(|conn| marking::read_markings(conn, &ids))
-                .map_err(|e| e.to_string())?;
-            Ok(markings
-                .into_iter()
-                .map(|(id, m)| MarkingItem {
-                    id,
-                    rating: i64::from(m.rating),
-                    color_label: m.color_label,
-                    like_state: m.like_state,
-                    lock_level: i64::from(m.lock_level),
+                .read(|conn| {
+                    let rows = marking::read_markings(conn, &ids)?;
+                    let mut out = Vec::with_capacity(rows.len());
+                    for (id, m) in rows {
+                        out.push(MarkingItem {
+                            id,
+                            rating: i64::from(m.rating),
+                            color_label: m.color_label,
+                            like_state: m.like_state,
+                            lock_level: i64::from(m.lock_level),
+                            // 一次动作最多是「一屏里选中的那些」，逐张读关联足够快
+                            tag_ids: tags::tags_of_asset(conn, id)?,
+                        });
+                    }
+                    Ok(out)
                 })
-                .collect())
+                .map_err(|e| e.to_string())?;
+            Ok(markings)
         })
     })
     .await
+}
+
+/// 标签关联改动之后，把差量同步到**全局词典**的使用次数（`app.db` 侧）。
+///
+/// 为什么在外壳层做：词典在 `app.db`、关联在各库的 `catalog.db` —— 一次动作要同时碰两个库，
+/// 而 `store` 层是按库分开的（`marking` 只认 catalog 的连接）。
+///
+/// **失败不影响已经落库的关联**：`use_count` 只用来给标签排序（常用的排前面），
+/// 为它让整个标记动作失败是不划算的 —— 所以这里吞掉错误、只在控制台留一行。
+fn sync_tag_counts<R: Runtime>(app: &AppHandle<R>, ops: &[marking::Op]) {
+    let mut delta = tags::TagDelta::default();
+    for op in ops {
+        match op {
+            marking::Op::TagAttach { tag_id, .. } => delta.added.push(*tag_id),
+            marking::Op::TagDetach { tag_id, .. } => delta.removed.push(*tag_id),
+            _ => {}
+        }
+    }
+    if delta.is_empty() {
+        return;
+    }
+    let state = app.state::<DbState>();
+    let result = state.with(app, |db| {
+        db.write(move |conn| tags::apply_delta(conn, &delta))
+            .map_err(|e| e.to_string())
+    });
+    if let Err(message) = result {
+        eprintln!("[raybend] ⚠️ 标签使用次数同步失败（不影响这次改动）：{message}");
+    }
 }
 
 /// 打标记 / 改标签（**会进撤销栈**）。
@@ -626,6 +668,9 @@ pub async fn browse_mark<R: Runtime>(
             .map_err(|e| e.to_string())
         })?;
 
+        // 标签的使用次数记在全局词典里，这里按本次差量同步（失败不影响落库的关联）
+        sync_tag_counts(&handle, &change.ops);
+
         // 记进撤销栈（只记真的改到了东西的动作 —— 空补丁不该占一步撤销）
         let (undo_label, redo_label, can_undo, can_redo) = state.with_undo(&id, |stack| {
             stack.push(change);
@@ -668,12 +713,15 @@ pub async fn browse_undo<R: Runtime>(
             );
         };
 
+        // 补丁要进闭包（会被移动），但同步标签计数还要用它 —— 先留一份
+        let applied_ops = patch.ops.clone();
         let outcome = state.with_catalog(&handle, &repository_id, move |db| {
             db.write_tx(move |conn| marking::apply(conn, &patch).map(|_| ()))
                 .map_err(|e| e.to_string())
         });
         match outcome {
             Ok(()) => {
+                sync_tag_counts(&handle, &applied_ops);
                 state.with_undo(&id, |stack| stack.commit_undo(change))?;
             }
             Err(e) => {
@@ -718,12 +766,15 @@ pub async fn browse_redo<R: Runtime>(
             );
         };
 
+        // 补丁要进闭包（会被移动），但同步标签计数还要用它 —— 先留一份
+        let applied_ops = patch.ops.clone();
         let outcome = state.with_catalog(&handle, &repository_id, move |db| {
             db.write_tx(move |conn| marking::apply(conn, &patch).map(|_| ()))
                 .map_err(|e| e.to_string())
         });
         match outcome {
             Ok(()) => {
+                sync_tag_counts(&handle, &applied_ops);
                 state.with_undo(&id, |stack| stack.commit_redo(change))?;
             }
             Err(e) => {

@@ -239,7 +239,8 @@
     "id",
     "likeState",
     "lockLevel",
-    "rating"
+    "rating",
+    "tagIds"
   ],
   "MarkResult": [
     "canRedo",

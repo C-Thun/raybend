@@ -3453,6 +3453,69 @@
                     },
                     {
                       "type": "frame",
+                      "id": "ckaiQ",
+                      "name": "SortControl",
+                      "height": 24,
+                      "gap": 4,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "D8rpY",
+                          "name": "SortLabel",
+                          "fill": "$fg-3",
+                          "content": "排序",
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "eG8gT",
+                          "name": "SortSelect",
+                          "height": 24,
+                          "fill": "$surface-track",
+                          "cornerRadius": 4,
+                          "gap": 2,
+                          "padding": [
+                            0,
+                            6
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "D4hSx",
+                              "name": "SortValue",
+                              "fill": "$fg-2",
+                              "content": "拍摄时间",
+                              "fontFamily": "Inter",
+                              "fontSize": 14,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "frame",
+                              "id": "nU5ru",
+                              "name": "Glyph / 下拉",
+                              "width": 10,
+                              "height": 10,
+                              "fill": "$fg-3"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "n979d",
+                          "name": "SortDir",
+                          "width": 20,
+                          "height": 20,
+                          "fill": "$fg-3",
+                          "cornerRadius": 4
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
                       "id": "F8n94",
                       "name": "ZoomSlider",
                       "width": 96,
@@ -16951,7 +17014,7 @@
                     {
                       "type": "frame",
                       "id": "XX2SP",
-                      "name": "Chip / 3★ 以上 ×",
+                      "name": "Chip / 3★ ×",
                       "fill": "$surface-bar",
                       "cornerRadius": 6,
                       "padding": [
@@ -16964,7 +17027,7 @@
                           "id": "w73Qg",
                           "name": "Text",
                           "fill": "$fg-1",
-                          "content": "3★ 以上 ×",
+                          "content": "3★ ×",
                           "fontFamily": "Inter",
                           "fontSize": 10,
                           "fontWeight": "normal"
@@ -17026,63 +17089,6 @@
                       "fontFamily": "Inter",
                       "fontSize": 11,
                       "fontWeight": "normal"
-                    }
-                  ]
-                },
-                {
-                  "type": "frame",
-                  "id": "MCbNC",
-                  "name": "SortBar",
-                  "width": "fill_container",
-                  "height": 24,
-                  "gap": 8,
-                  "alignItems": "center",
-                  "children": [
-                    {
-                      "type": "text",
-                      "id": "bjPmS",
-                      "name": "SortLabel",
-                      "fill": "$fg-3",
-                      "content": "排序",
-                      "fontFamily": "Inter",
-                      "fontSize": 11,
-                      "fontWeight": "normal"
-                    },
-                    {
-                      "type": "frame",
-                      "id": "qTCbQ",
-                      "name": "SortSelect",
-                      "height": 24,
-                      "fill": "$surface-bar",
-                      "cornerRadius": 4,
-                      "gap": 4,
-                      "padding": [
-                        0,
-                        8
-                      ],
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "cCBPt",
-                          "name": "SortValue",
-                          "fill": "$fg-1",
-                          "content": "拍摄时间",
-                          "fontFamily": "Inter",
-                          "fontSize": 12,
-                          "fontWeight": "normal"
-                        },
-                        {
-                          "type": "icon",
-                          "id": "MELor",
-                          "name": "Glyph / chevron-down",
-                          "width": 11,
-                          "height": 11,
-                          "icon": "chevron-down",
-                          "library": "lucide",
-                          "fill": "$fg-3"
-                        }
-                      ]
                     },
                     {
                       "type": "frame",
@@ -18605,6 +18611,192 @@
               ]
             }
           ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "rjDbR",
+      "x": 11500,
+      "y": 0,
+      "name": "Components / 对比画幅布局",
+      "width": 1000,
+      "height": 700,
+      "fill": "$surface-main",
+      "cornerRadius": 8,
+      "layout": "vertical",
+      "gap": 16,
+      "padding": 20,
+      "children": [
+        {
+          "type": "text",
+          "id": "kcQPu",
+          "name": "Title",
+          "fill": "$fg-1",
+          "content": "对比：画幅怎么摆（人类 2026-09-19 定）",
+          "fontFamily": "Inter",
+          "fontSize": 14,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "text",
+          "id": "IUqEz",
+          "name": "Intro",
+          "fill": "$fg-2",
+          "content": "窗口内按选择先后从左到右；第一幅是基准（带 1px 主色内描边），其余按它的比例居中扣区域；最多 4 张。",
+          "fontFamily": "Inter",
+          "fontSize": 14,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "text",
+          "id": "ZVcZ8",
+          "name": "Label / 2",
+          "fill": "$fg-1",
+          "content": "① 2 张：一排两个（1×2）",
+          "fontFamily": "Inter",
+          "fontSize": 14,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "Z1NX5s",
+          "name": "Mock / 2",
+          "width": 420,
+          "height": 160,
+          "layout": "vertical",
+          "gap": 8,
+          "children": [
+            {
+              "type": "frame",
+              "id": "nqtcD",
+              "name": "Row1",
+              "width": "fill_container",
+              "height": "fill_container",
+              "gap": 8,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "LeMi8",
+                  "name": "Frame / 1",
+                  "width": "fill_container",
+                  "height": "fill_container",
+                  "fill": "$surface-bar",
+                  "cornerRadius": 6,
+                  "stroke": "$brand",
+                  "strokeWidth": 1
+                },
+                {
+                  "type": "frame",
+                  "id": "h7I1YO",
+                  "name": "Frame / 2",
+                  "width": "fill_container",
+                  "height": "fill_container",
+                  "fill": "$surface-bar",
+                  "cornerRadius": 6
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "l1Dny",
+          "name": "Label / 3",
+          "fill": "$fg-1",
+          "content": "② 3 张：一排三个（1×3）",
+          "fontFamily": "Inter",
+          "fontSize": 14,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "UnrAe",
+          "name": "Mock / 3",
+          "width": 420,
+          "height": 150,
+          "layout": "vertical",
+          "gap": 8,
+          "children": [
+            {
+              "type": "frame",
+              "id": "ETX9F",
+              "name": "Row1",
+              "width": "fill_container",
+              "height": "fill_container",
+              "gap": 8,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "I7O4M",
+                  "name": "Frame / 1",
+                  "width": "fill_container",
+                  "height": "fill_container",
+                  "fill": "$surface-bar",
+                  "cornerRadius": 6,
+                  "stroke": "$brand",
+                  "strokeWidth": 1
+                },
+                {
+                  "type": "frame",
+                  "id": "Yp3t2",
+                  "name": "Frame / 2",
+                  "width": "fill_container",
+                  "height": "fill_container",
+                  "fill": "$surface-bar",
+                  "cornerRadius": 6
+                },
+                {
+                  "type": "frame",
+                  "id": "BmtKA",
+                  "name": "Frame / 3",
+                  "width": "fill_container",
+                  "height": "fill_container",
+                  "fill": "$surface-bar",
+                  "cornerRadius": 6
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "H3d1y",
+          "name": "Label / 4",
+          "fill": "$fg-1",
+          "content": "③ 4 张：2×2（人类 2026-09-19 定）",
+          "fontFamily": "Inter",
+          "fontSize": 14,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "HP7Wb",
+          "name": "Mock / 4",
+          "width": 420,
+          "height": 150,
+          "layout": "vertical",
+          "gap": 8,
+          "children": [
+            {
+              "type": "frame",
+              "id": "O6bai",
+              "name": "Row1",
+              "width": "fill_container",
+              "height": "fill_container",
+              "gap": 8
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "yLx4v",
+          "name": "Note",
+          "fill": "$fg-2",
+          "content": "第一幅（左上/最左）是基准：带 1px 主色内描边，其余按它的比例居中扣区域；窗口内按选择先后从左到右。",
+          "fontFamily": "Inter",
+          "fontSize": 14,
+          "fontWeight": "normal"
         }
       ]
     }

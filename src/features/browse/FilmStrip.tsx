@@ -22,7 +22,7 @@
  *    网格里已经缓存的照片，胶片带里立刻就有，不重复取一遍。
  */
 
-import { createEffect, For, Show, type JSX } from "solid-js";
+import { createEffect, For, on, Show, type JSX } from "solid-js";
 import { IconLock } from "@tabler/icons-solidjs";
 
 import { clickMode } from "../../lib/selection.ts";
@@ -80,15 +80,17 @@ export function FilmStrip(props: FilmStripProps): JSX.Element {
    * （`←`/`→`、对比态退出时的定位），胶片带必须跟着 —— 只认「当前下标」这一个信号，
    * 谁改的都不关心。
    */
-  createEffect(() => {
-    const at = index();
-    // 依赖「是不是只看对比图」：退出该状态时胶片带换了内容，得重新把当前那张滚进视野
-    const mode = compareOnly();
-    if (!props.viewer.state().active || scroller === undefined) return;
-    void mode;
-    const node = scroller.querySelector<HTMLElement>(`[data-strip-item="${at}"]`);
-    node?.scrollIntoView({ block: "nearest", inline: "nearest" });
-  });
+  createEffect(
+    on(
+      // 依赖三项：当前下标、是否「只看对比图」（退出时胶片带换了内容要重滚）、看图是否开着
+      () => [index(), compareOnly(), props.viewer.state().active] as const,
+      ([at, , active]) => {
+        if (!active || scroller === undefined) return;
+        const node = scroller.querySelector<HTMLElement>(`[data-strip-item="${at}"]`);
+        node?.scrollIntoView({ block: "nearest", inline: "nearest" });
+      },
+    ),
+  );
 
   /**
    * 移出一张之后，画面落到**还在对比里的那一张**（就近）。

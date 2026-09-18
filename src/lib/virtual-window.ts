@@ -124,6 +124,55 @@ export function computeVirtualWindow(input: VirtualWindowInput): VirtualWindow {
  * 行高相等时的快捷判断（调用方用得上：等行高时可以直接乘除算位置，
  * 不必走前缀和）。
  */
+/**
+ * 「把第 `target` 行滚进视野」需要的新 `scrollTop`（纯函数，好测）。
+ *
+ * 键盘导航要的就是这件事：`←`/`→` 换了「当前那张」之后，网格得跟上 ——
+ * 否则焦点在屏幕外飘，用户以为按键没反应。
+ *
+ * 三种情况：
+ * * 行整个在视野**上方** → 顶对齐（`top`）；
+ * * 行整个在视野**下方** → 底对齐（`top + height - viewport`）；
+ * * 已经看得见 → **原样返回**（一条像素都不动：不然每按一次方向键画面都抖一下）。
+ *
+ * 行高与视口高都按 `computeVirtualWindow` 的同一套规范化（非法值当 0）——
+ * 两处口径不一致的话会出现「滚了但没滚到位」。
+ *
+ * （2026-09-19：本函数上线时类型检查器一度报「没有这个导出」——陈旧快照，
+ * 判据与配方见 `ASSISTANCE.md` §二第 3 条；`pnpm test` 里那 5 条就是它的靶子。）
+ */
+export function rowScrollTop(input: {
+  rows: readonly VirtualRowLike[];
+  /** 目标行下标；越界时原样返回当前滚动位置 */
+  target: number;
+  scrollTop: number;
+  viewportHeight: number;
+}): number {
+  const rows = input.rows;
+  const viewport = Number.isFinite(input.viewportHeight)
+    ? Math.max(0, input.viewportHeight)
+    : 0;
+  const current = Number.isFinite(input.scrollTop) ? Math.max(0, input.scrollTop) : 0;
+  if (
+    rows.length === 0 ||
+    viewport <= 0 ||
+    !Number.isInteger(input.target) ||
+    input.target < 0 ||
+    input.target >= rows.length
+  ) {
+    return current;
+  }
+
+  let top = 0;
+  for (let i = 0; i < input.target; i += 1) top += saneHeight(rows[i].height);
+  const height = saneHeight(rows[input.target].height);
+  const bottom = top + height;
+
+  if (top < current) return top;
+  if (bottom > current + viewport) return Math.max(0, bottom - viewport);
+  return current;
+}
+
 export function isUniformHeight(rows: readonly VirtualRowLike[]): boolean {
   if (rows.length < 2) return true;
   const first = saneHeight(rows[0].height);

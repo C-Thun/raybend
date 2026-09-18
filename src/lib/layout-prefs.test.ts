@@ -67,14 +67,15 @@ test("readLayout：没存过 / 存了垃圾 / 存了空串，都安全回到默�
 
 test("write → read 往返一致（这就是「重启后还原」的核心）", () => {
   const storage = memoryStorage();
-  const prefs = { leftRatio: 0.37, recentRatio: 0.55 };
+  // 用 `...DEFAULT_LAYOUT` 打底：将来再加字段时这份测试不用跟着改
+  const prefs = { ...DEFAULT_LAYOUT, leftRatio: 0.37, recentRatio: 0.55 };
   writeLayout(prefs, storage);
   assert.deepEqual(readLayout(storage), prefs);
 });
 
 test("存储不可用时：读给默认、写不抛错", () => {
   assert.doesNotThrow(() => {
-    writeLayout({ leftRatio: 0.3, recentRatio: 0.3 }, undefined);
+    writeLayout({ ...DEFAULT_LAYOUT, leftRatio: 0.3, recentRatio: 0.3 }, undefined);
   });
   assert.deepEqual(readLayout(undefined), DEFAULT_LAYOUT);
 });
@@ -120,4 +121,35 @@ test("值没变时不写、也不更新信号（防 resize 回路：真机启动
   const atMax = store.prefs();
   store.setLeftRatio(9);
   assert.equal(store.prefs(), atMax, "夹取后仍是同一个值，就不该动");
+});
+
+
+// ─────────────────── 浏览侧栏宽度（像素） ───────────────────
+
+test("sanitizeLayout：侧栏宽度非法值落到默认、越界被夹回范围", () => {
+  const fallback = DEFAULT_LAYOUT;
+  assert.equal(sanitizeLayout({}).browseLeftWidth, fallback.browseLeftWidth);
+  assert.equal(sanitizeLayout({ browseLeftWidth: "宽" }).browseLeftWidth, fallback.browseLeftWidth);
+  assert.equal(
+    sanitizeLayout({ browseLeftWidth: 10 }).browseLeftWidth,
+    LAYOUT_BOUNDS.browseLeftWidth.min,
+    "太小要夹到下限（再窄只剩省略号）",
+  );
+  assert.equal(
+    sanitizeLayout({ browseRightWidth: 9999 }).browseRightWidth,
+    LAYOUT_BOUNDS.browseRightWidth.max,
+    "太大要夹到上限（别把网格挤没）",
+  );
+});
+
+test("sanitizeLayout：侧栏宽度取整（半像素会渗出 1px 的缝）", () => {
+  assert.equal(sanitizeLayout({ browseLeftWidth: 300.6 }).browseLeftWidth, 301);
+  assert.equal(sanitizeLayout({ browseLeftWidth: 300.2 }).browseLeftWidth, 300);
+});
+
+test("sanitizeLayout：旧存储（没有这两个字段）也能读，不报错", () => {
+  const legacy = { leftRatio: 0.3, recentRatio: 0.4 };
+  const prefs = sanitizeLayout(legacy);
+  assert.equal(prefs.leftRatio, 0.3, "老字段照常读");
+  assert.equal(prefs.browseLeftWidth, DEFAULT_LAYOUT.browseLeftWidth, "新字段回默认");
 });

@@ -22,7 +22,7 @@ import {
   onMount,
   type JSX,
 } from "solid-js";
-import { computeVirtualWindow } from "../../lib/virtual-window.ts";
+import { computeVirtualWindow, rowScrollTop } from "../../lib/virtual-window.ts";
 
 export interface VirtualGridRow {
   /** 稳定键（重建列表时用来复用 DOM） */
@@ -49,6 +49,14 @@ export interface VirtualGridProps<TRow extends VirtualGridRow> {
    * 「现在看到哪几行」才能只补缺的那几页（`features/browse/store.ts` 的 `ensureRange`）。
    */
   onVisibleRange?: (start: number, end: number) => void;
+  /**
+   * 把这个**行下标**滚进视野（值变化时执行）。
+   *
+   * 用途：键盘导航 —— `←`/`→` 换了「当前那张」之后，网格得跟上，
+   * 否则焦点在屏幕外飘着，用户以为按键没反应。已经看得见时**一个像素都不动**
+   * （数学在 `lib/virtual-window.ts` 的 `rowScrollTop`，有单测）。
+   */
+  focusRow?: number;
   class?: string;
 }
 
@@ -77,6 +85,22 @@ export function VirtualGrid<TRow extends VirtualGridRow>(
     if (key === undefined || !scroller) return;
     scroller.scrollTop = 0;
     setScrollTop(0);
+  });
+
+  // 键盘导航：把目标行滚进视野（已经看得见就不动）
+  createEffect(() => {
+    const target = props.focusRow;
+    if (target === undefined || !scroller) return;
+    const next = rowScrollTop({
+      rows: props.rows,
+      target,
+      scrollTop: scroller.scrollTop,
+      viewportHeight: scroller.clientHeight,
+    });
+    if (next !== scroller.scrollTop) {
+      scroller.scrollTop = next;
+      setScrollTop(next);
+    }
   });
 
   const window = () =>

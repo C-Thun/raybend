@@ -418,6 +418,20 @@ export interface MarkingItem {
   colorLabel: string | null;
   likeState: string | null;
   lockLevel: number;
+  /**
+   * 这张照片身上的**标签 id**（升序）。
+   *
+   * 名字不在这里：标签词典是**全局**的（`app.db`），而标记来自某个库的 catalog。
+   * 前端手上有一份词典（标签弹窗本来就要用），拿 id 去查名字即可。
+   */
+  tagIds: number[];
+}
+
+/** 标签词典里的一条（`app.db` 的 `tags` 表）。 */
+export interface Tag {
+  id: number;
+  name: string;
+  useCount: number;
 }
 
 /** 改完之后的状态。 */

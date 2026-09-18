@@ -20,6 +20,7 @@
 
 import { createEffect, createSignal, onCleanup, onMount, Show } from "solid-js";
 import { uiReady } from "./api/window.ts";
+import { t } from "./i18n/index.ts";
 import * as db from "./api/db.ts";
 import type { ExifData } from "./features/exif-strip/index.ts";
 import { toExifData } from "./features/exif-strip/index.ts";
@@ -31,7 +32,8 @@ import { createShellStore } from "./shell/store.ts";
 import { TitleBar } from "./shell/TitleBar.tsx";
 import { ToolsBar } from "./shell/ToolsBar.tsx";
 import { createImportStore, ImportWorkspace } from "./workspaces/import/index.ts";
-import { BrowseToolbar, createBrowseStore } from "./features/browse/index.ts";
+import { createToastStore, ToastHost, toastDisposer } from "./components/ui/Toast.tsx";
+import { BrowseToolbar, createBrowseStore, TagDialog } from "./features/browse/index.ts";
 import { browseDelete, browseFacets, browseMark, browseMarkings, browsePage, browseRedo, browseTimeline, browseUndo, flagsClear, flagsGet, flagsSet } from "./api/browse.ts";
 import { BrowseWorkspace } from "./workspaces/browse/index.ts";
 
@@ -100,6 +102,20 @@ export default function App() {
    * 多选时不显示（显示哪一张都不对），没有选择时是空态。
    */
   const [exif, setExif] = createSignal<ExifData | null>(null);
+  /**
+   * 标签弹窗开着没有（`BROWSE.md` §3.3）。
+   *
+   * 状态住在**组装层**而不是工具条里：工具条在 `ToolsBar` 的插槽里，弹窗要挂在
+   * 更外层（模态不该被条带的层叠上下文困住），而且它要读 browse store 的选择状态 ——
+   * 两边都在这里汇合（`ARCHITECTURE.md` §2 的组合层职责）。
+   */
+  const [tagsOpen, setTagsOpen] = createSignal(false);
+  /**
+   * 提示通道（`components/ui/Toast.tsx`）：挂在**根层** —— 模态/条带都有自己的层叠上下文，
+   * 提示要永远在最上面（`--z-toast`），所以由组装层建、往下传。
+   */
+  const toast = createToastStore();
+  onCleanup(toastDisposer(toast));
   createEffect(() => {
     const selected = grid.selectedIds();
     if (selected.size !== 1) {
@@ -141,7 +157,11 @@ export default function App() {
       >
         {/* 浏览模式的工具（标记系列 / 筛选开关 / 锁）由那个模块自己给 —— 见 ToolsBar 的说明 */}
         <Show when={shell.workflow() === "browse"}>
-          <BrowseToolbar store={browseStore} />
+          <BrowseToolbar
+            store={browseStore}
+            toast={toast}
+            onOpenTags={() => setTagsOpen(true)}
+          />
         </Show>
       </ToolsBar>
 
@@ -150,6 +170,30 @@ export default function App() {
         浏览 → 三列浏览工作区（库目录选择器 / 网格 / 信息栏）。
         编辑与导出还没做，落到导入那版（M1 的口径，切过去是空的）。
       */}
+      {/*
+        标签弹窗（`BROWSE.md` §3.3）：挂在**根层**，不推进 `ToolsBar` 的插槽 ——
+        模态有自己的遮罩与层叠（`--z-modal`），放进条带里会被那一层的上下文困住。
+      */}
+      <TagDialog
+        open={tagsOpen()}
+        store={browseStore}
+        onClose={() => setTagsOpen(false)}
+        onDone={(result) => {
+          // 标签改动也是「会进撤销栈」的动作：给一条带撤销的提示（与打标同一套口径）
+          if (result === null || result.changed === 0) return;
+          toast.show({
+            tone: "success",
+            message: t("browse.tagsSaved").replace("{n}", String(result.changed)),
+            action: result.canUndo
+              ? { label: t("browse.undo"), onAction: () => void browseStore.undo() }
+              : undefined,
+          });
+        }}
+      />
+
+      {/* 提示（右上角、不阻塞、约 5 秒；带「撤销」的动作把撤销放在自己身上） */}
+      <ToastHost store={toast} />
+
       <Show when={shell.workflow() === "browse"} fallback={
         <ImportWorkspace
           store={importStore}
@@ -161,7 +205,14 @@ export default function App() {
           onRecentRatioChange={layout.setRecentRatio}
         />
       }>
-        <BrowseWorkspace store={browseStore} />
+        <BrowseWorkspace
+          store={browseStore}
+          toast={toast}
+          leftWidth={layout.prefs().browseLeftWidth}
+          rightWidth={layout.prefs().browseRightWidth}
+          onLeftWidthChange={(width) => layout.setBrowseLeftWidth(width)}
+          onRightWidthChange={(width) => layout.setBrowseRightWidth(width)}
+        />
       </Show>
     </div>
   );

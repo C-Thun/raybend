@@ -295,6 +295,7 @@ const MARKING_ITEM_KEYS = [
   "likeState",
   "lockLevel",
   "rating",
+  "tagIds",
 ] as const satisfies readonly (keyof MarkingItem)[];
 const MARK_RESULT_KEYS = [
   "canRedo",

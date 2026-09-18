@@ -19,6 +19,7 @@ import type {
   MarkAction,
   MarkResult,
   MarkingItem,
+  Tag,
 } from "./types.ts";
 
 let coreModule: Promise<typeof import("@tauri-apps/api/core")> | undefined;
@@ -105,6 +106,22 @@ export async function browseMark(
 }
 
 /** 撤销一步。 */
+/**
+ * 搜索标签（全局词典，`app.db`）。
+ *
+ * `query` 空/缺省 → 按使用次数列出一批常用的（弹窗一打开就有东西可点）。
+ */
+export async function tagList(query = "", limit = 50): Promise<Tag[]> {
+  if (!isTauriRuntime()) return [];
+  return call<Tag[]>("tag_list", { query, limit });
+}
+
+/** 建标签（同名幂等：已有就返回已有的那条）。 */
+export async function tagEnsure(name: string): Promise<Tag | null> {
+  if (!isTauriRuntime()) return null;
+  return call<Tag>("tag_ensure", { name });
+}
+
 export async function browseUndo(repositoryId: string): Promise<MarkResult> {
   if (!isTauriRuntime()) return NO_BACKEND_MARK;
   return call<MarkResult>("browse_undo", { repositoryId });

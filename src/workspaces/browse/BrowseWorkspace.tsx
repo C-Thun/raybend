@@ -17,7 +17,16 @@
  * * 看图 / 对比 / 胶片带在 W2 —— 这里是「看片、挑片」的第一屏。
  */
 
-import { createMemo, createSignal, createEffect, onCleanup, onMount, Show } from "solid-js";
+import {
+  createEffect,
+  createMemo,
+  createSignal,
+  For,
+  onCleanup,
+  onMount,
+  Show,
+  type JSX,
+} from "solid-js";
 
 import { getThumbBytes, getViewImage, listRepositories } from "../../api/db.ts";
 import type { RepositoryView } from "../../api/types.ts";
@@ -35,6 +44,7 @@ import {
   type ViewerChrome,
 } from "../../features/browse/chrome.ts";
 import { FilmStrip } from "../../features/browse/FilmStrip.tsx";
+import { FilterBar } from "../../features/browse/FilterBar.tsx";
 import { CompareView } from "../../features/browse/CompareView.tsx";
 import { compareIds } from "../../features/browse/compare.ts";
 import { createThumbQueue } from "../../components/ui/thumb-queue.ts";
@@ -42,10 +52,72 @@ import { createViewerStore, Viewer } from "../../components/ui/viewer/index.ts";
 import { clampTileStepIndex, DEFAULT_TILE_STEP_INDEX, TILE_SIZE_STEPS, tileSizeAt } from "../../lib/tile-flow.ts";
 import { t } from "../../i18n/index.ts";
 import { Slider } from "../../components/ui/Slider.tsx";
+import { Button } from "../../components/ui/Button.tsx";
+import { ConfirmDialog, Dialog } from "../../components/ui/Dialog.tsx";
+import type { ToastStore } from "../../components/ui/Toast.tsx";
+import { browseKeyIntent, shouldHandleKey } from "../../features/browse/keys.ts";
+import { SplitHandleDots } from "../../components/ui/SplitHandle.tsx";
+import { nudgeWidth, resizeWidth } from "../../lib/column-resize.ts";
+
+/** 侧栏宽度的上下限（与 `lib/layout-prefs.ts` 的 LAYOUT_BOUNDS 一致；两处都要有：
+ *  那边挡存储里的垃圾值，这里挡拖拽本身） */
+const SIDEBAR_BOUNDS = { min: 220, max: 520 } as const;
+import { Menu } from "../../components/ui/Menu.tsx";
+import { IconArrowDown, IconArrowUp } from "@tabler/icons-solidjs";
+import type { BrowseSort, DeleteFailure } from "../../api/types.ts";
 
 export interface BrowseWorkspaceProps {
   store: BrowseStore;
+  /**
+   * 提示通道（`components/ui/Toast.tsx`）：删除这类**改磁盘**的动作必须给回执 ——
+   * 谁删了什么、几个被锁挡住、哪几个失败了，都在提示与失败清单里说清楚。
+   */
+  toast?: ToastStore;
+  /** 左列 / 右列宽度（像素，受控；拖拽松手时通过下面的回调落盘） */
+  leftWidth?: number;
+  rightWidth?: number;
+  onLeftWidthChange?: (width: number) => void;
+  onRightWidthChange?: (width: number) => void;
   class?: string;
+}
+
+/** 侧栏手柄的三点（与导入工作区同一套外观） */
+function ColumnHandle(props: {
+  side: "left" | "right";
+  width: number;
+  dragging: boolean;
+  onBegin: (event: PointerEvent) => void;
+  onNudge: (delta: number) => void;
+}): JSX.Element {
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label={props.side === "left" ? t("common.resize_left") : t("common.resize_right")}
+      aria-valuenow={props.width}
+      aria-valuemin={220}
+      aria-valuemax={520}
+      tabindex="0"
+      data-col-resizer={props.side}
+      class={[
+        "group/split flex h-full w-2 shrink-0 cursor-col-resize items-center justify-center outline-none",
+        props.dragging ? "bg-state-selected" : "hover:bg-state-hover",
+      ].join(" ")}
+      onPointerDown={props.onBegin}
+      onKeyDown={(event) => {
+        if (event.key === "ArrowLeft") {
+          event.preventDefault();
+          // 键盘调整：左右方向键各 8px，立刻落盘（一次按键就是一次「结束」）
+          props.onNudge(props.side === "left" ? -8 : 8);
+        } else if (event.key === "ArrowRight") {
+          event.preventDefault();
+          props.onNudge(props.side === "left" ? 8 : -8);
+        }
+      }}
+    >
+      <SplitHandleDots orientation="vertical" active={props.dragging} />
+    </div>
+  );
 }
 
 export function BrowseWorkspace(props: BrowseWorkspaceProps) {
@@ -65,6 +137,82 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
    * 这也正是三条收起条件里的「切换 flow」）。
    */
   const [libsExpanded, setLibsExpanded] = createSignal(false);
+  /**
+   * 排序的五个键（`plans/M2-W2-tail.md` 3.5；引擎 `BrowseSort` 早就支持）。
+   *
+   * 文案用**静态映射**而不是拼键名：`t()` 的键是字面量联合类型，拼出来的字符串过不了类型检查
+   * （这是有意为之 —— 拼错的键不会等到运行时才发现）。
+   */
+  const SORT_LABELS: Record<NonNullable<BrowseSort["key"]>, () => string> = {
+    takenAt: () => t("browse.sortTakenAt"),
+    importedAt: () => t("browse.sortImportedAt"),
+    fileName: () => t("browse.sortFileName"),
+    rating: () => t("browse.sortRating"),
+    camera: () => t("browse.sortCamera"),
+  };
+
+  /*
+   * 侧栏拖拽（`plans/M2-W2-tail.md` 6.1）：与导入工作区同一套做法 ——
+   * 原生 pointer 事件 + 指针捕获、**松手才落盘**（拖拽中间写存储既是浪费也会引起无谓重渲染）、
+   * 键盘方向键微调也走同一条夹取逻辑（数学在 `lib/column-resize.ts`，有单测）。
+   */
+  const [leftWidth, setLeftWidth] = createSignal(props.leftWidth ?? 300);
+  const [rightWidth, setRightWidth] = createSignal(props.rightWidth ?? 300);
+  const [draggingSide, setDraggingSide] = createSignal<"left" | "right" | null>(null);
+
+  function beginResize(side: "left" | "right", event: PointerEvent): void {
+    const read = side === "left" ? leftWidth : rightWidth;
+    const write = side === "left" ? setLeftWidth : setRightWidth;
+    const commit =
+      side === "left" ? props.onLeftWidthChange : props.onRightWidthChange;
+    const start = read();
+    const startX = event.clientX;
+    setDraggingSide(side);
+    const handle = event.currentTarget as HTMLElement;
+    try {
+      handle.setPointerCapture(event.pointerId);
+    } catch {
+      // 合成事件（冒烟脚本）拿不到捕获也能用下面挂在元素上的监听拖
+    }
+    const onMove = (move: PointerEvent): void => {
+      write(
+        resizeWidth({
+          start,
+          dx: move.clientX - startX,
+          invert: side === "right",
+          bounds: SIDEBAR_BOUNDS,
+        }),
+      );
+    };
+    const finish = (): void => {
+      handle.removeEventListener("pointermove", onMove);
+      handle.removeEventListener("pointerup", finish);
+      handle.removeEventListener("pointercancel", finish);
+      setDraggingSide(null);
+      commit?.(read());
+    };
+    handle.addEventListener("pointermove", onMove);
+    handle.addEventListener("pointerup", finish);
+    handle.addEventListener("pointercancel", finish);
+  }
+
+  function nudgeResize(side: "left" | "right", delta: number): void {
+    const read = side === "left" ? leftWidth : rightWidth;
+    const write = side === "left" ? setLeftWidth : setRightWidth;
+    const commit =
+      side === "left" ? props.onLeftWidthChange : props.onRightWidthChange;
+    const next = nudgeWidth(read(), delta, SIDEBAR_BOUNDS);
+    write(next);
+    commit?.(next);
+  }
+
+  /** 「当前那张」在列表里的下标 —— 键盘导航与「把它滚进视野」都靠它 */
+  const [focusIndex, setFocusIndex] = createSignal<number | undefined>(undefined);
+  /** 待确认的删除（张数；`null` = 没在确认） */
+  const [pendingDelete, setPendingDelete] = createSignal<number | null>(null);
+  /** 删除失败清单（有它就弹模态逐条列出来） */
+  const [deleteFailures, setDeleteFailures] = createSignal<DeleteFailure[]>([]);
+
   /** 看图的三种显示状态（`Tab` 循环；退出看图时重置为默认）。 */
   const [chrome, setChrome] = createSignal<ViewerChrome>("default");
   /**
@@ -160,6 +308,107 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
    * 监听挂在window上而不是看图件里：这是**外壳**的事（左右两列与胶片带的显隐），
    * 看图件只负责照片本身的缩放/平移（职责分开，换渲染层时这里不用动）。
    */
+  /*
+   * 键盘（`plans/M2-W2-tail.md` 5.2）：「事件 → 意图」的映射在 `features/browse/keys.ts`
+   * （纯函数、逐条有测），这里只把意图落到 store / viewer / 弹窗上。
+   *
+   * 冲突与分工：
+   * * `←`/`→`、`Esc`、`Enter` 在**看图里**由看图件自己接（它知道切哪张、怎么退），
+   *   这里只在网格里执行 `move`；
+   * * **数字打星只在网格里生效** —— 看图里的 `0` / `1` 是既有的缩放快捷键（适配 / 100%），
+   *   不让打星覆盖它；看图时打标用 `P` / `X` / `U` 与工具条；
+   * * `Delete` 永远要确认（人类 2026-09-19 的批注：删除能批量，不需要 easy destroy）。
+   */
+  onMount(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      const modal = document.querySelector('[role="dialog"]') !== null;
+      if (!shouldHandleKey(event.target as HTMLElement | null, modal)) return;
+      const intent = browseKeyIntent(event, {
+        viewing: viewer.state().active,
+        hasSelection: store.selectedCount() > 0,
+      });
+      if (intent === null) return;
+      switch (intent.kind) {
+        case "move":
+          if (!viewer.state().active) {
+            event.preventDefault();
+            moveFocus(intent.delta);
+          }
+          return;
+        case "rating":
+          if (!viewer.state().active) {
+            void store.mark({ kind: "rating", value: intent.value });
+          }
+          return;
+        case "flag":
+          void store.setFlag(store.selectedIds(), intent.value);
+          return;
+        case "delete":
+          event.preventDefault();
+          setPendingDelete(store.selectedCount());
+          return;
+        case "clear-selection":
+          store.clearSelection();
+          return;
+        default:
+          // viewer-prev / viewer-next / open-viewer / close-viewer 各有接的人了
+          return;
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    onCleanup(() => window.removeEventListener("keydown", onKey));
+  });
+
+  /** 移动「当前那张」（网格里 `←` / `→`）：等价于点它一下 —— 与点击同一套选择语义 */
+  function moveFocus(delta: -1 | 1): void {
+    const total = store.total();
+    if (total === 0) return;
+    const current = focusIndex();
+    const next =
+      current === undefined
+        ? delta > 0
+          ? 0
+          : total - 1
+        : Math.min(total - 1, Math.max(0, current + delta));
+    const item = store.itemAt(next);
+    if (item === null) {
+      // 那一段还没取到（分页）：让它去取，并把焦点先挪过去，下一按就能落上
+      void store.ensureRange(next, next + 1);
+      setFocusIndex(next);
+      return;
+    }
+    setFocusIndex(next);
+    store.select(item.id, "replace");
+  }
+
+  /** 删除选中的照片：走回收站；结果用提示说清楚，失败清单进模态逐条列 */
+  async function runDelete(): Promise<void> {
+    setPendingDelete(null);
+    const result = await store.removeSelected();
+    if (result === null) return;
+    if (result.deleted > 0) {
+      props.toast?.show({
+        tone: "success",
+        message: t("browse.deleteDone").replace("{n}", String(result.deleted)),
+      });
+    }
+    if (result.blockedLocked.length > 0) {
+      props.toast?.show({
+        tone: "danger",
+        message: t("browse.deleteBlocked").replace("{n}", String(result.blockedLocked.length)),
+      });
+    }
+    if (result.alreadyGone > 0) {
+      props.toast?.show({
+        tone: "info",
+        message: t("browse.deleteGone").replace("{n}", String(result.alreadyGone)),
+      });
+    }
+    if (result.failed.length > 0) {
+      setDeleteFailures([...result.failed]);
+    }
+  }
+
   onMount(() => {
     const onKey = (event: KeyboardEvent): void => {
       if (!viewer.state().active) return;
@@ -254,27 +503,39 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
     >
       {/* 三列（看图的①③态就是这两列在不在） */}
       <div class="flex min-h-0 flex-1">
-        {/* 左列 */}
+        {/* 左列（宽度可拖拽：手柄在它右边） */}
         <aside
-        class={[
-          "flex w-[300px] shrink-0 flex-col border-r border-line-1 bg-surface-main",
-          // 看图 ②「关左右」时**藏起来但不卸载**：卸载会把目录树的展开状态与滚动位置清掉，
-          // 按一下 Tab 就白跑一趟（而且回来要重新读盘）。
-          chromeShowsSides(chrome()) ? "" : "hidden",
-        ]
-          .filter(Boolean)
-          .join(" ")}
-      >
-        <BrowseLeftColumn
-          store={store}
-          repositories={repositories()}
-          reposLoading={reposLoading()}
-          reposError={reposError()}
-          libsExpanded={libsExpanded()}
-          onExpandLibs={() => setLibsExpanded(true)}
-          onCollapseLibs={() => setLibsExpanded(false)}
-        />
-      </aside>
+          class={[
+            "flex shrink-0 flex-col border-r border-line-1 bg-surface-main",
+            // 看图 ②「关左右」时**藏起来但不卸载**：卸载会把目录树的展开状态与滚动位置清掉，
+            // 按一下 Tab 就白跑一趟（而且回来要重新读盘）。
+            chromeShowsSides(chrome()) ? "" : "hidden",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+          style={{ width: `${leftWidth()}px` }}
+        >
+          <BrowseLeftColumn
+            store={store}
+            repositories={repositories()}
+            reposLoading={reposLoading()}
+            reposError={reposError()}
+            libsExpanded={libsExpanded()}
+            onExpandLibs={() => setLibsExpanded(true)}
+            onCollapseLibs={() => setLibsExpanded(false)}
+          />
+        </aside>
+
+        {/* 拖拽手柄：左列 ↔ 中列（看图「关左右」时手柄一起收起来） */}
+        <Show when={chromeShowsSides(chrome())}>
+          <ColumnHandle
+            side="left"
+            width={leftWidth()}
+            dragging={draggingSide() === "left"}
+            onBegin={(event) => beginResize("left", event)}
+            onNudge={(delta) => nudgeResize("left", delta)}
+          />
+        </Show>
 
       {/* 中列 */}
       <main
@@ -287,6 +548,11 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
         data-chrome={chrome()}
         data-film={chromeShowsFilm(chrome()) ? "on" : "off"}
       >
+        {/** 筛选结果区（chips + 共 N 张 + 任一/全部）：看图时不占位置 */}
+        <Show when={!viewer.state().active}>
+          <FilterBar store={store} />
+        </Show>
+
         {/**
          * 照片区：网格 + 看图盖层；看图时它下面接胶片带（`design/browse.md` §2.5）。
          *
@@ -301,7 +567,9 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
             tileStep={tileStep()}
             grouped={grouped()}
             thumbs={thumbs}
+            focusIndex={focusIndex()}
             onInteract={() => setLibsExpanded(false)}
+            onFocusIndex={(index) => setFocusIndex(index)}
             onOpenViewer={openViewer}
           />
 
@@ -379,6 +647,42 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
             {t("grid.by_time")}
           </button>
 
+          {/* 排序：键 + 方向（画布 ② 的 SortBar 挪到这里，见 FilterBar 的文件头说明） */}
+          <div class="flex shrink-0 items-center gap-1" data-sort>
+            <span class="text-fg-3">{t("browse.sort")}</span>
+            <Menu
+              label={t("browse.sort")}
+              placement="top"
+              items={(
+                Object.keys(SORT_LABELS) as NonNullable<BrowseSort["key"]>[]
+              ).map((key) => ({
+                value: key,
+                label: SORT_LABELS[key](),
+                selected: (store.sort().key ?? "takenAt") === key,
+              }))}
+              onSelect={(value) =>
+                store.setSort({ ...store.sort(), key: value as NonNullable<BrowseSort["key"]> })
+              }
+            >
+              {(triggerProps) => (
+                <button
+                  {...triggerProps()}
+                  class="rounded-ui px-1.5 py-0.5 text-fs-2 text-fg-2 hover:bg-state-hover hover:text-fg-1"
+                >
+                  {SORT_LABELS[store.sort().key ?? "takenAt"]()}
+                </button>
+              )}
+            </Menu>
+            <button
+              type="button"
+              aria-label={store.sort().desc ? t("browse.sortDesc") : t("browse.sortAsc")}
+              class="flex h-5 w-5 items-center justify-center rounded-ui text-fg-3 hover:bg-state-hover hover:text-fg-1"
+              onClick={() => store.setSort({ ...store.sort(), desc: !store.sort().desc })}
+            >
+              {store.sort().desc ? <IconArrowDown size={13} /> : <IconArrowUp size={13} />}
+            </button>
+          </div>
+
           <span class="shrink-0 text-fg-3">{tileSizeAt(tileStep())}px</span>
           <div class="w-24 shrink-0">
             <Slider
@@ -408,14 +712,26 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
         </Show>
       </main>
 
+      {/* 拖拽手柄：中列 ↔ 右列 */}
+      <Show when={chromeShowsSides(chrome())}>
+        <ColumnHandle
+          side="right"
+          width={rightWidth()}
+          dragging={draggingSide() === "right"}
+          onBegin={(event) => beginResize("right", event)}
+          onNudge={(delta) => nudgeResize("right", delta)}
+        />
+      </Show>
+
       {/* 右列 */}
       <aside
         class={[
-          "flex w-[300px] shrink-0 flex-col border-l border-line-1 bg-surface-main",
+          "flex shrink-0 flex-col border-l border-line-1 bg-surface-main",
           chromeShowsSides(chrome()) ? "" : "hidden",
         ]
           .filter(Boolean)
           .join(" ")}
+        style={{ width: `${rightWidth()}px` }}
       >
         {/*
           右栏在看图态换成**预览 + 直方图**（`BROWSE.md` §5.9）——
@@ -433,6 +749,45 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
       <Show when={viewer.state().active}>
         <ViewerStatusBar photo={viewer.current()} />
       </Show>
+
+      {/*
+        删除确认（`AGENTS.md` §11.3 的定案 + 人类 2026-09-19 的批注）：
+        **只走确认这一条路，不给 Shift 快通道，也不用 `easy destroy`** ——
+        删除支持多选批量，而 easy destroy 那套是给「不做批量界面、又要连续快速删单张」准备的。
+      */}
+      <ConfirmDialog
+        open={pendingDelete() !== null}
+        title={t("browse.deleteTitle")}
+        message={t("browse.deleteConfirm").replace("{n}", String(pendingDelete() ?? 0))}
+        onConfirm={() => void runDelete()}
+        onCancel={() => setPendingDelete(null)}
+      />
+
+      {/* 删除失败清单：一条都不许闷掉（用户得知道哪几个没删掉、为什么） */}
+      <Dialog
+        open={deleteFailures().length > 0}
+        onOpenChange={(open) => {
+          if (!open) setDeleteFailures([]);
+        }}
+        title={t("browse.deleteFailedTitle").replace("{n}", String(deleteFailures().length))}
+        description={t("browse.deleteFailedHint")}
+        footer={
+          <Button variant="secondary" onClick={() => setDeleteFailures([])}>
+            {t("common.close")}
+          </Button>
+        }
+      >
+        <ul class="flex max-h-64 flex-col gap-1 overflow-y-auto" data-delete-failures>
+          <For each={deleteFailures()}>
+            {(failure) => (
+              <li class="flex flex-col gap-0.5 border-b border-line-1 pb-1 last:border-0">
+                <span class="break-all text-fs-2 text-fg-1">{failure.path}</span>
+                <span class="text-fs-0 text-danger">{failure.reason}</span>
+              </li>
+            )}
+          </For>
+        </ul>
+      </Dialog>
     </div>
   );
 }

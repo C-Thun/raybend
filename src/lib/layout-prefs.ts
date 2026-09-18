@@ -29,6 +29,15 @@ export interface LayoutPrefs {
   leftRatio: number;
   /** 左列内部「最近」段的高度比例（0–1；「来源」= 1 − 它） */
   recentRatio: number;
+  /**
+   * 浏览工作区左列 / 右列的宽度（**像素**，不是比例）。
+   *
+   * 为什么这两条用像素而上面那条用比例：信息栏与库列表是**侧栏** ——
+   * 桌面软件里侧栏宽度是人手动定死的（改窗口大小不该让信息栏跟着变宽窄），
+   * 而导入工作区那条左列是「整页的一部分」，跟着窗口缩放更自然。
+   */
+  browseLeftWidth: number;
+  browseRightWidth: number;
 }
 
 /**
@@ -39,9 +48,18 @@ export interface LayoutPrefs {
 export const LAYOUT_BOUNDS = {
   leftRatio: { min: 0.12, max: 0.5 },
   recentRatio: { min: 0.15, max: 0.7 },
+  /** 侧栏像素下限 220：再窄标签/目录名就只剩省略号；上限 520：别把网格挤没 */
+  browseLeftWidth: { min: 220, max: 520 },
+  browseRightWidth: { min: 220, max: 520 },
 } as const;
 
-export const DEFAULT_LAYOUT: LayoutPrefs = { leftRatio: 0.22, recentRatio: 0.32 };
+export const DEFAULT_LAYOUT: LayoutPrefs = {
+  leftRatio: 0.22,
+  recentRatio: 0.32,
+  // 与 M2-W1 时代的固定宽度一致（两侧各 300），所以默认视觉上什么都没变
+  browseLeftWidth: 300,
+  browseRightWidth: 300,
+};
 
 function defaultStorage(): LayoutStorage | undefined {
   try {
@@ -68,12 +86,19 @@ export function sanitizeLayout(
   fallback: LayoutPrefs = DEFAULT_LAYOUT,
 ): LayoutPrefs {
   if (typeof raw !== "object" || raw === null) {
-    return { leftRatio: fallback.leftRatio, recentRatio: fallback.recentRatio };
+    return { ...fallback };
   }
   const record = raw as Record<string, unknown>;
   return {
     leftRatio: clamp(record.leftRatio, LAYOUT_BOUNDS.leftRatio, fallback.leftRatio),
     recentRatio: clamp(record.recentRatio, LAYOUT_BOUNDS.recentRatio, fallback.recentRatio),
+    // 像素宽度取整：半像素宽度在 subpixel 布局下会渗出 1px 的缝
+    browseLeftWidth: Math.round(
+      clamp(record.browseLeftWidth, LAYOUT_BOUNDS.browseLeftWidth, fallback.browseLeftWidth),
+    ),
+    browseRightWidth: Math.round(
+      clamp(record.browseRightWidth, LAYOUT_BOUNDS.browseRightWidth, fallback.browseRightWidth),
+    ),
   };
 }
 
@@ -107,6 +132,9 @@ export interface LayoutStore {
   /** 拖拽**结束**时调用（只记最终比例，中间过程由 Ark 自己管） */
   setLeftRatio: (ratio: number) => void;
   setRecentRatio: (ratio: number) => void;
+  /** 浏览工作区侧栏宽度（像素）；拖拽**松手**时调它落盘 */
+  setBrowseLeftWidth: (width: number) => void;
+  setBrowseRightWidth: (width: number) => void;
 }
 
 /**
@@ -129,7 +157,14 @@ export function createLayoutStore(
    */
   const commit = (next: LayoutPrefs): void => {
     const current = prefs();
-    if (current.leftRatio === next.leftRatio && current.recentRatio === next.recentRatio) {
+    // ⚠️ 四个字段**都要比**：早先只比了前两个，于是「只改侧栏宽度」会被当成没变化吞掉
+    //（2026-09-19 加宽度时发现的：改了值、信号不动、界面纹丝不动）。
+    if (
+      current.leftRatio === next.leftRatio &&
+      current.recentRatio === next.recentRatio &&
+      current.browseLeftWidth === next.browseLeftWidth &&
+      current.browseRightWidth === next.browseRightWidth
+    ) {
       return;
     }
     setPrefs(next);
@@ -140,5 +175,9 @@ export function createLayoutStore(
     prefs,
     setLeftRatio: (ratio) => commit(sanitizeLayout({ ...prefs(), leftRatio: ratio })),
     setRecentRatio: (ratio) => commit(sanitizeLayout({ ...prefs(), recentRatio: ratio })),
+    setBrowseLeftWidth: (width) =>
+      commit(sanitizeLayout({ ...prefs(), browseLeftWidth: width })),
+    setBrowseRightWidth: (width) =>
+      commit(sanitizeLayout({ ...prefs(), browseRightWidth: width })),
   };
 }

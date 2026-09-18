@@ -30,11 +30,14 @@
  * 属 W2（`plans/M2.md` 的阶段 6 只出控件本身）。
  */
 
-import { createEffect, For, Show, createSignal } from "solid-js";
+import { For, Show } from "solid-js";
 import {
   IconBan,
   IconFlag,
   IconLock,
+  IconArrowBackUp,
+  IconArrowForwardUp,
+  IconTag,
   IconStar,
   IconStarFilled,
   IconThumbDown,
@@ -45,6 +48,10 @@ import { ToggleBlock } from "../../components/ui/ToggleBlock.tsx";
 import { ConfirmDialog } from "../../components/ui/Dialog.tsx";
 import { createEasyDestroy } from "../../lib/easy-destroy.ts";
 import { markNotice, type MarkNotice } from "./mark-feedback.ts";
+import type { MarkResult } from "../../api/types.ts";
+import type { ToastStore } from "../../components/ui/Toast.tsx";
+import { filterFromSelection } from "./filter.ts";
+import { colorText } from "./labels.ts";
 import { Button } from "../../components/ui/Button.tsx";
 import { t } from "../../i18n/index.ts";
 import {
@@ -60,6 +67,13 @@ export interface BrowseToolbarProps {
   store: BrowseStore;
   /** 打开标签弹窗（W2 接线；现在只把按钮摆在那里并禁用）。 */
   onOpenTags?: () => void;
+  /**
+   * 提示通道（`components/ui/Toast.tsx`）。
+   *
+   * 为什么走 prop 而不是让工具条自己建一个：提示要**挂在根层**（`--z-toast`、不被条带的
+   * 层叠上下文困住），所以 store 由组装层建、这里只往里推。可选 = 陈列室/单测里不必准备。
+   */
+  toast?: ToastStore;
 }
 
 /** 色标 → 令牌类名（必须是字面量，Tailwind 才扫得到）。 */
@@ -82,7 +96,8 @@ function MixedMark() {
 
 export function BrowseToolbar(props: BrowseToolbarProps) {
   const store = props.store;
-  const [filterMode, setFilterMode] = createSignal(false);
+  /** 筛选态住在 store 里（结果区的 chips 也要读它，见 `store.filterMode`） */
+  const filterMode = () => store.filterMode();
   /**
    * 「移除所有旗标」的确认（`easy destroy` 范式：默认弹确认，按住 `Shift` 跳过）。
    *
@@ -91,8 +106,14 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
    * 清旗标是个全局开关动作，值一次确认；删照片本身支持多选批量，不需要它。
    */
   const clearFlags = createEasyDestroy();
-  /** 标记之后要说的话（被锁挡住 / 什么都没改）—— `plans/M2-W2-tail.md` 3.1 */
-  const [notice, setNotice] = createSignal<MarkNotice | null>(null);
+  /**
+   * 标记之后要说的话（被锁挡住 / 什么都没改）—— `plans/M2-W2-tail.md` 3.1。
+   *
+   * 2026-09-19：从「工具条里的一行小字」改成 **toast**（4.2 落地）——
+   * 同一类信息只该有一个去处，而且 toast 能顺手挂「撤销」。
+   * `markNotice()` 那套判定一个字没变，只是渲染换了地方。
+   */
+  const notice = (result: MarkResult | null): MarkNotice | null => markNotice(result);
 
   const selected = () => store.selectedItems();
   const hasSelection = () => selected().length > 0;
@@ -111,6 +132,42 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
   const isExactly = (state: TriState<string>, value: string): boolean =>
     state.kind === "value" && state.value === value;
 
+  /**
+   * 撤销 / 重做：做完给一条提示（说了「撤了什么」），失败也说话。
+   *
+   * 背面也要给反馈的理由：撤销之后照片上的标记会变，但**变回什么样**用户不一定记得 ——
+   * 「撤销：标 3 星」这句话正是补上这一点。
+   */
+  async function runHistory(kind: "undo" | "redo"): Promise<void> {
+    const before = store.undoState();
+    const label = kind === "undo" ? before.undoLabel : before.redoLabel;
+    const result = kind === "undo" ? await store.undo() : await store.redo();
+    if (result === null) return;
+    const key = kind === "undo" ? "browse.undoWith" : "browse.redoWith";
+    props.toast?.show({
+      tone: "success",
+      message: label === null ? t(kind === "undo" ? "browse.undo" : "browse.redo") : t(key).replace("{label}", label),
+      action:
+        kind === "undo" && result.canRedo
+          ? { label: t("browse.redo"), onAction: () => void store.redo() }
+          : undefined,
+    });
+  }
+
+  /** 撤销/重做按钮的悬停文案：有具体动作名就带上（「撤销：标 3 星」） */
+  const undoTitle = (): string => {
+    const state = store.undoState();
+    return state.canUndo && state.undoLabel !== null
+      ? t("browse.undoWith").replace("{label}", state.undoLabel)
+      : t("browse.undo");
+  };
+  const redoTitle = (): string => {
+    const state = store.undoState();
+    return state.canRedo && state.redoLabel !== null
+      ? t("browse.redoWith").replace("{label}", state.redoLabel)
+      : t("browse.redo");
+  };
+
   /** 选中的 id（打标记用）。 */
   const ids = () => store.selectedIds();
 
@@ -121,14 +178,28 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
    * 而「被锁挡住」恰恰是最需要说话的那种（照片上一个像素都不会变）。
    */
   async function runMark(action: Parameters<typeof store.mark>[0]): Promise<void> {
-    setNotice(markNotice(await store.mark(action)));
+    const result = await store.mark(action);
+    const warning = notice(result);
+    if (warning !== null) {
+      // 边界情况（被锁挡住 / 一个都没改）：必须说话，否则用户以为点错了
+      props.toast?.show({
+        tone: warning.key === "browse.markSkippedLocked" ? "danger" : "info",
+        message: t(warning.key).replace("{n}", String(warning.count)),
+      });
+      return;
+    }
+    if (result === null) return;
+    // 成功：给一条带「撤销」的提示 —— 人对误操作的第一反应就是找撤销（画布上就这么画的）
+    if (result.changed > 0) {
+      props.toast?.show({
+        tone: "success",
+        message: t("browse.markedCount").replace("{n}", String(result.changed)),
+        action: result.canUndo
+          ? { label: t("browse.undo"), onAction: () => void store.undo() }
+          : undefined,
+      });
+    }
   }
-
-  // 换了选择就把上一句收起来（它说的是上一批照片的事）
-  createEffect(() => {
-    store.selection().ids;
-    setNotice(null);
-  });
 
   /** 有选中照片时才让标记控件可用。 */
   const markDisabled = () => !hasSelection();
@@ -183,13 +254,51 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
 
   return (
     <div class="flex items-center gap-1">
+      {/*
+        撤销 / 重做（`plans/M2-W2-tail.md` 4.1）：按钮的可用性与文案都来自
+        后端每次动作回的 `undoLabel` / `redoLabel`（「标 3 星」这种可读动作名）——
+        前端不猜栈里有什么，也不自己拼动作名。
+      */}
+      <Button
+        variant="ghost"
+        icon={<IconArrowBackUp size={14} />}
+        disabled={!store.undoState().canUndo}
+        title={undoTitle()}
+        aria-label={undoTitle()}
+        onClick={() => void runHistory("undo")}
+      >
+        {t("browse.undo")}
+      </Button>
+      <Button
+        variant="ghost"
+        icon={<IconArrowForwardUp size={14} />}
+        disabled={!store.undoState().canRedo}
+        title={redoTitle()}
+        aria-label={redoTitle()}
+        onClick={() => void runHistory("redo")}
+      >
+        {t("browse.redo")}
+      </Button>
+
+      <span class="w-3" />
+
       {/* 筛选开关：打开后右侧控件全部变成筛选语义 */}
       <ToggleBlock
         pressed={filterMode()}
         onPressedChange={(pressed) => {
-          setFilterMode(pressed);
-          // 关掉筛选时把筛选条件清干净 —— 否则界面看起来「没筛」却还少着照片
-          if (!pressed) store.patchFilter({ ratings: [], colors: [], likes: [], locks: [] });
+          /*
+           * 打开筛选的那一刻**从选中照片取同类**（`BROWSE.md` §3.1 的「爽用法」）：
+           * 选一张 3 星红标图 → 打开 → 所有 3 星或红标图留下。
+           * 没有选中就不预置条件（空条件 + 一句提示，见 `FilterBar`）。
+           */
+          if (pressed) {
+            const items = selected();
+            if (items.length > 0) {
+              store.patchFilter(filterFromSelection(items));
+            }
+          }
+          // 关掉筛选的清理在 store.setFilterMode 里做（四组条件一起清）
+          store.setFilterMode(pressed);
         }}
         icon={<IconBan size={14} />}
         label={t("browse.filterHint")}
@@ -226,8 +335,9 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
           clearFlags.request(
             t("browse.flagClearConfirm"),
             () => {
-              setNotice(null);
               void store.clearFlags();
+              // 清旗标是全局动作，做完了说一句（它是「移除类」，用户需要确认真的发生了）
+              props.toast?.show({ tone: "success", message: t("browse.flagCleared") });
             },
             event,
           );
@@ -295,7 +405,7 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
               <button
                 type="button"
                 disabled={markDisabled()}
-                aria-label={color === null ? t("browse.colorNone") : color}
+                aria-label={colorText(color)}
                 onClick={() => void markColor(color)}
                 class={[
                   "h-3.5 w-3.5 rounded-full ring-1 ring-line-2",
@@ -328,14 +438,19 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
           disabled={markDisabled()}
           onPressedChange={() => void markLike("dislike")}
           icon={<IconThumbDown size={14} />}
-          label={t("browse.reject")}
+          label={t("browse.dislike")}
         />
       </div>
 
       <span class="w-5" />
 
-      {/* 标签（弹窗在 W2） */}
-      <Button variant="ghost" disabled onClick={props.onOpenTags}>
+      {/* 标签：开弹窗（`TagDialog`，单张可增删、批量只加） */}
+      <Button
+        variant="ghost"
+        disabled={markDisabled()}
+        icon={<IconTag size={14} />}
+        onClick={props.onOpenTags}
+      >
         {t("browse.tag")}
       </Button>
 
@@ -370,13 +485,6 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
           }}
         </For>
       </div>
-
-      {/* 标记后的边界提示（3.1）：只在出问题时说话 */}
-      <Show when={notice()}>{(n) => (
-        <span class="ml-2 shrink-0 text-fs-2 text-fg-3" data-mark-notice={n().key}>
-          {t(n().key).replace("{n}", String(n().count))}
-        </span>
-      )}</Show>
 
       {/* 「移除所有旗标」的确认弹窗（Shift 可跳过，提示语在弹窗里） */}
       <ConfirmDialog

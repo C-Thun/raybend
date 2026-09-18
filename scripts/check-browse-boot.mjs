@@ -137,7 +137,21 @@ const FIXTURES = {
   },
   browse_facets: { ratings: [], colors: [], likes: [], locks: [] },
   browse_markings: [],
+  // 标签词典（3.2）：搜索与创建各给一份
+  tag_list: [
+    { id: 1, name: "婚礼", useCount: 3 },
+    { id: 2, name: "外景", useCount: 1 },
+  ],
+  tag_ensure: { id: 9, name: "新标签", useCount: 0 },
+  // 删除：一次把三条路径都造出来（删到 1 张、被锁挡住 1 张、失败 1 张）
+  browse_delete: {
+    deleted: 1,
+    blockedLocked: [9],
+    alreadyGone: 0,
+    failed: [{ path: "C:/Photos/demo/photos/2026-08-15/MY006.JPG", reason: "文件被占用" }],
+  },
   // 3.1 的边界：假装有两张被锁挡住 —— 界面上必须说出来
+  // 打标先回「被锁挡住」（3.1 的边界提示），之后由 undo/redo 那几条断言接手
   browse_mark: {
     changed: 0,
     skippedLocked: [9, 11],
@@ -256,6 +270,17 @@ try {
   await send("Page.addScriptToEvaluateOnNewDocument", {
     source: `
       Error.stackTraceLimit = 60;
+      // 抓「未处理的 Promise 拒绝」与运行期错误：Solid 里这类异常常常只留在控制台，
+      // 而静默失败会让冒烟只能看到「后面全都不对」这种二手症状
+      window.__REJECTIONS = [];
+      window.addEventListener("unhandledrejection", (event) => {
+        const reason = event.reason;
+        const stack = reason && reason.stack ? String(reason.stack).slice(0, 400) : "";
+        window.__REJECTIONS.push("unhandledrejection: " + String(reason) + " @ " + stack);
+      });
+      window.addEventListener("error", (event) => {
+        window.__REJECTIONS.push("error: " + String(event.message));
+      });
       window.__TAURI_INTERNALS__ = {
         metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main" } },
         transformCallback: (cb) => cb,
@@ -490,16 +515,33 @@ try {
   await sleep(400);
   const noticeShown = await send("Runtime.evaluate", {
     expression: `(() => {
-      const note = document.querySelector("[data-mark-notice]");
-      return { present: Boolean(note), key: note?.getAttribute("data-mark-notice") ?? null };
+      const note = document.querySelector("[data-toast]");
+      return {
+        present: Boolean(note),
+        tone: note?.getAttribute("data-toast") ?? null,
+        text: (note?.textContent ?? "").slice(0, 40),
+      };
     })()`,
     returnByValue: true,
   });
   const noticeState = noticeShown.result?.value ?? {};
   if (markNotice.result?.value !== true) {
     problems.push("冒烟里没找到第 3 颗星按钮（aria-label 变了？）");
-  } else if (noticeState.key !== "browse.markSkippedLocked") {
-    problems.push(`被锁挡住时应当有提示（实测 ${JSON.stringify(noticeState)}）`);
+  } else if (noticeState.tone !== "danger") {
+    problems.push(`被锁挡住时应当弹一条「危险」提示（实测 ${JSON.stringify(noticeState)}）`);
+  }
+  // 提示自己是「不阻塞操作」的：容器不能吃掉点击
+  const toastLayer = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const host = document.querySelector("[data-toast-host]");
+      return host ? getComputedStyle(host).pointerEvents : null;
+    })()`,
+    returnByValue: true,
+  });
+  if (toastLayer.result?.value !== "none") {
+    problems.push(
+      `提示容器必须是 pointer-events: none（不遮挡操作，实测 ${JSON.stringify(toastLayer.result?.value)}）`,
+    );
   }
 
   /*
@@ -563,6 +605,505 @@ try {
       returnByValue: true,
     });
     await sleep(200);
+  }
+
+  /*
+   * 3.2：标签弹窗（单张）—— 打开 → 输入即搜（0.6s 防抖）→ 创建新标签 → 保存落库。
+   * 这条链跨了 Rust 的两个命令（tag_list / tag_ensure）与 browse_mark 的 attachTags。
+   */
+  const openTags = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const button = [...document.querySelectorAll("button")].find(
+        (b) => b.textContent && b.textContent.trim() === "标签",
+      );
+      if (!button) return { found: false };
+      if (button.disabled) return { found: true, disabled: true };
+      button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      return { found: true, disabled: false };
+    })()`,
+    returnByValue: true,
+  });
+  await sleep(400);
+  const tagOpenState = await send("Runtime.evaluate", {
+    expression: `(() => ({
+      dialog: document.querySelector("[data-tag-dialog]")?.getAttribute("data-tag-dialog") ?? null,
+      input: Boolean(document.querySelector("[data-tag-dialog] input")),
+      results: document.querySelectorAll("[data-tag-result]").length,
+    }))()`,
+    returnByValue: true,
+  });
+  const tagOpen = tagOpenState.result?.value ?? {};
+  const tagButton = openTags.result?.value ?? {};
+  if (tagButton.found !== true || tagButton.disabled === true) {
+    problems.push(`「标签」按钮应当可点（实测 ${JSON.stringify(tagButton)}）`);
+  } else if (tagOpen.dialog !== "single") {
+    problems.push(`单张时应当开「单张」形态的标签弹窗（实测 ${JSON.stringify(tagOpen)}）`);
+  } else if (tagOpen.results < 1) {
+    problems.push(`弹窗打开时应当先列出一批常用标签（实测 ${JSON.stringify(tagOpen.results)}）`);
+  }
+
+  if (tagOpen.dialog === "single") {
+    // 输入即搜：等过防抖
+    await send("Runtime.evaluate", {
+      expression: `(() => {
+        const input = document.querySelector("[data-tag-dialog] input");
+        if (!input) return false;
+        // 故意用一个**词典里没有**的名字：走创建路径（已有同名时应当复用，不建重复的）
+        input.value = "新标签";
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        return true;
+      })()`,
+      returnByValue: true,
+    });
+    await sleep(1000);
+    const searchState = await send("Runtime.evaluate", {
+      expression: `(() => ({
+        results: document.querySelectorAll("[data-tag-result]").length,
+        create: Boolean(document.querySelector("[data-tag-create]")),
+        log: (window.__INVOKE_LOG || []).filter((c) => c.startsWith("tag_")).length,
+      }))()`,
+      returnByValue: true,
+    });
+    const search = searchState.result?.value ?? {};
+    if (search.results < 1 || search.create !== true) {
+      problems.push(`输入之后应当出搜索结果与「创建」行（实测 ${JSON.stringify(search)}）`);
+    }
+    // 词典里已有的名字点「创建」**不该**再建一个（去重是硬要求）
+    const dedupeCheck = await send("Runtime.evaluate", {
+      expression: `(() => {
+        const input = document.querySelector("[data-tag-dialog] input");
+        if (!input) return { typed: false };
+        input.value = "婚礼";
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        return { typed: true };
+      })()`,
+      returnByValue: true,
+    });
+    if (dedupeCheck.result?.value?.typed === true) {
+      await sleep(1000);
+      const before = await send("Runtime.evaluate", {
+        expression: `(window.__INVOKE_LOG || []).filter((c) => c === "tag_ensure").length`,
+        returnByValue: true,
+      });
+      await send("Runtime.evaluate", {
+        expression: `document.querySelector("[data-tag-create]")?.dispatchEvent(new MouseEvent("click", { bubbles: true }))`,
+        returnByValue: true,
+      });
+      await sleep(300);
+      const after = await send("Runtime.evaluate", {
+        expression: `(() => ({
+          ensures: (window.__INVOKE_LOG || []).filter((c) => c === "tag_ensure").length,
+          chips: document.querySelectorAll("[data-tag-chip]").length,
+        }))()`,
+        returnByValue: true,
+      });
+      const dedup = after.result?.value ?? {};
+      if (dedup.ensures !== before.result?.value) {
+        problems.push("词典里已有的标签不该再建一个（tag_ensure 不该被调用）");
+      }
+      if (typeof dedup.chips !== "number" || dedup.chips < 1) {
+        problems.push(`复用已有标签时也该出现在待保存列表里（实测 ${JSON.stringify(dedup)}）`);
+      }
+      // 把输入还原成「新标签」，继续验创建路径
+      await send("Runtime.evaluate", {
+        expression: `(() => {
+          const input = document.querySelector("[data-tag-dialog] input");
+          input.value = "新标签";
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+          return true;
+        })()`,
+        returnByValue: true,
+      });
+      await sleep(1000);
+    }
+
+    // 点「创建」行 → tag_ensure + 一个待保存的 chip
+    await send("Runtime.evaluate", {
+      expression: `document.querySelector("[data-tag-create]")?.dispatchEvent(new MouseEvent("click", { bubbles: true }))`,
+      returnByValue: true,
+    });
+    await sleep(400);
+    const stagedState = await send("Runtime.evaluate", {
+      expression: `(() => ({
+        chips: document.querySelectorAll("[data-tag-chip]").length,
+        staged: document.querySelectorAll("[data-tag-staged='true']").length,
+        ensured: (window.__INVOKE_LOG || []).includes("tag_ensure"),
+      }))()`,
+      returnByValue: true,
+    });
+    const staged = stagedState.result?.value ?? {};
+    if (staged.ensured !== true) {
+      problems.push("「创建」应当调用 tag_ensure 先把标签建出来");
+    }
+    if (staged.staged < 1) {
+      problems.push(`创建后应当出现一个待保存的标签（实测 ${JSON.stringify(staged)}）`);
+    }
+
+    // 保存 → 关窗 + browse_mark 带上 attachTags
+    await send("Runtime.evaluate", {
+      expression: `(() => {
+        const dialog = document.querySelector('[role="dialog"]');
+        const save = [...(dialog?.querySelectorAll("button") ?? [])].find(
+          (b) => b.textContent && b.textContent.trim() === "保存",
+        );
+        save?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        return Boolean(save);
+      })()`,
+      returnByValue: true,
+    });
+    await sleep(500);
+    const savedState = await send("Runtime.evaluate", {
+      expression: `(() => ({
+        closed: !document.querySelector("[data-tag-dialog]"),
+        marks: (window.__INVOKE_LOG || []).filter((c) => c === "browse_mark").length,
+      }))()`,
+      returnByValue: true,
+    });
+    const saved = savedState.result?.value ?? {};
+    if (saved.marks < 1) {
+      problems.push("保存标签应当落到 browse_mark（attachTags）");
+    }
+    if (saved.closed !== true) {
+      problems.push(`保存之后弹窗应当关掉（实测 ${JSON.stringify(saved)}）`);
+    }
+  }
+
+  /*
+   * 4.1：撤销 / 重做按钮 —— 未做过动作时禁用；按钮文案里带后端的动作名。
+   */
+  const undoUi = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const find = (text) =>
+        [...document.querySelectorAll("button")].find((b) => b.textContent?.trim() === text);
+      const undo = find("撤销");
+      const redo = find("重做");
+      return {
+        found: Boolean(undo && redo),
+        undoDisabled: undo ? undo.disabled : null,
+        redoDisabled: redo ? redo.disabled : null,
+      };
+    })()`,
+    returnByValue: true,
+  });
+  const undoState = undoUi.result?.value ?? {};
+  if (undoState.found !== true) {
+    problems.push(`工具条上应当有撤销 / 重做按钮（实测 ${JSON.stringify(undoState)}）`);
+  } else if (undoState.undoDisabled !== true) {
+    problems.push("还没做过任何动作时「撤销」应当是禁用的");
+  }
+
+  /*
+   * 6.1：左右列宽度可拖拽 —— 两根手柄都在，键盘微调真的改了列宽。
+   *
+   * 用键盘（而不是合成 pointer 拖拽）验这条：拖拽的数学在 `lib/column-resize.ts` 有单测，
+   * 这里要验的是**接线**（手柄 → 宽度 → 落盘），键盘走的是同一条夹取路径。
+   */
+  const widthBefore = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const handles = {
+        left: Boolean(document.querySelector('[data-col-resizer="left"]')),
+        right: Boolean(document.querySelector('[data-col-resizer="right"]')),
+      };
+      const aside = document.querySelector("aside");
+      return { handles, width: aside ? Math.round(aside.getBoundingClientRect().width) : null };
+    })()`,
+    returnByValue: true,
+  });
+  const beforeResize = widthBefore.result?.value ?? {};
+  if (beforeResize.handles?.left !== true || beforeResize.handles?.right !== true) {
+    problems.push(`左右列都应当有拖拽手柄（实测 ${JSON.stringify(beforeResize.handles)}）`);
+  } else {
+    await send("Runtime.evaluate", {
+      expression: `(() => {
+        const handle = document.querySelector('[data-col-resizer="left"]');
+        handle?.focus();
+        handle?.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }),
+        );
+        return true;
+      })()`,
+      returnByValue: true,
+    });
+    await sleep(300);
+    const afterWidth = await send("Runtime.evaluate", {
+      expression: `(() => {
+        const aside = document.querySelector("aside");
+        return aside ? Math.round(aside.getBoundingClientRect().width) : null;
+      })()`,
+      returnByValue: true,
+    });
+    const widened = afterWidth.result?.value ?? null;
+    if (widened === null || beforeResize.width === null || widened <= beforeResize.width) {
+      problems.push(
+        `按方向键应当把左列调宽（原来 ${JSON.stringify(beforeResize.width)}，现在 ${JSON.stringify(widened)}）`,
+      );
+    }
+    // 调回去，别影响后面的布局断言
+    await send("Runtime.evaluate", {
+      expression: `(() => {
+        const handle = document.querySelector('[data-col-resizer="left"]');
+        handle?.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true, cancelable: true }),
+        );
+        return true;
+      })()`,
+      returnByValue: true,
+    });
+    await sleep(200);
+  }
+
+  /*
+   * 5.2：键盘评片流 —— 网格里 `→` 移动「当前那张」、数字打星、`Esc` 取消选择。
+   */
+  const beforeKey = await send("Runtime.evaluate", {
+    // ⚠️ 别用 aria-label 判断「哪一张」：`Tile` 根节点上**没有** aria-label
+    // （它的无障碍名来自内容），拿它比较会得到两次 null —— 2026-09-19 踩过。
+    // 用「在所有 tile 里排第几」更稳。
+    expression: `(() => {
+      const tiles = [...document.querySelectorAll('[role="option"]')];
+      return tiles.findIndex((tile) => tile.getAttribute("aria-selected") === "true");
+    })()`,
+    returnByValue: true,
+  });
+  await send("Runtime.evaluate", {
+    expression: `window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }))`,
+    returnByValue: true,
+  });
+  await sleep(300);
+  const afterKey = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const tiles = [...document.querySelectorAll('[role="option"]')];
+      return {
+        selectedAt: tiles.findIndex((tile) => tile.getAttribute("aria-selected") === "true"),
+        count: tiles.filter((tile) => tile.getAttribute("aria-selected") === "true").length,
+        marked: (window.__INVOKE_LOG || []).filter((c) => c === "browse_mark").length,
+      };
+    })()`,
+    returnByValue: true,
+  });
+  const moved = afterKey.result?.value ?? {};
+  if (moved.count !== 1) {
+    problems.push(`方向键移动「当前那张」之后应当仍然只有一张被选中（实测 ${JSON.stringify(moved)}）`);
+  } else if (moved.selectedAt === beforeKey.result?.value) {
+    problems.push(
+      `方向键应当把「当前那张」挪到下一张（原来是第 ${JSON.stringify(
+        beforeKey.result?.value,
+      )} 个，现在还是第 ${JSON.stringify(moved.selectedAt)} 个）`,
+    );
+  }
+
+  // 数字键打星（只在网格里生效）
+  await send("Runtime.evaluate", {
+    expression: `window.dispatchEvent(new KeyboardEvent("keydown", { key: "3", bubbles: true, cancelable: true }))`,
+    returnByValue: true,
+  });
+  await sleep(400);
+  const rated = await send("Runtime.evaluate", {
+    expression: `(window.__INVOKE_LOG || []).filter((c) => c === "browse_mark").length`,
+    returnByValue: true,
+  });
+  if ((rated.result?.value ?? 0) <= (moved.marked ?? 0)) {
+    problems.push("按数字键应当打星（browse_mark 没被调用）");
+  }
+
+  /*
+   * 5.1：Delete → 必须先弹确认（人类 2026-09-19 的批注：删除能批量，所以不给 easy destroy / Shift 快通道）。
+   * 确认之后：成功的走提示、被锁与失败的分别说清楚，失败清单进模态。
+   */
+  await send("Runtime.evaluate", {
+    expression: `window.dispatchEvent(new KeyboardEvent("keydown", { key: "Delete", bubbles: true, cancelable: true }))`,
+    returnByValue: true,
+  });
+  await sleep(300);
+  const deleteGate = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const dialog = document.querySelector('[role="dialog"]');
+      return {
+        dialog: Boolean(dialog),
+        text: (dialog?.textContent ?? "").slice(0, 60),
+        deletedYet: (window.__INVOKE_LOG || []).includes("browse_delete"),
+      };
+    })()`,
+    returnByValue: true,
+  });
+  const deleteGateState = deleteGate.result?.value ?? {};
+  if (deleteGateState.dialog !== true) {
+    problems.push(`Delete 必须先弹确认（实测 ${JSON.stringify(deleteGateState)}）`);
+  }
+  if (deleteGateState.deletedYet === true) {
+    problems.push("还没确认就已经删了 —— 确认弹窗必须挡住删除");
+  }
+  if (deleteGateState.dialog === true) {
+    await send("Runtime.evaluate", {
+      expression: `(() => {
+        const dialog = document.querySelector('[role="dialog"]');
+        const confirm = [...(dialog?.querySelectorAll("button") ?? [])].find(
+          (b) => b.textContent && b.textContent.trim() === "确定",
+        );
+        confirm?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        return Boolean(confirm);
+      })()`,
+      returnByValue: true,
+    });
+    await sleep(600);
+    const deleteResult = await send("Runtime.evaluate", {
+      expression: `(() => ({
+        tones: [...document.querySelectorAll("[data-toast]")].map((t) => t.getAttribute("data-toast")),
+        failures: Boolean(document.querySelector("[data-delete-failures]")),
+        failureText: (document.querySelector("[data-delete-failures]")?.textContent ?? "").slice(0, 60),
+        dialogs: document.querySelectorAll('[role="dialog"]').length,
+        // 诊断用：删除接口到底回了什么、删完还剩几张被选中
+        log: (window.__INVOKE_LOG || []).filter((c) => c === "browse_delete").length,
+        tail: (window.__INVOKE_LOG || []).slice(-8),
+        pages: (window.__INVOKE_LOG || []).filter((c) => c === "browse_page").length,
+        rejections: (window.__REJECTIONS || []).slice(0, 3),
+        selectedText: (document.querySelector("main")?.innerText ?? "").match(/已选 \d+ 张/)?.[0] ?? null,
+      }))()`,
+      returnByValue: true,
+    });
+    const del = deleteResult.result?.value ?? {};
+    if (!Array.isArray(del.tones) || !del.tones.includes("success")) {
+      problems.push(`删除成功要有提示（实测 ${JSON.stringify(del.tones)}）`);
+    }
+    if (!Array.isArray(del.tones) || !del.tones.includes("danger")) {
+      problems.push(`被锁挡住 / 失败要有「危险」提示（实测 ${JSON.stringify(del.tones)}）`);
+    }
+    if (del.failures !== true || !String(del.failureText).includes("MY006")) {
+      problems.push(`删除失败清单要逐条列出来（实测 ${JSON.stringify(del)}）`);
+    }
+    // 关掉失败清单，别挡住后面的断言
+    await send("Runtime.evaluate", {
+      expression: `(() => {
+        const dialog = [...document.querySelectorAll('[role="dialog"]')].find((d) =>
+          d.querySelector("[data-delete-failures]"),
+        );
+        const close = [...(dialog?.querySelectorAll("button") ?? [])].find(
+          (b) => b.textContent && b.textContent.trim() === "关闭",
+        );
+        close?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        return Boolean(close);
+      })()`,
+      returnByValue: true,
+    });
+    await sleep(300);
+  }
+
+  // 再选中一张，供后面的筛选断言用（删除把选中清掉了）
+  await send("Runtime.evaluate", {
+    expression: `(() => {
+      const tile = document.querySelector('[role="option"]');
+      tile?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      return Boolean(tile);
+    })()`,
+    returnByValue: true,
+  });
+  await sleep(300);
+
+  /*
+   * 3.3–3.5：筛选开关打开后 —— 结果区出 chips（从选中照片「取同类」）、
+   * 两个以上条件出「任一/全部」、chip 能单条摘掉、排序控件在控制条上。
+   */
+  const filterOn = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const button = [...document.querySelectorAll("button")].find(
+        (b) => b.getAttribute("aria-label") === "开启后，后面的标记都变成筛选条件",
+      );
+      if (!button) return { found: false };
+      button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      return { found: true };
+    })()`,
+    returnByValue: true,
+  });
+  await sleep(500);
+  const filterState = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const bar = document.querySelector('[data-filter-bar="open"]');
+      return {
+        bar: Boolean(bar),
+        chips: document.querySelectorAll("[data-filter-chip]").length,
+        count: Boolean(document.querySelector("[data-filter-count]")),
+        combinator: document.querySelectorAll('[role="radiogroup"]').length,
+      };
+    })()`,
+    returnByValue: true,
+  });
+  const filterUi = filterState.result?.value ?? {};
+  if (filterOn.result?.value?.found !== true) {
+    problems.push("冒烟里没找到「筛选」开关（aria-label 变了？）");
+  } else if (filterUi.bar !== true) {
+    problems.push(`打开筛选后应有结果区（实测 ${JSON.stringify(filterUi)}）`);
+  } else {
+    // 选中的是 MY001：3 星 + 红色 + 喜欢 ⇒ 三条同类条件
+    if (filterUi.chips !== 3) {
+      problems.push(`筛选条件应当从选中照片取同类（3 星/红色/喜欢 → 3 条，实测 ${filterUi.chips}）`);
+    }
+    if (filterUi.count !== true) {
+      problems.push("结果区应当显示「共 N 张」");
+    }
+    if (filterUi.combinator < 1) {
+      problems.push("两个以上条件时应当出现「任一 / 全部」切换");
+    }
+
+    // 摘掉一条 chip：只少一条，别的条件不动
+    const removed = await send("Runtime.evaluate", {
+      expression: `(() => {
+        const chip = document.querySelector("[data-filter-chip]");
+        const key = chip?.getAttribute("data-filter-chip") ?? null;
+        chip?.querySelector("button")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        return key;
+      })()`,
+      returnByValue: true,
+    });
+    await sleep(400);
+    const afterRemove = await send("Runtime.evaluate", {
+      expression: `(() => ({
+        chips: document.querySelectorAll("[data-filter-chip]").length,
+        stillThere: Boolean(document.querySelector('[data-filter-chip="${removed.result?.value}"]')),
+      }))()`,
+      returnByValue: true,
+    });
+    const after = afterRemove.result?.value ?? {};
+    if (after.chips !== 2 || after.stillThere !== false) {
+      problems.push(`摘掉一条 chip 应当只少那一条（实测 ${JSON.stringify(after)}）`);
+    }
+  }
+
+  // 排序：控制条上有控件；换一个键会重查
+  const sortUi = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const box = document.querySelector("[data-sort]");
+      const buttons = box ? [...box.querySelectorAll("button")] : [];
+      return { box: Boolean(box), buttons: buttons.length };
+    })()`,
+    returnByValue: true,
+  });
+  const sortState = sortUi.result?.value ?? {};
+  if (sortState.box !== true || sortState.buttons < 2) {
+    problems.push(`底部控制条上应当有排序控件（键 + 方向，实测 ${JSON.stringify(sortState)}）`);
+  }
+
+  // 关掉筛选：结果区收起来，条件也清干净
+  await send("Runtime.evaluate", {
+    expression: `(() => {
+      const button = [...document.querySelectorAll("button")].find(
+        (b) => b.getAttribute("aria-label") === "开启后，后面的标记都变成筛选条件",
+      );
+      button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      return Boolean(button);
+    })()`,
+    returnByValue: true,
+  });
+  await sleep(500);
+  const filterOffState = await send("Runtime.evaluate", {
+    expression: `(() => ({
+      bar: Boolean(document.querySelector('[data-filter-bar="open"]')),
+      chips: document.querySelectorAll("[data-filter-chip]").length,
+    }))()`,
+    returnByValue: true,
+  });
+  const off = filterOffState.result?.value ?? {};
+  if (off.bar !== false || off.chips !== 0) {
+    problems.push(`关掉筛选应当收起结果区并清干净条件（实测 ${JSON.stringify(off)}）`);
   }
 
   const openViewer = await send("Runtime.evaluate", {

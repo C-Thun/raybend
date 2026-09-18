@@ -81,6 +81,13 @@ export interface BrowseGridProps {
    * 「从用户体感来说就是在 browse mid 里随便点了一下」）。
    */
   onInteract?: () => void;
+  /** 用户点了第几张（**全列表下标**）：工作区据此记住「当前那张」，键盘导航从它接着走 */
+  onFocusIndex?: (index: number) => void;
+  /**
+   * 把这一张（**全列表下标**）滚进视野 —— 键盘 `←`/`→` 移动「当前那张」之后调。
+   * 不传 = 不管滚动。
+   */
+  focusIndex?: number;
   /**
    * 要进看图（双击某张、或在选中一张时回车）。
    *
@@ -206,6 +213,13 @@ export function BrowseGrid(props: BrowseGridProps) {
     const at = list.findIndex((photo) => photo.id === String(id));
     if (at >= 0) props.onOpenViewer?.(list, at);
   }
+
+  /** 「当前那张」落在哪一行（虚拟列表按行渲染，滚动得按行来） */
+  const focusRow = (): number | undefined => {
+    const index = props.focusIndex;
+    if (index === undefined) return undefined;
+    return rows().findIndex((row) => row.kind === "tiles" && row.slots.includes(index));
+  };
 
   /** 网格里的键盘：只接「回车进看图」（方向键与区间选本来就在 tile 的点击语义里）。 */
   function onGridKeyDown(event: KeyboardEvent): void {
@@ -356,6 +370,7 @@ export function BrowseGrid(props: BrowseGridProps) {
       <Show when={watermark()} keyed fallback={<VirtualGrid
         rows={rows()}
         resetKey={props.resetKey}
+        focusRow={focusRow()}
         onVisibleRange={(start, end) => {
           const [from, to] = rowIndexRange(start, end);
           void store.ensureRange(from, to + 1);
@@ -379,6 +394,24 @@ export function BrowseGrid(props: BrowseGridProps) {
               <For each={row.slots}>
                 {(index) => {
                   const item = () => store.itemAt(index);
+                  /**
+                   * 这张照片的旗标。
+                   *
+                   * ⚠️ 必须写成**一次函数调用里先判空再取值**，不能写成
+                   * `item() === null ? null : store.picks().has(item()!.id) ? …` ——
+                   * Solid 的编译会把那个三元拆成**两次独立的重算**：判空那次的结果会被缓存
+                   * （「非空」），而分支里的 `item().id` 是**新读的** ⇒ 数据在两次之间变成 null 时
+                   * 直接读着 null 崩（2026-09-19 冒烟实测：删完照片后
+                   * `TypeError: Cannot read properties of null (reading 'id')`，
+                   * 整个网格渲染跟着坏掉）。
+                   */
+                  const flagOf = (): "pick" | "reject" | null => {
+                    const it = item();
+                    if (it === null) return null;
+                    if (store.picks().has(it.id)) return "pick";
+                    if (store.rejects().has(it.id)) return "reject";
+                    return null;
+                  };
                   const path = () => {
                     const it = item();
                     return it === null ? null : absPath(it.relPath);
@@ -419,15 +452,7 @@ export function BrowseGrid(props: BrowseGridProps) {
                       rating={item()?.rating ?? 0}
                       colorLabel={asColorLabel(item()?.colorLabel)}
                       locked={(item()?.lockLevel ?? 0) > 0}
-                      flag={
-                        item() === null
-                          ? null
-                          : store.picks().has(item()!.id)
-                            ? "pick"
-                            : store.rejects().has(item()!.id)
-                              ? "reject"
-                              : null
-                      }
+                      flag={flagOf()}
                       onClick={(event) => {
                         const it = item();
                         if (it === null) return;
@@ -435,6 +460,7 @@ export function BrowseGrid(props: BrowseGridProps) {
                         store.select(it.id, clickMode(event), visibleIds());
                         // 「去看照片了」——展开的库列表该收了（BROWSE.md §4.2）
                         props.onInteract?.();
+                        props.onFocusIndex?.(index);
                       }}
                       />
                     </div>

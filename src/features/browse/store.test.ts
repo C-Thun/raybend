@@ -114,13 +114,16 @@ function fakeApi(count: number) {
             colorLabel: all[id - 1]?.colorLabel ?? null,
             likeState: all[id - 1]?.likeState ?? null,
             lockLevel: all[id - 1]?.lockLevel ?? 0,
+            tagIds: [],
           },
       );
     },
     async mark(_id: string, ids: readonly number[], action: MarkAction): Promise<MarkResult> {
       calls.mark.push(action);
       for (const id of ids) {
-        const current = marks.get(id) ?? { id, rating: 0, colorLabel: null, likeState: null, lockLevel: 0 };
+        const current =
+          marks.get(id) ??
+          { id, rating: 0, colorLabel: null, likeState: null, lockLevel: 0, tagIds: [] };
         const next =
           action.kind === "rating"
             ? { ...current, rating: action.value }
@@ -591,4 +594,26 @@ test("setAnchor：没有选择时也不动", async () => {
   store.setAnchor(1);
   assert.equal(store.anchorId(), null);
   assert.deepEqual(store.selectedIds(), []);
+});
+
+// ─────────────────── 删除（走回收站） ───────────────────
+
+test("removeSelected：删完清空选择、重新取一遍页面数据、把结果原样带回", async () => {
+  const { api, calls } = fakeApi(6);
+  const store = createBrowseStore({ api });
+  open(store);
+  await tick();
+  const pagesBefore = calls.page.length;
+
+  store.select(1, "replace");
+  store.select(2, "toggle");
+  const result = await store.removeSelected();
+
+  assert.deepEqual(result, EMPTY_DELETE, "后端回什么就带什么（界面按它决定提示）");
+  assert.deepEqual(store.selectedIds(), [], "删完选择清空");
+  assert.ok(
+    calls.page.length > pagesBefore,
+    "删完要重新取一遍（否则网格上还留着已经删掉的照片）",
+  );
+  assert.equal(store.error(), null);
 });

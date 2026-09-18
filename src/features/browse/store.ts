@@ -48,6 +48,7 @@ import {
   selectionCount,
   type SelectionState,
 } from "../../lib/selection.ts";
+import { clearMarkFilters, conditionCount } from "./filter.ts";
 
 /** 一页取多少张。256 与网格的 overscan 一起够撑一屏还有富余。 */
 export const PAGE_SIZE = 256;
@@ -94,6 +95,22 @@ export interface BrowseDeps {
   api: BrowseApi;
 }
 
+/** 撤销/重做按钮要的几个值（来自后端每次动作返回的 `MarkResult`） */
+export interface UndoState {
+  canUndo: boolean;
+  canRedo: boolean;
+  /** 「撤销：<label>」里的 label（后端给的可读动作名） */
+  undoLabel: string | null;
+  redoLabel: string | null;
+}
+
+export const EMPTY_UNDO_STATE: UndoState = {
+  canUndo: false,
+  canRedo: false,
+  undoLabel: null,
+  redoLabel: null,
+};
+
 export interface BrowseStore {
   // ── 查询 ──
   repositoryId(): string | null;
@@ -102,6 +119,14 @@ export interface BrowseStore {
   scopePath(): string | null;
   filter(): BrowseFilter;
   sort(): BrowseSort;
+  /**
+   * 筛选模式（`BROWSE.md` §3.1）：开着时 toolsbar 的标记控件是**筛选条件**，
+   * 而不是「给选中的照片设值」。关掉时会把四组标记条件清干净 ——
+   * 否则界面看起来「没筛」却还少着照片（原先这件事在工具条里做，现在收到这里，
+   * 因为工具条与结果区（chips）两边都要读它）。
+   */
+  filterMode(): boolean;
+  setFilterMode(on: boolean): void;
   /** 当前查询（没有库时是 `null`）。 */
   query(): BrowseQuery | null;
   setRepository(id: string | null): void;
@@ -158,6 +183,15 @@ export interface BrowseStore {
   mark(action: MarkAction): Promise<MarkResult | null>;
   undo(): Promise<MarkResult | null>;
   redo(): Promise<MarkResult | null>;
+  /**
+   * **撤销栈的当前状态**（按钮的可用性与文案）。
+   *
+   * 后端每次动作都会回 `canUndo/canRedo` 与两个可读标签（「标 3 星」），
+   * 前端只负责记住最后一次看到的快照 —— 不去猜栈里有什么。
+   * 刚进库、还没做过任何动作时是全 false（此时栈里确实可能是空的，
+   * 也可能是上次会话留下的，但我们不猜）。
+   */
+  undoState(): UndoState;
   /** 删掉选中的照片（回收站）。 */
   removeSelected(): Promise<DeleteResult | null>;
 
@@ -176,6 +210,21 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
   const [repositoryId, setRepositoryIdSignal] = createSignal<string | null>(null);
   const [scopePath, setScopePathSignal] = createSignal<string | null>(null);
   const [filter, setFilterSignal] = createSignal<BrowseFilter>({});
+  const [filterMode, setFilterModeSignal] = createSignal(false);
+  const [undoState, setUndoState] = createSignal<UndoState>(EMPTY_UNDO_STATE);
+
+  /** 每次动作之后把撤销栈状态收下来（marking/undo/redo 三处都走它） */
+  const rememberUndo = (result: MarkResult | null): MarkResult | null => {
+    if (result !== null) {
+      setUndoState({
+        canUndo: result.canUndo,
+        canRedo: result.canRedo,
+        undoLabel: result.undoLabel,
+        redoLabel: result.redoLabel,
+      });
+    }
+    return result;
+  };
   const [sort, setSortSignal] = createSignal<BrowseSort>({ key: "takenAt", desc: true });
 
   const [total, setTotal] = createSignal(0);
@@ -360,6 +409,7 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
     const ids = selectedIds();
     if (id === null || ids.length === 0) return null;
     const result = await api.mark(id, ids, action);
+    rememberUndo(result);
     // 打完标要把这批照片的新状态读回来（三态控件显示的就是它）
     await refreshMarkings();
     // 本地条目里的标记值也要跟着变（网格上的星点/色标就是这些字段）
@@ -402,6 +452,8 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
     scopePath,
     filter,
     sort,
+    filterMode,
+    undoState,
     query,
 
     setRepository(id) {
@@ -427,6 +479,14 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
     setSort(next) {
       setSortSignal(next);
       void reload();
+    },
+    setFilterMode(on) {
+      setFilterModeSignal(on);
+      if (on) return;
+      // 关掉筛选：四组标记条件清干净；只有真的要清才重查（省一次往返）
+      const had = conditionCount(filter()) > 0;
+      setFilterSignal(clearMarkFilters(filter()));
+      if (had) void reload();
     },
 
     total,
@@ -472,21 +532,21 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
     markings,
     refreshMarkings,
     async mark(action) {
-      return mark(action);
+      return rememberUndo(await mark(action));
     },
     async undo() {
       const id = repositoryId();
       if (id === null) return null;
       const result = await api.undo(id);
       await reload(); // 撤销改的是库里的值，最稳的是重新取一遍
-      return result;
+      return rememberUndo(result);
     },
     async redo() {
       const id = repositoryId();
       if (id === null) return null;
       const result = await api.redo(id);
       await reload();
-      return result;
+      return rememberUndo(result);
     },
     async removeSelected() {
       const id = repositoryId();

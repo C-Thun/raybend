@@ -202,3 +202,38 @@ test("isUniformHeight：等行高为真，混入一行不等就为假", () => {
   assert.equal(isUniformHeight([{ height: 20 }, { height: 21 }]), false);
   assert.equal(isUniformHeight([{ height: 20 }, { height: 0 }]), false);
 });
+
+// ─────────────────── 滚到某一行（键盘导航用） ───────────────────
+
+import { rowScrollTop } from "./virtual-window.ts";
+
+const ROWS = [{ height: 100 }, { height: 100 }, { height: 100 }, { height: 100 }];
+
+test("rowScrollTop：目标在下方 → 底对齐（刚好看得见）", () => {
+  assert.equal(rowScrollTop({ rows: ROWS, target: 2, scrollTop: 0, viewportHeight: 150 }), 150);
+});
+
+test("rowScrollTop：目标在上方 → 顶对齐", () => {
+  assert.equal(rowScrollTop({ rows: ROWS, target: 0, scrollTop: 250, viewportHeight: 150 }), 0);
+});
+
+test("rowScrollTop：已经看得见 → 一个像素都不动（不然每按一次方向键画面都抖）", () => {
+  assert.equal(rowScrollTop({ rows: ROWS, target: 1, scrollTop: 50, viewportHeight: 150 }), 50);
+  assert.equal(rowScrollTop({ rows: ROWS, target: 0, scrollTop: 0, viewportHeight: 150 }), 0);
+});
+
+test("rowScrollTop：越界 / 空列表 / 非法输入 → 原样返回", () => {
+  assert.equal(rowScrollTop({ rows: ROWS, target: 9, scrollTop: 40, viewportHeight: 150 }), 40);
+  assert.equal(rowScrollTop({ rows: ROWS, target: -1, scrollTop: 40, viewportHeight: 150 }), 40);
+  assert.equal(rowScrollTop({ rows: [], target: 0, scrollTop: 40, viewportHeight: 150 }), 40);
+  assert.equal(rowScrollTop({ rows: ROWS, target: 0, scrollTop: 40, viewportHeight: 0 }), 40);
+  assert.equal(
+    rowScrollTop({ rows: ROWS, target: 0, scrollTop: Number.NaN, viewportHeight: 150 }),
+    0,
+  );
+});
+
+test("rowScrollTop：行高不齐时按前缀和算（不是 target × 平均高）", () => {
+  const rows = [{ height: 40 }, { height: 300 }, { height: 60 }];
+  assert.equal(rowScrollTop({ rows: rows, target: 2, scrollTop: 0, viewportHeight: 100 }), 300);
+});

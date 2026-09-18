@@ -120,6 +120,73 @@ pub fn tags_by_ids(conn: &Connection, ids: &[i64]) -> Result<Vec<Tag>> {
     Ok(ids.iter().filter_map(|id| by_id.get(id).cloned()).collect())
 }
 
+/// 按名字**搜索**标签（标签弹窗里的「输入即搜」）。
+///
+/// * **折叠后做子串匹配**：`NFC + 小写` 之后再 `LIKE %…%`，所以书写差异（大小写、
+///   Unicode 规范化形式）都能对上；
+/// * **通配符要转义**（见 [`escape_like`]）：用户输入 `%` 时不该变成「匹配一切」；
+/// * 空查询 = 按使用次数列出全部（弹窗一打开先给一批常用的，而不是一片空白）；
+/// * 排序：`use_count` 降序 → 名字升序（用得多的在前，好选）；
+/// * `limit` 为 0 → 空（调用方不该这么传，但也不该把整个词典倒出来）。
+pub fn search_tags(conn: &Connection, query: &str, limit: usize) -> Result<Vec<Tag>> {
+    if limit == 0 {
+        return Ok(Vec::new());
+    }
+    let folded = fold_name(query.trim());
+    if folded.is_empty() {
+        return list_tags(conn, limit);
+    }
+    let pattern = format!("%{}%", escape_like(&folded));
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {TAG_COLS} FROM tags WHERE name_folded LIKE ?1 ESCAPE '\\' \
+         ORDER BY use_count DESC, name COLLATE NOCASE ASC LIMIT ?2"
+    ))?;
+    let rows = stmt.query_map(
+        params![pattern, i64::try_from(limit).unwrap_or(i64::MAX)],
+        row_to_tag,
+    )?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+/// 把 `LIKE` 里的通配符变成普通字符。
+///
+/// 不转义的话：搜 `50%` 会命中所有标签（`%` 匹配任意串）、`a_b` 会命中 `axb`。
+/// 反斜杠自己也要转义，否则「以反斜杠结尾」会把 `ESCAPE` 的语义撑破。
+#[must_use]
+pub fn escape_like(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for ch in input.chars() {
+        if matches!(ch, '%' | '_' | '\\') {
+            out.push('\\');
+        }
+        out.push(ch);
+    }
+    out
+}
+
+/// 按差量同步使用次数（`app.db` 侧；`catalog.db` 那边写完关联之后调）。
+///
+/// 为什么用「加减」而不是「重算」：标签是**全局词典**，而关联分布在各个 catalog 里 ——
+/// 单库重算必然算少。`+1/-1` 只依赖本次动作的事实；下限夹在 0（`bump_use_count` 里），
+/// 所以漂移只会偏大、不会变负。
+pub fn apply_delta(conn: &Connection, delta: &TagDelta) -> Result<()> {
+    /*
+     * 直接 UPDATE，**不走 `bump_use_count`**：
+     * 那个函数会回读一次 use_count，词典里没有这个 id 时就报错 ——
+     * 而关联侧残留一个「已从词典删掉」的 tag_id 是**正常可能**的：
+     * 标签是全局词典、关联在各库的 catalog 里，删词典条目不会回头清每个库。
+     * 碰到不认识的 id 就影响 0 行、静默跳过。
+     */
+    let mut stmt = conn.prepare("UPDATE tags SET use_count = max(0, use_count + ?1) WHERE id = ?2")?;
+    for id in &delta.added {
+        stmt.execute(params![1, id])?;
+    }
+    for id in &delta.removed {
+        stmt.execute(params![-1, id])?;
+    }
+    Ok(())
+}
+
 /// 词典全量（按使用次数倒序、同次数按名字）。
 pub fn list_all(conn: &Connection) -> Result<Vec<Tag>> {
     let mut stmt = conn.prepare(&format!(
@@ -442,6 +509,135 @@ mod tests {
         )
         .unwrap();
         conn.last_insert_rowid()
+    }
+
+    // ---------- 搜索（输入即搜） ----------
+
+    #[test]
+    fn search_matches_substring_case_insensitively() {
+        let conn = app();
+        ensure_tag(&conn, "Travel", T0).unwrap();
+        ensure_tag(&conn, "TRavel 2026", T0).unwrap();
+        ensure_tag(&conn, "家庭", T0).unwrap();
+
+        let hits = search_tags(&conn, "trav", 10).unwrap();
+        let names: Vec<&str> = hits.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"Travel"));
+        assert!(names.contains(&"TRavel 2026"), "子串命中，且大小写无关");
+        assert!(!names.contains(&"家庭"));
+
+        // 中文子串
+        let cn = search_tags(&conn, "庭", 10).unwrap();
+        assert_eq!(cn.len(), 1);
+        assert_eq!(cn[0].name, "家庭");
+    }
+
+    #[test]
+    fn search_with_empty_query_lists_most_used_first() {
+        let conn = app();
+        let a = ensure_tag(&conn, "旅行", T0).unwrap();
+        let b = ensure_tag(&conn, "旅行拍立得", T0).unwrap();
+        let _ = b;
+        bump_use_count(&conn, a, 5).unwrap();
+
+        let all = search_tags(&conn, "   ", 10).unwrap();
+        assert_eq!(all.len(), 2, "空查询 = 列出全部");
+        assert_eq!(all[0].name, "旅行", "用得多的在前");
+    }
+
+    #[test]
+    fn search_escapes_like_wildcards() {
+        let conn = app();
+        ensure_tag(&conn, "50% off", T0).unwrap();
+        ensure_tag(&conn, "50x off", T0).unwrap();
+        ensure_tag(&conn, "a_b", T0).unwrap();
+        ensure_tag(&conn, "axb", T0).unwrap();
+
+        let percent = search_tags(&conn, "50%", 10).unwrap();
+        assert_eq!(percent.len(), 1, "% 不该被当成通配符");
+        assert_eq!(percent[0].name, "50% off");
+
+        let underscore = search_tags(&conn, "a_b", 10).unwrap();
+        assert_eq!(underscore.len(), 1, "_ 不该被当成单字符通配");
+        assert_eq!(underscore[0].name, "a_b");
+
+        // 末尾单个反斜杠：转义没做对的话这里会把 ESCAPE 的语义撑破
+        ensure_tag(&conn, "back\\", T0).unwrap();
+        let back = search_tags(&conn, "back\\", 10).unwrap();
+        assert_eq!(back.len(), 1);
+    }
+
+    #[test]
+    fn search_respects_limit_and_zero() {
+        let conn = app();
+        for i in 0..5 {
+            ensure_tag(&conn, &format!("tag-{i}"), T0).unwrap();
+        }
+        assert_eq!(search_tags(&conn, "tag", 2).unwrap().len(), 2);
+        assert!(search_tags(&conn, "tag", 0).unwrap().is_empty(), "limit=0 不倒整个词典");
+        assert!(search_tags(&conn, "没有这个", 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn escape_like_only_touches_wildcards() {
+        assert_eq!(escape_like("plain"), "plain");
+        assert_eq!(escape_like("a%b"), "a\\%b");
+        assert_eq!(escape_like("a_b"), "a\\_b");
+        assert_eq!(escape_like("a\\b"), "a\\\\b");
+        assert_eq!(escape_like("旅行%"), "旅行\\%");
+    }
+
+    // ---------- 使用次数同步 ----------
+
+    #[test]
+    fn apply_delta_bumps_up_and_down_and_never_goes_negative() {
+        let conn = app();
+        let id = ensure_tag(&conn, "旅行", T0).unwrap();
+
+        apply_delta(
+            &conn,
+            &TagDelta {
+                added: vec![id, id],
+                removed: vec![],
+            },
+        )
+        .unwrap();
+        assert_eq!(tag_by_id(&conn, id).unwrap().unwrap().use_count, 2);
+
+        apply_delta(
+            &conn,
+            &TagDelta {
+                added: vec![],
+                removed: vec![id],
+            },
+        )
+        .unwrap();
+        assert_eq!(tag_by_id(&conn, id).unwrap().unwrap().use_count, 1);
+
+        // 减多了也不能变负（下限 0）
+        apply_delta(
+            &conn,
+            &TagDelta {
+                added: vec![],
+                removed: vec![id, id, id],
+            },
+        )
+        .unwrap();
+        assert_eq!(tag_by_id(&conn, id).unwrap().unwrap().use_count, 0);
+    }
+
+    #[test]
+    fn apply_delta_ignores_unknown_ids() {
+        let conn = app();
+        // 关联侧说有 999 号标签，但词典里没有（跨库/被删的痕迹）——不该 panic
+        apply_delta(
+            &conn,
+            &TagDelta {
+                added: vec![999],
+                removed: vec![1000],
+            },
+        )
+        .unwrap();
     }
 
     // ---------- 折叠与命名 ----------
