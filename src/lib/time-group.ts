@@ -91,8 +91,21 @@ const MS_PER_MINUTE = 60_000;
 /** 带上「用哪个偏移看它」的照片（分组与显示时间范围都要用） */
 interface TimedPhoto {
   id: string;
+  /** 相机记下的那个瞬间（Unix 毫秒，**原样**） */
   takenAtMs: number;
   offset: number;
+  /**
+   * **可见时刻**：`takenAtMs + offset`（把不同偏移的照片摆到同一条「墙上的钟」上）。
+   *
+   * 分组（哪天、哪一片）只认它，不认原始毫秒 —— 这是人类 2026-09-18 定的口径：
+   * **同一个用户可见的时间，必须落进同一个篮子**。
+   *
+   * 为什么不用原始毫秒（2026-09-18 的实证）：同一张照片的 JPG（EXIF 带 `+08:00`）
+   * 与 RW2（当时读不到 `OffsetTime*`，被当成 UTC）原始毫秒差了整整 8 小时 ——
+   * 界面上显示的时刻一模一样，代码却把它们切成两片、甚至切成两天，
+   * 于是同一天出现两个日期标题、一次纯位图一次纯 RAW。
+   */
+  visibleMs: number;
 }
 
 /** 本地时区偏移（分钟，东为正），取给定时刻的偏移（能正确处理夏令时） */
@@ -138,6 +151,10 @@ function dayStartMs(key: string, offsetMinutes: number): number {
  * ⚠️ 第一次只修成「保持传入顺序」，而**浏览网格**的传入顺序恰恰就是后端的时间序
  * （`ORDER BY taken_at DESC, id DESC`）—— 等于没修，问题照旧。现在明确按名字排：
  * 两个网格传进来的都可能是时间序，片内让人看到的是文件名序。
+ *
+ * **分组只认「可见时刻」**（人类 2026-09-18 定的口径）：`takenAtMs + offset`。
+ * 只要用户看到的时刻相同，就必须落进同一个日期桶、同一片 —— 无论它们的原始毫秒
+ * 与偏移怎么不同。见 `TimedPhoto::visibleMs` 里记的那次实证（JPG 与 RW2 差 8 小时）。
  */
 export function groupByTime(
   photos: readonly TimePhotoLike[],
@@ -173,19 +190,25 @@ export function groupByTime(
     } else {
       offset = options.offsetMinutes ?? localOffsetMinutes(photo.takenAtMs);
     }
-    timed.push({ id: photo.id, takenAtMs: photo.takenAtMs, offset });
+    timed.push({
+      id: photo.id,
+      takenAtMs: photo.takenAtMs,
+      offset,
+      visibleMs: photo.takenAtMs + offset * MS_PER_MINUTE,
+    });
   }
 
-  // 按时间升序；同一时刻的按 id 兜底，保证顺序确定（可断言）
+  // 按**可见时刻**升序（同偏移时与按原始毫秒同序）；同一时刻的按 id 兜底，保证顺序确定
   timed.sort((a, b) =>
-    a.takenAtMs === b.takenAtMs
+    a.visibleMs === b.visibleMs
       ? a.id.localeCompare(b.id)
-      : a.takenAtMs - b.takenAtMs,
+      : a.visibleMs - b.visibleMs,
   );
 
   const days = new Map<string, { photos: TimedPhoto[]; offset: number }>();
 
   for (const photo of timed) {
+    // 日期也按可见时刻算（`dayKey` 内部再加一次偏移，效果等价于对 `visibleMs` 取 UTC 日期）
     const key = dayKey(photo.takenAtMs, photo.offset);
     const bucket = days.get(key);
     if (bucket) {
@@ -228,7 +251,9 @@ export function groupByTime(
     };
     for (const photo of bucket.photos) {
       const previous = current[current.length - 1];
-      if (previous && photo.takenAtMs - previous.takenAtMs > gapMs) {
+      // ⚠️ 用**可见时刻**差，不是原始毫秒差：用户看到的间隔 > 阈值才该断片。
+      // 同偏移时两者相等（行为不变）；混合偏移时这一条正是「同一段连续拍摄被切成两片」的解药。
+      if (previous && photo.visibleMs - previous.visibleMs > gapMs) {
         flush();
       }
       current.push(photo);

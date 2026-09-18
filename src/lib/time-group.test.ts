@@ -288,3 +288,71 @@ test("片内排序：数字段按数值比（P1000009 在 P1000019 之前）", (
   const grouping = groupByTime(photos, { gapMinutes: 60, offsetMinutes: 480 });
   assert.deepEqual(grouping.days[0]!.slices[0]!.photoIds, ["a", "b", "c"]);
 });
+
+/*
+ * ── 「同一个可见时刻 ⇒ 同一个篮子」（人类 2026-09-18 定的口径）──────────────
+ *
+ * 实证背景：同一张照片的 JPG 与 RW2，界面上显示的时刻一模一样，
+ * 但原始毫秒差了整整 8 小时（RAW 那边把墙上时间当成了 UTC）→
+ * 被切成两片、甚至切成两天，同一天出现两个日期标题、一次纯位图一次纯 RAW。
+ *
+ * 所以分组**不许**看原始毫秒，只看「墙上那口钟」：`takenAtMs + offset`。
+ */
+test("同一可见时刻、偏移不同 ⇒ 必落同一个日期桶与同一片（不许按原始毫秒分家）", () => {
+  // 同一次快门：墙上都是 2026-09-13 12:14
+  const localMs = at(2026, 9, 13, 12, 14); // 带 +08:00 的 JPG：墙上 12:14
+  const asUtcMs = localMs + CST * 60_000; // 同一时刻被当成 UTC（墙上还是 12:14，原始毫秒差 8 小时）
+
+  const grouping = groupByTime(
+    [
+      { id: "jpg", takenAtMs: localMs, offsetMinutes: CST },
+      { id: "raw", takenAtMs: asUtcMs, offsetMinutes: 0 },
+    ],
+    { gapMinutes: 60, offsetMinutes: CST },
+  );
+
+  assert.equal(grouping.days.length, 1, "同一个可见时刻不能分成两天");
+  assert.equal(grouping.days[0].id, "2026-09-13");
+  assert.equal(grouping.days[0].slices.length, 1, "同一个可见时刻不能断成两片");
+  assert.deepEqual(grouping.days[0].slices[0].photoIds.sort(), ["jpg", "raw"]);
+});
+
+test("断片用可见时刻差：可见间隔 30 分钟不断片，哪怕原始毫秒差了 8 小时", () => {
+  const first = at(2026, 9, 13, 12, 0);
+  const second = at(2026, 9, 13, 12, 30);
+  const grouping = groupByTime(
+    [
+      { id: "a", takenAtMs: first, offsetMinutes: CST },
+      // 第二张的「墙上时间」是 12:30，只是偏移被记成 0（原始毫秒比第一张晚 8.5 小时）
+      { id: "b", takenAtMs: second + CST * 60_000, offsetMinutes: 0 },
+    ],
+    { gapMinutes: 60, offsetMinutes: CST },
+  );
+  assert.equal(grouping.days[0].slices.length, 1, "可见间隔 30 分钟 < 阈值 60 分钟，不该断片");
+});
+
+test("断片仍按可见阈值断：可见间隔 90 分钟必须断成两片", () => {
+  const first = at(2026, 9, 13, 12, 0);
+  const second = at(2026, 9, 13, 13, 30);
+  const grouping = groupByTime(
+    [
+      { id: "a", takenAtMs: first, offsetMinutes: CST },
+      { id: "b", takenAtMs: second + CST * 60_000, offsetMinutes: 0 },
+    ],
+    { gapMinutes: 60, offsetMinutes: CST },
+  );
+  assert.equal(grouping.days[0].slices.length, 2, "可见间隔 90 分钟 > 阈值，应当断片");
+});
+
+test("同偏移时行为与按原始毫秒完全一致（这次改动对正常数据零影响）", () => {
+  const photos: TimePhotoLike[] = [
+    { id: "a", takenAtMs: at(2026, 9, 13, 9, 0), offsetMinutes: CST },
+    { id: "b", takenAtMs: at(2026, 9, 13, 9, 59), offsetMinutes: CST },
+    { id: "c", takenAtMs: at(2026, 9, 13, 11, 0), offsetMinutes: CST },
+  ];
+  const grouping = groupByTime(photos, { gapMinutes: 60, offsetMinutes: CST });
+  assert.equal(grouping.days.length, 1);
+  assert.equal(grouping.days[0].slices.length, 2, "9:00+9:59 一片；11:00 起新片");
+  assert.deepEqual(grouping.days[0].slices[0].photoIds, ["a", "b"]);
+  assert.deepEqual(grouping.days[0].slices[1].photoIds, ["c"]);
+});
