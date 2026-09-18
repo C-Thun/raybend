@@ -54,7 +54,17 @@ pub const JPEG_QUALITY: u8 = 82;
 ///
 /// **纪律**：只要改动了「同一份输入会渲染出不同像素」的东西（解码路径、方向处理、编码参数、
 /// 叠加内容），就必须 +1 —— 否则用户看到的是**旧算法**的结果，而程序一切正常。
-pub const PIPELINE_VERSION: u32 = 3;
+///
+/// **第二次踩同一个坑**（2026-09-17，v3 → v4）：RAW 的**方向处理**（`render_raw_file` 里
+/// 从文件头读 orientation 的那段）是在抬到 v3 **之后半小时**才进去的 ——
+/// 于是 v3 签名对「转向之前渲染的纵拍 RAW」依然命中，人类看到的是
+/// 「**tile 的框是纵的、框里的图是横的**」（框的纵横比走的是新元数据，而缩略图是旧缓存）。
+/// 实测证据：拿同一张 `P1000023.RW2` 跑 `thumb-probe`，现管线输出的是 **288×384（纵）** ✓，
+/// 说明代码没问题、就是缓存没作废。
+///
+/// ⇒ 所以这条纪律的正确用法是：**同一个改动里，改了渲染行为就顺手抬版本**，
+/// 不要「先合并渲染改动、之后再抬」（中间那段时间产出的缓存会带着旧行为却持有新签名）。
+pub const PIPELINE_VERSION: u32 = 4;
 
 /// 缩略图尺度。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
@@ -114,12 +124,16 @@ impl SizeClass {
 }
 
 /// 渲染签名（编码格式 + 质量 + 管线版本 + 尺度）。
+///
+/// ⚠️ 这里的版本字面量必须与 [`PIPELINE_VERSION`] **同改** —— 常量管「新图用哪个版本」，
+/// 字面量管「缓存键里写哪个版本」，两者不一致就会出现「改完算法、旧缓存仍命中」
+/// （`render_sig_changes_with_pipeline_version` 这条测试就是钉它们的）。
 #[must_use]
 pub const fn render_sig(size: SizeClass) -> &'static str {
     match size {
-        SizeClass::Grid => "jpeg-q82-grid-v3",
-        SizeClass::Strip => "jpeg-q82-strip-v3",
-        SizeClass::Screen => "jpeg-q86-screen-v3",
+        SizeClass::Grid => "jpeg-q82-grid-v4",
+        SizeClass::Strip => "jpeg-q82-strip-v4",
+        SizeClass::Screen => "jpeg-q86-screen-v4",
     }
 }
 

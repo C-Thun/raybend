@@ -325,10 +325,17 @@ export function createPhotoGridStore(deps: PhotoGridDeps): PhotoGridStore {
       const times = await deps.api.readSourceTimes(pending);
       if (token !== generation) return;
       const byPath = new Map(times.map((entry) => [entry.path, entry]));
+      let merged = 0;
+      let missed = 0;
       setItems((prev) =>
         prev.map((item) => {
           const entry = byPath.get(itemId(item));
-          if (!entry) return item;
+          if (!entry) {
+            // 只统计「请求过却没回来」的那些（其它条目本来就不需要合并）
+            if (pending.includes(itemId(item))) missed += 1;
+            return item;
+          }
+          merged += 1;
           return {
             ...item,
             takenAtMs: entry.takenAtMs,
@@ -337,6 +344,18 @@ export function createPhotoGridStore(deps: PhotoGridDeps): PhotoGridStore {
           };
         }),
       );
+      /*
+       * 留一条控制台诊断：人类报过「按时间模式下同一天出现两个分组标题、一遍纯位图一遍纯 RAW」，
+       * 而后端探针（`examples/source-times-probe.rs`）显示 300 个文件全都能从 EXIF 读到时间。
+       * 到底是不是「补回来的没并上」（路径对不上 / 命令没回来），这行字直接给出答案 ——
+       * 真的少的时候才打，平时不刷屏。
+       */
+      if (missed > 0) {
+        console.warn(
+          // i18n-exempt: 控制台诊断（不是界面文案），见 DESIGN.md §11.1 的豁免项
+          `[photo-grid] 补读拍摄时间：合并 ${merged} 条，有 ${missed} 条没对上（按时间分组可能因此分层）`,
+        );
+      }
     } catch {
       // 读不到时间不该把网格变成错误态：退回「未知时间」组即可
     } finally {

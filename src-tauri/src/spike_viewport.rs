@@ -17,7 +17,7 @@
 //! 也让「静止帧成本」与「运动帧成本」两个数分开量 —— 否则量到的是我们的空转。
 
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant};
 
 use raybend::render::stats::{
@@ -354,13 +354,19 @@ pub fn open_window<R: Runtime>(app: &AppHandle<R>) -> Result<SpikeSnapshot, Stri
     }
 
     // 窗口事件 → 命令：尺寸/DPR 变化必须通知渲染线程（否则 surface 与坐标全错）
+    //
+    // 这里还挂两件事：① 标记「窗口事实脏了」（渲染线程据此刷新，见循环里的说明）；
+    // ② 记一笔事件日志 —— 拖动跨屏时这里会爆量，卡死时的日志就是第一手证据。
+    let facts_dirty = Arc::new(std::sync::atomic::AtomicBool::new(true));
     {
         let tx = tx.clone();
         let shared_for_events = shared.clone();
+        let facts_dirty_for_events = facts_dirty.clone();
         window.on_window_event(move |event| match event {
             tauri::WindowEvent::Resized(size) => {
-                let dpr = shared_for_events
-                    .lock()
+                facts_dirty_for_events.store(true, std::sync::atomic::Ordering::Relaxed);
+                note_window_event("Resized", format!("{}×{}", size.width, size.height));
+                let dpr = lock_shared(&shared_for_events, "事件·Resized 取 dpr")
                     .map(|guard| guard.viewport.dpr)
                     .unwrap_or(1.0);
                 let _ = tx.send(SpikeCommand::Resize {
@@ -370,8 +376,9 @@ pub fn open_window<R: Runtime>(app: &AppHandle<R>) -> Result<SpikeSnapshot, Stri
                 });
             }
             tauri::WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
-                let size = shared_for_events
-                    .lock()
+                facts_dirty_for_events.store(true, std::sync::atomic::Ordering::Relaxed);
+                note_window_event("ScaleFactorChanged", format!("dpr={scale_factor}"));
+                let size = lock_shared(&shared_for_events, "事件·ScaleFactorChanged 取尺寸")
                     .map(|guard| guard.surface_size)
                     .unwrap_or((1280, 820));
                 let _ = tx.send(SpikeCommand::Resize {
@@ -380,16 +387,25 @@ pub fn open_window<R: Runtime>(app: &AppHandle<R>) -> Result<SpikeSnapshot, Stri
                     dpr: *scale_factor as f32,
                 });
             }
-            _ => {}
+            other => {
+                note_window_event("other", format!("{other:?}"));
+            }
         });
     }
 
     let thread_window = window.clone();
     let thread_shared = shared.clone();
+    // 事件处理器已经在用克隆的那份；这份原件移动进渲染线程（它负责刷新窗口事实）
+    let facts_dirty_for_thread = facts_dirty.clone();
     std::thread::Builder::new()
         .name("spike-render".into())
         .spawn(move || {
-            if let Err(error) = render_loop(thread_window, rx, thread_shared.clone())
+            if let Err(error) = render_loop(
+                thread_window,
+                rx,
+                thread_shared.clone(),
+                facts_dirty_for_thread,
+            )
                 && let Ok(mut guard) = thread_shared.lock() {
                     guard.last_error = Some(error);
                 }
@@ -568,6 +584,7 @@ fn render_loop<R: Runtime>(
     window: tauri::WebviewWindow<R>,
     rx: Receiver<SpikeCommand>,
     shared: Arc<Mutex<Shared>>,
+    facts_dirty: Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<(), String> {
     let size = window
         .inner_size()
@@ -584,6 +601,8 @@ fn render_loop<R: Runtime>(
     let coord_max_error = coord_roundtrip_error(context.viewport());
     let mut last_present: Option<Instant> = None;
     let mut script: Option<Script> = None;
+    // 上次刷新窗口事实的时刻（不再每帧去问窗口，见循环里的说明）
+    let mut facts_last = Instant::now();
 
     {
         let mut guard = shared.lock().map_err(|e| e.to_string())?;
@@ -610,8 +629,11 @@ fn render_loop<R: Runtime>(
                 if matches!(command, SpikeCommand::Shutdown) {
                     break;
                 }
-                if let Some(error) = apply_command(command, &mut context, &mut script, &shared)
-                    && let Ok(mut guard) = shared.lock() {
+                let t_command = Instant::now();
+                let failed = apply_command(command, &mut context, &mut script, &shared);
+                log_slow("apply_command", t_command.elapsed());
+                if let Some(error) = failed
+                    && let Some(mut guard) = lock_shared(&shared, "apply_command 结果回写") {
                         guard.last_error = Some(error);
                     }
             }
@@ -632,13 +654,14 @@ fn render_loop<R: Runtime>(
         let cpu_start = Instant::now();
         let outcome = context.render();
         let cpu_ms = cpu_start.elapsed().as_secs_f32() * 1000.0;
+        log_slow("render", cpu_start.elapsed());
         let now = Instant::now();
         let interval_ms = last_present
             .map(|last| (now - last).as_secs_f32() * 1000.0)
             .unwrap_or(0.0);
         last_present = Some(now);
 
-        if let Ok(mut guard) = shared.lock() {
+        if let Some(mut guard) = lock_shared(&shared, "每帧写统计数据") {
             guard.rendered = context.frames_drawn();
             guard.viewport = *context.viewport();
             guard.last_frame_ms = interval_ms;
@@ -657,15 +680,32 @@ fn render_loop<R: Runtime>(
             refresh_window_facts(&window, &mut guard);
         }
 
+        /*
+         * 窗口事实（尺寸 / dpr / 显示器 / 最大化 / 边框）**不再每帧去问窗口**。
+         *
+         * 为什么：`inner_size()` / `scale_factor()` / `current_monitor()` 这些都要跨线程回主线程 ——
+         * 而 Windows **拖动窗口时跑的是模态消息循环**，这些调用会被拖住。每帧都问就等于
+         * 每帧去碰一次那个循环（人类报的「拖到另一块屏就卡几秒」机理吻合）。
+         * 现在改成**事件驱动**（`Resized` / `ScaleFactorChanged` 置脏）+ 1 秒兑底。
+         */
+        if facts_dirty.swap(false, std::sync::atomic::Ordering::Relaxed)
+            || facts_last.elapsed() >= Duration::from_secs(1)
+        {
+            facts_last = Instant::now();
+            if let Some(mut guard) = lock_shared(&shared, "刷新窗口事实") {
+                refresh_window_facts(&window, &mut guard);
+            }
+        }
+
         match outcome {
             Ok(RenderOutcome::Drawn) | Ok(RenderOutcome::Skipped) => {}
             Ok(RenderOutcome::Reconfigured(reason)) => {
-                if let Ok(mut guard) = shared.lock() {
+                if let Some(mut guard) = lock_shared(&shared, "记录 surface 重配") {
                     guard.device_lost.push(format!("{reason}（第 {} 帧）", context.frames_drawn()));
                 }
             }
             Err(error) => {
-                if let Ok(mut guard) = shared.lock() {
+                if let Some(mut guard) = lock_shared(&shared, "记录渲染错误") {
                     guard.last_error = Some(error.to_string());
                 }
             }
@@ -930,6 +970,63 @@ fn coord_roundtrip_error(viewport: &Viewport) -> f32 {
 }
 
 /// 每帧刷新那些只有窗口才知道的事实（最大化/全屏/显示器/DPR）。
+/// 加锁并**计时**：锁等待超过 100ms 就记一行。
+///
+/// 为什么值得专门做：渲染线程与「窗口事件处理器」、「前端每 300ms 的状态轮询」都在碰这把锁。
+/// 一旦渲染线程在持有它的时候被拖住（跨线程调用、swapchain 重建），别的地方就会排队 ——
+/// 「窗口卡住几秒」这类现象，**等锁耗时是能直接看出真相的探针**。
+fn lock_shared<'a>(shared: &'a Arc<Mutex<Shared>>, what: &str) -> Option<MutexGuard<'a, Shared>> {
+    let started = Instant::now();
+    let guard = shared.lock().ok()?;
+    let waited = started.elapsed();
+    if waited.as_millis() >= 100 {
+        eprintln!("[spike] 等锁 `{what}` 用了 {waited:?} —— 有人在长时间持锁");
+    }
+    Some(guard)
+}
+
+/// 限速的慢操作日志：同一类操作每秒最多打一行（免得本身把日志刷爆、拖慢渲染）。
+fn log_slow(kind: &str, elapsed: Duration) {
+    const THRESHOLD: Duration = Duration::from_millis(50);
+    if elapsed < THRESHOLD {
+        return;
+    }
+    static LAST: OnceLock<Mutex<std::collections::HashMap<String, Instant>>> = OnceLock::new();
+    let map = LAST.get_or_init(|| Mutex::new(std::collections::HashMap::new()));
+    let Ok(mut guard) = map.lock() else { return };
+    let now = Instant::now();
+    if let Some(last) = guard.get(kind)
+        && now.duration_since(*last) < Duration::from_secs(1)
+    {
+        return;
+    }
+    guard.insert(kind.to_string(), now);
+    eprintln!("[spike] `{kind}` 耗时 {elapsed:?}（超过 {THRESHOLD:?}）");
+}
+
+/// 窗口事件计数（拖动 / 跨屏时会爆量 —— 这是判断「事件风暴」的依据）。
+static WINDOW_EVENT_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// 记一次窗口事件，并**按秒汇总**打印（具体事件只在低频时逐个打，免得刷屏）。
+///
+/// 人类拖动窗口跨屏时会触发大量 `Resized` / `ScaleFactorChanged`，一旦卡死，
+/// 这张时间线就是「哪个阶段、哪个事件量级」的第一手证据。
+fn note_window_event(kind: &str, detail: String) {
+    static LAST: OnceLock<Mutex<(Instant, usize)>> = OnceLock::new();
+    let count = WINDOW_EVENT_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+    let slot = LAST.get_or_init(|| Mutex::new((Instant::now(), 0)));
+    let Ok(mut guard) = slot.lock() else { return };
+    let (since, last_count) = *guard;
+    let burst = count.saturating_sub(last_count);
+    if since.elapsed() >= Duration::from_secs(1) {
+        eprintln!("[spike] 窗口事件：过去 {:?} 共 {burst} 次（累计 {count}）；最近一次 {kind} {detail}", since.elapsed());
+        *guard = (Instant::now(), count);
+    } else if burst < 4 {
+        // 低频时逐条打，便于对照时间线
+        eprintln!("[spike] 窗口事件 {kind} {detail}（累计 {count}）");
+    }
+}
+
 fn refresh_window_facts<R: Runtime>(window: &tauri::WebviewWindow<R>, shared: &mut Shared) {
     shared.maximized = window.is_maximized().unwrap_or(false);
     shared.fullscreen = window.is_fullscreen().unwrap_or(false);

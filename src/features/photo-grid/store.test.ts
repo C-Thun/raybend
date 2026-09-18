@@ -614,3 +614,50 @@ test("载入门：换目录后，旧目录迟到的头部缓存既不污染新�
     "迟到的旧元信息不能把新目录的比例冲回占位",
   );
 });
+
+test("按时间：同名 JPG 与 RW2 补读 EXIF 后落进同一片，并且片内挨着", async () => {
+  /*
+   * 人类两级上报的那条：源目录里 JPG 与 RAW 各自成组、同一天的分组标题出现两次。
+   *
+   * 机制在**兜底时间**上：扫描阶段给的是「文件名 / mtime」兜底，两种格式的真时间不同就会分开。
+   * 这里刻意把兜底值拉开：JPG 一侧 00:54 / 01:08，RAW 一侧 03:58 / 04:26 ——
+   * 中间差 2 小时 50 分 > 1 小时阈值，于是**断成两片**（这就是人类看到的画面）。
+   * 补读 EXIF 之后四个都在 01:08 之内，应当只剩一片，且片内按文件名自然序。
+   */
+  const { api, state } = fakeApi();
+  state.items = [
+    { ...item("P1000019.JPG", at(0, 54)), takenAtSource: "file_mtime" },
+    { ...item("P1000020.JPG", at(1, 8)), takenAtSource: "file_mtime" },
+    { ...item("P1000019.RW2", at(3, 58)), ext: "rw2", kind: "raw", takenAtSource: "file_mtime" },
+    { ...item("P1000020.RW2", at(4, 26)), ext: "rw2", kind: "raw", takenAtSource: "file_mtime" },
+  ];
+  const withExif = (name: string, ms: number): void => {
+    state.times.set(`/src/${name}`, {
+      path: `/src/${name}`,
+      takenAtMs: ms,
+      takenAtSource: "exif",
+      takenAtOffsetMin: CST,
+    });
+  };
+  // 同一张照片的 RAW 与 JPG 差十几秒（真实情况就是几秒到几十秒）
+  withExif("P1000019.JPG", at(0, 54));
+  withExif("P1000019.RW2", at(0, 54, 15));
+  withExif("P1000020.JPG", at(1, 8));
+  withExif("P1000020.RW2", at(1, 8, 15));
+
+  const store = createPhotoGridStore({ api });
+  store.setSourceDir("/src");
+  await flush();
+  store.setByTime(true);
+  await flush();
+
+  const grouped = store.grouping();
+  assert.ok(grouped, "补读时间之后应当能分组");
+  assert.equal(grouped.days.length, 1, "四个文件属于同一天");
+  assert.equal(grouped.days[0]?.slices.length, 1, "而且只落进一片 —— 不再按格式分层");
+  assert.deepEqual(
+    store.displayItems().map((entry) => entry.fileName),
+    ["P1000019.JPG", "P1000019.RW2", "P1000020.JPG", "P1000020.RW2"],
+    "片内按文件名自然序，同名的 JPG 与 RAW 挨着",
+  );
+});
