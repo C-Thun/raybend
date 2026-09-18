@@ -26,10 +26,18 @@ export interface BrowseTileRow {
   kind: "tiles";
   key: string;
   height: number;
-  /** 起始下标（全列表）。 */
+  /** 起始下标（**显示序**，即本行第一格在全列表里的显示位次）。 */
   start: number;
   /** 这一行几张（最后一行可能不满）。 */
   count: number;
+  /**
+   * 本行每一格对应的**数据下标**（store 的 `itemAt` 用），长度与 `count` 一致。
+   *
+   * 为什么行里要带这个：分组与片内排序都是**显示规则**（人类 2026-09-18 定），
+   * 所以映射由显示层持有；数据层只认自己的查询顺序。逐格取 `store.itemAt(slots[i])` 即可。
+   * 不分组时 `slots` 就是 `start..start+count`，与以前一样。
+   */
+  slots: number[];
 }
 
 /** 一行分组标题。 */
@@ -152,6 +160,12 @@ export interface BuildBrowseRowsInput {
   groups?: readonly BrowseGroupBoundary[];
   /** 行间距（由密度档位决定）——与导入网格同口径。 */
   gap?: number;
+  /**
+   * 「显示序 → 数据下标」的映射（显示层算好的，见 {@link sliceOrder}）。
+   *
+   * 给了它，每行就照着它排格子；不给 = 显示序与查询序一致（未分组时的常态）。
+   */
+  order?: readonly number[];
 }
 
 /** 构建行数组。空列表 → 空数组（视图显示空态）。 */
@@ -168,6 +182,16 @@ export function buildBrowseRows(input: BuildBrowseRowsInput): BrowseRowModel[] {
       : 0;
   const tileRowHeight = input.cellSize + gap;
   const rows: BrowseRowModel[] = [];
+  const order = input.order;
+
+  /** 显示位次区间 → 这一行每格的数据下标。 */
+  const slotRange = (start: number, count: number): number[] => {
+    const slots: number[] = [];
+    for (let at = start; at < start + count; at += 1) {
+      slots.push(order?.[at] ?? at);
+    }
+    return slots;
+  };
 
   const pushTiles = (start: number, end: number, groupKey: string): void => {
     for (let at = start; at < end; at += columns) {
@@ -178,6 +202,7 @@ export function buildBrowseRows(input: BuildBrowseRowsInput): BrowseRowModel[] {
         height: tileRowHeight,
         start: at,
         count,
+        slots: slotRange(at, count),
       });
     }
   };

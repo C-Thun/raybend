@@ -463,55 +463,41 @@ test("重复设同一个库不会重复加载", async () => {
 
 // ─────────────────── 显示序映射（片内自然序交给 store）───────────────────
 
-/** `0..n-1` 的置换；`swap` 非空时交换这两位的映射（模拟片内重排） */
-function permutation(n: number, swap: [number, number] | null = null): number[] {
-  const order = Array.from({ length: n }, (_, index) => index);
-  if (swap) {
-    const [a, b] = swap;
-    order[a] = b;
-    order[b] = a;
-  }
-  return order;
-}
-
-test("显示序映射：itemAt 按显示序取，Shift 区间选择也按显示序走", async () => {
+test("可见顺序由调用方给：Shift 区间选择跟着它走（数据层不猜显示规则）", async () => {
+  /*
+   * 人类 2026-09-18 定的边界：分组、片内排序都是**显示规则**，
+   * 所以顺序由显示层算好传进来；store 只按传进来的顺序做区间展开。
+   * 这里用「2、1、3…」这个顺序模拟「片内按文件名重排」的结果。
+   */
   const { api } = fakeApi(6);
   const store = createBrowseStore({ api });
   store.setRepository("RepoA");
   await tick();
 
-  store.setDisplayOrder(permutation(6, [0, 1]));
-  assert.equal(store.itemAt(0)?.id, 2);
-  assert.equal(store.itemAt(1)?.id, 1);
-  assert.equal(store.itemAt(2)?.id, 3);
-
-  /*
-   * 区间选择（Shift）走的就是「可见顺序」——它也必须按显示序，
-   * 否则用户在一个时间段里 Shift 连选，选中的会是他没看见的那些照片。
-   */
-  store.select(2, "replace");
-  store.select(1, "range");
+  const visible = ["2", "1", "3", "4", "5", "6"];
+  store.select(2, "replace", visible);
+  store.select(1, "range", visible);
   assert.deepEqual(store.selectedIds().sort((a, b) => a - b), [1, 2]);
 
-  // 清掉映射（取消分组）→ 回到后端顺序
-  store.setDisplayOrder(null);
-  assert.equal(store.itemAt(0)?.id, 1);
-  assert.equal(store.itemAt(1)?.id, 2);
+  // 不传顺序 → 退回查询顺序（只有未分组时才是对的，所以调用方必须传）
+  store.clearSelection();
+  store.select(1, "replace");
+  assert.equal(store.itemAt(0)?.id, 1, "数据层仍按查询顺序给数据");
 });
 
-test("显示序映射：按需取数按**后端下标**算页（取的是可见区间的超集）", async () => {
+test("按需取数只认数据下标：可见区间给什么就取什么页", async () => {
+  // 显示序是置换时，取数区间由显示层换算好（`BrowseGrid.rowIndexRange` 取 min..max 超集），
+  // store 这边只按数据下标算页 —— 它不知道也不该知道显示顺序。
   const { api, calls } = fakeApi(600);
   const store = createBrowseStore({ api });
   store.setRepository("RepoA");
   await tick();
 
-  // 显示第 0 位映射到后端第 599 位 → 该取第 2 页（512..767），而不是第 0 页
-  store.setDisplayOrder(permutation(600, [0, 599]));
   calls.page = [];
-  await store.ensureRange(0, 1);
+  await store.ensureRange(599, 600);
   assert.ok(
     calls.page.includes(512),
-    `应当取到第 2 页（offset 512），实际取了 ${calls.page.join(",")}`,
+    `第 599 个数据下标落在第 2 页（offset 512），实际取了 ${calls.page.join(",")}`,
   );
-  assert.ok(!calls.page.includes(0), "不该去取第 0 页（那里没有要显示的那张）");
+  assert.ok(!calls.page.includes(0), "第 0 页已经加载过，不该重复取");
 });

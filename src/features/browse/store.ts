@@ -112,15 +112,6 @@ export interface BrowseStore {
   total(): number;
   /** 第 `index` 张；还没加载到就是 `null`。 */
   itemAt(index: number): AssetItem | null;
-  /**
-   * 设置「**显示序 → 条目下标**」的映射（`null` = 两者一致）。
-   *
-   * 为什么要它：片内要按文件名自然序排（`features/browse/rows.ts` 的 `sliceOrder`），
-   * 而分页来自后端的时间序 —— 两套顺序不能各说各话，否则「按需取下来的页」
-   * 与「屏幕上那一格」会错位（显示错照片）。这里让**店面保持一套下标（显示序）**，
-   * 只在 `itemAt` / `ensureRange` 两个边界上做映射：界面、选区、键盘导航都只用一套。
-   */
-  setDisplayOrder(order: readonly number[] | null): void;
   timeline(): readonly TimelineEntry[];
   facets(): BrowseFacets | null;
   loading(): boolean;
@@ -133,11 +124,17 @@ export interface BrowseStore {
   // ── 选择 ──
   selection(): SelectionState;
   selectedIds(): number[];
-  selectedCount(): number;
+  selectedCount(order?: readonly string[]): number;
   selectedItems(): AssetItem[];
   anchorId(): number | null;
-  select(id: number, mode: "replace" | "toggle" | "range"): void;
-  selectAll(): void;
+  select(id: number, mode: "replace" | "toggle" | "range", order?: readonly string[]): void;
+  /**
+   * 「可见顺序」由**显示层**给：区间选择（Shift）与「全选本片」都要按用户看到的顺序走。
+   *
+   * 为什么不让 store 自己算：分组、片内排序是**显示规则**（人类 2026-09-18 定），
+   * 数据层不该知道它们。不传就退回查询顺序 —— 那样只有未分组时才是对的。
+   */
+  selectAll(order?: readonly string[]): void;
   clearSelection(): void;
 
   // ── 标记 ──
@@ -174,16 +171,6 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
   const [facets, setFacets] = createSignal<BrowseFacets | null>(null);
   const [loading, setLoading] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
-  /** 「显示序 → 条目下标」；`null` = 同一套顺序（未分组时的常态）。 */
-  const [displayOrder, setDisplayOrderSignal] = createSignal<readonly number[] | null>(null);
-
-  /** 显示位次 → 条目数组里的下标（没设映射时就是恒等）。 */
-  const at = (index: number): number => {
-    const order = displayOrder();
-    if (order === null) return index;
-    const mapped = order[index];
-    return mapped === undefined ? index : mapped;
-  };
 
   const [selection, setSelection] = createSignal<SelectionState>(EMPTY_SELECTION);
   const [markings, setMarkings] = createSignal<ReadonlyMap<number, MarkingItem>>(new Map());
@@ -273,13 +260,8 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
   const ensureRange = async (start: number, end: number): Promise<void> => {
     const q = query();
     if (q === null || end <= start) return;
-    // 显示序与后端序不一致时，先把可见区间映射回**条目下标**再算页号：
-    // 页是按后端顺序取的，直接拿显示位次当页号会取错数据。映射后取的是**超集**
-    // （可见区间的下标可能是散的），多取几张无所谓 —— 反正是同一批页。
-    const lo = Math.max(0, Math.min(at(start), at(end - 1)));
-    const hi = Math.max(at(start), at(end - 1));
-    const firstPage = Math.max(0, Math.floor(lo / PAGE_SIZE));
-    const lastPage = Math.max(0, Math.floor(hi / PAGE_SIZE));
+    const firstPage = Math.max(0, Math.floor(start / PAGE_SIZE));
+    const lastPage = Math.max(0, Math.floor((end - 1) / PAGE_SIZE));
     const mine = generation;
 
     const want: number[] = [];
@@ -309,13 +291,16 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
     }
   };
 
-  /** 选中/导航用的顺序：**按显示序**（片内是文件名自然序）。 */
-  const orderedIds = (): string[] => {
-    const list = entries();
+  /**
+   * 选中/导航用的顺序：**调用方（显示层）给的优先**，不传就用查询顺序。
+   *
+   * 顺序本身是显示规则（分组 + 片内排序），所以 store 不自己算 —— 见接口里 `selectAll` 的说明。
+   */
+  const orderedIds = (order?: readonly string[]): string[] => {
+    if (order !== undefined) return [...order];
     const ids: string[] = [];
-    for (let index = 0; index < list.length; index += 1) {
-      const item = list[at(index)];
-      if (item !== null && item !== undefined) ids.push(String(item.id));
+    for (const item of entries()) {
+      if (item !== null) ids.push(String(item.id));
     }
     return ids;
   };
@@ -426,10 +411,7 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
 
     total,
     itemAt(index) {
-      return entries()[at(index)] ?? null;
-    },
-    setDisplayOrder(order) {
-      setDisplayOrderSignal(order === null ? null : [...order]);
+      return entries()[index] ?? null;
     },
     timeline,
     facets,
@@ -440,18 +422,20 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
 
     selection,
     selectedIds,
-    selectedCount: () => selectionCount(selection(), orderedIds()),
+    selectedCount: (order) => selectionCount(selection(), orderedIds(order)),
     selectedItems,
     anchorId: () => {
       const anchor = selection().anchor;
       return anchor === null ? null : Number(anchor);
     },
-    select(id, mode) {
-      setSelection(applySelection(selection(), orderedIds(), String(id), mode));
+    select(id, mode, order) {
+      setSelection(
+        applySelection(selection(), orderedIds(order), String(id), mode),
+      );
       void refreshMarkings();
     },
-    selectAll() {
-      setSelection(selectAllIds(orderedIds()));
+    selectAll(order) {
+      setSelection(selectAllIds(orderedIds(order)));
       void refreshMarkings();
     },
     clearSelection() {

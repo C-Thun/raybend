@@ -102,10 +102,27 @@ export function BrowseGrid(props: BrowseGridProps) {
    * 把映射交给 store，`itemAt` / `ensureRange` 两个边界自己换算，
    * 于是界面、选区、键盘导航都只用一套下标（详见 store 的 `setDisplayOrder`）。
    */
-  createEffect(() => {
+  /**
+   * 显示序 → 数据下标（片内按文件名自然序）。**这是显示层的东西**：
+   * 数据层（store）只按查询顺序给数据，不参与分组与排序（人类 2026-09-18 定的边界）。
+   */
+  const order = createMemo(() => {
     const list = groups();
-    store.setDisplayOrder(list ? sliceOrder(store.timeline(), list) : null);
+    return list ? sliceOrder(store.timeline(), list) : undefined;
   });
+
+  /** 当前可见顺序的 id（区间选择要用 —— 用户看到的顺序才是「顺序」）。 */
+  const visibleIds = (): string[] => {
+    const ids: string[] = [];
+    for (const row of rows()) {
+      if (row.kind !== "tiles") continue;
+      for (const slot of row.slots) {
+        const item = store.itemAt(slot);
+        if (item !== null) ids.push(String(item.id));
+      }
+    }
+    return ids;
+  };
 
   const rows = createMemo<BrowseRowModel[]>(() => {
     return buildBrowseRows({
@@ -114,6 +131,7 @@ export function BrowseGrid(props: BrowseGridProps) {
       cellSize: cellWidth(),
       groups: groups(),
       gap: gap(),
+      order: order(),
     });
   });
 
@@ -121,11 +139,29 @@ export function BrowseGrid(props: BrowseGridProps) {
   const rowIndexRange = (start: number, end: number): [number, number] => {
     const list = rows();
     if (list.length === 0) return [0, 0];
-    const from = list[Math.max(0, Math.min(start, list.length - 1))];
-    const to = list[Math.max(0, Math.min(end - 1, list.length - 1))];
-    const first = from.kind === "tiles" ? from.start : from.start;
-    const last = to.kind === "tiles" ? to.start + to.count : to.start + to.count;
-    return [first, last];
+    const from = Math.max(0, Math.min(start, list.length - 1));
+    const to = Math.max(0, Math.min(end - 1, list.length - 1));
+    // 可见行的**数据下标**可能是散的（显示序是置换）→ 取 min..max 的超集即可，
+    // 多取几张无所谓：页是按数据序取的，多出来的格子本来就该在内存里。
+    let lo = Number.POSITIVE_INFINITY;
+    let hi = Number.NEGATIVE_INFINITY;
+    for (let at = from; at <= to; at += 1) {
+      const row = list[at];
+      if (row === undefined) continue;
+      // 分组标题行没有格子，但它覆盖的**显示位次区间**也要算进去（否则区间选择会漏数据）
+      const slots =
+        row.kind === "tiles"
+          ? row.slots
+          : Array.from({ length: row.count }, (_unused, index) =>
+              order()?.[row.start + index] ?? row.start + index,
+            );
+      for (const slot of slots) {
+        if (slot < lo) lo = slot;
+        if (slot > hi) hi = slot;
+      }
+    }
+    if (!Number.isFinite(lo)) return [0, 0];
+    return [lo, hi + 1];
   };
 
   /*
@@ -231,7 +267,7 @@ export function BrowseGrid(props: BrowseGridProps) {
           }
           return (
             <div class="flex" style={{ gap: `${gap()}px` }}>
-              <For each={Array.from({ length: row.count }, (_, i) => row.start + i)}>
+              <For each={row.slots}>
                 {(index) => {
                   const item = () => store.itemAt(index);
                   const path = () => {
@@ -277,7 +313,7 @@ export function BrowseGrid(props: BrowseGridProps) {
                           : event.ctrlKey || event.metaKey
                             ? "toggle"
                             : "replace";
-                        store.select(it.id, mode);
+                        store.select(it.id, mode, visibleIds());
                       }}
                     />
                   );
