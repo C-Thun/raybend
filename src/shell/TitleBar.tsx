@@ -27,33 +27,44 @@ import { A } from "@solidjs/router";
 import logoSmall from "../assets/branding/logo-small.png";
 import {
   IconArrowsMinimize,
-  IconInfoCircle,
-  IconLanguage,
   IconMinus,
   IconMoon,
   IconSquare,
   IconSun,
   IconX,
 } from "@tabler/icons-solidjs";
-import { Show, createSignal, onCleanup, onMount, type JSX } from "solid-js";
+import { For, Show, createMemo, onCleanup, onMount, type JSX } from "solid-js";
 import { createWindowChrome, tauriWindowHandle } from "../api/window.ts";
 import { IconButton } from "../components/ui/Button.tsx";
 import { Menu } from "../components/ui/Menu.tsx";
 import { SegmentedControl } from "../components/ui/SegmentedControl.tsx";
 import { Tooltip } from "../components/ui/Tooltip.tsx";
-import { locale, localeLabel, nextLocale, setLocale, t } from "../i18n/index.ts";
+import { locale, localeLabel, nextLocale, t } from "../i18n/index.ts";
+import type { MessageKey } from "../i18n/index.ts";
+import { chordOf, type CommandSpec } from "../lib/commands.ts";
+import { shortcutOverrides } from "../lib/shortcuts.ts";
 import type { AppearanceStore } from "../lib/appearance.ts";
 import { AboutDialog } from "./AboutDialog.tsx";
 import type { ShellStore } from "./store.ts";
 
+/** 标题栏上的菜单顺序（`plans/M2-W3.md` §2.6） */
+const MENU_ORDER = ["file", "edit", "view", "window", "help"] as const;
+type MenuName = (typeof MENU_ORDER)[number];
+
 export interface TitleBarProps {
   store: ShellStore;
   appearance: AppearanceStore;
+  /** 命令注册表（菜单项**全部**从它来：所以「每个菜单项都是可搜索命令」是结构保证） */
+  commands: readonly CommandSpec[];
+  /** 跑一条命令（组装层的统入口：记最近 + 真的跑） */
+  onRun: (command: CommandSpec) => void;
+  /** 关于弹窗的状态住在组装层（命令面板也要能打开它） */
+  aboutOpen: boolean;
+  onAboutOpenChange: (open: boolean) => void;
 }
 
 export function TitleBar(props: TitleBarProps) {
   const chrome = createWindowChrome();
-  const [aboutOpen, setAboutOpen] = createSignal(false);
 
   onMount(() => {
     void (async () => {
@@ -63,6 +74,57 @@ export function TitleBar(props: TitleBarProps) {
   onCleanup(() => chrome.dispose());
 
   const controls = () => chrome.view();
+
+  /**
+   * 菜单标签：一律从注册表取本地化标题 —— **只有一个例外**：
+   * 语言切换那条要显示**目标语言自己的名字**（endonym，点下去会变成什么），
+   * 用 `t()` 会让中英两种界面都写自己的名字，那条菜单就失去意义了。
+   */
+  const itemLabel = (command: CommandSpec): string =>
+    command.id === "help.language.toggle"
+      ? localeLabel(nextLocale(locale()))
+      : t(command.titleKey as MessageKey);
+
+  /** 每个菜单的项（顺序 = 注册表顺序） */
+  const menuItems = createMemo(() => {
+    const build = (name: MenuName) =>
+      props.commands
+        .filter((command) => command.menu === name)
+        .map((command) => ({
+          value: command.id,
+          label: itemLabel(command),
+          ...(command.enabled?.() === false ? { disabled: true } : {}),
+          ...(chordOf(command, shortcutOverrides()) === null
+            ? {}
+            : { shortcut: chordOf(command, shortcutOverrides()) ?? undefined }),
+          ...(isActive(command) ? { selected: true } : {}),
+        }));
+    return new Map<MenuName, ReturnType<typeof build>>(MENU_ORDER.map((name) => [name, build(name)]));
+  });
+
+  /** 菜单里的「当前生效项」：工作流 / 主题 / 密度 / 语言那几条打个勾 */
+  function isActive(command: CommandSpec): boolean {
+    switch (command.id) {
+      case "view.flow.import":
+      case "view.flow.browse":
+      case "view.flow.edit":
+      case "view.flow.export":
+        return props.store.workflow() === command.id.split(".")[2];
+      case "view.density.compact":
+        return props.appearance.density() === "compact";
+      case "view.density.loose":
+        return props.appearance.density() === "loose";
+      default:
+        return false;
+    }
+  }
+
+  const runById = (id: string): void => {
+    const command = props.commands.find((item) => item.id === id);
+    if (command === undefined) return;
+    // 语言那条的标签是特例（endonym），行为仍在注册表里
+    props.onRun(command);
+  };
 
   return (
     <>
@@ -110,51 +172,32 @@ export function TitleBar(props: TitleBarProps) {
           </span>
         </div>
 
-        {/* ── 菜单：只在鼠标指向标题行时出现（设计稿明确要求）── */}
-        <div class="flex shrink-0 items-center ps-2">
+        {/* ── 菜单：只在鼠标指向标题行时出现（设计稿明确要求）──
+            五个菜单（文件 / 编辑 / 视图 / 窗口 / 帮助）的**每一项都来自命令注册表** ——
+            所以「菜单项同时是可搜索命令」不是靠人工同步，而是结构保证；
+            右侧那颗键位提示也读同一份覆盖表，改完键菜单会跟着变。 */}
+        <div class="flex shrink-0 items-center gap-0.5 ps-2">
           <Show when={props.store.menuVisible()}>
-            <Menu
-              label={t("titlebar.menu.help")}
-              placement="bottom-start"
-              items={[
-                /*
-                 * 语言切换（人类 2026-09-16 要求，放在「关于」**上面**）。
-                 *
-                 * ⚠️ **这一条的文字是特例，不能用 `t()` 取**：
-                 * 它要显示的是**目标语言自己的名字**（endonym）—— 中文界面显示 `English`、
-                 * 英文界面显示 `中文`，也就是「点下去会变成什么」。
-                 * 用 `t()` 会让两种界面都写自己的名字（中文界面写「中文」），
-                 * 那条菜单就完全失去了意义。
-                 * 所以从**目标语言的包**里取：`localeLabel(nextLocale(...))`。
-                 */
-                {
-                  value: "language",
-                  label: localeLabel(nextLocale(locale())),
-                  icon: <IconLanguage size={14} />,
-                },
-                {
-                  value: "about",
-                  label: t("titlebar.menu.help.about"),
-                  icon: <IconInfoCircle size={14} />,
-                },
-              ]}
-              onSelect={(value) => {
-                if (value === "about") setAboutOpen(true);
-                if (value === "language") {
-                  setLocale(nextLocale(locale()));
-                }
-              }}
-              onOpenChange={(open) => props.store.pinMenus(open)}
-            >
-              {(triggerProps) => (
-                <button
-                  {...triggerProps()}
-                  class="rounded-ui px-2 py-0.5 text-fs-2 text-fg-2 transition-colors hover:bg-state-hover hover:text-fg-1"
+            <For each={[...MENU_ORDER]}>
+              {(name) => (
+                <Menu
+                  label={t(`titlebar.menu.${name}` as MessageKey)}
+                  placement="bottom-start"
+                  items={menuItems().get(name) ?? []}
+                  onSelect={(value) => runById(value)}
+                  onOpenChange={(open) => props.store.pinMenus(open)}
                 >
-                  {t("titlebar.menu.help")}
-                </button>
+                  {(triggerProps) => (
+                    <button
+                      {...triggerProps()}
+                      class="rounded-ui px-2 py-0.5 text-fs-2 text-fg-2 transition-colors hover:bg-state-hover hover:text-fg-1"
+                    >
+                      {t(`titlebar.menu.${name}` as MessageKey)}
+                    </button>
+                  )}
+                </Menu>
               )}
-            </Menu>
+            </For>
           </Show>
         </div>
 
@@ -240,7 +283,7 @@ export function TitleBar(props: TitleBarProps) {
         </Show>
       </header>
 
-      <AboutDialog open={aboutOpen()} onOpenChange={setAboutOpen} />
+      <AboutDialog open={props.aboutOpen} onOpenChange={props.onAboutOpenChange} />
     </>
   );
 }

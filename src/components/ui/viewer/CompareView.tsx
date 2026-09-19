@@ -77,6 +77,7 @@ import {
   viewerControlsVisible,
 } from "./interaction.ts";
 import { ViewerControls } from "./ViewerControls.tsx";
+import { registerViewerActions } from "./actions.ts";
 
 /** 格间距与四周内边距（CSS px）——量栏区尺寸时要减掉它们 */
 const COMPARE_GAP = 8;
@@ -372,35 +373,26 @@ export function CompareView(props: CompareViewProps): JSX.Element {
   });
   onCleanup(wheel.dispose);
 
-  /* 键盘：与单张看图同一套（那边在对比态下没有挂载，所以这些键在这儿接） */
+  /*
+   * 键盘交给**命令分发器**（`plans/M2-W3.md` §2.5 步骤 3）：对比态的缩放/适配与单张看图
+   * 是**同一条命令**（`viewer.zoomIn` / `viewer.fit` …），只是实现不同 ——
+   * 这里把对比自己那份（逐幅画幅的百分比同步）注册进 `viewer/actions.ts`。
+   * `Esc`（返回）与 `Tab`（三态）由工作区那边注册的动作负责。
+   */
   onMount(() => {
-    const onKey = (event: KeyboardEvent): void => {
-      if (event.defaultPrevented || !props.store.state().active) return;
-      switch (event.key) {
-        case "+":
-        case "=":
-          event.preventDefault();
-          zoomAt(1.25);
-          break;
-        case "-":
-          event.preventDefault();
-          zoomAt(1 / 1.25);
-          break;
-        case "0":
-          // 适配 = 以当前那张为准（与右下那颗「适配」按钮同一条口径：再按一次去 100%）
-          event.preventDefault();
-          toggleFitOfCurrent();
-          break;
-        case "1":
-          event.preventDefault();
-          goToOneToOne();
-          break;
-        default:
-          break;
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    onCleanup(() => window.removeEventListener("keydown", onKey));
+    registerViewerActions({
+      zoomIn: () => zoomAt(1.25),
+      zoomOut: () => zoomAt(1 / 1.25),
+      // 适配 = 以当前那张为准（与右下那颗「适配」按钮同一条口径：再按一次去 100%）
+      toggleFit: () => toggleFitOfCurrent(),
+      actual: () => goToOneToOne(),
+      next: () => props.store.next(),
+      prev: () => props.store.prev(),
+      // 注意用**内部**的 `close()`（它会连 `onClose` 一起叫 —— 工作区靠它复位三态），
+      // 不是 `props.store.close()`（那只会关掉 store）
+      close: () => close(),
+    });
+    onCleanup(() => registerViewerActions(null));
   });
 
   const controlsVisible = (): boolean =>

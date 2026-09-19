@@ -174,7 +174,15 @@ export default function KitchenSink() {
   return (
     <div class="flex h-full flex-col bg-surface-main text-fg-1">
       {/* ── 真实外壳（M1-4）：陈列室直接用实物，不另画一套 ─── */}
-      <TitleBar store={shell} appearance={appearance} />
+      {/* 菜单在陈列室里没有命令可接（空注册表）：菜单按钮仍会渲染，只是没项 */}
+      <TitleBar
+        store={shell}
+        appearance={appearance}
+        commands={[]}
+        onRun={() => {}}
+        aboutOpen={false}
+        onAboutOpenChange={() => {}}
+      />
 
       {/* ── 开发期控制条（产品界面里没有这一行）───────────── */}
       <header class="flex h-bar-tool-h shrink-0 items-center gap-3 bg-surface-bar px-pad-x">

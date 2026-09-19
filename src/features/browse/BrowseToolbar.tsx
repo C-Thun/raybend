@@ -49,8 +49,7 @@ import {
 import { ToggleBlock } from "../../components/ui/ToggleBlock.tsx";
 import { ConfirmDialog } from "../../components/ui/Dialog.tsx";
 import { createEasyDestroy } from "../../lib/easy-destroy.ts";
-import { markNotice, type MarkNotice } from "./mark-feedback.ts";
-import type { MarkResult } from "../../api/types.ts";
+import { applyMarkIntent, type MarkIntent } from "./mark-actions.ts";
 import type { ToastStore } from "../../components/ui/Toast.tsx";
 import { filterFromSelection } from "./filter.ts";
 import { colorText } from "./labels.ts";
@@ -59,7 +58,6 @@ import { t } from "../../i18n/index.ts";
 import {
   COLOR_VALUES,
   LOCK_LEVELS,
-  nextRating,
   triState,
   type TriState,
 } from "../../lib/marking-state.ts";
@@ -101,13 +99,12 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
    */
   const clearFlags = createEasyDestroy();
   /**
-   * 标记之后要说的话（被锁挡住 / 什么都没改）—— `plans/M2-W2-tail.md` 3.1。
+   * 标记之后的提示语（被锁挡住 / 什么都没改）—— `plans/M2-W2-tail.md` 3.1。
    *
-   * 2026-09-19：从「工具条里的一行小字」改成 **toast**（4.2 落地）——
-   * 同一类信息只该有一个去处，而且 toast 能顺手挂「撤销」。
-   * `markNotice()` 那套判定一个字没变，只是渲染换了地方。
+   * 2026-09-19：从「工具条里的一行小字」改成 **toast**（4.2 落地）；
+   * 2026-09-20（W3）：判定与渲染一起搬进 `mark-actions.ts` ——
+   * 命令面板的「打 3 星」与这里点的必须是同一件事、同一句话。
    */
-  const notice = (result: MarkResult | null): MarkNotice | null => markNotice(result);
 
   const selected = () => store.selectedItems();
   const hasSelection = () => selected().length > 0;
@@ -128,14 +125,8 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
 
   /** 筛选态的星标阈值（`null` = 没筛星） */
   const filterRating = (): number | null => store.filter().minRating ?? null;
-  /** 筛选态的色标条件 */
-  const filterColors = (): readonly string[] => store.filter().colors ?? [];
-  /** 筛选态的喜欢条件（`"like"` / `"dislike"`，空 = 没筛） */
-  const filterLike = (): string | null => (store.filter().likes ?? [])[0] ?? null;
   /** 筛选条件里有没有这个喜欢值（`.includes` —— 与色标 / 锁同一口径） */
   const likeFiltered = (value: string): boolean => (store.filter().likes ?? []).includes(value);
-  /** 筛选态的锁条件 */
-  const filterLocks = (): readonly number[] => store.filter().locks ?? [];
   /** 筛选态的旗标条件（`pick` / `reject` / `none`） */
   const filterFlag = (): string | null => store.filter().flag?.mode ?? null;
   /** 选中的这些照片是不是**都有旗标**（旗标在内存里，只有 store 知道） */
@@ -223,34 +214,13 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
   }
 
   /**
-   * 走一次标记动作，并把「该说的话」收下来。
-   *
-   * 所有入口（星/色/喜欢/锁）都经过它 —— 否则总有一条路径忘了提示，
-   * 而「被锁挡住」恰恰是最需要说话的那种（照片上一个像素都不会变）。
+   * 标记动作的**唯一实现**在 `features/browse/mark-actions.ts`（W3 抽出去的）：
+   * 工具条按钮与命令面板搜到的同一条命令必须做出**同一件事** ——
+   * 「筛选态改条件 / 标记态打标」的分支、以及「被锁挡住」这类提示，都在那里。
    */
-  async function runMark(action: Parameters<typeof store.mark>[0]): Promise<void> {
-    const result = await store.mark(action);
-    const warning = notice(result);
-    if (warning !== null) {
-      // 边界情况（被锁挡住 / 一个都没改）：必须说话，否则用户以为点错了
-      props.toast?.show({
-        tone: warning.key === "browse.markSkippedLocked" ? "danger" : "info",
-        message: t(warning.key).replace("{n}", String(warning.count)),
-      });
-      return;
-    }
-    if (result === null) return;
-    // 成功：给一条带「撤销」的提示 —— 人对误操作的第一反应就是找撤销（画布上就这么画的）
-    if (result.changed > 0) {
-      props.toast?.show({
-        tone: "success",
-        message: t("browse.markedCount").replace("{n}", String(result.changed)),
-        action: result.canUndo
-          ? { label: t("browse.undo"), onAction: () => void store.undo() }
-          : undefined,
-      });
-    }
-  }
+  const apply = (intent: MarkIntent): void => {
+    void applyMarkIntent(store, intent, props.toast);
+  };
 
   /**
    * 控件禁用与否。
@@ -261,66 +231,10 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
    */
   const markDisabled = () => (filterMode() ? false : !hasSelection());
 
-  async function markRating(star: number): Promise<void> {
-    if (filterMode()) {
-      /*
-       * 筛选模式：星标是**阈值**（人类 2026-09-19：「选 3 星，那么 4 星、5 星的也能出现」）。
-       * 再点同一个值 = 取消这个条件（与赞/踩、旗标同一套手感）。
-       */
-      store.patchFilter({ minRating: filterRating() === star ? null : star });
-      return;
-    }
-    const values = selected().map((item) => item.rating);
-    await runMark({ kind: "rating", value: nextRating(values, star) });
-  }
-
-  async function markColor(color: string | null): Promise<void> {
-    if (filterMode()) {
-      // 组内是「或」：绿 + 蓝都能加；再点同一个 = 取消那一个
-      const key = color ?? "none";
-      const current = filterColors();
-      const next = current.includes(key)
-        ? current.filter((c) => c !== key)
-        : [...current, key];
-      store.patchFilter({ colors: next });
-      return;
-    }
-    await runMark({ kind: "color", value: color });
-  }
-
-  async function markLike(value: "like" | "dislike"): Promise<void> {
-    if (filterMode()) {
-      /*
-       * 赞 / 踩**互斥**（人类 2026-09-19）：点另一个会把前一个换掉；
-       * 再点同一个 = 取消这个条件（界面上的按钮随之弹起）。
-       */
-      store.patchFilter({ likes: filterLike() === value ? [] : [value] });
-      return;
-    }
-    /*
-     * 赞 / 踩互斥，重复点同一个 = **取消**（人类 2026-09-20 报「取消不了、提示没有需要改动的照片」）。
-     *
-     * 与锁那条同一条口径：已经全是这个值就发 `null`（后端把它当「清掉」）。
-     * 以前这里无条件是 `value`，于是「再点一次」送回同一个值 → 后端判定无改动 →
-     * 弹「没有需要改动的照片」，用户就永远取消不掉。
-     */
-    const target = isExactly(likeState(), value) ? null : value;
-    await runMark({ kind: "like", value: target });
-  }
-
-  async function markLock(level: number): Promise<void> {
-    if (filterMode()) {
-      const current = filterLocks();
-      const next = current.includes(level) ? current.filter((l) => l !== level) : [level];
-      store.patchFilter({ locks: next });
-      return;
-    }
-    // 再点一次已锁的级别 = 解锁（否则锁上就撤不掉）
-    const current = lockState();
-    const target =
-      current.kind === "value" && current.value === level ? LOCK_LEVELS.none : level;
-    await runMark({ kind: "lock", value: target });
-  }
+  const markRating = (star: number): void => apply({ kind: "rating", value: star });
+  const markColor = (color: string | null): void => apply({ kind: "color", value: color });
+  const markLike = (value: "like" | "dislike"): void => apply({ kind: "like", value });
+  const markLock = (level: number): void => apply({ kind: "lock", value: level });
 
   return (
     <div class="flex items-center gap-1">

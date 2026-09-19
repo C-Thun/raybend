@@ -24,6 +24,7 @@ import {
   createMemo,
   createSignal,
   For,
+  on,
   onCleanup,
   onMount,
   Show,
@@ -86,6 +87,14 @@ export interface PhotoGridProps {
    * 网格自己不认识那些概念 —— 它只负责「打开前打个招呼」。
    */
   onOpeningViewer?: () => void;
+  /**
+   * 「打开看图」的**请求计数**（命令面板 / 快捷键发的；每次 +1 就按当前选中开）。
+   *
+   * 为什么走计数而不是暴露 `openViewer`：打开看图时要拿「显示序里的完整清单」——
+   * 那是网格（与数据源适配器）知道的事。计数式请求让命令复用**同一段代码**，
+   * 不用在工作区里再拼一份「该给看图什么」的清单（`AGENTS.md` §2.12）。
+   */
+  openRequest?: number;
   /**
    * 把这一张（按 id）滚进视野 —— 键盘 `←`/`→` 换了「当前那张」之后调。
    * 已经看得见时一个像素都不动（数学在 `lib/virtual-window.ts` 的 `rowScrollTop`）。
@@ -279,6 +288,24 @@ export function PhotoGrid(props: PhotoGridProps): JSX.Element {
     }
     return -1;
   };
+
+  /*
+   * 「打开看图」的外部请求（命令面板 / 快捷键）：与网格里按回车**同一条路** ——
+   * 目标 = 锚点（它在选中集里就用它），否则选中集里的第一张。
+   */
+  createEffect(
+    on(
+      () => props.openRequest ?? 0,
+      (request) => {
+        if (request <= 0) return;
+        const selection = source.selection();
+        const anchor = selection.anchor;
+        const target =
+          anchor !== null && selection.ids.has(anchor) ? anchor : [...selection.ids][0];
+        if (target !== undefined) openViewer(target);
+      },
+    ),
+  );
 
   /*
    * ══ 锚定：换筛选时让窗口内容不动（人类 2026-09-19）══

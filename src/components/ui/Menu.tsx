@@ -30,6 +30,13 @@ export interface MenuItemSpec {
   selected?: boolean;
   /** 在这项**之前**留一段分组空隙 */
   separatorBefore?: boolean;
+  /**
+   * 当前键位（**已格式化**，如 `Ctrl+K`）—— 菜单项右侧那颗小字。
+   *
+   * 由调用方从命令注册表取（`chordOf(command, overrides)`），所以改键之后
+   * 菜单上的提示与真正生效的键位**永远一致**（同一份数据）。没绑就不传。
+   */
+  shortcut?: string;
 }
 
 export interface MenuProps {
@@ -109,6 +116,9 @@ export function Menu(props: MenuProps) {
                     <ArkMenu.ItemText class="min-w-0 flex-1 truncate">
                       {item.label}
                     </ArkMenu.ItemText>
+                    <Show when={item.shortcut}>
+                      <span class="ms-4 shrink-0 text-fs-0 text-fg-3 tnum">{item.shortcut}</span>
+                    </Show>
                   </ArkMenu.Item>
                 </>
               )}

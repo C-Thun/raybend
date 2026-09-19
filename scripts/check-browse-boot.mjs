@@ -3456,6 +3456,312 @@ try {
   }
 
   /*
+   * ══ 标题栏菜单（M2-W3：五个菜单，每一项都是可搜索命令）══
+   *
+   * 菜单**悬停标题栏才出现**（`design/main.md` §2.1 的规矩），所以先用真鼠标
+   * （`Input.dispatchMouseEvent`）移到标题栏上，再断言：
+   *   ① 五个菜单都在；② 点开「编辑」→ 项在、右侧有键位提示。
+   */
+  const headerBox = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const header = document.querySelector("header[data-tauri-drag-region]");
+      if (!header) return null;
+      const rect = header.getBoundingClientRect();
+      return { x: rect.left + 220, y: rect.top + rect.height / 2 };
+    })()`,
+    returnByValue: true,
+  });
+  const headerPoint = headerBox.result?.value ?? null;
+  if (headerPoint === null) {
+    problems.push("找不到标题栏（菜单这条验不了）");
+  } else {
+    await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: headerPoint.x, y: headerPoint.y });
+    await sleep(350);
+    const menus = await send("Runtime.evaluate", {
+      expression: `(() => {
+        const header = document.querySelector("header[data-tauri-drag-region]");
+        const labels = [...(header?.querySelectorAll("button") ?? [])].map((b) => b.textContent?.trim() ?? "");
+        return { labels };
+      })()`,
+      returnByValue: true,
+    });
+    const labels = menus.result?.value?.labels ?? [];
+    for (const expected of ["文件", "编辑", "视图", "窗口", "帮助"]) {
+      if (!labels.includes(expected)) {
+        problems.push(`标题栏菜单里缺「${expected}」（实测 ${JSON.stringify(labels)}）`);
+      }
+    }
+    // 点开「编辑」：项 + 键位提示
+    const opened = await send("Runtime.evaluate", {
+      expression: `(() => {
+        const header = document.querySelector("header[data-tauri-drag-region]");
+        const button = [...(header?.querySelectorAll("button") ?? [])].find((b) => b.textContent?.trim() === "编辑");
+        button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        return Boolean(button);
+      })()`,
+      returnByValue: true,
+    });
+    await sleep(350);
+    const items = await send("Runtime.evaluate", {
+      expression: `(() => {
+        const parts = [...document.querySelectorAll('[data-scope="menu"][data-part="item"]')];
+        return {
+          count: parts.length,
+          texts: parts.map((item) => (item.textContent ?? "").replace(/\\s+/g, " ").trim()),
+        };
+      })()`,
+      returnByValue: true,
+    });
+    const menuContent = items.result?.value ?? {};
+    if (opened.result?.value !== true) {
+      problems.push("点不开「编辑」菜单（菜单这条验不了）");
+    } else if ((menuContent.count ?? 0) < 3) {
+      problems.push(`「编辑」菜单的项太少（实测 ${JSON.stringify(menuContent)}）`);
+    } else {
+      const joined = (menuContent.texts ?? []).join(" | ");
+      if (!joined.includes("撤销")) problems.push(`「编辑」菜单里应当有「撤销」（实测 ${JSON.stringify(menuContent.texts)}）`);
+      if (!joined.includes("Ctrl+Z")) {
+        problems.push(`菜单项右侧应当显示当前键位（实测 ${JSON.stringify(menuContent.texts)}）`);
+      }
+      // 关掉菜单（点空白）
+      await send("Input.dispatchMouseEvent", { type: "mousePressed", button: "left", buttons: 1, clickCount: 1, x: 700, y: 400 });
+      await send("Input.dispatchMouseEvent", { type: "mouseReleased", button: "left", buttons: 0, clickCount: 1, x: 700, y: 400 });
+      await sleep(300);
+    }
+    // 鼠标移开标题栏（把菜单收起来，别影响后面的断言）
+    await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 700, y: 400 });
+    await sleep(250);
+  }
+
+  /*
+   * ══ 命令面板 / 快捷键体系（M2-W3）══
+   *
+   * 三条判据（对 `PLAN.md` 的 DoD）：
+   *   ① `Ctrl+K` 开面板、搜得到、**每行右侧显示键位**；
+   *   ② 回车真的执行了那条命令（用「按时间」开关当观测点）；
+   *   ③ 快捷键能改：`Ctrl+,` 开设置 → 把「信息档位」改到 `Ctrl+Alt+I` → 保存 →
+   *      新键生效、旧键解绑。
+   *
+   * 键盘一律走 CDP 真实按键（`Input.dispatchKeyEvent`）：分发器挂在 window 上，
+   * 真按键顺带验了「浏览器不抢这个组合」。
+   */
+  const cdpKey = async (options) => {
+    const base = {
+      key: options.key,
+      code: options.code ?? "",
+      windowsVirtualKeyCode: options.vk ?? 0,
+      modifiers: options.modifiers ?? 0,
+    };
+    await send("Input.dispatchKeyEvent", { type: "keyDown", ...base, ...(options.text ? { text: options.text } : {}) });
+    await send("Input.dispatchKeyEvent", { type: "keyUp", ...base });
+  };
+  const MOD_CTRL = 2;
+  const MOD_ALT = 1;
+
+  await cdpKey({ key: "k", code: "KeyK", vk: 75, modifiers: MOD_CTRL });
+  await sleep(350);
+  const paletteOpen = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const host = document.querySelector('[data-command-palette="open"]');
+      if (!host) return { open: false };
+      const rows = [...host.querySelectorAll("[data-command-item]")];
+      return {
+        open: true,
+        chords: rows.map((row) => ({
+          id: row.getAttribute("data-command-item"),
+          chord: row.querySelector("[data-command-chord]")?.textContent?.trim() ?? null,
+        })),
+      };
+    })()`,
+    returnByValue: true,
+  });
+  const palette = paletteOpen.result?.value ?? {};
+  if (palette.open !== true) {
+    problems.push('按下 Ctrl+K 应当打开命令面板（[data-command-palette="open"] 不在）');
+  } else {
+    const chords = Array.isArray(palette.chords) ? palette.chords : [];
+    if (chords.length === 0) problems.push("命令面板里一条命令都没有（注册表没接上？）");
+    if (!chords.some((row) => row.chord && row.chord !== "—")) {
+      problems.push(`命令面板每行应当显示快捷键（实测 ${JSON.stringify(chords.slice(0, 3))}）`);
+    }
+    const infoChord = chords.find((row) => row.id === "view.tiles.info");
+    if (infoChord !== undefined && infoChord.chord !== "I") {
+      problems.push(`「信息档位」的键位应当显示 I（实测 ${JSON.stringify(infoChord)}）`);
+    }
+  }
+
+  // 搜「按时间」→ 回车 → 控制条上的「按时间」真的被切换
+  const beforeByTime = await send("Runtime.evaluate", {
+    expression: `document.querySelector('button[aria-label="按时间"]')?.getAttribute("aria-pressed") ?? null`,
+    returnByValue: true,
+  });
+  await send("Runtime.evaluate", {
+    expression: `(() => { const input = document.querySelector('[data-command-palette="open"] input'); input?.focus(); return Boolean(input); })()`,
+    returnByValue: true,
+  });
+  await send("Input.insertText", { text: "按时间" });
+  await sleep(300);
+  const searched = await send("Runtime.evaluate", {
+    expression: `[...document.querySelectorAll('[data-command-palette="open"] [data-command-item]')].map((row) => row.getAttribute("data-command-item"))`,
+    returnByValue: true,
+  });
+  const hits = searched.result?.value ?? [];
+  if (!hits.includes("view.tiles.byTime")) {
+    problems.push(`搜「按时间」应当命中 view.tiles.byTime（实测 ${JSON.stringify(hits)}）`);
+  }
+  await cdpKey({ key: "Enter", code: "Enter", vk: 13 });
+  await sleep(500);
+  const afterByTime = await send("Runtime.evaluate", {
+    expression: `(() => ({
+      pressed: document.querySelector('button[aria-label="按时间"]')?.getAttribute("aria-pressed") ?? null,
+      paletteStillOpen: document.querySelector('[data-command-palette="open"]') !== null,
+    }))()`,
+    returnByValue: true,
+  });
+  const byTime = afterByTime.result?.value ?? {};
+  if (byTime.pressed === (beforeByTime.result?.value ?? null)) {
+    problems.push(`面板里回车执行「按时间」应当切换它（实测 ${JSON.stringify(byTime)}）`);
+  }
+  if (byTime.paletteStillOpen === true) problems.push("执行一条命令之后面板应当关掉");
+  // 收尾：切回去（后面的分组断言不欢迎「按时间」开着）
+  await send("Runtime.evaluate", {
+    expression: `(() => {
+      const button = [...document.querySelectorAll("button")].find((b) => b.getAttribute("aria-label") === "按时间");
+      if (button?.getAttribute("aria-pressed") === "true") button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      return true;
+    })()`,
+    returnByValue: true,
+  });
+  await sleep(300);
+
+  // 快捷键设置：改一条键 → 保存 → 新键生效、旧键解绑
+  await cdpKey({ key: ",", code: "Comma", vk: 188, modifiers: MOD_CTRL, text: "," });
+  await sleep(450);
+  const settingsOpen = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const dialog = document.querySelector('[data-shortcuts-dialog="open"]');
+      return {
+        open: dialog !== null,
+        rows: dialog ? dialog.querySelectorAll("[data-shortcut-row]").length : 0,
+        infoKey: document.querySelector('[data-shortcut-key="view.tiles.info"]')?.textContent?.trim() ?? null,
+      };
+    })()`,
+    returnByValue: true,
+  });
+  const settings = settingsOpen.result?.value ?? {};
+  if (settings.open !== true) {
+    problems.push('按下 Ctrl+, 应当打开快捷键设置（[data-shortcuts-dialog="open"] 不在）');
+  } else {
+    if (settings.rows < 30) problems.push(`快捷键设置应当列出全部命令（实测 ${settings.rows} 行）`);
+    if (settings.infoKey === null) problems.push("快捷键设置里没找到「信息档位」那一行");
+
+    const remap = await send("Runtime.evaluate", {
+      expression: `(() => {
+        const button = document.querySelector('[data-shortcut-key="view.tiles.info"]');
+        button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        return Boolean(button);
+      })()`,
+      returnByValue: true,
+    });
+    if (remap.result?.value !== true) {
+      problems.push("点不动「信息档位」那一行的键位按钮（改键这条验不了）");
+    } else {
+      await cdpKey({ key: "i", code: "KeyI", vk: 73, modifiers: MOD_CTRL | MOD_ALT });
+      await sleep(300);
+      const afterCapture = await send("Runtime.evaluate", {
+        expression: `document.querySelector('[data-shortcut-key="view.tiles.info"]')?.textContent?.trim() ?? null`,
+        returnByValue: true,
+      });
+      const captured = afterCapture.result?.value ?? null;
+      if (typeof captured !== "string" || !captured.includes("I")) {
+        problems.push(`捕获新键之后那一行应当显示 Ctrl+Alt+I（实测 ${JSON.stringify(captured)}）`);
+      }
+      await send("Runtime.evaluate", {
+        expression: `(() => {
+          const dialog = document.querySelector('[data-shortcuts-dialog="open"]');
+          const save = [...(dialog?.querySelectorAll("button") ?? [])].find((b) => b.textContent?.trim() === "保存");
+          save?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+          return Boolean(save);
+        })()`,
+        returnByValue: true,
+      });
+      await sleep(450);
+      const savedState = await send("Runtime.evaluate", {
+        expression: `(() => {
+          const raw = localStorage.getItem("raybend.shortcuts.v1");
+          let parsed = null;
+          try { parsed = raw === null ? null : JSON.parse(raw); } catch { parsed = "unparsable"; }
+          return { parsed, dialog: document.querySelector('[data-shortcuts-dialog="open"]') !== null };
+        })()`,
+        returnByValue: true,
+      });
+      const saved = savedState.result?.value ?? {};
+      if (saved.dialog === true) problems.push("点了保存之后设置弹窗应当关掉");
+      if (!saved.parsed || saved.parsed === "unparsable" || saved.parsed.overrides?.["view.tiles.info"] !== "Ctrl+Alt+I") {
+        problems.push(`改键必须落盘（实测 ${JSON.stringify(saved)}）`);
+      }
+
+      const beforeInfo = await send("Runtime.evaluate", {
+        expression: `document.querySelector("[data-tiles-control-bar] [data-tile-info]")?.getAttribute("data-tile-info") ?? null`,
+        returnByValue: true,
+      });
+      await cdpKey({ key: "i", code: "KeyI", vk: 73, modifiers: MOD_CTRL | MOD_ALT });
+      await sleep(400);
+      const afterInfo = await send("Runtime.evaluate", {
+        expression: `document.querySelector("[data-tiles-control-bar] [data-tile-info]")?.getAttribute("data-tile-info") ?? null`,
+        returnByValue: true,
+      });
+      const newLevel = afterInfo.result?.value ?? null;
+      if (newLevel === (beforeInfo.result?.value ?? null)) {
+        problems.push(`改键后 Ctrl+Alt+I 应当切一档信息档位（前 ${beforeInfo.result?.value} 后 ${newLevel}）`);
+      }
+      // 旧键 i 应当已经解绑：按一下不再变化
+      await cdpKey({ key: "i", code: "KeyI", vk: 73, text: "i" });
+      await sleep(400);
+      const afterOldKey = await send("Runtime.evaluate", {
+        expression: `document.querySelector("[data-tiles-control-bar] [data-tile-info]")?.getAttribute("data-tile-info") ?? null`,
+        returnByValue: true,
+      });
+      if (afterOldKey.result?.value !== newLevel) {
+        problems.push(`改键之后旧键 i 不该再触发（实测 ${JSON.stringify(newLevel)} → ${JSON.stringify(afterOldKey.result?.value)}）`);
+      }
+
+      // 收尾：全部恢复默认，并把信息档位转回 off
+      await cdpKey({ key: ",", code: "Comma", vk: 188, modifiers: MOD_CTRL, text: "," });
+      await sleep(450);
+      const restored = await send("Runtime.evaluate", {
+        expression: `(() => {
+          const dialog = document.querySelector('[data-shortcuts-dialog="open"]');
+          const buttons = [...(dialog?.querySelectorAll("button") ?? [])];
+          buttons.find((b) => b.textContent?.trim() === "全部恢复默认")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+          buttons.find((b) => b.textContent?.trim() === "保存")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+          return true;
+        })()`,
+        returnByValue: true,
+      });
+      void restored;
+      await sleep(450);
+      // 信息档位是三态循环：按到位为止（探针纪律：把结局塞进返回值一次读全）
+      const infoReset = await send("Runtime.evaluate", {
+        expression: `(() => {
+          const level = () => document.querySelector("[data-tiles-control-bar] [data-tile-info]")?.getAttribute("data-tile-info") ?? null;
+          const seen = [];
+          for (let i = 0; i < 4 && level() !== "off"; i += 1) {
+            seen.push(level());
+            window.dispatchEvent(new KeyboardEvent("keydown", { key: "i", bubbles: true, cancelable: true }));
+          }
+          return { seen, final: level() };
+        })()`,
+        returnByValue: true,
+      });
+      const infoState = infoReset.result?.value ?? {};
+      if (infoState.final !== "off") {
+        problems.push(`信息档位没转回 off（实测 ${JSON.stringify(infoState)}）`);
+      }
+    }
+  }
+
+  /*
    * ⚠️ 这一段放在**最后**：它会真的开一次模态（库设置弹窗）。
    * 模态的收尾（Ark 的 inert / 焦点归还）在无头环境里有时会留下痕迹，
    * 放在中间会让后面那些「hover / 键盘」断言莫名失败 —— 那是工装噪音，不是产品问题。

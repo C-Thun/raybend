@@ -21,6 +21,7 @@
 
 import { createSignal, onCleanup, onMount, Show } from "solid-js";
 import type { ViewerStore } from "./store.ts";
+import { registerViewerActions } from "./actions.ts";
 import { ViewerControls } from "./ViewerControls.tsx";
 import {
   createWheelZoom,
@@ -89,56 +90,43 @@ export function Viewer(props: ViewerProps) {
     props.onClose?.();
   };
 
-  /** 键盘：Esc 返回、方向键翻页、+/-/0/1 缩放 */
+  /**
+   * 键盘交给**命令分发器**（`plans/M2-W3.md` §2.5 步骤 3）：
+   * 这里只把「当前挂载的这份实现」注册进 `viewer/actions.ts`，
+   * 命令（`viewer.close` / `viewer.zoomIn` / `viewer.fit` …）通过它取用。
+   *
+   * 为什么不再自己挂 window 监听：那会让「改键」落空 ——
+   * 用户把「放大」改到别的键上，这里却仍然只认 `+`。
+   * 两类语义保留下来：`0` = 适配（已适配时不动）、`1` = 100%（已是 100% 时不动）；
+   * 旧代码就是这么写的（避免同一条命令按两次把自己转回原地）。
+   *
+   * ⚠️ `Enter`（再按一次退出）**不走命令**：它是看图件自己的语义
+   * （网格里回车是「进看图」，看图里回车是「出去」—— 两个面各管各的），
+   * 保留在这里当**内建键**，并在设置界面里写明。
+   */
   onMount(() => {
+    registerViewerActions({
+      zoomIn: () => props.store.zoomBy(1.25),
+      zoomOut: () => props.store.zoomBy(1 / 1.25),
+      toggleFit: () => {
+        if (!state().fit) props.store.toggleFit();
+      },
+      actual: () => {
+        if (state().fit) props.store.toggleFit();
+      },
+      next: () => props.store.next(),
+      prev: () => props.store.prev(),
+      close: () => close(),
+    });
+    onCleanup(() => registerViewerActions(null));
+
+    // 回车＝退出：内建，不走注册表（理由见上面的注释）
     const onKey = (event: KeyboardEvent): void => {
       if (!state().active) return;
-      /*
-       * 已经被别人用掉的事件不处理（`preventDefault` 是个通用信号）：
-       * 实测事故 —— 网格里按回车打开看图时，**同一个仍在冒泡的事件**会接着到达这里，
-       * 被当成「回车＝退出」把刚开的看图又关掉（2026-09-18 冒烟：active 同一个 tick 变回 false）。
-       * 网格那边现在也 `stopPropagation` 了，但这里再加一道 —— 以后别的入口（胶片带、命令面板）
-       * 用回车打开看图时不会重踩。
-       */
       if (event.defaultPrevented) return;
-      switch (event.key) {
-        case "Escape":
-          event.preventDefault();
-          close();
-          break;
-        case "Enter":
-          // 设计稿 §3.2：选中后回车进来，**再按一次回车出去**（进胶片带/对比模式后再另说）
-          event.preventDefault();
-          close();
-          break;
-        case "ArrowRight":
-          event.preventDefault();
-          props.store.next();
-          break;
-        case "ArrowLeft":
-          event.preventDefault();
-          props.store.prev();
-          break;
-        case "+":
-        case "=":
-          event.preventDefault();
-          props.store.zoomBy(1.25);
-          break;
-        case "-":
-          event.preventDefault();
-          props.store.zoomBy(1 / 1.25);
-          break;
-        case "0":
-          event.preventDefault();
-          if (!state().fit) props.store.toggleFit();
-          break;
-        case "1":
-          event.preventDefault();
-          if (state().fit) props.store.toggleFit();
-          break;
-        default:
-          break;
-      }
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      close();
     };
     window.addEventListener("keydown", onKey);
     onCleanup(() => window.removeEventListener("keydown", onKey));

@@ -1,0 +1,52 @@
+/**
+ * 浏览工作区的**动作槽**（`plans/M2-W3.md` §2.5 步骤 2）。
+ *
+ * ## 为什么需要它
+ *
+ * 有几件「主要操作」的状态住在**工作区**里、不在 store 里：
+ *
+ * | 动作 | 状态住哪 |
+ * | --- | --- |
+ * | 删除（回收站） | 工作区的确认弹窗（`pendingDelete` + 失败清单） |
+ * | 进看图 | 工作区的 `prepareViewer`（三态复位、锚点） |
+ * | `Tab` 三态循环 | 工作区的 `chrome` 信号 |
+ *
+ * 命令注册表要能调它们，但不能认识工作区内部 —— 所以工作区挂载时把这一组动作
+ * **注册**进来，命令通过 `browseActions()` 取用（与 `viewer/actions.ts` 同一套做法）。
+ *
+ * ## 纪律
+ *
+ * * 卸载时**必须** `register(null)`（否则命令会打到已卸载的工作区上）；
+ * * 槽里只有**动作**，没有状态：读状态一律走 `browseStore`（唯一事实来源）。
+ */
+
+export interface BrowseActions {
+  /** 正在看图（单张或对比） */
+  viewing: () => boolean;
+  /** 处在对比态（选中 ≥ 2 张时的看图） */
+  comparing: () => boolean;
+  /** 看图态下胶片带可见（`infoKeyApplies` 要这一项） */
+  filmVisible: () => boolean;
+  /** 打开删除确认（工作区负责确认 → 回收站 → 失败清单） */
+  requestDelete: () => void;
+  /** 网格里移动「当前那张」（←/→）：与点击同一套选择语义 */
+  moveFocus: (delta: -1 | 1) => void;
+  /** 进看图（从锚点那张开始；多选时自然进对比） */
+  openViewer: () => void;
+  /** `Tab` 三态循环（左右 / 胶片带） */
+  cycleChrome: () => void;
+  /** 回到默认三态（退出看图时用） */
+  resetChrome: () => void;
+  /** 对比态：胶片带只显示参与对比的图（再按一次回去） */
+  toggleCompareStrip: () => void;
+}
+
+let current: BrowseActions | null = null;
+
+export function registerBrowseActions(actions: BrowseActions | null): void {
+  current = actions;
+}
+
+export function browseActions(): BrowseActions | null {
+  return current;
+}

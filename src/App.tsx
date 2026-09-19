@@ -19,7 +19,9 @@
  */
 
 import { Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
-import { uiReady } from "./api/window.ts";
+import { uiReady, tauriWindowHandle } from "./api/window.ts";
+import { isTauriRuntime } from "./api/tauri-env.ts";
+import type { BrowseSort } from "./api/types.ts";
 import { t } from "./i18n/index.ts";
 import * as db from "./api/db.ts";
 import type { ExifData } from "./features/exif-strip/index.ts";
@@ -34,6 +36,28 @@ import { ToolsBar } from "./shell/ToolsBar.tsx";
 import { createImportStore, ImportWorkspace } from "./workspaces/import/index.ts";
 import { createToastStore, ToastHost, toastDisposer } from "./components/ui/Toast.tsx";
 import { BrowseToolbar, createBrowseStore, TagDialog } from "./features/browse/index.ts";
+import { browseActions } from "./features/browse/actions.ts";
+import { applyMarkIntent } from "./features/browse/mark-actions.ts";
+import { importActions } from "./features/import/actions.ts";
+import { viewerActions } from "./components/ui/viewer/actions.ts";
+import {
+  CommandPalette,
+  ShortcutSettingsDialog,
+  createCommandDispatcher,
+  createCommandRegistry,
+  type CommandDeps,
+} from "./features/commands/index.ts";
+import { chordOf, type CommandSpec } from "./lib/commands.ts";
+import { rememberCommand, shortcutOverrides } from "./lib/shortcuts.ts";
+import {
+  commitDisplayTileStep,
+  displayByTime,
+  displayTileStep,
+  setDisplayByTime,
+  setDisplayTileStep,
+} from "./lib/display-prefs.ts";
+import { cycleTileInfo, infoMode } from "./components/ui/tile-info.ts";
+import { locale, nextLocale, setLocale } from "./i18n/index.ts";
 import { LibrarySettingsDialog } from "./features/repositories/index.ts";
 import { browseDelete, browseFacets, browseMark, browseMarkings, browsePage, browseRedo, browseTimeline, browseUndo, flagsClear, flagsGet, flagsSet, tagList } from "./api/browse.ts";
 import { BrowseWorkspace } from "./workspaces/browse/index.ts";
@@ -193,9 +217,146 @@ export default function App() {
   const toast = createToastStore();
   onCleanup(toastDisposer(toast));
 
+  /* ── 命令体系（`features/commands/`）的组装（`plans/M2-W3.md` §2.1）── */
+
+  const [paletteOpen, setPaletteOpen] = createSignal(false);
+  const [shortcutsOpen, setShortcutsOpen] = createSignal(false);
+  const [aboutOpen, setAboutOpen] = createSignal(false);
+  /** 「新建库」的请求计数：导入工作区看到它变就开弹窗（弹窗状态住在那个工作区） */
+  const [newRepositoryRequest, setNewRepositoryRequest] = createSignal(0);
+
+  /** 找一份窗口句柄（浏览器里是 `null`：那三条命令静默不做） */
+  type BrowseSortKey = NonNullable<BrowseSort["key"]>;
+  const withWindow = async (act: (handle: {
+    minimize: () => Promise<void>;
+    toggleMaximize: () => Promise<void>;
+    close: () => Promise<void>;
+  }) => Promise<void>): Promise<void> => {
+    const handle = await tauriWindowHandle();
+    if (handle !== null) await act(handle);
+  };
+
+  /** 当前挂载的工作区的动作槽（同一时刻只有一个） */
+  const activeWorkspaceActions = () => browseActions() ?? importActions();
+  const viewing = (): boolean => activeWorkspaceActions()?.viewing() ?? false;
+  const filmVisible = (): boolean => activeWorkspaceActions()?.filmVisible() ?? false;
+
+  const commandDeps: CommandDeps = {
+    flow: shell.workflow,
+    setFlow: shell.setWorkflow,
+    theme: appearance.theme,
+    toggleTheme: appearance.toggleTheme,
+    density: appearance.density,
+    setDensity: appearance.setDensity,
+    toggleLocale: () => setLocale(nextLocale(locale())),
+    window: {
+      available: isTauriRuntime,
+      minimize: () => void withWindow((handle) => handle.minimize()),
+      toggleMaximize: () => void withWindow((handle) => handle.toggleMaximize()),
+      close: () => void withWindow((handle) => handle.close()),
+    },
+    openPalette: () => setPaletteOpen(true),
+    openShortcuts: () => setShortcutsOpen(true),
+    openAbout: () => setAboutOpen(true),
+    openTags: () => setTagsOpen(true),
+    openLibrarySettings: () => {
+      const id = browseStore.repositoryId();
+      if (id !== null) setLibrarySettingsId(id);
+    },
+    openNewRepository: () => setNewRepositoryRequest((count) => count + 1),
+    display: {
+      byTime: displayByTime,
+      setByTime: setDisplayByTime,
+      infoMode,
+      cycleInfo: cycleTileInfo,
+      tileStep: displayTileStep,
+      setTileStep: setDisplayTileStep,
+      commitTileStep: commitDisplayTileStep,
+    },
+    viewer: {
+      viewing,
+      comparing: () => browseActions()?.comparing() ?? false,
+      filmVisible,
+      actions: viewerActions,
+    },
+    browse: {
+      repositoryId: browseStore.repositoryId,
+      undo: () => void browseStore.undo(),
+      redo: () => void browseStore.redo(),
+      canUndo: () => browseStore.undoState().canUndo,
+      canRedo: () => browseStore.undoState().canRedo,
+      hasSelection: () => browseStore.selectedCount() > 0,
+      selectedCount: browseStore.selectedCount,
+      selectAll: () => browseStore.selectAll(),
+      clearSelection: () => browseStore.clearSelection(),
+      // **与工具条同一份实现**（`features/browse/mark-actions.ts`）：筛选态改条件、标记态打标
+      mark: (action) => void applyMarkIntent(browseStore, action, toast),
+      setFlag: (value) => void browseStore.setFlag(browseStore.selectedIds(), value),
+      filterMode: browseStore.filterMode,
+      toggleFilter: () => browseStore.setFilterMode(!browseStore.filterMode()),
+      clearFilter: () => browseStore.setFilterMode(false),
+      sortKey: () => browseStore.sort().key ?? "takenAt",
+      setSortKey: (key) =>
+        browseStore.setSort({ ...browseStore.sort(), key: key as BrowseSortKey }),
+      toggleSortDirection: () =>
+        browseStore.setSort({ ...browseStore.sort(), desc: !browseStore.sort().desc }),
+      requestDelete: () => browseActions()?.requestDelete(),
+      moveFocus: (delta) => browseActions()?.moveFocus(delta),
+      openViewer: () => browseActions()?.openViewer(),
+      cycleChrome: () => browseActions()?.cycleChrome(),
+      toggleCompareStrip: () => browseActions()?.toggleCompareStrip(),
+    },
+    import: {
+      hasSelection: () => grid.hasSelection(),
+      selectedCount: () => grid.selectedIds().size,
+      selectAll: () => grid.selectAll(),
+      excludeSelected: () => importStore.toggleExcluded([...grid.selectedIds()]),
+      openViewer: () => importActions()?.openViewer(),
+      cycleChrome: () => importActions()?.cycleChrome(),
+    },
+  };
+
+  const commands = createCommandRegistry(commandDeps);
+
+  /** 跑一条命令（**唯一入口**：菜单、命令面板、以后可能的别处都走它） */
+  const runCommand = (command: CommandSpec): void => {
+    rememberCommand(command.id);
+    void command.run();
+  };
+
+  const dispatcher = createCommandDispatcher({
+    commands: () => commands,
+    overrides: shortcutOverrides,
+    blocked: () =>
+      paletteOpen() ||
+      shortcutsOpen() ||
+      aboutOpen() ||
+      document.querySelector('[role="dialog"]') !== null,
+    onRun: (command) => {
+      // 「打开面板」这类命令会把面板开开关关，别让分发器的日志把它们写成递归
+      if (command.id !== "help.palette") setPaletteOpen(false);
+    },
+  });
+  onMount(() => {
+    dispatcher.attach();
+    onCleanup(() => dispatcher.dispose());
+  });
+
+  /** 菜单项的键位提示（菜单与面板读同一份覆盖表） */
+  const menuShortcut = (command: CommandSpec): string | undefined =>
+    chordOf(command, shortcutOverrides()) ?? undefined;
+  void menuShortcut;
+
   return (
     <div class="flex h-full w-full flex-col bg-surface-main text-fg-1">
-      <TitleBar store={shell} appearance={appearance} />
+      <TitleBar
+        store={shell}
+        appearance={appearance}
+        commands={commands}
+        onRun={runCommand}
+        aboutOpen={aboutOpen()}
+        onAboutOpenChange={setAboutOpen}
+      />
       <FlowBar store={shell} exif={flowInfo()} />
 
       {/*
@@ -267,6 +428,27 @@ export default function App() {
       {/* 提示（右上角、不阻塞、约 5 秒；带「撤销」的动作把撤销放在自己身上） */}
       <ToastHost store={toast} />
 
+      {/*
+        命令面板与快捷键设置（`plans/M2-W3.md`）：都挂在**根层** ——
+        它们自己带遮罩与层叠，不能困在条带或工作区的上下文里。
+        面板的 `onRun` 走 `runCommand`（与菜单、分发器同一个入口）。
+      */}
+      <CommandPalette
+        open={paletteOpen()}
+        onOpenChange={setPaletteOpen}
+        commands={commands}
+        onRun={(command) => {
+          setPaletteOpen(false);
+          runCommand(command);
+        }}
+      />
+      <ShortcutSettingsDialog
+        open={shortcutsOpen()}
+        onOpenChange={setShortcutsOpen}
+        commands={commands}
+        onSaved={() => toast.show({ tone: "success", message: t("shortcuts.saved") })}
+      />
+
       {/* 数据库升级：全窗口阻塞遮罩（不给出口 —— 升级是原子操作，只能等） */}
       <MigrationGate notices={migrations()} />
 
@@ -280,6 +462,8 @@ export default function App() {
           onLeftRatioChange={layout.setLeftRatio}
           recentRatio={initialLayout.recentRatio}
           onRecentRatioChange={layout.setRecentRatio}
+          /* 命令面板里的「新建库…」靠它打开导入侧的弹窗（状态住在那个工作区） */
+          openCreateRequest={newRepositoryRequest()}
         />
       }>
         <BrowseWorkspace

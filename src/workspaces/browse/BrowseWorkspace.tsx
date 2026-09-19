@@ -80,8 +80,7 @@ import { t } from "../../i18n/index.ts";
 import { Button } from "../../components/ui/Button.tsx";
 import { ConfirmDialog, Dialog } from "../../components/ui/Dialog.tsx";
 import type { ToastStore } from "../../components/ui/Toast.tsx";
-import { browseKeyIntent, shouldHandleKey } from "../../lib/viewer-keys.ts";
-import { cycleTileInfo, infoKeyApplies } from "../../components/ui/tile-info.ts";
+import { registerBrowseActions } from "../../features/browse/actions.ts";
 import { SplitHandle } from "../../components/ui/SplitHandle.tsx";
 import { nudgeWidth, resizeWidth } from "../../lib/column-resize.ts";
 import { joinPath } from "../../lib/paths.ts";
@@ -231,6 +230,11 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
   const [pendingDelete, setPendingDelete] = createSignal<number | null>(null);
   /** 删除失败清单（有它就弹模态逐条列出来） */
   const [deleteFailures, setDeleteFailures] = createSignal<DeleteFailure[]>([]);
+  /**
+   * 「打开看图」的请求计数（命令面板 / 快捷键）：传给 `PhotoGrid`，
+   * 它按当前选中开 —— 与网格里按回车**同一条路**（不另写一份「该给看图什么」）。
+   */
+  const [openViewerRequest, setOpenViewerRequest] = createSignal(0);
 
   /** 看图的三种显示状态（`Tab` 循环；退出看图时重置为默认）。 */
   const [chrome, setChrome] = createSignal<ViewerChrome>("default");
@@ -421,61 +425,32 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
    *   不让打星覆盖它；看图时打标用 `P` / `X` / `U` 与工具条；
    * * `Delete` 永远要确认（人类 2026-09-19 的批注：删除能批量，不需要 easy destroy）。
    */
+  /*
+   * 键盘与「主要操作」的入口统一交给**命令注册表**（`plans/M2-W3.md` §2.5）：
+   * 这里只把自己那份**动作**注册进 `features/browse/actions.ts`，
+   * 命令（`mark.rating.3` / `nav.open` / `viewer.close` / `view.chrome.cycle` …）通过它取用。
+   *
+   * 为什么不再自己挂 window 监听：那样「改键」会落空 ——
+   * 用户把「打 3 星」改到别的键，这里却仍然只认 `3`。
+   *
+   * 分工（与 W2 的键位表一致；意图表 `lib/viewer-keys.ts` 仍保留作参考与单测）：
+   * * 看图里的 `Esc` / 方向键 / `+−01` → `components/ui/viewer/actions.ts`（看图件自己注册）；
+   * * 网格里的数字打星、`P/X/U`、`Delete`、`Ctrl+A`、`←/→`、`i` → 命令；
+   * * **内建**（不走注册表）：`Enter` 在看图里返回、网格里的 roving focus、弹窗与菜单内部。
+   */
   onMount(() => {
-    const onKey = (event: KeyboardEvent): void => {
-      const modal = document.querySelector('[role="dialog"]') !== null;
-      if (!shouldHandleKey(event.target as HTMLElement | null, modal)) return;
-      /*
-       * `i`：切 tiles 的「信息」档位 —— **只在 tiles / film 下生效**
-       * （人类 2026-09-19 定的范围；2026-09-20 补上浏览侧这一半 —— 之前只有导入侧接了，
-       * 浏览里按 `i` 毫无反应）。判据走 `components/ui/tile-info.ts` 那**一份**实现。
-       */
-      if (event.key === "i" || event.key === "I") {
-        const viewing = viewer.state().active;
-        if (!infoKeyApplies({ viewing, filmVisible: chromeShowsFilm(chrome()) })) return;
-        event.preventDefault();
-        cycleTileInfo();
-        return;
-      }
-      const intent = browseKeyIntent(event, {
-        viewing: viewer.state().active,
-        hasSelection: store.selectedCount() > 0,
-      });
-      if (intent === null) return;
-      switch (intent.kind) {
-        case "move":
-          if (!viewer.state().active) {
-            event.preventDefault();
-            moveFocus(intent.delta);
-          }
-          return;
-        case "rating":
-          if (!viewer.state().active) {
-            void store.mark({ kind: "rating", value: intent.value });
-          }
-          return;
-        case "flag":
-          void store.setFlag(store.selectedIds(), intent.value);
-          return;
-        case "delete":
-          event.preventDefault();
-          setPendingDelete(store.selectedCount());
-          return;
-        case "clear-selection":
-          store.clearSelection();
-          return;
-        case "select-all":
-          // 只挡浏览器默认行为（否则整页文字会被选中变蓝），选择本身交给 store
-          event.preventDefault();
-          store.selectAll();
-          return;
-        default:
-          // viewer-prev / viewer-next / open-viewer / close-viewer 各有接的人了
-          return;
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    onCleanup(() => window.removeEventListener("keydown", onKey));
+    registerBrowseActions({
+      viewing: () => viewer.state().active,
+      comparing,
+      filmVisible: () => chromeShowsFilm(chrome()),
+      requestDelete: () => setPendingDelete(store.selectedCount()),
+      moveFocus,
+      openViewer: () => setOpenViewerRequest((count) => count + 1),
+      cycleChrome: () => setChrome((current) => nextChrome(current)),
+      resetChrome: () => setChrome("default"),
+      toggleCompareStrip: () => setCompareStrip((on) => !on),
+    });
+    onCleanup(() => registerBrowseActions(null));
   });
 
   /** 移动「当前那张」（网格里 `←` / `→`）：等价于点它一下 —— 与点击同一套选择语义 */
@@ -528,42 +503,6 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
     }
   }
 
-  onMount(() => {
-    const onKey = (event: KeyboardEvent): void => {
-      if (!viewer.state().active) return;
-      /*
-       * 对比态下的**回车**（`BROWSE.md` §5.5、`plans/M2-W2.md` 2.4）：
-       * 胶片带切成「只显示参与对比的图」那种特殊状态，再按一次回去。
-       *
-       * 为什么这一条在**外壳**而不是对比视图里：它改的是**胶片带显示什么**
-       * （布局级的状态），而不是照片本身的缩放/平移。
-       */
-      if (event.key === "Enter") {
-        if (!comparing()) return;
-        event.preventDefault();
-        setCompareStrip((on) => !on);
-        return;
-      }
-      /*
-       * 对比态下的 **Esc**：退回 tiles。
-       *
-       * 为什么这一条必须在外壳里：单张看图件自己接 Esc（关闭自己），但**对比态下
-       * 单张看图件根本没挂载** —— 没人接这个键，用户按 Esc 会没反应
-       * （2026-09-18 冒烟实测：对比后按 Esc，看图还开着）。
-       */
-      if (event.key === "Escape" && comparing()) {
-        event.preventDefault();
-        setChrome("default");
-        viewer.close();
-        return;
-      }
-      if (event.key !== "Tab") return;
-      event.preventDefault();
-      setChrome((current) => nextChrome(current));
-    };
-    window.addEventListener("keydown", onKey);
-    onCleanup(() => window.removeEventListener("keydown", onKey));
-  });
 
   onMount(() => {
     void (async () => {
@@ -850,6 +789,8 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
             onInteract={() => setLibsExpanded(false)}
             onFocusIndex={(index) => setFocusIndex(index)}
             onOpeningViewer={() => prepareViewer()}
+            /* 命令面板 / 快捷键的「看这张」：交给网格按当前选中开（与回车同一条路） */
+            openRequest={openViewerRequest()}
             watermark={() => gridWatermark()}
           />
 

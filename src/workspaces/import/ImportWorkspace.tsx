@@ -22,6 +22,7 @@ import {
   createEffect,
   createMemo,
   createSignal,
+  on,
   onCleanup,
   onMount,
   Show,
@@ -37,6 +38,7 @@ import {
   type PhotoGridStore,
 } from "../../features/photo-grid/index.ts";
 import { StateWatermark } from "../../components/ui/StateWatermark.tsx";
+import { registerImportActions } from "../../features/import/actions.ts";
 import { IconAlertTriangle, IconFolderOpen, IconPhoto, IconPhotoOff } from "@tabler/icons-solidjs";
 import { TilesShell } from "../../components/ui/tiles/index.ts";
 import {
@@ -49,8 +51,6 @@ import {
 import { createThumbQueue } from "../../components/ui/thumb-queue.ts";
 import { getThumbBytes, getViewImage } from "../../api/db.ts";
 import { chromeShowsFilm, nextChrome, type ViewerChrome } from "../../lib/viewer-chrome.ts";
-import { shouldHandleKey } from "../../lib/viewer-keys.ts";
-import { cycleTileInfo, infoKeyApplies } from "../../components/ui/tile-info.ts";
 import { compareIds } from "../../lib/viewer-compare.ts";
 import {
   createImportStore,
@@ -88,6 +88,14 @@ export interface ImportWorkspaceProps {
   onRecentRatioChange?: (ratio: number) => void;
   /** 与浏览工作区共用的根层提示队列。 */
   toast?: ToastStore;
+  /**
+   * 「新建库」的请求计数（命令面板 / 菜单里的 `file.newRepository`）。
+   *
+   * 为什么是个**数字**：弹窗状态住在本工作区（它还要把「已创建」回写给库列表），
+   * 而命令住在组装层 —— 用「变了就开弹窗」这种计数式请求，
+   * 比把 `setCreating` 本身搬出去少一层搬运（也供得住连续点两次）。
+   */
+  openCreateRequest?: number;
 }
 
 /** 空间预检的时限：与导入命令同量级（15 秒只可能是「后端挂了」）。 */
@@ -104,6 +112,16 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
   const store = props.store;
   const grid = props.grid;
   const [creating, setCreating] = createSignal(false);
+
+  /* 命令面板 / 菜单里的「新建库…」：计数一变就开弹窗（首次挂载时不响应 —— 那时计数是 0） */
+  createEffect(
+    on(
+      () => props.openCreateRequest ?? 0,
+      (request) => {
+        if (request > 0) setCreating(true);
+      },
+    ),
+  );
   const groupingLocale = () => (locale() === "en-US" ? "en-US" : "zh-CN");
 
   // 导入：进度弹窗的状态机（api 从 `src/api/` 注入，浏览器里自动降级）
@@ -271,59 +289,33 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
     },
   });
 
+  /**
+   * 进看图（从**锚点**那张开始）：抽成具名函数，**键盘（命令）与别处共用一份**。
+   */
+  function openViewerFromAnchor(): void {
+    const photos = viewerPhotos();
+    if (photos.length === 0) return;
+    const anchor = grid.selection().anchor;
+    const at = anchor === null ? 0 : photos.findIndex((photo) => photo.id === anchor);
+    viewer.show(photos, at < 0 ? 0 : at);
+  }
+
   /*
-   * 键盘：与 browse **同一套语义**，并复用它的 `shouldHandleKey` 守卫
-   * （输入框里按 Tab 不该被我们吃掉）。
-   *   Tab   → 三态循环（film+左右 / film only / view only）
-   *   Enter → tiles 里进看图（从锚点那张开始）
-   *   Esc   → 退出看图并把外壳复位
+   * 键盘与「主要操作」统一交给**命令注册表**（`plans/M2-W3.md` §2.5）：
+   * 这里只把自己那份动作注册进 `features/import/actions.ts`，命令通过它取用 ——
+   * 与浏览侧同一套（同一个键位表、同一份命令清单，改键才真的生效）。
    */
   onMount(() => {
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (!shouldHandleKey(event.target, false)) return;
-      const active = viewer.state().active;
-
-      if (event.key === "Tab") {
-        if (!active) return;
-        event.preventDefault();
-        setChrome(nextChrome(chrome()));
-        return;
-      }
-      if (event.key === "Escape") {
-        if (!active) return;
-        event.preventDefault();
-        setChrome("default");
-        viewer.close();
-        return;
-      }
-      /*
-       * `Ctrl/Cmd + A`：tiles 里**全选**（人类 2026-09-20）。纯看图态不接 ——
-       * 那时全选会把对比集合也一起换掉，不是用户要的。
-       */
-      if ((event.ctrlKey || event.metaKey) && (event.key === "a" || event.key === "A")) {
-        if (active) return;
-        event.preventDefault();
-        grid.selectAll();
-        return;
-      }
-      // `i`：切 tiles 的「信息」档位 —— **只在 tiles / film 下生效**（纯看图态不接，人类 2026-09-19）
-      if (event.key === "i" || event.key === "I") {
-        if (!infoKeyApplies({ viewing: active, filmVisible: chromeShowsFilm(chrome()) })) return;
-        event.preventDefault();
-        cycleTileInfo();
-        return;
-      }
-      if (event.key === "Enter" && !active) {
-        const photos = viewerPhotos();
-        if (photos.length === 0) return;
-        event.preventDefault();
-        const anchor = grid.selection().anchor;
-        const at = anchor === null ? 0 : photos.findIndex((photo) => photo.id === anchor);
-        viewer.show(photos, at < 0 ? 0 : at);
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    onCleanup(() => window.removeEventListener("keydown", onKeyDown));
+    registerImportActions({
+      viewing: () => viewer.state().active,
+      filmVisible: () => chromeShowsFilm(chrome()),
+      cycleChrome: () => setChrome(nextChrome(chrome())),
+      resetChrome: () => setChrome("default"),
+      openViewer: openViewerFromAnchor,
+      selectAll: () => grid.selectAll(),
+      excludeSelected: () => store.toggleExcluded([...grid.selectedIds()]),
+    });
+    onCleanup(() => registerImportActions(null));
   });
 
   /** 左列宽度的上下限（比例）：与 `lib/layout-prefs.ts` 的范围一致，再加一道像素下限 */
