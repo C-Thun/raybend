@@ -76,6 +76,17 @@ export function CompareView(props: CompareViewProps): JSX.Element {
     });
   };
 
+  /**
+   * 返回 tiles：**先关 store，再通知外面**（与 `Viewer` 同一条规矩）。
+   *
+   * 外面拿到回调时只做「复位外壳状态」那件事（三态回到默认），
+   * 关 store 是这两个视图自己的责任 —— 分开就不可能出现「通知了但没关」。
+   */
+  const close = (): void => {
+    props.store.close();
+    props.onClose?.();
+  };
+
   const onWheel = (event: WheelEvent): void => {
     event.preventDefault();
     const factor = event.deltaY < 0 ? 1.1 : 1 / 1.1;
@@ -214,7 +225,7 @@ export function CompareView(props: CompareViewProps): JSX.Element {
         )}
       </For>
       {/* 整个对比区**只有一组**控件（人类 2026-09-19）：左上返回 + 右下缩放，常驻可见 */}
-      <ViewerControls store={props.store} onClose={props.onClose} visible={true} />
+      <ViewerControls store={props.store} onClose={close} visible={true} />
     </div>
   );
 }

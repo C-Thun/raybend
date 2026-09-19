@@ -385,9 +385,9 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
                         store={viewer}
                         class="z-10"
                         onClose={() => {
-                          // 退回 tiles 时左右栏必定回来（与 browse 同一条规矩）
+                          // 退回 tiles 时左右栏必定回来（与 browse 同一条规矩）；
+                          // **关 store 归 Viewer 自己做** —— 这里只管外壳状态
                           setChrome("default");
-                          viewer.close();
                         }}
                       />
                     }
@@ -396,6 +396,8 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
                       photos={comparePhotos()}
                       selectedCount={grid.selectedCount()}
                       store={viewer}
+                      /* 对比态的返回（左上角那颗）：与单张看图同一条规矩 */
+                      onClose={() => setChrome("default")}
                       class="z-10"
                     />
                   </Show>

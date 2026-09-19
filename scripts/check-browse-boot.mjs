@@ -1527,6 +1527,61 @@ try {
     }
   }
 
+  /*
+   * 对比态的那**一组**控件（人类 2026-09-19：整个对比区只有一组「左上返回 + 右下缩放」，
+   * 不是每幅画幅各来一组）。顺带守住那个真实踩过的坑 ——
+   * 抽共享组件时返回按钮接的是「通知外面」的回调、没有关 store，症状是**点了没反应**
+   * （`pnpm smoke:ui` 的看图演示先抓到，这里再对对比态守一遍）。
+   */
+  const compareControls = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const host = document.querySelector('[data-compare="open"]');
+      const back = host?.querySelector('button[aria-label="返回"]') ?? null;
+      return {
+        frames: document.querySelectorAll("[data-compare-frame]").length,
+        back: back !== null,
+        zoom: host?.querySelectorAll('[data-viewer-controls="zoom"]').length ?? 0,
+        backTotal: document.querySelectorAll('button[aria-label="返回"]').length,
+      };
+    })()`,
+    returnByValue: true,
+  });
+  const controls = compareControls.result?.value ?? {};
+  if (!controls.back) problems.push("对比态缺左上角「返回」（整个对比区应当有一组）");
+  if (controls.zoom !== 1) {
+    problems.push(`对比态的缩放控件应当只有一组（实测 ${JSON.stringify(controls.zoom)}）`);
+  }
+  if (controls.backTotal !== 1) {
+    problems.push(`对比态不该有多组返回控件（实测 ${JSON.stringify(controls.backTotal)}）`);
+  }
+  if (controls.back) {
+    await send("Runtime.evaluate", {
+      expression: `(() => {
+        const host = document.querySelector('[data-compare="open"]');
+        const back = host?.querySelector('button[aria-label="返回"]');
+        back?.click();
+        return Boolean(back);
+      })()`,
+      returnByValue: true,
+    });
+    await sleep(500);
+    const afterBack = await send("Runtime.evaluate", {
+      expression: `(() => ({
+        viewer: Boolean(document.querySelector('[data-viewer="open"]')),
+        compare: Boolean(document.querySelector('[data-compare="open"]')),
+        chrome: document.querySelector("main[data-chrome]")?.getAttribute("data-chrome") ?? null,
+      }))()`,
+      returnByValue: true,
+    });
+    const backState = afterBack.result?.value ?? {};
+    if (backState.viewer || backState.compare) {
+      problems.push(`对比态点返回没退出看图（实测 ${JSON.stringify(backState)}）`);
+    }
+    if (backState.chrome !== "default") {
+      problems.push(`对比态点返回之后三态应当复位（实测 ${JSON.stringify(backState.chrome)}）`);
+    }
+  }
+
   /* Esc 退回 tiles：看图件关掉、左右栏必定回来 */
   await send("Runtime.evaluate", {
     expression: `window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }))`,

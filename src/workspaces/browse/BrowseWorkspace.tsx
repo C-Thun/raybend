@@ -569,6 +569,8 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
                 photos={comparePhotos()}
                 selectedCount={compareSelectedCount()}
                 store={viewer}
+                /* 对比态的返回（左上角那颗）：与单张看图同一条规矩 —— 外壳复位三态 */
+                onClose={() => setChrome("default")}
                 onFocus={(photo) => {
                   /*
                    * 2.5（`BROWSE.md` §5.7）：点哪张图就是**当前**那张 ——

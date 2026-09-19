@@ -279,7 +279,12 @@ export function Viewer(props: ViewerProps) {
 
       <ViewerControls
         store={props.store}
-        onClose={props.onClose}
+        /*
+         * ⚠️ 必须给**内部**的 `close()`，不能直接给 `props.onClose`：
+         * 后者只是「通知外面」，不关 store —— 2026-09-19 抽共享组件时就是这里漏了，
+         * 症状是「点了返回没反应」（`pnpm smoke:ui` 当场抓到）。
+         */
+        onClose={close}
         /* 光标靠近**任一**角落就让这组控件浮出：返回在左上、缩放在右下，
            用同一个可见条件最省心（贴着哪边都能唤醒它们） */
         visible={nearTopLeft() || nearBottomRight()}
