@@ -34,12 +34,26 @@
  * 做位移同步（例：第一张 4:3、后面是 3:2 → 只能对比『3:2 区域中间抽出来的 4:3』那部分）」。
  * 这里的「第一幅」= 对比窗口里**最早选中**的那张（见上）。
  *
- * * **缩放同步**：同一个倍率对所有画幅都成立（都是同一个盒子）；
- * * **位移按百分比同步**：平移量以「画幅尺寸的百分比」表达，而不是像素 ——
- *   因为两张图的像素尺寸本来就不同（4000×3000 与 6000×4000），
- *   同一个像素位移在两边的观感完全不同。
+ * * **缩放同步**：同一个倍率对所有画幅都成立（都是同一个画框）；
+ * * **位移按百分比同步**：所有画幅的扣取区都映射到**同一个画框**，所以「同一个 CSS 像素
+ *   位移」对每一幅而言就是「同一个画框百分比」—— 不需要再单独换算百分比。
  *
  * 这两条正是 `plans/M2-W2.md` 2.3 的两条硬要求。
+ *
+ * ## 两层盒子（2026-09-20 人类纠正后的口径，别再混）
+ *
+ * ```text
+ * ┌─ 窗口（= 分栏分到的栏区）─────────┐   ← 可见/裁剪的边界（`overflow: hidden`），有底色与描边
+ * │        ┌─ 画框（等比例，居中）─┐   │   ← 基准比例的盒子：所有扣取区映射到这里
+ * │        │      图片内容          │   │   ← 放大时画框变大，由窗口裁掉多余部分
+ * │        └──────────────────────┘   │
+ * └──────────────────────────────────┘
+ * ```
+ *
+ * 人类原话：「每个分栏方法内分到的栏区都**像个窗口一样**……图片比例不能变化和拉伸，
+ * 但在这个窗口内可以任意缩放，放大时图片变大，在各自整个窗口内都可以看到图」。
+ * 所以：**画框不是裁剪边界**，它只是「扣取区在适配时的大小与位置」；放大后画框
+ * 可以大于窗口（这时才是窗口在裁）。适配时画框在窗口里居中，窗口剩下的地方是底色。
  */
 
 /**
@@ -184,55 +198,84 @@ export function cropToAspect(size: Size, aspect: number): CropRect {
 }
 
 /**
- * 一帧：某张照片 + 它在自己像素里要显示的那块。
+ * 一帧：某张照片 + 它在自己像素里要显示的那块 + 它在**画框**里的摆法。
  *
- * **对照片类型泛型**：`compareFrames` 会把传进来的对象**原样**放进帧里，
+ * **对照片类型泛型**：`compareGeometry` 会把传进来的对象**原样**放进帧里，
  * 所以调用方拿到的 `frame.photo` 仍是它自己的类型（`fileName` / `path` 这些字段不丢）。
  */
 export interface CompareFrame<T extends ComparablePhoto = ComparablePhoto> {
   photo: T;
-  /** 扣出来的那块（比例 = 基准比例） */
+  /** 扣出来的那块（比例 = 基准比例；尺寸未知时是 0） */
   crop: CropRect;
+  /** 整幅图在画框里的显示尺寸（CSS px，**适配时**，即相对倍数 = 1） */
+  image: Size;
+  /** 整幅图左上角相对**画框**左上角的偏移（CSS px，适配时；≤ 0） */
+  imageOffset: { x: number; y: number };
 }
 
 /**
- * 算出每一帧该显示哪块（**以第一幅的比例为准**）。
+ * 一整组对比的几何：画框 + 每帧的扣取区与图片摆放。
  *
- * `photos` 传 `compareShown(compareIds(...))` 的结果（已经按显示顺序、已截到上限）。
+ * `frame` 是**等比例画框**在适配时的大小（居中放在窗口里，见文件头「两层盒子」）；
+ * 放大/平移是视图在它之上叠的变换（`translate(pan) scale(rel)`），几何本身不变。
  */
-export function compareFrames<T extends ComparablePhoto>(
+export interface CompareGeometry<T extends ComparablePhoto = ComparablePhoto> {
+  /** 等比例画框——所有画幅共用（`rel = 1` 时的大小） */
+  frame: Size;
+  /**
+   * 基准图 **1:1**（原图像素 : CSS 像素 = 1）对应的**相对倍数**；尺寸未知 = `null`。
+   *
+   * 为什么用相对倍数而不是绝对倍率：对比里各图像素尺寸本来就不同
+   * （4000×3000 与 6000×4000），「所有画幅同一个倍率」只能是相对画框的倍数。
+   * 需要「100%」时（双击、读数）换算到**基准那幅**：`rel = oneToOneRel`。
+   */
+  oneToOneRel: number | null;
+  frames: CompareFrame<T>[];
+}
+
+/**
+ * 算出窗口（栏区）当前该显示的一组几何（**以第一幅的比例为准**）。
+ *
+ * `photos` 传 `compareIds(...)` 映射出来的结果（已经按显示顺序、已截到上限）；
+ * `pane` 是**分栏分到的栏区**（窗口）的 CSS 尺寸 —— 不是画框、不是视口。
+ *
+ * 尺寸未知（`natural` 缺失）时：画框算不出来（`frame = 0×0`），该帧的 `crop` 与 `image`
+ * 也是 0 —— 视图据此显示「还没读到这张的尺寸」，而不是编一个比例把画面拉歪。
+ */
+export function compareGeometry<T extends ComparablePhoto>(
   photos: readonly T[],
-): CompareFrame<T>[] {
+  pane: Size,
+): CompareGeometry<T> {
   const aspect = baselineAspect(photos);
-  return photos.map((photo) => ({
-    photo,
-    crop:
-      aspect === null
-        ? cropToAspect(photo.natural ?? { width: 0, height: 0 }, 0)
-        : cropToAspect(photo.natural ?? { width: 0, height: 0 }, aspect),
-  }));
-}
+  const frame = aspect === null ? { width: 0, height: 0 } : fitAspectWithin(pane, aspect);
 
-/**
- * 位移归一化：像素 → **画幅的百分比**。
- *
- * 同步位移必须按百分比换算（`plans/M2-W2.md` 2.3 的原话）：
- * 4000px 宽的图往右挪 200px 与 6000px 宽的图往右挪 200px，观感完全不同；
- * 换算成「挪了画幅的 5%」两边才一致。
- *
- * 尺寸未知时返回 0（宁可不同步，也不要拿一个假的百分比去乱挪）。
- */
-export function panPercent(pan: { x: number; y: number }, size: Size): { x: number; y: number } {
-  return {
-    x: size.width > 0 ? pan.x / size.width : 0,
-    y: size.height > 0 ? pan.y / size.height : 0,
-  };
-}
+  const frames = photos.map((photo): CompareFrame<T> => {
+    const natural = photo.natural;
+    const known =
+      natural !== undefined && natural.width > 0 && natural.height > 0;
+    const crop =
+      aspect === null || !known
+        ? { x: 0, y: 0, width: 0, height: 0 }
+        : cropToAspect(natural, aspect);
+    // 扣取区正好铺满画框：画框宽 = 扣取宽 × base
+    const base = crop.width > 0 ? frame.width / crop.width : 0;
+    return {
+      photo,
+      crop,
+      image: {
+        width: (natural?.width ?? 0) * base,
+        height: (natural?.height ?? 0) * base,
+      },
+      // 扣取区居中在整幅图里，所以两边的偏移都是负的（图片比画框大）
+      imageOffset: { x: -crop.x * base, y: -crop.y * base },
+    };
+  });
 
-/** 位移还原：画幅的百分比 → 某个具体画幅的像素（`panPercent` 的反函数） */
-export function percentToPan(
-  percent: { x: number; y: number },
-  size: Size,
-): { x: number; y: number } {
-  return { x: percent.x * size.width, y: percent.y * size.height };
+  const baseline = frames[0];
+  const oneToOneRel =
+    baseline !== undefined && baseline.crop.width > 0 && frame.width > 0
+      ? baseline.crop.width / frame.width
+      : null;
+
+  return { frame, oneToOneRel, frames };
 }

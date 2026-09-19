@@ -23,6 +23,7 @@ import { createSignal, onCleanup, onMount, Show } from "solid-js";
 import type { ViewerStore } from "./store.ts";
 import { ViewerControls } from "./ViewerControls.tsx";
 import {
+  createWheelZoom,
   isViewerControlTarget,
   viewerControlsVisible,
 } from "./interaction.ts";
@@ -146,35 +147,18 @@ export function Viewer(props: ViewerProps) {
   /*
    * 滚轮：**按帧合并**。滚轮事件在高精度触控板上可以到 100+ Hz，
    * 每次都改状态 = 每帧重算多次变换；合并成「一帧一次」手感一样但开销固定。
+   * 实现与**对比视图共用**（`interaction.ts::createWheelZoom`）—— 两处的滚轮手感必须一致。
    */
-  let wheelDelta = 0;
-  let wheelAnchor: { x: number; y: number } | null = null;
-  let wheelFrame = 0;
-
-  function onWheel(event: WheelEvent): void {
-    event.preventDefault();
-    const rect = host?.getBoundingClientRect();
-    if (rect !== undefined) {
-      wheelAnchor = { x: event.clientX - rect.left, y: event.clientY - rect.top };
-    }
-    wheelDelta += event.deltaY;
-    if (wheelFrame !== 0) return;
-    wheelFrame = requestAnimationFrame(() => {
-      wheelFrame = 0;
-      const delta = wheelDelta;
-      const anchor = wheelAnchor;
-      wheelDelta = 0;
-      if (delta === 0) return;
-      // 指数映射：无论快慢滚，视觉上的缩放速度都一致
-      props.store.zoomBy(
-        Math.exp(-delta * 0.0015),
-        anchor === null ? undefined : anchor,
-      );
-    });
-  }
-  onCleanup(() => {
-    if (wheelFrame !== 0) cancelAnimationFrame(wheelFrame);
+  const wheel = createWheelZoom({
+    resolveAnchor: (event) => {
+      const rect = host?.getBoundingClientRect();
+      return rect === undefined
+        ? null
+        : { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    },
+    apply: (factor, anchor) => props.store.zoomBy(factor, anchor ?? undefined),
   });
+  onCleanup(wheel.dispose);
 
   /* 拖动平移：用指针捕获，拖出窗口也不丢事件 */
   let dragFrom: { x: number; y: number } | null = null;
@@ -221,7 +205,7 @@ export function Viewer(props: ViewerProps) {
         .filter(Boolean)
         .join(" ")}
       data-viewer="open"
-      onWheel={onWheel}
+      onWheel={wheel.onWheel}
       onPointerDown={onPointerDown}
       onPointerMove={(event) => {
         onPointerMove(event);
@@ -230,7 +214,11 @@ export function Viewer(props: ViewerProps) {
       onPointerLeave={() => setCursor(null)}
       onPointerUp={endDrag}
       onPointerCancel={endDrag}
-      onDblClick={() => props.store.toggleFit()}
+      onDblClick={(event) => {
+        // 双击落在缩放/返回按钮上时不当成「切换适配」—— 那两个按钮自己有点击行为
+        if (isViewerControlTarget(event.target)) return;
+        props.store.toggleFit();
+      }}
     >
       <Show when={props.store.imageUrl()}>
         {(url) => (

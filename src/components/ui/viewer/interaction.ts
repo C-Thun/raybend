@@ -18,6 +18,71 @@ export interface ViewerViewport {
   height: number;
 }
 
+/** 滚轮累计量 → 缩放倍数（> 1 放大）。指数映射：无论快慢滚，视觉上的缩放速度一致。 */
+export const WHEEL_ZOOM_RATE = 0.0015;
+
+/** 滚轮缩放因子（纯函数，好测）。 */
+export function wheelZoomFactor(deltaY: number): number {
+  return Math.exp(-deltaY * WHEEL_ZOOM_RATE);
+}
+
+export interface WheelZoomOptions {
+  /** 事件落点 → 缩放锚点（**视口内坐标**）；返回 `null` = 用视口中心 */
+  resolveAnchor?: (event: WheelEvent) => ViewerCursor | null;
+  /** **一帧一次**地收到倍数与最近一次的锚点（拿不到锚点就是 `null` = 视口中心） */
+  apply: (factor: number, anchor: ViewerCursor | null) => void;
+  /** 帧调度（单测注入用；默认 `requestAnimationFrame`） */
+  schedule?: (callback: () => void) => number;
+  /** 取消帧调度（与 `schedule` 配套；默认 `cancelAnimationFrame`） */
+  cancel?: (handle: number) => void;
+}
+
+/**
+ * 滚轮缩放：**按帧合并 + 指数映射**（单张看图与对比共用，行为必须一致）。
+ *
+ * 为什么要合并：高精度触控板的滚轮事件能到 100+ Hz，每次都改状态 = 每帧重算多次变换；
+ * 合并成「一帧一次」手感一样但开销固定。**停止时那一次也要发**（尾样本没丢：
+ * 累计量在下一帧照常兑现）。
+ */
+export function createWheelZoom(options: WheelZoomOptions): {
+  onWheel: (event: WheelEvent) => void;
+  dispose: () => void;
+} {
+  const schedule =
+    options.schedule ??
+    ((callback: () => void): number => requestAnimationFrame(callback));
+  const cancel =
+    options.cancel ?? ((handle: number): void => cancelAnimationFrame(handle));
+
+  let delta = 0;
+  let anchor: ViewerCursor | null = null;
+  let frame = 0;
+
+  return {
+    onWheel(event: WheelEvent): void {
+      event.preventDefault();
+      const resolved = options.resolveAnchor?.(event) ?? null;
+      // 锚点取**最近一次**能拿到的：一帧内多次滚动时，画面按最后一次落点缩放
+      if (resolved !== null) anchor = resolved;
+      delta += event.deltaY;
+      if (frame !== 0) return;
+      frame = schedule(() => {
+        frame = 0;
+        const total = delta;
+        const at = anchor;
+        delta = 0;
+        if (total === 0) return;
+        options.apply(wheelZoomFactor(total), at);
+      });
+    },
+    dispose(): void {
+      if (frame !== 0) cancel(frame);
+      frame = 0;
+      delta = 0;
+    },
+  };
+}
+
 /** 控件触发区：左上返回 120×120；右下覆盖整条缩放条及其周边。 */
 export const VIEWER_BACK_CORNER = 120;
 export const VIEWER_ZOOM_CORNER_X = 420;
@@ -30,6 +95,9 @@ export const VIEWER_ZOOM_CORNER_Y = 96;
  * 仍然会提供 `closest()`，可以与浏览器保持同一条判据。
  */
 export function isViewerControlTarget(target: EventTarget | null): boolean {
+  // SAFETY: 运行时只调 `closest`，所以只断言「可能带 closest 的对象」；
+  // 这与 `instanceof Element` 相比更宽（SVG 图标、测试里的假对象都能用），
+  // 而 `closest` 的类型检查由下面 `typeof === "function"` 自己兜住。
   const candidate = target as unknown as
     | { closest?: (selector: string) => unknown }
     | null;

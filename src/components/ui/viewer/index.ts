@@ -18,7 +18,6 @@ export { Viewer } from "./Viewer.tsx";
 export type { ViewerProps } from "./Viewer.tsx";
 export {
   clampPan,
-  clampFramePan,
   clampZoom,
   computeFitScale,
   createViewerStore,

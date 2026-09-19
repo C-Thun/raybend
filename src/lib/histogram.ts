@@ -11,9 +11,12 @@
  * 2. **点与点之间走直线**：重叠色带的上下边界若分别做三次插值，即便各自不过冲，
  *    也可能在两个采样点之间互相穿过，画出数据里没有的细线/尖刺；逐点折线严格经过
  *    后端采样值，不在采样点之间编造额外形状；
- * 3. **颜色分层**：三条通道曲线叠起来一共 7 种区域 —— 单通道（红/绿/蓝）、
+ * 3. **每个区域在每一列都有定义**（哪怕厚度是 0）：谁高谁低**逐列**都在变，
+ *    如果只在「自己当主角」的列上给值、其余列置 0，跨列连线就会**掉回基线** ——
+ *    那就是 2026-09-20 人类报的「像尖刺一样的边缘异常」（见 `histogramBands`）；
+ * 4. **颜色分层**：三条通道曲线叠起来一共 7 种区域 —— 单通道（红/绿/蓝）、
  *    两两重叠（黄/青/紫）、三色重叠（中间灰）。**不靠混合模式取色**，
- *    而是按「每列排序后分层」把 7 个区域**显式切开**，每层填自己的颜色：
+ *    而是把 7 个区域**显式切开**，每层填自己的颜色：
  *    混合模式（`screen`）在改用非纯色通道后混不出规定的黄/青/紫，
  *    显式分层则颜色就是令牌里那个色，改色只改令牌。
  */
@@ -111,18 +114,24 @@ export interface HistogramBands {
 }
 
 /**
- * 把三条通道曲线切成 7 个**互不重叠**的区域（每列按高度排序后切层）：
+ * 把三条通道曲线切成 7 个**互不重叠**的区域。
+ *
+ * 每一层都用「自己的边界曲线」表达，**处处有定义**（厚度可以为 0）：
  *
  * ```text
- *         ┌── 单通道（最高那条）        ← 它的色
- *         ├── 两两重叠（中间那条）      ← 那一对的色（黄/青/紫）
- *         └── 三色重叠（最低那条）      ← 中间灰
+ *         ┌── 单通道 = [max(另两个), 自己]      ← 自己不是最高时厚度 0（贴在 max 上）
+ *         ├── 两两重叠 = [min(自己, min(另两个)), min(另两个)]   ← 那一对里的低者最高时才厚
+ *         └── 三色重叠 = [0, min(三者的最小)]
  * ```
  *
- * 这样每一列的颜色构成与「加色叠加」的观感一致，但**颜色是我们指定的**，
- * 而不是交给 `mix-blend-screen` 去算（后者在通道色不是纯红绿蓝时，混不出规定的黄/青/紫）。
+ * 为什么不用「每列先排序、再把 low/mid/high 分给对应层」那种写法：那样只有
+ * 「本列的冠军」才有值，其余层是 0 —— 相邻两列的冠军一换，那条折线就从曲线上
+ * 直直落回基线，画出来就是一根**细尖刺**（人类 2026-09-20 报的异常）。
+ * 现在的写法两层边界都是连续曲线，冠军切换时只是厚度连续地变成 0，
+ * 不会编造出数据里没有的区域。
  *
- * 并列（两通道等高）时按固定顺序（r → g → b）打破平局，保证结果**可复现**。
+ * 颜色语义仍然是「加色叠加」：黄 = 红+绿（b 最低时那一对）、青 = 绿+蓝、紫 = 红+蓝；
+ * 三色重叠 = 中间灰。并列（两通道等高）时厚度自然是 0，不靠“平局规则”去指定颜色。
  */
 export function histogramBands(
   r: readonly number[],
@@ -147,38 +156,35 @@ export function histogramBands(
   const clamp01 = (value: number): number =>
     Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0;
 
-  for (let index = 0; index < samples; index += 1) {
-    // 排序（并列时按 r → g → b 的固定顺序，结果可复现）
-    const triple: [number, string][] = [
-      [clamp01(r[index] ?? 0), "r"],
-      [clamp01(g[index] ?? 0), "g"],
-      [clamp01(b[index] ?? 0), "b"],
-    ];
-    triple.sort((left, right) => left[0] - right[0] || left[1].localeCompare(right[1]));
-    const [low, mid, high] = triple;
+  /** 把一条带子写进两层数组（`bottom ≤ top` 由调用方保证） */
+  const set = (target: HistogramBand, index: number, bottom: number, top: number): void => {
+    target.bottom[index] = bottom;
+    target.top[index] = top;
+  };
 
-    // 三色重叠：0 → 最低那条
-    layers.rgb.bottom[index] = 0;
-    layers.rgb.top[index] = low[0];
+  for (let index = 0; index < samples; index += 1) {
+    const rv = clamp01(r[index] ?? 0);
+    const gv = clamp01(g[index] ?? 0);
+    const bv = clamp01(b[index] ?? 0);
+
+    // 三色重叠：0 → 三者最小（最低那条包络，本来就连续）
+    set(layers.rgb, index, 0, Math.min(rv, gv, bv));
 
     /*
-     * 两两重叠：最低 → 中间那条。
-     * 哪一对「重叠」取决于**哪两个通道不是最低的** —— 所以用「最低的那个」反推：
-     * 最低是 r ⇒ 另外两个是 g+b；最低是 g ⇒ r+b；最低是 b ⇒ r+g。
+     * 单通道：另一个更大的那个 → 自己。
+     * 自己不是最高时 `max(另两个) ≥ 自己` ⇒ 被夹到 0 厚度、贴在自己这条曲线上。
      */
-    const pairBand =
-      low[1] === "r"
-        ? layers.gb
-        : low[1] === "g"
-          ? layers.rb
-          : layers.rg;
-    pairBand.bottom[index] = low[0];
-    pairBand.top[index] = mid[0];
+    set(layers.r, index, Math.min(rv, Math.max(gv, bv)), rv);
+    set(layers.g, index, Math.min(gv, Math.max(rv, bv)), gv);
+    set(layers.b, index, Math.min(bv, Math.max(rv, gv)), bv);
 
-    // 单通道：中间 → 最高那条
-    const singleBand = high[1] === "r" ? layers.r : high[1] === "g" ? layers.g : layers.b;
-    singleBand.bottom[index] = mid[0];
-    singleBand.top[index] = high[0];
+    /*
+     * 两两重叠：黄 = 红+绿（只在 b 最低时出现）⇒ [min(b, min(r,g)), min(r,g)]。
+     * 其余情况厚度 0：贴着 `min(r,g)`，而不是贴着基线。
+     */
+    set(layers.rg, index, Math.min(bv, Math.min(rv, gv)), Math.min(rv, gv));
+    set(layers.gb, index, Math.min(rv, Math.min(gv, bv)), Math.min(gv, bv));
+    set(layers.rb, index, Math.min(gv, Math.min(rv, bv)), Math.min(rv, bv));
   }
 
   return layers;

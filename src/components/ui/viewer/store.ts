@@ -33,6 +33,13 @@
  * * 交互（滚轮、拖动、双击、快捷键）只表达**意图**（我要放大到 200%、我要适配窗口），
  *   换算全部落在这里的纯函数里（它们都有单测）。
  *
+ * **一个例外：对比态**（`CompareView.tsx`，2026-09-20 定）。对比里「倍率」的单位是
+ * **相对画框的倍数**而不是原图像素（各图像素尺寸本就不同，只有一个共同的画框），
+ * 每个栏区还是**独立的窗口**（一个窗口，没有「看得到哪一块」这种单值）。
+ * 所以对比的 `rel` / `pan` 住在 `CompareView` 里；它仍然只调这里的纯函数
+ * （`clampPan` / `zoomPanAt` / `MIN_ZOOM` / `MAX_ZOOM`），数学没有第二套。
+ * 对比时右栏的视野框不画（它描述的是单张看图那个窗口）。
+ *
  * 将来接 Rust 原生视口（M2-W3 的 wgpu 直绘）时：**状态搬去 Rust 独有**
  * （`AGENTS.md` §6.1 的接口纪律），前端这份退化成一份镜像；
  * 那时这个 store 的函数就是「前端镜像」的更新器，`visibleRect()` 这类纯函数
@@ -190,10 +197,18 @@ export function zoomPanAt(args: {
 }
 
 /**
- * 平移量夹取：图比视口大时不许拖出边界（边永远在视口外）；
- * 图比视口小时**锁在中间**（不给拖，免得用户以为图丢了）。
+ * 平移量夹取：内容比视口大时不许拖出边界（边永远在视口外）；
+ * 内容比视口小时**锁在中间**（不给拖，免得用户以为图丢了）。
  *
- * ⚠️ **原图尺寸未知时不夹取**（2026-09-17 修）：`natural` 是 0 时，
+ * 「内容」= **已经乘好倍率的显示尺寸**，两种调用方共用这一条规则：
+ *
+ * * 单张看图：`原图尺寸 × zoom`；
+ * * 对比：`画框尺寸 × 相对倍数`（每个栏区是窗口，见 `lib/viewer-compare.ts`）。
+ *
+ * 收「乘好的尺寸」而不是「原图 + 倍率」，是因为对比那边的倍率是**相对画框**的，
+ * 不存在一个公共的「原图 × 倍率」——把这一步换算留在调用方，夹取规则就只有这一份。
+ *
+ * ⚠️ **内容尺寸未知时不夹取**（2026-09-17 修）：内容是 0 时，
  * 上面两条规则算出来的上限都是 0 —— 于是**任何缩放下都拖不动**。
  * 这正是「RAW 双击点开后鼠标拖不动」的机制：RAW 的尺寸以前读不到（EXIF 读不了
  * RW2 那种魔数，见 `crates/raybend/src/media/tiff.rs`），`natural` 就一直是 0。
@@ -202,42 +217,25 @@ export function zoomPanAt(args: {
  */
 export function clampPan(args: {
   pan: { x: number; y: number };
-  zoom: number;
+  /** 内容盒的显示尺寸（原图 × 倍率 / 画框 × 相对倍数） */
+  content: NaturalSize;
   viewport: ViewportSize;
-  natural: NaturalSize;
 }): { x: number; y: number } {
-  const { pan, zoom, viewport, natural } = args;
-  if (natural.width <= 0 || natural.height <= 0) {
+  const { pan, content, viewport } = args;
+  if (content.width <= 0 || content.height <= 0) {
     // 尺寸未知：不猜边界，原样放行（拖动至少是可用的）
     return { x: pan.x, y: pan.y };
   }
   const limit = (scaled: number, available: number): number =>
     Math.max(0, (scaled - available) / 2);
-  const maxX = limit(natural.width * zoom, viewport.width);
-  const maxY = limit(natural.height * zoom, viewport.height);
+  const maxX = limit(content.width, viewport.width);
+  const maxY = limit(content.height, viewport.height);
+  // 上限为 0 时直接给 0：否则 `Math.max(-0, x)` 会把 `-0` 传出去（快照/断言里很烦人）
+  const clamp = (value: number, max: number): number =>
+    max === 0 ? 0 : Math.min(max, Math.max(-max, value));
   return {
-    x: Math.min(maxX, Math.max(-maxX, pan.x)),
-    y: Math.min(maxY, Math.max(-maxY, pan.y)),
-  };
-}
-
-/**
- * 已经用 CSS 铺满等比例画框的图片，按「相对适配倍率」夹取平移。
- * scale=1 时没有可拖空间；放大后可拖范围就是画框溢出量的一半。
- */
-export function clampFramePan(args: {
-  pan: { x: number; y: number };
-  scale: number;
-  viewport: ViewportSize;
-}): { x: number; y: number } {
-  const scale = Number.isFinite(args.scale) ? Math.max(1, args.scale) : 1;
-  const maxX = Math.max(0, (args.viewport.width * (scale - 1)) / 2);
-  const maxY = Math.max(0, (args.viewport.height * (scale - 1)) / 2);
-  const clamp = (value: number, limit: number): number =>
-    limit === 0 ? 0 : Math.min(limit, Math.max(-limit, value));
-  return {
-    x: clamp(args.pan.x, maxX),
-    y: clamp(args.pan.y, maxY),
+    x: clamp(pan.x, maxX),
+    y: clamp(pan.y, maxY),
   };
 }
 
@@ -272,11 +270,6 @@ export interface ViewerStore {
   zoomBy: (factor: number, anchor?: { x: number; y: number }) => void;
   zoomTo: (zoom: number, anchor?: { x: number; y: number }) => void;
   panBy: (dx: number, dy: number) => void;
-  /** 对比画框用：倍率以适配值为基准，平移按画框 CSS 像素夹取。 */
-  zoomWithinFrame: (factor: number, viewport: ViewportSize, fitZoom: number) => void;
-  panWithinFrame: (dx: number, dy: number, viewport: ViewportSize, fitZoom: number) => void;
-  /** 把给定倍率定为当前视图的「适配」，同时把平移归零。 */
-  resetFit: (zoom?: number) => void;
   toggleFit: () => void;
 }
 
@@ -536,9 +529,8 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
         zoom,
         pan: clampPan({
           pan: prev.pan,
-          zoom,
+          content: { width: size.width * zoom, height: size.height * zoom },
           viewport: next.viewport,
-          natural: size,
         }),
       };
     });
@@ -560,9 +552,11 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
             viewport: prev.viewport,
             ...(anchor === undefined ? {} : { anchor }),
           }),
-          zoom,
+          content: {
+            width: prev.natural.width * zoom,
+            height: prev.natural.height * zoom,
+          },
           viewport: prev.viewport,
-          natural: prev.natural,
         }),
       };
     });
@@ -573,59 +567,12 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
       ...prev,
       pan: clampPan({
         pan: { x: prev.pan.x + dx, y: prev.pan.y + dy },
-        zoom: prev.zoom,
+        content: {
+          width: prev.natural.width * prev.zoom,
+          height: prev.natural.height * prev.zoom,
+        },
         viewport: prev.viewport,
-        natural: prev.natural,
       }),
-    }));
-  }
-
-  function panWithinFrame(
-    dx: number,
-    dy: number,
-    viewport: ViewportSize,
-    fitZoom: number,
-  ): void {
-    setState((prev) => {
-      const pan = clampFramePan({
-        pan: { x: prev.pan.x + dx, y: prev.pan.y + dy },
-        scale: fitZoom > 0 ? prev.zoom / fitZoom : 1,
-        viewport,
-      });
-      if (pan.x === prev.pan.x && pan.y === prev.pan.y) return prev;
-      return { ...prev, pan };
-    });
-  }
-
-  function zoomWithinFrame(
-    factor: number,
-    viewport: ViewportSize,
-    fitZoom: number,
-  ): void {
-    if (!Number.isFinite(factor) || factor <= 0 || !(fitZoom > 0)) return;
-    setState((prev) => {
-      // 对比画框的最小倍率就是「适配」；再缩小只会露出无意义的空边。
-      const zoom = clampZoom(Math.max(fitZoom, prev.zoom * factor));
-      const ratio = prev.zoom > 0 ? zoom / prev.zoom : 1;
-      return {
-        ...prev,
-        zoom,
-        fit: zoom === fitZoom,
-        pan: clampFramePan({
-          pan: { x: prev.pan.x * ratio, y: prev.pan.y * ratio },
-          scale: zoom / fitZoom,
-          viewport,
-        }),
-      };
-    });
-  }
-
-  function resetFit(zoom?: number): void {
-    setState((prev) => ({
-      ...prev,
-      fit: true,
-      zoom: clampZoom(zoom ?? computeFitScale(prev.viewport, prev.natural)),
-      pan: { x: 0, y: 0 },
     }));
   }
 
@@ -660,9 +607,6 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
     zoomBy: (factor, anchor) => applyZoom(state().zoom * factor, anchor),
     zoomTo: (zoom, anchor) => applyZoom(zoom, anchor),
     panBy,
-    zoomWithinFrame,
-    panWithinFrame,
-    resetFit,
     toggleFit,
   };
 }

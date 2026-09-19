@@ -1,9 +1,9 @@
 /**
  * 对比态数学的测试。
  *
- * 这些数字**必须钉死**：画幅不一致时的扣取、位移的百分比换算，错一点的表现是
- * 「一边拖一边两边错位」——人眼立刻看得出来，但很难反推出是哪一步算错了。
- * 人类点名的例子（4:3 与 3:2 混）单独一条。
+ * 这些数字**必须钉死**：画幅不一致时的扣取、画框与窗口的关系，错一点的表现是
+ * 「一边拖一边两边错位」或者「图片被挤在画框里、填不满窗口」——
+ * 人眼立刻看得出来，但很难反推出是哪一步算错了。人类点名的例子（4:3 与 3:2 混）单独一条。
  */
 
 import assert from "node:assert/strict";
@@ -11,13 +11,11 @@ import test from "node:test";
 import {
   baselineAspect,
   COMPARE_MAX,
-  compareFrames,
+  compareGeometry,
   compareIds,
   compareLayout,
   cropToAspect,
   fitAspectWithin,
-  panPercent,
-  percentToPan,
 } from "./viewer-compare.ts";
 import type { ComparablePhoto } from "./viewer-compare.ts";
 
@@ -232,8 +230,15 @@ test("cropToAspect：尺寸或比例非法时原样返回，不猜", () => {
 
 // ─────────────────── 整组：人类点名的例子 ───────────────────
 
-test("compareFrames：4:3 打头、后面 3:2 → 后面的被扣成 4:3（居中）", () => {
-  const frames = compareFrames([photo("a", 4000, 3000), photo("b", 6000, 4000)]);
+/** 一个竖着的栏区（2 张一排时很常见）：画框会被宽度限住、上下留白 */
+const PANE = { width: 600, height: 800 };
+
+test("compareGeometry：4:3 打头、后面 3:2 → 后面的被扣成 4:3（居中）", () => {
+  const { frame, frames } = compareGeometry(
+    [photo("a", 4000, 3000), photo("b", 6000, 4000)],
+    PANE,
+  );
+  assert.deepEqual(frame, { width: 600, height: 450 }, "画框 = 基准 4:3 在栏区里 contain");
   assert.equal(frames.length, 2);
   const [first, second] = frames;
   assert.deepEqual(first!.crop, { x: 0, y: 0, width: 4000, height: 3000 }, "第一幅是基准，整张");
@@ -244,8 +249,43 @@ test("compareFrames：4:3 打头、后面 3:2 → 后面的被扣成 4:3（居�
   assert.equal(second!.crop.y, 0);
 });
 
-test("compareFrames：比例全都一样时谁都不扣", () => {
-  const frames = compareFrames([photo("a", 6000, 4000), photo("b", 3000, 2000), photo("c", 900, 600)]);
+test("compareGeometry：扣取区正好铺满画框（两幅都在画框里重合）", () => {
+  const { frame, frames } = compareGeometry(
+    [photo("a", 4000, 3000), photo("b", 6000, 4000)],
+    PANE,
+  );
+  for (const frameItem of frames) {
+    const base = frameItem.crop.width > 0 ? frame.width / frameItem.crop.width : 0;
+    assert.equal(frameItem.crop.x * base + frameItem.imageOffset.x, 0, "扣取区左沿贴画框左沿");
+    assert.equal(frameItem.crop.y * base + frameItem.imageOffset.y, 0, "扣取区上沿贴画框上沿");
+    assert.ok(Math.abs(frameItem.crop.width * base - frame.width) < 1e-9);
+    assert.ok(Math.abs(frameItem.crop.height * base - frame.height) < 1e-9);
+  }
+  // 第二幅（3:2 原图）比画框宽：图片左右两侧被画框裁掉，偏移是负的
+  assert.ok(Math.abs(frames[1]!.image.width - frame.width * 1.125) < 1e-9);
+  assert.ok(frames[1]!.imageOffset.x < 0);
+  assert.equal(frames[1]!.image.height, frame.height, "高度方向正好等于画框（扣的是上下两侧）");
+});
+
+test("compareGeometry：画框永远不超过栏区（窗口），比例不变形", () => {
+  const wide = compareGeometry([photo("a", 4000, 3000)], { width: 1000, height: 300 });
+  assert.deepEqual(wide.frame, { width: 400, height: 300 }, "高度限住时按高度算宽");
+  const tall = compareGeometry([photo("a", 4000, 3000)], { width: 200, height: 900 });
+  assert.deepEqual(tall.frame, { width: 200, height: 150 }, "宽度限住时按宽度算高");
+});
+
+test("compareGeometry：oneToOneRel 是「基准图 1:1」需要的相对倍数", () => {
+  const { frame, oneToOneRel } = compareGeometry([photo("a", 4000, 3000)], PANE);
+  // 画框 600×450 装的是 4000×3000 的图 ⇒ 适配倍率 0.15 ⇒ 要放大 1/0.15 才是 1:1
+  assert.ok(Math.abs(frame.width * (oneToOneRel ?? 0) - 4000) < 1e-9);
+  assert.ok(Math.abs(oneToOneRel! - 4000 / 600) < 1e-9);
+});
+
+test("compareGeometry：比例全都一样时谁都不扣", () => {
+  const { frames } = compareGeometry(
+    [photo("a", 6000, 4000), photo("b", 3000, 2000), photo("c", 900, 600)],
+    PANE,
+  );
   for (const frame of frames) {
     assert.equal(frame.crop.x, 0);
     assert.equal(frame.crop.y, 0);
@@ -254,31 +294,31 @@ test("compareFrames：比例全都一样时谁都不扣", () => {
   }
 });
 
-test("compareFrames：尺寸未知的那一帧不参与扣取（退回整张/零）", () => {
-  const frames = compareFrames([photo("a", 4000, 3000), photo("b")]);
+test("compareGeometry：尺寸未知的那一帧不参与扣取（退回整张/零）", () => {
+  const { frames } = compareGeometry([photo("a", 4000, 3000), photo("b")], PANE);
+  assert.deepEqual(frames[1]!.crop, { x: 0, y: 0, width: 0, height: 0 });
+  assert.deepEqual(frames[1]!.image, { width: 0, height: 0 });
+});
+
+test("compareGeometry：第一幅尺寸未知时整体退回零（不编比例）", () => {
+  const { frame, oneToOneRel, frames } = compareGeometry([photo("a"), photo("b", 6000, 4000)], PANE);
+  assert.deepEqual(frame, { width: 0, height: 0 });
+  assert.equal(oneToOneRel, null);
   assert.deepEqual(frames[1]!.crop, { x: 0, y: 0, width: 0, height: 0 });
 });
 
-test("compareFrames：空列表给空数组", () => {
-  assert.deepEqual(compareFrames([]), []);
+test("compareGeometry：空列表与零尺寸栏区都不炸", () => {
+  assert.deepEqual(compareGeometry([], PANE).frames, []);
+  assert.equal(compareGeometry([], PANE).oneToOneRel, null);
+  const zero = compareGeometry([photo("a", 4000, 3000)], { width: 0, height: 0 });
+  assert.deepEqual(zero.frame, { width: 0, height: 0 });
+  assert.equal(zero.oneToOneRel, null);
 });
 
-// ─────────────────── 位移的百分比换算 ───────────────────
-
-test("panPercent / percentToPan：互为反函数", () => {
-  const size = { width: 4000, height: 3000 };
-  const percent = panPercent({ x: 200, y: -150 }, size);
-  assert.deepEqual(percent, { x: 0.05, y: -0.05 });
-  assert.deepEqual(percentToPan(percent, size), { x: 200, y: -150 });
-});
-
-test("panPercent：同一百分比在两幅不同尺寸上给出不同像素（这正是要的效果）", () => {
-  const percent = { x: 0.05, y: 0.05 };
-  assert.deepEqual(percentToPan(percent, { width: 4000, height: 3000 }), { x: 200, y: 150 });
-  assert.deepEqual(percentToPan(percent, { width: 6000, height: 4000 }), { x: 300, y: 200 });
-});
-
-test("panPercent：尺寸未知时不编百分比（返回 0）", () => {
-  assert.deepEqual(panPercent({ x: 200, y: 200 }, { width: 0, height: 0 }), { x: 0, y: 0 });
-  assert.deepEqual(percentToPan({ x: 0.5, y: 0.5 }, { width: 0, height: 0 }), { x: 0, y: 0 });
+test("compareGeometry：竖向照片配横基准也能扣（扣上下）", () => {
+  const { frames } = compareGeometry([photo("a", 4000, 3000), photo("b", 3000, 4000)], PANE);
+  assert.equal(frames[1]!.crop.width, 3000);
+  assert.equal(frames[1]!.crop.height, 2250);
+  assert.ok(frames[1]!.crop.y > 0);
+  assert.ok(frames[1]!.imageOffset.y < 0, "图片比画框高 ⇒ 上沿在画框外面");
 });

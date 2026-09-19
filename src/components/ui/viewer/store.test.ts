@@ -9,7 +9,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   clampPan,
-  clampFramePan,
   clampZoom,
   computeFitScale,
   createViewerStore,
@@ -102,53 +101,60 @@ test("zoomPanAt：锚点下的那一点**不动**（滚轮缩放的关键性质�
   assert.ok(Math.abs(screen.y - anchor.y) < 1e-9, `y 漂了：${screen.y}`);
 });
 
-test("clampPan：**原图尺寸未知时不夹取**（RAW 双击点开后拖不动的根因）", () => {
+test("clampPan：**内容尺寸未知时不夹取**（RAW 双击点开后拖不动的根因）", () => {
   /*
-   * `natural` 是 0 时，原来的公式算出的上限是 0 —— 任何缩放下都拖不动。
+   * 内容是 0 时，原来的公式算出的上限是 0 —— 任何缩放下都拖不动。
    * RAW 的尺寸以前读不到（EXIF 读不了 RW2 的魔数），于是「双击点开 RAW 拖不动」。
    * 判据：尺寸未知时**原样放行**（不知道边界不等于不许移动）。
    */
   const viewport = { width: 1200, height: 800 };
-  const unknown = { width: 0, height: 0 };
   assert.deepEqual(
-    clampPan({ pan: { x: 500, y: -300 }, zoom: 2, viewport, natural: unknown }),
+    clampPan({ pan: { x: 500, y: -300 }, content: { width: 0, height: 0 }, viewport }),
     { x: 500, y: -300 },
   );
   // 只有一个方向未知时也不夹（不能只修一半）
   assert.deepEqual(
     clampPan({
       pan: { x: 250, y: 120 },
-      zoom: 1,
+      content: { width: 0, height: 3000 },
       viewport,
-      natural: { width: 0, height: 3000 },
     }),
     { x: 250, y: 120 },
   );
 });
 
-test("clampPan：图比视口大 → 边不许拖进来；比视口小 → 锁在中间", () => {
+test("clampPan：内容比视口大 → 边不许拖进来；比视口小 → 锁在中间", () => {
   const viewport = { width: 800, height: 600 };
-  const natural = { width: 1000, height: 800 };
 
-  // 2 倍：可拖范围 = (2000−800)/2 = 600
-  const big = clampPan({ pan: { x: 5000, y: -5000 }, zoom: 2, viewport, natural });
+  // 内容 2000×1600：可拖范围 = (2000−800)/2 = 600
+  const big = clampPan({
+    pan: { x: 5000, y: -5000 },
+    content: { width: 2000, height: 1600 },
+    viewport,
+  });
   assert.equal(big.x, 600, "超出右边界 → 停在 +limit");
   assert.equal(big.y, -500, "超出上边界 → 停在 −limit（(1600−600)/2 = 500）");
 
-  // 0.5 倍：图比视口小 → 只能居中
-  const small = clampPan({ pan: { x: 120, y: 80 }, zoom: 0.5, viewport, natural });
+  // 内容比视口小 → 只能居中
+  const small = clampPan({
+    pan: { x: 120, y: 80 },
+    content: { width: 500, height: 400 },
+    viewport,
+  });
   assert.deepEqual(small, { x: 0, y: 0 });
 });
 
-test("clampFramePan：对比适配时锁中间，放大后按画框溢出量夹取", () => {
+test("clampPan：对比的画框也走同一条规则（画框 × 相对倍数 = 内容）", () => {
   const viewport = { width: 600, height: 400 };
+  // 适配（内容 = 画框 600×300）：高度方向没得拖，宽度方向也没溢出
   assert.deepEqual(
-    clampFramePan({ pan: { x: 80, y: -50 }, scale: 1, viewport }),
+    clampPan({ pan: { x: 80, y: -50 }, content: { width: 600, height: 300 }, viewport }),
     { x: 0, y: 0 },
   );
+  // 放到 1.5 倍（内容 900×450）：x 上限 (900−600)/2 = 150，y 上限 (450−400)/2 = 25
   assert.deepEqual(
-    clampFramePan({ pan: { x: 500, y: -500 }, scale: 1.5, viewport }),
-    { x: 150, y: -100 },
+    clampPan({ pan: { x: 500, y: -500 }, content: { width: 900, height: 450 }, viewport }),
+    { x: 150, y: -25 },
   );
 });
 
@@ -297,26 +303,6 @@ test("focus：对比画幅切焦点时保留缩放与平移，只更新当前照
   assert.deepEqual(store.state().pan, before.pan);
   assert.equal(store.state().fit, before.fit);
   assert.deepEqual(store.state().natural, { width: 6000, height: 4000 });
-});
-
-test("对比变换：拖动是 CSS 像素一比一，缩放后按画框边界夹取", () => {
-  const fake = fakeDeps();
-  const store = createViewerStore(fake.deps);
-  store.show(PHOTOS, 0);
-  store.resetFit(0.5);
-  const frame = { width: 600, height: 400 };
-
-  store.zoomWithinFrame(2, frame, 0.5);
-  store.panWithinFrame(80, -60, frame, 0.5);
-  assert.deepEqual(store.state().pan, { x: 80, y: -60 }, "鼠标位移多少，画面就位移多少");
-
-  store.panWithinFrame(10_000, -10_000, frame, 0.5);
-  assert.deepEqual(store.state().pan, { x: 300, y: -200 }, "2× 时最多拖到一半画框宽高");
-
-  store.zoomWithinFrame(0.01, frame, 0.5);
-  assert.equal(store.state().zoom, 0.5, "不能缩到适配倍率以下露出空边");
-  assert.equal(store.state().fit, true);
-  assert.deepEqual(store.state().pan, { x: 0, y: 0 });
 });
 
 test("多图 URL：每幅照片持有自己的 URL，关闭时全部回收", async () => {

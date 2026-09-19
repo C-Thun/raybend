@@ -1924,6 +1924,223 @@ try {
   }
 
   /*
+   * 对比：**栏区是窗口**（人类 2026-09-20 纠正）。
+   *
+   * 要守住的三件事：
+   *   1. 图片**不被拉伸**（画框比例 = 基准比例，且与栏区比例无关）；
+   *   2. 放大后内容**能铺满整个栏区**（从前把画框当裁剪边界，图片永远关在自己那个小盒子里）；
+   *   3. **双击在「适配 ↔ 100%」之间切**，且双击落在栏区里（不是只认窗口中央）。
+   *
+   * 量法：栏区（`[data-compare-frame]`）与画框（`[data-compare-canvas]`）分别取矩形。
+   * 适配时画框 ≤ 栏区且居中；放大后画框必须**超出**栏区至少一个方向（否则就还是被关着）。
+   */
+  const compareWindow = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const pane = document.querySelector('[data-compare-frame="0"]');
+      const canvas = pane?.querySelector("[data-compare-canvas]");
+      const paneRect = pane?.getBoundingClientRect();
+      const canvasRect = canvas?.getBoundingClientRect();
+      const clip = pane ? getComputedStyle(pane).overflow : null;
+      return {
+        pane: paneRect ? { width: paneRect.width, height: paneRect.height } : null,
+        canvas: canvasRect ? { width: canvasRect.width, height: canvasRect.height } : null,
+        clip,
+      };
+    })()`,
+    returnByValue: true,
+  });
+  const fitWindow = compareWindow.result?.value ?? {};
+  if (fitWindow.clip !== "hidden") {
+    problems.push(`栏区必须是可见边界（overflow: hidden），实测 ${JSON.stringify(fitWindow.clip)}`);
+  }
+  if (
+    fitWindow.pane === null ||
+    fitWindow.canvas === null ||
+    fitWindow.canvas.width > fitWindow.pane.width + 0.5 ||
+    fitWindow.canvas.height > fitWindow.pane.height + 0.5
+  ) {
+    problems.push(`适配时画框应当落在栏区之内（实测 ${JSON.stringify(fitWindow)}）`);
+  }
+
+  /* 双击栏区 → 100%（基准那幅原图 1:1）：画框必须大到溢出栏区 */
+  await send("Runtime.evaluate", {
+    expression: `(() => {
+      const pane = document.querySelector('[data-compare-frame="0"]');
+      pane?.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true }));
+      return Boolean(pane);
+    })()`,
+    returnByValue: true,
+  });
+  await sleep(300);
+  const zoomed = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const pane = document.querySelector('[data-compare-frame="0"]');
+      const canvas = pane?.querySelector("[data-compare-canvas]");
+      const paneRect = pane?.getBoundingClientRect();
+      const canvasRect = canvas?.getBoundingClientRect();
+      const zoomLabel = document.querySelector('[data-viewer-controls="zoom"] button:nth-child(2)')?.textContent?.trim() ?? null;
+      return {
+        pane: paneRect ? { width: paneRect.width, height: paneRect.height } : null,
+        canvas: canvasRect ? { width: canvasRect.width, height: canvasRect.height } : null,
+        zoomLabel,
+      };
+    })()`,
+    returnByValue: true,
+  });
+  const zoomState = zoomed.result?.value ?? {};
+  if (
+    zoomState.canvas === null ||
+    zoomState.pane === null ||
+    (zoomState.canvas.width <= zoomState.pane.width + 0.5 &&
+      zoomState.canvas.height <= zoomState.pane.height + 0.5)
+  ) {
+    problems.push(
+      `双击后应当回到 100%（画框溢出栏区、可铺满整格），实测 ${JSON.stringify(zoomState)}`,
+    );
+  }
+  if (!String(zoomState.zoomLabel ?? "").includes("100%")) {
+    problems.push(`双击后读数应当是 100%（实测 ${JSON.stringify(zoomState.zoomLabel)}）`);
+  }
+
+  /* 再双击一次 → 回到适配（画框重新落回栏区内，读数变成「适配」） */
+  await send("Runtime.evaluate", {
+    expression: `(() => {
+      const pane = document.querySelector('[data-compare-frame="0"]');
+      pane?.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true }));
+      return Boolean(pane);
+    })()`,
+    returnByValue: true,
+  });
+  await sleep(300);
+  const refitted = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const pane = document.querySelector('[data-compare-frame="0"]');
+      const canvas = pane?.querySelector("[data-compare-canvas]");
+      const paneRect = pane?.getBoundingClientRect();
+      const canvasRect = canvas?.getBoundingClientRect();
+      const zoomLabel = document.querySelector('[data-viewer-controls="zoom"] button:nth-child(2)')?.textContent?.trim() ?? null;
+      return {
+        inside:
+          paneRect && canvasRect
+            ? canvasRect.width <= paneRect.width + 0.5 &&
+              canvasRect.height <= paneRect.height + 0.5
+            : null,
+        zoomLabel,
+      };
+    })()`,
+    returnByValue: true,
+  });
+  const refitState = refitted.result?.value ?? {};
+  if (refitState.inside !== true) {
+    problems.push(`再双击一次应当回到适配（画框落回栏区内），实测 ${JSON.stringify(refitState)}`);
+  }
+
+  /*
+   * 拖动：**鼠标走多少，画面就走多少**（人类 2026-09-20 点名的那条）。
+   *
+   * 真鼠标事件（`Input.dispatchMouseEvent`）而不是合成 DOM 事件 —— 后者没有 pointerId、
+   * 也走不了 pointer capture，正好也把「拖动这条路真的通」一起验了。
+   * 放大到 100% 之后拖：内容盒比栏区大，所以位移应当原样跟手（不被夹取吃掉）。
+   */
+  await send("Runtime.evaluate", {
+    expression: `(() => {
+      const pane = document.querySelector('[data-compare-frame="0"]');
+      pane?.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true }));
+      return Boolean(pane);
+    })()`,
+    returnByValue: true,
+  });
+  await sleep(300);
+  const dragStart = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const pane = document.querySelector('[data-compare-frame="0"]');
+      const rect = pane?.getBoundingClientRect();
+      const canvas = pane?.querySelector("[data-compare-canvas]");
+      const canvasRect = canvas?.getBoundingClientRect();
+      const matrix = canvas ? new DOMMatrixReadOnly(getComputedStyle(canvas).transform) : null;
+      return rect && canvasRect && matrix
+        ? {
+            x: rect.left + rect.width / 2,
+            y: rect.top + rect.height / 2,
+            before: { width: canvasRect.width, height: canvasRect.height, x: matrix.e, y: matrix.f },
+          }
+        : null;
+    })()`,
+    returnByValue: true,
+  });
+  const dragFrom = dragStart.result?.value ?? null;
+  if (dragFrom === null) {
+    problems.push("量不到对比画框的变换，拖动这条没法验");
+  } else {
+    const dx = 60;
+    const dy = -40;
+    await send("Input.dispatchMouseEvent", {
+      type: "mousePressed",
+      button: "left",
+      buttons: 1,
+      clickCount: 1,
+      x: Math.round(dragFrom.x),
+      y: Math.round(dragFrom.y),
+    });
+    await send("Input.dispatchMouseEvent", {
+      type: "mouseMoved",
+      button: "left",
+      buttons: 1,
+      x: Math.round(dragFrom.x + dx),
+      y: Math.round(dragFrom.y + dy),
+    });
+    await sleep(120);
+    const dragMoved = await send("Runtime.evaluate", {
+      expression: `(() => {
+        const canvas = document.querySelector('[data-compare-frame="0"] [data-compare-canvas]');
+        const matrix = canvas ? new DOMMatrixReadOnly(getComputedStyle(canvas).transform) : null;
+        const rect = canvas?.getBoundingClientRect();
+        return matrix && rect ? { width: rect.width, height: rect.height, x: matrix.e, y: matrix.f } : null;
+      })()`,
+      returnByValue: true,
+    });
+    await send("Input.dispatchMouseEvent", {
+      type: "mouseReleased",
+      button: "left",
+      buttons: 0,
+      clickCount: 1,
+      x: Math.round(dragFrom.x + dx),
+      y: Math.round(dragFrom.y + dy),
+    });
+    const moved = dragMoved.result?.value ?? null;
+    if (moved === null) {
+      problems.push("拖动后量不到画框变换");
+    } else {
+      // 倍数没变（拖动不缩放），位移应当就是鼠标位移（容差 1px 给取整）
+      if (Math.abs(moved.width - dragFrom.before.width) > 1) {
+        problems.push(
+          `拖动不该改变倍率（拖前 ${JSON.stringify(dragFrom.before.width)}，拖后 ${JSON.stringify(moved.width)}）`,
+        );
+      }
+      if (Math.abs(moved.x - dragFrom.before.x - dx) > 1.5) {
+        problems.push(
+          `拖动位移应当跟手：鼠标走 ${dx}px，实际画面走了 ${JSON.stringify(moved.x - dragFrom.before.x)}px`,
+        );
+      }
+      if (Math.abs(moved.y - dragFrom.before.y - dy) > 1.5) {
+        problems.push(
+          `拖动位移应当跟手：鼠标走 ${dy}px，实际画面走了 ${JSON.stringify(moved.y - dragFrom.before.y)}px`,
+        );
+      }
+    }
+    // 拖完回到适配，后面的控件检查从干净状态开始
+    await send("Runtime.evaluate", {
+      expression: `(() => {
+        const pane = document.querySelector('[data-compare-frame="0"]');
+        pane?.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true }));
+        return Boolean(pane);
+      })()`,
+      returnByValue: true,
+    });
+    await sleep(200);
+  }
+
+  /*
    * 对比态的那**一组**控件（人类 2026-09-19：整个对比区只有一组「左上返回 + 右下缩放」，
    * 不是每幅画幅各来一组）。顺带守住那个真实踩过的坑 ——
    * 抽共享组件时返回按钮接的是「通知外面」的回调、没有关 store，症状是**点了没反应**

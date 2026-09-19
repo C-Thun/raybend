@@ -38,6 +38,13 @@ import { Histogram } from "../../components/ui/Histogram.tsx";
 
 export interface ViewerReadoutProps {
   store: ViewerStore;
+  /**
+   * 要不要画「视野框」（默认画）。
+   *
+   * 对比态传 `false`：视野框描述的是**单张看图那一个窗口**里看得见哪一块，
+   * 而对比是好几个各自独立的窗口 —— 一个框表达不了（2026-09-20）。
+   */
+  showVisibleBox?: boolean;
 }
 
 /**
@@ -123,7 +130,7 @@ export function ViewerReadout(props: ViewerReadoutProps): JSX.Element {
                 alt=""
                 draggable={false}
               />
-              <Show when={rect()}>
+              <Show when={props.showVisibleBox !== false ? rect() : null}>
                 {(area) => (
                   <div
                     class="pointer-events-none absolute border border-brand"

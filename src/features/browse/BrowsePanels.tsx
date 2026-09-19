@@ -647,6 +647,11 @@ export interface AssetInfoProps {
    */
   viewer?: ViewerStore | null;
   /**
+   * 是否正在多图对比。对比时右栏不画「视野框」—— 好几个窗口，一个框描述不了
+   * （见 `ViewerReadout` 的 `showVisibleBox`）。
+   */
+  comparing?: boolean;
+  /**
    * 这张照片**所属库的名字**（右栏「文件基础信息 → 所属库」）。
    *
    * 库名住在工作区（它才拿着库列表），右栏不该为了一个名字自己去拉一次库列表 ——
@@ -876,7 +881,9 @@ export function AssetInfo(props: AssetInfoProps) {
           文件信息两块都不动（它下面还在）。
         */}
         <Show when={props.viewer} fallback={<ExifSection item={item()!} />}>
-          {(store) => <ViewerReadout store={store()} />}
+          {(store) => (
+            <ViewerReadout store={store()} showVisibleBox={props.comparing !== true} />
+          )}
         </Show>
 
         {/*

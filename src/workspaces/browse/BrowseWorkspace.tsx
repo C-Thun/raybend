@@ -884,6 +884,8 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
               store={store}
               item={anchor()}
               viewer={viewer.state().active ? viewer : null}
+              /* 对比态不画视野框：好几个窗口，一个框描述不了 */
+              comparing={comparing()}
               /* 「所属库」那一行：名字住在工作区（它拿着库列表） */
               repositoryName={
                 repositories().find((repo) => repo.id === store.repositoryId())?.name ?? null
