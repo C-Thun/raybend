@@ -684,6 +684,13 @@ export interface AssetInfoProps {
    * （`BROWSE.md` §5.9）；tiles 模式下传 `null`，保持原来的 EXIF。
    */
   viewer?: ViewerStore | null;
+  /**
+   * 这张照片**所属库的名字**（右栏「文件基础信息 → 所属库」）。
+   *
+   * 库名住在工作区（它才拿着库列表），右栏不该为了一个名字自己去拉一次库列表 ——
+   * 所以从上面传进来，拿不到就这一行不显示。
+   */
+  repositoryName?: string | null;
   class?: string;
 }
 
@@ -699,6 +706,88 @@ function Field(props: { label: string; value: string | null }) {
   );
 }
 
+/**
+ * 一行**可编辑**的字段（人类 2026-09-19 的右栏规格：作者 / 描述 / 地理三行政区划）。
+ *
+ * 交互：点值 → 变输入框 → 回车提交 / `Esc` 取消 / 失焦提交。
+ * 提交走 `store.setText()`（后端是 `marking::set_text`，**进撤销栈**）。
+ *
+ * 两条纪律：
+ * 1. **没变就不发请求**（点开又点走不该产生一次落库与一步撤销）；
+ * 2. 空串 = **清空该字段**（后端把空串当 `NULL`）—— 这是「删掉写错的作者」的正路，
+ *    不是「取消编辑」；取消是 `Esc`。
+ */
+function EditableField(props: {
+  label: string;
+  value: string | null;
+  placeholder: string;
+  onCommit: (value: string) => void;
+}): JSX.Element {
+  const [editing, setEditing] = createSignal(false);
+  const [draft, setDraft] = createSignal("");
+  let inputEl: HTMLInputElement | undefined;
+
+  const begin = (): void => {
+    setDraft(props.value ?? "");
+    setEditing(true);
+    queueMicrotask(() => {
+      inputEl?.focus();
+      inputEl?.select();
+    });
+  };
+
+  const commit = (): void => {
+    if (!editing()) return;
+    setEditing(false);
+    const next = draft().trim();
+    if (next === (props.value ?? "")) return;
+    props.onCommit(next);
+  };
+
+  return (
+    <div class="flex items-baseline gap-2" data-editable-field={props.label}>
+      <span class="w-16 shrink-0 text-fs-0 text-fg-3">{props.label}</span>
+      <Show
+        when={editing()}
+        fallback={
+          <button
+            type="button"
+            class="min-w-0 flex-1 cursor-text truncate text-left text-fs-2 text-fg-1 hover:text-brand"
+            title={props.value ?? props.placeholder}
+            onClick={begin}
+          >
+            {props.value !== null && props.value !== "" ? (
+              props.value
+            ) : (
+              <span class="text-fg-3">{props.placeholder}</span>
+            )}
+          </button>
+        }
+      >
+        <input
+          ref={inputEl}
+          class="min-w-0 flex-1 rounded-ui bg-surface-bar px-1.5 py-0.5 text-fs-2 text-fg-1 outline-none"
+          value={draft()}
+          aria-label={props.label}
+          onInput={(event) => setDraft(event.currentTarget.value)}
+          onBlur={commit}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              commit();
+            } else if (event.key === "Escape") {
+              event.preventDefault();
+              // Esc = 取消编辑（不落库）：先把草稿丢回原值，再关掉输入框
+              setDraft(props.value ?? "");
+              setEditing(false);
+            }
+          }}
+        />
+      </Show>
+    </div>
+  );
+}
+
 /** 把毫秒按给定时区偏移渲染成人能读的串。 */
 function localDateTime(ms: number, offsetMinutes: number | null): string {
   const date = new Date(ms + (offsetMinutes ?? 0) * 60_000);
@@ -707,20 +796,6 @@ function localDateTime(ms: number, offsetMinutes: number | null): string {
     `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())} ` +
     `${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}`
   );
-}
-
-/** 文件大小（人类可读）。 */
-function humanSize(bytes: number | null): string | null {
-  if (bytes === null || !Number.isFinite(bytes)) return null;
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ["KB", "MB", "GB"];
-  let value = bytes / 1024;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit += 1;
-  }
-  return `${value.toFixed(1)} ${units[unit]}`;
 }
 
 /** 曝光时间：1/250 这种写法比 0.004s 直观。 */
@@ -811,6 +886,22 @@ function AssetTags(props: { store: BrowseStore; item: AssetItem }): JSX.Element 
 export function AssetInfo(props: AssetInfoProps) {
   const item = () => props.item;
 
+  /**
+   * 创建日期：**文件在磁盘上被创建的时刻**（不是拍摄时间 —— 那个在「拍摄信息」里）。
+   * 后端在文件系统不给出生时间时会退回 mtime（`asset_files.file_created_ms` 的 COALESCE）。
+   */
+  const createdText = (): string | null => {
+    const ms = item()?.createdMs ?? null;
+    return ms === null ? null : localDateTime(ms, null);
+  };
+
+  /** GPS：十进制度，6 位小数够到亚米级（再多的位数只是噪声） */
+  const gpsText = (): string | null => {
+    const it = item();
+    if (it === null || it.gpsLat === null || it.gpsLon === null) return null;
+    return `${it.gpsLat.toFixed(6)}, ${it.gpsLon.toFixed(6)}`;
+  };
+
   return (
     <div class={["min-h-0 flex-1 overflow-y-auto p-2", props.class ?? ""].filter(Boolean).join(" ")}>
       <Show
@@ -833,28 +924,67 @@ export function AssetInfo(props: AssetInfoProps) {
         */}
         <AssetTags store={props.store} item={item()!} />
 
-        {/* 文件信息（作者/描述/地理在 W2 接编辑） */}
-        <section class="mb-5">
-          <h3 class="mb-1.5 text-fs-3 font-semibold text-fg-2">{t("browse.fileInfo")}</h3>
+        {/*
+          文件基础信息（人类 2026-09-19 的右栏规格，顺序照抄）：
+          文件名 / 创建日期 / 所在路径 / 所属库 / 作者（可编辑）/ Description（可编辑）。
+        */}
+        <section class="mb-5" data-asset-file-info="open">
+          <h3 class="mb-1.5 text-fs-3 font-semibold text-fg-2">{t("browse.fileBasicInfo")}</h3>
           <div class="flex flex-col gap-1.5">
             <Field label={t("browse.fieldFileName")} value={item()!.fileName} />
-            <Field
-              label={t("browse.fieldTakenAt")}
-              value={
-                item()!.takenAt === null
-                  ? null
-                  : localDateTime(item()!.takenAt!, item()!.takenAtOffsetMin)
-              }
-            />
+            <Field label={t("browse.fieldCreatedAt")} value={createdText()} />
             <Field label={t("browse.fieldPath")} value={item()!.relPath} />
-            <Field
-              label={t("browse.fieldFileType")}
-              value={item()!.isRaw ? t("browse.raw") : item()!.ext.toUpperCase()}
+            <Field label={t("browse.fieldRepository")} value={props.repositoryName ?? null} />
+            <EditableField
+              label={t("browse.fieldAuthor")}
+              value={item()!.author}
+              placeholder={t("browse.fieldEmpty")}
+              onCommit={(value) => void props.store.setText("author", value)}
             />
-            <Field label={t("browse.fieldFileSize")} value={humanSize(item()!.sizeBytes)} />
+            <EditableField
+              label={t("browse.fieldDescription")}
+              value={item()!.description}
+              placeholder={t("browse.fieldEmpty")}
+              onCommit={(value) => void props.store.setText("description", value)}
+            />
             <Show when={item()!.missing}>
               <p class="text-fs-2 text-danger">{t("browse.missingFile")}</p>
             </Show>
+          </div>
+        </section>
+
+        {/*
+          地理信息：**GPS 是从文件读的**（EXIF，导入时写库，不可编辑）；
+          下面四项是人写的（可编辑，走同一个 `setText`）。
+        */}
+        <section class="mb-5" data-asset-geo="open">
+          <h3 class="mb-1.5 text-fs-3 font-semibold text-fg-2">{t("browse.geoInfo")}</h3>
+          <div class="flex flex-col gap-1.5">
+            <Field label={t("browse.fieldGps")} value={gpsText()} />
+            <EditableField
+              label={t("browse.fieldCountry")}
+              value={item()!.country}
+              placeholder={t("browse.fieldEmpty")}
+              onCommit={(value) => void props.store.setText("country", value)}
+            />
+            <EditableField
+              label={t("browse.fieldProvince")}
+              value={item()!.provinceState}
+              placeholder={t("browse.fieldEmpty")}
+              onCommit={(value) => void props.store.setText("provinceState", value)}
+            />
+            <EditableField
+              label={t("browse.fieldCity")}
+              value={item()!.city}
+              placeholder={t("browse.fieldEmpty")}
+              onCommit={(value) => void props.store.setText("city", value)}
+            />
+            <EditableField
+              label={t("browse.fieldSublocation")}
+              value={item()!.sublocation}
+              placeholder={t("browse.fieldEmpty")}
+              onCommit={(value) => void props.store.setText("sublocation", value)}
+            />
           </div>
         </section>
       </Show>

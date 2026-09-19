@@ -880,7 +880,15 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
           右栏在看图态换成**预览 + 直方图**（`BROWSE.md` §5.9）——
           看图件的 store 本身就是「当前看哪张 + 看到哪一块」的唯一事实来源，直接传进去。
         */}
-        <AssetInfo store={store} item={anchor()} viewer={viewer.state().active ? viewer : null} />
+        <AssetInfo
+              store={store}
+              item={anchor()}
+              viewer={viewer.state().active ? viewer : null}
+              /* 「所属库」那一行：名字住在工作区（它拿着库列表） */
+              repositoryName={
+                repositories().find((repo) => repo.id === store.repositoryId())?.name ?? null
+              }
+            />
       </aside>
       </div>
 
