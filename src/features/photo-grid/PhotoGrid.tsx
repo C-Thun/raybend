@@ -537,7 +537,15 @@ function TileCell(props: {
   const item = () => props.source.itemAt(props.slot);
   const id = () => item()?.id ?? "";
   const thumb = () => props.source.thumb(item()?.path ?? "");
-  const selected = () => item() !== null && props.source.selection().ids.has(id());
+  /*
+   * 选中态**直接在 JSX 里读信号**（这里只留一个语义化的名字）：
+   * `selection()` 是 store 的信号，`item()` 也是 —— 两个信号一变，
+   * `Tile` 的 `aria-selected` / 底色就该跟着变。
+   */
+  const isSelected = (): boolean => {
+    const it = item();
+    return it !== null && props.source.selection().ids.has(it.id);
+  };
   /** RAW 角标：展示的就是 RAW → `RAW`；位图 + RAW → `+RAW`；否则不显示 */
   const rawMode = (): "raw" | "plus" | undefined => {
     const it = item();
@@ -562,7 +570,7 @@ function TileCell(props: {
         // 小尺寸档（96/120/144）星标退化成「一颗星 + 数字」
         compact={props.source.tileStep() <= 2}
         src={thumb().url ?? undefined}
-        selected={selected()}
+        selected={isSelected()}
         loading={item() === null || thumb().status === "loading" || thumb().status === "idle"}
         excluded={item()?.excluded === true}
         rating={item()?.marks?.rating ?? 0}
