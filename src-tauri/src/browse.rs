@@ -19,7 +19,7 @@ use raybend::store::db::{CatalogDb, OpenOpts};
 use raybend::store::delete::DeleteReport;
 use raybend::store::flags::{Flag, FlagKey, FlagSet};
 use raybend::store::marking::{self, UndoStack};
-use raybend::store::query::{self, AssetRow, Combinator, Filter, Query, Scope, Sort, SortKey};
+use raybend::store::query::{self, AssetRow, Combinator, Filter, FlagFilter, Query, Scope, Sort, SortKey};
 use raybend::store::repository;
 use raybend::store::tags;
 use raybend::store::time;
@@ -112,8 +112,13 @@ fn resolve_root<R: Runtime>(app: &AppHandle<R>, repository_id: &str) -> Result<P
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FilterDto {
+    /// 星级**阈值**：`Some(n)` = 「n 星及以上」（人类 2026-09-19）。
+    /// 旧的 `ratings: Vec<i64>`（精确匹配）已废弃，前端也不再发。
     #[serde(default)]
-    pub ratings: Vec<i64>,
+    pub min_rating: Option<i64>,
+    /// 旗标筛选：`{ mode, ids }`（旗标只在内存里，id 列表由外壳给 —— 见 `store::flags`）。
+    #[serde(default)]
+    pub flag: Option<FlagFilterDto>,
     #[serde(default)]
     pub colors: Vec<String>,
     #[serde(default)]
@@ -145,14 +150,25 @@ pub struct FilterDto {
     pub combinator: Option<String>,
 }
 
+/// 旗标筛选的输入形态（与前端 `BrowseFilter.flag` 一一对应）。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FlagFilterDto {
+    /// `pick` / `reject` / `none`
+    pub mode: String,
+    /// 相关的 id（`none` 时是「要排除的」）
+    #[serde(default)]
+    pub ids: Vec<i64>,
+}
+
 impl FilterDto {
     fn into_filter(self) -> Filter {
         Filter {
-            ratings: self
-                .ratings
-                .into_iter()
-                .filter_map(|r| u8::try_from(r).ok())
-                .collect(),
+            min_rating: self.min_rating.and_then(|r| u8::try_from(r).ok()),
+            flag: self.flag.map(|flag| FlagFilter {
+                mode: flag.mode,
+                ids: flag.ids,
+            }),
             colors: self.colors,
             likes: self.likes,
             locks: self
@@ -256,6 +272,8 @@ pub struct AssetItem {
     pub file_name: String,
     pub ext: String,
     pub is_raw: bool,
+    /// 这个资产还有没有 RAW（三种 tile 形态靠它与 `is_raw` 一起判，见 `AssetRow.has_raw`）
+    pub has_raw: bool,
     pub taken_at: Option<i64>,
     pub taken_at_offset_min: Option<i64>,
     pub rating: i64,
@@ -284,6 +302,7 @@ impl From<AssetRow> for AssetItem {
             rel_path: row.rel_path,
             ext: row.ext,
             is_raw: row.is_raw,
+            has_raw: row.has_raw,
             taken_at: row.taken_at,
             taken_at_offset_min: row.taken_at_offset_min,
             rating: i64::from(row.rating),

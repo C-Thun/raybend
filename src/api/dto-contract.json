@@ -189,6 +189,7 @@
   ],
   "AssetItem": [
     "cameraMake",
+    "hasRaw",
     "cameraModel",
     "colorLabel",
     "exposureMs",

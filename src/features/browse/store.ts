@@ -39,6 +39,7 @@ import type {
   MarkingItem,
   MetaFile,
   PhotoMeta,
+  Tag,
   TimelineEntry,
 } from "../../api/types.ts";
 import {
@@ -68,6 +69,8 @@ export interface BrowseApi {
   }>;
   facets(query: BrowseQuery): Promise<BrowseFacets>;
   markings(repositoryId: string, ids: readonly number[]): Promise<MarkingItem[]>;
+  /** 标签词典（右栏显示标签名用；标签弹窗自己另按搜索拉一份更长的） */
+  tagList(query: string, limit: number): Promise<Tag[]>;
   mark(
     repositoryId: string,
     ids: readonly number[],
@@ -114,6 +117,9 @@ export interface UndoState {
   undoLabel: string | null;
   redoLabel: string | null;
 }
+
+/** 标签词典一次拉多少条（够右栏显示用；标签弹窗自己按搜索拉）。 */
+const TAG_DICTIONARY_LIMIT = 200;
 
 export const EMPTY_UNDO_STATE: UndoState = {
   canUndo: false,
@@ -163,6 +169,16 @@ export interface BrowseStore {
   error(): string | null;
   /** 重新加载（换库/换筛选后自动调；也可以手动调）。 */
   reload(): Promise<void>;
+  /**
+   * 标签词典（id → 名字）。**库里只存 tag id**（标记来自 catalog，名字来自 app.db），
+   * 所以界面要显示标签名就得有一份词典 —— 收在这里，右栏与标签弹窗共用同一份，
+   * 新建的标签当场就能在这两处显示。
+   */
+  tags(): readonly Tag[];
+  /** 拉一次词典（幂等：已经拉到过就不再拉） */
+  loadTags(): Promise<void>;
+  /** 记一个刚建出来的标签（弹窗里「回车建新标签」之后调，免得右栏要等下次刷新） */
+  rememberTag(tag: Tag): void;
   /**
    * 一张照片的**真实宽高**（tile 比例、看图缩放边界都要它）。
    *
@@ -363,6 +379,10 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
 
   const [selection, setSelection] = createSignal<SelectionState>(EMPTY_SELECTION);
   const [markings, setMarkings] = createSignal<ReadonlyMap<number, MarkingItem>>(new Map());
+  /** 标签词典（`id → 名字`）。右栏与标签弹窗共用，见接口说明。 */
+  const [tags, setTags] = createSignal<readonly Tag[]>([]);
+  /** 词典拉过没有（避免每次渲染都发一趟 IPC） */
+  let tagsLoaded = false;
   const [picks, setPicks] = createSignal<ReadonlySet<number>>(new Set<number>());
   const [rejects, setRejects] = createSignal<ReadonlySet<number>>(new Set<number>());
 
@@ -384,10 +404,41 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
     return {
       repositoryId: id,
       scopePath: scope,
-      filter: filter(),
+      filter: withFlagIds(filter()),
       sort: sort(),
     };
   };
+
+  /**
+   * 把旗标筛选里的 `ids` 填上（界面只给 `mode`）。
+   *
+   * 为什么在这里填：旗标是**内存集合**（`picks` / `rejects`），只有 store 同时看得见
+   * 「条件」与「集合」；让工具条自己去拼，就得把两边的同步责任散到界面上。
+   */
+  const withFlagIds = (current: BrowseFilter): BrowseFilter => {
+    const mode = current.flag?.mode;
+    if (mode === undefined || mode === null) return current;
+    const ids =
+      mode === "pick"
+        ? [...picks()]
+        : mode === "reject"
+          ? [...rejects()]
+          : // 「无旗标」要排除的是**有旗标的全部**（pick 与 reject 都算）
+            [...new Set([...picks(), ...rejects()])];
+    return { ...current, flag: { mode, ids } };
+  };
+
+  async function loadTags(): Promise<void> {
+    if (tagsLoaded) return;
+    tagsLoaded = true;
+    try {
+      const list = await api.tagList("", TAG_DICTIONARY_LIMIT);
+      setTags(list);
+    } catch {
+      // 读不到词典不是错误：界面把标签名退回「#id」显示
+      tagsLoaded = false;
+    }
+  }
 
   /** 换查询之后的统一处理：作废在飞结果、清空数据与选择、重新加载。 */
   const resetForNewQuery = (): void => {
@@ -627,6 +678,11 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
     error,
     reload,
     ensureRange,
+    tags,
+    loadTags,
+    rememberTag: (tag) => {
+      setTags((prev) => (prev.some((item) => item.id === tag.id) ? prev : [...prev, tag]));
+    },
     naturalOf,
     ensureNatural,
 

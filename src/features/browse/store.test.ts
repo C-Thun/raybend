@@ -33,6 +33,7 @@ function item(id: number, overrides: Partial<AssetItem> = {}): AssetItem {
     fileName: `${id}.jpg`,
     ext: "jpg",
     isRaw: false,
+    hasRaw: false,
     takenAt: 1_789_516_800_000 + id * 1000,
     takenAtOffsetMin: null,
     rating: 0,
@@ -81,6 +82,10 @@ function fakeApi(count: number) {
   const gates: Array<() => void> = [];
 
   const api: BrowseApi = {
+    // 右栏要按 id 显示标签名 ⇒ store 会拉一次词典；测试里给空词典
+    async tagList() {
+      return [];
+    },
     async page(_query: BrowseQuery, offset: number, limit: number) {
       calls.page.push(offset);
       if (gates.length > 0) {
@@ -315,7 +320,7 @@ test("换筛选会清空已加载的窗口与选择", async () => {
   store.select(3, "replace");
   assert.equal(store.selectedCount(), 1);
 
-  store.patchFilter({ ratings: [5] });
+  store.patchFilter({ minRating: 5 });
   assert.equal(store.selectedCount(), 0, "换筛选后选择要清掉");
   await tick();
   assert.equal(store.itemAt(0)?.id, 1, "数据重新加载");
@@ -493,13 +498,13 @@ test("setFilter / setSort 会带上完整查询重新加载", async () => {
   await tick();
   calls.page = [];
 
-  store.setFilter({ ratings: [3] });
+  store.setFilter({ minRating: 3 });
   await tick();
   store.setSort({ key: "fileName", desc: false });
   await tick();
 
   assert.deepEqual(calls.page, [0, 0], "每次查询变化都要重新取第一页");
-  assert.equal(store.query()?.filter?.ratings?.[0], 3);
+  assert.equal(store.query()?.filter?.minRating, 3);
   assert.equal(store.query()?.sort?.key, "fileName");
 });
 
@@ -665,6 +670,9 @@ function legacyApi(count: number) {
     async facets(): Promise<BrowseFacets> {
       return EMPTY_FACETS;
     },
+    async tagList() {
+      return [];
+    },
     async markings() {
       return [];
     },
@@ -777,4 +785,27 @@ test("ensureNatural：没有注入补读口子时静默不动（浏览器预览�
   await tick();
   await store.ensureNatural([{ id: 1, path: "D:/lib/photos/1.jpg" }]);
   assert.equal(store.naturalOf(1), null);
+});
+
+// ─────────────────── 旗标筛选：id 由 store 填 ───────────────────
+
+test("旗标条件：发查询时把当前旗标集合填进 ids（界面只给 mode）", async () => {
+  const { api } = fakeApi(5);
+  const store = createBrowseStore({ api });
+  open(store);
+  await tick();
+
+  await store.setFlag([1, 2], "pick");
+  store.patchFilter({ flag: { mode: "pick" } });
+  let sent = store.query()?.filter?.flag;
+  assert.equal(sent?.mode, "pick");
+  assert.deepEqual([...(sent?.ids ?? [])].sort(), [1, 2], "有旗标 ⇒ 只看这些 id");
+
+  store.patchFilter({ flag: { mode: "none" } });
+  sent = store.query()?.filter?.flag;
+  assert.equal(sent?.mode, "none");
+  assert.deepEqual([...(sent?.ids ?? [])].sort(), [1, 2], "无旗标 ⇒ 排除有旗标的那些");
+
+  store.patchFilter({ flag: null });
+  assert.equal(store.query()?.filter?.flag ?? null, null, "取消条件后不带旗标条件");
 });

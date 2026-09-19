@@ -248,7 +248,8 @@ fn open_and_fill(rows: usize) -> Connection {
 
 fn star_filter() -> Query {
     let mut q = Query::new(Scope::Repository);
-    q.filter.ratings = vec![3, 4, 5];
+    // 星标是**阈值**语义（`>= N`）：这里就是「3 星及以上」
+    q.filter.min_rating = Some(3);
     q.filter.combinator = Combinator::And;
     q
 }
@@ -261,7 +262,7 @@ fn color_filter() -> Query {
 
 fn and_filter() -> Query {
     let mut q = Query::new(Scope::Repository);
-    q.filter.ratings = vec![5];
+    q.filter.min_rating = Some(5);
     q.filter.colors = vec!["red".to_string()];
     q.filter.combinator = Combinator::And;
     q
@@ -343,8 +344,8 @@ fn query_sql_fragment(query: &Query) -> String {
         return String::new();
     }
     let mut bits: Vec<String> = Vec::new();
-    if !query.filter.ratings.is_empty() {
-        bits.push("rating IN (…)".to_string());
+    if let Some(min) = query.filter.min_rating {
+        bits.push(format!("rating >= {min}"));
     }
     if !query.filter.colors.is_empty() {
         bits.push("color_label IN (…)".to_string());

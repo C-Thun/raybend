@@ -22,7 +22,7 @@ import {
   onMount,
   type JSX,
 } from "solid-js";
-import { computeVirtualWindow, rowScrollTop } from "../../lib/virtual-window.ts";
+import { computeVirtualWindow, rowScrollTop, rowTop } from "../../lib/virtual-window.ts";
 
 export interface VirtualGridRow {
   /** 稳定键（重建列表时用来复用 DOM） */
@@ -57,6 +57,14 @@ export interface VirtualGridProps<TRow extends VirtualGridRow> {
    * （数学在 `lib/virtual-window.ts` 的 `rowScrollTop`，有单测）。
    */
   focusRow?: number;
+  /**
+   * 把某一行**精确钉在**视口的某个位置：`row` 的顶边离滚动容器顶边 `offsetPx` 像素。
+   *
+   * 与 `focusRow` 的分工：那个只保证「看得见」；这个要**像素级对齐**，
+   * 用来实现「换筛选条件时窗口内容不动」——把当前那张照片钉回原来的位置。
+   * `key` 是去重用的：只有它变了才执行（否则每次渲染都会把用户的滚动拽回去）。
+   */
+  scrollTo?: { row: number; offsetPx: number; key: string | number } | null;
   /**
    * 点**空白处**（这一下没落在内容上）时回调 —— 用来「取消选择」。
    *
@@ -123,6 +131,17 @@ export function VirtualGrid<TRow extends VirtualGridRow>(
     }
   });
 
+  // 精确钉位：只有 key 变了才执行一次（见 props.scrollTo 的说明）
+  createEffect<string | number | undefined>((applied) => {
+    const request = props.scrollTo;
+    if (request === null || request === undefined || scroller === undefined) return applied;
+    if (applied === request.key) return applied;
+    const target = Math.max(0, rowTop(props.rows, request.row) - request.offsetPx);
+    scroller.scrollTop = target;
+    setScrollTop(target);
+    return request.key;
+  });
+
   const window = () =>
     computeVirtualWindow({
       rows: props.rows,
@@ -144,6 +163,8 @@ export function VirtualGrid<TRow extends VirtualGridRow>(
   return (
     <div
       ref={scroller}
+      /* 冒烟与锚定逻辑都靠它拿到滚动容器（不要靠 class 找） */
+      data-virtual-scroller
       class={[
         "min-h-0 flex-1 overflow-y-auto overflow-x-hidden",
         props.class ?? "",

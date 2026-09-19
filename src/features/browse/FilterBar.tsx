@@ -2,7 +2,7 @@
  * 筛选结果区（`BROWSE.md` §3.1、`plans/M2-W2-tail.md` 3.3/3.4、画布 `States / 浏览状态` 的 ②）。
  *
  * ```text
- * │ (3 星 ×) (红色 ×) (未标记喜欢 ×)   共 42 张            [任一 | 全部] │
+ * │ (≥3 星 ×) (红色 ×) (有旗标 ×)   共 42 张            [全部 | 任一] │
  * ```
  *
  * 三条：
@@ -11,8 +11,8 @@
  *    每条都能单独摘掉（摘一条只动它自己，见 `filter.ts` 的测试）。
  * 2. **「共 N 张」是筛选后的数**（`store.total()` 跟的是当前查询）——
  *    这是「筛完还剩多少」的即时反馈，也是判断筛得太狠的依据。
- * 3. **任一 / 全部**只在**两个以上条件**时才出现：只有一个条件时问「与还是或」没意义。
- *    默认「任一」（人类 2026-09-18 定）。
+ * 3. **全部 / 任一**只在**两个以上条件**时才出现：只有一个条件时问「与还是或」没意义。
+ *    默认**「全部」（组间与）**（人类 2026-09-19 定的口径：选哪个标记就只显示哪个标记的图）。
  *
  * 排序控件**不在这里**：它跟着底部控制条（与「按时间」「缩放」同排），
  * 因为排序在没开筛选时也要能用 —— 画布 ② 里那个 `SortBar` 的位置会在阶段 6 的画布复核里同步。
@@ -24,7 +24,7 @@ import { IconX } from "@tabler/icons-solidjs";
 import { SegmentedControl } from "../../components/ui/SegmentedControl.tsx";
 import { t } from "../../i18n/index.ts";
 import { chipKey, filterChips, removeChip, type FilterChip } from "./filter.ts";
-import { colorText, lockText, ratingText } from "./labels.ts";
+import { colorText, lockText } from "./labels.ts";
 import type { BrowseStore } from "./store.ts";
 
 export interface FilterBarProps {
@@ -39,7 +39,8 @@ export function FilterBar(props: FilterBarProps): JSX.Element {
   const label = (chip: FilterChip): string => {
     switch (chip.kind) {
       case "rating":
-        return ratingText(chip.value);
+        // 阈值语义：chip 上必须写出「≥」，否则会被读成「正好 3 星」
+        return t("browse.filterRatingAtLeast").replace("{n}", String(chip.value));
       case "color":
         return colorText(chip.value === "none" ? null : chip.value);
       case "like":
@@ -50,6 +51,12 @@ export function FilterBar(props: FilterBarProps): JSX.Element {
             : t("browse.likeNone");
       case "lock":
         return lockText(chip.value);
+      case "flag":
+        return chip.value === "pick"
+          ? t("browse.flagWith")
+          : chip.value === "reject"
+            ? t("browse.flagRejected")
+            : t("browse.flagWithout");
     }
   };
 
@@ -102,10 +109,10 @@ export function FilterBar(props: FilterBarProps): JSX.Element {
         <Show when={chips().length >= 2}>
           <div class="ml-auto">
             <SegmentedControl
-              value={props.store.filter().combinator ?? "or"}
+              value={props.store.filter().combinator ?? "and"}
               options={[
-                { value: "or", label: t("browse.filterAny") },
                 { value: "and", label: t("browse.filterAll") },
+                { value: "or", label: t("browse.filterAny") },
               ]}
               onValueChange={(value) =>
                 props.store.patchFilter({ combinator: value === "and" ? "and" : "or" })

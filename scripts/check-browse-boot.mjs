@@ -666,9 +666,10 @@ try {
    */
   const pickClick = await send("Runtime.evaluate", {
     expression: `(() => {
-      const pick = document.querySelector('button[aria-label="留下"]');
-      const before = { found: Boolean(pick), disabled: pick ? pick.disabled : null };
-      pick?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      // 人类 2026-09-19：标记态只剩**一个**旗标开关（实心旗），「留下/丢弃」的说法已废
+      const flag = document.querySelector('button[aria-label="旗标"]');
+      const before = { found: Boolean(flag), disabled: flag ? flag.disabled : null };
+      flag?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       return before;
     })()`,
     returnByValue: true,
@@ -1247,6 +1248,66 @@ try {
     }
   }
 
+  /*
+   * 人类 2026-09-19 定的新语义（筛选态）：
+   *   ① 工具条上的标记**不再跟随选中的照片**，它就是「筛选条件」本身 ——
+   *      选另一张照片不会再改条件；② 旗标区是**两个**按钮「有旗标 / 无旗标」；
+   *   ③ 星标是**阈值**语义（chip 文案写 `≥N 星`）。
+   */
+  const filterToolbar = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const byLabel = (text) => document.querySelector('button[aria-label="' + text + '"]');
+      const chipsBefore = document.querySelectorAll("[data-filter-chip]").length;
+      // 换个「选中」：点一个别的 tile（挑评分不同的那张）
+      const tiles = [...document.querySelectorAll('[role="option"]')];
+      const other = tiles.find((tile) => tile.getAttribute("aria-selected") !== "true") ?? tiles[0];
+      other?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      return {
+        chipsBefore,
+        withFlag: Boolean(byLabel("有旗标")),
+        withoutFlag: Boolean(byLabel("无旗标")),
+        legacyKeep: Boolean(byLabel("留下")),
+        legacyDrop: Boolean(byLabel("丢弃")),
+      };
+    })()`,
+    returnByValue: true,
+  });
+  await sleep(600);
+  const afterSelect = await send("Runtime.evaluate", {
+    expression: `(() => ({
+      chips: document.querySelectorAll("[data-filter-chip]").length,
+      count: document.querySelector('[data-filter-count]')?.textContent ?? "",
+    }))()`,
+    returnByValue: true,
+  });
+  const ft = filterToolbar.result?.value ?? {};
+  const fa = afterSelect.result?.value ?? {};
+  if (ft.withFlag !== true || ft.withoutFlag !== true) {
+    problems.push(`筛选态旗标区应当是「有旗标 / 无旗标」两个按钮（实测 ${JSON.stringify(ft)}）`);
+  }
+  if (ft.legacyKeep === true || ft.legacyDrop === true) {
+    problems.push("「留下 / 丢弃」的说法已废（人类 2026-09-19），工具条上不该再有这两个按钮");
+  }
+  if (fa.chips !== ft.chipsBefore) {
+    problems.push(
+      `筛选态下改「选中」不该动筛选条件（前 ${ft.chipsBefore} 条 → 后 ${fa.chips} 条）`,
+    );
+  }
+
+  // 星标是阈值：chip 文案必须写「≥」（选中 3 星 ⇒ 4/5 星也要出来）
+  const ratingChip = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const chip = [...document.querySelectorAll("[data-filter-chip]")]
+        .find((c) => (c.getAttribute("data-filter-chip") ?? "").startsWith("rating:"));
+      return chip ? chip.textContent.trim() : null;
+    })()`,
+    returnByValue: true,
+  });
+  const ratingText = ratingChip.result?.value;
+  if (typeof ratingText === "string" && !ratingText.includes("≥")) {
+    problems.push(`星标筛选是阈值语义，chip 应当写「≥N 星」（实测 ${JSON.stringify(ratingText)}）`);
+  }
+
   // 排序：控制条上有控件；换一个键会重查
   const sortUi = await send("Runtime.evaluate", {
     expression: `(() => {
@@ -1823,6 +1884,107 @@ try {
   if (after.viewer !== false) problems.push("Esc 之后看图件没关掉");
   if (after.chrome !== "default" || after.sides !== 2) {
     problems.push(`退回 tiles 时左右栏必须回来，实测 ${JSON.stringify(after)}`);
+  }
+
+  /*
+   * 人类 2026-09-19 报的 bug：Enter 进看图 → Esc 退出后，照片还是选中的，
+   * 但再按 Enter 进不去。真因：焦点在看图件关掉后掉到了 `body`，键事件再也到不了网格。
+   *
+   * 这一整段是**自足**的：按真实路径走一遍「选中 → 回车进看图 → Esc 退出 → 再回车」，
+   * 不依赖前面几步留下的状态（前面那些步子已经动过筛选、删除、对比）。
+   */
+  const keyOn = (key) => (target) => `(() => {
+    const el = ${target} ?? document.body;
+    el.dispatchEvent(new KeyboardEvent("keydown", { key: "${key}", bubbles: true, cancelable: true }));
+    return true;
+  })()`;
+  const viewerOpen = async () => {
+    const reply = await send("Runtime.evaluate", {
+      expression: `Boolean(document.querySelector('[data-viewer="open"]'))`,
+      returnByValue: true,
+    });
+    return reply.result?.value === true;
+  };
+  const focusInGrid = async () => {
+    const reply = await send("Runtime.evaluate", {
+      expression: `(() => {
+        const scroller = document.querySelector("[data-virtual-scroller]");
+        const active = document.activeElement;
+        return Boolean(scroller) && Boolean(active) && scroller.contains(active);
+      })()`,
+      returnByValue: true,
+    });
+    return reply.result?.value === true;
+  };
+
+  // 先把可能的看图态关掉，再从 tiles 里点一张（真实用户动作）
+  await send("Runtime.evaluate", {
+    expression: `window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }))`,
+    returnByValue: true,
+  });
+  await sleep(400);
+  await send("Runtime.evaluate", {
+    expression: `(() => {
+      const tile = document.querySelector('[role="option"]');
+      tile?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      return Boolean(tile);
+    })()`,
+    returnByValue: true,
+  });
+  await sleep(500);
+  // 真机点击会顺带把焦点给 tile（浏览器原生行为），合成事件不会 —— 补上它。
+  // 注意要**等重渲染落地之后**再聚焦：点选会把行元素整块换掉。
+  await send("Runtime.evaluate", {
+    expression: `(() => {
+      const tile = document.querySelector('[role="option"][aria-selected="true"]')
+        ?? document.querySelector('[role="option"]');
+      if (tile instanceof HTMLElement) tile.focus();
+      return document.activeElement === tile;
+    })()`,
+    returnByValue: true,
+  });
+  await sleep(200);
+
+  // ① 回车进看图
+  await send("Runtime.evaluate", { expression: keyOn("Enter")("document.activeElement"), returnByValue: true });
+  await sleep(900);
+  if ((await viewerOpen()) !== true) {
+    problems.push("网格里选中一张后按回车应当能进看图");
+  } else {
+    // ② Esc 退出：看图关掉，**焦点必须回到网格里**
+    await send("Runtime.evaluate", {
+      expression: `window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }))`,
+      returnByValue: true,
+    });
+    await sleep(700);
+    if ((await viewerOpen()) !== false) {
+      problems.push("Esc 之后看图件没关掉");
+    }
+    const focused = await focusInGrid();
+    const where = await send("Runtime.evaluate", {
+      expression: `(() => {
+        const a = document.activeElement;
+        return a ? a.tagName + "[" + (a.getAttribute("role") ?? "-") + "]" : "null";
+      })()`,
+      returnByValue: true,
+    });
+    if (!focused) {
+      problems.push(
+        `Esc 退出看图后焦点应当回到网格里（实测 ${JSON.stringify(where.result?.value)}）—— 否则回车/方向键就断了`,
+      );
+    }
+    // ③ 再按回车：必须能重新进去（这就是人类报的那条）
+    await send("Runtime.evaluate", { expression: keyOn("Enter")("document.activeElement"), returnByValue: true });
+    await sleep(900);
+    if ((await viewerOpen()) !== true) {
+      problems.push("Esc 退出后再按回车应当能重新进看图（人类 2026-09-19 报的 bug）");
+    } else {
+      await send("Runtime.evaluate", {
+        expression: `window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }))`,
+        returnByValue: true,
+      });
+      await sleep(400);
+    }
   }
 
   const stackOverflow = consoleErrors.find((text) => /Maximum call stack/.test(text));

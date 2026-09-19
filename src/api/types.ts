@@ -357,6 +357,13 @@ export interface AssetItem {
   fileName: string;
   ext: string;
   isRaw: boolean;
+  /**
+   * 这个资产**还有没有 RAW**（不管展示的是哪个文件）。
+   *
+   * 三种 tile 形态（人类 2026-09-19）：只有位图 / 只有 RAW / 位图 + RAW；
+   * 第三种下面写 `+RAW`（位图是 SOOC，编辑落在 RAW 上），与「只有 RAW」的 `RAW` 分开。
+   */
+  hasRaw: boolean;
   takenAt: number | null;
   /** 拍摄时间用的时区偏移（分钟）；`null` = 相机没写，按 UTC 看。 */
   takenAtOffsetMin: number | null;
@@ -491,7 +498,11 @@ export interface DirEmptyView {
 
 /** 筛选条件（字段都可省 = 不限）。 */
 export interface BrowseFilter {
-  ratings?: number[];
+  /**
+   * 星级**阈值**：`n` = 「n 星及以上」（人类 2026-09-19：选 3 星时 4/5 星也要出现）。
+   * 不再是「精确等于某几档」—— 想看「没打星的」用文本/其他条件。
+   */
+  minRating?: number | null;
   colors?: string[];
   likes?: string[];
   locks?: number[];
@@ -505,7 +516,15 @@ export interface BrowseFilter {
   focalTo?: number | null;
   tags?: number[];
   text?: string | null;
-  /** `"and"` / `"or"`（缺省 = `"or"`）。 */
+  /**
+   * 旗标筛选（人类 2026-09-19）。
+   *
+   * 旗标**只活在内存里**（`store/flags.rs`），所以这里把 id 列表一起带上：
+   * `pick` / `reject` ⇒ 只看这些 id；`none` ⇒ 看**除了**这些 id 之外的。
+   * id 由 store 在发查询前按当前旗标集合填（界面只管 `mode`）。
+   */
+  flag?: { mode: "pick" | "reject" | "none"; ids?: number[] } | null;
+  /** `"and"` / `"or"`（缺省 = `"and"`：人类 2026-09-19 定的口径）。 */
   combinator?: "and" | "or";
 }
 

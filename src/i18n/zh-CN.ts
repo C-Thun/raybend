@@ -281,6 +281,11 @@ export const zhCN = {
  "browse.colorNone": "无色",
  /* 五个色标名 + 「不喜欢 / 未标记喜欢 / 未上锁」：工具条 aria-label、筛选 chips、
     看图状态栏三处共用（`features/browse/labels.ts` 是唯一的取用口） */
+ "browse.filterRatingAtLeast": "≥{n} 星",
+ "browse.flagWith": "有旗标",
+ "browse.flagWithout": "无旗标",
+ "browse.flagRejected": "已弃",
+ "browse.flagToggle": "旗标",
  "browse.colorRed": "红色",
  "browse.colorYellow": "黄色",
  "browse.colorGreen": "绿色",
@@ -290,6 +295,7 @@ export const zhCN = {
  "browse.dislike": "不喜欢",
  "browse.likeNone": "未标记喜欢",
  "browse.lockNone": "未上锁",
+ "browse.tagsSection": "标签",
  "browse.tag": "标签",
  "browse.tagsTitle": "标签",
  "browse.tagsTitleBatch": "给 {n} 张照片加标签",

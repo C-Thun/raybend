@@ -141,6 +141,23 @@ export function computeVirtualWindow(input: VirtualWindowInput): VirtualWindow {
  * （2026-09-19：本函数上线时类型检查器一度报「没有这个导出」——陈旧快照，
  * 判据与配方见 `AGENTS.md` §7 的诊断纪律；`pnpm test` 里那 5 条就是它的靶子。）
  */
+/**
+ * 第 `index` 行的**顶边**在内容坐标系里的位置（= 前面所有行的高度之和）。
+ *
+ * 用途：**把某一行钉在视口的某个位置**（例如「换筛选之后，让当前这张照片
+ * 仍然停在离顶边 120px 的地方」）。`rowScrollTop` 只保证「看得见」，
+ * 而这条要的是**精确位置** —— 两者共用同一份行高累加。
+ *
+ * 越界（负下标 / 超过行数）返回 0 或总高，调用方自己夹取。
+ */
+export function rowTop(rows: readonly VirtualRowLike[], index: number): number {
+  if (!Number.isInteger(index) || index <= 0) return 0;
+  const limit = Math.min(index, rows.length);
+  let top = 0;
+  for (let i = 0; i < limit; i += 1) top += saneHeight(rows[i].height);
+  return top;
+}
+
 export function rowScrollTop(input: {
   rows: readonly VirtualRowLike[];
   /** 目标行下标；越界时原样返回当前滚动位置 */
@@ -163,8 +180,7 @@ export function rowScrollTop(input: {
     return current;
   }
 
-  let top = 0;
-  for (let i = 0; i < input.target; i += 1) top += saneHeight(rows[i].height);
+  const top = rowTop(rows, input.target);
   const height = saneHeight(rows[input.target].height);
   const bottom = top + height;
 

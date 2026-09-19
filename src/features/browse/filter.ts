@@ -4,8 +4,19 @@
  * ## 筛选是什么
  *
  * 打开筛选开关后，toolsbar 上的标记控件**不再给选中的照片设值**，而是变成
- * 「对当前 tiles / 胶片带做筛选」的条件。条件之间默认**「任一」（或）**，
- * 也可以切成「全部」（与）—— 引擎两种都支持（`store/query.rs` 的 `Combinator`）。
+ * 「对当前 tiles / 胶片带做筛选」的条件。
+ *
+ * ## 组合语义（人类 2026-09-19 定的口径）
+ *
+ * * **组内是「或」**：在同一组里点多个值（例：绿 + 蓝）⇒ 绿**或**蓝；
+ * * **组间是「与」**：星 ≥3 **且** 绿色 **且** 有旗标 ⇒ 三者都要满足；
+ * * 所以默认 `combinator = "and"`（组与组之间为与）。引擎两种都支持
+ *   （`store/query.rs` 的 `Combinator`），切成 `"or"` 是「任一条件命中即可」的宽口径。
+ *
+ * ## 星标是「阈值」不是「精确值」
+ *
+ * 人类 2026-09-19：选 3 星时，**4 星、5 星也要出现** —— 所以条件是 `rating >= 3`
+ * （`minRating`），不是 `rating IN (3)`。
  *
  * ## 人类点名的那个「爽用法」
  *
@@ -28,7 +39,8 @@ export type FilterChip =
   | { kind: "rating"; value: number }
   | { kind: "color"; value: string }
   | { kind: "like"; value: string }
-  | { kind: "lock"; value: number };
+  | { kind: "lock"; value: number }
+  | { kind: "flag"; value: "pick" | "reject" | "none" };
 
 /** chip 的稳定 key（渲染列表与测试用；`kind` + `value` 唯一确定一条） */
 export function chipKey(chip: FilterChip): string {
@@ -38,10 +50,16 @@ export function chipKey(chip: FilterChip): string {
 /** 把筛选条件摊成 chips（顺序固定：星 → 色 → 喜欢 → 锁，与控件顺序一致） */
 export function filterChips(filter: BrowseFilter): FilterChip[] {
   const out: FilterChip[] = [];
-  for (const value of filter.ratings ?? []) out.push({ kind: "rating", value });
+  if (filter.minRating !== null && filter.minRating !== undefined) {
+    out.push({ kind: "rating", value: filter.minRating });
+  }
   for (const value of filter.colors ?? []) out.push({ kind: "color", value });
   for (const value of filter.likes ?? []) out.push({ kind: "like", value });
   for (const value of filter.locks ?? []) out.push({ kind: "lock", value });
+  // 旗标排在最后（它与其他四组不同：不是「取值」，而是「有没有」）
+  if (filter.flag !== null && filter.flag !== undefined) {
+    out.push({ kind: "flag", value: filter.flag.mode });
+  }
   return out;
 }
 
@@ -54,19 +72,21 @@ export function conditionCount(filter: BrowseFilter): number {
 export function removeChip(filter: BrowseFilter, chip: FilterChip): BrowseFilter {
   switch (chip.kind) {
     case "rating":
-      return { ...filter, ratings: (filter.ratings ?? []).filter((v) => v !== chip.value) };
+      return { ...filter, minRating: null };
     case "color":
       return { ...filter, colors: (filter.colors ?? []).filter((v) => v !== chip.value) };
     case "like":
       return { ...filter, likes: (filter.likes ?? []).filter((v) => v !== chip.value) };
     case "lock":
       return { ...filter, locks: (filter.locks ?? []).filter((v) => v !== chip.value) };
+    case "flag":
+      return { ...filter, flag: null };
   }
 }
 
 /** 只保留这四组条件、其余（文本/日期/机型…）原样 —— 「关掉筛选」时清的也就是这四组 */
 export function clearMarkFilters(filter: BrowseFilter): BrowseFilter {
-  return { ...filter, ratings: [], colors: [], likes: [], locks: [] };
+  return { ...filter, minRating: null, colors: [], likes: [], locks: [], flag: null };
 }
 
 /**
@@ -84,24 +104,38 @@ export function filterFromSelection(
     MarkingItem,
     "rating" | "colorLabel" | "likeState" | "lockLevel"
   >[],
+  /**
+   * 选中的这些照片**是不是都有旗标**（旗标只活在内存里，只有调用方知道）。
+   *
+   * `true` ⇒ 初始条件带上「有旗标」；`false` / 不给 ⇒ 不带旗标条件
+   * （「无旗标」不能从选中推出来：用户选中的照片没旗标，不等于他想看没旗标的）。
+   */
+  picked = false,
 ): BrowseFilter {
   if (items.length === 0) return {};
-  const ratings = new Set<number>();
   const colors = new Set<string>();
   const likes = new Set<string>();
   const locks = new Set<number>();
 
+  /*
+   * 星级：阈值语义下「与这张图一样」= **它那颗星**（≥N 会把它连同更高的都收进来）。
+   * 多选时取**最小值**：那是这批照片里最宽的同类口子（取最大值会把大部分选中项筛掉，
+   * 而用户此刻的意图是「看看和这些图类似的」）。
+   */
+  const minRating = Math.min(...items.map((item) => item.rating));
+
   for (const item of items) {
-    ratings.add(item.rating);
     colors.add(item.colorLabel ?? "none");
     likes.add(item.likeState ?? "none");
     if (item.lockLevel > 0) locks.add(item.lockLevel);
   }
 
   return {
-    ratings: [...ratings].sort((a, b) => a - b),
+    minRating,
     colors: [...colors].sort(),
     likes: [...likes].sort(),
     locks: [...locks].sort((a, b) => a - b),
+    combinator: "and",
+    ...(picked ? { flag: { mode: "pick" as const } } : {}),
   };
 }

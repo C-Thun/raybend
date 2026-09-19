@@ -87,8 +87,13 @@ impl Combinator {
 /// 筛选条件。**所有字段都是「不限 = `None` / 空集合」**。
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Filter {
-    /// 评分取值（0–5；0 表示「没打星」）。
-    pub ratings: Vec<u8>,
+    /// 星级**阈值**：`Some(n)` = 「**n 星及以上**」。
+    ///
+    /// 人类 2026-09-19 明确：筛选星标是「大于等于」——选 3 星时 4 星、5 星的图也要出现。
+    /// （原先这里是 `ratings: Vec<u8>` + `rating IN (...)` 的精确匹配，已废弃。）
+    pub min_rating: Option<u8>,
+    /// 旗标筛选（**旗标只活在内存里**，所以这里带 id 列表，见 `store::flags` 的文件头）。
+    pub flag: Option<FlagFilter>,
     /// 色标取值（`red`/`yellow`/`green`/`cyan`/`blue`/`purple`，外加 [`NO_COLOR`] 表示「无色」）。
     pub colors: Vec<String>,
     /// 喜欢状态（`like` / `dislike`，外加 [`NO_LIKE`] 表示「没表态」）。
@@ -113,6 +118,21 @@ pub struct Filter {
     pub combinator: Combinator,
 }
 
+/// 旗标筛选：**哪些 id 有旗标**由调用方（外壳）给 —— 旗标不进数据库，
+/// 所以引擎拿到的是一份 id 列表，而不是去 join 一张表。
+///
+/// 三种模式（人类 2026-09-19 定的界面语义）：
+/// * `pick`：只看**有旗标**的（`id IN ids`）；
+/// * `reject`：只看「弃」的（同样是 `id IN ids`，只是 id 来自 rejected 那份集合）；
+/// * `none`：只看**没旗标**的（`id NOT IN ids`，`ids` = 有旗标的全部 id）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FlagFilter {
+    /// `pick` / `reject` / `none`
+    pub mode: String,
+    /// 相关的那批 id（`none` 时是「要排除的」）
+    pub ids: Vec<i64>,
+}
+
 /// 「无色标」在 `colors` 里的表示（UI 上是那个空心圈）。
 pub const NO_COLOR: &str = "none";
 /// 「没表过态」在 `likes` 里的表示。
@@ -131,14 +151,36 @@ impl Filter {
     fn conditions(&self) -> Vec<(String, Vec<Value>)> {
         let mut out: Vec<(String, Vec<Value>)> = Vec::new();
 
-        if !self.ratings.is_empty() {
-            let placeholders = placeholders(self.ratings.len());
-            let params = self
-                .ratings
-                .iter()
-                .map(|r| Value::Integer(i64::from(*r)))
-                .collect();
-            out.push((format!("a.rating IN ({placeholders})"), params));
+        if let Some(min) = self.min_rating {
+            out.push((
+                "a.rating >= ?".to_string(),
+                vec![Value::Integer(i64::from(min))],
+            ));
+        }
+
+        if let Some(flag) = &self.flag {
+            /*
+             * 空列表要当心：`IN ()` 是语法错误，而语义上
+             *   * `pick` / `reject` 且没有 id ⇒ 一张都不该匹配（否则「有旗标」会显示全部）；
+             *   * `none` 且没有 id ⇒ 全部都没旗标 ⇒ 不加条件。
+             */
+            if flag.ids.is_empty() {
+                if flag.mode != "none" {
+                    out.push(("0 = 1".to_string(), Vec::new()));
+                }
+            } else {
+                let placeholders = placeholders(flag.ids.len());
+                let params = flag
+                    .ids
+                    .iter()
+                    .map(|id| Value::Integer(*id))
+                    .collect::<Vec<_>>();
+                if flag.mode == "none" {
+                    out.push((format!("a.id NOT IN ({placeholders})"), params));
+                } else {
+                    out.push((format!("a.id IN ({placeholders})"), params));
+                }
+            }
         }
 
         if let Some((sql, params)) = nullable_in("a.color_label", &self.colors) {
@@ -465,6 +507,12 @@ pub struct AssetRow {
     pub ext: String,
     /// 展示用文件是位图还是 RAW。
     pub is_raw: bool,
+    /// 这个资产**还有没有 RAW**（不管展示的是哪个）。
+    ///
+    /// 人类 2026-09-19：库里的 tile 有三种形态 —— 只有位图 / 只有 RAW / 位图 + RAW；
+    /// 第三种要在照片下面写 `+RAW`（它是 SOOC 的位图 + 可编辑的 RAW），
+    /// 与「只有 RAW」的 `RAW` 区分开。
+    pub has_raw: bool,
     pub taken_at: Option<i64>,
     /// 拍摄时间用的时区偏移（分钟）；`None` = 相机没写，按 UTC 看。
     pub taken_at_offset_min: Option<i64>,
@@ -500,7 +548,7 @@ const ROW_COLUMNS: &str = "\
     COALESCE(f.role, '') AS role, \
     a.taken_at, a.taken_at_offset_min, a.rating, a.color_label, a.like_state, a.lock_level, \
     a.camera_make, a.camera_model, a.lens, a.focal_mm, a.f_number, a.exposure_ms, a.iso, \
-    a.width, a.height, a.orientation, f.size_bytes, f.missing_since";
+    a.width, a.height, a.orientation, f.size_bytes, f.missing_since,     EXISTS(SELECT 1 FROM asset_files r WHERE r.asset_id = a.id AND r.role = 'raw') AS has_raw";
 
 /// 展示用文件的选取规则：**有位图就位图，没有就 RAW**。
 ///
@@ -519,6 +567,7 @@ fn row_from(row: &Row<'_>) -> rusqlite::Result<AssetRow> {
         rel_path,
         ext: row.get(2)?,
         is_raw: role == "raw",
+        has_raw: row.get::<_, i64>(22)? != 0,
         taken_at: row.get(4)?,
         taken_at_offset_min: row.get(5)?,
         rating: u8::try_from(row.get::<_, i64>(6)?).unwrap_or(0),
@@ -983,17 +1032,19 @@ mod tests {
         );
 
         let mut query = Query::new(Scope::Repository);
-        query.filter.ratings = vec![3, 5];
+        // 阈值语义（人类 2026-09-19）：≥3 星 ⇒ 3 星与 5 星都在
+        query.filter.min_rating = Some(3);
         let mut got = ids_of(&page(&conn, &query, 0, 10).unwrap());
         got.sort_unstable();
         assert_eq!(got, vec![three, five]);
     }
 
     #[test]
-    fn zero_rating_means_unrated_and_is_selectable() {
+    fn rating_threshold_zero_matches_everything() {
+        // 阈值语义下 `≥0` 等于「不筛星」——「只看没打星的」不再是一种条件（人类 2026-09-19）
         let conn = catalog();
         let unrated = add(&conn, Spec::default());
-        add(
+        let two = add(
             &conn,
             Spec {
                 rating: 2,
@@ -1001,8 +1052,62 @@ mod tests {
             },
         );
         let mut query = Query::new(Scope::Repository);
-        query.filter.ratings = vec![0];
-        assert_eq!(ids_of(&page(&conn, &query, 0, 10).unwrap()), vec![unrated]);
+        query.filter.min_rating = Some(0);
+        let mut got = ids_of(&page(&conn, &query, 0, 10).unwrap());
+        got.sort_unstable();
+        let mut want = vec![unrated, two];
+        want.sort_unstable();
+        assert_eq!(got, want);
+    }
+
+    #[test]
+    fn flag_filter_uses_the_id_list_from_the_shell() {
+        /*
+         * 旗标不进数据库（只活在内存里，见 `store::flags`），所以引擎拿到的是一份 id 列表：
+         *   * `pick` ⇒ 只看这些 id；
+         *   * `none` ⇒ 看**除了**这些 id 之外的全部；
+         *   * 空列表：`pick` 一张都不给（否则「有旗标」会把整个库显示出来），`none` 全给。
+         */
+        let conn = catalog();
+        let a = add(&conn, Spec::default());
+        let b = add(&conn, Spec::default());
+        let c = add(&conn, Spec::default());
+
+        let mut query = Query::new(Scope::Repository);
+        query.filter.flag = Some(FlagFilter {
+            mode: "pick".to_string(),
+            ids: vec![b],
+        });
+        assert_eq!(ids_of(&page(&conn, &query, 0, 10).unwrap()), vec![b]);
+
+        query.filter.flag = Some(FlagFilter {
+            mode: "none".to_string(),
+            ids: vec![b],
+        });
+        let mut got = ids_of(&page(&conn, &query, 0, 10).unwrap());
+        got.sort_unstable();
+        let mut want = vec![a, c];
+        want.sort_unstable();
+        assert_eq!(got, want, "无旗标 = 排除有旗标的那些");
+
+        query.filter.flag = Some(FlagFilter {
+            mode: "pick".to_string(),
+            ids: Vec::new(),
+        });
+        assert!(
+            ids_of(&page(&conn, &query, 0, 10).unwrap()).is_empty(),
+            "「有旗标」但一个旗标都没有 ⇒ 空结果，而不是全部"
+        );
+
+        query.filter.flag = Some(FlagFilter {
+            mode: "none".to_string(),
+            ids: Vec::new(),
+        });
+        assert_eq!(
+            ids_of(&page(&conn, &query, 0, 10).unwrap()).len(),
+            3,
+            "「无旗标」且没有任何旗标 ⇒ 全部都在"
+        );
     }
 
     #[test]
@@ -1199,7 +1304,7 @@ mod tests {
         );
 
         let mut query = Query::new(Scope::Repository);
-        query.filter.ratings = vec![3];
+        query.filter.min_rating = Some(3);
         query.filter.colors = vec!["red".to_string()];
 
         query.filter.combinator = Combinator::And;

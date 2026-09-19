@@ -12,6 +12,7 @@ function item(overrides: Partial<AssetItem> = {}): AssetItem {
     fileName: "MYP0001.RW2",
     ext: "RW2",
     isRaw: true,
+    hasRaw: true,
     takenAt: 1_700_000_000_000,
     takenAtOffsetMin: 480,
     rating: 0,
@@ -65,6 +66,7 @@ test("assetItemExif：全是 null 的项不产生空组（缺的字段一律 und
       height: null,
       ext: "",
       isRaw: false,
+    hasRaw: false,
     }),
   );
   assert.equal(exif.camera, undefined);

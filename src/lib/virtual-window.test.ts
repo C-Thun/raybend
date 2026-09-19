@@ -205,7 +205,7 @@ test("isUniformHeight：等行高为真，混入一行不等就为假", () => {
 
 // ─────────────────── 滚到某一行（键盘导航用） ───────────────────
 
-import { rowScrollTop } from "./virtual-window.ts";
+import { rowScrollTop, rowTop } from "./virtual-window.ts";
 
 const ROWS = [{ height: 100 }, { height: 100 }, { height: 100 }, { height: 100 }];
 
@@ -237,3 +237,32 @@ test("rowScrollTop：行高不齐时按前缀和算（不是 target × 平均高
   const rows = [{ height: 40 }, { height: 300 }, { height: 60 }];
   assert.equal(rowScrollTop({ rows: rows, target: 2, scrollTop: 0, viewportHeight: 100 }), 300);
 });
+// ─────────────────────── 把某一行钉在指定位置（锚定） ───────────────────────
+
+test("rowTop：前面所有行的高度之和", () => {
+  const rows = [{ height: 100 }, { height: 100 }, { height: 100 }];
+  assert.equal(rowTop(rows, 0), 0);
+  assert.equal(rowTop(rows, 1), 100);
+  assert.equal(rowTop(rows, 2), 200);
+});
+
+test("rowTop：高度不齐（分组标题那种）也按实际累加", () => {
+  const rows = [{ height: 30 }, { height: 120 }, { height: 30 }, { height: 120 }];
+  assert.equal(rowTop(rows, 2), 150);
+});
+
+test("rowTop：越界与非法值给出安全结果（不返回 NaN）", () => {
+  const rows = [{ height: 100 }, { height: 100 }];
+  assert.equal(rowTop(rows, -3), 0);
+  assert.equal(rowTop(rows, 99), 200, "超过行数 ⇒ 总高（调用方自己夹）");
+  assert.equal(rowTop(rows, Number.NaN), 0);
+  assert.equal(rowTop([], 3), 0);
+});
+
+test("rowTop 与 rowScrollTop 用的是同一份行高口径", () => {
+  const rows = [{ height: 40 }, { height: 40 }, { height: 40 }];
+  // 目标行高 40、视口 100：第 2 行已经在视野里 ⇒ 不动；第 3 行要滚到刚好露出来
+  assert.equal(rowScrollTop({ rows, target: 1, scrollTop: 0, viewportHeight: 100 }), 0);
+  assert.equal(rowScrollTop({ rows, target: 2, scrollTop: 0, viewportHeight: 100 }), 20);
+});
+

@@ -47,6 +47,7 @@ import {
   IconBan,
   IconLock,
   IconStar,
+  IconFlagFilled,
   IconStarFilled,
 } from "@tabler/icons-solidjs";
 import { Show, splitProps, type JSX } from "solid-js";
@@ -398,8 +399,12 @@ export function Tile(props: TileProps) {
             )}
           </Show>
 
+          {/*
+            旗标用**实心小旗**（人类 2026-09-19：以前这里是星星，与星标撞在一起分不清）。
+            「弃」的那一态在界面上已经取消了（见 BrowseToolbar 的说明），所以这里只有一种旗。
+          */}
           <Show when={local.flag === "pick"}>
-            <IconStarFilled size={11} aria-hidden="true" />
+            <IconFlagFilled size={11} aria-hidden="true" />
           </Show>
         </div>
       </Show>

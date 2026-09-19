@@ -263,6 +263,7 @@ const TEMPLATE_PREVIEW_KEYS = [
 /* ── 浏览（M2-W1）── */
 
 const ASSET_ITEM_KEYS = [
+  "hasRaw",
   "cameraMake",
   "cameraModel",
   "colorLabel",

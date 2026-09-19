@@ -188,6 +188,8 @@ export function TagDialog(props: TagDialogProps): JSX.Element {
     const created = await tagEnsure(name);
     if (created === null) return;
     setDictionary((current) => [created, ...current]);
+    // 同步进 store 的词典：右栏「标签」那一段当场就能显示它（不必等下次刷新）
+    props.store.rememberTag(created);
     stageTag(created);
   }
 
@@ -211,6 +213,15 @@ export function TagDialog(props: TagDialogProps): JSX.Element {
 
   async function save(): Promise<void> {
     if (busy()) return;
+    /*
+     * **输入框里还有没提交的名字 ⇒ 先把它当一条标签**（人类 2026-09-19：
+     * 「第一次点了保存没反应，后面好了」—— 真因就在这里：
+     * 用户打完字直接点「保存」，而保存只提交「已挂上/已摘掉」的清单，
+     * 输入框里的那串字既没挂上也没保存，弹窗一关看起来就是「点了没反应」）。
+     *
+     * 与回车同一个入口（`commitInput`），所以「回车新建」「点保存新建」结果一致。
+     */
+    if (query().trim() !== "") await commitInput();
     const add = adding()
       .map((tag) => tag.id)
       .filter((id) => !existingIds().includes(id));

@@ -672,6 +672,11 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
  * ══════════════════════════════════════════════════════════════ */
 
 export interface AssetInfoProps {
+  /**
+   * 浏览 store：右栏要读**这张照片的标签**（id 在标记里、名字在标签词典里，
+   * 两样都挂在 store 上）。
+   */
+  store: BrowseStore;
   /** 当前锚点那张（多选时是它，见 `BROWSE.md` §5.10）。 */
   item: AssetItem | null;
   /**
@@ -774,6 +779,35 @@ function ExifSection(props: { item: AssetItem }): JSX.Element {
   );
 }
 
+/** 一张照片的标签行（右栏用）。 */
+function AssetTags(props: { store: BrowseStore; item: AssetItem }): JSX.Element {
+  const store = props.store;
+  // 词典按需拉一次（幂等）
+  createEffect(() => {
+    void store.loadTags();
+  });
+  const tagIds = () => store.markings().get(props.item.id)?.tagIds ?? [];
+  const nameOf = (id: number): string =>
+    store.tags().find((tag) => tag.id === id)?.name ?? `#${id}`;
+
+  return (
+    <Show when={tagIds().length > 0}>
+      <section class="mb-5" data-asset-tags="open">
+        <h3 class="mb-1.5 text-fs-3 font-semibold text-fg-2">{t("browse.tagsSection")}</h3>
+        <div class="flex flex-wrap gap-1">
+          <For each={tagIds()}>
+            {(id) => (
+              <span class="rounded-ui bg-surface-track px-1.5 py-0.5 text-fs-1 text-fg-1">
+                {nameOf(id)}
+              </span>
+            )}
+          </For>
+        </div>
+      </section>
+    </Show>
+  );
+}
+
 export function AssetInfo(props: AssetInfoProps) {
   const item = () => props.item;
 
@@ -791,6 +825,13 @@ export function AssetInfo(props: AssetInfoProps) {
         <Show when={props.viewer} fallback={<ExifSection item={item()!} />}>
           {(store) => <ViewerReadout store={store()} />}
         </Show>
+
+        {/*
+          标签（人类 2026-09-19：右栏原先完全没展示标签）。
+          名字来自 store 的词典（`tags()`），id 来自这张照片的标记（`markings()`）——
+          词典没拉到就退回 `#id`，不装作没有标签。
+        */}
+        <AssetTags store={props.store} item={item()!} />
 
         {/* 文件信息（作者/描述/地理在 W2 接编辑） */}
         <section class="mb-5">

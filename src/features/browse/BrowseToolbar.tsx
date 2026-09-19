@@ -32,11 +32,12 @@
 
 import { For, Show } from "solid-js";
 import {
-  IconBan,
   IconFlag,
   IconLock,
   IconArrowBackUp,
   IconFilter,
+  IconFlagFilled,
+  IconFlagOff,
   IconArrowForwardUp,
   IconTag,
   IconStar,
@@ -116,10 +117,30 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
     read: (item: (typeof selected extends () => (infer U)[] ? U : never)) => T | null,
   ): TriState<T> => triState(selected().map((item) => read(item) ?? undefined));
 
+  /*
+   * 三态取值**只在标记态用**（筛选态一律读 `store.filter()`，见文件头的表）。
+   * 保留 `pick` 是因为标记态仍要看「选中的照片是什么状态」。
+   */
   const ratingState = () => pick<number>((item) => item.rating);
   const colorState = () => pick<string>((item) => item.colorLabel);
   const likeState = () => pick<string>((item) => item.likeState);
   const lockState = () => pick<number>((item) => item.lockLevel);
+
+  /** 筛选态的星标阈值（`null` = 没筛星） */
+  const filterRating = (): number | null => store.filter().minRating ?? null;
+  /** 筛选态的色标条件 */
+  const filterColors = (): readonly string[] => store.filter().colors ?? [];
+  /** 筛选态的喜欢条件（`"like"` / `"dislike"`，空 = 没筛） */
+  const filterLike = (): string | null => (store.filter().likes ?? [])[0] ?? null;
+  /** 筛选态的锁条件 */
+  const filterLocks = (): readonly number[] => store.filter().locks ?? [];
+  /** 筛选态的旗标条件（`pick` / `reject` / `none`） */
+  const filterFlag = (): string | null => store.filter().flag?.mode ?? null;
+  /** 选中的这些照片是不是**都有旗标**（旗标在内存里，只有 store 知道） */
+  const selectedAllPicked = (): boolean => {
+    const items = selected();
+    return items.length > 0 && items.every((item) => store.picks().has(item.id));
+  };
 
   /** 三态「恰好等于某个值」——写成具名函数，TS 才收窄得了（重复调用表达式不行）。 */
   const isExactly = (state: TriState<string>, value: string): boolean =>
@@ -165,6 +186,17 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
   const ids = () => store.selectedIds();
 
   /**
+   * 标记态的旗标开关：选中的**都已有旗标** ⇒ 取消；否则全部打上。
+   *
+   * 「都取消」而不是「逐个取反」：旗标是个整体状态，逐个取反会让一批照片里的旗子
+   * 一半亮一半灭，用户根本看不出点了以后发生了什么。
+   */
+  async function toggleFlag(): Promise<void> {
+    const all = selectedAllPicked();
+    await store.setFlag(ids(), all ? null : "pick");
+  }
+
+  /**
    * 走一次标记动作，并把「该说的话」收下来。
    *
    * 所有入口（星/色/喜欢/锁）都经过它 —— 否则总有一条路径忘了提示，
@@ -194,15 +226,22 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
     }
   }
 
-  /** 有选中照片时才让标记控件可用。 */
-  const markDisabled = () => !hasSelection();
+  /**
+   * 控件禁用与否。
+   *
+   * 标记态：**没有选中照片就不能打标**（点了也不知道往哪张打）。
+   * 筛选态：**永远可用** —— 筛选不需要先选照片（人类 2026-09-19：
+   * 「一旦开了筛选……顶部的那些图标就变成了设置筛选条件」）。
+   */
+  const markDisabled = () => (filterMode() ? false : !hasSelection());
 
   async function markRating(star: number): Promise<void> {
     if (filterMode()) {
-      // 筛选模式：点几星就是「只看几星」（再点一次同一个 → 取消筛选）
-      const current = store.filter().ratings ?? [];
-      const next = current.length === 1 && current[0] === star ? [] : [star];
-      store.patchFilter({ ratings: next });
+      /*
+       * 筛选模式：星标是**阈值**（人类 2026-09-19：「选 3 星，那么 4 星、5 星的也能出现」）。
+       * 再点同一个值 = 取消这个条件（与赞/踩、旗标同一套手感）。
+       */
+      store.patchFilter({ minRating: filterRating() === star ? null : star });
       return;
     }
     const values = selected().map((item) => item.rating);
@@ -211,9 +250,12 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
 
   async function markColor(color: string | null): Promise<void> {
     if (filterMode()) {
-      const current = store.filter().colors ?? [];
+      // 组内是「或」：绿 + 蓝都能加；再点同一个 = 取消那一个
       const key = color ?? "none";
-      const next = current.includes(key) ? current.filter((c) => c !== key) : [key];
+      const current = filterColors();
+      const next = current.includes(key)
+        ? current.filter((c) => c !== key)
+        : [...current, key];
       store.patchFilter({ colors: next });
       return;
     }
@@ -222,10 +264,15 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
 
   async function markLike(value: "like" | "dislike" | null): Promise<void> {
     if (filterMode()) {
-      const current = store.filter().likes ?? [];
-      const key = value ?? "none";
-      const next = current.includes(key) ? current.filter((l) => l !== key) : [key];
-      store.patchFilter({ likes: next });
+      /*
+       * 赞 / 踩**互斥**（人类 2026-09-19）：点另一个会把前一个换掉；
+       * 再点同一个 = 取消这个条件（界面上的按钮随之弹起）。
+       */
+      if (value === null) {
+        store.patchFilter({ likes: [] });
+        return;
+      }
+      store.patchFilter({ likes: filterLike() === value ? [] : [value] });
       return;
     }
     await runMark({ kind: "like", value });
@@ -233,7 +280,7 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
 
   async function markLock(level: number): Promise<void> {
     if (filterMode()) {
-      const current = store.filter().locks ?? [];
+      const current = filterLocks();
       const next = current.includes(level) ? current.filter((l) => l !== level) : [level];
       store.patchFilter({ locks: next });
       return;
@@ -302,43 +349,71 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
 
       <span class="w-5" />
 
-      {/* 旗标（只有两态；不进筛选，见文件头说明） */}
-      <ToggleBlock
-        pressed={false}
-        disabled={markDisabled()}
-        onPressedChange={() => void store.setFlag(ids(), "pick")}
-        icon={<IconFlag size={14} />}
-        label={t("browse.pick")}
+      {/*
+        旗标（人类 2026-09-19 重定）：
+        * **不是「留下 / 丢弃」，就是开关一个旗标**（旗标只活在内存、可跨目录，`BROWSE.md` §3.2）；
+        * 标记态：**一个按钮开/关**（图标是**实心旗**）+ 右边一个「清空旗标」；
+        * 筛选态：**两个按钮**「有旗标」（实心旗）/「无旗标」（空心旗），再点一次取消条件。
+
+        为什么标记态只留一个按钮：旗标是「这张我要留着处理」的标记，
+        「不想要」由删除表达（有回收站兜底），再来一个「弃」按钮只会让工具条更挤、
+        而且两张旗子长得很像、点错也看不出来。
+      */}
+      <Show
+        when={filterMode()}
+        fallback={
+          <>
+            <ToggleBlock
+              pressed={selectedAllPicked()}
+              disabled={markDisabled()}
+              onPressedChange={() => void toggleFlag()}
+              icon={<IconFlagFilled size={14} />}
+              label={t("browse.flagToggle")}
+            >
+              {t("browse.flagToggle")}
+            </ToggleBlock>
+            <Button
+              variant="ghost"
+              disabled={store.picks().size + store.rejects().size === 0}
+              icon={<IconFlagOff size={14} />}
+              onClick={(event) => {
+                clearFlags.request(
+                  t("browse.flagClearConfirm"),
+                  () => {
+                    void store.clearFlags();
+                    // 清旗标是全局动作，做完了说一句（它是「移除类」，用户需要确认真的发生了）
+                    props.toast?.show({ tone: "success", message: t("browse.flagCleared") });
+                  },
+                  event,
+                );
+              }}
+            >
+              {t("browse.flagClear")}
+            </Button>
+          </>
+        }
       >
-        {t("browse.pick")}
-      </ToggleBlock>
-      <ToggleBlock
-        pressed={false}
-        disabled={markDisabled()}
-        onPressedChange={() => void store.setFlag(ids(), "reject")}
-        icon={<IconBan size={14} />}
-        label={t("browse.reject")}
-      >
-        {t("browse.reject")}
-      </ToggleBlock>
-      <Button
-        variant="ghost"
-        disabled={store.picks().size + store.rejects().size === 0}
-        icon={<IconBan size={14} />}
-        onClick={(event) => {
-          clearFlags.request(
-            t("browse.flagClearConfirm"),
-            () => {
-              void store.clearFlags();
-              // 清旗标是全局动作，做完了说一句（它是「移除类」，用户需要确认真的发生了）
-              props.toast?.show({ tone: "success", message: t("browse.flagCleared") });
-            },
-            event,
-          );
-        }}
-      >
-        {t("browse.flagClear")}
-      </Button>
+        <ToggleBlock
+          pressed={filterFlag() === "pick"}
+          onPressedChange={() =>
+            store.patchFilter({ flag: filterFlag() === "pick" ? null : { mode: "pick" } })
+          }
+          icon={<IconFlagFilled size={14} />}
+          label={t("browse.flagWith")}
+        >
+          {t("browse.flagWith")}
+        </ToggleBlock>
+        <ToggleBlock
+          pressed={filterFlag() === "none"}
+          onPressedChange={() =>
+            store.patchFilter({ flag: filterFlag() === "none" ? null : { mode: "none" } })
+          }
+          icon={<IconFlag size={14} />}
+          label={t("browse.flagWithout")}
+        >
+          {t("browse.flagWithout")}
+        </ToggleBlock>
+      </Show>
 
       <span class="w-5" />
 

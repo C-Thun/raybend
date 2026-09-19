@@ -35,7 +35,7 @@ import { createImportStore, ImportWorkspace } from "./workspaces/import/index.ts
 import { createToastStore, ToastHost, toastDisposer } from "./components/ui/Toast.tsx";
 import { BrowseToolbar, createBrowseStore, TagDialog } from "./features/browse/index.ts";
 import { LibrarySettingsDialog } from "./features/repositories/index.ts";
-import { browseDelete, browseFacets, browseMark, browseMarkings, browsePage, browseRedo, browseTimeline, browseUndo, flagsClear, flagsGet, flagsSet } from "./api/browse.ts";
+import { browseDelete, browseFacets, browseMark, browseMarkings, browsePage, browseRedo, browseTimeline, browseUndo, flagsClear, flagsGet, flagsSet, tagList } from "./api/browse.ts";
 import { BrowseWorkspace } from "./workspaces/browse/index.ts";
 import {
   applyNotice,
@@ -76,6 +76,7 @@ export default function App() {
       timeline: browseTimeline,
       facets: browseFacets,
       markings: browseMarkings,
+      tagList,
       mark: browseMark,
       undo: browseUndo,
       redo: browseRedo,

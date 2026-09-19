@@ -43,6 +43,7 @@ import {
   tileSizeAt,
 } from "../../lib/tile-flow.ts";
 import { joinPath } from "../../lib/paths.ts";
+import { rowTop } from "../../lib/virtual-window.ts";
 import { buildBrowseRows, browseGroups, sliceOrder, type BrowseRowModel } from "./rows.ts";
 import type { BrowseStore } from "./store.ts";
 
@@ -92,6 +93,26 @@ export interface BrowseGridProps {
    * 不传 = 不管滚动。
    */
   focusIndex?: number;
+  /**
+   * 「看图刚刚关掉了」的**计数器**（每次关 +1）。
+   *
+   * 网格要它**只为一件事**：把焦点要回来（见下面那个 effect）——否则焦点掉到 `body`，
+   * 回车/方向键再也到不了网格（人类 2026-09-19 报的「Esc 退出后回车进不去」就是这个）。
+   *
+   * 为什么是计数器而不是「看图是否开着」：看图有**多条关闭路径**
+   * （`Esc`、对比态的「返回」、工具条上的关闭），只盯「开着→关掉」的跃变会漏掉
+   * 「关闭时网格根本没在跑那个跃变」的情形 —— 实测踩过（真机冒烟里
+   * 对比态点返回后焦点就没人管了）。这里改成「外面每关一次就报一次」，
+   * 与谁关的、走哪条路都无关。
+   */
+  focusNudge?: number;
+  /**
+   * 当前筛选条件的**指纹**（`JSON.stringify(filter)` + 模式）。
+   *
+   * 网格用它做一件事：**换筛选时让窗口内容不动**（人类 2026-09-19）——
+   * 指纹一变就把「参考照片」钉回它原来离容器顶边的位置。
+   */
+  filterKey?: string;
   /**
    * 要进看图（双击某张、或在选中一张时回车）。
    *
@@ -220,6 +241,134 @@ export function BrowseGrid(props: BrowseGridProps) {
     if (at >= 0) props.onOpenViewer?.(list, at);
   }
 
+  /**
+   * 看图关掉时把焦点还给网格。
+   *
+   * 为什么必须还：回车进看图的监听挂在**网格容器**上（`onKeyDown`），
+   * 而看图件关闭时它是被卸载的 —— 焦点会掉回 `<body>`，之后按回车**事件根本到不了网格**。
+   * 界面上照片看着还是选中的（状态在 store 里没丢），但回车没反应，
+   * 人类 2026-09-19 报的「Esc 退出后按 Enter 进不去」就是这一条。
+   *
+   * 落到哪：优先**锚点那张 tile**（用户看到的「当前这张」），没有就落到任意一张 tile，
+   * 再没有就落到容器本身（容器临时给 `tabindex="-1"`，不然不可聚焦）。
+   */
+  /**
+   * 把焦点还回「当前那张」tile。
+   *
+   * 落到哪：优先**锚点那张**（用户看到的「当前这张」），没有就落到任意一张 tile，
+   * 再没有就落到容器本身（容器临时给 `tabindex="-1"`，不然不可聚焦）。
+   *
+   * 为什么要**重试几帧**：看图关掉会触发一次数据重载（标记/分页），
+   * 虚拟列表的行元素是整块换掉的 —— 第一帧刚 focus 上的那张 tile
+   * 下一帧可能已经不在 DOM 里了，焦点于是又掉回 `body`（真机冒烟实测）。
+   * 判据收紧成「焦点**丢了**才补」：只要此刻焦点在网格里，或用户已经点到别处
+   * （工具条、输入框……），就不再插手。
+   */
+  function focusTiles(attempt = 0): void {
+    if (container === undefined) return;
+    const selected =
+      container.querySelector<HTMLElement>('[role="option"][aria-selected="true"]') ??
+      container.querySelector<HTMLElement>('[role="option"]');
+    if (selected !== null) {
+      selected.focus();
+    } else {
+      container.setAttribute("tabindex", "-1");
+      container.focus();
+    }
+    if (attempt >= 6) return;
+    requestAnimationFrame(() => {
+      if (container === undefined) return;
+      const active = document.activeElement;
+      const lost = active === null || active === document.body;
+      if (!lost) return;
+      focusTiles(attempt + 1);
+    });
+  }
+
+  createEffect<number | undefined>((seen) => {
+    const nudge = props.focusNudge ?? 0;
+    if (seen !== undefined && nudge !== seen) queueMicrotask(() => focusTiles());
+    return nudge;
+  });
+
+  /*
+   * ══ 锚定：换筛选时让窗口内容不动（人类 2026-09-19）══
+   *
+   * 问题：筛选把一批照片去掉之后，列表只剩剩下的那些 —— 原来在屏幕上方的照片全没了，
+   * 于是「视线里那张」会突然跳到别处（用户失去方位感）。
+   *
+   * 做法（两条）：
+   *   1. **持续记录参考照片**：滚动/取数时把「第一条可见行里的第一个 tile」连同
+   *      它离容器顶边的像素距离存下来（`lastSeen`）—— 这是个普通对象，不参与响应式；
+   *   2. **筛选指纹一变**：把刚才那份快照记成 `pendingPin`；等新数据铺好之后，
+   *      在**新列表**里找同一张照片（找不到就退回锚点那张），把它滚回原来的高度。
+   *
+   * 找不到那张照片时**什么都不做**（保持浏览器的滚动位置）——
+   * 硬滚到「第 N 行」在筛掉一大半的情况下会把用户甩到别的地方，比不动更糟。
+   */
+  let lastSeen: { id: number; offsetPx: number } | null = null;
+  const [pendingPin, setPendingPin] = createSignal<
+    { id: number; offsetPx: number; key: string } | null
+  >(null);
+  const [scrollRequest, setScrollRequest] = createSignal<
+    { row: number; offsetPx: number; key: string } | null
+  >(null);
+
+  /** 某个 id 现在落在第几行（`-1` = 不在当前已加载的列表里） */
+  const rowOfId = (id: number): number => {
+    const list = rows();
+    for (let index = 0; index < list.length; index += 1) {
+      const row = list[index];
+      if (row === undefined || row.kind !== "tiles") continue;
+      for (const slot of row.slots) {
+        if (store.itemAt(slot)?.id === id) return index;
+      }
+    }
+    return -1;
+  };
+
+  /** 记一次「参考照片」（可见范围变化时调） */
+  function rememberReference(startRow: number): void {
+    const scroller = container?.querySelector<HTMLElement>("[data-virtual-scroller]");
+    if (scroller === null || scroller === undefined) return;
+    const row = rows()[startRow];
+    if (row === undefined || row.kind !== "tiles") return;
+    const firstSlot = row.slots.find((slot) => store.itemAt(slot) !== null);
+    if (firstSlot === undefined) return;
+    const item = store.itemAt(firstSlot);
+    if (item === null) return;
+    lastSeen = { id: item.id, offsetPx: rowTop(rows(), startRow) - scroller.scrollTop };
+  }
+
+  // 筛选指纹变了 ⇒ 记下待钉的目标（用**变化前**记下的那份快照）
+  createEffect<string | undefined>((previous) => {
+    const key = props.filterKey;
+    if (previous !== undefined && key !== previous && lastSeen !== null) {
+      setPendingPin({ ...lastSeen, key: `${previous}→${key}` });
+    }
+    return key;
+  });
+
+  // 新数据铺好之后（`rows()` 变了）执行钉位；数据还没回来就等下一轮
+  createEffect(() => {
+    const pin = pendingPin();
+    if (pin === null) return;
+    if (store.total() === 0) {
+      setPendingPin(null);
+      return;
+    }
+    const anchor = store.selection().anchor;
+    let row = rowOfId(pin.id);
+    if (row < 0 && anchor !== null) row = rowOfId(Number(anchor));
+    if (row < 0) {
+      // 参考照片被筛掉了、锚点也不在：**什么都不做**（见上面第 2 条的说明）
+      setPendingPin(null);
+      return;
+    }
+    setScrollRequest({ row, offsetPx: pin.offsetPx, key: pin.key });
+    setPendingPin(null);
+  });
+
   /** 「当前那张」落在哪一行（虚拟列表按行渲染，滚动得按行来） */
   const focusRow = (): number | undefined => {
     const index = props.focusIndex;
@@ -299,6 +448,19 @@ export function BrowseGrid(props: BrowseGridProps) {
     thumbs.clear();
   });
   onCleanup(() => ownThumbs?.clear());
+
+  /**
+   * tile 下面的那个小标签（`Tile` 的 `tag`）。
+   *
+   * 三种形态一眼可分（人类 2026-09-19）：只有位图写扩展名、只有 RAW 写 `RAW`、
+   * **位图 + RAW 写 `+RAW`** —— 第三种是「SOOC 位图 + 可编辑 RAW」的复合体。
+   */
+  const tileTag = (item: { ext?: string; isRaw?: boolean; hasRaw?: boolean } | undefined): string | undefined => {
+    if (item === undefined) return undefined;
+    if (item.isRaw === true) return t("browse.raw");
+    if (item.hasRaw === true) return `+${t("browse.raw")}`;
+    return item.ext === undefined ? undefined : item.ext.toUpperCase();
+  };
 
   /** 库里照片的绝对路径（拼接规则在 `lib/paths.ts`，全项目一份）。 */
   const absPath = (relPath: string): string | null => {
@@ -388,7 +550,9 @@ export function BrowseGrid(props: BrowseGridProps) {
         /* 点空白（没落在 tile 上）= 取消选择（人类 2026-09-19） */
         onBackgroundClick={() => store.clearSelection()}
         focusRow={focusRow()}
+        scrollTo={scrollRequest()}
         onVisibleRange={(start, end) => {
+          rememberReference(start);
           const [from, to] = rowIndexRange(start, end);
           /*
            * 取数据 + **顺手把这一段的真实宽高补齐**。
@@ -491,7 +655,13 @@ export function BrowseGrid(props: BrowseGridProps) {
                       loading={item() === null}
                       context="library"
                       label={item()?.fileName ?? ""}
-                      tag={item()?.ext?.toUpperCase() ?? undefined}
+                      /*
+                       * 三种 tile 形态（人类 2026-09-19）：
+                       *   只有位图 → 扩展名（JPG / PNG）
+                       *   只有 RAW → `RAW`
+                       *   位图 + RAW → `+RAW`（位图是 SOOC，编辑落在 RAW 上）
+                       */
+                      tag={tileTag(item() ?? undefined)}
                       src={url() ?? undefined}
                       /*
                        * 竖图必须按**自己的比例**居中显示（人类 2026-09-19：一旦是 tile，

@@ -283,6 +283,19 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
     if (!comparing()) setCompareStrip(false);
   });
 
+  /*
+   * 看图关掉 ⇒ 通知网格把焦点要回去（`BROWSE.md` §5.4 的键盘接续）。
+   *
+   * 挂在「看图开没开」这个状态上，是因为**所有**关闭路径最后都会落到它
+   * （`Esc`、对比态的「返回」、看图件自己的关闭按钮）—— 只做一次、只有一份实现。
+   */
+  const [focusNudge, setFocusNudge] = createSignal(0);
+  createEffect<boolean | undefined>((wasActive) => {
+    const active = viewer.state().active;
+    if (wasActive === true && !active) setFocusNudge((n) => n + 1);
+    return active;
+  });
+
   /** 进看图：顺便把展开的库列表收了（`BROWSE.md` §4.2 的第二个收起条件）。 */  function openViewer(photos: Parameters<typeof viewer.show>[0], index: number): void {
     setLibsExpanded(false);
     // 每次进看图都从「① 默认」开始（退出时重置，这两处合起来保证「左右栏必定回来」）
@@ -666,6 +679,8 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
             grouped={grouped()}
             thumbs={thumbs}
             focusIndex={focusIndex()}
+            focusNudge={focusNudge()}
+            filterKey={`${store.filterMode() ? "on" : "off"}:${JSON.stringify(store.filter())}`}
             onInteract={() => setLibsExpanded(false)}
             onFocusIndex={(index) => setFocusIndex(index)}
             onOpenViewer={openViewer}
@@ -755,7 +770,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
           右栏在看图态换成**预览 + 直方图**（`BROWSE.md` §5.9）——
           看图件的 store 本身就是「当前看哪张 + 看到哪一块」的唯一事实来源，直接传进去。
         */}
-        <AssetInfo item={anchor()} viewer={viewer.state().active ? viewer : null} />
+        <AssetInfo store={store} item={anchor()} viewer={viewer.state().active ? viewer : null} />
       </aside>
       </div>
 
