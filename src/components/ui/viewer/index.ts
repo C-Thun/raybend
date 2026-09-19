@@ -35,3 +35,6 @@ export type {
   ViewerStoreDeps,
   ViewportSize,
 } from "./store.ts";
+/** 胶片带与对比视图：**import 与 browse 共用同一份**（人类 2026-09-19） */
+export { FilmStrip } from "./FilmStrip.tsx";
+export { CompareView } from "./CompareView.tsx";

@@ -42,7 +42,22 @@
  * 这两条正是 `plans/M2-W2.md` 2.3 的两条硬要求。
  */
 
-import type { ViewerPhoto } from "../components/ui/viewer/index.ts";
+/**
+ * 对比数学只关心两件事：**这张是谁**（`id`）与**它的原始尺寸**（`natural`）。
+ *
+ * 刻意**不** import UI 层里那个照片类型 —— 那是 `components/` 的定义，
+ * 而 `lib/` 只能向下依赖（`ARCHITECTURE.md` §1，`pnpm lint:arch` 会拦）。
+ * 声明「我需要的形状」而不是「我要谁的类型」，两侧（import / browse）就都能用它：
+ * 真实照片对象在结构上满足它，直接传进来即可。
+ */
+export interface ComparablePhoto {
+  id: string;
+  /**
+   * 原图尺寸。口径与 `ViewerPhoto.natural` **完全一致**：可选，但一旦有就非 null
+   * （还没读到元数据时就是「没有」）。尺寸未知时对比退回「整张/零」，不编比例。
+   */
+  natural?: { width: number; height: number };
+}
 
 /** 同时对比的**上限**（人类 2026-09-18：对比 2–4 张） */
 export const COMPARE_MAX = 4;
@@ -111,7 +126,7 @@ export function compareLayout(count: number): { columns: number; rows: number } 
  * 尺寸未知（`natural` 缺失）时返回 `null` —— 调用方退回「各自用自己的比例」，
  * 而不是编一个比例出来（编错了整屏都会歪）。
  */
-export function baselineAspect(photos: readonly ViewerPhoto[]): number | null {
+export function baselineAspect(photos: readonly ComparablePhoto[]): number | null {
   const first = photos[0];
   const size = first?.natural;
   if (!size || size.width <= 0 || size.height <= 0) return null;
@@ -147,9 +162,14 @@ export function cropToAspect(size: Size, aspect: number): CropRect {
   return { x: 0, y: (height - cropped) / 2, width, height: cropped };
 }
 
-/** 一帧：某张照片 + 它在自己像素里要显示的那块 */
-export interface CompareFrame {
-  photo: ViewerPhoto;
+/**
+ * 一帧：某张照片 + 它在自己像素里要显示的那块。
+ *
+ * **对照片类型泛型**：`compareFrames` 会把传进来的对象**原样**放进帧里，
+ * 所以调用方拿到的 `frame.photo` 仍是它自己的类型（`fileName` / `path` 这些字段不丢）。
+ */
+export interface CompareFrame<T extends ComparablePhoto = ComparablePhoto> {
+  photo: T;
   /** 扣出来的那块（比例 = 基准比例） */
   crop: CropRect;
 }
@@ -159,7 +179,9 @@ export interface CompareFrame {
  *
  * `photos` 传 `compareShown(compareIds(...))` 的结果（已经按显示顺序、已截到上限）。
  */
-export function compareFrames(photos: readonly ViewerPhoto[]): CompareFrame[] {
+export function compareFrames<T extends ComparablePhoto>(
+  photos: readonly T[],
+): CompareFrame<T>[] {
   const aspect = baselineAspect(photos);
   return photos.map((photo) => ({
     photo,

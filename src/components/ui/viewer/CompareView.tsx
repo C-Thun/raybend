@@ -24,9 +24,9 @@
 
 import { createSignal, For, Show, type JSX } from "solid-js";
 
-import { t } from "../../i18n/index.ts";
-import type { ViewerPhoto, ViewerStore } from "../../components/ui/viewer/index.ts";
-import { baselineAspect, COMPARE_MAX, compareFrames, compareLayout, panPercent } from "../../lib/viewer-compare.ts";
+import { t } from "../../../i18n/index.ts";
+import type { ViewerPhoto, ViewerStore } from "./index.ts";
+import { baselineAspect, COMPARE_MAX, compareFrames, compareLayout, panPercent } from "../../../lib/viewer-compare.ts";
 
 export interface CompareViewProps {
   /** 参与对比的照片（已按显示顺序、已截到上限，顺序里第一个是基准） */

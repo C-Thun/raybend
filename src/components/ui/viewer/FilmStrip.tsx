@@ -25,17 +25,28 @@
 import { createEffect, For, on, Show, type JSX } from "solid-js";
 import { IconLock } from "@tabler/icons-solidjs";
 
-import { clickMode } from "../../lib/selection.ts";
-import { t } from "../../i18n/index.ts";
-import type { ThumbQueue } from "../../components/ui/thumb-queue.ts";
-import type { ViewerPhoto, ViewerStore } from "../../components/ui/viewer/index.ts";
-import type { BrowseStore } from "./store.ts";
+import { clickMode } from "../../../lib/selection.ts";
+import { t } from "../../../i18n/index.ts";
+import type { ThumbQueue } from "../thumb-queue.ts";
+import type { ViewerPhoto, ViewerStore } from "./index.ts";
 
 export interface FilmStripProps {
   /** 看图件：列表与当前下标都从它来（胶片带与看图同源） */
   viewer: ViewerStore;
-  /** 浏览 store：选择状态与选择动作（与 tiles 共用同一套） */
-  store: BrowseStore;
+  /**
+   * 当前选中集（画「选中底色」用）。
+   *
+   * ⚠️ 这里**不再直接持有 browse store**（人类 2026-09-19 要求两侧共用同一份组件）：
+   * 胶片带只认「选中集 + 一个选择回调」，谁调用它、库里怎么存标记都与它无关 ——
+   * 于是 import 与 browse 能用**同一条**胶片带，而选择语义仍由各自的 store 决定。
+   */
+  selectedIds: ReadonlySet<string>;
+  /**
+   * 点一张：模式（replace / toggle / range）已经由本组件按修饰键算好
+   * （`clickMode()`，与网格用的是同一个函数）。
+   * 调用方负责把它落进自己的选择模型（browse 会把它交给 `store.select`）。
+   */
+  onSelect: (id: number, mode: "replace" | "toggle" | "range") => void;
   /** 与网格共用的缩略图队列 */
   thumbs: ThumbQueue;
   /**
@@ -69,7 +80,7 @@ export function FilmStrip(props: FilmStripProps): JSX.Element {
   /** 当前这张在**全列表**里的下标（`goTo` 要的是全列表下标） */
   const fullIndex = (photo: ViewerPhoto): number =>
     allPhotos().findIndex((item) => item.id === photo.id);
-  const selectedIds = () => props.store.selection().ids;
+  const selectedIds = () => props.selectedIds;
   // 选择集合里存的是**字符串** id（`lib/selection.ts` 的口径），看图件的 id 也是字符串
   const isSelected = (photo: ViewerPhoto): boolean => selectedIds().has(photo.id);
 
@@ -132,11 +143,7 @@ export function FilmStrip(props: FilmStripProps): JSX.Element {
      */
     const keep = compare ? [...(props.onlyIds ?? [])] : [];
     // ① 选择：与 tiles **同一套**（修饰键判定也是同一个函数）
-    props.store.select(
-      Number(photo.id),
-      mode,
-      allPhotos().map((item) => item.id),
-    );
+    props.onSelect(Number(photo.id), mode);
     if (compare) {
       // 点的是**要移出对比**的那张：不跳过去；若它正是当前那张，落到还在对比里的邻居
       if (wasCurrent) goToSurvivor(photo, keep);

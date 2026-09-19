@@ -18,9 +18,13 @@ import {
   panPercent,
   percentToPan,
 } from "./viewer-compare.ts";
-import type { ViewerPhoto } from "../components/ui/viewer/index.ts";
+import type { ComparablePhoto } from "./viewer-compare.ts";
 
-function photo(id: string, width?: number, height?: number): ViewerPhoto {
+/** 测试用照片：满足 `ComparablePhoto`，另外带几个真实对象才有的字段（验泛型会不会丢字段） */
+type TestPhoto = ComparablePhoto & { path: string; fileName: string };
+
+/** 不传宽高 = 尺寸未知（真实场景：元数据还没读到） */
+function photo(id: string, width?: number, height?: number): TestPhoto {
   return {
     id,
     path: `/lib/${id}.JPG`,

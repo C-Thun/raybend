@@ -43,9 +43,9 @@ import {
   nextChrome,
   type ViewerChrome,
 } from "../../lib/viewer-chrome.ts";
-import { FilmStrip } from "../../features/browse/FilmStrip.tsx";
+import { FilmStrip } from "../../components/ui/viewer/index.ts";
 import { FilterBar } from "../../features/browse/FilterBar.tsx";
-import { CompareView } from "../../features/browse/CompareView.tsx";
+import { CompareView } from "../../components/ui/viewer/index.ts";
 import { compareIds } from "../../lib/viewer-compare.ts";
 import { createThumbQueue } from "../../components/ui/thumb-queue.ts";
 import { createViewerStore, Viewer } from "../../components/ui/viewer/index.ts";
@@ -671,7 +671,14 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
         <Show when={viewer.state().active && chromeShowsFilm(chrome())}>
           <FilmStrip
             viewer={viewer}
-            store={store}
+            selectedIds={store.selection().ids}
+            onSelect={(id, mode) =>
+              store.select(
+                id,
+                mode,
+                viewer.state().photos.map((photo) => photo.id),
+              )
+            }
             thumbs={thumbs}
             onlyIds={compareStrip() ? comparedIds() : undefined}
           />
