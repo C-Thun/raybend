@@ -234,6 +234,17 @@ const chrome = spawn(
     "--no-sandbox",
     "--disable-gpu",
     "--disable-dev-shm-usage",
+    /*
+     * **无头 Chrome 默认没有鼠标**：`(hover: hover)` / `(pointer: fine)` 都是 false，
+     * 于是 Tailwind 里所有 `hover:*` / `group-hover:*` 变体整条失效
+     *（那是「真机有鼠标」才成立的媒体特性）。`Emulation.setEmulatedMedia` 试过、不生效，
+     * 正确做法是启动时把 blink 的悬停/指针能力直接声明出来
+     *（HoverType::kHover = 2，PointerType::kFine = 4）。
+     *
+     * 不修这个的后果：冒烟里怎么移动鼠标，信息条都不浮出 —— 会误判成 CSS 写错
+     *（2026-09-20 真踩过）。
+     */
+    "--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4",
     `--remote-debugging-port=${PORT}`,
     "--window-size=1440,900",
     "about:blank",
@@ -355,16 +366,25 @@ try {
           if (cmd === "dir_meta_ensure") {
             /*
              * 补读宽高（老库兜底路径）：按请求的文件名逐个回答 ——
-             * 回来一份「真实的」4:3，界面应当据此把比例与对比尺寸都补齐。
+             * 回来一份「真实的」尺寸，界面应当据此把比例与对比尺寸都补齐。
+             *
+             * ⚠️ 故意让 **MY006 变成竖图且更小**（2400×3200，7.68M）而其他都是
+             * 4000×3000（12M）：这样 ① 老库补读路径照旧被覆盖；
+             * ② 一组里的图**比例不同、像素数也不同** —— 虚拟画布（宽 4000 × 高 3200）、
+             * 居中留白、以及「按像素数最小的那张算适合窗口」三条都能在真浏览器里量到。
              */
             const files = (args && args.files) || [];
             return Promise.resolve(
-              files.map((file) => ({
-                relative: String(file.relative),
-                width: 4000,
-                height: 3000,
-                orientation: 1,
-              })),
+              files.map((file) => {
+                const relative = String(file.relative);
+                const portrait = /MY006/i.test(relative);
+                return {
+                  relative,
+                  width: portrait ? 2400 : 4000,
+                  height: portrait ? 3200 : 3000,
+                  orientation: 1,
+                };
+              }),
             );
           }
           if (cmd === "dir_list") {
@@ -375,6 +395,14 @@ try {
               return Promise.resolve([photos.date, photos.raw]);
             }
             return Promise.resolve([]);
+          }
+          /*
+           * 打标的**参数**要留痕：赞/踩「再点一次 = 取消」这条只能靠参数验
+           * （2026-09-20 的 bug 就是第二次仍然发 value="like"，后端判定无改动 → 弹「没有需要改动的照片」）。
+           */
+          if (cmd === "browse_mark") {
+            window.__MARK_ARGS = window.__MARK_ARGS || [];
+            window.__MARK_ARGS.push(args);
           }
           return Promise.resolve(
             Object.prototype.hasOwnProperty.call(fixtures, cmd) ? fixtures[cmd] : undefined,
@@ -595,11 +623,38 @@ try {
   const tilesCompare = await send("Runtime.evaluate", {
     expression: `(() => {
       const frames = [...document.querySelectorAll("[data-compare-frame]")];
+      /*
+       * **混合比例**的一组（人类 2026-09-20 报的那个「横图被裁成竖图」）：
+       * MY005 是 4000×3000（横）、MY006 补读成 2400×3200（竖且更小）。
+       * 虚拟画布应当是 4000×3200 —— 两张图都按**原尺寸居中**贴进去，谁都不裁。
+       */
+      const details = frames.map((frame) => {
+        const canvasEl = frame.querySelector("[data-compare-canvas]");
+        const img = frame.querySelector("img");
+        const canvasBox = canvasEl?.getBoundingClientRect();
+        const imgBox = img?.getBoundingClientRect();
+        const paneBox = frame.getBoundingClientRect();
+        return canvasBox && imgBox
+          ? {
+              name: frame.getAttribute("aria-label"),
+              fillW: imgBox.width / canvasBox.width,
+              fillH: imgBox.height / canvasBox.height,
+              offsetX: (imgBox.left - canvasBox.left) / canvasBox.width,
+              offsetY: (imgBox.top - canvasBox.top) / canvasBox.height,
+              insideCanvas:
+                imgBox.width <= canvasBox.width + 0.5 && imgBox.height <= canvasBox.height + 0.5,
+              insidePane:
+                imgBox.width <= paneBox.width + 0.5 && imgBox.height <= paneBox.height + 0.5,
+              canvas: { width: canvasBox.width, height: canvasBox.height },
+            }
+          : null;
+      });
       return {
         compare: Boolean(document.querySelector('[data-compare="open"]')),
         frames: frames.length,
         images: frames.filter((f) => f.querySelector("img") !== null).length,
         noSize: (document.body.innerText || "").includes("还没读到这张的尺寸"),
+        details,
       };
     })()`,
     returnByValue: true,
@@ -618,6 +673,46 @@ try {
     }
     if (tilesCmp.noSize) {
       problems.push("对比里出现了「还没读到这张的尺寸」—— 说明宽高没补齐就进画幅了");
+    }
+
+    /*
+     * 混合比例：虚拟画布 = 最大宽 × 最大高 = 4000×3200；
+     * 横图（4000×3000）上下各留 100px（占比 0.03125），竖图（2400×3200）左右各留 800px（0.2）。
+     * 关键：**两张都不被裁**（`insideCanvas`），而且**没有任何一张被拉伸**（fill 值就是原比例）。
+     */
+    const details = tilesCmp.details ?? [];
+    const landscape = details.find((d) => d !== null && /MY005/i.test(String(d.name)));
+    const portrait = details.find((d) => d !== null && /MY006/i.test(String(d.name)));
+    if (landscape === undefined || portrait === undefined) {
+      problems.push(`量不到两张混合比例的图（实测 ${JSON.stringify(details)}）`);
+    } else {
+      if (Math.abs(landscape.fillW - 1) > 0.01 || Math.abs(landscape.fillH - 3000 / 3200) > 0.01) {
+        problems.push(`横图在画布里的占比不对（实测 ${JSON.stringify(landscape)}）`);
+      }
+      if (Math.abs(portrait.fillW - 2400 / 4000) > 0.01 || Math.abs(portrait.fillH - 1) > 0.01) {
+        problems.push(`竖图在画布里的占比不对（实测 ${JSON.stringify(portrait)}）`);
+      }
+      if (Math.abs(landscape.offsetX) > 0.005 || Math.abs(landscape.offsetY - 100 / 3200) > 0.01) {
+        problems.push(`横图应当在画布上下留白（居中），实测 ${JSON.stringify(landscape)}`);
+      }
+      if (Math.abs(portrait.offsetY) > 0.005 || Math.abs(portrait.offsetX - 0.2) > 0.01) {
+        problems.push(`竖图应当在画布左右留白（居中），实测 ${JSON.stringify(portrait)}`);
+      }
+      if (landscape.insideCanvas !== true || portrait.insideCanvas !== true) {
+        problems.push(
+          `虚拟画布不许裁图（人类报的正是「横图被裁成竖比例」），实测 ${JSON.stringify({ landscape, portrait })}`,
+        );
+      }
+      /*
+       * 「适合窗口」按**像素数最小**的那张算：竖图 2400×3200 = 7.68M 比横图 12M 小，
+       * 所以它必须完整待在栏区里（横图可以溢出栏区被窗口裁 —— 那是窗口的事，不是画布的事）。
+       */
+      if (portrait.insidePane !== true) {
+        problems.push(`「适合窗口」应当按最小的那张（竖图）算，它必须整张可见（实测 ${JSON.stringify(portrait)}）`);
+      }
+      if (Math.abs(landscape.canvas.width - portrait.canvas.width) > 0.5) {
+        problems.push("两格的画布必须是同一张（尺寸一致）");
+      }
     }
   }
 
@@ -1125,6 +1220,72 @@ try {
   }
 
   /*
+   * 赞/踩：**重复点同一个 = 取消**（人类 2026-09-20 报「取消不了，右上角提示没有需要改动的照片」）。
+   *
+   * 根因：`markLike` 无条件是 `value`，第二次仍送同一个值 → 后端判定无改动。
+   * 验证方式取最直接的一条：选一张**已经喜欢**的照片（fixture 里 MY002 的 `likeState = like`），
+   * 点「喜欢」必须送出 `value = null`（取消）。这样不依赖「打完标再读回来」那条回路
+   *（假后端的 `browse_markings` 是固定的空数组，回路本来就闭不上）。
+   */
+  const likeSetup = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const tiles = [...document.querySelectorAll('[data-virtual-scroller] [role="option"]')];
+      // fixture 里唯一「已喜欢」的就是带标记的那一张（rating 3 + 红标 + likeState=like）
+      const target = tiles.find((t) => t.querySelector('[data-tile-bar="marks"] svg') !== null)
+        ?? tiles[0]
+        ?? null;
+      target?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      const button = [...document.querySelectorAll("button")].find(
+        (b) => b.getAttribute("aria-label") === "喜欢",
+      );
+      return {
+        tile: target ? (target.innerText || "").trim().slice(0, 12) : null,
+        pressed: button?.getAttribute("aria-pressed") ?? null,
+        disabled: button ? button.disabled : null,
+      };
+    })()`,
+    returnByValue: true,
+  });
+  await sleep(350);
+  const likeSetupState = likeSetup.result?.value ?? {};
+  await send("Runtime.evaluate", {
+    expression: `window.__MARK_ARGS = []`,
+    returnByValue: true,
+  });
+  const likeClick = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const button = [...document.querySelectorAll("button")].find(
+        (b) => b.getAttribute("aria-label") === "喜欢",
+      );
+      button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      return { pressed: button?.getAttribute("aria-pressed") ?? null, disabled: button ? button.disabled : null };
+    })()`,
+    returnByValue: true,
+  });
+  await sleep(400);
+  const likeArgs = await send("Runtime.evaluate", {
+    // 参数形状：`{ repositoryId, ids, action }`，动作在 `action` 里
+    expression: `(window.__MARK_ARGS || []).filter((a) => a && a.action && a.action.kind === "like")`,
+    returnByValue: true,
+  });
+  const likes = likeArgs.result?.value ?? [];
+  if (likeSetupState.pressed !== "true") {
+    problems.push(
+      `没选中一张「已喜欢」的照片，取消这条验不了（实测 ${JSON.stringify(likeSetupState)}）`,
+    );
+  }
+  if (likes.length === 0) {
+    problems.push(`点「喜欢」应当发一次 browse_mark（实测 ${JSON.stringify(likes)}）`);
+  } else if (likes[likes.length - 1].action.value !== null) {
+    problems.push(
+      `已经喜欢的那张再点「喜欢」必须**取消**（值应当是 null，实测 ${JSON.stringify(likes[likes.length - 1].action)}）`,
+    );
+  }
+  if (likeClick.result?.value?.disabled === true) {
+    problems.push("「喜欢」按钮不该是禁用的（有选中就该能点）");
+  }
+
+  /*
    * 5.1：Delete → 必须先弹确认（人类 2026-09-19 的批注：删除能批量，所以不给 easy destroy / Shift 快通道）。
    * 确认之后：成功的走提示、被锁与失败的分别说清楚，失败清单进模态。
    */
@@ -1262,6 +1423,395 @@ try {
       `点一行里空着的槽位应当取消选择（实测命中的是 ${JSON.stringify(blankHit.target)}，选中仍是 ${blankAfter.selected}）`,
     );
   }
+
+  /*
+   * tiles 的信息条（人类 2026-09-20 报的两条）：
+   *   ① 悬浮/选中时**顶部标记条**与**底部文件名背景条**都没了；
+   *   ② 信息档位（含第 1 级）无效 —— 根因是顶部条从来没渲染过（`Tile` 的 `inLibrary()`
+   *      一直没人满足：网格没传 `context="library"`）。
+   *
+   * 现在要守住的口径（人类 2026-09-20 定）：
+   *   * **未选中/未悬浮** + 开了信息档位 → 强制显示：**无底纹**、文字加**反色勾边**；
+   *   * **选中/悬浮** → 回到标准方案：**半透背景条** + `fg-1`，**不要勾边**；
+   *   * `marks` 档只管顶部标记；`marks-name` 档连底部文件名一起强制显示。
+   *
+   * 量法：`data-tile-bar` 有四个值 —— `marks-forced` / `marks` / `name-forced` / `name`；
+   * 用 `opacity` 与 `backgroundColor` / `textShadow` 分辨「哪一层在显示、用的哪套方案」。
+   * 内容用「有几个 svg + 无障碍名」判：星标与色标都是图标，`innerText` 本来就是空的。
+   */
+  /*
+   * 这个冒烟跑在**无头 Chrome** 里，它的 `(hover: hover)` 默认是 false（见启动参数的
+   * `--blink-settings`）：拿不到鼠标能力时，Tailwind 的 `group-hover:*` 变体整条失效，
+   * 后面的 hover 断言会变成假绿/假红 —— 所以先确认环境真的「有鼠标」。
+   */
+  const hoverMedia = await send("Runtime.evaluate", {
+    expression: `matchMedia("(hover: hover)").matches`,
+    returnByValue: true,
+  });
+  if (hoverMedia.result?.value !== true) {
+    problems.push(
+      `冒烟环境没能模拟出「有鼠标」的媒体特性（hover=${JSON.stringify(hoverMedia.result?.value)}）—— hover 断言不可信`,
+    );
+  }
+
+  const readBars = `(() => {
+    const all = [...document.querySelectorAll('[data-virtual-scroller] [role="option"]')];
+    // 找**有标记**的那一格（星标/色标都在标准层里）；找不到就退回第一格
+    const tile = all.find((t) => t.querySelector('[data-tile-bar="marks"] svg') !== null) ?? all[0] ?? null;
+    if (tile === null) return null;
+    const read = (name) => {
+      const el = tile.querySelector('[data-tile-bar="' + name + '"]');
+      if (el === null) return null;
+      const style = getComputedStyle(el);
+      return {
+        opacity: style.opacity,
+        background: style.backgroundColor,
+        shadow: style.textShadow,
+        svgs: el.querySelectorAll("svg").length,
+        aria: el.querySelector("[aria-label]")?.getAttribute("aria-label") ?? null,
+      };
+    };
+    return {
+      hasForcedMarks: tile.querySelector('[data-tile-bar="marks-forced"]') !== null,
+      hasForcedName: tile.querySelector('[data-tile-bar="name-forced"]') !== null,
+      marks: read("marks"),
+      name: read("name"),
+      forcedMarks: read("marks-forced"),
+      forcedName: read("name-forced"),
+    };
+  })()`;
+
+  const infoBars = await send("Runtime.evaluate", { expression: readBars, returnByValue: true });
+  const bars0 = infoBars.result?.value ?? null;
+  const transparent = (value) => value === "rgba(0, 0, 0, 0)" || value === "transparent";
+  const showsMarks = (bar) => bar !== null && (bar.svgs > 0 || (bar.aria ?? "") !== "");
+  if (bars0 === null) {
+    problems.push("找不到 tiles 的格子（信息条那几条断言没法量）");
+  } else {
+    if (bars0.marks === null) {
+      problems.push("tiles 顶上那条**标记信息条**不在 DOM 里（人类 2026-09-20 报的第一条）");
+    } else {
+      // 标准层**始终**带着半透底（只是用 opacity 藏着）—— 「背景条」本身不该丢
+      if (transparent(bars0.marks.background)) {
+        problems.push(`标准层应当带着半透背景条（实测 ${JSON.stringify(bars0.marks)}）`);
+      }
+      if (bars0.marks.opacity !== "0") {
+        problems.push(`默认（未选中未悬浮、未开信息档位）标准层应当藏着（实测 ${JSON.stringify(bars0.marks)}）`);
+      }
+      if (bars0.marks.shadow !== "none") {
+        problems.push(`默认（未选中未悬浮）不该有勾边（实测 ${JSON.stringify(bars0.marks)}）`);
+      }
+    }
+    if (bars0.name === null) {
+      problems.push("tiles 底下那条**文件名条**不在 DOM 里");
+    } else if (transparent(bars0.name.background)) {
+      problems.push(`文件名条的**半透背景**不该丢（实测 ${JSON.stringify(bars0.name)}）`);
+    }
+    if (bars0.hasForcedMarks || bars0.hasForcedName) {
+      problems.push("没开信息档位时不该有强制显示层");
+    }
+  }
+
+  /* 第 1 档（`marks`）：未选中 → 顶部标记**强制显示**（无底纹 + 勾边），底部文件名不跟出来 */
+  await send("Runtime.evaluate", {
+    expression: `window.dispatchEvent(new KeyboardEvent("keydown", { key: "i", bubbles: true, cancelable: true }))`,
+    returnByValue: true,
+  });
+  await sleep(300);
+  const infoMarks = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const bar = document.querySelector("[data-tiles-control-bar] [data-tile-info]");
+      const all = [...document.querySelectorAll('[data-virtual-scroller] [role="option"]')];
+      const tile = all.find((t) => t.querySelector('[data-tile-bar="marks"] svg') !== null) ?? all[0] ?? null;
+      const forced = tile?.querySelector('[data-tile-bar="marks-forced"]');
+      const style = forced ? getComputedStyle(forced) : null;
+      return {
+        level: bar?.getAttribute("data-tile-info") ?? null,
+        forced: forced !== null,
+        opacity: style?.opacity ?? null,
+        background: style?.backgroundColor ?? null,
+        shadow: style?.textShadow ?? null,
+        svgs: forced ? forced.querySelectorAll("svg").length : 0,
+        aria: forced?.querySelector("[aria-label]")?.getAttribute("aria-label") ?? null,
+        hasForcedName: tile?.querySelector('[data-tile-bar="name-forced"]') !== null,
+      };
+    })()`,
+    returnByValue: true,
+  });
+  const marks1 = infoMarks.result?.value ?? {};
+  if (marks1.level !== "marks") {
+    problems.push(`按一次 i 应当是「标记」档（实测 ${JSON.stringify(marks1.level)}）`);
+  }
+  if (marks1.forced !== true || marks1.opacity !== "1") {
+    problems.push(`「标记」档下未选中的格子应当强制显示顶部标记（实测 ${JSON.stringify(marks1)}）`);
+  } else {
+    if (!transparent(marks1.background)) {
+      problems.push(`强制显示层不该有底纹（实测 ${JSON.stringify(marks1.background)}）`);
+    }
+    if (marks1.shadow === "none") {
+      problems.push(`强制显示层要有反色勾边（人类说的「加边框」，实测 ${JSON.stringify(marks1)}）`);
+    }
+    if (!showsMarks(marks1)) {
+      problems.push(
+        `强制显示的标记条是空的 —— MY002 上有 3 星 + 红标，应当看得见（实测 ${JSON.stringify(marks1)}）`,
+      );
+    }
+  }
+  if (marks1.hasForcedName) {
+    problems.push("「标记」档不该把底部文件名也强制显示（那是第 2 档的事）");
+  }
+
+  /* 指向（真鼠标悬停）：强制层淡出、标准层淡入（回到半透底 + 无勾边） */
+  const hoverTarget = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const all = [...document.querySelectorAll('[data-virtual-scroller] [role="option"]')];
+      const tile = all.find((t) => t.querySelector('[data-tile-bar="marks"] svg') !== null) ?? all[0] ?? null;
+      const rect = tile?.getBoundingClientRect();
+      return rect ? { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2) } : null;
+    })()`,
+    returnByValue: true,
+  });
+  const hoverAt = hoverTarget.result?.value ?? null;
+  if (hoverAt === null) {
+    problems.push("量不到要悬停的格子");
+  } else {
+    await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: hoverAt.x, y: hoverAt.y });
+    await sleep(400);
+    const hovered = await send("Runtime.evaluate", {
+      expression: `(() => {
+        const tile = document.querySelector('[data-virtual-scroller] [role="option"]:hover');
+        if (tile === null) return { hovered: false };
+        const standard = tile.querySelector('[data-tile-bar="marks"]');
+        const forced = tile.querySelector('[data-tile-bar="marks-forced"]');
+        const style = standard ? getComputedStyle(standard) : null;
+        return {
+          hovered: true,
+          standardOpacity: style?.opacity ?? null,
+          standardBackground: style?.backgroundColor ?? null,
+          standardShadow: style?.textShadow ?? null,
+          forcedOpacity: forced ? getComputedStyle(forced).opacity : null,
+        };
+      })()`,
+      returnByValue: true,
+    });
+    const hoverState = hovered.result?.value ?? {};
+    if (hoverState.hovered !== true) {
+      problems.push("鼠标移到格子上之后浏览器并不认为那一格被悬停（环境问题）");
+    } else {
+      if (hoverState.standardOpacity !== "1") {
+        problems.push(`指向时标准信息条要浮出（实测 ${JSON.stringify(hoverState)}）`);
+      }
+      if (transparent(hoverState.standardBackground ?? "rgba(0, 0, 0, 0)")) {
+        problems.push(`指向时标准信息条要有半透底（实测 ${JSON.stringify(hoverState)}）`);
+      }
+      if (hoverState.standardShadow !== "none") {
+        problems.push("有底纹时不该再描边（人类 2026-09-20：有背景条就不需要描边）");
+      }
+      if (hoverState.forcedOpacity !== "0") {
+        problems.push(`指向时强制显示层应当淡出（实测 ${JSON.stringify(hoverState)}）`);
+      }
+    }
+  }
+
+  /* 第 2 档（`marks-name`）：顶 + 底都强制显示；选中之后回到标准方案（两层都带底） */
+  // 先把鼠标移开：上一段刚把那格悬停着，悬停时强制层本来就该淡出
+  await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 4, y: 4 });
+  await sleep(250);
+  await send("Runtime.evaluate", {
+    expression: `window.dispatchEvent(new KeyboardEvent("keydown", { key: "i", bubbles: true, cancelable: true }))`,
+    returnByValue: true,
+  });
+  await sleep(300);
+  const infoName = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const all = [...document.querySelectorAll('[data-virtual-scroller] [role="option"]')];
+      const tile = all.find((t) => t.querySelector('[data-tile-bar="marks"] svg') !== null) ?? all[0] ?? null;
+      const bar = document.querySelector("[data-tiles-control-bar] [data-tile-info]");
+      const name = tile?.querySelector('[data-tile-bar="name-forced"]');
+      return {
+        level: bar?.getAttribute("data-tile-info") ?? null,
+        hasForcedName: name !== null,
+        nameOpacity: name ? getComputedStyle(name).opacity : null,
+        nameShadow: name ? getComputedStyle(name).textShadow : null,
+        nameText: (name?.innerText || "").trim(),
+      };
+    })()`,
+    returnByValue: true,
+  });
+  const nameState = infoName.result?.value ?? {};
+  if (nameState.level !== "marks-name") {
+    problems.push(`按两次 i 应当是「标记 + 文件名」档（实测 ${JSON.stringify(nameState.level)}）`);
+  }
+  if (nameState.hasForcedName !== true || nameState.nameOpacity !== "1") {
+    problems.push(`第 2 档下未选中的格子应当把文件名也强制显示（实测 ${JSON.stringify(nameState)}）`);
+  } else {
+    if (nameState.nameShadow === "none") {
+      problems.push(`强制显示的文件名要有勾边（实测 ${JSON.stringify(nameState)}）`);
+    }
+    if (nameState.nameText === "") {
+      problems.push("强制显示的文件名条是空的（应当有 MY002 的文件名）");
+    }
+  }
+
+  /* 选中：强制层**不渲染**，标准层常亮且带半透底 */
+  await send("Runtime.evaluate", {
+    expression: `(() => {
+      const all = [...document.querySelectorAll('[data-virtual-scroller] [role="option"]')];
+      const tile = all.find((t) => t.querySelector('[data-tile-bar="marks"] svg') !== null) ?? all[0] ?? null;
+      tile?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      return Boolean(tile);
+    })()`,
+    returnByValue: true,
+  });
+  await sleep(400);
+  const selectedBars = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const tile = document.querySelector('[data-virtual-scroller] [role="option"][aria-selected="true"]');
+      if (tile === null) return null;
+      const standard = (name) => {
+        const el = tile.querySelector('[data-tile-bar="' + name + '"]');
+        return el === null
+          ? null
+          : {
+              opacity: getComputedStyle(el).opacity,
+              background: getComputedStyle(el).backgroundColor,
+              shadow: getComputedStyle(el).textShadow,
+            };
+      };
+      return {
+        forcedMarks: tile.querySelector('[data-tile-bar="marks-forced"]') !== null,
+        forcedName: tile.querySelector('[data-tile-bar="name-forced"]') !== null,
+        marks: standard("marks"),
+        name: standard("name"),
+      };
+    })()`,
+    returnByValue: true,
+  });
+  const selBars = selectedBars.result?.value ?? null;
+  if (selBars === null) {
+    problems.push("点一下格子应当选中它（信息条那条断言没得量）");
+  } else {
+    if (selBars.forcedMarks || selBars.forcedName) {
+      problems.push("选中之后不该再有强制显示层（那时走标准方案）");
+    }
+    if (selBars.marks === null || selBars.marks.opacity !== "1") {
+      problems.push(`选中时顶部标记条应当常亮（实测 ${JSON.stringify(selBars.marks)}）`);
+    }
+    if (selBars.marks !== null && transparent(selBars.marks.background)) {
+      problems.push(`选中时顶部条要有半透背景（实测 ${JSON.stringify(selBars.marks)}）`);
+    }
+    if (selBars.marks !== null && selBars.marks.shadow !== "none") {
+      problems.push("选中时有背景条，不该再描边");
+    }
+    if (selBars.name === null || selBars.name.opacity !== "1") {
+      problems.push(`选中时底部文件名条应当常亮（实测 ${JSON.stringify(selBars.name)}）`);
+    }
+    if (selBars.name !== null && transparent(selBars.name.background)) {
+      problems.push(`选中时文件名条要有半透背景（实测 ${JSON.stringify(selBars.name)}）`);
+    }
+  }
+
+  /*
+   * **持久化**（人类 2026-09-20：「按时间」在 import 与 browse 之间都要持久化，
+   * 浏览侧以前每次进都重置；信息显示级别也要持久化）。
+   *
+   * 这条不走「重启应用」（冒烟里做不到），而是查**落盘内容**：设备级偏好写在
+   * `localStorage["raybend.display.v1"]`（`lib/display-prefs.ts`），
+   * 两个工作区读的是同一份 —— 只要值在里面、且下一次读回来就是它，就算持久化成立
+   *（读回来的路径由 `display-prefs.test.ts` 与模块初始化的同步读覆盖）。
+   */
+  const persisted = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const byTime = [...document.querySelectorAll("button")].find(
+        (b) => b.getAttribute("aria-label") === "按时间",
+      );
+      byTime?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      return Boolean(byTime);
+    })()`,
+    returnByValue: true,
+  });
+  if (persisted.result?.value !== true) {
+    problems.push("状态条上没找到「按时间」开关（持久化这条验不了）");
+  }
+  await sleep(400);
+  const storedPrefs = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const raw = localStorage.getItem("raybend.display.v1");
+      let parsed = null;
+      try { parsed = raw === null ? null : JSON.parse(raw); } catch { parsed = "unparsable"; }
+      const button = [...document.querySelectorAll("button")].find(
+        (b) => b.getAttribute("aria-label") === "按时间",
+      );
+      return { raw, parsed, pressed: button?.getAttribute("aria-pressed") ?? null };
+    })()`,
+    returnByValue: true,
+  });
+  const prefsState = storedPrefs.result?.value ?? {};
+  if (prefsState.pressed !== "true") {
+    problems.push(`点「按时间」之后按钮应当是按下态（实测 ${JSON.stringify(prefsState)}）`);
+  }
+  if (!prefsState.parsed || prefsState.parsed === "unparsable" || prefsState.parsed.byTime !== true) {
+    problems.push(
+      `「按时间」必须落盘（键 raybend.display.v1 里 byTime 应当是 true，实测 ${JSON.stringify(prefsState)}）`,
+    );
+  }
+  // 信息档位是同一份记录：盘上的值必须等于**界面上当前的档位**（不写死某一档）
+  const liveInfoLevel = await send("Runtime.evaluate", {
+    expression: `document.querySelector("[data-tiles-control-bar] [data-tile-info]")?.getAttribute("data-tile-info") ?? null`,
+    returnByValue: true,
+  });
+  const liveLevel = liveInfoLevel.result?.value ?? null;
+  if (typeof prefsState.parsed?.infoMode !== "string") {
+    problems.push(`显示偏好里缺 infoMode（实测 ${JSON.stringify(prefsState)}）`);
+  } else if (liveLevel !== null && prefsState.parsed.infoMode !== liveLevel) {
+    problems.push(
+      `信息档位应当跟着落盘（界面 ${JSON.stringify(liveLevel)}，盘上 ${JSON.stringify(prefsState.parsed.infoMode)}）`,
+    );
+  }
+  // 收尾：把「按时间」关回去，免得影响后面的分组断言
+  await send("Runtime.evaluate", {
+    expression: `(() => {
+      const byTime = [...document.querySelectorAll("button")].find(
+        (b) => b.getAttribute("aria-label") === "按时间",
+      );
+      if (byTime?.getAttribute("aria-pressed") === "true") {
+        byTime.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      }
+      return true;
+    })()`,
+    returnByValue: true,
+  });
+  await sleep(300);
+
+  /* 收尾：鼠标移开 + 档位转回 `off` + 清掉选中，后面的断言从干净状态开始 */
+  await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 4, y: 4 });
+  await send("Runtime.evaluate", {
+    expression: `window.dispatchEvent(new KeyboardEvent("keydown", { key: "i", bubbles: true, cancelable: true }))`,
+    returnByValue: true,
+  });
+  await sleep(200);
+  const infoOff = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const bar = document.querySelector("[data-tiles-control-bar] [data-tile-info]");
+      return {
+        level: bar?.getAttribute("data-tile-info") ?? null,
+        forced: document.querySelector('[data-tile-bar="marks-forced"], [data-tile-bar="name-forced"]') !== null,
+      };
+    })()`,
+    returnByValue: true,
+  });
+  const infoOffState = infoOff.result?.value ?? {};
+  if (infoOffState.level !== "off") {
+    problems.push(`再按一次 i 应当回到「无」档（实测 ${JSON.stringify(infoOffState.level)}）`);
+  }
+  if (infoOffState.forced) {
+    problems.push("回到「无」档后不该还有强制显示层");
+  }
+  await send("Runtime.evaluate", {
+    expression: `window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }))`,
+    returnByValue: true,
+  });
+  await sleep(200);
 
   // 再选中一张，供后面的筛选断言用（删除把选中清掉了）
   await send("Runtime.evaluate", {
@@ -1620,19 +2170,37 @@ try {
     expression: `(() => {
       const frames = [...document.querySelectorAll("[data-compare-frame]")];
       const sources = frames.map((frame) => frame.querySelector("img")?.getAttribute("src") ?? null);
-      const ratios = frames.map((frame) => {
-        const rect = frame.querySelector("[data-compare-canvas]")?.getBoundingClientRect();
-        return rect && rect.height > 0 ? rect.width / rect.height : null;
+      /*
+       * **虚拟画布**（人类 2026-09-20）：所有格子里的画布必须一模一样（尺寸 + 变换），
+       * 差别只在里面放的是哪张图。画布比例 = 最大宽 / 最大高，与单张图的比例无关。
+       */
+      const canvases = frames.map((frame) => {
+        const canvasEl = frame.querySelector("[data-compare-canvas]");
+        const rect = canvasEl?.getBoundingClientRect();
+        return rect ? { width: rect.width, height: rect.height } : null;
+      });
+      const images = frames.map((frame) => {
+        const canvasEl = frame.querySelector("[data-compare-canvas]");
+        const img = frame.querySelector("img");
+        const canvasRect = canvasEl?.getBoundingClientRect();
+        const imgRect = img?.getBoundingClientRect();
+        return canvasRect && imgRect
+          ? {
+              width: imgRect.width / canvasRect.width,
+              height: imgRect.height / canvasRect.height,
+              offsetX: (imgRect.left - canvasRect.left) / canvasRect.width,
+              offsetY: (imgRect.top - canvasRect.top) / canvasRect.height,
+            }
+          : null;
       });
       return {
         compare: Boolean(document.querySelector('[data-compare="open"]')),
         frames: frames.length,
         images: sources.filter(Boolean).length,
         uniqueSources: new Set(sources.filter(Boolean)).size,
-        ratios,
-        baseline: document.querySelector("[data-compare-frame][data-baseline='true']")?.getAttribute("data-compare-frame") ?? null,
+        canvases,
+        images2: images,
         viewer: Boolean(document.querySelector('[data-viewer="open"]')),
-        selected: document.querySelectorAll("[data-strip-item]").length,
       };
     })()`,
     returnByValue: true,
@@ -1647,14 +2215,19 @@ try {
     if (compareState.images !== 2 || compareState.uniqueSources !== 2) {
       problems.push(`对比的每幅画面必须载入自己的图（实测 ${JSON.stringify(compareState)}）`);
     }
+    const canvasSizes = compareState.canvases ?? [];
     if (
-      !Array.isArray(compareState.ratios) ||
-      compareState.ratios.some((ratio) => typeof ratio !== "number" || Math.abs(ratio - compareState.ratios[0]) > 0.001)
+      canvasSizes.length !== 2 ||
+      canvasSizes.some(
+        (size) =>
+          size === null ||
+          Math.abs(size.width - canvasSizes[0].width) > 0.5 ||
+          Math.abs(size.height - canvasSizes[0].height) > 0.5,
+      )
     ) {
-      problems.push(`对比画框在窗口约束下必须保持同一比例（实测 ${JSON.stringify(compareState.ratios)}）`);
-    }
-    if (compareState.baseline !== "0") {
-      problems.push(`第一幅应当是画幅比例基准（实测 ${JSON.stringify(compareState.baseline)}）`);
+      problems.push(
+        `每格的虚拟画布必须一样大（同一张画布的几个副本），实测 ${JSON.stringify(canvasSizes)}`,
+      );
     }
     if (compareState.viewer !== false) {
       problems.push("对比态下不该同时出现单张看图件");
@@ -1924,15 +2497,15 @@ try {
   }
 
   /*
-   * 对比：**栏区是窗口**（人类 2026-09-20 纠正）。
+   * 对比：**栏区是窗口 + 一张虚拟画布**（人类 2026-09-20 的新方案）。
    *
    * 要守住的三件事：
-   *   1. 图片**不被拉伸**（画框比例 = 基准比例，且与栏区比例无关）；
-   *   2. 放大后内容**能铺满整个栏区**（从前把画框当裁剪边界，图片永远关在自己那个小盒子里）；
-   *   3. **双击在「适配 ↔ 100%」之间切**，且双击落在栏区里（不是只认窗口中央）。
+   *   1. 栏区是可见边界（`overflow: hidden`），不是「图片自己的小盒子」；
+   *   2. 画布**不裁**任何一张图：每张图按原尺寸居中贴进画布（小的图两头留空）；
+   *   3. **双击 = 适合窗口 ↔ 100%**（100% 时画布就是 1:1 的原图像素）。
    *
-   * 量法：栏区（`[data-compare-frame]`）与画框（`[data-compare-canvas]`）分别取矩形。
-   * 适配时画框 ≤ 栏区且居中；放大后画框必须**超出**栏区至少一个方向（否则就还是被关着）。
+   * 这一组对比的两张图 fixture 里都是 4000×3000（同尺寸），所以画布 = 4000×3000，
+   * 两张图都应当铺满画布（100% / 100%）—— 混合比例那组在 tiles 进对比那一段量。
    */
   const compareWindow = await send("Runtime.evaluate", {
     expression: `(() => {
@@ -1940,10 +2513,28 @@ try {
       const canvas = pane?.querySelector("[data-compare-canvas]");
       const paneRect = pane?.getBoundingClientRect();
       const canvasRect = canvas?.getBoundingClientRect();
+      const host = document.querySelector('[data-compare="open"]');
+      const zoom = Number(host?.getAttribute("data-compare-zoom") ?? "NaN");
+      const fills = [...document.querySelectorAll("[data-compare-frame]")].map((frame) => {
+        const canvasEl = frame.querySelector("[data-compare-canvas]");
+        const img = frame.querySelector("img");
+        const canvasBox = canvasEl?.getBoundingClientRect();
+        const imgBox = img?.getBoundingClientRect();
+        return canvasBox && imgBox
+          ? {
+              width: imgBox.width / canvasBox.width,
+              height: imgBox.height / canvasBox.height,
+              inside:
+                imgBox.width <= canvasBox.width + 0.5 && imgBox.height <= canvasBox.height + 0.5,
+            }
+          : null;
+      });
       const clip = pane ? getComputedStyle(pane).overflow : null;
       return {
         pane: paneRect ? { width: paneRect.width, height: paneRect.height } : null,
         canvas: canvasRect ? { width: canvasRect.width, height: canvasRect.height } : null,
+        zoom,
+        fills,
         clip,
       };
     })()`,
@@ -1959,10 +2550,35 @@ try {
     fitWindow.canvas.width > fitWindow.pane.width + 0.5 ||
     fitWindow.canvas.height > fitWindow.pane.height + 0.5
   ) {
-    problems.push(`适配时画框应当落在栏区之内（实测 ${JSON.stringify(fitWindow)}）`);
+    problems.push(`「适合窗口」时画布应当落在栏区之内（实测 ${JSON.stringify(fitWindow)}）`);
+  }
+  /*
+   * 画布不许裁任何一张图（`inside`），也不能把图拉出画布（`fill ≤ 1`）。
+   * 这一组里都是 4000×3000 的图，所以每张都应当**正好铺满**画布。
+   *
+   * 只统计**已经出图**的格子：取图是异步的，某一格晚一拍不该算失败
+   * （「每格都有图」那条已经在前面单独断言过了）。
+   */
+  const fills = (fitWindow.fills ?? []).filter((fill) => fill !== null);
+  if (fills.length === 0) {
+    problems.push(`量不到任何画幅的图片占位（实测 ${JSON.stringify(fitWindow.fills)}）`);
+  }
+  if (
+    fills.some(
+      (fill) =>
+        fill.inside !== true ||
+        fill.width > 1.005 ||
+        fill.height > 1.005 ||
+        Math.abs(fill.width - 1) > 0.01 ||
+        Math.abs(fill.height - 1) > 0.01,
+    )
+  ) {
+    problems.push(
+      `同尺寸的一组：每张图都应当正好铺满画布且不被裁（实测 ${JSON.stringify(fills)}）`,
+    );
   }
 
-  /* 双击栏区 → 100%（基准那幅原图 1:1）：画框必须大到溢出栏区 */
+  /* 双击栏区 → 100%：画布就是原图像素 1:1（4000×3000 的 fixture ⇒ 画布 4000×3000） */
   await send("Runtime.evaluate", {
     expression: `(() => {
       const pane = document.querySelector('[data-compare-frame="0"]');
@@ -1976,33 +2592,39 @@ try {
     expression: `(() => {
       const pane = document.querySelector('[data-compare-frame="0"]');
       const canvas = pane?.querySelector("[data-compare-canvas]");
-      const paneRect = pane?.getBoundingClientRect();
       const canvasRect = canvas?.getBoundingClientRect();
+      const host = document.querySelector('[data-compare="open"]');
       const zoomLabel = document.querySelector('[data-viewer-controls="zoom"] button:nth-child(2)')?.textContent?.trim() ?? null;
       return {
-        pane: paneRect ? { width: paneRect.width, height: paneRect.height } : null,
         canvas: canvasRect ? { width: canvasRect.width, height: canvasRect.height } : null,
+        zoom: Number(host?.getAttribute("data-compare-zoom") ?? "NaN"),
+        fit: host?.getAttribute("data-compare-fit") ?? null,
+        debug: (globalThis.__cd ?? []).slice(-12),
+        paneId: pane?.getAttribute("data-compare-photo-id") ?? null,
+        current: document.querySelector("[data-compare-frame][data-current='true']")?.getAttribute("data-compare-photo-id") ?? null,
         zoomLabel,
       };
     })()`,
     returnByValue: true,
   });
   const zoomState = zoomed.result?.value ?? {};
+  if (Math.abs(Number(zoomState.zoom) - 1) > 0.001) {
+    problems.push(`双击后倍率应当是 100%（1:1），实测 ${JSON.stringify(zoomState)}`);
+  }
   if (
     zoomState.canvas === null ||
-    zoomState.pane === null ||
-    (zoomState.canvas.width <= zoomState.pane.width + 0.5 &&
-      zoomState.canvas.height <= zoomState.pane.height + 0.5)
+    Math.abs(zoomState.canvas.width - 4000) > 2 ||
+    Math.abs(zoomState.canvas.height - 3000) > 2
   ) {
     problems.push(
-      `双击后应当回到 100%（画框溢出栏区、可铺满整格），实测 ${JSON.stringify(zoomState)}`,
+      `100% 时画布应当按原图像素显示（4000×3000），实测 ${JSON.stringify(zoomState.canvas)}`,
     );
   }
   if (!String(zoomState.zoomLabel ?? "").includes("100%")) {
     problems.push(`双击后读数应当是 100%（实测 ${JSON.stringify(zoomState.zoomLabel)}）`);
   }
 
-  /* 再双击一次 → 回到适配（画框重新落回栏区内，读数变成「适配」） */
+  /* 再双击一次 → 回到适合窗口（倍率变小、画布重新落回栏区内） */
   await send("Runtime.evaluate", {
     expression: `(() => {
       const pane = document.querySelector('[data-compare-frame="0"]');
@@ -2018,21 +2640,23 @@ try {
       const canvas = pane?.querySelector("[data-compare-canvas]");
       const paneRect = pane?.getBoundingClientRect();
       const canvasRect = canvas?.getBoundingClientRect();
-      const zoomLabel = document.querySelector('[data-viewer-controls="zoom"] button:nth-child(2)')?.textContent?.trim() ?? null;
+      const host = document.querySelector('[data-compare="open"]');
       return {
         inside:
           paneRect && canvasRect
             ? canvasRect.width <= paneRect.width + 0.5 &&
               canvasRect.height <= paneRect.height + 0.5
             : null,
-        zoomLabel,
+        zoom: Number(host?.getAttribute("data-compare-zoom") ?? "NaN"),
       };
     })()`,
     returnByValue: true,
   });
   const refitState = refitted.result?.value ?? {};
-  if (refitState.inside !== true) {
-    problems.push(`再双击一次应当回到适配（画框落回栏区内），实测 ${JSON.stringify(refitState)}`);
+  if (refitState.inside !== true || !(Number(refitState.zoom) < 1)) {
+    problems.push(
+      `再双击一次应当回到适合窗口（画布落回栏区内、倍率 < 1），实测 ${JSON.stringify(refitState)}`,
+    );
   }
 
   /*

@@ -25,6 +25,14 @@
  */
 
 import { createSignal } from "solid-js";
+
+import {
+  commitDisplayTileStep,
+  displayByTime,
+  displayTileStep,
+  setDisplayByTime,
+  setDisplayTileStep,
+} from "../../lib/display-prefs.ts";
 import { withTimeout } from "../../lib/timeout.ts";
 import { timeoutMessage } from "../../i18n/index.ts";
 import {
@@ -50,10 +58,7 @@ import {
   type SelectionState,
 } from "../../lib/selection.ts";
 import { groupByTime, type TimeGrouping } from "../../lib/time-group.ts";
-import {
-  clampTileStepIndex,
-  DEFAULT_TILE_STEP_INDEX,
-} from "../../lib/tile-flow.ts";
+import { clampTileStepIndex } from "../../lib/tile-flow.ts";
 import {
   createThumbQueue,
   type ThumbEntry,
@@ -75,10 +80,15 @@ export const DEFAULT_GAP_MINUTES = 60;
  */
 export const DEFAULT_META_TIMEOUT_MS = 20_000;
 
-/** 设置键（与 `src/api/db.ts` 的 `SETTING_KEYS` 保持一致） */
+/**
+ * 仍在 `app.db` 里的网格设置键（与 `src/api/db.ts` 的 `SETTING_KEYS` 保持一致）。
+ *
+ * ⚠️ `tile_step` / `by_time` **已经搬走**（`lib/display-prefs.ts`，localStorage）：
+ * 那两个是「怎么看」的设备级偏好，而且 import 与 browse 必须共用一份 ——
+ * 以前只有导入侧读写它们，浏览侧每次进都重置（人类 2026-09-20 报的）。
+ * 时间间隔阈值留在库里（它是**库内数据**的解释参数，不是显示偏好）。
+ */
 export const GRID_SETTING_KEYS = {
-  tileStep: "grid.tile_step",
-  byTime: "grid.by_time",
   gapMinutes: "grid.time_gap_minutes",
 } as const;
 
@@ -167,8 +177,12 @@ export function createPhotoGridStore(deps: PhotoGridDeps): PhotoGridStore {
   const [error, setError] = createSignal<string | null>(null);
   const [problems, setProblems] = createSignal<readonly string[]>([]);
 
-  const [tileStep, setTileStepSignal] = createSignal(DEFAULT_TILE_STEP_INDEX);
-  const [byTime, setByTimeSignal] = createSignal(false);
+  /*
+   * 格子尺寸与「按时间」走**共享的设备级偏好**（`lib/display-prefs.ts`）：
+   * 两个工作区读同一份、且跨会话还原。梯度/分组的推导逻辑不变，只是值的来源换了地方。
+   */
+  const tileStep = displayTileStep;
+  const byTime = displayByTime;
   const [gapMinutes, setGapMinutes] = createSignal(DEFAULT_GAP_MINUTES);
   const [loadingTimes, setLoadingTimes] = createSignal(false);
 
@@ -438,26 +452,24 @@ export function createPhotoGridStore(deps: PhotoGridDeps): PhotoGridStore {
    * ══════════════════════════════════════════════════════════ */
 
   /**
-   * 改 tile 尺寸档位。**只改状态，不写设置** ——
-   * 拖动滑块时每动一格都写一次设置，一拖就是几百次 IPC 加几百次数据库写，
-   * 手感直接卡住（2026-09-16 人类反馈「尺寸调节非常卡」）。落盘走 `commitTileStep`，
+   * 改 tile 尺寸档位。**只改内存，不落盘** ——
+   * 拖动滑块时每动一格都写一次存储，一拖就是几百次同步写，手感直接卡住
+   *（2026-09-16 人类反馈「尺寸调节非常卡」）。落盘走 `commitTileStep`，
    * 由滑块在**拖拽结束**时调一次。
    */
   const setTileStep = (step: number): void => {
-    const next = clampTileStepIndex(step);
-    if (next === tileStep()) return;
-    setTileStepSignal(next);
+    setDisplayTileStep(clampTileStepIndex(step));
   };
 
-  /** 把当前档位写进设置（滑块拖拽结束时调一次） */
+  /** 把当前档位落盘（滑块拖拽结束时调一次） */
   const commitTileStep = (): void => {
-    void writeSetting(GRID_SETTING_KEYS.tileStep, String(tileStep()));
+    commitDisplayTileStep();
   };
 
+  /** 「按时间」开关：立刻落盘（一次点击就是一个终值），并按需补读拍摄时间 */
   const setByTime = (value: boolean): void => {
     if (value === byTime()) return;
-    setByTimeSignal(value);
-    void writeSetting(GRID_SETTING_KEYS.byTime, value ? "1" : "0");
+    setDisplayByTime(value);
     if (value) void loadTimes();
   };
 
@@ -496,18 +508,16 @@ export function createPhotoGridStore(deps: PhotoGridDeps): PhotoGridStore {
     return ordered;
   };
 
+  /**
+   * 从 `app.db` 补齐**库内**设置（时间间隔阈值）。
+   *
+   * 格子尺寸与「按时间」不在这里：它们在 `lib/display-prefs.ts` 里**同步**读好
+   *（`localStorage`），所以首次渲染就是对的，不会先画默认值再跳。
+   */
   async function hydrate(): Promise<void> {
-    const [step, time, gap] = await Promise.all([
-      readNumber(GRID_SETTING_KEYS.tileStep, DEFAULT_TILE_STEP_INDEX),
-      readBoolean(GRID_SETTING_KEYS.byTime, false),
-      readNumber(GRID_SETTING_KEYS.gapMinutes, DEFAULT_GAP_MINUTES),
-    ]);
-    setTileStepSignal(clampTileStepIndex(step));
+    const gap = await readNumber(GRID_SETTING_KEYS.gapMinutes, DEFAULT_GAP_MINUTES);
     if (Number.isFinite(gap) && gap > 0) setGapMinutes(gap);
-    if (time && !byTime()) {
-      setByTimeSignal(true);
-      if (items().length > 0) void loadTimes();
-    }
+    if (byTime() && items().length > 0) void loadTimes();
   }
 
   async function readNumber(key: string, fallback: number): Promise<number> {
@@ -518,24 +528,6 @@ export function createPhotoGridStore(deps: PhotoGridDeps): PhotoGridStore {
       return Number.isFinite(value) ? value : fallback;
     } catch {
       return fallback;
-    }
-  }
-
-  async function readBoolean(key: string, fallback: boolean): Promise<boolean> {
-    try {
-      const raw = await deps.api.getSetting(key);
-      if (raw === null) return fallback;
-      return raw === "1" || raw.toLowerCase() === "true";
-    } catch {
-      return fallback;
-    }
-  }
-
-  async function writeSetting(key: string, value: string): Promise<void> {
-    try {
-      await deps.api.setSetting(key, value);
-    } catch {
-      // 存不下偏好不影响本次使用
     }
   }
 

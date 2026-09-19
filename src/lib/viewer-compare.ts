@@ -21,39 +21,39 @@
  * * **最近**从哪看：`SelectionState.ids` 是个 `Set`，而 `toggle` / `range` / `extendSelection`
  *   全都是「`new Set(旧)` 再 `add`」—— 新增的落在**末尾**，所以 **Set 的插入顺序就是选择先后**
  *   （`pruneSelection` 也保序）。不新增字段、不动选择内核。
- * * **窗口内从左到右**也按选择先后：最早选中的在最左，它就是画幅基准 ——
- *   例：Ctrl 依次点 A B C D E F ⇒ 窗口 `C D E F`，基准 C，A/B 被挤掉。
+ * * **窗口内从左到右**也按选择先后：最早选中的在最左 ——
+ *   例：Ctrl 依次点 A B C D E F ⇒ 窗口 `C D E F`，A/B 被挤掉。
  * * **锚点必含**：区间选择时锚点在中间，可能被挤出窗口 —— 那就挤掉窗口里最早的那张，
  *   把锚点放到末尾（它是用户最后一次动作的那张）。
  * * 批量选择（`Ctrl+A`、「日组全选」）没有「先后」可言：插入顺序 = 列表/组内顺序，
  *   于是窗口 = 这批的最后 4 张。行为确定、可解释，只是不是一张张点出来的意图。
  *
- * ## 画幅不一致时怎么办：以**第一幅**为准扣等比例区域
+ * ## 画幅不一致时怎么办：**虚拟画布**（人类 2026-09-20 改的口径，取代旧的「扣等比例区域」）
  *
- * 人类原话：「**画幅比例不一致时以第一幅图的画幅比例为准**，对后面的图**扣等比例区域**
- * 做位移同步（例：第一张 4:3、后面是 3:2 → 只能对比『3:2 区域中间抽出来的 4:3』那部分）」。
- * 这里的「第一幅」= 对比窗口里**最早选中**的那张（见上）。
+ * 旧口径是「以第一幅的画幅比例为准，对后面的图扣等比例区域」。**已废弃**，原因很具体：
+ * 截掉的部分在**缩放后会露馅** —— 竖图打头时，横图被裁成竖比例，看着“没问题”，
+ * 但鼠标一放大，用户就想看到被裁掉的那部分了（人类原话：「这一缩就露馅了」）。
  *
- * * **缩放同步**：同一个倍率对所有画幅都成立（都是同一个画框）；
- * * **位移按百分比同步**：所有画幅的扣取区都映射到**同一个画框**，所以「同一个 CSS 像素
- *   位移」对每一幅而言就是「同一个画框百分比」—— 不需要再单独换算百分比。
- *
- * 这两条正是 `plans/M2-W2.md` 2.3 的两条硬要求。
- *
- * ## 两层盒子（2026-09-20 人类纠正后的口径，别再混）
+ * 新口径（人类 2026-09-20 定）：
  *
  * ```text
- * ┌─ 窗口（= 分栏分到的栏区）─────────┐   ← 可见/裁剪的边界（`overflow: hidden`），有底色与描边
- * │        ┌─ 画框（等比例，居中）─┐   │   ← 基准比例的盒子：所有扣取区映射到这里
- * │        │      图片内容          │   │   ← 放大时画框变大，由窗口裁掉多余部分
- * │        └──────────────────────┘   │
- * └──────────────────────────────────┘
+ * ┌─ 虚拟画布（宽 = 各图最大宽，高 = 各图最大高，单位就是原图像素）─┐
+ * │      ┌─────┐                       │
+ * │      │ 竖图 │   ← 居中放进画布         │
+ * │      └─────┘                       │
+ * │  ┌───────────┐   ← 小的图两头都挨不到边 │
+ * │  └───────────┘                       │
+ * └─────────────────────────────────┘
  * ```
  *
- * 人类原话：「每个分栏方法内分到的栏区都**像个窗口一样**……图片比例不能变化和拉伸，
- * 但在这个窗口内可以任意缩放，放大时图片变大，在各自整个窗口内都可以看到图」。
- * 所以：**画框不是裁剪边界**，它只是「扣取区在适配时的大小与位置」；放大后画框
- * 可以大于窗口（这时才是窗口在裁）。适配时画框在窗口里居中，窗口剩下的地方是底色。
+ * * **画布尺寸 = 最大宽 × 最大高**（例：6000×4000 与 3750×5000 ⇒ 画布 6000×5000）；
+ * * 每张图**按自己的原图尺寸居中放进画布**（不裁、不缩、不拉伸）；
+ * * **统一倍率**：一个倍率对所有图成立（比例不同也不存在“各自按比例”的问题），
+ *   1 = 100% = 画布像素 1:1；
+ * * 移动按**画布坐标**：顶多有些图被移出窗口，但总有图在窗口里（人类：可以接受）。
+ *
+ * 倍率不再是“相对画框的倍数”而是**绝对倍率**（画布像素 → CSS 像素），
+ * 所以「 100%」就是 1:1、「适合窗口」就是把某张图 contain 进栏区。
  */
 
 /**
@@ -79,11 +79,6 @@ export const COMPARE_MAX = 4;
 export interface Size {
   width: number;
   height: number;
-}
-
-export interface CropRect extends Size {
-  x: number;
-  y: number;
 }
 
 /**
@@ -144,8 +139,8 @@ export function compareIds(
  * 布局：几张画幅怎么摆（人类 2026-09-19 定：2 张一排 / 3 张一排三个 / 4 张 2×2）。
  *
  * 为啥不是「永远一排」：1600 宽的窗口减去两侧栏后，4 张一排每张只剩 ≈240px，
- * 看细节不够；2×2 每张能大一倍。每种布局里**每格尺寸一致**，
- * 所以「所有画幅扣成同一个比例」仍然成立（格子大小不影响比例与百分比同步）。
+ * 看细节不够；2×2 每张能大一倍。每种布局里**每格尺寸一致** ——
+ * 栏区一样大，「适合窗口」的倍率才有确定含义。
  */
 export function compareLayout(count: number): { columns: number; rows: number } {
   const safe = Number.isFinite(count) ? Math.floor(count) : 0;
@@ -154,128 +149,114 @@ export function compareLayout(count: number): { columns: number; rows: number } 
   if (n === 3) return { columns: 3, rows: 1 };
   return { columns: Math.max(1, n), rows: 1 };
 }
-
 /**
- * 基准比例 = **第一幅**的宽高比。
+ * 一张图在**虚拟画布**里的落点。
  *
- * 尺寸未知（`natural` 缺失）时返回 `null` —— 调用方退回「各自用自己的比例」，
- * 而不是编一个比例出来（编错了整屏都会歪）。
+ * **对照片类型泛型**：`compareCanvas` 会把传进来的对象**原样**放进落点里，
+ * 所以调用方拿到的 `placement.photo` 仍是它自己的类型（`fileName` / `path` 不丢）。
  */
-export function baselineAspect(photos: readonly ComparablePhoto[]): number | null {
-  const first = photos[0];
-  const size = first?.natural;
-  if (!size || size.width <= 0 || size.height <= 0) return null;
-  return size.width / size.height;
-}
-
-/**
- * 在**一张图自己的像素**里，居中扣出比例为 `aspect` 的那块。
- *
- * 三种情况都要对（都有单测）：
- * * 比基准**宽** → 扣两侧（保留高度）；
- * * 比基准**窄/高** → 扣上下（保留宽度）；
- * * 比例已经一致 → 整张，一点不扣（不许出现 ±0.5px 的滑动）；
- * * 尺寸未知或非法 → 原样返回（不猜）。
- */
-export function cropToAspect(size: Size, aspect: number): CropRect {
-  const { width, height } = size;
-  if (!(width > 0) || !(height > 0) || !(aspect > 0) || !Number.isFinite(aspect)) {
-    return { x: 0, y: 0, width: Math.max(0, width), height: Math.max(0, height) };
-  }
-  const current = width / height;
-  // 比例一致（含浮点误差）：整张，别为了 1e-9 的差别去裁一像素
-  if (Math.abs(current - aspect) <= 1e-6) {
-    return { x: 0, y: 0, width, height };
-  }
-  if (current > aspect) {
-    // 太宽：扣两侧
-    const cropped = height * aspect;
-    return { x: (width - cropped) / 2, y: 0, width: cropped, height };
-  }
-  // 太窄/太高：扣上下
-  const cropped = width / aspect;
-  return { x: 0, y: (height - cropped) / 2, width, height: cropped };
-}
-
-/**
- * 一帧：某张照片 + 它在自己像素里要显示的那块 + 它在**画框**里的摆法。
- *
- * **对照片类型泛型**：`compareGeometry` 会把传进来的对象**原样**放进帧里，
- * 所以调用方拿到的 `frame.photo` 仍是它自己的类型（`fileName` / `path` 这些字段不丢）。
- */
-export interface CompareFrame<T extends ComparablePhoto = ComparablePhoto> {
+export interface ComparePlacement<T extends ComparablePhoto = ComparablePhoto> {
   photo: T;
-  /** 扣出来的那块（比例 = 基准比例；尺寸未知时是 0） */
-  crop: CropRect;
-  /** 整幅图在画框里的显示尺寸（CSS px，**适配时**，即相对倍数 = 1） */
-  image: Size;
-  /** 整幅图左上角相对**画框**左上角的偏移（CSS px，适配时；≤ 0） */
-  imageOffset: { x: number; y: number };
-}
-
-/**
- * 一整组对比的几何：画框 + 每帧的扣取区与图片摆放。
- *
- * `frame` 是**等比例画框**在适配时的大小（居中放在窗口里，见文件头「两层盒子」）；
- * 放大/平移是视图在它之上叠的变换（`translate(pan) scale(rel)`），几何本身不变。
- */
-export interface CompareGeometry<T extends ComparablePhoto = ComparablePhoto> {
-  /** 等比例画框——所有画幅共用（`rel = 1` 时的大小） */
-  frame: Size;
+  /** 原图尺寸（画布坐标；尺寸未知时是 0） */
+  natural: Size;
   /**
-   * 基准图 **1:1**（原图像素 : CSS 像素 = 1）对应的**相对倍数**；尺寸未知 = `null`。
+   * 左上角在画布里的位置。
    *
-   * 为什么用相对倍数而不是绝对倍率：对比里各图像素尺寸本来就不同
-   * （4000×3000 与 6000×4000），「所有画幅同一个倍率」只能是相对画框的倍数。
-   * 需要「100%」时（双击、读数）换算到**基准那幅**：`rel = oneToOneRel`。
+   * **居中**：小图在 X / Y 两个方向的两头都挨不到画布边（人类 2026-09-20：
+   * 「因为图小，所以 x 轴和 y 轴各自的两头都挨不到边」）—— 居中也让所有图的
+   * **中心**对齐，那正是对比时要看的参照点。
    */
-  oneToOneRel: number | null;
-  frames: CompareFrame<T>[];
+  offset: { x: number; y: number };
+}
+
+/** 一整组对比的虚拟画布（见文件头）。 */
+export interface CompareCanvas<T extends ComparablePhoto = ComparablePhoto> {
+  /** 画布尺寸 = 各图**最大宽 × 最大高**（全部尺寸未知时是 0×0） */
+  size: Size;
+  placements: ComparePlacement<T>[];
 }
 
 /**
- * 算出窗口（栏区）当前该显示的一组几何（**以第一幅的比例为准**）。
+ * 算出这一组对比的虚拟画布与每张图的落点。
  *
- * `photos` 传 `compareIds(...)` 映射出来的结果（已经按显示顺序、已截到上限）；
- * `pane` 是**分栏分到的栏区**（窗口）的 CSS 尺寸 —— 不是画框、不是视口。
- *
- * 尺寸未知（`natural` 缺失）时：画框算不出来（`frame = 0×0`），该帧的 `crop` 与 `image`
- * 也是 0 —— 视图据此显示「还没读到这张的尺寸」，而不是编一个比例把画面拉歪。
+ * `photos` 传 `compareIds(...)` 映射出来的结果（已按显示顺序、已截到上限）。
+ * 尺寸未知（`natural` 缺失）的图照样占一个落点（`natural` 是 0），
+ * 视图据此显示「还没读到这张的尺寸」，而不是编一个比例把画面拉歪。
  */
-export function compareGeometry<T extends ComparablePhoto>(
-  photos: readonly T[],
-  pane: Size,
-): CompareGeometry<T> {
-  const aspect = baselineAspect(photos);
-  const frame = aspect === null ? { width: 0, height: 0 } : fitAspectWithin(pane, aspect);
+/**
+ * 一张图的**有效**原图尺寸（两轴都必须 > 0）。
+ *
+ * 脏数据（`0` / 负数 / `NaN` / 缺 `natural`）一慨当「尺寸未知」—— 画布与落点都
+ * 不该拿一个半瞎的尺寸去摆版面（否则会出现「宽 0、高 200」这种画布）。
+ */
+function validSize(photo: ComparablePhoto): Size {
+  const natural = photo.natural;
+  if (
+    natural === undefined ||
+    !(natural.width > 0) ||
+    !(natural.height > 0) ||
+    !Number.isFinite(natural.width) ||
+    !Number.isFinite(natural.height)
+  ) {
+    return { width: 0, height: 0 };
+  }
+  return { width: natural.width, height: natural.height };
+}
 
-  const frames = photos.map((photo): CompareFrame<T> => {
-    const natural = photo.natural;
-    const known =
-      natural !== undefined && natural.width > 0 && natural.height > 0;
-    const crop =
-      aspect === null || !known
-        ? { x: 0, y: 0, width: 0, height: 0 }
-        : cropToAspect(natural, aspect);
-    // 扣取区正好铺满画框：画框宽 = 扣取宽 × base
-    const base = crop.width > 0 ? frame.width / crop.width : 0;
+export function compareCanvas<T extends ComparablePhoto>(
+  photos: readonly T[],
+): CompareCanvas<T> {
+  let width = 0;
+  let height = 0;
+  for (const photo of photos) {
+    const natural = validSize(photo);
+    if (natural.width > width) width = natural.width;
+    if (natural.height > height) height = natural.height;
+  }
+
+  const placements = photos.map((photo): ComparePlacement<T> => {
+    const natural = validSize(photo);
     return {
       photo,
-      crop,
-      image: {
-        width: (natural?.width ?? 0) * base,
-        height: (natural?.height ?? 0) * base,
-      },
-      // 扣取区居中在整幅图里，所以两边的偏移都是负的（图片比画框大）
-      imageOffset: { x: -crop.x * base, y: -crop.y * base },
+      natural,
+      offset: { x: (width - natural.width) / 2, y: (height - natural.height) / 2 },
     };
   });
 
-  const baseline = frames[0];
-  const oneToOneRel =
-    baseline !== undefined && baseline.crop.width > 0 && frame.width > 0
-      ? baseline.crop.width / frame.width
-      : null;
+  return { size: { width, height }, placements };
+}
 
-  return { frame, oneToOneRel, frames };
+/**
+ * 画布比例（宽 / 高）—— 视图用它把画布**铺进栏区**（`fitAspectWithin` 的输入）。
+ *
+ * 画布还没量出来（`0×0`）时给 1：调用方本来就该走空态，别在比例上除零。
+ */
+export function canvasAspect(canvas: CompareCanvas): number {
+  const { width, height } = canvas.size;
+  return width > 0 && height > 0 ? width / height : 1;
+}
+
+/**
+ * **像素数最小**的那张 —— 进入对比 / 改变对比集合时的「适合窗口」以它为准
+ * （人类 2026-09-20：「以尺寸最小的图片（不需要计算很精确，按像素数来就行）
+ * 来算适合的放大倍率，类似代替用户在最小的图片上双击到适合画面尺寸」）。
+ *
+ * 尺寸未知的**不参与**（拿不到像素数就不能比较）；全都未知时返回 `null`。
+ * 并列时取先遇到的那张（列表顺序 = 显示顺序，可复现）。
+ */
+export function smallestByPixels<T extends ComparablePhoto>(
+  photos: readonly T[],
+): T | null {
+  let best: T | null = null;
+  let bestPixels = Number.POSITIVE_INFINITY;
+  for (const photo of photos) {
+    const natural = validSize(photo);
+    if (natural.width <= 0) continue;
+    const pixels = natural.width * natural.height;
+    if (pixels < bestPixels) {
+      best = photo;
+      bestPixels = pixels;
+    }
+  }
+  return best;
 }

@@ -12,15 +12,22 @@
  * 状态栏按钮、两个网格、两处键盘处理都读它 —— 只有这一份实现。
  */
 
-import { createSignal } from "solid-js";
-
-import type { TileInfoMode } from "./Tile.tsx";
+import {
+  displayInfoMode,
+  setDisplayInfoMode,
+  type TileInfoMode,
+} from "../../lib/display-prefs.ts";
 
 export const TILE_INFO_CYCLE: readonly TileInfoMode[] = ["off", "marks", "marks-name"];
 
-const [infoMode, setInfoMode] = createSignal<TileInfoMode>("off");
-
-export { infoMode };
+/**
+ * 当前档位（模块级单例）。
+ *
+ * 状态本身住在 `lib/display-prefs.ts`：那里同时负责**落盘**（人类 2026-09-20：
+ * 信息显示级别要持久化）与 import / browse 共用一份。这里只保留「tiles 信息档位」
+ * 这个业务名字与循环规则 —— 没有第二份信号。
+ */
+export const infoMode = displayInfoMode;
 
 /** 下一个档位（`off → marks → marks-name → off`） */
 export function nextTileInfoMode(current: TileInfoMode): TileInfoMode {
@@ -29,7 +36,23 @@ export function nextTileInfoMode(current: TileInfoMode): TileInfoMode {
   return TILE_INFO_CYCLE[(at + 1) % TILE_INFO_CYCLE.length] ?? "off";
 }
 
-/** 切到下一档（按钮与 `i` 键都走这里） */
+/** 切到下一档（按钮与 `i` 键都走这里）—— 切完立刻落盘 */
 export function cycleTileInfo(): void {
-  setInfoMode((current) => nextTileInfoMode(current));
+  setDisplayInfoMode(nextTileInfoMode(infoMode()));
+}
+
+/**
+ * `i` 键在当前状态下**该不该接**（人类 2026-09-19 定的范围：tiles / film 才接，
+ * 纯看图态不接 —— 那时 `i` 不该有任何作用）。
+ *
+ * 两个工作区共用这一条判据：各自的「是不是在看图」「胶片带在不在」是两套外壳状态，
+ * 但「什么时候允许切信息档位」在业务上是同一件事。
+ */
+export function infoKeyApplies(state: {
+  /** 是否处在看图态（film / view） */
+  viewing: boolean;
+  /** 看图态下胶片带可不可见（`chromeShowsFilm`） */
+  filmVisible: boolean;
+}): boolean {
+  return !state.viewing || state.filmVisible;
 }

@@ -65,12 +65,20 @@ import { compareIds } from "../../lib/viewer-compare.ts";
 import { createThumbQueue } from "../../components/ui/thumb-queue.ts";
 import { TilesShell } from "../../components/ui/tiles/index.ts";
 import { createViewerStore, Viewer } from "../../components/ui/viewer/index.ts";
-import { clampTileStepIndex, DEFAULT_TILE_STEP_INDEX } from "../../lib/tile-flow.ts";
+import { clampTileStepIndex } from "../../lib/tile-flow.ts";
+import {
+  commitDisplayTileStep,
+  displayByTime,
+  displayTileStep,
+  setDisplayByTime,
+  setDisplayTileStep,
+} from "../../lib/display-prefs.ts";
 import { t } from "../../i18n/index.ts";
 import { Button } from "../../components/ui/Button.tsx";
 import { ConfirmDialog, Dialog } from "../../components/ui/Dialog.tsx";
 import type { ToastStore } from "../../components/ui/Toast.tsx";
 import { browseKeyIntent, shouldHandleKey } from "../../lib/viewer-keys.ts";
+import { cycleTileInfo, infoKeyApplies } from "../../components/ui/tile-info.ts";
 import { SplitHandle } from "../../components/ui/SplitHandle.tsx";
 import { nudgeWidth, resizeWidth } from "../../lib/column-resize.ts";
 import { joinPath } from "../../lib/paths.ts";
@@ -149,8 +157,17 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
   const [reposLoading, setReposLoading] = createSignal(true);
   /** 读库列表失败时的原因（不再是静默空态）。 */
   const [reposError, setReposError] = createSignal<string | null>(null);
-  const [tileStep, setTileStep] = createSignal(DEFAULT_TILE_STEP_INDEX);
-  const [grouped, setGrouped] = createSignal(false);
+  /*
+   * 「按时间」与格子尺寸档位都是**共享的设备级偏好**（`lib/display-prefs.ts`）：
+   * 与导入侧读同一份、且跨会话还原。
+   *
+   * 以前这里是两个本地信号（`createSignal(false)` / 默认档），于是浏览里开了「按时间」、
+   * 切走再回来就重置（人类 2026-09-20 报的）；导入侧的同类状态也各存各的。
+   */
+  const tileStep = displayTileStep;
+  const setTileStep = setDisplayTileStep;
+  const grouped = displayByTime;
+  const setGrouped = setDisplayByTime;
   /**
    * 库列表是否展开（`BROWSE.md` §4.2）。
    *
@@ -405,6 +422,18 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
     const onKey = (event: KeyboardEvent): void => {
       const modal = document.querySelector('[role="dialog"]') !== null;
       if (!shouldHandleKey(event.target as HTMLElement | null, modal)) return;
+      /*
+       * `i`：切 tiles 的「信息」档位 —— **只在 tiles / film 下生效**
+       * （人类 2026-09-19 定的范围；2026-09-20 补上浏览侧这一半 —— 之前只有导入侧接了，
+       * 浏览里按 `i` 毫无反应）。判据走 `components/ui/tile-info.ts` 那**一份**实现。
+       */
+      if (event.key === "i" || event.key === "I") {
+        const viewing = viewer.state().active;
+        if (!infoKeyApplies({ viewing, filmVisible: chromeShowsFilm(chrome()) })) return;
+        event.preventDefault();
+        cycleTileInfo();
+        return;
+      }
       const intent = browseKeyIntent(event, {
         viewing: viewer.state().active,
         hasSelection: store.selectedCount() > 0,
@@ -604,8 +633,8 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
       thumbs,
       tileStep,
       setTileStep,
-      // 档位落盘：这个工作区的档位目前只活在会话里（与导入侧各自记一份，组件同一份）
-      commitTileStep: () => {},
+      // 档位落盘：拖拽结束时写一次（与导入侧同一份实现、同一个键）
+      commitTileStep: () => commitDisplayTileStep(),
       grouped,
     }),
   );

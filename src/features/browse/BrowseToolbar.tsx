@@ -262,20 +262,24 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
     await runMark({ kind: "color", value: color });
   }
 
-  async function markLike(value: "like" | "dislike" | null): Promise<void> {
+  async function markLike(value: "like" | "dislike"): Promise<void> {
     if (filterMode()) {
       /*
        * 赞 / 踩**互斥**（人类 2026-09-19）：点另一个会把前一个换掉；
        * 再点同一个 = 取消这个条件（界面上的按钮随之弹起）。
        */
-      if (value === null) {
-        store.patchFilter({ likes: [] });
-        return;
-      }
       store.patchFilter({ likes: filterLike() === value ? [] : [value] });
       return;
     }
-    await runMark({ kind: "like", value });
+    /*
+     * 赞 / 踩互斥，重复点同一个 = **取消**（人类 2026-09-20 报「取消不了、提示没有需要改动的照片」）。
+     *
+     * 与锁那条同一条口径：已经全是这个值就发 `null`（后端把它当「清掉」）。
+     * 以前这里无条件是 `value`，于是「再点一次」送回同一个值 → 后端判定无改动 →
+     * 弹「没有需要改动的照片」，用户就永远取消不掉。
+     */
+    const target = isExactly(likeState(), value) ? null : value;
+    await runMark({ kind: "like", value: target });
   }
 
   async function markLock(level: number): Promise<void> {

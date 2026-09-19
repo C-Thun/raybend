@@ -1,49 +1,48 @@
 /**
  * 对比视图（`BROWSE.md` §5.7、`plans/M2-W2.md` 2.2–2.3）。
  *
- * ## 两层盒子：栏区是**窗口**，画框是内容（人类 2026-09-20 纠正）
+ * ## 一张**虚拟画布**，几个窗口（人类 2026-09-20 定的新方案）
  *
  * ```text
  * ┌─ 窗口 = 分栏分到的那一格（2 张一排 / 3 张一排 / 4 张 2×2）────┐
- * │   ┌─ 画框（基准比例，居中）──┐                                  │
- * │   │        图片内容           │   ← 放大时画框变大，超出部分由窗口裁掉 │
- * │   └────────────────────────┘                                  │
- * └───────────────────────────────────────────────────────────────┘
+ * │  ┌─ 虚拟画布（各图最大宽 × 最大高）──────────────────┐         │
+ * │  │        ┌─────┐                                  │         │
+ * │  │        │ 竖图 │   ← 每张图按**自己的原图尺寸**居中放进画布 │
+ * │  │        └─────┘                                  │         │
+ * │  │  ┌───────────┐                                  │         │
+ * │  │  └───────────┘                                  │         │
+ * │  └─────────────────────────────────────────────────┘         │
+ * └──────────────────────────────────────────────────────────────┘
  * ```
  *
- * 曾经把**画框**当成裁剪边界（外层盒子缩到图片比例、`overflow` 挂在它上面），
- * 症状就是人类报的「放大后图片被限制在自己的图片幅面宽高内」——
- * 窗口明明还有地方，那一格却永远只在自己那个小盒子里动。现在的口径：
+ * 这是**取代**旧方案（以第一幅比例扣等比例区域）的口径，起因是人类报的具体问题：
+ * 竖图打头时横图被裁成竖比例，看着「没问题」，但**一放大就露馅** —— 用户想看被裁掉的
+ * 那部分。新方案里「不裁不缩」：所有图按原图像素居中贴进同一张画布，小的图两头留空。
  *
- * * **窗口（栏区）是可见边界**：`overflow-hidden` 挂在窗口上，放大后图片能铺满整格；
- * * **画框不是边界**，它只决定「扣取区在适配时映射到哪里」—— 所有画幅共用同一个画框，
- *   所以位移天然同步（见 `lib/viewer-compare.ts` 的文件头）；
- * * 画框是 `contain` 出来的 ⇒ 图片**永远等比例**，不拉伸。
+ * ## 谁拥有缩放 / 平移
  *
- * ## 缩放 / 平移的单位：相对画框的倍数，住在**本视图**里
- *
- * 对比里各图的像素尺寸本来就不同（4000×3000 与 6000×4000），「同一个倍率」只能是
- * **相对画框**的倍数（`rel`）。这个单位不属于单张看图的 store（那是「原图像素 × zoom」），
- * 所以 `rel` / `pan` 归这里：对比不会污染单张看图进入前的倍率与位置，
- * 单张看图也不必理解画框。数学仍只有一份 —— `lib/viewer-compare.ts::compareGeometry`
- * 与 `store.ts` 的 `clampPan` / `zoomPanAt`（都是纯函数、有单测）。
- *
- * 平移是**同一个 CSS 像素位移对所有画幅生效**：所有扣取区都映射到同一个画框，
- * 所以同一个屏幕位移对每一幅而言就是同一个画框百分比
- * （`plans/M2-W2.md` 2.3 的「位移按百分比同步」）。
+ * 画布坐标 = **原图像素**，所以这里的倍率是**绝对倍率**（画布像素 → CSS 像素），
+ * 1 = 100% = 1:1。这个单位与单张看图的 store 一致，但**适配语义不同**：
+ * 对比的「适合窗口」是「**以某张图为基准** contain 进栏区」（双击哪张就按哪张算），
+ * 而且同时有好几个窗口。所以 `zoom` / `pan` / `fitId` 住在**本视图**里，
+ * 单张看图的 store 不被污染；数学仍只有一份 —— `lib/viewer-compare.ts` 的
+ * `compareCanvas` / `canvasAspect` / `smallestByPixels` / `fitAspectWithin`
+ * 与 store 的纯函数 `clampPan` / `clampZoom` / `computeFitScale` / `zoomPanAt`。
  *
  * ## 交互
  *
  * | 操作 | 行为 |
  * | --- | --- |
- * | 滚轮 | 以**光标**为锚缩放（按帧合并，与单张看图共用 `interaction.ts` 那一份） |
- * | 双击 | **适配 ↔ 100%**（100% = 基准那幅的原图像素 1:1） |
- * | 拖动 | 平移；内容比窗口小时锁在中间，放大后不许拖出边界 |
+ * | 进入 / 改变对比集合 | 重算画布，重新**居中**，并按**像素数最小**的那张算「适合窗口」 |
+ * | 滚轮 | 以**光标**为锚缩放（按帧合并，与单张看图共用一份实现） |
+ * | 双击 | **适合窗口 ↔ 100%**：适合窗口按**双击的那张图**算，其他图跟着这个倍率 |
+ * | 拖动 | 平移（按**画布**坐标夹取；图可能被移出窗口，但总有图在窗口里） |
  * | 点某一格 | 设为**当前照片**（右栏与底部状态栏跟着走，选择集合不变） |
  * | `+` / `-` / `0` / `1` | 与单张看图同一套（对比态下单张看图件没挂载，这些键在这儿接） |
  */
 
 import {
+  batch,
   createEffect,
   createMemo,
   createSignal,
@@ -55,11 +54,18 @@ import {
 } from "solid-js";
 
 import { t } from "../../../i18n/index.ts";
-import { COMPARE_MAX, compareGeometry, compareLayout } from "../../../lib/viewer-compare.ts";
+import {
+  canvasAspect,
+  COMPARE_MAX,
+  compareCanvas,
+  compareLayout,
+  fitAspectWithin,
+  smallestByPixels,
+} from "../../../lib/viewer-compare.ts";
 import {
   clampPan,
-  MAX_ZOOM,
-  MIN_ZOOM,
+  clampZoom,
+  computeFitScale,
   zoomPanAt,
   type ViewerPhoto,
   type ViewerStore,
@@ -77,7 +83,7 @@ const COMPARE_GAP = 8;
 const COMPARE_PADDING = 16;
 
 export interface CompareViewProps {
-  /** 参与对比的照片（已按显示顺序、已截到上限，顺序里第一个是画幅比例基准） */
+  /** 参与对比的照片（已按显示顺序、已截到上限） */
   photos: readonly ViewerPhoto[];
   /** 选中总数；大于 4 时说明界面只显示最近选择的 4 张。 */
   selectedCount?: number;
@@ -95,44 +101,98 @@ export function CompareView(props: CompareViewProps): JSX.Element {
 
   /** 栏区（窗口）尺寸：由 host 尺寸与行列数算出（每格一样大，所以只量一次） */
   const [pane, setPane] = createSignal<ViewportSize>({ width: 0, height: 0 });
-  /** 相对画框的倍数：1 = 适配；`oneToOneRel` = 基准图 1:1 */
-  const [rel, setRel] = createSignal(1);
+  /**
+   * 用户自己给的绝对倍率（画布像素 → CSS 像素，1 = 100% = 1:1）。
+   *
+   * 它只是「**不在适配状态**时用哪个倍率」；真正生效的倍率是下面那个 memo ——
+   * 适配状态（`fitId` 非空）以**那张图**算出来的倍率为准。
+   * 这样「按哪张图适配」就不会出现「谁最后写 zoom 谁赢」的自激（2026-09-20 踩过：
+   * effect 里写 zoom 会把双击刚设好的 100% 立刻改回适配值）。
+   */
+  const [manualZoom, setManualZoom] = createSignal(1);
   /** 平移（CSS 像素，相对窗口中心）—— 所有画幅共用同一个值 */
   const [pan, setPan] = createSignal({ x: 0, y: 0 });
+  /**
+   * 当前「适合窗口」是**按哪张图**算的（照片 id）；`null` = 用户自己缩放过 / 已是 100%。
+   *
+   * 有它才做得到两件人类点名的事：① 双击在哪张图上就按哪张算；② 尺寸是**后来才补读**
+   * 到的（老库）或栏区被拉大了，只要还在「适合窗口」状态就跟着重算。
+   */
+  const [fitId, setFitId] = createSignal<string | null>(null);
   const [dragging, setDragging] = createSignal<{ x: number; y: number } | null>(null);
   const [cursor, setCursor] = createSignal<{ x: number; y: number } | null>(null);
 
   const layout = () => compareLayout(props.photos.length);
-  const geometry = createMemo(() => compareGeometry(props.photos, pane()));
-  /** 适配状态 = 相对倍数回到 1（它们是一回事，不另设一个会失同步的标志） */
-  const fitted = () => rel() === 1;
+  const canvas = createMemo(() => compareCanvas(props.photos));
+  /**
+   * 画布在窗口里的**布局盒**（contain）：缩放只是它上面的一条 `transform`，
+   * 不改布局 ⇒ 滚轮缩放不触发重排（四幅一起缩放也不掉帧）。
+   */
+  const layoutBox = createMemo(() => fitAspectWithin(pane(), canvasAspect(canvas())));
+  /** 画布像素 → 布局盒 CSS 像素（布局比例尺）。倍率换算都从它出发 */
+  const layoutBase = (): number => {
+    const width = canvas().size.width;
+    return width > 0 ? layoutBox().width / width : 0;
+  };
+  /**
+   * 某张图「适合窗口」的倍率：把**它自己** contain 进当前栏区。
+   *
+   * 栏区尺寸与这张图的尺寸都会**自动**重新触发它（尺寸是老库后来才补读到的也一样），
+   * 不需要额外去盯事件。
+   */
+  const fitZoomFor = (photo: ViewerPhoto | undefined): number =>
+    photo === undefined
+      ? 1
+      : clampZoom(computeFitScale(pane(), photo.natural ?? { width: 0, height: 0 }));
 
-  /** 内容盒 = 画框 × 相对倍数 —— 平移夹取看它（窗口比它大就锁在中间） */
-  const contentBox = (scale: number): ViewportSize => ({
-    width: geometry().frame.width * scale,
-    height: geometry().frame.height * scale,
+  /**
+   * 生效的倍率（唯一事实来源）：
+   *
+   * * `fitId` 非空 ⇒ 按**那张图**重新算（这就是「统一倍率，其他图跟着调」）；
+   * * 否则用用户自己给的那个（滚轮 / 加减 / 100%）。
+   */
+  const zoom = createMemo(() => {
+    const id = fitId();
+    if (id === null) return manualZoom();
+    const photo = props.photos.find((candidate) => candidate.id === id);
+    return photo === undefined ? manualZoom() : fitZoomFor(photo);
   });
 
-  /** 相对倍数的上下限：换算自单张看图那一套像素倍率界限（`MIN_ZOOM`..`MAX_ZOOM`） */
-  const relLimits = (): { min: number; max: number } => {
-    const oneToOne = geometry().oneToOneRel;
-    if (oneToOne === null || !(oneToOne > 0)) return { min: 1, max: 1 };
-    return { min: MIN_ZOOM * oneToOne, max: MAX_ZOOM * oneToOne };
+  /** 画布在 `transform` 里的缩放：布局盒早就 contain 好了，剩下的倍率由它补 */
+  const transformScale = (): number => {
+    const base = layoutBase();
+    return base > 0 ? zoom() / base : 1;
+  };
+  /** 内容盒（= 画布 × 倍率）：平移夹取看它 */
+  const contentBox = (scale: number): ViewportSize => ({
+    width: canvas().size.width * scale,
+    height: canvas().size.height * scale,
+  });
+
+  /** 适配到某张图（居中）。其他图跟着同一个倍率走 —— 这就是「统一倍率」 */
+  const fitTo = (photo: ViewerPhoto): void => {
+    batch(() => {
+      setFitId(photo.id);
+      setPan({ x: 0, y: 0 });
+    });
   };
 
-  const clampRel = (value: number): number => {
-    if (!Number.isFinite(value) || value <= 0) return 1;
-    const { min, max } = relLimits();
-    return Math.min(max, Math.max(min, value));
+  /** 100%：画布 1:1（与单张看图同一口径） */
+  const goToOneToOne = (): void => {
+    batch(() => {
+      setFitId(null);
+      setManualZoom(clampZoom(1));
+      setPan({ x: 0, y: 0 });
+    });
   };
 
-  /** 缩放：以 `anchor`（窗口坐标）为锚，**锚点下的内容不动** */
+  /** 缩放：以 `anchor`（窗口坐标）为锚，锚点下的内容不动；手动缩放即退出「适合窗口」状态 */
   const zoomAt = (factor: number, anchor?: { x: number; y: number }): void => {
     if (!Number.isFinite(factor) || factor <= 0) return;
     const viewport = pane();
     if (viewport.width <= 0 || viewport.height <= 0) return;
-    const current = rel();
-    const next = clampRel(current * factor);
+    const current = zoom();
+    const next = clampZoom(current * factor);
     if (next === current) return;
     const moved = zoomPanAt({
       pan: pan(),
@@ -141,52 +201,40 @@ export function CompareView(props: CompareViewProps): JSX.Element {
       viewport,
       ...(anchor === undefined ? {} : { anchor }),
     });
-    setRel(next);
-    setPan(clampPan({ pan: moved, content: contentBox(next), viewport }));
+    // 三件事一次落：退出适配状态 + 记下新倍率 + 夹取平移（中间态不该被看见）
+    batch(() => {
+      setFitId(null);
+      setManualZoom(next);
+      setPan(clampPan({ pan: moved, content: contentBox(next), viewport }));
+    });
   };
 
-  /** 平移：夹取到「内容盒 ↔ 窗口」之间 */
+  /** 平移：按**画布**夹取（画布比窗口小时锁在中间） */
   const panBy = (dx: number, dy: number): void => {
     const viewport = pane();
     setPan((previous) => {
       const next = clampPan({
         pan: { x: previous.x + dx, y: previous.y + dy },
-        content: contentBox(rel()),
+        content: contentBox(zoom()),
         viewport,
       });
       return next.x === previous.x && next.y === previous.y ? previous : next;
     });
   };
 
-  /** 适配：画框铺成窗口内最大的等比例盒子，居中 */
-  const fitTo = (): void => {
-    setRel(1);
-    setPan({ x: 0, y: 0 });
+  /** 当前那张（右栏/状态栏跟着走的那张）——「适合窗口」按钮以它为准 */
+  const currentPhoto = (): ViewerPhoto | undefined => {
+    const id = props.store.current()?.id;
+    return props.photos.find((photo) => photo.id === id) ?? props.photos[0];
   };
 
-  /** 100%：基准那幅回到原图像素 1:1（尺寸未知时没有 1:1 可言，退到适配） */
-  const goToOneToOne = (): void => {
-    const oneToOne = geometry().oneToOneRel;
-    if (oneToOne === null) {
-      fitTo();
-      return;
-    }
-    setRel(clampRel(oneToOne));
-    setPan({ x: 0, y: 0 });
-  };
-
-  /**
-   * 双击：**适配 ↔ 100%**（与单张看图同一条口径）。
-   *
-   * 已在 100% 上再双击也回适配 —— 判据用 `fitted()`，而不是「等于 oneToOne」：
-   * 用户滚到 100% 附近再双击，期望的也是「回适配」。
-   */
-  const toggleFit = (): void => {
-    if (fitted()) {
+  /** 双击某格：**适合窗口 ↔ 100%**（适合窗口按被双击的那张算） */
+  const toggleZoom = (photo: ViewerPhoto): void => {
+    if (fitId() === photo.id) {
       goToOneToOne();
       return;
     }
-    fitTo();
+    fitTo(photo);
   };
 
   /**
@@ -223,9 +271,9 @@ export function CompareView(props: CompareViewProps): JSX.Element {
   });
 
   createEffect(() => {
-    // 窗口尺寸或倍数变了：把已有平移收回新边界（内容比窗口小时会被锁回中间）
+    // 窗口尺寸或倍率变了：把已有平移收回新边界（画布比窗口小时会被锁回中间）
     const viewport = pane();
-    const scale = rel();
+    const scale = zoom();
     setPan((previous) => {
       const next = clampPan({ pan: previous, content: contentBox(scale), viewport });
       return next.x === previous.x && next.y === previous.y ? previous : next;
@@ -233,7 +281,7 @@ export function CompareView(props: CompareViewProps): JSX.Element {
   });
 
   /**
-   * 换了一组画幅（选择变化）才重置成「适配」。
+   * 换了一组画幅（选择变化）才重置：重算画布、画面**居中**、按**像素数最小**的那张算适合窗口。
    *
    * 判据是**照片集合的指纹**而不是 `props.photos` 的引用 —— 后者每次读都是新数组
    * （调用方现算的），拿它当依赖会把「点某一格切当前照片」也当成换组。
@@ -243,10 +291,27 @@ export function CompareView(props: CompareViewProps): JSX.Element {
     const nextKey = props.photos.map((photo) => `${photo.id}\u0000${photo.path}`).join("\u0001");
     if (nextKey === photoKey) return;
     photoKey = nextKey;
-    fitTo();
 
     // 同一套 store 负责取图；这里只表达「这几张现在都需要」，不另写第二套加载器
     for (const photo of props.photos) void props.store.ensureImage(photo);
+
+    const smallest = smallestByPixels(props.photos);
+    if (smallest === null) {
+      /*
+       * 尺寸都还没读到：先按「适配到第一张」摆着（它的尺寸一旦补读回来，
+       * `zoom` 那个 memo 会自己按新尺寸重算 —— 不需要额外的 effect 盯）。
+       */
+      const first = props.photos[0];
+      if (first === undefined) {
+        setFitId(null);
+        setManualZoom(clampZoom(1));
+        setPan({ x: 0, y: 0 });
+      } else {
+        fitTo(first);
+      }
+    } else {
+      fitTo(smallest);
+    }
 
     const currentId = props.store.current()?.id;
     if (!props.photos.some((photo) => photo.id === currentId)) {
@@ -259,8 +324,8 @@ export function CompareView(props: CompareViewProps): JSX.Element {
    * 滚轮：按帧合并 + 指数映射，**与单张看图共用** `interaction.ts::createWheelZoom`
    * （两处的滚轮手感必须一致，也不能各写一份累计逻辑）。
    *
-   * 锚点取「光标落在哪一格」，再换算成**那一格的本地坐标**：各格一样大、显示的内容
-   * 也按同一个画框对齐，所以在哪一格上缩放，锚到的都是同一个内容点。
+   * 锚点取「光标落在哪一格的本地坐标」：所有格子一样大、显示的是**同一张画布**，
+   * 所以在哪一格上缩放，锚到的都是同一个画布点。
    */
   const paneRectFor = (target: EventTarget | null): DOMRect | null => {
     if (!(target instanceof Element)) return null;
@@ -291,10 +356,15 @@ export function CompareView(props: CompareViewProps): JSX.Element {
           event.preventDefault();
           zoomAt(1 / 1.25);
           break;
-        case "0":
-          event.preventDefault();
-          fitTo();
+        case "0": {
+          // 适配 = 以当前那张为准（与右下那颗「适配」按钮同一条口径）
+          const photo = currentPhoto();
+          if (photo !== undefined) {
+            event.preventDefault();
+            fitTo(photo);
+          }
           break;
+        }
         case "1":
           event.preventDefault();
           goToOneToOne();
@@ -318,20 +388,20 @@ export function CompareView(props: CompareViewProps): JSX.Element {
     props.onClose?.();
   };
 
-  /** 读数：相对倍数 → 基准那幅的**原图像素比例**（100% 就是 1:1） */
+  /** 读数：绝对倍率（100% = 1:1）；处在「适合窗口」状态时只说「适配」 */
   const zoomLabel = (): string => {
-    const oneToOne = geometry().oneToOneRel;
-    if (fitted() || oneToOne === null || !(oneToOne > 0)) return t("viewer.fit");
-    return `${Math.round((rel() / oneToOne) * 100)}%`;
+    if (fitId() !== null && fitId() === props.store.current()?.id) return t("viewer.fit");
+    return `${Math.round(zoom() * 100)}%`;
   };
 
-  const focusFromTarget = (target: EventTarget | null): void => {
-    if (!(target instanceof Element)) return;
+  const focusFromTarget = (target: EventTarget | null): ViewerPhoto | undefined => {
+    if (!(target instanceof Element)) return undefined;
     const frame = target.closest<HTMLElement>("[data-compare-photo-id]");
     const id = frame?.dataset.comparePhotoId;
-    if (id === undefined) return;
+    if (id === undefined) return undefined;
     const photo = props.photos.find((candidate) => candidate.id === id);
     if (photo !== undefined) props.onFocus?.(photo);
+    return photo;
   };
 
   const onPointerDown = (event: PointerEvent): void => {
@@ -371,6 +441,8 @@ export function CompareView(props: CompareViewProps): JSX.Element {
       data-compare-count={props.photos.length}
       data-compare-cols={layout().columns}
       data-compare-rows={layout().rows}
+      data-compare-zoom={zoom()}
+      data-compare-fit={fitId() ?? "none"}
       class={[
         "absolute inset-0 z-10 grid overflow-hidden bg-surface-bar",
         dragging() === null ? "cursor-grab" : "cursor-grabbing",
@@ -393,7 +465,8 @@ export function CompareView(props: CompareViewProps): JSX.Element {
       onDblClick={(event) => {
         // 双击落在缩放/返回按钮上时不当成「切换适配」—— 那两个按钮自己有点击行为
         if (isViewerControlTarget(event.target)) return;
-        toggleFit();
+        const photo = focusFromTarget(event.target) ?? currentPhoto();
+        if (photo !== undefined) toggleZoom(photo);
       }}
     >
       <Show when={(props.selectedCount ?? 0) > COMPARE_MAX}>
@@ -405,49 +478,49 @@ export function CompareView(props: CompareViewProps): JSX.Element {
         </span>
       </Show>
 
-      <For each={geometry().frames}>
-        {(frame, at) => (
+      <For each={canvas().placements}>
+        {(placement, at) => (
           <div
             data-compare-frame={at()}
-            data-compare-photo-id={frame.photo.id}
-            data-baseline={at() === 0 ? "true" : undefined}
-            data-current={props.store.current()?.id === frame.photo.id ? "true" : undefined}
-            aria-label={frame.photo.fileName}
-            /* 窗口：可见/裁剪的边界（图片放大后铺满整格，而不是被自己的画框关住） */
+            data-compare-photo-id={placement.photo.id}
+            data-current={props.store.current()?.id === placement.photo.id ? "true" : undefined}
+            aria-label={placement.photo.fileName}
+            /* 窗口：可见/裁剪的边界（画布放大后铺满整格，而不是被画布关住） */
             class={[
               "relative flex h-full min-w-0 cursor-pointer items-center justify-center overflow-hidden rounded-ui bg-surface-main",
               // 当前那张（点哪格就是哪张）用主色描边点明；其余只用底色分格
-              props.store.current()?.id === frame.photo.id
+              props.store.current()?.id === placement.photo.id
                 ? "border border-brand"
                 : "border border-transparent",
             ].join(" ")}
             /* 保留 click 入口给键盘/自动化；真实指针在 pointerdown 已先切焦点 */
-            onClick={() => props.onFocus?.(frame.photo)}
+            onClick={() => props.onFocus?.(placement.photo)}
           >
             <Show
-              when={frame.crop.width > 0 && frame.image.width > 0}
+              when={canvas().size.width > 0 && placement.natural.width > 0}
               fallback={
                 <span class="text-fs-2 text-fg-3">{t("browse.compareNoSize")}</span>
               }
             >
               {/*
-                画框：等比例内容盒，由 flex 居中；放大 = 整体缩放（`transform-origin: center`）。
-                `overflow-hidden` 在这一层是**为了扣取区**：扣出来的那块映射满画框，
-                画框之外的原图内容（比例不一致时被扣掉的部分）不该露出来。
-                超出窗口的部分由**窗口**裁掉 —— 这一层不是可见边界。
+                **同一张画布**在每一格里的一个副本：尺寸与变换完全一样，差别只是里面
+                只放这一格的图。所以「统一倍率、按画布对位」是构造出来的，不靠逐帧同步。
+
+                位置用**百分比**（相对画布）：与倍率、与栏区大小都无关 ——
+                缩放只改父级那条 `transform`，图片自身的样式一动不动。
               */}
               <div
                 data-compare-canvas
-                class="relative shrink-0 overflow-hidden"
+                class="relative shrink-0"
                 style={{
-                  width: `${geometry().frame.width}px`,
-                  height: `${geometry().frame.height}px`,
-                  transform: `translate3d(${pan().x}px, ${pan().y}px, 0) scale(${rel()})`,
+                  width: `${layoutBox().width}px`,
+                  height: `${layoutBox().height}px`,
+                  transform: `translate3d(${pan().x}px, ${pan().y}px, 0) scale(${transformScale()})`,
                   "transform-origin": "center",
                   "will-change": "transform",
                 }}
               >
-                <Show when={props.store.imageUrlFor(frame.photo)}>
+                <Show when={props.store.imageUrlFor(placement.photo)}>
                   {(url) => (
                     <img
                       class="pointer-events-none absolute max-w-none select-none"
@@ -455,10 +528,10 @@ export function CompareView(props: CompareViewProps): JSX.Element {
                       alt=""
                       draggable={false}
                       style={{
-                        width: `${frame.image.width}px`,
-                        height: `${frame.image.height}px`,
-                        left: `${frame.imageOffset.x}px`,
-                        top: `${frame.imageOffset.y}px`,
+                        left: `${(placement.offset.x / canvas().size.width) * 100}%`,
+                        top: `${(placement.offset.y / canvas().size.height) * 100}%`,
+                        width: `${(placement.natural.width / canvas().size.width) * 100}%`,
+                        height: `${(placement.natural.height / canvas().size.height) * 100}%`,
                       }}
                     />
                   )}
@@ -476,7 +549,10 @@ export function CompareView(props: CompareViewProps): JSX.Element {
         zoomLabel={zoomLabel}
         onZoomOut={() => zoomAt(1 / 1.25)}
         onZoomIn={() => zoomAt(1.25)}
-        onFit={fitTo}
+        onFit={() => {
+          const photo = currentPhoto();
+          if (photo !== undefined) fitTo(photo);
+        }}
       />
     </div>
   );

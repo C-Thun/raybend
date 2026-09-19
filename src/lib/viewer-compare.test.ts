@@ -1,21 +1,21 @@
 /**
  * 对比态数学的测试。
  *
- * 这些数字**必须钉死**：画幅不一致时的扣取、画框与窗口的关系，错一点的表现是
- * 「一边拖一边两边错位」或者「图片被挤在画框里、填不满窗口」——
- * 人眼立刻看得出来，但很难反推出是哪一步算错了。人类点名的例子（4:3 与 3:2 混）单独一条。
+ * 这些数字**必须钉死**：虚拟画布的尺寸与每张图的落点错一点，表现就是「一边拖一边
+ * 两边错位」或者「小图被拉大 / 大图被裁掉」—— 人眼立刻看得出来，但很难反推出是哪一步
+ * 算错了。人类点名的例子（竖图打头 + 横图）单独一条。
  */
 
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  baselineAspect,
+  canvasAspect,
   COMPARE_MAX,
-  compareGeometry,
+  compareCanvas,
   compareIds,
   compareLayout,
-  cropToAspect,
   fitAspectWithin,
+  smallestByPixels,
 } from "./viewer-compare.ts";
 import type { ComparablePhoto } from "./viewer-compare.ts";
 
@@ -155,170 +155,97 @@ test("fitAspectWithin：窗口横竖变化时始终保持画幅比例", () => {
 
 // ─────────────────── 基准比例 ───────────────────
 
-test("baselineAspect：以**第一幅**为准", () => {
-  assert.equal(baselineAspect([photo("a", 4000, 3000), photo("b", 6000, 4000)]), 4000 / 3000);
+// ─────────────────── 虚拟画布（2026-09-20 新方案） ───────────────────
+
+test("compareCanvas：尺寸一样时，画布就是那张图，落点都在原点", () => {
+  const canvas = compareCanvas([photo("a", 4000, 3000), photo("b", 3000, 2250)]);
+  // 注意：同比例但**尺寸不同**时，画布取最大宽 × 最大高，小的图居中（不拉伸）
+  assert.deepEqual(canvas.size, { width: 4000, height: 3000 });
+  assert.deepEqual(canvas.placements[0]!.offset, { x: 0, y: 0 });
+  assert.deepEqual(canvas.placements[1]!.offset, { x: 500, y: 375 });
 });
 
-test("baselineAspect：第一幅尺寸未知时返回 null（不编比例）", () => {
-  assert.equal(baselineAspect([photo("a")]), null);
-  assert.equal(baselineAspect([photo("a", 0, 0)]), null);
-  assert.equal(baselineAspect([]), null);
-});
-
-// ─────────────────── 扣等比例区域 ───────────────────
-
-test("cropToAspect：比例一致时一张都不扣", () => {
-  assert.deepEqual(cropToAspect({ width: 3000, height: 2000 }, 1.5), {
-    x: 0,
-    y: 0,
-    width: 3000,
-    height: 2000,
-  });
-});
-
-test("cropToAspect：比基准**宽**时扣两侧（保留高度、居中）", () => {
-  // 16:9 的图，要 4:3 的区域 → 保留高度，两边各扣掉
-  const crop = cropToAspect({ width: 1920, height: 1080 }, 4 / 3);
-  assert.equal(crop.height, 1080);
-  assert.equal(Math.round(crop.width), 1440);
-  assert.equal(crop.x, (1920 - 1440) / 2);
-  assert.equal(crop.y, 0);
-});
-
-test("cropToAspect：比基准**窄/高**时扣上下（保留宽度、居中）", () => {
-  // 竖向 3:4 的图，要 4:3 的区域 → 保留宽度，上下扣掉
-  const crop = cropToAspect({ width: 3000, height: 4000 }, 4 / 3);
-  assert.equal(crop.width, 3000);
-  assert.equal(crop.height, 2250);
-  assert.equal(crop.y, 875);
-  assert.equal(crop.x, 0);
-});
-
-test("cropToAspect：竖向照片也能被扣（横基准配竖图）", () => {
-  const crop = cropToAspect({ width: 3000, height: 4000 }, 3 / 2);
-  assert.equal(crop.width, 3000);
-  assert.equal(crop.height, 2000);
-  assert.equal(crop.y, 1000);
-});
-
-test("cropToAspect：极端长边（100:1）不会算出负数或 NaN", () => {
-  const crop = cropToAspect({ width: 10_000, height: 100 }, 1);
-  assert.equal(crop.height, 100);
-  assert.equal(crop.width, 100);
-  assert.ok(crop.x > 0);
-  const wide = cropToAspect({ width: 100, height: 10_000 }, 1);
-  assert.equal(wide.width, 100);
-  assert.equal(wide.height, 100);
-  assert.ok(wide.y > 0);
-});
-
-test("cropToAspect：尺寸或比例非法时原样返回，不猜", () => {
-  assert.deepEqual(cropToAspect({ width: 0, height: 0 }, 1.5), { x: 0, y: 0, width: 0, height: 0 });
-  assert.deepEqual(cropToAspect({ width: 100, height: 50 }, 0), {
-    x: 0,
-    y: 0,
-    width: 100,
-    height: 50,
-  });
-  assert.deepEqual(cropToAspect({ width: 100, height: 50 }, Number.NaN), {
-    x: 0,
-    y: 0,
-    width: 100,
-    height: 50,
-  });
-});
-
-// ─────────────────── 整组：人类点名的例子 ───────────────────
-
-/** 一个竖着的栏区（2 张一排时很常见）：画框会被宽度限住、上下留白 */
-const PANE = { width: 600, height: 800 };
-
-test("compareGeometry：4:3 打头、后面 3:2 → 后面的被扣成 4:3（居中）", () => {
-  const { frame, frames } = compareGeometry(
-    [photo("a", 4000, 3000), photo("b", 6000, 4000)],
-    PANE,
-  );
-  assert.deepEqual(frame, { width: 600, height: 450 }, "画框 = 基准 4:3 在栏区里 contain");
-  assert.equal(frames.length, 2);
-  const [first, second] = frames;
-  assert.deepEqual(first!.crop, { x: 0, y: 0, width: 4000, height: 3000 }, "第一幅是基准，整张");
-  // 6000×4000（3:2）扣成 4:3 → 高 4000、宽 5333.33…
-  assert.equal(second!.crop.width, 4000 * (4 / 3));
-  assert.equal(second!.crop.height, 4000);
-  assert.equal(second!.crop.x, (6000 - 4000 * (4 / 3)) / 2);
-  assert.equal(second!.crop.y, 0);
-});
-
-test("compareGeometry：扣取区正好铺满画框（两幅都在画框里重合）", () => {
-  const { frame, frames } = compareGeometry(
-    [photo("a", 4000, 3000), photo("b", 6000, 4000)],
-    PANE,
-  );
-  for (const frameItem of frames) {
-    const base = frameItem.crop.width > 0 ? frame.width / frameItem.crop.width : 0;
-    assert.equal(frameItem.crop.x * base + frameItem.imageOffset.x, 0, "扣取区左沿贴画框左沿");
-    assert.equal(frameItem.crop.y * base + frameItem.imageOffset.y, 0, "扣取区上沿贴画框上沿");
-    assert.ok(Math.abs(frameItem.crop.width * base - frame.width) < 1e-9);
-    assert.ok(Math.abs(frameItem.crop.height * base - frame.height) < 1e-9);
-  }
-  // 第二幅（3:2 原图）比画框宽：图片左右两侧被画框裁掉，偏移是负的
-  assert.ok(Math.abs(frames[1]!.image.width - frame.width * 1.125) < 1e-9);
-  assert.ok(frames[1]!.imageOffset.x < 0);
-  assert.equal(frames[1]!.image.height, frame.height, "高度方向正好等于画框（扣的是上下两侧）");
-});
-
-test("compareGeometry：画框永远不超过栏区（窗口），比例不变形", () => {
-  const wide = compareGeometry([photo("a", 4000, 3000)], { width: 1000, height: 300 });
-  assert.deepEqual(wide.frame, { width: 400, height: 300 }, "高度限住时按高度算宽");
-  const tall = compareGeometry([photo("a", 4000, 3000)], { width: 200, height: 900 });
-  assert.deepEqual(tall.frame, { width: 200, height: 150 }, "宽度限住时按宽度算高");
-});
-
-test("compareGeometry：oneToOneRel 是「基准图 1:1」需要的相对倍数", () => {
-  const { frame, oneToOneRel } = compareGeometry([photo("a", 4000, 3000)], PANE);
-  // 画框 600×450 装的是 4000×3000 的图 ⇒ 适配倍率 0.15 ⇒ 要放大 1/0.15 才是 1:1
-  assert.ok(Math.abs(frame.width * (oneToOneRel ?? 0) - 4000) < 1e-9);
-  assert.ok(Math.abs(oneToOneRel! - 4000 / 600) < 1e-9);
-});
-
-test("compareGeometry：比例全都一样时谁都不扣", () => {
-  const { frames } = compareGeometry(
-    [photo("a", 6000, 4000), photo("b", 3000, 2000), photo("c", 900, 600)],
-    PANE,
-  );
-  for (const frame of frames) {
-    assert.equal(frame.crop.x, 0);
-    assert.equal(frame.crop.y, 0);
-    assert.equal(frame.crop.width, frame.photo.natural!.width);
-    assert.equal(frame.crop.height, frame.photo.natural!.height);
+test("compareCanvas：人类点名的例子 —— 竖图打头 + 横图，谁都不裁", () => {
+  /*
+   * 旧方案会「以第一幅比例扣等比例区域」：竖图打头就把横图裁成竖比例 —— 一放大露馅。
+   * 新方案：画布 = 最大宽 × 最大高，两张图各自按原尺寸居中放进去。
+   */
+  const tall = photo("tall", 3750, 5000);
+  const wide = photo("wide", 6000, 4000);
+  const canvas = compareCanvas([tall, wide]);
+  assert.deepEqual(canvas.size, { width: 6000, height: 5000 });
+  // 竖图：宽度方向两头留空 ((6000−3750)/2 = 1125)，高度方向正好贴着
+  assert.deepEqual(canvas.placements[0]!.offset, { x: 1125, y: 0 });
+  assert.deepEqual(canvas.placements[0]!.natural, { width: 3750, height: 5000 });
+  // 横图：高度方向两头留空 ((5000−4000)/2 = 500)，宽度方向正好贴着
+  assert.deepEqual(canvas.placements[1]!.offset, { x: 0, y: 500 });
+  // 两张图都**完整**落在画布内（没有被裁掉的部分）
+  for (const placement of canvas.placements) {
+    assert.ok(placement.offset.x >= 0 && placement.offset.y >= 0);
+    assert.ok(placement.offset.x + placement.natural.width <= canvas.size.width);
+    assert.ok(placement.offset.y + placement.natural.height <= canvas.size.height);
   }
 });
 
-test("compareGeometry：尺寸未知的那一帧不参与扣取（退回整张/零）", () => {
-  const { frames } = compareGeometry([photo("a", 4000, 3000), photo("b")], PANE);
-  assert.deepEqual(frames[1]!.crop, { x: 0, y: 0, width: 0, height: 0 });
-  assert.deepEqual(frames[1]!.image, { width: 0, height: 0 });
+test("compareCanvas：小的图 x / y 两头都挨不到边（居中）", () => {
+  const canvas = compareCanvas([photo("big", 6000, 5000), photo("small", 2000, 1200)]);
+  assert.deepEqual(canvas.size, { width: 6000, height: 5000 });
+  assert.deepEqual(canvas.placements[1]!.offset, { x: 2000, y: 1900 });
 });
 
-test("compareGeometry：第一幅尺寸未知时整体退回零（不编比例）", () => {
-  const { frame, oneToOneRel, frames } = compareGeometry([photo("a"), photo("b", 6000, 4000)], PANE);
-  assert.deepEqual(frame, { width: 0, height: 0 });
-  assert.equal(oneToOneRel, null);
-  assert.deepEqual(frames[1]!.crop, { x: 0, y: 0, width: 0, height: 0 });
+test("compareCanvas：尺寸未知的图照样占一个落点（0 尺寸），画布由已知的算", () => {
+  const canvas = compareCanvas([photo("a", 4000, 3000), photo("b")]);
+  assert.deepEqual(canvas.size, { width: 4000, height: 3000 });
+  assert.deepEqual(canvas.placements[1]!.natural, { width: 0, height: 0 });
+  assert.deepEqual(canvas.placements[1]!.offset, { x: 2000, y: 1500 });
 });
 
-test("compareGeometry：空列表与零尺寸栏区都不炸", () => {
-  assert.deepEqual(compareGeometry([], PANE).frames, []);
-  assert.equal(compareGeometry([], PANE).oneToOneRel, null);
-  const zero = compareGeometry([photo("a", 4000, 3000)], { width: 0, height: 0 });
-  assert.deepEqual(zero.frame, { width: 0, height: 0 });
-  assert.equal(zero.oneToOneRel, null);
+test("compareCanvas：全都未知 / 空列表 / 脏尺寸都不炸", () => {
+  assert.deepEqual(compareCanvas([]).size, { width: 0, height: 0 });
+  assert.deepEqual(compareCanvas([]).placements, []);
+  const unknown = compareCanvas([photo("a"), photo("b")]);
+  assert.deepEqual(unknown.size, { width: 0, height: 0 });
+  assert.equal(unknown.placements.length, 2);
+  const dirty = compareCanvas([photo("a", 0, 0), photo("b", -100, 200)]);
+  assert.deepEqual(dirty.size, { width: 0, height: 0 });
 });
 
-test("compareGeometry：竖向照片配横基准也能扣（扣上下）", () => {
-  const { frames } = compareGeometry([photo("a", 4000, 3000), photo("b", 3000, 4000)], PANE);
-  assert.equal(frames[1]!.crop.width, 3000);
-  assert.equal(frames[1]!.crop.height, 2250);
-  assert.ok(frames[1]!.crop.y > 0);
-  assert.ok(frames[1]!.imageOffset.y < 0, "图片比画框高 ⇒ 上沿在画框外面");
+test("compareCanvas：泛型不丢照片自己的字段", () => {
+  const canvas = compareCanvas([photo("a", 4000, 3000)]);
+  assert.equal(canvas.placements[0]!.photo.fileName, "a.JPG");
+  assert.equal(canvas.placements[0]!.photo.path, "/lib/a.JPG");
+});
+
+// ─────────────────── 画布比例与「最小那张」 ───────────────────
+
+test("canvasAspect：正常给宽高比，空画布给 1（调用方走空态）", () => {
+  assert.equal(canvasAspect(compareCanvas([photo("a", 6000, 5000)])), 6000 / 5000);
+  assert.equal(canvasAspect(compareCanvas([])), 1);
+  assert.equal(canvasAspect(compareCanvas([photo("a")])), 1);
+});
+
+test("smallestByPixels：按像素数最小的那张（进入对比时的「适合窗口」基准）", () => {
+  const small = photo("small", 2000, 1500); // 3.0M
+  const big = photo("big", 6000, 4000); // 24M
+  const mid = photo("mid", 3000, 3000); // 9.0M
+  assert.equal(smallestByPixels([big, small, mid]), small);
+  assert.equal(smallestByPixels([big, mid]), mid);
+});
+
+test("smallestByPixels：尺寸未知的不参与；全未知 / 空列表给 null", () => {
+  const known = photo("known", 4000, 3000);
+  assert.equal(smallestByPixels([photo("a"), known]), known);
+  assert.equal(smallestByPixels([photo("a"), photo("b")]), null);
+  assert.equal(smallestByPixels([]), null);
+  // 0 / 负数 / 非有限值都不算「尺寸已知」
+  assert.equal(smallestByPixels([photo("a", 0, 0)]), null);
+  assert.equal(smallestByPixels([photo("a", -5, 100)]), null);
+  assert.equal(smallestByPixels([photo("a", Number.NaN, 100)]), null);
+});
+
+test("smallestByPixels：并列时取先遇到的（列表顺序 = 显示顺序，可复现）", () => {
+  const first = photo("first", 4000, 3000);
+  const second = photo("second", 6000, 2000); // 也是 12M
+  assert.equal(smallestByPixels([first, second]), first);
+  assert.equal(smallestByPixels([second, first]), second);
 });

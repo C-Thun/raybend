@@ -572,6 +572,12 @@ function TileCell(props: {
     >
       <Tile
         info={infoMode()}
+        /*
+         * **库内**上下文：顶部那条标记信息条（星标/色标/旗标）只在库内照片上出现。
+         * 这一条 2026-09-20 才补上 —— 之前 `Tile` 里的 `inLibrary()` 判定一直没人满足，
+         * 于是顶部条从来没渲染过（人类报「顶部信息条没了」）。
+         */
+        context="library"
         label={item()?.fileName ?? ""}
         tag={item()?.ext?.toUpperCase() ?? undefined}
         raw={rawMode()}

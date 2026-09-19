@@ -56,12 +56,18 @@ import {
   DEFAULT_DISPLAY_ASPECT,
   MAX_DISPLAY_ASPECT,
 } from "../../lib/tile-flow.ts";
+import type { TileInfoMode } from "../../lib/display-prefs.ts";
 
 /** 颜色标记（库内才有）—— 取值与类名映射的唯一来源是 `lib/color-labels.ts` */
 export type TileColorLabel = ColorLabel;
 
-/** 「信息」档位：见 `TileProps.info` */
-export type TileInfoMode = "off" | "marks" | "marks-name";
+/**
+ * 「信息」档位：见 `TileProps.info`。
+ *
+ * 值表与类型住在 `lib/display-prefs.ts`（**与持久化同一份** —— 这里再定义一遍就是两份）
+ * 并从这里继续对外导出，免得所有调用方都改 import。
+ */
+export type { TileInfoMode } from "../../lib/display-prefs.ts";
 
 export interface TileProps
   extends Omit<JSX.HTMLAttributes<HTMLDivElement>, "children"> {
@@ -95,11 +101,16 @@ export interface TileProps
   /** 库内才有的信息（导入工作流里这些事都不存在，槽位直接不渲染） */
   context?: "library" | "source";
   /**
-   * 「信息」档位（人类 2026-09-19；由 tiles 状态栏上的 `i` 开关/`i` 键控制）：
+   * 「信息」档位（人类 2026-09-19 引入、**2026-09-20 改口径**；由 tiles 状态栏的 `i`
+   * 开关 / `i` 键控制）：
    *
    *   - `off`（默认）：信息条只在指向/选中时出现，带半透明底纹（既有行为）；
-   *   - `marks`：**常显标记**（星标/色标/旗标），**去掉底纹**，文字加反色勾边；
-   *   - `marks-name`：标记 + **下面的文件名**都常显，同样没有底纹。
+   *   - `marks`：**未指向、未选中**时强制显示顶部标记（星标/色标/旗标）—— **无底纹**、
+   *     文字加反色勾边；一旦指向/选中就回到标准方案（半透底 + `fg-1`、**去掉勾边**）；
+   *   - `marks-name`：同上，但连**下面的文件名**也一起强制显示。
+   *
+   * 这条「没有指向/选中时才用加强显示、指向/选中后回到原方案」与照片右下角
+   * `RAW` / `+RAW` 角标的显示逻辑是**同一个概念**（见 `Tile.raw`）。
    */
   info?: TileInfoMode;
   /**
@@ -192,14 +203,19 @@ export function Tile(props: TileProps) {
     return Math.min(5, Math.max(0, Math.round(value)));
   };
 
-  /** 信息是否常亮（选中时不再依赖悬停） */
-  const infoAlwaysOn = (): boolean => Boolean(local.selected);
   /** 用户在状态栏选的档位 */
   const infoMode = (): TileInfoMode => local.info ?? "off";
-  /** 信息条常显：选中（既有规则）或用户开了 info */
-  const infoVisible = (): boolean => infoAlwaysOn() || infoMode() !== "off";
-  /** 开了 info 就**不要半透明底纹**，改成反色勾边（人类 2026-09-19） */
-  const infoBare = (): boolean => infoMode() !== "off";
+  /**
+   * **强制显示层**要不要上（人类 2026-09-20 定的口径）：
+   * 开了信息档位、且**未选中** —— 此时在没有底纹的前提下常显（文字加反色勾边）。
+   *
+   * 「指向/聚焦」不必在这里判：那交给 CSS（`group-hover` / `group-focus-within` 淡出本层、
+   * 淡入标准层），与 `RAW` 角标同一套做法。
+   * 「选中」是持续状态，那时标准层本来就常亮，所以强制层**根本不渲染**（不是 opacity-0）。
+   */
+  const forceTopBar = (): boolean => infoMode() !== "off" && !local.selected;
+  /** 底部条只在 `marks-name` 这一档才强制显示（`marks` 档只管标记） */
+  const forceNameBar = (): boolean => infoMode() === "marks-name" && !local.selected;
 
   return (
     <div
@@ -357,85 +373,164 @@ export function Tile(props: TileProps) {
 
       {/* ── 顶部信息条（库内）：星标 / 颜色 / 旗标 ─────────────── */}
       <Show when={inLibrary()}>
+        {/*
+          ① 强制显示层（开信息档位、未选中）：无底纹 + 反色勾边。
+             指向/聚焦时本层淡出（`group-hover` / `group-focus-within`），把位置让给下面那层。
+        */}
+        <Show when={forceTopBar()}>
+          <div
+            data-tile-bar="marks-forced"
+            class="pointer-events-none absolute inset-x-0 top-0 flex items-center gap-1 px-(--tile-pad) tile-info-text transition-opacity group-hover/tile:opacity-0 group-focus-within/tile:opacity-0"
+            style={{ height: "var(--tile-bar-h)" }}
+            aria-hidden="true"
+          >
+            <TileMarks
+              rating={rating()}
+              compact={local.compact === true}
+              colorLabel={local.colorLabel ?? null}
+              flag={local.flag ?? null}
+            />
+          </div>
+        </Show>
+
+        {/*
+          ② 标准层：指向 / 聚焦 / 选中时出现 —— 半透底纹 + `fg-1`，**不要勾边**
+             （有底纹就不需要描边了，人类 2026-09-20）。它就是「原来那套方案」。
+        */}
         <div
+          data-tile-bar="marks"
           class={[
             "pointer-events-none absolute inset-x-0 top-0 flex items-center gap-1",
-            "px-(--tile-pad) transition-opacity",
-            infoBare() ? "tile-info-text" : "bg-(--tile-bar-scrim) text-fg-1",
+            "bg-(--tile-bar-scrim) px-(--tile-pad) text-fg-1 transition-opacity",
             "opacity-0 group-hover/tile:opacity-100 group-focus-within/tile:opacity-100",
-            infoVisible() ? "opacity-100" : "",
-          ].join(" ")}
+            local.selected ? "opacity-100" : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
           style={{ height: "var(--tile-bar-h)" }}
         >
-          {/* 星标：0 星什么都不显示；窄格子退化成「一颗星 + 数字」 */}
-          <Show when={rating() > 0}>
-            <span
-              class="flex shrink-0 items-center gap-0.5"
-              aria-label={t("grid.rating", { n: rating() })}
-            >
-              <Show
-                when={!local.compact}
-                fallback={
-                  <>
-                    <IconStarFilled size={12} aria-hidden="true" />
-                    <span class="text-fs-0 tnum">{rating()}</span>
-                  </>
-                }
-              >
-                {[1, 2, 3, 4, 5].map((index) =>
-                  index <= rating() ? (
-                    <IconStarFilled size={11} aria-hidden="true" />
-                  ) : (
-                    <IconStar size={11} class="opacity-50" aria-hidden="true" />
-                  ),
-                )}
-              </Show>
-            </span>
-          </Show>
-
-          <span class="min-w-0 flex-1" />
-
-          {/* 颜色标记：悬停/选中时底纹被盖住，用它兜底让人看到标色 */}
-          <Show when={local.colorLabel}>
-            {(label) => (
-              <span
-                class={["size-2 shrink-0 rounded-full", LABEL_DOT[label()]].join(" ")}
-                aria-label={t("grid.color_label")}
-              />
-            )}
-          </Show>
-
-          {/*
-            旗标用**实心小旗**（人类 2026-09-19：以前这里是星星，与星标撞在一起分不清）。
-            「弃」的那一态在界面上已经取消了（见 BrowseToolbar 的说明），所以这里只有一种旗。
-          */}
-          <Show when={local.flag === "pick"}>
-            <IconFlagFilled size={11} aria-hidden="true" />
-          </Show>
+          <TileMarks
+            rating={rating()}
+            compact={local.compact === true}
+            colorLabel={local.colorLabel ?? null}
+            flag={local.flag ?? null}
+          />
         </div>
       </Show>
 
       {/* ── 底部信息条：文件名 + 类型（+ 加锁）───────────────── */}
+      {/* ① 强制显示层：只有 `marks-name` 档、且未选中时才上（无底纹 + 勾边） */}
+      <Show when={forceNameBar()}>
+        <div
+          data-tile-bar="name-forced"
+          class="pointer-events-none absolute inset-x-0 bottom-0 flex items-center gap-1 px-(--tile-pad) tile-info-text transition-opacity group-hover/tile:opacity-0 group-focus-within/tile:opacity-0"
+          style={{ height: "var(--tile-bar-h)" }}
+          aria-hidden="true"
+        >
+          <TileName label={local.label} name={displayName()} tag={local.tag} locked={local.locked} />
+        </div>
+      </Show>
+
+      {/* ② 标准层：指向 / 聚焦 / 选中 */}
       <div
+        data-tile-bar="name"
         class={[
           "pointer-events-none absolute inset-x-0 bottom-0 flex items-center gap-1",
-          "px-(--tile-pad) transition-opacity",
-          infoBare() ? "tile-info-text" : "bg-(--tile-bar-scrim) text-fg-1",
+          "bg-(--tile-bar-scrim) px-(--tile-pad) text-fg-1 transition-opacity",
           "opacity-0 group-hover/tile:opacity-100 group-focus-within/tile:opacity-100",
-          infoAlwaysOn() || infoMode() === "marks-name" ? "opacity-100" : "",
-        ].join(" ")}
+          local.selected ? "opacity-100" : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
         style={{ height: "var(--tile-bar-h)" }}
       >
-        <span class="min-w-0 flex-1 truncate text-fs-1" title={local.label}>
-          {displayName()}
-        </span>
-        <Show when={local.tag}>
-          <span class="shrink-0 text-fs-0">{local.tag}</span>
-        </Show>
-        <Show when={local.locked}>
-          <IconLock size={11} class="shrink-0" aria-label={t("grid.locked")} />
-        </Show>
+        <TileName label={local.label} name={displayName()} tag={local.tag} locked={local.locked} />
       </div>
     </div>
+  );
+}
+
+/**
+ * 顶部条的**内容**：星标 / 色标 / 旗标。
+ *
+ * 抽成子组件是**为了强制显示层与标准层共用同一份实现**（否则「同一处两种表达」的欠账
+ * 迟早出现：改了一层的星标忘了改另一层）。
+ */
+function TileMarks(props: {
+  rating: number;
+  compact: boolean;
+  colorLabel: ColorLabel | null;
+  flag: "pick" | "reject" | null;
+}): JSX.Element {
+  return (
+    <>
+      {/* 星标：0 星什么都不显示；窄格子退化成「一颗星 + 数字」 */}
+      <Show when={props.rating > 0}>
+        <span
+          class="flex shrink-0 items-center gap-0.5"
+          aria-label={t("grid.rating", { n: props.rating })}
+        >
+          <Show
+            when={!props.compact}
+            fallback={
+              <>
+                <IconStarFilled size={12} aria-hidden="true" />
+                <span class="text-fs-0 tnum">{props.rating}</span>
+              </>
+            }
+          >
+            {[1, 2, 3, 4, 5].map((index) =>
+              index <= props.rating ? (
+                <IconStarFilled size={11} aria-hidden="true" />
+              ) : (
+                <IconStar size={11} class="opacity-50" aria-hidden="true" />
+              ),
+            )}
+          </Show>
+        </span>
+      </Show>
+
+      <span class="min-w-0 flex-1" />
+
+      {/* 颜色标记：悬停/选中时底纹被盖住，用它兜底让人看到标色 */}
+      <Show when={props.colorLabel}>
+        {(label) => (
+          <span
+            class={["size-2 shrink-0 rounded-full", LABEL_DOT[label()]].join(" ")}
+            aria-label={t("grid.color_label")}
+          />
+        )}
+      </Show>
+
+      {/*
+        旗标用**实心小旗**（人类 2026-09-19：以前这里是星星，与星标撞在一起分不清）。
+        「弃」的那一态在界面上已经取消了（见 BrowseToolbar 的说明），所以这里只有一种旗。
+      */}
+      <Show when={props.flag === "pick"}>
+        <IconFlagFilled size={11} aria-hidden="true" />
+      </Show>
+    </>
+  );
+}
+
+/** 底部条的**内容**：文件名 + 类型（+ 加锁）—— 同样一份实现、两处渲染 */
+function TileName(props: {
+  label: string;
+  name: string;
+  tag?: string;
+  locked?: boolean;
+}): JSX.Element {
+  return (
+    <>
+      <span class="min-w-0 flex-1 truncate text-fs-1" title={props.label}>
+        {props.name}
+      </span>
+      <Show when={props.tag}>
+        <span class="shrink-0 text-fs-0">{props.tag}</span>
+      </Show>
+      <Show when={props.locked}>
+        <IconLock size={11} class="shrink-0" aria-label={t("grid.locked")} />
+      </Show>
+    </>
   );
 }
