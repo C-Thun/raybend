@@ -132,6 +132,8 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
   const filterColors = (): readonly string[] => store.filter().colors ?? [];
   /** 筛选态的喜欢条件（`"like"` / `"dislike"`，空 = 没筛） */
   const filterLike = (): string | null => (store.filter().likes ?? [])[0] ?? null;
+  /** 筛选条件里有没有这个喜欢值（`.includes` —— 与色标 / 锁同一口径） */
+  const likeFiltered = (value: string): boolean => (store.filter().likes ?? []).includes(value);
   /** 筛选态的锁条件 */
   const filterLocks = (): readonly number[] => store.filter().locks ?? [];
   /** 筛选态的旗标条件（`pick` / `reject` / `none`） */
@@ -145,6 +147,30 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
   /** 三态「恰好等于某个值」——写成具名函数，TS 才收窄得了（重复调用表达式不行）。 */
   const isExactly = (state: TriState<string>, value: string): boolean =>
     state.kind === "value" && state.value === value;
+
+  /**
+   * 赞 / 踩按钮的按下态：标记态看选中照片，筛选态看**筛选条件**。
+   *
+   * 2026-09-20 人类报的 bug：筛选态下点「赞 / 踩」确实筛了，但按钮不亮 ——
+   * 以前这里只读 `likeState()`（选中照片的三态），而筛选条件一变 `reload()`
+   * 就把选中清空了，于是永远显示「没值」。色标 / 锁早就是「筛选态读条件」的口径。
+   */
+  const likePressed = (value: "like" | "dislike"): boolean =>
+    filterMode() ? likeFiltered(value) : isExactly(likeState(), value);
+
+  /**
+   * 星标点亮到第几颗：标记态是「选中照片有几星」，筛选态是**阈值**（`minRating`）。
+   *
+   * 阈值语义下点亮 1..N 颗 —— 与 chips 里的 `≥N 星` 是同一件事（同 `likePressed` 的修复）。
+   */
+  const starFilled = (star: number): boolean => {
+    if (filterMode()) {
+      const threshold = filterRating();
+      return threshold !== null && star <= threshold;
+    }
+    const state = ratingState();
+    return state.kind === "value" && state.value >= star;
+  };
 
   /**
    * 撤销 / 重做：做完给一条提示（说了「撤了什么」），失败也说话。
@@ -429,14 +455,10 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
         <For each={[1, 2, 3, 4, 5]}>
           {(star) => {
             const state = () => ratingState();
-            const filled = () => {
-              const s = state();
-              return s.kind === "value" && s.value >= star;
-            };
             const iconClass = () => {
               const s = state();
               if (s.kind === "mixed") return "text-fg-2 opacity-70";
-              return filled() ? "text-brand" : "text-fg-3";
+              return starFilled(star) ? "text-brand" : "text-fg-3";
             };
             return (
               <button
@@ -450,7 +472,7 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
                 ].join(" ")}
               >
                 <span class={iconClass()}>
-                  {filled() ? <IconStarFilled size={14} /> : <IconStar size={14} />}
+                  {starFilled(star) ? <IconStarFilled size={14} /> : <IconStar size={14} />}
                 </span>
               </button>
             );
@@ -515,14 +537,14 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
           <MixedMark />
         </Show>
         <ToggleBlock
-          pressed={isExactly(likeState(), "like")}
+          pressed={likePressed("like")}
           disabled={markDisabled()}
           onPressedChange={() => void markLike("like")}
           icon={<IconThumbUpFilled size={16} />}
           label={t("browse.like")}
         />
         <ToggleBlock
-          pressed={isExactly(likeState(), "dislike")}
+          pressed={likePressed("dislike")}
           disabled={markDisabled()}
           onPressedChange={() => void markLike("dislike")}
           icon={<IconThumbDownFilled size={16} />}

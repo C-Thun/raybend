@@ -2116,6 +2116,128 @@ try {
     problems.push(`底部控制条上应当有排序控件（键 + 方向，实测 ${JSON.stringify(sortState)}）`);
   }
 
+  /*
+   * 筛选态下控件要显示**条件本身**（人类 2026-09-20 报「赞和踩被选中时不显示状态」）。
+   *
+   * 根因：工具条的按下态以前只读「选中照片的三态」，而筛选条件一变 `store.reload()`
+   * 就会清空选中 ⇒ 永远显示无值。色标 / 锁早就是读 `store.filter()` 的口径，
+   * 星标与赞踩是漏掉的两处（这次一起修）。
+   *
+   * 此刻的条件：色标红 + 喜欢（星标那条 chip 已被上一步摘掉）。
+   *
+   * 先把「选中」清掉再读：不然旧代码可能**碰巧**读出一张恰好是「喜欢」的照片
+   * （前面的步骤刚点过一张），让这条断言假绿 —— 筛选态本来就不该看选中。
+   */
+  await send("Runtime.evaluate", {
+    expression: `window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }))`,
+    returnByValue: true,
+  });
+  await sleep(300);
+  const filterPressed = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const byLabel = (text) => document.querySelector('button[aria-label="' + text + '"]');
+      const pressed = (b) => (b ? b.getAttribute("aria-pressed") : null);
+      return {
+        chips: document.querySelectorAll("[data-filter-chip]").length,
+        like: pressed(byLabel("喜欢")),
+        dislike: pressed(byLabel("不喜欢")),
+      };
+    })()`,
+    returnByValue: true,
+  });
+  const fp = filterPressed.result?.value ?? {};
+  if (fp.chips < 2) {
+    problems.push(`筛选态按下态这条没复现（此刻应当还有两条条件，实测 ${JSON.stringify(fp)}）`);
+  }
+  if (fp.like !== "true") {
+    problems.push(
+      `筛选条件里有「喜欢」时，喜欢按钮必须是按下态（实测 ${JSON.stringify(fp)}）`,
+    );
+  }
+  if (fp.dislike === "true") {
+    problems.push("没筛「不喜欢」时它不该是按下态");
+  }
+
+  /** 读两个赞踩按钮的按下态（这段要读很多次，写成一处） */
+  const readLikeButtons = async () => {
+    const r = await send("Runtime.evaluate", {
+      expression: `(() => {
+        const byLabel = (text) => document.querySelector('button[aria-label="' + text + '"]');
+        const pressed = (b) => (b ? b.getAttribute("aria-pressed") : null);
+        return { like: pressed(byLabel("喜欢")), dislike: pressed(byLabel("不喜欢")) };
+      })()`,
+      returnByValue: true,
+    });
+    return r.result?.value ?? {};
+  };
+
+  // 点「不喜欢」→ 条件换成它（互斥），按下态跟着换；再点一次 = 取消
+  await send("Runtime.evaluate", {
+    expression: `(() => {
+      const byLabel = (text) => document.querySelector('button[aria-label="' + text + '"]');
+      byLabel("不喜欢")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      return true;
+    })()`,
+    returnByValue: true,
+  });
+  await sleep(500);
+  const afterDislike = await readLikeButtons();
+  if (afterDislike.dislike !== "true" || afterDislike.like === "true") {
+    problems.push(`筛选态点「不喜欢」应当把条件换成它（实测 ${JSON.stringify(afterDislike)}）`);
+  }
+  await send("Runtime.evaluate", {
+    expression: `(() => {
+      const byLabel = (text) => document.querySelector('button[aria-label="' + text + '"]');
+      byLabel("不喜欢")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      return true;
+    })()`,
+    returnByValue: true,
+  });
+  await sleep(500);
+  const afterDislikeOff = await readLikeButtons();
+  if (afterDislikeOff.dislike === "true" || afterDislikeOff.like === "true") {
+    problems.push(
+      `筛选态再点一次已选中的「不喜欢」应当取消条件（实测 ${JSON.stringify(afterDislikeOff)}）`,
+    );
+  }
+
+  // 星标阈值：此刻没有星级条件 ⇒ 点第 3 颗 = 「≥3 星」，1..3 颗点亮、4/5 不亮
+  await send("Runtime.evaluate", {
+    expression: `(() => {
+      const b = document.querySelector('button[aria-label="3 星"]');
+      b?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      return Boolean(b);
+    })()`,
+    returnByValue: true,
+  });
+  await sleep(500);
+  const starThreshold = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const on = (n) => {
+        const b = document.querySelector('button[aria-label="' + n + ' 星"]');
+        return b === null ? null : (b.innerHTML || "").includes("star-filled");
+      };
+      return { s1: on(1), s2: on(2), s3: on(3), s4: on(4), s5: on(5) };
+    })()`,
+    returnByValue: true,
+  });
+  const st = starThreshold.result?.value ?? {};
+  if (st.s1 !== true || st.s2 !== true || st.s3 !== true || st.s4 === true || st.s5 === true) {
+    problems.push(
+      `筛选态星标是阈值（≥3 星 ⇒ 1..3 颗点亮、4/5 不亮，实测 ${JSON.stringify(st)}）`,
+    );
+  }
+  // 收尾：再点一次第 3 颗取消阈值，免得给后面的断言留条件
+  await send("Runtime.evaluate", {
+    expression: `(() => {
+      const b = document.querySelector('button[aria-label="3 星"]');
+      b?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      return true;
+    })()`,
+    returnByValue: true,
+  });
+  await sleep(400);
+
   // 关掉筛选：结果区收起来，条件也清干净
   await send("Runtime.evaluate", {
     expression: `(() => {
