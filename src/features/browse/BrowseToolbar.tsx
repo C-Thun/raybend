@@ -40,8 +40,8 @@ import {
   IconTag,
   IconStar,
   IconStarFilled,
-  IconThumbDown,
-  IconThumbUp,
+  IconThumbDownFilled,
+  IconThumbUpFilled,
 } from "@tabler/icons-solidjs";
 
 import { ToggleBlock } from "../../components/ui/ToggleBlock.tsx";
@@ -408,8 +408,14 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
                 aria-label={colorText(color)}
                 onClick={() => void markColor(color)}
                 class={[
-                  "h-3.5 w-3.5 rounded-full ring-1 ring-line-2",
-                  color === null ? "bg-transparent" : (COLOR_DOT[color] ?? ""),
+                  "h-3.5 w-3.5 rounded-full",
+                  /*
+                   * 有颜色的圆点**只要颜色**，不加描边（人类 2026-09-19：降低框线感）；
+                   * 但「取消标色」那个空圆必须留一圈 —— 否则它在面色上根本看不见。
+                   */
+                  color === null
+                    ? "ring-1 ring-line-2 bg-transparent"
+                    : (COLOR_DOT[color] ?? ""),
                   active() || filtered() ? "ring-2 ring-brand" : "",
                   markDisabled() ? "opacity-40" : "",
                 ].join(" ")}
@@ -430,14 +436,14 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
           pressed={isExactly(likeState(), "like")}
           disabled={markDisabled()}
           onPressedChange={() => void markLike("like")}
-          icon={<IconThumbUp size={14} />}
+          icon={<IconThumbUpFilled size={16} />}
           label={t("browse.like")}
         />
         <ToggleBlock
           pressed={isExactly(likeState(), "dislike")}
           disabled={markDisabled()}
           onPressedChange={() => void markLike("dislike")}
-          icon={<IconThumbDown size={14} />}
+          icon={<IconThumbDownFilled size={16} />}
           label={t("browse.dislike")}
         />
       </div>
