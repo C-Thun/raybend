@@ -74,10 +74,14 @@ src/features/browse/mark-actions.ts ← 标记动作**唯一实现**（工具条
 
 ## 遗留
 
-1. **阶段 6 的脚本**：`scripts/perf-browse.mjs`（无头、假后端 10 万条：筛选感知延迟 +
-   JS 帧预算 + 堆）与 `scripts/perf-win.mjs`（真机 2560×1440 采样）**尚未写**；
-   `scripts/lib/cdp.mjs`（三个 CDP 脚本的公共部分）也还没抽。
-   ⇒ 60fps 的裁决本来就归人类（`AGENTS.md` §2.8），这两条留到下一轮。
+1. **阶段 6**：`scripts/lib/cdp.mjs`（新脚本共用的 CDP 工装）与 `pnpm perf:browse`
+   （无头 + 假后端 **10 万条**）**已落地** —— 实测：
+   * **筛选数据路径 34ms**（判据 <100ms）：从点下「≥3 星」到筛选结果回来；
+   * 首屏绘制 182ms、滚动帧 p50/p95 = 60/103ms：**仅上报**（无头是软件渲染，
+     量到的主要是光栅化；60fps 的裁决在 Windows 真机）；
+   * JS 堆 97–134MB（10 万条行模型 + 可见 tile）。
+   **还差**：`scripts/perf-win.mjs`（真机 2560×1440 采样）与把三个老 CDP 脚本迁到
+   `scripts/lib/cdp.mjs`（它们各自带着大量与工装无关的断言，迁移单独做更稳）。
 2. **`design/browse.pen` 的命令面板帧**未复核（需 Pencil，当前未连接）；菜单 / 快捷键设置
    两帧画布上没有 —— 需要人类开一次 Pencil。
 3. 真机目视：面板/菜单/设置三处观感与键位手感。
