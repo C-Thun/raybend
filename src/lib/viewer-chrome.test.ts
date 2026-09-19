@@ -11,7 +11,7 @@ import {
   CHROME_CYCLE,
   nextChrome,
   type ViewerChrome,
-} from "./chrome.ts";
+} from "./viewer-chrome.ts";
 
 test("循环顺序是 ①默认 → ②关左右 → ③关胶片带 → ①（并列，不是叠加）", () => {
   assert.deepEqual([...CHROME_CYCLE], ["default", "film-only", "view-only"]);

@@ -42,7 +42,7 @@
  * 这两条正是 `plans/M2-W2.md` 2.3 的两条硬要求。
  */
 
-import type { ViewerPhoto } from "../../components/ui/viewer/index.ts";
+import type { ViewerPhoto } from "../components/ui/viewer/index.ts";
 
 /** 同时对比的**上限**（人类 2026-09-18：对比 2–4 张） */
 export const COMPARE_MAX = 4;

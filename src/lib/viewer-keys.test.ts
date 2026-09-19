@@ -8,7 +8,7 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { browseKeyIntent, shouldHandleKey, type KeyContext } from "./keys.ts";
+import { browseKeyIntent, shouldHandleKey, type KeyContext } from "./viewer-keys.ts";
 
 const tiles: KeyContext = { viewing: false, hasSelection: true };
 const viewing: KeyContext = { viewing: true, hasSelection: true };

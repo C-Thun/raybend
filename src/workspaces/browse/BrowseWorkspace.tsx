@@ -42,11 +42,11 @@ import {
   chromeShowsSides,
   nextChrome,
   type ViewerChrome,
-} from "../../features/browse/chrome.ts";
+} from "../../lib/viewer-chrome.ts";
 import { FilmStrip } from "../../features/browse/FilmStrip.tsx";
 import { FilterBar } from "../../features/browse/FilterBar.tsx";
 import { CompareView } from "../../features/browse/CompareView.tsx";
-import { compareIds } from "../../features/browse/compare.ts";
+import { compareIds } from "../../lib/viewer-compare.ts";
 import { createThumbQueue } from "../../components/ui/thumb-queue.ts";
 import { createViewerStore, Viewer } from "../../components/ui/viewer/index.ts";
 import { clampTileStepIndex, DEFAULT_TILE_STEP_INDEX, TILE_SIZE_STEPS, tileSizeAt } from "../../lib/tile-flow.ts";
@@ -55,7 +55,7 @@ import { Slider } from "../../components/ui/Slider.tsx";
 import { Button } from "../../components/ui/Button.tsx";
 import { ConfirmDialog, Dialog } from "../../components/ui/Dialog.tsx";
 import type { ToastStore } from "../../components/ui/Toast.tsx";
-import { browseKeyIntent, shouldHandleKey } from "../../features/browse/keys.ts";
+import { browseKeyIntent, shouldHandleKey } from "../../lib/viewer-keys.ts";
 import { SplitHandle } from "../../components/ui/SplitHandle.tsx";
 import { nudgeWidth, resizeWidth } from "../../lib/column-resize.ts";
 

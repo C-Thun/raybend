@@ -17,8 +17,8 @@ import {
   cropToAspect,
   panPercent,
   percentToPan,
-} from "./compare.ts";
-import type { ViewerPhoto } from "../../components/ui/viewer/index.ts";
+} from "./viewer-compare.ts";
+import type { ViewerPhoto } from "../components/ui/viewer/index.ts";
 
 function photo(id: string, width?: number, height?: number): ViewerPhoto {
   return {
