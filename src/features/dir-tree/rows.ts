@@ -56,15 +56,30 @@ export function buildTreeRows(input: TreeRowInput): TreeRow[] {
 
   const rows: TreeRow[] = [];
 
-  /** 递归下降：用显式栈而不是递归，深度由用户的目录结构决定 */
-  const push = (path: string, name: string, depth: number, volumeKind: VolumeKind | null) => {
+  /**
+   * 递归下降：用显式栈而不是递归，深度由用户的目录结构决定。
+   *
+   * `knownExpandable`：来自**父一级目录清单里的 `hasChildren`** ——
+   * 后端多扫了一层，所以还没展开就知道该不该画箭头（人类 2026-09-19 定的口径）。
+   * 没这个信息时（例如卷/根）才退回「未读过 → 先认为可展开」。
+   */
+  const push = (
+    path: string,
+    name: string,
+    depth: number,
+    volumeKind: VolumeKind | null,
+    knownExpandable?: boolean,
+  ) => {
     const expanded = input.isExpanded(path);
-    const children = volumeKind === null ? input.childrenOf(path) : input.childrenOf(path);
-    const expandable = children === undefined ? true : children.length > 0;
+    const children = input.childrenOf(path);
+    const expandable =
+      children !== undefined
+        ? children.length > 0
+        : (knownExpandable ?? true);
     rows.push({ path, name, depth, volumeKind, expandable, expanded });
     if (!expanded || depth >= maxDepth || children === undefined) return;
     for (const child of children) {
-      push(child.path, child.name, depth + 1, null);
+      push(child.path, child.name, depth + 1, null, child.hasChildren);
     }
   };
 

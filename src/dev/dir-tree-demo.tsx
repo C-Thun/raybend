@@ -32,9 +32,11 @@ function demoChildren(path: string): DirEntry[] {
   const segments = path.split("\\").filter(Boolean);
   if (segments.length >= MAX_DEPTH + 1) return [];
   const tail = segments[segments.length - 1] ?? "D";
+  // 深度没到底就还有下一层（与 `demoChildren` 的早退条件保持一致）
+  const hasChildren = segments.length < MAX_DEPTH + 1;
   return Array.from({ length: BREADTH }, (_, index) => {
     const name = `${tail === "D:" ? "文件夹" : tail}-${index + 1}`;
-    return { name, path: `${path}\\${name}` };
+    return { name, path: `${path}\\${name}`, hasChildren };
   });
 }
 
@@ -63,7 +65,8 @@ export function DirTreeDemo() {
     setExternal((prev) => {
       const at = prev[root] ?? [];
       const name = `外部新增-${at.length + 1}`;
-      return { ...prev, [root]: [...at, { name, path: `${root}${name}` }] };
+      // 外部新建的是空目录 → 不该显示展开箭头
+      return { ...prev, [root]: [...at, { name, path: `${root}${name}`, hasChildren: false }] };
     });
   };
 

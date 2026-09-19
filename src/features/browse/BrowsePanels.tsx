@@ -88,6 +88,13 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
   const [expanded, setExpanded] = createSignal<ReadonlySet<string>>(new Set<string>());
   /** 每个目录的子目录（懒加载：展开时才读那一级）。 */
   const [children, setChildren] = createSignal<ReadonlyMap<string, string[]>>(new Map());
+  /**
+   * 子目录**有没有下一层**（键 = 库内相对路径）—— 由 `listDirs` 多扫一层带回来。
+   *
+   * 人类 2026-09-19：目录下没子目录却画个展开箭头是误导。以前这里只能「没读过就当有」，
+   * 现在没展开也能说准；真展开过之后以实际子目录为准（`children` 优先）。
+   */
+  const [childFlags, setChildFlags] = createSignal<ReadonlyMap<string, boolean>>(new Map());
   /** 本次会话里的库顺序（点库移顶）。 */
   const [order, setOrder] = createSignal<readonly string[]>([]);
 
@@ -182,6 +189,13 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
         );
         return next;
       });
+      setChildFlags((prev) => {
+        const next = new Map(prev);
+        for (const entry of visible) {
+          next.set(toRelPath(entry.path), entry.hasChildren);
+        }
+        return next;
+      });
     } catch {
       // 读不到就当作没有子目录（权限/离线都是常事，不该弹错）
       setChildren((prev) => new Map(prev).set(relPath, []));
@@ -193,6 +207,7 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
     const base = root();
     setExpanded(new Set<string>());
     setChildren(new Map());
+    setChildFlags(new Map());
     if (base !== null) void loadChildren(PHOTOS_DIR);
   });
 
@@ -210,8 +225,9 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
           relPath: rel,
           depth,
           expanded: isExpanded,
-          // 还没读过的那一级一律显示箭头（有没有子目录要读了才知道）
-          hasChildren: known === undefined || known.length > 0,
+          // 展开过就以实际子目录为准；没展开过用多扫一层带回来的标志（最后才乐观认为有）
+          hasChildren:
+            known !== undefined ? known.length > 0 : (childFlags().get(rel) ?? true),
         });
         if (isExpanded) walk(rel, depth + 1);
       }

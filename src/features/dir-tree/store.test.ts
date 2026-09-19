@@ -16,7 +16,8 @@ import type { DirEntry } from "../../api/types.ts";
 import { createDirTreeStore } from "./store.ts";
 
 function dir(path: string): DirEntry {
-  return { path, name: path };
+  // 夹具默认「还有下一层」：与「未读过就乐观画箭头」的旧口径一致，测试意图不变
+  return { path, name: path, hasChildren: true };
 }
 
 /** 可挂起、可失败的假加载器 */
@@ -158,8 +159,8 @@ test("空目录：读回来是空数组（而不是 undefined）", async () => {
 test("refreshAll：只重读展开着的目录，且保留展开状态", async () => {
   const calls: string[] = [];
   const listings: Record<string, DirEntry[]> = {
-    "/a": [{ name: "b", path: "/a/b" }],
-    "/b": [{ name: "c", path: "/b/c" }],
+    "/a": [{ name: "b", path: "/a/b", hasChildren: true }],
+    "/b": [{ name: "c", path: "/b/c", hasChildren: false }],
   };
   const store = createDirTreeStore({
     loadDirs: async (path) => {
@@ -180,7 +181,7 @@ test("refreshAll：只重读展开着的目录，且保留展开状态", async (
 
 test("展开总是重读那一级：缓存是为秒开，不是为省读磁盘", async () => {
   let calls = 0;
-  let listing: DirEntry[] = [{ name: "a", path: "/root/a" }];
+  let listing: DirEntry[] = [{ name: "a", path: "/root/a", hasChildren: true }];
   const store = createDirTreeStore({
     loadDirs: async () => {
       calls += 1;
@@ -193,7 +194,7 @@ test("展开总是重读那一级：缓存是为秒开，不是为省读磁盘",
 
   store.collapse("/root");
   // 程序外面新建了一个目录：我们不监听，但**展开**必须自己重读，不该等谁按「刷新」
-  listing = [...listing, { name: "外部新建", path: "/root/外部新建" }];
+  listing = [...listing, { name: "外部新建", path: "/root/外部新建", hasChildren: false }];
   await store.expand("/root");
 
   assert.equal(calls, 2, "再次展开必须重新读，即使缓存里已经有内容");
@@ -205,7 +206,7 @@ test("重读失败不清空已看到的内容（失败不能表现成「这个�
   const store = createDirTreeStore({
     loadDirs: async () => {
       if (failing) throw new Error("盘掉了");
-      return [{ name: "a", path: "/root/a" }];
+      return [{ name: "a", path: "/root/a", hasChildren: false }];
     },
   });
 
@@ -222,7 +223,7 @@ test("refreshAll：重读展开着的目录，能拿到程序外面新增的内�
   let extra: DirEntry | null = null;
   const store = createDirTreeStore({
     loadDirs: async () => [
-      { name: "原有", path: "/a/原有" },
+      { name: "原有", path: "/a/原有", hasChildren: false },
       ...(extra === null ? [] : [extra]),
     ],
   });
@@ -230,7 +231,7 @@ test("refreshAll：重读展开着的目录，能拿到程序外面新增的内�
   await store.expand("/a");
   assert.equal(store.childrenOf("/a")?.length, 1);
 
-  extra = { name: "外部新建", path: "/a/外部新建" };
+  extra = { name: "外部新建", path: "/a/外部新建", hasChildren: false };
   await store.refreshAll();
   assert.equal(store.childrenOf("/a")?.length, 2, "重读之后应当看到新目录");
 });

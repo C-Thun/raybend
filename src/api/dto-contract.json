@@ -15,10 +15,7 @@
     "kindLabel",
     "path"
   ],
-  "DirEntry": [
-    "name",
-    "path"
-  ],
+  "DirEntry": ["hasChildren", "name", "path"],
   "MetaFile": [
     "fileSize",
     "mtimeMs",

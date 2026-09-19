@@ -12,8 +12,9 @@ import { test } from "node:test";
 import type { DirEntry, Volume } from "../../api/types.ts";
 import { buildTreeRows, volumeDisplayName } from "./rows.ts";
 
-function dir(path: string, name = path): DirEntry {
-  return { path, name };
+function dir(path: string, name = path, hasChildren = true): DirEntry {
+  // 默认 true = 「父一级的清单说它还有下一层」；旧测试的意图不变
+  return { path, name, hasChildren };
 }
 
 function volume(path: string, kind: Volume["kind"] = "local"): Volume {
@@ -54,6 +55,39 @@ test("展开的目录按深度优先摊平（顺序即显示顺序）", () => {
     rows.map((row) => `${"  ".repeat(row.depth)}${row.name}`),
     ["D:\\", "  Photos", "    2024", "  Work"],
   );
+});
+
+test("多扫一层：父一级的清单说没有子目录 → 不画展开箭头", () => {
+  /*
+   * 人类 2026-09-19：「目录下没子目录了还显示展开图标误导人」。
+   * 后端列目录时会顺手看一眼每个子目录里还有没有目录，这里就该用它 ——
+   * 而不是像以前那样「没读过就先画上，点开才发现是空的」。
+   */
+  const rows = buildTreeRows({
+    volumes: [volume("D:\\")],
+    childrenOf: table({
+      "D:\\": [dir("D:\\Leaf", "Leaf", false), dir("D:\\Branch", "Branch", true)],
+    }),
+    // 要看子行的箭头，得先把卷展开（折叠时子树整棵不出现）
+    isExpanded: (path) => path === "D:\\",
+  });
+  const flags = Object.fromEntries(rows.map((row) => [row.name, row.expandable]));
+  assert.equal(flags.Leaf, false, "清单说 Leaf 没有下一层 → 不给箭头");
+  assert.equal(flags.Branch, true, "清单说 Branch 有下一层 → 给箭头");
+});
+
+test("多扫一层：真读过之后以实际子目录为准（清单过时也不能误导）", () => {
+  // 清单说没有、实际读出来有 → 必须给箭头（数据比缓存新鲜）
+  const rows = buildTreeRows({
+    volumes: [volume("D:\\")],
+    childrenOf: table({
+      "D:\\": [dir("D:\\Changed", "Changed", false)],
+      "D:\\Changed": [dir("D:\\Changed\\new", "new", false)],
+    }),
+    // 展开卷，子行才会出现
+    isExpanded: (path) => path === "D:\\",
+  });
+  assert.equal(rows.find((row) => row.name === "Changed")?.expandable, true);
 });
 
 test("折叠的目录不生成子行（子树整棵不出现）", () => {

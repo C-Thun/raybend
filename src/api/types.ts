@@ -55,6 +55,11 @@ export interface Volume {
 export interface DirEntry {
   name: string;
   path: string;
+  /**
+   * 它里面还有没有会显示出来的子目录 —— 后端**多扫一层**带回来的（人类 2026-09-19 定）。
+   * 以前前端只能保守地「没读过就先画箭头」，点开才发现是空的，属于误导。
+   */
+  hasChildren: boolean;
 }
 
 /** 中列里的一张照片。 */

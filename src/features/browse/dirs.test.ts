@@ -11,8 +11,8 @@ import { test } from "node:test";
 import type { DirEntry } from "../../api/types.ts";
 import { dirDisplayName, isRawDirName, PHOTOS_DIR, visibleChildDirs } from "./dirs.ts";
 
-function entry(name: string, path = `C:/lib/photos/${name}`): DirEntry {
-  return { name, path };
+function entry(name: string, path = `C:/lib/photos/${name}`, hasChildren = true): DirEntry {
+  return { name, path, hasChildren };
 }
 
 // ─────────────────────────── isRawDirName ───────────────────────────

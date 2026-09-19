@@ -99,7 +99,7 @@ const PHOTO_META_KEYS = [
   "relative",
   "width",
 ] as const satisfies readonly (keyof PhotoMeta)[];
-const DIR_ENTRY_KEYS = ["name", "path"] as const satisfies readonly (keyof DirEntry)[];
+const DIR_ENTRY_KEYS = ["hasChildren", "name", "path"] as const satisfies readonly (keyof DirEntry)[];
 const SOURCE_ITEM_KEYS = [
   "ext",
   "fileName",

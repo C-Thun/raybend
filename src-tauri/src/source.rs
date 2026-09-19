@@ -165,6 +165,9 @@ pub struct VolumeView {
 pub struct DirEntryView {
     pub name: String,
     pub path: String,
+    /// 里面还有没有会显示出来的子目录（树上的箭头）—— 人类 2026-09-19：
+    /// 不允许多扫一层之前那种「没子目录也画箭头」的误导。
+    pub has_children: bool,
 }
 
 /// 中列里的一张照片。
@@ -349,6 +352,7 @@ pub async fn dir_list(path: String) -> Result<Vec<DirEntryView>, String> {
                     .map(|d| DirEntryView {
                         name: d.name,
                         path: d.path.to_string_lossy().into_owned(),
+                        has_children: d.has_children,
                     })
                     .collect()
             })

@@ -32,6 +32,13 @@ pub struct DirEntry {
     pub name: String,
     /// 完整路径。
     pub path: PathBuf,
+    /// 它里面**还有没有会显示出来的子目录** —— 决定树上画不画展开箭头。
+    ///
+    /// 为什么要多扫一层（人类 2026-09-19 定）：只列一层的话前端无从知道某个子目录是不是
+    /// 空到底，只能保守地先画上箭头，点开才发现什么都没有 —— 那是误导。
+    /// 代价是每个子目录多一次 `read_dir`，但**找到第一个合格项就短路**（`find`），
+    /// 只有真空的目录才需要读到底；本地盘这点代价远小于让人点空箭头。
+    pub has_children: bool,
 }
 
 /// 中列里的一张照片（列表阶段的信息）。
@@ -88,6 +95,54 @@ pub struct PhotoCount {
     pub truncated: bool,
 }
 
+/// 一个目录项是不是「树上会显示的目录」：跳过隐藏 / 垃圾名 / 符号链接 / 非目录。
+///
+/// `list_dirs` 与 `has_subdirectories` **共用这一处判定** —— 两边的口径必须一致，
+/// 否则会出现「箭头说有、点开是空」的错（或者反过来：有子目录却不画箭头）。
+fn is_listable_dir(entry: &std::fs::DirEntry) -> bool {
+    let name = entry.file_name().to_string_lossy().into_owned();
+
+    // 隐藏项：`.` 开头 / Windows 隐藏属性（人类 2026-09-16：目录树里不显示隐藏目录）
+    if kind::is_hidden_name(&name) {
+        return false;
+    }
+    #[cfg(windows)]
+    {
+        if entry
+            .metadata()
+            .map(|meta| kind::has_hidden_attribute(&meta))
+            .unwrap_or(false)
+        {
+            return false;
+        }
+    }
+    // 系统目录 / 垃圾名：`$RECYCLE.BIN`、`System Volume Information` …
+    if kind::junk_kind(&name).is_some() {
+        return false;
+    }
+    // 符号链接不跟随：目录环与「链接到别处」的目录最容易把树撑爆。
+    //
+    // ⚠️ 用 `file_type()`（`read_dir` 自带的条目类型）而不是 `path().is_dir()`：
+    // 后者会**多一次 stat 系统调用**。在一个 300 条的目录上，实测 9p 下
+    // 0.9s → 0.45s（慢盘上是成倍的差别）。
+    let Ok(file_type) = entry.file_type() else {
+        return false;
+    };
+    !file_type.is_symlink() && file_type.is_dir()
+}
+
+/// 这个目录里有没有**会显示出来的**子目录（判定口径与 `list_dirs` 完全一致）。
+///
+/// 读不了（权限等）一律当「没有」—— 与 `list_dirs` 在该层跳过它的行为一致，
+/// 不会出现「画了箭头点开报错」。
+fn has_subdirectories(dir: &Path) -> bool {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    // `any` 短路：找到第一个合格项就停，只有真空目录才读到底
+    entries.flatten().any(|entry| is_listable_dir(&entry))
+}
+
 /// 一个目录的**直接子目录**（不递归、不下钻）。
 ///
 /// 排序：按名字**不区分大小写**升序（Windows 资源管理器的手感），同名前缀时用原名兜底，
@@ -101,40 +156,14 @@ pub fn list_dirs(root: &Path) -> Result<Vec<DirEntry>> {
     let mut out = Vec::new();
     for entry in std::fs::read_dir(root)? {
         let entry = entry?;
-        let name = entry.file_name().to_string_lossy().into_owned();
-
-        // 隐藏项：`.` 开头 / Windows 隐藏属性（人类 2026-09-16：目录树里不显示隐藏目录）
-        if kind::is_hidden_name(&name) {
-            continue;
-        }
-        #[cfg(windows)]
-        {
-            if entry
-                .metadata()
-                .map(|meta| kind::has_hidden_attribute(&meta))
-                .unwrap_or(false)
-            {
-                continue;
-            }
-        }
-        // 系统目录 / 垃圾名：`$RECYCLE.BIN`、`System Volume Information` …
-        if kind::junk_kind(&name).is_some() {
-            continue;
-        }
-        // 符号链接不跟随：目录环与「链接到别处」的目录最容易把树撑爆。
-        //
-        // ⚠️ 用 `file_type()`（`read_dir` 自带的条目类型）而不是 `path().is_dir()`：
-        // 后者会**多一次 stat 系统调用**。在一个 300 条的目录上，实测 9p 下
-        // 0.9s → 0.45s（慢盘上是成倍的差别）。
-        let Ok(file_type) = entry.file_type() else {
-            continue;
-        };
-        if file_type.is_symlink() || !file_type.is_dir() {
+        // 跳过规则全部在 `is_listable_dir` 里 —— 与「多扫一层」的探测**共用同一口径**
+        if !is_listable_dir(&entry) {
             continue;
         }
 
         out.push(DirEntry {
-            name,
+            name: entry.file_name().to_string_lossy().into_owned(),
+            has_children: has_subdirectories(&entry.path()),
             path: entry.path(),
         });
     }
@@ -375,6 +404,59 @@ mod tests {
         // 不下钻：inner 不出现（它是 apple 的子目录）
         assert!(!names(&dirs).contains(&"inner"));
         assert_eq!(dirs[0].path, root.join("apple"));
+    }
+
+    #[test]
+    fn list_dirs_reports_whether_each_child_has_subdirectories() {
+        let dir = tmp();
+        let root = dir.path();
+        // deep/ 下面有子目录 → true
+        fs::create_dir_all(root.join("deep/inner")).unwrap();
+        // leaf/ 下面只有文件 → false
+        fs::create_dir_all(root.join("leaf")).unwrap();
+        write(&root.join("leaf/photo.jpg"), 10);
+        // empty/ 空目录 → false
+        fs::create_dir_all(root.join("empty")).unwrap();
+        // trap/ 只有隐藏子目录 → false（口径与 `list_dirs` 一致：隐藏项不算）
+        fs::create_dir_all(root.join("trap/.hidden")).unwrap();
+
+        let dirs = list_dirs(root).unwrap();
+        let flag = |name: &str| -> bool {
+            dirs.iter()
+                .find(|entry| entry.name == name)
+                .unwrap()
+                .has_children
+        };
+        assert!(flag("deep"), "有子目录 → true");
+        assert!(!flag("leaf"), "只有文件 → false");
+        assert!(!flag("empty"), "空目录 → false");
+        assert!(!flag("trap"), "只有隐藏子目录 → false");
+    }
+
+    #[test]
+    fn list_dirs_has_children_matches_what_expanding_will_show() {
+        /*
+         * 不变式：`has_children` 必须等于「展开后真的列得出东西」。
+         * 两处判定同源（都用 `is_listable_dir`）就不会出现
+         * 「画了箭头、点开是空」或「有子目录却不给箭头」这两种误导。
+         */
+        let dir = tmp();
+        let root = dir.path();
+        for name in ["a/b", "a/c/d", "e", "f/g"] {
+            fs::create_dir_all(root.join(name)).unwrap();
+        }
+        write(&root.join("a/b/only-file.jpg"), 10);
+
+        let dirs = list_dirs(root).unwrap();
+        for entry in &dirs {
+            let children = list_dirs(&entry.path).unwrap();
+            assert_eq!(
+                entry.has_children,
+                !children.is_empty(),
+                "{} 的箭头与展开结果不一致",
+                entry.name
+            );
+        }
     }
 
     #[test]
