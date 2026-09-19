@@ -133,6 +133,23 @@ const DEMO_ITEMS = [1, 2, 3, 4, 5, 6].map((i) => ({
 }));
 
 const FIXTURES = {
+  /*
+   * 左列那两条命令（人类 2026-09-19：「假后端缺命令，导入左列显示『读不了这个位置』」）：
+   * 形参按 `src/api/types.ts` 的 `RecentDir` / `Volume` 给全，
+   * 缺字段会让视图在 `.slice()` 上炸 —— 那种失败是工装的，不是产品的。
+   */
+  recent_dirs_list: [
+    { path: "C:\\Photos\\demo", includeSubdirs: true, usedAt: 1_789_000_000_000, useCount: 3 },
+  ],
+  volumes_list: [
+    {
+      path: "C:\\",
+      name: "系统盘",
+      kind: "fixed",
+      totalBytes: 512_000_000_000,
+      freeBytes: 128_000_000_000,
+    },
+  ],
   repositories_list: REPOSITORIES,
   browse_page: { total: DEMO_ITEMS.length, offset: 0, items: DEMO_ITEMS },
   browse_timeline: {
