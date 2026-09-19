@@ -254,6 +254,7 @@ export default function App() {
       <LibrarySettingsDialog
         open={librarySettingsId() !== null}
         repositoryId={librarySettingsId()}
+        toast={toast}
         onOpenChange={(open) => {
           if (!open) setLibrarySettingsId(null);
         }}
@@ -273,6 +274,7 @@ export default function App() {
         <ImportWorkspace
           store={importStore}
           grid={grid}
+          toast={toast}
           onRevealInLibrary={() => shell.setWorkflow("browse")}
           leftRatio={initialLayout.leftRatio}
           onLeftRatioChange={layout.setLeftRatio}

@@ -21,7 +21,7 @@ import { IconDots, IconFolderMinus, IconFolderPlus } from "@tabler/icons-solidjs
 
 import { dirCreate, dirEmptyCheck, dirRemoveEmpty, listDirs } from "../../api/db.ts";
 import { Button } from "../../components/ui/Button.tsx";
-import { RepositoryCard } from "../repositories/RepositoryCard.tsx";
+import { RepositoryCard } from "../../components/ui/RepositoryCard.tsx";
 import { ConfirmDialog, Dialog } from "../../components/ui/Dialog.tsx";
 import { Input } from "../../components/ui/Form.tsx";
 import { Menu } from "../../components/ui/Menu.tsx";
@@ -415,7 +415,7 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
         <For each={visibleRepos()}>
           {(repo) => (
             /*
-             * 库卡片 = **导入侧那一份**（`features/repositories/RepositoryCard.tsx`）。
+             * 库卡片 = **全应用同一份**（`components/ui/RepositoryCard.tsx`）。
              * 人类 2026-09-19：「这种东西怎么可能出现 2 个组件？拿 import 里的替换掉」——
              * 原来这里是内联的第二份实现（圆点 + 另一套排版），已删。
              */

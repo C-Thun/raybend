@@ -47,6 +47,7 @@ import type {
   PhotoCount,
   PhotoMeta,
   RecentDir,
+  RebuildProgress,
   RebuildReport,
   RepositoryPath,
   RepositoryProbe,
@@ -335,6 +336,12 @@ const REBUILD_REPORT_KEYS = [
   "returned",
   "scanned",
 ] as const satisfies readonly (keyof RebuildReport)[];
+const REBUILD_PROGRESS_KEYS = [
+  "done",
+  "phase",
+  "repositoryId",
+  "total",
+] as const satisfies readonly (keyof RebuildProgress)[];
 const MIGRATION_NOTICE_KEYS = [
   "from",
   "kind",
@@ -412,6 +419,9 @@ const KEY_TABLES = {
   DeleteFailure: checkKeys<DeleteFailure, typeof DELETE_FAILURE_KEYS>(DELETE_FAILURE_KEYS),
   DeleteResult: checkKeys<DeleteResult, typeof DELETE_RESULT_KEYS>(DELETE_RESULT_KEYS),
   FlagsView: checkKeys<FlagsView, typeof FLAGS_VIEW_KEYS>(FLAGS_VIEW_KEYS),
+  RebuildProgress: checkKeys<RebuildProgress, typeof REBUILD_PROGRESS_KEYS>(
+    REBUILD_PROGRESS_KEYS,
+  ),
   RebuildReport: checkKeys<RebuildReport, typeof REBUILD_REPORT_KEYS>(REBUILD_REPORT_KEYS),
   MigrationNotice: checkKeys<MigrationNotice, typeof MIGRATION_NOTICE_KEYS>(
     MIGRATION_NOTICE_KEYS,

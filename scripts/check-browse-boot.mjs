@@ -108,6 +108,16 @@ const DEMO_ITEMS = [1, 2, 3, 4, 5, 6].map((i) => ({
   fileName: `MY00${i}.JPG`,
   ext: "JPG",
   isRaw: false,
+  hasRaw: false,
+  author: null,
+  description: null,
+  gpsLat: null,
+  gpsLon: null,
+  country: null,
+  provinceState: null,
+  city: null,
+  sublocation: null,
+  createdMs: 1_789_000_000_000 + i * 1000,
   takenAt: 1_789_000_000_000 + i * 1000,
   takenAtOffsetMin: null,
   rating: i === 1 ? 3 : 0,
@@ -300,7 +310,9 @@ try {
         window.__REJECTIONS.push("unhandledrejection: " + String(reason) + " @ " + stack);
       });
       window.addEventListener("error", (event) => {
-        window.__REJECTIONS.push("error: " + String(event.message));
+        const error = event.error;
+        const stack = error && error.stack ? String(error.stack).slice(0, 800) : "";
+        window.__REJECTIONS.push("error: " + String(event.message) + (stack ? " @ " + stack : ""));
       });
       window.__TAURI_INTERNALS__ = {
         metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main" } },
@@ -534,22 +546,31 @@ try {
    * 最后两张（MY005/MY006）在 fixture 里没有宽高，进对比必须能看到图，
    * 而不是那句「还没读到这张的尺寸」。
    */
-  // ① 先普通点一张（清掉之前的选中），再 Ctrl 加选第二张 ⇒ 目录里共 2 张选中
+  // ① 先普通点一张（清掉之前的选中），等一帧让「收起库列表」落地，
+  // 再从**当前 DOM**重新命中第二张 Ctrl 加选 ⇒ 目录里共 2 张选中。
+  // 不长期持有第一次查询到的节点：真人的第二次点击也会重新做命中测试。
   await send("Runtime.evaluate", {
     expression: `(() => {
-      const tiles = [...document.querySelectorAll('[role="option"]')];
+      const tiles = [...document.querySelectorAll('main [data-virtual-scroller] [role="option"]')];
       if (tiles.length < 6) return "tile 不够";
-      const click = (el, ctrl) =>
-        el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, ctrlKey: ctrl }));
-      click(tiles[4], false);
-      click(tiles[5], true);
+      tiles[4].dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      return "ok";
+    })()`,
+    returnByValue: true,
+  });
+  await sleep(50);
+  await send("Runtime.evaluate", {
+    expression: `(() => {
+      const tiles = [...document.querySelectorAll('main [data-virtual-scroller] [role="option"]')];
+      if (tiles.length < 6) return "tile 不够";
+      tiles[5].dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, ctrlKey: true }));
       return "ok";
     })()`,
     returnByValue: true,
   });
   await sleep(400);
   const tilesSelected = await send("Runtime.evaluate", {
-    expression: `document.querySelectorAll('[role="option"][aria-selected="true"]').length`,
+    expression: `document.querySelectorAll('main [data-virtual-scroller] [role="option"][aria-selected="true"]').length`,
     returnByValue: true,
   });
   if (tilesSelected.result?.value !== 2) {
@@ -561,7 +582,7 @@ try {
   // ② 回车 → 直接进对比（对比是选择状态的派生值）
   await send("Runtime.evaluate", {
     expression: `(() => {
-      const tiles = [...document.querySelectorAll('[role="option"]')];
+      const tiles = [...document.querySelectorAll('main [data-virtual-scroller] [role="option"]')];
       const last = tiles[tiles.length - 1];
       if (!last) return false;
       last.focus();
@@ -608,7 +629,7 @@ try {
   await sleep(500);
   await send("Runtime.evaluate", {
     expression: `(() => {
-      const tile = document.querySelector('[role="option"]');
+      const tile = document.querySelector('main [data-virtual-scroller] [role="option"]');
       tile?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
       return true;
     })()`,
@@ -629,7 +650,7 @@ try {
    */
   await send("Runtime.evaluate", {
     expression: `(() => {
-      const tile = document.querySelector('[role="option"]');
+      const tile = document.querySelector('main [data-virtual-scroller] [role="option"]');
       tile?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       return Boolean(tile);
     })()`,
@@ -1024,7 +1045,7 @@ try {
     // （它的无障碍名来自内容），拿它比较会得到两次 null —— 2026-09-19 踩过。
     // 用「在所有 tile 里排第几」更稳。
     expression: `(() => {
-      const tiles = [...document.querySelectorAll('[role="option"]')];
+      const tiles = [...document.querySelectorAll('main [data-virtual-scroller] [role="option"]')];
       return tiles.findIndex((tile) => tile.getAttribute("aria-selected") === "true");
     })()`,
     returnByValue: true,
@@ -1036,7 +1057,7 @@ try {
   await sleep(300);
   const afterKey = await send("Runtime.evaluate", {
     expression: `(() => {
-      const tiles = [...document.querySelectorAll('[role="option"]')];
+      const tiles = [...document.querySelectorAll('main [data-virtual-scroller] [role="option"]')];
       return {
         selectedAt: tiles.findIndex((tile) => tile.getAttribute("aria-selected") === "true"),
         count: tiles.filter((tile) => tile.getAttribute("aria-selected") === "true").length,
@@ -1193,7 +1214,7 @@ try {
    */
   await send("Runtime.evaluate", {
     expression: `(() => {
-      const tile = document.querySelector('[role="option"]');
+      const tile = document.querySelector('main [data-virtual-scroller] [role="option"]');
       tile?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       return Boolean(tile);
     })()`,
@@ -1202,7 +1223,7 @@ try {
   await sleep(400);
   const blank = await send("Runtime.evaluate", {
     expression: `(() => {
-      const tile = document.querySelector('[role="option"]');
+      const tile = document.querySelector('main [data-virtual-scroller] [role="option"]');
       const row = tile?.closest('[role="option"]')?.parentElement?.parentElement ?? null;
       const inRow = row ? [...row.querySelectorAll('[role="option"]')] : [];
       const last = inRow[inRow.length - 1] ?? null;
@@ -1226,7 +1247,7 @@ try {
   await sleep(400);
   const blankState = await send("Runtime.evaluate", {
     expression: `(() => {
-      const tiles = [...document.querySelectorAll('[role="option"]')];
+      const tiles = [...document.querySelectorAll('main [data-virtual-scroller] [role="option"]')];
       return {
         selected: tiles.filter((t) => t.getAttribute("aria-selected") === "true").length,
         status: (document.querySelector("main")?.innerText ?? "").match(/已选 \d+ 张/)?.[0] ?? null,
@@ -1245,7 +1266,7 @@ try {
   // 再选中一张，供后面的筛选断言用（删除把选中清掉了）
   await send("Runtime.evaluate", {
     expression: `(() => {
-      const tile = document.querySelector('[role="option"]');
+      const tile = document.querySelector('main [data-virtual-scroller] [role="option"]');
       tile?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       return Boolean(tile);
     })()`,
@@ -1333,7 +1354,7 @@ try {
       const byLabel = (text) => document.querySelector('button[aria-label="' + text + '"]');
       const chipsBefore = document.querySelectorAll("[data-filter-chip]").length;
       // 换个「选中」：点一个别的 tile（挑评分不同的那张）
-      const tiles = [...document.querySelectorAll('[role="option"]')];
+      const tiles = [...document.querySelectorAll('main [data-virtual-scroller] [role="option"]')];
       const other = tiles.find((tile) => tile.getAttribute("aria-selected") !== "true") ?? tiles[0];
       other?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       return {
@@ -1422,7 +1443,7 @@ try {
 
   const openViewer = await send("Runtime.evaluate", {
     expression: `(() => {
-      const tile = document.querySelector('[role="option"]');
+      const tile = document.querySelector('main [data-virtual-scroller] [role="option"]');
       if (!tile) return "没有 tile";
       // 真实交互是 click →（再点一下）→ dblclick；只丢一个 dblclick 不是用户会做的事
       tile.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -1447,7 +1468,7 @@ try {
   if (viaDbl.result?.value !== true) {
     const enter = await send("Runtime.evaluate", {
       expression: `(() => {
-        const tile = document.querySelector('[role="option"]');
+        const tile = document.querySelector('main [data-virtual-scroller] [role="option"]');
         if (!tile) return "没有 tile";
         tile.focus();
         tile.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
@@ -1489,8 +1510,8 @@ try {
     // 失败时把现场带出来：没有 tile、tile 是占位、还是点击没接上 —— 三种原因差别很大
     const why = await send("Runtime.evaluate", {
       expression: `(() => ({
-        tiles: document.querySelectorAll('[role="option"]').length,
-        selected: document.querySelectorAll('[role="option"][aria-selected="true"]').length,
+        tiles: document.querySelectorAll('main [data-virtual-scroller] [role="option"]').length,
+        selected: document.querySelectorAll('main [data-virtual-scroller] [role="option"][aria-selected="true"]').length,
         mainText: (document.querySelector("main")?.innerText ?? "").slice(0, 80),
         anyViewer: document.querySelectorAll("[data-viewer]").length,
         mainTail: (document.querySelector("main")?.outerHTML ?? "").slice(-120),
@@ -1999,7 +2020,7 @@ try {
   await sleep(400);
   await send("Runtime.evaluate", {
     expression: `(() => {
-      const tile = document.querySelector('[role="option"]');
+      const tile = document.querySelector('main [data-virtual-scroller] [role="option"]');
       tile?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       return Boolean(tile);
     })()`,
@@ -2010,8 +2031,8 @@ try {
   // 注意要**等重渲染落地之后**再聚焦：点选会把行元素整块换掉。
   await send("Runtime.evaluate", {
     expression: `(() => {
-      const tile = document.querySelector('[role="option"][aria-selected="true"]')
-        ?? document.querySelector('[role="option"]');
+      const tile = document.querySelector('main [data-virtual-scroller] [role="option"][aria-selected="true"]')
+        ?? document.querySelector('main [data-virtual-scroller] [role="option"]');
       if (tile instanceof HTMLElement) tile.focus();
       return document.activeElement === tile;
     })()`,
@@ -2068,6 +2089,14 @@ try {
   const otherErrors = consoleErrors.filter((text) => !/Maximum call stack/.test(text));
   if (otherErrors.length > 0) {
     problems.push(`控制台有 ${otherErrors.length} 条错误，例如：` + otherErrors[0].split("\n")[0]);
+  }
+  const runtimeErrors = await send("Runtime.evaluate", {
+    expression: `(window.__REJECTIONS || []).slice()`,
+    returnByValue: true,
+  });
+  const runtimeErrorList = runtimeErrors.result?.value ?? [];
+  if (runtimeErrorList.length > 0) {
+    problems.push(`页面有 ${runtimeErrorList.length} 条未处理异常，例如：` + String(runtimeErrorList[0]).split("\n")[0]);
   }
 } finally {
   chrome.kill("SIGKILL");

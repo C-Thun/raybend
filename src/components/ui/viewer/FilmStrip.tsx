@@ -22,13 +22,19 @@
  *    网格里已经缓存的照片，胶片带里立刻就有，不重复取一遍。
  */
 
-import { createEffect, For, on, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, For, on, Show, type JSX } from "solid-js";
 import { IconLock } from "@tabler/icons-solidjs";
 
 import { clickMode } from "../../../lib/selection.ts";
 import { t } from "../../../i18n/index.ts";
 import type { ThumbQueue } from "../thumb-queue.ts";
 import type { ViewerPhoto, ViewerStore } from "./index.ts";
+import {
+  captureFilmStripAnchor,
+  restoreFilmStripScroll,
+  type FilmStripAnchor,
+  type FilmStripItemMetric,
+} from "./film-strip-anchor.ts";
 
 export interface FilmStripProps {
   /** 看图件：列表与当前下标都从它来（胶片带与看图同源） */
@@ -63,9 +69,9 @@ export interface FilmStripProps {
 export function FilmStrip(props: FilmStripProps): JSX.Element {
   let scroller: HTMLDivElement | undefined;
 
-  const allPhotos = () => props.viewer.state().photos;
+  const allPhotos = createMemo(() => props.viewer.state().photos);
   /** 对比态子集：给定 id 顺序优先（胶片带与画幅顺序一致），否则就是全部 */
-  const photos = (): ViewerPhoto[] => {
+  const photos = createMemo<ViewerPhoto[]>(() => {
     const only = props.onlyIds;
     if (only === undefined) return [...allPhotos()];
     const byId = new Map(allPhotos().map((photo) => [photo.id, photo]));
@@ -73,7 +79,7 @@ export function FilmStrip(props: FilmStripProps): JSX.Element {
       const photo = byId.get(id);
       return photo === undefined ? [] : [photo];
     });
-  };
+  });
   /** 「只看对比图」这种特殊状态：整条加主色细边框、点击 = 移出对比 */
   const compareOnly = (): boolean => props.onlyIds !== undefined;
   const index = () => props.viewer.state().index;
@@ -84,6 +90,58 @@ export function FilmStrip(props: FilmStripProps): JSX.Element {
   // 选择集合里存的是**字符串** id（`lib/selection.ts` 的口径），看图件的 id 也是字符串
   const isSelected = (photo: ViewerPhoto): boolean => selectedIds().has(photo.id);
 
+  /*
+   * ══ 像素锚定：胶片带内容换过以后，眼前那张不横跳 ══
+   *
+   * 与 PhotoGrid 的纵向规则相同，只把「行 / 顶边 / scrollTop」换成
+   * 「照片 / 左边 / scrollLeft」。内容指纹覆盖全列表与「只看对比图」状态；
+   * 参考照片被筛掉时退到当前照片，两张都不存在才保持原位。
+   */
+  let lastSeen: FilmStripAnchor | null = null;
+  let pendingPin: (FilmStripAnchor & { key: string }) | null = null;
+
+  const itemMetrics = (): FilmStripItemMetric[] => {
+    if (scroller === undefined) return [];
+    return Array.from(scroller.querySelectorAll<HTMLElement>("[data-strip-id]")).map(
+      (node) => ({
+        id: node.dataset.stripId ?? "",
+        start: node.offsetLeft,
+        size: node.offsetWidth,
+      }),
+    );
+  };
+
+  const rememberReference = (): void => {
+    if (scroller === undefined) return;
+    const anchor = captureFilmStripAnchor(itemMetrics(), scroller.scrollLeft);
+    if (anchor !== null) lastSeen = anchor;
+  };
+
+  const contentKey = createMemo(() =>
+    `${compareOnly() ? "compare" : "all"}\u001e${photos().map((photo) => photo.id).join("\u001f")}`,
+  );
+
+  createEffect<string | undefined>((previous) => {
+    const key = contentKey();
+    if (previous !== undefined && key !== previous && lastSeen !== null) {
+      pendingPin = { ...lastSeen, key };
+      queueMicrotask(() => {
+        const pin = pendingPin;
+        if (pin === null || pin.key !== contentKey() || scroller === undefined) return;
+        const next = restoreFilmStripScroll(
+          itemMetrics(),
+          pin,
+          props.viewer.current()?.id ?? null,
+        );
+        pendingPin = null;
+        if (next === null) return;
+        scroller.scrollLeft = next;
+        rememberReference();
+      });
+    }
+    return key;
+  });
+
   /**
    * 当前这张要**滚进视野**。
    *
@@ -93,12 +151,13 @@ export function FilmStrip(props: FilmStripProps): JSX.Element {
    */
   createEffect(
     on(
-      // 依赖三项：当前下标、是否「只看对比图」（退出时胶片带换了内容要重滚）、看图是否开着
-      () => [index(), compareOnly(), props.viewer.state().active] as const,
-      ([at, , active]) => {
+      // 内容换过时由上面的像素锚定负责；这里只响应「当前照片真的变了」。
+      () => [index(), props.viewer.state().active] as const,
+      ([at, active]) => {
         if (!active || scroller === undefined) return;
         const node = scroller.querySelector<HTMLElement>(`[data-strip-item="${at}"]`);
         node?.scrollIntoView({ block: "nearest", inline: "nearest" });
+        queueMicrotask(rememberReference);
       },
     ),
   );
@@ -157,6 +216,7 @@ export function FilmStrip(props: FilmStripProps): JSX.Element {
     <div
       ref={scroller}
       data-filmstrip="open"
+      onScroll={rememberReference}
       /*
        * `overflow-x-auto` + `shrink-0` 的子项：横向滚动条只在需要时出现；
        * 纵向不滚（104 高放得下 80 的缩略 + 上下各 12 的呼吸）。
@@ -181,6 +241,7 @@ export function FilmStrip(props: FilmStripProps): JSX.Element {
             <button
               type="button"
               data-strip-item={fullIndex(photo)}
+              data-strip-id={photo.id}
               data-current={fullIndex(photo) === index() ? "true" : undefined}
               aria-current={fullIndex(photo) === index() ? "true" : undefined}
               aria-label={photo.fileName}

@@ -16,6 +16,7 @@
 
 import { t } from "../i18n/index.ts";
 import { isTauriRuntime } from "./tauri-env.ts";
+import { onTauriEvent } from "./events.ts";
 import type {
   ImportBatchProgress,
   ImportPrecheck,
@@ -33,7 +34,6 @@ export interface ImportSource {
 export const IMPORT_PROGRESS_EVENT = "import://progress";
 
 let coreModule: Promise<typeof import("@tauri-apps/api/core")> | undefined;
-let eventModule: Promise<typeof import("@tauri-apps/api/event")> | undefined;
 
 function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   coreModule ??= import("@tauri-apps/api/core");
@@ -148,10 +148,5 @@ export async function importInterrupted(
 export async function onImportProgress(
   handler: (progress: ImportBatchProgress) => void,
 ): Promise<() => void> {
-  if (!isTauriRuntime()) return () => {};
-  eventModule ??= import("@tauri-apps/api/event");
-  const { listen } = await eventModule;
-  return listen<ImportBatchProgress>(IMPORT_PROGRESS_EVENT, (event) =>
-    handler(event.payload),
-  );
+  return onTauriEvent<ImportBatchProgress>(IMPORT_PROGRESS_EVENT, handler);
 }

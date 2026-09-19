@@ -66,6 +66,7 @@ import { SplitHandle } from "../../components/ui/SplitHandle.tsx";
 import { withTimeout } from "../../lib/timeout.ts";
 import { timeoutMessage } from "../../i18n/index.ts";
 import { LeftColumn } from "./LeftColumn.tsx";
+import type { ToastStore } from "../../components/ui/toast.ts";
 
 export interface ImportWorkspaceProps {
   store: ImportStore;
@@ -85,6 +86,8 @@ export interface ImportWorkspaceProps {
   /** 左列里「最近」段的高度比例（0–1） */
   recentRatio?: number;
   onRecentRatioChange?: (ratio: number) => void;
+  /** 与浏览工作区共用的根层提示队列。 */
+  toast?: ToastStore;
 }
 
 /** 空间预检的时限：与导入命令同量级（15 秒只可能是「后端挂了」）。 */
@@ -529,6 +532,7 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
           onRepositoryStale={store.markRepositoryOffline}
           locale={groupingLocale()}
           class="min-h-0 flex-1"
+          {...(props.toast === undefined ? {} : { toast: props.toast })}
         />
 
         <RepositoryFooter

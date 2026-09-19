@@ -603,6 +603,17 @@ export interface MigrationNotice {
 }
 
 /** 「重建数据」的结果（齿轮弹窗里那句摘要用它）。 */
+export type RebuildPhase = "scan" | "apply" | "metadata" | "counts" | "done";
+
+/** 「重建数据」的实时事件（只陈述事实，界面按当前语言组织句子）。 */
+export interface RebuildProgress {
+  repositoryId: string;
+  phase: RebuildPhase;
+  done: number;
+  total: number;
+}
+
+/** 「重建数据」的结果（齿轮弹窗里那句摘要用它）。 */
 export interface RebuildReport {
   /** 扫到多少文件。 */
   scanned: number;

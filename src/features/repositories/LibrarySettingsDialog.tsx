@@ -8,16 +8,17 @@
  * 3. **保存前先校验** —— 模版坏了根本不写进库（否则下次导入才发现）。
  */
 
-import { createEffect, createSignal, For, Show } from "solid-js";
+import { createEffect, createSignal, For, onCleanup, Show } from "solid-js";
 import * as db from "../../api/db.ts";
-import type { TemplatePreview } from "../../api/types.ts";
-import type { RepositoryView } from "../../api/types.ts";
+import type { RebuildProgress, RepositoryView, TemplatePreview } from "../../api/types.ts";
 import { Button } from "../../components/ui/Button.tsx";
+import type { ToastStore } from "../../components/ui/toast.ts";
 import { IconCloudOff, IconRefresh } from "@tabler/icons-solidjs";
 import { ConfirmDialog, Dialog } from "../../components/ui/Dialog.tsx";
 import { Input } from "../../components/ui/Form.tsx";
 import { locale, t } from "../../i18n/index.ts";
 import { formatCount } from "../../lib/format.ts";
+import { rebuildProgressMessage } from "./rebuild-progress.ts";
 
 /** 可用的模版变量（与 Rust 的 `KNOWN_VARS` 一致；点一下插到光标处）。 */
 const VARIABLES = [
@@ -52,6 +53,8 @@ export interface LibrarySettingsDialogProps {
    * 反映到外面的库卡片上，不需要谁去挨个同步。
    */
   onStale?: (repositoryId: string) => void;
+  /** 应用根层的统一提示队列；不传时仍会在弹窗内保留完成摘要。 */
+  toast?: ToastStore;
 }
 
 export function LibrarySettingsDialog(props: LibrarySettingsDialogProps) {
@@ -68,13 +71,19 @@ export function LibrarySettingsDialog(props: LibrarySettingsDialogProps) {
   const [counts, setCounts] = createSignal<[number, number] | null>(null);
   const [rebuildOpen, setRebuildOpen] = createSignal(false);
   const [rebuilding, setRebuilding] = createSignal(false);
+  const [rebuildProgress, setRebuildProgress] = createSignal<RebuildProgress | null>(null);
   const [rebuilt, setRebuilt] = createSignal<string | null>(null);
+  let stopRebuildProgress: (() => void) | null = null;
+
+  onCleanup(() => stopRebuildProgress?.());
 
   // 打开时读一次当前模版
   createEffect(() => {
     if (!props.open) return;
     const id = props.repositoryId;
     if (id === null) return;
+    setRebuildProgress(null);
+    setRebuilt(null);
     setLoading(true);
     setError(null);
     /*
@@ -151,25 +160,52 @@ export function LibrarySettingsDialog(props: LibrarySettingsDialogProps) {
     setRebuildOpen(false);
     setRebuilding(true);
     setRebuilt(null);
+    setRebuildProgress({ repositoryId: id, phase: "scan", done: 0, total: 0 });
     try {
+      // 先订阅、后发命令：小库可能很快，反过来会漏掉第一批甚至全部事件。
+      try {
+        stopRebuildProgress?.();
+        stopRebuildProgress = await db.onRebuildProgress((progress) => {
+          if (progress.repositoryId !== id || props.repositoryId !== id) return;
+          setRebuildProgress(progress.phase === "done" ? null : progress);
+        });
+      } catch {
+        // 订阅失败不拦重建；按钮仍保持 loading，完成摘要仍由命令返回值给出。
+        stopRebuildProgress = null;
+      }
       const report = await db.rebuildRepository(id);
-      setCounts([report.photosCount, report.imagesCount]);
-      setRebuilt(
-        t("repo.rebuild_done", {
-          scanned: String(report.scanned),
-          registered: String(report.registered),
-          missing: String(report.missing),
-          filled: String(report.metadataFilled),
-          photos: String(report.photosCount),
-          images: String(report.imagesCount),
-        }),
-      );
+      const summary = t("repo.rebuild_done", {
+        scanned: report.scanned,
+        registered: report.registered,
+        missing: report.missing,
+        filled: report.metadataFilled,
+        photos: report.photosCount,
+        images: report.imagesCount,
+      });
+      // 运行期间允许关弹窗；若用户已经打开另一个库，不能把旧库结果写到新库面板里。
+      if (props.repositoryId === id) {
+        setCounts([report.photosCount, report.imagesCount]);
+        setRebuilt(summary);
+      }
+      props.toast?.show({ tone: "success", message: summary });
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
+      if (props.repositoryId === id) {
+        setError(caught instanceof Error ? caught.message : String(caught));
+      }
     } finally {
+      stopRebuildProgress?.();
+      stopRebuildProgress = null;
+      setRebuildProgress(null);
       setRebuilding(false);
     }
   }
+
+  const rebuildProgressText = (): string | null => {
+    const progress = rebuildProgress();
+    if (progress === null) return null;
+    const message = rebuildProgressMessage(progress);
+    return "params" in message ? t(message.key, message.params) : t(message.key);
+  };
 
   /** 相片数量：外面的视图优先（它刚更新过），没有就用自己读的 */
   const photosCount = (): number | null =>
@@ -263,6 +299,13 @@ export function LibrarySettingsDialog(props: LibrarySettingsDialogProps) {
               {t("repo.rebuild_button")}
             </Button>
           </div>
+          <Show when={rebuildProgressText()}>
+            {(message) => (
+              <p class="text-fs-0 text-brand" role="status" aria-live="polite">
+                {message()}
+              </p>
+            )}
+          </Show>
           <Show when={rebuilt()}>
             {(summary) => <p class="text-fs-0 text-fg-2">{summary()}</p>}
           </Show>

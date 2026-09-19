@@ -302,6 +302,7 @@ fn every_contract_entry_has_a_test() {
         // 数据库升级通知（M2-W2）
         "MigrationNotice",
         // 重建数据（M2-W2 数量体系）
+        "RebuildProgress",
         "RebuildReport",
     ];
     for key in value.as_object().unwrap().keys() {
@@ -359,6 +360,16 @@ fn migration_notice_matches_contract() {
 /// 「重建数据」的结果也要进契约（字段名漂了，界面上那句摘要就是一堆 `undefined`）。
 #[test]
 fn rebuild_report_matches_contract() {
+    let progress = crate::repo::RebuildProgressDto {
+        repository_id: "r".to_string(),
+        phase: "scan".to_string(),
+        done: 1,
+        total: 2,
+    };
+    assert_eq!(
+        keys_of_value(&progress),
+        contract_keys("RebuildProgress")
+    );
     assert_eq!(
         keys_of::<crate::repo::RebuildReportDto>(),
         contract_keys("RebuildReport")

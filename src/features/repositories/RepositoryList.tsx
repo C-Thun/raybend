@@ -17,7 +17,7 @@
  *   * **照片数读不到时显示「—」而不是 0** —— 0 会让用户以为库是空的。
  */
 
-import { RepositoryCard } from "./RepositoryCard.tsx";
+import { RepositoryCard } from "../../components/ui/RepositoryCard.tsx";
 import { createSignal, For, Show } from "solid-js";
 import {
   IconAlertTriangle,
@@ -29,6 +29,7 @@ import { ScrollBox } from "../../components/ui/ScrollBar.tsx";
 import { t } from "../../i18n/index.ts";
 import { type GroupingLocale } from "../../lib/format.ts";
 import type { LoadStatus } from "../../lib/load-status.ts";
+import type { ToastStore } from "../../components/ui/toast.ts";
 
 export interface RepositoryListProps {
   repositories: readonly RepositoryView[];
@@ -49,6 +50,7 @@ export interface RepositoryListProps {
   onRetry?: () => void;
   locale?: GroupingLocale;
   class?: string;
+  toast?: ToastStore;
 }
 
 export function RepositoryList(props: RepositoryListProps) {
@@ -151,9 +153,8 @@ export function RepositoryList(props: RepositoryListProps) {
         {...(props.onRepositoryStale === undefined
           ? {}
           : { onStale: (id: string) => props.onRepositoryStale?.(id) })}
+        {...(props.toast === undefined ? {} : { toast: props.toast })}
       />
     </div>
   );
 }
-
-

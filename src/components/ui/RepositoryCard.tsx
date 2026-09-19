@@ -25,7 +25,11 @@ import { IconCloudOff, IconFolder, IconLoader2, IconSettings } from "@tabler/ico
 import { t } from "../../i18n/index.ts";
 import { formatCount, type GroupingLocale } from "../../lib/format.ts";
 import { shortPath } from "../../lib/shortpath.ts";
-import type { RemountError } from "./state.ts";
+
+/** 重新挂载失败的事实；状态层只存事实，卡片按当前语言成句。 */
+export type RepositoryRemountError =
+  | { kind: "not_found"; tried: number }
+  | { kind: "message"; text: string };
 
 export interface RepositoryCardProps {
   name: string;
@@ -39,7 +43,7 @@ export interface RepositoryCardProps {
   /** 正在重新查找（离线卡片上转圈） */
   remounting?: boolean;
   /** 重新查找失败的原因（显示在卡片下方）；`null` = 没有错误 */
-  remountError?: RemountError | null;
+  remountError?: RepositoryRemountError | null;
   locale: GroupingLocale;
   /** 点卡片 = 选中这个库 */
   onSelect: () => void;
@@ -50,7 +54,7 @@ export interface RepositoryCardProps {
 }
 
 /** 重新查找失败：按「事实」成句（判断窄化交给这个函数，别塞进 JSX 的三元里） */
-function remountText(error: RemountError): string {
+function remountText(error: RepositoryRemountError): string {
   return error.kind === "not_found"
     ? t("repo.remount_failed", { tried: String(error.tried) })
     : error.text;

@@ -14,6 +14,7 @@
  */
 
 import { isTauriRuntime } from "./tauri-env.ts";
+import { onTauriEvent } from "./events.ts";
 import { t } from "../i18n/index.ts";
 import type {
   DirEmptyView,
@@ -27,6 +28,7 @@ import type {
   MetaFile,
   PhotoMeta,
   RebuildReport,
+  RebuildProgress,
   RepositoryProbe,
   RepositoryView,
   SourceScan,
@@ -419,6 +421,16 @@ export async function syncDirectoryCounts(
 export async function rebuildRepository(repositoryId: string): Promise<RebuildReport> {
   if (!isTauriRuntime()) throw new Error(t("common.desktop_only"));
   return call<RebuildReport>("repository_rebuild", { repositoryId });
+}
+
+/** 进度事件名（与 `src-tauri/src/repo.rs::REBUILD_EVENT` 一致）。 */
+export const REBUILD_PROGRESS_EVENT = "db://rebuild";
+
+/** 订阅所有库的重建进度；具体库的过滤由发起重建的界面负责。 */
+export async function onRebuildProgress(
+  handler: (progress: RebuildProgress) => void,
+): Promise<() => void> {
+  return onTauriEvent<RebuildProgress>(REBUILD_PROGRESS_EVENT, handler);
 }
 
 /* ══════════════════════════════════════════════════════════════

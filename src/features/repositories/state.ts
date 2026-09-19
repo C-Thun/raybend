@@ -20,6 +20,7 @@
 
 import { createSignal } from "solid-js";
 import type { RepositoryView } from "../../api/types.ts";
+import type { RepositoryRemountError } from "../../components/ui/RepositoryCard.tsx";
 import type { LoadStatus } from "../../lib/load-status.ts";
 
 /**
@@ -31,9 +32,7 @@ import type { LoadStatus } from "../../lib/load-status.ts";
  *   * `not_found` → 卡片上写「没找到这个库（已试过 N 处）」（`repo.remount_failed`）；
  *   * `message` → 后端原话（已经是人话，直接展示）。
  */
-export type RemountError =
-  | { kind: "not_found"; tried: number }
-  | { kind: "message"; text: string };
+export type RemountError = RepositoryRemountError;
 
 /** 本模块用到的 `src/api/db.ts` 子集（注入以便测试） */
 export interface RepositoryStateApi {
