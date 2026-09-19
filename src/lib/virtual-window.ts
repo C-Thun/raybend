@@ -139,7 +139,7 @@ export function computeVirtualWindow(input: VirtualWindowInput): VirtualWindow {
  * 两处口径不一致的话会出现「滚了但没滚到位」。
  *
  * （2026-09-19：本函数上线时类型检查器一度报「没有这个导出」——陈旧快照，
- * 判据与配方见 `ASSISTANCE.md` §二第 3 条；`pnpm test` 里那 5 条就是它的靶子。）
+ * 判据与配方见 `AGENTS.md` §7 的诊断纪律；`pnpm test` 里那 5 条就是它的靶子。）
  */
 export function rowScrollTop(input: {
   rows: readonly VirtualRowLike[];
