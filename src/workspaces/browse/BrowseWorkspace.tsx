@@ -674,7 +674,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
             selectedIds={store.selection().ids}
             onSelect={(id, mode) =>
               store.select(
-                id,
+                Number(id),
                 mode,
                 viewer.state().photos.map((photo) => photo.id),
               )

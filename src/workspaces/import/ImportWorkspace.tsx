@@ -18,11 +18,23 @@
  * 两种主题下中央都形成聚焦（`design/main.md` §3）。
  */
 
-import { createEffect, createSignal, onMount, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, onMount, Show } from "solid-js";
 import * as importCommands from "../../api/import.ts";
 import { importPrecheck, onImportProgress, type ImportSource } from "../../api/import.ts";
 import { locale, t } from "../../i18n/index.ts";
 import { PhotoGrid, type PhotoGridStore } from "../../features/photo-grid/index.ts";
+import {
+  CompareView,
+  createViewerStore,
+  FilmStrip,
+  Viewer,
+  type ViewerPhoto,
+} from "../../components/ui/viewer/index.ts";
+import { createThumbQueue } from "../../components/ui/thumb-queue.ts";
+import { getThumbBytes, getViewImage } from "../../api/db.ts";
+import { chromeShowsFilm, nextChrome, type ViewerChrome } from "../../lib/viewer-chrome.ts";
+import { shouldHandleKey } from "../../lib/viewer-keys.ts";
+import { compareIds } from "../../lib/viewer-compare.ts";
 import {
   createImportStore,
   ImportProgressDialog,
@@ -174,6 +186,99 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
   /** 量容器宽度用（把手与它同一行） */
   let rowEl: HTMLDivElement | undefined;
 
+  /*
+   * ── 看图（tiles / film / view 三态）────────────────────────────────────
+   *
+   * 人类 2026-09-19：import 与 browse 的**中列**要能用同一套东西 ——
+   * 同一份 `chrome.ts`（三态循环）、同一个 `Viewer` / `FilmStrip` / `CompareView`。
+   * tiles 仍是默认态，且**排版口径一点没动**（还是 `PhotoGrid` + `lib/tile-flow.ts`）。
+   */
+  const viewer = createViewerStore({
+    loadScreen: (path) => getViewImage(path, "screen"),
+    loadThumb: (path) => getThumbBytes(path, "grid"),
+  });
+  const [chrome, setChrome] = createSignal<ViewerChrome>("default");
+
+  /**
+   * 看图用的照片列表：与中列**同一份数据、同一个顺序**（`grid.items()`）。
+   * `naturalOf` 给的是真实宽高（头部缓存那份），对比与缩放都靠它，
+   * 缺了也不慌 —— `ViewerPhoto.natural` 本来就是可选。
+   */
+  const viewerPhotos = createMemo<ViewerPhoto[]>(() =>
+    grid.items().map((item) => {
+      const natural = grid.naturalOf(item.path);
+      return {
+        id: item.path,
+        path: item.path,
+        fileName: item.fileName,
+        ...(natural === null ? {} : { natural }),
+      };
+    }),
+  );
+
+  /**
+   * 对比：与 browse **同一条规则**（`lib/viewer-compare.ts`）——
+   * 选中 ≥ 2 张就是对比态，超过 4 张只对比**最近选中的 4 张**（锚点必含）。
+   */
+  const comparePhotoIds = createMemo<string[]>(() =>
+    compareIds(grid.selectedIds(), viewerPhotos().map((photo) => photo.id), grid.selection().anchor),
+  );
+  const comparing = (): boolean => viewer.state().active && comparePhotoIds().length >= 2;
+  /** 对比态要显示的那几张（按对比顺序） */
+  const comparePhotos = createMemo<ViewerPhoto[]>(() => {
+    const byId = new Map(viewerPhotos().map((photo) => [photo.id, photo]));
+    return comparePhotoIds().flatMap((id) => {
+      const photo = byId.get(id);
+      return photo === undefined ? [] : [photo];
+    });
+  });
+
+  /** 胶片带的缩略图队列（网格那份藏在 `PhotoGrid` 里没对外暴露，所以这里自建一份） */
+  const filmThumbs = createThumbQueue({
+    load: async (path) => {
+      const bytes = await getThumbBytes(path, "grid");
+      return bytes ?? null;
+    },
+  });
+
+  /*
+   * 键盘：与 browse **同一套语义**，并复用它的 `shouldHandleKey` 守卫
+   * （输入框里按 Tab 不该被我们吃掉）。
+   *   Tab   → 三态循环（film+左右 / film only / view only）
+   *   Enter → tiles 里进看图（从锚点那张开始）
+   *   Esc   → 退出看图并把外壳复位
+   */
+  onMount(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (!shouldHandleKey(event.target, false)) return;
+      const active = viewer.state().active;
+
+      if (event.key === "Tab") {
+        if (!active) return;
+        event.preventDefault();
+        setChrome(nextChrome(chrome()));
+        return;
+      }
+      if (event.key === "Escape") {
+        if (!active) return;
+        event.preventDefault();
+        setChrome("default");
+        viewer.close();
+        return;
+      }
+      if (event.key === "Enter" && !active) {
+        const photos = viewerPhotos();
+        if (photos.length === 0) return;
+        event.preventDefault();
+        const anchor = grid.selection().anchor;
+        const at = anchor === null ? 0 : photos.findIndex((photo) => photo.id === anchor);
+        viewer.show(photos, at < 0 ? 0 : at);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    onCleanup(() => window.removeEventListener("keydown", onKeyDown));
+  });
+
   /** 左列宽度的上下限（比例）：与 `lib/layout-prefs.ts` 的范围一致，再加一道像素下限 */
   const clampLeftRatio = (ratio: number): number =>
     Math.min(0.5, Math.max(0.12, ratio));
@@ -245,9 +350,48 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
       {/* 中列 + 右列：右列宽度固定，不参与拖拽 */}
       <div class="flex min-h-0 min-w-0 flex-1">
               {/* ── 中列：照片网格 ─────────────────────────────── */}
-              <main class="flex min-w-0 flex-1 flex-col bg-surface-bar">
-                {/* 排除状态住在工作区 store（跨目录、跨源一份），网格只负责显示 */}
-                <PhotoGrid store={grid} isExcluded={store.isExcluded} />
+              <main class="relative flex min-w-0 flex-1 flex-col bg-surface-bar">
+                <Show
+                  when={viewer.state().active}
+                  fallback={
+                    /* 排除状态住在工作区 store（跨目录、跨源一份），网格只负责显示 */
+                    <PhotoGrid store={grid} isExcluded={store.isExcluded} />
+                  }
+                >
+                  <Show
+                    when={comparing()}
+                    fallback={
+                      <Viewer
+                        store={viewer}
+                        class="z-10"
+                        onClose={() => {
+                          // 退回 tiles 时左右栏必定回来（与 browse 同一条规矩）
+                          setChrome("default");
+                          viewer.close();
+                        }}
+                      />
+                    }
+                  >
+                    <CompareView
+                      photos={comparePhotos()}
+                      selectedCount={grid.selectedCount()}
+                      store={viewer}
+                      class="z-10"
+                    />
+                  </Show>
+                </Show>
+
+                {/* 胶片带：仅看图态可见；`view only`（第③态）整条收起 */}
+                <Show when={viewer.state().active && chromeShowsFilm(chrome())}>
+                  <FilmStrip
+                    viewer={viewer}
+                    selectedIds={grid.selectedIds()}
+                    /* 选择语义全在网格 store 里（`clickItem` 与 tiles 点一下是同一条路） */
+                    onSelect={(id, mode) => grid.clickItem(id, mode)}
+                    thumbs={filmThumbs}
+                    class="shrink-0"
+                  />
+                </Show>
               </main>
 
               {/* ── 右列：库（固定宽，不可拖）─────────────────── */}

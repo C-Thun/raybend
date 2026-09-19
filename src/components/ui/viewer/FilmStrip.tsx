@@ -46,7 +46,7 @@ export interface FilmStripProps {
    * （`clickMode()`，与网格用的是同一个函数）。
    * 调用方负责把它落进自己的选择模型（browse 会把它交给 `store.select`）。
    */
-  onSelect: (id: number, mode: "replace" | "toggle" | "range") => void;
+  onSelect: (id: string, mode: "replace" | "toggle" | "range") => void;
   /** 与网格共用的缩略图队列 */
   thumbs: ThumbQueue;
   /**
@@ -143,7 +143,7 @@ export function FilmStrip(props: FilmStripProps): JSX.Element {
      */
     const keep = compare ? [...(props.onlyIds ?? [])] : [];
     // ① 选择：与 tiles **同一套**（修饰键判定也是同一个函数）
-    props.onSelect(Number(photo.id), mode);
+    props.onSelect(photo.id, mode);
     if (compare) {
       // 点的是**要移出对比**的那张：不跳过去；若它正是当前那张，落到还在对比里的邻居
       if (wasCurrent) goToSurvivor(photo, keep);
