@@ -6,8 +6,8 @@
  * 于是抽成独立组件，**两处共用同一份**：
  *
  *   - 单张看图：沿用「鼠标靠近右下角才浮出」的规则（`visible` 由调用方按光标位置给）；
- *   - 对比：**常驻可见**（对比时更需要它，而且整个对比区**只有一组**控件，
- *     不是每幅画幅各来一组）。
+ *   - 对比：沿用同一套角落唤醒规则，而且整个对比区**只有一组**控件，
+ *     不是每幅画幅各来一组。
  *
  * 定位：两个控件都是 `absolute`，所以父级必须是定位容器
  * （`Viewer` / `CompareView` 的根节点都满足）。
@@ -23,8 +23,13 @@ export interface ViewerControlsProps {
   store: ViewerStore;
   /** 关闭（返回 tiles）。给了才渲染左上角那颗 */
   onClose?: () => void;
-  /** 是否可见（看图态按光标位置给；对比态恒为 true） */
+  /** 是否可见（看图与对比都按共用的角落光标判据给） */
   visible: boolean;
+  /** 对比态用「相对适配倍率」，可覆盖默认的原图像素倍率文案。 */
+  zoomLabel?: () => string;
+  onZoomOut?: () => void;
+  onZoomIn?: () => void;
+  onFit?: () => void;
   class?: string;
 }
 
@@ -76,7 +81,7 @@ export function ViewerControls(props: ViewerControlsProps): JSX.Element {
           type="button"
           class="flex size-6 cursor-pointer items-center justify-center rounded-ui text-fg-2 hover:bg-state-hover hover:text-fg-1"
           aria-label={t("viewer.zoom_out")}
-          onClick={() => props.store.zoomBy(1 / 1.25)}
+          onClick={() => (props.onZoomOut ?? (() => props.store.zoomBy(1 / 1.25)))()}
         >
           <IconMinus size={14} aria-hidden="true" />
         </button>
@@ -84,15 +89,15 @@ export function ViewerControls(props: ViewerControlsProps): JSX.Element {
           type="button"
           class="min-w-16 cursor-pointer rounded-ui px-1 text-center text-fs-1 text-fg-2 hover:bg-state-hover hover:text-fg-1 tnum"
           aria-label={t("viewer.fit")}
-          onClick={() => props.store.toggleFit()}
+          onClick={() => (props.onFit ?? (() => props.store.toggleFit()))()}
         >
-          {zoomLabel()}
+          {props.zoomLabel?.() ?? zoomLabel()}
         </button>
         <button
           type="button"
           class="flex size-6 cursor-pointer items-center justify-center rounded-ui text-fg-2 hover:bg-state-hover hover:text-fg-1"
           aria-label={t("viewer.zoom_in")}
-          onClick={() => props.store.zoomBy(1.25)}
+          onClick={() => (props.onZoomIn ?? (() => props.store.zoomBy(1.25)))()}
         >
           <IconPlus size={14} aria-hidden="true" />
         </button>

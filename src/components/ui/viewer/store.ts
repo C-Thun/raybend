@@ -98,7 +98,7 @@ export interface ViewerStoreDeps {
   /** 取网格小图（可能已经在网格的缓存里，用来秒显）。可省略 */
   loadThumb?: (path: string) => Promise<Uint8Array | null>;
   makeUrl?: (bytes: Uint8Array) => string;
-  /** 缓存上限（张）—— 看图一次只显示一张，留前后几张足够来回翻 */
+  /** 多图 URL 缓存上限（张）；对比最多 4 张，所以实际下限也是 4。 */
   cacheLimit?: number;
   revokeUrl?: (url: string) => void;
 }
@@ -221,12 +221,36 @@ export function clampPan(args: {
   };
 }
 
+/**
+ * 已经用 CSS 铺满等比例画框的图片，按「相对适配倍率」夹取平移。
+ * scale=1 时没有可拖空间；放大后可拖范围就是画框溢出量的一半。
+ */
+export function clampFramePan(args: {
+  pan: { x: number; y: number };
+  scale: number;
+  viewport: ViewportSize;
+}): { x: number; y: number } {
+  const scale = Number.isFinite(args.scale) ? Math.max(1, args.scale) : 1;
+  const maxX = Math.max(0, (args.viewport.width * (scale - 1)) / 2);
+  const maxY = Math.max(0, (args.viewport.height * (scale - 1)) / 2);
+  const clamp = (value: number, limit: number): number =>
+    limit === 0 ? 0 : Math.min(limit, Math.max(-limit, value));
+  return {
+    x: clamp(args.pan.x, maxX),
+    y: clamp(args.pan.y, maxY),
+  };
+}
+
 export interface ViewerStore {
   state: () => ViewerState;
   /** 当前这张（`photos[index]`，没有就是 `null`） */
   current: () => ViewerPhoto | null;
   /** 视图用：当前该显示哪张图（可能是小图，也可能是大图） */
   imageUrl: () => string | null;
+  /** 多图视图用：指定照片自己的 URL，绝不能把当前图 URL 填给全部画幅。 */
+  imageUrlFor: (photo: ViewerPhoto) => string | null;
+  /** 确保指定照片进入多图 URL 缓存；同一路径并发调用会合并。 */
+  ensureImage: (photo: ViewerPhoto) => Promise<void>;
   imageStatus: () => "idle" | "loading" | "ready" | "error";
   /** 「正在显示大图」—— 视图据此显示一个极轻的指示（可选） */
   sharp: () => boolean;
@@ -241,11 +265,18 @@ export interface ViewerStore {
    * 所以从胶片带点过去不会继承上一张的缩放，也不会把列表换掉。
    */
   goTo: (index: number) => void;
+  /** 只切换「当前照片」，保留缩放与平移（对比画幅切焦点用）。 */
+  focus: (index: number) => void;
   setViewport: (size: ViewportSize) => void;
   setNatural: (size: NaturalSize) => void;
   zoomBy: (factor: number, anchor?: { x: number; y: number }) => void;
   zoomTo: (zoom: number, anchor?: { x: number; y: number }) => void;
   panBy: (dx: number, dy: number) => void;
+  /** 对比画框用：倍率以适配值为基准，平移按画框 CSS 像素夹取。 */
+  zoomWithinFrame: (factor: number, viewport: ViewportSize, fitZoom: number) => void;
+  panWithinFrame: (dx: number, dy: number, viewport: ViewportSize, fitZoom: number) => void;
+  /** 把给定倍率定为当前视图的「适配」，同时把平移归零。 */
+  resetFit: (zoom?: number) => void;
   toggleFit: () => void;
 }
 
@@ -255,6 +286,13 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
   const [imageStatus, setImageStatus] =
     createSignal<"idle" | "loading" | "ready" | "error">("idle");
   const [sharp, setSharp] = createSignal(false);
+  /**
+   * 多图视图的独立 URL 表。单张看图的 `currentUrl` 会在换图时立刻回收，不能拿它给
+   * 四个对比画幅共用；这里每张照片各持有自己的 URL，并按有限容量回收。
+   */
+  const [imageUrls, setImageUrls] = createSignal<
+    ReadonlyMap<string, { url: string; path: string }>
+  >(new Map());
 
   const makeUrl =
     deps.makeUrl ??
@@ -269,6 +307,12 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
 
   /** 换图时的作废令牌：迟到的结果直接丢掉（换得快时尤其重要） */
   let generation = 0;
+  let imageUrlsGeneration = 0;
+  const pendingImageUrls = new Map<string, number>();
+  const imageUrlsLimit = Math.max(
+    4,
+    Number.isFinite(deps.cacheLimit) ? Math.floor(deps.cacheLimit ?? 4) : 4,
+  );
   /** 已生成的 URL：换图/关闭时回收上一个 */
   let currentUrl: string | null = null;
 
@@ -282,6 +326,60 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
   const photos = (): readonly ViewerPhoto[] => state().photos;
   const index = (): number => state().index;
   const current = (): ViewerPhoto | null => photos()[index()] ?? null;
+
+  const imageKey = (photo: ViewerPhoto): string => `${photo.id}\u0000${photo.path}`;
+
+  function imageUrlFor(photo: ViewerPhoto): string | null {
+    const cached = imageUrls().get(imageKey(photo));
+    if (cached !== undefined) return cached.url;
+    const shown = current();
+    return shown?.id === photo.id && shown.path === photo.path ? imageUrl() : null;
+  }
+
+  /** 多幅画面各取自己的屏幕档；同一照片在途请求合并，迟到结果按代号丢弃。 */
+  async function ensureImage(photo: ViewerPhoto): Promise<void> {
+    const key = imageKey(photo);
+    if (imageUrls().has(key) || pendingImageUrls.has(key)) return;
+    const ticket = imageUrlsGeneration;
+    pendingImageUrls.set(key, ticket);
+    try {
+      const bytes = await deps.loadScreen(photo.path);
+      if (bytes === null || ticket !== imageUrlsGeneration) return;
+      const url = makeUrl(bytes);
+      if (ticket !== imageUrlsGeneration) {
+        revokeUrl(url);
+        return;
+      }
+      setImageUrls((previous) => {
+        if (previous.has(key)) {
+          revokeUrl(url);
+          return previous;
+        }
+        const next = new Map(previous);
+        next.set(key, { url, path: photo.path });
+        while (next.size > imageUrlsLimit) {
+          const oldest = next.keys().next().value as string | undefined;
+          if (oldest === undefined) break;
+          const dropped = next.get(oldest);
+          next.delete(oldest);
+          if (dropped !== undefined) revokeUrl(dropped.url);
+        }
+        return next;
+      });
+    } catch {
+      // 单幅取不到不影响其它画幅；该框保留底色，后续重新进入还能再试。
+    } finally {
+      if (pendingImageUrls.get(key) === ticket) pendingImageUrls.delete(key);
+    }
+  }
+
+  function clearImageUrls(): void {
+    imageUrlsGeneration += 1;
+    pendingImageUrls.clear();
+    const previous = imageUrls();
+    setImageUrls(new Map());
+    for (const cached of previous.values()) revokeUrl(cached.url);
+  }
 
   /** 处在适配状态时，任何尺寸变化都要重新算适配倍率 */
   function refit(next: ViewerState): Partial<ViewerState> {
@@ -313,7 +411,7 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
     try {
       const bytes = await deps.loadScreen(photo.path);
       if (ticket !== generation) {
-        if (bytes !== null) URL.revokeObjectURL(makeUrl(bytes)); // 迟到的大图直接丢掉
+        if (bytes !== null) revokeUrl(makeUrl(bytes)); // 迟到的大图直接丢掉
         return;
       }
       if (bytes === null) {
@@ -336,30 +434,29 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
     generation += 1;
     const ticket = generation;
     const photo = nextPhotos[clamped]!;
-    setState((prev) => ({
-      ...prev,
-      active: true,
-      photos: nextPhotos,
-      index: clamped,
-      fit: true,
+    setState((prev) => {
       /*
        * 尺寸的来路，按可信度排序：
        *   1. 这张照片**元数据**里的宽高（有它就一步到位，RAW 靠它才拖得动）；
        *   2. 旧图尺寸当估计（原来的行为，等 onLoad 回填真实尺寸再修正，避免闪一下大白块）。
        */
-      ...refit({
+      const next: ViewerState = {
         ...prev,
-        natural: photo.natural ?? prev.natural,
+        active: true,
         photos: nextPhotos,
         index: clamped,
-      }),
-    }));
+        fit: true,
+        natural: photo.natural ?? prev.natural,
+      };
+      return { ...next, ...refit(next) };
+    });
     void loadFor(photo, ticket);
   }
 
   function close(): void {
     generation += 1;
     replaceUrl(null);
+    clearImageUrls();
     setSharp(false);
     setImageStatus("idle");
     setState({ ...EMPTY_VIEWER, viewport: state().viewport });
@@ -375,14 +472,31 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
     const ticket = generation;
     setState((prev) => {
       const photo = list[clamped];
-      return {
+      const next: ViewerState = {
         ...prev,
         index: clamped,
         fit: true,
-        ...refit({ ...prev, natural: photo?.natural ?? prev.natural, index: clamped }),
+        natural: photo?.natural ?? prev.natural,
       };
+      return { ...next, ...refit(next) };
     });
     void loadFor(list[clamped]!, ticket);
+  }
+
+  function focus(nextIndex: number): void {
+    const list = photos();
+    if (list.length === 0) return;
+    const clamped = Math.min(list.length - 1, Math.max(0, nextIndex));
+    if (clamped === index()) return;
+    generation += 1;
+    const ticket = generation;
+    const photo = list[clamped]!;
+    setState((prev) => ({
+      ...prev,
+      index: clamped,
+      natural: photo.natural ?? prev.natural,
+    }));
+    void loadFor(photo, ticket);
   }
 
   function setViewport(size: ViewportSize): void {
@@ -466,6 +580,55 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
     }));
   }
 
+  function panWithinFrame(
+    dx: number,
+    dy: number,
+    viewport: ViewportSize,
+    fitZoom: number,
+  ): void {
+    setState((prev) => {
+      const pan = clampFramePan({
+        pan: { x: prev.pan.x + dx, y: prev.pan.y + dy },
+        scale: fitZoom > 0 ? prev.zoom / fitZoom : 1,
+        viewport,
+      });
+      if (pan.x === prev.pan.x && pan.y === prev.pan.y) return prev;
+      return { ...prev, pan };
+    });
+  }
+
+  function zoomWithinFrame(
+    factor: number,
+    viewport: ViewportSize,
+    fitZoom: number,
+  ): void {
+    if (!Number.isFinite(factor) || factor <= 0 || !(fitZoom > 0)) return;
+    setState((prev) => {
+      // 对比画框的最小倍率就是「适配」；再缩小只会露出无意义的空边。
+      const zoom = clampZoom(Math.max(fitZoom, prev.zoom * factor));
+      const ratio = prev.zoom > 0 ? zoom / prev.zoom : 1;
+      return {
+        ...prev,
+        zoom,
+        fit: zoom === fitZoom,
+        pan: clampFramePan({
+          pan: { x: prev.pan.x * ratio, y: prev.pan.y * ratio },
+          scale: zoom / fitZoom,
+          viewport,
+        }),
+      };
+    });
+  }
+
+  function resetFit(zoom?: number): void {
+    setState((prev) => ({
+      ...prev,
+      fit: true,
+      zoom: clampZoom(zoom ?? computeFitScale(prev.viewport, prev.natural)),
+      pan: { x: 0, y: 0 },
+    }));
+  }
+
   /** 双击：适配 ↔ 100%（100% 时以视口中心为锚，保证看到的是中心那块） */
   function toggleFit(): void {
     setState((prev) => {
@@ -482,11 +645,14 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
     state,
     current,
     imageUrl,
+    imageUrlFor,
+    ensureImage,
     imageStatus,
     sharp,
     show,
     close,
     goTo,
+    focus,
     next: () => goTo(index() + 1),
     prev: () => goTo(index() - 1),
     setViewport,
@@ -494,6 +660,9 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
     zoomBy: (factor, anchor) => applyZoom(state().zoom * factor, anchor),
     zoomTo: (zoom, anchor) => applyZoom(zoom, anchor),
     panBy,
+    zoomWithinFrame,
+    panWithinFrame,
+    resetFit,
     toggleFit,
   };
 }

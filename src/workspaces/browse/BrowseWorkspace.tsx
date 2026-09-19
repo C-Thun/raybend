@@ -793,7 +793,6 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
             onFocusIndex={(index) => setFocusIndex(index)}
             onOpeningViewer={() => prepareViewer()}
             watermark={() => gridWatermark()}
-            class="px-2 py-2"
           />
 
           {/*
@@ -834,7 +833,8 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
                    * 注意下边用的是 `setAnchor` 而不是 `select` —— 后者会散掉对比。
                    */
                   const at = viewer.state().photos.findIndex((item) => item.id === photo.id);
-                  if (at >= 0) viewer.goTo(at);
+                  // 对比里只换「当前照片」，不能像胶片带那样重置共同缩放与位移。
+                  if (at >= 0) viewer.focus(at);
                   store.setAnchor(Number(photo.id));
                 }}
               />

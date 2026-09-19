@@ -1,5 +1,5 @@
 /**
- * `Histogram` —— RGB 直方图（三通道填充曲线 + 加色区域），看图与**将来的编辑模块共用**。
+ * `Histogram` —— RGB 直方图（三通道填充折线 + 加色区域），看图与**将来的编辑模块共用**。
  *
  * 为什么提到 `components/ui/`（而不是留在浏览的右栏里）：人类 2026-09-19 明确
  * 「这个组件需要优化成方便后续编辑时实时调整的状态」—— 编辑模块要拿它当
@@ -13,7 +13,7 @@
  * 画法（人类 2026-09-19 的三条要求）：
  *
  * 1. **52 个采样点**（0..255 每 5 级一个点）—— 点数由数据决定，组件不关心；
- * 2. **点与点之间是平滑曲线**（单调三次插值，见 `lib`；不会过冲）；
+ * 2. **点与点之间是直线**（见 `lib`；重叠色带的两条边不会因分别拟合而交叉）；
  * 3. **颜色就是色标那六色**：单通道 = 红/绿/蓝，两两重叠 = 黄/青/紫（绿+红=黄、
  *    蓝+绿=青、红+蓝=紫），三色重叠 = 一个偏亮的**中间灰**（不是纯白）。
  *    实现上**不靠混合模式取色**，而是把 7 个区域显式切开各填各色 —— 颜色因此是
@@ -55,7 +55,7 @@ export function Histogram(props: HistogramProps) {
       class={["relative h-[72px] w-full overflow-hidden rounded-ui bg-surface-bar", props.class ?? ""]
         .filter(Boolean)
         .join(" ")}
-      data-histogram={props.bars === null ? "empty" : "curves"}
+      data-histogram={props.bars === null ? "empty" : "lines"}
     >
       {/*
         背景等分虚线（人类 2026-09-19）：

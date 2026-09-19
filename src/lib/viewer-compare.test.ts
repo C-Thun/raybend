@@ -15,6 +15,7 @@ import {
   compareIds,
   compareLayout,
   cropToAspect,
+  fitAspectWithin,
   panPercent,
   percentToPan,
 } from "./viewer-compare.ts";
@@ -137,6 +138,21 @@ test("compareLayout：非法与越界输入不炸（0 给 1×1，超过 4 张按
   assert.deepEqual(compareLayout(5), { columns: 2, rows: 2 });
   assert.deepEqual(compareLayout(99), { columns: 2, rows: 2 });
   assert.deepEqual(compareLayout(2.7), { columns: 2, rows: 1 }, "小数向下取整");
+});
+
+test("fitAspectWithin：窗口横竖变化时始终保持画幅比例", () => {
+  assert.deepEqual(fitAspectWithin({ width: 600, height: 300 }, 4 / 3), {
+    width: 400,
+    height: 300,
+  });
+  assert.deepEqual(fitAspectWithin({ width: 240, height: 500 }, 4 / 3), {
+    width: 240,
+    height: 180,
+  });
+  assert.deepEqual(fitAspectWithin({ width: 0, height: 500 }, 4 / 3), {
+    width: 0,
+    height: 0,
+  });
 });
 
 // ─────────────────── 基准比例 ───────────────────

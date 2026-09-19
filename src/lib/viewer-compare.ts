@@ -73,6 +73,27 @@ export interface CropRect extends Size {
 }
 
 /**
+ * 把固定画幅比例完整放进一个格子里（contain），返回不变形的实际画框尺寸。
+ *
+ * Compare 不能只写 `height: 100%; max-width: 100%`：窗口变窄后宽度会被夹，若高度仍是
+ * 100%，空盒子自己的 `aspect-ratio` 在不同布局引擎里会被约束打破，图片就跟着拉伸。
+ */
+export function fitAspectWithin(bounds: Size, aspect: number): Size {
+  if (
+    !(bounds.width > 0) ||
+    !(bounds.height > 0) ||
+    !(aspect > 0) ||
+    !Number.isFinite(aspect)
+  ) {
+    return { width: 0, height: 0 };
+  }
+  if (bounds.width / bounds.height > aspect) {
+    return { width: bounds.height * aspect, height: bounds.height };
+  }
+  return { width: bounds.width, height: bounds.width / aspect };
+}
+
+/**
  * 算出「现在该对比哪几张」——**最近选中的 `COMPARE_MAX` 张**，按选择先后排。
  *
  * * `selected` 传 `store.selection().ids`（`Set` 的插入顺序 = 选择先后）；

@@ -435,7 +435,7 @@ export function PhotoGrid(props: PhotoGridProps): JSX.Element {
   return (
     <div
       ref={container}
-      class={["flex min-h-0 flex-1 flex-col bg-surface-bar", props.class ?? ""]
+      class={["flex min-h-0 flex-1 flex-col bg-surface-bar px-2 py-2", props.class ?? ""]
         .filter(Boolean)
         .join(" ")}
       onKeyDown={onGridKeyDown}

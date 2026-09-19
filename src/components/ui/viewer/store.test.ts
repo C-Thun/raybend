@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   clampPan,
+  clampFramePan,
   clampZoom,
   computeFitScale,
   createViewerStore,
@@ -139,6 +140,18 @@ test("clampPan：图比视口大 → 边不许拖进来；比视口小 → 锁�
   assert.deepEqual(small, { x: 0, y: 0 });
 });
 
+test("clampFramePan：对比适配时锁中间，放大后按画框溢出量夹取", () => {
+  const viewport = { width: 600, height: 400 };
+  assert.deepEqual(
+    clampFramePan({ pan: { x: 80, y: -50 }, scale: 1, viewport }),
+    { x: 0, y: 0 },
+  );
+  assert.deepEqual(
+    clampFramePan({ pan: { x: 500, y: -500 }, scale: 1.5, viewport }),
+    { x: 150, y: -100 },
+  );
+});
+
 test("show：打开、适配、先小图后大图（渐进），current/index 正确", async () => {
   const fake = fakeDeps();
   const store = createViewerStore(fake.deps);
@@ -174,6 +187,19 @@ test("show：越界的下标会被夹回来（别信任调用方）", () => {
   assert.equal(store.state().index, 2);
   store.show(PHOTOS, -5);
   assert.equal(store.state().index, 0);
+});
+
+test("show/goTo：元数据尺寸随当前照片切换，不沿用上一张", () => {
+  const fake = fakeDeps();
+  const store = createViewerStore(fake.deps);
+  const photos: ViewerPhoto[] = [
+    { ...PHOTOS[0]!, natural: { width: 4000, height: 3000 } },
+    { ...PHOTOS[1]!, natural: { width: 3000, height: 4000 } },
+  ];
+  store.show(photos, 0);
+  assert.deepEqual(store.state().natural, { width: 4000, height: 3000 });
+  store.goTo(1);
+  assert.deepEqual(store.state().natural, { width: 3000, height: 4000 });
 });
 
 test("next/prev：到头就停住，不循环（循环会让人以为后面还有）", () => {
@@ -249,6 +275,81 @@ test("panBy：平移受夹取约束", () => {
   store.zoomTo(1);
   store.panBy(10_000, 10_000);
   assert.equal(store.state().pan.x, (5000 - 800) / 2);
+});
+
+test("focus：对比画幅切焦点时保留缩放与平移，只更新当前照片和尺寸", () => {
+  const fake = fakeDeps();
+  const store = createViewerStore(fake.deps);
+  const photos: ViewerPhoto[] = [
+    { ...PHOTOS[0]!, natural: { width: 4000, height: 3000 } },
+    { ...PHOTOS[1]!, natural: { width: 6000, height: 4000 } },
+  ];
+  store.setViewport({ width: 800, height: 600 });
+  store.show(photos, 0);
+  store.zoomTo(1);
+  store.panBy(120, -80);
+  const before = store.state();
+
+  store.focus(1);
+
+  assert.equal(store.current()?.id, "b");
+  assert.equal(store.state().zoom, before.zoom);
+  assert.deepEqual(store.state().pan, before.pan);
+  assert.equal(store.state().fit, before.fit);
+  assert.deepEqual(store.state().natural, { width: 6000, height: 4000 });
+});
+
+test("对比变换：拖动是 CSS 像素一比一，缩放后按画框边界夹取", () => {
+  const fake = fakeDeps();
+  const store = createViewerStore(fake.deps);
+  store.show(PHOTOS, 0);
+  store.resetFit(0.5);
+  const frame = { width: 600, height: 400 };
+
+  store.zoomWithinFrame(2, frame, 0.5);
+  store.panWithinFrame(80, -60, frame, 0.5);
+  assert.deepEqual(store.state().pan, { x: 80, y: -60 }, "鼠标位移多少，画面就位移多少");
+
+  store.panWithinFrame(10_000, -10_000, frame, 0.5);
+  assert.deepEqual(store.state().pan, { x: 300, y: -200 }, "2× 时最多拖到一半画框宽高");
+
+  store.zoomWithinFrame(0.01, frame, 0.5);
+  assert.equal(store.state().zoom, 0.5, "不能缩到适配倍率以下露出空边");
+  assert.equal(store.state().fit, true);
+  assert.deepEqual(store.state().pan, { x: 0, y: 0 });
+});
+
+test("多图 URL：每幅照片持有自己的 URL，关闭时全部回收", async () => {
+  const fake = fakeDeps();
+  const store = createViewerStore(fake.deps);
+  store.show(PHOTOS, 0);
+
+  await Promise.all(PHOTOS.map((photo) => store.ensureImage(photo)));
+  const urls = PHOTOS.map((photo) => store.imageUrlFor(photo));
+  assert.ok(urls.every((url) => url !== null));
+  assert.equal(new Set(urls).size, PHOTOS.length, "不能把最后一张图的 URL 复用给全部画幅");
+
+  store.close();
+  for (const url of urls) {
+    assert.ok(fake.revoked.includes(url!), `关闭时应回收多图 URL ${url}`);
+  }
+});
+
+test("多图 URL：取不到其中一张时只让该幅为空，不串用别张图", async () => {
+  const urls: string[] = [];
+  const store = createViewerStore({
+    loadScreen: async (path) => path === "/b.jpg" ? null : new Uint8Array([1]),
+    makeUrl: () => {
+      const url = `blob:multi-${urls.length + 1}`;
+      urls.push(url);
+      return url;
+    },
+    revokeUrl: () => undefined,
+  });
+  await Promise.all(PHOTOS.map((photo) => store.ensureImage(photo)));
+  assert.ok(store.imageUrlFor(PHOTOS[0]!) !== null);
+  assert.equal(store.imageUrlFor(PHOTOS[1]!), null);
+  assert.ok(store.imageUrlFor(PHOTOS[2]!) !== null);
 });
 
 test("close：复位并回收 URL（不泄漏 blob）", async () => {

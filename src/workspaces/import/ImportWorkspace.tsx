@@ -491,6 +491,10 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
                       store={viewer}
                       /* 对比态的返回（左上角那颗）：与单张看图同一条规矩 */
                       onClose={() => setChrome("default")}
+                      onFocus={(photo) => {
+                        const at = viewer.state().photos.findIndex((item) => item.id === photo.id);
+                        if (at >= 0) viewer.focus(at);
+                      }}
                       class="z-10"
                     />
                   </Show>

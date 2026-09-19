@@ -1523,9 +1523,9 @@ try {
   }
   if (shown.status !== true) problems.push("看图态底部状态栏没出现（[data-viewer-status=\"open\"] 不在）");
   if (shown.readout !== true) problems.push("右栏没换成预览 + 直方图（[data-viewer-readout=\"open\"] 不在）");
-  // 2026-09-19 起直方图是**三条填充曲线**（加色叠加），不再是柱子
-  if (shown.histogram !== "curves") {
-    problems.push(`直方图没画出曲线（data-histogram=${JSON.stringify(shown.histogram)}）`);
+  // 2026-09-20 起直方图是**逐点填充折线**（加色分层），不再做三次曲线拟合
+  if (shown.histogram !== "lines") {
+    problems.push(`直方图没画出折线（data-histogram=${JSON.stringify(shown.histogram)}）`);
   }
   if (shown.strip !== 6) {
     problems.push(`胶片带应当有 6 张缩略（实测 ${JSON.stringify(shown.strip)}）`);
@@ -1543,7 +1543,7 @@ try {
    */
   const histogramShape = await send("Runtime.evaluate", {
     expression: `(() => {
-      const host = document.querySelector('[data-histogram="curves"]');
+      const host = document.querySelector('[data-histogram="lines"]');
       if (host === null) return null;
       const paths = [...host.querySelectorAll("path")];
       const gridLines = [...host.querySelectorAll("span")].filter((el) =>
@@ -1553,7 +1553,7 @@ try {
         paths: paths.length,
         labelFills: paths.filter((p) => (p.getAttribute("class") ?? "").includes("fill-(--label-")).length,
         triple: paths.filter((p) => (p.getAttribute("class") ?? "").includes("--hist-triple")).length,
-        smooth: paths.every((p) => (p.getAttribute("d") ?? "").includes(" C")),
+        straight: paths.every((p) => !(p.getAttribute("d") ?? "").includes(" C")),
         gridLines: gridLines.length,
       };
     })()`,
@@ -1561,7 +1561,7 @@ try {
   });
   const hist = histogramShape.result?.value ?? null;
   if (hist === null) {
-    problems.push("看图右栏里没有画出来的直方图（[data-histogram=\"curves\"] 不在）");
+    problems.push("看图右栏里没有画出来的直方图（[data-histogram=\"lines\"] 不在）");
   } else {
     if (hist.paths !== 7) {
       problems.push(`直方图应当是 7 个区域各一条（三色重叠 + 三个两两重叠 + 三条单通道），实测 ${JSON.stringify(hist)}`);
@@ -1572,7 +1572,7 @@ try {
     if (hist.triple !== 1) {
       problems.push(`三色重叠区要用 --hist-triple（实测 ${JSON.stringify(hist.triple)} 条）`);
     }
-    if (!hist.smooth) problems.push("直方图曲线必须是平滑段（贝塞尔），不能是折线");
+    if (!hist.straight) problems.push("直方图必须逐点直连，不能再出现三次曲线段");
     if (hist.gridLines !== 4) {
       problems.push(`背景等分虚线应当是 4 根（纵 3 + 横 1），实测 ${JSON.stringify(hist.gridLines)}`);
     }
@@ -1617,13 +1617,24 @@ try {
   });
   await sleep(400);
   const compareOn = await send("Runtime.evaluate", {
-    expression: `(() => ({
-      compare: Boolean(document.querySelector('[data-compare="open"]')),
-      frames: document.querySelectorAll("[data-compare-frame]").length,
-      baseline: document.querySelector("[data-compare-frame][data-baseline='true']")?.getAttribute("data-compare-frame") ?? null,
-      viewer: Boolean(document.querySelector('[data-viewer="open"]')),
-      selected: document.querySelectorAll("[data-strip-item]").length,
-    }))()`,
+    expression: `(() => {
+      const frames = [...document.querySelectorAll("[data-compare-frame]")];
+      const sources = frames.map((frame) => frame.querySelector("img")?.getAttribute("src") ?? null);
+      const ratios = frames.map((frame) => {
+        const rect = frame.querySelector("[data-compare-canvas]")?.getBoundingClientRect();
+        return rect && rect.height > 0 ? rect.width / rect.height : null;
+      });
+      return {
+        compare: Boolean(document.querySelector('[data-compare="open"]')),
+        frames: frames.length,
+        images: sources.filter(Boolean).length,
+        uniqueSources: new Set(sources.filter(Boolean)).size,
+        ratios,
+        baseline: document.querySelector("[data-compare-frame][data-baseline='true']")?.getAttribute("data-compare-frame") ?? null,
+        viewer: Boolean(document.querySelector('[data-viewer="open"]')),
+        selected: document.querySelectorAll("[data-strip-item]").length,
+      };
+    })()`,
     returnByValue: true,
   });
   const compareState = compareOn.result?.value ?? {};
@@ -1633,8 +1644,17 @@ try {
     if (compareState.frames !== 2) {
       problems.push(`对比应当有 2 幅画幅（实测 ${JSON.stringify(compareState.frames)}）`);
     }
+    if (compareState.images !== 2 || compareState.uniqueSources !== 2) {
+      problems.push(`对比的每幅画面必须载入自己的图（实测 ${JSON.stringify(compareState)}）`);
+    }
+    if (
+      !Array.isArray(compareState.ratios) ||
+      compareState.ratios.some((ratio) => typeof ratio !== "number" || Math.abs(ratio - compareState.ratios[0]) > 0.001)
+    ) {
+      problems.push(`对比画框在窗口约束下必须保持同一比例（实测 ${JSON.stringify(compareState.ratios)}）`);
+    }
     if (compareState.baseline !== "0") {
-      problems.push(`第一幅应当是基准（带主色描边）（实测 ${JSON.stringify(compareState.baseline)}）`);
+      problems.push(`第一幅应当是画幅比例基准（实测 ${JSON.stringify(compareState.baseline)}）`);
     }
     if (compareState.viewer !== false) {
       problems.push("对比态下不该同时出现单张看图件");
@@ -1918,6 +1938,10 @@ try {
         back: back !== null,
         zoom: host?.querySelectorAll('[data-viewer-controls="zoom"]').length ?? 0,
         backTotal: document.querySelectorAll('button[aria-label="返回"]').length,
+        backOpacity: back === null ? null : getComputedStyle(back).opacity,
+        zoomOpacity: host?.querySelector('[data-viewer-controls="zoom"]') === null
+          ? null
+          : getComputedStyle(host.querySelector('[data-viewer-controls="zoom"]')).opacity,
       };
     })()`,
     returnByValue: true,
@@ -1929,6 +1953,52 @@ try {
   }
   if (controls.backTotal !== 1) {
     problems.push(`对比态不该有多组返回控件（实测 ${JSON.stringify(controls.backTotal)}）`);
+  }
+  if (controls.backOpacity !== "0" || controls.zoomOpacity !== "0") {
+    problems.push(`对比控件默认应当隐藏，靠近角落才显示（实测 ${JSON.stringify(controls)}）`);
+  }
+  if (controls.zoom === 1) {
+    await send("Runtime.evaluate", {
+      expression: `(() => {
+        const host = document.querySelector('[data-compare="open"]');
+        const rect = host?.getBoundingClientRect();
+        if (!host || !rect) return false;
+        host.dispatchEvent(new PointerEvent("pointermove", {
+          bubbles: true,
+          clientX: rect.right - 20,
+          clientY: rect.bottom - 20,
+        }));
+        return true;
+      })()`,
+      returnByValue: true,
+    });
+    await sleep(220);
+    const zoomInteraction = await send("Runtime.evaluate", {
+      expression: `(() => {
+        const controls = document.querySelector('[data-compare="open"] [data-viewer-controls="zoom"]');
+        const buttons = controls ? [...controls.querySelectorAll("button")] : [];
+        const before = buttons[1]?.textContent?.trim() ?? null;
+        buttons[2]?.click();
+        return {
+          opacity: controls ? getComputedStyle(controls).opacity : null,
+          before,
+          after: buttons[1]?.textContent?.trim() ?? null,
+        };
+      })()`,
+      returnByValue: true,
+    });
+    await sleep(50);
+    const zoomAfter = await send("Runtime.evaluate", {
+      expression: `document.querySelector('[data-compare="open"] [data-viewer-controls="zoom"] button:nth-child(2)')?.textContent?.trim() ?? null`,
+      returnByValue: true,
+    });
+    const zi = zoomInteraction.result?.value ?? {};
+    if (zi.opacity !== "1") {
+      problems.push(`鼠标靠近右下角后对比缩放控件应显示（实测 opacity=${JSON.stringify(zi.opacity)}）`);
+    }
+    if (zoomAfter.result?.value === zi.before) {
+      problems.push(`对比放大按钮点击后倍率没有变化（前后都是 ${JSON.stringify(zi.before)}）`);
+    }
   }
   if (controls.back) {
     await send("Runtime.evaluate", {

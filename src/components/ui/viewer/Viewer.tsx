@@ -22,6 +22,10 @@
 import { createSignal, onCleanup, onMount, Show } from "solid-js";
 import type { ViewerStore } from "./store.ts";
 import { ViewerControls } from "./ViewerControls.tsx";
+import {
+  isViewerControlTarget,
+  viewerControlsVisible,
+} from "./interaction.ts";
 
 export interface ViewerProps {
   store: ViewerStore;
@@ -41,36 +45,13 @@ export function Viewer(props: ViewerProps) {
    *   左上角 → 返回按钮；右下角 → 缩放指示。
    * 判据是「离角落多少像素以内」，不是「有没有悬停在按钮上」—— 按钮本身很小时，
    * 要求精确悬停等于找不到。键盘用户靠 `:focus-within` 兜住（Tab 能到）。
-   */
+  */
   const [cursor, setCursor] = createSignal<{ x: number; y: number } | null>(null);
-  const CORNER_BACK = 120;
-  /**
-   * 右下角控制条的**触发区**（人类 2026-09-19 报的问题）。
-   *
-   * 原来是一个 `200×200` 的**正方角**，而那条控件最长约 350px（三个按钮 + 百分比 + 文件名）
-   * 且贴在离角 12px 的位置 —— 于是鼠标移到条的**左段**时，只要横向偏出条外一点，
-   * `width - x` 就超过 200，整条当场隐掉，非常不合理。
-   *
-   * 现在按「**条的最大宽度 + 周围一圈余量**」取（水平 420 / 竖直 96）：
-   * 只要鼠标还在条及其周边，它就保持可见。数值是纯几何，不引入测量与 observer
-   * （每条 pointermove 都测一次 rect 会白白触发布局）。
-   */
-  const CORNER_ZOOM_X = 420;
-  const CORNER_ZOOM_Y = 96;
-  const nearTopLeft = (): boolean => {
-    const at = cursor();
-    return at !== null && at.x <= CORNER_BACK && at.y <= CORNER_BACK;
-  };
-  const nearBottomRight = (): boolean => {
-    const at = cursor();
-    if (at === null) return false;
-    const width = host?.clientWidth ?? 0;
-    const height = host?.clientHeight ?? 0;
-    return (
-      width - at.x <= CORNER_ZOOM_X &&
-      height - at.y <= CORNER_ZOOM_Y
-    );
-  };
+  const controlsVisible = (): boolean =>
+    viewerControlsVisible(cursor(), {
+      width: host?.clientWidth ?? 0,
+      height: host?.clientHeight ?? 0,
+    });
 
   /*
    * 显示哪个数字，这里有个坑（人类 2026-09-16 报的「打开瞬间比例很大、有时卡住」）：
@@ -205,10 +186,7 @@ export function Viewer(props: ViewerProps) {
      * 从按钮手里抢走 —— 人类实测「左上角返回按钮点了没反应」就是这个原因
      * （放大/缩小按钮同理）。判据用 `closest`，这样按钮里的图标也算控件。
      */
-    const target = event.target;
-    if (target instanceof Element && target.closest("button, a, input, [role='button']") !== null) {
-      return;
-    }
+    if (isViewerControlTarget(event.target)) return;
     dragFrom = { x: event.clientX, y: event.clientY };
     setDragging(true);
     (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
@@ -287,7 +265,7 @@ export function Viewer(props: ViewerProps) {
         onClose={close}
         /* 光标靠近**任一**角落就让这组控件浮出：返回在左上、缩放在右下，
            用同一个可见条件最省心（贴着哪边都能唤醒它们） */
-        visible={nearTopLeft() || nearBottomRight()}
+        visible={controlsVisible()}
       />
     </div>
   );

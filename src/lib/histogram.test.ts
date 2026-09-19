@@ -14,7 +14,6 @@ import {
   histogramBarHeights,
   histogramIsEmpty,
   histogramPath,
-  monotoneSample,
   type HistogramBand,
 } from "./histogram.ts";
 import type { HistogramCounts } from "./histogram.ts";
@@ -104,7 +103,7 @@ test("histogramBarHeights：后端少报了峰值时以实际数据为准", () =
   assert.equal(bars.b[3], 1);
 });
 
-// ─────────────────── 填充曲线路径与带形路径（平滑 + 分层） ───────────────────
+// ─────────────────── 填充折线路径与带形路径（逐点 + 分层） ───────────────────
 
 test("histogramPath：空数据与非法尺寸 → 空路径（不画）", () => {
   assert.equal(histogramPath([], 100, 50), "");
@@ -113,11 +112,12 @@ test("histogramPath：空数据与非法尺寸 → 空路径（不画）", () =>
   assert.equal(histogramPath([0.5], Number.NaN, 50), "");
 });
 
-test("histogramPath：从左下基线出发、走平滑段、回基线闭合", () => {
+test("histogramPath：从左下基线出发、逐点直连、回基线闭合", () => {
   const d = histogramPath([0, 1, 0], 100, 40);
   assert.ok(d.startsWith("M0.00,40.00"), `起点必须是左下基线，实际 ${d.slice(0, 20)}`);
   assert.ok(d.endsWith("Z"), "路径要闭合（填充用）");
-  assert.ok(d.includes(" C"), "点与点之间必须是三次贝塞尔段（平滑曲线），不是折线");
+  assert.ok(!d.includes(" C"), "不得拟合三次曲线（重叠色带的上下边界会在点间交叉）");
+  assert.ok(d.includes(" L"), "采样点之间应当是直线段");
   assert.ok(d.includes("50.00,0.00"), "中间点顶到上沿（值 1 → y=0）");
 });
 
@@ -125,41 +125,23 @@ test("histogramPath：52 个采样点 → 51 段", () => {
   const values = Array.from({ length: HISTOGRAM_SAMPLES }, (_, i) => (i % 7) / 7);
   assert.equal(values.length, 52);
   const d = histogramPath(values, 256, 100);
-  const segments = d.split(" C").length - 1;
+  const segments = d.split(" L").length - 1 - 2; // 扣掉回基线的两段
   assert.equal(segments, 51, `52 个点应当连成 51 段（实际 ${segments}）`);
 });
 
-test("单调插值：不过冲（不会冒到比两端更高的地方）", () => {
-  // 单调递增的台阶：线性/三次样条都会在台阶处过冲，单调插值不该
-  const values = [0, 0, 0, 1, 1, 1];
-  const d = histogramPath(values, 100, 100);
-  const ys = [...d.matchAll(/[,\s]([\d.]+)\b/g)].length; // 只是确保能解析
-  assert.ok(ys > 0);
-  // 采样贝塞尔曲线（在每段的 0..1 上取点），检查 y 不越界
-  const curve = d; // 复用同一份路径文本
-  assert.ok(!curve.includes("NaN"));
-  // 直接对插值函数本身做数值检查（下面的单测更严格）
-  const top = monotoneSample(values, 50);
-  for (const value of top) {
-    assert.ok(value >= -1e-9 && value <= 1 + 1e-9, `插值越界：${value}`);
-  }
-  // 单调性：整体不下降
-  for (let i = 1; i < top.length; i += 1) {
-    assert.ok(top[i] >= top[i - 1] - 1e-9, "单调序列的插值不该下降");
-  }
-});
-
-test("单调插值：平坦段与全零序列不出 NaN", () => {
-  const flat = monotoneSample([0.5, 0.5, 0.5], 12);
-  for (const value of flat) assert.equal(Number.isFinite(value), true);
-  const zeros = monotoneSample([0, 0, 0, 0], 8);
-  for (const value of zeros) assert.equal(value, 0);
+test("直线路径：脏值被夹在画布内且不出 NaN", () => {
+  const d = histogramPath([Number.NaN, -2, 2], 100, 100);
+  assert.ok(!d.includes("NaN"));
+  assert.ok(d.includes("M0.00,100.00"), "NaN 退到基线");
+  assert.ok(d.includes("L50.00,100.00"), "负数夹到 0");
+  assert.ok(d.includes("L100.00,0.00"), "大于 1 夹到 1");
 });
 
 test("histogramBandPath：带形从下边界的右下角回到左下角闭合", () => {
   const d = histogramBandPath([0.8, 0.8], [0.5, 0.5], 100, 100);
   assert.ok(d.startsWith("M0.00,20.00"), `起点应当是上边界的左端，实际 ${d.slice(0, 16)}`);
   assert.ok(d.endsWith("Z"));
+  assert.ok(!d.includes(" C"), "带的上下边界都不得单独拟合曲线");
   assert.ok(d.includes("100.00,50.00"), "要走到上边界右端");
   assert.ok(d.includes("0.00,50.00"), "再沿下边界回到左端（y = 100-0.5*100）");
 });
