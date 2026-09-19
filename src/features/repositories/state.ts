@@ -111,7 +111,7 @@ export function createRepositoryState(deps: {
     const row = byId(repositoryId);
     if (row === undefined || !row.online) return;
     // 保留 displayPath（那是「上次已知路径」，离线时正要显示它），只收起在线专属的字段
-    patch(repositoryId, { online: false, root: null, photoCount: null });
+    patch(repositoryId, { online: false, root: null, photosCount: null, imagesCount: null });
   }
 
   async function load(): Promise<void> {

@@ -12,12 +12,12 @@
 //! 直接对着 Windows 的 `C:\...` 路径跑会走离线分支。做法：拷一份 app.db 到本机，
 //! 把路径改成本机挂载点（例如 `/mnt/c/src/tmp/testrespos`），再跑这个例子。
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Instant;
 
 use raybend::store::db::AppDb;
 use raybend::store::repository::{self, RepositoryView};
-use raybend::store::{assets, pool, time};
+use raybend::store::time;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let path = std::env::args()
@@ -29,7 +29,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("打开数据目录：{:?}", opened.elapsed());
 
     let built = Instant::now();
-    let views = db.read(|conn| repository::build_views(conn, count_photos_in))?;
+    let views = db.read(repository::build_views)?;
     println!(
         "build_views：{} 个库，耗时 {:?}",
         views.len(),
@@ -40,18 +40,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         print_view(v);
     }
 
-    // 单独再数一遍，明确圈出「数照片」这一步的成本（它是唯一会碰别的文件的步骤）。
+    /*
+     * 单独再数一遍「一个目录」的成本（`readdir` 两次：本目录 + `_RAW`）。
+     *
+     * 现在列表**不再**逐个打开库的 catalog.db 数资产（那是老实现，慢盘上几秒起步），
+     * 两个数字直接读 `app.db`；单独扫盘只发生在「这个库还没数过」时。
+     */
     for v in &views {
         let Some(root) = v.root.as_deref() else {
             continue;
         };
         let t = Instant::now();
-        let counted = count_photos_in(Path::new(root));
+        let counted = repository::count_dir_on_disk(Path::new(root), "photos");
         println!(
-            "  `{}`：单独数一次 = {:?}，结果 {:?}",
+            "  `{}`：单独扫一遍 photos/ = {:?}，结果 相片 {} / 图片 {}",
             v.name,
             t.elapsed(),
-            counted
+            counted.photos,
+            counted.images
         );
     }
     Ok(())
@@ -59,21 +65,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 fn print_view(v: &RepositoryView) {
     println!(
-        "  · {name} | id={id} | online={online} | root={root:?} | photos={count:?} | tried={tried} | paths={paths:?}",
+        "  · {name} | id={id} | online={online} | root={root:?} | 相片={photos:?} 图片={images:?} | tried={tried} | paths={paths:?}",
         name = v.name,
         id = v.id,
         online = v.online,
         root = v.root,
-        count = v.photo_count,
+        photos = v.photos_count,
+        images = v.images_count,
         tried = v.tried_paths,
         paths = v.paths.iter().map(|p| p.path.as_str()).collect::<Vec<_>>(),
     );
-}
-
-/// 与 `src-tauri/src/repo.rs` 里的同名函数保持一致（那里是唯一事实来源，改动要同步）。
-fn count_photos_in(root: &Path) -> Option<i64> {
-    let catalog: PathBuf = root.join(repository::CATALOG_FILE_NAME);
-    let pool = pool::ReadPool::open(catalog).ok()?;
-    let (assets, _files) = pool.with(assets::counts).ok()?;
-    Some(assets)
 }

@@ -176,7 +176,8 @@ function repository(id: string, name = id): RepositoryView {
     root: `/libs/${id}`,
     displayPath: `/libs/${id}`,
     paths: [],
-    photoCount: 0,
+    photosCount: 0,
+    imagesCount: 0,
     triedPaths: 0,
   };
 }
@@ -479,9 +480,9 @@ test("库：加载、选中、局部刷新", async () => {
   store.selectRepository("b");
   assert.equal(store.selectedRepository()?.name, "乙");
 
-  store.upsertRepository({ ...repository("c", "丙"), photoCount: 7 });
+  store.upsertRepository({ ...repository("c", "丙"), photosCount: 7, imagesCount: 9 });
   assert.equal(store.repositories().length, 3);
-  store.upsertRepository({ ...repository("c", "丙（改名）"), photoCount: 9 });
+  store.upsertRepository({ ...repository("c", "丙（改名）"), photosCount: 9, imagesCount: 11 });
   assert.equal(store.repositories().length, 3, "同 id 是更新而不是追加");
   assert.equal(store.selectedRepository()?.name, "乙");
 });

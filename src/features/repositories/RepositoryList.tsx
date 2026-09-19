@@ -177,10 +177,10 @@ function RepositoryCard(props: {
   onOpenSettings: (id: string) => void;
 }) {
   const countLabel = () =>
-    props.repository.photoCount === null
+    props.repository.photosCount === null
       ? t("repo.count_unknown")
       : t("grid.count", {
-          n: formatCount(props.repository.photoCount, props.locale),
+          n: formatCount(props.repository.photosCount ?? 0, props.locale),
         });
 
   return (

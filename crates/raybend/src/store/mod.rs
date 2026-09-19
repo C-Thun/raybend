@@ -33,6 +33,7 @@
 
 pub mod assets;
 pub mod backfill;
+pub mod rebuild;
 pub mod db;
 pub mod delete;
 pub mod file_id;

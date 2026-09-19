@@ -1,15 +1,17 @@
-//! 库（相片仓）相关命令：列表、建库前的探测、建库、重挂载、照片数。
+//! 库（相片仓）相关命令：列表、建库前的探测、建库、重挂载、计数与**重建数据**。
 //!
 //! 业务规则在 `raybend::store::repository`（`REPOSITORY.md` §2 的库身份/多路径/在线离线），
-//! 这里只做三件事：拿 `app.db`、开 `catalog.db` 数照片、把结构转成前端视图。
+//! 这里只做三件事：拿 `app.db` / `catalog.db`、把结构转成前端视图、把耗时活儿丢到后台线程。
 //!
-//! ⚠️ **数照片要开另一个库**（`catalog.db`），所以「库列表」这个命令是有 I/O 的 ——
-//! 它在后台线程里跑，且每次只开一个只读连接池（不跑迁移、不起写线程）。
+//! **计数（2026-09-19 的新口径）**：`photos_count`（相片，不含 `_RAW`）与
+//! `images_count`（图片，含 `_RAW`）存在 `app.db` 的 `repositories` + `directories` 里，
+//! 由「导入时写」「进目录时增量同步」「重建时全量重算」三条路径维护 ——
+//! 列表命令因此**不再逐个打开库的 catalog.db**（老实现那样做，慢盘上几秒起步）。
 
 use std::path::{Path, PathBuf};
 
-use raybend::store::db::{AppDb, CatalogDb, OpenOpts};
-use raybend::store::{assets, pool, repository, time};
+use raybend::store::db::{CatalogDb, OpenOpts};
+use raybend::store::{repository, time};
 use serde::Serialize;
 use tauri::{AppHandle, Manager, Runtime};
 
@@ -32,8 +34,10 @@ pub struct RepositoryViewDto {
     /// 卡片上显示哪条路径：在线 = 库根，离线 = 上次已知路径。
     pub display_path: String,
     pub paths: Vec<RepositoryPathDto>,
-    /// 库里的照片数（离线或读不到时 `None` —— **不是 0**）。
-    pub photo_count: Option<i64>,
+    /// **相片数量**（不含 `_RAW/`）。`None` = 还没数过 —— 界面显示「—」，**不是 0**。
+    pub photos_count: Option<i64>,
+    /// **图片数量**（含 `_RAW/`）。
+    pub images_count: Option<i64>,
     /// 探测过几条路径（离线时给「已试过 N 处」的提示）。
     pub tried_paths: usize,
 }
@@ -68,7 +72,8 @@ impl From<repository::RepositoryView> for RepositoryViewDto {
                     last_seen_at: p.last_seen_at,
                 })
                 .collect(),
-            photo_count: view.photo_count,
+            photos_count: view.photos_count,
+            images_count: view.images_count,
             tried_paths: view.tried_paths,
         }
     }
@@ -90,17 +95,7 @@ pub struct RepositoryProbeDto {
     pub message: Option<String>,
 }
 
-/// 数一个库里有多少张照片（开只读连接池，不跑迁移、不起写线程）。
-///
-/// 读不到就返回 `None` —— 界面上显示「—」而不是「0 张」，两者含义完全不同。
-fn count_photos_in(root: &Path) -> Option<i64> {
-    let catalog = root.join(repository::CATALOG_FILE_NAME);
-    let pool = pool::ReadPool::open(catalog).ok()?;
-    let (assets, _files) = pool.with(assets::counts).ok()?;
-    Some(assets)
-}
-
-/// 库列表（含在线状态与照片数）。
+/// 库列表（含在线状态与两个计数）。
 #[tauri::command]
 pub async fn repositories_list<R: Runtime>(
     app: AppHandle<R>,
@@ -108,16 +103,56 @@ pub async fn repositories_list<R: Runtime>(
     let handle = app.clone();
     blocking(move || {
         let state = handle.state::<DbState>();
-        state.with(&handle, views)
+        views(&handle, &state)
     })
     .await
 }
 
-fn views(db: &AppDb) -> Result<Vec<RepositoryViewDto>, String> {
-    db.read(|conn| repository::build_views(conn, count_photos_in))
-        .map(|views| views.into_iter().map(RepositoryViewDto::from).collect())
-        .map_err(|e| e.to_string())
+/// 库列表 + **给还没数过的库补一次盘扫**。
+///
+/// 为什么要「顺手补」：老库（或刚登记、还没导入过的库）在 `directories` 里没有行，
+/// 卡片上就是「—」。第一次列表时扫一遍 `photos/` 把数字建立起来（本机磁盘，毫秒到几十毫秒），
+/// 之后就都在 app.db 里了 —— 与「实时性优先于缓存」那条纪律同一个取向。
+fn views<R: Runtime>(app: &AppHandle<R>, state: &DbState) -> Result<Vec<RepositoryViewDto>, String> {
+    let list = state.with(app, |db| {
+        db.read(repository::build_views).map_err(|e| e.to_string())
+    })?;
+    for view in &list {
+        if view.photos_count.is_some() || !view.online {
+            continue;
+        }
+        let (Some(root), Some(folder)) = (view.root.as_deref(), Some(DEFAULT_PHOTOS_DIR)) else {
+            continue;
+        };
+        let (id, root) = (view.id.clone(), PathBuf::from(root));
+        // 写闭包要跨线程（`'static`）：把 id / root **move 进去**（外面已经 clone 好了）
+        let _ = state.with(app, move |db| {
+            db.write(move |conn| {
+                repository::count_library_on_disk(
+                    conn,
+                    &id,
+                    &root,
+                    folder,
+                    raybend::store::time::now_millis(),
+                )
+                .map(|_| ())
+            })
+            .map_err(|error| error.to_string())
+        });
+    }
+    // 补完之后重读一次（这次数字都在 app.db 里了）
+    let list = if list.iter().any(|view| view.photos_count.is_none() && view.online) {
+        state.with(app, |db| {
+            db.read(repository::build_views).map_err(|e| e.to_string())
+        })?
+    } else {
+        list
+    };
+    Ok(list.into_iter().map(RepositoryViewDto::from).collect())
 }
+
+/// `photos/` 目录名（库内落地目录；`FUTURE G14` 将来可配）。
+const DEFAULT_PHOTOS_DIR: &str = "photos";
 
 /// 探一个目录：里面有没有库？能不能新建？
 #[tauri::command]
@@ -202,13 +237,16 @@ pub async fn repository_create<R: Runtime>(
         let state = handle.state::<DbState>();
         state.with(&handle, |db| {
             db.register_repository(&meta, &root, now)
-                .map_err(|e| e.to_string())?;
-            // 返回完整视图（路径状态、照片数都算上）
-            views(db)?
-                .into_iter()
-                .find(|v| v.id == meta.id)
-                .ok_or_else(|| "库刚登记完却查不到，请重试".to_string())
-        })
+                .map_err(|e| e.to_string())
+        })?;
+        /*
+         * 视图在**锁外**再取：`views` 自己还要 `db.read` / `db.write`（补扫盘计数），
+         * 而 `state.with` 持着那把互斥锁 —— 在它里面再叫一次就是自己等自己（死锁）。
+         */
+        views(&handle, &state)?
+            .into_iter()
+            .find(|v| v.id == meta.id)
+            .ok_or_else(|| "库刚登记完却查不到，请重试".to_string())
     })
     .await
 }
@@ -229,38 +267,162 @@ pub async fn repository_remount<R: Runtime>(
         let now = time::now_millis();
         state.with(&handle, |db| {
             db.write_tx(move |tx| repository::refresh_path_status(tx, &id, now))
-                .map_err(|e| e.to_string())?;
-            views(db)?
-                .into_iter()
-                .find(|v| v.id == repository_id)
-                .ok_or_else(|| format!("没有这个库：{repository_id}"))
+                .map_err(|e| e.to_string())
+        })?;
+        // 同上：视图要在锁外取（它会顺手补一次盘扫计数，内部还要拿锁）
+        views(&handle, &state)?
+            .into_iter()
+            .find(|v| v.id == repository_id)
+            .ok_or_else(|| format!("没有这个库：{repository_id}"))
+    })
+    .await
+}
+
+/// 一个库现在的两个计数（离线或没数过 → `None`）。
+///
+/// 返回值是 `[photos, images]` 两个数（相片数量 / 图片数量）——
+/// 界面上的库卡片只显示前者，齿轮弹窗里两个都显示。
+#[tauri::command]
+pub async fn repository_counts<R: Runtime>(
+    app: AppHandle<R>,
+    repository_id: String,
+) -> Result<Option<[i64; 2]>, String> {
+    let handle = app.clone();
+    blocking(move || {
+        let state = handle.state::<DbState>();
+        state.with(&handle, |db| {
+            db.read(|conn| repository::totals(conn, &repository_id))
+                .map(|counts| counts.map(|c| [c.photos, c.images]))
+                .map_err(|e| e.to_string())
         })
     })
     .await
 }
 
-/// 一个库现在有多少张照片（离线 → `None`）。
+/// **进目录时同步计数**（人类 2026-09-19 的要求）。
+///
+/// 做什么：把 `scopePath` 这个目录在磁盘上的真实文件数读出来（本目录 + 它自己的 `_RAW`），
+/// 与 `app.db` 里那行对比 —— 不一样就写回去，并把差值滚到库级汇总上。
+///
+/// 为什么每次进目录都做：**本地应用实时性优先**（`AGENTS.md` §2 #13）——
+/// 程序外面往目录里加/删文件是常事，一次 `readdir` 是微秒级，没必要为省它去承担「数字对不上」。
+///
+/// 返回：[目录的计数, 库级汇总]。
 #[tauri::command]
-pub async fn repository_counts<R: Runtime>(
+pub async fn repository_sync_dir<R: Runtime>(
     app: AppHandle<R>,
     repository_id: String,
-) -> Result<Option<i64>, String> {
+    scope_path: Option<String>,
+) -> Result<Option<[[i64; 2]; 2]>, String> {
     let handle = app.clone();
     blocking(move || {
         let state = handle.state::<DbState>();
-        let root = state.with(&handle, |db| {
+        let Some(root) = state.with(&handle, |db| {
             db.resolve_repository(&repository_id)
                 .map(|resolved| match resolved {
                     repository::RepositoryState::Online { root } => Some(root),
                     repository::RepositoryState::Offline { .. } => None,
                 })
                 .map_err(|e| e.to_string())
-        })?;
-        Ok(root.and_then(|root| count_photos_in(&root)))
+        })?
+        else {
+            return Ok(None);
+        };
+        let Some(scope) = scope_path.filter(|path| !path.is_empty()) else {
+            return Ok(None);
+        };
+        let now = time::now_millis();
+        let (id, scope_for_task) = (repository_id.clone(), scope.clone());
+        state
+            .with(&handle, move |db| {
+                db.write(move |conn| {
+                    let counts = repository::count_dir_on_disk(&root, &scope_for_task);
+                    repository::set_directory_counts(conn, &id, &scope_for_task, counts, now)?;
+                    let totals = repository::totals(conn, &id)?.unwrap_or_default();
+                    Ok([[counts.photos, counts.images], [totals.photos, totals.images]])
+                })
+                .map_err(|e| e.to_string())
+            })
+            .map(Some)
     })
     .await
 }
 
+/* ══════════════════════════════════════════════════════════════
+ * 重建数据（人类 2026-09-19：齿轮弹窗里的那个按钮）
+ * ══════════════════════════════════════════════════════════════ */
+
+/// 「重建数据」的结果（给用户看的一句话 + 几个数字）。
+#[derive(Debug, Default, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RebuildReportDto {
+    /// 扫到多少文件。
+    pub scanned: usize,
+    /// 新登记进来的文件（库里有记录之外、磁盘上多出来的）。
+    pub registered: usize,
+    /// 新标记为「磁盘上找不到」的。
+    pub missing: usize,
+    /// 之前找不到、这次又出现的。
+    pub returned: usize,
+    /// 路径变了（文件被改名/移动）但认出来的。
+    pub renamed: usize,
+    /// 补上元数据的资产数（老库那批没有 EXIF 的）。
+    pub metadata_filled: usize,
+    /// 重建后的**相片数量**。
+    pub photos_count: i64,
+    /// 重建后的**图片数量**。
+    pub images_count: i64,
+}
+
+/// 重扫整个库、把 catalog 与 app.db 的计数拉平（耗时，界面上要挡住操作）。
+///
+/// 四件事，顺序不能反：
+///   1. **扫盘**（`photos/` 之下）+ 与 `asset_files` 对比 → 登记新文件、标记缺失、修正路径；
+///   2. **重读元数据**（`taken_at` / 宽高 / 朝向为空的老资产）—— 老库那批的根因就是它们空着；
+///   3. **重算目录计数**（清空后按磁盘重数一遍）；
+///   4. 汇总进 `repositories`（第 3 步里已经顺带做了）。
+#[tauri::command]
+pub async fn repository_rebuild<R: Runtime>(
+    app: AppHandle<R>,
+    repository_id: String,
+) -> Result<RebuildReportDto, String> {
+    let handle = app.clone();
+    blocking(move || {
+        let state = handle.state::<DbState>();
+        let root = online_root(&handle, &repository_id)?;
+        let now = time::now_millis();
+        let catalog = CatalogDb::open(&root, OpenOpts::new(backups(&handle).as_deref(), now))
+            .map_err(|e| e.to_string())?;
+
+        // ①② 磁盘 ↔ catalog 对齐 + 元数据重读
+        let rescan = raybend::store::rebuild::rescan_library(&catalog, &root, DEFAULT_PHOTOS_DIR, now)
+            .map_err(|e| e.to_string())?;
+
+        // ③④ 计数：清空重来（这一份在 app.db 里）
+        let (id, dir) = (repository_id.clone(), root.clone());
+        let totals = state
+            .with(&handle, move |db| {
+                db.write(move |conn| {
+                    repository::clear_directories(conn, &id)?;
+                    repository::count_library_on_disk(conn, &id, &dir, DEFAULT_PHOTOS_DIR, now)
+                })
+                .map_err(|e| e.to_string())
+            })
+            .map_err(|e| e.to_string())?;
+
+        Ok(RebuildReportDto {
+            scanned: rescan.scanned,
+            registered: rescan.registered,
+            missing: rescan.missing,
+            returned: rescan.returned,
+            renamed: rescan.renamed,
+            metadata_filled: rescan.metadata_filled,
+            photos_count: totals.photos,
+            images_count: totals.images,
+        })
+    })
+    .await
+}
 
 /* ══════════════════════════════════════════════════════════════
  * 库设置：导入模版（M1-6 的「齿轮」）

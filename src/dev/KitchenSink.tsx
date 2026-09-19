@@ -977,7 +977,8 @@ const DEMO_REPOS: RepositoryView[] = [
     displayPath: "D:\\Photos\\Library",
     paths: [{ path: "D:\\Photos\\Library", lastSeenAt: 0, status: "online" }],
     triedPaths: 0,
-    photoCount: 1248,
+    photosCount: 1248,
+    imagesCount: 1248,
   },
   {
     id: "lib-demo-offline",
@@ -990,7 +991,8 @@ const DEMO_REPOS: RepositoryView[] = [
     displayPath: "E:\\Backup\\Photos",
     paths: [{ path: "E:\\Backup\\Photos", lastSeenAt: 0, status: "offline" }],
     triedPaths: 1,
-    photoCount: null,
+    photosCount: null,
+    imagesCount: null,
   },
 ];
 

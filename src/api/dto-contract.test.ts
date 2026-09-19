@@ -47,6 +47,7 @@ import type {
   PhotoCount,
   PhotoMeta,
   RecentDir,
+  RebuildReport,
   RepositoryPath,
   RepositoryProbe,
   RepositorySettings,
@@ -156,7 +157,8 @@ const REPOSITORY_VIEW_KEYS = [
   "name",
   "online",
   "paths",
-  "photoCount",
+  "imagesCount",
+  "photosCount",
   "root",
   "triedPaths",
 ] as const satisfies readonly (keyof RepositoryView)[];
@@ -313,6 +315,16 @@ const DELETE_RESULT_KEYS = [
   "deleted",
   "failed",
 ] as const satisfies readonly (keyof DeleteResult)[];
+const REBUILD_REPORT_KEYS = [
+  "imagesCount",
+  "metadataFilled",
+  "missing",
+  "photosCount",
+  "registered",
+  "renamed",
+  "returned",
+  "scanned",
+] as const satisfies readonly (keyof RebuildReport)[];
 const MIGRATION_NOTICE_KEYS = [
   "from",
   "kind",
@@ -390,6 +402,7 @@ const KEY_TABLES = {
   DeleteFailure: checkKeys<DeleteFailure, typeof DELETE_FAILURE_KEYS>(DELETE_FAILURE_KEYS),
   DeleteResult: checkKeys<DeleteResult, typeof DELETE_RESULT_KEYS>(DELETE_RESULT_KEYS),
   FlagsView: checkKeys<FlagsView, typeof FLAGS_VIEW_KEYS>(FLAGS_VIEW_KEYS),
+  RebuildReport: checkKeys<RebuildReport, typeof REBUILD_REPORT_KEYS>(REBUILD_REPORT_KEYS),
   MigrationNotice: checkKeys<MigrationNotice, typeof MIGRATION_NOTICE_KEYS>(
     MIGRATION_NOTICE_KEYS,
   ),

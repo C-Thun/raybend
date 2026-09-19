@@ -301,6 +301,8 @@ fn every_contract_entry_has_a_test() {
         "DirEmptyView",
         // 数据库升级通知（M2-W2）
         "MigrationNotice",
+        // 重建数据（M2-W2 数量体系）
+        "RebuildReport",
     ];
     for key in value.as_object().unwrap().keys() {
         if key.starts_with('_') {
@@ -352,6 +354,15 @@ fn migration_notice_matches_contract() {
         phase: MigrationPhase::Start,
     });
     assert_eq!(keys_of_value(&start), contract_keys("MigrationNotice"));
+}
+
+/// 「重建数据」的结果也要进契约（字段名漂了，界面上那句摘要就是一堆 `undefined`）。
+#[test]
+fn rebuild_report_matches_contract() {
+    assert_eq!(
+        keys_of::<crate::repo::RebuildReportDto>(),
+        contract_keys("RebuildReport")
+    );
 }
 
 #[test]

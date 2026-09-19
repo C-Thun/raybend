@@ -487,9 +487,53 @@ fn run_import_thread<R: Runtime>(
     };
     run_batch(deps, &jobs);
 
+    /*
+     * 导入之后的**目录计数**（人类 2026-09-19 的数量体系）：
+     * 「导入时，是先统计导入目录……随后将这个库下的所有 directories 的这两个 count 加起来，
+     * 更新进 repository」。
+     *
+     * 实现上不去追模版算出来的目标路径，而是**回看库里现在有哪些目录**（`asset_files` 的
+     * 父目录去重）——模版是可变的、还可能带子目录透传，从结果反推永远比从参数正推准。
+     * 每个目录一次 `readdir`（本目录 + `_RAW`），本地盘上是微秒级。
+     */
+    refresh_directory_counts(&app, &repository_id, &root);
+
     // 终态一定再发一条（节流不该让「已完成」这件事丢在路上）
     let _ = app.emit(PROGRESS_EVENT, &handle.snapshot());
 }
+
+/// 把库里的**目录计数**重算一遍（导入结束时调；`重建数据`也走同一条路）。
+///
+/// 做法：把 `photos/` 之下**按目录**数一遍（本目录 + 它自己的 `_RAW`），逐目录写进
+/// `app.db` 的 `directories`，并在同一个事务里把库级汇总求和写回 `repositories` ——
+/// 正是人类 2026-09-19 说的「将这个库下的所有 directories 的这两个 count 加起来」。
+///
+/// 为什么整库重数而不是只数这次导入落地的目录：模版可变、子目录透传也不定，
+/// 从结果反推（库里现在有哪些目录）比从参数正推稳；而且导入本来就是重活，
+/// 多走一遍 `readdir` 树（本地盘、毫秒级）不值得为它省。
+///
+/// 失败**不打扰用户**：导入本身已经成功了，计数只是展示数字；下次进目录的增量同步会补上。
+fn refresh_directory_counts<R: Runtime>(
+    app: &AppHandle<R>,
+    repository_id: &str,
+    root: &std::path::Path,
+) {
+    let now = time::now_millis();
+    let (id, root) = (repository_id.to_string(), root.to_path_buf());
+    let state = app.state::<DbState>();
+    let result = state.with(app, move |db| {
+        db.write(move |conn| {
+            repository::count_library_on_disk(conn, &id, &root, PHOTOS_DIR, now).map(|_| ())
+        })
+        .map_err(|error| error.to_string())
+    });
+    if let Err(error) = result {
+        eprintln!("[raybend] 写目录计数失败：{error}");
+    }
+}
+
+/// 库内落地目录名（默认 `photos`；`FUTURE G14` 将来可配）。
+const PHOTOS_DIR: &str = "photos";
 
 /// 库根：离线库直接给一句人话。
 fn resolve_root<R: Runtime>(app: &AppHandle<R>, repository_id: &str) -> Result<PathBuf, String> {

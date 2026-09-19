@@ -28,7 +28,13 @@ import {
   type JSX,
 } from "solid-js";
 
-import { getThumbBytes, getViewImage, listRepositories } from "../../api/db.ts";
+import {
+  getThumbBytes,
+  getViewImage,
+  listRepositories,
+  remountRepository,
+  syncDirectoryCounts,
+} from "../../api/db.ts";
 import type { RepositoryView } from "../../api/types.ts";
 import {
   AssetInfo,
@@ -67,6 +73,13 @@ import type { BrowseSort, DeleteFailure } from "../../api/types.ts";
 
 export interface BrowseWorkspaceProps {
   store: BrowseStore;
+  /**
+   * 点库卡片上的齿轮 → 打开**库设置**。
+   *
+   * 弹窗本身住在组装层（`App.tsx`）：导入侧与浏览侧点开的是同一个
+   * `LibrarySettingsDialog`，而两个工作区都不该各自造一份弹窗状态。
+   */
+  onOpenLibrarySettings?: (repositoryId: string) => void;
   /**
    * 提示通道（`components/ui/Toast.tsx`）：删除这类**改磁盘**的动作必须给回执 ——
    * 谁删了什么、几个被锁挡住、哪几个失败了，都在提示与失败清单里说清楚。
@@ -447,9 +460,61 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
     })();
   });
 
+  /** 重新读一次库列表（重挂载、重建、改模版之后都会调它）。 */
+  async function refreshRepositories(): Promise<void> {
+    try {
+      setRepositories(await listRepositories());
+    } catch (error) {
+      console.error("[browse] 重读库列表失败", error); // i18n-exempt: 控制台诊断，不是界面文案
+    }
+  }
+
+  /**
+   * 点离线图标：对登记过的路径重新找一遍（与导入侧同一套语义）。
+   * 找不到**不是错误** —— 列表照旧显示离线徽标。
+   *
+   * ⚠️ 名字别叫 `remountRepository`（与上面 import 进来的那个**同名会自己调自己**，
+   * 类型还会退化成 `void`）—— 这类影子错误编译期只说「类型不匹配」，很难一眼看出。
+   */
+  async function remountLibrary(id: string): Promise<void> {
+    try {
+      const updated = await remountRepository(id);
+      setRepositories((prev) => prev.map((repo) => (repo.id === id ? updated : repo)));
+    } catch (error) {
+      console.error("[browse] 重挂载失败", error); // i18n-exempt: 控制台诊断
+      await refreshRepositories();
+    }
+  }
+
   const root = createMemo(
     () => repositories().find((r) => r.id === store.repositoryId())?.root ?? null,
   );
+
+  /*
+   * **进目录时同步计数**（人类 2026-09-19 的数量体系）。
+   *
+   * 每次 scope 变化都读盘数一次这个目录（本目录 + 它自己的 `_RAW`），与 `app.db` 里那行对比；
+   * 不一样就写回去、并把差值滚到库级汇总 —— 于是「程序外面往目录里加了照片」这种事实
+   * 立刻体现在卡片上，不需要谁去点刷新。
+   */
+  createEffect(() => {
+    const id = store.repositoryId();
+    const scope = store.scopePath();
+    if (id === null || scope === null) return;
+    void syncDirectoryCounts(id, scope)
+      .then((result: [[number, number], [number, number]] | null) => {
+        // 数字变了才刷新列表（避免每次滚动都重读一遍库）
+        if (result === null) return;
+        const [, totals] = result;
+        const current = repositories().find((repo) => repo.id === id);
+        if (current === undefined) return;
+        if (current.photosCount === totals[0] && current.imagesCount === totals[1]) return;
+        void refreshRepositories();
+      })
+      .catch(() => {
+        // 同步失败不打扰用户：卡片上的数字保持上一次已知的值
+      });
+  });
 
   /*
    * 进对比（选中 ≥ 2 张）就把**对比那几张**的宽高补齐。
@@ -519,6 +584,8 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
             libsExpanded={libsExpanded()}
             onExpandLibs={() => setLibsExpanded(true)}
             onCollapseLibs={() => setLibsExpanded(false)}
+            onOpenSettings={(id) => props.onOpenLibrarySettings?.(id)}
+            onRemount={(id) => void remountLibrary(id)}
           />
         </aside>
 

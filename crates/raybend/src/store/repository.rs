@@ -446,6 +446,210 @@ pub fn refresh_path_status(
 // 界面用的「库视图」与「建库前的探测」
 // ---------------------------------------------------------------------------
 
+/// 一个目录（或整库）的**两种计数**（人类 2026-09-19 定的口径）：
+///
+/// * `photos` = **相片数量**：本目录内、**不含** `_RAW/` 里的文件；
+/// * `images` = **图片数量**：本目录内 + 本目录下 `_RAW/` 里的**全部**文件。
+///
+/// 「目录」只算**本目录 + 本目录下的 `_RAW`**，不含其它子目录（子目录各有各的行）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Counts {
+    /// 相片数量
+    pub photos: i64,
+    /// 图片数量
+    pub images: i64,
+}
+
+/// `_RAW` 子目录名（RAW 分流的目标；也是计数时「哪些不算相片」的判据）。
+pub const RAW_DIR_NAME: &str = "_RAW";
+
+/// 某个文件名是不是**照片文件**（计数用）。
+///
+/// 判据保守但够用：只看扩展名，且**排除**库里自己的东西（`.db`、`.xmp`、临时文件）。
+/// 计数是给用户看的数字，宁可少算也不要把 `catalog.db` 算成一张照片。
+fn is_photo_file(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    if lower.starts_with('.') {
+        return false;
+    }
+    if lower.ends_with(".db")
+        || lower.ends_with(".db-wal")
+        || lower.ends_with(".db-shm")
+        || lower.ends_with(".xmp")
+        || lower.ends_with(".tmp")
+    {
+        return false;
+    }
+    crate::media::kind::kind_of_file(name).is_photo()
+}
+
+/// **从磁盘数一个目录**：本目录 + 本目录下的 `_RAW`。
+///
+/// * 目录不存在（还没导入过东西）→ 全 0，**不是错误**；
+/// * 读不了的条目跳过（权限/坏链接）—— 计数是展示用的数字，不该因为一个怪文件就报错。
+pub fn count_dir_on_disk(root: &Path, rel_path: &str) -> Counts {
+    let dir = if rel_path.is_empty() {
+        root.to_path_buf()
+    } else {
+        root.join(rel_path.replace('/', std::path::MAIN_SEPARATOR_STR))
+    };
+    let mut counts = Counts::default();
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name == RAW_DIR_NAME {
+                continue; // `_RAW` 由下面的单独一轮统计（它的文件**不算相片**）
+            }
+            if is_photo_file(&name) {
+                counts.photos += 1;
+                counts.images += 1;
+            }
+        }
+    }
+    let raw = dir.join(RAW_DIR_NAME);
+    if let Ok(entries) = std::fs::read_dir(&raw) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if is_photo_file(&name) {
+                counts.images += 1;
+            }
+        }
+    }
+    counts
+}
+
+/// 把**整个库**（`photos/` 之下）按目录数一遍 —— 老库还没有目录行时用它建立第一版。
+///
+/// 每个「含照片的目录」写一行；`_RAW` 不算目录（它的文件计入它父目录的 `images`）。
+/// 返回汇总值。
+pub fn count_library_on_disk(
+    conn: &Connection,
+    repository_id: &str,
+    root: &Path,
+    photos_dir: &str,
+    now_ms: i64,
+) -> Result<Counts> {
+    let base = if photos_dir.is_empty() {
+        root.to_path_buf()
+    } else {
+        root.join(photos_dir)
+    };
+    let mut dirs: Vec<String> = Vec::new();
+    collect_dirs(&base, photos_dir, &mut dirs);
+    let mut total = Counts::default();
+    for rel in dirs {
+        let counts = count_dir_on_disk(root, &rel);
+        set_directory_counts(conn, repository_id, &rel, counts, now_ms)?;
+        total.photos += counts.photos;
+        total.images += counts.images;
+    }
+    Ok(total)
+}
+
+/// 递归收集 `photos/` 之下的目录（含 `photos/` 本身；**不含** `_RAW` ——
+/// 它的内容计入父目录的 `images`）。
+fn collect_dirs(dir: &Path, rel: &str, out: &mut Vec<String>) {
+    out.push(rel.to_string());
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name == RAW_DIR_NAME || name.starts_with('.') {
+            continue;
+        }
+        let is_dir = entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false);
+        if !is_dir {
+            continue;
+        }
+        let child = if rel.is_empty() {
+            name.clone()
+        } else {
+            format!("{rel}/{name}")
+        };
+        collect_dirs(&entry.path(), &child, out);
+    }
+}
+
+/// 写一个目录的计数，并**在同一个事务外**把库级汇总重算一遍（调用方负责事务）。
+///
+/// 汇总口径：该库 **所有目录行** 的两个计数分别求和（人类 2026-09-19：
+/// 「将这个库下的所有 directories 的这两个 count 加起来，更新进 repository」）。
+pub fn set_directory_counts(
+    conn: &Connection,
+    repository_id: &str,
+    rel_path: &str,
+    counts: Counts,
+    now_ms: i64,
+) -> Result<()> {
+    let forms = PathForms::new(rel_path);
+    conn.execute(
+        "INSERT INTO directories(repository_id, rel_path, rel_path_folded, photos_count, images_count, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT(repository_id, rel_path_folded) DO UPDATE SET
+            rel_path = excluded.rel_path,
+            photos_count = excluded.photos_count,
+            images_count = excluded.images_count,
+            updated_at = excluded.updated_at",
+        params![
+            repository_id,
+            forms.normalized(),
+            forms.folded(),
+            counts.photos,
+            counts.images,
+            now_ms
+        ],
+    )?;
+    refresh_totals(conn, repository_id)?;
+    Ok(())
+}
+
+/// 按 `directories` 重算并写回库级汇总（两个计数各自求和）。
+pub fn refresh_totals(conn: &Connection, repository_id: &str) -> Result<Counts> {
+    let totals: Counts = conn.query_row(
+        "SELECT COALESCE(SUM(photos_count), 0), COALESCE(SUM(images_count), 0)
+           FROM directories WHERE repository_id = ?1",
+        [repository_id],
+        |row| {
+            Ok(Counts {
+                photos: row.get(0)?,
+                images: row.get(1)?,
+            })
+        },
+    )?;
+    let rows = conn.execute(
+        "UPDATE repositories SET photos_count = ?2, images_count = ?3 WHERE id = ?1",
+        params![repository_id, totals.photos, totals.images],
+    )?;
+    if rows == 0 {
+        // 库被删了（用户刚在别处移除）—— 静默返回即可，不是错误
+        return Ok(totals);
+    }
+    Ok(totals)
+}
+
+/// 库级汇总；`None` = 这个库**还没有任何目录行**（数字未知，界面显示「—」而不是 0）。
+pub fn totals(conn: &Connection, repository_id: &str) -> Result<Option<Counts>> {
+    let row: Option<(Option<i64>, Option<i64>)> = conn
+        .query_row(
+            "SELECT photos_count, images_count FROM repositories WHERE id = ?1",
+            [repository_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    match row {
+        Some((Some(photos), Some(images))) => Ok(Some(Counts { photos, images })),
+        _ => Ok(None),
+    }
+}
+
+/// 清空一个库的目录行（**重建数据**之前调；之后重新扫盘建立）。
+pub fn clear_directories(conn: &Connection, repository_id: &str) -> Result<usize> {
+    let removed = conn.execute("DELETE FROM directories WHERE repository_id = ?1", [repository_id])?;
+    refresh_totals(conn, repository_id)?;
+    Ok(removed)
+}
+
 /// 一个库在界面上的一条记录（`design/main.md` §3.3 的库卡片）。
 ///
 /// 与 [`RepositoryRow`] 的区别：这里回答的是**界面需要的问题** ——
@@ -466,8 +670,10 @@ pub struct RepositoryView {
     pub display_path: String,
     /// 登记过的全部路径（已按「最近见过」排序）。
     pub paths: Vec<RepositoryPathRow>,
-    /// 库里的照片数（**在线且真的读到了**才有；离线 = `None`）。
-    pub photo_count: Option<i64>,
+    /// **相片数量**（不含 `_RAW/`；`None` = 还没数过 —— 界面显示「—」，不是 0）。
+    pub photos_count: Option<i64>,
+    /// **图片数量**（含 `_RAW/`；`None` = 还没数过）。
+    pub images_count: Option<i64>,
     /// 探测过几条路径（离线时给「已试过 N 处」的提示）。
     pub tried_paths: usize,
 }
@@ -477,10 +683,7 @@ pub struct RepositoryView {
 /// 「有多少张照片」要开另一个库（`catalog.db`），所以由调用方注入 ——
 /// 这样这一层不把「开库」这件事硬编进来，测试也能直接给个假数。
 /// 注入的闭包拿到的是**库根目录**，返回 `None` 表示读不到（离线、损坏…）。
-pub fn build_views(
-    conn: &Connection,
-    mut photo_count: impl FnMut(&Path) -> Option<i64>,
-) -> Result<Vec<RepositoryView>> {
+pub fn build_views(conn: &Connection) -> Result<Vec<RepositoryView>> {
     let mut views = Vec::new();
     for row in list_repositories(conn)? {
         let state = resolve_repository(conn, &row.id)?;
@@ -497,10 +700,18 @@ pub fn build_views(
                 (false, None, last, *tried)
             }
         };
-        let photo_count = root
-            .as_deref()
-            .map(Path::new)
-            .and_then(&mut photo_count);
+        /*
+         * 两个计数**直接读 app.db**（人类 2026-09-19 的数量体系）。
+         *
+         * 老实现是「为每个库开一次 catalog.db 数资产」—— 库多、盘慢时列表要等好几秒，
+         * 而且它数的是「资产数」而不是「相片 / 图片」两个口径。现在这两个数字由
+         * `directories` 表汇总而来（导入时写、进目录时增量同步、重建时全量重算）。
+         */
+        let counts = totals(conn, &row.id)?;
+        let (photos_count, images_count) = match counts {
+            Some(counts) => (Some(counts.photos), Some(counts.images)),
+            None => (None, None),
+        };
         views.push(RepositoryView {
             id: row.id,
             name: row.name,
@@ -511,7 +722,8 @@ pub fn build_views(
             root,
             display_path,
             paths: row.paths,
-            photo_count,
+            photos_count,
+            images_count,
             tried_paths: tried,
         });
     }
@@ -1112,27 +1324,40 @@ mod tests {
         )
         .unwrap();
 
-        // 注入的取数：只给在线那个根返回数量
-        let mut calls = Vec::new();
-        let views = build_views(&app, |root| {
-            calls.push(root.to_path_buf());
-            (root == online_root).then_some(42)
-        })
-        .unwrap();
-
+        /*
+         * 计数现在读的是 `app.db` 里的 `directories` 汇总（人类 2026-09-19 的数量体系）：
+         * 还没数过的库是 `None`（界面显示「—」），写进一行之后立刻就有值。
+         */
+        let views = build_views(&app).unwrap();
         assert_eq!(views.len(), 2);
-        assert_eq!(calls.len(), 1, "只该为在线的库去数照片");
 
         let online_view = views.iter().find(|v| v.id == online.id).unwrap();
         assert!(online_view.online);
-        assert_eq!(online_view.photo_count, Some(42));
+        assert_eq!(online_view.photos_count, None, "还没数过 → None（不是 0）");
+
+        set_directory_counts(
+            &app,
+            &online.id,
+            "photos",
+            Counts {
+                photos: 42,
+                images: 50,
+            },
+            T0,
+        )
+        .unwrap();
+        let views = build_views(&app).unwrap();
+        let online_view = views.iter().find(|v| v.id == online.id).unwrap();
+        assert_eq!(online_view.photos_count, Some(42), "相片数量不含 _RAW");
+        assert_eq!(online_view.images_count, Some(50), "图片数量含 _RAW");
         assert_eq!(online_view.display_path, online_root.to_string_lossy());
         assert_eq!(online_view.paths.len(), 1);
         assert_eq!(online_view.import_template.as_deref(), Some(DEFAULT_IMPORT_TEMPLATE));
 
         let offline_view = views.iter().find(|v| v.id == offline_id).unwrap();
         assert!(!offline_view.online);
-        assert_eq!(offline_view.photo_count, None);
+        assert_eq!(offline_view.photos_count, None);
+        assert_eq!(offline_view.images_count, None);
         assert_eq!(offline_view.tried_paths, 1);
         assert!(
             offline_view.display_path.ends_with("不在这里"),
@@ -1144,12 +1369,12 @@ mod tests {
     #[test]
     fn build_views_with_no_libraries_is_empty() {
         let app = app_db();
-        assert!(build_views(&app, |_| None).unwrap().is_empty());
+        assert!(build_views(&app).unwrap().is_empty());
     }
 
     #[test]
-    fn build_views_skips_the_count_call_when_the_root_is_gone() {
-        // 在线判定与取数解耦：库在线但取数读不到 → `None`，而不是报错
+    fn build_views_reports_none_counts_when_never_counted() {
+        // 在线判定与计数解耦：库在线但还没数过 → `None`（界面显示「—」），而不是报错
         let dir = tmp();
         let app = app_db();
         let root = dir.path().join("库");
@@ -1157,9 +1382,10 @@ mod tests {
         register_repository(&app, &meta, T0).unwrap();
         add_repository_path(&app, &meta.id, root.to_string_lossy().as_ref(), T0).unwrap();
 
-        let views = build_views(&app, |_| None).unwrap();
+        let views = build_views(&app).unwrap();
         assert_eq!(views.len(), 1);
         assert!(views[0].online, "库文件在，就是在线");
-        assert_eq!(views[0].photo_count, None, "数不出来就是 None，不是 0");
+        assert_eq!(views[0].photos_count, None, "还没数过就是 None，不是 0");
+        assert_eq!(views[0].images_count, None);
     }
 }

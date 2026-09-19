@@ -26,6 +26,7 @@ import type {
   RecentDir,
   MetaFile,
   PhotoMeta,
+  RebuildReport,
   RepositoryProbe,
   RepositoryView,
   SourceScan,
@@ -380,12 +381,44 @@ export async function remountRepository(
   return call<RepositoryView>("repository_remount", { repositoryId });
 }
 
-/** 一个库现在有多少张照片（离线 → `null`）。 */
+/**
+ * 一个库现在的两个计数：`[相片数量, 图片数量]`（离线或还没数过 → `null`）。
+ *
+ * 口径（人类 2026-09-19）：**相片**不含 `_RAW/`，**图片**含 `_RAW/`。
+ */
 export async function repositoryCounts(
   repositoryId: string,
-): Promise<number | null> {
+): Promise<[number, number] | null> {
   if (!isTauriRuntime()) return null;
-  return call<number | null>("repository_counts", { repositoryId });
+  return call<[number, number] | null>("repository_counts", { repositoryId });
+}
+
+/**
+ * **进目录时同步计数**（人类 2026-09-19）：读盘数一次这个目录，与库里那行对比，
+ * 不一样就写回去并把差值滚到库级汇总。
+ *
+ * 返回 `[目录计数, 库级汇总]`，各是 `[相片, 图片]`；离线或没给目录时是 `null`。
+ * 本地 `readdir` 是微秒级，所以**每次进目录都调**（`AGENTS.md` §2 #13 的实时性优先）。
+ */
+export async function syncDirectoryCounts(
+  repositoryId: string,
+  scopePath: string | null,
+): Promise<[[number, number], [number, number]] | null> {
+  if (!isTauriRuntime()) return null;
+  return call<[[number, number], [number, number]] | null>("repository_sync_dir", {
+    repositoryId,
+    scopePath,
+  });
+}
+
+/**
+ * **重建数据**：重扫整个库、把 catalog 与计数拉平（耗时，界面上要挡住操作）。
+ *
+ * 干四件事：扫盘对齐文件、重读老库缺失的元数据（EXIF）、重算目录计数、汇总进库表。
+ */
+export async function rebuildRepository(repositoryId: string): Promise<RebuildReport> {
+  if (!isTauriRuntime()) throw new Error(t("common.desktop_only"));
+  return call<RebuildReport>("repository_rebuild", { repositoryId });
 }
 
 /* ══════════════════════════════════════════════════════════════

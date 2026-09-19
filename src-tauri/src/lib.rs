@@ -211,6 +211,8 @@ pub fn run() {
             repo::repository_create,
             repo::repository_remount,
             repo::repository_counts,
+            repo::repository_sync_dir,
+            repo::repository_rebuild,
             repo::repository_settings,
             repo::repository_set_template,
             repo::repository_template_preview,

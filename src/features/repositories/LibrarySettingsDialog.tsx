@@ -13,10 +13,11 @@ import * as db from "../../api/db.ts";
 import type { TemplatePreview } from "../../api/types.ts";
 import type { RepositoryView } from "../../api/types.ts";
 import { Button } from "../../components/ui/Button.tsx";
-import { IconCloudOff } from "@tabler/icons-solidjs";
-import { Dialog } from "../../components/ui/Dialog.tsx";
+import { IconCloudOff, IconRefresh } from "@tabler/icons-solidjs";
+import { ConfirmDialog, Dialog } from "../../components/ui/Dialog.tsx";
 import { Input } from "../../components/ui/Form.tsx";
-import { t } from "../../i18n/index.ts";
+import { locale, t } from "../../i18n/index.ts";
+import { formatCount } from "../../lib/format.ts";
 
 /** 可用的模版变量（与 Rust 的 `KNOWN_VARS` 一致；点一下插到光标处）。 */
 const VARIABLES = [
@@ -60,6 +61,14 @@ export function LibrarySettingsDialog(props: LibrarySettingsDialogProps) {
   const [saving, setSaving] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
   let inputEl: HTMLInputElement | undefined;
+  /*
+   * 重建数据（人类 2026-09-19）：**花时间**（要重扫整个库），所以是「按钮 → 二级确认 → 跑」，
+   * 跑的时候按钮转圈、别让用户以为界面死了。
+   */
+  const [counts, setCounts] = createSignal<[number, number] | null>(null);
+  const [rebuildOpen, setRebuildOpen] = createSignal(false);
+  const [rebuilding, setRebuilding] = createSignal(false);
+  const [rebuilt, setRebuilt] = createSignal<string | null>(null);
 
   // 打开时读一次当前模版
   createEffect(() => {
@@ -68,6 +77,14 @@ export function LibrarySettingsDialog(props: LibrarySettingsDialogProps) {
     if (id === null) return;
     setLoading(true);
     setError(null);
+    /*
+     * 两个计数**自己读一次**：外面的库卡片可能有（导入侧），也可能没有（浏览侧只拿得到 id）。
+     * 读不到就是「—」—— 数字缺一个不该让整个弹窗打不开。
+     */
+    void db
+      .repositoryCounts(id)
+      .then(setCounts)
+      .catch(() => setCounts(null));
     void db
       .repositorySettings(id)
       .then((settings) => {
@@ -127,6 +144,40 @@ export function LibrarySettingsDialog(props: LibrarySettingsDialogProps) {
     }
   }
 
+  /** 真跑一次重建，把结果拼成一句人话（数字都在里面，不假装「已优化」）。 */
+  async function runRebuild(): Promise<void> {
+    const id = props.repositoryId;
+    if (id === null || rebuilding()) return;
+    setRebuildOpen(false);
+    setRebuilding(true);
+    setRebuilt(null);
+    try {
+      const report = await db.rebuildRepository(id);
+      setCounts([report.photosCount, report.imagesCount]);
+      setRebuilt(
+        t("repo.rebuild_done", {
+          scanned: String(report.scanned),
+          registered: String(report.registered),
+          missing: String(report.missing),
+          filled: String(report.metadataFilled),
+          photos: String(report.photosCount),
+          images: String(report.imagesCount),
+        }),
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setRebuilding(false);
+    }
+  }
+
+  /** 相片数量：外面的视图优先（它刚更新过），没有就用自己读的 */
+  const photosCount = (): number | null =>
+    props.repository?.photosCount ?? counts()?.[0] ?? null;
+  /** 图片数量（含 `_RAW`） */
+  const imagesCount = (): number | null =>
+    props.repository?.imagesCount ?? counts()?.[1] ?? null;
+
   /** 离线时不给保存：改了也写不进去（`repository_settings` 本身就会失败） */
   const offline = (): boolean => props.repository?.online === false;
 
@@ -174,6 +225,48 @@ export function LibrarySettingsDialog(props: LibrarySettingsDialogProps) {
             ? t("repo.settings_hint")
             : t("repo.settings_hint_named", { name: props.repositoryName })}
         </p>
+
+        {/*
+          两个计数（人类 2026-09-19）：**相片数量**不含 `_RAW/`，**图片数量**含 ——
+          卡片上只显示前者，这里两个都给（用户在这里才知道 `_RAW` 里还躺着多少）。
+        */}
+        <div class="flex flex-col gap-1 rounded-ui bg-surface-track p-2">
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-fs-1 text-fg-2">{t("repo.counts_photos")}</span>
+            <span class="text-fs-2 text-fg-1 tnum">
+              {photosCount() === null ? "—" : formatCount(photosCount() ?? 0, locale())}
+            </span>
+          </div>
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-fs-1 text-fg-2">{t("repo.counts_images")}</span>
+            <span class="text-fs-2 text-fg-1 tnum">
+              {imagesCount() === null ? "—" : formatCount(imagesCount() ?? 0, locale())}
+            </span>
+          </div>
+          <p class="text-fs-0 text-fg-3">{t("repo.counts_hint")}</p>
+        </div>
+
+        {/* 重建数据：重扫整个库（文件对齐 + 元数据重读 + 计数重算） */}
+        <div class="flex flex-col gap-1 rounded-ui bg-surface-track p-2">
+          <div class="flex items-center justify-between gap-2">
+            <div class="min-w-0">
+              <p class="text-fs-1 text-fg-1">{t("repo.rebuild_title")}</p>
+              <p class="text-fs-0 text-fg-3">{t("repo.rebuild_hint")}</p>
+            </div>
+            <Button
+              variant="secondary"
+              disabled={offline() || rebuilding()}
+              loading={rebuilding()}
+              onClick={() => setRebuildOpen(true)}
+            >
+              <IconRefresh size={14} aria-hidden="true" />
+              {t("repo.rebuild_button")}
+            </Button>
+          </div>
+          <Show when={rebuilt()}>
+            {(summary) => <p class="text-fs-0 text-fg-2">{summary()}</p>}
+          </Show>
+        </div>
 
         <label class="flex flex-col gap-1">
           <span class="text-fs-0 text-fg-2">{t("repo.template_label")}</span>
@@ -231,6 +324,20 @@ export function LibrarySettingsDialog(props: LibrarySettingsDialogProps) {
           {(message) => <p class="text-fs-1 text-danger">{message()}</p>}
         </Show>
       </div>
+
+      {/*
+        二级确认：**透明遮罩**（人类 2026-09-19）—— 一级窗口已经在压暗背景了，
+        再叠一层半透就是越叠越黑。文案里把「要花时间」说清楚，别让用户以为卡住了。
+      */}
+      <ConfirmDialog
+        open={rebuildOpen()}
+        scrim={false}
+        title={t("repo.rebuild_confirm_title")}
+        message={t("repo.rebuild_confirm")}
+        confirmLabel={t("repo.rebuild_confirm_ok")}
+        onConfirm={() => void runRebuild()}
+        onCancel={() => setRebuildOpen(false)}
+      />
     </Dialog>
   );
 }

@@ -22,7 +22,8 @@ function view(overrides: Partial<RepositoryView> = {}): RepositoryView {
     displayPath: "D:\\Photos",
     paths: [],
     triedPaths: 1,
-    photoCount: 10,
+    photosCount: 10,
+    imagesCount: 12,
     ...overrides,
   };
 }
@@ -109,7 +110,7 @@ test("markOffline：立刻降级（这就是「库设置发现离线 → 列表�
   store.markOffline("lib1");
   const row = store.byId("lib1");
   assert.equal(row?.online, false, "列表里立刻变离线");
-  assert.equal(row?.photoCount, null, "照片数读不到 → 显示「—」而不是 0");
+  assert.equal(row?.photosCount, null, "相片数读不到 → 显示「—」而不是 0");
   assert.equal(row?.displayPath, "D:\\Photos", "保留上次已知路径（离线时正要显示它）");
 });
 
@@ -123,7 +124,7 @@ test("markOffline：已经离线的不用再动（避免无意义的重渲染）
 });
 
 test("remount：找到 → 就地变在线并清掉提示", async () => {
-  const { api, state } = fakeApi([view({ online: false, root: null, photoCount: null })]);
+  const { api, state } = fakeApi([view({ online: false, root: null, photosCount: null, imagesCount: null })]);
   state.remountResult = view({ online: true });
   const store = createRepositoryState({ api });
   await store.load();

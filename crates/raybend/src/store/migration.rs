@@ -81,6 +81,7 @@ pub struct Migration {
 /// * v1 `init`：库注册表 / 路径 / 设置 / 任务队列 / 应用元信息
 /// * v2 `tags`：**标签词典**（跨库公用，BROWSE.md §7.1）
 /// * v3 `recent_dirs`：最近导入过的目录（design/main.md §3.1.1 的「最近」）
+/// * v4 `directory_counts`：**目录级计数**（相片/图片两个数）+ 库级汇总列（人类 2026-09-19）
 pub const APP_MIGRATIONS: &[Migration] = &[
     Migration {
         version: 1,
@@ -96,6 +97,11 @@ pub const APP_MIGRATIONS: &[Migration] = &[
         version: 3,
         name: "recent_dirs",
         sql: include_str!("migrations/app_0003_recent_dirs.sql"),
+    },
+    Migration {
+        version: 4,
+        name: "directory_counts",
+        sql: include_str!("migrations/app_0004_directory_counts.sql"),
     },
 ];
 
@@ -563,8 +569,10 @@ mod tests {
     fn fresh_app_db_applies_all_migrations() {
         let mut conn = mem();
         let out = apply(&mut conn, DbKind::App, Backups::none(), 1_789_516_800_000).unwrap();
-        assert_eq!((out.from, out.to), (0, 3));
-        assert_eq!(out.applied, vec![1, 2, 3]);
+        // 全新库应当把**当前全部**迁移跑一遍（不写死版本号：以后再加迁移这条不该跟着改）
+        let latest = supported_version(DbKind::App);
+        assert_eq!((out.from, out.to), (0, latest));
+        assert_eq!(out.applied, (1..=latest).collect::<Vec<i64>>());
         assert!(out.snapshot.is_none(), "全新库不需要快照");
         assert!(out.changed());
 
@@ -624,7 +632,7 @@ mod tests {
     }
 
     #[test]
-    fn existing_app_db_upgrades_from_v2_to_v3_without_losing_data() {
+    fn existing_app_db_upgrades_to_the_latest_without_losing_data() {
         // 真实升级路径：一个已经跑过 v1/v2 的 app.db（用户上一步装的就是这个版本）
         let mut conn = mem();
         let old = apply_list(
@@ -643,8 +651,17 @@ mod tests {
         .unwrap();
 
         let out = apply(&mut conn, DbKind::App, Backups::none(), 1_789_516_800_001).unwrap();
-        assert_eq!((out.from, out.to), (2, 3), "只补跑 v3");
-        assert_eq!(out.applied, vec![3]);
+        // 只补跑缺的那几条（**不写死版本号**：以后再加迁移这条测试不该跟着改）
+        assert_eq!(out.from, 2, "从 v2 接着升");
+        assert_eq!(
+            out.to,
+            supported_version(DbKind::App),
+            "应当升到本程序支持的最高版本"
+        );
+        assert!(
+            out.applied.iter().all(|version| *version > 2),
+            "不该重跑已经跑过的那些"
+        );
 
         // 老数据还在
         let value: String = conn

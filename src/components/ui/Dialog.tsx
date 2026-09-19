@@ -35,6 +35,14 @@ export interface DialogProps {
   footer?: JSX.Element;
   /** 右上角那个关闭按钮的无障碍名，默认「关闭」 */
   closeLabel?: string;
+  /**
+   * 遮罩要不要压暗背景。默认要（`bg-scrim`）。
+   *
+   * **二级确认弹窗传 `false`**（人类 2026-09-19）：一级弹窗已经压暗过一次，
+   * 二级再压一次就是「半透叠半透」—— 背景越叠越黑，看起来像界面坏了。
+   * 透明遮罩仍然拦住点击（该有的模态语义一个不少）。
+   */
+  scrim?: boolean;
   class?: string;
 }
 
@@ -47,6 +55,7 @@ export function Dialog(props: DialogProps) {
     "children",
     "footer",
     "closeLabel",
+    "scrim",
     "class",
   ]);
 
@@ -64,7 +73,9 @@ export function Dialog(props: DialogProps) {
       role="dialog"
     >
       <Portal>
-        <ArkDialog.Backdrop class="fixed inset-0 bg-scrim" />
+        <ArkDialog.Backdrop
+          class={["fixed inset-0", local.scrim === false ? "bg-transparent" : "bg-scrim"].join(" ")}
+        />
         <ArkDialog.Positioner class="fixed inset-0 flex items-center justify-center p-4">
           <ArkDialog.Content
             class={[
@@ -135,6 +146,8 @@ export interface ConfirmDialogProps {
   title?: string;
   confirmLabel?: string;
   cancelLabel?: string;
+  /** 遮罩是否压暗（二级确认传 `false`；见 `DialogProps.scrim`） */
+  scrim?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -154,6 +167,11 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
         if (!open) props.onCancel();
       }}
       title={props.title}
+      /*
+       * 「二级确认」用**透明遮罩**（人类 2026-09-19）：一级窗口已经在压暗背景了，
+       * 这里再叠一层半透就是越叠越黑。给了 `scrim: false` 就交给调用方决定。
+       */
+      {...(props.scrim === undefined ? {} : { scrim: props.scrim })}
       footer={
         <>
           <Button variant="secondary" onClick={props.onCancel}>

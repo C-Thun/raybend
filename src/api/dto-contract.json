@@ -15,7 +15,11 @@
     "kindLabel",
     "path"
   ],
-  "DirEntry": ["hasChildren", "name", "path"],
+  "DirEntry": [
+    "hasChildren",
+    "name",
+    "path"
+  ],
   "MetaFile": [
     "fileSize",
     "mtimeMs",
@@ -77,12 +81,13 @@
     "createdAt",
     "displayPath",
     "id",
+    "imagesCount",
     "importTemplate",
     "lastOpenedAt",
     "name",
     "online",
     "paths",
-    "photoCount",
+    "photosCount",
     "root",
     "triedPaths"
   ],
@@ -275,5 +280,15 @@
     "label",
     "running",
     "to"
+  ],
+  "RebuildReport": [
+    "imagesCount",
+    "metadataFilled",
+    "missing",
+    "photosCount",
+    "registered",
+    "renamed",
+    "returned",
+    "scanned"
   ]
 }

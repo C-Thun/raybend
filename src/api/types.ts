@@ -177,10 +177,14 @@ export interface RepositoryView {
   displayPath: string;
   paths: RepositoryPath[];
   /**
-   * 库里的照片数。
-   * **`null` 不等于 0**：离线或读不到时是 `null`，界面显示「—」。
+   * **相片数量**（不含 `_RAW/` 里的文件）。
+   *
+   * **`null` 不等于 0**：还没数过时是 `null`，界面显示「—」。
+   * 口径与来源见 `DESIGN.md`：由 `app.db` 的 `directories` 表汇总而来。
    */
-  photoCount: number | null;
+  photosCount: number | null;
+  /** **图片数量**（含 `_RAW/` 里的文件）—— 库卡片上不显示，齿轮弹窗里显示。 */
+  imagesCount: number | null;
   /** 探测过几条路径（离线时给「已试过 N 处」的提示）。 */
   triedPaths: number;
 }
@@ -545,4 +549,24 @@ export interface MigrationNotice {
   to: number;
   /** `true` = 开始（弹遮罩）；`false` = 结束（撤遮罩） */
   running: boolean;
+}
+
+/** 「重建数据」的结果（齿轮弹窗里那句摘要用它）。 */
+export interface RebuildReport {
+  /** 扫到多少文件。 */
+  scanned: number;
+  /** 新登记进来的文件（磁盘上有、库里没记录）。 */
+  registered: number;
+  /** 新标记为「磁盘上找不到」的。 */
+  missing: number;
+  /** 之前找不到、这次又出现的。 */
+  returned: number;
+  /** 路径变了但认出来的。 */
+  renamed: number;
+  /** 补上元数据的资产数（老库那批没有 EXIF 的）。 */
+  metadataFilled: number;
+  /** 重建后的**相片数量**。 */
+  photosCount: number;
+  /** 重建后的**图片数量**。 */
+  imagesCount: number;
 }

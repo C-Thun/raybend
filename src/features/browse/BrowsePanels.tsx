@@ -25,7 +25,9 @@ import { ConfirmDialog, Dialog } from "../../components/ui/Dialog.tsx";
 import { Input } from "../../components/ui/Form.tsx";
 import { Menu } from "../../components/ui/Menu.tsx";
 import type { AssetItem, DirEmptyView, RepositoryView } from "../../api/types.ts";
-import { t } from "../../i18n/index.ts";
+import { IconCloudOff, IconSettings } from "@tabler/icons-solidjs";
+import { locale, t } from "../../i18n/index.ts";
+import { formatCount } from "../../lib/format.ts";
 import type { ViewerStore } from "../../components/ui/viewer/index.ts";
 import { shortPath } from "../../lib/shortpath.ts";
 import { dirDisplayName, PHOTOS_DIR, visibleChildDirs } from "./dirs.ts";
@@ -68,6 +70,13 @@ export interface BrowseLeftColumnProps {
   onExpandLibs?: () => void;
   /** 到点自动收（15 秒没再点库）。 */
   onCollapseLibs?: () => void;
+  /**
+   * 开这个库的设置（齿轮）。**与导入侧同一套**：卡片长一样、齿轮位置一样、
+   * 点开的是同一个 `LibrarySettingsDialog`（由组装层持有）。
+   */
+  onOpenSettings?: (repositoryId: string) => void;
+  /** 点离线图标：对登记过的路径重新找一遍（与导入侧同一套语义）。 */
+  onRemount?: (repositoryId: string) => void;
   class?: string;
 }
 
@@ -405,9 +414,13 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
         </Show>
         <For each={visibleRepos()}>
           {(repo) => (
-            <button
-              type="button"
-              onClick={() => selectRepository(repo.id)}
+            /*
+             * 卡片 = **一个容器**（点它选库），里面两个可点区域：
+             * 主体（选库）与行尾那一格（在线 = 齿轮 → 库设置；离线 = 离线图标 → 重新查找）。
+             * 与导入侧 `RepositoryList` 是同一套外观与同一套语义（人类 2026-09-19：
+             * 「统一掉库卡片组件，import 里的库卡片和 browse 里统一」）。
+             */
+            <div
               class={[
                 "mb-2 flex h-(--card-h) w-full items-center gap-2 rounded-(--radius) px-2 text-left",
                 store.repositoryId() === repo.id
@@ -415,17 +428,48 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
                   : "text-fg-2 hover:bg-state-hover",
               ].join(" ")}
             >
-              <span class="shrink-0 text-fs-3 text-brand">●</span>
-              <span class="min-w-0 flex-1">
-                <span class="block truncate text-fs-2">{repo.name}</span>
-                <span class="block truncate text-fs-0 text-fg-3">
-                  {shortPath(repo.displayPath, { maxLength: 48 })}
+              <button
+                type="button"
+                class="flex min-w-0 flex-1 items-center gap-2 text-left"
+                onClick={() => selectRepository(repo.id)}
+              >
+                <span class="shrink-0 text-fs-3 text-brand">●</span>
+                <span class="min-w-0 flex-1">
+                  <span class="block truncate text-fs-2">{repo.name}</span>
+                  <span class="flex items-center gap-1.5 truncate text-fs-0 text-fg-3">
+                    <span class="truncate">{shortPath(repo.displayPath, { maxLength: 40 })}</span>
+                    {/* 相片总数（不含 `_RAW`）—— 与导入侧卡片同一个位置、同一个口径 */}
+                    <span class="shrink-0 tnum">
+                      {repo.photosCount === null
+                        ? "—"
+                        : t("grid.count", { n: formatCount(repo.photosCount, locale()) })}
+                    </span>
+                  </span>
                 </span>
-              </span>
-              <Show when={!repo.online}>
-                <span class="shrink-0 text-fs-0 text-danger">{t("browse.offline")}</span>
+              </button>
+              <Show
+                when={repo.online}
+                fallback={
+                  <button
+                    type="button"
+                    aria-label={t("browse.offline")}
+                    class="flex size-6 shrink-0 items-center justify-center rounded-ui text-danger hover:bg-state-hover"
+                    onClick={() => props.onRemount?.(repo.id)}
+                  >
+                    <IconCloudOff size={14} aria-hidden="true" />
+                  </button>
+                }
+              >
+                <button
+                  type="button"
+                  aria-label={t("repo.settings_title")}
+                  class="flex size-6 shrink-0 items-center justify-center rounded-ui text-fg-2 hover:bg-state-hover hover:text-fg-1"
+                  onClick={() => props.onOpenSettings?.(repo.id)}
+                >
+                  <IconSettings size={14} aria-hidden="true" />
+                </button>
               </Show>
-            </button>
+            </div>
           )}
         </For>
         <Show when={hasMore()}>

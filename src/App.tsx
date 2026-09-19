@@ -34,6 +34,7 @@ import { ToolsBar } from "./shell/ToolsBar.tsx";
 import { createImportStore, ImportWorkspace } from "./workspaces/import/index.ts";
 import { createToastStore, ToastHost, toastDisposer } from "./components/ui/Toast.tsx";
 import { BrowseToolbar, createBrowseStore, TagDialog } from "./features/browse/index.ts";
+import { LibrarySettingsDialog } from "./features/repositories/index.ts";
 import { browseDelete, browseFacets, browseMark, browseMarkings, browsePage, browseRedo, browseTimeline, browseUndo, flagsClear, flagsGet, flagsSet } from "./api/browse.ts";
 import { BrowseWorkspace } from "./workspaces/browse/index.ts";
 import {
@@ -177,6 +178,14 @@ export default function App() {
    */
   const [tagsOpen, setTagsOpen] = createSignal(false);
   /**
+   * 库设置弹窗（齿轮）：**导入侧与浏览侧共用同一个弹窗**，由组装层持有。
+   *
+   * 为什么放这里：导入侧的齿轮长在 `RepositoryList` 里（那边自己持有弹窗），
+   * 而浏览侧的库卡片在 `BrowseLeftColumn` 里 —— 两个工作区都放一份弹窗状态就是两份真相。
+   * 浏览侧从这里开；导入侧维持原样（它还要把「模版已保存」回写给列表）。
+   */
+  const [librarySettingsId, setLibrarySettingsId] = createSignal<string | null>(null);
+  /**
    * 提示通道（`components/ui/Toast.tsx`）：挂在**根层** —— 模态/条带都有自己的层叠上下文，
    * 提示要永远在最上面（`--z-toast`），所以由组装层建、往下传。
    */
@@ -237,6 +246,22 @@ export default function App() {
         }}
       />
 
+      {/*
+        库设置（齿轮）：浏览侧的那条路。弹窗自带「两个计数 + 重建数据」，
+        关掉之后浏览工作区下次进目录时会重新同步计数。
+      */}
+      <LibrarySettingsDialog
+        open={librarySettingsId() !== null}
+        repositoryId={librarySettingsId()}
+        onOpenChange={(open) => {
+          if (!open) setLibrarySettingsId(null);
+        }}
+        onSaved={() => {
+          // 改了模版：库列表那份缓存也要跟着刷新（它显示的是模版与计数）
+          void browseStore.reload();
+        }}
+      />
+
       {/* 提示（右上角、不阻塞、约 5 秒；带「撤销」的动作把撤销放在自己身上） */}
       <ToastHost store={toast} />
 
@@ -256,6 +281,7 @@ export default function App() {
       }>
         <BrowseWorkspace
           store={browseStore}
+          onOpenLibrarySettings={(id) => setLibrarySettingsId(id)}
           toast={toast}
           leftWidth={layout.prefs().browseLeftWidth}
           rightWidth={layout.prefs().browseRightWidth}
