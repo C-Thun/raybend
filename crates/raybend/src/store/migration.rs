@@ -224,6 +224,31 @@ pub fn supported_version(kind: DbKind) -> i64 {
 /// 按种类执行迁移。这是生产路径的唯一入口。
 ///
 /// `backup_dir` 为 `None` 时**不做快照** —— 只应在测试里这么用。
+/// 迁移**即将开始**时的通知钩子 —— 由**外壳**注册（见 `src-tauri` 的 setup）。
+///
+/// 为什么用全局钩子、而不是给 `apply` 加参数：
+/// store 层**不依赖 Tauri**（`AGENTS.md` §4 的分层纪律），而「升级时告诉界面一声、
+/// 让它挡住用户操作」是外壳的事。钩子让两边各守本分 ——
+/// store 只说「我要开始迁移了（哪个库、从哪版到哪版）」，外壳决定怎么展示。
+///
+/// 只在**真的要跑迁移**时触发：全新的库（0 → N）与已是最新版的库都不会响。
+static PROGRESS_HOOK: std::sync::OnceLock<
+    Box<dyn Fn(DbKind, i64, i64) + Send + Sync + 'static>,
+> = std::sync::OnceLock::new();
+
+/// 注册进度钩子。**只生效一次**（后注册的返回 `false`）—— 进程内只该有一个外壳。
+pub fn set_progress_hook(
+    hook: Box<dyn Fn(DbKind, i64, i64) + Send + Sync + 'static>,
+) -> bool {
+    PROGRESS_HOOK.set(hook).is_ok()
+}
+
+fn notify_start(kind: DbKind, from: i64, to: i64) {
+    if let Some(hook) = PROGRESS_HOOK.get() {
+        hook(kind, from, to);
+    }
+}
+
 pub fn apply(
     conn: &mut Connection,
     kind: DbKind,
@@ -260,6 +285,9 @@ fn apply_list(
             snapshot: None,
         });
     }
+
+    // ①.5 告诉外壳「要开始升级了」——界面据此挡住用户操作，升级完再放开
+    notify_start(kind, current, target);
 
     // ② 迁移前快照：只在「已有数据」时做（全新库没什么可备份的）
     let snapshot = match (current, backups.dir) {

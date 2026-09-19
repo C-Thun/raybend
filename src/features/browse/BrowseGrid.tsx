@@ -74,6 +74,8 @@ export interface BrowseGridProps {
   class?: string;
   /** 尺寸档位（受控；控制条改它）。 */
   tileStep?: number;
+  /** 尺寸档位变化（Ctrl+滚轮用；由工作区落盘） */
+  onTileStepChange?: (step: number) => void;
   /** 按时间分组（受控）。 */
   grouped?: boolean;
   /**
@@ -372,6 +374,8 @@ export function BrowseGrid(props: BrowseGridProps) {
       <Show when={watermark()} keyed fallback={<VirtualGrid
         rows={rows()}
         resetKey={props.resetKey}
+        /* Ctrl+滚轮调档位（与导入网格同一个手势，实现也在 VirtualGrid 里） */
+        onZoomWheel={(delta) => props.onTileStepChange?.(clampTileStepIndex(step() + delta))}
         /* 点空白（没落在 tile 上）= 取消选择（人类 2026-09-19） */
         onBackgroundClick={() => store.clearSelection()}
         focusRow={focusRow()}

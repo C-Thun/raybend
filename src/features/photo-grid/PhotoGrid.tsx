@@ -40,11 +40,7 @@ import { createTokenPx } from "../../components/ui/tokens.ts";
 import { locale, t } from "../../i18n/index.ts";
 import { formatDayLabel, formatTimeRange } from "../../lib/datetime.ts";
 import { formatCount, type GroupingLocale } from "../../lib/format.ts";
-import {
-  computeTileFlow,
-  nextIndexForArrow,
-  tileSizeAt,
-} from "../../lib/tile-flow.ts";
+import { clampTileStepIndex, computeTileFlow, nextIndexForArrow, tileSizeAt } from "../../lib/tile-flow.ts";
 import type { SourceItem } from "../../api/types.ts";
 import { GridControlBar } from "./GridControlBar.tsx";
 import { createViewerStore, Viewer } from "../../components/ui/viewer/index.ts";
@@ -254,6 +250,13 @@ export function PhotoGrid(props: PhotoGridProps) {
                   rows={rows()}
                   overscan={2}
                   resetKey={store.dir() ?? ""}
+                  /* Ctrl+滚轮调档位（与浏览网格同一个手势）；松手那次由 commitTileStep 落盘 */
+                  onZoomWheel={(step) => {
+                    store.setTileStep(
+                      clampTileStepIndex(store.tileStep() + step),
+                    );
+                    store.commitTileStep();
+                  }}
                   /* 点空白 = 取消选择（与浏览网格同一行为） */
                   onBackgroundClick={() => store.clearSelection()}
                   renderRow={(row) =>

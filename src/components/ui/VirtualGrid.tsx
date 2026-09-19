@@ -64,6 +64,17 @@ export interface VirtualGridProps<TRow extends VirtualGridRow> {
    * （那些元素有自己的点击处理）。人类 2026-09-19 要求：点空白 = 取消选中的图。
    */
   onBackgroundClick?: () => void;
+  /**
+   * **Ctrl（或 ⌘）+ 滚轮**：调 tiles 的尺寸档位（人类 2026-09-19）。
+   *
+   * 参数是方向：`-1` 缩小、`1` 放大。为什么把判定放在这里而不是各网格里：
+   * 「Ctrl+滚轮 = 缩放档位」是 tiles 的**通用手势**，两个工作区必须一模一样；
+   * 而它只在网格上生效（看图里的滚轮是缩放图片，那条路不经过这里）。
+   *
+   * ⚠️ 必须在元素上监听并 `preventDefault()` —— 否则 Chromium 会把它当成
+   * 页面缩放（整窗放大），那显然不是我们要的。
+   */
+  onZoomWheel?: (step: -1 | 1) => void;
   class?: string;
 }
 
@@ -140,6 +151,13 @@ export function VirtualGrid<TRow extends VirtualGridRow>(
         .filter(Boolean)
         .join(" ")}
       onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
+      onWheel={(event) => {
+        if (props.onZoomWheel === undefined) return;
+        // ⌘ 也认（macOS 用户的手感）；不按修饰键时**一律不管**，滚动照常
+        if (!event.ctrlKey && !event.metaKey) return;
+        event.preventDefault();
+        props.onZoomWheel(event.deltaY < 0 ? 1 : -1);
+      }}
       onClick={(event) => {
         // 落在「容器本身」或「留白层」上都算空白；落在行 / tile 上不算
         if (event.target === event.currentTarget || event.target === surface) {

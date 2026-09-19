@@ -531,6 +531,8 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
             root={root()}
             resetKey={`${store.repositoryId() ?? ""}:${store.scopePath() ?? ""}`}
             tileStep={tileStep()}
+            /* Ctrl+滚轮：与状态栏的滑块走同一个 setter（手感与 import 一致） */
+            onTileStepChange={(step) => setTileStep(clampTileStepIndex(step))}
             grouped={grouped()}
             thumbs={thumbs}
             focusIndex={focusIndex()}
