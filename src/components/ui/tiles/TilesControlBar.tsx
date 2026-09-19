@@ -20,16 +20,18 @@
  * 所以它住在 `components/ui/`，两个工作区各自把配置灌进来。
  */
 
-import { Show } from "solid-js";
+import { Show, type JSX } from "solid-js";
 import {
   IconArrowDown,
   IconArrowUp,
   IconClock,
   IconInfoCircle,
+  IconLock,
   IconZoomIn,
   IconZoomOut,
 } from "@tabler/icons-solidjs";
 import { PathText } from "../PathText.tsx";
+import { PhotoMarks } from "../PhotoMarks.tsx";
 import { Slider } from "../Slider.tsx";
 import { cycleTileInfo, infoMode } from "../tile-info.ts";
 import { ToggleBlock } from "../ToggleBlock.tsx";
@@ -50,6 +52,24 @@ export interface TilesSortConfig {
   desc: boolean;
   onKeyChange: (key: string) => void;
   onDirectionToggle: () => void;
+}
+
+/**
+ * 看图态的**内容**（人类 2026-09-20 定：看图时中列底部与 tiles 是**同一条**状态栏，
+ * 只换内容 —— 文件名 + 锁 + 这一张的标记；不再另开一条跨列的信息条）。
+ *
+ * 数据来自看图件当前那张照片（`ViewerPhoto`）—— 由工作区映射成这个小对象，
+ * 状态栏组件本身不认识 store、也不发请求。
+ */
+export interface TilesViewingInfo {
+  /** 当前那张的文件名 */
+  fileName: string | null;
+  /** 锁级别（0/1/2）—— **紧挨着文件名右边**显示（`BROWSE.md` §5.8） */
+  lockLevel: number;
+  rating: number;
+  colorLabel: string | null;
+  flag: "pick" | "reject" | null;
+  like: "like" | "dislike" | null;
 }
 
 export interface TilesControlBarProps {
@@ -102,15 +122,7 @@ export function TilesControlBar(props: TilesControlBarProps) {
     showDir() !== null || leadText() !== "" || (props.fileName ?? "") !== "";
 
   return (
-    <div
-      class={[
-        "flex h-8 shrink-0 items-center gap-2 border-t border-t-surface-track px-3",
-        props.class ?? "",
-      ]
-        .filter(Boolean)
-        .join(" ")}
-      data-tiles-control-bar
-    >
+    <BarFrame mode="tiles" class={props.class}>
       {/* 计数：**含选中数**（人类 2026-09-19：导入侧本来就有，浏览侧也要有） */}
       <span class="shrink-0 text-fs-1 text-fg-2 tnum">
         {t("grid.count", { n: formatCount(props.count, groupLocale()) })}
@@ -233,6 +245,73 @@ export function TilesControlBar(props: TilesControlBarProps) {
         endIcon={<IconZoomIn size={14} />}
         class="w-40 shrink-0"
       />
+    </BarFrame>
+  );
+}
+
+/**
+ * 那条栏的**外框** —— tiles 与看图**共用**（人类 2026-09-20 定的结构）。
+ *
+ * 他说得很直：中列底部只有一条状态栏，“就是 tiles 那一条的容器”；
+ * 看图只是**换内容**（文件名 + 锁 + 标记），不是另开一条跨列的条。
+ * 所以高度 / 面色 / 上边线 / 标记属性都只写在这里一份。
+ */
+function BarFrame(props: {
+  mode: "tiles" | "view";
+  class?: string;
+  children: JSX.Element;
+}): JSX.Element {
+  return (
+    <div
+      class={[
+        "flex h-8 shrink-0 items-center gap-2 border-t border-t-surface-track px-3",
+        props.class ?? "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+      data-tiles-control-bar
+      data-tiles-bar-mode={props.mode}
+    >
+      {props.children}
     </div>
+  );
+}
+
+/**
+ * **看图态的**内容（与 `TilesControlBar` 同一条栏、同一个 `BarFrame`）：
+ * 左 = 文件名 + **紧挨着**的锁徽标；右 = 这一张的标记（`BROWSE.md` §5.8）。
+ *
+ * 人类 2026-09-20 把旧的那条全宽 `ViewerStatusBar` 删了换成它 ——
+ * 理由见 `AGENTS.md` §11.1 的结构红线：workspace 只有纵向分列、没有跨列行。
+ */
+export function PhotoStatusBar(props: { info: TilesViewingInfo; class?: string }): JSX.Element {
+  const info = (): TilesViewingInfo => props.info;
+  return (
+    <BarFrame mode="view" class={props.class}>
+      {/* 左：文件名 + 紧挨着的锁徽标 */}
+      <span class="min-w-0 shrink truncate text-fs-1 text-fg-1" title={info().fileName ?? ""}>
+        {info().fileName ?? ""}
+      </span>
+      <Show when={info().lockLevel > 0}>
+        <span
+          class="flex shrink-0 items-center gap-1 rounded-(--radius) bg-surface-layer px-1.5 text-fs-0 text-fg-2"
+          title={info().lockLevel >= 2 ? t("browse.lockNoEdit") : t("browse.lockNoDelete")}
+        >
+          <IconLock size={11} aria-hidden="true" />
+          {info().lockLevel >= 2 ? 2 : 1}
+        </span>
+      </Show>
+
+      <span class="min-w-0 flex-1" />
+
+      {/* 右：这一张的标记（只显示「有值」的那些 —— 状态栏不是设置控件） */}
+      <PhotoMarks
+        class="shrink-0"
+        rating={info().rating}
+        colorLabel={info().colorLabel}
+        flag={info().flag}
+        like={info().like}
+      />
+    </BarFrame>
   );
 }

@@ -3,7 +3,8 @@
  *
  * 为什么要收成一处：这份映射原先在**三处**各写了一遍
  * （`components/ui/Tile.tsx` 的 `LABEL_DOT`、`features/browse/BrowseToolbar.tsx` 的 `COLOR_DOT`、
- * 以及 `features/browse/ViewerStatusBar.tsx` 又一份 `COLOR_DOT`），
+ * 以及看图状态栏（当时是 `features/browse/ViewerStatusBar.tsx`，
+ * 2026-09-20 并入 `components/ui/PhotoMarks.tsx`）又一份 `COLOR_DOT`），
  * 值表还散在 `lib/marking-state.ts`（顺序）、`BrowseGrid.tsx`（合法性集合）、
  * `features/browse/labels.ts`（文案 switch）里。加一个「青」要在六个地方改 ——
  * 这正是 `AGENTS.md` §2 #12「同一个能力只允许有一套实现」要拦的那种事。

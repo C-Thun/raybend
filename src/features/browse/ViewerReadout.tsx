@@ -34,6 +34,7 @@ import { getHistogram, type Histogram as HistogramData } from "../../api/db.ts";
 import { t } from "../../i18n/index.ts";
 import { visibleRect, type ViewerStore } from "../../components/ui/viewer/index.ts";
 import { HISTOGRAM_SAMPLES, histogramBarHeights, histogramIsEmpty } from "../../lib/histogram.ts";
+import { PREVIEW_FRAME_ASPECT, fitAxisFor } from "../../lib/preview-frame.ts";
 import { Histogram } from "../../components/ui/Histogram.tsx";
 
 export interface ViewerReadoutProps {
@@ -104,24 +105,32 @@ export function ViewerReadout(props: ViewerReadoutProps): JSX.Element {
   return (
     <>
       {/* ── 预览（整张 + 视野框） ── */}
+      {/*
+        框是**固定 4:3**（人类 2026-09-20：「比例改成 4:3，不要 3:2，这样对纵图支持更好」）——
+        不是按窗口高度写死的像素，也不是跟着照片走：固定下来横图铺宽、纵图铺高，
+        同一块面板宽度下纵图能占到更多高度。几何规则在 `lib/preview-frame.ts`（有单测）。
+      */}
       <section class="mb-5" data-viewer-readout="open">
         <h3 class="mb-1.5 text-fs-3 font-semibold text-fg-2">{t("browse.preview")}</h3>
-        <div class="flex h-[180px] items-center justify-center rounded-ui bg-surface-bar p-2">
+        <div
+          class="flex w-full items-center justify-center rounded-ui bg-surface-bar p-2"
+          style={{ "aspect-ratio": String(PREVIEW_FRAME_ASPECT) }}
+        >
           <Show
             when={natural().width > 0 && natural().height > 0}
             fallback={<span class="text-fs-2 text-fg-3">{t("browse.noSelection")}</span>}
           >
             {/*
-              这层盒子**就是照片的盒子**（`aspect-ratio` = 原图比例、高度撑满、宽度跟着算），
+              这层盒子**就是照片的盒子**（`aspect-ratio` = 原图比例，铺满框的一条边），
               所以视野框用百分比定位就天然对齐 —— 不需要去读 DOM 尺寸。
             */}
             <div
               class="relative"
               style={{
                 "aspect-ratio": `${natural().width} / ${natural().height}`,
-                height: "100%",
-                "max-width": "100%",
-                "max-height": "100%",
+                ...(fitAxisFor(natural().width, natural().height, PREVIEW_FRAME_ASPECT) === "width"
+                  ? { width: "100%", height: "auto" }
+                  : { height: "100%", width: "auto" }),
               }}
             >
               <img

@@ -2315,7 +2315,7 @@ try {
       const main = document.querySelector("main[data-chrome]");
       return {
         viewer: Boolean(document.querySelector('[data-viewer="open"]')),
-        status: Boolean(document.querySelector('[data-viewer-status="open"]')),
+        status: Boolean(document.querySelector('main [data-tiles-control-bar][data-tiles-bar-mode="view"]')),
         readout: Boolean(document.querySelector('[data-viewer-readout="open"]')),
         strip: document.querySelectorAll("[data-strip-item]").length,
         stripCurrent: document.querySelector("[data-strip-item][data-current='true']")?.getAttribute("data-strip-item") ?? null,
@@ -2342,8 +2342,106 @@ try {
     });
     problems.push(`双击之后看图件没打开（现场：${JSON.stringify(why.result?.value)}）`);
   }
-  if (shown.status !== true) problems.push("看图态底部状态栏没出现（[data-viewer-status=\"open\"] 不在）");
+  if (shown.status !== true) {
+    problems.push(
+      "看图态中列底部状态栏没出现（main 里的 [data-tiles-bar-mode=\"view\"] 不在 —— 看图那条应当就是 tiles 那条）",
+    );
+  }
+
+  /*
+   * 结构红线（人类 2026-09-20）：**workspace 只有纵向分列，没有跨列行，每一列各自到底**。
+   *
+   * 以前看图那条信息条是全宽、在三列下面（`ViewerStatusBar`）—— 既跨列又与 tiles 状态栏
+   * 重复。现在它必须是**中列（`main`）自己的最后一段**：横向不跨出 main，纵向在胶片带下面、
+   * 贴着 main 的底边。
+   */
+  const barGeometry = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const main = document.querySelector("main[data-chrome]");
+      const bar = document.querySelector('main [data-tiles-control-bar][data-tiles-bar-mode="view"]');
+      const strip = document.querySelector('[data-filmstrip="open"]');
+      if (!main || !bar) return { main: Boolean(main), bar: Boolean(bar) };
+      const mb = main.getBoundingClientRect();
+      const bb = bar.getBoundingClientRect();
+      const sb = strip ? strip.getBoundingClientRect() : null;
+      return {
+        mode: bar.getAttribute("data-tiles-bar-mode"),
+        insideMain: bar.closest("main") !== null,
+        leftInside: bb.left >= mb.left - 1,
+        rightInside: bb.right <= mb.right + 1,
+        bottomFlush: Math.abs(bb.bottom - mb.bottom) <= 1,
+        belowStrip: sb === null ? null : bb.top >= sb.bottom - 1,
+      };
+    })()`,
+    returnByValue: true,
+  });
+  const barGeo = barGeometry.result?.value ?? {};
+  if (barGeo.insideMain !== true || barGeo.leftInside !== true || barGeo.rightInside !== true) {
+    problems.push(
+      `看图状态栏必须在**中列之内**、不跨列（实测 ${JSON.stringify(barGeo)}）—— workspace 没有跨列行`,
+    );
+  }
+  if (barGeo.bottomFlush !== true) {
+    problems.push(`看图状态栏应当是中列最底那一格（实测 ${JSON.stringify(barGeo)}）`);
+  }
+  if (barGeo.belowStrip === false) {
+    problems.push(`看图状态栏要排在胶片带**下面**（实测 ${JSON.stringify(barGeo)}）`);
+  }
+
+  /*
+   * 胶片带**装得下就居中**（人类 2026-09-20）：内层那一行是 `w-max mx-auto`。
+   * fixture 里只有 6 张（远窄于窗口）⇒ 第一张的左边缘应当明显离开胶片带左边缘。
+   */
+  const stripCentered = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const strip = document.querySelector('[data-filmstrip="open"]');
+      const first = strip?.querySelector("[data-strip-item]");
+      const row = first?.parentElement ?? null;
+      if (!strip || !first || !row) return null;
+      const sb = strip.getBoundingClientRect();
+      const rb = row.getBoundingClientRect();
+      const fb = first.getBoundingClientRect();
+      return {
+        scrollWidth: strip.scrollWidth,
+        clientWidth: strip.clientWidth,
+        leftGap: Math.round(rb.left - sb.left),
+        firstGap: Math.round(fb.left - sb.left),
+        rowWidth: Math.round(rb.width),
+      };
+    })()`,
+    returnByValue: true,
+  });
+  const stripFit = stripCentered.result?.value ?? null;
+  if (stripFit === null) {
+    problems.push("量不到胶片带的内层行（居中这条验不了）");
+  } else if (stripFit.scrollWidth <= stripFit.clientWidth && stripFit.leftGap <= 4) {
+    problems.push(
+      `胶片带装得下时应当居中（实测 ${JSON.stringify(stripFit)}）—— 内层行是 w-max mx-auto`,
+    );
+  }
   if (shown.readout !== true) problems.push("右栏没换成预览 + 直方图（[data-viewer-readout=\"open\"] 不在）");
+  /*
+   * 预览框是**固定 4:3**（人类 2026-09-20：「比例改成 4:3，不要 3:2，这样对纵图支持更好」）。
+   * 量外框的宽高比，容差 2%（子像素与内边距）。
+   */
+  const previewFrame = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const section = document.querySelector('[data-viewer-readout="open"]');
+      const frame = section?.querySelector("div");
+      if (!frame) return null;
+      const r = frame.getBoundingClientRect();
+      return { w: Math.round(r.width), h: Math.round(r.height), ratio: r.height === 0 ? 0 : r.width / r.height };
+    })()`,
+    returnByValue: true,
+  });
+  const frame = previewFrame.result?.value ?? null;
+  if (frame === null) {
+    problems.push("量不到右栏预览框（4:3 这条验不了）");
+  } else if (Math.abs(frame.ratio - 4 / 3) > 0.03) {
+    problems.push(
+      `右栏预览框应当是 4:3（实测 ${JSON.stringify(frame)}）—— 不要 3:2，也不要跟着照片比例走`,
+    );
+  }
   // 2026-09-20 起直方图是**逐点填充折线**（加色分层），不再做三次曲线拟合
   if (shown.histogram !== "lines") {
     problems.push(`直方图没画出折线（data-histogram=${JSON.stringify(shown.histogram)}）`);
@@ -2412,7 +2510,7 @@ try {
   const stripAfter = await send("Runtime.evaluate", {
     expression: `(() => ({
       current: document.querySelector("[data-strip-item][data-current='true']")?.getAttribute("data-strip-item") ?? null,
-      status: document.querySelector('[data-viewer-status="open"]')?.innerText ?? "",
+      status: document.querySelector('main [data-tiles-control-bar][data-tiles-bar-mode="view"]')?.innerText ?? "",
       selected: document.querySelectorAll("[data-strip-item]").length,
     }))()`,
     returnByValue: true,
@@ -2527,7 +2625,7 @@ try {
   await sleep(400);
   const afterFocus = await send("Runtime.evaluate", {
     expression: `(() => ({
-      status: document.querySelector('[data-viewer-status="open"]')?.innerText ?? "",
+      status: document.querySelector('main [data-tiles-control-bar][data-tiles-bar-mode="view"]')?.innerText ?? "",
       rightColumn: (document.querySelector("aside:last-of-type")?.innerText ?? "").slice(0, 80),
       frameCurrent: document.querySelector("[data-compare-frame][data-current='true']")?.getAttribute("data-compare-frame") ?? null,
       frames: document.querySelectorAll("[data-compare-frame]").length,

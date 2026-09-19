@@ -220,9 +220,13 @@ export function FilmStrip(props: FilmStripProps): JSX.Element {
       /*
        * `overflow-x-auto` + `shrink-0` 的子项：横向滚动条只在需要时出现；
        * 纵向不滚（104 高放得下 80 的缩略 + 上下各 12 的呼吸）。
+       *
+       * 里面那一行是 `w-max mx-auto`：**装得下就居中**（人类 2026-09-20），
+       * 装不下时 auto 外边距归零、就还是原来那样从左排起、横向滚动。
+       * 不用 `justify-center`：flex 的居中对**溢出**会两头都截，起始那几张滚不回来。
        */
       class={[
-        "flex h-[104px] shrink-0 items-center gap-1.5 overflow-x-auto overflow-y-hidden bg-surface-main px-2",
+        "h-[104px] shrink-0 overflow-x-auto overflow-y-hidden bg-surface-main",
         // 「只看对比图」= 整条 1px 主色细边框（画布 `Shell / Browse / Compare` 的 FilmStrip）
         compareOnly() ? "border border-brand" : "",
         props.class ?? "",
@@ -231,6 +235,7 @@ export function FilmStrip(props: FilmStripProps): JSX.Element {
         .join(" ")}
       data-strip-mode={compareOnly() ? "compare" : "all"}
     >
+      <div class="mx-auto flex h-full w-max items-center gap-1.5 px-2">
       <For each={photos()}>
         {(photo) => {
           const lockLevel = (): number => photo.marks?.lockLevel ?? 0;
@@ -291,6 +296,7 @@ export function FilmStrip(props: FilmStripProps): JSX.Element {
           );
         }}
       </For>
+      </div>
     </div>
   );
 }

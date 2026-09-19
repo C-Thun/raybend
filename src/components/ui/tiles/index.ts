@@ -8,7 +8,9 @@
 
 export { TilesShell, type TilesShellProps } from "./TilesShell.tsx";
 export {
+  PhotoStatusBar,
   TilesControlBar,
   type TilesControlBarProps,
   type TilesSortConfig,
+  type TilesViewingInfo,
 } from "./TilesControlBar.tsx";

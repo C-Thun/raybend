@@ -46,14 +46,10 @@
 import {
   IconBan,
   IconLock,
-  IconStar,
-  IconFlagFilled,
-  IconStarFilled,
-  IconThumbDownFilled,
-  IconThumbUpFilled,
 } from "@tabler/icons-solidjs";
 import { Show, splitProps, type JSX } from "solid-js";
 import { t } from "../../i18n/index.ts";
+import { PhotoMarks } from "./PhotoMarks.tsx";
 import {
   DEFAULT_DISPLAY_ASPECT,
   MAX_DISPLAY_ASPECT,
@@ -151,7 +147,7 @@ export interface TileProps
  * 它们是 `lib/color-labels.ts` 的唯一一份，工具条与看图状态栏用的是同一张。
  * 以前这里各写一份，加一个色要改三处（人类 2026-09-19 统一时收敛掉）。
  */
-import { COLOR_DOT_CLASS as LABEL_DOT, COLOR_TINT_CLASS as LABEL_TINT, type ColorLabel } from "../../lib/color-labels.ts";
+import { COLOR_TINT_CLASS as LABEL_TINT, type ColorLabel } from "../../lib/color-labels.ts";
 
 export function Tile(props: TileProps) {
   const [local, rest] = splitProps(props, [
@@ -393,13 +389,14 @@ export function Tile(props: TileProps) {
             style={{ height: "var(--tile-bar-h)" }}
             aria-hidden="true"
           >
-            <TileMarks
+            <PhotoMarks
               rating={rating()}
               compact={local.compact === true}
               colorLabel={local.colorLabel ?? null}
               flag={local.flag ?? null}
               like={local.like ?? null}
               outlined
+              spread
             />
           </div>
         </Show>
@@ -420,13 +417,13 @@ export function Tile(props: TileProps) {
             .join(" ")}
           style={{ height: "var(--tile-bar-h)" }}
         >
-          <TileMarks
+          <PhotoMarks
             rating={rating()}
             compact={local.compact === true}
             colorLabel={local.colorLabel ?? null}
             flag={local.flag ?? null}
             like={local.like ?? null}
-            outlined={false}
+            spread
           />
         </div>
       </Show>
@@ -460,96 +457,6 @@ export function Tile(props: TileProps) {
         <TileName label={local.label} name={displayName()} tag={local.tag} locked={local.locked} />
       </div>
     </div>
-  );
-}
-
-/**
- * 顶部条的**内容**：星标 / 色标 / 旗标。
- *
- * 抽成子组件是**为了强制显示层与标准层共用同一份实现**（否则「同一处两种表达」的欠账
- * 迟早出现：改了一层的星标忘了改另一层）。
- */
-function TileMarks(props: {
-  rating: number;
-  compact: boolean;
-  colorLabel: ColorLabel | null;
-  flag: "pick" | "reject" | null;
-  like: "like" | "dislike" | null;
-  /**
-   * 要不要给**图案**加反色描边（强制显示层传 true）。
-   *
-   * 文字那层由容器的 `.tile-info-text` 管；SVG 对 `text-shadow` 不感冒，
-   * 所以图标单独走 `.tile-info-icon`（`paint-order: stroke`）、色点走 `.tile-info-dot`。
-   */
-  outlined: boolean;
-}): JSX.Element {
-  /** 图案描边类（强制显示层才有） */
-  const iconClass = (): string => (props.outlined ? "tile-info-icon" : "");
-  return (
-    <>
-      {/* 星标：0 星什么都不显示；窄格子退化成「一颗星 + 数字」 */}
-      <Show when={props.rating > 0}>
-        <span
-          class="flex shrink-0 items-center gap-0.5"
-          aria-label={t("grid.rating", { n: props.rating })}
-        >
-          <Show
-            when={!props.compact}
-            fallback={
-              <>
-                <IconStarFilled size={12} class={iconClass()} aria-hidden="true" />
-                <span class="text-fs-0 tnum">{props.rating}</span>
-              </>
-            }
-          >
-            {[1, 2, 3, 4, 5].map((index) =>
-              index <= props.rating ? (
-                <IconStarFilled size={11} class={iconClass()} aria-hidden="true" />
-              ) : (
-                <IconStar size={11} class={["opacity-50", iconClass()].join(" ")} aria-hidden="true" />
-              ),
-            )}
-          </Show>
-        </span>
-      </Show>
-
-      <span class="min-w-0 flex-1" />
-
-      {/* 颜色标记：悬停/选中时底纹被盖住，用它兜底让人看到标色 */}
-      <Show when={props.colorLabel}>
-        {(label) => (
-          <span
-            class={[
-              "size-2 shrink-0 rounded-full",
-              props.outlined ? "tile-info-dot" : "",
-              LABEL_DOT[label()],
-            ]
-              .filter(Boolean)
-              .join(" ")}
-            aria-label={t("grid.color_label")}
-          />
-        )}
-      </Show>
-
-      {/*
-        赞 / 踩（人类 2026-09-20：**这两个也要在图片顶部显示**）。
-        与工具条同一套三态语义：`like` = 大拇指朝上、`dislike` = 朝下、`null` = 不显示。
-      */}
-      <Show when={props.like === "like"}>
-        <IconThumbUpFilled size={11} class={iconClass()} aria-hidden="true" />
-      </Show>
-      <Show when={props.like === "dislike"}>
-        <IconThumbDownFilled size={11} class={iconClass()} aria-hidden="true" />
-      </Show>
-
-      {/*
-        旗标用**实心小旗**（人类 2026-09-19：以前这里是星星，与星标撞在一起分不清）。
-        「弃」的那一态在界面上已经取消了（见 BrowseToolbar 的说明），所以这里只有一种旗。
-      */}
-      <Show when={props.flag === "pick"}>
-        <IconFlagFilled size={11} class={iconClass()} aria-hidden="true" />
-      </Show>
-    </>
   );
 }
 

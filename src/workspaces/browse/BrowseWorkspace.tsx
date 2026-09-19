@@ -39,7 +39,6 @@ import type { RepositoryView } from "../../api/types.ts";
 import {
   AssetInfo,
   BrowseLeftColumn,
-  ViewerStatusBar,
   type BrowseStore,
 } from "../../features/browse/index.ts";
 import {
@@ -63,7 +62,11 @@ import {
 import { CompareView } from "../../components/ui/viewer/index.ts";
 import { compareIds } from "../../lib/viewer-compare.ts";
 import { createThumbQueue } from "../../components/ui/thumb-queue.ts";
-import { TilesShell } from "../../components/ui/tiles/index.ts";
+import {
+  PhotoStatusBar,
+  TilesShell,
+  type TilesViewingInfo,
+} from "../../components/ui/tiles/index.ts";
 import { createViewerStore, Viewer } from "../../components/ui/viewer/index.ts";
 import { clampTileStepIndex } from "../../lib/tile-flow.ts";
 import {
@@ -712,6 +715,25 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
     return [repoName, last].filter((s) => s !== "").join(" / ");
   });
 
+  /**
+   * 看图态那条状态栏的内容（人类 2026-09-20：与 tiles **同一条**，只换内容）。
+   *
+   * 字段来自看图件当前那张（`ViewerPhoto.marks` / `flag`）—— 调用方本来就有，
+   * 不为了显示四个数再问一次后端。
+   */
+  const viewingInfo = (): TilesViewingInfo => {
+    const photo = viewer.current();
+    const like = photo?.marks?.likeState;
+    return {
+      fileName: photo?.fileName ?? null,
+      lockLevel: photo?.marks?.lockLevel ?? 0,
+      rating: photo?.marks?.rating ?? 0,
+      colorLabel: photo?.marks?.colorLabel ?? null,
+      flag: photo?.flag ?? null,
+      like: like === "like" || like === "dislike" ? like : null,
+    };
+  };
+
   return (
     <div
       class={["flex min-h-0 flex-1 flex-col", props.class ?? ""].filter(Boolean).join(" ")}
@@ -780,7 +802,9 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
           这里与导入侧用的是同一个 `TilesShell` / `TilesControlBar`；
           差异按人列的清单走**显式配置**：浏览侧把 `sort` 传上（导入侧暂时不传）。
 
-          看图态不给 `bar`：那时中列下面是胶片带，状态条让位给它。
+          看图态不给 `bar`：那段会另开一条**中列最底**的状态栏 ——
+          看图的“东西”与 tiles 是同一条（同一个 `TilesControlBar`，只换内容），
+          所以它必须排在胶片带**后面**，见图下的渲染处。
         */}
         <TilesShell
           bar={
@@ -896,6 +920,17 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
             onlyIds={compareStrip() ? comparedIds() : undefined}
           />
         </Show>
+
+        {/*
+          看图态的底部状态栏（`BROWSE.md` §5.8）——**中列最底那一格**。
+
+          人类 2026-09-20 定的结构红线：**workspace 只有纵向分列，没有跨列行，每一列各自到底**。
+          它以前是三列下面一条全宽的条（`ViewerStatusBar`），既跨列又与 tiles 的状态栏重复；
+          现在就是 tiles 那一条（同一个组件），看图时换成「文件名 + 锁 + 标记」。
+        */}
+        <Show when={viewer.state().active}>
+          <PhotoStatusBar info={viewingInfo()} />
+        </Show>
       </main>
 
       {/* 右列**没有把手**：宽度固定（人类 2026-09-19 定，之后另有安排） */}
@@ -927,15 +962,6 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
             />
       </aside>
       </div>
-
-      {/*
-        看图态的底部状态栏（`BROWSE.md` §5.8）：**全宽、在三列下面** ——
-        与画布的 `ViewerStatusBar` 一致（它不在中列里，而是在整个工作区下面）。
-        只在看图时出现；tiles 模式下底部那条是控制条（计数/当前目录/视图控制）。
-      */}
-      <Show when={viewer.state().active}>
-        <ViewerStatusBar photo={viewer.current()} />
-      </Show>
 
       {/*
         删除确认（`AGENTS.md` §11.3 的定案 + 人类 2026-09-19 的批注）：

@@ -7,7 +7,6 @@
  * 浏览侧只提供它的**数据源适配器**（`browseSource`）与水印文案（在工作区里）。
  */
 export { browseSource, type BrowseSourceDeps } from "./grid-source.ts";
-export { ViewerStatusBar, type ViewerStatusBarProps } from "./ViewerStatusBar.tsx";
 export { BrowseToolbar, type BrowseToolbarProps } from "./BrowseToolbar.tsx";
 export { TagDialog, type TagDialogProps } from "./TagDialog.tsx";
 export {
