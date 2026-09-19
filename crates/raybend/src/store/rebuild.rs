@@ -50,6 +50,33 @@ pub fn rescan_library(
     photos_dir: &str,
     now_ms: i64,
 ) -> Result<RescanReport> {
+    rescan_library_with_progress(catalog, root, photos_dir, now_ms, &mut |_| {})
+}
+
+/// 重建过程中的**进度事实**（命令层把它翻成事件给前端；这里不认识 Tauri）。
+///
+/// `phase` 是**机器可读**的阶段名（`scan` / `apply` / `metadata`），
+/// 句子由前端按当前语言组织 —— 后端不拼人话（i18n 纪律）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RebuildProgress {
+    pub phase: &'static str,
+    /// 这一阶段已完成多少
+    pub done: usize,
+    /// 这一阶段总共多少（扫描阶段要扫完才知道 ⇒ 那时 `done == total`）
+    pub total: usize,
+}
+
+/// 带进度的重扫（人类 2026-09-19：重建数据要能看到进展，不能黑箱几十秒）。
+///
+/// 每个**阶段结束**报一次，加上扫描过程中**每 N 个文件**报一次 ——
+/// 大库最耗时的是扫盘，那段没有反馈，人就会以为卡死了。
+pub fn rescan_library_with_progress(
+    catalog: &CatalogDb,
+    root: &Path,
+    photos_dir: &str,
+    now_ms: i64,
+    progress: &mut dyn FnMut(RebuildProgress),
+) -> Result<RescanReport> {
     let base = if photos_dir.is_empty() {
         root.to_path_buf()
     } else {
@@ -59,7 +86,29 @@ pub fn rescan_library(
     // ① 扫盘（**不跟随符号链接**：库目录里放个链接指到自己会扫不完）
     let cancel = Cancel::new();
     let (scanned, _outcome) = if base.is_dir() {
-        scan::scan_collect(&base, &ScanOptions::default(), &cancel)?
+        let mut seen = 0usize;
+        let mut files = Vec::new();
+        let outcome = scan::scan(&base, &ScanOptions::default(), &cancel, |event| {
+            if let scan::ScanEvent::File(file) = event {
+                seen += 1;
+                files.push(file);
+                // 每 200 个报一次：太密会把事件通道打满、太疏又像卡住
+                if seen.is_multiple_of(200) {
+                    progress(RebuildProgress {
+                        phase: "scan",
+                        done: seen,
+                        total: seen,
+                    });
+                }
+            }
+            Ok(())
+        })?;
+        progress(RebuildProgress {
+            phase: "scan",
+            done: files.len(),
+            total: files.len(),
+        });
+        (files, outcome)
     } else {
         (Vec::new(), scan::ScanOutcome::default())
     };
@@ -97,8 +146,19 @@ pub fn rescan_library(
         assets::apply_diff(conn, &plan, &disk, now_ms)
     })?;
 
+    progress(RebuildProgress {
+        phase: "apply",
+        done: scanned_count,
+        total: scanned_count,
+    });
+
     // ③ 元数据重读（老库那批 NULL 的行）
     let filled = backfill::backfill_metadata(catalog, now_ms)?;
+    progress(RebuildProgress {
+        phase: "metadata",
+        done: filled.filled,
+        total: scanned_count,
+    });
 
     Ok(RescanReport {
         scanned: scanned_count,

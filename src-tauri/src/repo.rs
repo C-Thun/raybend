@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use raybend::store::db::{CatalogDb, OpenOpts};
 use raybend::store::{repository, time};
 use serde::Serialize;
-use tauri::{AppHandle, Manager, Runtime};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 use raybend::import::template;
 
@@ -352,6 +352,21 @@ pub async fn repository_sync_dir<R: Runtime>(
  * 重建数据（人类 2026-09-19：齿轮弹窗里的那个按钮）
  * ══════════════════════════════════════════════════════════════ */
 
+/// 重建数据的**进度事件名**（前端据此显示「扫到第几张 / 正在补元数据」）。
+pub const REBUILD_EVENT: &str = "db://rebuild";
+
+/// 重建进度（人类 2026-09-19：重建数据要能看到进展，不能黑箱几十秒）。
+///
+/// `phase` 是**机器可读**的阶段名（`scan` / `apply` / `metadata` / `counts` / `done`）——
+/// 句子由前端按当前语言组织，后端不拼人话（i18n 纪律）。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RebuildProgressDto {
+    pub repository_id: String,
+    pub phase: String,
+    pub done: usize,
+    pub total: usize,
+}
 /// 「重建数据」的结果（给用户看的一句话 + 几个数字）。
 #[derive(Debug, Default, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -394,9 +409,28 @@ pub async fn repository_rebuild<R: Runtime>(
         let catalog = CatalogDb::open(&root, OpenOpts::new(backups(&handle).as_deref(), now))
             .map_err(|e| e.to_string())?;
 
-        // ①② 磁盘 ↔ catalog 对齐 + 元数据重读
-        let rescan = raybend::store::rebuild::rescan_library(&catalog, &root, DEFAULT_PHOTOS_DIR, now)
-            .map_err(|e| e.to_string())?;
+        // ①② 磁盘 ↔ catalog 对齐 + 元数据重读（**带进度**：每一步都往前端报一次）
+        let emitter = handle.clone();
+        let progress_repo = repository_id.clone();
+        let emit_progress = |phase: &str, done: usize, total: usize| {
+            let _ = emitter.emit(
+                REBUILD_EVENT,
+                RebuildProgressDto {
+                    repository_id: progress_repo.clone(),
+                    phase: phase.to_string(),
+                    done,
+                    total,
+                },
+            );
+        };
+        let rescan = raybend::store::rebuild::rescan_library_with_progress(
+            &catalog,
+            &root,
+            DEFAULT_PHOTOS_DIR,
+            now,
+            &mut |p| emit_progress(p.phase, p.done, p.total),
+        )
+        .map_err(|e| e.to_string())?;
 
         // ③④ 计数：清空重来（这一份在 app.db 里）
         let (id, dir) = (repository_id.clone(), root.clone());
@@ -409,6 +443,11 @@ pub async fn repository_rebuild<R: Runtime>(
                 .map_err(|e| e.to_string())
             })
             .map_err(|e| e.to_string())?;
+
+        // 计数（app.db 侧）也报一次：这一段的耗时在大库上不小
+        let photos_done = usize::try_from(totals.photos).unwrap_or(0);
+        emit_progress("counts", photos_done, photos_done);
+        emit_progress("done", photos_done, photos_done);
 
         Ok(RebuildReportDto {
             scanned: rescan.scanned,
