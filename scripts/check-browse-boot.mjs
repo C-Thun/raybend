@@ -1191,8 +1191,9 @@ try {
   }
   if (shown.status !== true) problems.push("看图态底部状态栏没出现（[data-viewer-status=\"open\"] 不在）");
   if (shown.readout !== true) problems.push("右栏没换成预览 + 直方图（[data-viewer-readout=\"open\"] 不在）");
-  if (shown.histogram !== "bars") {
-    problems.push(`直方图没画出柱子（data-histogram=${JSON.stringify(shown.histogram)}）`);
+  // 2026-09-19 起直方图是**三条填充曲线**（加色叠加），不再是柱子
+  if (shown.histogram !== "curves") {
+    problems.push(`直方图没画出曲线（data-histogram=${JSON.stringify(shown.histogram)}）`);
   }
   if (shown.strip !== 6) {
     problems.push(`胶片带应当有 6 张缩略（实测 ${JSON.stringify(shown.strip)}）`);
