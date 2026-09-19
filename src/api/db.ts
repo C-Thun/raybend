@@ -269,7 +269,11 @@ export interface Histogram {
 
 export async function getHistogram(
   path: string,
-  bins = 24,
+  /**
+   * 采样点数（**桶数**）。默认 52 = 0..255 每 5 级一个点（人类 2026-09-19 定的口径）；
+   * 后端按 `value * bins / 256` 分桶，所以这里给几就是几个采样点。
+   */
+  bins = 52,
 ): Promise<Histogram | null> {
   if (!isTauriRuntime()) return null;
   const value = await call<Histogram>("image_histogram", { path, bins });

@@ -11,6 +11,7 @@ import { test } from "node:test";
 
 import {
   COLOR_DOT_CLASS,
+  COLOR_FILL_CLASS,
   COLOR_LABELS,
   COLOR_TINT_CLASS,
   COLOR_VALUES,
@@ -41,6 +42,13 @@ test("两个映射表覆盖全部色标，且逐个指向自己的令牌", () =>
   }
   assert.equal(Object.keys(COLOR_DOT_CLASS).length, COLOR_LABELS.length);
   assert.equal(Object.keys(COLOR_TINT_CLASS).length, COLOR_LABELS.length);
+});
+
+test("填充映射同样覆盖全部色标（直方图用的就是这一份）", () => {
+  for (const label of COLOR_LABELS) {
+    assert.equal(COLOR_FILL_CLASS[label], `fill-(--label-${label})`, `${label} 的填充类名`);
+  }
+  assert.equal(Object.keys(COLOR_FILL_CLASS).length, COLOR_LABELS.length);
 });
 
 test("合法性判断：只认表里的值", () => {

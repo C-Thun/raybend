@@ -26,10 +26,15 @@
 
 import { createEffect, createSignal, onCleanup, Show, type JSX } from "solid-js";
 
-import { getHistogram, type Histogram } from "../../api/db.ts";
+/*
+ * ⚠️ DTO 类型与组件同名（都叫 Histogram）：这里把**后端数据**那个改名 `HistogramData`，
+ * 组件保留自己的短名字（它是界面上那个东西，读代码的地方更多）。
+ */
+import { getHistogram, type Histogram as HistogramData } from "../../api/db.ts";
 import { t } from "../../i18n/index.ts";
 import { visibleRect, type ViewerStore } from "../../components/ui/viewer/index.ts";
-import { histogramBarHeights, histogramIsEmpty, histogramPath } from "./histogram.ts";
+import { HISTOGRAM_SAMPLES, histogramBarHeights, histogramIsEmpty } from "../../lib/histogram.ts";
+import { Histogram } from "../../components/ui/Histogram.tsx";
 
 export interface ViewerReadoutProps {
   store: ViewerStore;
@@ -42,9 +47,9 @@ export interface ViewerReadoutProps {
  * 不当长期缓存用（真正的缓存属于后端 `cache/` 的活）。
  */
 const HISTOGRAM_CACHE_LIMIT = 24;
-const histogramCache = new Map<string, Histogram | null>();
+const histogramCache = new Map<string, HistogramData | null>();
 
-function cacheHistogram(path: string, value: Histogram | null): void {
+function cacheHistogram(path: string, value: HistogramData | null): void {
   if (histogramCache.size >= HISTOGRAM_CACHE_LIMIT) {
     const oldest = histogramCache.keys().next();
     if (!oldest.done) histogramCache.delete(oldest.value);
@@ -53,7 +58,7 @@ function cacheHistogram(path: string, value: Histogram | null): void {
 }
 
 export function ViewerReadout(props: ViewerReadoutProps): JSX.Element {
-  const [histogram, setHistogram] = createSignal<Histogram | null>(null);
+  const [histogram, setHistogram] = createSignal<HistogramData | null>(null);
 
   // 取直方图：跟着「当前这张」走，取完之前先是空态（不阻塞任何东西）
   createEffect(() => {
@@ -71,7 +76,7 @@ export function ViewerReadout(props: ViewerReadoutProps): JSX.Element {
     onCleanup(() => {
       alive = false;
     });
-    void getHistogram(path)
+    void getHistogram(path, HISTOGRAM_SAMPLES)
       .then((value) => {
         if (!alive) return;
         cacheHistogram(path, value);
@@ -136,13 +141,10 @@ export function ViewerReadout(props: ViewerReadoutProps): JSX.Element {
         </div>
       </section>
 
-      {/* ── 直方图（三通道**填充曲线**，加色叠加） ── */}
+      {/* ── 直方图（三通道填充曲线 + 加色区域；组件在 `components/ui/Histogram.tsx`） ── */}
       <section class="mb-5">
         <h3 class="mb-1.5 text-fs-3 font-semibold text-fg-2">{t("browse.histogram")}</h3>
-        <div
-          class="rounded-ui bg-surface-bar px-2 py-1.5"
-          data-histogram={histogramIsEmpty(bars()) ? "empty" : "curves"}
-        >
+        <div class="rounded-ui bg-surface-bar px-2 py-1.5">
           <Show
             when={!histogramIsEmpty(bars())}
             fallback={
@@ -150,34 +152,11 @@ export function ViewerReadout(props: ViewerReadoutProps): JSX.Element {
             }
           >
             {/*
-              三条**填充曲线**叠着画，靠 `mix-blend-screen` 做加色混合 —— 这是参考图的做法：
-              红蓝重叠 = 紫、蓝绿 = 青、绿红 = 黄、三色 = 白（灰）。
-              采样密度：256 个桶画在几百像素宽的框里 → 一桶不到一个像素，曲线天然平滑无锯齿，
-              不需要任何插值（这也是「按像素级精度构筑曲线」的落法）。
+              组件吃的是**归一化后的采样**（不是原始计数）：这样将来编辑模块每帧重算
+              （拖曝光/对比时）只要把新的 `bars` 传进来就换一帧 —— 不需要重新请求后端、
+              也不需要重新挂载。绘制数学与颜色分层都在 `lib` / 组件内部，不在这层。
             */}
-            <svg
-              class="h-[72px] w-full"
-              viewBox="0 0 256 100"
-              preserveAspectRatio="none"
-              role="img"
-              aria-label={t("browse.histogramHint")}
-            >
-              <path
-                d={histogramPath(bars()?.r ?? [], 256, 100)}
-                fill="var(--hist-r)"
-                class="mix-blend-screen"
-              />
-              <path
-                d={histogramPath(bars()?.g ?? [], 256, 100)}
-                fill="var(--hist-g)"
-                class="mix-blend-screen"
-              />
-              <path
-                d={histogramPath(bars()?.b ?? [], 256, 100)}
-                fill="var(--hist-b)"
-                class="mix-blend-screen"
-              />
-            </svg>
+            <Histogram bars={bars()} />
           </Show>
         </div>
       </section>

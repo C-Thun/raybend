@@ -60,3 +60,18 @@ export const COLOR_TINT_CLASS: Record<ColorLabel, string> = {
   blue: "bg-(--label-blue-tint)",
   purple: "bg-(--label-purple-tint)",
 };
+
+/**
+ * 色标 → **填充**类名（直方图的填充曲线用）。
+ *
+ * 与 `COLOR_DOT_CLASS` 同源同表：直方图的通道色就是色标那六个色（人类 2026-09-19），
+ * 所以不给直方图另立一套色 —— 那样两边迟早会漂开。
+ */
+export const COLOR_FILL_CLASS: Record<ColorLabel, string> = {
+  red: "fill-(--label-red)",
+  yellow: "fill-(--label-yellow)",
+  green: "fill-(--label-green)",
+  cyan: "fill-(--label-cyan)",
+  blue: "fill-(--label-blue)",
+  purple: "fill-(--label-purple)",
+};
