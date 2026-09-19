@@ -103,7 +103,7 @@ impl FlagSet {
         self.get(key) == Some(Flag::Reject)
     }
 
-    /// 清空**所有**旗标（用户点「移除所有旗标」，`BROWSE.md` §3.2 要求先确认）。
+    /// 清空**所有**旗标（用户点「清空旗标」，`BROWSE.md` §3.2 要求先确认）。
     ///
     /// 返回清掉了多少个 —— 调用方可以据此提示「已移除 12 个旗标」。
     pub fn clear(&mut self) -> usize {

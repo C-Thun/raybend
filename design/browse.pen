@@ -861,7 +861,7 @@
             {
               "type": "frame",
               "id": "Z7rzzK",
-              "name": "ToolButton / 移除所有旗标",
+              "name": "ToolButton / 清空旗标",
               "width": 28,
               "height": 28,
               "cornerRadius": 4,
@@ -4414,7 +4414,7 @@
             {
               "type": "frame",
               "id": "oTEph",
-              "name": "Mark / 移除所有旗标",
+              "name": "Mark / 清空旗标",
               "width": 28,
               "height": 28,
               "cornerRadius": 4,
@@ -4668,7 +4668,7 @@
             {
               "type": "frame",
               "id": "rOyYI",
-              "name": "Mark / 移除所有旗标",
+              "name": "Mark / 清空旗标",
               "width": 28,
               "height": 28,
               "cornerRadius": 4,
@@ -4934,7 +4934,7 @@
             {
               "type": "frame",
               "id": "ip1V5",
-              "name": "Mark / 移除所有旗标",
+              "name": "Mark / 清空旗标",
               "width": 28,
               "height": 28,
               "cornerRadius": 4,
@@ -6811,7 +6811,7 @@
             {
               "type": "frame",
               "id": "C1wZE",
-              "name": "ToolButton / 移除所有旗标",
+              "name": "ToolButton / 清空旗标",
               "width": 28,
               "height": 28,
               "cornerRadius": 4,
@@ -9589,7 +9589,7 @@
             {
               "type": "frame",
               "id": "P0sPRE",
-              "name": "ToolButton / 移除所有旗标",
+              "name": "ToolButton / 清空旗标",
               "width": 28,
               "height": 28,
               "cornerRadius": 4,
@@ -12343,7 +12343,7 @@
             {
               "type": "frame",
               "id": "WWEXo",
-              "name": "ToolButton / 移除所有旗标",
+              "name": "ToolButton / 清空旗标",
               "width": 28,
               "height": 28,
               "cornerRadius": 4,
