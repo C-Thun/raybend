@@ -40,6 +40,7 @@ import type {
   ImportStart,
   MarkingItem,
   MarkResult,
+  MigrationNotice,
   MetaFile,
   ImportPlannedRun,
   InterruptedRun,
@@ -312,6 +313,13 @@ const DELETE_RESULT_KEYS = [
   "deleted",
   "failed",
 ] as const satisfies readonly (keyof DeleteResult)[];
+const MIGRATION_NOTICE_KEYS = [
+  "from",
+  "kind",
+  "label",
+  "running",
+  "to",
+] as const satisfies readonly (keyof MigrationNotice)[];
 const FLAGS_VIEW_KEYS = ["picks", "rejects", "total"] as const satisfies readonly (keyof FlagsView)[];
 const DIR_EMPTY_VIEW_KEYS = [
   "empty",
@@ -382,6 +390,9 @@ const KEY_TABLES = {
   DeleteFailure: checkKeys<DeleteFailure, typeof DELETE_FAILURE_KEYS>(DELETE_FAILURE_KEYS),
   DeleteResult: checkKeys<DeleteResult, typeof DELETE_RESULT_KEYS>(DELETE_RESULT_KEYS),
   FlagsView: checkKeys<FlagsView, typeof FLAGS_VIEW_KEYS>(FLAGS_VIEW_KEYS),
+  MigrationNotice: checkKeys<MigrationNotice, typeof MIGRATION_NOTICE_KEYS>(
+    MIGRATION_NOTICE_KEYS,
+  ),
   DirEmptyView: checkKeys<DirEmptyView, typeof DIR_EMPTY_VIEW_KEYS>(DIR_EMPTY_VIEW_KEYS),
 } as const;
 

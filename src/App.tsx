@@ -36,6 +36,12 @@ import { createToastStore, ToastHost, toastDisposer } from "./components/ui/Toas
 import { BrowseToolbar, createBrowseStore, TagDialog } from "./features/browse/index.ts";
 import { browseDelete, browseFacets, browseMark, browseMarkings, browsePage, browseRedo, browseTimeline, browseUndo, flagsClear, flagsGet, flagsSet } from "./api/browse.ts";
 import { BrowseWorkspace } from "./workspaces/browse/index.ts";
+import {
+  applyNotice,
+  MigrationGate,
+  NO_MIGRATIONS,
+  type MigrationMap,
+} from "./features/migration/index.ts";
 
 export default function App() {
   const shell = createShellStore();
@@ -84,6 +90,19 @@ export default function App() {
    *
    * 浏览器里（`pnpm dev`）`uiReady()` 直接返回，什么也不做。
    */
+  /*
+   * 数据库升级的阻塞遮罩（人类 2026-09-19）：外壳只做**订阅**这件事，
+   * 「哪些库正在升级、显示哪一条」是 `features/migration/notice.ts` 的纯逻辑。
+   *
+   * 为什么挂在组装层：升级可能在启动时就发生（`app.db`），也可能在用户第一次点库时
+   * 才发生（`catalog.db` —— 人类要求「只在真正用到时才检查 + 升级」）。
+   * 遮罩要盖住**整个窗口**，所以它属于最外层，不属于某个工作区。
+   */
+  const [migrations, setMigrations] = createSignal<MigrationMap>(NO_MIGRATIONS);
+  void db.onMigrationNotice((notice) => {
+    setMigrations((previous) => applyNotice(previous, notice));
+  });
+
   onMount(() => {
     const fontsReady =
       typeof document !== "undefined" && "fonts" in document
@@ -215,6 +234,9 @@ export default function App() {
 
       {/* 提示（右上角、不阻塞、约 5 秒；带「撤销」的动作把撤销放在自己身上） */}
       <ToastHost store={toast} />
+
+      {/* 数据库升级：全窗口阻塞遮罩（不给出口 —— 升级是原子操作，只能等） */}
+      <MigrationGate notices={migrations()} />
 
       <Show when={shell.workflow() === "browse"} fallback={
         <ImportWorkspace

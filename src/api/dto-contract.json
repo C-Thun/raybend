@@ -268,5 +268,12 @@
     "dirCount",
     "emptyDirCount",
     "hasUnresolvedLink"
+  ],
+  "MigrationNotice": [
+    "from",
+    "kind",
+    "label",
+    "running",
+    "to"
   ]
 }

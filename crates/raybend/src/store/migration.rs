@@ -221,31 +221,53 @@ pub fn supported_version(kind: DbKind) -> i64 {
         .unwrap_or(0)
 }
 
-/// 按种类执行迁移。这是生产路径的唯一入口。
+/// 迁移通知的**两个阶段**。
 ///
-/// `backup_dir` 为 `None` 时**不做快照** —— 只应在测试里这么用。
-/// 迁移**即将开始**时的通知钩子 —— 由**外壳**注册（见 `src-tauri` 的 setup）。
+/// 一次升级有头有尾：外壳据此**弹**出阻塞遮罩、**撤**掉阻塞遮罩。
+/// 少了 `Done`，遮罩就只能靠猜或超时撤 —— 迁移失败时界面直接卡死。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MigrationPhase {
+    /// 即将开始（快照与逐条迁移都还没跑）
+    Start,
+    /// 结束（**成功或失败都发** —— 失败的原因由调用方的 `Result` 负责）
+    Done,
+}
+
+/// 一条迁移通知：哪个库、从哪版到哪版、处于哪个阶段。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MigrationNotice {
+    /// 哪一类库（`app.db` / `catalog.db` / `thumbs.db`）
+    pub kind: DbKind,
+    /// 迁移前的 schema 版本
+    pub from: i64,
+    /// 目标 schema 版本（迁移列表里的最大值）
+    pub to: i64,
+    /// 阶段
+    pub phase: MigrationPhase,
+}
+
+/// 迁移进度的通知钩子 —— 由**外壳**注册（见 `src-tauri` 的 `db::install_migration_hook`）。
 ///
 /// 为什么用全局钩子、而不是给 `apply` 加参数：
 /// store 层**不依赖 Tauri**（`AGENTS.md` §4 的分层纪律），而「升级时告诉界面一声、
 /// 让它挡住用户操作」是外壳的事。钩子让两边各守本分 ——
-/// store 只说「我要开始迁移了（哪个库、从哪版到哪版）」，外壳决定怎么展示。
+/// store 只说「我要开始/结束迁移了（哪个库、从哪版到哪版）」，外壳决定怎么展示。
 ///
 /// 只在**真的要跑迁移**时触发：全新的库（0 → N）与已是最新版的库都不会响。
-static PROGRESS_HOOK: std::sync::OnceLock<
-    Box<dyn Fn(DbKind, i64, i64) + Send + Sync + 'static>,
-> = std::sync::OnceLock::new();
+static PROGRESS_HOOK: std::sync::OnceLock<Hook> = std::sync::OnceLock::new();
+
+/// 通知钩子的类型别名（`Box<dyn Fn…>` 写在签名里太长）。
+pub type Hook = Box<dyn Fn(MigrationNotice) + Send + Sync + 'static>;
 
 /// 注册进度钩子。**只生效一次**（后注册的返回 `false`）—— 进程内只该有一个外壳。
-pub fn set_progress_hook(
-    hook: Box<dyn Fn(DbKind, i64, i64) + Send + Sync + 'static>,
-) -> bool {
+pub fn set_progress_hook(hook: Hook) -> bool {
     PROGRESS_HOOK.set(hook).is_ok()
 }
 
-fn notify_start(kind: DbKind, from: i64, to: i64) {
-    if let Some(hook) = PROGRESS_HOOK.get() {
-        hook(kind, from, to);
+/// 发一条通知（`hook` 为 `None` ⇒ 没人听，什么也不做 —— 测试与无外壳场景）。
+fn notify(hook: Option<&(dyn Fn(MigrationNotice) + Send + Sync)>, notice: MigrationNotice) {
+    if let Some(hook) = hook {
+        hook(notice);
     }
 }
 
@@ -255,16 +277,40 @@ pub fn apply(
     backups: Backups<'_>,
     now_ms: i64,
 ) -> Result<MigrationOutcome> {
-    apply_list(conn, kind, kind.migrations(), backups, now_ms)
+    let hook = PROGRESS_HOOK.get();
+    apply_list_with_hook(
+        conn,
+        kind,
+        kind.migrations(),
+        backups,
+        now_ms,
+        hook.map(|hook| hook.as_ref()),
+    )
 }
 
 /// 用一份**给定的**迁移列表执行（测试用；生产走 [`apply`]）。
+#[cfg(test)]
 fn apply_list(
     conn: &mut Connection,
     kind: DbKind,
     migrations: &[Migration],
     backups: Backups<'_>,
     now_ms: i64,
+) -> Result<MigrationOutcome> {
+    apply_list_with_hook(conn, kind, migrations, backups, now_ms, None)
+}
+
+/// 同上，外加**外部注入的通知出口**。
+///
+/// 生产传进程内那一个（`apply`），测试传一个记流水账的闭包 ——
+/// 全局 `OnceLock` 一个进程只能装一次，测试没法靠它验证「开始 / 结束」的时序。
+fn apply_list_with_hook(
+    conn: &mut Connection,
+    kind: DbKind,
+    migrations: &[Migration],
+    backups: Backups<'_>,
+    now_ms: i64,
+    hook: Option<&(dyn Fn(MigrationNotice) + Send + Sync)>,
 ) -> Result<MigrationOutcome> {
     let current = schema_version(conn)?;
     let target = migrations.iter().map(|m| m.version).max().unwrap_or(0);
@@ -287,8 +333,37 @@ fn apply_list(
     }
 
     // ①.5 告诉外壳「要开始升级了」——界面据此挡住用户操作，升级完再放开
-    notify_start(kind, current, target);
+    notify(hook, MigrationNotice {
+        kind,
+        from: current,
+        to: target,
+        phase: MigrationPhase::Start,
+    });
 
+    let outcome = run(conn, kind, migrations, backups, now_ms, current, target);
+
+    // ⑤ 收尾通知：**成不成都发** —— 失败时界面同样要撤掉遮罩（错误由调用方抛给用户看）
+    notify(hook, MigrationNotice {
+        kind,
+        from: current,
+        to: target,
+        phase: MigrationPhase::Done,
+    });
+
+    outcome
+}
+
+/// 迁移的正文（快照 → 逐条事务 → 完整性检查）。拆出来是为了让 [`apply_list`]
+/// 无论成功失败都能走到收尾通知（`?` 直接返回会跳过它）。
+fn run(
+    conn: &mut Connection,
+    kind: DbKind,
+    migrations: &[Migration],
+    backups: Backups<'_>,
+    now_ms: i64,
+    current: i64,
+    target: i64,
+) -> Result<MigrationOutcome> {
     // ② 迁移前快照：只在「已有数据」时做（全新库没什么可备份的）
     let snapshot = match (current, backups.dir) {
         (from @ 1.., Some(dir)) => Some(create_snapshot(conn, dir, kind, &backups, from, now_ms)?),
@@ -776,6 +851,122 @@ mod tests {
             .query_row("SELECT count(*) FROM t1", [], |r| r.get(0))
             .unwrap();
         assert_eq!(n, 1);
+    }
+
+    #[test]
+    fn reports_start_then_done_around_a_real_migration() {
+        let dir = tmp();
+        let db = dir.path().join("catalog.db");
+        let mut conn = Connection::open(&db).unwrap();
+        pragma::apply(&conn, false).unwrap();
+        apply_list(&mut conn, DbKind::Catalog, &[FAKE_V1], Backups::none(), 0).unwrap();
+
+        let seen = std::sync::Mutex::new(Vec::new());
+        let hook = |notice: MigrationNotice| seen.lock().unwrap().push(notice);
+
+        apply_list_with_hook(
+            &mut conn,
+            DbKind::Catalog,
+            &[FAKE_V1, FAKE_V2],
+            Backups::none(),
+            0,
+            Some(&hook),
+        )
+        .unwrap();
+
+        assert_eq!(
+            *seen.lock().unwrap(),
+            vec![
+                MigrationNotice {
+                    kind: DbKind::Catalog,
+                    from: 1,
+                    to: 2,
+                    phase: MigrationPhase::Start,
+                },
+                MigrationNotice {
+                    kind: DbKind::Catalog,
+                    from: 1,
+                    to: 2,
+                    phase: MigrationPhase::Done,
+                },
+            ],
+            "一次升级要有头有尾：Start → Done"
+        );
+    }
+
+    #[test]
+    fn no_notice_when_there_is_nothing_to_migrate() {
+        let mut conn = mem();
+        apply(&mut conn, DbKind::Catalog, Backups::none(), 0).unwrap();
+
+        let seen = std::sync::Mutex::new(Vec::new());
+        let hook = |notice: MigrationNotice| seen.lock().unwrap().push(notice);
+
+        // 已是最新版（当前版本 == 目标版本 ⇒ 提前返回，不跑迁移）
+        let noop = apply_list_with_hook(
+            &mut conn,
+            DbKind::Catalog,
+            DbKind::Catalog.migrations(),
+            Backups::none(),
+            0,
+            Some(&hook),
+        )
+        .unwrap();
+        assert!(noop.applied.is_empty());
+        // 版本闸门拒绝（库比程序新）走的是提前返回，也不该发声
+        conn.pragma_update(None, "user_version", 99_i64).unwrap();
+        let gated = apply_list_with_hook(
+            &mut conn,
+            DbKind::Catalog,
+            DbKind::Catalog.migrations(),
+            Backups::none(),
+            0,
+            Some(&hook),
+        );
+        assert!(gated.is_err());
+
+        assert!(
+            seen.lock().unwrap().is_empty(),
+            "没真跑迁移就不该弹遮罩（空跑与版本闸门都不发通知）"
+        );
+    }
+
+    #[test]
+    fn failing_migration_still_reports_done() {
+        let dir = tmp();
+        let db = dir.path().join("catalog.db");
+        let mut conn = Connection::open(&db).unwrap();
+        pragma::apply(&conn, false).unwrap();
+        apply_list(&mut conn, DbKind::Catalog, &[FAKE_V1], Backups::none(), 0).unwrap();
+
+        let seen = std::sync::Mutex::new(Vec::new());
+        let hook = |notice: MigrationNotice| seen.lock().unwrap().push(notice);
+
+        let err = apply_list_with_hook(
+            &mut conn,
+            DbKind::Catalog,
+            &[
+                FAKE_V1,
+                Migration {
+                    version: 2,
+                    name: "bad",
+                    sql: FAKE_BAD.sql,
+                },
+            ],
+            Backups::none(),
+            0,
+            Some(&hook),
+        )
+        .unwrap_err();
+        assert!(matches!(err, Error::Migration { version: 2, .. }));
+
+        let phases: Vec<MigrationPhase> =
+            seen.lock().unwrap().iter().map(|n| n.phase).collect();
+        assert_eq!(
+            phases,
+            vec![MigrationPhase::Start, MigrationPhase::Done],
+            "迁移失败也必须发 Done —— 否则前端的阻塞遮罩永远撤不掉"
+        );
     }
 
     #[test]

@@ -299,6 +299,8 @@ fn every_contract_entry_has_a_test() {
         "DeleteFailure",
         "FlagsView",
         "DirEmptyView",
+        // 数据库升级通知（M2-W2）
+        "MigrationNotice",
     ];
     for key in value.as_object().unwrap().keys() {
         if key.starts_with('_') {
@@ -335,6 +337,21 @@ fn browse_assets_dtos_match_contract() {
     assert_eq!(keys_of::<DeleteResult>(), contract_keys("DeleteResult"));
     assert_eq!(keys_of::<FlagsView>(), contract_keys("FlagsView"));
     assert_eq!(keys_of::<DirEmptyView>(), contract_keys("DirEmptyView"));
+}
+
+/// 迁移通知也要进契约：字段名漂了，前端拿到 `undefined` 就撤不掉阻塞遮罩
+/// （表现为「升级完界面还是死的」—— 正是这个桥要防的那类静默故障）。
+#[test]
+fn migration_notice_matches_contract() {
+    use raybend::store::migration::{DbKind, MigrationNotice, MigrationPhase};
+
+    let start = crate::migration::to_event(MigrationNotice {
+        kind: DbKind::Catalog,
+        from: 3,
+        to: 4,
+        phase: MigrationPhase::Start,
+    });
+    assert_eq!(keys_of_value(&start), contract_keys("MigrationNotice"));
 }
 
 #[test]

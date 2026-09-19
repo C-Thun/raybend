@@ -10,6 +10,7 @@
 pub mod browse;
 pub mod db;
 mod import;
+mod migration;
 pub mod repo;
 pub mod source;
 pub mod tags;
@@ -250,6 +251,12 @@ pub fn run() {
         .manage(spike_viewport::SpikeState::default())
         .setup(|app| {
             use tauri::Manager;
+            /*
+             * 迁移通知的钩子要**赶在第一次开库之前**装上：
+             * 下面那行 `db::warm_up` 就可能触发 `app.db` 的升级，
+             * 而升级开始时界面得能弹阻塞遮罩（人类 2026-09-19 的要求）。
+             */
+            migration::install(app.handle());
             // 先把数据底座打开（命令也可以懒打开，这里做一次是为了启动日志能立刻反映问题）。
             // **失败不阻止启动**：窗口该出来还是要出来，错误让前端在需要时再报。
             let state = app.state::<db::DbState>();

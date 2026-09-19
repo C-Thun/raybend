@@ -18,6 +18,7 @@ import { t } from "../i18n/index.ts";
 import type {
   DirEmptyView,
   DirEntry,
+  MigrationNotice,
   RepositorySettings,
   TemplatePreview,
   FileExif,
@@ -441,4 +442,28 @@ export async function getBooleanSetting(
   const raw = await getSetting(key);
   if (raw === null) return fallback;
   return raw === "1" || raw.toLowerCase() === "true";
+}
+
+/** 数据库升级事件名（与 `src-tauri/src/migration.rs` 的 `MIGRATION_EVENT` 一致）。 */
+export const MIGRATION_EVENT = "db://migration";
+
+/** 缓存的事件模块（浏览器里根本不会加载它）。 */
+let eventModule: Promise<typeof import("@tauri-apps/api/event")> | undefined;
+
+/**
+ * 订阅数据库升级通知；返回**取消订阅**的函数。
+ *
+ * 一次升级有头有尾（`running: true` / `false`），失败也会发 `false` ——
+ * 界面据此弹/撤阻塞遮罩（`src/features/migration/`），不会卡在里面。
+ * 浏览器里返回一个什么都不做的函数（开发预览没有后端）。
+ */
+export async function onMigrationNotice(
+  handler: (notice: MigrationNotice) => void,
+): Promise<() => void> {
+  if (!isTauriRuntime()) return () => {};
+  eventModule ??= import("@tauri-apps/api/event");
+  const { listen } = await eventModule;
+  return listen<MigrationNotice>(MIGRATION_EVENT, (event) =>
+    handler(event.payload),
+  );
 }

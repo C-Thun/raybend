@@ -527,3 +527,22 @@ export type MarkAction =
   | { kind: "lock"; value: number }
   | { kind: "attachTags"; tagIds: number[] }
   | { kind: "detachTags"; tagIds: number[] };
+
+/**
+ * 数据库升级通知（`db://migration` 事件的载荷）。
+ *
+ * 一次升级有头有尾：`running: true` 弹阻塞遮罩、`false` 撤掉
+ * （**失败也会发 `false`**，所以界面不会卡在遮罩里）。
+ */
+export interface MigrationNotice {
+  /** 库的种类：`app` / `catalog` / `thumbs` */
+  kind: "app" | "catalog" | "thumbs";
+  /** 中文名（提示文案直接用，界面不自己拼） */
+  label: string;
+  /** 升级前的 schema 版本 */
+  from: number;
+  /** 升级后的 schema 版本 */
+  to: number;
+  /** `true` = 开始（弹遮罩）；`false` = 结束（撤遮罩） */
+  running: boolean;
+}

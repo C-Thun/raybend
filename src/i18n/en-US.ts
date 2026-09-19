@@ -16,6 +16,11 @@ import type { MessageKey } from "./index.ts";
  * `locale-parity.test.ts` 双向断言，`pnpm test` 时就会炸。
  */
 export const enUS: Record<MessageKey, string> = {
+ // ── Database upgrade (M2-W2) ──────────────────────────
+ "migration.title": "Upgrading the database",
+ "migration.body": "{label} needs its structure upgraded from v{from} to v{to} \u2014 rewriting data…",
+ "migration.hint": "The interface is locked until this finishes. Please do not close the app.",
+
  "import.title": "Importing",
  "import.done_title": "Import finished",
  "import.preparing": "Preparing…",

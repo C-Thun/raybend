@@ -62,6 +62,7 @@ import { EasyCopy } from "../components/ui/EasyCopy";
 import { EasyDestroyButton } from "../components/ui/EasyDestroy";
 import { DirTreeDemo } from "./dir-tree-demo.tsx";
 import { ImportProgressDemo } from "./import-progress-demo.tsx";
+import { MigrationGateDemo } from "./migration-gate-demo.tsx";
 
 /** 演示用的 EXIF：三组都有值（对应 design/main.md §2.2 的示例） */
 const DEMO_EXIF: ExifData = {
@@ -947,6 +948,13 @@ export default function KitchenSink() {
         <ImportProgressDemo />
       </Section>
 
+
+      <Section
+        title="数据库升级遮罩（M2-W2）"
+        note="真状态机 + 假通知：升级期间全窗口阻塞，鼠标与键盘都点不动"
+      >
+        <MigrationGateDemo />
+      </Section>
 
       <Section title="目录树（通用组件）" note="导入侧可勾选、浏览侧不勾选；双击行名展开/折叠；同一份组件两种配置">
         <DirTreeDemo />

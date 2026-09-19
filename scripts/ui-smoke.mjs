@@ -608,6 +608,73 @@ try {
   }
 
   /*
+   * 数据库升级遮罩（M2-W2）：升级期间**鼠标与键盘都得挡住**。
+   *
+   * 为什么值得断言：只挡鼠标是最容易犯的错 —— 外观上一切正常，
+   * 但用户按住方向键/数字键照样能操作一个「结构正在被改写」的库。
+   * 所以这里除了断言遮罩出现/消失，还要真的发一个键盘事件看它有没有被吃掉。
+   */
+  const migrationGate = await evaluate(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const button = (label) =>
+      [...document.querySelectorAll("button")].find(
+        (node) => node.textContent.trim() === label,
+      );
+    if (!document.querySelector("[data-migration-demo]")) return null;
+
+    const start = button("发一条升级通知");
+    const done = button("发一条完成通知");
+    if (!start || !done) return null;
+
+    start.click();
+    await sleep(120);
+    const overlay = document.querySelector('[data-migration-gate="open"]');
+    const text = overlay ? overlay.innerText.replace(/\\s+/g, " ") : "";
+    // 键盘拦截：在捕获阶段被吃掉 ⇒ 冒泡阶段没人收到
+    // 派发目标用 document.body（**真实按键的路径**：window → document → body → …），
+    // 直接派发到 window 是 target 阶段，按注册顺序触发，测不出捕获拦截
+    let leaked = false;
+    const spy = () => { leaked = true; };
+    window.addEventListener("keydown", spy);
+    const press = (key) =>
+      document.body.dispatchEvent(
+        new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }),
+      );
+    press("ArrowRight");
+    press("3");
+    await sleep(60);
+    window.removeEventListener("keydown", spy);
+
+    const stateText = document.querySelector("[data-migration-demo]").innerText;
+    done.click();
+    await sleep(120);
+    return {
+      visible: overlay !== null,
+      text,
+      leaked,
+      running: stateText.includes("遮罩开着：是"),
+      gone: document.querySelector('[data-migration-gate="open"]') === null,
+    };
+  })()`);
+
+  if (migrationGate === null) {
+    problems.push("画廊里没有「数据库升级遮罩」演示（src/dev/migration-gate-demo.tsx 没挂上？）");
+  } else {
+    if (!migrationGate.visible) problems.push("发了升级通知但遮罩没出现");
+    if (!migrationGate.running) problems.push("遮罩出现时状态没报「遮罩开着：是」");
+    if (!migrationGate.text.includes("正在升级数据库")) {
+      problems.push(`遮罩没写标题（实测 ${JSON.stringify(migrationGate.text.slice(0, 60))}）`);
+    }
+    if (!migrationGate.text.includes("v3") || !migrationGate.text.includes("v4")) {
+      problems.push("遮罩没写清版本跨度（v3 → v4）");
+    }
+    if (migrationGate.leaked) {
+      problems.push("升级遮罩只挡鼠标没挡键盘（keydown 漏到了外壳）");
+    }
+    if (!migrationGate.gone) problems.push("发了完成通知遮罩没撤掉（界面就永远卡住了）");
+  }
+
+  /*
    * 导入工作区在**应用外壳**页上（厨房水槽里没有它），所以这里自己导航过去 ——
    * 脚本无论被传入哪个 URL，都会把两页都过一遍。
    */
