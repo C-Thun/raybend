@@ -57,6 +57,13 @@ export interface VirtualGridProps<TRow extends VirtualGridRow> {
    * （数学在 `lib/virtual-window.ts` 的 `rowScrollTop`，有单测）。
    */
   focusRow?: number;
+  /**
+   * 点**空白处**（这一下没落在内容上）时回调 —— 用来「取消选择」。
+   *
+   * 判据：点的是滚动容器本身、或容纳行的那个留白层；点在任何 tile / 行上都不算
+   * （那些元素有自己的点击处理）。人类 2026-09-19 要求：点空白 = 取消选中的图。
+   */
+  onBackgroundClick?: () => void;
   class?: string;
 }
 
@@ -64,6 +71,8 @@ export function VirtualGrid<TRow extends VirtualGridRow>(
   props: VirtualGridProps<TRow>,
 ) {
   let scroller: HTMLDivElement | undefined;
+  /** 容纳行的留白层：点它也算点空白 */
+  let surface: HTMLDivElement | undefined;
   const [scrollTop, setScrollTop] = createSignal(0);
   const [viewportHeight, setViewportHeight] = createSignal(0);
 
@@ -131,6 +140,12 @@ export function VirtualGrid<TRow extends VirtualGridRow>(
         .filter(Boolean)
         .join(" ")}
       onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
+      onClick={(event) => {
+        // 落在「容器本身」或「留白层」上都算空白；落在行 / tile 上不算
+        if (event.target === event.currentTarget || event.target === surface) {
+          props.onBackgroundClick?.();
+        }
+      }}
     >
       {/*
         上下留白撑出总高：`paddingTop + 可见行 + paddingBottom = 总高`。
@@ -138,6 +153,7 @@ export function VirtualGrid<TRow extends VirtualGridRow>(
         调用方不必再算每行的 top。
       */}
       <div
+        ref={surface}
         style={{
           "padding-top": `${window().paddingTop}px`,
           "padding-bottom": `${window().paddingBottom}px`,

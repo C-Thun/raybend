@@ -36,6 +36,7 @@ import {
   IconFlag,
   IconLock,
   IconArrowBackUp,
+  IconFilter,
   IconArrowForwardUp,
   IconTag,
   IconStar,
@@ -300,7 +301,8 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
           // 关掉筛选的清理在 store.setFilterMode 里做（四组条件一起清）
           store.setFilterMode(pressed);
         }}
-        icon={<IconBan size={14} />}
+        /* 漏斗 = 筛选的通用符号；`IconBan` 在本项目里是「移除/排除」的意思（AGENTS.md §11.3），不能混用 */
+        icon={<IconFilter size={16} />}
         label={t("browse.filterHint")}
       >
         {t("browse.filter")}

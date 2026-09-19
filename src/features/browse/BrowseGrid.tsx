@@ -371,6 +371,8 @@ export function BrowseGrid(props: BrowseGridProps) {
       <Show when={watermark()} keyed fallback={<VirtualGrid
         rows={rows()}
         resetKey={props.resetKey}
+        /* 点空白（没落在 tile 上）= 取消选择（人类 2026-09-19） */
+        onBackgroundClick={() => store.clearSelection()}
         focusRow={focusRow()}
         onVisibleRange={(start, end) => {
           const [from, to] = rowIndexRange(start, end);

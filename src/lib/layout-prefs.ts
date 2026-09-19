@@ -48,8 +48,11 @@ export interface LayoutPrefs {
 export const LAYOUT_BOUNDS = {
   leftRatio: { min: 0.12, max: 0.5 },
   recentRatio: { min: 0.15, max: 0.7 },
-  /** 侧栏像素下限 220：再窄标签/目录名就只剩省略号；上限 520：别把网格挤没 */
-  browseLeftWidth: { min: 220, max: 520 },
+  /**
+   * 左列像素下限 **264**（人类 2026-09-19：在 220 基础上 +20% —— 220 时目录名/标签
+   * 太挤）；上限 520 不变（别把网格挤没）。
+   */
+  browseLeftWidth: { min: 264, max: 520 },
   browseRightWidth: { min: 220, max: 520 },
 } as const;
 

@@ -120,6 +120,15 @@ fn is_listable_dir(entry: &std::fs::DirEntry) -> bool {
     if kind::junk_kind(&name).is_some() {
         return false;
     }
+    /*
+     * `_RAW/` 是**保留目录**：树的每一层都会把它过滤掉（`REPOSITORY.md` §4.1），
+     * 所以它不能算进「这个目录有没有子目录」—— 否则会出现
+     * 「明明没有可见子目录、却画着展开箭头，点开是空的」（人类 2026-09-19 报的）。
+     * 注意只影响**列目录**这条路径：导入扫描走的是 `scan`，`_RAW` 照常被认出来。
+     */
+    if name.eq_ignore_ascii_case("_raw") {
+        return false;
+    }
     // 符号链接不跟随：目录环与「链接到别处」的目录最容易把树撑爆。
     //
     // ⚠️ 用 `file_type()`（`read_dir` 自带的条目类型）而不是 `path().is_dir()`：

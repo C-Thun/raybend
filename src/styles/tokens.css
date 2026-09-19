@@ -276,7 +276,8 @@
   --radius: 4px;
 
   --panel-w-left: 320px;
-  --panel-w-right: 300px;
+  /* 右列宽度（人类 2026-09-19：+25% —— 这里要放功能，300 太窄） */
+  --panel-w-right: 375px;
 
   --btn-pad-x: 5px;
   --btn-pad-y: 3px;

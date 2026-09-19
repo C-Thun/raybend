@@ -43,7 +43,11 @@ export function ToastHost(props: ToastHostProps): JSX.Element {
   return (
     <div
       data-toast-host="open"
-      class="pointer-events-none fixed right-3 top-3 flex w-[320px] flex-col gap-2"
+      /*
+     * 位置（人类 2026-09-19）：压在 **titlebar 之下** —— 挡住 flowinfo 那一带没问题，
+     * 但不能盖住右上角的窗口三键（最小化/最大化/关闭），那里被压住「怪怪的」。
+     */
+    class="pointer-events-none fixed right-3 top-[calc(var(--bar-title-h)+8px)] flex w-[320px] flex-col gap-2"
       style={{ "z-index": "var(--z-toast)" }}
       aria-live="polite"
     >

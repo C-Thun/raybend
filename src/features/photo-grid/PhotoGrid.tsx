@@ -253,6 +253,8 @@ export function PhotoGrid(props: PhotoGridProps) {
                   rows={rows()}
                   overscan={2}
                   resetKey={store.dir() ?? ""}
+                  /* 点空白 = 取消选择（与浏览网格同一行为） */
+                  onBackgroundClick={() => store.clearSelection()}
                   renderRow={(row) =>
                     row.kind === "tiles" ? (
                       <TileRow
