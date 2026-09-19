@@ -38,7 +38,6 @@ import {
 import type { RepositoryView } from "../../api/types.ts";
 import {
   AssetInfo,
-  BrowseGrid,
   BrowseLeftColumn,
   ViewerStatusBar,
   type BrowseStore,
@@ -51,6 +50,16 @@ import {
 } from "../../lib/viewer-chrome.ts";
 import { FilmStrip } from "../../components/ui/viewer/index.ts";
 import { FilterBar } from "../../features/browse/FilterBar.tsx";
+import { browseSource } from "../../features/browse/grid-source.ts";
+import { PhotoGrid } from "../../features/photo-grid/index.ts";
+import { StateWatermark } from "../../components/ui/StateWatermark.tsx";
+import {
+  IconAlbumOff,
+  IconAlertTriangle,
+  IconFolder,
+  IconPhoto,
+  IconPhotoOff,
+} from "@tabler/icons-solidjs";
 import { CompareView } from "../../components/ui/viewer/index.ts";
 import { compareIds } from "../../lib/viewer-compare.ts";
 import { createThumbQueue } from "../../components/ui/thumb-queue.ts";
@@ -305,11 +314,93 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
     return active;
   });
 
-  /** 进看图：顺便把展开的库列表收了（`BROWSE.md` §4.2 的第二个收起条件）。 */  function openViewer(photos: Parameters<typeof viewer.show>[0], index: number): void {
+  /**
+   * 网格数据源（适配器）：把浏览 store 包成网格契约。
+   *
+   * 依赖里带上 `thumbs`（与胶片带共用那一条队列）与档位三个回调（受控）——
+   * 网格自己不持有这些状态。
+   */
+  const gridSource = createMemo(() =>
+    browseSource({
+      store,
+      root: root(),
+      thumbs,
+      tileStep,
+      setTileStep,
+      // 档位落盘：这个工作区的档位目前只活在会话里（与导入侧各自记一份，组件同一份）
+      commitTileStep: () => {},
+      grouped,
+    }),
+  );
+
+  /** 「当前那张」的 id（键盘导航换了它之后把那一行滚进视野） */
+  const focusId = (): string | undefined => {
+    const item = store.anchorItem();
+    return item === null ? undefined : String(item.id);
+  };
+
+  /**
+   * 空态 / 加载 / 错误的水印（文案是浏览侧的：没选库 / 没选目录 / 空库）。
+   * 这些条件本来写在 `BrowseGrid` 里 —— 那是**视图配置**，谁开这个视图谁给文案。
+   */
+  function gridWatermark(): JSX.Element | null {
+    if (store.repositoryId() === null) {
+      return (
+        <StateWatermark
+          icon={<IconAlbumOff size={64} stroke-width={1} />}
+          text={t("browse.noRepository")}
+        />
+      );
+    }
+    if (store.scopePath() === null) {
+      return (
+        <StateWatermark
+          icon={<IconFolder size={64} stroke-width={1} />}
+          text={t("browse.pickDirectory")}
+        />
+      );
+    }
+    if (store.error() !== null && store.total() === 0) {
+      return (
+        <StateWatermark
+          tone="error"
+          icon={<IconAlertTriangle size={64} stroke-width={1} />}
+          text={t("browse.load_error", { message: store.error() ?? "" })}
+          action={{ label: t("common.retry"), run: () => void store.reload() }}
+        />
+      );
+    }
+    if (store.loading() && store.total() === 0) {
+      return (
+        <StateWatermark
+          animate
+          icon={<IconPhoto size={64} stroke-width={1} />}
+          text={t("browse.loading")}
+        />
+      );
+    }
+    if (store.total() === 0) {
+      return (
+        <StateWatermark
+          icon={<IconPhotoOff size={64} stroke-width={1} />}
+          text={t("browse.empty_lib")}
+        />
+      );
+    }
+    return null;
+  }
+
+  /**
+   * 进看图**之前**要做的事（`PhotoGrid.onOpeningViewer`）：收起展开的库列表、
+   * 把三态复位到「① 默认」。
+   *
+   * 真正的 `viewer.show()` 由网格做（它手上有显示序的完整清单）——
+   * 工作区负责的是「外壳状态」，两件事分开（所以这个回调不接参数）。
+   */
+  function prepareViewer(): void {
     setLibsExpanded(false);
     // 每次进看图都从「① 默认」开始（退出时重置，这两处合起来保证「左右栏必定回来」）
     setChrome("default");
-    viewer.show(photos, index);
   }
 
   /*
@@ -678,21 +769,24 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
                 }
           }
         >
-          <BrowseGrid
-            store={store}
-            root={root()}
-            resetKey={`${store.repositoryId() ?? ""}:${store.scopePath() ?? ""}`}
-            tileStep={tileStep()}
-            /* Ctrl+滚轮：与状态栏的滑块走同一个 setter（手感与 import 一致） */
-            onTileStepChange={(step) => setTileStep(clampTileStepIndex(step))}
-            grouped={grouped()}
-            thumbs={thumbs}
-            focusIndex={focusIndex()}
+          {/*
+            网格是**全项目唯一那一份**（`features/photo-grid/PhotoGrid.tsx`）。
+            浏览侧的差异（分页 / 显示序置换 / 标记 / 绝对路径）全在数据源适配器里
+            （`features/browse/grid-source.ts`）—— 人类 2026-09-19：「同一个东西
+            两个组件本身就是 bug」，`BrowseGrid` 已删除。
+          */}
+          <PhotoGrid
+            source={gridSource()}
+            viewer={viewer}
+            /* 与胶片带共用同一个缩略图队列 / viewer，所以这两样都不传（由适配器与上面提供） */
             focusNudge={focusNudge()}
-            filterKey={`${store.filterMode() ? "on" : "off"}:${JSON.stringify(store.filter())}`}
+            focusId={focusId()}
+            pinsKey={`${store.repositoryId() ?? ""}:${store.scopePath() ?? ""}:${store.filterMode() ? "on" : "off"}:${JSON.stringify(store.filter())}`}
             onInteract={() => setLibsExpanded(false)}
             onFocusIndex={(index) => setFocusIndex(index)}
-            onOpenViewer={openViewer}
+            onOpeningViewer={() => prepareViewer()}
+            watermark={() => gridWatermark()}
+            class="px-2 py-2"
           />
 
           {/*

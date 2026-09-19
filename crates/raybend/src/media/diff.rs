@@ -455,6 +455,7 @@ mod tests {
                 .to_string(),
             size_bytes: Some(size),
             mtime_ms: Some(mtime),
+            file_created_ms: None,
             identity: None,
             missing: false,
         }

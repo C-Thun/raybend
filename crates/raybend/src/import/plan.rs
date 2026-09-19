@@ -857,6 +857,7 @@ mod tests {
             kind,
             size_bytes: 1000,
             mtime_ms: Some(1_700_000_000_000),
+            created_ms: None,
             identity: None,
             taken_at,
             brand: None,

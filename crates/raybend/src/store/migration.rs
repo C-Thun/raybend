@@ -613,8 +613,8 @@ mod tests {
             1_789_516_800_000,
         )
         .unwrap();
-        assert_eq!((out.from, out.to), (0, 3));
-        assert_eq!(out.applied, vec![1, 2, 3]);
+        assert_eq!((out.from, out.to), (0, 4));
+        assert_eq!(out.applied, vec![1, 2, 3, 4]);
         for table in [
             "repository_meta",
             "assets",
@@ -721,8 +721,8 @@ mod tests {
         .unwrap();
 
         let out = apply(&mut conn, DbKind::Catalog, Backups::none(), 1_789_516_800_001).unwrap();
-        assert_eq!((out.from, out.to), (2, 3), "只补跑 v3");
-        assert_eq!(out.applied, vec![3]);
+        assert_eq!((out.from, out.to), (2, 4), "只补跑 v3 与 v4");
+        assert_eq!(out.applied, vec![3, 4]);
 
         // 旧行还在，且新列是 NULL（不是被填了垃圾值）
         let (path, size, src_vol): (String, i64, Option<i64>) = conn

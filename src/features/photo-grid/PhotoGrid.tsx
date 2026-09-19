@@ -1,88 +1,125 @@
 /**
- * `PhotoGrid` —— 中列的照片网格（`design/main.md` §3.2）。
+ * `PhotoGrid` —— **全项目唯一的照片网格**（`design/main.md` §3.2）。
  *
- * 组成：`VirtualGrid`（只渲染可见行）+ `rows.ts`（行模型）+ 缩略图队列
- * + `GridControlBar`（底部控制条）。
+ * 导入与浏览两侧都用它；两侧的差异（分页 / 洞 / 显示序置换 / 标记 / 排除）
+ * 全部由**数据源**（`TilesSource`，见 `components/ui/tiles/source.ts`）吸收，
+ * 网格自己不知道「这是导入还是浏览」。
  *
- * 三件事值得说明：
+ * 组成：`VirtualGrid`（只渲染可见行）+ `ui/tiles/rows.ts`（行模型）+ 缩略图队列 + Tile。
  *
- * 1. **tile 尺寸由 JS 拥有**（`DESIGN.md` §12.6）：档位 → `--tile-cell-w/h`
- *    写在容器上，`Tile` 组件读这两个变量画画面区；换行数学用
- *    `computeTileFlow`（除最后一行外每行列数相同，余量全部作右边距）。
- *    这里刻意**不重新发明**尺寸计算 —— 算法与档位都在 `lib/tile-flow.ts` 里，
- *    有单测。
- * 2. **缩略图只在行被渲染时才请求**：虚拟化已经把「可见」这件事算好了，
- *    所以 `TileCell` 在自己的 `createEffect` 里请求，滚出视口就不再管它
- *    （队列里已完成的结果按 LRU 留着，滚回来是瞬时的）。
- * 3. **排除的视觉**：被排除的照片压暗 + 角标。之所以不是隐藏，是因为
- *    「批量排除」是反转操作（`DESIGN.md` §12.2）—— 看不见就没法反选回来。
+ * 四件事值得说明：
+ *
+ * 1. **tile 尺寸由 JS 拥有**（`DESIGN.md` §12.6）：档位 → `--tile-cell` 写在容器上，
+ *    `Tile` 读它画画面区；换行数学用 `computeTileFlow`（行模型那边有单测）。
+ * 2. **缩略图只在行被渲染时才请求**：虚拟化已经把「可见」算好了，
+ *    `TileCell` 在自己的 `createEffect` 里请求，滚出视口就不再管它。
+ * 3. **看图是覆盖层**：网格不卸载 —— 退出时光标、选中与**滚动位置**原地不动
+ *    （人类 2026-09-17 报过「进看图再退出回到列表开头」，根因就是卸载）。
+ * 4. **看图关掉要把焦点要回来**（`focusNudge`）：否则焦点掉到 `<body>`，
+ *    回车/方向键再也到不了网格（人类 2026-09-19 报的「Esc 后回车进不去」）。
  */
 
-import {
-  createEffect,
-  createSignal,
-  onCleanup,
-  onMount,
-  Show,
-} from "solid-js";
-import {
-  IconAlertTriangle,
-  IconCalendar,
-  IconFolderOpen,
-  IconPhoto,
-  IconPhotoOff,
-} from "@tabler/icons-solidjs";
-import { StateWatermark } from "../../components/ui/StateWatermark.tsx";
+import { createEffect, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { IconCalendar } from "@tabler/icons-solidjs";
+
 import { Tile } from "../../components/ui/Tile.tsx";
-import { infoMode } from "../../components/ui/tile-info.ts";
 import { VirtualGrid } from "../../components/ui/VirtualGrid.tsx";
 import { createTokenPx } from "../../components/ui/tokens.ts";
+import { infoMode } from "../../components/ui/tile-info.ts";
+import { createViewerStore, Viewer, type ViewerStore } from "../../components/ui/viewer/index.ts";
 import { locale, t } from "../../i18n/index.ts";
 import { formatDayLabel, formatTimeRange } from "../../lib/datetime.ts";
 import { formatCount, type GroupingLocale } from "../../lib/format.ts";
-import { clampTileStepIndex, computeTileFlow, nextIndexForArrow, tileSizeAt } from "../../lib/tile-flow.ts";
-import type { SourceItem } from "../../api/types.ts";
-import { createViewerStore, Viewer } from "../../components/ui/viewer/index.ts";
+import {
+  clampTileStepIndex,
+  computeTileFlow,
+  nextIndexForArrow,
+  tileSizeAt,
+} from "../../lib/tile-flow.ts";
+import { rowTop } from "../../lib/virtual-window.ts";
+import { isColorLabel, type ColorLabel } from "../../lib/color-labels.ts";
 import { getThumbBytes, getViewImage } from "../../api/db.ts";
 import {
   buildGridRows,
   DAY_HEADER,
-  itemId,
   SLICE_HEADER,
-  type TileRowModel,
-  type GroupRowModel,
-} from "./rows.ts";
-import type { PhotoGridStore } from "./store.ts";
+  type GridRowModel,
+} from "../../components/ui/tiles/rows.ts";
+import type { GridStatus, TilesSource } from "../../components/ui/tiles/source.ts";
 
 export interface PhotoGridProps {
-  store: PhotoGridStore;
+  /** 数据源（导入侧 `importSource()`、浏览侧 `browseSource()`） */
+  source: TilesSource;
   /**
-   * 这张照片是不是被**排除**了（`AGENTS.md` §11.3）。
-   *
-   * 排除状态**不住在这个模块**里：它是「这批导入不带哪些」的事，
-   * 跨目录、跨源共用一份，持有者在导入工作区的 store（见 `lib/excluded.ts` 的说明）。
-   * 网格只负责**显示**它 —— 所以这里收一个判定函数，不自己去存。
+   * 看图件。**不传就自建** —— 浏览侧与胶片带/右栏共用工作区那一份
+   * （看图的倍率、当前那张在三个视图之间必须一致）。
    */
-  isExcluded?: (id: string) => boolean;
+  viewer?: ViewerStore;
+  /**
+   * 「看图刚刚关掉了」的**计数器**（每次关 +1）：网格据此把焦点要回来。
+   *
+   * 为什么是计数器而不是「看图是否开着」：看图有多条关闭路径（`Esc`、对比态的「返回」、
+   * 关闭按钮），只盯「开着→关掉」的跃变会漏掉「关闭时网格根本没在跑那个跃变」的情形
+   * （真机实测：对比态点返回后焦点就没人管了）。
+   */
+  focusNudge?: number;
+  /**
+   * 内容指纹（浏览侧传「库 + 范围 + 筛选」）。变了就把**参考照片**钉回原来的高度，
+   * 换筛选时窗口内容不动（人类 2026-09-19）。
+   */
+  pinsKey?: string;
+  /** 用户在网格里点了一下（浏览侧用它收起展开的库列表） */
+  onInteract?: () => void;
+  /** 点了第几格（显示序下标）：浏览侧据此记住「当前那张」，键盘导航从它接着走 */
+  onFocusIndex?: (index: number) => void;
+  /**
+   * 打开看图的**前一刻**回调（浏览侧要在这里复位三态 `chrome`、收起库列表）。
+   * 网格自己不认识那些概念 —— 它只负责「打开前打个招呼」。
+   */
+  onOpeningViewer?: () => void;
+  /**
+   * 把这一张（按 id）滚进视野 —— 键盘 `←`/`→` 换了「当前那张」之后调。
+   * 已经看得见时一个像素都不动（数学在 `lib/virtual-window.ts` 的 `rowScrollTop`）。
+   */
+  focusId?: string;
+  /**
+   * 方向键是否在网格里移动「当前那张」。
+   *
+   * 导入侧：是（网格自己接键盘）。浏览侧：**不是** —— 那边有一套全局的
+   * 「事件 → 意图」映射（`features/browse/keys.ts`），方向键由工作区统一处理，
+   * 网格再插一手就会两边同时动。
+   */
+  movesWithArrowKeys?: boolean;
+  /**
+   * 空态 / 加载 / 错误的水印。两侧文案不同（空目录 vs 没选库），所以由调用方给。
+   * 不传 = 网格只在有数据时渲染（调用方自己管空态）。
+   */
+  watermark?: (info: {
+    status: GridStatus;
+    error: string | null;
+    count: number;
+  }) => JSX.Element | null;
   class?: string;
 }
 
-export function PhotoGrid(props: PhotoGridProps) {
-  const store = props.store;
+/** 库里的色标字符串 → `Tile` 认的联合类型（认不出就是没有） */
+function asColorLabel(value: string | null | undefined): ColorLabel | null {
+  return isColorLabel(value) ? value : null;
+}
+
+export function PhotoGrid(props: PhotoGridProps): JSX.Element {
+  const source = props.source;
   let container: HTMLDivElement | undefined;
   const [width, setWidth] = createSignal(0);
 
-  // 密度相关的高度/间距从令牌读（切档时重读，见 components/ui/tokens.ts）
   const gap = createTokenPx("--gap", 4);
 
   onMount(() => {
     if (!container) return;
     const measure = (): void => {
-      // 扣掉容器自身左右内边距（换行数学要求「内容宽」）
       const style = getComputedStyle(container as HTMLDivElement);
       const padding =
-        Number.parseFloat(style.paddingLeft) +
-        Number.parseFloat(style.paddingRight);
+        Number.parseFloat(style.paddingLeft) + Number.parseFloat(style.paddingRight);
       setWidth(Math.max(0, (container?.clientWidth ?? 0) - padding));
     };
     measure();
@@ -91,291 +128,442 @@ export function PhotoGrid(props: PhotoGridProps) {
     onCleanup(() => observer.disconnect());
   });
 
-  const cellWidth = () => tileSizeAt(store.tileStep());
+  const cellWidth = () => tileSizeAt(source.tileStep());
   const flow = () =>
-    computeTileFlow({
-      containerWidth: width(),
-      cellWidth: cellWidth(),
-      gap: gap(),
-    });
+    computeTileFlow({ containerWidth: width(), cellWidth: cellWidth(), gap: gap() });
 
   const rows = () =>
     buildGridRows({
-      items: store.displayItems(),
+      count: source.count(),
       columns: flow().columns,
       cellSize: cellWidth(),
-      grouping: store.grouping(),
+      ...(source.slices() === undefined ? {} : { slices: source.slices() }),
     });
 
   /*
-   * 看图（`features/viewer`）：**状态与视图都在那个模块**，这里只负责
-   * 「谁触发打开」与「打开时把网格区域换成它」。
-   *
-   * 大图（屏幕档，长边 1920）**按需**取；网格小图作为秒显的底（渐进显示）。
-   * 浏览器里两者都取不到 → 查看器自己落到错误态，不会白屏。
+   * 看图：**状态与视图都在 viewer 模块**，这里只负责「谁触发打开」。
+   * 浏览侧传进来的是与胶片带共用的那一份（倍率、当前那张必须一致）。
    */
-  const viewer = createViewerStore({
-    // 屏幕档走**统一取图口**（`plans/M2-W2.md` §2.1）：位图没编辑过时它可以直接给原图，
-    // RAW 则由 `display` 模块走内嵌预览 / 解码 —— 这里不必再关心是哪种。
-    loadScreen: (path) => getViewImage(path, "screen"),
-    loadThumb: (path) => getThumbBytes(path, "grid"),
-  });
+  const ownViewer = props.viewer === undefined
+    ? createViewerStore({
+        loadScreen: (path) => getViewImage(path, "screen"),
+        loadThumb: (path) => getThumbBytes(path, "grid"),
+      })
+    : null;
+  const viewer = props.viewer ?? ownViewer!;
 
-  /** 网格里的照片（顺序即视图顺序）→ 查看器要的形态 */
-  const viewerPhotos = () =>
-    store.displayItems().map((item) => {
-      const id = itemId(item);
-      const natural = store.naturalOf(id);
-      return {
-        id,
+  /** 网格里的照片（按显示序）→ 查看器要的形态 */
+  const viewerPhotos = (): {
+    id: string;
+    path: string;
+    fileName: string;
+    natural?: { width: number; height: number };
+    marks?: {
+      rating: number;
+      colorLabel: string | null;
+      likeState: string | null;
+      lockLevel: number;
+    };
+    flag?: "pick" | "reject" | null;
+  }[] => {
+    const out = [];
+    for (let index = 0; index < source.count(); index += 1) {
+      const item = source.itemAt(index);
+      if (item === null) continue;
+      const natural = source.naturalOf(item.id);
+      out.push({
+        id: item.id,
         path: item.path,
         fileName: item.fileName,
-        // 元数据里的真实宽高：看图靠它算拖动边界（RAW 以前读不到尺寸 → 拖不动）
         ...(natural === null ? {} : { natural }),
-      };
-    });
-
-  /** 选中后按回车 → 进看图（设计稿 §3.2）；方向键在网格里移动选中 */
-  function onGridKeyDown(event: KeyboardEvent): void {
-    /*
-     * 方向键移动选中（人类 2026-09-16）：左右一格、上下**整行**。
-     * 不支持 `Ctrl`/`Shift` 组合（不加选、不扩区间）—— 那是后面再说的事。
-     * 到头就停住（`nextIndexForArrow` 返回 `null`）。
-     */
-    // 看图打开时方向键归看图（网格在下面挂着，别让两边同时响应）
-    if (viewer.state().active) return;
-    if (
-      event.key === "ArrowLeft" ||
-      event.key === "ArrowRight" ||
-      event.key === "ArrowUp" ||
-      event.key === "ArrowDown"
-    ) {
-      const list = store.displayItems();
-      const currentId = [...store.selectedIds()][0];
-      if (currentId === undefined) return;
-      const at = list.findIndex((item) => itemId(item) === currentId);
-      const next = nextIndexForArrow({
-        from: at,
-        count: list.length,
-        columns: flow().columns,
-        key: event.key,
+        ...(item.marks === undefined
+          ? {}
+          : {
+              marks: {
+                rating: item.marks.rating,
+                colorLabel: item.marks.colorLabel,
+                likeState: item.marks.likeState ?? null,
+                lockLevel: item.marks.locked ? 1 : 0,
+              },
+              flag: item.marks.flag,
+            }),
       });
-      const target = next === null ? undefined : list[next];
-      if (target === undefined) return;
-      event.preventDefault();
-      // 走 clickItem("replace")：选中与锚点一起更新（接着按 Shift 的语义才对得上）
-      store.clickItem(itemId(target), "replace");
-      // 键盘移动后把焦点带过去，免得焦点留在旧的 tile 上、方向键失灵
-      queueMicrotask(() => {
-        const node = container?.querySelector<HTMLElement>('[role="option"][aria-selected="true"]');
-        node?.focus();
-      });
-      return;
     }
-    if (event.key !== "Enter") return;
-    /*
-     * 回车进看图 —— **多选也走这条**（人类 2026-09-19：tiles 下多选按回车要能进对比）。
-     *
-     * 进看图的那一张取**锚点**（最后点中的那张），没锚点就取第一张；
-     * 选中 ≥ 2 张时进看图**就是对比态**（对比是选择状态的派生值，
-     * 见工作区的 `comparing()`），所以这里不需要另开一条路。
-     */
-    const selected = [...store.selectedIds()];
-    if (selected.length === 0) return;
-    const anchor = store.selection().anchor;
-    const target =
-      anchor !== null && selected.includes(anchor) ? anchor : selected[0];
-    if (target === undefined) return;
-    event.preventDefault();
-    openViewer(target);
-  }
+    return out;
+  };
 
   function openViewer(byId: string): void {
+    props.onOpeningViewer?.();
     const list = viewerPhotos();
     const at = list.findIndex((photo) => photo.id === byId);
     if (at >= 0) viewer.show(list, at);
   }
 
-  const groupingLocale = (): GroupingLocale =>
-    locale() === "en-US" ? "en-US" : "zh-CN";
+  /*
+   * ── 键盘 ──
+   *
+   * 回车进看图（**多选也走这条**：选中 ≥ 2 张时进看图就是对比态，
+   * 对比是选择状态的派生值）。方向键只有 `movesWithArrowKeys` 时才接。
+   */
+  function onGridKeyDown(event: KeyboardEvent): void {
+    if (viewer.state().active) return;
+    if (
+      props.movesWithArrowKeys === true &&
+      (event.key === "ArrowLeft" ||
+        event.key === "ArrowRight" ||
+        event.key === "ArrowUp" ||
+        event.key === "ArrowDown")
+    ) {
+      const selection = source.selection();
+      const current = [...selection.ids][0];
+      if (current === undefined) return;
+      const next = nextIndexForArrow({
+        from: Number.parseInt(current, 10) >= 0 && source.itemById(current) !== null
+          ? indexOf(current)
+          : -1,
+        count: source.count(),
+        columns: flow().columns,
+        key: event.key,
+      });
+      if (next === null) return;
+      const target = source.itemAt(next);
+      if (target === null) return;
+      event.preventDefault();
+      source.select(target.id, "replace");
+      queueMicrotask(() => {
+        const node = container?.querySelector<HTMLElement>(
+          '[role="option"][aria-selected="true"]',
+        );
+        node?.focus();
+      });
+      return;
+    }
+    if (event.key !== "Enter") return;
+    const selection = source.selection();
+    if (selection.ids.size === 0) return;
+    const anchor = selection.anchor;
+    const target =
+      anchor !== null && selection.ids.has(anchor) ? anchor : [...selection.ids][0];
+    if (target === undefined) return;
+    event.preventDefault();
+    // 这个回车已经被我们用掉了：不让它继续冒泡到 window ——
+    // 否则刚打开的看图件会在同一个事件里又收到一次「回车＝退出」，闪一下就关
+    event.stopPropagation();
+    openViewer(target);
+  }
+
+  /** 某个 id 现在落在显示序的第几格（键盘导航用） */
+  const indexOf = (id: string): number => {
+    for (let index = 0; index < source.count(); index += 1) {
+      if (source.itemAt(index)?.id === id) return index;
+    }
+    return -1;
+  };
+
+  /*
+   * ══ 锚定：换筛选时让窗口内容不动（人类 2026-09-19）══
+   *
+   * 1. **持续记录参考照片**：可见范围变化时把「第一条可见行里的第一个格子」
+   *    连同它离容器顶边的像素距离存下来（普通对象，不参与响应式）；
+   * 2. **指纹一变**：把那份快照记成待钉目标；新数据铺好后，在新列表里找同一张
+   *    （找不到就退回锚点），把它滚回原来的高度。
+   *
+   * 找不到那张时**什么都不做** —— 硬滚到「第 N 行」在筛掉一大半时会把用户甩到别处。
+   */
+  let lastSeen: { id: string; offsetPx: number } | null = null;
+  const [pendingPin, setPendingPin] = createSignal<
+    { id: string; offsetPx: number; key: string } | null
+  >(null);
+  const [scrollRequest, setScrollRequest] = createSignal<
+    { row: number; offsetPx: number; key: string } | null
+  >(null);
+
+  const rowOfId = (id: string): number => {
+    const list = rows();
+    for (let index = 0; index < list.length; index += 1) {
+      const row = list[index];
+      if (row === undefined || row.kind !== "tiles") continue;
+      for (const slot of row.slots) {
+        if (source.itemAt(slot)?.id === id) return index;
+      }
+    }
+    return -1;
+  };
+
+  function rememberReference(startRow: number): void {
+    const scroller = container?.querySelector<HTMLElement>("[data-virtual-scroller]");
+    if (scroller === null || scroller === undefined) return;
+    const row = rows()[startRow];
+    if (row === undefined || row.kind !== "tiles") return;
+    for (const slot of row.slots) {
+      const item = source.itemAt(slot);
+      if (item === null) continue;
+      lastSeen = { id: item.id, offsetPx: rowTop(rows(), startRow) - scroller.scrollTop };
+      return;
+    }
+  }
+
+  createEffect<string | undefined>((previous) => {
+    const key = props.pinsKey;
+    if (previous !== undefined && key !== previous && lastSeen !== null) {
+      setPendingPin({ ...lastSeen, key: `${previous}→${key}` });
+    }
+    return key;
+  });
+
+  createEffect(() => {
+    const pin = pendingPin();
+    if (pin === null) return;
+    if (source.count() === 0) {
+      setPendingPin(null);
+      return;
+    }
+    const anchor = source.selection().anchor;
+    let row = rowOfId(pin.id);
+    if (row < 0 && anchor !== null) row = rowOfId(anchor);
+    if (row < 0) {
+      setPendingPin(null);
+      return;
+    }
+    setScrollRequest({ row, offsetPx: pin.offsetPx, key: pin.key });
+    setPendingPin(null);
+  });
+
+  /*
+   * ── 看图关掉后把焦点还给网格 ──
+   *
+   * 落到哪：优先选中的那张 tile，没有就任意一张，再没有就容器自己（临时给 `tabindex="-1"`）。
+   * **重试几帧**：关掉看图会触发一次数据重载，虚拟列表的行元素是整块换掉的 ——
+   * 第一帧 focus 上的 tile 下一帧可能已经不在了。判据收紧成「**焦点丢了才补**」：
+   * 焦点已在网格里、或用户点到了别处（工具条、输入框），就不再插手。
+   */
+  function focusTiles(attempt = 0): void {
+    if (container === undefined) return;
+    const selected =
+      container.querySelector<HTMLElement>('[role="option"][aria-selected="true"]') ??
+      container.querySelector<HTMLElement>('[role="option"]');
+    if (selected !== null) {
+      selected.focus();
+    } else {
+      container.setAttribute("tabindex", "-1");
+      container.focus();
+    }
+    if (attempt >= 6) return;
+    requestAnimationFrame(() => {
+      if (container === undefined) return;
+      const active = document.activeElement;
+      if (active !== null && active !== document.body) return;
+      focusTiles(attempt + 1);
+    });
+  }
+
+  /** 「当前那张」落在哪一行（虚拟列表按行滚动） */
+  const focusRow = (): number | undefined => {
+    const id = props.focusId;
+    if (id === undefined) return undefined;
+    const row = rowOfId(id);
+    return row < 0 ? undefined : row;
+  };
+
+  createEffect<number | undefined>((seen) => {
+    const nudge = props.focusNudge ?? 0;
+    if (seen !== undefined && nudge !== seen) queueMicrotask(() => focusTiles());
+    return nudge;
+  });
+
+  /*
+   * ── 按需取数 + 补读真实宽高 ──
+   *
+   * 虚拟化已经算好「看到哪几行」，网格把它换成显示序区间交给数据源：
+   * * 浏览侧按页取（`ensureRange`）；
+   * * 两侧都要补读**可见那些**的真实宽高 —— 老库的 `width/height` 可能是 NULL，
+   *   而 tile 的比例、看图的拖动边界都要它。
+   */
+  function onVisibleRange(start: number, end: number): void {
+    rememberReference(start);
+    const list = rows();
+    let from = Number.POSITIVE_INFINITY;
+    let to = Number.NEGATIVE_INFINITY;
+    for (let at = Math.max(0, start); at < Math.min(end, list.length); at += 1) {
+      const row = list[at];
+      if (row === undefined || row.kind !== "tiles") continue;
+      for (const slot of row.slots) {
+        if (slot < from) from = slot;
+        if (slot > to) to = slot;
+      }
+    }
+    if (!Number.isFinite(from)) return;
+    void source.ensureRange?.(from, to + 1);
+    const entries: { id: string; path: string }[] = [];
+    for (let slot = from; slot <= to; slot += 1) {
+      const item = source.itemAt(slot);
+      if (item === null) continue;
+      entries.push({ id: item.id, path: item.path });
+    }
+    void source.ensureNatural(entries);
+  }
+
+  const groupingLocale = (): GroupingLocale => (locale() === "en-US" ? "en-US" : "zh-CN");
+
+  const watermark = (): JSX.Element | null =>
+    props.watermark?.({
+      status: source.status(),
+      error: source.error(),
+      count: source.count(),
+    }) ?? null;
 
   return (
-    <div class={["flex min-h-0 flex-1 flex-col bg-surface-bar", props.class ?? ""].join(" ")}>
-      {/* 画面区：全部状态都在这里切换 */}
-      <div
-        ref={container}
-        onKeyDown={onGridKeyDown}
-        class="relative flex min-h-0 flex-1 flex-col px-3 pt-2"
-        style={{
-          /*
-           * 只给**宽度**：画面区高度由 `Tile` 里的 `aspect-ratio` 自己排
-           * （`--tile-cell-h` 已废除 —— 那个「JS 算好的像素高」正是上一版错位的来源）。
-           */
-          "--tile-cell": `${cellWidth()}px`,
-        }}
-      >
-        <Show
-          when={store.dir()}
-          fallback={
-            <StateWatermark
-              icon={<IconFolderOpen size={64} stroke-width={1} />}
-              text={t("grid.pick_dir")}
-            />
+    <div
+      ref={container}
+      class={["flex min-h-0 flex-1 flex-col bg-surface-bar", props.class ?? ""]
+        .filter(Boolean)
+        .join(" ")}
+      onKeyDown={onGridKeyDown}
+      style={{ "--tile-cell": `${cellWidth()}px` }}
+    >
+      {/*
+        水印（空态 / 加载 / 错误）与网格**互斥**：`keyed` 不能删 —— 非 keyed 的 `Show`
+        比的是真值，而这里的 `when` 是元素本身（2026-09-18 冒烟抓到的那个
+        「真值不变就不重渲染」）。有数据时水印为 `null`，网格照画。
+      */}
+      <Show when={watermark()} keyed>
+        {(node) => node}
+      </Show>
+      <Show when={watermark() === null}>
+        <VirtualGrid
+          rows={rows()}
+          overscan={2}
+          resetKey={source.scopeKey()}
+          scrollTo={scrollRequest()}
+          {...(focusRow() === undefined ? {} : { focusRow: focusRow() })}
+          onVisibleRange={onVisibleRange}
+          /* Ctrl+滚轮调档位（两侧同一个手势）；松手那次由 commitTileStep 落盘 */
+          onZoomWheel={(step) => {
+            source.setTileStep(clampTileStepIndex(source.tileStep() + step));
+            source.commitTileStep();
+          }}
+          onBackgroundClick={() => source.clearSelection()}
+          renderRow={(row) =>
+            row.kind === "tiles" ? (
+              <TileRow
+                source={source}
+                row={row}
+                gap={gap()}
+                onOpen={openViewer}
+                {...(props.onInteract === undefined ? {} : { onInteract: props.onInteract })}
+                {...(props.onFocusIndex === undefined ? {} : { onFocusIndex: props.onFocusIndex })}
+              />
+            ) : (
+              <GroupHeader source={source} row={row} locale={groupingLocale()} />
+            )
           }
-        >
-        <Show when={store.status() !== "error"} fallback={
-            <StateWatermark
-              tone="error"
-              icon={<IconAlertTriangle size={64} stroke-width={1} />}
-              text={t("grid.load_error", { message: store.error() ?? "" })}
-              action={{ label: t("common.retry"), run: store.reload }}
-            />
-          }>
-            {/*
-              载入态 = **扫描目录 + 读文件头缓存**两段（见 store.ts 的 `load`）：
-              等头部缓存铺完才铺 tile，照片的比例一次到位，不会先占位再「长大」。
-            */}
-            <Show
-              when={store.status() !== "loading"}
-              fallback={
-                <StateWatermark
-                  animate
-                  icon={<IconPhoto size={64} stroke-width={1} />}
-                  text={t("grid.loading_dir")}
-                />
-              }
-            >
-              <Show
-                when={rows().length > 0}
-                fallback={
-                  <StateWatermark
-                    icon={<IconPhotoOff size={64} stroke-width={1} />}
-                    text={t("grid.empty_dir")}
-                  />
-                }
-              >
-                <VirtualGrid
-                  rows={rows()}
-                  overscan={2}
-                  resetKey={store.dir() ?? ""}
-                  /* Ctrl+滚轮调档位（与浏览网格同一个手势）；松手那次由 commitTileStep 落盘 */
-                  onZoomWheel={(step) => {
-                    store.setTileStep(
-                      clampTileStepIndex(store.tileStep() + step),
-                    );
-                    store.commitTileStep();
-                  }}
-                  /* 点空白 = 取消选择（与浏览网格同一行为） */
-                  onBackgroundClick={() => store.clearSelection()}
-                  renderRow={(row) =>
-                    row.kind === "tiles" ? (
-                      <TileRow
-                        store={store}
-                        row={row}
-                        gap={gap()}
-                        onOpen={openViewer}
-                        {...(props.isExcluded === undefined
-                          ? {}
-                          : { isExcluded: props.isExcluded })}
-                      />
-                    ) : (
-                      <GroupHeader
-                        store={store}
-                        row={row}
-                        locale={groupingLocale()}
-                      />
-                    )
-                  }
-                />
-              </Show>
-            </Show>
-          </Show>
-        </Show>
-        {/*
-          看图是**覆盖层**，不是把网格换掉：网格一直挂着，退出时光标、选中与**滚动位置**
-          原地不动。（人类 2026-09-17 报：进看图再退出会回到列表开头 ——
-          根因就是这里把网格卸载了，DOM 一没，滚动位置自然归零。）
-        */}
-        <Show when={viewer.state().active}>
-          <Viewer store={viewer} class="z-10" />
-        </Show>
-      </div>
+        />
+      </Show>
+
+      {/* 看图是覆盖层，不是把网格换掉：网格一直挂着，滚动位置留得住 */}
+      <Show when={viewer.state().active}>
+        <Viewer store={viewer} class="z-10" />
+      </Show>
     </div>
   );
 }
 
 /** 一行 tile */
 function TileRow(props: {
-  store: PhotoGridStore;
-  row: TileRowModel;
+  source: TilesSource;
+  row: GridRowModel & { kind: "tiles" };
   gap: number;
-  /** 双击一张 → 打开看图 */
   onOpen: (id: string) => void;
-  isExcluded?: (id: string) => boolean;
-}) {
+  onInteract?: () => void;
+  onFocusIndex?: (index: number) => void;
+}): JSX.Element {
   return (
     <div
       class="flex items-start"
       style={{ gap: `${props.gap}px`, height: `${props.row.height}px` }}
     >
-      {props.row.items.map((item) => (
+      {props.row.slots.map((slot) => (
         <TileCell
-          store={props.store}
-          item={item}
+          source={props.source}
+          slot={slot}
           onOpen={props.onOpen}
-          {...(props.isExcluded === undefined
-            ? {}
-            : { isExcluded: props.isExcluded })}
+          {...(props.onInteract === undefined ? {} : { onInteract: props.onInteract })}
+          {...(props.onFocusIndex === undefined ? {} : { onFocusIndex: props.onFocusIndex })}
         />
       ))}
     </div>
   );
 }
 
-/** 一张照片（负责请求自己的缩略图） */
+/** 一个格子（负责请求自己的缩略图） */
 function TileCell(props: {
-  store: PhotoGridStore;
-  item: SourceItem;
+  source: TilesSource;
+  slot: number;
   onOpen: (id: string) => void;
-  isExcluded?: (id: string) => boolean;
-}) {
-  const id = () => itemId(props.item);
-  const thumb = () => props.store.thumb(id());
-  const selected = () => props.store.selectedIds().has(id());
-  const excluded = () => props.isExcluded?.(id()) ?? false;
-
+  onInteract?: () => void;
+  onFocusIndex?: (index: number) => void;
+}): JSX.Element {
   // 被渲染（= 可见）时才请求 —— 虚拟化保证了这一点
-  createEffect(() => props.store.requestThumb(id()));
+  createEffect(() => {
+    const item = props.source.itemAt(props.slot);
+    if (item !== null) props.source.requestThumb(item.path);
+  });
+
+  const item = () => props.source.itemAt(props.slot);
+  const id = () => item()?.id ?? "";
+  const thumb = () => props.source.thumb(item()?.path ?? "");
+  const selected = () => item() !== null && props.source.selection().ids.has(id());
+  /** RAW 角标：展示的就是 RAW → `RAW`；位图 + RAW → `+RAW`；否则不显示 */
+  const rawMode = (): "raw" | "plus" | undefined => {
+    const it = item();
+    if (it === null) return undefined;
+    if (it.isRaw === true) return "raw";
+    if (it.hasRaw === true) return "plus";
+    return undefined;
+  };
 
   return (
     <div
       class="relative"
       // **正方外框**：边长就是尺寸档。行高恒定才有得拖（见 Tile 的模块注释）
       style={{ width: "var(--tile-cell)", height: "var(--tile-cell)" }}
-      // 双击进看图（设计稿 §3.2 的第一条）；单击仍是选中
-      onDblClick={() => props.onOpen(id())}
+      onDblClick={() => {
+        const it = item();
+        if (it !== null) props.onOpen(it.id);
+      }}
     >
       <Tile
         info={infoMode()}
-        label={props.item.fileName}
-        tag={props.item.ext?.toUpperCase() ?? undefined}
-        // RAW 角标：未指向、未选中时才浮在右下角（后端已经分好类，不用前端认扩展名）
-        raw={props.item.kind === "raw" ? "raw" : undefined}
-        aspect={props.store.aspectOf(id())}
+        label={item()?.fileName ?? ""}
+        tag={item()?.ext?.toUpperCase() ?? undefined}
+        raw={rawMode()}
+        aspect={props.source.aspectOf(id())}
         // 小尺寸档（96/120/144）星标退化成「一颗星 + 数字」
-        compact={props.store.tileStep() <= 2}
+        compact={props.source.tileStep() <= 2}
         src={thumb().url ?? undefined}
         selected={selected()}
-        loading={thumb().status === "loading" || thumb().status === "idle"}
-        excluded={excluded()}
+        loading={item() === null || thumb().status === "loading" || thumb().status === "idle"}
+        excluded={item()?.excluded === true}
+        rating={item()?.marks?.rating ?? 0}
+        /*
+         * 色标值来自数据库（可能有历史脏数据），认不出来的当没有 ——
+         * 与右栏/工具条同一个判据（`lib/color-labels.ts`）。
+         */
+        colorLabel={asColorLabel(item()?.marks?.colorLabel)}
+        flag={item()?.marks?.flag ?? null}
+        locked={item()?.marks?.locked === true}
         onClick={(event) => {
+          const it = item();
+          if (it === null) return;
           const mode =
             event.shiftKey && !event.ctrlKey && !event.metaKey
               ? "range"
               : event.ctrlKey || event.metaKey
                 ? "toggle"
                 : "replace";
-          props.store.clickItem(id(), mode);
+          props.source.select(it.id, mode);
+          props.onInteract?.();
+          props.onFocusIndex?.(props.slot);
         }}
       />
     </div>
@@ -384,25 +572,17 @@ function TileCell(props: {
 
 /** 分组标题行（日 / 时间片 / 未知时间） */
 function GroupHeader(props: {
-  store: PhotoGridStore;
-  row: GroupRowModel;
+  source: TilesSource;
+  row: GridRowModel & { kind: "group" };
   locale: GroupingLocale;
-}) {
-  const label = () => {
+}): JSX.Element {
+  const label = (): string => {
     const row = props.row;
     if (row.unknown) return t("grid.unknown_time");
     if (row.level === "day") return formatDayLabel(row.dayId, props.locale);
     if (row.startMs === null || row.endMs === null) return row.dayId;
-    return formatTimeRange(
-      row.startMs,
-      row.endMs,
-      row.offsetMinutes,
-      props.locale,
-    );
+    return formatTimeRange(row.startMs, row.endMs, row.offsetMinutes, props.locale);
   };
-
-  const selectLabel = () =>
-    props.row.level === "day" ? t("grid.select_all_day") : t("grid.select_all_range");
 
   const isDay = (): boolean => props.row.level === "day";
 
@@ -410,29 +590,25 @@ function GroupHeader(props: {
     /*
      * 留白只加在**上方**（行高里已经含了它）：标题贴着自己这一组、与上一组拉开。
      * 层级靠三样一起表达：留白（20 vs 10）、字号字重（14 semibold vs 13 normal）、
-     * 颜色（`fg-1` vs `fg-2`）—— 设计稿里这一块本来就没有横线也没有色块。
+     * 颜色（`fg-1` vs `fg-2`）—— 这一块本来就没有横线也没有色块。
      */
     <div
       class="flex items-center gap-2"
       style={{
         height: `${props.row.height}px`,
-        // 留白**从同一个事实源里推导**（行高 − 内容高）—— 见 rows.ts 的 DAY_HEADER
-        "padding-top": `${props.row.height - (isDay() ? DAY_HEADER.contentHeight : SLICE_HEADER.contentHeight)}px`,
+        // 留白**从同一个事实源里推导**（行高 − 内容高）—— 见 ui/tiles/rows.ts
+        "padding-top": `${
+          props.row.height - (isDay() ? DAY_HEADER.contentHeight : SLICE_HEADER.contentHeight)
+        }px`,
       }}
     >
       <Show when={isDay()}>
-        <IconCalendar
-          size={14}
-          class="shrink-0 text-fg-1"
-          aria-hidden="true"
-        />
+        <IconCalendar size={14} class="shrink-0 text-fg-1" aria-hidden="true" />
       </Show>
       <span
         class={[
           "truncate",
-          isDay()
-            ? "text-fs-2 font-semibold text-fg-1"
-            : "text-fs-1 text-fg-2",
+          isDay() ? "text-fs-2 font-semibold text-fg-1" : "text-fs-1 text-fg-2",
         ].join(" ")}
       >
         {label()}
@@ -440,7 +616,7 @@ function GroupHeader(props: {
       <span class="shrink-0 text-fs-0 text-fg-3 tnum">
         {t("grid.count", { n: formatCount(props.row.count, props.locale) })}
       </span>
-      {/* 药丸（设计稿：日组 `$state-selected` 高 20 / 时间片 `$state-hover` 高 18） */}
+      {/* 药丸（日组 `$state-selected` 高 20 / 时间片 `$state-hover` 高 18） */}
       <button
         type="button"
         class={[
@@ -449,9 +625,9 @@ function GroupHeader(props: {
             ? "h-5 bg-state-selected text-fg-2 hover:text-fg-1"
             : "h-4.5 bg-state-hover text-fg-3 hover:text-fg-1",
         ].join(" ")}
-        onClick={() => props.store.selectGroup(props.row.photoIds)}
+        onClick={(event) => props.source.selectGroupRange(props.row.start, props.row.count, event.ctrlKey || event.metaKey)}
       >
-        {selectLabel()}
+        {isDay() ? t("grid.select_all_day") : t("grid.select_all_range")}
       </button>
     </div>
   );

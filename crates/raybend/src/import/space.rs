@@ -109,6 +109,7 @@ mod tests {
             file_name: name,
             size_bytes: size,
             mtime_ms: None,
+            created_ms: None,
         }
     }
 

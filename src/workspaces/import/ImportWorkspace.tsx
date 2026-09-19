@@ -18,12 +18,26 @@
  * 两种主题下中央都形成聚焦（`design/main.md` §3）。
  */
 
-import { createEffect, createMemo, createSignal, onCleanup, onMount, Show } from "solid-js";
+import {
+  createEffect,
+  createMemo,
+  createSignal,
+  onCleanup,
+  onMount,
+  Show,
+  type JSX,
+} from "solid-js";
 import * as importCommands from "../../api/import.ts";
 import { importPrecheck, onImportProgress, type ImportSource } from "../../api/import.ts";
 import { locale, t } from "../../i18n/index.ts";
 import { fileNameOf } from "../../lib/format.ts";
-import { PhotoGrid, type PhotoGridStore } from "../../features/photo-grid/index.ts";
+import {
+  importSource,
+  PhotoGrid,
+  type PhotoGridStore,
+} from "../../features/photo-grid/index.ts";
+import { StateWatermark } from "../../components/ui/StateWatermark.tsx";
+import { IconAlertTriangle, IconFolderOpen, IconPhoto, IconPhotoOff } from "@tabler/icons-solidjs";
 import { TilesShell } from "../../components/ui/tiles/index.ts";
 import {
   CompareView,
@@ -322,6 +336,49 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
     props.onLeftRatioChange?.(next);
   }
 
+  /** 网格数据源（适配器：把导入 store 包成网格契约） */
+  const gridSource = createMemo(() => importSource(grid, { isExcluded: store.isExcluded }));
+
+  /** 空态 / 加载 / 错误的水印（文案是导入侧的，所以由工作区给） */
+  function gridWatermark(): JSX.Element | null {
+    if (grid.dir() === null) {
+      return (
+        <StateWatermark
+          icon={<IconFolderOpen size={64} stroke-width={1} />}
+          text={t("grid.pick_dir")}
+        />
+      );
+    }
+    if (grid.status() === "error") {
+      return (
+        <StateWatermark
+          tone="error"
+          icon={<IconAlertTriangle size={64} stroke-width={1} />}
+          text={t("grid.load_error", { message: grid.error() ?? "" })}
+          action={{ label: t("common.retry"), run: grid.reload }}
+        />
+      );
+    }
+    if (grid.status() === "idle" || grid.status() === "loading") {
+      return (
+        <StateWatermark
+          animate
+          icon={<IconPhoto size={64} stroke-width={1} />}
+          text={t("grid.loading_dir")}
+        />
+      );
+    }
+    if (grid.displayItems().length === 0) {
+      return (
+        <StateWatermark
+          icon={<IconPhotoOff size={64} stroke-width={1} />}
+          text={t("grid.empty_dir")}
+        />
+      );
+    }
+    return null;
+  }
+
   return (
     /*
      * 工作区 = 普通 flex 行 + **自写的宽度把手**（原则见 DESIGN.md §8.6：只给左边）。
@@ -404,8 +461,11 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
                 <Show
                   when={viewer.state().active}
                   fallback={
-                    /* 排除状态住在工作区 store（跨目录、跨源一份），网格只负责显示 */
-                    <PhotoGrid store={grid} isExcluded={store.isExcluded} />
+                    /*
+                     * 网格是全项目唯一那份（`PhotoGrid`）；导入侧的差异通过**数据源适配器**
+                     * 传进去（排除状态住在工作区 store：跨目录、跨源一份，网格只负责显示）。
+                     */
+                    <PhotoGrid source={gridSource()} watermark={() => gridWatermark()} />
                   }
                 >
                   <Show

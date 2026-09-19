@@ -553,6 +553,7 @@ mod tests {
                 file_name: name,
                 size_bytes: size,
                 mtime_ms: Some(T0 - 1000),
+                created_ms: None,
             },
             SourceExtras {
                 identity: Some(FileId::new(5, [3u8; 16])),

@@ -993,6 +993,7 @@ mod tests {
             file_name: name,
             size_bytes: size,
             mtime_ms: Some(1_700_000_000_000),
+            created_ms: None,
         }
     }
 

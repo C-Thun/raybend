@@ -9,6 +9,8 @@
  */
 
 export { PhotoGrid } from "./PhotoGrid.tsx";
+export { importSource } from "./source.ts";
+export type { ImportSourceOptions } from "./source.ts";
 export type { PhotoGridProps } from "./PhotoGrid.tsx";
 export {
   createPhotoGridStore,

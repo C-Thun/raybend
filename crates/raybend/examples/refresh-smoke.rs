@@ -34,6 +34,7 @@ fn snapshot(root: &std::path::Path, opts: &ScanOptions) -> Vec<DiskFile> {
                 kind: f.kind,
                 size_bytes: f.size_bytes,
                 mtime_ms: f.mtime_ms,
+                created_ms: None,
                 identity,
             });
         }
