@@ -8,7 +8,7 @@
  * │ │      ┌────┐  │ │   ← 1px 主色框 = 当前**看得见的那块**（放大/拖动时动）
  * │ │      └────┘  │ │
  * │ └──────────────┘ │
- * │ 直方图            │   ← 24 根柱，三通道叠着画
+ * │ 直方图            │   ← 三条填充曲线，加色叠加
  * │ ▁▂▅█▇▅▃▂▁▁▂▃▅▇▅▂ │
  * └──────────────────┘
  * ```
@@ -18,18 +18,18 @@
  * 1. **预览框的数学在 `visibleRect()`**（`components/ui/viewer/store.ts`），这里只按百分比摆 ——
  *    框和照片必须是同一个变换，否则放大后框会跟画面错位；
  * 2. **直方图是 Rust 算的**（`getHistogram` → `image_histogram`）：`AGENTS.md` §6.1 的红线，
- *    前端不碰像素；这里只把 24 个整数画成柱子；
+ *    前端不碰像素；这里只把 256 个整数连成曲线；
  * 3. 两块的底都用 `$surface-bar`（面板内插入块的规定，`design/browse.md` §2.3.1）。
  *
  * 只在看图时出现：tiles 模式下这两块让位给 EXIF（`AssetInfo` 里切换）。
  */
 
-import { createEffect, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
+import { createEffect, createSignal, onCleanup, Show, type JSX } from "solid-js";
 
 import { getHistogram, type Histogram } from "../../api/db.ts";
 import { t } from "../../i18n/index.ts";
 import { visibleRect, type ViewerStore } from "../../components/ui/viewer/index.ts";
-import { histogramBarHeights, histogramIsEmpty } from "./histogram.ts";
+import { histogramBarHeights, histogramIsEmpty, histogramPath } from "./histogram.ts";
 
 export interface ViewerReadoutProps {
   store: ViewerStore;
@@ -136,12 +136,12 @@ export function ViewerReadout(props: ViewerReadoutProps): JSX.Element {
         </div>
       </section>
 
-      {/* ── 直方图（24 柱，三通道叠画） ── */}
+      {/* ── 直方图（三通道**填充曲线**，加色叠加） ── */}
       <section class="mb-5">
         <h3 class="mb-1.5 text-fs-3 font-semibold text-fg-2">{t("browse.histogram")}</h3>
         <div
           class="rounded-ui bg-surface-bar px-2 py-1.5"
-          data-histogram={histogramIsEmpty(bars()) ? "empty" : "bars"}
+          data-histogram={histogramIsEmpty(bars()) ? "empty" : "curves"}
         >
           <Show
             when={!histogramIsEmpty(bars())}
@@ -149,38 +149,35 @@ export function ViewerReadout(props: ViewerReadoutProps): JSX.Element {
               <p class="py-3 text-center text-fs-2 text-fg-3">{t("browse.histogramEmpty")}</p>
             }
           >
-            <div class="flex h-[72px] items-end gap-px" title={t("browse.histogramHint")}>
-              <For each={bars()?.r ?? []}>
-                {(_, index) => (
-                  <div class="relative h-full flex-1">
-                    <div
-                      class="absolute inset-x-0 bottom-0"
-                      style={{
-                        height: `${(bars()?.r[index()] ?? 0) * 100}%`,
-                        background: "var(--hist-r)",
-                        opacity: "var(--hist-alpha)",
-                      }}
-                    />
-                    <div
-                      class="absolute inset-x-0 bottom-0"
-                      style={{
-                        height: `${(bars()?.g[index()] ?? 0) * 100}%`,
-                        background: "var(--hist-g)",
-                        opacity: "var(--hist-alpha)",
-                      }}
-                    />
-                    <div
-                      class="absolute inset-x-0 bottom-0"
-                      style={{
-                        height: `${(bars()?.b[index()] ?? 0) * 100}%`,
-                        background: "var(--hist-b)",
-                        opacity: "var(--hist-alpha)",
-                      }}
-                    />
-                  </div>
-                )}
-              </For>
-            </div>
+            {/*
+              三条**填充曲线**叠着画，靠 `mix-blend-screen` 做加色混合 —— 这是参考图的做法：
+              红蓝重叠 = 紫、蓝绿 = 青、绿红 = 黄、三色 = 白（灰）。
+              采样密度：256 个桶画在几百像素宽的框里 → 一桶不到一个像素，曲线天然平滑无锯齿，
+              不需要任何插值（这也是「按像素级精度构筑曲线」的落法）。
+            */}
+            <svg
+              class="h-[72px] w-full"
+              viewBox="0 0 256 100"
+              preserveAspectRatio="none"
+              role="img"
+              aria-label={t("browse.histogramHint")}
+            >
+              <path
+                d={histogramPath(bars()?.r ?? [], 256, 100)}
+                fill="var(--hist-r)"
+                class="mix-blend-screen"
+              />
+              <path
+                d={histogramPath(bars()?.g ?? [], 256, 100)}
+                fill="var(--hist-g)"
+                class="mix-blend-screen"
+              />
+              <path
+                d={histogramPath(bars()?.b ?? [], 256, 100)}
+                fill="var(--hist-b)"
+                class="mix-blend-screen"
+              />
+            </svg>
           </Show>
         </div>
       </section>

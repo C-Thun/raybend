@@ -56,3 +56,29 @@ export function histogramBarHeights(hist: Histogram | null): HistogramBars | nul
 export function histogramIsEmpty(bars: HistogramBars | null): boolean {
   return bars === null || bars.max <= 0;
 }
+
+/**
+ * 一条通道的**填充曲线路径**（SVG `d`）—— 人类 2026-09-19 定的新画法。
+ *
+ * 为什么不做插值：**采样密度本身就大于像素密度**（256 桶画在几百像素宽的框里，
+ * 一桶不到一个像素），所以直接连点就已经平滑、看不出台阶。
+ * 「按像素级精度构筑曲线」指的就是这件事 —— 一个色阶一个采样点，不抽样、不平均。
+ *
+ * 形状：从左下基线出发 → 依次经过每个桶 → 回到右下基线闭合（填充用）。
+ * 越界的高度会被夹到 0..1（后端换了桶数、或数据不齐时不至于画出框外）。
+ */
+export function histogramPath(
+  values: readonly number[],
+  width: number,
+  height: number,
+): string {
+  if (values.length === 0 || !(width > 0) || !(height > 0)) return "";
+  const step = width / values.length;
+  const points = values.map((value, index) => {
+    const clamped = Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0;
+    const x = index * step;
+    const y = height - clamped * height;
+    return `${x.toFixed(2)},${y.toFixed(2)}`;
+  });
+  return `M0,${height.toFixed(2)} L${points.join(" L")} L${width.toFixed(2)},${height.toFixed(2)} Z`;
+}

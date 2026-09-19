@@ -8,6 +8,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  histogramPath,
   histogramBarHeights,
   histogramIsEmpty,
 } from "./histogram.ts";
@@ -96,4 +97,45 @@ test("histogramBarHeights：后端少报了峰值时以实际数据为准", () =
   assert.ok(bars !== null);
   assert.equal(bars.max, 40);
   assert.equal(bars.b[3], 1);
+});
+
+// ─────────────────────────── 填充曲线路径（新画法） ───────────────────────────
+
+test("histogramPath：空数据与非法尺寸 → 空路径（不画）", () => {
+  assert.equal(histogramPath([], 100, 50), "");
+  assert.equal(histogramPath([0.5], 0, 50), "");
+  assert.equal(histogramPath([0.5], 100, 0), "");
+  assert.equal(histogramPath([0.5], Number.NaN, 50), "");
+});
+
+test("histogramPath：从左下基线出发、沿曲线、回基线闭合", () => {
+  const d = histogramPath([0, 1, 0], 100, 40);
+  assert.ok(d.startsWith("M0,40.00 L"), `起点必须是左下基线，实际 ${d.slice(0, 20)}`);
+  assert.ok(d.endsWith("Z"), "路径要闭合（填充用）");
+  assert.ok(d.includes("0.00,40.00"), "第一个点落在基线（值 0）");
+  // 三等分：步长 100/3 = 33.33，所以峰值点在 x=33.33（不是 50）
+  assert.ok(d.includes("33.33,0.00"), "中间点顶到上沿（值 1）");
+});
+
+test("histogramPath：每个桶一个采样点（像素级精度）", () => {
+  const bins = 256;
+  const values = Array.from({ length: bins }, (_, i) => (i % 7) / 7);
+  const d = histogramPath(values, 256, 100);
+  // 采样点 = 桶数（起点 M 不算）—— 密度大于像素密度，所以曲线天然平滑
+  const samples = d.split(" L").length - 1 - 1; // 末尾还有一个「回基线」的点
+  assert.equal(samples, bins, `采样点数应当等于桶数（实际 ${samples}）`);
+});
+
+test("histogramPath：越界高度夹到 0..1，不画出框外", () => {
+  const d = histogramPath([-5, 2, Number.NaN], 3, 10);
+  assert.ok(d.includes("0.00,10.00"), "负值 → 落在基线");
+  assert.ok(d.includes("1.00,0.00"), "大于 1 → 顶到上沿");
+  assert.ok(!d.includes("NaN"), "非数字不传播");
+});
+
+test("histogramPath：单桶时也要是一条完整可填充的路径", () => {
+  const d = histogramPath([0.5], 10, 10);
+  assert.ok(d.startsWith("M0,10.00 L"), "仍从基线起");
+  assert.ok(d.endsWith("Z"), "仍闭合");
+  assert.ok(d.includes("0.00,5.00"), "中点高度 = 0.5");
 });
