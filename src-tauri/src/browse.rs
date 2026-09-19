@@ -259,6 +259,9 @@ pub enum MarkActionDto {
     AttachTags { tag_ids: Vec<i64> },
     /// 摘标签（单张编辑标签弹窗）。
     DetachTags { tag_ids: Vec<i64> },
+    /// 改一个可编辑的文字字段（右栏：作者 / 描述 / 国家 / 省州 / 城市 / 具体地点）。
+    /// `field` 只认 `TextField::parse` 认的那几个名字，其余报错（**不做静默忽略**）。
+    SetText { field: String, value: Option<String> },
 }
 
 // ─────────────────────────── 输出 DTO ───────────────────────────
@@ -274,6 +277,17 @@ pub struct AssetItem {
     pub is_raw: bool,
     /// 这个资产还有没有 RAW（三种 tile 形态靠它与 `is_raw` 一起判，见 `AssetRow.has_raw`）
     pub has_raw: bool,
+    /// 右栏「文件基础信息 / 地理信息」（人写的那几项 + EXIF 读的 GPS）
+    pub author: Option<String>,
+    pub description: Option<String>,
+    pub gps_lat: Option<f64>,
+    pub gps_lon: Option<f64>,
+    pub country: Option<String>,
+    pub province_state: Option<String>,
+    pub city: Option<String>,
+    pub sublocation: Option<String>,
+    /// 创建日期（毫秒；取不到出生时间时是修改时间）
+    pub created_ms: Option<i64>,
     pub taken_at: Option<i64>,
     pub taken_at_offset_min: Option<i64>,
     pub rating: i64,
@@ -303,6 +317,15 @@ impl From<AssetRow> for AssetItem {
             ext: row.ext,
             is_raw: row.is_raw,
             has_raw: row.has_raw,
+            author: row.author,
+            description: row.description,
+            gps_lat: row.gps_lat,
+            gps_lon: row.gps_lon,
+            country: row.country,
+            province_state: row.province_state,
+            city: row.city,
+            sublocation: row.sublocation,
+            created_ms: row.created_ms,
             taken_at: row.taken_at,
             taken_at_offset_min: row.taken_at_offset_min,
             rating: i64::from(row.rating),
@@ -679,6 +702,21 @@ pub async fn browse_mark<R: Runtime>(
                     }
                     MarkActionDto::DetachTags { tag_ids } => {
                         marking::detach_tags(conn, &ids, tag_ids, "摘标签")?
+                    }
+                    MarkActionDto::SetText { field, value } => {
+                        let parsed = marking::TextField::parse(field).ok_or_else(|| {
+                            raybend::Error::Unsupported(format!(
+                                "右栏没有这个可编辑字段：{field}"
+                            ))
+                        })?;
+                        if let Some(text) = value
+                            && text.chars().count() > marking::TEXT_FIELD_MAX_CHARS {
+                                return Err(raybend::Error::Unsupported(format!(
+                                    "文字太长（上限 {} 字）",
+                                    marking::TEXT_FIELD_MAX_CHARS
+                                )));
+                            }
+                        marking::set_text(conn, &ids, parsed, value.as_deref())?
                     }
                 };
                 let applied = marking::apply(conn, &change)?;

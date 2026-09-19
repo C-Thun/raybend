@@ -127,6 +127,12 @@ pub const CATALOG_MIGRATIONS: &[Migration] = &[
         name: "source_identity",
         sql: include_str!("migrations/catalog_0003_source_identity.sql"),
     },
+    Migration {
+        version: 4,
+        // 文件创建时间（右栏「文件基础信息」的创建日期）
+        name: "file_created",
+        sql: include_str!("migrations/catalog_0004_file_created.sql"),
+    },
 ];
 
 /// 缩略图缓存库 `thumbs.db` 的迁移列表。

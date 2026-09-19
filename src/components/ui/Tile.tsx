@@ -103,13 +103,19 @@ export interface TileProps
    */
   info?: TileInfoMode;
   /**
-   * 是不是 RAW（人类 2026-09-17 要求）：未指向、未选中时，照片**右下角**浮一个
-   * 主色底纹的圆角 `RAW` 标签；鼠标指向或选中时**消失**。
+   * 右下角 RAW 角标的**显示模式**（`undefined` = 不显示）：
    *
-   * 为什么只在没指向/没选中时显示：那两种状态下本来就有信息条与选中底色，
-   * 再挂一个角标就是噪声；而平时它解决的是「一眼看出这批里哪些是 RAW」。
+   *   * `"raw"` —— 这张就是 RAW；
+   *   * `"plus"` —— **位图 + RAW** 的复合：展示的是 SOOC 位图，但同一张照片还有可编辑的 RAW
+   *     （人类 2026-09-19：用 `+RAW` 与纯 RAW 区分）。
+   *
+   * 三种 tile 形态（位图 / RAW / 位图+RAW）靠**同一个角标、同一套显示规则**表达，
+   * 只是文字不同 —— 不要在文件名那条上另造一个标记。
+   *
+   * 显示规则（人类 2026-09-17 定的，别改）：未指向、未选中时浮出；鼠标指向时淡出、
+   * 选中时直接不渲染（那两种状态下本来就有信息条与选中底色，再挂角标是噪声）。
    */
-  raw?: boolean;
+  raw?: "raw" | "plus";
   /** 星标 0..5（0 = 什么都不显示） */
   rating?: number;
   flag?: "pick" | "reject" | null;
@@ -314,7 +320,7 @@ export function Tile(props: TileProps) {
                   local.selected ? "hidden" : "group-hover/tile:opacity-0",
                 ].join(" ")}
               >
-                RAW
+                {local.raw === "plus" ? "+RAW" : "RAW"}
               </span>
             </Show>
 

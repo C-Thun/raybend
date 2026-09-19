@@ -34,6 +34,7 @@ import type {
   BrowseQuery,
   BrowseSort,
   DeleteResult,
+  EditableTextField,
   MarkAction,
   MarkResult,
   MarkingItem,
@@ -253,6 +254,13 @@ export interface BrowseStore {
   undoState(): UndoState;
   /** 删掉选中的照片（回收站）。 */
   removeSelected(): Promise<DeleteResult | null>;
+  /**
+   * 改右栏里可编辑的文字字段（作者 / 描述 / 地理四项）。
+   *
+   * 作用对象是**当前选中的那些照片**（批量也能改 —— 与打标同一条规矩）。
+   * `value` 传空串 = 清空该字段。走的是 `browse_mark`，所以**可以撤销**。
+   */
+  setText(field: EditableTextField, value: string): Promise<MarkResult | null>;
 
   // ── 旗标 ──
   picks(): ReadonlySet<number>;
@@ -755,6 +763,10 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
       setSelection(clearSelection());
       await reload();
       return result;
+    },
+
+    async setText(field, value) {
+      return mark({ kind: "setText", field, value });
     },
 
     picks,

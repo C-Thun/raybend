@@ -450,16 +450,16 @@ export function BrowseGrid(props: BrowseGridProps) {
   onCleanup(() => ownThumbs?.clear());
 
   /**
-   * tile 下面的那个小标签（`Tile` 的 `tag`）。
-   *
-   * 三种形态一眼可分（人类 2026-09-19）：只有位图写扩展名、只有 RAW 写 `RAW`、
-   * **位图 + RAW 写 `+RAW`** —— 第三种是「SOOC 位图 + 可编辑 RAW」的复合体。
+   * RAW 角标的显示模式（`Tile` 的 `raw`）：展示的是 RAW → `"raw"`；
+   * 展示的是位图、但同一张还有 RAW → `"plus"`（角标写 `+RAW`）；其余不显示。
    */
-  const tileTag = (item: { ext?: string; isRaw?: boolean; hasRaw?: boolean } | undefined): string | undefined => {
+  const rawMode = (
+    item: { isRaw?: boolean; hasRaw?: boolean } | undefined,
+  ): "raw" | "plus" | undefined => {
     if (item === undefined) return undefined;
-    if (item.isRaw === true) return t("browse.raw");
-    if (item.hasRaw === true) return `+${t("browse.raw")}`;
-    return item.ext === undefined ? undefined : item.ext.toUpperCase();
+    if (item.isRaw === true) return "raw";
+    if (item.hasRaw === true) return "plus";
+    return undefined;
   };
 
   /** 库里照片的绝对路径（拼接规则在 `lib/paths.ts`，全项目一份）。 */
@@ -655,13 +655,14 @@ export function BrowseGrid(props: BrowseGridProps) {
                       loading={item() === null}
                       context="library"
                       label={item()?.fileName ?? ""}
+                      /* 文件名那条＝**主名 + 扩展名**（与导入侧同一个表达，别在这里放 RAW） */
+                      tag={item()?.ext?.toUpperCase() ?? undefined}
                       /*
-                       * 三种 tile 形态（人类 2026-09-19）：
-                       *   只有位图 → 扩展名（JPG / PNG）
-                       *   只有 RAW → `RAW`
-                       *   位图 + RAW → `+RAW`（位图是 SOOC，编辑落在 RAW 上）
+                       * RAW 角标（人类 2026-09-19）：与导入侧**同一个角标、同一套显隐规则**，
+                       * 只在文字上区分两种模式 —— 展示的是 RAW → `RAW`；
+                       * 展示的是位图但同一张还有 RAW → `+RAW`。
                        */
-                      tag={tileTag(item() ?? undefined)}
+                      raw={rawMode(item() ?? undefined)}
                       src={url() ?? undefined}
                       /*
                        * 竖图必须按**自己的比例**居中显示（人类 2026-09-19：一旦是 tile，

@@ -65,10 +65,16 @@ import { browseKeyIntent, shouldHandleKey } from "../../lib/viewer-keys.ts";
 import { SplitHandle } from "../../components/ui/SplitHandle.tsx";
 import { nudgeWidth, resizeWidth } from "../../lib/column-resize.ts";
 import { joinPath } from "../../lib/paths.ts";
+import { LAYOUT_BOUNDS } from "../../lib/layout-prefs.ts";
 
-/** 侧栏宽度的上下限（与 `lib/layout-prefs.ts` 的 LAYOUT_BOUNDS 一致；两处都要有：
- *  那边挡存储里的垃圾值，这里挡拖拽本身） */
-const SIDEBAR_BOUNDS = { min: 220, max: 520 } as const;
+/**
+ * 侧栏宽度的上下限 = **唯一那一份**（`lib/layout-prefs.ts` 的 `LAYOUT_BOUNDS`）。
+ *
+ * 早先这里手抄了一份（220/520），于是把下限抬到 264 时**只有存储那一侧生效**、
+ * 拖拽这一侧纹丝不动 —— 同一件事两处写，改一处另一处不生效（人类 2026-09-19 抓到的
+ * 正是这类问题）。现在两边共用一条。
+ */
+const SIDEBAR_BOUNDS = LAYOUT_BOUNDS.browseLeftWidth;
 import type { BrowseSort, DeleteFailure } from "../../api/types.ts";
 
 export interface BrowseWorkspaceProps {
@@ -87,9 +93,12 @@ export interface BrowseWorkspaceProps {
   toast?: ToastStore;
   /** 左列 / 右列宽度（像素，受控；拖拽松手时通过下面的回调落盘） */
   leftWidth?: number;
+  /**
+   * 右列宽度（像素）。**不受控、不可拖** —— 按 `DESIGN.md` §8.6，把手只加在左侧边界上，
+   * 右列宽度是常量（`BROWSE_RIGHT_WIDTH`），所以这里没有对应的 `on…Change`。
+   */
   rightWidth?: number;
   onLeftWidthChange?: (width: number) => void;
-  onRightWidthChange?: (width: number) => void;
   class?: string;
 }
 

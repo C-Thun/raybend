@@ -93,7 +93,7 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
   /** 筛选态住在 store 里（结果区的 chips 也要读它，见 `store.filterMode`） */
   const filterMode = () => store.filterMode();
   /**
-   * 「移除所有旗标」的确认（`easy destroy` 范式：默认弹确认，按住 `Shift` 跳过）。
+   * 「清空旗标」的确认（`easy destroy` 范式：默认弹确认，按住 `Shift` 跳过）。
    *
    * 为什么它用 `easy destroy` 而**删照片不用**（人类 2026-09-19 的批注）：
    * `easy destroy` 是给「不为了批量而把界面变拥挤、又要能连续快速处理单张」准备的 ——
@@ -570,7 +570,7 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
         </For>
       </div>
 
-      {/* 「移除所有旗标」的确认弹窗（Shift 可跳过，提示语在弹窗里） */}
+      {/* 「清空旗标」的确认弹窗（Shift 可跳过，提示语在弹窗里） */}
       <ConfirmDialog
         open={clearFlags.pending() !== null}
         title={clearFlags.pending()?.title}

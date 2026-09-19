@@ -55,6 +55,8 @@ pub struct SourceFile {
     pub size_bytes: u64,
     /// 修改时间（Unix 毫秒）。
     pub mtime_ms: Option<i64>,
+    /// 创建时间（Unix 毫秒；文件系统不给出生时间时为 `None`）。
+    pub created_ms: Option<i64>,
     /// 文件身份（读不到时为 `None`）。
     pub identity: Option<FileId>,
     /// 拍摄时间（Unix 毫秒；缺了模版就渲染成 0）。
@@ -81,6 +83,7 @@ impl SourceFile {
             stem_folded: scan.stem_folded.clone(),
             size_bytes: scan.size_bytes,
             mtime_ms: scan.mtime_ms,
+            created_ms: scan.created_ms,
             identity: extras.identity,
             taken_at: extras.taken_at,
             brand: extras.brand,

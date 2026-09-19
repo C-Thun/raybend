@@ -513,6 +513,21 @@ pub struct AssetRow {
     /// 第三种要在照片下面写 `+RAW`（它是 SOOC 的位图 + 可编辑的 RAW），
     /// 与「只有 RAW」的 `RAW` 区分开。
     pub has_raw: bool,
+    /// 右栏「文件基础信息 / 地理信息」里那几项（全可空：EXIF 里未必有、人也未必填过）。
+    ///
+    /// `author` / `description` / `country` / `province_state` / `city` / `sublocation`
+    /// 是**人写的**（右栏可编辑，走 `marking::set_text`）；
+    /// `gps_lat` / `gps_lon` 是**从文件读的**（EXIF，导入时写）。
+    pub author: Option<String>,
+    pub description: Option<String>,
+    pub gps_lat: Option<f64>,
+    pub gps_lon: Option<f64>,
+    pub country: Option<String>,
+    pub province_state: Option<String>,
+    pub city: Option<String>,
+    pub sublocation: Option<String>,
+    /// 文件的创建日期（毫秒）。取不到出生时间时**退回修改时间**（见 `ROW_COLUMNS`）。
+    pub created_ms: Option<i64>,
     pub taken_at: Option<i64>,
     /// 拍摄时间用的时区偏移（分钟）；`None` = 相机没写，按 UTC 看。
     pub taken_at_offset_min: Option<i64>,
@@ -548,7 +563,10 @@ const ROW_COLUMNS: &str = "\
     COALESCE(f.role, '') AS role, \
     a.taken_at, a.taken_at_offset_min, a.rating, a.color_label, a.like_state, a.lock_level, \
     a.camera_make, a.camera_model, a.lens, a.focal_mm, a.f_number, a.exposure_ms, a.iso, \
-    a.width, a.height, a.orientation, f.size_bytes, f.missing_since,     EXISTS(SELECT 1 FROM asset_files r WHERE r.asset_id = a.id AND r.role = 'raw') AS has_raw";
+    a.width, a.height, a.orientation, f.size_bytes, f.missing_since,     EXISTS(SELECT 1 FROM asset_files r WHERE r.asset_id = a.id AND r.role = 'raw') AS has_raw, \
+    a.author, a.description, a.gps_lat, a.gps_lon, \
+    a.country, a.province_state, a.city, a.sublocation, \
+    COALESCE(f.file_created_ms, f.mtime_ms) AS created_ms";
 
 /// 展示用文件的选取规则：**有位图就位图，没有就 RAW**。
 ///
@@ -568,6 +586,15 @@ fn row_from(row: &Row<'_>) -> rusqlite::Result<AssetRow> {
         ext: row.get(2)?,
         is_raw: role == "raw",
         has_raw: row.get::<_, i64>(22)? != 0,
+        author: row.get(23)?,
+        description: row.get(24)?,
+        gps_lat: row.get(25)?,
+        gps_lon: row.get(26)?,
+        country: row.get(27)?,
+        province_state: row.get(28)?,
+        city: row.get(29)?,
+        sublocation: row.get(30)?,
+        created_ms: row.get(31)?,
         taken_at: row.get(4)?,
         taken_at_offset_min: row.get(5)?,
         rating: u8::try_from(row.get::<_, i64>(6)?).unwrap_or(0),

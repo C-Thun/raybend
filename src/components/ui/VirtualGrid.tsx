@@ -180,10 +180,28 @@ export function VirtualGrid<TRow extends VirtualGridRow>(
         props.onZoomWheel(event.deltaY < 0 ? 1 : -1);
       }}
       onClick={(event) => {
-        // 落在「容器本身」或「留白层」上都算空白；落在行 / tile 上不算
-        if (event.target === event.currentTarget || event.target === surface) {
-          props.onBackgroundClick?.();
+        /*
+         * 「点空白」的判据：**这一下没有落在任何一张照片上**。
+         *
+         * 人类 2026-09-19 报过：早先写的是「target 是不是容器本身 / 留白层」——
+         * 于是一行里**没放图的空槽位**（比如一行 5 格只放了 2 张，点右边空着的 3 格）
+         * 命中的是**行元素**，被当成「点在行上」，取消选择没反应 ✗。
+         *
+         * 正确的问法是「点到照片了吗」：`role="option"` 是 tile（两个网格都一样），
+         * 只要是它的后代，就交给 tile 自己的点击处理；否则才是空白。
+         * 再排掉可交互元素（按钮 / 输入框 / 链接）—— 那些有自己的事，不该顺带取消选择。
+         */
+        const target = event.target;
+        if (!(target instanceof Element)) return;
+        if (target.closest('[role="option"]') !== null) return;
+        if (
+          target.closest(
+            'button, a, input, select, textarea, [role="button"], [role="checkbox"], [data-keep-click]',
+          ) !== null
+        ) {
+          return;
         }
+        props.onBackgroundClick?.();
       }}
     >
       {/*

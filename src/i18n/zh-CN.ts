@@ -262,7 +262,7 @@ export const zhCN = {
 
  "browse.filterHint": "开启后，后面的标记都变成筛选条件",
  "browse.flag": "旗标",
- "browse.flagClear": "移除所有旗标",
+ "browse.flagClear": "清空旗标",
  "browse.flagCleared": "已清空所有旗标",
 
  "browse.flagClearConfirm": "清空所有旗标？跨库、跨目录都生效（效果类似关掉软件重开）。",

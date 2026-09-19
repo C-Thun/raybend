@@ -364,6 +364,22 @@ export interface AssetItem {
    * 第三种下面写 `+RAW`（位图是 SOOC，编辑落在 RAW 上），与「只有 RAW」的 `RAW` 分开。
    */
   hasRaw: boolean;
+  /**
+   * 右栏「文件基础信息 / 地理信息」里那几项。
+   *
+   * `author` / `description` / `country` / `provinceState` / `city` / `sublocation`
+   * 是**人写的**（右栏可编辑）；`gpsLat` / `gpsLon` 是从文件读的（EXIF）。
+   */
+  author: string | null;
+  description: string | null;
+  gpsLat: number | null;
+  gpsLon: number | null;
+  country: string | null;
+  provinceState: string | null;
+  city: string | null;
+  sublocation: string | null;
+  /** 创建日期（毫秒；文件系统没有出生时间时退回修改时间） */
+  createdMs: number | null;
   takenAt: number | null;
   /** 拍摄时间用的时区偏移（分钟）；`null` = 相机没写，按 UTC 看。 */
   takenAtOffsetMin: number | null;
@@ -543,13 +559,29 @@ export interface BrowseQuery {
 }
 
 /** 标记动作（对应 Rust 的 `MarkActionDto`，serde 用 `kind` 做标签）。 */
+/**
+ * 右栏里**可编辑的文字字段**（与 Rust 的 `marking::TextField` 一一对应）。
+ *
+ * 用联合类型而不是 `string`：后端只认这几个名字，写错了编译器当场报错
+ * （IPC 那边收到不认识的名字会明确报错，不会静默忽略）。
+ */
+export type EditableTextField =
+  | "author"
+  | "description"
+  | "country"
+  | "provinceState"
+  | "city"
+  | "sublocation";
+
 export type MarkAction =
   | { kind: "rating"; value: number }
   | { kind: "color"; value: string | null }
   | { kind: "like"; value: string | null }
   | { kind: "lock"; value: number }
   | { kind: "attachTags"; tagIds: number[] }
-  | { kind: "detachTags"; tagIds: number[] };
+  | { kind: "detachTags"; tagIds: number[] }
+  /** 改右栏里可编辑的文字字段（空串 = 清空） */
+  | { kind: "setText"; field: EditableTextField; value: string };
 
 /**
  * 数据库升级通知（`db://migration` 事件的载荷）。

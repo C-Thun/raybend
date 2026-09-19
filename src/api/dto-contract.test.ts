@@ -264,6 +264,15 @@ const TEMPLATE_PREVIEW_KEYS = [
 
 const ASSET_ITEM_KEYS = [
   "hasRaw",
+  "author",
+  "description",
+  "gpsLat",
+  "gpsLon",
+  "country",
+  "provinceState",
+  "city",
+  "sublocation",
+  "createdMs",
   "cameraMake",
   "cameraModel",
   "colorLabel",

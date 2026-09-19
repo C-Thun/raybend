@@ -55,6 +55,8 @@ enum Op {
         kind: MediaKind,
         size_bytes: u64,
         mtime_ms: Option<i64>,
+        /// 副本的**创建时间**（右栏「创建日期」；文件系统不给就是 `None`）。
+        created_ms: Option<i64>,
         /// 库内**副本**的身份（读不到就 `None`）。
         copy_identity: Option<FileId>,
         /// 源文件绝对路径（溯源 + 兜底判重）。
@@ -230,6 +232,7 @@ impl ImportSink for CatalogSink<'_> {
             kind: file.kind,
             size_bytes: file.size_bytes,
             mtime_ms: file.mtime_ms,
+            created_ms: file.created_ms,
             copy_identity,
             source_path: file.abs_path.display().to_string(),
             source_identity: file.identity,
@@ -295,6 +298,7 @@ fn apply(conn: &rusqlite::Connection, op: &Op, now_ms: i64) -> Result<()> {
             kind,
             size_bytes,
             mtime_ms,
+            created_ms,
             copy_identity,
             source_path,
             source_identity,
@@ -309,6 +313,7 @@ fn apply(conn: &rusqlite::Connection, op: &Op, now_ms: i64) -> Result<()> {
                 kind: *kind,
                 size_bytes: *size_bytes,
                 mtime_ms: *mtime_ms,
+                created_ms: *created_ms,
                 identity: *copy_identity,
             };
             assets::insert_file(conn, asset_id, &disk, assets::role_of(*kind), now_ms)?;

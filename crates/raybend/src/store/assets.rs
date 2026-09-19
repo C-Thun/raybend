@@ -32,6 +32,8 @@ pub struct FileRow {
     pub ext: String,
     pub size_bytes: Option<u64>,
     pub mtime_ms: Option<i64>,
+    /// 文件创建时间（列在 v4 加；老库为 NULL ⇒ 上层退回 `mtime_ms`）
+    pub file_created_ms: Option<i64>,
     pub identity: Option<FileId>,
     /// `missing_since`：非空 = 磁盘上暂时找不到。
     pub missing: bool,
@@ -48,6 +50,7 @@ impl FileRow {
             rel_path_folded: self.rel_path_folded.clone(),
             size_bytes: self.size_bytes,
             mtime_ms: self.mtime_ms,
+            file_created_ms: self.file_created_ms,
             identity: self.identity,
             missing: self.missing,
         }
@@ -70,16 +73,16 @@ pub fn role_of(kind: MediaKind) -> &'static str {
 /// 跑；等真的到大库了再改成分批（`limit` 已经是现成的切分点）。
 pub fn list_files(conn: &Connection) -> Result<Vec<FileRow>> {
     let mut stmt = conn.prepare(
-        "SELECT id, asset_id, rel_path, rel_path_folded, role, ext, size_bytes, mtime_ms,
+        "SELECT id, asset_id, rel_path, rel_path_folded, role, ext, size_bytes, mtime_ms, file_created_ms,
                 volume_serial, file_id, missing_since
            FROM asset_files
           ORDER BY id",
     )?;
     let rows = stmt.query_map([], |r| {
         // SQLite 只有 i64：volume_serial 按位重解释存取（`as` 双向一一对应，不会丢信息）
-        let vol: Option<i64> = r.get(8)?;
-        let blob: Option<Vec<u8>> = r.get(9)?;
-        let missing_since: Option<i64> = r.get(10)?;
+        let vol: Option<i64> = r.get(9)?;
+        let blob: Option<Vec<u8>> = r.get(10)?;
+        let missing_since: Option<i64> = r.get(11)?;
         Ok(FileRow {
             row_id: r.get(0)?,
             asset_id: r.get(1)?,
@@ -89,6 +92,7 @@ pub fn list_files(conn: &Connection) -> Result<Vec<FileRow>> {
             ext: r.get(5)?,
             size_bytes: r.get::<_, Option<i64>>(6)?.map(|v| v.max(0) as u64),
             mtime_ms: r.get(7)?,
+            file_created_ms: r.get(8)?,
             identity: match (vol, blob.as_deref()) {
                 (Some(v), Some(b)) => FileId::from_blob(v as u64, b),
                 _ => None,
@@ -127,8 +131,8 @@ pub fn insert_file(
     conn.execute(
         "INSERT INTO asset_files
             (asset_id, role, rel_path, rel_path_folded, ext, size_bytes, mtime_ms,
-             volume_serial, file_id, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)",
+             file_created_ms, volume_serial, file_id, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11)",
         params![
             asset_id,
             role,
@@ -137,6 +141,7 @@ pub fn insert_file(
             ext,
             disk.size_bytes as i64,
             disk.mtime_ms,
+            disk.created_ms,
             vol,
             blob,
             now_ms
@@ -200,11 +205,15 @@ pub fn update_stat(
     row_id: i64,
     size_bytes: u64,
     mtime_ms: Option<i64>,
+    file_created_ms: Option<i64>,
     now_ms: i64,
 ) -> Result<()> {
     conn.execute(
-        "UPDATE asset_files SET size_bytes = ?1, mtime_ms = ?2, updated_at = ?3 WHERE id = ?4",
-        params![size_bytes as i64, mtime_ms, now_ms, row_id],
+        "UPDATE asset_files
+            SET size_bytes = ?1, mtime_ms = ?2,
+                file_created_ms = COALESCE(?5, file_created_ms), updated_at = ?3
+          WHERE id = ?4",
+        params![size_bytes as i64, mtime_ms, now_ms, row_id, file_created_ms],
     )?;
     Ok(())
 }
@@ -284,7 +293,7 @@ pub fn apply_diff(
         update_path(conn, r.row_id, &r.new_path, now_ms)?;
         // 顺带把大小/时间刷新一遍：改名往往伴随替换（同一次操作里做掉）
         if let Some(f) = disk.get(r.disk_index) {
-            update_stat(conn, r.row_id, f.size_bytes, f.mtime_ms, now_ms)?;
+            update_stat(conn, r.row_id, f.size_bytes, f.mtime_ms, f.created_ms, now_ms)?;
         }
         out.renamed += 1;
         if r.evidence == Evidence::Heuristic {
@@ -295,7 +304,7 @@ pub fn apply_diff(
     // ── 内容变了 ──
     for m in &plan.modified {
         if let Some(f) = disk.get(m.disk_index) {
-            update_stat(conn, m.row_id, f.size_bytes, f.mtime_ms, now_ms)?;
+            update_stat(conn, m.row_id, f.size_bytes, f.mtime_ms, f.created_ms, now_ms)?;
             out.modified += 1;
         }
     }
@@ -304,7 +313,7 @@ pub fn apply_diff(
     for m in &plan.returned {
         clear_missing(conn, m.row_id, now_ms)?;
         if let Some(f) = disk.get(m.disk_index) {
-            update_stat(conn, m.row_id, f.size_bytes, f.mtime_ms, now_ms)?;
+            update_stat(conn, m.row_id, f.size_bytes, f.mtime_ms, f.created_ms, now_ms)?;
         }
         out.returned += 1;
     }
@@ -406,9 +415,13 @@ fn normalize_raw_dir(dir: &str) -> &str {
 
 /// 把一个资产的 EXIF 元数据写进去。
 ///
-/// **只写「从文件推出来」的字段**：拍摄时间/器材/曝光/尺寸/朝向。
+/// **只写「从文件推出来」的字段**：拍摄时间/器材/曝光/尺寸/朝向/GPS。
 /// 绝不碰用户自己写的（`author` / `description` / `rating` / 色标 / 标签）——
 /// 重新读一遍 EXIF 不该把用户的劳动冲掉。
+///
+/// GPS 是「从文件推出来的」⇒ 在这里写（人类 2026-09-19 要在右栏看经纬度）。
+/// 而 `country` / `province_state` / `city` / `sublocation` 是**人写的**（EXIF 里没有），
+/// 所以不在这里，走 `marking::set_text`。
 pub fn apply_exif(
     conn: &Connection,
     asset_id: i64,
@@ -436,8 +449,10 @@ pub fn apply_exif(
             taken_at = ?1, taken_at_source = ?2, taken_at_offset_min = ?3,
             camera_make = ?4, camera_model = ?5, lens = ?6,
             focal_mm = ?7, f_number = ?8, exposure_ms = ?9, iso = ?10,
-            width = ?11, height = ?12, orientation = ?13, updated_at = ?14
-          WHERE id = ?15",
+            width = ?11, height = ?12, orientation = ?13,
+            gps_lat = COALESCE(?14, gps_lat), gps_lon = COALESCE(?15, gps_lon),
+            updated_at = ?16
+          WHERE id = ?17",
         params![
             taken_at,
             taken_src,
@@ -452,6 +467,8 @@ pub fn apply_exif(
             exif.width,
             exif.height,
             exif.orientation,
+            exif.gps.map(|g| g.lat),
+            exif.gps.map(|g| g.lon),
             now_ms,
             asset_id
         ],

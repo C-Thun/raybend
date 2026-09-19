@@ -101,6 +101,9 @@ pub struct ScannedFile {
     pub size_bytes: u64,
     /// 修改时间（Unix 毫秒）。取不到时为 `None`。
     pub mtime_ms: Option<i64>,
+    /// 创建时间（Unix 毫秒）。文件系统不给出生时间时为 `None`
+    /// （显示端退回 `mtime_ms`，所以这里不编造）。
+    pub created_ms: Option<i64>,
 }
 
 /// 跳过某个文件/目录的理由（统计与日志用）。
@@ -364,6 +367,7 @@ where
                 kind: file_kind,
                 size_bytes: size,
                 mtime_ms: meta.modified().ok().map(time::from_system_time),
+                created_ms: meta.created().ok().map(time::from_system_time),
             }))?;
         }
     }

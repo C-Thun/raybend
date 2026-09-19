@@ -165,7 +165,7 @@ const FIXTURES = {
     canRedo: false,
   },
   browse_flags_get: { total: 0, picks: [], rejects: [] },
-  // 打旗标之后假装库里真有了一面旗 —— 这样「移除所有旗标」才是可点的，
+  // 打旗标之后假装库里真有了一面旗 —— 这样「清空旗标」才是可点的，
   // 才验得到「必须先确认」这条（3.1）
   flags_set: { total: 1, picks: [1], rejects: [] },
   flags_clear: { total: 0, picks: [], rejects: [] },
@@ -678,7 +678,7 @@ try {
   const clearGate = await send("Runtime.evaluate", {
     expression: `(() => {
       const buttons = [...document.querySelectorAll("button")];
-      const clear = buttons.find((b) => b.textContent && b.textContent.includes("移除所有旗标"));
+      const clear = buttons.find((b) => b.textContent && b.textContent.includes("清空旗标"));
       if (!clear) return { found: false };
       if (clear.disabled) return { found: true, disabled: true };
       clear.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -698,7 +698,7 @@ try {
   const gateShown = gateState.result?.value ?? {};
   if (gate.found !== true || gate.disabled === true) {
     problems.push(
-      `「移除所有旗标」应当是可点的（实测 ${JSON.stringify(gate)}；打旗标按钮=${JSON.stringify(
+      `「清空旗标」应当是可点的（实测 ${JSON.stringify(gate)}；打旗标按钮=${JSON.stringify(
         pickClick.result?.value ?? {},
       )}；invoke=${JSON.stringify((await send("Runtime.evaluate", {
         expression: "JSON.stringify((window.__INVOKE_LOG || []).slice(-6))",
@@ -1166,6 +1166,63 @@ try {
       returnByValue: true,
     });
     await sleep(300);
+  }
+
+  /*
+   * 点空白取消选择（人类 2026-09-19 报的判定 bug）：
+   * 早先只认「容器本身 / 留白层」，于是一行里**右侧空着的槽位**点不动 ——
+   * 那一下命中的是**行元素**，被判成「点在行上」。
+   * 这里就按真实位置点：取该行最后一张图右边 8px 的那个点（用 elementFromPoint 取真实命中元素）。
+   */
+  await send("Runtime.evaluate", {
+    expression: `(() => {
+      const tile = document.querySelector('[role="option"]');
+      tile?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      return Boolean(tile);
+    })()`,
+    returnByValue: true,
+  });
+  await sleep(400);
+  const blank = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const tile = document.querySelector('[role="option"]');
+      const row = tile?.closest('[role="option"]')?.parentElement?.parentElement ?? null;
+      const inRow = row ? [...row.querySelectorAll('[role="option"]')] : [];
+      const last = inRow[inRow.length - 1] ?? null;
+      const rect = row ? row.getBoundingClientRect() : null;
+      const lastRect = last ? last.getBoundingClientRect() : null;
+      if (!row || !rect || !lastRect) return { ok: false };
+      const x = Math.min(rect.right - 4, lastRect.right + 8);
+      const y = lastRect.top + Math.min(lastRect.height / 2, 10);
+      const el = document.elementFromPoint(x, y);
+      if (!el) return { ok: false, reason: "elementFromPoint 空" };
+      const inTile = el.closest('[role="option"]') !== null;
+      el.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      return {
+        ok: true,
+        inTile,
+        target: el.tagName + (el.getAttribute("role") ? "[" + el.getAttribute("role") + "]" : ""),
+      };
+    })()`,
+    returnByValue: true,
+  });
+  await sleep(400);
+  const blankState = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const tiles = [...document.querySelectorAll('[role="option"]')];
+      return {
+        selected: tiles.filter((t) => t.getAttribute("aria-selected") === "true").length,
+        status: (document.querySelector("main")?.innerText ?? "").match(/已选 \d+ 张/)?.[0] ?? null,
+      };
+    })()`,
+    returnByValue: true,
+  });
+  const blankHit = blank.result?.value ?? {};
+  const blankAfter = blankState.result?.value ?? {};
+  if (blankHit.ok === true && blankHit.inTile === false && blankAfter.selected !== 0) {
+    problems.push(
+      `点一行里空着的槽位应当取消选择（实测命中的是 ${JSON.stringify(blankHit.target)}，选中仍是 ${blankAfter.selected}）`,
+    );
   }
 
   // 再选中一张，供后面的筛选断言用（删除把选中清掉了）

@@ -26,7 +26,7 @@ import type { ExifData } from "./features/exif-strip/index.ts";
 import { assetItemExif, toExifData } from "./features/exif-strip/index.ts";
 import { createPhotoGridStore } from "./features/photo-grid/index.ts";
 import { createAppearanceStore } from "./lib/appearance.ts";
-import { createLayoutStore } from "./lib/layout-prefs.ts";
+import { BROWSE_RIGHT_WIDTH, createLayoutStore } from "./lib/layout-prefs.ts";
 import { FlowBar } from "./shell/FlowBar.tsx";
 import { createShellStore } from "./shell/store.ts";
 import { TitleBar } from "./shell/TitleBar.tsx";
@@ -285,9 +285,8 @@ export default function App() {
           onOpenLibrarySettings={(id) => setLibrarySettingsId(id)}
           toast={toast}
           leftWidth={layout.prefs().browseLeftWidth}
-          rightWidth={layout.prefs().browseRightWidth}
+          rightWidth={BROWSE_RIGHT_WIDTH}
           onLeftWidthChange={(width) => layout.setBrowseLeftWidth(width)}
-          onRightWidthChange={(width) => layout.setBrowseRightWidth(width)}
         />
       </Show>
     </div>

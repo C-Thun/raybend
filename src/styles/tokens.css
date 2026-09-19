@@ -307,8 +307,14 @@
   --radius: 4px;
 
   --panel-w-left: 320px;
-  /* 右列宽度（人类 2026-09-19：+25% —— 这里要放功能，300 太窄） */
-  --panel-w-right: 375px;
+  /*
+   * 右列宽度：**只给导入工作区用**（`w-panel-w-right`）。
+   *
+   * 2026-09-19 曾被误改成 375px（那次真正要加宽的是**浏览**右列，
+   * 而浏览的右列宽度走 `layout-prefs.ts` 的 `browseRightWidth`，不看令牌）——
+   * 结果加宽落在了导入侧。已恢复，别再改这个值。
+   */
+  --panel-w-right: 300px;
 
   --btn-pad-x: 5px;
   --btn-pad-y: 3px;

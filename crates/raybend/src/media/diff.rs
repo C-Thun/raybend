@@ -40,6 +40,11 @@ pub struct DiskFile {
     pub kind: MediaKind,
     pub size_bytes: u64,
     pub mtime_ms: Option<i64>,
+    /// 文件的**创建时间**（右栏「文件基础信息 → 创建日期」）。
+    ///
+    /// 不是所有文件系统都有出生时间（ext4 视内核/挂载参数而定）⇒ `None` 是常态，
+    /// 显示端退回 `mtime_ms`，所以这里**不编造**值。
+    pub created_ms: Option<i64>,
     /// 文件身份；读不到时为 `None`（网络盘、权限、非 NTFS/无 inode 的 FS）。
     pub identity: Option<FileId>,
 }
@@ -58,6 +63,7 @@ impl DiskFile {
             kind: kind::kind_of_file(&rel_path),
             rel_path,
             size_bytes,
+            created_ms: None,
             mtime_ms,
             identity: None,
         }
@@ -90,6 +96,8 @@ pub struct DbFile {
     pub rel_path_folded: String,
     pub size_bytes: Option<u64>,
     pub mtime_ms: Option<i64>,
+    /// 文件创建时间（catalog v4 加的列；老库为 NULL）
+    pub file_created_ms: Option<i64>,
     pub identity: Option<FileId>,
     /// 已经标记过缺失（`missing_since IS NOT NULL`）。
     pub missing: bool,

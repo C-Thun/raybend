@@ -40,6 +40,79 @@ pub const LOCK_NO_DELETE: u8 = 1;
 /// 二级锁：**不能编辑**（比一级更严，含标记与标签）。
 pub const LOCK_NO_EDIT: u8 = 2;
 
+/// 右栏里**可编辑的文字字段**（文件基础信息 / 地理信息那几项）。
+///
+/// 为什么要枚举而不是直接传列名：列名进 SQL 就是注入面，而且列名改了编译器不会报错。
+/// **列名只在这里出现一次**（`column()`），外面只能传这个枚举。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextField {
+    /// 作者（EXIF Artist；将来支持「某库导入时自动填」）
+    Author,
+    Description,
+    Country,
+    ProvinceState,
+    City,
+    Sublocation,
+}
+
+impl TextField {
+    /// 数据库列名（**唯一出现的地方**）。
+    #[must_use]
+    pub const fn column(self) -> &'static str {
+        match self {
+            Self::Author => "author",
+            Self::Description => "description",
+            Self::Country => "country",
+            Self::ProvinceState => "province_state",
+            Self::City => "city",
+            Self::Sublocation => "sublocation",
+        }
+    }
+
+    /// 中文名（撤销栈里显示「撤销：改作者」）。
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Author => "作者",
+            Self::Description => "描述",
+            Self::Country => "国家",
+            Self::ProvinceState => "省/州",
+            Self::City => "城市",
+            Self::Sublocation => "具体地点",
+        }
+    }
+
+    /// 从 IPC 传来的名字解析（只认这几个，其余一律拒绝）。
+    #[must_use]
+    pub fn parse(name: &str) -> Option<Self> {
+        match name {
+            "author" => Some(Self::Author),
+            "description" => Some(Self::Description),
+            "country" => Some(Self::Country),
+            "provinceState" | "province_state" => Some(Self::ProvinceState),
+            "city" => Some(Self::City),
+            "sublocation" => Some(Self::Sublocation),
+            _ => None,
+        }
+    }
+
+    /// 所有可选字段（界面按这个顺序渲染）。
+    #[must_use]
+    pub const fn all() -> [Self; 6] {
+        [
+            Self::Author,
+            Self::Description,
+            Self::Country,
+            Self::ProvinceState,
+            Self::City,
+            Self::Sublocation,
+        ]
+    }
+}
+
+/// 文字字段的长度上限：够写一段描述，又不至于把界面/DB 撑爆。
+pub const TEXT_FIELD_MAX_CHARS: usize = 2000;
+
 /// 撤销栈的默认深度。100 步足够覆盖「刚发现打错了」这类场景，内存也几乎为零。
 pub const DEFAULT_UNDO_DEPTH: usize = 100;
 
@@ -74,6 +147,13 @@ pub enum Op {
         asset_id: i64,
         tag_id: i64,
     },
+    /// 改一个可编辑的文字字段（作者 / 描述 / 地理三项）。
+    Text {
+        asset_id: i64,
+        field: TextField,
+        before: Option<String>,
+        after: Option<String>,
+    },
 }
 
 impl Op {
@@ -86,7 +166,8 @@ impl Op {
             | Self::Like { asset_id, .. }
             | Self::Lock { asset_id, .. }
             | Self::TagAttach { asset_id, .. }
-            | Self::TagDetach { asset_id, .. } => *asset_id,
+            | Self::TagDetach { asset_id, .. }
+            | Self::Text { asset_id, .. } => *asset_id,
         }
     }
 
@@ -145,6 +226,17 @@ impl Op {
             Self::TagDetach { asset_id, tag_id } => Self::TagAttach {
                 asset_id: *asset_id,
                 tag_id: *tag_id,
+            },
+            Self::Text {
+                asset_id,
+                field,
+                before,
+                after,
+            } => Self::Text {
+                asset_id: *asset_id,
+                field: *field,
+                before: after.clone(),
+                after: before.clone(),
             },
         }
     }
@@ -267,6 +359,15 @@ pub fn apply(conn: &Connection, change: &ChangeSet) -> Result<Applied> {
                     changed.insert(asset_id);
                 }
             }
+            Op::Text { field, after, .. } => {
+                // 列名来自枚举（不是用户输入）⇒ 拼进来是安全的；这里也没别的插值口
+                let sql = format!(
+                    "UPDATE assets SET {} = ?1, updated_at = ?2 WHERE id = ?3",
+                    field.column()
+                );
+                conn.execute(&sql, rusqlite::params![after, now, asset_id])?;
+                changed.insert(asset_id);
+            }
             Op::TagDetach { tag_id, .. } => {
                 let removed = conn.execute(
                     "DELETE FROM asset_tags WHERE asset_id = ?1 AND tag_id = ?2",
@@ -283,6 +384,37 @@ pub fn apply(conn: &Connection, change: &ChangeSet) -> Result<Applied> {
         changed: changed.len(),
         skipped_locked: skipped.into_iter().collect(),
     })
+}
+
+/// 改一批照片的某个文字字段（右栏里那几项可编辑的内容）。
+///
+/// `value` 传 `None` / 空串 = **清空**该字段。**没变的不产生 op**（幂等），
+/// 否则「点一下没改内容」也会占一步撤销。
+pub fn set_text(
+    conn: &Connection,
+    ids: &[i64],
+    field: TextField,
+    value: Option<&str>,
+) -> Result<ChangeSet> {
+    let after = value
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(ToOwned::to_owned);
+    let mut ops = Vec::new();
+    for id in ids {
+        let sql = format!("SELECT {} FROM assets WHERE id = ?1", field.column());
+        let before: Option<String> = conn.query_row(&sql, [id], |r| r.get(0))?;
+        if before == after {
+            continue;
+        }
+        ops.push(Op::Text {
+            asset_id: *id,
+            field,
+            before,
+            after: after.clone(),
+        });
+    }
+    Ok(ChangeSet::new(format!("改{}", field.label()), ops))
 }
 
 /// 一张照片当前的标记值（读旧值用）。

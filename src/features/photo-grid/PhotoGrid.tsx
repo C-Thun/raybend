@@ -360,7 +360,7 @@ function TileCell(props: {
         label={props.item.fileName}
         tag={props.item.ext?.toUpperCase() ?? undefined}
         // RAW 角标：未指向、未选中时才浮在右下角（后端已经分好类，不用前端认扩展名）
-        raw={props.item.kind === "raw"}
+        raw={props.item.kind === "raw" ? "raw" : undefined}
         aspect={props.store.aspectOf(id())}
         // 小尺寸档（96/120/144）星标退化成「一颗星 + 数字」
         compact={props.store.tileStep() <= 2}

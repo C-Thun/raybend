@@ -136,10 +136,20 @@ test("sanitizeLayout：侧栏宽度非法值落到默认、越界被夹回范围
     "太小要夹到下限（再窄只剩省略号）",
   );
   assert.equal(
-    sanitizeLayout({ browseRightWidth: 9999 }).browseRightWidth,
-    LAYOUT_BOUNDS.browseRightWidth.max,
+    sanitizeLayout({ browseLeftWidth: 9999 }).browseLeftWidth,
+    LAYOUT_BOUNDS.browseLeftWidth.max,
     "太大要夹到上限（别把网格挤没）",
   );
+});
+
+test("右列宽度不是偏好：老存储里的那个键不再影响结果", () => {
+  /*
+   * 右列不可拖（`DESIGN.md` §8.6：把手只加在左侧边界）⇒ 没有「自定义值」可存，
+   * 它是 `BROWSE_RIGHT_WIDTH` 常量。老 profile 里那个键必须被**忽略** ——
+   * 否则「曾经存过 300」会永远压住新默认（真机踩过：改大默认值不生效）。
+   */
+  const parsed = sanitizeLayout({ browseRightWidth: 9999 }) as unknown as Record<string, unknown>;
+  assert.equal(parsed.browseRightWidth, undefined);
 });
 
 test("sanitizeLayout：侧栏宽度取整（半像素会渗出 1px 的缝）", () => {

@@ -30,15 +30,24 @@ export interface LayoutPrefs {
   /** 左列内部「最近」段的高度比例（0–1；「来源」= 1 − 它） */
   recentRatio: number;
   /**
-   * 浏览工作区左列 / 右列的宽度（**像素**，不是比例）。
+   * 浏览工作区**左列**的宽度（**像素**，不是比例）。
    *
-   * 为什么这两条用像素而上面那条用比例：信息栏与库列表是**侧栏** ——
+   * 为什么用像素而上面那条用比例：信息栏与库列表是**侧栏** ——
    * 桌面软件里侧栏宽度是人手动定死的（改窗口大小不该让信息栏跟着变宽窄），
    * 而导入工作区那条左列是「整页的一部分」，跟着窗口缩放更自然。
    */
   browseLeftWidth: number;
-  browseRightWidth: number;
 }
+
+/**
+ * 浏览工作区**右列**的宽度（像素，**常量**，不是偏好）。
+ *
+ * 为什么是常量：按 `DESIGN.md` §8.6 的原则，**右侧不给拖拽把手**（把手只加在左侧边界上），
+ * 所以用户没有任何办法改它 —— 那就没有「自定义值」可存。此前它躺在 `LayoutPrefs` 里，
+ * 后果是真机上一旦存过旧默认（300），后来把默认调大也不会生效（存的 300 赢过新默认）。
+ * 人类 2026-09-19：browse 右列 300 → **375（+25%）**。
+ */
+export const BROWSE_RIGHT_WIDTH = 375;
 
 /**
  * 允许的范围：既给拖拽留余量，也挡住存储里的垃圾值把某一段挤没。
@@ -51,17 +60,18 @@ export const LAYOUT_BOUNDS = {
   /**
    * 左列像素下限 **264**（人类 2026-09-19：在 220 基础上 +20% —— 220 时目录名/标签
    * 太挤）；上限 520 不变（别把网格挤没）。
+   *
+   * **这是唯一一份**：拖拽/键盘微调的闸门直接用这条（`BrowseWorkspace` 里那份
+   * 手抄的 `SIDEBAR_BOUNDS` 已删）—— 两处各写一份的话，改了一处另一处不生效。
    */
   browseLeftWidth: { min: 264, max: 520 },
-  browseRightWidth: { min: 220, max: 520 },
 } as const;
 
 export const DEFAULT_LAYOUT: LayoutPrefs = {
   leftRatio: 0.22,
   recentRatio: 0.32,
-  // 与 M2-W1 时代的固定宽度一致（两侧各 300），所以默认视觉上什么都没变
+  // 左列仍是 300（人类没要求改默认，只要求把下限抬到 264）
   browseLeftWidth: 300,
-  browseRightWidth: 300,
 };
 
 function defaultStorage(): LayoutStorage | undefined {
@@ -99,9 +109,7 @@ export function sanitizeLayout(
     browseLeftWidth: Math.round(
       clamp(record.browseLeftWidth, LAYOUT_BOUNDS.browseLeftWidth, fallback.browseLeftWidth),
     ),
-    browseRightWidth: Math.round(
-      clamp(record.browseRightWidth, LAYOUT_BOUNDS.browseRightWidth, fallback.browseRightWidth),
-    ),
+    // 右列宽度**不是偏好**：老存储里那个键直接忽略（值由 `BROWSE_RIGHT_WIDTH` 定）
   };
 }
 
@@ -135,9 +143,8 @@ export interface LayoutStore {
   /** 拖拽**结束**时调用（只记最终比例，中间过程由 Ark 自己管） */
   setLeftRatio: (ratio: number) => void;
   setRecentRatio: (ratio: number) => void;
-  /** 浏览工作区侧栏宽度（像素）；拖拽**松手**时调它落盘 */
+  /** 浏览工作区左列宽度（像素）；拖拽**松手**时调它落盘 */
   setBrowseLeftWidth: (width: number) => void;
-  setBrowseRightWidth: (width: number) => void;
 }
 
 /**
@@ -160,13 +167,12 @@ export function createLayoutStore(
    */
   const commit = (next: LayoutPrefs): void => {
     const current = prefs();
-    // ⚠️ 四个字段**都要比**：早先只比了前两个，于是「只改侧栏宽度」会被当成没变化吞掉
+    // ⚠️ 三个字段**都要比**：早先只比了前两个，于是「只改左列宽度」会被当成没变化吞掉
     //（2026-09-19 加宽度时发现的：改了值、信号不动、界面纹丝不动）。
     if (
       current.leftRatio === next.leftRatio &&
       current.recentRatio === next.recentRatio &&
-      current.browseLeftWidth === next.browseLeftWidth &&
-      current.browseRightWidth === next.browseRightWidth
+      current.browseLeftWidth === next.browseLeftWidth
     ) {
       return;
     }
@@ -180,7 +186,5 @@ export function createLayoutStore(
     setRecentRatio: (ratio) => commit(sanitizeLayout({ ...prefs(), recentRatio: ratio })),
     setBrowseLeftWidth: (width) =>
       commit(sanitizeLayout({ ...prefs(), browseLeftWidth: width })),
-    setBrowseRightWidth: (width) =>
-      commit(sanitizeLayout({ ...prefs(), browseRightWidth: width })),
   };
 }
