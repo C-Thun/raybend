@@ -89,7 +89,19 @@ Web 应用里成立的层（BFF、加载器编排、页面级数据预取…）�
 | —— | `src/features/import-queue/`（导入执行与进度） | M1-6 |
 | —— | `src/features/browse/`（浏览：查询 store、行模型、网格、标记工具栏、左右两列） | M2-W1 阶段 6 |
 | —— | `src/workspaces/browse/`（浏览工作区三列组合层） | M2-W1 阶段 6 |
+| —— | **`src/features/commands/`（命令注册表 + 命令面板 + 快捷键设置 + 分发器）** | M2-W3 |
+| —— | **`src/lib/{key-chords,commands,command-match,shortcuts}.ts`（命令与快捷键的纯逻辑，均带单测）** | M2-W3 |
+| —— | **`src/features/<域>/actions.ts`（工作区 / 看图件的**动作槽**：命令通过它调真实动作）** | M2-W3 |
 | —— | `src/dev/SpikeViewport.tsx` + `src/api/spike.ts`（**渲染 spike 诊断页**，`?spike=1` 才加载） | M2-W1 阶段 7 |
+
+### 2.0 命令与快捷键的归属（M2-W3 定）
+
+| 层 | 放什么 | 规矩 |
+| --- | --- | --- |
+| `lib/{key-chords,commands,command-match,shortcuts}.ts` | 键位解析/格式化/匹配、命令**类型**与冲突判定、模糊匹配、偏好存储与导入导出 | 纯逻辑；**不认识** DOM / i18n / store（分层规矩），所以判定在 lib、**措辞在 features** |
+| `features/commands/catalog.ts` | **全部命令**（id / 文案 key / 分组 / 作用域 / 默认键 / when / enabled / run） | 不 import 任何 feature：动作由组装层通过 `CommandDeps` 注入（组装层是唯一能碰所有 store 的地方） |
+| `features/commands/dispatcher.ts` | **全应用唯一的键盘监听** | 输入框 / 模态 / Ark 组件内部的键不归它管（`shouldHandleKey`）；元素自己的焦点行为（`Tile` 的 Enter、列表 roving focus）也不接 |
+| `features/<域>/actions.ts` | 工作区 / 看图件的**动作槽**（挂载时注册、卸载时置空） | 槽里只有动作没有状态：读状态一律回 store（唯一事实来源） |
 
 **Rust 侧（M2-W1 新增）**：
 
