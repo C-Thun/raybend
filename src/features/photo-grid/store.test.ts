@@ -24,6 +24,7 @@ import {
   DEFAULT_META_TIMEOUT_MS,
   type PhotoGridApi,
 } from "./store.ts";
+import { DEFAULT_TILE_STEP_INDEX, TILE_SIZE_STEPS } from "../../lib/tile-flow.ts";
 
 const CST = 480;
 
@@ -419,7 +420,7 @@ test("档位：夹到合法范围；拖动中只改内存、松手才落盘", as
   resetDisplayPrefsForTests();
 
   store.setTileStep(99);
-  assert.equal(store.tileStep(), 8, "9 档 → 最大下标 8");
+  assert.equal(store.tileStep(), TILE_SIZE_STEPS.length - 1, "越界夹到最大档");
   store.setTileStep(-5);
   assert.equal(store.tileStep(), 0);
   await flush();
@@ -437,7 +438,7 @@ test("档位：夹到合法范围；拖动中只改内存、松手才落盘", as
   );
 
   store.setTileStep(Number.NaN);
-  assert.equal(store.tileStep(), 4, "非法值回到默认档（正中间）");
+  assert.equal(store.tileStep(), DEFAULT_TILE_STEP_INDEX, "非法值回到默认档（几何中点那档）");
   resetDisplayPrefsForTests();
 });
 

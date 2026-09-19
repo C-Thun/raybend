@@ -17,6 +17,7 @@ import {
   TILE_SIZE_STEPS,
   clampDisplayAspect,
   clampTileStepIndex,
+  migrateTileStepIndex,
   tileRowCount,
   tileRowHeight,
   tileSizeAt,
@@ -158,15 +159,35 @@ test("不变式：used + remainder 恒等于容器宽（无四舍五入丢像素
 
 // ─── 尺寸档位 ─────────────────────────────────────────────
 
-test("档位是 9 档、奇数个、存在中间档、最大 512", () => {
-  assert.equal(TILE_SIZE_STEPS.length, 9);
+test("档位是 17 档、奇数个、存在中间档、最大 400（人类 2026-09-20 定的上限）", () => {
+  assert.equal(TILE_SIZE_STEPS.length, 17);
   assert.equal(TILE_SIZE_STEPS.length % 2, 1, "奇数档才有可选的中间档");
-  assert.equal(TILE_SIZE_STEPS[TILE_SIZE_STEPS.length - 1], 512);
+  assert.equal(TILE_SIZE_STEPS[TILE_SIZE_STEPS.length - 1], 400);
+  assert.equal(TILE_SIZE_STEPS[0], 128, "最小档仍是 128（不再有 96 那种密到看不清的档）");
 });
 
-test("默认档位就是正中间那档", () => {
-  assert.equal(DEFAULT_TILE_STEP_INDEX, 4);
-  assert.equal(tileSizeAt(DEFAULT_TILE_STEP_INDEX), 256);
+test("默认档位是 260（旧默认 256 的几何等价档，差 1.6%）", () => {
+  assert.equal(tileSizeAt(DEFAULT_TILE_STEP_INDEX), 260);
+  assert.equal(TILE_SIZE_STEPS[DEFAULT_TILE_STEP_INDEX], 260);
+});
+
+test("相邻两级的倍率在 1.05–1.10 之间（细腻，但不至于拖十下都没变化）", () => {
+  for (let i = 1; i < TILE_SIZE_STEPS.length; i += 1) {
+    const ratio = TILE_SIZE_STEPS[i] / TILE_SIZE_STEPS[i - 1];
+    assert.ok(
+      ratio >= 1.05 && ratio <= 1.1,
+      `第 ${i} 级倍率 ${ratio.toFixed(3)} 不在 1.05–1.10（${TILE_SIZE_STEPS[i - 1]} → ${TILE_SIZE_STEPS[i]}）`,
+    );
+  }
+});
+
+test("旧 9 档表的下标能按尺寸换算到新表（存过的档位不白瞎）", () => {
+  // 旧表：128,152,180,216,256,304,360,432,512
+  assert.equal(TILE_SIZE_STEPS[migrateTileStepIndex(0)], 128);
+  assert.equal(TILE_SIZE_STEPS[migrateTileStepIndex(4)], 260, "旧默认 256 落在最接近的 260");
+  assert.equal(TILE_SIZE_STEPS[migrateTileStepIndex(8)], 400, "旧最大 512 落到新上限 400");
+  assert.equal(migrateTileStepIndex(Number.NaN), DEFAULT_TILE_STEP_INDEX);
+  assert.equal(migrateTileStepIndex(999), TILE_SIZE_STEPS.length - 1, "越界先夹到旧表末尾");
 });
 
 test("档位严格单调递增（滑块拖起来不能有平台或回落）", () => {
@@ -179,10 +200,11 @@ test("档位严格单调递增（滑块拖起来不能有平台或回落）", ()
 });
 
 test("越界下标被夹到合法范围", () => {
+  const last = TILE_SIZE_STEPS.length - 1;
   assert.equal(clampTileStepIndex(-1), 0);
   assert.equal(clampTileStepIndex(-999), 0);
-  assert.equal(clampTileStepIndex(9), 8);
-  assert.equal(clampTileStepIndex(999), 8);
+  assert.equal(clampTileStepIndex(last + 1), last);
+  assert.equal(clampTileStepIndex(999), last);
   assert.equal(clampTileStepIndex(2.6), 3, "小数四舍五入");
   assert.equal(
     clampTileStepIndex(Number.NaN),
@@ -193,7 +215,7 @@ test("越界下标被夹到合法范围", () => {
 
 test("tileSizeAt 对越界与非法下标都返回合法档位", () => {
   assert.equal(tileSizeAt(-5), TILE_SIZE_STEPS[0]);
-  assert.equal(tileSizeAt(100), TILE_SIZE_STEPS[8]);
+  assert.equal(tileSizeAt(100), TILE_SIZE_STEPS[TILE_SIZE_STEPS.length - 1]);
   assert.equal(tileSizeAt(Number.NaN), tileSizeAt(DEFAULT_TILE_STEP_INDEX));
 });
 

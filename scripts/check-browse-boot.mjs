@@ -1396,6 +1396,14 @@ try {
     returnByValue: true,
   });
   await sleep(400);
+  /*
+   * 点空白取消选择（人类 2026-09-19 报的判定 bug）……
+   *
+   * ⚠️ 纵坐标要避开**右上角的 toast 区**：toast 宿主是 `fixed` 的 320 宽一列，
+   * 卡片自己 `pointer-events-auto` —— 点在那里会被它吃掉（2026-09-20 真撞上：
+   * 删除测试留下的「成功 / 失败」两条 toast 正好盖住那一格）。所以下面
+   * 从上往下试几个点，取第一个不被 toast 盖住的。
+   */
   const blank = await send("Runtime.evaluate", {
     expression: `(() => {
       const tile = document.querySelector('main [data-virtual-scroller] [role="option"]');
@@ -1406,14 +1414,39 @@ try {
       const lastRect = last ? last.getBoundingClientRect() : null;
       if (!row || !rect || !lastRect) return { ok: false };
       const x = Math.min(rect.right - 4, lastRect.right + 8);
-      const y = lastRect.top + Math.min(lastRect.height / 2, 10);
-      const el = document.elementFromPoint(x, y);
+      // 避开 toast（右上角 fixed 那一列）
+      const candidates = [
+        lastRect.top + Math.min(lastRect.height / 2, 10),
+        lastRect.bottom - 6,
+        lastRect.top + lastRect.height / 2,
+      ];
+      let el = null;
+      let y = 0;
+      for (const candidate of candidates) {
+        const hit = document.elementFromPoint(x, candidate);
+        if (hit && hit.closest("[data-toast-host]") === null) {
+          el = hit;
+          y = candidate;
+          break;
+        }
+      }
       if (!el) return { ok: false, reason: "elementFromPoint 空" };
       const inTile = el.closest('[role="option"]') !== null;
+      const chain = [];
+      for (let node = el; node !== null && chain.length < 6; node = node.parentElement) {
+        chain.push(node.tagName + (node.className && typeof node.className === "string" ? "." + node.className.split(" ").slice(0, 2).join(".") : ""));
+      }
+      const scroller = document.querySelector("main [data-virtual-scroller]");
       el.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       return {
         ok: true,
         inTile,
+        x: Math.round(x),
+        y: Math.round(y),
+        row: { l: Math.round(rect.left), r: Math.round(rect.right) },
+        last: { l: Math.round(lastRect.left), r: Math.round(lastRect.right) },
+        scroller: scroller ? { l: Math.round(scroller.getBoundingClientRect().left), r: Math.round(scroller.getBoundingClientRect().right) } : null,
+        chain,
         target: el.tagName + (el.getAttribute("role") ? "[" + el.getAttribute("role") + "]" : ""),
       };
     })()`,
@@ -1434,7 +1467,7 @@ try {
   const blankAfter = blankState.result?.value ?? {};
   if (blankHit.ok === true && blankHit.inTile === false && blankAfter.selected !== 0) {
     problems.push(
-      `点一行里空着的槽位应当取消选择（实测命中的是 ${JSON.stringify(blankHit.target)}，选中仍是 ${blankAfter.selected}）`,
+      `点一行里空着的槽位应当取消选择（实测命中的是 ${JSON.stringify(blankHit.target)}，选中仍是 ${blankAfter.selected}；几何 ${JSON.stringify(blankHit)}）`,
     );
   }
 

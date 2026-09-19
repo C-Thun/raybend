@@ -32,7 +32,7 @@
 
 import { createSignal, type Accessor } from "solid-js";
 
-import { clampTileStepIndex, DEFAULT_TILE_STEP_INDEX } from "./tile-flow.ts";
+import { clampTileStepIndex, DEFAULT_TILE_STEP_INDEX, migrateTileStepIndex, TILE_SIZE_STEPS } from "./tile-flow.ts";
 
 /** 「信息」档位（`Tile` 与状态条上的 `i` 开关共用这一份类型） */
 export type TileInfoMode = "off" | "marks" | "marks-name";
@@ -47,6 +47,15 @@ export interface DisplayPrefs {
 }
 
 export const DISPLAY_STORAGE_KEY = "raybend.display.v1";
+
+/**
+ * 存进 JSON 里的**档位表版本**（就是档位数）。
+ *
+ * 存的 `tileStep` 是**下标**，而下标只有配上「哪张表」才有意义 ——
+ * 2026-09-20 把 9 档表换成 17 档表（512 → 400 封顶）之后，旧记录的下标含义全变了。
+ * 没有这个字段的记录一律按旧表换算一次（`migrateTileStepIndex`），而不是直接夹取。
+ */
+export const TILE_STEP_SCALE = TILE_SIZE_STEPS.length;
 
 export const DEFAULT_DISPLAY_PREFS: DisplayPrefs = {
   byTime: false,
@@ -101,7 +110,28 @@ export function readDisplayPrefs(
   try {
     const raw = storage.getItem(DISPLAY_STORAGE_KEY);
     if (raw === null || raw === "") return { ...DEFAULT_DISPLAY_PREFS };
-    return sanitizeDisplayPrefs(JSON.parse(raw));
+    const parsed: unknown = JSON.parse(raw);
+    /*
+     * 旧记录（9 档表，2026-09-20 之前）没有 `tileStepScale` —— 下标含义不同，
+     * 按**尺寸最接近**换算（旧 8 = 512 → 新 16 = 400），再交给 sanitize。
+     * 注意只在**读存储**这一处迁移：写入路径（`patch`）拿的是内存里的新下标，
+     * 不能在那里再换一次。
+     */
+    const record = (
+      typeof parsed === "object" && parsed !== null ? parsed : {}
+    ) as Record<string, unknown>;
+    const fresh =
+      record.tileStepScale === TILE_STEP_SCALE
+        ? parsed
+        : {
+            ...record,
+            tileStep: migrateTileStepIndex(
+              typeof record.tileStep === "number" && Number.isFinite(record.tileStep)
+                ? record.tileStep
+                : DEFAULT_TILE_STEP_INDEX,
+            ),
+          };
+    return sanitizeDisplayPrefs(fresh);
   } catch {
     return { ...DEFAULT_DISPLAY_PREFS };
   }
@@ -113,7 +143,11 @@ export function writeDisplayPrefs(
 ): void {
   if (!storage) return;
   try {
-    storage.setItem(DISPLAY_STORAGE_KEY, JSON.stringify(prefs));
+    // 多存一个 `tileStepScale`：下次读时才知道这个下标配的是哪张表（见 `TILE_STEP_SCALE`）
+    storage.setItem(
+      DISPLAY_STORAGE_KEY,
+      JSON.stringify({ ...prefs, tileStepScale: TILE_STEP_SCALE }),
+    );
   } catch {
     // 存储不可用：静默（偏好丢了不影响用）
   }

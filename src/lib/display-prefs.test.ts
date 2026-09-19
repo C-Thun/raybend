@@ -10,7 +10,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { DEFAULT_TILE_STEP_INDEX } from "./tile-flow.ts";
+import { DEFAULT_TILE_STEP_INDEX, TILE_SIZE_STEPS } from "./tile-flow.ts";
 import {
   DEFAULT_DISPLAY_PREFS,
   displayByTime,
@@ -59,7 +59,7 @@ test("sanitizeDisplayPrefs：合法值原样保留，越界档位夹回范围", 
     sanitizeDisplayPrefs({ byTime: true, infoMode: "marks-name", tileStep: 6 }),
     { byTime: true, infoMode: "marks-name", tileStep: 6 },
   );
-  assert.equal(sanitizeDisplayPrefs({ tileStep: 99 }).tileStep, 8);
+  assert.equal(sanitizeDisplayPrefs({ tileStep: 99 }).tileStep, TILE_SIZE_STEPS.length - 1);
   assert.equal(sanitizeDisplayPrefs({ tileStep: -3 }).tileStep, 0);
   assert.equal(
     sanitizeDisplayPrefs({ tileStep: Number.NaN }).tileStep,
@@ -82,6 +82,34 @@ test("writeDisplayPrefs / readDisplayPrefs：来回一趟不丢字段", () => {
   assert.equal(storage.data.has(DISPLAY_STORAGE_KEY), true, "写在约定的键上");
 });
 
+test("旧 9 档表存过的下标：按尺寸换算一次，不直接夹取", () => {
+  /*
+   * 2026-09-20 把 9 档表换成 17 档表（512 → 400 封顶）。旧记录没有 `tileStepScale`，
+   * 下标含义不同：旧 8（512）在新表里是 228，直接读就会“偷偷缩小”；
+   * 正确行为是按尺寸找最接近的那档（400）。
+   */
+  const legacyMax = fakeStorage({
+    [DISPLAY_STORAGE_KEY]: JSON.stringify({ byTime: false, infoMode: "off", tileStep: 8 }),
+  });
+  assert.equal(readDisplayPrefs(legacyMax).tileStep, TILE_SIZE_STEPS.length - 1, "旧最大档 → 新最大档 400");
+
+  const legacyDefault = fakeStorage({
+    [DISPLAY_STORAGE_KEY]: JSON.stringify({ byTime: false, infoMode: "off", tileStep: 4 }),
+  });
+  assert.equal(readDisplayPrefs(legacyDefault).tileStep, DEFAULT_TILE_STEP_INDEX, "旧默认 256 → 新表里的 256");
+
+  // 新记录（带 `tileStepScale`）原样读，不再换算
+  const fresh = fakeStorage({
+    [DISPLAY_STORAGE_KEY]: JSON.stringify({
+      byTime: false,
+      infoMode: "off",
+      tileStep: 8,
+      tileStepScale: TILE_SIZE_STEPS.length,
+    }),
+  });
+  assert.equal(readDisplayPrefs(fresh).tileStep, 8);
+});
+
 test("共享单例：写进去之后任何读者立刻看到同一个值", () => {
   resetDisplayPrefsForTests();
   setDisplayByTime(true);
@@ -100,7 +128,7 @@ test("共享单例：写进去之后任何读者立刻看到同一个值", () =>
 test("单例：非法值不写进状态（sanitize 在写入路径上也生效）", () => {
   resetDisplayPrefsForTests();
   setDisplayTileStep(999);
-  assert.equal(displayTileStep(), 8, "越界夹回最大档");
+  assert.equal(displayTileStep(), TILE_SIZE_STEPS.length - 1, "越界夹回最大档");
   setDisplayInfoMode("nonsense" as never);
   assert.equal(displayInfoMode(), "off", "认不出的档位不接受");
   resetDisplayPrefsForTests();
