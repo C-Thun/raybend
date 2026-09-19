@@ -58,6 +58,7 @@ import type { ToastStore } from "../../components/ui/Toast.tsx";
 import { browseKeyIntent, shouldHandleKey } from "../../lib/viewer-keys.ts";
 import { SplitHandle } from "../../components/ui/SplitHandle.tsx";
 import { nudgeWidth, resizeWidth } from "../../lib/column-resize.ts";
+import { joinPath } from "../../lib/paths.ts";
 
 /** 侧栏宽度的上下限（与 `lib/layout-prefs.ts` 的 LAYOUT_BOUNDS 一致；两处都要有：
  *  那边挡存储里的垃圾值，这里挡拖拽本身） */
@@ -245,7 +246,14 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
     const byId = new Map(viewer.state().photos.map((photo) => [photo.id, photo]));
     return comparedIds().flatMap((id) => {
       const photo = byId.get(id);
-      return photo === undefined ? [] : [photo];
+      if (photo === undefined) return [];
+      /*
+       * 宽高**以 store 为准**：看图件手里那份是进看图那一刻的快照，
+       * 而老库的尺寸可能是回来之后才补读到的（`ensureNatural`）——
+       * 不覆盖这一层的话，对比画幅会一直卡在「还没读到这张的尺寸」。
+       */
+      const natural = store.naturalOf(Number(id));
+      return [natural === null ? photo : { ...photo, natural }];
     });
   };
   /** 选中总数（>4 时界面上说明「只对比最近选中的 4 张」，不静默截断） */
@@ -442,6 +450,26 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
   const root = createMemo(
     () => repositories().find((r) => r.id === store.repositoryId())?.root ?? null,
   );
+
+  /*
+   * 进对比（选中 ≥ 2 张）就把**对比那几张**的宽高补齐。
+   *
+   * 与导入侧同一条纪律、同一个理由：网格只为可见 tile 读过元数据，
+   * 而且老库里 `assets.width/height` 可能是 NULL（2026-09-18 之前的导入不写 EXIF）——
+   * 缺了它，对比的基准比例算不出来，画幅只能显示「还没读到这张的尺寸」。
+   * 只补对比集（通常 ≤4 张），不去碰整个目录。
+   */
+  createEffect(() => {
+    const ids = comparedIds();
+    if (ids.length < 2) return;
+    const base = root();
+    if (base === null) return;
+    const entries = ids.flatMap((id) => {
+      const item = store.itemById(Number(id));
+      return item === null ? [] : [{ id: item.id, path: joinPath(base, item.relPath) }];
+    });
+    void store.ensureNatural(entries);
+  });
 
   /**
    * 右栏（与 flowbar 的 flowinfo）显示谁：多选时是**锚点**那张（`BROWSE.md` §5.10）。

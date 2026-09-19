@@ -639,3 +639,142 @@ test("removeSelected：删完清空选择、重新取一遍页面数据、把结
   );
   assert.equal(store.error(), null);
 });
+
+// ─────────────────── 真实宽高：老库那批 NULL 的兜底 ───────────────────
+
+/** 一个「老库」：条目的 width/height 是 NULL（2026-09-18 之前的导入就是这种）。 */
+function legacyApi(count: number) {
+  const all = Array.from({ length: count }, (_, i) =>
+    item(i + 1, { width: null, height: null }),
+  );
+  const asked: { dir: string; names: string[] }[] = [];
+  const api: BrowseApi = {
+    async page(_query: BrowseQuery, offset: number, limit: number) {
+      return { total: all.length, offset, items: all.slice(offset, offset + limit) };
+    },
+    async timeline() {
+      return {
+        total: all.length,
+        entries: all.map((a) => ({
+          id: a.id,
+          relPath: a.relPath,
+          takenAt: a.takenAt,
+        })),
+      };
+    },
+    async facets(): Promise<BrowseFacets> {
+      return EMPTY_FACETS;
+    },
+    async markings() {
+      return [];
+    },
+    async mark() {
+      return EMPTY_MARK;
+    },
+    async undo() {
+      return EMPTY_MARK;
+    },
+    async redo() {
+      return EMPTY_MARK;
+    },
+    async remove() {
+      return EMPTY_DELETE;
+    },
+    async flagsGet() {
+      return { total: all.length, picks: [], rejects: [] };
+    },
+    async flagsSet() {
+      return { total: all.length, picks: [], rejects: [] };
+    },
+    async flagsClear() {
+      return { total: all.length, picks: [], rejects: [] };
+    },
+  };
+  return { api, asked, all };
+}
+
+test("naturalOf：数据库里没宽高时返回 null（界面按占位比例显示，不报错）", async () => {
+  const { api } = legacyApi(3);
+  const store = createBrowseStore({ api });
+  open(store);
+  await tick();
+  assert.equal(store.naturalOf(1), null);
+});
+
+test("naturalOf：数据库里有宽高就直接用（不必补读）", async () => {
+  const { api } = fakeApi(3);
+  const store = createBrowseStore({ api });
+  open(store);
+  await tick();
+  assert.deepEqual(store.naturalOf(1), { width: 5184, height: 3888 });
+});
+
+test("ensureNatural：把补读回来的宽高**合并**进缓存，并只问缺的那些", async () => {
+  const { api } = legacyApi(3);
+  const asked: { dir: string; names: string[] }[] = [];
+  const store = createBrowseStore({
+    api,
+    metaEnsure: async (dir, files) => {
+      asked.push({ dir, names: files.map((file) => file.relative) });
+      return files.map((file) => ({
+        relative: file.relative,
+        width: 4000,
+        height: 3000,
+        orientation: 1,
+      }));
+    },
+  });
+  open(store);
+  await tick();
+
+  await store.ensureNatural([
+    { id: 1, path: "D:/lib/photos/1.jpg" },
+    { id: 2, path: "D:/lib/photos/2.jpg" },
+  ]);
+  assert.deepEqual(store.naturalOf(1), { width: 4000, height: 3000 });
+  assert.deepEqual(store.naturalOf(2), { width: 4000, height: 3000 });
+  assert.equal(asked.length, 1, "同一个目录只问一次");
+  assert.deepEqual(asked[0]?.names, ["1.jpg", "2.jpg"]);
+  assert.equal(asked[0]?.dir, "D:/lib/photos");
+
+  // 再问一次：已经有了，不该再打扰后端
+  await store.ensureNatural([{ id: 1, path: "D:/lib/photos/1.jpg" }]);
+  assert.equal(asked.length, 1, "已有宽高就不该重复读盘");
+});
+
+test("ensureNatural：不同目录分开问；读不到不报错（静默退回占位）", async () => {
+  const { api } = legacyApi(2);
+  const asked: string[] = [];
+  const store = createBrowseStore({
+    api,
+    metaEnsure: async (dir, files) => {
+      asked.push(dir);
+      if (dir.endsWith("bad")) throw new Error("读不了");
+      return files.map((file) => ({
+        relative: file.relative,
+        width: 0,
+        height: 0,
+        orientation: 1,
+      }));
+    },
+  });
+  open(store);
+  await tick();
+
+  await store.ensureNatural([
+    { id: 1, path: "D:/lib/photos/1.jpg" },
+    { id: 2, path: "D:/lib/bad/2.jpg" },
+  ]);
+  assert.deepEqual(asked.sort(), ["D:/lib/bad", "D:/lib/photos"]);
+  assert.equal(store.naturalOf(1), null, "宽高为 0 的读数不算数");
+  assert.equal(store.naturalOf(2), null, "抛错也不影响后续");
+});
+
+test("ensureNatural：没有注入补读口子时静默不动（浏览器预览）", async () => {
+  const { api } = legacyApi(1);
+  const store = createBrowseStore({ api });
+  open(store);
+  await tick();
+  await store.ensureNatural([{ id: 1, path: "D:/lib/photos/1.jpg" }]);
+  assert.equal(store.naturalOf(1), null);
+});

@@ -42,6 +42,7 @@ import {
   DEFAULT_TILE_STEP_INDEX,
   tileSizeAt,
 } from "../../lib/tile-flow.ts";
+import { joinPath } from "../../lib/paths.ts";
 import { buildBrowseRows, browseGroups, sliceOrder, type BrowseRowModel } from "./rows.ts";
 import type { BrowseStore } from "./store.ts";
 
@@ -184,14 +185,16 @@ export function BrowseGrid(props: BrowseGridProps) {
         if (item === null) continue;
         const path = absPath(item.relPath);
         if (path === null) continue;
+        /*
+         * 真实宽高：**先问 store**（它认得补读回来的那些），再退回数据库清单里那两列。
+         * 看图靠它算拖动边界、对比靠它算基准比例（RAW 尤其要紧，见 viewer/store.ts）。
+         */
+        const natural = store.naturalOf(item.id);
         out.push({
           id: String(item.id),
           path,
           fileName: item.fileName,
-          // 元数据里的真实宽高：看图靠它算拖动边界（RAW 尤其要紧，见 viewer/store.ts）
-          ...(item.width !== null && item.height !== null
-            ? { natural: { width: item.width, height: item.height } }
-            : {}),
+          ...(natural === null ? {} : { natural }),
           // 看图态的底部状态栏要显示这些（省一次为了四个数问后端的往返）
           marks: {
             rating: item.rating,
@@ -224,18 +227,27 @@ export function BrowseGrid(props: BrowseGridProps) {
     return rows().findIndex((row) => row.kind === "tiles" && row.slots.includes(index));
   };
 
-  /** 网格里的键盘：只接「回车进看图」（方向键与区间选本来就在 tile 的点击语义里）。 */
+  /**
+   * 网格里的键盘：只接「回车进看图」（方向键与区间选本来就在 tile 的点击语义里）。
+   *
+   * **多选也走这里**（人类 2026-09-19 报的「tiles 下多选按回车进不了对比」）：
+   * 选中 ≥ 2 张时进看图就是**对比态**（对比是选择状态的派生值，见工作区的 `comparing()`），
+   * 所以「多选 + 回车」不需要另写一条路径 —— 只要别在这里把多选挡掉。
+   * 进看图的那一张取**锚点**（最后点中的），没锚点就取第一张。
+   */
   function onGridKeyDown(event: KeyboardEvent): void {
     if (event.key !== "Enter") return;
     const selected = store.selectedIds();
-    const only = selected[0];
-    if (selected.length !== 1 || only === undefined) return;
+    if (selected.length === 0) return;
+    const anchor = store.selection().anchor;
+    const target = anchor !== null && selected.includes(Number(anchor)) ? anchor : selected[0];
+    if (target === undefined) return;
     event.preventDefault();
     // **这个回车已经被我们用掉了**：不让它继续冒泡到 window ——
     // 否则刚打开的看图件会在同一个事件里又收到一次「回车＝退出」，闪一下就关
     // （2026-09-18 冒烟实测：active 在同一个 tick 里变回 false）。
     event.stopPropagation();
-    openViewerAt(only);
+    openViewerAt(Number(target));
   }
 
   /** 行 → 下标区间（按需取数用）。 */
@@ -288,12 +300,10 @@ export function BrowseGrid(props: BrowseGridProps) {
   });
   onCleanup(() => ownThumbs?.clear());
 
-  /** 库里照片的绝对路径。 */
+  /** 库里照片的绝对路径（拼接规则在 `lib/paths.ts`，全项目一份）。 */
   const absPath = (relPath: string): string | null => {
     const root = props.root;
-    if (root === null) return null;
-    const sep = root.endsWith("/") || root.endsWith("\\") ? "" : "/";
-    return `${root}${sep}${relPath}`;
+    return root === null ? null : joinPath(root, relPath);
   };
 
   /*
@@ -380,7 +390,24 @@ export function BrowseGrid(props: BrowseGridProps) {
         focusRow={focusRow()}
         onVisibleRange={(start, end) => {
           const [from, to] = rowIndexRange(start, end);
-          void store.ensureRange(from, to + 1);
+          /*
+           * 取数据 + **顺手把这一段的真实宽高补齐**。
+           *
+           * 为什么要补：`assets.width/height` 是导入时写的，老库那批是 NULL
+           * （见 `store/backfill.rs` 的文件头）→ tile 比例退回占位、对比报「没读到尺寸」。
+           * 只补**可见这一段**（与导入侧「为可见 tile 读元信息」同一条纪律：
+           * 不为一次滚动去读上千个文件头）。
+           */
+          void store.ensureRange(from, to + 1).then(() => {
+            const entries: { id: number; path: string }[] = [];
+            for (let at = from; at <= to; at += 1) {
+              const item = store.itemAt(at);
+              if (item === null) continue;
+              const path = absPath(item.relPath);
+              if (path !== null) entries.push({ id: item.id, path });
+            }
+            void store.ensureNatural(entries);
+          });
         }}
         renderRow={(row) => {
           if (row.kind === "group") {
@@ -431,6 +458,15 @@ export function BrowseGrid(props: BrowseGridProps) {
                     return entry.status === "ready" ? entry.url : null;
                   };
 
+                  /*
+                   * 这张的真实宽高（tile 比例要用）：**先问 store**，
+                   * 因为老库那批 `width/height` 是 NULL，补读回来的那份只有 store 知道。
+                   */
+                  const natural = (): { width: number; height: number } | null => {
+                    const it = item();
+                    return it === null ? null : store.naturalOf(it.id);
+                  };
+
                   return (
                     /*
                      * 双击进看图挂在**外面这层**：`Tile` 自己会接管 `onClick`（它有一套激活语义），
@@ -462,7 +498,10 @@ export function BrowseGrid(props: BrowseGridProps) {
                        * 就只有这一套显示规范）。取法与导入网格**同一个夹取函数**，
                        * 不再各写一套：未知尺寸 → 占位比例；超宽 → 夹到 3:1。
                        */
-                      aspect={clampDisplayAspect(item()?.width ?? 0, item()?.height ?? 0)}
+                      aspect={clampDisplayAspect(
+                        natural()?.width ?? 0,
+                        natural()?.height ?? 0,
+                      )}
                       rating={item()?.rating ?? 0}
                       colorLabel={asColorLabel(item()?.colorLabel)}
                       locked={(item()?.lockLevel ?? 0) > 0}

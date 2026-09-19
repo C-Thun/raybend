@@ -37,6 +37,8 @@ import type {
   MarkAction,
   MarkResult,
   MarkingItem,
+  MetaFile,
+  PhotoMeta,
   TimelineEntry,
 } from "../../api/types.ts";
 import {
@@ -93,6 +95,15 @@ export interface BrowseApi {
 
 export interface BrowseDeps {
   api: BrowseApi;
+  /**
+   * 补读几个文件的展示元信息（宽高）—— **只在库里没这两列时才用**。
+   *
+   * 为什么需要它：`assets.width/height` 是**导入时**写进去的，而 2026-09-18 之前的导入
+   * 根本不写 EXIF（见 `store/backfill.rs` 的文件头），老库那批资产这两列是 NULL。
+   * 于是浏览网格拿不到比例（tile 显示不对）、对比画幅报「还没读到这张的尺寸」——
+   * 人类 2026-09-19 报的就是这个。补读是**兜底**（真正的修复是回填，见 `repository_backfill`）。
+   */
+  metaEnsure?: (dir: string, files: readonly MetaFile[]) => Promise<PhotoMeta[]>;
 }
 
 /** 撤销/重做按钮要的几个值（来自后端每次动作返回的 `MarkResult`） */
@@ -139,12 +150,37 @@ export interface BrowseStore {
   total(): number;
   /** 第 `index` 张；还没加载到就是 `null`。 */
   itemAt(index: number): AssetItem | null;
+  /**
+   * 按**资产 id** 取已加载的那一项（`null` = 还没加载到）。
+   *
+   * 看图/对比那几条路手上只有 id（缩略图队列、选择集合都是 id），
+   * 要库内相对路径（拼绝对路径去读元信息）就得反查一次。
+   */
+  itemById(id: number): AssetItem | null;
   timeline(): readonly TimelineEntry[];
   facets(): BrowseFacets | null;
   loading(): boolean;
   error(): string | null;
   /** 重新加载（换库/换筛选后自动调；也可以手动调）。 */
   reload(): Promise<void>;
+  /**
+   * 一张照片的**真实宽高**（tile 比例、看图缩放边界都要它）。
+   *
+   * 取法：先看补读缓存（老库那批），再退回数据库清单里的 `width/height`；
+   * 都没有就是 `null`（界面按占位比例显示，不报错）。
+   *
+   * 注意它**不是**响应式的读取（内部按数组身份缓存索引）：调用方要拿到「补读之后」
+   * 的新值，得等 `ensureNatural` 的 promise 结算、并且重渲染一次（信号 `extraNatural`
+   * 会触发重渲染 —— 组件里读它的地方自然就更新了）。
+   */
+  naturalOf(id: number): { width: number; height: number } | null;
+  /**
+   * 按需补读这几张的宽高（**要绝对路径**，调用方知道库根）。
+   *
+   * 与导入侧 `PhotoGridStore.ensureNatural` 是同一件事、同一套纪律：
+   * 只补缺的、**合并**进缓存（不清空已有的）、失败静默（读不到就按占位比例显示）。
+   */
+  ensureNatural(entries: readonly { id: number; path: string }[]): Promise<void>;
   /** 保证 `[start, end)` 这一段的数据都在（缺哪页补哪页）。 */
   ensureRange(start: number, end: number): Promise<void>;
 
@@ -240,6 +276,90 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
   const [facets, setFacets] = createSignal<BrowseFacets | null>(null);
   const [loading, setLoading] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
+
+  /**
+   * 补读回来的真实宽高（按资产 id）。老库那批 `assets.width/height` 是 NULL，
+   * 网格与对比都靠它兜底 —— 见 `BrowseDeps.metaEnsure` 的说明。
+   */
+  const [extraNatural, setExtraNatural] = createSignal<
+    ReadonlyMap<number, { width: number; height: number }>
+  >(new Map());
+
+  /*
+   * 已加载项按 id 索引（`naturalOf` 要按 id 取数据库那份宽高）。
+   *
+   * ⚠️ **故意不用 `createMemo`**：Node 里 `solid-js` 走的是 SSR 构建（没有响应式），
+   * `createMemo` 只算一次 —— 那样索引会永远停在「空表」，测试里表现为
+   * 「DB 里明明有宽高，`naturalOf` 却总返回 null」。
+   * 改成**按数组身份**缓存的惰性索引：`setEntries` 每次都换新数组，所以身份一变就重建。
+   */
+  let indexedFrom: readonly (AssetItem | null)[] | undefined;
+  let indexedItems = new Map<number, AssetItem>();
+  const itemsById = (): Map<number, AssetItem> => {
+    const list = entries();
+    if (list !== indexedFrom) {
+      const map = new Map<number, AssetItem>();
+      for (const item of list) if (item !== null) map.set(item.id, item);
+      indexedFrom = list;
+      indexedItems = map;
+    }
+    return indexedItems;
+  };
+
+  const naturalOf = (id: number): { width: number; height: number } | null => {
+    const extra = extraNatural().get(id);
+    if (extra !== undefined) return extra;
+    const item = itemsById().get(id);
+    if (item === undefined || item.width === null || item.height === null) return null;
+    if (item.width <= 0 || item.height <= 0) return null;
+    return { width: item.width, height: item.height };
+  };
+
+  async function ensureNatural(entries: readonly { id: number; path: string }[]): Promise<void> {
+    const load = deps.metaEnsure;
+    if (load === undefined) return;
+    const missing = entries.filter((entry) => naturalOf(entry.id) === null);
+    if (missing.length === 0) return;
+
+    // 按目录分组（同一个目录一次 IPC，与导入侧同一套做法）
+    const byDir = new Map<string, { id: number; name: string }[]>();
+    for (const entry of missing) {
+      const cut = Math.max(entry.path.lastIndexOf("/"), entry.path.lastIndexOf("\\"));
+      if (cut <= 0) continue;
+      const dir = entry.path.slice(0, cut);
+      const name = entry.path.slice(cut + 1);
+      const list = byDir.get(dir);
+      if (list === undefined) byDir.set(dir, [{ id: entry.id, name }]);
+      else list.push({ id: entry.id, name });
+    }
+    if (byDir.size === 0) return;
+
+    const found: [number, { width: number; height: number }][] = [];
+    for (const [dir, wanted] of byDir) {
+      const token = generation;
+      try {
+        const metas = await load(
+          dir,
+          wanted.map((item) => ({ relative: item.name, fileSize: 0, mtimeMs: 0 })),
+        );
+        if (token !== generation) return; // 换查询了，迟到的结果丢掉
+        wanted.forEach((item, index) => {
+          const meta = metas[index];
+          if (meta !== undefined && meta.width > 0 && meta.height > 0) {
+            found.push([item.id, { width: meta.width, height: meta.height }]);
+          }
+        });
+      } catch {
+        // 读不到不是错误：按占位比例显示（与导入侧同一条纪律）
+      }
+    }
+    if (found.length === 0) return;
+    setExtraNatural((prev) => {
+      const merged = new Map(prev);
+      for (const [id, size] of found) merged.set(id, size);
+      return merged;
+    });
+  }
 
   const [selection, setSelection] = createSignal<SelectionState>(EMPTY_SELECTION);
   const [markings, setMarkings] = createSignal<ReadonlyMap<number, MarkingItem>>(new Map());
@@ -500,12 +620,15 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
     itemAt(index) {
       return entries()[index] ?? null;
     },
+    itemById: (id) => itemsById().get(id) ?? null,
     timeline,
     facets,
     loading,
     error,
     reload,
     ensureRange,
+    naturalOf,
+    ensureNatural,
 
     selection,
     selectedIds,

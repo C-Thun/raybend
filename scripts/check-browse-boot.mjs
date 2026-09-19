@@ -121,8 +121,12 @@ const DEMO_ITEMS = [1, 2, 3, 4, 5, 6].map((i) => ({
   fNumber: null,
   exposureMs: null,
   iso: null,
-  width: 4000,
-  height: 3000,
+  /*
+   * 最后两张**故意不给宽高**：老库（2026-09-18 之前的导入）里 `assets.width/height`
+   * 就是 NULL —— 界面必须靠 `dir_meta_ensure` 补读兜住（tile 比例与对比尺寸都靠它）。
+   */
+  width: i >= 5 ? null : 4000,
+  height: i >= 5 ? null : 3000,
   orientation: 1,
   sizeBytes: 1000,
   missing: false,
@@ -297,19 +301,42 @@ try {
             return Promise.resolve(bytes.buffer);
           }
           if (cmd === "image_histogram") {
-            // 直方图的形状不能像 PNG 那样乱编：界面会按 max 归一化柱高，
-            // 给一组能分出形状的计数（24 桶的中段鼓起来一个包）
-            const bins = 24;
-            const shape = Array.from({ length: bins }, (_, i) =>
-              Math.round(400 * Math.exp(-((i - 11) ** 2) / 18)),
-            );
+            /*
+             * 直方图的形状不能像 PNG 那样乱编：界面会按 max 归一化高度。
+             * **52 桶**（= 0..255 每 5 级一个点，人类 2026-09-19 的口径）：
+             * 三个通道给**互相错开**的包，好让分层取色（单通道 / 两两重叠 / 三色重叠）
+             * 真的都被画出来 —— 三条完全一样的曲线是测不出分层的。
+             */
+            const bins = 52;
+            const shape = (center, width, height) =>
+              Array.from({ length: bins }, (_, i) =>
+                Math.round(height * Math.exp(-((i - center) ** 2) / width)),
+              );
+            const r = shape(20, 60, 400);
+            const g = shape(26, 90, 360);
+            const b = shape(33, 120, 320);
             return Promise.resolve({
               bins,
-              r: shape.map((v, i) => (i > 16 ? 0 : v)),
-              g: shape,
-              b: shape.map((v, i) => (i < 4 ? 0 : v)),
-              max: Math.max(...shape),
+              r,
+              g,
+              b,
+              max: 400,
             });
+          }
+          if (cmd === "dir_meta_ensure") {
+            /*
+             * 补读宽高（老库兜底路径）：按请求的文件名逐个回答 ——
+             * 回来一份「真实的」4:3，界面应当据此把比例与对比尺寸都补齐。
+             */
+            const files = (args && args.files) || [];
+            return Promise.resolve(
+              files.map((file) => ({
+                relative: String(file.relative),
+                width: 4000,
+                height: 3000,
+                orientation: 1,
+              })),
+            );
           }
           if (cmd === "dir_list") {
             const path = String((args && args.path) || "").replace(/\\\\/g, "/");
@@ -484,6 +511,94 @@ try {
   if ((afterPick.result?.value ?? 0) < 1) {
     problems.push("点了目录之后没有去读库（browse_page 没被调用）");
   }
+  /*
+   * tiles 下的多选 → **回车进对比**（人类 2026-09-19 报：只能在 film 里 Ctrl 多选，
+   * tiles 里多选按回车没反应）。顺带把「老库宽高为 NULL」那条兜底路径也验掉：
+   * 最后两张（MY005/MY006）在 fixture 里没有宽高，进对比必须能看到图，
+   * 而不是那句「还没读到这张的尺寸」。
+   */
+  // ① 先普通点一张（清掉之前的选中），再 Ctrl 加选第二张 ⇒ 目录里共 2 张选中
+  await send("Runtime.evaluate", {
+    expression: `(() => {
+      const tiles = [...document.querySelectorAll('[role="option"]')];
+      if (tiles.length < 6) return "tile 不够";
+      const click = (el, ctrl) =>
+        el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, ctrlKey: ctrl }));
+      click(tiles[4], false);
+      click(tiles[5], true);
+      return "ok";
+    })()`,
+    returnByValue: true,
+  });
+  await sleep(400);
+  const tilesSelected = await send("Runtime.evaluate", {
+    expression: `document.querySelectorAll('[role="option"][aria-selected="true"]').length`,
+    returnByValue: true,
+  });
+  if (tilesSelected.result?.value !== 2) {
+    problems.push(
+      `tiles 里 Ctrl 点两张应当有 2 张选中（实测 ${JSON.stringify(tilesSelected.result?.value)}）`,
+    );
+  }
+
+  // ② 回车 → 直接进对比（对比是选择状态的派生值）
+  await send("Runtime.evaluate", {
+    expression: `(() => {
+      const tiles = [...document.querySelectorAll('[role="option"]')];
+      const last = tiles[tiles.length - 1];
+      if (!last) return false;
+      last.focus();
+      last.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+      return true;
+    })()`,
+    returnByValue: true,
+  });
+  await sleep(900);
+  const tilesCompare = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const frames = [...document.querySelectorAll("[data-compare-frame]")];
+      return {
+        compare: Boolean(document.querySelector('[data-compare="open"]')),
+        frames: frames.length,
+        images: frames.filter((f) => f.querySelector("img") !== null).length,
+        noSize: (document.body.innerText || "").includes("还没读到这张的尺寸"),
+      };
+    })()`,
+    returnByValue: true,
+  });
+  const tilesCmp = tilesCompare.result?.value ?? {};
+  if (tilesCmp.compare !== true) {
+    problems.push(`tiles 里选中 2 张后按回车应当直接进对比（实测 ${JSON.stringify(tilesCmp)}）`);
+  } else {
+    if (tilesCmp.frames !== 2) {
+      problems.push(`tiles 进对比后应当有 2 幅画幅（实测 ${JSON.stringify(tilesCmp.frames)}）`);
+    }
+    if (tilesCmp.images !== 2) {
+      problems.push(
+        `对比画幅都要出图 —— 老库（宽高为 NULL）必须靠补读兜住（实测出图 ${JSON.stringify(tilesCmp.images)} 幅）`,
+      );
+    }
+    if (tilesCmp.noSize) {
+      problems.push("对比里出现了「还没读到这张的尺寸」—— 说明宽高没补齐就进画幅了");
+    }
+  }
+
+  // ③ 收尾：退出看图 + 把选中缩回一张（后面的单张看图断言不能被对比态干扰）
+  await send("Runtime.evaluate", {
+    expression: `window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }))`,
+    returnByValue: true,
+  });
+  await sleep(500);
+  await send("Runtime.evaluate", {
+    expression: `(() => {
+      const tile = document.querySelector('[role="option"]');
+      tile?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      return true;
+    })()`,
+    returnByValue: true,
+  });
+  await sleep(400);
+
   /*
    * ── 阶段 1 的那条链：双击进看图 → 状态栏 → Tab 三态 → Esc 退回 ──
    *
@@ -1261,6 +1376,50 @@ try {
   }
   if (shown.stripCurrent !== "0") {
     problems.push(`刚进看图时当前那张应当是第 1 张（实测 ${JSON.stringify(shown.stripCurrent)}）`);
+  }
+
+  /*
+   * 直方图：**7 个区域各画一条 + 背景 4 根等分虚线**（人类 2026-09-19 的三条要求）。
+   *
+   * 为什么要断言到这种程度：分层取色是新做法（不再是 `mix-blend-screen`），
+   * 最典型的坏法是「只有三条通道曲线、重叠处根本不上色」——
+   * 那样画面上看着也像直方图，但人类要的「两两重叠 = 黄/青/紫、三色 = 灰」全没了。
+   */
+  const histogramShape = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const host = document.querySelector('[data-histogram="curves"]');
+      if (host === null) return null;
+      const paths = [...host.querySelectorAll("path")];
+      const gridLines = [...host.querySelectorAll("span")].filter((el) =>
+        (el.getAttribute("class") ?? "").includes("--hist-grid"),
+      );
+      return {
+        paths: paths.length,
+        labelFills: paths.filter((p) => (p.getAttribute("class") ?? "").includes("fill-(--label-")).length,
+        triple: paths.filter((p) => (p.getAttribute("class") ?? "").includes("--hist-triple")).length,
+        smooth: paths.every((p) => (p.getAttribute("d") ?? "").includes(" C")),
+        gridLines: gridLines.length,
+      };
+    })()`,
+    returnByValue: true,
+  });
+  const hist = histogramShape.result?.value ?? null;
+  if (hist === null) {
+    problems.push("看图右栏里没有画出来的直方图（[data-histogram=\"curves\"] 不在）");
+  } else {
+    if (hist.paths !== 7) {
+      problems.push(`直方图应当是 7 个区域各一条（三色重叠 + 三个两两重叠 + 三条单通道），实测 ${JSON.stringify(hist)}`);
+    }
+    if (hist.labelFills !== 6) {
+      problems.push(`六条区域曲线要用色标那六色（实测 ${JSON.stringify(hist.labelFills)} 条）`);
+    }
+    if (hist.triple !== 1) {
+      problems.push(`三色重叠区要用 --hist-triple（实测 ${JSON.stringify(hist.triple)} 条）`);
+    }
+    if (!hist.smooth) problems.push("直方图曲线必须是平滑段（贝塞尔），不能是折线");
+    if (hist.gridLines !== 4) {
+      problems.push(`背景等分虚线应当是 4 根（纵 3 + 横 1），实测 ${JSON.stringify(hist.gridLines)}`);
+    }
   }
 
   /* 胶片带：点第 2 张 → 看的就是它，底部状态栏跟着走（BROWSE.md §5.7） */

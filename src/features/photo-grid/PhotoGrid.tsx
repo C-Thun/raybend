@@ -173,12 +173,21 @@ export function PhotoGrid(props: PhotoGridProps) {
       return;
     }
     if (event.key !== "Enter") return;
+    /*
+     * 回车进看图 —— **多选也走这条**（人类 2026-09-19：tiles 下多选按回车要能进对比）。
+     *
+     * 进看图的那一张取**锚点**（最后点中的那张），没锚点就取第一张；
+     * 选中 ≥ 2 张时进看图**就是对比态**（对比是选择状态的派生值，
+     * 见工作区的 `comparing()`），所以这里不需要另开一条路。
+     */
     const selected = [...store.selectedIds()];
-    const only = selected[0];
-    if (selected.length === 1 && only !== undefined) {
-      event.preventDefault();
-      openViewer(only);
-    }
+    if (selected.length === 0) return;
+    const anchor = store.selection().anchor;
+    const target =
+      anchor !== null && selected.includes(anchor) ? anchor : selected[0];
+    if (target === undefined) return;
+    event.preventDefault();
+    openViewer(target);
   }
 
   function openViewer(byId: string): void {

@@ -65,6 +65,11 @@ export default function App() {
    * 而 store 的生命周期不该跟着工作流开关走（切回来时窗口数据还在，不用重新加载）。
    */
   const browseStore = createBrowseStore({
+    /*
+     * 补读元信息的口子：老库里 `assets.width/height` 可能是 NULL（2026-09-18 之前的导入
+     * 不写 EXIF），那批照片的 tile 比例与对比尺寸都靠它兜底。
+     */
+    metaEnsure: db.dirMetaEnsure,
     api: {
       page: browsePage,
       timeline: browseTimeline,
