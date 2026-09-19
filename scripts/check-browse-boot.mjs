@@ -531,7 +531,6 @@ try {
     returnByValue: true,
   });
   await sleep(400);
-  const tilesSelected = await send("Runtime.evaluate", {
     expression: `document.querySelectorAll('[role="option"][aria-selected="true"]').length`,
     returnByValue: true,
   });

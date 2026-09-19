@@ -23,6 +23,7 @@ import {
   createEffect,
   createMemo,
   createSignal,
+  For,
   onCleanup,
   onMount,
   Show,
@@ -507,15 +508,23 @@ function TileRow(props: {
       class="flex items-start"
       style={{ gap: `${props.gap}px`, height: `${props.row.height}px` }}
     >
-      {props.row.slots.map((slot) => (
-        <TileCell
-          source={props.source}
-          slot={slot}
-          onOpen={props.onOpen}
-          {...(props.onInteract === undefined ? {} : { onInteract: props.onInteract })}
-          {...(props.onFocusIndex === undefined ? {} : { onFocusIndex: props.onFocusIndex })}
-        />
-      ))}
+      {/*
+        用 `For`（不是 `.map()`）：**每一格要有自己的响应式作用域**。
+        实测（真机冒烟）：`.map()` 铺出来的格子，`selected` 这个绑定在选中变化后
+        不再重跑 —— 点完两张，DOM 上 `aria-selected` 还是 false（数据层是对的）。
+        换成 `For` 后每格是独立的 owner，绑定按各自的依赖更新。
+      */}
+      <For each={props.row.slots}>
+        {(slot) => (
+          <TileCell
+            source={props.source}
+            slot={slot}
+            onOpen={props.onOpen}
+            {...(props.onInteract === undefined ? {} : { onInteract: props.onInteract })}
+            {...(props.onFocusIndex === undefined ? {} : { onFocusIndex: props.onFocusIndex })}
+          />
+        )}
+      </For>
     </div>
   );
 }
