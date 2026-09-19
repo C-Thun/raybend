@@ -55,3 +55,20 @@
 - `pnpm test` / `cargo test` / `check:browse` / `smoke:ui` 全绿；
 - `BROWSE.md` §5.4 与 `DESIGN.md` 的口径同步更新；
 - 一份 `implementations/` 记录（含「import tiles 未被改变」的证据）。
+
+---
+
+## 5. 完成记录（2026-09-19 14:39 CST）
+
+**已全部做完**（`implementations/2026-09-19_viewer-three-states-shared.md` 有完整记录与证据）：
+
+1. ✅ 三个纯逻辑模块搬到 `lib/`（`viewer-chrome` / `viewer-compare` / `viewer-keys`），
+   引用路径按编译器报错逐条改正；对比数学改成**结构类型 + 泛型**（`ComparablePhoto`），
+   顺带修掉 `lib → ui` 的分层违规。
+2. ✅ `FilmStrip` / `CompareView` 搬到 `components/ui/viewer/`；
+   `FilmStrip` 解开对 browse store 的依赖（`selectedIds` + `onSelect(id: string, mode)`），
+   并去掉「id 是数字」这个 browse 专属假设。
+3. ✅ browse 的 tiles 未改（本来就共用 `lib/tile-flow.ts` + `Tile`）。
+4. ✅ import 中列接上三态 + 胶片带 + 对比 + `Tab` / `Enter` / `Esc`。
+5. ✅ 冒烟双侧覆盖：`check:browse` 的三态断言更新为新语义（并且**正是它当场抓到**语义回归）；
+   `smoke:ui` 绿；**import 的 tiles 未动**有 `git diff` 为空的证据。
