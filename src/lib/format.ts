@@ -75,3 +75,22 @@ export function formatCountCapped(
     ? `${formatCount(limit, locale)}+`
     : formatCount(value, locale);
 }
+
+/**
+ * 路径的**末级名字**（文件名或最后一级目录名）。
+ *
+ * 用在「状态条中间那一段」这类地方：界面要的是**名字**，路径本身另有 `PathText` 负责缩写。
+ * 两种分隔符都吃（Windows 的 `\` 与库内相对路径的 `/`）—— 这个仓里两种都会出现：
+ * 源目录是系统路径（`C:\src\pic\2026-08-15`），库内路径统一用 `/`（`photos/2026-08-15`）。
+ *
+ * 边界口径：
+ *   * 末尾有分隔符（`"a/b/"`）→ 取 `b`（不是空串）；
+ *   * 纯分隔符（`"/"`）或空串 → 原样返回（没有「名字」可言，别硬编一个新的）；
+ *   * 没有分隔符（`"P1000023.RW2"`）→ 原样返回。
+ */
+export function fileNameOf(path: string): string {
+  const trimmed = path.replace(/[\\/]+$/, "");
+  if (trimmed === "") return path;
+  const cut = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+  return cut < 0 ? trimmed : trimmed.slice(cut + 1);
+}

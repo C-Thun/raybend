@@ -48,10 +48,10 @@ import { FilterBar } from "../../features/browse/FilterBar.tsx";
 import { CompareView } from "../../components/ui/viewer/index.ts";
 import { compareIds } from "../../lib/viewer-compare.ts";
 import { createThumbQueue } from "../../components/ui/thumb-queue.ts";
+import { TilesShell } from "../../components/ui/tiles/index.ts";
 import { createViewerStore, Viewer } from "../../components/ui/viewer/index.ts";
-import { clampTileStepIndex, DEFAULT_TILE_STEP_INDEX, TILE_SIZE_STEPS, tileSizeAt } from "../../lib/tile-flow.ts";
+import { clampTileStepIndex, DEFAULT_TILE_STEP_INDEX } from "../../lib/tile-flow.ts";
 import { t } from "../../i18n/index.ts";
-import { Slider } from "../../components/ui/Slider.tsx";
 import { Button } from "../../components/ui/Button.tsx";
 import { ConfirmDialog, Dialog } from "../../components/ui/Dialog.tsx";
 import type { ToastStore } from "../../components/ui/Toast.tsx";
@@ -62,8 +62,6 @@ import { nudgeWidth, resizeWidth } from "../../lib/column-resize.ts";
 /** 侧栏宽度的上下限（与 `lib/layout-prefs.ts` 的 LAYOUT_BOUNDS 一致；两处都要有：
  *  那边挡存储里的垃圾值，这里挡拖拽本身） */
 const SIDEBAR_BOUNDS = { min: 220, max: 520 } as const;
-import { Menu } from "../../components/ui/Menu.tsx";
-import { IconArrowDown, IconArrowUp } from "@tabler/icons-solidjs";
 import type { BrowseSort, DeleteFailure } from "../../api/types.ts";
 
 export interface BrowseWorkspaceProps {
@@ -453,15 +451,18 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
    */
   const anchor = createMemo(() => store.anchorItem());
 
-  /** 状态栏中间那段：`库名 / 最后一级目录 · 文件名`（`BROWSE.md` §5.10）。 */
-  const currentLabel = createMemo(() => {
+  /**
+   * 状态条中间那段的**左侧**：`库名 / 最后一级目录`（`BROWSE.md` §5.10）。
+   *
+   * 文件名**不在这里拼**：那条状态条是两侧共用的组件，它自己会在后面接上
+   * 「· 当前那张的文件名」（人类 2026-09-19：导入侧以前漏了这一段，统一时一起补）。
+   */
+  const currentLead = createMemo(() => {
     const repoName =
       repositories().find((r) => r.id === store.repositoryId())?.name ?? "";
     const scope = store.scopePath();
     const last = scope === null ? "" : (scope.split("/").pop() ?? "");
-    const file = anchor()?.fileName ?? "";
-    const left = [repoName, last].filter((s) => s !== "").join(" / ");
-    return file === "" ? left : `${left}${left === "" ? "" : " · "}${file}`;
+    return [repoName, last].filter((s) => s !== "").join(" / ");
   });
 
   return (
@@ -525,7 +526,41 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
          * `flex flex-col` 不能省：网格自己的根节点靠 `flex-1` 撑高，
          * 外面换成普通块级盒子的话它会直接塌成 0 高（虚拟列表一格都不渲染）。
          */}
-        <div class="relative flex min-h-0 flex-1 flex-col">
+        {/*
+          tiles = **网格 + 下面那条状态条**（人类 2026-09-19：业务上不可分割）。
+          这里与导入侧用的是同一个 `TilesShell` / `TilesControlBar`；
+          差异按人列的清单走**显式配置**：浏览侧把 `sort` 传上（导入侧暂时不传）。
+
+          看图态不给 `bar`：那时中列下面是胶片带，状态条让位给它。
+        */}
+        <TilesShell
+          bar={
+            viewer.state().active
+              ? null
+              : {
+                  count: store.total(),
+                  selectedCount: store.selectedCount(),
+                  // 中间那段的左侧：**库名 / 最后一级目录**（浏览侧不显示完整路径）
+                  label: currentLead(),
+                  // 右侧：当前那张（多选时是锚点那张）
+                  fileName: anchor()?.fileName ?? null,
+                  byTime: grouped(),
+                  onByTimeChange: (value) => setGrouped(value),
+                  tileStep: tileStep(),
+                  onTileStepChange: (step) => setTileStep(clampTileStepIndex(step)),
+                  sort: {
+                    keys: Object.keys(SORT_LABELS) as NonNullable<BrowseSort["key"]>[],
+                    value: store.sort().key ?? "takenAt",
+                    labelOf: (key) => SORT_LABELS[key as NonNullable<BrowseSort["key"]>](),
+                    desc: store.sort().desc === true,
+                    onKeyChange: (key) =>
+                      store.setSort({ ...store.sort(), key: key as NonNullable<BrowseSort["key"]> }),
+                    onDirectionToggle: () =>
+                      store.setSort({ ...store.sort(), desc: !store.sort().desc }),
+                  },
+                }
+          }
+        >
           <BrowseGrid
             store={store}
             root={root()}
@@ -585,87 +620,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
               />
             </Show>
           </Show>
-        </div>
-
-        {/*
-          控制条（`design/browse.md` §2.3）：计数 — 当前目录/文件名 — 按时间 + 缩放。
-          看图时**不出现** —— 那时中列下面是胶片带，底部那条是全宽的看图状态栏。
-        */}
-        <Show when={!viewer.state().active}>
-          <div class="flex h-8 shrink-0 items-center gap-3 px-2 text-fs-2 text-fg-3">
-          <span>{t("browse.count").replace("{n}", String(store.total()))}</span>
-          <Show when={store.selectedCount() > 0}>
-            <span class="text-fg-2">
-              {t("browse.selected").replace("{n}", String(store.selectedCount()))}
-            </span>
-          </Show>
-
-          <span class="min-w-0 flex-1 truncate text-center text-fg-3">
-            {currentLabel()}
-          </span>
-
-          <button
-            type="button"
-            onClick={() => setGrouped(!grouped())}
-            class={[
-              "h-6 shrink-0 rounded-(--radius) px-2",
-              grouped()
-                ? "bg-state-selected text-fg-1"
-                : "text-fg-3 hover:bg-state-hover",
-            ].join(" ")}
-          >
-            {t("grid.by_time")}
-          </button>
-
-          {/* 排序：键 + 方向（画布 ② 的 SortBar 挪到这里，见 FilterBar 的文件头说明） */}
-          <div class="flex shrink-0 items-center gap-1" data-sort>
-            <span class="text-fg-3">{t("browse.sort")}</span>
-            <Menu
-              label={t("browse.sort")}
-              placement="top"
-              items={(
-                Object.keys(SORT_LABELS) as NonNullable<BrowseSort["key"]>[]
-              ).map((key) => ({
-                value: key,
-                label: SORT_LABELS[key](),
-                selected: (store.sort().key ?? "takenAt") === key,
-              }))}
-              onSelect={(value) =>
-                store.setSort({ ...store.sort(), key: value as NonNullable<BrowseSort["key"]> })
-              }
-            >
-              {(triggerProps) => (
-                <button
-                  {...triggerProps()}
-                  class="rounded-ui px-1.5 py-0.5 text-fs-2 text-fg-2 hover:bg-state-hover hover:text-fg-1"
-                >
-                  {SORT_LABELS[store.sort().key ?? "takenAt"]()}
-                </button>
-              )}
-            </Menu>
-            <button
-              type="button"
-              aria-label={store.sort().desc ? t("browse.sortDesc") : t("browse.sortAsc")}
-              class="flex h-5 w-5 items-center justify-center rounded-ui text-fg-3 hover:bg-state-hover hover:text-fg-1"
-              onClick={() => store.setSort({ ...store.sort(), desc: !store.sort().desc })}
-            >
-              {store.sort().desc ? <IconArrowDown size={13} /> : <IconArrowUp size={13} />}
-            </button>
-          </div>
-
-          <span class="shrink-0 text-fg-3">{tileSizeAt(tileStep())}px</span>
-          <div class="w-24 shrink-0">
-            <Slider
-              min={0}
-              max={TILE_SIZE_STEPS.length - 1}
-              step={1}
-              value={tileStep()}
-              label={t("grid.zoom")}
-              onValueChange={(value) => setTileStep(clampTileStepIndex(value))}
-            />
-          </div>
-          </div>
-        </Show>
+        </TilesShell>
 
         {/*
           胶片带（`BROWSE.md` §5.5）：看图时在照片区下面形成，横向滚动选图。

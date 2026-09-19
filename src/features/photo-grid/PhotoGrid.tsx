@@ -42,7 +42,6 @@ import { formatDayLabel, formatTimeRange } from "../../lib/datetime.ts";
 import { formatCount, type GroupingLocale } from "../../lib/format.ts";
 import { clampTileStepIndex, computeTileFlow, nextIndexForArrow, tileSizeAt } from "../../lib/tile-flow.ts";
 import type { SourceItem } from "../../api/types.ts";
-import { GridControlBar } from "./GridControlBar.tsx";
 import { createViewerStore, Viewer } from "../../components/ui/viewer/index.ts";
 import { getThumbBytes, getViewImage } from "../../api/db.ts";
 import {
@@ -292,18 +291,6 @@ export function PhotoGrid(props: PhotoGridProps) {
           <Viewer store={viewer} class="z-10" />
         </Show>
       </div>
-
-      <GridControlBar
-        count={store.items().length}
-        dir={store.dir()}
-        byTime={store.byTime()}
-        onByTimeChange={store.setByTime}
-        tileStep={store.tileStep()}
-        onTileStepChange={store.setTileStep}
-        onTileStepCommit={store.commitTileStep}
-        locale={groupingLocale()}
-        loadingTimes={store.loadingTimes()}
-      />
     </div>
   );
 }

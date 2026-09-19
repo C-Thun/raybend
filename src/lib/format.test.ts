@@ -7,7 +7,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { formatCount, formatCountCapped } from "./format.ts";
+import { fileNameOf, formatCount, formatCountCapped } from "./format.ts";
 
 test("三位以内不分组（中英一致）", () => {
   for (const n of [0, 1, 12, 999]) {
@@ -75,4 +75,19 @@ test("封顶参数非法时不封顶（不因为传了 0/NaN 就把数字全吃�
   assert.equal(formatCountCapped(1248, 0, "zh-CN"), "1 248");
   assert.equal(formatCountCapped(1248, Number.NaN, "zh-CN"), "1 248");
   assert.equal(formatCountCapped(1248, -5, "zh-CN"), "1 248");
+});
+
+test("路径末级名字：两种分隔符都吃", () => {
+  assert.equal(fileNameOf("C:\\src\\pic\\2026-08-15\\MY0001.JPG"), "MY0001.JPG");
+  assert.equal(fileNameOf("photos/2026-08-15/MY0001.JPG"), "MY0001.JPG");
+  assert.equal(fileNameOf("photos/2026-08-15"), "2026-08-15");
+});
+
+test("路径末级名字的边界：末尾分隔符 / 纯分隔符 / 空串 / 无分隔符", () => {
+  assert.equal(fileNameOf("photos/2026-08-15/"), "2026-08-15", "末尾分隔符不该给出空名字");
+  assert.equal(fileNameOf("C:\\src\\"), "src");
+  assert.equal(fileNameOf("/"), "/", "纯分隔符没有名字可言，原样返回");
+  assert.equal(fileNameOf(""), "");
+  assert.equal(fileNameOf("P1000023.RW2"), "P1000023.RW2");
+  assert.equal(fileNameOf("照片/中文名.jpg"), "中文名.jpg", "中文名照常");
 });

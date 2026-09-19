@@ -22,7 +22,9 @@ import { createEffect, createMemo, createSignal, onCleanup, onMount, Show } from
 import * as importCommands from "../../api/import.ts";
 import { importPrecheck, onImportProgress, type ImportSource } from "../../api/import.ts";
 import { locale, t } from "../../i18n/index.ts";
+import { fileNameOf } from "../../lib/format.ts";
 import { PhotoGrid, type PhotoGridStore } from "../../features/photo-grid/index.ts";
+import { TilesShell } from "../../components/ui/tiles/index.ts";
 import {
   CompareView,
   createViewerStore,
@@ -371,6 +373,34 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
       <div class="flex min-h-0 min-w-0 flex-1">
               {/* ── 中列：照片网格 ─────────────────────────────── */}
               <main class="relative flex min-w-0 flex-1 flex-col bg-surface-bar">
+                {/*
+                  tiles = **网格 + 下面那条状态条**（人类 2026-09-19：业务上不可分割）。
+                  两侧用的是同一个 `TilesShell` + `TilesControlBar`，差异只走显式配置：
+                  导入侧现在不传 `sort`（以后想开就传同一份 props，不用改组件）。
+
+                  看图时不给 `bar`（那条位置让给胶片带与看图件）——
+                  与浏览侧口径一致：看图态下**没有** tiles 的状态条。
+                */}
+                <TilesShell
+                  bar={
+                    viewer.state().active
+                      ? null
+                      : {
+                          count: grid.items().length,
+                          selectedCount: grid.selectedCount(),
+                          dir: grid.dir(),
+                          // 「当前那张」= 选择锚点（最后一次点的）
+                          fileName: fileNameOf(grid.selection().anchor ?? ""),
+                          byTime: grid.byTime(),
+                          onByTimeChange: grid.setByTime,
+                          tileStep: grid.tileStep(),
+                          onTileStepChange: grid.setTileStep,
+                          onTileStepCommit: grid.commitTileStep,
+                          locale: groupingLocale(),
+                          loadingTimes: grid.loadingTimes(),
+                        }
+                  }
+                >
                 <Show
                   when={viewer.state().active}
                   fallback={
@@ -402,6 +432,7 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
                     />
                   </Show>
                 </Show>
+                </TilesShell>
 
                 {/* 胶片带：仅看图态可见；`view only`（第③态）整条收起 */}
                 <Show when={viewer.state().active && chromeShowsFilm(chrome())}>

@@ -895,6 +895,39 @@ try {
     );
   }
 
+  /*
+   * tiles 的状态条：**两侧同一个组件**（人类 2026-09-19：tiles 在业务上不可分割）。
+   *
+   * 为什么这里值得断言：统一之前浏览侧那条是**内联**在 `BrowseWorkspace` 里的另一份实现，
+   * 于是「导入侧加了 `信息` 按钮、浏览侧没有」这种漂移天天发生，而且没人会报 ——
+   * 谁都以为「另一个视图大概也有」。判据就用共享组件自己的标记 `[data-tiles-control-bar]`。
+   */
+  const tilesBar = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const bar = document.querySelector("main [data-tiles-control-bar]");
+      if (bar === null) return null;
+      const text = bar.innerText.replace(/\\s+/g, " ");
+      return {
+        info: bar.querySelector("[data-tile-info]")?.getAttribute("data-tile-info") ?? null,
+        sort: bar.querySelector("[data-sort]") !== null,
+        zoom: bar.querySelector('[role="slider"]') !== null,
+        byTime: text.includes("按时间"),
+        // 计数与选中数是同一段文案里的两个数字（人类要求：两边都要有选中计数）
+        count: text.slice(0, 40),
+      };
+    })()`,
+    returnByValue: true,
+  });
+  const bar = tilesBar.result?.value ?? null;
+  if (bar === null) {
+    problems.push("浏览侧没用上共享的 tiles 状态条（[data-tiles-control-bar] 不在）");
+  } else {
+    if (bar.info === null) problems.push("状态条上缺「信息」三态开关（两侧应当都有）");
+    if (!bar.sort) problems.push("浏览侧状态条应当有排序（它是可配置项，但浏览现在开着）");
+    if (!bar.zoom) problems.push("状态条上缺缩放滑块");
+    if (!bar.byTime) problems.push("状态条上缺「按时间」");
+  }
+
   // 数字键打星（只在网格里生效）
   await send("Runtime.evaluate", {
     expression: `window.dispatchEvent(new KeyboardEvent("keydown", { key: "3", bubbles: true, cancelable: true }))`,

@@ -1550,6 +1550,38 @@ try {
   })()`);
 
   /*
+   * 导入侧的 tiles 状态条：**与浏览侧同一个组件**（人类 2026-09-19 的统一口径）。
+   *
+   * 这里断言两件事：共享组件在位（`[data-tiles-control-bar]`），
+   * 以及**排序是可配置项**——导入侧现在不传，所以那一块**不该出现**
+   * （以后想开就传同一份 props，不用改组件）。
+   */
+  const importTilesBar = await evaluate(`(() => {
+    const bar = document.querySelector("main [data-tiles-control-bar]");
+    if (bar === null) return null;
+    const text = bar.innerText.replace(/\\s+/g, " ");
+    return {
+      info: bar.querySelector("[data-tile-info]")?.getAttribute("data-tile-info") ?? null,
+      sort: bar.querySelector("[data-sort]") !== null,
+      zoom: bar.querySelector('[role="slider"]') !== null,
+      byTime: text.includes("按时间"),
+      // 中间那段不该再有那个不知所云的九点图标（人类 2026-09-19 点名去掉了）
+      nineDots: Boolean(bar.querySelector('[data-nine-dots]')),
+    };
+  })()`);
+
+  if (importTilesBar === null) {
+    problems.push("导入侧没用上共享的 tiles 状态条（[data-tiles-control-bar] 不在）");
+  } else {
+    if (importTilesBar.info === null) problems.push("导入侧状态条缺「信息」三态开关");
+    if (importTilesBar.sort) {
+      problems.push("导入侧没开启排序，那一块不该出现（可配置项要走 props）");
+    }
+    if (!importTilesBar.zoom) problems.push("导入侧状态条缺缩放滑块");
+    if (!importTilesBar.byTime) problems.push("导入侧状态条缺「按时间」");
+  }
+
+  /*
    * 左列结构（M1-8 的新形态）：**两段可拖 + 底部自适应「已选目录」**。
    *
    * 浏览器里没有后端（卷与最近都是空的），所以这里量的是**几何不变量** ——
