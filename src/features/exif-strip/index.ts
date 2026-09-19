@@ -18,3 +18,5 @@ export type { ExifData, ExifGroupId } from "./types.ts";
 
 /** 传输形状（`src/api/types.ts` 的 `FileExif`）→ 界面形状（`ExifData`） */
 export { toExifData } from "./from-file.ts";
+/** 浏览侧：列表项直接转界面形状（不再走 IPC —— 字段本来就在手上） */
+export { assetItemExif } from "./from-asset.ts";

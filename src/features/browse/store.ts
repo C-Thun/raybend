@@ -154,6 +154,13 @@ export interface BrowseStore {
   selectedCount(order?: readonly string[]): number;
   selectedItems(): AssetItem[];
   anchorId(): number | null;
+  /**
+   * 锚点那张（多选时右栏与 flowinfo 用它）；一张没选就是 `null`。
+   *
+   * 规则只此一处（人类 2026-09-19）：以前 browse 工作区与组装层各写一份，
+   * flowbar 的信息区（flowinfo）再抄就是第三份，所以下沉到 store。
+   */
+  anchorItem(): AssetItem | null;
   select(id: number, mode: "replace" | "toggle" | "range", order?: readonly string[]): void;
   /**
    * **只把「当前那张」（锚点）挪过去**，不动选择集合。
@@ -507,6 +514,19 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
     anchorId: () => {
       const anchor = selection().anchor;
       return anchor === null ? null : Number(anchor);
+    },
+    /*
+     * 锚点那张（多选时右栏显示它）—— **规则只此一处**：
+     * 有锚点就用锚点，锚点不在选中集里（或没有锚点）就退回第一张；一张没选就是 null。
+     *
+     * 人类 2026-09-19：这条规则以前同时写在 browse 工作区与组装层，很容易走偏；
+     * flowbar 的信息区（flowinfo）也要用它，所以下沉到这里 —— 两处都读同一个方法。
+     */
+    anchorItem: () => {
+      const selected = selectedItems();
+      if (selected.length === 0) return null;
+      const anchor = selection().anchor;
+      return selected.find((item) => String(item.id) === anchor) ?? selected[0] ?? null;
     },
     select(id, mode, order) {
       setSelection(

@@ -18,12 +18,12 @@
  * 放进任何一边都会让另一边去钻内部实现。
  */
 
-import { createEffect, createSignal, onCleanup, onMount, Show } from "solid-js";
+import { Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import { uiReady } from "./api/window.ts";
 import { t } from "./i18n/index.ts";
 import * as db from "./api/db.ts";
 import type { ExifData } from "./features/exif-strip/index.ts";
-import { toExifData } from "./features/exif-strip/index.ts";
+import { assetItemExif, toExifData } from "./features/exif-strip/index.ts";
 import { createPhotoGridStore } from "./features/photo-grid/index.ts";
 import { createAppearanceStore } from "./lib/appearance.ts";
 import { createLayoutStore } from "./lib/layout-prefs.ts";
@@ -98,10 +98,52 @@ export default function App() {
   });
 
   /*
-   * flowbar 的图片信息区：**只选了一张**时才去读它的 EXIF。
-   * 多选时不显示（显示哪一张都不对），没有选择时是空态。
+   * flowbar 右侧的图片信息区（约定叫 **flowinfo**）——
+   * **切到哪个 flow 就跟着哪个 flow 走**，那个 flow 没选中照片就清空
+   * （人类 2026-09-19 定的口径；以前只认导入侧的选择，所以在浏览里选图它一动不动）。
+   *
+   * 两条路的取法不一样，但显示规则同源：
+   *   - 导入：中列只给了路径 → 读一次 EXIF（异步）。只选一张才读，多选显示哪张都不对；
+   *   - 浏览：列表项**本来就带着**这些字段 → 直接换形状，不用 IPC（本地应用能立刻给就别绕）。
    */
-  const [exif, setExif] = createSignal<ExifData | null>(null);
+  const [importExif, setImportExif] = createSignal<ExifData | null>(null);
+  createEffect(() => {
+    const selected = grid.selectedIds();
+    // 不在导入工作流就不读 —— 切回浏览时那块信息不该还留着上一张的
+    if (shell.workflow() !== "import" || selected.size !== 1) {
+      setImportExif(null);
+      return;
+    }
+    const path = selected.values().next().value as string;
+    let cancelled = false;
+    void db
+      .readFileExif(path)
+      .then((file) => {
+        if (!cancelled) setImportExif(toExifData(file));
+      })
+      .catch(() => {
+        if (!cancelled) setImportExif(null);
+      });
+    onCleanup(() => {
+      cancelled = true;
+    });
+  });
+
+  /** flowinfo 的内容：当前 flow 的「当前照片」，没有就 `null`（空态） */
+  const flowInfo = createMemo<ExifData | null>(() => {
+    switch (shell.workflow()) {
+      case "import":
+        return importExif();
+      case "browse": {
+        const item = browseStore.anchorItem();
+        return item === null ? null : assetItemExif(item);
+      }
+      default:
+        // 编辑 / 导出还没开工：没有「当前照片」就显示空态
+        return null;
+    }
+  });
+
   /**
    * 标签弹窗开着没有（`BROWSE.md` §3.3）。
    *
@@ -116,31 +158,11 @@ export default function App() {
    */
   const toast = createToastStore();
   onCleanup(toastDisposer(toast));
-  createEffect(() => {
-    const selected = grid.selectedIds();
-    if (selected.size !== 1) {
-      setExif(null);
-      return;
-    }
-    const path = selected.values().next().value as string;
-    let cancelled = false;
-    void db
-      .readFileExif(path)
-      .then((file) => {
-        if (!cancelled) setExif(toExifData(file));
-      })
-      .catch(() => {
-        if (!cancelled) setExif(null);
-      });
-    onCleanup(() => {
-      cancelled = true;
-    });
-  });
 
   return (
     <div class="flex h-full w-full flex-col bg-surface-main text-fg-1">
       <TitleBar store={shell} appearance={appearance} />
-      <FlowBar store={shell} exif={exif()} />
+      <FlowBar store={shell} exif={flowInfo()} />
 
       {/*
         批量排除（`DESIGN.md` §12.2 的**反转**语义）：没有选中项时禁用。

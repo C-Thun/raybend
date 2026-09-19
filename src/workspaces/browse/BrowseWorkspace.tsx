@@ -445,15 +445,13 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
     () => repositories().find((r) => r.id === store.repositoryId())?.root ?? null,
   );
 
-  /** 右栏显示谁：多选时是锚点那张（`BROWSE.md` §5.10）。 */
-  const anchor = createMemo(() => {
-    const id = store.anchorId();
-    if (id === null) return null;
-    for (const item of store.selectedItems()) {
-      if (item.id === id) return item;
-    }
-    return store.selectedItems()[0] ?? null;
-  });
+  /**
+   * 右栏（与 flowbar 的 flowinfo）显示谁：多选时是**锚点**那张（`BROWSE.md` §5.10）。
+   *
+   * 规则本身住在 store 的 `anchorItem()` 里 —— 组装层读的是**同一个方法**，
+   * 所以「右栏显示谁」与「flowinfo 显示谁」不可能两边走偏。
+   */
+  const anchor = createMemo(() => store.anchorItem());
 
   /** 状态栏中间那段：`库名 / 最后一级目录 · 文件名`（`BROWSE.md` §5.10）。 */
   const currentLabel = createMemo(() => {

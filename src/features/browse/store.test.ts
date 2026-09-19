@@ -321,6 +321,28 @@ test("换筛选会清空已加载的窗口与选择", async () => {
   assert.equal(store.itemAt(0)?.id, 1, "数据重新加载");
 });
 
+test("anchorItem：\u300c\u5f53\u524d\u90a3\u5f20\u300d\u7684\u89c4\u5219\u53ea\u6b64\u4e00\u5904\uff08\u591a\u9009\u65f6\u7ed9\u951a\u70b9\uff0c\u6ca1\u9009\u5c31\u662f null\uff09", async () => {
+  // \u4eba\u7c7b 2026-09-19\uff1a\u8fd9\u6761\u89c4\u5219\u4ee5\u524d\u540c\u65f6\u5199\u5728\u5de5\u4f5c\u533a\u4e0e\u7ec4\u88c5\u5c42\uff08flowinfo \u4e5f\u8981\u7528\uff09\u2014\u2014\u73b0\u5728\u53ea\u80fd\u4ece\u8fd9\u91cc\u8bfb
+  const { api } = fakeApi(5);
+  const store = createBrowseStore({ api });
+  open(store);
+  await tick();
+
+  assert.equal(store.anchorItem(), null, "\u4e00\u5f20\u6ca1\u9009 \u2192 null");
+
+  store.select(2, "replace");
+  assert.equal(store.anchorItem()?.id, 2, "\u5355\u9009\u5c31\u662f\u5b83\u81ea\u5df1");
+
+  store.select(4, "toggle");
+  assert.equal(store.anchorItem()?.id, 4, "\u65b0\u9009\u7684\u90a3\u5f20\u6210\u4e3a\u951a\u70b9");
+
+  store.setAnchor(2);
+  assert.equal(store.anchorItem()?.id, 2, "\u951a\u70b9\u53ef\u4ee5\u663e\u5f0f\u6307\u5b9a\uff08\u5bf9\u6bd4\u6001\u8981\u7528\uff09");
+
+  store.clearSelection();
+  assert.equal(store.anchorItem(), null, "\u6e05\u7a7a\u4e4b\u540e\u56de\u5230 null");
+});
+
 test("换范围（目录）也会清选择", async () => {
   const { api } = fakeApi(20);
   const store = createBrowseStore({ api });
