@@ -51,7 +51,15 @@ export function ToolsBar(props: ToolsBarProps) {
 
  return (
   <Show when={tools().length > 0 || props.hasExtraTools}>
-   <div class="flex h-bar-tool-h shrink-0 items-center justify-center gap-1 bg-surface-main px-pad-x">
+   <div
+    /*
+     * `data-toolsbar`：给冒烟一个**稳定的锚**。
+     * 不然断言只能靠「在 document 里瞎找按钮」——色标那种一排同名文案的控件
+     * 很容易找错地方（2026-09-19 加色标断言时正踩了这个）。
+     */
+    data-toolsbar
+    class="flex h-bar-tool-h shrink-0 items-center justify-center gap-1 bg-surface-main px-pad-x"
+   >
     <For each={tools()}>
      {(tool) => (
       <Button

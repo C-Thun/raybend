@@ -4,7 +4,7 @@
 -- v1 只有 rating / flag；浏览要用的色标、喜欢、锁、作者、描述、地理在本条补齐。
 
 -- ── 1. 标记类字段（全部可空；NULL = 用户没设过）──
-ALTER TABLE assets ADD COLUMN color_label TEXT;    -- red / yellow / green / blue / purple
+ALTER TABLE assets ADD COLUMN color_label TEXT;    -- red / yellow / green / cyan / blue / purple
 ALTER TABLE assets ADD COLUMN like_state  TEXT;    -- like / dislike
 ALTER TABLE assets ADD COLUMN lock_level  INTEGER NOT NULL DEFAULT 0;  -- 0 无 / 1 不可删 / 2 不可编辑
 

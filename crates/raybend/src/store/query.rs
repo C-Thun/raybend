@@ -89,7 +89,7 @@ impl Combinator {
 pub struct Filter {
     /// 评分取值（0–5；0 表示「没打星」）。
     pub ratings: Vec<u8>,
-    /// 色标取值（`red`/`yellow`/`green`/`blue`/`purple`，外加 [`NO_COLOR`] 表示「无色」）。
+    /// 色标取值（`red`/`yellow`/`green`/`cyan`/`blue`/`purple`，外加 [`NO_COLOR`] 表示「无色」）。
     pub colors: Vec<String>,
     /// 喜欢状态（`like` / `dislike`，外加 [`NO_LIKE`] 表示「没表态」）。
     pub likes: Vec<String>,

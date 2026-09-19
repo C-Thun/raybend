@@ -25,8 +25,11 @@ use rusqlite::Connection;
 use crate::error::{Error, Result};
 use crate::store::time::now_millis;
 
-/// 合法色标（与 `DESIGN.md` 的五个色标令牌一一对应）。
-pub const COLORS: [&str; 5] = ["red", "yellow", "green", "blue", "purple"];
+/// 合法色标（与 `DESIGN.md` §1.4 的六个色标令牌一一对应）。
+///
+/// 顺序**不重要**（校验只看集合）；界面的面板顺序由前端的 `lib/color-labels.ts` 决定，
+/// 这里不重复一遍顺序，免得两处各自漂移。
+pub const COLORS: [&str; 6] = ["red", "yellow", "green", "cyan", "blue", "purple"];
 /// 合法的「喜欢」取值。
 pub const LIKES: [&str; 2] = ["like", "dislike"];
 

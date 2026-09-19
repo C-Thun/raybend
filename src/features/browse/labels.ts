@@ -12,7 +12,7 @@
 
 import { t } from "../../i18n/index.ts";
 
-/** 色标（`BROWSE.md` §3.2 的 6 态：红黄绿蓝紫 + 无） */
+/** 色标（`BROWSE.md` §3.2 的 7 态：红黄绿青蓝紫 + 无） */
 export function colorText(color: string | null): string {
   switch (color) {
     case "red":
@@ -21,6 +21,8 @@ export function colorText(color: string | null): string {
       return t("browse.colorYellow");
     case "green":
       return t("browse.colorGreen");
+    case "cyan":
+      return t("browse.colorCyan");
     case "blue":
       return t("browse.colorBlue");
     case "purple":

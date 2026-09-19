@@ -793,6 +793,34 @@ try {
   }
 
   /*
+   * 色标：**六色都在**（红黄绿青蓝紫）+ 无色那个空心圈，且青色点得动（人类 2026-09-19 加了青）。
+   *
+   * 为什么值得断言：色标取值原先散在六处各写一份映射，加一个色漏掉一处
+   * 就表现为「某个视图上这颗色标是空的」——而且不报错。
+   */
+  const colorDots = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const bar = document.querySelector("[data-toolsbar]");
+      const dots = [...(bar?.querySelectorAll("button[aria-label]") ?? [])].filter((b) =>
+        ["红色", "黄色", "绿色", "青色", "蓝色", "紫色", "无色"].includes(b.getAttribute("aria-label")),
+      );
+      const cyan = dots.find((b) => b.getAttribute("aria-label") === "青色");
+      return {
+        count: dots.length,
+        names: dots.map((b) => b.getAttribute("aria-label")),
+        cyanDisabled: cyan ? cyan.disabled : null,
+      };
+    })()`,
+    returnByValue: true,
+  });
+  const colors = colorDots.result?.value ?? {};
+  if (colors.count !== 7) {
+    problems.push(`工具条上应当有 7 个色标按钮（六色 + 无色），实测 ${JSON.stringify(colors)}`);
+  } else if (!colors.names.includes("青色")) {
+    problems.push(`色标里缺「青」（实测 ${JSON.stringify(colors.names)}）`);
+  }
+
+  /*
    * 6.1：左右列宽度可拖拽 —— 两根手柄都在，键盘微调真的改了列宽。
    *
    * 用键盘（而不是合成 pointer 拖拽）验这条：拖拽的数学在 `lib/column-resize.ts` 有单测，

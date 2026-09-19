@@ -274,6 +274,7 @@ export const zhCN = {
  "browse.colorRed": "红色",
  "browse.colorYellow": "黄色",
  "browse.colorGreen": "绿色",
+ "browse.colorCyan": "青色",
  "browse.colorBlue": "蓝色",
  "browse.colorPurple": "紫色",
  "browse.dislike": "不喜欢",

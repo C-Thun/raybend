@@ -802,6 +802,7 @@ fn color_name(color: &str) -> &str {
         "red" => "红",
         "yellow" => "黄",
         "green" => "绿",
+        "cyan" => "青",
         "blue" => "蓝",
         "purple" => "紫",
         other => other,

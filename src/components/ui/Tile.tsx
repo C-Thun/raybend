@@ -56,8 +56,8 @@ import {
   MAX_DISPLAY_ASPECT,
 } from "../../lib/tile-flow.ts";
 
-/** 颜色标记（库内才有）—— 名字对应 `tokens.css` 里的 `--label-*` */
-export type TileColorLabel = "red" | "yellow" | "green" | "blue" | "purple";
+/** 颜色标记（库内才有）—— 取值与类名映射的唯一来源是 `lib/color-labels.ts` */
+export type TileColorLabel = ColorLabel;
 
 /** 「信息」档位：见 `TileProps.info` */
 export type TileInfoMode = "off" | "marks" | "marks-name";
@@ -120,23 +120,12 @@ export interface TileProps
   onActivate?: () => void;
 }
 
-/** 颜色标记 → 外框的低浓底纹（类名必须**字面写出**，Tailwind 才扫得到） */
-const LABEL_TINT: Record<TileColorLabel, string> = {
-  red: "bg-(--label-red)/15",
-  yellow: "bg-(--label-yellow)/15",
-  green: "bg-(--label-green)/15",
-  blue: "bg-(--label-blue)/15",
-  purple: "bg-(--label-purple)/15",
-};
-
-/** 颜色标记圆点的实色（悬停/选中时底纹被盖住，用它兜底显示标色） */
-const LABEL_DOT: Record<TileColorLabel, string> = {
-  red: "bg-(--label-red)",
-  yellow: "bg-(--label-yellow)",
-  green: "bg-(--label-green)",
-  blue: "bg-(--label-blue)",
-  purple: "bg-(--label-purple)",
-};
+/*
+ * 色标的两张类名表（低浓底纹 / 实色圆点）**不在这里**：
+ * 它们是 `lib/color-labels.ts` 的唯一一份，工具条与看图状态栏用的是同一张。
+ * 以前这里各写一份，加一个色要改三处（人类 2026-09-19 统一时收敛掉）。
+ */
+import { COLOR_DOT_CLASS as LABEL_DOT, COLOR_TINT_CLASS as LABEL_TINT, type ColorLabel } from "../../lib/color-labels.ts";
 
 export function Tile(props: TileProps) {
   const [local, rest] = splitProps(props, [

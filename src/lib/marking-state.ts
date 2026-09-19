@@ -94,15 +94,11 @@ export function ratingDisplay(rating: number, compact: boolean): RatingDisplay |
  * 它当时无人引用，且是「中文硬编码进界面」的隐患。
  */
 
-/** 色标的可选值（顺序 = 面板上的顺序；`null` = 无色，是那个空心圈）。 */
-export const COLOR_VALUES: readonly (string | null)[] = [
-  "red",
-  "yellow",
-  "green",
-  "blue",
-  "purple",
-  null,
-];
+/*
+ * 色标的取值表**不在这里**：它住在 `lib/color-labels.ts`（值表 + 类名映射的唯一来源）。
+ * 这里只把值表再导出一次，免得调用方为了拿「面板顺序」多 import 一个模块。
+ */
+export { COLOR_VALUES, type ColorLabel } from "./color-labels.ts";
 
 /** 锁的两级（`BROWSE.md` §3.4）。 */
 export const LOCK_LEVELS = {

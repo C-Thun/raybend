@@ -27,6 +27,7 @@ import {
 import { getThumbBytes } from "../../api/db.ts";
 import { StateWatermark } from "../../components/ui/StateWatermark.tsx";
 import { Tile, type TileColorLabel } from "../../components/ui/Tile.tsx";
+import { isColorLabel } from "../../lib/color-labels.ts";
 import { infoMode } from "../../components/ui/tile-info.ts";
 import type { ViewerPhoto } from "../../components/ui/viewer/index.ts";
 import { VirtualGrid } from "../../components/ui/VirtualGrid.tsx";
@@ -50,12 +51,10 @@ import type { BrowseStore } from "./store.ts";
  * **不用类型断言糊过去**：值来自数据库（可能有历史脏数据、或者将来加了新颜色），
  * 认不出来的就当没有 —— 比让界面显示一个不存在的颜色强。
  */
-const COLOR_LABELS = new Set<string>(["red", "yellow", "green", "blue", "purple"]);
+/* 合法性判断走共享表（`lib/color-labels.ts`）：加色标只改那一处 */
 
 function asColorLabel(value: string | null | undefined): TileColorLabel | null {
-  return typeof value === "string" && COLOR_LABELS.has(value)
-    ? (value as TileColorLabel)
-    : null;
+  return isColorLabel(value) ? value : null;
 }
 
 export interface BrowseGridProps {

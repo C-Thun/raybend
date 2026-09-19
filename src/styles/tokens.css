@@ -187,28 +187,55 @@
 }
 
 /* ══════════════════════════════════════════════════════════════
- * 色标（`DESIGN.md` §1.4）：两主题各一套，用户 2026-09-15 指定
+ * 色标（`DESIGN.md` §1.4）：**两主题共用一套，六色**（人类 2026-09-19）
  *
- * 深色套在深底上全过 WCAG AA（对 surface-bar 4.74 ~ 9.27:1）；
- * 浅色套里黄/绿/蓝当「色块」看只有 ~2:1（非文字图形需 3:1）→
- * 浅色主题下画色标要加 1px 深描边（见 DESIGN.md §2.5）。
+ * 口径（每条都有实测支撑，表在 DESIGN.md §1.4）：
+ *   * 六色 = 红 / 黄 / 绿 / **青** / 蓝 / 紫；青插在绿与蓝之间，
+ *     绿往黄绿挪（H 145→138）、蓝往靛蓝挪（H 247→262）**给青让位**；
+ *   * **青不与主色撞车**：主色 `#52c6ab` 是 L .75 / H 175 的薄荷绿，
+ *     青取 H 211 / L .64 → 两者 OKLab 距离 **13.1**（其它色都 ≥ 17）；
+ *   * **一套两主题**：亮度取中段（L .62 ~ .74）。太亮在浅底上看不见，
+ *     太暗在深底上看不见 —— 这是单一套能同时照顾两侧的可行带。
+ *     实测：对 `surface-bar` 深底 3.7 ~ 6.0:1、浅底 2.0 ~ 3.2:1
+ *     （黄天生弱：它要够黄就得亮，浅底上必然只有 ~2:1，见 §1.4 的说明）。
  * ══════════════════════════════════════════════════════════════ */
 
+:root {
+  --label-red: #e86156;
+  --label-yellow: #c9a90c;
+  --label-green: #6db453;
+  --label-cyan: #009eb3;
+  --label-blue: #5283e0;
+  --label-purple: #ad67dc;
+}
+
+/* 低浓底纹的**浓度**：按主题各给一档（深 16% / 浅 20%）。
+   为什么要分开：底纹是「按 OKLab 混进画面」的，同一个 α 在深底与浅底上
+   离面色的距离差很多（浅底偏淡、深底偏浓）。这两档实测让两侧都落在
+   ΔE 5 ~ 8 —— 看得出来，又不抢照片。 */
 :root,
 :root[data-theme="dark"] {
-  --label-red: #e7766f;
-  --label-yellow: #eac565;
-  --label-green: #89e98e;
-  --label-blue: #7cb7ec;
-  --label-purple: #a886ed;
+  --label-tint-mix: 16%;
 }
 
 :root[data-theme="light"] {
-  --label-red: #b8524c;
-  --label-yellow: #cca53e;
-  --label-green: #56c85c;
-  --label-blue: #5891c5;
-  --label-purple: #805acd;
+  --label-tint-mix: 20%;
+}
+
+/* 低浓底纹（tile 的外框底色）：**由色标色现算**，不是写死的一组「变淡色」。
+   与 `--state-hover` 同一套做法（DESIGN.md §2 的「实时合成，不写字面色值」）；
+   `transparent` 参与混合时按**预乘**处理，所以结果就是「该色 16%/20% 不透明度」。 */
+:root {
+  --label-red-tint: color-mix(in oklab, var(--label-red) var(--label-tint-mix), transparent);
+  --label-yellow-tint: color-mix(in oklab, var(--label-yellow) var(--label-tint-mix), transparent);
+  --label-green-tint: color-mix(in oklab, var(--label-green) var(--label-tint-mix), transparent);
+  --label-cyan-tint: color-mix(in oklab, var(--label-cyan) var(--label-tint-mix), transparent);
+  --label-blue-tint: color-mix(in oklab, var(--label-blue) var(--label-tint-mix), transparent);
+  --label-purple-tint: color-mix(in oklab, var(--label-purple) var(--label-tint-mix), transparent);
+
+  /* 选中态色标点的**内圈**颜色：取当前面上那一层的面（toolsbar 的面是 `surface-main`），
+     于是「外圈主色 → 内圈面色 → 色标本体」三层，主色不直接贴着色标色。 */
+  --label-ring-inset: var(--surface-main);
 }
 
 /* ══════════════════════════════════════════════════════════════

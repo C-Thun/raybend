@@ -264,6 +264,7 @@ export const enUS: Record<MessageKey, string> = {
  "browse.colorRed": "Red",
  "browse.colorYellow": "Yellow",
  "browse.colorGreen": "Green",
+ "browse.colorCyan": "Cyan",
  "browse.colorBlue": "Blue",
  "browse.colorPurple": "Purple",
  "browse.dislike": "Dislike",

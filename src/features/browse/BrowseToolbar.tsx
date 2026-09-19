@@ -63,6 +63,7 @@ import {
   type TriState,
 } from "../../lib/marking-state.ts";
 import type { BrowseStore } from "./store.ts";
+import { COLOR_DOT_CLASS, isColorLabel } from "../../lib/color-labels.ts";
 
 export interface BrowseToolbarProps {
   store: BrowseStore;
@@ -76,15 +77,6 @@ export interface BrowseToolbarProps {
    */
   toast?: ToastStore;
 }
-
-/** 色标 → 令牌类名（必须是字面量，Tailwind 才扫得到）。 */
-const COLOR_DOT: Record<string, string> = {
-  red: "bg-(--label-red)",
-  yellow: "bg-(--label-yellow)",
-  green: "bg-(--label-green)",
-  blue: "bg-(--label-blue)",
-  purple: "bg-(--label-purple)",
-};
 
 /** 混合态的视觉：半亮 + 一个短横。 */
 function MixedMark() {
@@ -417,8 +409,17 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
                    */
                   color === null
                     ? "ring-1 ring-line-2 bg-transparent"
-                    : (COLOR_DOT[color] ?? ""),
-                  active() || filtered() ? "ring-2 ring-brand" : "",
+                    : (isColorLabel(color) ? COLOR_DOT_CLASS[color] : ""),
+                  /*
+                   * 选中态 = **两层环**（人类 2026-09-19）：
+                   *   * 外圈：固定主色（`ring-2 ring-brand`，与全局「点击后=主色底」一脉）；
+                   *   * 内圈：**所在面的颜色**（`inset-ring-1`）——
+                   *     让它把主色与色标本色隔开一圈，形成「主色环扣着一颗色标」的效果。
+                   * 代价是加内圈后色标看起来小了一点，这是**预期的**（内圈占了本色）。
+                   */
+                  active() || filtered()
+                    ? "ring-2 ring-brand inset-ring-1 inset-ring-(--label-ring-inset)"
+                    : "",
                   markDisabled() ? "opacity-40" : "",
                 ].join(" ")}
               />

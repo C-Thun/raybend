@@ -29,14 +29,8 @@ import {
 import { t } from "../../i18n/index.ts";
 import type { ViewerPhoto } from "../../components/ui/viewer/index.ts";
 
-/** 色标 → 令牌类名（必须是字面量，Tailwind 才扫得到；与 `BrowseToolbar` 同一套）。 */
-const COLOR_DOT: Record<string, string> = {
-  red: "bg-(--label-red)",
-  yellow: "bg-(--label-yellow)",
-  green: "bg-(--label-green)",
-  blue: "bg-(--label-blue)",
-  purple: "bg-(--label-purple)",
-};
+/** 色标的类名映射与工具条**共用同一份**（`lib/color-labels.ts`）。 */
+import { COLOR_DOT_CLASS, isColorLabel } from "../../lib/color-labels.ts";
 
 export interface ViewerStatusBarProps {
   /** 当前正在看的那张（看图件自己的 `current()`）。 */
@@ -46,6 +40,17 @@ export interface ViewerStatusBarProps {
 
 export function ViewerStatusBar(props: ViewerStatusBarProps) {
   const marks = () => props.photo?.marks;
+
+  /**
+   * 色标 → 类名（不是色标就是 `null`）。
+   *
+   * 先算成字符串再交给 `Show`：`isColorLabel` 是**类型守卫**，
+   * 直接写 `when={isColorLabel(...)}` 的话子函数拿到的是 `true` 而不是那个值。
+   */
+  const colorDotClass = (): string | null => {
+    const value = marks()?.colorLabel;
+    return isColorLabel(value) ? COLOR_DOT_CLASS[value] : null;
+  };
 
   return (
     <div
@@ -95,14 +100,13 @@ export function ViewerStatusBar(props: ViewerStatusBarProps) {
           </span>
         </Show>
 
-        <Show when={marks()?.colorLabel !== null && marks()?.colorLabel !== undefined}>
-          <span
-            class={[
-              "size-3 shrink-0 rounded-full ring-1 ring-line-2",
-              COLOR_DOT[marks()?.colorLabel ?? ""] ?? "",
-            ].join(" ")}
-            aria-label={String(marks()?.colorLabel ?? "")}
-          />
+        <Show when={colorDotClass()}>
+          {(dot) => (
+            <span
+              class={["size-3 shrink-0 rounded-full ring-1 ring-line-2", dot()].join(" ")}
+              aria-label={String(marks()?.colorLabel ?? "")}
+            />
+          )}
         </Show>
 
         <Show when={props.photo?.flag === "pick"}>
