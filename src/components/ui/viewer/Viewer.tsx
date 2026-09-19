@@ -45,7 +45,19 @@ export function Viewer(props: ViewerProps) {
    */
   const [cursor, setCursor] = createSignal<{ x: number; y: number } | null>(null);
   const CORNER_BACK = 120;
-  const CORNER_ZOOM = 200;
+  /**
+   * 右下角控制条的**触发区**（人类 2026-09-19 报的问题）。
+   *
+   * 原来是一个 `200×200` 的**正方角**，而那条控件最长约 350px（三个按钮 + 百分比 + 文件名）
+   * 且贴在离角 12px 的位置 —— 于是鼠标移到条的**左段**时，只要横向偏出条外一点，
+   * `width - x` 就超过 200，整条当场隐掉，非常不合理。
+   *
+   * 现在按「**条的最大宽度 + 周围一圈余量**」取（水平 420 / 竖直 96）：
+   * 只要鼠标还在条及其周边，它就保持可见。数值是纯几何，不引入测量与 observer
+   * （每条 pointermove 都测一次 rect 会白白触发布局）。
+   */
+  const CORNER_ZOOM_X = 420;
+  const CORNER_ZOOM_Y = 96;
   const nearTopLeft = (): boolean => {
     const at = cursor();
     return at !== null && at.x <= CORNER_BACK && at.y <= CORNER_BACK;
@@ -55,7 +67,10 @@ export function Viewer(props: ViewerProps) {
     if (at === null) return false;
     const width = host?.clientWidth ?? 0;
     const height = host?.clientHeight ?? 0;
-    return width - at.x <= CORNER_ZOOM && height - at.y <= CORNER_ZOOM;
+    return (
+      width - at.x <= CORNER_ZOOM_X &&
+      height - at.y <= CORNER_ZOOM_Y
+    );
   };
 
   /*

@@ -666,7 +666,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
         {/*
           胶片带（`BROWSE.md` §5.5）：看图时在照片区下面形成，横向滚动选图。
           列表就是看图件手里那一份 —— 两边永远同源。
-          `Tab` 第③态（`no-film`）把它藏起来（`chromeShowsFilm`）。
+          `Tab` 第③态（`view-only`，只看图）把它藏起来（`chromeShowsFilm`）。
         */}
         <Show when={viewer.state().active && chromeShowsFilm(chrome())}>
           <FilmStrip
