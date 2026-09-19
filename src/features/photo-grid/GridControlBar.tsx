@@ -14,9 +14,10 @@
  */
 
 import { Show } from "solid-js";
-import { IconClock, IconGridDots, IconZoomIn, IconZoomOut } from "@tabler/icons-solidjs";
+import { IconInfoCircle, IconClock, IconGridDots, IconZoomIn, IconZoomOut } from "@tabler/icons-solidjs";
 import { PathText } from "../../components/ui/PathText.tsx";
 import { Slider } from "../../components/ui/Slider.tsx";
+import { cycleTileInfo, infoMode } from "../../components/ui/tile-info.ts";
 import { ToggleBlock } from "../../components/ui/ToggleBlock.tsx";
 import { t } from "../../i18n/index.ts";
 import { formatCount, type GroupingLocale } from "../../lib/format.ts";
@@ -77,6 +78,31 @@ export function GridControlBar(props: GridControlBarProps) {
       <Show when={props.loadingTimes}>
         <span class="shrink-0 text-fs-0 text-fg-3">{t("common.loading")}</span>
       </Show>
+
+      {/*
+        「信息」三态开关（人类 2026-09-19）：`off` → `marks`（只标记）→ `marks-name`（标记 + 文件名）。
+        背景按全局反馈规则：未选中**无底色**、第一档**辅色底**、第二档**主色底**（DESIGN.md §5）。
+        快捷键是 `i`（只在 tiles / film 下生效，见工作区的键盘处理）。
+      */}
+      <button
+        type="button"
+        data-tile-info={infoMode()}
+        aria-pressed={infoMode() !== "off"}
+        aria-label={t("grid.info")}
+        title={t("grid.info")}
+        onClick={() => cycleTileInfo()}
+        class={[
+          "flex h-6 shrink-0 cursor-pointer items-center gap-1 rounded-ui px-1.5 text-fs-1 transition-colors",
+          infoMode() === "marks-name"
+            ? "bg-state-selected text-fg-1"
+            : infoMode() === "marks"
+              ? "bg-state-hover text-fg-1"
+              : "text-fg-2 hover:bg-state-hover hover:text-fg-1",
+        ].join(" ")}
+      >
+        <IconInfoCircle size={16} aria-hidden="true" />
+        <span class="whitespace-nowrap">{t("grid.info")}</span>
+      </button>
 
       {/* 按时间（可按下式，见 design/main.md §4.8.1）——
           放在**缩放组件的左边**：它是视图选项，跟缩放是一类东西 */}

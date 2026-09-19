@@ -34,6 +34,7 @@ import { createThumbQueue } from "../../components/ui/thumb-queue.ts";
 import { getThumbBytes, getViewImage } from "../../api/db.ts";
 import { chromeShowsFilm, nextChrome, type ViewerChrome } from "../../lib/viewer-chrome.ts";
 import { shouldHandleKey } from "../../lib/viewer-keys.ts";
+import { cycleTileInfo } from "../../components/ui/tile-info.ts";
 import { compareIds } from "../../lib/viewer-compare.ts";
 import {
   createImportStore,
@@ -274,6 +275,15 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
         event.preventDefault();
         setChrome("default");
         viewer.close();
+        return;
+      }
+      // `i`：切 tiles 的「信息」档位 —— **只在 tiles / film 下生效**（纯看图态不接，人类 2026-09-19）
+      if (event.key === "i" || event.key === "I") {
+        const inTiles = !active;
+        const inFilm = active && chromeShowsFilm(chrome());
+        if (!inTiles && !inFilm) return;
+        event.preventDefault();
+        cycleTileInfo();
         return;
       }
       if (event.key === "Enter" && !active) {

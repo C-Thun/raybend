@@ -310,6 +310,10 @@
 
   --tile-pad: 3px; /* 正方外框的内边距：照片在其中保比例居中，四周留出这点空隙 */
   --tile-bar-h: 18px; /* 覆盖在照片上的信息条高（文件名/类型/标记） */
+  /* 「信息」模式：照片上的文字 + **反色勾边**（人类 2026-09-19）
+     —— 浅色字配深色勾边（暗色主题），亮色主题反过来。 */
+  --tile-info-fg: #f5f6f7;
+  --tile-info-outline: #16181b;
   --scrollbar-w: 8px; /* 细滚动条宽/高 */
 
   --action-btn-h: 34px; /* 导入按钮等 */
@@ -361,6 +365,8 @@
 
   --tile-pad: 4px;
   --tile-bar-h: 22px;
+  --tile-info-fg: #16181b;
+  --tile-info-outline: #f5f6f7;
   --win-ctl-w: 62px;
   --scrollbar-w: 10px;
 

@@ -155,6 +155,7 @@ export const zhCN = {
  "grid.color_label": "颜色标记",
  "grid.locked": "已加锁",
  "grid.by_time": "按时间",
+  "grid.info": "信息",
  "grid.select_all_day": "全选当天",
  "grid.select_all_range": "全选此段",
   "viewer.back": "返回",

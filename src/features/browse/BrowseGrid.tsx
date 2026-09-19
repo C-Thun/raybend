@@ -27,6 +27,7 @@ import {
 import { getThumbBytes } from "../../api/db.ts";
 import { StateWatermark } from "../../components/ui/StateWatermark.tsx";
 import { Tile, type TileColorLabel } from "../../components/ui/Tile.tsx";
+import { infoMode } from "../../components/ui/tile-info.ts";
 import type { ViewerPhoto } from "../../components/ui/viewer/index.ts";
 import { VirtualGrid } from "../../components/ui/VirtualGrid.tsx";
 import { createTokenPx } from "../../components/ui/tokens.ts";
@@ -443,6 +444,7 @@ export function BrowseGrid(props: BrowseGridProps) {
                       }}
                     >
                       <Tile
+                      info={infoMode()}
                       selected={
                         item() !== null &&
                         store.selection().ids.has(String(item()?.id))

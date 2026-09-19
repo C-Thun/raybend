@@ -34,6 +34,7 @@ import {
 } from "@tabler/icons-solidjs";
 import { StateWatermark } from "../../components/ui/StateWatermark.tsx";
 import { Tile } from "../../components/ui/Tile.tsx";
+import { infoMode } from "../../components/ui/tile-info.ts";
 import { VirtualGrid } from "../../components/ui/VirtualGrid.tsx";
 import { createTokenPx } from "../../components/ui/tokens.ts";
 import { locale, t } from "../../i18n/index.ts";
@@ -356,6 +357,7 @@ function TileCell(props: {
       onDblClick={() => props.onOpen(id())}
     >
       <Tile
+        info={infoMode()}
         label={props.item.fileName}
         tag={props.item.ext?.toUpperCase() ?? undefined}
         // RAW 角标：未指向、未选中时才浮在右下角（后端已经分好类，不用前端认扩展名）

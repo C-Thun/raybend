@@ -116,3 +116,24 @@ textarea,
  outline: var(--focus-ring-w) solid var(--focus-ring);
  outline-offset: 1px;
 }
+
+/* ────────────────────────────────────────────────────────────────
+ * 「信息」模式（tiles 上常显的标记/文件名）：文字加**反色勾边**
+ *
+ * 为什么用 `text-shadow` 八向偏移，而不是 `-webkit-text-stroke`：
+ * 后者是**居中描边**，会吃掉字形内部的像素、让字变细；阴影法只在外圈加边，
+ * 字形宽度不变，小字号（11–12px）下尤其明显。
+ * 颜色走 `--tile-info-*` 两条令牌（暗色主题是浅字深边，亮色反过来）。
+ * ──────────────────────────────────────────────────────────────── */
+.tile-info-text {
+  color: var(--tile-info-fg);
+  text-shadow:
+    1px 0 0 var(--tile-info-outline),
+    -1px 0 0 var(--tile-info-outline),
+    0 1px 0 var(--tile-info-outline),
+    0 -1px 0 var(--tile-info-outline),
+    1px 1px 0 var(--tile-info-outline),
+    -1px 1px 0 var(--tile-info-outline),
+    1px -1px 0 var(--tile-info-outline),
+    -1px -1px 0 var(--tile-info-outline);
+}

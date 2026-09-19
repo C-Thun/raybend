@@ -148,6 +148,7 @@ export const enUS: Record<MessageKey, string> = {
  "grid.color_label": "Color label",
  "grid.locked": "Locked",
  "grid.by_time": "By time",
+  "grid.info": "Info",
  "grid.select_all_day": "Select whole day",
  "grid.select_all_range": "Select this range",
   "viewer.back": "Back",

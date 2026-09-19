@@ -59,6 +59,9 @@ import {
 /** 颜色标记（库内才有）—— 名字对应 `tokens.css` 里的 `--label-*` */
 export type TileColorLabel = "red" | "yellow" | "green" | "blue" | "purple";
 
+/** 「信息」档位：见 `TileProps.info` */
+export type TileInfoMode = "off" | "marks" | "marks-name";
+
 export interface TileProps
   extends Omit<JSX.HTMLAttributes<HTMLDivElement>, "children"> {
   /** 完整文件名（显示时会去掉后缀；`title` 与无障碍名用完整的） */
@@ -90,6 +93,14 @@ export interface TileProps
   actions?: JSX.Element;
   /** 库内才有的信息（导入工作流里这些事都不存在，槽位直接不渲染） */
   context?: "library" | "source";
+  /**
+   * 「信息」档位（人类 2026-09-19；由 tiles 状态栏上的 `i` 开关/`i` 键控制）：
+   *
+   *   - `off`（默认）：信息条只在指向/选中时出现，带半透明底纹（既有行为）；
+   *   - `marks`：**常显标记**（星标/色标/旗标），**去掉底纹**，文字加反色勾边；
+   *   - `marks-name`：标记 + **下面的文件名**都常显，同样没有底纹。
+   */
+  info?: TileInfoMode;
   /**
    * 是不是 RAW（人类 2026-09-17 要求）：未指向、未选中时，照片**右下角**浮一个
    * 主色底纹的圆角 `RAW` 标签；鼠标指向或选中时**消失**。
@@ -141,6 +152,7 @@ export function Tile(props: TileProps) {
     "excluded",
     "actions",
     "context",
+    "info",
     "raw",
     "rating",
     "flag",
@@ -186,6 +198,12 @@ export function Tile(props: TileProps) {
 
   /** 信息是否常亮（选中时不再依赖悬停） */
   const infoAlwaysOn = (): boolean => Boolean(local.selected);
+  /** 用户在状态栏选的档位 */
+  const infoMode = (): TileInfoMode => local.info ?? "off";
+  /** 信息条常显：选中（既有规则）或用户开了 info */
+  const infoVisible = (): boolean => infoAlwaysOn() || infoMode() !== "off";
+  /** 开了 info 就**不要半透明底纹**，改成反色勾边（人类 2026-09-19） */
+  const infoBare = (): boolean => infoMode() !== "off";
 
   return (
     <div
@@ -346,9 +364,10 @@ export function Tile(props: TileProps) {
         <div
           class={[
             "pointer-events-none absolute inset-x-0 top-0 flex items-center gap-1",
-            "bg-(--tile-bar-scrim) px-(--tile-pad) text-fg-1 transition-opacity",
+            "px-(--tile-pad) transition-opacity",
+            infoBare() ? "tile-info-text" : "bg-(--tile-bar-scrim) text-fg-1",
             "opacity-0 group-hover/tile:opacity-100 group-focus-within/tile:opacity-100",
-            infoAlwaysOn() ? "opacity-100" : "",
+            infoVisible() ? "opacity-100" : "",
           ].join(" ")}
           style={{ height: "var(--tile-bar-h)" }}
         >
@@ -400,9 +419,10 @@ export function Tile(props: TileProps) {
       <div
         class={[
           "pointer-events-none absolute inset-x-0 bottom-0 flex items-center gap-1",
-          "bg-(--tile-bar-scrim) px-(--tile-pad) text-fg-1 transition-opacity",
+          "px-(--tile-pad) transition-opacity",
+          infoBare() ? "tile-info-text" : "bg-(--tile-bar-scrim) text-fg-1",
           "opacity-0 group-hover/tile:opacity-100 group-focus-within/tile:opacity-100",
-          infoAlwaysOn() ? "opacity-100" : "",
+          infoAlwaysOn() || infoMode() === "marks-name" ? "opacity-100" : "",
         ].join(" ")}
         style={{ height: "var(--tile-bar-h)" }}
       >
