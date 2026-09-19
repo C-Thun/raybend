@@ -599,7 +599,8 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
   const gridSource = createMemo(() =>
     browseSource({
       store,
-      root: root(),
+      // 传取值函数（不是值）：库列表是异步来的，见 `BrowseSourceDeps.root` 的说明
+      root,
       thumbs,
       tileStep,
       setTileStep,

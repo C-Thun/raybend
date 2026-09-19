@@ -33,8 +33,14 @@ export const DEFAULT_GAP_MINUTES = 60;
 
 export interface BrowseSourceDeps {
   store: BrowseStore;
-  /** 库根目录（缩略图要绝对路径）；`null` = 还没选库 */
-  root: string | null;
+  /**
+   * 库根目录（缩略图要绝对路径）；返回 `null` = 还没选库 / 库列表还没到。
+   *
+   * ⚠️ 必须是**取值函数**而不是值：库列表是异步来的，开工那一刻它还是 `null` ——
+   * 传值等于把这个 `null` 闭包进去，之后永远拼不出绝对路径
+   * （真机冒烟实测：格子永远停在占位、`thumb_get` 一次都不发）。
+   */
+  root: () => string | null;
   /**
    * 与胶片带**共用**的缩略图队列（工作区建、两边用）：
    * 网格里已缓存的照片，胶片带里立刻就有。
@@ -166,7 +172,8 @@ export function browseSource(deps: BrowseSourceDeps): TilesSource {
   const toGridItem = (dataIndex: number): GridItem | null => {
     const item = store.itemAt(dataIndex);
     if (item === null) return null;
-    const path = deps.root === null ? null : joinPath(deps.root, item.relPath);
+    const root = deps.root();
+    const path = root === null ? null : joinPath(root, item.relPath);
     if (path === null) return null;
     const natural = store.naturalOf(item.id);
     return {

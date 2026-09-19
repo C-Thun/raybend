@@ -19,7 +19,15 @@
  *    回车/方向键再也到不了网格（人类 2026-09-19 报的「Esc 后回车进不去」）。
  */
 
-import { createEffect, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
+import {
+  createEffect,
+  createMemo,
+  createSignal,
+  onCleanup,
+  onMount,
+  Show,
+  type JSX,
+} from "solid-js";
 import { IconCalendar } from "@tabler/icons-solidjs";
 
 import { Tile } from "../../components/ui/Tile.tsx";
@@ -132,18 +140,29 @@ export function PhotoGrid(props: PhotoGridProps): JSX.Element {
   const flow = () =>
     computeTileFlow({ containerWidth: width(), cellWidth: cellWidth(), gap: gap() });
 
-  const rows = () =>
+  /*
+   * ⚠️ **必须 memo**：`buildGridRows` 每次都返回**新数组 + 新行对象**，
+   * 而 `VirtualGrid` 的 `<For>` 按引用去重 —— 不 memo 的话，任何一次重算
+   * （哪怕只是选中变了）都会把整片行 DOM 重建一遍。
+   * 后果很具体（真机冒烟抓到的）：
+   *   * 同一次事件里连点两张（Ctrl 多选）时，第二次点的是**已经被替换掉的**节点 ⇒ 没反应；
+   *   * 点一下再双击进看图，双击落在旧节点上 ⇒ 看图打不开。
+   * 依赖只有「格子数 / 列数 / 档位 / 分组」这几样，选中与否不进这个 memo。
+   */
+  const rows = createMemo(() =>
     buildGridRows({
       count: source.count(),
       columns: flow().columns,
       cellSize: cellWidth(),
       ...(source.slices() === undefined ? {} : { slices: source.slices() }),
-    });
+    }),
+  );
 
   /*
    * 看图：**状态与视图都在 viewer 模块**，这里只负责「谁触发打开」。
    * 浏览侧传进来的是与胶片带共用的那一份（倍率、当前那张必须一致）。
    */
+  const ownsViewer = props.viewer === undefined;
   const ownViewer = props.viewer === undefined
     ? createViewerStore({
         loadScreen: (path) => getViewImage(path, "screen"),
@@ -460,8 +479,14 @@ export function PhotoGrid(props: PhotoGridProps): JSX.Element {
         />
       </Show>
 
-      {/* 看图是覆盖层，不是把网格换掉：网格一直挂着，滚动位置留得住 */}
-      <Show when={viewer.state().active}>
+      {/*
+        看图是覆盖层，不是把网格换掉：网格一直挂着，滚动位置留得住。
+        ⚠️ **只在「网格自己建的 viewer」时渲染**：浏览侧传进来的是工作区那一份，
+        而工作区还要在它上面叠**对比视图**（CompareView）与胶片带 —— 网格再渲染一份
+        就会同时冒出两个看图件（真机冒烟抓到的：「对比态下不该同时出现单张看图件」、
+        「不该有多组返回控件（实测 2）」）。
+      */}
+      <Show when={ownsViewer && viewer.state().active}>
         <Viewer store={viewer} class="z-10" />
       </Show>
     </div>
@@ -527,10 +552,6 @@ function TileCell(props: {
       class="relative"
       // **正方外框**：边长就是尺寸档。行高恒定才有得拖（见 Tile 的模块注释）
       style={{ width: "var(--tile-cell)", height: "var(--tile-cell)" }}
-      onDblClick={() => {
-        const it = item();
-        if (it !== null) props.onOpen(it.id);
-      }}
     >
       <Tile
         info={infoMode()}
@@ -552,6 +573,16 @@ function TileCell(props: {
         colorLabel={asColorLabel(item()?.marks?.colorLabel)}
         flag={item()?.marks?.flag ?? null}
         locked={item()?.marks?.locked === true}
+        /*
+         * 双击进看图走 `Tile` 自己的 `onActivate`：**它内部把 `onDblClick` 占住了**
+         * （`Tile.tsx` 的 `onDblClick={() => local.onActivate?.()}`），
+         * 外面再传 `onDblClick` 会被它覆盖掉 —— 老代码为此在外面包了一层，
+         * 那是绕过；这里按它设计的接口接（回车/空格激活也一起覆盖）。
+         */
+        onActivate={() => {
+          const it = item();
+          if (it !== null) props.onOpen(it.id);
+        }}
         onClick={(event) => {
           const it = item();
           if (it === null) return;

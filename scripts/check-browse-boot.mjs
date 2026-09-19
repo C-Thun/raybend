@@ -368,54 +368,16 @@ try {
 
   const clicked = await send("Runtime.evaluate", {
     expression: `(() => {
-      window.__ERRS = [];
-      window.addEventListener("error", (e) => {
-        window.__ERRS.push(String(e.message) + " @ " + String(e.filename) + ":" + String(e.lineno));
-      });
-      window.addEventListener("unhandledrejection", (e) => {
-        window.__ERRS.push("rejection: " + String(e.reason));
-      });
       const label = [...document.querySelectorAll("label")]
         .find((n) => /浏览|Browse/.test(n.textContent ?? ""));
       if (!label) return "没找到「浏览」标签";
       label.click();
-      // 诊断：把「切换」这条链路的每个环节都打出来
-      const input = label.control ?? document.getElementById(label.getAttribute("for") ?? "");
-      const before = document.querySelector("main")?.innerText?.slice(0, 40) ?? "";
-      input?.click();
-      const after = document.querySelector("main")?.innerText?.slice(0, 40) ?? "";
-      window.__FLOW_PROBE = {
-        tag: label.tagName, htmlFor: label.getAttribute("for"), hasControl: Boolean(input),
-        inputType: input?.getAttribute("type") ?? null, inputName: input?.getAttribute("name") ?? null,
-        checkedNow: input?.checked ?? null, before, after,
-      };
       return "ok";
     })()`,
     returnByValue: true,
   });
   if (clicked.result?.value !== "ok") problems.push(String(clicked.result?.value));
   await sleep(2000);
-
-  const probe = await send("Runtime.evaluate", {
-    expression: `(() => {
-      const labels = [...document.querySelectorAll("label")].map((n) => (n.textContent ?? "").trim());
-      const main = document.querySelector("main");
-      const aside = document.querySelector("aside");
-      return {
-        labels,
-        flowAttr: document.querySelector("[data-flow]")?.getAttribute("data-flow")
-          ?? main?.getAttribute("data-flow") ?? null,
-        mainText: (main?.innerText ?? "").slice(0, 120),
-        asideText: (aside?.innerText ?? "").slice(0, 80),
-        hasPhotoGrid: Boolean(document.querySelector("[data-virtual-scroller]")),
-        invokes: (window.__INVOKE_LOG || []).slice(-8),
-        flowProbe: window.__FLOW_PROBE ?? null,
-        errors: window.__ERRS ?? [],
-      };
-    })()`,
-    returnByValue: true,
-  });
-  process.stderr.write("🔎 切换后现场: " + JSON.stringify(probe.result?.value) + "\n");
 
   const left = await send("Runtime.evaluate", {
     expression: `[...document.querySelectorAll("aside")].map((a) => a.innerText ?? "").join(" | ")`,
