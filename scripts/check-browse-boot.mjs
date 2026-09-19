@@ -1507,10 +1507,10 @@ try {
     await sleep(200);
   }
   const expected = [
-    { chrome: "no-sides", sides: 0, film: "on", strip: true },
-    { chrome: "no-film", sides: 2, film: "off", strip: false },
+    { chrome: "film-only", sides: 0, film: "on", strip: true },
+    { chrome: "view-only", sides: 0, film: "off", strip: false },
     { chrome: "default", sides: 2, film: "on", strip: true },
-    { chrome: "no-sides", sides: 0, film: "on", strip: true },
+    { chrome: "film-only", sides: 0, film: "on", strip: true },
   ];
   for (let i = 0; i < expected.length; i += 1) {
     const want = expected[i];
