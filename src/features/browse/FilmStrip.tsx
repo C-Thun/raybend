@@ -197,7 +197,12 @@ export function FilmStrip(props: FilmStripProps): JSX.Element {
               >
                 {(url) => (
                   <img
-                    class="h-full w-full rounded-ui object-cover"
+                    /*
+                     * `object-contain` 而不是 `cover`：胶片带里**竖图必须完整显示**，
+                     * 不能被裁成横的（人类 2026-09-19 点名）。
+                     * 这与网格 tile 的取图口径一致：照片永远完整居中，只容不改比例。
+                     */
+                    class="h-full w-full rounded-ui object-contain"
                     src={url()}
                     alt=""
                     draggable={false}

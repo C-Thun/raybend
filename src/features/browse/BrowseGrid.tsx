@@ -36,6 +36,7 @@ import { t } from "../../i18n/index.ts";
 import {
   computeTileFlow,
   clampTileStepIndex,
+  clampDisplayAspect,
   DEFAULT_TILE_STEP_INDEX,
   tileSizeAt,
 } from "../../lib/tile-flow.ts";
@@ -449,6 +450,12 @@ export function BrowseGrid(props: BrowseGridProps) {
                       label={item()?.fileName ?? ""}
                       tag={item()?.ext?.toUpperCase() ?? undefined}
                       src={url() ?? undefined}
+                      /*
+                       * 竖图必须按**自己的比例**居中显示（人类 2026-09-19：一旦是 tile，
+                       * 就只有这一套显示规范）。取法与导入网格**同一个夹取函数**，
+                       * 不再各写一套：未知尺寸 → 占位比例；超宽 → 夹到 3:1。
+                       */
+                      aspect={clampDisplayAspect(item()?.width ?? 0, item()?.height ?? 0)}
                       rating={item()?.rating ?? 0}
                       colorLabel={asColorLabel(item()?.colorLabel)}
                       locked={(item()?.lockLevel ?? 0) > 0}
