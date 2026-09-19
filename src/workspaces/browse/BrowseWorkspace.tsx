@@ -314,25 +314,6 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
     return active;
   });
 
-  /**
-   * 网格数据源（适配器）：把浏览 store 包成网格契约。
-   *
-   * 依赖里带上 `thumbs`（与胶片带共用那一条队列）与档位三个回调（受控）——
-   * 网格自己不持有这些状态。
-   */
-  const gridSource = createMemo(() =>
-    browseSource({
-      store,
-      root: root(),
-      thumbs,
-      tileStep,
-      setTileStep,
-      // 档位落盘：这个工作区的档位目前只活在会话里（与导入侧各自记一份，组件同一份）
-      commitTileStep: () => {},
-      grouped,
-    }),
-  );
-
   /** 「当前那张」的 id（键盘导航换了它之后把那一行滚进视野） */
   const focusId = (): string | undefined => {
     const item = store.anchorItem();
@@ -599,8 +580,33 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
     }
   }
 
+  /** 库根目录（库内相对路径 → 绝对路径） */
   const root = createMemo(
     () => repositories().find((r) => r.id === store.repositoryId())?.root ?? null,
+  );
+
+  /**
+   * 网格数据源（适配器）：把浏览 store 包成网格契约。
+   *
+   * 依赖里带上 `thumbs`（与胶片带共用那一条队列）与档位三个回调（受控）——
+   * 网格自己不持有这些状态。
+   *
+   * ⚠️ 它**必须排在 `root` 之后**：`createMemo` 会立刻求值一次，
+   * 而 `root()` 在它声明之前访问会触发 TDZ（真机冒烟实测：
+   * `ReferenceError: Cannot access 'root' before initialization`，
+   * 表现为「点了『浏览』状态切了但界面不动」）。
+   */
+  const gridSource = createMemo(() =>
+    browseSource({
+      store,
+      root: root(),
+      thumbs,
+      tileStep,
+      setTileStep,
+      // 档位落盘：这个工作区的档位目前只活在会话里（与导入侧各自记一份，组件同一份）
+      commitTileStep: () => {},
+      grouped,
+    }),
   );
 
   /*
