@@ -70,7 +70,11 @@ export function TitleBar(props: TitleBarProps) {
         // 裸值 = 只有直接点在标题行自身（含空白拖拽区）才触发拖动；
         // 按钮/标签这类可点元素会**自动**阻断拖动，所以不要给它们加这个属性
         data-tauri-drag-region
-        class="flex h-bar-title-h shrink-0 items-stretch bg-surface-bar text-fg-1 select-none"
+        /*
+         * `z-(--z-titlebar)`：**弹窗之上**（人类 2026-09-20 定的口径）。
+         * `relative` 是让 z 生效的前提（static 元素上的 z-index 会被忽略）。
+         */
+        class="relative z-(--z-titlebar) flex h-bar-title-h shrink-0 items-stretch bg-surface-bar text-fg-1 select-none"
         onPointerEnter={() => props.store.setMenuHover(true)}
         onPointerLeave={() => props.store.setMenuHover(false)}
         onFocusIn={() => props.store.setMenuFocus(true)}

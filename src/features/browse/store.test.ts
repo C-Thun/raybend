@@ -229,6 +229,34 @@ test("空库：total 为 0，没有条目，也不算错误", async () => {
 
 // ─────────────────────────── 加载与分页 ───────────────────────────
 
+test("selectAll：覆盖**整个 scope**（时间线全量），不只是已加载的那一页", async () => {
+  /*
+   * 人类 2026-09-20：「tiles 里要支持 ctrl+a 全选，**即使未显示的部分也要设置选中状态**」。
+   *
+   * 列表是**按页取**的（`PAGE_SIZE`），所以「只选已加载的那些」是个很容易犯的错 ——
+   * 这条用一个跨页的库把它钉住：加载只有第一页，全选必须覆盖 `total` 那么多张。
+   */
+  const total = PAGE_SIZE + 5;
+  const { api } = fakeApi(total);
+  const store = createBrowseStore({ api });
+  open(store);
+  await tick();
+
+  assert.equal(store.total(), total, "fixture 要跨页，否则这条测不到东西");
+  let loaded = 0;
+  for (let i = 0; i < total; i += 1) if (store.itemAt(i) !== null) loaded += 1;
+  assert.ok(loaded <= PAGE_SIZE, `已加载的应当只有第一页（实测 ${loaded}）`);
+
+  store.selectAll();
+  assert.equal(
+    store.selection().ids.size,
+    total,
+    "全选要把整个范围里的每一张都选上（含没加载出来的）",
+  );
+});
+
+
+
 test("选了库但还没选目录：不发任何查询，网格是「请选目录」的空态", async () => {
   const { api, calls } = fakeApi(10);
   const store = createBrowseStore({ api });

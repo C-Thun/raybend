@@ -46,7 +46,7 @@ import {
   createEffect,
   createMemo,
   createSignal,
-  For,
+  Index,
   onCleanup,
   onMount,
   Show,
@@ -228,8 +228,38 @@ export function CompareView(props: CompareViewProps): JSX.Element {
     return props.photos.find((photo) => photo.id === id) ?? props.photos[0];
   };
 
-  /** 双击某格：**适合窗口 ↔ 100%**（适合窗口按被双击的那张算） */
+  /** 是不是正处在 100%（画布 1:1） */
+  const atOneToOne = (): boolean => Math.abs(zoom() - 1) < 1e-6;
+
+  /**
+   * **双击**某格：在 **100% ↔ 适合窗口** 之间切（人类 2026-09-20 报「双击放大缩小还是不行」）。
+   *
+   * 口径（与单张看图一致、但锚点不同）：
+   *
+   * * 已经在 100% ⇒ 按**被双击的那张**算适合窗口；
+   * * 其它任何状态（适配中、或者用户滚到过 250%）⇒ **直接到 100%**。
+   *
+   * 为什么不是「先按这张适配、再点一次才到 100%」：那样在**适配目标不是这张**时，
+   * 第一下双击看起来什么都没发生（换了个适配基准而已）—— 人只会说「双击没反应」。
+   * 双击是「我要看像素」的动作，一次就要到 100%。
+   */
   const toggleZoom = (photo: ViewerPhoto): void => {
+    if (atOneToOne()) {
+      fitTo(photo);
+      return;
+    }
+    goToOneToOne();
+  };
+
+  /**
+   * 右下角那颗「适配」键：**按当前那张图适配 ↔ 100%** 之间切。
+   *
+   * 人类 2026-09-20：「compare 下点右下角缩放可以切到适应窗口，但再次点击切不到 100%（单图 view 下可以）」——
+   * 单张看图那颗键本来就是 `toggleFit()`（适配 ↔ 100%），对比这边之前只做了「适配」那一半。
+   */
+  const toggleFitOfCurrent = (): void => {
+    const photo = currentPhoto();
+    if (photo === undefined) return;
     if (fitId() === photo.id) {
       goToOneToOne();
       return;
@@ -356,15 +386,11 @@ export function CompareView(props: CompareViewProps): JSX.Element {
           event.preventDefault();
           zoomAt(1 / 1.25);
           break;
-        case "0": {
-          // 适配 = 以当前那张为准（与右下那颗「适配」按钮同一条口径）
-          const photo = currentPhoto();
-          if (photo !== undefined) {
-            event.preventDefault();
-            fitTo(photo);
-          }
+        case "0":
+          // 适配 = 以当前那张为准（与右下那颗「适配」按钮同一条口径：再按一次去 100%）
+          event.preventDefault();
+          toggleFitOfCurrent();
           break;
-        }
         case "1":
           event.preventDefault();
           goToOneToOne();
@@ -478,26 +504,35 @@ export function CompareView(props: CompareViewProps): JSX.Element {
         </span>
       </Show>
 
-      <For each={canvas().placements}>
+      {/*
+        ⚠️ 必须用 `Index` 而不是 `For`（2026-09-20 真机踩过）：
+        `canvas()` 是个 memo，而 `compareCanvas()` **每次都返回新的落点对象** ——
+        用 `For`（按**引用**认身份）时，任何一次重算都会把这一格的 DOM 整个销毁重建。
+        后果不只是闪：**真双击的第二下会落在新建的元素上，浏览器根本不发 dblclick**
+        （人类两次报「双击不行」的根因就是这个；合成的 `new MouseEvent("dblclick")` 绕过它，
+        所以冒烟一直是假绿）。
+        `Index` 按**下标**认身份 —— 格子始终是同一批 DOM，只有内容跟着信号更新。
+      */}
+      <Index each={canvas().placements}>
         {(placement, at) => (
           <div
-            data-compare-frame={at()}
-            data-compare-photo-id={placement.photo.id}
-            data-current={props.store.current()?.id === placement.photo.id ? "true" : undefined}
-            aria-label={placement.photo.fileName}
+            data-compare-frame={at}
+            data-compare-photo-id={placement().photo.id}
+            data-current={props.store.current()?.id === placement().photo.id ? "true" : undefined}
+            aria-label={placement().photo.fileName}
             /* 窗口：可见/裁剪的边界（画布放大后铺满整格，而不是被画布关住） */
             class={[
               "relative flex h-full min-w-0 cursor-pointer items-center justify-center overflow-hidden rounded-ui bg-surface-main",
               // 当前那张（点哪格就是哪张）用主色描边点明；其余只用底色分格
-              props.store.current()?.id === placement.photo.id
+              props.store.current()?.id === placement().photo.id
                 ? "border border-brand"
                 : "border border-transparent",
             ].join(" ")}
             /* 保留 click 入口给键盘/自动化；真实指针在 pointerdown 已先切焦点 */
-            onClick={() => props.onFocus?.(placement.photo)}
+            onClick={() => props.onFocus?.(placement().photo)}
           >
             <Show
-              when={canvas().size.width > 0 && placement.natural.width > 0}
+              when={canvas().size.width > 0 && placement().natural.width > 0}
               fallback={
                 <span class="text-fs-2 text-fg-3">{t("browse.compareNoSize")}</span>
               }
@@ -520,7 +555,7 @@ export function CompareView(props: CompareViewProps): JSX.Element {
                   "will-change": "transform",
                 }}
               >
-                <Show when={props.store.imageUrlFor(placement.photo)}>
+                <Show when={props.store.imageUrlFor(placement().photo)}>
                   {(url) => (
                     <img
                       class="pointer-events-none absolute max-w-none select-none"
@@ -528,10 +563,10 @@ export function CompareView(props: CompareViewProps): JSX.Element {
                       alt=""
                       draggable={false}
                       style={{
-                        left: `${(placement.offset.x / canvas().size.width) * 100}%`,
-                        top: `${(placement.offset.y / canvas().size.height) * 100}%`,
-                        width: `${(placement.natural.width / canvas().size.width) * 100}%`,
-                        height: `${(placement.natural.height / canvas().size.height) * 100}%`,
+                        left: `${(placement().offset.x / canvas().size.width) * 100}%`,
+                        top: `${(placement().offset.y / canvas().size.height) * 100}%`,
+                        width: `${(placement().natural.width / canvas().size.width) * 100}%`,
+                        height: `${(placement().natural.height / canvas().size.height) * 100}%`,
                       }}
                     />
                   )}
@@ -540,7 +575,7 @@ export function CompareView(props: CompareViewProps): JSX.Element {
             </Show>
           </div>
         )}
-      </For>
+      </Index>
 
       <ViewerControls
         store={props.store}
@@ -549,10 +584,7 @@ export function CompareView(props: CompareViewProps): JSX.Element {
         zoomLabel={zoomLabel}
         onZoomOut={() => zoomAt(1 / 1.25)}
         onZoomIn={() => zoomAt(1.25)}
-        onFit={() => {
-          const photo = currentPhoto();
-          if (photo !== undefined) fitTo(photo);
-        }}
+        onFit={toggleFitOfCurrent}
       />
     </div>
   );

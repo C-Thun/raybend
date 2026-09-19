@@ -166,7 +166,7 @@ test("档位是 9 档、奇数个、存在中间档、最大 512", () => {
 
 test("默认档位就是正中间那档", () => {
   assert.equal(DEFAULT_TILE_STEP_INDEX, 4);
-  assert.equal(tileSizeAt(DEFAULT_TILE_STEP_INDEX), 208);
+  assert.equal(tileSizeAt(DEFAULT_TILE_STEP_INDEX), 256);
 });
 
 test("档位严格单调递增（滑块拖起来不能有平台或回落）", () => {
@@ -220,8 +220,8 @@ test("展示比例：超出 3:1 / 1:3 的夹到边界（与 Rust 侧同一个口
 });
 
 test("行高 = 正方外框的边长（信息条是覆盖层，不占高度）", () => {
-  assert.equal(tileRowHeight(208), 208);
-  assert.equal(tileRowHeight(96), 96);
+  assert.equal(tileRowHeight(256), 256);
+  assert.equal(tileRowHeight(128), 128);
   for (const bad of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
     assert.equal(tileRowHeight(bad), 0, "非法输入不发散");
   }

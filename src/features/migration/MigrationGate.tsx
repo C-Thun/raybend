@@ -64,7 +64,8 @@ export function MigrationGate(props: MigrationGateProps) {
     <Show when={notice()}>
       {(current) => (
         <div
-          class="fixed inset-0 z-50 flex items-center justify-center bg-scrim"
+          /* 阶梯用令牌，不写字面量（`tokens.css` 的 z 轴那一段） */
+          class="fixed inset-0 z-(--z-modal) flex items-center justify-center bg-scrim"
           data-migration-gate="open"
           role="alertdialog"
           aria-modal="true"

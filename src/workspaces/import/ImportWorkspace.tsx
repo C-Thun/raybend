@@ -296,6 +296,16 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
         viewer.close();
         return;
       }
+      /*
+       * `Ctrl/Cmd + A`：tiles 里**全选**（人类 2026-09-20）。纯看图态不接 ——
+       * 那时全选会把对比集合也一起换掉，不是用户要的。
+       */
+      if ((event.ctrlKey || event.metaKey) && (event.key === "a" || event.key === "A")) {
+        if (active) return;
+        event.preventDefault();
+        grid.selectAll();
+        return;
+      }
       // `i`：切 tiles 的「信息」档位 —— **只在 tiles / film 下生效**（纯看图态不接，人类 2026-09-19）
       if (event.key === "i" || event.key === "I") {
         if (!infoKeyApplies({ viewing: active, filmVisible: chromeShowsFilm(chrome()) })) return;

@@ -39,7 +39,7 @@
  * | 位置 | 将来放什么 |
  * | --- | --- |
  * | 照片右上角 | 动作槽（排除等，指向/聚焦时出现）—— `actions` |
- * | 顶部条（**库内**） | 星标 / 颜色 / 旗标 —— `rating` / `colorLabel` / `flag` |
+ * | 顶部条（**库内**） | 星标 / 颜色 / 旗标 / 赞踩 —— `rating` / `colorLabel` / `flag` / `like` |
  * | 底部条右端 | 加锁标记 `locked`；再往后还有别的属性也往这放 |
  */
 
@@ -49,6 +49,8 @@ import {
   IconStar,
   IconFlagFilled,
   IconStarFilled,
+  IconThumbDownFilled,
+  IconThumbUpFilled,
 } from "@tabler/icons-solidjs";
 import { Show, splitProps, type JSX } from "solid-js";
 import { t } from "../../i18n/index.ts";
@@ -130,6 +132,12 @@ export interface TileProps
   /** 星标 0..5（0 = 什么都不显示） */
   rating?: number;
   flag?: "pick" | "reject" | null;
+  /**
+   * 赞 / 踩（人类 2026-09-20：**这两个标记也要在图片顶部显示**）。
+   *
+   * `null` = 没标；与工具条那条一样是**三态互斥**（喜欢 / 不喜欢 / 无）。
+   */
+  like?: "like" | "dislike" | null;
   locked?: boolean;
   colorLabel?: TileColorLabel | null;
   /** 窄格子（小尺寸档）：星标退化成「一颗星 + 数字」，避免挤成一团 */
@@ -163,6 +171,7 @@ export function Tile(props: TileProps) {
     "raw",
     "rating",
     "flag",
+    "like",
     "locked",
     "colorLabel",
     "compact",
@@ -389,6 +398,8 @@ export function Tile(props: TileProps) {
               compact={local.compact === true}
               colorLabel={local.colorLabel ?? null}
               flag={local.flag ?? null}
+              like={local.like ?? null}
+              outlined
             />
           </div>
         </Show>
@@ -414,6 +425,8 @@ export function Tile(props: TileProps) {
             compact={local.compact === true}
             colorLabel={local.colorLabel ?? null}
             flag={local.flag ?? null}
+            like={local.like ?? null}
+            outlined={false}
           />
         </div>
       </Show>
@@ -461,7 +474,17 @@ function TileMarks(props: {
   compact: boolean;
   colorLabel: ColorLabel | null;
   flag: "pick" | "reject" | null;
+  like: "like" | "dislike" | null;
+  /**
+   * 要不要给**图案**加反色描边（强制显示层传 true）。
+   *
+   * 文字那层由容器的 `.tile-info-text` 管；SVG 对 `text-shadow` 不感冒，
+   * 所以图标单独走 `.tile-info-icon`（`paint-order: stroke`）、色点走 `.tile-info-dot`。
+   */
+  outlined: boolean;
 }): JSX.Element {
+  /** 图案描边类（强制显示层才有） */
+  const iconClass = (): string => (props.outlined ? "tile-info-icon" : "");
   return (
     <>
       {/* 星标：0 星什么都不显示；窄格子退化成「一颗星 + 数字」 */}
@@ -474,16 +497,16 @@ function TileMarks(props: {
             when={!props.compact}
             fallback={
               <>
-                <IconStarFilled size={12} aria-hidden="true" />
+                <IconStarFilled size={12} class={iconClass()} aria-hidden="true" />
                 <span class="text-fs-0 tnum">{props.rating}</span>
               </>
             }
           >
             {[1, 2, 3, 4, 5].map((index) =>
               index <= props.rating ? (
-                <IconStarFilled size={11} aria-hidden="true" />
+                <IconStarFilled size={11} class={iconClass()} aria-hidden="true" />
               ) : (
-                <IconStar size={11} class="opacity-50" aria-hidden="true" />
+                <IconStar size={11} class={["opacity-50", iconClass()].join(" ")} aria-hidden="true" />
               ),
             )}
           </Show>
@@ -496,10 +519,27 @@ function TileMarks(props: {
       <Show when={props.colorLabel}>
         {(label) => (
           <span
-            class={["size-2 shrink-0 rounded-full", LABEL_DOT[label()]].join(" ")}
+            class={[
+              "size-2 shrink-0 rounded-full",
+              props.outlined ? "tile-info-dot" : "",
+              LABEL_DOT[label()],
+            ]
+              .filter(Boolean)
+              .join(" ")}
             aria-label={t("grid.color_label")}
           />
         )}
+      </Show>
+
+      {/*
+        赞 / 踩（人类 2026-09-20：**这两个也要在图片顶部显示**）。
+        与工具条同一套三态语义：`like` = 大拇指朝上、`dislike` = 朝下、`null` = 不显示。
+      */}
+      <Show when={props.like === "like"}>
+        <IconThumbUpFilled size={11} class={iconClass()} aria-hidden="true" />
+      </Show>
+      <Show when={props.like === "dislike"}>
+        <IconThumbDownFilled size={11} class={iconClass()} aria-hidden="true" />
       </Show>
 
       {/*
@@ -507,7 +547,7 @@ function TileMarks(props: {
         「弃」的那一态在界面上已经取消了（见 BrowseToolbar 的说明），所以这里只有一种旗。
       */}
       <Show when={props.flag === "pick"}>
-        <IconFlagFilled size={11} aria-hidden="true" />
+        <IconFlagFilled size={11} class={iconClass()} aria-hidden="true" />
       </Show>
     </>
   );

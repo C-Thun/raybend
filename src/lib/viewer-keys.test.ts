@@ -64,6 +64,17 @@ test("删除：没选中就没有可删的（按键不接）", () => {
   assert.equal(browseKeyIntent({ key: "Backspace" }, nothingSelected), null);
 });
 
+test("Ctrl/Cmd + A：全选（唯一允许带修饰键的一条）", () => {
+  // 人类 2026-09-20：「tiles 里要支持 ctrl+a 全选，即使未显示的部分也要设置选中状态」
+  const at = { viewing: false, hasSelection: false };
+  assert.deepEqual(browseKeyIntent({ key: "a", ctrlKey: true }, at), { kind: "select-all" });
+  assert.deepEqual(browseKeyIntent({ key: "A", ctrlKey: true }, at), { kind: "select-all" });
+  assert.deepEqual(browseKeyIntent({ key: "a", metaKey: true }, at), { kind: "select-all" });
+  // 不带修饰键的 a 不是全选（留给将来的「喜欢」之类），带 Alt 的也不接
+  assert.equal(browseKeyIntent({ key: "a" }, at), null);
+  assert.equal(browseKeyIntent({ key: "a", altKey: true }, at), null);
+});
+
 test("带 Ctrl / Cmd / Alt 的组合一律不管（留给快捷键体系）", () => {
   for (const modifier of ["ctrlKey", "metaKey", "altKey"] as const) {
     assert.equal(browseKeyIntent({ key: "3", [modifier]: true }, tiles), null);

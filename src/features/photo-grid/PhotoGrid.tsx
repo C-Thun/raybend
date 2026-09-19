@@ -595,6 +595,14 @@ function TileCell(props: {
          */
         colorLabel={asColorLabel(item()?.marks?.colorLabel)}
         flag={item()?.marks?.flag ?? null}
+        // 赞/踩（人类 2026-09-20）：只认三态里那两个值，认不出的当没有
+        like={
+          item()?.marks?.likeState === "like"
+            ? "like"
+            : item()?.marks?.likeState === "dislike"
+              ? "dislike"
+              : null
+        }
         locked={item()?.marks?.locked === true}
         /*
          * 双击进看图走 `Tile` 自己的 `onActivate`：**它内部把 `onDblClick` 占住了**

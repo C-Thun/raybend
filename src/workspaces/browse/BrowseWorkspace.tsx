@@ -461,6 +461,11 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
         case "clear-selection":
           store.clearSelection();
           return;
+        case "select-all":
+          // 只挡浏览器默认行为（否则整页文字会被选中变蓝），选择本身交给 store
+          event.preventDefault();
+          store.selectAll();
+          return;
         default:
           // viewer-prev / viewer-next / open-viewer / close-viewer 各有接的人了
           return;

@@ -256,6 +256,20 @@ chrome.stderr.on("data", () => {});
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const problems = [];
 
+/**
+ * **真双击**：用 CDP 发两对 press/release（第二对 `clickCount: 2`），
+ * 浏览器由此自己合成 dblclick —— 走的正是真人那条路（含 pointer capture / 命中测试）。
+ *
+ * 合成 `new MouseEvent("dblclick")` 只能证明「处理器在」，证明不了「这条路通」：
+ * 对比里双击失效那几次全是在这条真路上暴露的（2026-09-20）。
+ */
+async function realDoubleClick(sendFn, x, y) {
+  await sendFn("Input.dispatchMouseEvent", { type: "mousePressed", button: "left", buttons: 1, clickCount: 1, x, y });
+  await sendFn("Input.dispatchMouseEvent", { type: "mouseReleased", button: "left", buttons: 0, clickCount: 1, x, y });
+  await sendFn("Input.dispatchMouseEvent", { type: "mousePressed", button: "left", buttons: 1, clickCount: 2, x, y });
+  await sendFn("Input.dispatchMouseEvent", { type: "mouseReleased", button: "left", buttons: 0, clickCount: 2, x, y });
+}
+
 async function pageTarget() {
   for (let i = 0; i < 60; i++) {
     try {
@@ -1790,6 +1804,141 @@ try {
     returnByValue: true,
   });
   await sleep(200);
+  /*
+   * 顶部条上的**赞/踩**与**图标描边**（人类 2026-09-20 的两条新要求）。
+   *
+   * 判据：
+   *   * 赞/踩 —— fixture 里那张带标记的照片 `likeState = "like"`，
+   *     所以它的顶部条里应当有一个 `tabler-icon-thumb-up-filled` 的 svg；
+   *   * 描边 —— 强制层（未选中未悬浮）的图标要带 `.tile-info-icon`（`paint-order: stroke`），
+   *     标准层（有半透底）**不带**（有底纹就不需要描边）。
+   */
+  const marksLevelBefore = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const button = document.querySelector("[data-tiles-control-bar] [data-tile-info]");
+      const before = button?.getAttribute("data-tile-info") ?? null;
+      // ① 先把选择清掉：强制显示层只在**未选中**时渲染（选中走标准层）
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+      // ② 档位切到「标记」，强制层才会在顶部条里出现
+      if (before !== "marks") {
+        window.dispatchEvent(new KeyboardEvent("keydown", { key: "i", bubbles: true, cancelable: true }));
+      }
+      return before;
+    })()`,
+    returnByValue: true,
+  });
+  const levelBefore = marksLevelBefore.result?.value ?? null;
+  await sleep(350);
+  const marksDetail = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const all = [...document.querySelectorAll('[data-virtual-scroller] [role="option"]')];
+      const tile = all.find((t) => t.querySelector('[data-tile-bar="marks"] svg') !== null) ?? all[0] ?? null;
+      if (tile === null) return null;
+      const forced = tile.querySelector('[data-tile-bar="marks-forced"]');
+      const standard = tile.querySelector('[data-tile-bar="marks"]');
+      const classesOf = (bar) =>
+        bar === null ? null : [...bar.querySelectorAll("svg")].map((svg) => svg.getAttribute("class") ?? "");
+      return {
+        likeIcon: (tile.innerHTML || "").includes("thumb-up-filled")
+          || (tile.innerHTML || "").includes("thumb-down-filled"),
+        forcedIcons: classesOf(forced),
+        standardIcons: classesOf(standard),
+        standardDot: standard?.querySelector(".tile-info-dot") !== null,
+      };
+    })()`,
+    returnByValue: true,
+  });
+  const marks = marksDetail.result?.value ?? null;
+  if (marks === null) {
+    problems.push("量不到带标记的格子（赞踩/描边这两条没法验）");
+  } else {
+    if (marks.likeIcon !== true) {
+      problems.push("顶部信息条上应当显示赞/踩（人类 2026-09-20；fixture 那张是已喜欢）");
+    }
+    const forcedHasOutline =
+      Array.isArray(marks.forcedIcons) &&
+      marks.forcedIcons.length > 0 &&
+      marks.forcedIcons.every((cls) => String(cls).includes("tile-info-icon"));
+    if (!forcedHasOutline) {
+      problems.push(
+        `强制显示层的图案要带描边（.tile-info-icon，实测 ${JSON.stringify(marks.forcedIcons)}）`,
+      );
+    }
+    const standardHasOutline =
+      Array.isArray(marks.standardIcons) &&
+      marks.standardIcons.some((cls) => String(cls).includes("tile-info-icon"));
+    if (standardHasOutline) {
+      problems.push("标准层（有半透底）的图案不该再描边");
+    }
+  }
+
+  /*
+   * `Ctrl/Cmd + A` = **全选**（人类 2026-09-20），而且必须是**整个范围**的全选 ——
+   * 「即使未显示的部分也要设置选中状态」。
+   */
+  await send("Runtime.evaluate", {
+    expression: `window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }))`,
+    returnByValue: true,
+  });
+  await sleep(250);
+  const selectAll = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const dispatched = window.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "a", ctrlKey: true, bubbles: true, cancelable: true }),
+      );
+      const tiles = [...document.querySelectorAll('[data-virtual-scroller] [role="option"]')];
+      const selected = tiles.filter((t) => t.getAttribute("aria-selected") === "true").length;
+      const status = (document.querySelector("main")?.innerText ?? "").match(/已选 (\d+) 张/)?.[1] ?? null;
+      return {
+        notPrevented: dispatched,
+        rendered: tiles.length,
+        renderedSelected: selected,
+        selectedTotal: status === null ? null : Number(status),
+        textSelection: String(window.getSelection()?.toString() ?? "").length,
+      };
+    })()`,
+    returnByValue: true,
+  });
+  const selectState = selectAll.result?.value ?? {};
+  if (selectState.notPrevented !== false) {
+    problems.push("Ctrl+A 必须 preventDefault（否则浏览器会把整页文字选中变蓝）");
+  }
+  if (selectState.textSelection !== 0) {
+    problems.push(`Ctrl+A 之后不该有文本选择（实测 ${JSON.stringify(selectState.textSelection)} 字符）`);
+  }
+  if (!(Number(selectState.renderedSelected) > 0)) {
+    problems.push(`Ctrl+A 应当选中（实测 ${JSON.stringify(selectState)}）`);
+  }
+  if (selectState.renderedSelected !== selectState.rendered) {
+    problems.push(
+      `Ctrl+A 之后**当前渲染出来的每一格**都该是选中态（实测 ${JSON.stringify(selectState)}）`,
+    );
+  }
+  /*
+   * 「未显示的部分也要选中」这条在**冒烟里量不了**（fixture 只有 6 张、全都渲染出来了），
+   * 所以它由单测钉住：`features/browse/store.test.ts` 的
+   * 「selectAll 覆盖整个 scope（时间线全量），不只是已加载的页」。
+   */
+  // 收尾：清掉选择 + 把档位还原成进来时的样子（后面那段 cleanup 依赖它）
+  await send("Runtime.evaluate", {
+    expression: `(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+      /*
+       * 档位是**三态循环**（off → marks → marks-name → off），所以「还原」要按到位为止，
+       * 不能只按一次（按一次只是往前推一格）。
+       */
+      const want = ${JSON.stringify(levelBefore)};
+      for (let i = 0; i < 4; i += 1) {
+        const level = document.querySelector("[data-tiles-control-bar] [data-tile-info]")?.getAttribute("data-tile-info");
+        if (level === want) break;
+        window.dispatchEvent(new KeyboardEvent("keydown", { key: "i", bubbles: true, cancelable: true }));
+      }
+      return document.querySelector("[data-tiles-control-bar] [data-tile-info]")?.getAttribute("data-tile-info") ?? null;
+    })()`,
+    returnByValue: true,
+  });
+  await sleep(300);
+
   const infoOff = await send("Runtime.evaluate", {
     expression: `(() => {
       const bar = document.querySelector("[data-tiles-control-bar] [data-tile-info]");
@@ -2578,16 +2727,28 @@ try {
     );
   }
 
-  /* 双击栏区 → 100%：画布就是原图像素 1:1（4000×3000 的 fixture ⇒ 画布 4000×3000） */
-  await send("Runtime.evaluate", {
+  /*
+   * 双击栏区 → 100%：画布就是原图像素 1:1（4000×3000 的 fixture ⇒ 画布 4000×3000）。
+   *
+   * ⚠️ 用**真鼠标事件**（`realDoubleClick`），不用合成 MouseEvent ——
+   * 人类两次报「双击不行」，两次都是这条真路上的问题被合成的假事件盖住了。
+   */
+  const paneCenter = await send("Runtime.evaluate", {
     expression: `(() => {
-      const pane = document.querySelector('[data-compare-frame="0"]');
-      pane?.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true }));
-      return Boolean(pane);
+      const rect = document.querySelector('[data-compare-frame="0"]')?.getBoundingClientRect();
+      return rect
+        ? { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2) }
+        : null;
     })()`,
     returnByValue: true,
   });
-  await sleep(300);
+  const paneAt = paneCenter.result?.value ?? null;
+  if (paneAt === null) {
+    problems.push("量不到对比第一格的中心（双击这条没法验）");
+  } else {
+    await realDoubleClick(send, paneAt.x, paneAt.y);
+  }
+  await sleep(350);
   const zoomed = await send("Runtime.evaluate", {
     expression: `(() => {
       const pane = document.querySelector('[data-compare-frame="0"]');
@@ -2624,16 +2785,64 @@ try {
     problems.push(`双击后读数应当是 100%（实测 ${JSON.stringify(zoomState.zoomLabel)}）`);
   }
 
-  /* 再双击一次 → 回到适合窗口（倍率变小、画布重新落回栏区内） */
-  await send("Runtime.evaluate", {
+  /* 右下角「适配」键：连点两次 —— 先回适配、再去 100%（人类 2026-09-20 报「第二次点不到 100%」） */
+  const fitButtonClick = async () =>
+    send("Runtime.evaluate", {
+      expression: `(() => {
+        const button = document.querySelector('[data-compare="open"] [data-viewer-controls="zoom"] button:nth-child(2)');
+        button?.click();
+        return button?.textContent?.trim() ?? null;
+      })()`,
+      returnByValue: true,
+    });
+  await fitButtonClick();
+  await sleep(300);
+  const afterFitClick = await send("Runtime.evaluate", {
     expression: `(() => {
+      const host = document.querySelector('[data-compare="open"]');
+      const canvas = document.querySelector('[data-compare-frame="0"] [data-compare-canvas]');
       const pane = document.querySelector('[data-compare-frame="0"]');
-      pane?.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true }));
-      return Boolean(pane);
+      const canvasRect = canvas?.getBoundingClientRect();
+      const paneRect = pane?.getBoundingClientRect();
+      return {
+        zoom: Number(host?.getAttribute("data-compare-zoom") ?? "NaN"),
+        label: document.querySelector('[data-compare="open"] [data-viewer-controls="zoom"] button:nth-child(2)')?.textContent?.trim() ?? null,
+        inside:
+          canvasRect && paneRect
+            ? canvasRect.width <= paneRect.width + 0.5 && canvasRect.height <= paneRect.height + 0.5
+            : null,
+      };
     })()`,
     returnByValue: true,
   });
+  const fitState1 = afterFitClick.result?.value ?? {};
+  if (fitState1.inside !== true || !(Number(fitState1.zoom) < 1)) {
+    problems.push(`「适配」键第一次点应当回到适合窗口（实测 ${JSON.stringify(fitState1)}）`);
+  }
+  await fitButtonClick();
   await sleep(300);
+  const afterFitClick2 = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const host = document.querySelector('[data-compare="open"]');
+      return {
+        zoom: Number(host?.getAttribute("data-compare-zoom") ?? "NaN"),
+        label: document.querySelector('[data-compare="open"] [data-viewer-controls="zoom"] button:nth-child(2)')?.textContent?.trim() ?? null,
+      };
+    })()`,
+    returnByValue: true,
+  });
+  const fitState2 = afterFitClick2.result?.value ?? {};
+  if (Math.abs(Number(fitState2.zoom) - 1) > 0.001) {
+    problems.push(
+      `「适配」键**再点一次**应当切到 100%（与单张看图同一条口径，实测 ${JSON.stringify(fitState2)}）`,
+    );
+  }
+
+  /* 再双击一次 → 回到适合窗口（倍率变小、画布重新落回栏区内） */
+  if (paneAt !== null) {
+    await realDoubleClick(send, paneAt.x, paneAt.y);
+  }
+  await sleep(350);
   const refitted = await send("Runtime.evaluate", {
     expression: `(() => {
       const pane = document.querySelector('[data-compare-frame="0"]');
@@ -2992,6 +3201,157 @@ try {
       await sleep(400);
     }
   }
+
+  /*
+   * ⚠️ 这一段放在**最后**：它会真的开一次模态（库设置弹窗）。
+   * 模态的收尾（Ark 的 inert / 焦点归还）在无头环境里有时会留下痕迹，
+   * 放在中间会让后面那些「hover / 键盘」断言莫名失败 —— 那是工装噪音，不是产品问题。
+   */
+  /*
+   * 弹窗层级（人类 2026-09-20 报）：**弹窗要盖住看图的覆盖层，但要在标题栏之下**
+   *（阶梯：toast 80 > titlebar 75 > modal 70 > scrim 60 > popover 40）。
+   *
+   * 复现的正是真机那条路：进看图（view/film）→ 点左列库卡片上的齿轮 →
+   * 从前弹窗被 `z-10` 的看图覆盖层压住，只有周围一圈被遮罩压暗。
+   *
+   * 判据用**命中测试**（`elementFromPoint`）而不是只看 z 值 —— 用户看到的就是「点在谁身上」。
+   */
+  await send("Runtime.evaluate", {
+    expression: `(() => {
+      const tile = document.querySelector('main [data-virtual-scroller] [role="option"]');
+      tile?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      return true;
+    })()`,
+    returnByValue: true,
+  });
+  await sleep(300);
+  await send("Runtime.evaluate", {
+    expression: `(() => {
+      const tile = document.querySelector('main [data-virtual-scroller] [role="option"]');
+      tile?.focus();
+      tile?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+      return true;
+    })()`,
+    returnByValue: true,
+  });
+  await sleep(600);
+  const gateOpen = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const gear = [...document.querySelectorAll("button")].find(
+        (b) => b.getAttribute("aria-label") === "库设置",
+      );
+      gear?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      return { gear: Boolean(gear), viewer: Boolean(document.querySelector('[data-viewer="open"]')) };
+    })()`,
+    returnByValue: true,
+  });
+  const dialogGate = gateOpen.result?.value ?? {};
+  if (dialogGate.gear !== true || dialogGate.viewer !== true) {
+    problems.push(
+      `弹窗层级这条没复现出来（需要「看图开着 + 库卡片齿轮可见」，实测 ${JSON.stringify(dialogGate)}）`,
+    );
+  }
+  await sleep(600);
+  const layering = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const scope = (part) => document.querySelector('[data-scope="dialog"][data-part="' + part + '"]');
+      const positioner = scope("positioner");
+      const content = scope("content");
+      const zOf = (value) => (value ? Number(getComputedStyle(value).zIndex) : null);
+      const contentRect = content?.getBoundingClientRect();
+      // 弹窗中心偏上一点：这个点同时落在看图覆盖层与弹窗上
+      const hit = contentRect
+        ? document.elementFromPoint(contentRect.left + contentRect.width / 2, contentRect.top + 12)
+        : null;
+      // 标题栏那一条（沉浸式窗口：拖拽区与关窗键都在里面）
+      const titlePoint = document.querySelector("[data-tauri-drag-region]");
+      const titleRect = titlePoint?.getBoundingClientRect();
+      const titleHit = titleRect
+        ? document.elementFromPoint(titleRect.left + titleRect.width / 2, titleRect.top + titleRect.height / 2)
+        : null;
+      const toastHost = document.querySelector("[data-toast-host]");
+      return {
+        modalZ: zOf(positioner),
+        scrimZ: zOf(scope("backdrop")),
+        viewerZ: zOf(document.querySelector('[data-viewer="open"]')),
+        titlebarZ: zOf(document.querySelector("[data-tauri-drag-region]")?.closest("header") ?? null),
+        toastZ: zOf(toastHost),
+        hitIsDialog: hit ? hit.closest('[data-scope="dialog"]') !== null : null,
+        hitTag: hit ? hit.tagName : null,
+        titleHitIsDialog: titleHit ? titleHit.closest('[data-scope="dialog"]') !== null : null,
+        titleHitTag: titleHit ? titleHit.tagName : null,
+      };
+    })()`,
+    returnByValue: true,
+  });
+  const layers = layering.result?.value ?? {};
+  if (layers.modalZ === null || layers.viewerZ === null) {
+    problems.push(`量不到弹窗/看图层的 z（实测 ${JSON.stringify(layers)}）`);
+  } else {
+    if (!(layers.modalZ > layers.viewerZ)) {
+      problems.push(
+        `弹窗必须在看图/胶片覆盖层之上（弹窗 ${layers.modalZ} vs 看图 ${layers.viewerZ}）；` +
+          "Zag 的 dialog positioner 不会自己写 z-index，靠的是 index.css 里那条 !important",
+      );
+    }
+    if (layers.hitIsDialog !== true) {
+      problems.push(
+        `弹窗中心命中的不是弹窗（拿到 ${JSON.stringify(layers.hitTag)}）—— 就是人类报的「被挡住、只有周围一圈变暗」`,
+      );
+    }
+    if (!(layers.scrimZ !== null && layers.scrimZ > layers.viewerZ)) {
+      problems.push(`遮罩也要盖住看图覆盖层（实测 scrim=${layers.scrimZ}, viewer=${layers.viewerZ}）`);
+    }
+    if (layers.modalZ !== null && layers.titlebarZ !== null && !(layers.titlebarZ > layers.modalZ)) {
+      problems.push(
+        `标题栏要留在弹窗之上（沉浸式窗口要靠它拖拽/关窗，实测 titlebar=${layers.titlebarZ}, modal=${layers.modalZ}）`,
+      );
+    }
+    if (layers.titleHitIsDialog === true) {
+      problems.push("标题栏那条被弹窗盖住了（应该还是标题栏自己接事件）");
+    }
+    if (layers.toastZ !== null && layers.titlebarZ !== null && !(layers.toastZ > layers.titlebarZ)) {
+      problems.push(`右上角消息要在标题栏之上（实测 toast=${layers.toastZ}, titlebar=${layers.titlebarZ}）`);
+    }
+  }
+  /*
+   * 关弹窗：**点它自己的关闭键**，不是往 window 上发一个 Esc ——
+   * Ark 的 Esc 处理挂在 content 上，合成事件从 window 往下发根本到不了它
+   *（真机上键盘事件是冒泡上来的，所以那条路在浏览器里是通的）。
+   */
+  await send("Runtime.evaluate", {
+    expression: `(() => {
+      const close = document.querySelector('[data-scope="dialog"][data-part="close-trigger"]');
+      close?.click();
+      return Boolean(close);
+    })()`,
+    returnByValue: true,
+  });
+  await sleep(400);
+  await send("Runtime.evaluate", {
+    expression: `(() => {
+      const back = document.querySelector('[data-viewer="open"] button[aria-label="返回"]')
+        ?? document.querySelector('[data-compare="open"] button[aria-label="返回"]');
+      back?.click();
+      const esc = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+      if (!back) window.dispatchEvent(esc);
+      return Boolean(back);
+    })()`,
+    returnByValue: true,
+  });
+  await sleep(500);
+  const layeringCleanup = await send("Runtime.evaluate", {
+    expression: `(() => ({
+      dialog: Boolean(document.querySelector('[data-scope="dialog"]')),
+      viewer: Boolean(document.querySelector('[data-viewer="open"], [data-compare="open"]')),
+    }))()`,
+    returnByValue: true,
+  });
+  const cleanState = layeringCleanup.result?.value ?? {};
+  if (cleanState.dialog === true || cleanState.viewer === true) {
+    problems.push(`弹窗层级这段没把界面收干净（后面的断言会被带偏，实测 ${JSON.stringify(cleanState)}）`);
+  }
+
 
   const stackOverflow = consoleErrors.find((text) => /Maximum call stack/.test(text));
   if (stackOverflow) {

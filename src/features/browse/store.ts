@@ -728,7 +728,18 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
       );
     },
     selectAll(order) {
-      setSelection(selectAllIds(orderedIds(order)));
+      /*
+       * 全选 = 当前**范围**里的全部照片，**不只是已加载的那几页**
+       *（人类 2026-09-20：「即使未显示的部分也要设置选中状态」）。
+       *
+       * 列表是**按页取**的（`PAGE_SIZE = 256`），所以 `entries()` 可能只有一部分；
+       * 而 `timeline()` 是这个 scope 的**全量 id 清单**（首屏就取了），正好拿来用 ——
+       * 不用为此再发一轮「把所有页取回来」的请求（十万张照片要四百次）。
+       * 时间线还没到时退回已加载的顺序（至少不是空的）。
+       */
+      const fromTimeline = timeline().map((entry) => String(entry.id));
+      const source = order ?? (fromTimeline.length > 0 ? fromTimeline : orderedIds());
+      setSelection(selectAllIds(source));
       void refreshMarkings();
     },
     clearSelection() {

@@ -264,7 +264,7 @@ export function ImportProgressDialog(props: ImportProgressDialogProps) {
 
       {/* 取消的二次确认（画布上没有单独帧：与「新建库」的确认同一套口径） */}
       <Show when={confirmingCancel()}>
-        <div class="fixed inset-0 z-50 flex items-center justify-center bg-scrim">
+        <div class="fixed inset-0 z-(--z-modal) flex items-center justify-center bg-scrim">
           <div class="flex w-96 flex-col gap-3 rounded-ui bg-surface-layer p-4">
             <p class="text-fs-2 text-fg-1">{t("import.cancel_confirm")}</p>
             <p class="text-fs-1 text-fg-2">{t("import.keep_partial")}</p>

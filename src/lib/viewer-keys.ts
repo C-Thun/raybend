@@ -36,6 +36,7 @@ export type BrowseKeyIntent =
   | { kind: "open-viewer" }
   | { kind: "close-viewer" }
   | { kind: "clear-selection" }
+  | { kind: "select-all" }
   | { kind: "delete" }
   | null;
 
@@ -61,6 +62,20 @@ export interface KeyContext {
  * 而且 `Ctrl+0`…`Ctrl+5` 这种将来可能要留给别的功能）。
  */
 export function browseKeyIntent(event: KeyLike, context: KeyContext): BrowseKeyIntent {
+  /*
+   * `Ctrl/Cmd + A` = **全选**（人类 2026-09-20：「tiles 里要支持 ctrl+a 全选，
+   * 即使未显示的部分也要设置选中状态」）。
+   *
+   * 这是**唯一**允许带修饰键的一条：下面的纪律（Ctrl/Cmd/Alt 组合一律不管）是为了
+   * 把 `Ctrl+0…5` 这类留给将来的快捷键体系，而 `Ctrl+A` 是全平台通用的「全选」，
+   * 不接反而会被浏览器抢去做**文本选择**（页面会蓝一片）。
+   */
+  if (
+    (event.ctrlKey === true || event.metaKey === true) &&
+    (event.key === "a" || event.key === "A")
+  ) {
+    return { kind: "select-all" };
+  }
   if (event.ctrlKey === true || event.metaKey === true || event.altKey === true) return null;
 
   switch (event.key) {
