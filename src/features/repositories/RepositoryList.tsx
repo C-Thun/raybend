@@ -17,20 +17,17 @@
  *   * **照片数读不到时显示「—」而不是 0** —— 0 会让用户以为库是空的。
  */
 
+import { RepositoryCard } from "./RepositoryCard.tsx";
 import { createSignal, For, Show } from "solid-js";
 import {
   IconAlertTriangle,
-  IconCloudOff,
-  IconFolder,
-  IconLoader2,
-  IconSettings,
 } from "@tabler/icons-solidjs";
 import { LibrarySettingsDialog } from "./LibrarySettingsDialog.tsx";
 import type { RemountError } from "./state.ts";
 import type { RepositoryView } from "../../api/types.ts";
 import { ScrollBox } from "../../components/ui/ScrollBar.tsx";
 import { t } from "../../i18n/index.ts";
-import { formatCount, type GroupingLocale } from "../../lib/format.ts";
+import { type GroupingLocale } from "../../lib/format.ts";
 import type { LoadStatus } from "../../lib/load-status.ts";
 
 export interface RepositoryListProps {
@@ -98,14 +95,17 @@ export function RepositoryList(props: RepositoryListProps) {
             <For each={props.repositories}>
               {(repository) => (
                 <RepositoryCard
-                  repository={repository}
+                  name={repository.name}
+                  displayPath={repository.displayPath}
+                  photosCount={repository.photosCount}
+                  online={repository.online}
                   selected={repository.id === props.selectedId}
                   remounting={props.remountingId === repository.id}
                   remountError={props.remountErrors?.[repository.id] ?? null}
                   locale={locale()}
-                  onSelect={props.onSelect}
-                  onRemount={props.onRemount}
-                  onOpenSettings={(id) => setSettingsId(id)}
+                  onSelect={() => props.onSelect(repository.id)}
+                  onRemount={() => props.onRemount(repository.id)}
+                  onOpenSettings={() => setSettingsId(repository.id)}
                 />
               )}
             </For>
@@ -156,144 +156,4 @@ export function RepositoryList(props: RepositoryListProps) {
   );
 }
 
-/**
- * 重挂载失败的那句话：`not_found` 是可翻译的（已试过 N 处），
- * `message` 是后端原话（本来就是人话，直出）。
- */
-function remountText(error: RemountError): string {
-  return error.kind === "not_found"
-    ? t("repo.remount_failed", { tried: error.tried })
-    : error.text;
-}
 
-function RepositoryCard(props: {
-  repository: RepositoryView;
-  selected: boolean;
-  remounting: boolean;
-  remountError: RemountError | null;
-  locale: GroupingLocale;
-  onSelect: (id: string) => void;
-  onRemount: (id: string) => void;
-  onOpenSettings: (id: string) => void;
-}) {
-  const countLabel = () =>
-    props.repository.photosCount === null
-      ? t("repo.count_unknown")
-      : t("grid.count", {
-          n: formatCount(props.repository.photosCount ?? 0, props.locale),
-        });
-
-  return (
-    <div
-      role="option"
-      aria-selected={props.selected}
-      tabindex={0}
-      class={[
-        /*
-         * 上下内边距**显式给**（`py-(--pad-y)`）：只靠 `justify-center` 撑的话，
-         * 字行盒与图标块的高度差会让上下的留白看起来不一样（人类 2026-09-16 报的
-         * 「顶部几乎没有 padding，和底部有明显差异」）。
-         */
-        "flex cursor-pointer flex-col justify-center gap-(--gap) rounded-ui px-(--pad-x) py-(--pad-y)",
-        "transition-colors",
-        props.selected
-          ? "bg-state-selected"
-          : "hover:bg-state-hover",
-      ].join(" ")}
-      style={{ "min-height": "var(--card-h)" }}
-      onClick={() => props.onSelect(props.repository.id)}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          props.onSelect(props.repository.id);
-        }
-      }}
-    >
-      <div class="flex min-w-0 items-center gap-2">
-        <span
-          class={[
-            "flex size-6 shrink-0 items-center justify-center rounded-ui",
-            props.repository.online
-              ? "bg-brand text-fg-on-brand"
-              : "bg-surface-track text-fg-3",
-          ].join(" ")}
-          aria-hidden="true"
-        >
-          <IconFolder size={14} />
-        </span>
-        <span class="min-w-0 flex-1 truncate text-fs-2 text-fg-1">
-          {props.repository.name}
-        </span>
-
-        {/*
-          右侧那一格：**在线 = 齿轮**（开库设置）、**离线 = 离线图标**（点它重新查找）。
-          设计稿（`RepoGear` / `RepoOffline`）给了两个形态，但**不带文字** ——
-          「离线」二字只进无障碍名与悬停提示（人类 2026-09-16 明确要求）。
-          点它自己 `stopPropagation`：卡片整块是「选中这个库」，不能顺带把设置也开了。
-        */}
-        <Show
-          when={props.repository.online}
-          fallback={
-            <button
-              type="button"
-              aria-label={t("repo.remount")}
-              title={t("repo.remount")}
-              class={[
-                "flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-ui",
-                "bg-surface-bar text-fg-2 hover:text-fg-1",
-              ].join(" ")}
-              onClick={(event) => {
-                event.stopPropagation();
-                props.onRemount(props.repository.id);
-              }}
-            >
-              <Show
-                when={props.remounting}
-                fallback={<IconCloudOff size={14} aria-hidden="true" />}
-              >
-                <IconLoader2 size={14} class="animate-spin" aria-hidden="true" />
-              </Show>
-            </button>
-          }
-        >
-          <button
-            type="button"
-            aria-label={t("repo.settings_title")}
-            title={t("repo.settings_title")}
-            class="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-ui text-fg-2 hover:bg-state-hover hover:text-fg-1"
-            onClick={(event) => {
-              event.stopPropagation();
-              props.onOpenSettings(props.repository.id);
-            }}
-          >
-            <IconSettings size={14} aria-hidden="true" />
-          </button>
-        </Show>
-
-        {/* 多路径：多于一条时给个小提示（卡片只显示当前在线那条） */}
-        <Show when={props.repository.paths.length > 1}>
-          <span class="shrink-0 text-fs-0 text-fg-3 tnum">
-            {t("repo.path_count", { n: props.repository.paths.length })}
-          </span>
-        </Show>
-      </div>
-
-      <div class="flex min-w-0 items-center gap-2 ps-8">
-        <span
-          dir="ltr"
-          class="min-w-0 flex-1 truncate text-fs-1 text-fg-3"
-          title={props.repository.displayPath}
-        >
-          {props.repository.displayPath}
-        </span>
-        <span class="shrink-0 text-fs-1 text-fg-2 tnum">{countLabel()}</span>
-      </div>
-
-      <Show when={props.remountError}>
-        {(error) => (
-          <p class="ps-8 text-fs-0 text-fg-3">{remountText(error())}</p>
-        )}
-      </Show>
-    </div>
-  );
-}

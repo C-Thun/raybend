@@ -21,15 +21,15 @@ import { IconDots, IconFolderMinus, IconFolderPlus } from "@tabler/icons-solidjs
 
 import { dirCreate, dirEmptyCheck, dirRemoveEmpty, listDirs } from "../../api/db.ts";
 import { Button } from "../../components/ui/Button.tsx";
+import { RepositoryCard } from "../repositories/RepositoryCard.tsx";
 import { ConfirmDialog, Dialog } from "../../components/ui/Dialog.tsx";
 import { Input } from "../../components/ui/Form.tsx";
 import { Menu } from "../../components/ui/Menu.tsx";
 import type { AssetItem, DirEmptyView, RepositoryView } from "../../api/types.ts";
-import { IconCloudOff, IconSettings } from "@tabler/icons-solidjs";
 import { locale, t } from "../../i18n/index.ts";
-import { formatCount } from "../../lib/format.ts";
+
 import type { ViewerStore } from "../../components/ui/viewer/index.ts";
-import { shortPath } from "../../lib/shortpath.ts";
+
 import { dirDisplayName, PHOTOS_DIR, visibleChildDirs } from "./dirs.ts";
 import { ViewerReadout } from "./ViewerReadout.tsx";
 import {
@@ -415,60 +415,22 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
         <For each={visibleRepos()}>
           {(repo) => (
             /*
-             * 卡片 = **一个容器**（点它选库），里面两个可点区域：
-             * 主体（选库）与行尾那一格（在线 = 齿轮 → 库设置；离线 = 离线图标 → 重新查找）。
-             * 与导入侧 `RepositoryList` 是同一套外观与同一套语义（人类 2026-09-19：
-             * 「统一掉库卡片组件，import 里的库卡片和 browse 里统一」）。
+             * 库卡片 = **导入侧那一份**（`features/repositories/RepositoryCard.tsx`）。
+             * 人类 2026-09-19：「这种东西怎么可能出现 2 个组件？拿 import 里的替换掉」——
+             * 原来这里是内联的第二份实现（圆点 + 另一套排版），已删。
              */
-            <div
-              class={[
-                "mb-2 flex h-(--card-h) w-full items-center gap-2 rounded-(--radius) px-2 text-left",
-                store.repositoryId() === repo.id
-                  ? "bg-state-selected text-fg-1"
-                  : "text-fg-2 hover:bg-state-hover",
-              ].join(" ")}
-            >
-              <button
-                type="button"
-                class="flex min-w-0 flex-1 items-center gap-2 text-left"
-                onClick={() => selectRepository(repo.id)}
-              >
-                <span class="shrink-0 text-fs-3 text-brand">●</span>
-                <span class="min-w-0 flex-1">
-                  <span class="block truncate text-fs-2">{repo.name}</span>
-                  <span class="flex items-center gap-1.5 truncate text-fs-0 text-fg-3">
-                    <span class="truncate">{shortPath(repo.displayPath, { maxLength: 40 })}</span>
-                    {/* 相片总数（不含 `_RAW`）—— 与导入侧卡片同一个位置、同一个口径 */}
-                    <span class="shrink-0 tnum">
-                      {repo.photosCount === null
-                        ? "—"
-                        : t("grid.count", { n: formatCount(repo.photosCount, locale()) })}
-                    </span>
-                  </span>
-                </span>
-              </button>
-              <Show
-                when={repo.online}
-                fallback={
-                  <button
-                    type="button"
-                    aria-label={t("browse.offline")}
-                    class="flex size-6 shrink-0 items-center justify-center rounded-ui text-danger hover:bg-state-hover"
-                    onClick={() => props.onRemount?.(repo.id)}
-                  >
-                    <IconCloudOff size={14} aria-hidden="true" />
-                  </button>
-                }
-              >
-                <button
-                  type="button"
-                  aria-label={t("repo.settings_title")}
-                  class="flex size-6 shrink-0 items-center justify-center rounded-ui text-fg-2 hover:bg-state-hover hover:text-fg-1"
-                  onClick={() => props.onOpenSettings?.(repo.id)}
-                >
-                  <IconSettings size={14} aria-hidden="true" />
-                </button>
-              </Show>
+            <div class="mb-2">
+              <RepositoryCard
+                name={repo.name}
+                displayPath={repo.displayPath}
+                photosCount={repo.photosCount}
+                online={repo.online}
+                selected={store.repositoryId() === repo.id}
+                locale={locale()}
+                onSelect={() => selectRepository(repo.id)}
+                onOpenSettings={() => props.onOpenSettings?.(repo.id)}
+                onRemount={() => props.onRemount?.(repo.id)}
+              />
             </div>
           )}
         </For>
