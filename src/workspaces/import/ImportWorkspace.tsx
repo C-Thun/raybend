@@ -233,6 +233,16 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
     });
   });
 
+  /*
+   * 进对比就把**对比那几张**的宽高补齐（人类 2026-09-19 报的拉伸/拖动不对的根因）：
+   * 网格只为可见 tile 读过元数据，别的照片 `naturalOf` 是 null → 基准比例算不出来。
+   * 只补对比集（通常 ≤4 张），不去碰整个目录 —— 别为一次对比读上千个文件头。
+   */
+  createEffect(() => {
+    const ids = comparePhotoIds();
+    if (ids.length >= 2) void grid.ensureNatural(ids);
+  });
+
   /** 胶片带的缩略图队列（网格那份藏在 `PhotoGrid` 里没对外暴露，所以这里自建一份） */
   const filmThumbs = createThumbQueue({
     load: async (path) => {

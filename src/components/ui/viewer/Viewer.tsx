@@ -19,10 +19,9 @@
  * | `+` / `-` / `0` / `1` | 放大 / 缩小 / 适配 / 100% |
  */
 
-import { IconArrowLeft, IconMinus, IconPlus } from "@tabler/icons-solidjs";
 import { createSignal, onCleanup, onMount, Show } from "solid-js";
-import { t } from "../../../i18n/index.ts";
 import type { ViewerStore } from "./store.ts";
+import { ViewerControls } from "./ViewerControls.tsx";
 
 export interface ViewerProps {
   store: ViewerStore;
@@ -80,12 +79,6 @@ export function Viewer(props: ViewerProps) {
    * 所以：**适配状态只说「适配」**（不报数字），大图到了再补上百分比；
    * 用户自己缩放之后报的就是「相对当前显示这张图」的比例，始终是真的。
    */
-  const zoomLabel = (): string => {
-    const zoom = state().zoom;
-    if (!state().fit) return `${Math.round(zoom * 100)}%`;
-    const fitText = t("viewer.fit_label");
-    return props.store.sharp() ? `${fitText} · ${Math.round(zoom * 100)}%` : fitText;
-  };
 
   function trackCursor(event: PointerEvent): void {
     const rect = host?.getBoundingClientRect();
@@ -284,59 +277,13 @@ export function Viewer(props: ViewerProps) {
         )}
       </Show>
 
-      {/* 左上角返回（设计稿：浮在左上角；悬停才浮出是后续细节） */}
-      <button
-        type="button"
-        class={[
-          "absolute start-3 top-3 flex cursor-pointer items-center gap-1 rounded-ui bg-surface-layer px-2 py-1 text-fs-1 text-fg-1",
-          "transition-opacity",
-          "opacity-0 focus-visible:opacity-100 focus-within:opacity-100",
-          nearTopLeft() ? "opacity-100" : "",
-        ].join(" ")}
-        onClick={close}
-        aria-label={t("viewer.back")}
-      >
-        <IconArrowLeft size={14} aria-hidden="true" />
-        {t("viewer.back")}
-      </button>
-
-      {/* 右下角：缩放控件 + 百分比（基础版：给鼠标用户一个不靠滚轮的入口） */}
-      <div
-        class={[
-          "absolute end-3 bottom-3 flex items-center gap-1 rounded-ui bg-surface-layer px-1.5 py-1",
-          "transition-opacity",
-          "opacity-0 focus-within:opacity-100",
-          nearBottomRight() ? "opacity-100" : "",
-        ].join(" ")}
-      >
-        <button
-          type="button"
-          class="flex size-6 cursor-pointer items-center justify-center rounded-ui text-fg-2 hover:bg-state-hover hover:text-fg-1"
-          aria-label={t("viewer.zoom_out")}
-          onClick={() => props.store.zoomBy(1 / 1.25)}
-        >
-          <IconMinus size={14} aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          class="min-w-16 cursor-pointer rounded-ui px-1 text-center text-fs-1 text-fg-2 hover:bg-state-hover hover:text-fg-1 tnum"
-          aria-label={t("viewer.fit")}
-          onClick={() => props.store.toggleFit()}
-        >
-          {zoomLabel()}
-        </button>
-        <button
-          type="button"
-          class="flex size-6 cursor-pointer items-center justify-center rounded-ui text-fg-2 hover:bg-state-hover hover:text-fg-1"
-          aria-label={t("viewer.zoom_in")}
-          onClick={() => props.store.zoomBy(1.25)}
-        >
-          <IconPlus size={14} aria-hidden="true" />
-        </button>
-        <span class="max-w-64 truncate ps-1 text-fs-1 text-fg-3">
-          {props.store.current()?.fileName ?? ""}
-        </span>
-      </div>
+      <ViewerControls
+        store={props.store}
+        onClose={props.onClose}
+        /* 光标靠近**任一**角落就让这组控件浮出：返回在左上、缩放在右下，
+           用同一个可见条件最省心（贴着哪边都能唤醒它们） */
+        visible={nearTopLeft() || nearBottomRight()}
+      />
     </div>
   );
 }

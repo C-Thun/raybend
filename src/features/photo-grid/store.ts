@@ -111,6 +111,15 @@ export interface PhotoGridStore {
   aspectOf: (id: string) => number;
   /** 元数据里的已换算宽高（给看图用：尺寸未知时拖动会被夹死，见 viewer/store 的 clampPan） */
   naturalOf: (id: string) => { width: number; height: number } | null;
+  /**
+   * 按需补读**指定文件**的宽高（**合并**进现有元数据，不清空）。
+   *
+   * 人类 2026-09-19 报的「import 里一进对比就被拉伸、拖动也不对」就是缺这一步：
+   * 网格只为**可见的** tile 读了元数据，视口外那些 `naturalOf` 是 `null`，
+   * 于是对比的基准比例（`baselineAspect`）算不出来，画幅退回窗口比例；
+   * 拖动也用错了尺寸。看图片先调一次它，尺寸就齐了。
+   */
+  ensureNatural: (paths: readonly string[]) => Promise<void>;
   status: () => LoadStatus;
   error: () => string | null;
   /** 扫描时读不了的位置（不致命） */
@@ -310,6 +319,48 @@ export function createPhotoGridStore(deps: PhotoGridDeps): PhotoGridStore {
       setPhotoMeta(next);
     } catch {
       // 读不到元信息不是错误：按默认比例显示就是了
+    }
+  }
+
+  /**
+   * 按需补读宽高并**合并**进现有元数据。
+   *
+   * 与 `loadPhotoMeta` 的区别很关键：那个是「换目录，整套重来」（`setPhotoMeta(next)` 覆盖），
+   * 这里只补几张、**必须保留**已有的 —— 否则补读会把可见 tile 的比例清掉。
+   */
+  async function ensureNatural(paths: readonly string[]): Promise<void> {
+    const current = dir();
+    if (current === null || paths.length === 0) return;
+    const missing = paths.filter((path) => naturalOf(path) === null);
+    if (missing.length === 0) return;
+
+    const byPath = new Map(items().map((item) => [itemId(item), item]));
+    const files = missing.flatMap((path) => {
+      const item = byPath.get(path);
+      return item === undefined
+        ? []
+        : [
+            {
+              relative: item.fileName,
+              fileSize: item.sizeBytes,
+              mtimeMs: item.mtimeMs ?? 0,
+            },
+          ];
+    });
+    if (files.length === 0) return;
+
+    try {
+      const metas = await deps.api.dirMetaEnsure(current, files);
+      setPhotoMeta((prev) => {
+        const merged = new Map(prev);
+        missing.forEach((path, index) => {
+          const meta = metas[index];
+          if (meta !== undefined) merged.set(path, meta);
+        });
+        return merged;
+      });
+    } catch {
+      // 读不到不是错误：按占位比例显示
     }
   }
 
@@ -528,6 +579,7 @@ export function createPhotoGridStore(deps: PhotoGridDeps): PhotoGridStore {
     displayItems,
     aspectOf,
     naturalOf,
+    ensureNatural,
     status,
     error,
     problems,

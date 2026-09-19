@@ -26,6 +26,7 @@ import { createSignal, For, Show, type JSX } from "solid-js";
 
 import { t } from "../../../i18n/index.ts";
 import type { ViewerPhoto, ViewerStore } from "./index.ts";
+import { ViewerControls } from "./ViewerControls.tsx";
 import { baselineAspect, COMPARE_MAX, compareFrames, compareLayout, panPercent } from "../../../lib/viewer-compare.ts";
 
 export interface CompareViewProps {
@@ -45,6 +46,8 @@ export interface CompareViewProps {
   onFocus?: (photo: ViewerPhoto) => void;
   /** 看图件的 store：倍率与位移的唯一来源（对比例看与单张看图共用一套） */
   store: ViewerStore;
+  /** 返回 tiles（左上角那颗按钮用它） */
+  onClose?: () => void;
   class?: string;
 }
 
@@ -210,6 +213,8 @@ export function CompareView(props: CompareViewProps): JSX.Element {
           </div>
         )}
       </For>
+      {/* 整个对比区**只有一组**控件（人类 2026-09-19）：左上返回 + 右下缩放，常驻可见 */}
+      <ViewerControls store={props.store} onClose={props.onClose} visible={true} />
     </div>
   );
 }
