@@ -1,55 +1,51 @@
-# raybend · 光伴
+<div align="center">
 
-一个**相片管理软件**。目标是把「导入 → 浏览 → 评级 → 筛选 → 整理 → 导出」这条工作流做到足够顺手，成为商业相片管理软件的开源替代。
+<img src="assets/logo-wide.webp" alt="RayBend · 光伴" width="440" />
 
-| | |
-| --- | --- |
-| 英文名 / 仓库名 | `raybend` |
-| 中文名 | 光伴 |
-| 产品名（安装包与窗口标题） | `RayBend` |
+**光伴 · Local-first, open-source photo management**
 
-## 状态
+Import → Browse → Edit → Export, one complete workflow. Free, no subscription, nothing leaves your disk.
 
-**早期开发中**，当前处于 **M0：可行性验证与项目骨架** 阶段，尚无可供日常使用的功能。
+English ｜ 简体中文 ｜ [Website](https://raybend.cthun.com/) ｜ [Download](https://github.com/C-Thun/raybend/releases)
 
-- 开发计划与里程碑：[`PLAN.md`](PLAN.md)
-- 远期方向登记：[`FUTURE.md`](FUTURE.md)
-- 核心信息、纪律与架构决定：[`AGENTS.md`](AGENTS.md)
+</div>
 
-## 技术选型
+---
 
-| 层 | 选型 |
-| --- | --- |
-| 应用外壳 | Tauri 2（Windows 上为 WebView2） |
-| 前端 | TypeScript + SolidJS + Tailwind CSS |
-| 核心逻辑 | Rust（`crates/raybend`，业务层不依赖 Tauri） |
-| 图像渲染 | 原生 wgpu 直绘 + 透明 WebView 挖洞 |
-| 存储 | SQLite（全局库 `app.db` + 每个相片仓一份 `catalog.db`） |
-| RAW 解码 | rawler（做成可插拔后端） |
-| UI 组件 / 图标 | Ark UI / Tabler Icons |
+## Why RayBend
 
-## 平台
+Photo managers today come in three flavors: too expensive, subscription-based, or reasonably priced but unstable. A photo library is built over decades; the tool that keeps it in order should not be a recurring bill.
 
-Windows 优先（Win10/11 近两年版本）；macOS 与 Linux 属远期规划。
+RayBend takes a different position: one complete workflow — Import → Browse → Edit → Export — where your photos and every change you make stay on your own disk. No account, no upload. Free, forever — open source under AGPL-3.0.
 
-## 工具链
+## Features
 
-统一使用 **pnpm**（前端）与 **cargo**（Rust），不引入 npm / yarn / bun 等第二套工具链。
+- **One workflow** — Import, Browse, Edit, Export: four full workspaces in sequence, a single switch apart.
+- **The interface is the feature set** — Every action sits on the screen as a button, not buried in menu hierarchies; commands and keyboard shortcuts remain, as advanced options for practiced hands.
+- **Multi-source import** — A single import can draw from several sources at once, multi-slot cameras included; names and folder structure follow templates, with serial numbers that increment automatically.
+- **Grouped by time** — Photos fall naturally into days and sessions within the day; take in the shape of a day first, a single frame second.
+- **Multi-image compare** — Candidates side by side on one screen; choose with the full picture in view.
+- **Non-destructive editing** — Color grading at the core; no adjustment ever touches the original. One photo, many versions; styles saved and reusable.
+- **Everything local** — No account, no upload, fully usable offline; your photos and the structure you give them stay on your own disk.
+- **Appearance & language** — Light and dark themes, two density settings, English and Chinese — all a toggle away.
+
+## Download
+
+For Windows 10 / 11 (64-bit), free of charge. Installers on [GitHub Releases](https://github.com/C-Thun/raybend/releases).
+
+## Build from source
 
 ```bash
-pnpm install              # 安装前端依赖
-pnpm tauri dev            # 开发运行（Linux/WSL 下为 webkit2gtk）
-cargo check --workspace   # Rust 侧检查
+pnpm install
+pnpm tauri dev
 ```
 
-> Windows 侧的构建与运行方式见 `AGENTS.md` 的「如何运行」一节。
+Requires pnpm and the Rust toolchain.
 
-## 许可
+## Tech stack
 
-**AGPL-3.0-only** —— 全文见 [`LICENSE`](LICENSE)。
+Rust · Tauri 2 · wgpu (native GPU rendering) · SolidJS · Tailwind CSS · SQLite · rawler (RAW decoding)
 
-选择它的实用理由：本项目主体是本地桌面应用，AGPL 的额外网络条款只在「对外提供网络服务」时才生效；同时它使本项目可以合法复用同许可与 GPL 系项目（rawler、darktable、RawTherapee 等）的实现。
+## License
 
-若将来把 raybend 作为网络服务对外提供，必须按 AGPL 第 13 条向使用者提供对应源码。
-
-第三方组件与参考项目的许可清单见 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)。
+[AGPL-3.0-only](LICENSE); third-party notices in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). Should you ever offer RayBend as a network service, AGPL §13 requires releasing the corresponding source under the same license.
