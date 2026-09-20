@@ -28,6 +28,7 @@
     "crash:drill": "bash scripts/crash-drill.sh",
     "migrate:drill": "bash scripts/migration-drill.sh",
     "check:win": "node scripts/check-win-artifact.mjs",
+    "debug:win": "node --check scripts/debug-win.mjs && node scripts/debug-win.mjs",
     "spike:win": "node --check scripts/spike-win.mjs && node scripts/spike-win.mjs"
   },
   "dependencies": {
