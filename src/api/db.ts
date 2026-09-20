@@ -55,6 +55,9 @@ export const SETTING_KEYS = {
   avoidDuplicates: "import.avoid_duplicates",
   /** 是否处于「按时间」模式 */
   byTime: "grid.by_time",
+  /** 导入 / 浏览胶片带各自的 17 档尺寸（app.db，全局设备设置） */
+  importFilmStripStep: "filmstrip.import_tile_step",
+  browseFilmStripStep: "filmstrip.browse_tile_step",
 } as const;
 
 /** 缓存的 `@tauri-apps/api/core` 模块（浏览器里根本不会加载它）。 */
@@ -273,10 +276,9 @@ export interface Histogram {
 export async function getHistogram(
   path: string,
   /**
-   * 采样点数（**桶数**）。默认 52 = 0..255 每 5 级一个点（人类 2026-09-19 定的口径）；
-   * 后端按 `value * bins / 256` 分桶，所以这里给几就是几个采样点。
+   * 采样点数。当前固定为 86：亮度 0 单独，其余每 3 个亮度值取平均。
    */
-  bins = 52,
+  bins = 86,
 ): Promise<Histogram | null> {
   if (!isTauriRuntime()) return null;
   const value = await call<Histogram>("image_histogram", { path, bins });

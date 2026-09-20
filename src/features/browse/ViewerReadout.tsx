@@ -8,7 +8,7 @@
  * │ │      ┌────┐  │ │   ← 1px 主色框 = 当前**看得见的那块**（放大/拖动时动）
  * │ │      └────┘  │ │
  * │ └──────────────┘ │
- * │ 直方图            │   ← 三条填充曲线，加色叠加
+ * │ 直方图            │   ← 三条完整填充曲线，可选择通道
  * │ ▁▂▅█▇▅▃▂▁▁▂▃▅▇▅▂ │
  * └──────────────────┘
  * ```
@@ -18,7 +18,7 @@
  * 1. **预览框的数学在 `visibleRect()`**（`components/ui/viewer/store.ts`），这里只按百分比摆 ——
  *    框和照片必须是同一个变换，否则放大后框会跟画面错位；
  * 2. **直方图是 Rust 算的**（`getHistogram` → `image_histogram`）：`AGENTS.md` §6.1 的红线，
- *    前端不碰像素；这里只把 256 个整数连成曲线；
+ *    前端不碰像素；这里只把 86 个平均采样连成曲线；
  * 3. 两块的底都用 `$surface-bar`（面板内插入块的规定，`design/browse.md` §2.3.1）。
  *
  * 只在看图时出现：tiles 模式下这两块让位给 EXIF（`AssetInfo` 里切换）。
@@ -157,7 +157,7 @@ export function ViewerReadout(props: ViewerReadoutProps): JSX.Element {
         </div>
       </section>
 
-      {/* ── 直方图（三通道填充曲线 + 加色区域；组件在 `components/ui/Histogram.tsx`） ── */}
+      {/* ── 直方图（三条完整通道曲线；组件在 `components/ui/Histogram.tsx`） ── */}
       <section class="mb-5">
         <h3 class="mb-1.5 text-fs-3 font-semibold text-fg-2">{t("browse.histogram")}</h3>
         <div class="rounded-ui bg-surface-bar px-2 py-1.5">

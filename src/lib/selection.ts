@@ -120,6 +120,20 @@ export function clearSelection(): SelectionState {
 }
 
 /**
+ * 只移动「当前照片」锚点，不改变选择集合。
+ *
+ * 对比视图点某一幅时用这条：若改走 `replace`，多选会当场散掉；若每个工作区
+ * 各自手改 `{ ...state, anchor }`，import / browse 又会产生两套行为。
+ */
+export function focusSelection(
+  state: SelectionState,
+  target: string,
+): SelectionState {
+  if (!state.ids.has(target) || state.anchor === target) return state;
+  return { ids: state.ids, anchor: target };
+}
+
+/**
  * `批量排除`：对给定的一组 id 做**反转**（在集合里就拿出来，不在就放进去）。
  *
  * 这是 `DESIGN.md` §12.2 明确要求的语义：按钮文字恒定、动作恒定，

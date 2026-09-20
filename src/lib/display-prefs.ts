@@ -1,69 +1,53 @@
 /**
- * **网格显示偏好**（设备级、import 与 browse 共用一份、下次启动还原）。
+ * import / browse 各自的 tiles statusbar 显示偏好（设备级、同步落在 localStorage）。
  *
- * 三件事：
+ * 两个 flow 仍然使用同一个 tiles 组件，但偏好不是同一份：摄影师在导入时常要看
+ * 文件名、在库里则可能只看标记；两边的分组与缩放密度也未必一样。
  *
- * | 偏好 | 是什么 | 谁在读 |
- * | --- | --- | --- |
- * | `byTime` | tiles 是否**按时间分组** | 两个工作区的网格（与状态条上的「按时间」开关） |
- * | `infoMode` | 图片**信息档位**（无 / 标记 / 标记+文件名） | `components/ui/tile-info.ts` 与 `Tile` |
- * | `tileStep` | 格子尺寸档位（滑块） | 两个工作区的网格 + 状态条 |
- *
- * ## 为什么要有这个模块（而不是各存各的）
- *
- * 三者都是「**怎么看**」而不是「看什么」，而且人在 import 与 browse 里看的是**同一批 tiles** ——
- * 切工作流不该变样（人类 2026-09-20：「按时间需要在 import 和 browse 之间都要支持持久化，
- * 信息显示级别也要持久化」）。此前 `by_time` / `tile_step` 是各工作区自己读 `app.db`
- * 的设置，于是**浏览侧每次进都重置**（它的那两份状态压根没落盘）；
- * 信息档位则只是一个内存单例，关掉软件就忘了。
- *
- * ## 为什么用 `localStorage` 而不是 `app.db`
- *
- * 与 `appearance.ts` / `layout-prefs.ts` 同一条理由：设备级偏好，且**要在首次渲染前拿到** ——
- * 异步读库会先按默认值画一帧再跳变（分组一动就是整屏重排，跳变很明显）。
- * 存储任何非法输入都落回默认（`sanitizeDisplayPrefs`），读写都**不抛错**。
- *
- * ## 一份状态、两处读
- *
- * 这里是**模块级单例信号**（与 `tile-info.ts` / `appearance` 一样）：
- * 两个工作区、状态条、`Tile` 拿到的都是同一个值，谁改都立刻反映到另一边 ——
- * 不需要任何跨工作区的同步代码（那正是以前两边会漂移的原因）。
+ * 存储升级只从这里走：v1 是一份共享值，v2 把它复制成 import / browse 两份；旧的
+ * import 三态信息在迁移后收敛为 off / marks-name（开 = 显示全部，也就是文件名）。
  */
 
 import { createSignal, type Accessor } from "solid-js";
 
-import { clampTileStepIndex, DEFAULT_TILE_STEP_INDEX, migrateTileStepIndex, TILE_SIZE_STEPS } from "./tile-flow.ts";
+import {
+  clampTileStepIndex,
+  DEFAULT_TILE_STEP_INDEX,
+  migrateTileStepIndex,
+  TILE_SIZE_STEPS,
+} from "./tile-flow.ts";
 
-/** 「信息」档位（`Tile` 与状态条上的 `i` 开关共用这一份类型） */
 export type TileInfoMode = "off" | "marks" | "marks-name";
+export type DisplayScope = "import" | "browse";
 
-export interface DisplayPrefs {
-  /** tiles 按时间分组 */
+export interface ScopedDisplayPrefs {
   byTime: boolean;
-  /** 图片信息档位 */
   infoMode: TileInfoMode;
-  /** 格子尺寸档位索引（0..8，见 `lib/tile-flow.ts`） */
+  /** 0..16 的连续位置；小数表示落在相邻两个预设档之间。 */
   tileStep: number;
 }
 
-export const DISPLAY_STORAGE_KEY = "raybend.display.v1";
+export interface DisplayPrefs {
+  import: ScopedDisplayPrefs;
+  browse: ScopedDisplayPrefs;
+}
 
-/**
- * 存进 JSON 里的**档位表版本**（就是档位数）。
- *
- * 存的 `tileStep` 是**下标**，而下标只有配上「哪张表」才有意义 ——
- * 2026-09-20 把 9 档表换成 17 档表（512 → 400 封顶）之后，旧记录的下标含义全变了。
- * 没有这个字段的记录一律按旧表换算一次（`migrateTileStepIndex`），而不是直接夹取。
- */
+/** 新结构；v1 只用于一次性迁移，迁移后不会再写。 */
+export const DISPLAY_STORAGE_KEY = "raybend.display.v2";
+export const LEGACY_DISPLAY_STORAGE_KEY = "raybend.display.v1";
 export const TILE_STEP_SCALE = TILE_SIZE_STEPS.length;
 
-export const DEFAULT_DISPLAY_PREFS: DisplayPrefs = {
+export const DEFAULT_SCOPED_DISPLAY_PREFS: ScopedDisplayPrefs = {
   byTime: false,
   infoMode: "off",
   tileStep: DEFAULT_TILE_STEP_INDEX,
 };
 
-/** 存储的最小接口（便于测试注入；也兼容 localStorage 被禁用时的静默失败） */
+export const DEFAULT_DISPLAY_PREFS: DisplayPrefs = {
+  import: { ...DEFAULT_SCOPED_DISPLAY_PREFS },
+  browse: { ...DEFAULT_SCOPED_DISPLAY_PREFS },
+};
+
 export interface DisplayStorage {
   getItem: (key: string) => string | null;
   setItem: (key: string, value: string) => void;
@@ -73,18 +57,23 @@ function defaultStorage(): DisplayStorage | undefined {
   try {
     return globalThis.localStorage;
   } catch {
-    // 隐私模式 / 禁用存储时访问 localStorage 会抛错，那时就当作没有存储
     return undefined;
   }
 }
 
 const INFO_MODES: readonly TileInfoMode[] = ["off", "marks", "marks-name"];
 
-/** 解析存下来的值：任何非法输入都落到默认，**绝不抛错**。 */
-export function sanitizeDisplayPrefs(
+function cloneDefaults(): DisplayPrefs {
+  return {
+    import: { ...DEFAULT_SCOPED_DISPLAY_PREFS },
+    browse: { ...DEFAULT_SCOPED_DISPLAY_PREFS },
+  };
+}
+
+export function sanitizeScopedDisplayPrefs(
   raw: unknown,
-  fallback: DisplayPrefs = DEFAULT_DISPLAY_PREFS,
-): DisplayPrefs {
+  fallback: ScopedDisplayPrefs = DEFAULT_SCOPED_DISPLAY_PREFS,
+): ScopedDisplayPrefs {
   if (typeof raw !== "object" || raw === null) return { ...fallback };
   const record = raw as Record<string, unknown>;
   const mode = record.infoMode;
@@ -94,7 +83,6 @@ export function sanitizeDisplayPrefs(
       typeof mode === "string" && (INFO_MODES as readonly string[]).includes(mode)
         ? (mode as TileInfoMode)
         : fallback.infoMode,
-    // 档位越界/非数字都夹回有效档（与滑块那条闸门同一实现）
     tileStep: clampTileStepIndex(
       typeof record.tileStep === "number" && Number.isFinite(record.tileStep)
         ? record.tileStep
@@ -103,37 +91,62 @@ export function sanitizeDisplayPrefs(
   };
 }
 
+export function sanitizeDisplayPrefs(
+  raw: unknown,
+  fallback: DisplayPrefs = DEFAULT_DISPLAY_PREFS,
+): DisplayPrefs {
+  if (typeof raw !== "object" || raw === null) {
+    return {
+      import: { ...fallback.import },
+      browse: { ...fallback.browse },
+    };
+  }
+  const record = raw as Record<string, unknown>;
+  const imported = sanitizeScopedDisplayPrefs(record.import, fallback.import);
+  imported.infoMode = imported.infoMode === "off" ? "off" : "marks-name";
+  return {
+    import: imported,
+    browse: sanitizeScopedDisplayPrefs(record.browse, fallback.browse),
+  };
+}
+
+/** v1 的共享偏好 → v2 两份偏好（只在读存储时执行一次）。 */
+export function migrateLegacyDisplayPrefs(raw: unknown): DisplayPrefs {
+  const record = (typeof raw === "object" && raw !== null ? raw : {}) as Record<string, unknown>;
+  const freshStep =
+    record.tileStepScale === TILE_STEP_SCALE
+      ? record.tileStep
+      : migrateTileStepIndex(
+          typeof record.tileStep === "number" && Number.isFinite(record.tileStep)
+            ? record.tileStep
+            : DEFAULT_TILE_STEP_INDEX,
+        );
+  const shared = sanitizeScopedDisplayPrefs({ ...record, tileStep: freshStep });
+  return {
+    import: {
+      ...shared,
+      infoMode: shared.infoMode === "off" ? "off" : "marks-name",
+    },
+    browse: { ...shared },
+  };
+}
+
 export function readDisplayPrefs(
   storage: DisplayStorage | undefined = defaultStorage(),
 ): DisplayPrefs {
-  if (!storage) return { ...DEFAULT_DISPLAY_PREFS };
+  if (!storage) return cloneDefaults();
   try {
-    const raw = storage.getItem(DISPLAY_STORAGE_KEY);
-    if (raw === null || raw === "") return { ...DEFAULT_DISPLAY_PREFS };
-    const parsed: unknown = JSON.parse(raw);
-    /*
-     * 旧记录（9 档表，2026-09-20 之前）没有 `tileStepScale` —— 下标含义不同，
-     * 按**尺寸最接近**换算（旧 8 = 512 → 新 16 = 400），再交给 sanitize。
-     * 注意只在**读存储**这一处迁移：写入路径（`patch`）拿的是内存里的新下标，
-     * 不能在那里再换一次。
-     */
-    const record = (
-      typeof parsed === "object" && parsed !== null ? parsed : {}
-    ) as Record<string, unknown>;
-    const fresh =
-      record.tileStepScale === TILE_STEP_SCALE
-        ? parsed
-        : {
-            ...record,
-            tileStep: migrateTileStepIndex(
-              typeof record.tileStep === "number" && Number.isFinite(record.tileStep)
-                ? record.tileStep
-                : DEFAULT_TILE_STEP_INDEX,
-            ),
-          };
-    return sanitizeDisplayPrefs(fresh);
+    const current = storage.getItem(DISPLAY_STORAGE_KEY);
+    if (current !== null && current !== "") {
+      return sanitizeDisplayPrefs(JSON.parse(current));
+    }
+    const legacy = storage.getItem(LEGACY_DISPLAY_STORAGE_KEY);
+    if (legacy === null || legacy === "") return cloneDefaults();
+    const migrated = migrateLegacyDisplayPrefs(JSON.parse(legacy));
+    writeDisplayPrefs(migrated, storage);
+    return migrated;
   } catch {
-    return { ...DEFAULT_DISPLAY_PREFS };
+    return cloneDefaults();
   }
 }
 
@@ -143,70 +156,62 @@ export function writeDisplayPrefs(
 ): void {
   if (!storage) return;
   try {
-    // 多存一个 `tileStepScale`：下次读时才知道这个下标配的是哪张表（见 `TILE_STEP_SCALE`）
     storage.setItem(
       DISPLAY_STORAGE_KEY,
-      JSON.stringify({ ...prefs, tileStepScale: TILE_STEP_SCALE }),
+      JSON.stringify({ version: 2, tileStepScale: TILE_STEP_SCALE, ...prefs }),
     );
   } catch {
-    // 存储不可用：静默（偏好丢了不影响用）
+    // 偏好不可写不影响主流程。
   }
 }
 
-/**
- * 单例状态。**改值就落盘** —— 这里没有「拖拽中不写」的问题：
- * 格子尺寸那条有（拖一次几十次），所以它走 `setTileStep`（只改内存）
- * + `commitTileStep`（松手时调一次，见 `features/photo-grid/store.ts`）。
- */
 const [prefs, setPrefs] = createSignal<DisplayPrefs>(readDisplayPrefs());
 
-function patch(next: Partial<DisplayPrefs>, persist: boolean): void {
+function patchScope(scope: DisplayScope, next: Partial<ScopedDisplayPrefs>, persist: boolean): void {
   const current = prefs();
-  const merged = sanitizeDisplayPrefs({ ...current, ...next }, current);
+  const before = current[scope];
+  const after = sanitizeScopedDisplayPrefs({ ...before, ...next }, before);
+  if (scope === "import") after.infoMode = after.infoMode === "off" ? "off" : "marks-name";
   if (
-    merged.byTime === current.byTime &&
-    merged.infoMode === current.infoMode &&
-    merged.tileStep === current.tileStep
-  ) {
-    return;
-  }
+    before.byTime === after.byTime &&
+    before.infoMode === after.infoMode &&
+    before.tileStep === after.tileStep
+  ) return;
+  const merged = { ...current, [scope]: after };
   setPrefs(merged);
   if (persist) writeDisplayPrefs(merged);
 }
 
 export const displayPrefs: Accessor<DisplayPrefs> = prefs;
-export const displayByTime: Accessor<boolean> = () => prefs().byTime;
-export const displayInfoMode: Accessor<TileInfoMode> = () => prefs().infoMode;
-export const displayTileStep: Accessor<number> = () => prefs().tileStep;
+export const importDisplayPrefs: Accessor<ScopedDisplayPrefs> = () => prefs().import;
+export const browseDisplayPrefs: Accessor<ScopedDisplayPrefs> = () => prefs().browse;
 
-/** 「按时间」开关：立刻落盘（一次点击就是一个终值） */
-export function setDisplayByTime(value: boolean): void {
-  patch({ byTime: value }, true);
-}
+export const importDisplayByTime: Accessor<boolean> = () => prefs().import.byTime;
+export const importDisplayInfoMode: Accessor<TileInfoMode> = () => prefs().import.infoMode;
+export const importDisplayTileStep: Accessor<number> = () => prefs().import.tileStep;
+export const browseDisplayByTime: Accessor<boolean> = () => prefs().browse.byTime;
+export const browseDisplayInfoMode: Accessor<TileInfoMode> = () => prefs().browse.infoMode;
+export const browseDisplayTileStep: Accessor<number> = () => prefs().browse.tileStep;
 
-/** 信息档位：立刻落盘 */
-export function setDisplayInfoMode(value: TileInfoMode): void {
-  patch({ infoMode: value }, true);
-}
+export const setImportDisplayByTime = (value: boolean): void =>
+  patchScope("import", { byTime: value }, true);
+export const setImportDisplayInfoMode = (value: TileInfoMode): void =>
+  patchScope("import", { infoMode: value }, true);
+export const setImportDisplayTileStep = (value: number): void =>
+  patchScope("import", { tileStep: value }, false);
+export const commitImportDisplayTileStep = (): void => writeDisplayPrefs(prefs());
 
-/** 格子尺寸档位：**只改内存**（拖拽中每动一格都调它） */
-export function setDisplayTileStep(value: number): void {
-  patch({ tileStep: value }, false);
-}
+export const setBrowseDisplayByTime = (value: boolean): void =>
+  patchScope("browse", { byTime: value }, true);
+export const setBrowseDisplayInfoMode = (value: TileInfoMode): void =>
+  patchScope("browse", { infoMode: value }, true);
+export const setBrowseDisplayTileStep = (value: number): void =>
+  patchScope("browse", { tileStep: value }, false);
+export const commitBrowseDisplayTileStep = (): void => writeDisplayPrefs(prefs());
 
-/** 把当前格子尺寸落盘（滑块松手时调一次） */
-export function commitDisplayTileStep(): void {
-  writeDisplayPrefs(prefs());
-}
-
-/**
- * **仅测试用**：把单例状态复位。
- *
- * 这是模块级单例（两个工作区共用一份），Node 里同一个测试文件共享同一个模块实例 ——
- * 改了档位/开关的用例必须能把它放回去，否则后面的用例会看到别人留下的状态。
- */
-export function resetDisplayPrefsForTests(
-  next: DisplayPrefs = DEFAULT_DISPLAY_PREFS,
-): void {
-  setPrefs({ ...next });
+export function resetDisplayPrefsForTests(next: DisplayPrefs = DEFAULT_DISPLAY_PREFS): void {
+  setPrefs({
+    import: { ...next.import },
+    browse: { ...next.browse },
+  });
 }

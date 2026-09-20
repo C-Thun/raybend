@@ -35,7 +35,7 @@ import type { CommandSpec } from "../../lib/commands.ts";
  * 一旦哪边加了工作流，`App.tsx` 那处赋值会当场报错（这比共享一个类型更早暴露漂移）。
  */
 export type CommandFlow = "import" | "browse" | "edit" | "export";
-import { TILE_SIZE_STEPS } from "../../lib/tile-flow.ts";
+import { nextTilePresetPosition, TILE_SIZE_STEPS } from "../../lib/tile-flow.ts";
 
 /** 组装层要注入的全部能力（**只有函数**：命令不认识 store） */
 /**
@@ -78,7 +78,7 @@ export interface CommandDeps {
   openLibrarySettings: () => void;
   openNewRepository: () => void;
 
-  /* ── 网格显示（两个工作区共用一份偏好） ────────────── */
+  /* ── 网格显示（两个工作区共用命令契约，偏好按作用域隔离） ───── */
   display: {
     byTime: () => boolean;
     setByTime: (value: boolean) => void;
@@ -122,7 +122,7 @@ export interface CommandDeps {
     moveFocus: (delta: -1 | 1) => void;
     /** 进看图（锚点那张） */
     openViewer: () => void;
-    /** `Tab` 三态循环 */
+    /** `Tab` 四态循环 */
     cycleChrome: () => void;
     /** 对比态：胶片带只显示参与对比的图 */
     toggleCompareStrip: () => void;
@@ -136,6 +136,7 @@ export interface CommandDeps {
     excludeSelected: () => void;
     openViewer: () => void;
     cycleChrome: () => void;
+    toggleCompareStrip: () => void;
   };
 }
 
@@ -406,7 +407,7 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       when: inTiles,
       enabled: () => deps.display.tileStep() < TILE_SIZE_STEPS.length - 1,
       run: () => {
-        deps.display.setTileStep(deps.display.tileStep() + 1);
+        deps.display.setTileStep(nextTilePresetPosition(deps.display.tileStep(), 1));
         deps.display.commitTileStep();
       },
     }),
@@ -419,7 +420,7 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       when: inTiles,
       enabled: () => deps.display.tileStep() > 0,
       run: () => {
-        deps.display.setTileStep(deps.display.tileStep() - 1);
+        deps.display.setTileStep(nextTilePresetPosition(deps.display.tileStep(), -1));
         deps.display.commitTileStep();
       },
     }),
@@ -592,7 +593,10 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       scope: "viewer",
       defaultKey: "Enter",
       when: () => deps.viewer.comparing(),
-      run: () => deps.browse.toggleCompareStrip(),
+      run: () =>
+        deps.flow() === "import"
+          ? deps.import.toggleCompareStrip()
+          : deps.browse.toggleCompareStrip(),
     }),
 
     /* ══ 标记（浏览） ═══════════════════════════════════ */

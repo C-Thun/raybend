@@ -83,6 +83,28 @@ export function createWheelZoom(options: WheelZoomOptions): {
   };
 }
 
+/**
+ * 看图面（单张看图 / 对比）**接管键盘焦点**。
+ *
+ * 为什么必须有这一条（人类 2026-09-20 报的「browse 里回车进得去、退不出来」）：
+ * 看图是**覆盖层**，网格不卸载 —— 打开看图时焦点如果还留在底下那张 tile 上，
+ * 它会先把自己的 `Enter`（激活 = 重新打开看图）吃掉并 `preventDefault()`，
+ * 看图件挂在 `window` 上的「回车退出」永远等不到这个事件。
+ * 导入侧当时看着正常，只是因为一次重渲染恰好把 tile 换掉、焦点掉到了 `body` ——
+ * 偶然行为不算行为。
+ *
+ * 看图面一旦拥有焦点，键盘语义就只有一份：
+ *   * 单张看图的 `Enter` / `Esc` / `←→` / `+−01` 都是看图件的；
+ *   * 对比下的 `Enter` 由命令分发器接（`viewer.compareOnly`）。
+ *
+ * 关闭后由**网格**把焦点收回（`PhotoGrid` 里的 `focusTiles`）—— 那一份也在网格内部，
+ * 两个工作区不需要各接一条线。
+ */
+export function takeViewerFocus(host: HTMLElement | undefined): void {
+  // `preventScroll`：看图面铺满中列，聚焦不该引起任何滚动
+  host?.focus({ preventScroll: true });
+}
+
 /** 控件触发区：左上返回 120×120；右下覆盖整条缩放条及其周边。 */
 export const VIEWER_BACK_CORNER = 120;
 export const VIEWER_ZOOM_CORNER_X = 420;

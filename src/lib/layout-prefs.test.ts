@@ -128,6 +128,7 @@ test("值没变时不写、也不更新信号（防 resize 回路：真机启动
 
 test("sanitizeLayout：侧栏宽度非法值落到默认、越界被夹回范围", () => {
   const fallback = DEFAULT_LAYOUT;
+  assert.equal(LAYOUT_BOUNDS.browseLeftWidth.min, 220, "browse left 下限与 import left 对齐");
   assert.equal(sanitizeLayout({}).browseLeftWidth, fallback.browseLeftWidth);
   assert.equal(sanitizeLayout({ browseLeftWidth: "宽" }).browseLeftWidth, fallback.browseLeftWidth);
   assert.equal(

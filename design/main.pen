@@ -361,37 +361,59 @@
               "children": [
                 {
                   "type": "frame",
-                  "id": "S0PZD",
-                  "name": "FlowChip / 导入 / 选中",
+                  "id": "vj39G",
+                  "name": "FlowSlot / 导入",
+                  "clip": true,
+                  "width": 81,
                   "height": 28,
-                  "fill": "$brand",
-                  "cornerRadius": 14,
-                  "gap": 6,
-                  "padding": [
-                    0,
-                    14
-                  ],
-                  "alignItems": "center",
+                  "layout": "vertical",
+                  "gap": -28,
                   "children": [
                     {
-                      "type": "icon",
-                      "id": "ILf1R",
-                      "name": "FlowIcon / 导入",
-                      "width": 16,
-                      "height": 16,
-                      "icon": "import",
-                      "library": "lucide",
-                      "fill": "$fg-on-brand"
+                      "type": "frame",
+                      "id": "OOqcb",
+                      "name": "FlowIndicator / 单一移动背景",
+                      "width": 81,
+                      "height": 28,
+                      "fill": "$brand",
+                      "cornerRadius": 14
                     },
                     {
-                      "type": "text",
-                      "id": "ZR57F",
-                      "name": "FlowLabel / 导入",
-                      "fill": "$fg-on-brand",
-                      "content": "导入",
-                      "fontFamily": "Inter",
-                      "fontSize": 15,
-                      "fontWeight": "500"
+                      "type": "frame",
+                      "id": "S0PZD",
+                      "name": "FlowChip / 导入 / foreground",
+                      "width": 81,
+                      "height": 28,
+                      "fill": "#00000000",
+                      "cornerRadius": 14,
+                      "gap": 6,
+                      "padding": [
+                        0,
+                        14
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "ILf1R",
+                          "name": "FlowIcon / 导入",
+                          "width": 16,
+                          "height": 16,
+                          "icon": "import",
+                          "library": "lucide",
+                          "fill": "$fg-on-brand"
+                        },
+                        {
+                          "type": "text",
+                          "id": "ZR57F",
+                          "name": "FlowLabel / 导入",
+                          "fill": "$fg-on-brand",
+                          "content": "导入",
+                          "fontFamily": "Inter",
+                          "fontSize": 15,
+                          "fontWeight": "500"
+                        }
+                      ]
                     }
                   ]
                 },
@@ -2540,7 +2562,7 @@
                 {
                   "type": "frame",
                   "id": "q1fSV",
-                  "name": "GridControlBar",
+                  "name": "TilesStatusbar / Import",
                   "width": "fill_container",
                   "height": 32,
                   "gap": 8,
@@ -2583,6 +2605,29 @@
                       "name": "SpacerC2",
                       "width": "fill_container",
                       "height": 1
+                    },
+                    {
+                      "type": "frame",
+                      "id": "ICoXi",
+                      "name": "Toggle / 文件名 / 已开启（一级开关）",
+                      "width": 28,
+                      "height": 28,
+                      "fill": "$state-selected",
+                      "cornerRadius": 4,
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "SmbMi",
+                          "name": "Glyph / file-text",
+                          "width": 14,
+                          "height": 14,
+                          "icon": "file-text",
+                          "library": "lucide",
+                          "fill": "$brand"
+                        }
+                      ]
                     },
                     {
                       "type": "frame",
@@ -2657,6 +2702,29 @@
                           "fill": "$surface-track",
                           "cornerRadius": 1,
                           "alignItems": "center"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "SOo36",
+                      "name": "IconButton / 适合窗口 / 无按下状态",
+                      "width": 28,
+                      "height": 28,
+                      "fill": "$surface-layer",
+                      "cornerRadius": 4,
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "xi3Mw",
+                          "name": "Glyph / move-horizontal",
+                          "width": 14,
+                          "height": 14,
+                          "icon": "move-horizontal",
+                          "library": "lucide",
+                          "fill": "$fg-2"
                         }
                       ]
                     }
@@ -4891,37 +4959,59 @@
               "children": [
                 {
                   "type": "frame",
-                  "id": "GTvjH",
-                  "name": "FlowChip / 导入 / 选中",
+                  "id": "lmLhA",
+                  "name": "FlowSlot / 导入",
+                  "clip": true,
+                  "width": 81,
                   "height": 28,
-                  "fill": "$brand",
-                  "cornerRadius": 14,
-                  "gap": 6,
-                  "padding": [
-                    0,
-                    14
-                  ],
-                  "alignItems": "center",
+                  "layout": "vertical",
+                  "gap": -28,
                   "children": [
                     {
-                      "type": "icon",
-                      "id": "j8o4F",
-                      "name": "FlowIcon / 导入",
-                      "width": 16,
-                      "height": 16,
-                      "icon": "import",
-                      "library": "lucide",
-                      "fill": "$fg-on-brand"
+                      "type": "frame",
+                      "id": "ZXyeC",
+                      "name": "FlowIndicator / 单一移动背景",
+                      "width": 81,
+                      "height": 28,
+                      "fill": "$brand",
+                      "cornerRadius": 14
                     },
                     {
-                      "type": "text",
-                      "id": "nP5PU",
-                      "name": "FlowLabel / 导入",
-                      "fill": "$fg-on-brand",
-                      "content": "导入",
-                      "fontFamily": "Inter",
-                      "fontSize": 15,
-                      "fontWeight": "500"
+                      "type": "frame",
+                      "id": "GTvjH",
+                      "name": "FlowChip / 导入 / foreground",
+                      "width": 81,
+                      "height": 28,
+                      "fill": "#00000000",
+                      "cornerRadius": 14,
+                      "gap": 6,
+                      "padding": [
+                        0,
+                        14
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "j8o4F",
+                          "name": "FlowIcon / 导入",
+                          "width": 16,
+                          "height": 16,
+                          "icon": "import",
+                          "library": "lucide",
+                          "fill": "$fg-on-brand"
+                        },
+                        {
+                          "type": "text",
+                          "id": "nP5PU",
+                          "name": "FlowLabel / 导入",
+                          "fill": "$fg-on-brand",
+                          "content": "导入",
+                          "fontFamily": "Inter",
+                          "fontSize": 15,
+                          "fontWeight": "500"
+                        }
+                      ]
                     }
                   ]
                 },
@@ -7070,7 +7160,7 @@
                 {
                   "type": "frame",
                   "id": "bAm85",
-                  "name": "GridControlBar",
+                  "name": "TilesStatusbar / Import",
                   "width": "fill_container",
                   "height": 32,
                   "gap": 8,
@@ -7113,6 +7203,29 @@
                       "name": "SpacerC2",
                       "width": "fill_container",
                       "height": 1
+                    },
+                    {
+                      "type": "frame",
+                      "id": "QtNKO",
+                      "name": "Toggle / 文件名 / 已开启（一级开关）",
+                      "width": 28,
+                      "height": 28,
+                      "fill": "$state-selected",
+                      "cornerRadius": 4,
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "MTnHV",
+                          "name": "Glyph / file-text",
+                          "width": 14,
+                          "height": 14,
+                          "icon": "file-text",
+                          "library": "lucide",
+                          "fill": "$brand"
+                        }
+                      ]
                     },
                     {
                       "type": "frame",
@@ -7187,6 +7300,29 @@
                           "fill": "$surface-track",
                           "cornerRadius": 1,
                           "alignItems": "center"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "ebQaF",
+                      "name": "IconButton / 适合窗口 / 无按下状态",
+                      "width": 28,
+                      "height": 28,
+                      "fill": "$surface-layer",
+                      "cornerRadius": 4,
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "zhnfN",
+                          "name": "Glyph / move-horizontal",
+                          "width": 14,
+                          "height": 14,
+                          "icon": "move-horizontal",
+                          "library": "lucide",
+                          "fill": "$fg-2"
                         }
                       ]
                     }
@@ -7938,37 +8074,59 @@
               "children": [
                 {
                   "type": "frame",
-                  "id": "ecbNc",
-                  "name": "FlowChip / 导入 / 选中",
+                  "id": "yQZyw",
+                  "name": "FlowSlot / 导入",
+                  "clip": true,
+                  "width": 93,
                   "height": 34,
-                  "fill": "$brand",
-                  "cornerRadius": 17,
-                  "gap": 6,
-                  "padding": [
-                    0,
-                    20
-                  ],
-                  "alignItems": "center",
+                  "layout": "vertical",
+                  "gap": -34,
                   "children": [
                     {
-                      "type": "icon",
-                      "id": "zaOIj",
-                      "name": "FlowIcon / 导入",
-                      "width": 16,
-                      "height": 16,
-                      "icon": "import",
-                      "library": "lucide",
-                      "fill": "$fg-on-brand"
+                      "type": "frame",
+                      "id": "x2aIj3",
+                      "name": "FlowIndicator / 单一移动背景",
+                      "width": 93,
+                      "height": 34,
+                      "fill": "$brand",
+                      "cornerRadius": 17
                     },
                     {
-                      "type": "text",
-                      "id": "OHroW",
-                      "name": "FlowLabel / 导入",
-                      "fill": "$fg-on-brand",
-                      "content": "导入",
-                      "fontFamily": "Inter",
-                      "fontSize": 15,
-                      "fontWeight": "500"
+                      "type": "frame",
+                      "id": "ecbNc",
+                      "name": "FlowChip / 导入 / foreground",
+                      "width": 93,
+                      "height": 34,
+                      "fill": "#00000000",
+                      "cornerRadius": 17,
+                      "gap": 6,
+                      "padding": [
+                        0,
+                        20
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "zaOIj",
+                          "name": "FlowIcon / 导入",
+                          "width": 16,
+                          "height": 16,
+                          "icon": "import",
+                          "library": "lucide",
+                          "fill": "$fg-on-brand"
+                        },
+                        {
+                          "type": "text",
+                          "id": "OHroW",
+                          "name": "FlowLabel / 导入",
+                          "fill": "$fg-on-brand",
+                          "content": "导入",
+                          "fontFamily": "Inter",
+                          "fontSize": 15,
+                          "fontWeight": "500"
+                        }
+                      ]
                     }
                   ]
                 },
@@ -10059,7 +10217,7 @@
                 {
                   "type": "frame",
                   "id": "VXO5E",
-                  "name": "GridControlBar",
+                  "name": "TilesStatusbar / Import",
                   "width": "fill_container",
                   "height": 38,
                   "gap": 8,
@@ -10102,6 +10260,29 @@
                       "name": "SpacerC2",
                       "width": "fill_container",
                       "height": 1
+                    },
+                    {
+                      "type": "frame",
+                      "id": "i8cWC",
+                      "name": "Toggle / 文件名 / 已开启（一级开关）",
+                      "width": 34,
+                      "height": 34,
+                      "fill": "$state-selected",
+                      "cornerRadius": 4,
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "uPKpr",
+                          "name": "Glyph / file-text",
+                          "width": 16,
+                          "height": 16,
+                          "icon": "file-text",
+                          "library": "lucide",
+                          "fill": "$brand"
+                        }
+                      ]
                     },
                     {
                       "type": "frame",
@@ -10176,6 +10357,29 @@
                           "fill": "$surface-track",
                           "cornerRadius": 1,
                           "alignItems": "center"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "xZtlc",
+                      "name": "IconButton / 适合窗口 / 无按下状态",
+                      "width": 34,
+                      "height": 34,
+                      "fill": "$surface-layer",
+                      "cornerRadius": 4,
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "WWiKv",
+                          "name": "Glyph / move-horizontal",
+                          "width": 16,
+                          "height": 16,
+                          "icon": "move-horizontal",
+                          "library": "lucide",
+                          "fill": "$fg-2"
                         }
                       ]
                     }
@@ -12148,14 +12352,69 @@
           "fontWeight": "normal"
         },
         {
-          "type": "text",
-          "id": "u1gdpD",
-          "name": "Dialog Hint",
-          "fill": "$fg-2",
-          "content": "版本 0.1.0 · AGPL-3.0-only · 相片管理",
-          "fontFamily": "Inter",
-          "fontSize": 12,
-          "fontWeight": "normal"
+          "type": "frame",
+          "id": "U7LOl",
+          "name": "About Brand / 放大软件图标",
+          "width": "fill_container",
+          "height": 80,
+          "gap": 16,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "K5v3vj",
+              "name": "RayBend App Image / 80×80",
+              "width": 80,
+              "height": 80,
+              "fill": "$brand",
+              "cornerRadius": 16,
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "PFNvL",
+                  "name": "Glyph / aperture",
+                  "width": 46,
+                  "height": 46,
+                  "icon": "aperture",
+                  "library": "lucide",
+                  "fill": "$fg-on-brand"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "CGHPe",
+              "name": "About Product Copy",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 6,
+              "justifyContent": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "u1gdpD",
+                  "name": "Dialog Hint",
+                  "fill": "$fg-2",
+                  "content": "版本 0.1.0 · AGPL-3.0-only · 相片管理",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "jLqpf",
+                  "name": "About Tagline",
+                  "fill": "$fg-2",
+                  "content": "面向摄影师的本地相片管理器",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
         },
         {
           "type": "frame",
@@ -12211,7 +12470,7 @@
             {
               "type": "frame",
               "id": "S528l",
-              "name": "Button / 取消",
+              "name": "Button / 关闭",
               "height": 32,
               "fill": "$surface-track",
               "cornerRadius": "$radius",
@@ -12234,7 +12493,7 @@
             {
               "type": "frame",
               "id": "Eep7d",
-              "name": "Button / 暂停",
+              "name": "Button / 查看许可",
               "height": 32,
               "fill": "$brand",
               "cornerRadius": "$radius",

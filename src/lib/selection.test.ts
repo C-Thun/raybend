@@ -14,6 +14,7 @@ import {
   clickMode,
   EMPTY_SELECTION,
   extendSelection,
+  focusSelection,
   hasSelection,
   invertSet,
   pruneSelection,
@@ -128,6 +129,17 @@ test("全选与清空", () => {
   assert.equal(all.anchor, "a");
   assert.equal(selectAll([]), EMPTY_SELECTION);
   assert.equal(clearSelection().ids.size, 0);
+});
+
+test("focusSelection：只挪锚点，不改多选集合", () => {
+  const current = state(["a", "b", "c"], "a");
+  const focused = focusSelection(current, "c");
+  assert.equal(focused.ids, current.ids, "集合沿用同一份，只改变锚点");
+  assert.deepEqual(sorted(focused), ["a", "b", "c"]);
+  assert.equal(focused.anchor, "c");
+
+  assert.equal(focusSelection(focused, "c"), focused, "重复聚焦不制造新状态");
+  assert.equal(focusSelection(focused, "z"), focused, "目标不在选择中就不动");
 });
 
 test("hasSelection / selectionCount：按当前列表算", () => {

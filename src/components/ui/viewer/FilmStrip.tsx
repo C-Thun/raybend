@@ -2,14 +2,19 @@
  * 胶片带（`BROWSE.md` §5.5、`design/browse.md` §2.5、`plans/M2-W2.md` 2.1）。
  *
  * ```text
- * ┌───────────────────────────────────────────────────────────────┐  104 高
- * │ ▢ ▢ ▣ ◻ ▢ …                                                   │  96×80 一张，横向滚动
- * └───────────────────────────────────────────────────────────────┘
+ * ┌───────────────────────────────────────────────────────────────┐  tile 高 + 上下各 8px
+ * │ ▢ ▢ ▣ ◻ ▢ …                                                   │  默认 158×132，横向滚动
+ * └───────────────────────────────────────────────────────────────┘  ↑ 2px 无感滚动条
  * ```
  *
- * 画布（`Shell / Browse / View` 的 `FilmStrip`）给的值：**104 高**、缩略 **96×80**、
- * 间距 6、左右内边距 8、底 `$surface-main`；缩略圆角 4；
+ * 画布（`Shell / Browse / View` 的 `FilmStrip`）已同步为默认 **148 高**、缩略
+ * **158×132**，间距 6、左右与上下内边距 8、底 `$surface-main`；缩略圆角 4；
  * **选中** = 铺 `$state-selected`，**当前那张**（锚点）再加 **1px `$brand` 描边**。
+ *
+ * 2026-09-20 最终口径：缩略 tile 是约 100–240px 的 **17 档**，默认 132px；
+ * 胶片带总高度由 tile + 固定上下边距推导。`Ctrl + 滚轮` 调档，不另放界面控件。
+ * 原生横向滚动条不显示（它占高度且时有时无），位置由底部 2px 的
+ * `SubtleScrollbar` 指示；普通滚轮仍转换成横向滚动。
  *
  * ## 三条纪律
  *
@@ -26,7 +31,12 @@ import { createEffect, createMemo, For, on, Show, type JSX } from "solid-js";
 import { IconLock } from "@tabler/icons-solidjs";
 
 import { clickMode } from "../../../lib/selection.ts";
+import {
+  filmStripMetric,
+  nextFilmStripStep,
+} from "../../../lib/film-strip-size.ts";
 import { t } from "../../../i18n/index.ts";
+import { SubtleScrollbar } from "../SubtleScrollbar.tsx";
 import type { ThumbQueue } from "../thumb-queue.ts";
 import type { ViewerPhoto, ViewerStore } from "./index.ts";
 import {
@@ -63,11 +73,16 @@ export interface FilmStripProps {
    * 点一张也是「带 Ctrl 的效果」（点什么就把什么移出对比）。
    */
   onlyIds?: readonly string[];
+  /** 当前工作流自己的持久化尺寸档位（0..16）。 */
+  sizeStep: number;
+  /** Ctrl + 滚轮得到的新档位；数据库防抖由组装层处理。 */
+  onSizeStepChange: (step: number) => void;
   class?: string;
 }
 
 export function FilmStrip(props: FilmStripProps): JSX.Element {
   let scroller: HTMLDivElement | undefined;
+  const metric = createMemo(() => filmStripMetric(props.sizeStep));
 
   const allPhotos = createMemo(() => props.viewer.state().photos);
   /** 对比态子集：给定 id 顺序优先（胶片带与画幅顺序一致），否则就是全部 */
@@ -118,7 +133,7 @@ export function FilmStrip(props: FilmStripProps): JSX.Element {
   };
 
   const contentKey = createMemo(() =>
-    `${compareOnly() ? "compare" : "all"}\u001e${photos().map((photo) => photo.id).join("\u001f")}`,
+    `${compareOnly() ? "compare" : "all"}\u001esize:${metric().step}\u001e${photos().map((photo) => photo.id).join("\u001f")}`,
   );
 
   createEffect<string | undefined>((previous) => {
@@ -212,29 +227,71 @@ export function FilmStrip(props: FilmStripProps): JSX.Element {
     if (at >= 0) props.viewer.goTo(at);
   };
 
+  /**
+   * 滚轮：**纵向滚轮 → 横向滚动**。
+   *
+   * 原生横向滚动条被 `.scrollbar-none` 隐藏之后，纵向滚轮在 Chromium 里不会横向滚
+   * 这个容器 —— 不自己转就等于「既没有滚动条、也滚不动」（人类 2026-09-20）。
+   * 触屏左右划动走原生（`overflow-x-auto` 的触摸平移），不经这里。
+   */
+  const onWheel = (event: WheelEvent): void => {
+    if (scroller === undefined) return;
+    /*
+     * 隐藏缩放：Ctrl + 滚轮只调胶片带 tile 的 17 档，不让 WebView 接走做页面缩放。
+     * 一次事件只走一档 —— 高精度触控板会连续送事件，本身就形成细腻过渡；普通鼠标
+     * 一格也只走一档，不会因为 `deltaY=120` 一口气跳好几档。
+     */
+    if (event.ctrlKey) {
+      event.preventDefault();
+      const delta = Math.abs(event.deltaY) >= Math.abs(event.deltaX)
+        ? event.deltaY
+        : event.deltaX;
+      if (delta === 0) return;
+      rememberReference();
+      props.onSizeStepChange(nextFilmStripStep(metric().step, delta < 0 ? 1 : -1));
+      return;
+    }
+    // 装得下就不拦：没有可滚的余量时把滚轮留给外层（虽然胶片带下面已经到底了）
+    if (scroller.scrollWidth - scroller.clientWidth <= 1) return;
+    // 横向分量本来就有的（触控板横扫 / Shift + 滚轮）交给原生
+    if (Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return;
+    event.preventDefault();
+    // `deltaMode`：0 = 像素、1 = 行（旧式鼠标滚轮）—— 行要乘一个行高再换算
+    const unit = event.deltaMode === 1 ? 16 : 1;
+    scroller.scrollLeft += event.deltaY * unit;
+  };
+
   return (
-    <div
-      ref={scroller}
-      data-filmstrip="open"
-      onScroll={rememberReference}
-      /*
-       * `overflow-x-auto` + `shrink-0` 的子项：横向滚动条只在需要时出现；
-       * 纵向不滚（104 高放得下 80 的缩略 + 上下各 12 的呼吸）。
-       *
-       * 里面那一行是 `w-max mx-auto`：**装得下就居中**（人类 2026-09-20），
-       * 装不下时 auto 外边距归零、就还是原来那样从左排起、横向滚动。
-       * 不用 `justify-center`：flex 的居中对**溢出**会两头都截，起始那几张滚不回来。
-       */
-      class={[
-        "h-[104px] shrink-0 overflow-x-auto overflow-y-hidden bg-surface-main",
-        // 「只看对比图」= 整条 1px 主色细边框（画布 `Shell / Browse / Compare` 的 FilmStrip）
-        compareOnly() ? "border border-brand" : "",
-        props.class ?? "",
-      ]
-        .filter(Boolean)
-        .join(" ")}
-      data-strip-mode={compareOnly() ? "compare" : "all"}
-    >
+    /*
+     * 外层只管「相对定位」：2px 无感滚动条要贴在**容器底边**上（放在滚动容器里面
+     * 会跟着内容一起滚走）。`shrink-0` 挂外层 —— 它才是 flex 列里的那一项。
+     */
+    <div class={["relative shrink-0", props.class ?? ""].filter(Boolean).join(" ")}>
+      <div
+        ref={scroller}
+        data-filmstrip="open"
+        onScroll={rememberReference}
+        onWheel={onWheel}
+        /*
+         * `overflow-x-auto` 但**不给滚动条**：原生横向滚动条会占高度且时有时无，
+         * 一出现就把缩略图挤小（人类 2026-09-20）—— 位置改由 `SubtleScrollbar` 指示。
+         * 纵向不滚（总高度始终等于 tile 高度 + 上下各 8px）。
+         *
+         * 里面那一行是 `w-max mx-auto`：**装得下就居中**（人类 2026-09-20），
+         * 装不下时 auto 外边距归零、就还是原来那样从左排起、横向滚动。
+         * 不用 `justify-center`：flex 的居中对**溢出**会两头都截，起始那几张滚不回来。
+         */
+        class={[
+          "w-full overflow-x-auto overflow-y-hidden overscroll-x-contain scrollbar-none bg-surface-main",
+          // 「只看对比图」= 整条 1px 主色细边框（画布 `Shell / Browse / Compare` 的 FilmStrip）
+          compareOnly() ? "border border-brand" : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
+        data-strip-mode={compareOnly() ? "compare" : "all"}
+        data-filmstrip-step={metric().step}
+        style={{ height: `${metric().stripHeight}px` }}
+      >
       <div class="mx-auto flex h-full w-max items-center gap-1.5 px-2">
       <For each={photos()}>
         {(photo) => {
@@ -253,7 +310,7 @@ export function FilmStrip(props: FilmStripProps): JSX.Element {
               title={photo.fileName}
               onClick={(event) => onThumb(photo, event)}
               class={[
-                "relative h-20 w-24 shrink-0 overflow-hidden rounded-ui p-0.5",
+                "relative shrink-0 overflow-hidden rounded-ui p-0.5",
                 /*
                  * 选中 = 铺 `$state-selected`（照片四周留 2px，底色才看得见 —— 与网格
                  * 的 tile 同一个手法）；当前那张（锚点）再加 1px 主色描边。
@@ -263,6 +320,10 @@ export function FilmStrip(props: FilmStripProps): JSX.Element {
                   ? "border border-brand"
                   : "border border-transparent hover:bg-state-hover",
               ].join(" ")}
+              style={{
+                width: `${metric().tileWidth}px`,
+                height: `${metric().tileHeight}px`,
+              }}
             >
               <Show
                 when={props.thumbs.get(photo.path).url}
@@ -297,6 +358,12 @@ export function FilmStrip(props: FilmStripProps): JSX.Element {
         }}
       </For>
       </div>
+      </div>
+      {/*
+       * 2px 进度指示（`SubtleScrollbar`）：绝对定位、不占布局空间，
+       * 所以「可滚 / 不可滚」都不会改变缩略图尺寸 —— 那正是要它来的原因。
+       */}
+      <SubtleScrollbar target={() => scroller} />
     </div>
   );
 }

@@ -11,6 +11,18 @@
 @import "./styles/scrollbar.css";
 @import "./styles/motion.css";
 
+/*
+ * 直方图只画三条完整路径，交叠颜色交给合成器：深色底用 screen、浅色底用 multiply。
+ * 这比逐段切七种交叠区域更快，也不会在曲线交叉处留下亚像素空缝。
+ */
+.histogram-channel {
+  mix-blend-mode: screen;
+  transition: opacity 100ms linear;
+}
+
+:root[data-theme="light"] .histogram-channel {
+  mix-blend-mode: multiply;
+}
 html,
 body,
 #root {

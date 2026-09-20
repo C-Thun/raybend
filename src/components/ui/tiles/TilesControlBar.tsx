@@ -14,7 +14,7 @@
  *    * 缩放条用**导入侧那档**（两端带加减号图标、`w-40`）；
  *    * 排序**保留为可配置项**：浏览侧传 `sort`，导入侧现在不传
  *      （以后想开就传同一份 props，不用改这个文件）；
- *    * `信息`（三态开关）两边都有，走 `components/ui/tile-info.ts` 这个单例。
+ *    * `信息`由工作区注入：browse 是三态，import 是「关 / 文件名」两态，持久化互不串线。
  *
  * 组件只吃**数据 + 回调**，不认识任何 store、不 import 任何 feature ——
  * 所以它住在 `components/ui/`，两个工作区各自把配置灌进来。
@@ -25,6 +25,7 @@ import {
   IconArrowDown,
   IconArrowUp,
   IconClock,
+  IconArrowsHorizontal,
   IconInfoCircle,
   IconLock,
   IconZoomIn,
@@ -33,12 +34,12 @@ import {
 import { PathText } from "../PathText.tsx";
 import { PhotoMarks } from "../PhotoMarks.tsx";
 import { Slider } from "../Slider.tsx";
-import { cycleTileInfo, infoMode } from "../tile-info.ts";
 import { ToggleBlock } from "../ToggleBlock.tsx";
 import { Menu } from "../Menu.tsx";
 import { locale as uiLocale, t } from "../../../i18n/index.ts";
 import { formatCount, type GroupingLocale } from "../../../lib/format.ts";
 import { TILE_SIZE_STEPS } from "../../../lib/tile-flow.ts";
+import type { TileInfoMode } from "../../../lib/display-prefs.ts";
 
 /** 排序控件要的全部东西（浏览侧现在是排序键 + 升降两件；以后还有别的键也无所谓） */
 export interface TilesSortConfig {
@@ -89,11 +90,16 @@ export interface TilesControlBarProps {
   /** 是否处于「按时间」模式 */
   byTime: boolean;
   onByTimeChange: (value: boolean) => void;
-  /** 档位下标（`lib/tile-flow.ts` 的 9 档） */
+  /** 当前工作区自己的信息档位与切换动作。 */
+  infoMode: TileInfoMode;
+  onInfoToggle: () => void;
+  /** 连续档位位置（锚点来自 `lib/tile-flow.ts` 的 17 档，允许落在两档之间） */
   tileStep: number;
   onTileStepChange: (step: number) => void;
   /** 拖拽结束（用于落盘，别在拖动过程中写设置） */
   onTileStepCommit?: (step: number) => void;
+  /** 把当前横向一排铺满窗口（由 TilesShell 交给网格计算）。 */
+  onFitRow?: () => void;
   /**
    * 语言（数字分组用它）。**不给就按当前界面语言自动取** ——
    * 免得每个调用方再抄一遍「locale → GroupingLocale」的映射
@@ -107,7 +113,26 @@ export interface TilesControlBarProps {
   class?: string;
 }
 
-export function TilesControlBar(props: TilesControlBarProps) {
+export interface TilesControlBarComponentProps {
+  /**
+   * 配置必须以 accessor 传入：父级每次缩放都会产生一份新配置对象，但组件实例不能因此
+   * 重建，否则 Ark Slider 会在拖动第一格后丢掉 pointer capture。
+   */
+  config: () => TilesControlBarProps;
+  onFitRow: () => void;
+}
+
+export function TilesControlBar(input: TilesControlBarComponentProps) {
+  /*
+   * 保留下面清晰的 props.xxx 写法，同时让每一次读取都落到最新配置。
+   * 这个代理只服务二十来个状态栏字段，不进列表热路径。
+   */
+  const props = new Proxy({} as TilesControlBarProps, {
+    get: (_target, key) => {
+      if (key === "onFitRow") return input.onFitRow;
+      return input.config()[key as keyof TilesControlBarProps];
+    },
+  });
   /** 分组语言：调用方给了就用它的，否则跟界面语言走 */
   const groupLocale = (): GroupingLocale =>
     props.locale ?? (uiLocale() === "en-US" ? "en-US" : "zh-CN");
@@ -196,23 +221,19 @@ export function TilesControlBar(props: TilesControlBarProps) {
         )}
       </Show>
 
-      {/*
-        「信息」三态开关（人类 2026-09-19）：`off` → `marks`（只标记）→ `marks-name`（标记 + 文件名）。
-        背景按全局反馈规则：未选中**无底色**、第一档**辅色底**、第二档**主色底**（DESIGN.md §5）。
-        快捷键是 `i`（只在 tiles / film 下生效，见两个工作区的键盘处理）。
-      */}
+      {/* `信息`档位由调用方控制；import 只会给 off / marks-name，browse 保留三态。 */}
       <button
         type="button"
-        data-tile-info={infoMode()}
-        aria-pressed={infoMode() !== "off"}
+        data-tile-info={props.infoMode}
+        aria-pressed={props.infoMode !== "off"}
         aria-label={t("grid.info")}
         title={t("grid.info")}
-        onClick={() => cycleTileInfo()}
+        onClick={props.onInfoToggle}
         class={[
           "flex h-6 shrink-0 cursor-pointer items-center gap-1 rounded-ui px-1.5 text-fs-1 transition-colors",
-          infoMode() === "marks-name"
+          props.infoMode === "marks-name"
             ? "bg-state-selected text-fg-1"
-            : infoMode() === "marks"
+            : props.infoMode === "marks"
               ? "bg-state-hover text-fg-1"
               : "text-fg-2 hover:bg-state-hover hover:text-fg-1",
         ].join(" ")}
@@ -231,11 +252,12 @@ export function TilesControlBar(props: TilesControlBarProps) {
         <span class="whitespace-nowrap">{t("grid.by_time")}</span>
       </ToggleBlock>
 
-      {/* 缩放：9 档离散，两端带加减号（用导入侧那档） */}
+      {/* 缩放：17 个预设锚点之间允许连续落点，两端带加减号 */}
       <Slider
         value={props.tileStep}
         min={0}
         max={TILE_SIZE_STEPS.length - 1}
+        step={0.01}
         label={t("grid.zoom")}
         onValueChange={props.onTileStepChange}
         {...(props.onTileStepCommit === undefined
@@ -245,6 +267,15 @@ export function TilesControlBar(props: TilesControlBarProps) {
         endIcon={<IconZoomIn size={14} />}
         class="w-40 shrink-0"
       />
+      <button
+        type="button"
+        aria-label={t("grid.fit_row")}
+        title={t("grid.fit_row")}
+        onClick={props.onFitRow}
+        class="flex size-6 shrink-0 items-center justify-center rounded-ui bg-state-hover text-fg-2 transition-colors hover:bg-state-hover hover:text-fg-1"
+      >
+        <IconArrowsHorizontal size={16} aria-hidden="true" />
+      </button>
     </BarFrame>
   );
 }

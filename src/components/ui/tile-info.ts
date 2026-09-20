@@ -1,33 +1,33 @@
 /**
- * tiles 的「信息」档位 —— **import 与 browse 共用同一个状态**（人类 2026-09-19）。
+ * tiles 的「信息」档位。视图实现只有一份，偏好按 import / browse 分开持久化。
  *
- * 三态循环（状态栏那个 `i` 按钮或 `i` 键切）：
+ * browse 的三态循环（statusbar 的 `i` 按钮或 `i` 键切）：
  *
  *   `off`（默认）→ `marks`（只显示标记）→ `marks-name`（标记 + 文件名）→ `off`
  *
- * 为什么做成**模块级单例信号**而不是塞进某个 store：
- *   - 两个工作区的网格 store 是两个类型，塞进任何一个都会逼另一侧去适配；
- *   - 而「tiles 的信息档位」在业务上就是**一个**用户偏好（他看的是同一批 tiles），
- *     两个地方各存一份反而会出现「切了工作流档位变了」的怪事。
- * 状态栏按钮、两个网格、两处键盘处理都读它 —— 只有这一份实现。
+ * 为什么信号放在共享模块而不是塞进某个 store：两个工作区的网格 store 是两个类型，
+ * 但它们应当复用同一套读写与迁移框架；具体值按 import / browse 隔离。
  */
 
 import {
-  displayInfoMode,
-  setDisplayInfoMode,
+  browseDisplayInfoMode,
+  importDisplayInfoMode,
+  setBrowseDisplayInfoMode,
+  setImportDisplayInfoMode,
   type TileInfoMode,
 } from "../../lib/display-prefs.ts";
 
 export const TILE_INFO_CYCLE: readonly TileInfoMode[] = ["off", "marks", "marks-name"];
 
 /**
- * 当前档位（模块级单例）。
+ * 两个作用域各自的当前档位。
  *
  * 状态本身住在 `lib/display-prefs.ts`：那里同时负责**落盘**（人类 2026-09-20：
- * 信息显示级别要持久化）与 import / browse 共用一份。这里只保留「tiles 信息档位」
- * 这个业务名字与循环规则 —— 没有第二份信号。
+ * 信息显示级别要持久化）由 `display-prefs.ts` 统一管理。这里只保留「tiles 信息档位」
+ * 这个业务名字与循环规则，不另造持久化渠道。
  */
-export const infoMode = displayInfoMode;
+export const browseInfoMode = browseDisplayInfoMode;
+export const importInfoMode = importDisplayInfoMode;
 
 /** 下一个档位（`off → marks → marks-name → off`） */
 export function nextTileInfoMode(current: TileInfoMode): TileInfoMode {
@@ -37,8 +37,13 @@ export function nextTileInfoMode(current: TileInfoMode): TileInfoMode {
 }
 
 /** 切到下一档（按钮与 `i` 键都走这里）—— 切完立刻落盘 */
-export function cycleTileInfo(): void {
-  setDisplayInfoMode(nextTileInfoMode(infoMode()));
+export function cycleBrowseTileInfo(): void {
+  setBrowseDisplayInfoMode(nextTileInfoMode(browseInfoMode()));
+}
+
+/** import 只有一级：关 ↔ 显示全部（当前就是文件名）。 */
+export function toggleImportTileInfo(): void {
+  setImportDisplayInfoMode(importInfoMode() === "off" ? "marks-name" : "off");
 }
 
 /**

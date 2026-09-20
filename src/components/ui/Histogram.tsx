@@ -1,120 +1,137 @@
 /**
- * `Histogram` —— RGB 直方图（三通道填充折线 + 加色区域），看图与**将来的编辑模块共用**。
+ * RGB 直方图：三条完整填充曲线 + 内置通道选择器与亮度指示。
  *
- * 为什么提到 `components/ui/`（而不是留在浏览的右栏里）：人类 2026-09-19 明确
- * 「这个组件需要优化成方便后续编辑时实时调整的状态」—— 编辑模块要拿它当
- * **实时反馈件**（拖曝光/对比时每帧重画），所以它必须：
- *
- *   * **只吃数据**：`bars` 是已经归一化好的采样（`lib` 算的），组件不碰 IPC、不碰 store；
- *   * **重画只是一个纯函数调用**：调用方把新的 `bars` 传进来就换一帧，
- *     不需要重新挂载、不需要重新请求后端；
- *   * **没有内部状态**（没有信号、没有 effect）—— 这既让它便宜，也让它可以被任意父层驱动。
- *
- * 画法（人类 2026-09-19 的三条要求）：
- *
- * 1. **52 个采样点**（0..255 每 5 级一个点）—— 点数由数据决定，组件不关心；
- * 2. **点与点之间是直线**（见 `lib`；重叠色带的两条边不会因分别拟合而交叉）；
- * 3. **颜色就是色标那六色**：单通道 = 红/绿/蓝，两两重叠 = 黄/青/紫（绿+红=黄、
- *    蓝+绿=青、红+蓝=紫），三色重叠 = 一个偏亮的**中间灰**（不是纯白）。
- *    实现上**不靠混合模式取色**，而是把 7 个区域显式切开各填各色 —— 颜色因此是
- *    令牌里那个色，改色标只改令牌。
- *
- * 背景（人类要求）：**很浅的细密虚线**，纵向 4 等分、横向上下 2 等分 ——
- * 只给亮度轴一个参照，不能跟曲线抢注意力。
+ * 不再把交叠区切成七块硬填色。那套算法在通道交叉的亚像素边界会留下细缝，而且
+ * 每次输入变化都要构造 14 条上下边界。现在始终只有三条闭合 path，由浏览器合成：
+ * 没有几何缝隙，数据源实时变化时也只更新三条路径。
  */
 
-import { For } from "solid-js";
+import { For, createSignal } from "solid-js";
 import { t } from "../../i18n/index.ts";
-import {
-  histogramBandPath,
-  histogramBands,
-  histogramPath,
-  type HistogramBars,
-} from "../../lib/histogram.ts";
-import { COLOR_FILL_CLASS } from "../../lib/color-labels.ts";
+import { histogramPath, type HistogramBars } from "../../lib/histogram.ts";
 
-/** 画布坐标系（`preserveAspectRatio="none"` 拉伸到实际尺寸；这样与像素宽度无关） */
 const VIEW_W = 256;
 const VIEW_H = 100;
+type Channel = "r" | "g" | "b";
+
+const CHANNELS: readonly Channel[] = ["r", "g", "b"];
+const CHANNEL_FILL: Record<Channel, string> = {
+  r: "fill-(--label-red)",
+  g: "fill-(--label-green)",
+  b: "fill-(--label-blue)",
+};
+const CHANNEL_NAME = {
+  r: "browse.histogramRed",
+  g: "browse.histogramGreen",
+  b: "browse.histogramBlue",
+} as const;
 
 export interface HistogramProps {
-  /** 归一化后的采样（`histogramBarHeights` 的产物）；`null` = 还没取到，画空态 */
   bars: HistogramBars | null;
   class?: string;
 }
 
 export function Histogram(props: HistogramProps) {
-  /** 7 个区域（每列按高度排序切开），只在数据变化时重算 */
-  const bands = () => {
-    const current = props.bars;
-    return current === null ? null : histogramBands(current.r, current.g, current.b);
+  const [selected, setSelected] = createSignal<Channel | null>(null);
+  const [level, setLevel] = createSignal<number | null>(null);
+
+  const drawOrder = (): Channel[] => {
+    const active = selected();
+    return active === null
+      ? [...CHANNELS]
+      : [...CHANNELS.filter((channel) => channel !== active), active];
   };
+  const values = (channel: Channel): readonly number[] => props.bars?.[channel] ?? [];
+
+  function track(event: PointerEvent): void {
+    const rect = event.currentTarget instanceof Element
+      ? event.currentTarget.getBoundingClientRect()
+      : null;
+    if (rect === null || rect.width <= 0) return;
+    const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+    setLevel(Math.round(ratio * 255));
+  }
 
   return (
     <div
-      class={["relative h-[72px] w-full overflow-hidden rounded-ui bg-surface-bar", props.class ?? ""]
+      class={["flex h-44 w-full flex-col rounded-ui bg-surface-bar", props.class ?? ""]
         .filter(Boolean)
         .join(" ")}
       data-histogram={props.bars === null ? "empty" : "lines"}
+      data-channel={selected() ?? "all"}
     >
-      {/*
-        背景等分虚线（人类 2026-09-19）：
-        * 纵向 4 等分 → 3 根；横向上下 2 等分 → 1 根；
-        * 用「2px 线 + 3px 空」的细密虚线，颜色走 `--hist-grid`（很浅）；
-        * 用 DOM 而不是 SVG `stroke-dasharray`：SVG 被 `preserveAspectRatio="none"` 拉伸，
-          虚线的「段长」会跟着变形（竖线被拉长、横线被压扁），DOM 的 CSS 虚线始终是像素级的。
-      */}
-      <div class="pointer-events-none absolute inset-0" aria-hidden="true">
-        <For each={[25, 50, 75]}>
-          {(percent) => (
-            <span
-              class="absolute inset-y-0 w-px bg-[linear-gradient(to_bottom,var(--hist-grid)_0_2px,transparent_2px_5px)] bg-repeat-y"
-              style={{ left: `${percent}%` }}
-            />
-          )}
-        </For>
-        <span class="absolute inset-x-0 top-1/2 h-px bg-[linear-gradient(to_right,var(--hist-grid)_0_2px,transparent_2px_5px)] bg-repeat-x" />
+      <div
+        class="relative min-h-0 flex-1 overflow-hidden rounded-t-(--radius)"
+        onPointerMove={track}
+        onPointerLeave={() => setLevel(null)}
+      >
+        <div class="pointer-events-none absolute inset-0 z-10" aria-hidden="true">
+          <For each={[25, 50, 75]}>
+            {(percent) => (
+              <span
+                class="absolute inset-y-0 w-px bg-[linear-gradient(to_bottom,var(--hist-grid)_0_2px,transparent_2px_5px)] bg-repeat-y"
+                style={{ left: `${percent}%` }}
+              />
+            )}
+          </For>
+          <span class="absolute inset-x-0 top-1/2 h-px bg-[linear-gradient(to_right,var(--hist-grid)_0_2px,transparent_2px_5px)] bg-repeat-x" />
+        </div>
+
+        <svg
+          class="absolute inset-0 h-full w-full"
+          viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
+          preserveAspectRatio="none"
+          role="img"
+          aria-label={t("browse.histogramHint")}
+        >
+          <For each={drawOrder()}>
+            {(channel) => (
+              <path
+                d={histogramPath(values(channel), VIEW_W, VIEW_H)}
+                class={["histogram-channel", CHANNEL_FILL[channel]].join(" ")}
+                style={{
+                  opacity:
+                    selected() === null || selected() === channel ? "0.82" : "0.24",
+                }}
+              />
+            )}
+          </For>
+        </svg>
+
+        <span
+          class="pointer-events-none absolute inset-y-0 z-20 w-px bg-brand"
+          style={{ left: `${((level() ?? 0) / 255) * 100}%`, opacity: level() === null ? 0 : 0.8 }}
+          aria-hidden="true"
+        />
       </div>
 
-      <svg
-        class="relative h-full w-full"
-        viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
-        preserveAspectRatio="none"
-        role="img"
-        aria-label={t("browse.histogramHint")}
-      >
-        {/* ① 三色重叠（最低那条以下）：中间灰 —— 画在最底层 */}
-        <path
-          d={histogramPath(bands()?.rgb.top ?? [], VIEW_W, VIEW_H)}
-          class="fill-(--hist-triple)"
-        />
-        {/* ② 两两重叠：绿+红=黄、蓝+绿=青、红+蓝=紫 */}
-        <path
-          d={histogramBandPath(bands()?.rg.top ?? [], bands()?.rg.bottom ?? [], VIEW_W, VIEW_H)}
-          class={COLOR_FILL_CLASS.yellow}
-        />
-        <path
-          d={histogramBandPath(bands()?.gb.top ?? [], bands()?.gb.bottom ?? [], VIEW_W, VIEW_H)}
-          class={COLOR_FILL_CLASS.cyan}
-        />
-        <path
-          d={histogramBandPath(bands()?.rb.top ?? [], bands()?.rb.bottom ?? [], VIEW_W, VIEW_H)}
-          class={COLOR_FILL_CLASS.purple}
-        />
-        {/* ③ 单通道：红 / 绿 / 蓝（各自从中位数画到自己的高度） */}
-        <path
-          d={histogramBandPath(bands()?.r.top ?? [], bands()?.r.bottom ?? [], VIEW_W, VIEW_H)}
-          class={COLOR_FILL_CLASS.red}
-        />
-        <path
-          d={histogramBandPath(bands()?.g.top ?? [], bands()?.g.bottom ?? [], VIEW_W, VIEW_H)}
-          class={COLOR_FILL_CLASS.green}
-        />
-        <path
-          d={histogramBandPath(bands()?.b.top ?? [], bands()?.b.bottom ?? [], VIEW_W, VIEW_H)}
-          class={COLOR_FILL_CLASS.blue}
-        />
-      </svg>
+      <div class="flex h-8 shrink-0 items-center px-1.5">
+        <div class="flex items-center gap-1" role="group" aria-label={t("browse.histogramChannels")}>
+          <For each={CHANNELS}>
+            {(channel) => (
+              <button
+                type="button"
+                aria-pressed={selected() === channel}
+                aria-label={t(CHANNEL_NAME[channel])}
+                title={t(CHANNEL_NAME[channel])}
+                onClick={() => setSelected((current) => (current === channel ? null : channel))}
+                class={[
+                  "flex h-5 min-w-6 items-center justify-center rounded-ui px-1 text-fs-0 font-semibold transition-colors",
+                  selected() === channel
+                    ? "bg-state-selected text-fg-1"
+                    : "text-fg-3 hover:bg-state-hover hover:text-fg-2",
+                ].join(" ")}
+              >
+                {channel.toUpperCase()}
+              </button>
+            )}
+          </For>
+        </div>
+        <span class="min-w-0 flex-1" />
+        <span class="text-fs-0 text-fg-3 tnum" aria-live="off">
+          {level() === null ? "" : t("browse.histogramLevel", { level: level() ?? 0 })}
+        </span>
+      </div>
     </div>
   );
 }

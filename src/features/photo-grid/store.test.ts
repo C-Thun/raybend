@@ -14,8 +14,8 @@ import { test } from "node:test";
 import type { SourceItem, SourceScan, TimeEntry } from "../../api/types.ts";
 import { itemId } from "./rows.ts";
 import {
-  displayByTime,
-  displayTileStep,
+  importDisplayByTime,
+  importDisplayTileStep,
   resetDisplayPrefsForTests,
 } from "../../lib/display-prefs.ts";
 import {
@@ -430,7 +430,7 @@ test("档位：夹到合法范围；拖动中只改内存、松手才落盘", as
     "拖动过程中**不写任何存储**（一拖几百次写正是卡的原因）",
   );
   store.commitTileStep();
-  assert.equal(displayTileStep(), 0, "松手时落盘的是当前档位（共享显示偏好）");
+  assert.equal(importDisplayTileStep(), 0, "松手时落盘的是当前 import 档位");
   assert.equal(
     state.settings.get("grid.tile_step"),
     undefined,
@@ -442,14 +442,14 @@ test("档位：夹到合法范围；拖动中只改内存、松手才落盘", as
   resetDisplayPrefsForTests();
 });
 
-test("按时间：写进**共享**显示偏好（新开的 store 立刻读到，不需要 hydrate）", async () => {
+test("按时间：写进 import 显示偏好（新开的 import store 立刻读到）", async () => {
   const { api, state } = fakeApi();
   const store = createPhotoGridStore({ api });
   resetDisplayPrefsForTests();
 
   store.setByTime(true);
   await flush();
-  assert.equal(displayByTime(), true, "共享偏好已更新（两个工作区读的就是它）");
+  assert.equal(importDisplayByTime(), true, "import 偏好已更新");
   assert.equal(
     state.settings.get("grid.by_time"),
     undefined,
@@ -469,7 +469,7 @@ test("hydrate：设置里有非法值时退回默认", async () => {
   await store.hydrate();
   // 时间间隔阈值仍来自 app.db；档位来自显示偏好（那一条的校验在 display-prefs.test.ts）
   assert.equal(store.gapMinutes(), DEFAULT_GAP_MINUTES);
-  assert.equal(store.tileStep(), displayTileStep());
+  assert.equal(store.tileStep(), importDisplayTileStep());
 });
 
 test("缩略图：按需请求，命中后不再重复取", async () => {

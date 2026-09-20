@@ -21,6 +21,9 @@ import {
   tileRowCount,
   tileRowHeight,
   tileSizeAt,
+  tilePositionForSize,
+  nextTilePresetPosition,
+  fitTileSizeToRow,
   nextIndexForArrow,
 } from "./tile-flow.ts";
 
@@ -205,7 +208,7 @@ test("越界下标被夹到合法范围", () => {
   assert.equal(clampTileStepIndex(-999), 0);
   assert.equal(clampTileStepIndex(last + 1), last);
   assert.equal(clampTileStepIndex(999), last);
-  assert.equal(clampTileStepIndex(2.6), 3, "小数四舍五入");
+  assert.equal(clampTileStepIndex(2.6), 2.6, "连续位置不能被取整");
   assert.equal(
     clampTileStepIndex(Number.NaN),
     DEFAULT_TILE_STEP_INDEX,
@@ -217,6 +220,37 @@ test("tileSizeAt 对越界与非法下标都返回合法档位", () => {
   assert.equal(tileSizeAt(-5), TILE_SIZE_STEPS[0]);
   assert.equal(tileSizeAt(100), TILE_SIZE_STEPS[TILE_SIZE_STEPS.length - 1]);
   assert.equal(tileSizeAt(Number.NaN), tileSizeAt(DEFAULT_TILE_STEP_INDEX));
+});
+
+test("连续档位：尺寸与位置可逆，不会在 fit 后跳档", () => {
+  for (const position of [0, 1.25, 8.5, 15.9, TILE_SIZE_STEPS.length - 1]) {
+    const roundTrip = tilePositionForSize(tileSizeAt(position));
+    assert.ok(Math.abs(roundTrip - position) < 1e-9, `${position} → ${roundTrip}`);
+  }
+});
+
+test("相邻预设档：从小数位置向两边分别落到真正的下一档", () => {
+  assert.equal(nextTilePresetPosition(8.5, 1), 9);
+  assert.equal(nextTilePresetPosition(8.5, -1), 8);
+  assert.equal(nextTilePresetPosition(8, 1), 9);
+  assert.equal(nextTilePresetPosition(8, -1), 7);
+  assert.equal(nextTilePresetPosition(0, -1), 0);
+  assert.equal(nextTilePresetPosition(16, 1), 16);
+});
+
+test("适合窗口：维持当前列数吃掉余量；单格溢出时允许缩小", () => {
+  assert.equal(
+    fitTileSizeToRow({ containerWidth: 960, cellWidth: 150, gap: 8 }),
+    (960 - 5 * 8) / 6,
+  );
+  assert.equal(
+    fitTileSizeToRow({ containerWidth: 100, cellWidth: 150, gap: 8 }),
+    100,
+  );
+  assert.equal(
+    fitTileSizeToRow({ containerWidth: 0, cellWidth: 150, gap: 8 }),
+    150,
+  );
 });
 
 // ─── 展示比例（3:1 夹取）与行高 ──────────────────────────

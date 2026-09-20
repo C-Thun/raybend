@@ -13,6 +13,7 @@ import {
   createMemo,
   createSignal,
   For,
+  on,
   onCleanup,
   Show,
   type JSX,
@@ -211,14 +212,38 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
     }
   }
 
+  /**
+   * 启动恢复到一个深层目录时，把它的祖先逐层读出并展开。
+   * 只依赖 `scopePath`，所以无论恢复来自启动记忆还是将来别的入口，都走同一条路。
+   */
+  async function revealScope(relPath: string): Promise<void> {
+    const normalized = relPath.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+    if (normalized !== PHOTOS_DIR && !normalized.startsWith(`${PHOTOS_DIR}/`)) return;
+    const segments = normalized.split("/");
+    const ancestors: string[] = [];
+    for (let length = 1; length < segments.length; length += 1) {
+      ancestors.push(segments.slice(0, length).join("/"));
+    }
+    for (const parent of ancestors) await loadChildren(parent);
+    setExpanded(new Set(ancestors.slice(1)));
+  }
+
   // 换库：清空展开状态并从 **`photos/`** 读起（库根不算树的根，见 `PHOTOS_DIR`）
-  createEffect(() => {
-    const base = root();
-    setExpanded(new Set<string>());
-    setChildren(new Map());
-    setChildFlags(new Map());
-    if (base !== null) void loadChildren(PHOTOS_DIR);
-  });
+  createEffect(
+    on(root, (base) => {
+      // `on` 只订阅库根：正常点目录不能把整棵树清掉；scope 只在换库/启动恢复时读取一次。
+      const scope = store.scopePath();
+      setExpanded(new Set<string>());
+      setChildren(new Map());
+      setChildFlags(new Map());
+      if (base !== null) {
+        void (async () => {
+          await loadChildren(PHOTOS_DIR);
+          if (scope !== null) await revealScope(scope);
+        })();
+      }
+    }),
+  );
 
   /** 展开的树（前序遍历）。 */
   const treeRows = createMemo<TreeRow[]>(() => {

@@ -33,7 +33,7 @@ import {
   IconSun,
   IconX,
 } from "@tabler/icons-solidjs";
-import { For, Show, createMemo, onCleanup, onMount, type JSX } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import { createWindowChrome, tauriWindowHandle } from "../api/window.ts";
 import { IconButton } from "../components/ui/Button.tsx";
 import { Menu } from "../components/ui/Menu.tsx";
@@ -65,6 +65,10 @@ export interface TitleBarProps {
 
 export function TitleBar(props: TitleBarProps) {
   const chrome = createWindowChrome();
+  const [openMenu, setOpenMenu] = createSignal<MenuName | null>(null);
+
+  createEffect(() => props.store.pinMenus(openMenu() !== null));
+  onCleanup(() => props.store.pinMenus(false));
 
   onMount(() => {
     void (async () => {
@@ -181,15 +185,21 @@ export function TitleBar(props: TitleBarProps) {
             <For each={[...MENU_ORDER]}>
               {(name) => (
                 <Menu
+                  open={openMenu() === name}
                   label={t(`titlebar.menu.${name}` as MessageKey)}
                   placement="bottom-start"
                   items={menuItems().get(name) ?? []}
                   onSelect={(value) => runById(value)}
-                  onOpenChange={(open) => props.store.pinMenus(open)}
+                  onOpenChange={(open) =>
+                    setOpenMenu((current) => (open ? name : current === name ? null : current))
+                  }
                 >
                   {(triggerProps) => (
                     <button
                       {...triggerProps()}
+                      onPointerEnter={() => {
+                        if (openMenu() !== null && openMenu() !== name) setOpenMenu(name);
+                      }}
                       class="rounded-ui px-2 py-0.5 text-fs-2 text-fg-2 transition-colors hover:bg-state-hover hover:text-fg-1"
                     >
                       {t(`titlebar.menu.${name}` as MessageKey)}

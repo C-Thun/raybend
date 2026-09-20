@@ -11,9 +11,11 @@ export interface ImportActions {
   viewing: () => boolean;
   /** 看图态下胶片带可见（`infoKeyApplies` 要这一项） */
   filmVisible: () => boolean;
-  /** `Tab` 三态循环 */
+  /** 处在对比态。 */
+  comparing: () => boolean;
+  /** `Tab` 四态循环 */
   cycleChrome: () => void;
-  /** 回到默认三态（退出看图） */
+  /** 回到默认四态（退出看图） */
   resetChrome: () => void;
   /** 进看图（从锚点那张开始） */
   openViewer: () => void;
@@ -21,6 +23,8 @@ export interface ImportActions {
   selectAll: () => void;
   /** 批量排除选中的照片 */
   excludeSelected: () => void;
+  /** 对比态：胶片带在“仅对比集 / 全目录”之间切换。 */
+  toggleCompareStrip: () => void;
 }
 
 let current: ImportActions | null = null;

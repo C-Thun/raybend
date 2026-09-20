@@ -8,8 +8,8 @@
  * | 动作 | 状态住哪 |
  * | --- | --- |
  * | 删除（回收站） | 工作区的确认弹窗（`pendingDelete` + 失败清单） |
- * | 进看图 | 工作区的 `prepareViewer`（三态复位、锚点） |
- * | `Tab` 三态循环 | 工作区的 `chrome` 信号 |
+ * | 进看图 | 工作区的 `prepareViewer`（四态复位、锚点） |
+ * | `Tab` 四态循环 | 工作区的 `chrome` 信号 |
  *
  * 命令注册表要能调它们，但不能认识工作区内部 —— 所以工作区挂载时把这一组动作
  * **注册**进来，命令通过 `browseActions()` 取用（与 `viewer/actions.ts` 同一套做法）。
@@ -33,9 +33,9 @@ export interface BrowseActions {
   moveFocus: (delta: -1 | 1) => void;
   /** 进看图（从锚点那张开始；多选时自然进对比） */
   openViewer: () => void;
-  /** `Tab` 三态循环（左右 / 胶片带） */
+  /** `Tab` 四态循环（左栏 / 右栏 / 胶片带） */
   cycleChrome: () => void;
-  /** 回到默认三态（退出看图时用） */
+  /** 回到默认四态（退出看图时用） */
   resetChrome: () => void;
   /** 对比态：胶片带只显示参与对比的图（再按一次回去） */
   toggleCompareStrip: () => void;

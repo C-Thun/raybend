@@ -9,7 +9,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { infoKeyApplies, nextTileInfoMode, TILE_INFO_CYCLE } from "./tile-info.ts";
+import {
+  importInfoMode,
+  infoKeyApplies,
+  nextTileInfoMode,
+  TILE_INFO_CYCLE,
+  toggleImportTileInfo,
+} from "./tile-info.ts";
+import { resetDisplayPrefsForTests } from "../../lib/display-prefs.ts";
 
 test("档位循环：off → marks → marks-name → off（三态）", () => {
   assert.deepEqual([...TILE_INFO_CYCLE], ["off", "marks", "marks-name"]);
@@ -20,6 +27,16 @@ test("档位循环：off → marks → marks-name → off（三态）", () => {
 
 test("档位循环：脏值退回 off（不卡在非法档位）", () => {
   assert.equal(nextTileInfoMode("nonsense" as never), "off");
+});
+
+test("import 信息只有关 / 文件名两态", () => {
+  resetDisplayPrefsForTests();
+  assert.equal(importInfoMode(), "off");
+  toggleImportTileInfo();
+  assert.equal(importInfoMode(), "marks-name");
+  toggleImportTileInfo();
+  assert.equal(importInfoMode(), "off");
+  resetDisplayPrefsForTests();
 });
 
 test("infoKeyApplies：tiles 下接，纯看图态不接，film 下接", () => {

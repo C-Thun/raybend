@@ -27,11 +27,11 @@
 import { createSignal } from "solid-js";
 
 import {
-  commitDisplayTileStep,
-  displayByTime,
-  displayTileStep,
-  setDisplayByTime,
-  setDisplayTileStep,
+  commitImportDisplayTileStep,
+  importDisplayByTime,
+  importDisplayTileStep,
+  setImportDisplayByTime,
+  setImportDisplayTileStep,
 } from "../../lib/display-prefs.ts";
 import { withTimeout } from "../../lib/timeout.ts";
 import { timeoutMessage } from "../../i18n/index.ts";
@@ -52,6 +52,7 @@ import {
   applySelection,
   EMPTY_SELECTION,
   extendSelection,
+  focusSelection,
   hasSelection as anySelected,
   selectAll as selectAllIds,
   selectionCount,
@@ -84,8 +85,8 @@ export const DEFAULT_META_TIMEOUT_MS = 20_000;
  * 仍在 `app.db` 里的网格设置键（与 `src/api/db.ts` 的 `SETTING_KEYS` 保持一致）。
  *
  * ⚠️ `tile_step` / `by_time` **已经搬走**（`lib/display-prefs.ts`，localStorage）：
- * 那两个是「怎么看」的设备级偏好，而且 import 与 browse 必须共用一份 ——
- * 以前只有导入侧读写它们，浏览侧每次进都重置（人类 2026-09-20 报的）。
+ * 那两个是「怎么看」的设备级偏好；import / browse 共用一套持久化框架，
+ * 但各自保存一份值。以前只有导入侧读写它们，浏览侧每次进都重置。
  * 时间间隔阈值留在库里（它是**库内数据**的解释参数，不是显示偏好）。
  */
 export const GRID_SETTING_KEYS = {
@@ -160,12 +161,16 @@ export interface PhotoGridStore {
   /** 选中的张数（只算还在当前列表里的） */
   selectedCount: () => number;
   clickItem: (id: string, mode: "replace" | "toggle" | "range") => void;
+  /** 只挪当前锚点，不改变多选集合。 */
+  setAnchor: (id: string) => void;
   /** 全选一组（日 / 时间片）；`additive = false` 表示替换掉现有选择 */
   selectGroup: (ids: readonly string[], additive?: boolean) => void;
   selectAll: () => void;
   clearSelection: () => void;
 
   /* ── 缩略图 ───────────────────────────── */
+  /** 网格与胶片带共用的同一条队列。 */
+  thumbQueue: ThumbQueue;
   thumb: (path: string) => ThumbEntry;
   requestThumb: (path: string) => void;
 }
@@ -178,11 +183,11 @@ export function createPhotoGridStore(deps: PhotoGridDeps): PhotoGridStore {
   const [problems, setProblems] = createSignal<readonly string[]>([]);
 
   /*
-   * 格子尺寸与「按时间」走**共享的设备级偏好**（`lib/display-prefs.ts`）：
-   * 两个工作区读同一份、且跨会话还原。梯度/分组的推导逻辑不变，只是值的来源换了地方。
+   * 格子尺寸与「按时间」走 import 自己的设备级偏好（`lib/display-prefs.ts`）：
+   * 与 browse 复用同一套迁移/持久化实现，但值互相隔离并可跨会话还原。
    */
-  const tileStep = displayTileStep;
-  const byTime = displayByTime;
+  const tileStep = importDisplayTileStep;
+  const byTime = importDisplayByTime;
   const [gapMinutes, setGapMinutes] = createSignal(DEFAULT_GAP_MINUTES);
   const [loadingTimes, setLoadingTimes] = createSignal(false);
 
@@ -458,18 +463,18 @@ export function createPhotoGridStore(deps: PhotoGridDeps): PhotoGridStore {
    * 由滑块在**拖拽结束**时调一次。
    */
   const setTileStep = (step: number): void => {
-    setDisplayTileStep(clampTileStepIndex(step));
+    setImportDisplayTileStep(clampTileStepIndex(step));
   };
 
   /** 把当前档位落盘（滑块拖拽结束时调一次） */
   const commitTileStep = (): void => {
-    commitDisplayTileStep();
+    commitImportDisplayTileStep();
   };
 
   /** 「按时间」开关：立刻落盘（一次点击就是一个终值），并按需补读拍摄时间 */
   const setByTime = (value: boolean): void => {
     if (value === byTime()) return;
-    setDisplayByTime(value);
+    setImportDisplayByTime(value);
     if (value) void loadTimes();
   };
 
@@ -553,6 +558,10 @@ export function createPhotoGridStore(deps: PhotoGridDeps): PhotoGridStore {
     );
   };
 
+  const setAnchor = (id: string): void => {
+    setSelection((current) => focusSelection(current, id));
+  };
+
   const selectAll = (): void => {
     setSelection(selectAllIds(orderedIds()));
   };
@@ -594,10 +603,12 @@ export function createPhotoGridStore(deps: PhotoGridDeps): PhotoGridStore {
     // 张数按**当前列表**算：换目录后旧选择可能还残留在集合里，不该算进去
     selectedCount: () => selectionCount(selection(), orderedIds()),
     clickItem,
+    setAnchor,
     selectGroup,
     selectAll,
     clearSelection,
 
+    thumbQueue: thumbs,
     thumb: (path) => thumbs.get(path),
     requestThumb: (path) => thumbs.request(path),
   };

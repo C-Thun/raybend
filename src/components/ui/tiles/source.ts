@@ -17,6 +17,7 @@
 
 import type { ThumbEntry } from "../thumb-queue.ts";
 import type { RowSlice } from "./rows.ts";
+import type { TileInfoMode } from "../../../lib/display-prefs.ts";
 
 /** 网格里一张照片（两侧的公共形状）。只放渲染真正要用的字段。 */
 export interface GridItem {
@@ -75,6 +76,8 @@ export interface TilesSource {
   scopeKey(): string;
   selection(): { ids: ReadonlySet<string>; anchor: string | null };
   select(id: string, mode: "replace" | "toggle" | "range"): void;
+  /** 只挪当前锚点，不改变多选集合（对比视图点某一幅时用）。 */
+  setAnchor(id: string): void;
   /**
    * 选中**显示序区间**里的所有照片（日 / 时间片标题上的「全选」）。
    *
@@ -84,6 +87,8 @@ export interface TilesSource {
    */
   selectGroupRange(start: number, count: number, additive?: boolean): void;
   clearSelection(): void;
+  /** 当前工作区自己的信息显示档位。 */
+  infoMode(): TileInfoMode;
   tileStep(): number;
   setTileStep(step: number): void;
   commitTileStep(): void;

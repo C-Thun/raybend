@@ -113,6 +113,21 @@ raybend（中文名**「光伴」**，产品名 `RayBend`）是一个**相片管
       而不是逐项请示。汇报时机 = 一个工作单元收口、或整批做完。
     - 中间过程只写进 `implementations/`，不逐项要确认 —— 他是要看结果，不是要看进度条。
 
+15. **新增功能必须评估命令体系接入**（人类 2026-09-20 明确）：
+    - 命令面板与快捷键设置不是原始产品规划的一部分，但 M2-W3 已经完成，**保留并复用**；
+    - 以后增加任何用户可触发的功能，都要明确检查它是否适合登记进统一命令注册表，进而出现在
+      **commands panel、快捷键设置与标题栏菜单**中；不能再另写一套菜单动作或硬编码快捷键；
+    - 不是所有功能都必须变成命令（例如列表内部 roving focus、弹窗自己的确认/取消），但实施记录里
+      要写清“已接入”或“不适合接入及理由”。判断基准是摄影师的实际工作流，不以“像 VS Code”作为目标。
+
+16. **数据库 schema 变化只走现有迁移框架**（人类 2026-09-20 重申）：
+    - 已有框架在 `crates/raybend/src/store/migration.rs` + `store/migrations/*.sql`：版本闸门、
+      `VACUUM INTO` 迁移前快照、逐条事务、完整性检查、Start/Done 通知与全窗口 `MigrationGate`；
+    - `app.db` / `catalog.db` / `thumbs.db` 新增或修改字段时，必须增加对应版本迁移并登记到该框架，
+      **禁止**启动时临时 `ALTER`、另造迁移通道、静默删库重建；
+    - localStorage 等设备级偏好也必须使用**版本化 key + 显式一次性迁移**（例如
+      `raybend.display.v1 → v2`），迁移逻辑与测试放在偏好自己的模块里。
+
 ---
 
 ## 3. 版本基线（2026-09-15 核实）
@@ -637,6 +652,18 @@ IPC 单测（用**真实字段名**反序列化；缺 DPR 必须报错，不许�
 | **`toolsbar`** | 第三条：工具按钮，**内容居中**、随工作流变、无内容时整行隐藏 | `ToolsBar` |
 | **`workspace`** | 三条下面的工作区，完全跟着工作流走 | `Workspace` |
 | **工作流**（flow） | 导入 / 浏览 / 编辑 / 导出 四个阶段。**是有序流水线**，不是并列选项 | `FlowChip / …` |
+| **`statusbar`** | `mid`（工作区中列）最底部的状态/控制位置；它是**位置术语**，不保证所有前缀都对应同一个组件 | `…StatusBar` / `TilesControlBar` |
+
+#### `statusbar` 的命名规则（人类 2026-09-20 口述）
+
+- 说 `statusbar` 时通常必须带**当前 mid 内容**前缀：`tiles statusbar`、`view statusbar`、
+  `film statusbar`；不要按 flow 说 `import statusbar` / `browse statusbar`。
+- 原因：statusbar **跟着 mid 的组件走，不跟 flow 走**。同一套 tiles 无论出现在 import 还是 browse，
+  都叫 `tiles statusbar`（组件相同、配置与持久化数据源可以不同）。
+- `statusbar` 只是“中列最底这个位置”的统称，**不意味着是同一个控件**：
+  `tiles statusbar` 与 `film statusbar` 可以是不同内容/组件。
+- 目前 `view statusbar` 与 `film statusbar` 都服务单张照片，视为同一个东西，不必人为拆成两套；
+  compare 也复用看图状态栏的照片事实。
 
 #### `workspace` 的结构红线（人类 2026-09-20 口述，**不可违反**）
 
@@ -705,6 +732,20 @@ IPC 单测（用**真实字段名**反序列化；缺 DPR 必须报错，不许�
 - 中间更常说具体模式：**`browse tiles`** / **`browse view`** / **`browse film`**。
 
 > 这套词只描述**位置与职责**，不指定实现文件；文档、设计稿、提交信息里一律用这套叫法。
+
+**tiles / view / film / compare 的结构红线（2026-09-20）**：
+
+- import 与 browse 的中列照片区域必须经过同一个 `PhotoViewingStage` 与
+  `PhotoViewingController`；工作区只提供 `TilesSource` 数据适配、statusbar 配置与外围栏数据。
+- `PhotoGrid` 进入 view / film / compare 时**只能隐藏，不能卸载**。虚拟列表、scrollTop、
+  选择与退出后的焦点接续都依赖同一颗长期存在的网格实例。
+- 胶片带选择与对比锚点只能调用 `TilesSource.select / setAnchor`，不得在工作区再拼一套选择逻辑；
+  import / browse 的 id、分页、元数据补读差异留在 adapter / store。
+- 胶片带尺寸组件仍只有一份，但 import / browse 的尺寸偏好必须分开：根层的
+  `film-strip-prefs.ts` 通过通用 `setting_get / setting_set` 写 `app.db.settings`，各自 2 秒防抖；
+  禁止把数据库调用塞进 `FilmStrip` 或再建第二套胶片带。
+- tiles statusbar 只能由 `TilesShell` 装配。受控滑杆更新配置时不得重建 `TilesControlBar` DOM，
+  否则 pointer capture 会在拖动第一格后丢失。
 
 ### 11.5 其他常用术语
 

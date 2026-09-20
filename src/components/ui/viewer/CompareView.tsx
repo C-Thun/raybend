@@ -74,6 +74,7 @@ import {
 import {
   createWheelZoom,
   isViewerControlTarget,
+  takeViewerFocus,
   viewerControlsVisible,
 } from "./interaction.ts";
 import { ViewerControls } from "./ViewerControls.tsx";
@@ -288,6 +289,12 @@ export function CompareView(props: CompareViewProps): JSX.Element {
   };
 
   onMount(() => {
+    /*
+     * 对比面也**接管键盘焦点**（与单张看图同一条规矩，
+     * 见 `interaction.ts::takeViewerFocus`）：多图对比可能从 tiles 里多选后直接进来，
+     * 焦点如果留在 tile 上，回车就会被 tile 当成「激活」吃掉。
+     */
+    takeViewerFocus(host);
     if (host === undefined) return;
     measure();
     const observer = new ResizeObserver(measure);
@@ -377,7 +384,7 @@ export function CompareView(props: CompareViewProps): JSX.Element {
    * 键盘交给**命令分发器**（`plans/M2-W3.md` §2.5 步骤 3）：对比态的缩放/适配与单张看图
    * 是**同一条命令**（`viewer.zoomIn` / `viewer.fit` …），只是实现不同 ——
    * 这里把对比自己那份（逐幅画幅的百分比同步）注册进 `viewer/actions.ts`。
-   * `Esc`（返回）与 `Tab`（三态）由工作区那边注册的动作负责。
+   * `Esc`（返回）与 `Tab`（四态）由工作区那边注册的动作负责。
    */
   onMount(() => {
     registerViewerActions({
@@ -388,7 +395,7 @@ export function CompareView(props: CompareViewProps): JSX.Element {
       actual: () => goToOneToOne(),
       next: () => props.store.next(),
       prev: () => props.store.prev(),
-      // 注意用**内部**的 `close()`（它会连 `onClose` 一起叫 —— 工作区靠它复位三态），
+      // 注意用**内部**的 `close()`（它会连 `onClose` 一起叫 —— 工作区靠它复位四态），
       // 不是 `props.store.close()`（那只会关掉 store）
       close: () => close(),
     });
@@ -463,11 +470,15 @@ export function CompareView(props: CompareViewProps): JSX.Element {
       data-compare-fit={fitId() ?? "none"}
       class={[
         "absolute inset-0 z-10 grid overflow-hidden bg-surface-bar",
+        // 接管焦点用（`takeViewerFocus`）；`outline-none`：整块画面不该出现聚焦环
+        "outline-none",
         dragging() === null ? "cursor-grab" : "cursor-grabbing",
         props.class ?? "",
       ]
         .filter(Boolean)
         .join(" ")}
+      // `-1`：可编程聚焦，但不进 Tab 序列
+      tabindex="-1"
       style={{
         gap: `${COMPARE_GAP}px`,
         padding: `${COMPARE_PADDING / 2}px`,

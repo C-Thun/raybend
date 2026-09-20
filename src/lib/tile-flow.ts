@@ -128,15 +128,70 @@ export function migrateTileStepIndex(legacyIndex: number): number {
   return best;
 }
 
-/** 把任意下标夹到合法范围（滑块拖到边界外、配置读到脏值都要经过它） */
+/**
+ * 把任意档位位置夹到合法范围。
+ *
+ * 位置允许是小数：`10.5` 表示正好落在第 10、11 个预设档之间。状态栏的
+ * 「适合窗口」会算出这种值，若在这里取整，按钮一按完滑块与 tile 就会互相跳。
+ */
 export function clampTileStepIndex(index: number): number {
  if (!Number.isFinite(index)) return DEFAULT_TILE_STEP_INDEX;
- return Math.min(TILE_SIZE_STEPS.length - 1, Math.max(0, Math.round(index)));
+ return Math.min(TILE_SIZE_STEPS.length - 1, Math.max(0, index));
 }
 
-/** 取某一档的单元格宽度 */
-export function tileSizeAt(index: number): TileSizeStep {
- return TILE_SIZE_STEPS[clampTileStepIndex(index)];
+/**
+ * 取档位位置对应的单元格宽度。整数位置命中预设档，小数位置在相邻两档间线性插值。
+ */
+export function tileSizeAt(index: number): number {
+ const at = clampTileStepIndex(index);
+ const lower = Math.floor(at);
+ const upper = Math.ceil(at);
+ const from = TILE_SIZE_STEPS[lower] ?? TILE_SIZE_STEPS[0];
+ const to = TILE_SIZE_STEPS[upper] ?? TILE_SIZE_STEPS[TILE_SIZE_STEPS.length - 1];
+ if (lower === upper) return from;
+ return from + (to - from) * (at - lower);
+}
+
+/**
+ * 实际尺寸 → 连续档位位置（`tileSizeAt` 的反函数）。
+ *
+ * 用于「适合窗口」：计算结果通常不正好命中 17 个预设值，必须把它放到两档之间，
+ * 才能让按钮、进度条与后续缩放共用同一条连续坐标。
+ */
+export function tilePositionForSize(size: number): number {
+ if (!Number.isFinite(size)) return DEFAULT_TILE_STEP_INDEX;
+ if (size <= TILE_SIZE_STEPS[0]) return 0;
+ const last = TILE_SIZE_STEPS.length - 1;
+ if (size >= TILE_SIZE_STEPS[last]) return last;
+ for (let index = 0; index < last; index += 1) {
+  const from = TILE_SIZE_STEPS[index];
+  const to = TILE_SIZE_STEPS[index + 1];
+  if (size > to) continue;
+  return index + (size - from) / (to - from);
+ }
+ return last;
+}
+
+/**
+ * 从任意连续位置走到相邻的**预设档**。加减命令与 Ctrl+滚轮用它，避免从 10.6
+ * 直接 `+1` 跳到 11.6（那会永远错开预设档）。
+ */
+export function nextTilePresetPosition(position: number, direction: -1 | 1): number {
+ const at = clampTileStepIndex(position);
+ if (direction > 0) return Math.min(TILE_SIZE_STEPS.length - 1, Math.floor(at + 1e-9) + 1);
+ return Math.max(0, Math.ceil(at - 1e-9) - 1);
+}
+
+/**
+ * 按当前列数把一行的右侧余量均匀吃掉，返回刚好铺满的 cell 尺寸。
+ * 正常情况只会放大；单格已经横向溢出时会收小到容器宽，极端窄窗口也能自救。
+ */
+export function fitTileSizeToRow(input: TileFlowInput): number {
+ const flow = computeTileFlow(input);
+ const gap = Number.isFinite(input.gap) ? Math.max(0, input.gap) : 0;
+ const width = Number.isFinite(input.containerWidth) ? Math.max(0, input.containerWidth) : 0;
+ if (width <= 0) return input.cellWidth;
+ return (width - (flow.columns - 1) * gap) / flow.columns;
 }
 
 /**

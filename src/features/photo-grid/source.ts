@@ -15,6 +15,7 @@ import type { GridItem, GridStatus, TilesSource } from "../../components/ui/tile
 import { groupingToSlices, type RowSlice } from "../../components/ui/tiles/rows.ts";
 import type { PhotoGridStore } from "./store.ts";
 import { itemId } from "./rows.ts";
+import type { TileInfoMode } from "../../lib/display-prefs.ts";
 
 /** 把一张 `SourceItem` 转成网格要看的形状 */
 function toGridItem(store: PhotoGridStore, item: ReturnType<PhotoGridStore["displayItems"]>[number]): GridItem {
@@ -33,6 +34,7 @@ function toGridItem(store: PhotoGridStore, item: ReturnType<PhotoGridStore["disp
 export interface ImportSourceOptions {
   /** 这张是不是被排除了（状态不在网格里，见 `PhotoGrid` 的说明） */
   isExcluded?: (id: string) => boolean;
+  infoMode?: () => TileInfoMode;
 }
 
 /** 包一个导入侧数据源。`isExcluded` 会一路带到 `Tile` 上（排除态的画法）。 */
@@ -64,6 +66,7 @@ export function importSource(
     scopeKey: () => store.dir() ?? "",
     selection: () => store.selection(),
     select: (id, mode) => store.clickItem(id, mode),
+    setAnchor: (id) => store.setAnchor(id),
     selectGroupRange: (start, count, additive) => {
       const ids = store
         .displayItems()
@@ -72,6 +75,7 @@ export function importSource(
       store.selectGroup(ids, additive ?? false);
     },
     clearSelection: () => store.clearSelection(),
+    infoMode: () => options.infoMode?.() ?? "off",
     tileStep: () => store.tileStep(),
     setTileStep: (step) => store.setTileStep(step),
     commitTileStep: () => store.commitTileStep(),

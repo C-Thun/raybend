@@ -42,15 +42,15 @@ import {
   type BrowseStore,
 } from "../../features/browse/index.ts";
 import {
-  chromeShowsFilm,
-  chromeShowsSides,
-  nextChrome,
-  type ViewerChrome,
+  chromeShowsLeft,
+  chromeShowsRight,
 } from "../../lib/viewer-chrome.ts";
-import { FilmStrip } from "../../components/ui/viewer/index.ts";
 import { FilterBar } from "../../features/browse/FilterBar.tsx";
 import { browseSource } from "../../features/browse/grid-source.ts";
-import { PhotoGrid } from "../../features/photo-grid/index.ts";
+import {
+  createPhotoViewingController,
+  PhotoViewingStage,
+} from "../../features/photo-grid/index.ts";
 import { StateWatermark } from "../../components/ui/StateWatermark.tsx";
 import {
   IconAlbumOff,
@@ -59,23 +59,17 @@ import {
   IconPhoto,
   IconPhotoOff,
 } from "@tabler/icons-solidjs";
-import { CompareView } from "../../components/ui/viewer/index.ts";
-import { compareIds } from "../../lib/viewer-compare.ts";
 import { createThumbQueue } from "../../components/ui/thumb-queue.ts";
+import type { TilesViewingInfo } from "../../components/ui/tiles/index.ts";
+import { createViewerStore } from "../../components/ui/viewer/index.ts";
 import {
-  PhotoStatusBar,
-  TilesShell,
-  type TilesViewingInfo,
-} from "../../components/ui/tiles/index.ts";
-import { createViewerStore, Viewer } from "../../components/ui/viewer/index.ts";
-import { clampTileStepIndex } from "../../lib/tile-flow.ts";
-import {
-  commitDisplayTileStep,
-  displayByTime,
-  displayTileStep,
-  setDisplayByTime,
-  setDisplayTileStep,
+  browseDisplayByTime,
+  browseDisplayTileStep,
+  commitBrowseDisplayTileStep,
+  setBrowseDisplayByTime,
+  setBrowseDisplayTileStep,
 } from "../../lib/display-prefs.ts";
+import { browseInfoMode, cycleBrowseTileInfo } from "../../components/ui/tile-info.ts";
 import { t } from "../../i18n/index.ts";
 import { Button } from "../../components/ui/Button.tsx";
 import { ConfirmDialog, Dialog } from "../../components/ui/Dialog.tsx";
@@ -89,9 +83,8 @@ import { LAYOUT_BOUNDS } from "../../lib/layout-prefs.ts";
 /**
  * 侧栏宽度的上下限 = **唯一那一份**（`lib/layout-prefs.ts` 的 `LAYOUT_BOUNDS`）。
  *
- * 早先这里手抄了一份（220/520），于是把下限抬到 264 时**只有存储那一侧生效**、
- * 拖拽这一侧纹丝不动 —— 同一件事两处写，改一处另一处不生效（人类 2026-09-19 抓到的
- * 正是这类问题）。现在两边共用一条。
+ * 早先这里手抄过一份边界，改存储侧时拖拽侧不会同步。现在两边共用一条；
+ * 2026-09-20 下限与 import left 对齐为 220px。
  */
 const SIDEBAR_BOUNDS = LAYOUT_BOUNDS.browseLeftWidth;
 import type { BrowseSort, DeleteFailure } from "../../api/types.ts";
@@ -118,6 +111,9 @@ export interface BrowseWorkspaceProps {
    */
   rightWidth?: number;
   onLeftWidthChange?: (width: number) => void;
+  /** browse 自己的胶片带尺寸档位；与 import 分开存进 app.db。 */
+  filmStripStep: number;
+  onFilmStripStepChange: (step: number) => void;
   class?: string;
 }
 
@@ -160,16 +156,14 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
   /** 读库列表失败时的原因（不再是静默空态）。 */
   const [reposError, setReposError] = createSignal<string | null>(null);
   /*
-   * 「按时间」与格子尺寸档位都是**共享的设备级偏好**（`lib/display-prefs.ts`）：
-   * 与导入侧读同一份、且跨会话还原。
-   *
-   * 以前这里是两个本地信号（`createSignal(false)` / 默认档），于是浏览里开了「按时间」、
-   * 切走再回来就重置（人类 2026-09-20 报的）；导入侧的同类状态也各存各的。
+   * 「按时间」与格子尺寸档位走 browse 自己的设备级偏好（`lib/display-prefs.ts`）：
+   * 与 import 复用同一套迁移/持久化实现，但两边的值互相隔离并可跨会话还原。
+   * 以前这里是本地信号，切走再回来会重置。
    */
-  const tileStep = displayTileStep;
-  const setTileStep = setDisplayTileStep;
-  const grouped = displayByTime;
-  const setGrouped = setDisplayByTime;
+  const tileStep = browseDisplayTileStep;
+  const setTileStep = setBrowseDisplayTileStep;
+  const grouped = browseDisplayByTime;
+  const setGrouped = setBrowseDisplayByTime;
   /**
    * 库列表是否展开（`BROWSE.md` §4.2）。
    *
@@ -230,22 +224,6 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
   const [pendingDelete, setPendingDelete] = createSignal<number | null>(null);
   /** 删除失败清单（有它就弹模态逐条列出来） */
   const [deleteFailures, setDeleteFailures] = createSignal<DeleteFailure[]>([]);
-  /**
-   * 「打开看图」的请求计数（命令面板 / 快捷键）：传给 `PhotoGrid`，
-   * 它按当前选中开 —— 与网格里按回车**同一条路**（不另写一份「该给看图什么」）。
-   */
-  const [openViewerRequest, setOpenViewerRequest] = createSignal(0);
-
-  /** 看图的三种显示状态（`Tab` 循环；退出看图时重置为默认）。 */
-  const [chrome, setChrome] = createSignal<ViewerChrome>("default");
-  /**
-   * 对比态的「只看对比图」胶片带（`BROWSE.md` §5.5）：对比中再按一次**回车**。
-   *
-   * 退出条件写在派生逻辑里（`createEffect`）而不是各处手动清 ——
-   * 「只剩一幅就退出」是**选择状态**决定的事，手动清一定会漏。
-   */
-  const [compareStrip, setCompareStrip] = createSignal(false);
-
   /*
    * 看图（`components/ui/viewer/` 的共享件）。
    *
@@ -278,64 +256,25 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
   });
   onCleanup(() => thumbs.clear());
 
-  /**
-   * 对比态（`plans/M2-W2.md` 2.2）：**没有「进入对比」这个动作**。
-   *
-   * 它直接由**选择状态**派生 —— 看图模式 + 选中 ≥ 2 张 ⇒ 对比；
-   * 反选到只剩 1 张 ⇒ 自动回到单张看图。所以上面这几个都是 `createMemo` 意义上的
-   * 派生值，而不是一份可以「忘了同步」的额外状态。
-   */
-  const comparedIds = () =>
-    compareIds(
-      store.selection().ids,
-      viewer.state().photos.map((photo) => photo.id),
-      store.selection().anchor,
-    );
-  /**
-   * 实际进画幅的那几张。
-   *
-   * ⚠️ **按窗口顺序映射**，不是按显示顺序过滤 —— 窗口从左到右就是选择先后
-   * （最早选中的在左、它是画幅基准），与胶片带也同序。
-   */
-  const comparePhotos = () => {
-    const byId = new Map(viewer.state().photos.map((photo) => [photo.id, photo]));
-    return comparedIds().flatMap((id) => {
-      const photo = byId.get(id);
-      if (photo === undefined) return [];
-      /*
-       * 宽高**以 store 为准**：看图件手里那份是进看图那一刻的快照，
-       * 而老库的尺寸可能是回来之后才补读到的（`ensureNatural`）——
-       * 不覆盖这一层的话，对比画幅会一直卡在「还没读到这张的尺寸」。
-       */
-      const natural = store.naturalOf(Number(id));
-      return [natural === null ? photo : { ...photo, natural }];
-    });
-  };
-  /** 选中总数（>4 时界面上说明「只对比最近选中的 4 张」，不静默截断） */
-  const compareSelectedCount = () => store.selectedCount();
-  const comparing = () => viewer.state().active && comparePhotos().length >= 2;
-
   /*
-   * 「只剩一幅」时自动退出「只看对比图」那种胶片带状态（`BROWSE.md` §5.5 的收尾）。
-   *
-   * 胶片带的滚动定位交给胶片带自己：它盯的是「当前那张」，模式一变就会重新滚进视野 ——
-   * 那正是「退出时定位到这最后一张图的位置」要的效果。
+   * view / film / compare 的状态、锚点与尺寸补读只在共享控制器里维护。
+   * 两个工作区的差异只剩数据适配：这里把库 id 转成绝对路径交给 browse store。
    */
-  createEffect(() => {
-    if (!comparing()) setCompareStrip(false);
-  });
-
-  /*
-   * 看图关掉 ⇒ 通知网格把焦点要回去（`BROWSE.md` §5.4 的键盘接续）。
-   *
-   * 挂在「看图开没开」这个状态上，是因为**所有**关闭路径最后都会落到它
-   * （`Esc`、对比态的「返回」、看图件自己的关闭按钮）—— 只做一次、只有一份实现。
-   */
-  const [focusNudge, setFocusNudge] = createSignal(0);
-  createEffect<boolean | undefined>((wasActive) => {
-    const active = viewer.state().active;
-    if (wasActive === true && !active) setFocusNudge((n) => n + 1);
-    return active;
+  const viewing = createPhotoViewingController({
+    viewer,
+    selection: store.selection,
+    setAnchor: (id) => store.setAnchor(Number(id)),
+    naturalOf: (id) => store.naturalOf(Number(id)),
+    ensureNatural: (ids) => {
+      const base = root();
+      if (base === null) return;
+      const entries = ids.flatMap((id) => {
+        const item = store.itemById(Number(id));
+        return item === null ? [] : [{ id: item.id, path: joinPath(base, item.relPath) }];
+      });
+      return store.ensureNatural(entries);
+    },
+    onPreparingViewer: () => setLibsExpanded(false),
   });
 
   /** 「当前那张」的 id（键盘导航换了它之后把那一行滚进视野） */
@@ -395,21 +334,8 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
     return null;
   }
 
-  /**
-   * 进看图**之前**要做的事（`PhotoGrid.onOpeningViewer`）：收起展开的库列表、
-   * 把三态复位到「① 默认」。
-   *
-   * 真正的 `viewer.show()` 由网格做（它手上有显示序的完整清单）——
-   * 工作区负责的是「外壳状态」，两件事分开（所以这个回调不接参数）。
-   */
-  function prepareViewer(): void {
-    setLibsExpanded(false);
-    // 每次进看图都从「① 默认」开始（退出时重置，这两处合起来保证「左右栏必定回来」）
-    setChrome("default");
-  }
-
   /*
-   * `Tab` 循环三态（`BROWSE.md` §5.4，人类 2026-09-18 定为**并列三态**）。
+   * `Tab` 循环四态（`BROWSE.md` §5.4）：默认 → 仅关左 → 关两侧 → 仅 view。
    *
    * 监听挂在window上而不是看图件里：这是**外壳**的事（左右两列与胶片带的显隐），
    * 看图件只负责照片本身的缩放/平移（职责分开，换渲染层时这里不用动）。
@@ -419,8 +345,8 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
    * （纯函数、逐条有测），这里只把意图落到 store / viewer / 弹窗上。
    *
    * 冲突与分工：
-   * * `←`/`→`、`Esc`、`Enter` 在**看图里**由看图件自己接（它知道切哪张、怎么退），
-   *   这里只在网格里执行 `move`；
+   * * `←`/`→`、`Esc` 在看图里走看图命令；单张 view 的 `Enter` 内建退出，compare 的
+   *   `Enter` 走命令切换胶片带范围；这里只在网格里执行 `move`；
    * * **数字打星只在网格里生效** —— 看图里的 `0` / `1` 是既有的缩放快捷键（适配 / 100%），
    *   不让打星覆盖它；看图时打标用 `P` / `X` / `U` 与工具条；
    * * `Delete` 永远要确认（人类 2026-09-19 的批注：删除能批量，不需要 easy destroy）。
@@ -436,19 +362,20 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
    * 分工（与 W2 的键位表一致；意图表 `lib/viewer-keys.ts` 仍保留作参考与单测）：
    * * 看图里的 `Esc` / 方向键 / `+−01` → `components/ui/viewer/actions.ts`（看图件自己注册）；
    * * 网格里的数字打星、`P/X/U`、`Delete`、`Ctrl+A`、`←/→`、`i` → 命令；
-   * * **内建**（不走注册表）：`Enter` 在看图里返回、网格里的 roving focus、弹窗与菜单内部。
+   * * **内建**（不走注册表）：单张 view 的 `Enter` 返回、网格里的 roving focus、弹窗与菜单内部；
+   *   compare 的 `Enter` 已登记为 `viewer.compareOnly` 命令。
    */
   onMount(() => {
     registerBrowseActions({
       viewing: () => viewer.state().active,
-      comparing,
-      filmVisible: () => chromeShowsFilm(chrome()),
+      comparing: viewing.comparing,
+      filmVisible: viewing.filmVisible,
       requestDelete: () => setPendingDelete(store.selectedCount()),
       moveFocus,
-      openViewer: () => setOpenViewerRequest((count) => count + 1),
-      cycleChrome: () => setChrome((current) => nextChrome(current)),
-      resetChrome: () => setChrome("default"),
-      toggleCompareStrip: () => setCompareStrip((on) => !on),
+      openViewer: viewing.requestOpen,
+      cycleChrome: viewing.cycleChrome,
+      resetChrome: viewing.resetChrome,
+      toggleCompareStrip: viewing.toggleCompareStrip,
     });
     onCleanup(() => registerBrowseActions(null));
   });
@@ -580,9 +507,10 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
       thumbs,
       tileStep,
       setTileStep,
-      // 档位落盘：拖拽结束时写一次（与导入侧同一份实现、同一个键）
-      commitTileStep: () => commitDisplayTileStep(),
+      // 档位落盘：拖拽结束时写一次（与导入侧同一份实现、不同作用域）
+      commitTileStep: () => commitBrowseDisplayTileStep(),
       grouped,
+      infoMode: browseInfoMode,
     }),
   );
 
@@ -610,26 +538,6 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
       .catch(() => {
         // 同步失败不打扰用户：卡片上的数字保持上一次已知的值
       });
-  });
-
-  /*
-   * 进对比（选中 ≥ 2 张）就把**对比那几张**的宽高补齐。
-   *
-   * 与导入侧同一条纪律、同一个理由：网格只为可见 tile 读过元数据，
-   * 而且老库里 `assets.width/height` 可能是 NULL（2026-09-18 之前的导入不写 EXIF）——
-   * 缺了它，对比的基准比例算不出来，画幅只能显示「还没读到这张的尺寸」。
-   * 只补对比集（通常 ≤4 张），不去碰整个目录。
-   */
-  createEffect(() => {
-    const ids = comparedIds();
-    if (ids.length < 2) return;
-    const base = root();
-    if (base === null) return;
-    const entries = ids.flatMap((id) => {
-      const item = store.itemById(Number(id));
-      return item === null ? [] : [{ id: item.id, path: joinPath(base, item.relPath) }];
-    });
-    void store.ensureNatural(entries);
   });
 
   /**
@@ -683,9 +591,9 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
         <aside
           class={[
             "flex shrink-0 flex-col bg-surface-main",
-            // 看图 ②「关左右」时**藏起来但不卸载**：卸载会把目录树的展开状态与滚动位置清掉，
+            // 看图第 ② 档起左列**藏起来但不卸载**：卸载会把目录树的展开状态与滚动位置清掉，
             // 按一下 Tab 就白跑一趟（而且回来要重新读盘）。
-            chromeShowsSides(chrome()) ? "" : "hidden",
+            chromeShowsLeft(viewing.chrome()) ? "" : "hidden",
           ]
             .filter(Boolean)
             .join(" ")}
@@ -704,8 +612,8 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
           />
         </aside>
 
-        {/* 拖拽手柄：左列 ↔ 中列（看图「关左右」时手柄一起收起来） */}
-        <Show when={chromeShowsSides(chrome())}>
+        {/* 拖拽手柄：左列 ↔ 中列（看图第 ② 档起与左列一起收起来） */}
+        <Show when={chromeShowsLeft(viewing.chrome())}>
           <ColumnHandle
             onDragStart={beginLeftResize}
             onDrag={dragLeft}
@@ -718,12 +626,12 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
       <main
         class="relative flex min-h-0 min-w-0 flex-1 flex-col bg-surface-bar"
         /*
-         * 三态在 DOM 上留痕：左右两列的显隐已经生效（就是那两个 `hidden`），
+         * 四态在 DOM 上留痕：左右两列的显隐已经生效（就是那两个 `hidden`），
          * **胶片带那一条要等 2.1 才落地** —— 但状态本身现在就可观测，
          * 冒烟断言与以后接胶片带都读这两个属性，不用另加一个全局状态。
          */
-        data-chrome={chrome()}
-        data-film={chromeShowsFilm(chrome()) ? "on" : "off"}
+        data-chrome={viewing.chrome()}
+        data-film={viewing.filmVisible() ? "on" : "off"}
       >
         {/** 筛选结果区（chips + 共 N 张 + 任一/全部）：看图时不占位置 */}
         <Show when={!viewer.state().active}>
@@ -736,142 +644,42 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
          * `flex flex-col` 不能省：网格自己的根节点靠 `flex-1` 撑高，
          * 外面换成普通块级盒子的话它会直接塌成 0 高（虚拟列表一格都不渲染）。
          */}
-        {/*
-          tiles = **网格 + 下面那条状态条**（人类 2026-09-19：业务上不可分割）。
-          这里与导入侧用的是同一个 `TilesShell` / `TilesControlBar`；
-          差异按人列的清单走**显式配置**：浏览侧把 `sort` 传上（导入侧暂时不传）。
-
-          看图态不给 `bar`：那段会另开一条**中列最底**的状态栏 ——
-          看图的“东西”与 tiles 是同一条（同一个 `TilesControlBar`，只换内容），
-          所以它必须排在胶片带**后面**，见图下的渲染处。
-        */}
-        <TilesShell
-          bar={
-            viewer.state().active
-              ? null
-              : {
-                  count: store.total(),
-                  selectedCount: store.selectedCount(),
-                  // 中间那段的左侧：**库名 / 最后一级目录**（浏览侧不显示完整路径）
-                  label: currentLead(),
-                  // 右侧：当前那张（多选时是锚点那张）
-                  fileName: anchor()?.fileName ?? null,
-                  byTime: grouped(),
-                  onByTimeChange: (value) => setGrouped(value),
-                  tileStep: tileStep(),
-                  onTileStepChange: (step) => setTileStep(clampTileStepIndex(step)),
-                  sort: {
-                    keys: Object.keys(SORT_LABELS) as NonNullable<BrowseSort["key"]>[],
-                    value: store.sort().key ?? "takenAt",
-                    labelOf: (key) => SORT_LABELS[key as NonNullable<BrowseSort["key"]>](),
-                    desc: store.sort().desc === true,
-                    onKeyChange: (key) =>
-                      store.setSort({ ...store.sort(), key: key as NonNullable<BrowseSort["key"]> }),
-                    onDirectionToggle: () =>
-                      store.setSort({ ...store.sort(), desc: !store.sort().desc }),
-                  },
-                }
-          }
-        >
-          {/*
-            网格是**全项目唯一那一份**（`features/photo-grid/PhotoGrid.tsx`）。
-            浏览侧的差异（分页 / 显示序置换 / 标记 / 绝对路径）全在数据源适配器里
-            （`features/browse/grid-source.ts`）—— 人类 2026-09-19：「同一个东西
-            两个组件本身就是 bug」，`BrowseGrid` 已删除。
-          */}
-          <PhotoGrid
-            source={gridSource()}
-            viewer={viewer}
-            /* 与胶片带共用同一个缩略图队列 / viewer，所以这两样都不传（由适配器与上面提供） */
-            focusNudge={focusNudge()}
-            focusId={focusId()}
-            pinsKey={`${store.repositoryId() ?? ""}:${store.scopePath() ?? ""}:${store.filterMode() ? "on" : "off"}:${JSON.stringify(store.filter())}`}
-            onInteract={() => setLibsExpanded(false)}
-            onFocusIndex={(index) => setFocusIndex(index)}
-            onOpeningViewer={() => prepareViewer()}
-            /* 命令面板 / 快捷键的「看这张」：交给网格按当前选中开（与回车同一条路） */
-            openRequest={openViewerRequest()}
-            watermark={() => gridWatermark()}
-          />
-
-          {/*
-            看图盖在**照片区**上（不是整个中列）—— 胶片带要留在它下面可见。
-            网格**不卸载** —— 滚动位置才留得住，M2-W1 踩过这个坑。
-            `Viewer` 自己就是 `absolute inset-0`，所以这里只要求父级 `relative`。
-          */}
-          <Show when={viewer.state().active}>
-            {/*
-              选中 ≥ 2 张时是**对比**（`plans/M2-W2.md` 2.2）：同一个看图件提供倍率与位移，
-              对比视图负责把多幅画幅摆开并做百分比同步。
-              否则是单张看图。
-            */}
-            <Show
-              when={comparing()}
-              fallback={
-                <Viewer
-                  store={viewer}
-                  class="z-10"
-                  onClose={() => {
-                    // 退回 tiles 时左右栏必定回来（BROWSE.md §5.4）
-                    setChrome("default");
-                  }}
-                />
-              }
-            >
-              <CompareView
-                photos={comparePhotos()}
-                selectedCount={compareSelectedCount()}
-                store={viewer}
-                /* 对比态的返回（左上角那颗）：与单张看图同一条规矩 —— 外壳复位三态 */
-                onClose={() => setChrome("default")}
-                onFocus={(photo) => {
-                  /*
-                   * 2.5（`BROWSE.md` §5.7）：点哪张图就是**当前**那张 ——
-                   * 两件事一起做：看图件切到它（状态栏/胶片带跟着），
-                   * 选择集合里的**锚点**挪到它（右栏信息跟它）。
-                   * 注意下边用的是 `setAnchor` 而不是 `select` —— 后者会散掉对比。
-                   */
-                  const at = viewer.state().photos.findIndex((item) => item.id === photo.id);
-                  // 对比里只换「当前照片」，不能像胶片带那样重置共同缩放与位移。
-                  if (at >= 0) viewer.focus(at);
-                  store.setAnchor(Number(photo.id));
-                }}
-              />
-            </Show>
-          </Show>
-        </TilesShell>
-
-        {/*
-          胶片带（`BROWSE.md` §5.5）：看图时在照片区下面形成，横向滚动选图。
-          列表就是看图件手里那一份 —— 两边永远同源。
-          `Tab` 第③态（`view-only`，只看图）把它藏起来（`chromeShowsFilm`）。
-        */}
-        <Show when={viewer.state().active && chromeShowsFilm(chrome())}>
-          <FilmStrip
-            viewer={viewer}
-            selectedIds={store.selection().ids}
-            onSelect={(id, mode) =>
-              store.select(
-                Number(id),
-                mode,
-                viewer.state().photos.map((photo) => photo.id),
-              )
-            }
-            thumbs={thumbs}
-            onlyIds={compareStrip() ? comparedIds() : undefined}
-          />
-        </Show>
-
-        {/*
-          看图态的底部状态栏（`BROWSE.md` §5.8）——**中列最底那一格**。
-
-          人类 2026-09-20 定的结构红线：**workspace 只有纵向分列，没有跨列行，每一列各自到底**。
-          它以前是三列下面一条全宽的条（`ViewerStatusBar`），既跨列又与 tiles 的状态栏重复；
-          现在就是 tiles 那一条（同一个组件），看图时换成「文件名 + 锁 + 标记」。
-        */}
-        <Show when={viewer.state().active}>
-          <PhotoStatusBar info={viewingInfo()} />
-        </Show>
+        <PhotoViewingStage
+          source={gridSource()}
+          controller={viewing}
+          thumbs={thumbs}
+          filmStripStep={props.filmStripStep}
+          onFilmStripStepChange={props.onFilmStripStepChange}
+          tilesBar={{
+            count: store.total(),
+            selectedCount: store.selectedCount(),
+            label: currentLead(),
+            fileName: anchor()?.fileName ?? null,
+            byTime: grouped(),
+            onByTimeChange: (value) => setGrouped(value),
+            infoMode: browseInfoMode(),
+            onInfoToggle: cycleBrowseTileInfo,
+            tileStep: tileStep(),
+            onTileStepChange: setTileStep,
+            onTileStepCommit: () => commitBrowseDisplayTileStep(),
+            sort: {
+              keys: Object.keys(SORT_LABELS) as NonNullable<BrowseSort["key"]>[],
+              value: store.sort().key ?? "takenAt",
+              labelOf: (key) => SORT_LABELS[key as NonNullable<BrowseSort["key"]>](),
+              desc: store.sort().desc === true,
+              onKeyChange: (key) =>
+                store.setSort({ ...store.sort(), key: key as NonNullable<BrowseSort["key"]> }),
+              onDirectionToggle: () =>
+                store.setSort({ ...store.sort(), desc: !store.sort().desc }),
+            },
+          }}
+          viewingInfo={viewingInfo()}
+          focusId={focusId()}
+          pinsKey={`${store.repositoryId() ?? ""}:${store.scopePath() ?? ""}:${store.filterMode() ? "on" : "off"}:${JSON.stringify(store.filter())}`}
+          onInteract={() => setLibsExpanded(false)}
+          onFocusIndex={(index) => setFocusIndex(index)}
+          watermark={() => gridWatermark()}
+        />
       </main>
 
       {/* 右列**没有把手**：宽度固定（人类 2026-09-19 定，之后另有安排） */}
@@ -880,7 +688,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
       <aside
         class={[
           "flex shrink-0 flex-col bg-surface-main",
-          chromeShowsSides(chrome()) ? "" : "hidden",
+          chromeShowsRight(viewing.chrome()) ? "" : "hidden",
         ]
           .filter(Boolean)
           .join(" ")}
@@ -895,7 +703,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
               item={anchor()}
               viewer={viewer.state().active ? viewer : null}
               /* 对比态不画视野框：好几个窗口，一个框描述不了 */
-              comparing={comparing()}
+              comparing={viewing.comparing()}
               /* 「所属库」那一行：名字住在工作区（它拿着库列表） */
               repositoryName={
                 repositories().find((repo) => repo.id === store.repositoryId())?.name ?? null

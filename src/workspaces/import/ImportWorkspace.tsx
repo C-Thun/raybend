@@ -33,25 +33,18 @@ import { importPrecheck, onImportProgress, type ImportSource } from "../../api/i
 import { locale, t } from "../../i18n/index.ts";
 import { fileNameOf } from "../../lib/format.ts";
 import {
+  createPhotoViewingController,
   importSource,
-  PhotoGrid,
+  PhotoViewingStage,
   type PhotoGridStore,
 } from "../../features/photo-grid/index.ts";
 import { StateWatermark } from "../../components/ui/StateWatermark.tsx";
 import { registerImportActions } from "../../features/import/actions.ts";
 import { IconAlertTriangle, IconFolderOpen, IconPhoto, IconPhotoOff } from "@tabler/icons-solidjs";
-import { TilesShell } from "../../components/ui/tiles/index.ts";
-import {
-  CompareView,
-  createViewerStore,
-  FilmStrip,
-  Viewer,
-  type ViewerPhoto,
-} from "../../components/ui/viewer/index.ts";
-import { createThumbQueue } from "../../components/ui/thumb-queue.ts";
+import type { TilesViewingInfo } from "../../components/ui/tiles/index.ts";
+import { createViewerStore } from "../../components/ui/viewer/index.ts";
 import { getThumbBytes, getViewImage } from "../../api/db.ts";
-import { chromeShowsFilm, nextChrome, type ViewerChrome } from "../../lib/viewer-chrome.ts";
-import { compareIds } from "../../lib/viewer-compare.ts";
+import { chromeShowsLeft, chromeShowsRight } from "../../lib/viewer-chrome.ts";
 import {
   createImportStore,
   ImportProgressDialog,
@@ -67,6 +60,7 @@ import { withTimeout } from "../../lib/timeout.ts";
 import { timeoutMessage } from "../../i18n/index.ts";
 import { LeftColumn } from "./LeftColumn.tsx";
 import type { ToastStore } from "../../components/ui/toast.ts";
+import { importInfoMode, toggleImportTileInfo } from "../../components/ui/tile-info.ts";
 
 export interface ImportWorkspaceProps {
   store: ImportStore;
@@ -86,6 +80,9 @@ export interface ImportWorkspaceProps {
   /** 左列里「最近」段的高度比例（0–1） */
   recentRatio?: number;
   onRecentRatioChange?: (ratio: number) => void;
+  /** import 自己的胶片带尺寸档位；与 browse 分开存进 app.db。 */
+  filmStripStep: number;
+  onFilmStripStepChange: (step: number) => void;
   /** 与浏览工作区共用的根层提示队列。 */
   toast?: ToastStore;
   /**
@@ -225,80 +222,31 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
   let rowEl: HTMLDivElement | undefined;
 
   /*
-   * ── 看图（tiles / film / view 三态）────────────────────────────────────
+   * ── 看图（tiles / film / view 四态）────────────────────────────────────
    *
    * 人类 2026-09-19：import 与 browse 的**中列**要能用同一套东西 ——
-   * 同一份 `chrome.ts`（三态循环）、同一个 `Viewer` / `FilmStrip` / `CompareView`。
+   * 同一份 `chrome.ts`（四态循环）、同一个 `Viewer` / `FilmStrip` / `CompareView`。
    * tiles 仍是默认态，且**排版口径一点没动**（还是 `PhotoGrid` + `lib/tile-flow.ts`）。
    */
   const viewer = createViewerStore({
     loadScreen: (path) => getViewImage(path, "screen"),
     loadThumb: (path) => getThumbBytes(path, "grid"),
   });
-  const [chrome, setChrome] = createSignal<ViewerChrome>("default");
-
-  /**
-   * 看图用的照片列表：与中列**同一份数据、同一个顺序**（`grid.items()`）。
-   * `naturalOf` 给的是真实宽高（头部缓存那份），对比与缩放都靠它，
-   * 缺了也不慌 —— `ViewerPhoto.natural` 本来就是可选。
-   */
-  const viewerPhotos = createMemo<ViewerPhoto[]>(() =>
-    grid.items().map((item) => {
-      const natural = grid.naturalOf(item.path);
-      return {
-        id: item.path,
-        path: item.path,
-        fileName: item.fileName,
-        ...(natural === null ? {} : { natural }),
-      };
-    }),
-  );
-
-  /**
-   * 对比：与 browse **同一条规则**（`lib/viewer-compare.ts`）——
-   * 选中 ≥ 2 张就是对比态，超过 4 张只对比**最近选中的 4 张**（锚点必含）。
-   */
-  const comparePhotoIds = createMemo<string[]>(() =>
-    compareIds(grid.selectedIds(), viewerPhotos().map((photo) => photo.id), grid.selection().anchor),
-  );
-  const comparing = (): boolean => viewer.state().active && comparePhotoIds().length >= 2;
-  /** 对比态要显示的那几张（按对比顺序） */
-  const comparePhotos = createMemo<ViewerPhoto[]>(() => {
-    const byId = new Map(viewerPhotos().map((photo) => [photo.id, photo]));
-    return comparePhotoIds().flatMap((id) => {
-      const photo = byId.get(id);
-      return photo === undefined ? [] : [photo];
-    });
+  const viewingInfo = (): TilesViewingInfo => ({
+    fileName: viewer.current()?.fileName ?? null,
+    lockLevel: 0,
+    rating: 0,
+    colorLabel: null,
+    flag: null,
+    like: null,
   });
-
-  /*
-   * 进对比就把**对比那几张**的宽高补齐（人类 2026-09-19 报的拉伸/拖动不对的根因）：
-   * 网格只为可见 tile 读过元数据，别的照片 `naturalOf` 是 null → 基准比例算不出来。
-   * 只补对比集（通常 ≤4 张），不去碰整个目录 —— 别为一次对比读上千个文件头。
-   */
-  createEffect(() => {
-    const ids = comparePhotoIds();
-    if (ids.length >= 2) void grid.ensureNatural(ids);
+  const viewing = createPhotoViewingController({
+    viewer,
+    selection: grid.selection,
+    setAnchor: grid.setAnchor,
+    naturalOf: grid.naturalOf,
+    ensureNatural: grid.ensureNatural,
   });
-
-  /** 胶片带的缩略图队列（网格那份藏在 `PhotoGrid` 里没对外暴露，所以这里自建一份） */
-  const filmThumbs = createThumbQueue({
-    load: async (path) => {
-      const bytes = await getThumbBytes(path, "grid");
-      return bytes ?? null;
-    },
-  });
-
-  /**
-   * 进看图（从**锚点**那张开始）：抽成具名函数，**键盘（命令）与别处共用一份**。
-   */
-  function openViewerFromAnchor(): void {
-    const photos = viewerPhotos();
-    if (photos.length === 0) return;
-    const anchor = grid.selection().anchor;
-    const at = anchor === null ? 0 : photos.findIndex((photo) => photo.id === anchor);
-    viewer.show(photos, at < 0 ? 0 : at);
-  }
 
   /*
    * 键盘与「主要操作」统一交给**命令注册表**（`plans/M2-W3.md` §2.5）：
@@ -308,12 +256,14 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
   onMount(() => {
     registerImportActions({
       viewing: () => viewer.state().active,
-      filmVisible: () => chromeShowsFilm(chrome()),
-      cycleChrome: () => setChrome(nextChrome(chrome())),
-      resetChrome: () => setChrome("default"),
-      openViewer: openViewerFromAnchor,
+      comparing: viewing.comparing,
+      filmVisible: viewing.filmVisible,
+      cycleChrome: viewing.cycleChrome,
+      resetChrome: viewing.resetChrome,
+      openViewer: viewing.requestOpen,
       selectAll: () => grid.selectAll(),
       excludeSelected: () => store.toggleExcluded([...grid.selectedIds()]),
+      toggleCompareStrip: viewing.toggleCompareStrip,
     });
     onCleanup(() => registerImportActions(null));
   });
@@ -340,7 +290,9 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
   }
 
   /** 网格数据源（适配器：把导入 store 包成网格契约） */
-  const gridSource = createMemo(() => importSource(grid, { isExcluded: store.isExcluded }));
+  const gridSource = createMemo(() =>
+    importSource(grid, { isExcluded: store.isExcluded, infoMode: importInfoMode }),
+  );
 
   /** 空态 / 加载 / 错误的水印（文案是导入侧的，所以由工作区给） */
   function gridWatermark(): JSX.Element | null {
@@ -389,7 +341,10 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
      */
     <div ref={rowEl} class="flex min-h-0 flex-1">
       <aside
-        class="flex min-h-0 shrink-0 flex-col bg-surface-main p-panel-pad"
+        class={[
+          "min-h-0 shrink-0 flex-col bg-surface-main p-panel-pad",
+          chromeShowsLeft(viewing.chrome()) ? "flex" : "hidden",
+        ].join(" ")}
         // 用百分比而不是像素：窗口大小变了之后比例仍然对（与持久化的口径一致）
         style={{ "flex-basis": `${leftRatio() * 100}%`, "min-width": "220px" }}
       >
@@ -405,117 +360,73 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
       </aside>
 
       {/* 三点把手：拖它只改左列宽度比例（全项目唯一的把手组件） */}
-      <SplitHandle
-        orientation="vertical"
-        aria-label={t("common.resize_left")}
-        aria-valuenow={Math.round(leftRatio() * 100)}
-        aria-valuemin={12}
-        aria-valuemax={50}
-        tabindex="0"
-        onDragStart={beginLeftDrag}
-        onDrag={(dx) => {
-          if (leftDragWidth <= 0) return;
-          setLeftRatio(clampLeftRatio(leftDragStart + dx / leftDragWidth));
-        }}
-        onDragEnd={() => props.onLeftRatioChange?.(leftRatio())}
-        onKeyDown={(event) => {
-          if (event.key === "ArrowLeft") {
-            event.preventDefault();
-            nudgeLeftRatio(-0.02);
-          } else if (event.key === "ArrowRight") {
-            event.preventDefault();
-            nudgeLeftRatio(0.02);
-          }
-        }}
-      />
+      <Show when={chromeShowsLeft(viewing.chrome())}>
+        <SplitHandle
+          orientation="vertical"
+          aria-label={t("common.resize_left")}
+          aria-valuenow={Math.round(leftRatio() * 100)}
+          aria-valuemin={12}
+          aria-valuemax={50}
+          tabindex="0"
+          onDragStart={beginLeftDrag}
+          onDrag={(dx) => {
+            if (leftDragWidth <= 0) return;
+            setLeftRatio(clampLeftRatio(leftDragStart + dx / leftDragWidth));
+          }}
+          onDragEnd={() => props.onLeftRatioChange?.(leftRatio())}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowLeft") {
+              event.preventDefault();
+              nudgeLeftRatio(-0.02);
+            } else if (event.key === "ArrowRight") {
+              event.preventDefault();
+              nudgeLeftRatio(0.02);
+            }
+          }}
+        />
+      </Show>
 
       {/* 中列 + 右列：右列宽度固定，不参与拖拽 */}
       <div class="flex min-h-0 min-w-0 flex-1">
               {/* ── 中列：照片网格 ─────────────────────────────── */}
-              <main class="relative flex min-w-0 flex-1 flex-col bg-surface-bar">
-                {/*
-                  tiles = **网格 + 下面那条状态条**（人类 2026-09-19：业务上不可分割）。
-                  两侧用的是同一个 `TilesShell` + `TilesControlBar`，差异只走显式配置：
-                  导入侧现在不传 `sort`（以后想开就传同一份 props，不用改组件）。
-
-                  看图时不给 `bar`（那条位置让给胶片带与看图件）——
-                  与浏览侧口径一致：看图态下**没有** tiles 的状态条。
-                */}
-                <TilesShell
-                  bar={
-                    viewer.state().active
-                      ? null
-                      : {
-                          count: grid.items().length,
-                          selectedCount: grid.selectedCount(),
-                          dir: grid.dir(),
-                          // 「当前那张」= 选择锚点（最后一次点的）
-                          fileName: fileNameOf(grid.selection().anchor ?? ""),
-                          byTime: grid.byTime(),
-                          onByTimeChange: grid.setByTime,
-                          tileStep: grid.tileStep(),
-                          onTileStepChange: grid.setTileStep,
-                          onTileStepCommit: grid.commitTileStep,
-                          locale: groupingLocale(),
-                          loadingTimes: grid.loadingTimes(),
-                        }
-                  }
-                >
-                <Show
-                  when={viewer.state().active}
-                  fallback={
-                    /*
-                     * 网格是全项目唯一那份（`PhotoGrid`）；导入侧的差异通过**数据源适配器**
-                     * 传进去（排除状态住在工作区 store：跨目录、跨源一份，网格只负责显示）。
-                     */
-                    <PhotoGrid source={gridSource()} watermark={() => gridWatermark()} />
-                  }
-                >
-                  <Show
-                    when={comparing()}
-                    fallback={
-                      <Viewer
-                        store={viewer}
-                        class="z-10"
-                        onClose={() => {
-                          // 退回 tiles 时左右栏必定回来（与 browse 同一条规矩）；
-                          // **关 store 归 Viewer 自己做** —— 这里只管外壳状态
-                          setChrome("default");
-                        }}
-                      />
-                    }
-                  >
-                    <CompareView
-                      photos={comparePhotos()}
-                      selectedCount={grid.selectedCount()}
-                      store={viewer}
-                      /* 对比态的返回（左上角那颗）：与单张看图同一条规矩 */
-                      onClose={() => setChrome("default")}
-                      onFocus={(photo) => {
-                        const at = viewer.state().photos.findIndex((item) => item.id === photo.id);
-                        if (at >= 0) viewer.focus(at);
-                      }}
-                      class="z-10"
-                    />
-                  </Show>
-                </Show>
-                </TilesShell>
-
-                {/* 胶片带：仅看图态可见；`view only`（第③态）整条收起 */}
-                <Show when={viewer.state().active && chromeShowsFilm(chrome())}>
-                  <FilmStrip
-                    viewer={viewer}
-                    selectedIds={grid.selectedIds()}
-                    /* 选择语义全在网格 store 里（`clickItem` 与 tiles 点一下是同一条路） */
-                    onSelect={(id, mode) => grid.clickItem(id, mode)}
-                    thumbs={filmThumbs}
-                    class="shrink-0"
-                  />
-                </Show>
+              <main
+                class="relative flex min-w-0 flex-1 flex-col bg-surface-bar"
+                data-chrome={viewing.chrome()}
+                data-film={viewing.filmVisible() ? "on" : "off"}
+              >
+                <PhotoViewingStage
+                  source={gridSource()}
+                  controller={viewing}
+                  thumbs={grid.thumbQueue}
+                  filmStripStep={props.filmStripStep}
+                  onFilmStripStepChange={props.onFilmStripStepChange}
+                  tilesBar={{
+                    count: grid.items().length,
+                    selectedCount: grid.selectedCount(),
+                    dir: grid.dir(),
+                    fileName: fileNameOf(grid.selection().anchor ?? ""),
+                    byTime: grid.byTime(),
+                    onByTimeChange: grid.setByTime,
+                    infoMode: importInfoMode(),
+                    onInfoToggle: toggleImportTileInfo,
+                    tileStep: grid.tileStep(),
+                    onTileStepChange: grid.setTileStep,
+                    onTileStepCommit: grid.commitTileStep,
+                    locale: groupingLocale(),
+                    loadingTimes: grid.loadingTimes(),
+                  }}
+                  viewingInfo={viewingInfo()}
+                  watermark={() => gridWatermark()}
+                />
               </main>
 
               {/* ── 右列：库（固定宽，不可拖）─────────────────── */}
-              <aside class="flex w-panel-w-right shrink-0 flex-col gap-2 bg-surface-main p-panel-pad">
+              <aside
+                class={[
+                  "w-panel-w-right shrink-0 flex-col gap-2 bg-surface-main p-panel-pad",
+                  chromeShowsRight(viewing.chrome()) ? "flex" : "hidden",
+                ].join(" ")}
+              >
         <p class="text-fs-1 tracking-wide text-fg-2 uppercase">
           {/* 面板标题说清是「导入到哪个库」—— 单说「库」太模糊 */}
           {t("import.dest_library")}

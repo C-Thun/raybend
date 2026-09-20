@@ -9,12 +9,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   HISTOGRAM_SAMPLES,
-  histogramBandPath,
-  histogramBands,
   histogramBarHeights,
   histogramIsEmpty,
   histogramPath,
-  type HistogramBand,
 } from "./histogram.ts";
 import type { HistogramCounts } from "./histogram.ts";
 
@@ -121,12 +118,12 @@ test("histogramPath：从左下基线出发、逐点直连、回基线闭合", (
   assert.ok(d.includes("50.00,0.00"), "中间点顶到上沿（值 1 → y=0）");
 });
 
-test("histogramPath：52 个采样点 → 51 段", () => {
+test("histogramPath：86 个采样点 → 85 段", () => {
   const values = Array.from({ length: HISTOGRAM_SAMPLES }, (_, i) => (i % 7) / 7);
-  assert.equal(values.length, 52);
+  assert.equal(values.length, 86);
   const d = histogramPath(values, 256, 100);
   const segments = d.split(" L").length - 1 - 2; // 扣掉回基线的两段
-  assert.equal(segments, 51, `52 个点应当连成 51 段（实际 ${segments}）`);
+  assert.equal(segments, 85, `86 个点应当连成 85 段（实际 ${segments}）`);
 });
 
 test("直线路径：脏值被夹在画布内且不出 NaN", () => {
@@ -135,106 +132,4 @@ test("直线路径：脏值被夹在画布内且不出 NaN", () => {
   assert.ok(d.includes("M0.00,100.00"), "NaN 退到基线");
   assert.ok(d.includes("L50.00,100.00"), "负数夹到 0");
   assert.ok(d.includes("L100.00,0.00"), "大于 1 夹到 1");
-});
-
-test("histogramBandPath：带形从下边界的右下角回到左下角闭合", () => {
-  const d = histogramBandPath([0.8, 0.8], [0.5, 0.5], 100, 100);
-  assert.ok(d.startsWith("M0.00,20.00"), `起点应当是上边界的左端，实际 ${d.slice(0, 16)}`);
-  assert.ok(d.endsWith("Z"));
-  assert.ok(!d.includes(" C"), "带的上下边界都不得单独拟合曲线");
-  assert.ok(d.includes("100.00,50.00"), "要走到上边界右端");
-  assert.ok(d.includes("0.00,50.00"), "再沿下边界回到左端（y = 100-0.5*100）");
-});
-
-test("histogramBandPath：长度不齐时按短的截断（不炸）", () => {
-  assert.equal(histogramBandPath([], [], 100, 50), "");
-  const d = histogramBandPath([1, 1, 1], [0], 30, 10);
-  assert.ok(d.endsWith("Z"));
-});
-
-// ─────────────────────────── 分层：7 个区域拼回原通道 ───────────────────────────
-
-test("histogramBands：三色重叠是最低那条，单通道是最高那条", () => {
-  const layers = histogramBands([0.9], [0.5], [0.2]);
-  assert.deepEqual(layers.rgb.top, [0.2], "三色重叠 = 三者最小");
-  assert.deepEqual(layers.rgb.bottom, [0]);
-  // 最低的是 b ⇒ 另外两个（r+g）形成「黄」那层；最高的 r 是单通道
-  assert.deepEqual(layers.rg.top, [0.5]);
-  assert.deepEqual(layers.rg.bottom, [0.2]);
-  assert.deepEqual(layers.r.top, [0.9]);
-  assert.deepEqual(layers.r.bottom, [0.5]);
-  /*
-   * 没被用到的层是 **0 厚度**（不是缺项）—— 关键是它**贴在边界曲线上**、
-   * 而不是掉回基线：以前写成 0 就在跨列时画出一根尖刺。
-   */
-  assert.deepEqual(layers.gb.top, [0.2]);
-  assert.deepEqual(layers.gb.bottom, [0.2], "零厚度要贴在 min(g,b) 上，不能贴基线");
-  assert.deepEqual(layers.b.top, [0.2]);
-  assert.deepEqual(layers.b.bottom, [0.2]);
-});
-
-test("histogramBands：冠军换人时不下基线（这就是尖刺的来源）", () => {
-  // 中间那一列红最高，两边都是绿/蓝最高：红那层必须在两侧**贴住自己的位置**
-  const layers = histogramBands([0.2, 0.9, 0.2], [0.8, 0.1, 0.8], [0.8, 0.1, 0.8]);
-  assert.deepEqual(layers.r.top, [0.2, 0.9, 0.2]);
-  assert.deepEqual(
-    layers.r.bottom,
-    [0.2, 0.1, 0.2],
-    "不红的那两列应当是 0 厚度（贴着 max(g,b)），而不是 0",
-  );
-  const thickness = (band: HistogramBand, index: number): number =>
-    (band.top[index] ?? 0) - (band.bottom[index] ?? 0);
-  assert.equal(thickness(layers.r, 0), 0);
-  assert.equal(thickness(layers.r, 2), 0);
-  assert.ok(Math.abs(thickness(layers.r, 1) - 0.8) < 1e-9);
-});
-
-test("histogramBands：任何列上层与层之间都不重叠、拼起来正好等于三条通道", () => {
-  const r = [0.9, 0, 0.3, 1];
-  const g = [0.5, 0.7, 0.3, 0.4];
-  const b = [0.2, 0.7, 0.8, 0.4];
-  const layers = histogramBands(r, g, b);
-  const keys = Object.keys(layers) as (keyof typeof layers)[];
-  for (let i = 0; i < r.length; i += 1) {
-    // 每层的 [bottom, top] 必须是有效区间
-    for (const key of keys) {
-      const band = layers[key];
-      assert.ok(
-        (band.top[i] ?? 0) >= (band.bottom[i] ?? 0) - 1e-9,
-        "层的上边界不能低于下边界",
-      );
-      assert.ok(
-        (band.top[i] ?? 0) <= 1 + 1e-9 && (band.bottom[i] ?? 0) >= -1e-9,
-        "层必须落在 0..1 内",
-      );
-    }
-    // 7 层的厚度加起来 = 三条通道里最高的那条（不多不少）
-    const total = keys.reduce(
-      (sum, key) => sum + ((layers[key].top[i] ?? 0) - (layers[key].bottom[i] ?? 0)),
-      0,
-    );
-    assert.ok(
-      Math.abs(total - Math.max(r[i]!, g[i]!, b[i]!)) < 1e-9,
-      `第 ${i} 列：各层厚度之和应当等于最高通道（实际 ${total}）`,
-    );
-    assert.ok(Math.abs(layers.rgb.top[i]! - Math.min(r[i]!, g[i]!, b[i]!)) < 1e-9, "灰层 = 最小值");
-  }
-});
-
-test("histogramBands：三通道等高的列上只有灰层，其余都是 0 厚度（且可复现）", () => {
-  const a = histogramBands([0.5], [0.5], [0.5]);
-  const b = histogramBands([0.5], [0.5], [0.5]);
-  assert.deepEqual(a, b, "同样的输入必须给出同样的输出");
-  assert.deepEqual(a.rgb.top, [0.5]);
-  const thickness = (band: HistogramBand): number =>
-    (band.top[0] ?? 0) - (band.bottom[0] ?? 0);
-  const rest = ["rg", "gb", "rb", "r", "g", "b"] as const;
-  for (const key of rest) {
-    assert.equal(thickness(a[key]), 0, `${key} 层不该有厚度`);
-  }
-});
-
-test("histogramBands：长度不齐按短的截断", () => {
-  const layers = histogramBands([1, 1], [1], []);
-  assert.equal(layers.rgb.top.length, 0);
 });

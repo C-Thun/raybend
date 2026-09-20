@@ -152,8 +152,8 @@ pub fn rescan_library_with_progress(
         total: scanned_count,
     });
 
-    // ③ 元数据重读（老库那批 NULL 的行）
-    let filled = backfill::backfill_metadata(catalog, now_ms)?;
+    // ③ 元数据全量重读：重建的语义是“以磁盘为准”，非空但错误的方向/尺寸也必须修正。
+    let filled = backfill::refresh_metadata(catalog, now_ms)?;
     progress(RebuildProgress {
         phase: "metadata",
         done: filled.filled,

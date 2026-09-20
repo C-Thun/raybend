@@ -27,6 +27,7 @@ import type { ThumbEntry } from "../../components/ui/thumb-queue.ts";
 import type { RowSlice } from "../../components/ui/tiles/rows.ts";
 import type { GridItem, GridStatus, TilesSource } from "../../components/ui/tiles/source.ts";
 import type { BrowseStore } from "./store.ts";
+import type { TileInfoMode } from "../../lib/display-prefs.ts";
 
 /** 时间片阈值（分钟）：两侧同一个值 —— 见 `lib/time-group.ts` 的分组规则 */
 export const DEFAULT_GAP_MINUTES = 60;
@@ -52,6 +53,8 @@ export interface BrowseSourceDeps {
   commitTileStep: () => void;
   /** 按时间分组（受控） */
   grouped: () => boolean;
+  /** 浏览自己的信息三态；与 import 的一级开关分开持久化。 */
+  infoMode: () => TileInfoMode;
 }
 
 /** 显示序的一份快照（置换 + 分组） */
@@ -75,25 +78,40 @@ export function browseSource(deps: BrowseSourceDeps): TilesSource {
    * —— 时间线换了（重新查询）才重算，与 store 的 `entries` 是同一个口径。
    */
   let cachedFor: readonly unknown[] | null = null;
+  /**
+   * 缓存还要认「按时间」这一档：切换开关时**时间线数组没变**（还是同一个引用），
+   * 只有偏好变了 —— 不把它算进缓存键，开关就会「按了没反应」
+   * （人类 2026-09-20 报的「库目录下全部照片在同一时段时，按时间不起效」）。
+   */
+  let cachedByTime: boolean | null = null;
   let cached: DisplayOrder = { ids: [], dataIndexOf: new Map(), slices: undefined };
 
   const order = (): DisplayOrder => {
     const timeline = store.timeline();
-    if (timeline === cachedFor) return cached;
+    /*
+     * ⚠️ 这一读必须在**缓存判断之前**：它既是缓存键的一部分，也是响应式依赖 ——
+     * 放到 return 之后就等于没订阅，切换开关不会触发重算。
+     */
+    const byTime = deps.grouped();
+    if (timeline === cachedFor && byTime === cachedByTime) return cached;
 
     const dataIndexOf = new Map<string, number>();
     timeline.forEach((entry, index) => dataIndexOf.set(String(entry.id), index));
 
     // 分组（只有「按时间」模式才算）：片内顺序由 `groupByTime` 按 name 排好
-    const grouping: TimeGrouping | undefined = deps.grouped()
+    const grouping: TimeGrouping | undefined = byTime
       ? groupByTime(
           timeline.map((entry) => {
             const item = store.itemById(entry.id);
             return {
               id: String(entry.id),
               takenAtMs: entry.takenAt,
-              ...(entry.takenAt === null ? {} : {}),
-              offset: item?.takenAtOffsetMin ?? null,
+              /*
+               * 时区偏移：`undefined`（这张还没取回来）**不要**当成 `null` ——
+               * `null` 的语义是「相机没写时区，按 UTC 看」，而「还没读到」应该退回
+               * 本机时区（`groupByTime` 对 `undefined` 的默认）——两者恰好一致。
+               */
+              offsetMinutes: item?.takenAtOffsetMin,
               name: entry.relPath,
             };
           }),
@@ -104,6 +122,7 @@ export function browseSource(deps: BrowseSourceDeps): TilesSource {
 
     if (grouping === undefined) {
       cachedFor = timeline;
+      cachedByTime = byTime;
       cached = {
         ids: timeline.map((entry) => String(entry.id)),
         dataIndexOf,
@@ -160,6 +179,7 @@ export function browseSource(deps: BrowseSourceDeps): TilesSource {
     }
 
     cachedFor = timeline;
+    cachedByTime = byTime;
     cached = { ids, dataIndexOf, slices };
     return cached;
   };
@@ -256,11 +276,13 @@ export function browseSource(deps: BrowseSourceDeps): TilesSource {
       return { ids: state.ids, anchor: state.anchor };
     },
     select: (id, mode) => store.select(Number(id), mode, [...order().ids]),
+    setAnchor: (id) => store.setAnchor(Number(id)),
     selectGroupRange: (start, count, additive) => {
       const ids = order().ids.slice(start, start + count);
       store.selectAll(additive === true ? ids : ids);
     },
     clearSelection: () => store.clearSelection(),
+    infoMode: () => deps.infoMode(),
     tileStep: () => deps.tileStep(),
     setTileStep: (step) => deps.setTileStep(step),
     commitTileStep: () => deps.commitTileStep(),

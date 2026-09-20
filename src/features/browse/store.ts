@@ -47,6 +47,7 @@ import {
   applySelection,
   clearSelection,
   EMPTY_SELECTION,
+  focusSelection,
   hasSelection,
   selectAll as selectAllIds,
   selectionCount,
@@ -722,10 +723,7 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
       void refreshMarkings();
     },
     setAnchor(id) {
-      const key = String(id);
-      setSelection((current) =>
-        current.ids.has(key) ? { ...current, anchor: key } : current,
-      );
+      setSelection((current) => focusSelection(current, String(id)));
     },
     selectAll(order) {
       /*

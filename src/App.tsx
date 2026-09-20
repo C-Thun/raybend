@@ -22,7 +22,7 @@ import { Show, createEffect, createMemo, createSignal, onCleanup, onMount } from
 import { uiReady, tauriWindowHandle } from "./api/window.ts";
 import { isTauriRuntime } from "./api/tauri-env.ts";
 import type { BrowseSort } from "./api/types.ts";
-import { t } from "./i18n/index.ts";
+import { t, timeoutMessage } from "./i18n/index.ts";
 import * as db from "./api/db.ts";
 import type { ExifData } from "./features/exif-strip/index.ts";
 import { assetItemExif, toExifData } from "./features/exif-strip/index.ts";
@@ -50,13 +50,23 @@ import {
 import { chordOf, type CommandSpec } from "./lib/commands.ts";
 import { rememberCommand, shortcutOverrides } from "./lib/shortcuts.ts";
 import {
-  commitDisplayTileStep,
-  displayByTime,
-  displayTileStep,
-  setDisplayByTime,
-  setDisplayTileStep,
+  browseDisplayByTime,
+  browseDisplayInfoMode,
+  browseDisplayTileStep,
+  commitBrowseDisplayTileStep,
+  commitImportDisplayTileStep,
+  importDisplayByTime,
+  importDisplayInfoMode,
+  importDisplayTileStep,
+  setBrowseDisplayByTime,
+  setBrowseDisplayTileStep,
+  setImportDisplayByTime,
+  setImportDisplayTileStep,
 } from "./lib/display-prefs.ts";
-import { cycleTileInfo, infoMode } from "./components/ui/tile-info.ts";
+import {
+  cycleBrowseTileInfo,
+  toggleImportTileInfo,
+} from "./components/ui/tile-info.ts";
 import { locale, nextLocale, setLocale } from "./i18n/index.ts";
 import { LibrarySettingsDialog } from "./features/repositories/index.ts";
 import { browseDelete, browseFacets, browseMark, browseMarkings, browsePage, browseRedo, browseTimeline, browseUndo, flagsClear, flagsGet, flagsSet, tagList } from "./api/browse.ts";
@@ -67,12 +77,30 @@ import {
   NO_MIGRATIONS,
   type MigrationMap,
 } from "./features/migration/index.ts";
+import { readBrowseSession, writeBrowseSession } from "./lib/browse-session.ts";
+import { withTimeout } from "./lib/timeout.ts";
+import { createFilmStripPreferenceStore } from "./lib/film-strip-prefs.ts";
+
+const STARTUP_REPOSITORIES_TIMEOUT_MS = 15_000;
 
 export default function App() {
   const shell = createShellStore();
   const appearance = createAppearanceStore();
   // 布局偏好（设备级）：左列宽度与左列内部的比例，拖拽结束落盘、下次启动还原
   const layout = createLayoutStore();
+  const filmStripPrefs = createFilmStripPreferenceStore({
+    getSetting: db.getSetting,
+    setSetting: db.setSetting,
+    keys: {
+      import: db.SETTING_KEYS.importFilmStripStep,
+      browse: db.SETTING_KEYS.browseFilmStripStep,
+    },
+    onError: (error, scope, operation) => {
+      console.error(`[filmstrip] ${scope} ${operation} failed`, error); // i18n-exempt: 控制台诊断
+    },
+  });
+  const filmStripPrefsReady = filmStripPrefs.load();
+  onCleanup(() => filmStripPrefs.dispose());
   /*
    * ⚠️ 比例**只在启动时读一次**（故意不放在 JSX 里，避开响应式跟踪）：
    * 如果让 `layout.prefs()` 参与渲染，就会形成回路 ——
@@ -112,6 +140,51 @@ export default function App() {
   });
 
   /*
+   * 启动落点（人类 2026-09-20）：只要登记过库就进 browse；完全没有库才进 import。
+   * 选库优先级 = 上次会话明确记录 → `lastOpenedAt` 最新 → 列表第一项；目录只在库也匹配时恢复。
+   *
+   * 这是设备级导航记忆，不进 catalog：catalog 跟着库移动，而「这台电脑上次看到哪里」属于 app。
+   * 本地存储若损坏/路径过期，`readBrowseSession` 会丢掉非法值，browse 仍能落在库选择器上。
+   */
+  const [startupResolved, setStartupResolved] = createSignal(false);
+  const startupReady = withTimeout(
+    db.listRepositories(),
+    STARTUP_REPOSITORIES_TIMEOUT_MS,
+    timeoutMessage("startup.timeout.repositories", STARTUP_REPOSITORIES_TIMEOUT_MS),
+  )
+    .then((repositories) => {
+      if (repositories.length === 0) {
+        shell.setWorkflow("import");
+        return;
+      }
+
+      shell.setWorkflow("browse");
+      const saved = readBrowseSession();
+      const preferred =
+        repositories.find((repository) => repository.id === saved.repositoryId) ??
+        [...repositories].sort(
+          (a, b) => (b.lastOpenedAt ?? Number.MIN_SAFE_INTEGER) - (a.lastOpenedAt ?? Number.MIN_SAFE_INTEGER),
+        )[0];
+      browseStore.setRepository(preferred.id);
+      if (saved.repositoryId === preferred.id && saved.scopePath !== null) {
+        browseStore.setScope(saved.scopePath);
+      }
+    })
+    .catch((error: unknown) => {
+      // 启动读库失败不能被误判为「没有库」；保留默认 import，让界面可用，同时留诊断证据。
+      console.error("[startup] 读取库注册表失败", error); // i18n-exempt: 控制台诊断
+    })
+    .finally(() => setStartupResolved(true));
+
+  createEffect(() => {
+    if (!startupResolved()) return;
+    writeBrowseSession({
+      repositoryId: browseStore.repositoryId(),
+      scopePath: browseStore.scopePath(),
+    });
+  });
+
+  /*
    * 启动闪屏的收尾（见 `src-tauri/src/lib.rs` 的 `ui_ready`）。
    *
    * 时机：**首屏挂载之后，并且等字体就绪**（限时 400ms）——
@@ -139,9 +212,13 @@ export default function App() {
       typeof document !== "undefined" && "fonts" in document
         ? document.fonts.ready.catch(() => undefined)
         : Promise.resolve();
-    void Promise.race([
-      fontsReady,
-      new Promise((resolve) => setTimeout(resolve, 400)),
+    void Promise.all([
+      startupReady,
+      filmStripPrefsReady,
+      Promise.race([
+        fontsReady,
+        new Promise((resolve) => setTimeout(resolve, 400)),
+      ]),
     ]).then(() => {
       requestAnimationFrame(() => void uiReady());
     });
@@ -240,6 +317,7 @@ export default function App() {
   const activeWorkspaceActions = () => browseActions() ?? importActions();
   const viewing = (): boolean => activeWorkspaceActions()?.viewing() ?? false;
   const filmVisible = (): boolean => activeWorkspaceActions()?.filmVisible() ?? false;
+  const importFlow = (): boolean => shell.workflow() === "import";
 
   const commandDeps: CommandDeps = {
     flow: shell.workflow,
@@ -265,17 +343,23 @@ export default function App() {
     },
     openNewRepository: () => setNewRepositoryRequest((count) => count + 1),
     display: {
-      byTime: displayByTime,
-      setByTime: setDisplayByTime,
-      infoMode,
-      cycleInfo: cycleTileInfo,
-      tileStep: displayTileStep,
-      setTileStep: setDisplayTileStep,
-      commitTileStep: commitDisplayTileStep,
+      byTime: () => (importFlow() ? importDisplayByTime() : browseDisplayByTime()),
+      setByTime: (value) =>
+        importFlow() ? setImportDisplayByTime(value) : setBrowseDisplayByTime(value),
+      infoMode: () => (importFlow() ? importDisplayInfoMode() : browseDisplayInfoMode()),
+      cycleInfo: () => (importFlow() ? toggleImportTileInfo() : cycleBrowseTileInfo()),
+      tileStep: () => (importFlow() ? importDisplayTileStep() : browseDisplayTileStep()),
+      setTileStep: (value) =>
+        importFlow() ? setImportDisplayTileStep(value) : setBrowseDisplayTileStep(value),
+      commitTileStep: () =>
+        importFlow() ? commitImportDisplayTileStep() : commitBrowseDisplayTileStep(),
     },
     viewer: {
       viewing,
-      comparing: () => browseActions()?.comparing() ?? false,
+      comparing: () =>
+        shell.workflow() === "import"
+          ? (importActions()?.comparing() ?? false)
+          : (browseActions()?.comparing() ?? false),
       filmVisible,
       actions: viewerActions,
     },
@@ -313,6 +397,7 @@ export default function App() {
       excludeSelected: () => importStore.toggleExcluded([...grid.selectedIds()]),
       openViewer: () => importActions()?.openViewer(),
       cycleChrome: () => importActions()?.cycleChrome(),
+      toggleCompareStrip: () => importActions()?.toggleCompareStrip(),
     },
   };
 
@@ -462,6 +547,8 @@ export default function App() {
           onLeftRatioChange={layout.setLeftRatio}
           recentRatio={initialLayout.recentRatio}
           onRecentRatioChange={layout.setRecentRatio}
+          filmStripStep={filmStripPrefs.step("import")}
+          onFilmStripStepChange={(step) => filmStripPrefs.setStep("import", step)}
           /* 命令面板里的「新建库…」靠它打开导入侧的弹窗（状态住在那个工作区） */
           openCreateRequest={newRepositoryRequest()}
         />
@@ -473,6 +560,8 @@ export default function App() {
           leftWidth={layout.prefs().browseLeftWidth}
           rightWidth={BROWSE_RIGHT_WIDTH}
           onLeftWidthChange={(width) => layout.setBrowseLeftWidth(width)}
+          filmStripStep={filmStripPrefs.step("browse")}
+          onFilmStripStepChange={(step) => filmStripPrefs.setStep("browse", step)}
         />
       </Show>
     </div>

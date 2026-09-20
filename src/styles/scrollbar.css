@@ -18,6 +18,23 @@
   scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
+/*
+ * **无感滚动条**的容器（`components/ui/SubtleScrollbar.tsx`）：原生滚动条整个隐藏，
+ * 位置信息改由那一条 2px 指示给。
+ *
+ * 为什么需要它：原生横向滚动条会**占高度**且时有时无 —— 出现时把内容区挤矮，
+ * 胶片带里的缩略图跟着变小（人类 2026-09-20：同一屏照片的尺寸不能随滚动条的有无变化）。
+ * 隐藏之后滚轮要自己转成横向滚动（见 `FilmStrip` 的 `onWheel`），触屏左右划动走原生。
+ */
+.scrollbar-none {
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
 /* WebKit/Chromium 细粒度样式 */
 ::-webkit-scrollbar {
   width: var(--scrollbar-w);

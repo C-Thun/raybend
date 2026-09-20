@@ -99,7 +99,7 @@ const REPOSITORIES = [
 /*
  * 三张合成照片（形状与 `AssetItem` DTO 对齐）。
  *
- * 为什么要给数据：没有照片就测不到「双击进看图 / 状态栏 / Tab 三态」这条链 ——
+ * 为什么要给数据：没有照片就测不到「双击进看图 / 状态栏 / Tab 四态」这条链 ——
  * 而那正是 M2-W2 阶段 1 的主要交付。
  */
 const DEMO_ITEMS = [1, 2, 3, 4, 5, 6].map((i) => ({
@@ -346,6 +346,10 @@ try {
         invoke: (cmd, args) => {
           window.__INVOKE_LOG = window.__INVOKE_LOG || [];
           window.__INVOKE_LOG.push(cmd);
+          if (cmd === "setting_set") {
+            window.__SETTING_CALLS = window.__SETTING_CALLS || [];
+            window.__SETTING_CALLS.push(args);
+          }
           const fixtures = ${JSON.stringify(FIXTURES)};
           if (cmd === "thumb_get" || cmd === "view_image") {
             // 前端 toBytes() 认 ArrayBuffer / Uint8Array / number[]，给哪个都行
@@ -747,10 +751,10 @@ try {
   await sleep(400);
 
   /*
-   * ── 阶段 1 的那条链：双击进看图 → 状态栏 → Tab 三态 → Esc 退回 ──
+   * ── 阶段 1 的那条链：双击进看图 → 状态栏 → Tab 四态 → Esc 退回 ──
    *
    * 这一段是对 `plans/M2-W2.md` 1.2/1.3/1.4 的端到端冒烟：
-   * 网格 → 看图件 → 外壳三态，三个模块的接线错一处这里就红。
+   * 网格 → 看图件 → 外壳四态，三个模块的接线错一处这里就红。
    */
   /*
    * 3.1：标记动作的边界提示 —— 后端说「有 2 张被锁挡住」，界面必须说出来
@@ -1763,8 +1767,8 @@ try {
    * 浏览侧以前每次进都重置；信息显示级别也要持久化）。
    *
    * 这条不走「重启应用」（冒烟里做不到），而是查**落盘内容**：设备级偏好写在
-   * `localStorage["raybend.display.v1"]`（`lib/display-prefs.ts`），
-   * 两个工作区读的是同一份 —— 只要值在里面、且下一次读回来就是它，就算持久化成立
+   * `localStorage["raybend.display.v2"]`（`lib/display-prefs.ts`），
+   * 两个工作区各读自己的分域值 —— 只要 browse 值在里面、且下一次读回来就是它，就算持久化成立
    *（读回来的路径由 `display-prefs.test.ts` 与模块初始化的同步读覆盖）。
    */
   const persisted = await send("Runtime.evaluate", {
@@ -1783,7 +1787,7 @@ try {
   await sleep(400);
   const storedPrefs = await send("Runtime.evaluate", {
     expression: `(() => {
-      const raw = localStorage.getItem("raybend.display.v1");
+      const raw = localStorage.getItem("raybend.display.v2");
       let parsed = null;
       try { parsed = raw === null ? null : JSON.parse(raw); } catch { parsed = "unparsable"; }
       const button = [...document.querySelectorAll("button")].find(
@@ -1797,22 +1801,22 @@ try {
   if (prefsState.pressed !== "true") {
     problems.push(`点「按时间」之后按钮应当是按下态（实测 ${JSON.stringify(prefsState)}）`);
   }
-  if (!prefsState.parsed || prefsState.parsed === "unparsable" || prefsState.parsed.byTime !== true) {
+  if (!prefsState.parsed || prefsState.parsed === "unparsable" || prefsState.parsed.browse?.byTime !== true) {
     problems.push(
-      `「按时间」必须落盘（键 raybend.display.v1 里 byTime 应当是 true，实测 ${JSON.stringify(prefsState)}）`,
+      `「按时间」必须落盘（键 raybend.display.v2 里 browse.byTime 应当是 true，实测 ${JSON.stringify(prefsState)}）`,
     );
   }
-  // 信息档位是同一份记录：盘上的值必须等于**界面上当前的档位**（不写死某一档）
+  // 信息档位是 browse 分域里的同一份记录：盘上的值必须等于**界面上当前的档位**（不写死某一档）
   const liveInfoLevel = await send("Runtime.evaluate", {
     expression: `document.querySelector("[data-tiles-control-bar] [data-tile-info]")?.getAttribute("data-tile-info") ?? null`,
     returnByValue: true,
   });
   const liveLevel = liveInfoLevel.result?.value ?? null;
-  if (typeof prefsState.parsed?.infoMode !== "string") {
+  if (typeof prefsState.parsed?.browse?.infoMode !== "string") {
     problems.push(`显示偏好里缺 infoMode（实测 ${JSON.stringify(prefsState)}）`);
-  } else if (liveLevel !== null && prefsState.parsed.infoMode !== liveLevel) {
+  } else if (liveLevel !== null && prefsState.parsed.browse.infoMode !== liveLevel) {
     problems.push(
-      `信息档位应当跟着落盘（界面 ${JSON.stringify(liveLevel)}，盘上 ${JSON.stringify(prefsState.parsed.infoMode)}）`,
+      `信息档位应当跟着落盘（界面 ${JSON.stringify(liveLevel)}，盘上 ${JSON.stringify(prefsState.parsed.browse.infoMode)}）`,
     );
   }
   // 收尾：把「按时间」关回去，免得影响后面的分组断言
@@ -2452,6 +2456,164 @@ try {
       `胶片带装得下时应当居中（实测 ${JSON.stringify(stripFit)}）—— 内层行是 w-max mx-auto`,
     );
   }
+
+  /*
+   * 胶片带 2026-09-20 的三条硬规矩（人类）：
+   *   ① 默认 tile 偏小（实际 158×132），上下各 8px，因此整条 148px；
+   *      **没有原生横向滚动条**（`scrollbar-width: none`）——
+ *      它时有时无会把缩略图挤得忽大忽小；
+   *   ② Ctrl + 滚轮走 17 档隐藏缩放，默认第 4 档，向上滚一格到第 5 档；
+   *   ③ 普通滚轮要能横向滚，位置由 2px 的 `SubtleScrollbar` 指示（左滚到头宽 0、
+ *      右滚到头占满全宽）。装得下时验不了滚动，这里把视口临时压窄来验。
+   */
+  const stripChrome = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const strip = document.querySelector('[data-filmstrip="open"]');
+      if (!strip) return null;
+      const first = strip.querySelector("[data-strip-item]");
+      return {
+        height: Math.round(strip.getBoundingClientRect().height),
+        step: strip.getAttribute("data-filmstrip-step"),
+        tileWidth: first === null ? null : Math.round(first.getBoundingClientRect().width),
+        tileHeight: first === null ? null : Math.round(first.getBoundingClientRect().height),
+        scrollbarWidth: getComputedStyle(strip).scrollbarWidth,
+        indicator: Boolean(document.querySelector("[data-subtle-scrollbar]")),
+      };
+    })()`,
+    returnByValue: true,
+  });
+  const stripChromeState = stripChrome.result?.value ?? null;
+  if (stripChromeState === null) {
+    problems.push("量不到胶片带（尺寸/滚动条这条验不了）");
+  } else {
+    if (
+      stripChromeState.height !== 148 ||
+      stripChromeState.step !== "4" ||
+      stripChromeState.tileWidth !== 158 ||
+      stripChromeState.tileHeight !== 132
+    ) {
+      problems.push(
+        `胶片带默认应当是第 4 档、tile 158×132、总高 148，实测 ${JSON.stringify(stripChromeState)}`,
+      );
+    }
+    if (stripChromeState.scrollbarWidth !== "none") {
+      problems.push(
+        `胶片带不该有原生滚动条（scrollbar-width 应为 none），实测 ${JSON.stringify(stripChromeState.scrollbarWidth)}`,
+      );
+    }
+    if (stripChromeState.indicator !== true) {
+      problems.push("胶片带底部应有 2px 无感滚动条（[data-subtle-scrollbar] 不在）");
+    }
+  }
+  const stripZoom = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const strip = document.querySelector('[data-filmstrip="open"]');
+      if (!strip) return false;
+      strip.dispatchEvent(new WheelEvent("wheel", {
+        deltaY: -120,
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      }));
+      return true;
+    })()`,
+    returnByValue: true,
+  });
+  await sleep(300);
+  const stripZoomed = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const strip = document.querySelector('[data-filmstrip="open"]');
+      const first = strip?.querySelector("[data-strip-item]") ?? null;
+      if (!strip) return null;
+      const state = {
+        step: strip.getAttribute("data-filmstrip-step"),
+        height: Math.round(strip.getBoundingClientRect().height),
+        tileWidth: first === null ? null : Math.round(first.getBoundingClientRect().width),
+        tileHeight: first === null ? null : Math.round(first.getBoundingClientRect().height),
+      };
+      return state;
+    })()`,
+    returnByValue: true,
+  });
+  const stripZoomState = stripZoomed.result?.value ?? null;
+  if (stripZoom.result?.value !== true || stripZoomState === null) {
+    problems.push("量不到胶片带 Ctrl + 滚轮隐藏缩放");
+  } else if (
+    stripZoomState.step !== "5" ||
+    stripZoomState.height !== 157 ||
+    stripZoomState.tileWidth !== 169 ||
+    stripZoomState.tileHeight !== 141
+  ) {
+    problems.push(
+      `胶片带 Ctrl + 向上滚一格应到第 5 档、tile 169×141、总高 157，实测 ${JSON.stringify(stripZoomState)}`,
+    );
+  }
+  // 变化后 2 秒才写：模拟 Tauri 环境直接检查 setting_set 的参数（真实环境落 app.db）。
+  await sleep(2200);
+  const persistedFilmStep = await send("Runtime.evaluate", {
+    expression: `(() => ({ calls: (window.__SETTING_CALLS || []).slice() }))()`,
+    returnByValue: true,
+  });
+  const persistedFilm = persistedFilmStep.result?.value ?? {};
+  const browseFilmWrites = (persistedFilm.calls ?? []).filter(
+    (call) => call?.key === "filmstrip.browse_tile_step",
+  );
+  const importFilmWrites = (persistedFilm.calls ?? []).filter(
+    (call) => call?.key === "filmstrip.import_tile_step",
+  );
+  if (browseFilmWrites.length !== 1 || browseFilmWrites[0]?.value !== "5" || importFilmWrites.length !== 0) {
+    problems.push(`browse 胶片带档位应在静止 2 秒后独立落盘为 5，实测 ${JSON.stringify(persistedFilm)}`);
+  }
+  await send("Runtime.evaluate", {
+    expression: `(() => {
+      const strip = document.querySelector('[data-filmstrip="open"]');
+      strip?.dispatchEvent(new WheelEvent("wheel", {
+        deltaY: 120,
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      }));
+      return true;
+    })()`,
+    returnByValue: true,
+  });
+  await sleep(2200);
+  await send("Emulation.setDeviceMetricsOverride", { width: 620, height: 900, deviceScaleFactor: 1, mobile: false });
+  await sleep(500);
+  await send("Runtime.evaluate", {
+    expression: `(() => {
+      const strip = document.querySelector('[data-filmstrip="open"]');
+      strip?.dispatchEvent(new WheelEvent("wheel", { deltaY: 240, bubbles: true, cancelable: true }));
+      return true;
+    })()`,
+    returnByValue: true,
+  });
+  await sleep(300);
+  const stripScrollState = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const strip = document.querySelector('[data-filmstrip="open"]');
+      const bar = document.querySelector("[data-subtle-scrollbar] > div");
+      if (!strip) return null;
+      const max = strip.scrollWidth - strip.clientWidth;
+      const left = strip.scrollLeft;
+      return { max: Math.round(max), left: Math.round(left), barWidth: bar ? bar.style.width : null };
+    })()`,
+    returnByValue: true,
+  });
+  await send("Emulation.clearDeviceMetricsOverride");
+  await sleep(500);
+  const stripScroll = stripScrollState.result?.value ?? null;
+  if (stripScroll === null || stripScroll.max <= 1) {
+    problems.push("压窄视口后胶片带应当溢出（滚轮这条验不了）");
+  } else {
+    if (stripScroll.left <= 0) {
+      problems.push(`纵向滚轮必须能横向滚动胶片带（实测 left=${stripScroll.left}）`);
+    }
+    const ratio = stripScroll.barWidth === null ? null : Number.parseFloat(stripScroll.barWidth);
+    if (ratio === null || Math.abs(ratio - (stripScroll.left / stripScroll.max) * 100) > 1) {
+      problems.push(`无感滚动条应当指示位置（实测 ${JSON.stringify(stripScroll)}）`);
+    }
+  }
   if (shown.readout !== true) problems.push("右栏没换成预览 + 直方图（[data-viewer-readout=\"open\"] 不在）");
   /*
    * 预览框是**固定 4:3**（人类 2026-09-20：「比例改成 4:3，不要 3:2，这样对纵图支持更好」）。
@@ -2487,11 +2649,10 @@ try {
   }
 
   /*
-   * 直方图：**7 个区域各画一条 + 背景 4 根等分虚线**（人类 2026-09-19 的三条要求）。
+   * 直方图：**三条完整通道填充 path + 背景 4 根等分虚线**。
    *
-   * 为什么要断言到这种程度：分层取色是新做法（不再是 `mix-blend-screen`），
-   * 最典型的坏法是「只有三条通道曲线、重叠处根本不上色」——
-   * 那样画面上看着也像直方图，但人类要的「两两重叠 = 黄/青/紫、三色 = 灰」全没了。
+   * 为什么要断言到这种程度：旧的七块硬切会在亚像素交界处留白；现在由浏览器把三条
+   * 完整曲线叠加，既不留几何缝隙，也能在实时输入时只更新三条 path。
    */
   const histogramShape = await send("Runtime.evaluate", {
     expression: `(() => {
@@ -2503,8 +2664,9 @@ try {
       );
       return {
         paths: paths.length,
-        labelFills: paths.filter((p) => (p.getAttribute("class") ?? "").includes("fill-(--label-")).length,
-        triple: paths.filter((p) => (p.getAttribute("class") ?? "").includes("--hist-triple")).length,
+        channels: paths.filter((p) => (p.getAttribute("class") ?? "").includes("histogram-channel")).length,
+        channelButtons: host.querySelectorAll('button[aria-pressed]').length,
+        channel: host.getAttribute("data-channel"),
         straight: paths.every((p) => !(p.getAttribute("d") ?? "").includes(" C")),
         gridLines: gridLines.length,
       };
@@ -2515,14 +2677,11 @@ try {
   if (hist === null) {
     problems.push("看图右栏里没有画出来的直方图（[data-histogram=\"lines\"] 不在）");
   } else {
-    if (hist.paths !== 7) {
-      problems.push(`直方图应当是 7 个区域各一条（三色重叠 + 三个两两重叠 + 三条单通道），实测 ${JSON.stringify(hist)}`);
+    if (hist.paths !== 3 || hist.channels !== 3) {
+      problems.push(`直方图应当只有三条完整 RGB 通道 path，实测 ${JSON.stringify(hist)}`);
     }
-    if (hist.labelFills !== 6) {
-      problems.push(`六条区域曲线要用色标那六色（实测 ${JSON.stringify(hist.labelFills)} 条）`);
-    }
-    if (hist.triple !== 1) {
-      problems.push(`三色重叠区要用 --hist-triple（实测 ${JSON.stringify(hist.triple)} 条）`);
+    if (hist.channelButtons !== 3 || hist.channel !== "all") {
+      problems.push(`直方图默认应当全通道显示，并内置 R/G/B 三个互斥按钮，实测 ${JSON.stringify(hist)}`);
     }
     if (!hist.straight) problems.push("直方图必须逐点直连，不能再出现三次曲线段");
     if (hist.gridLines !== 4) {
@@ -2555,9 +2714,9 @@ try {
   if (!String(stripState.status).includes("MY002")) {
     problems.push(`点胶片带之后底部状态栏文件名没跟着走（实测 ${JSON.stringify(String(stripState.status).slice(0, 60))}）`);
   }
-  if (shown.chrome !== "default") problems.push(`进看图时三态应当从默认开始，实测 ${shown.chrome}`);
+  if (shown.chrome !== "default") problems.push(`进看图时四态应当从默认开始，实测 ${shown.chrome}`);
 
-  /* Tab：①默认 → ②关左右 → ③关胶片带 → ① */
+  /* Tab：①默认 → ②只关左 → ③关两侧 → ④仅 view → ① */
   /* 对比态：Ctrl 多选 → 自然进入对比；反选 → 自然退出（BROWSE.md §5.5） */
   await send("Runtime.evaluate", {
     expression: `(() => {
@@ -2634,6 +2793,20 @@ try {
     if (compareState.viewer !== false) {
       problems.push("对比态下不该同时出现单张看图件");
     }
+  }
+
+  /*
+   * 2026-09-20 的新口径（人类）：进入对比**不自动**切「只看对比图」——
+   * 胶片带仍显示全目录，好继续选第三张；再按一次回车才切（下面的 2.4 那段验的就是切过去）。
+   */
+  const stripOnEnter = await send("Runtime.evaluate", {
+    expression: `document.querySelector("[data-filmstrip]")?.getAttribute("data-strip-mode") ?? null`,
+    returnByValue: true,
+  });
+  if (stripOnEnter.result?.value !== "all") {
+    problems.push(
+      `进入对比时胶片带应当仍是全目录（不该自动切「只看对比图」），实测 ${JSON.stringify(stripOnEnter.result?.value)}`,
+    );
   }
 
   /*
@@ -2878,10 +3051,10 @@ try {
     await sleep(200);
   }
   const expected = [
+    { chrome: "film-right", sides: 1, film: "on", strip: true },
     { chrome: "film-only", sides: 0, film: "on", strip: true },
     { chrome: "view-only", sides: 0, film: "off", strip: false },
     { chrome: "default", sides: 2, film: "on", strip: true },
-    { chrome: "film-only", sides: 0, film: "on", strip: true },
   ];
   for (let i = 0; i < expected.length; i += 1) {
     const want = expected[i];
@@ -3327,7 +3500,7 @@ try {
       problems.push(`对比态点返回没退出看图（实测 ${JSON.stringify(backState)}）`);
     }
     if (backState.chrome !== "default") {
-      problems.push(`对比态点返回之后三态应当复位（实测 ${JSON.stringify(backState.chrome)}）`);
+      problems.push(`对比态点返回之后四态应当复位（实测 ${JSON.stringify(backState.chrome)}）`);
     }
   }
 
@@ -3491,16 +3664,24 @@ try {
         problems.push(`标题栏菜单里缺「${expected}」（实测 ${JSON.stringify(labels)}）`);
       }
     }
-    // 点开「编辑」：项 + 键位提示
-    const opened = await send("Runtime.evaluate", {
+    // 用真实鼠标移到「编辑」并点击：现在一个菜单打开后，悬浮其它标题会自动切换，
+    // 测试不能把鼠标留在另一个菜单标题上再用脚本伪点，否则会被正确的 hover 行为切走。
+    const editBox = await send("Runtime.evaluate", {
       expression: `(() => {
         const header = document.querySelector("header[data-tauri-drag-region]");
         const button = [...(header?.querySelectorAll("button") ?? [])].find((b) => b.textContent?.trim() === "编辑");
-        button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-        return Boolean(button);
+        if (!button) return null;
+        const rect = button.getBoundingClientRect();
+        return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
       })()`,
       returnByValue: true,
     });
+    const editPoint = editBox.result?.value ?? null;
+    if (editPoint !== null) {
+      await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: editPoint.x, y: editPoint.y });
+      await send("Input.dispatchMouseEvent", { type: "mousePressed", button: "left", buttons: 1, clickCount: 1, x: editPoint.x, y: editPoint.y });
+      await send("Input.dispatchMouseEvent", { type: "mouseReleased", button: "left", buttons: 0, clickCount: 1, x: editPoint.x, y: editPoint.y });
+    }
     await sleep(350);
     const items = await send("Runtime.evaluate", {
       expression: `(() => {
@@ -3513,7 +3694,7 @@ try {
       returnByValue: true,
     });
     const menuContent = items.result?.value ?? {};
-    if (opened.result?.value !== true) {
+    if (editPoint === null) {
       problems.push("点不开「编辑」菜单（菜单这条验不了）");
     } else if ((menuContent.count ?? 0) < 3) {
       problems.push(`「编辑」菜单的项太少（实测 ${JSON.stringify(menuContent)}）`);

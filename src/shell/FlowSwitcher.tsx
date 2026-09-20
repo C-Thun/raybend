@@ -57,25 +57,16 @@ export function FlowSwitcher<TValue extends string>(props: FlowSwitcherProps<TVa
         否则它塌成 0 宽：选中项变成「深色文字落在深色轨道上」，肉眼就是**看不见**。
         （实测踩过：这就是「横向选择器选中态全黑」的根因。）
       */}
-      <ArkSegmentGroup.Indicator class="absolute top-[var(--top)] left-[var(--left)] h-[var(--height)] w-[var(--width)] rounded-full bg-brand transition-all duration-150" />
+      <ArkSegmentGroup.Indicator class="pointer-events-none absolute top-[var(--top)] left-[var(--left)] h-[var(--height)] w-[var(--width)] rounded-full bg-brand transition-[left,top,width,height] duration-150 ease-out" />
       <For each={props.options}>
         {(option) => (
           <ArkSegmentGroup.Item
             value={option.value}
             disabled={option.disabled}
-              /*
-               * ⚠️ **选中项自己也要有主色底**（2026-09-20 修「切语言时选中底色会变」）：
-               * 指示块（Indicator）的几何是 Ark 量出来的，标签文字一变宽它就得重量 ——
-               * 那段窗口里（尤其配上 `transition-all`）选中项看上去就不是主色底了。
-               * 让**选中项自己**铺主色底，指示块只负责「滑动动画」这一件事：
-               * 指示块量偏/晚一拍时，底色仍然是对的，任何一次布局变化都不会豁口。
-               */
-
+            /* 只有 Indicator 画选中底；item 自身绝不预亮，避免目标先出现再被滑块覆盖。 */
             class={[
               "relative z-(--z-bar) flex h-flow-chip-h shrink-0 cursor-pointer items-center justify-center",
               "rounded-full px-flow-chip-pad-x",
-              // 选中项自己铺主色底（见 `SegmentedControl` 里那段说明：指示块只负责滑动动画）
-              "data-[state=checked]:bg-brand",
               "cursor-pointer",
             ].join(" ")}
           >

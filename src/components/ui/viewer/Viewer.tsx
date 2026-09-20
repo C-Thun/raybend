@@ -26,6 +26,7 @@ import { ViewerControls } from "./ViewerControls.tsx";
 import {
   createWheelZoom,
   isViewerControlTarget,
+  takeViewerFocus,
   viewerControlsVisible,
 } from "./interaction.ts";
 
@@ -100,11 +101,17 @@ export function Viewer(props: ViewerProps) {
    * 两类语义保留下来：`0` = 适配（已适配时不动）、`1` = 100%（已是 100% 时不动）；
    * 旧代码就是这么写的（避免同一条命令按两次把自己转回原地）。
    *
-   * ⚠️ `Enter`（再按一次退出）**不走命令**：它是看图件自己的语义
-   * （网格里回车是「进看图」，看图里回车是「出去」—— 两个面各管各的），
-   * 保留在这里当**内建键**，并在设置界面里写明。
+   * 单张 view 的 `Enter`（再按一次退出）仍是看图件自己的内建语义；compare 下的 Enter
+   * 会先被命令分发器消费，用来切换胶片带的「仅对比集 / 全目录」，因此不会落到退出处理。
    */
   onMount(() => {
+    /*
+     * 看图面**接管键盘焦点**（理由见 `interaction.ts::takeViewerFocus`）：
+     * 不接管的话，底下那张 tile 会先把回车吃掉（激活 = 重新打开看图），
+     * 下面这段「回车退出」永远等不到事件 —— 人类 2026-09-20 报的
+     * 「browse 里回车进得去、退不出来」就是这个。
+     */
+    takeViewerFocus(host);
     registerViewerActions({
       zoomIn: () => props.store.zoomBy(1.25),
       zoomOut: () => props.store.zoomBy(1 / 1.25),
@@ -120,7 +127,7 @@ export function Viewer(props: ViewerProps) {
     });
     onCleanup(() => registerViewerActions(null));
 
-    // 回车＝退出：内建，不走注册表（理由见上面的注释）
+    // 单张 view：回车退出。compare 的回车已被命令分发器 preventDefault。
     const onKey = (event: KeyboardEvent): void => {
       if (!state().active) return;
       if (event.defaultPrevented) return;
@@ -187,11 +194,15 @@ export function Viewer(props: ViewerProps) {
         // 编译产物里 `relative` 在后，`relative` 会赢，于是 Viewer 退化成列里的普通
         // flex 子项、只占住下半屏（2026-09-17 实测 bug）。定位交给调用方传 class。
         "absolute inset-0 overflow-hidden bg-surface-bar",
+        // 接管焦点用（`takeViewerFocus`）；`outline-none`：整块画面不该出现聚焦环
+        "outline-none",
         dragging() ? "cursor-grabbing" : "cursor-grab",
         props.class ?? "",
       ]
         .filter(Boolean)
         .join(" ")}
+      // `-1`：可编程聚焦，但不进 Tab 序列（Tab 要留给四态循环与控件）
+      tabindex="-1"
       data-viewer="open"
       onWheel={wheel.onWheel}
       onPointerDown={onPointerDown}

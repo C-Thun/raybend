@@ -20,8 +20,9 @@
  * `bar` 不给就是不要状态条（看图态那条由别处替代 —— 浏览侧是胶片带、导入侧是看图件）。
  */
 
-import type { JSX } from "solid-js";
+import { createSignal, Show, type JSX } from "solid-js";
 import { TilesControlBar, type TilesControlBarProps } from "./TilesControlBar.tsx";
+import { TilesFitRequestContext } from "./fit.ts";
 
 export interface TilesShellProps {
   /** 网格 / 看图区 */
@@ -32,15 +33,28 @@ export interface TilesShellProps {
 }
 
 export function TilesShell(props: TilesShellProps): JSX.Element {
+  const [fitRequest, setFitRequest] = createSignal(0);
   return (
-    <div
-      class={["relative flex min-h-0 flex-1 flex-col", props.class ?? ""]
-        .filter(Boolean)
-        .join(" ")}
-      data-tiles-shell
-    >
-      {props.children}
-      {props.bar ? <TilesControlBar {...props.bar} /> : null}
-    </div>
+    <TilesFitRequestContext.Provider value={fitRequest}>
+      <div
+        class={["relative flex min-h-0 flex-1 flex-col", props.class ?? ""]
+          .filter(Boolean)
+          .join(" ")}
+        data-tiles-shell
+      >
+        {props.children}
+        {/*
+          when 只看「有没有 bar」，不看配置对象身份：拖动滑杆时 tileStep 每次变化都会
+          产生新对象，但这颗 TilesControlBar 必须保持同一个 DOM / Ark Slider 实例，
+          pointer capture 才不会在第一格之后被销毁。
+        */}
+        <Show when={props.bar !== null && props.bar !== undefined}>
+          <TilesControlBar
+            config={() => props.bar as TilesControlBarProps}
+            onFitRow={() => setFitRequest((request) => request + 1)}
+          />
+        </Show>
+      </div>
+    </TilesFitRequestContext.Provider>
   );
 }

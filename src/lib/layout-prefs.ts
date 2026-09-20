@@ -53,26 +53,25 @@ export const BROWSE_RIGHT_WIDTH = 300;
 
 /**
  * 允许的范围：既给拖拽留余量，也挡住存储里的垃圾值把某一段挤没。
- * （左列另有 `minSize: "220px"` 的像素下限 —— 两个闸门都要有：比例管「拖」，
- * 像素管「窗口特别小时」；缩到很窄的窗口上，220px 会先兜住。）
+ * （导入左列也以 220px 兜底；browse 与它统一，避免库 / 目录列最窄仍占太多画面。）
  */
 export const LAYOUT_BOUNDS = {
   leftRatio: { min: 0.12, max: 0.5 },
   recentRatio: { min: 0.15, max: 0.7 },
   /**
-   * 左列像素下限 **264**（人类 2026-09-19：在 220 基础上 +20% —— 220 时目录名/标签
-   * 太挤）；上限 520 不变（别把网格挤没）。
+   * 左列像素下限 **220**（人类 2026-09-20：参考 import left，264 实际使用太宽）；
+   * 上限 520 不变（别把网格挤没）。
    *
    * **这是唯一一份**：拖拽/键盘微调的闸门直接用这条（`BrowseWorkspace` 里那份
    * 手抄的 `SIDEBAR_BOUNDS` 已删）—— 两处各写一份的话，改了一处另一处不生效。
    */
-  browseLeftWidth: { min: 264, max: 520 },
+  browseLeftWidth: { min: 220, max: 520 },
 } as const;
 
 export const DEFAULT_LAYOUT: LayoutPrefs = {
   leftRatio: 0.22,
   recentRatio: 0.32,
-  // 左列仍是 300（人类没要求改默认，只要求把下限抬到 264）
+  // 默认仍是 300；只把可拖下限与 import left 对齐到 220
   browseLeftWidth: 300,
 };
 

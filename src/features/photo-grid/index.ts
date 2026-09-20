@@ -9,9 +9,16 @@
  */
 
 export { PhotoGrid } from "./PhotoGrid.tsx";
+export { PhotoViewingStage } from "./PhotoViewingStage.tsx";
+export { createPhotoViewingController } from "./viewing.ts";
 export { importSource } from "./source.ts";
 export type { ImportSourceOptions } from "./source.ts";
 export type { PhotoGridProps } from "./PhotoGrid.tsx";
+export type { PhotoViewingStageProps } from "./PhotoViewingStage.tsx";
+export type {
+  PhotoViewingController,
+  PhotoViewingControllerDeps,
+} from "./viewing.ts";
 export {
   createPhotoGridStore,
   DEFAULT_GAP_MINUTES,

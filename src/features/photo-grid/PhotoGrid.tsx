@@ -15,7 +15,7 @@
  *    `TileCell` 在自己的 `createEffect` 里请求，滚出视口就不再管它。
  * 3. **看图是覆盖层**：网格不卸载 —— 退出时光标、选中与**滚动位置**原地不动
  *    （人类 2026-09-17 报过「进看图再退出回到列表开头」，根因就是卸载）。
- * 4. **看图关掉要把焦点要回来**（`focusNudge`）：否则焦点掉到 `<body>`，
+ * 4. **看图关掉要把焦点要回来**（组件自己盯 `viewer.state().active`）：否则焦点掉到 `<body>`，
  *    回车/方向键再也到不了网格（人类 2026-09-19 报的「Esc 后回车进不去」）。
  */
 
@@ -35,15 +35,17 @@ import { IconCalendar } from "@tabler/icons-solidjs";
 import { Tile } from "../../components/ui/Tile.tsx";
 import { VirtualGrid } from "../../components/ui/VirtualGrid.tsx";
 import { createTokenPx } from "../../components/ui/tokens.ts";
-import { infoMode } from "../../components/ui/tile-info.ts";
+import { useTilesFitRequest } from "../../components/ui/tiles/fit.ts";
 import { createViewerStore, Viewer, type ViewerStore } from "../../components/ui/viewer/index.ts";
 import { locale, t } from "../../i18n/index.ts";
 import { formatDayLabel, formatTimeRange } from "../../lib/datetime.ts";
 import { formatCount, type GroupingLocale } from "../../lib/format.ts";
 import {
-  clampTileStepIndex,
   computeTileFlow,
+  fitTileSizeToRow,
+  nextTilePresetPosition,
   nextIndexForArrow,
+  tilePositionForSize,
   tileSizeAt,
 } from "../../lib/tile-flow.ts";
 import { rowTop } from "../../lib/virtual-window.ts";
@@ -66,14 +68,6 @@ export interface PhotoGridProps {
    */
   viewer?: ViewerStore;
   /**
-   * 「看图刚刚关掉了」的**计数器**（每次关 +1）：网格据此把焦点要回来。
-   *
-   * 为什么是计数器而不是「看图是否开着」：看图有多条关闭路径（`Esc`、对比态的「返回」、
-   * 关闭按钮），只盯「开着→关掉」的跃变会漏掉「关闭时网格根本没在跑那个跃变」的情形
-   * （真机实测：对比态点返回后焦点就没人管了）。
-   */
-  focusNudge?: number;
-  /**
    * 内容指纹（浏览侧传「库 + 范围 + 筛选」）。变了就把**参考照片**钉回原来的高度，
    * 换筛选时窗口内容不动（人类 2026-09-19）。
    */
@@ -83,7 +77,7 @@ export interface PhotoGridProps {
   /** 点了第几格（显示序下标）：浏览侧据此记住「当前那张」，键盘导航从它接着走 */
   onFocusIndex?: (index: number) => void;
   /**
-   * 打开看图的**前一刻**回调（浏览侧要在这里复位三态 `chrome`、收起库列表）。
+   * 打开看图的**前一刻**回调（浏览侧要在这里复位四态 `chrome`、收起库列表）。
    * 网格自己不认识那些概念 —— 它只负责「打开前打个招呼」。
    */
   onOpeningViewer?: () => void;
@@ -149,6 +143,23 @@ export function PhotoGrid(props: PhotoGridProps): JSX.Element {
   const cellWidth = () => tileSizeAt(source.tileStep());
   const flow = () =>
     computeTileFlow({ containerWidth: width(), cellWidth: cellWidth(), gap: gap() });
+  const fitRequest = useTilesFitRequest();
+
+  createEffect(
+    on(
+      () => fitRequest?.() ?? 0,
+      (request) => {
+        if (request <= 0 || width() <= 0) return;
+        const fitted = fitTileSizeToRow({
+          containerWidth: width(),
+          cellWidth: cellWidth(),
+          gap: gap(),
+        });
+        source.setTileStep(tilePositionForSize(fitted));
+        source.commitTileStep();
+      },
+    ),
+  );
 
   /*
    * ⚠️ **必须 memo**：`buildGridRows` 每次都返回**新数组 + 新行对象**，
@@ -412,10 +423,21 @@ export function PhotoGrid(props: PhotoGridProps): JSX.Element {
     return row < 0 ? undefined : row;
   };
 
-  createEffect<number | undefined>((seen) => {
-    const nudge = props.focusNudge ?? 0;
-    if (seen !== undefined && nudge !== seen) queueMicrotask(() => focusTiles());
-    return nudge;
+  /*
+   * 看图关掉 ⇒ 把焦点还给网格（`BROWSE.md` §5.4 的键盘接续）。
+   *
+   * **盯的就是看图的开关本身**（人类 2026-09-20 统一）：看图的 store 就在这个组件
+   * 手里（`viewer`），所以这条不需要外面接线 —— 以前是工作区把「关了」变成计数器
+   * 传进来，于是导入侧要接一遍、浏览侧要接一遍（两份一模一样的逻辑）。
+   *
+   * 看图的关闭路径很多（`Esc`、对比态的「返回」、关闭按钮），但它们最后都落到
+   * `viewer.state().active` 这一个状态上 —— 只做一次、只有一份实现。
+   * 焦点不抢回来，回车/方向键就再也到不了网格（人类 2026-09-19 报的「Esc 后回车进不去」）。
+   */
+  createEffect<boolean | undefined>((wasActive) => {
+    const active = viewer.state().active;
+    if (wasActive === true && !active) queueMicrotask(() => focusTiles());
+    return active;
   });
 
   /*
@@ -486,7 +508,7 @@ export function PhotoGrid(props: PhotoGridProps): JSX.Element {
           onVisibleRange={onVisibleRange}
           /* Ctrl+滚轮调档位（两侧同一个手势）；松手那次由 commitTileStep 落盘 */
           onZoomWheel={(step) => {
-            source.setTileStep(clampTileStepIndex(source.tileStep() + step));
+            source.setTileStep(nextTilePresetPosition(source.tileStep(), step > 0 ? 1 : -1));
             source.commitTileStep();
           }}
           onBackgroundClick={() => source.clearSelection()}
@@ -598,7 +620,7 @@ function TileCell(props: {
       style={{ width: "var(--tile-cell)", height: "var(--tile-cell)" }}
     >
       <Tile
-        info={infoMode()}
+        info={props.source.infoMode()}
         /*
          * **库内**上下文：顶部那条标记信息条（星标/色标/旗标）只在库内照片上出现。
          * 这一条 2026-09-20 才补上 —— 之前 `Tile` 里的 `inLibrary()` 判定一直没人满足，

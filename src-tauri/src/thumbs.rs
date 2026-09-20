@@ -119,7 +119,9 @@ pub async fn view_image(path: String, purpose: Option<String>) -> Result<tauri::
 /// 快且足够稳（直方图看形状，不看精确计数）。
 #[tauri::command]
 pub async fn image_histogram(path: String, bins: Option<usize>) -> Result<HistogramDto, String> {
-    let bins = bins.filter(|b| *b > 0).unwrap_or(DEFAULT_BINS);
+    // 采样口径固定为 86（0 单独，其余每 3 级平均）；保留参数只为旧前端兼容。
+    let _requested_bins = bins;
+    let bins = DEFAULT_BINS;
     crate::source::blocking(move || {
         let histogram = raybend::display::histogram_of_file(Path::new(&path), bins)
             .map_err(|e| e.to_string())?
@@ -135,11 +137,11 @@ pub async fn image_histogram(path: String, bins: Option<usize>) -> Result<Histog
 pub struct HistogramDto {
     pub bins: usize,
     /// 每个桶的计数（长度都等于 `bins`）
-    pub r: Vec<u32>,
-    pub g: Vec<u32>,
-    pub b: Vec<u32>,
+    pub r: Vec<f64>,
+    pub g: Vec<f64>,
+    pub b: Vec<f64>,
     /// 三通道合并后的峰值（前端按它归一化柱高）
-    pub max: u32,
+    pub max: f64,
 }
 
 impl From<raybend::display::Histogram> for HistogramDto {

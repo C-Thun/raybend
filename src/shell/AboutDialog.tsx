@@ -98,7 +98,7 @@ export function AboutDialog(props: AboutDialogProps) {
     >
       <div class="flex flex-col gap-4">
         {/* ── 品牌块 ─────────────────────────────────── */}
-        <div class="flex items-center gap-3">
+        <div class="flex items-center gap-4">
           {/*
             这里地方大，用**带字**的大 logo（`logo.png`）。
             同样不加 CSS 圆角：徽章自带圆角，再套一层会切边。
@@ -108,7 +108,7 @@ export function AboutDialog(props: AboutDialogProps) {
             alt=""
             aria-hidden="true"
             draggable={false}
-            class="size-10 shrink-0 select-none"
+            class="size-20 shrink-0 select-none"
           />
           <div class="min-w-0">
             <div class="truncate text-fs-4 font-semibold text-fg-1">

@@ -310,6 +310,10 @@ pub struct AssetItem {
 
 impl From<AssetRow> for AssetItem {
     fn from(row: AssetRow) -> Self {
+        // catalog 存的是文件头里的原始像素轴；Browse DTO 对外给展示尺寸，必须应用方向。
+        // 单图 view / film 直接走解码后的图所以一直正常，只有 tiles / compare 读了这两个
+        // 原始数值，才会把 orientation=6/8 的竖图压成横图。
+        let (width, height) = oriented_dimensions(row.width, row.height, row.orientation);
         Self {
             id: row.id,
             file_name: query::file_name_of(&row.rel_path).to_string(),
@@ -339,12 +343,51 @@ impl From<AssetRow> for AssetItem {
             f_number: row.f_number,
             exposure_ms: row.exposure_ms,
             iso: row.iso,
-            width: row.width,
-            height: row.height,
+            width,
+            height,
             orientation: row.orientation,
             size_bytes: row.size_bytes,
             missing: row.missing,
         }
+    }
+}
+
+fn oriented_dimensions(
+    width: Option<i64>,
+    height: Option<i64>,
+    orientation: Option<i64>,
+) -> (Option<i64>, Option<i64>) {
+    if matches!(orientation, Some(5..=8)) {
+        (height, width)
+    } else {
+        (width, height)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::oriented_dimensions;
+
+    #[test]
+    fn browse_dimensions_apply_exif_orientation_once() {
+        assert_eq!(
+            oriented_dimensions(Some(6000), Some(4000), Some(6)),
+            (Some(4000), Some(6000)),
+            "竖拍 6/8 必须以竖向尺寸交给 tiles 与 compare",
+        );
+        assert_eq!(
+            oriented_dimensions(Some(6000), Some(4000), Some(1)),
+            (Some(6000), Some(4000)),
+        );
+        assert_eq!(
+            oriented_dimensions(None, Some(4000), Some(8)),
+            (Some(4000), None)
+        );
+        assert_eq!(
+            oriented_dimensions(Some(6000), Some(4000), Some(99)),
+            (Some(6000), Some(4000)),
+            "非法方向按不旋转处理",
+        );
     }
 }
 

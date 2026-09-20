@@ -1,4 +1,4 @@
-//! 老库的**元数据回填**：把 `assets.taken_at IS NULL` 的资产重新读一遍 EXIF。
+//! 老库的元数据回填，以及「重建数据」使用的全量元数据刷新。
 //!
 //! ## 为什么需要它
 //!
@@ -13,7 +13,7 @@
 //!
 //! 写的是 [`assets::apply_exif`] 那一组列（时间 / 器材 / 曝光 / 尺寸 / 朝向），
 //! **绝不碰用户写的**（`author` / `description` / `rating` / 色标 / 标签 / 锁）。
-//! 而且只处理 `taken_at IS NULL` 的资产 —— 已经有时间的行一个都不动。
+//! 普通回填只处理 `taken_at IS NULL`；重建则刷新全部在线资产，修复非空但错误的方向/尺寸。
 //!
 //! ## 顺序与并发
 //!
@@ -28,17 +28,18 @@ use std::path::{Path, PathBuf};
 
 use crate::error::Result;
 use crate::media::exif::{self, source_rank, ExifData, TakenAt};
+use crate::media::meta::{orientation_swaps_axes, read_photo_meta};
 use crate::store::assets;
 use crate::store::db::CatalogDb;
 
 /// 回填结果（给调用方打日志/报数用）。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BackfillReport {
-    /// 候选资产数（`taken_at IS NULL`）。
+    /// 候选资产数：普通回填是 `taken_at IS NULL`，全量刷新是全部在线资产。
     pub candidates: usize,
-    /// 这次真正补上的。
+    /// 这次真正写入的资产数。
     pub filled: usize,
-    /// 读完之后仍然没有时间的（文件里真的没有可用信息）。
+    /// 读完之后仍然没有任何可写文件元数据的资产数。
     pub still_missing: usize,
     /// 有文件不在磁盘上（离线盘 / 被删）——那些资产原样不动。
     pub unreadable: usize,
@@ -58,10 +59,42 @@ pub fn backfill_metadata(catalog: &CatalogDb, now_ms: i64) -> Result<BackfillRep
         if !abs.is_file() {
             return None;
         }
-        let data = exif::read_file_for(abs);
+        let data = read_disk_metadata(abs);
         let taken = exif::resolve_taken_at(Some(&data), name, mtime_ms);
         Some((data, taken))
     })
+}
+
+/// 重建数据时使用：不只补 NULL，而是重新读取全部在线资产的文件元数据。
+///
+/// 只覆盖 `assets::apply_exif` 管辖的文件事实；星级、文字、标签、锁等用户数据不动。
+pub fn refresh_metadata(catalog: &CatalogDb, now_ms: i64) -> Result<BackfillReport> {
+    refresh_with(catalog, now_ms, |abs, name, mtime_ms| {
+        if !abs.is_file() {
+            return None;
+        }
+        let data = read_disk_metadata(abs);
+        let taken = exif::resolve_taken_at(Some(&data), name, mtime_ms);
+        Some((data, taken))
+    })
+}
+
+/// EXIF 提供器材/时间；真实图像头提供更可信的尺寸。
+///
+/// `read_photo_meta` 返回已应用方向的展示尺寸，catalog 仍存原始像素轴，所以写入前换回去。
+fn read_disk_metadata(path: &Path) -> ExifData {
+    let mut data = exif::read_file_for(path);
+    if let Ok(meta) = read_photo_meta(path) {
+        let (width, height) = if orientation_swaps_axes(meta.orientation) {
+            (meta.height, meta.width)
+        } else {
+            (meta.width, meta.height)
+        };
+        data.width = (width > 0).then_some(i64::from(width));
+        data.height = (height > 0).then_some(i64::from(height));
+        data.orientation = Some(i64::from(meta.orientation));
+    }
+    data
 }
 
 /// 可注入读法的版本（测试用假读法，不必造真文件）。
@@ -69,17 +102,42 @@ pub fn backfill_with<F>(catalog: &CatalogDb, now_ms: i64, read: F) -> Result<Bac
 where
     F: Fn(&Path, &str, Option<i64>) -> Option<(ExifData, Option<TakenAt>)>,
 {
+    sync_with(catalog, now_ms, true, read)
+}
+
+/// 可注入读法的全量刷新（测试与重建共用）。
+pub fn refresh_with<F>(catalog: &CatalogDb, now_ms: i64, read: F) -> Result<BackfillReport>
+where
+    F: Fn(&Path, &str, Option<i64>) -> Option<(ExifData, Option<TakenAt>)>,
+{
+    sync_with(catalog, now_ms, false, read)
+}
+
+fn sync_with<F>(
+    catalog: &CatalogDb,
+    now_ms: i64,
+    only_missing: bool,
+    read: F,
+) -> Result<BackfillReport>
+where
+    F: Fn(&Path, &str, Option<i64>) -> Option<(ExifData, Option<TakenAt>)>,
+{
     let root: PathBuf = catalog.root().to_path_buf();
     let grouped: BTreeMap<i64, Vec<FileRow>> = catalog.read(|conn| {
-        let mut stmt = conn.prepare(
-            // 位图排在 RAW 前面（`role = 'raw'` 为真时排后面）：
-            // 后面挑「以谁为准」时直接取第一个命中的那个
+        let sql = if only_missing {
             "SELECT f.asset_id, f.role, f.rel_path, f.mtime_ms
                FROM asset_files f
                JOIN assets a ON a.id = f.asset_id
-              WHERE a.taken_at IS NULL
-              ORDER BY f.asset_id, (f.role = 'raw'), f.rel_path",
-        )?;
+              WHERE a.taken_at IS NULL AND f.missing_since IS NULL
+              ORDER BY f.asset_id, (f.role = 'raw'), f.rel_path"
+        } else {
+            "SELECT f.asset_id, f.role, f.rel_path, f.mtime_ms
+               FROM asset_files f
+              WHERE f.missing_since IS NULL
+              ORDER BY f.asset_id, (f.role = 'raw'), f.rel_path"
+        };
+        // 位图排在 RAW 前面（`role = 'raw'` 为真时排后面）。
+        let mut stmt = conn.prepare(sql)?;
         let rows = stmt.query_map([], |row| {
             Ok((
                 row.get::<_, i64>(0)?,
@@ -152,14 +210,16 @@ where
         let count = catalog.write_tx(move |tx| {
             let mut written = 0usize;
             for (asset_id, data, taken) in &updates {
-                // 回填期间用户又改了这一行 → 不覆盖（只填空值）
-                let still_empty: bool = tx.query_row(
-                    "SELECT taken_at IS NULL FROM assets WHERE id = ?1",
-                    [asset_id],
-                    |row| row.get(0),
-                )?;
-                if !still_empty {
-                    continue;
+                if only_missing {
+                    // 回填期间用户又改了这一行 → 不覆盖（只填空值）
+                    let still_empty: bool = tx.query_row(
+                        "SELECT taken_at IS NULL FROM assets WHERE id = ?1",
+                        [asset_id],
+                        |row| row.get(0),
+                    )?;
+                    if !still_empty {
+                        continue;
+                    }
                 }
                 assets::apply_exif(tx, *asset_id, data, *taken, now_ms)?;
                 written += 1;
@@ -296,6 +356,71 @@ mod tests {
         assert_eq!(report.candidates, 0, "已经有时间的资产不进候选");
         assert_eq!(report.filled, 0);
         assert_eq!(read_time(&catalog, id).0, Some(T0 - 1));
+    }
+
+    #[test]
+    fn refresh_replaces_existing_wrong_dimensions_but_preserves_user_fields() {
+        let (_dir, catalog) = temp_catalog();
+        let id = asset_with_file(&catalog, "photos/portrait.jpg", "bitmap", None);
+        catalog
+            .write(move |conn| {
+                conn.execute(
+                    "UPDATE assets SET taken_at = ?1, width = 4000, height = 3000,
+                         orientation = 1, rating = 5, description = '保留我'
+                       WHERE id = ?2",
+                    rusqlite::params![T0 - 1, id],
+                )?;
+                Ok(())
+            })
+            .expect("预置错误元数据");
+
+        let report = refresh_with(&catalog, T0 + 100, |_abs, _name, _mtime| {
+            Some((
+                ExifData {
+                    width: Some(6000),
+                    height: Some(4000),
+                    orientation: Some(6),
+                    ..ExifData::default()
+                },
+                Some(taken(T0 - 2, TakenAtSource::Exif)),
+            ))
+        })
+        .expect("全量刷新");
+
+        assert_eq!(report.candidates, 1, "已有 taken_at 也必须进全量刷新");
+        assert_eq!(report.filled, 1);
+        let row: (
+            Option<i64>,
+            Option<i64>,
+            Option<i64>,
+            i64,
+            Option<String>,
+            Option<i64>,
+        ) = catalog
+            .read(move |conn| {
+                Ok(conn.query_row(
+                    "SELECT width, height, orientation, rating, description, taken_at
+                       FROM assets WHERE id = ?1",
+                    [id],
+                    |row| {
+                        Ok((
+                            row.get(0)?,
+                            row.get(1)?,
+                            row.get(2)?,
+                            row.get(3)?,
+                            row.get(4)?,
+                            row.get(5)?,
+                        ))
+                    },
+                )?)
+            })
+            .expect("读回");
+        assert_eq!(row.0, Some(6000));
+        assert_eq!(row.1, Some(4000));
+        assert_eq!(row.2, Some(6));
+        assert_eq!(row.3, 5, "星级不能被重建抹掉");
+        assert_eq!(row.4.as_deref(), Some("保留我"), "文字不能被重建抹掉");
+        assert_eq!(row.5, Some(T0 - 2), "文件事实应刷新");
     }
 
     #[test]

@@ -13,7 +13,7 @@
  * | `0`–`5` | 打 0–5 星（`0` = 清零） |
  * | `P` / `X` | 旗标：留下 / 弃掉 |
  * | `U` | 取消旗标（**不是**清掉星级/色标 —— 见下面的说明） |
- * | `Enter` | 网格里进看图（看图里的 Enter 由看图件自己接） |
+ * | `Enter` | 网格里进看图；单张 view 退出；compare 切换胶片带范围 |
  * | `Esc` | 看图时退出；网格里取消所有选中 |
  * | `Delete` | 删除选中的照片（走回收站、要确认） |
  *
@@ -84,7 +84,7 @@ export function browseKeyIntent(event: KeyLike, context: KeyContext): BrowseKeyI
     case "ArrowRight":
       return context.viewing ? { kind: "viewer-next" } : { kind: "move", delta: 1 };
     case "Enter":
-      // 看图里的 Enter（退出）由看图件自己接；这里只管「网格里进看图」
+      // 看图里的 Enter 由 Viewer / compare 命令接；这里只管「网格里进看图」
       return context.viewing ? null : { kind: "open-viewer" };
     case "Escape":
       return context.viewing ? { kind: "close-viewer" } : { kind: "clear-selection" };

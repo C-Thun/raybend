@@ -61,11 +61,14 @@ export interface MenuProps {
    * （详细说明见 `src/shell/store.ts`）。
    */
   onOpenChange?: (open: boolean) => void;
+  /** 受控开关；标题栏用它让一个菜单打开后，悬浮其它标题即可切换。 */
+  open?: boolean;
 }
 
 export function Menu(props: MenuProps) {
   return (
     <ArkMenu.Root
+      open={props.open}
       positioning={{ placement: props.placement ?? "bottom-start" }}
       onSelect={(details) => props.onSelect(String(details.value))}
       onOpenChange={(details) => props.onOpenChange?.(details.open)}
