@@ -29,8 +29,10 @@
  */
 
 import { writeFileSync } from "node:fs";
+import { realpathSync } from "node:fs";
 
 import { connectCdp, launchChrome, requireServer, sleep } from "./lib/cdp.mjs";
+import { SCROLL_PROBE } from "./lib/perf-probes.mjs";
 
 const PORT = Number(process.env.PERF_PORT ?? 9511);
 const APP = process.env.APP_URL ?? "http://localhost:1420/";
@@ -113,7 +115,8 @@ function itemAt(index) {
   };
 }
 
-const MOCK = `
+/* 导出给探针验证脚本用（perf-win 的页内探针要对着同一份假后端跑一遍才算验证过） */
+export const MOCK = `
   window.__PERF = { pageCalls: 0, thumbCalls: 0, calls: [], matchCache: {} };
   window.__TAURI_INTERNALS__ = {
     metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main" } },
@@ -224,9 +227,10 @@ async function main() {
   try {
     await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: MOCK });
     await cdp.send("Page.navigate", { url: APP });
-    // 等首屏真的挂上（导入工作区有 aside；挂不上就直接报错，别让后面全是二手症状）
+    // 等首屏真的挂上（导入工作区有 aside；挂不上就直接报错，别让后面全是二手症状）。
+    // 30s：跑了多天的 dev server 冷挂载实测 ~14s（250 个模块重新校验），15s 会卡在边界上
     let booted = false;
-    for (let attempt = 0; attempt < 30 && !booted; attempt += 1) {
+    for (let attempt = 0; attempt < 60 && !booted; attempt += 1) {
       await sleep(500);
       const probe = await cdp.send("Runtime.evaluate", {
         expression: `Boolean(document.querySelector("aside")) || (document.body?.innerText ?? "").length > 0`,
@@ -369,43 +373,14 @@ async function main() {
     });
     const filterStats = filter.result?.value ?? {};
 
-    // ── 指标 2：滚动 JS 帧预算（程序化滚动 3 秒，采 rAF 间隔）──
+    // ── 指标 2：滚动 JS 帧预算（程序化滚动 3 秒，采 rAF 间隔；探针与 perf-win 共用一份）──
     const scroll = await cdp.send("Runtime.evaluate", {
-      expression: `(async () => {
-        const scroller = document.querySelector("main [data-virtual-scroller]");
-        if (!scroller) return { error: "找不到虚拟滚动容器" };
-        const deltas = [];
-        let last = performance.now();
-        let stop = false;
-        const tick = () => {
-          const now = performance.now();
-          deltas.push(now - last);
-          last = now;
-          if (!stop) requestAnimationFrame(tick);
-        };
-        requestAnimationFrame(tick);
-        const started = performance.now();
-        let y = scroller.scrollTop;
-        while (performance.now() - started < 3000) {
-          y += 600;
-          scroller.scrollTop = y;
-          await new Promise((resolve) => requestAnimationFrame(resolve));
-        }
-        stop = true;
-        await new Promise((resolve) => setTimeout(resolve, 100));
-        const sorted = deltas.slice(2).sort((a, b) => a - b);
-        const at = (q) => (sorted.length === 0 ? 0 : sorted[Math.min(sorted.length - 1, Math.round(q * (sorted.length - 1)))]);
-        return {
-          frames: sorted.length,
-          p50: Math.round(at(0.5) * 100) / 100,
-          p95: Math.round(at(0.95) * 100) / 100,
-          worst: sorted.length === 0 ? 0 : Math.round(sorted[sorted.length - 1] * 100) / 100,
-          scrolledTo: Math.round(scroller.scrollTop),
+      expression: `${SCROLL_PROBE}(3000)
+        .then((scrollStats) => ({
+          ...scrollStats,
           pageCalls: window.__PERF.pageCalls,
           thumbCalls: window.__PERF.thumbCalls,
-          tiles: document.querySelectorAll('main [data-virtual-scroller] [role="option"]').length,
-        };
-      })()`,
+        }))`,
       awaitPromise: true,
       returnByValue: true,
     });
@@ -471,7 +446,24 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(`✗ ${error instanceof Error ? error.message : String(error)}`);
-  process.exit(1);
-});
+/* 只在直接跑（node scripts/perf-browse.mjs）时执行；被 import 时只提供 MOCK */
+const realArgv1 = (() => {
+  try {
+    return process.argv[1] ? realpathSync(process.argv[1]) : null;
+  } catch {
+    return null;
+  }
+})();
+const realSelf = (() => {
+  try {
+    return realpathSync(new URL(import.meta.url).pathname);
+  } catch {
+    return null;
+  }
+})();
+if (realArgv1 !== null && realArgv1 === realSelf) {
+  main().catch((error) => {
+    console.error(`✗ ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  });
+}

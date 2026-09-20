@@ -7698,11 +7698,55 @@
                 },
                 {
                   "type": "frame",
+                  "id": "V5QEk1",
+                  "name": "FilmStrip Resize Handle / 三点",
+                  "width": "fill_container",
+                  "height": 8,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "t1Ren",
+                      "name": "Dots",
+                      "gap": 3,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "ellipse",
+                          "id": "y788Ms",
+                          "name": "Dot / 1",
+                          "fill": "$fg-3",
+                          "width": 3,
+                          "height": 3
+                        },
+                        {
+                          "type": "ellipse",
+                          "id": "dnyqB",
+                          "name": "Dot / 2",
+                          "fill": "$fg-3",
+                          "width": 3,
+                          "height": 3
+                        },
+                        {
+                          "type": "ellipse",
+                          "id": "swT20",
+                          "name": "Dot / 3",
+                          "fill": "$fg-3",
+                          "width": 3,
+                          "height": 3
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
                   "id": "tfWAV",
                   "name": "FilmStrip",
                   "clip": true,
                   "width": "fill_container",
-                  "height": 157,
+                  "height": 148,
                   "fill": "$surface-main",
                   "gap": 6,
                   "padding": 8,
@@ -7712,8 +7756,8 @@
                       "type": "frame",
                       "id": "lNluK",
                       "name": "StripThumb / 1",
-                      "width": 169,
-                      "height": 141,
+                      "width": 158,
+                      "height": 132,
                       "fill": "$surface-main",
                       "cornerRadius": 4
                     },
@@ -7721,8 +7765,8 @@
                       "type": "frame",
                       "id": "gfzk8",
                       "name": "StripThumb / 2",
-                      "width": 169,
-                      "height": 141,
+                      "width": 158,
+                      "height": 132,
                       "fill": "$surface-main",
                       "cornerRadius": 4
                     },
@@ -7730,8 +7774,8 @@
                       "type": "frame",
                       "id": "qn7Ix",
                       "name": "StripThumb / 3",
-                      "width": 169,
-                      "height": 141,
+                      "width": 158,
+                      "height": 132,
                       "fill": "$surface-main",
                       "cornerRadius": 4
                     },
@@ -7739,8 +7783,8 @@
                       "type": "frame",
                       "id": "TTMp3",
                       "name": "StripThumb / 4",
-                      "width": 169,
-                      "height": 141,
+                      "width": 158,
+                      "height": 132,
                       "fill": "$surface-main",
                       "cornerRadius": 4
                     },
@@ -7748,8 +7792,8 @@
                       "type": "frame",
                       "id": "fWT4F",
                       "name": "StripThumb / 5",
-                      "width": 169,
-                      "height": 141,
+                      "width": 158,
+                      "height": 132,
                       "fill": "$state-selected",
                       "cornerRadius": 4,
                       "stroke": "$brand",
@@ -7760,8 +7804,8 @@
                       "type": "frame",
                       "id": "E55iZ",
                       "name": "StripThumb / 6",
-                      "width": 169,
-                      "height": 141,
+                      "width": 158,
+                      "height": 132,
                       "fill": "$surface-main",
                       "cornerRadius": 4
                     },
@@ -7769,8 +7813,8 @@
                       "type": "frame",
                       "id": "KjhQZ",
                       "name": "StripThumb / 7",
-                      "width": 169,
-                      "height": 141,
+                      "width": 158,
+                      "height": 132,
                       "fill": "$state-selected",
                       "cornerRadius": 4
                     },
@@ -7778,8 +7822,8 @@
                       "type": "frame",
                       "id": "XkY5i",
                       "name": "StripThumb / 8",
-                      "width": 169,
-                      "height": 141,
+                      "width": 158,
+                      "height": 132,
                       "fill": "$surface-main",
                       "cornerRadius": 4
                     },
@@ -7787,8 +7831,8 @@
                       "type": "frame",
                       "id": "f34Je",
                       "name": "StripThumb / 9",
-                      "width": 169,
-                      "height": 141,
+                      "width": 158,
+                      "height": 132,
                       "fill": "$surface-main",
                       "cornerRadius": 4
                     },
@@ -7796,8 +7840,8 @@
                       "type": "frame",
                       "id": "ApPud",
                       "name": "StripThumb / 10",
-                      "width": 169,
-                      "height": 141,
+                      "width": 158,
+                      "height": 132,
                       "fill": "$surface-main",
                       "cornerRadius": 4
                     },
@@ -7805,8 +7849,8 @@
                       "type": "frame",
                       "id": "qH5j9",
                       "name": "StripThumb / 11",
-                      "width": 169,
-                      "height": 141,
+                      "width": 158,
+                      "height": 132,
                       "fill": "$surface-main",
                       "cornerRadius": 4
                     },
@@ -7814,8 +7858,8 @@
                       "type": "frame",
                       "id": "f2RzB",
                       "name": "StripThumb / 12",
-                      "width": 169,
-                      "height": 141,
+                      "width": 158,
+                      "height": 132,
                       "fill": "$surface-main",
                       "cornerRadius": 4
                     }
@@ -12612,11 +12656,55 @@
                 },
                 {
                   "type": "frame",
+                  "id": "krpWR",
+                  "name": "FilmStrip Resize Handle / 三点",
+                  "width": "fill_container",
+                  "height": 8,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "Umsye",
+                      "name": "Dots",
+                      "gap": 3,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "ellipse",
+                          "id": "b06YS",
+                          "name": "Dot / 1",
+                          "fill": "$fg-3",
+                          "width": 3,
+                          "height": 3
+                        },
+                        {
+                          "type": "ellipse",
+                          "id": "fQztc",
+                          "name": "Dot / 2",
+                          "fill": "$fg-3",
+                          "width": 3,
+                          "height": 3
+                        },
+                        {
+                          "type": "ellipse",
+                          "id": "zoQdS",
+                          "name": "Dot / 3",
+                          "fill": "$fg-3",
+                          "width": 3,
+                          "height": 3
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
                   "id": "rFAxY",
                   "name": "FilmStrip / Compare Focus / 仅选中项",
                   "clip": true,
                   "width": "fill_container",
-                  "height": 157,
+                  "height": 148,
                   "fill": "$surface-main",
                   "stroke": "$brand",
                   "strokeWidth": 1,
@@ -12629,8 +12717,8 @@
                       "type": "frame",
                       "id": "iD3rp",
                       "name": "StripThumb / 1",
-                      "width": 169,
-                      "height": 141,
+                      "width": 158,
+                      "height": 132,
                       "fill": "$state-selected",
                       "cornerRadius": 4,
                       "stroke": "$brand",
@@ -12641,8 +12729,8 @@
                       "type": "frame",
                       "id": "bdRqA",
                       "name": "StripThumb / 2",
-                      "width": 169,
-                      "height": 141,
+                      "width": 158,
+                      "height": 132,
                       "fill": "$state-selected",
                       "cornerRadius": 4,
                       "stroke": "$brand",
@@ -20856,7 +20944,7 @@
           "fill": "$fg-1",
           "textGrowth": "fixed-width",
           "width": "fill_container",
-          "content": "浏览状态：命令面板 / 筛选开启 / Tab 的两态 / 未选目录的空态",
+          "content": "浏览状态：命令面板 / 筛选开启 / Tab 四态 / 未选目录的空态",
           "fontFamily": "Inter",
           "fontSize": 16,
           "fontWeight": "normal"
@@ -21462,7 +21550,7 @@
                   "id": "H6OyO",
                   "name": "Label3",
                   "fill": "$fg-1",
-                  "content": "② Tab 关左右（留胶片带）",
+                  "content": "② Tab 只关左（右栏 + 胶片带）",
                   "fontFamily": "Inter",
                   "fontSize": 13,
                   "fontWeight": "normal"
@@ -21648,7 +21736,7 @@
                   "fill": "$fg-2",
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
-                  "content": "Tab 第 2 态：左右两列隐藏、网格铺满整宽（顶部三条不变）。与第 3 态（关胶片带）到底是**并列**还是**叠加**仍未定（BROWSE.md §10 问题 3）—— 定了再画 Tab 的循环顺序。",
+                  "content": "Tab 第 2 态只隐藏左边库/目录列，保留右栏与胶片带。完整循环：①两侧+胶片带 → ②右栏+胶片带 → ③仅胶片带 → ④仅 view → ①；顶部三条始终不变。",
                   "lineHeight": 1.5,
                   "fontFamily": "Inter",
                   "fontSize": 11,
@@ -21669,7 +21757,7 @@
                   "id": "rYWty",
                   "name": "Label3",
                   "fill": "$fg-1",
-                  "content": "③ Tab 关胶片带（左右两列在）",
+                  "content": "③/④ Tab 仅胶片带 / 仅 view",
                   "fontFamily": "Inter",
                   "fontSize": 13,
                   "fontWeight": "normal"
@@ -21810,7 +21898,7 @@
                   "fill": "$fg-2",
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
-                  "content": "Tab 第 3 态：只关胶片带，左右两列仍在。三态并列循环：①默认 → ②关左右 → ③关胶片带 → ①（2026-09-18 定）；①默认见 Shell / Browse / View。回车退回 tiles 时左右栏必定回来。",
+                  "content": "第 3 态隐藏两侧、保留胶片带；第 4 态连胶片带一起隐藏，只留 view。回车退回 tiles 时恢复默认两侧。import / browse 共用同一循环。",
                   "lineHeight": 1.5,
                   "fontFamily": "Inter",
                   "fontSize": 11,

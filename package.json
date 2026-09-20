@@ -23,6 +23,7 @@
     "smoke:ui": "node --check scripts/ui-smoke.mjs && node scripts/ui-smoke.mjs",
     "check:browse": "node --check scripts/check-browse-boot.mjs && node scripts/check-browse-boot.mjs",
     "perf:browse": "node --check scripts/perf-browse.mjs && node scripts/perf-browse.mjs",
+    "perf:win": "node --check scripts/perf-win.mjs && node scripts/perf-win.mjs",
     "test": "node --test \"src/**/*.test.ts\"",
     "shot": "node scripts/shot.mjs",
     "crash:drill": "bash scripts/crash-drill.sh",

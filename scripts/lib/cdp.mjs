@@ -81,13 +81,19 @@ export function launchChrome(options = {}) {
   return chrome;
 }
 
-/** 连上调试端口，返回 `{ send, close, on }` */
+/** 连上调试端口，返回 `{ send, close, on }`。
+ *
+ * `options.host`（默认 `127.0.0.1`）：无头本机就用默认；连 **Windows 宿主上的
+ * WebView2**（`perf-win`）要传宿主 IP —— WSL NAT 下 `localhost` 不通 Windows 侧服务。
+ * 返回的 `webSocketDebuggerUrl` 里写的是 `127.0.0.1`，连接前会改写成请求的那个 host。
+ */
 export async function connectCdp(port, options = {}) {
+  const host = options.host ?? "127.0.0.1";
   const deadline = Date.now() + (options.timeoutMs ?? 20000);
   let target;
   while (Date.now() < deadline) {
     try {
-      const list = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
+      const list = await (await fetch(`http://${host}:${port}/json/list`)).json();
       target = list.find((item) => item.type === "page" && item.webSocketDebuggerUrl);
       if (target) break;
     } catch {
@@ -95,9 +101,17 @@ export async function connectCdp(port, options = {}) {
     }
     await sleep(200);
   }
-  if (!target) throw new Error(`Chrome 调试端口没起来（:${port}）`);
+  if (!target) throw new Error(`Chrome 调试端口没起来（${host}:${port}）`);
 
-  const ws = new WebSocket(target.webSocketDebuggerUrl);
+  // DevTools 报的 ws 地址永远是 127.0.0.1 —— 按我们实际连的 host 改写，否则跨机连不上
+  let wsUrl;
+  try {
+    wsUrl = new URL(target.webSocketDebuggerUrl);
+    wsUrl.host = `${host}:${port}`;
+  } catch {
+    throw new Error(`DevTools 报的 ws 地址不合法：${target.webSocketDebuggerUrl}`);
+  }
+  const ws = new WebSocket(wsUrl);
   await new Promise((resolve, reject) => {
     ws.addEventListener("open", resolve, { once: true });
     ws.addEventListener("error", reject, { once: true });
