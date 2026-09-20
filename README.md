@@ -6,7 +6,7 @@
 
 Import → Browse → Edit → Export, one complete workflow. Free, no subscription, nothing leaves your disk.
 
-English ｜ 简体中文 ｜ [Website](https://raybend.cthun.com/) ｜ [Download](https://github.com/C-Thun/raybend/releases)
+English ｜ [简体中文](README.zh-CN.md) ｜ [Website](https://raybend.cthun.com/) ｜ [Download](https://github.com/C-Thun/raybend/releases)
 
 </div>
 

@@ -6,7 +6,7 @@
 
 导入 → 浏览 → 编辑 → 导出，一条完整的工作流。免费，无订阅，照片不出你的磁盘。
 
-English ｜ 简体中文 ｜ [官网](https://raybend.cthun.com/) ｜ [下载](https://github.com/C-Thun/raybend/releases)
+[English](README.md) ｜ 简体中文 ｜ [官网](https://raybend.cthun.com/) ｜ [下载](https://github.com/C-Thun/raybend/releases)
 
 </div>
 
