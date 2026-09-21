@@ -114,7 +114,10 @@ export async function connectCdp(port, options = {}) {
   const ws = new WebSocket(wsUrl);
   await new Promise((resolve, reject) => {
     ws.addEventListener("open", resolve, { once: true });
-    ws.addEventListener("error", reject, { once: true });
+    ws.addEventListener("error", (event) => {
+      const why = event?.message || event?.error?.message || "无详情（常见：握手没等到响应就断了）";
+      reject(new Error(`WS 握手失败：${why}`));
+    }, { once: true });
   });
 
   let nextId = 1;
