@@ -296,10 +296,17 @@ async function main() {
       returnByValue: true,
     })).result?.value;
     const notes = [];
-    if (!`${viewport.inner[0]}x${viewport.inner[1]}`.startsWith("2560x1440")) {
+    /* DoD 的 2560×1440 是**物理分辨率**口径：CSS 尺寸 × DPR 才是真正的光栅面积
+     * （例：125%×110% 屏上全屏窗口 CSS 约 1862×1048、dpr 1.375 → 物理 2560×1441，已达标） */
+    const physical = [
+      Math.round(viewport.inner[0] * viewport.dpr),
+      Math.round(viewport.inner[1] * viewport.dpr),
+    ];
+    viewport.physical = physical;
+    if (physical[0] < 2500 || physical[1] < 1400) {
       notes.push(
-        `视口是 ${viewport.inner[0]}×${viewport.inner[1]}，不是 DoD 的 2560×1440 —— ` +
-          "把窗口拉到那台屏上最大化（或 F11）后重跑，帧率数字才算数",
+        `视口 CSS ${viewport.inner[0]}×${viewport.inner[1]}（dpr ${viewport.dpr}）= 物理 ${physical[0]}×${physical[1]}，` +
+          "不到 DoD 的 2560×1440 —— 把窗口拉到那台屏上最大化（或 F11）后重跑，帧率数字才算数",
       );
     }
 
@@ -377,7 +384,9 @@ async function main() {
 
     const fps = (ms) => (ms > 0 ? Math.round(1000 / ms) : null);
     console.log("\n浏览真机采样（只上报；60fps 的裁决归人类目视，AGENTS.md §2.8）");
-    console.log(`视口           ${viewport.inner[0]}×${viewport.inner[1]}  dpr ${viewport.dpr}`);
+    console.log(
+      `视口           ${viewport.inner[0]}×${viewport.inner[1]}  dpr ${viewport.dpr}  物理 ${physical[0]}×${physical[1]}`,
+    );
     console.log(`目录           ${picked.scope}`);
     console.log(`滚动帧 p50/p95 ${scroll.p50} / ${scroll.p95} ms   最差 ${scroll.worst} ms`);
     console.log(`               ≈ ${fps(scroll.p50)} fps（p50）/ ${fps(scroll.p95)} fps（p95），${scroll.frames} 帧`);
