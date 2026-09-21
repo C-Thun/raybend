@@ -22,7 +22,7 @@
  * 2. **一次筛选计时**：开筛选 → 点「3 星」→ 首屏 tile 变化（真机端到端：IPC + 查询 + 绘制）；
  * 3. **JS 堆 / DOM 节点 / 视口 / DPR**（`AGENTS.md` §7.9：环境事实必须随报告带上）。
  *
- * ## 连接方式（WSL → Windows 宿主：直连优先，不通则自动反向隧道）
+ * ## 连接方式（WSL → Windows 宿主：直连；需一次性 netsh 授权）
  *
  * exe 需要带调试参数起 WebView2（`--launch` 已代劳，经 WSLENV 透传）：
  *
@@ -30,16 +30,22 @@
  * WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS='--remote-debugging-port=9333'
  * ```
  *
- * ⚠️ **Chromium（WebView2 153 实测）把调试口硬绑在 Windows 的 `127.0.0.1`**——
- * `--remote-debugging-address=0.0.0.0` 会被无视（headed 模式下的安全限制），
- * 而 WSL NAT 下 `localhost` 不通 Windows 侧、防火墙又拦 WSL 子网的入站。
- * 所以脚本走**反向隧道**：WSL 起中继口（`127.0.0.1:9334`），Windows 侧 PowerShell
- * **拨出**到 WSL（出站不受防火墙限制）并同时拨本机 `127.0.0.1:9333`，两头对拷。
- * 整条链路零管理员权限、不改防火墙。
+ * ⚠️ **Chromium（WebView2 153 实测）把调试口硬绑在 Windows 的 `127.0.0.1`**（headed
+ * 模式下的安全限制，`--remote-debugging-address=0.0.0.0` 被无视）；WSL NAT 下
+ * `localhost` 不通 Windows 侧，防火墙也拦 WSL 子网入站。所以需要**一次性**
+ * 管理员授权（管理员 PowerShell 里跑，持久保存，之后永久直连）：
  *
- * 连不上的排查：① `netstat` 里没有 `127.0.0.1:9333` → 调试口没开（多半是另一个
- * RayBend 实例先占了 WebView2 浏览器进程——先把别的窗口关掉再 `--launch`）；
- * ② Windows 拨不到 WSL（罕见）→ 用 `PERF_WIN_RELAY_IP` 手工指定 WSL IP。
+ * ```powershell
+ * netsh interface portproxy add v4tov4 listenaddress=0.0.0.0 listenport=9334 connectaddress=127.0.0.1 connectport=9333
+ * netsh advfirewall firewall add rule name="RayBend CDP (WSL only)" dir=in action=allow protocol=TCP localport=9334 remoteip=172.16.0.0/12
+ * ```
+ *
+ * （防火墙规则只放行 WSL 子网 172.16.0.0/12 的 9334 入站，不暴露给局域网。）
+ * 脚本会依次试：`PERF_WIN_HOST` 指定地址 → 网关:9333 → 网关:9334（portproxy）
+ * → 127.0.0.1（mirrored 网络）。连不上时会把上面两条命令再打印一遍。
+ *
+ * 另外的排查：`netstat` 里没有 `127.0.0.1:9333` → 调试口没开（多半是另一个
+ * RayBend 实例先占了 WebView2 浏览器进程——先把别的窗口关掉再 `--launch`）。
  *
  * ## 库用哪个
  *
@@ -50,7 +56,6 @@
 
 import { spawn } from "node:child_process";
 import { execSync } from "node:child_process";
-import net from "node:net";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -59,8 +64,8 @@ import { connectCdp, sleep } from "./lib/cdp.mjs";
 import { SCROLL_PROBE, VIEWPORT_PROBE } from "./lib/perf-probes.mjs";
 
 const PORT = Number(process.env.PERF_WIN_PORT ?? 9333);
-/** 反向隧道在本机（WSL）这一侧的中继口 */
-const RELAY_PORT = Number(process.env.PERF_WIN_RELAY_PORT ?? 9334);
+/** 一次性 netsh portproxy 监听的端口（直连候选之一） */
+const PROXY_PORT = Number(process.env.PERF_WIN_PROXY_PORT ?? 9334);
 const EXE = process.env.PERF_WIN_EXE ?? "/mnt/c/rb-target/raybend/debug/raybend-desktop.exe";
 const LAUNCH = process.argv.includes("--launch");
 /** 报告落点：默认崔总的临时目录（机器特定的测量物，不进仓库） */
@@ -160,34 +165,37 @@ export const FILTER_TIMING_PROBE = `
 })`;
 
 /** WSL NAT 下 Windows 宿主的地址：默认网关（`ip route show default` 的 via 那个） */
-function windowsHosts() {
-  const hosts = [];
-  if (process.env.PERF_WIN_HOST) hosts.push(process.env.PERF_WIN_HOST);
-  hosts.push("127.0.0.1"); // mirrored 网络模式 / Windows 侧自己跑
+/** 直连候选（按优先级）：`PERF_WIN_HOST` → 网关:调试口 → 网关:portproxy → 本机（mirrored 网络） */
+function directRoutes() {
+  const routes = [];
+  if (process.env.PERF_WIN_HOST) {
+    routes.push({ host: process.env.PERF_WIN_HOST, port: PORT, via: "PERF_WIN_HOST 指定" });
+  }
   try {
     const route = execSync("ip route show default", { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
     const via = /via\s+([0-9.]+)/.exec(route);
-    if (via) hosts.push(via[1]);
+    if (via) {
+      routes.push({ host: via[1], port: PORT, via: "网关直连" });
+      routes.push({ host: via[1], port: PROXY_PORT, via: "portproxy（方案 A 的一次性 netsh）" });
+    }
   } catch {
     /* 没有 ip 命令就算了 */
   }
-  return [...new Set(hosts)];
+  routes.push({ host: "127.0.0.1", port: PORT, via: "mirrored 网络" });
+  return routes;
 }
 
-/** 本机（WSL）的 eth0 地址 —— Windows 侧拨出过来用的目标 */
-function wslIp() {
-  if (process.env.PERF_WIN_RELAY_IP) return process.env.PERF_WIN_RELAY_IP;
-  try {
-    const out = execSync("ip -4 -o addr show scope global", {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-    const lines = out.split("\n").filter((line) => /inet\s+([0-9.]+)/.test(line));
-    const eth = lines.find((line) => /eth/.test(line)) ?? lines[0];
-    return eth ? (/inet\s+([0-9.]+)/.exec(eth))[1] : null;
-  } catch {
-    return null;
-  }
+/** 一次性 netsh 授权（连不上时打印；人类在管理员 PowerShell 里跑一次，永久直连） */
+function printOneTimeSetup() {
+  console.error("  ① 在 Windows 上用**管理员** PowerShell 跑一次（持久保存，之后永久直连）：");
+  console.error(
+    `     netsh interface portproxy add v4tov4 listenaddress=0.0.0.0 listenport=${PROXY_PORT} connectaddress=127.0.0.1 connectport=${PORT}`,
+  );
+  console.error(
+    `     netsh advfirewall firewall add rule name="RayBend CDP (WSL only)" dir=in action=allow protocol=TCP localport=${PROXY_PORT} remoteip=172.16.0.0/12`,
+  );
+  console.error("     （防火墙只放 WSL 子网 172.16.0.0/12 的入站，不暴露给局域网）");
+  console.error("  ② 跑完重试 pnpm perf:win；若 netstat 里连 127.0.0.1:9333 都没有 → 先关掉所有 RayBend 窗口再 --launch");
 }
 
 /** Windows 侧 netstat：调试口是否已在 Windows 本机监听（只绑 127.0.0.1 也算）。
@@ -208,101 +216,12 @@ function windowsCdpListening() {
   }
 }
 
-/**
- * 反向隧道：本机（WSL）起中继口；每个连进来的连接，临时起一个随机口，让 Windows 侧
- * PowerShell **拨出**（Windows→WSL 不经防火墙）并同拨 Windows 本机的调试口，两头对拷。
- * CDP 的 HTTP 与 WebSocket 都走这条链，客户端（`connectCdp`）完全无感。
- */
-function startReverseRelay(wslAddr) {
-  const children = new Set();
-  const dbg = (...args) => {
-    if (process.env.PERF_WIN_DEBUG) console.error("[relay]", ...args);
-  };
-  const server = net.createServer((sock) => {
-    dbg("front 连入");
-    let done = false;
-    let child = null;
-    const back = net.createServer();
-    let dialTimer = null;
-    const cleanup = () => {
-      if (done) return;
-      done = true;
-      if (dialTimer !== null) clearTimeout(dialTimer);
-      sock.destroy();
-      back.close();
-      if (child) {
-        children.delete(child);
-        try {
-          child.kill();
-        } catch {
-          /* 已经退了 */
-        }
-      }
-    };
-    sock.on("error", cleanup);
-    let bridged = false;
-    back.on("connection", (bridge) => {
-      bridged = true;
-      dbg("Windows 已拨入，桥接");
-      bridge.on("error", (error) => dbg("bridge 错误", error.code));
-      sock.pipe(bridge);
-      bridge.pipe(sock);
-      sock.on("close", cleanup);
-      bridge.on("close", cleanup);
-    });
-    back.on("listening", () => {
-      const backPort = back.address().port;
-      const ps =
-        `$ErrorActionPreference='Stop';try{` +
-        `$a=[System.Net.Sockets.TcpClient]::new('127.0.0.1',${PORT});` +
-        `$b=[System.Net.Sockets.TcpClient]::new('${wslAddr}',${backPort});` +
-        `$as=$a.GetStream();$bs=$b.GetStream();` +
-        `$t1=$as.CopyToAsync($bs);$t2=$bs.CopyToAsync($as);` +
-        `[void][System.Threading.Tasks.Task]::WaitAny(@($t1,$t2));` +
-        `$a.Close();$b.Close()}catch{}`;
-      const encoded = Buffer.from(ps, "utf16le").toString("base64");
-      child = spawn("powershell.exe", ["-NoProfile", "-EncodedCommand", encoded], { stdio: "ignore" });
-      children.add(child);
-      child.on("close", (code) => dbg("powershell 退出 code=", code));
-      child.on("close", cleanup);
-    });
-    back.on("error", cleanup);
-    back.listen(0, "0.0.0.0");
-    // 「Windows 拨号 8 秒不到就放弃」——拨到了就不动它，别把正在用的连接拆了
-    dialTimer = setTimeout(() => {
-      if (!bridged) {
-        dbg("8 秒没等到 Windows 拨入，放弃");
-        cleanup();
-      }
-    }, 8_000);
-  });
-  return {
-    server,
-    children,
-    listen: () =>
-      new Promise((resolve, reject) => {
-        server.once("error", reject);
-        server.listen(RELAY_PORT, "127.0.0.1", () => resolve());
-      }),
-    stop: () => {
-      server.close();
-      for (const child of children) {
-        try {
-          child.kill();
-        } catch {
-          /* 已退 */
-        }
-      }
-    },
-  };
-}
-
 /** `--launch`：从 WSL 拉起 Windows exe，经 WSLENV 把 CDP 参数带给 WebView2（§5.3 第 2 条） */
 function launchExe() {
   if (!existsSync(EXE)) {
     throw new Error(`exe 不存在：${EXE}（先跑 pnpm debug:win，或用 PERF_WIN_EXE 指定路径）`);
   }
-  /* 只带端口参数：0.0.0.0 会被 Chromium 153 无视（调试口硬绑 127.0.0.1），跨机靠反向隧道 */
+  /* 只带端口参数：0.0.0.0 会被 Chromium 153 无视（调试口硬绑 127.0.0.1），跨机靠一次性 netsh portproxy */
   const browserArguments = `--remote-debugging-port=${PORT}`;
   const child = spawn(EXE, [], {
     detached: true,
@@ -326,71 +245,39 @@ async function main() {
   if (LAUNCH && !already) launchExe();
   else if (LAUNCH) console.log(`调试口已在 Windows 侧监听（:9333）—— 复用现有实例，不重复拉起`);
 
-  /* 路线 1：直连（mirrored 网络 / PERF_WIN_HOST 指定了可达地址时成立） */
-  let host = null;
-  let version = null;
-  const directHosts = windowsHosts();
-  for (const candidate of directHosts) {
-    try {
-      const response = await fetch(`http://${candidate}:${PORT}/json/version`, {
-        signal: AbortSignal.timeout(1500),
-      });
-      if (response.ok) {
-        host = candidate;
-        version = await response.json();
-        break;
+  /* 直连候选轮询：PERF_WIN_HOST → 网关:9333 → 网关:9334（portproxy）→ 127.0.0.1（mirrored） */
+  let route = null;
+  const deadline = Date.now() + (LAUNCH && !already ? 90_000 : 20_000);
+  while (Date.now() < deadline && route === null) {
+    for (const candidate of directRoutes()) {
+      try {
+        const response = await fetch(`http://${candidate.host}:${candidate.port}/json/version`, {
+          signal: AbortSignal.timeout(2000),
+        });
+        if (response.ok) {
+          route = { ...candidate, version: await response.json() };
+          break;
+        }
+      } catch {
+        /* 这个候选不通，试下一个 */
       }
-    } catch {
-      /* 这个候选不通，试下一个 */
     }
+    if (route === null) await sleep(1000);
   }
-
-  /* 路线 2：反向隧道（NAT + 防火墙下的常规路线；Windows 侧 PowerShell 拨出，零权限） */
-  let relay = null;
-  if (host === null) {
+  if (route === null) {
     if (!windowsCdpListening()) {
       console.error(`✗ Windows 侧没有调试口在听（:${PORT}）`);
-      console.error("  ① 先关掉所有已打开的 RayBend 窗口（WebView2 浏览器进程共享，后起的带不上调试参数）");
-      console.error("  ② 再用 pnpm perf:win --launch 重跑（脚本会带 CDP 参数拉起 exe）");
-      process.exit(1);
+      console.error("  先关掉所有已打开的 RayBend 窗口（WebView2 浏览器进程共享，后起的带不上调试参数），");
+      console.error("  再用 pnpm perf:win --launch 重跑（脚本会带 CDP 参数拉起 exe）");
+    } else {
+      console.error(`✗ Windows 调试口在听（127.0.0.1:${PORT}）但 WSL 直连都不通 —— 缺一次性 netsh 授权：`);
+      printOneTimeSetup();
     }
-    const addr = wslIp();
-    if (addr === null) {
-      console.error("✗ Windows 侧调试口只绑了 127.0.0.1，且本机拿不到 WSL IP（无法建反向隧道）");
-      console.error("  用 PERF_WIN_RELAY_IP=<WSL的eth0 IP> 手工指定后重跑");
-      process.exit(1);
-    }
-    relay = startReverseRelay(addr);
-    await relay.listen();
-    host = "127.0.0.1";
-  }
-
-  /* 等调试口就绪（launch 后 app 起来要几秒；经隧道探测） */
-  const probePort = host === "127.0.0.1" && relay !== null ? RELAY_PORT : PORT;
-  const deadline = Date.now() + (LAUNCH && !already ? 90_000 : 20_000);
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(`http://${host}:${probePort}/json/version`, {
-        signal: AbortSignal.timeout(3000),
-      });
-      if (response.ok) {
-        version = await response.json();
-        break;
-      }
-    } catch {
-      /* 还没起来 */
-    }
-    await sleep(1000);
-  }
-  if (version === null) {
-    relay?.stop();
-    console.error(`✗ 调试口等了 ${(LAUNCH ? 90 : 20)} 秒也没就绪（${host}:${probePort}）`);
     process.exit(1);
   }
-  const via = relay !== null ? "反向隧道（Windows 侧调试口只绑了 127.0.0.1）" : "直连";
-  console.log(`连上 ${host}:${probePort}（${version?.Browser ?? "?"}，${via}）`);
+  console.log(`连上 ${route.host}:${route.port}（${route.version?.Browser ?? "?"}，${route.via}）`);
 
-  const cdp = await connectCdp(probePort, { host, timeoutMs: 20_000 });
+  const cdp = await connectCdp(route.port, { host: route.host, timeoutMs: 20_000 });
   try {
     /* 等应用真的挂上（标题栏/正文出现；生产包是 http://tauri.localhost，资产是嵌入的，快） */
     let booted = false;
@@ -474,9 +361,9 @@ async function main() {
     const report = {
       when: new Date().toISOString(),
       machine: "Windows 真机（人类跑）",
-      host,
-      port: probePort,
-      via,
+      host: route.host,
+      port: route.port,
+      via: route.via,
       viewport,
       scope: picked.scope,
       scroll,
@@ -504,7 +391,6 @@ async function main() {
     console.log("\n✓ 采样完成 —— 窗口可以关了；60fps 与体感结论由人类填写（plans/M2-W3.md §5）");
   } finally {
     cdp.close();
-    relay?.stop();
   }
 }
 
