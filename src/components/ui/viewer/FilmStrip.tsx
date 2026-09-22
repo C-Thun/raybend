@@ -12,7 +12,8 @@
  * **选中** = 铺 `$state-selected`，**当前那张**（锚点）再加 **1px `$brand` 描边**。
  *
  * 2026-09-20 最终口径：缩略 tile 是约 100–240px 的 **17 档**，默认 132px；
- * 胶片带总高度由 tile + 固定上下边距推导。`Ctrl + 滚轮` 调档，不另放界面控件。
+ * 胶片带内容高度由 tile + 固定上下边距推导；其上另有 8px 三点拖拉条。
+ * 拖拉条与 `Ctrl + 滚轮` 都只调整同一份 17 档受控状态。
  * 原生横向滚动条不显示（它占高度且时有时无），位置由底部 2px 的
  * `SubtleScrollbar` 指示；普通滚轮仍转换成横向滚动。
  *
@@ -33,9 +34,11 @@ import { IconLock } from "@tabler/icons-solidjs";
 import { clickMode } from "../../../lib/selection.ts";
 import {
   filmStripMetric,
+  filmStripStepFromDrag,
   nextFilmStripStep,
 } from "../../../lib/film-strip-size.ts";
 import { t } from "../../../i18n/index.ts";
+import { SplitHandle } from "../SplitHandle.tsx";
 import { SubtleScrollbar } from "../SubtleScrollbar.tsx";
 import type { ThumbQueue } from "../thumb-queue.ts";
 import type { ViewerPhoto, ViewerStore } from "./index.ts";
@@ -82,6 +85,7 @@ export interface FilmStripProps {
 
 export function FilmStrip(props: FilmStripProps): JSX.Element {
   let scroller: HTMLDivElement | undefined;
+  let resizeFromStep = props.sizeStep;
   const metric = createMemo(() => filmStripMetric(props.sizeStep));
 
   const allPhotos = createMemo(() => props.viewer.state().photos);
@@ -261,12 +265,52 @@ export function FilmStrip(props: FilmStripProps): JSX.Element {
     scroller.scrollLeft += event.deltaY * unit;
   };
 
+  const beginResize = (): void => {
+    rememberReference();
+    resizeFromStep = metric().step;
+  };
+
+  const resizeFromDrag = (deltaY: number): void => {
+    props.onSizeStepChange(filmStripStepFromDrag(resizeFromStep, deltaY));
+  };
+
+  const onResizeKeyDown = (event: KeyboardEvent): void => {
+    let next: number | null = null;
+    if (event.key === "ArrowUp") next = nextFilmStripStep(metric().step, 1);
+    else if (event.key === "ArrowDown") next = nextFilmStripStep(metric().step, -1);
+    else if (event.key === "Home") next = 0;
+    else if (event.key === "End") next = 16;
+    if (next === null) return;
+    event.preventDefault();
+    rememberReference();
+    props.onSizeStepChange(next);
+  };
+
   return (
     /*
      * 外层只管「相对定位」：2px 无感滚动条要贴在**容器底边**上（放在滚动容器里面
      * 会跟着内容一起滚走）。`shrink-0` 挂外层 —— 它才是 flex 列里的那一项。
      */
     <div class={["relative shrink-0", props.class ?? ""].filter(Boolean).join(" ")}>
+      <SplitHandle
+        orientation="horizontal"
+        data-filmstrip-resizer=""
+        aria-label={t("common.resize_filmstrip")}
+        aria-valuemin={0}
+        aria-valuemax={16}
+        aria-valuenow={metric().step}
+        aria-valuetext={t("common.resize_filmstrip_value", {
+          step: metric().step + 1,
+          total: 17,
+          pixels: metric().tileHeight,
+        })}
+        tabindex="0"
+        class="focus-visible:bg-state-hover focus-visible:outline-none"
+        onDragStart={beginResize}
+        onDrag={resizeFromDrag}
+        onDragEnd={resizeFromDrag}
+        onKeyDown={onResizeKeyDown}
+      />
       <div
         ref={scroller}
         data-filmstrip="open"

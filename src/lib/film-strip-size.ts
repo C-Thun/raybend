@@ -46,3 +46,37 @@ export function nextFilmStripStep(step: number, direction: number): number {
   if (direction === 0 || !Number.isFinite(direction)) return clampFilmStripStep(step);
   return clampFilmStripStep(step + (direction > 0 ? 1 : -1));
 }
+
+/**
+ * 把胶片带上沿把手的纵向位移映射回同一套 17 档。
+ *
+ * 把手在胶片带上方，所以向上拖（负 delta）= 胶片带变高；向下拖 = 变矮。
+ * 不把 9px 级差硬编码进交互：以真实档位高度找最近值，今后档位改成非等距也不会漂。
+ * 正好落在两档中点时顺着拖动方向跨档，避免鼠标已经越过一半却看起来没有响应。
+ */
+export function filmStripStepFromDrag(startStep: number, deltaY: number): number {
+  const start = clampFilmStripStep(startStep);
+  if (!Number.isFinite(deltaY) || deltaY === 0) return start;
+
+  const startHeight = FILM_STRIP_TILE_HEIGHT_STEPS[start] ?? 132;
+  const targetHeight = startHeight - deltaY;
+  const direction = deltaY < 0 ? 1 : -1;
+  let best = start;
+  let bestDistance = Number.POSITIVE_INFINITY;
+
+  for (let index = 0; index < FILM_STRIP_TILE_HEIGHT_STEPS.length; index += 1) {
+    const height = FILM_STRIP_TILE_HEIGHT_STEPS[index];
+    if (height === undefined) continue;
+    const distance = Math.abs(height - targetHeight);
+    if (
+      distance < bestDistance ||
+      (distance === bestDistance &&
+        ((direction > 0 && index > best) || (direction < 0 && index < best)))
+    ) {
+      best = index;
+      bestDistance = distance;
+    }
+  }
+
+  return clampFilmStripStep(best);
+}

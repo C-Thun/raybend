@@ -124,6 +124,8 @@ export const enUS: Record<MessageKey, string> = {
  "common.empty": "Nothing here",
  "common.resize_left": "Resize left column",
  "common.resize_right": "Resize right column",
+ "common.resize_filmstrip": "Resize filmstrip thumbnails",
+ "common.resize_filmstrip_value": "Step {step} of {total}; thumbnail height {pixels} pixels",
 
  "common.retry": "Retry",
  /**

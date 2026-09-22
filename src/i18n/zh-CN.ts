@@ -130,6 +130,8 @@ export const zhCN = {
  "common.empty": "暂无内容",
  "common.resize_left": "调整左列宽度",
  "common.resize_right": "调整右列宽度",
+ "common.resize_filmstrip": "调整胶片带缩略图大小",
+ "common.resize_filmstrip_value": "第 {step} 档，共 {total} 档；缩略图高 {pixels} 像素",
 
  "common.retry": "重试",
  /**

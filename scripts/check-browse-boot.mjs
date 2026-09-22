@@ -2458,19 +2458,23 @@ try {
   }
 
   /*
-   * 胶片带 2026-09-20 的三条硬规矩（人类）：
+   * 胶片带 2026-09-20/21 的四条硬规矩（人类）：
    *   ① 默认 tile 偏小（实际 158×132），上下各 8px，因此整条 148px；
    *      **没有原生横向滚动条**（`scrollbar-width: none`）——
  *      它时有时无会把缩略图挤得忽大忽小；
-   *   ② Ctrl + 滚轮走 17 档隐藏缩放，默认第 4 档，向上滚一格到第 5 档；
-   *   ③ 普通滚轮要能横向滚，位置由 2px 的 `SubtleScrollbar` 指示（左滚到头宽 0、
+   *   ② view 与胶片带之间有三点拖拉条，向上/下拖按同一套 17 档放大/缩小；
+   *   ③ Ctrl + 滚轮走同一套 17 档，默认第 4 档，向上滚一格到第 5 档；
+   *   ④ 普通滚轮要能横向滚，位置由 2px 的 `SubtleScrollbar` 指示（左滚到头宽 0、
  *      右滚到头占满全宽）。装得下时验不了滚动，这里把视口临时压窄来验。
    */
   const stripChrome = await send("Runtime.evaluate", {
     expression: `(() => {
       const strip = document.querySelector('[data-filmstrip="open"]');
+      const resizer = document.querySelector("[data-filmstrip-resizer]");
       if (!strip) return null;
       const first = strip.querySelector("[data-strip-item]");
+      const sr = strip.getBoundingClientRect();
+      const rr = resizer?.getBoundingClientRect() ?? null;
       return {
         height: Math.round(strip.getBoundingClientRect().height),
         step: strip.getAttribute("data-filmstrip-step"),
@@ -2478,6 +2482,12 @@ try {
         tileHeight: first === null ? null : Math.round(first.getBoundingClientRect().height),
         scrollbarWidth: getComputedStyle(strip).scrollbarWidth,
         indicator: Boolean(document.querySelector("[data-subtle-scrollbar]")),
+        resizer: rr === null ? null : {
+          height: Math.round(rr.height),
+          joinsStrip: Math.abs(rr.bottom - sr.top) <= 1,
+          dots: resizer?.querySelectorAll(":scope > span > span").length ?? 0,
+          now: resizer?.getAttribute("aria-valuenow") ?? null,
+        },
       };
     })()`,
     returnByValue: true,
@@ -2504,7 +2514,77 @@ try {
     if (stripChromeState.indicator !== true) {
       problems.push("胶片带底部应有 2px 无感滚动条（[data-subtle-scrollbar] 不在）");
     }
+    if (
+      stripChromeState.resizer?.height !== 8 ||
+      stripChromeState.resizer?.joinsStrip !== true ||
+      stripChromeState.resizer?.dots !== 3 ||
+      stripChromeState.resizer?.now !== "4"
+    ) {
+      problems.push(`view 与胶片带之间应有 8px 三点拖拉条，实测 ${JSON.stringify(stripChromeState.resizer)}`);
+    }
   }
+
+  /* 真鼠标拖动：向上 18px = 放大两档；再向下 18px 回到默认档。 */
+  const filmHandlePoint = async () => {
+    const point = await send("Runtime.evaluate", {
+      expression: `(() => {
+        const handle = document.querySelector("[data-filmstrip-resizer]");
+        const rect = handle?.getBoundingClientRect();
+        return rect ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 } : null;
+      })()`,
+      returnByValue: true,
+    });
+    return point.result?.value ?? null;
+  };
+  const dragFilmHandle = async (deltaY) => {
+    const point = await filmHandlePoint();
+    if (point === null) return false;
+    await send("Input.dispatchMouseEvent", {
+      type: "mousePressed", button: "left", buttons: 1, clickCount: 1,
+      x: Math.round(point.x), y: Math.round(point.y),
+    });
+    await send("Input.dispatchMouseEvent", {
+      type: "mouseMoved", button: "left", buttons: 1,
+      x: Math.round(point.x), y: Math.round(point.y + deltaY),
+    });
+    await sleep(120);
+    await send("Input.dispatchMouseEvent", {
+      type: "mouseReleased", button: "left", buttons: 0, clickCount: 1,
+      x: Math.round(point.x), y: Math.round(point.y + deltaY),
+    });
+    await sleep(220);
+    return true;
+  };
+  if (await dragFilmHandle(-18)) {
+    const draggedUp = await send("Runtime.evaluate", {
+      expression: `(() => {
+        const strip = document.querySelector('[data-filmstrip="open"]');
+        const tile = strip?.querySelector("[data-strip-item]");
+        const handle = document.querySelector("[data-filmstrip-resizer]");
+        return strip && tile && handle ? {
+          step: strip.getAttribute("data-filmstrip-step"),
+          tileHeight: Math.round(tile.getBoundingClientRect().height),
+          now: handle.getAttribute("aria-valuenow"),
+        } : null;
+      })()`,
+      returnByValue: true,
+    });
+    const state = draggedUp.result?.value ?? null;
+    if (state?.step !== "6" || state?.tileHeight !== 150 || state?.now !== "6") {
+      problems.push(`胶片带把手向上拖 18px 应放大两档，实测 ${JSON.stringify(state)}`);
+    }
+    await dragFilmHandle(18);
+    const draggedBack = await send("Runtime.evaluate", {
+      expression: `document.querySelector('[data-filmstrip="open"]')?.getAttribute("data-filmstrip-step") ?? null`,
+      returnByValue: true,
+    });
+    if (draggedBack.result?.value !== "4") {
+      problems.push(`胶片带把手向下拖 18px 应回到默认第 4 档，实测 ${JSON.stringify(draggedBack.result?.value)}`);
+    }
+  } else {
+    problems.push("找不到胶片带三点拖拉条，无法验证真实鼠标拖动");
+  }
+
   const stripZoom = await send("Runtime.evaluate", {
     expression: `(() => {
       const strip = document.querySelector('[data-filmstrip="open"]');
