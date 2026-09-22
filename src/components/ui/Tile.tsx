@@ -10,9 +10,17 @@
  * │   │     照片     │ │  ← 照片按自己的宽高比居中，四角圆角，四周留 --tile-pad
  * │   │              │ │     超过 3:1 / 1:3 的由**后端**居中截取（原图不受影响）
  * │   ╰──────────────╯ │
+ * │ [编辑/issue]  RAW │  ← 角落覆盖层：锚在**外框**四角，不跟照片走
  * │ ▒ 文件名      ORF ▒ │  ← 底部信息条：**覆盖在照片上**，默认隐藏
  * └────────────────────┘     指向/聚焦/选中时出现；选中时常亮
  * ```
+ *
+ * ## 角落覆盖层（2026-09-22 收口）
+ *
+ * 角标（`RAW` / `+RAW`，以后还有编辑数 / issue 数）一律挂在 **外框**的角上，
+ * **不跟照片走**（`[data-tile-corners]` 那一层）。原因很具体：照片在正方外框里是
+ * 保比例居中的，极端比例（1:3 的长条）下它只占外框中间的一条 —— 角标如果挂在照片上，
+ * 同一行里比例不同的两张就会一个贴外边、一个缩在中间（人类 2026-09-22 报的那条）。
  *
  * ## 为什么是正方外框（而不是让格子跟着照片比例走）
  *
@@ -36,9 +44,13 @@
  *
  * ## 扩展位（现在不显示，位置先留好）
  *
+ * 带 `*` 的都在**角落覆盖层**（外框四角）里，见上面的「角落覆盖层」。
+ *
  * | 位置 | 将来放什么 |
  * | --- | --- |
- * | 照片右上角 | 动作槽（排除等，指向/聚焦时出现）—— `actions` |
+ * | 外框右上角 * | 动作槽（排除等，指向/聚焦时出现）—— `actions` |
+ * | 外框右下角 * | `RAW` / `+RAW`（未指向、未选中时浮出）—— `raw` |
+ * | 外框左下角 * | **编辑数 / issue 数**（M3 编辑里程碑）—— 已留好空位（`data-tile-corner="issue"`），直接往里放 |
  * | 顶部条（**库内**） | 星标 / 颜色 / 旗标 / 赞踩 —— `rating` / `colorLabel` / `flag` / `like` |
  * | 底部条右端 | 加锁标记 `locked`；再往后还有别的属性也往这放 |
  */
@@ -323,32 +335,11 @@ export function Tile(props: TileProps) {
                 .join(" ")}
             />
 
-            <Show when={local.raw}>
-              {/*
-                RAW 角标：**未指向、未选中**时才在照片右下角浮出。
-
-                实现要点：
-                * 圆角用 `--tile-radius` —— 与照片圆角、`--tile-pad` 同一套令牌，
-                  贴在同一块面上才不突兀（用外面那种大圆角会看着像浮在另一个层上）；
-                * 指向时用**淡出**而不是直接 `hidden`：它下面就是悬停才出现的信息条，
-                  硬切会有一下呼哧感；选中则是持续状态，直接不渲染。
-                * `pointer-events-none`：它不是按钮，不睿鼠标事件（否则点到它就算点到照片了）。
-              */}
-              <span
-                class={[
-                  "pointer-events-none absolute end-1 bottom-1 rounded-(--tile-radius) bg-brand px-1",
-                  "font-600 text-fs-0 text-fg-on-brand transition-opacity",
-                  local.selected ? "hidden" : "group-hover/tile:opacity-0",
-                ].join(" ")}
-              >
-                {local.raw === "plus" ? "+RAW" : "RAW"}
-              </span>
-            </Show>
-
             {/*
               排除的标识：**照片正中央**一个禁行图标（圈 + 斜线，与 `toolsbar` 的批量排除同一套）。
               用 `pointer-events-none`：它不是按钮 —— 排除/恢复都走「先选中、再按批量排除」，
               在这里再挂一个可点图标，会给「轻点一下」赋予两种含义。
+              它居中在**照片**上（照片在外框里居中，两者中心重合）。
             */}
             <Show when={local.excluded}>
               <span class="pointer-events-none absolute inset-0 flex items-center justify-center">
@@ -360,19 +351,75 @@ export function Tile(props: TileProps) {
                 />
               </span>
             </Show>
-
-            {/* 动作槽：照片右上角，指向 / 键盘聚焦时出现 */}
-            <Show when={local.actions}>
-              <div class="absolute top-1 right-1 hidden group-hover/tile:flex group-focus-within/tile:flex">
-                {local.actions}
-              </div>
-            </Show>
           </div>
         </Show>
 
         {/* 空态：内容为空（不是没加载出来），给一个「—」 */}
         <Show when={local.empty && !local.loading}>
           <span class="absolute text-fs-1 text-fg-3">—</span>
+        </Show>
+      </div>
+
+      {/*
+        ── 角落覆盖层：锚在**外框**四角，不跟照片走 ─────────────────
+
+        为什么必须锚外框（人类 2026-09-22）：照片是保比例居中的，极端比例（比如 1:3
+        的长条）只占外框中间一条 —— 角标挂在照片上就会随照片跑，同一行里比例不同的两张
+        一个贴外边、一个缩在中间；而以后左下角还要放「编辑 / issue 数」，
+        几个角各自贴不同的面就彻底收不住了。
+
+        坐标：这一层 = 外框内缩一个 `--tile-pad`（照片贴满时就是它的边缘），
+        所以角标到外框的距离只由 `--tile-pad` 与本层的 `-1` 决定，与照片比例无关。
+
+        分层：在照片之后、信息条之前 —— 信息条（半透底纹那条）永远盖在角标上；
+        角标本来就只在「未指向、未选中」时显示，那时信息条也不在。
+
+        已占用的角：右下 = `RAW` / `+RAW`；右上 = 动作槽（暂时没人用）；
+        左下 = **留给 M3 的编辑 / issue 数**（直接进这一层，不要再另算距离）。
+      */}
+      <div data-tile-corners class="pointer-events-none absolute inset-(--tile-pad)">
+        <Show when={local.raw}>
+          {/*
+            RAW 角标：**未指向、未选中**时才在外框右下角浮出。
+
+            实现要点：
+            * 圆角用 `--tile-radius` —— 与照片圆角、`--tile-pad` 同一套令牌，
+              贴在同一块面上才不突兀（用外面那种大圆角会看着像浮在另一个层上）；
+            * `pointer-events-none`：它不是按钮，不睿鼠标事件（否则点到它就算点到照片了）。
+
+            显示规则（人类 2026-09-17 定、2026-09-22 补全）：**与信息条二选一** ——
+            只要信息条会出现（选中 / 指向 / 键盘聚焦 / `marks-name` 档强制显示文件名条），
+            它就退场。前两个是持续状态，直接**不渲染**；指向 / 聚焦用**淡出**
+            （与信息条的淡入同一拍，硬切会有一下呼哧感）。
+          */}
+          <span
+            data-tile-badge="raw"
+            class={[
+              "pointer-events-none absolute end-1 bottom-1 rounded-(--tile-radius) bg-brand px-1",
+              "font-600 text-fs-0 text-fg-on-brand transition-opacity",
+              local.selected || forceNameBar()
+                ? "hidden"
+                : "group-hover/tile:opacity-0 group-focus-within/tile:opacity-0",
+            ].join(" ")}
+          >
+            {local.raw === "plus" ? "+RAW" : "RAW"}
+          </span>
+        </Show>
+
+        {/*
+          左下角：**编辑数 / issue 数的预留位**（人类 2026-09-22 让先留好）。
+
+          坐标与右下角的 `RAW` 角标**镜像对应**（`start-1 bottom-1` vs `end-1 bottom-1`），
+          两者在同一条水平线上。M3 把正式图标塞进来即可 —— 不要挪到照片那一层，
+          也不要另算距离；这里空着的时候是 0 尺寸，不占地方也不遮照片。
+        */}
+        <div data-tile-corner="issue" class="absolute start-1 bottom-1 flex items-center gap-1" />
+
+        {/* 动作槽：外框右上角，指向 / 键盘聚焦时出现 */}
+        <Show when={local.actions}>
+          <div class="pointer-events-auto absolute end-1 top-1 hidden group-hover/tile:flex group-focus-within/tile:flex">
+            {local.actions}
+          </div>
         </Show>
       </div>
 

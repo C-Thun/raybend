@@ -22,6 +22,8 @@
  *      没勾选目录时「导入」禁用且给出原因、建库弹窗能打开且空路径时不可提交
  *   7. **导入进度弹窗**（画廊里的真 store + 假后端演示）：阶段条 / 计数 / 当前项 /
  *      错误清单 / 取消的二次确认 / 结束摘要 / 关得掉
+ *   8. **tile 的几何**（画廊）：正方外框、照片保比例居中、信息条底纹的可读性，
+ *      以及 **RAW 角标锚在外框**（跨不同比例边距一致、极端比例下不贴照片）
  *
  * 用法：
  *   pnpm dev                       # 另开一个终端起开发服务器
@@ -1151,7 +1153,8 @@ try {
     const describe = (tile) => {
       const rect = tile.getBoundingClientRect();
       const picture = tile.querySelector("img");
-      const pictureBox = picture ? picture.parentElement.getBoundingClientRect() : null;
+      const pictureBoxEl = picture ? picture.parentElement : null;
+      const pictureBox = pictureBoxEl ? pictureBoxEl.getBoundingClientRect() : null;
       const bars = [...tile.querySelectorAll("div")].filter((el) =>
         (el.getAttribute("style") ?? "").includes("--tile-bar-h"),
       );
@@ -1170,6 +1173,10 @@ try {
        */
       const excludeIcon = tile.querySelector('[aria-label="已排除"], [aria-label="Excluded"]');
       const iconBox = excludeIcon ? excludeIcon.getBoundingClientRect() : null;
+      const badge = tile.querySelector('[data-tile-badge="raw"]');
+      const badgeBox = badge ? badge.getBoundingClientRect() : null;
+      const issueSlot = tile.querySelector('[data-tile-corner="issue"]');
+      const issueBox = issueSlot ? issueSlot.getBoundingClientRect() : null;
       const iconCentered =
         iconBox && pictureBox
           ? Math.abs(
@@ -1209,6 +1216,36 @@ try {
             : null,
         hasTopBar: bars.some((el) => (el.getAttribute("class") ?? "").includes("top-0")),
         selected: tile.getAttribute("aria-selected") === "true",
+        /*
+         * 角落角标（RAW / +RAW）：**它跟照片无关**，只看两个结构事实 ——
+         * ① 在角落层里；② **不在照片盒里**。
+         *
+         * 这就是这条修复的判据（人类 2026-09-22）：角标一旦只由外框决定，
+         * 它跟图片内容就没有因果关系了 —— 图片只有一个像素也不影响，
+         * 所以不需要拿极端比例的样例去试，量结构就行。
+         */
+        badge:
+          badge !== null && badgeBox !== null
+            ? {
+                text: (badge.textContent ?? "").trim(),
+                inCorners: badge.closest("[data-tile-corners]") !== null,
+                inPhotoBox: pictureBoxEl ? pictureBoxEl.contains(badge) : null,
+                // 到外框右 / 下边缘的距离（只作诊断输出；断言看的是上面两条）
+                right: Math.round(rect.right - badgeBox.right),
+                bottom: Math.round(rect.bottom - badgeBox.bottom),
+                opacity: getComputedStyle(badge).opacity,
+              }
+            : null,
+        /*
+         * 左下角的**预留位**（M3 的编辑 / issue 数标签）：与右下角的 RAW 角标镜像对应。
+         * 空着时是 0 尺寸，所以只量它到外框左 / 下边缘的距离。
+         */
+        issueSlot: issueBox
+          ? {
+              left: Math.round(issueBox.left - rect.left),
+              bottom: Math.round(rect.bottom - issueBox.bottom),
+            }
+          : null,
       };
     };
     const out = tiles.map(describe);
@@ -1317,6 +1354,66 @@ try {
         );
       }
     }
+    /*
+     * RAW 角标在**图片之外**（人类 2026-09-22 报的那条）。
+     *
+     * 判据是**结构**，不是几何：角标必须待在角落层（`[data-tile-corners]`）里、
+     * **不能落在照片盒里**。只要这两条成立，角标的位置就只由外框决定 ——
+     * 图片多细多长都不影响（哪怕只有一个像素），不需要拿极端比例的样例去试。
+     *
+     * 反面：角标曾经是照片盒里的 `absolute end-1 bottom-1`，于是它跟着照片跑，
+     * 同一行里比例不同的两张会一个贴外边、一个缩在中间。
+     */
+    const badged = tileGrid.tiles.filter((t) => t.badge !== null);
+    if (badged.length === 0) {
+      problems.push("画廊里没有带 RAW 角标的样例 —— 角标那几条断言没法量");
+    }
+    for (const tile of badged) {
+      if (tile.badge.inCorners !== true) {
+        problems.push("RAW 角标不在角落层（[data-tile-corners]）里 —— 它的位置会跟着照片走");
+      }
+      if (tile.badge.inPhotoBox !== false) {
+        problems.push(
+          "RAW 角标落在**照片盒**里了 —— 那就会随照片比例乱跑，必须挪到外框的角落层",
+        );
+      }
+      if (!(Number(tile.badge.opacity) > 0)) {
+        problems.push(`角标是看不见的（opacity=${tile.badge.opacity}）—— 量它没有意义`);
+      }
+      // 反面：角标不能跑到外框外面去（外框 overflow-hidden 会把它剪掉一半）
+      if (tile.badge.right < 0 || tile.badge.bottom < 0) {
+        problems.push(
+          `RAW 角标跑到外框外面了（右 ${tile.badge.right}px / 下 ${tile.badge.bottom}px）`,
+        );
+      }
+    }
+
+    /*
+     * 左下角的**预留位**（人类 2026-09-22 让先留好，M3 的编辑 / issue 数用）。
+     *
+     * 它必须每个 tile 都在，而且与右下角的 RAW 角标**镜像对应**（同一条水平线、
+     * 到左右边缘的距离相等）—— 将来往里放正式图标时就不用再算一遍距离。
+     */
+    const missingSlot = tileGrid.tiles.filter((t) => t.issueSlot === null);
+    if (missingSlot.length > 0) {
+      problems.push(
+        `有 ${missingSlot.length} 个 tile 没有左下角的 issue 预留位（[data-tile-corner="issue"]）`,
+      );
+    }
+    for (const tile of badged) {
+      if (tile.issueSlot === null) continue;
+      if (tile.issueSlot.bottom !== tile.badge.bottom) {
+        problems.push(
+          `issue 预留位与 RAW 角标不在同一条水平线上（下 ${tile.issueSlot.bottom} vs ${tile.badge.bottom}）`,
+        );
+      }
+      if (tile.issueSlot.left !== tile.badge.right) {
+        problems.push(
+          `issue 预留位与 RAW 角标到左右边缘的距离不对应（左 ${tile.issueSlot.left} vs 右 ${tile.badge.right}）`,
+        );
+      }
+    }
+
     for (const theme of ["dark", "light"]) {
       const measured = tileGrid.scrim[theme];
       if (!(measured.alpha > 0.5)) {
@@ -1331,6 +1428,70 @@ try {
             `${measured.contrast}:1，没过 AA 的 4.5:1 —— 蒙层浓度不够，或文字用了次级色阶`,
         );
       }
+    }
+  }
+
+  /*
+   * 角标与信息条**二选一**（人类 2026-09-22 重申「原来的功能不能丢」）：
+   * **选中之后角标必须退场** —— 否则它和底部那条文件名条同时亮着，右下角就成了双层。
+   *
+   * 用画廊里那张 `+RAW` 样例（它可点选）验一下。指向态在这里验不了
+   *（无头浏览器没有真鼠标），那条由 `check:browse` 的 hover 断言守着。
+   */
+  const selectBadgeTile = await evaluate(`(() => {
+    const demo = document.querySelector('[data-demo="tile"]');
+    if (!demo) return null;
+    const tile = [...demo.querySelectorAll('[role="option"]')].find(
+      (t) => (t.querySelector('[data-tile-badge="raw"]')?.textContent ?? "").trim() === "+RAW",
+    );
+    if (!tile) return null;
+    const before = tile.querySelector('[data-tile-badge="raw"]');
+    // ⚠️ 必须在 click **之前**读：Solid 的更新是同步的，点完这个元素就带上 hidden 了
+    const beforeDisplay = before ? getComputedStyle(before).display : null;
+    tile.click();
+    return {
+      hadBadge: before !== null,
+      beforeDisplay,
+    };
+  })()`);
+  await sleep(200);
+  const selectedBadgeState = await evaluate(`(() => {
+    const demo = document.querySelector('[data-demo="tile"]');
+    if (!demo) return null;
+    const tile = [...demo.querySelectorAll('[role="option"]')].find(
+      (t) => (t.querySelector('[data-tile-badge="raw"]')?.textContent ?? "").trim() === "+RAW",
+    );
+    if (!tile) return null;
+    const badge = tile.querySelector('[data-tile-badge="raw"]');
+    return {
+      selected: tile.getAttribute("aria-selected"),
+      display: badge ? getComputedStyle(badge).display : null,
+      // 底部文件名条这时应当亮着（“二选一”的另一半）
+      nameBar: (() => {
+        const bar = tile.querySelector('[data-tile-bar="name"]');
+        return bar ? getComputedStyle(bar).opacity : null;
+      })(),
+    };
+  })()`);
+  if (selectBadgeTile === null || selectedBadgeState === null) {
+    problems.push("找不到可点选的 `+RAW` 样例 —— 「选中后角标退场」这条验不了");
+  } else {
+    if (selectBadgeTile.hadBadge !== true || selectBadgeTile.beforeDisplay === "none") {
+      problems.push("点选之前 `+RAW` 角标就没显示（量不到“退场”这个变化）");
+    }
+    if (selectedBadgeState.selected !== "true") {
+      problems.push("点了一下那张 `+RAW` 样例，但它没被选中");
+    }
+    if (selectedBadgeState.display !== "none") {
+      problems.push(
+        `选中之后 RAW 角标还在（display=${selectedBadgeState.display}）—— ` +
+          "角标与信息条必须二选一",
+      );
+    }
+    if (selectedBadgeState.nameBar !== "1") {
+      problems.push(
+        `选中之后底部文件名条没有常亮（opacity=${selectedBadgeState.nameBar}）—— 二选一的另一半没了`,
+      );
     }
   }
 

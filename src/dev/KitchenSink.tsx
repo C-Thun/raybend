@@ -589,7 +589,7 @@ export default function KitchenSink() {
           {/* ── Tile ────────────────────────────────────── */}
           <Section
             title="Tile（#11）"
-            note="边长由 --tile-cell 决定（JS 可改）；Space=选中、Enter=打开；指向/选中的信息条有底纹"
+            note="边长由 --tile-cell 决定（JS 可改）；Space=选中、Enter=打开；指向/选中的信息条有底纹；RAW 角标在图片外的角落层（不跟照片走）"
           >
             <div data-demo="tile" class="flex flex-wrap items-start gap-3">
               {/* 库内样例：顶部标记区（星标/颜色/旗标）+ 加锁；以及 4:3 的宽高比 */}
@@ -602,6 +602,7 @@ export default function KitchenSink() {
                 rating={4}
                 colorLabel="blue"
                 locked
+                raw="raw"
               />
               <Tile
                 label="P1000026.JPG"
@@ -612,6 +613,20 @@ export default function KitchenSink() {
                 rating={2}
                 colorLabel="red"
                 selected
+              />
+              {/*
+                位图 + RAW 的复合（`+RAW`）：展示的是 SOOC 位图，但同一张还有可编辑的 RAW。
+                它可点选（与下面那一排共用 `selectedTile`）—— 冒烟靠它验
+                「选中之后角标退场」那条（角标与信息条二选一）。
+              */}
+              <Tile
+                label="P1000027.JPG"
+                tag="JPG"
+                src={demoImage()}
+                aspect={3 / 2}
+                raw="plus"
+                selected={selectedTile() === 4}
+                onClick={() => setSelectedTile(4)}
               />
             <Row label="有图 / 选中 / 悬停">
               <Tile
