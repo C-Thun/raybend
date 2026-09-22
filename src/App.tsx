@@ -115,7 +115,9 @@ export default function App() {
    * 浏览工作区的状态（`features/browse/store.ts`）。
    *
    * 与网格 store 一样在组装层创建：**当前工作流要决定渲染谁**，
-   * 而 store 的生命周期不该跟着工作流开关走（切回来时窗口数据还在，不用重新加载）。
+   * 而 store 的生命周期不该跟着工作流开关走（切回来时滚动位置与选择还在）。
+   * 但「数据还是新的吗」**不跟着 store 跨工作流** —— 每次进浏览都要重读一遍，
+   * 见 `BrowseWorkspace` 的 `onMount`。
    */
   const browseStore = createBrowseStore({
     /*

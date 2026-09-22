@@ -184,6 +184,15 @@ function fakeApi(count: number) {
     setMarking(id: number, marking: MarkingItem) {
       marks.set(id, marking);
     },
+    /** 往库里添一张（模拟「导入刚落地」）—— 刷新看得见新照片那条要用 */
+    addItem(entry: AssetItem) {
+      all.push(entry);
+    },
+    /** 从库里删掉某张（模拟「在别处被删了/不再符合筛选」）—— 选择修剪那条要用 */
+    removeItem(id: number) {
+      const at = all.findIndex((entry) => entry.id === id);
+      if (at >= 0) all.splice(at, 1);
+    },
     resetCalls() {
       calls.page = [];
       calls.timeline = 0;
@@ -319,6 +328,160 @@ test("分页数据合进稀疏表：未加载的位置是 null", async () => {
   assert.equal(store.itemAt(PAGE_SIZE), null, "没请求过的页就是空的（稀疏表）");
   assert.equal(store.itemAt(PAGE_SIZE * 2), null);
   assert.equal(store.itemAt(PAGE_SIZE * 3)?.id, PAGE_SIZE * 3 + 1, "请求过的那页在");
+});
+
+// ─────────────────────────── 刷新（同查询重读）───────────────────────────
+
+/*
+ * 这一组盯的是人类 2026-09-22 报的那条：
+ * 「先进 browse，再去导入，导入的文件没有出现在列表里，得关了程序再进才行」。
+ *
+ * 根因是列表只在**查询变化**时重读 —— 于是 `refresh`（挂在工作区挂载时）
+ * 必须做到两件互相矛盾的事：**把数据换成最新的**，但不把用户的东西碰掉
+ *（选择、已铺出来的内容）。下面五条就是这五个面。
+ */
+
+test("refresh：把新导入的照片读进来", async () => {
+  const { api, addItem } = fakeApi(3);
+  const store = createBrowseStore({ api });
+  open(store);
+  await tick();
+  assert.equal(store.total(), 3);
+
+  // 用户去导入了一圈：库里多了一张（真实程序里这一步由导入自己写库）
+  addItem(item(4));
+  await store.refresh();
+
+  assert.equal(store.total(), 4);
+  assert.equal(store.itemAt(3)?.id, 4, "新照片必须出现在列表里");
+});
+
+test("refresh：不清空已有内容（刷新没回来之前照旧显示上一份）", async () => {
+  const { api } = fakeApi(3);
+  const store = createBrowseStore({ api });
+  open(store);
+  await tick();
+
+  // 卡住刷新用的那一次取页（时间线与分面会立刻回来，但 Promise.all 要等它）
+  const gate: Array<() => void> = [];
+  const originalPage = api.page;
+  api.page = async (query, offset, limit) => {
+    await new Promise<void>((resolve) => gate.push(resolve));
+    return originalPage(query, offset, limit);
+  };
+  const pending = store.refresh();
+  await tick();
+
+  assert.equal(store.total(), 3, "刷新期间显示的仍是上一份内容（清空会白一下）");
+  assert.equal(store.itemAt(0)?.id, 1);
+
+  for (const release of gate) release();
+  await pending;
+  assert.equal(store.itemAt(0)?.id, 1, "刷新完成后是第一页的新数据");
+});
+
+test("refresh：不弄丢选择，只剔掉真的不在列表里的", async () => {
+  const { api, removeItem } = fakeApi(5);
+  const store = createBrowseStore({ api });
+  open(store);
+  await tick();
+
+  store.select(2, "replace");
+  store.select(4, "toggle");
+  assert.deepEqual([...store.selection().ids].sort(), ["2", "4"]);
+
+  removeItem(4); // 这张在别处没了（删了，或者不再符合筛选）
+  await store.refresh();
+
+  assert.deepEqual([...store.selection().ids], ["2"], "还在的照样选中，消失的剔掉");
+  assert.equal(store.anchorItem()?.id, 2, "锚点被剔掉后退回第一张选中的");
+});
+
+test("refresh：第一页之外的页作废（新照片会把下标推移）", async () => {
+  const { api, addItem } = fakeApi(1000);
+  const store = createBrowseStore({ api });
+  open(store);
+  await tick();
+  await store.ensureRange(0, PAGE_SIZE + 2);
+  assert.equal(store.itemAt(PAGE_SIZE)?.id, PAGE_SIZE + 1, "先真的取回第二页");
+
+  addItem(item(9999));
+  await store.refresh();
+
+  assert.equal(store.total(), 1001, "总数跟着库里变了");
+  assert.equal(store.itemAt(0)?.id, 1, "第一页是新的");
+  assert.equal(
+    store.itemAt(PAGE_SIZE),
+    null,
+    "旧的第二页必须作废 —— 它的下标可能已经挪过了（留着会显示错人）",
+  );
+
+  // 用户滚下去时按需重取
+  await store.ensureRange(PAGE_SIZE, PAGE_SIZE + 1);
+  assert.equal(store.itemAt(PAGE_SIZE)?.id, PAGE_SIZE + 1, "重取之后就有内容了");
+});
+
+test("refresh：只读一趟首屏，不把已加载的页逐页重取", async () => {
+  /*
+   * 这是**成本口径**钉在测试里（人类 2026-09-22 问过这笔账）：
+   * 刷新 = 再付一次「进目录首屏」的钱（10 万条挤一个目录时量到
+   * 取页 0.5ms + 时间线 P95 142ms + 分面 P95 79ms）；
+   * 而不是「把用户滚过的每一页都重读一遍」那种精细活。
+   */
+  const { api, calls } = fakeApi(2000);
+  const store = createBrowseStore({ api });
+  open(store);
+  await tick();
+  await store.ensureRange(PAGE_SIZE * 2, PAGE_SIZE * 2 + 1);
+  calls.page = [];
+  calls.timeline = 0;
+  calls.facets = 0;
+
+  await store.refresh();
+
+  assert.deepEqual(calls.page, [0], "只读第一页");
+  assert.equal(calls.timeline, 1, "时间线一次");
+  assert.equal(calls.facets, 1, "分面一次");
+});
+
+test("refresh：把在飞的旧分页请求作废（迟到的响应不会盖回去）", async () => {
+  const { api } = fakeApi(2000);
+  const store = createBrowseStore({ api });
+  open(store);
+  await tick();
+
+  // 卡住第二页那次请求
+  const gate: Array<() => void> = [];
+  const originalPage = api.page;
+  api.page = async (query, offset, limit) => {
+    if (offset > 0) await new Promise<void>((resolve) => gate.push(resolve));
+    return originalPage(query, offset, limit);
+  };
+  const range = store.ensureRange(PAGE_SIZE, PAGE_SIZE + 1);
+  await tick();
+  await store.refresh();
+
+  // 现在放行那个属于刷新之前的第二页
+  for (const release of gate) release();
+  await range;
+
+  assert.equal(
+    store.itemAt(PAGE_SIZE),
+    null,
+    "按刷新之前的名单取回来的页必须丢掉",
+  );
+});
+
+test("refresh：没选库/没选目录时什么也不读", async () => {
+  const { api, calls } = fakeApi(3);
+  const store = createBrowseStore({ api });
+  await store.refresh();
+
+  assert.deepEqual(calls.page, []);
+  assert.equal(calls.timeline, 0);
+  assert.equal(calls.facets, 0);
+  assert.equal(store.total(), 0);
+  assert.equal(store.loading(), false, "别把「加载中」留在屏幕上");
 });
 
 // ─────────────────────────── 迟到的结果 ───────────────────────────

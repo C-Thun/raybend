@@ -21,6 +21,11 @@
  * 3. **换查询要清选择**：换了库/目录/筛选之后，原来选中的照片可能根本不在列表里了，
  *    留着它们会让「批量操作」作用在看不见的照片上。
  *
+ * 另外两件事分得很清（人类 2026-09-22 报的「导入完了回浏览看不到新照片」）：
+ * **查询变了**用 `reload`（清空重来、选择作废）；**查询没变但数据可能变了**
+ * （每次进浏览）用 `refresh`（保留内容与选择，只把数据重读一遍）——
+ * 判断依据是「这次重读是为了换查询，还是为了看最新的库」。
+ *
  * ⚠️ 派生量一律写成普通函数（不用 `createMemo`）：Node 里 `solid-js` 走 SSR 构建，
  * `createMemo` 只求值一次，测试会拿到永远不更新的假值（与既有 store 同一套说明）。
  */
@@ -49,6 +54,7 @@ import {
   EMPTY_SELECTION,
   focusSelection,
   hasSelection,
+  pruneSelection,
   selectAll as selectAllIds,
   selectionCount,
   type SelectionState,
@@ -171,6 +177,21 @@ export interface BrowseStore {
   error(): string | null;
   /** 重新加载（换库/换筛选后自动调；也可以手动调）。 */
   reload(): Promise<void>;
+  /**
+   * **同一个查询重读一遍**（`reload` 的「不清空」版）。
+   *
+   * 用在哪：**每次进浏览**（`BrowseWorkspace` 挂载时调）。数据可能被别的流程改掉了
+   * —— 导入、重建、在程序外面换了文件 —— 而查询一个字都没变，`reload` 永远不会被触发。
+   *
+   * 它与 `reload` 的两条区别都是刻意的：
+   *
+   * 1. **不清空**已有数据：刷新期间界面继续显示上一份内容，直到新的一页回来
+   *    （换查询才必须清空 —— 旧数据在新查询下是错的；同一个查询下它只是「可能过时」，
+   *    比整片空白好）；选择同理，**刷新不该把用户的选中弄丢**（不在列表里的会被剔掉）；
+   * 2. **第一页之外的页作废**：新照片会把后面的下标整体推移，留着旧页会在滚动时
+   *    显示错人；它们会在用户滚到时按需重取。
+   */
+  refresh(): Promise<void>;
   /**
    * 标签词典（id → 名字）。**库里只存 tag id**（标记来自 catalog，名字来自 app.db），
    * 所以界面要显示标签名就得有一份词典 —— 收在这里，右栏与标签弹窗共用同一份，
@@ -481,6 +502,57 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
     setTotal(totalCount);
   };
 
+  /**
+   * 丢掉第一页之后的每一格（`refresh` 用）。
+   *
+   * 刷新后不能留旧页：新照片插进来会把后面的下标整体推移，旧页会在滚动时
+   * 显示成另一张照片（比空着更糟）。它们会在用户滚到时由 `ensureRange` 按需重取 ——
+   * 进浏览那一刻滚动条就在顶部，所以页 0 以外的内容本来也不在屏幕上。
+   */
+  const dropPagesAfterFirst = (): void => {
+    setEntries((prev) => {
+      if (prev.length <= PAGE_SIZE) return prev;
+      return [
+        ...prev.slice(0, PAGE_SIZE),
+        ...new Array<AssetItem | null>(prev.length - PAGE_SIZE).fill(null),
+      ];
+    });
+  };
+
+  /**
+   * 取「进目录首屏」的三件事：第一页 + 时间线 + 分面。
+   *
+   * `reload` 与 `refresh` 共用 —— 这一条路上就这么多事，两者只差**读之前/之后
+   * 怎么处理已有数据**（清空 vs 保留），取数本身不该有两份。
+   * 出错时只记错误并交回 `null`；代号对不上（有更新的请求在飞）也交回 `null`。
+   */
+  const loadFirstScreen = async (
+    q: BrowseQuery,
+    mine: number,
+  ): Promise<readonly TimelineEntry[] | null> => {
+    try {
+      const [window, line, faces] = await Promise.all([
+        api.page(q, 0, PAGE_SIZE),
+        api.timeline(q, 0),
+        api.facets(q),
+      ]);
+      if (mine !== generation) return null;
+      applyPage(window.offset, window.items, window.total);
+      setTimeline(line.entries);
+      setFacets(faces);
+      return line.entries;
+    } catch (e) {
+      if (mine === generation) setError(e instanceof Error ? e.message : String(e));
+      return null;
+    }
+  };
+
+  /**
+   * **换查询**：清空重来（数据、选择、分面全部作废）。
+   *
+   * 只在库/目录/筛选/排序变了时用。数据可能变了但查询没变时用 [`refresh`]——
+   * 那个不清空、也不弄丢选择。
+   */
   const reload = async (): Promise<void> => {
     const q = query();
     if (q === null) {
@@ -494,23 +566,45 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
     const mine = generation;
     setLoading(true);
     setError(null);
-    try {
-      // 首屏：第一页 + 时间线 + 分面。三者一起发，谁先回来谁先画。
-      const [window, line, faces] = await Promise.all([
-        api.page(q, 0, PAGE_SIZE),
-        api.timeline(q, 0),
-        api.facets(q),
-      ]);
-      if (mine !== generation) return; // 迟到的结果，丢掉
-      applyPage(window.offset, window.items, window.total);
-      setTimeline(line.entries);
-      setFacets(faces);
-    } catch (e) {
-      if (mine !== generation) return;
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      if (mine === generation) setLoading(false);
+    await loadFirstScreen(q, mine);
+    if (mine === generation) setLoading(false);
+  };
+
+  /**
+   * **同一个查询重读一遍**（见接口里的 `refresh` 说明）。
+   *
+   * 结构上就是「不清空 + 把已有的页作废」：能这么短，正是因为不去猜「库变了没有」——
+   * 猜法的代价（一套要维护的「什么算更新」判定）比多读这一趟贵得多。
+   */
+  const refresh = async (): Promise<void> => {
+    const q = query();
+    if (q === null) {
+      // 没选库/没选目录时没什么可刷的：只把可能挂着的「加载中」收掉
+      setLoading(false);
+      return;
     }
+    // 作废在飞的请求（它们属于这次刷新之前的同一份数据），但**不动**已经铺出来的内容
+    generation += 1;
+    inFlight = new Set();
+    const mine = generation;
+    setLoading(true);
+    setError(null);
+
+    const line = await loadFirstScreen(q, mine);
+    if (mine !== generation) return;
+    dropPagesAfterFirst();
+    if (line !== null) {
+      /*
+       * 照片可能已经不在了（程序外面删的、别处导入后重排的）：把选择收敛到新时间线上。
+       * 这是**刷新与重载的分界** —— 重载清空选择，刷新只剔掉真的不见了的那几张。
+       */
+      setSelection((current) =>
+        pruneSelection(current, line.map((entry) => String(entry.id))),
+      );
+      // 选中那些照片的标记也重读一次（工具条的三态控件读的就是它）
+      void refreshMarkings();
+    }
+    setLoading(false);
   };
 
   const ensureRange = async (start: number, end: number): Promise<void> => {
@@ -686,6 +780,7 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
     loading,
     error,
     reload,
+    refresh,
     ensureRange,
     tags,
     loadTags,

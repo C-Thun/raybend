@@ -339,6 +339,15 @@ try {
         const stack = error && error.stack ? String(error.stack).slice(0, 800) : "";
         window.__REJECTIONS.push("error: " + String(event.message) + (stack ? " @ " + stack : ""));
       });
+      /*
+       * 假后端的 fixture **挂在 window 上、只建一次**：测试要能改它 ——
+       * 「导入后回浏览看到新照片」那条必须真的让假后端多出一张照片，
+       * 只能读的 fixture 只能证明「没变化时界面没炸」。
+       *
+       * ⚠️ 不能写在 invoke 函数里面：那样**每次调用都会重建一份**，测试的改动立刻被抹掉
+       *（踩过：回归检查因此假红，看着像产品没刷新，实际是工装把改动吃了）。
+       */
+      window.__FIXTURES = ${JSON.stringify(FIXTURES)};
       window.__TAURI_INTERNALS__ = {
         metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main" } },
         transformCallback: (cb) => cb,
@@ -350,7 +359,7 @@ try {
             window.__SETTING_CALLS = window.__SETTING_CALLS || [];
             window.__SETTING_CALLS.push(args);
           }
-          const fixtures = ${JSON.stringify(FIXTURES)};
+          const fixtures = window.__FIXTURES;
           if (cmd === "thumb_get" || cmd === "view_image") {
             // 前端 toBytes() 认 ArrayBuffer / Uint8Array / number[]，给哪个都行
             const raw = atob(${JSON.stringify(ONE_PIXEL_PNG)});
@@ -4172,6 +4181,95 @@ try {
     problems.push(`弹窗层级这段没把界面收干净（后面的断言会被带偏，实测 ${JSON.stringify(cleanState)}）`);
   }
 
+
+  /*
+   * **导入之后回浏览，新照片必须出现在列表里**（人类 2026-09-22 报的那条）。
+   *
+   * 症状：先进 browse、再去导入，导入的文件没有出现在列表里，得关程序重启才行。
+   * 根因：列表只在**查询变化**时重读（`setRepository` / `setScope` / 筛选 / 排序），
+   * 而「导入往库里加了东西」不改查询 —— 那份清单就停在上一次读的样子。
+   *
+   * 这里按用户那条路真走一遍：**改假后端的 fixture**（等价于导入落了新照片）
+   * → 切到导入 → 切回浏览 → 新照片必须自己出现（工作区挂载时那次重读的事）。
+   *
+   * 量法用两个**不依赖渲染数量**的信号：
+   *   * tiles 状态条上的计数（「N 张」）—— 它是查询总数，不是“画出来几格”；
+   *   * `browse_page` / `browse_timeline` 的**调用次数**（假后端的调用日志）——
+   *     它能区分「重读了」与「只是界面看起来一样」。
+   */
+  const snapshotBrowse = `(() => ({
+    bar: (document.querySelector("[data-tiles-control-bar] span")?.textContent ?? "").trim(),
+    tiles: document.querySelectorAll('[data-virtual-scroller] [role="option"]').length,
+    pages: (window.__INVOKE_LOG || []).filter((c) => c === "browse_page").length,
+    timelines: (window.__INVOKE_LOG || []).filter((c) => c === "browse_timeline").length,
+  }))()`;
+  const readBrowse = async () => {
+    const snapshot = await send("Runtime.evaluate", { expression: snapshotBrowse, returnByValue: true });
+    return snapshot.result?.value ?? {};
+  };
+
+  const beforeRefresh = await readBrowse();
+
+  const injected = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const page = window.__FIXTURES && window.__FIXTURES.browse_page;
+      const line = window.__FIXTURES && window.__FIXTURES.browse_timeline;
+      if (!page || !line) return "假后端没有可改的 fixture";
+      const fresh = {
+        ...page.items[0],
+        id: 7,
+        relPath: "photos/2026-08-15/MY007.JPG",
+        fileName: "MY007.JPG",
+      };
+      window.__FIXTURES.browse_page = { total: page.total + 1, offset: 0, items: [...page.items, fresh] };
+      window.__FIXTURES.browse_timeline = {
+        total: line.total + 1,
+        entries: [
+          ...line.entries,
+          { id: fresh.id, relPath: fresh.relPath, takenAt: fresh.takenAt },
+        ],
+      };
+      return "ok";
+    })()`,
+    returnByValue: true,
+  });
+  if (injected.result?.value !== "ok") {
+    problems.push(`改假后端的库没成功：${String(injected.result?.value)}`);
+  }
+
+  /** 点一下工作流标签（工作流切换在界面上就是这几个 label） */
+  const clickFlow = async (pattern) =>
+    await send("Runtime.evaluate", {
+      expression: `(() => {
+        const label = [...document.querySelectorAll("label")].find((n) => /${pattern}/.test(n.textContent ?? ""));
+        if (!label) return "没有这个标签";
+        label.click();
+        return "ok";
+      })()`,
+      returnByValue: true,
+    });
+
+  const toImport = await clickFlow("导入|Import");
+  if (toImport.result?.value !== "ok") problems.push("切到导入工作流失败（找不到标签）");
+  await sleep(1500);
+  const backToBrowse = await clickFlow("浏览|Browse");
+  if (backToBrowse.result?.value !== "ok") problems.push("切回浏览工作流失败（找不到标签）");
+  await sleep(2500);
+
+  const afterRefresh = await readBrowse();
+  if (!(afterRefresh.pages > beforeRefresh.pages) || !(afterRefresh.timelines > beforeRefresh.timelines)) {
+    problems.push(
+      `切回浏览后没有重读库（browse_page ${beforeRefresh.pages}→${afterRefresh.pages}、` +
+        `browse_timeline ${beforeRefresh.timelines}→${afterRefresh.timelines}）—— ` +
+        "进浏览必须重读一遍当前目录",
+    );
+  }
+  if (!/7/.test(String(afterRefresh.bar))) {
+    problems.push(
+      `回到浏览后列表没变（状态条计数「${beforeRefresh.bar}」→「${afterRefresh.bar}」，` +
+        "库里已经 7 张）—— 导入落到库里的新照片没出现在列表里",
+    );
+  }
 
   const stackOverflow = consoleErrors.find((text) => /Maximum call stack/.test(text));
   if (stackOverflow) {
