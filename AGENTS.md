@@ -128,6 +128,23 @@ raybend（中文名**「光伴」**，产品名 `RayBend`）是一个**相片管
       **禁止**启动时临时 `ALTER`、另造迁移通道、静默删库重建；
     - localStorage 等设备级偏好也必须使用**版本化 key + 显式一次性迁移**（例如
       `raybend.display.v1 → v2`），迁移逻辑与测试放在偏好自己的模块里。
+17. **Solid：包装组件透传 children 必须 `untrack` 一次**（人类 2026-09-23 要求「别再出现」）：
+    - `{props.children}` 会被编译成 `insert(el, () => props.children)` —— 那是一个 **render effect**，
+      **不是一次性插入**；而 children 的 getter 每求值一次，里面的 `createComponent(...)` 就重跑一遍。
+    - 于是：**「创建 children 期间被读到的任何信号」都成了「重建整棵子树」的开关**。
+      真凶实例（2026-09-23）：Ark 的 `SliderRoot` 用 `createSplitProps()` **同步**读走 `props.value`
+      （= tiles 的 `tileStep`）→ 拖动第一格值一变 → 整条状态栏重建 → 正在拖的 Ark Slider 实例
+      被换掉 → 「拖一格就断、焦点也丢」。
+    - **规矩**：凡是把 children 透传出去的壳组件（`BarFrame` 这类），一律
+      `const children = untrack(() => props.children)` 再插入。子组件创建期读什么信号都无所谓，
+      重建开关从根上没了。
+    - **判据不能只看「值变了没有」**：重建 + 拿新值重画一遍也会让第一步的值变（假绿）。
+      要断言**节点身份**（`el === 上次那个 el`），并把网格/列表也一起钉住 ——
+      它们被重建就意味着滚动位置与选择丢了。现成回归：`scripts/check-browse-boot.mjs`
+      的「缩放滑块拖动」那一段（去掉 `untrack` 立刻报红，已验证）。
+    - 诊断手法（下次别再从零查）：给 `Node.prototype.insertBefore/appendChild/replaceChild` 挂钩子，
+      只记录「插入目标在关注的容器内」的那些调用并打印 `new Error().stack`；
+      再配合 `element === 上次那个` 的身份比对，就能定位到是哪一层被重建。
 
 ---
 
@@ -655,6 +672,25 @@ IPC 单测（用**真实字段名**反序列化；缺 DPR 必须报错，不许�
 | **工作流**（flow） | 导入 / 浏览 / 编辑 / 导出 四个阶段。**是有序流水线**，不是并列选项 | `FlowChip / …` |
 | **`statusbar`** | `mid`（工作区中列）最底部的状态/控制位置；它是**位置术语**，不保证所有前缀都对应同一个组件 | `…StatusBar` / `TilesControlBar` |
 
+#### `toolsbar` 的三段式：`left` / `center` / `right`（人类 2026-09-23 口述）
+
+`toolsbar` 从左到右分三段，**左右两段各自贴边、中段居中**：
+
+| 说法 | 位置 | 装什么 |
+| --- | --- | --- |
+| **`toolsbar left`** | 最左 | 与 **workspace 左列**内容相关的**面板开关** |
+| **`toolsbar`** / **`toolsbar center`** | 中间 | 该工作流的具体功能按钮（**不加前缀时默认指这里**） |
+| **`toolsbar right`** | 最右 | 与 **workspace 右列**内容相关的**面板开关** |
+
+- **没有特别指定就往中段加按钮**（与以往行为兼容）。
+- 一侧可以是一**组互斥开关**（如 editor 左段的「多个左列面板」）：按下其中一个会关掉同组其他项，
+  再按同一个则整组关掉；**任何档位下都允许用户用鼠标把它们开回来**。
+- **挤压行为**：窗口变窄、中段按钮变长时，中段会被左右两段的底纹**盖住** ——
+  用**渐变淡出**（左右段底纹向中间渐隐），**不是硬边 + 阴影**，也不是按钮互相叠错位。
+- 无内容时整行隐藏（原规则不变）。
+
+设计稿：`design/editor.pen` 的 `Components / Editor / ToolsBar 三段式`（常态 + 挤压态）。
+
 #### `statusbar` 的命名规则（人类 2026-09-20 口述）
 
 - 说 `statusbar` 时通常必须带**当前 mid 内容**前缀：`tiles statusbar`、`view statusbar`、
@@ -747,7 +783,14 @@ IPC 单测（用**真实字段名**反序列化；缺 DPR 必须报错，不许�
   禁止把数据库调用塞进 `FilmStrip` 或再建第二套胶片带。view 与胶片带交界处的三点缩放把手
   必须复用 `SplitHandle`，并且只把位移量化到同一套 17 档，禁止另存一份自由高度。
 - tiles statusbar 只能由 `TilesShell` 装配。受控滑杆更新配置时不得重建 `TilesControlBar` DOM，
-  否则 pointer capture 会在拖动第一格后丢失。
+  否则拖动会在第一格之后断掉。
+  **这条 2026-09-23 又犯了一次，所以它现在有硬规则与回归**：
+  * 病根不在滑杆本身 —— `BarFrame` 透传 children 没 `untrack`，Ark 的 `SliderRoot` 创建时
+    **同步**读走了 `props.value`（tileStep），那次读被记在 `insert()` 那个 render effect 头上，
+    值一变整条栏重建（详见 §2.17）；
+  * 回归在 `scripts/check-browse-boot.mjs`（拖动滑块 → 断言一路跟手 + 滑块/状态栏/网格
+    **节点身份不变**）；
+  * 新增「拖拽类」控件时照抄这份判据：**别只断言值变了**。
 
 ### 11.5 其他常用术语
 
@@ -761,9 +804,11 @@ IPC 单测（用**真实字段名**反序列化；缺 DPR 必须报错，不许�
 | **`flowinfo`** | **flowbar 右侧的图片信息区**（机型/曝光/尺寸三组 `easy copy`）。口径（人类 2026-09-19 定）：**跟随当前工作流** —— 切到哪个 flow 就显示那个 flow 当前选中的那张，没选中就**清空**（不留上一个 flow 的残留）。实现见 `App.tsx` 的 `flowInfo` |
 | **`easy copy`** | 指向某个信息组 → 出细边框 + `点击复制` 气泡；点击后弹 `已复制` |
 | **`easy destroy`** | 移除类操作的快速通道：默认弹确认，**按住 `Shift` 跳过** |
+| **`issue`（定稿）** | 一张图的一个**非破坏性定稿版本**。一张图可有多个 issue，各有独立预览；`SOOC` 是**写死的特殊 issue**（= 相机直出 JPG），不可编辑、不可被改名占用。见 `FUTURE.md`「issue 与 SOOC」 |
+| **取消 / 确认 的按钮顺序** | **全系统统一：取消一律在左，确认（往前进类，如「创建」「导入」「定稿」）一律在右**（人类 2026-09-23 定） |
 | **中性面**（neutral surface） | 四级灰面：`surface-track` < `surface-main` < `surface-bar` < `surface-layer` |
 | **主色底 / 辅色底** | 全局反馈规则：**指向=辅色底，点击后=主色底**（`DESIGN.md` §5） |
 | **紧凑 / 宽松**（compact / loose） | 全局只有两档密度。**只影响间距类尺寸，不影响字号与图标大小** |
 | **按时间分组 / 时间片** | 见 `DESIGN.md` §12.7。同一拍摄日内，相邻间隔 > 1 小时则断为新片 |
 | **内嵌预览**（embedded preview） | 相机写在 RAW 里的 JPEG 预览。提取比完整解码快 1–2 个数量级 |
-| **编辑栈**（develop stack） | 对一张照片的全部非破坏性编辑操作的序列。第一阶段不做 |
+| **编辑栈**（develop stack） | 对一张照片的全部非破坏性编辑操作的序列；定稿后落成一个 **issue**。M3 起进入主线（不再后置） |
