@@ -71,6 +71,14 @@
    */
   --tile-bar-scrim: color-mix(in oklab, var(--surface-track) 65%, transparent);
 
+  /*
+   * 拉杆未填充段的底色（`DESIGN.md` §9.2 / §14.10）：**反色方向**——
+   * 取自另一个主题的 `--surface-bar`（dark 用浅、light 用深），再乘 **50% 浓度**。
+   * 半透是必须的：实心值时未填充段的反差比主色填充线还重，主次颠倒（人类 2026-09-23）。
+   * 值里已经带 alpha，用它的地方**不要再乘一次**。
+   */
+  --slider-track: #edf0e980;
+
   color-scheme: dark;
 }
 
@@ -97,6 +105,9 @@
    * 深色文字压在上面。72% 下对纯黑照片的对比度 ≈ 8:1。
    */
   --tile-bar-scrim: color-mix(in oklab, var(--surface-layer) 72%, transparent);
+
+  /* 拉杆未填充段（light 取深色 `#2A2D33` + 50% 浓度）—— 理由同 dark 块 */
+  --slider-track: #2a2d3380;
 
   color-scheme: light;
 }
@@ -462,6 +473,8 @@
   --color-state-hover: var(--state-hover);
   --color-state-selected: var(--state-selected);
   --color-state-active: var(--state-active);
+  /* 拉杆未填充段（半透；`DESIGN.md` §14.10） */
+  --color-slider-track: var(--slider-track);
 
   /* 浮层遮罩与范式描边 */
   --color-scrim: var(--scrim);
