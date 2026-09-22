@@ -20,3 +20,18 @@ export type { ExifData, ExifGroupId } from "./types.ts";
 export { toExifData } from "./from-file.ts";
 /** 浏览侧：列表项直接转界面形状（不再走 IPC —— 字段本来就在手上） */
 export { assetItemExif } from "./from-asset.ts";
+
+/*
+ * EXIF 的**显示格式**（纯函数）：`ƒ/2.8` / `1/125s` / `20.2 MP` 这类写法只允许有一处实现。
+ * 2026-09-23 对外导出，因为编辑右栏的「信息」页签也要显示同一批字段 ——
+ * 不给导出就会有人（包括我）在别处再抄一份格式规则。
+ */
+export {
+  formatAperture,
+  formatDimensions,
+  formatFocalLength,
+  formatIso,
+  formatMegapixels,
+  formatShutter,
+  formatText,
+} from "./exif-format.ts";

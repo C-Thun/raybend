@@ -9,6 +9,8 @@
 
 pub mod browse;
 pub mod db;
+/// 编辑视口的洞口状态（M3-W1 的契约层；W2 的渲染线程从这里取事实）。
+pub mod editor;
 mod import;
 mod migration;
 pub mod repo;
@@ -179,6 +181,8 @@ pub fn run() {
         .manage(import::ImportBatches::default())
         // 浏览会话态：撤销栈（每库一份）+ 旗标（跨库，内存）+ 当前打开的库缓存
         .manage(browse::BrowseState::default())
+        // 编辑视口的洞口事实（M3-W1）：前端报原始值，这里存着并算物理像素版本
+        .manage(editor::EditorState::default())
         .invoke_handler(tauri::generate_handler![
             // ── 数据底座的诊断与设置（M1-2）──
             db::app_paths,
@@ -236,6 +240,9 @@ pub fn run() {
             browse::flags_get,
             browse::flags_set,
             browse::flags_clear,
+            // ── 编辑视口（M3-W1：洞口事实的上报与回读）──
+            editor::editor_set_viewport,
+            editor::editor_viewport_state,
             // ── 库内目录树的菜单（新建子目录 / 删除空目录，BROWSE.md §4.3）──
             dirs::dir_empty_check,
             dirs::dir_remove_empty,

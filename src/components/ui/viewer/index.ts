@@ -37,4 +37,7 @@ export type {
 } from "./store.ts";
 /** 胶片带与对比视图：**import 与 browse 共用同一份**（人类 2026-09-19） */
 export { FilmStrip } from "./FilmStrip.tsx";
+export type { FilmStripViewer } from "./photos.ts";
+/** tiles → 看图件 / 胶片带的共享转换（网格、浏览、编辑三处共用一份） */
+export { photosFromSource, viewingInfoOf } from "./photos.ts";
 export { CompareView } from "./CompareView.tsx";

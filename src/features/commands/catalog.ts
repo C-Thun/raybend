@@ -138,6 +138,22 @@ export interface CommandDeps {
     cycleChrome: () => void;
     toggleCompareStrip: () => void;
   };
+
+  /* ── 编辑（M3-W1）───────────────────────────────── */
+  editor: {
+    /** 在不在编辑工作流（这些命令只在编辑里有意义） */
+    active: () => boolean;
+    /** 有没有可编辑的照片（空态下工具无从作用） */
+    hasPhoto: () => boolean;
+    /** `Tab` 三档循环（editor 的档位表） */
+    cycleChrome: () => void;
+    /** LUT 面板开关（toolsbar left 的那个开关） */
+    toggleLut: () => void;
+    /** 三个画布工具：互斥，再按一次同一个 = 退出 */
+    toggleTool: (tool: "crop" | "rotate" | "compare") => void;
+    /** 某个工具此刻是不是开着的（命令面板据此显示状态） */
+    isToolActive: (tool: "crop" | "rotate" | "compare") => boolean;
+  };
 }
 
 /** 排序键（浏览侧；与 `BrowseSort["key"]` 同一套值） */
@@ -452,8 +468,66 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       menu: "view",
       scope: "viewer",
       defaultKey: "Tab",
-      when: () => deps.viewer.viewing(),
-      run: () => (deps.flow() === "import" ? deps.import.cycleChrome() : deps.browse.cycleChrome()),
+      /*
+       * `Tab` 在三个 flow 里都改「显示成什么样」，但**档位表不一样**
+       * （browse 四档 / import 三档 / editor 三档，见 `lib/viewer-chrome.ts`）：
+       * 差异属于配置，所以这里只是转发到各自那一套。
+       *
+       * editor 里它**常开**（编辑永远在看图态，没有 tiles 可退回）；
+       * import / browse 里要有照片在看才生效。
+       */
+      when: () => deps.editor.active() || deps.viewer.viewing(),
+      run: () => {
+        if (deps.editor.active()) {
+          deps.editor.cycleChrome();
+          return;
+        }
+        if (deps.flow() === "import") deps.import.cycleChrome();
+        else deps.browse.cycleChrome();
+      },
+    }),
+
+    /* ══ 编辑（M3-W1：面板开关与三个画布工具）═════════
+     *
+     * `scope` 用 `viewer`：编辑视口就是「看图那一面」（与看图态同一类按键语境）；
+     * 新增一个 scope 值要动冲突检测与快捷键面板，收益不抵成本。
+     */
+    spec({
+      id: "editor.lut.toggle",
+      titleKey: "cmd.editor.lut",
+      group: "view",
+      menu: "view",
+      scope: "viewer",
+      when: () => deps.editor.active(),
+      run: () => deps.editor.toggleLut(),
+    }),
+    spec({
+      id: "editor.tool.crop",
+      titleKey: "cmd.editor.crop",
+      group: "view",
+      menu: "view",
+      scope: "viewer",
+      // 没有照片时进工具没有意义（空态下工具按钮也是禁用的）
+      when: () => deps.editor.active() && deps.editor.hasPhoto(),
+      run: () => deps.editor.toggleTool("crop"),
+    }),
+    spec({
+      id: "editor.tool.rotate",
+      titleKey: "cmd.editor.rotate",
+      group: "view",
+      menu: "view",
+      scope: "viewer",
+      when: () => deps.editor.active() && deps.editor.hasPhoto(),
+      run: () => deps.editor.toggleTool("rotate"),
+    }),
+    spec({
+      id: "editor.tool.compare",
+      titleKey: "cmd.editor.compare",
+      group: "view",
+      menu: "view",
+      scope: "viewer",
+      when: () => deps.editor.active() && deps.editor.hasPhoto(),
+      run: () => deps.editor.toggleTool("compare"),
     }),
 
     /* ══ 窗口 ══════════════════════════════════════════ */

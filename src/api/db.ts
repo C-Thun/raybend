@@ -55,9 +55,10 @@ export const SETTING_KEYS = {
   avoidDuplicates: "import.avoid_duplicates",
   /** 是否处于「按时间」模式 */
   byTime: "grid.by_time",
-  /** 导入 / 浏览胶片带各自的 17 档尺寸（app.db，全局设备设置） */
+  /** 导入 / 浏览 / 编辑胶片带各自的 17 档尺寸（app.db，全局设备设置） */
   importFilmStripStep: "filmstrip.import_tile_step",
   browseFilmStripStep: "filmstrip.browse_tile_step",
+  editorFilmStripStep: "filmstrip.editor_tile_step",
 } as const;
 
 /** 缓存的 `@tauri-apps/api/core` 模块（浏览器里根本不会加载它）。 */

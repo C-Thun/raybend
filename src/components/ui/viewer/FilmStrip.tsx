@@ -41,7 +41,7 @@ import { t } from "../../../i18n/index.ts";
 import { SplitHandle } from "../SplitHandle.tsx";
 import { SubtleScrollbar } from "../SubtleScrollbar.tsx";
 import type { ThumbQueue } from "../thumb-queue.ts";
-import type { ViewerPhoto, ViewerStore } from "./index.ts";
+import type { FilmStripViewer, ViewerPhoto } from "./index.ts";
 import {
   captureFilmStripAnchor,
   restoreFilmStripScroll,
@@ -50,8 +50,14 @@ import {
 } from "./film-strip-anchor.ts";
 
 export interface FilmStripProps {
-  /** 看图件：列表与当前下标都从它来（胶片带与看图同源） */
-  viewer: ViewerStore;
+  /**
+   * 看图件：列表与当前下标都从它来（胶片带与看图同源）。
+   *
+   * 类型收窄到 [`FilmStripViewer`]（`state` / `current` / `goTo` 三个读数）而不是整个
+   * `ViewerStore` —— 编辑工作区的视口是 GPU 直绘、不需要取图能力，但仍要有胶片带；
+   * 收窄之后它给一个轻量适配就行，不必为了凑类型造第二个 store（人类 2026-09-23）。
+   */
+  viewer: FilmStripViewer;
   /**
    * 当前选中集（画「选中底色」用）。
    *

@@ -10,9 +10,12 @@ import { createEffect, createMemo, createSignal } from "solid-js";
 
 import type { SelectionState } from "../../lib/selection.ts";
 import {
+  chromeName,
   chromeShowsFilm,
-  nextChrome,
-  type ViewerChrome,
+  chromeShowsLeft,
+  chromeShowsRight,
+  nextChromeStep,
+  type ChromeMode,
 } from "../../lib/viewer-chrome.ts";
 import { compareIds } from "../../lib/viewer-compare.ts";
 import type {
@@ -22,6 +25,13 @@ import type {
 
 export interface PhotoViewingControllerDeps {
   viewer: ViewerStore;
+  /**
+   * 这个工作区用哪一套档位表（`lib/viewer-chrome.ts`）。
+   *
+   * browse 四档、import 三档（2026-09-23 改口径）—— **差异属于配置，不属于控制器**，
+   * 所以控制器只有一份，档位表按 flow 传进来。
+   */
+  chromeMode: () => ChromeMode;
   selection: () => SelectionState;
   setAnchor: (id: string) => void;
   /** 补读后的真实尺寸；`null` 时继续使用 viewer 打开瞬间的快照。 */
@@ -34,7 +44,13 @@ export interface PhotoViewingControllerDeps {
 
 export interface PhotoViewingController {
   viewer: ViewerStore;
-  chrome: () => ViewerChrome;
+  /** 档位名（`data-chrome` 属性用） */
+  chrome: () => string;
+  /** 档位下标（`lib/editor-chrome.ts` 判「进出仅 view」要用） */
+  chromeStep: () => number;
+  /** 这三条是**当前档位的读数** —— 工作区不再自己拼 `chromeShowsX(chrome())` */
+  showsLeft: () => boolean;
+  showsRight: () => boolean;
   filmVisible: () => boolean;
   cycleChrome: () => void;
   resetChrome: () => void;
@@ -53,7 +69,7 @@ export interface PhotoViewingController {
 export function createPhotoViewingController(
   deps: PhotoViewingControllerDeps,
 ): PhotoViewingController {
-  const [chrome, setChrome] = createSignal<ViewerChrome>("default");
+  const [chromeStep, setChromeStep] = createSignal(0);
   const [compareStrip, setCompareStrip] = createSignal(false);
   const [openRequest, setOpenRequest] = createSignal(0);
 
@@ -90,7 +106,7 @@ export function createPhotoViewingController(
   });
 
   const resetChrome = (): void => {
-    setChrome("default");
+    setChromeStep(0);
   };
   const prepareViewer = (): void => {
     deps.onPreparingViewer?.();
@@ -99,10 +115,13 @@ export function createPhotoViewingController(
 
   return {
     viewer: deps.viewer,
-    chrome,
-    filmVisible: () => chromeShowsFilm(chrome()),
+    chrome: () => chromeName(deps.chromeMode(), chromeStep()),
+    chromeStep,
+    showsLeft: () => chromeShowsLeft(deps.chromeMode(), chromeStep()),
+    showsRight: () => chromeShowsRight(deps.chromeMode(), chromeStep()),
+    filmVisible: () => chromeShowsFilm(deps.chromeMode(), chromeStep()),
     cycleChrome: () => {
-      setChrome((current) => nextChrome(current));
+      setChromeStep((current) => nextChromeStep(deps.chromeMode(), current));
     },
     resetChrome,
     prepareViewer,

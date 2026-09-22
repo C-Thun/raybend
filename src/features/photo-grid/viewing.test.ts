@@ -26,6 +26,8 @@ test("共享看图控制器：两侧共用对比派生、锚点、命令请求�
     viewer.show(PHOTOS, 0);
     const controller = createPhotoViewingController({
       viewer,
+      // 档位表按 flow 传（本测走 browse 的四档）
+      chromeMode: () => "browse" as const,
       selection,
       setAnchor: (id) => setSelection((current) => focusSelection(current, id)),
       naturalOf: (id) => (id === "b" ? { width: 3000, height: 4000 } : null),
@@ -53,10 +55,15 @@ test("共享看图控制器：两侧共用对比派生、锚点、命令请求�
     assert.equal(controller.openRequest(), 2);
 
     assert.equal(controller.chrome(), "default");
+    assert.equal(controller.showsLeft(), true);
+    assert.equal(controller.filmVisible(), true);
     controller.cycleChrome();
-    assert.notEqual(controller.chrome(), "default");
+    assert.equal(controller.chrome(), "film-right");
+    assert.equal(controller.showsLeft(), false, "第二档只关左列");
+    assert.equal(controller.showsRight(), true);
     controller.resetChrome();
     assert.equal(controller.chrome(), "default");
+    assert.equal(controller.chromeStep(), 0);
 
     dispose();
   });

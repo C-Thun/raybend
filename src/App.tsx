@@ -71,6 +71,12 @@ import { locale, nextLocale, setLocale } from "./i18n/index.ts";
 import { LibrarySettingsDialog } from "./features/repositories/index.ts";
 import { browseDelete, browseFacets, browseMark, browseMarkings, browsePage, browseRedo, browseTimeline, browseUndo, flagsClear, flagsGet, flagsSet, tagList } from "./api/browse.ts";
 import { BrowseWorkspace } from "./workspaces/browse/index.ts";
+import { EditorWorkspace } from "./workspaces/editor/EditorWorkspace.tsx";
+import {
+  createEditorStore,
+  EditorPanelToggles,
+  EditorToolbar,
+} from "./features/editor/index.ts";
 import {
   applyNotice,
   MigrationGate,
@@ -85,6 +91,16 @@ const STARTUP_REPOSITORIES_TIMEOUT_MS = 15_000;
 
 export default function App() {
   const shell = createShellStore();
+  /*
+   * 编辑工作区的界面状态（档位 / LUT 面板 / 三个工具 / 参数草稿）。
+   *
+   * 为什么建在组装层而不是工作区里：**toolsbar 也要用**（左段的 LUT 开关与中段的三个工具
+   * 都是它的一部分），而 toolsbar 在外壳上 —— 两边必须读同一个 store
+   * （`ARCHITECTURE.md` §3 的状态归属：跨外壳与工作区的状态住这里）。
+   */
+  const editorStore = createEditorStore();
+  /** 编辑里有没有可编辑的照片（工具与右栏控件的可用性都看它） */
+  const editorEnabled = (): boolean => browseStore.anchorItem() !== null;
   const appearance = createAppearanceStore();
   // 布局偏好（设备级）：左列宽度与左列内部的比例，拖拽结束落盘、下次启动还原
   const layout = createLayoutStore();
@@ -94,6 +110,8 @@ export default function App() {
     keys: {
       import: db.SETTING_KEYS.importFilmStripStep,
       browse: db.SETTING_KEYS.browseFilmStripStep,
+      // 编辑是**第三份**尺寸偏好：胶片带组件同一份，档位各存各的（2026-09-23）
+      editor: db.SETTING_KEYS.editorFilmStripStep,
     },
     onError: (error, scope, operation) => {
       console.error(`[filmstrip] ${scope} ${operation} failed`, error); // i18n-exempt: 控制台诊断
@@ -401,6 +419,14 @@ export default function App() {
       cycleChrome: () => importActions()?.cycleChrome(),
       toggleCompareStrip: () => importActions()?.toggleCompareStrip(),
     },
+    editor: {
+      active: () => shell.workflow() === "edit",
+      hasPhoto: editorEnabled,
+      cycleChrome: () => editorStore.cycleTab(),
+      toggleLut: () => editorStore.toggleLut(),
+      toggleTool: (tool) => editorStore.toggleTool(tool),
+      isToolActive: (tool) => editorStore.tool() === tool,
+    },
   };
 
   const commands = createCommandRegistry(commandDeps);
@@ -457,7 +483,13 @@ export default function App() {
         // 选中的照片清单来自网格 —— 外壳只负责把两边接起来
         onBatchExclude={() => importStore.toggleExcluded([...grid.selectedIds()])}
         // 插槽里到底有没有东西，由这里明说（理由见 ToolsBar 的 hasExtraTools）
-        hasExtraTools={shell.workflow() === "browse"}
+        hasExtraTools={shell.workflow() === "browse" || shell.workflow() === "edit"}
+        /*
+         * 三段式（`AGENTS.md` §11.1）：左段 = 与 workspace 左列有关的面板开关，
+         * 中段 = 具体功能按钮，右段暂时空着（未来加东西才出现在那一侧）。
+         */
+        hasLeftTools={shell.workflow() === "edit"}
+        left={<EditorPanelToggles store={editorStore} enabled={editorEnabled()} />}
       >
         {/* 浏览模式的工具（标记系列 / 筛选开关 / 锁）由那个模块自己给 —— 见 ToolsBar 的说明 */}
         <Show when={shell.workflow() === "browse"}>
@@ -466,6 +498,10 @@ export default function App() {
             toast={toast}
             onOpenTags={() => setTagsOpen(true)}
           />
+        </Show>
+        {/* 编辑模式的中段：裁切 / 旋转 / 对比（互斥，再点一次退出） */}
+        <Show when={shell.workflow() === "edit"}>
+          <EditorToolbar store={editorStore} enabled={editorEnabled()} />
         </Show>
       </ToolsBar>
 
@@ -540,6 +576,7 @@ export default function App() {
       <MigrationGate notices={migrations()} />
 
       <Show when={shell.workflow() === "browse"} fallback={
+        <Show when={shell.workflow() === "edit"} fallback={
         <ImportWorkspace
           store={importStore}
           grid={grid}
@@ -554,6 +591,19 @@ export default function App() {
           /* 命令面板里的「新建库…」靠它打开导入侧的弹窗（状态住在那个工作区） */
           openCreateRequest={newRepositoryRequest()}
         />
+        }>
+          {/*
+            编辑工作区（M3-W1）：中列的视口在 W2 才会出图；
+            它读浏览侧的库 / 目录 / 清单 / 选择 —— 「当前在编哪张」只有一个真相（锚点）。
+          */}
+          <EditorWorkspace
+            store={editorStore}
+            browse={browseStore}
+            filmStripStep={filmStripPrefs.step("editor")}
+            onFilmStripStepChange={(step) => filmStripPrefs.setStep("editor", step)}
+            onOpenImport={() => shell.setWorkflow("import")}
+          />
+        </Show>
       }>
         <BrowseWorkspace
           store={browseStore}

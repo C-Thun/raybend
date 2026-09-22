@@ -24,18 +24,13 @@
  * 只在看图时出现：tiles 模式下这两块让位给 EXIF（`AssetInfo` 里切换）。
  */
 
-import { createEffect, createSignal, onCleanup, Show, type JSX } from "solid-js";
+import { Show, type JSX } from "solid-js";
 
-/*
- * ⚠️ DTO 类型与组件同名（都叫 Histogram）：这里把**后端数据**那个改名 `HistogramData`，
- * 组件保留自己的短名字（它是界面上那个东西，读代码的地方更多）。
- */
-import { getHistogram, type Histogram as HistogramData } from "../../api/db.ts";
+import { getHistogram } from "../../api/db.ts";
 import { t } from "../../i18n/index.ts";
 import { visibleRect, type ViewerStore } from "../../components/ui/viewer/index.ts";
-import { HISTOGRAM_SAMPLES, histogramBarHeights, histogramIsEmpty } from "../../lib/histogram.ts";
+import { HistogramPanel } from "../../components/ui/HistogramPanel.tsx";
 import { PREVIEW_FRAME_ASPECT, fitAxisFor } from "../../lib/preview-frame.ts";
-import { Histogram } from "../../components/ui/Histogram.tsx";
 
 export interface ViewerReadoutProps {
   store: ViewerStore;
@@ -48,54 +43,7 @@ export interface ViewerReadoutProps {
   showVisibleBox?: boolean;
 }
 
-/**
- * 直方图按**路径**缓存（不是按照片 id）：同一张照片来回翻时不必重算。
- *
- * 上限 24 条、超出丢最早的 —— 像看图件那边的图片缓存一样，只为「来回翻」服务，
- * 不当长期缓存用（真正的缓存属于后端 `cache/` 的活）。
- */
-const HISTOGRAM_CACHE_LIMIT = 24;
-const histogramCache = new Map<string, HistogramData | null>();
-
-function cacheHistogram(path: string, value: HistogramData | null): void {
-  if (histogramCache.size >= HISTOGRAM_CACHE_LIMIT) {
-    const oldest = histogramCache.keys().next();
-    if (!oldest.done) histogramCache.delete(oldest.value);
-  }
-  histogramCache.set(path, value);
-}
-
 export function ViewerReadout(props: ViewerReadoutProps): JSX.Element {
-  const [histogram, setHistogram] = createSignal<HistogramData | null>(null);
-
-  // 取直方图：跟着「当前这张」走，取完之前先是空态（不阻塞任何东西）
-  createEffect(() => {
-    const path = props.store.current()?.path;
-    if (path === undefined) {
-      setHistogram(null);
-      return;
-    }
-    if (histogramCache.has(path)) {
-      setHistogram(histogramCache.get(path) ?? null);
-      return;
-    }
-    setHistogram(null);
-    let alive = true;
-    onCleanup(() => {
-      alive = false;
-    });
-    void getHistogram(path, HISTOGRAM_SAMPLES)
-      .then((value) => {
-        if (!alive) return;
-        cacheHistogram(path, value);
-        setHistogram(value);
-      })
-      .catch(() => {
-        if (alive) setHistogram(null);
-      });
-  });
-
-  const bars = () => histogramBarHeights(histogram());
   const natural = () => props.store.state().natural;
   const rect = () => visibleRect(props.store.state());
   /** 框按**百分比**摆：这样预览缩小多少都不会错位 */
@@ -157,25 +105,13 @@ export function ViewerReadout(props: ViewerReadoutProps): JSX.Element {
         </div>
       </section>
 
-      {/* ── 直方图（三条完整通道曲线；组件在 `components/ui/Histogram.tsx`） ── */}
-      <section class="mb-5">
-        <h3 class="mb-1.5 text-fs-3 font-semibold text-fg-2">{t("browse.histogram")}</h3>
-        <div class="rounded-ui bg-surface-bar px-2 py-1.5">
-          <Show
-            when={!histogramIsEmpty(bars())}
-            fallback={
-              <p class="py-3 text-center text-fs-2 text-fg-3">{t("browse.histogramEmpty")}</p>
-            }
-          >
-            {/*
-              组件吃的是**归一化后的采样**（不是原始计数）：这样将来编辑模块每帧重算
-              （拖曝光/对比时）只要把新的 `bars` 传进来就换一帧 —— 不需要重新请求后端、
-              也不需要重新挂载。绘制数学与颜色分层都在 `lib` / 组件内部，不在这层。
-            */}
-            <Histogram bars={bars()} />
-          </Show>
-        </div>
-      </section>
+      {/* ── 直方图（取数 + 缓存 + 画图都在 `components/ui/HistogramPanel.tsx`，与编辑右栏共用一份） ── */}
+      <HistogramPanel
+        load={getHistogram}
+        path={props.store.current()?.path ?? null}
+        title={t("browse.histogram")}
+        emptyText={t("browse.histogramEmpty")}
+      />
     </>
   );
 }

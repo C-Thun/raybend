@@ -22,8 +22,8 @@ test("胶片带偏好：空值、非法值与边界都安全收敛", () => {
 
 test("胶片带偏好：import / browse 分开加载", async () => {
   const store = createFilmStripPreferenceStore({
-    keys: { import: "i", browse: "b" },
-    getSetting: async (key) => (key === "i" ? "2" : "11"),
+    keys: { import: "i", browse: "b", editor: "e" },
+    getSetting: async (key) => (key === "i" ? "2" : key === "e" ? "9" : "11"),
     setSetting: async () => {},
   });
   await store.load();
@@ -35,7 +35,7 @@ test("胶片带偏好：同一工作流连续变化只在静止两秒后写最�
   const scheduled: { run: () => void; delay: number; cancelled: boolean }[] = [];
   const writes: [string, string][] = [];
   const store = createFilmStripPreferenceStore({
-    keys: { import: "i", browse: "b" },
+    keys: { import: "i", browse: "b", editor: "e" },
     getSetting: async () => null,
     setSetting: async (key, value) => {
       writes.push([key, value]);
@@ -71,7 +71,7 @@ test("胶片带偏好：两个工作流拥有互不干扰的防抖计时器", as
   const writes: [string, string][] = [];
   let nextScope: FilmStripScope = "import";
   const store = createFilmStripPreferenceStore({
-    keys: { import: "i", browse: "b" },
+    keys: { import: "i", browse: "b", editor: "e" },
     getSetting: async () => null,
     setSetting: async (key, value) => {
       writes.push([key, value]);
@@ -100,7 +100,7 @@ test("胶片带偏好：迟到的加载结果不覆盖用户刚改的新档位",
     resolveLoad = resolve;
   });
   const store = createFilmStripPreferenceStore({
-    keys: { import: "i", browse: "b" },
+    keys: { import: "i", browse: "b", editor: "e" },
     getSetting: (key) => (key === "i" ? pending : Promise.resolve(null)),
     setSetting: async () => {},
   });

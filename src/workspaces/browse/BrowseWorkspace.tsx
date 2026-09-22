@@ -41,10 +41,6 @@ import {
   BrowseLeftColumn,
   type BrowseStore,
 } from "../../features/browse/index.ts";
-import {
-  chromeShowsLeft,
-  chromeShowsRight,
-} from "../../lib/viewer-chrome.ts";
 import { FilterBar } from "../../features/browse/FilterBar.tsx";
 import { browseSource } from "../../features/browse/grid-source.ts";
 import {
@@ -61,7 +57,7 @@ import {
 } from "@tabler/icons-solidjs";
 import { createThumbQueue } from "../../components/ui/thumb-queue.ts";
 import type { TilesViewingInfo } from "../../components/ui/tiles/index.ts";
-import { createViewerStore } from "../../components/ui/viewer/index.ts";
+import { createViewerStore, viewingInfoOf } from "../../components/ui/viewer/index.ts";
 import {
   browseDisplayByTime,
   browseDisplayTileStep,
@@ -265,6 +261,8 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
    */
   const viewing = createPhotoViewingController({
     viewer,
+    /* browse 保持 M2 的**四档**（人类 2026-09-23 明确：browse 不动） */
+    chromeMode: () => "browse",
     selection: store.selection,
     setAnchor: (id) => store.setAnchor(Number(id)),
     naturalOf: (id) => store.naturalOf(Number(id)),
@@ -591,18 +589,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
    * 字段来自看图件当前那张（`ViewerPhoto.marks` / `flag`）—— 调用方本来就有，
    * 不为了显示四个数再问一次后端。
    */
-  const viewingInfo = (): TilesViewingInfo => {
-    const photo = viewer.current();
-    const like = photo?.marks?.likeState;
-    return {
-      fileName: photo?.fileName ?? null,
-      lockLevel: photo?.marks?.lockLevel ?? 0,
-      rating: photo?.marks?.rating ?? 0,
-      colorLabel: photo?.marks?.colorLabel ?? null,
-      flag: photo?.flag ?? null,
-      like: like === "like" || like === "dislike" ? like : null,
-    };
-  };
+  const viewingInfo = (): TilesViewingInfo => viewingInfoOf(viewer.current());
 
   return (
     <div
@@ -616,7 +603,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
             "flex shrink-0 flex-col bg-surface-main",
             // 看图第 ② 档起左列**藏起来但不卸载**：卸载会把目录树的展开状态与滚动位置清掉，
             // 按一下 Tab 就白跑一趟（而且回来要重新读盘）。
-            chromeShowsLeft(viewing.chrome()) ? "" : "hidden",
+            viewing.showsLeft() ? "" : "hidden",
           ]
             .filter(Boolean)
             .join(" ")}
@@ -636,7 +623,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
         </aside>
 
         {/* 拖拽手柄：左列 ↔ 中列（看图第 ② 档起与左列一起收起来） */}
-        <Show when={chromeShowsLeft(viewing.chrome())}>
+        <Show when={viewing.showsLeft()}>
           <ColumnHandle
             onDragStart={beginLeftResize}
             onDrag={dragLeft}
@@ -711,7 +698,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
       <aside
         class={[
           "w-panel-w-right flex shrink-0 flex-col bg-surface-main",
-          chromeShowsRight(viewing.chrome()) ? "" : "hidden",
+          viewing.showsRight() ? "" : "hidden",
         ]
           .filter(Boolean)
           .join(" ")}

@@ -36,7 +36,13 @@ import { Tile } from "../../components/ui/Tile.tsx";
 import { VirtualGrid } from "../../components/ui/VirtualGrid.tsx";
 import { createTokenPx } from "../../components/ui/tokens.ts";
 import { useTilesFitRequest } from "../../components/ui/tiles/fit.ts";
-import { createViewerStore, Viewer, type ViewerStore } from "../../components/ui/viewer/index.ts";
+import {
+  createViewerStore,
+  photosFromSource,
+  Viewer,
+  type ViewerPhoto,
+  type ViewerStore,
+} from "../../components/ui/viewer/index.ts";
 import { locale, t } from "../../i18n/index.ts";
 import { formatDayLabel, formatTimeRange } from "../../lib/datetime.ts";
 import { formatCount, type GroupingLocale } from "../../lib/format.ts";
@@ -192,45 +198,13 @@ export function PhotoGrid(props: PhotoGridProps): JSX.Element {
     : null;
   const viewer = props.viewer ?? ownViewer!;
 
-  /** 网格里的照片（按显示序）→ 查看器要的形态 */
-  const viewerPhotos = (): {
-    id: string;
-    path: string;
-    fileName: string;
-    natural?: { width: number; height: number };
-    marks?: {
-      rating: number;
-      colorLabel: string | null;
-      likeState: string | null;
-      lockLevel: number;
-    };
-    flag?: "pick" | "reject" | null;
-  }[] => {
-    const out = [];
-    for (let index = 0; index < source.count(); index += 1) {
-      const item = source.itemAt(index);
-      if (item === null) continue;
-      const natural = source.naturalOf(item.id);
-      out.push({
-        id: item.id,
-        path: item.path,
-        fileName: item.fileName,
-        ...(natural === null ? {} : { natural }),
-        ...(item.marks === undefined
-          ? {}
-          : {
-              marks: {
-                rating: item.marks.rating,
-                colorLabel: item.marks.colorLabel,
-                likeState: item.marks.likeState ?? null,
-                lockLevel: item.marks.locked ? 1 : 0,
-              },
-              flag: item.marks.flag,
-            }),
-      });
-    }
-    return out;
-  };
+  /**
+   * 网格里的照片（按显示序）→ 查看器要的形态。
+   *
+   * 转换住在 `components/ui/viewer/photos.ts`：编辑工作区没有网格，但同样要胶片带，
+   * 两边共用同一份（`AGENTS.md` §2.12）。这里只留一个两行的调用点。
+   */
+  const viewerPhotos = (): ViewerPhoto[] => photosFromSource(source);
 
   function openViewer(byId: string): void {
     props.onOpeningViewer?.();

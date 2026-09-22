@@ -44,7 +44,6 @@ import { IconAlertTriangle, IconFolderOpen, IconPhoto, IconPhotoOff } from "@tab
 import type { TilesViewingInfo } from "../../components/ui/tiles/index.ts";
 import { createViewerStore } from "../../components/ui/viewer/index.ts";
 import { getThumbBytes, getViewImage } from "../../api/db.ts";
-import { chromeShowsLeft, chromeShowsRight } from "../../lib/viewer-chrome.ts";
 import {
   createImportStore,
   ImportProgressDialog,
@@ -242,6 +241,8 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
   });
   const viewing = createPhotoViewingController({
     viewer,
+    /* import 是**三档**（人类 2026-09-23 改口径）：中间那档 = 胶片带 + view */
+    chromeMode: () => "import",
     selection: grid.selection,
     setAnchor: grid.setAnchor,
     naturalOf: grid.naturalOf,
@@ -343,7 +344,7 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
       <aside
         class={[
           "min-h-0 shrink-0 flex-col bg-surface-main p-panel-pad",
-          chromeShowsLeft(viewing.chrome()) ? "flex" : "hidden",
+          viewing.showsLeft() ? "flex" : "hidden",
         ].join(" ")}
         // 用百分比而不是像素：窗口大小变了之后比例仍然对（与持久化的口径一致）
         style={{ "flex-basis": `${leftRatio() * 100}%`, "min-width": "220px" }}
@@ -360,7 +361,7 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
       </aside>
 
       {/* 三点把手：拖它只改左列宽度比例（全项目唯一的把手组件） */}
-      <Show when={chromeShowsLeft(viewing.chrome())}>
+      <Show when={viewing.showsLeft()}>
         <SplitHandle
           orientation="vertical"
           aria-label={t("common.resize_left")}
@@ -424,7 +425,7 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
               <aside
                 class={[
                   "w-panel-w-right shrink-0 flex-col gap-2 bg-surface-main p-panel-pad",
-                  chromeShowsRight(viewing.chrome()) ? "flex" : "hidden",
+                  viewing.showsRight() ? "flex" : "hidden",
                 ].join(" ")}
               >
         <p class="text-fs-1 tracking-wide text-fg-2 uppercase">
