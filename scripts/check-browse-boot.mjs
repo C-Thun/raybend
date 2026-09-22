@@ -1232,6 +1232,121 @@ try {
     if (!bar.byTime) problems.push("状态条上缺「按时间」");
   }
 
+  /*
+   * 缩放滑块：**按住拖动必须一路跟手**，而且**不能重建 DOM**
+   *（2026-09-23 人类报：「tiles 一拉缩放杆，移动一格后又丢焦点拖不动」）。
+   *
+   * 病根（真机抓到的）：`BarFrame` 把 children 交给 Solid 的 `insert()`，那是个 render effect；
+   * 而 Ark 的 `SliderRoot` 用 `createSplitProps()` **同步**读走 `props.value`（= `tileStep`）——
+   * 那次读被记在那个 effect 上。于是值一变 → 整条栏的 children 被 `createComponent` 重跑
+   * → 正在拖的 Ark Slider 实例被换掉 → 拖动与焦点一起断。
+   *
+   * 所以判据取**节点身份**，不能只验「值变了」：重建 + 拿新值重画一遍的假绿照样会让第一步的值变。
+   * 顺带把网格也钉住：tile 尺寸一变就重建网格的话，滚动位置与选择都会丢。
+   */
+  const sliderStart = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const thumb = document.querySelector('main [data-tiles-control-bar] [role="slider"]');
+      if (thumb === null) return null;
+      const box = thumb.getBoundingClientRect();
+      window.__dragProbe = {
+        thumb,
+        bar: document.querySelector("main [data-tiles-control-bar]"),
+        grid: document.querySelector("main [data-virtual-scroller]"),
+      };
+      return {
+        x: Math.round(box.left + box.width / 2),
+        y: Math.round(box.top + box.height / 2),
+        value: Number(thumb.getAttribute("aria-valuenow")),
+      };
+    })()`,
+    returnByValue: true,
+  });
+  const zoomStart = sliderStart.result?.value ?? null;
+  if (zoomStart === null) {
+    problems.push("找不到缩放滑块 —— 拖动回归测不了");
+  } else {
+    await send("Input.dispatchMouseEvent", {
+      type: "mousePressed",
+      button: "left",
+      buttons: 1,
+      clickCount: 1,
+      x: zoomStart.x,
+      y: zoomStart.y,
+    });
+    const zoomSeen = [];
+    for (const dx of [6, 14, 22, 30]) {
+      await send("Input.dispatchMouseEvent", {
+        type: "mouseMoved",
+        button: "left",
+        buttons: 1,
+        x: zoomStart.x + dx,
+        y: zoomStart.y,
+      });
+      await sleep(60);
+      const step = await send("Runtime.evaluate", {
+        expression: `Number(document.querySelector('main [data-tiles-control-bar] [role="slider"]')?.getAttribute("aria-valuenow") ?? NaN)`,
+        returnByValue: true,
+      });
+      zoomSeen.push(Number(step.result?.value));
+    }
+    /* 拖回原位再松手：把档位还原，别把状态留给后面那些几何断言 */
+    for (const dx of [30, 22, 14, 6, 0]) {
+      await send("Input.dispatchMouseEvent", {
+        type: "mouseMoved",
+        button: "left",
+        buttons: 1,
+        x: zoomStart.x + dx,
+        y: zoomStart.y,
+      });
+      await sleep(40);
+    }
+    await send("Input.dispatchMouseEvent", {
+      type: "mouseReleased",
+      button: "left",
+      buttons: 0,
+      clickCount: 1,
+      x: zoomStart.x,
+      y: zoomStart.y,
+    });
+    await sleep(200);
+
+    const zoomAfter = await send("Runtime.evaluate", {
+      expression: `(() => {
+        const bar = document.querySelector("main [data-tiles-control-bar]");
+        const thumb = bar?.querySelector('[role="slider"]');
+        return {
+          value: Number(thumb?.getAttribute("aria-valuenow") ?? NaN),
+          thumbSame: thumb === window.__dragProbe.thumb,
+          barSame: bar === window.__dragProbe.bar,
+          gridSame: document.querySelector("main [data-virtual-scroller]") === window.__dragProbe.grid,
+        };
+      })()`,
+      returnByValue: true,
+    });
+    const zoom = zoomAfter.result?.value ?? {};
+    const rises = zoomSeen.every((value, index) =>
+      index === 0 ? value > zoomStart.value : value > zoomSeen[index - 1],
+    );
+    if (!rises) {
+      problems.push(
+        `拖动缩放滑块必须一路跟手（起点 ${zoomStart.value}，每步实测 ${JSON.stringify(zoomSeen)}）——只动一格就停 = 拖动被打断`,
+      );
+    }
+    if (zoom.thumbSame !== true) {
+      problems.push("拖动过程中滑块节点被重建了（Ark Slider 实例被换掉）——拖动会在第一格之后断掉");
+    }
+    if (zoom.barSame !== true) {
+      problems.push("tile 尺寸一变，整条 tiles 状态栏被重建了");
+    }
+    if (zoom.gridSame !== true) {
+      problems.push("tile 尺寸一变，网格被重建了（滚动位置与选择都会丢）");
+    }
+    if (!(Math.abs(zoom.value - zoomStart.value) <= 0.3)) {
+      problems.push(`拖回原位后档位应当回到起点（起点 ${zoomStart.value}，实测 ${zoom.value}）`);
+    }
+  }
+
   // 数字键打星（只在网格里生效）
   await send("Runtime.evaluate", {
     expression: `window.dispatchEvent(new KeyboardEvent("keydown", { key: "3", bubbles: true, cancelable: true }))`,

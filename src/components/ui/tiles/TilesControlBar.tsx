@@ -20,7 +20,7 @@
  * 所以它住在 `components/ui/`，两个工作区各自把配置灌进来。
  */
 
-import { Show, type JSX } from "solid-js";
+import { Show, untrack, type JSX } from "solid-js";
 import {
   IconArrowDown,
   IconArrowUp,
@@ -292,6 +292,27 @@ function BarFrame(props: {
   class?: string;
   children: JSX.Element;
 }): JSX.Element {
+  /*
+   * children **只能取一次**（untrack），然后当静态节点插进去。
+   *
+   * ## 为什么（2026-09-23 真机排查，别再删这一行）
+   *
+   * `{props.children}` 会被 Solid 编译成 `insert(el, () => props.children)` ——
+   * 那是一个 **render effect**，不是一次性插入；而 `props.children` 的 getter
+   * 每求值一次就把里面的 `createComponent(...)` **重新跑一遍**（含 Ark Slider 的实例）。
+   *
+   * 于是：只要「创建 children 期间被读到的任何信号」变了，整排子节点就被重建。
+   * 这条栏上正好有一个：Ark 的 `SliderRoot` 用 `createSplitProps()` **同步**读走
+   * `props.value`（= `tileStep`）—— 那次读被记在了上面那个 render effect 头上。
+   * 后果就是人类报的「缩放杆拖一格就断」：值一变 → 整条栏重建 → 正在拖的
+   * Ark Slider 实例被换掉 → 拖动与焦点一起丢。
+   *
+   * 同理可推：**任何包装组件把 children 透传出去时都要 untrack 一次** ——
+   * 少这一句，子组件创建期读到的信号就成了「重建整棵子树」的开关。
+   * 诊断办法：`insert`/`insertBefore` 钩子 + `element === 上次那个元素` 的身份比对
+   *（见 `scripts/check-browse-boot.mjs` 里那条拖动回归）。
+   */
+  const children = untrack(() => props.children);
   return (
     <div
       class={[
@@ -303,7 +324,7 @@ function BarFrame(props: {
       data-tiles-control-bar
       data-tiles-bar-mode={props.mode}
     >
-      {props.children}
+      {children}
     </div>
   );
 }

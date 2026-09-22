@@ -20,7 +20,7 @@
  * `bar` 不给就是不要状态条（看图态那条由别处替代 —— 浏览侧是胶片带、导入侧是看图件）。
  */
 
-import { createSignal, Show, type JSX } from "solid-js";
+import { createSignal, Show, untrack, type JSX } from "solid-js";
 import { TilesControlBar, type TilesControlBarProps } from "./TilesControlBar.tsx";
 import { TilesFitRequestContext } from "./fit.ts";
 
@@ -34,6 +34,14 @@ export interface TilesShellProps {
 
 export function TilesShell(props: TilesShellProps): JSX.Element {
   const [fitRequest, setFitRequest] = createSignal(0);
+  /*
+   * 网格 / 看图件**只创建一次**（untrack）—— 与 `BarFrame` 同一条理由（`AGENTS.md` §2.17）：
+   * `{props.children}` 被编译成 `insert(el, () => props.children)`（一个 render effect），
+   * 于是「创建 children 期间被读到的信号」一变，整棵子树就会被重建。
+   * 网格被重建 = 滚动位置、选择、已铺出的缩略图全丢 —— 正是 §11.4 里
+   * 「PhotoGrid 只能隐藏、不能卸载」那条红线要防的事。
+   */
+  const children = untrack(() => props.children);
   return (
     <TilesFitRequestContext.Provider value={fitRequest}>
       <div
@@ -42,7 +50,7 @@ export function TilesShell(props: TilesShellProps): JSX.Element {
           .join(" ")}
         data-tiles-shell
       >
-        {props.children}
+        {children}
         {/*
           when 只看「有没有 bar」，不看配置对象身份：拖动滑杆时 tileStep 每次变化都会
           产生新对象，但这颗 TilesControlBar 必须保持同一个 DOM / Ark Slider 实例，
