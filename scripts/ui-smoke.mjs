@@ -1670,6 +1670,14 @@ try {
 
     const result = {
       width: Math.round(aside.getBoundingClientRect().width),
+      /*
+       * 右列宽度必须来自**唯一那份定义**（tokens.css 的 --panel-w-right）：
+       * 人类 2026-09-23 定「一个统一宽度，所有 flow 的 workspace right 一起改」。
+       * 这里量出来跟令牌对一下 —— 硬编码回 JS 里就当场红。
+       */
+      widthToken: getComputedStyle(document.documentElement)
+        .getPropertyValue("--panel-w-right")
+        .trim(),
       emptyState: text.includes("还没有库"),
       summary: /已选择\\s*0\\s*个目录/.test(text),
       avoidDuplicates: text.includes("避免重复导入"),
@@ -1788,6 +1796,17 @@ try {
 
     const result = {
       asides: asides.length,
+      /*
+       * 右栏宽度（浏览侧）：应与导入侧同一个令牌 --panel-w-right
+       *（人类 2026-09-23 统一的「一个宽度，所有 flow 一起改」）。
+       */
+      rightWidth:
+        asides.length > 0
+          ? Math.round(asides[asides.length - 1].getBoundingClientRect().width)
+          : null,
+      widthToken: getComputedStyle(document.documentElement)
+        .getPropertyValue("--panel-w-right")
+        .trim(),
       hasMain: main !== null,
       hasSearch: search !== null,
       leftShowsNoRepository: /还没有库|No library yet/.test(leftText),
@@ -1805,6 +1824,12 @@ try {
   if (browseWorkspace) {
     if (browseWorkspace.asides !== 2) {
       problems.push(`浏览工作区应当是两列 aside（左列 + 右栏），实测 ${browseWorkspace.asides}`);
+    }
+    if (browseWorkspace.rightWidth !== Math.round(Number.parseFloat(browseWorkspace.widthToken))) {
+      problems.push(
+        `浏览右栏宽度 ${browseWorkspace.rightWidth}px ≠ 令牌 --panel-w-right` +
+          `（${browseWorkspace.widthToken}）—— 两个工作区必须共用一个宽度`,
+      );
     }
     if (!browseWorkspace.hasMain) {
       problems.push("浏览工作区缺中间那列（main）");

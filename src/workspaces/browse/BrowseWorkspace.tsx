@@ -106,10 +106,13 @@ export interface BrowseWorkspaceProps {
   /** 左列 / 右列宽度（像素，受控；拖拽松手时通过下面的回调落盘） */
   leftWidth?: number;
   /**
-   * 右列宽度（像素）。**不受控、不可拖** —— 按 `DESIGN.md` §8.6，把手只加在左侧边界上，
-   * 右列宽度是常量（`BROWSE_RIGHT_WIDTH`），所以这里没有对应的 `on…Change`。
+   * 右列宽度**不在 props 里**：它如今只有一份定义 —— `tokens.css` 的 `--panel-w-right`
+   *（workspace 右列，所有工作流通用），容器上直接用 `w-panel-w-right`。
+   *
+   * 为什么之前是 props：那时 browse 右列有一个独立常量（`layout-prefs.ts` 的
+   * `BROWSE_RIGHT_WIDTH`），与导入侧的令牌是**两份定义** —— 同一个东西两处写。
+   * 人类 2026-09-23 定「统一宽度」，于是常量与 props 一起拆了。
    */
-  rightWidth?: number;
   onLeftWidthChange?: (width: number) => void;
   /** browse 自己的胶片带尺寸档位；与 import 分开存进 app.db。 */
   filmStripStep: number;
@@ -195,11 +198,11 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
    * （量了又写、写了又量 → 拖起来卡死）。现在两处都只是「把手 + 尺寸数学」。
    */
   const [leftWidth, setLeftWidth] = createSignal(props.leftWidth ?? 300);
-  /**
-   * 右列宽度**固定**，不参与拖拽（人类 2026-09-19 定：右列之后另有安排）。
-   * 左列才需要可调 —— 用户改 tile 尺寸时，右列固定会冒出"网格撑不满"的空档。
+  /*
+   * 右列宽度**固定**（`--panel-w-right`，不参与拖拽）：人类 2026-09-19 定「把手只加在左侧边界」，
+   * 2026-09-23 又把它统一成**所有工作流共用的一个值** —— 所以这里不再算宽度，
+   * 容器上直接挂 `w-panel-w-right`（与导入侧那一列同一个类名、同一个令牌）。
    */
-  const rightWidth = (): number => props.rightWidth ?? 300;
   /** 拖动起点的左列宽度（用「起点 + dx」而不是逐帧累加，丢帧时不会漂移） */
   let leftDragStart = 0;
 
@@ -702,17 +705,16 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
         />
       </main>
 
-      {/* 右列**没有把手**：宽度固定（人类 2026-09-19 定，之后另有安排） */}
+      {/* 右列**没有把手**：宽度固定（人类 2026-09-19 定「把手只加左边界」） */}
 
-      {/* 右列 */}
+      {/* 右列（宽度 = `--panel-w-right`，所有工作流通用；不支持拖拽） */}
       <aside
         class={[
-          "flex shrink-0 flex-col bg-surface-main",
+          "w-panel-w-right flex shrink-0 flex-col bg-surface-main",
           chromeShowsRight(viewing.chrome()) ? "" : "hidden",
         ]
           .filter(Boolean)
           .join(" ")}
-        style={{ width: `${rightWidth()}px` }}
       >
         {/*
           右栏在看图态换成**预览 + 直方图**（`BROWSE.md` §5.9）——

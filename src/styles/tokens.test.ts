@@ -78,7 +78,6 @@ const SAME_IN_BOTH = new Set([
   "--remove-icon",
   "--scrollbar-w",
   "--panel-w-left",
-  "--panel-w-right",
   "--toggle-block-icon",
 ]);
 
