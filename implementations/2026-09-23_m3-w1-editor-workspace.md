@@ -70,6 +70,7 @@
 | `pnpm lint:i18n` | ✓ 无硬编码中文文案 |
 | `pnpm build` | ✓ 构建通过（3.2s，无警告） |
 | `cargo test -p raybend-desktop --lib` | **50 通过 / 0 失败**（含 `editor::tests` 6 条：DPR 换算、非法值拒绝、0 尺寸合法、快照计数、camelCase 键名、`every_state_type_is_managed`） |
+| `pnpm smoke:ui http://localhost:1420/`（CDP，补跑） | 外壳**真的画出来了**（`hasMain` / `hasSearch` / `browseTools` / `restoredImport` 全真），**控制台无 error / warning**；`problems` 只剩「画廊里没有 X 演示」这类 **dev 陈列室** 断言（打应用外壳这条路径本来就不挂那些演示）——与本波无关 |
 
 **没有验证的（归人类，`AGENTS.md` §2.8）**：界面的实际观感（三列比例、右栏 255px 够不够塞三组页签、
 渐变挤压好不好看）、真机 DPI 下洞口上报的实际数值、编辑流程的手感。
@@ -80,7 +81,8 @@
    禁用态画法、issue 列表信息量）——本波按通用令牌实现，改宽度只需改令牌；
 2. 仓库根目录有上一轮遗留的 `probe-slider.html` / `probe-slider.tsx`（临时排障页，**未提交**，
    本次 commit 已排除），需要时人工删除；
-3. 未跑 `pnpm smoke:ui`（CDP 冒烟）——本波结束时未执行，留待下一波开工前补。
+3. CDP 冒烟已补跑（见上表）；它验的是「页面画得出来 + 控制台干净」，
+   **不含**编辑工作区的交互（切到编辑、点工具、拖拉杆）——那些归 W2 起的人工真机验收。
 
 ## 6. 改动文件
 
