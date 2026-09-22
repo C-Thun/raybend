@@ -395,8 +395,16 @@ export function Tile(props: TileProps) {
           <span
             data-tile-badge="raw"
             class={[
-              "pointer-events-none absolute end-1 bottom-1 rounded-(--tile-radius) bg-brand px-1",
-              "font-600 text-fs-0 text-fg-on-brand transition-opacity",
+              "pointer-events-none absolute end-1 bottom-1 rounded-(--tile-radius) px-1",
+              "font-600 text-fs-0 transition-opacity",
+              /*
+               * 底色（人类 2026-09-22）：纯 `RAW` 用**辅色**（琥珀金），
+               * `+RAW`（位图 + RAW 的复合）用**主色** —— 两者一眼分得清，不用读字。
+               * 文字两种都是 `fg-on-brand`（DESIGN.md §4.5：主色 / 辅色实底上
+               * 都用深字 `#202226`，实测 7.60:1 / 8.32:1）。
+               */
+              local.raw === "plus" ? "bg-brand" : "bg-brand-2",
+              "text-fg-on-brand",
               local.selected || forceNameBar()
                 ? "hidden"
                 : "group-hover/tile:opacity-0 group-focus-within/tile:opacity-0",
