@@ -50,11 +50,25 @@ export function FullscreenViewer() {
 
   const state = () => store.state();
 
+  /**
+   * 已应用的清单版本号（初始值 -1 = 一份都还没应用）。
+   *
+   * ❗ 为什么必须有它：挂载时的 `getFullscreenPayload()` 与后来的
+   * `fullscreen://payload` 事件**两条路都可能到**，而且可能乱序 ——
+   * 用户刚开窗又在主窗点了另一张，事件先到、初始读取后到，
+   * 没这个守卫就会「拿旧清单覆盖新清单」（症状：换图后显示的还是上一张）。
+   * 版本号在 Rust 侧递增（`FullscreenState::store`），前端只做比较。
+   */
+  let appliedRevision = -1;
+
   const applyPayload = (payload: FullscreenPayload | null): void => {
     if (payload === null || payload.items.length === 0) {
       setEmpty(true);
       return;
     }
+    // 迟到的旧包：丢掉（新的那份已经在画了）
+    if (payload.revision <= appliedRevision) return;
+    appliedRevision = payload.revision;
     setEmpty(false);
     store.show(
       payload.items.map((item) => ({
@@ -100,7 +114,12 @@ export function FullscreenViewer() {
         case "Escape":
         case "Enter":
           event.preventDefault();
-          void closeFullscreen();
+          /*
+           * `.catch` 是**必须**的：Rust 侧用 `destroy()` 立即销毁本窗口，
+           * 「命令的响应」很可能回不来（窗口已经没了）—— 不接就是一条未处理的拒绝，
+           * 在控制台里看着像功能坏了，而其实关窗成功了。
+           */
+          void closeFullscreen().catch(() => {});
           return;
         case "ArrowLeft":
         case "PageUp":

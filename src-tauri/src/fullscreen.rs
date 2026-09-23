@@ -54,6 +54,12 @@ pub struct FullscreenItem {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct FullscreenPayload {
+    /// **单调递增的版本号**（由 [`FullscreenState::store`] 递增）。
+    ///
+    /// 为什么需要它：页面挂载时的「取一次清单」与后来的「事件推新清单」**可能乱序到达** ——
+    /// 初始读取若晚于事件返回，就会拿**旧清单覆盖新清单**（症状：换图后显示的还是上一张）。
+    /// 页面只应用版本号更大的包，两条路径就都安全了（`AGENTS.md` §7.9 的 revision 口径）。
+    pub revision: u64,
     pub items: Vec<FullscreenItem>,
     pub index: usize,
 }
@@ -79,25 +85,35 @@ pub fn validate(items: &[FullscreenItem], index: usize) -> Result<(), String> {
 /// 全屏会话状态（挂在 Tauri 上）。
 #[derive(Default)]
 pub struct FullscreenState {
-    payload: Mutex<Option<FullscreenPayload>>,
+    inner: Mutex<Inner>,
+}
+
+#[derive(Default)]
+struct Inner {
+    /// 已发放的最大版本号（每存一次 +1）
+    revision: u64,
+    payload: Option<FullscreenPayload>,
 }
 
 impl FullscreenState {
-    fn store(&self, payload: FullscreenPayload) -> Result<(), String> {
+    /// 存一份新清单，**版本号在这里递增**（调用方不用管，返回带版本号的那一份去发事件）。
+    fn store(&self, mut payload: FullscreenPayload) -> Result<FullscreenPayload, String> {
         let mut guard = self
-            .payload
+            .inner
             .lock()
             .map_err(|_| "全屏看图状态锁中毒".to_string())?;
-        *guard = Some(payload);
-        Ok(())
+        guard.revision += 1;
+        payload.revision = guard.revision;
+        guard.payload = Some(payload.clone());
+        Ok(payload)
     }
 
     fn read(&self) -> Result<Option<FullscreenPayload>, String> {
         let guard = self
-            .payload
+            .inner
             .lock()
             .map_err(|_| "全屏看图状态锁中毒".to_string())?;
-        Ok(guard.clone())
+        Ok(guard.payload.clone())
     }
 }
 
@@ -125,8 +141,12 @@ pub async fn fullscreen_open<R: Runtime>(
     index: usize,
 ) -> Result<(), String> {
     validate(&items, index)?;
-    let payload = FullscreenPayload { items, index };
-    state.store(payload.clone())?;
+    // 存一份**带新版本号**的清单（页面据此丢弃迟到的旧包）
+    let payload = state.store(FullscreenPayload {
+        revision: 0,
+        items,
+        index,
+    })?;
 
     // 已经开着：通知页面换图（事件先发 —— 页面订阅着就立刻响应），再把它拿到前面
     let _ = app.emit(FULLSCREEN_EVENT, &payload);
@@ -137,7 +157,7 @@ pub async fn fullscreen_open<R: Runtime>(
     }
 
     let monitor = main_window_monitor(&app);
-    let window = WebviewWindowBuilder::new(
+    let window = match WebviewWindowBuilder::new(
         &app,
         FULLSCREEN_LABEL,
         // 与 spike 页同一种做法：查询串选页，dev 与打包版都不影响资源解析
@@ -150,7 +170,24 @@ pub async fn fullscreen_open<R: Runtime>(
     .skip_taskbar(true)
     .visible(false)
     .build()
-    .map_err(|error| format!("建全屏看图窗口失败：{error}"))?;
+    {
+        Ok(window) => window,
+        Err(error) => {
+            /*
+             * 两个现实场景会走到这里，都**不该**报错给用户：
+             *   * **连点两下按钮**：第一下正在建窗，第二下也到这里 —— 标签已被占；
+             *   * 上一扇刚被 `destroy`，标签尚未释放。
+             * 这时若窗口已在就退化成「复用 + 换图」（清单与事件在上面已经发过，
+             * 新页挂载时也会自己读一次），确实不在才把真错报出去。
+             */
+            if let Some(window) = app.get_webview_window(FULLSCREEN_LABEL) {
+                let _ = window.show();
+                let _ = window.set_focus();
+                return Ok(());
+            }
+            return Err(format!("建全屏看图窗口失败：{error}"));
+        }
+    };
 
     /*
      * 先摆到主窗口那块屏幕上，再全屏 —— 顺序不能反：
@@ -182,13 +219,18 @@ pub fn fullscreen_payload(
 
 /// 关掉全屏看图（`Esc` / `Enter` 都走它）。
 ///
+/// 用 [`tauri::WebviewWindow::destroy`] 而不是 `close`：`close` 走「请求关闭」，
+/// 窗口从标签表里消失是**异步**的 —— 而「按 `Esc` 后马上回主窗口再点全屏」是真实动作，
+/// 那一刻 `get_webview_window` 可能还看得到正在死掉的窗口，于是 `fullscreen_open`
+/// 走「复用」分支、什么也不发生（要点第二下）。`destroy` 立即销毁，标签当场释放。
+///
 /// # Errors
-/// 窗口存在但关闭失败（不存在算成功 —— 幂等）。
+/// 窗口存在但销毁失败（不存在算成功 —— 幂等）。
 #[tauri::command]
 pub async fn fullscreen_close<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(FULLSCREEN_LABEL) {
         window
-            .close()
+            .destroy()
             .map_err(|error| format!("关全屏看图窗口失败：{error}"))?;
     }
     Ok(())
@@ -220,6 +262,7 @@ mod tests {
     fn payload_serializes_with_camel_case_keys() {
         // 页面读的是 camelCase —— 与 `src/api/dto-contract.json` 对齐
         let payload = FullscreenPayload {
+            revision: 1,
             items: vec![item("a.jpg")],
             index: 0,
         };
@@ -227,7 +270,7 @@ mod tests {
         let object = value.as_object().expect("是个对象");
         let mut keys: Vec<&String> = object.keys().collect();
         keys.sort();
-        assert_eq!(keys, vec!["index", "items"]);
+        assert_eq!(keys, vec!["index", "items", "revision"]);
 
         let first = &value["items"][0];
         let mut item_keys: Vec<&String> = first.as_object().expect("是个对象").keys().collect();
@@ -240,21 +283,49 @@ mod tests {
         let state = FullscreenState::default();
         assert!(state.read().expect("读得到").is_none(), "一开始没有清单");
 
-        state
+        let stored = state
             .store(FullscreenPayload {
+                revision: 0,
                 items: vec![item("a.jpg"), item("b.jpg")],
                 index: 1,
             })
             .expect("存得进");
+        assert_eq!(stored.revision, 1, "版本号由 store 递增（调用方填 0 即可）");
+
         let payload = state.read().expect("读得到").expect("有值");
         assert_eq!(payload.index, 1);
         assert_eq!(payload.items.len(), 2);
         assert_eq!(payload.items[0].file_name, "a.jpg");
+        assert_eq!(payload.revision, 1);
+    }
+
+    #[test]
+    fn revision_increases_on_every_store() {
+        // 页面靠它丢弃迟到的旧清单 —— 不递增等于白加这个字段
+        let state = FullscreenState::default();
+        let first = state
+            .store(FullscreenPayload {
+                revision: 0,
+                items: vec![item("a.jpg")],
+                index: 0,
+            })
+            .expect("存得进");
+        let second = state
+            .store(FullscreenPayload {
+                revision: 0,
+                items: vec![item("b.jpg")],
+                index: 0,
+            })
+            .expect("存得进");
+        assert_eq!(first.revision, 1);
+        assert_eq!(second.revision, 2);
+        assert_eq!(state.read().expect("读得到").expect("有值").revision, 2);
     }
 
     #[test]
     fn payload_round_trips_through_json() {
         let payload = FullscreenPayload {
+            revision: 7,
             items: vec![item("带 空格 的.jpg"), item("b.ORF")],
             index: 1,
         };

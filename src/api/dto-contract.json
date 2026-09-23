@@ -328,7 +328,8 @@
   ],
   "FullscreenPayload": [
     "index",
-    "items"
+    "items",
+    "revision"
   ],
   "MigrationNotice": [
     "from",

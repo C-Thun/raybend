@@ -406,6 +406,7 @@ const FULLSCREEN_ITEM_KEYS = [
 const FULLSCREEN_PAYLOAD_KEYS = [
   "index",
   "items",
+  "revision",
 ] as const satisfies readonly (keyof FullscreenPayload)[];
 
 /** 手写的键表 → 覆盖检查（跑一遍，顺便让 `noUnusedLocals` 满意） */

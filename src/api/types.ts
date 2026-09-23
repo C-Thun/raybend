@@ -767,6 +767,13 @@ export interface FullscreenItem {
 
 /** 一次全屏会话的清单与当前下标（Rust 侧持有，页面取一次 + 订阅事件）。 */
 export interface FullscreenPayload {
+  /**
+   * 单调递增的版本号：页面**只应用版本更大的包**。
+   *
+   * 挂载时的「取一次清单」与后来的「事件推新清单」可能乱序到达，
+   * 没有它的话初始读取会用**旧清单覆盖新清单**（症状：换图后显示的还是上一张）。
+   */
+  revision: number;
   items: FullscreenItem[];
   index: number;
 }

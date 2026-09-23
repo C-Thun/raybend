@@ -85,3 +85,17 @@
 2. **`ImagePurpose` 的 TS 类型与 Rust 不一致（既有问题，本次撞上）**：`src/api/db.ts` 的联合类型含 `"original"`，但 Rust `ImagePurpose::parse` 只认 `grid/strip/screen`——传 `original` 会被拒。本次按 `screen` 实现；要「真 1:1 原图像素」需在 Rust 加 `original` 档并两端同步；
 3. **编辑工作流的 flowinfo 恒空 → 按钮不出现、但 `F` 键可用**：`App.tsx` 的 `flowInfo` 在 edit/export 分支返回 null，FlowBar 的按钮显隐跟着 `exif` 走，所以编辑里选中照片后**按钮不出现**；而命令 `viewer.fullscreen` 的 `when` 走 `fullscreenTarget()`（编辑侧真实提供清单），按 `F` 能全屏。若要编辑里也能点按钮，把 `flowInfo` 的 edit 分支补上编辑锚点的 EXIF 即可（一行改动）；
 4. 全屏页未做「闲置隐藏鼠标光标」——沉浸式可再加，本次未做（保持最小）。
+
+## 复查修复（同日，人类要求「检查一下实现有没有错误，有的话修掉」）
+
+复查结论：**三处真问题**（都不是编译期能抓到的），已修并补测试：
+
+| # | 问题 | 症状 | 修法 |
+| --- | --- | --- | --- |
+| 1 | **清单竞态** | 页面挂载时的 `getFullscreenPayload()` 与后来的 `fullscreen://payload` 事件**可能乱序到达** —— 初始读取若晚于事件返回，会拿旧清单覆盖新清单（换图后显示的还是上一张） | `FullscreenPayload` 加**单调递增 `revision`**（由 `FullscreenState::store` 递增，调用方填 0 即可），页面只应用版本更大的包（`appliedRevision` 守卫）；契约两侧同步该字段；新增 `revision_increases_on_every_store` 单测 |
+| 2 | **关窗是异步的** | `close()` 走「请求关闭」，标签从窗口表里消失是异步的 —— 「按 `Esc` 后马上回主窗口再点全屏」可能撞上正在死掉的窗口，于是走复用分支**什么都不发生**（要点第二下） | 关窗改用 `destroy()`（立即销毁、当场释放标签），并在前端 `.catch(() => {})` —— `destroy` 之后 IPC 响应很可能回不来，不接就是一条「看着像功能坏了」的未处理拒绝 |
+| 3 | **连点两下会弹假错误** | 第一下正在建窗、第二下也走到建窗 → 标签已被占 → 返回 `Err` → 前端弹一条 toast（用户什么都没做错） | 建窗失败时**先查窗口是否已在**：在就退化成「复用 + 换图」并返回 `Ok`，确实不在才把真错报出去 |
+
+复查中**核实无误**的部分（不必改）：监视器定位用物理像素且「先摆位再全屏」（顺序反了会闪主屏）；`current_monitor()` 只在点击那一刻问一次（非渲染循环）；步进沿用 store 的 `next`/`prev`（到头停）；按钮显隐 = `exif != null && onFullscreen != null`；命令 `when` 与按钮同一个读数；浏览器里全部空操作。
+
+验证（本轮全部重跑）：`npx tsc --noEmit` 0 错误；`pnpm test` 860 通过；`cargo test -p raybend-desktop --lib` **63** 通过（含新单测与契约断言）；`cargo clippy -p raybend-desktop` 干净；`pnpm smoke:ui` `problems: []`。
