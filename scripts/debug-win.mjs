@@ -65,10 +65,20 @@ const FRESH_PROCESS_MS = 20_000;
  * **只要进程活着它就存在**（哪怕一个界面窗口都没有），而且 `IsWindowVisible` 还返回 true。
  * 2026-09-23 那次排障就是靠它把「只剩一个消息窗的僵尸」认出来。
  *
+ * `PseudoConsoleWindow` 是 **ConPTY 伪终端窗**（从控制台拉起进程时由 Windows 控制台宿主创建，
+ * 归在应用 PID 名下、`IsWindowVisible` 也为真）—— 2026-09-24 崔总的实例就是从控制台起的，
+ * 它把「已经关了窗口的僵尸」误判成「开着」，脚本于是拒绝清理。
+ *
  * 反过来，应用**真正**的窗口类名是 `Tauri Window`（`tauri-runtime-wry-2.11.4/src/lib.rs:856`
  * 设的），不在这个表里 —— 所以「有可见的、类名不在这里的顶层窗」就等于「界面还开着」。
  */
-const INTERNAL_WINDOW_CLASSES = new Set(["Tao Thread Event Target", "IME", "MSFTIME UI", "Default IME"]);
+const INTERNAL_WINDOW_CLASSES = new Set([
+  "Tao Thread Event Target",
+  "PseudoConsoleWindow",
+  "IME",
+  "MSFTIME UI",
+  "Default IME",
+]);
 
 /**
  * PowerShell 探针：一次问出「所有 raybend-desktop.exe 进程 + 它们名下的顶层窗口 + exe 是否被独占占用」。
@@ -258,6 +268,8 @@ function reapStaleInstance() {
   }
 
   console.log("  僵尸的来历：窗口关掉后进程不退（已知问题，待查）；`pnpm perf:win --launch` 是 detached 拉起、跑完不回收，最容易留下它。");
+  console.log("  另一种已知来历（2026-09-24）：旧版全屏看图把 `Esc` 做成 hide —— 隐藏的 fullscreen-viewer 窗口也算一扇窗，");
+  console.log("  于是关掉主窗口后进程不退；那一条已在 2026-09-24 的修复里改成真销毁。");
   for (const row of rows) {
     const killed = spawnSync("taskkill.exe", ["/F", "/T", "/PID", String(row.pid)], { encoding: "utf8" });
     if (killed.status === 0) console.log(`  → 已清掉 PID ${row.pid}`);
