@@ -8,12 +8,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  HISTOGRAM_LAYER_ORDER,
   HISTOGRAM_SAMPLES,
   histogramBarHeights,
   histogramIsEmpty,
+  histogramLayers,
   histogramPath,
+  histogramRegionAt,
 } from "./histogram.ts";
-import type { HistogramCounts } from "./histogram.ts";
+import type { HistogramCounts, HistogramLayerKey } from "./histogram.ts";
 
 function hist(overrides: Partial<HistogramCounts> = {}): HistogramCounts {
   return {
@@ -132,4 +135,69 @@ test("直线路径：脏值被夹在画布内且不出 NaN", () => {
   assert.ok(d.includes("M0.00,100.00"), "NaN 退到基线");
   assert.ok(d.includes("L50.00,100.00"), "负数夹到 0");
   assert.ok(d.includes("L100.00,0.00"), "大于 1 夹到 1");
+});
+
+/* ══════════════════════════════════════════════════════════════
+ * 7 个区域的固定色语义（人类 2026-09-23 重申：全通道模式是固定色，不是自然叠加）
+ *
+ * 这几条锁的是「绘制顺序 + 包络」这套数学 —— 它决定了某处最终看得的是哪个区域色。
+ * 顺序或包络写错，界面上就会冒出黄/青/紫/灰之外的颜色（正是之前的 bug），这里会立刻红。
+ * ══════════════════════════════════════════════════════════════ */
+
+test("histogramLayers：单通道/两两/三色的包络就是 min 关系", () => {
+  const layers = histogramLayers([0.9, 0.2], [0.7, 0.5], [0.2, 0.5]);
+  assert.deepEqual(layers.r, [0.9, 0.2]);
+  assert.deepEqual(layers.g, [0.7, 0.5]);
+  assert.deepEqual(layers.b, [0.2, 0.5]);
+  assert.deepEqual(layers.rg, [0.7, 0.2], "两两重叠 = 那一对的较小者");
+  assert.deepEqual(layers.gb, [0.2, 0.5]);
+  assert.deepEqual(layers.rb, [0.2, 0.2]);
+  assert.deepEqual(layers.rgb, [0.2, 0.2], "三色重叠 = 三者最小者");
+});
+
+test("histogramLayers：长度不齐按最短、脏值夹到 0..1", () => {
+  const layers = histogramLayers([0.5, 2, Number.NaN], [0.5, 0.5], [0.5, -1]);
+  assert.equal(layers.rgb.length, 2, "三条长度不齐时按最短的来");
+  assert.deepEqual(layers.r, [0.5, 1], "越界夹到 1");
+  assert.deepEqual(layers.gb, [0.5, 0], "负数夹到 0");
+  assert.equal(histogramLayers([], [], []).r.length, 0, "空输入给空数组（不炸）");
+});
+
+test("histogramRegionAt：任何通道组合下都落在 7 个区域里的正确那一个", () => {
+  const cases: {
+    rgb: readonly [number, number, number];
+    /** [高度, 该高度处应当判出来的区域] */
+    at: readonly (readonly [number, HistogramLayerKey | null])[];
+  }[] = [
+    { rgb: [0.9, 0.7, 0.2], at: [[0.1, "rgb"], [0.5, "rg"], [0.8, "r"]] },
+    { rgb: [0.9, 0.2, 0.7], at: [[0.1, "rgb"], [0.5, "rb"], [0.8, "r"]] },
+    { rgb: [0.2, 0.9, 0.7], at: [[0.1, "rgb"], [0.5, "gb"], [0.8, "g"]] },
+    { rgb: [0.7, 0.9, 0.2], at: [[0.1, "rgb"], [0.5, "rg"], [0.8, "g"]] },
+    { rgb: [0.7, 0.2, 0.9], at: [[0.1, "rgb"], [0.5, "rb"], [0.8, "b"]] },
+    { rgb: [0.2, 0.7, 0.9], at: [[0.1, "rgb"], [0.5, "gb"], [0.8, "b"]] },
+    // 三通道等高：只有三色重叠，上面什么都没有
+    { rgb: [0.6, 0.6, 0.6], at: [[0.3, "rgb"], [0.9, null]] },
+    // 只有一个通道有值：没有重叠，直接是单通道色
+    { rgb: [0.8, 0, 0], at: [[0.3, "r"], [0.9, null]] },
+  ];
+
+  for (const item of cases) {
+    const [r, g, b] = item.rgb;
+    const layers = histogramLayers([r], [g], [b]);
+    for (const [height, expected] of item.at) {
+      assert.equal(
+        histogramRegionAt(layers, 0, height),
+        expected,
+        `rgb=(${r},${g},${b}) 在高度 ${height} 处应当是 ${expected}`,
+      );
+    }
+  }
+});
+
+test("绘制顺序：更「专」的区域画在后面（否则会被单通道色盖掉）", () => {
+  assert.deepEqual(
+    [...HISTOGRAM_LAYER_ORDER],
+    ["r", "g", "b", "rg", "gb", "rb", "rgb"],
+    "单通道先画、两两重叠其次、三色重叠最后 —— 顺序改了颜色就会错",
+  );
 });

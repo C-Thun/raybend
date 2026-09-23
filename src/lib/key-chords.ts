@@ -177,6 +177,12 @@ const KEY_LABELS: Record<string, string> = {
 export function keyLabel(key: string): string {
   const label = KEY_LABELS[key];
   if (label !== undefined) return label;
+  /*
+   * F 键统一**大写**（`f11` → `F11`）。
+   * 不这样写的话，`key.length === 1` 那条会把它原样透出去 —— 界面上会显示小写 `f11`，
+   * 与其它键位（`P` / `Tab` / `Ctrl+K`）的观感不一致。
+   */
+  if (/^f([1-9]|1[0-2])$/.test(key)) return key.toUpperCase();
   return key.length === 1 ? key.toUpperCase() : key;
 }
 

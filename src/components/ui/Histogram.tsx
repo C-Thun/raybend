@@ -6,9 +6,15 @@
  * 没有几何缝隙，数据源实时变化时也只更新三条路径。
  */
 
-import { For, createSignal } from "solid-js";
+import { For, Show, createMemo, createSignal } from "solid-js";
 import { t } from "../../i18n/index.ts";
-import { histogramPath, type HistogramBars } from "../../lib/histogram.ts";
+import {
+  HISTOGRAM_LAYER_ORDER,
+  histogramLayers,
+  histogramPath,
+  type HistogramBars,
+  type HistogramLayerKey,
+} from "../../lib/histogram.ts";
 
 const VIEW_W = 256;
 const VIEW_H = 100;
@@ -19,6 +25,21 @@ const CHANNEL_FILL: Record<Channel, string> = {
   r: "fill-(--label-red)",
   g: "fill-(--label-green)",
   b: "fill-(--label-blue)",
+};
+/**
+ * 7 个区域各自的**固定色**（人类 2026-09-19 定、2026-09-23 重申「是固定色不是自然叠加」）。
+ *
+ * 两两重叠用的是色标里那一对「加色」的色（红+绿=黄、绿+蓝=青、红+蓝=紫）——
+ * 不再另立一套，所以**改色只改令牌**；三色重叠用单独的中间灰 `--hist-triple`。
+ */
+const LAYER_FILL: Record<HistogramLayerKey, string> = {
+  r: "fill-(--label-red)",
+  g: "fill-(--label-green)",
+  b: "fill-(--label-blue)",
+  rg: "fill-(--label-yellow)",
+  gb: "fill-(--label-cyan)",
+  rb: "fill-(--label-purple)",
+  rgb: "fill-(--hist-triple)",
 };
 const CHANNEL_NAME = {
   r: "browse.histogramRed",
@@ -42,6 +63,10 @@ export function Histogram(props: HistogramProps) {
       : [...CHANNELS.filter((channel) => channel !== active), active];
   };
   const values = (channel: Channel): readonly number[] => props.bars?.[channel] ?? [];
+  /** 全通道模式的 7 个区域包络（固定色，见 `lib/histogram.ts` 的 `histogramLayers`） */
+  const layers = createMemo(() =>
+    histogramLayers(values("r"), values("g"), values("b")),
+  );
 
   function track(event: PointerEvent): void {
     const rect = event.currentTarget instanceof Element
@@ -84,18 +109,37 @@ export function Histogram(props: HistogramProps) {
           role="img"
           aria-label={t("browse.histogramHint")}
         >
-          <For each={drawOrder()}>
-            {(channel) => (
-              <path
-                d={histogramPath(values(channel), VIEW_W, VIEW_H)}
-                class={["histogram-channel", CHANNEL_FILL[channel]].join(" ")}
-                style={{
-                  opacity:
-                    selected() === null || selected() === channel ? "0.82" : "0.24",
-                }}
-              />
-            )}
-          </For>
+          {/*
+            两套逻辑（人类口径，完整说明见 `lib/histogram.ts` 的 `HISTOGRAM_LAYER_ORDER`）：
+
+            * **全通道（默认）**：7 个区域用**固定色** —— 黄/青/紫/灰就是令牌里那个色，
+              不靠混合模式；层与层后画盖前画，所以没有接缝。
+            * **点亮单通道**：选中那条在前台（正常浓度）、另两条半透明，**自然叠加** ——
+              这时不需要也不该再处理混色（需求原文：「此时就不需要处理混色了，自然叠加就行」）。
+          */}
+          <Show
+            when={selected() === null}
+            fallback={
+              <For each={drawOrder()}>
+                {(channel) => (
+                  <path
+                    d={histogramPath(values(channel), VIEW_W, VIEW_H)}
+                    class={["histogram-channel", CHANNEL_FILL[channel]].join(" ")}
+                    style={{ opacity: selected() === channel ? "0.82" : "0.24" }}
+                  />
+                )}
+              </For>
+            }
+          >
+            <For each={HISTOGRAM_LAYER_ORDER}>
+              {(key) => (
+                <path
+                  d={histogramPath(layers()[key], VIEW_W, VIEW_H)}
+                  class={["histogram-layer", LAYER_FILL[key]].join(" ")}
+                />
+              )}
+            </For>
+          </Show>
         </svg>
 
         <span

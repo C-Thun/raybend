@@ -151,3 +151,13 @@ test("eventKey：从事件取规范化键名", () => {
   assert.equal(eventKey({ key: "+" }), "=");
   assert.equal(eventKey({ key: "Nonsense" }), null);
 });
+
+test("keyLabel：F 键显示成大写（F11，不是 f11）", () => {
+  // 人类 2026-09-23 定：全屏用 F11 —— 快捷键面板与命令面板都显示它，
+  // 而 normalizeKey 存的是小写 `f11`，所以这里必须有一步大写。
+  assert.equal(keyLabel("f11"), "F11");
+  assert.equal(keyLabel("f1"), "F1");
+  assert.equal(keyLabel("f12"), "F12");
+  assert.equal(keyLabel("tab"), "Tab", "表里有的走表");
+  assert.equal(keyLabel("p"), "P", "单字符键照旧大写");
+});

@@ -12,24 +12,22 @@
 @import "./styles/motion.css";
 
 /*
- * 直方图只画三条完整路径，交叠颜色交给合成器：深色底用 lighten、浅色底用 darken。
- * 这比逐段切七种交叠区域更快，也不会在曲线交叉处留下亚像素空缝。
- * 用 lighten/darken 而不是 screen/multiply：后两者在三色相交处会分别冲到接近白 / 接近黑，
- * 三通道反而看不出区别（人类 2026-09-23 报「太冲」）。
+ * 直方图**不用混合模式**（两套逻辑都不用）：
+ *   * 全通道模式：7 个区域填**固定色**（`--label-*` 六色 + `--hist-triple`），
+ *     层与层后画盖前画 —— 黄/青/紫/灰就是令牌里那个色，**改色只改令牌**；
+ *   * 点亮单通道：选中那条在前台、另两条半透明，**自然叠加**（不处理混色）。
+ *
+ * 三种历史方案都错了，别再回去（人类 2026-09-23 重申「是固定色不是自然叠加」）：
+ *   * `screen` / `multiply`：三色相交分别冲到接近白 / 接近黑，看不出是哪个通道；
+ *   * `lighten`：取逐通道最大值，红+蓝变**粉**、绿+蓝变**青** ——「怎么冒出来新颜色」。
+ *
+ * 完整口径见 `src/lib/histogram.ts` 的 `HISTOGRAM_LAYER_ORDER` 与 DESIGN.md §13.1。
  */
-.histogram-channel {
-  /*
-   * 三条通道的交叠色：**不要**用 screen —— 三色相交处会堆到接近白，
-   * 在深色主题下糊成一块、反而看不出是哪个通道（人类 2026-09-23：「这里太冲了」）。
-   * `lighten` 取逐通道最大值：相交处仍然是有色相的中间调，不会互相相加冲顶。
-   * 浅色主题同理：`multiply` 会压到接近黑，`darken` 只取逐通道最小值。
-   */
-  mix-blend-mode: lighten;
+.histogram-channel,
+.histogram-layer {
+  /* 明确写出来：这里是**自然 alpha 合成**，不是 blend mode */
+  mix-blend-mode: normal;
   transition: opacity 100ms linear;
-}
-
-:root[data-theme="light"] .histogram-channel {
-  mix-blend-mode: darken;
 }
 html,
 body,

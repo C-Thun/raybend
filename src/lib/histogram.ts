@@ -111,3 +111,101 @@ export function histogramPath(
   // 回到右下基线 → 左下基线 → 闭合
   return `${top} L${fmt(last * step)},${fmt(height)} L${fmt(0)},${fmt(height)} Z`;
 }
+
+/* ══════════════════════════════════════════════════════════════
+ * 二、合成：7 个区域用**固定色**（人类 2026-09-19 定、2026-09-23 重申）
+ * ══════════════════════════════════════════════════════════════ */
+
+/**
+ * 7 个区域的**绘制顺序**：先画的在下、后画的盖上去。
+ *
+ * 顺序不是随便定的 —— 它是「区域分类」能正确落色的**唯一**保证：
+ * 每一层都从基线画到自己那条包络，后画的层若也够高就会盖住先画的。
+ * 于是某一列的某个高度上，**最后画到那儿的层**就是那一处的正确区域：
+ *
+ * ```text
+ *   rgb（三者最小） ≤ 两两重叠 ≤ 单通道      ← 高度关系
+ *   按 r → g → b → rg → gb → rb → rgb 画，最后盖上去的总是更「专」的那一类
+ * ```
+ *
+ * 举例（`r=.9 g=.7 b=.2`）：红 0→.9，绿 0→.7 盖住下半，蓝 0→.2 再盖，
+ * 两两重叠 0→.7/.2/.2 继续盖，三色重叠 0→.2 最后盖 —— 最终看得的是
+ * `0–.2 灰（三色）/ .2–.7 黄（红+绿）/ .7–.9 红（仅红）`，与「按交叠关系切 7 块」视觉等价。
+ *
+ * **但比切块好**：相邻区域之间不存在两条各自抗锯齿的边界（后画的那层直接盖在前一层上），
+ * 所以不会出现 2026-09-20 人类报的「细小覆盖区域出现空白」—— 那正是硬切边界的毛病。
+ * 颜色也**不靠混合模式**：每层填令牌里那个色，**改色只改令牌**。
+ */
+export const HISTOGRAM_LAYER_ORDER = ["r", "g", "b", "rg", "gb", "rb", "rgb"] as const;
+
+/** 区域键名就是「这一块里有哪几种通道」 */
+export type HistogramLayerKey = (typeof HISTOGRAM_LAYER_ORDER)[number];
+
+/** 每个区域的**上边界**（0..1 高度数组）；填充一律从基线画到它 */
+export type HistogramLayers = Record<HistogramLayerKey, number[]>;
+
+/**
+ * 把三条通道曲线拆成 7 个区域的上边界。
+ *
+ * ```text
+ *   单通道     r / g / b      = 自己
+ *   两两重叠   rg / gb / rb   = 那一对的**较小者**
+ *   三色重叠   rgb            = 三者的**最小者**
+ * ```
+ *
+ * 脏值（`NaN` / 越界）在这里就夹到 `0..1`，绝不画出画布；
+ * 三条长度不一致时按**最短**的来（后端换了柱数也不会画出斜线）。
+ */
+export function histogramLayers(
+  r: readonly number[],
+  g: readonly number[],
+  b: readonly number[],
+): HistogramLayers {
+  const samples = Math.max(0, Math.min(r.length, g.length, b.length));
+  const zeros = (): number[] => Array.from({ length: samples }, () => 0);
+  const layers: HistogramLayers = {
+    r: zeros(),
+    g: zeros(),
+    b: zeros(),
+    rg: zeros(),
+    gb: zeros(),
+    rb: zeros(),
+    rgb: zeros(),
+  };
+  const clamp01 = (value: number | undefined): number => {
+    const safe = value ?? 0;
+    return Number.isFinite(safe) ? Math.min(1, Math.max(0, safe)) : 0;
+  };
+
+  for (let index = 0; index < samples; index += 1) {
+    const rv = clamp01(r[index]);
+    const gv = clamp01(g[index]);
+    const bv = clamp01(b[index]);
+    layers.r[index] = rv;
+    layers.g[index] = gv;
+    layers.b[index] = bv;
+    layers.rg[index] = Math.min(rv, gv);
+    layers.gb[index] = Math.min(gv, bv);
+    layers.rb[index] = Math.min(rv, bv);
+    layers.rgb[index] = Math.min(rv, gv, bv);
+  }
+  return layers;
+}
+
+/**
+ * 某一列在某个高度上**最终看得的**是哪个区域（与绘制顺序同一套判据）。
+ *
+ * 给单测用：它能直接锁住「7 个区域的固定色语义」而不用跑浏览器 ——
+ * 绘制顺序或包络一旦写错，这里立刻红。
+ */
+export function histogramRegionAt(
+  layers: HistogramLayers,
+  index: number,
+  height: number,
+): HistogramLayerKey | null {
+  let winner: HistogramLayerKey | null = null;
+  for (const key of HISTOGRAM_LAYER_ORDER) {
+    if ((layers[key][index] ?? 0) >= height) winner = key;
+  }
+  return winner;
+}
