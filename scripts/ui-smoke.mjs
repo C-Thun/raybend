@@ -1931,6 +1931,39 @@ try {
     const holeBackground = hole === null ? null : getComputedStyle(hole).backgroundColor;
 
     /*
+     * 工具条**不在 Tab 序列里**（人类 2026-09-23：按 Tab 切面板时会顺手把工具条按钮
+     * focus 上，焦点框还被裁掉一半）。判据：bar 里没有任何 tabIndex >= 0 的元素。
+     */
+    const bar = document.querySelector("[data-toolsbar]");
+    const tabbable = bar === null
+      ? -1
+      : [...bar.querySelectorAll("*")].filter((el) => el.tabIndex >= 0).length;
+
+    /*
+     * 仅 view 档里 LUT 开关**不锁**（人类 2026-09-23 晚）：
+     * 按两下 Tab 进 ③（左列本来收起）→ 点 LUT 开关 → 左列必须真的出现。
+     * 左列宽度是最好的判据（收起时那一列量出来是 0）。
+     */
+    const leftAside = [...document.querySelectorAll("[data-editor-workspace] aside")][0] ?? null;
+    const leftWidth = () => (leftAside === null ? -1 : Math.round(leftAside.getBoundingClientRect().width));
+    const pressTab = async () => {
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    };
+    await pressTab();
+    await pressTab();
+    const leftInViewOnly = leftWidth();
+    const lutButton = document.querySelector("[data-toolsbar-left] button");
+    lutButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    const leftAfterToggle = leftWidth();
+    // 点回去（免得把左列状态带出这段）
+    lutButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    /*
      * 切回「导入」—— 别把后面的断言留在编辑态里（尤其是末尾那条
      * 「改窗口尺寸不许卡死」：它量的是 splitter，而导入工作区才有那套分栏）。
      */
@@ -1943,6 +1976,9 @@ try {
       empty: hole === null ? null : hole.getAttribute("data-viewport-empty"),
       painted: hole === null ? null : hole.getAttribute("data-viewport-painted"),
       holeBackground: holeBackground,
+      toolsbarTabbable: tabbable,
+      leftInViewOnly: leftInViewOnly,
+      leftAfterToggle: leftAfterToggle,
     };
   })()`);
 
@@ -1960,6 +1996,21 @@ try {
     }
     if (editor.holeBackground === "rgba(0, 0, 0, 0)") {
       problems.push("洞口底色是透明的 —— 桌面端会漏出桌面，浏览器里也该先画上底色");
+    }
+    if (editor.toolsbarTabbable > 0) {
+      problems.push(
+        `工具条里有 ${editor.toolsbarTabbable} 个元素还在 Tab 序列里（按 Tab 切档位时会被 focus 上，焦点框会被裁）`,
+      );
+    }
+    if (editor.leftInViewOnly !== 0) {
+      problems.push(
+        `「仅 view」档里左列竟然还占着 ${editor.leftInViewOnly}px（应当收起）`,
+      );
+    }
+    if (!(editor.leftAfterToggle > 0)) {
+      problems.push(
+        `「仅 view」档里点 LUT 开关左列没出现（宽度 ${editor.leftAfterToggle}px）—— 开关被档位锁住了`,
+      );
     }
   }
 

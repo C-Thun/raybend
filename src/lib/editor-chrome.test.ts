@@ -88,13 +88,19 @@ test("在 ③ 档里手动把面板开回来：用户操作优先，且离开时
   );
   assert.equal(
     editorLutVisible(reopened),
-    false,
-    "③ 档左列位置本来就不给，面板开着也看不见",
+    true,
+    "③ 里显式开启要**立刻看得见**（人类 2026-09-23：「按了没反应」是 bug）",
+  );
+  assert.equal(
+    reopened.leftForcedInViewOnly,
+    true,
+    "③ 里的显式开启要亮一枚临时通行证",
   );
 
-  // 离开 ③ 之后按面板自己的状态显示（开着）
+  // 离开 ③ 之后按面板自己的状态显示（开着），通行证要收回去
   const back = tab(reopened, 1);
   assert.equal(editorLutVisible(back), true);
+  assert.equal(back.leftForcedInViewOnly, false, "临时通行证只在本轮 ③ 里有效");
 });
 
 test("在 ③ 档里手动关掉再切回来：保持用户的最后一次意图", () => {
@@ -116,4 +122,41 @@ test("复位回第一档：只动档位，不动面板偏好", () => {
   assert.equal(reset.step, 0);
   assert.equal(reset.lutOpen, true);
   assert.equal(reset.lutHiddenForViewOnly, false);
+});
+
+test("③ 里显式开启：通行证只在本轮有效，再进 ③ 不会留着", () => {
+  const viewOnly = tab(initialEditorChrome(true), 2);
+  const reopened = setEditorLutOpen(viewOnly, true);
+  assert.equal(editorLutVisible(reopened), true);
+
+  // 出 ③ 再进 ③：进的时候照旧关掉（并清掉通行证）
+  const roundTrip = tab(tab(reopened, 1), 2);
+  assert.equal(roundTrip.step, 2);
+  assert.equal(roundTrip.lutOpen, false, "第二次进 ③ 照样先把面板关掉");
+  assert.equal(roundTrip.leftForcedInViewOnly, false, "上一次的通行证不许跨轮");
+  assert.equal(editorLutVisible(roundTrip), false);
+});
+
+test("③ 里再点一次关掉：通行证跟着收回去", () => {
+  const reopened = setEditorLutOpen(tab(initialEditorChrome(true), 2), true);
+  const closed = setEditorLutOpen(reopened, false);
+  assert.equal(closed.lutOpen, false);
+  assert.equal(closed.leftForcedInViewOnly, false);
+  assert.equal(editorLutVisible(closed), false);
+});
+
+test("①② 档里的显式开启不需要通行证（档位本来就给左列）", () => {
+  const second = tab(initialEditorChrome(true), 1);
+  const reopened = setEditorLutOpen(second, true);
+  assert.equal(reopened.leftForcedInViewOnly, false);
+  assert.equal(editorLutVisible(reopened), true);
+});
+
+test("复位：③ 里开出来的面板随复位一起收掉通行证", () => {
+  const forced = setEditorLutOpen(tab(initialEditorChrome(true), 2), true);
+  const reset = resetEditorChrome(forced);
+  assert.equal(reset.step, 0);
+  assert.equal(reset.leftForcedInViewOnly, false);
+  assert.equal(reset.lutHiddenForViewOnly, false);
+  assert.equal(reset.lutOpen, true);
 });

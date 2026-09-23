@@ -507,6 +507,7 @@ export const enUS: Record<MessageKey, string> = {
  "editor.tool.compare": "Compare",
  "editor.tool.pending": "Canvas interaction lands in M3-W5 (this wave brings the tool and its right-panel block)",
  "editor.lut.title": "LUT",
+ "editor.lut.defaultCategory": "Default",
  "editor.lut.newCategory": "New category",
  "editor.lut.newCategoryTitle": "New LUT category",
  "editor.lut.categoryPlaceholder": "Category name",

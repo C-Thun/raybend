@@ -12,16 +12,24 @@
 @import "./styles/motion.css";
 
 /*
- * 直方图只画三条完整路径，交叠颜色交给合成器：深色底用 screen、浅色底用 multiply。
+ * 直方图只画三条完整路径，交叠颜色交给合成器：深色底用 lighten、浅色底用 darken。
  * 这比逐段切七种交叠区域更快，也不会在曲线交叉处留下亚像素空缝。
+ * 用 lighten/darken 而不是 screen/multiply：后两者在三色相交处会分别冲到接近白 / 接近黑，
+ * 三通道反而看不出区别（人类 2026-09-23 报「太冲」）。
  */
 .histogram-channel {
-  mix-blend-mode: screen;
+  /*
+   * 三条通道的交叠色：**不要**用 screen —— 三色相交处会堆到接近白，
+   * 在深色主题下糊成一块、反而看不出是哪个通道（人类 2026-09-23：「这里太冲了」）。
+   * `lighten` 取逐通道最大值：相交处仍然是有色相的中间调，不会互相相加冲顶。
+   * 浅色主题同理：`multiply` 会压到接近黑，`darken` 只取逐通道最小值。
+   */
+  mix-blend-mode: lighten;
   transition: opacity 100ms linear;
 }
 
 :root[data-theme="light"] .histogram-channel {
-  mix-blend-mode: multiply;
+  mix-blend-mode: darken;
 }
 html,
 body,

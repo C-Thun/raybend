@@ -68,13 +68,60 @@ export function sanitizeLutCategories(raw: unknown): LutCategory[] {
   });
 }
 
-/** 分类名是不是已经被占了（**大小写与首尾空格都算同一个**：`Travel` 与 `travel` 撞名）。 */
+/** 分类名是不是已经被占了（**大小写与首尾空格都算同一个**：`Travel` 与 `travel` 撞名）。
+ *
+ * ⚠️ 两侧都要 trim：存储里可能留着带空格的老值（`sanitizeLutCategories` 会清掉，
+ * 但用户手改过 localStorage 就说不准），只 trim 入参的话就认不出它 —— 那样
+ * 默认分类的保护会漏（实测：名字写成 ` default ` 时又会新建一个）。
+ */
 export function hasCategoryNamed(
   categories: readonly LutCategory[],
   name: string,
 ): boolean {
   const target = name.trim().toLocaleLowerCase();
-  return categories.some((category) => category.name.toLocaleLowerCase() === target);
+  return categories.some(
+    (category) => category.name.trim().toLocaleLowerCase() === target,
+  );
+}
+
+/**
+ * 「默认分类」的两个名字（中 / 英）。
+ *
+ * 为什么认两个：**不另设字段**（人类 2026-09-23 明确「极简处理」）——
+ * 只靠名字判「已经有一个默认分类了」。于是中英切换不会造出第二个，
+ * 用户把英文名改成“默认分类”也不会被当成两个。
+ */
+export const DEFAULT_LUT_CATEGORY_NAMES = [
+  "默认分类", // i18n-exempt: 存储里的历史值（判重认名单，不是界面文案）
+  "Default", // i18n-exempt: 同上（英文形态）—— 两个都要认，与当前语言无关
+] as const;
+
+/**
+ * 保证分类表里**始终有一个默认分类**（幂等：已有任意一个默认名字就原样返回）。
+ *
+ * 口径（人类 2026-09-23）：
+ *
+ * * **每次启动都查一遍**（调用方在 store 创建时调）—— 用户删了也不拦，下次启动照建；
+ * * 两个名字**任意一个在就不新建**；
+ * * 新建出来的名字跟**当前界面语言**走（`默认分类` / `Default`），
+ *    而不是写死中文 —— 英文界面下凭空出现一个中文分类很怪。
+ *
+ * 重名判定复用 [`hasCategoryNamed`]（大小写不敏感 + 首尾空格），于是一个小写的
+ * `default` 也算数 —— 比严格对名字多一层保护，但**不会**造成任何多余的新建。
+ */
+export function ensureDefaultLutCategory(
+  categories: readonly LutCategory[],
+  defaultName: string,
+  random: () => number = Math.random,
+): LutCategory[] {
+  const wanted = trimmedName(defaultName) ?? DEFAULT_LUT_CATEGORY_NAMES[0];
+  const already = DEFAULT_LUT_CATEGORY_NAMES.some((name) =>
+    hasCategoryNamed(categories, name),
+  );
+  if (already) return [...categories];
+  const id = newLutCategoryId(categories, random);
+  // 放在**最前**：它是默认落到哪个分类的目标（导入 LUT 时的默认项）
+  return [{ id, name: wanted, entries: [] }, ...categories];
 }
 
 /** 建一个分类 id（本地唯一即可；不引第三方 uuid）。 */

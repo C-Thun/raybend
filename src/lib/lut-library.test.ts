@@ -3,9 +3,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  addLutCategory,
-  hasCategoryNamed,
   LUT_NAME_MAX,
+  addLutCategory,
+  ensureDefaultLutCategory,
+  hasCategoryNamed,
   lutCount,
   newLutCategoryId,
   sanitizeLutCategories,
@@ -75,4 +76,52 @@ test("LUT 计数把各分类加起来（空表是 0）", () => {
     ]),
     1,
   );
+});
+
+/* ══════════════════════════════════════════════════════════════
+ * 默认分类（人类 2026-09-23：每次启动查一遍）
+ * ══════════════════════════════════════════════════════════════ */
+
+test("默认分类：没有就建一个，名字跟当前语言走", () => {
+  const zh = ensureDefaultLutCategory([], "默认分类", () => 0.5);
+  assert.equal(zh.length, 1);
+  assert.equal(zh[0]!.name, "默认分类");
+  assert.equal(zh[0]!.entries.length, 0);
+
+  const en = ensureDefaultLutCategory([], "Default", () => 0.5);
+  assert.equal(en[0]!.name, "Default", "英文界面下不该凭空冒出一个中文分类");
+});
+
+test("默认分类：两个名字任意一个在就不新建（双语互认）", () => {
+  // 中文名在 → 英文界面也不新建
+  const hasZh = [{ id: "a", name: "默认分类", entries: [] }];
+  assert.deepEqual(ensureDefaultLutCategory(hasZh, "Default"), hasZh);
+  // 英文名在 → 中文界面也不新建
+  const hasEn = [{ id: "a", name: "Default", entries: [] }];
+  assert.deepEqual(ensureDefaultLutCategory(hasEn, "默认分类"), hasEn);
+  // 大小写 / 首尾空格算同一个（不造近似重名）
+  const hasLower = [{ id: "a", name: " default ", entries: [] }];
+  assert.deepEqual(ensureDefaultLutCategory(hasLower, "默认分类"), hasLower);
+});
+
+test("默认分类：用户删了不拦，下次调用照建（幂等）", () => {
+  const withDefault = ensureDefaultLutCategory([], "默认分类", () => 0.25);
+  // 用户把它删了 → 再查一次又回来了
+  const rebuilt = ensureDefaultLutCategory([], "默认分类", () => 0.25);
+  assert.deepEqual(rebuilt, withDefault, "同样的输入得到同样的一份（不漂）");
+  // 已经有了 → 原样返回（长度不变，不重复）
+  assert.equal(ensureDefaultLutCategory(withDefault, "默认分类").length, 1);
+  // 顺序：新建的排在**最前**（它是导入 LUT 时的默认项）
+  const withUser = ensureDefaultLutCategory(
+    [{ id: "u", name: "旅行", entries: [] }],
+    "默认分类",
+    () => 0.1,
+  );
+  assert.equal(withUser[0]!.name, "默认分类");
+  assert.equal(withUser[1]!.name, "旅行");
+});
+
+test("默认分类：默认名字是垃圾时退回中文名（存储里的脏值不能让面板起不来）", () => {
+  const built = ensureDefaultLutCategory([], "   ", () => 0.5);
+  assert.equal(built[0]!.name, "默认分类");
 });

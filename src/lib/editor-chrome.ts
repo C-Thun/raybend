@@ -16,7 +16,11 @@
  *   本来关着就什么都不做；
  * * **离开 ③ 时**，如果刚才是「我关的」就开回来；**空①② 两档不碰它**（保持用户的开关状态）；
  * * **任何档位下**，用户点 `toolsbar left` 都能把面板开回来 / 关掉 —— 用户操作永远优先，
- *   所以显式开关动作会**清掉**「我关的」这条记忆。
+ *   所以显式开关动作会**清掉**「我关的」这条记忆；
+ * * ⤴️ 补一条（人类 2026-09-23 晚）：「用户操作优先」要**真的看得到效果** ——
+ *   在 ③ 里点开关，面板就得在 ③ 里开出来（而不是只把意图记下来、等出了 ③ 才显形）。
+ *   所以 ③ 里显式开启会亮一枚临时通行证（`leftForcedInViewOnly`），
+ *   它**只在本次 ③ 期间有效**，进出 ③ 都会被清掉。
  *
  * 为什么写成纯函数：这三条规则要组合四种情形（本来关 / 本来开 / 在③里手动开回来 / 来回切两轮），
  * 靠肉眼在组件里验太贵；而它没有任何 UI 依赖，最适合做成可测的状态机
@@ -44,11 +48,22 @@ export interface EditorChromeState {
   lutOpen: boolean;
   /** 「进 仅view 时被我关掉了」的记忆（会话级） */
   lutHiddenForViewOnly: boolean;
+  /**
+   * 【仅在 ③（仅 view）里有意义】用户在 ③ 里显式把左列面板开回来了。
+   *
+   * 为何需要它：③ 档的档位表说「左列位置不给」，而如果可见性只由档位决定，
+   * 用户在 ③ 里点开关就会「按了没反应」（人类 2026-09-23 报的就是这个）。
+   * 这一位是**临时通行证**：只在当前这次 ③ 期间有效，进出 ③ 都清掉。
+   *
+   * 名字带 `Left` 而不是 `Lut`：以后左列会有多个面板（`.pd` 明确要按多面板设计），
+   * 人类要的是「**不锁任何左列面板开关**」，所以这枚通行证属于整个左列。
+   */
+  leftForcedInViewOnly: boolean;
 }
 
 /** 初始状态：档位在第一档，面板开关来自持久化偏好。 */
 export function initialEditorChrome(lutOpen: boolean): EditorChromeState {
-  return { step: 0, lutOpen, lutHiddenForViewOnly: false };
+  return { step: 0, lutOpen, lutHiddenForViewOnly: false, leftForcedInViewOnly: false };
 }
 
 /** 用户点 `toolsbar left`：显式意图，覆盖「我关的」那条记忆（用户操作优先）。 */
@@ -56,7 +71,13 @@ export function setEditorLutOpen(
   state: EditorChromeState,
   open: boolean,
 ): EditorChromeState {
-  return { ...state, lutOpen: open, lutHiddenForViewOnly: false };
+  return {
+    ...state,
+    lutOpen: open,
+    lutHiddenForViewOnly: false,
+    // 在 ③ 里显式开启 = 临时越过档位（否则「点了没反应」）；其余情况一律清掉
+    leftForcedInViewOnly: open && isLastChromeStep(MODE, state.step),
+  };
 }
 
 /** 用户按 `Tab`：在 editor 的三档里循环，并处理 ③ 的进出。 */
@@ -69,19 +90,26 @@ export function stepEditorTab(state: EditorChromeState): EditorChromeState {
   const leavingViewOnly = !isLastChromeStep(MODE, step) && isLastChromeStep(MODE, current);
 
   if (enteringViewOnly) {
-    // 开着才关（本来关着 ⇒ 无动作，也不留记忆）
+    // 进 ③：关掉（开着的话）+ 记住是我关的；同样清掉上一次 ③ 留下的通行证
+    const next = { ...state, step, leftForcedInViewOnly: false };
     return state.lutOpen
-      ? { ...state, step, lutOpen: false, lutHiddenForViewOnly: true }
-      : { ...state, step };
+      ? { ...next, lutOpen: false, lutHiddenForViewOnly: true }
+      : next;
   }
   if (leavingViewOnly && state.lutHiddenForViewOnly) {
-    return { ...state, step, lutOpen: true, lutHiddenForViewOnly: false };
+    return {
+      ...state,
+      step,
+      lutOpen: true,
+      lutHiddenForViewOnly: false,
+      leftForcedInViewOnly: false,
+    };
   }
-  return { ...state, step };
+  return { ...state, step, leftForcedInViewOnly: false };
 }
 
 /**
- * LUT 面板这一刻**可不可见**（= 档位允许左列 **且** 面板开着）。
+ * LUT 面板这一刻**可不可见**（= （档位允许左列 **或** ③ 里的临时通行证）**且** 面板开着）。
  *
  * 这一个读数同时服务三处，不要为它们各写一个别名（那正是本项目踩过的坑）：
  *
@@ -91,7 +119,7 @@ export function stepEditorTab(state: EditorChromeState): EditorChromeState {
  * * 挂空态 / 命令可用性判断。
  */
 export function editorLutVisible(state: EditorChromeState): boolean {
-  return chromeAt(MODE, state.step).left && state.lutOpen;
+  return (chromeAt(MODE, state.step).left || state.leftForcedInViewOnly) && state.lutOpen;
 }
 
 /** 右列这一刻在不在（与面板开关无关）。 */
@@ -111,5 +139,5 @@ export function editorChromeName(state: EditorChromeState): string {
 
 /** 复位到第一档（换库 / 换目录时用；面板开关不动 —— 那是用户的持久偏好）。 */
 export function resetEditorChrome(state: EditorChromeState): EditorChromeState {
-  return { ...state, step: 0, lutHiddenForViewOnly: false };
+  return { ...state, step: 0, lutHiddenForViewOnly: false, leftForcedInViewOnly: false };
 }

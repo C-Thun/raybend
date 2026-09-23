@@ -2,30 +2,40 @@
  * `ToolsBar` —— 工具行（`design/main.md` §2.3；三段式见 `design/editor.md` §2.1）。
  *
  * 三条规则，全部来自设计稿：
- *   1. **三段式**：`left` 贴左、中段居中、`right` 贴右（人类 2026-09-23 口述的 editor 形态，
+ *   1. **三段式**：`left` 贴左、中段吃掉剩余宽度、`right` 贴右（人类 2026-09-23 口述的 editor 形态，
  *      术语见 `AGENTS.md` §11.1）；
  *   2. **跟着工作流走**（装配表在 `shell/flow.ts`）；
  *   3. **无内容时整行不渲染** —— 注意是「不存在」，不是「一条空条」。
  *
  * ```text
- * ┌───┬───────────────────────┬───┐
- * │左 │          中           │右 │     左/右：与 workspace 左/右列相关的面板开关
- * └───┴───────────────────────┴───┘     中：该工作流的具体功能按钮（**不指定时的默认段**）
+ * ┌────┬────────────────────────────────┬────┐
+ * │左  │      中段（flex-1，居中）        │右  │
+ * └────┴────────────────────────────────┴────┘
+ *  ↑ 自然宽 + 朝中段的 padding          ↑ 同上，方向相反
  * ```
  *
- * # 为什么中段是「绝对定位铺满整条」而不是普通 flex 子项
+ * # 中段：`flex-1 + overflow-hidden + 两侧 20px 渐变淡出`（人类 2026-09-23 口述）
  *
- * 设计稿要求中段**在整条的正中央**（不是「左右两段之间的剩余空间里居中」）——
- * 后者在左右段宽度不等时会让中段肉眼可见地偏一边。所以中段的容器是
- * `absolute inset-0 + justify-center`：它按**整条的几何中心**对齐，与左右段多宽无关。
+ * * 左 / 右段**没有内容时宽度为 0**（`<Show>` 直接不渲染那一块）；
+ * * 中段**始终存在**，自动扩张、**撑满扣除左右两段后的剩余宽度**，并 `overflow-hidden`；
+ * * 中段内左右各一条**方向相反**的渐变遮罩（左：不透明 → 透明；右：透明 → 不透明，各 20px）：
+ *   内容超宽时先被裁在中段内，再从中段两侧**柔和地淡出**，不是硬切；
+ * * 左 / 右段与中段相接的那条边各留一份 padding（`pr-pad-x` / `pl-pad-x`，
+ *   走密度令牌，随紧凑 / 宽松自然撑开）—— 那是「左右段内容」与「中段内容」之间的分隔隙。
  *
- * # 挤压行为（人类明确）
+ * ⚠️ 一个**有意**的取舍：中段是在**剩余宽度**里居中，不是整条 bar 的几何中心
+ * （左右段宽度不等时中段内容会偏一点）。人类 2026-09-23 明确要这个形态
+ * （「中段自动扩张撑满剩余宽度」），所以 W1 那版「绝对定位铺满整条、按几何中心对齐」
+ * 已经被替换掉了 —— 别按旧注释改回去。
  *
- * 窗口变窄、中段按钮变长时，**中段被左右两段的底纹「盖住」** —— 用的是
- * **渐变淡出**（左右段底纹向中间渐隐），不是硬边 + 阴影，也不是按钮互相叠错位。
- * 实现就是左右段各挂一条 `pointer-events-none` 的渐变（`from-surface-main to-transparent`）：
- * 它压在**中段上面**（`z-10`），把被挤压的部分柔和地吃掉；`overflow-hidden` 保证
- * 中段再长也不会把页面撑出横向滚动。
+ * # 整条 bar 退出 `Tab` 序列（人类 2026-09-23 要求）
+ *
+ * 桌面应用里 `Tab` 是**切面板档位**的功能键（editor / import / browse 都这么用），
+ * 而浏览器的默认行为会顺手把焦点移到工具条上的按钮 —— 现象是「按一下 Tab，面板切了，
+ * 按钮上还套了一个被裁掉一半的焦点框」（真机反馈）。所以挂载后把所有**本来在 Tab 序列里**
+ * 的后代标成 `tabindex="-1"`：仍然可点、仍能被快捷键触发，只是不再参与 Tab 遍历
+ * （输入框之间用 Tab 跳转那种有用场景不在这一条 bar 上）。工具随工作流变化，
+ * 所以用 `MutationObserver` 跟着补。
  *
  * 「批量排除」是**反转**语义（`DESIGN.md` §12.2）：把选中的未排除项排除、
  * 已排除项恢复。所以按钮文字与外观恒定，**没有**「反排除」按钮；
@@ -35,7 +45,7 @@
  * 所以这里只接一个 `hasSelection` 布尔量与点击回调。
  */
 
-import { For, Show, type Component, type JSX } from "solid-js";
+import { For, onCleanup, onMount, Show, createEffect, type Component, type JSX } from "solid-js";
 import { Dynamic } from "solid-js/web";
 import { IconBan } from "@tabler/icons-solidjs";
 import { Button } from "../components/ui/Button.tsx";
@@ -79,6 +89,35 @@ export function ToolsBar(props: ToolsBarProps) {
   const tools = () => toolsFor(props.store.workflow());
   const hasCenter = (): boolean => tools().length > 0 || props.hasExtraTools === true;
 
+  let bar: HTMLDivElement | undefined;
+
+  /*
+   * 让整条 bar 退出 Tab 序列（见文件头）。只标「本来 tabIndex >= 0」的元素：
+   * 那是「会参与 Tab 遍历」的判据（普通 div 的 tabIndex 是 -1，不用管）。
+   */
+  const stripTabStops = (root: HTMLElement): void => {
+    for (const element of root.querySelectorAll<HTMLElement>("*")) {
+      if (element.tabIndex >= 0) element.setAttribute("tabindex", "-1");
+    }
+  };
+
+  onMount(() => {
+    if (bar === undefined) return;
+    const root = bar;
+    stripTabStops(root);
+    const observer = new MutationObserver(() => stripTabStops(root));
+    // 只看结构变化：**别监听 attributes** —— 我们自己写的 tabindex 会把它变成自激循环
+    observer.observe(root, { childList: true, subtree: true });
+    onCleanup(() => observer.disconnect());
+  });
+
+  // 工作流 / 工具集变化会换掉一批按钮：MutationObserver 会跟着补，这里再兜一次同步调用
+  createEffect(() => {
+    void props.store.workflow();
+    void props.hasSelection;
+    if (bar !== undefined) stripTabStops(bar);
+  });
+
   return (
     <Show
       when={
@@ -92,11 +131,22 @@ export function ToolsBar(props: ToolsBarProps) {
          * 很容易找错地方（2026-09-19 加色标断言时正踩了这个）。
          */
         data-toolsbar
-        class="relative flex h-bar-tool-h shrink-0 items-center overflow-hidden bg-surface-main px-pad-x"
+        ref={bar}
+        class="relative flex h-bar-tool-h shrink-0 items-center bg-surface-main px-pad-x"
       >
-        {/* 中段：铺满整条的绝对层 → 内容落在**这条带的正中央**（见文件头） */}
-        <div class="pointer-events-none absolute inset-0 flex items-center justify-center">
-          <div class="pointer-events-auto flex items-center gap-1">
+        {/* 左段：贴左；宽度由内容自然撑开；朝中段那一侧留一份密度相关的 padding */}
+        <Show when={props.hasLeftTools === true}>
+          <div data-toolsbar-left class="flex shrink-0 items-center gap-1 pr-pad-x">
+            {props.left}
+          </div>
+        </Show>
+
+        {/*
+          中段：吃掉剩余宽度（`flex-1` + `min-w-0` 才能在窄窗口下真正收缩），
+          `overflow-hidden` 保证内容不会跑到 bar 外面，两侧的渐变把溢出柔化掉。
+        */}
+        <div class="relative min-w-0 flex-1 self-stretch overflow-hidden">
+          <div class="flex h-full items-center justify-center gap-1">
             <For each={tools()}>
               {(tool) => (
                 <Button
@@ -111,26 +161,13 @@ export function ToolsBar(props: ToolsBarProps) {
             </For>
             {props.children}
           </div>
+          <FadeEdge side="left" />
+          <FadeEdge side="right" />
         </div>
 
-        {/* 左段：贴左；右侧那条渐变把挤压过来的中段柔化掉 */}
-        <Show when={props.hasLeftTools === true}>
-          <div
-            data-toolsbar-left
-            class="relative z-10 flex shrink-0 items-center gap-1"
-          >
-            {props.left}
-            <FadeToRight />
-          </div>
-        </Show>
-
-        {/* 右段：贴右（`ml-auto` 把它顶到最右），渐变朝左 */}
+        {/* 右段：贴右（中段是 `flex-1`，它自然被顶到最右）；朝中段那一侧同样留 padding */}
         <Show when={props.hasRightTools === true}>
-          <div
-            data-toolsbar-right
-            class="relative z-10 ml-auto flex shrink-0 items-center gap-1"
-          >
-            <FadeToLeft />
+          <div data-toolsbar-right class="flex shrink-0 items-center gap-1 pl-pad-x">
             {props.right}
           </div>
         </Show>
@@ -139,22 +176,23 @@ export function ToolsBar(props: ToolsBarProps) {
   );
 }
 
-/** 挤压时的柔和收边（向右渐隐）。`pointer-events-none` 是必须的 —— 它盖在中段上面。 */
-function FadeToRight(): JSX.Element {
+/**
+ * 中段一侧的渐变淡出（宽 20px = `w-5`，人类：「过渡设个 20 像素左右就行」）。
+ *
+ * 压在内容上面（`z-10`）并且 `pointer-events-none` —— 它只是「视觉上把溢出吃掉」，
+ * 不参与命中（否则中段边缘的按钮会点不到）。
+ */
+function FadeEdge(props: { side: "left" | "right" }): JSX.Element {
   return (
     <span
       aria-hidden="true"
-      class="pointer-events-none absolute top-0 left-full h-full w-10 bg-linear-to-r from-surface-main to-transparent"
-    />
-  );
-}
-
-/** 同上，朝左（右段用）。 */
-function FadeToLeft(): JSX.Element {
-  return (
-    <span
-      aria-hidden="true"
-      class="pointer-events-none absolute top-0 right-full h-full w-10 bg-linear-to-l from-surface-main to-transparent"
+      data-toolsbar-fade={props.side}
+      class={[
+        "pointer-events-none absolute inset-y-0 z-10 w-5",
+        props.side === "left"
+          ? "left-0 bg-linear-to-r from-surface-main to-transparent"
+          : "right-0 bg-linear-to-l from-surface-main to-transparent",
+      ].join(" ")}
     />
   );
 }

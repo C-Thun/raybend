@@ -519,6 +519,7 @@ export const zhCN = {
  "editor.tool.compare": "对比",
  "editor.tool.pending": "画布交互在 M3-W5 接入（这一波先立工具与右栏控制块）",
  "editor.lut.title": "LUT",
+ "editor.lut.defaultCategory": "默认分类",
  "editor.lut.newCategory": "新建分类",
  "editor.lut.newCategoryTitle": "新建 LUT 分类",
  "editor.lut.categoryPlaceholder": "分类名称",
@@ -604,6 +605,4 @@ export const zhCN = {
  "cmd.editor.compare": "对比工具",
  "cmd.editor.chrome": "切换编辑面板（左右 → 右 → 仅图）",
  "cmd.editor.toBrowse": "回浏览看网格",
-
-
 } as const;

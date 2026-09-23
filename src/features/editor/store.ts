@@ -20,6 +20,7 @@
 import { createSignal } from "solid-js";
 
 import type { EditorRenderState } from "../../api/types.ts";
+import { t } from "../../i18n/index.ts";
 
 import {
   initialEditorChrome,
@@ -40,6 +41,7 @@ import {
 } from "../../lib/editor-prefs.ts";
 import {
   addLutCategory,
+  ensureDefaultLutCategory,
   toggleExpandedCategory,
   type LutCategory,
 } from "../../lib/lut-library.ts";
@@ -158,11 +160,30 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
     }
   })();
 
+  /*
+   * **默认分类**（人类 2026-09-23）：每次启动都查一遍，`默认分类` / `Default`
+   * 两个名字任意一个在就不新建；没有就按**当前界面语言**建一个。
+   * 用户删了不拦（开源软件不讲究那么多），下次启动照建。
+   *
+   * 补出来的那一次顺手落盘 —— 之后每次启动都是恒等的（不会反复写存储）。
+   */
+  const initialCategories = ensureDefaultLutCategory(
+    initial.lutCategories,
+    t("editor.lut.defaultCategory"),
+  );
+  if (initialCategories.length !== initial.lutCategories.length) {
+    try {
+      writePrefs({ lutOpen: initial.lutOpen, lutCategories: initialCategories });
+    } catch {
+      // 写不进去不影响这次会话（偏好是锦上添花）
+    }
+  }
+
   const [chrome, setChrome] = createSignal<EditorChromeState>(
     initialEditorChrome(initial.lutOpen),
   );
   const [categories, setCategories] = createSignal<LutCategory[]>([
-    ...initial.lutCategories,
+    ...initialCategories,
   ]);
   const [expanded, setExpanded] = createSignal<string | null>(null);
   const [tool, setTool] = createSignal<EditorTool | null>(null);
