@@ -150,3 +150,43 @@ cargo run -p raybend --example avif-probe
 8. 二级锁的照片：右栏参数整列禁用并写明原因。
 
 <!-- 列表被中间那句说明打断过，这里把编号接上，别让 markdown lint 认为编号跳了 -->
+
+---
+
+## 7. 追加：真机「卡在正在载入照片」的定位与修复（同日）
+
+人类在 Windows 产物上验编辑时，**照片一直装不出来**（界面停在「正在载入照片」）。
+两个原因叠在一起：
+
+### 7.1 直接原因：Windows 的 `raybend-raw-worker.exe` 是过期的
+
+| 证据 | 结果 |
+| --- | --- |
+| `grep -c linear16 C:\rb-target\...\raybend-raw-worker.exe` | **0**（Sep 19 的产物，不认 `linear16`） |
+| 对照：WSL 侧 `target/debug/raybend-raw-worker` | 19（Sep 24 的产物） |
+
+`raybend-raw-worker` 是 **`raybend` 包里的 bin 目标**，而 Windows 构建命令只选
+`-p raybend-desktop` ⇒ **它根本不会被构建**（`spike-win.mjs` 当年选了两个包，所以 Sep 19 有一份）。
+于是「主程序新、worker 旧」→ 编辑器的线性解码在真机上一直失败。
+
+### 7.2 为什么失败没被看见：错误被「过期结果」吞掉了
+
+显影线程发结果 → 渲染线程发现 `outcome.id != latest_job` → 丢弃。
+换照片时前端是**先后脚**发两条（`SetPhoto` 带路径、`SetParams` 不带），而显影线程的
+「只留最新任务」会把带路径的那条**顶掉** ⇒ 手里没有源 ⇒ `continue` ⇒ **永远不发结果** ⇒
+界面永远停在「正在载入照片」。**失败被静默吃掉，这才是真正难查的地方。**
+
+### 7.3 三处修复（都要留着）
+
+1. `merge_jobs`（`src-tauri/src/editor.rs`）：排队任务**合成**而不是替换，
+   `photo: newer.photo.or(older.photo)` —— 参数任务不许把照片带走；
+   另加 `wanted_photo` 把「要看哪张」粘在显影线程里（+ 单测 4 组断言）。
+2. **协议版本握手**（`raw/worker.rs`）：`PROTOCOL_VERSION = 2`、`PROTOCOL_TAG`；
+   请求盖章 / 响应回执，对不上就**当面报错**并给出重建命令（旧 worker 报 0 ⇒ 必被抓）。
+3. **构建与核对**：
+   * `pnpm debug:win` 的 cargo 命令加上 `-p raybend`（与 `spike-win.mjs` 一致）；
+   * `pnpm check:win` 增加第 3 项：worker 必须**存在**、**不比 Rust 源码旧**、
+     且**二进制里有当前的 `PROTOCOL_TAG`**（标签从 Rust 源码里读，避免两处漂移）；
+   * `AGENTS.md` §5.3 记成第 7 条硬规矩（附「主程序对了 ≠ 子进程对了」这条同族教训）。
+
+> 修复后 `pnpm check:win` 在**旧产物上如实报红**（已实测），这就是它该有的样子。

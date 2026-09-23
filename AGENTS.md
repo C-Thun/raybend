@@ -313,11 +313,11 @@ pnpm release patch --dry-run   # 先看计划
 pnpm build                              # ① WSL 里产出 dist/
 export CARGO_TARGET_DIR='C:\rb-target\raybend'
 export WSLENV='CARGO_TARGET_DIR'        # ② 跨 WSL→Windows 透传环境变量（cmd 的 set 经互操作不可靠）
-cmd.exe /c 'pushd \\wsl.localhost\Ubuntu-24.04\home\andares\repos\c-thun\raybend & cargo build -p raybend-desktop --features custom-protocol'
+cmd.exe /c 'pushd \\wsl.localhost\Ubuntu-24.04\home\andares\repos\c-thun\raybend & cargo build -p raybend-desktop -p raybend --features custom-protocol'
 /mnt/c/rb-target/raybend/debug/raybend-desktop.exe   # ③ 运行（产物在 C: 本地）
 ```
 
-**四条硬规矩（实测踩坑）：**
+**八条硬规矩（实测踩坑）：**
 
 1. **Windows 构建的产物必须落在 Windows 本地盘**（`C:\rb-target\...`）。9p 共享（`\\wsl.localhost`）不支持 rustc 增量编译的锁文件语义，会报 `os error -2147024895`，且会把 Windows 产物污染进 WSL 的 `target/`。
 2. **跨 WSL→Windows 传环境变量用 `WSLENV`**，不要用 cmd 的 `set VAR=x & ...`（`&` 前的空格会进值，且引号经互操作会丢）。
@@ -339,7 +339,15 @@ cmd.exe /c 'pushd \\wsl.localhost\Ubuntu-24.04\home\andares\repos\c-thun\raybend
    另：Tauri 的平台配置合并是 **RFC 7396 merge patch** —— **数组会被整体替换**，
    所以那个文件必须重复整份窗口配置，改主配置的窗口尺寸时别忘了同步它。
 
-7. **先 `pnpm build` 再构建 Windows，构建完必须 `pnpm check:win`**（2026-09-16 血的教训）：
+7. **Windows 构建必须带上 `-p raybend`**（2026-09-24 教训）：`raybend-raw-worker` 是
+   `raybend` 包里的 **bin 目标**，只选 `raybend-desktop` 时**根本不会被构建** ——
+   于是「主程序是新的、worker 是旧的」，而旧 worker 不认新协议：
+   表现是**编辑器永远卡在「正在载入照片」**（那次卡了整整一轮人工测试）。
+   现在 `pnpm check:win` 会核对 worker 的**内容**（二进制里必须有当前 `PROTOCOL_TAG`）
+   与时间（不比 Rust 源码旧），过期直接报错。
+   另外主程序与 worker 之间还有**协议版本握手**：对不上会当面报错并给出重建命令，
+   不会再静默失败。
+8. **先 `pnpm build` 再构建 Windows，构建完必须 `pnpm check:win`**（2026-09-16 血的教训）：
    `dist/` 是**编译期嵌进 exe** 的，改了前端不重建 dist，产物里就是旧界面 ——
    而当时「exe 里有资源名」的核对是**假绿**（dist 自己旧，旧名字当然对得上），
    结果让人类拿着「没有修复的版本」白测一轮。
@@ -385,7 +393,10 @@ let dev = !custom_protocol;        // ← dev 由 feature 决定，不是 debug/
 2. 产物**比 `dist/` 新**（否则跑的可能是旧前端）
 3. Agent 侧可做的程序化冒烟：检查 exe 里含的是 **`dist/assets/` 当前的资源文件名**
    （含则说明资源确实被嵌入；内容字节是 brotli 压缩的，搜原始字符串搜不到是正常的）
-4. **换了图标后，「看起来没换」多半是 Windows 的图标缓存，不是产物没换**（2026-09-17 实测）：
+4. **「进程起来了」不等于「功能对了」，而「主程序对了」也不等于「它的子进程对了」**
+   （2026-09-24）：RAW 解码跑在**独立进程**里，主程序重建不会顺带重建它。
+   凡是「主程序 + 伙伴二进制」的形态，验证清单里都要有**伙伴的那一份**。
+5. **换了图标后，「看起来没换」多半是 Windows 的图标缓存，不是产物没换**（2026-09-17 实测）：
    同一个路径的 exe 被覆盖时，资源管理器/任务栏会继续显示旧图标。
    判定要用**证据**，别用眼睛：
    - 文件图标 = exe 的 `RT_ICON` 资源（6 张，与 `src-tauri/icons/icon.ico` 逐字节比对）；

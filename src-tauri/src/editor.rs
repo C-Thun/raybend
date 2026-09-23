@@ -1258,6 +1258,8 @@ fn apply_command(
                 }
                 None => {
                     context.clear_image();
+                    // 抬任务号：在途的结果必须作废（否则它回来时又把这幅画上去）
+                    *latest_job += 1;
                     state.photo_path = None;
                     state.painted_path = None;
                     state.image = None;
@@ -1499,25 +1501,47 @@ impl RenderState {
 ///
 /// 为什么不在渲染线程上算：管线在 1:1 档要几十到一百多毫秒（实测见实施记录），
 /// 放渲染线程会让**拖动/缩放一起卡**。放这里，渲染线程只管画上一张，永远跟手。
+/// 两个排队中的任务合成一个：**取新的，但照片不能被旧的带走**。
+///
+/// ⚠️ 真栽过一次（2026-09-24「照片装载不出来，卡在正在载入照片」）：
+/// 换照片时前端是**先后脚**发两条 —— `SetPhoto`（带路径）之后 `SetParams`
+/// （`loadDevelop` 一回来就会推参数，`photo: None`）。而这里原先「只留最新的」，
+/// 于是那条 `SetParams` 把 `SetPhoto` 整个顶掉 → 显影线程手里没有源 →
+/// 下面那个 `continue` → **永远不发结果** → 界面卡在「正在载入照片」。
+///
+/// `photo: None` 的语义是「用缓存里的源重算」，不是「不要照片了」——
+/// 清空照片走的是另一条路（`RenderCommand::SetPhoto { path: None }`，它不发任务）。
+fn merge_jobs(older: DevelopJob, newer: DevelopJob) -> DevelopJob {
+    DevelopJob {
+        photo: newer.photo.or(older.photo),
+        ..newer
+    }
+}
+
 fn develop_loop(receiver: Receiver<DevelopJob>, commands: Sender<RenderCommand>, max_texture: u32) {
     let mut cached: Option<CachedSource> = None;
+    // 最近一次被告知要显示的照片（**粘住**：参数任务不该把「要看哪张」弄丢）
+    let mut wanted_photo: Option<String> = None;
 
     while let Ok(job) = receiver.recv() {
-        // 队列里躺着的时候就可能已经过期了：先看通道里还有没有更新的（有就跳过这一个）
+        // 队列里躺着的时候就可能已经过期了：先看通道里还有没有更新的（合成，不是替换）
         let mut job = job;
         loop {
             match receiver.try_recv() {
-                Ok(newer) => job = newer,
+                Ok(newer) => job = merge_jobs(job, newer),
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => return,
             }
+        }
+        if let Some(path) = job.photo.clone() {
+            wanted_photo = Some(path);
         }
 
         // ① 需要的话先解码线性源（换照片 / 上一张解失败过）
         let mut decode_ms = None;
         let mut as_shot_temperature;
         let mut origin = "bitmap".to_string();
-        if let Some(path) = job.photo.clone()
+        if let Some(path) = wanted_photo.clone()
             && cached.as_ref().is_none_or(|entry| entry.path != path)
         {
             let started = std::time::Instant::now();
@@ -1555,7 +1579,10 @@ fn develop_loop(receiver: Receiver<DevelopJob>, commands: Sender<RenderCommand>,
         }
 
         let Some(entry) = cached.as_mut() else {
-            continue; // 还没照片（前端先发 SetParams 后发 SetPhoto 的窗口期）
+            // 只有「还没让显示过任何照片」才会走到这里（开局那一条参数任务）。
+            // 一旦要过照片，`wanted_photo` 就粘住了 —— 见 `merge_jobs` 的注释。
+            eprintln!("[editor] 参数任务先到、还没有照片可算（job #{}）：跳过", job.id);
+            continue;
         };
         as_shot_temperature = entry.as_shot_temperature;
         origin = entry.origin.clone();
@@ -1644,6 +1671,44 @@ struct LinearSource {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn job(id: u64, rev: u64, photo: Option<&str>) -> DevelopJob {
+        DevelopJob {
+            id,
+            rev,
+            photo: photo.map(str::to_string),
+            tier: ImageTier::Preview,
+            params: DevelopParams::default(),
+            curves: CurveSet::default(),
+        }
+    }
+
+    #[test]
+    fn merging_keeps_the_newest_but_never_drops_the_photo() {
+        // 换照片的真实顺序：SetPhoto(A) 之后紧跟一条 SetParams（photo: None）
+        let merged = merge_jobs(job(1, 1, Some("a.rw2")), job(2, 2, None));
+        assert_eq!(merged.id, 2, "任务号/参数取新的");
+        assert_eq!(merged.rev, 2);
+        assert_eq!(
+            merged.photo.as_deref(),
+            Some("a.rw2"),
+            "参数任务不能把照片顶掉 —— 顶掉就是「卡在正在载入照片」那个 bug"
+        );
+
+        // 换到另一张：新照片赢
+        let merged = merge_jobs(job(1, 1, Some("a.rw2")), job(2, 2, Some("b.rw2")));
+        assert_eq!(merged.photo.as_deref(), Some("b.rw2"));
+
+        // 开局那条参数任务：本来就没照片，合并后也没有
+        assert!(merge_jobs(job(1, 1, None), job(2, 2, None)).photo.is_none());
+        // 反过来（参数在前、照片在后）也要拿到照片
+        assert_eq!(
+            merge_jobs(job(1, 1, None), job(2, 2, Some("a.rw2")))
+                .photo
+                .as_deref(),
+            Some("a.rw2")
+        );
+    }
 
     fn args(dpr: f64) -> SetViewportArgs {
         SetViewportArgs {

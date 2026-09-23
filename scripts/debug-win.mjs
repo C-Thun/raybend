@@ -314,7 +314,13 @@ run("② Windows 侧 cargo 构建（debug + custom-protocol）", "cmd.exe", [
    * 的参数互操作会被搅掉，pushd 收到残引号就失败（实测）。pushd 对 UNC 会自动映射
    * 盘符（Z:），那个「UNC 路径不受支持」的警告是预期噪音。仓库路径不含空格。
    */
-  `pushd ${windowsRepoPath()} & cargo build -p raybend-desktop --features custom-protocol`,
+  /*
+   * ⚠️ `-p raybend` 不能少：`raybend-raw-worker` 是 `raybend` 包里的 bin 目标，
+   * 只选 `raybend-desktop` 的话**它根本不会被构建** —— 于是主程序新、worker 旧。
+   * 2026-09-24 就是这么栽的：Windows 那个 worker 停在 9 月 19 日（还不认 `linear16`），
+   * 编辑器的线性解码在真机上一直失败。`check-win-artifact.mjs` 现在会核对它。
+   */
+  `pushd ${windowsRepoPath()} & cargo build -p raybend-desktop -p raybend --features custom-protocol`,
 ], {
   env: { ...process.env, CARGO_TARGET_DIR, WSLENV: "CARGO_TARGET_DIR" },
 });

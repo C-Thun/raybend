@@ -28,7 +28,7 @@
 //! 3. 兜底：**自己**带上标记参数 `--raybend-raw-worker` 重启 —— 打包后的应用只有主程序
 //!    一个可执行文件，这条路径才是发布形态（`src-tauri/src/main.rs` 里有对应的入口）。
 
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -68,7 +68,35 @@ pub fn shared() -> &'static Mutex<RawWorker> {
 
 // ─────────────────────────── 协议 ───────────────────────────
 
-#[derive(Debug, Serialize, Deserialize)]
+/// 线上协议版本。**加/改字段就抬它**（两边同源，重建时自动一致）。
+///
+/// ⚠️ 为什么要有这个（2026-09-24 真机事故）：Windows 侧那个 `raybend-raw-worker.exe`
+/// 是 9 月 19 日建的，而 `linear16` 是 9 月 23 日加的 —— **主程序新、worker 旧**，
+/// 于是编辑器的线性解码在真机上一直失败（旧 worker 只认 `srgb8`）。
+/// 更糟的是这个失败当时被「过期结果」那条路吞掉了，界面表现为**永远卡在「正在载入照片」**。
+/// 光靠「记得重建」不够 —— 所以现在版本对不上就**当面报错**，并且错误里写清怎么修。
+///
+/// 版本史：v1 = 只有 `srgb8`；v2 = 加 `linear16` + `as_shot_temperature`。
+pub const PROTOCOL_VERSION: u32 = 2;
+
+/// 版本标签（**机器可读**，给「产物是不是这一份源码建的」用）。
+///
+/// `scripts/check-win-artifact.mjs` 会在 Windows 的 worker 可执行文件里找这个串 ——
+/// 找不到就说明**主程序新、worker 旧**（2026-09-24 那次真机事故的样子），当场报错。
+/// 它由 worker 启动时打到 stderr，所以一定在二进制里。**改协议就改它**（连同版本号）。
+pub const PROTOCOL_TAG: &str = "raybend-worker-proto-v2";
+
+/// 版本对不上时给人的那句话（客户端与测试共用一份文案）。
+fn protocol_mismatch(theirs: u32) -> String {
+    format!(
+        "RAW worker 协议版本对不上：它报 v{theirs}，本程序要 v{PROTOCOL_VERSION}。\
+         多半是 `raybend-raw-worker` 没跟着一起重建 —— \
+         重建它：`cargo build -p raybend --bin raybend-raw-worker`\
+         （Windows 侧见 AGENTS.md §5.3；`pnpm debug:win` / 发布脚本已带上这一步）。"
+    )
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct Request {
     op: String,
     #[serde(default)]
@@ -83,9 +111,12 @@ struct Request {
     /// 仅 `op = "sleep"` 用（隔离演练）。
     #[serde(default)]
     secs: u64,
+    /// 协议版本（见 [`PROTOCOL_VERSION`]；旧客户端不发 = 0）。
+    #[serde(default)]
+    protocol: u32,
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct Response {
     ok: bool,
     #[serde(default)]
@@ -106,6 +137,9 @@ struct Response {
     as_shot_temperature: Option<f32>,
     #[serde(default)]
     payload_len: u64,
+    /// 协议版本回执（旧 worker 不发这个字段 = 0 ⇒ 客户端据此判定「它过期了」）。
+    #[serde(default)]
+    protocol: u32,
 }
 
 /// 像素形态（协议层的字符串是稳定接口，**不要改**）。
@@ -344,6 +378,7 @@ impl RawWorker {
             allow_preview: false,
             format: None,
             secs: 0,
+            ..Request::default()
         };
         let (resp, _) = self.round_trip_raw(&req)?;
         if resp.ok {
@@ -364,6 +399,7 @@ impl RawWorker {
             allow_preview: false,
             format: None,
             secs: 0,
+            ..Request::default()
         };
         let (resp, _) = self.round_trip_raw(&req)?;
         if resp.ok {
@@ -384,6 +420,7 @@ impl RawWorker {
             allow_preview: false,
             format: None,
             secs,
+            ..Request::default()
         };
         let (resp, _) = self.round_trip_raw(&req)?;
         if resp.ok {
@@ -407,6 +444,7 @@ impl RawWorker {
             allow_preview: req.allow_preview,
             format: Some(format.as_str().to_string()),
             secs: 0,
+            ..Request::default()
         };
         let pair = match self.round_trip_raw(&wire) {
             Ok(pair) => pair,
@@ -464,6 +502,7 @@ impl RawWorker {
             allow_preview: false,
             format: None,
             secs: 0,
+            ..Request::default()
         };
         match exchange(&shared, &handshake, HANDSHAKE_TIMEOUT) {
             Ok((resp, _)) if resp.ok => {}
@@ -494,6 +533,14 @@ impl Drop for RawWorker {
     }
 }
 
+/// 给请求盖上协议版本（**唯一一处** —— 构造点不必各自记得填）。
+fn stamp(wire: &Request) -> Request {
+    Request {
+        protocol: PROTOCOL_VERSION,
+        ..wire.clone()
+    }
+}
+
 /// 一次同步往返：发请求 → 装看门狗 → 读响应。
 ///
 /// ⚠️ **两个坑都在这里，别改回去**：
@@ -511,7 +558,7 @@ fn exchange(
     // ① 发请求（只在写这一段持锁）
     let mut reader = {
         let mut guard = proc.lock().unwrap_or_else(|p| p.into_inner());
-        let body = serde_json::to_vec(wire)
+        let body = serde_json::to_vec(&stamp(wire))
             .map_err(|e| WorkerError::Protocol(format!("请求序列化失败：{e}")))?;
         write_frame(&mut guard.stdin, &body)
             .map_err(|e| WorkerError::Crashed(format!("写请求失败：{e}")))?;
@@ -540,6 +587,10 @@ fn exchange(
     }
 
     match result {
+        // 版本核对：**过期 worker 不许静默工作**（它就是「卡在正在载入照片」那次的原因）
+        Ok((resp, _)) if resp.protocol != PROTOCOL_VERSION => {
+            Err(WorkerError::Protocol(protocol_mismatch(resp.protocol)))
+        }
         Ok(v) => Ok(v),
         // 超时：错误归档成 Timeout（真实的读取错误对用户没意义，超时才是）
         Err(_) if timed_out.load(Ordering::Relaxed) => Err(WorkerError::Timeout(timeout.as_secs())),
@@ -560,7 +611,7 @@ fn exchange(
 }
 
 /// 读一个响应（头 + 可选 payload）。**不碰锁**。
-fn read_response(reader: &mut BufReader<ChildStdout>) -> Result<(Response, Vec<u8>), WorkerError> {
+fn read_response<R: BufRead>(reader: &mut R) -> Result<(Response, Vec<u8>), WorkerError> {
     let head = read_frame(reader)?;
     let resp: Response = serde_json::from_slice(&head)
         .map_err(|e| WorkerError::Protocol(format!("响应头不是合法 JSON：{e}")))?;
@@ -728,6 +779,9 @@ fn describe_exit(status: &std::process::ExitStatus) -> String {
 ///
 /// 返回值就是进程退出码。协议错误返回 2，正常收到 EOF 返回 0。
 pub fn run_worker_main() -> i32 {
+    // 启动就报一次版本：既方便人看日志，也让 [`PROTOCOL_TAG`] 一定在二进制里
+    // （`check-win-artifact.mjs` 靠这个串判断「这个 worker 是不是当前源码建的」）。
+    eprintln!("[worker] raybend-raw-worker {PROTOCOL_TAG}（协议 v{PROTOCOL_VERSION}）就绪");
     let stdin = std::io::stdin();
     let mut input = BufReader::new(stdin.lock());
     let stdout = std::io::stdout();
@@ -814,6 +868,7 @@ fn handle(request: Request) -> (Response, Vec<u8>) {
                                 format: Some("linear16".to_string()),
                                 as_shot_temperature: image.as_shot_temperature,
                                 payload_len,
+                                ..Response::default()
                             },
                             payload,
                         )
@@ -842,6 +897,7 @@ fn handle(request: Request) -> (Response, Vec<u8>) {
                                 format: Some("srgb8".to_string()),
                                 as_shot_temperature: None,
                                 payload_len,
+                                ..Response::default()
                             },
                             image.rgb,
                         )
@@ -869,7 +925,11 @@ fn handle(request: Request) -> (Response, Vec<u8>) {
 }
 
 fn write_response<W: Write>(out: &mut W, resp: &Response, payload: &[u8]) -> std::io::Result<()> {
-    let body = serde_json::to_vec(resp).unwrap_or_else(|_| b"{\"ok\":false}".to_vec());
+    let stamped = Response {
+        protocol: PROTOCOL_VERSION,
+        ..resp.clone()
+    };
+    let body = serde_json::to_vec(&stamped).unwrap_or_else(|_| b"{\"ok\":false}".to_vec());
     write_frame(out, &body)?;
     if !payload.is_empty() {
         out.write_all(payload)?;
@@ -881,6 +941,71 @@ fn write_response<W: Write>(out: &mut W, resp: &Response, payload: &[u8]) -> std
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_stale_worker_is_rejected_loudly_instead_of_silently_wrong() {
+        /*
+         * 2026-09-24 真机事故：主程序是新的、Windows 那个 worker 是旧的，
+         * 于是编辑器的线性解码一直失败 —— 而界面只表现为「卡在正在载入照片」。
+         * 现在旧 worker 的响应（没有 protocol 字段 = 0）必须**当面报错**，
+         * 而且错误里要写清怎么修。
+         */
+        let old: Response =
+            serde_json::from_slice(br#"{"ok":true,"width":4,"height":4,"payload_len":48}"#)
+                .expect("旧协议的头能解出来");
+        assert_eq!(old.protocol, 0, "旧 worker 不发这个字段，解出来就是 0");
+        assert_ne!(old.protocol, PROTOCOL_VERSION, "0 必须被判成过期");
+
+        let message = protocol_mismatch(old.protocol);
+        assert!(message.contains("raybend-raw-worker"), "要说清是哪个文件过期：{message}");
+        assert!(
+            message.contains("cargo build -p raybend --bin raybend-raw-worker"),
+            "要给一条能照抄的命令：{message}"
+        );
+
+        // 同一版本的响应要能过
+        let fresh: Response = serde_json::from_slice(
+            format!(r#"{{"ok":true,"protocol":{PROTOCOL_VERSION}}}"#).as_bytes(),
+        )
+        .expect("新协议的头能解出来");
+        assert_eq!(fresh.protocol, PROTOCOL_VERSION);
+    }
+
+    #[test]
+    fn the_version_is_on_the_wire_in_both_directions() {
+        // 请求：客户端盖章（`exchange` 那一处调的就是这个函数）
+        let raw = Request {
+            op: "decode".to_string(),
+            path: "a.rw2".to_string(),
+            format: Some("linear16".to_string()),
+            ..Request::default()
+        };
+        assert_eq!(raw.protocol, 0, "构造点不管版本，盖章是统一那一步的事");
+        let wire = stamp(&raw);
+        let json = serde_json::to_value(&wire).expect("能序列化");
+        assert_eq!(json["protocol"], PROTOCOL_VERSION);
+        assert_eq!(json["format"], "linear16", "像素形态照旧在线上");
+        assert_eq!(raw.protocol, 0, "盖章不许改动原来那一份");
+
+        // 响应：worker 盖章（`write_response` 里那一处）—— 盖过之后必须能被解回来
+        let mut buf = Vec::new();
+        write_response(
+            &mut buf,
+            &Response {
+                ok: true,
+                width: 2,
+                height: 2,
+                payload_len: 8, // 头里说有多少字节，读的那边才会去读
+                ..Response::default()
+            },
+            &[0u8; 8],
+        )
+        .expect("写得出去");
+        let mut reader = BufReader::new(std::io::Cursor::new(buf));
+        let (resp, payload) = read_response(&mut reader).expect("读得回来");
+        assert_eq!(resp.protocol, PROTOCOL_VERSION, "worker 的响应必须带版本");
+        assert_eq!(payload.len(), 8);
+    }
 
     #[test]
     fn resolve_worker_never_fails_in_a_dev_tree() {
