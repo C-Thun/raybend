@@ -345,6 +345,27 @@ pub fn luma_of(rgb: [f32; 3]) -> f32 {
     0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]
 }
 
+/// **把线性域那半条链作用到整张图**（分析用）。
+///
+/// 局部色调映射要在「用户已经放好的画面」上估分位数（曝光 / 反差 / 高光 / 黑区都算完了），
+/// 而分析图通常只有全图的 1/4 —— 所以这里不做按行并行（1.5MP 单线程就够），
+/// 而且**与 `render_rgb8` 共用同一组 `chain_linear`/`Resolved`**，不是第二份实现。
+#[must_use]
+pub fn chain_image(source: &LinearImage, params: &DevelopParams) -> LinearImage {
+    let resolved = Resolved::new(params);
+    let mut out = source.clone();
+    for pixel in out.rgb.as_chunks_mut::<3>().0 {
+        for (channel, value) in pixel.iter_mut().enumerate() {
+            let linear = f32::from(*value) / 65535.0;
+            let chained = chain_linear(linear, resolved.gains[channel], &resolved);
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            let encoded = (chained.clamp(0.0, 1.0) * 65535.0 + 0.5) as u32;
+            *value = u16::try_from(encoded.min(65535)).unwrap_or(u16::MAX);
+        }
+    }
+    out
+}
+
 /// LUT 的采样点数（输入域 0..1 上的等距采样，线性插值）。
 ///
 /// 4096 段：曲线与调性都是低频函数，插值误差远小于 1/65535；

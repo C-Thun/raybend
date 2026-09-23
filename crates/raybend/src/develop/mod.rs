@@ -5,6 +5,8 @@
 //! ├── params.rs    参数表（与 src/api/develop-params.json 逐条对齐）+ DevelopParams
 //! ├── color.rs     sRGB 传递函数、色温 ↔ 色度、白平衡增益（唯一一份色彩数学）
 //! ├── curve.rs     单调三次曲线（RGB / R / G / B）
+//! ├── filters.rs   箱式滤波 / 快速引导滤波（边缘保持，局部色调映射的底层算子）
+//! ├── local_tone.rs 动态反差（局部色调映射：压整体光比 + 抬局部反差）
 //! └── pipeline.rs  线性像素 → 参数 → 8bit 显示（参考实现 + LUT 快路径）
 //! ```
 //!
@@ -28,6 +30,8 @@
 
 pub mod color;
 pub mod curve;
+pub mod filters;
+pub mod local_tone;
 pub mod params;
 pub mod pipeline;
 
@@ -35,6 +39,6 @@ pub use color::{linear_to_srgb, srgb_to_linear, temperature_gain_ratio};
 pub use curve::{Curve, CurveChannel, CurveSet};
 pub use params::{Baseline, DevelopParams, Origin, ParamSpec, PARAMS, spec};
 pub use pipeline::{
-    LinearImage, apply_chroma, blacks_curve, chain_linear, contrast_curve, encode_and_curve,
-    highlights_curve, map_pixel_exact, render_rgb8,
+    LinearImage, apply_chroma, blacks_curve, chain_image, chain_linear, contrast_curve,
+    encode_and_curve, highlights_curve, map_pixel_exact, render_rgb8,
 };
