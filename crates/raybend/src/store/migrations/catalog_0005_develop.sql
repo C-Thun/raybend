@@ -29,6 +29,9 @@ CREATE TABLE develop_stacks (
     masks      TEXT,
     -- issue 种类：本轮恒为 'latest'（见文件头；W6 会扩成多 issue）
     issue_kind TEXT    NOT NULL DEFAULT 'latest',
+    -- **拍摄色温**（K）：色温拉杆的基线。它必须跟着 issue 一起存 ——
+    -- 否则「同一个参数」在编辑器（有 as-shot）与缩略图（读不到元数据）会渲染出两种颜色。
+    as_shot_k  REAL,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
 );

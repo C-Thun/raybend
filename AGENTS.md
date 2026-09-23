@@ -485,6 +485,9 @@ Tauri 3.0 已进入 alpha（`3.0.0-alpha.0`），已知关键变更：
       MYP0001.png
       _RAW\
         MYP0001.ORF   # 同名 RAW 放同级的 _RAW/（见 REPOSITORY.md §4.1）
+  cache\              # **库内缓存**（M3-W3 起）：大图（每 issue 一份 AVIF）
+    full\<资产 id>\
+      latest-v6.avif  # 编辑结果；raw-v6.avif = RAW 基础解码
   index.db            # 派生索引（缩略图索引、人脸、相似度）—— 可删可重建；真需要时才建
 ```
 
@@ -492,6 +495,10 @@ Tauri 3.0 已进入 alpha（`3.0.0-alpha.0`），已知关键变更：
 > 导入物落在库根的 `photos/`，`repo.json` 取消（库身份记在 `catalog.db` 内 + 中央 `app.db` 登记）。
 > **完整业务规格见 `REPOSITORY.md`**（库身份 / 同路径多库 / 同库多路径 / 在线离线 / 导入模版 / 序号 / 重名 / RAW 分流 / 目录透传）。
 
+- **缓存分两处**（M3-W3 定）：**小图**（网格 / 胶片带 / 看图的缩略图）在
+  `%LOCALAPPDATA%\raybend\cache\<库 id>\thumbs.db`（几万行小 BLOB，SQLite 合适）；
+  **大图**（每 issue 一张，几百 KB）在**库根**的 `cache/full/`（跟着库走，换机器/搬盘不用重渲染）。
+  两处的编码格式统一 **AVIF 质量 90 / 4:4:4**（人类 2026-09-24 定；将来换 JXL 见 `FUTURE.md` C8）。
 - **真相源规则**：本地编辑/评分/关键词以 **DB 为准**，XMP 只是互操作通道；RAW 永不写回原文件（只写 `.xmp` sidecar）。
 - **写并发**：SQLite 单写者 → 采用**单一写者 actor**（专属线程 + 专属连接，所有写操作串行化），读走连接池；批量事务；`PRAGMA journal_mode=WAL, synchronous=NORMAL, busy_timeout=5000, foreign_keys=ON`。
 - **库身份与多路径**（`REPOSITORY.md` §2）：库身份 = `catalog.db` 内的唯一 ID；`app.db` 记录「库 ID → 多个路径」。

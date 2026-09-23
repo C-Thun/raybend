@@ -390,6 +390,7 @@ const EDITOR_RENDER_STATE_KEYS = [
   "lastError",
   "lastHit",
   "origin",
+  // M3-W3：覆盖层变换（Rust 出的「图像像素 → 洞口 CSS 像素」仿射矩阵）
   "overlayTransform",
   "paintedPath",
   "panX",

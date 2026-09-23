@@ -28,6 +28,13 @@ use std::path::Path;
 
 use image::{DynamicImage, ExtendedColorType, ImageFormat, Rgb, RgbImage};
 
+use image::ImageEncoder;
+
+use crate::develop::curve::{Curve, CurveChannel, CurveSet};
+use crate::develop::params::DevelopParams;
+use crate::develop::pipeline::{LinearImage, render_rgb8};
+use crate::store::develop::DevelopStack;
+
 use crate::error::{Error, Result};
 use crate::media::kind::{MediaKind, kind_of_file};
 
@@ -40,8 +47,54 @@ pub const STRIP_LONG_EDGE: u32 = 192;
 /// 1920 是个折中：绝大多数显示器 1:1 看已经够清楚，解码与缓存代价又远小于原图。
 /// 真正的 1:1 原图（FULL 档）属于后续里程碑，这一版看图先用它。
 pub const SCREEN_LONG_EDGE: u32 = 1920;
-/// JPEG 质量（用户 2026-09-15 定：q82）。
-pub const JPEG_QUALITY: u8 = 82;
+/// **AVIF 的全局口径**（人类 2026-09-24 定）：质量 90、次级采样 4:4:4。
+///
+/// 4:4:4 不是「随手选的参数」：ravif 只有走 **RGB8**（`encode_rgb`）才是 4:4:4，
+/// 走 RGBA8 是 4:2:0 —— 所以缩略图与缓存图**一律丢 alpha** 再编码
+/// （照片本来也没有 alpha；见 [`encode_avif`]）。
+pub const AVIF_QUALITY: u8 = 90;
+
+/// AVIF 编码速度（1 最慢 / 10 最快）。**取 10**，理由是一组实测（22 线程，合成图，
+/// `examples/avif-probe.rs` 跑出来的；真实照片会更低）：
+///
+/// | 尺寸 | 速度 10 | 速度 8 | 同尺寸 JPEG q82 |
+/// | --- | --- | --- | --- |
+/// | 384×288 | 62ms / 5KB | 170ms / 4KB | 5ms / 12KB |
+/// | 1920×1280 | 539ms / 115KB | 1.9s / 82KB | 100ms / 270KB |
+/// | 2560×1707 | 904ms / 208KB | 4.1s / 146KB | 193ms / 481KB |
+///
+/// 慢档位（8）只换来 20–30% 的体积，却要 **3 倍**时间 —— 对一个「随时可能重写」的缓存
+/// 不划算。**没开线程时**（`image` 的 `rayon` feature）同样的速度 10 要 193ms/1920 档，
+/// 慢 8 倍以上，所以线程是必须的。
+pub const AVIF_SPEED: u8 = 10;
+
+/// **AVIF 编码**（全系统缓存图的唯一出口）。
+///
+/// # Errors
+/// 编码器内部错误（尺寸为 0、数据长度对不上…）。
+pub fn encode_avif(rgb: &[u8], width: u32, height: u32) -> Result<Vec<u8>> {
+    if width == 0 || height == 0 {
+        return Err(Error::Unsupported("AVIF 编码：尺寸为 0".to_string()));
+    }
+    let expected = (width as usize) * (height as usize) * 3;
+    if rgb.len() != expected {
+        return Err(Error::Unsupported(format!(
+            "AVIF 编码：像素长度对不上（期望 {expected}，收到 {}）",
+            rgb.len()
+        )));
+    }
+    let mut data = Vec::new();
+    let encoder = image::codecs::avif::AvifEncoder::new_with_speed_quality(
+        &mut data,
+        AVIF_SPEED,
+        AVIF_QUALITY,
+    );
+    // RGB8（不是 RGBA8）⇒ ravif 走 4:4:4 色度采样（人类 2026-09-24 的口径）
+    encoder
+        .write_image(rgb, width, height, image::ExtendedColorType::Rgb8)
+        .map_err(|e| Error::Unsupported(format!("AVIF 编码失败：{e}")))?;
+    Ok(data)
+}
 /// 渲染管线版本：**算法一改就 +1**（缓存靠它自动失效）。
 ///
 /// # v3（2026-09-17）：RAW 从占位图改成真解码
@@ -67,9 +120,13 @@ pub const JPEG_QUALITY: u8 = 82;
 /// 人类看 view 里的纵拍 RAW 依旧是歪的（「感觉和以前一样」）。教训照旧：
 /// **改渲染行为必须和抬版本号在同一个改动里完成**，中间任何一段产出的缓存都会变成毒缓存。
 ///
+/// **第四次（v5 → v6，2026-09-24）**：编码格式从 JPEG 换成 **AVIF**（质量 90 / 4:4:4，
+/// 人类定的全局口径）。这次**同时**改了 `render_sig` 的字面量与常量 —— 正是上面那条纪律。
+/// 旧 JPEG 缓存变成孤儿，由 GC 收走（`cache.rs` 的 `drop_stale_signatures`）。
+///
 /// ⇒ 所以这条纪律的正确用法是：**同一个改动里，改了渲染行为就顺手抬版本**，
 /// 不要「先合并渲染改动、之后再抬」（中间那段时间产出的缓存会带着旧行为却持有新签名）。
-pub const PIPELINE_VERSION: u32 = 5;
+pub const PIPELINE_VERSION: u32 = 6;
 
 /// 缩略图尺度。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
@@ -136,9 +193,26 @@ impl SizeClass {
 #[must_use]
 pub const fn render_sig(size: SizeClass) -> &'static str {
     match size {
-        SizeClass::Grid => "jpeg-q82-grid-v5",
-        SizeClass::Strip => "jpeg-q82-strip-v5",
-        SizeClass::Screen => "jpeg-q86-screen-v5",
+        SizeClass::Grid => "avif-q90-grid-v6",
+        SizeClass::Strip => "avif-q90-strip-v6",
+        SizeClass::Screen => "avif-q90-screen-v6",
+    }
+}
+
+/// **带编辑的渲染签名**：`<基础签名>+e<指纹>`（M3-W3）。
+///
+/// 没编辑过就是基础签名（与旧缓存完全一致 —— 老照片不会因为这次改动而重渲染）。
+/// 编辑过则带上编辑栈的指纹：**改一个参数就换一个签名** ⇒ 自动绕开旧缓存。
+///
+/// ⚠️ 这种「动态签名」让 `drop_stale_signatures` 的 `NOT IN (...)` 判据失效
+/// （它只认那几个静态签名）—— 所以那边的 GC 改成了**前缀匹配**（`cache.rs`）。
+#[must_use]
+pub fn render_sig_with_edit(size: SizeClass, edit: Option<&DevelopStack>) -> String {
+    match edit {
+        Some(stack) if !stack.is_empty() => {
+            format!("{}+e{:016x}", render_sig(size), stack.signature())
+        }
+        _ => render_sig(size).to_string(),
     }
 }
 
@@ -258,11 +332,29 @@ pub fn decode_file(path: &Path, spec: DecodeSpec) -> Result<Option<DecodedSource
 /// * **都不是**（或解不开）返回 `Ok(None)` —— 调用方据此用占位图
 ///   （`REPOSITORY.md` §4.1）。
 pub fn render_file(path: &Path, size: SizeClass) -> Result<Option<Thumb>> {
+    render_file_with_edit(path, size, None)
+}
+
+/// **渲染一个文件，可选套用编辑栈**（M3-W3：缩略图 / 看图反映编辑结果）。
+///
+/// 编辑栈的管线在**缩放之后**跑：管线的调性与色度都是**逐像素**的，
+/// 在缩小的图上跑数学上等价（重采样与逐像素操作几乎可交换），
+/// 代价却只有全尺寸的百分之一 —— 缩略图不必为它付 24MP 的钱。
+///
+/// 编辑栈为空（没编辑过）时与 [`render_file`] 完全一样。
+///
+/// # Errors
+/// 读不到文件 / 解码失败 / 编辑栈里的参数或曲线不合法。
+pub fn render_file_with_edit(
+    path: &Path,
+    size: SizeClass,
+    edit: Option<&DevelopStack>,
+) -> Result<Option<Thumb>> {
     let kind = path
         .file_name()
         .map_or(MediaKind::Other, |n| kind_of_file(&n.to_string_lossy()));
     if kind == MediaKind::Raw {
-        return render_raw_file(path, size);
+        return render_raw_file(path, size, edit);
     }
 
     let bytes = std::fs::read(path)?;
@@ -276,7 +368,7 @@ pub fn render_file(path: &Path, size: SizeClass) -> Result<Option<Thumb>> {
     let orientation = crate::media::exif::read_bytes(&bytes)
         .and_then(|data| data.orientation)
         .map(|raw| crate::media::meta::normalize_orientation(Some(raw)));
-    render_bytes(&bytes, size, orientation)
+    render_bytes_with_edit(&bytes, size, orientation, edit)
 }
 
 /// 给 RAW 缩放时多要的倍数：最终尺寸的 Lanczos 由 [`encode`] 在小图上做，
@@ -284,12 +376,12 @@ pub fn render_file(path: &Path, size: SizeClass) -> Result<Option<Thumb>> {
 const RAW_OVERSAMPLE: u32 = 2;
 
 /// RAW 的渲染（= [`decode_raw_file`] + JPEG 编码）。
-fn render_raw_file(path: &Path, size: SizeClass) -> Result<Option<Thumb>> {
+fn render_raw_file(path: &Path, size: SizeClass, edit: Option<&DevelopStack>) -> Result<Option<Thumb>> {
     let want = size.long_edge().saturating_mul(RAW_OVERSAMPLE).max(1);
     let Some(decoded) = decode_raw_file(path, DecodeSpec::thumb(want))? else {
         return Ok(None);
     };
-    encode(decoded.image, size, decoded.orientation, false).map(Some)
+    encode(decoded.image, size, decoded.orientation, false, edit).map(Some)
 }
 
 /// RAW 的解码：走 worker 进程（`AGENTS.md` §6.3：解码必须在独立进程里）。
@@ -371,10 +463,23 @@ pub fn render_bytes(
     size: SizeClass,
     orientation: Option<u16>,
 ) -> Result<Option<Thumb>> {
+    render_bytes_with_edit(bytes, size, orientation, None)
+}
+
+/// 从内存渲染（可带编辑栈）—— [`render_bytes`] 的完整形态。
+///
+/// # Errors
+/// 解码失败（不是图）返回 `Ok(None)`；编辑栈不合法才是 `Err`。
+pub fn render_bytes_with_edit(
+    bytes: &[u8],
+    size: SizeClass,
+    orientation: Option<u16>,
+    edit: Option<&DevelopStack>,
+) -> Result<Option<Thumb>> {
     let Ok(img) = image::load_from_memory(bytes) else {
         return Ok(None); // 不是能解码的图像（RAW、损坏文件…）
     };
-    encode(img, size, orientation, false).map(Some)
+    encode(img, size, orientation, false, edit).map(Some)
 }
 
 /// 网格/胶片带小图的**最大展示宽高比**（两侧都算：3:1 与 1:3）。
@@ -423,7 +528,42 @@ pub fn clamp_display_aspect(img: DynamicImage, max_aspect: f64) -> DynamicImage 
     img.crop_imm(x, y, width, height)
 }
 
-/// 缩放后编码成 JPEG。
+/// 把编辑栈套到一张**显示像素**（8bit sRGB）上。
+///
+/// 输入是已经解出来、缩好尺寸的显示数据 —— 所以这一步只做「线性化 → 管线 → 回到 8bit」。
+/// 对 JPG / RAW 内嵌预览来说它是**准线性**（8bit 里本来就没有更多信息），
+/// 与编辑器里那条 JPG 路同一个口径（`FUTURE.md` C7 记着收敛点）。
+///
+/// # Errors
+/// 栈里的参数 / 曲线不合法（**不静默跳过** —— 那会让人看到一张「没生效」的图而不知道为什么）。
+fn apply_develop(img: &image::RgbImage, stack: &DevelopStack) -> Result<image::RgbImage> {
+    let (width, height) = img.dimensions();
+    let Some(linear) = LinearImage::from_srgb8(width, height, img.as_raw()) else {
+        return Err(Error::Unsupported("编辑渲染：像素长度与尺寸对不上".to_string()));
+    };
+    let params = DevelopParams::from_values(
+        stack
+            .params
+            .iter()
+            .map(|(id, value)| (id.clone(), *value)),
+        stack.as_shot_k,
+    )
+    .map_err(|e| Error::Unsupported(format!("编辑栈里的参数不合法：{e}")))?;
+    let mut curves = CurveSet::identity();
+    for (channel, points) in &stack.curves {
+        let Some(channel) = CurveChannel::parse(channel) else {
+            return Err(Error::Unsupported(format!("编辑栈里有未知的曲线通道：{channel}")));
+        };
+        let curve = Curve::from_points(points.clone())
+            .map_err(|e| Error::Unsupported(format!("编辑栈里的曲线不合法（{}）：{e}", channel.as_str())))?;
+        curves.set_channel(channel, curve);
+    }
+    let rgb = render_rgb8(&linear, &params, &curves);
+    image::RgbImage::from_raw(width, height, rgb)
+        .ok_or_else(|| Error::Unsupported("编辑渲染：输出尺寸对不上".to_string()))
+}
+
+/// 缩放后编码成 AVIF（全系统缓存图的唯一格式，见 [`encode_avif`]）。
 ///
 /// 用 **Lanczos3** 而不是盒式平均：缩略图是照片软件的「门面」，6000px → 384px 这种
 /// 大幅度缩小时盒式滤波会出现明显的锯齿与摩尔纹。速度实测够用（见
@@ -433,6 +573,7 @@ pub fn encode(
     size: SizeClass,
     orientation: Option<u16>,
     placeholder: bool,
+    edit: Option<&DevelopStack>,
 ) -> Result<Thumb> {
     let img = match orientation {
         Some(o) if o != 1 => apply_orientation(&img, o),
@@ -451,11 +592,12 @@ pub fn encode(
 
     let rgb = resized.to_rgb8();
     let (width, height) = (rgb.width(), rgb.height());
-    let mut data = Vec::new();
-    let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut data, JPEG_QUALITY);
-    encoder
-        .encode_image(&rgb)
-        .map_err(|e| Error::Unsupported(format!("JPEG 编码失败：{e}")))?;
+    // 编辑栈：**没编辑过就一步都不多做**（保持原来那条最快的路）
+    let rgb = match edit {
+        Some(stack) if !stack.is_empty() => apply_develop(&rgb, stack)?,
+        _ => rgb,
+    };
+    let data = encode_avif(rgb.as_raw(), rgb.width(), rgb.height())?;
 
     Ok(Thumb {
         data,
@@ -523,6 +665,16 @@ pub fn apply_orientation(img: &DynamicImage, orientation: u16) -> DynamicImage {
 ///
 /// 字体是手写的 5×7 点阵（只有 R / A / W 三个字母，够用）。
 pub fn placeholder(kind: MediaKind, size: SizeClass) -> Result<Thumb> {
+    let img = placeholder_image(kind, size);
+    encode(DynamicImage::ImageRgb8(img), size, None, true, None)
+}
+
+/// **画**占位图（纯像素，不编码）。
+///
+/// 与 [`placeholder`] 分开是为了可测：AVIF 只有编码器（纯 Rust 那条路没有解码器），
+/// 想断言「字真的画上去了」就只能在这一层看像素。
+#[must_use]
+pub fn placeholder_image(kind: MediaKind, size: SizeClass) -> RgbImage {
     let long = size.long_edge();
     // 占位图按 3:2 画（相机的常见比例），再按尺度等比
     let (w, h) = (long, long * 2 / 3);
@@ -544,8 +696,7 @@ pub fn placeholder(kind: MediaKind, size: SizeClass) -> Result<Thumb> {
         MediaKind::Other => "?",
     };
     draw_text(&mut img, text, FONT_SCALE.max(1));
-
-    encode(DynamicImage::ImageRgb8(img), size, None, true)
+    img
 }
 
 // 占位图配色（这里**故意不引 tokens.css**：它是画布内容不是 UI 组件，
@@ -627,7 +778,19 @@ pub(crate) fn color_of(bytes: &[u8]) -> Rgb<u8> {
     Rgb([(h >> 16) as u8, (h >> 8) as u8, h as u8])
 }
 
-/// JPEG 字节是不是一张「像样的」缩略图（校验用：缓存里存的东西别是坏的）。
+/// **AVIF 字节是不是一张「像样的」图**（校验用：缓存里存的东西别是坏的）。
+///
+/// 认 ISO-BMFF 的 `ftyp` box：偏移 4 处是 `ftyp`，主品牌是 `avif` / `avis`（序列）
+/// / `mif1`（兼容品牌）。**不看文件内容能不能解** —— 那是解码器的事。
+#[must_use]
+pub fn is_valid_avif(bytes: &[u8]) -> bool {
+    bytes.len() > 64
+        && bytes.len() >= 12
+        && &bytes[4..8] == b"ftyp"
+        && matches!(&bytes[8..12], b"avif" | b"avis" | b"mif1")
+}
+
+/// JPEG 字节是不是一张「像样的」图（**导出**与互操作那条路还用 JPEG）。
 #[must_use]
 pub fn is_valid_jpeg(bytes: &[u8]) -> bool {
     matches!(image::guess_format(bytes), Ok(ImageFormat::Jpeg)) && bytes.len() > 64
@@ -744,12 +907,12 @@ mod tests {
     // ---------- 渲染 ----------
 
     #[test]
-    fn renders_jpeg_and_png_to_a_jpeg_thumbnail() {
+    fn renders_jpeg_and_png_to_an_avif_thumbnail() {
         for bytes in [jpeg_of(4000, 3000, [200, 100, 50]), png_of(300, 200)] {
             let t = render_bytes(&bytes, SizeClass::Grid, None)
                 .unwrap()
                 .unwrap();
-            assert!(is_valid_jpeg(&t.data), "输出必须是合法 JPEG");
+            assert!(is_valid_avif(&t.data), "输出必须是合法 AVIF（缓存格式）");
             assert!(t.width <= GRID_LONG_EDGE && t.height <= GRID_LONG_EDGE);
             assert!(!t.placeholder);
         }
@@ -813,7 +976,7 @@ mod tests {
             .unwrap();
         assert_eq!((t.width, t.height), (100, 80));
         // 但也仍然输出合法 JPEG，UI 不用分情况
-        assert!(is_valid_jpeg(&t.data));
+        assert!(is_valid_avif(&t.data));
     }
 
     #[test]
@@ -890,18 +1053,18 @@ mod tests {
                 .unwrap()
                 .unwrap();
             assert!(t.width <= GRID_LONG_EDGE);
-            assert!(is_valid_jpeg(&t.data), "orientation={o} 也应当是合法 JPEG");
+            assert!(is_valid_avif(&t.data), "orientation={o} 也应当是合法 AVIF");
         }
     }
 
     // ---------- 占位图 ----------
 
     #[test]
-    fn placeholder_is_a_valid_jpeg_with_expected_shape() {
+    fn placeholder_is_a_valid_avif_with_expected_shape() {
         for kind in [MediaKind::Raw, MediaKind::Image, MediaKind::Other] {
             let p = placeholder(kind, SizeClass::Grid).unwrap();
             assert!(p.placeholder, "要标出来是占位图");
-            assert!(is_valid_jpeg(&p.data), "{kind:?} 的占位图必须是合法 JPEG");
+            assert!(is_valid_avif(&p.data), "{kind:?} 的占位图必须是合法 AVIF");
             assert_eq!(p.width, GRID_LONG_EDGE);
             assert_eq!(p.height, GRID_LONG_EDGE * 2 / 3);
         }
@@ -911,16 +1074,20 @@ mod tests {
 
     #[test]
     fn placeholder_draws_text_pixels() {
-        // 图上应当真的有字（中间区域出现前景色像素），而不是一片纯色
-        let p = placeholder(MediaKind::Raw, SizeClass::Grid).unwrap();
-        let img = image::load_from_memory(&p.data).unwrap().to_rgb8();
-        // JPEG 是有损的，不能用精确色相等来判断「有字」——按与前景色的**接近程度**数
+        /*
+         * 图上应当真的有字（出现前景色像素），而不是一片纯色。
+         *
+         * 这一条看的是**纯像素那一层**（`placeholder_image`）：纯 Rust 那条路只有
+         * AVIF 编码器、没有解码器，编码后再解回来验像素做不到 —— 而「字画没画上去」
+         * 是绘制的事，与编码格式无关。
+         */
+        let img = placeholder_image(MediaKind::Raw, SizeClass::Grid);
         let near_fg = |px: &Rgb<u8>| {
             px.0.iter()
                 .zip(FG)
                 .map(|(a, b)| a.abs_diff(b) as u32)
                 .sum::<u32>()
-                < 90
+                < 30
         };
         let fg = img.pixels().filter(|px| near_fg(px)).count();
         assert!(fg > 50, "「RAW」字样该画出可见的像素，实际 {fg}");

@@ -39,6 +39,7 @@ import {
 import {
   bindEditorRenderer,
   commitDevelopStack,
+  getDevelopEditTarget,
   getDevelopStack,
   getEditorRenderState,
   resetDevelopStack,
@@ -283,10 +284,24 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
   /** 锚点一变就换纹理（渲染线程自己负责解码与两档切换）。 */
   createEffect(() => {
     if (!rendererBound()) return;
-    const path = currentPath();
-    void setEditorPhoto(path).catch((error: unknown) => {
-      console.error("[editor] 换照片失败", error); // i18n-exempt: 控制台诊断
-    });
+    const assetId = current()?.id;
+    const repositoryId = store.repositoryId();
+    if (assetId === null || assetId === undefined || repositoryId === null) {
+      void setEditorPhoto(null).catch(() => undefined);
+      return;
+    }
+    /*
+     * **编辑落在 RAW 上**（`REPOSITORY.md` §4.1）：位图 + RAW 时要编辑 `_RAW/` 里那个 RAW。
+     * 哪个文件、路径怎么拼由 Rust 侧解析（`develop_edit_target`）—— 前端不拼路径。
+     * 解析失败就退回当前显示的路径（至少还能看/能编辑位图）。
+     */
+    void getDevelopEditTarget(repositoryId, Number(assetId))
+      .then((target) => target ?? currentPath())
+      .catch(() => currentPath())
+      .then((path) => setEditorPhoto(path))
+      .catch((error: unknown) => {
+        console.error("[editor] 换照片失败", error); // i18n-exempt: 控制台诊断
+      });
   });
 
   /**
@@ -306,12 +321,16 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
     void commitDevelopStack(repositoryId, Number(assetId), {
       values: payload.values,
       curves: payload.curves,
+      // 色温基线跟着一起存（否则缩略图那条路会用另一个基线渲染出另一种颜色）
+      asShotK: payload.asShotTemperature,
     })
       .then(() => {
         // 只标「已落库」：库里回读的那一份与刚发出去的一致（Rust 侧会回读一遍验证）。
         // 撤销标签由 `browse` 的 undoState 统一显示（编辑与标记共用一套撤销栈），
         // 这里不再存第二份。
         props.store.markCommitted(rev);
+        // 缩略图要重取：编辑结果变了，旧的那张（SOOC）不该再显示
+        thumbs.clear();
       })
       .catch((error: unknown) => {
         // 落库失败不静默：画面还是对的，但下次换照片会丢 —— 必须让人知道

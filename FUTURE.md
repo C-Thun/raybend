@@ -142,6 +142,24 @@
 
 ---
 
+### C8　缓存与导出的编码格式：**AVIF 起步，JXL 成熟后替换**
+
+* **现状（M3-W3 定，人类 2026-09-24）**：全系统缓存图（缩略图 + 库内大图）统一 **AVIF，
+  质量 90、次级采样 4:4:4**（`thumbnail/render.rs` 的 `AVIF_QUALITY` / `AVIF_SPEED` /
+  `encode_avif`）。人类实测「AVIF 压缩率确实可以」——比 JPEG q82 小 2.3–3 倍。
+* **已知代价**（实测，见 `examples/avif-probe.rs`）：编码慢 6–12 倍
+  （网格 384px：62ms vs JPEG 5ms；1920px：539ms vs 100ms）。所以缩略图那条队列
+  **必须留在后台**，而且 `image` 的 `rayon` feature（ravif 多线程）是必须的 ——
+  不开线程慢 8 倍以上。
+* **将来换 JXL**：等 **JPEG XL 生态成熟**（浏览器/系统解码支持、纯 Rust 编码器速度）之后，
+  用 JXL 替换 AVIF —— 压缩率与画质都更好、而且有损/无损/alpha 一套搞定。
+  **触发条件**：换之前先量一次编码耗时（照 `avif-probe` 的路子），
+  别只看压缩率就换（这次 AVIF 的教训）。
+* **导出侧**：M4 的导出首批支持 JPEG / WebP / PNG / AVIF（`PLAN.md` §M4-W2），
+  JXL 与缓存格式的替换同一批上。
+
+---
+
 ### C7　RAW 出图口径：从「预览/完整解码两条路」收敛到「Rust 按规范渲染 + 缓存」
 
 * **现状（2026-09-17 定：保持现状）**：缩略图与看图共用 `DecodeRequest::thumb`，

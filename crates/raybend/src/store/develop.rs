@@ -27,7 +27,7 @@
 
 use std::collections::BTreeMap;
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 
 use crate::develop::curve::{Curve, CurveChannel};
 use crate::develop::params::spec;
@@ -40,10 +40,18 @@ pub struct DevelopStack {
     pub params: BTreeMap<String, f64>,
     /// 通道 → 控制点（归一化 0..1）；缺省 = 恒等
     pub curves: BTreeMap<String, Vec<[f32; 2]>>,
+    /// **拍摄色温**（K）—— 色温拉杆的基线。
+    ///
+    /// 它是 issue 的一部分：色温参数是**绝对 K**，而「目标 K 相对谁」取决于这张照片
+    /// 拍摄时的白平衡。不存它，缩略图那条路（读不到 RAW 元数据）就会用 6250 兜底，
+    /// 于是同一份参数在编辑器与缩略图里渲染出**两种颜色**。
+    pub as_shot_k: Option<f32>,
 }
 
 impl DevelopStack {
     /// 什么都没动过吗（没动过 = 与 SOOC 一样，不必渲染）。
+    ///
+    /// `as_shot_k` **不算「动过」**：它只是色温的解释基准，参数一个都没改就是没编辑过。
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.params.is_empty() && self.curves.is_empty()
@@ -54,6 +62,44 @@ impl DevelopStack {
     pub fn len(&self) -> usize {
         self.params.len() + self.curves.len()
     }
+
+    /// **这份编辑栈的稳定指纹**（缓存键用）。
+    ///
+    /// 同一份参数在任何机器、任何时刻都算出同一个值（FNV-1a over 规范化文本）——
+    /// 缩略图缓存靠它区分「编辑前 / 编辑后」，改一个参数就该重渲染。
+    ///
+    /// `as_shot_k` 也算进去：它变了，色温的解释就变了，画面跟着变。
+    #[must_use]
+    pub fn signature(&self) -> u64 {
+        let mut text = String::new();
+        for (id, value) in &self.params {
+            text.push_str(id);
+            text.push('=');
+            text.push_str(&format!("{value:.6}"));
+            text.push(';');
+        }
+        text.push('|');
+        for (channel, points) in &self.curves {
+            text.push_str(channel);
+            text.push(':');
+            for point in points {
+                text.push_str(&format!("{:.4},{:.4};", point[0], point[1]));
+            }
+        }
+        text.push('|');
+        match self.as_shot_k {
+            Some(kelvin) => text.push_str(&format!("k{kelvin:.0}")),
+            None => text.push_str("k-"),
+        }
+
+        // FNV-1a（64 位）：短、稳定、够散 —— 这里不需要密码学强度
+        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+        for byte in text.as_bytes() {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        hash
+    }
 }
 
 /// 读一张照片的编辑栈（没有就是空栈 —— **不是错误**）。
@@ -61,7 +107,19 @@ impl DevelopStack {
 /// # Errors
 /// 数据库读失败（含坏数据：曲线 JSON 解不开）。
 pub fn load(conn: &Connection, asset_id: i64) -> Result<DevelopStack> {
-    let mut stack = DevelopStack::default();
+    let as_shot_k = conn
+        .query_row(
+            "SELECT as_shot_k FROM develop_stacks WHERE asset_id = ?1",
+            [asset_id],
+            |row| row.get::<_, Option<f64>>(0),
+        )
+        .optional()?
+        .flatten()
+        .map(|value| value as f32);
+    let mut stack = DevelopStack {
+        as_shot_k,
+        ..DevelopStack::default()
+    };
 
     let mut statement = conn.prepare("SELECT param_id, value FROM develop_params WHERE asset_id = ?1")?;
     let rows = statement.query_map([asset_id], |row| {
@@ -115,8 +173,12 @@ pub fn save(conn: &Connection, asset_id: i64, stack: &DevelopStack, now_ms: i64)
             .map_err(|e| Error::Unsupported(format!("曲线 {channel} 不合法：{e}")))?;
     }
 
-    // ② 栈本体（没有就建一个）
+    // ② 栈本体（没有就建一个；as-shot 跟着一起写）
     ensure_stack(conn, asset_id, now_ms)?;
+    conn.execute(
+        "UPDATE develop_stacks SET as_shot_k = ?2 WHERE asset_id = ?1",
+        rusqlite::params![asset_id, stack.as_shot_k.map(f64::from)],
+    )?;
 
     // ③ 参数：先删掉「这一份里没有的」，再 upsert 有的
     let mut changed = 0usize;
@@ -296,6 +358,69 @@ pub fn clear(conn: &Connection, asset_id: i64) -> Result<usize> {
     Ok(conn.execute("DELETE FROM develop_stacks WHERE asset_id = ?1", [asset_id])?)
 }
 
+/// 这张照片该显示哪个**版本**（人类 2026-09-24 定的规则）。
+///
+/// 三个「issue」里只有 `latest` 是存下来的，另两个是虚拟的（见模块文档）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IssueChoice {
+    /// 相机直出的 JPG（该资产有 JPG 且没编辑过）。
+    Sooc,
+    /// RAW 的基础解码（没有 JPG、也没编辑过）。
+    Raw,
+    /// 编辑结果（有编辑栈）。
+    Latest,
+}
+
+/// 解析这张照片该显示哪个版本。
+///
+/// 规则（人类 2026-09-24）：
+///
+/// | 资产 | 没编辑过 | 编辑过 |
+/// | --- | --- | --- |
+/// | 只有 JPG | `SOOC` | `latest` |
+/// | 只有 RAW | `RAW`（基础解码一次） | `latest` |
+/// | JPG + RAW | `SOOC`（默认看相机直出） | `latest` |
+///
+/// # Errors
+/// 数据库读失败。
+pub fn choose_issue(conn: &Connection, asset_id: i64) -> Result<IssueChoice> {
+    if has_edits(conn, asset_id)? {
+        return Ok(IssueChoice::Latest);
+    }
+    let files = crate::store::assets::files_of_asset(conn, asset_id)?;
+    let has_bitmap = files
+        .iter()
+        .any(|file| file.role == "bitmap" && !file.missing);
+    Ok(if has_bitmap {
+        IssueChoice::Sooc
+    } else {
+        IssueChoice::Raw
+    })
+}
+
+/// 编辑器该**编辑哪个文件**（「编辑落在 RAW 上」，`REPOSITORY.md` §4.1）。
+///
+/// JPG + RAW 时返回 RAW 的库内相对路径；只有 JPG 时返回 JPG。
+/// 位图与 RAW 放在不同目录（`_RAW/`）这件事的规则**只在这里**实现一次 ——
+/// 前端不许自己拼 `_RAW/` 路径。
+///
+/// # Errors
+/// 数据库读失败。
+pub fn edit_target(conn: &Connection, asset_id: i64) -> Result<Option<String>> {
+    let files = crate::store::assets::files_of_asset(conn, asset_id)?;
+    let raw = files
+        .iter()
+        .find(|file| file.role == "raw" && !file.missing)
+        .map(|file| file.rel_path.clone());
+    if raw.is_some() {
+        return Ok(raw);
+    }
+    Ok(files
+        .iter()
+        .find(|file| file.role == "bitmap" && !file.missing)
+        .map(|file| file.rel_path.clone()))
+}
+
 /// 这张照片编辑过吗（缩略图要不要走编辑管线）。
 ///
 /// # Errors
@@ -340,6 +465,7 @@ mod tests {
                 .iter()
                 .map(|(channel, points)| ((*channel).to_string(), points.clone()))
                 .collect(),
+            as_shot_k: None,
         }
     }
 
@@ -478,6 +604,102 @@ mod tests {
             .query_row("SELECT count(*) FROM develop_params", [], |row| row.get(0))
             .expect("数");
         assert_eq!(params, 0, "参数行要跟着栈一起走（外键 CASCADE）");
+    }
+
+    /// 塞一个文件行（`role` = bitmap / raw）。
+    fn add_file(conn: &Connection, asset_id: i64, role: &str, rel_path: &str) {
+        conn.execute(
+            "INSERT INTO asset_files (asset_id, role, rel_path, rel_path_folded, ext,
+                                      created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?3, 'x', 0, 0)",
+            rusqlite::params![asset_id, role, rel_path],
+        )
+        .expect("插文件");
+    }
+
+    #[test]
+    fn signature_is_stable_and_sensitive() {
+        let base = stack(&[("exposure", 1.0), ("contrast", 20.0)], &[]);
+        let same = stack(&[("contrast", 20.0), ("exposure", 1.0)], &[]);
+        assert_eq!(base.signature(), same.signature(), "顺序不同、内容相同 ⇒ 同一个指纹");
+        let changed = stack(&[("exposure", 1.5), ("contrast", 20.0)], &[]);
+        assert_ne!(base.signature(), changed.signature(), "改一个参数就要变");
+        // 曲线参与指纹
+        let mut with_curve = base.clone();
+        with_curve
+            .curves
+            .insert("rgb".to_string(), vec![[0.0, 0.0], [0.5, 0.6], [1.0, 1.0]]);
+        assert_ne!(base.signature(), with_curve.signature());
+        // as-shot 也参与（它变了画面的色温解释就变了）
+        let mut with_baseline = base.clone();
+        with_baseline.as_shot_k = Some(4300.0);
+        assert_ne!(base.signature(), with_baseline.signature());
+        // 空栈也有指纹（不 panic）
+        assert_ne!(DevelopStack::default().signature(), 0);
+    }
+
+    #[test]
+    fn issue_choice_follows_the_rules() {
+        // 只有 JPG：没编辑 → SOOC
+        let (conn, asset_id) = catalog_with_asset();
+        add_file(&conn, asset_id, "bitmap", "photos/a.jpg");
+        assert_eq!(choose_issue(&conn, asset_id).expect("解析"), IssueChoice::Sooc);
+
+        // 编辑过 → latest（不管有没有 JPG）
+        save(&conn, asset_id, &stack(&[("exposure", 1.0)], &[]), now_millis()).expect("写");
+        assert_eq!(choose_issue(&conn, asset_id).expect("解析"), IssueChoice::Latest);
+
+        // 只有 RAW：没编辑 → RAW
+        let (conn, raw_asset) = catalog_with_asset();
+        add_file(&conn, raw_asset, "raw", "photos/_RAW/a.RW2");
+        assert_eq!(choose_issue(&conn, raw_asset).expect("解析"), IssueChoice::Raw);
+
+        // JPG + RAW：没编辑 → SOOC（默认看相机直出）
+        let (conn, both) = catalog_with_asset();
+        add_file(&conn, both, "bitmap", "photos/a.jpg");
+        add_file(&conn, both, "raw", "photos/_RAW/a.RW2");
+        assert_eq!(choose_issue(&conn, both).expect("解析"), IssueChoice::Sooc);
+
+        // 文件标记缺失（磁盘上没了）：不能当成「有」
+        let (conn, missing) = catalog_with_asset();
+        add_file(&conn, missing, "bitmap", "photos/gone.jpg");
+        conn.execute("UPDATE asset_files SET missing_since = 1", [])
+            .expect("标缺失");
+        assert_eq!(choose_issue(&conn, missing).expect("解析"), IssueChoice::Raw);
+    }
+
+    #[test]
+    fn edit_target_prefers_raw() {
+        let (conn, asset_id) = catalog_with_asset();
+        add_file(&conn, asset_id, "bitmap", "photos/2026/a.jpg");
+        assert_eq!(
+            edit_target(&conn, asset_id).expect("解析").as_deref(),
+            Some("photos/2026/a.jpg"),
+            "只有 JPG 时编辑 JPG"
+        );
+        add_file(&conn, asset_id, "raw", "photos/2026/_RAW/a.RW2");
+        assert_eq!(
+            edit_target(&conn, asset_id).expect("解析").as_deref(),
+            Some("photos/2026/_RAW/a.RW2"),
+            "有 RAW 时编辑 RAW（编辑落在 RAW 上）"
+        );
+    }
+
+    #[test]
+    fn as_shot_temperature_round_trips_with_the_stack() {
+        let (conn, asset_id) = catalog_with_asset();
+        let mut written = stack(&[("temperature", 4300.0)], &[]);
+        written.as_shot_k = Some(4350.0);
+        save(&conn, asset_id, &written, now_millis()).expect("写");
+        let loaded = load(&conn, asset_id).expect("读");
+        assert_eq!(loaded.as_shot_k, Some(4350.0), "基线要跟着 issue 一起存");
+        assert_eq!(loaded, written);
+        // 它不参与「编辑过没有」的判断
+        let baseline_only = DevelopStack {
+            as_shot_k: Some(5000.0),
+            ..DevelopStack::default()
+        };
+        assert!(baseline_only.is_empty(), "只存基线不算编辑过");
     }
 
     #[test]

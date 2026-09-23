@@ -333,14 +333,33 @@ pub fn render_now(
     size: SizeClass,
     now_ms: i64,
 ) -> Result<Vec<u8>> {
+    render_now_with_edit(thumbs, abs_path, size, now_ms, None)
+}
+
+/// 同 [`render_now`]，但**可以带编辑栈**（M3-W3：缩略图反映编辑结果）。
+///
+/// 带编辑时缓存签名变成 `<基础签名>+e<指纹>`（`render::render_sig_with_edit`）——
+/// 改一个参数就换一个签名，自动绕开旧缓存；GC 那边按**前缀**匹配保住它们
+/// （`cache::drop_stale_signatures`）。
+///
+/// # Errors
+/// 读文件 / 解码 / 编码 / 数据库任一步失败。
+pub fn render_now_with_edit(
+    thumbs: &ThumbsDb,
+    abs_path: &Path,
+    size: SizeClass,
+    now_ms: i64,
+    edit: Option<&crate::store::develop::DevelopStack>,
+) -> Result<Vec<u8>> {
     // 源文件还没入库，「身份字符串」就是**绝对路径**（见 `cache_key_for`）
     let material = abs_path.to_string_lossy().into_owned();
     let key = cache_key_for(abs_path, &material);
-    let sig = render::render_sig(size);
+    let sig = render::render_sig_with_edit(size, edit);
 
-    // 读池的连接是 `query_only`，且闭包要 `Send + 'static` —— 键得自己持一份
+    // 读池的连接是 `query_only`，且闭包要 `Send + 'static` —— 键与签名都得自己持一份
     let read_key = key.clone();
-    if let Some(bytes) = thumbs.read(move |conn| cache::get(conn, &read_key, size, sig))? {
+    let read_sig = sig.clone();
+    if let Some(bytes) = thumbs.read(move |conn| cache::get(conn, &read_key, size, &read_sig))? {
         return Ok(bytes);
     }
 
@@ -348,19 +367,22 @@ pub fn render_now(
         .file_name()
         .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
     let kind = kind::kind_of_file(&file_name);
-    let thumb = match render::render_file(abs_path, size)? {
+    let thumb = match render::render_file_with_edit(abs_path, size, edit)? {
         Some(t) => t,
         // 不可解码（RAW）：先用占位图兜住（与队列那条路同一取舍）
         None => render::placeholder(kind, size)?,
     };
     let (data, width, height) = (thumb.data, thumb.width, thumb.height);
 
-    thumbs.write(move |conn| cache::put(conn, &key, size, sig, &data, width, height, now_ms))?;
+    let write_sig = sig.clone();
+    thumbs.write(move |conn| {
+        cache::put(conn, &key, size, &write_sig, &data, width, height, now_ms)
+    })?;
     // 写进缓存的那份已由闭包持有，这里再取一次（一次 BLOB 读，微不足道）
     let read_key = abs_path.to_string_lossy().into_owned();
     let key = cache_key_for(abs_path, &read_key);
     thumbs
-        .read(move |conn| cache::get(conn, &key, size, sig))?
+        .read(move |conn| cache::get(conn, &key, size, &sig))?
         .ok_or_else(|| {
             crate::error::Error::Unsupported("缩略图刚写进缓存却读不回来".to_string())
         })
@@ -693,8 +715,8 @@ mod tests {
         .unwrap()
         .unwrap();
         assert!(
-            render::is_valid_jpeg(&bytes),
-            "占位图也该是合法 JPEG，UI 不分情况"
+            render::is_valid_avif(&bytes),
+            "占位图也该是合法 AVIF（缓存格式，UI 不分情况）"
         );
     }
 
@@ -955,7 +977,7 @@ mod tests {
 
         let abs = photo.join("a.jpg");
         let first = render_now(&thumbs, &abs, SizeClass::Grid, T0).unwrap();
-        assert!(render::is_valid_jpeg(&first), "应当是一张真 JPEG");
+        assert!(render::is_valid_avif(&first), "应当是一张真 AVIF");
 
         // 记下写入时间：第二次若又走渲染，`put` 会把 last_used_at 推到新值
         let key = cache_key_for(&abs, &abs.to_string_lossy());
@@ -980,7 +1002,7 @@ mod tests {
         let thumbs = thumbs_db(dir.path());
 
         let bytes = render_now(&thumbs, &photo.join("a.rw2"), SizeClass::Strip, T0).unwrap();
-        assert!(render::is_valid_jpeg(&bytes), "占位图也是合法 JPEG");
+        assert!(render::is_valid_avif(&bytes), "占位图也是合法 AVIF");
         assert_eq!(thumbs.read(cache::stats).unwrap().entries, 1, "占位图也入缓存");
     }
 

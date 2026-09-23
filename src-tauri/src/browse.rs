@@ -92,7 +92,10 @@ impl BrowseState {
 }
 
 /// 打开库需要的 root：先从 `app.db` 解析出在线路径。
-fn resolve_root<R: Runtime>(app: &AppHandle<R>, repository_id: &str) -> Result<PathBuf, String> {
+///
+/// `pub(crate)`：编辑器要拿库根拼绝对路径（`develop::develop_edit_target`），
+/// 而它**不能**在 `with_catalog` 里调（那把 `open` 锁正被持着 —— 会死锁）。
+pub(crate) fn resolve_root<R: Runtime>(app: &AppHandle<R>, repository_id: &str) -> Result<PathBuf, String> {
     let state = app.state::<DbState>();
     state.with(app, |db| {
         db.resolve_repository(repository_id)

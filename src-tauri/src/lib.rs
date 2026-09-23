@@ -261,6 +261,7 @@ pub fn run() {
             develop::develop_get,
             develop::develop_commit,
             develop::develop_reset,
+            develop::develop_edit_target,
             // ── 全屏看图 ──
             fullscreen::fullscreen_open,
             fullscreen::fullscreen_payload,

@@ -44,11 +44,13 @@
 //! 那是 RapidRAW 官方博客记的 20fps→120fps 那道坎）。
 //! 两个口**共用同一份解码与方向逻辑**（`thumbnail::render::decode_file`）。
 
+pub mod full_cache;
 pub mod histogram;
 pub mod pixels;
 
 use std::path::Path;
 
+pub use full_cache::FullCache;
 pub use histogram::{histogram_of_file, histogram_of_image, Histogram, DEFAULT_BINS};
 pub use pixels::{pixels, DisplayPixels, PixelSize};
 
@@ -104,7 +106,9 @@ pub enum ImageMime {
     Webp,
     Gif,
     Tiff,
-    /// 认不出来的扩展名 —— 按 JPEG 处理（渲染管线的输出永远是 JPEG）。
+    /// **AVIF**（M3-W3 起渲染管线的输出格式：人类 2026-09-24 定「缓存图一律 AVIF 90 / 4:4:4」）。
+    Avif,
+    /// 认不出来的扩展名 —— 按 JPEG 处理。
     Unknown,
 }
 
@@ -118,6 +122,7 @@ impl ImageMime {
             Self::Webp => "image/webp",
             Self::Gif => "image/gif",
             Self::Tiff => "image/tiff",
+            Self::Avif => "image/avif",
         }
     }
 
@@ -253,8 +258,8 @@ fn rendered(request: &ImageRequest<'_>, backend: Backend) -> Result<Option<Displ
     let thumb: Option<Thumb> = render_file(request.path, request.purpose.size_class())?;
     Ok(thumb.map(|thumb| DisplayImage {
         bytes: thumb.data,
-        // 管线的输出永远是 JPEG（`thumbnail/render.rs` 的 `encode`）
-        mime: ImageMime::Jpeg,
+        // 管线的输出是 AVIF（`thumbnail/render.rs` 的 `encode`；人类 2026-09-24 定的缓存格式）
+        mime: ImageMime::Avif,
         origin: ImageOrigin::Rendered,
         backend,
         size: Some((thumb.width, thumb.height)),

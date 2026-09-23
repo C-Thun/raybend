@@ -313,13 +313,25 @@ pub fn clear(conn: &Connection) -> Result<usize> {
 }
 
 /// 删掉**不属于当前签名**的老条目（算法升级后的孤儿回收）。
+///
+/// # 为什么是**前缀匹配**而不是 `NOT IN`
+///
+/// 带编辑的渲染签名是**动态**的（`avif-q90-grid-v6+e<指纹>`，见
+/// `render::render_sig_with_edit`）—— 一张编辑过的照片就有一个新签名，
+/// 用 `NOT IN (几个静态签名)` 会把它们全当成孤儿删掉（每次 GC 都白删一遍）。
+/// 改成「前缀命中就留着」之后：
+///
+/// * 静态签名（没编辑过）前缀就是它自己 ⇒ 行为与以前一致；
+/// * 编辑过的签名前缀是基础签名 ⇒ 被保住；
+/// * 真·老版本（`avif-q90-grid-v5+…`）前缀对不上 ⇒ 照旧回收。
 pub fn drop_stale_signatures(conn: &Connection, sigs: &[&str]) -> Result<usize> {
     if sigs.is_empty() {
         return clear(conn);
     }
-    let holes = vec!["?"; sigs.len()].join(", ");
-    let sql = format!("DELETE FROM thumbs WHERE render_sig NOT IN ({holes})");
-    Ok(conn.execute(&sql, rusqlite::params_from_iter(sigs.iter()))?)
+    let clauses = vec!["render_sig NOT LIKE ?"; sigs.len()].join(" AND ");
+    let patterns: Vec<String> = sigs.iter().map(|sig| format!("{sig}%")).collect();
+    let sql = format!("DELETE FROM thumbs WHERE {clauses}");
+    Ok(conn.execute(&sql, rusqlite::params_from_iter(patterns.iter()))?)
 }
 
 /// 统计。
@@ -686,8 +698,17 @@ mod tests {
         let removed = drop_stale_signatures(&conn, &["jpeg-q82-g1"]).unwrap();
         assert_eq!(removed, 1, "g2 是孤儿，收走");
         assert_eq!(stats(&conn).unwrap().entries, 2);
+        /*
+         * **带编辑的动态签名**（前缀 = 当前基础签名）必须被保住：
+         * 编辑过的照片签名是 `avif-q90-grid-v6+e<指纹>`，用老的 `NOT IN` 判据会被
+         * 每次 GC 都白删一遍（每次都要重渲染）。现在按前缀匹配 ⇒ 保住。
+         */
+        put(&conn, b"k", SizeClass::Grid, "jpeg-q82-g1+e0badc0de", b"x", 1, 1, 0).unwrap();
+        let removed = drop_stale_signatures(&conn, &["jpeg-q82-g1"]).unwrap();
+        assert_eq!(removed, 0, "编辑过的签名前缀命中，不许当孤儿删掉");
+        assert_eq!(stats(&conn).unwrap().entries, 3);
         // 语法糖：不传任何签名 = 清空
-        assert_eq!(drop_stale_signatures(&conn, &[]).unwrap(), 2);
+        assert_eq!(drop_stale_signatures(&conn, &[]).unwrap(), 3);
     }
 
     #[test]

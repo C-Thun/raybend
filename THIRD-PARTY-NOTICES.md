@@ -23,6 +23,8 @@
 | 【待 UI 设计阶段引入】Ark UI（`@ark-ui/solid`） | 5.x | MIT | UI 组件原语 | 兼容 |
 | 【待 UI 设计阶段引入】Tabler Icons（`@tabler/icons-solidjs`） | 3.x | MIT | 图标 | 兼容 |
 | 【待 M0-4 引入】rusqlite（bundled SQLite） | — | MIT + SQLite 公有领域 | 本地数据库 | 兼容 |
+| ravif（含 rav1e、avif-serialize） | 0.13.0 / 0.8.1 / 0.8.9 | **BSD-3-Clause**（rav1e 为 BSD-2-Clause） | **AVIF 编码**（全系统缓存图的格式，M3-W3 引入） | 兼容（宽松许可，BSD 系与 AGPL-3.0 无冲突） |
+| rayon | 1.12 | MIT / Apache-2.0 | ravif 的多线程编码（`image` 的 `rayon` feature 打开；不开的话 AVIF 编码慢 8 倍以上） | 兼容 |
 
 > **完整清单待补**：以上为当前可预见的直接依赖。M0-1 依赖落定、以及每个里程碑引入新依赖时，
 > 需补齐**完整清单（含间接依赖）**；发布前（M6）应据锁文件生成一次机器可核对的完整清单。

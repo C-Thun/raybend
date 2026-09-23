@@ -731,7 +731,7 @@ mod tests {
     fn overlay_transform_agrees_with_the_physical_mapping() {
         // 覆盖层矩阵必须与**渲染那套** `image_to_physical` 给出同一个结果
         // （两份数学一旦分家，覆盖层就会与照片错位 —— 这条测试就是防它的）
-        let mut viewport = Viewport {
+        let viewport = Viewport {
             viewport_size: (1600.0, 1200.0),
             image_size: (4000, 3000),
             clip_rect: Some(ClipRect {

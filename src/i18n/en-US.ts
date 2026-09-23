@@ -606,6 +606,7 @@ export const enUS: Record<MessageKey, string> = {
  "cmd.editor.compare": "Compare tool",
  "cmd.editor.chrome": "Cycle editor panels (both → right → view only)",
  "cmd.editor.toBrowse": "Back to browse grid",
+ // M3-W3：重置全部调整（破坏性，命令面板里可搜到、没有默认热键）
  "cmd.editor.resetDevelop": "Reset all adjustments",
 
 

@@ -21,10 +21,14 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use raybend::display::{self, ImagePurpose, ImageRequest, DEFAULT_BINS};
+use raybend::display::{self, FullCache, ImagePurpose, ImageRequest, DEFAULT_BINS};
+use raybend::store::develop::IssueChoice;
 use raybend::store::time;
-use raybend::thumbnail::{SizeClass, ThumbsDb, render_now};
+use raybend::thumbnail::render::{PIPELINE_VERSION, render_file_with_edit};
+use raybend::thumbnail::{SizeClass, ThumbsDb, render_now, render_now_with_edit};
 use tauri::{AppHandle, Manager, Runtime};
+
+use crate::develop::{self, ResolvedAsset};
 
 /// 源文件缩略图缓存所在的子目录名。
 ///
@@ -78,14 +82,64 @@ pub async fn thumb_get<R: Runtime>(
     let size = SizeClass::parse(size.as_deref().unwrap_or("grid"))
         .ok_or_else(|| format!("未知的缩略图尺度：{}", size.as_deref().unwrap_or("")))?;
 
+    // 编辑过的照片：缩略图也要反映编辑结果（M3-W3）。
+    // 解析只在**库内**文件上命中（源文件未入库时返回 None，走老路）。
+    let edit = edited_stack(&app, &path);
+
     let bytes = crate::source::blocking(move || {
-        let bytes = render_now(&db, Path::new(&path), size, time::now_millis())
-            .map_err(|e| e.to_string())?;
+        let bytes = match &edit {
+            Some(stack) => render_now_with_edit(
+                &db,
+                Path::new(&path),
+                size,
+                time::now_millis(),
+                Some(stack),
+            ),
+            None => render_now(&db, Path::new(&path), size, time::now_millis()),
+        }
+        .map_err(|e| e.to_string())?;
         Ok(bytes)
     })
     .await?;
 
     Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// 这个路径的资产编辑过吗？编辑过就把它的编辑栈取出来（给渲染用）。
+///
+/// 未入库 / 没编辑过 / 库离线 —— 一律 `None`（调用方走没有编辑的那条路）。
+fn edited_stack<R: Runtime>(
+    app: &AppHandle<R>,
+    path: &str,
+) -> Option<raybend::store::develop::DevelopStack> {
+    let asset = develop::resolve_asset(app, Path::new(path))?;
+    let (choice, stack) = develop::issue_of(app, &asset).ok()?;
+    if choice == IssueChoice::Latest && !stack.is_empty() {
+        Some(stack)
+    } else {
+        None
+    }
+}
+
+/// **大图缓存**：`<库根>/cache/full/<asset>/latest-v<pipeline>.avif`。
+///
+/// 命中直接给；没命中就渲染一遍再写进去（写失败只记一句 —— 缓存写不进去
+/// 只意味着下次再渲染一遍，不该让看图失败）。
+fn render_latest_cached(asset: &ResolvedAsset, stack: &raybend::store::develop::DevelopStack) -> Result<Vec<u8>, String> {
+    let cache = FullCache::open(&asset.root).map_err(|e| e.to_string())?;
+    if let Some(bytes) = cache.read(asset.asset_id, "latest", PIPELINE_VERSION) {
+        return Ok(bytes);
+    }
+    let full = asset
+        .root
+        .join(asset.rel_path.replace('/', std::path::MAIN_SEPARATOR_STR));
+    let thumb = render_file_with_edit(&full, SizeClass::Screen, Some(stack))
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("解不开这张照片：{}", full.display()))?;
+    if let Err(error) = cache.write(asset.asset_id, "latest", PIPELINE_VERSION, &thumb.data) {
+        eprintln!("[develop] 大图缓存写失败（不影响显示）：{error}");
+    }
+    Ok(thumb.data)
 }
 
 /// **统一取图口**（`crates/raybend/src/display`，口径见 `plans/M2-W2.md` §2.1）。
@@ -110,6 +164,25 @@ pub async fn view_image<R: Runtime>(
     let text = purpose.as_deref().unwrap_or("screen");
     let purpose = ImagePurpose::parse(text)
         .ok_or_else(|| format!("未知的取图用途：{text}"))?;
+
+    /*
+     * **编辑过的照片：非编辑器里也看编辑结果**（人类 2026-09-24 定的口径）。
+     *
+     * 只有 `screen`（全图查看）走这条路：
+     * * `grid` / `strip` 由 `thumb_get` 负责（它有自己的缓存库）；
+     * * `original` 的语义是「要原文件本身」（导出、互操作），**不该**被编辑结果替换。
+     *
+     * 顺序也重要：先看库里的大图缓存（AVIF，命中就毫秒级返回），没有再渲染并写回。
+     * 没编辑过（`SOOC` / `RAW`）时**一步都不多做** —— 直接落到下面那条老路。
+     */
+    if purpose == ImagePurpose::Screen
+        && let Some(asset) = develop::resolve_asset(&app, Path::new(&path))
+        && let Ok((IssueChoice::Latest, stack)) = develop::issue_of(&app, &asset)
+    {
+        let bytes = crate::source::blocking(move || render_latest_cached(&asset, &stack)).await?;
+        return Ok(tauri::ipc::Response::new(bytes));
+    }
+
     // 缓存库要先拿出来（`State` 不能跨 await 持有）——与 `thumb_get` 同一条路
     let cache_dir = sources_cache_dir(&app)?;
     let db = {

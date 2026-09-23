@@ -476,6 +476,26 @@ pub fn apply_exif(
     Ok(())
 }
 
+/// 按**库内相对路径**反查资产 id（缩略图 / 看图那两条命令只有路径）。
+///
+/// 用**折叠**形式比（`rel_path_folded`）：大小写与 Unicode 规范化的差异不算两回事
+/// （`AGENTS.md` §7.3）。找不到返回 `None`。
+///
+/// # Errors
+/// 数据库读失败。
+pub fn find_by_rel_path(conn: &Connection, rel_path: &str) -> Result<Option<i64>> {
+    let folded = crate::store::path_semantics::PathForms::new(rel_path)
+        .folded()
+        .to_string();
+    Ok(conn
+        .query_row(
+            "SELECT asset_id FROM asset_files WHERE rel_path_folded = ?1",
+            [folded],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()?)
+}
+
 /// 一个资产下有哪些文件（按角色）。
 pub fn files_of_asset(conn: &Connection, asset_id: i64) -> Result<Vec<FileRow>> {
     Ok(list_files(conn)?

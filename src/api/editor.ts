@@ -117,6 +117,13 @@ export interface DevelopStack {
   values: Record<string, number>;
   /** 通道 → 控制点（归一化 0..1）；只装动过的通道 */
   curves: Record<string, [number, number][]>;
+  /**
+   * 拍摄色温（K）—— 色温拉杆的基线，**跟着 issue 一起存**。
+   *
+   * 不存它的话，缩略图那条路（读不到 RAW 元数据）会用 6250 兜底，
+   * 同一份参数就会渲染出两种颜色。
+   */
+  asShotK?: number | null;
 }
 
 /** 落库 / 重置的结果：栈 + 撤销栈快照（界面据此显示「撤销：调整参数」）。 */
@@ -152,6 +159,7 @@ export async function commitDevelopStack(
     assetId,
     values: stack.values,
     curves: stack.curves,
+    asShotK: stack.asShotK ?? null,
   });
 }
 
@@ -162,4 +170,20 @@ export async function resetDevelopStack(
 ): Promise<DevelopCommitResult | null> {
   if (!isTauriRuntime()) return null;
   return call<DevelopCommitResult>("develop_reset", { repositoryId, assetId });
+}
+
+/**
+ * **编辑器该编辑哪个文件**（「编辑落在 RAW 上」，`REPOSITORY.md` §4.1）。
+ *
+ * JPG + RAW 时返回 `_RAW/` 里那个 RAW 的**绝对路径**；只有 JPG 就返回 JPG。
+ * 拼 `_RAW/` 这件事只在 Rust 侧实现一次 —— 前端不许自己拼。
+ *
+ * 返回 `null` = 没有可编辑的文件（资产缺文件 / 库离线）。
+ */
+export async function getDevelopEditTarget(
+  repositoryId: string,
+  assetId: number,
+): Promise<string | null> {
+  if (!isTauriRuntime()) return null;
+  return call<string | null>("develop_edit_target", { repositoryId, assetId });
 }
