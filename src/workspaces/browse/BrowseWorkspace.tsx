@@ -56,8 +56,9 @@ import {
   IconPhotoOff,
 } from "@tabler/icons-solidjs";
 import { createThumbQueue } from "../../components/ui/thumb-queue.ts";
+import { buildFullscreenTarget } from "../../lib/fullscreen-target.ts";
 import type { TilesViewingInfo } from "../../components/ui/tiles/index.ts";
-import { createViewerStore, viewingInfoOf } from "../../components/ui/viewer/index.ts";
+import { createViewerStore, photosFromSource, viewingInfoOf } from "../../components/ui/viewer/index.ts";
 import {
   browseDisplayByTime,
   browseDisplayTileStep,
@@ -377,6 +378,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
       cycleChrome: viewing.cycleChrome,
       resetChrome: viewing.resetChrome,
       toggleCompareStrip: viewing.toggleCompareStrip,
+      fullscreenTarget,
     });
     onCleanup(() => registerBrowseActions(null));
   });
@@ -568,6 +570,17 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
    * 所以「右栏显示谁」与「flowinfo 显示谁」不可能两边走偏。
    */
   const anchor = createMemo(() => store.anchorItem());
+
+  /**
+   * 全屏看图要的清单（flowbar 那个全屏按钮 + `viewer.fullscreen` 命令）。
+   *
+   * 显示序用的是**与网格同一个函数、同一个数据源**（`photosFromSource(gridSource())`）——
+   * 所以全屏里的 ←/→ 与网格里的邻居逐张一致，筛选 / 排序也一致；
+   * 这里不另建一份清单（§2.12）。
+   */
+  const fullscreenTarget = createMemo(() =>
+    buildFullscreenTarget(photosFromSource(gridSource()), store.selection().anchor),
+  );
 
   /**
    * 状态条中间那段的**左侧**：`库名 / 最后一级目录`（`BROWSE.md` §5.10）。

@@ -4,27 +4,28 @@
  * 左：工作流切换器（**有序流水线**，顺序固定不重排）—— 用**专属**的 `FlowSwitcher`，
  *     不是通用分段控件（理由见那个文件顶部：它是外壳的招牌部件）
  * 中：弹性空白
- * 右：`ExifStrip`（三组 `easy copy`）+ 吸附开关
+ * 右：`ExifStrip`（三组 `easy copy`）+ **全屏看图**按钮
  *
  * 两处「刻意如此」：
  *   1. **这一行比别处更圆润、也更大**（胶囊形轨道与色块）—— 设计稿明确要求，
  *      因为它是「阶段切换」，与旁边的方形工具按钮在语义上不同
- *   2. **吸附开关目前只是视觉**：设计稿把它标为「以后会加」的占位。
- *      M1 不做吸附行为（已登记 `FUTURE.md`），但**状态的存续**是真的 ——
- *      按下去就是按下去，不会自己弹回来
+ *   2. **全屏按钮跟随 picture info 一起出现**（人类 2026-09-23 定）：信息只在选中照片时
+ *      才有内容，而只有选中了照片才谈得上全屏看它 —— 两者是同一件事的两个面。
+ *      没有当前照片时（`exif == null` 或工作区没给出清单）按钮**整个不出现**，
+ *      而不是灰着占位。
  */
 
-import { createSignal } from "solid-js";
+import { Show } from "solid-js";
 import type { Component } from "solid-js";
 import { Dynamic } from "solid-js/web";
 import {
   IconAdjustmentsHorizontal,
   IconFolderDown,
-  IconMagnet,
+  IconMaximize,
   IconPhoto,
   IconUpload,
 } from "@tabler/icons-solidjs";
-import { ToggleBlock } from "../components/ui/ToggleBlock.tsx";
+import { IconButton } from "../components/ui/Button.tsx";
 import { ExifStrip, type ExifData } from "../features/exif-strip/index.ts";
 import { t } from "../i18n";
 import { WORKFLOWS, WORKFLOW_LABEL_KEY, type WorkflowId } from "./flow.ts";
@@ -33,12 +34,16 @@ import type { ShellStore } from "./store.ts";
 
 export interface FlowBarProps {
   store: ShellStore;
-  /** 当前照片的 EXIF；没有选中照片时为 `null` → EXIF 区显示空态 */
+  /** 当前照片的 EXIF；没有选中照片时为 `null` → EXIF 区显示空态，全屏按钮也不出现 */
   exif?: ExifData | null;
+  /**
+   * 点全屏看图。**只在真的能开时传**（工作区给了清单）——
+   * 传了才渲染按钮，所以不会出现「按下去没反应」的按钮。
+   */
+  onFullscreen?: () => void;
 }
 
 export function FlowBar(props: FlowBarProps) {
-  const [snap, setSnap] = createSignal(false);
 
   return (
     <div class="flex h-bar-flow-h shrink-0 items-center gap-2 bg-surface-main px-pad-x">
@@ -58,12 +63,19 @@ export function FlowBar(props: FlowBarProps) {
 
       <ExifStrip data={props.exif ?? null} class="justify-end" />
 
-      <ToggleBlock
-        pressed={snap()}
-        onPressedChange={setSnap}
-        label={t("flow.tool.snap")}
-        icon={<IconMagnet size={16} />}
-      />
+      {/*
+        全屏看图：**跟随 picture info**（见文件头第 2 条）。
+        判据用 `props.exif` 而不是「有没有选中照片」：两者在这里本来就是同一件事，
+        而 exif 是这一行**已经有**的事实（`flowinfo` 只在选中照片时非空）。
+      */}
+      <Show when={props.exif !== null && props.exif !== undefined && props.onFullscreen !== undefined}>
+        <IconButton
+          label={t("flow.tool.fullscreen")}
+          onClick={() => props.onFullscreen?.()}
+        >
+          <IconMaximize size={16} />
+        </IconButton>
+      </Show>
     </div>
   );
 }

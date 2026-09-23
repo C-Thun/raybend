@@ -307,6 +307,9 @@ fn every_contract_entry_has_a_test() {
         // 编辑视口（M3-W1 洞口契约 / M3-W2 渲染线程）
         "EditorViewportState",
         "EditorRenderState",
+        // 全屏看图（M3 晚：清单与下标跨 IPC）
+        "FullscreenItem",
+        "FullscreenPayload",
     ];
     for key in value.as_object().unwrap().keys() {
         if key.starts_with('_') {
@@ -404,4 +407,18 @@ fn editor_viewport_state_matches_contract() {
 fn editor_render_state_matches_contract() {
     use crate::editor::RenderState;
     assert_eq!(keys_of::<RenderState>(), contract_keys("EditorRenderState"));
+}
+
+/// 全屏看图的清单（`fullscreen_open` 收它、`fullscreen_payload` 回它）也进契约。
+///
+/// 键名一漂的症状：页面拿到的 `items` 全是 `undefined`，或 Rust 侧反序列化失败 ——
+/// 全屏窗开着但永远黑屏，不报错也不崩。
+#[test]
+fn fullscreen_payload_matches_contract() {
+    use crate::fullscreen::{FullscreenItem, FullscreenPayload};
+    assert_eq!(keys_of::<FullscreenItem>(), contract_keys("FullscreenItem"));
+    assert_eq!(
+        keys_of::<FullscreenPayload>(),
+        contract_keys("FullscreenPayload")
+    );
 }

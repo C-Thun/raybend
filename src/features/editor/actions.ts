@@ -11,6 +11,8 @@
  * 合成一个就会有人开始猜「viewing 在编辑里到底什么意思」。
  */
 
+import type { FullscreenTarget } from "../../lib/fullscreen-target.ts";
+
 export interface EditorActions {
   /** 正在看一张照片（编辑器里 = 有选中照片且渲染线程接管了画面） */
   viewing: () => boolean;
@@ -24,6 +26,8 @@ export interface EditorActions {
   resetChrome: () => void;
   /** 有没有可编辑的照片（空态下工具与控制块一律禁用） */
   hasPhoto: () => boolean;
+  /** 全屏看图要的清单（编辑侧同样是「当前目录显示序 + 锚点」）；没有照片时为 `null` */
+  fullscreenTarget: () => FullscreenTarget | null;
 }
 
 let current: EditorActions | null = null;

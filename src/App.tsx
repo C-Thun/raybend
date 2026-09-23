@@ -20,6 +20,7 @@
 
 import { Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import { uiReady, tauriWindowHandle } from "./api/window.ts";
+import { openFullscreen } from "./api/fullscreen.ts";
 import { isTauriRuntime } from "./api/tauri-env.ts";
 import type { BrowseSort } from "./api/types.ts";
 import { t, timeoutMessage } from "./i18n/index.ts";
@@ -346,6 +347,23 @@ export default function App() {
   const filmVisible = (): boolean => activeWorkspaceActions()?.filmVisible() ?? false;
   const importFlow = (): boolean => shell.workflow() === "import";
 
+  /**
+   * 全屏看图（沉浸式，另开一扇窗）。
+   *
+   * 清单由**当前工作区**给（它知道显示序与锚点）；这里只做两件事：
+   * 没有清单就不给动作（按钮不出现、命令不生效），有清单就把它交给 `api/fullscreen.ts`。
+   * 关窗与切图不在这里 —— 全屏页自己的 `Esc` / ←/→ 走 `api/fullscreen.ts`。
+   */
+  const fullscreen = (): (() => void) | undefined => {
+    const target = activeWorkspaceActions()?.fullscreenTarget() ?? null;
+    if (target === null) return undefined;
+    return () => {
+      void openFullscreen(target.items, target.index).catch((error: unknown) => {
+        toast.show({ tone: "danger", message: String(error) });
+      });
+    };
+  };
+
   const commandDeps: CommandDeps = {
     flow: shell.workflow,
     setFlow: shell.setWorkflow,
@@ -389,6 +407,7 @@ export default function App() {
           : (browseActions()?.comparing() ?? false),
       filmVisible,
       actions: viewerActions,
+      fullscreen,
     },
     browse: {
       repositoryId: browseStore.repositoryId,
@@ -492,7 +511,7 @@ export default function App() {
         aboutOpen={aboutOpen()}
         onAboutOpenChange={setAboutOpen}
       />
-      <FlowBar store={shell} exif={flowInfo()} />
+      <FlowBar store={shell} exif={flowInfo()} onFullscreen={fullscreen()} />
 
       {/*
         批量排除（`DESIGN.md` §12.2 的**反转**语义）：没有选中项时禁用。

@@ -97,7 +97,7 @@ export const zhCN = {
  "flow.browse": "浏览",
  "flow.edit": "编辑",
  "flow.export": "导出",
- "flow.tool.snap": "吸附",
+ "flow.tool.fullscreen": "全屏",
 
  // ── flowbar：图片信息（分组即内容结构，见 §4.8）────────
  "exif.camera": "机型",
@@ -110,6 +110,10 @@ export const zhCN = {
  "exif.megapixels": "像素",
  "exif.format": "格式",
  "exif.empty": "未选择照片",
+
+ // ── 全屏看图（沉浸式，另一扇窗口）────────────────────
+ "fullscreen.empty": "没有可显示的照片",
+ "fullscreen.failed": "这张照片读不出来",
 
  // ── 通用 ───────────────────────────────────────────────
  "common.easy_copy.hint": "点击复制",
@@ -467,6 +471,7 @@ export const zhCN = {
  "cmd.viewer.fit": "适配窗口 ↔ 100%",
  "cmd.viewer.actual": "100% ↔ 适配",
  "cmd.viewer.compareOnly": "胶片带只看对比图",
+ "cmd.viewer.fullscreen": "全屏看图",
  "cmd.mark.rating.0": "打 0 星（清零）",
  "cmd.mark.rating.1": "打 1 星",
  "cmd.mark.rating.2": "打 2 星",

@@ -20,6 +20,8 @@
  * * 槽里只有**动作**，没有状态：读状态一律走 `browseStore`（唯一事实来源）。
  */
 
+import type { FullscreenTarget } from "../../lib/fullscreen-target.ts";
+
 export interface BrowseActions {
   /** 正在看图（单张或对比） */
   viewing: () => boolean;
@@ -39,6 +41,13 @@ export interface BrowseActions {
   resetChrome: () => void;
   /** 对比态：胶片带只显示参与对比的图（再按一次回去） */
   toggleCompareStrip: () => void;
+  /**
+   * 全屏看图要的清单（当前显示序 + 锚点）；没有当前照片时为 `null`。
+   *
+   * 走动作槽而不是把清单存在组装层：**显示序是工作区的知识**
+   * （它知道 `gridSource()` 与筛选），组装层只负责把它交给 `api/fullscreen.ts`。
+   */
+  fullscreenTarget: () => FullscreenTarget | null;
 }
 
 let current: BrowseActions | null = null;

@@ -30,6 +30,8 @@ import type {
   DirEmptyView,
   EditorRenderState,
   EditorViewportState,
+  FullscreenItem,
+  FullscreenPayload,
   DirEntry,
   FacetCount,
   FileExif,
@@ -396,6 +398,15 @@ const EDITOR_RENDER_STATE_KEYS = [
   "wantedTier",
   "zoom",
 ] as const satisfies readonly (keyof EditorRenderState)[];
+const FULLSCREEN_ITEM_KEYS = [
+  "fileName",
+  "id",
+  "path",
+] as const satisfies readonly (keyof FullscreenItem)[];
+const FULLSCREEN_PAYLOAD_KEYS = [
+  "index",
+  "items",
+] as const satisfies readonly (keyof FullscreenPayload)[];
 
 /** 手写的键表 → 覆盖检查（跑一遍，顺便让 `noUnusedLocals` 满意） */
 const KEY_TABLES = {
@@ -471,6 +482,12 @@ const KEY_TABLES = {
   ),
   EditorRenderState: checkKeys<EditorRenderState, typeof EDITOR_RENDER_STATE_KEYS>(
     EDITOR_RENDER_STATE_KEYS,
+  ),
+  FullscreenItem: checkKeys<FullscreenItem, typeof FULLSCREEN_ITEM_KEYS>(
+    FULLSCREEN_ITEM_KEYS,
+  ),
+  FullscreenPayload: checkKeys<FullscreenPayload, typeof FULLSCREEN_PAYLOAD_KEYS>(
+    FULLSCREEN_PAYLOAD_KEYS,
   ),
 } as const;
 

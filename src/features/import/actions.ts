@@ -6,6 +6,8 @@
  * 所以它同样把自己那份动作注册进来，命令通过这里取用。
  */
 
+import type { FullscreenTarget } from "../../lib/fullscreen-target.ts";
+
 export interface ImportActions {
   /** 正在看图（film / view） */
   viewing: () => boolean;
@@ -25,6 +27,8 @@ export interface ImportActions {
   excludeSelected: () => void;
   /** 对比态：胶片带在“仅对比集 / 全目录”之间切换。 */
   toggleCompareStrip: () => void;
+  /** 全屏看图要的清单（当前显示序 + 锚点）；没有当前照片时为 `null`。 */
+  fullscreenTarget: () => FullscreenTarget | null;
 }
 
 let current: ImportActions | null = null;

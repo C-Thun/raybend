@@ -685,7 +685,7 @@ DESIGN.md（本文件，人类可读的规格与色板）
 <flow.browse>                   = 浏览            Browse
 <flow.edit>                     = 编辑            Edit
 <flow.export>                   = 导出            Export
-<flow.tool.snap>                = 吸附            Snap
+<flow.tool.fullscreen>          = 全屏            Fullscreen
 <exif.camera>                   = 机型            Camera
 <exif.lens>                     = 镜头            Lens
 <exif.focal>                    = 焦距            Focal length
@@ -1269,3 +1269,4 @@ tile 指向/选中时浮出的两条信息 —— **底部**：文件名 + 扩�
 | 2026-09-16 | **新增 §12.9 tile 信息条（覆盖在照片上）** 与令牌 `--tile-bar-scrim`：底纹 = **外框状态底纹 + 主题中性蒙层**两层（只用同色改浓度的话对比度会随状态漂，亮天空照片上必读不清）。深色 `surface-track` 65% 压暗 / 浅色 `surface-layer` 72% 提亮，按「照片是纯白/纯黑像素」的**最坏情况**算到过 AA（实测 5.14:1 / 8.03:1，`pnpm smoke:ui` 每次复测）；**信息条上的文字一律 `fg-1`**（再用 `fg-2` 在亮照片上只有 2.55:1，层级改由字号表达）。同步 §9.2 表与「派生值」注 |
 | 2026-09-19 | **§1.4 作废「浅色主题必须加 1px 深描边」**（人类 2026-09-19 明确：本界面是**无边线设计**，色标只靠色块本身、不加描边；实现端早已按此落地，spec 未同步）。保留实测对比度表与「黄 vs 辅色 1.16:1」两条**事实**，但缓解手段改为依赖既有的两道屏障（tile 底色优先级「颜色标记 > 指向」、`toolsbar` 色标点无 `hover:bg-state-hover`），**不再用描边** |
 | 2026-09-23 | **新增 §8.8 网格右侧滚动条占位**（人类 2026-09-23 定）：tiles 网格算可用宽度时**一律减掉右侧滚动条宽度**（留死，不按有无滚动条自适应），左边 8px 边距保留、右边可贴着滚动条。宽度**实测**（`src/lib/scrollbar.ts`）而不是读 `--scrollbar-w` —— `* { scrollbar-width: thin }` 在 Chromium 里盖过 `::-webkit-scrollbar` 的宽度声明，真实生效的是 thin 宽度（本机 10px，令牌写的是 8px），按令牌留就会把最后一列切掉约 2px |
+| 2026-09-23 | **flowbar 右端的磁铁开关换成全屏看图按钮**（人类 2026-09-23 定）：吸附暂不做（原占位撤销），全屏按钮用 `IconButton` + `IconMaximize`，**跟随图片信息一起出现**（没选中照片时整个不出现，不是灰着）；点击另开一扇无边框窗口按主窗口所在屏幕全屏（`src/features/fullscreen/` + `src-tauri/src/fullscreen.rs`），命令 `viewer.fullscreen`（默认键 `F`）。`design/main.pen` 里磁铁画稿待下次开 Pencil 时同步 |

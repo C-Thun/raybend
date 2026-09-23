@@ -321,6 +321,15 @@
     "wantedTier",
     "zoom"
   ],
+  "FullscreenItem": [
+    "fileName",
+    "id",
+    "path"
+  ],
+  "FullscreenPayload": [
+    "index",
+    "items"
+  ],
   "MigrationNotice": [
     "from",
     "kind",

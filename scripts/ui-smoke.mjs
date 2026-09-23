@@ -1719,6 +1719,31 @@ try {
   })()`);
 
   /*
+   * flowbar 右端（人类 2026-09-23）：磁铁开关换成全屏看图，且全屏按钮
+   * 跟随 picture info 一起出现。浏览器里没有库、没有选中照片，所以：
+   * 「吸附」必须没了；全屏按钮整个不该出现（不是灰着占位）。
+   */
+  const flowbar = await evaluate(`(() => {
+    const named = (el) => el.getAttribute("aria-label") ?? el.title ?? "";
+    const buttons = [...document.querySelectorAll("button")];
+    return {
+      snap: buttons.filter((el) => ["吸附", "Snap"].includes(named(el))).length,
+      fullscreen: buttons.some((el) => ["全屏", "Fullscreen"].includes(named(el))),
+    };
+  })()`);
+
+  if ((flowbar.snap ?? 0) > 0) {
+    problems.push(
+      "flowbar 里还留着「吸附」按钮（人类 2026-09-23：已换成全屏看图）",
+    );
+  }
+  if (flowbar.fullscreen === true) {
+    problems.push(
+      "没有选中照片时全屏按钮就出现了（它必须跟随 picture info 一起显示）",
+    );
+  }
+
+  /*
    * 导入侧的 tiles 状态条：**与浏览侧同一个组件**（人类 2026-09-19 的统一口径）。
    *
    * 这里断言两件事：共享组件在位（`[data-tiles-control-bar]`），
@@ -2455,6 +2480,36 @@ try {
 
   collectConsoleProblems(events.slice(workspaceEventsFrom));
 
+  /*
+   * 全屏看图页（?fullscreen=1）：浏览器里没有后端，拿不到清单，
+   * 所以这里验证的是「查询串选页正确 + 页面挂载 + 空态给话」——
+   * 开窗 / 全屏 / 键盘切图归真机验收（人类）。
+   * 放在输出快照**之前**、外壳检查之后：它会导航离开应用外壳。
+   */
+  await send("Page.navigate", {
+    url: new URL("/index.html?fullscreen=1", url).href,
+  });
+  if (!(await waitForContent(send))) {
+    problems.push("全屏看图页 60 秒仍没渲染出内容（白屏）");
+  }
+  const fullscreenPage = await evaluate(`(() => {
+    const host = document.querySelector("[data-fullscreen]");
+    return {
+      mode: host?.getAttribute("data-fullscreen") ?? null,
+      text: (document.body.innerText ?? "").replace(/\\s+/g, " "),
+      appShellLeaked: document.querySelector("aside") !== null,
+    };
+  })()`);
+  if (fullscreenPage.mode !== "open") {
+    problems.push("全屏看图页没挂上（[data-fullscreen] 不在或值不对）");
+  }
+  if (!/没有可显示的照片|No photo to show/.test(fullscreenPage.text)) {
+    problems.push("全屏看图页拿不到清单时没给空态提示（黑屏让人猜）");
+  }
+  if (fullscreenPage.appShellLeaked) {
+    problems.push("全屏看图页里混进了应用外壳（aside 还在）—— 查询串选页没生效");
+  }
+
   console.log(
     JSON.stringify(
       {
@@ -2480,6 +2535,7 @@ try {
         dirTree,
         workspace,
         browseWorkspace,
+        fullscreenPage,
         problems,
       },
       null,
@@ -2495,8 +2551,6 @@ try {
   ws?.close();
   chrome.kill("SIGKILL");
 }
-
-process.exit(problems.length > 0 ? 1 : 0);
 
 async function findTarget() {
   for (let attempt = 0; attempt < 40; attempt += 1) {

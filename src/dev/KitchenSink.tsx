@@ -21,9 +21,9 @@ import {
   type JSX,
 } from "solid-js";
 import {
-  IconAlertTriangle,
   IconCircleCheck,
   IconClock,
+  IconMaximize,
   IconCopy,
   IconFolder,
   IconFolderFilled,
@@ -448,8 +448,8 @@ export default function KitchenSink() {
               <ToggleBlock
                 pressed={toggleSnap()}
                 onPressedChange={setToggleSnap}
-                icon={<IconAlertTriangle size={16} />}
-                label={t("flow.tool.snap")}
+                icon={<IconMaximize size={16} />}
+                label={t("flow.tool.fullscreen")}
               />
               <ToggleBlock
                 pressed={toggleByTime()}

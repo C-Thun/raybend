@@ -11,6 +11,8 @@ pub mod browse;
 pub mod db;
 /// 编辑视口：洞口契约（M3-W1）+ 渲染线程（M3-W2）。
 pub mod editor;
+/// 全屏看图（另开无边框窗口，沉浸式无 UI）。
+pub mod fullscreen;
 mod import;
 mod migration;
 /// 窗口 ↔ wgpu 的最小胶水（取裸句柄 / 读客户区尺寸）——spike 与编辑视口共用这一份。
@@ -185,6 +187,8 @@ pub fn run() {
         .manage(browse::BrowseState::default())
         // 编辑视口的洞口事实（M3-W1）：前端报原始值，这里存着并算物理像素版本
         .manage(editor::EditorState::default())
+        // 全屏看图的清单与当前下标（flowbar 的全屏按钮）
+        .manage(fullscreen::FullscreenState::default())
         .invoke_handler(tauri::generate_handler![
             // ── 数据底座的诊断与设置（M1-2）──
             db::app_paths,
@@ -250,6 +254,10 @@ pub fn run() {
             editor::editor_set_photo,
             editor::editor_viewport_intent,
             editor::editor_render_state,
+            // ── 全屏看图 ──
+            fullscreen::fullscreen_open,
+            fullscreen::fullscreen_payload,
+            fullscreen::fullscreen_close,
             // ── 库内目录树的菜单（新建子目录 / 删除空目录，BROWSE.md §4.3）──
             dirs::dir_empty_check,
             dirs::dir_remove_empty,

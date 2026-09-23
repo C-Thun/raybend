@@ -93,7 +93,7 @@ export const enUS: Record<MessageKey, string> = {
  "flow.browse": "Browse",
  "flow.edit": "Edit",
  "flow.export": "Export",
- "flow.tool.snap": "Snap",
+ "flow.tool.fullscreen": "Fullscreen",
 
  "exif.camera": "Camera",
  "exif.lens": "Lens",
@@ -105,6 +105,10 @@ export const enUS: Record<MessageKey, string> = {
  "exif.megapixels": "Megapixels",
  "exif.format": "Format",
  "exif.empty": "No photo selected",
+
+ // ── fullscreen viewer (immersive, its own window) ──────
+ "fullscreen.empty": "No photo to show",
+ "fullscreen.failed": "Could not load this photo",
 
  "common.easy_copy.hint": "Click to copy",
  "common.easy_copy.done": "Copied",
@@ -455,6 +459,7 @@ export const enUS: Record<MessageKey, string> = {
  "cmd.viewer.fit": "Fit window ↔ 100%",
  "cmd.viewer.actual": "100% ↔ fit",
  "cmd.viewer.compareOnly": "Film strip: compared only",
+ "cmd.viewer.fullscreen": "Fullscreen view",
  "cmd.mark.rating.0": "Rate 0 stars (clear)",
  "cmd.mark.rating.1": "Rate 1 star",
  "cmd.mark.rating.2": "Rate 2 stars",

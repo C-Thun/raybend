@@ -95,6 +95,12 @@ export interface CommandDeps {
     comparing: () => boolean;
     filmVisible: () => boolean;
     actions: () => ViewerActions | null;
+    /**
+     * 全屏看图（另一扇窗口）。**没有可看的照片时返回 `undefined`** ——
+     * 调用方（命令与 flowbar 的按钮）据此决定「不显示 / 不执行」，
+     * 而不是给一个按下去没反应的按钮。
+     */
+    fullscreen: () => (() => void) | undefined;
   };
 
   /* ── 浏览 ───────────────────────────────────────── */
@@ -485,6 +491,23 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
         if (deps.flow() === "import") deps.import.cycleChrome();
         else deps.browse.cycleChrome();
       },
+    }),
+    /*
+     * 全屏看图：另一扇窗口、沉浸式无 UI（`src/features/fullscreen/`）。
+     *
+     * `when` 用「真的能开」当判据（工作区给了清单）—— 与 flowbar 那个按钮的
+     * 出现条件**同一个读数**，所以不会出现「按钮在、键不灵」或反之。
+     * `F` 没被占用（现有单键：`0/1/-/=/P/U/X/i`）。
+     */
+    spec({
+      id: "viewer.fullscreen",
+      titleKey: "cmd.viewer.fullscreen",
+      group: "view",
+      menu: "view",
+      scope: "viewer",
+      defaultKey: "F",
+      when: () => deps.viewer.fullscreen() !== undefined,
+      run: () => deps.viewer.fullscreen()?.(),
     }),
 
     /* ══ 编辑（M3-W1：面板开关与三个画布工具）═════════

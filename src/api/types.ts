@@ -752,3 +752,21 @@ export type EditorViewportIntent =
   | { kind: "toggleFit" }
   | { kind: "reset" }
   | { kind: "hitTest"; x: number; y: number };
+
+/* ══════════════════════════════════════════════════════════════
+ * 全屏看图（另一扇窗口，沉浸式）
+ * ══════════════════════════════════════════════════════════════ */
+
+/** 全屏页需要的一张照片（与 `lib/fullscreen-target.ts` 的形状一致）。 */
+export interface FullscreenItem {
+  id: string;
+  /** 绝对路径（`view_image` 直接吃它） */
+  path: string;
+  fileName: string;
+}
+
+/** 一次全屏会话的清单与当前下标（Rust 侧持有，页面取一次 + 订阅事件）。 */
+export interface FullscreenPayload {
+  items: FullscreenItem[];
+  index: number;
+}

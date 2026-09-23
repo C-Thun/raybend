@@ -64,6 +64,7 @@ import {
 import { createThumbQueue } from "../../components/ui/thumb-queue.ts";
 import { FilmStrip } from "../../components/ui/viewer/index.ts";
 import { photosFromSource, viewingInfoOf } from "../../components/ui/viewer/index.ts";
+import { buildFullscreenTarget } from "../../lib/fullscreen-target.ts";
 import { registerViewerActions, type ViewerActions } from "../../components/ui/viewer/actions.ts";
 import { PhotoStatusBar } from "../../components/ui/tiles/index.ts";
 import { browseInfoMode } from "../../components/ui/tile-info.ts";
@@ -134,6 +135,15 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
   );
 
   const photos = createMemo(() => photosFromSource(source()));
+
+  /**
+   * 全屏看图要的清单（flowbar 的全屏按钮 + `viewer.fullscreen` 命令）。
+   *
+   * 与 browse / import 同一份显示序函数 —— 编辑里看到的邻居就是浏览里看到的邻居。
+   */
+  const fullscreenTarget = createMemo(() =>
+    buildFullscreenTarget(photos(), store.selection().anchor),
+  );
 
   /**
    * 胶片带适配：**读**锚点、**写**回 browse store 的选择（`AGENTS.md` §11.4 红线）。
@@ -269,6 +279,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
     cycleChrome: () => props.store.cycleTab(),
     resetChrome: () => props.store.resetChrome(),
     hasPhoto: () => current() !== null,
+    fullscreenTarget,
   };
 
   onMount(() => {

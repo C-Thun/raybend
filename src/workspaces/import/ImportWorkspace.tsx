@@ -42,7 +42,8 @@ import { StateWatermark } from "../../components/ui/StateWatermark.tsx";
 import { registerImportActions } from "../../features/import/actions.ts";
 import { IconAlertTriangle, IconFolderOpen, IconPhoto, IconPhotoOff } from "@tabler/icons-solidjs";
 import type { TilesViewingInfo } from "../../components/ui/tiles/index.ts";
-import { createViewerStore } from "../../components/ui/viewer/index.ts";
+import { createViewerStore, photosFromSource } from "../../components/ui/viewer/index.ts";
+import { buildFullscreenTarget } from "../../lib/fullscreen-target.ts";
 import { getThumbBytes, getViewImage } from "../../api/db.ts";
 import {
   createImportStore,
@@ -265,6 +266,7 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
       selectAll: () => grid.selectAll(),
       excludeSelected: () => store.toggleExcluded([...grid.selectedIds()]),
       toggleCompareStrip: viewing.toggleCompareStrip,
+      fullscreenTarget,
     });
     onCleanup(() => registerImportActions(null));
   });
@@ -293,6 +295,15 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
   /** 网格数据源（适配器：把导入 store 包成网格契约） */
   const gridSource = createMemo(() =>
     importSource(grid, { isExcluded: store.isExcluded, infoMode: importInfoMode }),
+  );
+
+  /**
+   * 全屏看图要的清单（flowbar 的全屏按钮 + `viewer.fullscreen` 命令）。
+   *
+   * 与浏览侧同一个做法：显示序 = 网格那一份（`photosFromSource(gridSource())`）。
+   */
+  const fullscreenTarget = createMemo(() =>
+    buildFullscreenTarget(photosFromSource(gridSource()), grid.selection().anchor),
   );
 
   /** 空态 / 加载 / 错误的水印（文案是导入侧的，所以由工作区给） */

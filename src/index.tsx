@@ -14,6 +14,7 @@ import "@fontsource-variable/noto-sans-sc/wght.css";
 import { installEscapeBlur } from "./lib/dom-focus.ts";
 import { hydrateLocale } from "./i18n/index.ts";
 import SpikeViewport from "./dev/SpikeViewport.tsx";
+import FullscreenViewer from "./features/fullscreen/FullscreenViewer.tsx";
 
 /**
  * 组件陈列室（`src/dev/`）**只在开发期注册**，而且 `import()` 必须留在
@@ -57,10 +58,23 @@ const KitchenSink = import.meta.env.DEV
  */
 const SPIKE_MODE = new URLSearchParams(window.location.search).get("spike") === "1";
 
+/*
+ * 全屏看图页（`?fullscreen=1`）—— 与 spike 页同一套「查询串选页」的做法，
+ * 但它**是正式功能**（不是调试页），所以静态 import 进产物。
+ *
+ * 为什么另开一扇窗口而不是把主窗口全屏：人类 2026-09-23 的口径是「不受主窗口形态影响」
+ * （主窗口在编辑工作流、分栏、最大化都不影响它），而且 Esc 退出只该关掉看图这扇窗。
+ * Rust 侧建窗在 `src-tauri/src/fullscreen.rs`。
+ */
+const FULLSCREEN_MODE =
+  new URLSearchParams(window.location.search).get("fullscreen") === "1";
+
 render(
   () =>
     SPIKE_MODE ? (
       <SpikeViewport />
+    ) : FULLSCREEN_MODE ? (
+      <FullscreenViewer />
     ) : (
       <Router>
       {/*
