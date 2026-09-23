@@ -19,6 +19,8 @@
 
 import { createSignal } from "solid-js";
 
+import type { EditorRenderState } from "../../api/types.ts";
+
 import {
   initialEditorChrome,
   editorChromeName,
@@ -124,6 +126,24 @@ export interface EditorStore {
   addCategory: (name: string) => boolean;
   expandedCategory: () => string | null;
   toggleCategory: (id: string) => void;
+
+  /* ── GPU 视口（M3-W2）────────────────────────────── */
+  /**
+   * 渲染线程的最近一次快照。
+   *
+   * 它住在 store 而不是工作区里，是因为**两处都要用它**：
+   * 工作区拿它决定 `holeActive`，视口拿它显示「不可用 / 正在载入」的提示。
+   */
+  renderState: () => EditorRenderState | null;
+  setRenderState: (state: EditorRenderState | null) => void;
+  /**
+   * 洞口那条 DOM 链要不要透明（= 渲染器 ready 且**真的画出过照片**）。
+   *
+   * `App.tsx` 的根节点也读它（洞口之上一直到根节点都不能有底色）——
+   * 所以它只能有一份，不能各工作区自己存一份。
+   */
+  holeActive: () => boolean;
+  setHoleActive: (value: boolean) => void;
 }
 
 export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
@@ -151,6 +171,8 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
   const [angle, setAngleSignal] = createSignal(0);
   const [params, setParams] = createSignal<Record<string, number>>(defaultParams());
   const [curveChannel, setCurveChannel] = createSignal<CurveChannel>("rgb");
+  const [renderState, setRenderState] = createSignal<EditorRenderState | null>(null);
+  const [holeActive, setHoleActive] = createSignal(false);
 
   /** 面板状态一变就落盘（它只有开关两态，不需要防抖）。 */
   const persist = (next: EditorChromeState, nextCategories = categories()): void => {
@@ -250,5 +272,10 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
     },
     expandedCategory: expanded,
     toggleCategory: (id) => setExpanded((current) => toggleExpandedCategory(current, id)),
+
+    renderState,
+    setRenderState,
+    holeActive,
+    setHoleActive,
   };
 }

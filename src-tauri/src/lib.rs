@@ -9,10 +9,12 @@
 
 pub mod browse;
 pub mod db;
-/// 编辑视口的洞口状态（M3-W1 的契约层；W2 的渲染线程从这里取事实）。
+/// 编辑视口：洞口契约（M3-W1）+ 渲染线程（M3-W2）。
 pub mod editor;
 mod import;
 mod migration;
+/// 窗口 ↔ wgpu 的最小胶水（取裸句柄 / 读客户区尺寸）——spike 与编辑视口共用这一份。
+mod render_window;
 pub mod repo;
 pub mod source;
 pub mod tags;
@@ -243,6 +245,11 @@ pub fn run() {
             // ── 编辑视口（M3-W1：洞口事实的上报与回读）──
             editor::editor_set_viewport,
             editor::editor_viewport_state,
+            editor::editor_bind_renderer,
+            editor::editor_unbind_renderer,
+            editor::editor_set_photo,
+            editor::editor_viewport_intent,
+            editor::editor_render_state,
             // ── 库内目录树的菜单（新建子目录 / 删除空目录，BROWSE.md §4.3）──
             dirs::dir_empty_check,
             dirs::dir_remove_empty,

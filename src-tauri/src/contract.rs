@@ -304,6 +304,9 @@ fn every_contract_entry_has_a_test() {
         // 重建数据（M2-W2 数量体系）
         "RebuildProgress",
         "RebuildReport",
+        // 编辑视口（M3-W1 洞口契约 / M3-W2 渲染线程）
+        "EditorViewportState",
+        "EditorRenderState",
     ];
     for key in value.as_object().unwrap().keys() {
         if key.starts_with('_') {
@@ -380,4 +383,25 @@ fn rebuild_report_matches_contract() {
 fn delete_failure_is_a_nested_dto_too() {
     use crate::browse::DeleteFailure;
     assert_eq!(keys_of::<DeleteFailure>(), contract_keys("DeleteFailure"));
+}
+
+/// 编辑视口的两块状态（M3）也要进契约。
+///
+/// 它们比别的 DTO 更容易漂：前端**同时**读 `EditorViewportState`（洞口回读）与
+/// `EditorRenderState`（渲染线程快照 + 握手），而且后者里有几个字段是「界面据此决定
+/// 要不要把洞口切成透明」的开关（`ready` / `paintedPath`）—— 名字一漂，
+/// 症状是「照片永远不出现」或「洞口一直是 DOM 底色」，既不报错也不崩。
+#[test]
+fn editor_viewport_state_matches_contract() {
+    use crate::editor::ViewportStateDto;
+    assert_eq!(
+        keys_of::<ViewportStateDto>(),
+        contract_keys("EditorViewportState")
+    );
+}
+
+#[test]
+fn editor_render_state_matches_contract() {
+    use crate::editor::RenderState;
+    assert_eq!(keys_of::<RenderState>(), contract_keys("EditorRenderState"));
 }

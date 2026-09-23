@@ -39,6 +39,7 @@ import { BrowseToolbar, createBrowseStore, TagDialog } from "./features/browse/i
 import { browseActions } from "./features/browse/actions.ts";
 import { applyMarkIntent } from "./features/browse/mark-actions.ts";
 import { importActions } from "./features/import/actions.ts";
+import { editorActions } from "./features/editor/actions.ts";
 import { viewerActions } from "./components/ui/viewer/actions.ts";
 import {
   CommandPalette,
@@ -333,8 +334,14 @@ export default function App() {
     if (handle !== null) await act(handle);
   };
 
-  /** 当前挂载的工作区的动作槽（同一时刻只有一个） */
-  const activeWorkspaceActions = () => browseActions() ?? importActions();
+  /**
+   * 当前挂载的工作区的动作槽（同一时刻只有一个）。
+   *
+   * 编辑工作区也在里面：它的 `viewing()` 为真时，`viewer.zoomIn` / `fit` / `actual`
+   * 这些命令才在编辑里生效 —— 命令调用的是**当前挂载的那个视图**注册进来的实现
+   * （编辑视口那份在 `workspaces/editor/EditorWorkspace.tsx` 里注册）。
+   */
+  const activeWorkspaceActions = () => browseActions() ?? importActions() ?? editorActions();
   const viewing = (): boolean => activeWorkspaceActions()?.viewing() ?? false;
   const filmVisible = (): boolean => activeWorkspaceActions()?.filmVisible() ?? false;
   const importFlow = (): boolean => shell.workflow() === "import";
@@ -461,7 +468,22 @@ export default function App() {
   void menuShortcut;
 
   return (
-    <div class="flex h-full w-full flex-col bg-surface-main text-fg-1">
+    <div
+      class={[
+        "flex h-full w-full flex-col text-fg-1",
+        /*
+         * 根节点在**编辑视口出图时**必须透明。
+         *
+         * 为什么（这是透明挖洞的物理约束，不是口味）：DOM 在 GPU 的**上面** ——
+         * 洞口之上只要任何一层画了底色，wgpu 那张照片就一个像素也漏不出来。
+         * 洞口里的底色由 wgpu 自己画（主题色由前端当「事实」报给它），
+         * 所以让开链子不会把桌面漏出来。其余工作流照旧不透明，外观与以前完全一样。
+         */
+        shell.workflow() === "edit" && editorStore.holeActive()
+          ? "bg-transparent"
+          : "bg-surface-main",
+      ].join(" ")}
+    >
       <TitleBar
         store={shell}
         appearance={appearance}

@@ -28,6 +28,8 @@ import type {
   DeleteFailure,
   DeleteResult,
   DirEmptyView,
+  EditorRenderState,
+  EditorViewportState,
   DirEntry,
   FacetCount,
   FileExif,
@@ -357,6 +359,43 @@ const DIR_EMPTY_VIEW_KEYS = [
   "emptyDirCount",
   "hasUnresolvedLink",
 ] as const satisfies readonly (keyof DirEmptyView)[];
+const EDITOR_VIEWPORT_STATE_KEYS = [
+  "backdrop",
+  "backdropReported",
+  "dpr",
+  "holeCss",
+  "holePhysical",
+  "updates",
+  "viewportCss",
+] as const satisfies readonly (keyof EditorViewportState)[];
+const EDITOR_RENDER_STATE_KEYS = [
+  "adapter",
+  "backdrop",
+  "bound",
+  "decode",
+  "decodeError",
+  "dpr",
+  "drawnFrames",
+  "fitMode",
+  "history",
+  "holeCss",
+  "holePhysical",
+  "image",
+  "lastError",
+  "lastHit",
+  "origin",
+  "paintedPath",
+  "panX",
+  "panY",
+  "photoPath",
+  "ready",
+  "restarts",
+  "rotation",
+  "surface",
+  "tier",
+  "wantedTier",
+  "zoom",
+] as const satisfies readonly (keyof EditorRenderState)[];
 
 /** 手写的键表 → 覆盖检查（跑一遍，顺便让 `noUnusedLocals` 满意） */
 const KEY_TABLES = {
@@ -427,6 +466,12 @@ const KEY_TABLES = {
     MIGRATION_NOTICE_KEYS,
   ),
   DirEmptyView: checkKeys<DirEmptyView, typeof DIR_EMPTY_VIEW_KEYS>(DIR_EMPTY_VIEW_KEYS),
+  EditorViewportState: checkKeys<EditorViewportState, typeof EDITOR_VIEWPORT_STATE_KEYS>(
+    EDITOR_VIEWPORT_STATE_KEYS,
+  ),
+  EditorRenderState: checkKeys<EditorRenderState, typeof EDITOR_RENDER_STATE_KEYS>(
+    EDITOR_RENDER_STATE_KEYS,
+  ),
 } as const;
 
 const HERE = dirname(fileURLToPath(import.meta.url));

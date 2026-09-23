@@ -31,7 +31,7 @@ use std::sync::Arc;
  */
 use wgpu::rwh::{RawDisplayHandle, RawWindowHandle};
 
-use super::scene::TestImage;
+use super::image::RenderImage;
 use super::stats::AdapterInfo;
 use super::viewport::{AlphaMode, Viewport};
 
@@ -88,6 +88,10 @@ pub struct SurfaceDetails {
 }
 
 /// wgpu 上下文。
+///
+/// M3-W2 起它**同时服务两条路**：spike 调试窗口（合成测试图）与产品主窗口里的编辑视口
+/// （真实照片）。差异只有一个 [`Self::set_image`]：换图 = 换纹理 + 重建绑定组，
+/// 其余（surface / 设备 / 管线 / 视口矩阵 / 设备丢失恢复）**只有这一份**。
 pub struct GpuContext {
     instance: wgpu::Instance,
     adapter: wgpu::Adapter,
@@ -95,12 +99,25 @@ pub struct GpuContext {
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
+    /// 资源标签前缀（`spike` / `editor`）——wgpu 的报错会带上它，
+    /// 本文件里两次「旧设备的那一件」事故全靠它认出来。
+    label: String,
+    /// 绑定组布局。**与设备绑定**：`recover()` 必须跟着重建（那次真机 panic 的根因）。
+    layout: wgpu::BindGroupLayout,
     pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
     uniform: wgpu::Buffer,
     texture: wgpu::Texture,
     sampler: wgpu::Sampler,
-    image: TestImage,
+    image: RenderImage,
+    /// **画不画这个四边形**。`false` = 只有洞口底色（还没有照片 / 刚换掉）。
+    ///
+    /// 为什么不靠 `image_size == 0` 表达：「没有照片」不是「图像尺寸为 0」这种异常
+    /// （`Viewport::sanity_problems` 会把它当问题报出来），两件事得分开。
+    has_image: bool,
+    /// 洞口底色（照片没盖住的部分画它）—— 由前端把 `getComputedStyle` 的颜色报上来。
+    /// 默认全透明：spike 那条路要的就是「洞口外透出桌面」。
+    backdrop: wgpu::Color,
     viewport: Viewport,
     /// 设备丢失的记录（A.2 要）
     pub device_lost: Arc<std::sync::Mutex<Vec<String>>>,
@@ -114,8 +131,20 @@ pub struct GpuContext {
 }
 
 impl GpuContext {
-    /// 建上下文并上传测试图。`size` 是窗口内容区的**物理**像素。
-    pub fn new(handles: RawHandles, size: (u32, u32), dpr: f32) -> Result<Self, GpuError> {
+    /// 建上下文并上传一张图（`None` = 先不装图，只见洞口底色）。
+    /// `size` 是窗口内容区的**物理**像素，`label` 是资源标签前缀。
+    pub fn new(
+        handles: RawHandles,
+        size: (u32, u32),
+        dpr: f32,
+        image: Option<RenderImage>,
+        label: &str,
+    ) -> Result<Self, GpuError> {
+        let label = label.to_string();
+        let has_image = image.is_some();
+        // 没有照片时也得有一张**合法**的纹理（wgpu 不接受 0 尺寸）：
+        // 「画不画」由 `has_image` 管，不由纹理尺寸管。
+        let image = image.unwrap_or_else(RenderImage::transparent_1x1);
         // 后端由 wgpu 读 `WGPU_BACKEND`（dx12 / vulkan / gl）—— spike 要试回退，所以不写死。
         // 用 `_from_env()` 那一族构造函数才会读环境变量（别拿 `default()`：wgpu 30 没这个默认实现）。
         let instance =
@@ -173,8 +202,7 @@ impl GpuContext {
         };
         surface.configure(&device, &config);
 
-        let image = super::scene::make_test_image(6000, 4000);
-        let resources = build_device_resources(&device, &queue, &image, config.format, "spike");
+        let resources = build_device_resources(&device, &queue, &image, config.format, &label);
 
         let mut viewport = Viewport {
             image_size: (image.width, image.height),
@@ -196,16 +224,20 @@ impl GpuContext {
             device,
             queue,
             config,
+            layout: resources.layout,
             pipeline: resources.pipeline,
             bind_group: resources.bind_group,
             uniform: resources.uniform,
             texture: resources.texture,
             sampler: resources.sampler,
             image,
+            has_image,
+            backdrop: wgpu::Color::TRANSPARENT,
             viewport,
             device_lost,
             frames_drawn: 0,
             reconfigure_pending: false,
+            label,
         })
     }
 
@@ -217,12 +249,83 @@ impl GpuContext {
         &mut self.viewport
     }
 
-    pub fn image(&self) -> &TestImage {
+    pub fn image(&self) -> &RenderImage {
         &self.image
     }
 
+    /// 图像尺寸（图像像素）。没有图时是占位纹理的 1×1 —— 判断「有没有图」请用 [`Self::has_image`]。
     pub fn image_size(&self) -> (u32, u32) {
         (self.image.width, self.image.height)
+    }
+
+    /// 这一刻画不画图像四边形（`false` = 只有洞口底色）。
+    pub fn has_image(&self) -> bool {
+        self.has_image
+    }
+
+    /// 资源标签前缀（诊断）。
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+
+    /// 设备允许的最大纹理边长（2D）。**上传照片前要用它夹一下**：
+    /// 超过上限的图 `create_texture` 会直接报错（不是静默降级）。
+    pub fn max_texture_dimension_2d(&self) -> u32 {
+        self.device.limits().max_texture_dimension_2d
+    }
+
+    /// 洞口底色。
+    pub fn backdrop(&self) -> wgpu::Color {
+        self.backdrop
+    }
+
+    /// 设洞口底色（照片没盖住的部分画它）。
+    pub fn set_backdrop(&mut self, color: wgpu::Color) {
+        self.backdrop = color;
+    }
+
+    /// **换图**：重建纹理与绑定组（设备、管线、视口矩阵都不动）。
+    ///
+    /// 这是编辑器「换一张照片 / 换一个档位」的唯一入口 ——
+    /// 上传整块像素（`REPLACE` 混合 + 不透明 alpha，见 `create_pipeline`）。
+    pub fn set_image(&mut self, image: RenderImage) {
+        self.image = image;
+        self.upload_image(true);
+    }
+
+    /// **清空照片**：换成 1×1 占位纹理，并且不再画那个四边形（只剩洞口底色）。
+    pub fn clear_image(&mut self) {
+        self.image = RenderImage::transparent_1x1();
+        self.upload_image(false);
+    }
+
+    /// 把 `self.image` 传上设备（`has_image` 决定画不画）。
+    fn upload_image(&mut self, has_image: bool) {
+        self.texture = create_image_texture(&self.device, &self.queue, &self.image, &self.label);
+        self.bind_group = make_bind_group(
+            &self.device,
+            &self.layout,
+            &self.texture,
+            &self.sampler,
+            &self.uniform,
+            &self.label,
+        );
+        self.has_image = has_image;
+        self.viewport.image_size = (self.image.width, self.image.height);
+        // 尺寸变了要按当前档位重新适配（`Viewport::refit` 会清 pan）——
+        // 「换一张不同比例的图，画面还留着上一张的 pan」是必然跑偏的
+        if self.viewport.fit_mode != super::viewport::FitMode::Free {
+            self.viewport.refit();
+        }
+    }
+
+    /// 取走设备丢失的记录（编辑器把它搬进自己的历史上报，spike 直接读 `device_lost`）。
+    pub fn drain_device_lost(&self) -> Vec<String> {
+        let mut log = match self.device_lost.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        std::mem::take(&mut *log)
     }
 
     pub fn frames_drawn(&self) -> u64 {
@@ -251,7 +354,21 @@ impl GpuContext {
     /// 窗口尺寸变化（物理像素）。**最小化时宽高会是 0** —— 那种情况不重配 surface
     /// （wgpu 不允许 0 尺寸，而且最小化时也没必要画）。
     pub fn resize(&mut self, width: u32, height: u32, dpr: f32) {
-        self.viewport.dpr = dpr;
+        self.set_dpr(dpr);
+        self.resize_surface(width, height);
+    }
+
+    /// 只换 DPR（WebView 的 `devicePixelRatio`：含显示器 DPI + 系统文字缩放 + 页面缩放）。
+    ///
+    /// ⚠️ **不是** Tauri 的 `scale_factor()`（§7.9 铁律 3）—— 洞口与指针的换算都用这个。
+    pub fn set_dpr(&mut self, dpr: f32) {
+        if dpr.is_finite() && dpr > 0.0 {
+            self.viewport.dpr = dpr;
+        }
+    }
+
+    /// 只换 surface 尺寸（物理像素）——编辑器的窗口事件走这条（DPR 由 DOM 上报）。
+    pub fn resize_surface(&mut self, width: u32, height: u32) {
         self.viewport.viewport_size = (width as f32, height as f32);
         if width == 0 || height == 0 {
             return;
@@ -315,38 +432,50 @@ impl GpuContext {
         let view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("spike-frame"),
-            });
-        {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("spike-pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    depth_slice: None,
-                    ops: wgpu::Operations {
-                        // 透明黑：洞口之外不画东西，透出下面的桌面/窗口（这就是「挖洞」）
-                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                // 不用 multiview（spike 用不到）
-                multiview_mask: None,
-            });
-            // 洞口：scissor 之外一个像素都不碰 —— 挖洞就靠它
-            if let Some((x, y, w, h)) = self.viewport.scissor() {
-                pass.set_scissor_rect(x, y, w, h);
-                pass.set_pipeline(&self.pipeline);
-                pass.set_bind_group(0, &self.bind_group, &[]);
-                pass.draw(0..4, 0..1);
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some(&format!("{}-frame", self.label)),
+                });
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some(&format!("{}-pass", self.label)),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        resolve_target: None,
+                        depth_slice: None,
+                        ops: wgpu::Operations {
+                            /*
+                             * 清屏色 = **洞口底色**（默认透明）：
+                             *
+                             * * spike 那条路是透明黑 —— 洞口之外不画东西，透出下面的桌面/窗口（这就是「挖洞」）；
+                             * * 编辑器那条路把它设成界面底色（`set_backdrop`）—— 照片没盖住的部分
+                             *   必须是**界面自己的颜色**，不能透出桌面（那是产品观感事故）。
+                             *
+                             * ⚠️ 清屏作用于**整张 surface**（不只是洞口）：`scissor` 只约束绘制。
+                             * 洞口之外盖不到的地方全在 DOM 底下，所以颜色看不见 ——
+                             * 但这也意味着**洞口底色不能是透明+依赖 DOM**，否则就是「透出桌面」。
+                             */
+                            load: wgpu::LoadOp::Clear(self.backdrop),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    // 不用 multiview（spike 用不到）
+                    multiview_mask: None,
+                });
+                // 洞口：scissor 之外一个像素都不碰 —— 挖洞就靠它
+                if self.has_image
+                    && let Some((x, y, w, h)) = self.viewport.scissor()
+                {
+                    pass.set_scissor_rect(x, y, w, h);
+                    pass.set_pipeline(&self.pipeline);
+                    pass.set_bind_group(0, &self.bind_group, &[]);
+                    pass.draw(0..4, 0..1);
+                }
             }
-        }
         self.queue.submit(Some(encoder.finish()));
         // wgpu 30：呈现走 `queue.present`（不再是 `frame.present()`）
         self.queue.present(frame);
@@ -398,8 +527,9 @@ impl GpuContext {
             &self.queue,
             &self.image,
             self.config.format,
-            "spike",
+            &self.label,
         );
+        self.layout = resources.layout;
         self.pipeline = resources.pipeline;
         self.bind_group = resources.bind_group;
         self.uniform = resources.uniform;
@@ -442,6 +572,7 @@ impl GpuContext {
 /// 第一次漏的是 bind group layout，补上之后第二次漏的是 uniform buffer —— 都是「手写重建」惹的。
 /// 所以现在只剩一个入口：资源集合是设备局部的，**换个设备就整套重建**。
 struct DeviceResources {
+    layout: wgpu::BindGroupLayout,
     pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
     uniform: wgpu::Buffer,
@@ -451,16 +582,16 @@ struct DeviceResources {
 
 /// 在一台设备上建齐所有与设备绑定的资源。
 ///
-/// `label_prefix` 只影响调试标签（`spike` / `spike-offscreen`）——wgpu 的报错会带上它，
+/// `label_prefix` 只影响调试标签（`spike` / `editor`）——wgpu 的报错会带上它，
 /// 真机排错时很有用（本文件里两次事故的全靠标签认出来是「旧设备的那一件」）。
 fn build_device_resources(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
-    image: &TestImage,
+    image: &RenderImage,
     format: wgpu::TextureFormat,
     label_prefix: &str,
 ) -> DeviceResources {
-    let texture = create_image_texture(device, queue, image);
+    let texture = create_image_texture(device, queue, image, label_prefix);
     let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
         label: Some(&format!("{label_prefix}-sampler")),
         // 放大用最近邻：1:1 档位要能看出「一个图像像素就是一个屏幕像素」
@@ -477,9 +608,10 @@ fn build_device_resources(
         mapped_at_creation: false,
     });
     let layout = create_bind_group_layout(device);
-    let bind_group = make_bind_group(device, &layout, &texture, &sampler, &uniform);
-    let pipeline = create_pipeline(device, &layout, format);
+    let bind_group = make_bind_group(device, &layout, &texture, &sampler, &uniform, label_prefix);
+    let pipeline = create_pipeline(device, &layout, format, label_prefix);
     DeviceResources {
+        layout,
         pipeline,
         bind_group,
         uniform,
@@ -494,7 +626,8 @@ fn build_device_resources(
 /// 设备重建时必须跟着重建，不能从旧管线里取 —— 见 `recover()` 里记的那次真机 panic。
 fn create_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("spike-bind-layout"),
+        // 布局与设备绑定，但**标签不必带前缀**：它只进 wgpu 的调试信息，不参与资源匹配
+        label: Some("raybend-bind-layout"),
         entries: &[
             wgpu::BindGroupLayoutEntry {
                 binding: 0,
@@ -543,7 +676,8 @@ fn install_device_lost_logger(device: &wgpu::Device, sink: Arc<std::sync::Mutex<
 fn create_image_texture(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
-    image: &TestImage,
+    image: &RenderImage,
+    label_prefix: &str,
 ) -> wgpu::Texture {
     let size = wgpu::Extent3d {
         width: image.width,
@@ -552,7 +686,7 @@ fn create_image_texture(
     };
     let bytes_per_row = image.width * 4;
     let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("spike-image"),
+        label: Some(&format!("{label_prefix}-image")),
         size,
         mip_level_count: 1,
         sample_count: 1,
@@ -564,7 +698,7 @@ fn create_image_texture(
         view_formats: &[],
     });
     let encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("spike-upload"),
+        label: Some(&format!("{label_prefix}-upload")),
     });
     /*
      * 整块上传（6000×4000×4 = 96MB 一次拷完）。
@@ -599,10 +733,11 @@ fn make_bind_group(
     texture: &wgpu::Texture,
     sampler: &wgpu::Sampler,
     uniform: &wgpu::Buffer,
+    label_prefix: &str,
 ) -> wgpu::BindGroup {
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
     device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("spike-bind-group"),
+        label: Some(&format!("{label_prefix}-bind-group")),
         layout,
         entries: &[
             wgpu::BindGroupEntry {
@@ -625,19 +760,20 @@ fn create_pipeline(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
     format: wgpu::TextureFormat,
+    label_prefix: &str,
 ) -> wgpu::RenderPipeline {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("spike-shader"),
+        label: Some("raybend-shader"),
         source: wgpu::ShaderSource::Wgsl(include_str!("spike.wgsl").into()),
     });
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("spike-pipeline-layout"),
+        label: Some(&format!("{label_prefix}-pipeline-layout")),
         bind_group_layouts: &[Some(layout)],
         // 不用 immediate / push constant 数据
         immediate_size: 0,
     });
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("spike-pipeline"),
+        label: Some(&format!("{label_prefix}-pipeline")),
         layout: Some(&pipeline_layout),
         vertex: wgpu::VertexState {
             module: &shader,
@@ -696,7 +832,7 @@ fn pick_format(caps: &wgpu::SurfaceCapabilities) -> wgpu::TextureFormat {
  * 离屏渲染（不需要窗口/表面）
  * ══════════════════════════════════════════════════════════════ */
 
-/// 离屏渲染器：把测试图按给定视口画进一张纹理并**回读像素**。
+/// 离屏渲染器：把一张图按给定视口画进一张纹理并**回读像素**。
 ///
 /// 存在的理由有三条，都不是「顺手加的」：
 ///
@@ -705,20 +841,45 @@ fn pick_format(caps: &wgpu::SurfaceCapabilities) -> wgpu::TextureFormat {
 /// 2. **产出可核对的像素证据**：报告里的「画没画出来」不再只能靠人眼；
 /// 3. 将来**导出/生成缩略图**本来就要走离屏路径（`FUTURE.md` C 段），
 ///    现在写好过以后从 `GpuContext` 里拆。
+///
+/// M3-W2 起它多了一个身份：**编辑视口的像素证据入口** ——
+/// 真实照片（`display::pixels` 出来的那张）可以塞进来，按同一套 shader/矩阵画完回读，
+/// 于是在没有窗口的环境里也能断言「1:1 对齐、洞口裁切、底色清屏」这几件事
+/// （`examples/editor-offscreen.rs`）。
 pub struct OffscreenRenderer {
     device: wgpu::Device,
     queue: wgpu::Queue,
+    layout: wgpu::BindGroupLayout,
     pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
     uniform: wgpu::Buffer,
-    image: TestImage,
+    sampler: wgpu::Sampler,
+    texture: wgpu::Texture,
+    image: RenderImage,
+    /// 清屏色（默认透明；编辑器那条路设成洞口底色）。
+    backdrop: wgpu::Color,
+    /// 设备重建要用（`GpuContext::recover` 同一套：**适配器可以复用**，不必从头建 instance）
+    adapter: wgpu::Adapter,
     /// 回读用的缓冲区尺寸（跟随上一次渲染尺寸）
     readback: Option<(u32, u32, wgpu::Buffer)>,
 }
 
 impl OffscreenRenderer {
-    /// 建离屏渲染器（默认把测试图放进纹理；`WGPU_BACKEND` 同样生效）。
+    /// 建离屏渲染器（默认把合成测试图放进纹理；`WGPU_BACKEND` 同样生效）。
     pub fn new(handles_hint: Option<RawHandles>) -> Result<Self, GpuError> {
+        Self::with_image(
+            handles_hint,
+            super::scene::make_test_image(6000, 4000),
+            "spike-offscreen",
+        )
+    }
+
+    /// 用一张指定的图建离屏渲染器（编辑器像素证据走这条）。
+    pub fn with_image(
+        handles_hint: Option<RawHandles>,
+        image: RenderImage,
+        label: &str,
+    ) -> Result<Self, GpuError> {
         let _ = handles_hint;
         let instance =
             wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
@@ -730,7 +891,7 @@ impl OffscreenRenderer {
         }))
         .map_err(|e| GpuError::NoAdapter(e.to_string()))?;
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            label: Some("raybend-spike-offscreen"),
+            label: Some("raybend-offscreen"),
             required_features: wgpu::Features::empty(),
             required_limits: wgpu::Limits::default(),
             memory_hints: wgpu::MemoryHints::Performance,
@@ -738,28 +899,94 @@ impl OffscreenRenderer {
         }))
         .map_err(|e| GpuError::Device(e.to_string()))?;
 
-        let image = super::scene::make_test_image(6000, 4000);
         // 与真窗口那条路共用同一份资源建法（见 `build_device_resources` 的说明）
         let resources = build_device_resources(
             &device,
             &queue,
             &image,
             wgpu::TextureFormat::Rgba8UnormSrgb,
-            "spike-offscreen",
+            label,
         );
         Ok(Self {
             device,
             queue,
+            layout: resources.layout,
             pipeline: resources.pipeline,
             bind_group: resources.bind_group,
             uniform: resources.uniform,
+            sampler: resources.sampler,
+            texture: resources.texture,
             image,
+            backdrop: wgpu::Color::TRANSPARENT,
+            adapter,
             readback: None,
         })
     }
 
-    pub fn image(&self) -> &TestImage {
+    pub fn image(&self) -> &RenderImage {
         &self.image
+    }
+
+    /// 换图（像素证据要多组图对比时用）。
+    pub fn set_image(&mut self, image: RenderImage) {
+        self.image = image;
+        let texture = create_image_texture(&self.device, &self.queue, &self.image, "offscreen");
+        self.bind_group = make_bind_group(
+            &self.device,
+            &self.layout,
+            &texture,
+            &self.sampler,
+            &self.uniform,
+            "offscreen",
+        );
+        // 旧纹理由这个字段持有、新纹理接上（不靠绑定组隐式提寿 —— 显式持有最不容易误判）
+        self.texture = texture;
+    }
+
+    /// 设清屏色（「洞口底色」那条断言靠它：底色必须原样出现在照片之外）。
+    pub fn set_backdrop(&mut self, color: wgpu::Color) {
+        self.backdrop = color;
+    }
+
+    /// 演练设备丢失（`device.destroy()`）。之后的 `render` 会失败/空转 ——
+    /// 这正是真机上显卡驱动重启时的样子（`GpuContext` 那条路的对应物）。
+    pub fn simulate_device_loss(&mut self) {
+        self.device.destroy();
+    }
+
+    /// 设备丢失后重建：设备、管线、绑定组、纹理**整套重来**。
+    ///
+    /// 与 `GpuContext::recover` 同一条纪律：layout / buffer / texture 都记着自己属于哪个设备，
+    /// 跨设备复用会在 `create_bind_group` 抛校验错（本文件记着那次真机 panic）。
+    /// 所以重建只走 `build_device_resources` 一个入口。
+    ///
+    /// # Errors
+    /// 请求新设备失败时返回错误（调用方交给监督器重建整套）。
+    pub fn recover(&mut self) -> Result<(), GpuError> {
+        let (device, queue) = pollster::block_on(self.adapter.request_device(&wgpu::DeviceDescriptor {
+            label: Some("raybend-offscreen-recovered"),
+            required_features: wgpu::Features::empty(),
+            required_limits: wgpu::Limits::default(),
+            memory_hints: wgpu::MemoryHints::Performance,
+            ..Default::default()
+        }))
+        .map_err(|e| GpuError::Device(e.to_string()))?;
+        self.device = device;
+        self.queue = queue;
+        let resources = build_device_resources(
+            &self.device,
+            &self.queue,
+            &self.image,
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+            "offscreen",
+        );
+        self.layout = resources.layout;
+        self.pipeline = resources.pipeline;
+        self.bind_group = resources.bind_group;
+        self.uniform = resources.uniform;
+        self.texture = resources.texture;
+        self.sampler = resources.sampler;
+        Ok(())
     }
 
     /// 适配器信息（报告里要）。
@@ -799,17 +1026,18 @@ impl OffscreenRenderer {
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("spike-offscreen-frame"),
+                label: Some("offscreen-frame"),
             });
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("spike-offscreen-pass"),
+                label: Some("offscreen-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view,
                     resolve_target: None,
                     depth_slice: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        // 与真窗口那条路同一套语义：清屏 = 洞口底色（默认透明）
+                        load: wgpu::LoadOp::Clear(self.backdrop),
                         store: wgpu::StoreOp::Store,
                     },
                 })],
@@ -907,6 +1135,7 @@ fn write_matrix(queue: &wgpu::Queue, uniform: &wgpu::Buffer, viewport: &Viewport
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::render::viewport::FitMode;
 
     /// 拿一台可用的设备。没有适配器的环境（纯容器 / 无 GPU 的 CI）返回 `None` ——
     /// 那种情况**跳过**，但会说明原因，不给「不明不白的绿」。
@@ -972,5 +1201,66 @@ mod tests {
         // 能走到这里就说明 layout / uniform / sampler / texture / bind group / pipeline
         // **全是新设备的**（否则 wgpu 在 `create_bind_group` 就抛了）。
         assert_eq!(rebuilt.uniform.size(), 80);
+    }
+
+    /// 设备丢失 → `recover()` → **还能再出图**（编辑器渲染线程靠这条路活着）。
+    ///
+    /// 两条断言分开看：
+    /// * 重建**不 panic** —— `build_device_resources` 一个入口的纪律（上面那条测试的同族）；
+    /// * 重建之后**像素还是对的** —— 只重建不验证等于没重建。
+    #[test]
+    fn device_loss_recovery_still_draws_the_right_pixels() {
+        // 2×2、四个角四种颜色：重建之后一眼看出有没有串色/反图
+        let mut image = RenderImage::solid(2, 2, [0, 0, 0, 255]);
+        let put = |image: &mut RenderImage, x: usize, y: usize, rgba: [u8; 4]| {
+            let index = (y * image.width as usize + x) * 4;
+            image.pixels[index..index + 4].copy_from_slice(&rgba);
+        };
+        put(&mut image, 0, 0, [200, 10, 10, 255]);
+        put(&mut image, 1, 0, [10, 200, 10, 255]);
+        put(&mut image, 0, 1, [10, 10, 200, 255]);
+        put(&mut image, 1, 1, [240, 240, 10, 255]);
+
+        let Ok(mut renderer) = OffscreenRenderer::with_image(None, image, "recovery-test") else {
+            eprintln!("跳过 device_loss_recovery_still_draws_the_right_pixels：本环境没有可用的 wgpu 适配器");
+            return;
+        };
+        let size = (16u32, 16u32);
+        let mut viewport = Viewport {
+            image_size: (2, 2),
+            viewport_size: (size.0 as f32, size.1 as f32),
+            fit_mode: FitMode::Fit,
+            ..Default::default()
+        };
+        viewport.refit(); // Fit 2×2 到 16×16（每块 8×8）
+        let before = renderer.render(&viewport, size);
+        assert_eq!(before.len(), (size.0 * size.1 * 4) as usize, "先能出图");
+        // 图心（8,8）应当落在左上块的中心附近（Fit 居中、每块 8×8）
+        let center = rgba(&before, size.0, 4, 4);
+        assert!(near(center, [200, 10, 10], 12), "Fit 之后左上块在左上：{center:?}");
+
+        // 演练丢失 → 重建 → 再出图（真机上这就是「驱动重启之后画面自己回来了」）
+        renderer.simulate_device_loss();
+        renderer.recover().expect("设备重建不该失败");
+        let after = renderer.render(&viewport, size);
+        assert_eq!(after.len(), before.len(), "重建之后仍然出得了图");
+        assert_eq!(after, before, "同样的输入重建之后像素必须一模一样");
+    }
+
+    /// 取一个像素的 RGBA。
+    fn rgba(pixels: &[u8], width: u32, x: u32, y: u32) -> [u8; 4] {
+        let index = ((y as usize) * (width as usize) + x as usize) * 4;
+        [
+            pixels[index],
+            pixels[index + 1],
+            pixels[index + 2],
+            pixels[index + 3],
+        ]
+    }
+
+    /// 颜色大致相等（容差给重采样留余地）。
+    fn near(actual: [u8; 4], expected: [u8; 3], tolerance: u8) -> bool {
+        actual[3] > 200
+            && (0..3).all(|i| actual[i].abs_diff(expected[i]) <= tolerance)
     }
 }

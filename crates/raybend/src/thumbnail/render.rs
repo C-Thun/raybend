@@ -153,10 +153,108 @@ pub struct Thumb {
     pub placeholder: bool,
 }
 
+/// **解码一个文件**（不缩放、不编码）——整仓唯一一份「文件 → 源像素 + 方向」的实现。
+///
+/// 两个消费方共用它：
+///
+/// | 消费方 | 要什么 | 做什么加工 |
+/// | --- | --- | --- |
+/// | [`render_file`]（网格 / 胶片带 / 看图的 JPEG） | 像素 | 摆正 → 缩放 → 编码 |
+/// | `display::pixels`（编辑器的 GPU 纹理） | 像素 | 摆正 → 缩放 → RGBA8 |
+///
+/// 分出去的理由不是「想抽个层」，而是**方向（EXIF 1–8）那套优先级踩过三次坑**
+/// （tiles 正 / view 歪、缓存毒图）。再抄一份就等着第四、五次。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DecodeSpec {
+    /// 长边上限；`None` = 原尺寸。
+    ///
+    /// **RAW 会把它透给 worker 在子进程里缩放**（一张 6000×4000 的 RGB 是 72MB，
+    /// 跨进程搬完再缩很亏）；位图那条路不受它影响（先在内存里解出来，再缩）。
+    pub max_edge: Option<u32>,
+    /// 允许 RAW 走**内嵌预览**快路径（够大就用它）。
+    pub allow_preview: bool,
+}
+
+impl DecodeSpec {
+    /// 缩略图/屏幕档：RAW 在 worker 里缩、优先内嵌预览。
+    #[must_use]
+    pub const fn thumb(long_edge: u32) -> Self {
+        Self {
+            max_edge: Some(long_edge),
+            allow_preview: true,
+        }
+    }
+
+    /// 原尺寸完整解码（1:1 与将来的显影）。
+    #[must_use]
+    pub const fn full() -> Self {
+        Self {
+            max_edge: None,
+            allow_preview: false,
+        }
+    }
+}
+
+/// 解出来的源像素（还没摆正、还没缩）。
+#[derive(Debug, Clone)]
+pub struct DecodedSource {
+    pub image: DynamicImage,
+    /// EXIF 方向（1–8）；`None` = 文件里读不到，按 1 处理。
+    pub orientation: Option<u16>,
+    /// 像素是从哪来的（RAW 才有区别：内嵌预览 / 真解码）——诊断与报告要用。
+    pub source: PixelOrigin,
+}
+
+/// 像素的出处。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PixelOrigin {
+    /// 位图（JPEG/PNG/TIFF…）解出来的。
+    Bitmap,
+    /// RAW 的内嵌 JPEG 预览（快路径）。
+    RawEmbeddedPreview,
+    /// RAW 完整解码（黑电平 / 白平衡 / 色彩矩阵）。
+    RawDecoded,
+}
+
+/// 解码一个文件；解不开（不是图 / 相机不支持 / 文件损坏）返回 `Ok(None)`。
+///
+/// # Errors
+/// 文件读不了、RAW worker 进程级故障（崩溃/超时/协议）——那些是**真错误**；
+/// 「这张图解不开」不是。
+pub fn decode_file(path: &Path, spec: DecodeSpec) -> Result<Option<DecodedSource>> {
+    let kind = path
+        .file_name()
+        .map_or(MediaKind::Other, |n| kind_of_file(&n.to_string_lossy()));
+    if kind == MediaKind::Raw {
+        return decode_raw_file(path, spec);
+    }
+
+    let bytes = std::fs::read(path)?;
+    /*
+     * **方向必须在这里读**：竖拍照片（EXIF 方向 6/8）不摆正就会**躺着**显示 ——
+     * 这是 2026-09-16 人类报的现象（「所有纵拍图全显示成横过来了」）。
+     *
+     * 用**已经读进来的字节**解析（`exif::read_bytes`），不额外开文件；
+     * 而且这条路径只在缓存未命中时走，成本可以忽略（读头实测 ~0.02ms/张）。
+     */
+    let orientation = crate::media::exif::read_bytes(&bytes)
+        .and_then(|data| data.orientation)
+        .map(|raw| crate::media::meta::normalize_orientation(Some(raw)));
+    let Ok(image) = image::load_from_memory(&bytes) else {
+        return Ok(None); // 不是能解码的图像（RAW、损坏文件…）
+    };
+    Ok(Some(DecodedSource {
+        image,
+        orientation,
+        source: PixelOrigin::Bitmap,
+    }))
+}
+
 /// 渲染一个文件。
 ///
 /// * **图像**（JPEG/PNG/TIFF…）直接解码；
-/// * **RAW** 走 [`crate::raw`] 的 worker 进程（内嵌预览优先，见 `render_raw_file`）；
+/// * **RAW** 走 [`crate::raw`] 的 worker 进程（内嵌预览优先，见 `decode_raw_file`）；
 /// * **都不是**（或解不开）返回 `Ok(None)` —— 调用方据此用占位图
 ///   （`REPOSITORY.md` §4.1）。
 pub fn render_file(path: &Path, size: SizeClass) -> Result<Option<Thumb>> {
@@ -185,10 +283,25 @@ pub fn render_file(path: &Path, size: SizeClass) -> Result<Option<Thumb>> {
 /// 这里只要给出略大的源（两道降采样比一次大跨度缩放更干净）。
 const RAW_OVERSAMPLE: u32 = 2;
 
-/// RAW 的渲染
+/// RAW 的渲染（= [`decode_raw_file`] + JPEG 编码）。
 fn render_raw_file(path: &Path, size: SizeClass) -> Result<Option<Thumb>> {
     let want = size.long_edge().saturating_mul(RAW_OVERSAMPLE).max(1);
-    let request = crate::raw::DecodeRequest::thumb(path, want);
+    let Some(decoded) = decode_raw_file(path, DecodeSpec::thumb(want))? else {
+        return Ok(None);
+    };
+    encode(decoded.image, size, decoded.orientation, false).map(Some)
+}
+
+/// RAW 的解码：走 worker 进程（`AGENTS.md` §6.3：解码必须在独立进程里）。
+///
+/// 解不开（相机不支持 / 文件损坏 / worker 崩了）**不是错误** ——
+/// 一张解不开的 RAW 不该让整个导入挂掉，所以这里 `Ok(None)`、由调用方用占位图兜底。
+fn decode_raw_file(path: &Path, spec: DecodeSpec) -> Result<Option<DecodedSource>> {
+    let request = match spec.max_edge {
+        Some(max_edge) => crate::raw::DecodeRequest::thumb(path, max_edge.max(1)),
+        None => crate::raw::DecodeRequest::full(path),
+    }
+    .with_preview(spec.allow_preview);
 
     // 共享一条解码管道（理由见 `raw::worker::shared`）
     let decoded = {
@@ -198,21 +311,19 @@ fn render_raw_file(path: &Path, size: SizeClass) -> Result<Option<Thumb>> {
         match worker.decode(&request) {
             Ok(image) => image,
             Err(e) => {
-                /*
-                 * 解不开就退回占位图（调用方拿到 `None` 会用 `placeholder`）——
-                 * 相机不支持、文件损坏、worker 崩了都走这里。
-                 * 注意：**这不是错误**，一张解不开的 RAW 不该让整个导入失败。
-                 */
                 eprintln!("[thumb] RAW 解码失败（改用占位图）：{} —— {e}", path.display());
                 return Ok(None);
             }
         }
     };
 
+    let source = match decoded.source {
+        crate::raw::PixelSource::EmbeddedPreview => PixelOrigin::RawEmbeddedPreview,
+        crate::raw::PixelSource::Decoded => PixelOrigin::RawDecoded,
+    };
     let Some(buffer) = image::RgbImage::from_raw(decoded.width, decoded.height, decoded.rgb) else {
         return Ok(None);
     };
-    let img = DynamicImage::ImageRgb8(buffer);
 
     /*
      * 方向：**文件头优先**，读不到才用 worker 报的。
@@ -237,7 +348,11 @@ fn render_raw_file(path: &Path, size: SizeClass) -> Result<Option<Thumb>> {
         decoded.orientation,
     );
 
-    encode(img, size, orientation, false).map(Some)
+    Ok(Some(DecodedSource {
+        image: DynamicImage::ImageRgb8(buffer),
+        orientation,
+        source,
+    }))
 }
 
 /// 方向取哪一边：**文件头优先**，读不到才用解码器报的。

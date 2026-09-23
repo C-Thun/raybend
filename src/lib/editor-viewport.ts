@@ -33,6 +33,15 @@ export interface EditorViewportPayload {
   hole: { x: number; y: number; width: number; height: number };
   dpr: number;
   viewport: { width: number; height: number };
+  /**
+   * 洞口底色（`getComputedStyle(el).backgroundColor` 的字符串，原样上行）。
+   *
+   * 为什么由前端报：它是**主题相关**的（深色/浅色两套令牌），Rust 不该认识主题。
+   * 为什么**不**解析成三个数：解析（`rgb()` / `rgba()` / 十六进制 / 透明度）
+   * 与「怎么到 GPU 上」是同一件事，那件事在 Rust（`Srgb8::parse_css`）。
+   * 读不到 / 空串 / 解不开时**省略这个字段**，Rust 用兜底色并在状态里标出来。
+   */
+  backdrop?: string;
 }
 
 /** CSS 矩形（`getBoundingClientRect()` 的四个数）。 */
@@ -122,19 +131,26 @@ export function editorViewportPayload(input: {
   rect: CssRect;
   dpr: number;
   viewport: { width: number; height: number };
+  backdrop?: string | null;
 }): EditorViewportPayload | null {
-  const { rect, dpr, viewport } = input;
+  const { rect, dpr, viewport, backdrop } = input;
   if (!finite(rect.x) || !finite(rect.y) || !finite(rect.width) || !finite(rect.height)) {
     return null;
   }
   if (!finite(dpr) || dpr <= 0) return null;
   if (!finite(viewport.width) || !finite(viewport.height)) return null;
   if (rect.width < 0 || rect.height < 0) return null;
-  return {
+  const payload: EditorViewportPayload = {
     hole: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
     dpr,
     viewport: { width: viewport.width, height: viewport.height },
   };
+  // 底色：读不到 / 空串就**省略**（Rust 那边有兜底色并把「用的是兜底的」标出来），
+  // 但给了就必须是字符串 —— 传个 42 过去只会让整条上报被 serde 拒掉
+  if (typeof backdrop === "string" && backdrop.trim() !== "") {
+    payload.backdrop = backdrop;
+  }
+  return payload;
 }
 
 /** 两次载荷「是不是同一件事」（相同就不重发）。 */
@@ -149,7 +165,9 @@ export function sameViewportPayload(
     a.hole.width === b.hole.width &&
     a.hole.height === b.hole.height &&
     a.viewport.width === b.viewport.width &&
-    a.viewport.height === b.viewport.height
+    a.viewport.height === b.viewport.height &&
+    // 主题一变底色就变 —— 不比较它的话，切主题之后洞口底还是旧色
+    a.backdrop === b.backdrop
   );
 }
 
@@ -170,6 +188,7 @@ export interface ViewportReporter {
     rect: CssRect;
     dpr: number;
     viewport: { width: number; height: number };
+    backdrop?: string | null;
   }) => void;
   /** 立刻把挂起的那一帧发出去（卸载前用，保证尾样本不丢） */
   flush: () => void;

@@ -13,23 +13,13 @@
 //! | 平滑**渐变** | 8bit 阶梯（色带）与 sRGB 处理是否一致 |
 //!
 //! 生成是纯 CPU、确定性的（同一个 `seed` 出同一张图）—— 这样报告里的数字可以复现。
+//!
+//! 图本身的类型是 [`super::image::RenderImage`]（M3-W2 起与真实照片共用同一个类型）。
 
-/// 一张 RGBA8 的测试图。
-pub struct TestImage {
-    pub width: u32,
-    pub height: u32,
-    /// RGBA8，行主序，长度 = width × height × 4
-    pub pixels: Vec<u8>,
-}
-
-impl TestImage {
-    pub fn byte_len(&self) -> usize {
-        self.pixels.len()
-    }
-}
+use super::image::RenderImage;
 
 /// 生成测试图。`width`/`height` 为 0 时返回一张 1×1（避免 0 尺寸纹理导致 wgpu 报错）。
-pub fn make_test_image(width: u32, height: u32) -> TestImage {
+pub fn make_test_image(width: u32, height: u32) -> RenderImage {
     let width = width.max(1);
     let height = height.max(1);
     let mut pixels = vec![0u8; (width as usize) * (height as usize) * 4];
@@ -126,7 +116,7 @@ pub fn make_test_image(width: u32, height: u32) -> TestImage {
         }
     }
 
-    TestImage {
+    RenderImage {
         width,
         height,
         pixels,
@@ -134,7 +124,7 @@ pub fn make_test_image(width: u32, height: u32) -> TestImage {
 }
 
 /// 图心（浮点）—— 坐标检查用。
-pub fn image_center(image: &TestImage) -> (f32, f32) {
+pub fn image_center(image: &RenderImage) -> (f32, f32) {
     (image.width as f32 / 2.0, image.height as f32 / 2.0)
 }
 
@@ -143,7 +133,7 @@ mod tests {
     use super::*;
 
     /// 取一个像素的 **RGB**（alpha 单独验，见 `every_pixel_is_opaque`）。
-    fn px(image: &TestImage, x: u32, y: u32) -> [u8; 3] {
+    fn px(image: &RenderImage, x: u32, y: u32) -> [u8; 3] {
         let i = ((y as usize) * (image.width as usize) + x as usize) * 4;
         [image.pixels[i], image.pixels[i + 1], image.pixels[i + 2]]
     }

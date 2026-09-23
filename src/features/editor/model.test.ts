@@ -25,6 +25,8 @@ import {
   editorEmptyIcon,
   editorEmptyKind,
   editorEmptyOffersImport,
+  editorViewportNotice,
+  type EditorViewportNoticeInput,
 } from "./source.ts";
 import type { ViewerPhoto } from "../../components/ui/viewer/index.ts";
 import type { MessageKey } from "../../i18n/index.ts";
@@ -201,4 +203,79 @@ test("胶片带适配：锚点不在清单里（刚换目录 / 被筛掉）不�
   const empty = createEditorStrip({ photos: () => [], anchorId: () => null, goTo: () => undefined });
   assert.equal(empty.state().active, false);
   assert.equal(empty.current(), null);
+});
+
+/* ══════════════════════════════════════════════════════════════
+ * 洞口提示（M3-W2）
+ * ══════════════════════════════════════════════════════════════ */
+
+/** 一份「有照片、渲染器 ready、还没出图」的基线，测试里按需改字段。 */
+function noticeInput(overrides: Partial<EditorViewportNoticeInput> = {}): EditorViewportNoticeInput {
+  const base: EditorViewportNoticeInput = {
+    empty: null,
+    hasPhoto: true,
+    state: {
+      bound: true,
+      ready: true,
+      paintedPath: null,
+      decode: "loading",
+      decodeError: null,
+      lastError: null,
+    },
+  };
+  return { ...base, ...overrides };
+}
+
+test("洞口提示：空态优先（有水印就不挂提示）", () => {
+  for (const empty of ["no-repository", "no-directory", "no-photos", "no-selection"] as const) {
+    assert.equal(editorViewportNotice(noticeInput({ empty })), null, empty);
+  }
+});
+
+test("洞口提示：没选中照片就不提示（那是水印的活）", () => {
+  assert.equal(editorViewportNotice(noticeInput({ hasPhoto: false })), null);
+});
+
+test("洞口提示：画出来了就什么都不显示", () => {
+  assert.equal(
+    editorViewportNotice(noticeInput({ state: { ...noticeInput().state!, paintedPath: "/a.jpg" } })),
+    null,
+  );
+});
+
+test("洞口提示：浏览器里（拿不到状态）说清楚是「桌面版才有」", () => {
+  assert.equal(editorViewportNotice(noticeInput({ state: null })), "browser");
+});
+
+test("洞口提示：错误压过进度（不许一直转圈）", () => {
+  const decoding = noticeInput({
+    state: { ...noticeInput().state!, decode: "error", decodeError: "文件损坏" },
+  });
+  assert.equal(editorViewportNotice(decoding), "decode-error");
+  const rendering = noticeInput({
+    state: { ...noticeInput().state!, lastError: "设备丢失", decode: "error" },
+  });
+  assert.equal(editorViewportNotice(rendering), "render-error");
+
+  // 已经画出过图 + 有错误：**错误优先**（界面要让人看得见出事了）
+  const paintedButBroken = noticeInput({
+    state: { ...noticeInput().state!, paintedPath: "/a.jpg", lastError: "设备丢失" },
+  });
+  assert.equal(editorViewportNotice(paintedButBroken), "render-error");
+});
+
+test("洞口提示：初始化 / 载入中分得开", () => {
+  const init = noticeInput({
+    state: { ...noticeInput().state!, bound: true, ready: false, decode: "idle" },
+  });
+  assert.equal(editorViewportNotice(init), "init");
+  const notBound = noticeInput({ state: { ...noticeInput().state!, bound: false } });
+  assert.equal(editorViewportNotice(notBound), "init");
+  const loading = noticeInput();
+  assert.equal(editorViewportNotice(loading), "loading");
+  // 解码好了但还没画（等渲染线程那一帧）：也当初始化那一档，别报错
+  const decodedNotPainted = noticeInput({
+    state: { ...noticeInput().state!, decode: "ready" },
+  });
+  assert.equal(editorViewportNotice(decodedNotPainted), "init");
 });

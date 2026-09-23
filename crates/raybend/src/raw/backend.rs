@@ -89,6 +89,16 @@ impl DecodeRequest {
             allow_preview: false,
         }
     }
+
+    /// 改「允不允许内嵌预览快路径」（两个构造函数之外的第三个开关）。
+    ///
+    /// 存在的理由：编辑器要的两档（内嵌预览 / 完整解码）与缩略图的请求形状不同 ——
+    /// 前者可能「限了长边但仍要完整解码」，用构造函数拼不出来。
+    #[must_use]
+    pub fn with_preview(mut self, allow: bool) -> Self {
+        self.allow_preview = allow;
+        self
+    }
 }
 
 /// 后端自身的错误。**不进 `crate::Error`** —— 由 [`crate::raw::worker`] 翻译成
@@ -134,6 +144,17 @@ mod tests {
         let req = DecodeRequest::thumb("/x/IMG.RW2", 768);
         assert_eq!(req.max_edge, Some(768));
         assert!(req.allow_preview, "缩略图必须允许快路径");
+    }
+
+    #[test]
+    fn preview_flag_can_be_switched_on_a_limited_request() {
+        // 编辑器那一档：**限了长边但不要内嵌预览**（要真解码的像素）
+        let req = DecodeRequest::thumb("/x/IMG.RW2", 2048).with_preview(false);
+        assert_eq!(req.max_edge, Some(2048));
+        assert!(!req.allow_preview);
+        let back = DecodeRequest::full("/x/IMG.RW2").with_preview(true);
+        assert_eq!(back.max_edge, None);
+        assert!(back.allow_preview);
     }
 
     #[test]

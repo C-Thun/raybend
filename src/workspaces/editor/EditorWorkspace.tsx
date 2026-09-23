@@ -25,8 +25,17 @@
  * 挂载时重读一遍当前目录（`AGENTS.md` §2.13：本地应用以「看到真相」为先）。
  */
 
-import { createMemo, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 
+import {
+  bindEditorRenderer,
+  getEditorRenderState,
+  setEditorPhoto,
+  unbindEditorRenderer,
+  sendEditorViewportIntent,
+} from "../../api/editor.ts";
+import { isTauriRuntime } from "../../api/tauri-env.ts";
+import type { EditorRenderState, EditorViewportIntent } from "../../api/types.ts";
 import { getHistogram, getThumbBytes, listRepositories } from "../../api/db.ts";
 import type { AssetItem, RepositoryView } from "../../api/types.ts";
 import { browseSource } from "../../features/browse/grid-source.ts";
@@ -34,12 +43,14 @@ import type { BrowseStore } from "../../features/browse/store.ts";
 import {
   EditorPanels,
   EditorViewport,
+  EDITOR_ZOOM_STEP,
   LutPanel,
   createEditorStrip,
   editorEmptyKind,
   type EditorPhotoInfo,
   type EditorStore,
 } from "../../features/editor/index.ts";
+import { registerEditorActions, type EditorActions } from "../../features/editor/actions.ts";
 import {
   assetItemExif,
   formatAperture,
@@ -53,6 +64,7 @@ import {
 import { createThumbQueue } from "../../components/ui/thumb-queue.ts";
 import { FilmStrip } from "../../components/ui/viewer/index.ts";
 import { photosFromSource, viewingInfoOf } from "../../components/ui/viewer/index.ts";
+import { registerViewerActions, type ViewerActions } from "../../components/ui/viewer/actions.ts";
 import { PhotoStatusBar } from "../../components/ui/tiles/index.ts";
 import { browseInfoMode } from "../../components/ui/tile-info.ts";
 import {
@@ -140,6 +152,133 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
   });
 
   const current = createMemo(() => strip.current());
+
+  /* ── GPU 视口（M3-W2）：握手 / 轮询 / 换照片 / 动作槽 ─────────────
+   *
+   * 工作区在这一块里的职责是「接线」，不是像素：
+   *
+   * | 谁 | 管什么 |
+   * | --- | --- |
+   * | 前端 | 何时起/停渲染线程、当前是哪张、把状态摊给视口与根节点 |
+   * | Rust | 视口变换、解码、纹理、设备丢失与重启 |
+   */
+  const [rendererBound, setRendererBound] = createSignal(false);
+
+  /** 当前照片的**绝对路径**（锚点那张；没有就是 `null`）。 */
+  const currentPath = createMemo(() => current()?.path ?? null);
+
+  /**
+   * 状态回写：渲染线程说「画出来了」才把洞口切成透明。
+   *
+   * 三条都要：
+   * * `bound` —— 会话还在（线程走了就得退回 DOM，否则洞口会停在一张旧帧上）；
+   * * `ready` —— 设备与 surface 都就绪；
+   * * `paintedPath` —— **真的出过图**；没有它就没有「谁在画这块矩形」的保证。
+   */
+  const applyRenderState = (state: EditorRenderState | null): void => {
+    props.store.setRenderState(state);
+    props.store.setHoleActive(
+      state !== null && state.bound && state.ready && state.paintedPath !== null,
+    );
+  };
+
+  /** 发一条视口意图（缩放 / 平移 / 适配）——失败只记控制台，不带崩界面。 */
+  const sendIntent = (intent: EditorViewportIntent): void => {
+    void sendEditorViewportIntent(intent).catch((error: unknown) => {
+      console.error("[editor] 视口意图失败", error); // i18n-exempt: 控制台诊断
+    });
+  };
+
+  /** 起渲染线程（挂载时一次；「重试」也走它 —— Rust 侧对已死的线程会重新起一个）。 */
+  const startRenderer = (): void => {
+    void bindEditorRenderer()
+      .then((state) => {
+        applyRenderState(state);
+        setRendererBound(true);
+      })
+      .catch((error: unknown) => {
+        // 起不来不是致命的：视口退化成 DOM（水印 + 一句说明），编辑器其余部分照常可用
+        console.error("[editor] 渲染线程起不来", error); // i18n-exempt: 控制台诊断
+        setRendererBound(false);
+      });
+  };
+
+  onMount(() => {
+    if (!isTauriRuntime()) return;
+    startRenderer();
+    // 轮询：既是握手（ready / paintedPath），也是**上报通道**（重启次数 / 当前错误）
+    const timer = window.setInterval(() => {
+      void getEditorRenderState()
+        .then((state) => applyRenderState(state))
+        .catch(() => {
+          // 读状态失败不弹错：下一轮再试（它的失败不能把编辑器搞成错误页）
+        });
+    }, 250);
+    onCleanup(() => {
+      window.clearInterval(timer);
+      void unbindEditorRenderer().catch(() => {
+        // 停不掉也只是线程多活一会儿；窗口关了进程就没了
+      });
+      applyRenderState(null);
+      setRendererBound(false);
+    });
+  });
+
+  /** 锚点一变就换纹理（渲染线程自己负责解码与两档切换）。 */
+  createEffect(() => {
+    if (!rendererBound()) return;
+    const path = currentPath();
+    void setEditorPhoto(path).catch((error: unknown) => {
+      console.error("[editor] 换照片失败", error); // i18n-exempt: 控制台诊断
+    });
+  });
+
+  /** 胶片带里的上一张 / 下一张（看图命令 `viewer.prev` / `viewer.next` 走这里）。 */
+  const stepAnchor = (delta: -1 | 1): void => {
+    const list = photos();
+    const at = list.findIndex((photo) => photo.id === store.selection().anchor);
+    if (at < 0) return;
+    const next = list[at + delta];
+    if (next === undefined) return;
+    store.select(Number(next.id), "replace");
+  };
+
+  /*
+   * 把「缩放 / 适配」注册给看图命令槽（`components/ui/viewer/actions.ts`）：
+   * 命令只有一份（`viewer.zoomIn` / `fit` / `actual`，键 `=` `-` `0` `1`），
+   * 谁挂载谁提供实现 —— 编辑器不另立一套命令 id。
+   *
+   * `close`（`Esc`）**故意是空动作**：在编辑器里 `Esc` 的语义是「退出当前工具」
+   * （W1 已定），不是「退出编辑器」—— 顺手退出编辑会让人莫名其妙掉回浏览。
+   */
+  const viewerActionsImpl: ViewerActions = {
+    zoomIn: () => sendIntent({ kind: "zoomBy", factor: EDITOR_ZOOM_STEP }),
+    zoomOut: () => sendIntent({ kind: "zoomBy", factor: 1 / EDITOR_ZOOM_STEP }),
+    toggleFit: () => sendIntent({ kind: "toggleFit" }),
+    actual: () => sendIntent({ kind: "fit", mode: "oneToOne" }),
+    next: () => stepAnchor(1),
+    prev: () => stepAnchor(-1),
+    close: () => {},
+  };
+
+  /** 工作区动作槽（`App.tsx` 的 `viewing()` / `filmVisible()` 读数靠它）。 */
+  const editorActionsImpl: EditorActions = {
+    viewing: () => current() !== null && props.store.holeActive(),
+    filmVisible: () => props.store.showsFilm(),
+    comparing: () => false,
+    cycleChrome: () => props.store.cycleTab(),
+    resetChrome: () => props.store.resetChrome(),
+    hasPhoto: () => current() !== null,
+  };
+
+  onMount(() => {
+    registerViewerActions(viewerActionsImpl);
+    registerEditorActions(editorActionsImpl);
+    onCleanup(() => {
+      registerViewerActions(null);
+      registerEditorActions(null);
+    });
+  });
 
   /** 四态空态（`features/editor/source.ts` 的纯函数，顺序即优先级）。 */
   const empty = createMemo(() =>
@@ -236,13 +375,20 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
           三块都在**同一列**里（`AGENTS.md` §11.1：没有跨列行，每列各自到底）。
         */}
         <main
-          class="relative flex min-h-0 min-w-0 flex-1 flex-col bg-surface-bar"
+          class={[
+            "relative flex min-h-0 min-w-0 flex-1 flex-col",
+            // 出图时整列透明（洞口之上一直到根节点都不能有底色，`bg-surface-bar` 会挡住 GPU）
+            props.store.holeActive() ? "bg-transparent" : "bg-surface-bar",
+          ].join(" ")}
           data-chrome={props.store.chromeName()}
           data-film={props.store.showsFilm() ? "on" : "off"}
         >
           <EditorViewport
             empty={empty()}
+            hasPhoto={current() !== null}
+            renderState={props.store.renderState}
             onOpenImport={props.onOpenImport}
+            onRetry={startRenderer}
           />
 
           {/* 胶片带（自带顶部三点缩放把手，全项目唯一那一份） */}

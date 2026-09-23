@@ -117,3 +117,65 @@ export function editorEmptyIcon(kind: Exclude<EditorEmptyKind, null>): EditorEmp
 export function editorEmptyOffersImport(kind: EditorEmptyKind): boolean {
   return kind === "no-repository";
 }
+
+/* ══════════════════════════════════════════════════════════════
+ * 洞口该显示什么提示（M3-W2）
+ * ══════════════════════════════════════════════════════════════ */
+
+/**
+ * 洞口里的提示种类。
+ *
+ * | 值 | 何时 | 文案 |
+ * | --- | --- | --- |
+ * | `browser` | 浏览器预览（没有 Tauri / 没有渲染线程） | 「桌面版会在这里直绘照片」 |
+ * | `init` | 渲染器还在初始化 | 「正在准备 GPU 视口…」 |
+ * | `loading` | 照片在解码 | 「正在载入照片…」 |
+ * | `decode-error` | 这张照片解不开 | 解码错误原文 |
+ * | `render-error` | 渲染线程报错 / 已放弃重启 | 错误原文 + 重试 |
+ * | `null` | 照片已经画出来了（或本来就是空态水印） | 什么都不显示 |
+ */
+export type EditorViewportNotice =
+  | "browser"
+  | "init"
+  | "loading"
+  | "decode-error"
+  | "render-error";
+
+export interface EditorViewportNoticeInput {
+  /** 四态空态（非 `null` 时提示让位给水印） */
+  empty: EditorEmptyKind;
+  /** 有没有选中照片 */
+  hasPhoto: boolean;
+  /** 渲染线程的状态快照（`null` = 拿不到：浏览器 / 还没 bind） */
+  state: {
+    bound: boolean;
+    ready: boolean;
+    paintedPath: string | null;
+    decode: "idle" | "loading" | "ready" | "error";
+    decodeError: string | null;
+    lastError: string | null;
+  } | null;
+}
+
+/**
+ * 洞口里该印哪个提示（纯函数，顺序即优先级）。
+ *
+ * 三条口径：
+ *
+ * 1. **空态优先**：没有可编辑的照片时，提示让位给四态水印（那是更准确的信息）；
+ * 2. **照片没出来才提示**：`paintedPath` 有值就是画出来了 —— 再挂一条「正在载入」是噪声；
+ * 3. **错误压过进度**：解码/渲染失败时显示错误原文（不是永远转圈的「正在载入」）。
+ */
+export function editorViewportNotice(
+  input: EditorViewportNoticeInput,
+): EditorViewportNotice | null {
+  if (input.empty !== null) return null;
+  if (!input.hasPhoto) return null;
+  if (input.state === null) return "browser";
+  if (input.state.lastError !== null) return "render-error";
+  if (input.state.decode === "error") return "decode-error";
+  if (input.state.paintedPath !== null) return null;
+  if (!input.state.bound || !input.state.ready) return "init";
+  if (input.state.decode === "loading") return "loading";
+  return "init";
+}

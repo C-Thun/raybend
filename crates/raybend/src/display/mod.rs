@@ -36,12 +36,21 @@
 //! * **编辑栈是占位的**（[`EditSpec`]）：结构留好，等编辑里程碑接进来；
 //! * 缓存复用缩略图那套（`render_sig` 含管线版本，算法升级自动变孤儿）；
 //! * 临时图**不落盘**：本轮所有路径都是「现算 + 交给缓存」，没有自建临时文件。
+//!
+//! # 兄弟口：像素（M3-W2 加）
+//!
+//! [`pixels`] 是给 **GPU 纹理**用的：同样是「给一张照片、拿一张能显示的图」，
+//! 但它出的是 RGB 像素而不是 JPEG 字节（编辑视口不能把图编成 JPEG 再解回来 ——
+//! 那是 RapidRAW 官方博客记的 20fps→120fps 那道坎）。
+//! 两个口**共用同一份解码与方向逻辑**（`thumbnail::render::decode_file`）。
 
 pub mod histogram;
+pub mod pixels;
 
 use std::path::Path;
 
 pub use histogram::{histogram_of_file, histogram_of_image, Histogram, DEFAULT_BINS};
+pub use pixels::{pixels, DisplayPixels, PixelSize};
 
 use crate::error::Result;
 use crate::media::kind::{self, MediaKind};

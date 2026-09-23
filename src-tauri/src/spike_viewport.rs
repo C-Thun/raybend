@@ -24,9 +24,11 @@ use raybend::render::stats::{
     AdapterInfo, FrameStats, HumanNotes, ScenarioStats, SpikeReport, SurfaceInfo,
 };
 use raybend::render::viewport::FitMode;
-use raybend::render::{GpuContext, RawHandles, RenderOutcome, Viewport};
+use raybend::render::{GpuContext, RenderOutcome, Viewport};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, Runtime, WebviewUrl, WebviewWindowBuilder};
+
+use crate::render_window::raw_handles;
 
 /// 调试窗口的 label（`tauri.conf.json` 里没有它 —— 它是按需建的）。
 pub const SPIKE_LABEL: &str = "spike-viewport";
@@ -706,22 +708,6 @@ fn local_now() -> String {
  * ══════════════════════════════════════════════════════════════ */
 
 /// 从窗口上取裸句柄（rwh 版本一致性由 `Cargo.lock` 保证：tauri 与 wgpu 都是 rwh 0.6）。
-fn raw_handles<R: Runtime>(window: &tauri::WebviewWindow<R>) -> Result<RawHandles, String> {
-    use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
-    let display = window
-        .display_handle()
-        .map_err(|e| format!("取 display handle 失败：{e}"))?
-        .as_raw();
-    let handle = window
-        .window_handle()
-        .map_err(|e| format!("取 window handle 失败：{e}"))?
-        .as_raw();
-    Ok(RawHandles {
-        display,
-        window: handle,
-    })
-}
-
 fn render_loop<R: Runtime>(
     window: tauri::WebviewWindow<R>,
     rx: Receiver<SpikeCommand>,
@@ -739,8 +725,15 @@ fn render_loop<R: Runtime>(
     let handles = raw_handles(&window)?;
 
     let started = Instant::now();
-    let mut context =
-        GpuContext::new(handles, (size.width, size.height), dpr).map_err(|e| e.to_string())?;
+    let mut context = GpuContext::new(
+        handles,
+        (size.width, size.height),
+        dpr,
+        // spike 的图像是**合成测试图**（与真实照片同一个 `RenderImage` 类型）
+        Some(raybend::render::scene::make_test_image(6000, 4000)),
+        "spike",
+    )
+    .map_err(|e| e.to_string())?;
     let upload_ms = started.elapsed().as_secs_f32() * 1000.0;
 
     // 纯数学自查；不能用于证明 DOM 与 GPU 最终呈现对齐。

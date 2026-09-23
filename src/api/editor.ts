@@ -3,15 +3,18 @@
  *
  * 契约的两条纪律：
  *
- * 1. **前端只上报原始事实**（CSS 矩形 + 运行时 DPR + CSS 视口尺寸）——
+ * 1. **前端只上报原始事实**（CSS 矩形 + 运行时 DPR + CSS 视口尺寸 + 计算出来的底色字符串）——
  *    物理换算、缩放、命中测试全在 Rust（`AGENTS.md` §6.1 红线 2、§7.9 铁律 2）；
  * 2. **非法值当面报错**，不静默回退 —— Rust 侧会拒绝 NaN / 非正 DPR，
  *    这一层把错误往上抛给调用方（上报器有自己的 try 边界）。
  *
- * W1 只有「上报 + 回读」两条命令：回读是给诊断与冒烟用的（Rust 手里的洞口对不对，
- * 一比就知道前端有没有报错单位）。W2 的渲染线程会直接读同一份状态。
+ * M3-W1 只有「上报 + 回读」两条命令；M3-W2 加上渲染线程那四条：
+ * `bind`（懒启动）/ `unbind` / `setPhoto` / `intent`，外加一条轮询用的 `getRenderState`。
+ * **照片像素不出 Rust** —— 前端拿到的只有状态（哪张、什么档位、画了没有），
+ * 图是 wgpu 直接画到窗口上的。
  */
 
+import type { EditorRenderState, EditorViewportIntent, EditorViewportState } from "./types.ts";
 import type { EditorViewportPayload } from "../lib/editor-viewport.ts";
 import { isTauriRuntime } from "./tauri-env.ts";
 
@@ -23,20 +26,8 @@ function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   return coreModule.then((core) => core.invoke<T>(cmd, args));
 }
 
-/** Rust 侧存下的视口事实（含它自己算出来的**物理**像素洞口，用来核对单位）。 */
-export interface EditorViewportState {
-  /** 前端报上来的 CSS 像素洞口 */
-  holeCss: { x: number; y: number; width: number; height: number } | null;
-  /** Rust 按 DPR 换算出的物理像素洞口（与 CSS 值一比就知道 DPR 有没有对上） */
-  holePhysical: { x: number; y: number; width: number; height: number } | null;
-  dpr: number;
-  viewportCss: { width: number; height: number };
-  /** 已经收到过几次上报（诊断：一直不涨说明前端没报） */
-  updates: number;
-}
-
 /**
- * 上报洞口（CSS 像素）+ DPR + 视口尺寸。
+ * 上报洞口（CSS 像素）+ DPR + 视口尺寸 + 洞口底色。
  *
  * 浏览器（无 Tauri）里返回 `null` —— 那里没有渲染线程可喂，不该报错。
  * 返回 `null` 也表示这条命令在当前环境不可用，调用方据此跳过后续动作。
@@ -52,4 +43,46 @@ export async function setEditorViewport(
 export async function getEditorViewportState(): Promise<EditorViewportState | null> {
   if (!isTauriRuntime()) return null;
   return call<EditorViewportState>("editor_viewport_state");
+}
+
+/**
+ * 起渲染线程（幂等）。编辑器挂载时调一次。
+ *
+ * 浏览器里返回 `null`（那里没有窗口与 GPU 表面可挂）；调用方据此把洞口留在 DOM 态
+ * （水印/占位照旧显示），**不**进入「透明洞口」那条路。
+ */
+export async function bindEditorRenderer(): Promise<EditorRenderState | null> {
+  if (!isTauriRuntime()) return null;
+  return call<EditorRenderState>("editor_bind_renderer");
+}
+
+/** 停渲染线程（幂等）。离开编辑器时调。 */
+export async function unbindEditorRenderer(): Promise<void> {
+  if (!isTauriRuntime()) return;
+  await call<void>("editor_unbind_renderer");
+}
+
+/** 换照片（`null` = 清空）。前端在锚点变化时调。 */
+export async function setEditorPhoto(path: string | null): Promise<EditorRenderState | null> {
+  if (!isTauriRuntime()) return null;
+  return call<EditorRenderState>("editor_set_photo", { path });
+}
+
+/** 发一条视口意图（缩放 / 平移 / 档位 / 复位 / 命中测试）。 */
+export async function sendEditorViewportIntent(
+  intent: EditorViewportIntent,
+): Promise<EditorRenderState | null> {
+  if (!isTauriRuntime()) return null;
+  return call<EditorRenderState>("editor_viewport_intent", { intent });
+}
+
+/**
+ * 读渲染线程的状态（前端每 250ms 一次）。
+ *
+ * 它同时干两件事：**握手**（`ready` + `paintedPath` 决定洞口那条 DOM 链要不要透明）
+ * 与**上报**（`restarts` / `lastError`：渲染线程崩过但爬起来了，界面必须能看见）。
+ */
+export async function getEditorRenderState(): Promise<EditorRenderState | null> {
+  if (!isTauriRuntime()) return null;
+  return call<EditorRenderState>("editor_render_state");
 }

@@ -9,7 +9,7 @@
 export { createEditorStore, CURVE_CHANNELS, EDITOR_TOOLS } from "./store.ts";
 export type { CurveChannel, EditorStore, EditorStoreDeps, EditorTool } from "./store.ts";
 
-export { EditorViewport } from "./viewport.tsx";
+export { EditorViewport, EDITOR_ZOOM_STEP } from "./viewport.tsx";
 export type { EditorViewportProps } from "./viewport.tsx";
 
 export { EditorPanels } from "./panels.tsx";
@@ -19,8 +19,13 @@ export { LutPanel, LUT_PANEL_WIDTH } from "./lut-panel.tsx";
 
 export { EditorPanelToggles, EditorToolbar } from "./toolbar.tsx";
 
-export { createEditorStrip, editorEmptyKind, editorEmptyOffersImport } from "./source.ts";
-export type { EditorEmptyKind, EditorStripDeps } from "./source.ts";
+export { createEditorStrip, editorEmptyKind, editorEmptyOffersImport, editorViewportNotice } from "./source.ts";
+export type {
+  EditorEmptyKind,
+  EditorStripDeps,
+  EditorViewportNotice,
+  EditorViewportNoticeInput,
+} from "./source.ts";
 
 export { GROUP_LABEL_KEY, PARAM_GROUPS, paramsInGroup, PARAMS } from "./params.ts";
 export type { ParamGroup, ParamSpec } from "./params.ts";

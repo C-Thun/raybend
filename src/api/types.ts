@@ -632,3 +632,123 @@ export interface RebuildReport {
   /** 重建后的**图片数量**。 */
   imagesCount: number;
 }
+
+/* ══════════════════════════════════════════════════════════════
+ * 编辑视口（M3：洞口契约 + 渲染线程）
+ * ══════════════════════════════════════════════════════════════ */
+
+/** 一个矩形。**字段名带单位**：`holeCss` 是 CSS 像素、`holePhysical` 是物理像素。 */
+export interface RectView {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** 一个尺寸（CSS 像素）。 */
+export interface SizeView {
+  width: number;
+  height: number;
+}
+
+/**
+ * 洞口底色（sRGB 8bit，就是 `getComputedStyle` 报上来的那个值）。
+ *
+ * 它是**主题相关的**（深色/浅色两套令牌），所以由前端读完报过来 ——
+ * Rust 不需要认识主题，只负责把它画在照片没盖住的地方。
+ */
+export interface BackdropView {
+  r: number;
+  g: number;
+  b: number;
+}
+
+/** `editor_set_viewport` / `editor_viewport_state` 的返回（W1 的洞口契约）。 */
+export interface EditorViewportState {
+  /** 前端报上来的 CSS 像素洞口 */
+  holeCss: RectView | null;
+  /** Rust 按 DPR 换算出的物理像素洞口（与 CSS 值一比就知道 DPR 有没有对上） */
+  holePhysical: RectView | null;
+  dpr: number;
+  viewportCss: SizeView;
+  /** 洞口底色 */
+  backdrop: BackdropView;
+  /** 底色是不是前端报上来的（`false` = Rust 用了兜底色 —— 说明主题色没报上来） */
+  backdropReported: boolean;
+  /** 已经收到过几次上报（诊断：一直不涨说明前端没报） */
+  updates: number;
+}
+
+/** 取图档位：屏幕档（内嵌预览）/ 全尺寸（1:1）。 */
+export type EditorImageTier = "preview" | "full";
+
+/** 像素从哪来（RAW 的两条路在这一项上分得开）。 */
+export type EditorPixelOrigin = "bitmap" | "raw-embedded-preview" | "raw-decoded";
+
+/** 解码状态。 */
+export type EditorDecodeState = "idle" | "loading" | "ready" | "error";
+
+/**
+ * 渲染线程的状态快照（前端每 250ms 轮询一次）。
+ *
+ * 两个用途：**握手**（`ready` + `paintedPath` 决定洞口那条 DOM 链要不要透明）
+ * 与**上报**（`restarts` / `lastError`：渲染线程崩过但爬起来了，界面必须能看见）。
+ */
+export interface EditorRenderState {
+  /** 会话在（渲染线程活着） */
+  bound: boolean;
+  /** 渲染器建起来了（surface + 设备齐了） */
+  ready: boolean;
+  /** 适配器与后端（诊断：真机上一眼看出跑的是 DX12 还是 Vulkan） */
+  adapter: string;
+  /** surface 的物理像素尺寸 */
+  surface: SizeView;
+  /** 渲染器正在用的 DPR（WebView 的，不是 native scale） */
+  dpr: number;
+  holeCss: RectView | null;
+  holePhysical: RectView | null;
+  backdrop: BackdropView;
+  /** 当前装上纹理的那张照片 */
+  photoPath: string | null;
+  /** **真的画出来过**的那张（前端据此把洞口那条 DOM 链切成透明） */
+  paintedPath: string | null;
+  /** 图像尺寸（图像像素） */
+  image: SizeView | null;
+  tier: EditorImageTier | null;
+  wantedTier: EditorImageTier | null;
+  origin: EditorPixelOrigin | null;
+  zoom: number;
+  panX: number;
+  panY: number;
+  fitMode: "fit" | "fill" | "oneToOne" | "free";
+  rotation: number;
+  drawnFrames: number;
+  /** 监督器重启过几次（>0 = 崩过但爬起来了） */
+  restarts: number;
+  decode: EditorDecodeState;
+  decodeError: string | null;
+  /** 最近一次命中测试（图像像素） */
+  lastHit: { x: number; y: number } | null;
+  /** **当前**错误（恢复出图后会被清掉） */
+  lastError: string | null;
+  /** 近期事件（重启 / 设备丢失 / 恢复） */
+  history: string[];
+}
+
+/**
+ * 视口意图（前端**只发意图**，坐标数学全在 Rust）。
+ *
+ * `x` / `y` 是 **CSS 窗口坐标**（`clientX/clientY`）—— **不**减洞口原点、不乘 DPR：
+ * 那两步是 Rust 的活（`AGENTS.md` §6.1 红线 2）。
+ *
+ * `zoomBy` / `toggleFit` 是**不给坐标**的意图（按钮与快捷键）：
+ * 锚点（洞口中心）与「现在是哪一档」都只有 Rust 知道。
+ */
+export type EditorViewportIntent =
+  | { kind: "zoomAt"; x: number; y: number; factor: number }
+  | { kind: "zoomBy"; factor: number }
+  | { kind: "pan"; dx: number; dy: number }
+  | { kind: "fit"; mode: "fit" | "fill" | "oneToOne" | "free" }
+  | { kind: "toggleFit" }
+  | { kind: "reset" }
+  | { kind: "hitTest"; x: number; y: number };
