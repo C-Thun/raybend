@@ -23,7 +23,7 @@
  * 裁切/旋转的画布交互在 W5。
  */
 
-import { For, Show, createSignal, type JSX } from "solid-js";
+import { For, Show, createEffect, createSignal, onCleanup, type JSX } from "solid-js";
 
 import { Button } from "../../components/ui/Button.tsx";
 import { SegmentedControl } from "../../components/ui/SegmentedControl.tsx";
@@ -32,7 +32,7 @@ import { Switch } from "../../components/ui/Form.tsx";
 import { Menu } from "../../components/ui/Menu.tsx";
 import { t } from "../../i18n/index.ts";
 import type { MessageKey } from "../../i18n/index.ts";
-import type { HistogramCounts } from "../../lib/histogram.ts";
+import { HISTOGRAM_SAMPLES, type HistogramCounts } from "../../lib/histogram.ts";
 import type { ThumbQueue } from "../../components/ui/thumb-queue.ts";
 import type { ViewerPhoto } from "../../components/ui/viewer/index.ts";
 import { PREVIEW_FRAME_ASPECT } from "../../lib/preview-frame.ts";
@@ -47,7 +47,8 @@ import {
 } from "./params.ts";
 import { PendingNote } from "./parts.tsx";
 import { SliderRow } from "./SliderRow.tsx";
-import type { CurveChannel, EditorStore } from "./store.ts";
+import type { EditorStore } from "./store.ts";
+import { CurveEditor } from "./CurveEditor.tsx";
 
 /* ══════════════════════════════════════════════════════════════
  * 入参形状
@@ -238,7 +239,13 @@ export function EditorPanels(props: EditorPanelsProps): JSX.Element {
           label={t("editor.group.curve")}
           options={[{ value: "curve", label: t("editor.group.curve") }]}
         />
-        <CurveTab store={props.store} enabled={props.enabled} />
+        <CurveTab
+          store={props.store}
+          enabled={props.enabled}
+          current={props.current}
+          loadHistogram={props.loadHistogram}
+          onCommit={props.onCommit}
+        />
       </section>
     </div>
   );
@@ -406,13 +413,6 @@ function LensExtras(props: { enabled: boolean }): JSX.Element {
  * 第 3 组：曲线
  * ══════════════════════════════════════════════════════════════ */
 
-const CURVE_CHANNEL_LABEL: Record<CurveChannel, string> = {
-  rgb: "RGB",
-  r: "R",
-  g: "G",
-  b: "B",
-};
-
 /**
  * 曲线（W1：**恒等曲线**的静态示意）。
  *
@@ -420,44 +420,48 @@ const CURVE_CHANNEL_LABEL: Record<CurveChannel, string> = {
  * 是为了让页签组有形状、也让「加了曲线之后会是这么大一块」这件事可评审。
  * 见 `design/editor.md` §7 的说明：曲线是**唯一自研**的控件（Ark 没有对应件）。
  */
-function CurveTab(props: { store: EditorStore; enabled: boolean }): JSX.Element {
+function CurveTab(props: {
+  store: EditorStore;
+  enabled: boolean;
+  current: ViewerPhoto | null;
+  loadHistogram: (path: string, bins: number) => Promise<HistogramCounts | null>;
+  onCommit?: () => void;
+}): JSX.Element {
+  /*
+   * 背景那层直方图：与总览页签**同一个取数口**（`image_histogram`，Rust 算的）。
+   *
+   * ⚠️ 它现在统计的是**文件本身**（SOOC），不是编辑后的结果 —— 编辑后的直方图
+   * 要等 `image_histogram` 接上编辑栈（W4）。这条写在实施记录里，不是遗漏。
+   */
+  const [histogram, setHistogram] = createSignal<HistogramCounts | null>(null);
+  createEffect(() => {
+    const path = props.current?.path ?? null;
+    if (path === null) {
+      setHistogram(null);
+      return;
+    }
+    let cancelled = false;
+    void props
+      .loadHistogram(path, HISTOGRAM_SAMPLES)
+      .then((counts) => {
+        if (!cancelled) setHistogram(counts);
+      })
+      .catch(() => {
+        // 直方图取不到只是背景少一层：不弹错、不挡操作
+        if (!cancelled) setHistogram(null);
+      });
+    onCleanup(() => {
+      cancelled = true;
+    });
+  });
+
   return (
-    <div class="flex flex-col gap-2" data-editor-curve>
-      <SegmentedControl
-        value={props.store.curveChannel()}
-        onValueChange={(value) =>
-          props.store.setCurveChannel(value as CurveChannel)
-        }
-        label={t("editor.group.curve")}
-        options={(["rgb", "r", "g", "b"] as const).map((channel) => ({
-          value: channel,
-          label: CURVE_CHANNEL_LABEL[channel],
-        }))}
-      />
-      <div class="rounded-ui bg-surface-bar p-2">
-        <svg
-          viewBox="0 0 100 100"
-          class="block h-32 w-full"
-          role="img"
-          aria-label={t("editor.group.curve")}
-        >
-          {/* 4×4 网格（设计稿：网格 + 曲线 + 控制点） */}
-          <For each={[25, 50, 75]}>
-            {(at) => (
-              <>
-                <line x1={at} y1={0} x2={at} y2={100} stroke="var(--surface-layer)" stroke-width="0.4" />
-                <line x1={0} y1={at} x2={100} y2={at} stroke="var(--surface-layer)" stroke-width="0.4" />
-              </>
-            )}
-          </For>
-          <rect x={0} y={0} width={100} height={100} fill="none" stroke="var(--surface-layer)" stroke-width="0.4" />
-          {/* 恒等曲线（左下 → 右上）：W3 起换成真实控制点 */}
-          <line x1={0} y1={100} x2={100} y2={0} stroke="var(--brand)" stroke-width="1.2" />
-          <circle cx={50} cy={50} r={2.2} fill="var(--brand)" />
-        </svg>
-      </div>
-      <PendingNote text={t("editor.curve.later")} />
-    </div>
+    <CurveEditor
+      store={props.store}
+      histogram={histogram()}
+      disabled={!props.enabled}
+      onCommit={props.onCommit}
+    />
   );
 }
 

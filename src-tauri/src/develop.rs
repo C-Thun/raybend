@@ -227,9 +227,9 @@ fn undo_label(ops: &[Op]) -> String {
     }
 }
 
-/// 重置的返回值也是 `DevelopCommitResult`（前端两条路共用一套读数）。
-
 /// **重置全部**：清掉这张照片的编辑栈（回到与 SOOC 一致）。
+///
+/// 返回值与 `develop_commit` 同一个形状（前端两条路共用一套读数）。
 ///
 /// # Errors
 /// 库没打开 / 数据库写失败。

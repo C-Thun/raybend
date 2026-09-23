@@ -45,6 +45,7 @@ import {
   toggleExpandedCategory,
   type LutCategory,
 } from "../../lib/lut-library.ts";
+import { isIdentityCurve, type CurvePoint } from "../../lib/curve.ts";
 import {
   CROP_RATIOS,
   defaultParams,
@@ -140,15 +141,15 @@ export interface EditorStore {
   /** 换照片：把库里读回来的一份编辑栈灌进来（并把它当成「已落库」） */
   loadDevelop: (
     values: Record<string, number>,
-    curves: Partial<Record<CurveChannel, readonly [number, number][]>>,
+    curves: Partial<Record<CurveChannel, readonly CurvePoint[]>>,
   ) => void;
 
   /* ── 曲线 ───────────────────────────────────────────── */
   curveChannel: () => CurveChannel;
   setCurveChannel: (channel: CurveChannel) => void;
   /** 某个通道的控制点（归一化 0..1；恒等曲线是 `[[0,0],[1,1]]`） */
-  curvePoints: (channel: CurveChannel) => readonly [number, number][];
-  setCurvePoints: (channel: CurveChannel, points: readonly [number, number][]) => void;
+  curvePoints: (channel: CurveChannel) => readonly CurvePoint[];
+  setCurvePoints: (channel: CurveChannel, points: readonly CurvePoint[]) => void;
   /** 某个通道回到恒等 */
   resetCurve: (channel: CurveChannel) => void;
 
@@ -178,31 +179,13 @@ export interface EditorStore {
   setHoleActive: (value: boolean) => void;
 }
 
-/** 恒等曲线的控制点（`[[0,0],[1,1]]`）。 */
-const IDENTITY_POINTS: readonly (readonly [number, number])[] = [
-  [0, 0],
-  [1, 1],
-];
-
 /** 四个通道的恒等曲线（**每次都要新对象** —— 直接改会被当成没变）。 */
-function identityCurves(): Record<CurveChannel, [number, number][]> {
-  return {
-    rgb: IDENTITY_POINTS.map((point) => [...point] as [number, number]),
-    r: IDENTITY_POINTS.map((point) => [...point] as [number, number]),
-    g: IDENTITY_POINTS.map((point) => [...point] as [number, number]),
-    b: IDENTITY_POINTS.map((point) => [...point] as [number, number]),
-  };
-}
-
-/** 一条曲线是不是恒等（只装动过的通道）。 */
-function isIdentityCurve(points: readonly (readonly [number, number])[]): boolean {
-  return (
-    points.length === 2 &&
-    points[0][0] === 0 &&
-    points[0][1] === 0 &&
-    points[1][0] === 1 &&
-    points[1][1] === 1
-  );
+function identityCurves(): Record<CurveChannel, CurvePoint[]> {
+  const identity = (): CurvePoint[] => [
+    [0, 0],
+    [1, 1],
+  ];
+  return { rgb: identity(), r: identity(), g: identity(), b: identity() };
 }
 
 export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
@@ -250,7 +233,7 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
   const [params, setParams] = createSignal<Record<string, number>>(defaultParams());
   const [curveChannel, setCurveChannel] = createSignal<CurveChannel>("rgb");
   const [asShot, setAsShot] = createSignal<number | null>(null);
-  const [curves, setCurves] = createSignal<Record<CurveChannel, [number, number][]>>(
+  const [curves, setCurves] = createSignal<Record<CurveChannel, CurvePoint[]>>(
     identityCurves(),
   );
   const [developRev, setDevelopRev] = createSignal(0);
@@ -292,7 +275,9 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
     const dirtyCurves: Record<string, [number, number][]> = {};
     for (const channel of CURVE_CHANNELS) {
       const points = curves()[channel];
-      if (!isIdentityCurve(points)) dirtyCurves[channel] = points;
+      if (!isIdentityCurve(points)) {
+        dirtyCurves[channel] = points.map(([x, y]) => [x, y]);
+      }
     }
     return { values, asShotTemperature: asShot(), curves: dirtyCurves };
   };
@@ -412,7 +397,7 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
       for (const channel of CURVE_CHANNELS) {
         const points = loadedCurves[channel];
         if (points !== undefined && points.length >= 2) {
-          merged[channel] = points.map(([x, y]) => [x, y] as [number, number]);
+          merged[channel] = points.map(([x, y]) => [x, y] as CurvePoint);
         }
       }
       setCurves(merged);
@@ -428,12 +413,18 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
     setCurvePoints: (channel, points) => {
       setCurves((current) => ({
         ...current,
-        [channel]: points.map(([x, y]) => [x, y] as [number, number]),
+        [channel]: points.map(([x, y]) => [x, y] as CurvePoint),
       }));
       bumpDevelop();
     },
     resetCurve: (channel) => {
-      setCurves((current) => ({ ...current, [channel]: IDENTITY_POINTS.map((p) => [...p] as [number, number]) }));
+      setCurves((current) => ({
+        ...current,
+        [channel]: [
+          [0, 0],
+          [1, 1],
+        ],
+      }));
       bumpDevelop();
     },
 

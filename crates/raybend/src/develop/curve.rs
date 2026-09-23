@@ -373,9 +373,57 @@ pub fn curve_is_not_a_param() -> bool {
     spec("curve").is_none()
 }
 
+/// 与 TS 侧共用的**外部给定测试向量**（见 `src/lib/curve-vectors.json`）。
+///
+/// 前端也要画这条曲线（拖动的每一帧），所以求值有两份实现 ——
+/// 这份文件是它们的**共同基准**：两侧都对着同一组采样值断言，公式一改漏一处就红。
+const CURVE_VECTORS_JSON: &str = include_str!("../../../../src/lib/curve-vectors.json");
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn curve_matches_the_shared_test_vectors() {
+        // 与 `src/lib/curve.test.ts` 对着**同一份**向量断言（跨语言不许漂）
+        let document: serde_json::Value =
+            serde_json::from_str(CURVE_VECTORS_JSON).expect("向量文件必须能解析");
+        let cases = document["cases"].as_array().expect("cases 是数组");
+        assert!(!cases.is_empty(), "向量文件不能是空的");
+        for case in cases {
+            let points: Vec<[f32; 2]> = case["points"]
+                .as_array()
+                .expect("points")
+                .iter()
+                .map(|point| {
+                    let pair = point.as_array().expect("点是一对坐标");
+                    [
+                        pair[0].as_f64().expect("x") as f32,
+                        pair[1].as_f64().expect("y") as f32,
+                    ]
+                })
+                .collect();
+            let steps = case["steps"].as_u64().expect("steps") as usize;
+            let samples: Vec<f32> = case["samples"]
+                .as_array()
+                .expect("samples")
+                .iter()
+                .map(|value| value.as_f64().expect("采样值") as f32)
+                .collect();
+            assert_eq!(samples.len(), steps + 1, "采样点数与 steps 对不上");
+
+            let curve = Curve::from_points(points.clone()).expect("向量里的曲线必须合法");
+            for (index, expected) in samples.iter().enumerate() {
+                #[allow(clippy::cast_precision_loss)]
+                let x = index as f32 / steps as f32;
+                let got = curve.eval(x);
+                assert!(
+                    (got - expected).abs() < 5e-4,
+                    "控制点 {points:?} 在 x={x} 处：向量给 {expected}，本实现算 {got}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn identity_curve_is_the_diagonal() {
