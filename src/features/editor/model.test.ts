@@ -21,7 +21,9 @@ import {
   isParamDirty,
   isParamWired,
   paramSpec,
+  PARAM_GROUPS,
   paramsInGroup,
+  paramsInOverview,
   type ParamSpec,
 } from "./params.ts";
 import contract from "../../api/develop-params.json" with { type: "json" };
@@ -60,7 +62,16 @@ test("参数表：数字全部来自 develop-params.json（唯一真相）", () 
   // M3-W3 接进管线的就是影调 + 色彩这 7 条；清晰度 / 镜头留 W4
   assert.deepEqual(
     PARAMS.filter((p) => p.wired).map((p) => p.id),
-    ["exposure", "contrast", "highlights", "blacks", "temperature", "saturation", "vibrance"],
+    [
+      "exposure",
+      "contrast",
+      "highlights",
+      "blacks",
+      "dynamicContrast",
+      "temperature",
+      "saturation",
+      "vibrance",
+    ],
   );
   assert.equal(isParamWired("exposure"), true);
   assert.equal(isParamWired("sharpenAmount"), false);
@@ -73,6 +84,21 @@ test("动过没有：可以把「这张照片的基线」传进来（色温用�
   assert.equal(isParamDirty("temperature", 5200), true, "拿静态兜底 6250 比，5200 算动过");
   assert.equal(isParamDirty("temperature", 5200, 5200), false, "按照片基线比就不算动过");
   assert.equal(isParamDirty("temperature", 7000, 5200), true);
+});
+
+test("寄居在别处的参数只渲染一次，且两处合起来是全集", () => {
+  // `AGENTS.md` §2.12：同一个东西两种表达本身就是 bug。
+  // 动态反差暂时住在总览页的直方图下面（`placement: "overview"`）——
+  // 它绝不能在影调页签里再出现一次，也不能从两处都掉出去。
+  const overview = paramsInOverview().map((p) => p.id);
+  assert.deepEqual(overview, ["dynamicContrast"], "总览页寄居的应当只有动态反差");
+  const inGroups = PARAM_GROUPS.flatMap((group) => paramsInGroup(group).map((p) => p.id));
+  assert.ok(!inGroups.includes("dynamicContrast"), "影调页签里不许再出现一次");
+  assert.deepEqual(
+    [...inGroups, ...overview].sort(),
+    PARAMS.map((p) => p.id).sort(),
+    "页签 + 寄居 必须正好覆盖参数表（不许有杆掉进缝里）",
+  );
 });
 
 test("参数表：id 唯一、分组齐全、范围合法", () => {

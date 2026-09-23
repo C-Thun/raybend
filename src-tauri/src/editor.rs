@@ -42,7 +42,11 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, Runtime, State, WebviewWindow};
 
-use raybend::develop::{Curve, CurveChannel, CurveSet, DevelopParams, LinearImage, render_rgb8};
+use raybend::develop::local_tone::{LocalToneOpts, LocalToneState};
+use raybend::develop::{
+    Curve, CurveChannel, CurveSet, DevelopParams, LinearImage, Resolved, chain_image,
+    render_rgb8_with_local_tone,
+};
 use raybend::display::{self, PixelSize};
 use raybend::render::{
     FitMode, GpuContext, ImageTier, RenderImage, RenderOutcome, RestartPolicy, Verdict, tier_for,
@@ -473,6 +477,13 @@ struct CachedSource {
     full: LinearImage,
     /// 屏幕档副本（第一次要预览档时缩一次，之后一直用）
     preview: Option<LinearImage>,
+    /// **分析图**（长边 1/4，链之前的线性源）—— 只依赖照片，参数变了不用重缩
+    analysis_source: Option<LinearImage>,
+    /// **动态反差的分析结果** + 它是用哪组链参数算出来的（见 [`Resolved::chain_key`]）。
+    ///
+    /// 分两段缓存是拖得动拉杆的关键：分解与分位数只依赖「照片 + 线性链参数」，
+    /// **与强度无关**；拖动动态反差杆本身根本不需要重算它。
+    local_tone: Option<([f32; 6], LocalToneState)>,
     /// 拍摄色温估计（K）——前端拿它当色温拉杆的基线
     as_shot_temperature: Option<f32>,
     /// 像素从哪来（`raw-linear` / `bitmap-linear`）
@@ -1554,6 +1565,8 @@ fn develop_loop(receiver: Receiver<DevelopJob>, commands: Sender<RenderCommand>,
                         path,
                         full: source.image,
                         preview: None,
+                        analysis_source: None,
+                        local_tone: None,
                         as_shot_temperature,
                         origin: origin.clone(),
                     });
@@ -1587,7 +1600,29 @@ fn develop_loop(receiver: Receiver<DevelopJob>, commands: Sender<RenderCommand>,
         as_shot_temperature = entry.as_shot_temperature;
         origin = entry.origin.clone();
 
-        // ② 按档位取源（预览档要缩一次，缩完缓存住）
+        // ② 动态反差：分析图只缩一次；分析结果只在**线性链参数**变了才重算。
+        //    这一段必须放在取 source 之前（它要可变借 entry）。
+        let local_strength = (job.params.value("dynamicContrast") / 100.0) as f32;
+        if local_strength > 0.0 {
+            let key = Resolved::new(&job.params).chain_key();
+            if entry
+                .local_tone
+                .as_ref()
+                .is_none_or(|(cached_key, _)| *cached_key != key)
+            {
+                if entry.analysis_source.is_none() {
+                    let long = entry.full.width.max(entry.full.height);
+                    entry.analysis_source = Some(entry.full.downscaled_to((long / 4).max(256)));
+                }
+                if let Some(analysis) = entry.analysis_source.as_ref() {
+                    let chained = chain_image(analysis, &job.params);
+                    let state = LocalToneState::analyze(&chained, &LocalToneOpts::default());
+                    entry.local_tone = Some((key, state));
+                }
+            }
+        }
+
+        // ③ 按档位取源（预览档要缩一次，缩完缓存住）
         let (source, width, height) = match job.tier {
             ImageTier::Full => (&entry.full, entry.full.width, entry.full.height),
             ImageTier::Preview => {
@@ -1599,9 +1634,17 @@ fn develop_loop(receiver: Receiver<DevelopJob>, commands: Sender<RenderCommand>,
             }
         };
 
-        // ③ 跑管线（这一段就是「拖一下要多久」的全部）
+        // ④ 跑管线（这一段就是「拖一下要多久」的全部）
+        let local = if local_strength > 0.0 {
+            entry
+                .local_tone
+                .as_ref()
+                .map(|(_, state)| (state, local_strength))
+        } else {
+            None
+        };
         let started = std::time::Instant::now();
-        let rgb = render_rgb8(source, &job.params, &job.curves);
+        let rgb = render_rgb8_with_local_tone(source, &job.params, &job.curves, local);
         let develop_ms = started.elapsed().as_secs_f64() * 1000.0;
 
         let outcome = DevelopOutcome {

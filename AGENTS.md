@@ -872,3 +872,4 @@ IPC 单测（用**真实字段名**反序列化；缺 DPR 必须报错，不许�
 | **编辑栈**（develop stack） | 对一张照片的全部非破坏性编辑操作的序列；定稿后落成一个 **issue**。M3 起进入主线（不再后置） |
 | **`fullscreen`**（全屏看图） | **无 UI 的沉浸式单图浏览**：另开一扇**无边框窗口**、按**主窗口所在那块屏幕**全屏，默认适应窗口、双击 100%、滚轮缩放、`←/→`/`PgUp/PgDn` 切图（到头停）、`Esc`/`Enter` 退出。命令 `viewer.fullscreen`，默认键 **`F11`**；入口在 flowbar 右端（跟随 picture info 显示）。实现：`src/features/fullscreen/` + `src-tauri/src/fullscreen.rs`。⚠️ 与「主窗口里的看图态」（view / film / compare）是**两回事**，别混 |
 | **`shortcut`**（快捷键） | 统一命令注册表里的**默认键位**（`CommandSpec.defaultKey`）：它决定该命令出现在**快捷键设置面板**与 `Ctrl+K` 命令面板里的键位；冲突检测与保留键规则见 `lib/commands.ts` / `lib/key-chords.ts`。新增功能时的必选动作见 §2.15 |
+| **动态反差**（Dynamic Contrast） | 一根拉杆的**局部色调映射**（参数 id `dynamicContrast`，0–100 单极，0 = 完全不动画面）：**压整体光比 + 抬局部反差**。与 `contrast`（全局反差曲线）不是一回事 —— 它多了一个**空间维度**，所以能同时做这两件在逐像素曲线上数学互斥的事。算法见 `crates/raybend/src/develop/local_tone.rs`（分解用 `filters.rs` 的引导滤波）。**暂时**住在编辑器「总览」页的直方图下面（`params.ts` 的 `placement: "overview"`），不占参数组页签 |

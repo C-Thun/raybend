@@ -36,6 +36,7 @@
 
 use super::color::{linear_to_srgb, srgb8_to_linear_table, temperature_gain_ratio};
 use super::curve::CurveSet;
+use super::local_tone::{LocalToneRows, LocalToneState};
 use super::params::DevelopParams;
 
 /// **线性 sRGB** 图像（u16 编码：`0..=65535` 对应 `0.0..=1.0`）。
@@ -210,6 +211,22 @@ impl Resolved {
     #[must_use]
     pub fn needs_chroma(&self) -> bool {
         self.saturation.abs() > 1e-6 || self.vibrance.abs() > 1e-6
+    }
+
+    /// **线性链的指纹**：这几项变了才需要重算局部色调映射的分析。
+    ///
+    /// 色度（饱和 / 自然饱和）与曲线**不在**里面 —— 它们作用在显示参考域，
+    /// 不影响分析所看到的那张图（那张图是「链完、显示变换之前」的线性图）。
+    #[must_use]
+    pub fn chain_key(&self) -> [f32; 6] {
+        [
+            self.gains[0],
+            self.gains[1],
+            self.gains[2],
+            self.contrast,
+            self.highlights,
+            self.blacks,
+        ]
     }
 }
 
@@ -486,9 +503,216 @@ fn map_rows(input: &[u16], output: &mut [u8], luts: &ChannelLuts, resolved: &Res
     }
 }
 
+/// 线性链的 LUT（**融合路径用**）：线性 u16 → 链过之后的线性 f32。
+///
+/// 输出**不夹**：曝光 +2EV 会把高光推到 1.0 以上，而局部色调映射要在夹取之前看到它。
+/// 存 f32 而不是 u16：这里的输出还要过 `log2`，定点量化会在暗部变成可见的色带。
+struct LinearChainLuts {
+    tables: [Vec<f32>; 3],
+}
+
+impl LinearChainLuts {
+    fn build(resolved: &Resolved) -> Self {
+        let mut tables: [Vec<f32>; 3] = [
+            vec![0f32; LUT_LEN],
+            vec![0f32; LUT_LEN],
+            vec![0f32; LUT_LEN],
+        ];
+        #[allow(clippy::cast_precision_loss)]
+        let denominator = (LUT_LEN - 1) as f32;
+        for (channel, table) in tables.iter_mut().enumerate() {
+            for (index, slot) in table.iter_mut().enumerate() {
+                #[allow(clippy::cast_precision_loss)]
+                let linear = index as f32 / denominator;
+                *slot = chain_linear(linear, resolved.gains[channel], resolved);
+            }
+        }
+        Self { tables }
+    }
+
+    /// 查表（线性插值）。
+    #[inline]
+    fn lookup(&self, channel: usize, linear: u16) -> f32 {
+        let table = &self.tables[channel];
+        #[allow(clippy::cast_precision_loss)]
+        let scaled = f32::from(linear) / 65535.0 * (LUT_LEN - 1) as f32;
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let index = scaled.floor() as usize;
+        if index + 1 >= LUT_LEN {
+            return table[LUT_LEN - 1];
+        }
+        let fraction = scaled - index as f32;
+        table[index] + (table[index + 1] - table[index]) * fraction
+    }
+}
+
+/// 显示 LUT（**融合路径用**）：线性（0..1，越界夹）→ 显示值 0..1（含 sRGB OETF 与曲线）。
+///
+/// 存 f32 而不是 u8：融合路径的色度步骤（饱和度 / 自然饱和度）在这之后做，
+/// 用 u8 会在缩放时露出量化台阶（与 `ChannelLuts` 存 u16 同一个理由）。
+struct DisplayLuts {
+    tables: [Vec<f32>; 3],
+}
+
+impl DisplayLuts {
+    fn build(curves: &CurveSet) -> Self {
+        let mut tables: [Vec<f32>; 3] = [
+            vec![0f32; LUT_LEN],
+            vec![0f32; LUT_LEN],
+            vec![0f32; LUT_LEN],
+        ];
+        #[allow(clippy::cast_precision_loss)]
+        let denominator = (LUT_LEN - 1) as f32;
+        for (channel, table) in tables.iter_mut().enumerate() {
+            for (index, slot) in table.iter_mut().enumerate() {
+                #[allow(clippy::cast_precision_loss)]
+                let linear = index as f32 / denominator;
+                *slot = encode_and_curve(linear, channel, curves);
+            }
+        }
+        Self { tables }
+    }
+
+    /// 查表（线性插值）；输入越界时夹到两端。
+    #[inline]
+    fn lookup(&self, channel: usize, linear: f32) -> f32 {
+        let table = &self.tables[channel];
+        if !linear.is_finite() || linear <= 0.0 {
+            return table[0];
+        }
+        if linear >= 1.0 {
+            return table[LUT_LEN - 1];
+        }
+        let scaled = linear * (LUT_LEN - 1) as f32;
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let index = scaled.floor() as usize;
+        if index + 1 >= LUT_LEN {
+            return table[LUT_LEN - 1];
+        }
+        let fraction = scaled - index as f32;
+        table[index] + (table[index + 1] - table[index]) * fraction
+    }
+}
+
+/// **生产路径（带动态反差）**：线性源 → 局部色调映射 → 8bit sRGB。
+///
+/// `local = None` 或强度 ≤ 0 时**原样走 [`render_rgb8`]** —— 拉杆在 0 位时这个功能
+/// 等于不存在（逐位一致，且不多花一分钱）。
+///
+/// 为什么是**融合的一趟**而不是「先算中间图再渲染」：24MP 的中间线性图是 144MB 的
+/// 内存往返，而这条链本来就是逐像素的 —— 合成一趟就只需读一次源、写一次显示像素。
+#[must_use]
+pub fn render_rgb8_with_local_tone(
+    source: &LinearImage,
+    params: &DevelopParams,
+    curves: &CurveSet,
+    local: Option<(&LocalToneState, f32)>,
+) -> Vec<u8> {
+    let Some((state, strength)) = local else {
+        return render_rgb8(source, params, curves);
+    };
+    if strength <= 0.0 || strength.is_nan() {
+        return render_rgb8(source, params, curves);
+    }
+    let resolved = Resolved::new(params);
+    let pass = LocalPass {
+        state,
+        strength,
+        chain: &LinearChainLuts::build(&resolved),
+        display: &DisplayLuts::build(curves),
+        resolved: &resolved,
+        chroma: resolved.needs_chroma(),
+        width: source.width as usize,
+        height: source.height as usize,
+    };
+    let mut out = vec![0u8; source.rgb.len()];
+    let threads = std::thread::available_parallelism()
+        .map_or(1, std::num::NonZeroUsize::get)
+        .min(16);
+    if threads <= 1 || pass.height < 32 {
+        pass.run(&source.rgb, &mut out, 0);
+        return out;
+    }
+    let rows_per_chunk = pass.height.div_ceil(threads);
+    std::thread::scope(|scope| {
+        let mut remaining_in = source.rgb.as_slice();
+        let mut remaining_out = out.as_mut_slice();
+        let mut first_row = 0usize;
+        while !remaining_out.is_empty() {
+            let rows = (remaining_out.len() / (pass.width * 3)).min(rows_per_chunk).max(1);
+            let take = rows * pass.width * 3;
+            let (chunk_out, rest_out) = remaining_out.split_at_mut(take);
+            let (chunk_in, rest_in) = remaining_in.split_at(take);
+            remaining_in = rest_in;
+            remaining_out = rest_out;
+            let pass_ref = &pass;
+            let start = first_row;
+            first_row += rows;
+            scope.spawn(move || pass_ref.run(chunk_in, chunk_out, start));
+        }
+    });
+    out
+}
+
+/// 融合路径的一趟像素循环（与 `map_rows` 并列，**不是**它的替代）。
+struct LocalPass<'a> {
+    state: &'a LocalToneState,
+    strength: f32,
+    chain: &'a LinearChainLuts,
+    display: &'a DisplayLuts,
+    resolved: &'a Resolved,
+    chroma: bool,
+    width: usize,
+    height: usize,
+}
+
+impl LocalPass<'_> {
+    fn run(&self, input: &[u16], output: &mut [u8], first_row: usize) {
+        debug_assert_eq!(input.len(), output.len());
+        let mut rows = LocalToneRows::new(
+            self.state,
+            self.strength,
+            self.width as u32,
+            self.height as u32,
+        );
+        let input_rows = input.as_chunks::<3>().0.chunks(self.width);
+        let output_rows = output.as_chunks_mut::<3>().0.chunks_mut(self.width);
+        for (local_row, (line_in, line_out)) in input_rows.zip(output_rows).enumerate() {
+            rows.set_row(first_row + local_row);
+            for (x, (pixel_in, pixel_out)) in line_in.iter().zip(line_out.iter_mut()).enumerate() {
+                let chained = [
+                    self.chain.lookup(0, pixel_in[0]),
+                    self.chain.lookup(1, pixel_in[1]),
+                    self.chain.lookup(2, pixel_in[2]),
+                ];
+                let ratio = rows.ratio_for_rgb(x, chained);
+                let mut display = [
+                    self.display.lookup(0, chained[0] * ratio),
+                    self.display.lookup(1, chained[1] * ratio),
+                    self.display.lookup(2, chained[2] * ratio),
+                ];
+                if self.chroma {
+                    display = apply_chroma(
+                        display,
+                        self.resolved.saturation,
+                        self.resolved.vibrance,
+                    );
+                }
+                for (channel, slot) in pixel_out.iter_mut().enumerate() {
+                    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                    {
+                        *slot = (display[channel].clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::develop::local_tone::LocalToneOpts;
 
     fn params(values: &[(&str, f64)]) -> DevelopParams {
         let mut params = DevelopParams::new(None);
@@ -536,6 +760,78 @@ mod tests {
                 "8bit {value} 往返成了 {got}"
             );
         }
+    }
+
+    /// 一张带渐变与纹理的小图（局部色调映射需要二维邻域，单行图测不了）。
+    ///
+    /// 亮度上限刻意压在 1.0 以下（−7…−1 stops）：`chain_image` 是 u16，会把超过 1.0 的
+    /// 高光**夹掉**，而融合路径不夹 —— 拿一张会溢出的图做参照，比出来的差异
+    /// 是「参照自己丢了信息」，不是融合路径算错了。
+    fn textured(width: u32, height: u32) -> LinearImage {
+        let mut rgb = Vec::with_capacity((width as usize) * (height as usize) * 3);
+        for y in 0..height as usize {
+            for x in 0..width as usize {
+                #[allow(clippy::cast_precision_loss)]
+                let t = x as f32 / (width as f32 - 1.0).max(1.0);
+                let checker: f32 = if (x + y) % 2 == 0 { 1.0 } else { -1.0 };
+                let value = (-7.0 + 6.0 * t).exp2() * (0.2 * checker).exp2();
+                let encoded = linear(value);
+                rgb.extend([encoded, encoded, encoded]);
+            }
+        }
+        LinearImage::new(width, height, rgb).expect("形状对得上")
+    }
+
+    #[test]
+    fn local_tone_at_zero_strength_is_bit_identical_to_the_plain_pipeline() {
+        // 拉杆在 0 位时这个功能必须**等于不存在**（不多花一分钱，也不许改一个像素）
+        let source = textured(64, 48);
+        let params = params(&[("exposure", 0.5), ("contrast", 30.0), ("saturation", 20.0)]);
+        let curves = CurveSet::identity();
+        let state = LocalToneState::analyze(
+            &chain_image(&source, &params),
+            &LocalToneOpts::default(),
+        );
+        let plain = render_rgb8(&source, &params, &curves);
+        assert_eq!(render_rgb8_with_local_tone(&source, &params, &curves, None), plain);
+        for strength in [0.0f32, -1.0, f32::NAN] {
+            assert_eq!(
+                render_rgb8_with_local_tone(&source, &params, &curves, Some((&state, strength))),
+                plain,
+                "强度 {strength} 时融合路径不等于原路径"
+            );
+        }
+    }
+
+    #[test]
+    fn fused_path_matches_the_two_step_path() {
+        // 「两条路一套数学」（`mod.rs` 的口径）：融合的一趟 vs（链 → apply_inplace → 显示）。
+        // 两边差得超过 2 级 8bit 就说明有一边自己长了一套算法。
+        let source = textured(64, 48);
+        let params = params(&[("exposure", 0.3), ("contrast", 20.0), ("saturation", 15.0)]);
+        let curves = CurveSet::identity();
+        let chained = chain_image(&source, &params);
+        let state = LocalToneState::analyze(&chained, &LocalToneOpts::default());
+        let strength = 0.7f32;
+
+        let fused = render_rgb8_with_local_tone(&source, &params, &curves, Some((&state, strength)));
+
+        let mut reference_image = chained.clone();
+        state.apply_inplace(&mut reference_image, strength);
+        let mut reference = Vec::with_capacity(reference_image.rgb.len());
+        for pixel in reference_image.rgb.as_chunks::<3>().0 {
+            for (channel, value) in pixel.iter().enumerate() {
+                let display = encode_and_curve(f32::from(*value) / 65535.0, channel, &curves);
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                reference.push((display.clamp(0.0, 1.0) * 255.0 + 0.5) as u8);
+            }
+        }
+
+        let mut worst = 0i16;
+        for (a, b) in fused.iter().zip(reference.iter()) {
+            worst = worst.max((i16::from(*a) - i16::from(*b)).abs());
+        }
+        assert!(worst <= 2, "融合路径与两步路径差了 {worst} 级 8bit");
     }
 
     #[test]

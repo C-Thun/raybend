@@ -245,7 +245,6 @@ impl LocalToneState {
             return;
         }
         let strength = strength.min(1.0);
-        let resolved = self.resolve(strength);
 
         let width = image.width as usize;
         let threads = std::thread::available_parallelism()
@@ -253,7 +252,7 @@ impl LocalToneState {
             .min(16);
         let height = image.height as usize;
         if threads <= 1 || height < 32 {
-            apply_rows(self, &resolved, &mut image.rgb, width, height, 0);
+            apply_rows(self, strength, &mut image.rgb, width, height, 0);
             return;
         }
         let rows_per_chunk = height.div_ceil(threads);
@@ -266,10 +265,9 @@ impl LocalToneState {
                 let (chunk, rest) = remaining.split_at_mut(take);
                 remaining = rest;
                 let state = self;
-                let resolved = &resolved;
                 let start = first_row;
                 first_row += rows;
-                scope.spawn(move || apply_rows(state, resolved, chunk, width, height, start));
+                scope.spawn(move || apply_rows(state, strength, chunk, width, height, start));
             }
         });
     }
@@ -292,6 +290,84 @@ impl LocalToneState {
     }
 }
 
+/// **一行一行推进**的 apply 上下文：5 个上采样器 + 解析好的标量。
+///
+/// 为什么要把它单独拿出来：管线要把局部色调映射**融进同一趟像素循环**
+/// （读一次源、写一次显示像素），而不是先算出一张中间图再走第二遍 ——
+/// 24MP 的中间线性图是 144MB 的内存往返，而这条链本来就是逐像素的。
+/// 所以「怎么算」必须能被管线按行调用，不能只藏在 `apply_inplace` 里。
+pub struct LocalToneRows<'a> {
+    resolved: Resolved,
+    fine_a: RowUpsampler<'a>,
+    fine_b: RowUpsampler<'a>,
+    coarse_a: RowUpsampler<'a>,
+    coarse_b: RowUpsampler<'a>,
+    gate: RowUpsampler<'a>,
+}
+
+impl<'a> LocalToneRows<'a> {
+    /// 建一个（`width`/`height` = **这次要渲染的那张图**的尺寸，可以是预览档）。
+    #[must_use]
+    pub fn new(state: &'a LocalToneState, strength: f32, width: u32, height: u32) -> Self {
+        let resolved = state.resolve(strength.clamp(0.0, 1.0));
+        Self {
+            resolved,
+            fine_a: RowUpsampler::new(&state.fine.a, width, height),
+            fine_b: RowUpsampler::new(&state.fine.b, width, height),
+            coarse_a: RowUpsampler::new(&state.coarse.a, width, height),
+            coarse_b: RowUpsampler::new(&state.coarse.b, width, height),
+            gate: RowUpsampler::new(&state.gate, width, height),
+        }
+    }
+
+    /// 推进到第 `y` 行。
+    pub fn set_row(&mut self, y: usize) {
+        self.fine_a.set_row(y);
+        self.fine_b.set_row(y);
+        self.coarse_a.set_row(y);
+        self.coarse_b.set_row(y);
+        self.gate.set_row(y);
+    }
+
+    /// 给定当前像素**链过之后**的线性 RGB，返回亮度倍率。
+    #[inline]
+    #[must_use]
+    pub fn ratio_for_rgb(&self, x: usize, rgb: [f32; 3]) -> f32 {
+        let l = luma_of(rgb).max(MIN_LINEAR).log2();
+        self.ratio(x, l)
+    }
+
+    /// 给定当前像素的 `log2` 亮度，返回亮度倍率（分解 + 压缩 + 分级增益 + 重组）。
+    #[inline]
+    #[must_use]
+    pub fn ratio(&self, x: usize, l: f32) -> f32 {
+        let base_fine = self.fine_a.at(x) * l + self.fine_b.at(x);
+        let base_coarse = self.coarse_a.at(x) * base_fine + self.coarse_b.at(x);
+        let detail_fine = l - base_fine;
+        let detail_coarse = base_fine - base_coarse;
+        let resolved = &self.resolved;
+
+        // ③ base 压缩 + ④ 分级增益（带门控与软饱和）
+        //
+        // ❗ 这里是最容易写错的一处：`added_detail` 返回的是**增量**，
+        //   而细节本身（D1/D2）永远都要加回去 —— 门控只调「多给的那部分」。
+        //   曾写成 `T(B2) + gate·(added_D1 + added_D2)`，等于用增量替掉了细节：
+        //   拉杆一离开 0，整张图的纹理全消失、只剩一层压缩过的 base。
+        //   （s = 0 的恒等单测看不见它，因为那条路径提前返回了 —— 守它的是
+        //   `tiny_strength_is_almost_identity` 那条测试。）
+        let compressed = compress_base(base_coarse, resolved);
+        let gate = self.gate.at(x);
+        let target = compressed
+            + detail_coarse
+            + gate * added_detail(detail_coarse, resolved.coarse_gain, resolved.coarse_limit)
+            + detail_fine
+            + gate * added_detail(detail_fine, resolved.fine_gain, resolved.fine_limit);
+
+        // ⑤ 只动亮度：按 2^(L'−L) 缩 RGB（保色相与通道间比例）
+        (target - l).exp2().clamp(MIN_RATIO, MAX_RATIO)
+    }
+}
+
 /// 一段像素的 `apply`（**唯一**的像素循环）。
 ///
 /// `width`/`height` 是**整张图**的尺寸（上采样器靠它算缩放比），
@@ -300,61 +376,27 @@ impl LocalToneState {
 ///   每个块各自算出一个不同的缩放比，块边界会出现横向条带。
 fn apply_rows(
     state: &LocalToneState,
-    resolved: &Resolved,
+    strength: f32,
     rows: &mut [u16],
     width: usize,
     height: usize,
     first_row: usize,
 ) {
     debug_assert_eq!(rows.len() % (width * 3), 0);
-    let mut fine_a = RowUpsampler::new(&state.fine.a, width as u32, height as u32);
-    let mut fine_b = RowUpsampler::new(&state.fine.b, width as u32, height as u32);
-    let mut coarse_a = RowUpsampler::new(&state.coarse.a, width as u32, height as u32);
-    let mut coarse_b = RowUpsampler::new(&state.coarse.b, width as u32, height as u32);
-    let mut gate = RowUpsampler::new(&state.gate, width as u32, height as u32);
+    let mut context = LocalToneRows::new(state, strength, width as u32, height as u32);
 
     for (local_row, line) in rows.as_chunks_mut::<3>().0.chunks_mut(width).enumerate() {
         let y = first_row + local_row;
-        fine_a.set_row(y);
-        fine_b.set_row(y);
-        coarse_a.set_row(y);
-        coarse_b.set_row(y);
-        gate.set_row(y);
+        context.set_row(y);
         for (x, pixel) in line.iter_mut().enumerate() {
             let rgb = [
                 linear_of(pixel[0]),
                 linear_of(pixel[1]),
                 linear_of(pixel[2]),
             ];
-            let luma = luma_of(rgb);
-            let l = luma.max(MIN_LINEAR).log2();
-
-            // 分解（全分辨率、由低分辨率系数插值而来）
-            let base_fine = fine_a.at(x) * l + fine_b.at(x);
-            let base_coarse = coarse_a.at(x) * base_fine + coarse_b.at(x);
-            let detail_fine = l - base_fine;
-            let detail_coarse = base_fine - base_coarse;
-
-            // ③ base 压缩（黑场锚住）+ ④ 分级增益（带门控与软限幅）
-            //
-            // ❗ 这里是整个模块最容易写错的一行：`added_detail` 返回的是**增量**，
-            //   而细节本身（D1/D2）永远都要加回去 —— 门控只调「多给的那部分」。
-            //   曾写成 `target = compressed + gate·(added_D1 + added_D2)`，等于用增量
-            //   替掉了细节：拉杆一离开 0，整张图的纹理全消失、只剩一层压缩过的 base。
-            //   （s = 0 的恒等单测看不见它，因为那条路径提前返回了 —— 守它的是
-            //   `tiny_strength_is_almost_identity` 那条测试。）
-            let compressed = compress_base(base_coarse, resolved);
-            let gate = gate.at(x);
-            let target = compressed
-                + detail_coarse
-                + gate * added_detail(detail_coarse, resolved.coarse_gain, resolved.coarse_limit)
-                + detail_fine
-                + gate * added_detail(detail_fine, resolved.fine_gain, resolved.fine_limit);
-
-            // ⑤ 只动亮度：按 2^(L'−L) 缩 RGB（保色相与通道间比例）
-            let ratio = (target - l).exp2().clamp(MIN_RATIO, MAX_RATIO);
-            for channel in 0..3 {
-                pixel[channel] = encoded_of(rgb[channel] * ratio);
+            let ratio = context.ratio_for_rgb(x, rgb);
+            for (channel, value) in pixel.iter_mut().enumerate() {
+                *value = encoded_of(rgb[channel] * ratio);
             }
         }
     }

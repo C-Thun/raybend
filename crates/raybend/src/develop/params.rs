@@ -86,6 +86,8 @@ pub const PARAMS: &[ParamSpec] = &[
     ParamSpec { id: "contrast", min: -100.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Center, wired: true, baseline: Baseline::Static },
     ParamSpec { id: "highlights", min: -100.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Center, wired: true, baseline: Baseline::Static },
     ParamSpec { id: "blacks", min: -100.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Center, wired: true, baseline: Baseline::Static },
+    // 动态反差（局部色调映射）：单极 0..100，0 = 完全不动画面（`local_tone` 的强度）
+    ParamSpec { id: "dynamicContrast", min: 0.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Start, wired: true, baseline: Baseline::Static },
     // ── 色彩 ──
     ParamSpec { id: "temperature", min: 2500.0, max: 10000.0, step: 50.0, default: 6250.0, origin: Origin::Center, wired: true, baseline: Baseline::AsShot },
     ParamSpec { id: "saturation", min: -100.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Center, wired: true, baseline: Baseline::Static },

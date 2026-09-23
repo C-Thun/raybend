@@ -43,6 +43,7 @@ import {
   PARAM_GROUPS,
   cropRatioLabel,
   paramsInGroup,
+  paramsInOverview,
   type ParamGroup,
 } from "./params.ts";
 import { PendingNote } from "./parts.tsx";
@@ -154,6 +155,9 @@ export function EditorPanels(props: EditorPanelsProps): JSX.Element {
             current={props.current}
             thumbs={props.thumbs}
             loadHistogram={props.loadHistogram}
+            store={props.store}
+            enabled={props.enabled}
+            onCommit={props.onCommit}
           />
         </Show>
         <Show when={viewTab() === "issues"}>
@@ -259,6 +263,9 @@ function OverviewTab(props: {
   current: ViewerPhoto | null;
   thumbs: ThumbQueue;
   loadHistogram: (path: string, bins: number) => Promise<HistogramCounts | null>;
+  store: EditorStore;
+  enabled: boolean;
+  onCommit?: () => void;
 }): JSX.Element {
   const path = (): string | null => props.current?.path ?? null;
   const thumb = (): string | null => {
@@ -303,6 +310,25 @@ function OverviewTab(props: {
         title={t("browse.histogram")}
         emptyText={t("browse.histogramEmpty")}
       />
+      {/*
+        寄居在直方图下面的参数（目前只有动态反差，`params.ts` 的 `placement: "overview"`）。
+        人类 2026-09-24 定：它**暂时**不住在影调页签里，也不占单独的面板块。
+        同一根杆只能出现一次 —— `paramsInGroup` 会把 `overview` 的排除掉。
+      */}
+      <For each={paramsInOverview()}>
+        {(spec) => (
+          <SliderRow
+            spec={spec}
+            value={props.store.paramValue(spec.id)}
+            disabled={!props.enabled || !spec.wired}
+            onValueChange={(value) => props.store.setParam(spec.id, value)}
+            onValueCommit={() => props.onCommit?.()}
+          />
+        )}
+      </For>
+      {/* 上面那块直方图还是 SOOC 的（编辑后的直方图排在 W4）——
+          拉杆紧贴着它，不写一句会让人以为「拖了画面变、直方图不变」是 bug */}
+      <PendingNote text={t("editor.panel.histogramSooc")} />
     </>
   );
 }

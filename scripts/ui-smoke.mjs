@@ -1995,6 +1995,55 @@ try {
     }
   }
 
+  /*
+   * 编辑右栏：动态反差那根杆**只许出现一次**，且住在总览页的直方图下面。
+   *
+   * 为什么值得一条断言（`AGENTS.md` §2.12）：它是「同一个东西两种表达」的高发区 ——
+   * 参数表里它归「影调」，但人类 2026-09-24 定它**暂时**挂在总览页；两处都渲染就是 bug。
+   * 浏览器里没有库也没选中照片，但编辑右栏仍然要画出来（空态是「还没有选中照片」）。
+   * 跑完**切回导入**：后面的左列断言找的是导入左列的「最近 / 来源」两个 pane。
+   */
+  const editorPanel = await evaluate(`(async () => {
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const label = (text) =>
+      [...document.querySelectorAll("label,button,[role=tab]")].find(
+        (n) => (n.textContent || "").trim() === text,
+      );
+    const edit = label("编辑") ?? label("Edit");
+    if (!edit) return null;
+    edit.click();
+    await sleep(900);
+    const panels = document.querySelector("[data-editor-panels]");
+    const text = (panels?.innerText ?? "").replace(/\\s+/g, " ");
+    const occurrences = (text.match(/动态反差|Dynamic Contrast/g) ?? []).length;
+    const sliderIndex = text.search(/动态反差|Dynamic Contrast/);
+    const groupIndex = text.search(/影调|Tone/);
+    const histogramIndex = text.search(/直方图|Histogram/);
+    (label("导入") ?? label("Import"))?.click();
+    await sleep(400);
+    return {
+      hasPanels: panels !== null,
+      occurrences,
+      sliderIndex,
+      groupIndex,
+      histogramIndex,
+    };
+  })()`);
+  if (editorPanel && editorPanel.hasPanels) {
+    if (editorPanel.occurrences !== 1) {
+      problems.push(
+        `编辑右栏里「动态反差」出现了 ${editorPanel.occurrences} 次（应当恰好 1 次，` +
+          "同一根杆不许两处渲染）",
+      );
+    }
+    if (editorPanel.histogramIndex >= 0 && editorPanel.sliderIndex < editorPanel.histogramIndex) {
+      problems.push("「动态反差」不在直方图下面（人类 2026-09-24 定的临时位置）");
+    }
+    if (editorPanel.groupIndex >= 0 && editorPanel.sliderIndex > editorPanel.groupIndex) {
+      problems.push("「动态反差」跑到参数组页签里去了（同一根杆不许两处渲染）");
+    }
+  }
+
   const leftColumn = await evaluate(`(async () => {
     const rect = (el) => el.getBoundingClientRect();
     const titleOf = (pane) => {

@@ -39,6 +39,9 @@ export type ParamOrigin = "center" | "start";
 /** 默认值的来源（与 Rust 侧 `Baseline` 同一套值）。 */
 export type ParamBaseline = "static" | "as-shot";
 
+/** 这根杆住在哪（纯界面概念，不进契约文件）。 */
+export type ParamPlacement = "panel" | "overview";
+
 export interface ParamSpec {
   id: string;
   labelKey: MessageKey;
@@ -61,6 +64,14 @@ export interface ParamSpec {
   wired: boolean;
   /** 默认值从哪来（色温是 `as-shot`：随照片的元数据走）。 */
   baseline: ParamBaseline;
+  /**
+   * 这根杆住在哪：`panel` = 参数组页签里；`overview` = 总览页的直方图下面。
+   *
+   * 人类 2026-09-24 定：动态反差**暂时**挂在直方图下面、不占单独的面板块。
+   * 同一根杆只能出现一次 —— 所以 `paramsInGroup` 必须把 `overview` 的排除掉，
+   * 否则「同一个东西两种表达」就是 bug（`AGENTS.md` §2.12）。
+   */
+  placement: ParamPlacement;
   /** 两端是否显示极值。不显示时**槽位仍然保留**（否则同一列轨道会左右不齐）。 */
   limits: boolean;
   /** 小数位（值文本用） */
@@ -102,6 +113,8 @@ interface Decoration {
   unit?: string;
   minLabel?: string;
   maxLabel?: string;
+  /** 不写 = `panel`（参数组页签里） */
+  placement?: ParamPlacement;
 }
 
 const DECORATIONS: Record<string, Decoration> = {
@@ -109,6 +122,13 @@ const DECORATIONS: Record<string, Decoration> = {
   contrast: { group: "tone", labelKey: "editor.param.contrast", decimals: 0 },
   highlights: { group: "tone", labelKey: "editor.param.highlights", decimals: 0 },
   blacks: { group: "tone", labelKey: "editor.param.blacks", decimals: 0 },
+  // 归在影调组，但**暂时**住在总览页的直方图下面（人类 2026-09-24 定）
+  dynamicContrast: {
+    group: "tone",
+    labelKey: "editor.param.dynamicContrast",
+    decimals: 0,
+    placement: "overview",
+  },
   temperature: {
     group: "color",
     labelKey: "editor.param.temperature",
@@ -157,6 +177,7 @@ export const PARAMS: readonly ParamSpec[] = CONTRACT.params.map((param) => {
     id: param.id,
     labelKey: decoration.labelKey,
     group: decoration.group,
+    placement: decoration.placement ?? "panel",
     min: param.min,
     max: param.max,
     step: param.step,
@@ -180,9 +201,14 @@ export const PARAM_CONTRACT_VERSION: number = CONTRACT.version;
 /** 装饰表里没被契约覆盖的 id（测试用：两边必须一一对应）。 */
 export const DECORATED_IDS: readonly string[] = Object.keys(DECORATIONS);
 
-/** 某一组的参数（右栏按页签取）。 */
+/** 某一组的参数（右栏按页签取）—— **不含**寄居在别处的（`placement: "overview"`）。 */
 export function paramsInGroup(group: ParamGroup): readonly ParamSpec[] {
-  return PARAMS.filter((param) => param.group === group);
+  return PARAMS.filter((param) => param.group === group && param.placement === "panel");
+}
+
+/** 寄居在别处的参数（总览页直方图下面那根）—— 与 `paramsInGroup` 互斥，合起来是全集。 */
+export function paramsInOverview(): readonly ParamSpec[] {
+  return PARAMS.filter((param) => param.placement === "overview");
 }
 
 /** 按 id 取口径。 */
@@ -302,6 +328,7 @@ export const ANGLE_SPEC: ParamSpec = {
   id: "angle",
   labelKey: "editor.rotate.angle",
   group: "tone",
+  placement: "panel",
   min: -360,
   max: 360,
   step: 0.1,

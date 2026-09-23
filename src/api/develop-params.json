@@ -17,6 +17,7 @@
     { "id": "contrast", "min": -100, "max": 100, "step": 1, "default": 0, "origin": "center", "wired": true, "baseline": "static" },
     { "id": "highlights", "min": -100, "max": 100, "step": 1, "default": 0, "origin": "center", "wired": true, "baseline": "static" },
     { "id": "blacks", "min": -100, "max": 100, "step": 1, "default": 0, "origin": "center", "wired": true, "baseline": "static" },
+    { "id": "dynamicContrast", "min": 0, "max": 100, "step": 1, "default": 0, "origin": "start", "wired": true, "baseline": "static" },
 
     { "id": "temperature", "min": 2500, "max": 10000, "step": 50, "default": 6250, "origin": "center", "wired": true, "baseline": "as-shot" },
     { "id": "saturation", "min": -100, "max": 100, "step": 1, "default": 0, "origin": "center", "wired": true, "baseline": "static" },
