@@ -231,11 +231,7 @@ export function TilesControlBar(input: TilesControlBarComponentProps) {
         onClick={props.onInfoToggle}
         class={[
           "flex h-6 shrink-0 cursor-pointer items-center gap-1 rounded-ui px-1.5 text-fs-1 transition-colors",
-          props.infoMode === "marks-name"
-            ? "bg-state-selected text-fg-1"
-            : props.infoMode === "marks"
-              ? "bg-state-hover text-fg-1"
-              : "text-fg-2 hover:bg-state-hover hover:text-fg-1",
+          infoButtonClass(props.infoMode),
         ].join(" ")}
       >
         <IconInfoCircle size={16} aria-hidden="true" />
@@ -267,8 +263,10 @@ export function TilesControlBar(input: TilesControlBarComponentProps) {
         endIcon={<IconZoomIn size={14} />}
         class="w-40 shrink-0"
       />
+      {/* 横向适合窗口（稳定测试钩子：与 `data-tiles-control-bar` / `data-tile-info` / `data-sort` 同一条规矩） */}
       <button
         type="button"
+        data-tiles-fit-row
         aria-label={t("grid.fit_row")}
         title={t("grid.fit_row")}
         onClick={props.onFitRow}
@@ -278,6 +276,16 @@ export function TilesControlBar(input: TilesControlBarComponentProps) {
       </button>
     </BarFrame>
   );
+}
+
+/**
+ * `信息`按钮的底色：三态各一档（关 / 只标记 / 标记+文件名）。
+ * 写成函数而不是嵌套三元 —— 三个档位一眼能对上是哪个。
+ */
+function infoButtonClass(mode: TileInfoMode): string {
+  if (mode === "marks-name") return "bg-state-selected text-fg-1";
+  if (mode === "marks") return "bg-state-hover text-fg-1";
+  return "text-fg-2 hover:bg-state-hover hover:text-fg-1";
 }
 
 /**
@@ -298,21 +306,24 @@ function BarFrame(props: {
    * ## 为什么（2026-09-23 真机排查，别再删这一行）
    *
    * `{props.children}` 会被 Solid 编译成 `insert(el, () => props.children)` ——
-   * 那是一个 **render effect**，不是一次性插入；而 `props.children` 的 getter
-   * 每求值一次就把里面的 `createComponent(...)` **重新跑一遍**（含 Ark Slider 的实例）。
+   * 那是一个 **render effect**，不是一次性插入；而 children 的 getter 每求值一次，
+   * 里面的 `createComponent(...)` 就重跑一遍。
    *
-   * 于是：只要「创建 children 期间被读到的任何信号」变了，整排子节点就被重建。
+   * 于是：**「创建 children 期间被读到的任何信号」都成了「重建整棵子树」的开关**。
    * 这条栏上正好有一个：Ark 的 `SliderRoot` 用 `createSplitProps()` **同步**读走
    * `props.value`（= `tileStep`）—— 那次读被记在了上面那个 render effect 头上。
-   * 后果就是人类报的「缩放杆拖一格就断」：值一变 → 整条栏重建 → 正在拖的
-   * Ark Slider 实例被换掉 → 拖动与焦点一起丢。
+   * 后果就是人类报的「缩放杆拖一格就断」：值一变 → 整条栏重建 →
+   * 正在拖的 Ark Slider 实例被换掉 → 拖动与焦点一起丢。
    *
-   * 同理可推：**任何包装组件把 children 透传出去时都要 untrack 一次** ——
-   * 少这一句，子组件创建期读到的信号就成了「重建整棵子树」的开关。
+   * ⚠️ **untrack 要写在插入点这一行**（`{untrack(() => props.children)}`），
+   * **别**提到组件 body 里去提前求值：Solid 的 `useContext` 按「创建时的 owner 链」查找，
+   * 提前造出来的子节点就落在这个组件自己返回的 Provider **之外**了
+   *（`TilesShell` 里真踩过：拖动修好了，「横向适合窗口」按钮却按不动了）。
+   *
+   * 同理可推：**任何包装组件把 children 透传出去时都要就地 untrack 一次**。
    * 诊断办法：`insert`/`insertBefore` 钩子 + `element === 上次那个元素` 的身份比对
-   *（见 `scripts/check-browse-boot.mjs` 里那条拖动回归）。
+   *（见 `scripts/check-browse-boot.mjs` 里那两条拖动 / 自动宽度回归）。
    */
-  const children = untrack(() => props.children);
   return (
     <div
       class={[
@@ -324,7 +335,7 @@ function BarFrame(props: {
       data-tiles-control-bar
       data-tiles-bar-mode={props.mode}
     >
-      {children}
+      {untrack(() => props.children)}
     </div>
   );
 }

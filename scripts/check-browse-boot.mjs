@@ -1347,6 +1347,162 @@ try {
     }
   }
 
+  /*
+   * 「横向适合窗口」（自动宽度）：点一下必须真的把当前行铺满。
+   *
+   * 这是上一条拖动回归的**另一面**（`AGENTS.md` §2.17 的 A / B 两面）：
+   * 把 children 提到 `TilesFitRequestContext.Provider` 外面去 `untrack`（写在组件 body 里），
+   * 网格的 `useTilesFitRequest()` 就拿到 `undefined`，这个按钮按下去毫无反应 ——
+   * 而那正是「修好拖动」的代价（2026-09-23 真踩过）。所以两条断言必须成对存在。
+   *
+   * 判据用**首行宽度 vs 容器宽度**（与 gap / 密度令牌无关，量的是同一件事实）：
+   * 首行满格时，它的宽度应当正好等于网格可用宽度。档位被夹到两端（0 / 16）时本来
+   * 就铺不满（尺寸到极限了），那种情形跳过。
+   *
+   * ⚠️ **先把档位挪开再点**（点轨道左端 = 最小值）：上一轮如果已经把它调成了合适值，
+   * 「点了没反应」也能蒙对（档位本来就在合适位置上）—— 那是假绿。
+   */
+  const zoomTrack = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const control = document.querySelector(
+        'main [data-tiles-control-bar] [data-scope="slider"][data-part="control"]',
+      );
+      if (control === null) return null;
+      const box = control.getBoundingClientRect();
+      const thumb = document.querySelector('main [data-tiles-control-bar] [role="slider"]');
+      return {
+        left: box.left,
+        width: box.width,
+        y: Math.round(box.top + box.height / 2),
+        step: Number(thumb?.getAttribute("aria-valuenow") ?? NaN),
+      };
+    })()`,
+    returnByValue: true,
+  });
+  const track = zoomTrack.result?.value ?? null;
+  if (track === null) {
+    problems.push("找不到缩放滑块的轨道（量不到 control）");
+  } else {
+    const clickTrackAt = async (x) => {
+      await send("Input.dispatchMouseEvent", {
+        type: "mousePressed",
+        button: "left",
+        buttons: 1,
+        clickCount: 1,
+        x: Math.round(x),
+        y: track.y,
+      });
+      await send("Input.dispatchMouseEvent", {
+        type: "mouseReleased",
+        button: "left",
+        buttons: 0,
+        clickCount: 1,
+        x: Math.round(x),
+        y: track.y,
+      });
+      await sleep(120);
+    };
+    const readStep = async () => {
+      const value = await send("Runtime.evaluate", {
+        expression: `Number(document.querySelector('main [data-tiles-control-bar] [role="slider"]')?.getAttribute("aria-valuenow") ?? NaN)`,
+        returnByValue: true,
+      });
+      return Number(value.result?.value);
+    };
+
+    /* ① 挪到最小档（轨道左端）—— 保证下面那次「适合窗口」不是空跑 */
+    await clickTrackAt(track.left + 2);
+    const movedToMin = await readStep();
+    if (!(movedToMin <= 0.5)) {
+      problems.push(`点缩放轨道左端应当把档位拉到最小（实测 ${movedToMin}）`);
+    }
+
+    /* ② 点「横向适合窗口」 */
+    const fitButton = await send("Runtime.evaluate", {
+      expression: `(() => {
+        const button = document.querySelector("main [data-tiles-fit-row]");
+        if (button === null) return null;
+        const box = button.getBoundingClientRect();
+        return { x: Math.round(box.left + box.width / 2), y: Math.round(box.top + box.height / 2) };
+      })()`,
+      returnByValue: true,
+    });
+    const fitAt = fitButton.result?.value ?? null;
+    if (fitAt === null) {
+      problems.push("状态条上找不到「横向适合窗口」按钮（[data-tiles-fit-row]）");
+    } else {
+      await send("Input.dispatchMouseEvent", {
+        type: "mousePressed",
+        button: "left",
+        buttons: 1,
+        clickCount: 1,
+        x: fitAt.x,
+        y: fitAt.y,
+      });
+      await send("Input.dispatchMouseEvent", {
+        type: "mouseReleased",
+        button: "left",
+        buttons: 0,
+        clickCount: 1,
+        x: fitAt.x,
+        y: fitAt.y,
+      });
+      await sleep(300);
+    const fitted = await send("Runtime.evaluate", {
+      expression: `(() => {
+        const scroller = document.querySelector("main [data-virtual-scroller]");
+        const tiles = [...(scroller?.querySelectorAll('[role="option"]') ?? [])];
+        if (!scroller || tiles.length === 0) return null;
+        const style = getComputedStyle(scroller);
+        const padding =
+          (Number.parseFloat(style.paddingLeft) || 0) + (Number.parseFloat(style.paddingRight) || 0);
+        const inner = scroller.clientWidth - padding;
+        const box = (el) => el.getBoundingClientRect();
+        const top = Math.round(box(tiles[0]).top);
+        const firstRow = tiles.filter((tile) => Math.round(box(tile).top) === top);
+        const first = box(firstRow[0]);
+        const last = box(firstRow[firstRow.length - 1]);
+        const rowWidth = last.right - first.left;
+        const step = Number(
+          document
+            .querySelector('main [data-tiles-control-bar] [role="slider"]')
+            ?.getAttribute("aria-valuenow") ?? NaN,
+        );
+        return {
+          inner,
+          rowWidth,
+          cell: first.width,
+          rowTiles: firstRow.length,
+          /* 还有下一行 ⇒ 这一行是满的（分栏就是按满行切的） */
+          full: tiles.length > firstRow.length,
+          step,
+          delta: Math.abs(rowWidth - inner),
+        };
+      })()`,
+      returnByValue: true,
+    });
+    const fit = fitted.result?.value ?? null;
+    if (fit === null) {
+      problems.push("点了「横向适合窗口」之后量不到网格几何");
+    } else if (fit.step !== 0 && fit.step !== 16 && fit.full && !(fit.delta <= 1.5)) {
+      problems.push(
+        `「横向适合窗口」应当把当前行铺满（容器 ${fit.inner}px，首行 ${fit.rowTiles} 格 × ${fit.cell.toFixed(1)}px = ${fit.rowWidth.toFixed(1)}px，差 ${fit.delta.toFixed(1)}px）—— 差得多 = 网格没收到 fit 请求（TilesShell 的 context 丢了）`,
+      );
+    }
+
+    /* ③ 还原档位（点轨道上原档位对应的位置）—— 别把状态留给后面那些几何 / 信息条断言 */
+      if (Number.isFinite(zoomStart.value)) {
+        await clickTrackAt(track.left + (zoomStart.value / 16) * track.width);
+        const restored = await readStep();
+        if (!(Math.abs(restored - zoomStart.value) <= 0.5)) {
+          problems.push(
+            `点轨道还原档位应当回到起点附近（起点 ${zoomStart.value}，实测 ${restored}）`,
+          );
+        }
+      }
+    }
+  }
+
   // 数字键打星（只在网格里生效）
   await send("Runtime.evaluate", {
     expression: `window.dispatchEvent(new KeyboardEvent("keydown", { key: "3", bubbles: true, cancelable: true }))`,
