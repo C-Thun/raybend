@@ -429,6 +429,7 @@ let dev = !custom_protocol;        // ← dev 由 feature 决定，不是 debug/
   2. 覆盖层（蒙版、裁剪柄、直方图采样框等）使用 Rust 提供的**同一变换矩阵**，禁止前端自行推导像素对齐。
   3. WGSL 源码与 uniform 结构体属于 Rust crate，前端不接触像素格式与色彩空间。
 - **分类使用**：Library/网格视图用 DOM 虚拟化（webview 内，便于选中/键盘/拖拽）；Develop 视口用原生 wgpu 直绘。
+- **透明链是硬约束（2026-09-24 血泪）**：wgpu 直绘在 webview **底下**，所以洞口之上（一直到 `html` / `body`）**任何一层都不能有底色**。`html` / `body` 必须**常驻透明**（`index.css` 里显式写 `transparent` —— `color-scheme: dark` 下「没有背景」的画布会被刷成不透明的默认深色），底色由各页面自己的根容器画。W2 只做了「根 div → main → 洞口」、漏了 `html/body` → 编辑器视口**从来没出过图**（spike 页在 JS 里自己置了透明所以看着正常）。冒烟有断言盯着这两层。
 - **风险与退路**：Tauri 官方未一级支持「webview 上叠加原生 GPU 内容」（相关 issue #8246、#13740），但社区已有多例可用实现（RapidRAW 的 WGPU 直绘、`clearlysid/tauri-wgpu-cam`）。若 Windows 上出现不可解的合成/DWM 问题，退路是切换 Tauri 的 CEF 运行时（自带宽高一致的 Chromium），已登记 `FUTURE.md`。
 - 色彩管理**预留不做**：第一阶段只保证 SDR 下不变形，ICC/HDR 在后期里程碑接入。
 - **坐标契约（原生视口开工前必读）**：见 §7.9 与 `docs/native-viewport-coordinate-guide.md`。
