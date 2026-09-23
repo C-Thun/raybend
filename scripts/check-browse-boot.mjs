@@ -1410,6 +1410,97 @@ try {
       return Number(value.result?.value);
     };
 
+    /*
+     * 「铺满」的判据（两种情形共用**一份**实现，§2.12）：
+     *
+     * 网格量宽度的口径 = 外层容器 `clientWidth` − padding − **右侧滚动条占位**，所以
+     * **可用宽** = 有滚动条 ? 可见宽 : 可见宽 − 预留宽（人类 2026-09-23 定的口径：不管有没有
+     * 滚动条，右边一律留出滚动条宽度，左边保留边距）。铺满的定义（`lib/tile-flow.ts`）：
+     * 列数 = `floor((可用宽 + gap) / (格宽 + gap))`，格宽 = `(可用宽 − (列数−1)×gap) / 列数`。
+     *
+     * ⚠️ 判据落在**格宽**上而不是「首行宽度」：照片少时一行放得下全部（`full:false`），
+     * 那种情形行宽天然铺不满 —— 只比行宽会把这类情形整段跳过（初版就这么漏了一回）。
+     */
+    const MEASURE_FIT = `(() => {
+      const scroller = document.querySelector("main [data-virtual-scroller]");
+      const tiles = [...(scroller?.querySelectorAll('[role="option"]') ?? [])];
+      if (!scroller || tiles.length === 0) return null;
+      const root = getComputedStyle(document.documentElement);
+      const token = (name) => Number.parseFloat(root.getPropertyValue(name)) || 0;
+      /*
+       * 真实滚动条宽度：**实测**（造一个强制出滚动条的探针），不读 --scrollbar-w 令牌 ——
+       * 全局的 scrollbar-width: thin 在 Chromium 里盖过 ::-webkit-scrollbar 的 width 声明，
+       * 生效的是 thin 宽度（10px），令牌写的是 8px。
+       */
+      const probe = document.createElement("div");
+      probe.style.cssText =
+        "position:absolute;top:-9999px;left:0;width:100px;height:100px;overflow:scroll";
+      document.body.appendChild(probe);
+      const probed = probe.offsetWidth - probe.clientWidth;
+      probe.remove();
+      const style = getComputedStyle(scroller);
+      const padding =
+        (Number.parseFloat(style.paddingLeft) || 0) + (Number.parseFloat(style.paddingRight) || 0);
+      const box = (el) => el.getBoundingClientRect();
+      const top = Math.round(box(tiles[0]).top);
+      const firstRow = tiles.filter((tile) => Math.round(box(tile).top) === top);
+      const first = box(firstRow[0]);
+      const last = box(firstRow[firstRow.length - 1]);
+      const step = Number(
+        document
+          .querySelector('main [data-tiles-control-bar] [role="slider"]')
+          ?.getAttribute("aria-valuenow") ?? NaN,
+      );
+      return {
+        inner: scroller.clientWidth - padding,
+        reserved: probed > 0 ? probed : token("--scrollbar-w"),
+        gap: token("--gap"),
+        /* offsetWidth 减 clientWidth 就是经典滚动条占掉的那一竖条（没有就是 0） */
+        actual: scroller.offsetWidth - scroller.clientWidth,
+        hasScrollbar: scroller.offsetWidth - scroller.clientWidth > 1,
+        rowWidth: last.right - first.left,
+        cell: first.width,
+        rowTiles: firstRow.length,
+        full: tiles.length > firstRow.length,
+        step,
+      };
+    })()`;
+
+    const checkFit = (label, measured) => {
+      if (measured === null) {
+        problems.push(`${label}：量不到网格几何`);
+        return;
+      }
+      /* 有滚动条时 `actual` 就是真值（量的是真滚动条），没有时用探针实测值 */
+      const reserved = measured.actual > 1 ? measured.actual : measured.reserved;
+      const usable = measured.hasScrollbar ? measured.inner : measured.inner - reserved;
+      /* ① 硬要求：不能被滚动条切 */
+      if (measured.rowWidth > measured.inner + 1.5) {
+        problems.push(
+          `${label}：行铺到滚动条底下了（可见宽 ${measured.inner}px，首行实测 ${measured.rowWidth.toFixed(1)}px）`,
+        );
+      }
+      /* ② 铺满的定义（与首行满不满无关）；档位夹到两端时目标超出 17 档范围，跳过 */
+      if (measured.step !== 0 && measured.step !== 16) {
+        const columns = Math.max(
+          1,
+          Math.floor((usable + measured.gap) / (measured.cell + measured.gap)),
+        );
+        const wantCell = (usable - (columns - 1) * measured.gap) / columns;
+        if (Math.abs(measured.cell - wantCell) > 0.5) {
+          problems.push(
+            `${label}：格宽不符「铺满」定义（${measured.hasScrollbar ? "有" : "无"}滚动条 ⇒ 可用宽 ${usable.toFixed(1)}px / ${columns} 列 ⇒ 应为 ${wantCell.toFixed(1)}px，实测 ${measured.cell.toFixed(1)}px；预留宽 ${reserved}px）`,
+          );
+        }
+      }
+      /* ③ 首行满格时，行宽也必须等于可用宽 */
+      if (measured.full && Math.abs(measured.rowWidth - usable) > 1.5) {
+        problems.push(
+          `${label}：首行没铺满（可用宽 ${usable.toFixed(1)}px，首行实测 ${measured.rowWidth.toFixed(1)}px）`,
+        );
+      }
+    };
+
     /* ① 挪到最小档（轨道左端）—— 保证下面那次「适合窗口」不是空跑 */
     await clickTrackAt(track.left + 2);
     const movedToMin = await readStep();
@@ -1448,47 +1539,74 @@ try {
         y: fitAt.y,
       });
       await sleep(300);
-    const fitted = await send("Runtime.evaluate", {
-      expression: `(() => {
-        const scroller = document.querySelector("main [data-virtual-scroller]");
-        const tiles = [...(scroller?.querySelectorAll('[role="option"]') ?? [])];
-        if (!scroller || tiles.length === 0) return null;
-        const style = getComputedStyle(scroller);
-        const padding =
-          (Number.parseFloat(style.paddingLeft) || 0) + (Number.parseFloat(style.paddingRight) || 0);
-        const inner = scroller.clientWidth - padding;
-        const box = (el) => el.getBoundingClientRect();
-        const top = Math.round(box(tiles[0]).top);
-        const firstRow = tiles.filter((tile) => Math.round(box(tile).top) === top);
-        const first = box(firstRow[0]);
-        const last = box(firstRow[firstRow.length - 1]);
-        const rowWidth = last.right - first.left;
-        const step = Number(
-          document
-            .querySelector('main [data-tiles-control-bar] [role="slider"]')
-            ?.getAttribute("aria-valuenow") ?? NaN,
-        );
-        return {
-          inner,
-          rowWidth,
-          cell: first.width,
-          rowTiles: firstRow.length,
-          /* 还有下一行 ⇒ 这一行是满的（分栏就是按满行切的） */
-          full: tiles.length > firstRow.length,
-          step,
-          delta: Math.abs(rowWidth - inner),
-        };
-      })()`,
-      returnByValue: true,
-    });
-    const fit = fitted.result?.value ?? null;
-    if (fit === null) {
-      problems.push("点了「横向适合窗口」之后量不到网格几何");
-    } else if (fit.step !== 0 && fit.step !== 16 && fit.full && !(fit.delta <= 1.5)) {
-      problems.push(
-        `「横向适合窗口」应当把当前行铺满（容器 ${fit.inner}px，首行 ${fit.rowTiles} 格 × ${fit.cell.toFixed(1)}px = ${fit.rowWidth.toFixed(1)}px，差 ${fit.delta.toFixed(1)}px）—— 差得多 = 网格没收到 fit 请求（TilesShell 的 context 丢了）`,
-      );
-    }
+      const fitted = await send("Runtime.evaluate", {
+        expression: MEASURE_FIT,
+        returnByValue: true,
+      });
+      checkFit("「横向适合窗口」", fitted.result?.value ?? null);
+
+    /*
+     * ④ 有滚动条的情形 —— 人类报的就是这一条：「铺满」算出来的最后一列被滚动条切了。
+     * 把滚动容器压矮逼出滚动条（`max-height` 对 flex 项有效），再点一次「横向适合窗口」：
+     * 这次必须**贴着滚动条但不被切**（有滚动条时右边不再多留空带）。
+     * 逼不出滚动条就跳过（不是产品问题，是这一招没生效）。
+     */
+      await send("Runtime.evaluate", {
+        expression: `(() => {
+          const scroller = document.querySelector("main [data-virtual-scroller]");
+          if (scroller) scroller.style.maxHeight = "100px";
+        })()`,
+        returnByValue: true,
+      });
+      await sleep(250);
+      const squeezed = await send("Runtime.evaluate", {
+        expression: `(() => {
+          const scroller = document.querySelector("main [data-virtual-scroller]");
+          const button = document.querySelector("main [data-tiles-fit-row]");
+          if (!scroller || !button) return null;
+          const box = button.getBoundingClientRect();
+          return {
+            hasScrollbar: scroller.offsetWidth - scroller.clientWidth > 1,
+            x: Math.round(box.left + box.width / 2),
+            y: Math.round(box.top + box.height / 2),
+          };
+        })()`,
+        returnByValue: true,
+      });
+      const squeezedState = squeezed.result?.value ?? null;
+      if (squeezedState?.hasScrollbar === true) {
+        await send("Input.dispatchMouseEvent", {
+          type: "mousePressed",
+          button: "left",
+          buttons: 1,
+          clickCount: 1,
+          x: squeezedState.x,
+          y: squeezedState.y,
+        });
+        await send("Input.dispatchMouseEvent", {
+          type: "mouseReleased",
+          button: "left",
+          buttons: 0,
+          clickCount: 1,
+          x: squeezedState.x,
+          y: squeezedState.y,
+        });
+        await sleep(300);
+        const withBar = await send("Runtime.evaluate", {
+          expression: MEASURE_FIT,
+          returnByValue: true,
+        });
+        checkFit("「横向适合窗口」（压矮逼出滚动条后）", withBar.result?.value ?? null);
+      }
+      /* 松开压矮，恢复原样 */
+      await send("Runtime.evaluate", {
+        expression: `(() => {
+          const scroller = document.querySelector("main [data-virtual-scroller]");
+          if (scroller) scroller.style.maxHeight = "";
+        })()`,
+        returnByValue: true,
+      });
+      await sleep(200);
 
     /* ③ 还原档位（点轨道上原档位对应的位置）—— 别把状态留给后面那些几何 / 信息条断言 */
       if (Number.isFinite(zoomStart.value)) {

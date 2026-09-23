@@ -35,6 +35,7 @@ import { IconCalendar } from "@tabler/icons-solidjs";
 import { Tile } from "../../components/ui/Tile.tsx";
 import { VirtualGrid } from "../../components/ui/VirtualGrid.tsx";
 import { createTokenPx } from "../../components/ui/tokens.ts";
+import { measureScrollbarWidth } from "../../lib/scrollbar.ts";
 import { useTilesFitRequest } from "../../components/ui/tiles/fit.ts";
 import {
   createViewerStore,
@@ -131,6 +132,23 @@ export function PhotoGrid(props: PhotoGridProps): JSX.Element {
   const [width, setWidth] = createSignal(0);
 
   const gap = createTokenPx("--gap", 4);
+  /**
+   * 右侧**滚动条占位**（人类 2026-09-23 定：不做自适应，**留死**）。
+   *
+   * 网格的滚动容器（`[data-virtual-scroller]`）用的是**经典滚动条**（它**占布局宽度**）。
+   * 而量宽度的是它的**外层容器**（`px-2 py-2` 那个 div）：`clientWidth` 把滚动条那一竖条
+   * 也算进去，于是「铺满」算出来的格子会仲到滚动条底下被切（2026-09-23 人类报的那一条）。
+   *
+   * 所以：**不管有没有滚动条，右边一律留出滚动条宽度**。代价是没有滚动条时右边多一条空带 ——
+   * 而那条空带与边距长得一样（轨道本来就是透明的，§6 无边线），换来的是「尺寸不随滚动条
+   * 有无而跳」与「永远不会被滚动条切」。左边那个 8px 边距保留（人类：「左边有边距」）。
+   *
+   * ⚠️ 宽度是**实测**的（`measureScrollbarWidth()`），不是读 `--scrollbar-w` 令牌：
+   * `* { scrollbar-width: thin }` 在 Chromium 里盖过了 `::-webkit-scrollbar { width: … }`，
+   * 真实生效的宽度（本机 10px）与令牌（8px）**不是一个数** —— 按令牌留就会差 2px、
+   * 最后一列仍被切掉一条边（真机量到过）。
+   */
+  const scrollbar = measureScrollbarWidth();
 
   onMount(() => {
     if (!container) return;
@@ -138,7 +156,7 @@ export function PhotoGrid(props: PhotoGridProps): JSX.Element {
       const style = getComputedStyle(container as HTMLDivElement);
       const padding =
         Number.parseFloat(style.paddingLeft) + Number.parseFloat(style.paddingRight);
-      setWidth(Math.max(0, (container?.clientWidth ?? 0) - padding));
+      setWidth(Math.max(0, (container?.clientWidth ?? 0) - padding - scrollbar));
     };
     measure();
     const observer = new ResizeObserver(measure);

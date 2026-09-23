@@ -128,23 +128,40 @@ raybend（中文名**「光伴」**，产品名 `RayBend`）是一个**相片管
       **禁止**启动时临时 `ALTER`、另造迁移通道、静默删库重建；
     - localStorage 等设备级偏好也必须使用**版本化 key + 显式一次性迁移**（例如
       `raybend.display.v1 → v2`），迁移逻辑与测试放在偏好自己的模块里。
-17. **Solid：包装组件透传 children 必须 `untrack` 一次**（人类 2026-09-23 要求「别再出现」）：
-    - `{props.children}` 会被编译成 `insert(el, () => props.children)` —— 那是一个 **render effect**，
+17. **Solid：包装组件透传 children —— `untrack` 必须写在「插入点」，一步错两头坏**（人类 2026-09-23 定：
+    「那个提示要并行说明，这两者的教训」）：
+
+    同一个手法有**两面**，2026-09-23 一天里各踩一次 —— 先踩 A 面，修 A 面时又踩 B 面：
+
+    - **A 面：不 `untrack`（原样写 `{props.children}`）**
+      → `{props.children}` 会被编译成 `insert(el, () => props.children)` —— 那是一个 **render effect**，
       **不是一次性插入**；而 children 的 getter 每求值一次，里面的 `createComponent(...)` 就重跑一遍。
-    - 于是：**「创建 children 期间被读到的任何信号」都成了「重建整棵子树」的开关**。
-      真凶实例（2026-09-23）：Ark 的 `SliderRoot` 用 `createSplitProps()` **同步**读走 `props.value`
+      于是**「创建 children 期间被读到的任何信号」都成了「重建整棵子树」的开关**。
+      真凶实例：Ark 的 `SliderRoot` 用 `createSplitProps()` **同步**读走 `props.value`
       （= tiles 的 `tileStep`）→ 拖动第一格值一变 → 整条状态栏重建 → 正在拖的 Ark Slider 实例
       被换掉 → 「拖一格就断、焦点也丢」。
-    - **规矩**：凡是把 children 透传出去的壳组件（`BarFrame` 这类），一律
-      `const children = untrack(() => props.children)` 再插入。子组件创建期读什么信号都无所谓，
-      重建开关从根上没了。
+    - **B 面：把 `untrack` 提到组件 body 里**（`const children = untrack(() => props.children)`）
+      → children 在本组件返回的 `<XxxContext.Provider>` **之前**就被造出来了，而 Solid 的
+      `useContext` 走的是**「创建时的 owner 链」** —— 子组件于是落在 Provider **外面**，
+      拿到 `undefined`。真凶实例：`TilesShell` 的 children（网格）被提前造 →
+      `PhotoGrid` 的 `useTilesFitRequest()` 拿到 `undefined` → **「横向适合窗口」按钮按了毫无反应**
+      （当时正治着拖动，于是变成「修好一个、按死另一个」）。
+    - **✅ 正解：在插入点就地 untrack** —— `{untrack(() => props.children)}`（就写在 JSX 里那一行）。
+      两个毛病同时消失：重建开关没了（A 面），children 仍在 Provider 的 owner 链里（B 面）。
+    - **规矩**：凡是把 children 透传出去的壳组件（`BarFrame` / `TilesShell` 这类），
+      **一律在插入点 untrack 一次**；**禁止**提到组件 body 里提前求值。
+    - **两面必须成对验**：只验一边就会出现「按下葫芦浮起瓢」。现成回归在
+      `scripts/check-browse-boot.mjs`：
+      * 「缩放滑块拖动」——断言**一路跟手** + 滑块/状态栏/网格**节点身份不变**（A 面）；
+      * 「横向适合窗口」——断言点击后**当前行真的铺满**（= 网格确实收到了 fit 请求，B 面）。
+      两条各自去掉对应的一半就立刻报红（已反面验证）。
     - **判据不能只看「值变了没有」**：重建 + 拿新值重画一遍也会让第一步的值变（假绿）。
-      要断言**节点身份**（`el === 上次那个 el`），并把网格/列表也一起钉住 ——
-      它们被重建就意味着滚动位置与选择丢了。现成回归：`scripts/check-browse-boot.mjs`
-      的「缩放滑块拖动」那一段（去掉 `untrack` 立刻报红，已验证）。
-    - 诊断手法（下次别再从零查）：给 `Node.prototype.insertBefore/appendChild/replaceChild` 挂钩子，
-      只记录「插入目标在关注的容器内」的那些调用并打印 `new Error().stack`；
+      要断言**节点身份**（`el === 上次那个 el`），并把网格/列表一起钉住 ——
+      它们被重建就意味着滚动位置与选择丢了。
+    - **诊断手法**（下次别再从零查）：给 `Node.prototype.insertBefore/appendChild/replaceChild`
+      挂钩子，只记录「插入目标在关注的容器内」的那些调用并打印 `new Error().stack`；
       再配合 `element === 上次那个` 的身份比对，就能定位到是哪一层被重建。
+      B 面更快：在子组件里读一次那个 context，把结果（`yes` / `no`）写到 DOM 属性上看一眼。
 
 ---
 
@@ -784,13 +801,16 @@ IPC 单测（用**真实字段名**反序列化；缺 DPR 必须报错，不许�
   必须复用 `SplitHandle`，并且只把位移量化到同一套 17 档，禁止另存一份自由高度。
 - tiles statusbar 只能由 `TilesShell` 装配。受控滑杆更新配置时不得重建 `TilesControlBar` DOM，
   否则拖动会在第一格之后断掉。
-  **这条 2026-09-23 又犯了一次，所以它现在有硬规则与回归**：
-  * 病根不在滑杆本身 —— `BarFrame` 透传 children 没 `untrack`，Ark 的 `SliderRoot` 创建时
-    **同步**读走了 `props.value`（tileStep），那次读被记在 `insert()` 那个 render effect 头上，
-    值一变整条栏重建（详见 §2.17）；
-  * 回归在 `scripts/check-browse-boot.mjs`（拖动滑块 → 断言一路跟手 + 滑块/状态栏/网格
-    **节点身份不变**）；
-  * 新增「拖拽类」控件时照抄这份判据：**别只断言值变了**。
+  **这条 2026-09-23 又犯了一次，而且修的时候按死了另一个功能 —— 教训成对记在 §2.17**：
+  * A 面：`BarFrame` 透传 children 没 `untrack` → Ark 的 `SliderRoot` 创建时**同步**读走
+    `props.value`（tileStep），那次读被记在 `insert()` 那个 render effect 头上 → 值一变整条栏重建
+    → 缩放杆「拖一格就断」；
+  * B 面：把 `untrack` 提到 `TilesShell` 的组件 body 里 → 网格在 `TilesFitRequestContext.Provider`
+    **外面**被造 → `useTilesFitRequest()` 拿到 `undefined` →「横向适合窗口」按钮按不动
+    （**修好拖动、按死自动宽度**）；
+  * ✅ 正解：`{untrack(() => props.children)}` 写在**插入点**（见 §2.17）；
+  * 回归：`scripts/check-browse-boot.mjs` 的「缩放滑块拖动」+「横向适合窗口」**两段**，
+    分别钉住 A 面与 B 面；新增「拖拽类」控件时照抄这份判据 —— **别只断言值变了**。
 
 ### 11.5 其他常用术语
 
