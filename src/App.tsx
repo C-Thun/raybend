@@ -91,6 +91,19 @@ import { createFilmStripPreferenceStore } from "./lib/film-strip-prefs.ts";
 
 const STARTUP_REPOSITORIES_TIMEOUT_MS = 15_000;
 
+/**
+ * 全屏窗的**画布底色**（给 Rust 设窗口背景色用，防首帧白闪）。
+ *
+ * 与全屏页自己的 `bg-surface-track` **同源**（都是那个令牌），所以不会两边不一致；
+ * 主题切了也不必通知 —— 每次点全屏都重新读一次当前值。
+ */
+function canvasBackground(): string {
+  if (typeof window === "undefined") return "";
+  return getComputedStyle(document.documentElement)
+    .getPropertyValue("--surface-track")
+    .trim();
+}
+
 export default function App() {
   const shell = createShellStore();
   /*
@@ -358,9 +371,11 @@ export default function App() {
     const target = activeWorkspaceActions()?.fullscreenTarget() ?? null;
     if (target === null) return undefined;
     return () => {
-      void openFullscreen(target.items, target.index).catch((error: unknown) => {
-        toast.show({ tone: "danger", message: String(error) });
-      });
+      void openFullscreen(target.items, target.index, canvasBackground()).catch(
+        (error: unknown) => {
+          toast.show({ tone: "danger", message: String(error) });
+        },
+      );
     };
   };
 

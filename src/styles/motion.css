@@ -79,7 +79,11 @@
   animation: rb-watermark-in 200ms ease-out 120ms forwards;
 }
 
-/* 缓慢呼吸：浓度在 0.55 ↔ 0.95 之间来回（不透明度乘在外层的显隐上） */
+/*
+ * 缓慢呼吸：浓度在 0.55 ↔ 0.95 之间来回（不透明度乘在外层的显隐上）
+ *
+ * 现在只给「非载入」的静态水印用（载入态改用下面的流光 —— 两处同时动太啧）。
+ */
 @keyframes rb-watermark-breathe {
   0%,
   100% {
@@ -95,30 +99,49 @@
 }
 
 /*
- * 高光扫过：一条低浓度中性渐变，被水印块自己裁住（宿主给 `overflow: hidden`），
- * 靠 `transform` 扫过 —— 观感是「光缓慢掠过印痕」，而不是一条亮带横穿整个网格。
+ * 载入态的**流光**：一道渐亮的光在**字形与图标本身**上流过。
  *
- * 浓度 14% 是刻意的：再浓就成了「loading 条纹」，与「别抢眼」相抵。
+ * 人类 2026-09-23 明确否掉了旧做法（一条半透明渐变条从整块上扫过）：
+ * 「不是给文字和图案加一个渐变的方块背景，太丑了」—— 要的是光**流过内容**本身。
+ *
+ * 实现：水印内容画**两遍** —— 底下一遍是常态浓度，上面一遍是亮一档的同内容，
+ * 用移动的 `mask-image` 把上面那遍裁成一条扫过的光带。
+ * 于是变亮的是字与图案自己的笔画，而不是盖在它们上面的一块渐变。
+ *
+ * 只动 `mask-position`（合成层内，不触发布局）；`mask` 在 WebView2（Chromium）里可用，
+ * `-webkit-` 前缀一并写上以防旧内核。
  */
-@keyframes rb-watermark-sheen {
-  0% {
-    transform: translateX(-160%);
+@keyframes rb-shimmer-sweep {
+  from {
+    mask-position: 130% 0;
+    -webkit-mask-position: 130% 0;
   }
-  55%,
-  100% {
-    transform: translateX(260%);
+  to {
+    mask-position: -130% 0;
+    -webkit-mask-position: -130% 0;
   }
 }
 
-.rb-watermark-sheen {
-  background-image: linear-gradient(
+.rb-shimmer-mask {
+  /* 遮罩只看 alpha：中间那段不透明就够，颜色取令牌（色值只许写在 tokens.css） */
+  mask-image: linear-gradient(
     100deg,
-    transparent,
-    color-mix(in oklab, var(--fg-1) 14%, transparent),
-    transparent
+    transparent 34%,
+    var(--fg-1) 50%,
+    transparent 66%
   );
-  animation: rb-watermark-sheen 5.2s ease-in-out infinite;
-  will-change: transform;
+  -webkit-mask-image: linear-gradient(
+    100deg,
+    transparent 34%,
+    var(--fg-1) 50%,
+    transparent 66%
+  );
+  mask-size: 220% 100%;
+  -webkit-mask-size: 220% 100%;
+  mask-repeat: no-repeat;
+  -webkit-mask-repeat: no-repeat;
+  animation: rb-shimmer-sweep 1.9s linear infinite;
+  will-change: mask-position;
 }
 
 /*
@@ -138,12 +161,15 @@
     animation: none;
   }
 
-  .rb-watermark-breathe,
-  .rb-watermark-sheen {
+  .rb-watermark-breathe {
     animation: none;
   }
 
-  .rb-watermark-sheen {
+  /*
+   * 流光：**整个高光层去掉**（不是「停住」）。
+   * 停住的话 `mask` 会定在某个位置，等于给字与图案随机挑一块变亮 —— 看着像渲染坏了。
+   */
+  .rb-shimmer-mask {
     display: none;
   }
 }

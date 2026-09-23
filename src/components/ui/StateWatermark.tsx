@@ -11,8 +11,12 @@
  * 所以这个组件的全部视觉手段只有三样：
  *   1. **低浓度**：图标 `--fg-3`、文字 `--fg-2`，整块再乘一道不透明度；
  *   2. **大**：图标 64px、细笔画（`stroke-width=1`）—— 像蚀刻而不是像按钮；
- *   3. **缓慢的动态**（仅载入态）：呼吸 + 一道高光扫过，见 `styles/motion.css`
- *      的「状态水印」一节（那一类动画的时长口径与反馈类不同，别混）。
+ *   3. **缓慢的动态**（仅载入态）：一道光在**字形与图标本身**上流过，见 `styles/motion.css`
+      的「状态水印」一节（那一类动画的时长口径与反馈类不同，别混）。
+ *
+ * ⚠️ **载入态的流光会把内容画两遍**（底下常态一遍、上面亮一档一遍，用移动的 `mask` 裁成光带）：
+ * 所以 `icon` 要传**新造的 JSX**（内联写法 `icon={<IconPhoto size={64} />}`），
+ * 不要传一个存起来的元素对象 —— 那样两遍会抢同一个 DOM 节点。
  *
  * ## 四个语义（同一组件，不拆）
  *
@@ -25,10 +29,12 @@
  *
  * ## 两条实现纪律
  *
- * 1. **延时出现**（`rb-watermark-reveal`，120ms）：载入快的时候（命中缓存/小目录）
+ * 1. **延时出现**（`rb-watermark-reveal`，默认 120ms）：载入快的时候（命中缓存/小目录）
  *    这一段还没画出来就结束了 —— 否则每次打开旧目录都会**闪一帧**水印，
  *    看起来像界面在抖。
- * 2. **动效只包住图标与文字**：`action`（重试）不参与呼吸 ——
+ *    读**大库**这种「可能真慢」的场景可以把 `delayMs` 调到 1500：1.5 秒内出图就
+ *    完全不显示（人类 2026-09-23 定的保底口径）。
+ * 2. **动效只包住图标与文字**：`action`（重试）不参与流光 ——
  *    它是可点的东西，浓度必须稳定在能读、能瞄的状态。
  */
 
@@ -39,8 +45,10 @@ export interface StateWatermarkProps {
   icon: JSX.Element;
   /** 一句话（**已经是译好的文案**，本组件不碰 i18n —— 它属于基础元素层） */
   text: string;
-  /** 载入态：延时出现 + 缓慢呼吸 + 高光扫过。空态 / 提示态不传 */
+  /** 载入态：延时出现 + 流光扫过。空态 / 提示态不传 */
   animate?: boolean;
+  /** 延时出现的毫秒数（只对 `animate` 有意义）。默认 120ms；读大库可给 1500 */
+  delayMs?: number;
   /** 错误态用 `--danger`；其余用次级前景色 */
   tone?: "muted" | "error";
   /** 可选动作（例：重试）。它是**唯一**吃点击的东西 */
@@ -53,6 +61,7 @@ export function StateWatermark(props: StateWatermarkProps) {
     "icon",
     "text",
     "animate",
+    "delayMs",
     "tone",
     "action",
     "class",
@@ -61,6 +70,38 @@ export function StateWatermark(props: StateWatermarkProps) {
   const animate = (): boolean => Boolean(local.animate);
   const toneClass = (): string =>
     local.tone === "error" ? "text-danger" : "text-fg-3";
+
+  /**
+   * 水印内容（图标 + 一句话）。
+   *
+   * `highlight` = true 时是**流光层**那份：颜色亮一档，靠外层 `mask` 只露出光带那一段。
+   * 两遍都由这一个函数造（每次访问 `local.icon` 都是**新的一遍**，见文件头的 ⚠️）。
+   */
+  const content = (highlight: boolean): JSX.Element => (
+    <>
+      <span
+        class={[
+          "flex items-center justify-center",
+          highlight ? "text-fg-1" : toneClass(),
+        ].join(" ")}
+        aria-hidden="true"
+      >
+        {local.icon}
+      </span>
+      <p
+        class={[
+          "max-w-96 text-fs-2 break-words",
+          highlight
+            ? "text-fg-1"
+            : local.tone === "error"
+              ? "text-danger"
+              : "text-fg-2",
+        ].join(" ")}
+      >
+        {local.text}
+      </p>
+    </>
+  );
 
   return (
     <div
@@ -80,36 +121,34 @@ export function StateWatermark(props: StateWatermarkProps) {
           "flex flex-col items-center gap-3 text-center",
           animate() ? "rb-watermark-reveal" : "opacity-90",
         ].join(" ")}
+        // 延时出现：`animation-delay` 内联覆盖掉样式表里那个 120ms（大库用 1500）
+        style={
+          animate() && local.delayMs !== undefined
+            ? { "animation-delay": `${local.delayMs}ms` }
+            : undefined
+        }
       >
         {/*
-          高光要被水印块裁住（`overflow-hidden`），所以图标 + 文字包在一个 relative 里；
-          `rb-watermark-breathe` 也挂在它上面 —— 呼吸只作用于印痕本身，不作用于下面的按钮。
+          图标 + 文字包在 relative 里：流光层要用 `absolute inset-0` 盖在同一位置上。
+          `overflow-hidden` 保证移动的遮罩不会溢出到网格上。
         */}
-        <div
-          class={[
-            "relative flex flex-col items-center gap-3 overflow-hidden px-8 py-1",
-            animate() ? "rb-watermark-breathe" : "",
-          ]
-            .filter(Boolean)
-            .join(" ")}
-        >
-          <span class={["flex items-center justify-center", toneClass()].join(" ")} aria-hidden="true">
-            {local.icon}
-          </span>
-          <p
-            class={[
-              "max-w-96 text-fs-2 break-words",
-              local.tone === "error" ? "text-danger" : "text-fg-2",
-            ].join(" ")}
-          >
-            {local.text}
-          </p>
+        <div class="relative flex flex-col items-center gap-3 overflow-hidden px-8 py-1">
+          {/* 底层：常态浓度（不含任何动画） */}
+          <div class="flex flex-col items-center gap-3">{content(false)}</div>
 
+          {/*
+            流光层（人类 2026-09-23 定）：同一内容再画一遍、颜色亮一档，
+            用移动的 `mask` 裁成一道扫过的光带 —— 变亮的是**字与图案自己的笔画**，
+            而不是盖在它们上面的一块渐变方块（旧做法被否掉的原因）。
+          */}
           <Show when={animate()}>
-            <span
+            <div
               aria-hidden="true"
-              class="rb-watermark-sheen pointer-events-none absolute inset-y-0 start-0 w-1/2"
-            />
+              data-watermark-shimmer="on"
+              class="rb-shimmer-mask pointer-events-none absolute inset-0 flex flex-col items-center gap-3"
+            >
+              {content(true)}
+            </div>
           </Show>
         </div>
 

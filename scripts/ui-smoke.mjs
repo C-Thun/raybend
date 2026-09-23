@@ -1649,6 +1649,48 @@ try {
     }
   }
 
+  /*
+   * 状态水印的**流光**（人类 2026-09-23：不要渐变方块，要光在字与图案上流过）。
+   *
+   * 陈列室里有载入态示例（`delayMs={0}`，立即出现），所以这里能直接量到。
+   * 关键的一条是 **hasIcon**：内容是画两遍的（底下常态一遍、上面亮一档一遍），
+   * 要是哪天有人传了一个存起来的元素对象，图标就会被抢到只剩一遍 —— 这里当场红。
+   */
+  const shimmer = await evaluate(`(() => {
+    const layer = document.querySelector("[data-watermark-shimmer]");
+    if (layer === null) return null;
+    const style = getComputedStyle(layer);
+    return {
+      hasIcon: layer.querySelector("svg") !== null,
+      hasText: (layer.textContent ?? "").trim().length > 0,
+      masked: (style.maskImage ?? style.webkitMaskImage ?? "none") !== "none",
+      animated: (style.animationName ?? "none") !== "none",
+      display: style.display,
+      sheenGone: document.querySelector(".rb-watermark-sheen") === null,
+    };
+  })()`);
+
+  if (shimmer === null) {
+    problems.push(
+      "陈列室里没有载入水印示例（[data-watermark-shimmer] 不在）—— 流光就没人盯着了",
+    );
+  } else {
+    if (!shimmer.hasIcon) {
+      problems.push(
+        "水印流光层里没有图标 —— 内容画两遍时图标被抢走了（不要传存起来的元素对象）",
+      );
+    }
+    if (!shimmer.hasText) problems.push("水印流光层里没有文字");
+    if (!shimmer.masked) problems.push("水印流光层的 mask 没生效（光不会出现在字上）");
+    // display: none 是「系统开了减少动态效果」那条分支，那种情况下静止是对的
+    if (shimmer.display !== "none" && !shimmer.animated) {
+      problems.push("水印流光层没有动画（是静止的）");
+    }
+    if (!shimmer.sheenGone) {
+      problems.push("旧的水印扫光条（.rb-watermark-sheen）还在 DOM 里");
+    }
+  }
+
   const appUrl = new URL("/", url).href;
   await send("Page.navigate", { url: appUrl });
   if (!(await waitForContent(send))) {

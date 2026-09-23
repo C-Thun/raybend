@@ -29,8 +29,10 @@ import {
   IconFolderFilled,
   IconInfoCircle,
   IconPhoto,
+  IconPhotoOff,
   IconPlus,
 } from "@tabler/icons-solidjs";
+import { StateWatermark } from "../components/ui/StateWatermark.tsx";
 import { t } from "../i18n";
 import { LOCALE_IDS, locale, setLocale, type LocaleId } from "../i18n";
 import { createAppearanceStore } from "../lib/appearance";
@@ -981,6 +983,32 @@ export default function KitchenSink() {
 
       <Section title="目录树（通用组件）" note="导入侧可勾选、浏览侧不勾选；双击行名展开/折叠；同一份组件两种配置">
         <DirTreeDemo />
+      </Section>
+
+      {/*
+        状态水印的**载入态**（人类 2026-09-23 定的流光）。
+        这里必须留一个示例：冒烟要在它上面断言「流光层里真的还有图标」——
+        内容是被画两遍的（底下常态一遍、上面亮一档一遍），
+        要是哪天有人传了一个存起来的元素对象，图标就会被抢走、只剩文字。
+        `delayMs={0}`：陈列室里不等那 120ms，立即出现（否则截图/断言会抳空）。
+      */}
+      <Section title="状态水印（载入 / 空 / 错误）" note="载入态的流光在字与图案上流过；空/错误态是静态印痕">
+        <div class="flex flex-col gap-2">
+          <div class="flex h-40 items-center justify-center rounded-ui bg-surface-main">
+            <StateWatermark
+              animate
+              delayMs={0}
+              icon={<IconPhoto size={64} stroke-width={1} />}
+              text="正在载入示例（流光）"
+            />
+          </div>
+          <div class="flex h-40 items-center justify-center rounded-ui bg-surface-main">
+            <StateWatermark
+              icon={<IconPhotoOff size={64} stroke-width={1} />}
+              text="空态示例（静态）"
+            />
+          </div>
+        </div>
       </Section>
 
 </div>

@@ -108,6 +108,7 @@ export const enUS: Record<MessageKey, string> = {
 
  // ── fullscreen viewer (immersive, its own window) ──────
  "fullscreen.empty": "No photo to show",
+ "fullscreen.loading": "Loading",
  "fullscreen.failed": "Could not load this photo",
 
  "common.easy_copy.hint": "Click to copy",

@@ -497,7 +497,10 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
      *
      * `when` 用「真的能开」当判据（工作区给了清单）—— 与 flowbar 那个按钮的
      * 出现条件**同一个读数**，所以不会出现「按钮在、键不灵」或反之。
-     * `F` 没被占用（现有单键：`0/1/-/=/P/U/X/i`）。
+     * **`F11`**（人类 2026-09-23 定：全屏用看图软件的习惯键）——
+     * 未被占用（现有单键 `0/1/-/=/P/U/X/i`），也不是保留键
+     * （保留的只有 `Alt+F4` / `Ctrl+Alt+Delete` / `Ctrl+Shift+Esc`）。
+     * 同时它会自动出现在 `Ctrl+K` 命令面板里（面板直接吃注册表，不用另登记）。
      */
     spec({
       id: "viewer.fullscreen",
@@ -505,7 +508,7 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       group: "view",
       menu: "view",
       scope: "viewer",
-      defaultKey: "F",
+      defaultKey: "F11",
       when: () => deps.viewer.fullscreen() !== undefined,
       run: () => deps.viewer.fullscreen()?.(),
     }),

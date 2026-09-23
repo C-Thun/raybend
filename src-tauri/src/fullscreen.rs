@@ -129,16 +129,34 @@ fn main_window_monitor<R: Runtime>(app: &AppHandle<R>) -> Option<tauri::Monitor>
     }
 }
 
+/// 把窗口摆到主窗口那块屏幕的**整个矩形**上（物理像素）。
+///
+/// 每次打开都要调 —— 用户可能把主窗口拖到另一块屏之后再点全屏，
+/// 「全屏跟着主窗口走」这条口径才是活的。
+fn place_on_main_monitor<R: Runtime>(window: &tauri::WebviewWindow<R>, app: &AppHandle<R>) {
+    let Some(monitor) = main_window_monitor(app) else {
+        return;
+    };
+    let position = monitor.position();
+    let size = monitor.size();
+    let _ = window.set_position(tauri::PhysicalPosition::new(position.x, position.y));
+    let _ = window.set_size(tauri::PhysicalSize::new(size.width, size.height));
+}
+
 /// 打开全屏看图（幂等：已经开着就换图 + 聚焦，不重建窗口）。
 ///
+/// `background` 是前端报的**画布底色**（CSS 颜色串，如 `#17191c`）：拿它设窗口背景色，
+/// 消除 WebView 首帧的**白闪**。解不开不是错误（不设而已），与编辑视口那条上报同一口径。
+///
 /// # Errors
-/// 清单 / 下标非法；或窗口建不起来。
+/// 清单 / 下标非法；或窗口建不起来（且确实没有可复用的窗口）。
 #[tauri::command]
 pub async fn fullscreen_open<R: Runtime>(
     app: AppHandle<R>,
     state: State<'_, FullscreenState>,
     items: Vec<FullscreenItem>,
     index: usize,
+    background: Option<String>,
 ) -> Result<(), String> {
     validate(&items, index)?;
     // 存一份**带新版本号**的清单（页面据此丢弃迟到的旧包）
@@ -147,17 +165,24 @@ pub async fn fullscreen_open<R: Runtime>(
         items,
         index,
     })?;
+    let canvas = background
+        .as_deref()
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .and_then(raybend::render::Srgb8::parse_css);
 
-    // 已经开着：通知页面换图（事件先发 —— 页面订阅着就立刻响应），再把它拿到前面
+    // 已经开着：通知页面换图（事件先发 —— 页面订阅着就立刻响应），再摆位/全屏/拿到前面
     let _ = app.emit(FULLSCREEN_EVENT, &payload);
     if let Some(window) = app.get_webview_window(FULLSCREEN_LABEL) {
+        place_on_main_monitor(&window, &app);
+        let _ = window.set_fullscreen(true);
         let _ = window.show();
         let _ = window.set_focus();
         return Ok(());
     }
 
     let monitor = main_window_monitor(&app);
-    let window = match WebviewWindowBuilder::new(
+    let mut builder = WebviewWindowBuilder::new(
         &app,
         FULLSCREEN_LABEL,
         // 与 spike 页同一种做法：查询串选页，dev 与打包版都不影响资源解析
@@ -168,9 +193,35 @@ pub async fn fullscreen_open<R: Runtime>(
     .resizable(false)
     // 它不是一个「工作窗口」：不出现在任务栏、不抢 Alt+Tab 的位置感
     .skip_taskbar(true)
-    .visible(false)
-    .build()
-    {
+    .visible(false);
+
+    /*
+     * 建窗时就带上目标屏幕的**几何**与**底色**（人类 2026-09-23：「进全屏很慢，
+     * 屏幕一半先黑、再全黑、再出图，中间还有几帧白框闪烁」）：
+     *
+     *   * **几何**：不先给尺寸的话，窗口会以默认尺寸出生在主屏、露一下再被挪到目标屏
+     *     并放大 —— 那两下就是「一半先黑 → 再全黑」；
+     *   * **底色**：WebView 首帧是**白**的，不设背景色就会闪白框。
+     *
+     * 两个都吃**逻辑像素**（builder 的 `position`/`inner_size` 是逻辑值），
+     * 所以用监视器自己的 `scale_factor` 从物理值换过去 —— 这是**原生窗口**坐标系，
+     * 与 WebView 的 DPR 不是同一个量（`AGENTS.md` §7.9），别混。
+     */
+    if let Some(monitor) = &monitor {
+        let scale = monitor.scale_factor();
+        if scale > 0.0 {
+            let position = monitor.position();
+            let size = monitor.size();
+            builder = builder
+                .position(f64::from(position.x) / scale, f64::from(position.y) / scale)
+                .inner_size(f64::from(size.width) / scale, f64::from(size.height) / scale);
+        }
+    }
+    if let Some(canvas) = canvas {
+        builder = builder.background_color(tauri::window::Color(canvas.r, canvas.g, canvas.b, 255));
+    }
+
+    let window = match builder.build() {
         Ok(window) => window,
         Err(error) => {
             /*
@@ -181,6 +232,8 @@ pub async fn fullscreen_open<R: Runtime>(
              * 新页挂载时也会自己读一次），确实不在才把真错报出去。
              */
             if let Some(window) = app.get_webview_window(FULLSCREEN_LABEL) {
+                place_on_main_monitor(&window, &app);
+                let _ = window.set_fullscreen(true);
                 let _ = window.show();
                 let _ = window.set_focus();
                 return Ok(());
@@ -190,16 +243,11 @@ pub async fn fullscreen_open<R: Runtime>(
     };
 
     /*
-     * 先摆到主窗口那块屏幕上，再全屏 —— 顺序不能反：
-     * `set_fullscreen(true)` 是「在窗口当前所在的屏幕上全屏」，先全屏再挪会先闪一下主屏。
-     * 坐标系是**物理像素**（monitor.position/size 就是物理值，别再乘 scale）。
+     * 再摆一次位（`monitor` 取不到时上面那段没跑）与全屏：
+     * `set_fullscreen(true)` 是「在窗口**当前所在**屏幕上全屏」，所以必须在摆位之后调 ——
+     * 顺序反了会先在主屏全屏一下再被挪过去。
      */
-    if let Some(monitor) = monitor {
-        let position = monitor.position();
-        let size = monitor.size();
-        let _ = window.set_position(tauri::PhysicalPosition::new(position.x, position.y));
-        let _ = window.set_size(tauri::PhysicalSize::new(size.width, size.height));
-    }
+    place_on_main_monitor(&window, &app);
     let _ = window.set_fullscreen(true);
     let _ = window.show();
     let _ = window.set_focus();
@@ -219,19 +267,25 @@ pub fn fullscreen_payload(
 
 /// 关掉全屏看图（`Esc` / `Enter` 都走它）。
 ///
-/// 用 [`tauri::WebviewWindow::destroy`] 而不是 `close`：`close` 走「请求关闭」，
-/// 窗口从标签表里消失是**异步**的 —— 而「按 `Esc` 后马上回主窗口再点全屏」是真实动作，
-/// 那一刻 `get_webview_window` 可能还看得到正在死掉的窗口，于是 `fullscreen_open`
-/// 走「复用」分支、什么也不发生（要点第二下）。`destroy` 立即销毁，标签当场释放。
+/// **隐藏，不销毁**（人类 2026-09-23 报「进全屏很慢，没有一按就进去的感觉」）：
+/// 销毁的话下次要重新建窗口 + 重新加载页面（WebView 冷启动几百毫秒），
+/// 隐藏则下次 `show()` 是**瞬间**的 —— 页面、图像缓存、清单都还在。
+/// 代价是一扇闲置的 WebView 常驻内存，换「秒开」值得；它不出现在任务栏，用户看不到。
+///
+/// 顺带解掉一个竞态：不再销毁就没有「标签还在释放中」的窗口，
+/// 也就没有「按 `Esc` 后立刻再点全屏却没反应」那一类问题。
+///
+/// 用 `Alt+F4` / 系统方式关掉时窗口是**真销毁**的 —— 那时下次打开会重新建窗，
+/// `fullscreen_open` 两条路都处理了。
 ///
 /// # Errors
-/// 窗口存在但销毁失败（不存在算成功 —— 幂等）。
+/// 窗口存在但隐藏失败（不存在算成功 —— 幂等）。
 #[tauri::command]
 pub async fn fullscreen_close<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(FULLSCREEN_LABEL) {
         window
-            .destroy()
-            .map_err(|error| format!("关全屏看图窗口失败：{error}"))?;
+            .hide()
+            .map_err(|error| format!("隐藏全屏看图窗口失败：{error}"))?;
     }
     Ok(())
 }

@@ -27,13 +27,24 @@ function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   return coreModule.then((core) => core.invoke<T>(cmd, args));
 }
 
-/** 打开全屏看图（清单 + 当前下标）。Rust 侧会校验：空清单 / 越界直接报错。 */
+/**
+ * 打开全屏看图（清单 + 当前下标 + 画布底色）。
+ *
+ * `background` 是 CSS 颜色串（前端用 `getComputedStyle` 拿的 `--surface-track`）：
+ * Rust 拿它设窗口背景色，消除 WebView 首帧的**白闪**。给不出就不给（不致命）。
+ * Rust 侧会校验：空清单 / 越界直接报错。
+ */
 export async function openFullscreen(
   items: readonly FullscreenItem[],
   index: number,
+  background?: string,
 ): Promise<void> {
   if (!isTauriRuntime()) return;
-  await call<void>("fullscreen_open", { items: [...items], index });
+  await call<void>("fullscreen_open", {
+    items: [...items],
+    index,
+    background: background ?? null,
+  });
 }
 
 /** 关闭全屏看图（幂等：窗口不在也算成功）。 */

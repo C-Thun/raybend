@@ -25,7 +25,8 @@
  * 不在本次范围（真要改就加 `original` 档并同步 Rust 的 `ImagePurpose`）。
  */
 
-import { createSignal, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, createSignal, onCleanup, onMount, Show } from "solid-js";
+import { IconLoader2 } from "@tabler/icons-solidjs";
 
 import { getViewImage } from "../../api/db.ts";
 import {
@@ -46,9 +47,20 @@ export function FullscreenViewer() {
 
   const store = createViewerStore({
     loadScreen: (path) => getViewImage(path, "screen"),
+    /*
+     * 多图 URL 缓存：当前 + 前后各一张预载 = 3 张，给到 6 留余量。
+     * 不加大也能跑，但换图时刚预载好的邻居可能已被挤出去，预载就白做了。
+     */
+    cacheLimit: 6,
   });
 
   const state = () => store.state();
+
+  /**
+   * 「正在载入」：换图那一刻就为真（store 的 `loadFor` 第一件事就是置 `loading`），
+   * 所以遮罩是**立即**出现的，不是等超时。
+   */
+  const busy = (): boolean => store.imageStatus() === "loading";
 
   /**
    * 已应用的清单版本号（初始值 -1 = 一份都还没应用）。
@@ -109,27 +121,48 @@ export function FullscreenViewer() {
     });
     onCleanup(() => dispose?.());
 
+    /*
+     * 窗口被**重新显示**时再读一次清单。
+     *
+     * 为什么需要：`Esc` 只是把窗口隐藏（下次秒开），隐藏期间 WebView 可能被系统挂起，
+     * 那会儿推过来的事件有可能直到重新显示才被处理。重读一次是最便宜的兼底，
+     * 而版本号守卫保证重复应用同一份清单不会出问题（`applyPayload` 里比较 revision）。
+     */
+    const onVisible = (): void => {
+      if (document.visibilityState !== "visible") return;
+      void getFullscreenPayload()
+        .then(applyPayload)
+        .catch(() => {});
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    onCleanup(() => document.removeEventListener("visibilitychange", onVisible));
+
     const onKey = (event: KeyboardEvent): void => {
       switch (event.key) {
         case "Escape":
         case "Enter":
           event.preventDefault();
           /*
-           * `.catch` 是**必须**的：Rust 侧用 `destroy()` 立即销毁本窗口，
-           * 「命令的响应」很可能回不来（窗口已经没了）—— 不接就是一条未处理的拒绝，
+           * `.catch` 是**必须**的：Rust 侧关窗后本窗口就没了，
+           * 「命令的响应」很可能回不来 —— 不接就是一条未处理的拒绝，
            * 在控制台里看着像功能坏了，而其实关窗成功了。
            */
           void closeFullscreen().catch(() => {});
           return;
+        /*
+         * 载入期间**只放 Esc / Enter 走**（人类 2026-09-23：「阻止除了 esc/enter
+         * 退出外的一切操作」）。连按方向键时如果还继续换图，就是在还没看到上一张的
+         * 情况下又发下一张的请求 —— 越按越慢、还什么都看不到。
+         */
         case "ArrowLeft":
         case "PageUp":
           event.preventDefault();
-          store.prev();
+          if (!busy()) store.prev();
           return;
         case "ArrowRight":
         case "PageDown":
           event.preventDefault();
-          store.next();
+          if (!busy()) store.next();
           return;
         default:
       }
@@ -138,7 +171,27 @@ export function FullscreenViewer() {
     onCleanup(() => window.removeEventListener("keydown", onKey));
   });
 
-  /* 滚轮：与主窗口看图**同一份实现**（按帧合并，锚点是鼠标位置） */
+  /*
+   * **前后邻图预载**（人类 2026-09-23：「每浏览一幅图，都在后台对前后两张做预载」）。
+   *
+   * 触发时机是「当前这张已经就绪」—— 不抢当前这张的带宽/解码（RAW 解码在 Rust 侧
+   * 是串行的，先抢只会让正在等的那张更慢）；就绪后它才在后台把邻居拉进 URL 缓存。
+   * 于是连续看图的体验是：第一张等一下，之后每张基本秒开。
+   *
+   * 用的是 store 自己的图像缓存（`ensureImage` 会跳过已在缓存里的），
+   * 所以重复触发是安全的；列表到头/到尾只预载存在的那一侧。
+   */
+  createEffect(() => {
+    if (store.imageStatus() !== "ready") return;
+    const photos = state().photos;
+    const at = state().index;
+    for (const offset of [1, -1]) {
+      const neighbour = photos[at + offset];
+      if (neighbour !== undefined) void store.ensureImage(neighbour);
+    }
+  });
+
+  /* 滚轮：与主窗口看图**同一份实现**（按帧合并，锚点是鼠标位置）；载入期间不响应 */
   const wheel = createWheelZoom({
     resolveAnchor: (event) => {
       const rect = host?.getBoundingClientRect();
@@ -146,7 +199,10 @@ export function FullscreenViewer() {
         ? null
         : { x: event.clientX - rect.left, y: event.clientY - rect.top };
     },
-    apply: (factor, anchor) => store.zoomBy(factor, anchor ?? undefined),
+    apply: (factor, anchor) => {
+      if (busy()) return;
+      store.zoomBy(factor, anchor ?? undefined);
+    },
   });
   onCleanup(wheel.dispose);
 
@@ -154,6 +210,8 @@ export function FullscreenViewer() {
   let dragFrom: { x: number; y: number } | null = null;
 
   function onPointerDown(event: PointerEvent): void {
+    // 载入期间不接拖动（遮罩盖着，但指针事件会冒泡到宿主）
+    if (busy()) return;
     if (event.button !== 0) return;
     dragFrom = { x: event.clientX, y: event.clientY };
     setDragging(true);
@@ -189,7 +247,10 @@ export function FullscreenViewer() {
       onPointerMove={onPointerMove}
       onPointerUp={endDrag}
       onPointerCancel={endDrag}
-      onDblClick={() => store.toggleFit()}
+      onDblClick={() => {
+        if (busy()) return;
+        store.toggleFit();
+      }}
     >
       <Show when={!empty()} fallback={<Hint text={t("fullscreen.empty")} />}>
         <Show when={store.imageUrl()}>
@@ -215,6 +276,26 @@ export function FullscreenViewer() {
         </Show>
         <Show when={store.imageStatus() === "error"}>
           <Hint text={t("fullscreen.failed")} />
+        </Show>
+
+        {/*
+          载入遮罩（人类 2026-09-23）：**无边框毛玻璃框**，中间是浅色字 + 浅色动图
+          + 「载入中」。它要**立即**出现 —— 换图那一下屏幕本来就是空的，
+          没提示就只是「卡了几秒，什么也没有」。
+
+          它同时是**输入闸门**：铺满整屏且 `pointer-events-auto`，鼠标落在它上面
+          （拖动/滚轮/双击的处理器另有 `busy()` 判断，因为事件会冒泡到宿主）。
+        */}
+        <Show when={busy()}>
+          <div
+            class="absolute inset-0 z-30 flex items-center justify-center backdrop-blur-md"
+            data-fullscreen-loading="on"
+          >
+            <div class="flex items-center gap-2 rounded-ui bg-surface-layer/70 px-4 py-2">
+              <IconLoader2 size={16} class="animate-spin text-fg-2" aria-hidden="true" />
+              <span class="text-fs-2 text-fg-1">{t("fullscreen.loading")}</span>
+            </div>
+          </div>
         </Show>
       </Show>
     </div>

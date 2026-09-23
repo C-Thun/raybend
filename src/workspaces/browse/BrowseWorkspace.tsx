@@ -318,8 +318,17 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
     }
     if (store.loading() && store.total() === 0) {
       return (
+        /*
+         * 读库的载入水印（人类 2026-09-23 定）：
+         *
+         *   * 动画就是共享的那套**流光**（光在字与图案上流过，见 `StateWatermark`）；
+         *   * `delayMs` 给 **1500**：读库一般很快（命中会话缓存时几十毫秒），
+         *     给 1.5 秒保底 —— 这期间就出图的话**完全不显示**水印，不闪一帧。
+         *     只有真慢（大库、冷启动、机械盘）才会看到它，那时它是「它在忙」的凭据。
+         */
         <StateWatermark
           animate
+          delayMs={1500}
           icon={<IconPhoto size={64} stroke-width={1} />}
           text={t("browse.loading")}
         />
