@@ -743,6 +743,13 @@ export interface EditorRenderState {
   developMs: number | null;
   /** 最近一次**解码**耗时（毫秒；只有换照片那一次有值） */
   decodeMs: number | null;
+  /**
+   * **图像像素 → 洞口内 CSS 像素**的仿射矩阵 `[a, b, c, d, e, f]`（覆盖层专用）。
+   *
+   * 语义与 CSS 的 `matrix()` 完全一致：`css_x = a·px + c·py + e`。
+   * 覆盖层把子元素写成**图像像素坐标**再整层套上它 —— 视口数学只有 Rust 一份。
+   */
+  overlayTransform: [number, number, number, number, number, number] | null;
   zoom: number;
   panX: number;
   panY: number;

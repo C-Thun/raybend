@@ -315,6 +315,49 @@ impl Viewport {
         ]
     }
 
+    /// **图像像素 → 洞口内 CSS 像素**的仿射变换（覆盖层专用，M3-W3 定契约）。
+    ///
+    /// 返回 `[a, b, c, d, e, f]`，语义与 CSS 的 `matrix()` 完全一致：
+    ///
+    /// ```text
+    /// css_x = a·px + c·py + e
+    /// css_y = b·px + d·py + f
+    /// ```
+    ///
+    /// # 为什么要有它（`AGENTS.md` §6.1 红线 2）
+    ///
+    /// 覆盖层（裁切柄、旋转框、对比分线、将来的蒙版）必须与照片**像素级对齐**，
+    /// 而视口数学（缩放 / 平移 / 旋转 / DPR / 洞口）是 Rust 独有的。
+    /// 与其让每个覆盖层自己推导一遍（一定会有人漏掉旋转或 DPR），
+    /// 不如把**同一个变换**交出去：覆盖层把子元素写成**图像像素坐标**，
+    /// 再整层套上这个矩阵 —— 数学只有一份。
+    ///
+    /// 洞口缺失（还没上报过）时返回 `None`。
+    #[must_use]
+    pub fn css_overlay_transform(&self) -> Option<[f32; 6]> {
+        let rect = self.clip_rect?;
+        let dpr = if self.dpr > 0.0 { self.dpr } else { 1.0 };
+        let scale = self.zoom / dpr;
+        let (sin, cos) = self.rotation.to_radians().sin_cos();
+        let a = scale * cos;
+        let b = scale * sin;
+        let c = -scale * sin;
+        let d = scale * cos;
+        let area = self.rect_center();
+        // 物理 → CSS：先减洞口原点，再除 DPR
+        let tx = (area.0 + self.pan_px.0 - rect.x) / dpr;
+        let ty = (area.1 + self.pan_px.1 - rect.y) / dpr;
+        let center = self.image_center();
+        Some([
+            a,
+            b,
+            c,
+            d,
+            tx - (a * center.0 + c * center.1),
+            ty - (b * center.0 + d * center.1),
+        ])
+    }
+
     /// 矩阵作用在图像四角上，得到 NDC 四角（给测试与覆盖层对齐用）。
     pub fn projected_corners_ndc(&self) -> [(f32, f32); 4] {
         let m = self.matrix();
@@ -682,5 +725,105 @@ mod tests {
         let physical = (css.0 * 1.5, css.1 * 1.5);
         let expected = v.physical_to_image(physical);
         assert!(close(image.0, expected.0, 1e-3) && close(image.1, expected.1, 1e-3));
+    }
+
+    #[test]
+    fn overlay_transform_agrees_with_the_physical_mapping() {
+        // 覆盖层矩阵必须与**渲染那套** `image_to_physical` 给出同一个结果
+        // （两份数学一旦分家，覆盖层就会与照片错位 —— 这条测试就是防它的）
+        let mut viewport = Viewport {
+            viewport_size: (1600.0, 1200.0),
+            image_size: (4000, 3000),
+            clip_rect: Some(ClipRect {
+                x: 320.0,
+                y: 140.0,
+                width: 960.0,
+                height: 900.0,
+            }),
+            dpr: 1.5,
+            zoom: 0.42,
+            pan_px: (37.0, -21.0),
+            rotation: 17.0,
+            ..Viewport::default()
+        };
+        let matrix = viewport.css_overlay_transform().expect("有洞口就有矩阵");
+        for point in [(0.0f32, 0.0f32), (4000.0, 3000.0), (1234.5, 987.25)] {
+            let physical = viewport.image_to_physical(point);
+            let css = viewport.physical_to_css(physical);
+            let rect = viewport.clip_rect.expect("有洞口");
+            // 洞口内的 CSS = 物理减洞口原点再除 DPR（`physical_to_css` 是整窗口的，
+            // 所以这里要自己减一次洞口原点 —— 这正是覆盖层要的那一套）
+            let expected = (
+                (physical.0 - rect.x) / viewport.dpr,
+                (physical.1 - rect.y) / viewport.dpr,
+            );
+            let got = (
+                matrix[0] * point.0 + matrix[2] * point.1 + matrix[4],
+                matrix[1] * point.0 + matrix[3] * point.1 + matrix[5],
+            );
+            assert!(
+                (got.0 - expected.0).abs() < 0.01 && (got.1 - expected.1).abs() < 0.01,
+                "{point:?}：矩阵给 {got:?}，物理映射给 {expected:?}（CSS {css:?}）"
+            );
+        }
+    }
+
+    #[test]
+    fn overlay_transform_is_identity_when_nothing_changes() {
+        // 1:1、无旋转、无平移、DPR=1、洞口就是整窗口 ⇒ 图像像素直接等于 CSS 像素
+        let viewport = Viewport {
+            viewport_size: (1000.0, 800.0),
+            image_size: (1000, 800),
+            clip_rect: Some(ClipRect {
+                x: 0.0,
+                y: 0.0,
+                width: 1000.0,
+                height: 800.0,
+            }),
+            dpr: 1.0,
+            zoom: 1.0,
+            ..Viewport::default()
+        };
+        let matrix = viewport.css_overlay_transform().expect("有洞口");
+        assert!((matrix[0] - 1.0).abs() < 1e-6, "a 应当是 1：{matrix:?}");
+        assert!(matrix[1].abs() < 1e-6 && matrix[2].abs() < 1e-6);
+        assert!((matrix[3] - 1.0).abs() < 1e-6, "d 应当是 1：{matrix:?}");
+        assert!(matrix[4].abs() < 1e-6 && matrix[5].abs() < 1e-6);
+    }
+
+    #[test]
+    fn overlay_transform_scales_by_zoom_over_dpr() {
+        let viewport = Viewport {
+            viewport_size: (1000.0, 800.0),
+            image_size: (1000, 800),
+            clip_rect: Some(ClipRect {
+                x: 0.0,
+                y: 0.0,
+                width: 1000.0,
+                height: 800.0,
+            }),
+            dpr: 2.0,
+            zoom: 0.5,
+            ..Viewport::default()
+        };
+        let matrix = viewport.css_overlay_transform().expect("有洞口");
+        // 0.5 倍缩放、DPR 2 ⇒ CSS 比例 = 0.25
+        assert!((matrix[0] - 0.25).abs() < 1e-6, "a = zoom/dpr：{matrix:?}");
+        // 图像中心落在**洞口的 CSS 中心**：洞口 1000×800 物理、DPR 2 ⇒ CSS 500×400，
+        // 中心就是 (250, 200)
+        let center = (
+            matrix[0] * 500.0 + matrix[2] * 400.0 + matrix[4],
+            matrix[1] * 500.0 + matrix[3] * 400.0 + matrix[5],
+        );
+        assert!((center.0 - 250.0).abs() < 0.01 && (center.1 - 200.0).abs() < 0.01, "{center:?}");
+    }
+
+    #[test]
+    fn overlay_transform_needs_a_hole() {
+        let viewport = Viewport {
+            clip_rect: None,
+            ..Viewport::default()
+        };
+        assert!(viewport.css_overlay_transform().is_none(), "没有洞口就没有覆盖层");
     }
 }

@@ -377,6 +377,7 @@ pub fn curve_is_not_a_param() -> bool {
 ///
 /// 前端也要画这条曲线（拖动的每一帧），所以求值有两份实现 ——
 /// 这份文件是它们的**共同基准**：两侧都对着同一组采样值断言，公式一改漏一处就红。
+#[cfg(test)]
 const CURVE_VECTORS_JSON: &str = include_str!("../../../../src/lib/curve-vectors.json");
 
 #[cfg(test)]

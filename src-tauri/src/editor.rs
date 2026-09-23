@@ -545,6 +545,11 @@ pub struct RenderState {
     pub develop_ms: Option<f64>,
     /// 最近一次**解码**耗时（毫秒；只有换照片那一次有值）
     pub decode_ms: Option<f64>,
+    /// **图像像素 → 洞口内 CSS 像素**的仿射矩阵 `[a, b, c, d, e, f]`（覆盖层专用）。
+    ///
+    /// 覆盖层（裁切柄 / 旋转框 / 对比线 / 将来的蒙版）把子元素写成**图像像素坐标**，
+    /// 整层套这个矩阵 —— 数学只有 Rust 一份（`AGENTS.md` §6.1 红线 2）。
+    pub overlay_transform: Option<[f32; 6]>,
     pub zoom: f32,
     pub pan_x: f32,
     pub pan_y: f32,
@@ -1469,6 +1474,8 @@ fn publish(state: &mut RenderState, context: &GpuContext) {
             height: f64::from(rect.height),
         });
     }
+    // 覆盖层矩阵：每次发布都算一遍（它只依赖视口状态，很便宜）
+    state.overlay_transform = viewport.css_overlay_transform();
 }
 
 impl RenderState {

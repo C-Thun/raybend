@@ -390,6 +390,7 @@ const EDITOR_RENDER_STATE_KEYS = [
   "lastError",
   "lastHit",
   "origin",
+  "overlayTransform",
   "paintedPath",
   "panX",
   "panY",

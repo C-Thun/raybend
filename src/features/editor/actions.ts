@@ -26,6 +26,13 @@ export interface EditorActions {
   resetChrome: () => void;
   /** 有没有可编辑的照片（空态下工具与控制块一律禁用） */
   hasPhoto: () => boolean;
+  /**
+   * **重置全部调整**（M3-W3）：清空编辑栈（库里也清）。
+   *
+   * 与「重置这一项」不同，它是**破坏性**的（一次抹掉所有参数与曲线），
+   * 所以只挂在命令面板里、**不给默认热键**（`AGENTS.md` §2.15：留空也要写清理由）。
+   */
+  resetDevelop: () => void;
   /** 全屏看图要的清单（编辑侧同样是「当前目录显示序 + 锚点」）；没有照片时为 `null` */
   fullscreenTarget: () => FullscreenTarget | null;
 }

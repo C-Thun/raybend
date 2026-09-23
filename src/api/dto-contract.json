@@ -313,6 +313,7 @@
     "lastError",
     "lastHit",
     "origin",
+    "overlayTransform",
     "paintedPath",
     "panX",
     "panY",

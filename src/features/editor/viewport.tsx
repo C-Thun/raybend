@@ -34,6 +34,7 @@ import {
 import { StateWatermark } from "../../components/ui/StateWatermark.tsx";
 import { createWheelZoom } from "../../components/ui/viewer/interaction.ts";
 import { t } from "../../i18n/index.ts";
+import { ViewportOverlay } from "./ViewportOverlay.tsx";
 import type { MessageKey } from "../../i18n/index.ts";
 import { createDragSession, createPanAccumulator } from "../../lib/editor-intent.ts";
 import { createViewportReporter, type ViewportReporter } from "../../lib/editor-viewport.ts";
@@ -297,6 +298,14 @@ export function EditorViewport(props: EditorViewportProps): JSX.Element {
         aria-hidden="true"
         class="pointer-events-none absolute h-0 w-0 bg-surface-bar"
       />
+      {/*
+        **覆盖层宿主**（M3-W3 定契约）：W5 的裁切 / 旋转 / 对比与将来的蒙版都插进这里。
+        子元素一律用**图像像素**坐标书写，由它统一套上 Rust 给的仿射矩阵 ——
+        视口数学只有一份，覆盖层不许自己乘 zoom / 减 pan / 补 DPR。
+        W3 这一波还没有覆盖层内容（三个工具在 W5），所以这里是空的。
+      */}
+      <ViewportOverlay renderState={props.renderState()} />
+
       <Show when={props.empty} fallback={<ViewportMessage props={props} />}>
         {(kind) => {
           const Icon = EMPTY_ICON[editorEmptyIcon(kind())];

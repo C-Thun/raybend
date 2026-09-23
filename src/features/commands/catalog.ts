@@ -159,6 +159,8 @@ export interface CommandDeps {
     toggleTool: (tool: "crop" | "rotate" | "compare") => void;
     /** 某个工具此刻是不是开着的（命令面板据此显示状态） */
     isToolActive: (tool: "crop" | "rotate" | "compare") => boolean;
+    /** 重置全部调整（破坏性：一次抹掉所有参数与曲线） */
+    resetDevelop: () => void;
   };
 }
 
@@ -545,6 +547,19 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       scope: "viewer",
       when: () => deps.editor.active() && deps.editor.hasPhoto(),
       run: () => deps.editor.toggleTool("rotate"),
+    }),
+    /*
+     * **不给默认热键**（`AGENTS.md` §2.15：留空也要写清理由）：
+     * 它一次抹掉这张照片的全部调整，误触代价高；而且它已经有明确入口
+     * （右栏「全部重置」按钮），没必要再占一个全局键。
+     */
+    spec({
+      id: "editor.develop.reset",
+      titleKey: "cmd.editor.resetDevelop",
+      group: "edit",
+      scope: "viewer",
+      when: () => deps.editor.active() && deps.editor.hasPhoto(),
+      run: () => deps.editor.resetDevelop(),
     }),
     spec({
       id: "editor.tool.compare",

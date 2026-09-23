@@ -467,6 +467,8 @@ export default function App() {
       toggleLut: () => editorStore.toggleLut(),
       toggleTool: (tool) => editorStore.toggleTool(tool),
       isToolActive: (tool) => editorStore.tool() === tool,
+      // 重置全部调整要**同时清库**，所以走工作区注册的那一份实现（不是 store 单独能干的）
+      resetDevelop: () => editorActions()?.resetDevelop(),
     },
   };
 

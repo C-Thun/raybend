@@ -605,7 +605,8 @@ export const enUS: Record<MessageKey, string> = {
  "cmd.editor.rotate": "Rotate tool",
  "cmd.editor.compare": "Compare tool",
  "cmd.editor.chrome": "Cycle editor panels (both → right → view only)",
- "cmd.editor.toBrowse": "Back to Browse (grid)",
+ "cmd.editor.toBrowse": "Back to browse grid",
+ "cmd.editor.resetDevelop": "Reset all adjustments",
 
 
 };

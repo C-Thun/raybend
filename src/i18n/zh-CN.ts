@@ -618,4 +618,5 @@ export const zhCN = {
  "cmd.editor.compare": "对比工具",
  "cmd.editor.chrome": "切换编辑面板（左右 → 右 → 仅图）",
  "cmd.editor.toBrowse": "回浏览看网格",
+ "cmd.editor.resetDevelop": "重置全部调整",
 } as const;

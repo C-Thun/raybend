@@ -440,6 +440,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
     cycleChrome: () => props.store.cycleTab(),
     resetChrome: () => props.store.resetChrome(),
     hasPhoto: () => current() !== null,
+    resetDevelop,
     fullscreenTarget,
   };
 
