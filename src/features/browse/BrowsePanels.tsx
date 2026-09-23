@@ -895,7 +895,22 @@ export function AssetInfo(props: AssetInfoProps) {
   };
 
   return (
-    <div class={["min-h-0 flex-1 overflow-y-auto p-2", props.class ?? ""].filter(Boolean).join(" ")}>
+    /*
+     * 右栏信息面板的**滚动容器**：
+     *   * `scroll-y-reserved` → 滚动条落在预留空间里（`DESIGN.md` §8.9）；
+     *   * 横向 padding 走**密度令牌**（人类 2026-09-23：宽松档下 browse 右列
+     *     以前写死 `p-2`、两档一个样 —— 「这宽松了个啥」）；
+     *   * 滚动侧（右）用 `--panel-pad-scroll`，比左侧小 4px：滚动条自己占的是
+     *     padding **外面**那一层，所以这里只需留一道窄空隙。
+     */
+    <div
+      class={[
+        "scroll-y-reserved min-h-0 flex-1 pl-panel-pad pr-panel-pad-scroll py-panel-pad",
+        props.class ?? "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
       <Show
         when={item() !== null}
         fallback={<p class="p-2 text-fs-2 text-fg-3">{t("browse.noSelection")}</p>}

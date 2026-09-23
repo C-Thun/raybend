@@ -1882,6 +1882,37 @@ try {
       searchPlaceholder: search ? (search.getAttribute("placeholder") ?? "") : null,
     };
 
+    /*
+     * workspace right 的**横向 padding 必须跟着密度走**（人类 2026-09-23 报：
+     * 「只有 import 右列在宽松档变了，browse / editor 都没变，这宽松了个啥」）。
+     *
+     * 量的是右栏**信息面板**（滚动容器）的左右 padding：
+     *   * 宽松档必须**大于**紧凑档（否则就是写死了）；
+     *   * 右（滚动侧）要比左**小** —— 原生滚动条画在 padding 外面，
+     *     这里只需留一道窄空隙（--panel-pad-scroll，DESIGN.md §8.9）。
+     *
+     * 直接改 data-density 而不是去点标题栏的开关：要验的是「令牌 → padding」这段接线，
+     * 开关本身已经在陈列室那段验过了。量完恢复到宽松（后面几段都在宽松档下跑）。
+     */
+    const infoPad = () => {
+      const aside = [...document.querySelectorAll("aside")].at(-1);
+      const inner =
+        aside?.querySelector("[class*='scroll-y-reserved']") ?? aside?.firstElementChild ?? null;
+      if (inner === null) return null;
+      const cs = getComputedStyle(inner);
+      return {
+        left: Math.round(parseFloat(cs.paddingLeft)),
+        right: Math.round(parseFloat(cs.paddingRight)),
+        gutter: cs.scrollbarGutter || "(none)",
+      };
+    };
+    document.documentElement.dataset.density = "compact";
+    await sleep(220);
+    result.rightPadCompact = infoPad();
+    document.documentElement.dataset.density = "loose";
+    await sleep(220);
+    result.rightPadLoose = infoPad();
+
     (labelFor("导入") ?? labelFor("Import"))?.click();
     await sleep(300);
     result.restoredImport = document.querySelector('input[type="search"]') === null;
@@ -1889,6 +1920,27 @@ try {
   })()`);
 
   if (browseWorkspace) {
+    const compactPad = browseWorkspace.rightPadCompact;
+    const loosePad = browseWorkspace.rightPadLoose;
+    if (compactPad === null || loosePad === null) {
+      problems.push("量不到浏览右栏信息面板的 padding（选择器该更新了）");
+    } else {
+      if (!(loosePad.left > compactPad.left)) {
+        problems.push(
+          `浏览右栏的横向 padding 不跟密度走：紧凑 ${compactPad.left}px → 宽松 ${loosePad.left}px`,
+        );
+      }
+      if (!(loosePad.right < loosePad.left)) {
+        problems.push(
+          `浏览右栏滚动侧的 padding 没有更小（左 ${loosePad.left}px / 右 ${loosePad.right}px）—— 滚动条要落在预留空间里`,
+        );
+      }
+      if (!loosePad.gutter.includes("stable")) {
+        problems.push(
+          `浏览右栏的滚动容器没有 scrollbar-gutter: stable（实测 ${loosePad.gutter}）—— 滚动条一出现内容就会缩一下`,
+        );
+      }
+    }
     if (browseWorkspace.asides !== 2) {
       problems.push(`浏览工作区应当是两列 aside（左列 + 右栏），实测 ${browseWorkspace.asides}`);
     }

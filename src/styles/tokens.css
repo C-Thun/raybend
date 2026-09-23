@@ -325,6 +325,13 @@
   --row-h: 24px; /* 列表行高 */
   --row-indent: 8px; /* 列表行起始缩进 */
   --panel-pad: 6px;
+  /*
+   * **滚动容器那一侧的 padding**（`DESIGN.md` §8.9）：比 `--panel-pad` 小 4px。
+   * 因为原生滚动条画在 padding **之外**（贴外缘）—— 实测 `scrollbar-gutter: stable`
+   * 下「无滚动条」与「有滚动条」的 `clientWidth` 完全相同，
+   * 所以这里就是「内容 ↔ 滚动条」那道空隙；它小一点，没滚动条时左右才不至于明显不平衡。
+   */
+  --panel-pad-scroll: 2px;
   --radius: 4px;
 
   --panel-w-left: 320px;
@@ -400,6 +407,8 @@
   --row-h: 30px;
   --row-indent: 12px;
   --panel-pad: 12px;
+  /* 同紧凑档：滚动侧比另一侧小 4px（理由见紧凑块里的说明） */
+  --panel-pad-scroll: 8px;
   --radius: 6px;
 
   --panel-w-left: 360px;
@@ -508,6 +517,7 @@
   --spacing-row-h: var(--row-h);
   --spacing-row-indent: var(--row-indent);
   --spacing-panel-pad: var(--panel-pad);
+  --spacing-panel-pad-scroll: var(--panel-pad-scroll);
   --spacing-panel-w-left: var(--panel-w-left);
   --spacing-panel-w-right: var(--panel-w-right);
   --spacing-seg-track-pad: var(--seg-track-pad);

@@ -105,7 +105,8 @@ export function EditorPanels(props: EditorPanelsProps): JSX.Element {
     <div
       data-editor-panels
       class={[
-        "flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto bg-surface-main p-panel-pad",
+        /* 滚动条落在预留空间里；横向 padding 走密度令牌（与 browse 右栏同一口径） */
+        "flex min-h-0 flex-1 scroll-y-reserved flex-col gap-3 bg-surface-main pl-panel-pad pr-panel-pad-scroll py-panel-pad",
         props.class ?? "",
       ]
         .filter(Boolean)

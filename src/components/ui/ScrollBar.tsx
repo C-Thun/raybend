@@ -29,9 +29,15 @@ export function ScrollBox(props: ScrollBoxProps) {
       {...rest}
       class={[
         "min-h-0 min-w-0 flex-1 overscroll-contain",
-        axis() === "y" ? "overflow-x-hidden overflow-y-auto" : "",
+        /*
+         * 纵向滚动一律带 `scroll-y-reserved`：**滚动条落在预留空间里**
+         * （人类 2026-09-23 定的全局规则，见 `DESIGN.md` §8.9 与 `scrollbar.css`）。
+         * 写进组件而不是每个调用点各写一遍：这是「可滚动」这件事本身的一部分，
+         * 漏写就会重新出现「滚动条一出现、内容缩一下」的抽动。
+         */
+        axis() === "y" ? "scroll-y-reserved overflow-x-hidden" : "",
         axis() === "x" ? "overflow-x-auto overflow-y-hidden" : "",
-        axis() === "both" ? "overflow-auto" : "",
+        axis() === "both" ? "scroll-y-reserved overflow-x-auto" : "",
         local.class ?? "",
       ]
         .filter(Boolean)
