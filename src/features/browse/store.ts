@@ -274,6 +274,14 @@ export interface BrowseStore {
    * 也可能是上次会话留下的，但我们不猜）。
    */
   undoState(): UndoState;
+  /**
+   * **撤销 / 重做发生过几次**（M3-W3）。
+   *
+   * 编辑器要靠它知道「库里的编辑栈可能被改回去了」—— 撤销会动 `develop_*` 表
+   * （显影参数也是撤销栈里的一步），所以编辑器必须重新读一遍。
+   * 只认「撤销 / 重做」这一件事，不跟着普通标记动作抖。
+   */
+  undoTick(): number;
   /** 删掉选中的照片（回收站）。 */
   removeSelected(): Promise<DeleteResult | null>;
   /**
@@ -301,6 +309,7 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
   const [filter, setFilterSignal] = createSignal<BrowseFilter>({});
   const [filterMode, setFilterModeSignal] = createSignal(false);
   const [undoState, setUndoState] = createSignal<UndoState>(EMPTY_UNDO_STATE);
+  const [undoTick, setUndoTick] = createSignal(0);
 
   /** 每次动作之后把撤销栈状态收下来（marking/undo/redo 三处都走它） */
   const rememberUndo = (result: MarkResult | null): MarkResult | null => {
@@ -735,6 +744,7 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
     sort,
     filterMode,
     undoState,
+    undoTick,
     query,
 
     setRepository(id) {
@@ -850,6 +860,8 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
       if (id === null) return null;
       const result = await api.undo(id);
       await reload(); // 撤销改的是库里的值，最稳的是重新取一遍
+      // 撤销可能动的是**编辑栈**（显影参数也是撤销栈里的一步）—— 通知编辑器重读
+      setUndoTick((current) => current + 1);
       return rememberUndo(result);
     },
     async redo() {
@@ -857,6 +869,7 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
       if (id === null) return null;
       const result = await api.redo(id);
       await reload();
+      setUndoTick((current) => current + 1);
       return rememberUndo(result);
     },
     async removeSelected() {

@@ -154,6 +154,27 @@ pub enum Op {
         before: Option<String>,
         after: Option<String>,
     },
+    /// 改一个**显影参数**（编辑栈；M3-W3）。
+    ///
+    /// `before` / `after` 是 **f64 的位模式**（`Option<u64>`）：`Op` 要能 `Eq`
+    /// （撤销栈与测试都靠它），而 f64 不是 `Eq`。位模式能**精确**还原原值 ——
+    /// 连 `-0.0` 与 `0.0` 的区别都保得住（`==` 分不出来，位模式分得出来）。
+    /// `None` = 这一项不在（回到基线）。
+    DevelopParam {
+        asset_id: i64,
+        param_id: String,
+        before: Option<u64>,
+        after: Option<u64>,
+    },
+    /// 改一条**曲线**（整条替换；`None` = 回到恒等）。
+    ///
+    /// 控制点存成 JSON 字符串：撤销要的是「原样还原」，字符串最不容易出错。
+    DevelopCurve {
+        asset_id: i64,
+        channel: String,
+        before: Option<String>,
+        after: Option<String>,
+    },
 }
 
 impl Op {
@@ -167,7 +188,9 @@ impl Op {
             | Self::Lock { asset_id, .. }
             | Self::TagAttach { asset_id, .. }
             | Self::TagDetach { asset_id, .. }
-            | Self::Text { asset_id, .. } => *asset_id,
+            | Self::Text { asset_id, .. }
+            | Self::DevelopParam { asset_id, .. }
+            | Self::DevelopCurve { asset_id, .. } => *asset_id,
         }
     }
 
@@ -235,6 +258,28 @@ impl Op {
             } => Self::Text {
                 asset_id: *asset_id,
                 field: *field,
+                before: after.clone(),
+                after: before.clone(),
+            },
+            Self::DevelopParam {
+                asset_id,
+                param_id,
+                before,
+                after,
+            } => Self::DevelopParam {
+                asset_id: *asset_id,
+                param_id: param_id.clone(),
+                before: *after,
+                after: *before,
+            },
+            Self::DevelopCurve {
+                asset_id,
+                channel,
+                before,
+                after,
+            } => Self::DevelopCurve {
+                asset_id: *asset_id,
+                channel: channel.clone(),
                 before: after.clone(),
                 after: before.clone(),
             },
@@ -376,6 +421,34 @@ pub fn apply(conn: &Connection, change: &ChangeSet) -> Result<Applied> {
                 if removed > 0 {
                     changed.insert(asset_id);
                 }
+            }
+            Op::DevelopParam {
+                param_id, after, ..
+            } => {
+                // 位模式 → f64（见 `Op::DevelopParam` 的说明：为了 `Eq`）
+                let value = after.map(f64::from_bits);
+                crate::store::develop::set_param(conn, asset_id, param_id, value, now)?;
+                changed.insert(asset_id);
+            }
+            Op::DevelopCurve {
+                channel, after, ..
+            } => {
+                let points: Option<Vec<[f32; 2]>> = match after {
+                    Some(json) => Some(serde_json::from_str(json).map_err(|e| {
+                        crate::error::Error::Unsupported(format!(
+                            "撤销栈里的曲线数据坏了（{channel}）：{e}"
+                        ))
+                    })?),
+                    None => None,
+                };
+                crate::store::develop::set_curve(
+                    conn,
+                    asset_id,
+                    channel,
+                    points.as_deref(),
+                    now,
+                )?;
+                changed.insert(asset_id);
             }
         }
     }
@@ -810,6 +883,82 @@ mod tests {
             |r| r.get(0),
         )
         .unwrap()
+    }
+
+    // ---------- 编辑栈（M3-W3）----------
+
+    /// 显影参数的撤销：**位模式进、原值出**（含 `-0.0` 这种 `==` 分不出的情况）。
+    #[test]
+    fn develop_param_op_inverts_exactly() {
+        let conn = catalog();
+        let id = asset(&conn);
+        let op = Op::DevelopParam {
+            asset_id: id,
+            param_id: "exposure".to_string(),
+            before: None,
+            after: Some(0.5f64.to_bits()),
+        };
+        let applied = apply(&conn, &ChangeSet::new("调整曝光", vec![op.clone()])).unwrap();
+        assert_eq!(applied.changed, 1);
+        assert_eq!(
+            crate::store::develop::load(&conn, id).unwrap().params.get("exposure"),
+            Some(&0.5)
+        );
+
+        // 撤销：回到「没有这一项」
+        let undo = ChangeSet::new("调整曝光", vec![op.invert()]);
+        apply(&conn, &undo).unwrap();
+        assert!(crate::store::develop::load(&conn, id).unwrap().params.is_empty());
+        assert!(!crate::store::develop::has_edits(&conn, id).unwrap());
+
+        // `-0.0` 的位模式能精确还原（`==` 会把 -0.0 与 0.0 看成相等）
+        let zero = Op::DevelopParam {
+            asset_id: id,
+            param_id: "blacks".to_string(),
+            before: Some((-0.0f64).to_bits()),
+            after: Some(0.0f64.to_bits()),
+        };
+        let inverted = zero.invert();
+        assert_eq!(
+            match inverted {
+                Op::DevelopParam { after, .. } => after,
+                _ => panic!("invert 之后还是 DevelopParam"),
+            },
+            Some((-0.0f64).to_bits())
+        );
+    }
+
+    #[test]
+    fn develop_curve_op_inverts_and_respects_the_lock() {
+        let conn = catalog();
+        let id = asset(&conn);
+        let points = vec![[0.0f32, 0.0], [0.5, 0.7], [1.0, 1.0]];
+        let json = serde_json::to_string(&points).unwrap();
+        let op = Op::DevelopCurve {
+            asset_id: id,
+            channel: "rgb".to_string(),
+            before: None,
+            after: Some(json.clone()),
+        };
+        apply(&conn, &ChangeSet::new("曲线", vec![op.clone()])).unwrap();
+        assert_eq!(
+            crate::store::develop::load(&conn, id).unwrap().curves.get("rgb"),
+            Some(&points)
+        );
+        apply(&conn, &ChangeSet::new("曲线", vec![op.invert()])).unwrap();
+        assert!(crate::store::develop::load(&conn, id).unwrap().curves.is_empty());
+
+        // 二级锁的照片：显影参数也要被跳过（锁的语义就是「不可编辑」）
+        conn.execute("UPDATE assets SET lock_level = 2 WHERE id = ?1", [id])
+            .unwrap();
+        let locked = apply(
+            &conn,
+            &ChangeSet::new("调整", vec![op]),
+        )
+        .unwrap();
+        assert_eq!(locked.changed, 0);
+        assert_eq!(locked.skipped_locked, vec![id]);
+        assert!(!crate::store::develop::has_edits(&conn, id).unwrap());
     }
 
     // ---------- 基本写入 ----------

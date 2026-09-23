@@ -308,7 +308,9 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
       curves: payload.curves,
     })
       .then(() => {
-        // 只标「已落库」：库里回读的那一份与刚发出去的一致（Rust 侧会回读一遍验证）
+        // 只标「已落库」：库里回读的那一份与刚发出去的一致（Rust 侧会回读一遍验证）。
+        // 撤销标签由 `browse` 的 undoState 统一显示（编辑与标记共用一套撤销栈），
+        // 这里不再存第二份。
         props.store.markCommitted(rev);
       })
       .catch((error: unknown) => {
@@ -329,6 +331,29 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
       setDevelopError(String(error));
     });
   };
+
+  /**
+   * **撤销 / 重做之后重读编辑栈**。
+   *
+   * 显影参数与曲线都进的是**同一个撤销栈**（`browse` 的标记操作与编辑共用一套历史），
+   * 所以 Ctrl+Z 很可能改的就是编辑栈 —— 必须重新读回来，否则画面与库里会对不上。
+   */
+  createEffect(() => {
+    const tick = store.undoTick();
+    if (tick === 0) return; // 初次挂载不必重读（下面的换照片分支会读）
+    const assetId = current()?.id;
+    const repositoryId = store.repositoryId();
+    if (assetId === null || assetId === undefined || repositoryId === null) return;
+    void getDevelopStack(repositoryId, Number(assetId))
+      .then((stack) => {
+        if (stack === null) return;
+        props.store.loadDevelop(stack.values, stack.curves);
+      })
+      .catch((error: unknown) => {
+        console.error("[editor] 撤销后重读编辑栈失败", error); // i18n-exempt: 控制台诊断
+        setDevelopError(String(error));
+      });
+  });
 
   /**
    * **换照片：先把库里那份编辑栈读回来**（`latest` 存储位）。
@@ -440,7 +465,19 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
   );
 
   /** 右栏控件的可用性：有照片才动得了（空态一律禁用）。 */
-  const enabled = (): boolean => current() !== null;
+  /**
+   * 这张照片加了**二级锁**（不可编辑）吗。
+   *
+   * 锁的语义就是「不可编辑」（`AGENTS.md` §11.5 的标记体系），所以参数面板整列禁用 ——
+   * 让拉杆能拖、拖完又被后端跳过，比禁用更糟。
+   */
+  const locked = (): boolean => {
+    const id = current()?.id;
+    if (id === null || id === undefined) return false;
+    return (store.itemById(Number(id))?.lockLevel ?? 0) >= 2;
+  };
+
+  const enabled = (): boolean => current() !== null && !locked();
 
   /** 「信息」页签的字段（格式化的唯一实现在 `features/exif-strip/exif-format.ts`）。 */
   const info = createMemo<EditorPhotoInfo | null>(() => {
@@ -574,6 +611,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
             onCommit={commitDevelop}
             onReset={resetDevelop}
             error={developError()}
+            locked={locked()}
           />
         </aside>
       </div>

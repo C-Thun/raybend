@@ -80,7 +80,7 @@ impl BrowseState {
     }
 
     /// 撤销栈的入口（`open` 之后才会拿它）。
-    fn with_undo<T>(
+    pub(crate) fn with_undo<T>(
         &self,
         repository_id: &str,
         f: impl FnOnce(&mut UndoStack) -> T,

@@ -575,6 +575,7 @@ export const zhCN = {
  "editor.panel.resetAll": "全部重置",
  "editor.panel.live": "影调 / 色彩已接管线：拖动即改画面，松手落库",
  "editor.panel.w4Later": "清晰度 / 镜头在 M3-W4 接入（现在禁用，不会假装能用）",
+ "editor.panel.locked": "这张照片加了二级锁（不可编辑）—— 解锁后才能调整",
  "editor.crop.ratio": "比例",
  "editor.crop.free": "自由",
  "editor.crop.original": "原始比例",

@@ -116,11 +116,7 @@ pub fn save(conn: &Connection, asset_id: i64, stack: &DevelopStack, now_ms: i64)
     }
 
     // ② 栈本体（没有就建一个）
-    conn.execute(
-        "INSERT INTO develop_stacks (asset_id, created_at, updated_at) VALUES (?1, ?2, ?2)
-         ON CONFLICT(asset_id) DO UPDATE SET updated_at = ?2",
-        rusqlite::params![asset_id, now_ms],
-    )?;
+    ensure_stack(conn, asset_id, now_ms)?;
 
     // ③ 参数：先删掉「这一份里没有的」，再 upsert 有的
     let mut changed = 0usize;
@@ -183,6 +179,112 @@ pub fn save(conn: &Connection, asset_id: i64, stack: &DevelopStack, now_ms: i64)
     }
 
     Ok(changed)
+}
+
+/// 写**一项**参数（`value = None` ⇒ 删掉这一项 = 回到基线）。
+///
+/// 撤销栈走的就是这一条：它一次只还原一项（不像 [`save`] 那样覆盖整份）。
+///
+/// # Errors
+/// 未知参数 id / 值非法 / 数据库写失败。
+pub fn set_param(
+    conn: &Connection,
+    asset_id: i64,
+    param_id: &str,
+    value: Option<f64>,
+    now_ms: i64,
+) -> Result<()> {
+    let Some(spec) = spec(param_id) else {
+        return Err(Error::Unsupported(format!("未知的显影参数：{param_id}")));
+    };
+    if let Some(value) = value
+        && !spec.accepts(value)
+    {
+        return Err(Error::Unsupported(format!(
+            "参数 {param_id} 的值非法：{value}（允许 {}..{}）",
+            spec.min, spec.max
+        )));
+    }
+    ensure_stack(conn, asset_id, now_ms)?;
+    match value {
+        Some(value) => {
+            conn.execute(
+                "INSERT INTO develop_params (asset_id, param_id, value) VALUES (?1, ?2, ?3)
+                 ON CONFLICT(asset_id, param_id) DO UPDATE SET value = excluded.value",
+                rusqlite::params![asset_id, param_id, value],
+            )?;
+        }
+        None => {
+            conn.execute(
+                "DELETE FROM develop_params WHERE asset_id = ?1 AND param_id = ?2",
+                rusqlite::params![asset_id, param_id],
+            )?;
+        }
+    }
+    prune_empty_stack(conn, asset_id)?;
+    Ok(())
+}
+
+/// 写**一条**曲线（`points = None` ⇒ 删掉 = 回到恒等）。
+///
+/// # Errors
+/// 未知通道 / 控制点不合法 / 数据库写失败。
+pub fn set_curve(
+    conn: &Connection,
+    asset_id: i64,
+    channel: &str,
+    points: Option<&[[f32; 2]]>,
+    now_ms: i64,
+) -> Result<()> {
+    if CurveChannel::parse(channel).is_none() {
+        return Err(Error::Unsupported(format!("未知的曲线通道：{channel}")));
+    }
+    if let Some(points) = points {
+        Curve::from_points(points.to_vec())
+            .map_err(|e| Error::Unsupported(format!("曲线 {channel} 不合法：{e}")))?;
+    }
+    ensure_stack(conn, asset_id, now_ms)?;
+    match points {
+        Some(points) => {
+            let json = serde_json::to_string(points)
+                .map_err(|e| Error::Unsupported(format!("曲线序列化失败：{e}")))?;
+            conn.execute(
+                "INSERT INTO develop_curves (asset_id, channel, points) VALUES (?1, ?2, ?3)
+                 ON CONFLICT(asset_id, channel) DO UPDATE SET points = excluded.points",
+                rusqlite::params![asset_id, channel, json],
+            )?;
+        }
+        None => {
+            conn.execute(
+                "DELETE FROM develop_curves WHERE asset_id = ?1 AND channel = ?2",
+                rusqlite::params![asset_id, channel],
+            )?;
+        }
+    }
+    prune_empty_stack(conn, asset_id)?;
+    Ok(())
+}
+
+/// 建栈本体（没有就建，有就更新 `updated_at`）。
+fn ensure_stack(conn: &Connection, asset_id: i64, now_ms: i64) -> Result<()> {
+    conn.execute(
+        "INSERT INTO develop_stacks (asset_id, created_at, updated_at) VALUES (?1, ?2, ?2)
+         ON CONFLICT(asset_id) DO UPDATE SET updated_at = ?2",
+        rusqlite::params![asset_id, now_ms],
+    )?;
+    Ok(())
+}
+
+/// 栈空了就把本体删掉（「没编辑过」要能回到干净状态）。
+fn prune_empty_stack(conn: &Connection, asset_id: i64) -> Result<()> {
+    conn.execute(
+        "DELETE FROM develop_stacks
+          WHERE asset_id = ?1
+            AND NOT EXISTS (SELECT 1 FROM develop_params WHERE asset_id = ?1)
+            AND NOT EXISTS (SELECT 1 FROM develop_curves WHERE asset_id = ?1)",
+        [asset_id],
+    )?;
+    Ok(())
 }
 
 /// 清掉一张照片的编辑栈（重置全部）。
@@ -395,6 +497,39 @@ mod tests {
         );
         assert!(!load(&conn, first).expect("读一").params.contains_key("blacks"));
         assert!(!load(&conn, second).expect("读二").params.contains_key("exposure"));
+    }
+
+    #[test]
+    fn single_item_writes_and_deletes() {
+        let (conn, asset_id) = catalog_with_asset();
+        set_param(&conn, asset_id, "exposure", Some(0.75), now_millis()).expect("写一项");
+        assert_eq!(load(&conn, asset_id).expect("读").params.len(), 1);
+        // 写第二项：第一项**不许**被碰（这正是与 `save` 的区别 —— 撤销栈靠它）
+        set_param(&conn, asset_id, "contrast", Some(20.0), now_millis()).expect("写第二项");
+        let loaded = load(&conn, asset_id).expect("读");
+        assert_eq!(loaded.params.len(), 2);
+        // 删一项
+        set_param(&conn, asset_id, "exposure", None, now_millis()).expect("删");
+        let loaded = load(&conn, asset_id).expect("读");
+        assert!(!loaded.params.contains_key("exposure"));
+        assert!(loaded.params.contains_key("contrast"));
+        // 删光 ⇒ 栈本体也走掉
+        set_param(&conn, asset_id, "contrast", None, now_millis()).expect("删光");
+        assert!(!has_edits(&conn, asset_id).expect("查"));
+    }
+
+    #[test]
+    fn single_curve_writes_and_deletes() {
+        let (conn, asset_id) = catalog_with_asset();
+        let points = [[0.0f32, 0.0], [0.5, 0.6], [1.0, 1.0]];
+        set_curve(&conn, asset_id, "rgb", Some(&points), now_millis()).expect("写曲线");
+        let loaded = load(&conn, asset_id).expect("读");
+        assert_eq!(loaded.curves.get("rgb"), Some(&points.to_vec()));
+        set_curve(&conn, asset_id, "rgb", None, now_millis()).expect("删曲线");
+        assert!(!has_edits(&conn, asset_id).expect("查"));
+        // 非法输入要被拒
+        assert!(set_curve(&conn, asset_id, "x", Some(&points), now_millis()).is_err());
+        assert!(set_param(&conn, asset_id, "exposure", Some(99.0), now_millis()).is_err());
     }
 
     #[test]

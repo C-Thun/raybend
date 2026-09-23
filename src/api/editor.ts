@@ -119,6 +119,14 @@ export interface DevelopStack {
   curves: Record<string, [number, number][]>;
 }
 
+/** 落库 / 重置的结果：栈 + 撤销栈快照（界面据此显示「撤销：调整参数」）。 */
+export interface DevelopCommitResult {
+  stack: DevelopStack;
+  /** 刚记进撤销栈的那一步叫什么（没改动就是 `null`） */
+  undoLabel: string | null;
+  canUndo: boolean;
+}
+
 /** 读这张照片的编辑栈（没有 = 空栈，不是错误）。 */
 export async function getDevelopStack(
   repositoryId: string,
@@ -137,9 +145,9 @@ export async function commitDevelopStack(
   repositoryId: string,
   assetId: number,
   stack: DevelopStack,
-): Promise<DevelopStack | null> {
+): Promise<DevelopCommitResult | null> {
   if (!isTauriRuntime()) return null;
-  return call<DevelopStack>("develop_commit", {
+  return call<DevelopCommitResult>("develop_commit", {
     repositoryId,
     assetId,
     values: stack.values,
@@ -151,7 +159,7 @@ export async function commitDevelopStack(
 export async function resetDevelopStack(
   repositoryId: string,
   assetId: number,
-): Promise<DevelopStack | null> {
+): Promise<DevelopCommitResult | null> {
   if (!isTauriRuntime()) return null;
-  return call<DevelopStack>("develop_reset", { repositoryId, assetId });
+  return call<DevelopCommitResult>("develop_reset", { repositoryId, assetId });
 }

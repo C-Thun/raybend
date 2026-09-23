@@ -563,6 +563,7 @@ export const enUS: Record<MessageKey, string> = {
  "editor.panel.resetAll": "Reset all",
  "editor.panel.live": "Tone and color are live: drag to see the change, release to save",
  "editor.panel.w4Later": "Detail and lens land in M3-W4 (disabled on purpose)",
+ "editor.panel.locked": "This photo is locked (no edits) — unlock it first",
  "editor.crop.ratio": "Aspect",
  "editor.crop.free": "Free",
  "editor.crop.original": "Original",

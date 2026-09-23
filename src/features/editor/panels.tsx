@@ -97,6 +97,8 @@ export interface EditorPanelsProps {
   onReset?: () => void;
   /** 落库 / 读库失败的原因（有值就显示一行提示 —— 不静默吞掉） */
   error?: string | null;
+  /** 这张照片被二级锁锁住（不可编辑）—— 整列禁用 + 一句话说明 */
+  locked?: boolean;
   class?: string;
 }
 
@@ -202,9 +204,11 @@ export function EditorPanels(props: EditorPanelsProps): JSX.Element {
           >
             <PendingNote
               text={
-                paramTab() === "tone" || paramTab() === "color"
-                  ? t("editor.panel.live")
-                  : t("editor.panel.w4Later")
+                props.locked === true
+                  ? t("editor.panel.locked")
+                  : paramTab() === "tone" || paramTab() === "color"
+                    ? t("editor.panel.live")
+                    : t("editor.panel.w4Later")
               }
               class="flex-1"
             />
