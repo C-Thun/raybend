@@ -1905,6 +1905,65 @@ try {
   })()`);
 
   /*
+   * 编辑工作区（M3-W2）：浏览器里**没有 GPU 视口**（没有 Tauri 命令），
+   * 所以这一段的判据是「退化得对」而不是「照片出没出来」：
+   *
+   *   · 切到「编辑」不抛错，工作区与洞口元素都在；
+   *   · 洞口**不进透明态** —— 在浏览器里透明没有意义，
+   *     而在桌面端它是「照片真的画出来了」的开关（`holeActive`）。
+   *     这条断言守的正是那个开关：卡在真上、或卡在假上都会显形；
+   *   · 洞口里画着自己的底色（不是 rgba(0,0,0,0)），否则真机上就是「漏桌面」。
+   *
+   * 真机上的出图、1:1、透明合成归人类目视（AGENTS.md §2.8）。
+   */
+  const editor = await evaluate(`(async () => {
+    const labelFor = (text) =>
+      [...document.querySelectorAll("label")].find(
+        (node) => node.textContent.trim() === text,
+      );
+    const editLabel = labelFor("编辑") ?? labelFor("Edit");
+    if (editLabel === null) return null;
+    editLabel.click();
+    await new Promise((resolve) => setTimeout(resolve, 400));
+
+    const workspace = document.querySelector("[data-editor-workspace]");
+    const hole = document.querySelector("[data-editor-viewport]");
+    const holeBackground = hole === null ? null : getComputedStyle(hole).backgroundColor;
+
+    /*
+     * 切回「导入」—— 别把后面的断言留在编辑态里（尤其是末尾那条
+     * 「改窗口尺寸不许卡死」：它量的是 splitter，而导入工作区才有那套分栏）。
+     */
+    (labelFor("导入") ?? labelFor("Import"))?.click();
+    await new Promise((resolve) => setTimeout(resolve, 250));
+
+    return {
+      workspace: workspace !== null,
+      hole: hole !== null,
+      empty: hole === null ? null : hole.getAttribute("data-viewport-empty"),
+      painted: hole === null ? null : hole.getAttribute("data-viewport-painted"),
+      holeBackground: holeBackground,
+    };
+  })()`);
+
+  if (editor) {
+    if (!editor.workspace) {
+      problems.push("切到「编辑」看不到工作区（[data-editor-workspace] 不在）");
+    }
+    if (!editor.hole) {
+      problems.push("编辑工作区里找不到洞口（[data-editor-viewport] 不在）");
+    }
+    if (editor.painted === "on") {
+      problems.push(
+        "浏览器里洞口进了透明态 —— 浏览器没有 GPU 视口，应该留在 DOM 态（否则真机上就是「漏桌面」）",
+      );
+    }
+    if (editor.holeBackground === "rgba(0, 0, 0, 0)") {
+      problems.push("洞口底色是透明的 —— 桌面端会漏出桌面，浏览器里也该先画上底色");
+    }
+  }
+
+  /*
    * 弹窗骨架（2026-09-16 人类反馈：内边距太小、标题与右上角的叉没对齐）。
    * 这里是**同一份** Dialog 组件，所以量一次就够；数值取自设计稿
    * （padding 16 / 标题 17 / 底部按钮 32）。改成小数会立刻红。
