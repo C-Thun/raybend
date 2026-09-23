@@ -190,3 +190,36 @@ cargo run -p raybend --example avif-probe
    * `AGENTS.md` §5.3 记成第 7 条硬规矩（附「主程序对了 ≠ 子进程对了」这条同族教训）。
 
 > 修复后 `pnpm check:win` 在**旧产物上如实报红**（已实测），这就是它该有的样子。
+
+### 7.4 修复后的验证（可重复执行，不需要 GUI）
+
+驱动**那个 Windows worker 本身**跑一次真机样本 —— 这正是坏掉的那条路：
+
+```bash
+RAYBEND_RAW_WORKER=/mnt/c/rb-target/raybend/debug/raybend-raw-worker.exe \
+  cargo run -q -p raybend --example develop-probe -- 'C:\src\tmp\pic\P1000019.RW2' /mnt/c/src/tmp
+```
+
+实测输出（2026-09-24 05:0x）：
+
+```text
+[worker] raybend-raw-worker raybend-worker-proto-v2（协议 v2）就绪
+线性解码（5184×3888，60466176 值，拍摄色温 Some("4350K")）：2368.4 ms
+```
+
+另有一次性核对（协议层，确认载荷真是 16bit 线性而不是 8bit）：
+`ping` 回执带 `protocol: 2`；`decode` 回执 `format: "linear16"`、`source: "decoded"`
+（完整解码，不是内嵌预览）、载荷 120.9 MB、u16 取值到 65535。
+
+**注意**：这些是**冒烟**。GUI 里「拖一下画面跟着变」仍然只能由人类在真机上验（§2.8）。
+
+### 7.5 顺手加固：错误不再被静默吞掉
+
+渲染线程丢掉过期结果是**对的**（总有更新的任务在跑），但前提是**新任务一定会有结果**。
+现在这条链是闭合的：
+
+* `SetPhoto` / `SetParams` 每抬一次任务号就必然发一条任务；
+* 显影线程**粘住** `wanted_photo`，所以任何一条任务都不会「没有源可算」；
+* 清空照片走单独分支（不发任务，但抬任务号，让在途结果作废）。
+
+于是「失败」只有一种归宿：**以错误的形式出现在界面上**。
