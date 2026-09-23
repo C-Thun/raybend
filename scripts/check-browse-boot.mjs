@@ -3248,10 +3248,34 @@ try {
         channel: host.getAttribute("data-channel"),
         straight: paths.every((p) => !(p.getAttribute("d") ?? "").includes(" C")),
         gridLines: gridLines.length,
-        gridSizes: gridLines.map((el) => ({
-          axis: el.getAttribute("data-histogram-grid"),
-          size: getComputedStyle(el).backgroundSize,
-        })),
+        gridSizes: gridLines.map((el) => {
+          const box = el.getBoundingClientRect();
+          return {
+            axis: el.getAttribute("data-histogram-grid"),
+            size: getComputedStyle(el).backgroundSize,
+            centerX: box.left + box.width / 2,
+            centerY: box.top + box.height / 2,
+          };
+        }),
+        plot: (() => {
+          const box = host.querySelector("[data-histogram-plot]")?.getBoundingClientRect();
+          return box === undefined
+            ? null
+            : { left: box.left, top: box.top, width: box.width, height: box.height };
+        })(),
+        /* 网格层在曲线**下面**的判据：它在 DOM 里排在 SVG 前，且没有 z-index 覆盖 */
+        gridLayerZ: (() => {
+          const layer = host.querySelector("[data-histogram-grid]")?.parentElement;
+          return layer === null || layer === undefined ? null : getComputedStyle(layer).zIndex;
+        })(),
+        svgIsAfterGrid: (() => {
+          const plot = host.querySelector("[data-histogram-plot]");
+          const grid = host.querySelector("[data-histogram-grid]")?.parentElement ?? null;
+          const svg = plot?.querySelector("svg") ?? null;
+          if (plot === null || grid === null || svg === null) return null;
+          const kids = [...plot.children];
+          return kids.indexOf(svg) > kids.indexOf(grid);
+        })(),
       };
     })()`,
     returnByValue: true,
@@ -3286,15 +3310,54 @@ try {
      * 虚线必须真的「看得见」（2026-09-23 人类报的：只有顶端/两端各 2px 小段）：
      * 渐变的 auto 尺寸 = 整个元素，图案只画一次 —— 必须有可平铺的 background-size。
      * 只数 span 个数是抓不住这个 bug 的（那就是它一直没被发现的原因）。
+     *
+     * 2026-09-24：图案从「2px 亮 + 3px 空」改成「1px 亮 + 2px 空」（人类：再细一点）——
+     * 平铺尺寸从 5px 变 3px，断言跟着改。
      */
     const gridSizes = Array.isArray(hist.gridSizes) ? hist.gridSizes : [];
     if (
       gridSizes.length !== 4 ||
-      gridSizes.some((line) => !String(line.size ?? "").includes("5px"))
+      gridSizes.some((line) => !String(line.size ?? "").includes("3px"))
     ) {
       problems.push(
         `等分虚线必须有可平铺的 background-size（否则图案只画一次、看不见），实测 ${JSON.stringify(gridSizes)}`,
       );
+    }
+    /*
+     * 四等分实测（2026-09-24 人类：「左右两格看着比中间的宽」）：
+     * 三根竖线的**中心**必须落在绘图区宽的 25/50/75% 上（±1px），
+     * 横向那根的中心落在高的 50% 上。旧写法 `left: 25%` 是左边缘贴线，
+     * 1px 线占 [25%, 25%+1px]，四格变成 `25% / 25%−1px / …` —— 左边那格天然宽一格。
+     */
+    const verticals = gridSizes.filter((line) => line.axis === "v");
+    const horizontal = gridSizes.find((line) => line.axis === "h");
+    if (hist.plot === null || verticals.length !== 3 || horizontal === undefined) {
+      problems.push(`量不到等分线的四等分几何（实测 ${JSON.stringify(hist)}）`);
+    } else {
+      const expected = [0.25, 0.5, 0.75].map((ratio) => hist.plot.left + hist.plot.width * ratio);
+      const got = verticals.map((line) => line.centerX).sort((a, b) => a - b);
+      const worst = Math.max(...got.map((x, index) => Math.abs(x - expected[index])));
+      if (worst > 1) {
+        problems.push(
+          `三根竖线必须把宽度四等分（期望 ${JSON.stringify(expected.map((x) => Math.round(x)))}，实测 ${JSON.stringify(got.map((x) => Math.round(x)))}）`,
+        );
+      }
+      const mid = hist.plot.top + hist.plot.height / 2;
+      if (Math.abs(horizontal.centerY - mid) > 1) {
+        problems.push(
+          `横向等分线必须在高的 50%（期望 ${Math.round(mid)}，实测 ${Math.round(horizontal.centerY)}）`,
+        );
+      }
+    }
+    /*
+     * 等分线要在**曲线下面**（2026-09-24 人类：「位置要在峰值图的背景上，不是盖在峰值图上」）：
+     * 同层级下 DOM 后画的上 —— 网格层必须在 SVG 前面，且不得有 z-index 盖回去。
+     */
+    if (hist.gridLayerZ !== "auto") {
+      problems.push(`等分线那层不得有 z-index（否则会盖在峰值图上），实测 ${JSON.stringify(hist.gridLayerZ)}`);
+    }
+    if (hist.svgIsAfterGrid !== true) {
+      problems.push(`等分线那层必须排在 SVG 前面（背景纹理，不是覆盖层），实测 ${JSON.stringify(hist.svgIsAfterGrid)}`);
     }
   }
 
@@ -4437,11 +4500,29 @@ try {
         const row = (id) => document.querySelector('[data-command-palette="open"] [data-command-item="' + id + '"]');
         const fullscreen = row("viewer.fullscreen");
         const editor = row("editor.lut.toggle");
+        // 期望色从令牌现算（不写死 rgb）：探针元素挂一下 --fg-1 / --fg-2 再读
+        const token = (name) => {
+          const probe = document.createElement("span");
+          probe.style.color = "var(" + name + ")";
+          document.body.appendChild(probe);
+          const value = getComputedStyle(probe).color;
+          probe.remove();
+          return value;
+        };
+        const titleColor = (element) => {
+          const title = element?.querySelector("span");
+          return title === null || title === undefined ? null : getComputedStyle(title).color;
+        };
         return {
           fullscreenPresent: fullscreen !== null,
           editorPresent: editor !== null,
           editorFlag: editor?.getAttribute("data-command-available") ?? null,
           editorReason: editor?.textContent?.trim() ?? null,
+          fg1: token("--fg-1"),
+          fg2: token("--fg-2"),
+          availableColor: titleColor(fullscreen),
+          unavailableColor: titleColor(editor),
+          unavailableOpacity: editor === null ? null : getComputedStyle(editor).opacity,
         };
       })()`,
       returnByValue: true,
@@ -4456,6 +4537,20 @@ try {
       problems.push(`浏览工作流里 editor.lut.toggle 应当标成不可用（实测 ${JSON.stringify(paletteRows)}）`);
     } else if (!String(paletteRows.editorReason ?? "").includes("不可用")) {
       problems.push(`不可用的行要说明原因（实测 ${JSON.stringify(paletteRows)}）`);
+    }
+    /*
+     * 字色两档（人类 2026-09-24：「能用的就亮出来不好吗」）：
+     *   能用 → `fg-1`（正文级高反差）；不能用 → `fg-2`（禁用=次级）；**不许再叠 opacity**
+     *（在次级色上再乘一道就低于可读线了 —— 那正是这次报「根本看不清」的原因）。
+     */
+    if (paletteRows.availableColor !== paletteRows.fg1) {
+      problems.push(`能用的命令应当用 fg-1（实测 ${JSON.stringify(paletteRows)}）`);
+    }
+    if (paletteRows.unavailableColor !== paletteRows.fg2) {
+      problems.push(`不能用的命令应当用 fg-2（实测 ${JSON.stringify(paletteRows)}）`);
+    }
+    if (paletteRows.unavailableOpacity !== "1") {
+      problems.push(`不可用的行不许再叠 opacity（实测 ${JSON.stringify(paletteRows)}）`);
     }
 
     /*
@@ -4494,6 +4589,40 @@ try {
       problems.push(`方向键移动光标时列表必须跟着滚（实测 ${JSON.stringify(scrollState)}）`);
     } else if (!(scrollState.scrollTop > 0)) {
       problems.push(`命令多于一屏时按 ↓ 到底应当产生滚动（实测 scrollTop=${scrollState.scrollTop}）`);
+    }
+
+    /*
+     * PageUp / PageDown 翻页（人类 2026-09-24 要求）：一次跳「一屏能放下的行数」。
+     * 判据取「至少 >1 行」且「选中行仍在可视区」——与 ↑/↓ 同一条滚动纪律。
+     */
+    const readCursor = `(() => {
+      const list = document.querySelector('[data-command-palette="open"] ul');
+      const rows = [...document.querySelectorAll('[data-command-palette="open"] [data-command-item]')];
+      const index = rows.findIndex((row) => row.getAttribute("aria-selected") === "true");
+      const row = rows[index] ?? null;
+      if (list === null || row === null) return null;
+      const listRect = list.getBoundingClientRect();
+      const rowRect = row.getBoundingClientRect();
+      return {
+        index,
+        count: rows.length,
+        inside: rowRect.top >= listRect.top - 1 && rowRect.bottom <= listRect.bottom + 1,
+      };
+    })()`;
+    const beforePage = await send("Runtime.evaluate", { expression: readCursor, returnByValue: true });
+    await cdpKey({ key: "PageDown", code: "PageDown", vk: 34 });
+    await sleep(250);
+    const afterPage = await send("Runtime.evaluate", { expression: readCursor, returnByValue: true });
+    const pageFrom = beforePage.result?.value ?? null;
+    const pageTo = afterPage.result?.value ?? null;
+    if (pageFrom === null || pageTo === null) {
+      problems.push("量不到命令面板的光标（PageUp/PageDown 这条验不了）");
+    } else if (!(pageTo.index > pageFrom.index)) {
+      problems.push(`按 PageDown 光标应当前进（前 ${pageFrom.index} 后 ${pageTo.index}）`);
+    } else if (pageTo.index - pageFrom.index <= 1) {
+      problems.push(`按 PageDown 应当跳「一页」而不只是一行（前 ${pageFrom.index} 后 ${pageTo.index}）`);
+    } else if (pageTo.inside !== true) {
+      problems.push(`翻页后选中行必须仍在可视区（实测 ${JSON.stringify(pageTo)}）`);
     }
 
     // 搜键位：F11 必须能找到绑了它的命令

@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { CommandSpec } from "../../lib/commands.ts";
-import { buildPaletteRows } from "./palette.ts";
+import { buildPaletteRows, pageStep } from "./palette.ts";
 
 function cmd(id: string, patch: Partial<CommandSpec> = {}): CommandSpec {
   return {
@@ -71,4 +71,19 @@ test("行上带着当前键位（显示用），没绑是 null", () => {
 test("空查询把最近用过的排最前", () => {
   const rows = buildPaletteRows(sources([cmd("a"), cmd("b"), cmd("c")], "", ["b"]));
   assert.equal(rows[0]?.command.id, "b");
+});
+
+test("pageStep：一页 = 列表可视高度 ÷ 行高（除不尽向下取整）", () => {
+  assert.equal(pageStep({ listHeight: 300, rowHeight: 30 }), 10);
+  assert.equal(pageStep({ listHeight: 305, rowHeight: 30 }), 10, "除不尽宁可少跳一行");
+  assert.equal(pageStep({ listHeight: 29, rowHeight: 30 }), 1, "至少要跳一行");
+  assert.equal(pageStep({ listHeight: 600, rowHeight: 25 }), 24);
+});
+
+test("pageStep：量不到高度时退回保守值（总比按了不动强）", () => {
+  assert.equal(pageStep({ listHeight: 0, rowHeight: 30 }), 10);
+  assert.equal(pageStep({ listHeight: 300, rowHeight: 0 }), 10);
+  assert.equal(pageStep({ listHeight: Number.NaN, rowHeight: 30 }), 10);
+  assert.equal(pageStep({ listHeight: 0, rowHeight: 0, fallback: 5 }), 5);
+  assert.equal(pageStep({ listHeight: 300, rowHeight: 30, fallback: 5 }), 10, "量得到就不看 fallback");
 });

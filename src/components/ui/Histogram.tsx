@@ -86,23 +86,44 @@ export function Histogram(props: HistogramProps) {
       data-channel={selected() ?? "all"}
     >
       <div
+        data-histogram-plot="on"
         class="relative min-h-0 flex-1 overflow-hidden rounded-t-(--radius)"
         onPointerMove={track}
         onPointerLeave={() => setLevel(null)}
       >
-        <div class="pointer-events-none absolute inset-0 z-10" aria-hidden="true">
+        {/*
+          很浅的细密虚线（`DESIGN.md` §13.1）：纵向 4 等分（3 根）+ 横向上下 2 等分（1 根）。
+          用 DOM 画而不是 SVG `stroke-dasharray`：SVG 被 `preserveAspectRatio="none"` 拉伸时
+          虚线段长会跟着变形（竖线拉长、横线压扁）。
+
+          ⚠️ **必须给 `background-size`**（2026-09-23 人类报「等分线看不到，只有两头 2px 小段」）：
+          渐变的 `auto` 尺寸 = 整个元素，那条「1px 亮 + 2px 空」的图案只会画一次，
+          后面全是透明 —— `repeat` 无从重复。冒烟量 `backgroundSize` 盯着这一点
+          （只数 span 个数是抓不住的）。
+
+          ⚠️ **线条中心必须落在等分点上**（2026-09-24 人类：「左右两格看着比中间的宽」）：
+          旧写法 `left: 25%` 是**左边缘**贴 25%，1px 的线占 [25%, 25%+1px]，
+          四格于是变成 `25% / 25%−1px / 25%−1px / 25%−1px` —— 左边那格天然宽一格。
+          现在用 `-translate-x-1/2` 把中心对到 25/50/75%，四格等宽（冒烟有实测断言）。
+
+          ⚠️ **这层在曲线下面**（2026-09-24 人类：「位置要在峰值图的背景上，不是盖在峰值图上」）：
+          它没有 `z-index`，而 SVG 在 DOM 里排在它后面 —— 同层级下后画的上，
+          于是虚线只在曲线的透明处露出（背景纹理），不会压在峰上。
+          最上面的亮度指示线（`z-20`）不受影响。
+        */}
+        <div class="pointer-events-none absolute inset-0" aria-hidden="true">
           <For each={[25, 50, 75]}>
             {(percent) => (
               <span
                 data-histogram-grid="v"
-                class="absolute inset-y-0 w-px bg-[linear-gradient(to_bottom,var(--hist-grid)_0_2px,transparent_2px_5px)] bg-repeat-y [background-size:100%_5px]"
+                class="absolute inset-y-0 w-px -translate-x-1/2 bg-[linear-gradient(to_bottom,var(--hist-grid)_0_1px,transparent_1px_3px)] bg-repeat-y [background-size:100%_3px]"
                 style={{ left: `${percent}%` }}
               />
             )}
           </For>
           <span
             data-histogram-grid="h"
-            class="absolute inset-x-0 top-1/2 h-px bg-[linear-gradient(to_right,var(--hist-grid)_0_2px,transparent_2px_5px)] bg-repeat-x [background-size:5px_100%]"
+            class="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-[linear-gradient(to_right,var(--hist-grid)_0_1px,transparent_1px_3px)] bg-repeat-x [background-size:3px_100%]"
           />
         </div>
 

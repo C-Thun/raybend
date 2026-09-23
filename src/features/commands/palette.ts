@@ -44,6 +44,26 @@ export interface PaletteRowSources {
 }
 
 /**
+ * PageUp / PageDown 的**步长**：一页能放几行。
+ *
+ * 纯函数（量到的高度当入参）—— 这样「翻一页到底跳几行」有单测钉住，
+ * 而不是靠手感；量不到高度（列表还没挂上 / 高度为 0）时退回 `fallback`
+ * （保守值，总比「按了不动」强）。
+ *
+ * 除不尽时**向下取整**：宁可少跳一行，也不要把下一屏的头一行跳过去。
+ */
+export function pageStep(args: {
+  listHeight: number;
+  rowHeight: number;
+  fallback?: number;
+}): number {
+  const fallback = args.fallback ?? 10;
+  if (!Number.isFinite(args.listHeight) || !Number.isFinite(args.rowHeight)) return fallback;
+  if (args.listHeight <= 0 || args.rowHeight <= 0) return fallback;
+  return Math.max(1, Math.floor(args.listHeight / args.rowHeight));
+}
+
+/**
  * 造面板行：**全量命令** → 按查询排序 → 带回展示字段与可用性。
  *
  * ⚠️ **不过滤 `when`**（与菜单「暗着但可见」同一条纪律，`DESIGN.md` §12.11）：

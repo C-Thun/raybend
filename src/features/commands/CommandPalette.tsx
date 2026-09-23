@@ -28,7 +28,7 @@
  *
  * ## 键盘
  *
- * `↑`/`↓` 移动、`Enter` 执行、`Esc` 关（Ark 的 dialog 自带 Esc）。
+ * `↑`/`↓` 移动、`PageUp`/`PageDown` 翻页、`Enter` 执行、`Esc` 关（Ark 的 dialog 自带 Esc）。
  * 这些都是**面板内部**的键，不经过分发器（面板开着时分发器被 `blocked` 挡住）。
  * 光标移动时列表要**跟着滚**（`scrollIntoView({ block: "nearest" })`），
  * 否则命令多于一屏时选中行会跑到可视区外。
@@ -42,7 +42,7 @@ import { chordOf, rawChordOf, type CommandSpec } from "../../lib/commands.ts";
 import { shortcutOverrides, recentCommands } from "../../lib/shortcuts.ts";
 import { t } from "../../i18n/index.ts";
 import type { MessageKey } from "../../i18n/index.ts";
-import { buildPaletteRows, type PaletteRow } from "./palette.ts";
+import { buildPaletteRows, pageStep, type PaletteRow } from "./palette.ts";
 
 export interface CommandPaletteProps {
   open: boolean;
@@ -66,6 +66,8 @@ export function CommandPalette(props: CommandPaletteProps) {
   const [cursor, setCursor] = createSignal(0);
   /** 每行 DOM：光标移动时靠它把当前行滚进可视区（列表是虚拟滚动容器） */
   const itemElements = new Map<string, HTMLLIElement>();
+  /** 结果列表本体（PageUp/PageDown 的步长要拿它的可视高度来算） */
+  let listElement: HTMLUListElement | undefined;
 
   /** 分组名（`cmd.group.<group>`）；认不出来就显示原 group（不装没有） */
   const groupLabel = (group: string): string => {
@@ -111,10 +113,25 @@ export function CommandPalette(props: CommandPaletteProps) {
     itemElements.get(row.command.id)?.scrollIntoView({ block: "nearest" });
   });
 
-  const move = (delta: -1 | 1): void => {
+  const move = (delta: number): void => {
     const count = rows().length;
     if (count === 0) return;
     setCursor((current) => (current + delta + count) % count);
+  };
+
+  /**
+   * 一页跳几行（PageUp / PageDown）：按列表可视高度 ÷ 光标那行的高度。
+   *
+   * 用**光标那行**而不是第一行：组标题行比命令行矮一点，拿第一行算会在
+   * 「刚好落在标题行上」时少跳一行。量不到就交给 `pageStep` 的保守值。
+   */
+  const pageSize = (): number => {
+    const row = rows()[cursor()];
+    const element = row === undefined ? undefined : itemElements.get(row.command.id);
+    return pageStep({
+      listHeight: listElement?.clientHeight ?? 0,
+      rowHeight: element?.getBoundingClientRect().height ?? 0,
+    });
   };
 
   const run = (row: PaletteRow | undefined): void => {
@@ -132,6 +149,21 @@ export function CommandPalette(props: CommandPaletteProps) {
     if (event.key === "ArrowUp") {
       event.preventDefault();
       move(-1);
+      return;
+    }
+    /*
+     * 翻页（人类 2026-09-24 要求）：一次跳「一屏能放下的行数」，与 ↑/↓ 同一套回绕。
+     * 这是**面板内部键**（与 ↑/↓/Enter/Esc 同类，`DESIGN.md` §13.7 的「内建键位」）——
+     * 不进命令注册表：它只在面板打开时成立，没有「改键」的语义。
+     */
+    if (event.key === "PageDown") {
+      event.preventDefault();
+      move(pageSize());
+      return;
+    }
+    if (event.key === "PageUp") {
+      event.preventDefault();
+      move(-pageSize());
       return;
     }
     if (event.key === "Enter") {
@@ -179,7 +211,13 @@ export function CommandPalette(props: CommandPaletteProps) {
                 <p class="px-3 py-6 text-center text-fs-2 text-fg-3">{t("palette.empty")}</p>
               }
             >
-              <ul class="min-h-0 flex-1 overflow-y-auto py-1" role="listbox">
+              <ul
+                ref={(element: HTMLUListElement) => {
+                  listElement = element;
+                }}
+                class="min-h-0 flex-1 overflow-y-auto py-1"
+                role="listbox"
+              >
                 <For each={rows()}>
                   {(row, index) => (
                     <>
@@ -203,19 +241,26 @@ export function CommandPalette(props: CommandPaletteProps) {
                         onClick={() => run(row)}
                         class={[
                           "flex cursor-pointer items-center gap-2 px-3 py-1.5 text-fs-2",
-                          index() === cursor()
-                            ? "bg-state-hover text-fg-1"
-                            : "text-fg-2",
-                          row.availability.available ? "" : "opacity-50",
+                          // 指向/光标 = 辅色底（全局反馈规则）；**不靠改字色**表达
+                          index() === cursor() ? "bg-state-hover" : "",
+                          /*
+                           * 字色只分两档（`DESIGN.md` §4 的标准档位 + §5 的 disabled 规则）：
+                           *   能用   → `fg-1`（正文/标题级，高反差）
+                           *   不能用 → `fg-2`（次级；「前景降为次级色，面不变」）
+                           *
+                           * ⚠️ **不要再叠 `opacity`**（人类 2026-09-24：「根本看不清，能用的就亮出来不好吗」）——
+                           * 次级色上再乘一道透明度，两级降下来就低于可读线了。
+                           */
+                          row.availability.available ? "text-fg-1" : "text-fg-2",
                         ]
                           .filter(Boolean)
                           .join(" ")}
                       >
                         <span class="min-w-0 flex-1 truncate">{row.title}</span>
-                        {/* 不可用就说清为什么（灰掉不解释等于「坏了」） */}
+                        {/* 不可用就说清为什么（灰掉不解释等于「坏了」）——它是解释，不是装饰，用次级色保证能读 */}
                         <Show when={unavailableKey(row)}>
                           {(key) => (
-                            <span class="shrink-0 text-fs-0 text-fg-3">{t(key())}</span>
+                            <span class="shrink-0 text-fs-0 text-fg-2">{t(key())}</span>
                           )}
                         </Show>
                         <span
