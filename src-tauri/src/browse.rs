@@ -53,7 +53,7 @@ impl BrowseState {
     ///
     /// 锁序（避免死锁的最重要一条）：**任何地方都先拿 `open`、再拿 `undo`**，
     /// 绝不反过来。
-    fn with_catalog<R: Runtime, T>(
+    pub(crate) fn with_catalog<R: Runtime, T>(
         &self,
         app: &AppHandle<R>,
         repository_id: &str,

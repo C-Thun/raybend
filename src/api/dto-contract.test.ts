@@ -372,10 +372,14 @@ const EDITOR_VIEWPORT_STATE_KEYS = [
 ] as const satisfies readonly (keyof EditorViewportState)[];
 const EDITOR_RENDER_STATE_KEYS = [
   "adapter",
+  "appliedParamsRev",
+  "asShotTemperature",
   "backdrop",
   "bound",
   "decode",
   "decodeError",
+  "decodeMs",
+  "developMs",
   "dpr",
   "drawnFrames",
   "fitMode",
@@ -389,6 +393,7 @@ const EDITOR_RENDER_STATE_KEYS = [
   "paintedPath",
   "panX",
   "panY",
+  "paramsRev",
   "photoPath",
   "ready",
   "restarts",

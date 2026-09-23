@@ -1,0 +1,191 @@
+//! **显影管线的性能与像素证据探针**（M3-W3）。
+//!
+//! ```bash
+//! # 纯合成数据：量管线本身的耗时（24MP / 2.5MP 两档 × 几组参数）
+//! cargo run -p raybend --example develop-probe
+//!
+//! # 带一张真照片：量「线性解码 + 管线」的端到端耗时（RAW 走 worker）
+//! cargo run -p raybend --example develop-probe -- /mnt/c/src/tmp/pic/P1000019.RW2
+//! ```
+//!
+//! 为什么要有它：`AGENTS.md` §2.8 —— 交互帧率这类东西 Agent 只能量数字、不能下结论，
+//! 但**数字必须是真的**。实施记录里的耗时就是这里跑出来的。
+
+use std::path::Path;
+use std::time::Instant;
+
+use raybend::develop::{CurveSet, DevelopParams, LinearImage, render_rgb8};
+
+fn synthetic(width: u32, height: u32) -> LinearImage {
+    let mut rgb = Vec::with_capacity((width as usize) * (height as usize) * 3);
+    for y in 0..height {
+        for x in 0..width {
+            #[allow(clippy::cast_precision_loss)]
+            let r = ((x as f32) / (width as f32)).clamp(0.0, 1.0);
+            #[allow(clippy::cast_precision_loss)]
+            let g = ((y as f32) / (height as f32)).clamp(0.0, 1.0);
+            let b = ((r + g) / 2.0).clamp(0.0, 1.0);
+            for value in [r, g, b] {
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                let encoded = (value * 65535.0 + 0.5) as u32;
+                rgb.push(u16::try_from(encoded.min(65535)).unwrap_or(u16::MAX));
+            }
+        }
+    }
+    LinearImage::new(width, height, rgb).expect("形状对得上")
+}
+
+fn params(values: &[(&str, f64)]) -> DevelopParams {
+    let mut params = DevelopParams::new(Some(5200.0));
+    for (id, value) in values {
+        params.set(id, *value).expect("参数合法");
+    }
+    params
+}
+
+fn time(label: &str, source: &LinearImage, params: &DevelopParams, curves: &CurveSet) {
+    // 先跑一遍热热身（分配输出缓冲、把页表摸热）
+    let _ = render_rgb8(source, params, curves);
+    let runs = 3;
+    let mut total = std::time::Duration::ZERO;
+    for _ in 0..runs {
+        let start = Instant::now();
+        let out = render_rgb8(source, params, curves);
+        total += start.elapsed();
+        std::hint::black_box(&out);
+    }
+    let average = total / runs;
+    let pixels = u64::from(source.width) * u64::from(source.height);
+    #[allow(clippy::cast_precision_loss)]
+    let megapixels = pixels as f64 / 1_000_000.0;
+    #[allow(clippy::cast_precision_loss)]
+    let millis = average.as_secs_f64() * 1000.0;
+    println!(
+        "{label:<44} {:>7.2} MP   {millis:>8.1} ms   {:.1} ms/MP",
+        megapixels,
+        millis / megapixels
+    );
+}
+
+fn main() {
+    let path = std::env::args().nth(1);
+    let threads = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
+    println!("可用并行度：{threads}");
+    println!(
+        "{:<44} {:>9}   {:>11}   每 MP",
+        "场景", "像素", "耗时"
+    );
+
+    let curves = CurveSet::identity();
+    let default = DevelopParams::new(Some(5200.0));
+    let exposure = params(&[("exposure", 0.5)]);
+    let all_tone = params(&[
+        ("exposure", 0.5),
+        ("contrast", 40.0),
+        ("highlights", -50.0),
+        ("blacks", 30.0),
+        ("temperature", 4200.0),
+    ]);
+    let with_chroma = params(&[
+        ("exposure", 0.5),
+        ("contrast", 40.0),
+        ("highlights", -50.0),
+        ("blacks", 30.0),
+        ("temperature", 4200.0),
+        ("saturation", 30.0),
+        ("vibrance", 40.0),
+    ]);
+
+    // 预览档（长边 1920 的 16:9）与 1:1 档（24MP）
+    let preview = synthetic(1920, 1080);
+    let full = synthetic(6000, 4000);
+
+    time("预览档 1920×1080 · 默认参数", &preview, &default, &curves);
+    time("预览档 1920×1080 · 曝光", &preview, &exposure, &curves);
+    time("预览档 1920×1080 · 全部调性", &preview, &all_tone, &curves);
+    time("预览档 1920×1080 · 带色度", &preview, &with_chroma, &curves);
+    time("1:1 档 6000×4000 · 默认参数", &full, &default, &curves);
+    time("1:1 档 6000×4000 · 曝光", &full, &exposure, &curves);
+    time("1:1 档 6000×4000 · 全部调性", &full, &all_tone, &curves);
+    time("1:1 档 6000×4000 · 带色度", &full, &with_chroma, &curves);
+    time("1:1 档 6000×4000 · 缩到预览档", &full, &default, &curves);
+
+    // 缩放的耗时单独量（它不是管线的一部分，但拖动档位时会走）
+    let start = Instant::now();
+    let small = full.downscaled_to(1920);
+    println!(
+        "\n6000×4000 → {}×{} 缩放：{:.1} ms",
+        small.width,
+        small.height,
+        start.elapsed().as_secs_f64() * 1000.0
+    );
+
+    if let Some(path) = path {
+        let path = Path::new(&path);
+        println!("\n── 真照片：{} ──", path.display());
+        let is_raw = raybend::display::pixels::is_raw_photo(path);
+        if is_raw {
+            // RAW 走**线性解码**（完整解码 + 去马赛克，M3-W3 的显影输入）
+            let request = raybend::raw::backend::DecodeRequest::full(path);
+            let start = Instant::now();
+            let worker = raybend::raw::worker::shared();
+            let result = worker.lock().expect("worker 锁").decode_linear(&request);
+            let elapsed = start.elapsed();
+            match result {
+                Ok(image) => {
+                    println!(
+                        "线性解码（{}×{}，{} 值，拍摄色温 {:?}）：{:.1} ms",
+                        image.width,
+                        image.height,
+                        image.rgb.len(),
+                        image.as_shot_temperature.map(|k| format!("{k:.0}K")),
+                        elapsed.as_secs_f64() * 1000.0
+                    );
+                    let linear = raybend::develop::LinearImage::new(
+                        image.width,
+                        image.height,
+                        image.rgb,
+                    )
+                    .expect("形状对");
+                    time("RAW 线性源 · 全部调性", &linear, &all_tone, &curves);
+                    let start = Instant::now();
+                    let small = linear.downscaled_to(1920);
+                    println!(
+                        "缩到预览档（{}×{}）：{:.1} ms",
+                        small.width,
+                        small.height,
+                        start.elapsed().as_secs_f64() * 1000.0
+                    );
+                    // 输出一张 PNG 当像素证据（人类可以目视）
+                    let out = render_rgb8(&small, &all_tone, &curves);
+                    if let Some(dir) = std::env::args().nth(2) {
+                        let target = Path::new(&dir).join("develop-probe-raw.png");
+                        let buffer = image::RgbImage::from_raw(small.width, small.height, out)
+                            .expect("尺寸对");
+                        buffer.save(&target).expect("写 PNG");
+                        println!("像素证据：{}", target.display());
+                    }
+                }
+                Err(error) => println!("线性解码失败：{error}"),
+            }
+        } else {
+            let start = Instant::now();
+            match raybend::display::pixels(path, raybend::display::PixelSize::Full) {
+                Ok(Some(pixels)) => {
+                    println!(
+                        "解码（8bit sRGB，{}×{}，{}）：{:.1} ms",
+                        pixels.width,
+                        pixels.height,
+                        pixels.size.as_str(),
+                        start.elapsed().as_secs_f64() * 1000.0
+                    );
+                    let linear = LinearImage::from_srgb8(pixels.width, pixels.height, &pixels.rgb)
+                        .expect("形状对");
+                    time("真照片（线性化后）· 全部调性", &linear, &all_tone, &curves);
+                }
+                Ok(None) => println!("解不开这张照片"),
+                Err(error) => println!("解码失败：{error}"),
+            }
+        }
+    }
+}

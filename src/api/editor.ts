@@ -14,7 +14,12 @@
  * 图是 wgpu 直接画到窗口上的。
  */
 
-import type { EditorRenderState, EditorViewportIntent, EditorViewportState } from "./types.ts";
+import type {
+  EditorRenderState,
+  EditorViewportIntent,
+  EditorViewportState,
+  DevelopParamsPayload,
+} from "./types.ts";
 import type { EditorViewportPayload } from "../lib/editor-viewport.ts";
 import { isTauriRuntime } from "./tauri-env.ts";
 
@@ -77,6 +82,21 @@ export async function sendEditorViewportIntent(
 }
 
 /**
+ * **显影参数**（拉杆 / 曲线）—— 参数一变就发，渲染线程重算像素。
+ *
+ * 拖动中每帧一条完全没问题：渲染线程按「最新者优先」丢弃过期任务（`editor.rs` 的
+ * `develop_loop`），而且管线跑在**显影线程**上，渲染线程永远只管画上一张。
+ *
+ * 浏览器里返回 `null`（没有渲染线程可喂）。
+ */
+export async function setEditorParams(
+  params: DevelopParamsPayload,
+): Promise<EditorRenderState | null> {
+  if (!isTauriRuntime()) return null;
+  return call<EditorRenderState>("editor_set_params", { params });
+}
+
+/**
  * 读渲染线程的状态（前端每 250ms 一次）。
  *
  * 它同时干两件事：**握手**（`ready` + `paintedPath` 决定洞口那条 DOM 链要不要透明）
@@ -85,4 +105,53 @@ export async function sendEditorViewportIntent(
 export async function getEditorRenderState(): Promise<EditorRenderState | null> {
   if (!isTauriRuntime()) return null;
   return call<EditorRenderState>("editor_render_state");
+}
+
+/* ══════════════════════════════════════════════════════════════
+ * 编辑栈（`latest`）—— M3-W3 的落库口
+ * ══════════════════════════════════════════════════════════════ */
+
+/** 一张照片的编辑栈（与 Rust 侧 `DevelopStackDto` 逐字对应）。 */
+export interface DevelopStack {
+  /** 参数 id → 值（**只装与基线不同的项**） */
+  values: Record<string, number>;
+  /** 通道 → 控制点（归一化 0..1）；只装动过的通道 */
+  curves: Record<string, [number, number][]>;
+}
+
+/** 读这张照片的编辑栈（没有 = 空栈，不是错误）。 */
+export async function getDevelopStack(
+  repositoryId: string,
+  assetId: number,
+): Promise<DevelopStack | null> {
+  if (!isTauriRuntime()) return null;
+  return call<DevelopStack>("develop_get", { repositoryId, assetId });
+}
+
+/**
+ * **落库**（覆盖式：载荷里没有的项 = 没动过 = 删掉）。
+ *
+ * 只在**松手**时调（拖动中每帧都写库会把单写者线程淹掉，也毫无意义）。
+ */
+export async function commitDevelopStack(
+  repositoryId: string,
+  assetId: number,
+  stack: DevelopStack,
+): Promise<DevelopStack | null> {
+  if (!isTauriRuntime()) return null;
+  return call<DevelopStack>("develop_commit", {
+    repositoryId,
+    assetId,
+    values: stack.values,
+    curves: stack.curves,
+  });
+}
+
+/** 重置全部（清掉这张照片的编辑栈）。 */
+export async function resetDevelopStack(
+  repositoryId: string,
+  assetId: number,
+): Promise<DevelopStack | null> {
+  if (!isTauriRuntime()) return null;
+  return call<DevelopStack>("develop_reset", { repositoryId, assetId });
 }

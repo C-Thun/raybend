@@ -111,6 +111,7 @@ pub const APP_MIGRATIONS: &[Migration] = &[
 /// * v2 `marking_tags_geo`：色标·喜欢·锁 / 作者·描述·地理 / EXIF 时区 /
 ///   资产↔标签关联 / 全文索引加 `description`（BROWSE.md §3·§7·§9）
 /// * v3 `source_identity`：`asset_files` 的**源身份**列（判重用，REPOSITORY.md §4.3）
+/// * v5 `develop`：编辑栈（`develop_stacks` / `develop_params` / `develop_curves`，M3-W3）
 pub const CATALOG_MIGRATIONS: &[Migration] = &[
     Migration {
         version: 1,
@@ -132,6 +133,12 @@ pub const CATALOG_MIGRATIONS: &[Migration] = &[
         // 文件创建时间（右栏「文件基础信息」的创建日期）
         name: "file_created",
         sql: include_str!("migrations/catalog_0004_file_created.sql"),
+    },
+    Migration {
+        version: 5,
+        // 编辑栈（参数 + 曲线；本轮只有 `latest` 一个存储位）
+        name: "develop",
+        sql: include_str!("migrations/catalog_0005_develop.sql"),
     },
 ];
 
@@ -301,8 +308,12 @@ pub fn apply(
 }
 
 /// 用一份**给定的**迁移列表执行（测试用；生产走 [`apply`]）。
+///
+/// `pub(crate)` 是给**别的模块的迁移测试**用的：造一个「历史版本」的库
+/// （例如只跑到 v4），再验证升到最新版之后老数据不丢 ——
+/// `store::develop` 的升级测试就是这么写的。
 #[cfg(test)]
-fn apply_list(
+pub(crate) fn apply_list(
     conn: &mut Connection,
     kind: DbKind,
     migrations: &[Migration],
@@ -613,8 +624,8 @@ mod tests {
             1_789_516_800_000,
         )
         .unwrap();
-        assert_eq!((out.from, out.to), (0, 4));
-        assert_eq!(out.applied, vec![1, 2, 3, 4]);
+        assert_eq!((out.from, out.to), (0, 5));
+        assert_eq!(out.applied, vec![1, 2, 3, 4, 5]);
         for table in [
             "repository_meta",
             "assets",
@@ -625,6 +636,10 @@ mod tests {
             "assets_fts",
             "asset_tags",
             "idx_asset_files_source_identity",
+            // v5：编辑栈（M3-W3）
+            "develop_stacks",
+            "develop_params",
+            "develop_curves",
         ] {
             let n: i64 = conn
                 .query_row(
@@ -721,8 +736,8 @@ mod tests {
         .unwrap();
 
         let out = apply(&mut conn, DbKind::Catalog, Backups::none(), 1_789_516_800_001).unwrap();
-        assert_eq!((out.from, out.to), (2, 4), "只补跑 v3 与 v4");
-        assert_eq!(out.applied, vec![3, 4]);
+        assert_eq!((out.from, out.to), (2, 5), "只补跑 v3 / v4 / v5");
+        assert_eq!(out.applied, vec![3, 4, 5]);
 
         // 旧行还在，且新列是 NULL（不是被填了垃圾值）
         let (path, size, src_vol): (String, i64, Option<i64>) = conn

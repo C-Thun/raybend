@@ -25,17 +25,31 @@
  * 挂载时重读一遍当前目录（`AGENTS.md` §2.13：本地应用以「看到真相」为先）。
  */
 
-import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
+import {
+  createEffect,
+  createMemo,
+  createSignal,
+  onCleanup,
+  onMount,
+  Show,
+  untrack,
+  type JSX,
+} from "solid-js";
 
 import {
   bindEditorRenderer,
+  commitDevelopStack,
+  getDevelopStack,
   getEditorRenderState,
+  resetDevelopStack,
+  setEditorParams,
   setEditorPhoto,
   unbindEditorRenderer,
   sendEditorViewportIntent,
 } from "../../api/editor.ts";
+import { createLatestCoalescer } from "../../lib/editor-intent.ts";
 import { isTauriRuntime } from "../../api/tauri-env.ts";
-import type { EditorRenderState, EditorViewportIntent } from "../../api/types.ts";
+import type { DevelopParamsPayload, EditorRenderState, EditorViewportIntent } from "../../api/types.ts";
 import { getHistogram, getThumbBytes, listRepositories } from "../../api/db.ts";
 import type { AssetItem, RepositoryView } from "../../api/types.ts";
 import { browseSource } from "../../features/browse/grid-source.ts";
@@ -185,11 +199,20 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
    * * `ready` —— 设备与 surface 都就绪；
    * * `paintedPath` —— **真的出过图**；没有它就没有「谁在画这块矩形」的保证。
    */
+  /** 编辑栈落库 / 读取的错误（**不静默**：画面还是对的，但改动会丢，必须让人看见）。 */
+  const [developError, setDevelopError] = createSignal<string | null>(null);
+
   const applyRenderState = (state: EditorRenderState | null): void => {
     props.store.setRenderState(state);
     props.store.setHoleActive(
       state !== null && state.bound && state.ready && state.paintedPath !== null,
     );
+    /*
+     * 拍摄色温（K）由渲染线程从 RAW 元数据算出来 —— 它是**色温拉杆的基线**
+     * （`AGENTS.md` §11.5：载入照片时标尺要挪到照片自己的色温上）。
+     * 写进 store 之后，载荷里的 `asShotTemperature` 跟着变 ⇒ 参数自动重发一次。
+     */
+    props.store.setAsShotTemperature(state?.asShotTemperature ?? null);
   };
 
   /** 发一条视口意图（缩放 / 平移 / 适配）——失败只记控制台，不带崩界面。 */
@@ -234,6 +257,29 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
     });
   });
 
+  /**
+   * **参数 → 管线**：载荷一变就发（帧合并 + 尾样本必发，见 `createLatestCoalescer`）。
+   *
+   * 拖动中每帧一条完全没问题：Rust 侧按「最新者优先」丢弃过期任务，
+   * 而且管线跑在**显影线程**上 —— 渲染线程永远只管画上一张，拖动与缩放不会卡。
+   */
+  const paramsSender = createLatestCoalescer<DevelopParamsPayload>({
+    send: (payload) => {
+      void setEditorParams(payload).catch((error: unknown) => {
+        console.error("[editor] 显影参数被拒", error); // i18n-exempt: 控制台诊断
+      });
+    },
+  });
+  onCleanup(() => {
+    paramsSender.dispose();
+  });
+
+  createEffect(() => {
+    const payload = props.store.developPayload();
+    if (!rendererBound()) return;
+    paramsSender.push(payload);
+  });
+
   /** 锚点一变就换纹理（渲染线程自己负责解码与两档切换）。 */
   createEffect(() => {
     if (!rendererBound()) return;
@@ -241,6 +287,96 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
     void setEditorPhoto(path).catch((error: unknown) => {
       console.error("[editor] 换照片失败", error); // i18n-exempt: 控制台诊断
     });
+  });
+
+  /**
+   * **落库**（覆盖式）：松手 / 点重置时把当前载荷写进 catalog。
+   *
+   * 拖动中每帧都写库会把单写者线程淹掉，而且没有任何意义 ——
+   * 所以高频那条路是 `setEditorParams`（只发内存参数给渲染线程），
+   * 这一条只在**松手**时走一次。
+   */
+  const commitDevelop = (): void => {
+    const assetId = current()?.id;
+    const repositoryId = store.repositoryId();
+    if (assetId === null || assetId === undefined || repositoryId === null) return;
+    if (!props.store.developDirty()) return;
+    const rev = props.store.developRev();
+    const payload = props.store.developPayload();
+    void commitDevelopStack(repositoryId, Number(assetId), {
+      values: payload.values,
+      curves: payload.curves,
+    })
+      .then(() => {
+        // 只标「已落库」：库里回读的那一份与刚发出去的一致（Rust 侧会回读一遍验证）
+        props.store.markCommitted(rev);
+      })
+      .catch((error: unknown) => {
+        // 落库失败不静默：画面还是对的，但下次换照片会丢 —— 必须让人知道
+        console.error("[editor] 编辑栈落库失败", error); // i18n-exempt: 控制台诊断
+        setDevelopError(String(error));
+      });
+  };
+
+  /** 重置全部：库里清空 + 参数回默认（一次点击两个动作，别只做一半）。 */
+  const resetDevelop = (): void => {
+    const assetId = current()?.id;
+    const repositoryId = store.repositoryId();
+    props.store.resetParams();
+    if (assetId === null || assetId === undefined || repositoryId === null) return;
+    void resetDevelopStack(repositoryId, Number(assetId)).catch((error: unknown) => {
+      console.error("[editor] 重置编辑栈失败", error); // i18n-exempt: 控制台诊断
+      setDevelopError(String(error));
+    });
+  };
+
+  /**
+   * **换照片：先把库里那份编辑栈读回来**（`latest` 存储位）。
+   *
+   * 两条防线：
+   *
+   * 1. 读回来之前**记下 rev**，回来时 rev 变了（用户已经动过）就**不覆盖**用户的改动；
+   * 2. 离开这张照片时（effect 的 cleanup）如果还有没落库的改动，**先存到上一张上** ——
+   *    松手落库是主路径，这一条是兜底（拖动中途换照片、或松手事件被别的东西吃掉）。
+   */
+  let lastPhoto: { repositoryId: string; assetId: number } | null = null;
+  createEffect(() => {
+    const assetId = current()?.id;
+    const repositoryId = store.repositoryId();
+    onCleanup(() => {
+      // 换照片 / 卸载：把还没落库的改动存到**上一张**上
+      if (
+        lastPhoto !== null &&
+        untrack(() => props.store.developDirty())
+      ) {
+        const payload = untrack(() => props.store.developPayload());
+        void commitDevelopStack(lastPhoto.repositoryId, lastPhoto.assetId, {
+          values: payload.values,
+          curves: payload.curves,
+        }).catch((error: unknown) => {
+          console.error("[editor] 切换照片前落库失败", error); // i18n-exempt: 控制台诊断
+        });
+      }
+    });
+
+    if (assetId === null || assetId === undefined || repositoryId === null) {
+      lastPhoto = null;
+      return;
+    }
+    const id = Number(assetId);
+    lastPhoto = { repositoryId, assetId: id };
+    const revAtRequest = props.store.developRev();
+    void getDevelopStack(repositoryId, id)
+      .then((stack) => {
+        if (stack === null) return;
+        // 读的过程中用户已经动过：**不要**用库里那份盖掉他的改动
+        if (props.store.developRev() !== revAtRequest) return;
+        props.store.loadDevelop(stack.values, stack.curves);
+      })
+      .catch((error: unknown) => {
+        console.error("[editor] 读编辑栈失败", error); // i18n-exempt: 控制台诊断
+        setDevelopError(String(error));
+      });
   });
 
   /** 胶片带里的上一张 / 下一张（看图命令 `viewer.prev` / `viewer.next` 走这里）。 */
@@ -435,6 +571,9 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
             info={info()}
             thumbs={thumbs}
             loadHistogram={loadHistogram}
+            onCommit={commitDevelop}
+            onReset={resetDevelop}
+            error={developError()}
           />
         </aside>
       </div>

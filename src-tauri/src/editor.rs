@@ -42,6 +42,7 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, Runtime, State, WebviewWindow};
 
+use raybend::develop::{Curve, CurveChannel, CurveSet, DevelopParams, LinearImage, render_rgb8};
 use raybend::display::{self, PixelSize};
 use raybend::render::{
     FitMode, GpuContext, ImageTier, RenderImage, RenderOutcome, RestartPolicy, Verdict, tier_for,
@@ -397,28 +398,109 @@ enum RenderCommand {
     SetPhoto { path: Option<String> },
     /// 视口意图
     Intent(ViewportIntent),
-    /// 解码完了一张
-    Decoded(DecodeOutcome),
+    /// 显影参数（拉杆 / 曲线）变了 —— 只重算像素，不重新解码
+    ///
+    /// 带的是**已经校验过的**解析结果（命令层负责校验，线程里不再解析一遍）。
+    SetParams {
+        params: DevelopParams,
+        curves: CurveSet,
+    },
+    /// 显影完了一张（新照片或新参数）
+    Developed(DevelopOutcome),
     /// 结束会话（离开编辑器）
     Stop,
 }
 
-/// 一次解码任务（渲染线程 → 解码线程）。
-struct DecodeJob {
-    /// 单调递增的任务号：**只有最新那个的结果有效**（换照片/换档位会把旧的作废）
-    id: u64,
-    path: String,
-    tier: ImageTier,
+/// 前端送来的显影参数（**只装非默认项**；色温基线随照片走）。
+///
+/// 校验在这里（`into_parts`）：未知 id / 非法值 / 坏曲线一律**报错**，
+/// 不静默夹取 —— 一个 NaN 悄悄过去，整张图就变黑了，而界面上看不出原因。
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DevelopParamsDto {
+    /// 参数 id → 值（只装与基线不同的项）
+    #[serde(default)]
+    pub values: std::collections::BTreeMap<String, f64>,
+    /// 这张照片的 as-shot 色温（K）；`None` = 读不到
+    #[serde(default)]
+    pub as_shot_temperature: Option<f32>,
+    /// 通道（`rgb` / `r` / `g` / `b`）→ 控制点 `[[x, y], …]`（归一化 0..1）
+    #[serde(default)]
+    pub curves: std::collections::BTreeMap<String, Vec<[f32; 2]>>,
 }
 
-/// 解码线程 → 渲染线程。
-struct DecodeOutcome {
+impl DevelopParamsDto {
+    /// 转成管线要的两件东西（参数 + 曲线）。
+    ///
+    /// # Errors
+    /// 未知参数 id / 值非法 / 未知曲线通道 / 控制点不合法。
+    pub fn into_parts(self) -> Result<(DevelopParams, CurveSet), String> {
+        let params = DevelopParams::from_values(self.values, self.as_shot_temperature)?;
+        let mut curves = CurveSet::identity();
+        for (channel, points) in self.curves {
+            let Some(channel) = CurveChannel::parse(&channel) else {
+                return Err(format!("未知的曲线通道：{channel}"));
+            };
+            let curve = Curve::from_points(points)?;
+            curves.set_channel(channel, curve);
+        }
+        Ok((params, curves))
+    }
+}
+
+/// 一次**显影任务**（渲染线程 → 显影线程）。
+///
+/// 显影线程同时管两件事，因为它们是同一份数据的两个阶段：
+/// **解码**（文件 → 线性源，贵）与**按参数算像素**（线性源 → 显示像素，便宜）。
+/// 把源缓存在线程里，参数一变就只跑第二段 —— 这就是「拖拉杆要跟得上手」的全部秘密。
+struct DevelopJob {
+    /// 单调递增的任务号：**只有最新那个的结果有效**（换照片 / 换档位 / 又拖了一下）
     id: u64,
+    /// 这一次任务用的是第几版参数（回传给前端看「算完没有」）
+    rev: u64,
+    /// `Some(path)` = 先换照片（解码线性源）；`None` = 用缓存里的源重算
+    photo: Option<String>,
+    /// 输出档位（预览 = 缩到屏幕档；全尺寸 = 原尺寸）
+    tier: ImageTier,
+    params: DevelopParams,
+    curves: CurveSet,
+}
+
+/// 显影线程手里缓存的**线性源**（一张照片一份，含按档位缩好的预览副本）。
+struct CachedSource {
+    path: String,
+    /// 全尺寸线性源（显影的唯一输入）
+    full: LinearImage,
+    /// 屏幕档副本（第一次要预览档时缩一次，之后一直用）
+    preview: Option<LinearImage>,
+    /// 拍摄色温估计（K）——前端拿它当色温拉杆的基线
+    as_shot_temperature: Option<f32>,
+    /// 像素从哪来（`raw-linear` / `bitmap-linear`）
+    origin: String,
+}
+
+/// 一次显影的结果（显影线程 → 渲染线程）。
+struct DevelopOutcome {
+    id: u64,
+    rev: u64,
     path: String,
     tier: ImageTier,
-    /// 像素从哪来（`bitmap` / `raw-embedded-preview` / `raw-decoded`）
+    /// 像素从哪来（`bitmap` / `raw-linear`）——诊断与界面提示要看
     origin: String,
-    result: Result<RenderImage, String>,
+    /// 拍摄色温估计（K）——前端拿它当色温拉杆的基线
+    as_shot_temperature: Option<f32>,
+    /// 解码耗时（毫秒；只换照片那一次有值）
+    decode_ms: Option<f64>,
+    /// 管线耗时（毫秒）——**实施记录里的数字就是它**
+    develop_ms: f64,
+    result: Result<DevelopedImage, String>,
+}
+
+/// 显影好的像素（RGBA8 由渲染线程扩；这里给 RGB8）。
+struct DevelopedImage {
+    width: u32,
+    height: u32,
+    rgb: Vec<u8>,
 }
 
 /// 渲染线程的共享状态 —— **前端轮询读的就是它**（序列化后直接回给前端）。
@@ -450,8 +532,19 @@ pub struct RenderState {
     pub tier: Option<ImageTier>,
     /// 正在取的档位（不一样就说明解码还没回来）
     pub wanted_tier: Option<ImageTier>,
-    /// 像素从哪来（RAW 内嵌预览 / 完整解码 / 位图）
+    /// 像素从哪来（RAW 线性解码 / 位图线性化）
     pub origin: Option<String>,
+    /// **拍摄色温估计**（K）——前端拿它当色温拉杆的基线（`AGENTS.md` §11.5）
+    pub as_shot_temperature: Option<f32>,
+    /// 收到过几次显影参数（前端据此判断「我发的那次算完没有」：
+    /// `params_rev > applied_params_rev` = 还在算）
+    pub params_rev: u64,
+    /// 已经画到屏幕上的那一次参数（`applied_params_rev`）
+    pub applied_params_rev: u64,
+    /// 最近一次**管线**耗时（毫秒）——诊断与性能基线用
+    pub develop_ms: Option<f64>,
+    /// 最近一次**解码**耗时（毫秒；只有换照片那一次有值）
+    pub decode_ms: Option<f64>,
     pub zoom: f32,
     pub pan_x: f32,
     pub pan_y: f32,
@@ -715,6 +808,33 @@ pub fn editor_set_photo(
 }
 
 /// 发一条视口意图（前端**不做坐标数学**，只把看到的原始值报过来）。
+/// **显影参数**（拉杆 / 曲线）变了。
+///
+/// 前端在**每一帧合并后**发（拖动中每帧一条完全没问题：渲染线程按最新者优先丢弃过期任务，
+/// 见 `lib/editor-intent.ts` 那套「合并 + 尾样本」的口径）。
+///
+/// 非法值在这里**当面报错**（未知 id / NaN / 超范围 / 坏曲线），不静默夹取 ——
+/// 一个 NaN 悄悄过去整张图就变黑了，而界面上看不出原因。
+///
+/// # Errors
+/// 参数不合法时返回原因；渲染器还没起来时**不算错误**（返回当前状态，前端不必特判）。
+#[tauri::command]
+pub fn editor_set_params(
+    state: State<'_, EditorState>,
+    params: DevelopParamsDto,
+) -> Result<RenderState, String> {
+    let (parsed, curves) = params.into_parts()?;
+    if let Some(sender) = session_sender(&state) {
+        sender
+            .send(RenderCommand::SetParams {
+                params: parsed,
+                curves,
+            })
+            .map_err(|_| "渲染线程不在了".to_string())?;
+    }
+    current_render_state(&state)
+}
+
 #[tauri::command]
 pub fn editor_viewport_intent(
     state: State<'_, EditorState>,
@@ -890,20 +1010,36 @@ fn run_session<R: Runtime>(
         state.note(format!("渲染器就绪（{} / {}）", adapter.backend, details.format));
     }
 
-    // 解码线程：与这一轮会话同生共死（Stop 之后由通道断开自然退出）
-    let (decode_sender, decode_receiver) = channel::<DecodeJob>();
-    let decode_commands = commands.clone();
+    // 显影线程：与这一轮会话同生共死（Stop 之后由通道断开自然退出）
+    let (develop_sender, develop_receiver) = channel::<DevelopJob>();
+    let develop_commands = commands.clone();
     let max_texture = context.max_texture_dimension_2d();
-    let decoder = std::thread::Builder::new()
-        .name("editor-decode".to_string())
-        .spawn(move || decode_loop(decode_receiver, decode_commands, max_texture));
+    let developer = std::thread::Builder::new()
+        .name("editor-develop".to_string())
+        .spawn(move || develop_loop(develop_receiver, develop_commands, max_texture));
 
-    let exit = session_loop(&mut context, receiver, shared, &decode_sender);
-    drop(decode_sender); // 让解码线程看到通道关闭
-    if let Ok(handle) = decoder {
+    let exit = session_loop(&mut context, receiver, shared, &develop_sender);
+    drop(develop_sender); // 让显影线程看到通道关闭
+    if let Ok(handle) = developer {
         let _ = handle.join();
     }
     exit
+}
+
+/// 会话主线程手里那份「当前参数」（渲染线程算 job 时要用）。
+#[derive(Debug, Clone)]
+struct SessionParams {
+    params: DevelopParams,
+    curves: CurveSet,
+}
+
+impl Default for SessionParams {
+    fn default() -> Self {
+        Self {
+            params: DevelopParams::new(None),
+            curves: CurveSet::identity(),
+        }
+    }
 }
 
 /// 会话主循环：吃命令 → 画一帧 → 报状态。
@@ -911,11 +1047,12 @@ fn session_loop(
     context: &mut GpuContext,
     receiver: &Receiver<RenderCommand>,
     shared: &Arc<Mutex<RenderState>>,
-    decoder: &Sender<DecodeJob>,
+    developer: &Sender<DevelopJob>,
 ) -> SessionExit {
     let mut dirty = true;
     let mut latest_job: u64 = 0;
     let mut consecutive_errors: u32 = 0;
+    let mut session = SessionParams::default();
 
     loop {
         match receiver.recv_timeout(Duration::from_millis(200)) {
@@ -924,9 +1061,10 @@ fn session_loop(
                     command,
                     context,
                     shared,
-                    decoder,
+                    developer,
                     &mut latest_job,
                     &mut dirty,
+                    &mut session,
                 )
                     && let Ok(mut state) = shared.lock() {
                         state.last_error = Some(error.clone());
@@ -948,9 +1086,10 @@ fn session_loop(
                         command,
                         context,
                         shared,
-                        decoder,
+                        developer,
                         &mut latest_job,
                         &mut dirty,
+                        &mut session,
                     ) && let Ok(mut state) = shared.lock()
                     {
                         state.last_error = Some(error.clone());
@@ -1035,13 +1174,15 @@ fn session_loop(
 }
 
 /// 一条命令落到上下文上。返回 `Err` = 拒绝（前端能看见原因）。
+#[allow(clippy::too_many_arguments)]
 fn apply_command(
     command: RenderCommand,
     context: &mut GpuContext,
     shared: &Arc<Mutex<RenderState>>,
-    decoder: &Sender<DecodeJob>,
+    developer: &Sender<DevelopJob>,
     latest_job: &mut u64,
     dirty: &mut bool,
+    session: &mut SessionParams,
 ) -> Result<(), String> {
     match command {
         RenderCommand::Stop => Ok(()),
@@ -1081,7 +1222,7 @@ fn apply_command(
                 state.backdrop = validated.backdrop.into();
                 state.dpr = validated.dpr;
             }
-            ensure_tier(context, shared, decoder, latest_job);
+            ensure_output(context, shared, developer, latest_job, session);
             *dirty = true;
             Ok(())
         }
@@ -1093,16 +1234,21 @@ fn apply_command(
                     state.decode = "loading".to_string();
                     state.decode_error = None;
                     state.wanted_tier = Some(ImageTier::Preview);
+                    state.as_shot_temperature = None;
+                    state.tier = None;
                     state.history_photo(&path);
                     *latest_job += 1;
-                    let job = DecodeJob {
+                    let job = DevelopJob {
                         id: *latest_job,
-                        path,
+                        rev: state.params_rev,
+                        photo: Some(path),
                         tier: ImageTier::Preview,
+                        params: session.params.clone(),
+                        curves: session.curves.clone(),
                     };
                     drop(state);
-                    if decoder.send(job).is_err() {
-                        return Err("解码线程不在了".to_string());
+                    if developer.send(job).is_err() {
+                        return Err("显影线程不在了".to_string());
                     }
                 }
                 None => {
@@ -1115,22 +1261,66 @@ fn apply_command(
                     state.origin = None;
                     state.decode = "idle".to_string();
                     state.decode_error = None;
+                    state.as_shot_temperature = None;
                     drop(state);
                 }
             }
             *dirty = true;
             Ok(())
         }
-        RenderCommand::Decoded(outcome) => {
+        RenderCommand::SetParams { params, curves } => {
+            session.params = params;
+            session.curves = curves;
+            let mut state = lock_state(shared);
+            state.params_rev += 1;
+            let rev = state.params_rev;
+            let path = state.photo_path.clone();
+            if path.is_some() {
+                // 参数一变就重算：档位沿用「当前想要的」（正在 1:1 就按全尺寸算）
+                let wanted = state.wanted_tier.unwrap_or_else(|| {
+                    tier_for(context.viewport().zoom, state.tier.unwrap_or(ImageTier::Preview))
+                });
+                state.wanted_tier = Some(wanted);
+                state.decode = "loading".to_string();
+                *latest_job += 1;
+                let job = DevelopJob {
+                    id: *latest_job,
+                    rev,
+                    photo: None,
+                    tier: wanted,
+                    params: session.params.clone(),
+                    curves: session.curves.clone(),
+                };
+                drop(state);
+                if developer.send(job).is_err() {
+                    return Err("显影线程不在了".to_string());
+                }
+            }
+            *dirty = true;
+            Ok(())
+        }
+        RenderCommand::Developed(outcome) => {
             if outcome.id != *latest_job {
-                return Ok(()); // 过期结果：丢掉（换照片/换档位之后的旧任务）
+                return Ok(()); // 过期结果：丢掉（换照片/换参数之后的旧任务）
             }
             let mut state = lock_state(shared);
             state.wanted_tier = None;
+            state.decode_ms = outcome.decode_ms;
+            state.develop_ms = Some(outcome.develop_ms);
             match outcome.result {
                 Ok(image) => {
                     let size = (image.width, image.height);
-                    context.set_image(image);
+                    let Some(render_image) =
+                        RenderImage::from_rgb8(image.width, image.height, &image.rgb)
+                    else {
+                        state.decode = "error".to_string();
+                        state.decode_error = Some(format!(
+                            "显影结果的尺寸与字节数对不上：{}×{}",
+                            image.width, image.height
+                        ));
+                        return Ok(());
+                    };
+                    context.set_image(render_image);
                     let mut viewport = *context.viewport();
                     if viewport.fit_mode != FitMode::Free {
                         viewport.refit();
@@ -1145,12 +1335,17 @@ fn apply_command(
                     state.origin = Some(outcome.origin);
                     state.decode = "ready".to_string();
                     state.decode_error = None;
+                    state.applied_params_rev = outcome.rev;
+                    if outcome.as_shot_temperature.is_some() {
+                        state.as_shot_temperature = outcome.as_shot_temperature;
+                    }
                     drop(state);
-                    ensure_tier(context, shared, decoder, latest_job);
+                    ensure_output(context, shared, developer, latest_job, session);
                 }
                 Err(error) => {
                     state.decode = "error".to_string();
                     state.decode_error = Some(error);
+                    state.applied_params_rev = outcome.rev;
                     drop(state);
                 }
             }
@@ -1209,19 +1404,22 @@ fn apply_command(
                     return Ok(());
                 }
             }
-            ensure_tier(context, shared, decoder, latest_job);
+            ensure_output(context, shared, developer, latest_job, session);
             *dirty = true;
             Ok(())
         }
     }
 }
 
-/// 需要换档位吗（缩放跨过 `1:1` 就要真解码）—— 需要就发一个解码任务。
-fn ensure_tier(
+/// 需要换档位吗（缩放跨过 `1:1` 就要全尺寸输出）—— 需要就让显影线程重出一张。
+///
+/// 注意：**这里不重新解码**（线性源缓存在显影线程里），只换输出尺寸。
+fn ensure_output(
     context: &GpuContext,
     shared: &Arc<Mutex<RenderState>>,
-    decoder: &Sender<DecodeJob>,
+    developer: &Sender<DevelopJob>,
     latest_job: &mut u64,
+    session: &SessionParams,
 ) {
     let mut state = lock_state(shared);
     let Some(path) = state.photo_path.clone() else {
@@ -1235,13 +1433,16 @@ fn ensure_tier(
     state.wanted_tier = Some(wanted);
     state.decode = "loading".to_string();
     *latest_job += 1;
-    let job = DecodeJob {
+    let job = DevelopJob {
         id: *latest_job,
-        path,
+        rev: state.params_rev,
+        photo: Some(path),
         tier: wanted,
+        params: session.params.clone(),
+        curves: session.curves.clone(),
     };
     drop(state);
-    let _ = decoder.send(job);
+    let _ = developer.send(job);
 }
 
 /// 把渲染器的状态如实地搬进快照。
@@ -1284,12 +1485,16 @@ impl RenderState {
     }
 }
 
-/// 解码线程：一次一张、**最新者优先**（过期的任务连做都不做）。
-fn decode_loop(
-    receiver: Receiver<DecodeJob>,
-    commands: Sender<RenderCommand>,
-    max_texture: u32,
-) {
+/// **显影线程**：一次一张、**最新者优先**（过期的任务连做都不做）。
+///
+/// 两件事都在这条线程上：**解码线性源**（贵，换照片时才做）与**按参数算像素**
+/// （便宜，拖拉杆时每帧一次）。源缓存在线程里 ⇒ 参数变化不必重新解码。
+///
+/// 为什么不在渲染线程上算：管线在 1:1 档要几十到一百多毫秒（实测见实施记录），
+/// 放渲染线程会让**拖动/缩放一起卡**。放这里，渲染线程只管画上一张，永远跟手。
+fn develop_loop(receiver: Receiver<DevelopJob>, commands: Sender<RenderCommand>, max_texture: u32) {
+    let mut cached: Option<CachedSource> = None;
+
     while let Ok(job) = receiver.recv() {
         // 队列里躺着的时候就可能已经过期了：先看通道里还有没有更新的（有就跳过这一个）
         let mut job = job;
@@ -1301,50 +1506,132 @@ fn decode_loop(
             }
         }
 
-        let size = match job.tier {
-            ImageTier::Preview => PixelSize::Screen,
-            ImageTier::Full => PixelSize::Full,
-        };
-        let (origin, result) = match display::pixels(Path::new(&job.path), size) {
-            Ok(Some(pixels)) => {
-                let origin = match pixels.origin {
-                    raybend::thumbnail::render::PixelOrigin::Bitmap => "bitmap",
-                    raybend::thumbnail::render::PixelOrigin::RawEmbeddedPreview => {
-                        "raw-embedded-preview"
+        // ① 需要的话先解码线性源（换照片 / 上一张解失败过）
+        let mut decode_ms = None;
+        let mut as_shot_temperature;
+        let mut origin = "bitmap".to_string();
+        if let Some(path) = job.photo.clone()
+            && cached.as_ref().is_none_or(|entry| entry.path != path)
+        {
+            let started = std::time::Instant::now();
+            match decode_linear_source(Path::new(&path), max_texture) {
+                Ok(source) => {
+                    decode_ms = Some(started.elapsed().as_secs_f64() * 1000.0);
+                    as_shot_temperature = source.as_shot_temperature;
+                    origin = source.origin.clone();
+                    cached = Some(CachedSource {
+                        path,
+                        full: source.image,
+                        preview: None,
+                        as_shot_temperature,
+                        origin: origin.clone(),
+                    });
+                }
+                Err(error) => {
+                    let outcome = DevelopOutcome {
+                        id: job.id,
+                        rev: job.rev,
+                        path,
+                        tier: job.tier,
+                        origin,
+                        as_shot_temperature: None,
+                        decode_ms: Some(started.elapsed().as_secs_f64() * 1000.0),
+                        develop_ms: 0.0,
+                        result: Err(error),
+                    };
+                    if commands.send(RenderCommand::Developed(outcome)).is_err() {
+                        return; // 渲染线程走了
                     }
-                    raybend::thumbnail::render::PixelOrigin::RawDecoded => "raw-decoded",
-                };
-                match RenderImage::from_rgb8(pixels.width, pixels.height, &pixels.rgb) {
-                    Some(image) => {
-                        // 夹到设备上限：超过 `max_texture_dimension_2d` 的图
-                        // `create_texture` 会直接报错（不是静默降级）
-                        let image = image.clamped_to_long_edge(max_texture);
-                        (origin.to_string(), Ok(image))
-                    }
-                    None => (
-                        origin.to_string(),
-                        Err(format!(
-                            "解码结果的尺寸与字节数对不上：{}×{}",
-                            pixels.width, pixels.height
-                        )),
-                    ),
+                    continue;
                 }
             }
-            Ok(None) => ("unknown".to_string(), Err(format!("解不开这张照片：{}", job.path))),
-            Err(error) => ("unknown".to_string(), Err(format!("{error}"))),
+        }
+
+        let Some(entry) = cached.as_mut() else {
+            continue; // 还没照片（前端先发 SetParams 后发 SetPhoto 的窗口期）
+        };
+        as_shot_temperature = entry.as_shot_temperature;
+        origin = entry.origin.clone();
+
+        // ② 按档位取源（预览档要缩一次，缩完缓存住）
+        let (source, width, height) = match job.tier {
+            ImageTier::Full => (&entry.full, entry.full.width, entry.full.height),
+            ImageTier::Preview => {
+                if entry.preview.is_none() {
+                    entry.preview = Some(entry.full.downscaled_to(PixelSize::SCREEN_EDGE));
+                }
+                let preview = entry.preview.as_ref().expect("刚补上的");
+                (preview, preview.width, preview.height)
+            }
         };
 
-        let outcome = DecodeOutcome {
+        // ③ 跑管线（这一段就是「拖一下要多久」的全部）
+        let started = std::time::Instant::now();
+        let rgb = render_rgb8(source, &job.params, &job.curves);
+        let develop_ms = started.elapsed().as_secs_f64() * 1000.0;
+
+        let outcome = DevelopOutcome {
             id: job.id,
-            path: job.path,
+            rev: job.rev,
+            path: entry.path.clone(),
             tier: job.tier,
             origin,
-            result,
+            as_shot_temperature,
+            decode_ms,
+            develop_ms,
+            result: Ok(DevelopedImage {
+                width,
+                height,
+                rgb,
+            }),
         };
-        if commands.send(RenderCommand::Decoded(outcome)).is_err() {
+        if commands.send(RenderCommand::Developed(outcome)).is_err() {
             return; // 渲染线程走了
         }
     }
+}
+
+/// 解码一张照片的**线性源**（显影管线的唯一输入）。
+///
+/// * RAW → `raw::worker` 的线性解码（完整解码 + 去马赛克，scene-referred）；
+/// * 位图 → 先解出 8bit sRGB 再线性化（**准线性**：8bit 里本来就没有更多信息）。
+///
+/// 长边超过设备的纹理上限时在这里缩掉（`create_texture` 会直接报错，不是静默降级）。
+fn decode_linear_source(path: &Path, max_texture: u32) -> Result<LinearSource, String> {
+    let started = std::time::Instant::now();
+    let (mut image, origin, as_shot_temperature) = if display::pixels::is_raw_photo(path) {
+        let request = raybend::raw::backend::DecodeRequest::full(path);
+        let worker = raybend::raw::worker::shared();
+        let mut guard = worker.lock().map_err(|_| "RAW worker 锁中毒".to_string())?;
+        let decoded = guard.decode_linear(&request).map_err(|e| e.to_string())?;
+        let image = LinearImage::new(decoded.width, decoded.height, decoded.rgb)
+            .ok_or_else(|| format!("线性解码结果的尺寸对不上：{}×{}", decoded.width, decoded.height))?;
+        (image, "raw-linear".to_string(), decoded.as_shot_temperature)
+    } else {
+        let Some(pixels) = display::pixels(path, PixelSize::Full).map_err(|e| e.to_string())? else {
+            return Err(format!("解不开这张照片：{}", path.display()));
+        };
+        let image = LinearImage::from_srgb8(pixels.width, pixels.height, &pixels.rgb)
+            .ok_or_else(|| format!("解码结果的尺寸对不上：{}×{}", pixels.width, pixels.height))?;
+        (image, "bitmap-linear".to_string(), None)
+    };
+    let long = image.width.max(image.height);
+    if max_texture > 0 && long > max_texture {
+        image = image.downscaled_to(max_texture);
+    }
+    let _ = started;
+    Ok(LinearSource {
+        image,
+        origin,
+        as_shot_temperature,
+    })
+}
+
+/// 解好的线性源（带出处与色温基线）。
+struct LinearSource {
+    image: LinearImage,
+    origin: String,
+    as_shot_temperature: Option<f32>,
 }
 
 #[cfg(test)]

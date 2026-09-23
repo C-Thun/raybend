@@ -9,7 +9,9 @@ import test from "node:test";
 
 import {
   CROP_RATIOS,
+  DECORATED_IDS,
   PARAMS,
+  PARAM_CONTRACT_VERSION,
   PARAM_DEFAULTS,
   cropRatioLabel,
   defaultParams,
@@ -17,9 +19,12 @@ import {
   formatParamValue,
   invertRatio,
   isParamDirty,
+  isParamWired,
+  paramSpec,
   paramsInGroup,
   type ParamSpec,
 } from "./params.ts";
+import contract from "../../api/develop-params.json" with { type: "json" };
 import {
   createEditorStrip,
   editorEmptyIcon,
@@ -30,6 +35,45 @@ import {
 } from "./source.ts";
 import type { ViewerPhoto } from "../../components/ui/viewer/index.ts";
 import type { MessageKey } from "../../i18n/index.ts";
+
+test("参数表：数字全部来自 develop-params.json（唯一真相）", () => {
+  assert.equal(PARAM_CONTRACT_VERSION, 1, "契约版本变了要一起改这里的断言");
+  assert.deepEqual(
+    PARAMS.map((p) => p.id),
+    contract.params.map((p) => p.id),
+    "两侧的 id 与顺序必须一致（Rust 侧还有一条同样的断言）",
+  );
+  assert.deepEqual(
+    [...DECORATED_IDS].sort(),
+    PARAMS.map((p) => p.id).sort(),
+    "装饰表与契约必须一一对应（多一条少一条都是 bug）",
+  );
+  for (const [index, spec] of PARAMS.entries()) {
+    const json = contract.params[index];
+    assert.equal(spec.min, json.min, `${spec.id}: min`);
+    assert.equal(spec.max, json.max, `${spec.id}: max`);
+    assert.equal(spec.step, json.step, `${spec.id}: step`);
+    assert.equal(spec.origin, json.origin, `${spec.id}: origin`);
+    assert.equal(spec.wired, json.wired, `${spec.id}: wired`);
+    assert.equal(spec.baseline, json.baseline, `${spec.id}: baseline`);
+  }
+  // M3-W3 接进管线的就是影调 + 色彩这 7 条；清晰度 / 镜头留 W4
+  assert.deepEqual(
+    PARAMS.filter((p) => p.wired).map((p) => p.id),
+    ["exposure", "contrast", "highlights", "blacks", "temperature", "saturation", "vibrance"],
+  );
+  assert.equal(isParamWired("exposure"), true);
+  assert.equal(isParamWired("sharpenAmount"), false);
+  assert.equal(isParamWired("不存在"), false);
+  assert.equal(paramSpec("temperature")?.baseline, "as-shot", "色温的默认值随照片");
+  assert.equal(paramSpec("exposure")?.baseline, "static");
+});
+
+test("动过没有：可以把「这张照片的基线」传进来（色温用）", () => {
+  assert.equal(isParamDirty("temperature", 5200), true, "拿静态兜底 6250 比，5200 算动过");
+  assert.equal(isParamDirty("temperature", 5200, 5200), false, "按照片基线比就不算动过");
+  assert.equal(isParamDirty("temperature", 7000, 5200), true);
+});
 
 test("参数表：id 唯一、分组齐全、范围合法", () => {
   const ids = PARAMS.map((p) => p.id);

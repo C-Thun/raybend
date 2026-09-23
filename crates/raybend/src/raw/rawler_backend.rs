@@ -19,12 +19,16 @@
 use std::path::Path;
 
 use image::{DynamicImage, GenericImageView};
+use rawler::RawImage;
 use rawler::RawLoader;
 use rawler::decoders::{Decoder, RawDecodeParams};
-use rawler::imgop::develop::{ProcessingStep, RawDevelop};
+use rawler::imgop::develop::{Intermediate, ProcessingStep, RawDevelop};
+use rawler::imgop::xyz::Illuminant;
 use rawler::rawsource::RawSource;
 
-use super::backend::{DecodeRequest, PixelSource, RawBackend, RawError, RawImage8, RawResult};
+use super::backend::{
+    DecodeRequest, PixelSource, RawBackend, RawError, RawImage16, RawImage8, RawResult,
+};
 use super::precheck::{Precheck, precheck};
 
 /// 内嵌预览**至少**要有目标尺寸的这个百分比才用它（否则真解码）。
@@ -38,8 +42,7 @@ pub const PREVIEW_MIN_PERCENT: u32 = 75;
 ///
 /// 刻意**不含**降噪 / 镜头校正 / 色调映射（那些属于编辑里程碑，见 `FUTURE.md` §D）。
 /// 末了一步 `SRgb` 是伽马编码 —— 输出给显示器看的，不是线性数据。
-/// 将来做显影管线时要的就是「到 `Calibrate` 为止的线性 f32」，届时用
-/// `RawDevelop::new_with(&LINEAR_STEPS)` 即可（本模块已经把它拆成常量）。
+/// 显影管线要的是「到 `Calibrate` 为止的线性 f32」——就是 [`LINEAR_STEPS`]。
 const BROWSING_STEPS: &[ProcessingStep] = &[
     ProcessingStep::Rescale,
     ProcessingStep::Demosaic,
@@ -49,6 +52,36 @@ const BROWSING_STEPS: &[ProcessingStep] = &[
     ProcessingStep::Calibrate,
     ProcessingStep::CropDefault,
     ProcessingStep::SRgb,
+];
+
+/// **显影管线用的步骤**（M3-W3）：与浏览那条**只差最后一步** —— 不做 sRGB 伽马。
+///
+/// 于是输出的就是「线性 sRGB f32」（`Calibrate` 已经把相机空间映射到 sRGB 原色，
+/// 见 `map_3ch_to_rgb`），再转成 u16 交给 `develop::pipeline`。
+///
+/// 两条步骤表**必须只差 `SRgb` 一项**：这是「浏览看到的图」与「显影管线的输入」
+/// 来自同一套解码的保证（否则同一张 RAW 在两个地方会解出不同的像素）。
+const LINEAR_STEPS: &[ProcessingStep] = &[
+    ProcessingStep::Rescale,
+    ProcessingStep::Demosaic,
+    ProcessingStep::FujiRotate,
+    ProcessingStep::CropActiveArea,
+    ProcessingStep::WhiteBalance,
+    ProcessingStep::Calibrate,
+    ProcessingStep::CropDefault,
+];
+
+/// 找色彩矩阵时优先要的照明（与 `develop_intermediate` 里的 `Calibrate` 同一张表）。
+const CALIBRATION_ILLUMINANTS: &[Illuminant] = &[
+    Illuminant::D65,
+    Illuminant::A,
+    Illuminant::B,
+    Illuminant::C,
+    Illuminant::D50,
+    Illuminant::D55,
+    Illuminant::D75,
+    Illuminant::Daylight,
+    Illuminant::Flash,
 ];
 
 /// rawler 后端。
@@ -68,41 +101,21 @@ impl RawBackend for RawlerBackend {
     }
 
     fn decode(&self, req: &DecodeRequest) -> RawResult<RawImage8> {
-        // 分步计时（只在 `RAYBEND_RAW_TRACE=1` 时输出到 stderr —— 这条路径跑在
-        // worker 进程里，stderr 是继承的，所以父进程的日志里能直接看到）
-        let trace = std::env::var_os("RAYBEND_RAW_TRACE").is_some();
-        let t0 = std::time::Instant::now();
-
-        // 预检（本后端自己也做一道：它可能被单独测试/单跑，不能指望调用方已经做过）
-        match precheck(&req.path) {
-            Precheck::Ok { .. } => {}
-            Precheck::Rejected(why) => return Err(RawError::NotRaw(why)),
-        }
-        let mark = |label: &str| {
-            if trace {
-                eprintln!("[raw] {label}: {:?}", t0.elapsed());
-            }
-        };
-        mark("precheck");
-
-        let source = RawSource::new(&req.path)
-            .map_err(|e| RawError::Io(format!("{}：{e}", req.path.display())))?;
-        mark("open");
-        let loader = loader();
-        mark("loader");
-        let decoder = loader
-            .get_decoder(&source)
-            .map_err(|e| RawError::Unsupported(e.to_string()))?;
-        mark("detect");
-        let params = RawDecodeParams::default();
-
+        let trace = Tracer::new();
+        let opened = open(req)?;
+        let Opened {
+            source,
+            decoder,
+            params,
+        } = &opened;
+        trace.mark("open");
         let need = req.max_edge.unwrap_or(u32::MAX);
 
         if req.allow_preview
-            && let Some(found) = pick_embedded(decoder.as_ref(), &source, &params, need)
+            && let Some(found) = pick_embedded(decoder.as_ref(), source, params, need)
         {
             let (img, source_kind) = found;
-            mark("embedded");
+            trace.mark("embedded");
             /*
              * 方向：**只在读不到外层 EXIF 的容器上才花这 50ms**。
              *
@@ -113,33 +126,239 @@ impl RawBackend for RawlerBackend {
              * 拿不到方向不会让图崩，最多是「竖拍看起来是躺着的」；管线那边拿不到方向会按 1 处理。
              */
             let orientation = if needs_metadata_orientation(&req.path) {
-                read_orientation(decoder.as_ref(), &source, &params)
+                read_orientation(decoder.as_ref(), source, params)
             } else {
                 None
             };
-            mark("metadata");
+            trace.mark("metadata");
             let out = finish(img, req.max_edge, source_kind, orientation);
-            mark("finish");
+            trace.mark("finish");
             return out;
         }
 
-        // ── 真实解码 ──
+        // ── 真实解码（8bit sRGB：黑电平 / 白平衡 / 色彩矩阵 / sRGB 伽马）──
         let raw = decoder
-            .raw_image(&source, &params, false)
+            .raw_image(source, params, false)
             .map_err(|e| classify(e.to_string()))?;
-        mark("raw_image");
+        trace.mark("raw_image");
         let orientation = Some(raw.orientation.to_u16());
         let develop = RawDevelop::new_with(BROWSING_STEPS);
         let intermediate = develop
             .develop_intermediate(&raw)
             .map_err(|e| RawError::Decode(e.to_string()))?;
-        mark("develop");
+        trace.mark("develop");
         let img = intermediate
             .to_dynamic_image()
             .ok_or_else(|| RawError::Empty("显影结果无法转成图像".to_string()))?;
         let out = finish(img, req.max_edge, PixelSource::Decoded, orientation);
-        mark("finish");
+        trace.mark("finish");
         out
+    }
+
+    /// **线性解码**（M3-W3 的显影输入）：与 `decode` 同一条链，只是不做最后那步 sRGB 伽马。
+    ///
+    /// 输出是线性 sRGB 的 u16（见 [`RawImage16`]），外加**拍摄色温估计**
+    /// （色温拉杆的基线，`AGENTS.md` §11.5）。
+    fn decode_linear(&self, req: &DecodeRequest) -> RawResult<RawImage16> {
+        let trace = Tracer::new();
+        let opened = open(req)?;
+        let Opened {
+            source,
+            decoder,
+            params,
+        } = &opened;
+        trace.mark("open");
+
+        // 线性这条路**不走内嵌预览**：相机写的 JPEG 已经被机内处理过，
+        // 拿它当「场景参考」的数据源等于自欺（`FUTURE.md` D1）。
+        let raw = decoder
+            .raw_image(source, params, false)
+            .map_err(|e| classify(e.to_string()))?;
+        trace.mark("raw_image");
+
+        // 色温估计要在 `raw` 还在的时候算（后面 develop 只是借用它）
+        let as_shot_temperature = as_shot_temperature(&raw);
+        let orientation = Some(raw.orientation.to_u16());
+        let develop = RawDevelop::new_with(LINEAR_STEPS);
+        let intermediate = develop
+            .develop_intermediate(&raw)
+            .map_err(|e| RawError::Decode(e.to_string()))?;
+        trace.mark("develop");
+
+        let mut image = linear_from_intermediate(intermediate, orientation, as_shot_temperature)?;
+        if let Some(max_edge) = req.max_edge.filter(|edge| *edge > 0) {
+            let long = image.width.max(image.height);
+            if long > max_edge {
+                image = downscale(image, max_edge);
+            }
+        }
+        trace.mark("finish");
+        Ok(image)
+    }
+}
+
+/// 打开一次解码所需的全部东西（两条解码路径共用）。
+struct Opened {
+    source: RawSource,
+    decoder: Box<dyn Decoder>,
+    params: RawDecodeParams,
+}
+
+/// 预检 + 打开 + 认容器 + 取参数（**两条路径共用的唯一一份**）。
+fn open(req: &DecodeRequest) -> RawResult<Opened> {
+    // 预检（本后端自己也做一道：它可能被单独测试/单跑，不能指望调用方已经做过）
+    match precheck(&req.path) {
+        Precheck::Ok { .. } => {}
+        Precheck::Rejected(why) => return Err(RawError::NotRaw(why)),
+    }
+    let source = RawSource::new(&req.path)
+        .map_err(|e| RawError::Io(format!("{}：{e}", req.path.display())))?;
+    let loader = loader();
+    let decoder = loader
+        .get_decoder(&source)
+        .map_err(|e| RawError::Unsupported(e.to_string()))?;
+    Ok(Opened {
+        source,
+        decoder,
+        params: RawDecodeParams::default(),
+    })
+}
+
+/// 分步计时（只在 `RAYBEND_RAW_TRACE=1` 时输出到 stderr —— 这条路径跑在
+/// worker 进程里，stderr 是继承的，所以父进程的日志里能直接看到）。
+struct Tracer {
+    enabled: bool,
+    started: std::time::Instant,
+}
+
+impl Tracer {
+    fn new() -> Self {
+        Self {
+            enabled: std::env::var_os("RAYBEND_RAW_TRACE").is_some(),
+            started: std::time::Instant::now(),
+        }
+    }
+
+    fn mark(&self, label: &str) {
+        if self.enabled {
+            eprintln!("[raw] {label}: {:?}", self.started.elapsed());
+        }
+    }
+}
+
+/// `Intermediate`（f32）→ [`RawImage16`]（线性 u16）。
+///
+/// 走 `to_dynamic_image()` 再 `into_raw()`：**不做第二份拷贝**（`DynamicImage` 的
+/// 16bit 变体内部就是 `ImageBuffer`，`into_raw()` 直接把 `Vec` 交出来）。
+/// 单色（去马赛克关掉 / 单色传感器）与四通道（四色滤镜）都归一成三通道。
+fn linear_from_intermediate(
+    intermediate: Intermediate,
+    orientation: Option<u16>,
+    as_shot_temperature: Option<f32>,
+) -> RawResult<RawImage16> {
+    let Some(image) = intermediate.to_dynamic_image() else {
+        return Err(RawError::Empty("显影结果无法转成图像".to_string()));
+    };
+    let (width, height, rgb) = match image {
+        DynamicImage::ImageRgb16(buffer) => {
+            let (width, height) = buffer.dimensions();
+            (width, height, buffer.into_raw())
+        }
+        DynamicImage::ImageRgba16(buffer) => {
+            let (width, height) = buffer.dimensions();
+            // 丢掉 alpha（管线不吃它），保留前三个通道
+            let mut rgb = Vec::with_capacity((width as usize) * (height as usize) * 3);
+            for pixel in buffer.as_raw().as_chunks::<4>().0 {
+                rgb.extend_from_slice(&pixel[..3]);
+            }
+            (width, height, rgb)
+        }
+        DynamicImage::ImageLuma16(buffer) => {
+            let (width, height) = buffer.dimensions();
+            let mut rgb = Vec::with_capacity((width as usize) * (height as usize) * 3);
+            for value in buffer.as_raw() {
+                rgb.extend_from_slice(&[*value, *value, *value]);
+            }
+            (width, height, rgb)
+        }
+        other => {
+            // `to_dynamic_image` 只会给 16bit 的三种形态；真出现别的说明上游变了
+            return Err(RawError::Empty(format!(
+                "线性解码拿到了意外的像素形态：{:?}",
+                other.color()
+            )));
+        }
+    };
+    let out = RawImage16 {
+        width,
+        height,
+        rgb,
+        source: PixelSource::Decoded,
+        orientation,
+        as_shot_temperature,
+    };
+    if !out.is_consistent() {
+        return Err(RawError::Empty(format!(
+            "线性解码结果尺寸不合法：{width}×{height}"
+        )));
+    }
+    Ok(out)
+}
+
+/// 从相机元数据估**拍摄色温**（K）—— 色温拉杆的基线。
+///
+/// 做法（与 `develop::color` 里的数学同一份）：
+/// 相机中性 = `(1/wb_r, 1/wb_g, 1/wb_b)`（`wb_coeffs` 是「把这张照片的照明变成中性」的倍率），
+/// 乘上色彩矩阵的逆得到 XYZ，取色度再反查色温。
+///
+/// 读不到 / 算不出就返回 `None`（调用方退回默认值）—— **不许猜**。
+fn as_shot_temperature(raw: &RawImage) -> Option<f32> {
+    let (_, matrix) = raw.color_matrix_find_first(CALIBRATION_ILLUMINANTS.iter().copied())?;
+    if matrix.len() < 9 {
+        return None;
+    }
+    let xyz_to_cam = [
+        [matrix[0], matrix[1], matrix[2]],
+        [matrix[3], matrix[4], matrix[5]],
+        [matrix[6], matrix[7], matrix[8]],
+    ];
+    let neutral = camera_neutral_from_wb(&raw.wb_coeffs)?;
+    crate::develop::color::cct_from_camera_neutral(neutral, xyz_to_cam)
+}
+
+/// `wb_coeffs` → **相机空间的中性方向**（= 照明在相机里的响应）。
+///
+/// ❗ 只看**前三个**系数：四色传感器才有第 4 个，三色机器上它是 `NaN`
+/// （实测 Panasonic DC-G9 的 RW2：`[2.0859375, 1.0, 2.1953125, NaN]`）。
+/// 早先对整个数组查 `is_finite` ⇒ **所有三色机器都算不出色温**（基线永远是 `None`）。
+///
+/// `wb_coeffs` 的语义是「把这张照片的照明乘成中性」的倍率，所以照明的相机响应
+/// 就是它的**倒数**（绿归一为 1，与 rawler 的口径一致）。
+fn camera_neutral_from_wb(wb: &[f32; 4]) -> Option<[f32; 3]> {
+    let rgb = [wb[0], wb[1], wb[2]];
+    if !rgb.iter().all(|value| value.is_finite()) {
+        return None;
+    }
+    if rgb.iter().any(|value| value.abs() < 1e-6) {
+        return None;
+    }
+    Some([1.0 / rgb[0], 1.0 / rgb[1], 1.0 / rgb[2]])
+}
+
+/// 线性图的快速降采样（箱式平均，与 `develop::pipeline` 同一份实现）。
+fn downscale(image: RawImage16, long_edge: u32) -> RawImage16 {
+    let Some(linear) = crate::develop::LinearImage::new(image.width, image.height, image.rgb.clone())
+    else {
+        return image;
+    };
+    let small = linear.downscaled_to(long_edge);
+    RawImage16 {
+        width: small.width,
+        height: small.height,
+        rgb: small.rgb,
+        source: image.source,
+        orientation: image.orientation,
+        as_shot_temperature: image.as_shot_temperature,
     }
 }
 
@@ -301,6 +520,10 @@ mod tests {
         std::fs::write(path, &bytes).unwrap();
     }
 
+    fn close(a: f32, b: f32, tolerance: f32) -> bool {
+        (a - b).abs() <= tolerance
+    }
+
     #[test]
     fn missing_file_is_not_raw_error() {
         let backend = RawlerBackend::new();
@@ -364,6 +587,43 @@ mod tests {
                 "{name} 外层就能读到 EXIF，不该再花 50ms"
             );
         }
+    }
+
+    #[test]
+    fn camera_neutral_survives_the_nan_fourth_coefficient() {
+        // 真机实测值（Panasonic DC-G9 的 RW2）：第 4 个系数是 NaN ——
+        // 早先的写法在这里返回 None，于是**所有三色机器都没有色温基线**。
+        let neutral = camera_neutral_from_wb(&[2.085_937_5, 1.0, 2.195_312_5, f32::NAN])
+            .expect("前三个系数有效就该算得出来");
+        assert!(close(neutral[0], 1.0 / 2.085_937_5, 1e-6));
+        assert!(close(neutral[1], 1.0, 1e-6));
+        assert!(close(neutral[2], 1.0 / 2.195_312_5, 1e-6));
+        // 前三个里出现非法值 / 0 才算读不出来
+        assert!(camera_neutral_from_wb(&[f32::NAN, 1.0, 1.0, 1.0]).is_none());
+        assert!(camera_neutral_from_wb(&[2.0, 0.0, 2.0, 1.0]).is_none());
+    }
+
+    #[test]
+    fn as_shot_temperature_follows_a_known_illuminant() {
+        // 造一张「相机空间 = sRGB」的假图：相机中性 = 某色温的白 ⇒ 反查要回到那个色温
+        use crate::develop::color::{SRGB_TO_XYZ_D65, XYZ_TO_SRGB_D65, kelvin_to_xy, mat3_inverse, mat3_vec3, xy_to_xyz};
+        let xyz_to_cam = mat3_inverse(SRGB_TO_XYZ_D65).expect("可逆");
+        let matrix: Vec<f32> = xyz_to_cam.iter().flatten().copied().collect();
+        for kelvin in [3000.0f32, 5000.0, 6500.0] {
+            let (x, y) = kelvin_to_xy(kelvin);
+            let white = mat3_vec3(XYZ_TO_SRGB_D65, xy_to_xyz(x, y));
+            let wb = [1.0 / white[0], 1.0, 1.0 / white[2], f32::NAN];
+            let neutral = camera_neutral_from_wb(&wb).expect("有效");
+            let back = crate::develop::color::cct_from_camera_neutral(neutral, xyz_to_cam)
+                .expect("能反查");
+            // 容差 5%：这是个**估计值**（只用来把拉杆挪到位），不是色彩学意义上的精确 CCT ——
+            // 近似公式 + sRGB 矩阵往返都会带几十到一百多 K 的误差（3000K 实测差 ~100K）。
+            assert!(
+                (back - kelvin).abs() / kelvin < 0.05,
+                "{kelvin}K 反查成 {back}K"
+            );
+        }
+        let _ = &matrix;
     }
 
     #[test]

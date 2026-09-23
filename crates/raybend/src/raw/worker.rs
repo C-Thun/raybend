@@ -37,7 +37,7 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
-use super::backend::{PixelSource, RawBackend, RawImage8};
+use super::backend::{PixelSource, RawBackend, RawImage8, RawImage16};
 use super::rawler_backend::RawlerBackend;
 
 /// worker 进程的启动标记：主程序看到它就走 worker 循环（`main` 里判断）。
@@ -77,6 +77,9 @@ struct Request {
     max_edge: Option<u32>,
     #[serde(default)]
     allow_preview: bool,
+    /// 像素形态：缺省 / `"srgb8"` = 8bit sRGB（浏览用）；`"linear16"` = 线性 sRGB u16（显影用）。
+    #[serde(default)]
+    format: Option<String>,
     /// 仅 `op = "sleep"` 用（隔离演练）。
     #[serde(default)]
     secs: u64,
@@ -95,8 +98,48 @@ struct Response {
     source: Option<String>,
     #[serde(default)]
     orientation: Option<u16>,
+    /// 像素形态回执（与请求对得上；旧客户端不认它就当 `srgb8`）。
+    #[serde(default)]
+    format: Option<String>,
+    /// **拍摄色温估计**（K，只有 `linear16` 会给）——色温拉杆的基线。
+    #[serde(default)]
+    as_shot_temperature: Option<f32>,
     #[serde(default)]
     payload_len: u64,
+}
+
+/// 像素形态（协议层的字符串是稳定接口，**不要改**）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PixelFormat {
+    /// 8bit sRGB（浏览 / 缩略图）。
+    Srgb8,
+    /// 线性 sRGB u16（显影管线）。
+    Linear16,
+}
+
+impl PixelFormat {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Srgb8 => "srgb8",
+            Self::Linear16 => "linear16",
+        }
+    }
+}
+
+/// 响应里的像素来源字符串 → 枚举（认不出就当内嵌预览 —— 旧协议没有这个字段）。
+fn source_of(head: &Response) -> PixelSource {
+    match head.source.as_deref() {
+        Some("decoded") => PixelSource::Decoded,
+        _ => PixelSource::EmbeddedPreview,
+    }
+}
+
+/// 响应里的像素形态（认不出 / 没给 = `srgb8`）。
+fn format_of(head: &Response) -> PixelFormat {
+    match head.format.as_deref() {
+        Some("linear16") => PixelFormat::Linear16,
+        _ => PixelFormat::Srgb8,
+    }
 }
 
 /// worker 相关的一切失败（进程 / 协议 / 超时 / 解码）。
@@ -217,26 +260,15 @@ impl RawWorker {
         }
     }
 
-    /// 解码一张 RAW。失败时**不需要**调用方做清理（下次请求会自动重建进程）。
+    /// 解码一张 RAW（8bit sRGB）。失败时**不需要**调用方做清理（下次请求会自动重建进程）。
+    ///
+    /// # Errors
+    /// 进程故障（起不来 / 崩了 / 超时）、协议错、或解码本身失败。
     pub fn decode(
         &mut self,
         req: &super::backend::DecodeRequest,
     ) -> Result<RawImage8, WorkerError> {
-        let (head, payload) = match self.round_trip(req) {
-            Ok(pair) => pair,
-            Err(e) => {
-                if e.needs_respawn() {
-                    self.shutdown();
-                }
-                return Err(e);
-            }
-        };
-
-        if !head.ok {
-            return Err(WorkerError::Decode(
-                head.error.unwrap_or_else(|| "未知错误".to_string()),
-            ));
-        }
+        let (head, payload) = self.round_trip(req, PixelFormat::Srgb8)?;
         let width = head.width;
         let height = head.height;
         let expected = u64::from(width) * u64::from(height) * 3;
@@ -246,19 +278,59 @@ impl RawWorker {
                 payload.len()
             )));
         }
-        let source = match head.source.as_deref() {
-            Some("decoded") => PixelSource::Decoded,
-            _ => PixelSource::EmbeddedPreview,
-        };
         let image = RawImage8 {
             width,
             height,
             rgb: payload,
-            source,
+            source: source_of(&head),
             orientation: head.orientation,
         };
         if !image.is_consistent() {
             return Err(WorkerError::Protocol("解出来的图尺寸不合法".to_string()));
+        }
+        Ok(image)
+    }
+
+    /// 解码一张 RAW 成**线性 16 位**（M3-W3 的显影管线输入）。
+    ///
+    /// 载荷是 u16 小端（每像素 3 个值），与 [`RawImage8`] 的协议只差格式。
+    ///
+    /// # Errors
+    /// 同 [`Self::decode`]。
+    pub fn decode_linear(
+        &mut self,
+        req: &super::backend::DecodeRequest,
+    ) -> Result<RawImage16, WorkerError> {
+        let (head, payload) = self.round_trip(req, PixelFormat::Linear16)?;
+        if format_of(&head) != PixelFormat::Linear16 {
+            return Err(WorkerError::Protocol(format!(
+                "worker 回的像素形态不对：期望 linear16，收到 {:?}",
+                head.format
+            )));
+        }
+        let width = head.width;
+        let height = head.height;
+        let expected = u64::from(width) * u64::from(height) * 3 * 2;
+        if payload.len() as u64 != expected {
+            return Err(WorkerError::Protocol(format!(
+                "线性像素长度对不上：期望 {expected} 字节，收到 {}",
+                payload.len()
+            )));
+        }
+        let mut rgb = Vec::with_capacity(payload.len() / 2);
+        for chunk in payload.as_chunks::<2>().0 {
+            rgb.push(u16::from_le_bytes([chunk[0], chunk[1]]));
+        }
+        let image = RawImage16 {
+            width,
+            height,
+            rgb,
+            source: source_of(&head),
+            orientation: head.orientation,
+            as_shot_temperature: head.as_shot_temperature,
+        };
+        if !image.is_consistent() {
+            return Err(WorkerError::Protocol("线性解码结果尺寸不合法".to_string()));
         }
         Ok(image)
     }
@@ -270,6 +342,7 @@ impl RawWorker {
             path: String::new(),
             max_edge: None,
             allow_preview: false,
+            format: None,
             secs: 0,
         };
         let (resp, _) = self.round_trip_raw(&req)?;
@@ -289,6 +362,7 @@ impl RawWorker {
             path: String::new(),
             max_edge: None,
             allow_preview: false,
+            format: None,
             secs: 0,
         };
         let (resp, _) = self.round_trip_raw(&req)?;
@@ -308,6 +382,7 @@ impl RawWorker {
             path: String::new(),
             max_edge: None,
             allow_preview: false,
+            format: None,
             secs,
         };
         let (resp, _) = self.round_trip_raw(&req)?;
@@ -323,15 +398,32 @@ impl RawWorker {
     fn round_trip(
         &mut self,
         req: &super::backend::DecodeRequest,
+        format: PixelFormat,
     ) -> Result<(Response, Vec<u8>), WorkerError> {
         let wire = Request {
             op: "decode".to_string(),
             path: req.path.to_string_lossy().into_owned(),
             max_edge: req.max_edge,
             allow_preview: req.allow_preview,
+            format: Some(format.as_str().to_string()),
             secs: 0,
         };
-        self.round_trip_raw(&wire)
+        let pair = match self.round_trip_raw(&wire) {
+            Ok(pair) => pair,
+            Err(e) => {
+                if e.needs_respawn() {
+                    self.shutdown();
+                }
+                return Err(e);
+            }
+        };
+        let (head, payload) = pair;
+        if !head.ok {
+            return Err(WorkerError::Decode(
+                head.error.unwrap_or_else(|| "未知错误".to_string()),
+            ));
+        }
+        Ok((head, payload))
     }
 
     fn round_trip_raw(&mut self, wire: &Request) -> Result<(Response, Vec<u8>), WorkerError> {
@@ -370,6 +462,7 @@ impl RawWorker {
             path: String::new(),
             max_edge: None,
             allow_preview: false,
+            format: None,
             secs: 0,
         };
         match exchange(&shared, &handshake, HANDSHAKE_TIMEOUT) {
@@ -700,30 +793,68 @@ fn handle(request: Request) -> (Response, Vec<u8>) {
                 allow_preview: request.allow_preview,
             };
             let backend = RawlerBackend::new();
-            match backend.decode(&req) {
-                Ok(image) => {
-                    let payload_len = image.rgb.len() as u64;
-                    (
+            let linear = request.format.as_deref() == Some("linear16");
+            if linear {
+                match backend.decode_linear(&req) {
+                    Ok(image) => {
+                        // u16 → 小端字节（协议层只搬字节，形态由 format 字段说明）
+                        let mut payload = Vec::with_capacity(image.rgb.len() * 2);
+                        for value in &image.rgb {
+                            payload.extend_from_slice(&value.to_le_bytes());
+                        }
+                        let payload_len = payload.len() as u64;
+                        (
+                            Response {
+                                ok: true,
+                                error: None,
+                                width: image.width,
+                                height: image.height,
+                                source: Some(image.source.as_str().to_string()),
+                                orientation: image.orientation,
+                                format: Some("linear16".to_string()),
+                                as_shot_temperature: image.as_shot_temperature,
+                                payload_len,
+                            },
+                            payload,
+                        )
+                    }
+                    Err(e) => (
                         Response {
-                            ok: true,
-                            error: None,
-                            width: image.width,
-                            height: image.height,
-                            source: Some(image.source.as_str().to_string()),
-                            orientation: image.orientation,
-                            payload_len,
+                            ok: false,
+                            error: Some(e.to_string()),
+                            ..Response::default()
                         },
-                        image.rgb,
-                    )
+                        Vec::new(),
+                    ),
                 }
-                Err(e) => (
-                    Response {
-                        ok: false,
-                        error: Some(e.to_string()),
-                        ..Response::default()
-                    },
-                    Vec::new(),
-                ),
+            } else {
+                match backend.decode(&req) {
+                    Ok(image) => {
+                        let payload_len = image.rgb.len() as u64;
+                        (
+                            Response {
+                                ok: true,
+                                error: None,
+                                width: image.width,
+                                height: image.height,
+                                source: Some(image.source.as_str().to_string()),
+                                orientation: image.orientation,
+                                format: Some("srgb8".to_string()),
+                                as_shot_temperature: None,
+                                payload_len,
+                            },
+                            image.rgb,
+                        )
+                    }
+                    Err(e) => (
+                        Response {
+                            ok: false,
+                            error: Some(e.to_string()),
+                            ..Response::default()
+                        },
+                        Vec::new(),
+                    ),
+                }
             }
         }
         other => (

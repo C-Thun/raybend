@@ -1,20 +1,24 @@
 /**
- * 编辑参数表（**纯数据**，`design/editor.md` §3.7 + `DESIGN.md` §14.10）。
+ * 编辑参数表（`design/editor.md` §3.7 + `DESIGN.md` §14.10）。
  *
- * 这一份表同时喂三处，所以必须只有一份：
+ * # 数字的真相在 `src/api/develop-params.json`
  *
- * * 右栏第 2 组页签（`影调` / `色彩` / `清晰度` / `镜头`）的拉杆；
- * * W3 的 IPC 载荷（参数名 = 管线的一级）；
- * * 「全部重置」与「这一项回到默认」。
+ * 范围 / 步长 / 默认值 / 填充原点 / 本波接没接管线 —— 这些**不是**写在这里的，
+ * 而是从 `src/api/develop-params.json` 读进来；Rust 侧（`crates/raybend/src/develop/params.rs`）
+ * 对着同一份文件逐条断言。改数改那一处，两侧的测试会盯着。
  *
- * 每条参数自带：范围、步长、双极还是单极、要不要显示极值、几位小数 ——
- * 这些是**编辑器自己的口径**，写进组件里就会散成好几处。
+ * 本文件只补**界面装饰**：语言包 key、分组、小数位、单位、极值文案、要不要显示极值。
  *
- * ⚠️ 本波（M3-W1）拉杆只改数值、**不改画面**：显影管线在 W3 落地。
- * 但参数名与范围在这里定死，W3 只接管线、不动界面。
+ * # 为什么装饰与数字要分开
+ *
+ * 数字是**管线与界面共同依赖的口径**（改错一处就是「拉杆能拖、画面不对」）；
+ * 装饰（文案、小数位）只有界面关心。混在一起写，就会有人为了让标签好看去动范围。
  */
 
 import type { MessageKey } from "../../i18n/index.ts";
+// `with { type: "json" }` 不是多余的：`node --test` 跑单测时（`pnpm test`）
+// 没有它就报 ERR_IMPORT_ATTRIBUTE_MISSING —— Vite 那边两种写法都认。
+import contract from "../../api/develop-params.json" with { type: "json" };
 
 /** 右栏第 2 组的四个页签（也是参数的分组名）。 */
 export type ParamGroup = "tone" | "color" | "detail" | "lens";
@@ -29,6 +33,12 @@ export const GROUP_LABEL_KEY: Record<ParamGroup, MessageKey> = {
   lens: "editor.group.lens",
 };
 
+/** 填充从哪长（与 Rust 侧 `Origin` 同一套值）。 */
+export type ParamOrigin = "center" | "start";
+
+/** 默认值的来源（与 Rust 侧 `Baseline` 同一套值）。 */
+export type ParamBaseline = "static" | "as-shot";
+
 export interface ParamSpec {
   id: string;
   labelKey: MessageKey;
@@ -41,7 +51,16 @@ export interface ParamSpec {
    * `center` = 双极参数（曝光 / 反差 / 色温…），`start` = 单极参数（降噪 / 锐化）。
    * 与「把手在哪」无关 —— 把手永远只由当前值决定。
    */
-  origin: "center" | "start";
+  origin: ParamOrigin;
+  /**
+   * 本波（M3-W3）这条参数接进管线了吗。
+   *
+   * `false` = M3-W4 接（清晰度 / 镜头两组）：界面**必须禁用**并写明哪一波接 ——
+   * 一个能拖但没反应的拉杆比一个禁用的拉杆更糟。
+   */
+  wired: boolean;
+  /** 默认值从哪来（色温是 `as-shot`：随照片的元数据走）。 */
+  baseline: ParamBaseline;
   /** 两端是否显示极值。不显示时**槽位仍然保留**（否则同一列轨道会左右不齐）。 */
   limits: boolean;
   /** 小数位（值文本用） */
@@ -53,42 +72,127 @@ export interface ParamSpec {
   maxLabel?: string;
 }
 
+/** 契约文件里的一条（只关心数字那几项）。 */
+interface ContractParam {
+  id: string;
+  min: number;
+  max: number;
+  step: number;
+  default: number;
+  origin: string;
+  wired: boolean;
+  baseline: string;
+}
+
+const CONTRACT: { version: number; params: ContractParam[] } = contract as {
+  version: number;
+  params: ContractParam[];
+};
+
 /**
- * 参数表（顺序即界面顺序）。
+ * 界面装饰（按 id）。
  *
- * 范围口径：曝光是 EV（−2..+2），其余调性/色彩都是百分比式的 −100..100，
- * 降噪与锐化是 0..100 的单极；色温按开尔文给两端极值文案（2500/10000）——
- * 它的实际白平衡换算在 W3 的管线里做，这里只是**用户看到的刻度**。
+ * `group` / `labelKey` / `decimals` / `unit` / 极值文案 —— 都在这里；
+ * 数字不在这里（见文件头）。
  */
-export const PARAMS: readonly ParamSpec[] = [
-  // ── 影调 ──────────────────────────────────────────────
-  { id: "exposure", labelKey: "editor.param.exposure", group: "tone", min: -2, max: 2, step: 0.05, origin: "center", limits: true, decimals: 2, minLabel: "-2", maxLabel: "+2" },
-  { id: "contrast", labelKey: "editor.param.contrast", group: "tone", min: -100, max: 100, step: 1, origin: "center", limits: true, decimals: 0 },
-  { id: "highlights", labelKey: "editor.param.highlights", group: "tone", min: -100, max: 100, step: 1, origin: "center", limits: true, decimals: 0 },
-  { id: "blacks", labelKey: "editor.param.blacks", group: "tone", min: -100, max: 100, step: 1, origin: "center", limits: true, decimals: 0 },
+interface Decoration {
+  group: ParamGroup;
+  labelKey: MessageKey;
+  decimals: number;
+  unit?: string;
+  minLabel?: string;
+  maxLabel?: string;
+}
 
-  // ── 色彩 ──────────────────────────────────────────────
-  { id: "temperature", labelKey: "editor.param.temperature", group: "color", min: 2500, max: 10000, step: 50, origin: "center", limits: true, decimals: 0, unit: "K", minLabel: "2500", maxLabel: "10000" },
-  { id: "saturation", labelKey: "editor.param.saturation", group: "color", min: -100, max: 100, step: 1, origin: "center", limits: true, decimals: 0 },
-  { id: "vibrance", labelKey: "editor.param.vibrance", group: "color", min: -100, max: 100, step: 1, origin: "center", limits: true, decimals: 0 },
+const DECORATIONS: Record<string, Decoration> = {
+  exposure: { group: "tone", labelKey: "editor.param.exposure", decimals: 2, minLabel: "-2", maxLabel: "+2" },
+  contrast: { group: "tone", labelKey: "editor.param.contrast", decimals: 0 },
+  highlights: { group: "tone", labelKey: "editor.param.highlights", decimals: 0 },
+  blacks: { group: "tone", labelKey: "editor.param.blacks", decimals: 0 },
+  temperature: {
+    group: "color",
+    labelKey: "editor.param.temperature",
+    decimals: 0,
+    unit: "K",
+    minLabel: "2500",
+    maxLabel: "10000",
+  },
+  saturation: { group: "color", labelKey: "editor.param.saturation", decimals: 0 },
+  vibrance: { group: "color", labelKey: "editor.param.vibrance", decimals: 0 },
+  lumaNr: { group: "detail", labelKey: "editor.param.lumaNr", decimals: 0 },
+  colorNr: { group: "detail", labelKey: "editor.param.colorNr", decimals: 0 },
+  sharpenAmount: { group: "detail", labelKey: "editor.param.sharpenAmount", decimals: 0 },
+  sharpenRadius: { group: "detail", labelKey: "editor.param.sharpenRadius", decimals: 0 },
+  distortion: { group: "lens", labelKey: "editor.param.distortion", decimals: 0 },
+  vignette: { group: "lens", labelKey: "editor.param.vignette", decimals: 0 },
+  chromatic: { group: "lens", labelKey: "editor.param.chromatic", decimals: 0 },
+};
 
-  // ── 清晰度 ────────────────────────────────────────────
-  { id: "lumaNr", labelKey: "editor.param.lumaNr", group: "detail", min: 0, max: 100, step: 1, origin: "start", limits: true, decimals: 0 },
-  { id: "colorNr", labelKey: "editor.param.colorNr", group: "detail", min: 0, max: 100, step: 1, origin: "start", limits: true, decimals: 0 },
-  { id: "sharpenAmount", labelKey: "editor.param.sharpenAmount", group: "detail", min: 0, max: 100, step: 1, origin: "start", limits: true, decimals: 0 },
-  { id: "sharpenRadius", labelKey: "editor.param.sharpenRadius", group: "detail", min: 0, max: 100, step: 1, origin: "start", limits: true, decimals: 0 },
+/** 契约里的 `origin` 字符串 → 我们的联合类型（写错了当场报错，不静默吞）。 */
+function parseOrigin(id: string, origin: string): ParamOrigin {
+  if (origin === "center" || origin === "start") return origin;
+  // i18n-exempt: 契约文件写坏了才会看到的开发期错误（不是界面文案）
+  throw new Error(`develop-params.json：${id} 的 origin 不认识：${origin}`);
+}
 
-  // ── 镜头 ──────────────────────────────────────────────
-  { id: "distortion", labelKey: "editor.param.distortion", group: "lens", min: -100, max: 100, step: 1, origin: "center", limits: true, decimals: 0 },
-  { id: "vignette", labelKey: "editor.param.vignette", group: "lens", min: -100, max: 100, step: 1, origin: "center", limits: true, decimals: 0 },
-  { id: "chromatic", labelKey: "editor.param.chromatic", group: "lens", min: -100, max: 100, step: 1, origin: "center", limits: true, decimals: 0 },
-];
+/** 契约里的 `baseline` 字符串 → 我们的联合类型。 */
+function parseBaseline(id: string, baseline: string): ParamBaseline {
+  if (baseline === "static" || baseline === "as-shot") return baseline;
+  // i18n-exempt: 同上（契约文件写坏了才会看到）
+  throw new Error(`develop-params.json：${id} 的 baseline 不认识：${baseline}`);
+}
+
+/**
+ * 参数表（顺序即界面顺序，**由契约文件决定**）。
+ *
+ * 每一条都必须有装饰：契约里多一条没写装饰的，这里当场抛错（漏掉比画错更难发现）。
+ */
+export const PARAMS: readonly ParamSpec[] = CONTRACT.params.map((param) => {
+  const decoration = DECORATIONS[param.id];
+  if (decoration === undefined) {
+    // i18n-exempt: 同上（契约文件写坏了才会看到）
+    throw new Error(`develop-params.json 里的 ${param.id} 没有界面装饰（params.ts）`);
+  }
+  return {
+    id: param.id,
+    labelKey: decoration.labelKey,
+    group: decoration.group,
+    min: param.min,
+    max: param.max,
+    step: param.step,
+    origin: parseOrigin(param.id, param.origin),
+    wired: param.wired,
+    baseline: parseBaseline(param.id, param.baseline),
+    // 极值一律显示（`DESIGN.md` §14.10 的槽位规则由组件保证）
+    limits: true,
+    decimals: decoration.decimals,
+    ...(decoration.unit === undefined ? {} : { unit: decoration.unit }),
+    ...(decoration.minLabel === undefined ? {} : { minLabel: decoration.minLabel }),
+    ...(decoration.maxLabel === undefined ? {} : { maxLabel: decoration.maxLabel }),
+  };
+});
 
 export const PARAM_IDS: readonly string[] = PARAMS.map((param) => param.id);
+
+/** 契约文件里声明的版本（改结构时两侧一起看它）。 */
+export const PARAM_CONTRACT_VERSION: number = CONTRACT.version;
+
+/** 装饰表里没被契约覆盖的 id（测试用：两边必须一一对应）。 */
+export const DECORATED_IDS: readonly string[] = Object.keys(DECORATIONS);
 
 /** 某一组的参数（右栏按页签取）。 */
 export function paramsInGroup(group: ParamGroup): readonly ParamSpec[] {
   return PARAMS.filter((param) => param.group === group);
+}
+
+/** 按 id 取口径。 */
+export function paramSpec(id: string): ParamSpec | undefined {
+  return PARAMS.find((param) => param.id === id);
+}
+
+/** 这一条接进管线了吗（没接的界面禁用）。 */
+export function isParamWired(id: string): boolean {
+  return paramSpec(id)?.wired === true;
 }
 
 /**
@@ -97,8 +201,8 @@ export function paramsInGroup(group: ParamGroup): readonly ParamSpec[] {
  * 口径：**双极参数取区间中点**（曝光正好落在 0、色温落在 2500..10000 的中间 ——
  * 「不动」在双极拉杆上就是把手在正中），**单极参数取左端**（0）。
  *
- * 注意别用「是不是跨 0」判双极：色温的区间全是正数，但它仍然是双极的
- * （填充从中点向把手方向长）—— 判据是 `origin`，不是区间的符号。
+ * ⚠️ 色温的**真实**默认值是这张照片的 as-shot 色温（随照片变）—— 这里给的是
+ * 读不到元数据时的兜底。判断「动过没有」要用 `isParamDirty(id, value, baseline)`。
  */
 export const PARAM_DEFAULTS: Readonly<Record<string, number>> = Object.freeze(
   Object.fromEntries(
@@ -115,12 +219,13 @@ export function defaultParams(): Record<string, number> {
 }
 
 /**
- * 某个参数是不是「动过」（与默认值不同）。
+ * 某个参数是不是「动过」（与基线不同）。
  *
- * 用来把「已调整」显示出来（也让 W3 的「只把非默认项发给管线」有据可依）。
+ * `baseline` 不给时用静态默认值；色温这类 `as-shot` 参数由调用方把**这张照片的**
+ * 基线传进来（编辑器 store 有它）。
  */
-export function isParamDirty(id: string, value: number): boolean {
-  const base = PARAM_DEFAULTS[id];
+export function isParamDirty(id: string, value: number, baseline?: number): boolean {
+  const base = baseline ?? PARAM_DEFAULTS[id];
   return base === undefined ? false : value !== base;
 }
 
@@ -201,6 +306,8 @@ export const ANGLE_SPEC: ParamSpec = {
   max: 360,
   step: 0.1,
   origin: "center",
+  wired: false,
+  baseline: "static",
   limits: true,
   decimals: 1,
   unit: "°",

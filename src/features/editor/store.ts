@@ -19,7 +19,7 @@
 
 import { createSignal } from "solid-js";
 
-import type { EditorRenderState } from "../../api/types.ts";
+import type { DevelopParamsPayload, EditorRenderState } from "../../api/types.ts";
 import { t } from "../../i18n/index.ts";
 
 import {
@@ -49,6 +49,8 @@ import {
   CROP_RATIOS,
   defaultParams,
   invertRatio,
+  paramSpec,
+  PARAM_DEFAULTS,
   type CropRatio,
 } from "./params.ts";
 
@@ -113,14 +115,42 @@ export interface EditorStore {
   setAngle: (degrees: number) => void;
   resetAngle: () => void;
 
-  /* ── 调整参数（W3 接管线）──────────────────────────── */
+  /* ── 调整参数（M3-W3：真的改画面）──────────────────── */
   paramValue: (id: string) => number;
+  /** 这一项的**基线**（色温随照片的 as-shot，其余是静态默认值） */
+  paramBaseline: (id: string) => number;
   setParam: (id: string, value: number) => void;
+  /** 这一项回到基线（= DB 里删掉这一行） */
+  resetParam: (id: string) => void;
   resetParams: () => void;
+  /** 这张照片的拍摄色温（K）—— 色温拉杆的基线；`null` = 渲染线程还没解出来 */
+  asShotTemperature: () => number | null;
+  /** 渲染线程报回来的拍摄色温（工作区写进来；**不算用户改动**，不抬 rev） */
+  setAsShotTemperature: (kelvin: number | null) => void;
+  /** 当前 IPC 载荷（帧合并后发出去的那一份；只装与基线不同的项） */
+  developPayload: () => DevelopParamsPayload;
+  /** 参数变过几次（与 `committedRev` 比就知道「有没有还没落库的改动」） */
+  developRev: () => number;
+  /** 最近一次**成功落库**（或从库里读回来）对应的 rev */
+  committedRev: () => number;
+  /** 落库成功之后清掉 dirty 标记 */
+  markCommitted: (rev: number) => void;
+  /** 有没有还没落库的改动 */
+  developDirty: () => boolean;
+  /** 换照片：把库里读回来的一份编辑栈灌进来（并把它当成「已落库」） */
+  loadDevelop: (
+    values: Record<string, number>,
+    curves: Partial<Record<CurveChannel, readonly [number, number][]>>,
+  ) => void;
 
   /* ── 曲线 ───────────────────────────────────────────── */
   curveChannel: () => CurveChannel;
   setCurveChannel: (channel: CurveChannel) => void;
+  /** 某个通道的控制点（归一化 0..1；恒等曲线是 `[[0,0],[1,1]]`） */
+  curvePoints: (channel: CurveChannel) => readonly [number, number][];
+  setCurvePoints: (channel: CurveChannel, points: readonly [number, number][]) => void;
+  /** 某个通道回到恒等 */
+  resetCurve: (channel: CurveChannel) => void;
 
   /* ── LUT 分类（设备级偏好）─────────────────────────── */
   lutCategories: () => readonly LutCategory[];
@@ -146,6 +176,33 @@ export interface EditorStore {
    */
   holeActive: () => boolean;
   setHoleActive: (value: boolean) => void;
+}
+
+/** 恒等曲线的控制点（`[[0,0],[1,1]]`）。 */
+const IDENTITY_POINTS: readonly (readonly [number, number])[] = [
+  [0, 0],
+  [1, 1],
+];
+
+/** 四个通道的恒等曲线（**每次都要新对象** —— 直接改会被当成没变）。 */
+function identityCurves(): Record<CurveChannel, [number, number][]> {
+  return {
+    rgb: IDENTITY_POINTS.map((point) => [...point] as [number, number]),
+    r: IDENTITY_POINTS.map((point) => [...point] as [number, number]),
+    g: IDENTITY_POINTS.map((point) => [...point] as [number, number]),
+    b: IDENTITY_POINTS.map((point) => [...point] as [number, number]),
+  };
+}
+
+/** 一条曲线是不是恒等（只装动过的通道）。 */
+function isIdentityCurve(points: readonly (readonly [number, number])[]): boolean {
+  return (
+    points.length === 2 &&
+    points[0][0] === 0 &&
+    points[0][1] === 0 &&
+    points[1][0] === 1 &&
+    points[1][1] === 1
+  );
 }
 
 export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
@@ -192,8 +249,53 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
   const [angle, setAngleSignal] = createSignal(0);
   const [params, setParams] = createSignal<Record<string, number>>(defaultParams());
   const [curveChannel, setCurveChannel] = createSignal<CurveChannel>("rgb");
+  const [asShot, setAsShot] = createSignal<number | null>(null);
+  const [curves, setCurves] = createSignal<Record<CurveChannel, [number, number][]>>(
+    identityCurves(),
+  );
+  const [developRev, setDevelopRev] = createSignal(0);
+  const [committedRev, setCommittedRev] = createSignal(0);
   const [renderState, setRenderState] = createSignal<EditorRenderState | null>(null);
   const [holeActive, setHoleActive] = createSignal(false);
+
+  /** 参数动了一下：抬一次 rev（工作区据此发 IPC，DB 层据此判断要不要落库）。 */
+  const bumpDevelop = (): void => {
+    setDevelopRev((current) => current + 1);
+  };
+
+  /**
+   * 这一项的基线。
+   *
+   * 色温是**随照片**的（`baseline: "as-shot"`）：元数据读得到就用它，
+   * 读不到退回表里的静态默认值（6250）。其余参数就是静态默认值。
+   */
+  const paramBaseline = (id: string): number => {
+    const spec = paramSpec(id);
+    if (spec === undefined) return 0;
+    if (spec.baseline !== "as-shot") return PARAM_DEFAULTS[id] ?? spec.min;
+    const kelvin = asShot();
+    if (kelvin === null) return PARAM_DEFAULTS[id] ?? spec.min;
+    return Math.min(Math.max(kelvin, spec.min), spec.max);
+  };
+
+  /**
+   * 发出去的载荷：**只装与基线不同的项**（与 DB 同一口径）。
+   *
+   * 色温的基线来自这张照片的 as-shot —— 所以「载入后标尺就在照片自己的色温上」
+   * 这件事不是界面上的特例，而是数据层就长这样。
+   */
+  const developPayload = (): DevelopParamsPayload => {
+    const values: Record<string, number> = {};
+    for (const [id, value] of Object.entries(params())) {
+      if (value !== paramBaseline(id)) values[id] = value;
+    }
+    const dirtyCurves: Record<string, [number, number][]> = {};
+    for (const channel of CURVE_CHANNELS) {
+      const points = curves()[channel];
+      if (!isIdentityCurve(points)) dirtyCurves[channel] = points;
+    }
+    return { values, asShotTemperature: asShot(), curves: dirtyCurves };
+  };
 
   /** 面板状态一变就落盘（它只有开关两态，不需要防抖）。 */
   const persist = (next: EditorChromeState, nextCategories = categories()): void => {
@@ -275,12 +377,65 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
     setAngle: (degrees) => setAngleSignal(degrees),
     resetAngle: () => setAngleSignal(0),
 
-    paramValue: (id) => params()[id] ?? 0,
-    setParam: (id, value) => setParams((current) => ({ ...current, [id]: value })),
-    resetParams: () => setParams(defaultParams()),
+    paramValue: (id) => params()[id] ?? PARAM_DEFAULTS[id] ?? 0,
+    paramBaseline,
+    setParam: (id, value) => {
+      setParams((current) => ({ ...current, [id]: value }));
+      bumpDevelop();
+    },
+    resetParam: (id) => {
+      setParams((current) => ({ ...current, [id]: paramBaseline(id) }));
+      bumpDevelop();
+    },
+    resetParams: () => {
+      setParams(defaultParams());
+      setCurves(identityCurves());
+      bumpDevelop();
+    },
+    asShotTemperature: asShot,
+    setAsShotTemperature: (kelvin) => {
+      // 只换基线：**不抬 rev**（这不是用户的改动，标 dirty 会让「松手落库」误判）
+      setAsShot((current) => (current === kelvin ? current : kelvin));
+    },
+    developPayload,
+    developRev,
+    committedRev,
+    markCommitted: (rev) => setCommittedRev(rev),
+    developDirty: () => developRev() !== committedRev(),
+    loadDevelop: (values, loadedCurves) => {
+      const next = defaultParams();
+      for (const [id, value] of Object.entries(values)) {
+        if (typeof value === "number" && Number.isFinite(value)) next[id] = value;
+      }
+      setParams(next);
+      const merged = identityCurves();
+      for (const channel of CURVE_CHANNELS) {
+        const points = loadedCurves[channel];
+        if (points !== undefined && points.length >= 2) {
+          merged[channel] = points.map(([x, y]) => [x, y] as [number, number]);
+        }
+      }
+      setCurves(merged);
+      // 从库里读回来的就是「已落库」的状态
+      const nextRev = developRev() + 1;
+      setDevelopRev(nextRev);
+      setCommittedRev(nextRev);
+    },
 
     curveChannel,
     setCurveChannel,
+    curvePoints: (channel) => curves()[channel],
+    setCurvePoints: (channel, points) => {
+      setCurves((current) => ({
+        ...current,
+        [channel]: points.map(([x, y]) => [x, y] as [number, number]),
+      }));
+      bumpDevelop();
+    },
+    resetCurve: (channel) => {
+      setCurves((current) => ({ ...current, [channel]: IDENTITY_POINTS.map((p) => [...p] as [number, number]) }));
+      bumpDevelop();
+    },
 
     lutCategories: () => categories(),
     addCategory: (name) => {

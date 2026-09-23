@@ -9,6 +9,8 @@
 
 pub mod browse;
 pub mod db;
+/// 编辑栈的落库命令（M3-W3：读 / 落库 / 重置）。
+pub mod develop;
 /// 编辑视口：洞口契约（M3-W1）+ 渲染线程（M3-W2）。
 pub mod editor;
 /// 全屏看图（另开无边框窗口，沉浸式无 UI）。
@@ -252,8 +254,13 @@ pub fn run() {
             editor::editor_bind_renderer,
             editor::editor_unbind_renderer,
             editor::editor_set_photo,
+            editor::editor_set_params,
             editor::editor_viewport_intent,
             editor::editor_render_state,
+            // ── 编辑栈落库（M3-W3：松手才写库）──
+            develop::develop_get,
+            develop::develop_commit,
+            develop::develop_reset,
             // ── 全屏看图 ──
             fullscreen::fullscreen_open,
             fullscreen::fullscreen_payload,

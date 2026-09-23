@@ -86,6 +86,17 @@ export interface EditorPanelsProps {
   thumbs: ThumbQueue;
   /** 直方图取数（Rust 算的；注入进来，本模块不碰 `api`） */
   loadHistogram: (path: string, bins: number) => Promise<HistogramCounts | null>;
+  /**
+   * 参数**松手**了（拖动结束 / 点了重置）—— 工作区拿它落库。
+   *
+   * 拖动过程中只改画面不落库（`AGENTS.md` 的口径：松手才落库），
+   * 所以这里只给一个「可以存了」的信号，具体存什么由 store 的载荷决定。
+   */
+  onCommit?: () => void;
+  /** 「全部重置」—— 与单项不同：它要**同时**清库（工作区负责），所以单独一个口子 */
+  onReset?: () => void;
+  /** 落库 / 读库失败的原因（有值就显示一行提示 —— 不静默吞掉） */
+  error?: string | null;
   class?: string;
 }
 
@@ -167,8 +178,11 @@ export function EditorPanels(props: EditorPanelsProps): JSX.Element {
               <SliderRow
                 spec={spec}
                 value={props.store.paramValue(spec.id)}
-                disabled={!props.enabled}
+                /* 本波没接进管线的（清晰度 / 镜头）**禁用**并写明哪一波接 ——
+                   一个能拖但没反应的拉杆比一个禁用的拉杆更糟 */
+                disabled={!props.enabled || !spec.wired}
                 onValueChange={(value) => props.store.setParam(spec.id, value)}
+                onValueCommit={() => props.onCommit?.()}
               />
             )}
           </For>
@@ -178,11 +192,34 @@ export function EditorPanels(props: EditorPanelsProps): JSX.Element {
           </Show>
         </div>
         <div class="flex items-center justify-between gap-2">
-          <PendingNote text={t("editor.panel.pipelineLater")} class="flex-1" />
+          <Show
+            when={props.error == null}
+            fallback={
+              <p class="flex-1 text-fs-0 leading-snug text-danger" data-editor-develop-error>
+                {props.error}
+              </p>
+            }
+          >
+            <PendingNote
+              text={
+                paramTab() === "tone" || paramTab() === "color"
+                  ? t("editor.panel.live")
+                  : t("editor.panel.w4Later")
+              }
+              class="flex-1"
+            />
+          </Show>
           <Button
             variant="ghost"
             disabled={!props.enabled}
-            onClick={() => props.store.resetParams()}
+            onClick={() => {
+              if (props.onReset !== undefined) {
+                props.onReset();
+                return;
+              }
+              props.store.resetParams();
+              props.onCommit?.();
+            }}
           >
             {t("editor.panel.resetAll")}
           </Button>
@@ -356,7 +393,7 @@ function LensExtras(props: { enabled: boolean }): JSX.Element {
         disabled={!props.enabled}
         label={t("editor.lens.enable")}
       />
-      <PendingNote text={t("editor.panel.pipelineLater")} />
+      <PendingNote text={t("editor.panel.w4Later")} />
     </div>
   );
 }

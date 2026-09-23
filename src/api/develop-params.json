@@ -1,0 +1,34 @@
+{
+  "_comment": [
+    "显影参数的数字契约 —— **唯一真相**（范围 / 步长 / 默认值 / 填充原点 / 本波接没接管线）。",
+    "三处都对着它断言，改数就要一起改：",
+    "  * TS：src/features/editor/params.ts 读它建界面（src/features/editor/params.test.ts 守着）；",
+    "  * Rust：crates/raybend/src/develop/params.rs 的 PARAMS 表（该文件的单测逐条比对）；",
+    "  * 管线：develop::params::spec(id) 决定一个参数怎么被理解。",
+    "'origin' = 拉杆填充从哪长（center 双极 / start 单极），与'把手在哪'无关。",
+    "'wired' = 本波（M3-W3）这条参数接没接进显影管线；false 的界面要禁用并写明哪一波接。",
+    "'baseline' = 默认值的来源：'static' 用 default 字段；'as-shot' 表示随照片变（色温），",
+    "  default 只是读不到元数据时的兜底。",
+    "注意：参数表里**没有**曲线 —— 曲线是另一套模型（每通道控制点），不进这个文件。"
+  ],
+  "version": 1,
+  "params": [
+    { "id": "exposure", "min": -2, "max": 2, "step": 0.05, "default": 0, "origin": "center", "wired": true, "baseline": "static" },
+    { "id": "contrast", "min": -100, "max": 100, "step": 1, "default": 0, "origin": "center", "wired": true, "baseline": "static" },
+    { "id": "highlights", "min": -100, "max": 100, "step": 1, "default": 0, "origin": "center", "wired": true, "baseline": "static" },
+    { "id": "blacks", "min": -100, "max": 100, "step": 1, "default": 0, "origin": "center", "wired": true, "baseline": "static" },
+
+    { "id": "temperature", "min": 2500, "max": 10000, "step": 50, "default": 6250, "origin": "center", "wired": true, "baseline": "as-shot" },
+    { "id": "saturation", "min": -100, "max": 100, "step": 1, "default": 0, "origin": "center", "wired": true, "baseline": "static" },
+    { "id": "vibrance", "min": -100, "max": 100, "step": 1, "default": 0, "origin": "center", "wired": true, "baseline": "static" },
+
+    { "id": "lumaNr", "min": 0, "max": 100, "step": 1, "default": 0, "origin": "start", "wired": false, "baseline": "static" },
+    { "id": "colorNr", "min": 0, "max": 100, "step": 1, "default": 0, "origin": "start", "wired": false, "baseline": "static" },
+    { "id": "sharpenAmount", "min": 0, "max": 100, "step": 1, "default": 0, "origin": "start", "wired": false, "baseline": "static" },
+    { "id": "sharpenRadius", "min": 0, "max": 100, "step": 1, "default": 0, "origin": "start", "wired": false, "baseline": "static" },
+
+    { "id": "distortion", "min": -100, "max": 100, "step": 1, "default": 0, "origin": "center", "wired": false, "baseline": "static" },
+    { "id": "vignette", "min": -100, "max": 100, "step": 1, "default": 0, "origin": "center", "wired": false, "baseline": "static" },
+    { "id": "chromatic", "min": -100, "max": 100, "step": 1, "default": 0, "origin": "center", "wired": false, "baseline": "static" }
+  ]
+}

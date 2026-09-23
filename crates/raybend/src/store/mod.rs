@@ -36,6 +36,7 @@ pub mod backfill;
 pub mod rebuild;
 pub mod db;
 pub mod delete;
+pub mod develop;
 pub mod file_id;
 pub mod flags;
 pub mod marking;

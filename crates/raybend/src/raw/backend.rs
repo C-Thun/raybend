@@ -57,6 +57,45 @@ impl RawImage8 {
     }
 }
 
+/// 一张解好的 RAW 图：**线性 sRGB，16 位**（M3-W3 的显影管线输入）。
+///
+/// # 为什么是线性 sRGB、不是「相机空间」
+///
+/// rawler 的显影链在 `Calibrate` 步就把相机空间映射到了 **sRGB 原色的线性光**
+/// （`rgb2cam = normalize(xyz2cam · SRGB_TO_XYZ_D65)` 的伪逆）—— 所以到 `Calibrate`
+/// 为止、**去掉 `SRgb` 伽马步**，拿到的就是「线性 sRGB」。
+/// 这正是 `FUTURE.md` D1 要的 scene-referred 输入：调性在它上面做，不会在 8bit 显示空间里出色带。
+///
+/// # 精度
+///
+/// 1.0 映射到 `65535`。u16 的相对精度（1.5e-5）远好于 8bit 显示（1/255），
+/// 而内存只有 f32 的一半 —— 24MP 三通道 144MB（f32 要 288MB）。
+#[derive(Debug, Clone, PartialEq)]
+pub struct RawImage16 {
+    pub width: u32,
+    pub height: u32,
+    /// `width * height * 3` 个值（线性 sRGB，0..=65535 ↔ 0.0..=1.0）。
+    pub rgb: Vec<u16>,
+    pub source: PixelSource,
+    /// EXIF 方向（1–8）；`None` = 文件里没有，按 1 处理。
+    pub orientation: Option<u16>,
+    /// **拍摄时的色温估计**（K）：从相机的白平衡系数 + 色彩矩阵反算出来的。
+    ///
+    /// 它是编辑器里色温拉杆的**基线**（`AGENTS.md` §11.5：载入照片时标尺要移到这个位置）。
+    /// `None` = 这台相机/这个文件里算不出来，调用方退回默认值。
+    pub as_shot_temperature: Option<f32>,
+}
+
+impl RawImage16 {
+    /// 自查：长度与声明的尺寸必须对得上。
+    #[must_use]
+    pub fn is_consistent(&self) -> bool {
+        self.width > 0
+            && self.height > 0
+            && self.rgb.len() == (self.width as usize) * (self.height as usize) * 3
+    }
+}
+
 /// 一次解码请求。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DecodeRequest {
@@ -131,8 +170,23 @@ pub trait RawBackend: Send + Sync {
     /// 后端名（日志与诊断）。
     fn name(&self) -> &'static str;
 
-    /// 解码一张 RAW。
+    /// 解码一张 RAW（8bit sRGB，给网格/看图/缩略图）。
     fn decode(&self, req: &DecodeRequest) -> RawResult<RawImage8>;
+
+    /// 解码一张 RAW 成**线性 16 位**（给显影管线）。
+    ///
+    /// 默认实现报「不支持」—— 换后端时（`FUTURE.md` §B）若新后端没有线性输出，
+    /// 失败是显式的，而不是静默退回 8bit（那会让「scene-referred」变成一句空话）。
+    ///
+    /// # Errors
+    /// 见 [`RawError`]。
+    fn decode_linear(&self, req: &DecodeRequest) -> RawResult<RawImage16> {
+        let _ = req;
+        Err(RawError::Unsupported(format!(
+            "后端 {} 不支持线性解码",
+            self.name()
+        )))
+    }
 }
 
 #[cfg(test)]

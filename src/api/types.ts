@@ -694,6 +694,22 @@ export type EditorDecodeState = "idle" | "loading" | "ready" | "error";
  * 两个用途：**握手**（`ready` + `paintedPath` 决定洞口那条 DOM 链要不要透明）
  * 与**上报**（`restarts` / `lastError`：渲染线程崩过但爬起来了，界面必须能看见）。
  */
+/**
+ * **显影参数**的 IPC 载荷（与 Rust 侧 `DevelopParamsDto` 逐字对应）。
+ *
+ * 三条口径：
+ *
+ * * `values` —— **只装与基线不同的项**（与 DB 同一口径：没动过的项不出现）；
+ * * `asShotTemperature` —— 这张照片的拍摄色温（K），色温拉杆的基线；读不到给 `null`；
+ * * `curves` —— 通道（`rgb` / `r` / `g` / `b`）→ 控制点 `[[x, y], …]`（归一化 0..1），
+ *   只装动过的通道（恒等的不发）。
+ */
+export interface DevelopParamsPayload {
+  values: Record<string, number>;
+  asShotTemperature: number | null;
+  curves: Record<string, [number, number][]>;
+}
+
 export interface EditorRenderState {
   /** 会话在（渲染线程活着） */
   bound: boolean;
@@ -717,6 +733,16 @@ export interface EditorRenderState {
   tier: EditorImageTier | null;
   wantedTier: EditorImageTier | null;
   origin: EditorPixelOrigin | null;
+  /** **拍摄色温估计**（K）—— 色温拉杆的基线（`AGENTS.md` §11.5）；读不到就是 `null` */
+  asShotTemperature: number | null;
+  /** 收到过几次显影参数（与 `appliedParamsRev` 比就知道「我发的那次算完没有」） */
+  paramsRev: number;
+  /** 已经画到屏幕上的那一次参数 */
+  appliedParamsRev: number;
+  /** 最近一次**管线**耗时（毫秒）—— 诊断与性能基线 */
+  developMs: number | null;
+  /** 最近一次**解码**耗时（毫秒；只有换照片那一次有值） */
+  decodeMs: number | null;
   zoom: number;
   panX: number;
   panY: number;

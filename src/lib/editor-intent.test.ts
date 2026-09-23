@@ -11,6 +11,7 @@ import test from "node:test";
 import {
   CLICK_SLOP_PX,
   createDragSession,
+  createLatestCoalescer,
   createPanAccumulator,
   isClickGesture,
   type PanIntent,
@@ -152,4 +153,82 @@ test("拖动会话：总位移与逐次位移分开记", () => {
   session.move(40, 0);
   session.move(0, 0);
   assert.equal(session.end().click, true);
+});
+
+test("最新值胜出：一帧一条，只发最后一个（参数通道）", () => {
+  const frames = fakeScheduler();
+  const sent: number[] = [];
+  const coalescer = createLatestCoalescer<number>({
+    send: (value) => sent.push(value),
+    scheduler: frames.scheduler,
+  });
+
+  coalescer.push(1);
+  coalescer.push(2);
+  coalescer.push(3);
+  assert.deepEqual(sent, [], "同一帧内一条都不发");
+  frames.run();
+  assert.deepEqual(sent, [3], "只发最后那一个");
+
+  coalescer.push(4);
+  coalescer.push(5);
+  frames.run();
+  assert.deepEqual(sent, [3, 5]);
+  assert.equal(coalescer.sentCount(), 2);
+});
+
+test("尾样本必发：flush 把挂起的那一个立刻发出去", () => {
+  const frames = fakeScheduler();
+  const sent: number[] = [];
+  const coalescer = createLatestCoalescer<number>({
+    send: (value) => sent.push(value),
+    scheduler: frames.scheduler,
+  });
+
+  coalescer.push(7);
+  coalescer.flush(); // 松手 —— 不能等下一帧（丢了就会「松手后弹回去一点」）
+  assert.deepEqual(sent, [7]);
+  assert.equal(frames.pending(), 0, "flush 之后不该还挂着调度");
+
+  // 重复 flush 不该重复发
+  coalescer.flush();
+  assert.deepEqual(sent, [7]);
+});
+
+test("值没变就不发；dispose 丢掉挂起的、不发送", () => {
+  const frames = fakeScheduler();
+  const sent: string[] = [];
+  const coalescer = createLatestCoalescer<string>({
+    send: (value) => sent.push(value),
+    scheduler: frames.scheduler,
+  });
+
+  coalescer.push("a");
+  frames.run();
+  coalescer.push("a"); // 同一个值：不发
+  frames.run();
+  assert.deepEqual(sent, ["a"]);
+
+  coalescer.push("b");
+  coalescer.dispose(); // 卸载：挂起的那一个直接丢
+  frames.run();
+  assert.deepEqual(sent, ["a"], "dispose 之后挂起的值不许再发出去");
+});
+
+test("对象载荷用自定义相等判定（参数载荷是对象）", () => {
+  const frames = fakeScheduler();
+  const sent: { v: number }[] = [];
+  const coalescer = createLatestCoalescer<{ v: number }>({
+    send: (value) => sent.push(value),
+    equals: (a, b) => a.v === b.v,
+    scheduler: frames.scheduler,
+  });
+  coalescer.push({ v: 1 });
+  frames.run();
+  coalescer.push({ v: 1 });
+  frames.run();
+  assert.equal(sent.length, 1, "内容相同就不该再发一次 IPC");
+  coalescer.push({ v: 2 });
+  frames.run();
+  assert.equal(sent.length, 2);
 });

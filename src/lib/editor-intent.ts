@@ -14,7 +14,7 @@
  * 帧调度复用 `lib/editor-viewport.ts` 的 `createFrameScheduler`（一份实现，两处用）。
  */
 
-import { createFrameScheduler, type FrameScheduler } from "./editor-viewport.ts";
+import { createFrameScheduler, type FrameScheduler, type FrameTicket } from "./editor-viewport.ts";
 
 /** 一次平移意图（CSS 位移，**不乘 DPR** —— 那是 Rust 的活）。 */
 export interface PanIntent {
@@ -169,5 +169,84 @@ export function createDragSession(): DragSession {
       return result;
     },
     active: () => dragging,
+  };
+}
+
+/**
+ * **「最新值胜出」的帧合并器**（M3-W3 的参数通道）。
+ *
+ * 与 `createPanAccumulator` 的区别：平移要把位移**加起来**，而参数是**替换** ——
+ * 拖动中来了十个值，只需把最后那个发出去。规矩与平移那条一样（`AGENTS.md` §7.9）：
+ *
+ * 1. **一帧最多发一次**（高刷屏的 `input` 事件能到 200Hz）；
+ * 2. **尾样本必发** —— 停手那一次不能丢，否则 Rust 手里会停在半路的值上
+ *    （用户看到的就是「松手后画面又弹回去一点」）；
+ * 3. 值相同就不发（省掉一次 IPC + 一次管线）。
+ *
+ * 为什么不用防抖（debounce）：拖动过程中画面**必须**跟着变，防抖会让它一秒才动一次。
+ */
+export interface LatestCoalescer<T> {
+  /** 记一个最新值（多密都行；同一帧内只发最后一个） */
+  push: (value: T) => void;
+  /** 立刻把挂起的那一个发出去（松手 / 卸载前 —— 尾样本） */
+  flush: () => void;
+  /** 取消挂起的调度（卸载时），**不发** */
+  dispose: () => void;
+  /** 已经发出过几次（冒烟断言用） */
+  sentCount: () => number;
+}
+
+export interface LatestCoalescerDeps<T> {
+  /** 真正发出去（IPC / 测试里换成数组收集） */
+  send: (value: T) => void;
+  /** 相等判定（默认为 `Object.is`） */
+  equals?: (a: T, b: T) => boolean;
+  /** 帧调度（默认真实 rAF；测试注入确定实现） */
+  scheduler?: FrameScheduler;
+}
+
+export function createLatestCoalescer<T>(deps: LatestCoalescerDeps<T>): LatestCoalescer<T> {
+  const scheduler = deps.scheduler ?? createFrameScheduler();
+  const equals = deps.equals ?? Object.is;
+  let pending: { value: T } | null = null;
+  let ticket: FrameTicket | null = null;
+  let last: { value: T } | null = null;
+  let sent = 0;
+
+  const emit = (value: T): void => {
+    if (last !== null && equals(last.value, value)) return;
+    last = { value };
+    sent += 1;
+    deps.send(value);
+  };
+
+  const flushPending = (): void => {
+    ticket = null;
+    if (pending === null) return;
+    const value = pending.value;
+    pending = null;
+    emit(value);
+  };
+
+  return {
+    push: (value) => {
+      pending = { value };
+      ticket ??= scheduler.request(flushPending);
+    },
+    flush: () => {
+      if (ticket !== null) {
+        scheduler.cancel(ticket);
+        ticket = null;
+      }
+      flushPending();
+    },
+    dispose: () => {
+      if (ticket !== null) {
+        scheduler.cancel(ticket);
+        ticket = null;
+      }
+      pending = null;
+    },
+    sentCount: () => sent,
   };
 }
