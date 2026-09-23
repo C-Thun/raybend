@@ -71,6 +71,34 @@ export interface CommandSpec {
 /** 覆盖表：`null` = 显式解绑（"我就是要这个功能没有键"） */
 export type ShortcutOverrides = Readonly<Record<string, string | null>>;
 
+/** 一条命令此刻**不可用**的原因（两个判定各对应一个） */
+export type CommandUnavailableReason = "when" | "enabled";
+
+/**
+ * 一条命令此刻能不能用 —— **全应用只有这一个判定**。
+ *
+ * ```text
+ *  when 为假   → 这个场景里没有它（例：不在浏览网格里）
+ *  enabled 为假 → 场景对了但条件不够（例：没有选中照片）
+ * ```
+ *
+ * 四个消费方读同一份：**分发器**（接不接这个键）、**命令面板**（亮着还是暗着）、
+ * **标题栏菜单**（能不能点）、**快捷键设置**（不判定 —— 键位永远可改）。
+ *
+ * 为什么必须收成一条（2026-09-23 人类报「F11 / 全屏看图在 Ctrl+K 里搜不到」）：
+ * 之前四个界面里有三套不同口径 —— 面板按 `when` **过滤**（命令直接消失）、
+ * 菜单只看 `enabled`、分发器两个都看。同一件事三种说法，必然有一处说错，
+ * 而且「说错」的表现是「命令找不到」——用户根本无法区分是没登记还是被过滤。
+ * 现在：**列表永远列全，能不能用由这一条说**。
+ */
+export function availabilityOf(
+  command: CommandSpec,
+): { available: true } | { available: false; reason: CommandUnavailableReason } {
+  if (command.when?.() === false) return { available: false, reason: "when" };
+  if (command.enabled?.() === false) return { available: false, reason: "enabled" };
+  return { available: true };
+}
+
 export interface BindingIssue {
   kind: "duplicate" | "shared" | "reserved" | "risky" | "invalid";
   /** 要不要拦住保存/导入 */

@@ -338,6 +338,67 @@ test("多图 URL：取不到其中一张时只让该幅为空，不串用别张�
   assert.ok(store.imageUrlFor(PHOTOS[2]!) !== null);
 });
 
+test("loadFor：预载写下的 URL 会被单图路径直接吃掉（不再走第二次 IPC）", async () => {
+  let screenCalls = 0;
+  const fake = fakeDeps();
+  const store = createViewerStore({
+    ...fake.deps,
+    loadScreen: async (): Promise<Uint8Array> => {
+      screenCalls += 1;
+      return new Uint8Array([2]);
+    },
+  });
+  store.setViewport({ width: 800, height: 600 });
+  store.show(PHOTOS, 0);
+  await flush();
+  assert.equal(screenCalls, 1, "当前那张发一次");
+
+  await store.ensureImage(PHOTOS[1]!);
+  assert.equal(screenCalls, 2, "预载 b 发一次");
+
+  const before = store.imageUrl();
+  store.goTo(1);
+  await flush();
+  assert.equal(screenCalls, 2, "翻到预载过的那张不该再发 IPC");
+  assert.equal(store.imageStatus(), "ready");
+  assert.equal(store.imageUrl(), "blob:3", "用的就是预载那张的 URL");
+  assert.ok(fake.revoked.includes(before!), "上一张的 URL 被回收");
+});
+
+test("loadFor：同一张正在预载时**等它**，不发重复请求（RAW 解码是串行的）", async () => {
+  let screenCalls = 0;
+  const resolvers: ((bytes: Uint8Array) => void)[] = [];
+  const fake = fakeDeps();
+  const store = createViewerStore({
+    ...fake.deps,
+    loadScreen: (): Promise<Uint8Array> => {
+      screenCalls += 1;
+      return new Promise((resolve) => {
+        resolvers.push(resolve);
+      });
+    },
+  });
+  store.setViewport({ width: 800, height: 600 });
+  store.show(PHOTOS, 0);
+  await flush(); // loadThumb 是 async 的：loadScreen 要等一个微任务之后才发出来
+  resolvers[0]!(new Uint8Array([2]));
+  await flush();
+
+  const prefetch = store.ensureImage(PHOTOS[1]!);
+  await flush();
+  assert.equal(screenCalls, 2, "预载 b 发了一次、挂在途");
+
+  store.goTo(1);
+  await flush();
+  assert.equal(screenCalls, 2, "用户翻到 b：请求被合并，不许重复发");
+
+  resolvers[1]!(new Uint8Array([3]));
+  await prefetch;
+  await flush();
+  assert.equal(store.imageStatus(), "ready");
+  assert.equal(store.imageUrl(), "blob:3");
+});
+
 test("close：复位并回收 URL（不泄漏 blob）", async () => {
   const fake = fakeDeps();
   const store = createViewerStore(fake.deps);

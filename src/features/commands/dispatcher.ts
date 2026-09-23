@@ -23,7 +23,7 @@
 import { createMemo } from "solid-js";
 
 import { chordMatches, detectPlatform, type ChordPlatform } from "../../lib/key-chords.ts";
-import { parsedChordOf, type CommandSpec, type ShortcutOverrides } from "../../lib/commands.ts";
+import { availabilityOf, parsedChordOf, type CommandSpec, type ShortcutOverrides } from "../../lib/commands.ts";
 import { rememberCommand } from "../../lib/shortcuts.ts";
 import { shouldHandleKey } from "../../lib/viewer-keys.ts";
 
@@ -70,8 +70,8 @@ export function createCommandDispatcher(options: CommandDispatcherOptions): Comm
     for (const entry of bound()) {
       if (entry.chord === null) continue;
       if (!chordMatches(entry.chord, event, platform())) continue;
-      if (entry.command.when?.() === false) continue;
-      if (entry.command.enabled?.() === false) continue;
+      // 可用性判定只有一份（`lib/commands.ts`）：`when` 与 `enabled` 两个闸都在里面
+      if (!availabilityOf(entry.command).available) continue;
       matches.push(entry.command);
       // 第一个就执行：见文件头「为什么第一个匹配就够」
       break;

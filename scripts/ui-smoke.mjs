@@ -1660,6 +1660,11 @@ try {
     const layer = document.querySelector("[data-watermark-shimmer]");
     if (layer === null) return null;
     const style = getComputedStyle(layer);
+    const base = document.querySelector("[data-watermark-base]");
+    const rect = (element) => {
+      const box = element?.getBoundingClientRect();
+      return box === undefined ? null : { left: box.left, top: box.top, width: box.width, height: box.height };
+    };
     return {
       hasIcon: layer.querySelector("svg") !== null,
       hasText: (layer.textContent ?? "").trim().length > 0,
@@ -1667,6 +1672,8 @@ try {
       animated: (style.animationName ?? "none") !== "none",
       display: style.display,
       sheenGone: document.querySelector(".rb-watermark-sheen") === null,
+      baseRect: rect(base),
+      layerRect: rect(layer),
     };
   })()`);
 
@@ -1688,6 +1695,24 @@ try {
     }
     if (!shimmer.sheenGone) {
       problems.push("旧的水印扫光条（.rb-watermark-sheen）还在 DOM 里");
+    }
+    /*
+     * 几何一致（人类 2026-09-23 报「流光轮廓比字高几个像素」）：
+     * 底层与流光层必须是**同一个矩形** —— 只有颜色与遮罩不同。
+     * 旧实现底层受父级 padding 内缩、流光层 absolute inset-0 不含 padding，
+     * 垂直方向正好差 py-1 = 4px；这条断言就是那次事故的钉子。
+     */
+    if (shimmer.baseRect !== null && shimmer.layerRect !== null) {
+      const same = ["left", "top", "width", "height"].every(
+        (key) => Math.abs(shimmer.baseRect[key] - shimmer.layerRect[key]) <= 0.5,
+      );
+      if (!same) {
+        problems.push(
+          `流光层与底层必须逐像素重合（底 ${JSON.stringify(shimmer.baseRect)} / 光 ${JSON.stringify(shimmer.layerRect)}）`,
+        );
+      }
+    } else {
+      problems.push("量不到流光层/底层的几何（[data-watermark-base] 或 [data-watermark-shimmer] 不在）");
     }
   }
 
@@ -2131,6 +2156,33 @@ try {
         `「仅 view」档里点 LUT 开关左列没出现（宽度 ${editor.leftAfterToggle}px）—— 开关被档位锁住了`,
       );
     }
+  }
+
+  /*
+   * 透明挖洞的**物理前提**（2026-09-23 修）：html / body 必须常驻透明 ——
+   * 窗口是 `transparent: true`、wgpu 直绘在 webview 底下，DOM 链上任何一层不透明
+   * 都会把照片挡死（编辑器「从来没出过图」的根因就是 body 那层 `--surface-main`）。
+   * 底色由**各页面自己的根容器**画，所以同时断言 App 根 div 是不透明的 ——
+   * 两条一起看：让开的那两层真的让开了，而画面并没有变成透明的。
+   */
+  const backdrops = await evaluate(`(() => {
+    const root = document.querySelector("#root > div");
+    const read = (element) => element === null ? null : getComputedStyle(element).backgroundColor;
+    return {
+      html: read(document.documentElement),
+      body: read(document.body),
+      root: read(root),
+    };
+  })()`);
+  if (backdrops.html !== "rgba(0, 0, 0, 0)" || backdrops.body !== "rgba(0, 0, 0, 0)") {
+    problems.push(
+      `html / body 必须常驻透明（wgpu 直绘在 webview 底下，不透明会挡死照片）：实测 ${JSON.stringify(backdrops)}`,
+    );
+  }
+  if (backdrops.root === "rgba(0, 0, 0, 0)") {
+    problems.push(
+      `App 根容器必须有底色（html/body 让开之后由它画）：实测 ${JSON.stringify(backdrops)}`,
+    );
   }
 
   /*

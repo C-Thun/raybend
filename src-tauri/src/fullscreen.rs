@@ -13,13 +13,21 @@
 //!        │ fullscreen_open { items, index }
 //!        ▼
 //!  FullscreenState（清单 + 下标，进程级）      ← 页面挂载时用 fullscreen_payload 取一次
-//!        │ 同时 emit "fullscreen://payload"   ← 已开着的话，页面收到就换图（不重建窗口）
+//!        │ 同时 emit "fullscreen://payload"   ← 窗口已在（连点两次开）时，页面收到就换图
 //!        ▼
 //!  全屏窗口（label = fullscreen-viewer，url = index.html?fullscreen=1）
 //! ```
 //!
 //! ⚠️ **为什么清单走 Rust 而不是 URL**：一个目录几千张照片时 URL 装不下（也不该装）；
-//! 而页面又要在「已经开着的窗口里换图」时拿到新清单 —— 所以状态放 Rust、事件通知页面。
+//! 而页面又要在「窗口已经在建/已在」时拿到新清单 —— 所以状态放 Rust、事件通知页面。
+//!
+//! ⚠️ **窗口不复用**（人类 2026-09-23：「怎么可能这个窗口还能复用啊？优化的点一定是
+//! 载入速度而不是想着复用」）：`Esc` 走 [`fullscreen_close`] **真销毁**，每次打开都
+//! 重新建窗、页面重新挂载并主动读一次清单 —— 「打开看到上一次那张」那条链从根上不存在。
+//! 秒开靠三件事：建窗即带几何、窗口底色防白闪、Rust 侧图像缓存。
+//! 旧实现为省建窗时间把 `Esc` 做成 `hide()`，重开靠事件 + `visibilitychange` 推新清单；
+//! 而原生窗口 hide/show 不保证触发页面可见性变化、隐藏期间 WebView 也可能被挂起 ——
+//! 清单就停在旧的。**别再回到那条路。**
 //!
 //! ⚠️ `current_monitor()` 属于「拖动期间可能阻塞」那一类窗口查询（`AGENTS.md` §7.9 的
 //! 工程侧血泪第 4 条）。这里只在**用户点按钮的那一刻**问一次（不是渲染循环里反复问），
@@ -93,6 +101,9 @@ struct Inner {
     /// 已发放的最大版本号（每存一次 +1）
     revision: u64,
     payload: Option<FullscreenPayload>,
+    /// 上一扇窗口已派发销毁、但还没从窗口管理器里消失（`destroy()` 是异步派发的）。
+    /// 新开窗要等它先消失，否则会撞上「标签仍被占用」。
+    closing: bool,
 }
 
 impl FullscreenState {
@@ -115,6 +126,52 @@ impl FullscreenState {
             .map_err(|_| "全屏看图状态锁中毒".to_string())?;
         Ok(guard.payload.clone())
     }
+
+    fn mark_closing(&self) -> Result<(), String> {
+        let mut guard = self
+            .inner
+            .lock()
+            .map_err(|_| "全屏看图状态锁中毒".to_string())?;
+        guard.closing = true;
+        Ok(())
+    }
+
+    fn is_closing(&self) -> Result<bool, String> {
+        let guard = self
+            .inner
+            .lock()
+            .map_err(|_| "全屏看图状态锁中毒".to_string())?;
+        Ok(guard.closing)
+    }
+
+    fn clear_closing(&self) -> Result<(), String> {
+        let mut guard = self
+            .inner
+            .lock()
+            .map_err(|_| "全屏看图状态锁中毒".to_string())?;
+        guard.closing = false;
+        Ok(())
+    }
+}
+
+/// 等上一扇窗口真正从窗口管理器里消失（`destroy()` 只是把销毁派发给事件循环，
+/// 管理器里的条目要等运行时发出 `Destroyed` 才移除）。
+///
+/// 上限 500ms：真机上销毁是毫秒级的，等这么久基本只有一种情况 —— 系统卡住了；
+/// 那时宁可去撞一次建窗错误（有复用兜底），也不要把命令挂死。
+/// 用 `spawn_blocking` 让出 tokio worker：等的时候主线程还要跑事件循环去处理销毁。
+async fn wait_until_window_gone<R: Runtime>(app: &AppHandle<R>) {
+    let handle = app.clone();
+    let _ = tauri::async_runtime::spawn_blocking(move || {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
+        while handle.get_webview_window(FULLSCREEN_LABEL).is_some() {
+            if std::time::Instant::now() >= deadline {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    })
+    .await;
 }
 
 /// 主窗口**所在那块**屏幕（拿不到就 `None` → 交给系统决定开在哪）。
@@ -143,7 +200,18 @@ fn place_on_main_monitor<R: Runtime>(window: &tauri::WebviewWindow<R>, app: &App
     let _ = window.set_size(tauri::PhysicalSize::new(size.width, size.height));
 }
 
-/// 打开全屏看图（幂等：已经开着就换图 + 聚焦，不重建窗口）。
+/// 把窗口摆到主窗口那块屏幕上、全屏、拿到最前面。
+fn focus_existing_window<R: Runtime>(window: &tauri::WebviewWindow<R>, app: &AppHandle<R>) {
+    place_on_main_monitor(window, app);
+    let _ = window.set_fullscreen(true);
+    let _ = window.show();
+    let _ = window.set_focus();
+}
+
+/// 打开全屏看图。
+///
+/// 正常路径是**每次新建窗口**（见模块头：不复用）。只有两种情况会走「窗口已在就换图」：
+/// ① 用户连点两次按钮，第一扇还在建/已建好；② 等待旧窗销毁超时（500ms）但它其实还在。
 ///
 /// `background` 是前端报的**画布底色**（CSS 颜色串，如 `#17191c`）：拿它设窗口背景色，
 /// 消除 WebView 首帧的**白闪**。解不开不是错误（不设而已），与编辑视口那条上报同一口径。
@@ -171,16 +239,24 @@ pub async fn fullscreen_open<R: Runtime>(
         .filter(|text| !text.is_empty())
         .and_then(raybend::render::Srgb8::parse_css);
 
-    // 已经开着：通知页面换图（事件先发 —— 页面订阅着就立刻响应），再摆位/全屏/拿到前面
-    let _ = app.emit(FULLSCREEN_EVENT, &payload);
-    if let Some(window) = app.get_webview_window(FULLSCREEN_LABEL) {
-        place_on_main_monitor(&window, &app);
-        let _ = window.set_fullscreen(true);
-        let _ = window.show();
-        let _ = window.set_focus();
+    // 已经开着（且不在销毁中）：通知页面换图（事件先发 —— 页面订阅着就立刻响应），
+    // 再摆位/全屏/拿到前面。这是「连点两次开」那条路，不是正常开窗路径。
+    if !state.is_closing()?
+        && let Some(window) = app.get_webview_window(FULLSCREEN_LABEL)
+    {
+        let _ = app.emit(FULLSCREEN_EVENT, &payload);
+        focus_existing_window(&window, &app);
         return Ok(());
     }
 
+    /*
+     * 上一扇正在销毁（`Esc` 之后马上又按 `F11`）：等它从管理器里消失再建新的。
+     * 不等的话 `builder.build()` 会撞上「标签已被占用」，而那时的兜底是
+     * 「复用」——一复用又回到了「打开看到上一次那张」的老路。
+     */
+    if state.is_closing()? {
+        wait_until_window_gone(&app).await;
+    }
     let monitor = main_window_monitor(&app);
     let mut builder = WebviewWindowBuilder::new(
         &app,
@@ -227,15 +303,13 @@ pub async fn fullscreen_open<R: Runtime>(
             /*
              * 两个现实场景会走到这里，都**不该**报错给用户：
              *   * **连点两下按钮**：第一下正在建窗，第二下也到这里 —— 标签已被占；
-             *   * 上一扇刚被 `destroy`，标签尚未释放。
-             * 这时若窗口已在就退化成「复用 + 换图」（清单与事件在上面已经发过，
-             * 新页挂载时也会自己读一次），确实不在才把真错报出去。
+             *   * 等 500ms 后旧窗仍未从管理器消失（极少见）。
+             * 这时若窗口已在就退化成「复用 + 换图」（事件在这里补发，页面收到就换），
+             * 确实不在才把真错报出去。
              */
             if let Some(window) = app.get_webview_window(FULLSCREEN_LABEL) {
-                place_on_main_monitor(&window, &app);
-                let _ = window.set_fullscreen(true);
-                let _ = window.show();
-                let _ = window.set_focus();
+                let _ = app.emit(FULLSCREEN_EVENT, &payload);
+                focus_existing_window(&window, &app);
                 return Ok(());
             }
             return Err(format!("建全屏看图窗口失败：{error}"));
@@ -247,10 +321,8 @@ pub async fn fullscreen_open<R: Runtime>(
      * `set_fullscreen(true)` 是「在窗口**当前所在**屏幕上全屏」，所以必须在摆位之后调 ——
      * 顺序反了会先在主屏全屏一下再被挪过去。
      */
-    place_on_main_monitor(&window, &app);
-    let _ = window.set_fullscreen(true);
-    let _ = window.show();
-    let _ = window.set_focus();
+    focus_existing_window(&window, &app);
+    state.clear_closing()?;
     Ok(())
 }
 
@@ -267,25 +339,30 @@ pub fn fullscreen_payload(
 
 /// 关掉全屏看图（`Esc` / `Enter` 都走它）。
 ///
-/// **隐藏，不销毁**（人类 2026-09-23 报「进全屏很慢，没有一按就进去的感觉」）：
-/// 销毁的话下次要重新建窗口 + 重新加载页面（WebView 冷启动几百毫秒），
-/// 隐藏则下次 `show()` 是**瞬间**的 —— 页面、图像缓存、清单都还在。
-/// 代价是一扇闲置的 WebView 常驻内存，换「秒开」值得；它不出现在任务栏，用户看不到。
+/// **真销毁**（人类 2026-09-23 定：「怎么可能这个窗口还能复用啊？优化的点一定是载入速度
+/// 而不是想着复用」）。旧实现为了「秒开」只 `hide()`，重开靠事件 + `visibilitychange`
+/// 推新清单 —— 而原生窗口 hide/show 不保证触发页面可见性变化、隐藏期间 WebView 也可能
+/// 被挂起，清单就停在旧的（症状：打开看到上一次那张）。
 ///
-/// 顺带解掉一个竞态：不再销毁就没有「标签还在释放中」的窗口，
-/// 也就没有「按 `Esc` 后立刻再点全屏却没反应」那一类问题。
+/// 秒开靠三件事，不靠复用窗口：① 建窗即带几何；② 窗口底色防白闪；③ Rust 侧图像缓存。
+/// 销毁是**异步派发**的：这里记一笔 `closing`，[`fullscreen_open`] 据此等旧窗消失再建新的
+/// （不记的话「`Esc` 后立刻再开」会撞上标签占用，兜底复用又回到旧毛病）。
 ///
-/// 用 `Alt+F4` / 系统方式关掉时窗口是**真销毁**的 —— 那时下次打开会重新建窗，
-/// `fullscreen_open` 两条路都处理了。
+/// 用 `Alt+F4` / 系统方式关掉时窗口同样是真销毁 —— 那条路不经过这里，
+/// 所以 `closing` 不会被置位；`fullscreen_open` 发现窗口不在就直接建，两条路都成立。
 ///
 /// # Errors
-/// 窗口存在但隐藏失败（不存在算成功 —— 幂等）。
+/// 窗口存在但销毁失败（不存在算成功 —— 幂等）。
 #[tauri::command]
-pub async fn fullscreen_close<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+pub async fn fullscreen_close<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, FullscreenState>,
+) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(FULLSCREEN_LABEL) {
+        state.mark_closing()?;
         window
-            .hide()
-            .map_err(|error| format!("隐藏全屏看图窗口失败：{error}"))?;
+            .destroy()
+            .map_err(|error| format!("销毁全屏看图窗口失败：{error}"))?;
     }
     Ok(())
 }
@@ -351,6 +428,18 @@ mod tests {
         assert_eq!(payload.items.len(), 2);
         assert_eq!(payload.items[0].file_name, "a.jpg");
         assert_eq!(payload.revision, 1);
+    }
+
+    #[test]
+    fn closing_flag_tracks_destroy_window() {
+        // `fullscreen_open` 靠它决定「等旧窗消失再建新的」还是「直接复用」——
+        // 置了不清会让下次开窗白等 500ms，清了不该清的会撞标签占用。
+        let state = FullscreenState::default();
+        assert!(!state.is_closing().expect("读得到"), "一开始不在销毁中");
+        state.mark_closing().expect("置得上");
+        assert!(state.is_closing().expect("读得到"));
+        state.clear_closing().expect("清得掉");
+        assert!(!state.is_closing().expect("读得到"));
     }
 
     #[test]

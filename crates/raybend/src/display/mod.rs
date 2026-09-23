@@ -54,7 +54,8 @@ pub use pixels::{pixels, DisplayPixels, PixelSize};
 
 use crate::error::Result;
 use crate::media::kind::{self, MediaKind};
-use crate::thumbnail::{render_file, SizeClass, Thumb};
+use crate::thumbnail::cache as thumb_cache;
+use crate::thumbnail::{render_file, render_sig, SizeClass, Thumb, ThumbsDb, cache_key_for};
 
 /// 取图目的 —— 决定走哪一档（以及能不能直接给原图）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -273,6 +274,79 @@ pub fn display_image(request: &ImageRequest<'_>) -> Result<Option<DisplayImage>>
     }
 }
 
+/// 「位图 + 原图 + 没编辑」——会**直接给原文件字节**那条路（见 [`BitmapBackend`]）。
+///
+/// 抽出来是给 [`cached_image`] 判断「这次请求该不该查缓存」：
+/// 那条路就是一次文件读，而且 `Original` 的语义是「要原文件本身」，
+/// 命中一条 Screen 渲染缓存是错的。
+fn takes_original_shortcut(request: &ImageRequest<'_>, kind: MediaKind) -> bool {
+    request.purpose == ImagePurpose::Original && !request.needs_render() && kind != MediaKind::Raw
+}
+
+const fn backend_of(kind: MediaKind) -> Backend {
+    match kind {
+        MediaKind::Raw => Backend::Raw,
+        MediaKind::Image | MediaKind::Other => Backend::Bitmap,
+    }
+}
+
+/// **带磁盘缓存的统一取图口**（view 路径走它；`src-tauri` 的 `view_image`）。
+///
+/// 与 [`display_image`] 的唯一区别：走渲染管线出来的结果会落进 `thumbs.db`
+/// （与网格/胶片带**同一套缓存键与 `render_sig`**），同一张、同一档下次直接命中。
+///
+/// 为什么必须有它（人类 2026-09-23 报「每切一张都要等 1 秒多」）：
+/// 旧的 view 路径每次都重新解码 —— RAW 要几百毫秒到一秒多，连续看图就变成
+/// 「每张都等」。缓存命中后只剩一次 SQLite BLOB 读。预载也才有意义：
+/// 预载把结果写进磁盘缓存，用户真正翻到那张时不再重解码。
+///
+/// **不缓存那条「直接给原文件」的路**（位图 + `Original` + 没编辑）：它就是一次
+/// 文件读，缓存反而多一次查库，而且会偷换语义（见 [`takes_original_shortcut`]）。
+///
+/// # Errors
+/// 与 [`display_image`] 相同（读不到文件 / 解不开）。
+pub fn cached_image(
+    thumbs: &ThumbsDb,
+    request: &ImageRequest<'_>,
+    now_ms: i64,
+) -> Result<Option<DisplayImage>> {
+    let kind = kind::kind_of_file(&request.path.to_string_lossy());
+    if takes_original_shortcut(request, kind) {
+        return display_image(request);
+    }
+
+    let size = request.purpose.size_class();
+    let sig = render_sig(size);
+    // 未入库的源文件：「身份字符串」就是绝对路径（与 `render_now` 同一口径）
+    let material = request.path.to_string_lossy().into_owned();
+    let key = cache_key_for(request.path, &material);
+
+    let read_key = key.clone();
+    if let Some((bytes, width, height)) =
+        thumbs.read(move |conn| thumb_cache::get_with_size(conn, &read_key, size, sig))?
+    {
+        return Ok(Some(DisplayImage {
+            bytes,
+            mime: ImageMime::Jpeg,
+            origin: ImageOrigin::Rendered,
+            backend: backend_of(kind),
+            size: Some((width, height)),
+        }));
+    }
+
+    let Some(image) = display_image(request)? else {
+        return Ok(None);
+    };
+    if image.origin == ImageOrigin::Rendered {
+        let data = image.bytes.clone();
+        let (width, height) = image.size.unwrap_or((0, 0));
+        thumbs.write(move |conn| {
+            thumb_cache::put(conn, &key, size, sig, &data, width, height, now_ms)
+        })?;
+    }
+    Ok(Some(image))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -343,6 +417,42 @@ mod tests {
         assert_eq!(image.mime, ImageMime::Jpeg);
         assert_eq!(image.size, None, "不为了报尺寸去解码原图");
         assert_eq!(image.bytes, b"not-really-a-jpeg-but-bytes-are-bytes");
+    }
+
+    #[test]
+    fn cached_image_serves_from_disk_and_leaves_the_original_shortcut_uncached() {
+        let dir = tempfile::tempdir().expect("临时目录");
+        let path = dir.path().join("photo.jpg");
+        let img = image::RgbImage::from_fn(8, 6, |x, y| {
+            image::Rgb([(x * 20) as u8, (y * 30) as u8, 40])
+        });
+        img.save(&path).expect("写 JPEG");
+        let db = ThumbsDb::open(dir.path().join("cache"), 0).expect("开缓存库");
+
+        // 走渲染的请求：第一次现算、第二次（源文件已经被**换成另一张图**）仍然给旧字节 ——
+        // 这就是磁盘缓存命中（注意：缓存键优先用文件身份，所以不能靠删文件来验）
+        let screen = ImageRequest::plain(&path, ImagePurpose::Screen);
+        let first = cached_image(&db, &screen, 0)
+            .expect("第一次不该报错")
+            .expect("应当有图");
+        assert_eq!(first.origin, ImageOrigin::Rendered);
+        assert!(first.size.is_some(), "渲染出来的带尺寸");
+
+        let other = image::RgbImage::from_fn(64, 48, |_, _| image::Rgb([250, 10, 10]));
+        other.save(&path).expect("覆盖成另一张图");
+        let second = cached_image(&db, &screen, 1)
+            .expect("第二次不该报错")
+            .expect("缓存里应当有");
+        assert_eq!(second.bytes, first.bytes, "第二次必须来自缓存（源文件已换掉）");
+        assert_eq!(second.size, first.size, "缓存里的尺寸也要带上");
+
+        // 「直接给原文件」那条路不缓存：读到的必须就是刚写进去的那张（而不是旧渲染）
+        let original = ImageRequest::plain(&path, ImagePurpose::Original);
+        let raw = cached_image(&db, &original, 0)
+            .expect("原图请求不该报错")
+            .expect("有原文件");
+        assert_eq!(raw.origin, ImageOrigin::OriginalFile);
+        assert_eq!(raw.bytes, std::fs::read(&path).expect("读原文件"));
     }
 
     #[test]

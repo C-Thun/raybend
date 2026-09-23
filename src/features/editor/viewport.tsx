@@ -36,7 +36,7 @@ import { createWheelZoom } from "../../components/ui/viewer/interaction.ts";
 import { t } from "../../i18n/index.ts";
 import type { MessageKey } from "../../i18n/index.ts";
 import { createDragSession, createPanAccumulator } from "../../lib/editor-intent.ts";
-import { createViewportReporter } from "../../lib/editor-viewport.ts";
+import { createViewportReporter, type ViewportReporter } from "../../lib/editor-viewport.ts";
 import { sendEditorViewportIntent, setEditorViewport } from "../../api/editor.ts";
 import { isTauriRuntime } from "../../api/tauri-env.ts";
 import type { EditorRenderState } from "../../api/types.ts";
@@ -85,6 +85,23 @@ export const EDITOR_ZOOM_STEP = 1.25;
 
 export function EditorViewport(props: EditorViewportProps): JSX.Element {
   let hole: HTMLDivElement | undefined;
+  /**
+   * 洞口底色的**稳定探针**（永远带着 `bg-surface-bar`）。
+   *
+   * 为什么不直接读洞口自己：出图时洞口会变成 `bg-transparent`，
+   * 那时读到的是 `rgba(0, 0, 0, 0)` —— Rust 只能回退成**深色兜底**，
+   * 浅色主题下洞口与缝就变成深灰（2026-09-23 修）。
+   */
+  let backdropProbe: HTMLSpanElement | undefined;
+  /**
+   * 洞口事实上报器（`onMount` 里建）。
+   *
+   * 挂在组件作用域上是因为**主题变化那条补报也要用它** —— 上报器自带去重，
+   * 直接 `setEditorViewport` 会把「每 250ms 轮询一次状态」变成 4 次/秒的 IPC，
+   * 而 Rust 那边每一条 `Viewport` 命令都会 `dirty = true` 画一帧
+   * （设计目标是「空闲时一帧都不画」）。
+   */
+  let reporter: ViewportReporter | null = null;
 
   /** 一次意图：发出去，失败只记控制台（不该让交互把界面带崩）。 */
   const send = (intent: Parameters<typeof sendEditorViewportIntent>[0]): void => {
@@ -102,7 +119,7 @@ export function EditorViewport(props: EditorViewportProps): JSX.Element {
     const element = hole;
 
     /* ── ① 洞口事实上报（W1）───────────────────────── */
-    const reporter = createViewportReporter({
+    reporter = createViewportReporter({
       send: (payload) => {
         // 报错不吞：弹到控制台（终端诊断，不走语言包）——
         // 「一直没报上去」与「报错了」必须分得开
@@ -114,13 +131,13 @@ export function EditorViewport(props: EditorViewportProps): JSX.Element {
 
     const observe = (): void => {
       const rect = element.getBoundingClientRect();
-      reporter.observe({
+      reporter?.observe({
         rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
         // ⚠️ **运行时** DPR：含显示器 DPI + 系统文字缩放 + 页面缩放（§7.9 铁律 3）
         dpr: window.devicePixelRatio,
         viewport: { width: window.innerWidth, height: window.innerHeight },
         // 洞口底色：**字符串原样上行**（解析在 Rust；主题一变它跟着变）
-        backdrop: readComputedBackdrop(element),
+        backdrop: readComputedBackdrop(backdropProbe),
       });
     };
 
@@ -207,8 +224,9 @@ export function EditorViewport(props: EditorViewportProps): JSX.Element {
 
     onCleanup(() => {
       // 卸载前把挂起的那一帧发出去（尾样本不能丢），再断开
-      reporter.flush();
-      reporter.dispose();
+      reporter?.flush();
+      reporter?.dispose();
+      reporter = null;
       wheel.dispose();
       pan.dispose();
       observer.disconnect();
@@ -240,13 +258,13 @@ export function EditorViewport(props: EditorViewportProps): JSX.Element {
     queueMicrotask(() => {
       if (!element.isConnected) return;
       const rect = element.getBoundingClientRect();
-      void setEditorViewport({
-        hole: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+      // 走上报器（不是裸 `setEditorViewport`）：它自带去重 ——
+      // 轮询带来的重复上报不会变成每秒四次「画一帧」
+      reporter?.observe({
+        rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
         dpr: window.devicePixelRatio,
         viewport: { width: window.innerWidth, height: window.innerHeight },
-        backdrop: readComputedBackdrop(element) ?? undefined,
-      }).catch(() => {
-        // 与首帧上报同一条路：失败只记控制台（上面那处已经说明）
+        backdrop: readComputedBackdrop(backdropProbe),
       });
     });
   });
@@ -268,6 +286,17 @@ export function EditorViewport(props: EditorViewportProps): JSX.Element {
         .filter(Boolean)
         .join(" ")}
     >
+      {/*
+        洞口底色的**稳定探针**：0×0、不参与布局，只为读 `bg-surface-bar` 的计算值。
+        出图时洞口自己是透明的，只有这个探针还能报出主题底色（见上面的说明）。
+      */}
+      <span
+        ref={(element: HTMLSpanElement) => {
+          backdropProbe = element;
+        }}
+        aria-hidden="true"
+        class="pointer-events-none absolute h-0 w-0 bg-surface-bar"
+      />
       <Show when={props.empty} fallback={<ViewportMessage props={props} />}>
         {(kind) => {
           const Icon = EMPTY_ICON[editorEmptyIcon(kind())];
@@ -362,8 +391,12 @@ function ViewportMessage(props: { props: EditorViewportProps }): JSX.Element {
  * **不做解析**：`rgb(...)` / `rgba(...)` 的形态与「它怎么变成 GPU 清屏色」是同一件事，
  * 那件事在 Rust（`Srgb8::parse_css`）。这里只负责「把浏览器算出来的事实原样交上去」——
  * 读不到就返回 `null`，Rust 会用兜底色并在状态里标出来。
+ *
+ * ⚠️ 传进来的必须是**稳定探针**（`backdropProbe`），不是洞口自己：
+ * 洞口出图时是透明的，拿它读会读到 `rgba(0, 0, 0, 0)`。
  */
-function readComputedBackdrop(element: HTMLElement): string | null {
+function readComputedBackdrop(element: HTMLElement | undefined): string | null {
+  if (element === undefined) return null;
   if (typeof window === "undefined" || typeof window.getComputedStyle !== "function") {
     return null;
   }

@@ -133,7 +133,12 @@ export function PhotoGrid(props: PhotoGridProps): JSX.Element {
   let container: HTMLDivElement | undefined;
   const [width, setWidth] = createSignal(0);
 
-  const gap = createTokenPx("--gap", 4);
+  /*
+   * 格子间距读 `--tile-gap` 而**不是 `--gap`**（人类 2026-09-23 定：tiles 不参与密度调节）。
+   * `--gap` 是密度令牌（3↔6），读它的话切一次松紧就要全网格重算换行 + 重建可见行；
+   * 照片一多就是秒级卡顿。tile 内部（`--tile-pad` / `--tile-bar-h`）同理已固定。
+   */
+  const gap = createTokenPx("--tile-gap", 3);
   /**
    * 右侧**滚动条占位**（人类 2026-09-23 定：不做自适应，**留死**）。
    *
@@ -169,6 +174,15 @@ export function PhotoGrid(props: PhotoGridProps): JSX.Element {
   const cellWidth = () => tileSizeAt(source.tileStep());
   const flow = () =>
     computeTileFlow({ containerWidth: width(), cellWidth: cellWidth(), gap: gap() });
+  /**
+   * 列数（只在**真的换了列数**时才通知下游）。
+   *
+   * 为什么单独包一层：`flow()` 每次宽度变化都返回新对象，而 `rows()` 是 O(照片数)
+   * 的行模型构建 —— 拖左栏 / 切密度时宽度连续变，直接读 `flow().columns` 会让
+   * 每一像素都重建全部行（大库下就是卡顿的来源）。`createMemo` 默认 `===` 比较，
+   * 列数没变就不往下游发。
+   */
+  const columns = createMemo(() => flow().columns);
   const fitRequest = useTilesFitChannel();
 
   /** 当前「铺满一行」算出来的格宽（给请求处理与可用性读数共用，不写两遍公式） */
@@ -222,7 +236,7 @@ export function PhotoGrid(props: PhotoGridProps): JSX.Element {
   const rows = createMemo(() =>
     buildGridRows({
       count: source.count(),
-      columns: flow().columns,
+      columns: columns(),
       cellSize: cellWidth(),
       ...(source.slices() === undefined ? {} : { slices: source.slices() }),
     }),
@@ -279,7 +293,7 @@ export function PhotoGrid(props: PhotoGridProps): JSX.Element {
           ? indexOf(current)
           : -1,
         count: source.count(),
-        columns: flow().columns,
+        columns: columns(),
         key: event.key,
       });
       if (next === null) return;

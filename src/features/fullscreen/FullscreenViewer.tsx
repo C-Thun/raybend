@@ -67,7 +67,7 @@ export function FullscreenViewer() {
    *
    * ❗ 为什么必须有它：挂载时的 `getFullscreenPayload()` 与后来的
    * `fullscreen://payload` 事件**两条路都可能到**，而且可能乱序 ——
-   * 用户刚开窗又在主窗点了另一张，事件先到、初始读取后到，
+   * 用户刚开窗又在主窗点了另一张（或连点两次开），事件先到、初始读取后到，
    * 没这个守卫就会「拿旧清单覆盖新清单」（症状：换图后显示的还是上一张）。
    * 版本号在 Rust 侧递增（`FullscreenState::store`），前端只做比较。
    */
@@ -122,20 +122,14 @@ export function FullscreenViewer() {
     onCleanup(() => dispose?.());
 
     /*
-     * 窗口被**重新显示**时再读一次清单。
+     * 窗口被**重新显示**时再读一次清单 —— 这条兼底已经**不需要**了：
+     * `Esc` 现在是真销毁（`fullscreen_close`），每次打开都是新窗口、页面重新挂载，
+     * 挂载时那次 `getFullscreenPayload()` 就是最新清单。
      *
-     * 为什么需要：`Esc` 只是把窗口隐藏（下次秒开），隐藏期间 WebView 可能被系统挂起，
-     * 那会儿推过来的事件有可能直到重新显示才被处理。重读一次是最便宜的兼底，
-     * 而版本号守卫保证重复应用同一份清单不会出问题（`applyPayload` 里比较 revision）。
+     * 历史（别回去）：旧实现为了秒开把 `Esc` 做成 `hide()`，重开复用窗口，
+     * 靠事件 + `visibilitychange` 推新清单 —— 而原生窗口 hide/show 不保证触发
+     * 页面可见性变化、隐藏期间 WebView 也可能被挂起，清单就停在旧的。
      */
-    const onVisible = (): void => {
-      if (document.visibilityState !== "visible") return;
-      void getFullscreenPayload()
-        .then(applyPayload)
-        .catch(() => {});
-    };
-    document.addEventListener("visibilitychange", onVisible);
-    onCleanup(() => document.removeEventListener("visibilitychange", onVisible));
 
     const onKey = (event: KeyboardEvent): void => {
       switch (event.key) {
@@ -176,19 +170,26 @@ export function FullscreenViewer() {
    *
    * 触发时机是「当前这张已经就绪」—— 不抢当前这张的带宽/解码（RAW 解码在 Rust 侧
    * 是串行的，先抢只会让正在等的那张更慢）；就绪后它才在后台把邻居拉进 URL 缓存。
-   * 于是连续看图的体验是：第一张等一下，之后每张基本秒开。
    *
-   * 用的是 store 自己的图像缓存（`ensureImage` 会跳过已在缓存里的），
-   * 所以重复触发是安全的；列表到头/到尾只预载存在的那一侧。
+   * 两条纪律（2026-09-23 晚修「越预载越慢」时定的）：
+   *   1. **串行**：同一时刻最多一个预载在飞。并行发两个只会让用户真正要的那张
+   *      排在它们后面（解码队列是单例）；
+   *   2. **用户翻走就停链**：每一步之前看一眼当前位置 —— 翻走了就不要再给旧位置的
+   *      邻居占解码队列（在飞的那一个停不了，但后面那个可以不发）。
+   *
+   * 顺序先「下一张」（方向键的主方向），再「上一张」。
    */
   createEffect(() => {
     if (store.imageStatus() !== "ready") return;
     const photos = state().photos;
     const at = state().index;
-    for (const offset of [1, -1]) {
-      const neighbour = photos[at + offset];
-      if (neighbour !== undefined) void store.ensureImage(neighbour);
-    }
+    const forward = photos[at + 1];
+    const backward = photos[at - 1];
+    void (async () => {
+      const moved = (): boolean => state().index !== at;
+      if (forward !== undefined && !moved()) await store.ensureImage(forward);
+      if (backward !== undefined && !moved()) await store.ensureImage(backward);
+    })();
   });
 
   /* 滚轮：与主窗口看图**同一份实现**（按帧合并，锚点是鼠标位置）；载入期间不响应 */

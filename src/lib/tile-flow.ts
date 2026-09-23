@@ -16,7 +16,7 @@ export interface TileFlowInput {
  containerWidth: number;
  /** 单元格宽（含图片与字幕的整块宽度） */
  cellWidth: number;
- /** 列间距（由密度档位决定：紧凑 4 / 宽松 8） */
+ /** 列间距（`--tile-gap`；**不随密度变** —— tiles 不参与松紧调节，人类 2026-09-23 定） */
  gap: number;
 }
 

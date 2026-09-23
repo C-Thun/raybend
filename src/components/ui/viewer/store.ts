@@ -301,7 +301,16 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
   /** 换图时的作废令牌：迟到的结果直接丢掉（换得快时尤其重要） */
   let generation = 0;
   let imageUrlsGeneration = 0;
-  const pendingImageUrls = new Map<string, number>();
+  /**
+   * 在途的多图请求：key → `{ ticket, task }`。
+   *
+   * 存 promise 而不只是代号，是为了让**单图路径能等它**：用户翻到的正是预载中的那张时，
+   * 不该再发一个重复请求 —— RAW 解码在 Rust 侧是串行的单例，重复请求只会排在预载后面。
+   */
+  const pendingImageUrls = new Map<
+    string,
+    { ticket: number; task: Promise<void> }
+  >();
   const imageUrlsLimit = Math.max(
     4,
     Number.isFinite(deps.cacheLimit) ? Math.floor(deps.cacheLimit ?? 4) : 4,
@@ -329,41 +338,65 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
     return shown?.id === photo.id && shown.path === photo.path ? imageUrl() : null;
   }
 
-  /** 多幅画面各取自己的屏幕档；同一照片在途请求合并，迟到结果按代号丢弃。 */
-  async function ensureImage(photo: ViewerPhoto): Promise<void> {
+  /**
+   * 从多图缓存里**取出**一张的 URL（取出即归调用方所有）。
+   *
+   * 单图路径接管它之后会由 `replaceUrl` 回收 —— 不摘出来的话，同一个 URL
+   * 会被两处分别 revoke，先回收的那一处会把还在显示的另一处打断。
+   */
+  function takeCachedImageUrl(photo: ViewerPhoto): string | null {
     const key = imageKey(photo);
-    if (imageUrls().has(key) || pendingImageUrls.has(key)) return;
+    const cached = imageUrls().get(key);
+    if (cached === undefined) return null;
+    setImageUrls((previous) => {
+      if (!previous.has(key)) return previous;
+      const next = new Map(previous);
+      next.delete(key);
+      return next;
+    });
+    return cached.url;
+  }
+
+  /** 多幅画面各取自己的屏幕档；同一照片在途请求合并，迟到结果按代号丢弃。 */
+  function ensureImage(photo: ViewerPhoto): Promise<void> {
+    const key = imageKey(photo);
+    if (imageUrls().has(key)) return Promise.resolve();
+    const pending = pendingImageUrls.get(key);
+    if (pending !== undefined) return pending.task;
     const ticket = imageUrlsGeneration;
-    pendingImageUrls.set(key, ticket);
-    try {
-      const bytes = await deps.loadScreen(photo.path);
-      if (bytes === null || ticket !== imageUrlsGeneration) return;
-      const url = makeUrl(bytes);
-      if (ticket !== imageUrlsGeneration) {
-        revokeUrl(url);
-        return;
-      }
-      setImageUrls((previous) => {
-        if (previous.has(key)) {
+    const task = (async () => {
+      try {
+        const bytes = await deps.loadScreen(photo.path);
+        if (bytes === null || ticket !== imageUrlsGeneration) return;
+        const url = makeUrl(bytes);
+        if (ticket !== imageUrlsGeneration) {
           revokeUrl(url);
-          return previous;
+          return;
         }
-        const next = new Map(previous);
-        next.set(key, { url, path: photo.path });
-        while (next.size > imageUrlsLimit) {
-          const oldest = next.keys().next().value as string | undefined;
-          if (oldest === undefined) break;
-          const dropped = next.get(oldest);
-          next.delete(oldest);
-          if (dropped !== undefined) revokeUrl(dropped.url);
-        }
-        return next;
-      });
-    } catch {
-      // 单幅取不到不影响其它画幅；该框保留底色，后续重新进入还能再试。
-    } finally {
-      if (pendingImageUrls.get(key) === ticket) pendingImageUrls.delete(key);
-    }
+        setImageUrls((previous) => {
+          if (previous.has(key)) {
+            revokeUrl(url);
+            return previous;
+          }
+          const next = new Map(previous);
+          next.set(key, { url, path: photo.path });
+          while (next.size > imageUrlsLimit) {
+            const oldest = next.keys().next().value as string | undefined;
+            if (oldest === undefined) break;
+            const dropped = next.get(oldest);
+            next.delete(oldest);
+            if (dropped !== undefined) revokeUrl(dropped.url);
+          }
+          return next;
+        });
+      } catch {
+        // 单幅取不到不影响其它画幅；该框保留底色，后续重新进入还能再试。
+      } finally {
+        if (pendingImageUrls.get(key)?.ticket === ticket) pendingImageUrls.delete(key);
+      }
+    })();
+    pendingImageUrls.set(key, { ticket, task });
+    return task;
   }
 
   function clearImageUrls(): void {
@@ -387,6 +420,43 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
   async function loadFor(photo: ViewerPhoto, ticket: number): Promise<void> {
     setImageStatus("loading");
     setSharp(false);
+
+    /*
+     * ① 预载（或多图视图）已经取好的：**直接用**，不再走一次 IPC。
+     *
+     * 这正是预载存在的意义 —— 旧实现里 `loadFor` 每次都重新 `loadScreen`，
+     * 预载写下的 URL 只有对比视图读（`imageUrlFor`），单图路径根本不吃，
+     * 于是「预载了还要等一秒多」（人类 2026-09-23 报的）。
+     */
+    const prefetched = takeCachedImageUrl(photo);
+    if (prefetched !== null) {
+      if (ticket !== generation) {
+        revokeUrl(prefetched);
+        return;
+      }
+      replaceUrl(prefetched);
+      setSharp(true);
+      setImageStatus("ready");
+      return;
+    }
+
+    /*
+     * ② 这张正在预载：**等它**，别发第二个请求。
+     * RAW 解码在 Rust 侧是串行的单例 —— 重复请求只会排在自己后面，越等越久。
+     */
+    const pending = pendingImageUrls.get(imageKey(photo));
+    if (pending !== undefined) {
+      await pending.task;
+      if (ticket !== generation) return;
+      const arrived = takeCachedImageUrl(photo);
+      if (arrived !== null) {
+        replaceUrl(arrived);
+        setSharp(true);
+        setImageStatus("ready");
+        return;
+      }
+      // 预载没成（取不到 / 已被作废）：落回下面的常规路径再试一次
+    }
 
     if (deps.loadThumb !== undefined) {
       try {

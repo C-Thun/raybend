@@ -92,6 +92,41 @@ test("rankCommands：最近加分只打破接近的平局，不盖过明显更�
   assert.equal(ranked[0].id, "edit.undo");
 });
 
+test("关键词：搜键位能命中绑了它的命令（F11）", () => {
+  const item: CommandSearchItem = {
+    id: "viewer.fullscreen",
+    title: "全屏看图",
+    group: "视图",
+    keywords: ["F11"],
+  };
+  assert.ok(scoreCommand("F11", item) !== null, "搜 F11 必须命中（面板上就写着这个键）");
+  assert.ok(scoreCommand("f11", item) !== null, "大小写不敏感");
+  assert.ok(scoreCommand("F1", item) !== null, "前缀也能搜到");
+  assert.equal(scoreCommand("F12", item), null, "不是自己的键不该命中");
+});
+
+test("关键词：带空格的英文查询会试连写形式（full screen → fullscreen）", () => {
+  const item: CommandSearchItem = {
+    id: "viewer.fullscreen",
+    title: "全屏看图",
+    group: "视图",
+    keywords: ["F11"],
+  };
+  assert.ok(scoreCommand("full screen", item) !== null, "按词组写也要能中 id 的连写形式");
+  assert.ok(scoreCommand("fullscreen", item) !== null);
+});
+
+test("关键词：Mod 写法也收（搜 Mod+K 命中绑 Mod+K 的命令）", () => {
+  const item: CommandSearchItem = {
+    id: "help.palette",
+    title: "命令面板",
+    group: "帮助",
+    keywords: ["Ctrl+K", "Mod+K"],
+  };
+  assert.ok(scoreCommand("Mod+K", item) !== null);
+  assert.ok(scoreCommand("ctrl+k", item) !== null);
+});
+
 test("rankCommands：没有匹配时返回空数组（面板显示「没找到」）", () => {
   assert.deepEqual(rankCommands("zzzzz", ITEMS), []);
 });

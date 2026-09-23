@@ -1454,7 +1454,7 @@ try {
       return {
         inner: scroller.clientWidth - padding,
         reserved: probed > 0 ? probed : token("--scrollbar-w"),
-        gap: token("--gap"),
+        gap: token("--tile-gap"),
         /* offsetWidth 减 clientWidth 就是经典滚动条占掉的那一竖条（没有就是 0） */
         actual: scroller.offsetWidth - scroller.clientWidth,
         hasScrollbar: scroller.offsetWidth - scroller.clientWidth > 1,
@@ -1664,6 +1664,61 @@ try {
         }
       }
     }
+  }
+
+  /*
+   * tiles 不参与密度（人类 2026-09-23 定）：
+   * 切密度前后，格宽 / 格高 / 间距 / 行高必须**完全不变** ——
+   * 变了就意味着「切一次松紧要全网格重算换行 + 重建可见行 DOM」（照片一多就是秒级卡顿）。
+   * 密度令牌只留给面板/条带（`--gap` / `--panel-pad` / `--bar-*-h`），
+   * tile 内部与 tile 间距走固定令牌（`--tile-gap` / `--tile-pad` / `--tile-bar-h`）。
+   *
+   * 直接改 `data-density`（要验的是「令牌 → 几何」这段接线，不是标题栏开关）。
+   * 验完必须切回紧凑档 —— 后面还有一堆几何断言。
+   */
+  const tileMetrics = `(() => {
+    const scroller = document.querySelector("main [data-virtual-scroller]");
+    const tile = scroller?.querySelector('[role="option"]');
+    const cell = tile?.parentElement ?? null;
+    const row = cell?.parentElement ?? null;
+    if (tile === null || cell === null || row === null) return null;
+    const box = cell.getBoundingClientRect();
+    const style = getComputedStyle(row);
+    return {
+      width: Math.round(box.width * 10) / 10,
+      height: Math.round(box.height * 10) / 10,
+      gap: style.gap,
+      rowHeight: style.height,
+    };
+  })()`;
+  const readTileMetrics = async () => {
+    const measured = await send("Runtime.evaluate", { expression: tileMetrics, returnByValue: true });
+    return measured.result?.value ?? null;
+  };
+  const setDensity = async (value) => {
+    await send("Runtime.evaluate", {
+      expression: 'document.documentElement.dataset.density = "' + value + '"',
+      returnByValue: true,
+    });
+    await sleep(250);
+  };
+
+  await setDensity("compact");
+  const tilesCompact = await readTileMetrics();
+  await setDensity("loose");
+  const tilesLoose = await readTileMetrics();
+  await setDensity("compact");
+  if (tilesCompact === null || tilesLoose === null) {
+    problems.push("量不到 tiles 的密度几何（网格里没有可见格子？）");
+  } else if (
+    tilesCompact.width !== tilesLoose.width ||
+    tilesCompact.height !== tilesLoose.height ||
+    tilesCompact.gap !== tilesLoose.gap ||
+    tilesCompact.rowHeight !== tilesLoose.rowHeight
+  ) {
+    problems.push(
+      `tiles 不该跟着密度变（紧凑 ${JSON.stringify(tilesCompact)} / 宽松 ${JSON.stringify(tilesLoose)}）`,
+    );
   }
 
   // 数字键打星（只在网格里生效）
@@ -3182,9 +3237,7 @@ try {
       const host = document.querySelector('[data-histogram="lines"]');
       if (host === null) return null;
       const paths = [...host.querySelectorAll("path")];
-      const gridLines = [...host.querySelectorAll("span")].filter((el) =>
-        (el.getAttribute("class") ?? "").includes("--hist-grid"),
-      );
+      const gridLines = [...host.querySelectorAll("[data-histogram-grid]")];
       return {
         paths: paths.length,
         layers: paths.filter((p) => (p.getAttribute("class") ?? "").includes("histogram-layer")).length,
@@ -3195,6 +3248,10 @@ try {
         channel: host.getAttribute("data-channel"),
         straight: paths.every((p) => !(p.getAttribute("d") ?? "").includes(" C")),
         gridLines: gridLines.length,
+        gridSizes: gridLines.map((el) => ({
+          axis: el.getAttribute("data-histogram-grid"),
+          size: getComputedStyle(el).backgroundSize,
+        })),
       };
     })()`,
     returnByValue: true,
@@ -3224,6 +3281,20 @@ try {
     if (!hist.straight) problems.push("直方图必须逐点直连，不能再出现三次曲线段");
     if (hist.gridLines !== 4) {
       problems.push(`背景等分虚线应当是 4 根（纵 3 + 横 1），实测 ${JSON.stringify(hist.gridLines)}`);
+    }
+    /*
+     * 虚线必须真的「看得见」（2026-09-23 人类报的：只有顶端/两端各 2px 小段）：
+     * 渐变的 auto 尺寸 = 整个元素，图案只画一次 —— 必须有可平铺的 background-size。
+     * 只数 span 个数是抓不住这个 bug 的（那就是它一直没被发现的原因）。
+     */
+    const gridSizes = Array.isArray(hist.gridSizes) ? hist.gridSizes : [];
+    if (
+      gridSizes.length !== 4 ||
+      gridSizes.some((line) => !String(line.size ?? "").includes("5px"))
+    ) {
+      problems.push(
+        `等分虚线必须有可平铺的 background-size（否则图案只画一次、看不见），实测 ${JSON.stringify(gridSizes)}`,
+      );
     }
   }
 
@@ -4355,6 +4426,100 @@ try {
     if (infoChord !== undefined && infoChord.chord !== "I") {
       problems.push(`「信息档位」的键位应当显示 I（实测 ${JSON.stringify(infoChord)}）`);
     }
+    /*
+     * 2026-09-23 修的两条口径（T3/T4 回归）：
+     *   ① 此刻不可用的命令**照样列出**（灰掉 + 说明），不能从列表里消失；
+     *   ② 搜键位（F11）能直接找到绑了它的命令。
+     * 浏览器里 editor.lut.toggle（只在编辑工作流里适用）必然不可用 —— 拿它当①的样本。
+     */
+    const available = await send("Runtime.evaluate", {
+      expression: `(() => {
+        const row = (id) => document.querySelector('[data-command-palette="open"] [data-command-item="' + id + '"]');
+        const fullscreen = row("viewer.fullscreen");
+        const editor = row("editor.lut.toggle");
+        return {
+          fullscreenPresent: fullscreen !== null,
+          editorPresent: editor !== null,
+          editorFlag: editor?.getAttribute("data-command-available") ?? null,
+          editorReason: editor?.textContent?.trim() ?? null,
+        };
+      })()`,
+      returnByValue: true,
+    });
+    const paletteRows = available.result?.value ?? {};
+    if (paletteRows.fullscreenPresent !== true) {
+      problems.push("viewer.fullscreen 必须在面板里列出来（不可用也要可见）");
+    }
+    if (paletteRows.editorPresent !== true) {
+      problems.push("不可用的命令也必须在面板里列出来（editor.lut.toggle 不见了）");
+    } else if (paletteRows.editorFlag !== "no") {
+      problems.push(`浏览工作流里 editor.lut.toggle 应当标成不可用（实测 ${JSON.stringify(paletteRows)}）`);
+    } else if (!String(paletteRows.editorReason ?? "").includes("不可用")) {
+      problems.push(`不可用的行要说明原因（实测 ${JSON.stringify(paletteRows)}）`);
+    }
+
+    /*
+     * 方向键移动光标时列表要跟着滚（命令多于一屏时，否则选中行会跑出可视区）。
+     * 判据：连按 ArrowDown 之后，aria-selected 那行必须还在列表的可视矩形里。
+     */
+    await send("Runtime.evaluate", {
+      expression: `(() => { const input = document.querySelector('[data-command-palette="open"] input'); input?.focus(); return Boolean(input); })()`,
+      returnByValue: true,
+    });
+    for (let press = 0; press < 30; press += 1) {
+      await cdpKey({ key: "ArrowDown", code: "ArrowDown", vk: 40 });
+    }
+    await sleep(250);
+    const scrolled = await send("Runtime.evaluate", {
+      expression: `(() => {
+        const list = document.querySelector('[data-command-palette="open"] ul');
+        const row = document.querySelector('[data-command-palette="open"] [aria-selected="true"]');
+        if (!list || !row) return { ok: false, hasList: Boolean(list), hasRow: Boolean(row) };
+        const listRect = list.getBoundingClientRect();
+        const rowRect = row.getBoundingClientRect();
+        return {
+          ok: true,
+          inside: rowRect.top >= listRect.top - 1 && rowRect.bottom <= listRect.bottom + 1,
+          scrollTop: Math.round(list.scrollTop),
+          rowTop: Math.round(rowRect.top),
+          listTop: Math.round(listRect.top),
+          listBottom: Math.round(listRect.bottom),
+          rowBottom: Math.round(rowRect.bottom),
+        };
+      })()`,
+      returnByValue: true,
+    });
+    const scrollState = scrolled.result?.value ?? {};
+    if (scrollState.ok !== true || scrollState.inside !== true) {
+      problems.push(`方向键移动光标时列表必须跟着滚（实测 ${JSON.stringify(scrollState)}）`);
+    } else if (!(scrollState.scrollTop > 0)) {
+      problems.push(`命令多于一屏时按 ↓ 到底应当产生滚动（实测 scrollTop=${scrollState.scrollTop}）`);
+    }
+
+    // 搜键位：F11 必须能找到绑了它的命令
+    const clearPaletteInput = `(() => {
+      const input = document.querySelector('[data-command-palette="open"] input');
+      if (!input) return false;
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+      setter.call(input, "");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.focus();
+      return true;
+    })()`;
+    await send("Runtime.evaluate", { expression: clearPaletteInput, returnByValue: true });
+    await send("Input.insertText", { text: "F11" });
+    await sleep(300);
+    const keySearch = await send("Runtime.evaluate", {
+      expression: `[...document.querySelectorAll('[data-command-palette="open"] [data-command-item]')].map((row) => row.getAttribute("data-command-item"))`,
+      returnByValue: true,
+    });
+    const keyHits = keySearch.result?.value ?? [];
+    if (!keyHits.includes("viewer.fullscreen")) {
+      problems.push(`搜「F11」应当命中 viewer.fullscreen（实测 ${JSON.stringify(keyHits)}）`);
+    }
+    // 清空查询，后面的「按时间」搜索从一个干净输入开始
+    await send("Runtime.evaluate", { expression: clearPaletteInput, returnByValue: true });
+    await sleep(150);
   }
 
   // 搜「按时间」→ 回车 → 控制条上的「按时间」真的被切换

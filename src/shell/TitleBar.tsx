@@ -41,7 +41,7 @@ import { SegmentedControl } from "../components/ui/SegmentedControl.tsx";
 import { Tooltip } from "../components/ui/Tooltip.tsx";
 import { locale, localeLabel, nextLocale, t } from "../i18n/index.ts";
 import type { MessageKey } from "../i18n/index.ts";
-import { chordOf, type CommandSpec } from "../lib/commands.ts";
+import { availabilityOf, chordOf, type CommandSpec } from "../lib/commands.ts";
 import { shortcutOverrides } from "../lib/shortcuts.ts";
 import type { AppearanceStore } from "../lib/appearance.ts";
 import { AboutDialog } from "./AboutDialog.tsx";
@@ -97,7 +97,8 @@ export function TitleBar(props: TitleBarProps) {
         .map((command) => ({
           value: command.id,
           label: itemLabel(command),
-          ...(command.enabled?.() === false ? { disabled: true } : {}),
+          // 与命令面板 / 分发器同一份可用性判定（`when` + `enabled`）：暗着但可见
+          ...(!availabilityOf(command).available ? { disabled: true } : {}),
           ...(chordOf(command, shortcutOverrides()) === null
             ? {}
             : { shortcut: chordOf(command, shortcutOverrides()) ?? undefined }),

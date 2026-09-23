@@ -5,7 +5,7 @@
  *
  * | 谁 | 用途 |
  * | --- | --- |
- * | `openFullscreen(items, index)` | 主窗口调：存清单 + 开窗（已开着就换图 + 聚焦） |
+ * | `openFullscreen(items, index)` | 主窗口调：存清单 + 开窗（**每次新建**；连点两次时第二下才走「已开着就换图 + 聚焦」） |
  * | `getFullscreenPayload()` | 全屏页挂载时取一次清单 |
  * | `closeFullscreen()` | 全屏页按 `Esc` / `Enter` 时调 |
  * | `onFullscreenPayload(cb)` | 窗口已开着时换图（不重建窗口） |

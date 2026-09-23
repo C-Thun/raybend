@@ -129,12 +129,22 @@ export function StateWatermark(props: StateWatermarkProps) {
         }
       >
         {/*
-          图标 + 文字包在 relative 里：流光层要用 `absolute inset-0` 盖在同一位置上。
+          图标 + 文字包在同一个**网格单元**里：底层与流光层是同一个单元格的两层，
+          几何天然逐像素一致（人类 2026-09-23 报「流光轮廓比字高几个像素」——
+          旧实现底层走普通流（受父级 px-8 py-1 内缩），流光层却是 `absolute inset-0`
+          （不含 padding）→ 高光整体上移 4px）。
+          用网格堆叠而不是「给两层写同一份 padding」：后者靠两处保持一致，
+          下次改一处又会错位；堆叠靠的是同一个格子，错不了。
           `overflow-hidden` 保证移动的遮罩不会溢出到网格上。
         */}
-        <div class="relative flex flex-col items-center gap-3 overflow-hidden px-8 py-1">
+        <div class="relative grid overflow-hidden px-8 py-1">
           {/* 底层：常态浓度（不含任何动画） */}
-          <div class="flex flex-col items-center gap-3">{content(false)}</div>
+          <div
+            data-watermark-base="on"
+            class="col-start-1 row-start-1 flex flex-col items-center gap-3"
+          >
+            {content(false)}
+          </div>
 
           {/*
             流光层（人类 2026-09-23 定）：同一内容再画一遍、颜色亮一档，
@@ -145,7 +155,7 @@ export function StateWatermark(props: StateWatermarkProps) {
             <div
               aria-hidden="true"
               data-watermark-shimmer="on"
-              class="rb-shimmer-mask pointer-events-none absolute inset-0 flex flex-col items-center gap-3"
+              class="rb-shimmer-mask pointer-events-none col-start-1 row-start-1 flex flex-col items-center gap-3"
             >
               {content(true)}
             </div>

@@ -36,8 +36,26 @@ body,
  margin: 0;
 }
 
+/*
+ * html / body **常驻透明**（底色由**各页面自己的根容器**画）。
+ *
+ * 为什么（透明挖洞的物理约束，`AGENTS.md` §6.1 方案 B）：窗口是 `transparent: true`，
+ * wgpu 直绘在 webview **底下** —— DOM 链上任何一层不透明都会把照片挡死。
+ * App 根 div / 全屏页 / 陈列室都有自己的 `bg-surface-*`，所以让开不会露出桌面。
+ *
+ * ⚠️ 必须**显式**写 `transparent`，不能只删掉背景：`:root` 上有 `color-scheme: dark`，
+ * 浏览器会给「没有背景」的画布刷一层不透明的默认深色 —— 那样照样挡死。
+ * （spike 页早就在 JS 里干过同一件事，见 `dev/SpikeViewport.tsx` 的注释。）
+ *
+ * 2026-09-23 事故：编辑器视口「从来没出过图」，根因就是 body 这层底色 ——
+ * spike 页自己置了透明所以看着正常，编辑器忘了，于是 wgpu 画了也被挡住。
+ */
+html,
 body {
- background: var(--surface-main);
+ background: transparent;
+}
+
+body {
  color: var(--fg-1);
  /*
   * 字体栈（DESIGN.md §7.1）：拉丁/数字走 Inter，汉字走 Noto Sans SC。

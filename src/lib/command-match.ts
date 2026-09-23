@@ -23,6 +23,15 @@ export interface CommandSearchItem {
   title: string;
   /** 已本地化的分组名（用于分组显示；也参与匹配） */
   group?: string;
+  /**
+   * 额外可搜的词：当前键位（`F11` / `Ctrl+K`）与原始写法（`Mod+K`）等。
+   *
+   * 为什么需要它（人类 2026-09-23 报「F11 在 Ctrl+K 里搜不到」）：
+   * 面板每行右侧就写着键位，用户很自然直接搜那个键；而键位以前不在搜索索引里，
+   * 搜 `F11` 一条都不出 —— 「显示得出来、搜不到」是最不可解释的一种不可见。
+   * 权重与 id 同级（同乘 0.7），低于标题匹配。
+   */
+  keywords?: readonly string[];
 }
 
 /** 这个位置算不算「词的开始」（ASCII 字母数字块的开头，或紧跟分隔符之后） */
@@ -59,25 +68,43 @@ export function subsequenceScore(query: string, text: string): number {
 /**
  * 一条命令对查询的匹配分；`null` = 不匹配（面板里不显示）。
  * 空查询 = 人人都匹配（分 0，顺序交给调用方）。
+ *
+ * 带空格的查询会**同时试连写形式**（`full screen` → `fullscreen`）：
+ * 中文用户搜英文命令名时常常按词组写，而 id 里是连写的（`viewer.fullscreen`）。
  */
 export function scoreCommand(query: string, item: CommandSearchItem): number | null {
-  const needle = query.trim().toLowerCase();
-  if (needle === "") return 0;
+  const raw = query.trim().toLowerCase();
+  if (raw === "") return 0;
 
+  const needles = raw.includes(" ") ? [raw, raw.replace(/\s+/g, "")] : [raw];
+  let best = -1;
+  for (const needle of needles) {
+    best = Math.max(best, scoreNeedle(needle, item));
+  }
+  return best < 0 ? null : best;
+}
+
+/** 单个写法（已去空格、已小写）的匹配分；`-1` = 不匹配 */
+function scoreNeedle(needle: string, item: CommandSearchItem): number {
   const title = item.title.toLowerCase();
   if (title === needle) return 1000;
   if (title.startsWith(needle)) return 800 - Math.min(title.length - needle.length, 100);
 
   const titleScore = subsequenceScore(needle, title);
   const idScore = subsequenceScore(needle, item.id.toLowerCase());
-  const groupScore = item.group === undefined ? -1 : subsequenceScore(needle, item.group.toLowerCase());
+  const groupScore =
+    item.group === undefined ? -1 : subsequenceScore(needle, item.group.toLowerCase());
+  const keywordScore = (item.keywords ?? []).reduce(
+    (best, keyword) => Math.max(best, subsequenceScore(needle, keyword.toLowerCase())),
+    -1,
+  );
 
-  const best = Math.max(
+  return Math.max(
     titleScore,
     idScore < 0 ? -1 : idScore * 0.7,
     groupScore < 0 ? -1 : groupScore * 0.5,
+    keywordScore < 0 ? -1 : keywordScore * 0.7,
   );
-  return best < 0 ? null : best;
 }
 
 /** 最近用过的加分（越靠前加得越多，最多 20 —— 只打破接近的平局） */

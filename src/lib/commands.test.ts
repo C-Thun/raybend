@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  availabilityOf,
   blockingIssues,
   chordOf,
   detectConflicts,
@@ -90,6 +91,24 @@ test("冲突：作用域不相交的同一条键 = 只提示（shared，放行�
   assert.equal(issues[0].kind, "shared");
   assert.equal(issues[0].blocking, false);
   assert.equal(blockingIssues(issues).length, 0, "现状（0/1 两种含义）不该被拦");
+});
+
+test("availabilityOf：when 与 enabled 两个闸，各报各的原因", () => {
+  // 四个界面（分发器 / 面板 / 菜单 / 设置）读的就是这一份 —— 口径分叉过（2026-09-23）。
+  assert.deepEqual(availabilityOf(cmd("a")), { available: true });
+  assert.deepEqual(availabilityOf(cmd("a", { when: () => false })), {
+    available: false,
+    reason: "when",
+  });
+  assert.deepEqual(availabilityOf(cmd("a", { enabled: () => false })), {
+    available: false,
+    reason: "enabled",
+  });
+  assert.deepEqual(
+    availabilityOf(cmd("a", { when: () => false, enabled: () => false })),
+    { available: false, reason: "when" },
+    "两个都为假时报 when（场景不对是更根本的原因）",
+  );
 });
 
 test("冲突：三条命令两条相交 → 报一条 duplicate", () => {

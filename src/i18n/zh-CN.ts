@@ -407,6 +407,9 @@ export const zhCN = {
  // ── 命令注册表 / 命令面板 / 快捷键（M2-W3）────────────────
  "palette.placeholder": "输入命令…",
  "palette.empty": "没有匹配的命令",
+ // 灰掉的行要说明「为什么现在不能用」（DESIGN.md §12.11 第 3 条）
+ "palette.unavailable.when": "当前场景不可用",
+ "palette.unavailable.enabled": "当前条件下不可用",
  "shortcuts.title": "快捷键",
  "shortcuts.description": "点右侧的键位即可改键：按下新键生效，Backspace 解绑，Esc 取消。保存后立即生效。",
  "shortcuts.pressKey": "按下新键…",

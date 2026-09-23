@@ -94,12 +94,16 @@ export function Histogram(props: HistogramProps) {
           <For each={[25, 50, 75]}>
             {(percent) => (
               <span
-                class="absolute inset-y-0 w-px bg-[linear-gradient(to_bottom,var(--hist-grid)_0_2px,transparent_2px_5px)] bg-repeat-y"
+                data-histogram-grid="v"
+                class="absolute inset-y-0 w-px bg-[linear-gradient(to_bottom,var(--hist-grid)_0_2px,transparent_2px_5px)] bg-repeat-y [background-size:100%_5px]"
                 style={{ left: `${percent}%` }}
               />
             )}
           </For>
-          <span class="absolute inset-x-0 top-1/2 h-px bg-[linear-gradient(to_right,var(--hist-grid)_0_2px,transparent_2px_5px)] bg-repeat-x" />
+          <span
+            data-histogram-grid="h"
+            class="absolute inset-x-0 top-1/2 h-px bg-[linear-gradient(to_right,var(--hist-grid)_0_2px,transparent_2px_5px)] bg-repeat-x [background-size:5px_100%]"
+          />
         </div>
 
         <svg

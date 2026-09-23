@@ -395,6 +395,9 @@ export const enUS: Record<MessageKey, string> = {
  // ── 命令注册表 / 命令面板 / 快捷键（M2-W3）────────────────
  "palette.placeholder": "Type a command…",
  "palette.empty": "No matching commands",
+ // 灰掉的行要说明「为什么现在不能用」（DESIGN.md §12.11 第 3 条）
+ "palette.unavailable.when": "Not available here",
+ "palette.unavailable.enabled": "Not available right now",
  "shortcuts.title": "Keyboard shortcuts",
  "shortcuts.description": "Click a key to rebind: press the new keys, Backspace to unbind, Esc to cancel. Changes apply right after saving.",
  "shortcuts.pressKey": "Press keys…",

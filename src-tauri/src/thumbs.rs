@@ -94,16 +94,31 @@ pub async fn thumb_get<R: Runtime>(
 /// 这个是 **view 与缩略图共用的总入口** —— 调用方只说「哪张、要多大、有没有编辑」，
 /// 由 `display` 决定它是 RAW 还是位图、该给原图还是该渲染。
 ///
+/// **带磁盘缓存**（`display::cached_image`）：渲染结果写进源文件缓存库
+/// （与 `thumb_get` 同一个 `_sources/thumbs.db`、同一套缓存键），所以连续看图、
+/// 邻图预载都不会重复解码 —— 旧的裸 `display_image` 每次都重解，一张 RAW 要一秒多。
+///
 /// `purpose`：`"grid"` / `"strip"` / `"screen"` / `"original"`；缺省 `screen`（看图）。
-/// 位图 + `original` + 没编辑过 ⇒ **直接给原文件字节**（不经渲染管线）。
+/// 位图 + `original` + 没编辑过 ⇒ **直接给原文件字节**（不经渲染管线，也不缓存）。
 #[tauri::command]
-pub async fn view_image(path: String, purpose: Option<String>) -> Result<tauri::ipc::Response, String> {
+pub async fn view_image<R: Runtime>(
+    app: AppHandle<R>,
+    state: tauri::State<'_, SourcesThumbs>,
+    path: String,
+    purpose: Option<String>,
+) -> Result<tauri::ipc::Response, String> {
     let text = purpose.as_deref().unwrap_or("screen");
     let purpose = ImagePurpose::parse(text)
         .ok_or_else(|| format!("未知的取图用途：{text}"))?;
+    // 缓存库要先拿出来（`State` 不能跨 await 持有）——与 `thumb_get` 同一条路
+    let cache_dir = sources_cache_dir(&app)?;
+    let db = {
+        let now = time::now_millis();
+        state.get(&cache_dir, now)?
+    };
     let bytes = crate::source::blocking(move || {
         let request = ImageRequest::plain(Path::new(&path), purpose);
-        let image = display::display_image(&request)
+        let image = display::cached_image(&db, &request, time::now_millis())
             .map_err(|e| e.to_string())?
             .ok_or_else(|| "取不到这张图（类型认不出或解不开）".to_string())?;
         Ok(image.bytes)

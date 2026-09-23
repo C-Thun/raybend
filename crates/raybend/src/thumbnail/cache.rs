@@ -209,6 +209,26 @@ pub fn get(conn: &Connection, key: &[u8], size: SizeClass, sig: &str) -> Result<
         .optional()?)
 }
 
+/// 取一条缩略图**连同尺寸**（一次查询）。
+///
+/// 给「统一取图口」的缓存路径用：命中时要把尺寸一起报回 `DisplayImage.size`，
+/// 分两次查（`get` + `meta`）没必要。其余语义与 [`get`] 完全相同（纯读、不碰 frecency）。
+pub fn get_with_size(
+    conn: &Connection,
+    key: &[u8],
+    size: SizeClass,
+    sig: &str,
+) -> Result<Option<(Vec<u8>, u32, u32)>> {
+    Ok(conn
+        .query_row(
+            "SELECT data, width, height FROM thumbs
+              WHERE cache_key = ?1 AND size_class = ?2 AND render_sig = ?3",
+            params![key, size.as_str(), sig],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()?)
+}
+
 /// 记一次「用过」（frecency 的原料）：`hits += 1`、`last_used_at = now`。
 ///
 /// 批量调用更划算（一次事务里 `touch` 一批），见模块文档的回收策略。
@@ -482,6 +502,25 @@ mod tests {
         assert_eq!(got.len(), 16);
         assert!(has(&conn, &key, SizeClass::Grid, render_sig(SizeClass::Grid)).unwrap());
         assert!(!has(&conn, &key, SizeClass::Strip, render_sig(SizeClass::Strip)).unwrap());
+    }
+
+    #[test]
+    fn get_with_size_returns_bytes_and_dimensions_in_one_read() {
+        let conn = mem();
+        let key = cache_key(None, "a.jpg");
+        assert!(
+            get_with_size(&conn, &key, SizeClass::Screen, render_sig(SizeClass::Screen))
+                .unwrap()
+                .is_none(),
+            "未命中是 None，不是错误"
+        );
+        put_n(&conn, &key, SizeClass::Screen, 16, T0);
+        let (bytes, width, height) =
+            get_with_size(&conn, &key, SizeClass::Screen, render_sig(SizeClass::Screen))
+                .unwrap()
+                .unwrap();
+        assert_eq!(bytes.len(), 16);
+        assert_eq!((width, height), (300, 200), "尺寸与 put 写入的一致");
     }
 
     #[test]

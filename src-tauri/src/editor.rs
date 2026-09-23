@@ -144,7 +144,7 @@ impl ColorDto {
 }
 
 /// 前端 `editor_set_viewport` 的一次载荷（**原始事实**，见模块文档）。
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetViewportArgs {
     pub hole: RectDto,
@@ -218,7 +218,7 @@ pub fn physical_rect(hole: RectDto, dpr: f64) -> RectDto {
 }
 
 /// 收到的事实（存起来的那一份）。
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct StoredViewport {
     pub hole_css: Option<RectDto>,
     pub dpr: f64,
@@ -229,6 +229,9 @@ pub struct StoredViewport {
     pub backdrop_reported: bool,
     /// 收到过几次（诊断：一直不涨 = 前端根本没报）
     pub updates: u64,
+    /// 最近一次上报的**原始载荷**（补发给晚起的会话用 —— 见 [`Self::replay`]）。
+    /// 存原始串而不是重拼：底色那一项 `backdrop_reported` 的语义依赖它。
+    raw: Option<SetViewportArgs>,
 }
 
 impl Default for StoredViewport {
@@ -240,6 +243,7 @@ impl Default for StoredViewport {
             backdrop: raybend::render::Srgb8::DARK_SURFACE_BAR,
             backdrop_reported: false,
             updates: 0,
+            raw: None,
         }
     }
 }
@@ -259,6 +263,23 @@ impl StoredViewport {
         self.backdrop = next.backdrop;
         self.backdrop_reported = next.backdrop_reported;
         self.updates = self.updates.saturating_add(1);
+    }
+
+    /// 记住这次的**原始**载荷（与 [`Self::apply`] 分开，是因为校验后的结构
+    /// 丢失了「底色原本报的是什么串」）。
+    pub fn remember_raw(&mut self, args: SetViewportArgs) {
+        self.raw = Some(args);
+    }
+
+    /// 补发给新会话的原始载荷。
+    ///
+    /// 为什么需要：前端的上报器**会去重**（同一份载荷不重复发），而视口上报
+    /// 可能早于会话建立 —— 那时 `sink` 还没有，事实只存进了 `EditorState`，
+    /// 新会话的 `clip_rect` 就一直是 `None`（症状：照片按整窗适配、不在洞口里）。
+    /// 会话起来时补发一次，两个方向的时序都成立。
+    #[must_use]
+    pub fn replay(&self) -> Option<SetViewportArgs> {
+        self.raw.clone()
     }
 }
 
@@ -601,6 +622,16 @@ pub async fn editor_bind_renderer<R: Runtime>(
         })
         .map_err(|error| format!("起渲染线程失败：{error}"))?;
 
+    /*
+     * 把**已经收到的**洞口事实补发给新会话（见 `StoredViewport::replay`）。
+     * 这条通道在 `sink` 设好之前是空的，所以补发要赶在把 sender 存进 `Session` 之前。
+     */
+    if let Ok(guard) = state.viewport.lock()
+        && let Some(args) = guard.replay()
+    {
+        let _ = commands.send(RenderCommand::Viewport(args));
+    }
+
     *state
         .session
         .lock()
@@ -657,6 +688,7 @@ pub fn editor_set_viewport(
             .lock()
             .map_err(|_| "编辑器视口状态锁中毒".to_string())?;
         guard.apply(validated);
+        guard.remember_raw(args.clone());
         guard.snapshot()
     };
     if let Some(sender) = session_sender(&state) {
@@ -937,7 +969,16 @@ fn session_loop(
             Ok(RenderOutcome::Drawn) => {
                 consecutive_errors = 0;
                 let mut state = lock_state(shared);
-                if state.photo_path.is_some() {
+                /*
+                 * 「画出来了」= **真的有一张图在纹理里**（`has_image`）且当前确实选了照片。
+                 *
+                 * ❗ 不能只看 `photo_path.is_some()`：`SetPhoto` 之后、解码回来之前
+                 * 也会画帧（只有洞口底色），那时标上 `painted_path` 会让前端立刻把洞口切透明，
+                 * 而且 `editorViewportNotice` 的「paintedPath 有值就不提示」会**压掉载入提示** ——
+                 * 用户看到的就是一个空洞口、什么信息都没有（2026-09-23 人类报的
+                 * 「视口空、点图片不显示」有这一份）。
+                 */
+                if state.photo_path.is_some() && context.has_image() {
                     state.painted_path = state.photo_path.clone();
                 }
                 // 出图正常 ⇒ 清掉当前错误（spike 的「红字永远挂着」教训）
@@ -1391,6 +1432,19 @@ mod tests {
             (physical.x - 300.0 * 1.375).abs() < 1e-6,
             "物理洞口必须带偏移，不能只算宽高"
         );
+    }
+
+    #[test]
+    fn replay_returns_the_raw_payload_for_late_sessions() {
+        // 会话可能晚于第一次上报才建立；补发的那一份必须是**原始载荷**
+        // （连底色串一起 —— 校验后的结构只留解析结果）。
+        let mut stored = StoredViewport::default();
+        assert!(stored.replay().is_none(), "还没收到过就没什么可补发");
+        let raw = args(1.375);
+        stored.remember_raw(raw.clone());
+        let replay = stored.replay().expect("有原始载荷");
+        assert_eq!(replay.hole.width, raw.hole.width);
+        assert_eq!(replay.backdrop.as_deref(), Some("rgb(42, 45, 51)"));
     }
 
     #[test]
