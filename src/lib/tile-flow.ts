@@ -82,22 +82,32 @@ export function computeTileFlow(input: TileFlowInput): TileFlow {
  * 阶梯史（改它之前先读这里）：
  *   * 初版 9 档 `96,120,144,176,208,256,320,400,512`；
  *   * 2026-09-20 上午：最小档太小（一页太多图）⇒ 抬到 128 起、仍到 512 收；
- *   * 2026-09-20 下午（本表）：**400 封顶 + 17 档**，每级约 +7.4%，
- *     换屏 / 换窗口宽度时都能找到一个不挤不空的档。
+ *   * 2026-09-20 下午：**400 封顶 + 17 档**，每级约 +7.4%；
+ *   * **2026-09-23（本表）：320 封顶（−20%）+ 17 档，每级约 +5.9%** ——
+ *     人类要求「最大尺寸缩小 20%，重排 17 档使过渡更平滑」：封顶降下来、
+ *     每级比例从 7.4% 收到 5.9%，拖动滑块时相邻两档的跳跃感明显变小。
  */
 export const TILE_SIZE_STEPS = [
-  128, 136, 148, 160, 172, 184, 196, 212, 228, 244, 260, 280, 300, 324, 348, 372, 400,
+  128, 136, 144, 152, 160, 170, 180, 192, 202, 214, 226, 240, 254, 270, 286, 302, 320,
 ] as const;
 
 export type TileSizeStep = (typeof TILE_SIZE_STEPS)[number];
 
 /**
- * 默认档位下标：**260**（新表里的第 11 档）。
+ * 最大档（人类 2026-09-23：「最大尺寸边长缩小 20%」）。
  *
- * 旧表的默认是 256，新表按几何阶梯排下来最近的等价档是 260（差 1.6%，肉眼无差）——
- * 为了阶梯均匀，**不为了保住 256 这个数字去把某一级掰弯**。
+ * 自适应宽度（`fitTileSizeToRow`）**不许超过它** —— 超过时那个按钮直接无效
+ * （见 `canFitRow`）：算不出能铺满的档，就不能假装铺得满。
  */
-export const DEFAULT_TILE_STEP_INDEX = 10;
+export const MAX_TILE_SIZE: number = TILE_SIZE_STEPS[TILE_SIZE_STEPS.length - 1];
+
+/**
+ * 默认档位下标：**254**（新表里的第 13 档）。
+ *
+ * 旧表的默认是 256 → 上一版是 260 → 这一版全表缩了 20%，按尺寸最接近的档取 254
+ * （差 0.8%，肉眼无差）。阶梯均匀优先于保住某个具体数字。
+ */
+export const DEFAULT_TILE_STEP_INDEX = 12;
 
 /**
  * 旧表（9 档、512 封顶）—— **只为把存过的档位下标换算成新表的等价尺寸**。
@@ -192,6 +202,24 @@ export function fitTileSizeToRow(input: TileFlowInput): number {
  const width = Number.isFinite(input.containerWidth) ? Math.max(0, input.containerWidth) : 0;
  if (width <= 0) return input.cellWidth;
  return (width - (flow.columns - 1) * gap) / flow.columns;
+}
+
+/**
+ * 「横向适合窗口」**能不能做**（人类 2026-09-23 定）。
+ *
+ * 判据：算出来的格宽不得超过最大档（`MAX_TILE_SIZE`）。
+ * 超过时按钮**无效** —— 那时只有「少放几列」才铺得满，而列数是按当前格宽算出来的，
+ * 不能为了铺满而凭空改列数（那会让网格瞬间跳一次列）。
+ * 所以宁可老实说「这个按钮现在干不了这件事」。
+ *
+ * 窗口很宽、照片很少时就会碰上（例如 4 张照片摆在 2560 宽的屏上）。
+ */
+export function canFitRow(input: TileFlowInput): boolean {
+ // 容器还没量到（宽 0）：不是「能做」—— 没有宽度事实就不该声称铺得满
+ if (!Number.isFinite(input.containerWidth) || input.containerWidth <= 0) return false;
+ const fitted = fitTileSizeToRow(input);
+ if (!Number.isFinite(fitted) || fitted <= 0) return false;
+ return fitted <= MAX_TILE_SIZE;
 }
 
 /**

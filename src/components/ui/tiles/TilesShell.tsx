@@ -34,8 +34,14 @@ export interface TilesShellProps {
 
 export function TilesShell(props: TilesShellProps): JSX.Element {
   const [fitRequest, setFitRequest] = createSignal(0);
+  /*
+   * 「横向适合窗口」现在**能不能**做（人类 2026-09-23：算出来超过最大档就无效）。
+   * 网格算完回填（它拿着容器宽 / 列数 / 间距），状态条据此禁用按钮。
+   */
+  const [fitAvailable, setFitAvailable] = createSignal(true);
+  const fitChannel = { request: fitRequest, available: fitAvailable, setAvailable: setFitAvailable };
   return (
-    <TilesFitRequestContext.Provider value={fitRequest}>
+    <TilesFitRequestContext.Provider value={fitChannel}>
       <div
         class={["relative flex min-h-0 flex-1 flex-col", props.class ?? ""]
           .filter(Boolean)
@@ -65,6 +71,7 @@ export function TilesShell(props: TilesShellProps): JSX.Element {
           <TilesControlBar
             config={() => props.bar as TilesControlBarProps}
             onFitRow={() => setFitRequest((request) => request + 1)}
+            fitAvailable={fitAvailable()}
           />
         </Show>
       </div>

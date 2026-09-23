@@ -120,6 +120,14 @@ export interface TilesControlBarComponentProps {
    */
   config: () => TilesControlBarProps;
   onFitRow: () => void;
+  /**
+   * 「横向适合窗口」现在**能不能**做（网格算完回填，见 `fit.ts`）。
+   *
+   * `false` = 按钮**禁用**（人类 2026-09-23：算出来的格宽超过最大档时按钮无效）——
+   * 那时只有「少放几列」才铺得满，而列数不能为了铺满而凭空改（网格会跳一次列），
+   * 所以老实禁用比「按了没反应」诚实。不给就当作能做。
+   */
+  fitAvailable?: boolean;
 }
 
 export function TilesControlBar(input: TilesControlBarComponentProps) {
@@ -267,10 +275,17 @@ export function TilesControlBar(input: TilesControlBarComponentProps) {
       <button
         type="button"
         data-tiles-fit-row
+        data-fit-available={input.fitAvailable === false ? "no" : "yes"}
+        disabled={input.fitAvailable === false}
         aria-label={t("grid.fit_row")}
         title={t("grid.fit_row")}
-        onClick={props.onFitRow}
-        class="flex size-6 shrink-0 items-center justify-center rounded-ui bg-state-hover text-fg-2 transition-colors hover:bg-state-hover hover:text-fg-1"
+        onClick={input.onFitRow}
+        class={[
+          "flex size-6 shrink-0 items-center justify-center rounded-ui transition-colors",
+          input.fitAvailable === false
+            ? "cursor-default text-fg-3 opacity-60"
+            : "bg-state-hover text-fg-2 hover:text-fg-1",
+        ].join(" ")}
       >
         <IconArrowsHorizontal size={16} aria-hidden="true" />
       </button>

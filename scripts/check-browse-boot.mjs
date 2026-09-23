@@ -1608,13 +1608,58 @@ try {
       });
       await sleep(200);
 
-    /* ③ 还原档位（点轨道上原档位对应的位置）—— 别把状态留给后面那些几何 / 信息条断言 */
+    /*
+     * ③ 还原档位 —— 别把状态留给后面那些几何 / 信息条断言。
+     *
+     * ⚠️ 用**拖回**而不是「点轨道上对应的位置」：轨道点击的 x → 档位映射会差零点几档
+     * （控件矩形含内边距，Ark 的命中区是轨道本身），原来那套在**整数档**下蒙对了，
+     * 而「适合窗口」算出来的是小数档（如 12.61）—— 一点就停在原地，看着像没还原。
+     */
       if (Number.isFinite(zoomStart.value)) {
-        await clickTrackAt(track.left + (zoomStart.value / 16) * track.width);
+        const thumbNow = await send("Runtime.evaluate", {
+          expression: `(() => {
+            const thumb = document.querySelector('main [data-tiles-control-bar] [role="slider"]');
+            if (thumb === null) return null;
+            const box = thumb.getBoundingClientRect();
+            return { x: Math.round(box.left + box.width / 2), y: Math.round(box.top + box.height / 2) };
+          })()`,
+          returnByValue: true,
+        });
+        const from = thumbNow.result?.value ?? null;
+        if (from !== null) {
+          await send("Input.dispatchMouseEvent", {
+            type: "mousePressed",
+            button: "left",
+            buttons: 1,
+            clickCount: 1,
+            x: from.x,
+            y: from.y,
+          });
+          const steps = 8;
+          for (let i = 1; i <= steps; i += 1) {
+            await send("Input.dispatchMouseEvent", {
+              type: "mouseMoved",
+              button: "left",
+              buttons: 1,
+              x: Math.round(from.x + ((zoomStart.x - from.x) * i) / steps),
+              y: from.y,
+            });
+            await sleep(30);
+          }
+          await send("Input.dispatchMouseEvent", {
+            type: "mouseReleased",
+            button: "left",
+            buttons: 0,
+            clickCount: 1,
+            x: zoomStart.x,
+            y: zoomStart.y,
+          });
+          await sleep(200);
+        }
         const restored = await readStep();
         if (!(Math.abs(restored - zoomStart.value) <= 0.5)) {
           problems.push(
-            `点轨道还原档位应当回到起点附近（起点 ${zoomStart.value}，实测 ${restored}）`,
+            `拖回起点档位应当回到起点附近（起点 ${zoomStart.value}，实测 ${restored}）`,
           );
         }
       }
@@ -2895,13 +2940,13 @@ try {
     problems.push("量不到胶片带（尺寸/滚动条这条验不了）");
   } else {
     if (
-      stripChromeState.height !== 148 ||
-      stripChromeState.step !== "4" ||
-      stripChromeState.tileWidth !== 158 ||
-      stripChromeState.tileHeight !== 132
+      stripChromeState.height !== 146 ||
+      stripChromeState.step !== "7" ||
+      stripChromeState.tileWidth !== 156 ||
+      stripChromeState.tileHeight !== 130
     ) {
       problems.push(
-        `胶片带默认应当是第 4 档、tile 158×132、总高 148，实测 ${JSON.stringify(stripChromeState)}`,
+        `胶片带默认应当是第 7 档、tile 156×130、总高 146（2026-09-23 新表：96–192 等比、默认 130），实测 ${JSON.stringify(stripChromeState)}`,
       );
     }
     if (stripChromeState.scrollbarWidth !== "none") {
@@ -2916,7 +2961,7 @@ try {
       stripChromeState.resizer?.height !== 8 ||
       stripChromeState.resizer?.joinsStrip !== true ||
       stripChromeState.resizer?.dots !== 3 ||
-      stripChromeState.resizer?.now !== "4"
+      stripChromeState.resizer?.now !== "7"
     ) {
       problems.push(`view 与胶片带之间应有 8px 三点拖拉条，实测 ${JSON.stringify(stripChromeState.resizer)}`);
     }
@@ -2968,16 +3013,16 @@ try {
       returnByValue: true,
     });
     const state = draggedUp.result?.value ?? null;
-    if (state?.step !== "6" || state?.tileHeight !== 150 || state?.now !== "6") {
-      problems.push(`胶片带把手向上拖 18px 应放大两档，实测 ${JSON.stringify(state)}`);
+    if (state?.step !== "10" || state?.tileHeight !== 148 || state?.now !== "10") {
+      problems.push(`胶片带把手向上拖 18px 应放大到第 10 档（130 → 148），实测 ${JSON.stringify(state)}`);
     }
     await dragFilmHandle(18);
     const draggedBack = await send("Runtime.evaluate", {
       expression: `document.querySelector('[data-filmstrip="open"]')?.getAttribute("data-filmstrip-step") ?? null`,
       returnByValue: true,
     });
-    if (draggedBack.result?.value !== "4") {
-      problems.push(`胶片带把手向下拖 18px 应回到默认第 4 档，实测 ${JSON.stringify(draggedBack.result?.value)}`);
+    if (draggedBack.result?.value !== "7") {
+      problems.push(`胶片带把手向下拖 18px 应回到默认第 7 档，实测 ${JSON.stringify(draggedBack.result?.value)}`);
     }
   } else {
     problems.push("找不到胶片带三点拖拉条，无法验证真实鼠标拖动");
@@ -3017,13 +3062,13 @@ try {
   if (stripZoom.result?.value !== true || stripZoomState === null) {
     problems.push("量不到胶片带 Ctrl + 滚轮隐藏缩放");
   } else if (
-    stripZoomState.step !== "5" ||
-    stripZoomState.height !== 157 ||
-    stripZoomState.tileWidth !== 169 ||
-    stripZoomState.tileHeight !== 141
+    stripZoomState.step !== "8" ||
+    stripZoomState.height !== 152 ||
+    stripZoomState.tileWidth !== 163 ||
+    stripZoomState.tileHeight !== 136
   ) {
     problems.push(
-      `胶片带 Ctrl + 向上滚一格应到第 5 档、tile 169×141、总高 157，实测 ${JSON.stringify(stripZoomState)}`,
+      `胶片带 Ctrl + 向上滚一格应到第 8 档、tile 163×136、总高 152，实测 ${JSON.stringify(stripZoomState)}`,
     );
   }
   // 变化后 2 秒才写：模拟 Tauri 环境直接检查 setting_set 的参数（真实环境落 app.db）。
@@ -3039,8 +3084,8 @@ try {
   const importFilmWrites = (persistedFilm.calls ?? []).filter(
     (call) => call?.key === "filmstrip.import_tile_step",
   );
-  if (browseFilmWrites.length !== 1 || browseFilmWrites[0]?.value !== "5" || importFilmWrites.length !== 0) {
-    problems.push(`browse 胶片带档位应在静止 2 秒后独立落盘为 5，实测 ${JSON.stringify(persistedFilm)}`);
+  if (browseFilmWrites.length !== 1 || browseFilmWrites[0]?.value !== "8" || importFilmWrites.length !== 0) {
+    problems.push(`browse 胶片带档位应在静止 2 秒后独立落盘为 8（Ctrl+滚轮后的档），实测 ${JSON.stringify(persistedFilm)}`);
   }
   await send("Runtime.evaluate", {
     expression: `(() => {
@@ -3142,6 +3187,9 @@ try {
       );
       return {
         paths: paths.length,
+        layers: paths.filter((p) => (p.getAttribute("class") ?? "").includes("histogram-layer")).length,
+        fills: new Set(paths.map((p) => getComputedStyle(p).fill)).size,
+        blend: paths.map((p) => getComputedStyle(p).mixBlendMode).join(","),
         channels: paths.filter((p) => (p.getAttribute("class") ?? "").includes("histogram-channel")).length,
         channelButtons: host.querySelectorAll('button[aria-pressed]').length,
         channel: host.getAttribute("data-channel"),
@@ -3155,8 +3203,20 @@ try {
   if (hist === null) {
     problems.push("看图右栏里没有画出来的直方图（[data-histogram=\"lines\"] 不在）");
   } else {
-    if (hist.paths !== 3 || hist.channels !== 3) {
-      problems.push(`直方图应当只有三条完整 RGB 通道 path，实测 ${JSON.stringify(hist)}`);
+    /*
+     * 人类 2026-09-23 定的**两套逻辑**：
+     *   * 全通道（默认）→ **7 块固定色区域**（`histogram-layer`，每块一个令牌色）；
+     *   * 点亮单通道 → 3 条通道 path（`histogram-channel`）自然叠加。
+     * 并且**两种模式都不许用混合模式**（`screen`/`lighten` 那些会造出新色相）。
+     */
+    if (hist.paths !== 7 || hist.layers !== 7 || hist.channels !== 0) {
+      problems.push(`直方图全通道模式应当是 7 块固定色区域（histogram-layer），实测 ${JSON.stringify(hist)}`);
+    }
+    if (hist.fills !== 7) {
+      problems.push(`7 块区域应当各有一个固定色（改色只改令牌），实测不同色数 ${hist.fills}`);
+    }
+    if (hist.blend.split(",").some((mode) => mode !== "normal")) {
+      problems.push(`直方图不许用混合模式取色（人类 2026-09-23 重申是固定色），实测 ${hist.blend}`);
     }
     if (hist.channelButtons !== 3 || hist.channel !== "all") {
       problems.push(`直方图默认应当全通道显示，并内置 R/G/B 三个互斥按钮，实测 ${JSON.stringify(hist)}`);
@@ -3164,6 +3224,54 @@ try {
     if (!hist.straight) problems.push("直方图必须逐点直连，不能再出现三次曲线段");
     if (hist.gridLines !== 4) {
       problems.push(`背景等分虚线应当是 4 根（纵 3 + 横 1），实测 ${JSON.stringify(hist.gridLines)}`);
+    }
+  }
+
+  /*
+   * 直方图**点亮单通道**：这时才回到「三条通道自然叠加」——
+   * 选中那条在前台、另两条半透明，而且同样**不用混合模式**。
+   */
+  const histogramSingle = await send("Runtime.evaluate", {
+    /* ⚠️ 表达式是 async IIFE → 必须 awaitPromise，否则回包是被序列化成 {} 的 Promise */
+    awaitPromise: true,
+    expression: `(async () => {
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      const host = document.querySelector('[data-histogram="lines"]');
+      if (host === null) return null;
+      const button = [...host.querySelectorAll("button[aria-pressed]")].at(0);
+      button?.click();
+      await sleep(250);
+      const paths = [...host.querySelectorAll("path")];
+      return {
+        channel: host.getAttribute("data-channel"),
+        paths: paths.length,
+        channels: paths.filter((p) => (p.getAttribute("class") ?? "").includes("histogram-channel")).length,
+        layers: paths.filter((p) => (p.getAttribute("class") ?? "").includes("histogram-layer")).length,
+        blend: paths.map((p) => getComputedStyle(p).mixBlendMode).join(","),
+        opacities: paths.map((p) => Number(getComputedStyle(p).opacity).toFixed(2)).sort().join(","),
+      };
+    })()`,
+    returnByValue: true,
+  });
+  const histSingle = histogramSingle.result?.value ?? null;
+  if (histSingle === null) {
+    problems.push("点亮单通道后量不到直方图");
+  } else {
+    if (histSingle.channels !== 3 || histSingle.layers !== 0) {
+      problems.push(`点亮单通道后应当是 3 条通道 path（自然叠加），实测 ${JSON.stringify(histSingle)}`);
+    }
+    if (histSingle.channel === "all") {
+      problems.push("点了通道按钮但 data-channel 还是 all");
+    }
+    if (typeof histSingle.blend !== "string") {
+      problems.push(`单通道模式的直方图读不到 mix-blend-mode（返回对象：${JSON.stringify(histSingle)}）`);
+    } else if (histSingle.blend.split(",").some((mode) => mode !== "normal")) {
+      problems.push(`单通道模式也不许用混合模式，实测 ${histSingle.blend}`);
+    }
+    if (typeof histSingle.opacities !== "string") {
+      problems.push(`单通道模式读不到 opacity（返回对象：${JSON.stringify(histSingle)}）`);
+    } else if (!histSingle.opacities.includes("0.24")) {
+      problems.push(`单通道模式里未选中的两条应当是半透明（0.24），实测 ${histSingle.opacities}`);
     }
   }
 

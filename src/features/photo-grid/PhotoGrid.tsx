@@ -36,7 +36,7 @@ import { Tile } from "../../components/ui/Tile.tsx";
 import { VirtualGrid } from "../../components/ui/VirtualGrid.tsx";
 import { createTokenPx } from "../../components/ui/tokens.ts";
 import { measureScrollbarWidth } from "../../lib/scrollbar.ts";
-import { useTilesFitRequest } from "../../components/ui/tiles/fit.ts";
+import { useTilesFitChannel } from "../../components/ui/tiles/fit.ts";
 import {
   createViewerStore,
   photosFromSource,
@@ -48,6 +48,8 @@ import { locale, t } from "../../i18n/index.ts";
 import { formatDayLabel, formatTimeRange } from "../../lib/datetime.ts";
 import { formatCount, type GroupingLocale } from "../../lib/format.ts";
 import {
+  MAX_TILE_SIZE,
+  canFitRow,
   computeTileFlow,
   fitTileSizeToRow,
   nextTilePresetPosition,
@@ -167,18 +169,41 @@ export function PhotoGrid(props: PhotoGridProps): JSX.Element {
   const cellWidth = () => tileSizeAt(source.tileStep());
   const flow = () =>
     computeTileFlow({ containerWidth: width(), cellWidth: cellWidth(), gap: gap() });
-  const fitRequest = useTilesFitRequest();
+  const fitRequest = useTilesFitChannel();
+
+  /** 当前「铺满一行」算出来的格宽（给请求处理与可用性读数共用，不写两遍公式） */
+  const fittedCellWidth = (): number =>
+    fitTileSizeToRow({
+      containerWidth: width(),
+      cellWidth: cellWidth(),
+      gap: gap(),
+    });
+
+  /*
+   * 回填「现在能不能铺满」（人类 2026-09-23）：算出来的格宽超过最大档就不能 ——
+   * 状态条据此把按钮**禁用**，而不是让人按一下发现没反应。
+   * 依赖只有容器宽 / 当前档 / 间距，与 `available` 本身无关，不会自激。
+   */
+  createEffect(() => {
+    if (fitRequest === undefined) return;
+    fitRequest.setAvailable(width() > 0 && canFitRow({
+      containerWidth: width(),
+      cellWidth: cellWidth(),
+      gap: gap(),
+    }));
+  });
 
   createEffect(
     on(
-      () => fitRequest?.() ?? 0,
+      () => fitRequest?.request() ?? 0,
       (request) => {
         if (request <= 0 || width() <= 0) return;
-        const fitted = fitTileSizeToRow({
-          containerWidth: width(),
-          cellWidth: cellWidth(),
-          gap: gap(),
-        });
+        const fitted = fittedCellWidth();
+        /*
+         * 超过最大档就**什么都不做**（按钮此时已经是禁用态，这里是第二道闸）：
+         * 夹到最大档看着像「按了一半」，而铺不满是用户能一眼看出来的。
+         */
+        if (!Number.isFinite(fitted) || fitted > MAX_TILE_SIZE) return;
         source.setTileStep(tilePositionForSize(fitted));
         source.commitTileStep();
       },

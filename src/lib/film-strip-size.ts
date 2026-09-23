@@ -4,13 +4,21 @@
  * 这里的数字是 **tile 高度**，不是胶片带总高度：总高度始终由
  * `tile height + 上下固定边距` 推导，避免再次出现「只把条加高，照片没变大」。
  * 宽度沿用胶片带原来的 6:5 容器比例；照片本身仍由 `object-contain` 完整显示。
+ *
+ * **2026-09-23**：人类要求「最大尺寸缩小 20%、重排 17 档使过渡更平滑」——
+ * 封顶 240 → **192**，并且从**等差**（每级固定 +9px，低档处显得粗、高档处显得细）
+ * 改成**等比**（每级约 +4.4%，与 tiles 的 17 档同一套阶梯语言）。
  */
-export const FILM_STRIP_TILE_HEIGHT_STEPS = Object.freeze(
-  Array.from({ length: 17 }, (_, index) => 96 + index * 9),
-);
+export const FILM_STRIP_TILE_HEIGHT_STEPS = Object.freeze([
+  96, 100, 104, 110, 114, 120, 124, 130, 136, 142, 148, 154, 162, 168, 176, 184, 192,
+]);
 
-/** 96 + 4 × 9 = 132px：偏小、仍落在用户指定的 130–140px 默认范围。 */
-export const DEFAULT_FILM_STRIP_STEP = 4;
+/**
+ * 默认档位下标：**130**（第 8 档）。
+ *
+ * 旧表的默认是 132 → 本表全表缩了 20%（240 → 192）后，按尺寸最接近取 130（差 1.5%）。
+ */
+export const DEFAULT_FILM_STRIP_STEP = 7;
 
 /** 上、下各 8px；细滚动指示条绝对定位，不额外占高度。 */
 export const FILM_STRIP_PADDING_Y = 8;
