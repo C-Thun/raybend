@@ -60,6 +60,8 @@
 
 import { createSignal } from "solid-js";
 
+import { imageMimeOfBytes } from "../../../lib/image-mime.ts";
+
 /** 看图里的一张（id 与网格一致：用路径） */
 export interface ViewerPhoto {
   id: string;
@@ -294,7 +296,9 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
       // 直接进 Blob 在某些运行时会被拒（与 `photo-grid/thumbnails.ts` 同一做法）
       const buffer = new ArrayBuffer(bytes.byteLength);
       new Uint8Array(buffer).set(bytes);
-      return URL.createObjectURL(new Blob([buffer], { type: "image/jpeg" }));
+      // MIME 按字节自己的文件头判（`lib/image-mime.ts`）：`view_image` 既可能给
+      // 渲染出来的 AVIF，也可能给原文件本身（`original` 用途）—— 写死任何一个都是撒谎。
+      return URL.createObjectURL(new Blob([buffer], { type: imageMimeOfBytes(bytes) }));
     });
   const revokeUrl = deps.revokeUrl ?? ((url: string): void => URL.revokeObjectURL(url));
 

@@ -16,9 +16,15 @@
  * **换目录用 `clear()`**：它会丢弃整张表并回收 URL，同时推进一个「代号」——
  * 还在飞的请求回来时发现代号变了就直接丢掉，不会把上一个目录的缩略图
  * 补进新列表里（那种串图很难查）。
+ *
+ * **只改一张用 `refresh(path)`**：编辑落库后当前那张的缩略图要反映新编辑，
+ * 但其它格子与它无关 —— `clear()` 会把整条胶片带每一格的 URL 都回收，
+ * 松一次手全量重画（2026-09-24 人类报的「最严重」那一条）。
  */
 
 import { createSignal, untrack } from "solid-js";
+
+import { imageMimeOfBytes } from "../../lib/image-mime.ts";
 
 export type ThumbStatus = "idle" | "loading" | "ready" | "error";
 
@@ -49,6 +55,13 @@ export interface ThumbQueue {
   get: (path: string) => ThumbEntry;
   /** 请求一张（已缓存或已在飞则忽略；失败过的允许重试） */
   request: (path: string) => void;
+  /**
+   * 让**一张**失效并立刻重取（编辑落库后这一张的缩略图要反映新编辑）。
+   *
+   * 与 `clear()` 的区别：只动这一条 —— 其它格子的 URL、节点身份与滚动位置都不受影响。
+   * 在飞的旧请求按**按路径的代号**丢弃：旧结果回来时对不上就丢，不会把旧图盖在新图上。
+   */
+  refresh: (path: string) => void;
   /** 队内统计（排错与「加载中」提示用） */
   stats: () => { entries: number; inflight: number; queued: number };
   /** 丢弃全部缓存并回收 URL（换目录、卸载时调） */
@@ -62,11 +75,14 @@ export interface ThumbQueue {
  * `buffer` 类型是 `ArrayBufferLike`（可能是 `SharedArrayBuffer`），
  * 在 TS 的新 lib 里与 `BlobPart` 不兼容，硬转会引入一个类型洞。
  * 缩略图只有几十 KB，复制一次无所谓。
+ *
+ * MIME **按字节自己的文件头判**（`lib/image-mime.ts`）—— 以前写死 `image/jpeg`，
+ * 而管线现在吐 AVIF；写死任何一个都会在另一条路上撒谎。
  */
 function defaultToUrl(bytes: Uint8Array): string {
   const buffer = new ArrayBuffer(bytes.byteLength);
   new Uint8Array(buffer).set(bytes);
-  return URL.createObjectURL(new Blob([buffer], { type: "image/jpeg" }));
+  return URL.createObjectURL(new Blob([buffer], { type: imageMimeOfBytes(bytes) }));
 }
 
 function defaultRevoke(url: string): void {
@@ -86,6 +102,9 @@ export function createThumbQueue(deps: ThumbQueueDeps): ThumbQueue {
   let recent: string[] = [];
   /** 代号：`clear()` 推进它，用来丢弃上一个目录还在飞的请求 */
   let generation = 0;
+  /** 每条路径的代号：`refresh()` 推进它，用来丢弃这条路径上还在飞的旧请求 */
+  const pathRevs = new Map<string, number>();
+  const revOf = (path: string): number => pathRevs.get(path) ?? 0;
 
   const patch = (path: string, entry: ThumbEntry): void => {
     setEntries((prev) => ({ ...prev, [path]: entry }));
@@ -128,10 +147,12 @@ export function createThumbQueue(deps: ThumbQueueDeps): ThumbQueue {
       patch(path, { status: "loading", url: null });
 
       const issuedAt = generation;
+      const issuedRev = revOf(path);
       void deps
         .load(path)
         .then((bytes) => {
-          if (issuedAt !== generation) return; // 上一个目录的结果，丢掉
+          // 上一个目录的 / 被 `refresh()` 作废的旧结果，丢掉
+          if (issuedAt !== generation || issuedRev !== revOf(path)) return;
           if (bytes === null) {
             patch(path, { status: "error", url: null });
             return;
@@ -142,7 +163,9 @@ export function createThumbQueue(deps: ThumbQueueDeps): ThumbQueue {
           evict();
         })
         .catch(() => {
-          if (issuedAt === generation) patch(path, { status: "error", url: null });
+          if (issuedAt === generation && issuedRev === revOf(path)) {
+            patch(path, { status: "error", url: null });
+          }
         })
         .finally(() => {
           if (issuedAt !== generation) return;
@@ -152,24 +175,43 @@ export function createThumbQueue(deps: ThumbQueueDeps): ThumbQueue {
     }
   };
 
+  const request = (path: string): void => {
+    const current = entries()[path];
+    if (current && current.status !== "error") return; // 已在飞 / 已完成
+    if (queued.includes(path)) return;
+    // 失败过的允许重试（文件被占用这类问题常常是暂时的）
+    patch(path, { status: "loading", url: null });
+    queued.push(path);
+    pump();
+  };
+
   return {
     get: (path) => entries()[path] ?? IDLE_THUMB,
 
-    request: (path) => {
-      const current = entries()[path];
-      if (current && current.status !== "error") return; // 已在飞 / 已完成
-      if (queued.includes(path)) return;
-      // 失败过的允许重试（文件被占用这类问题常常是暂时的）
-      patch(path, { status: "loading", url: null });
-      queued.push(path);
-      pump();
-    },
+    request,
 
     stats: () => ({
       entries: Object.keys(entries()).length,
       inflight: inflight(),
       queued: queued.length,
     }),
+
+    refresh: (path) => {
+      // 在飞的旧请求作废（代号推进）；URL 回收；条目删掉重取。
+      // `untrack` 同 `clear()`：`refresh` 通常也在 effect 里被调，读 `entries` 不能进依赖。
+      pathRevs.set(path, revOf(path) + 1);
+      const current = untrack(entries)[path];
+      if (current?.url) revokeUrl(current.url);
+      queued = queued.filter((item) => item !== path);
+      recent = recent.filter((item) => item !== path);
+      setEntries((prev) => {
+        if (!(path in prev)) return prev;
+        const next = { ...prev };
+        delete next[path];
+        return next;
+      });
+      request(path);
+    },
 
     clear: () => {
       generation += 1;

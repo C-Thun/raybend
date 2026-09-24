@@ -209,6 +209,58 @@ test("已完成之后 clear：URL 被回收", async () => {
   assert.deepEqual(queue.stats().entries, 0);
 });
 
+test("refresh：只重取这一张，别的格子不受影响（编辑落库那条路）", async () => {
+  const loader = fakeLoader();
+  const urls = fakeUrls();
+  const queue = createThumbQueue({ load: loader.load, ...urls });
+
+  queue.request("/a.jpg");
+  queue.request("/b.jpg");
+  await flush();
+  const aUrl = queue.get("/a.jpg").url;
+  const bUrl = queue.get("/b.jpg").url;
+  assert.ok(aUrl && bUrl);
+
+  queue.refresh("/a.jpg");
+  await flush();
+
+  assert.equal(loader.calls.filter((path) => path === "/a.jpg").length, 2, "a 重取了一次");
+  assert.equal(loader.calls.filter((path) => path === "/b.jpg").length, 1, "b 一次都不多");
+  assert.notEqual(queue.get("/a.jpg").url, aUrl, "a 换了新 URL");
+  assert.equal(queue.get("/b.jpg").url, bUrl, "b 的 URL 原样（节点身份不丢）");
+  assert.deepEqual(urls.revoked, [aUrl], "只回收 a 的旧 URL");
+});
+
+test("refresh 时在飞的旧结果被丢掉，不会把旧图盖在新图上", async () => {
+  const loader = fakeLoader({ hold: true });
+  const urls = fakeUrls();
+  const queue = createThumbQueue({ load: loader.load, ...urls });
+
+  queue.request("/a.jpg");
+  await flush(1);
+  queue.refresh("/a.jpg"); // 旧请求还在飞
+  loader.state.hold = false;
+  loader.releaseAll();
+  await flush(6);
+
+  assert.equal(loader.calls.length, 2, "旧的一次 + 新的一次");
+  assert.equal(queue.get("/a.jpg").status, "ready");
+  assert.equal(urls.created.length, 1, "只有新结果创建了 URL（旧结果被代号丢掉）");
+  assert.equal(queue.get("/a.jpg").url, urls.created[0]);
+  assert.deepEqual(queue.stats(), { entries: 1, inflight: 0, queued: 0 });
+});
+
+test("refresh 一张没请求过的：当作首次请求", async () => {
+  const loader = fakeLoader();
+  const urls = fakeUrls();
+  const queue = createThumbQueue({ load: loader.load, ...urls });
+
+  queue.refresh("/new.jpg");
+  await flush();
+  assert.equal(queue.get("/new.jpg").status, "ready");
+  assert.equal(loader.calls.length, 1);
+});
+
 test("统计里的 queued / inflight 与实际进度一致", async () => {
   const loader = fakeLoader({ hold: true });
   const urls = fakeUrls();
