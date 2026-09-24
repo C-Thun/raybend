@@ -190,8 +190,24 @@ pnpm debug:win            # 上面这一整套 + 产物核对（worker 也查）
   `mime: ImageMime::Avif` + **AVIF 字节**（人类定的缓存格式）。`image` crate 的 `avif` feature **只有编码器、没有解码器**
   ⇒ `load_from_memory` 对 AVIF **必定失败** ⇒ `Ok(None)` ⇒ **直方图恒为空**。
   这也解释了下一段 §3 里「曲线背景的直方图底纹没实现」—— **同一个取数口**（`CurveTab` 的 `loadHistogram`）。
+* **实测（不是推断）**：`cargo run -p raybend --example hist-probe -- <RAW> <JPG>` 对**两种文件都是 ✗**：
+
+  ```text
+  ✗ /mnt/c/src/tmp/pic/P1000019.RW2
+      **拿不到直方图**（`Ok(None)`）—— 界面上就是空态
+  ✗ /mnt/c/src/tmp/pic/P1000001.JPG
+      **拿不到直方图**（`Ok(None)`）—— 界面上就是空态
+  ```
+
+  比预想更宽：**位图也一样挂** —— `BitmapBackend::render` 只要不是 `ImagePurpose::Original`
+  也会走 `rendered()`（同样吐 AVIF）。所以现在**任何照片的直方图都是空的**，
+  浏览右栏与编辑右栏一起空。
+* **探针**：`crates/raybend/examples/hist-probe.rs`（本轮新加，专门用来钉这件事；修好之后它应当打出 ✓）。
 * **影响面（已核对）**：同族读回自己渲染字节的地方只有这一处 ——
   `thumbnail/render.rs:318` 与 `:479` 读的是**输入位图文件的字节**（不是我们的输出），不受影响。
+  但顺带记一笔**同族的潜在坑**：`ImageMime::of_path()` 把 `.avif` 映射成 `Jpeg`，
+  而 `render_bytes_with_edit` / `decode_bitmap` 用 `image::load_from_memory` 解码**输入文件** ——
+  哪天用户往库里放一张 `.avif`，那条路也会 `Ok(None)`（不是本轮 bug，别混进来修）。
 * **建议方向**：**别去装 AVIF 解码器**（纯 Rust 那条路没有，装 dav1d/libavif 是重依赖）。
   正解是让直方图**不经过编码**：直接拿管线输出的 RGB 字节算（新增一个「取像素而不是取图」的口子，
   `display` 里已有 `pixels()` 这条同族 API），顺带更快（省掉一次编码 + 一次解码）。
@@ -251,7 +267,9 @@ pnpm debug:win            # 上面这一整套 + 产物核对（worker 也查）
   * 双击：`src/features/editor/CurveEditor.tsx:169` 的 `onDoubleClick`（`nearestPoint` 命中 → `removePoint` → 提交）**已经写了**；
   * 底纹：同文件 208–216 行 `<Show when={channelValues(props.histogram, channel()).length > 0}>` 画 `data-curve-histogram`。
 * **为什么两条都像「没实现」**：
-  1. **直方图恒为空**（§2.8 的 AVIF 回归）⇒ 那个 `<Show>` 永远不成立 ⇒ 底纹不可见 ✓；
+  1. **直方图恒为空**（§2.8 的 AVIF 回归，**已实测**）⇒ 那个 `<Show>` 永远不成立 ⇒ 底纹不可见 ✓；
+     注意 §2.8 修完这一条会**自动好**（同一个取数口），但**别在修的时候顺手把「编辑后的直方图」也当成它的一部分** ——
+     现在这一段是 SOOC 的直方图（面板里已经写了提示），要跟着编辑走是另一件事（W4）。
   2. 双击那条：**指针按下就已经在加点/拖点了** —— 双击的第一次 `pointerdown` 会把点加到光标处（或抓住最近的点），
      第二次 `pointerdown` 再动一次，然后 `dblclick` 才删 —— 净效果是「看到点被加出来又删掉/或删错了那个」，
      用户主观上就是「双击没用」。
@@ -335,7 +353,7 @@ decode后的结果是缓存在内存中的，然后就是能在develop做的尽�
 
 | 顺序 | 事 | 为什么排这儿 |
 | --- | --- | --- |
-| 1 | §2.8 直方图取数改成不经过编码 | **一个根因同时解决三条**（直方图 / 曲线底纹 / 编辑后直方图的地基），而且改动小、可测 |
+| 1 | §2.8 直方图取数改成不经过编码 | **一个根因同时解决三条**（直方图 / 曲线底纹 / 编辑后直方图的地基），而且改动小、可测；`examples/hist-probe.rs` 现成可验（现在 ✗ → 修完应当 ✓） |
 | 2 | §2.10 的「功能失效」：显影线程 `catch_unwind` + 参数失败可见 | 工程纪律，且它可能是「失效」的直接原因；修完再复现一次别的症状 |
 | 3 | §2.9 缩略图按路径失效（+ MIME 修正） | 用户说「最严重」，且根因已确定，改动集中在 `thumb-queue.ts` + 一处调用 |
 | 4 | §2.6 flowbar info 接编辑流 | 一行 switch 的事，用户明确要求「所有 flow 都要有」 |
