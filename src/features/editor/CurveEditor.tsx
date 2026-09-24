@@ -26,10 +26,12 @@ import {
   addPoint,
   curvePath,
   curveFunction,
+  isDoubleClick,
   isIdentityCurve,
   movePoint,
   nearestPoint,
   removePoint,
+  type ClickStamp,
   type CurvePoint,
 } from "../../lib/curve.ts";
 import { t } from "../../i18n/index.ts";
@@ -101,6 +103,8 @@ function channelValues(
 
 export function CurveEditor(props: CurveEditorProps): JSX.Element {
   const [dragging, setDragging] = createSignal<number | null>(null);
+  /** 「第一下」的指纹 —— 双击的判定在第二次按下上做（见 `lib/curve.ts` 的说明）。 */
+  let lastPress: ClickStamp | null = null;
 
   const channel = (): CurveChannel => props.store.curveChannel();
   const points = (): readonly CurvePoint[] => props.store.curvePoints(channel());
@@ -123,6 +127,25 @@ export function CurveEditor(props: CurveEditorProps): JSX.Element {
     if (!(svg instanceof SVGSVGElement)) return;
     const { x, y } = positionOf(event, svg);
     const current = points();
+
+    /*
+     * **双击先于一切**：够近、够快、且第一下没拖动 → 按双击处理，
+     * 吃掉这次按下（不再加点/抓点），删掉命中的点。
+     * 靠浏览器的 `dblclick` 事件不行 —— 那时按下已经被上面两条吃掉了。
+     */
+    const now = performance.now();
+    if (isDoubleClick(lastPress, x, y, now)) {
+      lastPress = null;
+      const hit = nearestPoint(current, x, y, POINT_TOLERANCE);
+      if (hit < 0) return;
+      const next = removePoint(current, hit);
+      if (next.length !== current.length) {
+        props.store.setCurvePoints(channel(), next);
+        props.onCommit?.();
+      }
+      return;
+    }
+    lastPress = { x, y, time: now, moved: false };
 
     // ① 命中已有的点 → 拖它
     const hit = nearestPoint(current, x, y, POINT_TOLERANCE);
@@ -153,6 +176,11 @@ export function CurveEditor(props: CurveEditorProps): JSX.Element {
     const svg = event.currentTarget;
     if (!(svg instanceof SVGSVGElement)) return;
     const { x, y } = positionOf(event, svg);
+    // 拖动过 → 这不是双击的前半段（拖一下再点一下是两次独立操作）
+    if (lastPress !== null) {
+      const distance = Math.hypot(x - lastPress.x, y - lastPress.y);
+      if (distance > 0.005) lastPress = { ...lastPress, moved: true };
+    }
     props.store.setCurvePoints(channel(), movePoint(points(), index, x, y));
   }
 
@@ -164,23 +192,6 @@ export function CurveEditor(props: CurveEditorProps): JSX.Element {
       svg.releasePointerCapture(event.pointerId);
     }
     props.onCommit?.();
-  }
-
-  function onDoubleClick(event: MouseEvent): void {
-    if (props.disabled === true) return;
-    const svg = event.currentTarget;
-    if (!(svg instanceof SVGSVGElement)) return;
-    const rect = svg.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return;
-    const x = (event.clientX - rect.left) / rect.width;
-    const y = 1 - (event.clientY - rect.top) / rect.height;
-    const hit = nearestPoint(points(), x, y, POINT_TOLERANCE);
-    if (hit < 0) return;
-    const next = removePoint(points(), hit);
-    if (next.length !== points().length) {
-      props.store.setCurvePoints(channel(), next);
-      props.onCommit?.();
-    }
   }
 
   return (
@@ -203,7 +214,6 @@ export function CurveEditor(props: CurveEditorProps): JSX.Element {
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerUp}
-          onDblClick={onDoubleClick}
         >
           {/* ① 直方图（背景，50% 半透明） */}
           <Show when={channelValues(props.histogram, channel()).length > 0}>

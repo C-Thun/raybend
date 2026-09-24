@@ -249,6 +249,49 @@ export function removePoint(
   return points.filter((_, at) => at !== index);
 }
 
+/* ══════════════════════════════════════════════════════════════
+ * 双击（删点）的判定 —— 纯逻辑抽出来是为了能单测
+ * ══════════════════════════════════════════════════════════════
+ *
+ * # 为什么不能靠浏览器的 `dblclick` 事件
+ *
+ * 指针**按下**就已经在加点/抓点了（这是曲线的正常交互），等 `dblclick` 到来时
+ * 第二次按下已经被上面两条吃掉了 —— 净效果是「点被加出来又删掉/或删错了那个」，
+ * 用户看到的就是「双击没用」（2026-09-24 人类报的）。
+ *
+ * 所以下列判定在**第二次 `pointerdown`** 上做：够近、够快、且**第一下没拖动**
+ * （拖一下再回来点一下不是双击，是两次独立操作）——命中就按双击处理，
+ * 把这次按下吃掉，不再加点/抓点。
+ */
+
+/** 一次按下的指纹（记录「第一下」用）。 */
+export interface ClickStamp {
+  x: number;
+  y: number;
+  time: number;
+  /** 按下之后**拖动过** —— 拖动不是双击的前半段 */
+  moved: boolean;
+}
+
+/** 两次按下的最大间隔（ms；浏览器双击的典型判定是 500，取保守值）。 */
+export const DOUBLE_CLICK_WINDOW_MS = 400;
+
+/** 两次按下「同一点」的最大距离（归一化坐标；与命中控制点的容差同量级）。 */
+export const DOUBLE_CLICK_TOLERANCE = 0.055;
+
+/** 这一次按下是不是双击的第二次（`previous` 为 `null` = 没有「第一下」）。 */
+export function isDoubleClick(
+  previous: ClickStamp | null,
+  x: number,
+  y: number,
+  time: number,
+): boolean {
+  if (previous === null || previous.moved) return false;
+  if (time - previous.time > DOUBLE_CLICK_WINDOW_MS) return false;
+  if (Number.isNaN(x) || Number.isNaN(y) || Number.isNaN(time)) return false;
+  return Math.hypot(x - previous.x, y - previous.y) <= DOUBLE_CLICK_TOLERANCE;
+}
+
 /** 一条曲线在 `steps` 个采样点上的值（测试向量用）。 */
 export function sampleCurve(
   points: readonly CurvePoint[],

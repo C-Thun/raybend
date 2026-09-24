@@ -17,11 +17,13 @@ import {
   canPlaceAt,
   curveFunction,
   curvePath,
+  isDoubleClick,
   isIdentityCurve,
   movePoint,
   nearestPoint,
   removePoint,
   sampleCurve,
+  type ClickStamp,
   type CurvePoint,
 } from "./curve.ts";
 
@@ -157,4 +159,30 @@ test("非法输入不炸：NaN / 越界坐标被夹回来", () => {
   assert.ok(clamped(0) >= 0 && clamped(1) <= 1);
   // 点数不足：退化成恒等，不抛
   assert.equal(curveFunction([[0.5, 0.5]])(0.5), 0.5);
+});
+
+/* ── 双击（删点）的判定 ─────────────────────────────────────── */
+
+test("双击判定：够近、够快、第一下没拖动才算", () => {
+  const first: ClickStamp = { x: 0.3, y: 0.7, time: 1000, moved: false };
+  // 同点、350ms 后 → 双击
+  assert.equal(isDoubleClick(first, 0.31, 0.7, 1350), true);
+  // 没有第一下 → 不是
+  assert.equal(isDoubleClick(null, 0.3, 0.7, 1100), false);
+  // 太慢（> 400ms）
+  assert.equal(isDoubleClick(first, 0.3, 0.7, 1500), false);
+  // 太远（> 0.055）
+  assert.equal(isDoubleClick(first, 0.5, 0.7, 1100), false);
+  // 第一下拖动过（拖一下再点一下是两次独立操作）
+  assert.equal(isDoubleClick({ ...first, moved: true }, 0.3, 0.7, 1100), false);
+  // 边界：正好 400ms / 正好容差距离 → 算
+  assert.equal(isDoubleClick(first, 0.3, 0.7, 1400), true);
+  assert.equal(isDoubleClick(first, 0.3 + 0.055, 0.7, 1100), true);
+});
+
+test("双击判定：NaN 一律不算（不猜）", () => {
+  const first: ClickStamp = { x: 0.3, y: 0.7, time: 1000, moved: false };
+  assert.equal(isDoubleClick(first, Number.NaN, 0.7, 1100), false);
+  assert.equal(isDoubleClick(first, 0.3, Number.NaN, 1100), false);
+  assert.equal(isDoubleClick(first, 0.3, 0.7, Number.NaN), false);
 });
