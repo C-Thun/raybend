@@ -198,6 +198,43 @@ pub async fn develop_edit_target<R: Runtime>(
     .await
 }
 
+/// **刷新 preview**（`IMAGING.md` §4）：编辑器**进 / 出**两个节点各调一次。
+///
+/// preview = `<库根>/cache/full/<asset>/latest-v<pipeline>.avif`（长边 1920，AVIF）——
+/// 与 `view_image` 走的是**同一份**（`thumbs::render_latest_cached`：命中只读、未命中才渲染），
+/// 所以两边不会各写一份。
+///
+/// 三条口径（人类 2026-09-24 定，规则本体在 `store::develop::needs_preview`）：
+///
+/// * **没编辑过就什么都不做** —— SOOC / RAW 的内置位图就代替 preview；
+/// * **进编辑**时调一次：缓存多半已被上一次落库作废（`develop_commit` 会删它），
+///   这一下把预览重新备好；
+/// * **退出编辑**时再调一次：把「最后剩下的状态」落成预览。
+///
+/// 返回 `false` = 没生成（没编辑过 / 资产找不到），**不是错误**。
+///
+/// # Errors
+/// 渲染失败或库读失败。
+#[tauri::command]
+pub async fn develop_preview_refresh<R: Runtime>(
+    app: AppHandle<R>,
+    path: String,
+) -> Result<bool, String> {
+    let handle = app.clone();
+    blocking(move || {
+        let Some(asset) = resolve_asset(&handle, Path::new(&path)) else {
+            return Ok(false);
+        };
+        let (choice, stack) = issue_of(&handle, &asset)?;
+        if !raybend::store::develop::needs_preview(choice, &stack) {
+            return Ok(false);
+        }
+        crate::thumbs::render_latest_cached(&asset, &stack)?;
+        Ok(true)
+    })
+    .await
+}
+
 /// 读一张照片的编辑栈（没有就是空栈 —— 界面据此显示「未编辑」）。
 ///
 /// # Errors

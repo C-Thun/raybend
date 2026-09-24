@@ -42,6 +42,7 @@ import {
   getDevelopEditTarget,
   getDevelopStack,
   getEditorRenderState,
+  refreshDevelopPreview,
   resetDevelopStack,
   setEditorParams,
   setEditorPhoto,
@@ -400,23 +401,42 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
    * 2. 离开这张照片时（effect 的 cleanup）如果还有没落库的改动，**先存到上一张上** ——
    *    松手落库是主路径，这一条是兜底（拖动中途换照片、或松手事件被别的东西吃掉）。
    */
-  let lastPhoto: { repositoryId: string; assetId: number } | null = null;
+  /**
+   * **preview 的刷新**（`IMAGING.md` §4）：编辑器**进 / 出**两个节点各一次。
+   *
+   * 这是**后台那一路** —— 不等它（一张 1920 的 AVIF 要几百毫秒），失败也只记日志：
+   * 预览没备好最多让下次看图慢一点，不该影响编辑。
+   */
+  const refreshPreview = (path: string | null): void => {
+    if (path === null || path === "") return;
+    void refreshDevelopPreview(path).catch((error: unknown) => {
+      console.error("[editor] 预览图刷新失败", error); // i18n-exempt: 控制台诊断
+    });
+  };
+
+  let lastPhoto: { repositoryId: string; assetId: number; path: string | null } | null = null;
   createEffect(() => {
     const assetId = current()?.id;
     const repositoryId = store.repositoryId();
+    const path = currentPath();
     onCleanup(() => {
-      // 换照片 / 卸载：把还没落库的改动存到**上一张**上
-      if (
-        lastPhoto !== null &&
-        untrack(() => props.store.developDirty())
-      ) {
+      // 换照片 / 卸载：① 还没落库的改动存到**上一张**上；② 把 preview 更新到最后状态
+      const previous = lastPhoto;
+      if (previous === null) return;
+      if (untrack(() => props.store.developDirty())) {
         const payload = untrack(() => props.store.developPayload());
-        void commitDevelopStack(lastPhoto.repositoryId, lastPhoto.assetId, {
+        void commitDevelopStack(previous.repositoryId, previous.assetId, {
           values: payload.values,
           curves: payload.curves,
-        }).catch((error: unknown) => {
-          console.error("[editor] 切换照片前落库失败", error); // i18n-exempt: 控制台诊断
-        });
+        })
+          // 落库**之后**才刷新：preview 读的就是库里的编辑栈（先刷新会拿到旧栈）
+          .then(() => refreshPreview(previous.path))
+          .catch((error: unknown) => {
+            console.error("[editor] 切换照片前落库失败", error); // i18n-exempt: 控制台诊断
+          });
+      } else {
+        // 没改动也刷一次：上一次落库已经把缓存作废了（「退出编辑」那个节点）
+        refreshPreview(previous.path);
       }
     });
 
@@ -425,7 +445,9 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
       return;
     }
     const id = Number(assetId);
-    lastPhoto = { repositoryId, assetId: id };
+    lastPhoto = { repositoryId, assetId: id, path };
+    // 「进编辑」那个节点：把 preview 备好（缓存命中时只读一次，很便宜）
+    refreshPreview(path);
     const revAtRequest = props.store.developRev();
     void getDevelopStack(repositoryId, id)
       .then((stack) => {

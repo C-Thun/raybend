@@ -173,6 +173,20 @@ export async function resetDevelopStack(
 }
 
 /**
+ * **刷新 preview**（`IMAGING.md` §4）：编辑器**进 / 出**两个节点各调一次。
+ *
+ * preview = 库内大图缓存（长边 1920 的 AVIF，`<库根>/cache/full/…`）—— 与 `view_image`
+ * 走的是同一份（命中只读、未命中才渲染）。没编辑过时 Rust 侧**直接跳过**：
+ * SOOC / RAW 的内置位图就代替 preview。
+ *
+ * 它是**后台那一路**：调用方不必等它（返回值只用于诊断，`false` = 没生成，不是错误）。
+ */
+export async function refreshDevelopPreview(path: string): Promise<boolean> {
+  if (!isTauriRuntime()) return false;
+  return call<boolean>("develop_preview_refresh", { path });
+}
+
+/**
  * **编辑器该编辑哪个文件**（「编辑落在 RAW 上」，`REPOSITORY.md` §4.1）。
  *
  * JPG + RAW 时返回 `_RAW/` 里那个 RAW 的**绝对路径**；只有 JPG 就返回 JPG。

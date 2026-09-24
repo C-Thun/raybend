@@ -125,7 +125,10 @@ fn edited_stack<R: Runtime>(
 ///
 /// 命中直接给；没命中就渲染一遍再写进去（写失败只记一句 —— 缓存写不进去
 /// 只意味着下次再渲染一遍，不该让看图失败）。
-fn render_latest_cached(asset: &ResolvedAsset, stack: &raybend::store::develop::DevelopStack) -> Result<Vec<u8>, String> {
+///
+/// `pub(crate)`：`view_image` 与 `develop_preview_refresh`（进/出编辑那两下）共用这一份 ——
+/// preview 只允许有一条生成路径。
+pub(crate) fn render_latest_cached(asset: &ResolvedAsset, stack: &raybend::store::develop::DevelopStack) -> Result<Vec<u8>, String> {
     let cache = FullCache::open(&asset.root).map_err(|e| e.to_string())?;
     if let Some(bytes) = cache.read(asset.asset_id, "latest", PIPELINE_VERSION) {
         return Ok(bytes);

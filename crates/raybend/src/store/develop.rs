@@ -398,6 +398,17 @@ pub fn choose_issue(conn: &Connection, asset_id: i64) -> Result<IssueChoice> {
     })
 }
 
+/// **这张照片要不要生成 preview**（`IMAGING.md` §4，人类 2026-09-24 定）。
+///
+/// 一句话：**只有「编辑过的」才有 preview** —— 没编辑过时 `SOOC` / `RAW` 的内置位图
+/// 就代替 preview，**不额外生成**。
+///
+/// 生成节点（进编辑 / 退出编辑）在 `src-tauri` 那条命令里，这里只回答「要不要」。
+#[must_use]
+pub fn needs_preview(choice: IssueChoice, stack: &DevelopStack) -> bool {
+    choice == IssueChoice::Latest && !stack.is_empty()
+}
+
 /// 编辑器该**编辑哪个文件**（「编辑落在 RAW 上」，`REPOSITORY.md` §4.1）。
 ///
 /// JPG + RAW 时返回 RAW 的库内相对路径；只有 JPG 时返回 JPG。
@@ -467,6 +478,21 @@ mod tests {
                 .collect(),
             as_shot_k: None,
         }
+    }
+
+    #[test]
+    fn preview_only_for_edited_latest() {
+        let edited = stack(&[("exposure", 0.5)], &[]);
+        let untouched = stack(&[], &[]);
+        // 编辑过的（latest）→ 要 preview
+        assert!(needs_preview(IssueChoice::Latest, &edited));
+        // 没编辑过 → sooc/raw 内置代替 preview，不生成
+        assert!(!needs_preview(IssueChoice::Sooc, &untouched));
+        assert!(!needs_preview(IssueChoice::Raw, &untouched));
+        // 空栈的 latest 是自相矛盾的输入，但也不能生成（宁可少生成）
+        assert!(!needs_preview(IssueChoice::Latest, &untouched));
+        // 非 latest 却带着栈（理论上进不来）→ 同样不生成
+        assert!(!needs_preview(IssueChoice::Sooc, &edited));
     }
 
     #[test]
