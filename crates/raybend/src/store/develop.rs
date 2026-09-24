@@ -409,27 +409,78 @@ pub fn needs_preview(choice: IssueChoice, stack: &DevelopStack) -> bool {
     choice == IssueChoice::Latest && !stack.is_empty()
 }
 
+/// 编辑**落在哪个文件上**（人类 2026-09-24 定：编辑器里可切，**默认 RAW**）。
+///
+/// 它不是「显示哪个 issue」（那是 [`IssueChoice`]），而是「这次编辑拿哪个当底」——
+/// 将来每个 issue 会带上「基于 sooc 还是基于 raw 编辑」的标签（登记在 `FUTURE.md`）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum EditBase {
+    /// 相机直出的位图（JPG）—— 「基于 SOOC 编辑」
+    Sooc,
+    /// RAW（基础解码）—— **默认**
+    #[default]
+    Raw,
+}
+
+impl EditBase {
+    /// 解析前端传来的字符串；**认不出给 `None`**（调用方报错，不静默回退到默认值）。
+    #[must_use]
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "sooc" => Some(Self::Sooc),
+            "raw" => Some(Self::Raw),
+            _ => None,
+        }
+    }
+
+    /// 反过来：写进载荷 / 日志用的字符串。
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Sooc => "sooc",
+            Self::Raw => "raw",
+        }
+    }
+}
+
+/// 这张照片有没有可用的位图 / RAW（界面据此**禁用**切不过去的那一侧）。
+///
+/// 返回 `(has_bitmap, has_raw)`。
+///
+/// # Errors
+/// 数据库读失败。
+pub fn edit_base_available(conn: &Connection, asset_id: i64) -> Result<(bool, bool)> {
+    let files = crate::store::assets::files_of_asset(conn, asset_id)?;
+    let has = |role: &str| files.iter().any(|file| file.role == role && !file.missing);
+    Ok((has("bitmap"), has("raw")))
+}
+
 /// 编辑器该**编辑哪个文件**（「编辑落在 RAW 上」，`REPOSITORY.md` §4.1）。
 ///
-/// JPG + RAW 时返回 RAW 的库内相对路径；只有 JPG 时返回 JPG。
+/// `base` 是用户在编辑器里选的编辑基准（人类 2026-09-24）：
+///
+/// * [`EditBase::Raw`]（默认）→ 有 RAW 就给 RAW，没有就退回位图；
+/// * [`EditBase::Sooc`] → 有可用位图就给位图，没有就退回 RAW（只有 RAW 的照片没得选）。
+///
 /// 位图与 RAW 放在不同目录（`_RAW/`）这件事的规则**只在这里**实现一次 ——
 /// 前端不许自己拼 `_RAW/` 路径。
 ///
 /// # Errors
 /// 数据库读失败。
-pub fn edit_target(conn: &Connection, asset_id: i64) -> Result<Option<String>> {
+pub fn edit_target(conn: &Connection, asset_id: i64, base: EditBase) -> Result<Option<String>> {
     let files = crate::store::assets::files_of_asset(conn, asset_id)?;
-    let raw = files
-        .iter()
-        .find(|file| file.role == "raw" && !file.missing)
-        .map(|file| file.rel_path.clone());
-    if raw.is_some() {
-        return Ok(raw);
-    }
-    Ok(files
-        .iter()
-        .find(|file| file.role == "bitmap" && !file.missing)
-        .map(|file| file.rel_path.clone()))
+    let pick = |role: &str| {
+        files
+            .iter()
+            .find(|file| file.role == role && !file.missing)
+            .map(|file| file.rel_path.clone())
+    };
+    let raw = pick("raw");
+    let bitmap = pick("bitmap");
+    Ok(match base {
+        EditBase::Raw => raw.or(bitmap),
+        EditBase::Sooc => bitmap.or(raw),
+    })
 }
 
 /// 这张照片编辑过吗（缩略图要不要走编辑管线）。
@@ -695,20 +746,61 @@ mod tests {
     }
 
     #[test]
-    fn edit_target_prefers_raw() {
+    fn edit_target_follows_the_base() {
         let (conn, asset_id) = catalog_with_asset();
         add_file(&conn, asset_id, "bitmap", "photos/2026/a.jpg");
         assert_eq!(
-            edit_target(&conn, asset_id).expect("解析").as_deref(),
+            edit_target(&conn, asset_id, EditBase::Raw).expect("解析").as_deref(),
             Some("photos/2026/a.jpg"),
-            "只有 JPG 时编辑 JPG"
+            "只有 JPG 时编辑 JPG（RAW 基准也没 RAW 可给）"
+        );
+        assert_eq!(
+            edit_target(&conn, asset_id, EditBase::Sooc).expect("解析").as_deref(),
+            Some("photos/2026/a.jpg")
         );
         add_file(&conn, asset_id, "raw", "photos/2026/_RAW/a.RW2");
         assert_eq!(
-            edit_target(&conn, asset_id).expect("解析").as_deref(),
+            edit_target(&conn, asset_id, EditBase::Raw).expect("解析").as_deref(),
             Some("photos/2026/_RAW/a.RW2"),
-            "有 RAW 时编辑 RAW（编辑落在 RAW 上）"
+            "RAW 基准：编辑落在 RAW 上"
         );
+        assert_eq!(
+            edit_target(&conn, asset_id, EditBase::Sooc).expect("解析").as_deref(),
+            Some("photos/2026/a.jpg"),
+            "SOOC 基准：编辑落在相机直出的位图上"
+        );
+
+        // 只有 RAW 的照片：SOOC 基准也退回 RAW（没得选）
+        let (conn, raw_only) = catalog_with_asset();
+        add_file(&conn, raw_only, "raw", "photos/_RAW/b.RW2");
+        assert_eq!(
+            edit_target(&conn, raw_only, EditBase::Sooc).expect("解析").as_deref(),
+            Some("photos/_RAW/b.RW2")
+        );
+
+        // 位图标记缺失（磁盘上没了）：SOOC 基准也不许选中它
+        let (conn, gone) = catalog_with_asset();
+        add_file(&conn, gone, "bitmap", "photos/gone.jpg");
+        add_file(&conn, gone, "raw", "photos/_RAW/c.RW2");
+        conn.execute("UPDATE asset_files SET missing_since = 1 WHERE role = 'bitmap'", [])
+            .expect("标缺失");
+        assert_eq!(
+            edit_target(&conn, gone, EditBase::Sooc).expect("解析").as_deref(),
+            Some("photos/_RAW/c.RW2"),
+            "位图没了就退回 RAW，而不是给一条死路径"
+        );
+    }
+
+    #[test]
+    fn edit_base_parses_only_the_two_known_words() {
+        assert_eq!(EditBase::parse("sooc"), Some(EditBase::Sooc));
+        assert_eq!(EditBase::parse("raw"), Some(EditBase::Raw));
+        assert_eq!(EditBase::parse("RAW"), None, "大小写不许猜");
+        assert_eq!(EditBase::parse(""), None);
+        assert_eq!(EditBase::parse("jpeg"), None);
+        assert_eq!(EditBase::default(), EditBase::Raw, "默认是 RAW");
+        assert_eq!(EditBase::Sooc.as_str(), "sooc");
+        assert_eq!(EditBase::Raw.as_str(), "raw");
     }
 
     #[test]

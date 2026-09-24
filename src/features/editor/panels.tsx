@@ -32,6 +32,7 @@ import { Switch } from "../../components/ui/Form.tsx";
 import { Menu } from "../../components/ui/Menu.tsx";
 import { t } from "../../i18n/index.ts";
 import type { MessageKey } from "../../i18n/index.ts";
+import type { DevelopEditBase } from "../../api/types.ts";
 import { HISTOGRAM_SAMPLES, type HistogramCounts } from "../../lib/histogram.ts";
 import type { ThumbQueue } from "../../components/ui/thumb-queue.ts";
 import type { ViewerPhoto } from "../../components/ui/viewer/index.ts";
@@ -304,6 +305,30 @@ function OverviewTab(props: {
         src={thumb()}
         natural={props.current?.natural ?? null}
         emptyText={path() === null ? t("editor.empty.noSelection") : t("common.loading")}
+      />
+      {/**
+        * **编辑基准**（人类 2026-09-24）：这次编辑拿哪个当底 —— 默认 RAW，可切 SOOC。
+        * 放在总览图**下面**；缺文件的那一侧**禁用**（只有 RAW 的照片切不到 SOOC）。
+        * 切换会让工作区重新解析编辑目标并重解这张图（`develop_edit_target(base)`）。
+        * 将来 issue 会带上「基于 sooc / 基于 raw 编辑」的标签，点 issue 同步这里
+        * （登记在 `FUTURE.md`，本波先做切换）。
+        */}
+      <SegmentedControl
+        value={props.store.editBase()}
+        onValueChange={(value) => props.store.setEditBase(value as DevelopEditBase)}
+        label={t("editor.base.label")}
+        options={[
+          {
+            value: "sooc",
+            label: t("editor.base.sooc"),
+            disabled: !props.store.editBaseAvailable().bitmap,
+          },
+          {
+            value: "raw",
+            label: t("editor.base.raw"),
+            disabled: !props.store.editBaseAvailable().raw,
+          },
+        ]}
       />
       {/* 缩放控制：视口没有鼠标靠近浮出的按钮，这里给一个稳定的读数与入口 */}
       <EditorZoomControl

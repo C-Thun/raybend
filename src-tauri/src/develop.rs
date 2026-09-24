@@ -168,31 +168,66 @@ pub fn issue_of<R: Runtime>(
 ///
 /// 返回**绝对路径**（前端直接拿去 `editor_set_photo`）；没有可编辑文件时返回 `None`。
 ///
+/// **编辑器该编辑哪个文件**（「编辑落在 RAW 上」，`REPOSITORY.md` §4.1）＋
+/// 这张照片**能不能切到另一侧**（人类 2026-09-24：总览图下的 SOOC / RAW 切换按钮）。
+///
+/// `base`：`"sooc"` / `"raw"`（缺省 `"raw"`，人类定的默认值）；
+/// 认不出的词**报错**，不静默回退 —— 否则界面上按钮显示的和实际编的不是同一张。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditTargetDto {
+    /// 实际会编辑的文件（**绝对路径**，前端直接拿去 `editor_set_photo`）；
+    /// `None` = 没有可编辑的文件（资产缺文件 / 库离线）
+    pub path: Option<String>,
+    /// 有可用的位图（SOOC 那一侧）吗
+    pub has_bitmap: bool,
+    /// 有可用的 RAW 吗
+    pub has_raw: bool,
+}
+
+/// 解析编辑基准（缺省 RAW）。
+fn parse_edit_base(base: Option<&str>) -> Result<raybend::store::develop::EditBase, String> {
+    match base {
+        None => Ok(raybend::store::develop::EditBase::Raw),
+        Some(text) => raybend::store::develop::EditBase::parse(text)
+            .ok_or_else(|| format!("未知的编辑基准：{text}（只认 sooc / raw）")),
+    }
+}
+
 /// # Errors
-/// 库没打开 / 数据库读失败。
+/// 库没打开 / 数据库读失败 / 编辑基准认不出。
 #[tauri::command]
 pub async fn develop_edit_target<R: Runtime>(
     app: AppHandle<R>,
     repository_id: String,
     asset_id: i64,
-) -> Result<Option<String>, String> {
+    base: Option<String>,
+) -> Result<EditTargetDto, String> {
+    let base = parse_edit_base(base.as_deref())?;
     let handle = app.clone();
     blocking(move || {
         // 先把库根解析出来（**不能**在 `with_catalog` 里做：那把锁正被持着）
         let root = crate::browse::resolve_root(&handle, &repository_id)?;
         let state = handle.state::<BrowseState>();
         state.with_catalog(&handle, &repository_id, |db| {
-            let rel = db
-                .read(move |conn| develop::edit_target(conn, asset_id))
+            let (rel, available) = db
+                .read(move |conn| {
+                    let rel = develop::edit_target(conn, asset_id, base)?;
+                    let available = develop::edit_base_available(conn, asset_id)?;
+                    Ok((rel, available))
+                })
                 .map_err(|e| e.to_string())?;
-            let Some(rel) = rel else {
-                return Ok(None);
-            };
-            Ok(Some(
+            let (has_bitmap, has_raw) = available;
+            let path = rel.map(|rel| {
                 root.join(rel.replace('/', std::path::MAIN_SEPARATOR_STR))
                     .to_string_lossy()
-                    .into_owned(),
-            ))
+                    .into_owned()
+            });
+            Ok(EditTargetDto {
+                path,
+                has_bitmap,
+                has_raw,
+            })
         })
     })
     .await

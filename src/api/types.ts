@@ -697,6 +697,29 @@ export type EditorDecodeState = "idle" | "loading" | "ready" | "error";
  * 与**上报**（`restarts` / `lastError`：渲染线程崩过但爬起来了，界面必须能看见）。
  */
 /**
+ * **编辑基准**：这次编辑拿哪个当底（人类 2026-09-24 定：总览图下可切，**默认 RAW**）。
+ *
+ * 它不是「显示哪个 issue」，而是「编辑落在哪个文件上」——
+ * 将来每个 issue 会带上「基于 sooc / 基于 raw 编辑」的标签（`FUTURE.md`）。
+ */
+export type DevelopEditBase = "sooc" | "raw";
+
+/**
+ * `develop_edit_target` 的返回：实际会编辑哪个文件 + 两侧各有没有可用文件。
+ *
+ * `hasBitmap` / `hasRaw` 是给界面**禁用**切不过去的那一侧用的 ——
+ * 否则用户点一下「SOOC」什么都没变，只会以为按钮坏了。
+ */
+export interface DevelopEditTarget {
+  /** 实际会编辑的文件（绝对路径）；`null` = 没有可编辑的文件 */
+  path: string | null;
+  /** 有可用的位图（SOOC 那一侧）吗 */
+  hasBitmap: boolean;
+  /** 有可用的 RAW 吗 */
+  hasRaw: boolean;
+}
+
+/**
  * **显影参数**的 IPC 载荷（与 Rust 侧 `DevelopParamsDto` 逐字对应）。
  *
  * 三条口径：

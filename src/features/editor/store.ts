@@ -19,7 +19,11 @@
 
 import { createSignal } from "solid-js";
 
-import type { DevelopParamsPayload, EditorRenderState } from "../../api/types.ts";
+import type {
+  DevelopEditBase,
+  DevelopParamsPayload,
+  EditorRenderState,
+} from "../../api/types.ts";
 import { t } from "../../i18n/index.ts";
 
 import {
@@ -150,6 +154,15 @@ export interface EditorStore {
   beginParamDrag: () => void;
   /** 拖拽结束（松手）—— 这一下会让载荷重发，Rust 侧于是补全尺寸 */
   endParamDrag: () => void;
+
+  /* ── 编辑基准（SOOC / RAW，人类 2026-09-24）────── */
+  /** 这次编辑拿哪个当底（**默认 RAW**；会话内跟着用户走，重进编辑器回到默认） */
+  editBase: () => DevelopEditBase;
+  setEditBase: (base: DevelopEditBase) => void;
+  /** 这张照片两侧各有没有可用文件（缺的那一侧**禁用**，不让用户白点） */
+  editBaseAvailable: () => { bitmap: boolean; raw: boolean };
+  /** 工作区拿到 `develop_edit_target` 的结果后写进来 */
+  setEditBaseAvailable: (available: { bitmap: boolean; raw: boolean }) => void;
   /** 换照片：把库里读回来的一份编辑栈灌进来（并把它当成「已落库」） */
   loadDevelop: (
     values: Record<string, number>,
@@ -251,6 +264,8 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
   const [developRev, setDevelopRev] = createSignal(0);
   const [committedRev, setCommittedRev] = createSignal(0);
   const [paramDragging, setParamDragging] = createSignal(false);
+  const [editBase, setEditBase] = createSignal<DevelopEditBase>("raw");
+  const [editBaseAvailable, setEditBaseAvailable] = createSignal({ bitmap: false, raw: false });
   const [renderState, setRenderState] = createSignal<EditorRenderState | null>(null);
   const [holeActive, setHoleActive] = createSignal(false);
 
@@ -409,6 +424,10 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
     paramDragging,
     beginParamDrag: () => setParamDragging(true),
     endParamDrag: () => setParamDragging(false),
+    editBase,
+    setEditBase: (base) => setEditBase(base),
+    editBaseAvailable,
+    setEditBaseAvailable,
     loadDevelop: (values, loadedCurves) => {
       // 换照片时把「拖动中」清掉：上一次拖到一半就换了图的话，
       // 这个标志会一直挂在 true 上 —— 那样后面的渲染全被压成预览档（画面永远偏软）。

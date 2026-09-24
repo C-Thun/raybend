@@ -304,12 +304,20 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
       return;
     }
     /*
-     * **编辑落在 RAW 上**（`REPOSITORY.md` §4.1）：位图 + RAW 时要编辑 `_RAW/` 里那个 RAW。
+     * **编辑落在哪个文件上**（人类 2026-09-24）：默认 RAW，总览图下的 SOOC / RAW 按钮
+     * 可切（`store.editBase()` 是这个 effect 的依赖 —— 切一下就重新解析并重解这张图）。
      * 哪个文件、路径怎么拼由 Rust 侧解析（`develop_edit_target`）—— 前端不拼路径。
      * 解析失败就退回当前显示的路径（至少还能看/能编辑位图）。
      */
-    void getDevelopEditTarget(repositoryId, Number(assetId))
-      .then((target) => target ?? currentPath())
+    void getDevelopEditTarget(repositoryId, Number(assetId), props.store.editBase())
+      .then((target) => {
+        // 两侧可用性给总览的切换按钮用：缺文件的那一侧禁用，不让用户白点
+        props.store.setEditBaseAvailable({
+          bitmap: target?.hasBitmap ?? false,
+          raw: target?.hasRaw ?? false,
+        });
+        return target?.path ?? currentPath();
+      })
       .catch(() => currentPath())
       .then((path) => setEditorPhoto(path))
       .catch((error: unknown) => {

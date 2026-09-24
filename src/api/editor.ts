@@ -15,6 +15,8 @@
  */
 
 import type {
+  DevelopEditBase,
+  DevelopEditTarget,
   EditorRenderState,
   EditorViewportIntent,
   EditorViewportState,
@@ -189,15 +191,19 @@ export async function refreshDevelopPreview(path: string): Promise<boolean> {
 /**
  * **编辑器该编辑哪个文件**（「编辑落在 RAW 上」，`REPOSITORY.md` §4.1）。
  *
- * JPG + RAW 时返回 `_RAW/` 里那个 RAW 的**绝对路径**；只有 JPG 就返回 JPG。
+ * `base` 是总览图下那个切换按钮选的基准（人类 2026-09-24，**默认 `"raw"`**）：
+ * `"raw"` 时返回 `_RAW/` 里那个 RAW 的绝对路径（没 RAW 就退回位图）；
+ * `"sooc"` 时返回相机直出的位图（没位图就退回 RAW）。
  * 拼 `_RAW/` 这件事只在 Rust 侧实现一次 —— 前端不许自己拼。
  *
- * 返回 `null` = 没有可编辑的文件（资产缺文件 / 库离线）。
+ * 返回里还带 `hasBitmap` / `hasRaw`：界面据此**禁用**切不过去的那一侧。
+ * `path === null` = 没有可编辑的文件（资产缺文件 / 库离线）。
  */
 export async function getDevelopEditTarget(
   repositoryId: string,
   assetId: number,
-): Promise<string | null> {
+  base: DevelopEditBase = "raw",
+): Promise<DevelopEditTarget | null> {
   if (!isTauriRuntime()) return null;
-  return call<string | null>("develop_edit_target", { repositoryId, assetId });
+  return call<DevelopEditTarget>("develop_edit_target", { repositoryId, assetId, base });
 }
