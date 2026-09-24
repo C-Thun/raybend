@@ -7,6 +7,7 @@
 //! ├── curve.rs     单调三次曲线（RGB / R / G / B）
 //! ├── filters.rs   箱式滤波 / 快速引导滤波（边缘保持，局部色调映射的底层算子）
 //! ├── local_tone.rs 动态反差（局部色调映射：压整体光比 + 抬局部反差）
+//! ├── lens.rs      镜头校正（畸变 / 横向色差 / 暗角：模型 + 数学 + 像素趟）
 //! └── pipeline.rs  线性像素 → 参数 → 8bit 显示（参考实现 + LUT 快路径）
 //! ```
 //!
@@ -31,6 +32,7 @@
 pub mod color;
 pub mod curve;
 pub mod filters;
+pub mod lens;
 pub mod local_tone;
 pub mod params;
 pub mod pipeline;
