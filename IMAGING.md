@@ -44,11 +44,17 @@
 
 | 格式 | 现状 | 要做什么 |
 | --- | --- | --- |
-| **avif** | `image` 的 `avif` feature **只有编码器**（ravif），没有解码器 | 要接解码器（`avif-native`/dav1d 或别的 crate）——**§6 的「先读 preview」也依赖它** |
-| **heic** | `image` **完全不支持** | 接 libheif 系解码器（只影响导入，导出不涉及） |
+| **avif** | ✅ **已接**（2026-09-24）：`image` 的 `avif-native` feature（底层 **dav1d** 静态库）+ `ravif` 编码器 | 已做：Rust 侧能解我们自己的缓存图（`display::pixels_from_avif`）与导入的 avif。**待补：真 avif 文件的导入冒烟**（现只有合成图 round-trip） |
+| **heic** | `image` **完全不支持** | 接 libheif 系解码器（只影响导入，导出不涉及）——**另一件事**，不在 avif 这一批 |
 
 > 浏览器（`<img>` / `view_image`）**不需要**我们解 AVIF —— 它自己会解；
 > 需要解码器的是 **Rust 侧要像素**的地方（编辑器 GPU 纹理、缩略图/直方图等本地处理）。
+>
+> **dav1d 的构建代价**（已沉淀成脚本，别再踩）：WSL 侧靠系统库（`apt install libdav1d-dev`，1.4.1）；
+> Windows 侧没有 pkg-config，用**一次性构建的静态库** —— `scripts/build-dav1d-win.cmd`
+> （meson + ninja + nasm + VS Build Tools，产物 `C:\rb-deps\dav1d-1.5.0\`），
+> 构建时由 `scripts/lib/dav1d-win.mjs` 把位置经 `SYSTEM_DEPS_DAV1D_*` 环境变量告诉 cargo。
+> 许可登记见 `THIRD-PARTY-NOTICES.md`（BSD-2-Clause）。
 
 ---
 
@@ -124,10 +130,16 @@
 
 ### 4.2 与现有「大图缓存」的关系
 
-现状 `FullCache`：`<库根>/cache/full/<asset_id>/<issue>-v<pipeline>.avif`
-（`issue` ∈ `sooc`/`raw`/`latest`；SOOC 不进缓存 —— 那就是原文件本身）。
-本文件的 **preview ≈ 这个 cache**：`latest-v*.avif` 就是「编辑结果的那张 1920」。
+现状 `FullCache`：`<库根>/cache/full/<asset_id>/<issue>-<base>-v<pipeline>.avif`
+（`issue` ∈ `sooc`/`raw`/`latest`；SOOC 不进缓存 —— 那就是原文件本身；
+`base` ∈ `sooc`/`raw` = **编辑基准**，见 §4.3）。
+本文件的 **preview ≈ 这个 cache**：`latest-raw-v*.avif` 就是「基于 RAW 的编辑结果那张 1920」。
 **差异在生成节点**（现状是按需渲染时写，规格是进/出编辑 + 存 issue 时写）——见 §8。
+
+> **基准必须进文件名**（2026-09-24 定，已实现）：同一张照片在两种基准下渲染出的是两张不同的图，
+> 而 `latest` 只有一个名字 —— 不加这一维的话，切了基准会**读到另一基准渲染的旧图**，
+> 而且看不出是错的。基准从**源文件**推（`EditBase::of_file`：RAW → `raw`，其余 → `sooc`），
+> 不靠调用方传（传就会传错）。
 
 ### 4.3 编辑基准：SOOC / RAW 切换（人类 2026-09-24 定）
 
@@ -137,6 +149,8 @@
 * **将来（已登记，本波只做切换）**：每个 issue 打上「基于 sooc 编辑 / 基于 raw 编辑」的标签，
   **点不同标签的 issue 时同步切换总览图下的按钮**，以变更当前编辑针对的图。
 * 同一份编辑栈落在两种像素上观感会有差 —— 所以标签必须跟着 issue 走，不能只存一份全局基准。
+* **缓存命名跟着基准走**（已实现）：`cache/full/<asset>/latest-<base>-v<pipeline>.avif` ——
+  两个基准各存一份，互不覆盖（理由见 §4.2 的引用块）。
 
 ---
 
@@ -150,6 +164,23 @@
 
 > 依赖：Rust 侧解 AVIF（§1.4）—— preview 是 AVIF，GPU 纹理要像素。
 > 浏览器那条路（`<img>`）不需要解码器，但编辑视口是 Rust 直绘，绕不开。
+>
+> **已实现（2026-09-24）**：进编辑 / 在胶片带上换照片时，**先拿一张已经存在的图顶上**
+> （毫秒级），真帧（RAW 全解码 + 管线）随后替换。取图顺序（能找到哪个用哪个）：
+>
+> 1. **`latest`** —— 大图缓存里**与当前编辑基准同一侧**的那一份（编辑过的照片才有）；
+> 2. **`SOOC`** —— 相机直出的位图（同名 JPG）；
+> 3. **要编的这张文件本身** —— RAW 走 worker 的内嵌预览，位图直接解。
+>
+> 三条口径（都踩过）：
+> * 过渡帧走**同一条显影通道**（`RenderCommand::Developed`）与**同一个任务号** ——
+>   号对不上会被当过期结果丢掉，过渡帧就永远不显示；
+> * 它的**逻辑尺寸用原图尺寸**（`media::meta::read_photo_meta` 读头得出，已按方向摆正），
+>   不是 1920 —— 否则真帧回来时 `set_image` 会 refit，画面跳一下；
+> * 过渡帧期间**直方图是过渡图的直方图**（像素由显影线程当前帧直接给出），真帧到了再刷新 ——
+>   这是可接受的，不是 bug；**不写任何缓存**（它本来就是从缓存读的）。
+>
+> 实现：`src-tauri/src/editor.rs` 的 `transition_plan` / `transition_outcome`。
 
 ### 5.1 编辑视口的档位与「拖动中只算预览档」（人类 2026-09-24 定）
 
@@ -206,19 +237,19 @@
 | 缩略图默认 = sooc/raw（§3.1-7） | ✅ 没编辑过就走 SOOC/RAW 解码那条路 | — |
 | issue 切换语义（§3.2） | ❌ issue 体系只有 `latest` + 虚拟 SOOC/RAW；**切 issue 的 UI 与语义未实现** | 未来里程碑；实现时按 §3.2 的三条判定 |
 | preview 生成节点（§4） | ✅ 已接**进编辑 / 退出编辑**两个节点（`develop_preview_refresh`，命中缓存只读）；`raw-v*.avif` 生产仍未写（只有 `latest`） | **存 issue 那个节点等 issue 体系**；`raw-*` 那份要不要写、什么时候写另议 |
-| 「先读 preview」+ 毛玻璃提示（§5） | ✅ 提示已改半透毛玻璃（只遮 view、`pointer-events-none`，与全屏那条同观感）；❌ 「先读 preview」还没做 —— 编辑进图仍是 RAW 全解码（1.6–2.4s） | 依赖 **AVIF 解码器**（§1.4）；选了编码器之后再接「先出预览图、后台再解 RAW」 |
+| 「先读 preview」（§5） | ✅ **已做**（2026-09-24）：进编辑 / 换照片先出过渡帧（`latest` → `SOOC` → RAW 内嵌预览，见 §5），真帧随后替换；毛玻璃提示只遮 view、`pointer-events-none` | 观感（糊到什么程度、够不够快）归人类真机验 |
 | 浏览器侧读 AVIF（view） | ✅ `view_image` 给 AVIF 字节，`<img>` 自己解 | — |
-| HEIC / AVIF **导入** | ❌ 目前是占位图（解不开） | 接解码器（§1.4） |
+| HEIC / AVIF **导入** | ✅ avif **已通**（解码器接上了；导入路径本来就是通用位图那条）—— 待补真文件冒烟；❌ HEIC 仍是占位图 | HEIC 要 libheif 系（§1.4） |
+| 编辑基准进缓存名（§4.2/§4.3） | ✅ 已做：`latest-<base>-v<pipeline>.avif`，两个基准各存一份 | — |
 | export 用 preview（§7） | 未开工（M4） | — |
 
 ---
 
 ## 9. 未决点（实现前需要人类拍板）
 
-1. **AVIF 解码器的选型**：`image` 的 `avif-native`（dav1d）还是别的解码器 ——
-   这是新增依赖，按 `AGENTS.md` §2.9 要先讨论再上。
-   （已定：**导入 avif / heic 必须接解码器**；未定：选哪个、以及 §5「先读 preview」
-   是走 Rust 解码还是先用 DOM 覆盖层让浏览器解。）
+1. **AVIF 解码器已定**（人类 2026-09-24 拍板）：`image` 的 `avif-native`（底层 **dav1d**），
+   2026-09-24 接上并落地（构建代价与脚本见 §1.4）。
+   **仍待人类拍板的**：RAW + JPG 成对时 preview 从哪个文件渲染（下一条）。
 2. **RAW + JPG 成对时，preview 从哪个文件渲染**：现在两条路（`view_image` 与
    `develop_preview_refresh`）都按**前端给的显示路径**（= JPG）渲染，而编辑器编的是
    `_RAW/` 里那个 RAW —— 同一份编辑栈落在两种像素上，观感会略有差异。

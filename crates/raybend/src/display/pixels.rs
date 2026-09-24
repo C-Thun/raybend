@@ -146,6 +146,46 @@ pub fn is_raw_photo(path: &Path) -> bool {
     is_raw(path)
 }
 
+/// **解一段 AVIF 字节**（我们自己的缓存图）→ 能直接进纹理的 RGB 像素。
+///
+/// 与 [`pixels`] 的分工：那个是「给一张**照片文件**」，这个是「给一段**缓存字节**」。
+/// 缓存图是**我们自己渲染出来的**（`thumbnail::render::encode_avif` 写的，已经摆正、
+/// 已经缩到屏幕档），所以这里**不读 EXIF、不摆正、不再缩放** —— 只解码。
+///
+/// 为什么非要有它（`AGENTS.md` §6.1 的透明链）：编辑视口是 wgpu 直绘，纹理要的是像素；
+/// 浏览器能解 AVIF，但 GPU 直绘那条路绕不开 Rust 侧的解码器 —— 那就是 `image` 的
+/// `avif-native`（底层 dav1d）那一步（`IMAGING.md` §1，handoff §2）。
+///
+/// 解不开（缓存被改坏 / 不是 AVIF）返回 `None` —— **不是错误**：
+/// 过渡帧解不出来只是少了那一下「先进先出图」，真帧照样会来。
+#[must_use]
+pub fn pixels_from_avif(bytes: &[u8]) -> Option<DisplayPixels> {
+    if bytes.is_empty() {
+        return None;
+    }
+    let image = image::load_from_memory_with_format(bytes, image::ImageFormat::Avif).ok()?;
+    let rgb = image.to_rgb8();
+    let (width, height) = (rgb.width(), rgb.height());
+    if width == 0 || height == 0 {
+        return None;
+    }
+    let pixels = DisplayPixels {
+        width,
+        height,
+        rgb: rgb.into_raw(),
+        origin: PixelOrigin::AvifCache,
+        // 缓存图就是屏幕档（长边 ≤1920）—— 这个字段描述的是「它在哪一档」，
+        // 不是「我们把它缩到了哪一档」（这里不缩）。
+        size: PixelSize::Screen,
+    };
+    debug_assert!(
+        pixels.is_consistent(),
+        "AVIF 解码结果的尺寸与字节数对不上：{width}×{height} / {} 字节",
+        pixels.rgb.len()
+    );
+    Some(pixels)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -261,5 +301,86 @@ mod tests {
         assert!(is_raw_photo(Path::new("/x/IMG.CR3")));
         assert!(!is_raw_photo(Path::new("/x/IMG.JPG")));
         assert!(!is_raw_photo(Path::new("/x/noext")));
+    }
+
+    /* ── AVIF 解码（`avif-native` / dav1d）───────────────────── */
+
+    /// 一张 32×32 的水平渐变（左→右 R、上→下 G、B 固定）——平滑，容差能收得很紧。
+    fn gradient_rgb(width: u32, height: u32) -> Vec<u8> {
+        let mut rgb = Vec::with_capacity((width as usize) * (height as usize) * 3);
+        for y in 0..height {
+            for x in 0..width {
+                #[allow(clippy::cast_possible_truncation)]
+                rgb.extend_from_slice(&[(x * 8) as u8, (y * 8) as u8, 128]);
+            }
+        }
+        rgb
+    }
+
+    /// **我们自己写的 AVIF 必须能解回来** —— 这是「Rust 侧解码器真的接上了」的唯一证据
+    /// （handoff §2.3）：合成图 → `encode_avif`（ravif，q90 / 4:4:4）→ `pixels_from_avif`。
+    ///
+    /// 它在 2026-09-24 之前恒为 `None` —— `image` 的 `avif` feature 只有编码器，
+    /// 解码要 `avif-native`（底层 dav1d，需要系统库 / 静态库）。
+    #[test]
+    fn avif_round_trip_decodes_our_own_cache_format() {
+        let (width, height) = (32u32, 32u32);
+        let rgb = gradient_rgb(width, height);
+        let bytes = crate::thumbnail::render::encode_avif(&rgb, width, height).expect("编码");
+
+        let pixels = pixels_from_avif(&bytes)
+            .expect("解不开 —— `avif-native` / dav1d 没接上？（handoff §2）");
+        assert_eq!((pixels.width, pixels.height), (width, height), "尺寸要一模一样");
+        assert!(pixels.is_consistent());
+        assert_eq!(pixels.origin, PixelOrigin::AvifCache, "出处要说是缓存图");
+
+        // AVIF 是有损的（q90 / 4:4:4）：渐变上允许很小的偏差，但不许整体偏移
+        let mut worst = 0i32;
+        let mut total = 0i64;
+        for y in 0..height {
+            for x in 0..width {
+                let at = ((y * width + x) * 3) as usize;
+                #[allow(clippy::cast_possible_truncation)]
+                let want = [(x * 8) as u8, (y * 8) as u8, 128];
+                for (channel, expected) in want.iter().enumerate() {
+                    let diff = i32::from(pixels.rgb[at + channel]) - i32::from(*expected);
+                    worst = worst.max(diff.abs());
+                    total += i64::from(diff);
+                }
+            }
+        }
+        let samples = i64::from(width * height * 3);
+        let mean = (total as f64) / (samples as f64);
+        assert!(worst <= 8, "单点最大偏差 {worst}（期望 ≤8）");
+        assert!(mean.abs() < 1.0, "平均偏差 {mean:.3}（整体偏移说明色彩矩阵/range 对不上）");
+    }
+
+    /// 坏字节只许安静地失败，**不许 panic、不许挂住**。
+    ///
+    /// 「挂住」这条尤其重要：`image` 的 AVIF 解码器在等一帧画不出来时会一直
+    /// `send_pending_data` 重试（`read_until_ready` 是个死循环）—— 截断的输入
+    /// 必须能从 dav1d 那里拿到一个错误，否则过渡帧那条路会把显影线程卡死。
+    #[test]
+    fn avif_garbage_fails_quietly() {
+        assert!(pixels_from_avif(&[]).is_none(), "空字节");
+        assert!(pixels_from_avif(b"not an avif at all").is_none(), "纯垃圾");
+        // 只剩 ftyp 头（没有真正的 AV1 负载）
+        assert!(pixels_from_avif(b"\0\0\0\x1cftypavif\0\0\0\0avifmif1").is_none());
+
+        let bytes = crate::thumbnail::render::encode_avif(&gradient_rgb(32, 32), 32, 32)
+            .expect("编码");
+        let half = &bytes[..bytes.len() / 2];
+        assert!(pixels_from_avif(half).is_none(), "截断的 AVIF 必须报 None 而不是挂住");
+        // 头没坏、身子缺一块（最容易卡住的那种）
+        let mut cut = bytes.clone();
+        cut.truncate(bytes.len() - 16);
+        let _ = pixels_from_avif(&cut);
+    }
+
+    /// 编码尺寸与像素长度对不上时，`encode_avif` 自己就要报错（上游防护，别在解码侧才炸）。
+    #[test]
+    fn encode_avif_rejects_inconsistent_input() {
+        assert!(crate::thumbnail::render::encode_avif(&[0; 12], 4, 4).is_err());
+        assert!(crate::thumbnail::render::encode_avif(&[], 0, 4).is_err());
     }
 }

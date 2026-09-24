@@ -41,5 +41,10 @@ serde.workspace = true
 serde_json.workspace = true
 tauri-plugin-dialog = "2.7.3"
 
+[dev-dependencies]
+# 仅测试用：过渡帧那几条要真文件（缓存 AVIF / 位图）——与 `crates/raybend` 同一个包
+image.workspace = true
+tempfile.workspace = true
+
 [lints]
 workspace = true

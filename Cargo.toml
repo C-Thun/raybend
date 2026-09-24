@@ -46,7 +46,7 @@ trash = "5.2"
 # 由 `image` 的 avif 编码器（底层 ravif，纯 Rust，无系统库）提供。
 # 走 **RGB8** 输入才会得到 4:4:4（ravif 的 `encode_rgba` 是 4:2:0），见 `thumbnail::render::encode_avif`。
 # 将来 JXL 生态成熟后换 JXL（已登记 `FUTURE.md` §C8）。
-image = { version = "0.25", default-features = false, features = ["jpeg", "png", "tiff", "avif", "rayon"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "tiff", "avif", "avif-native", "rayon"] }
 # 渲染（M2-W1 spike；AGENTS.md §6.1 定的方案 B = webview 挖洞 + wgpu 直绘到窗口表面）。
 # 版本 30.0.1：**上游最新**。AGENTS.md §3 记着 RapidRAW 曾把 wgpu 降到 29.0 以规避
 # Apple 设备上的 P3 色偏 —— 那是 macOS 的问题，本项目 Windows 优先，先从最新版起步

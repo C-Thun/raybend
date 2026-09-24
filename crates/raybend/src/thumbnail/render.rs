@@ -289,6 +289,11 @@ pub enum PixelOrigin {
     RawEmbeddedPreview,
     /// RAW 完整解码（黑电平 / 白平衡 / 色彩矩阵）。
     RawDecoded,
+    /// **我们自己的大图缓存**（`cache/full/<id>/latest-<base>-v<pipeline>.avif`）。
+    ///
+    /// 编辑器的过渡帧走它（进编辑先出图，`src-tauri/src/editor.rs`）——
+    /// 它不是「照片解码」，而是「上一次渲染好的结果」。
+    AvifCache,
 }
 
 /// 解码一个文件；解不开（不是图 / 相机不支持 / 文件损坏）返回 `Ok(None)`。

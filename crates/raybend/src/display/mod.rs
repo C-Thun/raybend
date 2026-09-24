@@ -54,7 +54,7 @@ pub use full_cache::FullCache;
 pub use histogram::{
     histogram_of_file, histogram_of_image, histogram_of_rgb8, Histogram, DEFAULT_BINS,
 };
-pub use pixels::{pixels, DisplayPixels, PixelSize};
+pub use pixels::{DisplayPixels, PixelSize, pixels, pixels_from_avif};
 
 use crate::error::Result;
 use crate::media::kind::{self, MediaKind};

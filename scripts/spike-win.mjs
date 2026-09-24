@@ -35,6 +35,8 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 
+import { windowsBuildEnv } from "./lib/dav1d-win.mjs";
+
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const TARGET_DIR = process.env.WIN_TARGET_DIR ?? "C:\\rb-target\\raybend";
 const TARGET_DIR_WSL = process.env.WIN_TARGET_DIR_WSL ?? "/mnt/c/rb-target/raybend";
@@ -84,12 +86,9 @@ if (!run("pnpm", ["build"])) {
 step(2, `构建 Windows 产物（产物落 ${TARGET_DIR}，不走 9p 共享）`);
 const buildCmd = `pushd ${uncRepo} & cargo build -p raybend-desktop -p raybend --features custom-protocol`;
 const built = run("cmd.exe", ["/c", buildCmd], {
-  env: {
-    ...process.env,
-    // 跨 WSL→Windows 传环境变量走 WSLENV（cmd 的 `set VAR=x & …` 会把空格吃进值里）
-    CARGO_TARGET_DIR: TARGET_DIR,
-    WSLENV: process.env.WSLENV ? `${process.env.WSLENV}:CARGO_TARGET_DIR` : "CARGO_TARGET_DIR",
-  },
+  // 跨 WSL→Windows 传环境变量走 WSLENV（cmd 的 `set VAR=x & …` 会把空格吃进值里）；
+  // dav1d 那几个变量（AVIF 解码静态库）也在这里并进去 —— 见 `scripts/lib/dav1d-win.mjs`。
+  env: windowsBuildEnv({ CARGO_TARGET_DIR: TARGET_DIR }),
 });
 if (!built) {
   fail(

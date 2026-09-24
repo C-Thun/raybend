@@ -24,7 +24,9 @@
 | 【待 UI 设计阶段引入】Tabler Icons（`@tabler/icons-solidjs`） | 3.x | MIT | 图标 | 兼容 |
 | 【待 M0-4 引入】rusqlite（bundled SQLite） | — | MIT + SQLite 公有领域 | 本地数据库 | 兼容 |
 | ravif（含 rav1e、avif-serialize） | 0.13.0 / 0.8.1 / 0.8.9 | **BSD-3-Clause**（rav1e 为 BSD-2-Clause） | **AVIF 编码**（全系统缓存图的格式，M3-W3 引入） | 兼容（宽松许可，BSD 系与 AGPL-3.0 无冲突） |
-| rayon | 1.12 | MIT / Apache-2.0 | ravif 的多线程编码（`image` 的 `rayon` feature 打开；不开的话 AVIF 编码慢 8 倍以上） | 兼容 |
+| **dav1d**（经 `image` 的 `avif-native` → `dav1d` / `dav1d-sys` / `av-data`，后三个是 MIT 的 Rust 绑定） | **1.5.0**（Windows 静态库）/ 1.4.1（WSL 系统库） | **BSD-2-Clause**（C 库）；绑定 crate MIT | **AVIF 解码**（Rust 侧要像素的地方：编辑器过渡帧、avif 导入；M3-W3 引入） | 兼容（宽松许可）。**不是 Rust 依赖而是系统/静态 C 库**：Windows 侧由 `scripts/build-dav1d-win.cmd` 从 `https://code.videolan.org/videolan/dav1d` 的 `1.5.0` tag 源码构建成静态库（`C:\rb-deps\dav1d-1.5.0\`，不打 DLL 进安装包）；WSL 侧用发行版包 `libdav1d-dev` |
+| mp4parse（`avif-native` 带进来） | 0.17 | MPL-2.0 | AVIF/HEIF 容器解析（不碰 AV1 位流） | 兼容（MPL-2.0 为文件级 copyleft，可链接） |
+| rav1e / rayon | 1.12 | MIT / Apache-2.0 | ravif 的多线程编码（`image` 的 `rayon` feature 打开；不开的话 AVIF 编码慢 8 倍以上） | 兼容 |
 
 > **完整清单待补**：以上为当前可预见的直接依赖。M0-1 依赖落定、以及每个里程碑引入新依赖时，
 > 需补齐**完整清单（含间接依赖）**；发布前（M6）应据锁文件生成一次机器可核对的完整清单。
@@ -90,3 +92,4 @@
 | 2026-09-17 | 新增 §1b「品牌素材」：logo 与闪屏图**自研**，随项目 AGPL-3.0-only（人类确认） |
 | 2026-09-17 | 新增 §1c「官网依赖」：Lucide 图标数据(ISC)、Inter / Noto Sans SC(OFL-1.1)、官网的 Solid 2 线与构建/测试工具 |
 | 2026-09-17 | §1c 补 potrace(GPL-2.0，**开发期描摹工具**，只产坐标不进产物) |
+| 2026-09-24 | 新增 **dav1d 1.5.0（BSD-2-Clause）**：AVIF 解码（`image` 的 `avif-native`）；Windows 走一次性构建的静态库、WSL 走系统包。连带登记 `mp4parse`(MPL-2.0) |

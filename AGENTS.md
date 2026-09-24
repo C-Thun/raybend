@@ -310,14 +310,25 @@ pnpm release patch --dry-run   # 先看计划
 
 # —— Windows 侧（真实产品环境：WebView2）——
 # 前端在 WSL 构建，Windows 只跑 Rust，不需要在 Windows 装 Node。
+#
+# ⚠️ 日常就用 `pnpm debug:win`（脚本已封装下面这几条，含 dav1d 环境变量）——
+#    下面这份是**排障时对照用的原命令**。
 pnpm build                              # ① WSL 里产出 dist/
 export CARGO_TARGET_DIR='C:\rb-target\raybend'
-export WSLENV='CARGO_TARGET_DIR'        # ② 跨 WSL→Windows 透传环境变量（cmd 的 set 经互操作不可靠）
+# ② dav1d（AVIF 解码）静态库位置 —— 没这几条 Windows 侧 cargo 会在 dav1d-sys 报「找不到 dav1d」。
+#    库由 scripts/build-dav1d-win.cmd 一次性构建（换机器/换盘才需要再跑），默认 C:\rb-deps\dav1d-1.5.0。
+export SYSTEM_DEPS_DAV1D_NO_PKG_CONFIG=1
+export SYSTEM_DEPS_DAV1D_LIB=dav1d
+export SYSTEM_DEPS_DAV1D_LINK=static
+export SYSTEM_DEPS_DAV1D_SEARCH_NATIVE='C:\rb-deps\dav1d-1.5.0\lib'
+export SYSTEM_DEPS_DAV1D_INCLUDE='C:\rb-deps\dav1d-1.5.0\include'
+export WSLENV='CARGO_TARGET_DIR:SYSTEM_DEPS_DAV1D_NO_PKG_CONFIG:SYSTEM_DEPS_DAV1D_LIB:SYSTEM_DEPS_DAV1D_LINK:SYSTEM_DEPS_DAV1D_SEARCH_NATIVE:SYSTEM_DEPS_DAV1D_INCLUDE'
+# ③ 跨 WSL→Windows 透传环境变量（cmd 的 set 经互操作不可靠）
 cmd.exe /c 'pushd \\wsl.localhost\Ubuntu-24.04\home\andares\repos\c-thun\raybend & cargo build -p raybend-desktop -p raybend --features custom-protocol'
-/mnt/c/rb-target/raybend/debug/raybend-desktop.exe   # ③ 运行（产物在 C: 本地）
+/mnt/c/rb-target/raybend/debug/raybend-desktop.exe   # ④ 运行（产物在 C: 本地）
 ```
 
-**八条硬规矩（实测踩坑）：**
+**九条硬规矩（实测踩坑）：**
 
 1. **Windows 构建的产物必须落在 Windows 本地盘**（`C:\rb-target\...`）。9p 共享（`\\wsl.localhost`）不支持 rustc 增量编译的锁文件语义，会报 `os error -2147024895`，且会把 Windows 产物污染进 WSL 的 `target/`。
 2. **跨 WSL→Windows 传环境变量用 `WSLENV`**，不要用 cmd 的 `set VAR=x & ...`（`&` 前的空格会进值，且引号经互操作会丢）。
@@ -353,6 +364,16 @@ cmd.exe /c 'pushd \\wsl.localhost\Ubuntu-24.04\home\andares\repos\c-thun\raybend
    结果让人类拿着「没有修复的版本」白测一轮。
    `pnpm check:win` 既比**时间**（exe 必须比 dist 新）也比**内容**（资源名逐个命中），
    不合格会直接打印补救命令。
+9. **dav1d 静态库是 Windows 构建的前置**（2026-09-24，AVIF 解码）：
+   `image` 的 `avif-native` 拉进 `dav1d-sys`，它用 `system-deps` 找 dav1d 库；
+   Windows 上没有 pkg-config，所以**位置靠环境变量告诉它**（见上面的原命令）。
+   * 库不在仓库里，用 **`scripts/build-dav1d-win.cmd`** 一次性构建
+     （meson + ninja + nasm + VS Build Tools，约 3 分钟，产物 `C:\rb-deps\dav1d-1.5.0\`）；
+   * 环境变量已封进 **`scripts/lib/dav1d-win.mjs`**，`pnpm debug:win` / `pnpm spike:win`
+     会自动带上 —— **别在别处再写一份**（`AGENTS.md` §2.12）；
+   * 链的是**静态库**（`SYSTEM_DEPS_DAV1D_LINK=static`）⇒ 安装包里不需要带 `dav1d.dll`；
+   * WSL 侧不同：用系统库（`sudo apt install libdav1d-dev`，1.4.1）走 pkg-config，**不需要**这些变量；
+   * 许可与版本登记在 `THIRD-PARTY-NOTICES.md`。
 
 ### 5.3.1 为什么必须加 `--features custom-protocol`（重要，别拆掉）
 

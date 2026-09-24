@@ -164,6 +164,31 @@ pub fn issue_of<R: Runtime>(
     })
 }
 
+/// 这张照片在**指定基准**下的源文件（绝对路径）。
+///
+/// 与 [`develop_edit_target`] 同一个口径（走 `store::develop::edit_target`），
+/// 只是这里给**进程内**调用方用（编辑器的过渡帧计划要拿 SOOC 那一侧的文件），
+/// 不经过 IPC 往返。没那一侧的文件（只有 RAW 没有 JPG）就是 `None`。
+pub fn source_path_of<R: Runtime>(
+    app: &AppHandle<R>,
+    asset: &ResolvedAsset,
+    base: raybend::store::develop::EditBase,
+) -> Option<PathBuf> {
+    let browse = app.state::<BrowseState>();
+    let asset_id = asset.asset_id;
+    let rel = browse
+        .with_catalog(app, &asset.repository_id, move |db| {
+            db.read(move |conn| develop::edit_target(conn, asset_id, base))
+                .map_err(|e| e.to_string())
+        })
+        .ok()??;
+    Some(
+        asset
+            .root
+            .join(rel.replace('/', std::path::MAIN_SEPARATOR_STR)),
+    )
+}
+
 /// 编辑器该编辑哪个文件（「编辑落在 RAW 上」）。
 ///
 /// 返回**绝对路径**（前端直接拿去 `editor_set_photo`）；没有可编辑文件时返回 `None`。

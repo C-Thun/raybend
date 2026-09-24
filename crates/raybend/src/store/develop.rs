@@ -441,6 +441,20 @@ impl EditBase {
             Self::Raw => "raw",
         }
     }
+
+    /// **这个文件属于哪一侧**（从源文件推，不靠调用方传）。
+    ///
+    /// 大图缓存的命名要按基准分文件（`display::full_cache`）：
+    /// 「渲染用的哪个文件，就是哪个基准」是唯一不会错的口径 ——
+    /// 让调用方自己报一个基准，就一定会出现「报的和用的不是同一侧」。
+    #[must_use]
+    pub fn of_file(path: &std::path::Path) -> Self {
+        let is_raw = path.file_name().is_some_and(|name| {
+            crate::media::kind::kind_of_file(&name.to_string_lossy())
+                == crate::media::kind::MediaKind::Raw
+        });
+        if is_raw { Self::Raw } else { Self::Sooc }
+    }
 }
 
 /// 这张照片有没有可用的位图 / RAW（界面据此**禁用**切不过去的那一侧）。

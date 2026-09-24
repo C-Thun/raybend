@@ -47,7 +47,7 @@ use raybend::develop::{
     Curve, CurveChannel, CurveSet, DevelopParams, LinearImage, Resolved, chain_image,
     render_rgb8_with_local_tone,
 };
-use raybend::display::{self, PixelSize};
+use raybend::display::{self, FullCache, PixelSize};
 use raybend::render::{
     FitMode, GpuContext, ImageTier, RenderImage, RenderOutcome, RestartPolicy, Verdict, tier_for,
     tier_for_params,
@@ -400,7 +400,13 @@ enum RenderCommand {
     /// 窗口客户区尺寸变化（物理像素；**主线程推来**，渲染线程不查窗口）
     Resize { width: u32, height: u32 },
     /// 换照片 / 清空照片
-    SetPhoto { path: Option<String> },
+    ///
+    /// `transition`：**过渡帧计划**（进编辑先出图，handoff §3）——
+    /// 命令层算好（那里有库、有 catalog），显影线程只管试。`None` = 不发过渡帧。
+    SetPhoto {
+        path: Option<String>,
+        transition: Option<TransitionPlan>,
+    },
     /// 视口意图
     Intent(ViewportIntent),
     /// 显影参数（拉杆 / 曲线）变了 —— 只重算像素，不重新解码
@@ -461,6 +467,45 @@ impl DevelopParamsDto {
     }
 }
 
+/// 过渡帧的一个候选来源（按顺序试，第一个能解出来的上屏）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum TransitionKind {
+    /// 我们自己的大图缓存（AVIF，`cache/full/<id>/latest-<base>-v<pipeline>.avif`）。
+    AvifCache,
+    /// 照片文件本身（RAW → 内嵌预览；位图 → 直接解）。
+    PhotoFile,
+}
+
+/// 过渡帧的一个候选：文件 + 它是什么 + 上屏后怎么报「像素从哪来」。
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TransitionSource {
+    path: std::path::PathBuf,
+    kind: TransitionKind,
+    /// 写进 `RenderState.origin` 的字符串（诊断与界面提示要看）。
+    origin: &'static str,
+}
+
+/// **过渡帧的取图计划**（handoff §3「进来先读 preview」+ §2.5「切图优先」）。
+///
+/// 进编辑 / 在胶片带上换照片时，先拿一张**已经存在的图**画上去（毫秒级），
+/// 真帧（RAW 全解码 + 管线）随后替换。候选顺序即优先级：
+/// `latest`（缓存里有就读）→ `SOOC`（相机直出位图）→ `RAW`（内嵌预览）。
+///
+/// 计划在**命令层**算好（那里有库、有 catalog），显影线程只管试 ——
+/// 它是个普通线程，够不着数据库。
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TransitionPlan {
+    sources: Vec<TransitionSource>,
+    /// **原图尺寸**（已按方向摆正）—— 过渡帧的逻辑尺寸。
+    ///
+    /// 为什么不报过渡帧自己的尺寸（例如 1920）：`set_image` 在逻辑尺寸变了时会 `refit`，
+    /// 真帧回来那一刻几何会重摆（`Free` 模式下用户拖过的视角会被拉回中心）。
+    /// 报原图尺寸就**根本不会发生那次 refit**。
+    /// 查不到时退回用过渡帧自己的尺寸 —— 两者都已摆正、宽高比一致，
+    /// `Fit` 档下 refit 的结果逐像素相同（`zoom_for_fit` 只取决于宽高比）。
+    source_size: Option<(u32, u32)>,
+}
+
 /// 一次**显影任务**（渲染线程 → 显影线程）。
 ///
 /// 显影线程同时管两件事，因为它们是同一份数据的两个阶段：
@@ -477,6 +522,9 @@ struct DevelopJob {
     tier: ImageTier,
     params: DevelopParams,
     curves: CurveSet,
+    /// **过渡帧计划**（进编辑先出图）：只在真的要解码那一下用一次；
+    /// `None` = 不发过渡帧（换档位 / 改参数那类任务）
+    transition: Option<TransitionPlan>,
 }
 
 /// 显影线程手里缓存的**线性源**（一张照片一份，含按档位缩好的预览副本）。
@@ -505,8 +553,11 @@ struct DevelopOutcome {
     rev: u64,
     path: String,
     tier: ImageTier,
-    /// 像素从哪来（`bitmap` / `raw-linear`）——诊断与界面提示要看
+    /// 像素从哪来（`bitmap` / `raw-linear` / `preview-latest`…）——诊断与界面提示要看
     origin: String,
+    /// 这是**过渡帧**吗（进编辑先出图）：真帧还在路上 ——
+    /// 所以它**不清 `wanted_tier`、不置 `ready`、不动 `applied_params_rev`**。
+    transition: bool,
     /// 拍摄色温估计（K）——前端拿它当色温拉杆的基线
     as_shot_temperature: Option<f32>,
     /// 解码耗时（毫秒；只换照片那一次有值）
@@ -827,14 +878,123 @@ pub fn editor_viewport_state(state: State<'_, EditorState>) -> Result<ViewportSt
 }
 
 /// 换照片（`None` = 清空）。前端在锚点变化时调。
+///
+/// 同时算一份**过渡帧计划**（handoff §3「进来先读 preview」+ §2.5「切图优先」）：
+/// 进编辑 / 在胶片带上换照片时，先拿一张**已经存在的图**顶上（毫秒级），
+/// 真帧（RAW 全解码 + 管线）随后替换。
+///
+/// 为什么计划在命令层算：候选里要查库（这张属于哪个资产、位图在哪一侧）——
+/// 显影线程是个普通线程，够不着数据库（`AGENTS.md` §4：业务不依赖 Tauri）。
 #[tauri::command]
-pub fn editor_set_photo(
+pub async fn editor_set_photo<R: Runtime>(
+    app: AppHandle<R>,
     state: State<'_, EditorState>,
     path: Option<String>,
 ) -> Result<RenderState, String> {
+    let plan = match path.as_deref() {
+        Some(path) => {
+            let handle = app.clone();
+            let path = path.to_string();
+            crate::source::blocking(move || Ok(transition_plan(&handle, &path))).await?
+        }
+        None => None,
+    };
     let sender = session_sender(&state).ok_or_else(|| "渲染线程还没起来".to_string())?;
-    let _ = sender.send(RenderCommand::SetPhoto { path });
+    let _ = sender.send(RenderCommand::SetPhoto {
+        path,
+        transition: plan,
+    });
     current_render_state(&state)
+}
+
+/// **候选顺序**（纯逻辑，可单测）：`latest`（同基准）→ `SOOC` 位图 → 要编的文件本身。
+///
+/// 入参是已经查好的事实（缓存路径、位图路径），调用方负责查库；
+/// 这里只回答「先试哪个、后试哪个」。**缺文件的一律不进列表** ——
+/// 显影线程里试一个不存在的文件只是白跑一趟。
+fn transition_sources(
+    path: &Path,
+    base: raybend::store::develop::EditBase,
+    latest_cache: Option<std::path::PathBuf>,
+    sooc: Option<std::path::PathBuf>,
+) -> Vec<TransitionSource> {
+    let mut sources = Vec::new();
+
+    // ① latest：编辑结果（与当前基准同一侧）—— 最接近用户最终会看到的那张
+    if let Some(cached) = latest_cache.filter(|cached| cached.is_file()) {
+        sources.push(TransitionSource {
+            path: cached,
+            kind: TransitionKind::AvifCache,
+            origin: "preview-latest",
+        });
+    }
+
+    // ② SOOC：相机直出的位图。
+    //    只在「要编的是 RAW」时单独推 —— 要编的就是位图时，它就是下面第三步那张，别重复。
+    if base == raybend::store::develop::EditBase::Raw
+        && let Some(sooc) = sooc.filter(|sooc| sooc.is_file())
+    {
+        sources.push(TransitionSource {
+            path: sooc,
+            kind: TransitionKind::PhotoFile,
+            origin: "preview-sooc",
+        });
+    }
+
+    // ③ 要编的这张文件本身：RAW 走 worker 的内嵌预览（比全解码快一两个数量级），位图直接解
+    if path.is_file() {
+        sources.push(TransitionSource {
+            path: path.to_path_buf(),
+            kind: TransitionKind::PhotoFile,
+            origin: match base {
+                raybend::store::develop::EditBase::Raw => "preview-raw",
+                raybend::store::develop::EditBase::Sooc => "preview-bitmap",
+            },
+        });
+    }
+
+    sources
+}
+
+/// **过渡帧的取图计划**（能找到哪个用哪个，顺序即优先级，见 [`transition_sources`]）：
+///
+/// 1. `latest` —— 大图缓存里**与当前编辑基准同一侧**的那一份（编辑过的照片才有；
+///    基准进文件名，所以这里拿到的不会另一侧的图，见 `IMAGING.md` §4.3）；
+/// 2. `SOOC` —— 相机直出的位图（同名 JPG）；
+/// 3. 要编的这张文件本身 —— RAW 走 worker 的内嵌预览，位图直接解。
+///
+/// 不在任何库里（源目录直接进编辑这种）或一个候选都没有 → `None`：
+/// 不发过渡帧，走老路（视口等真帧）。
+fn transition_plan<R: Runtime>(app: &AppHandle<R>, path: &str) -> Option<TransitionPlan> {
+    let path = Path::new(path);
+    let asset = crate::develop::resolve_asset(app, path)?;
+    let base = raybend::store::develop::EditBase::of_file(path);
+
+    let latest_cache = FullCache::open(&asset.root).ok().map(|cache| {
+        cache.path_for(
+            asset.asset_id,
+            "latest",
+            base,
+            raybend::thumbnail::render::PIPELINE_VERSION,
+        )
+    });
+    let sooc = crate::develop::source_path_of(app, &asset, raybend::store::develop::EditBase::Sooc);
+    let sources = transition_sources(path, base, latest_cache, sooc);
+    if sources.is_empty() {
+        return None;
+    }
+
+    // 原图尺寸（**已按方向摆正**）：过渡帧的逻辑尺寸用它，真帧回来时不会 refit。
+    // 读的是文件头（`read_photo_meta` 只读头，不整图解码），毫秒级。
+    let source_size = raybend::media::meta::read_photo_meta(path)
+        .ok()
+        .filter(raybend::media::meta::PhotoMeta::has_size)
+        .map(|meta| (meta.width, meta.height));
+
+    Some(TransitionPlan {
+        sources,
+        source_size,
+    })
 }
 
 /// 发一条视口意图（前端**不做坐标数学**，只把看到的原始值报过来）。
@@ -1258,7 +1418,7 @@ fn apply_command(
             *dirty = true;
             Ok(())
         }
-        RenderCommand::SetPhoto { path } => {
+        RenderCommand::SetPhoto { path, transition } => {
             let mut state = lock_state(shared);
             match path {
                 Some(path) => {
@@ -1277,6 +1437,7 @@ fn apply_command(
                         tier: ImageTier::Preview,
                         params: session.params.clone(),
                         curves: session.curves.clone(),
+                        transition,
                     };
                     drop(state);
                     if developer.send(job).is_err() {
@@ -1331,6 +1492,8 @@ fn apply_command(
                     tier: wanted,
                     params: session.params.clone(),
                     curves: session.curves.clone(),
+                    // 参数任务不发过渡帧（图已经在屏幕上，只是要重算）
+                    transition: None,
                 };
                 drop(state);
                 if developer.send(job).is_err() {
@@ -1343,6 +1506,36 @@ fn apply_command(
         RenderCommand::Developed(outcome) => {
             if outcome.id != *latest_job {
                 return Ok(()); // 过期结果：丢掉（换照片/换参数之后的旧任务）
+            }
+            /*
+             * **过渡帧**（进编辑先出图，handoff §3）：把图先画上去，但**状态留在「载入中」**——
+             * 真帧还在路上，不许把它当「算完了」：
+             *
+             * * 不清 `wanted_tier`（真帧还要按它出）；
+             * * 不置 `decode = ready`（否则载入提示提前撤掉、界面骗人）；
+             * * 不动 `applied_params_rev`（这张不是按当前参数算出来的）；
+             * * 不调 `ensure_output`（它不是一帧「已就绪」的结果，别拿它去触发档位切换）。
+             *
+             * 逻辑尺寸照旧用**原图尺寸**（`source_width/height`）——
+             * 与真帧同一个值，真帧回来时 `set_image` 直接早退，**连 refit 都不会发生**。
+             */
+            if outcome.transition {
+                let mut state = lock_state(shared);
+                if let Ok(image) = outcome.result {
+                    let source_size = (image.source_width, image.source_height);
+                    if let Some(render_image) =
+                        RenderImage::from_rgb8(image.width, image.height, &image.rgb)
+                    {
+                        context.set_image(render_image, source_size);
+                        state.image = Some(SizeDto {
+                            width: source_size.0 as f64,
+                            height: source_size.1 as f64,
+                        });
+                        state.origin = Some(outcome.origin);
+                    }
+                }
+                *dirty = true;
+                return Ok(());
             }
             let mut state = lock_state(shared);
             state.wanted_tier = None;
@@ -1482,6 +1675,8 @@ fn ensure_output(
         tier: wanted,
         params: session.params.clone(),
         curves: session.curves.clone(),
+        // 换档位不发过渡帧：源已经在显影线程手里（这一步只是换输出尺寸）
+        transition: None,
     };
     drop(state);
     let _ = developer.send(job);
@@ -1549,6 +1744,9 @@ impl RenderState {
 fn merge_jobs(older: DevelopJob, newer: DevelopJob) -> DevelopJob {
     DevelopJob {
         photo: newer.photo.or(older.photo),
+        // 过渡帧计划跟着**照片**走：参数任务不带它（`None`），合并时不许把它丢了 ——
+        // 丢了就变成「换照片的那条任务没过渡帧」，而那正是需要它的那一条。
+        transition: newer.transition.or(older.transition),
         ..newer
     }
 }
@@ -1580,7 +1778,7 @@ fn develop_loop(receiver: Receiver<DevelopJob>, commands: Sender<RenderCommand>,
         }
 
         let outcome = match std::panic::catch_unwind(AssertUnwindSafe(|| {
-            run_develop_job(&mut cached, &wanted_photo, &job, max_texture)
+            run_develop_job(&mut cached, &wanted_photo, &job, max_texture, &commands)
         })) {
             Ok(outcome) => outcome,
             Err(payload) => {
@@ -1595,6 +1793,7 @@ fn develop_loop(receiver: Receiver<DevelopJob>, commands: Sender<RenderCommand>,
                         .unwrap_or_default(),
                     tier: job.tier,
                     origin: "panic".to_string(),
+                    transition: false,
                     as_shot_temperature: None,
                     decode_ms: None,
                     develop_ms: 0.0,
@@ -1614,11 +1813,15 @@ fn develop_loop(receiver: Receiver<DevelopJob>, commands: Sender<RenderCommand>,
 }
 
 /// 一条显影任务（[`develop_loop`] 的实体）；`None` = 没有照片可算，跳过这条。
+///
+/// `commands`：**过渡帧直接从这儿发**（不等这条任务算完）——
+/// 「先出图、再解码」的关键就在这一行的位置上：它必须在 `decode_linear_source` **之前**。
 fn run_develop_job(
     cached: &mut Option<CachedSource>,
     wanted_photo: &Option<String>,
     job: &DevelopJob,
     max_texture: u32,
+    commands: &Sender<RenderCommand>,
 ) -> Option<DevelopOutcome> {
     // ① 需要的话先解码线性源（换照片 / 上一张解失败过）
     let mut decode_ms = None;
@@ -1626,6 +1829,15 @@ fn run_develop_job(
     if let Some(path) = wanted_photo.clone()
         && cached.as_ref().is_none_or(|entry| entry.path != path)
     {
+        // ①′ **过渡帧**：真解码之前先发一张已经存在的图（handoff §3）——
+        //     毫秒级 vs RAW 全解码的秒级，用户看到的是「先进先出图」。
+        //     解不出来就什么都不发（不是错：真帧照样会来）。
+        if let Some(plan) = job.transition.as_ref()
+            && let Some(frame) = transition_outcome(plan, job, &path)
+            && commands.send(RenderCommand::Developed(frame)).is_err()
+        {
+            return None; // 渲染线程走了
+        }
         let started = std::time::Instant::now();
         match decode_linear_source(Path::new(&path), max_texture) {
             Ok(source) => {
@@ -1649,6 +1861,7 @@ fn run_develop_job(
                     path,
                     tier: job.tier,
                     origin,
+                    transition: false,
                     as_shot_temperature: None,
                     decode_ms: Some(started.elapsed().as_secs_f64() * 1000.0),
                     develop_ms: 0.0,
@@ -1720,6 +1933,7 @@ fn run_develop_job(
         path: entry.path.clone(),
         tier: job.tier,
         origin,
+        transition: false,
         as_shot_temperature,
         decode_ms,
         develop_ms,
@@ -1732,6 +1946,59 @@ fn run_develop_job(
             source_height: entry.full.height,
         }),
     })
+}
+
+/// **过渡帧**：按计划里的顺序找第一个能解出来的来源，做成一条显影结果（handoff §3）。
+///
+/// 与真帧走的是**同一条通道**（`RenderCommand::Developed` + **同一个任务号**）——
+/// 任务号必须一致，否则渲染线程会把它当过期结果丢掉（`outcome.id != *latest_job`），
+/// 过渡帧就永远不显示。
+///
+/// 一条都解不出来就返回 `None`（不是错：真帧照样会来）。
+fn transition_outcome(
+    plan: &TransitionPlan,
+    job: &DevelopJob,
+    path: &str,
+) -> Option<DevelopOutcome> {
+    for source in &plan.sources {
+        let pixels = match source.kind {
+            TransitionKind::AvifCache => {
+                let Ok(bytes) = std::fs::read(&source.path) else {
+                    continue; // 缓存被删了 / 读不动：试下一个
+                };
+                display::pixels_from_avif(&bytes)
+            }
+            TransitionKind::PhotoFile => display::pixels(&source.path, PixelSize::Screen)
+                .ok()
+                .flatten(),
+        };
+        let Some(pixels) = pixels else {
+            continue;
+        };
+        let (source_width, source_height) = plan
+            .source_size
+            .unwrap_or((pixels.width, pixels.height));
+        return Some(DevelopOutcome {
+            id: job.id,
+            rev: job.rev,
+            path: path.to_string(),
+            tier: job.tier,
+            origin: source.origin.to_string(),
+            transition: true,
+            // 过渡帧不是「按参数算出来的」：色温基线还得等真帧（RAW 的 as-shot 在解码里）
+            as_shot_temperature: None,
+            decode_ms: None,
+            develop_ms: 0.0,
+            result: Ok(DevelopedImage {
+                width: pixels.width,
+                height: pixels.height,
+                rgb: pixels.rgb,
+                source_width,
+                source_height,
+            }),
+        });
+    }
+    None
 }
 
 /// 解码一张照片的**线性源**（显影管线的唯一输入）。
@@ -1798,7 +2065,218 @@ mod tests {
             tier: ImageTier::Preview,
             params: DevelopParams::default(),
             curves: CurveSet::default(),
+            transition: None,
         }
+    }
+
+    /// 一份只有一个候选的过渡帧计划（写测试用）。
+    fn plan(path: &str, kind: TransitionKind, origin: &'static str) -> TransitionPlan {
+        TransitionPlan {
+            sources: vec![TransitionSource {
+                path: std::path::PathBuf::from(path),
+                kind,
+                origin,
+            }],
+            source_size: Some((4000, 3000)),
+        }
+    }
+
+    #[test]
+    fn merging_keeps_the_transition_plan_with_the_photo() {
+        // 换照片那条带计划、紧接着的参数任务不带 —— 合并时不许把计划弄丢
+        // （丢了就变成「正是需要它的那一条没有过渡帧」）。
+        let mut with_plan = job(1, 1, Some("a.rw2"));
+        with_plan.transition = Some(plan("a.avif", TransitionKind::AvifCache, "preview-latest"));
+        let merged = merge_jobs(with_plan, job(2, 2, None));
+        assert!(
+            merged.transition.is_some(),
+            "参数任务不能把过渡帧计划顶掉"
+        );
+        assert_eq!(merged.photo.as_deref(), Some("a.rw2"));
+
+        // 换到另一张时，计划取新的那一份
+        let mut other = job(3, 3, Some("b.rw2"));
+        other.transition = Some(plan("b.avif", TransitionKind::AvifCache, "preview-sooc"));
+        let merged = merge_jobs(job(1, 1, Some("a.rw2")), other);
+        assert_eq!(
+            merged.transition.expect("有计划").sources[0].origin,
+            "preview-sooc"
+        );
+    }
+
+    /// **过渡帧三条硬口径**（handoff §3.3）：任务号一致、`origin` 报得出来、
+    /// 逻辑尺寸用**原图尺寸**（不是这张过渡图自己的 1920）。
+    #[test]
+    fn transition_frame_carries_job_id_origin_and_original_size() {
+        let dir = tempfile::tempdir().expect("临时目录");
+        let path = dir.path().join("photo.png");
+        let mut img = image::RgbImage::new(64, 48);
+        for (x, y, pixel) in img.enumerate_pixels_mut() {
+            *pixel = image::Rgb([(x % 256) as u8, (y % 256) as u8, 7]);
+        }
+        img.save(&path).expect("写 PNG");
+
+        let job = job(42, 7, Some(&path.to_string_lossy()));
+        let plan = plan(
+            &path.to_string_lossy(),
+            TransitionKind::PhotoFile,
+            "preview-photo",
+        );
+        let outcome = transition_outcome(&plan, &job, &path.to_string_lossy()).expect("有过渡帧");
+
+        assert_eq!(outcome.id, 42, "任务号必须与当前任务一致，否则会被当过期结果丢掉");
+        assert_eq!(outcome.rev, 7);
+        assert!(outcome.transition, "要标成过渡帧（渲染线程据此不置 ready）");
+        assert_eq!(outcome.origin, "preview-photo");
+        let image = outcome.result.expect("解得出这张 PNG");
+        assert_eq!((image.width, image.height), (64, 48), "纹理是这张图自己的尺寸");
+        assert_eq!(
+            (image.source_width, image.source_height),
+            (4000, 3000),
+            "逻辑尺寸用原图尺寸 —— 报 64×48 的话真帧回来会 refit 跳一下"
+        );
+    }
+
+    /// **候选顺序**（§2.5 切图优先的规格）：`latest` → `SOOC` → 要编的文件本身。
+    #[test]
+    fn transition_sources_follow_the_latest_sooc_raw_order() {
+        let dir = tempfile::tempdir().expect("临时目录");
+        let raw = dir.path().join("photo.rw2");
+        let jpg = dir.path().join("photo.jpg");
+        let cached = dir.path().join("latest-raw-v6.avif");
+        for file in [&raw, &jpg, &cached] {
+            std::fs::write(file, b"x").expect("建文件");
+        }
+
+        let sources = transition_sources(
+            &raw,
+            raybend::store::develop::EditBase::Raw,
+            Some(cached.clone()),
+            Some(jpg.clone()),
+        );
+        let origins: Vec<&str> = sources.iter().map(|source| source.origin).collect();
+        assert_eq!(
+            origins,
+            vec!["preview-latest", "preview-sooc", "preview-raw"],
+            "顺序就是规格：latest → SOOC → RAW"
+        );
+        assert_eq!(sources[0].kind, TransitionKind::AvifCache);
+        assert_eq!(sources[1].kind, TransitionKind::PhotoFile);
+    }
+
+    /// 没编辑过（没有 latest 缓存）、没有同名 JPG：只剩「要编的这张」—— 依然要出过渡帧。
+    #[test]
+    fn transition_sources_degrade_to_the_photo_itself() {
+        let dir = tempfile::tempdir().expect("临时目录");
+        let raw = dir.path().join("only.rw2");
+        std::fs::write(&raw, b"x").expect("建文件");
+        let missing_cache = dir.path().join("nope.avif");
+
+        let sources = transition_sources(
+            &raw,
+            raybend::store::develop::EditBase::Raw,
+            Some(missing_cache),
+            None,
+        );
+        assert_eq!(sources.len(), 1, "不存在的缓存不许进候选：{sources:?}");
+        assert_eq!(sources[0].origin, "preview-raw");
+
+        // 文件不存在（路径是编出来的）→ 一个候选都没有
+        assert!(transition_sources(&dir.path().join("gone.rw2"), raybend::store::develop::EditBase::Raw, None, None).is_empty());
+    }
+
+    /// 要编的就是位图（SOOC 基准）：不重复推同一张（否则会白解两遍）。
+    #[test]
+    fn transition_sources_do_not_duplicate_the_sooc_side() {
+        let dir = tempfile::tempdir().expect("临时目录");
+        let jpg = dir.path().join("photo.jpg");
+        std::fs::write(&jpg, b"x").expect("建文件");
+
+        let sources = transition_sources(
+            &jpg,
+            raybend::store::develop::EditBase::Sooc,
+            None,
+            Some(jpg.clone()),
+        );
+        assert_eq!(sources.len(), 1, "位图基准下 SOOC 与「要编的这张」是同一个：{sources:?}");
+        assert_eq!(sources[0].origin, "preview-bitmap");
+    }
+
+    /// 没有原图尺寸时退回用过渡帧自己的尺寸（宽高比一致时 Fit 档下看不出区别）。
+    #[test]
+    fn transition_frame_falls_back_to_its_own_size() {
+        let dir = tempfile::tempdir().expect("临时目录");
+        let path = dir.path().join("photo.png");
+        image::RgbImage::new(32, 16).save(&path).expect("写 PNG");
+        let mut plan = plan(
+            &path.to_string_lossy(),
+            TransitionKind::PhotoFile,
+            "preview-photo",
+        );
+        plan.source_size = None;
+        let job = job(1, 1, Some(&path.to_string_lossy()));
+        let image = transition_outcome(&plan, &job, &path.to_string_lossy())
+            .expect("有过渡帧")
+            .result
+            .expect("解得出");
+        assert_eq!((image.source_width, image.source_height), (32, 16));
+    }
+
+    /// 候选一个都用不了（缓存文件不在、图解不开）→ `None`，**不是错**：真帧照样会来。
+    #[test]
+    fn transition_frame_skips_unusable_sources() {
+        let dir = tempfile::tempdir().expect("临时目录");
+        let junk = dir.path().join("junk.avif");
+        std::fs::write(&junk, b"not an avif").expect("写垃圾");
+        let missing = dir.path().join("missing.avif");
+        let plan = TransitionPlan {
+            sources: vec![
+                TransitionSource {
+                    path: missing,
+                    kind: TransitionKind::AvifCache,
+                    origin: "preview-latest",
+                },
+                TransitionSource {
+                    path: junk,
+                    kind: TransitionKind::AvifCache,
+                    origin: "preview-sooc",
+                },
+            ],
+            source_size: None,
+        };
+        let job = job(1, 1, Some("x.rw2"));
+        assert!(transition_outcome(&plan, &job, "x.rw2").is_none());
+    }
+
+    /// 我们自己的 AVIF 缓存字节能变成过渡帧像素（缓存 → 纹理那条路）。
+    #[test]
+    fn transition_frame_decodes_our_avif_cache() {
+        let dir = tempfile::tempdir().expect("临时目录");
+        let cached = dir.path().join("latest-raw-v6.avif");
+        let mut rgb = Vec::new();
+        for y in 0..24u32 {
+            for x in 0..32u32 {
+                rgb.extend_from_slice(&[(x * 8) as u8, (y * 8) as u8, 100]);
+            }
+        }
+        let bytes = raybend::thumbnail::render::encode_avif(&rgb, 32, 24).expect("编码");
+        std::fs::write(&cached, &bytes).expect("写缓存");
+
+        let plan = TransitionPlan {
+            sources: vec![TransitionSource {
+                path: cached,
+                kind: TransitionKind::AvifCache,
+                origin: "preview-latest",
+            }],
+            source_size: Some((6000, 4500)),
+        };
+        let job = job(9, 3, Some("x.rw2"));
+        let outcome = transition_outcome(&plan, &job, "x.rw2").expect("缓存能解");
+        assert_eq!(outcome.origin, "preview-latest");
+        let image = outcome.result.expect("有像素");
+        assert_eq!((image.width, image.height), (32, 24));
+        assert_eq!((image.source_width, image.source_height), (6000, 4500));
+        assert_eq!(image.rgb.len(), 32 * 24 * 3);
     }
 
     #[test]

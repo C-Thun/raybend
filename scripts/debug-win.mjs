@@ -35,6 +35,8 @@ import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
+import { windowsBuildEnv } from "./lib/dav1d-win.mjs";
+
 /** 仓库根（脚本自身位置向上一级） */
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -322,7 +324,7 @@ run("② Windows 侧 cargo 构建（debug + custom-protocol）", "cmd.exe", [
    */
   `pushd ${windowsRepoPath()} & cargo build -p raybend-desktop -p raybend --features custom-protocol`,
 ], {
-  env: { ...process.env, CARGO_TARGET_DIR, WSLENV: "CARGO_TARGET_DIR" },
+  env: windowsBuildEnv({ CARGO_TARGET_DIR }),
 });
 
 run("③ 产物核对（时间戳 + 资源名）", "node", ["scripts/check-win-artifact.mjs"]);
