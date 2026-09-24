@@ -1,8 +1,11 @@
-//! **边缘保持滤波**：局部色调映射（`super::local_tone`）的底层算子。
+//! **边缘保持滤波与标量整形**：局部色调映射（`super::local_tone`）与锐化（`super::sharpen`）
+//! 共用的底层算子。
 //!
-//! 这里只有两件东西：**可分离箱式滤波**（O(N)，滑动窗，不随半径变慢）
-//! 与**快速引导滤波**（He & Sun 2015：在 1/scale 分辨率上估 `a`/`b`，
-//! 回到全分辨率用局部线性模型 `a·I + b` 应用）。
+//! 这里只有三件东西：**可分离箱式滤波**（O(N)，滑动窗，不随半径变慢）、
+//! **快速引导滤波**（He & Sun 2015：在 1/scale 分辨率上估 `a`/`b`，
+//! 回到全分辨率用局部线性模型 `a·I + b` 应用），以及 **软限幅**
+//! （[`soft_saturate`] / [`added_detail`] —— detail 增益的公共算子；
+//! 两处各写一份的话，「限幅曲线改了只改一处」这条就破了）。
 //!
 //! # 为什么是引导滤波，不是双边滤波
 //!
@@ -201,6 +204,44 @@ fn blur_columns(src: &[f32], dst: &mut [f32], width: usize, height: usize, radiu
             out[x] = sum[x] / count;
         }
     }
+}
+
+/// **软饱和**：`|x| ≤ limit` 时**原样返回**，超过后平滑收住、渐近到 `±2·limit`。
+///
+/// ❗ 这里必须是「以下恒等、以上才收」，不能用 `x/(1+|x|/limit)` 那种形式 ——
+/// 后者在 limit 以下**也在按比例衰减**（|x| = limit/2 时已经吃掉 33%）。
+/// 曾经把它当成安全网去封 base 压缩量，结果 1.54 stops 的压缩被削成 0.95，
+/// 光比压缩从承诺的 55% 掉到 75% —— 而单看代码完全看不出来。
+/// 连续性：在 `|x| = limit` 处两侧导数都是 1，不会在图上留下折点。
+#[inline]
+#[must_use]
+pub fn soft_saturate(value: f32, limit: f32) -> f32 {
+    let magnitude = value.abs();
+    if magnitude <= limit {
+        return value;
+    }
+    let excess = magnitude - limit;
+    let capped = limit + excess / (1.0 + excess / limit);
+    if value < 0.0 {
+        -capped
+    } else {
+        capped
+    }
+}
+
+/// **detail 增益的增量**（带软限幅）：`g·d / (1 + |g·d|/limit)`。
+///
+/// `g = 0` ⇒ 恰好 0（强度 0 时逐位恒等的来源）；`|g·d|` 大 ⇒ 饱和到 `±limit`。
+///
+/// 局部色调映射（`local_tone`）与锐化（`sharpen`）用的是**同一份** ——
+/// 两边都是「把 detail 乘一个增益、但别让它变成光晕」。
+#[inline]
+#[must_use]
+pub fn added_detail(detail: f32, gain: f32, limit: f32) -> f32 {
+    if gain <= 0.0 || gain.is_nan() {
+        return 0.0;
+    }
+    soft_saturate(gain * detail, limit)
 }
 
 /// **区域平均降采样**（比例不整除时按实际像素数平均，不丢边角）。

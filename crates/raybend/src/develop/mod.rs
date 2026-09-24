@@ -5,10 +5,12 @@
 //! ├── params.rs    参数表（与 src/api/develop-params.json 逐条对齐）+ DevelopParams
 //! ├── color.rs     sRGB 传递函数、色温 ↔ 色度、白平衡增益（唯一一份色彩数学）
 //! ├── curve.rs     单调三次曲线（RGB / R / G / B）
+//! ├── denoise.rs   降噪（亮度 / 色度；快速档 = log 域多尺度保边收缩）
 //! ├── filters.rs   箱式滤波 / 快速引导滤波（边缘保持，局部色调映射的底层算子）
 //! ├── local_tone.rs 动态反差（局部色调映射：压整体光比 + 抬局部反差）
 //! ├── lens.rs      镜头校正（畸变 / 横向色差 / 暗角：模型 + 数学 + 像素趟）
-//! └── pipeline.rs  线性像素 → 参数 → 8bit 显示（参考实现 + LUT 快路径）
+//! ├── pipeline.rs  线性像素 → 参数 → 8bit 显示（参考实现 + LUT 快路径）
+//! └── sharpen.rs   锐化（显示域亮度 unsharp + 软限幅）
 //! ```
 //!
 //! # 与邻居的分工
@@ -31,11 +33,13 @@
 
 pub mod color;
 pub mod curve;
+pub mod denoise;
 pub mod filters;
 pub mod lens;
 pub mod local_tone;
 pub mod params;
 pub mod pipeline;
+pub mod sharpen;
 
 pub use color::{linear_to_srgb, srgb_to_linear, temperature_gain_ratio};
 pub use curve::{Curve, CurveChannel, CurveSet};

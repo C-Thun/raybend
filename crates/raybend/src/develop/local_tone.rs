@@ -54,7 +54,7 @@
 //! * **强度 0 必须逐位恒等**：`apply_inplace` 在 `strength <= 0` 时直接返回，
 //!   且所有增量在 `g = 0` 时严格为 0 —— 单测钉住了这条。
 
-use super::filters::{GuidedModel, Plane, RowUpsampler};
+use super::filters::{GuidedModel, Plane, RowUpsampler, added_detail, soft_saturate};
 use super::pipeline::{LinearImage, luma_of};
 
 /// 最小的可表示线性亮度（= u16 编码里的 1）—— `log2` 的地板。
@@ -408,39 +408,6 @@ fn compress_base(base: f32, resolved: &Resolved) -> f32 {
     let delta = base - resolved.mid;
     let raw = resolved.mid + delta / (1.0 + resolved.alpha * delta.abs());
     base + soft_saturate(raw - base, resolved.base_limit)
-}
-
-/// **detail 增益的增量**（带软限幅）：`g·d / (1 + |g·d|/limit)`。
-///
-/// `g = 0` ⇒ 恰好 0（强度 0 时逐位恒等的来源）；`|g·d|` 大 ⇒ 饱和到 `±limit`。
-#[inline]
-fn added_detail(detail: f32, gain: f32, limit: f32) -> f32 {
-    if gain <= 0.0 || gain.is_nan() {
-        return 0.0;
-    }
-    soft_saturate(gain * detail, limit)
-}
-
-/// **软饱和**：`|x| ≤ limit` 时**原样返回**，超过后平滑收住、渐近到 `±2·limit`。
-///
-/// ❗ 这里必须是「以下恒等、以上才收」，不能用 `x/(1+|x|/limit)` 那种形式 ——
-/// 后者在 limit 以下**也在按比例衰减**（|x| = limit/2 时已经吃掉 33%）。
-/// 曾经把它当成安全网去封 base 压缩量，结果 1.54 stops 的压缩被削成 0.95，
-/// 光比压缩从承诺的 55% 掉到 75% —— 而单看代码完全看不出来。
-/// 连续性：在 `|x| = limit` 处两侧导数都是 1，不会在图上留下折点。
-#[inline]
-fn soft_saturate(value: f32, limit: f32) -> f32 {
-    let magnitude = value.abs();
-    if magnitude <= limit {
-        return value;
-    }
-    let excess = magnitude - limit;
-    let capped = limit + excess / (1.0 + excess / limit);
-    if value < 0.0 {
-        -capped
-    } else {
-        capped
-    }
 }
 
 /// `smoothstep`（Hermite）：`edge0` 以下 0、`edge1` 以上 1，中间平滑过渡。

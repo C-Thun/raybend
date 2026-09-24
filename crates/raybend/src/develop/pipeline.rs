@@ -717,6 +717,60 @@ pub fn render_rgb8_with_local_tone(
     out
 }
 
+/// **显影的全部可选阶段**（M3-W4）：镜头校正 / 降噪 / 动态反差 / 锐化。
+///
+/// 顺序**不能随便改**（改顺序 = 改画质，见 `plans/M3-W4.md` §1.3）：
+///
+/// ```text
+/// 线性源 → ① 镜头校正（暗角 + 畸变 + TCA，**一次重采样**）
+///         → ② 降噪（亮度 / 色度）
+///         → ③ 逐像素链（WB → 曝光 → 反差 → 高光 → 黑区 → 显示变换 → 曲线 → 色度 → 动态反差）
+///         → ④ 锐化（显示域，就地）
+///         → 8bit
+/// ```
+///
+/// 每一项都是 `Option`，且**每一项关掉时逐位恒等**（各阶段的单测钉着这一条）；
+/// 全部关掉时 [`render_develop`] 与 [`render_rgb8`] **逐位一致**。
+#[derive(Default)]
+pub struct DevelopStages<'a> {
+    /// 镜头校正（映射是恒等时整趟跳过）
+    pub lens: Option<&'a super::lens::LensMap>,
+    /// 降噪（快速档）
+    pub denoise: Option<&'a super::denoise::DenoisePlan>,
+    /// 动态反差（W3 已有的阶段）
+    pub local_tone: Option<(&'a LocalToneState, f32)>,
+    /// 锐化（显示域，**就地**改 8bit 输出）
+    pub sharpen: Option<&'a super::sharpen::SharpenPlan>,
+}
+
+/// **生产入口**：线性源 → 8bit sRGB（含全部可选阶段）。
+///
+/// 逐像素数学仍然只有 [`render_rgb8_with_local_tone`] 那一份 —— 这里只负责把
+/// **空间阶段**（镜头 / 降噪 / 锐化）按固定顺序串起来，**不重复实现链上的任何数学**。
+#[must_use]
+pub fn render_develop(
+    source: &LinearImage,
+    params: &DevelopParams,
+    curves: &CurveSet,
+    stages: &DevelopStages<'_>,
+) -> Vec<u8> {
+    let warped = stages
+        .lens
+        .filter(|map| !map.is_identity())
+        .map(|map| super::lens::warp_lens(source, map));
+    let source = warped.as_ref().unwrap_or(source);
+    let denoised = stages
+        .denoise
+        .filter(|plan| !plan.is_identity())
+        .map(|plan| super::denoise::denoise_fast(source, plan));
+    let source = denoised.as_ref().unwrap_or(source);
+    let mut out = render_rgb8_with_local_tone(source, params, curves, stages.local_tone);
+    if let Some(plan) = stages.sharpen.filter(|plan| !plan.is_identity()) {
+        super::sharpen::sharpen_display(&mut out, source.width, source.height, plan);
+    }
+    out
+}
+
 /// 融合路径的一趟像素循环（与 `map_rows` 并列，**不是**它的替代）。
 struct LocalPass<'a> {
     state: &'a LocalToneState,
@@ -797,6 +851,123 @@ mod tests {
             rgb.extend(pixel.iter().map(|v| linear(*v)));
         }
         LinearImage::new(pixels.len() as u32, 1, rgb).expect("形状对得上")
+    }
+
+    #[test]
+    fn render_develop_without_stages_matches_the_plain_path() {
+        // 全部阶段关掉（或给了恒等映射）⇒ 与 W3 那条路**逐位一致**
+        let mut rgb = Vec::new();
+        for y in 0..24u32 {
+            for x in 0..32u32 {
+                let value = (x as f32 / 32.0).min(1.0);
+                let other = (y as f32 / 24.0).min(1.0);
+                rgb.extend([linear(value), linear(other), linear(0.5)]);
+            }
+        }
+        let source = LinearImage::new(32, 24, rgb).expect("形状对得上");
+        let params = params(&[("exposure", 0.4), ("contrast", 25.0)]);
+        let curves = CurveSet::identity();
+        let plain = render_rgb8(&source, &params, &curves);
+
+        let stages = DevelopStages::default();
+        assert_eq!(render_develop(&source, &params, &curves, &stages), plain);
+
+        // 恒等映射 / 强度 0 的计划同样不许改动任何像素
+        let identity_map = super::super::lens::LensMap::new(&super::super::lens::LensCorrection {
+            norm: super::super::lens::Norm::new(32, 24, 1.0, 35.0),
+            distortion: None,
+            tca: None,
+            vignetting: None,
+            manual: super::super::lens::ManualLens::default(),
+        });
+        let zero_denoise = super::super::denoise::DenoisePlan::default();
+        let zero_sharpen = super::super::sharpen::SharpenPlan::default();
+        let stages = DevelopStages {
+            lens: Some(&identity_map),
+            denoise: Some(&zero_denoise),
+            local_tone: None,
+            sharpen: Some(&zero_sharpen),
+        };
+        assert_eq!(render_develop(&source, &params, &curves, &stages), plain);
+    }
+
+    #[test]
+    fn render_develop_stages_change_the_picture_in_the_expected_direction() {
+        // 一块平坦灰：三件阶段各自都要真的动到画面（否则「接线了但没生效」看不出来）
+        let source = LinearImage::new(
+            48,
+            32,
+            (0..48 * 32 * 3).map(|_| linear(0.35)).collect(),
+        )
+        .expect("形状对得上");
+        let params = DevelopParams::new(None);
+        let curves = CurveSet::identity();
+        let plain = render_develop(&source, &params, &curves, &DevelopStages::default());
+
+        // 暗角补偿（系数为负 ⇒ 角上变暗）
+        let map = super::super::lens::LensMap::new(&super::super::lens::LensCorrection {
+            norm: super::super::lens::Norm::new(48, 32, 1.0, 35.0),
+            distortion: None,
+            tca: None,
+            vignetting: Some(super::super::lens::Vignetting {
+                k1: -0.5,
+                k2: 0.0,
+                k3: 0.0,
+            }),
+            manual: super::super::lens::ManualLens::default(),
+        });
+        let stages = DevelopStages {
+            lens: Some(&map),
+            ..DevelopStages::default()
+        };
+        let with_lens = render_develop(&source, &params, &curves, &stages);
+        assert_ne!(with_lens, plain, "镜头校正必须真的改到像素");
+        assert!(with_lens[0] < plain[0], "角上应当变暗");
+
+        // 锐化：平坦图上没有细节可加，所以换一张有边缘的图来验
+        let mut rgb = Vec::new();
+        for _y in 0..16u32 {
+            for x in 0..48u32 {
+                let value = if x < 24 { 0.2 } else { 0.8 };
+                rgb.extend([linear(value), linear(value), linear(value)]);
+            }
+        }
+        let edge = LinearImage::new(48, 16, rgb).expect("形状对得上");
+        let plan = super::super::sharpen::SharpenPlan {
+            amount: 1.0,
+            radius: 2.0,
+        };
+        let stages = DevelopStages {
+            sharpen: Some(&plan),
+            ..DevelopStages::default()
+        };
+        assert_ne!(
+            render_develop(&edge, &params, &curves, &stages),
+            render_develop(&edge, &params, &curves, &DevelopStages::default()),
+            "锐化必须真的改到像素"
+        );
+
+        // 降噪：给带噪图，必须改到像素
+        let mut rgb = Vec::new();
+        let mut seed = 9u32;
+        for _ in 0..16 * 16 * 3 {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            rgb.push(u16::try_from(20000 + i32::try_from(seed >> 24).unwrap_or(0)).unwrap_or(0));
+        }
+        let noisy = LinearImage::new(16, 16, rgb).expect("形状对得上");
+        let nr = super::super::denoise::DenoisePlan {
+            luma: 1.0,
+            chroma: 1.0,
+        };
+        let stages = DevelopStages {
+            denoise: Some(&nr),
+            ..DevelopStages::default()
+        };
+        assert_ne!(
+            render_develop(&noisy, &params, &curves, &stages),
+            render_develop(&noisy, &params, &curves, &DevelopStages::default()),
+            "降噪必须真的改到像素"
+        );
     }
 
     #[test]
