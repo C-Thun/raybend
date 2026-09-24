@@ -80,9 +80,11 @@ export function PreviewFrame(props: PreviewFrameProps): JSX.Element {
           <Show
             when={natural()}
             fallback={
-              /* 尺寸还不知道：先按 object-contain 画着，`onLoad` 量到之后换成精确盒子 */
+              /* 尺寸还不知道：先按 object-contain 画着，`onLoad` 量到之后换成精确盒子。
+                 尺寸要用 `h-full w-full`（不是 `max-*`）—— `IMAGING.md` §3.1-4：
+                 比显示区小的图**要放大**，`max-*` 那套会把小图按原始像素摆着。 */
               <img
-                class="block max-h-full max-w-full object-contain"
+                class="block h-full w-full object-contain"
                 src={url()}
                 alt=""
                 draggable={false}

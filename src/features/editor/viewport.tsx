@@ -27,6 +27,7 @@ import {
   IconAlertTriangle,
   IconAlbumOff,
   IconFolder,
+  IconLoader2,
   IconPhoto,
   IconPhotoOff,
 } from "@tabler/icons-solidjs";
@@ -47,7 +48,6 @@ import {
   editorViewportNotice,
   type EditorEmptyKind,
 } from "./source.ts";
-import { PendingNote } from "./parts.tsx";
 
 export interface EditorViewportProps {
   /** 空态（四态之一）；`null` = 有照片 */
@@ -367,16 +367,30 @@ function ViewportMessage(props: { props: EditorViewportProps }): JSX.Element {
           </Show>
 
           <Show when={detail() === null}>
-            <PendingNote
-              text={t(
-                which() === "browser"
-                  ? "editor.viewport.browser"
-                  : which() === "loading"
-                    ? "editor.viewport.loading"
-                    : "editor.viewport.init",
-              )}
-              class="justify-center"
-            />
+            {/*
+              载入提示（`IMAGING.md` §5，人类 2026-09-24）：**半透毛玻璃**，
+              与全屏模式那条观感一致（`FullscreenViewer` 的载入遮罩）。
+
+              两条纪律：
+              * **只遮 view** —— 这个容器就是洞口，胶片带 / 面板 / 状态栏照常可点；
+              * `pointer-events-none` —— 连 view 里的拖动与缩放也不挡
+                （「不要阻挡其他操作」，与全屏那条「铺满整屏且拦输入」相反）。
+            */}
+            <div
+              class="pointer-events-none flex items-center gap-2 rounded-ui bg-surface-layer/70 px-3 py-1.5 backdrop-blur-md"
+              data-viewport-loading="on"
+            >
+              <IconLoader2 size={14} class="animate-spin text-fg-2" aria-hidden="true" />
+              <span class="text-fs-1 text-fg-1">
+                {t(
+                  which() === "browser"
+                    ? "editor.viewport.browser"
+                    : which() === "loading"
+                      ? "editor.viewport.loading"
+                      : "editor.viewport.init",
+                )}
+              </span>
+            </div>
           </Show>
 
           <Show when={which() === "render-error" && props.props.onRetry !== undefined}>
