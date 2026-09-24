@@ -203,8 +203,8 @@ pub async fn view_image<R: Runtime>(
 /// 看图态右栏的**直方图**（24 柱 RGB 合成；`plans/M2-W2.md` 1.6）。
 ///
 /// 统计在 Rust 侧做（`AGENTS.md` §6.1 的红线：前端不碰像素）——
-/// 前端只拿到 24 个整数去画柱子。取的是 `grid` 档（长边 384）的字节，
-/// 快且足够稳（直方图看形状，不看精确计数）。
+/// 前端只拿到 86 个浮点采样去画曲线。取的是**像素口**的 `Screen` 档（长边 1920）RGB 像素，
+/// **不经过编码**（直方图只要像素；2026-09-24 起不再绕道字节）。
 #[tauri::command]
 pub async fn image_histogram(path: String, bins: Option<usize>) -> Result<HistogramDto, String> {
     // 采样口径固定为 86（0 单独，其余每 3 级平均）；保留参数只为旧前端兼容。

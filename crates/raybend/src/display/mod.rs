@@ -51,7 +51,9 @@ pub mod pixels;
 use std::path::Path;
 
 pub use full_cache::FullCache;
-pub use histogram::{histogram_of_file, histogram_of_image, Histogram, DEFAULT_BINS};
+pub use histogram::{
+    histogram_of_file, histogram_of_image, histogram_of_rgb8, Histogram, DEFAULT_BINS,
+};
 pub use pixels::{pixels, DisplayPixels, PixelSize};
 
 use crate::error::Result;
