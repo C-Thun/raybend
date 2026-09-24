@@ -296,12 +296,18 @@ export default function App() {
     switch (shell.workflow()) {
       case "import":
         return importExif();
-      case "browse": {
+      /*
+       * 浏览与编辑**同一份取法**：编辑里「当前在编哪张」就是浏览侧的锚点
+       * （`EditorWorkspace` 的结构纪律：编辑不另造选择模型，胶片带点选写回同一个 store）。
+       * 所以这里不另写一套 —— 两条路读同一个锚点，切换 flow 也不会留上一张的残留。
+       */
+      case "browse":
+      case "edit": {
         const item = browseStore.anchorItem();
         return item === null ? null : assetItemExif(item);
       }
       default:
-        // 编辑 / 导出还没开工：没有「当前照片」就显示空态
+        // 导出还没开工：没有「当前照片」就显示空态（将来接同一条锚点即可）
         return null;
     }
   });
