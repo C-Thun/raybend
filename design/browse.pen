@@ -7882,7 +7882,7 @@
                 {
                   "type": "frame",
                   "id": "e6sfdr",
-                  "name": "InfoSection / 预览",
+                  "name": "InfoSection / 总览",
                   "width": "fill_container",
                   "layout": "vertical",
                   "gap": 6,
@@ -7890,9 +7890,9 @@
                     {
                       "type": "text",
                       "id": "UfO7x",
-                      "name": "InfoTitle / 预览",
+                      "name": "InfoTitle / 总览",
                       "fill": "$fg-2",
-                      "content": "预览",
+                      "content": "总览",
                       "fontFamily": "Inter",
                       "fontSize": 15,
                       "fontWeight": "600"
@@ -12755,7 +12755,7 @@
                 {
                   "type": "frame",
                   "id": "aaBLb",
-                  "name": "InfoSection / 预览",
+                  "name": "InfoSection / 总览",
                   "width": "fill_container",
                   "layout": "vertical",
                   "gap": 6,
@@ -12763,9 +12763,9 @@
                     {
                       "type": "text",
                       "id": "phy2O",
-                      "name": "InfoTitle / 预览",
+                      "name": "InfoTitle / 总览",
                       "fill": "$fg-2",
-                      "content": "预览",
+                      "content": "总览",
                       "fontFamily": "Inter",
                       "fontSize": 15,
                       "fontWeight": "600"

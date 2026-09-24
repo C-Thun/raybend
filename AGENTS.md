@@ -509,7 +509,8 @@ Tauri 3.0 已进入 alpha（`3.0.0-alpha.0`），已知关键变更：
 - **缓存分两处**（M3-W3 定）：**小图**（网格 / 胶片带 / 看图的缩略图）在
   `%LOCALAPPDATA%\raybend\cache\<库 id>\thumbs.db`（几万行小 BLOB，SQLite 合适）；
   **大图**（每 issue 一张，几百 KB）在**库根**的 `cache/full/`（跟着库走，换机器/搬盘不用重渲染）。
-  两处的编码格式统一 **AVIF 质量 90 / 4:4:4**（人类 2026-09-24 定；将来换 JXL 见 `FUTURE.md` C8）。
+  两处的编码格式统一 **AVIF 质量 90 / 4:4:4**（人类 2026-09-24 定；快照恒为 AVIF，
+  不考虑换 JXL —— 格式范围与 JXL 定位见 `FUTURE.md` C8）。
 - **真相源规则**：本地编辑/评分/关键词以 **DB 为准**，XMP 只是互操作通道；RAW 永不写回原文件（只写 `.xmp` sidecar）。
 - **写并发**：SQLite 单写者 → 采用**单一写者 actor**（专属线程 + 专属连接，所有写操作串行化），读走连接池；批量事务；`PRAGMA journal_mode=WAL, synchronous=NORMAL, busy_timeout=5000, foreign_keys=ON`。
 - **库身份与多路径**（`REPOSITORY.md` §2）：库身份 = `catalog.db` 内的唯一 ID；`app.db` 记录「库 ID → 多个路径」。
@@ -872,4 +873,4 @@ IPC 单测（用**真实字段名**反序列化；缺 DPR 必须报错，不许�
 | **编辑栈**（develop stack） | 对一张照片的全部非破坏性编辑操作的序列；定稿后落成一个 **issue**。M3 起进入主线（不再后置） |
 | **`fullscreen`**（全屏看图） | **无 UI 的沉浸式单图浏览**：另开一扇**无边框窗口**、按**主窗口所在那块屏幕**全屏，默认适应窗口、双击 100%、滚轮缩放、`←/→`/`PgUp/PgDn` 切图（到头停）、`Esc`/`Enter` 退出。命令 `viewer.fullscreen`，默认键 **`F11`**；入口在 flowbar 右端（跟随 picture info 显示）。实现：`src/features/fullscreen/` + `src-tauri/src/fullscreen.rs`。⚠️ 与「主窗口里的看图态」（view / film / compare）是**两回事**，别混 |
 | **`shortcut`**（快捷键） | 统一命令注册表里的**默认键位**（`CommandSpec.defaultKey`）：它决定该命令出现在**快捷键设置面板**与 `Ctrl+K` 命令面板里的键位；冲突检测与保留键规则见 `lib/commands.ts` / `lib/key-chords.ts`。新增功能时的必选动作见 §2.15 |
-| **动态反差**（Dynamic Contrast） | 一根拉杆的**局部色调映射**（参数 id `dynamicContrast`，0–100 单极，0 = 完全不动画面）：**压整体光比 + 抬局部反差**。与 `contrast`（全局反差曲线）不是一回事 —— 它多了一个**空间维度**，所以能同时做这两件在逐像素曲线上数学互斥的事。算法见 `crates/raybend/src/develop/local_tone.rs`（分解用 `filters.rs` 的引导滤波）。**暂时**住在编辑器「总览」页的直方图下面（`params.ts` 的 `placement: "overview"`），不占参数组页签 |
+| **动态反差**（Dynamic Contrast） | 一根拉杆的**局部色调映射**（参数 id `dynamicContrast`，0–100 单极，0 = 完全不动画面）：**压整体光比 + 抬局部反差**。与 `contrast`（全局反差曲线）不是一回事 —— 它多了一个**空间维度**，所以能同时做这两件在逐像素曲线上数学互斥的事。算法见 `crates/raybend/src/develop/local_tone.rs`（分解用 `filters.rs` 的引导滤波）。住在编辑器「影调」页签（与曝光/反差同组），走与其它参数一样的落库 / 撤销 / 重置链路 |
