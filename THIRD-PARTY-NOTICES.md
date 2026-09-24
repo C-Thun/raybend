@@ -27,6 +27,7 @@
 | **dav1d**（经 `image` 的 `avif-native` → `dav1d` / `dav1d-sys` / `av-data`，后三个是 MIT 的 Rust 绑定） | **1.5.0**（Windows 静态库）/ 1.4.1（WSL 系统库） | **BSD-2-Clause**（C 库）；绑定 crate MIT | **AVIF 解码**（Rust 侧要像素的地方：编辑器过渡帧、avif 导入；M3-W3 引入） | 兼容（宽松许可）。**不是 Rust 依赖而是系统/静态 C 库**：Windows 侧由 `scripts/build-dav1d-win.cmd` 从 `https://code.videolan.org/videolan/dav1d` 的 `1.5.0` tag 源码构建成静态库（`C:\rb-deps\dav1d-1.5.0\`，不打 DLL 进安装包）；WSL 侧用发行版包 `libdav1d-dev` |
 | mp4parse（`avif-native` 带进来） | 0.17 | MPL-2.0 | AVIF/HEIF 容器解析（不碰 AV1 位流） | 兼容（MPL-2.0 为文件级 copyleft，可链接） |
 | rav1e / rayon | 1.12 | MIT / Apache-2.0 | ravif 的多线程编码（`image` 的 `rayon` feature 打开；不开的话 AVIF 编码慢 8 倍以上） | 兼容 |
+| **lensfun**（纯 Rust 移植 `vdavid/lensfun-rs`，crates.io 包名就是 `lensfun`） | **0.7.0** | **代码 LGPL-3.0-or-later**；**内置的 XML 校准库 CC BY-SA 3.0** | **镜头校正**（畸变 / 横向色差 / 暗角；M3-W4 引入）。用法：`Database::load_bundled()` —— XML 库 gzip 后**嵌在二进制里**（约 5 MB 解压后，1543 支镜头），不分发资源文件 | **兼容**：LGPL-3.0 可经 GPL-3.0 路径与本项目 AGPL-3.0 组合（与 rawler 同一套论证）；数据部分原样分发 + 署名（见下方「数据来源」）。⚠️ 上游 API 仍是 0.x（beta），**只允许在 `crates/raybend/src/lens/` 内使用** |
 
 > **完整清单待补**：以上为当前可预见的直接依赖。M0-1 依赖落定、以及每个里程碑引入新依赖时，
 > 需补齐**完整清单（含间接依赖）**；发布前（M6）应据锁文件生成一次机器可核对的完整清单。
@@ -93,3 +94,4 @@
 | 2026-09-17 | 新增 §1c「官网依赖」：Lucide 图标数据(ISC)、Inter / Noto Sans SC(OFL-1.1)、官网的 Solid 2 线与构建/测试工具 |
 | 2026-09-17 | §1c 补 potrace(GPL-2.0，**开发期描摹工具**，只产坐标不进产物) |
 | 2026-09-24 | 新增 **dav1d 1.5.0（BSD-2-Clause）**：AVIF 解码（`image` 的 `avif-native`）；Windows 走一次性构建的静态库、WSL 走系统包。连带登记 `mp4parse`(MPL-2.0) |
+| 2026-09-25 | 新增 **lensfun 0.7.0**（纯 Rust 移植，LGPL-3.0-or-later；内置 XML 库 CC BY-SA 3.0）：镜头校正。**数据来源**：LensFun 项目（https://lensfun.github.io/ ，作者 Andrew Zabolotny 与 LensFun 贡献者）的校准数据库，经 `vdavid/lensfun-rs` 原样打包分发；Rust 移植由 David Veszelovszki 完成。M3-W4 引入 |
