@@ -41,6 +41,7 @@ import {
   commitDevelopStack,
   getDevelopEditTarget,
   getDevelopStack,
+  getLensMatch,
   getEditorRenderState,
   refreshDevelopPreview,
   resetDevelopStack,
@@ -276,7 +277,14 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
    */
   const paramsSender = createLatestCoalescer<DevelopParamsPayload>({
     send: (payload) => {
-      void setEditorParams(payload).catch((error: unknown) => {
+      // 镜头配置要后端读这张照片的拍摄参数 —— 载荷走的是**高频**那条路，
+      // 所以这里只传两个标量（`null` = 还没有当前照片，后端就不解析镜头）
+      const assetId = current()?.id;
+      void setEditorParams(
+        store.repositoryId(),
+        assetId === null || assetId === undefined ? null : Number(assetId),
+        payload,
+      ).catch((error: unknown) => {
         // 参数被拒（非法值 / 渲染线程没了）**不能只进控制台**：画面会停在最后一帧，
         // 用户看到的是「拉什么杆都没反应」。走面板那条错误通道，让原因留在界面上。
         console.error("[editor] 显影参数被拒", error); // i18n-exempt: 控制台诊断
@@ -344,6 +352,10 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
       curves: payload.curves,
       // 色温基线跟着一起存（否则缩略图那条路会用另一个基线渲染出另一种颜色）
       asShotK: payload.asShotTemperature,
+      // 镜头配置 / 开关 / 降噪方式：编辑栈的一级，与参数同一份载荷
+      lensProfile: payload.lensProfile,
+      lensEnabled: payload.lensEnabled,
+      nrMethod: payload.nrMethod,
     })
       .then(() => {
         // 只标「已落库」：库里回读的那一份与刚发出去的一致（Rust 侧会回读一遍验证）。
@@ -392,7 +404,11 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
     void getDevelopStack(repositoryId, Number(assetId))
       .then((stack) => {
         if (stack === null) return;
-        props.store.loadDevelop(stack.values, stack.curves);
+        props.store.loadDevelop(stack.values, stack.curves, {
+          lensProfile: stack.lensProfile ?? null,
+          lensEnabled: stack.lensEnabled ?? null,
+          nrMethod: stack.nrMethod === "high" ? "high" : null,
+        });
       })
       .catch((error: unknown) => {
         console.error("[editor] 撤销后重读编辑栈失败", error); // i18n-exempt: 控制台诊断
@@ -462,11 +478,23 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
         if (stack === null) return;
         // 读的过程中用户已经动过：**不要**用库里那份盖掉他的改动
         if (props.store.developRev() !== revAtRequest) return;
-        props.store.loadDevelop(stack.values, stack.curves);
+        props.store.loadDevelop(stack.values, stack.curves, {
+          lensProfile: stack.lensProfile ?? null,
+          lensEnabled: stack.lensEnabled ?? null,
+          nrMethod: stack.nrMethod === "high" ? "high" : null,
+        });
       })
       .catch((error: unknown) => {
         console.error("[editor] 读编辑栈失败", error); // i18n-exempt: 控制台诊断
         setDevelopError(String(error));
+      });
+    // **镜头匹配**：库没就绪就是「加载中」，就绪后自动识别（匹配不到不猜）
+    void getLensMatch(repositoryId, id)
+      .then((match) => props.store.setLensMatch(match))
+      .catch((error: unknown) => {
+        // 镜头库出问题不该阻断编辑：下拉先空着
+        console.error("[editor] 读镜头匹配失败", error); // i18n-exempt: 控制台诊断
+        props.store.setLensMatch(null);
       });
   });
 

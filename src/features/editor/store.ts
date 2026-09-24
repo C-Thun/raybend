@@ -21,8 +21,11 @@ import { createSignal } from "solid-js";
 
 import type {
   DevelopEditBase,
+  DevelopNrMethod,
   DevelopParamsPayload,
+  DevelopSettings,
   EditorRenderState,
+  LensMatch,
 } from "../../api/types.ts";
 import { t } from "../../i18n/index.ts";
 
@@ -167,7 +170,22 @@ export interface EditorStore {
   loadDevelop: (
     values: Record<string, number>,
     curves: Partial<Record<CurveChannel, readonly CurvePoint[]>>,
+    settings?: DevelopSettings,
   ) => void;
+
+  /* ── 镜头 / 降噪方式（M3-W4）──────────────────────── */
+  /** 镜头配置文件（`null` = 自动识别；`"none"` = 显式关掉；否则是 `maker|model`） */
+  lensProfile: () => string | null;
+  setLensProfile: (key: string | null) => void;
+  /** 配置文件那一半的开关（`null` = 默认开；**手动三根拉杆不受它影响**） */
+  lensEnabled: () => boolean | null;
+  setLensEnabled: (enabled: boolean | null) => void;
+  /** 降噪方式（`null` = 快速档） */
+  nrMethod: () => DevelopNrMethod | null;
+  setNrMethod: (method: DevelopNrMethod | null) => void;
+  /** 当前照片用的镜头（自动识别的结果或用户选的；由工作区写进来） */
+  lensMatch: () => LensMatch | null;
+  setLensMatch: (match: LensMatch | null) => void;
 
   /* ── 曲线 ───────────────────────────────────────────── */
   curveChannel: () => CurveChannel;
@@ -266,6 +284,10 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
   const [paramDragging, setParamDragging] = createSignal(false);
   const [editBase, setEditBase] = createSignal<DevelopEditBase>("raw");
   const [editBaseAvailable, setEditBaseAvailable] = createSignal({ bitmap: false, raw: false });
+  const [lensProfile, setLensProfileSignal] = createSignal<string | null>(null);
+  const [lensEnabled, setLensEnabledSignal] = createSignal<boolean | null>(null);
+  const [nrMethod, setNrMethodSignal] = createSignal<DevelopNrMethod | null>(null);
+  const [lensMatch, setLensMatch] = createSignal<LensMatch | null>(null);
   const [renderState, setRenderState] = createSignal<EditorRenderState | null>(null);
   const [holeActive, setHoleActive] = createSignal(false);
 
@@ -313,6 +335,10 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
       curves: dirtyCurves,
       // 拖动中：Rust 侧只算预览档（`tier_for_params`）
       interactive: paramDragging(),
+      // 镜头 / 降噪方式：它们是编辑栈的一级（会改变像素），跟着载荷一起发
+      lensProfile: lensProfile(),
+      lensEnabled: lensEnabled(),
+      nrMethod: nrMethod(),
     };
   };
 
@@ -428,7 +454,7 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
     setEditBase: (base) => setEditBase(base),
     editBaseAvailable,
     setEditBaseAvailable,
-    loadDevelop: (values, loadedCurves) => {
+    loadDevelop: (values, loadedCurves, settings) => {
       // 换照片时把「拖动中」清掉：上一次拖到一半就换了图的话，
       // 这个标志会一直挂在 true 上 —— 那样后面的渲染全被压成预览档（画面永远偏软）。
       setParamDragging(false);
@@ -445,6 +471,10 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
         }
       }
       setCurves(merged);
+      // 镜头 / 降噪方式：库里没有就回到默认（`null` = 自动识别 / 默认开 / 快速档）
+      setLensProfileSignal(settings?.lensProfile ?? null);
+      setLensEnabledSignal(settings?.lensEnabled ?? null);
+      setNrMethodSignal(settings?.nrMethod ?? null);
       // 从库里读回来的就是「已落库」的状态
       const nextRev = developRev() + 1;
       setDevelopRev(nextRev);
@@ -452,6 +482,24 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
     },
 
     curveChannel,
+    lensProfile,
+    setLensProfile: (key) => {
+      setLensProfileSignal(key);
+      bumpDevelop();
+    },
+    lensEnabled,
+    setLensEnabled: (enabled) => {
+      setLensEnabledSignal(enabled);
+      bumpDevelop();
+    },
+    nrMethod,
+    setNrMethod: (method) => {
+      setNrMethodSignal(method);
+      bumpDevelop();
+    },
+    lensMatch,
+    setLensMatch,
+
     setCurveChannel,
     curvePoints: (channel) => curves()[channel],
     setCurvePoints: (channel, points) => {

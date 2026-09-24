@@ -23,6 +23,7 @@ pub mod develop;
 pub mod display;
 pub mod import;
 pub mod index;
+pub mod lens;
 pub mod media;
 pub mod raw;
 pub mod repo;

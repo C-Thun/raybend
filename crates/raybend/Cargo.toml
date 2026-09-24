@@ -21,6 +21,7 @@ thiserror.workspace = true
 unicode-normalization.workspace = true
 wgpu.workspace = true
 pollster.workspace = true
+lensfun.workspace = true
 
 [lints]
 workspace = true

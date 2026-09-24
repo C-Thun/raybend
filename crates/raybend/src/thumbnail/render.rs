@@ -344,7 +344,7 @@ pub fn decode_file(path: &Path, spec: DecodeSpec) -> Result<Option<DecodedSource
 /// * **都不是**（或解不开）返回 `Ok(None)` —— 调用方据此用占位图
 ///   （`REPOSITORY.md` §4.1）。
 pub fn render_file(path: &Path, size: SizeClass) -> Result<Option<Thumb>> {
-    render_file_with_edit(path, size, None)
+    render_file_with_edit(path, size, None, None)
 }
 
 /// **渲染一个文件，可选套用编辑栈**（M3-W3：缩略图 / 看图反映编辑结果）。
@@ -361,12 +361,13 @@ pub fn render_file_with_edit(
     path: &Path,
     size: SizeClass,
     edit: Option<&DevelopStack>,
+    lens: Option<&crate::develop::lens::LensCorrection>,
 ) -> Result<Option<Thumb>> {
     let kind = path
         .file_name()
         .map_or(MediaKind::Other, |n| kind_of_file(&n.to_string_lossy()));
     if kind == MediaKind::Raw {
-        return render_raw_file(path, size, edit);
+        return render_raw_file(path, size, edit, lens);
     }
 
     let bytes = std::fs::read(path)?;
@@ -380,7 +381,7 @@ pub fn render_file_with_edit(
     let orientation = crate::media::exif::read_bytes(&bytes)
         .and_then(|data| data.orientation)
         .map(|raw| crate::media::meta::normalize_orientation(Some(raw)));
-    render_bytes_with_edit(&bytes, size, orientation, edit)
+    render_bytes_with_edit(&bytes, size, orientation, edit, lens)
 }
 
 /// 给 RAW 缩放时多要的倍数：最终尺寸的 Lanczos 由 [`encode`] 在小图上做，
@@ -388,12 +389,17 @@ pub fn render_file_with_edit(
 const RAW_OVERSAMPLE: u32 = 2;
 
 /// RAW 的渲染（= [`decode_raw_file`] + JPEG 编码）。
-fn render_raw_file(path: &Path, size: SizeClass, edit: Option<&DevelopStack>) -> Result<Option<Thumb>> {
+fn render_raw_file(
+    path: &Path,
+    size: SizeClass,
+    edit: Option<&DevelopStack>,
+    lens: Option<&crate::develop::lens::LensCorrection>,
+) -> Result<Option<Thumb>> {
     let want = size.long_edge().saturating_mul(RAW_OVERSAMPLE).max(1);
     let Some(decoded) = decode_raw_file(path, DecodeSpec::thumb(want))? else {
         return Ok(None);
     };
-    encode(decoded.image, size, decoded.orientation, false, edit).map(Some)
+    encode(decoded.image, size, decoded.orientation, false, edit, lens).map(Some)
 }
 
 /// RAW 的解码：走 worker 进程（`AGENTS.md` §6.3：解码必须在独立进程里）。
@@ -449,7 +455,7 @@ pub fn render_bytes(
     size: SizeClass,
     orientation: Option<u16>,
 ) -> Result<Option<Thumb>> {
-    render_bytes_with_edit(bytes, size, orientation, None)
+    render_bytes_with_edit(bytes, size, orientation, None, None)
 }
 
 /// 从内存渲染（可带编辑栈）—— [`render_bytes`] 的完整形态。
@@ -461,11 +467,12 @@ pub fn render_bytes_with_edit(
     size: SizeClass,
     orientation: Option<u16>,
     edit: Option<&DevelopStack>,
+    lens: Option<&crate::develop::lens::LensCorrection>,
 ) -> Result<Option<Thumb>> {
     let Ok(img) = image::load_from_memory(bytes) else {
         return Ok(None); // 不是能解码的图像（RAW、损坏文件…）
     };
-    encode(img, size, orientation, false, edit).map(Some)
+    encode(img, size, orientation, false, edit, lens).map(Some)
 }
 
 /// 网格/胶片带小图的**最大展示宽高比**（两侧都算：3:1 与 1:3）。
@@ -522,7 +529,11 @@ pub fn clamp_display_aspect(img: DynamicImage, max_aspect: f64) -> DynamicImage 
 ///
 /// # Errors
 /// 栈里的参数 / 曲线不合法（**不静默跳过** —— 那会让人看到一张「没生效」的图而不知道为什么）。
-fn apply_develop(img: &image::RgbImage, stack: &DevelopStack) -> Result<image::RgbImage> {
+fn apply_develop(
+    img: &image::RgbImage,
+    stack: &DevelopStack,
+    lens: Option<&crate::develop::lens::LensCorrection>,
+) -> Result<image::RgbImage> {
     let (width, height) = img.dimensions();
     let Some(linear) = LinearImage::from_srgb8(width, height, img.as_raw()) else {
         return Err(Error::Unsupported("编辑渲染：像素长度与尺寸对不上".to_string()));
@@ -548,7 +559,15 @@ fn apply_develop(img: &image::RgbImage, stack: &DevelopStack) -> Result<image::R
     // **缩略图也必须反映编辑结果**（M3 的 DoD）——
     // 动态反差的分解在缩略图尺寸上很便宜，不做的话网格与编辑器会显示两张不同的图。
     let plans = DevelopPlans::from_params(width, height, &params);
-    let lens_map = crate::develop::lens::LensMap::new(&plans.lens);
+    let lens_map = {
+        // 镜头配置文件（调用方解析后传进来）+ **手动三根拉杆**（从参数里合并）
+        let manual = plans.lens.manual;
+        let mut correction = lens.cloned().unwrap_or_else(|| {
+            crate::develop::lens::LensCorrection::manual_only(width, height, manual)
+        });
+        correction.manual = manual;
+        crate::develop::lens::LensMap::new(&correction)
+    };
     let local_state = (plans.local_tone > 0.0).then(|| {
         let chained = chain_image(&linear, &params);
         LocalToneState::analyze(&chained, &LocalToneOpts::default())
@@ -575,6 +594,7 @@ pub fn encode(
     orientation: Option<u16>,
     placeholder: bool,
     edit: Option<&DevelopStack>,
+    lens: Option<&crate::develop::lens::LensCorrection>,
 ) -> Result<Thumb> {
     let img = match orientation {
         Some(o) if o != 1 => apply_orientation(&img, o),
@@ -595,7 +615,7 @@ pub fn encode(
     let (width, height) = (rgb.width(), rgb.height());
     // 编辑栈：**没编辑过就一步都不多做**（保持原来那条最快的路）
     let rgb = match edit {
-        Some(stack) if !stack.is_empty() => apply_develop(&rgb, stack)?,
+        Some(stack) if !stack.is_empty() => apply_develop(&rgb, stack, lens)?,
         _ => rgb,
     };
     let data = encode_avif(rgb.as_raw(), rgb.width(), rgb.height())?;
@@ -667,7 +687,7 @@ pub fn apply_orientation(img: &DynamicImage, orientation: u16) -> DynamicImage {
 /// 字体是手写的 5×7 点阵（只有 R / A / W 三个字母，够用）。
 pub fn placeholder(kind: MediaKind, size: SizeClass) -> Result<Thumb> {
     let img = placeholder_image(kind, size);
-    encode(DynamicImage::ImageRgb8(img), size, None, true, None)
+    encode(DynamicImage::ImageRgb8(img), size, None, true, None, None)
 }
 
 /// **画**占位图（纯像素，不编码）。

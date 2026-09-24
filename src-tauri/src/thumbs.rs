@@ -85,6 +85,17 @@ pub async fn thumb_get<R: Runtime>(
     // 编辑过的照片：缩略图也要反映编辑结果（M3-W3）。
     // 解析只在**库内**文件上命中（源文件未入库时返回 None，走老路）。
     let edit = edited_stack(&app, &path);
+    // 镜头配置文件：**由调用方解析后传进渲染**（渲染层不认识数据库 —— 与 raw 后端同一套分层）
+    let lens = edit.as_ref().and_then(|stack| {
+        let asset = develop::resolve_asset(&app, Path::new(&path))?;
+        crate::lens::render_correction(
+            &app,
+            &asset.repository_id,
+            asset.asset_id,
+            stack.lens_profile.as_deref(),
+            stack.lens_enabled,
+        )
+    });
 
     let bytes = crate::source::blocking(move || {
         let bytes = match &edit {
@@ -94,6 +105,7 @@ pub async fn thumb_get<R: Runtime>(
                 size,
                 time::now_millis(),
                 Some(stack),
+                lens.as_ref(),
             ),
             None => render_now(&db, Path::new(&path), size, time::now_millis()),
         }
@@ -131,7 +143,8 @@ fn edited_stack<R: Runtime>(
 ///
 /// `pub(crate)`：`view_image` 与 `develop_preview_refresh`（进/出编辑那两下）共用这一份 ——
 /// preview 只允许有一条生成路径。
-pub(crate) fn render_latest_cached(
+pub(crate) fn render_latest_cached<R: Runtime>(
+    app: &AppHandle<R>,
     asset: &ResolvedAsset,
     stack: &raybend::store::develop::DevelopStack,
 ) -> Result<Vec<u8>, String> {
@@ -143,7 +156,15 @@ pub(crate) fn render_latest_cached(
     if let Some(bytes) = cache.read(asset.asset_id, "latest", base, PIPELINE_VERSION) {
         return Ok(bytes);
     }
-    let thumb = render_file_with_edit(&full, SizeClass::Screen, Some(stack))
+    // 镜头配置文件（调用方解析 —— 渲染层不认识数据库）
+    let lens = crate::lens::render_correction(
+        app,
+        &asset.repository_id,
+        asset.asset_id,
+        stack.lens_profile.as_deref(),
+        stack.lens_enabled,
+    );
+    let thumb = render_file_with_edit(&full, SizeClass::Screen, Some(stack), lens.as_ref())
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("解不开这张照片：{}", full.display()))?;
     if let Err(error) = cache.write(asset.asset_id, "latest", base, PIPELINE_VERSION, &thumb.data)
@@ -190,7 +211,9 @@ pub async fn view_image<R: Runtime>(
         && let Some(asset) = develop::resolve_asset(&app, Path::new(&path))
         && let Ok((IssueChoice::Latest, stack)) = develop::issue_of(&app, &asset)
     {
-        let bytes = crate::source::blocking(move || render_latest_cached(&asset, &stack)).await?;
+        let handle = app.clone();
+        let bytes =
+            crate::source::blocking(move || render_latest_cached(&handle, &asset, &stack)).await?;
         return Ok(tauri::ipc::Response::new(bytes));
     }
 

@@ -333,7 +333,7 @@ pub fn render_now(
     size: SizeClass,
     now_ms: i64,
 ) -> Result<Vec<u8>> {
-    render_now_with_edit(thumbs, abs_path, size, now_ms, None)
+    render_now_with_edit(thumbs, abs_path, size, now_ms, None, None)
 }
 
 /// 同 [`render_now`]，但**可以带编辑栈**（M3-W3：缩略图反映编辑结果）。
@@ -350,6 +350,7 @@ pub fn render_now_with_edit(
     size: SizeClass,
     now_ms: i64,
     edit: Option<&crate::store::develop::DevelopStack>,
+    lens: Option<&crate::develop::lens::LensCorrection>,
 ) -> Result<Vec<u8>> {
     // 源文件还没入库，「身份字符串」就是**绝对路径**（见 `cache_key_for`）
     let material = abs_path.to_string_lossy().into_owned();
@@ -367,7 +368,7 @@ pub fn render_now_with_edit(
         .file_name()
         .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
     let kind = kind::kind_of_file(&file_name);
-    let thumb = match render::render_file_with_edit(abs_path, size, edit)? {
+    let thumb = match render::render_file_with_edit(abs_path, size, edit, lens)? {
         Some(t) => t,
         // 不可解码（RAW）：先用占位图兜住（与队列那条路同一取舍）
         None => render::placeholder(kind, size)?,

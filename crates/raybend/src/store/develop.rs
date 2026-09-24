@@ -30,6 +30,7 @@ use std::collections::BTreeMap;
 use rusqlite::{Connection, OptionalExtension};
 
 use crate::develop::curve::{Curve, CurveChannel};
+use crate::develop::denoise::NrMethod;
 use crate::develop::params::spec;
 use crate::error::{Error, Result};
 
@@ -46,21 +47,39 @@ pub struct DevelopStack {
     /// 拍摄时的白平衡。不存它，缩略图那条路（读不到 RAW 元数据）就会用 6250 兜底，
     /// 于是同一份参数在编辑器与缩略图里渲染出**两种颜色**。
     pub as_shot_k: Option<f32>,
+    /// **镜头配置文件**（lensfun 的 `maker|model` 键；M3-W4）。
+    ///
+    /// * `None`   = 没动过 ⇒ 用 EXIF 自动识别
+    /// * `"none"` = 用户**显式关掉了自动匹配**
+    pub lens_profile: Option<String>,
+    /// **配置文件那一半**的开关（`None` = 默认开）。
+    ///
+    /// ❗ 它只管配置文件：三根手动拉杆不受它影响（人类 2026-09-25 拍板）。
+    pub lens_enabled: Option<bool>,
+    /// **降噪方式**（`None` = 快速档）。
+    pub nr_method: Option<NrMethod>,
 }
 
 impl DevelopStack {
     /// 什么都没动过吗（没动过 = 与 SOOC 一样，不必渲染）。
     ///
     /// `as_shot_k` **不算「动过」**：它只是色温的解释基准，参数一个都没改就是没编辑过。
+    /// `lens_enabled` 同理：单独一个开关不改变任何像素（它要配一个配置文件才有意义）。
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.params.is_empty() && self.curves.is_empty()
+        self.params.is_empty()
+            && self.curves.is_empty()
+            && self.lens_profile.is_none()
+            && self.nr_method.is_none_or(NrMethod::is_default)
     }
 
-    /// 动过的项数（参数 + 曲线通道）。
+    /// 动过的项数（参数 + 曲线 + 镜头配置 + 非默认的降噪方式）。
     #[must_use]
     pub fn len(&self) -> usize {
-        self.params.len() + self.curves.len()
+        self.params.len()
+            + self.curves.len()
+            + usize::from(self.lens_profile.is_some())
+            + usize::from(self.nr_method.is_some_and(|method| !method.is_default()))
     }
 
     /// **这份编辑栈的稳定指纹**（缓存键用）。
@@ -91,6 +110,18 @@ impl DevelopStack {
             Some(kelvin) => text.push_str(&format!("k{kelvin:.0}")),
             None => text.push_str("k-"),
         }
+        // 镜头配置与降噪方式**同样改变像素** ⇒ 必须进指纹，
+        // 否则「换了个配置文件、缩略图还是旧的」（毒缓存，`AGENTS.md` §2.16 同一条纪律）
+        text.push('|');
+        text.push_str(self.lens_profile.as_deref().unwrap_or("-"));
+        text.push('|');
+        text.push_str(match self.lens_enabled {
+            Some(true) => "on",
+            Some(false) => "off",
+            None => "-",
+        });
+        text.push('|');
+        text.push_str(self.nr_method.map_or("-", NrMethod::as_str));
 
         // FNV-1a（64 位）：短、稳定、够散 —— 这里不需要密码学强度
         let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
@@ -107,19 +138,33 @@ impl DevelopStack {
 /// # Errors
 /// 数据库读失败（含坏数据：曲线 JSON 解不开）。
 pub fn load(conn: &Connection, asset_id: i64) -> Result<DevelopStack> {
-    let as_shot_k = conn
+    let row = conn
         .query_row(
-            "SELECT as_shot_k FROM develop_stacks WHERE asset_id = ?1",
+            "SELECT as_shot_k, lens_profile, lens_enabled, nr_method FROM develop_stacks \
+             WHERE asset_id = ?1",
             [asset_id],
-            |row| row.get::<_, Option<f64>>(0),
+            |row| {
+                Ok((
+                    row.get::<_, Option<f64>>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<i64>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                ))
+            },
         )
-        .optional()?
-        .flatten()
-        .map(|value| value as f32);
-    let mut stack = DevelopStack {
-        as_shot_k,
-        ..DevelopStack::default()
-    };
+        .optional()?;
+    let mut stack = DevelopStack::default();
+    if let Some((as_shot_k, lens_profile, lens_enabled, nr_method)) = row {
+        #[allow(clippy::cast_possible_truncation)]
+        {
+            stack.as_shot_k = as_shot_k.map(|value| value as f32);
+        }
+        stack.lens_profile = lens_profile;
+        stack.lens_enabled = lens_enabled.map(|value| value != 0);
+        // 认不出的方式**当成默认**（不是错误）：库里存着一个以后版本才有的值，
+        // 老版本应当照旧能打开照片（向前兼容的最低要求）
+        stack.nr_method = nr_method.as_deref().and_then(NrMethod::parse);
+    }
 
     let mut statement = conn.prepare("SELECT param_id, value FROM develop_params WHERE asset_id = ?1")?;
     let rows = statement.query_map([asset_id], |row| {
@@ -173,11 +218,18 @@ pub fn save(conn: &Connection, asset_id: i64, stack: &DevelopStack, now_ms: i64)
             .map_err(|e| Error::Unsupported(format!("曲线 {channel} 不合法：{e}")))?;
     }
 
-    // ② 栈本体（没有就建一个；as-shot 跟着一起写）
+    // ② 栈本体（没有就建一个；as-shot 与镜头 / 降噪那几项跟着一起写）
     ensure_stack(conn, asset_id, now_ms)?;
     conn.execute(
-        "UPDATE develop_stacks SET as_shot_k = ?2 WHERE asset_id = ?1",
-        rusqlite::params![asset_id, stack.as_shot_k.map(f64::from)],
+        "UPDATE develop_stacks SET as_shot_k = ?2, lens_profile = ?3, lens_enabled = ?4, \
+         nr_method = ?5 WHERE asset_id = ?1",
+        rusqlite::params![
+            asset_id,
+            stack.as_shot_k.map(f64::from),
+            stack.lens_profile,
+            stack.lens_enabled.map(i64::from),
+            stack.nr_method.filter(|method| !method.is_default()).map(NrMethod::as_str),
+        ],
     )?;
 
     // ③ 参数：先删掉「这一份里没有的」，再 upsert 有的
@@ -327,6 +379,115 @@ pub fn set_curve(
     Ok(())
 }
 
+/// 编辑栈里**不是参数也不是曲线**的那几项（M3-W4）。
+///
+/// 它们共用一种撤销操作（[`crate::store::marking::Op::DevelopSetting`]）：
+/// 三项都是「一个可空的字符串/布尔」，各自的语义与校验写在 [`set_setting`] 里。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Setting {
+    /// 镜头配置文件（`None` = 没动过；`"none"` = 显式关掉自动匹配；否则是 `maker|model`）
+    LensProfile,
+    /// 配置文件那一半的开关（`"1"` / `"0"`）
+    LensEnabled,
+    /// 降噪方式（`"fast"` / `"high"`）
+    NrMethod,
+}
+
+impl Setting {
+    /// 撤销操作里用的键（也是前端载荷里的字段名）。
+    #[must_use]
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::LensProfile => "lensProfile",
+            Self::LensEnabled => "lensEnabled",
+            Self::NrMethod => "nrMethod",
+        }
+    }
+
+    /// 反查（认不出给 `None`）。
+    #[must_use]
+    pub fn parse(key: &str) -> Option<Self> {
+        match key {
+            "lensProfile" => Some(Self::LensProfile),
+            "lensEnabled" => Some(Self::LensEnabled),
+            "nrMethod" => Some(Self::NrMethod),
+            _ => None,
+        }
+    }
+
+    /// 它在 `develop_stacks` 里对应的列名（**枚举自带的值，不是用户输入**）。
+    const fn column(self) -> &'static str {
+        match self {
+            Self::LensProfile => "lens_profile",
+            Self::LensEnabled => "lens_enabled",
+            Self::NrMethod => "nr_method",
+        }
+    }
+
+    /// 值合法吗（`None` = 清掉这一项，永远合法）。
+    fn accepts(self, value: Option<&str>) -> bool {
+        match (self, value) {
+            (_, None) => true,
+            (Self::LensProfile, Some(text)) => !text.is_empty(),
+            (Self::LensEnabled, Some("0" | "1")) => true,
+            (Self::LensEnabled, Some(_)) => false,
+            (Self::NrMethod, Some(text)) => NrMethod::parse(text).is_some(),
+        }
+    }
+}
+
+impl DevelopStack {
+    /// 某一项设置现在的**字符串形式**（`None` = 没动过）。
+    ///
+    /// 撤销操作（`Op::DevelopSetting`）与前端载荷共用这一份口径 ——
+    /// 两边各写一遍 `match` 的话，以后加一项就会漏一处。
+    #[must_use]
+    pub fn setting_value(&self, setting: Setting) -> Option<String> {
+        match setting {
+            Setting::LensProfile => self.lens_profile.clone(),
+            Setting::LensEnabled => self
+                .lens_enabled
+                .map(|enabled| if enabled { "1" } else { "0" }.to_string()),
+            Setting::NrMethod => self
+                .nr_method
+                .filter(|method| !method.is_default())
+                .map(|method| method.as_str().to_string()),
+        }
+    }
+}
+
+/// 写**一项**设置（`value = None` ⇒ 清掉 = 回到默认）。
+///
+/// 撤销栈走的就是这一条（与 [`set_param`] 对称）。
+///
+/// # Errors
+/// 值非法（例如把降噪方式写成 `"medium"`）/ 未知键 / 数据库写失败。
+///
+/// # Panics
+/// `setting.column()` 是枚举自带的白名单字面量，拼 SQL 不会引入注入面。
+pub fn set_setting(
+    conn: &Connection,
+    asset_id: i64,
+    setting: Setting,
+    value: Option<&str>,
+    now_ms: i64,
+) -> Result<()> {
+    if !setting.accepts(value) {
+        return Err(Error::Unsupported(format!(
+            "{} 的值非法：{value:?}",
+            setting.key()
+        )));
+    }
+    ensure_stack(conn, asset_id, now_ms)?;
+    let sql = format!(
+        "UPDATE develop_stacks SET {} = ?2 WHERE asset_id = ?1",
+        setting.column()
+    );
+    conn.execute(&sql, rusqlite::params![asset_id, value])?;
+    prune_empty_stack(conn, asset_id)?;
+    Ok(())
+}
+
 /// 建栈本体（没有就建，有就更新 `updated_at`）。
 fn ensure_stack(conn: &Connection, asset_id: i64, now_ms: i64) -> Result<()> {
     conn.execute(
@@ -338,10 +499,15 @@ fn ensure_stack(conn: &Connection, asset_id: i64, now_ms: i64) -> Result<()> {
 }
 
 /// 栈空了就把本体删掉（「没编辑过」要能回到干净状态）。
+///
+/// 镜头 / 降噪那几列也要看：只设了配置文件、没动过参数的照片**仍然算编辑过**
+/// （配置文件会改变画面）。
 fn prune_empty_stack(conn: &Connection, asset_id: i64) -> Result<()> {
     conn.execute(
         "DELETE FROM develop_stacks
           WHERE asset_id = ?1
+            AND lens_profile IS NULL
+            AND nr_method IS NULL
             AND NOT EXISTS (SELECT 1 FROM develop_params WHERE asset_id = ?1)
             AND NOT EXISTS (SELECT 1 FROM develop_curves WHERE asset_id = ?1)",
         [asset_id],
@@ -502,10 +668,15 @@ pub fn edit_target(conn: &Connection, asset_id: i64, base: EditBase) -> Result<O
 /// # Errors
 /// 数据库读失败。
 pub fn has_edits(conn: &Connection, asset_id: i64) -> Result<bool> {
+    // ❗镜头配置 / 降噪方式也算「编辑过」：它们会改变画面（`choose_issue` 靠这条
+    // 决定显示 SOOC 还是 latest）—— 只数参数与曲线的话，一张只挑了镜头的照片
+    // 会被当成「没编辑过」，于是浏览侧显示相机直出、编辑器里却是校正过的两张图。
     let count: i64 = conn.query_row(
         "SELECT
             (SELECT count(*) FROM develop_params WHERE asset_id = ?1)
-          + (SELECT count(*) FROM develop_curves WHERE asset_id = ?1)",
+          + (SELECT count(*) FROM develop_curves WHERE asset_id = ?1)
+          + (SELECT count(*) FROM develop_stacks
+              WHERE asset_id = ?1 AND (lens_profile IS NOT NULL OR nr_method IS NOT NULL))",
         [asset_id],
         |row| row.get(0),
     )?;
@@ -542,6 +713,7 @@ mod tests {
                 .map(|(channel, points)| ((*channel).to_string(), points.clone()))
                 .collect(),
             as_shot_k: None,
+            ..DevelopStack::default()
         }
     }
 
@@ -884,6 +1056,135 @@ mod tests {
         // 非法输入要被拒
         assert!(set_curve(&conn, asset_id, "x", Some(&points), now_millis()).is_err());
         assert!(set_param(&conn, asset_id, "exposure", Some(99.0), now_millis()).is_err());
+    }
+
+    #[test]
+    fn the_migration_upgrades_an_existing_v5_stack_without_losing_data() {
+        // v5 → v6：老编辑栈（参数 + 曲线）必须原样还在（`AGENTS.md` §2.16）
+        let mut conn = Connection::open_in_memory().expect("内存库");
+        let v5 = &crate::store::migration::CATALOG_MIGRATIONS[..5];
+        crate::store::migration::apply_list(&mut conn, DbKind::Catalog, v5, Backups::none(), 0)
+            .expect("升到 v5");
+        conn.execute(
+            "INSERT INTO assets (rating, flag, imported_at, updated_at) VALUES (0, 'none', 0, 0)",
+            [],
+        )
+        .expect("插资产");
+        let asset_id = conn.last_insert_rowid();
+        // ⚠️ v5 时代的库还没有那三列 —— 不能调 `save`（它会写新列）
+        conn.execute(
+            "INSERT INTO develop_stacks (asset_id, created_at, updated_at, as_shot_k) \
+             VALUES (?1, 0, 0, 5200.0)",
+            [asset_id],
+        )
+        .expect("v5 时代的栈本体");
+        conn.execute(
+            "INSERT INTO develop_params (asset_id, param_id, value) VALUES (?1, 'exposure', 0.75)",
+            [asset_id],
+        )
+        .expect("v5 时代的参数");
+        conn.execute(
+            "INSERT INTO develop_curves (asset_id, channel, points) \
+             VALUES (?1, 'rgb', '[[0,0],[0.5,0.6],[1,1]]')",
+            [asset_id],
+        )
+        .expect("v5 时代的曲线");
+
+        apply(&mut conn, DbKind::Catalog, Backups::none(), 0).expect("升到 v6");
+
+        let loaded = load(&conn, asset_id).expect("读");
+        assert_eq!(loaded.params.get("exposure"), Some(&0.75), "老参数不丢");
+        assert!(loaded.curves.contains_key("rgb"), "老曲线不丢");
+        assert_eq!(loaded.as_shot_k, Some(5200.0), "拍摄色温不丢");
+        assert_eq!(loaded.lens_profile, None, "新列默认是「没动过」");
+        assert_eq!(loaded.nr_method, None);
+    }
+
+    #[test]
+    fn lens_and_nr_fields_round_trip_and_feed_the_signature() {
+        let (conn, asset_id) = catalog_with_asset();
+        let mut base = stack(&[("exposure", 0.5)], &[]);
+        let plain = base.signature();
+        save(&conn, asset_id, &base, now_millis()).expect("写");
+        assert_eq!(load(&conn, asset_id).expect("读"), base);
+
+        // 换配置文件 ⇒ 指纹必须变（否则缩略图不重渲染 —— 毒缓存）
+        base.lens_profile = Some("Panasonic|LUMIX G 12-35mm".to_string());
+        assert_ne!(base.signature(), plain, "配置文件要进指纹");
+        save(&conn, asset_id, &base, now_millis()).expect("写");
+        assert_eq!(load(&conn, asset_id).expect("读"), base);
+
+        // 降噪方式同样改画面 ⇒ 也要进指纹，而且要能存下来
+        base.nr_method = Some(NrMethod::High);
+        save(&conn, asset_id, &base, now_millis()).expect("写");
+        assert_eq!(load(&conn, asset_id).expect("读").nr_method, Some(NrMethod::High));
+
+        // 开关也要存住（它只影响配置文件那一半）
+        base.lens_enabled = Some(false);
+        save(&conn, asset_id, &base, now_millis()).expect("写");
+        assert_eq!(load(&conn, asset_id).expect("读").lens_enabled, Some(false));
+    }
+
+    #[test]
+    fn a_profile_alone_counts_as_an_edit() {
+        // 只挑了配置文件、没动参数：也是编辑（画面变了），不能当成「没编辑过」
+        let (conn, asset_id) = catalog_with_asset();
+        let mut only_profile = DevelopStack::default();
+        assert!(only_profile.is_empty());
+        only_profile.lens_profile = Some("A|B".to_string());
+        assert!(!only_profile.is_empty());
+        assert_eq!(only_profile.len(), 1);
+        save(&conn, asset_id, &only_profile, now_millis()).expect("写");
+        assert!(has_edits(&conn, asset_id).expect("查"));
+        assert_eq!(load(&conn, asset_id).expect("读"), only_profile);
+
+        // 只拨开关（没有配置文件）不算编辑：它一个人不改变任何像素
+        let only_switch = DevelopStack {
+            lens_enabled: Some(false),
+            ..DevelopStack::default()
+        };
+        assert!(only_switch.is_empty());
+
+        // 清掉配置文件之后，空栈要回到干净状态（本体行被删掉）
+        let cleared = DevelopStack::default();
+        save(&conn, asset_id, &cleared, now_millis()).expect("写");
+        assert!(!has_edits(&conn, asset_id).expect("查"));
+    }
+
+    #[test]
+    fn set_setting_writes_one_field_and_prunes() {
+        let (conn, asset_id) = catalog_with_asset();
+        // 写一个配置文件：要建栈、要能读回来
+        set_setting(
+            &conn,
+            asset_id,
+            Setting::LensProfile,
+            Some("A|B"),
+            now_millis(),
+        )
+        .expect("写");
+        assert_eq!(
+            load(&conn, asset_id).expect("读").lens_profile,
+            Some("A|B".to_string())
+        );
+        // 合法性：降噪方式只认两个值、开关只认 0/1
+        assert!(set_setting(&conn, asset_id, Setting::NrMethod, Some("medium"), 0).is_err());
+        assert!(set_setting(&conn, asset_id, Setting::LensEnabled, Some("true"), 0).is_err());
+        set_setting(&conn, asset_id, Setting::NrMethod, Some("high"), 0).expect("写");
+        set_setting(&conn, asset_id, Setting::LensEnabled, Some("0"), 0).expect("写");
+        let loaded = load(&conn, asset_id).expect("读");
+        assert_eq!(loaded.nr_method, Some(NrMethod::High));
+        assert_eq!(loaded.lens_enabled, Some(false));
+        // 键 ↔ 设置一一对应（撤销操作靠它）
+        for setting in [Setting::LensProfile, Setting::LensEnabled, Setting::NrMethod] {
+            assert_eq!(Setting::parse(setting.key()), Some(setting));
+        }
+        assert_eq!(Setting::parse("不存在"), None);
+        // 清掉全部 ⇒ 栈本体要消失
+        set_setting(&conn, asset_id, Setting::LensProfile, None, 0).expect("清");
+        set_setting(&conn, asset_id, Setting::NrMethod, None, 0).expect("清");
+        set_setting(&conn, asset_id, Setting::LensEnabled, None, 0).expect("清");
+        assert!(!has_edits(&conn, asset_id).expect("查"));
     }
 
     #[test]

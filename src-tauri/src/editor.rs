@@ -42,7 +42,7 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, Runtime, State, WebviewWindow};
 
-use raybend::develop::lens::LensMap;
+use raybend::develop::lens::{LensCorrection, LensMap};
 use raybend::develop::local_tone::{LocalToneOpts, LocalToneState};
 use raybend::develop::{
     Curve, CurveChannel, CurveSet, DevelopParams, DevelopPlans, DevelopStages, LinearImage, Resolved,
@@ -420,6 +420,10 @@ enum RenderCommand {
         params: DevelopParams,
         curves: CurveSet,
         interactive: bool,
+        /// 这次要用的**镜头校正**（已解析；`None` = 不用配置文件 —— 手动三根拉杆
+        /// 在显影线程里从参数合并，所以拖动时它们是实时的）。
+        /// `Box` 是因为它比其它变体大得多（clippy 的 `large_enum_variant`）。
+        lens: Option<Box<raybend::develop::lens::LensCorrection>>,
     },
     /// 显影完了一张（新照片或新参数）
     Developed(DevelopOutcome),
@@ -447,6 +451,15 @@ pub struct DevelopParamsDto {
     /// 拖动中只算屏幕那一档，松手那一下才按缩放补全尺寸（`tier_for_params`）。
     #[serde(default)]
     pub interactive: bool,
+    /// 镜头配置文件（`None` = 自动识别；`"none"` = 显式关掉；否则是 `maker|model`）
+    #[serde(default)]
+    pub lens_profile: Option<String>,
+    /// 配置文件那一半的开关（`None` = 默认开）
+    #[serde(default)]
+    pub lens_enabled: Option<bool>,
+    /// 降噪方式（`None` = 快速档；本消息里暂未使用 —— 高质量档的接线见 `plans/M3-W4.md`）
+    #[serde(default)]
+    pub nr_method: Option<String>,
 }
 
 impl DevelopParamsDto {
@@ -522,6 +535,9 @@ struct DevelopJob {
     /// 输出档位（预览 = 缩到屏幕档；全尺寸 = 原尺寸）
     tier: ImageTier,
     params: DevelopParams,
+    /// 已解析的镜头校正（配置文件那一半；`None` = 不用配置文件）。
+    /// 手动三根拉杆不在这里 —— 显影线程从 `params` 里合并（那样拖动才是实时的）。
+    lens: Option<raybend::develop::lens::LensCorrection>,
     curves: CurveSet,
     /// **过渡帧计划**（进编辑先出图）：只在真的要解码那一下用一次；
     /// `None` = 不发过渡帧（换档位 / 改参数那类任务）
@@ -1010,11 +1026,26 @@ fn transition_plan<R: Runtime>(app: &AppHandle<R>, path: &str) -> Option<Transit
 /// # Errors
 /// 参数不合法时返回原因；渲染器还没起来时**不算错误**（返回当前状态，前端不必特判）。
 #[tauri::command]
-pub fn editor_set_params(
+pub fn editor_set_params<R: Runtime>(
+    app: AppHandle<R>,
     state: State<'_, EditorState>,
+    repository_id: String,
+    asset_id: Option<i64>,
     params: DevelopParamsDto,
 ) -> Result<RenderState, String> {
     let interactive = params.interactive;
+    // 镜头配置：用**参数里带来的选择**（编辑栈那一层）+ catalog 里的拍摄参数解析。
+    // 每次参数任务都重解一遍 —— 它是「读一行 + 库里插值」，亚毫秒级，不值得为它加一层缓存。
+    let lens = match asset_id {
+        Some(asset_id) => crate::lens::render_correction(
+            &app,
+            &repository_id,
+            asset_id,
+            params.lens_profile.as_deref(),
+            params.lens_enabled,
+        ),
+        None => None,
+    };
     let (parsed, curves) = params.into_parts()?;
     if let Some(sender) = session_sender(&state) {
         sender
@@ -1022,6 +1053,7 @@ pub fn editor_set_params(
                 params: parsed,
                 curves,
                 interactive,
+                lens: lens.map(Box::new),
             })
             .map_err(|_| "渲染线程不在了".to_string())?;
     }
@@ -1224,6 +1256,9 @@ fn run_session<R: Runtime>(
 struct SessionParams {
     params: DevelopParams,
     curves: CurveSet,
+    /// 已解析的镜头校正（配置文件那一半；`None` = 不用配置文件）。
+    /// **手动微调不在这里** —— 它每次从 `params` 里合并（那样拖动才是实时的）。
+    lens: Option<raybend::develop::lens::LensCorrection>,
 }
 
 impl Default for SessionParams {
@@ -1231,6 +1266,7 @@ impl Default for SessionParams {
         Self {
             params: DevelopParams::new(None),
             curves: CurveSet::identity(),
+            lens: None,
         }
     }
 }
@@ -1437,6 +1473,7 @@ fn apply_command(
                         photo: Some(path),
                         tier: ImageTier::Preview,
                         params: session.params.clone(),
+                        lens: session.lens.clone(),
                         curves: session.curves.clone(),
                         transition,
                     };
@@ -1468,9 +1505,11 @@ fn apply_command(
             params,
             curves,
             interactive,
+            lens,
         } => {
             session.params = params;
             session.curves = curves;
+            session.lens = lens.map(|boxed| *boxed);
             let mut state = lock_state(shared);
             state.params_rev += 1;
             let rev = state.params_rev;
@@ -1492,6 +1531,7 @@ fn apply_command(
                     photo: None,
                     tier: wanted,
                     params: session.params.clone(),
+                    lens: session.lens.clone(),
                     curves: session.curves.clone(),
                     // 参数任务不发过渡帧（图已经在屏幕上，只是要重算）
                     transition: None,
@@ -1675,6 +1715,7 @@ fn ensure_output(
         photo: Some(path),
         tier: wanted,
         params: session.params.clone(),
+        lens: session.lens.clone(),
         curves: session.curves.clone(),
         // 换档位不发过渡帧：源已经在显影线程手里（这一步只是换输出尺寸）
         transition: None,
@@ -1928,7 +1969,16 @@ fn run_develop_job(
     } else {
         None
     };
-    let lens_map = LensMap::new(&plans.lens);
+    let lens_map = {
+        // 镜头：配置文件来自命令层（`job.lens`），**手动三根拉杆永远叠加在上面**
+        // （人类 2026-09-25 拍板：「启用校正」开关只管配置文件那一半）。
+        let manual = plans.lens.manual;
+        let mut correction = job.lens.clone().unwrap_or_else(|| {
+            LensCorrection::manual_only(entry.full.width, entry.full.height, manual)
+        });
+        correction.manual = manual;
+        LensMap::new(&correction)
+    };
     let stages = DevelopStages {
         lens: Some(&lens_map),
         denoise: Some(&plans.denoise),
@@ -2077,6 +2127,7 @@ mod tests {
             tier: ImageTier::Preview,
             params: DevelopParams::default(),
             curves: CurveSet::default(),
+            lens: None,
             transition: None,
         }
     }

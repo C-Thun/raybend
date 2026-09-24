@@ -92,10 +92,14 @@ export async function sendEditorViewportIntent(
  * 浏览器里返回 `null`（没有渲染线程可喂）。
  */
 export async function setEditorParams(
+  repositoryId: string | null,
+  assetId: number | null,
   params: DevelopParamsPayload,
 ): Promise<EditorRenderState | null> {
   if (!isTauriRuntime()) return null;
-  return call<EditorRenderState>("editor_set_params", { params });
+  // 后端要拿这两个去读**这张照片的拍摄参数**（焦距 / 光圈 / 机身）才能解析镜头配置
+  // ——对比起让前端再传一遍（同一份事实两处传，早晚对不上）。
+  return call<EditorRenderState>("editor_set_params", { repositoryId, assetId, params });
 }
 
 /**
@@ -126,6 +130,61 @@ export interface DevelopStack {
    * 同一份参数就会渲染出两种颜色。
    */
   asShotK?: number | null;
+  /**
+   * 镜头配置文件（`null` = 自动识别；`"none"` = 显式关掉自动匹配；否则是 `maker|model`）。
+   *
+   * 为什么 `null` 与 `"none"` 不同：自动识别是**会变的**（换了 EXIF 读法、或库里新增了
+   * 这支镜头）—— 「我不要自动匹配」这件事必须能存住。
+   */
+  lensProfile?: string | null;
+  /** 配置文件那一半的开关（`null` = 默认开）。**手动三根拉杆不受它影响**。 */
+  lensEnabled?: boolean | null;
+  /** 降噪方式（`null` = 快速档；`"high"` = BM3D 高质量档）。 */
+  nrMethod?: string | null;
+}
+
+/** 降噪方式（编辑栈的一级；`"high"` = BM3D 高质量档，后台任务）。 */
+export type DevelopNrMethod = "fast" | "high";
+
+/**
+ * 镜头配置文件（lensfun 库里的一支镜头）。
+ *
+ * `key` 是稳定键（`maker|model`）—— 存进编辑栈的是它，不是序号。
+ */
+export interface LensProfile {
+  key: string;
+  maker: string;
+  model: string;
+  /** 投影类型是矩形吗（鱼眼 / 全景的**几何**校正本轮不做，界面要写明） */
+  rectilinear: boolean;
+}
+
+/** 这张照片的镜头匹配状态（自动识别 + 下拉候选）。 */
+export interface LensMatch {
+  /** 库里就绪了吗（`false` ⇒ 界面显示「加载中」，不是「没匹配到」） */
+  ready: boolean;
+  /** 自动识别到的配置文件（没有就是 `null` —— **不猜**） */
+  detected: LensProfile | null;
+  /** EXIF 里的镜头字符串（拿它解释「为什么没匹配到」） */
+  lensName: string | null;
+  /** 下拉候选（自动匹配的排第一；库里没有就空） */
+  candidates: LensProfile[];
+}
+
+/** 编辑栈里**不是参数也不是曲线**的那几项（落库与回读都用这个形状）。 */
+export interface DevelopSettings {
+  lensProfile?: string | null;
+  lensEnabled?: boolean | null;
+  nrMethod?: DevelopNrMethod | null;
+}
+
+/** 这张照片的镜头匹配状态 + 候选（进编辑时问一次；库没就绪时 `ready = false`）。 */
+export async function getLensMatch(
+  repositoryId: string,
+  assetId: number,
+): Promise<LensMatch | null> {
+  if (!isTauriRuntime()) return null;
+  return call<LensMatch>("lens_match", { repositoryId, assetId });
 }
 
 /** 落库 / 重置的结果：栈 + 撤销栈快照（界面据此显示「撤销：调整参数」）。 */
@@ -156,12 +215,20 @@ export async function commitDevelopStack(
   stack: DevelopStack,
 ): Promise<DevelopCommitResult | null> {
   if (!isTauriRuntime()) return null;
-  return call<DevelopCommitResult>("develop_commit", {
-    repositoryId,
-    assetId,
+  // 编辑栈整体作为**一个**参数发过去（不再把六个字段摊在命令参数上）——
+  // 加一项设置时只改 DTO，不必再动命令签名
+  const payload: DevelopStack = {
     values: stack.values,
     curves: stack.curves,
     asShotK: stack.asShotK ?? null,
+    lensProfile: stack.lensProfile ?? null,
+    lensEnabled: stack.lensEnabled ?? null,
+    nrMethod: stack.nrMethod ?? null,
+  };
+  return call<DevelopCommitResult>("develop_commit", {
+    repositoryId,
+    assetId,
+    stack: payload,
   });
 }
 

@@ -57,6 +57,14 @@ wgpu = "30.0.1"
 # 用它而不是 `tauri::async_runtime`：业务 crate 不许依赖 tauri（AGENTS.md §4）。
 pollster = "0.4"
 
+# 镜头校正数据库（M3-W4）：[lensfun](https://lensfun.github.io/) 的**纯 Rust 移植**
+# （`vdavid/lensfun-rs`，无 C 依赖，XML 库 gzip 后嵌在二进制里）。
+# 许可：代码 **LGPL-3.0-or-later**（可经 GPL-3.0 路径与 AGPL-3.0 组合，与 rawler 同一套论证），
+# 数据 **CC BY-SA 3.0**（原样分发 + 署名）——已登记 `THIRD-PARTY-NOTICES.md`。
+# ⚠️ API 仍在 0.x（beta）：**只允许在 `crates/raybend/src/lens/` 内使用**，
+# 其它模块只认我们自己的 `develop::lens::LensCorrection`（与 raw 后端可插拔同一套分层纪律）。
+lensfun = "0.7"
+
 # Windows 平台调用：文件身份（GetFileInformationByHandleEx）/ 驱动器类型（GetDriveTypeW）
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
 

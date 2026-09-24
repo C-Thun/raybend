@@ -112,6 +112,7 @@ pub const APP_MIGRATIONS: &[Migration] = &[
 ///   资产↔标签关联 / 全文索引加 `description`（BROWSE.md §3·§7·§9）
 /// * v3 `source_identity`：`asset_files` 的**源身份**列（判重用，REPOSITORY.md §4.3）
 /// * v5 `develop`：编辑栈（`develop_stacks` / `develop_params` / `develop_curves`，M3-W3）
+/// * v6 `lens`：镜头配置文件 / 启用开关 / 降噪方式（M3-W4）
 pub const CATALOG_MIGRATIONS: &[Migration] = &[
     Migration {
         version: 1,
@@ -139,6 +140,12 @@ pub const CATALOG_MIGRATIONS: &[Migration] = &[
         // 编辑栈（参数 + 曲线；本轮只有 `latest` 一个存储位）
         name: "develop",
         sql: include_str!("migrations/catalog_0005_develop.sql"),
+    },
+    Migration {
+        version: 6,
+        // 镜头配置文件 / 启用开关 / 降噪方式（M3-W4；三列都是「NULL = 没动过」）
+        name: "lens",
+        sql: include_str!("migrations/catalog_0006_lens.sql"),
     },
 ];
 
@@ -624,8 +631,8 @@ mod tests {
             1_789_516_800_000,
         )
         .unwrap();
-        assert_eq!((out.from, out.to), (0, 5));
-        assert_eq!(out.applied, vec![1, 2, 3, 4, 5]);
+        assert_eq!((out.from, out.to), (0, 6));
+        assert_eq!(out.applied, vec![1, 2, 3, 4, 5, 6]);
         for table in [
             "repository_meta",
             "assets",
@@ -736,8 +743,8 @@ mod tests {
         .unwrap();
 
         let out = apply(&mut conn, DbKind::Catalog, Backups::none(), 1_789_516_800_001).unwrap();
-        assert_eq!((out.from, out.to), (2, 5), "只补跑 v3 / v4 / v5");
-        assert_eq!(out.applied, vec![3, 4, 5]);
+        assert_eq!((out.from, out.to), (2, 6), "只补跑 v3 / v4 / v5 / v6");
+        assert_eq!(out.applied, vec![3, 4, 5, 6]);
 
         // 旧行还在，且新列是 NULL（不是被填了垃圾值）
         let (path, size, src_vol): (String, i64, Option<i64>) = conn

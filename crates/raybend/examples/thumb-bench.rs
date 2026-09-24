@@ -192,7 +192,7 @@ fn main() {
             let d = t.elapsed();
             *acc += d;
             if *name == "两段式" {
-                boxes.push(render::encode(resized, SizeClass::Grid, None, false, None).unwrap());
+                boxes.push(render::encode(resized, SizeClass::Grid, None, false, None, None).unwrap());
             }
         }
 

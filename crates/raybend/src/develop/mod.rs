@@ -43,6 +43,8 @@ pub mod sharpen;
 
 pub use color::{linear_to_srgb, srgb_to_linear, temperature_gain_ratio};
 pub use curve::{Curve, CurveChannel, CurveSet};
+pub use denoise::{DenoisePlan, NrMethod};
+pub use lens::{LensCorrection, LensMap, ManualLens};
 pub use params::{Baseline, DevelopParams, Origin, ParamSpec, PARAMS, spec};
 pub use pipeline::{
     DevelopPlans, DevelopStages, LinearImage, Resolved, apply_chroma, blacks_curve, chain_image,

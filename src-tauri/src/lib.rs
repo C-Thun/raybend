@@ -16,6 +16,7 @@ pub mod editor;
 /// 全屏看图（另开无边框窗口，沉浸式无 UI）。
 pub mod fullscreen;
 mod import;
+pub mod lens;
 mod migration;
 /// 窗口 ↔ wgpu 的最小胶水（取裸句柄 / 读客户区尺寸）——spike 与编辑视口共用这一份。
 mod render_window;
@@ -255,6 +256,7 @@ pub fn run() {
             editor::editor_unbind_renderer,
             editor::editor_set_photo,
             editor::editor_set_params,
+            lens::lens_match,
             editor::editor_viewport_intent,
             editor::editor_render_state,
             // ── 编辑栈落库（M3-W3：松手才写库）──
@@ -294,6 +296,10 @@ pub fn run() {
             // **失败不阻止启动**：窗口该出来还是要出来，错误让前端在需要时再报。
             let state = app.state::<db::DbState>();
             db::warm_up(app.handle(), &state);
+
+            // 镜头库（lensfun）在**后台**预热：解压 + 解析约 5 MB XML 要几十毫秒，
+            // 不挡窗口（面板先用 `isReady` 显示「加载中」）。
+            lens::warm_up();
 
             /*
              * 启动闪屏（见 `tauri.conf.json` 的 `splash` 窗口与 `public/splash.html`）。

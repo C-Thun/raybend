@@ -29,10 +29,10 @@ import { Button } from "../../components/ui/Button.tsx";
 import { SegmentedControl } from "../../components/ui/SegmentedControl.tsx";
 import { HistogramPanel } from "../../components/ui/HistogramPanel.tsx";
 import { Switch } from "../../components/ui/Form.tsx";
-import { Menu } from "../../components/ui/Menu.tsx";
+import { Menu, type MenuItemSpec } from "../../components/ui/Menu.tsx";
 import { t } from "../../i18n/index.ts";
 import type { MessageKey } from "../../i18n/index.ts";
-import type { DevelopEditBase } from "../../api/types.ts";
+import type { DevelopEditBase, LensMatch } from "../../api/types.ts";
 import { HISTOGRAM_SAMPLES, type HistogramCounts } from "../../lib/histogram.ts";
 import type { ThumbQueue } from "../../components/ui/thumb-queue.ts";
 import type { ViewerPhoto } from "../../components/ui/viewer/index.ts";
@@ -193,6 +193,31 @@ export function EditorPanels(props: EditorPanelsProps): JSX.Element {
           }))}
         />
         <div class="flex flex-col gap-2.5">
+          {/* 清晰度页签多一块：**降噪方式**（快速 / 高质量）—— 人类 2026-09-25 拍板
+              「两档都做，先保底再移植」：快速档实时跟手，高质量档在后台跑（见 `plans/M3-W4.md` §2.1） */}
+          <Show when={paramTab() === "detail"}>
+            <div class="flex flex-col gap-1 pb-0.5">
+              <span class="text-fs-0 text-fg-2">{t("editor.detail.nrMethod")}</span>
+              <SegmentedControl
+                value={props.store.nrMethod() ?? "fast"}
+                onValueChange={(value) =>
+                  props.store.setNrMethod(value === "fast" ? null : "high")
+                }
+                label={t("editor.detail.nrMethod")}
+                options={[
+                  { value: "fast", label: t("editor.detail.nrFast") },
+                  { value: "high", label: t("editor.detail.nrHigh") },
+                ]}
+              />
+              <span class="text-fs-0 leading-snug text-fg-3">
+                {t(
+                  props.store.nrMethod() === "high"
+                    ? "editor.detail.nrHighHint"
+                    : "editor.detail.nrFastHint",
+                )}
+              </span>
+            </div>
+          </Show>
           <For each={paramsInGroup(paramTab())}>
             {(spec) => (
               <SliderRow
@@ -211,7 +236,7 @@ export function EditorPanels(props: EditorPanelsProps): JSX.Element {
           </For>
           {/* 镜头页签多两块非拉杆控件（`.pd`：配置文件 + 启用校正开关） */}
           <Show when={paramTab() === "lens"}>
-            <LensExtras enabled={props.enabled} />
+            <LensExtras store={props.store} enabled={props.enabled} />
           </Show>
         </div>
         <div class="flex items-center justify-between gap-2">
@@ -439,16 +464,81 @@ function InfoTab(props: { info: EditorPhotoInfo | null }): JSX.Element {
   );
 }
 
-/** 镜头页签的两块非拉杆控件（配置文件 + 启用校正）。 */
-function LensExtras(props: { enabled: boolean }): JSX.Element {
-  const [enabled, setEnabled] = createSignal(false);
+/** 镜头页签的两块非拉杆控件（配置文件 + 启用校正）。
+ *
+ * 口径（人类 2026-09-25 拍板）：**配置文件负责自动/库校正，三根拉杆是手动微调叠加其上**；
+ * 「启用校正」开关**只管配置文件那一半** —— 关掉它之后手动拉杆照常生效
+ * （与 Lightroom 的 Lens Corrections 面板一致）。 */
+function LensExtras(props: { store: EditorStore; enabled: boolean }): JSX.Element {
+  const match = (): LensMatch | null => props.store.lensMatch();
+  const chosen = (): string | null => props.store.lensProfile();
+  /** 下拉里当前该选哪一项：`"auto"` = 自动识别，`"none"` = 不用，其余是键 */
+  const selected = (): string => {
+    const value = chosen();
+    if (value === "none") return "none";
+    if (value !== null) return value;
+    return match()?.detected != null ? "auto" : "none";
+  };
+  const items = (): MenuItemSpec[] => {
+    const list: MenuItemSpec[] = [];
+    const detected = match()?.detected ?? null;
+    if (detected !== null) {
+      list.push({
+        value: "auto",
+        label: `${t("editor.lens.profileAuto")}（${detected.maker} ${detected.model}）`,
+        selected: selected() === "auto",
+      });
+    }
+    list.push({
+      value: "none",
+      label: t("editor.lens.profileNone"),
+      selected: selected() === "none",
+    });
+    // 用户选过的那一支可能不在候选里（换了照片、或库变了）：也得能显示出来
+    const value = chosen();
+    const candidates = match()?.candidates ?? [];
+    for (const candidate of candidates) {
+      list.push({
+        value: candidate.key,
+        label: `${candidate.maker} ${candidate.model}`,
+        selected: selected() === candidate.key,
+      });
+    }
+    if (value !== null && value !== "none" && !candidates.some((c) => c.key === value)) {
+      list.push({ value, label: value, selected: true });
+    }
+    return list;
+  };
+  const label = (): string => {
+    const value = selected();
+    if (value === "none") return t("editor.lens.profileNone");
+    if (value === "auto") {
+      const detected = match()?.detected;
+      return detected == null
+        ? t("editor.lens.profileAuto")
+        : `${detected.maker} ${detected.model}`;
+    }
+    const found = (match()?.candidates ?? []).find((candidate) => candidate.key === value);
+    return found == null ? value : `${found.maker} ${found.model}`;
+  };
+  /** 依赖图下面那句实话：库还没就绪 / EXIF 没镜头信息 / 库里没匹配上。 */
+  const note = (): string => {
+    const state = match();
+    if (state === null || !state.ready) return t("editor.lens.loading");
+    if (state.lensName == null || state.lensName.trim() === "") {
+      return t("editor.lens.noExif");
+    }
+    if (state.detected === null) return t("editor.lens.notFound");
+    const detected = state.detected;
+    return detected.rectilinear ? t("editor.lens.matched") : t("editor.lens.fisheye");
+  };
   return (
     <div class="flex flex-col gap-2 pt-1">
       <div class="flex flex-col gap-1">
         <span class="text-fs-0 text-fg-2">{t("editor.lens.profile")}</span>
         <Menu
-          items={[{ value: "none", label: t("editor.lens.profileNone"), selected: true }]}
-          onSelect={() => undefined}
+          items={items()}
+          onSelect={(value) => props.store.setLensProfile(value === "auto" ? null : value)}
           label={t("editor.lens.profile")}
           placement="bottom-start"
         >
@@ -459,18 +549,18 @@ function LensExtras(props: { enabled: boolean }): JSX.Element {
               disabled={!props.enabled}
               class="w-full justify-between"
             >
-              {t("editor.lens.profileNone")}
+              {label()}
             </Button>
           )}
         </Menu>
       </div>
       <Switch
-        checked={enabled()}
-        onCheckedChange={setEnabled}
+        checked={props.store.lensEnabled() ?? true}
+        onCheckedChange={(value) => props.store.setLensEnabled(value)}
         disabled={!props.enabled}
         label={t("editor.lens.enable")}
       />
-      <PendingNote text={t("editor.panel.lensProfileLater")} />
+      <PendingNote text={note()} />
     </div>
   );
 }

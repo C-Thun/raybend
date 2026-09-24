@@ -71,6 +71,43 @@ const CHROMA_EDGE_THRESHOLD: f32 = 0.06;
 /// 亮度的地板（= u16 编码里的 1）。
 const LUMA_FLOOR: f32 = 1.0 / 65535.0;
 
+/// 降噪方式（**编辑栈的一级**，不是全局偏好 —— 见 `catalog_0006_lens.sql` 的注释）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum NrMethod {
+    /// 快速档（默认）：多尺度保边收缩，实时跟手
+    #[default]
+    Fast,
+    /// 高质量档：BM3D（后台任务，拖动期间先显示快速档结果）
+    High,
+}
+
+impl NrMethod {
+    /// 存库用的字面量（默认档**不写库** ⇒ `NULL`）。
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Fast => "fast",
+            Self::High => "high",
+        }
+    }
+
+    /// 解析（认不出给 `None` —— 调用方决定是报错还是忽略，不静默回退）。
+    #[must_use]
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "fast" => Some(Self::Fast),
+            "high" => Some(Self::High),
+            _ => None,
+        }
+    }
+
+    /// 是默认档吗（默认档不写库）。
+    #[must_use]
+    pub fn is_default(self) -> bool {
+        self == Self::Fast
+    }
+}
+
 /// 降噪计划（快速档）：两支强度都是 `0..1`，两个都是 0 = 整趟跳过。
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct DenoisePlan {

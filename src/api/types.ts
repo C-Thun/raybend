@@ -741,6 +741,47 @@ export interface DevelopParamsPayload {
    * 缺省 `false`（老调用方 / 单测不传这个字段也是合法的）。
    */
   interactive: boolean;
+  /** 镜头配置文件（`null` = 自动识别；`"none"` = 显式关掉；否则是 `maker|model`） */
+  lensProfile: string | null;
+  /** 配置文件那一半的开关（`null` = 默认开；**手动三根拉杆不受它影响**） */
+  lensEnabled: boolean | null;
+  /** 降噪方式（`null` = 快速档） */
+  nrMethod: DevelopNrMethod | null;
+}
+
+/** 降噪方式（编辑栈的一级；`"high"` = BM3D 高质量档，后台任务）。 */
+export type DevelopNrMethod = "fast" | "high";
+
+/**
+ * 镜头配置文件（lensfun 库里的一支镜头）。
+ *
+ * `key` 是稳定键（`maker|model`）—— 存进编辑栈的是它，不是序号。
+ */
+export interface LensProfile {
+  key: string;
+  maker: string;
+  model: string;
+  /** 投影类型是矩形吗（鱼眼 / 全景的**几何**校正本轮不做，界面要写明） */
+  rectilinear: boolean;
+}
+
+/** 这张照片的镜头匹配状态（自动识别 + 下拉候选）。 */
+export interface LensMatch {
+  /** 库里就绪了吗（`false` ⇒ 界面显示「加载中」，不是「没匹配到」） */
+  ready: boolean;
+  /** 自动识别到的配置文件（没有就是 `null` —— **不猜**） */
+  detected: LensProfile | null;
+  /** EXIF 里的镜头字符串（拿它解释「为什么没匹配到」） */
+  lensName: string | null;
+  /** 下拉候选（自动匹配的排第一；库里没有就空） */
+  candidates: LensProfile[];
+}
+
+/** 编辑栈里**不是参数也不是曲线**的那几项（落库与回读都用这个形状）。 */
+export interface DevelopSettings {
+  lensProfile?: string | null;
+  lensEnabled?: boolean | null;
+  nrMethod?: DevelopNrMethod | null;
 }
 
 export interface EditorRenderState {

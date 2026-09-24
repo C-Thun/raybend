@@ -20,8 +20,9 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, Runtime};
 
+use raybend::develop::denoise::NrMethod;
 use raybend::store::assets;
-use raybend::store::develop::{self, DevelopStack, IssueChoice};
+use raybend::store::develop::{self, DevelopStack, IssueChoice, Setting};
 use raybend::store::marking::{ChangeSet, Op};
 use raybend::store::repository::{self, RepositoryState};
 use raybend::store::time;
@@ -41,6 +42,15 @@ pub struct DevelopStackDto {
     /// 拍摄色温（K）—— 色温拉杆的基线，**跟着 issue 一起存**（见 `store::develop::DevelopStack`）
     #[serde(default)]
     pub as_shot_k: Option<f32>,
+    /// 镜头配置文件（`null` = 自动识别；`"none"` = 显式关掉；否则是 `maker|model`）
+    #[serde(default)]
+    pub lens_profile: Option<String>,
+    /// 配置文件那一半的开关（`null` = 默认开）
+    #[serde(default)]
+    pub lens_enabled: Option<bool>,
+    /// 降噪方式（`null` = 快速档；`"high"` = BM3D）
+    #[serde(default)]
+    pub nr_method: Option<String>,
 }
 
 impl From<DevelopStack> for DevelopStackDto {
@@ -49,19 +59,33 @@ impl From<DevelopStack> for DevelopStackDto {
             values: stack.params,
             curves: stack.curves,
             as_shot_k: stack.as_shot_k,
+            lens_profile: stack.lens_profile,
+            lens_enabled: stack.lens_enabled,
+            nr_method: stack.nr_method.map(|method| method.as_str().to_string()),
         }
     }
 }
 
 impl DevelopStackDto {
     /// 转成 store 的形态。
-    #[must_use]
-    pub fn into_stack(self) -> DevelopStack {
-        DevelopStack {
+    ///
+    /// # Errors
+    /// 降噪方式认不出（前端只能发 `"fast"` / `"high"`；发别的就是 bug，**不静默当默认**）。
+    pub fn into_stack(self) -> Result<DevelopStack, String> {
+        let nr_method = match self.nr_method {
+            Some(text) => Some(NrMethod::parse(&text).ok_or_else(|| {
+                format!("未知的降噪方式：{text}（只认 fast / high）")
+            })?),
+            None => None,
+        };
+        Ok(DevelopStack {
             params: self.values,
             curves: self.curves,
             as_shot_k: self.as_shot_k,
-        }
+            lens_profile: self.lens_profile,
+            lens_enabled: self.lens_enabled,
+            nr_method,
+        })
     }
 }
 
@@ -289,7 +313,7 @@ pub async fn develop_preview_refresh<R: Runtime>(
         if !raybend::store::develop::needs_preview(choice, &stack) {
             return Ok(false);
         }
-        crate::thumbs::render_latest_cached(&asset, &stack)?;
+        crate::thumbs::render_latest_cached(&handle, &asset, &stack)?;
         Ok(true)
     })
     .await
@@ -331,19 +355,13 @@ pub async fn develop_commit<R: Runtime>(
     app: AppHandle<R>,
     repository_id: String,
     asset_id: i64,
-    values: BTreeMap<String, f64>,
-    curves: BTreeMap<String, Vec<[f32; 2]>>,
-    as_shot_k: Option<f32>,
+    stack: DevelopStackDto,
 ) -> Result<DevelopCommitResult, String> {
     let handle = app.clone();
     let undo_repository = repository_id.clone();
     blocking(move || {
         let state = handle.state::<BrowseState>();
-        let stack = DevelopStack {
-            params: values,
-            curves,
-            as_shot_k,
-        };
+        let stack = stack.into_stack()?;
         let (stored, ops) = state.with_catalog(&handle, &repository_id, move |db| {
             // ① 先读旧值（撤销要它 —— 「读旧值 → 写新值」在同一次调用里完成）
             let before = db
@@ -442,6 +460,20 @@ fn diff_stack(asset_id: i64, before: &DevelopStack, after: &DevelopStack) -> Vec
                 channel: channel.clone(),
                 before: serde_json::to_string(points).ok(),
                 after: None,
+            });
+        }
+    }
+
+    // 编辑栈设置（镜头配置文件 / 启用开关 / 降噪方式）：三项都是「一个可空字符串」
+    for setting in [Setting::LensProfile, Setting::LensEnabled, Setting::NrMethod] {
+        let old = before.setting_value(setting);
+        let new = after.setting_value(setting);
+        if old != new {
+            ops.push(Op::DevelopSetting {
+                asset_id,
+                key: setting.key().to_string(),
+                before: old,
+                after: new,
             });
         }
     }

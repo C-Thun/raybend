@@ -175,6 +175,17 @@ pub enum Op {
         before: Option<String>,
         after: Option<String>,
     },
+    /// 改一项**编辑栈设置**（镜头配置文件 / 启用开关 / 降噪方式；M3-W4）。
+    ///
+    /// 三项共用一个变体：它们都是「一个可空的值」，而 [`crate::store::develop::Setting`]
+    /// 自带键名与校验 —— 与其加三个几乎一样的变体，不如把差异放进那个枚举。
+    /// `before` / `after` 是**字符串形式**（`None` = 清掉这一项 = 回到默认）。
+    DevelopSetting {
+        asset_id: i64,
+        key: String,
+        before: Option<String>,
+        after: Option<String>,
+    },
 }
 
 impl Op {
@@ -190,7 +201,8 @@ impl Op {
             | Self::TagDetach { asset_id, .. }
             | Self::Text { asset_id, .. }
             | Self::DevelopParam { asset_id, .. }
-            | Self::DevelopCurve { asset_id, .. } => *asset_id,
+            | Self::DevelopCurve { asset_id, .. }
+            | Self::DevelopSetting { asset_id, .. } => *asset_id,
         }
     }
 
@@ -280,6 +292,17 @@ impl Op {
             } => Self::DevelopCurve {
                 asset_id: *asset_id,
                 channel: channel.clone(),
+                before: after.clone(),
+                after: before.clone(),
+            },
+            Self::DevelopSetting {
+                asset_id,
+                key,
+                before,
+                after,
+            } => Self::DevelopSetting {
+                asset_id: *asset_id,
+                key: key.clone(),
                 before: after.clone(),
                 after: before.clone(),
             },
@@ -448,6 +471,15 @@ pub fn apply(conn: &Connection, change: &ChangeSet) -> Result<Applied> {
                     points.as_deref(),
                     now,
                 )?;
+                changed.insert(asset_id);
+            }
+            Op::DevelopSetting { key, after, .. } => {
+                let Some(setting) = crate::store::develop::Setting::parse(key) else {
+                    return Err(crate::error::Error::Unsupported(format!(
+                        "撤销栈里有未知的编辑设置：{key}"
+                    )));
+                };
+                crate::store::develop::set_setting(conn, asset_id, setting, after.as_deref(), now)?;
                 changed.insert(asset_id);
             }
         }
