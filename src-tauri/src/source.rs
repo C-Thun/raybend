@@ -232,6 +232,8 @@ pub struct FileExifView {
     pub f_number: Option<f64>,
     /// 快门时间（**毫秒**；界面自己换算成「1/125s」这种写法）。
     pub exposure_ms: Option<f64>,
+    /// 曝光补偿（EV，负值 = 减光）。编辑右栏「与调节相关」那组要用。
+    pub exposure_bias_ev: Option<f64>,
     pub iso: Option<i64>,
     pub width: Option<i64>,
     pub height: Option<i64>,
@@ -457,6 +459,7 @@ pub async fn file_exif(path: String) -> Result<FileExifView, String> {
             focal_mm: data.focal_mm,
             f_number: data.f_number,
             exposure_ms: data.exposure_ms,
+            exposure_bias_ev: data.exposure_bias_ev,
             iso: data.iso,
             width: data.width,
             height: data.height,
