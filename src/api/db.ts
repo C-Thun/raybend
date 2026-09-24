@@ -209,6 +209,7 @@ export const EMPTY_FILE_EXIF: FileExif = {
   focalMm: null,
   fNumber: null,
   exposureMs: null,
+  exposureBiasEv: null,
   iso: null,
   width: null,
   height: null,

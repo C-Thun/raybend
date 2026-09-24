@@ -139,6 +139,7 @@ const PHOTO_COUNT_KEYS = [
 const FILE_EXIF_KEYS = [
   "cameraMake",
   "cameraModel",
+  "exposureBiasEv",
   "exposureMs",
   "ext",
   "fNumber",

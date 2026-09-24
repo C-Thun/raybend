@@ -35,7 +35,7 @@ import type { MessageKey } from "../../i18n/index.ts";
 import { HISTOGRAM_SAMPLES, type HistogramCounts } from "../../lib/histogram.ts";
 import type { ThumbQueue } from "../../components/ui/thumb-queue.ts";
 import type { ViewerPhoto } from "../../components/ui/viewer/index.ts";
-import { PREVIEW_FRAME_ASPECT } from "../../lib/preview-frame.ts";
+import { PreviewFrame } from "../../components/ui/PreviewFrame.tsx";
 import {
   ANGLE_SPEC,
   CROP_RATIOS,
@@ -43,37 +43,40 @@ import {
   PARAM_GROUPS,
   cropRatioLabel,
   paramsInGroup,
-  paramsInOverview,
   type ParamGroup,
 } from "./params.ts";
 import { PendingNote } from "./parts.tsx";
 import { SliderRow } from "./SliderRow.tsx";
 import type { EditorStore } from "./store.ts";
 import { CurveEditor } from "./CurveEditor.tsx";
+import { EditorZoomControl } from "./zoom-control.tsx";
 
 /* ══════════════════════════════════════════════════════════════
  * 入参形状
  * ══════════════════════════════════════════════════════════════ */
 
 /**
- * 「信息」页签要的字段（**结构类型**，由工作区从 `AssetItem` / `ExifData` 拼好传进来）。
+ * 「信息」页签要的字段（**结构类型**，由工作区拼好传进来）。
  *
  * 为什么不让本模块自己去查：`features/*` 之间不许互相 import（分层规则），
  * 而照片数据属于浏览那一侧 —— 工作区把两块接起来正是它的职责（`ARCHITECTURE.md` §2）。
- * 这里的字段**都是显示字符串**（格式化的唯一实现在 `features/exif-strip/exif-format.ts`）。
+ * 这里的字段**都是显示字符串**（格式化的唯一实现在 `features/exif-strip/exif-format.ts`
+ * 与 `lib/datetime.ts`）。
+ *
+ * ⚠️ **只收 flowbar 没有的字段**（人类 2026-09-24：与 flowbar 重复的在这里删掉）——
+ * 机型/镜头/ISO/快门/光圈/焦距/尺寸/格式都在 flowbar 右侧，别加回来。
  */
 export interface EditorPhotoInfo {
   fileName: string;
   relativePath: string;
-  format: string | null;
-  camera: string | null;
-  lens: string | null;
-  iso: string | null;
-  shutter: string | null;
-  aperture: string | null;
-  focal: string | null;
-  dimensions: string | null;
-  megapixels: string | null;
+  /** 拍摄基线色温（as-shot，K）—— 与调节关系最紧的那组置顶（人类 2026-09-24） */
+  temperatureBaseline: string | null;
+  /** 当前色温（拉杆值，K；拖动时跟着变） */
+  temperatureCurrent: string | null;
+  /** 曝光补偿（如 `−1.3 EV`） */
+  exposureBias: string | null;
+  /** 拍摄时间（已按 EXIF 时区格式化） */
+  takenAt: string | null;
 }
 
 export interface EditorPanelsProps {
@@ -101,6 +104,12 @@ export interface EditorPanelsProps {
   error?: string | null;
   /** 这张照片被二级锁锁住（不可编辑）—— 整列禁用 + 一句话说明 */
   locked?: boolean;
+  /** Rust 视口的当前缩放（`null` = 还没有渲染状态）—— 总览页的缩放控制用 */
+  zoom?: number | null;
+  /** 按倍率缩放一档（工作区把意图发给 Rust） */
+  onZoomBy?: (factor: number) => void;
+  /** 手动输入的目标缩放（`1.0` = 100%） */
+  onZoomTo?: (zoom: number) => void;
   class?: string;
 }
 
@@ -158,6 +167,9 @@ export function EditorPanels(props: EditorPanelsProps): JSX.Element {
             store={props.store}
             enabled={props.enabled}
             onCommit={props.onCommit}
+            zoom={props.zoom ?? null}
+            {...(props.onZoomBy === undefined ? {} : { onZoomBy: props.onZoomBy })}
+            {...(props.onZoomTo === undefined ? {} : { onZoomTo: props.onZoomTo })}
           />
         </Show>
         <Show when={viewTab() === "issues"}>
@@ -266,6 +278,9 @@ function OverviewTab(props: {
   store: EditorStore;
   enabled: boolean;
   onCommit?: () => void;
+  zoom: number | null;
+  onZoomBy?: (factor: number) => void;
+  onZoomTo?: (zoom: number) => void;
 }): JSX.Element {
   const path = (): string | null => props.current?.path ?? null;
   const thumb = (): string | null => {
@@ -278,56 +293,30 @@ function OverviewTab(props: {
   return (
     <>
       {/*
-        预览：与浏览右栏同一个 4:3 框口径（`lib/preview-frame.ts`），
-        用的也是**与胶片带同一份缩略图缓存** —— 不为「编辑里再看一眼」再取一遍图。
+        预览：与浏览右栏**同一个组件**（`components/ui/PreviewFrame.tsx`）——
+        固定 4:3 外框 + 按原图比例的内盒，不再自己写一份（`AGENTS.md` §2.12）。
+        图源仍是与胶片带**共用**的缩略图缓存（不为「编辑里再看一眼」再取一遍图）。
       */}
-      <div
-        class="flex w-full items-center justify-center rounded-ui bg-surface-bar p-2"
-        style={{ "aspect-ratio": String(PREVIEW_FRAME_ASPECT) }}
-        data-editor-preview
-      >
-        <Show
-          when={thumb()}
-          fallback={
-            <span class="text-fs-2 text-fg-3">
-              {path() === null ? t("editor.empty.noSelection") : t("common.loading")}
-            </span>
-          }
-        >
-          {(url) => (
-            <img
-              class="block h-full w-full object-contain"
-              src={url()}
-              alt=""
-              draggable={false}
-            />
-          )}
-        </Show>
-      </div>
+      <PreviewFrame
+        src={thumb()}
+        natural={props.current?.natural ?? null}
+        emptyText={path() === null ? t("editor.empty.noSelection") : t("common.loading")}
+      />
+      {/* 缩放控制：视口没有鼠标靠近浮出的按钮，这里给一个稳定的读数与入口 */}
+      <EditorZoomControl
+        zoom={props.zoom}
+        enabled={props.enabled}
+        onZoomBy={(factor) => props.onZoomBy?.(factor)}
+        onZoomTo={(zoom) => props.onZoomTo?.(zoom)}
+      />
       <HistogramPanel
         load={props.loadHistogram}
         path={path()}
         title={t("browse.histogram")}
         emptyText={t("browse.histogramEmpty")}
       />
-      {/*
-        寄居在直方图下面的参数（目前只有动态反差，`params.ts` 的 `placement: "overview"`）。
-        人类 2026-09-24 定：它**暂时**不住在影调页签里，也不占单独的面板块。
-        同一根杆只能出现一次 —— `paramsInGroup` 会把 `overview` 的排除掉。
-      */}
-      <For each={paramsInOverview()}>
-        {(spec) => (
-          <SliderRow
-            spec={spec}
-            value={props.store.paramValue(spec.id)}
-            disabled={!props.enabled || !spec.wired}
-            onValueChange={(value) => props.store.setParam(spec.id, value)}
-            onValueCommit={() => props.onCommit?.()}
-          />
-        )}
-      </For>
       {/* 上面那块直方图还是 SOOC 的（编辑后的直方图排在 W4）——
-          拉杆紧贴着它，不写一句会让人以为「拖了画面变、直方图不变」是 bug */}
+          不写一句会让人以为「拖了画面变、直方图不变」是 bug */}
       <PendingNote text={t("editor.panel.histogramSooc")} />
     </>
   );
@@ -360,38 +349,61 @@ function IssuesTab(props: { enabled: boolean }): JSX.Element {
 
 /** 信息页签：文件 / 相机 / 尺寸 + 编辑（`.pd` 的三段 + 一行编辑状态）。 */
 function InfoTab(props: { info: EditorPhotoInfo | null }): JSX.Element {
-  const rows = (): { labelKey: MessageKey; value: string | null }[] => {
+  /*
+   * 三组（人类 2026-09-24：与调节关系最紧的放最上、与 flowbar 重复的不要）：
+   * ① 与调节相关（色温基线 / 当前色温 / 曝光补偿）② 拍摄（时间）③ 文件（名 / 路径）。
+   * 机型/镜头/ISO/快门/光圈/焦距/尺寸/格式在 flowbar 右侧已经显示 —— 这里**不许**再加。
+   */
+  const groups = (): {
+    titleKey: MessageKey;
+    rows: { labelKey: MessageKey; value: string | null }[];
+  }[] => {
     const info = props.info;
     if (info === null) return [];
     return [
-      { labelKey: "editor.info.name", value: info.fileName },
-      { labelKey: "editor.info.path", value: info.relativePath },
-      { labelKey: "exif.format", value: info.format },
-      { labelKey: "exif.camera", value: info.camera },
-      { labelKey: "exif.lens", value: info.lens },
-      { labelKey: "exif.iso", value: info.iso },
-      { labelKey: "exif.shutter", value: info.shutter },
-      { labelKey: "exif.aperture", value: info.aperture },
-      { labelKey: "exif.focal", value: info.focal },
-      { labelKey: "exif.dimensions", value: info.dimensions },
-      { labelKey: "exif.megapixels", value: info.megapixels },
+      {
+        titleKey: "editor.info.adjustGroup",
+        rows: [
+          { labelKey: "editor.info.temperatureBaseline", value: info.temperatureBaseline },
+          { labelKey: "editor.info.temperatureCurrent", value: info.temperatureCurrent },
+          { labelKey: "editor.info.exposureBias", value: info.exposureBias },
+        ],
+      },
+      {
+        titleKey: "editor.info.shotGroup",
+        rows: [{ labelKey: "editor.info.takenAt", value: info.takenAt }],
+      },
+      {
+        titleKey: "editor.info.fileGroup",
+        rows: [
+          { labelKey: "editor.info.name", value: info.fileName },
+          { labelKey: "editor.info.path", value: info.relativePath },
+        ],
+      },
     ];
   };
 
   return (
-    <div class="flex flex-col gap-1" data-editor-info>
+    <div class="flex flex-col gap-3" data-editor-info>
       <Show
         when={props.info !== null}
         fallback={<p class="py-2 text-fs-1 text-fg-3">{t("exif.empty")}</p>}
       >
-        <For each={rows()}>
-          {(row) => (
-            <Show when={row.value !== null && row.value !== ""}>
-              <div class="flex items-baseline gap-2">
-                <span class="w-16 shrink-0 text-fs-0 text-fg-3">{t(row.labelKey)}</span>
-                <span class="min-w-0 flex-1 truncate text-fs-1 text-fg-1">{row.value}</span>
-              </div>
-            </Show>
+        <For each={groups()}>
+          {(group) => (
+            <div class="flex flex-col gap-1" data-editor-info-group>
+              <span class="text-fs-0 font-semibold text-fg-2">{t(group.titleKey)}</span>
+              <For each={group.rows}>
+                {(row) => (
+                  <Show when={row.value !== null && row.value !== ""}>
+                    <div class="flex items-baseline gap-2">
+                      <span class="w-16 shrink-0 text-fs-0 text-fg-3">{t(row.labelKey)}</span>
+                      <span class="min-w-0 flex-1 truncate text-fs-1 text-fg-1">{row.value}</span>
+                    </div>
+                  </Show>
+                )}
+              </For>
+            </div>
           )}
         </For>
       </Show>

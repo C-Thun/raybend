@@ -29,6 +29,7 @@ export { assetItemExif } from "./from-asset.ts";
 export {
   formatAperture,
   formatDimensions,
+  formatExposureBias,
   formatFocalLength,
   formatIso,
   formatMegapixels,

@@ -23,7 +23,6 @@ import {
   paramSpec,
   PARAM_GROUPS,
   paramsInGroup,
-  paramsInOverview,
   type ParamSpec,
 } from "./params.ts";
 import contract from "../../api/develop-params.json" with { type: "json" };
@@ -86,18 +85,21 @@ test("动过没有：可以把「这张照片的基线」传进来（色温用�
   assert.equal(isParamDirty("temperature", 7000, 5200), true);
 });
 
-test("寄居在别处的参数只渲染一次，且两处合起来是全集", () => {
+test("每根杆都住在参数组里（没有「寄居」的例外）", () => {
   // `AGENTS.md` §2.12：同一个东西两种表达本身就是 bug。
-  // 动态反差暂时住在总览页的直方图下面（`placement: "overview"`）——
-  // 它绝不能在影调页签里再出现一次，也不能从两处都掉出去。
-  const overview = paramsInOverview().map((p) => p.id);
-  assert.deepEqual(overview, ["dynamicContrast"], "总览页寄居的应当只有动态反差");
+  // 动态反差曾一度寄居在总览页（`placement: "overview"`）—— 2026-09-24 收进影调组，
+  // 与曝光/反差走同一套框架（落库 / 撤销 / 重置全一样）。
+  // 这条断言钉住：**每个参数都必须落在某一个组的页签里**，且只出现一次。
   const inGroups = PARAM_GROUPS.flatMap((group) => paramsInGroup(group).map((p) => p.id));
-  assert.ok(!inGroups.includes("dynamicContrast"), "影调页签里不许再出现一次");
   assert.deepEqual(
-    [...inGroups, ...overview].sort(),
+    [...inGroups].sort(),
     PARAMS.map((p) => p.id).sort(),
-    "页签 + 寄居 必须正好覆盖参数表（不许有杆掉进缝里）",
+    "页签必须正好覆盖参数表（不许有杆掉进缝里）",
+  );
+  assert.equal(new Set(inGroups).size, inGroups.length, "同一根杆不许出现在两个组里");
+  assert.ok(
+    paramsInGroup("tone").some((p) => p.id === "dynamicContrast"),
+    "动态反差在影调组里（与曝光/反差同组）",
   );
 });
 

@@ -62,6 +62,34 @@ export function formatTimeRange(
   return start === end ? start : `${start}–${end}`;
 }
 
+/**
+ * **日期 + 时间**（编辑右栏「信息」的拍摄时间用）。
+ *
+ * 时区口径与 [`formatClock`] 完全一致（同一份规则，别另立一套）——
+ * 差别只在多显示日期：形如 `2026/9/13 14:23`（跟随 locale）。
+ */
+export function formatDateTime(
+  ms: number,
+  offsetMinutes: number | null | undefined,
+  locale: string,
+): string {
+  if (!Number.isFinite(ms)) return "";
+  const useLocalZone = offsetMinutes === undefined;
+  const offset = useLocalZone ? 0 : (offsetMinutes ?? 0);
+  const shifted = ms + offset * 60_000;
+
+  const options: Intl.DateTimeFormatOptions = {
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  };
+  if (!useLocalZone) options.timeZone = "UTC";
+  return new Intl.DateTimeFormat(locale, options).format(shifted);
+}
+
 /** `YYYY-MM-DD` 是否是我们自己产出的日期键 */
 const DAY_KEY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 

@@ -18,6 +18,7 @@ function file(overrides: Partial<FileExif> = {}): FileExif {
     focalMm: null,
     fNumber: null,
     exposureMs: null,
+    exposureBiasEv: null,
     iso: null,
     width: null,
     height: null,

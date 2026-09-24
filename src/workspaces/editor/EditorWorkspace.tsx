@@ -50,9 +50,15 @@ import {
 } from "../../api/editor.ts";
 import { createLatestCoalescer } from "../../lib/editor-intent.ts";
 import { isTauriRuntime } from "../../api/tauri-env.ts";
-import type { DevelopParamsPayload, EditorRenderState, EditorViewportIntent } from "../../api/types.ts";
-import { getHistogram, getThumbBytes, listRepositories } from "../../api/db.ts";
+import type {
+  DevelopParamsPayload,
+  EditorRenderState,
+  EditorViewportIntent,
+  FileExif,
+} from "../../api/types.ts";
 import type { AssetItem, RepositoryView } from "../../api/types.ts";
+import { getHistogram, getThumbBytes, listRepositories, readFileExif } from "../../api/db.ts";
+import { formatDateTime } from "../../lib/datetime.ts";
 import { browseSource } from "../../features/browse/grid-source.ts";
 import type { BrowseStore } from "../../features/browse/store.ts";
 import {
@@ -66,16 +72,7 @@ import {
   type EditorStore,
 } from "../../features/editor/index.ts";
 import { registerEditorActions, type EditorActions } from "../../features/editor/actions.ts";
-import {
-  assetItemExif,
-  formatAperture,
-  formatDimensions,
-  formatFocalLength,
-  formatIso,
-  formatMegapixels,
-  formatShutter,
-  formatText,
-} from "../../features/exif-strip/index.ts";
+import { formatExposureBias } from "../../features/exif-strip/index.ts";
 import { createThumbQueue } from "../../components/ui/thumb-queue.ts";
 import { FilmStrip } from "../../components/ui/viewer/index.ts";
 import { photosFromSource, viewingInfoOf } from "../../components/ui/viewer/index.ts";
@@ -89,7 +86,7 @@ import {
   commitBrowseDisplayTileStep,
   setBrowseDisplayTileStep,
 } from "../../lib/display-prefs.ts";
-import { t } from "../../i18n/index.ts";
+import { locale, t } from "../../i18n/index.ts";
 
 export interface EditorWorkspaceProps {
   store: EditorStore;
@@ -223,6 +220,18 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
     });
   };
 
+  /**
+   * 手动输入的目标缩放（`1.0` = 100%）：按当前值折成 `zoomBy` 的倍率。
+   *
+   * 为什么不新增一个 `zoomTo` 意图：视口的夹取与错点保持都在 Rust 的 `zoom_at` 里，
+   * 一个倍率就够表达「到那个倍率」—— 少一条命令、少一处要同步的语义。
+   */
+  const zoomTo = (target: number): void => {
+    const current = props.store.renderState()?.zoom ?? null;
+    if (current === null || current <= 0 || !Number.isFinite(target) || target <= 0) return;
+    sendIntent({ kind: "zoomBy", factor: target / current });
+  };
+
   /** 起渲染线程（挂载时一次；「重试」也走它 —— Rust 侧对已死的线程会重新起一个）。 */
   const startRenderer = (): void => {
     void bindEditorRenderer()
@@ -267,7 +276,10 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
   const paramsSender = createLatestCoalescer<DevelopParamsPayload>({
     send: (payload) => {
       void setEditorParams(payload).catch((error: unknown) => {
+        // 参数被拒（非法值 / 渲染线程没了）**不能只进控制台**：画面会停在最后一帧，
+        // 用户看到的是「拉什么杆都没反应」。走面板那条错误通道，让原因留在界面上。
         console.error("[editor] 显影参数被拒", error); // i18n-exempt: 控制台诊断
+        setDevelopError(String(error));
       });
     },
   });
@@ -329,8 +341,13 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
         // 撤销标签由 `browse` 的 undoState 统一显示（编辑与标记共用一套撤销栈），
         // 这里不再存第二份。
         props.store.markCommitted(rev);
-        // 缩略图要重取：编辑结果变了，旧的那张（SOOC）不该再显示
-        thumbs.clear();
+        /*
+         * 缩略图要重取：编辑结果变了，旧的那张（SOOC）不该再显示。
+         * **只失效当前这一张**（`refresh`）—— `clear()` 会把整条胶片带每一格的 URL 都回收，
+         * 松一次手整条带子全量重画（2026-09-24 人类报的「最严重」那一条）。
+         */
+        const path = currentPath();
+        if (path !== null) thumbs.refresh(path);
       })
       .catch((error: unknown) => {
         // 落库失败不静默：画面还是对的，但下次换照片会丢 —— 必须让人知道
@@ -499,23 +516,49 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
 
   const enabled = (): boolean => current() !== null && !locked();
 
-  /** 「信息」页签的字段（格式化的唯一实现在 `features/exif-strip/exif-format.ts`）。 */
+  /** 右栏「信息」页签的**文件级 EXIF**（按需读文件头，不落库；毫秒级） */
+  const [fileExif, setFileExif] = createSignal<FileExif | null>(null);
+  createEffect(() => {
+    const path = currentPath();
+    if (path === null) {
+      setFileExif(null);
+      return;
+    }
+    let cancelled = false;
+    void readFileExif(path)
+      .then((file) => {
+        if (!cancelled) setFileExif(file);
+      })
+      .catch(() => {
+        if (!cancelled) setFileExif(null);
+      });
+    onCleanup(() => {
+      cancelled = true;
+    });
+  });
+
+  /**
+   * 「信息」页签的字段（人类 2026-09-24 的口径）：
+   * **只收 flowbar 没有的**（机型/镜头/ISO/快门/光圈/焦距/尺寸/格式都在 flowbar 右侧）；
+   * 与调节最紧的色温置顶。格式化只走 `exif-strip` / `lib/datetime` 的现成实现。
+   */
   const info = createMemo<EditorPhotoInfo | null>(() => {
     const item: AssetItem | null = store.anchorItem();
     if (item === null) return null;
-    const exif = assetItemExif(item);
+    const baseline = props.store.asShotTemperature();
+    const current = props.store.paramValue("temperature");
+    const taken = fileExif()?.takenAtMs ?? null;
+    const offset = fileExif()?.takenAtOffsetMin;
     return {
       fileName: item.fileName,
       relativePath: item.relPath,
-      format: formatText(exif.format) ?? null,
-      camera: formatText(exif.camera) ?? null,
-      lens: formatText(exif.lens) ?? null,
-      iso: formatIso(exif.iso) ?? null,
-      shutter: formatShutter(exif.exposureSeconds) ?? null,
-      aperture: formatAperture(exif.fNumber) ?? null,
-      focal: formatFocalLength(exif.focalLengthMm) ?? null,
-      dimensions: formatDimensions(exif.widthPx, exif.heightPx) ?? null,
-      megapixels: formatMegapixels(exif.widthPx, exif.heightPx) ?? null,
+      temperatureBaseline: baseline === null ? null : `${Math.round(baseline)} K`,
+      temperatureCurrent: `${Math.round(current)} K`,
+      exposureBias: formatExposureBias(fileExif()?.exposureBiasEv ?? null) ?? null,
+      takenAt:
+        taken === null
+          ? null
+          : formatDateTime(taken, offset === null ? undefined : offset, locale()),
     };
   });
 
@@ -632,6 +675,9 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
             onReset={resetDevelop}
             error={developError()}
             locked={locked()}
+            zoom={props.store.renderState()?.zoom ?? null}
+            onZoomBy={(factor) => sendIntent({ kind: "zoomBy", factor })}
+            onZoomTo={zoomTo}
           />
         </aside>
       </div>

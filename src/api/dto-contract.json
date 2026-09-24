@@ -63,6 +63,7 @@
   "FileExif": [
     "cameraMake",
     "cameraModel",
+    "exposureBiasEv",
     "exposureMs",
     "ext",
     "fNumber",

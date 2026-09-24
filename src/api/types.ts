@@ -144,6 +144,8 @@ export interface FileExif {
   fNumber: number | null;
   /** 快门时间（**毫秒**；界面自己换算成 `1/125s` 这种写法）。 */
   exposureMs: number | null;
+  /** 曝光补偿（EV，负值 = 减光）；编辑右栏「与调节相关」那组要用。 */
+  exposureBiasEv: number | null;
   iso: number | null;
   width: number | null;
   height: number | null;

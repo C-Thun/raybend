@@ -26,6 +26,8 @@ export function assetItemExif(item: AssetItem): ExifData {
     focalMm: item.focalMm,
     fNumber: item.fNumber,
     exposureMs: item.exposureMs,
+    // 库里不存曝光补偿（EXIF 是文件的属性，不进库）；需要时走 `readFileExif` 按需读
+    exposureBiasEv: null,
     iso: item.iso,
     width: item.width,
     height: item.height,

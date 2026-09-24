@@ -100,3 +100,17 @@ export function formatText(value: string | undefined): string | undefined {
  const trimmed = value.trim();
  return trimmed.length > 0 ? trimmed : undefined;
 }
+
+/**
+ * 曝光补偿：`+0.3 EV` / `−1.3 EV` / `0 EV`。
+ *
+ * ⚠️ 与上面那批**规则相反**：对曝光补偿来说 **0 与负数都是有效值**
+ * （0 = 无补偿，负 = 减光），只有非有限值才是「没有值」。
+ * 一位小数足句（相机的补偿步长是 ⅓ 或 ½ EV）。
+ */
+export function formatExposureBias(ev: number | null | undefined): string | undefined {
+ if (ev === null || ev === undefined || !Number.isFinite(ev)) return undefined;
+ const rounded = Math.round(ev * 10) / 10;
+ const sign = rounded > 0 ? "+" : "";
+ return `${sign}${trimNumber(rounded, 1)} EV`;
+}
