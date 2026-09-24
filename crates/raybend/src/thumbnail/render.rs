@@ -31,8 +31,11 @@ use image::{DynamicImage, ExtendedColorType, ImageFormat, Rgb, RgbImage};
 use image::ImageEncoder;
 
 use crate::develop::curve::{Curve, CurveChannel, CurveSet};
+use crate::develop::local_tone::{LocalToneOpts, LocalToneState};
 use crate::develop::params::DevelopParams;
-use crate::develop::pipeline::{LinearImage, render_rgb8};
+use crate::develop::pipeline::{
+    DevelopPlans, DevelopStages, LinearImage, chain_image, render_develop,
+};
 use crate::store::develop::DevelopStack;
 
 use crate::error::{Error, Result};
@@ -126,7 +129,11 @@ pub fn encode_avif(rgb: &[u8], width: u32, height: u32) -> Result<Vec<u8>> {
 ///
 /// ⇒ 所以这条纪律的正确用法是：**同一个改动里，改了渲染行为就顺手抬版本**，
 /// 不要「先合并渲染改动、之后再抬」（中间那段时间产出的缓存会带着旧行为却持有新签名）。
-pub const PIPELINE_VERSION: u32 = 6;
+///
+/// **第五次（v6 → v7，2026-09-25，M3-W4）**：缩略图 / 看图那条路接上了**可选阶段**
+/// （镜头手动微调 / 降噪 / 锐化）与**动态反差** —— 此前缩略图只跑逐像素链，
+/// 于是同一张照片在网格与编辑器里会是两张不同的图（`dynamicContrast` 完全没体现）。
+pub const PIPELINE_VERSION: u32 = 7;
 
 /// 缩略图尺度。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
@@ -193,9 +200,9 @@ impl SizeClass {
 #[must_use]
 pub const fn render_sig(size: SizeClass) -> &'static str {
     match size {
-        SizeClass::Grid => "avif-q90-grid-v6",
-        SizeClass::Strip => "avif-q90-strip-v6",
-        SizeClass::Screen => "avif-q90-screen-v6",
+        SizeClass::Grid => "avif-q90-grid-v7",
+        SizeClass::Strip => "avif-q90-strip-v7",
+        SizeClass::Screen => "avif-q90-screen-v7",
     }
 }
 
@@ -537,7 +544,22 @@ fn apply_develop(img: &image::RgbImage, stack: &DevelopStack) -> Result<image::R
             .map_err(|e| Error::Unsupported(format!("编辑栈里的曲线不合法（{}）：{e}", channel.as_str())))?;
         curves.set_channel(channel, curve);
     }
-    let rgb = render_rgb8(&linear, &params, &curves);
+    // 可选阶段（降噪 / 锐化 / 镜头手动微调）与动态反差：
+    // **缩略图也必须反映编辑结果**（M3 的 DoD）——
+    // 动态反差的分解在缩略图尺寸上很便宜，不做的话网格与编辑器会显示两张不同的图。
+    let plans = DevelopPlans::from_params(width, height, &params);
+    let lens_map = crate::develop::lens::LensMap::new(&plans.lens);
+    let local_state = (plans.local_tone > 0.0).then(|| {
+        let chained = chain_image(&linear, &params);
+        LocalToneState::analyze(&chained, &LocalToneOpts::default())
+    });
+    let stages = DevelopStages {
+        lens: Some(&lens_map),
+        denoise: Some(&plans.denoise),
+        local_tone: local_state.as_ref().map(|state| (state, plans.local_tone)),
+        sharpen: Some(&plans.sharpen),
+    };
+    let rgb = render_develop(&linear, &params, &curves, &stages);
     image::RgbImage::from_raw(width, height, rgb)
         .ok_or_else(|| Error::Unsupported("编辑渲染：输出尺寸对不上".to_string()))
 }

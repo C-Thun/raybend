@@ -14,7 +14,11 @@
 use std::path::Path;
 use std::time::Instant;
 
-use raybend::develop::{CurveSet, DevelopParams, LinearImage, render_rgb8};
+use raybend::develop::denoise::denoise_fast;
+use raybend::develop::lens::{LensMap, warp_lens};
+use raybend::develop::{
+    CurveSet, DevelopParams, DevelopPlans, DevelopStages, LinearImage, render_develop, render_rgb8,
+};
 
 fn synthetic(width: u32, height: u32) -> LinearImage {
     let mut rgb = Vec::with_capacity((width as usize) * (height as usize) * 3);
@@ -67,6 +71,51 @@ fn time(label: &str, source: &LinearImage, params: &DevelopParams, curves: &Curv
     );
 }
 
+/// 量一趟 `render_develop`（可选阶段全在里面）。
+fn time_with(
+    label: &str,
+    source: &LinearImage,
+    params: &DevelopParams,
+    curves: &CurveSet,
+    stages: &DevelopStages<'_>,
+) {
+    let _ = render_develop(source, params, curves, stages);
+    let runs = 3;
+    let mut total = std::time::Duration::ZERO;
+    for _ in 0..runs {
+        let start = Instant::now();
+        let out = render_develop(source, params, curves, stages);
+        total += start.elapsed();
+        std::hint::black_box(&out);
+    }
+    let average = total / runs;
+    let pixels = u64::from(source.width) * u64::from(source.height);
+    #[allow(clippy::cast_precision_loss)]
+    let megapixels = pixels as f64 / 1_000_000.0;
+    #[allow(clippy::cast_precision_loss)]
+    let millis = average.as_secs_f64() * 1000.0;
+    println!(
+        "{label:<44} {:>7.2} MP   {millis:>8.1} ms   {:.1} ms/MP",
+        megapixels,
+        millis / megapixels
+    );
+}
+
+/// 量一个单独操作（微基准：把「谁贵」从合并的数字里拆出来）。
+fn time_op(label: &str, runs: usize, mut op: impl FnMut()) {
+    op();
+    let mut total = std::time::Duration::ZERO;
+    for _ in 0..runs {
+        let start = Instant::now();
+        op();
+        total += start.elapsed();
+    }
+    let average = total / u32::try_from(runs).unwrap_or(1);
+    #[allow(clippy::cast_precision_loss)]
+    let millis = average.as_secs_f64() * 1000.0;
+    println!("{label:<44} {millis:>10.1} ms");
+}
+
 fn main() {
     let path = std::env::args().nth(1);
     let threads = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
@@ -109,6 +158,91 @@ fn main() {
     time("1:1 档 6000×4000 · 全部调性", &full, &all_tone, &curves);
     time("1:1 档 6000×4000 · 带色度", &full, &with_chroma, &curves);
     time("1:1 档 6000×4000 · 缩到预览档", &full, &default, &curves);
+
+    // ── M3-W4：可选阶段（镜头 / 降噪 / 锐化）的代价 ──
+    println!("\n── 可选阶段（M3-W4）──");
+    let detail = params(&[
+        ("lumaNr", 60.0),
+        ("colorNr", 60.0),
+        ("sharpenAmount", 60.0),
+        ("sharpenRadius", 50.0),
+    ]);
+    let lens_params = params(&[
+        ("distortion", 40.0),
+        ("vignette", 40.0),
+        ("chromatic", 40.0),
+    ]);
+    let everything = params(&[
+        ("exposure", 0.5),
+        ("contrast", 40.0),
+        ("saturation", 30.0),
+        ("lumaNr", 60.0),
+        ("colorNr", 60.0),
+        ("sharpenAmount", 60.0),
+        ("sharpenRadius", 50.0),
+        ("distortion", 40.0),
+        ("vignette", 40.0),
+        ("chromatic", 40.0),
+    ]);
+    for (tier, source) in [("预览档 1920×1080", &preview), ("1:1 档 6000×4000", &full)] {
+        // 先把两件最贵的事**单独**量一遍（合在一起的数字看不出是谁贵）
+        let probe_plans = DevelopPlans::from_params(source.width, source.height, &detail);
+        let probe_lens = DevelopPlans::from_params(source.width, source.height, &lens_params);
+        let probe_map = LensMap::new(&probe_lens.lens);
+        time_op(&format!("{tier} ·（单独）warp_lens"), 5, || {
+            std::hint::black_box(warp_lens(source, &probe_map));
+        });
+        time_op(&format!("{tier} ·（单独）denoise_fast"), 5, || {
+            std::hint::black_box(denoise_fast(source, &probe_plans.denoise));
+        });
+        let plans = DevelopPlans::from_params(source.width, source.height, &detail);
+        time_with(
+            &format!("{tier} · 降噪（亮度+色度 60）"),
+            source,
+            &detail,
+            &curves,
+            &DevelopStages {
+                denoise: Some(&plans.denoise),
+                ..DevelopStages::default()
+            },
+        );
+        time_with(
+            &format!("{tier} · 锐化（60 / 半径 2.5px）"),
+            source,
+            &detail,
+            &curves,
+            &DevelopStages {
+                sharpen: Some(&plans.sharpen),
+                ..DevelopStages::default()
+            },
+        );
+        let lens_plans = DevelopPlans::from_params(source.width, source.height, &lens_params);
+        let lens_map = LensMap::new(&lens_plans.lens);
+        time_with(
+            &format!("{tier} · 镜头手动校正（畸变/暗角/色差 40）"),
+            source,
+            &lens_params,
+            &curves,
+            &DevelopStages {
+                lens: Some(&lens_map),
+                ..DevelopStages::default()
+            },
+        );
+        let all_plans = DevelopPlans::from_params(source.width, source.height, &everything);
+        let all_map = LensMap::new(&all_plans.lens);
+        time_with(
+            &format!("{tier} · 全部阶段"),
+            source,
+            &everything,
+            &curves,
+            &DevelopStages {
+                lens: Some(&all_map),
+                denoise: Some(&all_plans.denoise),
+                local_tone: None,
+                sharpen: Some(&all_plans.sharpen),
+            },
+        );
+    }
 
     // 缩放的耗时单独量（它不是管线的一部分，但拖动档位时会走）
     let start = Instant::now();

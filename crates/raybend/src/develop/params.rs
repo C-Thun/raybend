@@ -23,9 +23,10 @@
 //! | `saturation` | 饱和度（线性域绕亮度缩放色度） | −100..+100 | 0 |
 //! | `vibrance` | 自然饱和度（低饱和的加得多） | −100..+100 | 0 |
 //!
-//! `清晰度` / `镜头` 两组（`lumaNr` / `colorNr` / `sharpenAmount` / `sharpenRadius` /
-//! `distortion` / `vignette` / `chromatic`）在表里**登记着**（界面已经有拉杆），
-//! 但 `wired = false` —— 它们在 M3-W4 才接进管线，界面据此禁用并写明。
+//! `清晰度` 四条（`lumaNr` / `colorNr` / `sharpenAmount` / `sharpenRadius`）**已接进管线**（M3-W4）：
+//! 亮度 / 色度降噪、锐化强度与半径。`镜头` 三条（`distortion` / `vignette` / `chromatic`）
+//! 是**手动微调**，接进管线的那一部分与配置文件（lensfun）无关；
+//! `wired = false` 的那几条由界面禁用并写明哪一波接。
 
 use std::collections::BTreeMap;
 
@@ -92,11 +93,11 @@ pub const PARAMS: &[ParamSpec] = &[
     ParamSpec { id: "temperature", min: 2500.0, max: 10000.0, step: 50.0, default: 6250.0, origin: Origin::Center, wired: true, baseline: Baseline::AsShot },
     ParamSpec { id: "saturation", min: -100.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Center, wired: true, baseline: Baseline::Static },
     ParamSpec { id: "vibrance", min: -100.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Center, wired: true, baseline: Baseline::Static },
-    // ── 清晰度（W4）──
-    ParamSpec { id: "lumaNr", min: 0.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Start, wired: false, baseline: Baseline::Static },
-    ParamSpec { id: "colorNr", min: 0.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Start, wired: false, baseline: Baseline::Static },
-    ParamSpec { id: "sharpenAmount", min: 0.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Start, wired: false, baseline: Baseline::Static },
-    ParamSpec { id: "sharpenRadius", min: 0.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Start, wired: false, baseline: Baseline::Static },
+    // ── 清晰度（M3-W4 接入）──
+    ParamSpec { id: "lumaNr", min: 0.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Start, wired: true, baseline: Baseline::Static },
+    ParamSpec { id: "colorNr", min: 0.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Start, wired: true, baseline: Baseline::Static },
+    ParamSpec { id: "sharpenAmount", min: 0.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Start, wired: true, baseline: Baseline::Static },
+    ParamSpec { id: "sharpenRadius", min: 0.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Start, wired: true, baseline: Baseline::Static },
     // ── 镜头（W4）──
     ParamSpec { id: "distortion", min: -100.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Center, wired: false, baseline: Baseline::Static },
     ParamSpec { id: "vignette", min: -100.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Center, wired: false, baseline: Baseline::Static },
@@ -339,8 +340,9 @@ mod tests {
         assert!(spec("no-such-param").is_none());
         assert!(is_wired("exposure"));
         assert!(is_wired("temperature"));
-        assert!(!is_wired("sharpenAmount"), "清晰度是 W4 的");
-        assert!(!is_wired("vignette"), "镜头是 W4 的");
+        assert!(is_wired("sharpenAmount"), "清晰度已在 M3-W4 接入");
+        assert!(is_wired("lumaNr"));
+        assert!(!is_wired("vignette"), "镜头手动微调接的是管线那一步（参数本身可用）");
         assert!(!is_known("curve"), "曲线不是参数（它有自己的模型）");
     }
 

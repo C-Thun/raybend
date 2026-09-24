@@ -700,7 +700,7 @@ mod tests {
         assert_eq!(stats(&conn).unwrap().entries, 2);
         /*
          * **带编辑的动态签名**（前缀 = 当前基础签名）必须被保住：
-         * 编辑过的照片签名是 `avif-q90-grid-v6+e<指纹>`，用老的 `NOT IN` 判据会被
+         * 编辑过的照片签名是 `avif-q90-grid-v7+e<指纹>`，用老的 `NOT IN` 判据会被
          * 每次 GC 都白删一遍（每次都要重渲染）。现在按前缀匹配 ⇒ 保住。
          */
         put(&conn, b"k", SizeClass::Grid, "jpeg-q82-g1+e0badc0de", b"x", 1, 1, 0).unwrap();

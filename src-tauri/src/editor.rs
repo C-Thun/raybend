@@ -42,10 +42,11 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, Runtime, State, WebviewWindow};
 
+use raybend::develop::lens::LensMap;
 use raybend::develop::local_tone::{LocalToneOpts, LocalToneState};
 use raybend::develop::{
-    Curve, CurveChannel, CurveSet, DevelopParams, LinearImage, Resolved, chain_image,
-    render_rgb8_with_local_tone,
+    Curve, CurveChannel, CurveSet, DevelopParams, DevelopPlans, DevelopStages, LinearImage, Resolved,
+    chain_image, render_develop,
 };
 use raybend::display::{self, FullCache, PixelSize};
 use raybend::render::{
@@ -1880,9 +1881,13 @@ fn run_develop_job(
     let as_shot_temperature = entry.as_shot_temperature;
     origin = entry.origin.clone();
 
+    // ②′ 可选阶段（镜头手动微调 / 降噪 / 锐化 / 动态反差强度）——
+    //     用**完整线性源**的尺寸建（归一化坐标与档位无关，见 `develop/lens.rs` 模块头）。
+    let plans = DevelopPlans::from_params(entry.full.width, entry.full.height, &job.params);
+
     // ② 动态反差：分析图只缩一次；分析结果只在**线性链参数**变了才重算。
     //    这一段必须放在取 source 之前（它要可变借 entry）。
-    let local_strength = (job.params.value("dynamicContrast") / 100.0) as f32;
+    let local_strength = plans.local_tone;
     if local_strength > 0.0 {
         let key = Resolved::new(&job.params).chain_key();
         if entry
@@ -1923,8 +1928,15 @@ fn run_develop_job(
     } else {
         None
     };
+    let lens_map = LensMap::new(&plans.lens);
+    let stages = DevelopStages {
+        lens: Some(&lens_map),
+        denoise: Some(&plans.denoise),
+        local_tone: local,
+        sharpen: Some(&plans.sharpen),
+    };
     let started = std::time::Instant::now();
-    let rgb = render_rgb8_with_local_tone(source, &job.params, &job.curves, local);
+    let rgb = render_develop(source, &job.params, &job.curves, &stages);
     let develop_ms = started.elapsed().as_secs_f64() * 1000.0;
 
     Some(DevelopOutcome {
@@ -2143,7 +2155,11 @@ mod tests {
         let dir = tempfile::tempdir().expect("临时目录");
         let raw = dir.path().join("photo.rw2");
         let jpg = dir.path().join("photo.jpg");
-        let cached = dir.path().join("latest-raw-v6.avif");
+        // 版本号从常量取（不要写死 —— 拾 PIPELINE_VERSION 时会静默变成「找不到缓存」）
+        let cached = dir.path().join(format!(
+            "latest-raw-v{}.avif",
+            raybend::thumbnail::render::PIPELINE_VERSION
+        ));
         for file in [&raw, &jpg, &cached] {
             std::fs::write(file, b"x").expect("建文件");
         }
@@ -2252,7 +2268,10 @@ mod tests {
     #[test]
     fn transition_frame_decodes_our_avif_cache() {
         let dir = tempfile::tempdir().expect("临时目录");
-        let cached = dir.path().join("latest-raw-v6.avif");
+        let cached = dir.path().join(format!(
+            "latest-raw-v{}.avif",
+            raybend::thumbnail::render::PIPELINE_VERSION
+        ));
         let mut rgb = Vec::new();
         for y in 0..24u32 {
             for x in 0..32u32 {

@@ -58,7 +58,8 @@ test("参数表：数字全部来自 develop-params.json（唯一真相）", () 
     assert.equal(spec.wired, json.wired, `${spec.id}: wired`);
     assert.equal(spec.baseline, json.baseline, `${spec.id}: baseline`);
   }
-  // M3-W3 接进管线的就是影调 + 色彩这 7 条；清晰度 / 镜头留 W4
+  // M3-W3 接的是影调 + 色彩 7 条；M3-W4 又接上清晰度 4 条（降噪 / 锐化）。
+  // 镜头那 3 条是**手动微调**，随 M3-W4 的镜头那一支一起接（见 `plans/M3-W4.md`）。
   assert.deepEqual(
     PARAMS.filter((p) => p.wired).map((p) => p.id),
     [
@@ -70,10 +71,15 @@ test("参数表：数字全部来自 develop-params.json（唯一真相）", () 
       "temperature",
       "saturation",
       "vibrance",
+      "lumaNr",
+      "colorNr",
+      "sharpenAmount",
+      "sharpenRadius",
     ],
   );
   assert.equal(isParamWired("exposure"), true);
-  assert.equal(isParamWired("sharpenAmount"), false);
+  assert.equal(isParamWired("sharpenAmount"), true, "清晰度已在 M3-W4 接入");
+  assert.equal(isParamWired("vignette"), false, "镜头手动微调随后接入");
   assert.equal(isParamWired("不存在"), false);
   assert.equal(paramSpec("temperature")?.baseline, "as-shot", "色温的默认值随照片");
   assert.equal(paramSpec("exposure")?.baseline, "static");

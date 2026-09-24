@@ -45,6 +45,7 @@ pub use color::{linear_to_srgb, srgb_to_linear, temperature_gain_ratio};
 pub use curve::{Curve, CurveChannel, CurveSet};
 pub use params::{Baseline, DevelopParams, Origin, ParamSpec, PARAMS, spec};
 pub use pipeline::{
-    LinearImage, Resolved, apply_chroma, blacks_curve, chain_image, chain_linear, contrast_curve,
-    encode_and_curve, highlights_curve, map_pixel_exact, render_rgb8, render_rgb8_with_local_tone,
+    DevelopPlans, DevelopStages, LinearImage, Resolved, apply_chroma, blacks_curve, chain_image,
+    chain_linear, contrast_curve, encode_and_curve, highlights_curve, map_pixel_exact, render_develop,
+    render_rgb8, render_rgb8_with_local_tone,
 };

@@ -198,7 +198,7 @@ export function EditorPanels(props: EditorPanelsProps): JSX.Element {
               <SliderRow
                 spec={spec}
                 value={props.store.paramValue(spec.id)}
-                /* 本波没接进管线的（清晰度 / 镜头）**禁用**并写明哪一波接 ——
+                /* 本波没接进管线的**禁用**并写明哪一波接 ——
                    一个能拖但没反应的拉杆比一个禁用的拉杆更糟 */
                 disabled={!props.enabled || !spec.wired}
                 onValueChange={(value) => props.store.setParam(spec.id, value)}
@@ -227,9 +227,9 @@ export function EditorPanels(props: EditorPanelsProps): JSX.Element {
               text={
                 props.locked === true
                   ? t("editor.panel.locked")
-                  : paramTab() === "tone" || paramTab() === "color"
-                    ? t("editor.panel.live")
-                    : t("editor.panel.w4Later")
+                  : paramTab() === "lens"
+                    ? t("editor.panel.lensProfileLater")
+                    : t("editor.panel.live")
               }
               class="flex-1"
             />
@@ -470,7 +470,7 @@ function LensExtras(props: { enabled: boolean }): JSX.Element {
         disabled={!props.enabled}
         label={t("editor.lens.enable")}
       />
-      <PendingNote text={t("editor.panel.w4Later")} />
+      <PendingNote text={t("editor.panel.lensProfileLater")} />
     </div>
   );
 }

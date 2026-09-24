@@ -23,10 +23,10 @@
     { "id": "saturation", "min": -100, "max": 100, "step": 1, "default": 0, "origin": "center", "wired": true, "baseline": "static" },
     { "id": "vibrance", "min": -100, "max": 100, "step": 1, "default": 0, "origin": "center", "wired": true, "baseline": "static" },
 
-    { "id": "lumaNr", "min": 0, "max": 100, "step": 1, "default": 0, "origin": "start", "wired": false, "baseline": "static" },
-    { "id": "colorNr", "min": 0, "max": 100, "step": 1, "default": 0, "origin": "start", "wired": false, "baseline": "static" },
-    { "id": "sharpenAmount", "min": 0, "max": 100, "step": 1, "default": 0, "origin": "start", "wired": false, "baseline": "static" },
-    { "id": "sharpenRadius", "min": 0, "max": 100, "step": 1, "default": 0, "origin": "start", "wired": false, "baseline": "static" },
+    { "id": "lumaNr", "min": 0, "max": 100, "step": 1, "default": 0, "origin": "start", "wired": true, "baseline": "static" },
+    { "id": "colorNr", "min": 0, "max": 100, "step": 1, "default": 0, "origin": "start", "wired": true, "baseline": "static" },
+    { "id": "sharpenAmount", "min": 0, "max": 100, "step": 1, "default": 0, "origin": "start", "wired": true, "baseline": "static" },
+    { "id": "sharpenRadius", "min": 0, "max": 100, "step": 1, "default": 0, "origin": "start", "wired": true, "baseline": "static" },
 
     { "id": "distortion", "min": -100, "max": 100, "step": 1, "default": 0, "origin": "center", "wired": false, "baseline": "static" },
     { "id": "vignette", "min": -100, "max": 100, "step": 1, "default": 0, "origin": "center", "wired": false, "baseline": "static" },

@@ -743,6 +743,48 @@ pub struct DevelopStages<'a> {
     pub sharpen: Option<&'a super::sharpen::SharpenPlan>,
 }
 
+/// **从编辑参数里解析出来的可选阶段**（显影线程与缩略图**共用一份**，免得两处各拼一遍 ——
+/// 两处拼两遍的话，以后加一个参数就会漏一处）。
+///
+/// 镜头那一块只有**手动微调**：配置文件（lensfun）由 `crate::lens` 解析后补进来，
+/// 不在本函数职责内（本模块不认识数据库，见 `develop/lens.rs` 的分层说明）。
+#[derive(Debug, Clone, PartialEq)]
+pub struct DevelopPlans {
+    pub denoise: super::denoise::DenoisePlan,
+    pub sharpen: super::sharpen::SharpenPlan,
+    pub lens: super::lens::LensCorrection,
+    /// 动态反差强度（`0..1`）
+    pub local_tone: f32,
+}
+
+impl DevelopPlans {
+    /// 从参数表 + 图像尺寸建。
+    #[must_use]
+    pub fn from_params(width: u32, height: u32, params: &DevelopParams) -> Self {
+        Self {
+            denoise: super::denoise::DenoisePlan::from_sliders(
+                params.value("lumaNr"),
+                params.value("colorNr"),
+            ),
+            sharpen: super::sharpen::SharpenPlan::from_sliders(
+                params.value("sharpenAmount"),
+                params.value("sharpenRadius"),
+            ),
+            lens: super::lens::LensCorrection::manual_only(
+                width,
+                height,
+                super::lens::ManualLens::from_sliders(
+                    params.value("distortion"),
+                    params.value("vignette"),
+                    params.value("chromatic"),
+                ),
+            ),
+            #[allow(clippy::cast_possible_truncation)]
+            local_tone: (params.value("dynamicContrast") / 100.0).clamp(0.0, 1.0) as f32,
+        }
+    }
+}
+
 /// **生产入口**：线性源 → 8bit sRGB（含全部可选阶段）。
 ///
 /// 逐像素数学仍然只有 [`render_rgb8_with_local_tone`] 那一份 —— 这里只负责把

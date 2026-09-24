@@ -223,15 +223,38 @@ pub struct ManualLens {
 }
 
 impl ManualLens {
+    /// 从三根拉杆（`−100..100`）建（越界夹取，不 panic）。
+    #[must_use]
+    pub fn from_sliders(distortion: f64, vignette: f64, chromatic: f64) -> Self {
+        let unit = |value: f64| (value / 100.0).clamp(-1.0, 1.0) as f32;
+        Self {
+            distortion: unit(distortion),
+            vignette: unit(vignette),
+            chromatic: unit(chromatic),
+        }
+    }
+
     /// 有没有动过（三个都是 0 就是没动）。
     #[must_use]
     pub fn is_identity(self) -> bool {
         self.distortion == 0.0 && self.vignette == 0.0 && self.chromatic == 0.0
     }
 
-    /// 手动畸变叠加的 `k1`。
-    fn k1(self) -> f32 {
-        self.distortion * MANUAL_DISTORTION_MAX
+    /// 手动畸变叠加的 `k1`（**已按画幅角归一**）。
+    ///
+    /// 为什么要归一：`k1` 是在归一化坐标里作用的，而同一支镜头的归一化画幅角
+    /// 随焦距变化（200mm 的画幅角只有 24mm 的 1/8 大）——不归一的话，同一根拉杆
+    /// 在长焦上几乎看不到效果、在广角上夸张。
+    /// 除以 `corner_r²` 之后，**画幅角上的径向位移量就正好是 `MANUAL_DISTORTION_MAX` 的倍数**。
+    fn k1(self, corner_r: f64) -> f32 {
+        let corner_sq = corner_r * corner_r;
+        if corner_sq <= f64::EPSILON {
+            return 0.0;
+        }
+        #[allow(clippy::cast_possible_truncation)]
+        {
+            self.distortion * MANUAL_DISTORTION_MAX / corner_sq as f32
+        }
     }
 
     /// 手动色差：红/蓝的径向缩放（红放大时蓝缩小）。
@@ -342,6 +365,22 @@ pub struct LensCorrection {
 }
 
 impl LensCorrection {
+    /// **只有手动微调**（没有配置文件）时的校正。
+    ///
+    /// 两个调用方（显影线程 / 缩略图）共用这一份，免得各自拼 `Norm`：
+    /// 手动那三根拉杆的效果都**已经按画幅归一**（畸变除过 `corner_r²`、暗角除过 `corner_r²`、
+    /// 色差是比值），所以这里给的 crop / 焦距只影响归一化坐标本身 —— 填中性值即可。
+    #[must_use]
+    pub fn manual_only(width: u32, height: u32, manual: ManualLens) -> Self {
+        Self {
+            norm: Norm::new(width, height, 1.0, 35.0),
+            distortion: None,
+            tca: None,
+            vignetting: None,
+            manual,
+        }
+    }
+
     /// 没有配置文件、也没有手动微调 —— 整趟可以跳过。
     #[must_use]
     pub fn is_identity(&self) -> bool {
@@ -382,6 +421,7 @@ impl LensMap {
     #[must_use]
     pub fn new(correction: &LensCorrection) -> Self {
         let manual = correction.manual;
+        let corner_r = correction.norm.half_diag.max(f64::EPSILON);
         let has_geometry = correction.distortion.is_some() || manual.distortion != 0.0;
         let has_tca = correction.tca.is_some() || manual.chromatic != 0.0;
         let scale = if has_geometry || has_tca {
@@ -397,12 +437,12 @@ impl LensMap {
                 1.0
             },
             distortion: correction.distortion,
-            manual_k1: manual.k1(),
+            manual_k1: manual.k1(corner_r),
             tca: correction.tca,
             manual_tca: manual.tca_scales(),
             vignetting: correction.vignetting,
             manual_vignette: manual.vignette,
-            corner_r: correction.norm.half_diag.max(f64::EPSILON),
+            corner_r,
             identity: correction.is_identity(),
         }
     }
@@ -479,10 +519,19 @@ impl LensMap {
     /// **源像素**处的暗角增益（`1.0` = 不补）。
     #[must_use]
     pub fn vignette_gain(&self, source_x: f32, source_y: f32) -> f32 {
-        if self.vignetting.is_none() && self.manual_vignette == 0.0 {
+        if !self.has_vignette() {
             return 1.0;
         }
         let (nx, ny) = self.norm.to_norm(source_x, source_y);
+        self.vignette_gain_norm(nx, ny)
+    }
+
+    /// 归一化坐标（**相对光心**，未乘 `inv_scale`）处的暗角增益。
+    ///
+    /// 像素循环用的是这个版本 —— 它手上已经有源图的归一化坐标，
+    /// 不必再“像素 → 归一化”往返一趟（少一次 f64 换算，而且更准）。
+    #[inline]
+    fn vignette_gain_norm(&self, nx: f32, ny: f32) -> f32 {
         let r2 = nx * nx + ny * ny;
         let mut gain = self.vignetting.map_or(1.0, |v| v.gain(r2));
         if self.manual_vignette != 0.0 {
@@ -495,6 +544,18 @@ impl LensMap {
         } else {
             1.0
         }
+    }
+
+    /// 有暗角要补吗（没有就整趟不查）。
+    #[inline]
+    fn has_vignette(&self) -> bool {
+        self.vignetting.is_some() || self.manual_vignette != 0.0
+    }
+
+    /// 红/蓝与绿**用不同的坐标**吗（没有 TCA 就三通道共用一套，省两次映射）。
+    #[inline]
+    fn separate_chroma(&self) -> bool {
+        self.tca.is_some() || self.manual_tca != (1.0, 1.0)
     }
 }
 
@@ -561,7 +622,8 @@ fn inverse_map(correction: &LensCorrection, x: f32, y: f32) -> (f32, f32) {
     let mut x = x;
     let mut y = y;
     // 手动 poly3 项在正向里是**后**做的 ⇒ 反向里要**先**反掉
-    let k1 = correction.manual.k1();
+    let corner_r = correction.norm.half_diag.max(f64::EPSILON);
+    let k1 = correction.manual.k1(corner_r);
     if k1 != 0.0 {
         let (ix, iy) = Distortion::Poly3 { k1 }.inverse(x, y);
         x = ix;
@@ -624,51 +686,119 @@ pub fn warp_lens(source: &LinearImage, map: &LensMap) -> LinearImage {
 }
 
 /// 一段行（**唯一**的镜头校正像素循环）。
+///
+/// 这一趟是显影里最贵的两件事之一，所以内循环里只留「每像素真的必须做」的事：
+/// 所有 f64 → f32 的转换、常量乘法、上限值都提到**行外**；归一化 x 沿行**累加**（不再每像素乘一次）；
+/// 没有 TCA 时三通道共用一套坐标；没有暗角时一次都不查。
 fn warp_rows(source: &LinearImage, out: &mut [u16], map: &LensMap, first_row: usize) {
     let width = source.width as usize;
     let height = source.height as usize;
+    #[allow(clippy::cast_possible_truncation)]
+    let norm_scale = map.norm.scale as f32;
+    #[allow(clippy::cast_possible_truncation)]
+    let inv_norm_scale = (1.0 / map.norm.scale) as f32;
+    #[allow(clippy::cast_possible_truncation)]
+    let center_x = map.norm.center_x as f32;
+    #[allow(clippy::cast_possible_truncation)]
+    let center_y = map.norm.center_y as f32;
+    #[allow(clippy::cast_possible_truncation)]
+    let inv_scale = map.inv_scale as f32;
+    let x_base = -center_x * inv_scale;
+    let x_step = norm_scale * inv_scale;
+    let x_offset = center_x * inv_norm_scale;
+    let y_offset = center_y * inv_norm_scale;
+    let separate_chroma = map.separate_chroma();
+    let vignette = map.has_vignette();
+    #[allow(clippy::cast_precision_loss)]
+    let (max_x, max_y) = ((width - 1) as f32, (height - 1) as f32);
+    let sampler = Sampler {
+        rgb: &source.rgb,
+        width,
+        height,
+        max_x,
+        max_y,
+    };
     for (local_row, line) in out.as_chunks_mut::<3>().0.chunks_mut(width).enumerate() {
         #[allow(clippy::cast_possible_truncation)]
-        let y = (first_row + local_row) as f32;
-        for (x, pixel) in line.iter_mut().enumerate() {
-            #[allow(clippy::cast_possible_truncation)]
-            let x = x as f32;
-            let coords = map.source_coords(x, y);
-            let gain = map.vignette_gain(coords[1][0], coords[1][1]);
-            for channel in 0..3 {
-                let [sx, sy] = coords[channel];
-                let value = sample_linear(&source.rgb, width, height, sx, sy, channel) * gain;
-                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-                {
-                    pixel[channel] = (value + 0.5).clamp(0.0, 65535.0) as u16;
-                }
-            }
+        let ny = ((first_row + local_row) as f32 * norm_scale - center_y) * inv_scale;
+        let mut nx = x_base;
+        for pixel in line.iter_mut() {
+            let (gx, gy) = map.distort(nx, ny);
+            let gain = if vignette {
+                map.vignette_gain_norm(gx, gy)
+            } else {
+                1.0
+            };
+            let sx = gx * inv_norm_scale + x_offset;
+            let sy = gy * inv_norm_scale + y_offset;
+            let (rx, ry, bx, by) = if separate_chroma {
+                let (red, blue) = (map.tca_red(gx, gy), map.tca_blue(gx, gy));
+                (
+                    red.0 * inv_norm_scale + x_offset,
+                    red.1 * inv_norm_scale + y_offset,
+                    blue.0 * inv_norm_scale + x_offset,
+                    blue.1 * inv_norm_scale + y_offset,
+                )
+            } else {
+                (sx, sy, sx, sy)
+            };
+            let green = sampler.at(sx, sy, 1);
+            let red = sampler.at(rx, ry, 0);
+            let blue = sampler.at(bx, by, 2);
+            pixel[0] = quantize(red * gain);
+            pixel[1] = quantize(green * gain);
+            pixel[2] = quantize(blue * gain);
+            nx += x_step;
         }
     }
 }
 
 /// 双线性采样（越界夹取 —— 自动缩放已保证不会用到，这里是兜底）。
-#[inline]
-fn sample_linear(rgb: &[u16], width: usize, height: usize, x: f32, y: f32, channel: usize) -> f32 {
-    if !x.is_finite() || !y.is_finite() {
-        return 0.0;
+///
+/// 把「行外能算的都算一次」的东西攒在这里，内循环只传坐标与通道。
+struct Sampler<'a> {
+    rgb: &'a [u16],
+    width: usize,
+    height: usize,
+    max_x: f32,
+    max_y: f32,
+}
+
+impl Sampler<'_> {
+    /// 取一个样本（`x0`/`y0` 用截断代替 `floor`：已夹到非负）。
+    #[inline]
+    fn at(&self, x: f32, y: f32, channel: usize) -> f32 {
+        if !(x.is_finite() && y.is_finite()) {
+            return 0.0;
+        }
+        let x = x.clamp(0.0, self.max_x);
+        let y = y.clamp(0.0, self.max_y);
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let x0 = x as usize;
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let y0 = y as usize;
+        let x1 = (x0 + 1).min(self.width - 1);
+        let y1 = (y0 + 1).min(self.height - 1);
+        #[allow(clippy::cast_precision_loss)]
+        let (fx, fy) = (x - x0 as f32, y - y0 as f32);
+        let row0 = y0 * self.width * 3 + channel;
+        let row1 = y1 * self.width * 3 + channel;
+        let (c0, c1) = (x0 * 3, x1 * 3);
+        let p00 = f32::from(self.rgb[row0 + c0]);
+        let top = p00 + (f32::from(self.rgb[row0 + c1]) - p00) * fx;
+        let p10 = f32::from(self.rgb[row1 + c0]);
+        let bottom = p10 + (f32::from(self.rgb[row1 + c1]) - p10) * fx;
+        top + (bottom - top) * fy
     }
-    #[allow(clippy::cast_precision_loss)]
-    let (max_x, max_y) = ((width - 1) as f32, (height - 1) as f32);
-    let x = x.clamp(0.0, max_x);
-    let y = y.clamp(0.0, max_y);
+}
+
+/// 浮点 → u16（四舍五入 + 夹取）。
+#[inline]
+fn quantize(value: f32) -> u16 {
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let x0 = x.floor() as usize;
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let y0 = y.floor() as usize;
-    let x1 = (x0 + 1).min(width - 1);
-    let y1 = (y0 + 1).min(height - 1);
-    #[allow(clippy::cast_precision_loss)]
-    let (fx, fy) = (x - x0 as f32, y - y0 as f32);
-    let at = |row: usize, col: usize| f32::from(rgb[(row * width + col) * 3 + channel]);
-    let top = at(y0, x0) + (at(y0, x1) - at(y0, x0)) * fx;
-    let bottom = at(y1, x0) + (at(y1, x1) - at(y1, x0)) * fx;
-    top + (bottom - top) * fy
+    {
+        (value + 0.5).clamp(0.0, 65535.0) as u16
+    }
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -907,6 +1037,41 @@ mod tests {
         let map = LensMap::new(&c);
         assert!(!map.is_identity());
         assert!(map.auto_scale_value() > 1.0);
+    }
+
+    #[test]
+    fn manual_distortion_effect_is_focal_independent() {
+        // 同一根拉杆在 24mm 与 200mm 上，**同一相对位置**的位移量应当一样。
+        // 度量取**右边中点**而不是角点：自动缩放会把角点收回来（净效果接近 1），
+        // 而畸变的可见信号是**差动**——中点与角点被拉伸的程度不同，中点才是那个差。
+        let signature = |focal: f64, manual: f32| -> f64 {
+            let norm = Norm::new(6000, 4000, 1.0, focal);
+            let mut c = correction(norm);
+            c.manual.distortion = manual;
+            let map = LensMap::new(&c);
+            let coords = map.source_coords(5999.0, 1999.5);
+            let cx = 5999.0_f64 / 2.0;
+            let cy = 3999.0_f64 / 2.0;
+            let dx = f64::from(coords[1][0]) - cx;
+            let dy = f64::from(coords[1][1]) - cy;
+            (dx * dx + dy * dy).sqrt() / cx
+        };
+        // 不动拉杆时映射是恒等的（往返过 f32 归一化，允许 1e-6 的浮点残差）
+        assert!(
+            (signature(35.0, 0.0) - 1.0).abs() < 1e-6,
+            "不动拉杆必须恒等：{}",
+            signature(35.0, 0.0)
+        );
+        let wide = signature(24.0, 1.0);
+        let tele = signature(200.0, 1.0);
+        assert!(
+            (wide - tele).abs() < 0.005,
+            "广角与长焦的手动畸变效果必须一致：{wide} vs {tele}"
+        );
+        assert!(
+            (wide - 1.0).abs() > 0.02,
+            "拉到底必须在画幅里看得出位移：{wide}"
+        );
     }
 
     #[test]
