@@ -450,18 +450,15 @@ issue 落库、三个工具的框线
 
 ### M4-W2　导出引擎与预设（按 issue 口径）
 
-- Rust 侧统一导出入口：尺寸/缩放、**JPEG / TIFF / PNG / WebP / AVIF 五种首批全支持**
-  （人类 2026-09-24 定的导入/导出格式范围，登记在 `FUTURE.md` §C8）、
-  质量、命名与目录模板、SDR 基线；前端不写像素算法
+- Rust 侧统一导出入口：尺寸/缩放、质量、命名与目录模板、SDR 基线；前端不写像素算法
+  * **格式范围以 `IMAGING.md` §1 为准**（唯一事实源）：位图**导出 5 种**
+    （JPEG / TIFF / PNG / WebP / AVIF）、**导入 6 种**（+HEIC）、**RAW 只进不出**、
+    JXL 排在后面（导入导出全流程，不替换缓存）、**issue 快照恒 AVIF**；
   * **AVIF 编码器已经在 M3-W3 引入**（缓存图就用它，`image` 的 `avif` feature / ravif）——
     导出只是复用它，不再新增依赖；
-  * ⚠️ 「导入 avif」需要另接解码器（`image` 只有 avif 编码器），见 `FUTURE.md` §C8；
-  * **导入侧另含 HEIC（位图共 6 种）**，导出不支持 HEIC —— `image` 完全不支持 HEIC 编解码，
-    要接 libheif 系解码器，见 `FUTURE.md` §C8；
-  * **RAW 不导出**（导出的是 issue 渲染 / 位图结果）；RAW 的**导入**尽量支持、
-    跟着 rawler 走（普通 Bayer 先支持全；X3 可不支持；X-Trans 看 rawler）—— 同见 `FUTURE.md` §C8/§B；
-  * **JPEG XL 排在后面**（生态成熟后支持**导入/导出全流程**；
-    **不用它替换缓存/issue 快照** —— 快照恒为 AVIF，见 `FUTURE.md` §C8）
+  * ⚠️ 「导入 avif / heic」需要另接解码器（`image` 只有 avif 编码器、完全不支持 HEIC）——
+    `IMAGING.md` §1.4；
+  * **TIFF 是 16-bit 无损**，兼作外部编辑的前置格式（见 M4-W4）
 - 导出来源以 **issue / SOOC** 为第一公民：导出选中的 issue（含编辑栈渲染）或 SOOC 原片；
   RAW / 位图 / 位图+RAW 三形态的来源选择沿用既有契约，身份从「照片」细化到「issue」
 - 元数据保留策略：EXIF/IPTC/关键词/版权；RAW 原文件永不改写；水印不阻塞首批闭环
