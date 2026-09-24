@@ -253,9 +253,12 @@ impl GpuContext {
         &self.image
     }
 
-    /// 图像尺寸（图像像素）。没有图时是占位纹理的 1×1 —— 判断「有没有图」请用 [`Self::has_image`]。
+    /// **逻辑图像尺寸**（**原图 / 解码尺寸**，图像像素）—— 视口与覆盖层的坐标系。
+    ///
+    /// 不是当前纹理的尺寸（那是「当前清晰度」）；没有图时是 `(1, 1)` ——
+    /// 判断「有没有图」请用 [`Self::has_image`]。
     pub fn image_size(&self) -> (u32, u32) {
-        (self.image.width, self.image.height)
+        self.viewport.image_size
     }
 
     /// 这一刻画不画图像四边形（`false` = 只有洞口底色）。
@@ -286,17 +289,35 @@ impl GpuContext {
 
     /// **换图**：重建纹理与绑定组（设备、管线、视口矩阵都不动）。
     ///
-    /// 这是编辑器「换一张照片 / 换一个档位」的唯一入口 ——
-    /// 上传整块像素（`REPLACE` 混合 + 不透明 alpha，见 `create_pipeline`）。
-    pub fn set_image(&mut self, image: RenderImage) {
+    /// `source_size` = **原图**的逻辑尺寸（不是这一档纹理的尺寸）：视口按它摆图，
+    /// 纹理只是「当前清晰度」。换档位（预览 ↔ 全尺寸）时逻辑尺寸不变 ⇒ **几何不变**，
+    /// 只换清晰度（M3-W4 修「双击 1:1 变成预览图的 1:1」时定）。
+    pub fn set_image(&mut self, image: RenderImage, source_size: (u32, u32)) {
         self.image = image;
+        self.set_source_size(source_size);
         self.upload_image(true);
     }
 
     /// **清空照片**：换成 1×1 占位纹理，并且不再画那个四边形（只剩洞口底色）。
     pub fn clear_image(&mut self) {
         self.image = RenderImage::transparent_1x1();
+        self.set_source_size((1, 1));
         self.upload_image(false);
+    }
+
+    /// 换**逻辑图像尺寸**（原图 / 解码尺寸）。
+    ///
+    /// 与纹理尺寸分开：档位从预览换到全尺寸时**逻辑尺寸不变**，几何就不该动 ——
+    /// 换纹理只换清晰度。尺寸真变了（换照片）才 `refit`，且只在非 `Free` 模式下
+    /// （`Free` 是用户自己拖出来的视角，不该被重摆）。
+    fn set_source_size(&mut self, size: (u32, u32)) {
+        if self.viewport.image_size == size {
+            return;
+        }
+        self.viewport.image_size = size;
+        if self.viewport.fit_mode != super::viewport::FitMode::Free {
+            self.viewport.refit();
+        }
     }
 
     /// 把 `self.image` 传上设备（`has_image` 决定画不画）。
@@ -311,12 +332,6 @@ impl GpuContext {
             &self.label,
         );
         self.has_image = has_image;
-        self.viewport.image_size = (self.image.width, self.image.height);
-        // 尺寸变了要按当前档位重新适配（`Viewport::refit` 会清 pan）——
-        // 「换一张不同比例的图，画面还留着上一张的 pan」是必然跑偏的
-        if self.viewport.fit_mode != super::viewport::FitMode::Free {
-            self.viewport.refit();
-        }
     }
 
     /// 取走设备丢失的记录（编辑器把它搬进自己的历史上报，spike 直接读 `device_lost`）。
@@ -601,9 +616,9 @@ fn build_device_resources(
     });
     let uniform = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some(&format!("{label_prefix}-uniforms")),
-        // 80 = mat4x4(64) + vec4(16)。**别改成「f32 + vec3」**：vec3 要 16 字节对齐，
-        // 那样实际是 96，wgpu 会在绘制时报「expects 96」（WGSL 侧的注释里记着这个坑）
-        size: 80,
+        // 96 = mat4x4(64) + vec4(16) + vec4(16)。**别改成「f32 + vec3」**：vec3 要 16 字节对齐，
+        // 那样实际占得更多，wgpu 会在绘制时报「expects N」（WGSL 侧的注释里记着这个坑）
+        size: 96,
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
@@ -1118,10 +1133,14 @@ impl OffscreenRenderer {
     }
 }
 
-/// 写 uniform（矩阵 + 不透明度）—— 与 `GpuContext::write_uniforms` 同一份布局。
+/// 写 uniform（矩阵 + 不透明度 + 逻辑图像尺寸）—— 与 `GpuContext::write_uniforms` 同一份布局。
+///
+/// 布局：`mat4x4`（0..64）+ `params: vec4`（64..80，`.x` = 不透明度）+
+/// `image_size: vec4`（80..96，`.xy` = 逻辑图像尺寸）。**尺寸必须与 WGSL 的 struct 一致** ——
+/// 差一个字段 wgpu 会在绘制时报「expects N bytes」（不报错、直接不出图的那种）。
 fn write_matrix(queue: &wgpu::Queue, uniform: &wgpu::Buffer, viewport: &Viewport) {
     let matrix = viewport.matrix();
-    let mut bytes = [0u8; 80];
+    let mut bytes = [0u8; 96];
     for (column, values) in matrix.iter().enumerate() {
         for (row, value) in values.iter().enumerate() {
             let offset = (column * 4 + row) * 4;
@@ -1129,6 +1148,10 @@ fn write_matrix(queue: &wgpu::Queue, uniform: &wgpu::Buffer, viewport: &Viewport
         }
     }
     bytes[64..68].copy_from_slice(&1.0f32.to_ne_bytes());
+    // 顶点按**逻辑尺寸**铺四边形（不是纹理尺寸）：当前纹理可能只是预览档（1920），
+    // 逻辑尺寸却是 6000 —— 按纹理尺寸铺，「1:1」就变成预览图的 1:1（2026-09-24 修）
+    bytes[80..84].copy_from_slice(&(viewport.image_size.0 as f32).to_ne_bytes());
+    bytes[84..88].copy_from_slice(&(viewport.image_size.1 as f32).to_ne_bytes());
     queue.write_buffer(uniform, 0, &bytes);
 }
 
@@ -1200,7 +1223,7 @@ mod tests {
         );
         // 能走到这里就说明 layout / uniform / sampler / texture / bind group / pipeline
         // **全是新设备的**（否则 wgpu 在 `create_bind_group` 就抛了）。
-        assert_eq!(rebuilt.uniform.size(), 80);
+        assert_eq!(rebuilt.uniform.size(), 96);
     }
 
     /// 设备丢失 → `recover()` → **还能再出图**（编辑器渲染线程靠这条路活着）。

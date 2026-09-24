@@ -134,19 +134,25 @@ fn main() {
             match result {
                 Ok(image) => {
                     println!(
-                        "线性解码（{}×{}，{} 值，拍摄色温 {:?}）：{:.1} ms",
+                        "线性解码（{}×{}，{} 值，方向 {:?}，拍摄色温 {:?}）：{:.1} ms",
                         image.width,
                         image.height,
                         image.rgb.len(),
+                        image.orientation,
                         image.as_shot_temperature.map(|k| format!("{k:.0}K")),
                         elapsed.as_secs_f64() * 1000.0
                     );
-                    let linear = raybend::develop::LinearImage::new(
-                        image.width,
-                        image.height,
-                        image.rgb,
-                    )
-                    .expect("形状对");
+                    // 与编辑器同一条构造路径：文件头方向优先（worker 对 TIFF 家族不可靠）+ 按方向摆正
+                    let mut image = image;
+                    image.orientation =
+                        raybend::media::exif::raw_orientation(path, image.orientation);
+                    println!("取方向（文件头优先）：{:?}", image.orientation);
+                    let linear = raybend::develop::LinearImage::from_raw16(image)
+                        .expect("形状对");
+                    println!(
+                        "摆正后的线性源：{}×{}（编辑器拿到的就是这个尺寸）",
+                        linear.width, linear.height
+                    );
                     time("RAW 线性源 · 全部调性", &linear, &all_tone, &curves);
                     let start = Instant::now();
                     let small = linear.downscaled_to(1920);

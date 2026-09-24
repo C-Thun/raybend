@@ -509,9 +509,14 @@ struct DevelopOutcome {
 
 /// 显影好的像素（RGBA8 由渲染线程扩；这里给 RGB8）。
 struct DevelopedImage {
+    /// **这一档纹理**的尺寸（预览档可能是 1920）。
     width: u32,
     height: u32,
     rgb: Vec<u8>,
+    /// **逻辑图像尺寸**（原图 / 解码尺寸）—— 视口摆图与「1:1」按它算，
+    /// 与当前是哪一档无关（M3-W4 修「双击 1:1 变成预览图的 1:1」）。
+    source_width: u32,
+    source_height: u32,
 }
 
 /// 渲染线程的共享状态 —— **前端轮询读的就是它**（序列化后直接回给前端）。
@@ -1327,7 +1332,7 @@ fn apply_command(
             state.develop_ms = Some(outcome.develop_ms);
             match outcome.result {
                 Ok(image) => {
-                    let size = (image.width, image.height);
+                    let source_size = (image.source_width, image.source_height);
                     let Some(render_image) =
                         RenderImage::from_rgb8(image.width, image.height, &image.rgb)
                     else {
@@ -1338,16 +1343,17 @@ fn apply_command(
                         ));
                         return Ok(());
                     };
-                    context.set_image(render_image);
-                    let mut viewport = *context.viewport();
-                    if viewport.fit_mode != FitMode::Free {
-                        viewport.refit();
-                    }
-                    *context.viewport_mut() = viewport;
+                    /*
+                     * 只换纹理，**不重摆视口**：`set_image` 只在逻辑尺寸真的变了
+                     * （换照片）时才 `refit`；预览档 ↔ 全尺寸档之间逻辑尺寸不变，
+                     * 几何必须原地不动 —— 否则「切到 1:1 要等全图算完」那段会跳一下。
+                     */
+                    context.set_image(render_image, source_size);
                     state.photo_path = Some(outcome.path);
+                    // 「尺寸」是**原图**尺寸，不是当前渲染档位的尺寸
                     state.image = Some(SizeDto {
-                        width: size.0 as f64,
-                        height: size.1 as f64,
+                        width: source_size.0 as f64,
+                        height: source_size.1 as f64,
                     });
                     state.tier = Some(outcome.tier);
                     state.origin = Some(outcome.origin);
@@ -1529,6 +1535,13 @@ fn merge_jobs(older: DevelopJob, newer: DevelopJob) -> DevelopJob {
     }
 }
 
+/// **显影线程**：吃任务 → 解码/管线 → 把结果交回渲染线程。
+///
+/// 每条任务都套 `catch_unwind`：管线里一次 panic 不许带走线程（`AGENTS.md` §7.9 同族教训 ——
+/// 「线程静默死掉 → 拉什么杆都没反应」正是这么来的）。捕获之后：
+///
+/// * **丢掉缓存的线性源**（panic 可能发生在解码/分析中途，那份状态不可信，下一次任务重新解）；
+/// * 把错误当作**这条任务的结果**交回渲染线程 → 界面上是可见的错误，而不是一张永远不动的旧帧。
 fn develop_loop(receiver: Receiver<DevelopJob>, commands: Sender<RenderCommand>, max_texture: u32) {
     let mut cached: Option<CachedSource> = None;
     // 最近一次被告知要显示的照片（**粘住**：参数任务不该把「要看哪张」弄丢）
@@ -1548,124 +1561,159 @@ fn develop_loop(receiver: Receiver<DevelopJob>, commands: Sender<RenderCommand>,
             wanted_photo = Some(path);
         }
 
-        // ① 需要的话先解码线性源（换照片 / 上一张解失败过）
-        let mut decode_ms = None;
-        let mut as_shot_temperature;
-        let mut origin = "bitmap".to_string();
-        if let Some(path) = wanted_photo.clone()
-            && cached.as_ref().is_none_or(|entry| entry.path != path)
+        let outcome = match std::panic::catch_unwind(AssertUnwindSafe(|| {
+            run_develop_job(&mut cached, &wanted_photo, &job, max_texture)
+        })) {
+            Ok(outcome) => outcome,
+            Err(payload) => {
+                cached = None; // 半路的状态不可信：下一次任务重新解码
+                Some(DevelopOutcome {
+                    id: job.id,
+                    rev: job.rev,
+                    path: job
+                        .photo
+                        .clone()
+                        .or_else(|| wanted_photo.clone())
+                        .unwrap_or_default(),
+                    tier: job.tier,
+                    origin: "panic".to_string(),
+                    as_shot_temperature: None,
+                    decode_ms: None,
+                    develop_ms: 0.0,
+                    result: Err(format!(
+                        "显影线程内部错误（已捕获，线程继续）：{}",
+                        panic_message(&payload)
+                    )),
+                })
+            }
+        };
+        if let Some(outcome) = outcome
+            && commands.send(RenderCommand::Developed(outcome)).is_err()
         {
-            let started = std::time::Instant::now();
-            match decode_linear_source(Path::new(&path), max_texture) {
-                Ok(source) => {
-                    decode_ms = Some(started.elapsed().as_secs_f64() * 1000.0);
-                    as_shot_temperature = source.as_shot_temperature;
-                    origin = source.origin.clone();
-                    cached = Some(CachedSource {
-                        path,
-                        full: source.image,
-                        preview: None,
-                        analysis_source: None,
-                        local_tone: None,
-                        as_shot_temperature,
-                        origin: origin.clone(),
-                    });
-                }
-                Err(error) => {
-                    let outcome = DevelopOutcome {
-                        id: job.id,
-                        rev: job.rev,
-                        path,
-                        tier: job.tier,
-                        origin,
-                        as_shot_temperature: None,
-                        decode_ms: Some(started.elapsed().as_secs_f64() * 1000.0),
-                        develop_ms: 0.0,
-                        result: Err(error),
-                    };
-                    if commands.send(RenderCommand::Developed(outcome)).is_err() {
-                        return; // 渲染线程走了
-                    }
-                    continue;
-                }
-            }
-        }
-
-        let Some(entry) = cached.as_mut() else {
-            // 只有「还没让显示过任何照片」才会走到这里（开局那一条参数任务）。
-            // 一旦要过照片，`wanted_photo` 就粘住了 —— 见 `merge_jobs` 的注释。
-            eprintln!("[editor] 参数任务先到、还没有照片可算（job #{}）：跳过", job.id);
-            continue;
-        };
-        as_shot_temperature = entry.as_shot_temperature;
-        origin = entry.origin.clone();
-
-        // ② 动态反差：分析图只缩一次；分析结果只在**线性链参数**变了才重算。
-        //    这一段必须放在取 source 之前（它要可变借 entry）。
-        let local_strength = (job.params.value("dynamicContrast") / 100.0) as f32;
-        if local_strength > 0.0 {
-            let key = Resolved::new(&job.params).chain_key();
-            if entry
-                .local_tone
-                .as_ref()
-                .is_none_or(|(cached_key, _)| *cached_key != key)
-            {
-                if entry.analysis_source.is_none() {
-                    let long = entry.full.width.max(entry.full.height);
-                    entry.analysis_source = Some(entry.full.downscaled_to((long / 4).max(256)));
-                }
-                if let Some(analysis) = entry.analysis_source.as_ref() {
-                    let chained = chain_image(analysis, &job.params);
-                    let state = LocalToneState::analyze(&chained, &LocalToneOpts::default());
-                    entry.local_tone = Some((key, state));
-                }
-            }
-        }
-
-        // ③ 按档位取源（预览档要缩一次，缩完缓存住）
-        let (source, width, height) = match job.tier {
-            ImageTier::Full => (&entry.full, entry.full.width, entry.full.height),
-            ImageTier::Preview => {
-                if entry.preview.is_none() {
-                    entry.preview = Some(entry.full.downscaled_to(PixelSize::SCREEN_EDGE));
-                }
-                let preview = entry.preview.as_ref().expect("刚补上的");
-                (preview, preview.width, preview.height)
-            }
-        };
-
-        // ④ 跑管线（这一段就是「拖一下要多久」的全部）
-        let local = if local_strength > 0.0 {
-            entry
-                .local_tone
-                .as_ref()
-                .map(|(_, state)| (state, local_strength))
-        } else {
-            None
-        };
-        let started = std::time::Instant::now();
-        let rgb = render_rgb8_with_local_tone(source, &job.params, &job.curves, local);
-        let develop_ms = started.elapsed().as_secs_f64() * 1000.0;
-
-        let outcome = DevelopOutcome {
-            id: job.id,
-            rev: job.rev,
-            path: entry.path.clone(),
-            tier: job.tier,
-            origin,
-            as_shot_temperature,
-            decode_ms,
-            develop_ms,
-            result: Ok(DevelopedImage {
-                width,
-                height,
-                rgb,
-            }),
-        };
-        if commands.send(RenderCommand::Developed(outcome)).is_err() {
             return; // 渲染线程走了
         }
     }
+}
+
+/// 一条显影任务（[`develop_loop`] 的实体）；`None` = 没有照片可算，跳过这条。
+fn run_develop_job(
+    cached: &mut Option<CachedSource>,
+    wanted_photo: &Option<String>,
+    job: &DevelopJob,
+    max_texture: u32,
+) -> Option<DevelopOutcome> {
+    // ① 需要的话先解码线性源（换照片 / 上一张解失败过）
+    let mut decode_ms = None;
+    let mut origin = "bitmap".to_string();
+    if let Some(path) = wanted_photo.clone()
+        && cached.as_ref().is_none_or(|entry| entry.path != path)
+    {
+        let started = std::time::Instant::now();
+        match decode_linear_source(Path::new(&path), max_texture) {
+            Ok(source) => {
+                decode_ms = Some(started.elapsed().as_secs_f64() * 1000.0);
+                let as_shot_temperature = source.as_shot_temperature;
+                origin = source.origin.clone();
+                *cached = Some(CachedSource {
+                    path,
+                    full: source.image,
+                    preview: None,
+                    analysis_source: None,
+                    local_tone: None,
+                    as_shot_temperature,
+                    origin: origin.clone(),
+                });
+            }
+            Err(error) => {
+                return Some(DevelopOutcome {
+                    id: job.id,
+                    rev: job.rev,
+                    path,
+                    tier: job.tier,
+                    origin,
+                    as_shot_temperature: None,
+                    decode_ms: Some(started.elapsed().as_secs_f64() * 1000.0),
+                    develop_ms: 0.0,
+                    result: Err(error),
+                });
+            }
+        }
+    }
+
+    let Some(entry) = cached.as_mut() else {
+        // 只有「还没让显示过任何照片」才会走到这里（开局那一条参数任务）。
+        // 一旦要过照片，`wanted_photo` 就粘住了 —— 见 `merge_jobs` 的注释。
+        eprintln!("[editor] 参数任务先到、还没有照片可算（job #{}）：跳过", job.id);
+        return None;
+    };
+    let as_shot_temperature = entry.as_shot_temperature;
+    origin = entry.origin.clone();
+
+    // ② 动态反差：分析图只缩一次；分析结果只在**线性链参数**变了才重算。
+    //    这一段必须放在取 source 之前（它要可变借 entry）。
+    let local_strength = (job.params.value("dynamicContrast") / 100.0) as f32;
+    if local_strength > 0.0 {
+        let key = Resolved::new(&job.params).chain_key();
+        if entry
+            .local_tone
+            .as_ref()
+            .is_none_or(|(cached_key, _)| *cached_key != key)
+        {
+            if entry.analysis_source.is_none() {
+                let long = entry.full.width.max(entry.full.height);
+                entry.analysis_source = Some(entry.full.downscaled_to((long / 4).max(256)));
+            }
+            if let Some(analysis) = entry.analysis_source.as_ref() {
+                let chained = chain_image(analysis, &job.params);
+                let state = LocalToneState::analyze(&chained, &LocalToneOpts::default());
+                entry.local_tone = Some((key, state));
+            }
+        }
+    }
+
+    // ③ 按档位取源（预览档要缩一次，缩完缓存住）
+    let (source, width, height) = match job.tier {
+        ImageTier::Full => (&entry.full, entry.full.width, entry.full.height),
+        ImageTier::Preview => {
+            if entry.preview.is_none() {
+                entry.preview = Some(entry.full.downscaled_to(PixelSize::SCREEN_EDGE));
+            }
+            let preview = entry.preview.as_ref().expect("刚补上的");
+            (preview, preview.width, preview.height)
+        }
+    };
+
+    // ④ 跑管线（这一段就是「拖一下要多久」的全部）
+    let local = if local_strength > 0.0 {
+        entry
+            .local_tone
+            .as_ref()
+            .map(|(_, state)| (state, local_strength))
+    } else {
+        None
+    };
+    let started = std::time::Instant::now();
+    let rgb = render_rgb8_with_local_tone(source, &job.params, &job.curves, local);
+    let develop_ms = started.elapsed().as_secs_f64() * 1000.0;
+
+    Some(DevelopOutcome {
+        id: job.id,
+        rev: job.rev,
+        path: entry.path.clone(),
+        tier: job.tier,
+        origin,
+        as_shot_temperature,
+        decode_ms,
+        develop_ms,
+        result: Ok(DevelopedImage {
+            width,
+            height,
+            rgb,
+            // 逻辑尺寸 = 完整线性源（不是这一档的渲染尺寸）
+            source_width: entry.full.width,
+            source_height: entry.full.height,
+        }),
+    })
 }
 
 /// 解码一张照片的**线性源**（显影管线的唯一输入）。
@@ -1680,10 +1728,19 @@ fn decode_linear_source(path: &Path, max_texture: u32) -> Result<LinearSource, S
         let request = raybend::raw::backend::DecodeRequest::full(path);
         let worker = raybend::raw::worker::shared();
         let mut guard = worker.lock().map_err(|_| "RAW worker 锁中毒".to_string())?;
-        let decoded = guard.decode_linear(&request).map_err(|e| e.to_string())?;
-        let image = LinearImage::new(decoded.width, decoded.height, decoded.rgb)
-            .ok_or_else(|| format!("线性解码结果的尺寸对不上：{}×{}", decoded.width, decoded.height))?;
-        (image, "raw-linear".to_string(), decoded.as_shot_temperature)
+        let mut decoded = guard.decode_linear(&request).map_err(|e| e.to_string())?;
+        let (width, height) = (decoded.width, decoded.height);
+        let as_shot_temperature = decoded.as_shot_temperature;
+        /*
+         * **方向与缩略图/看图那条路同一条规则**（`media::exif::raw_orientation`）：
+         * 文件头优先（worker 对 TIFF 家族报 1 不可靠），读不到才用 worker 报的。
+         * `from_raw16` 会按它把像素摆正（宽高随之互换）—— 显影管线、裁剪、覆盖层、
+         * 1:1 看到的都该是「用户实际看到的那张图」。编辑侧曾经连这一步都没有。
+         */
+        decoded.orientation = raybend::media::exif::raw_orientation(path, decoded.orientation);
+        let image = LinearImage::from_raw16(decoded)
+            .ok_or_else(|| format!("线性解码结果的尺寸对不上：{width}×{height}"))?;
+        (image, "raw-linear".to_string(), as_shot_temperature)
     } else {
         let Some(pixels) = display::pixels(path, PixelSize::Full).map_err(|e| e.to_string())? else {
             return Err(format!("解不开这张照片：{}", path.display()));

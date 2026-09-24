@@ -45,6 +45,9 @@ pub struct TiffInfo {
     /// 快门时间（**秒**；调用方按需换算成毫秒）
     pub exposure_secs: Option<f64>,
     pub f_number: Option<f64>,
+    /// **曝光补偿**（EV；SRATIONAL，负值 = 减光）。编辑右栏「与调节相关」那组要用
+    /// （人类 2026-09-24：与调节关系紧的信息要优先显示）。
+    pub exposure_bias_ev: Option<f64>,
     pub iso: Option<i64>,
     pub focal_mm: Option<f64>,
 }
@@ -80,6 +83,7 @@ const TAG_MODEL: u16 = 0x0110;
 const TAG_ORIENTATION: u16 = 0x0112;
 const TAG_SOFTWARE: u16 = 0x0131;
 const TAG_DATETIME: u16 = 0x0132;
+const TAG_EXPOSURE_BIAS: u16 = 0x9204;
 // 时区偏移（EXIF 2.31）；三个都在 EXIF 子 IFD 里
 const TAG_OFFSET_TIME: u16 = 0x9010;
 const TAG_OFFSET_TIME_ORIGINAL: u16 = 0x9011;
@@ -150,6 +154,7 @@ pub fn parse(bytes: &[u8]) -> Option<TiffInfo> {
                     TAG_OFFSET_TIME_DIGITIZED => off_digitized = entry.ascii(bytes, order),
                     TAG_EXPOSURE => info.exposure_secs = entry.rational(bytes, order),
                     TAG_FNUMBER => info.f_number = entry.rational(bytes, order),
+                    TAG_EXPOSURE_BIAS => info.exposure_bias_ev = entry.srational(bytes, order),
                     TAG_FOCAL => info.focal_mm = entry.rational(bytes, order),
                     TAG_ISO => info.iso = entry.int_value(order),
                     TAG_LENS => info.lens = entry.ascii(bytes, order),
@@ -197,6 +202,15 @@ impl ByteOrder {
         Some(match self {
             Self::Little => u32::from_le_bytes(raw),
             Self::Big => u32::from_be_bytes(raw),
+        })
+    }
+
+    /// 有符号 32 位（SRATIONAL 的分子用）
+    fn i32(self, bytes: &[u8], offset: usize) -> Option<i32> {
+        let raw: [u8; 4] = bytes.get(offset..offset + 4)?.try_into().ok()?;
+        Some(match self {
+            Self::Little => i32::from_le_bytes(raw),
+            Self::Big => i32::from_be_bytes(raw),
         })
     }
 }
@@ -278,6 +292,21 @@ impl Entry {
         let value = numerator / denominator;
         value.is_finite().then_some(value)
     }
+
+    /// SRATIONAL（类型 10）：分子是**有符号**的 —— 曝光补偿的负值（−1⅃ EV）就靠它。
+    fn srational(self, bytes: &[u8], order: ByteOrder) -> Option<f64> {
+        if self.field_type != 10 || self.count == 0 {
+            return None;
+        }
+        let data = self.data(bytes, order)?;
+        let numerator = f64::from(order.i32(&data, 0)?);
+        let denominator = f64::from(order.u32(&data, 4)?);
+        if denominator == 0.0 {
+            return None;
+        }
+        let value = numerator / denominator;
+        value.is_finite().then_some(value)
+    }
 }
 
 /// 读一个 IFD 的全部条目（只看前 [`MAX_ENTRIES`] 条，越界一律放弃）。
@@ -315,6 +344,8 @@ mod tests {
         Ascii(&'a str),
         /// RATIONAL：8 字节进数据区
         Rational(u32, u32),
+        /// SRATIONAL：分子**有符号**（曝光补偿）
+        SRational(i32, u32),
     }
 
     /// 造一个 TIFF：**两个 IFD**（IFD0 + EXIF IFD）。
@@ -373,6 +404,13 @@ mod tests {
                     data.extend_from_slice(&u32b(*num));
                     data.extend_from_slice(&u32b(*den));
                     (5, 1, u32b(offset))
+                }
+                Val::SRational(num, den) => {
+                    let offset = (data_start + data.len()) as u32;
+                    // 补码位型不变：`i32 as u32` 后走同一套字节序编码
+                    data.extend_from_slice(&u32b(*num as u32));
+                    data.extend_from_slice(&u32b(*den));
+                    (10, 1, u32b(offset))
                 }
             };
             meta.push((field_type, count));
@@ -444,6 +482,31 @@ mod tests {
         assert_eq!(info.width, Some(4000));
         assert_eq!(info.height, Some(3000));
         assert!(!info.is_empty());
+    }
+
+    #[test]
+    fn reads_signed_exposure_bias_from_the_exif_ifd() {
+        // SRATIONAL 的分子是**负数**（−4/3 = −1⅃ EV）：解析错符号的测试当场就红
+        let bytes = build(
+            MAGIC_TIFF,
+            false,
+            &[],
+            &[(TAG_EXPOSURE_BIAS, Val::SRational(-4, 3))],
+        );
+        let info = parse(&bytes).expect("应当能解析");
+        assert!(
+            (info.exposure_bias_ev.expect("要读到") - (-4.0 / 3.0)).abs() < 1e-9,
+            "{:?}",
+            info.exposure_bias_ev
+        );
+        // 0 EV 是有效值（无补偿），不许被当「没读到」滤掉
+        let bytes = build(
+            MAGIC_TIFF,
+            false,
+            &[],
+            &[(TAG_EXPOSURE_BIAS, Val::SRational(0, 1))],
+        );
+        assert_eq!(parse(&bytes).expect("应当能解析").exposure_bias_ev, Some(0.0));
     }
 
     #[test]

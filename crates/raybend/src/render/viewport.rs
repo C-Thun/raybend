@@ -73,6 +73,10 @@ pub enum AlphaMode {
 /// 视口状态。**Rust 独有**。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Viewport {
+    /// **逻辑图像尺寸**（**原图 / 解码尺寸**，图像像素）—— 不是当前纹理的尺寸。
+    ///
+    /// 坐标系、`1:1`、Fit 都按它算；纹理可能只是预览档（长边 1920），
+    /// 渲染时被拉伸到这块矩形上（M3-W4：把两者分开，否则「1:1」会是预览图的 1:1）。
     pub image_size: (u32, u32),
     /// 窗口内容区的物理像素尺寸
     pub viewport_size: (f32, f32),

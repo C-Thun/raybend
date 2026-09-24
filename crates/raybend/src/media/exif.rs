@@ -81,6 +81,9 @@ pub struct ExifData {
     pub f_number: Option<f64>,
     /// 快门时间（毫秒；1/250 秒 → 4.0）。
     pub exposure_ms: Option<f64>,
+    /// **曝光补偿**（EV，SRATIONAL；负值 = 减光）。编辑右栏「与调节相关」那组要用
+    /// （人类 2026-09-24：与调节关系紧的信息要优先显示）。
+    pub exposure_bias_ev: Option<f64>,
     pub iso: Option<i64>,
     pub width: Option<i64>,
     pub height: Option<i64>,
@@ -130,6 +133,30 @@ pub fn read_file_for(path: &Path) -> ExifData {
     } else {
         read_file(path)
     }
+}
+
+/// **RAW 的方向取哪一边**：文件头优先，读不到才用解码器报的（两边都没有就是 `None`）。
+///
+/// # 优先级不能反（2026-09-18 的教训）
+///
+/// 反过一次，症状是「双击进 view 看 RAW 原图是歪的，而 tiles 是正的」：
+/// 当时写成 `解码器.or(文件头)` —— **解码器的值压过了文件头**。而解码器从不代为摆正
+/// （`PixelSource::applies_orientation` 恒为 `false`），它报的方向对 TIFF 家族并不可靠：
+/// 实测 Panasonic RW2 报 `1`，文件头里却写着 `8`，于是 `Some(1)` 把真正的 8 盖掉 → 不转。
+/// tiles 走内嵌预览那条路时解码器给的是 `None`，回退到文件头反而转了 —— 「tiles 正、view 歪」
+/// 就是这么来的。CR3 这类方向只活在容器内部的格式，文件头读不到，回退值仍然用得上。
+///
+/// # 谁在用（不许各写一套）
+///
+/// 缩略图/看图那条路（`thumbnail::render::decode_raw_file`）与编辑器的**线性解码**
+/// （`src-tauri/editor.rs::decode_linear_source`）共用这一个函数 ——
+/// 编辑侧曾经连这一步都没有，竖拍 RAW 进编辑就是横的（2026-09-24 人类报的）。
+#[must_use]
+pub fn raw_orientation(path: &Path, from_decoder: Option<u16>) -> Option<u16> {
+    read_file_raw(path)
+        .orientation
+        .map(|raw| crate::media::meta::normalize_orientation(Some(raw)))
+        .or(from_decoder)
 }
 
 /// 路径的扩展名是不是 RAW（用 `media::kind` 那张表，不要自己列扩展名）。
@@ -257,6 +284,7 @@ fn read_bytes_inner(bytes: &[u8], raw_family: bool) -> Option<ExifData> {
         f_number: info.f_number,
         // 库里统一存**毫秒**（与主路一致）
         exposure_ms: info.exposure_secs.map(|secs| secs * 1000.0),
+        exposure_bias_ev: info.exposure_bias_ev,
         iso: info.iso,
         width: info.width,
         height: info.height,
@@ -285,6 +313,9 @@ pub fn from_exif(exif: &exif::Exif) -> ExifData {
     out.exposure_ms = rational(exif, Tag::ExposureTime, In::PRIMARY)
         .map(|secs| secs * 1000.0)
         .filter(|ms| ms.is_finite() && *ms >= 0.0);
+    // 曝光补偿（SRATIONAL）：0 是有效值（无补偿），不过滤零 ——
+    // 与「读不到」是两回事，界面上要不要显示归调用方
+    out.exposure_bias_ev = srational(exif, Tag::ExposureBiasValue, In::PRIMARY);
     out.iso = uint(exif, Tag::PhotographicSensitivity, In::PRIMARY)
         .or_else(|| uint(exif, Tag::ISOSpeed, In::PRIMARY))
         .map(i64::from);
@@ -543,6 +574,17 @@ fn rational(exif: &exif::Exif, tag: Tag, in_ifd: In) -> Option<f64> {
     .filter(|v| v.is_finite() && *v != 0.0)
 }
 
+/// 有理数（不滤零）—— 曝光补偿这种「0 是有效值」的字段用。
+fn srational(exif: &exif::Exif, tag: Tag, in_ifd: In) -> Option<f64> {
+    let v = &field(exif, tag, in_ifd)?.value;
+    match v {
+        Value::Rational(items) => items.first().map(exif::Rational::to_f64),
+        Value::SRational(items) => items.first().map(exif::SRational::to_f64),
+        _ => None,
+    }
+    .filter(|v| v.is_finite())
+}
+
 /// GPS：3 个有理数（度分秒）+ 半球标记 → 十进制度。
 fn read_gps(exif: &exif::Exif) -> Option<Gps> {
     let lat = gps_coord(exif, Tag::GPSLatitude, Tag::GPSLatitudeRef, "S")?;
@@ -633,6 +675,18 @@ mod tests {
         Entry {
             tag,
             ty: 5,
+            count: 1,
+            data,
+        }
+    }
+
+    /// SRATIONAL（类型 10）：分子**有符号**（曝光补偿 −1⅃ EV 这种）。
+    fn srational_entry(tag: u16, num: i32, den: u32) -> Entry {
+        let mut data = num.to_le_bytes().to_vec();
+        data.extend_from_slice(&den.to_le_bytes());
+        Entry {
+            tag,
+            ty: 10,
             count: 1,
             data,
         }
@@ -866,6 +920,58 @@ mod tests {
         let gps = data.gps.unwrap();
         assert!(gps.lat < 0.0, "南纬应当是负数：{}", gps.lat);
         assert!(gps.lon < 0.0, "西经应当是负数：{}", gps.lon);
+    }
+
+    #[test]
+    fn reads_exposure_bias_from_the_exif_ifd() {
+        // SRATIONAL 的分子是负数（−4/3 = −1⅃ EV）；0 也是有效值（无补偿）
+        let data = read_bytes(&build_tiff(
+            vec![],
+            vec![srational_entry(0x9204, -4, 3)],
+        ))
+        .unwrap();
+        assert!(
+            (data.exposure_bias_ev.unwrap() - (-4.0 / 3.0)).abs() < 1e-9,
+            "{:?}",
+            data.exposure_bias_ev
+        );
+        let zero = read_bytes(&build_tiff(
+            vec![],
+            vec![srational_entry(0x9204, 0, 1)],
+        ))
+        .unwrap();
+        assert_eq!(zero.exposure_bias_ev, Some(0.0), "0 EV 不能被当「没读到」滤掉");
+    }
+
+    #[test]
+    fn raw_orientation_comes_from_the_file_first_in_a_real_raw() {
+        /*
+         * 优先级教训的实文件版（原 `pick_orientation` 那条纯逻辑测试的继任者）：
+         * 文件头写了 8，解码器（对 TIFF 家族不可靠）报 1 —— 文件头必须赢。
+         */
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sample.rw2");
+        std::fs::write(
+            &path,
+            build_tiff(vec![short_entry(0x0112, 8)], vec![]),
+        )
+        .unwrap();
+        assert_eq!(
+            raw_orientation(&path, Some(1)),
+            Some(8),
+            "文件头赢（解码器对 TIFF 家族报 1 不可靠）"
+        );
+        // 文件头没有 → 回退到解码器
+        let path = dir.path().join("no-orientation.rw2");
+        std::fs::write(&path, build_tiff(vec![], vec![])).unwrap();
+        assert_eq!(raw_orientation(&path, Some(6)), Some(6));
+        // 两边都没有 → None（不猜）
+        assert_eq!(raw_orientation(&path, None), None);
+        // 文件不存在：不 panic，回退到解码器报的
+        assert_eq!(
+            raw_orientation(Path::new("/definitely/not/here.rw2"), Some(5)),
+            Some(5)
+        );
     }
 
     #[test]

@@ -1,6 +1,6 @@
 //! spike 的着色器（WGSL 属于 Rust 侧，前端不接触 —— `AGENTS.md` §6.1 红线 #3）。
 //!
-//! 一张图的四边形：顶点位置**直接用图像像素坐标**（0..w, 0..h），
+//! 一张图的四边形：顶点位置**直接用逻辑图像像素坐标**（0..w, 0..h），
 //! 由 [`crate::render::viewport::Viewport::matrix`] 算出的矩阵搬到 NDC。
 //! 这样视口变换只有**一处**（Rust 的 `Viewport`），着色器里没有第二套数学 ——
 //! 覆盖层要复用同一套时，直接拿同一个矩阵就行。
@@ -20,6 +20,14 @@ struct Uniforms {
      * 这个错就是离屏冒烟抓到的。用 vec4 则 64 + 16 = 80，两边一眼对得上。
      */
     params: vec4<f32>,
+    /*
+     * `.xy` = **逻辑图像尺寸**（原图 / 解码尺寸，图像像素）。
+     *
+     * 顶点用它铺四边形，**不是** `textureDimensions(image)`：当前纹理可能只是预览档（长边 1920），
+     * 逻辑尺寸却是 6000 —— 按纹理尺寸铺，「1:1」就变成「预览图的 1:1」（2026-09-24 修）。
+     * 纹理只是当前清晰度，UV 仍是 0..1，拉伸与否由这个尺寸决定。
+     */
+    image_size: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
@@ -35,7 +43,8 @@ struct VsOut {
 @vertex
 fn vs_main(@builtin(vertex_index) index: u32) -> VsOut {
     // 三角带：0=左上 1=右上 2=左下 3=右下
-    let dims = vec2<f32>(textureDimensions(image, 0));
+    // 顶点位置是**逻辑图像像素坐标**（0..逻辑尺寸），由矩阵搬到 NDC
+    let dims = uniforms.image_size.xy;
     let corner = vec2<f32>(f32(index & 1u), f32(index >> 1u));
     let pixel = corner * dims;
 

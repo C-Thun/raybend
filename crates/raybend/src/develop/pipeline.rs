@@ -159,6 +159,69 @@ impl LinearImage {
             rgb: out,
         }
     }
+
+    /// 从 **RAW 线性解码结果**建一张线性图（**按 EXIF 方向摆正**）。
+    ///
+    /// 位图那条路的等价物是 `display::pixels`（它已经摆正）→ [`Self::from_srgb8`]；
+    /// RAW 这条路的解码结果**没摆正**（方向只是元数据），所以规则落在这里 ——
+    /// 编辑侧曾经漏掉这一步（竖拍 RAW 进编辑就是横的，2026-09-24 人类报的）。
+    ///
+    /// 形状对不上返回 `None`（不猜、不补零）。
+    #[must_use]
+    pub fn from_raw16(source: crate::raw::backend::RawImage16) -> Option<Self> {
+        let image = Self::new(source.width, source.height, source.rgb)?;
+        Some(match source.orientation {
+            Some(value) if value != 1 => image.oriented(value),
+            _ => image,
+        })
+    }
+
+    /// 按 **EXIF 方向**（1–8）摆正像素；`1` / 未知值原样返回。
+    ///
+    /// # 为什么要烤进像素，而不是在视口里转
+    ///
+    /// 方向是**像素事实**，不是显示选项：显影管线、裁剪、覆盖层、`1:1` 看到的都应该是
+    /// 「用户实际看到的那张图」。烤进像素之后，下游（视口/覆盖层/命中测试）一份代码不用改。
+    ///
+    /// 编辑侧曾经**完全没做这一步**（缩略图/看图那条路有）——
+    /// 症状是竖拍 RAW 进编辑就是横的（2026-09-24 人类报的）。
+    ///
+    /// # 规则与缩略图那条路**逐字一致**
+    ///
+    /// 与 `thumbnail::render::apply_orientation`（`image` crate 的 `fliph` / `rotate90`…）
+    /// 同一张表；`pipeline.rs` 的测试拿 8bit 图**交叉验证**两份实现 —— 不许各走各的。
+    #[must_use]
+    pub fn oriented(&self, orientation: u16) -> Self {
+        let (w, h) = (self.width, self.height);
+        // 90°/270° 类的四个方向宽高互换
+        let swap = matches!(orientation, 5..=8);
+        let (out_w, out_h) = if swap { (h, w) } else { (w, h) };
+        let mut out = vec![0u16; self.rgb.len()];
+        // 按**目标**坐标遍历（旋转类方向的映射是「目标取源」，反过来算会越界）
+        for dy in 0..out_h {
+            for dx in 0..out_w {
+                // 目标像素 (dx,dy) 取源像素 (sx,sy)；表与 `apply_orientation` 同源
+                let (sx, sy) = match orientation {
+                    2 => (w - 1 - dx, dy),          // 水平镜像
+                    3 => (w - 1 - dx, h - 1 - dy),  // 180°
+                    4 => (dx, h - 1 - dy),          // 垂直镜像
+                    5 => (dy, dx),                  // 转置
+                    6 => (dy, h - 1 - dx),          // 顺时针 90°
+                    7 => (w - 1 - dy, h - 1 - dx),  // 反转置
+                    8 => (w - 1 - dy, dx),          // 逆时针 90°
+                    _ => (dx, dy),
+                };
+                let src = (sy as usize * w as usize + sx as usize) * 3;
+                let dst = (dy as usize * out_w as usize + dx as usize) * 3;
+                out[dst..dst + 3].copy_from_slice(&self.rgb[src..src + 3]);
+            }
+        }
+        Self {
+            width: out_w,
+            height: out_h,
+            rgb: out,
+        }
+    }
 }
 
 /// 管线里被解析出来的参数（一条参数查一次，别在像素循环里查表）。
@@ -734,6 +797,104 @@ mod tests {
             rgb.extend(pixel.iter().map(|v| linear(*v)));
         }
         LinearImage::new(pixels.len() as u32, 1, rgb).expect("形状对得上")
+    }
+
+    #[test]
+    fn raw_linear_source_is_oriented_on_the_way_in() {
+        use crate::raw::backend::{PixelSource, RawImage16};
+
+        let raw = |orientation: Option<u16>| RawImage16 {
+            width: 3,
+            height: 2,
+            rgb: (0..3 * 2 * 3).map(|i| i as u16).collect(),
+            source: PixelSource::Decoded,
+            orientation,
+            as_shot_temperature: None,
+        };
+        let pixel_at = |image: &LinearImage, x: u32, y: u32| -> [u16; 3] {
+            let index = ((y * image.width + x) * 3) as usize;
+            [image.rgb[index], image.rgb[index + 1], image.rgb[index + 2]]
+        };
+
+        let upright = LinearImage::from_raw16(raw(Some(1))).expect("形状对得上");
+        assert_eq!((upright.width, upright.height), (3, 2), "方向 1 不动");
+        assert_eq!(pixel_at(&upright, 0, 0), [0, 1, 2]);
+
+        let rotated = LinearImage::from_raw16(raw(Some(6))).expect("形状对得上");
+        assert_eq!((rotated.width, rotated.height), (2, 3), "方向 6 宽高互换");
+        // 顺时针 90°：源左上 (0,0) 落到目标右上 (1,0)
+        assert_eq!(pixel_at(&rotated, 1, 0), [0, 1, 2], "源左上 → 目标右上");
+
+        let missing = LinearImage::from_raw16(raw(None)).expect("形状对得上");
+        assert_eq!((missing.width, missing.height), (3, 2), "没有方向就按 1 处理");
+
+        // 形状对不上 → None（不猜、不补零）
+        let broken = RawImage16 {
+            width: 3,
+            height: 2,
+            rgb: vec![0; 5],
+            source: PixelSource::Decoded,
+            orientation: None,
+            as_shot_temperature: None,
+        };
+        assert!(LinearImage::from_raw16(broken).is_none());
+    }
+
+    #[test]
+    fn orientation_permutation_matches_the_thumbnail_path() {
+        /*
+         * 显影这条路的「按方向摆正」必须与缩略图/看图那条路（`image` crate 的
+         * `fliph` / `rotate90`…）**逐像素一致** —— 两份实现各走各的，用户就会看到
+         * 「网格里正着、编辑里躺着」那种很难查的错（§2.12）。
+         *
+         * 用 3×2 的非对称图：每个像素写一个能认出位置的值（8bit 范围，两边都能精确表示）。
+         */
+        use crate::thumbnail::render::apply_orientation;
+
+        let (w, h) = (3u32, 2u32);
+        let value = |x: u32, y: u32| ((y * w + x) * 10 + 1) as u8;
+        let mut rgb = Vec::with_capacity((w * h * 3) as usize);
+        for y in 0..h {
+            for x in 0..w {
+                let v = value(x, y);
+                rgb.extend([u16::from(v), u16::from(v) + 100, u16::from(v) + 200]);
+            }
+        }
+        let ours = LinearImage::new(w, h, rgb).expect("形状对得上");
+
+        let mut reference = image::RgbImage::new(w, h);
+        for (x, y, pixel) in reference.enumerate_pixels_mut() {
+            let v = value(x, y);
+            *pixel = image::Rgb([v, v + 100, v + 200]);
+        }
+
+        for orientation in 1u16..=8 {
+            let ours = ours.oriented(orientation);
+            let expected =
+                apply_orientation(&image::DynamicImage::ImageRgb8(reference.clone()), orientation)
+                    .to_rgb8();
+            assert_eq!(
+                (ours.width, ours.height),
+                (expected.width(), expected.height()),
+                "方向 {orientation}：宽高对不上"
+            );
+            let ours8: Vec<u8> = ours.rgb.iter().map(|v| *v as u8).collect();
+            assert_eq!(
+                ours8,
+                expected.into_raw(),
+                "方向 {orientation}：像素排布与缩略图那条路不一致"
+            );
+        }
+    }
+
+    #[test]
+    fn orientation_keeps_identity_and_unknown_untouched() {
+        let rgb: Vec<u16> = (0..3 * 2 * 3).map(|i| i as u16).collect();
+        let image = LinearImage::new(3, 2, rgb).expect("形状对得上");
+        for orientation in [1u16, 0, 9, u16::MAX] {
+            let same = image.oriented(orientation);
+            assert_eq!(same, image, "方向 {orientation} 应当原样返回");
+        }
     }
 
     #[test]

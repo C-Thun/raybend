@@ -66,6 +66,20 @@ fn make_photo() -> RenderImage {
     RenderImage::from_rgb8(size, size, &rgb).expect("合成的照片长度必须对得上")
 }
 
+/// **缩到一半的纹理**（32×32，每块 16×16）—— 验「1:1 按逻辑尺寸算」时替掉全尺寸纹理。
+fn make_half_photo() -> RenderImage {
+    let size = BLOCK; // 32
+    let half = BLOCK / 2; // 16
+    let mut rgb = Vec::with_capacity((size * size * 3) as usize);
+    for y in 0..size {
+        for x in 0..size {
+            let quadrant = usize::from(x >= half) + usize::from(y >= half) * 2;
+            rgb.extend_from_slice(&expected(quadrant));
+        }
+    }
+    RenderImage::from_rgb8(size, size, &rgb).expect("缩略纹理的长度必须对得上")
+}
+
 /// 第 `quadrant` 块的 RGB（外部给定的期望色，从 [`QUADRANTS`] 里取）。
 fn expected(quadrant: usize) -> [u8; 3] {
     let [r, g, b, _] = QUADRANTS[quadrant];
@@ -259,6 +273,50 @@ fn main() -> Result<(), String> {
         format!("{:?}", rgba(&actual, size.0, 64, 88)),
     );
     save_png(&out_dir.join("03-one-to-one.png"), &actual, size.0, size.1)?;
+
+    /* ── ④ 逻辑尺寸 ≠ 纹理尺寸：1:1 按**原图**算，不按当前档位 ───────────
+     *
+     * 这是 M3-W4 修的那条：预览档的纹理是缩小的（长边 1920），而「1:1」
+     * 必须是**原图**的一个像素对一个物理像素。这里把纹理换成 32×32
+     * （每块 16×16），逻辑尺寸仍是 64×64：
+     * ⇒ 1:1 时照片必须占 64×64 物理像素（x ∈ [32,96]、y ∈ [16,80]），
+     *   而不是纹理的 32×32（x ∈ [48,80]、y ∈ [32,64]）。
+     * 四个块中心仍应是四色（最近邻放大 2 倍，块边界正好落在 32 的倍数上）。
+     */
+    renderer.set_image(make_half_photo());
+    let mut logical = Viewport {
+        image_size: (image_w, image_h), // 逻辑尺寸 = 原图 64×64
+        viewport_size: (size.0 as f32, size.1 as f32),
+        fit_mode: FitMode::OneToOne,
+        ..Default::default()
+    };
+    logical.refit();
+    let downscaled = renderer.render(&logical, size);
+    println!("\n④ 逻辑尺寸 ≠ 纹理尺寸（纹理 32×32、逻辑 64×64）：");
+    check(
+        "照片边界按逻辑尺寸：左边界外一格（30,40）是底色",
+        is_backdrop(rgba(&downscaled, size.0, 30, 40)),
+        format!("{:?}", rgba(&downscaled, size.0, 30, 40)),
+    );
+    check(
+        "照片边界按逻辑尺寸：右边界外一格（97,40）是底色",
+        is_backdrop(rgba(&downscaled, size.0, 97, 40)),
+        format!("{:?}", rgba(&downscaled, size.0, 97, 40)),
+    );
+    for (x, y, quadrant, name) in [
+        (40u32, 24u32, 0usize, "左上块中心"),
+        (88, 24, 1, "右上块中心"),
+        (40, 72, 2, "左下块中心"),
+        (88, 72, 3, "右下块中心"),
+    ] {
+        check(
+            &format!("{name}（{x},{y}）· {:?}", expected(quadrant)),
+            near(rgba(&downscaled, size.0, x, y), expected(quadrant), 12),
+            format!("{:?}", rgba(&downscaled, size.0, x, y)),
+        );
+    }
+    save_png(&out_dir.join("04-logical-size.png"), &downscaled, size.0, size.1)?;
+    renderer.set_image(make_photo()); // 还原，别把状态留给后来的人
 
     println!("\nPNG 已写入 {}", out_dir.display());
     if failures.is_empty() {
