@@ -138,6 +138,18 @@ export interface EditorStore {
   markCommitted: (rev: number) => void;
   /** 有没有还没落库的改动 */
   developDirty: () => boolean;
+  /**
+   * **手指还按在滑杆 / 曲线上**（人类 2026-09-24）。
+   *
+   * 它只影响一件事：拖动期间 Rust 侧**只算预览档**，松手那一下才按缩放补全尺寸
+   * （`tier_for_params`）—— 「调拉杆时只对展示的像素处理，释放鼠标才对全图做处理」。
+   * 它跟着载荷一起发出去（不单独开 IPC）。
+   */
+  paramDragging: () => boolean;
+  /** 拖拽开始（滑杆的 `onValueChangeStart` / 曲线的 `pointerdown`） */
+  beginParamDrag: () => void;
+  /** 拖拽结束（松手）—— 这一下会让载荷重发，Rust 侧于是补全尺寸 */
+  endParamDrag: () => void;
   /** 换照片：把库里读回来的一份编辑栈灌进来（并把它当成「已落库」） */
   loadDevelop: (
     values: Record<string, number>,
@@ -238,6 +250,7 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
   );
   const [developRev, setDevelopRev] = createSignal(0);
   const [committedRev, setCommittedRev] = createSignal(0);
+  const [paramDragging, setParamDragging] = createSignal(false);
   const [renderState, setRenderState] = createSignal<EditorRenderState | null>(null);
   const [holeActive, setHoleActive] = createSignal(false);
 
@@ -279,7 +292,13 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
         dirtyCurves[channel] = points.map(([x, y]) => [x, y]);
       }
     }
-    return { values, asShotTemperature: asShot(), curves: dirtyCurves };
+    return {
+      values,
+      asShotTemperature: asShot(),
+      curves: dirtyCurves,
+      // 拖动中：Rust 侧只算预览档（`tier_for_params`）
+      interactive: paramDragging(),
+    };
   };
 
   /** 面板状态一变就落盘（它只有开关两态，不需要防抖）。 */
@@ -387,7 +406,13 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
     committedRev,
     markCommitted: (rev) => setCommittedRev(rev),
     developDirty: () => developRev() !== committedRev(),
+    paramDragging,
+    beginParamDrag: () => setParamDragging(true),
+    endParamDrag: () => setParamDragging(false),
     loadDevelop: (values, loadedCurves) => {
+      // 换照片时把「拖动中」清掉：上一次拖到一半就换了图的话，
+      // 这个标志会一直挂在 true 上 —— 那样后面的渲染全被压成预览档（画面永远偏软）。
+      setParamDragging(false);
       const next = defaultParams();
       for (const [id, value] of Object.entries(values)) {
         if (typeof value === "number" && Number.isFinite(value)) next[id] = value;

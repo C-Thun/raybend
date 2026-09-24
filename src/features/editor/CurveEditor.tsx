@@ -75,6 +75,10 @@ export interface CurveEditorProps {
   disabled?: boolean;
   /** 松手 / 改动完成 → 工作区落库 */
   onCommit?: () => void;
+  /** 拖拽开始（拖动中只算预览档，见 `store.beginParamDrag`） */
+  onDragStart?: () => void;
+  /** 拖拽结束 */
+  onDragEnd?: () => void;
 }
 
 /** 某个通道在背景里那条轮廓的采样值（RGB = 三通道包络）。 */
@@ -152,6 +156,7 @@ export function CurveEditor(props: CurveEditorProps): JSX.Element {
     if (hit >= 0) {
       setDragging(hit);
       svg.setPointerCapture(event.pointerId);
+      props.onDragStart?.();
       return;
     }
 
@@ -166,6 +171,7 @@ export function CurveEditor(props: CurveEditorProps): JSX.Element {
         const index = next.findIndex((point) => Math.abs(point[0] - x) < 1e-6);
         setDragging(index >= 0 ? index : null);
         svg.setPointerCapture(event.pointerId);
+        props.onDragStart?.();
       }
     }
   }
@@ -191,6 +197,8 @@ export function CurveEditor(props: CurveEditorProps): JSX.Element {
     if (svg instanceof SVGSVGElement && svg.hasPointerCapture(event.pointerId)) {
       svg.releasePointerCapture(event.pointerId);
     }
+    // 先松开「拖动中」再落库：松手这一下要让 Rust 侧补全尺寸（`tier_for_params`）
+    props.onDragEnd?.();
     props.onCommit?.();
   }
 

@@ -710,6 +710,14 @@ export interface DevelopParamsPayload {
   values: Record<string, number>;
   asShotTemperature: number | null;
   curves: Record<string, [number, number][]>;
+  /**
+   * **手指还按在滑杆 / 曲线上**（人类 2026-09-24）。
+   *
+   * Rust 侧据此选渲染档：拖动中**一律预览档**（缩到屏幕尺寸再算像素，
+   * 哪怕在 1:1 也不做全尺寸）；松手那一下按缩放重新算（要全尺寸就给全尺寸）。
+   * 缺省 `false`（老调用方 / 单测不传这个字段也是合法的）。
+   */
+  interactive: boolean;
 }
 
 export interface EditorRenderState {

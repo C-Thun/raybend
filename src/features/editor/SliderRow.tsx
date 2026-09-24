@@ -35,6 +35,15 @@ export interface SliderRowProps {
   onValueChange: (value: number) => void;
   /** 拖拽结束（W3 用它落库；本波只接不写） */
   onValueCommit?: (value: number) => void;
+  /**
+   * 拖拽开始 / 结束（人类 2026-09-24）：拖动中只算预览档，松手才补全尺寸。
+   *
+   * 起点认在**第一次值变化**上（Zag 的 slider 只有 `onValueChange` / `onValueChangeEnd`，
+   * 没有 `onValueChangeStart`）：点标签、点空白都不会误报「在拖」；
+   * 结束那条由 Zag 报，它带指针捕获 —— 拖到控件外面松手也算结束。
+   */
+  onDragStart?: () => void;
+  onDragEnd?: () => void;
   disabled?: boolean;
   class?: string;
 }
@@ -53,10 +62,15 @@ export function SliderRow(props: SliderRowProps): JSX.Element {
       disabled={props.disabled ?? false}
       onValueChange={(details) => {
         const next = details.value[0];
-        if (typeof next === "number" && next !== props.value) props.onValueChange(next);
+        if (typeof next === "number" && next !== props.value) {
+          props.onDragStart?.();
+          props.onValueChange(next);
+        }
       }}
       onValueChangeEnd={(details) => {
         const next = details.value[0];
+        // 顺序要紧：先松开「拖动中」（松手这一下要补全尺寸），再落库
+        props.onDragEnd?.();
         if (typeof next === "number") props.onValueCommit?.(next);
       }}
       class={["flex min-w-0 flex-col gap-0.5 select-none", props.class ?? ""]

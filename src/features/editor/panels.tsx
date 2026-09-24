@@ -202,6 +202,9 @@ export function EditorPanels(props: EditorPanelsProps): JSX.Element {
                 disabled={!props.enabled || !spec.wired}
                 onValueChange={(value) => props.store.setParam(spec.id, value)}
                 onValueCommit={() => props.onCommit?.()}
+                /* 拖动中只算预览档、松手补全尺寸（人类 2026-09-24，`store.beginParamDrag`） */
+                onDragStart={() => props.store.beginParamDrag()}
+                onDragEnd={() => props.store.endParamDrag()}
               />
             )}
           </For>
@@ -499,6 +502,8 @@ function CurveTab(props: {
       histogram={histogram()}
       disabled={!props.enabled}
       onCommit={props.onCommit}
+      onDragStart={() => props.store.beginParamDrag()}
+      onDragEnd={() => props.store.endParamDrag()}
     />
   );
 }

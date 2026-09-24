@@ -50,6 +50,7 @@ use raybend::develop::{
 use raybend::display::{self, PixelSize};
 use raybend::render::{
     FitMode, GpuContext, ImageTier, RenderImage, RenderOutcome, RestartPolicy, Verdict, tier_for,
+    tier_for_params,
 };
 
 use crate::MAIN_WINDOW_LABEL;
@@ -405,9 +406,13 @@ enum RenderCommand {
     /// 显影参数（拉杆 / 曲线）变了 —— 只重算像素，不重新解码
     ///
     /// 带的是**已经校验过的**解析结果（命令层负责校验，线程里不再解析一遍）。
+    ///
+    /// `interactive` = 手指还按着（人类 2026-09-24）：拖动中只算预览档，
+    /// 松手那一下才按缩放补全尺寸（`tier_for_params`）。
     SetParams {
         params: DevelopParams,
         curves: CurveSet,
+        interactive: bool,
     },
     /// 显影完了一张（新照片或新参数）
     Developed(DevelopOutcome),
@@ -431,6 +436,10 @@ pub struct DevelopParamsDto {
     /// 通道（`rgb` / `r` / `g` / `b`）→ 控制点 `[[x, y], …]`（归一化 0..1）
     #[serde(default)]
     pub curves: std::collections::BTreeMap<String, Vec<[f32; 2]>>,
+    /// **手指还按在滑杆 / 曲线上**（人类 2026-09-24）：
+    /// 拖动中只算屏幕那一档，松手那一下才按缩放补全尺寸（`tier_for_params`）。
+    #[serde(default)]
+    pub interactive: bool,
 }
 
 impl DevelopParamsDto {
@@ -844,12 +853,14 @@ pub fn editor_set_params(
     state: State<'_, EditorState>,
     params: DevelopParamsDto,
 ) -> Result<RenderState, String> {
+    let interactive = params.interactive;
     let (parsed, curves) = params.into_parts()?;
     if let Some(sender) = session_sender(&state) {
         sender
             .send(RenderCommand::SetParams {
                 params: parsed,
                 curves,
+                interactive,
             })
             .map_err(|_| "渲染线程不在了".to_string())?;
     }
@@ -1291,7 +1302,11 @@ fn apply_command(
             *dirty = true;
             Ok(())
         }
-        RenderCommand::SetParams { params, curves } => {
+        RenderCommand::SetParams {
+            params,
+            curves,
+            interactive,
+        } => {
             session.params = params;
             session.curves = curves;
             let mut state = lock_state(shared);
@@ -1299,10 +1314,13 @@ fn apply_command(
             let rev = state.params_rev;
             let path = state.photo_path.clone();
             if path.is_some() {
-                // 参数一变就重算：档位沿用「当前想要的」（正在 1:1 就按全尺寸算）
-                let wanted = state.wanted_tier.unwrap_or_else(|| {
-                    tier_for(context.viewport().zoom, state.tier.unwrap_or(ImageTier::Preview))
-                });
+                // 档位（人类 2026-09-24）：**拖动中一律预览档** —— 1:1 下也不做全尺寸；
+                // 松手那一下按缩放重新算（要全尺寸就给全尺寸）。见 `tier_for_params`。
+                let wanted = tier_for_params(
+                    interactive,
+                    context.viewport().zoom,
+                    state.tier.unwrap_or(ImageTier::Preview),
+                );
                 state.wanted_tier = Some(wanted);
                 state.decode = "loading".to_string();
                 *latest_job += 1;

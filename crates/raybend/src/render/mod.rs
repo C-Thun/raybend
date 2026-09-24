@@ -39,5 +39,5 @@ pub use gpu::{
 pub use image::RenderImage;
 pub use stats::{FrameStats, SpikeReport};
 pub use supervisor::{RestartPolicy, Verdict};
-pub use tier::{tier_for, ImageTier};
+pub use tier::{tier_for, tier_for_params, ImageTier};
 pub use viewport::{AlphaMode, ClipRect, FitMode, Viewport};

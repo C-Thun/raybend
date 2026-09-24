@@ -71,6 +71,22 @@ pub fn tier_for(zoom: f32, current: ImageTier) -> ImageTier {
     }
 }
 
+/// 按「拖动中 / 松手」与缩放，算出这一刻该用哪一档。
+///
+/// * `interactive = true`（手指还按在滑杆 / 曲线上）→ **一律 `Preview`**：
+///   拖动期间只算屏幕那一档 —— 哪怕在 1:1 也是（人类 2026-09-24：
+///   「调拉杆时只对展示的像素处理，释放鼠标才对全图做处理」）。
+///   代价是拖动中画面是软一点的预览图，松手才变锐 —— 这是**故意**的：
+///   全尺寸跑一遭是几百毫秒，跟上手优先。
+/// * `interactive = false`（松手那一下）→ 回到 [`tier_for`]：缩放要全尺寸就给全尺寸。
+#[must_use]
+pub fn tier_for_params(interactive: bool, zoom: f32, current: ImageTier) -> ImageTier {
+    if interactive {
+        return ImageTier::Preview;
+    }
+    tier_for(zoom, current)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -116,6 +132,37 @@ mod tests {
         }
         assert_eq!(tier, ImageTier::Preview, "整段都在 1.0 以下，应当仍是预览档");
         assert_eq!(changes, 0, "这段区间里一次档位都不该换");
+    }
+
+    #[test]
+    fn interactive_params_stay_on_preview_even_at_one_to_one() {
+        // 拖动中：不论缩放（含 1:1 与放大）都只算预览档
+        for zoom in [0.2f32, 0.99, 1.0, 2.5, 8.0] {
+            assert_eq!(
+                tier_for_params(true, zoom, ImageTier::Preview),
+                ImageTier::Preview,
+                "zoom={zoom} 拖动中也只算预览档"
+            );
+            assert_eq!(
+                tier_for_params(true, zoom, ImageTier::Full),
+                ImageTier::Preview,
+                "zoom={zoom} 拖动中要从全尺寸退回来（上一帧是全尺寸也不行）"
+            );
+        }
+        // 缩放不是有限数（上游出错）时也不许换档，但拖动中照样压回预览
+        assert_eq!(tier_for_params(true, f32::NAN, ImageTier::Full), ImageTier::Preview);
+    }
+
+    #[test]
+    fn released_params_follow_zoom_again() {
+        // 松手那一下：缩放要全尺寸就给全尺寸（「释放鼠标才对全图做处理」）
+        assert_eq!(tier_for_params(false, 1.0, ImageTier::Preview), ImageTier::Full);
+        assert_eq!(tier_for_params(false, 4.0, ImageTier::Preview), ImageTier::Full);
+        // 适应窗口（< 1:1）：松手也是预览档，不多花一次全尺寸
+        assert_eq!(tier_for_params(false, 0.5, ImageTier::Preview), ImageTier::Preview);
+        // 迟滞依旧生效：已经在全尺寸、缩放到 0.75（退档阈值以上）→ 不来回翻
+        assert_eq!(tier_for_params(false, 0.75, ImageTier::Full), ImageTier::Full);
+        assert_eq!(tier_for_params(false, 0.4, ImageTier::Full), ImageTier::Preview);
     }
 
     #[test]
