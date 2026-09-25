@@ -42,6 +42,13 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 /** Windows 侧产物目录（`AGENTS.md` §5.3：必须落 Windows 本地盘） */
 const CARGO_TARGET_DIR = "C:\\rb-target\\raybend";
+/**
+ * 本次构建图的单元清单（cargo 的 `--message-format=json` 输出）。
+ *
+ * 落在 target 目录的**上一级**而不是 `debug/` 里 —— 瘦身脚本清的是 `debug/`，
+ * 别自己把自己清了。
+ */
+const BUILD_UNITS = `${CARGO_TARGET_DIR}\\last-build.json`;
 /** 对应的 WSL 侧路径（check:win 与打印用） */
 const EXE = "/mnt/c/rb-target/raybend/debug/raybend-desktop.exe";
 /** 同一个产物的 Windows 侧路径（查进程与占用必须用它 —— WSL 路径 Windows 侧认不出来） */
@@ -321,12 +328,27 @@ run("② Windows 侧 cargo 构建（debug + custom-protocol）", "cmd.exe", [
    * 只选 `raybend-desktop` 的话**它根本不会被构建** —— 于是主程序新、worker 旧。
    * 2026-09-24 就是这么栽的：Windows 那个 worker 停在 9 月 19 日（还不认 `linear16`），
    * 编辑器的线性解码在真机上一直失败。`check-win-artifact.mjs` 现在会核对它。
+   *
+   * `--message-format=json` 把**本次构建图里的每个单元**（连已经是最新的也在内）
+   * 落到 `last-build.json` —— 第 ④ 步的瘦身脚本靠它判断「谁还活着」。
+   * 进度信息走 stderr，所以终端上照旧能看到 `Compiling …`。
    */
-  `pushd ${windowsRepoPath()} & cargo build -p raybend-desktop -p raybend --features custom-protocol`,
+  `pushd ${windowsRepoPath()} & cargo build -p raybend-desktop -p raybend --features custom-protocol --message-format=json > ${BUILD_UNITS}`,
 ], {
   env: windowsBuildEnv({ CARGO_TARGET_DIR }),
 });
 
 run("③ 产物核对（时间戳 + 资源名）", "node", ["scripts/check-win-artifact.mjs"]);
+
+/*
+ * ④ target 瘦身（人类 2026-09-25 要的）：删「不在本次构建图里、且已凉 ≥3 天」的产物。
+ * 为什么需要：那个目录只进不出，攒过 11.6 GiB（`cargo clean` 代价是十几分钟冷构建）。
+ * 复用第 ② 步的 JSON，不额外编译；宽限期保证不会把别的会话正在用的变体删掉。
+ */
+run("④ target 瘦身（删掉失效的旧产物）", "node", [
+  "scripts/clean-target.mjs",
+  "--json",
+  BUILD_UNITS,
+]);
 
 console.log(`\n✓ Windows debug 构建完成：${EXE}`);

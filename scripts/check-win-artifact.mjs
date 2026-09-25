@@ -43,8 +43,8 @@ if (!existsSync(join(DIST, "index.html"))) {
   fail(`找不到 ${DIST}/index.html（前端没构建过？）`, "  pnpm build");
 }
 
-/** Rust 源码里最新的修改时间（worker 必须不比它旧） */
-const newestRustSource = () => {
+/** 按实际构建目标取 Rust 源码与清单的最新时间。worker 不比较桌面壳。 */
+const newestRustSource = (...roots) => {
   let newest = 0;
   const walk = (dir) => {
     if (!existsSync(dir)) return;
@@ -54,8 +54,12 @@ const newestRustSource = () => {
       else if (entry.name.endsWith(".rs")) newest = Math.max(newest, statSync(full).mtimeMs);
     }
   };
-  walk("crates");
-  walk("src-tauri/src");
+  for (const root of roots) walk(root);
+  const manifests = ["Cargo.toml", "Cargo.lock", "crates/raybend/Cargo.toml"];
+  if (roots.includes("src-tauri/src")) manifests.push("src-tauri/Cargo.toml");
+  for (const manifest of manifests) {
+    if (existsSync(manifest)) newest = Math.max(newest, statSync(manifest).mtimeMs);
+  }
   return newest;
 };
 
@@ -75,6 +79,13 @@ const newestInDist = () => {
 
 const exeTime = statSync(exePath).mtimeMs;
 const distTime = newestInDist();
+const desktopSourceTime = newestRustSource("crates/raybend/src", "src-tauri/src");
+if (exeTime < desktopSourceTime) {
+  fail(
+    `Windows 产物比 Rust 源码旧（exe ${new Date(exeTime).toISOString()} < 源码 ${new Date(desktopSourceTime).toISOString()}）`,
+    "  pnpm debug:win",
+  );
+}
 if (exeTime <= distTime) {
   fail(
     `Windows 产物比前端新构建还旧 —— 它内嵌的是旧界面（差 ${Math.round((distTime - exeTime) / 1000)} 秒）`,
@@ -157,9 +168,9 @@ if (!workerBinary.includes(PROTOCOL_TAG)) {
     `    cmd.exe /c 'pushd \\\\wsl.localhost\\Ubuntu-24.04\\home\\andares\\repos\\c-thun\\raybend & cargo build -p raybend-desktop -p raybend --features custom-protocol'`,
   );
 }
-if (workerTime < newestRustSource()) {
+if (workerTime < newestRustSource("crates/raybend/src")) {
   fail(
-    `RAW worker 比 Rust 源码旧（worker ${new Date(workerTime).toISOString()} < 源码 ${new Date(newestRustSource()).toISOString()}）`,
+    `RAW worker 比 Rust 源码旧（worker ${new Date(workerTime).toISOString()} < 源码 ${new Date(newestRustSource("crates/raybend/src")).toISOString()}）`,
     "    cmd.exe /c 'pushd \\\\wsl.localhost\\Ubuntu-24.04\\home\\andares\\repos\\c-thun\\raybend & cargo build -p raybend-desktop -p raybend --features custom-protocol'",
   );
 }

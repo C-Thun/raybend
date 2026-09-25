@@ -85,6 +85,7 @@ export function launchChrome(options = {}) {
  *
  * `options.host`（默认 `127.0.0.1`）：无头本机就用默认；连 **Windows 宿主上的
  * WebView2**（`perf-win`）要传宿主 IP —— WSL NAT 下 `localhost` 不通 Windows 侧服务。
+ * `options.targetFilter` 可指定页面（例如排除桌面应用的启动闪屏）。
  * 返回的 `webSocketDebuggerUrl` 里写的是 `127.0.0.1`，连接前会改写成请求的那个 host。
  */
 export async function connectCdp(port, options = {}) {
@@ -94,7 +95,8 @@ export async function connectCdp(port, options = {}) {
   while (Date.now() < deadline) {
     try {
       const list = await (await fetch(`http://${host}:${port}/json/list`)).json();
-      target = list.find((item) => item.type === "page" && item.webSocketDebuggerUrl);
+      target = list.find((item) => item.type === "page" && item.webSocketDebuggerUrl
+        && (options.targetFilter === undefined || options.targetFilter(item)));
       if (target) break;
     } catch {
       /* 还没起来 */
