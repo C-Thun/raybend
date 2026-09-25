@@ -258,6 +258,7 @@ pub fn run() {
             editor::editor_set_params,
             lens::lens_match,
             editor::editor_viewport_intent,
+            editor::editor_confirm_tool,
             editor::editor_render_state,
             // ── 编辑栈落库（M3-W3：松手才写库）──
             develop::develop_get,

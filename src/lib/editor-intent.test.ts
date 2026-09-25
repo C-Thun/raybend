@@ -13,6 +13,8 @@ import {
   createDragSession,
   createLatestCoalescer,
   createPanAccumulator,
+  createPointerSender,
+  type ToolPointerIntent,
   isClickGesture,
   type PanIntent,
 } from "./editor-intent.ts";
@@ -230,5 +232,43 @@ test("对象载荷用自定义相等判定（参数载荷是对象）", () => {
   assert.equal(sent.length, 1, "内容相同就不该再发一次 IPC");
   coalescer.push({ v: 2 });
   frames.run();
+  assert.equal(sent.length, 2);
+});
+
+
+test("工具指针合并高频移动，松手位置优先且没有迟到的移动", () => {
+  const clock = fakeScheduler();
+  const sent: ToolPointerIntent[] = [];
+  const pointer = createPointerSender({ scheduler: clock.scheduler, send: (p) => sent.push(p) });
+  for (const kind of ["toolPointer", "comparePointer"] as const) {
+    sent.length = 0;
+    pointer.send({ kind, phase: "down", x: 0, y: 0 });
+    for (let x = 1; x <= 100; x++) pointer.send({ kind, phase: "move", x, y: x });
+    assert.equal(sent.length, 1);
+    clock.run();
+    assert.deepEqual(sent[sent.length - 1], { kind, phase: "move", x: 100, y: 100 });
+    pointer.send({ kind, phase: "move", x: 110, y: 110 });
+    pointer.send({ kind, phase: "up", x: 120, y: 120 });
+    clock.run();
+    assert.equal(sent.length, 3);
+    assert.deepEqual(sent[sent.length - 1], { kind, phase: "up", x: 120, y: 120 });
+  }
+});
+
+test("工具取消、换工具、卸载清除未发送的指针样本", () => {
+  const clock = fakeScheduler();
+  const sent: ToolPointerIntent[] = [];
+  const pointer = createPointerSender({ scheduler: clock.scheduler, send: (p) => sent.push(p) });
+  pointer.send({ kind: "toolPointer", phase: "move", x: 10, y: 20 });
+  pointer.send({ kind: "toolPointer", phase: "cancel", x: 10, y: 20 });
+  clock.run();
+  assert.deepEqual(sent.map((p) => p.phase), ["cancel"]);
+  pointer.send({ kind: "toolPointer", phase: "move", x: 20, y: 30 });
+  pointer.send({ kind: "comparePointer", phase: "down", x: 30, y: 40 });
+  clock.run();
+  assert.equal(sent.length, 2);
+  pointer.send({ kind: "comparePointer", phase: "move", x: 40, y: 50 });
+  pointer.dispose();
+  clock.run();
   assert.equal(sent.length, 2);
 });

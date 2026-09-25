@@ -138,7 +138,7 @@ export function TitleBar(props: TitleBarProps) {
         // 按钮/标签这类可点元素会**自动**阻断拖动，所以不要给它们加这个属性
         data-tauri-drag-region
         /*
-         * `z-(--z-titlebar)`：**弹窗之上**（人类 2026-09-20 定的口径）。
+         * `z-(--z-titlebar)`：在遮罩之上、弹窗之下（人类 2026-09-25 更新）。
          * `relative` 是让 z 生效的前提（static 元素上的 z-index 会被忽略）。
          */
         class="relative z-(--z-titlebar) flex h-bar-title-h shrink-0 items-stretch bg-surface-bar text-fg-1 select-none"

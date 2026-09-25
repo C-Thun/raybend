@@ -44,12 +44,15 @@ export interface SliderRowProps {
    */
   onDragStart?: () => void;
   onDragEnd?: () => void;
+  /** 双击把手时恢复这根拉杆自己的基准值，由调用方负责落库。 */
+  onReset?: () => void;
   disabled?: boolean;
   class?: string;
 }
 
 export function SliderRow(props: SliderRowProps): JSX.Element {
   const valueText = (): string => formatParamValue(props.spec, props.value);
+  let changedDuringGesture = false;
 
   return (
     <ArkSlider.Root
@@ -63,12 +66,16 @@ export function SliderRow(props: SliderRowProps): JSX.Element {
       onValueChange={(details) => {
         const next = details.value[0];
         if (typeof next === "number" && next !== props.value) {
-          props.onDragStart?.();
+          if (!changedDuringGesture) props.onDragStart?.();
+          changedDuringGesture = true;
           props.onValueChange(next);
         }
       }}
       onValueChangeEnd={(details) => {
         const next = details.value[0];
+        // 单击把手未改值时无需落库；双击重置只由 onReset 提交一次。
+        if (!changedDuringGesture) return;
+        changedDuringGesture = false;
         // 顺序要紧：先松开「拖动中」（松手这一下要补全尺寸），再落库
         props.onDragEnd?.();
         if (typeof next === "number") props.onValueCommit?.(next);
@@ -101,6 +108,12 @@ export function SliderRow(props: SliderRowProps): JSX.Element {
           */}
           <ArkSlider.Thumb
             index={0}
+            onDblClick={(event) => {
+              if (props.disabled) return;
+              event.preventDefault();
+              event.stopPropagation();
+              props.onReset?.();
+            }}
             class={[
               "block size-3.5 rounded-full bg-brand shadow-ui outline-none",
               "transition-transform hover:scale-110 focus-visible:scale-110",

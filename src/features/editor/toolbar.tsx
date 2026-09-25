@@ -1,17 +1,7 @@
 /**
  * 编辑模式的 `toolsbar` 装配（`design/editor.md` §2.1）。
- *
- * 三段式（`AGENTS.md` §11.1）：**左段**放与 workspace 左列有关的面板开关（LUT），
- * **中段**放画布工具（裁切 / 旋转 / 对比，互斥），**右段**暂时是空的（未来加东西才出现在那一侧）。
- *
- * ```text
- * [LUT]              [裁切][旋转][对比]                    （右侧留白）
- *  └ toolsbar left     └ toolsbar / center
- * ```
- *
- * 三工具互斥由 `store.tool()` 保证（同一时刻只有一个控制块）；**再点一次同一个 = 退出**
- * （`.pd`：裁切可反复点击开关）。三个按钮与左段的 LUT 都已登记进命令注册表
- * （`features/commands/catalog.ts`），所以命令面板 / 快捷键 / 菜单三处都能触发同一个动作。
+ * 左段只放 LUT 面板开关；中段同一组按 SOOC/RAW、撤销/重做、
+ * 裁切 / 旋转 / 对比排序并整体居中；右段放统一重置。
  */
 
 import { For, type JSX } from "solid-js";
@@ -20,9 +10,15 @@ import {
   IconCrop,
   IconPalette,
   IconRotateClockwise,
+  IconArrowBackUp,
+  IconArrowForwardUp,
+  IconWand,
 } from "@tabler/icons-solidjs";
 
 import { ToggleBlock } from "../../components/ui/ToggleBlock.tsx";
+import { SegmentedControl } from "../../components/ui/SegmentedControl.tsx";
+import { Button } from "../../components/ui/Button.tsx";
+import type { DevelopEditBase } from "../../api/types.ts";
 import { t } from "../../i18n/index.ts";
 import type { MessageKey } from "../../i18n/index.ts";
 import type { EditorStore, EditorTool } from "./store.ts";
@@ -44,36 +40,79 @@ export interface EditorToolbarProps {
   enabled: boolean;
 }
 
-/** 中段：三个画布工具（互斥）。 */
-export function EditorToolbar(props: EditorToolbarProps): JSX.Element {
+export interface EditorSourceHistoryProps extends EditorToolbarProps {
+  onBaseChange: (base: DevelopEditBase) => void;
+  history: {
+    state: () => { canUndo: boolean; canRedo: boolean; undoLabel: string | null; redoLabel: string | null };
+    undo: () => void;
+    redo: () => void;
+  };
+}
+
+/** mid：编辑源与历史动作在这一组按钮的最左边，整组按工具栏全宽居中。 */
+export function EditorToolbar(props: EditorSourceHistoryProps): JSX.Element {
+  const undoTitle = (): string => props.history.state().undoLabel === null
+    ? t("browse.undo")
+    : t("browse.undoWith").replace("{label}", props.history.state().undoLabel ?? "");
+  const redoTitle = (): string => props.history.state().redoLabel === null
+    ? t("browse.redo")
+    : t("browse.redoWith").replace("{label}", props.history.state().redoLabel ?? "");
   return (
-    <For each={TOOL_SPEC}>
-      {(tool) => (
-        <ToggleBlock
-          pressed={props.store.tool() === tool.id}
-          disabled={!props.enabled}
-          icon={<tool.icon size={14} />}
-          label={t(tool.labelKey)}
-          title={t("editor.tool.pending")}
-          onClick={() => props.store.toggleTool(tool.id)}
-        >
-          {t(tool.labelKey)}
-        </ToggleBlock>
-      )}
-    </For>
+    <div class="flex h-full shrink-0 items-center gap-1">
+      <SegmentedControl
+        value={props.store.editBase()}
+        onValueChange={(value) => props.onBaseChange(value as DevelopEditBase)}
+        label={t("editor.base.label")}
+        options={[
+          { value: "sooc", label: t("editor.base.sooc"), disabled: !props.enabled || !props.store.editBaseAvailable().bitmap },
+          { value: "raw", label: t("editor.base.raw"), disabled: !props.enabled || !props.store.editBaseAvailable().raw },
+        ]}
+      />
+      <Button variant="ghost" disabled={!props.history.state().canUndo} title={undoTitle()}
+        aria-label={undoTitle()} icon={<IconArrowBackUp size={14} />}
+        onClick={props.history.undo}>{t("browse.undo")}</Button>
+      <Button variant="ghost" disabled={!props.history.state().canRedo} title={redoTitle()}
+        aria-label={redoTitle()} icon={<IconArrowForwardUp size={14} />}
+        onClick={props.history.redo}>{t("browse.redo")}</Button>
+      <For each={TOOL_SPEC}>
+        {(tool) => (
+          <ToggleBlock
+            pressed={props.store.tool() === tool.id}
+            disabled={!props.enabled}
+            icon={<tool.icon size={14} />}
+            label={t(tool.labelKey)}
+            onClick={() => props.store.toggleTool(tool.id)}
+          >
+            {t(tool.labelKey)}
+          </ToggleBlock>
+        )}
+      </For>
+    </div>
   );
 }
 
-/** 左段：workspace 左列的面板开关（现在只有 LUT；一组互斥开关的第一个）。 */
+/** 左段：与左列对应的 LUT 面板开关。 */
 export function EditorPanelToggles(props: EditorToolbarProps): JSX.Element {
-  return (
-    <ToggleBlock
-      pressed={props.store.lutVisible()}
-      icon={<IconPalette size={14} />}
-      label={t("editor.toolsbar.lut")}
-      onClick={() => props.store.toggleLut()}
-    >
-      {t("editor.toolsbar.lut")}
-    </ToggleBlock>
-  );
+  return <ToggleBlock
+    pressed={props.store.lutVisible()}
+    icon={<IconPalette size={14} />}
+    label={t("editor.toolsbar.lut")}
+    onClick={() => props.store.toggleLut()}
+  >
+    {t("editor.toolsbar.lut")}
+  </ToggleBlock>;
+}
+
+/** 右段：自动调整和统一重置；命令面板复用相同动作。 */
+export function EditorResetTool(props: EditorToolbarProps & {
+  onRequestReset: () => void; onAutoAdjust: () => void;
+}): JSX.Element {
+  return <div class="flex items-center gap-1">
+    <Button variant="ghost" disabled={!props.enabled || props.store.autoAdjusting()}
+      title={t("editor.autoAdjustHint")} icon={<IconWand size={14} />}
+      onClick={props.onAutoAdjust}>{t(props.store.autoAdjusting() ? "editor.autoAdjusting" : "editor.autoAdjust")}</Button>
+    <Button variant="ghost" disabled={!props.enabled} onClick={props.onRequestReset}>
+      {t("editor.panel.resetAll")}
+    </Button>
+  </div>;
 }

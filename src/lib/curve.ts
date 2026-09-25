@@ -76,7 +76,10 @@ function tangents(points: readonly CurvePoint[]): number[] {
   result[0] = slopes[0];
   result[n - 1] = slopes[n - 2];
   for (let index = 1; index < n - 1; index += 1) {
-    result[index] = (slopes[index - 1] + slopes[index]) / 2;
+    // 局部极值处使用水平切线，与 Rust 保持一致，防止拐点过冲。
+    result[index] = slopes[index - 1] * slopes[index] <= 0
+      ? 0
+      : (slopes[index - 1] + slopes[index]) / 2;
   }
   for (let index = 0; index + 1 < n; index += 1) {
     const delta = slopes[index];

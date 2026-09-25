@@ -171,6 +171,8 @@ test("show：打开、适配、先小图后大图（渐进），current/index �
   await flush();
   assert.equal(store.imageStatus(), "ready");
   assert.equal(store.imageUrl(), "blob:2", "大图到了就用大图（小图只是先顶上）");
+  assert.equal(store.overviewImageUrl(), "blob:2", "总览只接完整的 Screen 图");
+  assert.equal(store.overviewStatus(), "ready");
   assert.equal(store.sharp(), true);
   assert.ok(fake.urls.length >= 1);
 });
@@ -182,8 +184,29 @@ test("show：大图取不到时，小图仍然显示（不是错误态）", asyn
   store.show(PHOTOS, 0);
   await flush();
   assert.equal(store.imageStatus(), "ready");
-  assert.equal(store.imageUrl(), "blob:1", "用网格小图兜住");
+  assert.equal(store.imageUrl(), "blob:1", "主视图仍用网格小图兜住");
+  assert.equal(store.overviewImageUrl(), null, "总览不能展示被 3:1 裁切的 grid 小图");
+  assert.equal(store.overviewStatus(), "error");
   assert.equal(store.sharp(), false);
+});
+
+test("Screen 尚在加载时，主视图可先用 grid，右栏总览等待全图", async () => {
+  let completeScreen: ((bytes: Uint8Array) => void) | undefined;
+  const store = createViewerStore({
+    loadThumb: async () => new Uint8Array([1]),
+    loadScreen: () => new Promise<Uint8Array>((resolve) => { completeScreen = resolve; }),
+    makeUrl: (bytes) => `blob:${bytes[0]}`,
+    revokeUrl: () => undefined,
+  });
+  store.show(PHOTOS, 0);
+  await flush();
+  assert.equal(store.imageUrl(), "blob:1");
+  assert.equal(store.overviewImageUrl(), null);
+  assert.equal(store.overviewStatus(), "loading");
+  completeScreen?.(new Uint8Array([2]));
+  await flush();
+  assert.equal(store.overviewImageUrl(), "blob:2");
+  assert.equal(store.overviewStatus(), "ready");
 });
 
 test("show：越界的下标会被夹回来（别信任调用方）", () => {

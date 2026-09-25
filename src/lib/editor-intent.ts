@@ -250,3 +250,30 @@ export function createLatestCoalescer<T>(deps: LatestCoalescerDeps<T>): LatestCo
     sentCount: () => sent,
   };
 }
+
+
+/** 绝对位置只取每帧最新样本；down/up/cancel 是不可合并的手势边界。 */
+export interface ToolPointerIntent {
+  kind: "toolPointer" | "comparePointer";
+  phase: "down" | "move" | "up" | "cancel";
+  x: number;
+  y: number;
+}
+
+export function createPointerSender(deps: {
+  send: (intent: ToolPointerIntent) => void;
+  scheduler?: FrameScheduler;
+}): { send: (intent: ToolPointerIntent) => void; dispose: () => void } {
+  const moves = createLatestCoalescer<ToolPointerIntent>(deps);
+  return {
+    send: (intent) => {
+      if (intent.phase === "move") moves.push(intent);
+      else {
+        // up 自带最终位置，取消不应再发送尚未绘制的移动。
+        moves.dispose();
+        deps.send(intent);
+      }
+    },
+    dispose: moves.dispose,
+  };
+}

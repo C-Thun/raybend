@@ -17,11 +17,11 @@
  *
  * # 现在有谁在用
  *
- * W3 这一波**还没有**覆盖层内容（裁切 / 旋转 / 对比在 W5），这里先把宿主与契约立起来 ——
- * 有了它，W5 的三个工具只需要往里面放「用图像像素写的」元素，不需要碰视口数学。
+ * 裁切/旋转/对比的工具图形已移到 GPU 同帧绘制，不经过本 DOM 宿主。
+ * 本组件保留为未来图像像素锚定的矢量覆盖内容入口。
  */
 
-import { Show, type JSX } from "solid-js";
+import { Show, untrack, type JSX } from "solid-js";
 
 import type { EditorRenderState } from "../../api/types.ts";
 
@@ -65,7 +65,7 @@ export function ViewportOverlay(props: ViewportOverlayProps): JSX.Element {
             style={{ transform: value() }}
             data-viewport-overlay-content
           >
-            {props.children}
+            {untrack(() => props.children)}
           </div>
         </div>
       )}

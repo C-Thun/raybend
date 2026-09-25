@@ -126,6 +126,8 @@ const DECORATIONS: Record<string, Decoration> = {
   sharpenRadius: { group: "detail", labelKey: "editor.param.sharpenRadius", decimals: 0 },
   distortion: { group: "lens", labelKey: "editor.param.distortion", decimals: 0 },
   vignette: { group: "lens", labelKey: "editor.param.vignette", decimals: 0 },
+  vignetteRange: { group: "lens", labelKey: "editor.param.vignetteRange", decimals: 0 },
+  chromaticBlue: { group: "lens", labelKey: "editor.param.chromaticBlue", decimals: 0 },
   chromatic: { group: "lens", labelKey: "editor.param.chromatic", decimals: 0 },
 };
 
@@ -183,7 +185,13 @@ export const DECORATED_IDS: readonly string[] = Object.keys(DECORATIONS);
 
 /** 某一组的参数（右栏按页签取）。 */
 export function paramsInGroup(group: ParamGroup): readonly ParamSpec[] {
-  return PARAMS.filter((param) => param.group === group);
+  const items = PARAMS.filter((param) => param.group === group);
+  if (group !== "tone") return items;
+  // 动态反差是影调的总强度，先于曝光等细项调节。
+  return [
+    ...items.filter((param) => param.id === "dynamicContrast"),
+    ...items.filter((param) => param.id !== "dynamicContrast"),
+  ];
 }
 
 /** 按 id 取口径。 */
@@ -199,18 +207,14 @@ export function isParamWired(id: string): boolean {
 /**
  * 参数默认值表。
  *
- * 口径：**双极参数取区间中点**（曝光正好落在 0、色温落在 2500..10000 的中间 ——
- * 「不动」在双极拉杆上就是把手在正中），**单极参数取左端**（0）。
+ * 默认值直接取参数契约；填充原点只决定轨道的画法，不决定默认位置。
  *
  * ⚠️ 色温的**真实**默认值是这张照片的 as-shot 色温（随照片变）—— 这里给的是
  * 读不到元数据时的兜底。判断「动过没有」要用 `isParamDirty(id, value, baseline)`。
  */
 export const PARAM_DEFAULTS: Readonly<Record<string, number>> = Object.freeze(
   Object.fromEntries(
-    PARAMS.map((param) => [
-      param.id,
-      param.origin === "center" ? (param.min + param.max) / 2 : param.min,
-    ]),
+    CONTRACT.params.map((param) => [param.id, param.default]),
   ),
 );
 
@@ -263,8 +267,8 @@ export interface CropRatio {
  * 比例下拉的项（顺序即界面顺序）。
  *
  * `自由` 与 `原始比例` 是**语义项**（不锁 / 锁到这张图自己的比例），
- * 其余是固定比例；`自定义` 不在表里 —— 它由用户手输横纵比之后**自动切过去**
- * （`.pd`：「用户手动输入后上面的比例选项自动变成`自定义`」）。
+ * 其余是固定比例；`自定义` 的比值来自草稿，因此由面板始终追加为可选项。
+ * 显式选择自定义可使用上次输入；修改宽或高也会立即切入自定义。
  */
 export const CROP_RATIOS: readonly CropRatio[] = [
   { id: "free", labelKey: "editor.crop.free", ratio: null },

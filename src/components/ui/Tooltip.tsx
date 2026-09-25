@@ -46,6 +46,8 @@ export interface TooltipProps {
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   disabled?: boolean;
+  /** easy copy 的 Portal 气泡单独走高于弹窗的层级。 */
+  layer?: "easy-copy";
   /** 触发器（渲染函数） */
   children: TriggerRender;
   class?: string;
@@ -60,6 +62,7 @@ export function Tooltip(props: TooltipProps) {
     "open",
     "onOpenChange",
     "disabled",
+    "layer",
     "children",
     "class",
   ]);
@@ -78,7 +81,7 @@ export function Tooltip(props: TooltipProps) {
       <ArkTooltip.Trigger asChild={local.children} />
       <Portal>
         {/* 同 Menu：z 轴由基础层统一赋值（见 index.css） */}
-        <ArkTooltip.Positioner>
+        <ArkTooltip.Positioner data-easy-copy-tip={local.layer === "easy-copy" ? "" : undefined}>
           <ArkTooltip.Content
             class={[
               "max-w-64 rounded-ui bg-surface-layer px-1.5 py-0.5 text-[11px] leading-4 text-fg-1",

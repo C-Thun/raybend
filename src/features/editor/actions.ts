@@ -18,7 +18,7 @@ export interface EditorActions {
   viewing: () => boolean;
   /** 胶片带可见（`infoKeyApplies` 要这一项） */
   filmVisible: () => boolean;
-  /** 处在对比态（编辑器这一波还没有对比 —— W5） */
+  /** 处在对比态；状态栏显示参考源与当前结果。 */
   comparing: () => boolean;
   /** `Tab` 三档循环 */
   cycleChrome: () => void;
@@ -33,6 +33,10 @@ export interface EditorActions {
    * 所以只挂在命令面板里、**不给默认热键**（`AGENTS.md` §2.15：留空也要写清理由）。
    */
   resetDevelop: () => void;
+  /** 按拍摄信息匹配并应用镜头配置。 */
+  autoAdjust: () => void;
+  /** 切换编辑源后保存 latest 来源。 */
+  commitDevelop: () => void;
   /** 全屏看图要的清单（编辑侧同样是「当前目录显示序 + 锚点」）；没有照片时为 `null` */
   fullscreenTarget: () => FullscreenTarget | null;
 }

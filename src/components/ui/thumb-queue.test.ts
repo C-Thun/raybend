@@ -231,6 +231,38 @@ test("refresh：只重取这一张，别的格子不受影响（编辑落库那�
   assert.deepEqual(urls.revoked, [aUrl], "只回收 a 的旧 URL");
 });
 
+test("refresh 保留旧图直到新图解码完成，再替换并回收旧 URL", async () => {
+  const loader = fakeLoader();
+  const urls = fakeUrls();
+  let releaseDecode: (() => void) | null = null;
+  let decodeCount = 0;
+  const queue = createThumbQueue({
+    load: loader.load,
+    ...urls,
+    prepareUrl: () => {
+      decodeCount += 1;
+      return decodeCount === 1
+        ? Promise.resolve()
+        : new Promise<void>((resolve) => { releaseDecode = resolve; });
+    },
+  });
+  queue.request("/a.jpg");
+  await flush();
+  const oldUrl = queue.get("/a.jpg").url;
+  assert.ok(oldUrl);
+
+  queue.refresh("/a.jpg");
+  assert.equal(queue.get("/a.jpg").url, oldUrl, "重取期间旧图仍可见");
+  await flush();
+  assert.equal(queue.get("/a.jpg").url, oldUrl, "新图尚未解码时不能闪白");
+  assert.deepEqual(urls.revoked, []);
+  assert.ok(releaseDecode);
+  (releaseDecode as () => void)();
+  await flush();
+  assert.notEqual(queue.get("/a.jpg").url, oldUrl);
+  assert.deepEqual(urls.revoked, [oldUrl]);
+});
+
 test("refresh 时在飞的旧结果被丢掉，不会把旧图盖在新图上", async () => {
   const loader = fakeLoader({ hold: true });
   const urls = fakeUrls();
@@ -285,3 +317,17 @@ test("统计里的 queued / inflight 与实际进度一致", async () => {
  * 那个场景的自动化在 `scripts/repro-browse.mjs`（假后端 + 真前端，可重复执行），
  * `thumb-queue.ts` 的 `clear()` 上也留了说明。这条注释是给「想再加测试」的人看的：
  * 别在 Node 里写这一条，写不出真的。 */
+
+test("当前照片排到待加载队列前面，避免切图时总览等整条胶片带", async () => {
+  const loader = fakeLoader({ hold: true });
+  const queue = createThumbQueue({ load: loader.load, ...fakeUrls(), concurrency: 1 });
+  queue.request("/first.jpg");
+  queue.request("/neighbor.jpg");
+  queue.request("/current.jpg");
+  queue.request("/current.jpg", true);
+  assert.deepEqual(loader.calls, ["/first.jpg"]);
+  loader.state.hold = false;
+  loader.releaseAll();
+  await flush();
+  assert.deepEqual(loader.calls, ["/first.jpg", "/current.jpg", "/neighbor.jpg"]);
+});

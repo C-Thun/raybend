@@ -22,6 +22,8 @@ import { fileURLToPath } from "node:url";
 
 import type {
   AssetItem,
+  LensProfile,
+  LensMatch,
   BrowseFacets,
   BrowseTimeline,
   BrowseWindow,
@@ -148,6 +150,11 @@ const FILE_EXIF_KEYS = [
   "iso",
   "kind",
   "lens",
+  "software",
+  "tags",
+  "gpsLat",
+  "gpsLon",
+  "datetimeRaw",
   "orientation",
   "takenAtMs",
   "takenAtOffsetMin",
@@ -372,6 +379,12 @@ const EDITOR_VIEWPORT_STATE_KEYS = [
   "viewportCss",
 ] as const satisfies readonly (keyof EditorViewportState)[];
 const EDITOR_RENDER_STATE_KEYS = [
+  "nrPending",
+  "nrError",
+  "referenceReady",
+  "referenceBase",
+  "comparing",
+  "compareLineCss",
   "adapter",
   "appliedParamsRev",
   "asShotTemperature",
@@ -385,9 +398,13 @@ const EDITOR_RENDER_STATE_KEYS = [
   "drawnFrames",
   "fitMode",
   "history",
+  "histogram",
   "holeCss",
   "holePhysical",
   "image",
+  "originalImage",
+  "toolBoxCss",
+  "toolRevision",
   "lastError",
   "lastHit",
   "origin",
@@ -418,7 +435,12 @@ const FULLSCREEN_PAYLOAD_KEYS = [
 ] as const satisfies readonly (keyof FullscreenPayload)[];
 
 /** 手写的键表 → 覆盖检查（跑一遍，顺便让 `noUnusedLocals` 满意） */
+const LENS_PROFILE_KEYS = ["key", "maker", "model", "rectilinear", "focalMin", "focalMax"] as const;
+const LENS_MATCH_KEYS = ["ready", "detected", "lensName", "focalMm", "candidates", "warnings"] as const;
+
 const KEY_TABLES = {
+  LensProfile: checkKeys<LensProfile, typeof LENS_PROFILE_KEYS>(LENS_PROFILE_KEYS),
+  LensMatch: checkKeys<LensMatch, typeof LENS_MATCH_KEYS>(LENS_MATCH_KEYS),
   RecentDir: checkKeys<RecentDir, typeof RECENT_DIR_KEYS>(RECENT_DIR_KEYS),
   Volume: checkKeys<Volume, typeof VOLUME_KEYS>(VOLUME_KEYS),
   DirEntry: checkKeys<DirEntry, typeof DIR_ENTRY_KEYS>(DIR_ENTRY_KEYS),

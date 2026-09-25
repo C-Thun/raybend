@@ -32,9 +32,11 @@ import {
   editorEmptyKind,
   editorEmptyOffersImport,
   editorViewportNotice,
+  editorVisibleRenderState,
   type EditorViewportNoticeInput,
 } from "./source.ts";
 import type { ViewerPhoto } from "../../components/ui/viewer/index.ts";
+import type { EditorRenderState } from "../../api/types.ts";
 import type { MessageKey } from "../../i18n/index.ts";
 
 test("参数表：数字全部来自 develop-params.json（唯一真相）", () => {
@@ -58,8 +60,7 @@ test("参数表：数字全部来自 develop-params.json（唯一真相）", () 
     assert.equal(spec.wired, json.wired, `${spec.id}: wired`);
     assert.equal(spec.baseline, json.baseline, `${spec.id}: baseline`);
   }
-  // M3-W3 接的是影调 + 色彩 7 条；M3-W4 又接上清晰度 4 条（降噪 / 锐化）。
-  // 镜头那 3 条是**手动微调**，随 M3-W4 的镜头那一支一起接（见 `plans/M3-W4.md`）。
+  // 影调、色彩、清晰度与镜头微调均接入同一参数管线。
   assert.deepEqual(
     PARAMS.filter((p) => p.wired).map((p) => p.id),
     [
@@ -75,11 +76,16 @@ test("参数表：数字全部来自 develop-params.json（唯一真相）", () 
       "colorNr",
       "sharpenAmount",
       "sharpenRadius",
+      "distortion",
+      "vignette",
+      "vignetteRange",
+      "chromatic",
+      "chromaticBlue",
     ],
   );
   assert.equal(isParamWired("exposure"), true);
   assert.equal(isParamWired("sharpenAmount"), true, "清晰度已在 M3-W4 接入");
-  assert.equal(isParamWired("vignette"), false, "镜头手动微调随后接入");
+  assert.equal(isParamWired("vignette"), true, "镜头手动微调已接入");
   assert.equal(isParamWired("不存在"), false);
   assert.equal(paramSpec("temperature")?.baseline, "as-shot", "色温的默认值随照片");
   assert.equal(paramSpec("exposure")?.baseline, "static");
@@ -103,10 +109,7 @@ test("每根杆都住在参数组里（没有「寄居」的例外）", () => {
     "页签必须正好覆盖参数表（不许有杆掉进缝里）",
   );
   assert.equal(new Set(inGroups).size, inGroups.length, "同一根杆不许出现在两个组里");
-  assert.ok(
-    paramsInGroup("tone").some((p) => p.id === "dynamicContrast"),
-    "动态反差在影调组里（与曝光/反差同组）",
-  );
+  assert.equal(paramsInGroup("tone")[0]?.id, "dynamicContrast", "动态反差位于影调首位");
 });
 
 test("参数表：id 唯一、分组齐全、范围合法", () => {
@@ -127,16 +130,10 @@ test("参数表：id 唯一、分组齐全、范围合法", () => {
   }
 });
 
-test("默认值：双极在 0、单极在左端", () => {
-  for (const spec of PARAMS) {
-    const value = PARAM_DEFAULTS[spec.id];
-    assert.equal(typeof value, "number");
-    if (spec.origin === "center") {
-      // 双极 ⇒ 把手在正中（**不是**「判区间是否跨 0」：色温全是正数但仍是双极）
-      assert.equal(value, (spec.min + spec.max) / 2, `${spec.id} 的默认值应当在正中`);
-    } else {
-      assert.equal(value, spec.min, `${spec.id} 的单极默认值在左端`);
-    }
+test("默认值取参数契约，与填充原点无关", () => {
+  for (const entry of contract.params) {
+    assert.equal(PARAM_DEFAULTS[entry.id], entry.default, entry.id);
+    assert.ok(entry.default >= entry.min && entry.default <= entry.max);
   }
   assert.deepEqual(defaultParams(), { ...PARAM_DEFAULTS });
   // 每次调用都是**新的**对象（否则「全部重置」之后面板还引用同一份）
@@ -356,4 +353,31 @@ test("洞口提示：初始化 / 载入中分得开", () => {
     state: { ...noticeInput().state!, decode: "ready" },
   });
   assert.equal(editorViewportNotice(decodedNotPainted), "init");
+});
+
+
+test("旧帧不能冒充新照片；目标帧到了才开放透明洞口", () => {
+  const state = {
+    photoPath: "C:/photos/old.rw2",
+    paintedPath: "C:/photos/old.rw2",
+    decode: "ready",
+  } as EditorRenderState;
+  const stale = editorVisibleRenderState(state, "C:/photos/new.rw2");
+  assert.equal(stale?.paintedPath, null);
+  assert.equal(stale?.decode, "loading");
+  assert.equal(state.paintedPath, "C:/photos/old.rw2", "不能篡改原始状态快照");
+
+  const loading = editorVisibleRenderState(
+    { ...state, photoPath: "C:/photos/new.rw2" },
+    "C:/photos/new.rw2",
+  );
+  assert.equal(loading?.paintedPath, null, "新照片还没画出时仍要等待");
+
+  const current = editorVisibleRenderState(
+    { ...state, photoPath: "C:/photos/new.rw2", paintedPath: "C:/photos/new.rw2" },
+    "C:/photos/new.rw2",
+  );
+  assert.equal(current?.paintedPath, "C:/photos/new.rw2");
+  assert.equal(editorVisibleRenderState(state, null)?.paintedPath, null);
+  assert.equal(editorVisibleRenderState(null, "C:/photos/new.rw2"), null);
 });

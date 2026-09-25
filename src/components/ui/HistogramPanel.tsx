@@ -1,5 +1,5 @@
 /**
- * `HistogramPanel` —— 直方图那一块（标题 + 图 / 空态 + 取数与缓存）。
+ * `HistogramPanel` —— 直方图那一块（标题 + 恒定高度的图 + 取数与缓存）。
  *
  * 2026-09-23 从 `features/browse/ViewerReadout.tsx` 抽出来：编辑右栏的「总览」页签
  * 要的是**同一个东西**（同一条 Rust 取数、同一份缓存口径、同一个画图组件），
@@ -14,12 +14,11 @@
  * 它只为「来回翻」服务，不当长期缓存用 —— 真正的缓存是后端 `cache/` 的活。
  */
 
-import { createEffect, createSignal, onCleanup, Show, type JSX } from "solid-js";
+import { createEffect, createSignal, onCleanup, type JSX } from "solid-js";
 
 import {
   HISTOGRAM_SAMPLES,
   histogramBarHeights,
-  histogramIsEmpty,
   type HistogramBars,
   type HistogramCounts,
 } from "../../lib/histogram.ts";
@@ -53,6 +52,8 @@ export interface HistogramPanelProps {
    * 拖曝光/对比时每帧重算直方图只需把这里换掉，不需要重新请求。
    */
   override?: HistogramBars | null;
+  /** 编辑器显影帧的计数；定义后直接画它，跳过按文件路径的缓存。 */
+  countsOverride?: HistogramCounts | null;
   class?: string;
 }
 
@@ -61,6 +62,7 @@ export function HistogramPanel(props: HistogramPanelProps): JSX.Element {
 
   // 取直方图：跟着「当前这张」走，取完之前先是空态（不阻塞任何东西）
   createEffect(() => {
+    if (props.countsOverride !== undefined) return;
     const path = props.path;
     if (path === null) {
       setCounts(null);
@@ -91,25 +93,14 @@ export function HistogramPanel(props: HistogramPanelProps): JSX.Element {
   const bars = (): HistogramBars | null =>
     props.override !== undefined && props.override !== null
       ? props.override
-      : histogramBarHeights(counts());
+      : histogramBarHeights(props.countsOverride !== undefined ? props.countsOverride : counts());
 
   return (
     <section class={["mb-3", props.class ?? ""].filter(Boolean).join(" ")}>
       <h3 class="mb-1.5 text-fs-3 font-semibold text-fg-2">{props.title}</h3>
       <div class="rounded-ui bg-surface-bar px-2 py-1.5">
-        <Show
-          when={!histogramIsEmpty(bars())}
-          fallback={
-            <p class="py-3 text-center text-fs-2 text-fg-3">{props.emptyText}</p>
-          }
-        >
-          {/*
-            组件吃的是**归一化后的采样**（不是原始计数）：这样将来编辑模块每帧重算
-            （拖曝光/对比时）只要把新的 `bars` 传进来就换一帧 —— 不需要重新请求后端、
-            也不需要重新挂载。绘制数学与颜色分层都在 `lib` / 组件内部，不在这层。
-          */}
-          <Histogram bars={bars()} />
-        </Show>
+        {/* 空数据也保留同一组件和高度；有数据时只补上峰状图，不重建面板。 */}
+        <Histogram bars={bars()} emptyText={props.emptyText} />
       </div>
     </section>
   );

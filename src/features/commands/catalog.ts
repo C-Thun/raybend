@@ -155,12 +155,15 @@ export interface CommandDeps {
     cycleChrome: () => void;
     /** LUT 面板开关（toolsbar left 的那个开关） */
     toggleLut: () => void;
+    /** SOOC/RAW 编辑源；命令与工具栏共用一条动作 */
+    setBase: (base: "sooc" | "raw") => void;
     /** 三个画布工具：互斥，再按一次同一个 = 退出 */
     toggleTool: (tool: "crop" | "rotate" | "compare") => void;
     /** 某个工具此刻是不是开着的（命令面板据此显示状态） */
     isToolActive: (tool: "crop" | "rotate" | "compare") => boolean;
     /** 重置全部调整（破坏性：一次抹掉所有参数与曲线） */
     resetDevelop: () => void;
+    autoAdjust: () => void;
   };
 }
 
@@ -520,6 +523,25 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
      * `scope` 用 `viewer`：编辑视口就是「看图那一面」（与看图态同一类按键语境）；
      * 新增一个 scope 值要动冲突检测与快捷键面板，收益不抵成本。
      */
+    // 来源切换会重解照片；默认键留空，避免摄影师在拉杆输入时误切源。
+    spec({
+      id: "editor.base.sooc",
+      titleKey: "cmd.editor.baseSooc",
+      group: "edit",
+      menu: "view",
+      scope: "viewer",
+      when: () => deps.editor.active() && deps.editor.hasPhoto(),
+      run: () => deps.editor.setBase("sooc"),
+    }),
+    spec({
+      id: "editor.base.raw",
+      titleKey: "cmd.editor.baseRaw",
+      group: "edit",
+      menu: "view",
+      scope: "viewer",
+      when: () => deps.editor.active() && deps.editor.hasPhoto(),
+      run: () => deps.editor.setBase("raw"),
+    }),
     spec({
       id: "editor.lut.toggle",
       titleKey: "cmd.editor.lut",
@@ -531,6 +553,7 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
     }),
     spec({
       id: "editor.tool.crop",
+      defaultKey: "C",
       titleKey: "cmd.editor.crop",
       group: "view",
       menu: "view",
@@ -541,12 +564,23 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
     }),
     spec({
       id: "editor.tool.rotate",
+      defaultKey: "R",
       titleKey: "cmd.editor.rotate",
       group: "view",
       menu: "view",
       scope: "viewer",
       when: () => deps.editor.active() && deps.editor.hasPhoto(),
       run: () => deps.editor.toggleTool("rotate"),
+    }),
+    // No default hotkey: this applies an optical correction; require a deliberate action.
+    spec({
+      id: "editor.develop.autoAdjust",
+      titleKey: "cmd.editor.autoAdjust",
+      group: "edit",
+      menu: "edit",
+      scope: "viewer",
+      when: () => deps.editor.active() && deps.editor.hasPhoto(),
+      run: () => deps.editor.autoAdjust(),
     }),
     /*
      * **不给默认热键**（`AGENTS.md` §2.15：留空也要写清理由）：
@@ -563,6 +597,7 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
     }),
     spec({
       id: "editor.tool.compare",
+      defaultKey: "B",
       titleKey: "cmd.editor.compare",
       group: "view",
       menu: "view",

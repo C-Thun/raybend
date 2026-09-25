@@ -63,31 +63,33 @@ export function MigrationGate(props: MigrationGateProps) {
   return (
     <Show when={notice()}>
       {(current) => (
-        <div
-          /* 阶梯用令牌，不写字面量（`tokens.css` 的 z 轴那一段） */
-          class="fixed inset-0 z-(--z-modal) flex items-center justify-center bg-scrim"
-          data-migration-gate="open"
-          role="alertdialog"
-          aria-modal="true"
-          aria-labelledby="migration-gate-title"
-        >
-          <div class="flex w-80 flex-col gap-2 rounded-ui bg-surface-layer p-(--dialog-pad)">
-            <div class="flex items-center gap-2">
-              <IconLoader2 size={16} class="shrink-0 animate-spin text-fg-2" aria-hidden="true" />
-              <h2 id="migration-gate-title" class="text-[15px] leading-6 font-semibold text-fg-1">
-                {t("migration.title")}
-              </h2>
+        <>
+          <div class="fixed inset-0 z-(--z-scrim) bg-scrim" aria-hidden="true" />
+          <div class="pointer-events-none fixed inset-0 z-(--z-modal) flex items-center justify-center">
+            <div
+              class="pointer-events-auto flex w-80 flex-col gap-2 rounded-ui bg-surface-layer p-(--dialog-pad)"
+              data-migration-gate="open"
+              role="alertdialog"
+              aria-modal="true"
+              aria-labelledby="migration-gate-title"
+            >
+              <div class="flex items-center gap-2">
+                <IconLoader2 size={16} class="shrink-0 animate-spin text-fg-2" aria-hidden="true" />
+                <h2 id="migration-gate-title" class="text-[15px] leading-6 font-semibold text-fg-1">
+                  {t("migration.title")}
+                </h2>
+              </div>
+              <p class="text-[13px] leading-normal text-fg-2">
+                {t("migration.body", {
+                  label: current().label,
+                  from: current().from,
+                  to: current().to,
+                })}
+              </p>
+              <p class="text-fs-0 leading-normal text-fg-3">{t("migration.hint")}</p>
             </div>
-            <p class="text-[13px] leading-normal text-fg-2">
-              {t("migration.body", {
-                label: current().label,
-                from: current().from,
-                to: current().to,
-              })}
-            </p>
-            <p class="text-fs-0 leading-normal text-fg-3">{t("migration.hint")}</p>
           </div>
-        </div>
+        </>
       )}
     </Show>
   );

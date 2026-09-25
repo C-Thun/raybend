@@ -186,3 +186,23 @@ test("双击判定：NaN 一律不算（不猜）", () => {
   assert.equal(isDoubleClick(first, 0.3, Number.NaN, 1100), false);
   assert.equal(isDoubleClick(first, 0.3, 0.7, Number.NaN), false);
 });
+
+
+test("局部峰谷不过冲相邻控制点，黑白场移动不算恒等", () => {
+  for (const points of [
+    [[0, 0.2], [0.25, 0.8], [0.5, 0.7], [1, 0.9]],
+    [[0, 0.8], [0.25, 0.2], [0.5, 0.3], [1, 0.1]],
+  ] as CurvePoint[][]) {
+    const evaluate = curveFunction(points);
+    for (let i = 1; i < points.length; i += 1) {
+      const [x0, y0] = points[i - 1];
+      const [x1, y1] = points[i];
+      for (let step = 0; step <= 100; step += 1) {
+        const y = evaluate(x0 + (x1 - x0) * step / 100);
+        assert.ok(y >= Math.min(y0, y1) - 1e-9 && y <= Math.max(y0, y1) + 1e-9);
+      }
+    }
+  }
+  assert.equal(isIdentityCurve([[0.1, 0], [1, 1]]), false);
+  assert.equal(isIdentityCurve([[0, 0], [0.9, 1]]), false);
+});

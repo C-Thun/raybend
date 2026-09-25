@@ -11,6 +11,7 @@ import {
   HISTOGRAM_LAYER_ORDER,
   HISTOGRAM_SAMPLES,
   histogramBarHeights,
+  curveHistogramValues,
   histogramIsEmpty,
   histogramLayers,
   histogramPath,
@@ -200,4 +201,12 @@ test("绘制顺序：更「专」的区域画在后面（否则会被单通道�
     ["r", "g", "b", "rg", "gb", "rb", "rgb"],
     "单通道先画、两两重叠其次、三色重叠最后 —— 顺序改了颜色就会错",
   );
+});
+
+test("曲线底纹按各通道真实计数归一化，RGB 使用亮度而非三色包络", () => {
+  const counts = hist({ luma: [0, 5, 10, 0] });
+  assert.deepEqual(curveHistogramValues(counts, "rgb"), [0, 0.5, 1, 0]);
+  assert.deepEqual(curveHistogramValues(counts, "r"), [1, 0, 0.5, 0]);
+  assert.deepEqual(curveHistogramValues(null, "b"), []);
+  assert.deepEqual(curveHistogramValues(hist({ luma: [0, 0, 0, 0] }), "rgb"), [0, 0, 0, 0]);
 });

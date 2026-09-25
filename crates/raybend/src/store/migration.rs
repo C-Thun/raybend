@@ -113,6 +113,7 @@ pub const APP_MIGRATIONS: &[Migration] = &[
 /// * v3 `source_identity`：`asset_files` 的**源身份**列（判重用，REPOSITORY.md §4.3）
 /// * v5 `develop`：编辑栈（`develop_stacks` / `develop_params` / `develop_curves`，M3-W3）
 /// * v6 `lens`：镜头配置文件 / 启用开关 / 降噪方式（M3-W4）
+/// * v7 `issue_source`：latest 明确基于 SOOC 还是 RAW
 pub const CATALOG_MIGRATIONS: &[Migration] = &[
     Migration {
         version: 1,
@@ -146,6 +147,21 @@ pub const CATALOG_MIGRATIONS: &[Migration] = &[
         // 镜头配置文件 / 启用开关 / 降噪方式（M3-W4；三列都是「NULL = 没动过」）
         name: "lens",
         sql: include_str!("migrations/catalog_0006_lens.sql"),
+    },
+    Migration {
+        version: 7,
+        name: "issue_source",
+        sql: include_str!("migrations/catalog_0007_issue_source.sql"),
+    },
+    Migration {
+        version: 8,
+        name: "lens_channels",
+        sql: include_str!("migrations/catalog_0008_lens_channels.sql"),
+    },
+    Migration {
+        version: 9,
+        name: "edit_geometry",
+        sql: include_str!("migrations/catalog_0009_edit_geometry.sql"),
     },
 ];
 
@@ -631,8 +647,8 @@ mod tests {
             1_789_516_800_000,
         )
         .unwrap();
-        assert_eq!((out.from, out.to), (0, 6));
-        assert_eq!(out.applied, vec![1, 2, 3, 4, 5, 6]);
+        assert_eq!((out.from, out.to), (0, 9));
+        assert_eq!(out.applied, vec![1, 2, 3, 4, 5, 6, 7, 8, 9]);
         for table in [
             "repository_meta",
             "assets",
@@ -743,8 +759,8 @@ mod tests {
         .unwrap();
 
         let out = apply(&mut conn, DbKind::Catalog, Backups::none(), 1_789_516_800_001).unwrap();
-        assert_eq!((out.from, out.to), (2, 6), "只补跑 v3 / v4 / v5 / v6");
-        assert_eq!(out.applied, vec![3, 4, 5, 6]);
+        assert_eq!((out.from, out.to), (2, 9), "只补跑 v3..v9");
+        assert_eq!(out.applied, vec![3, 4, 5, 6, 7, 8, 9]);
 
         // 旧行还在，且新列是 NULL（不是被填了垃圾值）
         let (path, size, src_vol): (String, i64, Option<i64>) = conn
@@ -1478,4 +1494,20 @@ mod tests {
             .unwrap();
         assert_eq!(n, 2, "同一路径可以属于两个库");
     }
+    #[test]
+    fn lens_channel_migration_preserves_legacy_red_and_blue_displacements() {
+        let mut conn = mem();
+        apply_list(&mut conn, DbKind::Catalog, &CATALOG_MIGRATIONS[..7], Backups::none(), 1).unwrap();
+        conn.execute_batch("INSERT INTO assets(id, taken_at, imported_at, updated_at) VALUES(1,1,1,1),(2,1,1,1);
+            INSERT INTO develop_stacks(asset_id,created_at,updated_at) VALUES(1,1,1),(2,1,1);
+            INSERT INTO develop_params(asset_id,param_id,value) VALUES(1,'chromatic',35),(2,'chromatic',-20);").unwrap();
+        let out = apply(&mut conn,DbKind::Catalog,Backups::none(),2).unwrap();
+        assert_eq!(out.applied,vec![8, 9]);
+        for (id, red) in [(1,35.0),(2,-20.0)] {
+            let value: f64 = conn.query_row("SELECT value FROM develop_params WHERE asset_id=?1 AND param_id='chromaticBlue'",[id],|r|r.get(0)).unwrap();
+            assert_eq!(value,-red);
+        }
+        assert!(apply(&mut conn,DbKind::Catalog,Backups::none(),3).unwrap().applied.is_empty());
+    }
+
 }

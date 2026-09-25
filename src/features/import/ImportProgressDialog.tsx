@@ -79,7 +79,8 @@ export function ImportProgressDialog(props: ImportProgressDialogProps) {
   }
 
   return (
-    <Dialog
+    <>
+      <Dialog
       open={store.open()}
       onOpenChange={(open) => {
         if (!open) requestCancel();
@@ -262,24 +263,29 @@ export function ImportProgressDialog(props: ImportProgressDialogProps) {
         </Show>
       </div>
 
-      {/* 取消的二次确认（画布上没有单独帧：与「新建库」的确认同一套口径） */}
-      <Show when={confirmingCancel()}>
-        <div class="fixed inset-0 z-(--z-modal) flex items-center justify-center bg-scrim">
-          <div class="flex w-96 flex-col gap-3 rounded-ui bg-surface-layer p-4">
-            <p class="text-fs-2 text-fg-1">{t("import.cancel_confirm")}</p>
-            <p class="text-fs-1 text-fg-2">{t("import.keep_partial")}</p>
-            <div class="flex justify-end gap-2">
-              <Button variant="secondary" onClick={() => setConfirmingCancel(false)}>
-                {t("import.keep_running")}
-              </Button>
-              <Button variant="primary" onClick={() => void doCancel()}>
-                {t("import.cancel_button")}
-              </Button>
-            </div>
-          </div>
-        </div>
-      </Show>
-    </Dialog>
+      </Dialog>
+      {/* 二次确认复用 Dialog 的独立遮罩/内容层，避免全屏容器盖住 titlebar。 */}
+      <Dialog
+        open={store.open() && confirmingCancel()}
+        onOpenChange={(open) => {
+          if (!open) setConfirmingCancel(false);
+        }}
+        scrim={false}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setConfirmingCancel(false)}>
+              {t("import.keep_running")}
+            </Button>
+            <Button variant="primary" onClick={() => void doCancel()}>
+              {t("import.cancel_button")}
+            </Button>
+          </>
+        }
+      >
+        <p class="text-fs-2 text-fg-1">{t("import.cancel_confirm")}</p>
+        <p class="mt-2 text-fs-1 text-fg-2">{t("import.keep_partial")}</p>
+      </Dialog>
+    </>
   );
 }
 

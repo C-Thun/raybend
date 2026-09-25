@@ -44,6 +44,8 @@ export interface ThumbQueueDeps {
   toUrl?: (bytes: Uint8Array) => string;
   /** 回收 URL（默认 `URL.revokeObjectURL`） */
   revokeUrl?: (url: string) => void;
+  /** 刷新替换前先解码新图，避免 URL 已切换而 WebView 尚未出图的闪白。 */
+  prepareUrl?: (url: string) => Promise<void>;
   /** 同时在飞的请求数上限（默认 4） */
   concurrency?: number;
   /** 缓存条数上限（默认 600 —— 384px 的 JPEG 约 30–60KB，600 条 ≈ 20–35MB） */
@@ -54,7 +56,7 @@ export interface ThumbQueue {
   /** 读一个条目的当前状态（不会触发请求） */
   get: (path: string) => ThumbEntry;
   /** 请求一张（已缓存或已在飞则忽略；失败过的允许重试） */
-  request: (path: string) => void;
+  request: (path: string, priority?: boolean) => void;
   /**
    * 让**一张**失效并立刻重取（编辑落库后这一张的缩略图要反映新编辑）。
    *
@@ -89,11 +91,19 @@ function defaultRevoke(url: string): void {
   URL.revokeObjectURL(url);
 }
 
+async function defaultPrepareUrl(url: string): Promise<void> {
+  if (typeof Image === "undefined") return;
+  const image = new Image();
+  image.src = url;
+  await image.decode();
+}
+
 export function createThumbQueue(deps: ThumbQueueDeps): ThumbQueue {
   const concurrency = Math.max(1, Math.floor(deps.concurrency ?? 4));
   const maxEntries = Math.max(1, Math.floor(deps.maxEntries ?? 600));
   const toUrl = deps.toUrl ?? defaultToUrl;
   const revokeUrl = deps.revokeUrl ?? defaultRevoke;
+  const prepareUrl = deps.prepareUrl ?? defaultPrepareUrl;
 
   const [entries, setEntries] = createSignal<Record<string, ThumbEntry>>({});
   const [inflight, setInflight] = createSignal(0);
@@ -120,7 +130,7 @@ export function createThumbQueue(deps: ThumbQueueDeps): ThumbQueue {
     const all = entries();
     const total = Object.keys(all).length;
     if (total <= maxEntries) return;
-    const evictable = recent.filter((path) => all[path]?.status === "ready");
+    const evictable = recent.filter((path) => all[path]?.status !== "loading");
     const victims = evictable.slice(0, total - maxEntries);
     if (victims.length === 0) return;
 
@@ -144,27 +154,40 @@ export function createThumbQueue(deps: ThumbQueueDeps): ThumbQueue {
       if (!current || current.status === "ready") continue;
 
       setInflight((n) => n + 1);
-      patch(path, { status: "loading", url: null });
+      patch(path, { status: "loading", url: current.url });
 
       const issuedAt = generation;
       const issuedRev = revOf(path);
       void deps
         .load(path)
-        .then((bytes) => {
+        .then(async (bytes) => {
           // 上一个目录的 / 被 `refresh()` 作废的旧结果，丢掉
           if (issuedAt !== generation || issuedRev !== revOf(path)) return;
           if (bytes === null) {
-            patch(path, { status: "error", url: null });
+            patch(path, { status: "error", url: entries()[path]?.url ?? null });
             return;
           }
           const url = toUrl(bytes);
+          try {
+            await prepareUrl(url);
+          } catch {
+            // 新图解码失败，旧图继续显示；新 URL 不能泄漏。
+            revokeUrl(url);
+            throw new Error("新缩略图解码失败"); // i18n-exempt: 队列内部诊断，界面不会展示
+          }
+          if (issuedAt !== generation || issuedRev !== revOf(path)) {
+            revokeUrl(url);
+            return;
+          }
+          const oldUrl = entries()[path]?.url;
           touch(path);
           patch(path, { status: "ready", url });
+          if (oldUrl) revokeUrl(oldUrl);
           evict();
         })
         .catch(() => {
           if (issuedAt === generation && issuedRev === revOf(path)) {
-            patch(path, { status: "error", url: null });
+            patch(path, { status: "error", url: entries()[path]?.url ?? null });
           }
         })
         .finally(() => {
@@ -175,13 +198,21 @@ export function createThumbQueue(deps: ThumbQueueDeps): ThumbQueue {
     }
   };
 
-  const request = (path: string): void => {
+  const request = (path: string, priority = false): void => {
+    const queuedAt = queued.indexOf(path);
+    if (queuedAt >= 0) {
+      if (priority && queuedAt > 0) {
+        queued.splice(queuedAt, 1);
+        queued.unshift(path);
+      }
+      return;
+    }
     const current = entries()[path];
     if (current && current.status !== "error") return; // 已在飞 / 已完成
-    if (queued.includes(path)) return;
     // 失败过的允许重试（文件被占用这类问题常常是暂时的）
     patch(path, { status: "loading", url: null });
-    queued.push(path);
+    if (priority) queued.unshift(path);
+    else queued.push(path);
     pump();
   };
 
@@ -197,20 +228,14 @@ export function createThumbQueue(deps: ThumbQueueDeps): ThumbQueue {
     }),
 
     refresh: (path) => {
-      // 在飞的旧请求作废（代号推进）；URL 回收；条目删掉重取。
+      // 在飞的旧请求作废，但旧 URL 一直留在视图中。新图解码后再原子换 URL。
       // `untrack` 同 `clear()`：`refresh` 通常也在 effect 里被调，读 `entries` 不能进依赖。
       pathRevs.set(path, revOf(path) + 1);
       const current = untrack(entries)[path];
-      if (current?.url) revokeUrl(current.url);
       queued = queued.filter((item) => item !== path);
-      recent = recent.filter((item) => item !== path);
-      setEntries((prev) => {
-        if (!(path in prev)) return prev;
-        const next = { ...prev };
-        delete next[path];
-        return next;
-      });
-      request(path);
+      patch(path, { status: "loading", url: current?.url ?? null });
+      queued.push(path);
+      pump();
     },
 
     clear: () => {

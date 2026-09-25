@@ -28,6 +28,8 @@ pub struct LensProfileDto {
     pub maker: String,
     pub model: String,
     pub rectilinear: bool,
+    pub focal_min: f32,
+    pub focal_max: f32,
 }
 
 impl From<LensProfile> for LensProfileDto {
@@ -37,6 +39,8 @@ impl From<LensProfile> for LensProfileDto {
             maker: profile.maker,
             model: profile.model,
             rectilinear: profile.rectilinear,
+            focal_min: profile.focal_min,
+            focal_max: profile.focal_max,
         }
     }
 }
@@ -45,14 +49,17 @@ impl From<LensProfile> for LensProfileDto {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LensMatchDto {
-    /// 库里就绪了吗（`false` ⇒ 界面显示「加载中」，不是「没匹配到」）
+    /// Successful queries always return a ready library; load failures reject with their cause.
     pub ready: bool,
     /// 自动识别到的配置文件（`null` = 没匹配到 —— **不猜**）
     pub detected: Option<LensProfileDto>,
     /// EXIF 里的镜头字符串（拿它解释「为什么没匹配到」）
     pub lens_name: Option<String>,
+    pub focal_mm: Option<f64>,
     /// 下拉候选（自动匹配的排第一）
     pub candidates: Vec<LensProfileDto>,
+    /// Metadata failures do not hide the independently available lens library.
+    pub warnings: Vec<String>,
 }
 
 /// 这张照片的拍摄参数（从 catalog 读；字段都可空 —— 缺什么是常态）。
@@ -88,8 +95,17 @@ pub fn shot_input<R: Runtime>(
     repository_id: &str,
     asset_id: i64,
 ) -> Result<ShotInput, String> {
+    shot_input_diagnostic(app, repository_id, asset_id).map(|(shot, _)| shot)
+}
+
+fn shot_input_diagnostic<R: Runtime>(
+    app: &AppHandle<R>,
+    repository_id: &str,
+    asset_id: i64,
+) -> Result<(ShotInput, Vec<String>), String> {
+    let mut warnings = Vec::new();
     let state = app.state::<BrowseState>();
-    state.with_catalog(app, repository_id, move |db| {
+    let (mut shot, raw_rel) = state.with_catalog(app, repository_id, move |db| {
         let shot = db
             .read(|conn| {
                 Ok(conn.query_row(
@@ -103,67 +119,113 @@ pub fn shot_input<R: Runtime>(
                             lens: row.get(2)?,
                             focal_mm: row.get(3)?,
                             f_number: row.get(4)?,
-                            width: row.get::<_, Option<i64>>(5)?.and_then(|v| u32::try_from(v).ok()),
-                            height: row.get::<_, Option<i64>>(6)?.and_then(|v| u32::try_from(v).ok()),
+                            width: row
+                                .get::<_, Option<i64>>(5)?
+                                .and_then(|v| u32::try_from(v).ok()),
+                            height: row
+                                .get::<_, Option<i64>>(6)?
+                                .and_then(|v| u32::try_from(v).ok()),
                         })
                     },
                 )?)
             })
             .map_err(|e| format!("读拍摄参数失败：{e}"))?;
-        Ok(shot)
-    })
+        let raw_rel = db
+            .read(|conn| {
+                raybend::store::develop::edit_target(
+                    conn,
+                    asset_id,
+                    raybend::store::develop::EditBase::Raw,
+                )
+            })
+            .map_err(|e| format!("读 RAW 路径失败：{e}"))?;
+        Ok((shot, raw_rel))
+    })?;
+    if shot.lens.as_ref().is_none_or(|name| name.trim().is_empty())
+        && let Some(rel) = raw_rel
+    {
+        match crate::browse::resolve_root(app, repository_id) {
+            Ok(root) => {
+                let path = root.join(rel.replace('/', std::path::MAIN_SEPARATOR_STR));
+                if raybend::store::develop::EditBase::of_file(&path)
+                    == raybend::store::develop::EditBase::Raw
+                {
+                    match raybend::raw::worker::shared()
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .lens_name(&path)
+                    {
+                        Ok(name) => shot.lens = name,
+                        Err(error) => warnings.push(format!("RAW 镜头信息读取失败：{error}")),
+                    }
+                }
+            }
+            Err(error) => warnings.push(error),
+        }
+    }
+    Ok((shot, warnings))
 }
 
-/// **镜头匹配状态**（进编辑时问一次）：自动识别 + 下拉候选。
-///
-/// 库没就绪时返回 `ready = false`（界面据此显示「配置文件库加载中…」），
-/// 而不是把「还没加载」说成「没匹配到」。
-///
-/// # Errors
-/// 读 catalog 失败。
+/// Read-only profile lookup. Metadata failures keep the full library searchable.
 #[tauri::command]
 pub async fn lens_match<R: Runtime>(
     app: AppHandle<R>,
     repository_id: String,
     asset_id: i64,
 ) -> Result<LensMatchDto, String> {
-    let handle = app.clone();
-    crate::source::blocking(move || {
-        let shot = shot_input(&handle, &repository_id, asset_id)?;
-        let ready = lens::is_ready();
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT_REQUEST: AtomicU64 = AtomicU64::new(1);
+    let request = NEXT_REQUEST.fetch_add(1, Ordering::Relaxed);
+    let started = std::time::Instant::now();
+    eprintln!("[lens_match:{request}] enter repository={repository_id} asset={asset_id}");
+    let result = crate::source::blocking(move || {
+        lens::load_database(true)?;
+        eprintln!("[lens_match:{request}] database ready; reading shot metadata");
+        let (shot, warnings) = shot_input_diagnostic(&app, &repository_id, asset_id)
+            .unwrap_or_else(|error| (ShotInput::default(), vec![error]));
+        for warning in &warnings {
+            eprintln!("[lens_match:{request}] metadata warning: {warning}");
+        }
         let input = shot.match_input();
-        let detected = lens::auto_match(&input).map(LensProfileDto::from);
-        let candidates = lens::candidates(&input)
-            .into_iter()
-            .map(LensProfileDto::from)
-            .collect();
         Ok(LensMatchDto {
-            ready,
-            detected,
-            lens_name: shot.lens.clone(),
-            candidates,
+            ready: true,
+            detected: lens::auto_match(&input).map(LensProfileDto::from),
+            candidates: lens::candidates(&input)
+                .into_iter()
+                .map(LensProfileDto::from)
+                .collect(),
+            lens_name: shot.lens,
+            focal_mm: shot.focal_mm,
+            warnings,
         })
     })
-    .await
+    .await;
+    match &result {
+        Ok(value) => eprintln!(
+            "[lens_match:{request}] complete ready={} candidates={} detected={:?} warnings={} elapsed_ms={}",
+            value.ready,
+            value.candidates.len(),
+            value.detected.as_ref().map(|p| &p.key),
+            value.warnings.len(),
+            started.elapsed().as_millis()
+        ),
+        Err(error) => eprintln!(
+            "[lens_match:{request}] failed elapsed_ms={} error={error}",
+            started.elapsed().as_millis()
+        ),
+    }
+    result
 }
 
-/// **后台预热镜头库**（窗口起来了再加载，别挡启动）。
+/// Warm-up is optional; a failed attempt is reported and the next explicit request retries it.
 pub fn warm_up() {
-    std::thread::spawn(|| {
-        let started = std::time::Instant::now();
-        lens::warm_up();
-        eprintln!(
-            "[lens] 镜头库就绪（{} 支镜头，{:.0} ms）",
-            lens::database().map_or(0, |db| db.lenses.len()),
-            started.elapsed().as_secs_f64() * 1000.0
-        );
-    });
+    std::thread::spawn(lens::warm_up);
 }
 
 /// 解析出**这次渲染要用的镜头校正**（`None` = 不用配置文件）。
 ///
 /// 两个调用方共用：`editor.rs`（显影线程的参数任务）与 `thumbs.rs`（大图缓存那条路）。
-/// 手动三根拉杆不在这里 —— 它们从显影参数里合并（那样拖动时才是实时的）。
+/// 手动拉杆不在这里 —— 它们从显影参数里合并（那样拖动时才是实时的）。
 pub fn render_correction<R: Runtime>(
     app: &AppHandle<R>,
     repository_id: &str,
@@ -171,6 +233,9 @@ pub fn render_correction<R: Runtime>(
     choice: Option<&str>,
     enabled: Option<bool>,
 ) -> Option<raybend::develop::lens::LensCorrection> {
+    if choice.is_none() || choice == Some("none") || enabled == Some(false) {
+        return None;
+    }
     let shot = shot_input(app, repository_id, asset_id).ok()?;
     let request = LensRequest {
         choice: choice.map(str::to_string),

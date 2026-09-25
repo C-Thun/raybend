@@ -132,6 +132,11 @@ textarea,
  --z-index: var(--z-popover) !important;
 }
 
+/* 只抬 easy copy 的 Portal 气泡；触发元素仍在 flowbar/工作区原位。 */
+[data-scope="tooltip"][data-part="positioner"][data-easy-copy-tip] {
+ --z-index: var(--z-easy-copy-tip) !important;
+}
+
 [data-scope="dialog"][data-part="backdrop"] {
  --z-index: var(--z-scrim) !important;
  /*
@@ -148,6 +153,12 @@ textarea,
 [data-scope="dialog"][data-part="positioner"] {
  --z-index: var(--z-modal) !important;
  z-index: var(--z-modal) !important;
+ /* 全屏位置器透明穿透；只让真实弹窗内容接点击，titlebar 才能位于遮罩与弹窗之间。 */
+ pointer-events: none;
+}
+
+[data-scope="dialog"][data-part="content"] {
+ pointer-events: auto;
 }
 
 /*

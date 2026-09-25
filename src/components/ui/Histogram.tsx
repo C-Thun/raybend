@@ -8,10 +8,12 @@
 
 import { For, Show, createMemo, createSignal } from "solid-js";
 import { t } from "../../i18n/index.ts";
+import { CompactChoice } from "./CompactChoice.tsx";
 import {
   HISTOGRAM_LAYER_ORDER,
   histogramLayers,
   histogramPath,
+  histogramIsEmpty,
   type HistogramBars,
   type HistogramLayerKey,
 } from "../../lib/histogram.ts";
@@ -48,13 +50,15 @@ const CHANNEL_NAME = {
 } as const;
 
 export interface HistogramProps {
-  bars: HistogramBars | null;
+  bars?: HistogramBars | null;
+  emptyText?: string;
   class?: string;
 }
 
 export function Histogram(props: HistogramProps) {
   const [selected, setSelected] = createSignal<Channel | null>(null);
   const [level, setLevel] = createSignal<number | null>(null);
+  const empty = (): boolean => histogramIsEmpty(props.bars ?? null);
 
   const drawOrder = (): Channel[] => {
     const active = selected();
@@ -72,7 +76,7 @@ export function Histogram(props: HistogramProps) {
     const rect = event.currentTarget instanceof Element
       ? event.currentTarget.getBoundingClientRect()
       : null;
-    if (rect === null || rect.width <= 0) return;
+    if (empty() || rect === null || rect.width <= 0) return;
     const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
     setLevel(Math.round(ratio * 255));
   }
@@ -82,7 +86,7 @@ export function Histogram(props: HistogramProps) {
       class={["flex h-44 w-full flex-col rounded-ui bg-surface-bar", props.class ?? ""]
         .filter(Boolean)
         .join(" ")}
-      data-histogram={props.bars === null ? "empty" : "lines"}
+      data-histogram={empty() ? "empty" : "lines"}
       data-channel={selected() ?? "all"}
     >
       <div
@@ -127,6 +131,15 @@ export function Histogram(props: HistogramProps) {
           />
         </div>
 
+        <Show when={empty()}>
+          <span
+            class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center text-fs-2 text-fg-2"
+            data-histogram-empty
+          >
+            {props.emptyText ?? t("browse.histogramEmpty")}
+          </span>
+        </Show>
+
         <svg
           class="absolute inset-0 h-full w-full"
           viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
@@ -142,28 +155,30 @@ export function Histogram(props: HistogramProps) {
             * **点亮单通道**：选中那条在前台（正常浓度）、另两条半透明，**自然叠加** ——
               这时不需要也不该再处理混色（需求原文：「此时就不需要处理混色了，自然叠加就行」）。
           */}
-          <Show
-            when={selected() === null}
-            fallback={
-              <For each={drawOrder()}>
-                {(channel) => (
+          <Show when={!empty()}>
+            <Show
+              when={selected() === null}
+              fallback={
+                <For each={drawOrder()}>
+                  {(channel) => (
+                    <path
+                      d={histogramPath(values(channel), VIEW_W, VIEW_H)}
+                      class={["histogram-channel", CHANNEL_FILL[channel]].join(" ")}
+                      style={{ opacity: selected() === channel ? "0.82" : "0.24" }}
+                    />
+                  )}
+                </For>
+              }
+            >
+              <For each={HISTOGRAM_LAYER_ORDER}>
+                {(key) => (
                   <path
-                    d={histogramPath(values(channel), VIEW_W, VIEW_H)}
-                    class={["histogram-channel", CHANNEL_FILL[channel]].join(" ")}
-                    style={{ opacity: selected() === channel ? "0.82" : "0.24" }}
+                    d={histogramPath(layers()[key], VIEW_W, VIEW_H)}
+                    class={["histogram-layer", LAYER_FILL[key]].join(" ")}
                   />
                 )}
               </For>
-            }
-          >
-            <For each={HISTOGRAM_LAYER_ORDER}>
-              {(key) => (
-                <path
-                  d={histogramPath(layers()[key], VIEW_W, VIEW_H)}
-                  class={["histogram-layer", LAYER_FILL[key]].join(" ")}
-                />
-              )}
-            </For>
+            </Show>
           </Show>
         </svg>
 
@@ -175,30 +190,16 @@ export function Histogram(props: HistogramProps) {
       </div>
 
       <div class="flex h-8 shrink-0 items-center px-1.5">
-        <div class="flex items-center gap-1" role="group" aria-label={t("browse.histogramChannels")}>
-          <For each={CHANNELS}>
-            {(channel) => (
-              <button
-                type="button"
-                aria-pressed={selected() === channel}
-                aria-label={t(CHANNEL_NAME[channel])}
-                title={t(CHANNEL_NAME[channel])}
-                onClick={() => setSelected((current) => (current === channel ? null : channel))}
-                class={[
-                  "flex h-5 min-w-6 items-center justify-center rounded-ui px-1 text-fs-0 font-semibold transition-colors",
-                  selected() === channel
-                    ? "bg-state-selected text-fg-1"
-                    : "text-fg-3 hover:bg-state-hover hover:text-fg-2",
-                ].join(" ")}
-              >
-                {channel.toUpperCase()}
-              </button>
-            )}
-          </For>
-        </div>
+        <CompactChoice
+          value={selected()}
+          label={t("browse.histogramChannels")}
+          options={CHANNELS.map((channel) => ({ value: channel, label: channel.toUpperCase(), ariaLabel: t(CHANNEL_NAME[channel]) }))}
+          onValueChange={setSelected}
+          onClear={() => setSelected(null)}
+        />
         <span class="min-w-0 flex-1" />
         <span class="text-fs-0 text-fg-3 tnum" aria-live="off">
-          {level() === null ? "" : t("browse.histogramLevel", { level: level() ?? 0 })}
+          {empty() || level() === null ? "" : t("browse.histogramLevel", { level: level() ?? 0 })}
         </span>
       </div>
     </div>

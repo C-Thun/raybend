@@ -21,7 +21,8 @@
 
 import { For, Show, createSignal, type JSX } from "solid-js";
 
-import { histogramPath, type HistogramCounts } from "../../lib/histogram.ts";
+import { curveHistogramValues, histogramPath, type HistogramCounts } from "../../lib/histogram.ts";
+import { CompactChoice } from "../../components/ui/CompactChoice.tsx";
 import {
   addPoint,
   curvePath,
@@ -79,30 +80,6 @@ export interface CurveEditorProps {
   onDragStart?: () => void;
   /** 拖拽结束 */
   onDragEnd?: () => void;
-}
-
-/** 某个通道在背景里那条轮廓的采样值（RGB = 三通道包络）。 */
-function channelValues(
-  histogram: HistogramCounts | null,
-  channel: CurveChannel,
-): readonly number[] {
-  if (histogram === null) return [];
-  if (channel === "r") return histogram.r;
-  if (channel === "g") return histogram.g;
-  if (channel === "b") return histogram.b;
-  // RGB：取三通道的**包络**（逐点最大），画成一条灰轮廓
-  const length = Math.max(histogram.r.length, histogram.g.length, histogram.b.length);
-  const out: number[] = [];
-  for (let index = 0; index < length; index += 1) {
-    out.push(
-      Math.max(
-        histogram.r[index] ?? 0,
-        histogram.g[index] ?? 0,
-        histogram.b[index] ?? 0,
-      ),
-    );
-  }
-  return out;
 }
 
 export function CurveEditor(props: CurveEditorProps): JSX.Element {
@@ -224,9 +201,9 @@ export function CurveEditor(props: CurveEditorProps): JSX.Element {
           onPointerCancel={onPointerUp}
         >
           {/* ① 直方图（背景，50% 半透明） */}
-          <Show when={channelValues(props.histogram, channel()).length > 0}>
+          <Show when={curveHistogramValues(props.histogram, channel()).length > 0}>
             <path
-              d={histogramPath(channelValues(props.histogram, channel()), VIEW, VIEW)}
+              d={histogramPath(curveHistogramValues(props.histogram, channel()), VIEW, VIEW)}
               class={CHANNEL_FILL[channel()]}
               opacity="0.5"
               data-curve-histogram={channel()}
@@ -294,36 +271,18 @@ export function CurveEditor(props: CurveEditorProps): JSX.Element {
 
       {/* ⑤ 通道（靠左）+ 重置（靠右）—— 样式照直方图那一套，但小一号 */}
       <div class="flex items-center justify-between gap-2">
-        <div class="flex items-center gap-1" role="group" aria-label={t("editor.curve.channels")}>
-          <For each={CHANNELS}>
-            {(item) => (
-              <button
-                type="button"
-                aria-pressed={channel() === item}
-                aria-label={CHANNEL_LABEL[item]}
-                title={CHANNEL_LABEL[item]}
-                disabled={props.disabled === true}
-                onClick={() => props.store.setCurveChannel(item)}
-                data-curve-channel={item}
-                data-curve-dirty={isIdentityCurve(props.store.curvePoints(item)) ? "no" : "yes"}
-                class={[
-                  "flex h-5 min-w-6 items-center justify-center rounded-ui px-1 text-fs-0 font-semibold transition-colors",
-                  channel() === item
-                    ? "bg-state-selected text-fg-1"
-                    : "text-fg-3 hover:bg-state-hover hover:text-fg-2",
-                  // 有调整的通道给**辅色底纹**（人类 2026-09-24：示意这个通道动过）
-                  !isIdentityCurve(props.store.curvePoints(item))
-                    ? "bg-state-hover text-fg-1"
-                    : "",
-                ]
-                  .filter(Boolean)
-                  .join(" ")}
-              >
-                {CHANNEL_LABEL[item]}
-              </button>
-            )}
-          </For>
-        </div>
+        <CompactChoice
+          value={channel()}
+          label={t("editor.curve.channels")}
+          dataName="curve"
+          options={CHANNELS.map((item) => ({
+            value: item,
+            label: CHANNEL_LABEL[item],
+            disabled: props.disabled === true,
+            dirty: !isIdentityCurve(props.store.curvePoints(item)),
+          }))}
+          onValueChange={(value) => props.store.setCurveChannel(value)}
+        />
         <button
           type="button"
           disabled={props.disabled === true}

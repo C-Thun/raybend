@@ -97,6 +97,7 @@ export function EasyCopy(props: EasyCopyProps) {
 
   return (
     <Tooltip
+      layer="easy-copy"
       open={open()}
       onOpenChange={(next) => {
         setHovered(next);

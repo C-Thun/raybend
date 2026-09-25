@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { detectConflicts } from "../../lib/commands.ts";
 import test from "node:test";
 
 import {
@@ -39,4 +40,51 @@ test("compare Enter：非对比态不适用", () => {
     (candidate) => candidate.id === "viewer.compareOnly",
   );
   assert.equal(command?.when?.(), false);
+});
+
+test("SOOC/RAW 编辑源命令共用工具栏的选择动作且没有误触热键", () => {
+  const calls: string[] = [];
+  const deps = {
+    editor: {
+      active: () => true,
+      hasPhoto: () => true,
+      setBase: (base: string) => calls.push(base),
+    },
+  } as unknown as CommandDeps;
+  const commands = createCommandRegistry(deps);
+  const sooc = commands.find((candidate) => candidate.id === "editor.base.sooc");
+  const raw = commands.find((candidate) => candidate.id === "editor.base.raw");
+  assert.ok(sooc);
+  assert.ok(raw);
+  assert.equal(sooc.defaultKey, undefined);
+  assert.equal(raw.defaultKey, undefined);
+  assert.equal(sooc.when?.(), true);
+  sooc.run();
+  raw.run();
+  assert.deepEqual(calls, ["sooc", "raw"]);
+});
+
+test("W5 三工具默认键位在命令注册表内且不冲突", () => {
+  const deps = {
+    editor: { active: () => true, hasPhoto: () => true, toggleTool: () => {} },
+  } as unknown as CommandDeps;
+  const commands = createCommandRegistry(deps);
+  const expected = { "editor.tool.crop": "C", "editor.tool.rotate": "R", "editor.tool.compare": "B" };
+  for (const [id, chord] of Object.entries(expected)) {
+    assert.equal(commands.find((command) => command.id === id)?.defaultKey, chord);
+  }
+  const conflicts = detectConflicts(commands, {});
+  assert.deepEqual(conflicts.filter((issue) => issue.blocking &&
+    issue.commandIds.some((id) => id in expected)), []);
+});
+
+test('自动调整命令复用编辑动作且默认不占热键', () => {
+  let applied = 0;
+  const deps = {editor:{active:()=>true, hasPhoto:()=>true, autoAdjust:()=>{applied++;}}} as unknown as CommandDeps;
+  const command = createCommandRegistry(deps).find(item=>item.id==='editor.develop.autoAdjust');
+  assert.ok(command);
+  assert.equal(command.defaultKey, undefined);
+  assert.equal(command.menu, 'edit');
+  command.run();
+  assert.equal(applied, 1);
 });

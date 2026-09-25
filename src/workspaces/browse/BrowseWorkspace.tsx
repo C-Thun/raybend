@@ -32,6 +32,7 @@ import {
   getThumbBytes,
   getViewImage,
   listRepositories,
+  readFileExif,
   remountRepository,
   syncDirectoryCounts,
 } from "../../api/db.ts";
@@ -75,6 +76,8 @@ import { registerBrowseActions } from "../../features/browse/actions.ts";
 import { SplitHandle } from "../../components/ui/SplitHandle.tsx";
 import { nudgeWidth, resizeWidth } from "../../lib/column-resize.ts";
 import { joinPath } from "../../lib/paths.ts";
+import { assetItemExif, toExifData, type SelectedFileMetadata } from "../../features/exif-strip/index.ts";
+import { getDevelopEditTarget } from "../../api/editor.ts";
 import { LAYOUT_BOUNDS } from "../../lib/layout-prefs.ts";
 
 /**
@@ -88,6 +91,7 @@ import type { BrowseSort, DeleteFailure } from "../../api/types.ts";
 
 export interface BrowseWorkspaceProps {
   store: BrowseStore;
+  selectedMetadata: SelectedFileMetadata;
   /**
    * 点库卡片上的齿轮 → 打开**库设置**。
    *
@@ -519,6 +523,27 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
   const root = createMemo(
     () => repositories().find((r) => r.id === store.repositoryId())?.root ?? null,
   );
+  createEffect(() => {
+    const item = store.anchorItem();
+    const base = root();
+    const path = item !== null && base !== null ? joinPath(base, item.relPath) : null;
+    props.selectedMetadata.select(path, item === null ? null : assetItemExif(item));
+    // 组合 tile 展示的是位图；若它缺镜头等拍摄字段，用同一资产的 RAW 补足
+    // FlowBar 的内存信息。RAW 路径由现有后端解析，不在前端猜 `_RAW` 目录。
+    if (path === null || item === null || !item.hasRaw || item.isRaw) return;
+    const repositoryId = store.repositoryId();
+    if (repositoryId === null) return;
+    let cancelled = false;
+    void getDevelopEditTarget(repositoryId, item.id, "raw")
+      .then((target) => target?.path && target.path !== path ? readFileExif(target.path) : null)
+      .then((raw) => {
+        if (!cancelled && raw !== null && props.selectedMetadata.path() === path) {
+          props.selectedMetadata.enrich(toExifData(raw));
+        }
+      })
+      .catch(() => {});
+    onCleanup(() => { cancelled = true; });
+  });
 
   /**
    * 网格数据源（适配器）：把浏览 store 包成网格契约。
@@ -732,6 +757,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
         <AssetInfo
               store={store}
               item={anchor()}
+              fileExif={props.selectedMetadata.file()}
               viewer={viewer.state().active ? viewer : null}
               /* 对比态不画视野框：好几个窗口，一个框描述不了 */
               comparing={viewing.comparing()}

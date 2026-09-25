@@ -244,3 +244,15 @@ test("组件里引用到的令牌，tokens.css 里必须有定义", () => {
       .join("\n")}`,
   );
 });
+
+test("全局层级：message > easy copy tip > 弹窗 > titlebar > 遮罩", () => {
+  const value = (name: string): number => {
+    const match = css.match(new RegExp(`^\\s*${name}:\\s*(\\d+);`, "m"));
+    assert.ok(match, `${name} 未定义`);
+    return Number(match[1]);
+  };
+  const levels = ["--z-toast", "--z-easy-copy-tip", "--z-modal", "--z-titlebar", "--z-scrim"].map(value);
+  assert.ok(levels.every((level, index) => index === 0 || levels[index - 1]! > level), levels.join(" > "));
+  const base = readFileSync(new URL("../index.css", import.meta.url), "utf8");
+  assert.match(base, /\[data-easy-copy-tip\][^{}]*\{[^{}]*--z-index: var\(--z-easy-copy-tip\) !important/s);
+});

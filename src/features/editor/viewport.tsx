@@ -5,7 +5,7 @@
  * ┌──────────────────────────────┐
  * │            ↑                 │  ← 滚轮 = 以光标为锚缩放（意图发去 Rust）
  * │      照片由 wgpu 直绘          │  ← 拖动 = 平移；双击 = 适合窗口 ↔ 1:1
- * │            ↓                 │  ← 松手没动 = 命中测试（W5 的三个工具要用）
+ * │            ↓                 │  ← 裁切/旋转传原始指针，几何交给 Rust
  * └──────────────────────────────┘
  * ```
  *
@@ -13,7 +13,7 @@
  *
  * 1. **只上报原始事实**（矩形 / DPR / CSS 视口 / 底色字符串），换算全在 Rust
  *    —— `AGENTS.md` §6.1 红线 2；
- * 2. 上报要**三处都触发 + 尾样本**：`ResizeObserver`、窗口 `resize`、DPR 变化各一路；
+ * 2. 上报覆盖尺寸、位置、窗口与 DPR 变化并保留尾样本；
  * 3. **只发意图**：滚轮给「CSS 窗口坐标 + 倍数」，拖动给「CSS 位移」——
  *    一次乘法都不在前端做；
  * 4. **照片由 GPU 画在 DOM 底下**，所以这块 DOM 在出图时必须**没有底色**（`holeActive`）——
@@ -35,9 +35,8 @@ import {
 import { StateWatermark } from "../../components/ui/StateWatermark.tsx";
 import { createWheelZoom } from "../../components/ui/viewer/interaction.ts";
 import { t } from "../../i18n/index.ts";
-import { ViewportOverlay } from "./ViewportOverlay.tsx";
 import type { MessageKey } from "../../i18n/index.ts";
-import { createDragSession, createPanAccumulator } from "../../lib/editor-intent.ts";
+import { createDragSession, createPanAccumulator, createPointerSender } from "../../lib/editor-intent.ts";
 import { createViewportReporter, type ViewportReporter } from "../../lib/editor-viewport.ts";
 import { sendEditorViewportIntent, setEditorViewport } from "../../api/editor.ts";
 import { isTauriRuntime } from "../../api/tauri-env.ts";
@@ -56,6 +55,8 @@ export interface EditorViewportProps {
   hasPhoto: boolean;
   /** 渲染线程的状态快照（`null` = 拿不到：浏览器 / 还没 bind） */
   renderState: () => EditorRenderState | null;
+  /** 当前工具；只是分派指针意图，不参与坐标换算。 */
+  tool?: () => "crop" | "rotate" | "compare" | null;
   /** 「去导入」按钮（只有「没有库」那一态给） */
   onOpenImport?: () => void;
   /** 重新起渲染线程（出图失败时那颗「重试」） */
@@ -139,6 +140,7 @@ export function EditorViewport(props: EditorViewportProps): JSX.Element {
         viewport: { width: window.innerWidth, height: window.innerHeight },
         // 洞口底色：**字符串原样上行**（解析在 Rust；主题一变它跟着变）
         backdrop: readComputedBackdrop(backdropProbe),
+        overlayColors: readOverlayColors(element),
       });
     };
 
@@ -155,6 +157,22 @@ export function EditorViewport(props: EditorViewportProps): JSX.Element {
     const observer = new ResizeObserver(observe);
     observer.observe(element);
     window.addEventListener("resize", observe);
+    // ResizeObserver 只盯尺寸：弹窗、面板与滚动可能让洞口整体位移而宽高不变。
+    // 在下一帧读布局，交给上报器去重；不会因普通 DOM 变更产生额外 IPC。
+    let layoutFrame: number | null = null;
+    const scheduleLayoutObserve = (): void => {
+      if (layoutFrame !== null) return;
+      layoutFrame = window.requestAnimationFrame(() => {
+        layoutFrame = null;
+        observe();
+      });
+    };
+    const layoutRoot = element.closest("[data-editor-workspace]") ?? element.parentElement;
+    const layoutObserver = new MutationObserver(scheduleLayoutObserve);
+    if (layoutRoot !== null) {
+      layoutObserver.observe(layoutRoot, { childList: true, subtree: true, attributes: true });
+    }
+    window.addEventListener("scroll", scheduleLayoutObserve, true);
 
     /* ── ② 滚轮：以光标为锚（复用看图件那一份实现）────── */
     const wheel = createWheelZoom({
@@ -176,11 +194,30 @@ export function EditorViewport(props: EditorViewportProps): JSX.Element {
       send: (intent) => send(intent),
     });
     let pointerId: number | null = null;
+    let pointerTool: ReturnType<NonNullable<EditorViewportProps["tool"]>> = null;
+    const pointer = createPointerSender({ send });
+    createEffect(() => {
+      const tool = props.tool?.() ?? null;
+      if (pointerId !== null && tool !== pointerTool) {
+        pointer.dispose();
+        drag.end();
+        pan.dispose();
+        try { element.releasePointerCapture(pointerId); } catch { /* no capture */ }
+        pointerId = null;
+      }
+    });
 
     const onPointerDown = (event: PointerEvent): void => {
-      if (event.button !== 0) return; // 只认左键（右键留给以后的上下文菜单）
+      if (event.button !== 0 || pointerId !== null) return; // 只认左键（右键留给以后的上下文菜单）
       pointerId = event.pointerId;
-      drag.start(event.clientX, event.clientY);
+      pointerTool = props.tool?.() ?? null;
+      if (props.tool?.() === "compare") {
+        pointer.send({ kind: "comparePointer", phase: "down", x: event.clientX, y: event.clientY });
+      } else if (props.tool?.() === "crop" || props.tool?.() === "rotate") {
+        pointer.send({ kind: "toolPointer", phase: "down", x: event.clientX, y: event.clientY });
+      } else {
+        drag.start(event.clientX, event.clientY);
+      }
       try {
         element.setPointerCapture(event.pointerId);
       } catch {
@@ -189,6 +226,14 @@ export function EditorViewport(props: EditorViewportProps): JSX.Element {
     };
 
     const onPointerMove = (event: PointerEvent): void => {
+      if (props.tool?.() === "compare") {
+        if (pointerId === event.pointerId) pointer.send({ kind: "comparePointer", phase: "move", x: event.clientX, y: event.clientY });
+        return;
+      }
+      if (props.tool?.() === "crop" || props.tool?.() === "rotate") {
+        if (pointerId === event.pointerId) pointer.send({ kind: "toolPointer", phase: "move", x: event.clientX, y: event.clientY });
+        return;
+      }
       if (!drag.active()) return;
       const delta = drag.move(event.clientX, event.clientY);
       if (delta === null) return;
@@ -196,7 +241,19 @@ export function EditorViewport(props: EditorViewportProps): JSX.Element {
     };
 
     const finishPointer = (event: PointerEvent): void => {
-      if (pointerId !== null && pointerId !== event.pointerId) return;
+      if (pointerId !== event.pointerId) return;
+      if (props.tool?.() === "compare") {
+        pointer.send({ kind: "comparePointer", phase: event.type === "pointercancel" ? "cancel" : "up", x: event.clientX, y: event.clientY });
+        pointerId = null;
+        try { element.releasePointerCapture(event.pointerId); } catch { /* no capture */ }
+        return;
+      }
+      if (props.tool?.() === "crop" || props.tool?.() === "rotate") {
+        pointer.send({ kind: "toolPointer", phase: event.type === "pointercancel" ? "cancel" : "up", x: event.clientX, y: event.clientY });
+        pointerId = null;
+        try { element.releasePointerCapture(event.pointerId); } catch { /* no capture */ }
+        return;
+      }
       if (!drag.active()) return;
       pan.flush(); // 尾样本：松手那一段也要发出去
       const ended = drag.end();
@@ -207,7 +264,7 @@ export function EditorViewport(props: EditorViewportProps): JSX.Element {
         // 没捕获过就没什么可释放的
       }
       if (ended.click) {
-        // 没怎么动 = 点击：报一次命中测试（W5 的三个工具要用，现在只回填状态）
+        // 没怎么动 = 点击：回填命中状态（普通视口操作）
         send({ kind: "hitTest", x: event.clientX, y: event.clientY });
       }
     };
@@ -230,7 +287,11 @@ export function EditorViewport(props: EditorViewportProps): JSX.Element {
       reporter = null;
       wheel.dispose();
       pan.dispose();
+      pointer.dispose();
       observer.disconnect();
+      layoutObserver.disconnect();
+      if (layoutFrame !== null) window.cancelAnimationFrame(layoutFrame);
+      window.removeEventListener("scroll", scheduleLayoutObserve, true);
       window.removeEventListener("resize", observe);
       dprQuery?.removeEventListener("change", onDprChange);
       element.removeEventListener("wheel", wheel.onWheel);
@@ -266,6 +327,7 @@ export function EditorViewport(props: EditorViewportProps): JSX.Element {
         dpr: window.devicePixelRatio,
         viewport: { width: window.innerWidth, height: window.innerHeight },
         backdrop: readComputedBackdrop(backdropProbe),
+        overlayColors: readOverlayColors(element),
       });
     });
   });
@@ -281,7 +343,7 @@ export function EditorViewport(props: EditorViewportProps): JSX.Element {
         // 出图时透明（wgpu 画在下面），否则自己画底色
         transparent() ? "bg-transparent" : "bg-surface-bar",
         // 拖动时的手型与光标反馈（与看图件同一套观感）
-        "cursor-grab active:cursor-grabbing",
+        props.tool?.() === "crop" ? "cursor-crosshair" : props.tool?.() === "rotate" ? "cursor-crosshair" : "cursor-grab active:cursor-grabbing",
         props.class ?? "",
       ]
         .filter(Boolean)
@@ -298,13 +360,7 @@ export function EditorViewport(props: EditorViewportProps): JSX.Element {
         aria-hidden="true"
         class="pointer-events-none absolute h-0 w-0 bg-surface-bar"
       />
-      {/*
-        **覆盖层宿主**（M3-W3 定契约）：W5 的裁切 / 旋转 / 对比与将来的蒙版都插进这里。
-        子元素一律用**图像像素**坐标书写，由它统一套上 Rust 给的仿射矩阵 ——
-        视口数学只有一份，覆盖层不许自己乘 zoom / 减 pan / 补 DPR。
-        W3 这一波还没有覆盖层内容（三个工具在 W5），所以这里是空的。
-      */}
-      <ViewportOverlay renderState={props.renderState()} />
+      {/* 工具覆盖层与照片由 Rust 在同一个 GPU pass 中绘制。 */}
 
       <Show when={props.empty} fallback={<ViewportMessage props={props} />}>
         {(kind) => {
@@ -444,4 +500,11 @@ function subscribeDpr(
   const query = window.matchMedia(`(resolution: ${dpr}dppx)`);
   query.addEventListener("change", onChange);
   return query;
+}
+
+/** 原样上报既有主题令牌，不在前端解析颜色或转换色彩空间。 */
+function readOverlayColors(element: HTMLElement): [string, string, string, string] {
+  const style = getComputedStyle(element);
+  return [style.getPropertyValue("--overlay-line"), style.getPropertyValue("--overlay-halo"),
+    style.getPropertyValue("--brand"), style.getPropertyValue("--brand-2")];
 }

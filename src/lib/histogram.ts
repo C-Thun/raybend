@@ -20,6 +20,8 @@ export interface HistogramCounts {
   r: readonly number[];
   g: readonly number[];
   b: readonly number[];
+  /** 实际像素的显示亮度计数；旧缓存可缺省。 */
+  luma?: readonly number[];
   /** 三通道合并后的峰值 */
   max: number;
 }
@@ -72,6 +74,19 @@ export function histogramBarHeights(hist: HistogramCounts | null): HistogramBars
 
   const scale = (values: number[]): number[] => values.map((value) => value / max);
   return { samples, r: scale(r), g: scale(g), b: scale(b), max };
+}
+
+/** 曲线底纹：真实亮度 / 单色通道的计数归一化为 SVG 高度。 */
+export function curveHistogramValues(
+  histogram: HistogramCounts | null,
+  channel: "rgb" | "r" | "g" | "b",
+): number[] {
+  if (histogram === null) return [];
+  const counts = channel === "rgb"
+    ? histogram.luma ?? histogram.r.map((value, index) => Math.max(value, histogram.g[index] ?? 0, histogram.b[index] ?? 0))
+    : histogram[channel];
+  const peak = Math.max(0, ...counts);
+  return peak > 0 ? counts.map((value) => Math.max(0, value) / peak) : counts.map(() => 0);
 }
 
 /** 「这张照片到底有没有可画的东西」—— 空直方图不画曲线，改画一句提示 */

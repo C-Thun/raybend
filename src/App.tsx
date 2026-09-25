@@ -18,15 +18,14 @@
  * 放进任何一边都会让另一边去钻内部实现。
  */
 
-import { Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
+import { Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { uiReady, tauriWindowHandle } from "./api/window.ts";
 import { openFullscreen } from "./api/fullscreen.ts";
 import { isTauriRuntime } from "./api/tauri-env.ts";
-import type { BrowseSort } from "./api/types.ts";
+import type { BrowseSort, DevelopEditBase } from "./api/types.ts";
 import { t, timeoutMessage } from "./i18n/index.ts";
 import * as db from "./api/db.ts";
-import type { ExifData } from "./features/exif-strip/index.ts";
-import { assetItemExif, toExifData } from "./features/exif-strip/index.ts";
+import { createSelectedFileMetadata } from "./features/exif-strip/index.ts";
 import { createPhotoGridStore } from "./features/photo-grid/index.ts";
 import { createAppearanceStore } from "./lib/appearance.ts";
 import { createLayoutStore } from "./lib/layout-prefs.ts";
@@ -77,6 +76,7 @@ import { EditorWorkspace } from "./workspaces/editor/EditorWorkspace.tsx";
 import {
   createEditorStore,
   EditorPanelToggles,
+  EditorResetTool,
   EditorToolbar,
 } from "./features/editor/index.ts";
 import {
@@ -114,6 +114,11 @@ export default function App() {
    * （`ARCHITECTURE.md` §3 的状态归属：跨外壳与工作区的状态住这里）。
    */
   const editorStore = createEditorStore();
+  const setEditorBase = (base: DevelopEditBase): void => {
+    if (editorStore.editBase() === base) return;
+    editorStore.setEditBase(base);
+    editorActions()?.commitDevelop();
+  };
   /** 编辑里有没有可编辑的照片（工具与右栏控件的可用性都看它） */
   const editorEnabled = (): boolean => browseStore.anchorItem() !== null;
   const appearance = createAppearanceStore();
@@ -259,57 +264,16 @@ export default function App() {
     });
   });
 
-  /*
-   * flowbar 右侧的图片信息区（约定叫 **flowinfo**）——
-   * **切到哪个 flow 就跟着哪个 flow 走**，那个 flow 没选中照片就清空
-   * （人类 2026-09-19 定的口径；以前只认导入侧的选择，所以在浏览里选图它一动不动）。
-   *
-   * 两条路的取法不一样，但显示规则同源：
-   *   - 导入：中列只给了路径 → 读一次 EXIF（异步）。只选一张才读，多选显示哪张都不对；
-   *   - 浏览：列表项**本来就带着**这些字段 → 直接换形状，不用 IPC（本地应用能立刻给就别绕）。
-   */
-  const [importExif, setImportExif] = createSignal<ExifData | null>(null);
+  /** 单一选中文件信息源：工作区只负责告诉它当前文件路径，FlowBar 与两处右栏同读这一份。 */
+  const selectedMetadata = createSelectedFileMetadata(db.readFileExif);
   createEffect(() => {
-    const selected = grid.selectedIds();
-    // 不在导入工作流就不读 —— 切回浏览时那块信息不该还留着上一张的
-    if (shell.workflow() !== "import" || selected.size !== 1) {
-      setImportExif(null);
+    const flow = shell.workflow();
+    if (flow !== "import") {
+      selectedMetadata.select(null);
       return;
     }
-    const path = selected.values().next().value as string;
-    let cancelled = false;
-    void db
-      .readFileExif(path)
-      .then((file) => {
-        if (!cancelled) setImportExif(toExifData(file));
-      })
-      .catch(() => {
-        if (!cancelled) setImportExif(null);
-      });
-    onCleanup(() => {
-      cancelled = true;
-    });
-  });
-
-  /** flowinfo 的内容：当前 flow 的「当前照片」，没有就 `null`（空态） */
-  const flowInfo = createMemo<ExifData | null>(() => {
-    switch (shell.workflow()) {
-      case "import":
-        return importExif();
-      /*
-       * 浏览与编辑**同一份取法**：编辑里「当前在编哪张」就是浏览侧的锚点
-       * （`EditorWorkspace` 的结构纪律：编辑不另造选择模型，胶片带点选写回同一个 store）。
-       * 所以这里不另写一套 —— 两条路读同一个锚点，切换 flow 也不会留上一张的残留。
-       */
-      case "browse":
-      case "edit": {
-        const item = browseStore.anchorItem();
-        return item === null ? null : assetItemExif(item);
-      }
-      default:
-        // 导出还没开工：没有「当前照片」就显示空态（将来接同一条锚点即可）
-        return null;
-    }
+    const selected = grid.selectedIds();
+    selectedMetadata.select(selected.size === 1 ? selected.values().next().value as string : null);
   });
 
   /**
@@ -471,10 +435,12 @@ export default function App() {
       hasPhoto: editorEnabled,
       cycleChrome: () => editorStore.cycleTab(),
       toggleLut: () => editorStore.toggleLut(),
+      setBase: setEditorBase,
       toggleTool: (tool) => editorStore.toggleTool(tool),
       isToolActive: (tool) => editorStore.tool() === tool,
       // 重置全部调整要**同时清库**，所以走工作区注册的那一份实现（不是 store 单独能干的）
       resetDevelop: () => editorActions()?.resetDevelop(),
+      autoAdjust: () => editorActions()?.autoAdjust(),
     },
   };
 
@@ -534,7 +500,7 @@ export default function App() {
         aboutOpen={aboutOpen()}
         onAboutOpenChange={setAboutOpen}
       />
-      <FlowBar store={shell} exif={flowInfo()} onFullscreen={fullscreen()} />
+      <FlowBar store={shell} exif={selectedMetadata.data()} onFullscreen={fullscreen()} />
 
       {/*
         批量排除（`DESIGN.md` §12.2 的**反转**语义）：没有选中项时禁用。
@@ -548,12 +514,13 @@ export default function App() {
         onBatchExclude={() => importStore.toggleExcluded([...grid.selectedIds()])}
         // 插槽里到底有没有东西，由这里明说（理由见 ToolsBar 的 hasExtraTools）
         hasExtraTools={shell.workflow() === "browse" || shell.workflow() === "edit"}
-        /*
-         * 三段式（`AGENTS.md` §11.1）：左段 = 与 workspace 左列有关的面板开关，
-         * 中段 = 具体功能按钮，右段暂时空着（未来加东西才出现在那一侧）。
-         */
+        /* left/right 盖在全宽 mid 上；mid 按整条 toolsbar 的中心对齐。 */
         hasLeftTools={shell.workflow() === "edit"}
         left={<EditorPanelToggles store={editorStore} enabled={editorEnabled()} />}
+        hasRightTools={shell.workflow() === "edit"}
+        right={<EditorResetTool store={editorStore} enabled={editorEnabled()}
+          onRequestReset={() => editorActions()?.resetDevelop()}
+          onAutoAdjust={() => editorActions()?.autoAdjust()} />}
       >
         {/* 浏览模式的工具（标记系列 / 筛选开关 / 锁）由那个模块自己给 —— 见 ToolsBar 的说明 */}
         <Show when={shell.workflow() === "browse"}>
@@ -563,9 +530,15 @@ export default function App() {
             onOpenTags={() => setTagsOpen(true)}
           />
         </Show>
-        {/* 编辑模式的中段：裁切 / 旋转 / 对比（互斥，再点一次退出） */}
+        {/* 编辑模式的 mid：画布工具、编辑源、历史动作在同一行整体居中。 */}
         <Show when={shell.workflow() === "edit"}>
-          <EditorToolbar store={editorStore} enabled={editorEnabled()} />
+          <EditorToolbar store={editorStore} enabled={editorEnabled()}
+            onBaseChange={setEditorBase}
+            history={{
+              state: browseStore.undoState,
+              undo: () => void browseStore.undo(),
+              redo: () => void browseStore.redo(),
+            }} />
         </Show>
       </ToolsBar>
 
@@ -663,6 +636,7 @@ export default function App() {
           <EditorWorkspace
             store={editorStore}
             browse={browseStore}
+            selectedMetadata={selectedMetadata}
             filmStripStep={filmStripPrefs.step("editor")}
             onFilmStripStepChange={(step) => filmStripPrefs.setStep("editor", step)}
             onOpenImport={() => shell.setWorkflow("import")}
@@ -671,6 +645,7 @@ export default function App() {
       }>
         <BrowseWorkspace
           store={browseStore}
+          selectedMetadata={selectedMetadata}
           onOpenLibrarySettings={(id) => setLibrarySettingsId(id)}
           toast={toast}
           leftWidth={layout.prefs().browseLeftWidth}

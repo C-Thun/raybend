@@ -247,6 +247,9 @@ export interface ViewerStore {
   current: () => ViewerPhoto | null;
   /** 视图用：当前该显示哪张图（可能是小图，也可能是大图） */
   imageUrl: () => string | null;
+  /** 总览只用完整 Screen 图；过渡用的 grid 小图不进入这里。 */
+  overviewImageUrl: () => string | null;
+  overviewStatus: () => "idle" | "loading" | "ready" | "error";
   /** 多图视图用：指定照片自己的 URL，绝不能把当前图 URL 填给全部画幅。 */
   imageUrlFor: (photo: ViewerPhoto) => string | null;
   /** 确保指定照片进入多图 URL 缓存；同一路径并发调用会合并。 */
@@ -281,6 +284,7 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
   const [imageStatus, setImageStatus] =
     createSignal<"idle" | "loading" | "ready" | "error">("idle");
   const [sharp, setSharp] = createSignal(false);
+  const [overviewStatus, setOverviewStatus] = createSignal<"idle" | "loading" | "ready" | "error">("idle");
   /**
    * 多图视图的独立 URL 表。单张看图的 `currentUrl` 会在换图时立刻回收，不能拿它给
    * 四个对比画幅共用；这里每张照片各持有自己的 URL，并按有限容量回收。
@@ -424,6 +428,7 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
   async function loadFor(photo: ViewerPhoto, ticket: number): Promise<void> {
     setImageStatus("loading");
     setSharp(false);
+    setOverviewStatus("loading");
 
     /*
      * ① 预载（或多图视图）已经取好的：**直接用**，不再走一次 IPC。
@@ -440,6 +445,7 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
       }
       replaceUrl(prefetched);
       setSharp(true);
+      setOverviewStatus("ready");
       setImageStatus("ready");
       return;
     }
@@ -456,6 +462,7 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
       if (arrived !== null) {
         replaceUrl(arrived);
         setSharp(true);
+        setOverviewStatus("ready");
         setImageStatus("ready");
         return;
       }
@@ -483,14 +490,17 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
       }
       if (bytes === null) {
         if (imageUrl() === null) setImageStatus("error");
+        setOverviewStatus("error");
         return;
       }
       replaceUrl(makeUrl(bytes));
       setSharp(true);
+      setOverviewStatus("ready");
       setImageStatus("ready");
     } catch {
       if (ticket === generation) {
         if (imageUrl() === null) setImageStatus("error");
+        setOverviewStatus("error");
       }
     }
   }
@@ -525,6 +535,7 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
     replaceUrl(null);
     clearImageUrls();
     setSharp(false);
+    setOverviewStatus("idle");
     setImageStatus("idle");
     setState({ ...EMPTY_VIEWER, viewport: state().viewport });
   }
@@ -666,6 +677,8 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
     state,
     current,
     imageUrl,
+    overviewImageUrl: () => overviewStatus() === "ready" ? imageUrl() : null,
+    overviewStatus,
     imageUrlFor,
     ensureImage,
     imageStatus,

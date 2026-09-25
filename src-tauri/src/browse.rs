@@ -11,7 +11,7 @@
 //! ⚠️ 这里的命令**都要走后台线程**（`source::blocking`）：10 万条的查询是毫秒级，
 //! 但开库、迁移检查、迁移快照都可能碰磁盘 —— 在 UI 线程上做这些会让界面卡住。
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -369,7 +369,20 @@ fn oriented_dimensions(
 
 #[cfg(test)]
 mod tests {
-    use super::oriented_dimensions;
+    use super::{edited_asset_ids, oriented_dimensions};
+    use raybend::store::marking::Op;
+
+    #[test]
+    fn only_develop_undo_ops_invalidate_latest_previews() {
+        let ops = vec![
+            Op::Rating { asset_id: 1, before: 0, after: 1 },
+            Op::DevelopParam { asset_id: 2, param_id: "exposure".into(), before: None, after: Some(0) },
+            Op::DevelopSetting { asset_id: 2, key: "sourceBase".into(), before: Some("raw".into()), after: Some("sooc".into()) },
+            Op::DevelopCurve { asset_id: 3, channel: "rgb".into(), before: None, after: Some("[]".into()) },
+        ];
+        assert_eq!(edited_asset_ids(&ops).into_iter().collect::<Vec<_>>(), [2, 3]);
+        assert!(edited_asset_ids(&[]).is_empty());
+    }
 
     #[test]
     fn browse_dimensions_apply_exif_orientation_once() {
@@ -825,6 +838,7 @@ pub async fn browse_undo<R: Runtime>(
         match outcome {
             Ok(()) => {
                 sync_tag_counts(&handle, &applied_ops);
+                invalidate_edited_previews(&handle, &repository_id, &applied_ops);
                 state.with_undo(&id, |stack| stack.commit_undo(change))?;
             }
             Err(e) => {
@@ -878,6 +892,7 @@ pub async fn browse_redo<R: Runtime>(
         match outcome {
             Ok(()) => {
                 sync_tag_counts(&handle, &applied_ops);
+                invalidate_edited_previews(&handle, &repository_id, &applied_ops);
                 state.with_undo(&id, |stack| stack.commit_redo(change))?;
             }
             Err(e) => {
@@ -897,6 +912,27 @@ pub async fn browse_redo<R: Runtime>(
         )
     })
     .await
+}
+
+/// 编辑撤销/重做会改变 latest：作废受影响照片的大图缓存。
+/// 标记操作仍只更新标记，不让整个库的预览跟着重算。
+fn edited_asset_ids(ops: &[marking::Op]) -> BTreeSet<i64> {
+    ops.iter().filter_map(|op| match op {
+        marking::Op::DevelopParam { asset_id, .. }
+        | marking::Op::DevelopCurve { asset_id, .. }
+        | marking::Op::DevelopSetting { asset_id, .. } => Some(*asset_id),
+        _ => None,
+    }).collect()
+}
+
+fn invalidate_edited_previews<R: Runtime>(app: &AppHandle<R>, repository_id: &str, ops: &[marking::Op]) {
+    let ids = edited_asset_ids(ops);
+    if ids.is_empty() { return; }
+    if let Ok(root) = resolve_root(app, repository_id)
+        && let Ok(cache) = raybend::display::FullCache::open(&root)
+    {
+        for asset_id in ids { cache.invalidate(asset_id); }
+    }
 }
 
 /// 中文色名（撤销标签用人话）。

@@ -157,3 +157,16 @@ test("dispose 之后不再有挂起的调度", () => {
   scheduler.run();
   assert.equal(sent.length, 0);
 });
+
+
+test("覆盖层主题颜色原样上报，颜色变化也触发视口更新", () => {
+  const colors: [string,string,string,string] = ["var(--overlay-line)", "var(--overlay-halo)", "var(--brand)", "var(--brand-2)"];
+  const input = { rect: {x:0,y:0,width:600,height:400}, dpr:1.375,
+    viewport: {width:800,height:600}, overlayColors: colors };
+  const a = editorViewportPayload(input)!;
+  assert.deepEqual(a.overlayColors, colors);
+  assert.equal(sameViewportPayload(a, editorViewportPayload(input)!), true);
+  colors[0] = "var(--fg-1)";
+  assert.equal(sameViewportPayload(a, editorViewportPayload(input)!), false);
+  assert.equal(a.overlayColors?.[0], "var(--overlay-line)", "已发送快照不跟着可变输入改变");
+});

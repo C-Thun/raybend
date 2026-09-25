@@ -362,10 +362,23 @@ function BarFrame(props: {
  * 人类 2026-09-20 把旧的那条全宽 `ViewerStatusBar` 删了换成它 ——
  * 理由见 `AGENTS.md` §11.1 的结构红线：workspace 只有纵向分列、没有跨列行。
  */
-export function PhotoStatusBar(props: { info: TilesViewingInfo; class?: string }): JSX.Element {
+export function PhotoStatusBar(props: { info: TilesViewingInfo; class?: string; compare?: { reference: string; result: string; choices: { value: string; label: string; selected: boolean; disabled?: boolean }[]; onReferenceChange: (value: string) => void } }): JSX.Element {
   const info = (): TilesViewingInfo => props.info;
   return (
     <BarFrame mode="view" class={props.class}>
+      <Show when={props.compare}>
+        {(compare) => <>
+          <Menu label={t("editor.base.label")} placement="top"
+            items={compare().choices} onSelect={compare().onReferenceChange}>
+            {(triggerProps) => <button {...triggerProps()}
+              class="rounded-ui bg-brand px-2 text-fs-1 text-fg-on-brand hover:bg-brand-2"
+              data-editor-compare-reference>{compare().reference} ▾</button>}
+          </Menu>
+          <span class="min-w-0 flex-1" />
+          <span class="text-fs-1 text-fg-1" data-editor-compare-result>{compare().result}</span>
+        </>}
+      </Show>
+      <Show when={!props.compare}>
       {/* 左：文件名 + 紧挨着的锁徽标 */}
       <span class="min-w-0 shrink truncate text-fs-1 text-fg-1" title={info().fileName ?? ""}>
         {info().fileName ?? ""}
@@ -390,6 +403,7 @@ export function PhotoStatusBar(props: { info: TilesViewingInfo; class?: string }
         flag={info().flag}
         like={info().like}
       />
+      </Show>
     </BarFrame>
   );
 }

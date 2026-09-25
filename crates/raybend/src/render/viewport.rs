@@ -214,6 +214,20 @@ impl Viewport {
         self.pan_px = (0.0, 0.0);
     }
 
+    /// 工具模式把旋转后的整张原图放进洞口，避免边角被裁掉。
+    pub fn refit_rotated(&mut self) {
+        let rect = self.effective_rect();
+        let (sin, cos) = self.rotation.to_radians().sin_cos();
+        let (w, h) = (self.image_size.0 as f32, self.image_size.1 as f32);
+        let bounds = ((w * cos.abs() + h * sin.abs()).max(1.0),
+                      (w * sin.abs() + h * cos.abs()).max(1.0));
+        if rect.width > 0.0 && rect.height > 0.0 {
+            self.fit_mode = FitMode::Fit;
+            self.zoom = (rect.width / bounds.0).min(rect.height / bounds.1).clamp(MIN_ZOOM, MAX_ZOOM);
+            self.pan_px = (0.0, 0.0);
+        }
+    }
+
     /// 以某个**物理像素**点为锚点缩放：缩放前后锚点下方的图像像素不动。
     ///
     /// 这是「差 1 像素图就跟不上鼠标」的那一处：手写时最容易漏掉
@@ -284,6 +298,79 @@ impl Viewport {
             return None;
         }
         Some((x as u32, y as u32, width as u32, height as u32))
+    }
+
+    /// 对比分线在洞口宽度上的归一化位置。指针只上报窗口 CSS 坐标；
+    /// 洞口原点和 DPR 的换算只在这里做。
+    #[must_use]
+    pub fn compare_fraction_at(&self, css_x: f32) -> Option<f32> {
+        let rect = self.clip_rect?;
+        if !css_x.is_finite() || rect.width <= 0.0 || !rect.width.is_finite() {
+            return None;
+        }
+        Some(((css_x * self.dpr - rect.x) / rect.width).clamp(0.0, 1.0))
+    }
+
+    /// 指针 → 旋转后的水平画框坐标（按原图宽高归一化）。
+    /// 与 `pointer_to_image` 不同，这里不逆旋转：裁切框始终水平。
+    #[must_use]
+    pub fn frame_pointer_normalized(&self, css: (f32, f32), source: (u32, u32)) -> Option<(f32, f32)> {
+        if !css.0.is_finite() || !css.1.is_finite() || source.0 == 0 || source.1 == 0
+            || self.zoom <= 0.0 || self.clip_rect.is_none() { return None; }
+        let physical = self.css_to_physical(css);
+        if !self.is_inside_clip(physical) { return None; }
+        let area = self.rect_center();
+        Some((0.5 + (physical.0 - area.0 - self.pan_px.0) / (self.zoom * source.0 as f32),
+              0.5 + (physical.1 - area.1 - self.pan_px.1) / (self.zoom * source.1 as f32)))
+    }
+
+    /// 归一化成片框 → 洞口内 CSS 矩形。覆盖层只照这个值画，不复制视口变换。
+    #[must_use]
+    pub fn frame_rect_css(&self, rect: crate::develop::geometry::CropRect, source: (u32, u32)) -> Option<ClipRect> {
+        let clip = self.clip_rect?;
+        if source.0 == 0 || source.1 == 0 { return None; }
+        let area = self.rect_center();
+        let dpr = self.dpr.max(f32::EPSILON);
+        Some(ClipRect {
+            x: (area.0 + self.pan_px.0 + (rect.x - 0.5) * source.0 as f32 * self.zoom - clip.x) / dpr,
+            y: (area.1 + self.pan_px.1 + (rect.y - 0.5) * source.1 as f32 * self.zoom - clip.y) / dpr,
+            width: rect.width * source.0 as f32 * self.zoom / dpr,
+            height: rect.height * source.1 as f32 * self.zoom / dpr,
+        })
+    }
+
+    /// 把手命中的 CSS 半径 → 两轴归一化容差。
+    #[must_use]
+    pub fn frame_hit_tolerance(&self, css_radius: f32, source: (u32, u32)) -> (f32, f32) {
+        let scale = self.zoom.max(MIN_ZOOM) / self.dpr.max(f32::EPSILON);
+        (css_radius / (scale * source.0.max(1) as f32), css_radius / (scale * source.1.max(1) as f32))
+    }
+
+    /// 洞口内的 CSS 分线位置；覆盖层直接放在这个坐标，不自行乘 DPR。
+    #[must_use]
+    pub fn compare_css_x(&self, fraction: f32) -> Option<f32> {
+        let rect = self.clip_rect?;
+        if !fraction.is_finite() || !rect.width.is_finite() || self.dpr <= 0.0 { return None; }
+        Some(rect.width * fraction.clamp(0.0, 1.0) / self.dpr)
+    }
+
+    /// 分线把手命中（窗口 CSS 坐标）。只允许在图像洞口内、且靠近分线开始拖。
+    #[must_use]
+    pub fn compare_handle_hit(&self, css: (f32, f32), fraction: f32) -> bool {
+        if !css.0.is_finite() || !css.1.is_finite() { return false; }
+        let Some(rect) = self.clip_rect else { return false; };
+        let physical = self.css_to_physical(css);
+        let line = rect.x + rect.width * fraction.clamp(0.0, 1.0);
+        self.is_inside_clip(physical) && (physical.0 - line).abs() <= 14.0 * self.dpr
+    }
+
+    /// 左边参考帧、右边当前结果的物理 scissor。两张纹理共用本视口矩阵。
+    #[must_use]
+    pub fn compare_scissors(&self, fraction: f32) -> Option<[(u32, u32, u32, u32); 2]> {
+        let (x, y, width, height) = self.scissor()?;
+        if !fraction.is_finite() { return None; }
+        let left = ((width as f32 * fraction.clamp(0.0, 1.0)).round() as u32).min(width);
+        Some([(x, y, left, height), (x + left, y, width - left, height)])
     }
 
     /// 图像像素 → NDC（-1..1）的 4×4 矩阵，**列主序**（WGSL 的 `mat4x4<f32>` 直接吃）。
@@ -820,6 +907,47 @@ mod tests {
             matrix[1] * 500.0 + matrix[3] * 400.0 + matrix[5],
         );
         assert!((center.0 - 250.0).abs() < 0.01 && (center.1 - 200.0).abs() < 0.01, "{center:?}");
+    }
+
+    #[test]
+    fn compare_uses_hole_and_dpr_and_clamps_pointer() {
+        let mut viewport = vp();
+        viewport.dpr = 1.5;
+        viewport.clip_rect = Some(ClipRect { x: 150.0, y: 75.0, width: 900.0, height: 600.0 });
+        assert_eq!(viewport.compare_fraction_at(400.0), Some(0.5));
+        assert_eq!(viewport.compare_css_x(0.5), Some(300.0));
+        assert_eq!(viewport.compare_fraction_at(-100.0), Some(0.0));
+        assert_eq!(viewport.compare_fraction_at(2000.0), Some(1.0));
+        assert!(viewport.compare_fraction_at(f32::NAN).is_none());
+        assert!(viewport.compare_handle_hit((400.0, 100.0), 0.5));
+        assert!(!viewport.compare_handle_hit((430.0, 100.0), 0.5));
+        assert!(!viewport.compare_handle_hit((400.0, 900.0), 0.5));
+        let [left, right] = viewport.compare_scissors(0.5).expect("有洞口");
+        assert_eq!(left, (150, 75, 450, 600));
+        assert_eq!(right, (600, 75, 450, 600));
+        assert_eq!(viewport.compare_scissors(0.0).unwrap()[0].2, 0);
+        assert_eq!(viewport.compare_scissors(1.0).unwrap()[1].2, 0);
+    }
+
+    #[test]
+    fn rotated_fit_and_crop_frame_share_the_same_css_hole() {
+        use crate::develop::geometry::CropRect;
+        let mut viewport = vp();
+        viewport.image_size = (4000, 3000);
+        viewport.dpr = 1.5;
+        viewport.clip_rect = Some(ClipRect { x: 150.0, y: 75.0, width: 900.0, height: 600.0 });
+        viewport.rotation = 45.0;
+        viewport.refit_rotated();
+        let bounds = (4000.0 * 45.0_f32.to_radians().cos().abs()
+            + 3000.0 * 45.0_f32.to_radians().sin().abs()) * viewport.zoom;
+        assert!(bounds <= 900.01, "旋转后整张原图要装进洞口");
+        let center = viewport.frame_pointer_normalized((400.0, 250.0), (4000, 3000)).unwrap();
+        assert!((center.0 - 0.5).abs() < 1e-5 && (center.1 - 0.5).abs() < 1e-5);
+        let rect = CropRect { x: 0.25, y: 0.25, width: 0.5, height: 0.5 };
+        let css = viewport.frame_rect_css(rect, (4000, 3000)).unwrap();
+        assert!((css.x + css.width / 2.0 - 300.0).abs() < 1e-4);
+        assert!((css.y + css.height / 2.0 - 200.0).abs() < 1e-4);
+        assert!(viewport.frame_pointer_normalized((0.0, 0.0), (4000, 3000)).is_none());
     }
 
     #[test]

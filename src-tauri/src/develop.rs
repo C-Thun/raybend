@@ -21,8 +21,9 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, Runtime};
 
 use raybend::develop::denoise::NrMethod;
+use raybend::develop::geometry::EditGeometry;
 use raybend::store::assets;
-use raybend::store::develop::{self, DevelopStack, IssueChoice, Setting};
+use raybend::store::develop::{self, DevelopStack, EditBase, IssueChoice, Setting};
 use raybend::store::marking::{ChangeSet, Op};
 use raybend::store::repository::{self, RepositoryState};
 use raybend::store::time;
@@ -38,6 +39,9 @@ use crate::source::blocking;
 #[serde(rename_all = "camelCase")]
 pub struct DevelopStackDto {
     pub values: BTreeMap<String, f64>,
+    /// latest 的唯一来源；旧 IPC 调用没有此项时沿用编辑器默认 RAW。
+    #[serde(default)]
+    pub source_base: Option<String>,
     pub curves: BTreeMap<String, Vec<[f32; 2]>>,
     /// 拍摄色温（K）—— 色温拉杆的基线，**跟着 issue 一起存**（见 `store::develop::DevelopStack`）
     #[serde(default)]
@@ -51,17 +55,22 @@ pub struct DevelopStackDto {
     /// 降噪方式（`null` = 快速档；`"high"` = BM3D）
     #[serde(default)]
     pub nr_method: Option<String>,
+    /// 无损裁切/旋转。
+    #[serde(default)]
+    pub geometry: Option<EditGeometry>,
 }
 
 impl From<DevelopStack> for DevelopStackDto {
     fn from(stack: DevelopStack) -> Self {
         Self {
             values: stack.params,
+            source_base: Some(stack.source_base.as_str().to_string()),
             curves: stack.curves,
             as_shot_k: stack.as_shot_k,
             lens_profile: stack.lens_profile,
             lens_enabled: stack.lens_enabled,
             nr_method: stack.nr_method.map(|method| method.as_str().to_string()),
+            geometry: stack.geometry,
         }
     }
 }
@@ -78,13 +87,18 @@ impl DevelopStackDto {
             })?),
             None => None,
         };
+        let source_base = self.source_base.as_deref().map_or(Ok(EditBase::Raw), |text| {
+            EditBase::parse(text).ok_or_else(|| format!("未知的 issue 源：{text}"))
+        })?;
         Ok(DevelopStack {
+            source_base,
             params: self.values,
             curves: self.curves,
             as_shot_k: self.as_shot_k,
             lens_profile: self.lens_profile,
             lens_enabled: self.lens_enabled,
             nr_method,
+            geometry: self.geometry,
         })
     }
 }
@@ -232,6 +246,8 @@ pub struct EditTargetDto {
     pub has_bitmap: bool,
     /// 有可用的 RAW 吗
     pub has_raw: bool,
+    /// 实际取到的源（某侧缺失时可能从另一侧回退）。
+    pub actual_base: Option<String>,
 }
 
 /// 解析编辑基准（缺省 RAW）。
@@ -272,10 +288,14 @@ pub async fn develop_edit_target<R: Runtime>(
                     .to_string_lossy()
                     .into_owned()
             });
+            let actual_base = path.as_deref().map(|path| {
+                EditBase::of_file(Path::new(path)).as_str().to_string()
+            });
             Ok(EditTargetDto {
                 path,
                 has_bitmap,
                 has_raw,
+                actual_base,
             })
         })
     })
@@ -465,7 +485,7 @@ fn diff_stack(asset_id: i64, before: &DevelopStack, after: &DevelopStack) -> Vec
     }
 
     // 编辑栈设置（镜头配置文件 / 启用开关 / 降噪方式）：三项都是「一个可空字符串」
-    for setting in [Setting::LensProfile, Setting::LensEnabled, Setting::NrMethod] {
+    for setting in [Setting::LensProfile, Setting::LensEnabled, Setting::NrMethod, Setting::SourceBase, Setting::Geometry] {
         let old = before.setting_value(setting);
         let new = after.setting_value(setting);
         if old != new {
@@ -548,4 +568,26 @@ pub async fn develop_reset<R: Runtime>(
         })
     })
     .await
+}
+
+#[cfg(test)]
+mod geometry_tests {
+    use super::*;
+    use raybend::develop::geometry::{CropRect, EditGeometry};
+
+    #[test]
+    fn geometry_confirmation_and_reset_are_single_reversible_settings() {
+        let baseline = DevelopStack::default();
+        let edited = DevelopStack {
+            geometry: Some(EditGeometry { rotation: 15.0,
+                crop: Some(CropRect { x: 0.2, y: 0.2, width: 0.6, height: 0.6 }), crop_ratio: None }),
+            ..DevelopStack::default()
+        };
+        let forward = diff_stack(7, &baseline, &edited);
+        assert!(matches!(forward.as_slice(), [Op::DevelopSetting { asset_id: 7, key, before: None, after: Some(_) }]
+            if key == "geometry"));
+        let backward = diff_stack(7, &edited, &baseline);
+        assert!(matches!(backward.as_slice(), [Op::DevelopSetting { asset_id: 7, key, before: Some(_), after: None }]
+            if key == "geometry"));
+    }
 }

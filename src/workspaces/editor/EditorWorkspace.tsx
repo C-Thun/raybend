@@ -26,6 +26,7 @@
  */
 
 import {
+  batch,
   createEffect,
   createMemo,
   createSignal,
@@ -39,6 +40,7 @@ import {
 import {
   bindEditorRenderer,
   commitDevelopStack,
+  confirmEditorTool,
   getDevelopEditTarget,
   getDevelopStack,
   getLensMatch,
@@ -56,26 +58,33 @@ import type {
   DevelopParamsPayload,
   EditorRenderState,
   EditorViewportIntent,
-  FileExif,
 } from "../../api/types.ts";
 import type { AssetItem, RepositoryView } from "../../api/types.ts";
-import { getHistogram, getThumbBytes, listRepositories, readFileExif } from "../../api/db.ts";
+import { getHistogram, getThumbBytes, getViewImage, listRepositories } from "../../api/db.ts";
 import { formatDateTime } from "../../lib/datetime.ts";
 import { browseSource } from "../../features/browse/grid-source.ts";
 import type { BrowseStore } from "../../features/browse/store.ts";
 import {
   EditorPanels,
+  createLensQuery,
   EditorViewport,
   EDITOR_ZOOM_STEP,
   LutPanel,
   createEditorStrip,
   editorEmptyKind,
+  editorVisibleRenderState,
   type EditorPhotoInfo,
   type EditorStore,
 } from "../../features/editor/index.ts";
 import { registerEditorActions, type EditorActions } from "../../features/editor/actions.ts";
-import { formatExposureBias } from "../../features/exif-strip/index.ts";
+import {
+  formatAperture, formatDimensions, formatExposureBias, formatFocalLength,
+  formatIso, formatShutter,
+  assetItemExif,
+  type SelectedFileMetadata,
+} from "../../features/exif-strip/index.ts";
 import { createThumbQueue } from "../../components/ui/thumb-queue.ts";
+import { ConfirmDialog } from "../../components/ui/Dialog.tsx";
 import { FilmStrip } from "../../components/ui/viewer/index.ts";
 import { photosFromSource, viewingInfoOf } from "../../components/ui/viewer/index.ts";
 import { buildFullscreenTarget } from "../../lib/fullscreen-target.ts";
@@ -94,6 +103,7 @@ export interface EditorWorkspaceProps {
   store: EditorStore;
   /** 浏览侧的 store（库 / 目录 / 清单 / 选择 / 锚点都在它手里） */
   browse: BrowseStore;
+  selectedMetadata: SelectedFileMetadata;
   /** browse 自己的胶片带尺寸档位（editor 用**自己那一份**，见 `lib/film-strip-prefs.ts`） */
   filmStripStep: number;
   onFilmStripStepChange: (step: number) => void;
@@ -106,14 +116,19 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
   const store = props.browse;
   const [repositories, setRepositories] = createSignal<RepositoryView[]>([]);
 
-  /**
-   * 胶片带与右栏「总览」**共用的**缩略图队列（同一份缓存 → 中列里立刻有图）。
-   * 换库时清空（不同库的同名相对路径会串图），卸载时也清。
-   */
+  /** 胶片带/网格小图仍共用 grid 队列；总览取完整的 Screen 图。 */
   const thumbs = createThumbQueue({
     load: async (path) => (await getThumbBytes(path, "grid")) ?? null,
   });
-  onCleanup(() => thumbs.clear());
+  const overviewImages = createThumbQueue({
+    load: (path) => getViewImage(path, "screen"),
+    concurrency: 2,
+    maxEntries: 24,
+  });
+  onCleanup(() => {
+    thumbs.clear();
+    overviewImages.clear();
+  });
 
   onMount(() => {
     void (async () => {
@@ -176,6 +191,20 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
   });
 
   const current = createMemo(() => strip.current());
+  // 只把稳定的 id 当作换图依赖：缩略图刷新会换 ViewerPhoto 对象引用。
+  const currentAssetId = createMemo(() => current()?.id ?? null);
+  const [compareReference, setCompareReference] = createSignal<"sooc" | "raw">("sooc");
+  let toolAssetId: string | null | undefined;
+  createEffect(() => {
+    const id = currentAssetId();
+    if (toolAssetId !== undefined && id !== toolAssetId) {
+      props.store.closeTool();
+      setCompareReference("sooc");
+    }
+    toolAssetId = id;
+  });
+  // 先读这张的 latest 来源和参数，再允许首帧显影；避免先解 RAW、随后因旧栈是 SOOC 又解一次。
+  const [developReadyAssetId, setDevelopReadyAssetId] = createSignal<string | null>(null);
 
   /* ── GPU 视口（M3-W2）：握手 / 轮询 / 换照片 / 动作槽 ─────────────
    *
@@ -190,6 +219,12 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
 
   /** 当前照片的**绝对路径**（锚点那张；没有就是 `null`）。 */
   const currentPath = createMemo(() => current()?.path ?? null);
+  createEffect(() => {
+    const path = currentPath();
+    if (path !== null) thumbs.request(path, true);
+  });
+  // 目标文件由 Rust 解析（RAW / SOOC）。状态轮询里旧照片的帧不能冒充它。
+  const [expectedPhotoPath, setExpectedPhotoPath] = createSignal<string | null>(null);
 
   /**
    * 状态回写：渲染线程说「画出来了」才把洞口切成透明。
@@ -201,18 +236,24 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
    */
   /** 编辑栈落库 / 读取的错误（**不静默**：画面还是对的，但改动会丢，必须让人看见）。 */
   const [developError, setDevelopError] = createSignal<string | null>(null);
+  const [resetOpen, setResetOpen] = createSignal(false);
 
   const applyRenderState = (state: EditorRenderState | null): void => {
-    props.store.setRenderState(state);
+    const expected = untrack(expectedPhotoPath);
+    const visibleState = editorVisibleRenderState(state, expected);
+    const currentFrame = visibleState?.paintedPath != null;
+    props.store.setRenderState(visibleState);
     props.store.setHoleActive(
-      state !== null && state.bound && state.ready && state.paintedPath !== null,
+      currentFrame && state !== null && state.bound && state.ready,
     );
     /*
      * 拍摄色温（K）由渲染线程从 RAW 元数据算出来 —— 它是**色温拉杆的基线**
      * （`AGENTS.md` §11.5：载入照片时标尺要挪到照片自己的色温上）。
      * 写进 store 之后，载荷里的 `asShotTemperature` 跟着变 ⇒ 参数自动重发一次。
      */
-    props.store.setAsShotTemperature(state?.asShotTemperature ?? null);
+    props.store.setAsShotTemperature(
+      state?.photoPath === expected ? (state?.asShotTemperature ?? null) : null,
+    );
   };
 
   /** 发一条视口意图（缩放 / 平移 / 适配）——失败只记控制台，不带崩界面。 */
@@ -279,7 +320,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
     send: (payload) => {
       // 镜头配置要后端读这张照片的拍摄参数 —— 载荷走的是**高频**那条路，
       // 所以这里只传两个标量（`null` = 还没有当前照片，后端就不解析镜头）
-      const assetId = current()?.id;
+      const assetId = currentAssetId();
       void setEditorParams(
         store.repositoryId(),
         assetId === null || assetId === undefined ? null : Number(assetId),
@@ -302,36 +343,132 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
     paramsSender.push(payload);
   });
 
+  const rotationSender = createLatestCoalescer<number>({
+    send: (degrees) => sendIntent({ kind: "setRotation", degrees }),
+  });
+  onCleanup(rotationSender.dispose);
+
+  /** 工具草稿仅驻留在 Rust；前端发送选项和原始指针事实。 */
+  createEffect(() => {
+    if (!rendererBound()) return;
+    const tool = props.store.tool();
+    rotationSender.dispose();
+    const initialRatio = untrack(() => {
+      if (tool !== "crop") return null;
+      const selected = props.store.cropRatio();
+      const size = props.store.renderState()?.originalImage;
+      return selected.id === "original" && size != null && size.height > 0
+        ? size.width / size.height : selected.ratio;
+    });
+    sendIntent({ kind: "setTool", tool: tool === "compare" ? null : tool, initialRatio });
+    if (tool === "rotate") props.store.setAngle(untrack(() => props.store.geometry()?.rotation ?? 0));
+  });
+  createEffect(() => {
+    if (!rendererBound() || props.store.tool() !== "rotate") return;
+    rotationSender.push(props.store.angle());
+  });
+  let seenToolRevision = 0;
+  createEffect(() => {
+    const state = props.store.renderState();
+    if (state === null) return;
+    const previousRevision = seenToolRevision;
+    seenToolRevision = state.toolRevision;
+    // 只认本次新增的拉直结果；退出期间也消费修订，旧快照不能覆盖刚进入的角度。
+    if (state.toolRevision <= previousRevision || props.store.tool() !== "rotate") return;
+    props.store.setAngle(state.rotation);
+  });
+  let lastCropKey = "";
+  createEffect(() => {
+    if (!rendererBound() || props.store.tool() !== "crop") { lastCropKey = ""; return; }
+    const selected = props.store.cropRatio();
+    const size = props.store.renderState()?.originalImage;
+    const ratio = selected.id === "original" && size != null && size.height > 0
+      ? size.width / size.height : selected.ratio;
+    const key = `${selected.id}:${ratio ?? "free"}:${size?.width ?? 0}:${size?.height ?? 0}`;
+    if (key === lastCropKey) return;
+    lastCropKey = key;
+    sendIntent({ kind: "setCropRatio", ratio });
+  });
+
+  createEffect(() => {
+    if (props.store.editBase() !== "raw") setCompareReference("sooc");
+  });
+  createEffect(() => {
+    if (!rendererBound() || props.store.tool() !== "compare") return;
+    sendIntent({ kind: "setReferenceBase", base: compareReference() });
+  });
+
+  /** 三工具互斥由 store 管；渲染线程只接收对比开关并保存分线。 */
+  createEffect(() => {
+    if (!rendererBound()) return;
+    const enabled = props.store.tool() === "compare";
+    sendIntent({ kind: "setCompare", enabled });
+  });
+
   /** 锚点一变就换纹理（渲染线程自己负责解码与两档切换）。 */
   createEffect(() => {
     if (!rendererBound()) return;
-    const assetId = current()?.id;
+    const assetId = currentAssetId();
     const repositoryId = store.repositoryId();
+    const editBase = props.store.editBase();
+    let active = true;
+    onCleanup(() => {
+      active = false;
+    });
+    setExpectedPhotoPath(null);
+    untrack(() => applyRenderState(props.store.renderState()));
     if (assetId === null || assetId === undefined || repositoryId === null) {
       void setEditorPhoto(null).catch(() => undefined);
       return;
     }
+    if (developReadyAssetId() !== assetId) return;
     /*
      * **编辑落在哪个文件上**（人类 2026-09-24）：默认 RAW，总览图下的 SOOC / RAW 按钮
      * 可切（`store.editBase()` 是这个 effect 的依赖 —— 切一下就重新解析并重解这张图）。
      * 哪个文件、路径怎么拼由 Rust 侧解析（`develop_edit_target`）—— 前端不拼路径。
      * 解析失败就退回当前显示的路径（至少还能看/能编辑位图）。
      */
-    void getDevelopEditTarget(repositoryId, Number(assetId), props.store.editBase())
+    void getDevelopEditTarget(repositoryId, Number(assetId), editBase)
       .then((target) => {
+        if (!active) return null;
         // 两侧可用性给总览的切换按钮用：缺文件的那一侧禁用，不让用户白点
         props.store.setEditBaseAvailable({
           bitmap: target?.hasBitmap ?? false,
           raw: target?.hasRaw ?? false,
         });
+        if (target?.actualBase && target.actualBase !== props.store.editBase()) {
+          props.store.setEditBase(target.actualBase);
+        }
         return target?.path ?? currentPath();
       })
-      .catch(() => currentPath())
-      .then((path) => setEditorPhoto(path))
+      .catch(() => (active ? currentPath() : null))
+      .then((path) => {
+        if (!active) return;
+        setExpectedPhotoPath(path);
+        untrack(() => applyRenderState(props.store.renderState()));
+        return setEditorPhoto(path);
+      })
+      .then(() => {
+        if (!active) return;
+        // 换图命令会作废上一张仍在解析的参数请求。照片入队后再补发
+        // 当前参数，保证「空栈的新图」也不会短暂套着上一张的调整。
+        paramsSender.push(props.store.developPayload());
+        paramsSender.flush();
+      })
       .catch((error: unknown) => {
+        if (!active) return;
         console.error("[editor] 换照片失败", error); // i18n-exempt: 控制台诊断
       });
   });
+
+  // IPC 调用的完成顺序可能与发起顺序不同；同一会话的编辑写入和 preview
+  // 生成串行，避免一次旧的松手结果在较新的版本之后写回 latest 缓存。
+  let persistTail: Promise<void> = Promise.resolve();
+  const persist = <T,>(task: () => Promise<T>): Promise<T> => {
+    const pending = persistTail.then(task, task);
+    persistTail = pending.then(() => undefined, () => undefined);
+    return pending;
+  };
 
   /**
    * **落库**（覆盖式）：松手 / 点重置时把当前载荷写进 catalog。
@@ -341,34 +478,42 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
    * 这一条只在**松手**时走一次。
    */
   const commitDevelop = (): void => {
-    const assetId = current()?.id;
+    const assetId = currentAssetId();
     const repositoryId = store.repositoryId();
     if (assetId === null || assetId === undefined || repositoryId === null) return;
+    if (developReadyAssetId() !== assetId) return;
     if (!props.store.developDirty()) return;
     const rev = props.store.developRev();
+    const path = currentPath();
     const payload = props.store.developPayload();
-    void commitDevelopStack(repositoryId, Number(assetId), {
+    const stack = {
       values: payload.values,
       curves: payload.curves,
-      // 色温基线跟着一起存（否则缩略图那条路会用另一个基线渲染出另一种颜色）
       asShotK: payload.asShotTemperature,
-      // 镜头配置 / 开关 / 降噪方式：编辑栈的一级，与参数同一份载荷
+      sourceBase: props.store.editBase(),
       lensProfile: payload.lensProfile,
       lensEnabled: payload.lensEnabled,
       nrMethod: payload.nrMethod,
+      geometry: payload.geometry,
+    };
+    void persist(async () => {
+      await commitDevelopStack(repositoryId, Number(assetId), stack);
+      if (path !== null) {
+        try {
+          await refreshDevelopPreview(path);
+        } catch (error) {
+          console.error("[editor] 预览图刷新失败", error); // i18n-exempt: 控制台诊断
+        }
+      }
     })
       .then(() => {
-        // 只标「已落库」：库里回读的那一份与刚发出去的一致（Rust 侧会回读一遍验证）。
-        // 撤销标签由 `browse` 的 undoState 统一显示（编辑与标记共用一套撤销栈），
-        // 这里不再存第二份。
-        props.store.markCommitted(rev);
-        /*
-         * 缩略图要重取：编辑结果变了，旧的那张（SOOC）不该再显示。
-         * **只失效当前这一张**（`refresh`）—— `clear()` 会把整条胶片带每一格的 URL 都回收，
-         * 松一次手整条带子全量重画（2026-09-24 人类报的「最严重」那一条）。
-         */
-        const path = currentPath();
-        if (path !== null) thumbs.refresh(path);
+        if (currentAssetId() === assetId && props.store.developRev() === rev) {
+          props.store.markCommitted(rev);
+        }
+        if (path !== null) {
+          thumbs.refresh(path);
+          overviewImages.refresh(path);
+        }
       })
       .catch((error: unknown) => {
         // 落库失败不静默：画面还是对的，但下次换照片会丢 —— 必须让人知道
@@ -377,16 +522,49 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
       });
   };
 
+  const confirmTool = (): void => {
+    rotationSender.flush();
+    const cropSetting = props.store.tool() === "crop"
+      ? { id: props.store.cropRatioId(), width: props.store.cropWidth(), height: props.store.cropHeight() }
+      : null;
+    void confirmEditorTool().then((geometry) => {
+      if (geometry === null) return;
+      const confirmed = {
+        ...geometry,
+        cropRatio: cropSetting ?? props.store.geometry()?.cropRatio ?? geometry.cropRatio ?? null,
+      };
+      batch(() => {
+        props.store.closeTool();
+        props.store.setGeometry(confirmed);
+      });
+      commitDevelop();
+    }).catch((error: unknown) => setDevelopError(String(error)));
+  };
+
   /** 重置全部：库里清空 + 参数回默认（一次点击两个动作，别只做一半）。 */
   const resetDevelop = (): void => {
-    const assetId = current()?.id;
+    const assetId = currentAssetId();
     const repositoryId = store.repositoryId();
-    props.store.resetParams();
     if (assetId === null || assetId === undefined || repositoryId === null) return;
-    void resetDevelopStack(repositoryId, Number(assetId)).catch((error: unknown) => {
-      console.error("[editor] 重置编辑栈失败", error); // i18n-exempt: 控制台诊断
-      setDevelopError(String(error));
-    });
+    if (developReadyAssetId() !== assetId) return;
+    props.store.resetParams();
+    props.store.setEditBase(props.store.editBaseAvailable().raw ? "raw" : "sooc");
+    const rev = props.store.developRev();
+    const path = currentPath();
+    void persist(() => resetDevelopStack(repositoryId, Number(assetId)))
+      .then(() => {
+        if (currentAssetId() === assetId && props.store.developRev() === rev) {
+          props.store.markCommitted(rev);
+        }
+        if (path !== null) {
+          thumbs.refresh(path);
+          overviewImages.refresh(path);
+        }
+      })
+      .catch((error: unknown) => {
+        console.error("[editor] 重置编辑栈失败", error); // i18n-exempt: 控制台诊断
+        setDevelopError(String(error));
+      });
   };
 
   /**
@@ -398,17 +576,25 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
   createEffect(() => {
     const tick = store.undoTick();
     if (tick === 0) return; // 初次挂载不必重读（下面的换照片分支会读）
-    const assetId = current()?.id;
+    const assetId = currentAssetId();
     const repositoryId = store.repositoryId();
+    const path = currentPath();
     if (assetId === null || assetId === undefined || repositoryId === null) return;
     void getDevelopStack(repositoryId, Number(assetId))
-      .then((stack) => {
-        if (stack === null) return;
+      .then(async (stack) => {
+        if (stack === null || currentAssetId() !== assetId) return;
         props.store.loadDevelop(stack.values, stack.curves, {
+          sourceBase: stack.sourceBase ?? "raw",
           lensProfile: stack.lensProfile ?? null,
           lensEnabled: stack.lensEnabled ?? null,
           nrMethod: stack.nrMethod === "high" ? "high" : null,
+          geometry: stack.geometry ?? null,
         });
+        if (path !== null) {
+          await refreshDevelopPreview(path);
+          thumbs.refresh(path);
+          overviewImages.refresh(path);
+        }
       })
       .catch((error: unknown) => {
         console.error("[editor] 撤销后重读编辑栈失败", error); // i18n-exempt: 控制台诊断
@@ -438,23 +624,39 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
     });
   };
 
-  let lastPhoto: { repositoryId: string; assetId: number; path: string | null } | null = null;
+  const lensQuery = createLensQuery(getLensMatch);
+  let autoAdjustRevision = 0;
+  onCleanup(() => { autoAdjustRevision++; lensQuery.dispose(); });
+
   createEffect(() => {
-    const assetId = current()?.id;
+    const assetId = currentAssetId();
     const repositoryId = store.repositoryId();
     const path = currentPath();
+    let active = true;
+    const previous =
+      assetId === null || assetId === undefined || repositoryId === null
+        ? null
+        : { repositoryId, assetId: Number(assetId), path };
     onCleanup(() => {
+      active = false;
       // 换照片 / 卸载：① 还没落库的改动存到**上一张**上；② 把 preview 更新到最后状态
-      const previous = lastPhoto;
       if (previous === null) return;
       if (untrack(() => props.store.developDirty())) {
         const payload = untrack(() => props.store.developPayload());
-        void commitDevelopStack(previous.repositoryId, previous.assetId, {
-          values: payload.values,
-          curves: payload.curves,
+        void persist(async () => {
+          await commitDevelopStack(previous.repositoryId, previous.assetId, {
+            values: payload.values,
+            curves: payload.curves,
+            asShotK: payload.asShotTemperature,
+            sourceBase: untrack(() => props.store.editBase()),
+            lensProfile: payload.lensProfile,
+            lensEnabled: payload.lensEnabled,
+            nrMethod: payload.nrMethod,
+            geometry: payload.geometry,
+          });
+          // 落库之后才刷新，preview 才能读到这份栈。
+          if (previous.path !== null) await refreshDevelopPreview(previous.path);
         })
-          // 落库**之后**才刷新：preview 读的就是库里的编辑栈（先刷新会拿到旧栈）
-          .then(() => refreshPreview(previous.path))
           .catch((error: unknown) => {
             console.error("[editor] 切换照片前落库失败", error); // i18n-exempt: 控制台诊断
           });
@@ -464,39 +666,76 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
       }
     });
 
-    if (assetId === null || assetId === undefined || repositoryId === null) {
-      lastPhoto = null;
-      return;
-    }
-    const id = Number(assetId);
-    lastPhoto = { repositoryId, assetId: id, path };
-    // 「进编辑」那个节点：把 preview 备好（缓存命中时只读一次，很便宜）
-    refreshPreview(path);
-    const revAtRequest = props.store.developRev();
-    void getDevelopStack(repositoryId, id)
+    setDevelopReadyAssetId(null);
+    autoAdjustRevision++;
+    lensQuery.select(previous?.repositoryId ?? null, previous?.assetId ?? null);
+    props.store.setAutoAdjusting(false);
+    if (previous === null) return;
+    const id = previous.assetId;
+    // 旧图的参数不能在新图载入期间继续被送进显影线程。
+    untrack(() => {
+      props.store.loadDevelop({}, {}, {});
+      props.store.setAsShotTemperature(null);
+      setDevelopError(null);
+    });
+    // 过渡帧会直接读现有 latest / SOOC / RAW 内嵌预览。此时不再并发生成
+    // latest：它会争用 RAW worker 和显影内存；最后状态在离开照片时再刷新。
+    // 只取一次快照，不能让 developRev 成为这个换图 effect 的依赖：
+    // 否则每次拖拉杆都会重新读栈、刷新 preview、甚至把正在编辑的图换掉。
+    const revAtRequest = untrack(() => props.store.developRev());
+    void getDevelopStack(previous.repositoryId, id)
       .then((stack) => {
-        if (stack === null) return;
+        if (!active) return;
         // 读的过程中用户已经动过：**不要**用库里那份盖掉他的改动
-        if (props.store.developRev() !== revAtRequest) return;
-        props.store.loadDevelop(stack.values, stack.curves, {
-          lensProfile: stack.lensProfile ?? null,
-          lensEnabled: stack.lensEnabled ?? null,
-          nrMethod: stack.nrMethod === "high" ? "high" : null,
-        });
+        if (stack !== null && props.store.developRev() === revAtRequest) {
+          props.store.loadDevelop(stack.values, stack.curves, {
+            sourceBase: stack.sourceBase ?? "raw",
+            lensProfile: stack.lensProfile ?? null,
+            lensEnabled: stack.lensEnabled ?? null,
+            nrMethod: stack.nrMethod === "high" ? "high" : null,
+            geometry: stack.geometry ?? null,
+          });
+        }
+        setDevelopReadyAssetId(previous.assetId.toString());
       })
       .catch((error: unknown) => {
+        if (!active) return;
         console.error("[editor] 读编辑栈失败", error); // i18n-exempt: 控制台诊断
         setDevelopError(String(error));
+        setDevelopReadyAssetId(previous.assetId.toString());
       });
-    // **镜头匹配**：库没就绪就是「加载中」，就绪后自动识别（匹配不到不猜）
-    void getLensMatch(repositoryId, id)
-      .then((match) => props.store.setLensMatch(match))
-      .catch((error: unknown) => {
-        // 镜头库出问题不该阻断编辑：下拉先空着
-        console.error("[editor] 读镜头匹配失败", error); // i18n-exempt: 控制台诊断
-        props.store.setLensMatch(null);
-      });
+
   });
+
+  const autoAdjust = async (): Promise<void> => {
+    if (!enabled() || props.store.autoAdjusting()) return;
+    const request = ++autoAdjustRevision;
+    const photo = currentAssetId();
+    const repository = store.repositoryId();
+    const base = props.store.editBase();
+    const chosen = props.store.lensProfile();
+    props.store.setAutoAdjusting(true);
+    try {
+      const result = await lensQuery.refresh();
+      if (request !== autoAdjustRevision || photo !== currentAssetId() ||
+          repository !== store.repositoryId() || base !== props.store.editBase() ||
+          chosen !== props.store.lensProfile()) return;
+      if (result === null) {
+        setDevelopError(t("editor.lens.autoFailed"));
+      } else if (result.detected === null) {
+        setDevelopError(t("editor.lens.notFound"));
+      } else {
+        batch(() => {
+          props.store.setLensProfile(result.detected!.key);
+          props.store.setLensEnabled(true);
+        });
+        setDevelopError(null);
+        commitDevelop();
+      }
+    } finally {
+      if (request === autoAdjustRevision) props.store.setAutoAdjusting(false);
+    }
+  };
 
   /** 胶片带里的上一张 / 下一张（看图命令 `viewer.prev` / `viewer.next` 走这里）。 */
   const stepAnchor = (delta: -1 | 1): void => {
@@ -530,11 +769,13 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
   const editorActionsImpl: EditorActions = {
     viewing: () => current() !== null && props.store.holeActive(),
     filmVisible: () => props.store.showsFilm(),
-    comparing: () => false,
+    comparing: () => props.store.tool() === "compare",
     cycleChrome: () => props.store.cycleTab(),
     resetChrome: () => props.store.resetChrome(),
     hasPhoto: () => current() !== null,
-    resetDevelop,
+    resetDevelop: () => setResetOpen(true),
+    commitDevelop,
+    autoAdjust: () => void autoAdjust(),
     fullscreenTarget,
   };
 
@@ -567,56 +808,59 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
    * 让拉杆能拖、拖完又被后端跳过，比禁用更糟。
    */
   const locked = (): boolean => {
-    const id = current()?.id;
+    const id = currentAssetId();
     if (id === null || id === undefined) return false;
     return (store.itemById(Number(id))?.lockLevel ?? 0) >= 2;
   };
 
-  const enabled = (): boolean => current() !== null && !locked();
+  const enabled = (): boolean =>
+    current() !== null && developReadyAssetId() === currentAssetId() && !locked();
 
-  /** 右栏「信息」页签的**文件级 EXIF**（按需读文件头，不落库；毫秒级） */
-  const [fileExif, setFileExif] = createSignal<FileExif | null>(null);
+  createEffect(() => {
+    const item = store.anchorItem();
+    props.selectedMetadata.select(currentPath(), item === null ? null : assetItemExif(item));
+  });
   createEffect(() => {
     const path = currentPath();
-    if (path === null) {
-      setFileExif(null);
-      return;
+    const lens = lensQuery.state().data?.lensName;
+    if (path !== null && path === props.selectedMetadata.path() && lens?.trim()) {
+      props.selectedMetadata.enrich({ lens });
     }
-    let cancelled = false;
-    void readFileExif(path)
-      .then((file) => {
-        if (!cancelled) setFileExif(file);
-      })
-      .catch(() => {
-        if (!cancelled) setFileExif(null);
-      });
-    onCleanup(() => {
-      cancelled = true;
-    });
   });
 
   /**
    * 「信息」页签的字段（人类 2026-09-24 的口径）：
-   * **只收 flowbar 没有的**（机型/镜头/ISO/快门/光圈/焦距/尺寸/格式都在 flowbar 右侧）；
-   * 与调节最紧的色温置顶。格式化只走 `exif-strip` / `lib/datetime` 的现成实现。
+   * 展示拍摄时文件中的原始信息；色温只用拍摄基线，不混入当前调整值。
+   * 格式化只走 `exif-strip` / `lib/datetime` 的现成实现。
    */
   const info = createMemo<EditorPhotoInfo | null>(() => {
     const item: AssetItem | null = store.anchorItem();
     if (item === null) return null;
+    const exif = props.selectedMetadata.file();
     const baseline = props.store.asShotTemperature();
-    const current = props.store.paramValue("temperature");
-    const taken = fileExif()?.takenAtMs ?? null;
-    const offset = fileExif()?.takenAtOffsetMin;
+    const taken = exif?.takenAtMs ?? null;
+    const offset = exif?.takenAtOffsetMin;
     return {
       fileName: item.fileName,
       relativePath: item.relPath,
+      tags: exif?.tags ?? [],
       temperatureBaseline: baseline === null ? null : `${Math.round(baseline)} K`,
-      temperatureCurrent: `${Math.round(current)} K`,
-      exposureBias: formatExposureBias(fileExif()?.exposureBiasEv ?? null) ?? null,
-      takenAt:
-        taken === null
-          ? null
-          : formatDateTime(taken, offset === null ? undefined : offset, locale()),
+      exposureBias: formatExposureBias(exif?.exposureBiasEv ?? null) ?? null,
+      iso: formatIso(exif?.iso ?? undefined) ?? null,
+      shutter: formatShutter(exif?.exposureMs == null ? undefined : exif.exposureMs / 1000) ?? null,
+      aperture: formatAperture(exif?.fNumber ?? undefined) ?? null,
+      focal: formatFocalLength(exif?.focalMm ?? undefined) ?? null,
+      cameraMake: exif?.cameraMake ?? null,
+      cameraModel: exif?.cameraModel ?? null,
+      lens: exif?.lens ?? lensQuery.state().data?.lensName ?? null,
+      dimensions: formatDimensions(exif?.width ?? undefined, exif?.height ?? undefined) ?? null,
+      orientation: exif?.orientation == null ? null : String(exif.orientation),
+      takenAt: taken === null ? null : formatDateTime(taken, offset === null ? undefined : offset, locale()),
+      datetimeRaw: exif?.datetimeRaw ?? null,
+      software: exif?.software ?? null,
+      gps: exif?.gpsLat == null || exif?.gpsLon == null ? null : `${exif.gpsLat.toFixed(5)}, ${exif.gpsLon.toFixed(5)}`,
+      format: exif?.ext?.toUpperCase() ?? null,
+      kind: exif?.kind ?? null,
     };
   });
 
@@ -692,6 +936,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
             empty={empty()}
             hasPhoto={current() !== null}
             renderState={props.store.renderState}
+            tool={props.store.tool}
             onOpenImport={props.onOpenImport}
             onRetry={startRenderer}
           />
@@ -710,7 +955,18 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
           </Show>
 
           {/* 状态栏：与看图态**同一条**（`PhotoStatusBar`），只换内容 */}
-          <PhotoStatusBar info={viewingInfoOf(current())} />
+          <PhotoStatusBar info={viewingInfoOf(current())}
+            compare={props.store.tool() === "compare" ? {
+              reference: t(props.store.renderState()?.referenceBase === "sooc" ? "editor.base.sooc" : "editor.base.raw"),
+              result: t("editor.compare.result"),
+              choices: [
+                { value: "sooc", label: t("editor.base.sooc"), selected: props.store.renderState()?.referenceBase === "sooc", disabled: !props.store.editBaseAvailable().bitmap },
+                { value: "raw", label: t("editor.base.raw"), selected: props.store.renderState()?.referenceBase === "raw", disabled: props.store.editBase() !== "raw" },
+              ],
+              onReferenceChange: (value: string) => {
+                if (value === "sooc" || value === "raw") setCompareReference(value);
+              },
+            } : undefined} />
         </main>
 
         {/* 右列：固定宽（`--panel-w-right`，所有工作流通用），三个页签组 */}
@@ -727,10 +983,12 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
             enabled={enabled()}
             current={current()}
             info={info()}
-            thumbs={thumbs}
+            lensQuery={lensQuery.state()}
+            onRefreshLens={() => { void lensQuery.refresh(); }}
+            overviewImages={overviewImages}
             loadHistogram={loadHistogram}
             onCommit={commitDevelop}
-            onReset={resetDevelop}
+            onToolConfirm={confirmTool}
             error={developError()}
             locked={locked()}
             zoom={props.store.renderState()?.zoom ?? null}
@@ -739,6 +997,14 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
           />
         </aside>
       </div>
+      <ConfirmDialog
+        open={resetOpen()}
+        title={t("editor.reset.title")}
+        message={t("editor.reset.confirm")}
+        confirmLabel={t("editor.reset.action")}
+        onCancel={() => setResetOpen(false)}
+        onConfirm={() => { setResetOpen(false); resetDevelop(); }}
+      />
     </div>
   );
 }

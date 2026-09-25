@@ -135,11 +135,19 @@ export interface PhotoCount {
   truncated: boolean;
 }
 
-/** 一个文件的 EXIF（喂 `flowbar` 的图片信息区）。 */
+/** 一条原始 EXIF/TIFF 标签（仅选中的文件按需读取）。 */
+export interface ExifTag { ifd: string; tag: string; value: string; }
+
+/** 一个文件的 EXIF（flowbar 使用精选字段；信息面板使用全部标签）。 */
 export interface FileExif {
+  tags: ExifTag[];
   cameraMake: string | null;
   cameraModel: string | null;
   lens: string | null;
+  software: string | null;
+  gpsLat: number | null;
+  gpsLon: number | null;
+  datetimeRaw: string | null;
   focalMm: number | null;
   fNumber: number | null;
   /** 快门时间（**毫秒**；界面自己换算成 `1/125s` 这种写法）。 */
@@ -717,6 +725,8 @@ export interface DevelopEditTarget {
   hasBitmap: boolean;
   /** 有可用的 RAW 吗 */
   hasRaw: boolean;
+  /** 实际选到的文件一侧；缺源回退时要与按钮和 issue 来源一致。 */
+  actualBase: DevelopEditBase | null;
 }
 
 /**
@@ -741,12 +751,13 @@ export interface DevelopParamsPayload {
    * 缺省 `false`（老调用方 / 单测不传这个字段也是合法的）。
    */
   interactive: boolean;
-  /** 镜头配置文件（`null` = 自动识别；`"none"` = 显式关掉；否则是 `maker|model`） */
+  /** 镜头配置文件（`null` = 未选择；`"none"` = 显式关掉；否则是 `maker|model`） */
   lensProfile: string | null;
   /** 配置文件那一半的开关（`null` = 默认开；**手动三根拉杆不受它影响**） */
   lensEnabled: boolean | null;
   /** 降噪方式（`null` = 快速档） */
   nrMethod: DevelopNrMethod | null;
+  geometry: EditGeometry | null;
 }
 
 /** 降噪方式（编辑栈的一级；`"high"` = BM3D 高质量档，后台任务）。 */
@@ -763,28 +774,48 @@ export interface LensProfile {
   model: string;
   /** 投影类型是矩形吗（鱼眼 / 全景的**几何**校正本轮不做，界面要写明） */
   rectilinear: boolean;
+  focalMin: number;
+  focalMax: number;
 }
 
 /** 这张照片的镜头匹配状态（自动识别 + 下拉候选）。 */
 export interface LensMatch {
-  /** 库里就绪了吗（`false` ⇒ 界面显示「加载中」，不是「没匹配到」） */
+  /** 成功返回时库已就绪；请求失败与等待状态由独立请求状态表达。 */
   ready: boolean;
   /** 自动识别到的配置文件（没有就是 `null` —— **不猜**） */
   detected: LensProfile | null;
   /** EXIF 里的镜头字符串（拿它解释「为什么没匹配到」） */
   lensName: string | null;
+  focalMm: number | null;
   /** 下拉候选（自动匹配的排第一；库里没有就空） */
   candidates: LensProfile[];
+  warnings: string[];
 }
 
 /** 编辑栈里**不是参数也不是曲线**的那几项（落库与回读都用这个形状）。 */
+/** W5 无损成片几何；crop 是按原图宽高归一化的旋转后水平画框。 */
+export interface EditGeometry {
+  rotation: number;
+  crop: { x: number; y: number; width: number; height: number } | null;
+  /** 上次确认裁切时的面板配置；旧记录没有此字段。 */
+  cropRatio?: { id: string; width: number; height: number } | null;
+}
+
 export interface DevelopSettings {
+  sourceBase?: DevelopEditBase;
   lensProfile?: string | null;
   lensEnabled?: boolean | null;
   nrMethod?: DevelopNrMethod | null;
+  geometry?: EditGeometry | null;
 }
 
 export interface EditorRenderState {
+  nrPending: boolean;
+  nrError: string | null;
+  referenceReady: boolean;
+  referenceBase: "sooc" | "raw" | null;
+  comparing: boolean;
+  compareLineCss: number | null;
   /** 会话在（渲染线程活着） */
   bound: boolean;
   /** 渲染器建起来了（surface + 设备齐了） */
@@ -804,9 +835,14 @@ export interface EditorRenderState {
   paintedPath: string | null;
   /** 图像尺寸（图像像素） */
   image: SizeView | null;
+  originalImage: SizeView | null;
+  toolBoxCss: RectView | null;
+  toolRevision: number;
   tier: EditorImageTier | null;
   wantedTier: EditorImageTier | null;
   origin: EditorPixelOrigin | null;
+  /** 非交互显影帧的直方图；拖动时保持上次统计。 */
+  histogram: import("../lib/histogram.ts").HistogramCounts | null;
   /** **拍摄色温估计**（K）—— 色温拉杆的基线（`AGENTS.md` §11.5）；读不到就是 `null` */
   asShotTemperature: number | null;
   /** 收到过几次显影参数（与 `appliedParamsRev` 比就知道「我发的那次算完没有」） */
@@ -858,7 +894,14 @@ export type EditorViewportIntent =
   | { kind: "fit"; mode: "fit" | "fill" | "oneToOne" | "free" }
   | { kind: "toggleFit" }
   | { kind: "reset" }
-  | { kind: "hitTest"; x: number; y: number };
+  | { kind: "hitTest"; x: number; y: number }
+  | { kind: "setCompare"; enabled: boolean }
+  | { kind: "comparePointer"; phase: "down" | "move" | "up" | "cancel"; x: number; y: number }
+  | { kind: "setTool"; tool: "crop" | "rotate" | null; initialRatio: number | null }
+  | { kind: "setReferenceBase"; base: "sooc" | "raw" }
+  | { kind: "setCropRatio"; ratio: number | null }
+  | { kind: "setRotation"; degrees: number }
+  | { kind: "toolPointer"; phase: "down" | "move" | "up" | "cancel"; x: number; y: number };
 
 /* ══════════════════════════════════════════════════════════════
  * 全屏看图（另一扇窗口，沉浸式）

@@ -63,16 +63,21 @@
   "FileExif": [
     "cameraMake",
     "cameraModel",
+    "datetimeRaw",
     "exposureBiasEv",
     "exposureMs",
     "ext",
     "fNumber",
     "focalMm",
+    "gpsLat",
+    "gpsLon",
     "height",
     "iso",
     "kind",
     "lens",
     "orientation",
+    "software",
+    "tags",
     "takenAtMs",
     "takenAtOffsetMin",
     "takenAtSource",
@@ -295,6 +300,12 @@
     "viewportCss"
   ],
   "EditorRenderState": [
+    "nrPending",
+    "nrError",
+    "referenceReady",
+    "referenceBase",
+    "comparing",
+    "compareLineCss",
     "adapter",
     "appliedParamsRev",
     "asShotTemperature",
@@ -307,10 +318,14 @@
     "dpr",
     "drawnFrames",
     "fitMode",
+    "histogram",
     "history",
     "holeCss",
     "holePhysical",
     "image",
+    "originalImage",
+    "toolBoxCss",
+    "toolRevision",
     "lastError",
     "lastHit",
     "origin",
@@ -360,5 +375,21 @@
     "renamed",
     "returned",
     "scanned"
+  ],
+  "LensProfile": [
+    "key",
+    "maker",
+    "model",
+    "rectilinear",
+    "focalMin",
+    "focalMax"
+  ],
+  "LensMatch": [
+    "ready",
+    "detected",
+    "lensName",
+    "focalMm",
+    "candidates",
+    "warnings"
   ]
 }

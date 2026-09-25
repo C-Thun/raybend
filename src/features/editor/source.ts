@@ -11,6 +11,7 @@
  */
 
 import type { FilmStripViewer, ViewerPhoto } from "../../components/ui/viewer/index.ts";
+import type { EditorRenderState } from "../../api/types.ts";
 
 /** 一些照片 + 当前那张的下标（胶片带要的最小形状）。 */
 export interface EditorStripDeps {
@@ -178,4 +179,23 @@ export function editorViewportNotice(
   if (!input.state.bound || !input.state.ready) return "init";
   if (input.state.decode === "loading") return "loading";
   return "init";
+}
+
+
+/**
+ * 轮询结果可能晚于用户选图。只有当前目标真的画过，才能把 WebView 洞口
+ * 设为透明；旧图即使在 GPU 里也不能冒充新图并压掉「正在载入」提示。
+ */
+export function editorVisibleRenderState(
+  state: EditorRenderState | null,
+  expectedPath: string | null,
+): EditorRenderState | null {
+  if (state === null) return null;
+  if (expectedPath !== null && state.paintedPath === expectedPath) return state;
+  return {
+    ...state,
+    paintedPath: null,
+    histogram: state.photoPath === expectedPath ? state.histogram : null,
+    decode: state.photoPath === expectedPath ? state.decode : "loading",
+  };
 }

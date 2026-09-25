@@ -14,10 +14,10 @@
  * 编辑不另造第二份选择模型，否则「编辑里换一张、回浏览还是旧的」这种 bug 必来。
  *
  * ⚠️ W1 的边界（写在最显眼处，别当遗漏）：参数拉杆只改**数值**，不改画面；
- * 裁切 / 旋转 / 对比只切**模式与右栏控制块**，画布上的框线在 W5。
+ * 裁切 / 旋转 / 对比的模式互斥由这里管理；画布草稿由 Rust 渲染线程持有。
  */
 
-import { createSignal } from "solid-js";
+import { batch, createSignal } from "solid-js";
 
 import type {
   DevelopEditBase,
@@ -25,7 +25,7 @@ import type {
   DevelopParamsPayload,
   DevelopSettings,
   EditorRenderState,
-  LensMatch,
+  EditGeometry,
 } from "../../api/types.ts";
 import { t } from "../../i18n/index.ts";
 
@@ -72,6 +72,11 @@ export type CurveChannel = "rgb" | "r" | "g" | "b";
 
 export const CURVE_CHANNELS: readonly CurveChannel[] = ["rgb", "r", "g", "b"];
 
+/** 轮询得到相同拍摄色温时，保留参数对象身份，避免空闲显影重复提交。 */
+export function withTemperatureBaseline(current: Record<string, number>, baseline: number): Record<string, number> {
+  return current.temperature === baseline ? current : { ...current, temperature: baseline };
+}
+
 export interface EditorStoreDeps {
   /** 偏好读写（默认真 `localStorage`；测试里注入假的） */
   readPrefs?: () => EditorPrefs;
@@ -106,14 +111,14 @@ export interface EditorStore {
 
   /* ── 裁切控制块 ─────────────────────────────────────── */
   cropRatioId: () => string;
-  /** 比例项（含「自由」「原始比例」与固定比例；自定义由手输产生） */
+  /** 比例项（含「自由」「原始比例」与固定比例；自定义始终可选） */
   cropRatio: () => CropRatio;
   setCropRatioId: (id: string) => void;
   /** 反转比例（4:3 ⇄ 3:4） */
   flipCropRatio: () => void;
   /** 取消比例限制 → 自由 */
   unlinkCropRatio: () => void;
-  /** 横 / 纵向比例输入（手输之后比例选项自动变成「自定义」） */
+  /** 横 / 纵向比例输入（有效输入即时切换「自定义」） */
   cropWidth: () => number;
   cropHeight: () => number;
   setCropSize: (width: number, height: number) => void;
@@ -166,6 +171,9 @@ export interface EditorStore {
   editBaseAvailable: () => { bitmap: boolean; raw: boolean };
   /** 工作区拿到 `develop_edit_target` 的结果后写进来 */
   setEditBaseAvailable: (available: { bitmap: boolean; raw: boolean }) => void;
+  /** 已确认的成片几何；草稿由 Rust 视口持有，确认后才写这里。 */
+  geometry: () => EditGeometry | null;
+  setGeometry: (geometry: EditGeometry | null) => void;
   /** 换照片：把库里读回来的一份编辑栈灌进来（并把它当成「已落库」） */
   loadDevelop: (
     values: Record<string, number>,
@@ -174,7 +182,7 @@ export interface EditorStore {
   ) => void;
 
   /* ── 镜头 / 降噪方式（M3-W4）──────────────────────── */
-  /** 镜头配置文件（`null` = 自动识别；`"none"` = 显式关掉；否则是 `maker|model`） */
+  /** 镜头配置文件（`null` = 未选择；`"none"` = 显式关掉；否则是 `maker|model`） */
   lensProfile: () => string | null;
   setLensProfile: (key: string | null) => void;
   /** 配置文件那一半的开关（`null` = 默认开；**手动三根拉杆不受它影响**） */
@@ -183,9 +191,9 @@ export interface EditorStore {
   /** 降噪方式（`null` = 快速档） */
   nrMethod: () => DevelopNrMethod | null;
   setNrMethod: (method: DevelopNrMethod | null) => void;
-  /** 当前照片用的镜头（自动识别的结果或用户选的；由工作区写进来） */
-  lensMatch: () => LensMatch | null;
-  setLensMatch: (match: LensMatch | null) => void;
+  /** 自动调整的后台请求状态。 */
+  autoAdjusting: () => boolean;
+  setAutoAdjusting: (busy: boolean) => void;
 
   /* ── 曲线 ───────────────────────────────────────────── */
   curveChannel: () => CurveChannel;
@@ -272,10 +280,23 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
   const [tool, setTool] = createSignal<EditorTool | null>(null);
   const [cropRatioId, setCropRatioId] = createSignal<string>("free");
   const [cropSize, setCropSizeSignal] = createSignal({ width: 3, height: 2 });
+  const restoreCropRatio = (saved: EditGeometry | null): void => {
+    const setting = saved?.cropRatio;
+    const valid = setting !== null && setting !== undefined
+      && (setting.id === "custom" || CROP_RATIOS.some((item) => item.id === setting.id))
+      && Number.isFinite(setting.width) && Number.isFinite(setting.height)
+      && setting.width > 0 && setting.height > 0
+      && setting.width / setting.height >= 0.01 && setting.width / setting.height <= 100;
+    setCropRatioId(valid ? setting.id : "free");
+    setCropSizeSignal(valid
+      ? { width: setting.width, height: setting.height }
+      : { width: 3, height: 2 });
+  };
   const [angle, setAngleSignal] = createSignal(0);
   const [params, setParams] = createSignal<Record<string, number>>(defaultParams());
   const [curveChannel, setCurveChannel] = createSignal<CurveChannel>("rgb");
   const [asShot, setAsShot] = createSignal<number | null>(null);
+  const [temperatureExplicit, setTemperatureExplicit] = createSignal(false);
   const [curves, setCurves] = createSignal<Record<CurveChannel, CurvePoint[]>>(
     identityCurves(),
   );
@@ -284,10 +305,25 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
   const [paramDragging, setParamDragging] = createSignal(false);
   const [editBase, setEditBase] = createSignal<DevelopEditBase>("raw");
   const [editBaseAvailable, setEditBaseAvailable] = createSignal({ bitmap: false, raw: false });
-  const [lensProfile, setLensProfileSignal] = createSignal<string | null>(null);
-  const [lensEnabled, setLensEnabledSignal] = createSignal<boolean | null>(null);
+  type LensSide = { profile: string | null; enabled: boolean | null };
+  const emptyLensSides = (): Record<DevelopEditBase, LensSide> => ({
+    raw: { profile: null, enabled: null },
+    sooc: { profile: null, enabled: null },
+  });
+  const [lensSides, setLensSides] = createSignal(emptyLensSides());
+  const lensProfile = (): string | null => lensSides()[editBase()].profile;
+  const lensEnabled = (): boolean | null => lensSides()[editBase()].enabled;
+  const updateLensSide = (change: Partial<LensSide>): void => {
+    const base = editBase();
+    setLensSides((current) => ({
+      ...current,
+      [base]: { ...current[base], ...change },
+    }));
+    bumpDevelop();
+  };
+  const [geometry, setGeometrySignal] = createSignal<EditGeometry | null>(null);
   const [nrMethod, setNrMethodSignal] = createSignal<DevelopNrMethod | null>(null);
-  const [lensMatch, setLensMatch] = createSignal<LensMatch | null>(null);
+  const [autoAdjusting, setAutoAdjusting] = createSignal(false);
   const [renderState, setRenderState] = createSignal<EditorRenderState | null>(null);
   const [holeActive, setHoleActive] = createSignal(false);
 
@@ -339,6 +375,7 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
       lensProfile: lensProfile(),
       lensEnabled: lensEnabled(),
       nrMethod: nrMethod(),
+      geometry: geometry(),
     };
   };
 
@@ -381,8 +418,11 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
 
     tool,
     toggleTool: (next) => {
-      // 三工具互斥：按下的那个亮、其余灭；再按同一个 = 退出（`.pd` 明确）
-      setTool((current) => (current === next ? null : next));
+      // 每次重进裁切都从已确认记录恢复；取消的草稿不能污染下一次。
+      batch(() => {
+        if (next === "crop" && tool() !== "crop") restoreCropRatio(geometry());
+        setTool((current) => (current === next ? null : next));
+      });
     },
     closeTool: () => setTool(null),
 
@@ -413,34 +453,53 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
     cropWidth: () => cropSize().width,
     cropHeight: () => cropSize().height,
     setCropSize: (width, height) => {
-      // 手输即「自定义」（`.pd`：用户手动输入后上面的比例选项自动变成自定义）
-      setCropSizeSignal({ width, height });
+      // 输入立即进入自定义；非法/暂未完成的数字保留最近有效的宽高。
       setCropRatioId("custom");
+      if (![width, height].every((value) => Number.isFinite(value) && value > 0)) return;
+      if (width / height < 0.01 || width / height > 100) return;
+      setCropSizeSignal({ width, height });
     },
 
     angle,
     setAngle: (degrees) => setAngleSignal(degrees),
     resetAngle: () => setAngleSignal(0),
 
-    paramValue: (id) => params()[id] ?? PARAM_DEFAULTS[id] ?? 0,
+    paramValue: (id) => id === "temperature" && !temperatureExplicit()
+      ? paramBaseline(id)
+      : params()[id] ?? PARAM_DEFAULTS[id] ?? 0,
     paramBaseline,
     setParam: (id, value) => {
+      if (id === "temperature") setTemperatureExplicit(true);
       setParams((current) => ({ ...current, [id]: value }));
       bumpDevelop();
     },
     resetParam: (id) => {
+      if (id === "temperature") setTemperatureExplicit(false);
       setParams((current) => ({ ...current, [id]: paramBaseline(id) }));
       bumpDevelop();
     },
     resetParams: () => {
-      setParams(defaultParams());
-      setCurves(identityCurves());
-      bumpDevelop();
+      batch(() => {
+        setTemperatureExplicit(false);
+        setParams({ ...defaultParams(), temperature: paramBaseline("temperature") });
+        setCurves(identityCurves());
+        setLensSides(emptyLensSides());
+        setNrMethodSignal(null);
+        setGeometrySignal(null);
+        restoreCropRatio(null);
+        bumpDevelop();
+      });
     },
     asShotTemperature: asShot,
     setAsShotTemperature: (kelvin) => {
       // 只换基线：**不抬 rev**（这不是用户的改动，标 dirty 会让「松手落库」误判）
-      setAsShot((current) => (current === kelvin ? current : kelvin));
+      batch(() => {
+        setAsShot((current) => (current === kelvin ? current : kelvin));
+        if (!temperatureExplicit()) {
+          // 状态轮询反复读到相同值时不提交显影；真正变化时两路信号合为一次更新。
+          setParams((current) => withTemperatureBaseline(current, paramBaseline("temperature")));
+        }
+      });
     },
     developPayload,
     developRev,
@@ -451,14 +510,27 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
     beginParamDrag: () => setParamDragging(true),
     endParamDrag: () => setParamDragging(false),
     editBase,
-    setEditBase: (base) => setEditBase(base),
+    setEditBase: (base) => {
+      if (base === editBase()) return;
+      batch(() => {
+        setEditBase(base);
+        bumpDevelop();
+      });
+    },
     editBaseAvailable,
     setEditBaseAvailable,
+    geometry,
+    setGeometry: (next) => {
+      batch(() => { setGeometrySignal(next); restoreCropRatio(next); bumpDevelop(); });
+    },
     loadDevelop: (values, loadedCurves, settings) => {
+      batch(() => {
       // 换照片时把「拖动中」清掉：上一次拖到一半就换了图的话，
       // 这个标志会一直挂在 true 上 —— 那样后面的渲染全被压成预览档（画面永远偏软）。
       setParamDragging(false);
       const next = defaultParams();
+      setTemperatureExplicit(Object.prototype.hasOwnProperty.call(values, "temperature"));
+      next.temperature = paramBaseline("temperature");
       for (const [id, value] of Object.entries(values)) {
         if (typeof value === "number" && Number.isFinite(value)) next[id] = value;
       }
@@ -471,34 +543,37 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
         }
       }
       setCurves(merged);
-      // 镜头 / 降噪方式：库里没有就回到默认（`null` = 自动识别 / 默认开 / 快速档）
-      setLensProfileSignal(settings?.lensProfile ?? null);
-      setLensEnabledSignal(settings?.lensEnabled ?? null);
+      // 镜头 / 降噪方式：库里没有就回到默认（`null` = 未选择 / 默认开 / 快速档）
+      const base = settings?.sourceBase ?? "raw";
+      const sides = emptyLensSides();
+      sides[base] = {
+        profile: settings?.lensProfile ?? null,
+        enabled: settings?.lensEnabled ?? null,
+      };
+      setLensSides(sides);
+      setEditBase(base);
       setNrMethodSignal(settings?.nrMethod ?? null);
+      setGeometrySignal(settings?.geometry ?? null);
+      restoreCropRatio(settings?.geometry ?? null);
       // 从库里读回来的就是「已落库」的状态
       const nextRev = developRev() + 1;
       setDevelopRev(nextRev);
       setCommittedRev(nextRev);
+      });
     },
 
     curveChannel,
     lensProfile,
-    setLensProfile: (key) => {
-      setLensProfileSignal(key);
-      bumpDevelop();
-    },
+    setLensProfile: (key) => updateLensSide({ profile: key }),
     lensEnabled,
-    setLensEnabled: (enabled) => {
-      setLensEnabledSignal(enabled);
-      bumpDevelop();
-    },
+    setLensEnabled: (enabled) => updateLensSide({ enabled }),
     nrMethod,
     setNrMethod: (method) => {
       setNrMethodSignal(method);
       bumpDevelop();
     },
-    lensMatch,
-    setLensMatch,
+    autoAdjusting,
+    setAutoAdjusting,
 
     setCurveChannel,
     curvePoints: (channel) => curves()[channel],

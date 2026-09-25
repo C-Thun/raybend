@@ -17,9 +17,9 @@ export type { EditorPanelsProps, EditorPhotoInfo } from "./panels.tsx";
 
 export { LutPanel, LUT_PANEL_WIDTH } from "./lut-panel.tsx";
 
-export { EditorPanelToggles, EditorToolbar } from "./toolbar.tsx";
+export { EditorPanelToggles, EditorResetTool, EditorToolbar } from "./toolbar.tsx";
 
-export { createEditorStrip, editorEmptyKind, editorEmptyOffersImport, editorViewportNotice } from "./source.ts";
+export { createEditorStrip, editorEmptyKind, editorEmptyOffersImport, editorViewportNotice, editorVisibleRenderState } from "./source.ts";
 export type {
   EditorEmptyKind,
   EditorStripDeps,
@@ -31,3 +31,6 @@ export { GROUP_LABEL_KEY, PARAM_GROUPS, paramsInGroup, PARAMS } from "./params.t
 export type { ParamGroup, ParamSpec } from "./params.ts";
 
 export { PendingNote } from "./parts.tsx";
+
+export { createLensQuery } from "./lens-query.ts";
+export type { LensQuery, LensQueryState } from "./lens-query.ts";

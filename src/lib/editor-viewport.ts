@@ -42,6 +42,7 @@ export interface EditorViewportPayload {
    * 读不到 / 空串 / 解不开时**省略这个字段**，Rust 用兜底色并在状态里标出来。
    */
   backdrop?: string;
+  overlayColors?: [string, string, string, string];
 }
 
 /** CSS 矩形（`getBoundingClientRect()` 的四个数）。 */
@@ -132,6 +133,7 @@ export function editorViewportPayload(input: {
   dpr: number;
   viewport: { width: number; height: number };
   backdrop?: string | null;
+  overlayColors?: [string, string, string, string];
 }): EditorViewportPayload | null {
   const { rect, dpr, viewport, backdrop } = input;
   if (!finite(rect.x) || !finite(rect.y) || !finite(rect.width) || !finite(rect.height)) {
@@ -150,6 +152,7 @@ export function editorViewportPayload(input: {
   if (typeof backdrop === "string" && backdrop.trim() !== "") {
     payload.backdrop = backdrop;
   }
+  if (input.overlayColors) payload.overlayColors = [...input.overlayColors];
   return payload;
 }
 
@@ -167,7 +170,8 @@ export function sameViewportPayload(
     a.viewport.width === b.viewport.width &&
     a.viewport.height === b.viewport.height &&
     // 主题一变底色就变 —— 不比较它的话，切主题之后洞口底还是旧色
-    a.backdrop === b.backdrop
+    a.backdrop === b.backdrop &&
+    a.overlayColors?.join(";") === b.overlayColors?.join(";")
   );
 }
 
@@ -189,6 +193,7 @@ export interface ViewportReporter {
     dpr: number;
     viewport: { width: number; height: number };
     backdrop?: string | null;
+    overlayColors?: [string, string, string, string];
   }) => void;
   /** 立刻把挂起的那一帧发出去（卸载前用，保证尾样本不丢） */
   flush: () => void;

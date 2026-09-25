@@ -50,17 +50,14 @@ export function ViewerReadout(props: ViewerReadoutProps): JSX.Element {
   return (
     <>
       {/* ── 预览（整张 + 视野框） ── */}
-      {/*
-        框是**固定 4:3**（人类 2026-09-20：「比例改成 4:3，不要 3:2，这样对纵图支持更好」）——
-        几何与画法都在 `components/ui/PreviewFrame.tsx`（编辑右栏「总览」用的是同一份）。
-      */}
+      {/* 全图总览只使用 Screen 图；grid 过渡图可能按 3:1 裁切。 */}
       <section class="mb-5" data-viewer-readout="open">
         <h3 class="mb-1.5 text-fs-3 font-semibold text-fg-2">{t("browse.preview")}</h3>
         <PreviewFrame
-          src={props.store.imageUrl()}
+          src={props.store.overviewImageUrl()}
           natural={natural()}
           visibleRect={props.showVisibleBox !== false ? rect() : null}
-          emptyText={t("browse.noSelection")}
+          emptyText={props.store.current() === null ? t("browse.noSelection") : props.store.overviewStatus() === "error" ? t("browse.previewUnavailable") : t("common.loading")}
         />
       </section>
 
