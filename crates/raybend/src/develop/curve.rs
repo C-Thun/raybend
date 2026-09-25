@@ -101,7 +101,10 @@ impl Curve {
             return Err(format!("曲线至少要两个控制点，给了 {}", points.len()));
         }
         if points.len() > MAX_POINTS {
-            return Err(format!("曲线控制点最多 {MAX_POINTS} 个，给了 {}", points.len()));
+            return Err(format!(
+                "曲线控制点最多 {MAX_POINTS} 个，给了 {}",
+                points.len()
+            ));
         }
         for point in &points {
             if !point[0].is_finite() || !point[1].is_finite() {
@@ -137,9 +140,7 @@ impl Curve {
     /// 是恒等曲线吗（界面上「这条通道动过没有」）。
     #[must_use]
     pub fn is_identity(&self) -> bool {
-        self.points.len() == 2
-            && (self.points[0][1] - 0.0).abs() < 1e-6
-            && (self.points[1][1] - 1.0).abs() < 1e-6
+        self.points == [[0.0, 0.0], [1.0, 1.0]]
     }
 
     /// 加一个控制点（返回新曲线；x 与已有点太近就返回 `Err`）。
@@ -164,17 +165,15 @@ impl Curve {
             return Err(format!("控制点下标越界：{index}"));
         }
         if let Some(previous) = index.checked_sub(1).and_then(|i| self.points.get(i))
-            && x <= previous[0] + MIN_X_GAP {
-                return Err(format!(
-                    "这个点会越过左边的控制点（至少隔开 {MIN_X_GAP}）"
-                ));
-            }
+            && x <= previous[0] + MIN_X_GAP
+        {
+            return Err(format!("这个点会越过左边的控制点（至少隔开 {MIN_X_GAP}）"));
+        }
         if let Some(next) = self.points.get(index + 1)
-            && x >= next[0] - MIN_X_GAP {
-                return Err(format!(
-                    "这个点会越过右边的控制点（至少隔开 {MIN_X_GAP}）"
-                ));
-            }
+            && x >= next[0] - MIN_X_GAP
+        {
+            return Err(format!("这个点会越过右边的控制点（至少隔开 {MIN_X_GAP}）"));
+        }
         let mut points = self.points.clone();
         points[index] = [x, y];
         Self::from_points(points)
@@ -236,7 +235,8 @@ impl Curve {
     fn tangents(&self) -> Vec<f32> {
         let n = self.points.len();
         if n == 2 {
-            let slope = (self.points[1][1] - self.points[0][1]) / (self.points[1][0] - self.points[0][0]);
+            let slope =
+                (self.points[1][1] - self.points[0][1]) / (self.points[1][0] - self.points[0][0]);
             return vec![slope, slope];
         }
         let mut slopes = Vec::with_capacity(n - 1);
@@ -247,7 +247,12 @@ impl Curve {
         tangents[0] = slopes[0];
         tangents[n - 1] = slopes[n - 2];
         for i in 1..n - 1 {
-            tangents[i] = (slopes[i - 1] + slopes[i]) / 2.0;
+            // 局部极值处必须水平；只缩短切线不能修正方向相反的过冲。
+            tangents[i] = if slopes[i - 1] * slopes[i] <= 0.0 {
+                0.0
+            } else {
+                (slopes[i - 1] + slopes[i]) / 2.0
+            };
         }
         // 限幅：保证单调（Fritsch–Carlson 的条件）
         for i in 0..n - 1 {
@@ -297,7 +302,8 @@ impl Curve {
         let h10 = t3 - 2.0 * t2 + t;
         let h01 = -2.0 * t3 + 3.0 * t2;
         let h11 = t3 - t2;
-        let value = h00 * y0 + h10 * h * tangents[segment] + h01 * y1 + h11 * h * tangents[segment + 1];
+        let value =
+            h00 * y0 + h10 * h * tangents[segment] + h01 * y1 + h11 * h * tangents[segment + 1];
         value.clamp(0.0, 1.0)
     }
 
@@ -353,7 +359,10 @@ impl CurveSet {
     /// 全恒等吗（决定要不要走曲线快路径）。
     #[must_use]
     pub fn is_identity(&self) -> bool {
-        self.rgb.is_identity() && self.r.is_identity() && self.g.is_identity() && self.b.is_identity()
+        self.rgb.is_identity()
+            && self.r.is_identity()
+            && self.g.is_identity()
+            && self.b.is_identity()
     }
 
     /// 动过的通道（DB 只存这些）。
@@ -437,6 +446,37 @@ mod tests {
     }
 
     #[test]
+    fn moved_endpoints_are_dirty_on_every_channel() {
+        for channel in CurveChannel::all() {
+            for points in [vec![[0.1, 0.0], [1.0, 1.0]], vec![[0.0, 0.0], [0.9, 1.0]]] {
+                let mut set = CurveSet::identity();
+                set.set_channel(channel, Curve::from_points(points).unwrap());
+                assert!(!set.is_identity(), "移动黑白场必须算编辑过");
+                assert_eq!(set.dirty_channels(), vec![channel]);
+            }
+        }
+    }
+
+    #[test]
+    fn turning_points_do_not_overshoot_neighboring_values() {
+        for points in [
+            vec![[0.0, 0.2], [0.25, 0.8], [0.5, 0.7], [1.0, 0.9]],
+            vec![[0.0, 0.8], [0.25, 0.2], [0.5, 0.3], [1.0, 0.1]],
+        ] {
+            let curve = Curve::from_points(points).unwrap();
+            for pair in curve.points().windows(2) {
+                let lo = pair[0][1].min(pair[1][1]);
+                let hi = pair[0][1].max(pair[1][1]);
+                for step in 0..=100 {
+                    let x = pair[0][0] + (pair[1][0] - pair[0][0]) * step as f32 / 100.0;
+                    let y = curve.eval(x);
+                    assert!(y >= lo - 1e-5 && y <= hi + 1e-5, "{pair:?}, {x} → {y}");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn eval_is_monotone_and_stays_in_range() {
         // 一个刻意难看的形状：平台 + 陡坡 + 平台（普通三次样条会在这里过冲）
         let curve = Curve::from_points(vec![
@@ -452,20 +492,18 @@ mod tests {
             let x = step as f32 / 1000.0;
             let y = curve.eval(x);
             assert!((0.0..=1.0).contains(&y), "越界：{x} → {y}");
-            assert!(y >= previous - 1e-4, "不单调：{x} → {y}（前一个 {previous}）");
+            assert!(
+                y >= previous - 1e-4,
+                "不单调：{x} → {y}（前一个 {previous}）"
+            );
             previous = y;
         }
     }
 
     #[test]
     fn control_points_are_interpolated_exactly() {
-        let curve = Curve::from_points(vec![
-            [0.0, 0.1],
-            [0.3, 0.4],
-            [0.7, 0.6],
-            [1.0, 0.95],
-        ])
-        .expect("合法曲线");
+        let curve = Curve::from_points(vec![[0.0, 0.1], [0.3, 0.4], [0.7, 0.6], [1.0, 0.95]])
+            .expect("合法曲线");
         for point in curve.points() {
             let y = curve.eval(point[0]);
             assert!((y - point[1]).abs() < 2e-3, "控制点 {point:?} 处得到 {y}");
@@ -527,13 +565,8 @@ mod tests {
 
     #[test]
     fn table_and_exact_evaluation_agree() {
-        let curve = Curve::from_points(vec![
-            [0.0, 0.0],
-            [0.2, 0.05],
-            [0.55, 0.6],
-            [1.0, 1.0],
-        ])
-        .expect("合法曲线");
+        let curve = Curve::from_points(vec![[0.0, 0.0], [0.2, 0.05], [0.55, 0.6], [1.0, 1.0]])
+            .expect("合法曲线");
         let tangents = curve.tangents();
         for step in 0..=2000 {
             let x = step as f32 / 2000.0;
@@ -551,7 +584,10 @@ mod tests {
         let mut set = CurveSet::identity();
         assert!(set.is_identity());
         assert!(set.dirty_channels().is_empty());
-        set.set_channel(CurveChannel::Blue, Curve::identity().with_point(0.5, 0.4).unwrap());
+        set.set_channel(
+            CurveChannel::Blue,
+            Curve::identity().with_point(0.5, 0.4).unwrap(),
+        );
         assert!(!set.is_identity());
         assert_eq!(set.dirty_channels(), vec![CurveChannel::Blue]);
         assert!(curve_is_not_a_param());

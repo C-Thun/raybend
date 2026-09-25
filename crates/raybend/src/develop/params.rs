@@ -99,9 +99,11 @@ pub const PARAMS: &[ParamSpec] = &[
     ParamSpec { id: "sharpenAmount", min: 0.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Start, wired: true, baseline: Baseline::Static },
     ParamSpec { id: "sharpenRadius", min: 0.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Start, wired: true, baseline: Baseline::Static },
     // ── 镜头（W4）──
-    ParamSpec { id: "distortion", min: -100.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Center, wired: false, baseline: Baseline::Static },
-    ParamSpec { id: "vignette", min: -100.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Center, wired: false, baseline: Baseline::Static },
-    ParamSpec { id: "chromatic", min: -100.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Center, wired: false, baseline: Baseline::Static },
+    ParamSpec { id: "distortion", min: -100.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Center, wired: true, baseline: Baseline::Static },
+    ParamSpec { id: "vignette", min: -100.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Center, wired: true, baseline: Baseline::Static },
+    ParamSpec { id: "vignetteRange", min: 0.0, max: 100.0, step: 1.0, default: 50.0, origin: Origin::Start, wired: true, baseline: Baseline::Static },
+    ParamSpec { id: "chromatic", min: -100.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Center, wired: true, baseline: Baseline::Static },
+    ParamSpec { id: "chromaticBlue", min: -100.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Center, wired: true, baseline: Baseline::Static },
 ];
 
 /// 前端那份契约文件（**唯一真相**，本文件与它逐条对齐）。
@@ -342,7 +344,7 @@ mod tests {
         assert!(is_wired("temperature"));
         assert!(is_wired("sharpenAmount"), "清晰度已在 M3-W4 接入");
         assert!(is_wired("lumaNr"));
-        assert!(!is_wired("vignette"), "镜头手动微调接的是管线那一步（参数本身可用）");
+        assert!(is_wired("vignette"), "镜头手动微调已接入管线");
         assert!(!is_known("curve"), "曲线不是参数（它有自己的模型）");
     }
 

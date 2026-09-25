@@ -17,11 +17,9 @@
 //! ③ Y' = B2 + D2' + D1'，再按 Y'/Y 缩回 RGB ← 只动亮度，保色相与饱和
 //! ```
 //!
-//! **噪声尺度 `s` 随亮度增长**（`s = Y · σ`）：散粒噪声的绝对幅度 ∝ √信号，
-//! 在**线性域**用固定阈值会「暗部糊成一片、亮部没动」；让 `s ∝ Y` 就拿到了
-//! 「log 域一个阈值通吃」的同一个效果，**而不用每像素跑一次 log2/exp2**
-//! （早期版本就是那样写的，实测那两个超越函数是全分辨率那一趟的主要开销）。
-//! 与 `local_tone` 的分解是同一套算子，只是那边在 log 域、这边用 `s ∝ Y` 代替。
+//! **快速档采用相对亮度阈值**（`s = Y · σ`），是对 log 域阈值的便宜近似。
+//! 它不是相机散粒噪声模型（散粒噪声幅度约随 √信号变化）；目前没有 ISO / 相机噪声档案。
+//! 与 `local_tone` 复用空间算子，避免逐像素 log2/exp2 的开销。
 //!
 //! **为什么用维纳因子而不是硬阈值**：硬阈值在阈值附近产生「要么全留要么全抹」的跳变，
 //! 表现为细节时隐时现的斑点；`D²/(D²+s²)` 是平滑的，而且**大信号自动趋近 1**（强边缘原样保留）。
@@ -30,7 +28,7 @@
 //! # 色度支：大半径保边模糊
 //!
 //! 色度噪声是低频的，所以做法很简单：把 `Cb/Cr`（相对亮度的差）做**大半径模糊**再混回去。
-//! 唯一要防的是「跨边缘把颜色带过去」：用亮度细尺度 `|D1|` 做门控 —— 有细节（边缘）的地方
+//! 唯一要防的是「跨边缘把颜色带过去」：用全分辨率亮度细尺度 `|D1|` 做门控 —— 有细节（边缘）的地方
 //! 少模糊。参考 RapidRAW 的 `remove_raw_artifacts_and_enhance`（同一思路，那边用 5×5 稀疏采样）。
 //!
 //! # 为什么分解在 1/4 分辨率上做（**这条是内存纪律**）
@@ -38,7 +36,7 @@
 //! 24MP 一张 f32 平面就是 96 MB。上面那条链在**全分辨率**要同时活着 6 张平面（≈580 MB），
 //! 而显影线程里已经躺着线性源（u16×3，144 MB）与输出（72 MB）。所以：
 //! 低分辨率平面用**一个并行单趟**直接从全分辨率源算出来（不经过中间图），
-//! 分解、滤波、色度混合全部在 1/4 分辨率上做，回到全分辨率时只留**逐行上采样**
+//! 分解、滤波在 1/4 分辨率上做，回到全分辨率时用**逐行上采样**按强度混合原图
 //! （[`RowUpsampler`]，一行缓冲），额外内存降到 ≈ 50 MB。
 //! 代价是细尺度只到「全分辨率 4 px」这一档 —— 而那正是噪点的尺度，够用。
 //!
@@ -74,7 +72,7 @@ const LUMA_FLOOR: f32 = 1.0 / 65535.0;
 /// 降噪方式（**编辑栈的一级**，不是全局偏好 —— 见 `catalog_0006_lens.sql` 的注释）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum NrMethod {
-    /// 快速档（默认）：多尺度保边收缩，实时跟手
+    /// 快速档（默认）：wgpu 小波降噪；设备不可用时回退 CPU 多尺度保边
     #[default]
     Fast,
     /// 高质量档：BM3D（后台任务，拖动期间先显示快速档结果）
@@ -122,8 +120,8 @@ impl DenoisePlan {
     #[must_use]
     pub fn from_sliders(luma_nr: f64, color_nr: f64) -> Self {
         Self {
-            luma: (luma_nr / 100.0).clamp(0.0, 1.0) as f32,
-            chroma: (color_nr / 100.0).clamp(0.0, 1.0) as f32,
+            luma: finite_strength((luma_nr / 100.0) as f32),
+            chroma: finite_strength((color_nr / 100.0) as f32),
         }
     }
 
@@ -140,14 +138,26 @@ impl DenoisePlan {
 /// 计划为空时直接 `clone`（**逐位一致**）。
 #[must_use]
 pub fn denoise_fast(source: &LinearImage, plan: &DenoisePlan) -> LinearImage {
-    if plan.is_identity() {
+    if let Some(image) = crate::render::wavelet::try_denoise(source, plan) {
+        return image;
+    }
+    let threads = std::thread::available_parallelism()
+        .map_or(1, std::num::NonZeroUsize::get)
+        .min(16);
+    denoise_with_threads(source, plan, threads)
+}
+
+/// 线程数可注入，让回归测试在单核机器上也实际覆盖分块路径。
+fn denoise_with_threads(source: &LinearImage, plan: &DenoisePlan, threads: usize) -> LinearImage {
+    if plan.is_identity() || !source.is_consistent() {
         return source.clone();
     }
-    let luma = plan.luma.clamp(0.0, 1.0);
-    let chroma = plan.chroma.clamp(0.0, 1.0);
+    let threads = threads.clamp(1, 16);
+    let luma = finite_strength(plan.luma);
+    let chroma = finite_strength(plan.chroma);
 
     // ── 分析（低分辨率平面一个并行单趟算出，之后全在 1/4 分辨率上做）──
-    let low = low_planes_from(source, ANALYSIS_SCALE);
+    let low = low_planes_from(source, ANALYSIS_SCALE, threads);
     let long = source.width.max(source.height);
     let r1_full = band_radius(long, 1200, 8);
     let r1 = (r1_full / ANALYSIS_SCALE).max(1) as usize;
@@ -160,8 +170,10 @@ pub fn denoise_fast(source: &LinearImage, plan: &DenoisePlan) -> LinearImage {
     };
     let chroma_low = if chroma > 0.0 {
         let radius = (band_radius(long, 220, 40) / ANALYSIS_SCALE).max(1) as usize;
-        let (cb, cr) = chroma_analysis(&low.luma, &b1, low.cb, low.cr, chroma, radius);
-        Some(ChromaAnalysis { cb, cr })
+        Some(ChromaAnalysis {
+            cb: box_blur(&low.cb, radius),
+            cr: box_blur(&low.cr, radius),
+        })
     } else {
         None
     };
@@ -177,29 +189,25 @@ pub fn denoise_fast(source: &LinearImage, plan: &DenoisePlan) -> LinearImage {
         chroma_low: chroma_low.as_ref(),
         luma_sigma,
         luma_active: luma > 0.0,
-        chroma_active: chroma > 0.0,
+        chroma_strength: chroma,
         width: source.width,
         height: source.height,
     };
-    let threads = std::thread::available_parallelism()
-        .map_or(1, std::num::NonZeroUsize::get)
-        .min(16);
     if threads <= 1 || height < 32 {
         stage.run(&source.rgb, &mut out, 0);
     } else {
         let rows_per_chunk = height.div_ceil(threads);
+        let chunk_len = rows_per_chunk * width * 3;
         std::thread::scope(|scope| {
-            let mut remaining = out.as_mut_slice();
-            let mut first_row = 0usize;
-            while !remaining.is_empty() {
-                let rows = (remaining.len() / (width * 3)).min(rows_per_chunk).max(1);
-                let take = rows * width * 3;
-                let (chunk, rest) = remaining.split_at_mut(take);
-                remaining = rest;
-                let start = first_row;
-                first_row += rows;
-                let stage_ref = &stage;
-                scope.spawn(move || stage_ref.run(&source.rgb, chunk, start));
+            // 与管线 LocalPass 同一契约：输入输出是对应的行块，first_row 只定位分析平面。
+            for (index, (input, output)) in source
+                .rgb
+                .chunks(chunk_len)
+                .zip(out.chunks_mut(chunk_len))
+                .enumerate()
+            {
+                let stage = &stage;
+                scope.spawn(move || stage.run(input, output, index * rows_per_chunk));
             }
         });
     }
@@ -218,15 +226,18 @@ struct Stage<'a> {
     /// **线性域**的细尺度噪声尺度系数（`s = Y · luma_sigma`）
     luma_sigma: f32,
     luma_active: bool,
-    chroma_active: bool,
+    chroma_strength: f32,
     width: u32,
     height: u32,
 }
 
 impl Stage<'_> {
-    /// 一段行的像素循环（**唯一**的降噪像素循环）。
+    /// 输入输出都必须是同一段行；first_row 是它们在整张图上的纵坐标。
     fn run(&self, input: &[u16], output: &mut [u16], first_row: usize) {
         let width = self.width as usize;
+        debug_assert_eq!(input.len(), output.len());
+        debug_assert_eq!(input.len() % (width * 3), 0);
+        debug_assert!(first_row + input.len() / (width * 3) <= self.height as usize);
         let mut up_b1 = RowUpsampler::new(self.b1, self.width, self.height);
         let mut up_b2 = self
             .coarse
@@ -259,11 +270,14 @@ impl Stage<'_> {
                 ];
                 let y0 = luma_of(rgb);
                 if y0 > LUMA_FLOOR {
-                    // ① 色度：把 Cb/Cr 换成低分辨率上模糊过的那一份
-                    //    （“原色度”已经在低分辨率那边混过了，这里只拿结果）
+                    // ① 色度：在原始像素上按强度混合，保边门控也用全分辨率亮度。
+                    // 不能直接替换成低分辨率色度：否则任意非零强度都会抹掉原图细节。
                     if let (Some(cb_up), Some(cr_up)) = (up_cb.as_ref(), up_cr.as_ref()) {
-                        rgb[2] = y0 + cb_up.at(x);
-                        rgb[0] = y0 + cr_up.at(x);
+                        let relative = (y0 - up_b1.at(x)).abs() / y0;
+                        let threshold = CHROMA_EDGE_THRESHOLD * LN2;
+                        let weight = self.chroma_strength / (1.0 + (relative / threshold).powi(2));
+                        rgb[2] += (y0 + cb_up.at(x) - rgb[2]) * weight;
+                        rgb[0] += (y0 + cr_up.at(x) - rgb[0]) * weight;
                         rgb[1] = (y0 - 0.2126 * rgb[0] - 0.0722 * rgb[2]) / 0.7152;
                     }
                     // ② 亮度：多尺度收缩（噪声尺度随亮度增长），再按比例缩回 RGB
@@ -274,9 +288,7 @@ impl Stage<'_> {
                         let target = if let Some(up) = up_b2.as_ref() {
                             let base2 = up.at(x);
                             let d2 = base1 - base2;
-                            base2
-                                + shrink(d2, noise1 * COARSE_SIGMA_RATIO)
-                                + shrink(d1, noise1)
+                            base2 + shrink(d2, noise1 * COARSE_SIGMA_RATIO) + shrink(d1, noise1)
                         } else {
                             base1 + shrink(d1, noise1)
                         };
@@ -289,13 +301,11 @@ impl Stage<'_> {
                 for channel in 0..3 {
                     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
                     {
-                        pixel_out[channel] =
-                            (rgb[channel].clamp(0.0, 1.0) * 65535.0 + 0.5) as u16;
+                        pixel_out[channel] = (rgb[channel].clamp(0.0, 1.0) * 65535.0 + 0.5) as u16;
                     }
                 }
             }
         }
-        let _ = (self.chroma_active, self.height);
     }
 }
 
@@ -327,7 +337,7 @@ struct LowPlanes {
 /// 块取法与 `LinearImage::downscaled_to` 同一套口径（`x·src/dst` 的整数区间），
 /// 但**只读一遍三通道、直接出三张 1/4 分辨率的平面**（而那条路要两遍扫描 + 一张三通道中间图，
 /// 且无法并行）。色度那两张多花每像素 4 次加减 —— 比起省下的那一趟，值。
-fn low_planes_from(source: &LinearImage, factor: u32) -> LowPlanes {
+fn low_planes_from(source: &LinearImage, factor: u32, threads: usize) -> LowPlanes {
     let step = factor.max(1) as usize;
     let source_width = source.width as usize;
     let source_height = source.height as usize;
@@ -335,9 +345,6 @@ fn low_planes_from(source: &LinearImage, factor: u32) -> LowPlanes {
     let height = source_height.div_ceil(step).max(1);
     let mut values = vec![[0f32; 3]; width * height];
     let rgb = &source.rgb;
-    let threads = std::thread::available_parallelism()
-        .map_or(1, std::num::NonZeroUsize::get)
-        .min(16);
     let rows_per_chunk = height.div_ceil(threads.max(1)).max(1);
     let mut remaining = values.as_mut_slice();
     let mut first = 0usize;
@@ -351,11 +358,11 @@ fn low_planes_from(source: &LinearImage, factor: u32) -> LowPlanes {
             scope.spawn(move || {
                 for (local, line) in chunk.chunks_mut(width).enumerate() {
                     let ly = start + local;
-                    let y0 = ly * step;
-                    let y1 = ((ly + 1) * step).min(source_height);
+                    let y0 = ly * source_height / height;
+                    let y1 = (ly + 1) * source_height / height;
                     for (lx, slot) in line.iter_mut().enumerate() {
-                        let x0 = lx * step;
-                        let x1 = ((lx + 1) * step).min(source_width);
+                        let x0 = lx * source_width / width;
+                        let x1 = (lx + 1) * source_width / width;
                         let mut sum = [0f32; 3];
                         let mut count = 0u32;
                         for y in y0..y1 {
@@ -365,7 +372,7 @@ fn low_planes_from(source: &LinearImage, factor: u32) -> LowPlanes {
                                 let r = f32::from(rgb[index]) / 65535.0;
                                 let g = f32::from(rgb[index + 1]) / 65535.0;
                                 let b = f32::from(rgb[index + 2]) / 65535.0;
-                                let luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+                                let luma = luma_of([r, g, b]);
                                 sum[0] += luma;
                                 sum[1] += b - luma;
                                 sum[2] += r - luma;
@@ -413,34 +420,19 @@ fn low_planes_from(source: &LinearImage, factor: u32) -> LowPlanes {
     }
 }
 
-/// 低分辨率上算好的色度（**已经混过、可以直接上采样**）。
+/// 低分辨率上模糊后的目标色度（回到原图后才按强度混合）。
 struct ChromaAnalysis {
     cb: Plane,
     cr: Plane,
 }
 
-/// 色度支的分析：大半径模糊 + 细节门控混合（两张平面**原地**改）。
-fn chroma_analysis(
-    luma_low: &Plane,
-    b1: &Plane,
-    mut cb: Plane,
-    mut cr: Plane,
-    strength: f32,
-    radius: usize,
-) -> (Plane, Plane) {
-    let width = luma_low.width as usize;
-    let cb_blur = box_blur(&cb, radius);
-    let cr_blur = box_blur(&cr, radius);
-    // 门控：有细节的地方少模糊（**相对**细节大 ⇒ 边缘）
-    let threshold = CHROMA_EDGE_THRESHOLD * LN2;
-    for index in 0..width * luma_low.height as usize {
-        let luma = luma_low.values[index];
-        let relative = (luma - b1.values[index]).abs() / luma.max(LUMA_FLOOR);
-        let weight = strength / (1.0 + (relative / threshold).powi(2));
-        cb.values[index] += (cb_blur.values[index] - cb.values[index]) * weight;
-        cr.values[index] += (cr_blur.values[index] - cr.values[index]) * weight;
+/// 非有限参数与 is_identity 的口径一致：该支关闭，不影响另一支。
+fn finite_strength(value: f32) -> f32 {
+    if value.is_finite() {
+        value.clamp(0.0, 1.0)
+    } else {
+        0.0
     }
-    (cb, cr)
 }
 
 /// 尺度半径：`长边 / divisor`，夹在 `1..=max` 里。
@@ -467,7 +459,11 @@ mod tests {
                     seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
                     (seed >> 16) as i32 % (i32::from(grain) + 1) - i32::from(grain) / 2
                 };
-                let base = if x < (width as usize) / 2 { 20000 } else { 40000 };
+                let base = if x < (width as usize) / 2 {
+                    20000
+                } else {
+                    40000
+                };
                 for channel in 0..3 {
                     let value = (base + next()).clamp(0, 65535);
                     rgb[(y * width as usize + x) * 3 + channel] = value as u16;
@@ -477,12 +473,12 @@ mod tests {
         LinearImage::new(width, height, rgb).expect("尺寸与长度对得上")
     }
 
-    fn variance(values: &[u16]) -> f64 {
+    fn variance<T: Copy + Into<f64>>(values: &[T]) -> f64 {
         let n = values.len() as f64;
-        let mean = values.iter().map(|v| f64::from(*v)).sum::<f64>() / n;
+        let mean = values.iter().map(|v| (*v).into()).sum::<f64>() / n;
         values
             .iter()
-            .map(|v| (f64::from(*v) - mean).powi(2))
+            .map(|v| ((*v).into() - mean).powi(2))
             .sum::<f64>()
             / n
     }
@@ -497,6 +493,223 @@ mod tests {
             }
         }
         out
+    }
+
+    /// 横纵向和各通道都不同，避免「重复第一行」也能通过平坦区方差测试。
+    fn spatial_pattern(width: u32, height: u32) -> LinearImage {
+        let mut rgb = Vec::new();
+        for y in 0..height {
+            for x in 0..width {
+                let base = 8000 + y * 500 + x * 100;
+                rgb.extend([base as u16, (base + 2000) as u16, (base + x * 20) as u16]);
+            }
+        }
+        LinearImage::new(width, height, rgb).unwrap()
+    }
+
+    #[test]
+    fn denoise_row_chunks_match_serial_for_both_sliders() {
+        for (w, h) in [
+            (1, 1),
+            (1, 37),
+            (37, 1),
+            (19, 31),
+            (19, 32),
+            (19, 37),
+            (43, 67),
+        ] {
+            let source = spatial_pattern(w, h);
+            for plan in [
+                DenoisePlan {
+                    luma: 0.7,
+                    chroma: 0.0,
+                },
+                DenoisePlan {
+                    luma: 0.0,
+                    chroma: 0.7,
+                },
+                DenoisePlan {
+                    luma: 0.7,
+                    chroma: 0.7,
+                },
+            ] {
+                let serial = denoise_with_threads(&source, &plan, 1);
+                for threads in [2, 3, 16] {
+                    let parallel = denoise_with_threads(&source, &plan, threads);
+                    assert_eq!((parallel.width, parallel.height), (w, h));
+                    assert_eq!(parallel.rgb.len(), serial.rgb.len());
+                    let mismatch = parallel
+                        .rgb
+                        .iter()
+                        .zip(&serial.rgb)
+                        .position(|(a, b)| a != b);
+                    assert_eq!(mismatch, None, "{w}×{h}, {threads} threads, {plan:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn chroma_strength_is_continuous_from_zero() {
+        let source = synthetic(19, 17, 8000);
+        let out = denoise_with_threads(
+            &source,
+            &DenoisePlan {
+                luma: 0.0,
+                chroma: 1e-6,
+            },
+            1,
+        );
+        let max_delta = source
+            .rgb
+            .iter()
+            .zip(&out.rgb)
+            .map(|(a, b)| a.abs_diff(*b))
+            .max()
+            .unwrap();
+        assert!(
+            max_delta <= 1,
+            "接近 0 不应丢掉原图色度细节：最大变化 {max_delta}"
+        );
+    }
+
+    #[test]
+    fn chroma_strength_interpolates_original_pixels_and_preserves_luma() {
+        let source = synthetic(19, 17, 8000);
+        let full = denoise_with_threads(
+            &source,
+            &DenoisePlan {
+                luma: 0.0,
+                chroma: 1.0,
+            },
+            1,
+        );
+        let half = denoise_with_threads(
+            &source,
+            &DenoisePlan {
+                luma: 0.0,
+                chroma: 0.5,
+            },
+            1,
+        );
+        for ((input, full), half) in source.rgb.iter().zip(&full.rgb).zip(&half.rgb) {
+            let midpoint = (u32::from(*input) + u32::from(*full)) / 2;
+            assert!(u32::from(*half).abs_diff(midpoint) <= 1);
+        }
+        for (input, output) in source
+            .rgb
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .zip(full.rgb.as_chunks::<3>().0)
+        {
+            assert!((luma_of(input.map(f32::from)) - luma_of(output.map(f32::from))).abs() <= 1.0);
+        }
+    }
+
+    #[test]
+    fn non_finite_strength_disables_only_its_branch() {
+        let source = spatial_pattern(7, 37);
+        for invalid in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            for (plan, expected) in [
+                (
+                    DenoisePlan {
+                        luma: invalid,
+                        chroma: 0.7,
+                    },
+                    DenoisePlan {
+                        luma: 0.0,
+                        chroma: 0.7,
+                    },
+                ),
+                (
+                    DenoisePlan {
+                        luma: 0.7,
+                        chroma: invalid,
+                    },
+                    DenoisePlan {
+                        luma: 0.7,
+                        chroma: 0.0,
+                    },
+                ),
+            ] {
+                assert_eq!(
+                    denoise_with_threads(&source, &plan, 3),
+                    denoise_with_threads(&source, &expected, 3)
+                );
+            }
+            assert_eq!(
+                DenoisePlan::from_sliders(f64::from(invalid), 50.0),
+                DenoisePlan {
+                    luma: 0.0,
+                    chroma: 0.5
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn malformed_images_are_untouched() {
+        for source in [
+            LinearImage {
+                width: 0,
+                height: 0,
+                rgb: vec![],
+            },
+            LinearImage {
+                width: 0,
+                height: 32,
+                rgb: vec![],
+            },
+            LinearImage {
+                width: 4,
+                height: 32,
+                rgb: vec![5; 10],
+            },
+        ] {
+            assert_eq!(
+                denoise_with_threads(
+                    &source,
+                    &DenoisePlan {
+                        luma: 1.0,
+                        chroma: 1.0
+                    },
+                    3
+                ),
+                source
+            );
+        }
+    }
+
+    #[test]
+    fn analysis_uses_the_shared_area_average_on_odd_sizes() {
+        use super::super::filters::downsample_box;
+        for (w, h) in [(1, 1), (1, 7), (5, 7), (19, 37)] {
+            let source = spatial_pattern(w, h);
+            for factor in [1, 4, 64] {
+                let low = low_planes_from(&source, factor, 3);
+                for (channel, plane) in [(0, &low.luma), (1, &low.cb), (2, &low.cr)] {
+                    let full = Plane::from_fn(w, h, |x, y| {
+                        let index = (y * w as usize + x) * 3;
+                        let rgb =
+                            std::array::from_fn(|c| f32::from(source.rgb[index + c]) / 65535.0);
+                        let y = luma_of(rgb);
+                        match channel {
+                            0 => y,
+                            1 => rgb[2] - y,
+                            _ => rgb[0] - y,
+                        }
+                    });
+                    let expected = downsample_box(&full, low.luma.width, low.luma.height);
+                    for (actual, expected) in plane.values.iter().zip(expected.values) {
+                        assert!(
+                            (actual - expected).abs() < 1e-6,
+                            "{w}×{h}, factor {factor}, channel {channel}"
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]
@@ -571,7 +784,7 @@ mod tests {
                     values.push(r - b);
                 }
             }
-            variance(&values.iter().map(|v| v.round() as u16).collect::<Vec<_>>())
+            variance(&values)
         };
         assert!(
             spread(&out) < spread(&source) * 0.5,
@@ -593,7 +806,13 @@ mod tests {
         );
         // 越界输入不 panic（夹取）
         let clamped = DenoisePlan::from_sliders(-10.0, 300.0);
-        assert_eq!(clamped, DenoisePlan { luma: 0.0, chroma: 1.0 });
+        assert_eq!(
+            clamped,
+            DenoisePlan {
+                luma: 0.0,
+                chroma: 1.0
+            }
+        );
     }
 
     #[test]

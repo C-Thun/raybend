@@ -317,7 +317,7 @@ pub fn contrast_curve(value: f32, amount: f32) -> f32 {
 /// 导数 = `1 + h(4y³ − 5y⁴) ≥ 1 − |h|` ⇒ `|h| ≤ 1` 时**严格单调**（不会出现亮暗反转）。
 #[must_use]
 pub fn highlights_curve(value: f32, amount: f32) -> f32 {
-    if amount.abs() < 1e-6 {
+    if amount.abs() < 1e-6 || !(0.0..=1.0).contains(&value) {
         return value;
     }
     let y4 = value * value * value * value;
@@ -330,7 +330,7 @@ pub fn highlights_curve(value: f32, amount: f32) -> f32 {
 /// 导数 = `1 + b(1−y)³(1−5y)`，`|b| ≤ 1` 时最小值 ≈ `0.78 > 0` ⇒ 单调。
 #[must_use]
 pub fn blacks_curve(value: f32, amount: f32) -> f32 {
-    if amount.abs() < 1e-6 {
+    if amount.abs() < 1e-6 || !(0.0..=1.0).contains(&value) {
         return value;
     }
     let one_minus = 1.0 - value;
@@ -381,7 +381,24 @@ pub fn map_pixel_exact_with(linear_rgb: [f32; 3], resolved: &Resolved, curves: &
         let linear = chain_linear(linear_rgb[channel], resolved.gains[channel], resolved);
         display[channel] = encode_and_curve(linear, channel, curves);
     }
+    if resolved.highlights > 0.0 {
+        let baseline = Resolved { highlights: 0.0, ..*resolved };
+        let unadjusted = std::array::from_fn(|channel| {
+            encode_and_curve(chain_linear(linear_rgb[channel], baseline.gains[channel], &baseline), channel, curves)
+        });
+        display = neutralize_positive_highlights(display, unadjusted);
+    }
     apply_chroma(display, resolved.saturation, resolved.vibrance)
+}
+
+/// 正向高光只改变亮度，避免亮蓝通道因逐通道曲线比红绿多增益而泛蓝。
+/// 已到显示白点的像素没有可恢复的亮度空间，保持原色，避免裁剪后偏色。
+fn neutralize_positive_highlights(adjusted: [f32; 3], baseline: [f32; 3]) -> [f32; 3] {
+    if baseline.iter().any(|value| *value >= 1.0 - 1e-5) {
+        return baseline;
+    }
+    let delta = (luma_of(adjusted) - luma_of(baseline)).max(0.0);
+    baseline.map(|value| (value + delta).clamp(0.0, 1.0))
 }
 
 /// **饱和度 / 自然饱和度**（显示参考域，绕亮度缩放色度）。
@@ -404,7 +421,7 @@ pub fn apply_chroma(rgb: [f32; 3], saturation: f32, vibrance: f32) -> [f32; 3] {
         let luma = luma_of(out);
         let max = out[0].max(out[1]).max(out[2]);
         let min = out[0].min(out[1]).min(out[2]);
-        let current = if max > 1e-6 { (max - min) / max } else { 0.0 };
+        let current = if max > 1e-6 { ((max - min) / max).clamp(0.0, 1.0) } else { 0.0 };
         let factor = (1.0 + vibrance * (1.0 - current)).max(0.0);
         out = [
             luma + (out[0] - luma) * factor,
@@ -509,6 +526,8 @@ impl ChannelLuts {
 pub fn render_rgb8(source: &LinearImage, params: &DevelopParams, curves: &CurveSet) -> Vec<u8> {
     let resolved = Resolved::new(params);
     let luts = ChannelLuts::build(&resolved, curves);
+    let baseline_luts = (resolved.highlights > 0.0).then(||
+        ChannelLuts::build(&Resolved { highlights: 0.0, ..resolved }, curves));
     let mut out = vec![0u8; source.rgb.len()];
     let width = source.width as usize;
 
@@ -516,7 +535,7 @@ pub fn render_rgb8(source: &LinearImage, params: &DevelopParams, curves: &CurveS
         .map_or(1, std::num::NonZeroUsize::get)
         .min(16);
     if threads <= 1 || source.height < 32 {
-        map_rows(&source.rgb, &mut out, &luts, &resolved);
+        map_rows(&source.rgb, &mut out, &luts, baseline_luts.as_ref(), &resolved);
         return out;
     }
 
@@ -532,15 +551,19 @@ pub fn render_rgb8(source: &LinearImage, params: &DevelopParams, curves: &CurveS
             remaining_in = rest_in;
             remaining_out = rest_out;
             let luts_ref = &luts;
+            let baseline_ref = baseline_luts.as_ref();
             let resolved_ref = &resolved;
-            scope.spawn(move || map_rows(chunk_in, chunk_out, luts_ref, resolved_ref));
+            scope.spawn(move || map_rows(chunk_in, chunk_out, luts_ref, baseline_ref, resolved_ref));
         }
     });
     out
 }
 
 /// 一段像素的逐像素映射（**唯一**的像素循环）。
-fn map_rows(input: &[u16], output: &mut [u8], luts: &ChannelLuts, resolved: &Resolved) {
+fn map_rows(
+    input: &[u16], output: &mut [u8], luts: &ChannelLuts,
+    baseline_luts: Option<&ChannelLuts>, resolved: &Resolved,
+) {
     debug_assert_eq!(input.len(), output.len());
     let chroma = resolved.needs_chroma();
     for (pixel_in, pixel_out) in input
@@ -554,6 +577,14 @@ fn map_rows(input: &[u16], output: &mut [u8], luts: &ChannelLuts, resolved: &Res
             luts.lookup(1, pixel_in[1]),
             luts.lookup(2, pixel_in[2]),
         ];
+        if let Some(baseline) = baseline_luts {
+            let original = [
+                baseline.lookup(0, pixel_in[0]),
+                baseline.lookup(1, pixel_in[1]),
+                baseline.lookup(2, pixel_in[2]),
+            ];
+            display = neutralize_positive_highlights(display, original);
+        }
         if chroma {
             display = apply_chroma(display, resolved.saturation, resolved.vibrance);
         }
@@ -678,10 +709,13 @@ pub fn render_rgb8_with_local_tone(
         return render_rgb8(source, params, curves);
     }
     let resolved = Resolved::new(params);
+    let baseline_chain = (resolved.highlights > 0.0).then(||
+        LinearChainLuts::build(&Resolved { highlights: 0.0, ..resolved }));
     let pass = LocalPass {
         state,
         strength,
         chain: &LinearChainLuts::build(&resolved),
+        baseline_chain: baseline_chain.as_ref(),
         display: &DisplayLuts::build(curves),
         resolved: &resolved,
         chroma: resolved.needs_chroma(),
@@ -735,7 +769,9 @@ pub fn render_rgb8_with_local_tone(
 pub struct DevelopStages<'a> {
     /// 镜头校正（映射是恒等时整趟跳过）
     pub lens: Option<&'a super::lens::LensMap>,
-    /// 降噪（快速档）
+    /// 同步调用的降噪方式；编辑器高质量帧由后台先算好再进入后续阶段。
+    pub nr_method: super::denoise::NrMethod,
+    /// 降噪
     pub denoise: Option<&'a super::denoise::DenoisePlan>,
     /// 动态反差（W3 已有的阶段）
     pub local_tone: Option<(&'a LocalToneState, f32)>,
@@ -777,6 +813,8 @@ impl DevelopPlans {
                     params.value("distortion"),
                     params.value("vignette"),
                     params.value("chromatic"),
+                    params.value("vignetteRange"),
+                    params.value("chromaticBlue"),
                 ),
             ),
             #[allow(clippy::cast_possible_truncation)]
@@ -804,7 +842,10 @@ pub fn render_develop(
     let denoised = stages
         .denoise
         .filter(|plan| !plan.is_identity())
-        .map(|plan| super::denoise::denoise_fast(source, plan));
+        .map(|plan| match stages.nr_method {
+            super::denoise::NrMethod::Fast => super::denoise::denoise_fast(source, plan),
+            super::denoise::NrMethod::High => super::bm3d::denoise_high(source, plan, &std::sync::atomic::AtomicBool::new(false)).expect("not cancelled"),
+        });
     let source = denoised.as_ref().unwrap_or(source);
     let mut out = render_rgb8_with_local_tone(source, params, curves, stages.local_tone);
     if let Some(plan) = stages.sharpen.filter(|plan| !plan.is_identity()) {
@@ -818,6 +859,7 @@ struct LocalPass<'a> {
     state: &'a LocalToneState,
     strength: f32,
     chain: &'a LinearChainLuts,
+    baseline_chain: Option<&'a LinearChainLuts>,
     display: &'a DisplayLuts,
     resolved: &'a Resolved,
     chroma: bool,
@@ -850,6 +892,14 @@ impl LocalPass<'_> {
                     self.display.lookup(1, chained[1] * ratio),
                     self.display.lookup(2, chained[2] * ratio),
                 ];
+                if let Some(baseline) = self.baseline_chain {
+                    let original = [
+                        self.display.lookup(0, baseline.lookup(0, pixel_in[0]) * ratio),
+                        self.display.lookup(1, baseline.lookup(1, pixel_in[1]) * ratio),
+                        self.display.lookup(2, baseline.lookup(2, pixel_in[2]) * ratio),
+                    ];
+                    display = neutralize_positive_highlights(display, original);
+                }
                 if self.chroma {
                     display = apply_chroma(
                         display,
@@ -881,6 +931,26 @@ mod tests {
         params
     }
 
+    #[test]
+    fn positive_highlights_preserve_bright_pixel_hue_and_clipped_white() {
+        let none = params(&[]);
+        let raised = params(&[("highlights", 100.0)]);
+        let pixel = [0.85, 0.8, 0.45];
+        let before = map_pixel_exact(pixel, &none);
+        let after = map_pixel_exact(pixel, &raised);
+        assert!(luma_of(after) > luma_of(before));
+        for channel in 1..3 {
+            assert!(((after[0] - after[channel]) - (before[0] - before[channel])).abs() < 1e-5,
+                "正向高光应等量提亮，不把暖色高光推成蓝色");
+        }
+        let clipped = [1.0, 1.0, 0.7];
+        assert_eq!(map_pixel_exact(clipped, &raised), map_pixel_exact(clipped, &none));
+        let source = LinearImage::new(2, 1, vec![linear(0.85), linear(0.8), linear(0.45), linear(1.0), linear(1.0), linear(0.7)]).expect("有效像素");
+        let rendered = render_rgb8(&source, &raised, &CurveSet::identity());
+        let baseline = render_rgb8(&source, &none, &CurveSet::identity());
+        assert_eq!(&rendered[3..6], &baseline[3..6], "截断的亮部不能因蓝通道单独增亮而发蓝");
+    }
+
     fn linear(value: f32) -> u16 {
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let encoded = (value.clamp(0.0, 1.0) * 65535.0 + 0.5) as u32;
@@ -893,6 +963,16 @@ mod tests {
             rgb.extend(pixel.iter().map(|v| linear(*v)));
         }
         LinearImage::new(pixels.len() as u32, 1, rgb).expect("形状对得上")
+    }
+
+    #[test]
+    fn highlight_and_black_curves_leave_out_of_gamut_channels_unchanged() {
+        assert_eq!(highlights_curve(1.25, 1.0), 1.25);
+        assert_eq!(blacks_curve(1.25, 1.0), 1.25);
+        assert_eq!(highlights_curve(-0.2, 1.0), -0.2);
+        assert_eq!(blacks_curve(-0.2, -1.0), -0.2);
+        assert!(highlights_curve(0.8, 1.0) > 0.8);
+        assert!(blacks_curve(0.2, 1.0) > 0.2);
     }
 
     #[test]
@@ -925,6 +1005,7 @@ mod tests {
         let zero_denoise = super::super::denoise::DenoisePlan::default();
         let zero_sharpen = super::super::sharpen::SharpenPlan::default();
         let stages = DevelopStages {
+            nr_method: Default::default(),
             lens: Some(&identity_map),
             denoise: Some(&zero_denoise),
             local_tone: None,
@@ -964,7 +1045,7 @@ mod tests {
         };
         let with_lens = render_develop(&source, &params, &curves, &stages);
         assert_ne!(with_lens, plain, "镜头校正必须真的改到像素");
-        assert!(with_lens[0] < plain[0], "角上应当变暗");
+        assert!(with_lens[0] > plain[0], "角上应当补亮");
 
         // 锐化：平坦图上没有细节可加，所以换一张有边缘的图来验
         let mut rgb = Vec::new();
@@ -1457,7 +1538,7 @@ mod tests {
         let resolved = Resolved::new(&params);
         let luts = ChannelLuts::build(&resolved, &curves);
         let mut single = vec![0u8; source.rgb.len()];
-        map_rows(&source.rgb, &mut single, &luts, &resolved);
+        map_rows(&source.rgb, &mut single, &luts, None, &resolved);
         assert_eq!(parallel, single, "多线程与单线程的输出必须一致");
     }
 
@@ -1496,4 +1577,12 @@ mod tests {
         assert_eq!(small.rgb[0], 32768);
         assert_eq!(small.rgb[3], 32768);
     }
+    #[test]
+    fn vibrance_does_not_reverse_after_saturation_pushes_a_channel_below_zero() {
+        let rgb=[0.9,0.1,0.05];
+        let saturated=apply_chroma(rgb,1.0,0.0);
+        let vibrant=apply_chroma(rgb,1.0,1.0);
+        assert_eq!(vibrant,saturated,"fully saturated colors should not lose saturation with positive vibrance");
+    }
+
 }

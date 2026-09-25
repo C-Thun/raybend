@@ -39,7 +39,7 @@ use super::pipeline::LinearImage;
 
 // ── 手动微调的最大幅度（拉杆 ±100 映射到这里；改它们 = 改观感）──
 
-/// 手动畸变：`k1` 的最大绝对值（poly3 的 `k1`；0.15 在画幅角上约 5.7% 的径向位移）。
+/// 手动畸变：按半对角归一的 poly3 强度；自动裁边之前，最大角上径向位移 15%。
 pub const MANUAL_DISTORTION_MAX: f32 = 0.15;
 /// 手动暗角：画幅角上的最大增益偏移（`±0.6` ⇒ 0.4×..1.6×）。
 pub const MANUAL_VIGNETTE_MAX: f32 = 0.6;
@@ -130,13 +130,10 @@ impl Distortion {
     fn residual(self, r: f64) -> f64 {
         match self {
             Self::Poly3 { k1 } => r * (1.0 + f64::from(k1) * r * r),
-            Self::Poly5 { k1, k2 } => {
-                r * (1.0 + f64::from(k1) * r * r + f64::from(k2) * r.powi(4))
+            Self::Poly5 { k1, k2 } => r * (1.0 + f64::from(k1) * r * r + f64::from(k2) * r.powi(4)),
+            Self::Ptlens { a, b, c } => {
+                r * (f64::from(a) * r.powi(3) + f64::from(b) * r * r + f64::from(c) * r + 1.0)
             }
-            Self::Ptlens { a, b, c } => r * (f64::from(a) * r.powi(3)
-                + f64::from(b) * r * r
-                + f64::from(c) * r
-                + 1.0),
         }
     }
 
@@ -188,12 +185,8 @@ fn poly3_tca(x: f32, y: f32, [v, c, b]: [f32; 3]) -> (f32, f32) {
     (x * poly, y * poly)
 }
 
-/// 暗角（`pa` 模型）：`c = 1 + k1·r² + k2·r⁴ + k3·r⁶`。
-///
-/// **校正 = 乘 `c`**（上游 `Reverse==true` 那条路走的是 `ModifyColor_Vignetting_PA`，
-/// 也就是乘 `c`；数据库里的 `k` 是**补偿**系数，不是衰减系数 —— 实测某镜头在画幅角上
-/// `c ≈ 0.575`，乘它会更暗、乘 `1/c` 才是补回来，而上游校正路径乘的是 `c`，
-/// 所以数据库里存的必然是补偿值）。
+/// 暗角 PA 模型存储衰减 `c = 1 + k1·r² + k2·r⁴ + k3·r⁶`。
+/// 校正在线性域乘 `1/c`；光心 c=1，因此曝光基准不变。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Vignetting {
     pub k1: f32,
@@ -207,37 +200,79 @@ impl Vignetting {
     pub fn gain(self, r2: f32) -> f32 {
         let r4 = r2 * r2;
         let r6 = r4 * r2;
-        1.0 + self.k1 * r2 + self.k2 * r4 + self.k3 * r6
+        let attenuation = 1.0 + self.k1 * r2 + self.k2 * r4 + self.k3 * r6;
+        if attenuation.is_finite() && attenuation > 0.0 {
+            attenuation.recip().min(16.0)
+        } else {
+            1.0
+        }
     }
 }
 
-/// 三根拉杆的手动微调（`−1..1`，0 = 不动）。
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+/// 手动微调：强度 `−1..1`，暗角范围 `0..1`。
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ManualLens {
     /// 畸变（叠加在配置文件之上）
     pub distortion: f32,
     /// 暗角
     pub vignette: f32,
-    /// 色差
+    /// 暗角补偿的作用范围（0=角落，1=向中心扩展）。
+    pub vignette_range: f32,
+    /// 红通道相对绿色的色差。
     pub chromatic: f32,
+    /// 蓝通道相对绿色的色差。
+    pub chromatic_blue: f32,
+}
+
+impl Default for ManualLens {
+    fn default() -> Self {
+        Self {
+            distortion: 0.0,
+            vignette: 0.0,
+            vignette_range: 0.5,
+            chromatic: 0.0,
+            chromatic_blue: 0.0,
+        }
+    }
 }
 
 impl ManualLens {
-    /// 从三根拉杆（`−100..100`）建（越界夹取，不 panic）。
+    /// 从界面拉杆建；非法输入回到中性，越界夹取。
     #[must_use]
-    pub fn from_sliders(distortion: f64, vignette: f64, chromatic: f64) -> Self {
-        let unit = |value: f64| (value / 100.0).clamp(-1.0, 1.0) as f32;
+    pub fn from_sliders(
+        distortion: f64,
+        vignette: f64,
+        chromatic: f64,
+        vignette_range: f64,
+        chromatic_blue: f64,
+    ) -> Self {
+        let unit = |value: f64| {
+            if value.is_finite() {
+                (value / 100.0).clamp(-1.0, 1.0) as f32
+            } else {
+                0.0
+            }
+        };
         Self {
             distortion: unit(distortion),
             vignette: unit(vignette),
             chromatic: unit(chromatic),
+            chromatic_blue: unit(chromatic_blue),
+            vignette_range: if vignette_range.is_finite() {
+                unit(vignette_range).max(0.0)
+            } else {
+                0.5
+            },
         }
     }
 
     /// 有没有动过（三个都是 0 就是没动）。
     #[must_use]
     pub fn is_identity(self) -> bool {
-        self.distortion == 0.0 && self.vignette == 0.0 && self.chromatic == 0.0
+        self.distortion == 0.0
+            && self.vignette == 0.0
+            && self.chromatic == 0.0
+            && self.chromatic_blue == 0.0
     }
 
     /// 手动畸变叠加的 `k1`（**已按画幅角归一**）。
@@ -257,16 +292,20 @@ impl ManualLens {
         }
     }
 
-    /// 手动色差：红/蓝的径向缩放（红放大时蓝缩小）。
+    /// 手动色差：红、蓝分别相对绿色径向缩放。
     fn tca_scales(self) -> (f32, f32) {
-        let d = self.chromatic * MANUAL_TCA_MAX;
-        (1.0 + d, 1.0 - d)
+        (
+            1.0 + self.chromatic * MANUAL_TCA_MAX,
+            1.0 + self.chromatic_blue * MANUAL_TCA_MAX,
+        )
     }
 }
 
 /// **归一化坐标映射**（lensfun 的惯例；与像素尺寸无关）。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Norm {
+    width: u32,
+    height: u32,
     /// `hypot(36,24) / crop / hypot(W+1, H+1) / real_focal`
     pub scale: f64,
     /// 光心在归一化坐标里的位置
@@ -282,8 +321,8 @@ impl Norm {
     /// 按镜头厂商给的 crop factor 与真实焦距算归一化（`real_focal` 缺省用标称焦距）。
     #[must_use]
     pub fn new(width: u32, height: u32, crop: f32, real_focal: f64) -> Self {
-        let w = if width >= 2 { f64::from(width - 1) } else { 1.0 };
-        let h = if height >= 2 { f64::from(height - 1) } else { 1.0 };
+        let w = f64::from(width.saturating_sub(1));
+        let h = f64::from(height.saturating_sub(1));
         let crop = if crop.is_finite() && crop > 0.0 {
             f64::from(crop)
         } else {
@@ -296,6 +335,8 @@ impl Norm {
         };
         let scale = 36.0_f64.hypot(24.0) / crop / (w + 1.0).hypot(h + 1.0) / focal;
         Self {
+            width,
+            height,
             scale,
             center_x: w / 2.0 * scale,
             center_y: h / 2.0 * scale,
@@ -307,13 +348,47 @@ impl Norm {
 
     /// 带光心偏移的版本（`center_x/y` 是镜头厂商给的相对偏移，单位 = 短边的一半）。
     #[must_use]
-    pub fn with_center_offset(mut self, offset_x: f32, offset_y: f32, width: u32, height: u32) -> Self {
-        let w = if width >= 2 { f64::from(width - 1) } else { 1.0 };
-        let h = if height >= 2 { f64::from(height - 1) } else { 1.0 };
+    pub fn with_center_offset(
+        mut self,
+        offset_x: f32,
+        offset_y: f32,
+        width: u32,
+        height: u32,
+    ) -> Self {
+        let w = f64::from(width.saturating_sub(1));
+        let h = f64::from(height.saturating_sub(1));
         let size = w.min(h);
         self.center_x += size / 2.0 * f64::from(offset_x) * self.scale;
         self.center_y += size / 2.0 * f64::from(offset_y) * self.scale;
         self
+    }
+
+    /// 同一张图换像素尺寸：保留传感器/焦距尺度与光心的相对偏移。
+    /// 系数可以跨预览档复用，像素坐标中心不能跨档复用。
+    fn resized(self, width: u32, height: u32) -> Self {
+        if (self.width, self.height) == (width, height) {
+            return self;
+        }
+        let diagonal = f64::from(self.width.max(1)).hypot(f64::from(self.height.max(1)));
+        let scale = self.scale * diagonal / f64::from(width.max(1)).hypot(f64::from(height.max(1)));
+        let half_w = f64::from(width.saturating_sub(1)) * scale * 0.5;
+        let half_h = f64::from(height.saturating_sub(1)) * scale * 0.5;
+        let short = self.half_w.min(self.half_h);
+        let offset_scale = if short > 0.0 {
+            half_w.min(half_h) / short
+        } else {
+            0.0
+        };
+        Self {
+            width,
+            height,
+            scale,
+            half_w,
+            half_h,
+            half_diag: half_w.hypot(half_h),
+            center_x: half_w + (self.center_x - self.half_w) * offset_scale,
+            center_y: half_h + (self.center_y - self.half_h) * offset_scale,
+        }
     }
 
     /// 像素 → 归一化（**已减光心**）。
@@ -410,7 +485,7 @@ pub struct LensMap {
     tca: Option<Tca>,
     manual_tca: (f32, f32),
     vignetting: Option<Vignetting>,
-    manual_vignette: f32,
+    manual: ManualLens,
     /// 归一化下的半对角（手动暗角以画幅角为 1）
     corner_r: f64,
     identity: bool,
@@ -423,7 +498,8 @@ impl LensMap {
         let manual = correction.manual;
         let corner_r = correction.norm.half_diag.max(f64::EPSILON);
         let has_geometry = correction.distortion.is_some() || manual.distortion != 0.0;
-        let has_tca = correction.tca.is_some() || manual.chromatic != 0.0;
+        let has_tca =
+            correction.tca.is_some() || manual.chromatic != 0.0 || manual.chromatic_blue != 0.0;
         let scale = if has_geometry || has_tca {
             auto_scale(correction)
         } else {
@@ -441,10 +517,23 @@ impl LensMap {
             tca: correction.tca,
             manual_tca: manual.tca_scales(),
             vignetting: correction.vignetting,
-            manual_vignette: manual.vignette,
+            manual,
             corner_r,
             identity: correction.is_identity(),
         }
+    }
+
+    fn for_image(&self, width: u32, height: u32) -> Self {
+        if (self.norm.width, self.norm.height) == (width, height) {
+            return self.clone();
+        }
+        Self::new(&LensCorrection {
+            norm: self.norm.resized(width, height),
+            distortion: self.distortion,
+            tca: self.tca,
+            vignetting: self.vignetting,
+            manual: self.manual,
+        })
     }
 
     /// 整趟可以跳过吗（没有配置文件、也没有手动微调）。
@@ -534,10 +623,13 @@ impl LensMap {
     fn vignette_gain_norm(&self, nx: f32, ny: f32) -> f32 {
         let r2 = nx * nx + ny * ny;
         let mut gain = self.vignetting.map_or(1.0, |v| v.gain(r2));
-        if self.manual_vignette != 0.0 {
+        if self.manual.vignette != 0.0 {
             #[allow(clippy::cast_possible_truncation)]
             let t = (f64::from(r2) / (self.corner_r * self.corner_r)) as f32;
-            gain *= 1.0 + self.manual_vignette * MANUAL_VIGNETTE_MAX * t;
+            let start = 0.8 * (1.0 - self.manual.vignette_range.clamp(0.0, 1.0));
+            let u = ((t - start) / (1.0 - start)).clamp(0.0, 1.0);
+            let weight = u * u * (3.0 - 2.0 * u);
+            gain *= 1.0 + self.manual.vignette * MANUAL_VIGNETTE_MAX * weight;
         }
         if gain.is_finite() && gain > 0.0 {
             gain
@@ -549,7 +641,7 @@ impl LensMap {
     /// 有暗角要补吗（没有就整趟不查）。
     #[inline]
     fn has_vignette(&self) -> bool {
-        self.vignetting.is_some() || self.manual_vignette != 0.0
+        self.vignetting.is_some() || self.manual.vignette != 0.0
     }
 
     /// 红/蓝与绿**用不同的坐标**吗（没有 TCA 就三通道共用一套，省两次映射）。
@@ -607,7 +699,10 @@ pub fn auto_scale(correction: &LensCorrection) -> f64 {
     }
     let mut scale = scale * AUTO_SCALE_MARGIN;
     // 有 TCA 时再多留千分之一（上游同样处理：亚像素通道可能把边界推出去一点）
-    if correction.tca.is_some() || correction.manual.chromatic != 0.0 {
+    if correction.tca.is_some()
+        || correction.manual.chromatic != 0.0
+        || correction.manual.chromatic_blue != 0.0
+    {
         scale *= AUTO_SCALE_MARGIN;
     }
     if scale.is_finite() && scale > 0.0 {
@@ -647,9 +742,11 @@ fn inverse_map(correction: &LensCorrection, x: f32, y: f32) -> (f32, f32) {
 /// 映射是恒等时直接 `clone`（**逐位一致**，不是「近似不变」）。
 #[must_use]
 pub fn warp_lens(source: &LinearImage, map: &LensMap) -> LinearImage {
-    if map.is_identity() {
+    if map.is_identity() || !source.is_consistent() {
         return source.clone();
     }
+    let resized = map.for_image(source.width, source.height);
+    let map = &resized;
     let width = source.width as usize;
     let height = source.height as usize;
     let mut out = vec![0u16; source.rgb.len()];
@@ -916,13 +1013,13 @@ mod tests {
 
     #[test]
     fn vignetting_gain_matches_hand_computed_value() {
-        // k1 = -1.0、其余 0：r² = 0.25 → 1 - 0.25 = 0.75
+        // 衰减 0.75 ⇒ 补偿增益 1 / 0.75。
         let v = Vignetting {
             k1: -1.0,
             k2: 0.0,
             k3: 0.0,
         };
-        assert!((v.gain(0.25) - 0.75).abs() < 1e-6);
+        assert!((v.gain(0.25) - 1.0 / 0.75).abs() < 1e-6);
         assert!((v.gain(0.0) - 1.0).abs() < 1e-6);
     }
 
@@ -936,7 +1033,11 @@ mod tests {
         let expected = 36.0_f64.hypot(24.0) / 6000.0_f64.hypot(4000.0) / 35.0;
         assert!((norm.scale - expected).abs() < 1e-18, "{}", norm.scale);
         // 画幅角：归一化半径应约 0.618（= 半对角 mm / 焦距）
-        assert!((norm.half_diag - 21.633_3 / 35.0).abs() < 1e-3, "{}", norm.half_diag);
+        assert!(
+            (norm.half_diag - 21.633_3 / 35.0).abs() < 1e-3,
+            "{}",
+            norm.half_diag
+        );
     }
 
     #[test]
@@ -946,7 +1047,10 @@ mod tests {
         let preview = Norm::new(3000, 2000, 1.0, 35.0);
         let (fx, fy) = full.to_norm(1500.0, 1000.0);
         let (px, py) = preview.to_norm(750.0, 500.0);
-        assert!((fx - px).abs() < 1e-4 && (fy - py).abs() < 1e-4, "{fx},{fy} vs {px},{py}");
+        assert!(
+            (fx - px).abs() < 1e-4 && (fy - py).abs() < 1e-4,
+            "{fx},{fy} vs {px},{py}"
+        );
     }
 
     #[test]
@@ -959,7 +1063,10 @@ mod tests {
         assert!((norm.border_radius(d, d) - norm.half_h * 2.0_f64.sqrt()).abs() < 1e-12);
         // 正对角方向才打到角上
         let diag = (norm.half_w * norm.half_w + norm.half_h * norm.half_h).sqrt();
-        assert!((norm.border_radius(norm.half_w / diag, norm.half_h / diag) - norm.half_diag).abs() < 1e-12);
+        assert!(
+            (norm.border_radius(norm.half_w / diag, norm.half_h / diag) - norm.half_diag).abs()
+                < 1e-12
+        );
     }
 
     // ── 映射与自动缩放 ──
@@ -979,14 +1086,14 @@ mod tests {
         let norm = Norm::new(101, 101, 1.0, 35.0);
         let mut c = correction(norm);
         c.distortion = Some(Distortion::Poly3 { k1: -0.2 });
-        c.tca = Some(Tca::Linear {
-            kr: 1.01,
-            kb: 0.99,
-        });
+        c.tca = Some(Tca::Linear { kr: 1.01, kb: 0.99 });
         let map = LensMap::new(&c);
         let coords = map.source_coords(50.0, 50.0);
         for [x, y] in coords {
-            assert!((x - 50.0).abs() < 1e-3 && (y - 50.0).abs() < 1e-3, "{x},{y}");
+            assert!(
+                (x - 50.0).abs() < 1e-3 && (y - 50.0).abs() < 1e-3,
+                "{x},{y}"
+            );
         }
     }
 
@@ -1025,7 +1132,11 @@ mod tests {
         let mut c = correction(norm);
         c.distortion = Some(Distortion::Poly3 { k1: 0.3 });
         let map = LensMap::new(&c);
-        assert!(map.auto_scale_value() > 1.0, "scale = {}", map.auto_scale_value());
+        assert!(
+            map.auto_scale_value() > 1.0,
+            "scale = {}",
+            map.auto_scale_value()
+        );
     }
 
     #[test]
@@ -1088,7 +1199,7 @@ mod tests {
         let center = map.vignette_gain(299.5, 199.5);
         assert!((center - 1.0).abs() < 1e-3, "光心增益 = {center}");
         let corner = map.vignette_gain(599.0, 399.0);
-        assert!(corner < 1.0, "角上增益 = {corner}（补偿系数为负 ⇒ 小于 1）");
+        assert!(corner > 1.0, "角上应补亮：{corner}");
     }
 
     #[test]
@@ -1096,7 +1207,7 @@ mod tests {
         let source = linear(64, 48, |_, _| [30000, 30000, 30000]);
         let norm = Norm::new(64, 48, 1.0, 35.0);
         let mut c = correction(norm);
-        // 补偿系数为负 ⇒ 校正增益 < 1 ⇒ 角上变暗；这是「方向正确」的判据
+        // 衰减系数为负 ⇒ 校正增益 > 1 ⇒ 角上补亮。
         c.vignetting = Some(Vignetting {
             k1: -0.5,
             k2: 0.0,
@@ -1110,7 +1221,10 @@ mod tests {
             center.abs_diff(30000) <= 5,
             "光心不该被暗角明显动到：{center}"
         );
-        assert!(corner < center - 1000, "角上应当被乘上 < 1 的增益：{corner} vs {center}");
+        assert!(
+            corner > center + 1000,
+            "角上应当被补亮：{corner} vs {center}"
+        );
     }
 
     #[test]
@@ -1127,5 +1241,81 @@ mod tests {
         for pixel in out.rgb.as_chunks::<3>().0 {
             assert_eq!(*pixel, [1000, 2000, 3000], "越界夹取不该产生 0（黑）");
         }
+    }
+    #[test]
+    fn full_resolution_profile_renders_preview_about_its_own_center() {
+        let source = ramp(63, 41);
+        for manual in [
+            ManualLens {
+                distortion: -0.8,
+                ..ManualLens::default()
+            },
+            ManualLens {
+                vignette: 0.8,
+                ..ManualLens::default()
+            },
+        ] {
+            let full = LensCorrection::manual_only(6300, 4100, manual);
+            let preview = LensCorrection::manual_only(63, 41, manual);
+            let actual = warp_lens(&source, &LensMap::new(&full));
+            let expected = warp_lens(&source, &LensMap::new(&preview));
+            for (a, b) in actual.rgb.iter().zip(&expected.rgb) {
+                assert!(
+                    a.abs_diff(*b) <= 1,
+                    "preview uses full-resolution coordinates: {a} vs {b}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn calibrated_vignette_recovers_uniform_illumination() {
+        let norm = Norm::new(65, 49, 1.0, 35.0);
+        let source = linear(65, 49, |x, y| {
+            let (nx, ny) = norm.to_norm(x as f32, y as f32);
+            let attenuation = 1.0 - 0.7 * (nx * nx + ny * ny);
+            [((30000.0 * attenuation).round() as u16); 3]
+        });
+        let mut c = correction(norm);
+        c.vignetting = Some(Vignetting {
+            k1: -0.7,
+            k2: 0.0,
+            k3: 0.0,
+        });
+        let out = warp_lens(&source, &LensMap::new(&c));
+        assert!(out.rgb.iter().all(|v| v.abs_diff(30000) <= 2));
+    }
+
+    #[test]
+    fn range_preserves_center_and_extends_compensation_inwards() {
+        let mut c = LensCorrection::manual_only(101, 101, ManualLens::default());
+        c.manual.vignette = 1.0;
+        c.manual.vignette_range = 0.0;
+        let narrow = LensMap::new(&c);
+        c.manual.vignette_range = 1.0;
+        let wide = LensMap::new(&c);
+        assert_eq!(narrow.vignette_gain(50.0, 50.0), 1.0);
+        assert_eq!(wide.vignette_gain(50.0, 50.0), 1.0);
+        assert!((narrow.vignette_gain(0.0, 0.0) - wide.vignette_gain(0.0, 0.0)).abs() < 1e-6);
+        assert!(wide.vignette_gain(80.0, 80.0) > narrow.vignette_gain(80.0, 80.0));
+        assert!((wide.vignette_gain(0.0, 0.0) - 1.6).abs() < 1e-6);
+    }
+    #[test]
+    fn red_and_blue_adjustments_are_independent() {
+        let red = ManualLens::from_sliders(0.0, 0.0, 100.0, 50.0, 0.0);
+        assert_eq!(red.tca_scales(), (1.0025, 1.0));
+        let blue = ManualLens::from_sliders(0.0, 0.0, 0.0, 50.0, -100.0);
+        assert_eq!(blue.tca_scales(), (1.0, 0.9975));
+        assert!(!blue.is_identity());
+        assert!(ManualLens::from_sliders(f64::NAN, f64::INFINITY, 0.0, 0.0, 0.0).is_identity());
+    }
+    #[test]
+    fn resized_profile_keeps_relative_optical_center_offset() {
+        let large = Norm::new(6000, 4000, 2.0, 12.0).with_center_offset(0.1, -0.2, 6000, 4000);
+        let small = large.resized(600, 400);
+        let expected = Norm::new(600, 400, 2.0, 12.0).with_center_offset(0.1, -0.2, 600, 400);
+        assert!((small.center_x - expected.center_x).abs() < 1e-9);
+        assert!((small.center_y - expected.center_y).abs() < 1e-9);
+        assert_eq!(Norm::new(1, 1, 1.0, 35.0).to_pixel(0.0, 0.0), (0.0, 0.0));
     }
 }

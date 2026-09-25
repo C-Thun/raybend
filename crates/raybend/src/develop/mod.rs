@@ -9,6 +9,7 @@
 //! ├── filters.rs   箱式滤波 / 快速引导滤波（边缘保持，局部色调映射的底层算子）
 //! ├── local_tone.rs 动态反差（局部色调映射：压整体光比 + 抬局部反差）
 //! ├── lens.rs      镜头校正（畸变 / 横向色差 / 暗角：模型 + 数学 + 像素趟）
+//! ├── lut.rs       LUT（`.cube` / HaldCLUT）：解析、求值与封面烘焙（**W6c 落点**；现只有内置样片）
 //! ├── pipeline.rs  线性像素 → 参数 → 8bit 显示（参考实现 + LUT 快路径）
 //! └── sharpen.rs   锐化（显示域亮度 unsharp + 软限幅）
 //! ```
@@ -34,9 +35,14 @@
 pub mod color;
 pub mod curve;
 pub mod denoise;
+pub mod bm3d;
+pub mod denoise_job;
+pub mod reference;
 pub mod filters;
+pub mod geometry;
 pub mod lens;
 pub mod local_tone;
+pub mod lut;
 pub mod params;
 pub mod pipeline;
 pub mod sharpen;

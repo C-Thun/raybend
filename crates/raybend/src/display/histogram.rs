@@ -60,6 +60,8 @@ pub struct Histogram {
     pub r: Vec<f64>,
     pub g: Vec<f64>,
     pub b: Vec<f64>,
+    /// 显示亮度（Rec.709），供 RGB 总曲线作底纹；不能从三个边缘直方图反推。
+    pub luma: Vec<f64>,
     pub max: f64,
 }
 
@@ -72,6 +74,7 @@ impl Histogram {
             r: vec![0.0; bins],
             g: vec![0.0; bins],
             b: vec![0.0; bins],
+            luma: vec![0.0; bins],
             max: 0.0,
         }
     }
@@ -96,11 +99,16 @@ pub fn histogram_of_rgb8(rgb: &[u8], bins: usize) -> Histogram {
     if bins == 0 {
         return Histogram::empty(0);
     }
-    let mut raw = [[0_u32; 256]; 3];
+    let mut raw = [[0_u32; 256]; 4];
     for pixel in rgb.as_chunks::<3>().0 {
         raw[0][usize::from(pixel[0])] += 1;
         raw[1][usize::from(pixel[1])] += 1;
         raw[2][usize::from(pixel[2])] += 1;
+        // 整数 Rec.709 系数之和为 10000，四舍五入后落入 0..255。
+        let y = (2126_u32 * u32::from(pixel[0])
+            + 7152_u32 * u32::from(pixel[1])
+            + 722_u32 * u32::from(pixel[2]) + 5000) / 10000;
+        raw[3][y as usize] += 1;
     }
     let collapse = |channel: &[u32; 256]| -> Vec<f64> {
         let mut out = Vec::with_capacity(DEFAULT_BINS);
@@ -118,6 +126,7 @@ pub fn histogram_of_rgb8(rgb: &[u8], bins: usize) -> Histogram {
         r: collapse(&raw[0]),
         g: collapse(&raw[1]),
         b: collapse(&raw[2]),
+        luma: collapse(&raw[3]),
         max: 0.0,
     };
     out.max = out
@@ -163,6 +172,16 @@ mod tests {
         assert_eq!(h.g[0], 1.0);
         assert_eq!(h.b[85], 1.0 / 3.0);
         assert_eq!(h.max, 1.0);
+    }
+
+    #[test]
+    fn luminance_is_counted_from_pixels_not_channel_histograms() {
+        let h = histogram_of_image(&img(&[[255, 0, 0], [0, 255, 0], [0, 0, 255]]), DEFAULT_BINS);
+        assert_eq!(h.luma.len(), DEFAULT_BINS);
+        assert_eq!(h.luma[18], 1.0 / 3.0, "红色亮度约 54");
+        assert_eq!(h.luma[61], 1.0 / 3.0, "绿色亮度约 182");
+        assert_eq!(h.luma[6], 1.0 / 3.0, "蓝色亮度约 18");
+        assert_eq!(h.luma[85], 0.0, "纯色像素不应被误当成白光");
     }
 
     #[test]

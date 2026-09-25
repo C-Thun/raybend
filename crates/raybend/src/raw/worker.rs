@@ -77,14 +77,14 @@ pub fn shared() -> &'static Mutex<RawWorker> {
 /// 光靠「记得重建」不够 —— 所以现在版本对不上就**当面报错**，并且错误里写清怎么修。
 ///
 /// 版本史：v1 = 只有 `srgb8`；v2 = 加 `linear16` + `as_shot_temperature`。
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
 
 /// 版本标签（**机器可读**，给「产物是不是这一份源码建的」用）。
 ///
 /// `scripts/check-win-artifact.mjs` 会在 Windows 的 worker 可执行文件里找这个串 ——
 /// 找不到就说明**主程序新、worker 旧**（2026-09-24 那次真机事故的样子），当场报错。
 /// 它由 worker 启动时打到 stderr，所以一定在二进制里。**改协议就改它**（连同版本号）。
-pub const PROTOCOL_TAG: &str = "raybend-worker-proto-v2";
+pub const PROTOCOL_TAG: &str = "raybend-worker-proto-v3";
 
 /// 版本对不上时给人的那句话（客户端与测试共用一份文案）。
 fn protocol_mismatch(theirs: u32) -> String {
@@ -135,6 +135,8 @@ struct Response {
     /// **拍摄色温估计**（K，只有 `linear16` 会给）——色温拉杆的基线。
     #[serde(default)]
     as_shot_temperature: Option<f32>,
+    #[serde(default)]
+    lens_name: Option<String>,
     #[serde(default)]
     payload_len: u64,
     /// 协议版本回执（旧 worker 不发这个字段 = 0 ⇒ 客户端据此判定「它过期了」）。
@@ -280,6 +282,23 @@ impl RawWorker {
     #[must_use]
     pub fn is_running(&self) -> bool {
         self.proc.is_some()
+    }
+
+    /// 不解码像素，只从 RAW 厂商元数据读取镜头名称。
+    pub fn lens_name(&mut self, path: &std::path::Path) -> Result<Option<String>, WorkerError> {
+        let wire = Request {
+            op: "metadata".to_string(),
+            path: path.to_string_lossy().into_owned(),
+            ..Request::default()
+        };
+        let (head, payload) = self.round_trip_raw(&wire)?;
+        if !head.ok {
+            return Err(WorkerError::Decode(head.error.unwrap_or_else(|| "RAW 元数据读取失败".to_string())));
+        }
+        if !payload.is_empty() {
+            return Err(WorkerError::Protocol("元数据响应不应包含像素".to_string()));
+        }
+        Ok(head.lens_name)
     }
 
     /// 主动结束子进程（应用退出时调用；`Drop` 里也会做一次）。
@@ -840,6 +859,10 @@ fn handle(request: Request) -> (Response, Vec<u8>) {
                 Vec::new(),
             )
         }
+        "metadata" => match RawlerBackend::lens_name(std::path::Path::new(&request.path)) {
+            Ok(lens_name) => (Response { ok: true, lens_name, ..Response::default() }, Vec::new()),
+            Err(error) => (Response { ok: false, error: Some(error.to_string()), ..Response::default() }, Vec::new()),
+        },
         "decode" => {
             let req = super::backend::DecodeRequest {
                 path: PathBuf::from(&request.path),

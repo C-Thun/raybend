@@ -93,6 +93,16 @@ impl RawlerBackend {
     pub const fn new() -> Self {
         Self
     }
+
+    /// 只解析 RAW 头和厂商 MakerNote；镜头识别留在隔离 worker 内。
+    pub fn lens_name(path: &Path) -> RawResult<Option<String>> {
+        let opened = open(&DecodeRequest::full(path))?;
+        let metadata = opened.decoder.raw_metadata(&opened.source, &opened.params)
+            .map_err(|e| classify(e.to_string()))?;
+        Ok(metadata.exif.lens_model
+            .or_else(|| metadata.lens.map(|lens| lens.lens_name))
+            .filter(|name| !name.trim().is_empty()))
+    }
 }
 
 impl RawBackend for RawlerBackend {

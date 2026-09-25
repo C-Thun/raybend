@@ -34,7 +34,17 @@ fn main() {
             println!("文件不存在");
             continue;
         }
-        let data = exif::read_file_for(path);
+        let mut data = exif::read_file_for(path);
+        if data.lens.is_none() && raybend::media::kind::kind_of_file(
+            &path.file_name().unwrap_or_default().to_string_lossy(),
+        ) == raybend::media::kind::MediaKind::Raw {
+            data.lens = raybend::raw::worker::shared()
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .lens_name(path)
+                .ok()
+                .flatten();
+        }
         println!(
             "机身：{} {}   镜头：{}",
             data.camera_make.as_deref().unwrap_or("(无)"),

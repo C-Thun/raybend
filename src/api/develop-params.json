@@ -28,8 +28,10 @@
     { "id": "sharpenAmount", "min": 0, "max": 100, "step": 1, "default": 0, "origin": "start", "wired": true, "baseline": "static" },
     { "id": "sharpenRadius", "min": 0, "max": 100, "step": 1, "default": 0, "origin": "start", "wired": true, "baseline": "static" },
 
-    { "id": "distortion", "min": -100, "max": 100, "step": 1, "default": 0, "origin": "center", "wired": false, "baseline": "static" },
-    { "id": "vignette", "min": -100, "max": 100, "step": 1, "default": 0, "origin": "center", "wired": false, "baseline": "static" },
-    { "id": "chromatic", "min": -100, "max": 100, "step": 1, "default": 0, "origin": "center", "wired": false, "baseline": "static" }
+    { "id": "distortion", "min": -100, "max": 100, "step": 1, "default": 0, "origin": "center", "wired": true, "baseline": "static" },
+    { "id": "vignette", "min": -100, "max": 100, "step": 1, "default": 0, "origin": "center", "wired": true, "baseline": "static" },
+    { "id": "vignetteRange", "min": 0, "max": 100, "step": 1, "default": 50, "origin": "start", "wired": true, "baseline": "static" },
+    { "id": "chromatic", "min": -100, "max": 100, "step": 1, "default": 0, "origin": "center", "wired": true, "baseline": "static" },
+    { "id": "chromaticBlue", "min": -100, "max": 100, "step": 1, "default": 0, "origin": "center", "wired": true, "baseline": "static" }
   ]
 }

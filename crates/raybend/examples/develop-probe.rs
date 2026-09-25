@@ -240,6 +240,7 @@ fn main() {
                 denoise: Some(&all_plans.denoise),
                 local_tone: None,
                 sharpen: Some(&all_plans.sharpen),
+                ..DevelopStages::default()
             },
         );
     }

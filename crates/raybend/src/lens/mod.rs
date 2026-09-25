@@ -14,7 +14,7 @@
 //!
 //! [`database`] 第一次调用要解压 + 解析约 5 MB XML，**几百毫秒** ——
 //! 绝不能在窗口启动路径或显影线程里同步等它。正确用法：
-//! 启动后在后台线程调 [`warm_up`]，界面先用 [`is_ready`] 决定显示「配置文件加载中…」。
+//! 启动后在后台线程调 [`warm_up`]；显式查询等待库加载并返回失败原因，界面单独跟踪请求状态。
 //!
 //! # 系数为什么还要「重标定」
 //!
@@ -25,46 +25,115 @@
 //! 本模块照抄那套公式（含 `d = 1 - Σk` 的 poly3/ptlens 归一），**自己算**而不是让 crate 的
 //! `Modifier` 算 —— 因为我们要的是**系数**（喂给自己的像素循环），而不是它的行级回调。
 
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 use lensfun::calib::{DistortionModel, TcaModel, VignettingModel};
 use lensfun::{Database, Lens};
 
-use crate::develop::lens::{
-    Distortion, LensCorrection, ManualLens, Norm, Tca, Vignetting,
-};
+use crate::develop::lens::{Distortion, LensCorrection, ManualLens, Norm, Tca, Vignetting};
 
 /// 「无穷远」的拍摄距离（米）。EXIF 里基本读不到对焦距离，
 /// 而上游的暗角插值需要一个距离轴 —— 用 1000 m（与 darktable 的默认一致）。
 pub const FAR_DISTANCE: f32 = 1000.0;
 
-static DATABASE: OnceLock<Option<Database>> = OnceLock::new();
+struct DatabaseCache {
+    database: OnceLock<Database>,
+    failure: Mutex<Option<String>>,
+}
+impl DatabaseCache {
+    const fn new() -> Self {
+        Self {
+            database: OnceLock::new(),
+            failure: Mutex::new(None),
+        }
+    }
+    fn load(
+        &self,
+        retry: bool,
+        loader: impl FnOnce() -> Result<Database, String>,
+    ) -> Result<&Database, String> {
+        if let Some(database) = self.database.get() {
+            return Ok(database);
+        }
+        let mut failure = self
+            .failure
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(database) = self.database.get() {
+            return Ok(database);
+        }
+        if !retry && let Some(error) = failure.as_ref() {
+            return Err(error.clone());
+        }
+        match loader() {
+            Ok(database) => {
+                let _ = self.database.set(database);
+                *failure = None;
+                self.database
+                    .get()
+                    .ok_or_else(|| "lens database was not initialized".to_owned())
+            }
+            Err(error) => {
+                *failure = Some(error.clone());
+                Err(error)
+            }
+        }
+    }
+}
+static DATABASE: DatabaseCache = DatabaseCache::new();
 
-/// 惰性加载数据库；失败或还没加载完就是 `None`（**不 panic、不阻塞重试**）。
+/// Load once successfully; preserve failures for diagnostics. Explicit requests can retry a failure.
+pub fn load_database(retry: bool) -> Result<&'static Database, String> {
+    DATABASE.load(retry, || {
+        let started = std::time::Instant::now();
+        let result = (|| {
+            let mut db =
+                Database::load_bundled().map_err(|error| format!("加载内置镜头库失败：{error}"))?;
+            for lens in &mut db.lenses {
+                lens.guess_parameters();
+            }
+            if db.lenses.is_empty() {
+                return Err("内置镜头库没有镜头条目".to_owned());
+            }
+            Ok(db)
+        })();
+        match &result {
+            Ok(db) => eprintln!(
+                "[lens.database] ready lenses={} cameras={} elapsed_ms={}",
+                db.lenses.len(),
+                db.cameras.len(),
+                started.elapsed().as_millis()
+            ),
+            Err(error) => eprintln!(
+                "[lens.database] failed elapsed_ms={} error={error}",
+                started.elapsed().as_millis()
+            ),
+        }
+        result
+    })
+}
 #[must_use]
 pub fn database() -> Option<&'static Database> {
-    DATABASE.get_or_init(|| Database::load_bundled().ok()).as_ref()
+    load_database(false).ok()
 }
-
-/// 数据库就绪了吗（界面据此决定显示「加载中」还是「未匹配」）。
 #[must_use]
 pub fn is_ready() -> bool {
-    DATABASE.get().is_some_and(Option::is_some)
+    DATABASE.database.get().is_some()
 }
-
-/// **后台预热**：启动后在单独线程里调它。重复调用无副作用。
 pub fn warm_up() {
-    let _ = database();
+    let _ = load_database(false);
 }
 
 /// 下拉里的一个镜头条目（**稳定键** = `maker|model`）。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LensProfile {
     pub key: String,
     pub maker: String,
     pub model: String,
     /// 投影类型是矩形吗（鱼眼 / 全景的**几何**校正本轮不做，见 [`ResolvedProfile::geometry`]）
     pub rectilinear: bool,
+    pub focal_min: f32,
+    pub focal_max: f32,
 }
 
 impl LensProfile {
@@ -131,36 +200,358 @@ fn profile_of(lens: &Lens) -> LensProfile {
         maker: lens.maker.clone(),
         model: lens.model.clone(),
         rectilinear: matches!(lens.lens_type, lensfun::LensType::Rectilinear),
+        focal_min: lens.focal_min,
+        focal_max: lens.focal_max,
     }
 }
 
-/// **自动识别**：机身 + EXIF 里的镜头字符串 → 库里的镜头条目。
-///
-/// 完全靠字符串模糊匹配（与上游 `FindLenses` 同一套打分）；**匹配不到就 `None`**，
-/// 不猜、不退回「取第一支镜头」那种会把校正做错的做法。
+/// A model's stable optical identity. All values are hundredths to avoid float key drift.
+/// The generation defaults to 1 when the model does not say II/III/Mark 2/etc.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct LensFeatures {
+    maker: String,
+    focal_min: u32,
+    focal_max: u32,
+    aperture: Option<(u32, u32)>,
+    generation: u8,
+}
+
+fn number_at(text: &str, start: usize) -> Option<(f32, usize)> {
+    let bytes = text.as_bytes();
+    let mut end = start;
+    while end < bytes.len() && (bytes[end].is_ascii_digit() || bytes[end] == b'.') {
+        end += 1;
+    }
+    if end == start {
+        return None;
+    }
+    let number = text.get(start..end)?.parse::<f32>().ok()?;
+    number.is_finite().then_some((number, end))
+}
+fn key_number(number: f32) -> Option<u32> {
+    (number.is_finite() && (0.7..=2000.0).contains(&number))
+        .then(|| (number * 100.0).round() as u32)
+}
+fn skip_spaces(text: &str, mut offset: usize) -> usize {
+    while text
+        .as_bytes()
+        .get(offset)
+        .is_some_and(u8::is_ascii_whitespace)
+    {
+        offset += 1;
+    }
+    offset
+}
+fn separator(text: &str, offset: usize) -> Option<usize> {
+    let next = text.get(offset..)?.chars().next()?;
+    if matches!(next, '-' | '–' | '—' | '−') {
+        Some(offset + next.len_utf8())
+    } else {
+        None
+    }
+}
+/// Reuse the same parser for EXIF and bundled models; Lensfun only extracts the first aperture
+/// and misses formats such as `12-60/F3.5-5.6` and Unicode focal separators.
+fn aperture_of(model: &str) -> Option<(usize, u32, u32)> {
+    let bytes = model.as_bytes();
+    for offset in 0..bytes.len() {
+        let marker = bytes[offset].eq_ignore_ascii_case(&b'f')
+            && (offset == 0 || !bytes[offset - 1].is_ascii_alphanumeric())
+            || bytes[offset] == b'1'
+                && bytes.get(offset + 1) == Some(&b':')
+                && (offset == 0 || !bytes[offset - 1].is_ascii_alphanumeric());
+        if !marker {
+            continue;
+        }
+        let mut start = offset + if bytes[offset] == b'1' { 2 } else { 1 };
+        if bytes.get(start) == Some(&b'/') {
+            start += 1;
+        }
+        start = skip_spaces(model, start);
+        let Some((first, end)) = number_at(model, start) else {
+            continue;
+        };
+        let Some(first) = key_number(first).filter(|n| (70..=6400).contains(n)) else {
+            continue;
+        };
+        let second = separator(model, end)
+            .and_then(|after| number_at(model, skip_spaces(model, after)))
+            .and_then(|(n, _)| key_number(n))
+            .filter(|n| *n >= first && *n <= 6400)
+            .unwrap_or(first);
+        return Some((offset, first, second));
+    }
+    None
+}
+fn focal_of(model: &str, aperture_start: Option<usize>) -> Option<(u32, u32)> {
+    let before_aperture = &model[..aperture_start.unwrap_or(model.len())];
+    // Some model names write the aperture first (1:4 12-45); keep the trailing part too.
+    let sections = [
+        before_aperture,
+        aperture_start
+            .and_then(|start| model.get(start..))
+            .unwrap_or(""),
+    ];
+    for section in sections {
+        let bytes = section.as_bytes();
+        let mut prime = None;
+        let mut offset = 0;
+        while offset < bytes.len() {
+            if !bytes[offset].is_ascii_digit() || offset > 0 && bytes[offset - 1].is_ascii_digit() {
+                offset += 1;
+                continue;
+            }
+            let Some((first, end)) = number_at(section, offset) else {
+                offset += 1;
+                continue;
+            };
+            let after_mm = if section
+                .get(end..)
+                .is_some_and(|tail| tail.to_ascii_lowercase().starts_with("mm"))
+            {
+                end + 2
+            } else {
+                end
+            };
+            if let Some(after) = separator(section, skip_spaces(section, after_mm)) {
+                let mut next = skip_spaces(section, after);
+                if section
+                    .get(next..)
+                    .is_some_and(|tail| tail.to_ascii_lowercase().starts_with("mm"))
+                {
+                    next += 2;
+                }
+                if let Some((second, _)) = number_at(section, next)
+                    && let (Some(a), Some(b)) = (key_number(first), key_number(second))
+                    && a >= 200
+                    && b >= a
+                    && b <= 200000
+                {
+                    return Some((a, b));
+                }
+            }
+            if after_mm != end && prime.is_none() {
+                prime = key_number(first).filter(|n| *n >= 200);
+            }
+            offset = end.max(offset + 1);
+        }
+        if let Some(single) = prime {
+            return Some((single, single));
+        }
+    }
+    None
+}
+fn generation_of(model: &str) -> u8 {
+    let lower = model.to_ascii_lowercase();
+    let words: Vec<&str> = lower
+        .split(|c: char| !c.is_ascii_alphanumeric() && c != '.')
+        .filter(|w| !w.is_empty())
+        .collect();
+    for (index, word) in words.iter().enumerate() {
+        let value = match *word {
+            "iv" => Some(4),
+            "iii" => Some(3),
+            "ii" => Some(2),
+            "v4" | "mk4" => Some(4),
+            "v3" | "mk3" => Some(3),
+            "v2" | "mk2" => Some(2),
+            "2" | "3" | "4"
+                if index > 0 && matches!(words[index - 1], "mark" | "mk" | "version") =>
+            {
+                word.parse().ok()
+            }
+            _ => [("iii", 3), ("ii", 2)]
+                .into_iter()
+                .find_map(|(suffix, value)| {
+                    word.strip_suffix(suffix)
+                        .filter(|prefix| prefix.ends_with(|c: char| c.is_ascii_digit()))
+                        .map(|_| value)
+                }),
+        };
+        if let Some(value) = value {
+            return value;
+        }
+    }
+    1
+}
+fn maker_of(text: &str) -> Option<&'static str> {
+    let lower = text.to_ascii_lowercase();
+    let words: Vec<&str> = lower
+        .split(|c: char| !c.is_ascii_alphabetic())
+        .filter(|w| !w.is_empty())
+        .collect();
+    let has = |word| words.contains(&word);
+    if has("panasonic") || has("lumix") {
+        Some("panasonic")
+    } else if has("olympus") || has("zuiko") || has("system") && has("om") {
+        Some("olympus")
+    } else if has("canon") {
+        Some("canon")
+    } else if has("nikon") || has("nikkor") {
+        Some("nikon")
+    } else if has("sony") {
+        Some("sony")
+    } else if has("sigma") {
+        Some("sigma")
+    } else if has("tamron") {
+        Some("tamron")
+    } else if has("fujifilm") || has("fuji") {
+        Some("fujifilm")
+    } else if has("pentax") {
+        Some("pentax")
+    } else if has("tokina") {
+        Some("tokina")
+    } else if has("samyang") {
+        Some("samyang")
+    } else if has("leica") {
+        Some("leica")
+    } else {
+        None
+    }
+}
+fn model_features(model: &str, maker: &str, focal: Option<(u32, u32)>) -> Option<LensFeatures> {
+    let aperture = aperture_of(model);
+    let (focal_min, focal_max) = focal.or_else(|| focal_of(model, aperture.map(|a| a.0)))?;
+    if focal_min > focal_max {
+        return None;
+    }
+    Some(LensFeatures {
+        maker: maker.to_owned(),
+        focal_min,
+        focal_max,
+        aperture: aperture.map(|(_, first, second)| (first, second)),
+        generation: generation_of(model),
+    })
+}
+fn input_features(input: &MatchInput) -> Option<LensFeatures> {
+    let model = input.lens.as_deref()?.trim();
+    if model.is_empty() {
+        return None;
+    }
+    let camera = input.camera_make.as_deref().and_then(maker_of);
+    let named = maker_of(model);
+    // Panasonic's Leica DG profiles are stored under Panasonic in Lensfun.
+    let maker = match (camera, named) {
+        (Some("panasonic"), Some("leica")) => "panasonic",
+        (_, Some(named)) => named,
+        (Some(camera), None) => camera,
+        (None, None) => return None,
+    };
+    model_features(model, maker, None)
+}
+fn database_features(db: &Database) -> &'static Vec<Option<LensFeatures>> {
+    static INDEX: OnceLock<Vec<Option<LensFeatures>>> = OnceLock::new();
+    INDEX.get_or_init(|| {
+        db.lenses
+            .iter()
+            .map(|lens| {
+                let focal = match (key_number(lens.focal_min), key_number(lens.focal_max)) {
+                    (Some(a), Some(b)) if a >= 200 && b >= a => Some((a, b)),
+                    _ => None,
+                };
+                let maker = maker_of(&lens.maker)
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| lens.maker.to_ascii_lowercase());
+                model_features(&lens.model, &maker, focal)
+            })
+            .collect()
+    })
+}
+fn family_score(exif_name: &str, profile_name: &str) -> usize {
+    let model = profile_name.to_ascii_lowercase();
+    exif_name
+        .to_ascii_lowercase()
+        .split(|c: char| !c.is_ascii_alphabetic())
+        .filter(|part| {
+            part.len() >= 4
+                && !matches!(
+                    *part,
+                    "panasonic"
+                        | "olympus"
+                        | "canon"
+                        | "nikon"
+                        | "sony"
+                        | "leica"
+                        | "lens"
+                        | "vario"
+                )
+        })
+        .filter(|part| {
+            model
+                .split(|c: char| !c.is_ascii_alphabetic())
+                .any(|other| other == *part)
+        })
+        .count()
+        + usize::from(exif_name.to_ascii_lowercase().contains("leica") && model.contains("leica"))
+}
+/// **自动识别**：优先按厂商、焦段（含定焦/变焦）、最大光圈范围和代数匹配。
+/// 缺少光圈而有多支同焦段镜头时，只在型号系列足以区分时选择；绝不猜第一支。
 #[must_use]
 pub fn auto_match(input: &MatchInput) -> Option<LensProfile> {
     let db = database()?;
-    let lens_name = input.lens.as_deref().unwrap_or("").trim();
-    if lens_name.is_empty() {
+    let target = input_features(input);
+    let name = input.lens.as_deref()?.trim();
+    if name.is_empty() {
         return None;
     }
-    let maker = input.camera_make.as_deref().filter(|m| !m.trim().is_empty());
-    let model = input.camera_model.as_deref().unwrap_or("").trim();
-    let cameras = if model.is_empty() {
-        Vec::new()
-    } else {
-        db.find_cameras(maker, model)
+    let Some(target) = target else {
+        // A literal full model name is still a safe fallback if EXIF uses a format we cannot parse.
+        let maker = input.camera_make.as_deref().and_then(maker_of);
+        return db
+            .lenses
+            .iter()
+            .find(|lens| {
+                lens.model.eq_ignore_ascii_case(name)
+                    && maker.is_none_or(|maker| maker_of(&lens.maker) == Some(maker))
+            })
+            .map(profile_of);
     };
-    // 先按机身（会带上卡口与画幅信息，匹配更准），没有机身就直接按型号找
-    if let Some(camera) = cameras.first()
-        && let Some(lens) = db.find_lenses(Some(camera), lens_name).first() {
-            return Some(profile_of(lens));
-        }
-    db.find_lenses(None, lens_name).first().map(|lens| profile_of(lens))
+    let camera_mount = input.camera_model.as_deref().and_then(|model| {
+        db.find_cameras(input.camera_make.as_deref(), model)
+            .first()
+            .map(|camera| camera.mount.clone())
+    });
+    let mut found: Vec<(usize, usize, bool)> = database_features(db)
+        .iter()
+        .enumerate()
+        .filter_map(|(index, features)| {
+            let feature = features.as_ref()?;
+            if feature.maker != target.maker
+                || feature.focal_min != target.focal_min
+                || feature.focal_max != target.focal_max
+                || feature.generation != target.generation
+            {
+                return None;
+            }
+            if let Some(aperture) = target.aperture
+                && feature.aperture != Some(aperture)
+            {
+                return None;
+            }
+            let lens = &db.lenses[index];
+            let mount = camera_mount
+                .as_ref()
+                .is_some_and(|mount| lens.mounts.iter().any(|m| m == mount));
+            Some((index, family_score(name, &lens.model), mount))
+        })
+        .collect();
+    if found.is_empty() {
+        return None;
+    }
+    if found.iter().any(|item| item.2) {
+        found.retain(|item| item.2);
+    }
+    found.sort_by(|a, b| {
+        b.1.cmp(&a.1)
+            .then_with(|| db.lenses[a.0].model.cmp(&db.lenses[b.0].model))
+    });
+    if target.aperture.is_none() && found.len() > 1 && found[0].1 == found[1].1 {
+        return None;
+    }
+    Some(profile_of(&db.lenses[found[0].0]))
 }
 
-/// 下拉候选：自动匹配的结果排第一，其余是**同卡口**的镜头（按库里的顺序）。
+/// 下拉候选：自动匹配的结果排第一，其余来自全库；手动搜索不被机身卡口截断。
 ///
 /// 为什么要给候选：EXIF 的镜头字符串经常与库里写的不完全一样（厂商后缀、代次），
 /// 自动匹配可能挑到近似的错条目 —— 让用户能自己选一个才是诚实的做法。
@@ -173,28 +564,11 @@ pub fn candidates(input: &MatchInput) -> Vec<LensProfile> {
     if let Some(matched) = auto_match(input) {
         out.push(matched);
     }
-    let maker = input.camera_make.as_deref().filter(|m| !m.trim().is_empty());
-    let model = input.camera_model.as_deref().unwrap_or("").trim();
-    let mount = if model.is_empty() {
-        None
-    } else {
-        db.find_cameras(maker, model)
-            .first()
-            .map(|camera| camera.mount.clone())
-            .filter(|mount| !mount.trim().is_empty())
-    };
+    let mut seen: std::collections::HashSet<String> = out.iter().map(|p| p.key.clone()).collect();
     for lens in &db.lenses {
         let profile = profile_of(lens);
-        if out.iter().any(|existing| existing.key == profile.key) {
-            continue;
-        }
-        if let Some(mount) = mount.as_deref()
-            && !lens.mounts.iter().any(|candidate| candidate == mount) {
-                continue;
-            }
-        out.push(profile);
-        if out.len() >= 200 {
-            break;
+        if seen.insert(profile.key.clone()) {
+            out.push(profile);
         }
     }
     out
@@ -203,16 +577,14 @@ pub fn candidates(input: &MatchInput) -> Vec<LensProfile> {
 /// **这次渲染到底用哪个配置文件**（`None` = 没有配置文件 / 用户关掉了 / 匹配不到）。
 ///
 /// 三种取值（与 `develop_stacks.lens_profile` 同一套语义）：
-/// * `None`   —— 没动过 ⇒ **自动识别**（匹配不到就没有）
-/// * `"none"` —— 用户显式关掉了自动匹配 ⇒ 不用配置文件
+/// * `None`   —— 未选择，不自动应用校正
+/// * `"none"` —— 用户显式清除了配置 ⇒ 不用配置文件
 /// * 其它     —— 用户从下拉里选的那一支（键认不出来时当「没有」，不猜一支）
 #[must_use]
-pub fn effective_profile(choice: Option<&str>, exif: &MatchInput) -> Option<LensProfile> {
-    let db = database()?;
+pub fn effective_profile(choice: Option<&str>) -> Option<LensProfile> {
     match choice {
-        Some("none") => None,
-        Some(key) => lens_by_key(db, key).map(profile_of),
-        None => auto_match(exif),
+        None | Some("none") => None,
+        Some(key) => lens_by_key(database()?, key).map(profile_of),
     }
 }
 
@@ -240,7 +612,7 @@ pub fn render_correction(request: &LensRequest, manual: ManualLens) -> Option<Le
     if request.enabled == Some(false) {
         return None;
     }
-    let profile = effective_profile(request.choice.as_deref(), &request.exif)?;
+    let profile = effective_profile(request.choice.as_deref())?;
     if profile.key == "none" {
         return None;
     }
@@ -296,8 +668,12 @@ pub fn resolve(key: &str, shot: &ShotParams, manual: ManualLens) -> Option<Resol
     let tca = lens
         .interpolate_tca(focal)
         .and_then(|calib| rescale_tca(calib.model, lens, real_focal));
-    let aperture = shot.aperture.filter(|value| value.is_finite() && *value > 0.0);
-    let distance = shot.distance.filter(|value| value.is_finite() && *value > 0.0);
+    let aperture = shot
+        .aperture
+        .filter(|value| value.is_finite() && *value > 0.0);
+    let distance = shot
+        .distance
+        .filter(|value| value.is_finite() && *value > 0.0);
     let vignetting = aperture.and_then(|aperture| {
         lens.interpolate_vignetting(focal, aperture, distance.unwrap_or(FAR_DISTANCE))
             .and_then(|calib| rescale_vignetting(calib.model, lens, real_focal))
@@ -308,8 +684,12 @@ pub fn resolve(key: &str, shot: &ShotParams, manual: ManualLens) -> Option<Resol
     } else {
         1.0
     };
-    let norm = Norm::new(shot.width, shot.height, crop, real_focal)
-        .with_center_offset(lens.center_x, lens.center_y, shot.width, shot.height);
+    let norm = Norm::new(shot.width, shot.height, crop, real_focal).with_center_offset(
+        lens.center_x,
+        lens.center_y,
+        shot.width,
+        shot.height,
+    );
 
     Some(ResolvedProfile {
         profile: profile_of(lens),
@@ -326,7 +706,11 @@ pub fn resolve(key: &str, shot: &ShotParams, manual: ManualLens) -> Option<Resol
 
 /// 标定时的等效焦距（mm）：`hypot(36,24) / crop / hypot(aspect, 1) / 2`。
 fn hugin_scale_in_mm(crop: f32, aspect_ratio: f32) -> f64 {
-    let crop = if crop.is_finite() && crop > 0.0 { f64::from(crop) } else { 1.0 };
+    let crop = if crop.is_finite() && crop > 0.0 {
+        f64::from(crop)
+    } else {
+        1.0
+    };
     let aspect = if aspect_ratio.is_finite() && aspect_ratio > 0.0 {
         f64::from(aspect_ratio)
     } else {
@@ -411,6 +795,57 @@ fn rescale_vignetting(model: VignettingModel, lens: &Lens, real_focal: f64) -> O
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn failed_database_load_keeps_error_and_can_retry() {
+        let cache = super::DatabaseCache::new();
+        assert_eq!(
+            cache
+                .load(false, || Err("synthetic parse failure".into()))
+                .unwrap_err(),
+            "synthetic parse failure"
+        );
+        assert_eq!(
+            cache
+                .load(false, || panic!("implicit render calls must not retry"))
+                .unwrap_err(),
+            "synthetic parse failure"
+        );
+        let loaded = cache.load(true, || Ok(lensfun::Database::new())).unwrap();
+        let reused = cache
+            .load(true, || panic!("successful loads are immutable"))
+            .unwrap();
+        assert!(std::ptr::eq(loaded, reused));
+    }
+
+    #[test]
+    fn concurrent_database_requests_only_load_once() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let cache = super::DatabaseCache::new();
+        let calls = AtomicUsize::new(0);
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
+                scope.spawn(|| {
+                    cache
+                        .load(true, || {
+                            calls.fetch_add(1, Ordering::Relaxed);
+                            Ok(lensfun::Database::new())
+                        })
+                        .unwrap();
+                });
+            }
+        });
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn a_match_does_not_apply_until_a_profile_is_selected() {
+        assert!(super::effective_profile(None).is_none());
+        assert!(super::effective_profile(Some("none")).is_none());
+        let key = "Panasonic|LEICA DG 12-60/F2.8-4.0";
+        assert_eq!(super::effective_profile(Some(key)).unwrap().key, key);
+        assert!(super::effective_profile(Some("missing|lens")).is_none());
+    }
+
     use super::*;
 
     /// 从库里挑一支**有畸变标定的矩形镜头**（不写死型号：库版本会变）。
@@ -465,8 +900,91 @@ mod tests {
     }
 
     #[test]
+    fn structured_signature_recovers_panasonic_zooms_from_exif_variants() {
+        let input = |lens: &str| MatchInput {
+            camera_make: Some("Panasonic".into()),
+            camera_model: Some("DMC-GX85".into()),
+            lens: Some(lens.into()),
+        };
+        for name in [
+            "LUMIX G VARIO 12-60/F3.5-5.6",
+            "Panasonic 12–60mm f/3.5–5.6",
+            "Lumix G Vario 12mm-60mm F3.5-5.6",
+        ] {
+            let found = auto_match(&input(name)).unwrap_or_else(|| panic!("{name}"));
+            assert!(
+                found.model.to_ascii_lowercase().contains("lumix"),
+                "{name}: {}",
+                found.model
+            );
+        }
+        let leica = auto_match(&input("DG Vario-Elmarit 12-60mm F2.8-4 Asph. Power OIS")).unwrap();
+        assert!(leica.model.to_ascii_lowercase().contains("leica"));
+        assert_eq!(leica.maker, "Panasonic");
+        assert!(
+            auto_match(&input("Panasonic 12-60mm")).is_none(),
+            "same range with missing aperture is ambiguous"
+        );
+        let named = auto_match(&input("LUMIX G VARIO 12-60mm")).unwrap();
+        assert!(named.model.to_ascii_lowercase().contains("lumix"));
+    }
+
+    #[test]
+    fn signature_separates_primes_zooms_apertures_generations_and_brands() {
+        let signature = |maker: &str, model: &str| {
+            input_features(&MatchInput {
+                camera_make: Some(maker.into()),
+                camera_model: None,
+                lens: Some(model.into()),
+            })
+            .unwrap()
+        };
+        assert_eq!(
+            signature("Olympus", "M.ZUIKO DIGITAL 12-45mm F4.0 PRO").focal_min,
+            1200
+        );
+        assert_eq!(
+            signature("Olympus", "M.ZUIKO DIGITAL 12-45mm F4.0 PRO").aperture,
+            Some((400, 400))
+        );
+        let prime = signature("Sony", "FE 35mm F1.8");
+        assert_eq!((prime.focal_min, prime.focal_max), (3500, 3500));
+        assert_ne!(prime, signature("Sony", "FE 35-70mm F1.8"));
+        assert_ne!(
+            signature("Panasonic", "12-60mm f/3.5-5.6"),
+            signature("Panasonic", "12-60mm f/2.8-4")
+        );
+        assert_ne!(
+            signature("Panasonic", "12-60mm f/3.5-5.6"),
+            signature("Olympus", "12-60mm f/3.5-5.6")
+        );
+        assert_eq!(signature("Canon", "EF 24-70mm f/2.8L II USM").generation, 2);
+        assert_eq!(signature("Canon", "RF 24-70mm f/2.8L IS USM").generation, 1);
+        assert_eq!(
+            signature("Canon", "RF 24-70mm f/2.8L Mark III USM").generation,
+            3
+        );
+        assert!(
+            input_features(&MatchInput {
+                lens: Some("unknown".into()),
+                ..Default::default()
+            })
+            .is_none()
+        );
+    }
+
+    #[test]
     fn resolve_interpolates_between_focal_samples() {
-        let lens = any_rectilinear_lens();
+        let lens = database()
+            .unwrap()
+            .lenses
+            .iter()
+            .find(|lens| {
+                matches!(lens.lens_type, lensfun::LensType::Rectilinear)
+                    && lens.calib_distortion.len() >= 2
+                    && lens.calib_distortion[0].focal != lens.calib_distortion[1].focal
+            })
+            .unwrap();
         let profile = profile_of(lens);
         // 取两个标定档之间的焦距（库里的档位是稀疏的）
         let mut focals: Vec<f32> = lens
@@ -480,7 +998,11 @@ mod tests {
             focal: between,
             aperture: None,
             distance: None,
-            camera_crop: if lens.crop_factor > 0.0 { lens.crop_factor } else { 1.0 },
+            camera_crop: if lens.crop_factor > 0.0 {
+                lens.crop_factor
+            } else {
+                1.0
+            },
             width: 6000,
             height: 4000,
         };
@@ -597,6 +1119,7 @@ mod tests {
             distortion: 0.5,
             vignette: -0.25,
             chromatic: 0.75,
+            ..ManualLens::default()
         };
         let shot = ShotParams {
             focal: (lens.focal_min + lens.focal_max) / 2.0,
@@ -644,8 +1167,38 @@ mod tests {
         };
         let candidates = candidates(&input);
         assert!(!candidates.is_empty());
-        assert_eq!(candidates[0].key, LensProfile::key_of(&lens.maker, &lens.model));
-        assert!(candidates.len() <= 200, "候选要封顶（下拉不是数据库浏览器）");
+        assert_eq!(
+            candidates[0].key,
+            LensProfile::key_of(&lens.maker, &lens.model)
+        );
+        assert!(
+            candidates.len() <= db.lenses.len(),
+            "候选不可重复或越过镜头库总数"
+        );
         let _ = db;
+    }
+    #[test]
+    fn manual_catalog_includes_common_lenses_across_mounts() {
+        let profiles = candidates(&MatchInput {
+            camera_make: Some("Panasonic".into()),
+            camera_model: Some("DMC-GX85".into()),
+            lens: None,
+        });
+        for (maker, focal_min, focal_max) in [
+            ("Panasonic", 12.0, 60.0),
+            ("Olympus", 12.0, 45.0),
+            ("Canon", 24.0, 70.0),
+            ("Nikon", 24.0, 70.0),
+            ("Sony", 24.0, 70.0),
+        ] {
+            assert!(
+                profiles.iter().any(|p| p.maker == maker
+                    && p.focal_min == focal_min
+                    && p.focal_max == focal_max),
+                "{maker} {focal_min}-{focal_max}"
+            );
+        }
+        let keys: std::collections::HashSet<_> = profiles.iter().map(|p| &p.key).collect();
+        assert_eq!(keys.len(), profiles.len());
     }
 }

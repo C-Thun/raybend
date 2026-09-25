@@ -1,7 +1,7 @@
 //! 缩略图三诊工具：**这一张文件到底能不能出图**。
 //!
 //! ```bash
-//! cargo run -p raybend --example thumb-probe -- <文件路径>
+//! cargo run -p raybend --example thumb-probe -- <文件路径> [--edited]
 //! cargo run -p raybend --example thumb-probe -- "C:\\src\\tmp\\pic\\P1000019.RW2"
 //! ```
 //!
@@ -31,6 +31,7 @@ fn main() {
         eprintln!("用法：thumb-probe <文件路径>");
         std::process::exit(2);
     };
+    let edited = std::env::args().skip(2).any(|value| value == "--edited");
     let path = std::path::Path::new(&arg);
     // 注意：这张存在性检查在 WSL 里判不了 `C:\...` 形式的路径（会显示 false）——
     // 那不代表文件不存在，真伪以 `render_file` 的结果为准。
@@ -68,7 +69,18 @@ fn main() {
         exif.exposure_ms, exif.f_number, exif.iso, exif.focal_mm
     );
 
-    match raybend::thumbnail::render_file(path, raybend::thumbnail::SizeClass::Grid) {
+    let mut stack = raybend::store::develop::DevelopStack::default();
+    if edited {
+        // 固定一档非默认曝光，强制走 latest 的真实 RAW 线性源与同一条显影管线。
+        stack.params.insert("exposure".to_string(), 0.5);
+    }
+    let result = raybend::thumbnail::render_file_with_edit(
+        path,
+        raybend::thumbnail::SizeClass::Grid,
+        edited.then_some(&stack),
+        None,
+    );
+    match result {
         Ok(Some(thumb)) => println!(
             "✅ 出图：{}×{}，{} 字节，占位图={}",
             thumb.width,

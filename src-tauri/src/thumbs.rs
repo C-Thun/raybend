@@ -82,26 +82,24 @@ pub async fn thumb_get<R: Runtime>(
     let size = SizeClass::parse(size.as_deref().unwrap_or("grid"))
         .ok_or_else(|| format!("未知的缩略图尺度：{}", size.as_deref().unwrap_or("")))?;
 
-    // 编辑过的照片：缩略图也要反映编辑结果（M3-W3）。
-    // 解析只在**库内**文件上命中（源文件未入库时返回 None，走老路）。
-    let edit = edited_stack(&app, &path);
-    // 镜头配置文件：**由调用方解析后传进渲染**（渲染层不认识数据库 —— 与 raw 后端同一套分层）
-    let lens = edit.as_ref().and_then(|stack| {
-        let asset = develop::resolve_asset(&app, Path::new(&path))?;
-        crate::lens::render_correction(
-            &app,
-            &asset.repository_id,
-            asset.asset_id,
-            stack.lens_profile.as_deref(),
-            stack.lens_enabled,
-        )
-    });
-
+    // 来源查库、lensfun 解析与渲染同在后台线程；缩略图多张并发时
+    // 不能让这些同步工作占住 IPC executor，拖慢编辑换图与状态轮询。
+    let handle = app.clone();
     let bytes = crate::source::blocking(move || {
+        let edit = edited_source(&handle, &path)?;
+        let lens = edit.as_ref().and_then(|(asset, stack, _)| {
+            crate::lens::render_correction(
+                &handle,
+                &asset.repository_id,
+                asset.asset_id,
+                stack.lens_profile.as_deref(),
+                stack.lens_enabled,
+            )
+        });
         let bytes = match &edit {
-            Some(stack) => render_now_with_edit(
+            Some((_, stack, source)) => render_now_with_edit(
                 &db,
-                Path::new(&path),
+                source,
                 size,
                 time::now_millis(),
                 Some(stack),
@@ -120,17 +118,23 @@ pub async fn thumb_get<R: Runtime>(
 /// 这个路径的资产编辑过吗？编辑过就把它的编辑栈取出来（给渲染用）。
 ///
 /// 未入库 / 没编辑过 / 库离线 —— 一律 `None`（调用方走没有编辑的那条路）。
-fn edited_stack<R: Runtime>(
+fn edited_source<R: Runtime>(
     app: &AppHandle<R>,
     path: &str,
-) -> Option<raybend::store::develop::DevelopStack> {
-    let asset = develop::resolve_asset(app, Path::new(path))?;
-    let (choice, stack) = develop::issue_of(app, &asset).ok()?;
-    if choice == IssueChoice::Latest && !stack.is_empty() {
-        Some(stack)
-    } else {
-        None
+) -> Result<Option<(ResolvedAsset, raybend::store::develop::DevelopStack, PathBuf)>, String> {
+    let Some(asset) = develop::resolve_asset(app, Path::new(path)) else {
+        return Ok(None);
+    };
+    let (choice, stack) = develop::issue_of(app, &asset)?;
+    if choice != IssueChoice::Latest || stack.is_empty() {
+        return Ok(None);
     }
+    let source = develop::source_path_of(app, &asset, stack.source_base)
+        .ok_or_else(|| format!("latest 的 {} 源文件不存在", stack.source_base.as_str()))?;
+    if raybend::store::develop::EditBase::of_file(&source) != stack.source_base {
+        return Err(format!("latest 的 {} 源文件不存在", stack.source_base.as_str()));
+    }
+    Ok(Some((asset, stack, source)))
 }
 
 /// **大图缓存**：`<库根>/cache/full/<asset>/latest-<base>-v<pipeline>.avif`。
@@ -149,10 +153,12 @@ pub(crate) fn render_latest_cached<R: Runtime>(
     stack: &raybend::store::develop::DevelopStack,
 ) -> Result<Vec<u8>, String> {
     let cache = FullCache::open(&asset.root).map_err(|e| e.to_string())?;
-    let full = asset
-        .root
-        .join(asset.rel_path.replace('/', std::path::MAIN_SEPARATOR_STR));
-    let base = raybend::store::develop::EditBase::of_file(&full);
+    let full = develop::source_path_of(app, asset, stack.source_base)
+        .ok_or_else(|| format!("latest 的 {} 源文件不存在", stack.source_base.as_str()))?;
+    let base = stack.source_base;
+    if raybend::store::develop::EditBase::of_file(&full) != base {
+        return Err(format!("latest 的 {} 源文件不存在", base.as_str()));
+    }
     if let Some(bytes) = cache.read(asset.asset_id, "latest", base, PIPELINE_VERSION) {
         return Ok(bytes);
     }
@@ -262,6 +268,7 @@ pub struct HistogramDto {
     pub r: Vec<f64>,
     pub g: Vec<f64>,
     pub b: Vec<f64>,
+    pub luma: Vec<f64>,
     /// 三通道合并后的峰值（前端按它归一化柱高）
     pub max: f64,
 }
@@ -273,6 +280,7 @@ impl From<raybend::display::Histogram> for HistogramDto {
             r: h.r,
             g: h.g,
             b: h.b,
+            luma: h.luma,
             max: h.max,
         }
     }

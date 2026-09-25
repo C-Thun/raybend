@@ -46,7 +46,13 @@ trash = "5.2"
 # 由 `image` 的 avif 编码器（底层 ravif，纯 Rust，无系统库）提供。
 # 走 **RGB8** 输入才会得到 4:4:4（ravif 的 `encode_rgba` 是 4:2:0），见 `thumbnail::render::encode_avif`。
 # 将来 JXL 生态成熟后换 JXL（已登记 `FUTURE.md` §C8）。
-image = { version = "0.25", default-features = false, features = ["jpeg", "png", "tiff", "avif", "avif-native", "rayon"] }
+#
+# `webp`：M3-W6c 的 LUT 封面需要 —— ① 人类 2026-09-25 给的内置样片本身就是 WebP；
+# ② 用户自带的演示图按规格也在支持列表里（`design/editor.md` §3.1.1）。
+# 纯 Rust（`image-webp`），没有系统库。
+# ⚠️ 但 `image` 的 WebP 编码器**只有无损**（`codecs/webp/encoder.rs` 的源码注释明说
+# “有损要 libwebp”）—— 封面要的“质量 80”是有损，方案待定（会动到新依赖，见 `PLAN.md` M3-W6c）。
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "tiff", "avif", "avif-native", "webp", "rayon"] }
 # 渲染（M2-W1 spike；AGENTS.md §6.1 定的方案 B = webview 挖洞 + wgpu 直绘到窗口表面）。
 # 版本 30.0.1：**上游最新**。AGENTS.md §3 记着 RapidRAW 曾把 wgpu 降到 29.0 以规避
 # Apple 设备上的 P3 色偏 —— 那是 macOS 的问题，本项目 Windows 优先，先从最新版起步
