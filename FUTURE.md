@@ -135,12 +135,33 @@
   发布里程碑时二选一：① 用一个构建期常量把它摇掉；② 保留（它只有几 KB，且不打开就零开销）。
   **不许**在没做选择的情况下让它悄悄进发布包。
 * **已知的 API 变动教训**（30.0.1 实测，写下来免得下次又猜）：
-  `Instance::new` 收**值**不是引用；`InstanceDescriptor` 没有 `default()`（用 `new_without_display_handle_from_env()` 那一族才会读 `WGPU_BACKEND`）；
+  `Instance::new` 收**值**不是引用；`InstanceDescriptor` 没有 `default()`（用 `new_without_display_handle_from_env()` 或对显式配置调用 `.with_env()` 才会读 `WGPU_BACKEND`）；
   `Surface::get_current_texture` 返回 `CurrentSurfaceTexture` 枚举（不再是 `Result`）；呈现走 `queue.present(texture)`；
   `Device` 上取不到 `queue`；`PipelineLayoutDescriptor` 用 `immediate_size`（不再有 `push_constant_ranges`）且布局要裹 `Some`；
   管线与 render pass 的 `multiview` 改名 `multiview_mask`；`SurfaceConfiguration` 新增 `color_space`。
 
 ---
+
+### C9　Windows 编辑视口的显式合成接入（2026-09-25 已确认并固化）
+
+* **真机反馈**：Opaque 修复后同屏内移动几乎不闪；窗体边缘超出屏幕后移动仍稳定复现闪烁。
+* **查实的实现冲突**：Tauri 2.11.4 对透明窗口建立 softbuffer，`RedrawRequested` 时向顶层 HWND
+  填背景色（默认 0）；softbuffer 0.4.8 最终执行 GDI `BitBlt`。旧产品的 wgpu surface 也直接挂
+  同一 HWND，存在两个绘制路径竞争底层内容。不能继续把补帧频率当成合成隔离。
+* **已采用方案**：复用 wgpu 30 的 DX12 `DxgiFromVisual`，把 GPU surface 放在 DirectComposition
+  visual 上，位于父窗直接绘制层之上、WebView 子窗之下。保留 Rust/wgpu、透明 DOM、现有矩阵与编辑管线。
+  不引入新依赖，不改 wry，不需要改用 CEF。
+* **已完成命令冒烟**：现有 exe 通过 `WGPU_BACKEND=dx12` 与
+  `WGPU_DX12_PRESENTATION_SYSTEM=visual` 启动，实际 Intel Arc / Dx12 / Opaque，出帧与空闲休眠通过。
+  崔总随后确认「成功了」。现已将 DX12 + DxgiFromVisual + Opaque 固化为 Windows 产品默认；
+  显式环境变量仍可用于诊断覆盖。非 Windows、透明 spike 和离屏工具保持各自原来的默认策略。
+* **平台接缝**：`PresentationAdapter` 只选择后端/呈现配置，与 alpha 策略分开；
+  macOS/Linux 暂用 `PlatformDefault`，真正移植时再扩展，见 `ARCHITECTURE.md` §2.1。
+* **结论**：保留 Rust/wgpu + WebView 分工，隔离平台合成层；不继续用提高补帧频率掩盖同 HWND 竞争。
+  此次确认针对本机复现场景，不能外推为所有 GPU/驱动均已通过。
+* **参考**：[DirectComposition 层次](https://learn.microsoft.com/en-us/windows/win32/api/dcomp/nf-dcomp-idcompositiondevice-createtargetforhwnd)、
+  [合成器的保留式结构](https://learn.microsoft.com/en-us/windows/win32/directcomp/architecture-and-components)。
+  详细源码证据与验证见 `implementations/2026-09-25_editor-offscreen-composition-investigation.md`。
 
 ### C8　编码格式范围：**缓存/快照恒为 AVIF；JXL 只做未来的导入/导出**
 
@@ -226,8 +247,11 @@
 ### D3　降噪 / 锐化 / 镜头校正
 
 * 镜头校正数据库：[lensfun](https://lensfun.github.io/)（LGPL-3.0，可经 GPL-3.0 路径与本项目 AGPL-3.0 组合）
-* 降噪候选：小波（RawTherapee）、NLM、后期可接 AI 去噪
-* GPU 化：wgpu compute shader（`AGENTS.md` §6.1 的渲染纪律已为此留口）
+* **2026-09-25 已落地**：快速档已接 wgpu 四尺度 à trous 小波（设备不可用回退 CPU 多尺度保边）；高质量档移植 RapidRAW 的两阶段 BM3D（纯 Rust CPU），独立后台、取消与单结果缓存。亮度/色度独立控制；完整相机/ISO 噪声档案与 AI 去噪仍属后续。
+* 镜头使用内置 Lensfun 库；已补焦段解析、全库品牌/焦段搜索、预览尺寸坐标适配、PA 逆衰减补偿。手动暗角量/范围与红/蓝通道分开。在线增量更新可用 Lensfun 官方数据库更新源，当前内置库已包含两种松下 12–60、奥巴 12–45 及多家 24–70。
+* **当前 GPU 小波**：复用 wgpu compute，亮度/色度独立 firm threshold，B3-spline 四尺度、512 像素分块 + 30 像素完整 halo；编辑器与缩略图共用。无 CUDA/OpenCV 新依赖。噪声阈值仍为手动启发式，后续可引入相机/ISO 噪声标定与按尺度控制。
+* **BM3D GPU 移植（2026-09-25 明确后续方向）**：目标是跨厂商 **wgpu/WGSL**，需移植块匹配、协同 3D 变换、Wiener 第二阶段和重叠聚合；复用当前 compute 服务的分块/读回边界，单独验画质与性能。CPU BM3D 保留为参考与后备；合成图实测 1920×1080 2.931 s、6000×4000 36.241 s，仍未达原定 ≤2 s / 全尺寸数秒目标。
+* **CUDA 依赖方案只作参考**：DawyD/bm3d-gpu（https://github.com/DawyD/bm3d-gpu ，BSD-2-Clause）已有 CUDA 实现，但直接集成限 NVIDIA 且需 C++/CUDA 工具链。登记在此，当前不集成 CUDA；研究其中 GPU 分组与聚合策略后移植到 wgpu。GPU NLM（OpenCV CUDA）同样不作为当前依赖。小波参考资料：darktable 官方 OpenCL 源码 https://github.com/darktable-org/darktable/blob/master/data/kernels/denoiseprofile.cl （本次小波 WGSL 为自行实现，未复制此文件）。
 
 ### D4　局部调整与蒙版
 
@@ -248,6 +272,40 @@
 
 * Windows 上可用 [gphoto2](https://github.com/gphoto/libgphoto2)（RapidRAW 在 Unix 上用它）或厂商 SDK
 * **触发条件**：核心闭环完成后，看用户需求
+
+### D8　3D LUT 与胶片模拟（第一版不做，人类 2026-09-25 定）
+
+* **目标**：一次套用「整包观感」（亮度曲线 + 色彩），而不是只改光比 —— 即「模仿某款胶片 / 厂商风格」这类需求。
+* **形态**：**3D LUT**。M3-W6c 的 `.cube` 引擎（三线性插值）就是它；**HaldCLUT** 是同一条查表路径的另一种编码
+  （把 identity 立方体嵌进一张二维图，常见 512×512 / 4096×4096）。两者**共用一份插值实现**，不写第二套（§2.12）。
+* **数据来源候选**（按许可从宽到严）：
+  * **自己生成** —— 从「我们的中性渲染 ↔ 相机内嵌 JPEG」成对采样回归出 LUT。**唯一无许可问题的「学官方观感」路径**，
+    而且数据就是用户自己的照片。
+  * **公开胶片模拟** —— Pat David / pIXELsHAM 的 FreeHaldClut 系列（RawTherapee Film Simulation 用的那套，
+    见 [RawPedia 的 Film Simulation 页](https://rawpedia.rawtherapee.com/Film_Simulation)）。许可 **CC-BY-SA 4.0**：
+    内容是内容许可、与软件 AGPL 分开管；
+    署名与「相同方式共享」进 `THIRD-PARTY-NOTICES.md`，**不得**当软件依赖混编。
+  * **商业 `.cube`（用户自带）** —— 走 M3-W6c 已有的导入通道，不需要额外机制。
+* **参考实现**：RawTherapee `rtengine/clutstore.cc`（`HaldCLUT::getRGB`：三线性插值 + `strength` 与原值混合）、`rtgui/filmsimulation.cc`。
+* **为什么第一版不做**：LUT 是**乘在光比之上**的。基础渲染曲线（`PLAN.md` M3-W6a）没做对之前，
+  LUT 只是把错的光比再染一层色，观感只会更乱。**顺序必须是「先光比、后色彩」。**
+* **触发条件**：M3-W6a 的基础曲线落地并被人验收之后，按需求拉回。
+
+### D9　DCP 相机配置文件（第一版不做，人类 2026-09-25 定）
+
+* **是什么**：Adobe 的相机配置文件格式，内含 `ColorMatrix` / `ToneCurve` / `HueSatMap` / `LookTable` /
+  `BaselineExposureOffset` 与双光源白平衡插值 —— 是**公开可得里最完整的「官方观感」近似**。
+  RawTherapee 自带 130 个（`rtdata/dcpprofiles/`），覆盖佳能 / 尼康 / 索尼 / 富士 / 松下 / 奥巴 / 宾得等。
+* ❗**许可红线（不可越）**：DCP 文件**不能再分发**。Adobe 的 Color Profile License 与 DNG SDK 都不允许；
+  第三方项目 [camicc](https://github.com/rafaelcgs10/camicc) 的 README 也明确写着「从本地 DNG Converter 提取、
+  不要 commit、不要再分发」。因此这条路**只能支持用户自带路径**，**绝不允许打包进安装包**
+  （RawTherapee 打了包，那是它自担的风险，我们不跟）。这条红线要同时写进 `THIRD-PARTY-NOTICES.md`。
+* **实现成本**：RawTherapee `rtengine/dcp.cc` 是 2000+ 行量级；难点在 `HueSatMap` 的色相-饱和度双线性插值
+  （`makeHueSatMap`，源码注释 "Ported from Adobes reference implementation"）与双光源插值。
+* **单拎出来说**：`BaselineExposureOffset` **本身就有价值** —— 它就是「RAW 本来偏暗」的那个补偿量（各家能差 ±1 EV）。
+  **但它不必靠 DCP 拿到**：同一个量能从内嵌 JPEG 反推，更省事且无许可问题（见 `PLAN.md` M3-W6a 的根因④）。
+* **触发条件**：① 用 [dcamprof](https://github.com/Beep6581/dcamprof)（GPL-3.0，需 ColorChecker 实拍 + Argyll CMS 测量）
+  自己生成 profile 的流程跑通之后；或 ② 用户群体明确要求读写 Adobe 的 DCP。两者都不是第一版的事。
 
 ---
 

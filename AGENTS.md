@@ -328,7 +328,7 @@ cmd.exe /c 'pushd \\wsl.localhost\Ubuntu-24.04\home\andares\repos\c-thun\raybend
 /mnt/c/rb-target/raybend/debug/raybend-desktop.exe   # ④ 运行（产物在 C: 本地）
 ```
 
-**九条硬规矩（实测踩坑）：**
+**十 条硬规矩（实测踩坑）：**
 
 1. **Windows 构建的产物必须落在 Windows 本地盘**（`C:\rb-target\...`）。9p 共享（`\\wsl.localhost`）不支持 rustc 增量编译的锁文件语义，会报 `os error -2147024895`，且会把 Windows 产物污染进 WSL 的 `target/`。
 2. **跨 WSL→Windows 传环境变量用 `WSLENV`**，不要用 cmd 的 `set VAR=x & ...`（`&` 前的空格会进值，且引号经互操作会丢）。
@@ -364,8 +364,7 @@ cmd.exe /c 'pushd \\wsl.localhost\Ubuntu-24.04\home\andares\repos\c-thun\raybend
    结果让人类拿着「没有修复的版本」白测一轮。
    `pnpm check:win` 既比**时间**（exe 必须比 dist 新）也比**内容**（资源名逐个命中），
    不合格会直接打印补救命令。
-9. **dav1d 静态库是 Windows 构建的前置**（2026-09-24，AVIF 解码）：
-   `image` 的 `avif-native` 拉进 `dav1d-sys`，它用 `system-deps` 找 dav1d 库；
+9. **dav1d 静态库是 Windows 构建的前置**（2026-09-24，AVIF 解码）：   `image` 的 `avif-native` 拉进 `dav1d-sys`，它用 `system-deps` 找 dav1d 库；
    Windows 上没有 pkg-config，所以**位置靠环境变量告诉它**（见上面的原命令）。
    * 库不在仓库里，用 **`scripts/build-dav1d-win.cmd`** 一次性构建
      （meson + ninja + nasm + VS Build Tools，约 3 分钟，产物 `C:\rb-deps\dav1d-1.5.0\`）；
@@ -374,6 +373,18 @@ cmd.exe /c 'pushd \\wsl.localhost\Ubuntu-24.04\home\andares\repos\c-thun\raybend
    * 链的是**静态库**（`SYSTEM_DEPS_DAV1D_LINK=static`）⇒ 安装包里不需要带 `dav1d.dll`；
    * WSL 侧不同：用系统库（`sudo apt install libdav1d-dev`，1.4.1）走 pkg-config，**不需要**这些变量；
    * 许可与版本登记在 `THIRD-PARTY-NOTICES.md`。
+10. **target 目录会只进不出，靠 `pnpm clean:win` / `clean:wsl` 自然清**（2026-09-25）：
+    cargo **从不回收**「不再是当前构建图一部分」的产物 —— 每换一次依赖版本 / feature 组合 /
+    构建参数就多留一份（实测：一个 target 目录攒到 11.6 GiB，`deps/` 里 `libtoml` 11 份、
+    `incremental/` 里 `raybend_desktop_lib-*` 10 个不同 unit-hash 目录；WSL 侧一次就清出 15 GB）。
+    * `pnpm debug:win` 的第 ④ 步会自动带上（复用该次构建的 `--message-format=json` 单元清单，
+      **不额外编译**）；想单独打就 `pnpm clean:win` / `pnpm clean:wsl`；
+    * 判据是**权威的**：cargo 的 JSON 输出会把构建图里**每个单元**都报出来（已最新的也报，带
+      `fresh:true`），「不在图里 **且** 已凉 ≥ `--keep-days`（默认 3 天）」才删 ——
+      宽限期是为了不碰**另一个会话正在用的另一套构建参数**产出的东西；
+    * `.fingerprint/` 不碰（只几十 MB，删错会让 cargo 白重编）；
+    * 先看后删：`pnpm clean:win --dry-run`（会列出最占空间的几项）。
+    * 什么时候仍需 `cargo clean`：规则/目录结构大改、或想彻底重来 —— 代价是一次冷构建。
 
 ### 5.3.1 为什么必须加 `--features custom-protocol`（重要，别拆掉）
 
@@ -464,7 +475,14 @@ let dev = !custom_protocol;        // ← dev 由 feature 决定，不是 debug/
 
 ### 6.1 渲染架构 = 原生 wgpu + 透明挖洞（方案 B）
 
-- WebView2 是覆盖整个窗口的一层；照片视口在 webview 中间**挖洞（透明）**，Rust 用 wgpu 直接绘制到窗口表面。
+- WebView2 是覆盖整个窗口的一层；照片视口在 webview 中间**挖洞（透明）**，Rust/wgpu 绘制其下的原生 GPU 底板；Windows 底板通过 DirectComposition visual 呈现。
+- **Windows 产品呈现默认 = DX12 + DirectComposition visual + Opaque**（2026-09-25 真机确认）：
+  Tauri 透明窗口在重绘时会用 softbuffer/GDI 清底；GPU 若直接呈现到同一 HWND，会在窗口边缘越出屏幕时闪烁。
+  必须让产品 GPU 表面通过 `DxgiFromVisual` 位于独立合成层，不能退回「同 HWND + 移动时补帧」。
+  `GpuContext` 仍是一份实现，后端/呈现配置在 `render/presentation.rs::PresentationAdapter` 收口；
+  `SurfaceComposition` 只管 alpha，不能用透明度隐式决定平台后端。macOS/Linux 暂留默认策略入口，
+  不提前做跨平台框架。保留 `WGPU_BACKEND` / `WGPU_DX12_PRESENTATION_SYSTEM` 显式诊断覆盖。
+  适配边界见 `ARCHITECTURE.md` §2.1，源码证据与经验见 `docs/native-viewport-coordinate-guide.md` §8。
 - **接口纪律（防返工的三条红线）**：
   1. 视口状态由 Rust 独有：`Viewport { zoom, pan_px, rotation, fit_mode, clip_rect, dpr, surface_format }`；前端只发送交互意图，不做坐标数学。
   2. 覆盖层（蒙版、裁剪柄、直方图采样框等）使用 Rust 提供的**同一变换矩阵**，禁止前端自行推导像素对齐。
@@ -755,7 +773,7 @@ IPC 单测（用**真实字段名**反序列化；缺 DPR 必须报错，不许�
 
 #### `toolsbar` 的三段式：`left` / `center` / `right`（人类 2026-09-23 口述）
 
-`toolsbar` 从左到右分三段，**左右两段各自贴边、中段居中**：
+`toolsbar` 只有 left / mid / right 三层：**mid 始终占整条工具栏 100% 宽度，按钮一组按整窗中心居中**；left/right 叠在 mid 上方，各自贴边，不参与 mid 的宽度计算。
 
 | 说法 | 位置 | 装什么 |
 | --- | --- | --- |
@@ -763,11 +781,11 @@ IPC 单测（用**真实字段名**反序列化；缺 DPR 必须报错，不许�
 | **`toolsbar`** / **`toolsbar center`** | 中间 | 该工作流的具体功能按钮（**不加前缀时默认指这里**） |
 | **`toolsbar right`** | 最右 | 与 **workspace 右列**内容相关的**面板开关** |
 
-- **没有特别指定就往中段加按钮**（与以往行为兼容）。
+- **不加前缀的 `toolsbar` 就是 mid 的居中按钮组**；组内「最左/最右」只表示顺序，不另分对齐区域。
 - 一侧可以是一**组互斥开关**（如 editor 左段的「多个左列面板」）：按下其中一个会关掉同组其他项，
   再按同一个则整组关掉；**任何档位下都允许用户用鼠标把它们开回来**。
-- **挤压行为**：窗口变窄、中段按钮变长时，中段会被左右两段的底纹**盖住** ——
-  用**渐变淡出**（左右段底纹向中间渐隐），**不是硬边 + 阴影**，也不是按钮互相叠错位。
+- **挤压行为**：窗口变窄时，mid 仍保持全宽且按钮组按整窗居中；left/right 的不透明底遮住底下的 mid，
+  各自内侧附 20px 渐隐。渐隐只负责遮罩，不承载按钮。
 - 无内容时整行隐藏（原规则不变）。
 
 设计稿：`design/editor.pen` 的 `Components / Editor / ToolsBar 三段式`（常态 + 挤压态）。

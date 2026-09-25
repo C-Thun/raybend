@@ -1,5 +1,5 @@
 {
-  "version": "2.17",
+  "version": "2.19",
   "children": [
     {
       "type": "frame",
@@ -540,7 +540,7 @@
                 {
                   "type": "frame",
                   "id": "sUiZc",
-                  "name": "ExifGroup / 机型+镜头",
+                  "name": "ExifGroup / 品牌+机型",
                   "fill": "$state-selected",
                   "cornerRadius": 4,
                   "gap": 6,
@@ -553,17 +553,31 @@
                     {
                       "type": "text",
                       "id": "rlyUN",
-                      "name": "ExifKey / camera",
+                      "name": "ExifVal / 品牌+机型",
                       "fill": "$fg-1",
-                      "content": "DC-G9",
+                      "content": "Panasonic · DC-G9",
                       "fontFamily": "Inter",
                       "fontSize": 13,
                       "fontWeight": "500"
-                    },
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "aGfkB",
+                  "name": "ExifGroup / 镜头",
+                  "cornerRadius": 4,
+                  "gap": 6,
+                  "padding": [
+                    4,
+                    8
+                  ],
+                  "alignItems": "center",
+                  "children": [
                     {
                       "type": "text",
                       "id": "JRvnF",
-                      "name": "ExifKey / lens",
+                      "name": "ExifVal / 镜头",
                       "fill": "$fg-2",
                       "content": "LEICA DG 12-60mm F2.8-4.0",
                       "fontFamily": "Inter",
@@ -5138,7 +5152,7 @@
                 {
                   "type": "frame",
                   "id": "w0rYe",
-                  "name": "ExifGroup / 机型+镜头",
+                  "name": "ExifGroup / 品牌+机型",
                   "fill": "$state-selected",
                   "cornerRadius": 4,
                   "gap": 6,
@@ -5151,17 +5165,31 @@
                     {
                       "type": "text",
                       "id": "A7KaR9",
-                      "name": "ExifKey / camera",
+                      "name": "ExifVal / 品牌+机型",
                       "fill": "$fg-1",
-                      "content": "DC-G9",
+                      "content": "Panasonic · DC-G9",
                       "fontFamily": "Inter",
                       "fontSize": 13,
                       "fontWeight": "500"
-                    },
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "ujCcC",
+                  "name": "ExifGroup / 镜头",
+                  "cornerRadius": 4,
+                  "gap": 6,
+                  "padding": [
+                    4,
+                    8
+                  ],
+                  "alignItems": "center",
+                  "children": [
                     {
                       "type": "text",
                       "id": "gOy01",
-                      "name": "ExifKey / lens",
+                      "name": "ExifVal / 镜头",
                       "fill": "$fg-2",
                       "content": "LEICA DG 12-60mm F2.8-4.0",
                       "fontFamily": "Inter",
@@ -8253,7 +8281,7 @@
                 {
                   "type": "frame",
                   "id": "SMQe3",
-                  "name": "ExifGroup / 机型+镜头",
+                  "name": "ExifGroup / 品牌+机型",
                   "fill": "$state-selected",
                   "cornerRadius": 4,
                   "gap": 6,
@@ -8266,17 +8294,31 @@
                     {
                       "type": "text",
                       "id": "IIqjL",
-                      "name": "ExifKey / camera",
+                      "name": "ExifVal / 品牌+机型",
                       "fill": "$fg-1",
-                      "content": "DC-G9",
+                      "content": "Panasonic · DC-G9",
                       "fontFamily": "Inter",
                       "fontSize": 13,
                       "fontWeight": "500"
-                    },
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "SFFod",
+                  "name": "ExifGroup / 镜头",
+                  "cornerRadius": 4,
+                  "gap": 6,
+                  "padding": [
+                    4,
+                    8
+                  ],
+                  "alignItems": "center",
+                  "children": [
                     {
                       "type": "text",
                       "id": "f1SXH",
-                      "name": "ExifKey / lens",
+                      "name": "ExifVal / 镜头",
                       "fill": "$fg-2",
                       "content": "LEICA DG 12-60mm F2.8-4.0",
                       "fontFamily": "Inter",

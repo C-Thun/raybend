@@ -95,3 +95,14 @@
 | 2026-09-17 | §1c 补 potrace(GPL-2.0，**开发期描摹工具**，只产坐标不进产物) |
 | 2026-09-24 | 新增 **dav1d 1.5.0（BSD-2-Clause）**：AVIF 解码（`image` 的 `avif-native`）；Windows 走一次性构建的静态库、WSL 走系统包。连带登记 `mp4parse`(MPL-2.0) |
 | 2026-09-25 | 新增 **lensfun 0.7.0**（纯 Rust 移植，LGPL-3.0-or-later；内置 XML 库 CC BY-SA 3.0）：镜头校正。**数据来源**：LensFun 项目（https://lensfun.github.io/ ，作者 Andrew Zabolotny 与 LensFun 贡献者）的校准数据库，经 `vdavid/lensfun-rs` 原样打包分发；Rust 移植由 David Veszelovszki 完成。M3-W4 引入 |
+
+
+## BM3D 移植（2026-09-25）
+
+`crates/raybend/src/develop/bm3d.rs` 的 DCT、归一化 Hadamard、硬阈值 / Wiener 协同滤波、块分组与加权聚合来自 **RapidRAW** 的 `src-tauri/src/denoising.rs`（CyberTimon / RapidRAW contributors，GNU AGPL v3）。参考提交：`f00145c11fd57043476574a384be7409a0a18e76`。
+
+- 源文件：https://github.com/CyberTimon/RapidRAW/blob/f00145c11fd57043476574a384be7409a0a18e76/src-tauri/src/denoising.rs
+- 上游许可：https://github.com/CyberTimon/RapidRAW/blob/f00145c11fd57043476574a384be7409a0a18e76/LICENSE
+- 修改：剥离 Tauri / 烘焙落盘逻辑，改为线性 u16 编辑阶段；独立亮度/色度强度、有界并行 tile、取消；修正参考块覆盖、窗口零边缘、SSD 单位与坐标截断；确定性候选选择、两像素粗搜加最优候选邻域细搜。
+- BM3D 算法出处：K. Dabov, A. Foi, V. Katkovnik, K. Egiazarian, “Image Denoising by Sparse 3-D Transform-Domain Collaborative Filtering,” IEEE TIP 2007。https://webpages.tuni.fi/foi/GCF-BM3D/
+- 未引入该学术站点受单独许可约束的 MATLAB/Python 二进制或源代码；本次实际移植源是上述 AGPL 的 RapidRAW 实现。项目许可证全文见根目录 `LICENSE`。

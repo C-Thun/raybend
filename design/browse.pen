@@ -1,5 +1,5 @@
 {
-  "version": "2.17",
+  "version": "2.19",
   "children": [
     {
       "type": "frame",
@@ -489,7 +489,7 @@
                 {
                   "type": "frame",
                   "id": "jHCot",
-                  "name": "ExifGroup / 机身镜头",
+                  "name": "ExifGroup / 品牌 + 机型",
                   "fill": "$state-selected",
                   "cornerRadius": 4,
                   "gap": 6,
@@ -501,6 +501,16 @@
                   "children": [
                     {
                       "type": "text",
+                      "id": "T7nhP",
+                      "name": "ExifVal / Panasonic",
+                      "fill": "$fg-2",
+                      "content": "Panasonic",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
                       "id": "Pq9Qf",
                       "name": "ExifVal / 机型",
                       "fill": "$fg-1",
@@ -508,17 +518,21 @@
                       "fontFamily": "Inter",
                       "fontSize": 13,
                       "fontWeight": "normal"
-                    },
-                    {
-                      "type": "text",
-                      "id": "KHhop",
-                      "name": "ExifSep1",
-                      "fill": "$fg-3",
-                      "content": "·",
-                      "fontFamily": "Inter",
-                      "fontSize": 13,
-                      "fontWeight": "normal"
-                    },
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "V42Qv",
+                  "name": "ExifGroup / 镜头独立复制",
+                  "cornerRadius": "$radius",
+                  "gap": 6,
+                  "padding": [
+                    4,
+                    8
+                  ],
+                  "alignItems": "center",
+                  "children": [
                     {
                       "type": "text",
                       "id": "wfKtH",
@@ -3588,6 +3602,7 @@
                   "id": "L8EQGZ",
                   "name": "InfoSection / EXIF",
                   "width": "fill_container",
+                  "fill": "$surface-main",
                   "layout": "vertical",
                   "gap": 6,
                   "children": [
@@ -3596,280 +3611,585 @@
                       "id": "A6iZ7",
                       "name": "InfoTitle / EXIF",
                       "fill": "$fg-2",
-                      "content": "EXIF",
+                      "content": "拍摄信息",
                       "fontFamily": "Inter",
                       "fontSize": 15,
                       "fontWeight": "600"
                     },
                     {
-                      "type": "frame",
-                      "id": "wJGzJ",
-                      "name": "InfoRow / 机型",
-                      "width": "fill_container",
-                      "gap": 8,
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "KNuOa",
-                          "name": "InfoLabel / 机型",
-                          "fill": "$fg-3",
-                          "textGrowth": "fixed-width",
-                          "width": 76,
-                          "content": "机型",
-                          "fontFamily": "Inter",
-                          "fontSize": 12,
-                          "fontWeight": "normal"
-                        },
-                        {
-                          "type": "text",
-                          "id": "yS949",
-                          "name": "InfoVal / 机型",
-                          "fill": "$fg-1",
-                          "textGrowth": "fixed-width",
-                          "width": "fill_container",
-                          "content": "DC-G9",
-                          "fontFamily": "Inter",
-                          "fontSize": 14,
-                          "fontWeight": "normal"
-                        }
-                      ]
+                      "type": "text",
+                      "id": "ADFUJ",
+                      "name": "Hint / 数值可复制",
+                      "fill": "$fg-3",
+                      "content": "点击数值复制 · 更多 EXIF 在此区域滚动",
+                      "fontFamily": "Inter",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
                     },
                     {
                       "type": "frame",
-                      "id": "f4Jpe",
-                      "name": "InfoRow / 镜头",
+                      "id": "QFDh4",
+                      "name": "EXIF / 独立滚动区 · 最大高度 384",
+                      "clip": true,
                       "width": "fill_container",
-                      "gap": 8,
-                      "alignItems": "center",
+                      "height": 384,
+                      "fill": "$surface-main",
+                      "layout": "vertical",
+                      "gap": 6,
                       "children": [
                         {
-                          "type": "text",
-                          "id": "ge9MU",
-                          "name": "InfoLabel / 镜头",
-                          "fill": "$fg-3",
-                          "textGrowth": "fixed-width",
-                          "width": 76,
-                          "content": "镜头",
-                          "fontFamily": "Inter",
-                          "fontSize": 12,
-                          "fontWeight": "normal"
+                          "type": "frame",
+                          "id": "wJGzJ",
+                          "name": "InfoRow / 机型",
+                          "width": "fill_container",
+                          "gap": 8,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "KNuOa",
+                              "name": "InfoLabel / 机型",
+                              "fill": "$fg-3",
+                              "textGrowth": "fixed-width",
+                              "width": 76,
+                              "content": "机型",
+                              "fontFamily": "Inter",
+                              "fontSize": 12,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "text",
+                              "id": "yS949",
+                              "name": "InfoVal / 机型",
+                              "fill": "$fg-1",
+                              "textGrowth": "fixed-width",
+                              "width": "fill_container",
+                              "content": "DC-G9",
+                              "fontFamily": "Inter",
+                              "fontSize": 14,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "f4Jpe",
+                          "name": "InfoRow / 镜头",
+                          "width": "fill_container",
+                          "gap": 8,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "ge9MU",
+                              "name": "InfoLabel / 镜头",
+                              "fill": "$fg-3",
+                              "textGrowth": "fixed-width",
+                              "width": 76,
+                              "content": "镜头",
+                              "fontFamily": "Inter",
+                              "fontSize": 12,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "text",
+                              "id": "G7ffFx",
+                              "name": "InfoVal / 镜头",
+                              "fill": "$fg-1",
+                              "textGrowth": "fixed-width",
+                              "width": "fill_container",
+                              "content": "LEICA DG 12-60",
+                              "fontFamily": "Inter",
+                              "fontSize": 14,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "Aav24",
+                          "name": "InfoRow / 焦段",
+                          "width": "fill_container",
+                          "gap": 8,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "gZhRZ",
+                              "name": "InfoLabel / 焦段",
+                              "fill": "$fg-3",
+                              "textGrowth": "fixed-width",
+                              "width": 76,
+                              "content": "焦段",
+                              "fontFamily": "Inter",
+                              "fontSize": 12,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "text",
+                              "id": "S6y8XW",
+                              "name": "InfoVal / 焦段",
+                              "fill": "$fg-1",
+                              "textGrowth": "fixed-width",
+                              "width": "fill_container",
+                              "content": "12mm",
+                              "fontFamily": "Inter",
+                              "fontSize": 14,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "teQxQ",
+                          "name": "InfoRow / 光圈",
+                          "width": "fill_container",
+                          "gap": 8,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "XsUTz",
+                              "name": "InfoLabel / 光圈",
+                              "fill": "$fg-3",
+                              "textGrowth": "fixed-width",
+                              "width": 76,
+                              "content": "光圈",
+                              "fontFamily": "Inter",
+                              "fontSize": 12,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "text",
+                              "id": "P6PjBm",
+                              "name": "InfoVal / 光圈",
+                              "fill": "$fg-1",
+                              "textGrowth": "fixed-width",
+                              "width": "fill_container",
+                              "content": "ƒ/2.8",
+                              "fontFamily": "Inter",
+                              "fontSize": 14,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "B0m5af",
+                          "name": "InfoRow / 快门",
+                          "width": "fill_container",
+                          "gap": 8,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "ttZSL",
+                              "name": "InfoLabel / 快门",
+                              "fill": "$fg-3",
+                              "textGrowth": "fixed-width",
+                              "width": 76,
+                              "content": "快门",
+                              "fontFamily": "Inter",
+                              "fontSize": 12,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "text",
+                              "id": "UK0Y8",
+                              "name": "InfoVal / 快门",
+                              "fill": "$fg-1",
+                              "textGrowth": "fixed-width",
+                              "width": "fill_container",
+                              "content": "1/125s",
+                              "fontFamily": "Inter",
+                              "fontSize": 14,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "FuWHX",
+                          "name": "InfoRow / 感光度",
+                          "width": "fill_container",
+                          "gap": 8,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "B0jZrU",
+                              "name": "InfoLabel / 感光度",
+                              "fill": "$fg-3",
+                              "textGrowth": "fixed-width",
+                              "width": 76,
+                              "content": "感光度",
+                              "fontFamily": "Inter",
+                              "fontSize": 12,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "text",
+                              "id": "vzP5F",
+                              "name": "InfoVal / 感光度",
+                              "fill": "$fg-1",
+                              "textGrowth": "fixed-width",
+                              "width": "fill_container",
+                              "content": "ISO 200",
+                              "fontFamily": "Inter",
+                              "fontSize": 14,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "ofI3z",
+                          "name": "InfoRow / 尺寸",
+                          "width": "fill_container",
+                          "gap": 8,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "Db8cu",
+                              "name": "InfoLabel / 尺寸",
+                              "fill": "$fg-3",
+                              "textGrowth": "fixed-width",
+                              "width": 76,
+                              "content": "尺寸",
+                              "fontFamily": "Inter",
+                              "fontSize": 12,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "text",
+                              "id": "pYYT9",
+                              "name": "InfoVal / 尺寸",
+                              "fill": "$fg-1",
+                              "textGrowth": "fixed-width",
+                              "width": "fill_container",
+                              "content": "5184 × 3888",
+                              "fontFamily": "Inter",
+                              "fontSize": 14,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "Dudvg",
+                          "name": "InfoRow / 格式",
+                          "width": "fill_container",
+                          "gap": 8,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "tPI4I",
+                              "name": "InfoLabel / 格式",
+                              "fill": "$fg-3",
+                              "textGrowth": "fixed-width",
+                              "width": 76,
+                              "content": "格式",
+                              "fontFamily": "Inter",
+                              "fontSize": 12,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "text",
+                              "id": "R0Ljnm",
+                              "name": "InfoVal / 格式",
+                              "fill": "$fg-1",
+                              "textGrowth": "fixed-width",
+                              "width": "fill_container",
+                              "content": "RAW + JPG",
+                              "fontFamily": "Inter",
+                              "fontSize": 14,
+                              "fontWeight": "normal"
+                            }
+                          ]
                         },
                         {
                           "type": "text",
-                          "id": "G7ffFx",
-                          "name": "InfoVal / 镜头",
-                          "fill": "$fg-1",
-                          "textGrowth": "fixed-width",
-                          "width": "fill_container",
-                          "content": "LEICA DG 12-60",
+                          "id": "A5WzYP",
+                          "name": "Header / 全部原始 EXIF",
+                          "fill": "$fg-2",
+                          "content": "全部原始 EXIF",
                           "fontFamily": "Inter",
-                          "fontSize": 14,
-                          "fontWeight": "normal"
-                        }
-                      ]
-                    },
-                    {
-                      "type": "frame",
-                      "id": "Aav24",
-                      "name": "InfoRow / 焦段",
-                      "width": "fill_container",
-                      "gap": 8,
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "gZhRZ",
-                          "name": "InfoLabel / 焦段",
-                          "fill": "$fg-3",
-                          "textGrowth": "fixed-width",
-                          "width": 76,
-                          "content": "焦段",
-                          "fontFamily": "Inter",
-                          "fontSize": 12,
-                          "fontWeight": "normal"
+                          "fontSize": 11,
+                          "fontWeight": "600"
                         },
                         {
-                          "type": "text",
-                          "id": "S6y8XW",
-                          "name": "InfoVal / 焦段",
-                          "fill": "$fg-1",
-                          "textGrowth": "fixed-width",
+                          "type": "frame",
+                          "id": "C2l0HM",
+                          "name": "EXIF Row / IFD 0 · Make",
                           "width": "fill_container",
-                          "content": "12mm",
-                          "fontFamily": "Inter",
-                          "fontSize": 14,
-                          "fontWeight": "normal"
-                        }
-                      ]
-                    },
-                    {
-                      "type": "frame",
-                      "id": "teQxQ",
-                      "name": "InfoRow / 光圈",
-                      "width": "fill_container",
-                      "gap": 8,
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "XsUTz",
-                          "name": "InfoLabel / 光圈",
-                          "fill": "$fg-3",
-                          "textGrowth": "fixed-width",
-                          "width": 76,
-                          "content": "光圈",
-                          "fontFamily": "Inter",
-                          "fontSize": 12,
-                          "fontWeight": "normal"
+                          "gap": 8,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "AslIf",
+                              "name": "Tag / IFD 0 · Make",
+                              "fill": "$fg-3",
+                              "textGrowth": "fixed-width",
+                              "width": 96,
+                              "content": "IFD 0 · Make",
+                              "fontFamily": "Inter",
+                              "fontSize": 11,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "text",
+                              "id": "zyJV7",
+                              "name": "Value / EasyCopy",
+                              "fill": "$fg-1",
+                              "textGrowth": "fixed-width",
+                              "width": 150,
+                              "content": "Panasonic",
+                              "fontFamily": "Inter",
+                              "fontSize": 11,
+                              "fontWeight": "normal"
+                            }
+                          ]
                         },
                         {
-                          "type": "text",
-                          "id": "P6PjBm",
-                          "name": "InfoVal / 光圈",
-                          "fill": "$fg-1",
-                          "textGrowth": "fixed-width",
+                          "type": "frame",
+                          "id": "iAiZK",
+                          "name": "EXIF Row / IFD 0 · Model",
                           "width": "fill_container",
-                          "content": "ƒ/2.8",
-                          "fontFamily": "Inter",
-                          "fontSize": 14,
-                          "fontWeight": "normal"
-                        }
-                      ]
-                    },
-                    {
-                      "type": "frame",
-                      "id": "B0m5af",
-                      "name": "InfoRow / 快门",
-                      "width": "fill_container",
-                      "gap": 8,
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "ttZSL",
-                          "name": "InfoLabel / 快门",
-                          "fill": "$fg-3",
-                          "textGrowth": "fixed-width",
-                          "width": 76,
-                          "content": "快门",
-                          "fontFamily": "Inter",
-                          "fontSize": 12,
-                          "fontWeight": "normal"
+                          "gap": 8,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "pItLF",
+                              "name": "Tag / IFD 0 · Model",
+                              "fill": "$fg-3",
+                              "textGrowth": "fixed-width",
+                              "width": 96,
+                              "content": "IFD 0 · Model",
+                              "fontFamily": "Inter",
+                              "fontSize": 11,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "text",
+                              "id": "S2WLOQ",
+                              "name": "Value / EasyCopy",
+                              "fill": "$fg-1",
+                              "textGrowth": "fixed-width",
+                              "width": 150,
+                              "content": "DC-G9",
+                              "fontFamily": "Inter",
+                              "fontSize": 11,
+                              "fontWeight": "normal"
+                            }
+                          ]
                         },
                         {
-                          "type": "text",
-                          "id": "UK0Y8",
-                          "name": "InfoVal / 快门",
-                          "fill": "$fg-1",
-                          "textGrowth": "fixed-width",
+                          "type": "frame",
+                          "id": "owlio",
+                          "name": "EXIF Row / Exif · LensModel",
                           "width": "fill_container",
-                          "content": "1/125s",
-                          "fontFamily": "Inter",
-                          "fontSize": 14,
-                          "fontWeight": "normal"
-                        }
-                      ]
-                    },
-                    {
-                      "type": "frame",
-                      "id": "FuWHX",
-                      "name": "InfoRow / 感光度",
-                      "width": "fill_container",
-                      "gap": 8,
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "B0jZrU",
-                          "name": "InfoLabel / 感光度",
-                          "fill": "$fg-3",
-                          "textGrowth": "fixed-width",
-                          "width": 76,
-                          "content": "感光度",
-                          "fontFamily": "Inter",
-                          "fontSize": 12,
-                          "fontWeight": "normal"
+                          "gap": 8,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "YvWaT",
+                              "name": "Tag / Exif · LensModel",
+                              "fill": "$fg-3",
+                              "textGrowth": "fixed-width",
+                              "width": 96,
+                              "content": "Exif · LensModel",
+                              "fontFamily": "Inter",
+                              "fontSize": 11,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "text",
+                              "id": "JCisk",
+                              "name": "Value / EasyCopy",
+                              "fill": "$fg-1",
+                              "textGrowth": "fixed-width",
+                              "width": 150,
+                              "content": "LEICA DG 12-60",
+                              "fontFamily": "Inter",
+                              "fontSize": 11,
+                              "fontWeight": "normal"
+                            }
+                          ]
                         },
                         {
-                          "type": "text",
-                          "id": "vzP5F",
-                          "name": "InfoVal / 感光度",
-                          "fill": "$fg-1",
-                          "textGrowth": "fixed-width",
+                          "type": "frame",
+                          "id": "AhqhT",
+                          "name": "EXIF Row / Exif · ExposureTime",
                           "width": "fill_container",
-                          "content": "ISO 200",
-                          "fontFamily": "Inter",
-                          "fontSize": 14,
-                          "fontWeight": "normal"
-                        }
-                      ]
-                    },
-                    {
-                      "type": "frame",
-                      "id": "ofI3z",
-                      "name": "InfoRow / 尺寸",
-                      "width": "fill_container",
-                      "gap": 8,
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "Db8cu",
-                          "name": "InfoLabel / 尺寸",
-                          "fill": "$fg-3",
-                          "textGrowth": "fixed-width",
-                          "width": 76,
-                          "content": "尺寸",
-                          "fontFamily": "Inter",
-                          "fontSize": 12,
-                          "fontWeight": "normal"
+                          "gap": 8,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "mRF6A",
+                              "name": "Tag / Exif · ExposureTime",
+                              "fill": "$fg-3",
+                              "textGrowth": "fixed-width",
+                              "width": 96,
+                              "content": "Exif · ExposureTime",
+                              "fontFamily": "Inter",
+                              "fontSize": 11,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "text",
+                              "id": "EgvS1",
+                              "name": "Value / EasyCopy",
+                              "fill": "$fg-1",
+                              "textGrowth": "fixed-width",
+                              "width": 150,
+                              "content": "1/125 s",
+                              "fontFamily": "Inter",
+                              "fontSize": 11,
+                              "fontWeight": "normal"
+                            }
+                          ]
                         },
                         {
-                          "type": "text",
-                          "id": "pYYT9",
-                          "name": "InfoVal / 尺寸",
-                          "fill": "$fg-1",
-                          "textGrowth": "fixed-width",
+                          "type": "frame",
+                          "id": "Wa9PE",
+                          "name": "EXIF Row / Exif · FocalLength",
                           "width": "fill_container",
-                          "content": "5184 × 3888",
-                          "fontFamily": "Inter",
-                          "fontSize": 14,
-                          "fontWeight": "normal"
-                        }
-                      ]
-                    },
-                    {
-                      "type": "frame",
-                      "id": "Dudvg",
-                      "name": "InfoRow / 格式",
-                      "width": "fill_container",
-                      "gap": 8,
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "tPI4I",
-                          "name": "InfoLabel / 格式",
-                          "fill": "$fg-3",
-                          "textGrowth": "fixed-width",
-                          "width": 76,
-                          "content": "格式",
-                          "fontFamily": "Inter",
-                          "fontSize": 12,
-                          "fontWeight": "normal"
+                          "gap": 8,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "lxUn3",
+                              "name": "Tag / Exif · FocalLength",
+                              "fill": "$fg-3",
+                              "textGrowth": "fixed-width",
+                              "width": 96,
+                              "content": "Exif · FocalLength",
+                              "fontFamily": "Inter",
+                              "fontSize": 11,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "text",
+                              "id": "GEeFP",
+                              "name": "Value / EasyCopy",
+                              "fill": "$fg-1",
+                              "textGrowth": "fixed-width",
+                              "width": 150,
+                              "content": "12 mm",
+                              "fontFamily": "Inter",
+                              "fontSize": 11,
+                              "fontWeight": "normal"
+                            }
+                          ]
                         },
                         {
-                          "type": "text",
-                          "id": "R0Ljnm",
-                          "name": "InfoVal / 格式",
-                          "fill": "$fg-1",
-                          "textGrowth": "fixed-width",
+                          "type": "frame",
+                          "id": "MGy4f",
+                          "name": "EXIF Row / Exif · FNumber",
                           "width": "fill_container",
-                          "content": "RAW + JPG",
-                          "fontFamily": "Inter",
-                          "fontSize": 14,
-                          "fontWeight": "normal"
+                          "gap": 8,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "gX12n",
+                              "name": "Tag / Exif · FNumber",
+                              "fill": "$fg-3",
+                              "textGrowth": "fixed-width",
+                              "width": 96,
+                              "content": "Exif · FNumber",
+                              "fontFamily": "Inter",
+                              "fontSize": 11,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "text",
+                              "id": "G2IodS",
+                              "name": "Value / EasyCopy",
+                              "fill": "$fg-1",
+                              "textGrowth": "fixed-width",
+                              "width": 150,
+                              "content": "f/2.8",
+                              "fontFamily": "Inter",
+                              "fontSize": 11,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "dqkGx",
+                          "name": "EXIF Row / Exif · ISO",
+                          "width": "fill_container",
+                          "gap": 8,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "A3SMro",
+                              "name": "Tag / Exif · ISO",
+                              "fill": "$fg-3",
+                              "textGrowth": "fixed-width",
+                              "width": 96,
+                              "content": "Exif · ISO",
+                              "fontFamily": "Inter",
+                              "fontSize": 11,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "text",
+                              "id": "uk7i1",
+                              "name": "Value / EasyCopy",
+                              "fill": "$fg-1",
+                              "textGrowth": "fixed-width",
+                              "width": 150,
+                              "content": "200",
+                              "fontFamily": "Inter",
+                              "fontSize": 11,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "p8aqNW",
+                          "name": "EXIF Row / Exif · DateTimeOriginal",
+                          "width": "fill_container",
+                          "gap": 8,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "gDP0q",
+                              "name": "Tag / Exif · DateTimeOriginal",
+                              "fill": "$fg-3",
+                              "textGrowth": "fixed-width",
+                              "width": 96,
+                              "content": "Exif · DateTimeOriginal",
+                              "fontFamily": "Inter",
+                              "fontSize": 11,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "text",
+                              "id": "uj8mn",
+                              "name": "Value / EasyCopy",
+                              "fill": "$fg-1",
+                              "textGrowth": "fixed-width",
+                              "width": 150,
+                              "content": "2026:08:15 09:15:22",
+                              "fontFamily": "Inter",
+                              "fontSize": 11,
+                              "fontWeight": "normal"
+                            }
+                          ]
                         }
                       ]
                     }
@@ -6462,7 +6782,7 @@
                 {
                   "type": "frame",
                   "id": "LdXZQ",
-                  "name": "ExifGroup / 机身镜头",
+                  "name": "ExifGroup / 品牌 + 机型",
                   "fill": "$state-selected",
                   "cornerRadius": 4,
                   "gap": 6,
@@ -6474,6 +6794,16 @@
                   "children": [
                     {
                       "type": "text",
+                      "id": "XkYp4",
+                      "name": "ExifVal / Panasonic",
+                      "fill": "$fg-2",
+                      "content": "Panasonic",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
                       "id": "dMWNj",
                       "name": "ExifVal / 机型",
                       "fill": "$fg-1",
@@ -6481,17 +6811,21 @@
                       "fontFamily": "Inter",
                       "fontSize": 13,
                       "fontWeight": "normal"
-                    },
-                    {
-                      "type": "text",
-                      "id": "mVhu3",
-                      "name": "ExifSep1",
-                      "fill": "$fg-3",
-                      "content": "·",
-                      "fontFamily": "Inter",
-                      "fontSize": 13,
-                      "fontWeight": "normal"
-                    },
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "dEzY8",
+                  "name": "ExifGroup / 镜头独立复制",
+                  "cornerRadius": "$radius",
+                  "gap": 6,
+                  "padding": [
+                    4,
+                    8
+                  ],
+                  "alignItems": "center",
+                  "children": [
                     {
                       "type": "text",
                       "id": "zD1Vy",
@@ -7900,7 +8234,8 @@
                     {
                       "type": "frame",
                       "id": "vaotD",
-                      "name": "FullThumb",
+                      "name": "Screen 全图总览 / 4:3 示例（动态 3:1～3:4）",
+                      "context": "实际高度由照片比例决定；外框宽度占满右栏，比例夹在 3:1 与 3:4；Screen 图完整显示，极端比例留白。",
                       "width": "fill_container",
                       "height": 180,
                       "fill": "$surface-bar",
@@ -11359,7 +11694,7 @@
                 {
                   "type": "frame",
                   "id": "dH4BT",
-                  "name": "ExifGroup / 机身镜头",
+                  "name": "ExifGroup / 品牌 + 机型",
                   "fill": "$state-selected",
                   "cornerRadius": 4,
                   "gap": 6,
@@ -11371,6 +11706,16 @@
                   "children": [
                     {
                       "type": "text",
+                      "id": "HfcrV",
+                      "name": "ExifVal / Panasonic",
+                      "fill": "$fg-2",
+                      "content": "Panasonic",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
                       "id": "Jy8Vw",
                       "name": "ExifVal / 机型",
                       "fill": "$fg-1",
@@ -11378,17 +11723,21 @@
                       "fontFamily": "Inter",
                       "fontSize": 13,
                       "fontWeight": "normal"
-                    },
-                    {
-                      "type": "text",
-                      "id": "C6zks",
-                      "name": "ExifSep1",
-                      "fill": "$fg-3",
-                      "content": "·",
-                      "fontFamily": "Inter",
-                      "fontSize": 13,
-                      "fontWeight": "normal"
-                    },
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "UskVF",
+                  "name": "ExifGroup / 镜头独立复制",
+                  "cornerRadius": "$radius",
+                  "gap": 6,
+                  "padding": [
+                    4,
+                    8
+                  ],
+                  "alignItems": "center",
+                  "children": [
                     {
                       "type": "text",
                       "id": "FEzkv",
@@ -12773,7 +13122,8 @@
                     {
                       "type": "frame",
                       "id": "Bw2TV",
-                      "name": "FullThumb",
+                      "name": "Screen 全图总览 / 4:3 示例（动态 3:1～3:4）",
+                      "context": "实际高度由照片比例决定；外框宽度占满右栏，比例夹在 3:1 与 3:4；Screen 图完整显示，极端比例留白。",
                       "width": "fill_container",
                       "height": 180,
                       "fill": "$surface-bar",
@@ -16232,7 +16582,7 @@
                 {
                   "type": "frame",
                   "id": "GFw34",
-                  "name": "ExifGroup / 机身镜头",
+                  "name": "ExifGroup / 品牌 + 机型",
                   "fill": "$state-selected",
                   "cornerRadius": 4,
                   "gap": 6,
@@ -16244,6 +16594,16 @@
                   "children": [
                     {
                       "type": "text",
+                      "id": "BXJpM",
+                      "name": "ExifVal / Panasonic",
+                      "fill": "$fg-2",
+                      "content": "Panasonic",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
                       "id": "tRPqi",
                       "name": "ExifVal / 机型",
                       "fill": "$fg-1",
@@ -16251,17 +16611,21 @@
                       "fontFamily": "Inter",
                       "fontSize": 13,
                       "fontWeight": "normal"
-                    },
-                    {
-                      "type": "text",
-                      "id": "hRDTK",
-                      "name": "ExifSep1",
-                      "fill": "$fg-3",
-                      "content": "·",
-                      "fontFamily": "Inter",
-                      "fontSize": 13,
-                      "fontWeight": "normal"
-                    },
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "M4q7NJ",
+                  "name": "ExifGroup / 镜头独立复制",
+                  "cornerRadius": "$radius",
+                  "gap": 6,
+                  "padding": [
+                    4,
+                    8
+                  ],
+                  "alignItems": "center",
+                  "children": [
                     {
                       "type": "text",
                       "id": "DO5mg",
@@ -24291,6 +24655,153 @@
                           "fontWeight": "normal"
                         }
                       ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "YQr5j",
+      "x": 14660,
+      "y": 0,
+      "name": "Components / 直方图无数据态",
+      "theme": {
+        "mode": "dark",
+        "density": "compact"
+      },
+      "width": 360,
+      "height": 234,
+      "layout": "vertical",
+      "gap": 12,
+      "children": [
+        {
+          "type": "text",
+          "id": "wWIAV",
+          "name": "Title / 空态组件",
+          "fill": "$fg-1",
+          "content": "直方图：加载中 / 无数据",
+          "fontFamily": "Inter",
+          "fontSize": 15,
+          "fontWeight": "600"
+        },
+        {
+          "type": "frame",
+          "id": "z93bQH",
+          "name": "Histogram / 固定高度空态",
+          "width": 320,
+          "height": 176,
+          "fill": "$surface-bar",
+          "cornerRadius": 4,
+          "layout": "vertical",
+          "children": [
+            {
+              "type": "frame",
+              "id": "S7A7B",
+              "name": "Plot / 无峰状图",
+              "width": "fill_container",
+              "height": 148,
+              "fill": "$surface-bar",
+              "layout": "vertical",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "izJyq",
+                  "name": "Placeholder / 暂无数据",
+                  "fill": "$fg-2",
+                  "content": "暂无数据",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "ThXyB",
+              "name": "Channels / 高度保留",
+              "width": "fill_container",
+              "height": 28,
+              "fill": "$surface-track",
+              "gap": 4,
+              "padding": [
+                4,
+                6
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "G0VsR",
+                  "name": "Channel R",
+                  "width": 24,
+                  "height": 20,
+                  "fill": "$surface-layer",
+                  "cornerRadius": 4,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "ei6GY",
+                      "name": "Label R",
+                      "fill": "$fg-2",
+                      "content": "R",
+                      "fontFamily": "Inter",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "w5LNsn",
+                  "name": "Channel G",
+                  "width": 24,
+                  "height": 20,
+                  "fill": "$surface-layer",
+                  "cornerRadius": 4,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "AdSqP",
+                      "name": "Label G",
+                      "fill": "$fg-2",
+                      "content": "G",
+                      "fontFamily": "Inter",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "g7ltz5",
+                  "name": "Channel B",
+                  "width": 24,
+                  "height": 20,
+                  "fill": "$surface-layer",
+                  "cornerRadius": 4,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "U1eRl",
+                      "name": "Label B",
+                      "fill": "$fg-2",
+                      "content": "B",
+                      "fontFamily": "Inter",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
                     }
                   ]
                 }

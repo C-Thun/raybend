@@ -107,7 +107,7 @@ Web 应用里成立的层（BFF、加载器编排、页面级数据预取…）�
 
 | 模块 | 位置 | 职责 |
 | --- | --- | --- |
-| 渲染 | `crates/raybend/src/render/`（`viewport` / `gpu` / `scene` / `stats`） | 视口变换与坐标口径（**Rust 独有**）、wgpu 上下文与离屏渲染、合成测试图、帧统计与报告 |
+| 渲染 | `crates/raybend/src/render/`（`viewport` / `gpu` / `presentation` / `scene` / `stats`） | 视口变换与坐标口径（**Rust 独有**）、wgpu 上下文与离屏渲染、合成测试图、帧统计与报告 |
 | 库目录操作 | `crates/raybend/src/repo/dirs.rs` | 新建子目录 / 删除空目录（名字校验按 Windows 口径、深度空判定） |
 | 目录树菜单 IPC | `src-tauri/src/dirs.rs` | 上面三个动作的命令层（`root + rel`，越界在 Rust 挡） |
 | spike 调试窗口 | `src-tauri/src/spike_viewport.rs` | `label = "spike-viewport"` 的窗口 + 独立渲染线程 + 命令层（**不动主窗口**） |
@@ -125,6 +125,32 @@ src/features/recent/
 
 `index.ts` 是硬要求：它让「模块的公开面」变成一件可以 review 的事，
 也避免上层按文件路径钻进去拿内部实现。
+
+---
+
+### 2.1 原生编辑视口：最小平台呈现适配（2026-09-25）
+
+编辑器继续共用 Rust/wgpu/WGSL 管线。平台变化只从
+`crates/raybend/src/render/presentation.rs::PresentationAdapter` 接入：一个枚举、一个产品选择入口、
+一个 wgpu instance 配置出口；目前不需要 trait、动态分发、注册表或第二套渲染循环。
+
+| 入口 / 责任 | 当前行为 |
+| --- | --- |
+| `PresentationAdapter::for_editor()` | Windows 选择 `WindowsComposition`；其它平台选择 `PlatformDefault` |
+| `WindowsComposition` | DX12 + `DxgiFromVisual`，GPU 内容位于父窗直接绘制层之上、WebView 子窗之下 |
+| `PlatformDefault` | 保留 wgpu 原生默认；spike 显式用它，macOS/Linux 暂作接入占位，不代表已完成跨平台验证 |
+| `instance_descriptor()` | 先应用策略，再读取环境覆盖；Windows 产品初始化失败会报错，不自动退回已知冲突的 HWND 路径 |
+| `SurfaceComposition` | 独立控制 alpha 与初始底色；编辑器为 `Opaque`，透明 spike 为 `Transparent` |
+| `GpuContext` | 唯一的设备、surface、纹理、WGSL、绘制、resize 和恢复实现；按传入配置建 instance |
+| `src-tauri/src/render_window.rs` | 唯一窗口句柄与尺寸胶水；适配器不依赖 Tauri、不持有窗口 |
+
+以后做 macOS/Linux 时，先验证目标系统的原生表面与 WebView 合成关系，再在这里增加对应策略，
+修改 `for_editor()` 的平台选择。若平台需要原生 layer/子窗，再在现有窗口胶水增加必要接入；
+现在不伪造未实现的 Metal/Wayland 接口，也不承诺只改一个枚举就能完成移植。
+坐标、照片处理、着色器和渲染循环继续共用。离屏渲染不参与窗口合成，保持现有独立初始化。
+
+Windows 当前是整个编辑视口的 wgpu 上下文使用 DX12，不存在 Vulkan → DX12 的跨 API 拷贝。
+策略原因、排障顺序与证据边界见 [原生视口经验 §8](docs/native-viewport-coordinate-guide.md)。
 
 ---
 
