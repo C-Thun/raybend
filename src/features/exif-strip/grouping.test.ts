@@ -101,8 +101,9 @@ test("文本字段：去空白，空串当作没有值", () => {
 
 /* ─── 分组 ─────────────────────────────────────────────── */
 
-test("完整数据：三组顺序固定（机型镜头 / 曝光 / 文件）", () => {
+test("完整数据：品牌机型 / 镜头 / 曝光 / 文件四组顺序固定", () => {
   const groups = groupExif({
+    cameraMake: "Panasonic",
     camera: "DC-G9",
     lens: "LEICA DG 12-60mm F2.8-4.0",
     focalLengthMm: 12,
@@ -116,14 +117,14 @@ test("完整数据：三组顺序固定（机型镜头 / 曝光 / 文件）", ()
 
   assert.deepEqual(
     groups.map((group) => group.id),
-    ["camera", "exposure", "file"],
-  );
-  assert.deepEqual(
-    groups[1].parts.map((part) => part.text),
-    ["12mm", "ƒ/2.8", "1/125s", "ISO 200"],
+    ["camera", "lens", "exposure", "file"],
   );
   assert.deepEqual(
     groups[2].parts.map((part) => part.text),
+    ["12mm", "ƒ/2.8", "1/125s", "ISO 200"],
+  );
+  assert.deepEqual(
+    groups[3].parts.map((part) => part.text),
     ["5184 × 3888", "20.2 MP", "RAW"],
   );
 });
@@ -136,6 +137,7 @@ test("只有机型时，强调项是机型", () => {
 
 test("没有机型但有镜头：镜头提为强调项（否则整组都是灰的）", () => {
   const groups = groupExif({ lens: "NIKKOR Z 24-70mm" });
+  assert.equal(groups[0].id, "lens");
   assert.deepEqual(groups[0].parts, [
     { text: "NIKKOR Z 24-70mm", labelKey: "exif.lens", emphasis: true },
   ]);
@@ -176,14 +178,31 @@ test("复制文本带字段名，用间隔点连接（粘出去能看懂）", ()
   );
 
   assert.equal(
-    groups[1].copyText,
+    groups[2].copyText,
     ["焦距 12mm", "光圈 ƒ/2.8"].join(EXIF_PART_SEPARATOR),
   );
-  // 机型不带字段名（它本身就是值）；镜头带
-  assert.equal(groups[0].copyText, `DC-G9${EXIF_PART_SEPARATOR}镜头 LEICA`);
+  assert.equal(groups[0].copyText, "DC-G9");
+  assert.equal(groups[1].copyText, "镜头 LEICA");
 });
 
 test("未注入翻译函数时，复制文本里是 key 名（开发期能一眼看出漏传）", () => {
   const [group] = groupExif({ iso: 200 });
   assert.equal(group.copyText, "exif.iso ISO 200");
+});
+
+test("品牌与机型成一组，镜头独立且缺任一字段仍可显示", () => {
+  const groups = groupExif({ cameraMake: " Panasonic ", camera: " DC-G9 ", lens: " 12-60 " });
+  assert.deepEqual(groups.map((group) => group.id), ["camera", "lens"]);
+  assert.deepEqual(groups[0].parts.map((part) => part.text), ["Panasonic", "DC-G9"]);
+  assert.equal(groups[0].copyText, "Panasonic · DC-G9");
+  assert.equal(groups[1].copyText, "exif.lens 12-60");
+  assert.deepEqual(groupExif({ cameraMake: "OLYMPUS" }).map((group) => group.id), ["camera"]);
+});
+
+test("相机型号自带厂商前缀时不重复展示品牌", () => {
+  const canon = groupExif({ cameraMake: "Canon", camera: "Canon EOS R5" });
+  assert.deepEqual(canon[0].parts.map((part) => part.text), ["Canon", "EOS R5"]);
+  const nikon = groupExif({ cameraMake: "NIKON CORPORATION", camera: "NIKON Z 7II" });
+  assert.deepEqual(nikon[0].parts.map((part) => part.text), ["NIKON CORPORATION", "Z 7II"]);
+  assert.deepEqual(groupExif({ cameraMake: "Sony", camera: "Sony" })[0].parts.map((part) => part.text), ["Sony"]);
 });

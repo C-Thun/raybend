@@ -7,12 +7,14 @@
  *   1. 格式规则（`ƒ/2.8`、`1/125s`、`20.2 MP`）只有一处，且可被单元测试钉住
  *   2. 将来要改排版（例如加 35mm 等效焦距、改单位制）不用回头动 Rust 侧
  *
- * 设计稿明确**省略色彩空间**，所以这里没有对应字段。
+ * FlowBar 省略色彩空间；完整 EXIF 在右侧信息栏逐项呈现。
  */
 
 export interface ExifData {
- /** 机型，如 `DC-G9`。**唯一用正文色显示**的一项（它是最关键的识别信息） */
+ /** 机型，如 `DC-G9`。通常是该条最醒目的识别信息。 */
  camera?: string;
+ /** 相机厂商，显示在型号左侧，与型号共同组成一组 EasyCopy。 */
+ cameraMake?: string;
  /** 镜头，如 `LEICA DG 12-60mm F2.8-4.0` */
  lens?: string;
 
@@ -32,5 +34,5 @@ export interface ExifData {
  format?: string;
 }
 
-/** 三个信息组的固定标识（顺序即显示顺序，`design/main.md` §2.2） */
-export type ExifGroupId = "camera" | "exposure" | "file";
+/** 四个信息组的固定标识（顺序即显示顺序，`design/main.md` §2.2） */
+export type ExifGroupId = "camera" | "lens" | "exposure" | "file";

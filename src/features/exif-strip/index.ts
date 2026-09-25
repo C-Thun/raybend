@@ -6,6 +6,9 @@
  * 这样「模块的公开面」就是一件可以 review 的事 —— 加一个导出就要想一次。
  */
 
+export { createSelectedFileMetadata } from "./selected.ts";
+export type { SelectedFileMetadata } from "./selected.ts";
+
 export { ExifStrip } from "./ExifStrip.tsx";
 export type { ExifStripProps } from "./ExifStrip.tsx";
 

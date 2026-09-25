@@ -225,9 +225,14 @@ pub struct PhotoCountView {
 #[derive(Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FileExifView {
+    pub tags: Vec<raybend::media::exif::ExifField>,
     pub camera_make: Option<String>,
     pub camera_model: Option<String>,
     pub lens: Option<String>,
+    pub software: Option<String>,
+    pub gps_lat: Option<f64>,
+    pub gps_lon: Option<f64>,
+    pub datetime_raw: Option<String>,
     pub focal_mm: Option<f64>,
     pub f_number: Option<f64>,
     /// 快门时间（**毫秒**；界面自己换算成「1/125s」这种写法）。
@@ -441,7 +446,19 @@ pub async fn file_exif(path: String) -> Result<FileExifView, String> {
         let abs = Path::new(&path);
         // RAW 要走 TIFF 家族兜底（RW2/ORF 的魔数不是 0x2A）——
         // 否则右上角参数栏对 RAW 只会显示一个「RAW」类型标，其余全空（2026-09-17 人类报）
-        let data = raybend::media::exif::read_file_for(abs);
+        let mut data = raybend::media::exif::read_file_for(abs);
+        if data.lens.as_ref().is_none_or(|name| name.trim().is_empty())
+            && raybend::media::kind::kind_of_file(
+                &abs.file_name().unwrap_or_default().to_string_lossy(),
+            ) == raybend::media::kind::MediaKind::Raw
+        {
+            data.lens = raybend::raw::worker::shared()
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .lens_name(abs)
+                .ok()
+                .flatten();
+        }
         let file_name = abs
             .file_name()
             .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
@@ -453,9 +470,14 @@ pub async fn file_exif(path: String) -> Result<FileExifView, String> {
         let kind = raybend::media::kind::kind_of_file(&file_name);
 
         Ok(FileExifView {
+            tags: raybend::media::exif::read_fields_for(abs),
             camera_make: data.camera_make,
             camera_model: data.camera_model,
             lens: data.lens,
+            software: data.software,
+            gps_lat: data.gps.as_ref().map(|gps| gps.lat),
+            gps_lon: data.gps.as_ref().map(|gps| gps.lon),
+            datetime_raw: data.datetime_raw,
             focal_mm: data.focal_mm,
             f_number: data.f_number,
             exposure_ms: data.exposure_ms,

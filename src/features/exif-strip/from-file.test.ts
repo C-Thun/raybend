@@ -12,9 +12,14 @@ import { formatLabel, toExifData } from "./from-file.ts";
 
 function file(overrides: Partial<FileExif> = {}): FileExif {
   return {
+    tags: [],
     cameraMake: null,
     cameraModel: null,
     lens: null,
+    software: null,
+    gpsLat: null,
+    gpsLon: null,
+    datetimeRaw: null,
     focalMm: null,
     fNumber: null,
     exposureMs: null,
@@ -32,12 +37,13 @@ function file(overrides: Partial<FileExif> = {}): FileExif {
   };
 }
 
-test("机型：优先型号，没有型号才退回厂商", () => {
+test("品牌与机型分别保留，由分组层合成 EasyCopy", () => {
   assert.equal(
     toExifData(file({ cameraMake: "Panasonic", cameraModel: "DC-G9" })).camera,
     "DC-G9",
   );
-  assert.equal(toExifData(file({ cameraMake: "Panasonic" })).camera, "Panasonic");
+  assert.equal(toExifData(file({ cameraMake: "Panasonic" })).cameraMake, "Panasonic");
+  assert.equal(toExifData(file({ cameraMake: "Panasonic" })).camera, undefined);
   assert.equal(toExifData(file()).camera, undefined, "都没有就是 undefined");
 });
 
@@ -59,6 +65,7 @@ test("镜头 / 焦距 / 光圈 / 感光度 / 尺寸：直接透传，空值变 u
     }),
   );
   assert.deepEqual(full, {
+    cameraMake: undefined,
     camera: undefined,
     lens: "LEICA DG 12-60mm F2.8-4.0",
     focalLengthMm: 12,

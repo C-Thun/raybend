@@ -46,6 +46,7 @@ function item(overrides: Partial<AssetItem> = {}): AssetItem {
 
 test("assetItemExif：机型优先用型号，毫秒换成秒，RAW 显示 RAW", () => {
   const exif = assetItemExif(item());
+  assert.equal(exif.cameraMake, "Panasonic");
   assert.equal(exif.camera, "DC-G9");
   assert.equal(exif.fNumber, 2.8);
   assert.equal(exif.exposureSeconds, 0.008);
@@ -56,9 +57,10 @@ test("assetItemExif：机型优先用型号，毫秒换成秒，RAW 显示 RAW",
   assert.equal(exif.format, "RAW");
 });
 
-test("assetItemExif：没有型号时退回厂商（显示规则与导入侧同源）", () => {
+test("assetItemExif：没有型号时保留独立的厂商品牌", () => {
   const exif = assetItemExif(item({ cameraModel: null }));
-  assert.equal(exif.camera, "Panasonic");
+  assert.equal(exif.cameraMake, "Panasonic");
+  assert.equal(exif.camera, undefined);
 });
 
 test("assetItemExif：全是 null 的项不产生空组（缺的字段一律 undefined）", () => {

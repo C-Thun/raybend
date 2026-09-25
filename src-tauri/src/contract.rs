@@ -15,12 +15,11 @@
 use serde::Serialize;
 
 use crate::import::{ImportPrecheckDto, ImportStartDto, InterruptedRunDto, PlannedRunDto};
-use crate::repo::{RepositorySettingsDto, TemplatePreviewDto};
 use crate::repo::{RepositoryPathDto, RepositoryProbeDto, RepositoryViewDto};
+use crate::repo::{RepositorySettingsDto, TemplatePreviewDto};
 use crate::source::{
     DirEntryView, FileExifView, MetaFileView, PhotoCountView, PhotoMetaView, RecentDirView,
-    SourceItemView, SourceScanView,
-    TimeEntryView, VolumeView,
+    SourceItemView, SourceScanView, TimeEntryView, VolumeView,
 };
 
 /// 前端契约文件（与 TS 侧共用同一份）。
@@ -109,7 +108,10 @@ fn import_batch_progress_keys_match_contract() {
         keys_of_value(progress.runs[0].current.as_ref().unwrap()),
         contract_keys("ImportCurrentItem")
     );
-    assert_eq!(keys_of_value(&progress.errors[0]), contract_keys("ImportError"));
+    assert_eq!(
+        keys_of_value(&progress.errors[0]),
+        contract_keys("ImportError")
+    );
 }
 
 #[test]
@@ -133,7 +135,10 @@ fn import_start_keys_match_contract() {
         }],
     };
     assert_eq!(keys_of_value(&dto), contract_keys("ImportStart"));
-    assert_eq!(keys_of_value(&dto.runs[0]), contract_keys("ImportPlannedRun"));
+    assert_eq!(
+        keys_of_value(&dto.runs[0]),
+        contract_keys("ImportPlannedRun")
+    );
 }
 
 #[test]
@@ -234,17 +239,26 @@ fn file_exif_keys_match_contract() {
 
 #[test]
 fn repository_view_keys_match_contract() {
-    assert_eq!(keys_of::<RepositoryViewDto>(), contract_keys("RepositoryView"));
+    assert_eq!(
+        keys_of::<RepositoryViewDto>(),
+        contract_keys("RepositoryView")
+    );
 }
 
 #[test]
 fn repository_path_keys_match_contract() {
-    assert_eq!(keys_of::<RepositoryPathDto>(), contract_keys("RepositoryPath"));
+    assert_eq!(
+        keys_of::<RepositoryPathDto>(),
+        contract_keys("RepositoryPath")
+    );
 }
 
 #[test]
 fn repository_probe_keys_match_contract() {
-    assert_eq!(keys_of::<RepositoryProbeDto>(), contract_keys("RepositoryProbe"));
+    assert_eq!(
+        keys_of::<RepositoryProbeDto>(),
+        contract_keys("RepositoryProbe")
+    );
 }
 
 #[test]
@@ -307,6 +321,8 @@ fn every_contract_entry_has_a_test() {
         // 编辑视口（M3-W1 洞口契约 / M3-W2 渲染线程）
         "EditorViewportState",
         "EditorRenderState",
+        "LensProfile",
+        "LensMatch",
         // 全屏看图（M3 晚：清单与下标跨 IPC）
         "FullscreenItem",
         "FullscreenPayload",
@@ -329,11 +345,11 @@ fn every_contract_entry_has_a_test() {
 
 #[test]
 fn browse_assets_dtos_match_contract() {
-    use crate::dirs::DirEmptyView;
     use crate::browse::{
         AssetItem, BrowseFacets, BrowseTimeline, BrowseWindow, DeleteResult, FacetCount, FlagsView,
         MarkResult, MarkingItem, TimelineEntry,
     };
+    use crate::dirs::DirEmptyView;
 
     assert_eq!(keys_of::<AssetItem>(), contract_keys("AssetItem"));
     assert_eq!(keys_of::<BrowseWindow>(), contract_keys("BrowseWindow"));
@@ -372,10 +388,7 @@ fn rebuild_report_matches_contract() {
         done: 1,
         total: 2,
     };
-    assert_eq!(
-        keys_of_value(&progress),
-        contract_keys("RebuildProgress")
-    );
+    assert_eq!(keys_of_value(&progress), contract_keys("RebuildProgress"));
     assert_eq!(
         keys_of::<crate::repo::RebuildReportDto>(),
         contract_keys("RebuildReport")
@@ -421,4 +434,27 @@ fn fullscreen_payload_matches_contract() {
         keys_of::<FullscreenPayload>(),
         contract_keys("FullscreenPayload")
     );
+}
+
+#[test]
+fn lens_match_keys_match_contract() {
+    use crate::lens::{LensMatchDto, LensProfileDto};
+    let profile = LensProfileDto {
+        key: "Panasonic|12-60".into(),
+        maker: "Panasonic".into(),
+        model: "12-60".into(),
+        rectilinear: true,
+        focal_min: 12.0,
+        focal_max: 60.0,
+    };
+    assert_eq!(keys_of_value(&profile), contract_keys("LensProfile"));
+    let response = LensMatchDto {
+        ready: true,
+        detected: Some(profile.clone()),
+        lens_name: None,
+        focal_mm: None,
+        candidates: vec![profile],
+        warnings: vec!["metadata unavailable".into()],
+    };
+    assert_eq!(keys_of_value(&response), contract_keys("LensMatch"));
 }

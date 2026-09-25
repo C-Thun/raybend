@@ -203,9 +203,14 @@ export async function readFileExif(path: string): Promise<FileExif> {
  * 字段与 `FileExif` 一一对应：Rust 侧加了字段，这里也要跟着加。
  */
 export const EMPTY_FILE_EXIF: FileExif = {
+  tags: [],
   cameraMake: null,
   cameraModel: null,
   lens: null,
+  software: null,
+  gpsLat: null,
+  gpsLon: null,
+  datetimeRaw: null,
   focalMm: null,
   fNumber: null,
   exposureMs: null,
@@ -271,6 +276,7 @@ export interface Histogram {
   r: number[];
   g: number[];
   b: number[];
+  luma?: number[];
   /** 三通道合并后的峰值（归一化柱高用） */
   max: number;
 }

@@ -2,11 +2,12 @@
  * EXIF 分组（`design/main.md` §2.2）。
  *
  * **分组是内容本身的结构，不是视觉随意切分**（用户明确）：划过某一组时同组边框一起亮，
- * 用户能看出哪些信息属于一组。三组固定：
+ * 用户能看出哪些信息属于一组。四组固定：
  *
- *   组 1  机型 + 镜头
- *   组 2  焦距 + 光圈 + 快门 + 感光度
- *   组 3  尺寸 + 像素数 + 格式
+ *   组 1  相机品牌 + 机型
+ *   组 2  镜头
+ *   组 3  焦距 + 光圈 + 快门 + 感光度
+ *   组 4  尺寸 + 像素数 + 格式
  *
  * 两条实现纪律：
  *   1. **空组整个不渲染**（不要出现一个只有边框、里面什么都没有的气泡）
@@ -52,11 +53,10 @@ export type Translate = (key: MessageKey) => string;
 const identity: Translate = (key) => key;
 
 /**
- * 把 EXIF 数据切成三个信息组。空组被丢掉；`data` 为空则返回空数组。
+ * 把 EXIF 数据切成四个信息组。空组被丢掉；`data` 为空则返回空数组。
  *
- * `emphasis` 的规则：机型是这张照片最关键的识别信息（设计稿指定用正文色）。
- * 若是**没有机型但有镜头**（截断的元数据），则把镜头提为强调项 ——
- * 否则整组都会是次要色，看着像一片灰。
+ * `emphasis` 的规则：机型是最关键的识别信息；只有品牌时强调品牌。
+ * 品牌与机型都缺失但有镜头时强调镜头。
  */
 export function groupExif(
  data: ExifData | null | undefined,
@@ -64,14 +64,14 @@ export function groupExif(
 ): ExifGroup[] {
  if (!data) return [];
 
- const camera = formatText(data.camera);
+ const make = formatText(data.cameraMake);
+ const camera = cameraModelWithoutMake(make, formatText(data.camera));
  const lens = formatText(data.lens);
 
  const cameraParts: ExifPart[] = [];
+ if (make) cameraParts.push({ text: make, emphasis: !camera });
  if (camera) cameraParts.push({ text: camera, emphasis: true });
- if (lens) {
-  cameraParts.push({ text: lens, labelKey: "exif.lens", emphasis: !camera });
- }
+ const lensParts: ExifPart[] = lens ? [{ text: lens, labelKey: "exif.lens", emphasis: !camera && !make }] : [];
 
  const exposureParts = dropEmpty([
   {
@@ -103,6 +103,7 @@ export function groupExif(
 
  const candidates: Array<{ id: ExifGroupId; parts: ExifPart[] }> = [
   { id: "camera", parts: cameraParts },
+  { id: "lens", parts: lensParts },
   { id: "exposure", parts: exposureParts },
   { id: "file", parts: fileParts },
  ];
@@ -120,6 +121,21 @@ export function groupExif(
    },
   ];
  });
+}
+
+/** Many cameras repeat Make at the start of Model; the separate brand chip must not echo it. */
+function cameraModelWithoutMake(make: string | undefined, model: string | undefined): string | undefined {
+ if (!make || !model) return model;
+ const firstWord = make.split(/[\s,]+/)[0];
+ const prefixes = [make, firstWord].filter((value) => value.length >= 3);
+ for (const prefix of prefixes) {
+  if (model.localeCompare(prefix, undefined, { sensitivity: "base" }) === 0) return undefined;
+  if (model.slice(0, prefix.length).toLowerCase() === prefix.toLowerCase() &&
+      model[prefix.length] === " ") {
+   return formatText(model.slice(prefix.length));
+  }
+ }
+ return model;
 }
 
 /** 单个片段在复制文本里的写法：有字段名就带上（粘出去能看懂），没有就只是值 */

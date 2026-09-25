@@ -22,11 +22,12 @@ import { IconDots, IconFolderMinus, IconFolderPlus } from "@tabler/icons-solidjs
 
 import { dirCreate, dirEmptyCheck, dirRemoveEmpty, listDirs } from "../../api/db.ts";
 import { Button } from "../../components/ui/Button.tsx";
+import { MetadataRows, type MetadataRow } from "../../components/ui/MetadataRows.tsx";
 import { RepositoryCard } from "../../components/ui/RepositoryCard.tsx";
 import { ConfirmDialog, Dialog } from "../../components/ui/Dialog.tsx";
 import { Input } from "../../components/ui/Form.tsx";
 import { Menu } from "../../components/ui/Menu.tsx";
-import type { AssetItem, DirEmptyView, RepositoryView } from "../../api/types.ts";
+import type { AssetItem, DirEmptyView, FileExif, RepositoryView } from "../../api/types.ts";
 import { locale, t } from "../../i18n/index.ts";
 
 import type { ViewerStore } from "../../components/ui/viewer/index.ts";
@@ -666,6 +667,8 @@ export interface AssetInfoProps {
   store: BrowseStore;
   /** 当前锚点那张（多选时是它，见 `BROWSE.md` §5.10）。 */
   item: AssetItem | null;
+  /** 当前展示文件的绝对路径；只为选中项按需读完整 EXIF。 */
+  fileExif?: FileExif | null;
   /**
    * 看图态下把看图件的 store 传进来：右栏的**拍摄信息让位给预览 + 直方图**
    * （`BROWSE.md` §5.9）；tiles 模式下传 `null`，保持原来的 EXIF。
@@ -807,43 +810,37 @@ function cameraText(item: AssetItem): string | null {
  * 拍摄信息（EXIF 那一段）。
  *
  * 抽成独立组件是为了让 `AssetInfo` 能在**看图态把它换成预览 + 直方图**
- * （`BROWSE.md` §5.9）—— 内容一个字没变，只是换了位置。
+ * （`BROWSE.md` §5.9）。tiles 态展示选中文件的完整 EXIF，内容过长时只滚动本区。
  */
-function ExifSection(props: { item: AssetItem }): JSX.Element {
-  return (
-    /* EXIF（BROWSE.md §6：tiles 模式下内容可能很长，要能滚） */
-    <section class="mb-5">
-      <h3 class="mb-1.5 text-fs-3 font-semibold text-fg-2">{t("browse.exif")}</h3>
-      <div class="flex flex-col gap-1.5">
-        <Field label={t("browse.fieldCamera")} value={cameraText(props.item)} />
-        <Field label={t("browse.fieldLens")} value={props.item.lens} />
-        <Field
-          label={t("browse.fieldFocal")}
-          value={props.item.focalMm === null ? null : `${props.item.focalMm} mm`}
-        />
-        <Field
-          label={t("browse.fieldAperture")}
-          value={props.item.fNumber === null ? null : `f/${props.item.fNumber}`}
-        />
-        <Field
-          label={t("browse.fieldExposure")}
-          value={exposureText(props.item.exposureMs)}
-        />
-        <Field
-          label={t("browse.fieldIso")}
-          value={props.item.iso === null ? null : `ISO ${props.item.iso}`}
-        />
-        <Field
-          label={t("browse.fieldSize")}
-          value={
-            props.item.width === null || props.item.height === null
-              ? null
-              : `${props.item.width} × ${props.item.height}`
-          }
-        />
-      </div>
-    </section>
-  );
+function ExifSection(props: { item: AssetItem; file: FileExif | null }): JSX.Element {
+  const rows = (): MetadataRow[] => {
+    const item = props.item;
+    const file = props.file;
+    return [
+      { label: t("browse.fieldCamera"), value: cameraText(item) },
+      { label: t("browse.fieldLens"), value: file?.lens ?? item.lens },
+      { label: t("browse.fieldFocal"), value: item.focalMm === null ? null : `${item.focalMm} mm` },
+      { label: t("browse.fieldAperture"), value: item.fNumber === null ? null : `f/${item.fNumber}` },
+      { label: t("browse.fieldExposure"), value: exposureText(item.exposureMs) },
+      { label: t("browse.fieldIso"), value: item.iso === null ? null : `ISO ${item.iso}` },
+      { label: t("browse.fieldSize"), value: item.width === null || item.height === null ? null : `${item.width} × ${item.height}` },
+      { label: t("browse.exif.software"), value: file?.software ?? null },
+      { label: t("browse.exif.datetimeRaw"), value: file?.datetimeRaw ?? null },
+      { label: t("browse.exif.exposureBias"), value: file?.exposureBiasEv == null ? null : `${file.exposureBiasEv} EV` },
+      { label: t("browse.exif.orientation"), value: file?.orientation == null ? null : String(file.orientation) },
+      { label: t("browse.exif.gps"), value: file?.gpsLat == null || file.gpsLon == null ? null : `${file.gpsLat}, ${file.gpsLon}` },
+    ];
+  };
+  return <section class="mb-5" data-browse-exif>
+    <h3 class="mb-1.5 text-fs-3 font-semibold text-fg-2">{t("browse.exif")}</h3>
+    <div class="scroll-y-reserved max-h-96 overflow-y-auto pr-1" data-browse-exif-scroll>
+      <MetadataRows rows={rows()} labelWidth="compact" />
+      <Show when={(props.file?.tags.length ?? 0) > 0}>
+        <h4 class="mt-2 mb-1 text-fs-0 font-semibold text-fg-2">{t("browse.exif.allTags")}</h4>
+        <MetadataRows rows={(props.file?.tags ?? []).map((tag) => ({label: tag.ifd + " · " + tag.tag, value: tag.value}))} />
+      </Show>
+    </div>
+  </section>;
 }
 
 /** 一张照片的标签行（右栏用）。 */
@@ -920,7 +917,7 @@ export function AssetInfo(props: AssetInfoProps) {
           看片时关心的是「这块亮不亮」而不是「光圈多少」；退出看图就换回来。
           文件信息两块都不动（它下面还在）。
         */}
-        <Show when={props.viewer} fallback={<ExifSection item={item()!} />}>
+        <Show when={props.viewer} fallback={<ExifSection item={item()!} file={props.fileExif ?? null} />}>
           {(store) => (
             <ViewerReadout store={store()} showVisibleBox={props.comparing !== true} />
           )}

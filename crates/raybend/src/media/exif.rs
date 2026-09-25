@@ -135,6 +135,74 @@ pub fn read_file_for(path: &Path) -> ExifData {
     }
 }
 
+/// A single original EXIF/TIFF field for the information panels. Binary vendor payloads are
+/// represented by their byte length; decoding MakerNote is vendor-specific and may be huge.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ExifField {
+    pub ifd: String,
+    pub tag: String,
+    pub value: String,
+}
+
+/// Read the complete metadata directory on demand for one selected file. The normal library
+/// browse path never ships these potentially numerous fields with each tile.
+#[must_use]
+pub fn read_fields_for(path: &Path) -> Vec<ExifField> {
+    use std::io::Read;
+    let mut head = vec![0_u8; HEAD_PROBE_BYTES];
+    if let Ok(mut file) = std::fs::File::open(path)
+        && let Ok(length) = file.read(&mut head)
+    {
+        head.truncate(length);
+        if let Some(fields) = fields_from_bytes(&head, is_raw_path(path)) {
+            return fields;
+        }
+    }
+    std::fs::read(path)
+        .ok()
+        .and_then(|bytes| fields_from_bytes(&bytes, is_raw_path(path)))
+        .unwrap_or_default()
+}
+fn fields_from_bytes(bytes: &[u8], raw_family: bool) -> Option<Vec<ExifField>> {
+    let reader = exif::Reader::new();
+    let parsed = std::io::Cursor::new(bytes)
+        .pipe(|mut cursor| reader.read_from_container(&mut cursor))
+        .or_else(|_| reader.read_raw(bytes.to_vec()));
+    if let Ok(parsed) = parsed {
+        let mut fields: Vec<_> = parsed
+            .fields()
+            .map(|field| {
+                let value = match &field.value {
+                    Value::Undefined(data, _) if data.len() > 128 => {
+                        format!("<{} bytes>", data.len())
+                    }
+                    _ => field.display_value().with_unit(field).to_string(),
+                };
+                let value = value
+                    .chars()
+                    .filter(|c| !c.is_control() || *c == '\n')
+                    .take(4096)
+                    .collect::<String>();
+                ExifField {
+                    ifd: format!("IFD {}", field.ifd_num.0),
+                    tag: field.tag.to_string(),
+                    value,
+                }
+            })
+            .collect();
+        fields.sort_by(|a, b| a.ifd.cmp(&b.ifd).then_with(|| a.tag.cmp(&b.tag)));
+        return Some(fields);
+    }
+    if raw_family {
+        return crate::media::tiff::read_fields(bytes).map(|rows| {
+            rows.into_iter()
+                .map(|(ifd, tag, value)| ExifField { ifd, tag, value })
+                .collect()
+        });
+    }
+    None
+}
+
 /// **RAW 的方向取哪一边**：文件头优先，读不到才用解码器报的（两边都没有就是 `None`）。
 ///
 /// # 优先级不能反（2026-09-18 的教训）
@@ -161,11 +229,10 @@ pub fn raw_orientation(path: &Path, from_decoder: Option<u16>) -> Option<u16> {
 
 /// 路径的扩展名是不是 RAW（用 `media::kind` 那张表，不要自己列扩展名）。
 fn is_raw_path(path: &Path) -> bool {
-    path.file_name()
-        .is_some_and(|name| {
-            crate::media::kind::kind_of_file(&name.to_string_lossy())
-                == crate::media::kind::MediaKind::Raw
-        })
+    path.file_name().is_some_and(|name| {
+        crate::media::kind::kind_of_file(&name.to_string_lossy())
+            == crate::media::kind::MediaKind::Raw
+    })
 }
 
 /// [`read_file`] 的可测版本：先只读 `probe_bytes` 个字节试解析，失败再整读。
@@ -814,6 +881,22 @@ mod tests {
     // ── 裸 TIFF / RAW 路径 ──
 
     #[test]
+    fn standard_field_list_includes_multiple_ifds() {
+        let fields = fields_from_bytes(&sample_tiff(), false).unwrap();
+        assert!(
+            fields
+                .iter()
+                .any(|field| field.tag == "Make" && field.value.contains("Panasonic"))
+        );
+        assert!(
+            fields
+                .iter()
+                .any(|field| field.tag == "LensModel" && field.value.contains("20-60"))
+        );
+        assert!(fields.iter().any(|field| field.tag == "DateTimeOriginal"));
+    }
+
+    #[test]
     fn reads_a_bare_tiff_like_a_raw_file() {
         let data = read_bytes(&sample_tiff()).expect("应当能读裸 TIFF");
         assert_eq!(data.camera_make.as_deref(), Some("Panasonic"));
@@ -925,22 +1008,18 @@ mod tests {
     #[test]
     fn reads_exposure_bias_from_the_exif_ifd() {
         // SRATIONAL 的分子是负数（−4/3 = −1⅃ EV）；0 也是有效值（无补偿）
-        let data = read_bytes(&build_tiff(
-            vec![],
-            vec![srational_entry(0x9204, -4, 3)],
-        ))
-        .unwrap();
+        let data = read_bytes(&build_tiff(vec![], vec![srational_entry(0x9204, -4, 3)])).unwrap();
         assert!(
             (data.exposure_bias_ev.unwrap() - (-4.0 / 3.0)).abs() < 1e-9,
             "{:?}",
             data.exposure_bias_ev
         );
-        let zero = read_bytes(&build_tiff(
-            vec![],
-            vec![srational_entry(0x9204, 0, 1)],
-        ))
-        .unwrap();
-        assert_eq!(zero.exposure_bias_ev, Some(0.0), "0 EV 不能被当「没读到」滤掉");
+        let zero = read_bytes(&build_tiff(vec![], vec![srational_entry(0x9204, 0, 1)])).unwrap();
+        assert_eq!(
+            zero.exposure_bias_ev,
+            Some(0.0),
+            "0 EV 不能被当「没读到」滤掉"
+        );
     }
 
     #[test]
@@ -951,11 +1030,7 @@ mod tests {
          */
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("sample.rw2");
-        std::fs::write(
-            &path,
-            build_tiff(vec![short_entry(0x0112, 8)], vec![]),
-        )
-        .unwrap();
+        std::fs::write(&path, build_tiff(vec![short_entry(0x0112, 8)], vec![])).unwrap();
         assert_eq!(
             raw_orientation(&path, Some(1)),
             Some(8),

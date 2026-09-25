@@ -92,6 +92,8 @@ const TAG_OFFSET_TIME_DIGITIZED: u16 = 0x9012;
 const TAG_RW2_WIDTH: u16 = 0x0002;
 const TAG_RW2_HEIGHT: u16 = 0x0003;
 const TAG_EXIF_IFD: u16 = 0x8769;
+const TAG_GPS_IFD: u16 = 0x8825;
+const TAG_INTEROP_IFD: u16 = 0xa005;
 // EXIF IFD 里的
 const TAG_EXPOSURE: u16 = 0x829a;
 const TAG_FNUMBER: u16 = 0x829d;
@@ -139,39 +141,146 @@ pub fn parse(bytes: &[u8]) -> Option<TiffInfo> {
     }
 
     if let Some(offset) = exif_ifd
-        && let Some(entries) = read_ifd(bytes, order, offset) {
-            let mut datetime_original = None;
-            // 三个偏移标签按偏好挑：Original > 通用 > Digitized（与 `exif.rs` 主路同序）
-            let (mut off_original, mut off_plain, mut off_digitized) = (None, None, None);
-            for entry in entries {
-                match entry.tag {
-                    // EXIF IFD 里的尺寸更准（是裁剪后的），优先
-                    TAG_PIXEL_X => info.width = entry.int_value(order).or(info.width),
-                    TAG_PIXEL_Y => info.height = entry.int_value(order).or(info.height),
-                    TAG_DATETIME_ORIGINAL => datetime_original = entry.ascii(bytes, order),
-                    TAG_OFFSET_TIME_ORIGINAL => off_original = entry.ascii(bytes, order),
-                    TAG_OFFSET_TIME => off_plain = entry.ascii(bytes, order),
-                    TAG_OFFSET_TIME_DIGITIZED => off_digitized = entry.ascii(bytes, order),
-                    TAG_EXPOSURE => info.exposure_secs = entry.rational(bytes, order),
-                    TAG_FNUMBER => info.f_number = entry.rational(bytes, order),
-                    TAG_EXPOSURE_BIAS => info.exposure_bias_ev = entry.srational(bytes, order),
-                    TAG_FOCAL => info.focal_mm = entry.rational(bytes, order),
-                    TAG_ISO => info.iso = entry.int_value(order),
-                    TAG_LENS => info.lens = entry.ascii(bytes, order),
-                    _ => {}
-                }
+        && let Some(entries) = read_ifd(bytes, order, offset)
+    {
+        let mut datetime_original = None;
+        // 三个偏移标签按偏好挑：Original > 通用 > Digitized（与 `exif.rs` 主路同序）
+        let (mut off_original, mut off_plain, mut off_digitized) = (None, None, None);
+        for entry in entries {
+            match entry.tag {
+                // EXIF IFD 里的尺寸更准（是裁剪后的），优先
+                TAG_PIXEL_X => info.width = entry.int_value(order).or(info.width),
+                TAG_PIXEL_Y => info.height = entry.int_value(order).or(info.height),
+                TAG_DATETIME_ORIGINAL => datetime_original = entry.ascii(bytes, order),
+                TAG_OFFSET_TIME_ORIGINAL => off_original = entry.ascii(bytes, order),
+                TAG_OFFSET_TIME => off_plain = entry.ascii(bytes, order),
+                TAG_OFFSET_TIME_DIGITIZED => off_digitized = entry.ascii(bytes, order),
+                TAG_EXPOSURE => info.exposure_secs = entry.rational(bytes, order),
+                TAG_FNUMBER => info.f_number = entry.rational(bytes, order),
+                TAG_EXPOSURE_BIAS => info.exposure_bias_ev = entry.srational(bytes, order),
+                TAG_FOCAL => info.focal_mm = entry.rational(bytes, order),
+                TAG_ISO => info.iso = entry.int_value(order),
+                TAG_LENS => info.lens = entry.ascii(bytes, order),
+                _ => {}
             }
-            if let Some(original) = datetime_original {
-                info.datetime = Some(original);
-            }
-            info.offset_time = off_original.or(off_plain).or(off_digitized);
         }
+        if let Some(original) = datetime_original {
+            info.datetime = Some(original);
+        }
+        info.offset_time = off_original.or(off_plain).or(off_digitized);
+    }
     // DateTimeOriginal 没有就退回 IFD0 的 DateTime（**只在这一处 move**，别在分支里就搬走）
     if info.datetime.is_none() {
         info.datetime = datetime_fallback;
     }
 
     Some(info)
+}
+
+/// List all reachable TIFF/EXIF directories from RAW formats whose magic kamadak rejects.
+/// The traversal is bounded and cycle-safe; vendor MakerNote payloads remain opaque.
+#[must_use]
+pub fn read_fields(bytes: &[u8]) -> Option<Vec<(String, String, String)>> {
+    let order = ByteOrder::detect(bytes)?;
+    let magic = order.u16(bytes, 2)?;
+    if !matches!(
+        magic,
+        MAGIC_TIFF | MAGIC_RW2 | MAGIC_ORF_RO | MAGIC_ORF_RS | MAGIC_ORF_OR_BE | MAGIC_ORF_RS_BE
+    ) {
+        return None;
+    }
+    let root = order.u32(bytes, 4)? as usize;
+    let mut pending = vec![("IFD 0".to_owned(), root)];
+    let mut visited = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    while let Some((ifd, offset)) = pending.pop() {
+        if visited.len() >= 16 || !visited.insert(offset) {
+            continue;
+        }
+        let Some(entries) = read_ifd(bytes, order, offset) else {
+            continue;
+        };
+        for entry in entries {
+            if let Some(target) = entry.int_value(order).and_then(|v| usize::try_from(v).ok()) {
+                match entry.tag {
+                    TAG_EXIF_IFD => pending.push(("Exif".to_owned(), target)),
+                    TAG_GPS_IFD => pending.push(("GPS".to_owned(), target)),
+                    TAG_INTEROP_IFD => pending.push(("Interoperability".to_owned(), target)),
+                    _ => {}
+                }
+            }
+            let name = match (ifd.as_str(), entry.tag) {
+                ("GPS", 0x0001) => "GPSLatitudeRef",
+                ("GPS", 0x0002) => "GPSLatitude",
+                ("GPS", 0x0003) => "GPSLongitudeRef",
+                ("GPS", 0x0004) => "GPSLongitude",
+                ("GPS", 0x0005) => "GPSAltitudeRef",
+                ("GPS", 0x0006) => "GPSAltitude",
+                (_, TAG_MAKE) => "Make",
+                (_, TAG_MODEL) => "Model",
+                (_, TAG_ORIENTATION) => "Orientation",
+                (_, TAG_SOFTWARE) => "Software",
+                (_, TAG_DATETIME) => "DateTime",
+                (_, TAG_DATETIME_ORIGINAL) => "DateTimeOriginal",
+                (_, TAG_OFFSET_TIME) => "OffsetTime",
+                (_, TAG_OFFSET_TIME_ORIGINAL) => "OffsetTimeOriginal",
+                (_, TAG_OFFSET_TIME_DIGITIZED) => "OffsetTimeDigitized",
+                (_, TAG_EXPOSURE) => "ExposureTime",
+                (_, TAG_FNUMBER) => "FNumber",
+                (_, TAG_EXPOSURE_BIAS) => "ExposureBiasValue",
+                (_, TAG_ISO) => "ISOSpeedRatings",
+                (_, TAG_FOCAL) => "FocalLength",
+                (_, TAG_LENS) => "LensModel",
+                (_, TAG_IMAGE_WIDTH | TAG_RW2_WIDTH | TAG_PIXEL_X) => "ImageWidth",
+                (_, TAG_IMAGE_LENGTH | TAG_RW2_HEIGHT | TAG_PIXEL_Y) => "ImageHeight",
+                _ => "",
+            };
+            let tag = if name.is_empty() {
+                format!("0x{:04X}", entry.tag)
+            } else {
+                name.to_owned()
+            };
+            let value = if let Some(value) = entry.ascii(bytes, order) {
+                value
+            } else if entry.field_type == 5 {
+                entry
+                    .rational(bytes, order)
+                    .map(|v| v.to_string())
+                    .unwrap_or_default()
+            } else if entry.field_type == 10 {
+                entry
+                    .srational(bytes, order)
+                    .map(|v| v.to_string())
+                    .unwrap_or_default()
+            } else if let Some(value) = entry.int_value(order) {
+                value.to_string()
+            } else if entry.count > 0 {
+                format!("<{} values, TIFF type {}>", entry.count, entry.field_type)
+            } else {
+                String::new()
+            };
+            out.push((
+                ifd.clone(),
+                tag,
+                if value.is_empty() {
+                    "<empty>".to_owned()
+                } else {
+                    value.chars().take(4096).collect()
+                },
+            ));
+        }
+        if ifd == "IFD 0" {
+            let count = usize::from(order.u16(bytes, offset)?);
+            if let Some(next) = offset
+                .checked_add(2)
+                .and_then(|v| count.checked_mul(12).and_then(|n| v.checked_add(n)))
+                .and_then(|pos| order.u32(bytes, pos))
+                && next != 0 {
+                    pending.push(("IFD 1".to_owned(), next as usize));
+                }
+        }
+    }
+    Some(out)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -335,7 +444,7 @@ fn read_ifd(bytes: &[u8], order: ByteOrder, offset: usize) -> Option<Vec<Entry>>
 mod tests {
     use super::*;
 
-        /// 值形态（决定 type / count / 载荷怎么摆）。
+    /// 值形态（决定 type / count / 载荷怎么摆）。
     #[derive(Debug, Clone)]
     enum Val<'a> {
         Short(u16),
@@ -383,9 +492,9 @@ mod tests {
         let mut fields: Vec<[u8; 4]> = Vec::new();
         let mut meta: Vec<(u16, u32)> = Vec::new(); // (type, count)
         let push = |val: &Val,
-                        data: &mut Vec<u8>,
-                        fields: &mut Vec<[u8; 4]>,
-                        meta: &mut Vec<(u16, u32)>| {
+                    data: &mut Vec<u8>,
+                    fields: &mut Vec<[u8; 4]>,
+                    meta: &mut Vec<(u16, u32)>| {
             let (field_type, count, field) = match val {
                 Val::Short(v) => {
                     let mut f = [0u8; 4];
@@ -435,7 +544,10 @@ mod tests {
         out.extend_from_slice(&u16b(magic));
         out.extend_from_slice(&u32b(ifd0_start as u32));
 
-        let write_ifd = |out: &mut Vec<u8>, tags: &[u16], field_slice: &[[u8; 4]], meta_slice: &[(u16, u32)]| {
+        let write_ifd = |out: &mut Vec<u8>,
+                         tags: &[u16],
+                         field_slice: &[[u8; 4]],
+                         meta_slice: &[(u16, u32)]| {
             out.extend_from_slice(&u16b(tags.len() as u16));
             for (index, tag) in tags.iter().enumerate() {
                 let (field_type, count) = meta_slice[index];
@@ -451,7 +563,12 @@ mod tests {
         if has_exif {
             ifd0_tags.push(TAG_EXIF_IFD);
         }
-        write_ifd(&mut out, &ifd0_tags, &fields[..ifd0_field_count], &meta[..ifd0_field_count]);
+        write_ifd(
+            &mut out,
+            &ifd0_tags,
+            &fields[..ifd0_field_count],
+            &meta[..ifd0_field_count],
+        );
         if has_exif {
             let exif_tags: Vec<u16> = exif.iter().map(|(tag, _)| *tag).collect();
             write_ifd(
@@ -463,6 +580,45 @@ mod tests {
         }
         out.extend_from_slice(&data);
         out
+    }
+
+    #[test]
+    fn raw_field_list_follows_gps_ifd_without_cycles() {
+        let mut bytes = build(MAGIC_RW2, false, &[(TAG_GPS_IFD, Val::Long(26))], &[]);
+        assert_eq!(bytes.len(), 26);
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes()); // GPSLatitudeRef
+        bytes.extend_from_slice(&2u16.to_le_bytes()); // ASCII
+        bytes.extend_from_slice(&2u32.to_le_bytes());
+        bytes.extend_from_slice(b"N\0\0\0");
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        let fields = read_fields(&bytes).unwrap();
+        assert!(fields.contains(&("GPS".into(), "GPSLatitudeRef".into(), "N".into())));
+    }
+
+    #[test]
+    fn raw_field_list_keeps_known_unknown_and_exif_ifd_entries() {
+        let bytes = build(
+            MAGIC_RW2,
+            false,
+            &[(TAG_MAKE, Val::Ascii("Panasonic")), (0x9999, Val::Long(42))],
+            &[
+                (TAG_LENS, Val::Ascii("DG Vario-Elmarit 12-60mm F2.8-4")),
+                (TAG_FNUMBER, Val::Rational(28, 10)),
+            ],
+        );
+        let fields = read_fields(&bytes).unwrap();
+        assert!(fields.contains(&("IFD 0".into(), "Make".into(), "Panasonic".into())));
+        assert!(fields.contains(&("IFD 0".into(), "0x9999".into(), "42".into())));
+        assert!(fields.iter().any(|(ifd, tag, value)| ifd == "Exif"
+            && tag == "LensModel"
+            && value.contains("12-60")));
+        assert!(
+            fields
+                .iter()
+                .any(|(ifd, tag, value)| ifd == "Exif" && tag == "FNumber" && value == "2.8")
+        );
+        assert_eq!(read_fields(b"II"), None);
     }
 
     #[test]
@@ -506,7 +662,10 @@ mod tests {
             &[],
             &[(TAG_EXPOSURE_BIAS, Val::SRational(0, 1))],
         );
-        assert_eq!(parse(&bytes).expect("应当能解析").exposure_bias_ev, Some(0.0));
+        assert_eq!(
+            parse(&bytes).expect("应当能解析").exposure_bias_ev,
+            Some(0.0)
+        );
     }
 
     #[test]
@@ -526,7 +685,10 @@ mod tests {
         let bytes = build(
             MAGIC_RW2,
             false,
-            &[(TAG_RW2_WIDTH, Val::Short(5264)), (TAG_RW2_HEIGHT, Val::Short(3904))],
+            &[
+                (TAG_RW2_WIDTH, Val::Short(5264)),
+                (TAG_RW2_HEIGHT, Val::Short(3904)),
+            ],
             &[
                 (TAG_DATETIME_ORIGINAL, Val::Ascii("2026:09:13 00:54:28")),
                 (TAG_OFFSET_TIME_ORIGINAL, Val::Ascii("+08:00")),
@@ -534,7 +696,11 @@ mod tests {
         );
         let info = parse(&bytes).expect("RW2 必须能解析");
         assert_eq!(info.datetime.as_deref(), Some("2026:09:13 00:54:28"));
-        assert_eq!(info.offset_time.as_deref(), Some("+08:00"), "时区偏移不能丢");
+        assert_eq!(
+            info.offset_time.as_deref(),
+            Some("+08:00"),
+            "时区偏移不能丢"
+        );
     }
 
     #[test]
@@ -556,7 +722,12 @@ mod tests {
         );
 
         // 只有通用那个时也要认
-        let plain = build(MAGIC_RW2, false, &[], &[(TAG_OFFSET_TIME, Val::Ascii("-05:30"))]);
+        let plain = build(
+            MAGIC_RW2,
+            false,
+            &[],
+            &[(TAG_OFFSET_TIME, Val::Ascii("-05:30"))],
+        );
         assert_eq!(
             parse(&plain).and_then(|i| i.offset_time).as_deref(),
             Some("-05:30")
@@ -679,7 +850,12 @@ mod tests {
 
     #[test]
     fn zero_denominator_is_not_a_number() {
-        let bytes = build(MAGIC_TIFF, false, &[], &[(TAG_EXPOSURE, Val::Rational(1, 0))]);
+        let bytes = build(
+            MAGIC_TIFF,
+            false,
+            &[],
+            &[(TAG_EXPOSURE, Val::Rational(1, 0))],
+        );
         let info = parse(&bytes).expect("应当能解析，只是快门读不到");
         assert_eq!(info.exposure_secs, None);
     }
@@ -746,7 +922,12 @@ mod tests {
 
     #[test]
     fn ascii_offset_out_of_range_is_none_not_panic() {
-        let mut bytes = build(MAGIC_TIFF, false, &[(TAG_MAKE, Val::Ascii("Panasonic"))], &[]);
+        let mut bytes = build(
+            MAGIC_TIFF,
+            false,
+            &[(TAG_MAKE, Val::Ascii("Panasonic"))],
+            &[],
+        );
         // 第一条的值字段（值区）在：头 8 + 条目表起点 2 + 8 = 18
         bytes[18..22].copy_from_slice(&0x00ff_ff00u32.to_le_bytes());
         let info = parse(&bytes).expect("整体仍应解析");
@@ -763,7 +944,12 @@ mod tests {
     #[test]
     fn wrong_type_is_ignored_not_guessed() {
         // 方向字段写成 ASCII 类型：不该当数字读
-        let bytes = build(MAGIC_TIFF, false, &[(TAG_ORIENTATION, Val::Ascii("abcd"))], &[]);
+        let bytes = build(
+            MAGIC_TIFF,
+            false,
+            &[(TAG_ORIENTATION, Val::Ascii("abcd"))],
+            &[],
+        );
         assert_eq!(parse(&bytes).map(|i| i.orientation), Some(None));
     }
 
@@ -771,11 +957,13 @@ mod tests {
     fn empty_info_is_reported_as_empty() {
         let info = TiffInfo::default();
         assert!(info.is_empty());
-        assert!(!TiffInfo {
-            orientation: Some(1),
-            ..Default::default()
-        }
-        .is_empty());
+        assert!(
+            !TiffInfo {
+                orientation: Some(1),
+                ..Default::default()
+            }
+            .is_empty()
+        );
     }
 
     #[test]
@@ -787,8 +975,14 @@ mod tests {
         }
         let bytes = std::fs::read(path).expect("读样本");
         let info = parse(&bytes).expect("真 RW2 应当能解析");
-        assert!(info.orientation.is_some(), "样本的方向应当读得出来：{info:?}");
-        assert!(info.width.unwrap_or(0) > 0, "样本的宽度应当读得出来：{info:?}");
+        assert!(
+            info.orientation.is_some(),
+            "样本的方向应当读得出来：{info:?}"
+        );
+        assert!(
+            info.width.unwrap_or(0) > 0,
+            "样本的宽度应当读得出来：{info:?}"
+        );
         assert!(info.model.is_some(), "样本的机身型号应当读得出来：{info:?}");
         assert!(
             info.datetime.is_some(),
