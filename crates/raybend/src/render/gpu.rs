@@ -2,7 +2,7 @@
 //!
 //! 本模块**不依赖 Tauri**（`AGENTS.md` §4：业务 crate 不许依赖 tauri）——
 //! 它只接受一对 `raw-window-handle` 的裸句柄（[`RawHandles`]），
-//! 从 Tauri 窗口上取句柄是 `src-tauri/src/spike_viewport.rs` 的事。
+//! 从 Tauri 窗口上取句柄统一由 `src-tauri/src/render_window.rs` 负责。
 //!
 //! # 为什么用裸句柄 + `unsafe`
 //!
@@ -10,7 +10,7 @@
 //! 于是渲染器要么持着窗口（`Arc`）并把它和 surface 放进同一个自引用结构里，要么就得
 //! 每次绘制都重新建 surface。裸句柄是 wgpu 官方给这种情况留的出口
 //! （[`wgpu::SurfaceTargetUnsafe::RawHandle`]），代价是**我们自己要保证窗口活得比 surface 久** ——
-//! 这一条由 spike 窗口的生命周期保证：窗口先建、后建上下文，关窗时先丢上下文再丢窗口。
+//! 这一条由 editor/spike 会话的生命周期保证：窗口先建、后建上下文，关窗时先丢上下文再丢窗口。
 //!
 //! # A.2 里跟这里有关的几项
 //!
@@ -18,7 +18,7 @@
 //!   （`Cargo.lock` 里只有一份 `raw-window-handle 0.6.2`）—— 这是最容易翻车的地方，
 //!   版本一旦分叉，`create_surface` 会在**运行时**失败而不是编译期。
 //! - 透明挖洞：surface 的 `alpha_mode` 与 clear 色决定透出来的东西对不对，报告里会记下来。
-//! - 后端回退：`WGPU_BACKEND=dx12|vulkan|gl` 由 wgpu 自己读环境变量，这里只把最终选中的后端如实报上去。
+//! - 平台呈现由 [`PresentationAdapter`] 选择；`WGPU_BACKEND` 显式诊断覆盖仍由 wgpu 读取。
 //! - 设备丢失：`device.destroy()` 演练 + 恢复重建。
 
 use std::sync::Arc;
@@ -32,6 +32,7 @@ use std::sync::Arc;
 use wgpu::rwh::{RawDisplayHandle, RawWindowHandle};
 
 use super::image::RenderImage;
+use super::presentation::PresentationAdapter;
 use super::stats::AdapterInfo;
 use super::viewport::{AlphaMode, Viewport};
 
@@ -84,7 +85,38 @@ pub enum RenderOutcome {
 pub struct SurfaceDetails {
     pub format: String,
     pub alpha_mode: String,
+    /// 实际呈现系统；DX12 要区分 HWND 与 DirectComposition visual。
+    pub presentation: String,
     pub size: (u32, u32),
+}
+
+/// GPU 表面如何与**桌面**合成；与覆盖在它上面的 WebView 是否透明无关。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SurfaceComposition {
+    /// 产品视口：照片与底色组成不透明底板，透明 WebView 只负责露出它。
+    /// Windows 不能沿用透明 spike 的预乘 alpha，否则移窗时可能透出桌面。
+    Opaque,
+    /// 透明窗口实验：优先预乘 alpha，平台不支持时退回不透明。
+    Transparent,
+}
+
+impl SurfaceComposition {
+    fn alpha_mode(
+        self,
+        supported: &[wgpu::CompositeAlphaMode],
+    ) -> Result<wgpu::CompositeAlphaMode, GpuError> {
+        use wgpu::CompositeAlphaMode::{Auto, Inherit, Opaque, PostMultiplied, PreMultiplied};
+        let candidates: &[wgpu::CompositeAlphaMode] = match self {
+            // 明确要求不透明；不偷偷回到导致镂空的透明路径。
+            Self::Opaque => &[Opaque],
+            Self::Transparent => &[PreMultiplied, PostMultiplied, Auto, Inherit, Opaque],
+        };
+        candidates
+            .iter()
+            .copied()
+            .find(|candidate| supported.contains(candidate))
+            .ok_or(GpuError::NoAlphaMode)
+    }
 }
 
 /// wgpu 上下文。
@@ -99,6 +131,7 @@ pub struct GpuContext {
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
+    presentation: String,
     /// 资源标签前缀（`spike` / `editor`）——wgpu 的报错会带上它，
     /// 本文件里两次「旧设备的那一件」事故全靠它认出来。
     label: String,
@@ -115,8 +148,15 @@ pub struct GpuContext {
     /// 为什么不靠 `image_size == 0` 表达：「没有照片」不是「图像尺寸为 0」这种异常
     /// （`Viewport::sanity_problems` 会把它当问题报出来），两件事得分开。
     has_image: bool,
+    reference: Option<(u64, RenderImage, wgpu::Texture)>,
+    reference_bind_group: Option<wgpu::BindGroup>,
+    compare_fraction: Option<f32>,
+    compare_dragging: bool,
+    overlay: super::overlay::OverlayRenderer,
+    overlay_palette: Option<super::overlay::OverlayPalette>,
+    tool_overlay: Option<super::overlay::ToolOverlay>,
     /// 洞口底色（照片没盖住的部分画它）—— 由前端把 `getComputedStyle` 的颜色报上来。
-    /// 默认全透明：spike 那条路要的就是「洞口外透出桌面」。
+    /// 产品默认不透明底色；spike 默认全透明，用于检验「洞口外透出桌面」。
     backdrop: wgpu::Color,
     viewport: Viewport,
     /// 设备丢失的记录（A.2 要）
@@ -133,11 +173,14 @@ pub struct GpuContext {
 impl GpuContext {
     /// 建上下文并上传一张图（`None` = 先不装图，只见洞口底色）。
     /// `size` 是窗口内容区的**物理**像素，`label` 是资源标签前缀。
+    /// `composition` 只管表面透明度；`presentation` 只管平台呈现配置，不能靠标签猜用途。
     pub fn new(
         handles: RawHandles,
         size: (u32, u32),
         dpr: f32,
         image: Option<RenderImage>,
+        composition: SurfaceComposition,
+        presentation: PresentationAdapter,
         label: &str,
     ) -> Result<Self, GpuError> {
         let label = label.to_string();
@@ -145,10 +188,9 @@ impl GpuContext {
         // 没有照片时也得有一张**合法**的纹理（wgpu 不接受 0 尺寸）：
         // 「画不画」由 `has_image` 管，不由纹理尺寸管。
         let image = image.unwrap_or_else(RenderImage::transparent_1x1);
-        // 后端由 wgpu 读 `WGPU_BACKEND`（dx12 / vulkan / gl）—— spike 要试回退，所以不写死。
-        // 用 `_from_env()` 那一族构造函数才会读环境变量（别拿 `default()`：wgpu 30 没这个默认实现）。
-        let instance =
-            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+        let descriptor = presentation.instance_descriptor();
+        let dx12_presentation = descriptor.backend_options.dx12.presentation_system;
+        let instance = wgpu::Instance::new(descriptor);
         // SAFETY: 句柄由调用方从**活着的**窗口上取（`RawHandles` 的契约），
         // 且本上下文保证在窗口之前销毁（spike 窗口的生命周期由 `src-tauri/src/spike_viewport.rs` 管）。
         // 这是 wgpu 官方给「surface 要活得比窗口对象的长」这种情形留的出口，
@@ -171,6 +213,11 @@ impl GpuContext {
             apply_limit_buckets: false,
         }))
         .map_err(|e| GpuError::NoAdapter(e.to_string()))?;
+        let presentation = if adapter.get_info().backend == wgpu::Backend::Dx12 {
+            format!("{dx12_presentation:?}")
+        } else {
+            "RawHandle".to_string()
+        };
 
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("raybend-spike"),
@@ -186,7 +233,7 @@ impl GpuContext {
         install_device_lost_logger(&device, device_lost.clone());
 
         let caps = surface.get_capabilities(&adapter);
-        let alpha_mode = pick_alpha_mode(&caps)?;
+        let alpha_mode = composition.alpha_mode(&caps.alpha_modes)?;
         let format = pick_format(&caps);
 
         let config = wgpu::SurfaceConfiguration {
@@ -217,6 +264,7 @@ impl GpuContext {
         };
         viewport.refit();
 
+        let overlay = resources.overlay;
         Ok(Self {
             instance,
             adapter,
@@ -224,6 +272,7 @@ impl GpuContext {
             device,
             queue,
             config,
+            presentation,
             layout: resources.layout,
             pipeline: resources.pipeline,
             bind_group: resources.bind_group,
@@ -232,7 +281,17 @@ impl GpuContext {
             sampler: resources.sampler,
             image,
             has_image,
-            backdrop: wgpu::Color::TRANSPARENT,
+            reference: None,
+            reference_bind_group: None,
+            compare_fraction: None,
+            compare_dragging: false,
+            overlay,
+            overlay_palette: None,
+            tool_overlay: None,
+            backdrop: match composition {
+                SurfaceComposition::Opaque => super::Srgb8::DARK_SURFACE_BAR.to_clear_color(),
+                SurfaceComposition::Transparent => wgpu::Color::TRANSPARENT,
+            },
             viewport,
             device_lost,
             frames_drawn: 0,
@@ -298,8 +357,66 @@ impl GpuContext {
         self.upload_image(true);
     }
 
+    /// 对比数据侧第二张纹理；独立于当前结果，使用同一个视口几何。
+    pub fn set_reference_image(&mut self, id: u64, image: RenderImage) {
+        let texture = create_image_texture(&self.device, &self.queue, &image, &self.label);
+        self.reference_bind_group = Some(make_bind_group(
+            &self.device, &self.layout, &texture, &self.sampler, &self.uniform, &self.label,
+        ));
+        self.reference = Some((id, image, texture));
+    }
+
+    /// `None` 关闭对比；位置由 Rust 视口换算后的 0..1 洞口比例表示。
+    pub fn set_compare_fraction(&mut self, fraction: Option<f32>) {
+        self.compare_fraction = fraction.filter(|value| value.is_finite()).map(|value| value.clamp(0.0, 1.0));
+        self.compare_dragging = false;
+    }
+
+    pub fn set_overlay_palette(&mut self, palette: super::overlay::OverlayPalette) {
+        self.overlay_palette = Some(palette);
+    }
+
+    pub fn set_tool_overlay(&mut self, tool: Option<super::overlay::ToolOverlay>) {
+        self.tool_overlay = tool;
+    }
+
+    pub fn compare_fraction(&self) -> Option<f32> { self.compare_fraction }
+
+    /// 原始 CSS 窗口指针事实。起手必须命中把手，随后拖动可夹到洞口两端。
+    pub fn compare_pointer(&mut self, phase: &str, css: (f32, f32)) -> bool {
+        let Some(fraction) = self.compare_fraction else { return false; };
+        match phase {
+            "down" => {
+                self.compare_dragging = self.viewport.compare_handle_hit(css, fraction);
+                false
+            }
+            "move" if self.compare_dragging => {
+                let Some(next) = self.viewport.compare_fraction_at(css.0) else { return false; };
+                self.compare_fraction = Some(next);
+                true
+            }
+            "up" => {
+                let changed = self.compare_dragging;
+                if changed && let Some(next) = self.viewport.compare_fraction_at(css.0) {
+                    self.compare_fraction = Some(next);
+                }
+                self.compare_dragging = false;
+                changed
+            }
+            "cancel" => { self.compare_dragging = false; false }
+            _ => false,
+        }
+    }
+
+    pub fn reference_id(&self) -> Option<u64> { self.reference.as_ref().map(|(id,_,_)| *id) }
+
+    /// W5 对分显示可绑定这张纹理；本轮仅提供数据与上传，不添加新的交互动作。
+    pub fn reference_texture(&self) -> Option<&wgpu::Texture> { self.reference.as_ref().map(|(_,_,texture)| texture) }
+
     /// **清空照片**：换成 1×1 占位纹理，并且不再画那个四边形（只剩洞口底色）。
     pub fn clear_image(&mut self) {
+        self.reference = None;
+        self.reference_bind_group = None;
         self.image = RenderImage::transparent_1x1();
         self.set_source_size((1, 1));
         self.upload_image(false);
@@ -351,6 +468,7 @@ impl GpuContext {
         SurfaceDetails {
             format: format!("{:?}", self.config.format),
             alpha_mode: format!("{:?}", self.config.alpha_mode),
+            presentation: self.presentation.clone(),
             size: (self.config.width, self.config.height),
         }
     }
@@ -403,7 +521,8 @@ impl GpuContext {
 
     /// 画一帧：写 uniform → 开 render pass（scissor = 洞口）→ 呈现。
     pub fn render(&mut self) -> Result<RenderOutcome, GpuError> {
-        if self.config.width == 0 || self.config.height == 0 {
+        // config 保留最近一次合法的非零尺寸；最小化事实在 viewport 上。
+        if self.viewport.viewport_size.0 <= 0.0 || self.viewport.viewport_size.1 <= 0.0 {
             return Ok(RenderOutcome::Skipped);
         }
         /*
@@ -422,6 +541,8 @@ impl GpuContext {
             self.surface.configure(&self.device, &self.config);
         }
         self.write_uniforms();
+        self.overlay.prepare(&self.queue, &self.viewport, self.tool_overlay,
+            self.compare_fraction.filter(|_| self.reference_bind_group.is_some()), self.overlay_palette);
 
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame) => frame,
@@ -461,7 +582,7 @@ impl GpuContext {
                         depth_slice: None,
                         ops: wgpu::Operations {
                             /*
-                             * 清屏色 = **洞口底色**（默认透明）：
+                             * 清屏色 = **洞口底色**（产品不透明，spike 透明）：
                              *
                              * * spike 那条路是透明黑 —— 洞口之外不画东西，透出下面的桌面/窗口（这就是「挖洞」）；
                              * * 编辑器那条路把它设成界面底色（`set_backdrop`）—— 照片没盖住的部分
@@ -485,10 +606,27 @@ impl GpuContext {
                 if self.has_image
                     && let Some((x, y, w, h)) = self.viewport.scissor()
                 {
-                    pass.set_scissor_rect(x, y, w, h);
                     pass.set_pipeline(&self.pipeline);
-                    pass.set_bind_group(0, &self.bind_group, &[]);
-                    pass.draw(0..4, 0..1);
+                    if let (Some(fraction), Some(reference)) = (self.compare_fraction, &self.reference_bind_group)
+                        && let Some([left, right]) = self.viewport.compare_scissors(fraction)
+                    {
+                        if left.2 > 0 {
+                            pass.set_scissor_rect(left.0, left.1, left.2, left.3);
+                            pass.set_bind_group(0, reference, &[]);
+                            pass.draw(0..4, 0..1);
+                        }
+                        if right.2 > 0 {
+                            pass.set_scissor_rect(right.0, right.1, right.2, right.3);
+                            pass.set_bind_group(0, &self.bind_group, &[]);
+                            pass.draw(0..4, 0..1);
+                        }
+                    } else {
+                        pass.set_scissor_rect(x, y, w, h);
+                        pass.set_bind_group(0, &self.bind_group, &[]);
+                        pass.draw(0..4, 0..1);
+                    }
+                    pass.set_scissor_rect(x, y, w, h);
+                    self.overlay.draw(&mut pass);
                 }
             }
         self.queue.submit(Some(encoder.finish()));
@@ -544,12 +682,19 @@ impl GpuContext {
             self.config.format,
             &self.label,
         );
+        self.overlay = resources.overlay;
         self.layout = resources.layout;
         self.pipeline = resources.pipeline;
         self.bind_group = resources.bind_group;
         self.uniform = resources.uniform;
         self.texture = resources.texture;
         self.sampler = resources.sampler;
+        if let Some((_, image, texture)) = &mut self.reference {
+            *texture = create_image_texture(&self.device, &self.queue, image, &self.label);
+            self.reference_bind_group = Some(make_bind_group(
+                &self.device, &self.layout, texture, &self.sampler, &self.uniform, &self.label,
+            ));
+        }
 
         if let Ok(mut log) = self.device_lost.lock() {
             log.push("恢复：设备/管线/纹理已重建".to_string());
@@ -593,6 +738,7 @@ struct DeviceResources {
     uniform: wgpu::Buffer,
     texture: wgpu::Texture,
     sampler: wgpu::Sampler,
+    overlay: super::overlay::OverlayRenderer,
 }
 
 /// 在一台设备上建齐所有与设备绑定的资源。
@@ -626,6 +772,7 @@ fn build_device_resources(
     let bind_group = make_bind_group(device, &layout, &texture, &sampler, &uniform, label_prefix);
     let pipeline = create_pipeline(device, &layout, format, label_prefix);
     DeviceResources {
+        overlay: super::overlay::OverlayRenderer::new(device, format),
         layout,
         pipeline,
         bind_group,
@@ -817,21 +964,6 @@ fn create_pipeline(
         multiview_mask: None,
         cache: None,
     })
-}
-
-/// 优先要预乘（与合成器的常见约定一致），退而求其次要直通 alpha，最后才是不透明。
-fn pick_alpha_mode(caps: &wgpu::SurfaceCapabilities) -> Result<wgpu::CompositeAlphaMode, GpuError> {
-    for candidate in [
-        wgpu::CompositeAlphaMode::PreMultiplied,
-        wgpu::CompositeAlphaMode::PostMultiplied,
-        wgpu::CompositeAlphaMode::Auto,
-        wgpu::CompositeAlphaMode::Inherit,
-    ] {
-        if caps.alpha_modes.contains(&candidate) {
-            return Ok(candidate);
-        }
-    }
-    Err(GpuError::NoAlphaMode)
 }
 
 /// 优先 sRGB 表面格式（否则画出来偏亮/偏暗）。
@@ -1160,6 +1292,50 @@ mod tests {
     use super::*;
     use crate::render::viewport::FitMode;
 
+    #[test]
+    fn surface_composition_product_requires_opaque_for_every_capability_order() {
+        use wgpu::CompositeAlphaMode::{Auto, Inherit, Opaque, PostMultiplied, PreMultiplied};
+        let modes = [PreMultiplied, PostMultiplied, Auto, Inherit, Opaque];
+        // 各种子集与相反的驱动枚举顺序：不能因为 PreMultiplied 排第一就选它。
+        for mask in 0..(1 << modes.len()) {
+            let mut supported: Vec<_> = modes.iter().enumerate()
+                .filter(|(index, _)| mask & (1 << index) != 0)
+                .map(|(_, mode)| *mode)
+                .collect();
+            for _ in 0..2 {
+                let picked = SurfaceComposition::Opaque.alpha_mode(&supported);
+                if supported.contains(&Opaque) {
+                    assert_eq!(picked.unwrap(), Opaque);
+                } else {
+                    assert!(matches!(picked, Err(GpuError::NoAlphaMode)));
+                }
+                supported.reverse();
+            }
+        }
+    }
+
+    #[test]
+    fn surface_composition_spike_preserves_transparency_and_handles_opaque_only() {
+        use wgpu::CompositeAlphaMode::{Auto, Inherit, Opaque, PostMultiplied, PreMultiplied};
+        let cases: &[(&[_], _)] = &[
+            (&[Opaque, Inherit, Auto, PostMultiplied, PreMultiplied], PreMultiplied),
+            (&[Opaque, PostMultiplied], PostMultiplied),
+            (&[Opaque, Auto], Auto),
+            (&[Opaque, Inherit], Inherit),
+            (&[Opaque], Opaque), // DX12 HWND surface 的真实能力；旧代码漏了这项。
+        ];
+        for (supported, expected) in cases {
+            assert_eq!(
+                SurfaceComposition::Transparent.alpha_mode(supported).unwrap(),
+                *expected,
+            );
+        }
+        assert!(matches!(
+            SurfaceComposition::Transparent.alpha_mode(&[]),
+            Err(GpuError::NoAlphaMode),
+        ));
+    }
+
     /// 拿一台可用的设备。没有适配器的环境（纯容器 / 无 GPU 的 CI）返回 `None` ——
     /// 那种情况**跳过**，但会说明原因，不给「不明不白的绿」。
     fn try_device(label: &str) -> Option<(wgpu::Device, wgpu::Queue)> {
@@ -1180,6 +1356,67 @@ mod tests {
             ..Default::default()
         }))
         .ok()
+    }
+
+    /// 合成小图：实际走覆盖层 shader、顶点布局与混合，移动后的线不得留在旧位置。
+    #[test]
+    fn tool_overlay_draws_and_moves_without_dom_or_pixel_readback_in_production() {
+        use super::super::overlay::{OverlayPalette, OverlayRenderer};
+        let Some((device, queue)) = try_device("test-tool-overlay") else {
+            eprintln!("跳过 tool_overlay_draws：本环境没有可用的 wgpu 适配器");
+            return;
+        };
+        let mut overlay = OverlayRenderer::new(&device, wgpu::TextureFormat::Rgba8UnormSrgb);
+        let viewport = Viewport { viewport_size: (64.0, 64.0),
+            clip_rect: Some(super::super::ClipRect {x:0.0,y:0.0,width:64.0,height:64.0}),
+            ..Default::default() };
+        let palette = OverlayPalette {
+            line: super::super::Srgb8 { r:255,g:255,b:255 },
+            halo: super::super::Srgb8 { r:0,g:0,b:0 },
+            crop: super::super::Srgb8 { r:0,g:255,b:0 },
+            rotate: super::super::Srgb8 { r:255,g:0,b:0 },
+        };
+        let target = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("overlay-test-target"),
+            size: wgpu::Extent3d {width:64,height:64,depth_or_array_layers:1},
+            mip_level_count:1, sample_count:1, dimension:wgpu::TextureDimension::D2,
+            format:wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage:wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC, view_formats:&[],
+        });
+        let readback = device.create_buffer(&wgpu::BufferDescriptor {
+            label:Some("overlay-test-readback"),size:256*64,
+            usage:wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,mapped_at_creation:false,
+        });
+        for (fraction, x) in [(0.5,32),(0.75,48)] {
+            overlay.prepare(&queue,&viewport,None,Some(fraction),Some(palette));
+            let view=target.create_view(&Default::default());
+            let mut encoder=device.create_command_encoder(&Default::default());
+            {
+                let mut pass=encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label:Some("overlay-test-pass"),
+                    color_attachments:&[Some(wgpu::RenderPassColorAttachment {
+                        view:&view,resolve_target:None,depth_slice:None,
+                        ops:wgpu::Operations {load:wgpu::LoadOp::Clear(wgpu::Color::BLACK),store:wgpu::StoreOp::Store},
+                    })],depth_stencil_attachment:None,timestamp_writes:None,occlusion_query_set:None,multiview_mask:None,
+                });
+                overlay.draw(&mut pass);
+            }
+            encoder.copy_texture_to_buffer(target.as_image_copy(), wgpu::TexelCopyBufferInfo {
+                buffer:&readback,layout:wgpu::TexelCopyBufferLayout {offset:0,bytes_per_row:Some(256),rows_per_image:Some(64)},
+            },wgpu::Extent3d {width:64,height:64,depth_or_array_layers:1});
+            queue.submit(Some(encoder.finish()));
+            let slice=readback.slice(..);
+            let (tx,rx)=std::sync::mpsc::channel();
+            slice.map_async(wgpu::MapMode::Read,move |result| {let _=tx.send(result);});
+            device.poll(wgpu::PollType::Wait {submission_index:None,timeout:Some(std::time::Duration::from_secs(5))}).unwrap();
+            rx.recv().unwrap().unwrap();
+            let bytes=slice.get_mapped_range().unwrap();
+            let pixel=|x:usize| &bytes[8*256+x*4..8*256+x*4+4];
+            assert_eq!(pixel(x),[255,255,255,255],"新位置必须已绘制");
+            if x==48 {assert_eq!(pixel(32),[0,0,0,255],"旧线必须被清除");}
+            drop(bytes);
+            readback.unmap();
+        }
     }
 
     /// 回归（2026-09-19 真机**连续两次** panic）：整套设备资源必须能在任意设备上重建。

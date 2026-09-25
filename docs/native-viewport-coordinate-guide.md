@@ -175,3 +175,68 @@ pnpm spike:win
 - [devicePixelRatio 的定义与页面缩放](https://developer.mozilla.org/en-US/docs/Web/API/Window/devicePixelRatio)
 - [DirectComposition 基本坐标：根 visual 相对客户区](https://learn.microsoft.com/en-us/windows/win32/directcomp/basic-concepts)
 - 本仓 `implementations/2026-09-18_spike-coordinate-offset-report.md`（旧推断，已补勘误）
+
+## 8. 产品 GPU 底板与透明实验必须区分（2026-09-25）
+
+WebView 的透明洞口只用于露出下层照片，**不等于 GPU 表面也应与桌面做透明合成**。
+产品 editor 使用 `SurfaceComposition::Opaque`，照片未覆盖处由主题底色填满；
+spike 使用 `SurfaceComposition::Transparent`，继续验证透桌面的实验。
+两种用途共用 `GpuContext`，通过显式参数选择，禁止依靠窗口名/资源标签猜测。
+`html/body` 和洞口祖先的 DOM 透明链仍然必须保留。
+
+本地 RapidRAW（HEAD `f00145c1`）采用同样的 WebView 挖洞架构，且提交
+[`dc6b578a4`](https://github.com/CyberTimon/RapidRAW/commit/dc6b578a4f5bdc9405c5bb604587b79fc4d78a6f)
+专门将 Windows 的 surface alpha 首选改为 `Opaque`。其 `Moved` 事件仅保存窗口状态，
+没有移窗持续重绘的特殊修复。提交标题是“try to fix alpha mode on windows”，
+源码只能证明采用了这个策略，不能证明所有机器上的闪烁都已消失。
+
+raybend 旧策略优先 `PreMultiplied`，并漏掉了只有 `Opaque` 能力时的处理。
+现在产品路径必须选到 `Opaque`，不支持就明确报错，不能静默回到透明合成。
+初始化诊断记录 backend / format / alpha / presentation，可从 `editor_render_state` 的日志核实实际选型。
+
+呈现失败也不能丢帧：重配/错误后约 16ms 重试，遮挡/最小化/取帧超时按 200ms 退让；
+成功后阻塞等命令，不持续重绘。新窗口事件可立即唤醒等待。
+尺寸为零时保留上次合法 swapchain 配置、暂停实际绘制，恢复非零尺寸后继续。
+这些是调度与配置不变量；真实拖窗、跨 DPI、最大化/恢复的视觉结果仍需 Windows 目视确认。
+
+### 8.1 越出屏幕仍闪：Opaque 不等于绘制层隔离
+
+2026-09-25 后续真机反馈：同屏内移动大幅改善，窗体边缘越出屏幕后移动仍闪。
+Tauri 2.11.4 会在透明窗口的 `RedrawRequested` 中用 softbuffer 清底，最终 GDI `BitBlt`
+写顶层 HWND；旧 GPU surface 也直接向该 HWND 呈现。前述 Opaque 仅修正 alpha 策略，
+不能阻止另一条绘制路径更新同一层。边缘重绘触发的精确事件时序尚未捕获，不能把每一次闪
+都当成已经证明的这一条调用。
+
+随后用现有 wgpu 的 DX12 `DxgiFromVisual` 做对照并采用：DirectComposition 将 GPU 内容放到
+父窗直接绘制层上方、WebView 子窗下方。这样仍保留原来的产品分工，仅改平台呈现接入。
+2026-09-25 命令冒烟已确认 Dx12 / Opaque 能初始化、呈现与空闲休眠；随后崔总在
+同场景复测后确认「成功了」。因此 Windows 产品默认已固化为 DX12 + DxgiFromVisual + Opaque，
+不再依赖特殊启动参数。渲染器 history 同时记录实际 backend、format、alpha 和 presentation。
+
+这是整个编辑视口 wgpu 上下文切换到 DX12，包括纹理、shader、命令提交与交换链；
+DirectComposition 是呈现层隔离，不是「Vulkan 画图后临时借 DX12 刷窗」。Rust/wgpu 调用和
+WGSL 着色器共用原实现，没有增加像素回读/IPC/浏览器解码的绕行。显式 `WGPU_BACKEND` 与
+`WGPU_DX12_PRESENTATION_SYSTEM` 仍能覆盖默认，供诊断对照；不要把这些覆盖当成产品默认。
+非 Windows、透明 spike 和离屏工具保持原策略。当前视觉确认来自本机复现场景。
+
+### 8.2 排障经验：分清透明度、呈现归属和帧调度
+
+- **WebView 透明与 GPU 底板透明是两件事**。DOM 洞口要透明，照片和底色组成的底板应为 Opaque。
+  透明 spike 用来验证能否透出桌面，其 alpha 策略不能直接成为产品默认。
+- **Opaque 不能隔离另一个绘制者**。同屏内好转、越出屏幕时仍闪，是继续追查窗口重绘路径的线索；
+  先画清谁写哪个 HWND / visual，再考虑重试、VSync 或裁剪。不能仅凭 Vulkan 的 `clipped(true)` 定罪。
+- **“用了 DX12”仍不够具体**。`DxgiFromHwnd` 和 `DxgiFromVisual` 是不同呈现路径；
+  诊断必须一起记录 backend / format / alpha / presentation。本次通过的是后者。
+- **提高重绘频率不能修复层的归属**。重试负责丢帧、遮挡和恢复，独立合成层负责避免软件清底覆盖；
+  两者各有职责。成功呈现后继续休眠，不为治闪烁常驻 60Hz。
+- **按证据分层确认**。本地依赖源码证明存在同层绘制竞争；命令冒烟证明设备初始化、出帧、唤醒与休眠；
+  崔总对原越屏场景的复测证明该场景已解决。没有逐帧抓取事件时序，也未覆盖所有 GPU、驱动或平台。
+- **参考项目只提供可核实的局部事实**。RapidRAW 的 Windows Opaque 优先支持 alpha 策略判断，
+  不能据此推导它已经实现 DirectComposition 隔离或解决所有拖动问题。
+
+平台接入现收口到 `PresentationAdapter`，接口边界与以后 macOS/Linux 的扩展方式以
+[ARCHITECTURE.md §2.1](../ARCHITECTURE.md) 为准。
+详细依赖版本、调用点及官方依据见
+[调查记录](../implementations/2026-09-25_editor-offscreen-composition-investigation.md)；
+默认固化与适配器验证见
+[实施记录](../implementations/2026-09-25_editor-directcomposition-default.md)。

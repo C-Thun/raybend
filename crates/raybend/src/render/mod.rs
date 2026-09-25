@@ -15,6 +15,7 @@
 //! - [`color`]：sRGB 8bit → 清屏色（洞口底色的唯一换算处）
 //! - [`tier`]：取图档位的迟滞（预览档 / 全尺寸档，编辑器视口用）
 //! - [`supervisor`]：长期 GPU worker 的重启策略（panic / 设备丢失都走它）
+//! - [`presentation`]：平台呈现的最小适配器（Windows DX12 + DirectComposition）
 //! - [`gpu`]：wgpu 上下文（surface 挂窗口、resize、设备丢失与恢复、后端探测）
 //! - [`scene`]：spike 用的合成测试图（含 1px 棋盘格与方位标记，用来目视判画质）
 //! - [`stats`]：帧时间统计与 spike 报告（自记录，供 `pnpm spike:win` 落盘）
@@ -26,17 +27,21 @@
 pub mod color;
 pub mod gpu;
 pub mod image;
+pub mod overlay;
+pub mod presentation;
 pub mod scene;
 pub mod stats;
 pub mod supervisor;
 pub mod tier;
 pub mod viewport;
+pub mod wavelet;
 
 pub use color::Srgb8;
 pub use gpu::{
-    GpuContext, GpuError, OffscreenRenderer, RawHandles, RenderOutcome, SurfaceDetails,
+    GpuContext, GpuError, OffscreenRenderer, RawHandles, RenderOutcome, SurfaceComposition, SurfaceDetails,
 };
 pub use image::RenderImage;
+pub use presentation::PresentationAdapter;
 pub use stats::{FrameStats, SpikeReport};
 pub use supervisor::{RestartPolicy, Verdict};
 pub use tier::{tier_for, tier_for_params, ImageTier};

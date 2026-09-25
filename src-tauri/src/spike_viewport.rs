@@ -731,6 +731,8 @@ fn render_loop<R: Runtime>(
         dpr,
         // spike 的图像是**合成测试图**（与真实照片同一个 `RenderImage` 类型）
         Some(raybend::render::scene::make_test_image(6000, 4000)),
+        raybend::render::SurfaceComposition::Transparent,
+        raybend::render::PresentationAdapter::PlatformDefault,
         "spike",
     )
     .map_err(|e| e.to_string())?;
