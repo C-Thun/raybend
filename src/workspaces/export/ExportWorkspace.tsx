@@ -6,6 +6,7 @@ import {
   For,
   onCleanup,
   onMount,
+  on,
   Show,
   untrack,
 } from "solid-js";
@@ -13,7 +14,7 @@ import {
   IconFolderOpen,
   IconList,
   IconPhoto,
-  IconUpload,
+  IconUpload, IconPlayerSkipForward, IconClock, IconLoader2, IconCheck, IconAlertTriangle,
 } from "@tabler/icons-solidjs";
 import {
   BrowseLeftColumn,
@@ -24,12 +25,12 @@ import { PhotoGrid } from "../../features/photo-grid/PhotoGrid.tsx";
 import { TilesShell } from "../../components/ui/tiles/TilesShell.tsx";
 import { Tile } from "../../components/ui/Tile.tsx";
 import { Button, IconButton } from "../../components/ui/Button.tsx";
-import { Input } from "../../components/ui/Form.tsx";
+import { Input, RadioChoices } from "../../components/ui/Form.tsx";
 import { Slider } from "../../components/ui/Slider.tsx";
 import { SegmentedControl } from "../../components/ui/SegmentedControl.tsx";
 import { SplitStack } from "../../components/ui/SplitStack.tsx";
 import { SplitHandle } from "../../components/ui/SplitHandle.tsx";
-import { ConfirmDialog } from "../../components/ui/Dialog.tsx";
+import { ConfirmDialog, Dialog } from "../../components/ui/Dialog.tsx";
 import { StateWatermark } from "../../components/ui/StateWatermark.tsx";
 import { createThumbQueue } from "../../components/ui/thumb-queue.ts";
 import {
@@ -49,18 +50,22 @@ import { clickMode } from "../../lib/selection.ts";
 import { joinPath } from "../../lib/paths.ts";
 import {
   variantKey,
-  type ExportFormat,
+  exportGalleryState, mainVariant,
+  formatSupportsQuality, EXPORT_FORMATS, EXISTING_FILE_POLICIES,
   type VariantSummary,
 } from "../../lib/export-model.ts";
 import { t } from "../../i18n/index.ts";
+import { Portal } from "solid-js/web";
+import { trackPointerDrag } from "../../lib/pointer-drag.ts";
+import { animateCount } from "../../lib/count-transition.ts";
 import { registerExportActions } from "./actions.ts";
 import {
   exportGallerySource,
   exportQueueSource,
   queueImageKey,
-  ISSUE_CHIP_WIDTH,
-  ISSUE_CHIP_HEIGHT,
 } from "./source.ts";
+import { EXPORT_TOP_SIZE_BOUNDS } from "../../lib/export-prefs.ts";
+import { tileSizeAt } from "../../lib/tile-flow.ts";
 import type { ExportStore } from "./store.ts";
 
 export interface ExportWorkspaceProps {
@@ -81,6 +86,7 @@ export function ExportWorkspace(props: ExportWorkspaceProps) {
   const [leftWidth, setLeftWidth] = createSignal(props.leftWidth);
   let dragStart = 0;
   const [resetOpen, setResetOpen] = createSignal(false);
+  const [allIssues, setAllIssues] = createSignal<number|null>(null);
   const root = () =>
     repositories().find((r) => r.id === props.browse.repositoryId())?.root ??
     null;
@@ -90,6 +96,7 @@ export function ExportWorkspace(props: ExportWorkspaceProps) {
   // variant 图与队列图共用一个限流/LRU 队列，队列取入队快照。
   const issueThumbs = createThumbQueue({
     load: async (key) => {
+      if (!key.startsWith("[")) return getThumbBytes(key, "grid");
       const [repo, reference, hash] = JSON.parse(key) as [
         string,
         { assetId: number; variant: string },
@@ -101,7 +108,7 @@ export function ExportWorkspace(props: ExportWorkspaceProps) {
       return getExportVariantImage(
         repo,
         reference,
-        "strip",
+        "grid",
         captured?.profileHash === hash ? captured : undefined,
       );
     },
@@ -116,12 +123,18 @@ export function ExportWorkspace(props: ExportWorkspaceProps) {
     grouped: () => prefs.value().grouped,
     infoMode: () => prefs.value().info,
   });
+  untrack(() => store.context(props.browse.repositoryId(), props.browse.scopePath() ?? ""));
+  createEffect(on(() => [props.browse.repositoryId(), props.browse.scopePath()] as const, ([repo, scope]) => {
+    store.context(repo, scope ?? "");
+    photoThumbs.clear();
+    issueThumbs.clear();
+  }, {defer:true}));
+  const gallery = exportGallerySource(base, store, issueThumbs);
   const assets = createMemo(() =>
-    Array.from({ length: base.count() }, (_, i) =>
-      Number(base.idAt?.(i)),
+    Array.from({ length: gallery.count() }, (_, i) =>
+      Number(gallery.idAt?.(i)),
     ).filter((id) => id > 0),
   );
-  const gallery = exportGallerySource(base, store);
   const queue = exportQueueSource(store, issueThumbs);
   const currentIssue = createMemo(
     () =>
@@ -133,22 +146,17 @@ export function ExportWorkspace(props: ExportWorkspaceProps) {
             store.selection().anchor,
         ) ?? null,
   );
+  const queueCurrent = () => store.queueItems().find(item=>item.id===store.queueSelection().anchor) ?? null;
   const fullscreenTarget = () => {
-    const current = currentIssue(),
-      repo = store.repository(),
-      dir = root();
-    if (current === null || repo === null || dir === null) return null;
-    return {
-      items: [
-        {
-          id: variantKey(repo, current.reference),
-          path: joinPath(dir, current.relPath),
-          fileName: current.name,
-          exportVariant: { repositoryId: repo, reference: current.reference },
-        },
-      ],
-      index: 0,
-    };
+    const current = currentIssue(), item=queueCurrent();
+    if(store.activeArea()==="queue")return item===null?null:{items:[{
+      id:item.id,path:joinPath(item.root,item.snapshot.relPath),fileName:item.snapshot.name,
+      exportVariant:{repositoryId:item.repositoryId,reference:item.snapshot.reference,captured:item.snapshot},
+    }],index:0};
+    const repo=store.repository(),dir=root();
+    if(current===null||repo===null||dir===null)return null;
+    return {items:[{id:variantKey(repo,current.reference),path:joinPath(dir,current.relPath),fileName:current.name,
+      exportVariant:{repositoryId:repo,reference:current.reference}}],index:0};
   };
   const showIssue = (variant: VariantSummary) => {
     const repo = store.repository(),
@@ -166,32 +174,29 @@ export function ExportWorkspace(props: ExportWorkspaceProps) {
       0,
     ).catch(store.reportError);
   };
+  let repoRefresh = 0;
   const refreshRepos = async () => {
-    setReposLoading(true);
+    const ticket = ++repoRefresh;
+    if (repositories().length === 0) setReposLoading(true);
     try {
-      setRepositories(await listRepositories());
+      const next = await listRepositories();
+      if (ticket !== repoRefresh) return;
+      setRepositories(next);
       setReposError(null);
     } catch (e) {
-      setReposError(String(e));
+      if (ticket === repoRefresh) setReposError(String(e));
     } finally {
-      setReposLoading(false);
+      if (ticket === repoRefresh) setReposLoading(false);
     }
   };
   createEffect(() => {
-    const repo = props.browse.repositoryId(),
-      scope = props.browse.scopePath();
-    store.context(repo, scope ?? "");
-    photoThumbs.clear();
-    issueThumbs.clear();
-  });
-  createEffect(() => {
-    const v = currentIssue(),
-      dir = root();
-    props.selectedMetadata.select(
-      v === null || dir === null ? null : joinPath(dir, v.relPath),
-    );
+    const v = currentIssue(), dir = root(), item=queueCurrent();
+    const path = store.activeArea()==="queue" ? (item===null?null:joinPath(item.root,item.snapshot.relPath)) : (v===null||dir===null?null:joinPath(dir,v.relPath));
+    if (untrack(props.selectedMetadata.path) !== path) props.selectedMetadata.select(path);
   });
   onMount(() => {
+    store.syncRuntime();
+    const focus=()=>store.syncRuntime();window.addEventListener("focus",focus);onCleanup(()=>window.removeEventListener("focus",focus));
     void refreshRepos();
     store.invalidate([...store.variants().keys()]);
     void props.browse.refresh().catch(store.reportError);
@@ -204,17 +209,25 @@ export function ExportWorkspace(props: ExportWorkspaceProps) {
         if (dir !== null) void store.enqueue(dir);
       },
       selectAll: () =>
-        void store.group(assets(), false).catch(store.reportError),
+        store.selectAllActive(allIssues()===null?assets():[allIssues()!]),
       requestReset: () => setResetOpen(true),
+      remove: store.removeSelected,
     });
     let dead = false;
     let off: (() => void) | undefined;
     void onCatalogChanged((change) => {
       if (change.repositoryId !== store.repository()) return;
-      store.invalidate([...store.variants().keys()]);
+      if(change.assetIds.length > 0) void store.invalidate(change.assetIds);
       for (const path of change.paths)
         if (photoThumbs.get(path).status !== "idle") photoThumbs.refresh(path);
-      issueThumbs.clear();
+      // File changes may keep the profile hash. Refresh only affected displayed
+      // images, retaining the old decoded image until its replacement is ready.
+      const paths = new Set(change.paths);
+      const dir = root();
+      if (dir) for (const id of change.assetIds) for (const v of store.listFor(id)) {
+        const key = JSON.stringify([store.repository(),v.reference,v.profileHash]);
+        if (paths.has(joinPath(dir,v.relPath)) && issueThumbs.get(key).status!=="idle") issueThumbs.refresh(key);
+      }
       void refreshRepos();
     }).then((unsub) => {
       if (dead) unsub();
@@ -246,25 +259,7 @@ export function ExportWorkspace(props: ExportWorkspaceProps) {
     const info = ["off", "marks", "marks-name"] as const;
     prefs.update({ info: info[(info.indexOf(prefs.value().info) + 1) % 3] });
   };
-  const bar = (bottom = false) => ({
-    count: bottom ? queue.count() : gallery.count(),
-    countLabel: bottom
-      ? t("export.queueCount", {
-          remaining: store.progress(store.selectedPreset()?.id ?? "").remaining,
-          total: queue.count(),
-        })
-      : undefined,
-    selectedCount: bottom ? 0 : store.selection().ids.size,
-    byTime: prefs.value().grouped,
-    onByTimeChange: (grouped: boolean) => prefs.update({ grouped }),
-    infoMode: prefs.value().info,
-    onInfoToggle: cycleInfo,
-    tileStep: bottom ? prefs.value().queueStep : prefs.value().topStep,
-    onTileStepChange: (step: number) =>
-      prefs.update(bottom ? { queueStep: step } : { topStep: step }, false),
-    onTileStepCommit: () => prefs.commit(),
-    compactControls: bottom,
-    centerContent: bottom ? (
+  const queueCenter = (
       <span class="flex min-w-0 items-center gap-2">
         <span class="truncate rounded-ui bg-state-selected px-2 text-fs-1 text-fg-1">
           {store.selectedPreset()?.name ?? t("export.pickPreset")}
@@ -277,140 +272,178 @@ export function ExportWorkspace(props: ExportWorkspaceProps) {
           <IconList size={14} />
         </IconButton>
       </span>
-    ) : undefined,
+  );
+  const bar = (bottom = false) => ({
+    count: bottom ? queue.count() : gallery.count(),
+    countLabel: bottom
+      ? t("export.queueCount", {
+          remaining: store.progress(store.selectedPreset()?.id ?? "").remaining,
+          total: queue.count(),
+        })
+      : undefined,
+    selectedCount: bottom ? store.queueSelection().ids.size : store.selection().ids.size,
+    byTime: prefs.value().grouped,
+    onByTimeChange: (grouped: boolean) => prefs.update({ grouped }),
+    infoMode: prefs.value().info,
+    onInfoToggle: cycleInfo,
+    tileStep: bottom ? prefs.value().queueStep : prefs.value().topStep,
+    onTileStepChange: (step: number) =>
+      prefs.update(bottom ? { queueStep: step } : { topStep: step }, false),
+    onTileStepCommit: () => prefs.commit(),
+    compactControls: bottom,
+    centerContent: bottom ? queueCenter : undefined,
     label: bottom
       ? (store.selectedPreset()?.name ?? t("export.pickPreset"))
       : props.browse.scopePath(),
   });
-  const galleryEmpty = () => (
-    <StateWatermark
-      animate={props.browse.loading()}
+  const galleryEmpty = () => {
+    const state = exportGalleryState({repository: store.repository(),scope: props.browse.scopePath(),count: gallery.status()==="loading" || (reposLoading() && root()===null) ? 0 : gallery.count(),loading: props.browse.loading() || gallery.status()==="loading" || reposLoading(),error: store.error() ?? props.browse.error()});
+    if (state === null) return null;
+    return <StateWatermark
+      animate={state === "loading"}
       icon={<IconPhoto size={64} />}
-      text={
-        store.repository() === null
-          ? t("browse.noRepository")
-          : props.browse.scopePath() === null
-            ? t("browse.pickDirectory")
-            : props.browse.loading()
-              ? t("browse.loading")
-              : t("export.noIssues")
-      }
-    />
-  );
-  function IssueStrip(p: { assetId: number }) {
-    return (
-      <div data-export-issues class="flex flex-wrap content-start gap-1 pt-1">
-        <For each={store.listFor(p.assetId)}>
-          {(variant) => {
-            const key = () =>
-              JSON.stringify([
-                store.repository(),
-                variant.reference,
-                variant.profileHash,
-              ]);
-            createEffect(() => issueThumbs.request(key()));
-            return (
-              <div
-                style={{
-                  width: `${ISSUE_CHIP_WIDTH}px`,
-                  height: `${ISSUE_CHIP_HEIGHT - 4}px`,
-                }}
-                title={variant.name}
-              >
-                <div style={{ height: `${ISSUE_CHIP_WIDTH}px` }}>
-                  <Tile
-                    label={variant.name}
-                    src={issueThumbs.get(key()).url}
-                    loading={issueThumbs.get(key()).status === "loading"}
-                    selected={store
-                      .selection()
-                      .ids.has(
-                        variantKey(store.repository() ?? "", variant.reference),
-                      )}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      void store
-                        .selectIssue(
-                          variant.reference,
-                          clickMode(event, true),
-                          assets(),
-                        )
-                        .catch(store.reportError);
-                    }}
-                    onActivate={() => showIssue(variant)}
-                  />
-                </div>
-                <div class="truncate text-center text-fs-0 text-fg-2">
-                  {variant.name}
-                </div>
-              </div>
-            );
-          }}
-        </For>
-        <Show when={!store.variants().has(p.assetId)}>
-          <span class="text-fs-0 text-fg-3">{t("common.loading")}</span>
-        </Show>
-      </div>
-    );
+      tone={state === "error" ? "error" : "muted"}
+      text={state === "repository" ? t("browse.noRepository") : state === "directory" ? t("browse.pickDirectory") : state === "loading" ? t("browse.loading") : state === "error" ? (store.error() ?? props.browse.error() ?? "") : t("export.noIssues")}
+    />;
+  };
+  type DragBatch = {variants:readonly VariantSummary[];repository:string;x:number;y:number;target:string|null};
+  const [dragBatch,setDragBatch]=createSignal<DragBatch|null>(null);
+  const [countDrops,setCountDrops]=createSignal(new Map<string,{from:number;to?:number}>());
+  let cancelDrag:(()=>void)|undefined;
+  let clickTimer:ReturnType<typeof setTimeout>|undefined;
+  const blockClick=(event:MouseEvent)=>{event.preventDefault();event.stopImmediatePropagation();};
+  const clearDragClick=()=>{clearTimeout(clickTimer);window.removeEventListener("click",blockClick,true);};
+  const hoveredPreset=(point:{x:number;y:number})=>document.elementFromPoint(point.x,point.y)?.closest<HTMLElement>("[data-export-preset]")?.dataset.exportPreset??null;
+  async function dropIntoPreset(batch:DragBatch,id:string):Promise<void>{
+    const dir=root();if(!dir || batch.repository!==store.repository())return;
+    const request={from:store.progress(id).total};
+    setCountDrops(old=>new Map(old).set(id,request));
+    const added=await store.enqueue(dir,{presetId:id,references:batch.variants.map(v=>v.reference),preserveSelection:true});
+    setCountDrops(old=>{const next=new Map(old);if(old.get(id)!==request)return old;
+      if(added>0)next.set(id,{from:request.from,to:store.progress(id).total});else next.delete(id);return next;});
   }
-  const queueOverlay = (id: string) => {
-    const item = () =>
-      store
-        .queues()
-        .get(store.selectedPreset()?.id ?? "")
-        ?.find((item) => item.id === id);
-    return (
-      <span class="pointer-events-none absolute left-1 top-1 rounded-ui bg-surface-layer px-1 text-fs-0 text-fg-2">
-        {t(
-          item()?.status === "done"
-            ? "export.status.done"
-            : item()?.status === "running"
-              ? "export.status.running"
-              : item()?.status === "failed"
-                ? "export.status.failed"
-                : "export.status.pending",
-        )}
-      </span>
-    );
+  function beginIssueDrag(event:PointerEvent):void{
+    if(event.button!==0 || event.ctrlKey || event.metaKey || event.shiftKey || store.busy())return;
+    const target=event.target as HTMLElement;
+    if(target.closest("button,input,select,[role=slider]"))return;
+    const small=target.closest<HTMLElement>("[data-export-issue]");
+    const cell=target.closest<HTMLElement>("[data-grid-item]");
+    const variant=small ? store.selectedVariants().find(v=>v.reference.variant===small.dataset.exportIssue && small.closest('[data-grid-item]')?.getAttribute('data-grid-item')===String(v.reference.assetId))
+      : cell ? mainVariant(store.listFor(Number(cell.dataset.gridItem))) : null;
+    if(!variant || !store.selection().ids.has(variantKey(store.repository()??"",variant.reference)))return;
+    const variants=[...store.selectedVariants()];const repository=store.repository();if(!repository)return;
+    cancelDrag?.();
+    cancelDrag=trackPointerDrag(event,{threshold:6,
+      start:point=>{clearDragClick();window.addEventListener("click",blockClick,true);variants.slice(0,4).forEach(v=>issueThumbs.request(JSON.stringify([repository,v.reference,v.profileHash]),true));setDragBatch({variants,repository,...point,target:null});},
+      move:point=>setDragBatch(old=>old?{...old,...point,target:hoveredPreset(point)}:null),
+      end:(point,cancelled,started)=>{const batch=dragBatch();setDragBatch(null);
+        if(started){clickTimer=setTimeout(clearDragClick,0);if(!cancelled&&batch){const id=hoveredPreset(point);if(id)void dropIntoPreset(batch,id);}}
+      },
+    });
+  }
+  createEffect(()=>{
+    const batch=dragBatch();if(!batch)return;
+    if(batch.repository!==store.repository() || batch.variants.some(v=>!store.selection().ids.has(variantKey(batch.repository,v.reference))))cancelDrag?.();
+  });
+  onCleanup(()=>{cancelDrag?.();clearDragClick();});
+  function PresetQueueCount(p:{id:string}){
+    const [shown,setShown]=createSignal(store.progress(p.id).total);
+    const [animating,setAnimating]=createSignal(false);
+    let cancel=()=>{};
+    createEffect(on(()=>countDrops().get(p.id),request=>{
+      cancel();setAnimating(false);
+      if(!request){setShown(store.progress(p.id).total);return;}
+      setShown(request.from);
+      if(request.to===undefined)return;
+      if(window.matchMedia('(prefers-reduced-motion: reduce)').matches){setShown(request.to);return;}
+      setAnimating(request.from!==request.to);
+      cancel=animateCount(request.from,request.to,value=>{setShown(value);if(value===request.to)setAnimating(false);});
+    }));
+    createEffect(()=>{const total=store.progress(p.id).total;untrack(()=>{
+      const request=countDrops().get(p.id);
+      if(!request || (request.to!==undefined && total!==request.to)){cancel();setAnimating(false);setShown(total);}
+    });});
+    onCleanup(()=>cancel());
+    return <span data-export-preset-count={p.id} class="shrink-0 text-fg-2 tnum" classList={{'rb-export-count-bump':animating()}}>
+      {Math.max(0,store.progress(p.id).remaining-(store.progress(p.id).total-shown()))}/{shown()}
+    </span>;
+  }
+  function QueueBadge(p: { status?: string; error?: string|null }) {
+    const text=()=>p.status?t(`export.status.${p.status}` as "export.status.pending"):"";
+    return <Show when={p.status}><span data-export-status={p.status} title={p.error??text()} aria-label={text()} class="pointer-events-none absolute left-1 top-1 rounded-ui bg-surface-layer p-0.5 text-fg-1">
+      <Show when={p.status==="pending"}><IconClock size={14}/></Show>
+      <Show when={p.status==="running"}><IconLoader2 size={14} class="animate-spin"/></Show>
+      <Show when={p.status==="done"}><IconCheck size={14}/></Show>
+      <Show when={p.status==="skipped"}><IconPlayerSkipForward size={14}/></Show>
+      <Show when={p.status==="failed"}><IconAlertTriangle size={14} class="text-danger"/></Show>
+    </span></Show>;
+  }
+  function IssueTile(p: { variant: VariantSummary; size: number }) {
+    const key=()=>JSON.stringify([store.repository(),p.variant.reference,p.variant.profileHash]);
+    const state=()=>store.queueState(p.variant.reference,p.variant.profileHash);
+    createEffect(()=>issueThumbs.request(key()));
+    return <div data-export-issue={p.variant.reference.variant} class="relative" title={p.variant.name} style={{width:`${p.size}px`,height:`${p.size}px`,"--tile-cell":`${p.size}px`}}>
+      <Tile keyboardActivate={false} label={p.variant.name} src={issueThumbs.get(key()).url} aspect={1} minimal selectionFrame
+        selected={store.selection().ids.has(variantKey(store.repository()??"",p.variant.reference))}
+        disabled={store.locked(p.variant)} selectionLocked={store.locked(p.variant)}
+        loading={issueThumbs.get(key()).status==="loading"}
+        onClick={event=>{event.stopPropagation();void store.selectIssue(p.variant.reference,clickMode(event,true),assets()).catch(store.reportError);}}
+        onActivate={()=>showIssue(p.variant)}/>
+      <QueueBadge status={state()?.status} error={state()?.error}/>
+    </div>;
+  }
+  function IssueStrip(p: { assetId: number }) {
+    const small=()=>Math.max(1,(tileSizeAt(prefs.value().topStep, EXPORT_TOP_SIZE_BOUNDS)-4)/2);
+    return <div data-export-issues class="pt-1">
+      <div class="grid grid-cols-2 gap-1"><For each={store.smallFor(p.assetId).slice(0,6)}>{v=><IssueTile variant={v} size={small()}/>}</For></div>
+      <Show when={store.smallFor(p.assetId).length>6}><button type="button" class="flex h-5 items-center rounded-ui text-fs-0 text-fg-2 hover:text-fg-1" onClick={()=>{store.focusArea("gallery");setAllIssues(p.assetId);}}>{t("export.allIssues")}</button></Show>
+    </div>;
+  }
+  function QueueFailure(p: { id: string }) {
+    const item = () => store.queueItems().find(entry => entry.id === p.id);
+    return <Show when={item()?.status === "failed"}>
+      <div data-export-queue-error class={prefs.value().queueList ? "min-w-0 flex-1" : "mt-1 flex h-16 min-w-0 flex-col justify-between"}>
+        <p class="line-clamp-2 break-words text-fs-0 text-danger" title={item()?.error ?? t("export.failedUnknown")}>
+          {t("export.failureReason", {reason: item()?.error ?? t("export.failedUnknown")})}
+        </p>
+        <Button data-export-retry class="self-start" size="sm" onClick={() => store.retry([p.id])}>{t("export.retry")}</Button>
+      </div>
+    </Show>;
+  }
+  const queueOverlay=(id:string)=>{
+    const item=()=>store.queueItems().find(i=>i.id===id);
+    return <QueueBadge status={item()?.status} error={item()?.error}/>;
   };
   const top = (
-    <TilesShell bar={bar()}>
+    <div data-export-area="gallery" onDragStart={event=>event.preventDefault()} class="flex min-h-0 flex-1 border" classList={{"border-brand-2":store.activeArea()==="gallery","border-surface-layer":store.activeArea()!=="gallery"}} onPointerDown={event=>{store.focusArea("gallery");beginIssueDrag(event);}} onFocusIn={()=>store.focusArea("gallery")}><TilesShell sizeBounds={EXPORT_TOP_SIZE_BOUNDS} bar={bar()}>
       <PhotoGrid
         source={gallery}
         commandEnter
         cellExtra={(item) => <IssueStrip assetId={Number(item.id)} />}
+        cellOverlay={item=>{const main=()=>mainVariant(store.listFor(Number(item.id)));const state=()=>main()?store.queueState(main()!.reference,main()!.profileHash):undefined;return <QueueBadge status={state()?.status} error={state()?.error}/>;}}
         activate={(id) => {
-          const v = store.listFor(Number(id))[0];
-          if (v !== undefined) showIssue(v);
+          const v = mainVariant(store.listFor(Number(id)));
+          if (v !== null) showIssue(v);
         }}
         watermark={galleryEmpty}
         onInteract={() => setLibsExpanded(false)}
       />
-    </TilesShell>
+    </TilesShell></div>
   );
   const bottom = (
-    <TilesShell bar={bar(true)}>
+    <div data-export-area="queue" class="flex min-h-0 flex-1 border" classList={{"border-brand-2":store.activeArea()==="queue","border-surface-layer":store.activeArea()!=="queue"}} onPointerDown={()=>store.focusArea("queue")} onFocusIn={()=>store.focusArea("queue")}><TilesShell bar={bar(true)}>
       <PhotoGrid
         source={queue}
         listMode={prefs.value().queueList}
-        cellExtra={(item) => {
-          const entry = store
-            .queues()
-            .get(store.selectedPreset()?.id ?? "")
-            ?.find((q) => q.id === item.id);
-          return (
-            <div
-              class="min-w-0 truncate text-fs-1 text-fg-2"
-              title={entry?.snapshot.name}
-            >
-              {entry?.snapshot.name}
-            </div>
-          );
-        }}
         commandEnter
         cellOverlay={(item) => queueOverlay(item.id)}
-        activate={() => {}}
-        watermark={() => (
+        cellExtra={(item) => <QueueFailure id={item.id} />}
+        activate={(id) => {
+          const item=store.queueItems().find(entry=>entry.id===id);
+          if(item)void openFullscreen([{id:item.id,path:joinPath(item.root,item.snapshot.relPath),fileName:item.snapshot.name,
+            exportVariant:{repositoryId:item.repositoryId,reference:item.snapshot.reference,captured:item.snapshot}}],0).catch(store.reportError);
+        }}
+        watermark={() => queue.count()>0 ? null : (
           <StateWatermark
             icon={<IconUpload size={64} />}
             text={
@@ -421,7 +454,7 @@ export function ExportWorkspace(props: ExportWorkspaceProps) {
           />
         )}
       />
-    </TilesShell>
+    </TilesShell></div>
   );
   const ratio = untrack(() => prefs.value().ratio);
   const fieldError = (field: string) => store.validation().errors[field];
@@ -514,51 +547,55 @@ export function ExportWorkspace(props: ExportWorkspaceProps) {
         data-export-right
         class="flex w-panel-w-right min-h-0 shrink-0 flex-col gap-3 bg-surface-main p-panel-pad"
       >
+        <section data-export-presets class="flex min-h-24 flex-1 flex-col gap-2">
         <div class="flex shrink-0 items-center justify-between">
-          <span class="text-fs-2 text-fg-2">{t("export.presets")}</span>
-          <Button onClick={() => store.choosePreset(null)}>
-            {t("export.new")}
-          </Button>
+          <span class="text-fs-2 text-fg-2">{t("export.presetList")}</span>
         </div>
-        <div data-export-preset-list class="max-h-36 shrink-0 overflow-auto">
-          <For each={store.presets()}>
+        <div data-export-preset-list class="min-h-0 flex-1 overflow-auto">
+          <For each={store.presets()} fallback={<p class="text-fs-1 text-fg-3">{t("export.noPresets")}</p>}>
             {(preset) => (
               <button
                 type="button"
-                class={`mb-1 flex w-full items-center gap-2 rounded-ui p-2 text-left text-fs-1 ${store.selectedPreset()?.id === preset.id ? "bg-state-selected" : "bg-surface-track hover:bg-state-hover"}`}
+                data-export-preset={preset.id}
+                aria-pressed={store.selectedPreset()?.id===preset.id}
+                class="border-2 mb-1 flex w-full items-center gap-2 rounded-ui p-2 text-left text-fs-1"
+                classList={{
+                  "border-brand-2":dragBatch()?.target===preset.id,
+                  "border-transparent":dragBatch()?.target!==preset.id,
+                  "bg-state-selected":store.selectedPreset()?.id===preset.id,
+                  "bg-surface-track":store.selectedPreset()?.id!==preset.id,
+                  "hover:bg-state-hover":store.selectedPreset()?.id!==preset.id,
+                }}
                 onClick={() => store.choosePreset(preset.id)}
               >
                 <span class="min-w-0 flex-1">
                   <span class="block truncate text-fg-1">{preset.name}</span>
                   <span class="block truncate text-fs-0 text-fg-3">
                     {preset.format.toUpperCase()} ·{" "}
-                    {preset.maxEdge === 0
-                      ? t("export.originalSize")
-                      : preset.maxEdge + "px"}
+                    {preset.sizeMode === "original" ? t("export.originalSize") : preset.sizeMode === "percent" ? preset.percent + "%" : preset.maxEdge + "px"}
                   </span>
                 </span>
+                <Show when={store.enabled().has(preset.id)}><IconCheck size={14} class="shrink-0 text-brand" aria-label={t("export.start")}/></Show>
                 <Show when={store.progress(preset.id).total > 0}>
-                  <span class="shrink-0 text-fg-2 tnum">
-                    {store.progress(preset.id).remaining}/
-                    {store.progress(preset.id).total}
-                  </span>
+                  <PresetQueueCount id={preset.id}/>
                 </Show>
               </button>
             )}
           </For>
         </div>
+        </section>
+        <section data-export-settings class="flex min-h-0 max-h-[calc(100%_-_108px)] shrink-0 flex-col gap-2">
         <form
+          id="export-preset-form"
           data-export-form
-          class="flex min-h-0 flex-1 flex-col gap-2 overflow-auto"
+          class="flex min-h-0 shrink flex-col gap-2 overflow-auto"
           onSubmit={(event) => {
             event.preventDefault();
             void store.save();
           }}
         >
-          <span class="text-fs-2 text-fg-2">
-            {store.selectedPreset() === null
-              ? t("export.newPreset")
-              : t("export.settings")}
+          <span data-export-form-title class="text-fs-2 text-fg-2">
+            {t(store.matchingPreset() === null ? "export.newPreset" : "export.editPreset")}
           </span>
           <label class="flex flex-col gap-1 text-fs-1 text-fg-2">
             {t("export.name")}
@@ -574,12 +611,11 @@ export function ExportWorkspace(props: ExportWorkspaceProps) {
           <SegmentedControl
             label={t("export.format")}
             value={store.draft().format}
-            options={(
-              ["jpeg", "tiff", "png", "webp", "avif"] as ExportFormat[]
-            ).map((value) => ({ value, label: value.toUpperCase() }))}
+            options={EXPORT_FORMATS.map((value) => ({ value, label: value === "jpeg" ? "JPG" : value.toUpperCase() }))}
             onValueChange={(format) => store.edit({ format })}
           />
-          <div class="flex justify-between text-fs-1 text-fg-2">
+          <Show when={formatSupportsQuality(store.draft().format)}>
+          <div data-export-quality class="flex justify-between text-fs-1 text-fg-2">
             <span>{t("export.quality")}</span>
             <span class="tnum">{store.draft().quality}</span>
           </div>
@@ -589,28 +625,23 @@ export function ExportWorkspace(props: ExportWorkspaceProps) {
             max={100}
             label={t("export.quality")}
             onValueChange={(quality) => store.edit({ quality })}
-            disabled={
-              store.draft().format === "png" || store.draft().format === "tiff"
-            }
           />
-          <label class="flex flex-col gap-1 text-fs-1 text-fg-2">
-            {t("export.maxEdge")}
-            <Input
-              type="number"
-              min="0"
-              max="65535"
-              value={store.draft().maxEdge}
-              invalid={!!fieldError("maxEdge")}
-              onInput={(event) =>
-                store.edit({
-                  maxEdge:
-                    event.currentTarget.value === ""
-                      ? NaN
-                      : Number(event.currentTarget.value),
-                })
-              }
-            />
-          </label>
+          </Show>
+          <div data-export-size class="flex flex-col gap-1 text-fs-1 text-fg-2">
+            <span>{t("export.size")}</span>
+            <RadioChoices label={t("export.size")} value={store.draft().sizeMode}
+              options={[{value:"original",label:t("export.keepSize")},{value:"percent",label:t("export.percentSize")},{value:"maxEdge",label:t("export.maxEdge")}]}
+              onValueChange={sizeMode=>store.edit({sizeMode, ...(sizeMode==="maxEdge" && store.draft().maxEdge===0?{maxEdge:2048}:{})})}
+              trailing={mode => mode==="original" ? null : <span class="flex shrink-0 items-center gap-1">
+                <Input data-export-size-value={mode} class="w-24 min-w-0 text-right tnum" type="number" min="1" max={mode==="percent"?100:65535}
+                  aria-label={t(mode==="percent"?"export.percentSize":"export.maxEdge")}
+                  disabled={store.draft().sizeMode!==mode}
+                  value={mode==="percent"?store.draft().percent:store.draft().maxEdge}
+                  invalid={!!fieldError(mode==="percent"?"percent":"maxEdge")}
+                  onInput={event=>store.edit({[mode==="percent"?"percent":"maxEdge"]:event.currentTarget.value===""?NaN:Number(event.currentTarget.value)})}/>
+                <span class="w-4 text-fg-3">{mode==="percent"?"%":"px"}</span>
+              </span>}/>
+          </div>
           <label class="flex flex-col gap-1 text-fs-1 text-fg-2">
             {t("export.directory")}
             <span class="flex gap-1">
@@ -636,6 +667,12 @@ export function ExportWorkspace(props: ExportWorkspaceProps) {
               </IconButton>
             </span>
           </label>
+          <div data-export-existing-file class="flex flex-col gap-1 text-fs-1 text-fg-2">
+            <span>{t("export.existingFile")}</span>
+            <SegmentedControl label={t("export.existingFile")} value={store.draft().existingFile}
+              options={EXISTING_FILE_POLICIES.map(value=>({value,label:t(`export.existingFile.${value}`)}))}
+              onValueChange={existingFile=>store.edit({existingFile})}/>
+          </div>
           <label class="flex flex-col gap-1 text-fs-1 text-fg-2">
             {t("export.template")}
             <Input
@@ -658,11 +695,11 @@ export function ExportWorkspace(props: ExportWorkspaceProps) {
                         ? "export.directory"
                         : field === "template"
                           ? "export.template"
-                          : field === "maxEdge"
-                            ? "export.maxEdge"
+                          : ["maxEdge","sizeMode","percent"].includes(field)
+                            ? "export.size"
                             : field === "quality"
                               ? "export.quality"
-                              : "export.format",
+                              : field === "existingFile" ? "export.existingFile" : "export.format",
                   ),
                   message: message === field ? t("export.invalid") : message,
                 })}
@@ -672,48 +709,39 @@ export function ExportWorkspace(props: ExportWorkspaceProps) {
           <For each={store.validation().warnings}>
             {(message) => <p class="text-fs-0 text-fg-3">{message}</p>}
           </For>
-          <Button
-            type="submit"
-            variant={
-              store
-                .presets()
-                .some(
-                  (p) => p.name === store.draft().name.trim().normalize("NFC"),
-                )
-                ? "secondary"
-                : "primary"
-            }
-            disabled={
-              store.busy() ||
-              store.loading() ||
-              Object.keys(store.validation().errors).length > 0
-            }
-            loading={store.busy()}
-          >
-            {t(
-              store
-                .presets()
-                .some(
-                  (p) => p.name === store.draft().name.trim().normalize("NFC"),
-                )
-                ? "export.update"
-                : "export.add",
-            )}
-          </Button>
         </form>
-        <div class="flex shrink-0 flex-col gap-1">
-          <Button
-            variant="primary"
-            disabled
-            title={t("export.executionPending")}
-          >
-            {t("export.start")}
+        <div data-export-actions class="flex shrink-0 items-center gap-2">
+          <Button data-export-save type="submit" form="export-preset-form" class="shrink-0"
+            variant={store.matchingPreset() ? "secondary" : "accent"}
+            disabled={!store.canSave()}
+            loading={store.busy()}>
+            {t(store.matchingPreset() ? "export.update" : "export.add")}
           </Button>
-          <span class="text-center text-fs-0 text-fg-3">
-            {t("export.executionPending")}
-          </span>
+          <Button data-export-run class="min-w-0 flex-1" variant="primary" disabled={!store.canRun()} onClick={store.toggleRun}>
+            <span class="relative grid overflow-hidden" aria-busy={store.progress(store.selectedPreset()?.id??"").processing}>
+              <span class="col-start-1 row-start-1 flex items-center gap-1.5" classList={{"opacity-50":store.progress(store.selectedPreset()?.id??"").processing}}><IconUpload size={14}/>{t(store.enabled().has(store.selectedPreset()?.id??"")?"export.stop":"export.start")}</span>
+              <Show when={store.progress(store.selectedPreset()?.id??"").processing}><span aria-hidden="true" data-export-run-processing class="rb-shimmer-mask pointer-events-none col-start-1 row-start-1 flex items-center gap-1.5"><IconUpload size={14}/>{t(store.enabled().has(store.selectedPreset()?.id??"")?"export.stop":"export.start")}</span></Show>
+            </span>
+          </Button>
         </div>
+        <p data-export-save-hint class="shrink-0 text-fs-0 text-fg-3">{t("export.saveBeforeStart")}</p>
+        </section>
       </aside>
+      <Show when={dragBatch()}>{batch=><Portal>
+        <div data-export-drag-preview aria-hidden="true" class="pointer-events-none fixed z-(--z-modal) size-[200px] opacity-80" style={{left:`${Math.min(batch().x+14,window.innerWidth-205)}px`,top:`${Math.min(batch().y+14,window.innerHeight-205)}px`}}>
+          <For each={batch().variants.slice(0,4)}>{(v,i)=><div class="rb-export-drag-card absolute size-[132px] overflow-hidden rounded-ui border border-fg-3 bg-surface-layer" style={{left:`${26+i()*9}px`,top:`${38-i()*3}px`,transform:`rotate(${(i()-(Math.min(4,batch().variants.length)-1)/2)*8}deg)`,'transform-origin':'50% 85%'}}>
+            <Show when={issueThumbs.get(JSON.stringify([batch().repository,v.reference,v.profileHash])).url} fallback={<IconPhoto size={48} class="m-auto mt-10 text-fg-3"/>}>{url=><img class="size-full object-contain" src={url()} alt="" draggable={false}/>}</Show>
+          </div>}</For>
+          <span class="absolute bottom-2 right-2 rounded-ui bg-surface-layer px-2 py-1 text-fs-2 text-fg-1 tnum">{batch().variants.length}</span>
+        </div>
+      </Portal>}</Show>
+      <Dialog open={store.limitOpen()} onOpenChange={store.setLimitOpen} title={t("export.limit")}><p class="text-fg-2">{t("export.limitBody")}</p></Dialog>
+      <Dialog open={allIssues()!==null} onOpenChange={open=>{if(!open)setAllIssues(null);}} title={t("export.allIssues")} size="wide">
+        <div data-export-all-issues class="grid max-h-[60vh] grid-cols-[repeat(auto-fit,minmax(136px,1fr))] gap-2 overflow-auto">
+          <For each={allIssues()===null?[]:store.refsFor([allIssues()!])}>{v=><IssueTile variant={v} size={136}/>}</For>
+        </div>
+        <div class="flex gap-2"><Button disabled={store.selection().ids.size===0} onClick={store.clear}>{t("export.clear")}</Button><Button disabled={!store.canEnqueue()} onClick={()=>{const dir=root();if(dir)void store.enqueue(dir);}}>{t("export.enqueue")}</Button><Button disabled={!store.canRemove()} onClick={store.removeSelected}>{t("export.remove")}</Button></div>
+      </Dialog>
       <ConfirmDialog
         open={resetOpen()}
         onCancel={() => setResetOpen(false)}

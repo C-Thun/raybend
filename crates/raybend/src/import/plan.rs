@@ -759,12 +759,17 @@ fn resolve_conflict(
     // 撞满上限就把不加后缀的名字交出去 —— runner 用 `create_new` 写文件，
     // 会以「目标已存在」失败，**不会静默覆盖**。
     for i in 1..=99_999u64 {
-        let candidate = compose(dir, &format!("{stem}_{i:02}"), ext);
+        let candidate = compose(dir, &collision_stem(stem, i), ext);
         if is_free(&candidate, fs, claimed, reserved) {
             return candidate;
         }
     }
     compose(dir, stem, ext)
+}
+
+/// Shared no-overwrite naming convention for import and export.
+pub fn collision_stem(stem: &str, index: u64) -> String {
+    if index == 0 { stem.into() } else { format!("{stem}_{index:02}") }
 }
 
 fn is_free(

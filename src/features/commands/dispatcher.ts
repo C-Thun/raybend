@@ -35,6 +35,8 @@ export interface CommandDispatcherOptions {
   /** 额外拦截：弹窗开着、正在输入、已经被别人处理过…… */
   blocked?: (event: KeyboardEvent) => boolean;
   /** 平台（测试注入用） */
+  /** Explicit dialog-owned command subset; ordinary dialogs still block everything. */
+  allowedWhileBlocked?: (command: CommandSpec, event: KeyboardEvent) => boolean;
   platform?: () => ChordPlatform;
   /** 执行留痕（冒烟与调试用） */
   onRun?: (command: CommandSpec) => void;
@@ -63,12 +65,13 @@ export function createCommandDispatcher(options: CommandDispatcherOptions): Comm
 
   const handle = (event: KeyboardEvent): boolean => {
     if (event.defaultPrevented) return false;
-    if (options.blocked?.(event) === true) return false;
+    const blocked = options.blocked?.(event) === true;
     if (!shouldHandleKey(event.target as HTMLElement | null, false)) return false;
 
     const matches: CommandSpec[] = [];
     for (const entry of bound()) {
       if (entry.chord === null) continue;
+      if (blocked && options.allowedWhileBlocked?.(entry.command, event) !== true) continue;
       if (!chordMatches(entry.chord, event, platform())) continue;
       // 可用性判定只有一份（`lib/commands.ts`）：`when` 与 `enabled` 两个闸都在里面
       if (!availabilityOf(entry.command).available) continue;

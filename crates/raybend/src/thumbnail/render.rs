@@ -30,12 +30,7 @@ use image::{DynamicImage, ExtendedColorType, ImageFormat, Rgb, RgbImage};
 
 use image::ImageEncoder;
 
-use crate::develop::curve::{Curve, CurveChannel, CurveSet};
-use crate::develop::local_tone::{LocalToneOpts, LocalToneState};
-use crate::develop::params::DevelopParams;
-use crate::develop::pipeline::{
-    DevelopPlans, DevelopStages, LinearImage, chain_image, render_develop,
-};
+use crate::develop::pipeline::LinearImage;
 use crate::store::develop::DevelopStack;
 
 use crate::error::{Error, Result};
@@ -76,6 +71,9 @@ pub const AVIF_SPEED: u8 = 10;
 /// # Errors
 /// 编码器内部错误（尺寸为 0、数据长度对不上…）。
 pub fn encode_avif(rgb: &[u8], width: u32, height: u32) -> Result<Vec<u8>> {
+    encode_avif_with_metadata(rgb, width, height, AVIF_QUALITY, Vec::new())
+}
+pub fn encode_avif_with_metadata(rgb: &[u8], width:u32,height:u32,quality:u8,exif:Vec<u8>) -> Result<Vec<u8>> {
     if width == 0 || height == 0 {
         return Err(Error::Unsupported("AVIF 编码：尺寸为 0".to_string()));
     }
@@ -87,11 +85,12 @@ pub fn encode_avif(rgb: &[u8], width: u32, height: u32) -> Result<Vec<u8>> {
         )));
     }
     let mut data = Vec::new();
-    let encoder = image::codecs::avif::AvifEncoder::new_with_speed_quality(
+    let mut encoder = image::codecs::avif::AvifEncoder::new_with_speed_quality(
         &mut data,
         AVIF_SPEED,
-        AVIF_QUALITY,
-    );
+        quality,
+    ).with_num_threads(Some(1));
+    if !exif.is_empty() { encoder.set_exif_metadata(exif).map_err(|e| Error::Unsupported(e.to_string()))?; }
     // RGB8（不是 RGBA8）⇒ ravif 走 4:4:4 色度采样（人类 2026-09-24 的口径）
     encoder
         .write_image(rgb, width, height, image::ExtendedColorType::Rgb8)
@@ -136,7 +135,8 @@ pub fn encode_avif(rgb: &[u8], width: u32, height: u32) -> Result<Vec<u8>> {
 /// v11（M3-W5）：成片几何先于网格展示夹取，并为紧裁切保留源像素。
 // v12: lens profiles apply only after an explicit selection / auto-adjust action.
 // v13: optional camera base curve before the editable user curve.
-pub const PIPELINE_VERSION: u32 = 13;
+// v14: RGB16 display stages; quantize only after sharpen/LUT/geometry.
+pub const PIPELINE_VERSION: u32 = 14;
 
 /// 缩略图尺度。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
@@ -203,9 +203,9 @@ impl SizeClass {
 #[must_use]
 pub const fn render_sig(size: SizeClass) -> &'static str {
     match size {
-        SizeClass::Grid => "avif-q90-grid-v13",
-        SizeClass::Strip => "avif-q90-strip-v13",
-        SizeClass::Screen => "avif-q90-screen-v13",
+        SizeClass::Grid => "avif-q90-grid-v14",
+        SizeClass::Strip => "avif-q90-strip-v14",
+        SizeClass::Screen => "avif-q90-screen-v14",
     }
 }
 
@@ -617,63 +617,10 @@ fn apply_develop_linear(
     decoded_as_shot_k: Option<f32>,
     lut: Option<&crate::develop::lut::Lut>,
 ) -> Result<image::RgbImage> {
-    let (width, height) = (linear.width, linear.height);
-    let params = DevelopParams::from_values(
-        stack.params.iter().map(|(id, value)| (id.clone(), *value)),
-        decoded_as_shot_k.or(stack.as_shot_k),
-    )
-    .map_err(|e| Error::Unsupported(format!("编辑栈里的参数不合法：{e}")))?;
-    let mut curves = CurveSet::identity();
-    if stack.source_base == crate::store::develop::EditBase::Raw
-        && let Some(points) = &stack.base_curve_points
-    {
-        curves.base = Curve::from_points(points.clone())
-            .map_err(|e| Error::Unsupported(format!("编辑栈里的基础曲线不合法：{e}")))?;
-    }
-    for (channel, points) in &stack.curves {
-        let Some(channel) = CurveChannel::parse(channel) else {
-            return Err(Error::Unsupported(format!(
-                "编辑栈里有未知的曲线通道：{channel}"
-            )));
-        };
-        let curve = Curve::from_points(points.clone()).map_err(|e| {
-            Error::Unsupported(format!("编辑栈里的曲线不合法（{}）：{e}", channel.as_str()))
-        })?;
-        curves.set_channel(channel, curve);
-    }
-    // 可选阶段（降噪 / 锐化 / 镜头手动微调）与动态反差：
-    // **缩略图也必须反映编辑结果**（M3 的 DoD）——
-    // 动态反差的分解在缩略图尺寸上很便宜，不做的话网格与编辑器会显示两张不同的图。
-    let plans = DevelopPlans::from_params(width, height, &params);
-    let lens_map = {
-        // 镜头配置文件（调用方解析后传进来）+ **手动三根拉杆**（从参数里合并）
-        let manual = plans.lens.manual;
-        let mut correction = lens.cloned().unwrap_or_else(|| {
-            crate::develop::lens::LensCorrection::manual_only(width, height, manual)
-        });
-        correction.manual = manual;
-        crate::develop::lens::LensMap::new(&correction)
-    };
-    let local_state = (plans.local_tone > 0.0).then(|| {
-        let chained = chain_image(linear, &params);
-        LocalToneState::analyze(&chained, &LocalToneOpts::default())
-    });
-    let stages = DevelopStages {
-        nr_method: stack.nr_method.unwrap_or_default(),
-        lens: Some(&lens_map),
-        denoise: Some(&plans.denoise),
-        local_tone: local_state.as_ref().map(|state| (state, plans.local_tone)),
-        sharpen: Some(&plans.sharpen),
-        lut,
-    };
-    let rgb = render_develop(linear, &params, &curves, &stages);
-    let (out_w, out_h, rgb) = match stack.geometry.filter(|geometry| !geometry.is_identity()) {
-        Some(geometry) => crate::develop::geometry::apply_rgb8((width, height), &rgb, geometry)
-            .ok_or_else(|| Error::Unsupported("编辑栈成片几何不合法".to_string()))?,
-        None => (width, height, rgb),
-    };
-    image::RgbImage::from_raw(out_w, out_h, rgb)
-        .ok_or_else(|| Error::Unsupported("编辑渲染：输出尺寸对不上".to_string()))
+    let image = crate::display::output::render_linear(linear, stack, lens, decoded_as_shot_k, lut, 0)?;
+    image::RgbImage::from_raw(image.width(), image.height(),
+        crate::develop::pipeline::quantize_rgb8(image.as_raw()))
+        .ok_or_else(|| Error::Unsupported("显示像素尺寸不一致".into()))
 }
 
 /// 缩放后编码成 AVIF（全系统缓存图的唯一格式，见 [`encode_avif`]）。

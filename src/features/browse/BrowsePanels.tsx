@@ -464,8 +464,10 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
         >
           <p class="px-1 py-2 text-fs-2 text-fg-3">{t("browse.noRepository")}</p>
         </Show>
-        <For each={visibleRepos()}>
-          {(repo) => (
+        <For each={visibleRepos().map((repo) => repo.id)}>
+          {(id) => {
+            const repo = () => props.repositories.find((item) => item.id === id)!;
+            return (
             /*
              * 库卡片 = **全应用同一份**（`components/ui/RepositoryCard.tsx`）。
              * 人类 2026-09-19：「这种东西怎么可能出现 2 个组件？拿 import 里的替换掉」——
@@ -473,18 +475,19 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
              */
             <div class="mb-2">
               <RepositoryCard
-                name={repo.name}
-                displayPath={repo.displayPath}
-                photosCount={repo.photosCount}
-                online={repo.online}
-                selected={store.repositoryId() === repo.id}
+                name={repo().name}
+                displayPath={repo().displayPath}
+                photosCount={repo().photosCount}
+                online={repo().online}
+                selected={store.repositoryId() === repo().id}
                 locale={locale()}
-                onSelect={() => selectRepository(repo.id)}
-                onOpenSettings={() => props.onOpenSettings?.(repo.id)}
-                onRemount={() => props.onRemount?.(repo.id)}
+                onSelect={() => selectRepository(repo().id)}
+                onOpenSettings={() => props.onOpenSettings?.(repo().id)}
+                onRemount={() => props.onRemount?.(repo().id)}
               />
             </div>
-          )}
+          );
+          }}
         </For>
         <Show when={hasMore()}>
           {/*
@@ -712,6 +715,8 @@ export interface AssetInfoProps {
    * 所以从上面传进来，拿不到就这一行不显示。
    */
   repositoryName?: string | null;
+  displayedIssueChoice?: string;
+  displayHistogram?: import("../../lib/histogram.ts").HistogramCounts;
   issueLibrary?: IssueLibrary | null;
   issueBusy?: boolean;
   issueError?: string | null;
@@ -904,11 +909,7 @@ function AssetTags(props: { store: BrowseStore; item: AssetItem }): JSX.Element 
 
 export function AssetInfo(props: AssetInfoProps) {
   const item = () => props.item;
-  const selectedIssueChoice = (): string => {
-    const selection = props.issueLibrary?.selection;
-    if (selection === "raw" && item()?.hasRaw === false) return "sooc";
-    return typeof selection === "string" ? selection : selection === undefined ? "latest" : `issue:${selection.issue}`;
-  };
+  const selectedIssueChoice = () => props.displayedIssueChoice ?? "latest";
 
   /**
    * 创建日期：**文件在磁盘上被创建的时刻**（不是拍摄时间 —— 那个在「拍摄信息」里）。
@@ -952,17 +953,6 @@ export function AssetInfo(props: AssetInfoProps) {
           看片时关心的是「这块亮不亮」而不是「光圈多少」；退出看图就换回来。
           文件信息两块都不动（它下面还在）。
         */}
-        <Show when={props.viewer} fallback={<ExifSection item={item()!} file={props.fileExif ?? null} />}>
-          {(store) => (
-            <ViewerReadout store={store()} showVisibleBox={props.comparing !== true} />
-          )}
-        </Show>
-
-        {/*
-          标签（人类 2026-09-19：右栏原先完全没展示标签）。
-          名字来自 store 的词典（`tags()`），id 来自这张照片的标记（`markings()`）——
-          词典没拉到就退回 `#id`，不装作没有标签。
-        */}
         <Show when={props.issueLibrary}>
           {(library) => <section class="mb-5" data-browse-issue-choice>
             <h3 class="mb-1.5 text-fs-3 font-semibold text-fg-2">{t("browse.issueDisplay")}</h3>
@@ -972,7 +962,7 @@ export function AssetInfo(props: AssetInfoProps) {
               onChange={(event) => props.onSelectIssue?.(event.currentTarget.value)}>
               <option value="latest">{t("editor.issue.latest")}</option>
               <Show when={!item()!.isRaw}><option value="sooc">{t("editor.issue.sooc")}</option></Show>
-              <Show when={item()!.hasRaw}><option value="raw">{t("editor.base.raw")}</option></Show>
+              <Show when={item()!.isRaw || item()!.hasRaw}><option value="raw">{t("editor.base.raw")}</option></Show>
               <For each={library().issues}>{(issue) =>
                 <option value={`issue:${issue.id}`}>{issue.name} · {issue.sourceBase.toUpperCase()}</option>
               }</For>
@@ -980,6 +970,18 @@ export function AssetInfo(props: AssetInfoProps) {
             <Show when={props.issueError}><p class="mt-1 text-fs-0 text-danger">{props.issueError}</p></Show>
           </section>}
         </Show>
+        <Show when={props.viewer} fallback={<ExifSection item={item()!} file={props.fileExif ?? null} />}>
+          {(store) => (
+            <ViewerReadout store={store()} showVisibleBox={props.comparing !== true} histogram={props.displayHistogram} />
+          )}
+        </Show>
+
+        {/*
+          标签（人类 2026-09-19：右栏原先完全没展示标签）。
+          名字来自 store 的词典（`tags()`），id 来自这张照片的标记（`markings()`）——
+          词典没拉到就退回 `#id`，不装作没有标签。
+        */}
+
 
         <AssetTags store={props.store} item={item()!} />
 

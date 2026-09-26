@@ -30,7 +30,7 @@
  * `createMemo` 只求值一次，测试会拿到永远不更新的假值（与既有 store 同一套说明）。
  */
 
-import { createSignal } from "solid-js";
+import { batch, createSignal } from "solid-js";
 
 import type {
   AssetItem,
@@ -338,6 +338,7 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
 
   const [total, setTotal] = createSignal(0);
   const [entries, setEntries] = createSignal<readonly (AssetItem | null)[]>([]);
+  const stalePages = new Set<number>();
   const [timeline, setTimeline] = createSignal<readonly TimelineEntry[]>([]);
   const [facets, setFacets] = createSignal<BrowseFacets | null>(null);
   const [loading, setLoading] = createSignal(false);
@@ -494,6 +495,7 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
   const resetForNewQuery = (): void => {
     generation += 1;
     inFlight = new Set();
+    stalePages.clear();
     setEntries([]);
     setTotal(0);
     setTimeline([]);
@@ -522,21 +524,17 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
     setTotal(totalCount);
   };
 
-  /**
-   * 丢掉第一页之后的每一格（`refresh` 用）。
-   *
-   * 刷新后不能留旧页：新照片插进来会把后面的下标整体推移，旧页会在滚动时
-   * 显示成另一张照片（比空着更糟）。它们会在用户滚到时由 `ensureRange` 按需重取 ——
-   * 进浏览那一刻滚动条就在顶部，所以页 0 以外的内容本来也不在屏幕上。
+  /** Reindex retained display data by asset identity, never by a stale slot.
+   * Mark the retained pages stale: visible cells reread them without blanking first.
    */
-  const dropPagesAfterFirst = (): void => {
-    setEntries((prev) => {
-      if (prev.length <= PAGE_SIZE) return prev;
-      return [
-        ...prev.slice(0, PAGE_SIZE),
-        ...new Array<AssetItem | null>(prev.length - PAGE_SIZE).fill(null),
-      ];
+  const retainPagesForTimeline = (line: readonly TimelineEntry[]): void => {
+    const byId = new Map(entries().filter((item): item is AssetItem => item !== null).map(item => [item.id, item]));
+    stalePages.clear();
+    const next = line.map((item, index) => {
+      if (index >= PAGE_SIZE) stalePages.add(Math.floor(index / PAGE_SIZE));
+      return byId.get(item.id) ?? null;
     });
+    setEntries(next);
   };
 
   /**
@@ -559,9 +557,12 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
         api.facets(q),
       ]);
       if (mine !== generation) return null;
-      applyPage(window.offset, window.items, window.total);
-      setTimeline(line.entries);
-      setFacets(faces);
+      batch(() => {
+        retainPagesForTimeline(line.entries);
+        applyPage(window.offset, window.items, window.total);
+        setTimeline(line.entries);
+        setFacets(faces);
+      });
       return line.entries;
     } catch (e) {
       if (mine === generation) setError(e instanceof Error ? e.message : String(e));
@@ -595,7 +596,7 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
   /**
    * **同一个查询重读一遍**（见接口里的 `refresh` 说明）。
    *
-   * 结构上就是「不清空 + 把已有的页作废」：能这么短，正是因为不去猜「库变了没有」——
+   * 结构上就是「保留按资产 ID 对齐的旧画面 + 标记页需重读」：能这么短，正是因为不去猜「库变了没有」——
    * 猜法的代价（一套要维护的「什么算更新」判定）比多读这一趟贵得多。
    */
   const refresh = async (): Promise<void> => {
@@ -614,7 +615,6 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
 
     const line = await loadFirstScreen(q, mine);
     if (mine !== generation) return;
-    dropPagesAfterFirst();
     if (line !== null) {
       /*
        * 照片可能已经不在了（程序外面删的、别处导入后重排的）：把选择收敛到新时间线上。
@@ -642,7 +642,7 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
       if (inFlight.has(key)) continue;
       const offset = page * PAGE_SIZE;
       const loaded = entries()[offset];
-      if (loaded !== undefined && loaded !== null) continue;
+      if (loaded !== undefined && loaded !== null && !stalePages.has(page)) continue;
       inFlight.add(key);
       want.push(page);
     }
@@ -653,6 +653,7 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
       try {
         const window = await api.page(q, page * PAGE_SIZE, PAGE_SIZE);
         if (mine !== generation) return;
+        stalePages.delete(page);
         applyPage(window.offset, window.items, window.total);
       } catch (e) {
         if (mine !== generation) return;

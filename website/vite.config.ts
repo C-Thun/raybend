@@ -3,74 +3,8 @@ import { fileRoutes } from 'filesystem-routing/vite';
 import { defineConfig } from 'vitest/config';
 import solid from '@solidjs/vite-plugin';
 
-/** GitHub 发布信息（与 `src/data/release.ts` 的 `ReleaseInfo` 对应） */
-interface ReleaseInfo {
-  tag: string;
-  url?: string;
-  publishedAt?: string;
-  prerelease?: boolean;
-  assets?: { name: string; size?: number; url?: string }[];
-}
-
-const REPO = 'C-Thun/raybend';
-const API = `https://api.github.com/repos/${REPO}/releases`;
-
-/**
- * 取发布信息（**只在构建时做一次**，浏览器端不请求 GitHub）。
- *
- * 优先级：`RAYBEND_TAG`（发布流程从 `github.event.release.tag_name` 传进来）→ `releases/latest`。
- * 只在 CI 或显式 `RAYBEND_FETCH_RELEASE=1` 时才发请求；本地 `pnpm build` 不联网。
- * 取不到就注入 `null` —— 页面走「即将发布」占位态，构建不会因为网络问题失败。
- */
-async function fetchReleaseInfo(): Promise<ReleaseInfo | null> {
-  const tag = process.env.RAYBEND_TAG?.trim();
-  const enabled = Boolean(tag) || process.env.CI === 'true' || process.env.RAYBEND_FETCH_RELEASE === '1';
-  if (!enabled) return null;
-
-  const endpoint = tag ? `${API}/tags/${encodeURIComponent(tag)}` : `${API}/latest`;
-  const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
-
-  try {
-    const response = await fetch(endpoint, {
-      headers: {
-        accept: 'application/vnd.github+json',
-        'user-agent': 'raybend-website-build',
-        ...(token ? { authorization: `Bearer ${token}` } : {}),
-      },
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
-    const data = (await response.json()) as {
-      tag_name?: string;
-      html_url?: string;
-      published_at?: string;
-      prerelease?: boolean;
-      assets?: { name?: string; size?: number; browser_download_url?: string }[];
-    };
-    if (!data.tag_name) throw new Error('响应里没有 tag_name');
-
-    return {
-      tag: data.tag_name,
-      url: data.html_url,
-      publishedAt: data.published_at,
-      prerelease: data.prerelease,
-      assets: (data.assets ?? [])
-        .filter((asset) => asset.name)
-        .map((asset) => ({
-          name: asset.name as string,
-          size: asset.size,
-          url: asset.browser_download_url,
-        })),
-    };
-  } catch (error) {
-    // 还没有正式版时这里就会 404 —— 属于正常情况，页面会走「即将发布」占位态。
-    // （vite 会为 client / ssr 环境各加载一次配置，所以这行可能重复打印几次。）
-    console.warn(`⚠ 没取到 GitHub 发布信息（${endpoint}）：${String(error)} —— 还没有正式版时属正常`);
-    // 有 tag 就退化用 tag（下载按钮指向发布页）；没有就当作还没发布
-    return tag ? { tag } : null;
-  }
-}
+import { fetchReleaseInfo } from './scripts/release-info.ts';
+import type { ReleaseInfo } from './src/data/release.ts';
 
 /** 同一次构建里只解析一次（vite 会为 client / ssr 环境各加载一次配置，不缓存就会重复请求） */
 let releaseInfoPromise: Promise<ReleaseInfo | null> | undefined;

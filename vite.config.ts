@@ -161,7 +161,7 @@ function readBuildInfo() {
     // 显式传入的构建时间优先（可复现构建），否则取当下
     builtAt: process.env.RAYBEND_BUILD_TIME?.trim() || new Date().toISOString(),
     gitHash: process.env.RAYBEND_GIT_HASH?.trim() || git(["rev-parse", "--short", "HEAD"]),
-    dirty: process.env.RAYBEND_DIRTY === "1" || dirty,
+    dirty: process.env.RAYBEND_DIRTY !== undefined ? process.env.RAYBEND_DIRTY === "1" : dirty,
   };
 }
 
@@ -175,6 +175,9 @@ export default defineConfig(() => ({
    */
   define: {
     __RAYBEND_BUILD__: JSON.stringify(readBuildInfo()),
+    __RAYBEND_UPDATER_PUBLIC_KEY__: JSON.stringify(process.env.RAYBEND_UPDATER_PUBLIC_KEY || ""),
+    __RAYBEND_DISTRIBUTION__: JSON.stringify(process.env.RAYBEND_DISTRIBUTION || "direct"),
+    __RAYBEND_DIAGNOSTICS__: JSON.stringify(["dev","test"].includes(process.env.RAYBEND_CHANNEL?.trim() || "dev")),
   },
 
   /*

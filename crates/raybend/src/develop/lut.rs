@@ -224,21 +224,30 @@ impl Lut {
     }
 
     pub fn apply_rgb8(&self, rgb: &mut [u8], strength: f32) -> Result<()> {
-        if !rgb.len().is_multiple_of(3) || !strength.is_finite() || !(0.0..=1.0).contains(&strength) {
+        self.apply_rgb(rgb, strength)
+    }
+
+    pub fn apply_rgb<T: super::sample::RgbSample>(
+        &self,
+        rgb: &mut [T],
+        strength: f32,
+    ) -> Result<()> {
+        if !rgb.len().is_multiple_of(3) || !strength.is_finite() || !(0.0..=1.0).contains(&strength)
+        {
             return Err(error("LUT 输入像素长度或强度无效"));
         }
         if strength == 0.0 {
             return Ok(());
         }
         for pixel in rgb.as_chunks_mut::<3>().0 {
-            let original = [pixel[0], pixel[1], pixel[2]].map(|value| f32::from(value) / 255.0);
+            let original = [pixel[0], pixel[1], pixel[2]].map(|value| value.value() / T::MAX);
             let mapped = self.eval(original);
             for channel in 0..3 {
-                pixel[channel] = ((original[channel] * (1.0 - strength)
-                    + mapped[channel] * strength)
-                    .clamp(0.0, 1.0)
-                    * 255.0)
-                    .round() as u8;
+                pixel[channel] = T::encode(
+                    (original[channel] * (1.0 - strength) + mapped[channel] * strength)
+                        .clamp(0.0, 1.0)
+                        * T::MAX,
+                );
             }
         }
         Ok(())

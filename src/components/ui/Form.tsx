@@ -7,9 +7,9 @@
  * 状态与反馈规则（DESIGN.md §5）：指向=辅色底，选中/开启=主色底。
  */
 
-import { Checkbox as ArkCheckbox, Switch as ArkSwitch } from "@ark-ui/solid";
+import { Checkbox as ArkCheckbox, Switch as ArkSwitch, RadioGroup as ArkRadioGroup } from "@ark-ui/solid";
 import type { JSX } from "solid-js";
-import { Show, splitProps } from "solid-js";
+import { For, Show, splitProps, untrack } from "solid-js";
 
 /* ══════════════════════════════════════════════════════════════
  * Checkbox —— 方形勾选（用于「包含子目录」等属性）
@@ -200,4 +200,23 @@ export function Input(props: InputProps) {
       ].join(" ")}
     />
   );
+}
+
+/** A vertical single-choice group with optional compact controls on each row. */
+export function RadioChoices<T extends string>(props: {
+  label: string; value: T; options: readonly {value:T;label:string}[];
+  onValueChange(value:T):void; trailing?:(value:T)=>JSX.Element;
+}) {
+  return <ArkRadioGroup.Root aria-label={props.label} value={props.value}
+    onValueChange={details=>{if(details.value)props.onValueChange(details.value as T);}}
+    class="flex flex-col gap-1">
+    <For each={props.options}>{option=><div class="flex min-h-7 items-center gap-2">
+      <ArkRadioGroup.Item value={option.value} data-choice-value={option.value} class="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-fs-1 text-fg-2">
+        <ArkRadioGroup.ItemControl class="size-3 shrink-0 rounded-full border border-fg-3 data-[state=checked]:border-brand data-[state=checked]:bg-brand"/>
+        <ArkRadioGroup.ItemText>{option.label}</ArkRadioGroup.ItemText>
+        <ArkRadioGroup.ItemHiddenInput/>
+      </ArkRadioGroup.Item>
+      {untrack(()=>props.trailing?.(option.value))}
+    </div>}</For>
+  </ArkRadioGroup.Root>;
 }

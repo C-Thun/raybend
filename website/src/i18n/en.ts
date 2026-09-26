@@ -153,7 +153,7 @@ export const en: Dictionary = {
     requirementsTitle: 'System requirements',
     requirements: ['Windows 10 / 11 (64-bit)', '4 GB RAM or more', 'Disk space for your photo library'],
     smartscreenNote:
-      'Early builds are not code-signed yet, so Windows may show a SmartScreen warning — choose "More info → Run anyway" to continue.',
+      'Check signing status and SHA-256 on the release page. Windows may warn about or block unsigned or unfamiliar apps; Smart App Control and organization policies may not allow an override.',
     sourceNote: 'You can also',
     sourceLink: 'build from source',
     sourceSuffix: '(needs Rust and pnpm).',

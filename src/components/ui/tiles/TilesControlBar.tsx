@@ -38,7 +38,7 @@ import { ToggleBlock } from "../ToggleBlock.tsx";
 import { Menu } from "../Menu.tsx";
 import { locale as uiLocale, t } from "../../../i18n/index.ts";
 import { formatCount, type GroupingLocale } from "../../../lib/format.ts";
-import { TILE_SIZE_STEPS } from "../../../lib/tile-flow.ts";
+import { clampTileStepIndex, tileSizeSteps, type TileSizeBounds } from "../../../lib/tile-flow.ts";
 import type { TileInfoMode } from "../../../lib/display-prefs.ts";
 
 /** 排序控件要的全部东西（浏览侧现在是排序键 + 升降两件；以后还有别的键也无所谓） */
@@ -74,6 +74,7 @@ export interface TilesViewingInfo {
 }
 
 export interface TilesControlBarProps {
+  sizeBounds?: TileSizeBounds;
   /** 当前列表里的张数 */
   count: number;
   /** 业务计数/队列标识仍画在同一个状态栏。 */
@@ -265,12 +266,13 @@ export function TilesControlBar(input: TilesControlBarComponentProps) {
       </Show>
       {/* 缩放：17 个预设锚点之间允许连续落点，两端带加减号 */}
       <Slider
-        value={props.tileStep}
+        value={clampTileStepIndex(props.tileStep, props.sizeBounds)}
         min={0}
-        max={TILE_SIZE_STEPS.length - 1}
+        max={Math.max(1, tileSizeSteps(props.sizeBounds).length - 1)}
+        disabled={tileSizeSteps(props.sizeBounds).length === 1}
         step={0.01}
         label={t("grid.zoom")}
-        onValueChange={props.onTileStepChange}
+        onValueChange={value => props.onTileStepChange(clampTileStepIndex(value, props.sizeBounds))}
         {...(props.onTileStepCommit === undefined
           ? {}
           : { onValueCommit: props.onTileStepCommit })}

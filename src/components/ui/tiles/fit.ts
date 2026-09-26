@@ -18,7 +18,9 @@
 
 import { createContext, useContext, type Accessor } from "solid-js";
 
+import type { TileSizeBounds } from "../../../lib/tile-flow.ts";
 export interface TilesFitChannel {
+  sizeBounds: Accessor<TileSizeBounds | undefined>;
   /** 请求计数：按钮点一下 +1，网格按它触发一次计算 */
   request: Accessor<number>;
   /** 现在**能不能**铺满（格宽不超过最大档）；网格算完回填 */

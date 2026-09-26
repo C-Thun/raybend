@@ -24,7 +24,9 @@ import { createSignal, Show, untrack, type JSX } from "solid-js";
 import { TilesControlBar, type TilesControlBarProps } from "./TilesControlBar.tsx";
 import { TilesFitRequestContext } from "./fit.ts";
 
+import type { TileSizeBounds } from "../../../lib/tile-flow.ts";
 export interface TilesShellProps {
+  sizeBounds?: TileSizeBounds;
   /** 网格 / 看图区 */
   children: JSX.Element;
   /** 状态条配置；`null` / 不给 = 不显示状态条 */
@@ -39,7 +41,7 @@ export function TilesShell(props: TilesShellProps): JSX.Element {
    * 网格算完回填（它拿着容器宽 / 列数 / 间距），状态条据此禁用按钮。
    */
   const [fitAvailable, setFitAvailable] = createSignal(true);
-  const fitChannel = { request: fitRequest, available: fitAvailable, setAvailable: setFitAvailable };
+  const fitChannel = { sizeBounds: () => props.sizeBounds, request: fitRequest, available: fitAvailable, setAvailable: setFitAvailable };
   return (
     <TilesFitRequestContext.Provider value={fitChannel}>
       <div
@@ -69,7 +71,7 @@ export function TilesShell(props: TilesShellProps): JSX.Element {
         */}
         <Show when={props.bar !== null && props.bar !== undefined}>
           <TilesControlBar
-            config={() => props.bar as TilesControlBarProps}
+            config={() => ({...props.bar as TilesControlBarProps, sizeBounds: props.sizeBounds})}
             onFitRow={() => setFitRequest((request) => request + 1)}
             fitAvailable={fitAvailable()}
           />

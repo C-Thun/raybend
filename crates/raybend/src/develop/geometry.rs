@@ -52,16 +52,26 @@ impl CropRect {
 /// 裁切确认时的面板配置；只影响下次编辑，不参与像素计算。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CropRatioId {
-    #[serde(rename = "free")] Free,
-    #[serde(rename = "original")] Original,
-    #[serde(rename = "1:1")] Square,
-    #[serde(rename = "3:2")] ThreeTwo,
-    #[serde(rename = "2:3")] TwoThree,
-    #[serde(rename = "4:3")] FourThree,
-    #[serde(rename = "3:4")] ThreeFour,
-    #[serde(rename = "16:9")] SixteenNine,
-    #[serde(rename = "9:16")] NineSixteen,
-    #[serde(rename = "custom")] Custom,
+    #[serde(rename = "free")]
+    Free,
+    #[serde(rename = "original")]
+    Original,
+    #[serde(rename = "1:1")]
+    Square,
+    #[serde(rename = "3:2")]
+    ThreeTwo,
+    #[serde(rename = "2:3")]
+    TwoThree,
+    #[serde(rename = "4:3")]
+    FourThree,
+    #[serde(rename = "3:4")]
+    ThreeFour,
+    #[serde(rename = "16:9")]
+    SixteenNine,
+    #[serde(rename = "9:16")]
+    NineSixteen,
+    #[serde(rename = "custom")]
+    Custom,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -75,8 +85,10 @@ pub struct CropRatioSetting {
 impl CropRatioSetting {
     #[must_use]
     pub fn valid(self) -> bool {
-        self.width.is_finite() && self.height.is_finite()
-            && self.width > 0.0 && self.height > 0.0
+        self.width.is_finite()
+            && self.height.is_finite()
+            && self.width > 0.0
+            && self.height > 0.0
             && (0.01..=100.0).contains(&(self.width / self.height))
     }
 }
@@ -102,9 +114,10 @@ impl EditGeometry {
             return Err("图像尺寸不能为零".into());
         }
         if let Some(crop) = self.crop
-            && (!crop.valid() || !contains_rect(source, self.rotation, crop)) {
-                return Err("裁切框超出旋转后的有像素区域".into());
-            }
+            && (!crop.valid() || !contains_rect(source, self.rotation, crop))
+        {
+            return Err("裁切框超出旋转后的有像素区域".into());
+        }
         if self.crop_ratio.is_some_and(|setting| !setting.valid()) {
             return Err("裁切比例配置无效".into());
         }
@@ -347,8 +360,22 @@ pub fn apply_rgb8(
     rgb: &[u8],
     geometry: EditGeometry,
 ) -> Option<(u32, u32, Vec<u8>)> {
+    apply_rgb(source, rgb, geometry)
+}
+
+pub fn apply_rgb<T: super::sample::RgbSample>(
+    source: (u32, u32),
+    rgb: &[T],
+    geometry: EditGeometry,
+) -> Option<(u32, u32, Vec<T>)> {
     let (w, h) = source;
-    if w == 0 || h == 0 || rgb.len() != w as usize * h as usize * 3 {
+    if w == 0
+        || h == 0
+        || (w as usize)
+            .checked_mul(h as usize)
+            .and_then(|n| n.checked_mul(3))
+            != Some(rgb.len())
+    {
         return None;
     }
     geometry.validate(source).ok()?;
@@ -361,7 +388,7 @@ pub fn apply_rgb8(
     let capacity = (out_w as usize)
         .checked_mul(out_h as usize)?
         .checked_mul(3)?;
-    let mut result = vec![0; capacity];
+    let mut result = vec![T::default(); capacity];
     let (sin, cos) = sin_cos_degrees(geometry.rotation);
     for y in 0..out_h {
         let frame_y = (crop.y + crop.height * (y as f32 + 0.5) / out_h as f32 - 0.5) * h as f32;
@@ -375,10 +402,10 @@ pub fn apply_rgb8(
             let (fx, fy) = (sx - x0 as f32, sy - y0 as f32);
             let target = (y as usize * out_w as usize + x as usize) * 3;
             for channel in 0..3 {
-                let at = |px: usize, py: usize| rgb[(py * w as usize + px) * 3 + channel] as f32;
+                let at = |px: usize, py: usize| rgb[(py * w as usize + px) * 3 + channel].value();
                 let top = at(x0, y0) * (1.0 - fx) + at(x1, y0) * fx;
                 let bottom = at(x0, y1) * (1.0 - fx) + at(x1, y1) * fx;
-                result[target + channel] = (top * (1.0 - fy) + bottom * fy).round() as u8;
+                result[target + channel] = T::encode(top * (1.0 - fy) + bottom * fy);
             }
         }
     }
@@ -391,13 +418,14 @@ mod tests {
 
     #[test]
     fn every_crop_ratio_id_from_the_panel_is_serializable() {
-        for id in ["free", "original", "1:1", "3:2", "2:3", "4:3",
-            "3:4", "16:9", "9:16", "custom"] {
+        for id in [
+            "free", "original", "1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16", "custom",
+        ] {
             let json = format!(r#"{{"id":"{id}","width":3,"height":2}}"#);
             let setting: CropRatioSetting = serde_json::from_str(&json).expect(id);
-            let roundtrip: CropRatioSetting = serde_json::from_str(
-                &serde_json::to_string(&setting).expect("序列化")
-            ).expect("读回");
+            let roundtrip: CropRatioSetting =
+                serde_json::from_str(&serde_json::to_string(&setting).expect("序列化"))
+                    .expect("读回");
             assert_eq!(roundtrip, setting);
         }
     }
@@ -405,24 +433,37 @@ mod tests {
     #[test]
     fn crop_ratio_setting_round_trips_without_changing_pixels() {
         let old: EditGeometry = serde_json::from_str(
-            r#"{"rotation":0,"crop":{"x":0.2,"y":0.2,"width":0.6,"height":0.6}}"#
-        ).expect("旧几何记录仍能读");
+            r#"{"rotation":0,"crop":{"x":0.2,"y":0.2,"width":0.6,"height":0.6}}"#,
+        )
+        .expect("旧几何记录仍能读");
         assert_eq!(old.crop_ratio, None);
         let saved = EditGeometry {
             crop_ratio: Some(CropRatioSetting {
-                id: CropRatioId::Custom, width: 5.0, height: 4.0,
+                id: CropRatioId::Custom,
+                width: 5.0,
+                height: 4.0,
             }),
             ..old
         };
         let json = serde_json::to_string(&saved).expect("保存");
-        assert_eq!(serde_json::from_str::<EditGeometry>(&json).expect("读回"), saved);
+        assert_eq!(
+            serde_json::from_str::<EditGeometry>(&json).expect("读回"),
+            saved
+        );
         assert_eq!(saved.output_rect((400, 300)), old.output_rect((400, 300)));
         assert_eq!(saved.is_identity(), old.is_identity());
-        assert!(EditGeometry {
-            crop_ratio: Some(CropRatioSetting {
-                id: CropRatioId::Custom, width: 0.0, height: 4.0,
-            }), ..old
-        }.validate((400, 300)).is_err());
+        assert!(
+            EditGeometry {
+                crop_ratio: Some(CropRatioSetting {
+                    id: CropRatioId::Custom,
+                    width: 0.0,
+                    height: 4.0,
+                }),
+                ..old
+            }
+            .validate((400, 300))
+            .is_err()
+        );
     }
 
     #[test]
@@ -448,7 +489,9 @@ mod tests {
             assert!(
                 EditGeometry {
                     rotation,
-                    crop: None, crop_ratio: None }
+                    crop: None,
+                    crop_ratio: None
+                }
                 .validate(source)
                 .is_err()
             );
@@ -461,7 +504,9 @@ mod tests {
                     y: 0.0,
                     width: 0.2,
                     height: 1.0
-                }), crop_ratio: None }
+                }),
+                crop_ratio: None
+            }
             .validate(source)
             .is_err()
         );
@@ -523,7 +568,9 @@ mod tests {
                 &rgb,
                 EditGeometry {
                     crop: Some(crop),
-                    rotation: 0.0, crop_ratio: None }
+                    rotation: 0.0,
+                    crop_ratio: None
+                }
             ),
             Some((2, 1, vec![20, 0, 0, 30, 0, 0]))
         );

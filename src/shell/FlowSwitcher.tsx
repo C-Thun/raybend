@@ -23,7 +23,7 @@ export interface FlowSwitcherOption<TValue extends string> {
   value: TValue;
   /** 文案（已翻译） */
   label: string;
-  icon?: JSX.Element;
+  icon?: () => JSX.Element;
   disabled?: boolean;
   processing?: boolean;
 }
@@ -79,12 +79,18 @@ export function FlowSwitcher<TValue extends string>(props: FlowSwitcherProps<TVa
                 "data-[disabled]:text-fg-3 data-[disabled]:opacity-60",
               ].join(" ")}
             >
-              <Show when={option.icon}>
-                <span class="flex size-4 items-center justify-center" aria-hidden="true">
-                  {option.icon}
+              <ArkSegmentGroup.ItemText>
+                <span class="relative grid overflow-hidden" aria-busy={option.processing===true}>
+                  <span class="col-start-1 row-start-1 flex items-center gap-2" classList={{"opacity-50":option.processing===true}}>
+                    <Show when={option.icon}><span class="flex size-4 items-center justify-center" aria-hidden="true">{option.icon?.()}</span></Show>
+                    {option.label}
+                  </span>
+                  <Show when={option.processing}><span aria-hidden="true" data-flow-processing class="rb-shimmer-mask pointer-events-none col-start-1 row-start-1 flex items-center gap-2">
+                    <Show when={option.icon}><span class="flex size-4 items-center justify-center">{option.icon?.()}</span></Show>
+                    {option.label}
+                  </span></Show>
                 </span>
-              </Show>
-              <ArkSegmentGroup.ItemText><span class="relative grid overflow-hidden" aria-busy={option.processing===true}><span class="col-start-1 row-start-1" classList={{"opacity-50":option.processing===true}}>{option.label}</span><Show when={option.processing}><span aria-hidden="true" data-flow-processing class="rb-shimmer-mask pointer-events-none col-start-1 row-start-1">{option.label}</span></Show></span></ArkSegmentGroup.ItemText>
+              </ArkSegmentGroup.ItemText>
             </ArkSegmentGroup.ItemControl>
             <ArkSegmentGroup.ItemHiddenInput />
           </ArkSegmentGroup.Item>

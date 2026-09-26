@@ -71,7 +71,7 @@ pollster = "0.4"
 lensfun = "0.7"
 
 # Windows 平台调用：文件身份（GetFileInformationByHandleEx）/ 驱动器类型（GetDriveTypeW）
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Registry", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("cargo-clippy"))'] }

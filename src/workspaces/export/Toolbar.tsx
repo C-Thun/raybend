@@ -10,7 +10,7 @@ export function ExportScopeTool(props: { store: ExportStore }) {
           ? "export.scope.all"
           : props.store.preferences.value().scope === "edited"
             ? "export.scope.edited"
-            : "export.scope.sooc",
+            : "export.scope.issues",
       )}
     </Button>
   );
@@ -19,18 +19,14 @@ export function ExportToolbar(props: { store: ExportStore }) {
   return (
     <>
       <Button
-        variant="primary"
-        disabled={
-          props.store.selectedPreset() === null ||
-          props.store.selection().ids.size === 0 ||
-          props.store.busy()
-        }
+        disabled={!props.store.canEnqueue()}
         onClick={() => exportActions()?.enqueue()}
       >
         {t("export.enqueue")}
       </Button>
+      <Button disabled={!props.store.canRemove()} onClick={props.store.removeSelected}>{t("export.remove")}</Button>
       <Button
-        disabled={props.store.selection().ids.size === 0}
+        disabled={props.store.activeSelection().ids.size === 0}
         onClick={() => props.store.clear()}
       >
         {t("export.clear")}

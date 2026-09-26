@@ -57,3 +57,11 @@ export async function pickSaveFile(
   });
   return typeof picked === "string" ? picked : null;
 }
+
+/** Shared single-file picker; callers supply translated labels. */
+export async function pickOpenFile(options:{title?:string;filters?:{name:string;extensions:string[]}[]}={}):Promise<string|null>{
+  if(!isTauriRuntime())return null;
+  dialogModule??=import("@tauri-apps/plugin-dialog");
+  const value=await(await dialogModule).open({directory:false,multiple:false,...options});
+  return typeof value==="string"?value:null;
+}

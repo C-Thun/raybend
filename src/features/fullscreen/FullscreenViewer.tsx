@@ -48,7 +48,7 @@ export function FullscreenViewer() {
 
   const variantImages=new Map<string, NonNullable<FullscreenPayload["items"][number]["exportVariant"]>>();
   const store = createViewerStore({
-    loadScreen: (path) => {const variant=variantImages.get(path);return variant===undefined?getViewImage(path,"screen"):getExportVariantImage(variant.repositoryId,variant.reference,"screen");},
+    loadScreen: (path) => {const variant=variantImages.get(path);return variant===undefined?getViewImage(path,"screen"):getExportVariantImage(variant.repositoryId,variant.reference,"screen",variant.captured);},
     /*
      * 多图 URL 缓存：当前 + 前后各一张预载 = 3 张，给到 6 留余量。
      * 不加大也能跑，但换图时刚预载好的邻居可能已被挤出去，预载就白做了。

@@ -103,10 +103,39 @@ test("重置命令共享可用性：无调整禁用，有手动或自动调整�
 });
 
 test("导出命令默认 Enter 无冲突，Esc/Ctrl+A 复用取消和全选，切工作流失效",()=>{
- let flow:CommandFlow="export";const calls:string[]=[];const deps={flow:()=>flow,viewer:{viewing:()=>false},export:{hasSelection:()=>true,canEnqueue:()=>true,enqueue:()=>calls.push("enqueue"),clearSelection:()=>calls.push("clear"),selectAll:()=>calls.push("all"),reset:()=>calls.push("reset"),canReset:()=>true,stopAll:()=>calls.push("stop"),canStop:()=>false,cycleScope:()=>calls.push("scope"),save:()=>calls.push("save")}} as unknown as CommandDeps;
+ let flow:CommandFlow="export";const calls:string[]=[];const deps={flow:()=>flow,viewer:{viewing:()=>false},export:{hasSelection:()=>true,canEnqueue:()=>true,enqueue:()=>calls.push("enqueue"),clearSelection:()=>calls.push("clear"),selectAll:()=>calls.push("all"),reset:()=>calls.push("reset"),canReset:()=>true,stopAll:()=>calls.push("stop"),canStop:()=>false,cycleScope:()=>calls.push("scope"),canSave:()=>true,save:()=>calls.push("save")}} as unknown as CommandDeps;
  const commands=createCommandRegistry(deps);for(const [id,key] of [["export.enqueue","Enter"],["edit.clearSelection","Esc"],["edit.selectAll","Mod+A"]]){const command=commands.find(c=>c.id===id)!;assert.equal(command.defaultKey,key);assert.equal(command.when?.(),true);command.run();}
  assert.deepEqual(calls,["enqueue","clear","all"]);assert.equal(commands.find(c=>c.id==="export.stopAll")?.enabled?.(),false);
  const conflicts=detectConflicts(commands,{});assert.deepEqual(conflicts.filter(issue=>issue.blocking&&issue.commandIds.some(id=>id.startsWith("export."))),[]);
  for(const id of ["export.reset","export.stopAll","export.scope","export.save"])assert.equal(commands.find(c=>c.id===id)?.defaultKey,undefined);
  flow="browse";assert.equal(commands.find(c=>c.id==="export.enqueue")?.when?.(),false);
+});
+
+test("export reuses Delete without a shortcut conflict and bounded zoom follows active tiles",()=>{
+ let area="gallery",position=0,canRemove=false;const calls:string[]=[];
+ const deps={flow:()=>"export",viewer:{viewing:()=>false},export:{canRemove:()=>canRemove,remove:()=>calls.push("remove")},display:{tileStep:()=>position,sizeBounds:()=>area==="gallery"?{min:240,max:320}:undefined,setTileStep:(p:number)=>{position=p;},commitTileStep:()=>{}}} as unknown as CommandDeps;
+ const registry=createCommandRegistry(deps),del=registry.find(c=>c.id==="edit.delete")!,zoomIn=registry.find(c=>c.id==="view.tiles.zoomIn")!,zoomOut=registry.find(c=>c.id==="view.tiles.zoomOut")!;
+ assert.equal(del.titleKey,"cmd.export.remove");assert.equal(del.defaultKey,"Delete");assert(!del.enabled?.());canRemove=true;del.run();assert.deepEqual(calls,["remove"]);
+ assert(!zoomOut.enabled?.());position=5;assert(!zoomIn.enabled?.());area="queue";assert(zoomIn.enabled?.());zoomIn.run();assert.equal(position,6);
+ assert.deepEqual(detectConflicts(registry,{}).filter(c=>c.blocking),[]);
+});
+
+test("export execution has Mod+Enter; deferred/removed features have no command; Esc is sole clear key",()=>{
+ const deps={flow:()=>"export",export:{canRun:()=>true,toggleRun:()=>{}}}as unknown as CommandDeps;
+ const cmds=createCommandRegistry(deps);
+ assert.equal(cmds.find(c=>c.id==="export.run")?.defaultKey,"Mod+Enter");
+ assert.equal(cmds.find(c=>c.id==="edit.clearSelection")?.defaultKey,"Esc");
+ for(const id of ["export.preview","export.importPresets","export.exportPresets","export.failures"])assert(!cmds.some(c=>c.id===id));
+ assert(!cmds.some(c=>c.defaultKey==="Mod+C"));
+});
+
+test("M5 帮助动作共用回调，F1 无冲突，低频设置明确不占热键",()=>{
+ const calls:string[]=[];
+ const deps={openHelp:()=>calls.push("help"),openLicenses:()=>calls.push("licenses"),openWelcome:()=>calls.push("welcome"),openUpdates:()=>calls.push("updates")} as unknown as CommandDeps;
+ const commands=createCommandRegistry(deps);
+ for(const [id,label] of [["help.docs","help"],["help.licenses","licenses"],["help.welcome","welcome"],["help.updates","updates"]]){
+  const command=commands.find(c=>c.id===id)!;assert.equal(command.defaultKey,id==="help.docs"?"F1":undefined);assert.equal(command.enabled?.(),true);command.run();assert.equal(calls[calls.length-1],label);
+ }
+ assert.deepEqual(calls,["help","licenses","welcome","updates"]);
+ assert.deepEqual(detectConflicts(commands,{}).filter(c=>c.blocking&&c.commandIds.includes("help.docs")),[]);
 });

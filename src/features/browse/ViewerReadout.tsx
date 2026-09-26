@@ -34,6 +34,7 @@ import { PreviewFrame } from "../../components/ui/PreviewFrame.tsx";
 
 export interface ViewerReadoutProps {
   store: ViewerStore;
+  histogram?: import("../../lib/histogram.ts").HistogramCounts;
   /**
    * 要不要画「视野框」（默认画）。
    *
@@ -63,6 +64,7 @@ export function ViewerReadout(props: ViewerReadoutProps): JSX.Element {
 
       {/* ── 直方图（取数 + 缓存 + 画图都在 `components/ui/HistogramPanel.tsx`，与编辑右栏共用一份） ── */}
       <HistogramPanel
+        countsOverride={props.histogram}
         load={getHistogram}
         path={props.store.current()?.path ?? null}
         title={t("browse.histogram")}

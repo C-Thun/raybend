@@ -17,3 +17,7 @@ target/
 
 # 开发
 prompts/
+# 人工执行的发布脚本临时配置与清单
+.release/
+
+release-out/

@@ -2780,12 +2780,11 @@ fn should_reload_source(
 }
 fn source_dependency_signature(path: &str, sooc: Option<&Path>) -> Option<String> {
     let mut signature = raybend::media::source::source_signature(Path::new(path)).ok()?;
-    if let Some(sooc) = sooc.filter(|source| *source != Path::new(path)) {
-        if let Ok(secondary) = raybend::media::source::source_signature(sooc) {
+    if let Some(sooc) = sooc.filter(|source| *source != Path::new(path))
+        && let Ok(secondary) = raybend::media::source::source_signature(sooc) {
             signature.push('/');
             signature.push_str(&secondary);
         }
-    }
     Some(signature)
 }
 

@@ -17,7 +17,7 @@
 import type { JSX } from "solid-js";
 import { Show, splitProps } from "solid-js";
 
-export type ButtonVariant = "primary" | "secondary" | "ghost";
+export type ButtonVariant = "primary" | "accent" | "secondary" | "ghost";
 export type ButtonSize = "sm" | "md";
 
 export interface ButtonProps
@@ -40,6 +40,8 @@ function variantClasses(variant: ButtonVariant, selected: boolean): string {
   switch (variant) {
     case "primary":
       return "bg-brand text-fg-on-brand hover:bg-brand";
+    case "accent":
+      return "bg-brand-2 text-fg-on-brand hover:bg-brand-2";
     case "secondary":
       return "bg-surface-track text-fg-1 hover:bg-state-hover";
     case "ghost":

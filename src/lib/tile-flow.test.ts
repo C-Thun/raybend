@@ -367,3 +367,18 @@ test("最大档与「能不能铺满」：算出来超过最大档就不能适�
   // 算出来正好等于最大档：能做（不苛刻到「必须小于」）
   assert.equal(canFitRow({ containerWidth: 320, cellWidth: 200, gap: 0 }), true);
 });
+
+test("configurable tile sizes cut preset stops, retain continuous fits and support custom endpoints", async () => {
+ const {tileSizeSteps,tileSizeAt,tilePositionForSize,clampTileStepIndex,nextTilePresetPosition,canFitRow}=await import("./tile-flow.ts");
+ const bounds={min:240,max:320};
+ assert.deepEqual(tileSizeSteps(bounds),[240,254,270,286,302,320]);
+ for(const size of [240,245.5,254,301.2,320])assert.equal(tileSizeAt(tilePositionForSize(size,bounds),bounds),size);
+ assert.equal(tileSizeAt(-100,bounds),240);assert.equal(tileSizeAt(Infinity,bounds),254);
+ assert.equal(tileSizeAt(100,bounds),320);assert.equal(clampTileStepIndex(16,bounds),5);
+ assert.equal(nextTilePresetPosition(0,-1,bounds),0);assert.equal(nextTilePresetPosition(4.5,1,bounds),5);
+ assert(!canFitRow({containerWidth:239,cellWidth:240,gap:8},bounds));
+ assert.deepEqual(tileSizeSteps({min:120,max:400}),[120,128,136,144,152,160,170,180,192,202,214,226,240,254,270,286,302,320,400]);
+ assert.equal(tileSizeAt(18,{min:120,max:400}),400);
+ assert.deepEqual(tileSizeSteps({min:NaN,max:-1}),tileSizeSteps());
+ assert.deepEqual(tileSizeSteps({min:300,max:100}),[300]);
+});

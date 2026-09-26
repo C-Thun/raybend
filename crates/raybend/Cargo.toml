@@ -23,6 +23,9 @@ wgpu.workspace = true
 pollster.workspace = true
 lensfun.workspace = true
 sha2 = "0.10.9"
+# Already locked/transitive; parse native XMP without a new XML implementation.
+roxmltree = "0.20.0"
+flate2 = "1.1.10"
 webp = { version = "0.3.1", default-features = false }
 notify = { version = "8.2.0", default-features = false }
 

@@ -348,6 +348,7 @@ try {
        *（踩过：回归检查因此假红，看着像产品没刷新，实际是工装把改动吃了）。
        */
       window.__FIXTURES = ${JSON.stringify(FIXTURES)};
+      window.__TAURI_EVENT_PLUGIN_INTERNALS__={unregisterListener:()=>{}};
       window.__TAURI_INTERNALS__ = {
         metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main" } },
         transformCallback: (cb) => cb,
@@ -355,6 +356,10 @@ try {
         invoke: (cmd, args) => {
           window.__INVOKE_LOG = window.__INVOKE_LOG || [];
           window.__INVOKE_LOG.push(cmd);
+          if (cmd === "external_applications") return Promise.resolve([]);
+          if (cmd === "external_task") return Promise.resolve({id:0,revision:0,status:"idle",output:null,error:null,missingApplication:null});
+          if (cmd === "export_queue") return Promise.resolve({revision:0,generation:0,queues:{},enabled:[]});
+          if (cmd === "file_exif") return Promise.resolve({...window.__FIXTURES.browse_page?.items?.[0],tags:[],cameraMake:null,cameraModel:null,lens:null,software:null,width:4000,height:3000,orientation:1});
           if (cmd === "setting_set") {
             window.__SETTING_CALLS = window.__SETTING_CALLS || [];
             window.__SETTING_CALLS.push(args);
@@ -440,14 +445,16 @@ try {
   });
   await send("Page.navigate", { url: APP });
 
-  for (let i = 0; i < 80; i++) {
+  let bootReady = false;
+  for (let i = 0; i < 240; i++) {
     const ready = await send("Runtime.evaluate", {
       expression: `(document.querySelector("#root")?.childElementCount ?? 0) > 0`,
       returnByValue: true,
     });
-    if (ready.result?.value === true) break;
+    if (ready.result?.value === true) { bootReady = true; break; }
     await sleep(250);
   }
+  if (!bootReady) throw new Error("应用启动在 60 秒内未就绪，停止后续交互断言");
   await sleep(1200);
 
   const clicked = await send("Runtime.evaluate", {
@@ -2003,6 +2010,11 @@ try {
     );
   }
 
+  // Previous navigation/blank-hit checks can leave selection or keyboard focus.
+  // Establish the unselected/unhovered precondition before inspecting passive bars.
+  await send("Runtime.evaluate", {expression:`(() => {document.activeElement?.blur();window.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true,cancelable:true}));})()`,returnByValue:true});
+  await send("Input.dispatchMouseEvent",{type:"mouseMoved",x:10,y:10});
+  await sleep(200);
   const readBars = `(() => {
     const all = [...document.querySelectorAll('[data-virtual-scroller] [role="option"]')];
     // 找**有标记**的那一格（星标/色标都在标准层里）；找不到就退回第一格
@@ -3194,7 +3206,7 @@ try {
   }
   if (shown.readout !== true) problems.push("右栏没换成预览 + 直方图（[data-viewer-readout=\"open\"] 不在）");
   /*
-   * 预览框是**固定 4:3**（人类 2026-09-20：「比例改成 4:3，不要 3:2，这样对纵图支持更好」）。
+   * 预览框按 BROWSE.md 当前规则随照片比例变化，夹在 3:1～3:4。
    * 量外框的宽高比，容差 2%（子像素与内边距）。
    */
   const previewFrame = await send("Runtime.evaluate", {
@@ -3203,16 +3215,16 @@ try {
       const frame = section?.querySelector("div");
       if (!frame) return null;
       const r = frame.getBoundingClientRect();
-      return { w: Math.round(r.width), h: Math.round(r.height), ratio: r.height === 0 ? 0 : r.width / r.height };
+      const image=frame.querySelector("img"); const aspect=image?.naturalWidth/image?.naturalHeight; return { w: Math.round(r.width), h: Math.round(r.height), ratio: r.height === 0 ? 0 : r.width / r.height, expected: Number.isFinite(aspect)&&aspect>0?Math.max(0.75,Math.min(3,aspect)):4/3 };
     })()`,
     returnByValue: true,
   });
   const frame = previewFrame.result?.value ?? null;
   if (frame === null) {
     problems.push("量不到右栏预览框（4:3 这条验不了）");
-  } else if (Math.abs(frame.ratio - 4 / 3) > 0.03) {
+  } else if (Math.abs(frame.ratio - frame.expected) > 0.03) {
     problems.push(
-      `右栏预览框应当是 4:3（实测 ${JSON.stringify(frame)}）—— 不要 3:2，也不要跟着照片比例走`,
+      `右栏预览框应当按照片比例夹在 3:1～3:4（实测 ${JSON.stringify(frame)}）（BROWSE.md 当前规范）`,
     );
   }
   // 2026-09-20 起直方图是**逐点填充折线**（加色分层），不再做三次曲线拟合
@@ -4922,9 +4934,9 @@ try {
     if (!(layers.scrimZ !== null && layers.scrimZ > layers.viewerZ)) {
       problems.push(`遮罩也要盖住看图覆盖层（实测 scrim=${layers.scrimZ}, viewer=${layers.viewerZ}）`);
     }
-    if (layers.modalZ !== null && layers.titlebarZ !== null && !(layers.titlebarZ > layers.modalZ)) {
+    if (layers.modalZ !== null && layers.titlebarZ !== null && !(layers.modalZ > layers.titlebarZ && layers.titlebarZ > layers.scrimZ)) {
       problems.push(
-        `标题栏要留在弹窗之上（沉浸式窗口要靠它拖拽/关窗，实测 titlebar=${layers.titlebarZ}, modal=${layers.modalZ}）`,
+        `弹窗应高于标题栏，标题栏高于遮罩（DESIGN.md 2026-09-25 规范，实测 titlebar=${layers.titlebarZ}, modal=${layers.modalZ}）`,
       );
     }
     if (layers.titleHitIsDialog === true) {

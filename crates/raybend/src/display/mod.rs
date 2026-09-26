@@ -47,6 +47,7 @@
 pub mod full_cache;
 pub mod histogram;
 pub mod pixels;
+pub mod output;
 
 use std::path::Path;
 

@@ -1,164 +1,84 @@
 #!/usr/bin/env node
-/**
- * 发版脚本（用户 2026-09-15 的评审意见 4；思路参照 `/home/andares/repos/neblor/mds`）。
- *
- * 用法：
- *   pnpm release test                    # 自测包：版本号不变，通道 test，产物在 dist/test-build
- *   pnpm release patch                   # 正式包：升补丁号
- *   pnpm release minor --channel beta    # 公测包：升次版本号并带 -beta.N
- *   pnpm release patch --dry-run         # 只打印计划，什么都不改
- *
- * 它做三件事：
- *   1. 把「这次打包是什么」算成一个计划（纯逻辑在 `src/lib/release-plan.ts`，有单测）
- *   2. 写回 `package.json` 版本号（只有正式发布才写），并把版本/通道/构建时间/git 状态
- *      通过环境变量传给 Vite（`vite.config.ts` 读它们注入 `src/lib/build-info.ts`）
- *   3. 跑前端构建；**然后停下**
- *
- * 它**不做**三件事（`AGENTS.md` §2.1：发布与推送必须由人类执行）：
- *   ✗ 不 commit、不 tag、不 push
- *   ✗ 不生成安装包（Windows 侧要按 `AGENTS.md` §5.3 的命令构建，那条路径由人跑）
- *   ✗ 不碰任何注册表 / 发布页
- * 计划里的 `humanCommands` 会把剩下该由人做的事逐条打印出来。
- *
- * 退出码：0 正常；1 参数或前置条件不对（例如正式包在脏树上且没给 --allow-dirty）。
- */
-
+/** 准备发布；--windows 仅供崔总执行。无 tag/push/上传。 */
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, existsSync } from "node:fs";
+import { dirname, join, resolve, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  createReleasePlan,
-  parseReleaseArgs,
-} from "../src/lib/release-plan.ts";
-
-const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const packagePath = join(projectRoot, "package.json");
-
-function fail(message) {
-  console.error(`✗ ${message}`);
-  process.exit(1);
-}
-
-function git(args) {
+import { parseReleaseArgs, createReleasePlan } from "../src/lib/release-plan.ts";
+import { versionEdits, applyVersionEdits, sha256, RELEASE_SOURCE_FILES } from "./lib/release-files.mjs";
+import { windowsReleaseConfig, windowsReleaseCommands, cmdPath } from "./lib/release-windows.mjs";
+import { finalizeRelease } from "./finalize-release.mjs";
+import { windowsBuildEnv } from "./lib/dav1d-win.mjs";
+export function runRelease({root=resolve(dirname(fileURLToPath(import.meta.url)),".."),argv=process.argv.slice(2),env=process.env,run=execFileSync,log=console.log,finalize=finalizeRelease}={}) {
+  const request=parseReleaseArgs(argv),pkg=JSON.parse(readFileSync(join(root,"package.json"),"utf8"));
+  let dirty=true,gitHash,gitAvailable=false;
   try {
-    return (
-      execFileSync("git", args, {
-        cwd: projectRoot,
-        encoding: "utf8",
-      }).trim() || undefined
-    );
-  } catch {
-    return undefined;
+    dirty=String(run("git",["status","--porcelain"],{cwd:root,encoding:"utf8"})).trim().length>0;
+    gitHash=String(run("git",["rev-parse","--short=12","HEAD"],{cwd:root,encoding:"utf8"})).trim();gitAvailable=true;
+  } catch { /* 正式计划阻断；test 记录来源未知。 */ }
+  const plan=createReleasePlan({version:pkg.version,request,dirty,gitHash,gitAvailable});
+  const edits=versionEdits(root,plan.targetVersion);
+  const config=JSON.parse(readFileSync(join(root,"src-tauri/tauri.conf.json"),"utf8"));
+  if(config.version!=="../package.json")throw new Error("Tauri 必须从 ../package.json 读取产品版本");
+  const builtAt=env.RAYBEND_BUILD_TIME || new Date().toISOString();
+  if(!Number.isFinite(Date.parse(builtAt)))throw new Error("非法 RAYBEND_BUILD_TIME");
+  const publicKey=request.withUpdater ? env.RAYBEND_UPDATER_PUBLIC_KEY ?? "" : "";
+  const buildEnv={...env,RAYBEND_VERSION:plan.targetVersion,RAYBEND_CHANNEL:plan.channel,RAYBEND_BUILD_TIME:builtAt,RAYBEND_GIT_HASH:gitHash??"",RAYBEND_DIRTY:dirty?"1":"0",RAYBEND_UPDATER_PUBLIC_KEY:publicKey,RAYBEND_DISTRIBUTION:"direct"};
+  const winConfig=request.windows ? windowsReleaseConfig(plan,{unsigned:request.unsigned,withUpdater:request.withUpdater,frontendDist:`../${plan.outputDir}`,certThumbprint:env.RAYBEND_SIGN_CERT_SHA1,updaterPublicKey:publicKey,updaterPrivateKey:env.TAURI_SIGNING_PRIVATE_KEY,timestamp:env.RAYBEND_SIGN_TIMESTAMP}):undefined;
+  const releaseOut=join(root,"release-out",plan.channel==="test"?`test-${builtAt.replaceAll(":","-")}`:`v${plan.targetVersion}`);
+  log(`发布计划：${plan.currentVersion} → ${plan.targetVersion} · ${plan.channel}\n前端：${plan.outputDir}\nWindows：${request.windows ? winConfig.bundle.targets.join(" / ") : "未生成；由崔总执行 --windows"}\n版本同步：${edits.map(e=>relative(root,e.path)).join(" / ")||"无需改动"}`);
+  for(const warning of plan.warnings)log(`⚠ ${warning}`);
+  for(const blocker of plan.blockers)log(`⛔ ${blocker}`);
+  if(request.dryRun){log("dry-run：没有改文件、构建、签名或发布");return plan;}
+  if(plan.blockers.length)throw new Error(plan.blockers.join("；"));
+  if(request.windows && existsSync(releaseOut))throw new Error("本版本 release-out 已存在；保留已有产物，请先核对，不能重复覆盖");
+  if(request.windows){
+    const cliVersion=JSON.parse(readFileSync(new URL("../node_modules/@tauri-apps/cli/package.json",import.meta.url),"utf8")).version;
+    let windowsCli;
+    try {windowsCli=String(run("cmd.exe",["/d","/c","cargo tauri --version"],{cwd:root,encoding:"utf8"}));}
+    catch {throw new Error(`Windows cargo-tauri 尚未就绪；先由崔总执行一次：cmd.exe /d /c "cargo install tauri-cli --version ${cliVersion} --locked"`);}
+    if(/tauri-cli\s+(\S+)/.exec(windowsCli)?.[1]!==cliVersion)throw new Error(`Windows cargo-tauri 须与前端 CLI ${cliVersion} 一致；请先升级，未改版本或构建`);
   }
-}
-
-/** 读 package.json；读不通就直接停（发版不能靠猜版本号） */
-function readPackage() {
+  const rollback=applyVersionEdits(edits);
   try {
-    return JSON.parse(readFileSync(packagePath, "utf8"));
-  } catch (error) {
-    fail(
-      `读 package.json 失败：${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-}
-
-let request;
-try {
-  request = parseReleaseArgs(process.argv.slice(2));
-} catch (error) {
-  fail(error instanceof Error ? error.message : String(error));
-}
-
-const pkg = readPackage();
-const dirty = (git(["status", "--porcelain"]) ?? "").length > 0;
-const gitHash = git(["rev-parse", "--short", "HEAD"]);
-
-const plan = createReleasePlan({
-  version: pkg.version,
-  request,
-  dirty,
-  gitHash,
-});
-
-/* ── 打印计划（人要先看清「这一下会打出什么包」）─────────────── */
-
-console.log("发版计划");
-console.log("─".repeat(52));
-console.log(`  当前版本   ${plan.currentVersion}`);
-console.log(
-  `  目标版本   ${plan.targetVersion}${plan.changesVersion ? "" : "（不变）"}`,
-);
-console.log(`  构建通道   ${plan.channel}`);
-console.log(`  产物目录   ${plan.outputDir}`);
-console.log(`  工作树     ${dirty ? "脏（有未提交改动）" : "干净"}`);
-console.log(`  commit     ${gitHash ?? "（拿不到）"}`);
-console.log("─".repeat(52));
-
-for (const warning of plan.warnings) {
-  console.warn(`⚠ ${warning}`);
-}
-
-const blocking = plan.warnings.some((warning) => /工作树是脏的/.test(warning));
-if (blocking && !request.dryRun) {
-  fail("正式包不带着未提交改动打。先提交，或明确用 --allow-dirty 接受。");
-}
-
-if (request.dryRun) {
-  console.log("\n（--dry-run：没有改任何文件，也没有构建）");
-} else {
-  if (plan.changesVersion) {
-    writeFileSync(
-      packagePath,
-      `${JSON.stringify({ ...pkg, version: plan.targetVersion }, null, 2)}\n`,
-    );
-    console.log(`\n✓ package.json 版本号 → ${plan.targetVersion}`);
-  }
-
-  if (request.skipBuild) {
-    console.log("（--skip-build：跳过构建）");
-  } else {
-    console.log("\n开始构建（构建信息会被打进产物）…");
-    const buildEnv = {
-      ...process.env,
-      RAYBEND_VERSION: plan.targetVersion,
-      RAYBEND_CHANNEL: plan.channel,
-      RAYBEND_BUILD_TIME: new Date().toISOString(),
-    };
-    if (gitHash) buildEnv.RAYBEND_GIT_HASH = gitHash;
-    if (dirty) buildEnv.RAYBEND_DIRTY = "1";
-
-    try {
-      execFileSync("pnpm", ["build"], {
-        cwd: projectRoot,
-        stdio: "inherit",
-        env: buildEnv,
-      });
-    } catch (error) {
-      fail(
-        `构建失败：${error instanceof Error ? error.message : String(error)}`,
-      );
+    if(!request.skipBuild){
+      run("pnpm",["licenses:generate"],{cwd:root,stdio:"inherit",env:buildEnv});
+      run("pnpm",["build","--outDir",plan.outputDir],{cwd:root,stdio:"inherit",env:buildEnv});
+      const frontendRoot=join(root,plan.outputDir),files=[];
+      const walk=dir=>{for(const entry of readdirSync(dir,{withFileTypes:true})){const path=join(dir,entry.name);if(entry.isSymbolicLink())throw new Error("发布前端不允许符号链接");if(entry.isDirectory())walk(path);else if(entry.name!=="raybend-build.json")files.push({path:relative(frontendRoot,path).replaceAll("\\","/"),sha256:sha256(readFileSync(path)),bytes:statSync(path).size});}};
+      walk(frontendRoot);files.sort((a,b)=>a.path.localeCompare(b.path));
+      const protocol=/pub const PROTOCOL_TAG: &str = "([^"]+)"/.exec(readFileSync(join(root,"crates/raybend/src/raw/worker.rs"),"utf8"))?.[1];
+      if(!protocol)throw new Error("找不到 RAW worker 协议标签");
+      const manifest={schema:1,version:plan.targetVersion,channel:plan.channel,builtAt,gitHash:gitHash??null,dirty,distribution:"direct",workerMode:"self",workerProtocol:protocol,files,sourceFiles:Object.fromEntries(RELEASE_SOURCE_FILES.map(path=>[path,sha256(readFileSync(join(root,path)))]))};
+      writeFileSync(join(frontendRoot,"raybend-build.json"),JSON.stringify(manifest,null,2)+"\n");
+      if(request.windows){
+        const stage=join(root,".release",plan.channel,plan.targetVersion);mkdirSync(stage,{recursive:true});
+        const cfg=join(stage,"tauri.release.json"),script=join(stage,"build.cmd");
+        // 相对 frontendDist 按 src-tauri 配置目录解析，不能按临时配置位置猜。
+        winConfig.build.frontendDist=String(run("wslpath",["-w",frontendRoot],{encoding:"utf8"})).trim();
+        writeFileSync(cfg,JSON.stringify(winConfig,null,2)+"\n");
+        const repoWin=String(run("wslpath",["-w",root],{encoding:"utf8"})).trim();
+        const cfgWin=String(run("wslpath",["-w",cfg],{encoding:"utf8"})).trim();
+        const scriptWin=String(run("wslpath",["-w",script],{encoding:"utf8"})).trim();
+        cmdPath(scriptWin);writeFileSync(script,windowsReleaseCommands(repoWin,cfgWin,{signed:winConfig.bundle.windows.signCommand!==null}));
+        const names=["RAYBEND_VERSION","RAYBEND_CHANNEL","RAYBEND_BUILD_TIME","RAYBEND_GIT_HASH","RAYBEND_DIRTY","RAYBEND_UPDATER_PUBLIC_KEY","RAYBEND_DISTRIBUTION","TAURI_SIGNING_PRIVATE_KEY","TAURI_SIGNING_PRIVATE_KEY_PASSWORD"];
+        const windowsEnv=windowsBuildEnv({...Object.fromEntries(names.map(name=>[name,buildEnv[name]])),CARGO_TARGET_DIR:"C:\\rb-target\\raybend-release"},names);
+        const privateKeyFile=env.TAURI_SIGNING_PRIVATE_KEY;
+        if(privateKeyFile && existsSync(privateKeyFile) && statSync(privateKeyFile).isFile())windowsEnv.TAURI_SIGNING_PRIVATE_KEY=String(run("wslpath",["-w",resolve(privateKeyFile)],{encoding:"utf8"})).trim();
+        run("cmd.exe",["/d","/c",scriptWin],{cwd:root,stdio:"inherit",env:windowsEnv});
+        run("pnpm",["check:win"],{cwd:root,stdio:"inherit",env:{...buildEnv,WIN_DIST:frontendRoot,WIN_EXE:"/mnt/c/rb-target/raybend-release/release/raybend-desktop.exe",WIN_WORKER_MODE:"self"}});
+        finalize({argv:["/mnt/c/rb-target/raybend-release/release/bundle","--manifest",join(frontendRoot,"raybend-build.json"),"--out",releaseOut,...(request.unsigned?["--allow-unsigned"]:[]),...(request.withUpdater?["--base-url",`https://github.com/C-Thun/raybend/releases/download/v${plan.targetVersion}/`]:[])],run,log,selectVersion:plan.targetVersion,requiredTargets:winConfig.bundle.targets});
+        log(`本地准备完成；由崔总真机验收后执行：pnpm release:publish ${relative(root,releaseOut)} --execute`);
+      }
     }
-    console.log(
-      `✓ 前端产物在 ${plan.outputDir === "dist" ? "dist/" : "dist/"}（Vite 输出目录固定为 dist）`,
-    );
+  } catch(error) {
+    try {rollback();} catch(conflict){throw new AggregateError([error,conflict],"构建失败；保留外部版本修改，需核对");}
+    throw new Error(`构建失败，已恢复本次版本写入；重试前重建前端：${error.message}`,{cause:error});
   }
+  if(request.skipBuild)log("版本准备完成；未构建，不是可发布产物");
+  if(!request.windows)for(const command of plan.humanCommands)log(`由崔总执行：${command}`);
+  return plan;
 }
-
-/* ── 该人做的事：逐条打印，不代劳 ──────────────────────────── */
-
-console.log("\n接下来由你执行（脚本不会碰这些，AGENTS.md §2.1）：");
-for (const command of plan.humanCommands) {
-  console.log(`  $ ${command}`);
-}
-
-if (plan.channel === "test") {
-  console.log(
-    "\n提示：测试包的版本号没变，安装前建议先卸载旧包，避免版本号相同的两包混淆。",
-  );
-} else {
-  console.log(
-    "\n提示：Windows 安装包请按 AGENTS.md §5.3 的命令构建（前端在 WSL 出、Rust 在 Windows 编）。",
-  );
+if(process.argv[1] && resolve(process.argv[1])===fileURLToPath(import.meta.url)){
+  try {runRelease();} catch(error){console.error(`✗ ${error.message}`);process.exitCode=1;}
 }

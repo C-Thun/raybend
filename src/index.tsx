@@ -13,7 +13,7 @@ import "./index.css";
 import "@fontsource-variable/noto-sans-sc/wght.css";
 import { installEscapeBlur } from "./lib/dom-focus.ts";
 import { hydrateLocale } from "./i18n/index.ts";
-import SpikeViewport from "./dev/SpikeViewport.tsx";
+const SpikeViewport = __RAYBEND_DIAGNOSTICS__ ? lazy(() => import("./dev/SpikeViewport.tsx")) : undefined;
 import FullscreenViewer from "./features/fullscreen/FullscreenViewer.tsx";
 
 /**
@@ -45,18 +45,8 @@ const KitchenSink = import.meta.env.DEV
   ? lazy(() => import("./dev/KitchenSink.tsx"))
   : undefined;
 
-/*
- * 渲染 spike 页（`?spike=1`）。
- *
- * 与陈列室不同，它**不能**只留在开发期：`PLAN.md` A.2 要求人类在 **Windows 打包产物**里
- * 验透明挖洞与 DPI，而那个产物跑的是 `dist/`。所以这里用**静态 import**（会进产物，
- * 体积很小）而不是 DEV 三元里的 `lazy()`。
- *
- * 判据用查询串而不是路由：窗口是 `WebviewUrl::App("index.html?spike=1")` 开的，
- * 查询串在 dev（`http://localhost:1420/`）与打包（`tauri://localhost/`）两种形态下
- * 都不影响资源解析，比多一条路由稳。
- */
-const SPIKE_MODE = new URLSearchParams(window.location.search).get("spike") === "1";
+/* 发布通道在模块顶层摇掉诊断页；Windows dev/test 包仍可检验 GPU。 */
+const SPIKE_MODE = __RAYBEND_DIAGNOSTICS__ && new URLSearchParams(window.location.search).get("spike") === "1";
 
 /*
  * 全屏看图页（`?fullscreen=1`）—— 与 spike 页同一套「查询串选页」的做法，
@@ -71,7 +61,7 @@ const FULLSCREEN_MODE =
 
 render(
   () =>
-    SPIKE_MODE ? (
+    SPIKE_MODE && SpikeViewport ? (
       <SpikeViewport />
     ) : FULLSCREEN_MODE ? (
       <FullscreenViewer />

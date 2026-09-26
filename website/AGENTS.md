@@ -144,12 +144,13 @@ fill=var(--color-brand) + stroke=var(--color-white) + paint-order="stroke"
 ### 4.4 下载信息（与发版同步）
 
 - **不在浏览器里请求 GitHub API**：版本号与下载直链是**构建期注入**的
-  `import.meta.env.RB_RELEASE`（`vite.config.ts` 里解析一次，`define` 进产物）。
-- 解析优先级：`RAYBEND_TAG`（发布流程从 `github.event.release.tag_name` 传入）→ CI 里查
-  `releases/latest`（带 `GITHUB_TOKEN`）→ 都没有就注入 `null`（页面走「即将发布」占位态）。
+  `import.meta.env.RB_RELEASE`（`scripts/release-info.ts` 在构建期适配，`vite.config.ts` 注入产物）。
+- 解析优先级：正式 published 事件直接读取 `GITHUB_EVENT_PATH` 的完整 Release 资产；其它构建用
+  `RAYBEND_TAG` 查指定已公开版本，或 CI 查询 `releases/latest`。尚无版本 404 为 pending；网络/认证/指定 tag
+  错误停止部署，保留已部署网站，不伪造版本。
   本地 `pnpm build` **不联网**。
-- 纯逻辑在 `src/data/release.ts`（`resolveRelease()`：选安装包 → 退化为发布页，忽略 prerelease，
-  校验 tag 形状），单测在 `release.test.ts`。**页面只消费它的结果**，不要在组件里写解析逻辑。
+- 纯逻辑在 `src/data/release.ts`（`resolveRelease()`：选本版 Windows x64 NSIS/MSI → 退化为发布页，忽略 draft/prerelease，
+  校验 tag 形状），单测在 `release.test.ts` 与 `scripts/release-info.test.ts`。**页面只消费它的结果**，不要在组件里写解析逻辑。
 - 预发布版（prerelease）**不上官网**。
 
 ### 4.5 图标（Lucide，但不直接用 `lucide-solid`）
@@ -282,3 +283,5 @@ JSON-LD `SoftwareApplication`）—— 这是**爬虫唯一能直接读到的东
   - `{"method":"costs"}` —— 当前会话的开销表
 
 给 signal / memo / effect **起名字**（`{ name: "..." }` 选项）—— 归因报告是按名字报 scope 的。
+
+2026-09-27 M5 接线：根 `release:publish --execute` 公开正式 Release 后，既有 published 工作流更新真实直链并部署 Pages；发布脚本等待工作流结果。无新增官网源码提交/浏览器 API 请求；首次真实链路仍待崔总执行。

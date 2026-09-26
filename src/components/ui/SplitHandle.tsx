@@ -37,7 +37,9 @@
  *   3. **rAF 节流** —— 一次拖动会来十几个 pointermove，逐条写布局就是自找卡顿。
  */
 
-import { createSignal, Show, splitProps, type JSX } from "solid-js";
+import { onCleanup, createSignal, Show, splitProps, type JSX } from "solid-js";
+
+import { trackPointerDrag } from "../../lib/pointer-drag.ts";
 
 export type SplitAxisAlignment = "horizontal" | "vertical";
 
@@ -109,50 +111,23 @@ export function SplitHandle(props: SplitHandleProps) {
   const axis = (event: PointerEvent): number =>
     horizontal() ? event.clientY : event.clientX;
 
+  let cancelDrag: (() => void) | undefined;
+  onCleanup(() => cancelDrag?.());
+
   function onPointerDown(event: PointerEvent): void {
     if (local.disabled || event.button !== 0) return;
     // 别让浏览器从这一刻开始「拖选文本」或做原生拖放
     event.preventDefault();
 
-    const handle = event.currentTarget as HTMLElement;
+    cancelDrag?.();
     const start = axis(event);
-    let latest = start;
-    let frame = 0;
-
-    const commit = (): void => {
-      frame = 0;
-      local.onDrag?.(latest - start);
-    };
-
-    setInternalDragging(true);
-    local.onDragStart?.();
-    try {
-      handle.setPointerCapture(event.pointerId);
-    } catch {
-      // 合成事件（冒烟脚本）或异常指针 id 时可能拿不到捕获 ——
-      // 拿不到也照样能用下面挂在元素上的监听拖，不要因此把整个拖动搞崩
-    }
-
-    const onMove = (move: PointerEvent): void => {
-      latest = axis(move);
-      // **一帧最多提交一次**：拖动一次会来十几条 pointermove，逐条写布局就是自找卡顿
-      if (!frame) frame = requestAnimationFrame(commit);
-    };
-    const finish = (): void => {
-      if (frame) {
-        cancelAnimationFrame(frame);
-        commit();
-      }
-      handle.removeEventListener("pointermove", onMove);
-      handle.removeEventListener("pointerup", finish);
-      handle.removeEventListener("pointercancel", finish);
-      setInternalDragging(false);
-      local.onDragEnd?.(latest - start);
-    };
-
-    handle.addEventListener("pointermove", onMove);
-    handle.addEventListener("pointerup", finish);
-    handle.addEventListener("pointercancel", finish);
+    const coordinate = (point: {x:number;y:number}) => horizontal()?point.y:point.x;
+    cancelDrag = trackPointerDrag(event, {
+      capture: true,
+      start: () => { setInternalDragging(true); local.onDragStart?.(); },
+      move: point => local.onDrag?.(coordinate(point)-start),
+      end: point => { setInternalDragging(false); local.onDragEnd?.(coordinate(point)-start); },
+    });
   }
 
   return (

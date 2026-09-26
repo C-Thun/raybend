@@ -28985,6 +28985,28 @@
               "icon": "check",
               "library": "lucide",
               "fill": "$brand"
+            },
+            {
+              "type": "frame",
+              "id": "E0KmDc",
+              "name": "IconButton / 档案改名",
+              "width": 24,
+              "height": 24,
+              "cornerRadius": "$radius",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "L8zxW",
+                  "name": "Glyph / 档案改名",
+                  "width": 14,
+                  "height": 14,
+                  "icon": "pencil",
+                  "library": "lucide",
+                  "fill": "$fg-2"
+                }
+              ]
             }
           ]
         },
@@ -29012,6 +29034,28 @@
               "fontFamily": "Inter",
               "fontSize": 12,
               "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "HMYrV",
+              "name": "IconButton / 档案改名",
+              "width": 24,
+              "height": 24,
+              "cornerRadius": "$radius",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "mUGiu",
+                  "name": "Glyph / 档案改名",
+                  "width": 14,
+                  "height": 14,
+                  "icon": "pencil",
+                  "library": "lucide",
+                  "fill": "$fg-2"
+                }
+              ]
             }
           ]
         }
@@ -43900,6 +43944,232 @@
                       "name": "文字 / 重置所有队列",
                       "fill": "$fg-on-brand",
                       "content": "移除 LUT",
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "cpnMK",
+      "x": 0,
+      "y": 2880,
+      "name": "Components / Editor / 两层重置与档案改名",
+      "theme": {
+        "mode": "dark",
+        "density": "compact"
+      },
+      "width": 960,
+      "height": 260,
+      "fill": "$surface-main",
+      "gap": 24,
+      "padding": 24,
+      "children": [
+        {
+          "type": "frame",
+          "id": "AFy5y",
+          "name": "Modal / 第一层重置",
+          "width": 440,
+          "fill": "$surface-layer",
+          "cornerRadius": "$radius",
+          "layout": "vertical",
+          "gap": 14,
+          "padding": 20,
+          "children": [
+            {
+              "type": "text",
+              "id": "eVbMp",
+              "name": "ModalTitle",
+              "fill": "$fg-1",
+              "content": "重置修改",
+              "fontFamily": "Inter",
+              "fontSize": 17,
+              "fontWeight": "600"
+            },
+            {
+              "type": "text",
+              "id": "IHPpg",
+              "name": "ModalBody",
+              "fill": "$fg-2",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "重置自动调整之外的所有修改？\n不重置基础曲线，再次点击可重置基础曲线",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "h9aH7p",
+              "name": "ModalActions",
+              "width": "fill_container",
+              "gap": 8,
+              "justifyContent": "end",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "Dyp9b",
+                  "name": "按钮 / 取消",
+                  "height": 30,
+                  "fill": "$surface-track",
+                  "cornerRadius": 4,
+                  "padding": [
+                    0,
+                    14
+                  ],
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "mOwRA",
+                      "name": "文字 / 取消",
+                      "fill": "$fg-2",
+                      "content": "取消",
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "OUOUz",
+                  "name": "按钮 / 确认重置",
+                  "height": 30,
+                  "fill": "$brand",
+                  "cornerRadius": 4,
+                  "padding": [
+                    0,
+                    14
+                  ],
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "Y55fr",
+                      "name": "文字 / 确认重置",
+                      "fill": "$fg-on-brand",
+                      "content": "重置修改",
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "Bkill",
+          "name": "Modal / 基础曲线档案改名",
+          "width": 440,
+          "fill": "$surface-layer",
+          "cornerRadius": "$radius",
+          "layout": "vertical",
+          "gap": 14,
+          "padding": 20,
+          "children": [
+            {
+              "type": "text",
+              "id": "sVegu",
+              "name": "ModalTitle",
+              "fill": "$fg-1",
+              "content": "档案改名",
+              "fontFamily": "Inter",
+              "fontSize": 17,
+              "fontWeight": "600"
+            },
+            {
+              "type": "frame",
+              "id": "EZUFe",
+              "name": "档案改名 / 名称输入框",
+              "width": "fill_container",
+              "height": 38,
+              "fill": "$surface-track",
+              "cornerRadius": 4,
+              "padding": [
+                0,
+                10
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "ZQ1nS",
+                  "name": "定稿弹窗 / 自动名称示例",
+                  "fill": "$fg-1",
+                  "content": "DC-G9 · Natural",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "zVYmq",
+              "name": "ModalActions",
+              "width": "fill_container",
+              "gap": 8,
+              "justifyContent": "end",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "c5zRWo",
+                  "name": "按钮 / 取消",
+                  "height": 30,
+                  "fill": "$surface-track",
+                  "cornerRadius": 4,
+                  "padding": [
+                    0,
+                    14
+                  ],
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "HMKPX",
+                      "name": "文字 / 取消",
+                      "fill": "$fg-2",
+                      "content": "取消",
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "V4qpJo",
+                  "name": "按钮 / 保存名称",
+                  "height": 30,
+                  "fill": "$brand",
+                  "cornerRadius": 4,
+                  "padding": [
+                    0,
+                    14
+                  ],
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "ka6CH",
+                      "name": "文字 / 保存名称",
+                      "fill": "$fg-on-brand",
+                      "content": "保存",
                       "fontFamily": "Inter",
                       "fontSize": 12,
                       "fontWeight": "normal"

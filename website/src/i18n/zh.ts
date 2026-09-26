@@ -153,7 +153,7 @@ export const zh = {
     requirementsTitle: '系统要求',
     requirements: ['Windows 10 / 11（64 位）', '内存 4 GB 以上', '磁盘空间按你的照片库大小准备'],
     smartscreenNote:
-      '早期版本尚未做代码签名，Windows 可能会弹出 SmartScreen 提示；届时点「更多信息 → 仍要运行」即可。',
+      '请核对发布页的签名状态与 SHA-256。未签名或信誉不足时 Windows 可能提醒或阻止运行；Smart App Control 与企业策略下未必有继续运行选项。',
     sourceNote: '也可以',
     sourceLink: '从源码构建',
     sourceSuffix: '（需要 Rust 与 pnpm）。',

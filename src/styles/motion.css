@@ -173,3 +173,16 @@
     display: none;
   }
 }
+
+.rb-export-drag-card {
+  mask-image: linear-gradient(transparent, var(--fg-1) 3%, var(--fg-1) 97%, transparent), linear-gradient(90deg, transparent, var(--fg-1) 3%, var(--fg-1) 97%, transparent);
+  mask-composite: intersect;
+}
+@keyframes rb-export-count-bump {
+  0%, 100% { transform: translateY(0); }
+  45% { transform: translateY(-2px); }
+}
+.rb-export-count-bump { animation: rb-export-count-bump 300ms ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .rb-export-count-bump { animation: none; }
+}

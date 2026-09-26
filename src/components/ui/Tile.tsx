@@ -150,6 +150,11 @@ export interface TileProps
   colorLabel?: TileColorLabel | null;
   /** 窄格子（小尺寸档）：星标退化成「一颗星 + 数字」，避免挤成一团 */
   compact?: boolean;
+  /** Enter can be owned by the workspace command while double-click still opens. */
+  keyboardActivate?: boolean;
+  minimal?: boolean;
+  selectionFrame?: boolean;
+  selectionLocked?: boolean;
   onClick?: JSX.EventHandlerUnion<HTMLDivElement, MouseEvent>;
   onActivate?: () => void;
 }
@@ -163,6 +168,7 @@ import { COLOR_TINT_CLASS as LABEL_TINT, type ColorLabel } from "../../lib/color
 
 export function Tile(props: TileProps) {
   const [local, rest] = splitProps(props, [
+    "keyboardActivate", "minimal", "selectionFrame", "selectionLocked",
     "label",
     "tag",
     "aspect",
@@ -190,7 +196,7 @@ export function Tile(props: TileProps) {
 
   const interactive = (): boolean => !local.disabled;
   const inLibrary = (): boolean => (local.context ?? "source") === "library";
-  const hasImage = (): boolean => Boolean(local.src) && !local.loading;
+  const hasImage = (): boolean => Boolean(local.src);
 
   /** 展示用的比例：夹到 3:1 之内（真值来自后端；这里再兜一次） */
   const aspect = (): number => {
@@ -207,6 +213,7 @@ export function Tile(props: TileProps) {
    * 判据保守：只有「点后 1~5 位字母数字」才当后缀 —— `IMG.2024.raw` 只去最后一段。
    */
   const displayName = (): string => {
+    if(local.selectionFrame || local.minimal)return local.label;
     const name = local.label;
     const dot = name.lastIndexOf(".");
     if (dot <= 0 || dot === name.length - 1) return name;
@@ -251,11 +258,11 @@ export function Tile(props: TileProps) {
         height: "var(--tile-cell, 208px)",
       }}
       class={[
-        "group/tile relative flex shrink-0 flex-col overflow-hidden",
+        "group/tile isolate relative flex shrink-0 flex-col overflow-hidden",
         "rounded-(--tile-radius) p-(--tile-pad) transition-colors",
         "outline-none focus-visible:ring-1 focus-visible:ring-focus-ring",
         // 底色优先级：选中（主色）> 库内颜色标记 > 指向（辅色）> 无所谓（透明）
-        local.selected
+        local.minimal ? "" : local.selected
           ? "bg-state-selected"
           : local.colorLabel == null
             ? interactive()
@@ -270,7 +277,7 @@ export function Tile(props: TileProps) {
       onClick={local.onClick}
       onDblClick={() => local.onActivate?.()}
       onKeyDown={(event) => {
-        if (event.key === "Enter") {
+        if (event.key === "Enter" && local.keyboardActivate !== false) {
           event.preventDefault();
           local.onActivate?.();
           return;
@@ -284,7 +291,7 @@ export function Tile(props: TileProps) {
     >
       {/* ── 照片区：保比例、居中 ─────────────────────────────── */}
       <div class="flex min-h-0 min-w-0 flex-1 items-center justify-center">
-        <Show
+      <Show
           when={hasImage()}
           fallback={
             /*
@@ -328,7 +335,7 @@ export function Tile(props: TileProps) {
               alt={local.label}
               draggable={false}
               class={[
-                "size-full object-cover",
+                local.minimal || local.selectionFrame ? "size-full object-contain" : "size-full object-cover",
                 local.excluded ? "opacity-35" : "",
               ]
                 .filter(Boolean)
@@ -431,6 +438,10 @@ export function Tile(props: TileProps) {
         </Show>
       </div>
 
+      <Show when={local.minimal}>
+        <div data-tile-bar="minimal-name" class="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-scrim px-1 text-fs-0 text-fg-1" title={local.label}>{local.label}</div>
+      </Show>
+      <Show when={!local.minimal}>
       {/* ── 顶部信息条（库内）：星标 / 颜色 / 旗标 ─────────────── */}
       <Show when={inLibrary()}>
         {/*
@@ -511,6 +522,11 @@ export function Tile(props: TileProps) {
       >
         <TileName label={local.label} name={displayName()} tag={local.tag} locked={local.locked} />
       </div>
+      </Show>
+      <Show when={local.selectionLocked || (local.selectionFrame && local.selected)}>
+        <div data-tile-selection-frame aria-hidden="true" class="pointer-events-none absolute inset-0 z-20 rounded-(--tile-radius) border-2"
+          classList={{"border-brand-2":!!local.selectionLocked,"border-brand":!local.selectionLocked}} />
+      </Show>
     </div>
   );
 }

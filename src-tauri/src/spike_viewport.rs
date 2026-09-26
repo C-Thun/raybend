@@ -399,6 +399,7 @@ pub async fn spike_open<R: Runtime>(app: AppHandle<R>) -> Result<SpikeSnapshot, 
 /// 开窗的**同步**实现：Tauri 的 setup 钩子里（启动参数）也要用，
 /// 而那会儿不方便 await 一个命令。
 pub fn open_window<R: Runtime>(app: &AppHandle<R>) -> Result<SpikeSnapshot, String> {
+    if !crate::distribution::diagnostics_enabled() {return Err("diagnostic viewport disabled in this build".into());}
     if let Some(window) = app.get_webview_window(SPIKE_LABEL) {
         let state = app.state::<SpikeState>();
         let shared = state

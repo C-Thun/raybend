@@ -24,6 +24,8 @@ export interface ReleaseInfo {
   publishedAt?: string;
   /** 是否为预发布版（正式版才会上官网） */
   prerelease?: boolean;
+  /** 草稿永不展示 */
+  draft?: boolean;
   /** 发布资产（安装包等） */
   assets?: readonly ReleaseAsset[];
 }
@@ -58,18 +60,19 @@ export type ReleaseView =
       publishedAt?: string;
     };
 
-/** 安装包优先级：NSIS 安装包 → MSI → 便携 zip；签名/校验文件不算资产 */
+/** 安装包优先级：NSIS 安装包 → MSI；签名/校验文件不算资产 */
 const ASSET_PREFERENCE: readonly (readonly [string, readonly string[]])[] = [
   ['exe', ['.exe']],
   ['msi', ['.msi']],
-  ['zip', ['.zip']],
 ];
 
 /** 校验 tag 合法性：必须像 `v1.2.3` 或 `1.2.3(-beta.1)`，别的当没发布处理 */
 export function parseTag(tag: string | undefined | null): string | undefined {
   if (typeof tag !== 'string') return undefined;
   const trimmed = tag.trim();
-  return /^v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(trimmed) ? trimmed : undefined;
+  const match = /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/.exec(trimmed);
+  if (!match || match.slice(1, 4).some(v => !Number.isSafeInteger(Number(v))) || match[4]?.split('.').some(v => /^0\d+$/.test(v))) return undefined;
+  return trimmed;
 }
 
 /** `12345678` → `12.3 MB` */
@@ -93,7 +96,8 @@ export function pickInstaller(
   if (!assets?.length) return undefined;
   for (const [, extensions] of ASSET_PREFERENCE) {
     for (const asset of assets) {
-      if (!asset.url) continue;
+      if (!asset.url || !/^RayBend_.+_x64(?:-setup\.exe|(?:_[A-Za-z-]+)?\.msi)$/i.test(asset.name)) continue;
+      try { const url=new URL(asset.url); if(url.protocol!=='https:' || url.hostname!=='github.com' || url.username || url.password || url.search || url.hash || !url.pathname.startsWith('/C-Thun/raybend/releases/download/') || decodeURIComponent(url.pathname.split('/').at(-1) ?? '')!==asset.name)continue; } catch { continue; }
       const lower = asset.name.toLowerCase();
       if (extensions.some((ext) => lower.endsWith(ext))) return asset;
     }
@@ -110,13 +114,13 @@ export function pickInstaller(
 export function resolveRelease(info: ReleaseInfo | null | undefined): ReleaseView {
   const tag = parseTag(info?.tag);
 
-  if (!info || !tag || info.prerelease) {
+  if (!info || !tag || info.prerelease || info.draft || tag.split('+')[0]!.includes('-')) {
     return { state: 'pending', releaseUrl: RELEASES_URL };
   }
 
   const version = tag.replace(/^v/i, '');
-  const releaseUrl = info.url ?? `${REPO_URL}/releases/tag/${tag}`;
-  const installer = pickInstaller(info.assets);
+  const releaseUrl = `${REPO_URL}/releases/tag/${encodeURIComponent(tag)}`;
+  const installer = pickInstaller(info.assets?.filter(asset => { try { return decodeURIComponent(new URL(asset.url ?? '').pathname.split('/').at(-2) ?? '')===tag && asset.name.startsWith(`RayBend_${version}_`); } catch { return false; } }));
 
   return {
     state: 'available',

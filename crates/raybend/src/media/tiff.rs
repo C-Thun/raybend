@@ -104,17 +104,41 @@ const TAG_PIXEL_X: u16 = 0xa002;
 const TAG_PIXEL_Y: u16 = 0xa003;
 const TAG_LENS: u16 = 0xa434;
 
+/// One recognition rule for TIFF and the supported RAW IFD families. A byte-order
+/// prefix alone is insufficient: Canon CRW, for example, starts with II too.
+fn family_order(bytes: &[u8]) -> Option<ByteOrder> {
+    let order = ByteOrder::detect(bytes)?;
+    matches!(
+        order.u16(bytes, 2)?,
+        MAGIC_TIFF | MAGIC_RW2 | MAGIC_ORF_RO | MAGIC_ORF_RS | MAGIC_ORF_OR_BE | MAGIC_ORF_RS_BE
+    )
+    .then_some(order)
+}
+
+pub(crate) fn is_tiff_family(bytes: &[u8]) -> bool {
+    family_order(bytes).is_some()
+}
+
+/// Read typed EXIF/GPS/XMP fields from the same IFD families as parse/read_fields.
+/// RW2 and ORF keep TIFF directory offsets/types but use a vendor magic. Adapt
+/// only the owned parser buffer; never mutate source bytes or the original file.
+/// Unknown headers and broken directories are still rejected by the parser.
+pub(crate) fn read_exif(bytes: &[u8]) -> Result<exif::Exif, exif::Error> {
+    let order =
+        family_order(bytes).ok_or(exif::Error::InvalidFormat("Unsupported TIFF family header"))?;
+    let mut data = bytes.to_vec();
+    let magic = match order {
+        ByteOrder::Little => MAGIC_TIFF.to_le_bytes(),
+        ByteOrder::Big => MAGIC_TIFF.to_be_bytes(),
+    };
+    data[2..4].copy_from_slice(&magic);
+    exif::Reader::new().read_raw(data)
+}
+
 /// 解析头部。`bytes` 至少要含 8 字节的 TIFF 头；给一大段（比如前 1 MiB）也行。
 #[must_use]
 pub fn parse(bytes: &[u8]) -> Option<TiffInfo> {
-    let order = ByteOrder::detect(bytes)?;
-    let magic = order.u16(bytes, 2)?;
-    if !matches!(
-        magic,
-        MAGIC_TIFF | MAGIC_RW2 | MAGIC_ORF_RO | MAGIC_ORF_RS | MAGIC_ORF_OR_BE | MAGIC_ORF_RS_BE
-    ) {
-        return None;
-    }
+    let order = family_order(bytes)?;
     let ifd0 = order.u32(bytes, 4)? as usize;
 
     let mut info = TiffInfo::default();
@@ -181,14 +205,7 @@ pub fn parse(bytes: &[u8]) -> Option<TiffInfo> {
 /// The traversal is bounded and cycle-safe; vendor MakerNote payloads remain opaque.
 #[must_use]
 pub fn read_fields(bytes: &[u8]) -> Option<Vec<(String, String, String)>> {
-    let order = ByteOrder::detect(bytes)?;
-    let magic = order.u16(bytes, 2)?;
-    if !matches!(
-        magic,
-        MAGIC_TIFF | MAGIC_RW2 | MAGIC_ORF_RO | MAGIC_ORF_RS | MAGIC_ORF_OR_BE | MAGIC_ORF_RS_BE
-    ) {
-        return None;
-    }
+    let order = family_order(bytes)?;
     let root = order.u32(bytes, 4)? as usize;
     let mut pending = vec![("IFD 0".to_owned(), root)];
     let mut visited = std::collections::HashSet::new();
@@ -275,9 +292,10 @@ pub fn read_fields(bytes: &[u8]) -> Option<Vec<(String, String, String)>> {
                 .checked_add(2)
                 .and_then(|v| count.checked_mul(12).and_then(|n| v.checked_add(n)))
                 .and_then(|pos| order.u32(bytes, pos))
-                && next != 0 {
-                    pending.push(("IFD 1".to_owned(), next as usize));
-                }
+                && next != 0
+            {
+                pending.push(("IFD 1".to_owned(), next as usize));
+            }
         }
     }
     Some(out)

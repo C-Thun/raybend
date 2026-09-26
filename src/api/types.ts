@@ -927,7 +927,7 @@ export type EditorViewportIntent =
 
 /** 全屏页需要的一张照片（与 `lib/fullscreen-target.ts` 的形状一致）。 */
 export interface FullscreenItem {
-  exportVariant?: {repositoryId:string;reference:{assetId:number;variant:string}};
+  exportVariant?: {repositoryId:string;reference:{assetId:number;variant:string};captured?:import("../lib/export-model.ts").VariantSnapshot};
   id: string;
   /** 绝对路径（`view_image` 直接吃它） */
   path: string;

@@ -49,3 +49,5 @@ Rust · Tauri 2 · wgpu（原生 GPU 渲染）· SolidJS · Tailwind CSS · SQLi
 ## 许可
 
 [AGPL-3.0-only](LICENSE)，第三方组件清单见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。若把光伴作为网络服务对外提供，需按 AGPL 第 13 条开放对应源码。
+
+发布准备、更新密钥与签名/商店操作见 [发布指南](docs/release.md)。应用内「帮助」提供离线使用说明与第三方许可，F1 打开使用说明。

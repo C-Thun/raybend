@@ -1,17 +1,19 @@
 import { createSignal } from "solid-js";
-export const EXPORT_PREFS_KEY = "raybend.export-display.v1";
+import { clampTileStepIndex, tilePositionForSize, tileSizeAt } from "./tile-flow.ts";
+export const EXPORT_TOP_SIZE_BOUNDS = { min: 240, max: 320 } as const;
+export const EXPORT_PREFS_KEY = "raybend.export-display.v3";
 export interface ExportDisplay {
   topStep: number;
   queueStep: number;
   grouped: boolean;
-  scope: "all" | "edited" | "sooc";
+  scope: "all" | "edited" | "issues";
   info: "off" | "marks" | "marks-name";
   ratio: number;
   selectedPreset: string | null;
   queueList: boolean;
 }
 export const DEFAULT_EXPORT_DISPLAY: ExportDisplay = {
-  topStep: 8,
+  topStep: 0,
   queueStep: 1,
   grouped: false,
   scope: "all",
@@ -34,10 +36,10 @@ export function readExportDisplay(raw: string | null): ExportDisplay {
       ? Math.min(16, Math.max(0, v))
       : fallback;
   return {
-    topStep: step(p.topStep, 8),
+    topStep: clampTileStepIndex(typeof p.topStep === "number" ? p.topStep : 0, EXPORT_TOP_SIZE_BOUNDS),
     queueStep: step(p.queueStep, 1),
     grouped: p.grouped === true,
-    scope: ["all", "edited", "sooc"].includes(p.scope ?? "") ? p.scope! : "all",
+    scope: ["all", "edited", "issues"].includes(p.scope ?? "") ? p.scope! : "all",
     info: ["off", "marks", "marks-name"].includes(p.info ?? "")
       ? p.info!
       : "off",
@@ -63,6 +65,18 @@ export function createExportPreferences(
   let raw: string | null = null;
   try {
     raw = storage?.getItem(EXPORT_PREFS_KEY) ?? null;
+    if (raw === null) {
+      const v2 = storage?.getItem("raybend.export-display.v2") ?? null;
+      const old = v2 ?? storage?.getItem("raybend.export-display.v1") ?? null;
+      if (old !== null) {
+        const previous = JSON.parse(old) as Partial<ExportDisplay>;
+        const migrated = readExportDisplay(old);
+        migrated.topStep = tilePositionForSize(tileSizeAt(typeof previous.topStep === "number" ? previous.topStep : 8), EXPORT_TOP_SIZE_BOUNDS);
+        migrated.scope = v2 === null ? "all" : readExportDisplay(old).scope;
+        raw = JSON.stringify(migrated);
+        storage?.setItem(EXPORT_PREFS_KEY, raw);
+      }
+    }
   } catch {
     /* 无读权限 */
   }

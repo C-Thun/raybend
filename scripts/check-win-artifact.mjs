@@ -26,7 +26,7 @@
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 
-const DIST = "dist";
+const DIST = process.env.WIN_DIST ?? "dist";
 const DEFAULT_EXE = "/mnt/c/rb-target/raybend/debug/raybend-desktop.exe";
 const exePath = process.env.WIN_EXE ?? DEFAULT_EXE;
 
@@ -140,7 +140,8 @@ if (missing.length > 0) {
 
 // ── ③ RAW worker：独立进程，主程序要用它解码（它过期 = 编辑功能静默失灵）──
 const workerExe = join(dirname(exePath), "raybend-raw-worker.exe");
-if (!existsSync(workerExe)) {
+const selfWorker = process.env.WIN_WORKER_MODE === "self";
+if (!selfWorker && !existsSync(workerExe)) {
   fail(
     `找不到 RAW worker：${workerExe}`,
     `    cmd.exe /c 'pushd \\\\wsl.localhost\\Ubuntu-24.04\\home\\andares\\repos\\c-thun\\raybend & cargo build -p raybend-desktop -p raybend --features custom-protocol'`,
@@ -160,8 +161,9 @@ const PROTOCOL_TAG = (() => {
   return found[1];
 })();
 
-const workerTime = statSync(workerExe).mtimeMs;
-const workerBinary = readFileSync(workerExe, "latin1");
+const workerPath = selfWorker ? exePath : workerExe;
+const workerTime = statSync(workerPath).mtimeMs;
+const workerBinary = readFileSync(workerPath, "latin1");
 if (!workerBinary.includes(PROTOCOL_TAG)) {
   fail(
     `RAW worker 过期：二进制里没有 ${PROTOCOL_TAG}（主程序新、worker 旧 —— 编辑功能会静默失灵）`,
@@ -176,5 +178,5 @@ if (workerTime < newestRustSource("crates/raybend/src")) {
 }
 
 console.log(
-  `✓ Windows 产物与前端一致\n  exe:  ${exePath}（${new Date(exeTime).toISOString()}）\n  dist: ${referenced.length} 个引用资源全部命中（最新 ${new Date(distTime).toISOString()}）\n  worker: ${workerExe}（${new Date(workerTime).toISOString()}，含 ${PROTOCOL_TAG}）`,
+  `✓ Windows 产物与前端一致\n  exe:  ${exePath}（${new Date(exeTime).toISOString()}）\n  dist: ${referenced.length} 个引用资源全部命中（最新 ${new Date(distTime).toISOString()}）\n  worker: ${workerPath}（${selfWorker ? "主程序自重启" : "独立进程"}）（${new Date(workerTime).toISOString()}，含 ${PROTOCOL_TAG}）`,
 );

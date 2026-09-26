@@ -61,6 +61,8 @@ pub struct FullscreenItem {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FullscreenVariant {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub captured: Option<serde_json::Value>,
     pub repository_id: String,
     pub reference: raybend::export::VariantRef,
 }
@@ -399,6 +401,7 @@ mod tests {
         assert!(legacy.export_variant.is_none());
         let issue = FullscreenItem {
             export_variant: Some(FullscreenVariant {
+                captured: Some(serde_json::json!({"profileHash":"stable"})),
                 repository_id: "中文库".into(),
                 reference: raybend::export::VariantRef {
                     asset_id: 1,
@@ -409,6 +412,7 @@ mod tests {
         };
         let json = serde_json::to_value(&issue).unwrap();
         assert_eq!(json["exportVariant"]["reference"]["assetId"], 1);
+        assert_eq!(json["exportVariant"]["captured"]["profileHash"], "stable");
         assert_eq!(
             serde_json::from_value::<FullscreenItem>(json).unwrap(),
             issue

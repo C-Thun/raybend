@@ -111,4 +111,7 @@ export function showsDebugInfo(channel: BuildChannel): boolean {
 declare global {
  // 由 vite.config.ts 的 `define` 注入（见那里的注释）
  var __RAYBEND_BUILD__: unknown;
+ var __RAYBEND_DIAGNOSTICS__: boolean;
+ var __RAYBEND_UPDATER_PUBLIC_KEY__: string;
+ var __RAYBEND_DISTRIBUTION__: string;
 }

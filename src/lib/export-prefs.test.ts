@@ -18,7 +18,7 @@ test("independent continuous zoom values and ratio clamped", () => {
   const p = readExportDisplay(
     '{"topStep":16.5,"queueStep":-1,"ratio":99,"grouped":true,"scope":"edited"}',
   );
-  assert.equal(p.topStep, 16);
+  assert.equal(p.topStep, 5);
   assert.equal(p.queueStep, 0);
   assert.equal(p.ratio, 0.8);
   assert.equal(p.scope, "edited");
@@ -33,13 +33,13 @@ test("preferences delayed commit and whitelist persistence never includes queue"
       writes.push(value);
     },
   });
-  prefs.update({ topStep: 10.5 }, false);
+  prefs.update({ topStep: 3.5 }, false);
   assert.equal(writes.length, 0);
   prefs.commit();
-  assert.equal(JSON.parse(writes[0]!).topStep, 10.5);
+  assert.equal(JSON.parse(writes[0]!).topStep, 3.5);
   prefs.update({ queueStep: 2 });
   assert.equal(JSON.parse(writes[1]!).queueStep, 2);
-  assert.equal(prefs.value().topStep, 10.5);
+  assert.equal(prefs.value().topStep, 3.5);
   assert.doesNotMatch(writes.join(""), /enabled|queues/);
 });
 test("disabled storage does not break interaction", () => {
@@ -51,6 +51,17 @@ test("disabled storage does not break interaction", () => {
       throw Error("denied");
     },
   });
-  p.update({ scope: "sooc" });
-  assert.equal(p.value().scope, "sooc");
+  p.update({ scope: "issues" });
+  assert.equal(p.value().scope, "issues");
+});
+
+test("v1/v2 display migration preserves physical size and raises upper minimum", () => {
+ for(const version of [1,2]) for(const index of [0,8,12,16]) {
+  const saved=new Map([[`raybend.export-display.v${version}`, JSON.stringify({topStep:index,queueStep:2,scope:version===1?"sooc":"issues"})]]);
+  const prefs=createExportPreferences({getItem:key=>saved.get(key)??null,setItem:(key,value)=>{saved.set(key,value);}});
+  assert.equal(prefs.value().topStep,index<11?0:index-11);
+  assert.equal(prefs.value().queueStep,2);
+  assert.equal(prefs.value().scope,version===1?"all":"issues");
+  assert(saved.has(EXPORT_PREFS_KEY));
+ }
 });

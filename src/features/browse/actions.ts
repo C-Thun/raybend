@@ -24,6 +24,8 @@ import { createActionSlot } from "../../lib/action-slot.ts";
 import type { FullscreenTarget } from "../../lib/fullscreen-target.ts";
 
 export interface BrowseActions {
+  canExternalEditor: () => boolean;
+  externalEditor: () => void;
   /** 正在看图（单张或对比） */
   viewing: () => boolean;
   /** 处在对比态（选中 ≥ 2 张时的看图） */

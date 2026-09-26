@@ -5,6 +5,7 @@ export interface ExportActions {
   filmVisible(): boolean;
   fullscreenTarget(): FullscreenTarget | null;
   enqueue(): void;
+  remove(): void;
   selectAll(): void;
   requestReset(): void;
 }

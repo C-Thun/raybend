@@ -331,3 +331,11 @@ test("当前照片排到待加载队列前面，避免切图时总览等整条�
   await flush();
   assert.deepEqual(loader.calls, ["/first.jpg", "/current.jpg", "/neighbor.jpg"]);
 });
+
+test("failure waits for an explicit retry instead of restarting by itself",async()=>{
+ // Node's Solid server build has no effects. The populated CDP export regression
+ // exercises this boundary with undecodable image bytes and asserts requests stay bounded.
+ let loads=0;const q=createThumbQueue({load:async()=>{loads++;throw Error("offline");},toUrl:()=>"",revokeUrl:()=>{}});
+ q.request("offline");await Promise.resolve();await Promise.resolve();await Promise.resolve();assert.equal(q.get("offline").status,"error");assert.equal(loads,1);
+ q.request("offline");await Promise.resolve();await Promise.resolve();await Promise.resolve();assert.equal(loads,2);q.clear();
+});

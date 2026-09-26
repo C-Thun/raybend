@@ -1,3 +1,7 @@
+import { Button } from "./components/ui/Button.tsx";
+import { createExternalEditorStore } from "./features/external-editor/store.ts";
+import { ExternalEditorDialog } from "./features/external-editor/ExternalEditorDialog.tsx";
+import { externalApplications,externalTask,onExternalTask } from "./api/external-editor.ts";
 /**
  * 应用组装（`ARCHITECTURE.md` §1 的最上层）。
  *
@@ -18,11 +22,15 @@
  * 放进任何一边都会让另一边去钻内部实现。
  */
 
+import { UpdateDialog } from "./shell/UpdateDialog.tsx";
+import { WelcomeDialog } from "./shell/WelcomeDialog.tsx";
+import { shouldWelcome, welcomeAcknowledged, acknowledgeWelcome } from "./lib/welcome.ts";
+import { EXPORT_TOP_SIZE_BOUNDS } from "./lib/export-prefs.ts";
 import { createExportStore } from "./workspaces/export/store.ts";
 import { ExportWorkspace } from "./workspaces/export/ExportWorkspace.tsx";
 import { ExportToolbar, ExportScopeTool, ExportStopTool } from "./workspaces/export/Toolbar.tsx";
 import { exportActions } from "./workspaces/export/actions.ts";
-import { getExportVariants, getExportSnapshots, validateExportPreset } from "./api/export.ts";
+import { getExportVariants, exportQueue, onExportState, getExportSnapshots, validateExportPreset } from "./api/export.ts";
 import { Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { uiReady, tauriWindowHandle } from "./api/window.ts";
 import { openFullscreen } from "./api/fullscreen.ts";
@@ -112,8 +120,11 @@ function canvasBackground(): string {
 
 export default function App() {
   const shell = createShellStore();
-  const exportStore=createExportStore({getSetting:db.getSetting,setSetting:db.setSetting,variants:getExportVariants,snapshots:getExportSnapshots,validate:validateExportPreset});
+  const exportStore=createExportStore({getSetting:db.getSetting,setSetting:db.setSetting,variants:getExportVariants,snapshots:getExportSnapshots,validate:validateExportPreset,runtime:exportQueue,subscribe:onExportState});
   onCleanup(()=>exportStore.dispose());
+  const externalEditor=createExternalEditorStore({getSetting:db.getSetting,setSetting:db.setSetting,applications:externalApplications,task:externalTask,subscribe:onExternalTask,
+    snapshot:async target=>{const [captured]=await getExportSnapshots(target.repositoryId,[target.reference]);if(!captured)throw Error(t("export.error.incomplete"));return captured;}});
+  onCleanup(externalEditor.dispose);
   /*
    * 编辑工作区的界面状态（档位 / LUT 面板 / 三个工具 / 参数草稿）。
    *
@@ -218,6 +229,8 @@ export default function App() {
    * 这是设备级导航记忆，不进 catalog：catalog 跟着库移动，而「这台电脑上次看到哪里」属于 app。
    * 本地存储若损坏/路径过期，`readBrowseSession` 会丢掉非法值，browse 仍能落在库选择器上。
    */
+  const [welcomeOpen, setWelcomeOpen] = createSignal(false);
+  const closeWelcome = () => { acknowledgeWelcome(); setWelcomeOpen(false); };
   const [startupResolved, setStartupResolved] = createSignal(false);
   const startupReady = withTimeout(
     db.listRepositories(),
@@ -225,6 +238,7 @@ export default function App() {
     timeoutMessage("startup.timeout.repositories", STARTUP_REPOSITORIES_TIMEOUT_MS),
   )
     .then((repositories) => {
+      setWelcomeOpen(shouldWelcome(isTauriRuntime(), repositories.length, welcomeAcknowledged()));
       if (repositories.length === 0) {
         shell.setWorkflow("import");
         return;
@@ -336,6 +350,8 @@ export default function App() {
   const [paletteOpen, setPaletteOpen] = createSignal(false);
   const [shortcutsOpen, setShortcutsOpen] = createSignal(false);
   const [aboutOpen, setAboutOpen] = createSignal(false);
+  const [updatesOpen,setUpdatesOpen]=createSignal(false);
+  const [aboutPage,setAboutPage]=createSignal<"about"|"help"|"licenses">("about");
   /** 「新建库」的请求计数：导入工作区看到它变就开弹窗（弹窗状态住在那个工作区） */
   const [newRepositoryRequest, setNewRepositoryRequest] = createSignal(0);
 
@@ -398,7 +414,11 @@ export default function App() {
     },
     openPalette: () => setPaletteOpen(true),
     openShortcuts: () => setShortcutsOpen(true),
-    openAbout: () => setAboutOpen(true),
+    openAbout: () => {setAboutPage("about");setAboutOpen(true);},
+    openHelp: () => {setAboutPage("help");setAboutOpen(true);},
+    openLicenses: () => {setAboutPage("licenses");setAboutOpen(true);},
+    openWelcome: () => setWelcomeOpen(true),
+    openUpdates: () => setUpdatesOpen(true),
     openTags: () => setTagsOpen(true),
     openLibrarySettings: () => {
       const id = browseStore.repositoryId();
@@ -406,14 +426,15 @@ export default function App() {
     },
     openNewRepository: () => setNewRepositoryRequest((count) => count + 1),
     display: {
+      sizeBounds: () => exportFlow() && exportStore.activeArea()==="gallery" ? EXPORT_TOP_SIZE_BOUNDS : undefined,
       byTime: () => exportFlow()?exportStore.preferences.value().grouped:(importFlow() ? importDisplayByTime() : browseDisplayByTime()),
       setByTime: (value) =>
         exportFlow()?exportStore.preferences.update({grouped:value}):importFlow() ? setImportDisplayByTime(value) : setBrowseDisplayByTime(value),
       infoMode: () => exportFlow()?exportStore.preferences.value().info:(importFlow() ? importDisplayInfoMode() : browseDisplayInfoMode()),
       cycleInfo: () => exportFlow()?exportStore.preferences.update({info:exportStore.preferences.value().info==="off"?"marks":exportStore.preferences.value().info==="marks"?"marks-name":"off"}):(importFlow() ? toggleImportTileInfo() : cycleBrowseTileInfo()),
-      tileStep: () => exportFlow()?exportStore.preferences.value().topStep:(importFlow() ? importDisplayTileStep() : browseDisplayTileStep()),
+      tileStep: () => exportFlow()?(exportStore.activeArea()==="gallery" ? exportStore.preferences.value().topStep : exportStore.preferences.value().queueStep):(importFlow() ? importDisplayTileStep() : browseDisplayTileStep()),
       setTileStep: (value) =>
-        exportFlow()?exportStore.preferences.update({topStep:value},false):importFlow() ? setImportDisplayTileStep(value) : setBrowseDisplayTileStep(value),
+        exportFlow()?exportStore.preferences.update(exportStore.activeArea()==="gallery" ? {topStep:value} : {queueStep:value},false):importFlow() ? setImportDisplayTileStep(value) : setBrowseDisplayTileStep(value),
       commitTileStep: () =>
         exportFlow()?exportStore.preferences.commit():importFlow() ? commitImportDisplayTileStep() : commitBrowseDisplayTileStep(),
     },
@@ -428,6 +449,8 @@ export default function App() {
       fullscreen,
     },
     browse: {
+      canExternalEditor:()=>browseActions()?.canExternalEditor() ?? false,
+      externalEditor:()=>browseActions()?.externalEditor(),
       repositoryId: browseStore.repositoryId,
       undo: () => void browseStore.undo(),
       redo: () => void browseStore.redo(),
@@ -463,7 +486,7 @@ export default function App() {
       cycleChrome: () => importActions()?.cycleChrome(),
       toggleCompareStrip: () => importActions()?.toggleCompareStrip(),
     },
-    export: {hasSelection:()=>exportStore.selection().ids.size>0,canEnqueue:()=>exportStore.selectedPreset()!==null&&exportStore.selection().ids.size>0&&!exportStore.busy(),enqueue:()=>exportActions()?.enqueue(),clearSelection:exportStore.clear,selectAll:()=>exportActions()?.selectAll(),reset:()=>exportActions()?.requestReset(),canReset:()=>[...exportStore.queues().values()].some(q=>q.length>0),stopAll:exportStore.stopAll,canStop:()=>exportStore.enabled().size>0,cycleScope:exportStore.cycleScope,save:()=>void exportStore.save()},
+    export: {hasSelection:()=>exportStore.activeSelection().ids.size>0,canEnqueue:exportStore.canEnqueue,canRemove:exportStore.canRemove,remove:exportStore.removeSelected,enqueue:()=>exportActions()?.enqueue(),clearSelection:exportStore.clear,selectAll:()=>exportActions()?.selectAll(),reset:()=>exportActions()?.requestReset(),canReset:()=>[...exportStore.queues().values()].some(q=>q.length>0),stopAll:exportStore.stopAll,canStop:()=>exportStore.enabled().size>0,cycleScope:exportStore.cycleScope,toggleRun:exportStore.toggleRun,canRun:exportStore.canRun,canSave:exportStore.canSave,save:()=>void exportStore.save()},
     editor: {
       active: () => shell.workflow() === "edit",
       hasPhoto: editorEnabled,
@@ -498,6 +521,9 @@ export default function App() {
       shortcutsOpen() ||
       aboutOpen() ||
       document.querySelector('[role="dialog"]') !== null,
+    allowedWhileBlocked: (command) => document.querySelector("[data-export-all-issues]") !== null &&
+      !paletteOpen() && !shortcutsOpen() && !aboutOpen() &&
+      ["edit.selectAll", "edit.delete", "export.enqueue"].includes(command.id),
     onRun: (command) => {
       // 「打开面板」这类命令会把面板开开关关，别让分发器的日志把它们写成递归
       if (command.id !== "help.palette") setPaletteOpen(false);
@@ -530,11 +556,16 @@ export default function App() {
           : "bg-surface-main",
       ].join(" ")}
     >
+      <UpdateDialog open={updatesOpen()} onOpenChange={setUpdatesOpen} canInstall={()=>!editorStore.developDirty() && migrations().size===0 && !exportStore.processing() && !externalEditor.running()}/>
+      <WelcomeDialog open={welcomeOpen()} onClose={closeWelcome}
+        onLibrary={() => {closeWelcome();shell.setWorkflow("import");runCommand(commands.find(c=>c.id==="file.newRepository")!);}}
+        onHelp={() => {closeWelcome();runCommand(commands.find(c=>c.id==="help.docs")!);}} />
       <TitleBar
         store={shell}
         appearance={appearance}
         commands={commands}
         onRun={runCommand}
+        aboutPage={aboutPage()}
         aboutOpen={aboutOpen()}
         onAboutOpenChange={setAboutOpen}
       />
@@ -555,12 +586,12 @@ export default function App() {
         /* left/right 盖在全宽 mid 上；mid 按整条 toolsbar 的中心对齐。 */
         hasLeftTools={shell.workflow() === "edit" || exportFlow()}
         left={<Show when={exportFlow()} fallback={<EditorPanelToggles store={editorStore} enabled={editorEnabled()} />}><ExportScopeTool store={exportStore}/></Show>}
-        hasRightTools={shell.workflow() === "edit" || exportFlow()}
-        right={<Show when={exportFlow()} fallback={<EditorResetTool store={editorStore} enabled={editorEnabled()}
+        hasRightTools={shell.workflow() === "browse" || shell.workflow() === "edit" || exportFlow()}
+        right={<Show when={shell.workflow()==="browse"} fallback={<Show when={exportFlow()} fallback={<EditorResetTool store={editorStore} enabled={editorEnabled()}
           onRequestReset={() => editorActions()?.resetDevelop()}
           canReset={() => editorActions()?.canReset() ?? false}
           canFinalize={() => editorActions()?.canFinalize() ?? false}
-          onFinalize={() => editorActions()?.finalize()} />}><ExportStopTool store={exportStore}/></Show>}
+          onFinalize={() => editorActions()?.finalize()} />}><ExportStopTool store={exportStore}/></Show>}><Button data-browse-external-editor size="sm" variant="ghost" disabled={!(browseActions()?.canExternalEditor()??false)} onClick={()=>browseActions()?.externalEditor()}>{t("external.title")}</Button></Show>}
       >
         {/* 浏览模式的工具（标记系列 / 筛选开关 / 锁）由那个模块自己给 —— 见 ToolsBar 的说明 */}
         <Show when={shell.workflow() === "browse"}>
@@ -645,6 +676,7 @@ export default function App() {
           runCommand(command);
         }}
       />
+      <ExternalEditorDialog store={externalEditor}/>
       <ShortcutSettingsDialog
         open={shortcutsOpen()}
         onOpenChange={setShortcutsOpen}
@@ -687,6 +719,7 @@ export default function App() {
         </Show>
       }>
         <BrowseWorkspace
+          onExternalEditor={target=>void externalEditor.show(target)}
           store={browseStore}
           selectedMetadata={selectedMetadata}
           onOpenLibrarySettings={(id) => setLibrarySettingsId(id)}

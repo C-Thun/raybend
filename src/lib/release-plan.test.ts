@@ -27,6 +27,9 @@ const request = (over: Partial<ReleaseRequest> = {}): ReleaseRequest => ({
   dryRun: false,
   allowDirty: false,
   skipBuild: false,
+  windows: false,
+  unsigned: false,
+  withUpdater: false,
   ...over,
 });
 
@@ -227,14 +230,8 @@ test("inBetaSeries：只认 beta.N 形式", () => {
   );
 });
 
-test("正式通道却带着预发布标识：报警（别把 beta 当正式版发）", () => {
-  const plan = createReleasePlan({
-    version: "0.1.0-beta.2",
-    request: request({ bump: "test", channel: "release" }),
-    dirty: false,
-    gitHash: "abc1234",
-  });
-  assert.ok(plan.warnings.some((warning) => /预发布标识/.test(warning)));
+test("test 禁止被改作正式发行通道", () => {
+  assert.throws(() => createReleasePlan({version:"0.1.0-beta.2",request:request({bump:"test",channel:"release"}),dirty:false,gitHash:"abc"}), /test/);
 });
 
 test("人要做的事被明确列出来（脚本只准备，不推送）", () => {
@@ -251,4 +248,20 @@ test("人要做的事被明确列出来（脚本只准备，不推送）", () =>
     plan.humanCommands.every((cmd) => !cmd.includes("--force")),
     "发版命令里不该出现 force",
   );
+});
+
+test("参数的两个 channel 写法、非法值、未知与重复参数",()=>{
+  assert.equal(parseReleaseArgs(["minor","--channel","beta"]).channel,"beta");
+  for(const args of [["patch","--channel"],["patch","--channel=bad"],["patch","--unknown"],["patch","--dry-run","--dry-run"],["patch","--channel=beta","--channel=release"],["test","--channel=beta"],["minor","--channel=test"],["patch","--unsigned"],["test","--windows","--skip-build"]]) assert.throws(()=>parseReleaseArgs(args));
+});
+test("版本规范、计数和进位溢出",()=>{
+  for(const version of ["01.2.3","1.2.3-beta..1","1.2.3-beta.01","9007199254740992.0.0"])assert.throws(()=>parseVersion(version));
+  assert.throws(()=>bumpVersion("9007199254740991.0.0","major"));
+  assert.throws(()=>nextPrerelease("1.2.3-beta.9007199254740991"));
+  assert.throws(()=>nextPrerelease("1.2.3","beta.xxx"));
+  assert.equal(inBetaSeries("1.2.3-beta.cat"),false);
+});
+test("test 不给 tag/push 提示，正式 git 不可用阻断",()=>{
+  assert.deepEqual(createReleasePlan({version:"0.1.0",request:request(),dirty:true}).humanCommands,[]);
+  assert.ok(createReleasePlan({version:"0.1.0",request:request({bump:"patch"}),dirty:false,gitAvailable:false}).blockers.length>0);
 });

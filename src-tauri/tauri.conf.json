@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "RayBend",
-  "version": "0.1.0",
+  "version": "../package.json",
   "identifier": "com.cthun.raybend",
   "build": {
     "beforeDevCommand": "pnpm dev",
@@ -48,17 +48,48 @@
     "desktop-behavior": {
       "browserContextMenus": false,
       "browserAcceleratorKeys": false
+    },
+    "updater": {
+      "pubkey": "",
+      "endpoints": [],
+      "windows": {
+        "installMode": "basicUi"
+      }
     }
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis", "msi"],
+    "targets": [
+      "nsis",
+      "msi"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "publisher": "C-Thun",
+    "licenseFile": "../LICENSE",
+    "homepage": "https://raybend.cthun.com/",
+    "resources": {
+      "../LICENSE": "licenses/LICENSE",
+      "../THIRD-PARTY-NOTICES.md": "licenses/THIRD-PARTY-NOTICES.md"
+    },
+    "windows": {
+      "allowDowngrades": false,
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": [
+          "English",
+          "SimpChinese"
+        ],
+        "displayLanguageSelector": true
+      },
+      "wix": {
+        "upgradeCode": "3E3C4B67-6F53-4A99-AD98-421306B894B1"
+      }
+    }
   }
 }

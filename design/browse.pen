@@ -970,6 +970,33 @@
                   "fill": "$fg-2"
                 }
               ]
+            },
+            {
+              "type": "frame",
+              "id": "UsMUx",
+              "layoutPosition": "absolute",
+              "x": 1422,
+              "y": 4,
+              "name": "Toolsbar right / 导出至外部编辑器",
+              "width": 170,
+              "height": 32,
+              "fill": "$surface-track",
+              "cornerRadius": "$radius",
+              "padding": 8,
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "J26ff",
+                  "name": "Label",
+                  "fill": "$fg-1",
+                  "content": "导出至外部编辑器",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
             }
           ]
         },
@@ -3597,6 +3624,64 @@
               "gap": 20,
               "padding": 8,
               "children": [
+                {
+                  "type": "frame",
+                  "id": "BWFcQ",
+                  "name": "InfoSection / 展示定稿",
+                  "context": "组件内展示选择，不写 latest。置于拍摄信息/看图总览之前；切目录或卸载回到 latest。",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 6,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "Lmq5B",
+                      "name": "InfoTitle / 展示定稿",
+                      "fill": "$fg-2",
+                      "content": "展示定稿",
+                      "fontFamily": "Inter",
+                      "fontSize": 15,
+                      "fontWeight": "600"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "i0HD1",
+                      "name": "IssueChoice / 当前照片",
+                      "width": "fill_container",
+                      "height": 32,
+                      "fill": "$surface-layer",
+                      "cornerRadius": 4,
+                      "padding": [
+                        0,
+                        8
+                      ],
+                      "justifyContent": "space_between",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "DX1yn",
+                          "name": "IssueChoice / 选中名称",
+                          "fill": "$fg-1",
+                          "content": "清冷蓝调 01 · RAW",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "LcvXU",
+                          "name": "IssueChoice / 展开箭头",
+                          "fill": "$fg-3",
+                          "content": "⌄",
+                          "fontFamily": "Inter",
+                          "fontSize": 16,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                },
                 {
                   "type": "frame",
                   "id": "L8EQGZ",
@@ -7263,6 +7348,33 @@
                   "fill": "$fg-2"
                 }
               ]
+            },
+            {
+              "type": "frame",
+              "id": "NtkAf",
+              "layoutPosition": "absolute",
+              "x": 1422,
+              "y": 4,
+              "name": "Toolsbar right / 导出至外部编辑器",
+              "width": 170,
+              "height": 32,
+              "fill": "$surface-track",
+              "cornerRadius": "$radius",
+              "padding": 8,
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "b54UD5",
+                  "name": "Label",
+                  "fill": "$fg-1",
+                  "content": "导出至外部编辑器",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
             }
           ]
         },
@@ -8213,6 +8325,64 @@
               "gap": 20,
               "padding": 8,
               "children": [
+                {
+                  "type": "frame",
+                  "id": "oBXY8",
+                  "name": "InfoSection / 展示定稿",
+                  "context": "组件内展示选择，不写 latest。置于拍摄信息/看图总览之前；切目录或卸载回到 latest。",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 6,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "fMQBt",
+                      "name": "InfoTitle / 展示定稿",
+                      "fill": "$fg-2",
+                      "content": "展示定稿",
+                      "fontFamily": "Inter",
+                      "fontSize": 15,
+                      "fontWeight": "600"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "GFILn",
+                      "name": "IssueChoice / 当前照片",
+                      "width": "fill_container",
+                      "height": 32,
+                      "fill": "$surface-layer",
+                      "cornerRadius": 4,
+                      "padding": [
+                        0,
+                        8
+                      ],
+                      "justifyContent": "space_between",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "NLeKI",
+                          "name": "IssueChoice / 选中名称",
+                          "fill": "$fg-1",
+                          "content": "清冷蓝调 01 · RAW",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "IRAjL",
+                          "name": "IssueChoice / 展开箭头",
+                          "fill": "$fg-3",
+                          "content": "⌄",
+                          "fontFamily": "Inter",
+                          "fontSize": 16,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                },
                 {
                   "type": "frame",
                   "id": "e6sfdr",
@@ -10588,63 +10758,6 @@
                 },
                 {
                   "type": "frame",
-                  "id": "oBXY8",
-                  "name": "InfoSection / 展示定稿",
-                  "width": "fill_container",
-                  "layout": "vertical",
-                  "gap": 6,
-                  "children": [
-                    {
-                      "type": "text",
-                      "id": "fMQBt",
-                      "name": "InfoTitle / 展示定稿",
-                      "fill": "$fg-2",
-                      "content": "展示定稿",
-                      "fontFamily": "Inter",
-                      "fontSize": 15,
-                      "fontWeight": "600"
-                    },
-                    {
-                      "type": "frame",
-                      "id": "GFILn",
-                      "name": "IssueChoice / 当前照片",
-                      "width": "fill_container",
-                      "height": 32,
-                      "fill": "$surface-layer",
-                      "cornerRadius": 4,
-                      "padding": [
-                        0,
-                        8
-                      ],
-                      "justifyContent": "space_between",
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "NLeKI",
-                          "name": "IssueChoice / 选中名称",
-                          "fill": "$fg-1",
-                          "content": "清冷蓝调 01 · RAW",
-                          "fontFamily": "Inter",
-                          "fontSize": 13,
-                          "fontWeight": "normal"
-                        },
-                        {
-                          "type": "text",
-                          "id": "IRAjL",
-                          "name": "IssueChoice / 展开箭头",
-                          "fill": "$fg-3",
-                          "content": "⌄",
-                          "fontFamily": "Inter",
-                          "fontSize": 16,
-                          "fontWeight": "normal"
-                        }
-                      ]
-                    }
-                  ]
-                },
-                {
-                  "type": "frame",
                   "id": "robhn",
                   "name": "InfoSection / 标签",
                   "width": "fill_container",
@@ -12232,6 +12345,33 @@
                   "fill": "$fg-2"
                 }
               ]
+            },
+            {
+              "type": "frame",
+              "id": "hpXTl",
+              "layoutPosition": "absolute",
+              "x": 1422,
+              "y": 4,
+              "name": "Toolsbar right / 导出至外部编辑器",
+              "width": 170,
+              "height": 32,
+              "fill": "$surface-track",
+              "cornerRadius": "$radius",
+              "padding": 8,
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "GmEyH",
+                  "name": "Label",
+                  "fill": "$fg-1",
+                  "content": "导出至外部编辑器",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
             }
           ]
         },
@@ -13158,6 +13298,64 @@
               "gap": 20,
               "padding": 8,
               "children": [
+                {
+                  "type": "frame",
+                  "id": "wqK85",
+                  "name": "InfoSection / 展示定稿",
+                  "context": "组件内展示选择，不写 latest。置于拍摄信息/看图总览之前；切目录或卸载回到 latest。",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 6,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "cFNOP",
+                      "name": "InfoTitle / 展示定稿",
+                      "fill": "$fg-2",
+                      "content": "展示定稿",
+                      "fontFamily": "Inter",
+                      "fontSize": 15,
+                      "fontWeight": "600"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "GIu3E",
+                      "name": "IssueChoice / 当前照片",
+                      "width": "fill_container",
+                      "height": 32,
+                      "fill": "$surface-layer",
+                      "cornerRadius": 4,
+                      "padding": [
+                        0,
+                        8
+                      ],
+                      "justifyContent": "space_between",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "d1dovs",
+                          "name": "IssueChoice / 选中名称",
+                          "fill": "$fg-1",
+                          "content": "清冷蓝调 01 · RAW",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "C0ntw",
+                          "name": "IssueChoice / 展开箭头",
+                          "fill": "$fg-3",
+                          "content": "⌄",
+                          "fontFamily": "Inter",
+                          "fontSize": 16,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                },
                 {
                   "type": "frame",
                   "id": "aaBLb",
@@ -17120,6 +17318,33 @@
                   "fill": "$fg-2"
                 }
               ]
+            },
+            {
+              "type": "frame",
+              "id": "zE2jM",
+              "layoutPosition": "absolute",
+              "x": 1422,
+              "y": 4,
+              "name": "Toolsbar right / 导出至外部编辑器",
+              "width": 170,
+              "height": 32,
+              "fill": "$surface-track",
+              "cornerRadius": "$radius",
+              "padding": 8,
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "LjP6I",
+                  "name": "Label",
+                  "fill": "$fg-1",
+                  "content": "导出至外部编辑器",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
             }
           ]
         },
@@ -19896,6 +20121,64 @@
               "children": [
                 {
                   "type": "frame",
+                  "id": "DDyMs",
+                  "name": "InfoSection / 展示定稿",
+                  "context": "组件内展示选择，不写 latest。置于拍摄信息/看图总览之前；切目录或卸载回到 latest。",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 6,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "T1frfI",
+                      "name": "InfoTitle / 展示定稿",
+                      "fill": "$fg-2",
+                      "content": "展示定稿",
+                      "fontFamily": "Inter",
+                      "fontSize": 15,
+                      "fontWeight": "600"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "YmR5K",
+                      "name": "IssueChoice / 当前照片",
+                      "width": "fill_container",
+                      "height": 32,
+                      "fill": "$surface-layer",
+                      "cornerRadius": 4,
+                      "padding": [
+                        0,
+                        8
+                      ],
+                      "justifyContent": "space_between",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "RUud6",
+                          "name": "IssueChoice / 选中名称",
+                          "fill": "$fg-1",
+                          "content": "清冷蓝调 01 · RAW",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "fm0qe",
+                          "name": "IssueChoice / 展开箭头",
+                          "fill": "$fg-3",
+                          "content": "⌄",
+                          "fontFamily": "Inter",
+                          "fontSize": 16,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
                   "id": "ucAqk",
                   "name": "InfoSection / EXIF",
                   "width": "fill_container",
@@ -21705,6 +21988,33 @@
                       "fontFamily": "Inter",
                       "fontSize": 11,
                       "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "urEf5",
+                      "layoutPosition": "absolute",
+                      "x": 122,
+                      "y": 4,
+                      "name": "Toolsbar right / 导出至外部编辑器",
+                      "width": 170,
+                      "height": 32,
+                      "fill": "$surface-track",
+                      "cornerRadius": "$radius",
+                      "padding": 8,
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "Z4dca",
+                          "name": "Label",
+                          "fill": "$fg-1",
+                          "content": "导出至外部编辑器",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        }
+                      ]
                     }
                   ]
                 },
@@ -22061,6 +22371,33 @@
                           "fontFamily": "Inter",
                           "fontSize": 9,
                           "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "ndo11",
+                          "layoutPosition": "absolute",
+                          "x": 102,
+                          "y": 4,
+                          "name": "Toolsbar right / 导出至外部编辑器",
+                          "width": 170,
+                          "height": 32,
+                          "fill": "$surface-track",
+                          "cornerRadius": "$radius",
+                          "padding": 8,
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "vzk9V",
+                              "name": "Label",
+                              "fill": "$fg-1",
+                              "content": "导出至外部编辑器",
+                              "fontFamily": "Inter",
+                              "fontSize": 12,
+                              "fontWeight": "normal"
+                            }
+                          ]
                         }
                       ]
                     },
@@ -22268,6 +22605,33 @@
                           "fontFamily": "Inter",
                           "fontSize": 9,
                           "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "zWfKX",
+                          "layoutPosition": "absolute",
+                          "x": 102,
+                          "y": 4,
+                          "name": "Toolsbar right / 导出至外部编辑器",
+                          "width": 170,
+                          "height": 32,
+                          "fill": "$surface-track",
+                          "cornerRadius": "$radius",
+                          "padding": 8,
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "wbmtr",
+                              "name": "Label",
+                              "fill": "$fg-1",
+                              "content": "导出至外部编辑器",
+                              "fontFamily": "Inter",
+                              "fontSize": 12,
+                              "fontWeight": "normal"
+                            }
+                          ]
                         }
                       ]
                     },
@@ -22439,6 +22803,33 @@
                           "fontFamily": "Inter",
                           "fontSize": 9,
                           "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "DD2K5",
+                          "layoutPosition": "absolute",
+                          "x": 102,
+                          "y": 4,
+                          "name": "Toolsbar right / 导出至外部编辑器",
+                          "width": 170,
+                          "height": 32,
+                          "fill": "$surface-track",
+                          "cornerRadius": "$radius",
+                          "padding": 8,
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "c4J0Q",
+                              "name": "Label",
+                              "fill": "$fg-1",
+                              "content": "导出至外部编辑器",
+                              "fontFamily": "Inter",
+                              "fontSize": 12,
+                              "fontWeight": "normal"
+                            }
+                          ]
                         }
                       ]
                     },
@@ -24861,6 +25252,447 @@
                       "fontWeight": "normal"
                     }
                   ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "D4qjou",
+      "x": 0,
+      "y": 2270,
+      "name": "Dialog / 导出至外部编辑器",
+      "theme": {
+        "mode": "dark",
+        "density": "compact"
+      },
+      "width": 560,
+      "fill": "$surface-layer",
+      "cornerRadius": 8,
+      "layout": "vertical",
+      "gap": 14,
+      "padding": 20,
+      "children": [
+        {
+          "type": "text",
+          "id": "WOcTc",
+          "name": "Title",
+          "fill": "$fg-1",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "导出至外部编辑器",
+          "fontFamily": "Inter",
+          "fontSize": 17,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "text",
+          "id": "X6Hss",
+          "name": "Draft",
+          "fill": "$fg-2",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "当前定稿：柔光 · DSC0001",
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "JnCYj",
+          "name": "Application / 登记选择",
+          "width": "fill_container",
+          "gap": 8,
+          "children": [
+            {
+              "type": "frame",
+              "id": "J7bbn",
+              "name": "Select / 上次应用",
+              "width": "fill_container",
+              "height": 32,
+              "fill": "$surface-track",
+              "cornerRadius": "$radius",
+              "padding": 8,
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "jbYwc",
+                  "name": "Label",
+                  "fill": "$fg-1",
+                  "content": "Adobe Photoshop",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "fHLIi",
+              "name": "Button / 添加应用",
+              "height": 32,
+              "fill": "$surface-track",
+              "cornerRadius": "$radius",
+              "padding": 8,
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "Vs7MG",
+                  "name": "Label",
+                  "fill": "$fg-1",
+                  "content": "+ 应用",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "d1W1rN",
+          "name": "DirectoryLabel",
+          "fill": "$fg-2",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "TIFF 保存目录",
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "plYdD",
+          "name": "Directory / 记忆路径",
+          "width": "fill_container",
+          "gap": 8,
+          "children": [
+            {
+              "type": "frame",
+              "id": "L37Mte",
+              "name": "Input / 保存目录",
+              "width": "fill_container",
+              "height": 32,
+              "fill": "$surface-track",
+              "cornerRadius": "$radius",
+              "padding": 8,
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "RJkmr",
+                  "name": "Label",
+                  "fill": "$fg-1",
+                  "content": "D:/照片/外部编辑",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "RgsGB",
+              "name": "Button / 选择目录",
+              "height": 32,
+              "fill": "$surface-track",
+              "cornerRadius": "$radius",
+              "padding": 8,
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "QY5IR",
+                  "name": "Label",
+                  "fill": "$fg-1",
+                  "content": "浏览",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "ED216",
+          "name": "Progress",
+          "fill": "$fg-2",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "正在准备 16-bit TIFF… · 可取消",
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "text",
+          "id": "TVj3b",
+          "name": "Hint",
+          "fill": "$fg-2",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "仅写出当前定稿并打开应用，不自动取回。",
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "VmQPO",
+          "name": "Actions",
+          "width": "fill_container",
+          "gap": 8,
+          "justifyContent": "end",
+          "children": [
+            {
+              "type": "frame",
+              "id": "BX83Z",
+              "name": "Button / 取消",
+              "height": 32,
+              "fill": "$surface-track",
+              "cornerRadius": "$radius",
+              "padding": 8,
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "USA1I",
+                  "name": "Label",
+                  "fill": "$fg-1",
+                  "content": "取消",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "ZFJsW",
+              "name": "Button / 确定",
+              "height": 32,
+              "fill": "$brand",
+              "cornerRadius": "$radius",
+              "padding": 8,
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "c2rGBD",
+                  "name": "Label",
+                  "fill": "$fg-on-brand",
+                  "content": "导出并打开",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "xjlJK",
+      "x": 0,
+      "y": 2677,
+      "name": "Dialog / 添加外部编辑应用",
+      "theme": {
+        "mode": "dark",
+        "density": "compact"
+      },
+      "width": 560,
+      "fill": "$surface-layer",
+      "cornerRadius": 8,
+      "layout": "vertical",
+      "gap": 12,
+      "padding": 20,
+      "children": [
+        {
+          "type": "text",
+          "id": "w80XXE",
+          "name": "Title",
+          "fill": "$fg-1",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "添加应用",
+          "fontFamily": "Inter",
+          "fontSize": 17,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "text",
+          "id": "yf8J3",
+          "name": "Hint",
+          "fill": "$fg-2",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "勾选本机已安装的应用；已登记路径不会重复添加。",
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "puuG9",
+          "name": "Candidate / ☐ Adobe Photoshop · C:/Program Files/Adobe/...",
+          "width": "fill_container",
+          "height": 32,
+          "fill": "$surface-track",
+          "cornerRadius": "$radius",
+          "padding": 8,
+          "justifyContent": "center",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "nSOay",
+              "name": "Label",
+              "fill": "$fg-1",
+              "content": "☐ Adobe Photoshop · C:/Program Files/Adobe/...",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "yMkG3",
+          "name": "Candidate / ☑ Affinity Photo 2 · 已添加",
+          "width": "fill_container",
+          "height": 32,
+          "fill": "$surface-track",
+          "cornerRadius": "$radius",
+          "padding": 8,
+          "justifyContent": "center",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "ATuYs",
+              "name": "Label",
+              "fill": "$fg-1",
+              "content": "☑ Affinity Photo 2 · 已添加",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "d4dTDb",
+          "name": "Candidate / ☐ GIMP · C:/Program Files/GIMP/...",
+          "width": "fill_container",
+          "height": 32,
+          "fill": "$surface-track",
+          "cornerRadius": "$radius",
+          "padding": 8,
+          "justifyContent": "center",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "r8Bae",
+              "name": "Label",
+              "fill": "$fg-1",
+              "content": "☐ GIMP · C:/Program Files/GIMP/...",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "ucUiV",
+          "name": "Actions",
+          "width": "fill_container",
+          "gap": 8,
+          "justifyContent": "end",
+          "children": [
+            {
+              "type": "frame",
+              "id": "h9ceU",
+              "name": "Button / 重新发现",
+              "height": 32,
+              "fill": "$surface-track",
+              "cornerRadius": "$radius",
+              "padding": 8,
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "pxVK8",
+                  "name": "Label",
+                  "fill": "$fg-1",
+                  "content": "重新发现",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "FR0C1",
+              "name": "Button / 手动应用",
+              "height": 32,
+              "fill": "$surface-track",
+              "cornerRadius": "$radius",
+              "padding": 8,
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "O9A425",
+                  "name": "Label",
+                  "fill": "$fg-1",
+                  "content": "选择 exe",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "zDUfW",
+              "name": "Button / 添加所选",
+              "height": 32,
+              "fill": "$brand",
+              "cornerRadius": "$radius",
+              "padding": 8,
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "l1hTV",
+                  "name": "Label",
+                  "fill": "$fg-on-brand",
+                  "content": "添加所选",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
                 }
               ]
             }

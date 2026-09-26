@@ -37,6 +37,8 @@ export function photosFromSource(source: TilesSource): ViewerPhoto[] {
     out.push({
       id: item.id,
       path: item.path,
+      ...(item.imageKey ? {imageKey:item.imageKey} : {}),
+      ...(item.exportVariant ? {exportVariant:item.exportVariant} : {}),
       fileName: item.fileName,
       ...(natural === null ? {} : { natural }),
       ...(marks === undefined

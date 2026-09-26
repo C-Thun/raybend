@@ -219,7 +219,9 @@ export function createThumbQueue(deps: ThumbQueueDeps): ThumbQueue {
   return {
     get: (path) => entries()[path] ?? IDLE_THUMB,
 
-    request,
+    // Request writes queue signals; callers track their path, never queue internals.
+    // Otherwise an error publication immediately retries forever from the same effect.
+    request: (path, priority) => untrack(() => request(path, priority)),
 
     stats: () => ({
       entries: Object.keys(entries()).length,
@@ -235,7 +237,7 @@ export function createThumbQueue(deps: ThumbQueueDeps): ThumbQueue {
       queued = queued.filter((item) => item !== path);
       patch(path, { status: "loading", url: current?.url ?? null });
       queued.push(path);
-      pump();
+      untrack(pump);
     },
 
     clear: () => {

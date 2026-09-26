@@ -29,7 +29,7 @@ import { IconButton } from "../components/ui/Button.tsx";
 import { ExifStrip, type ExifData } from "../features/exif-strip/index.ts";
 import { t } from "../i18n";
 import { WORKFLOWS, WORKFLOW_LABEL_KEY, type WorkflowId } from "./flow.ts";
-import { FlowSwitcher } from "./FlowSwitcher.tsx";
+import { FlowSwitcher, type FlowSwitcherOption } from "./FlowSwitcher.tsx";
 import type { ShellStore } from "./store.ts";
 
 export interface FlowBarProps {
@@ -45,6 +45,18 @@ export interface FlowBarProps {
 }
 
 export function FlowBar(props: FlowBarProps) {
+  /*
+   * 选项身份必须稳定：FlowSwitcher 的 For 按对象身份复用节点，Ark 则持续观察
+   * 当前 item 的尺寸。把 map 放在响应式 options getter 中，会在队列刷新（即便
+   * processing 仍是 false）或切语言时换掉全部 item；旧节点的 ResizeObserver
+   * 随后报 0×0，背景块就被隐藏。只让文案/处理态响应更新，不重建选项及按钮。
+   */
+  const options: readonly FlowSwitcherOption<WorkflowId>[] = WORKFLOWS.map((id) => ({
+    value: id,
+    get processing() { return id === "export" && props.exportProcessing === true; },
+    get label() { return t(WORKFLOW_LABEL_KEY[id]); },
+    icon: () => <Dynamic component={WORKFLOW_ICONS[id]} size={16} />,
+  }));
 
   return (
     <div class="flex h-bar-flow-h shrink-0 items-center gap-2 bg-surface-main px-pad-x">
@@ -52,12 +64,7 @@ export function FlowBar(props: FlowBarProps) {
         label={t("flow.label")}
         value={props.store.workflow()}
         onValueChange={props.store.setWorkflow}
-        options={WORKFLOWS.map((id) => ({
-          value: id,
-          processing:id==="export" && props.exportProcessing===true,
-          label: t(WORKFLOW_LABEL_KEY[id]),
-          icon: <Dynamic component={WORKFLOW_ICONS[id]} size={16} />,
-        }))}
+        options={options}
       />
 
       {/* 弹性空白：把 EXIF 与开关推到右边 */}

@@ -9,15 +9,10 @@
 //!   （典型是紫边）。做法是：算出亮度的细节量 `d`，把**同一个增量**加到 R/G/B 上 ——
 //!   通道差不变 ⇒ 色相与饱和度不变。
 //!
-//! # 为什么在 8bit 上做（**与计划里那句「量化之前」的偏离，理由在这**）
+//! # 精度
 //!
-//! 管线（`pipeline::render_rgb8`）本来就在最后一步量化成 8bit 输出。要「量化前锐化」
-//! 就得让整条链改成输出 f32/u16 显示值，多出来的**全尺寸缓冲**在 24MP 上是 144–288 MB
-//! （显影线程里已经躺着线性源 144 MB + 输出 72 MB）。
-//! 实测代价：8bit 数据算出来的细节信号带约 `0.5/255 ≈ 0.2%` 的量化底噪，
-//! 乘上增益后仍低于 8bit 输出本身的量化台阶 —— **看不出来**。
-//! 换来的是这一趟只需要一张 48 MB 的 u16 中间图（横向模糊结果）。
-//! 真要在 f32 显示域做，改的是 [`sharpen_display`] 的输入类型，不是算法。
+//! 同一套算法支持 u8/u16；显影管线在 RGB16 上锐化，所有阶段结束后才量化为显示字节。
+//! 亮度仍以 0..255 为单位计算，阈值与 M3 保持一致，横向缓冲保留 u16 精度。
 //!
 //! # 软限幅（复用 `local_tone` 那一份）
 //!
@@ -26,7 +21,7 @@
 //! 细纹理照常放大，大跳变自动收住。这就是 [`super::filters::soft_saturate`] 存在的理由，
 //! 两个模块共用一份，不各写一套。
 
-use super::filters::added_detail;
+use super::{filters::added_detail, sample::RgbSample};
 
 /// 增益上限（`1.0` 拉杆 = 这个值）。1.5 在强边缘上约等于「细节量翻 1.5 倍」。
 const GAIN_MAX: f32 = 1.5;
@@ -81,12 +76,12 @@ impl SharpenPlan {
 ///
 /// 两趟：横向箱式模糊亮度（写进 u16 中间图）→ 纵向模糊 + 加回细节。
 /// 计划为空、尺寸对不上、像素长度对不上时**原样返回**（不 panic、不改动）。
-pub fn sharpen_display(rgb: &mut [u8], width: u32, height: u32, plan: &SharpenPlan) {
+pub fn sharpen_display<T: RgbSample>(rgb: &mut [T], width: u32, height: u32, plan: &SharpenPlan) {
     if plan.is_identity() {
         return;
     }
     let (w, h) = (width as usize, height as usize);
-    if w == 0 || h == 0 || rgb.len() != w * h * 3 {
+    if w == 0 || h == 0 || w.checked_mul(h).and_then(|n| n.checked_mul(3)) != Some(rgb.len()) {
         return;
     }
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
@@ -101,7 +96,7 @@ pub fn sharpen_display(rgb: &mut [u8], width: u32, height: u32, plan: &SharpenPl
     let rows_per_chunk = h.div_ceil(threads.max(1));
     {
         // 借一份不可变的像素视图：闭包里用的是 `&[u8]`（Copy），不会把 `rgb` 移进去
-        let source: &[u8] = rgb;
+        let source: &[T] = rgb;
         let mut remaining = horizontal.as_mut_slice();
         std::thread::scope(|scope| {
             let mut first_row = 0usize;
@@ -123,7 +118,7 @@ pub fn sharpen_display(rgb: &mut [u8], width: u32, height: u32, plan: &SharpenPl
     // ② 纵向模糊 + 加回细节
     {
         let blurred: &[u16] = &horizontal;
-        let mut remaining: &mut [u8] = rgb;
+        let mut remaining: &mut [T] = rgb;
         std::thread::scope(|scope| {
             let mut first_row = 0usize;
             while !remaining.is_empty() {
@@ -149,14 +144,14 @@ pub fn sharpen_display(rgb: &mut [u8], width: u32, height: u32, plan: &SharpenPl
                         #[allow(clippy::cast_precision_loss)]
                         let count = (hi - lo + 1) as f32;
                         for (x, pixel) in line.iter_mut().enumerate() {
-                            let original = luma_of_rgb8(pixel);
+                            let original = luma_of_rgb(pixel);
                             let blur = accumulator[x] / count / FIXED_POINT;
                             let delta = added_detail(original - blur, gain, DETAIL_LIMIT);
                             for channel in pixel.iter_mut() {
-                                let value = f32::from(*channel) + delta;
+                                let value = channel.value() + delta * (T::MAX / 255.0);
                                 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
                                 {
-                                    *channel = (value + 0.5).clamp(0.0, 255.0) as u8;
+                                    *channel = T::encode(value);
                                 }
                             }
                         }
@@ -168,9 +163,9 @@ pub fn sharpen_display(rgb: &mut [u8], width: u32, height: u32, plan: &SharpenPl
 }
 
 /// 一行亮度的横向箱式模糊（滑动窗，O(宽)，与半径无关）。
-fn blur_row_luma(rgb: &[u8], out: &mut [u16], y: usize, width: usize, radius: usize) {
+fn blur_row_luma<T: RgbSample>(rgb: &[T], out: &mut [u16], y: usize, width: usize, radius: usize) {
     let row = &rgb[y * width * 3..(y + 1) * width * 3];
-    let luma = |x: usize| luma_of_rgb8(&row[x * 3..x * 3 + 3]);
+    let luma = |x: usize| luma_of_rgb(&row[x * 3..x * 3 + 3]);
     let first_hi = radius.min(width - 1);
     let mut sum = 0f32;
     for x in 0..=first_hi {
@@ -200,8 +195,9 @@ fn blur_row_luma(rgb: &[u8], out: &mut [u16], y: usize, width: usize, radius: us
 
 /// Rec.709 亮度（8bit 显示值，0..255）。
 #[inline]
-fn luma_of_rgb8(pixel: &[u8]) -> f32 {
-    0.2126 * f32::from(pixel[0]) + 0.7152 * f32::from(pixel[1]) + 0.0722 * f32::from(pixel[2])
+fn luma_of_rgb<T: RgbSample>(pixel: &[T]) -> f32 {
+    (0.2126 * pixel[0].value() + 0.7152 * pixel[1].value() + 0.0722 * pixel[2].value())
+        * (255.0 / T::MAX)
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -217,7 +213,11 @@ mod tests {
         let mut rgb = vec![0u8; (width as usize) * (height as usize) * 3];
         for y in 0..height as usize {
             for x in 0..width as usize {
-                let value = if x < (width as usize) / 2 { left } else { right };
+                let value = if x < (width as usize) / 2 {
+                    left
+                } else {
+                    right
+                };
                 let index = (y * width as usize + x) * 3;
                 rgb[index] = value;
                 rgb[index + 1] = value;

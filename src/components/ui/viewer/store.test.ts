@@ -569,3 +569,12 @@ test("源变化只取消受影响的在途比较图，旧结果不能覆盖新�
   assert.equal(store.imageUrlFor(PHOTOS[2]!), "blob:3");
   assert.ok(!revoked.includes("blob:3"));
 });
+
+test('display draft keys reload one asset without altering its file path; unchanged list keeps view transform',async()=>{
+ const calls:string[]=[];const deps=fakeDeps().deps;
+ const viewer=createViewerStore({...deps,loadScreen:async key=>{calls.push(key);return new Uint8Array([2]);}});
+ viewer.show([{...PHOTOS[0]!,imageKey:'draft-1'}],0);await new Promise(resolve=>setImmediate(resolve));viewer.zoomTo(2);const zoom=viewer.state().zoom;
+ viewer.syncPhotos([{...PHOTOS[0]!,imageKey:'draft-1'}]);assert.equal(viewer.state().zoom,zoom);assert.deepEqual(calls,['draft-1']);
+ viewer.syncPhotos([{...PHOTOS[0]!,imageKey:'draft-2'}]);await new Promise(resolve=>setImmediate(resolve));assert.deepEqual(calls,['draft-1','draft-2']);assert.equal(viewer.current()?.path,'/a.jpg');
+ viewer.syncPhotos([]);assert(!viewer.state().active);viewer.close();
+});

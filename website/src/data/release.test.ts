@@ -16,7 +16,7 @@ const FULL_RELEASE: ReleaseInfo = {
   prerelease: false,
   assets: [
     { name: 'RayBend_0.1.0_x64-setup.exe.sig', size: 400, url: 'https://example.com/sig' },
-    { name: 'RayBend_0.1.0_x64-setup.exe', size: 12_582_912, url: 'https://example.com/setup.exe' },
+    { name: 'RayBend_0.1.0_x64-setup.exe', size: 12_582_912, url: 'https://github.com/C-Thun/raybend/releases/download/v0.1.0/RayBend_0.1.0_x64-setup.exe' },
     { name: 'RayBend_0.1.0_x64.zip', size: 11_000_000, url: 'https://example.com/portable.zip' },
   ],
 };
@@ -57,9 +57,9 @@ describe('formatBytes', () => {
 describe('pickInstaller', () => {
   it('优先 exe，其次是 msi / zip，签名文件不算', () => {
     expect(pickInstaller(FULL_RELEASE.assets)?.name).toBe('RayBend_0.1.0_x64-setup.exe');
-    expect(pickInstaller([{ name: 'a.zip', url: 'z' }])?.name).toBe('a.zip');
-    expect(pickInstaller([{ name: 'a.msi', url: 'm' }, { name: 'a.exe.sig', url: 's' }])?.name).toBe(
-      'a.msi',
+    expect(pickInstaller([{ name: 'a.zip', url: 'z' }])).toBeUndefined();
+    expect(pickInstaller([{ name: 'RayBend_0.1.0_x64_en-US.msi', url: 'https://github.com/C-Thun/raybend/releases/download/v0.1.0/RayBend_0.1.0_x64_en-US.msi' }, { name: 'a.exe.sig', url: 's' }])?.name).toBe(
+      'RayBend_0.1.0_x64_en-US.msi',
     );
   });
 
@@ -84,7 +84,7 @@ describe('resolveRelease', () => {
       version: '0.1.0',
       tag: 'v0.1.0',
       releaseUrl: FULL_RELEASE.url,
-      downloadUrl: 'https://example.com/setup.exe',
+      downloadUrl: 'https://github.com/C-Thun/raybend/releases/download/v0.1.0/RayBend_0.1.0_x64-setup.exe',
       fileName: 'RayBend_0.1.0_x64-setup.exe',
       sizeLabel: '12.0 MB',
       publishedAt: '2026-10-01T09:30:00Z',

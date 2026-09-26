@@ -21,6 +21,9 @@
     "lint:i18n": "node scripts/check-i18n.mjs",
     "release": "node scripts/release.mjs",
     "smoke:ui": "node --check scripts/ui-smoke.mjs && node scripts/ui-smoke.mjs",
+    "check:flowbar": "node --check scripts/check-flowbar.mjs && node scripts/check-flowbar.mjs",
+    "check:export": "node --check scripts/check-export-boot.mjs && node scripts/check-export-boot.mjs",
+    "check:external": "node --check scripts/check-external-editor.mjs && node scripts/check-external-editor.mjs",
     "check:browse": "node --check scripts/check-browse-boot.mjs && node scripts/check-browse-boot.mjs",
     "perf:browse": "node --check scripts/perf-browse.mjs && node scripts/perf-browse.mjs",
     "perf:win": "node --check scripts/perf-win.mjs && node scripts/perf-win.mjs",
@@ -32,7 +35,11 @@
     "clean:win": "node --check scripts/clean-target.mjs && node scripts/clean-target.mjs",
     "clean:wsl": "node --check scripts/clean-target.mjs && node scripts/clean-target.mjs --target-dir ./target",
     "debug:win": "node --check scripts/debug-win.mjs && node scripts/debug-win.mjs",
-    "spike:win": "node --check scripts/spike-win.mjs && node scripts/spike-win.mjs"
+    "spike:win": "node --check scripts/spike-win.mjs && node scripts/spike-win.mjs",
+    "test:release": "node --test \"src/lib/release-plan.test.ts\" \"scripts/lib/*.test.mjs\"",
+    "licenses:generate": "node scripts/generate-licenses.mjs",
+    "release:finalize": "node scripts/finalize-release.mjs",
+    "release:publish": "node scripts/release-publish.mjs"
   },
   "dependencies": {
     "@ark-ui/solid": "^5.39.2",

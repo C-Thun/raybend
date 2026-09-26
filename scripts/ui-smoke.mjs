@@ -71,7 +71,12 @@ import { join } from "node:path";
   }
 }
 
-const url = process.argv[2] ?? "http://localhost:1420/dev/kitchen-sink";
+const requestedUrl = process.argv[2] ?? "http://localhost:1420/dev/kitchen-sink";
+// Full smoke checks the component gallery first, then navigates to the app shell.
+// An explicit app root should use that same route sequence, not assert gallery demos there.
+const requestedPage=new URL(requestedUrl);
+const url=!process.argv.includes("--export-only") && requestedPage.pathname==="/"
+  ? new URL("/dev/kitchen-sink",requestedPage).href : requestedUrl;
 const PORT = Number(process.env.CDP_PORT ?? 9333);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 

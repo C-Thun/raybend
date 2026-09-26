@@ -7,6 +7,8 @@
 //! M0-2 的渲染可行性验证会在这里另开一个 `spike-viewport` 调试窗口，
 //! 主窗口保持不透明、不受影响。
 
+mod distribution;
+mod updates;
 pub mod base_curve;
 pub mod browse;
 pub mod db;
@@ -20,6 +22,7 @@ pub mod fullscreen;
 mod import;
 pub mod issues;
 pub mod export;
+pub mod external_editor;
 pub mod lens;
 pub mod lut;
 mod migration;
@@ -113,7 +116,7 @@ fn spike_requested_from(args: &[String], env: Option<&str>) -> bool {
 fn spike_requested() -> bool {
     let args: Vec<String> = std::env::args().collect();
     let env = std::env::var(SPIKE_ENV).ok();
-    spike_requested_from(&args, env.as_deref())
+    distribution::diagnostics_enabled() && spike_requested_from(&args, env.as_deref())
 }
 
 /// 前端是否已经报过「界面就绪」（`ui_ready`）。
@@ -185,6 +188,8 @@ pub fn run() {
         .plugin(desktop_behavior::init())
         // 目录选择器（建库弹窗的「浏览…」）。官方插件：Windows 走原生对话框。
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(updates::UpdateState::default())
         .manage(db::DbState::default())
         .manage(thumbs::SourcesThumbs::default())
         // 浏览过的目录的元信息缓存（会话级内存，不落盘 —— 见 specs/photo-meta-and-tile-display.md）
@@ -196,12 +201,17 @@ pub fn run() {
         .manage(import::ImportBatches::default())
         // 浏览会话态：撤销栈（每库一份）+ 旗标（跨库，内存）+ 当前打开的库缓存
         .manage(browse::BrowseState::default())
+        .manage(export::ExportState::default())
+        .manage(external_editor::ExternalState::default())
         // 编辑视口的洞口事实（M3-W1）：前端报原始值，这里存着并算物理像素版本
         .manage(editor::EditorState::default())
         // 全屏看图的清单与当前下标（flowbar 的全屏按钮）
         .manage(fullscreen::FullscreenState::default())
         .invoke_handler(tauri::generate_handler![
             // ── 数据底座的诊断与设置（M1-2）──
+            updates::updates_check,
+            updates::updates_download,
+            updates::updates_install,
             db::app_paths,
             db::db_status,
             db::setting_get,
@@ -277,6 +287,13 @@ pub fn run() {
             export::export_snapshots,
             export::export_preset_validate,
             export::export_variant_image,
+            export::export_variant_details,
+            export::export_tiff16,
+            export::export_queue,
+            external_editor::external_applications,
+            external_editor::external_task,
+            export::export_preview,
+            export::export_presets_file,
             issues::issue_library,
             issues::issue_create,
             issues::issue_delete,
@@ -446,6 +463,7 @@ mod tests {
         ("lib.rs", include_str!("lib.rs")),
         ("db.rs", include_str!("db.rs")),
         ("import.rs", include_str!("import.rs")),
+        ("updates.rs", include_str!("updates.rs")),
         ("repo.rs", include_str!("repo.rs")),
         ("source.rs", include_str!("source.rs")),
         ("thumbs.rs", include_str!("thumbs.rs")),

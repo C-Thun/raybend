@@ -45,7 +45,7 @@
 
 ## 2. 外壳（三行）
 
-与 `design/main.md` §2 / `design/browse.md` §2.1 一致：`titlebar` 40 / `flowbar` 52 / `toolsbar` 40（紧凑档）。
+与 `design/main.md` §2 / `design/browse.md` §2.1 一致：画布硬写 `titlebar` 40 / `flowbar` 52 / `toolsbar` 40 —— **只是画布值**；实现以 `src/styles/tokens.css` 为准 = 紧凑 **36 / 48 / 36**、宽松 **44 / 62 / 44**（`DESIGN.md` § 8.4）。
 `flowbar` 的 `FlowSwitcher` 选中 **`编辑`**（主色胶囊），`ExifStrip` 与 import/browse 共用当前选中文件的元数据源；品牌+机型一组、镜头独立一组，均可 EasyCopy。
 
 ### 2.1 `toolsbar` 的新形态 = **左 / 中 / 右三段**（`prompts/editor.pd` 口述，2026-09-23）

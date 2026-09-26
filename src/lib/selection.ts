@@ -26,10 +26,28 @@
  * 锚点不在当前列表里时（换了目录、列表被筛过）**退化成单张选中**，
  * 而不是猜一个位置：猜错会让用户一次选中一大片不该选的照片。
  *
- * ## 不支持「`Shift` + `Ctrl` 同按」
+ * ## 两个术语（人类 2026-09-26 钉定，不要混用）
  *
- * 人类 2026-09-26：「这个功能不是我要求的，没人会这么操作」——
- * 两个一起按时**两个都不算**，退化成单击（见 `clickMode`）。
+ * ### 反转（inversion）—— **固有能力**
+ *
+ * **单击 ↔ `Ctrl`+单击 可以对调**（`TilesSource.invertedCtrl`）。它是一等的、受支持的
+ * 能力，**不是特例、不是 bug**；完整口径见 `BROWSE.md` § 5.2.4。
+ *
+ * ### 回退（fallback）—— `Shift`+`Ctrl`+单击 **不是操作**
+ *
+ * 设定上**不存在这个操作**，而且「可能永远也不会出现」—— 人类从反对「按住两个辅助键才能实现的功能」
+ * （类比：苹果反对鼠标右键）。为了**避免出现意外的操作功能**，对 `Shift`+`Ctrl`+单击做了
+ * **捕获**，并**回退到「当前场景的单击」**。
+ *
+ * ❗ **回退到什么，由当前场景决定**：当前场景的单击是什么，回退到的就是什么 ——
+ *
+ * ```text
+ * 标准场景：回退到 `replace`（只选这一张）
+ * 反转场景：回退到 `toggle`（加减这一张）
+ * ```
+ *
+ * 所以它**没有自己的语义、没有要定案的东西**，也**不要**给它设计行为。
+ *
  * 相应地也**不提供区间取消选中**：需要大范围持续性的选中应该用
  * 排除 / 旗标这类持久化手段，而不是“点一下就丢”的选中状态。
  *
@@ -211,31 +229,38 @@ export function invertSet(
  * 但改一处忘一处就是「网格里 Shift 是区间、胶片带里 Shift 是替换」这种人肉 bug ——
  * 而那类 bug 只有用户按下去才会发现。
  *
- * ## `Shift` + `Ctrl` 同按 = 退化成**单击**（人类 2026-09-26）
+ * ## `Shift` + `Ctrl` + 单击 → **回退**到本场景的单击（**不是一个操作**）
  *
- * 原话：「这个功能不是我要求的，没人会这么操作」——所以两个都**不算**，
- * 既不是区间也不是加选／减选，就是一次普通点击。（曾经的实现是「`Shift` 优先」，
- * 而网格那一份内联三元在同样情形下会退到 `toggle` —— 两边不一致，现已收归这里一处。）
+ * 人类 2026-09-26 钉定：这个组合**设定上不存在**，而且「可能永远也不会出现这个操作」——
+ * 他**从来反对「按住两个辅助键才能实现的功能」**（类比：苹果反对鼠标右键）。
+ * 为了**避免出现意外的操作功能**，对它做了捕获，并**回退到「当前场景的单击」**。
  *
- * ## `invertedCtrl`（导出画廊，`design/export.md` §4.2）
+ * ❗ **回退到什么，由当前场景决定**（`plainClick` 就是它）；它没有自己的语义，
+ * **没有要定案的东西**，也**不要**给它设计行为。详见文件头「两个术语」那一节。
+ * （曾经的实现是「`Shift` 优先」，而网格那一份内联三元在同样情形下会退到 `toggle` ——
+ * 两边不一致，现已收归这里一处。）
+ *
+ * ## 反转（`invertedCtrl`，导出画廊；`design/export.md` §4.2）
  *
  * 导出画廊以 issue 为第一公民，**默认就是多选**语义，所以那里「单击 = 加/减一张」
- * 而「`Ctrl` 单击 = 只选这一张」。这一个开关只翻转「有／无 `Ctrl`」这两个结果，
- * `Shift` 与「同按退化」的规则两边一致。
+ * 而「`Ctrl` 单击 = 只选这一张」。**反转只翻转「有／无 `Ctrl`」这两个结果**；
+ * `Shift` 区间与上面那条回退两边一致。
  */
 export function clickMode(event: {
   shiftKey: boolean;
   ctrlKey: boolean;
   metaKey: boolean;
 }, invertedCtrl = false): SelectMode {
-  const plain: SelectMode = invertedCtrl ? "toggle" : "replace";
-  const withCtrl: SelectMode = invertedCtrl ? "replace" : "toggle";
+  /** **当前场景的单击** —— 回退目标就是它（没有反转时 `replace`，反转时 `toggle`） */
+  const plainClick: SelectMode = invertedCtrl ? "toggle" : "replace";
+  /** 当前场景的 **`Ctrl`+单击** */
+  const ctrlClick: SelectMode = invertedCtrl ? "replace" : "toggle";
   const shift = event.shiftKey;
   const ctrl = event.ctrlKey || event.metaKey;
-  // 同按 → 两个修饰键都不算；否则 `Shift` 只管区间、`Ctrl` 只管加选
-  if (shift && ctrl) return plain;
+  // `Shift`+`Ctrl` **不是操作** → 捕获并回退到本场景的单击；否则两个修饰键各管一件事
+  if (shift && ctrl) return plainClick;
   if (shift) return "range";
-  return ctrl ? withCtrl : plain;
+  return ctrl ? ctrlClick : plainClick;
 }
 
 /** 选择状态是否为空（`toolsbar` 的批量排除据此禁用） */

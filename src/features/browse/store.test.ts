@@ -397,8 +397,8 @@ test("refresh：不弄丢选择，只剔掉真的不在列表里的", async () =
   assert.equal(store.anchorItem()?.id, 2, "锚点被剔掉后退回第一张选中的");
 });
 
-test("refresh：第一页之外的页作废（新照片会把下标推移）", async () => {
-  const { api, addItem } = fakeApi(1000);
+test("refresh：旧页按资产身份保留画面，但再次访问仍重读", async () => {
+  const { api, addItem, calls } = fakeApi(1000);
   const store = createBrowseStore({ api });
   open(store);
   await tick();
@@ -411,13 +411,15 @@ test("refresh：第一页之外的页作废（新照片会把下标推移）", a
   assert.equal(store.total(), 1001, "总数跟着库里变了");
   assert.equal(store.itemAt(0)?.id, 1, "第一页是新的");
   assert.equal(
-    store.itemAt(PAGE_SIZE),
-    null,
-    "旧的第二页必须作废 —— 它的下标可能已经挪过了（留着会显示错人）",
+    store.itemAt(PAGE_SIZE)?.id,
+    PAGE_SIZE + 1,
+    "同一资产的旧画面保留到重读完成，不能先清空",
   );
 
-  // 用户滚下去时按需重取
+  // 旧画面并不表示数据已新鲜，当前可见页仍按需重取。
+  calls.page = [];
   await store.ensureRange(PAGE_SIZE, PAGE_SIZE + 1);
+  assert.deepEqual(calls.page, [PAGE_SIZE]);
   assert.equal(store.itemAt(PAGE_SIZE)?.id, PAGE_SIZE + 1, "重取之后就有内容了");
 });
 
@@ -1045,4 +1047,16 @@ test("M4 重进同目录读盘，保留选择；迟到同步不能查询旧目�
   release(); await tick();
   assert.deepEqual(calls.page, []);
   assert.equal(store.scopePath(), "photos/新");
+});
+
+test("refresh：删除前面的照片后，保留页按资产 ID 重排且仍需重新读取",async()=>{
+ const {api,removeItem,calls}=fakeApi(PAGE_SIZE*3);
+ const store=createBrowseStore({api});open(store);await tick();
+ await store.ensureRange(PAGE_SIZE,PAGE_SIZE*2);
+ const retained=store.itemAt(PAGE_SIZE+1);
+ removeItem(1);await store.refresh();
+ assert.equal(store.itemAt(PAGE_SIZE)?.id,PAGE_SIZE+2);
+ assert.equal(store.itemAt(PAGE_SIZE),retained,"reindex the same asset object rather than keep the old slot");
+ calls.page=[];await store.ensureRange(PAGE_SIZE,PAGE_SIZE+1);assert.deepEqual(calls.page,[PAGE_SIZE]);
+ assert.equal(store.itemAt(PAGE_SIZE)?.id,PAGE_SIZE+2);
 });

@@ -150,3 +150,11 @@ test("issue 附加行高：每行取成员最大值，正常网格不改变，�
  const grouped=buildGridRows({count:4,columns:2,cellSize:CELL,slices:[slice()],extraHeight:(index)=>index*10});
  assert.deepEqual(tiles(grouped).map(row=>row.height),[CELL+10,CELL+30]);
 });
+
+test("rereading unchanged layout retains row objects while a resized issue row updates only itself",async()=>{
+ const {retainGridRows}=await import("./rows.ts");
+ const make=(extra:number)=>buildGridRows({count:4,columns:2,cellSize:240,extraHeight:index=>index===0?extra:0});
+ const previous=make(100),same=retainGridRows(previous,make(100));
+ assert.equal(same,previous);assert.equal(same[0],previous[0]);
+ const changed=retainGridRows(previous,make(200));assert.notEqual(changed[0],previous[0]);assert.equal(changed[1],previous[1]);
+});

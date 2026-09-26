@@ -209,3 +209,19 @@ export function groupingToSlices(grouping: TimeGrouping): RowSlice[] {
   }
   return out;
 }
+
+/** Preserve unchanged row identities across disk rereads and metadata batches. */
+export function retainGridRows(previous: readonly GridRowModel[], next: GridRowModel[]): GridRowModel[] {
+  const byKey = new Map(previous.map(row => [row.key, row]));
+  const stable = next.map(row => {
+    const old = byKey.get(row.key);
+    if (!old || old.kind !== row.kind) return row;
+    if (old.kind === "tiles" && row.kind === "tiles") {
+      return old.height === row.height && old.slots.length === row.slots.length &&
+        old.slots.every((slot, index) => slot === row.slots[index]) ? old : row;
+    }
+    return JSON.stringify(old) === JSON.stringify(row) ? old : row;
+  });
+  return previous.length === stable.length && stable.every((row, i) => row === previous[i])
+    ? previous as GridRowModel[] : stable;
+}

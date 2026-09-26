@@ -23,6 +23,7 @@ import {
   createSignal,
   For,
   onCleanup,
+  on,
   onMount,
   Show,
   type JSX,
@@ -77,8 +78,11 @@ import { SplitHandle } from "../../components/ui/SplitHandle.tsx";
 import { nudgeWidth, resizeWidth } from "../../lib/column-resize.ts";
 import { joinPath } from "../../lib/paths.ts";
 import { assetItemExif, toExifData, type SelectedFileMetadata } from "../../features/exif-strip/index.ts";
-import { commitDevelopStack, getDevelopEditTarget, refreshDevelopPreview, type DevelopStack } from "../../api/editor.ts";
+import { getDevelopEditTarget } from "../../api/editor.ts";
 import { getIssueLibrary, type IssueLibrary } from "../../api/issues.ts";
+import { createBrowseDisplay } from "../../features/browse/display-variants.ts";
+import { displayedReference, readDisplayVariantKey } from "../../lib/display-variant.ts";
+import { getExportSnapshots, getExportVariantImage, getExportVariantDetails } from "../../api/export.ts";
 import { LAYOUT_BOUNDS } from "../../lib/layout-prefs.ts";
 
 /**
@@ -91,6 +95,7 @@ const SIDEBAR_BOUNDS = LAYOUT_BOUNDS.browseLeftWidth;
 import type { BrowseSort, DeleteFailure } from "../../api/types.ts";
 
 export interface BrowseWorkspaceProps {
+  onExternalEditor?: (target:import("../../lib/external-editor.ts").ExternalTarget)=>void;
   store: BrowseStore;
   selectedMetadata: SelectedFileMetadata;
   /**
@@ -236,10 +241,20 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
    * 见 `specs/M2-W2.md` §2.1）：屏幕档由它决定「给原图还是渲染」，
    * 小图（秒显的底）还是网格那套缓存。这里只负责「谁触发打开」。
    */
-  const viewer = createViewerStore({
-    loadScreen: (path) => getViewImage(path, "screen"),
-    loadThumb: (path) => getThumbBytes(path, "grid"),
+  const display = createBrowseDisplay({
+    snapshot: async(repository,asset,choice)=>{
+      const [snapshot]=await getExportSnapshots(repository,[{assetId:asset,variant:choice}]);
+      if(!snapshot)throw Error(t("export.error.incomplete"));return snapshot;
+    },details:getExportVariantDetails,
   });
+  createEffect(()=>display.context(JSON.stringify([store.repositoryId(),store.scopePath()])));
+  onCleanup(display.dispose);
+  const loadDisplay = (key:string,size:"screen"|"grid")=>{
+    const target=readDisplayVariantKey(key);
+    return target?getExportVariantImage(target.repositoryId,target.reference,size,target.captured):
+      size==='screen'?getViewImage(key,'screen'):getThumbBytes(key,'grid');
+  };
+  const viewer = createViewerStore({loadScreen:key=>loadDisplay(key,'screen'),loadThumb:key=>loadDisplay(key,'grid')});
 
   /*
    * 缩略图队列：**网格与胶片带共用同一个**（`specs/M2-W2.md` 2.1）。
@@ -251,7 +266,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
    */
   const thumbs = createThumbQueue({
     load: async (path) => {
-      const bytes = await getThumbBytes(path, "grid");
+      const bytes = await loadDisplay(path, "grid");
       return bytes ?? null;
     },
   });
@@ -264,18 +279,19 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
   const [issueBusy, setIssueBusy] = createSignal(false);
   const [issueError, setIssueError] = createSignal<string | null>(null);
   const [issueRefreshTick, setIssueRefreshTick] = createSignal(0);
-  createEffect(() => {
-    const repositoryId = store.repositoryId();
-    const assetId = store.anchorItem()?.id;
-    store.undoTick();
-    issueRefreshTick();
-    if (repositoryId === null || assetId === undefined) { setIssueLibrary(null); return; }
-    let active = true;
-    void getIssueLibrary(repositoryId, assetId, locale() === "en-US")
-      .then((library) => { if (active) setIssueLibrary(library); })
-      .catch((error: unknown) => { if (active) { setIssueLibrary(null); setIssueError(String(error)); } });
-    onCleanup(() => { active = false; });
-  });
+  const issueContext=createMemo(()=>JSON.stringify([store.repositoryId(),store.anchorItem()?.id??null,store.undoTick(),issueRefreshTick(),locale()]));
+  let issueAssetKey='';
+  createEffect(on(issueContext,()=>{
+    const repositoryId=store.repositoryId(),assetId=store.anchorItem()?.id;
+    const key=JSON.stringify([repositoryId,assetId]);
+    if(key!==issueAssetKey){issueAssetKey=key;setIssueLibrary(null);setIssueError(null);}
+    if(repositoryId===null||assetId===undefined)return;
+    let active=true;
+    void getIssueLibrary(repositoryId,assetId,locale()==='en-US')
+      .then(library=>{if(active)setIssueLibrary(library);})
+      .catch(error=>{if(active){setIssueLibrary(null);setIssueError(String(error));}});
+    onCleanup(()=>{active=false;});
+  }));
   createEffect(() => {
     const tick = store.undoTick();
     if (tick === 0) return;
@@ -287,39 +303,19 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
     if (viewer.current()?.id === String(item.id)) viewer.reloadCurrent();
   });
   const selectBrowseIssue = async (choice: string): Promise<void> => {
-    if (issueBusy()) return;
-    const repositoryId = store.repositoryId();
-    const item = store.anchorItem();
-    const library = issueLibrary();
-    const base = root();
-    if (repositoryId === null || item === null || library === null || base === null) return;
-    if (choice === "latest") return;
-    const currentChoice = typeof library.selection === "string"
-      ? library.selection : `issue:${library.selection.issue}`;
-    if (choice === currentChoice) return;
-    let stack: DevelopStack;
-    if (choice === "raw" || choice === "sooc") {
-      stack = { sourceBase: choice, values: {}, curves: {} };
-    } else {
-      const issue = library.issues.find((entry) => `issue:${entry.id}` === choice);
-      if (issue === undefined) return;
-      stack = issue.stack;
-    }
-    const path = joinPath(base, item.relPath);
-    setIssueBusy(true);
-    setIssueError(null);
-    try {
-      const result = await commitDevelopStack(repositoryId, item.id, stack);
-      store.noteDevelopCommit(result);
-      if (store.repositoryId() === repositoryId && store.anchorItem()?.id === item.id) {
-        setIssueRefreshTick((value) => value + 1);
-        thumbs.refresh(path);
-        if (viewer.current()?.id === String(item.id)) viewer.reloadCurrent();
-      }
-      void refreshDevelopPreview(path).catch((error: unknown) => setIssueError(String(error)));
-    } catch (error) { setIssueError(String(error)); }
-    finally { setIssueBusy(false); }
+    const repositoryId=store.repositoryId(), item=store.anchorItem();
+    if(!repositoryId||!item||issueBusy())return;
+    setIssueBusy(true);setIssueError(null);
+    try {await display.select(repositoryId,item.id,choice);}
+    catch(error){setIssueError(String(error));}
+    finally{setIssueBusy(false);}
   };
+  createEffect(()=>{
+    const library=issueLibrary(),item=store.anchorItem();
+    if(!library||!item)return;
+    const choice=display.get(item.id)?.choice;
+    if(choice?.startsWith('issue:')&&!library.issues.some(issue=>`issue:${issue.id}`===choice))display.reset(item.id);
+  });
 
 
   /*
@@ -332,7 +328,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
     chromeMode: () => "browse",
     selection: store.selection,
     setAnchor: (id) => store.setAnchor(Number(id)),
-    naturalOf: (id) => store.naturalOf(Number(id)),
+    naturalOf: (id) => display.get(Number(id))?.natural ?? store.naturalOf(Number(id)),
     ensureNatural: (ids) => {
       const base = root();
       if (base === null) return;
@@ -454,6 +450,14 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
       resetChrome: viewing.resetChrome,
       toggleCompareStrip: viewing.toggleCompareStrip,
       fullscreenTarget,
+      canExternalEditor:()=>store.anchorItem()!==null && !store.anchorItem()!.missing && issueLibrary()!==null && !issueBusy(),
+      externalEditor:()=>{
+        const item=store.anchorItem(),repo=store.repositoryId(),library=issueLibrary();
+        if(!item||!repo||!library||item.missing||issueBusy())return;
+        const choice=display.get(item.id);
+        const latest=library.selection==='raw'&&!item.isRaw&&!item.hasRaw?'sooc':library.selection;
+        props.onExternalEditor?.({...choice?.target,repositoryId:repo,reference:choice?.target.reference??displayedReference(item.id,'latest',latest),name:choice?.target.captured?.name??t('editor.issue.latest')});
+      },
     });
     onCleanup(() => registerBrowseActions(null));
   });
@@ -619,7 +623,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
    * 表现为「点了『浏览』状态切了但界面不动」）。
    */
   const gridSource = createMemo(() =>
-    browseSource({
+    display.adapt(browseSource({
       store,
       // 传取值函数（不是值）：库列表是异步来的，见 `BrowseSourceDeps.root` 的说明
       root,
@@ -630,14 +634,19 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
       commitTileStep: () => commitBrowseDisplayTileStep(),
       grouped,
       infoMode: browseInfoMode,
-    }),
+    })),
   );
+
+  // Page-cache refreshes can temporarily contain holes. Only a display-choice change
+  // replaces viewer images; ordinary paging must preserve the active viewer.
+  createEffect(on(display.choices,()=>viewer.syncPhotos(photosFromSource(gridSource())),{defer:true}));
 
   onMount(() => {
     let disposed = false;
     let off: (() => void) | undefined;
     void onCatalogChanged((change) => {
       if (change.repositoryId !== store.repositoryId()) return;
+      if(change.assetIds.includes(store.anchorItem()?.id ?? -1))setIssueRefreshTick(value=>value+1);
       for (const path of change.paths) if (thumbs.get(path).status !== "idle") thumbs.refresh(path);
       viewer.invalidatePaths(change.paths);
       void refreshRepositories();
@@ -810,6 +819,8 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
               /* 对比态不画视野框：好几个窗口，一个框描述不了 */
               comparing={viewing.comparing()}
               /* 「所属库」那一行：名字住在工作区（它拿着库列表） */
+              displayedIssueChoice={display.get(anchor()?.id ?? -1)?.choice ?? "latest"}
+              displayHistogram={display.get(anchor()?.id ?? -1)?.histogram}
               issueLibrary={issueLibrary()}
               issueBusy={issueBusy()}
               issueError={issueError()}

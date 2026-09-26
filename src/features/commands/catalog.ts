@@ -35,7 +35,7 @@ import type { CommandSpec } from "../../lib/commands.ts";
  * 一旦哪边加了工作流，`App.tsx` 那处赋值会当场报错（这比共享一个类型更早暴露漂移）。
  */
 export type CommandFlow = "import" | "browse" | "edit" | "export";
-import { nextTilePresetPosition, TILE_SIZE_STEPS } from "../../lib/tile-flow.ts";
+import { nextTilePresetPosition, tileSizeSteps, type TileSizeBounds } from "../../lib/tile-flow.ts";
 
 /** 组装层要注入的全部能力（**只有函数**：命令不认识 store） */
 /**
@@ -74,6 +74,10 @@ export interface CommandDeps {
   openPalette: () => void;
   openShortcuts: () => void;
   openAbout: () => void;
+  openWelcome?: () => void;
+  openUpdates?: () => void;
+  openHelp?: () => void;
+  openLicenses?: () => void;
   openTags: () => void;
   openLibrarySettings: () => void;
   openNewRepository: () => void;
@@ -84,6 +88,7 @@ export interface CommandDeps {
     setByTime: (value: boolean) => void;
     infoMode: () => TileInfoMode;
     cycleInfo: () => void;
+    sizeBounds?: () => TileSizeBounds | undefined;
     tileStep: () => number;
     setTileStep: (index: number) => void;
     commitTileStep: () => void;
@@ -105,6 +110,8 @@ export interface CommandDeps {
 
   /* ── 浏览 ───────────────────────────────────────── */
   browse: {
+    canExternalEditor?: () => boolean;
+    externalEditor?: () => void;
     repositoryId: () => string | null;
     undo: () => void;
     redo: () => void;
@@ -145,7 +152,7 @@ export interface CommandDeps {
     toggleCompareStrip: () => void;
   };
 
-  export?: {hasSelection():boolean;canEnqueue():boolean;enqueue():void;clearSelection():void;selectAll():void;reset():void;canReset():boolean;stopAll():void;canStop():boolean;cycleScope():void;save():void};
+  export?: {toggleRun():void;canRun():boolean;canRemove():boolean;remove():void;hasSelection():boolean;canEnqueue():boolean;enqueue():void;clearSelection():void;selectAll():void;reset():void;canReset():boolean;stopAll():void;canStop():boolean;cycleScope():void;canSave():boolean;save():void};
 
   /* ── 编辑（M3-W1）───────────────────────────────── */
   editor: {
@@ -195,11 +202,15 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
 
   const inExport=()=>deps.flow()==="export";
   return [
+    // Seconds-long output with a dialog; deliberately no default shortcut.
+    spec({id:"browse.externalEditor",titleKey:"cmd.browse.externalEditor",group:"file",menu:"file",scope:"global",defaultKey:undefined,when:()=>deps.flow()==="browse",enabled:()=>deps.browse.canExternalEditor?.()??false,run:()=>deps.browse.externalEditor?.()}),
+    spec({id:"export.run",titleKey:"cmd.export.run",group:"file",menu:"file",scope:"global",defaultKey:"Mod+Enter",when:inExport,enabled:()=>deps.export?.canRun()??false,run:()=>deps.export?.toggleRun()}),
+    // 预设文件交换暂不启用；目标预览、失败清单不再作为产品命令。
     spec({id:"export.enqueue",titleKey:"cmd.export.enqueue",group:"file",menu:"file",scope:"tiles",defaultKey:"Enter",when:inExport,enabled:()=>deps.export?.canEnqueue()??false,run:()=>deps.export?.enqueue()}),
     spec({id:"export.reset",titleKey:"cmd.export.reset",group:"edit",menu:"edit",scope:"global",defaultKey:undefined,when:inExport,enabled:()=>deps.export?.canReset()??false,dangerous:true,run:()=>deps.export?.reset()}),
     spec({id:"export.stopAll",titleKey:"cmd.export.stopAll",group:"file",menu:"file",scope:"global",defaultKey:undefined,when:inExport,enabled:()=>deps.export?.canStop()??false,run:()=>deps.export?.stopAll()}),
     spec({id:"export.scope",titleKey:"cmd.export.scope",group:"view",menu:"view",scope:"tiles",defaultKey:undefined,when:inExport,run:()=>deps.export?.cycleScope()}),
-    spec({id:"export.save",titleKey:"cmd.export.save",group:"file",menu:"file",scope:"global",defaultKey:undefined,when:inExport,run:()=>deps.export?.save()}),
+    spec({id:"export.save",titleKey:"cmd.export.save",group:"file",menu:"file",scope:"global",defaultKey:undefined,when:inExport,enabled:()=>deps.export?.canSave()??false,run:()=>deps.export?.save()}),
     /* ══ 文件 ══════════════════════════════════════════ */
     spec({
       id: "file.newRepository",
@@ -301,15 +312,15 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
     }),
     spec({
       id: "edit.delete",
-      titleKey: "cmd.edit.delete",
+      get titleKey() {return inExport()?"cmd.export.remove":"cmd.edit.delete";},
       group: "edit",
       menu: "edit",
       scope: "tiles",
       defaultKey: "Delete",
       dangerous: true,
-      when: inBrowse,
-      enabled: () => deps.browse.hasSelection(),
-      run: () => deps.browse.requestDelete(),
+      when:()=>inBrowse()||inExport(),
+      enabled: () => inExport()?(deps.export?.canRemove()??false):deps.browse.hasSelection(),
+      run: () => inExport()?deps.export?.remove():deps.browse.requestDelete(),
     }),
     spec({
       id: "nav.movePrev",
@@ -444,9 +455,9 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       menu: "view",
       scope: "tiles",
       when:()=>inTiles()||inExport(),
-      enabled: () => deps.display.tileStep() < TILE_SIZE_STEPS.length - 1,
+      enabled: () => deps.display.tileStep() < tileSizeSteps(deps.display.sizeBounds?.()).length - 1,
       run: () => {
-        deps.display.setTileStep(nextTilePresetPosition(deps.display.tileStep(), 1));
+        deps.display.setTileStep(nextTilePresetPosition(deps.display.tileStep(), 1, deps.display.sizeBounds?.()));
         deps.display.commitTileStep();
       },
     }),
@@ -459,7 +470,7 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       when:()=>inTiles()||inExport(),
       enabled: () => deps.display.tileStep() > 0,
       run: () => {
-        deps.display.setTileStep(nextTilePresetPosition(deps.display.tileStep(), -1));
+        deps.display.setTileStep(nextTilePresetPosition(deps.display.tileStep(), -1, deps.display.sizeBounds?.()));
         deps.display.commitTileStep();
       },
     }),
@@ -685,6 +696,10 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       scope: "global",
       run: () => deps.toggleLocale(),
     }),
+    spec({id:"help.docs",titleKey:"cmd.help.docs",group:"help",menu:"help",scope:"global",defaultKey:"F1",enabled:()=>!!deps.openHelp,run:()=>deps.openHelp?.()}),
+    spec({id:"help.licenses",titleKey:"cmd.help.licenses",group:"help",menu:"help",scope:"global",defaultKey:undefined,enabled:()=>!!deps.openLicenses,run:()=>deps.openLicenses?.()}),
+    spec({id:"help.updates",titleKey:"cmd.help.updates",group:"help",menu:"help",scope:"global",defaultKey:undefined,enabled:()=>!!deps.openUpdates,run:()=>deps.openUpdates?.()}),
+    spec({id:"help.welcome",titleKey:"cmd.help.welcome",group:"help",menu:"help",scope:"global",defaultKey:undefined,enabled:()=>!!deps.openWelcome,run:()=>deps.openWelcome?.()}),
     spec({
       id: "help.about",
       titleKey: "cmd.help.about",

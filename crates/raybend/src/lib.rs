@@ -22,6 +22,7 @@
 pub mod develop;
 pub mod display;
 pub mod export;
+pub mod external_editor;
 pub mod import;
 pub mod index;
 pub mod lens;

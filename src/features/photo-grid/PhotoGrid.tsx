@@ -29,6 +29,7 @@ import {
   onCleanup,
   onMount,
   Show,
+  untrack,
   type JSX,
 } from "solid-js";
 import { IconCalendar } from "@tabler/icons-solidjs";
@@ -49,7 +50,7 @@ import { locale, t } from "../../i18n/index.ts";
 import { formatDayLabel, formatTimeRange } from "../../lib/datetime.ts";
 import { formatCount, type GroupingLocale } from "../../lib/format.ts";
 import {
-  MAX_TILE_SIZE,
+  tileSizeSteps,
   canFitRow,
   computeTileFlow,
   fitTileSizeToRow,
@@ -63,6 +64,7 @@ import { isColorLabel, type ColorLabel } from "../../lib/color-labels.ts";
 import { getThumbBytes, getViewImage } from "../../api/db.ts";
 import {
   buildGridRows,
+  retainGridRows,
   DAY_HEADER,
   SLICE_HEADER,
   type GridRowModel,
@@ -180,7 +182,9 @@ export function PhotoGrid(props: PhotoGridProps): JSX.Element {
     onCleanup(() => observer.disconnect());
   });
 
-  const cellWidth = () => tileSizeAt(source.tileStep());
+  const fitRequest = useTilesFitChannel();
+  const sizeBounds = () => fitRequest?.sizeBounds();
+  const cellWidth = () => tileSizeAt(source.tileStep(), sizeBounds());
   const flow = () =>
     computeTileFlow({ containerWidth: width(), cellWidth: cellWidth(), gap: gap() });
   /**
@@ -192,7 +196,6 @@ export function PhotoGrid(props: PhotoGridProps): JSX.Element {
    * 列数没变就不往下游发。
    */
   const columns = createMemo(() => props.listMode ? 1 : flow().columns);
-  const fitRequest = useTilesFitChannel();
 
   /** 当前「铺满一行」算出来的格宽（给请求处理与可用性读数共用，不写两遍公式） */
   const fittedCellWidth = (): number =>
@@ -213,7 +216,7 @@ export function PhotoGrid(props: PhotoGridProps): JSX.Element {
       containerWidth: width(),
       cellWidth: cellWidth(),
       gap: gap(),
-    }));
+    }, sizeBounds()));
   });
 
   createEffect(
@@ -226,8 +229,9 @@ export function PhotoGrid(props: PhotoGridProps): JSX.Element {
          * 超过最大档就**什么都不做**（按钮此时已经是禁用态，这里是第二道闸）：
          * 夹到最大档看着像「按了一半」，而铺不满是用户能一眼看出来的。
          */
-        if (!Number.isFinite(fitted) || fitted > MAX_TILE_SIZE) return;
-        source.setTileStep(tilePositionForSize(fitted));
+        const steps = tileSizeSteps(sizeBounds());
+        if (!Number.isFinite(fitted) || fitted < steps[0]! || fitted > steps[steps.length-1]!) return;
+        source.setTileStep(tilePositionForSize(fitted, sizeBounds()));
         source.commitTileStep();
       },
     ),
@@ -242,14 +246,14 @@ export function PhotoGrid(props: PhotoGridProps): JSX.Element {
    *   * 点一下再双击进看图，双击落在旧节点上 ⇒ 看图打不开。
    * 依赖只有「格子数 / 列数 / 档位 / 分组」这几样，选中与否不进这个 memo。
    */
-  const rows = createMemo(() =>
-    buildGridRows({
+  const rows = createMemo<GridRowModel[]>((previous) =>
+    retainGridRows(previous ?? [], buildGridRows({
       count: source.count(),
       columns: columns(),
       cellSize: cellWidth(),
       ...(source.extraHeight === undefined || props.listMode===true ? {} : {extraHeight: (index: number) => source.extraHeight!(index, cellWidth())}),
       ...(source.slices() === undefined ? {} : { slices: source.slices() }),
-    }),
+    })),
   );
 
   /*
@@ -550,13 +554,14 @@ export function PhotoGrid(props: PhotoGridProps): JSX.Element {
           onVisibleRange={onVisibleRange}
           /* Ctrl+滚轮调档位（两侧同一个手势）；松手那次由 commitTileStep 落盘 */
           onZoomWheel={(step) => {
-            source.setTileStep(nextTilePresetPosition(source.tileStep(), step > 0 ? 1 : -1));
+            source.setTileStep(nextTilePresetPosition(source.tileStep(), step > 0 ? 1 : -1, sizeBounds()));
             source.commitTileStep();
           }}
           onBackgroundClick={() => source.clearSelection()}
           renderRow={(row) =>
             row.kind === "tiles" ? (
               <TileRow
+                commandEnter={props.commandEnter}
                 source={source}
                 row={row}
                 gap={gap()}
@@ -590,6 +595,7 @@ export function PhotoGrid(props: PhotoGridProps): JSX.Element {
 
 /** 一行 tile */
 function TileRow(props: {
+  commandEnter?: boolean;
   source: TilesSource;
   row: GridRowModel & { kind: "tiles" };
   gap: number;
@@ -614,6 +620,7 @@ function TileRow(props: {
       <For each={props.row.slots}>
         {(slot) => (
           <TileCell
+            commandEnter={props.commandEnter}
             source={props.source}
             slot={slot}
             onOpen={props.onOpen}
@@ -631,6 +638,7 @@ function TileRow(props: {
 
 /** 一个格子（负责请求自己的缩略图） */
 function TileCell(props: {
+  commandEnter?: boolean;
   source: TilesSource;
   slot: number;
   onOpen: (id: string) => void;
@@ -641,14 +649,24 @@ function TileCell(props: {
   onFocusIndex?: (index: number) => void;
 }): JSX.Element {
   // 被渲染（= 可见）时才请求 —— 虚拟化保证了这一点
+  let requestedPath: string | null = null;
   createEffect(() => {
     const item = props.source.itemAt(props.slot);
-    if (item !== null) props.source.requestThumb(item.path);
+    // A same-range disk refresh can invalidate a page without scrolling. Reread
+    // visible stale/missing pages even when VirtualGrid's index range is unchanged.
+    untrack(() => { void props.source.ensureRange?.(props.slot, props.slot + 1); });
+    if (item !== null) {
+      const idle = props.source.thumb(item.imageKey ?? item.path).status === "idle";
+      if (requestedPath !== (item.imageKey ?? item.path) || idle) {
+        requestedPath = item.imageKey ?? item.path;
+        props.source.requestThumb(item.imageKey ?? item.path);
+      }
+    }
   });
 
   const item = () => props.source.itemAt(props.slot);
   const id = () => item()?.id ?? "";
-  const thumb = () => props.source.thumb(item()?.path ?? "");
+  const thumb = () => props.source.thumb(item()?.imageKey ?? item()?.path ?? "");
   /*
    * 选中态**直接在 JSX 里读信号**（这里只留一个语义化的名字）：
    * `selection()` 是 store 的信号，`item()` 也是 —— 两个信号一变，
@@ -659,6 +677,8 @@ function TileCell(props: {
     return it !== null && props.source.selection().ids.has(it.id);
   };
   /** RAW 角标：展示的就是 RAW → `RAW`；位图 + RAW → `+RAW`；否则不显示 */
+  const fitChannel = useTilesFitChannel();
+  const tileSize = () => tileSizeAt(props.source.tileStep(), fitChannel?.sizeBounds());
   const rawMode = (): "raw" | "plus" | undefined => {
     const it = item();
     if (it === null) return undefined;
@@ -669,12 +689,14 @@ function TileCell(props: {
 
   return (
     <div
+      data-grid-item={id()}
       class={props.listMode?"relative flex w-full items-center gap-3":"relative"}
       // **正方外框**：边长就是尺寸档。行高恒定才有得拖（见 Tile 的模块注释）
-      style={{ width: props.listMode?"100%":"var(--tile-cell)", height: `${tileSizeAt(props.source.tileStep()) + (props.listMode?0:props.source.extraHeight?.(props.slot, tileSizeAt(props.source.tileStep())) ?? 0)}px` }}
+      style={{ width: props.listMode?"100%":"var(--tile-cell)", height: `${tileSize() + (props.listMode?0:props.source.extraHeight?.(props.slot, tileSize()) ?? 0)}px` }}
     >
       <div class="relative shrink-0" style={{height: "var(--tile-cell)",width:"var(--tile-cell)"}}>
       <Tile
+        keyboardActivate={props.commandEnter !== true}
         info={props.source.infoMode()}
         /*
          * **库内**上下文：顶部那条标记信息条（星标/色标/旗标）只在库内照片上出现。
@@ -687,9 +709,12 @@ function TileCell(props: {
         raw={rawMode()}
         aspect={props.source.aspectOf(id())}
         // 小尺寸档（96/120/144）星标退化成「一颗星 + 数字」
-        compact={props.source.tileStep() <= 2}
+        compact={tileSize() <= 144}
         src={thumb().url ?? undefined}
         selected={isSelected()}
+        selectionFrame={item()?.selectionFrame}
+        selectionLocked={item()?.selectionLocked}
+        disabled={item()?.disabled}
         loading={item() === null || thumb().status === "loading" || thumb().status === "idle"}
         excluded={item()?.excluded === true}
         rating={item()?.marks?.rating ?? 0}
@@ -727,9 +752,9 @@ function TileCell(props: {
           props.onFocusIndex?.(props.slot);
         }}
       />
-      {item() === null ? null : props.cellOverlay?.(item()!)}
+      <Show when={item() === null ? null : id()} keyed>{(_id) => untrack(() => props.cellOverlay?.(item()!))}</Show>
       </div>
-      {item() === null ? null : props.cellExtra?.(item()!, props.slot)}
+      <Show when={item() === null ? null : id()} keyed>{(_id) => untrack(() => props.cellExtra?.(item()!, props.slot))}</Show>
     </div>
   );
 }

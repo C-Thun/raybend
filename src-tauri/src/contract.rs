@@ -431,6 +431,7 @@ fn fullscreen_payload_matches_contract() {
     use crate::fullscreen::{FullscreenItem, FullscreenPayload, FullscreenVariant};
     let item = FullscreenItem {
         export_variant: Some(FullscreenVariant {
+            captured: None,
             repository_id: "repo".into(),
             reference: raybend::export::VariantRef {
                 asset_id: 1,

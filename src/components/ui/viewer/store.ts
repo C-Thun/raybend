@@ -64,6 +64,8 @@ import { imageMimeOfBytes } from "../../../lib/image-mime.ts";
 
 /** 看图里的一张（id 与网格一致：用路径） */
 export interface ViewerPhoto {
+  imageKey?: string;
+  exportVariant?: import("../../../lib/display-variant.ts").DisplayVariant;
   id: string;
   path: string;
   fileName: string;
@@ -258,6 +260,7 @@ export interface ViewerStore {
   /** 「正在显示大图」—— 视图据此显示一个极轻的指示（可选） */
   sharp: () => boolean;
   show: (photos: readonly ViewerPhoto[], index: number) => void;
+  syncPhotos: (photos: readonly ViewerPhoto[]) => void;
   close: () => void;
   next: () => void;
   prev: () => void;
@@ -341,13 +344,13 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
   const index = (): number => state().index;
   const current = (): ViewerPhoto | null => photos()[index()] ?? null;
 
-  const imageKey = (photo: ViewerPhoto): string => `${photo.id}\u0000${photo.path}`;
+  const imageKey = (photo: ViewerPhoto): string => `${photo.id}\u0000${photo.imageKey ?? photo.path}`;
 
   function imageUrlFor(photo: ViewerPhoto): string | null {
     const cached = imageUrls().get(imageKey(photo));
     if (cached !== undefined) return cached.url;
     const shown = current();
-    return shown?.id === photo.id && shown.path === photo.path ? imageUrl() : null;
+    return shown?.id === photo.id && (shown.imageKey ?? shown.path) === (photo.imageKey ?? photo.path) ? imageUrl() : null;
   }
 
   /**
@@ -378,7 +381,7 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
     const ticket = ++imageUrlsTicket;
     const task = (async () => {
       try {
-        const bytes = await deps.loadScreen(photo.path);
+        const bytes = await deps.loadScreen(photo.imageKey ?? photo.path);
         if (bytes === null || pendingImageUrls.get(key)?.ticket !== ticket) return;
         const url = makeUrl(bytes);
         if (pendingImageUrls.get(key)?.ticket !== ticket) {
@@ -479,7 +482,7 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
 
     if (!keepPrevious && deps.loadThumb !== undefined) {
       try {
-        const bytes = await deps.loadThumb(photo.path);
+        const bytes = await deps.loadThumb(photo.imageKey ?? photo.path);
         if (ticket !== generation) return;
         if (bytes !== null) {
           replaceUrl(makeUrl(bytes));
@@ -491,7 +494,7 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
     }
 
     try {
-      const bytes = await deps.loadScreen(photo.path);
+      const bytes = await deps.loadScreen(photo.imageKey ?? photo.path);
       if (ticket !== generation) {
         if (bytes !== null) revokeUrl(makeUrl(bytes)); // 迟到的大图直接丢掉
         return;
@@ -536,6 +539,17 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
       return { ...next, ...refit(next) };
     });
     void loadFor(photo, ticket);
+  }
+
+  function syncPhotos(nextPhotos: readonly ViewerPhoto[]): void {
+    if(!state().active)return;
+    const photo=current();
+    const at=nextPhotos.findIndex(next=>next.id===photo?.id);
+    if(at<0){close();return;}
+    const next=nextPhotos[at]!;
+    const changed=photo===null||imageKey(photo)!==imageKey(next);
+    if(changed){show(nextPhotos,at);return;}
+    setState(prev=>({...prev,photos:nextPhotos,index:at}));
   }
 
   function close(): void {
@@ -716,6 +730,7 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
     imageStatus,
     sharp,
     show,
+    syncPhotos,
     close,
     goTo,
     focus,

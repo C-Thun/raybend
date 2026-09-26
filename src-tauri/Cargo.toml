@@ -41,6 +41,7 @@ serde.workspace = true
 serde_json.workspace = true
 tauri-plugin-dialog = "2.7.3"
 image.workspace = true
+tauri-plugin-updater = "2"
 
 # 与当前 Tauri 2.11 的 WebView2 COM 类型一致；依赖已在锁文件里，无额外 DLL。
 [target.'cfg(windows)'.dependencies]

@@ -25,9 +25,10 @@ test("browser export IPC fallback is explicit and does not produce simulated iss
     name: "",
     format: "jpeg",
     quality: 90,
-    maxEdge: 0,
+    maxEdge: 0, sizeMode: "original" as const, percent: 100,
     directory: "",
     template: ":FILENAME",
+    existingFile: "append",
   });
   assert.ok(result.errors.name);
   assert.ok(result.errors.directory);

@@ -21,6 +21,8 @@ import type { TileInfoMode } from "../../../lib/display-prefs.ts";
 
 /** 网格里一张照片（两侧的公共形状）。只放渲染真正要用的字段。 */
 export interface GridItem {
+  imageKey?: string;
+  exportVariant?: import("../../../lib/display-variant.ts").DisplayVariant;
   /** 稳定 id：导入 = 路径；浏览 = 资产 id 的字符串 */
   id: string;
   /** 取图用的**绝对路径** */
@@ -36,6 +38,9 @@ export interface GridItem {
   /** 同一张还有 RAW → 角标 `+RAW` */
   hasRaw?: boolean;
   missing?: boolean;
+  selectionFrame?: boolean;
+  selectionLocked?: boolean;
+  disabled?: boolean;
   /** 被排除（只有导入侧有这个概念） */
   excluded?: boolean;
   /** 库内才有的标记；导入侧不传 */

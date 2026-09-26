@@ -60,6 +60,7 @@ export interface TitleBarProps {
   onRun: (command: CommandSpec) => void;
   /** 关于弹窗的状态住在组装层（命令面板也要能打开它） */
   aboutOpen: boolean;
+  aboutPage?: "about" | "help" | "licenses";
   onAboutOpenChange: (open: boolean) => void;
 }
 
@@ -294,7 +295,7 @@ export function TitleBar(props: TitleBarProps) {
         </Show>
       </header>
 
-      <AboutDialog open={props.aboutOpen} onOpenChange={props.onAboutOpenChange} />
+      <AboutDialog page={props.aboutPage} open={props.aboutOpen} onOpenChange={props.onAboutOpenChange} />
     </>
   );
 }

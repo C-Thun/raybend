@@ -32,6 +32,7 @@
 /** 清单里的一张照片（`path` 是**绝对路径**，`view_image` 直接吃它）。 */
 export interface FullscreenTargetPhoto {
   exportVariant?: {
+    captured?: import("./export-model.ts").VariantSnapshot;
     repositoryId: string;
     reference: { assetId: number; variant: string };
   };

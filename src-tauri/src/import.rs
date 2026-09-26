@@ -57,6 +57,10 @@ struct Batch {
 }
 
 impl ImportBatches {
+    pub(crate) fn has_unfinished(&self) -> Result<bool, String> {
+        Ok(self.inner.lock().map_err(|_| "内部锁已损坏")?.values()
+            .any(|batch| !batch.handle.snapshot().state.is_final()))
+    }
     fn insert(&self, batch_id: String, batch: Batch) {
         let Ok(mut guard) = self.inner.lock() else {
             return;

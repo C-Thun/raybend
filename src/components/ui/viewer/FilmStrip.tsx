@@ -347,7 +347,7 @@ export function FilmStrip(props: FilmStripProps): JSX.Element {
         {(photo) => {
           const lockLevel = (): number => photo.marks?.lockLevel ?? 0;
           createEffect(() => {
-            props.thumbs.request(photo.path);
+            props.thumbs.request(photo.imageKey ?? photo.path);
           });
           return (
             <button
@@ -376,7 +376,7 @@ export function FilmStrip(props: FilmStripProps): JSX.Element {
               }}
             >
               <Show
-                when={props.thumbs.get(photo.path).url}
+                when={props.thumbs.get(photo.imageKey ?? photo.path).url}
                 fallback={<span class="block h-full w-full rounded-ui bg-surface-track" />}
               >
                 {(url) => (

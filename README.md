@@ -49,3 +49,5 @@ Rust · Tauri 2 · wgpu (native GPU rendering) · SolidJS · Tailwind CSS · SQL
 ## License
 
 [AGPL-3.0-only](LICENSE); third-party notices in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). Should you ever offer RayBend as a network service, AGPL §13 requires releasing the corresponding source under the same license.
+
+Release preparation and update/signing instructions: [release guide](docs/release.md). Offline help and third-party licenses are available from Help in the app; press F1 for the user guide.

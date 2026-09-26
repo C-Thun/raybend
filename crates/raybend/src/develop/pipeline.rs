@@ -12,7 +12,7 @@
 //!   → 显示变换（sRGB OETF）
 //!   → 曲线（先 RGB 合成、再各通道）
 //!   → 饱和度 / 自然饱和度（**显示参考域**，见下）
-//!   → 8bit 量化
+//!   → 16bit（显示时最后量化成 8bit） 量化
 //! ```
 //!
 //! ## 为什么色度（饱和/自然饱和）放在显示参考域
@@ -71,7 +71,10 @@ impl LinearImage {
     pub fn is_consistent(&self) -> bool {
         self.width > 0
             && self.height > 0
-            && self.rgb.len() == (self.width as usize) * (self.height as usize) * 3
+            && (self.width as usize)
+                .checked_mul(self.height as usize)
+                .and_then(|n| n.checked_mul(3))
+                == Some(self.rgb.len())
     }
 
     /// 8bit **sRGB 编码**的像素 → 线性（JPEG / RAW 内嵌预览那条路）。
@@ -96,6 +99,30 @@ impl LinearImage {
             rgb.push(u16::try_from(encoded.min(65535)).unwrap_or(u16::MAX));
         }
         Self::new(width, height, rgb)
+    }
+
+    /// High precision sRGB source (PNG/TIFF), retaining 16-bit samples before linearization.
+    #[must_use]
+    pub fn from_srgb16(width: u32, height: u32, samples: &[u16]) -> Option<Self> {
+        let expected = (width as usize)
+            .checked_mul(height as usize)?
+            .checked_mul(3)?;
+        if width == 0 || height == 0 || samples.len() != expected {
+            return None;
+        }
+        static TABLE: std::sync::OnceLock<Vec<u16>> = std::sync::OnceLock::new();
+        let table = TABLE.get_or_init(|| {
+            (0..=u16::MAX)
+                .map(|v| {
+                    (super::color::srgb_to_linear(f32::from(v) / 65535.0) * 65535.0).round() as u16
+                })
+                .collect()
+        });
+        Self::new(
+            width,
+            height,
+            samples.iter().map(|v| table[*v as usize]).collect(),
+        )
     }
 
     /// 缩到长边 `long_edge`（不放大）。
@@ -534,13 +561,13 @@ impl ChannelLuts {
     }
 }
 
-/// **生产路径**：线性源 → 8bit sRGB（行主序 RGB）。
+/// **生产路径**：线性源 → 16bit sRGB（行主序 RGB）。
 ///
 /// 多线程按行切块（`std::thread::scope`，不引第三方依赖）：
 /// 24MP 单线程要几百毫秒，切 8 块之后就落在「拖一下能跟得上」的范围里
 /// （实测数字见实施记录）。
 #[must_use]
-pub fn render_rgb8(source: &LinearImage, params: &DevelopParams, curves: &CurveSet) -> Vec<u8> {
+pub fn render_rgb16(source: &LinearImage, params: &DevelopParams, curves: &CurveSet) -> Vec<u16> {
     let resolved = Resolved::new(params);
     let luts = ChannelLuts::build(&resolved, curves);
     let baseline_luts = (resolved.highlights > 0.0).then(|| {
@@ -552,7 +579,7 @@ pub fn render_rgb8(source: &LinearImage, params: &DevelopParams, curves: &CurveS
             curves,
         )
     });
-    let mut out = vec![0u8; source.rgb.len()];
+    let mut out = vec![0u16; source.rgb.len()];
     let width = source.width as usize;
 
     let threads = std::thread::available_parallelism()
@@ -595,7 +622,7 @@ pub fn render_rgb8(source: &LinearImage, params: &DevelopParams, curves: &CurveS
 /// 一段像素的逐像素映射（**唯一**的像素循环）。
 fn map_rows(
     input: &[u16],
-    output: &mut [u8],
+    output: &mut [u16],
     luts: &ChannelLuts,
     baseline_luts: Option<&ChannelLuts>,
     resolved: &Resolved,
@@ -626,9 +653,9 @@ fn map_rows(
         }
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         {
-            pixel_out[0] = (display[0].clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
-            pixel_out[1] = (display[1].clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
-            pixel_out[2] = (display[2].clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
+            pixel_out[0] = (display[0].clamp(0.0, 1.0) * 65535.0 + 0.5) as u16;
+            pixel_out[1] = (display[1].clamp(0.0, 1.0) * 65535.0 + 0.5) as u16;
+            pixel_out[2] = (display[2].clamp(0.0, 1.0) * 65535.0 + 0.5) as u16;
         }
     }
 }
@@ -724,7 +751,7 @@ impl DisplayLuts {
     }
 }
 
-/// **生产路径（带动态反差）**：线性源 → 局部色调映射 → 8bit sRGB。
+/// **生产路径（带动态反差）**：线性源 → 局部色调映射 → 16bit sRGB。
 ///
 /// `local = None` 或强度 ≤ 0 时**原样走 [`render_rgb8`]** —— 拉杆在 0 位时这个功能
 /// 等于不存在（逐位一致，且不多花一分钱）。
@@ -732,17 +759,17 @@ impl DisplayLuts {
 /// 为什么是**融合的一趟**而不是「先算中间图再渲染」：24MP 的中间线性图是 144MB 的
 /// 内存往返，而这条链本来就是逐像素的 —— 合成一趟就只需读一次源、写一次显示像素。
 #[must_use]
-pub fn render_rgb8_with_local_tone(
+pub fn render_rgb16_with_local_tone(
     source: &LinearImage,
     params: &DevelopParams,
     curves: &CurveSet,
     local: Option<(&LocalToneState, f32)>,
-) -> Vec<u8> {
+) -> Vec<u16> {
     let Some((state, strength)) = local else {
-        return render_rgb8(source, params, curves);
+        return render_rgb16(source, params, curves);
     };
     if strength <= 0.0 || strength.is_nan() {
-        return render_rgb8(source, params, curves);
+        return render_rgb16(source, params, curves);
     }
     let resolved = Resolved::new(params);
     let baseline_chain = (resolved.highlights > 0.0).then(|| {
@@ -762,7 +789,7 @@ pub fn render_rgb8_with_local_tone(
         width: source.width as usize,
         height: source.height as usize,
     };
-    let mut out = vec![0u8; source.rgb.len()];
+    let mut out = vec![0u16; source.rgb.len()];
     let threads = std::thread::available_parallelism()
         .map_or(1, std::num::NonZeroUsize::get)
         .min(16);
@@ -802,7 +829,7 @@ pub fn render_rgb8_with_local_tone(
 ///         → ② 降噪（亮度 / 色度）
 ///         → ③ 逐像素链（WB → 曝光 → 反差 → 高光 → 黑区 → 显示变换 → 曲线 → 色度 → 动态反差）
 ///         → ④ 锐化（显示域，就地）
-///         → 8bit
+///         → 16bit（显示时最后量化成 8bit）
 /// ```
 ///
 /// 每一项都是 `Option`，且**每一项关掉时逐位恒等**（各阶段的单测钉着这一条）；
@@ -817,7 +844,7 @@ pub struct DevelopStages<'a> {
     pub denoise: Option<&'a super::denoise::DenoisePlan>,
     /// 动态反差（W3 已有的阶段）
     pub local_tone: Option<(&'a LocalToneState, f32)>,
-    /// 锐化（显示域，**就地**改 8bit 输出）
+    /// 锐化（显示域，**就地**改 16bit 输出）
     pub sharpen: Option<&'a super::sharpen::SharpenPlan>,
     /// 选中的创意 LUT；在显示域最后应用。
     pub lut: Option<&'a super::lut::Lut>,
@@ -867,17 +894,17 @@ impl DevelopPlans {
     }
 }
 
-/// **生产入口**：线性源 → 8bit sRGB（含全部可选阶段）。
+/// **生产入口**：线性源 → 16bit sRGB（含全部可选阶段）。
 ///
 /// 逐像素数学仍然只有 [`render_rgb8_with_local_tone`] 那一份 —— 这里只负责把
 /// **空间阶段**（镜头 / 降噪 / 锐化）按固定顺序串起来，**不重复实现链上的任何数学**。
 #[must_use]
-pub fn render_develop(
+pub fn render_develop16(
     source: &LinearImage,
     params: &DevelopParams,
     curves: &CurveSet,
     stages: &DevelopStages<'_>,
-) -> Vec<u8> {
+) -> Vec<u16> {
     let warped = stages
         .lens
         .filter(|map| !map.is_identity())
@@ -894,12 +921,12 @@ pub fn render_develop(
             }
         });
     let source = denoised.as_ref().unwrap_or(source);
-    let mut out = render_rgb8_with_local_tone(source, params, curves, stages.local_tone);
+    let mut out = render_rgb16_with_local_tone(source, params, curves, stages.local_tone);
     if let Some(plan) = stages.sharpen.filter(|plan| !plan.is_identity()) {
         super::sharpen::sharpen_display(&mut out, source.width, source.height, plan);
     }
     if let Some(lut) = stages.lut {
-        lut.apply_rgb8(&mut out, 1.0)
+        lut.apply_rgb(&mut out, 1.0)
             .expect("管线输出必为 RGB 三元组");
     }
     out
@@ -919,7 +946,7 @@ struct LocalPass<'a> {
 }
 
 impl LocalPass<'_> {
-    fn run(&self, input: &[u16], output: &mut [u8], first_row: usize) {
+    fn run(&self, input: &[u16], output: &mut [u16], first_row: usize) {
         debug_assert_eq!(input.len(), output.len());
         let mut rows = LocalToneRows::new(
             self.state,
@@ -961,12 +988,46 @@ impl LocalPass<'_> {
                 for (channel, slot) in pixel_out.iter_mut().enumerate() {
                     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
                     {
-                        *slot = (display[channel].clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
+                        *slot = (display[channel].clamp(0.0, 1.0) * 65535.0 + 0.5) as u16;
                     }
                 }
             }
         }
     }
+}
+
+/// Final 16-to-8 quantization; never used between develop stages.
+#[must_use]
+pub fn quantize_rgb8(samples: &[u16]) -> Vec<u8> {
+    samples
+        .iter()
+        .map(|v| ((u32::from(*v) + 128) / 257) as u8)
+        .collect()
+}
+
+#[must_use]
+pub fn render_rgb8(source: &LinearImage, params: &DevelopParams, curves: &CurveSet) -> Vec<u8> {
+    quantize_rgb8(&render_rgb16(source, params, curves))
+}
+
+#[must_use]
+pub fn render_rgb8_with_local_tone(
+    source: &LinearImage,
+    params: &DevelopParams,
+    curves: &CurveSet,
+    local: Option<(&LocalToneState, f32)>,
+) -> Vec<u8> {
+    quantize_rgb8(&render_rgb16_with_local_tone(source, params, curves, local))
+}
+
+#[must_use]
+pub fn render_develop(
+    source: &LinearImage,
+    params: &DevelopParams,
+    curves: &CurveSet,
+    stages: &DevelopStages<'_>,
+) -> Vec<u8> {
+    quantize_rgb8(&render_develop16(source, params, curves, stages))
 }
 
 #[cfg(test)]
@@ -1625,9 +1686,13 @@ mod tests {
         let parallel = render_rgb8(&source, &params, &curves);
         let resolved = Resolved::new(&params);
         let luts = ChannelLuts::build(&resolved, &curves);
-        let mut single = vec![0u8; source.rgb.len()];
+        let mut single = vec![0u16; source.rgb.len()];
         map_rows(&source.rgb, &mut single, &luts, None, &resolved);
-        assert_eq!(parallel, single, "多线程与单线程的输出必须一致");
+        assert_eq!(
+            parallel,
+            quantize_rgb8(&single),
+            "多线程与单线程的输出必须一致"
+        );
     }
 
     #[test]

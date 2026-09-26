@@ -18,7 +18,7 @@
 
 import { Dialog as ArkDialog } from "@ark-ui/solid";
 import { IconX } from "@tabler/icons-solidjs";
-import { Show, splitProps, type JSX } from "solid-js";
+import { Show, splitProps, untrack, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 import { t } from "../../i18n";
 import { blurActive } from "../../lib/dom-focus.ts";
@@ -43,6 +43,7 @@ export interface DialogProps {
    * 透明遮罩仍然拦住点击（该有的模态语义一个不少）。
    */
   scrim?: boolean;
+  size?: "md" | "wide";
   class?: string;
 }
 
@@ -56,6 +57,7 @@ export function Dialog(props: DialogProps) {
     "footer",
     "closeLabel",
     "scrim",
+    "size",
     "class",
   ]);
 
@@ -83,7 +85,8 @@ export function Dialog(props: DialogProps) {
                * 骨架照设计稿（main.pen `Dialog / 新建库`）：**padding 16 / gap 12**，
                * 且内边距**不吃密度档**（`--dialog-pad`）—— 紧凑档缩到 6px 会「贴边」。
                */
-              "flex w-full min-w-72 max-w-md flex-col gap-3 rounded-ui bg-surface-layer p-(--dialog-pad) outline-none",
+              "flex w-full min-w-72 flex-col gap-3 rounded-ui bg-surface-layer p-(--dialog-pad) outline-none",
+              local.size === "wide" ? "max-w-2xl" : "max-w-md",
               local.class ?? "",
             ].join(" ")}
           >
@@ -116,20 +119,20 @@ export function Dialog(props: DialogProps) {
               )} />
             </div>
 
-            <Show when={local.children}>
+            <Show when={untrack(() => local.children) != null}>
               <div class="min-w-0 text-[13px] leading-normal text-fg-1">
-                {local.children}
+                {untrack(() => local.children)}
               </div>
             </Show>
 
-            <Show when={local.footer}>
+            <Show when={untrack(() => local.footer) != null}>
               {/*
                 底部按钮按设计稿高 **32px**（`Dialog Footer` 里的 `Button` 就是 32 高）。
                 用后代选择器统一抬高，而不是让每个调用点自己写 `size` ——
                 弹窗底部的按钮理应一律同高，散在各处迟早会不一致。
               */}
               <div class="flex items-center justify-end gap-2 [&>button]:h-8 [&>button]:px-4 [&>button]:leading-none">
-                {local.footer}
+                {untrack(() => local.footer)}
               </div>
             </Show>
           </ArkDialog.Content>
@@ -150,6 +153,7 @@ export interface ConfirmDialogProps {
   description?: JSX.Element;
   /** 遮罩是否压暗（二级确认传 `false`；见 `DialogProps.scrim`） */
   scrim?: boolean;
+  size?: "md" | "wide";
   onConfirm: () => void;
   onCancel: () => void;
 }
