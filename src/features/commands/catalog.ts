@@ -1,5 +1,5 @@
 /**
- * **命令注册表**（`plans/M2-W3.md` §2.1/§3）—— 命令面板、标题栏菜单、快捷键分发器
+ * **命令注册表**（`specs/M2-W3.md` §2.1/§3）—— 命令面板、标题栏菜单、快捷键分发器
  * 三者共用的唯一事实来源。
  *
  * ## 这一层做什么、不做什么
@@ -145,6 +145,8 @@ export interface CommandDeps {
     toggleCompareStrip: () => void;
   };
 
+  export?: {hasSelection():boolean;canEnqueue():boolean;enqueue():void;clearSelection():void;selectAll():void;reset():void;canReset():boolean;stopAll():void;canStop():boolean;cycleScope():void;save():void};
+
   /* ── 编辑（M3-W1）───────────────────────────────── */
   editor: {
     /** 在不在编辑工作流（这些命令只在编辑里有意义） */
@@ -163,7 +165,11 @@ export interface CommandDeps {
     isToolActive: (tool: "crop" | "rotate" | "compare") => boolean;
     /** 重置全部调整（破坏性：一次抹掉所有参数与曲线） */
     resetDevelop: () => void;
+    canReset: () => boolean;
+    canFinalize: () => boolean;
+    finalize: () => void;
     autoAdjust: () => void;
+    canAutoAdjust: () => boolean;
   };
 }
 
@@ -187,7 +193,13 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
   /** 加一条命令（统一填 `when` 默认值，省得每条都写） */
   const spec = (command: CommandSpec): CommandSpec => command;
 
+  const inExport=()=>deps.flow()==="export";
   return [
+    spec({id:"export.enqueue",titleKey:"cmd.export.enqueue",group:"file",menu:"file",scope:"tiles",defaultKey:"Enter",when:inExport,enabled:()=>deps.export?.canEnqueue()??false,run:()=>deps.export?.enqueue()}),
+    spec({id:"export.reset",titleKey:"cmd.export.reset",group:"edit",menu:"edit",scope:"global",defaultKey:undefined,when:inExport,enabled:()=>deps.export?.canReset()??false,dangerous:true,run:()=>deps.export?.reset()}),
+    spec({id:"export.stopAll",titleKey:"cmd.export.stopAll",group:"file",menu:"file",scope:"global",defaultKey:undefined,when:inExport,enabled:()=>deps.export?.canStop()??false,run:()=>deps.export?.stopAll()}),
+    spec({id:"export.scope",titleKey:"cmd.export.scope",group:"view",menu:"view",scope:"tiles",defaultKey:undefined,when:inExport,run:()=>deps.export?.cycleScope()}),
+    spec({id:"export.save",titleKey:"cmd.export.save",group:"file",menu:"file",scope:"global",defaultKey:undefined,when:inExport,run:()=>deps.export?.save()}),
     /* ══ 文件 ══════════════════════════════════════════ */
     spec({
       id: "file.newRepository",
@@ -263,8 +275,8 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       menu: "edit",
       scope: "tiles",
       defaultKey: "Mod+A",
-      when: inTiles,
-      run: () => (deps.flow() === "import" ? deps.import.selectAll() : deps.browse.selectAll()),
+      when:()=>inTiles()||inExport(),
+      run: () => inExport()?deps.export?.selectAll():(deps.flow() === "import" ? deps.import.selectAll() : deps.browse.selectAll()),
     }),
     spec({
       id: "edit.clearSelection",
@@ -273,9 +285,9 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       menu: "edit",
       scope: "tiles",
       defaultKey: "Esc",
-      when: inBrowse,
-      enabled: () => deps.browse.hasSelection(),
-      run: () => deps.browse.clearSelection(),
+      when: () => inBrowse() || inExport(),
+      enabled: () => inExport() ? (deps.export?.hasSelection() ?? false) : deps.browse.hasSelection(),
+      run: () => inExport() ? deps.export?.clearSelection() : deps.browse.clearSelection(),
     }),
     spec({
       id: "edit.tags",
@@ -410,7 +422,7 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       group: "view",
       menu: "view",
       scope: "tiles",
-      when: inTiles,
+      when:()=>inTiles()||inExport(),
       run: () => deps.display.setByTime(!deps.display.byTime()),
     }),
     spec({
@@ -421,7 +433,7 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       scope: "tiles",
       defaultKey: "i",
       when: () =>
-        inTiles() ||
+        inTiles() || inExport() ||
         infoKeyApplies({ viewing: deps.viewer.viewing(), filmVisible: deps.viewer.filmVisible() }),
       run: () => deps.display.cycleInfo(),
     }),
@@ -431,7 +443,7 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       group: "view",
       menu: "view",
       scope: "tiles",
-      when: inTiles,
+      when:()=>inTiles()||inExport(),
       enabled: () => deps.display.tileStep() < TILE_SIZE_STEPS.length - 1,
       run: () => {
         deps.display.setTileStep(nextTilePresetPosition(deps.display.tileStep(), 1));
@@ -444,7 +456,7 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       group: "view",
       menu: "view",
       scope: "tiles",
-      when: inTiles,
+      when:()=>inTiles()||inExport(),
       enabled: () => deps.display.tileStep() > 0,
       run: () => {
         deps.display.setTileStep(nextTilePresetPosition(deps.display.tileStep(), -1));
@@ -579,20 +591,30 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       group: "edit",
       menu: "edit",
       scope: "viewer",
-      when: () => deps.editor.active() && deps.editor.hasPhoto(),
+      when: () => deps.editor.active() && deps.editor.canAutoAdjust(),
       run: () => deps.editor.autoAdjust(),
+    }),
+    // 定稿是低频且会创建永久条目，默认热键留空以防误触；仍可在快捷键设置自行绑定。
+    spec({
+      id: "editor.issue.finalize",
+      titleKey: "cmd.editor.finalize",
+      group: "edit",
+      menu: "edit",
+      scope: "viewer",
+      when: () => deps.editor.active() && deps.editor.canFinalize(),
+      run: () => deps.editor.finalize(),
     }),
     /*
      * **不给默认热键**（`AGENTS.md` §2.15：留空也要写清理由）：
-     * 它一次抹掉这张照片的全部调整，误触代价高；而且它已经有明确入口
-     * （右栏「全部重置」按钮），没必要再占一个全局键。
+     * 第二层直接清除自动调整，误触代价高；而且它已经有明确入口
+     * （工具栏「重置修改」按钮），没必要再占一个全局键。
      */
     spec({
       id: "editor.develop.reset",
       titleKey: "cmd.editor.resetDevelop",
       group: "edit",
       scope: "viewer",
-      when: () => deps.editor.active() && deps.editor.hasPhoto(),
+      when: () => deps.editor.active() && deps.editor.hasPhoto() && deps.editor.canReset(),
       run: () => deps.editor.resetDevelop(),
     }),
     spec({

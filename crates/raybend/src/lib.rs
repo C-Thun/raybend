@@ -21,17 +21,19 @@
 
 pub mod develop;
 pub mod display;
+pub mod export;
 pub mod import;
 pub mod index;
 pub mod lens;
 pub mod media;
 pub mod raw;
-pub mod repo;
 pub mod render;
+pub mod repo;
 pub mod store;
 pub mod thumbnail;
 
 mod error;
+mod fs_atomic;
 
 pub use error::{Error, Result};
 

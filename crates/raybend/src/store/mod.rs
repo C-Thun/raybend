@@ -33,21 +33,24 @@
 
 pub mod assets;
 pub mod backfill;
-pub mod rebuild;
+pub mod base_curve;
 pub mod db;
 pub mod delete;
 pub mod develop;
 pub mod file_id;
 pub mod flags;
-pub mod marking;
 pub mod fts;
 pub mod ids;
+pub mod issues;
 pub mod location;
+pub mod luts;
+pub mod marking;
 pub mod migration;
 pub mod path_semantics;
 pub mod pool;
-pub mod query;
 pub mod pragma;
+pub mod query;
+pub mod rebuild;
 pub mod recent;
 pub mod repository;
 pub mod tags;

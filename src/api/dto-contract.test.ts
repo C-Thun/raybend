@@ -1,5 +1,5 @@
 /**
- * IPC 契约的形状冒烟（`plans/M1-5.md` §3.1 的「手写镜像 + 形状冒烟测试」）。
+ * IPC 契约的形状冒烟（`specs/M1-5.md` §3.1 的「手写镜像 + 形状冒烟测试」）。
  *
  * 要防的是**一类静默故障**：Rust 侧改了个字段名（或忘了 `rename_all`），
  * 前端拿到 `undefined`，界面上表现为「某块永远空着」——不报错、不崩、就是没数据。
@@ -424,6 +424,7 @@ const EDITOR_RENDER_STATE_KEYS = [
   "zoom",
 ] as const satisfies readonly (keyof EditorRenderState)[];
 const FULLSCREEN_ITEM_KEYS = [
+  "exportVariant",
   "fileName",
   "id",
   "path",

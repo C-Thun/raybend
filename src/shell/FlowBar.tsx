@@ -34,6 +34,7 @@ import type { ShellStore } from "./store.ts";
 
 export interface FlowBarProps {
   store: ShellStore;
+  exportProcessing?: boolean;
   /** 当前照片的 EXIF；没有选中照片时为 `null` → EXIF 区显示空态，全屏按钮也不出现 */
   exif?: ExifData | null;
   /**
@@ -53,6 +54,7 @@ export function FlowBar(props: FlowBarProps) {
         onValueChange={props.store.setWorkflow}
         options={WORKFLOWS.map((id) => ({
           value: id,
+          processing:id==="export" && props.exportProcessing===true,
           label: t(WORKFLOW_LABEL_KEY[id]),
           icon: <Dynamic component={WORKFLOW_ICONS[id]} size={16} />,
         }))}

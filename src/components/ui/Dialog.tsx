@@ -146,6 +146,8 @@ export interface ConfirmDialogProps {
   title?: string;
   confirmLabel?: string;
   cancelLabel?: string;
+  /** 正文下方的补充内容，仅用于说明本次操作后果。 */
+  description?: JSX.Element;
   /** 遮罩是否压暗（二级确认传 `false`；见 `DialogProps.scrim`） */
   scrim?: boolean;
   onConfirm: () => void;
@@ -184,6 +186,7 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
       }
     >
       {props.message}
+      <Show when={props.description}><p class="mt-3 text-fs-1 text-fg-3">{props.description}</p></Show>
     </Dialog>
   );
 }

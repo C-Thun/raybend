@@ -19,7 +19,9 @@ use raybend::store::db::{CatalogDb, OpenOpts};
 use raybend::store::delete::DeleteReport;
 use raybend::store::flags::{Flag, FlagKey, FlagSet};
 use raybend::store::marking::{self, UndoStack};
-use raybend::store::query::{self, AssetRow, Combinator, Filter, FlagFilter, Query, Scope, Sort, SortKey};
+use raybend::store::query::{
+    self, AssetRow, Combinator, Filter, FlagFilter, Query, Scope, Sort, SortKey,
+};
 use raybend::store::repository;
 use raybend::store::tags;
 use raybend::store::time;
@@ -36,6 +38,8 @@ pub struct BrowseState {
     flags: Mutex<FlagSet>,
     /// 当前打开的库（`CatalogDb` 自带连接池与写者线程，重开一次不便宜）。
     open: Mutex<Option<OpenCatalog>>,
+    pub(crate) disk_sync: Mutex<()>,
+    pub(crate) live_watch: Mutex<Option<(String, PathBuf, raybend::media::watch::CatalogWatcher)>>,
 }
 
 struct OpenCatalog {
@@ -60,14 +64,16 @@ impl BrowseState {
         f: impl FnOnce(&CatalogDb) -> Result<T, String>,
     ) -> Result<T, String> {
         let mut guard = self.open.lock().map_err(|_| "内部锁已损坏".to_string())?;
-        let stale = guard
-            .as_ref()
-            .is_none_or(|open| open.repository_id != repository_id || !open.root.is_dir());
+        let root = resolve_root(app, repository_id)?;
+        let stale = guard.as_ref().is_none_or(|open| {
+            open.repository_id != repository_id || open.root != root || !open.root.is_dir()
+        });
         if stale {
             // 先放掉旧库（让它的写者线程收摊），再开新的
             *guard = None;
-            let root = resolve_root(app, repository_id)?;
-            let db = CatalogDb::open(&root, OpenOpts::new(None, time::now_millis()))
+            *self.live_watch.lock().map_err(|e| e.to_string())? = None;
+            let backups = crate::db::data_dir(app)?.join(raybend::store::db::BACKUPS_DIR);
+            let db = CatalogDb::open(&root, OpenOpts::new(Some(&backups), time::now_millis()))
                 .map_err(|e| e.to_string())?;
             *guard = Some(OpenCatalog {
                 repository_id: repository_id.to_string(),
@@ -95,7 +101,10 @@ impl BrowseState {
 ///
 /// `pub(crate)`：编辑器要拿库根拼绝对路径（`develop::develop_edit_target`），
 /// 而它**不能**在 `with_catalog` 里调（那把 `open` 锁正被持着 —— 会死锁）。
-pub(crate) fn resolve_root<R: Runtime>(app: &AppHandle<R>, repository_id: &str) -> Result<PathBuf, String> {
+pub(crate) fn resolve_root<R: Runtime>(
+    app: &AppHandle<R>,
+    repository_id: &str,
+) -> Result<PathBuf, String> {
     let state = app.state::<DbState>();
     state.with(app, |db| {
         db.resolve_repository(repository_id)
@@ -148,7 +157,7 @@ pub struct FilterDto {
     pub tags: Vec<i64>,
     #[serde(default)]
     pub text: Option<String>,
-    /// `"and"` / `"or"`（缺省 = `or`，见 `plans/M2.md` §3 第 1 条）。
+    /// `"and"` / `"or"`（缺省 = `or`，见 `specs/M2.md` §3 第 1 条）。
     #[serde(default)]
     pub combinator: Option<String>,
 }
@@ -264,7 +273,10 @@ pub enum MarkActionDto {
     DetachTags { tag_ids: Vec<i64> },
     /// 改一个可编辑的文字字段（右栏：作者 / 描述 / 国家 / 省州 / 城市 / 具体地点）。
     /// `field` 只认 `TextField::parse` 认的那几个名字，其余报错（**不做静默忽略**）。
-    SetText { field: String, value: Option<String> },
+    SetText {
+        field: String,
+        value: Option<String>,
+    },
 }
 
 // ─────────────────────────── 输出 DTO ───────────────────────────
@@ -375,12 +387,34 @@ mod tests {
     #[test]
     fn only_develop_undo_ops_invalidate_latest_previews() {
         let ops = vec![
-            Op::Rating { asset_id: 1, before: 0, after: 1 },
-            Op::DevelopParam { asset_id: 2, param_id: "exposure".into(), before: None, after: Some(0) },
-            Op::DevelopSetting { asset_id: 2, key: "sourceBase".into(), before: Some("raw".into()), after: Some("sooc".into()) },
-            Op::DevelopCurve { asset_id: 3, channel: "rgb".into(), before: None, after: Some("[]".into()) },
+            Op::Rating {
+                asset_id: 1,
+                before: 0,
+                after: 1,
+            },
+            Op::DevelopParam {
+                asset_id: 2,
+                param_id: "exposure".into(),
+                before: None,
+                after: Some(0),
+            },
+            Op::DevelopSetting {
+                asset_id: 2,
+                key: "sourceBase".into(),
+                before: Some("raw".into()),
+                after: Some("sooc".into()),
+            },
+            Op::DevelopCurve {
+                asset_id: 3,
+                channel: "rgb".into(),
+                before: None,
+                after: Some("[]".into()),
+            },
         ];
-        assert_eq!(edited_asset_ids(&ops).into_iter().collect::<Vec<_>>(), [2, 3]);
+        assert_eq!(
+            edited_asset_ids(&ops).into_iter().collect::<Vec<_>>(),
+            [2, 3]
+        );
         assert!(edited_asset_ids(&[]).is_empty());
     }
 
@@ -764,17 +798,16 @@ pub async fn browse_mark<R: Runtime>(
                     }
                     MarkActionDto::SetText { field, value } => {
                         let parsed = marking::TextField::parse(field).ok_or_else(|| {
-                            raybend::Error::Unsupported(format!(
-                                "右栏没有这个可编辑字段：{field}"
-                            ))
+                            raybend::Error::Unsupported(format!("右栏没有这个可编辑字段：{field}"))
                         })?;
                         if let Some(text) = value
-                            && text.chars().count() > marking::TEXT_FIELD_MAX_CHARS {
-                                return Err(raybend::Error::Unsupported(format!(
-                                    "文字太长（上限 {} 字）",
-                                    marking::TEXT_FIELD_MAX_CHARS
-                                )));
-                            }
+                            && text.chars().count() > marking::TEXT_FIELD_MAX_CHARS
+                        {
+                            return Err(raybend::Error::Unsupported(format!(
+                                "文字太长（上限 {} 字）",
+                                marking::TEXT_FIELD_MAX_CHARS
+                            )));
+                        }
                         marking::set_text(conn, &ids, parsed, value.as_deref())?
                     }
                 };
@@ -917,21 +950,31 @@ pub async fn browse_redo<R: Runtime>(
 /// 编辑撤销/重做会改变 latest：作废受影响照片的大图缓存。
 /// 标记操作仍只更新标记，不让整个库的预览跟着重算。
 fn edited_asset_ids(ops: &[marking::Op]) -> BTreeSet<i64> {
-    ops.iter().filter_map(|op| match op {
-        marking::Op::DevelopParam { asset_id, .. }
-        | marking::Op::DevelopCurve { asset_id, .. }
-        | marking::Op::DevelopSetting { asset_id, .. } => Some(*asset_id),
-        _ => None,
-    }).collect()
+    ops.iter()
+        .filter_map(|op| match op {
+            marking::Op::DevelopParam { asset_id, .. }
+            | marking::Op::DevelopCurve { asset_id, .. }
+            | marking::Op::DevelopSetting { asset_id, .. } => Some(*asset_id),
+            _ => None,
+        })
+        .collect()
 }
 
-fn invalidate_edited_previews<R: Runtime>(app: &AppHandle<R>, repository_id: &str, ops: &[marking::Op]) {
+fn invalidate_edited_previews<R: Runtime>(
+    app: &AppHandle<R>,
+    repository_id: &str,
+    ops: &[marking::Op],
+) {
     let ids = edited_asset_ids(ops);
-    if ids.is_empty() { return; }
+    if ids.is_empty() {
+        return;
+    }
     if let Ok(root) = resolve_root(app, repository_id)
         && let Ok(cache) = raybend::display::FullCache::open(&root)
     {
-        for asset_id in ids { cache.invalidate(asset_id); }
+        for asset_id in ids {
+            cache.invalidate(asset_id);
+        }
     }
 }
 

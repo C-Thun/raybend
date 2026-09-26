@@ -57,6 +57,7 @@ import {
   pruneSelection,
   selectAll as selectAllIds,
   selectionCount,
+  toggleGroupSelection,
   type SelectionState,
 } from "../../lib/selection.ts";
 import { clearMarkFilters, conditionCount } from "./filter.ts";
@@ -66,6 +67,8 @@ export const PAGE_SIZE = 256;
 
 /** 后端接口（测试里换成假实现）。 */
 export interface BrowseApi {
+  /** 所有首屏查询前先对齐磁盘；测试/浏览器可省略。 */
+  syncScope?(query: BrowseQuery): Promise<unknown>;
   page(
     query: BrowseQuery,
     offset: number,
@@ -192,6 +195,7 @@ export interface BrowseStore {
    *    显示错人；它们会在用户滚到时按需重取。
    */
   refresh(): Promise<void>;
+  reportError(error: unknown): void;
   /**
    * 标签词典（id → 名字）。**库里只存 tag id**（标记来自 catalog，名字来自 app.db），
    * 所以界面要显示标签名就得有一份词典 —— 收在这里，右栏与标签弹窗共用同一份，
@@ -255,6 +259,12 @@ export interface BrowseStore {
    * 数据层不该知道它们。不传就退回查询顺序 —— 那样只有未分组时才是对的。
    */
   selectAll(order?: readonly string[]): void;
+  /**
+   * 日 / 时间片那颗药丸的**整段开关**（全选中 → 全取消；否则 → 全选中）。
+   * 传 id 列表而不传区间：区间 → id 的换算由显示层做（它知道置换与分页）。
+   * 语义与口径在 `lib/selection.ts::toggleGroupSelection`。
+   */
+  toggleGroup(ids: readonly string[]): void;
   clearSelection(): void;
 
   // ── 标记 ──
@@ -274,6 +284,7 @@ export interface BrowseStore {
    * 也可能是上次会话留下的，但我们不猜）。
    */
   undoState(): UndoState;
+  noteDevelopCommit(result: { canUndo: boolean; undoLabel: string | null } | null): void;
   /**
    * **撤销 / 重做发生过几次**（M3-W3）。
    *
@@ -540,6 +551,8 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
     mine: number,
   ): Promise<readonly TimelineEntry[] | null> => {
     try {
+      await api.syncScope?.(q);
+      if (mine !== generation) return null;
       const [window, line, faces] = await Promise.all([
         api.page(q, 0, PAGE_SIZE),
         api.timeline(q, 0),
@@ -744,6 +757,9 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
     sort,
     filterMode,
     undoState,
+    noteDevelopCommit(result) {
+      if (result !== null) setUndoState({ canUndo: result.canUndo, canRedo: false, undoLabel: result.undoLabel, redoLabel: null });
+    },
     undoTick,
     query,
 
@@ -755,6 +771,7 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
       void reload().then(() => refreshFlags());
     },
     setScope(path) {
+      if (path !== null && path === scopePath()) { void refresh(); return; }
       if (scopePath() === path) return;
       setScopePathSignal(path);
       void reload();
@@ -791,6 +808,7 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
     error,
     reload,
     refresh,
+    reportError: (error: unknown) => setError(error instanceof Error ? error.message : String(error)),
     ensureRange,
     tags,
     loadTags,
@@ -843,6 +861,11 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
       const fromTimeline = timeline().map((entry) => String(entry.id));
       const source = order ?? (fromTimeline.length > 0 ? fromTimeline : orderedIds());
       setSelection(selectAllIds(source));
+      void refreshMarkings();
+    },
+    toggleGroup(ids) {
+      if (ids.length === 0) return;
+      setSelection((current) => toggleGroupSelection(current, ids));
       void refreshMarkings();
     },
     clearSelection() {

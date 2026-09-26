@@ -11,6 +11,7 @@
  * 合成一个就会有人开始猜「viewing 在编辑里到底什么意思」。
  */
 
+import { createActionSlot } from "../../lib/action-slot.ts";
 import type { FullscreenTarget } from "../../lib/fullscreen-target.ts";
 
 export interface EditorActions {
@@ -26,29 +27,29 @@ export interface EditorActions {
   resetChrome: () => void;
   /** 有没有可编辑的照片（空态下工具与控制块一律禁用） */
   hasPhoto: () => boolean;
-  /**
-   * **重置全部调整**（M3-W3）：清空编辑栈（库里也清）。
-   *
-   * 与「重置这一项」不同，它是**破坏性**的（一次抹掉所有参数与曲线），
-   * 所以只挂在命令面板里、**不给默认热键**（`AGENTS.md` §2.15：留空也要写清理由）。
-   */
+  /** 两层重置：先确认清除手动调整，再直接清除自动调整；无默认热键，避免误触。 */
+  canReset: () => boolean;
   resetDevelop: () => void;
-  /** 按拍摄信息匹配并应用镜头配置。 */
+  /** RAW、位图、机型信息齐全且当前可编辑。 */
+  canAutoAdjust: () => boolean;
+  /** 拟合基础曲线，保守调整影调色彩并匹配镜头。 */
   autoAdjust: () => void;
+  canFinalize: () => boolean;
+  finalize: () => void;
   /** 切换编辑源后保存 latest 来源。 */
   commitDevelop: () => void;
   /** 全屏看图要的清单（编辑侧同样是「当前目录显示序 + 锚点」）；没有照片时为 `null` */
   fullscreenTarget: () => FullscreenTarget | null;
 }
 
-let current: EditorActions | null = null;
+const slot = createActionSlot<EditorActions>();
 
 /** 工作区挂载时注册自己那一份；卸载时传 `null` 清空 */
 export function registerEditorActions(actions: EditorActions | null): void {
-  current = actions;
+  slot.register(actions);
 }
 
 /** 当前生效的那一份（不在编辑工作流里时为 `null`） */
 export function editorActions(): EditorActions | null {
-  return current;
+  return slot.read();
 }

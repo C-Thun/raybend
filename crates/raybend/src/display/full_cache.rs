@@ -1,4 +1,4 @@
-//! **库内大图缓存**：`<库根>/cache/full/<asset_id>/<issue>-v<pipeline>.avif`。
+//! **库内大图缓存**：`<库根>/cache/full/<asset_id>/<issue>-<base>-v<pipeline>.avif`。
 //!
 //! # 为什么放在库里（而不是 app data）
 //!
@@ -14,9 +14,10 @@
 //! ```text
 //! <库根>/cache/full/1234/latest-raw-v6.avif    ← 基于 RAW 编辑的结果
 //! <库根>/cache/full/1234/latest-sooc-v6.avif   ← 基于 SOOC 编辑的结果
+//! <库根>/cache/full/1234/issue-42-<hash>-raw-v6.avif ← 定稿 42 的独立快照
 //! ```
 //!
-//! * `issue` —— `sooc` / `raw` / `latest`（**SOOC 不进缓存**：那就是原文件本身）；
+//! * `issue` —— `latest` 或 `issue-<id>-<profile_hash>`；SOOC 不进缓存；
 //! * **`base` —— 编辑基准**（`sooc` / `raw`）：同一张照片在两种基准下渲染出的是
 //!   **两张不同的图**（人类 2026-09-24 让基准可切），所以它必须进文件名 ——
 //!   否则切了基准之后读到的是另一基准渲染出来的旧图，而且**看不出是错的**
@@ -35,7 +36,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::store::develop::EditBase;
 
 /// 库根下缓存目录的名字（用户看得见，起个直白的）。
@@ -67,6 +68,12 @@ impl FullCache {
         &self.root
     }
 
+    /// latest / 定稿共享的源版本命名规则；迟到结果写到旧版本，后续请求不会命中。
+    #[must_use]
+    pub fn source_name(issue: &str, signature: &str) -> String {
+        format!("{issue}-src{signature}")
+    }
+
     /// 某个资产某个 issue **某个编辑基准**的缓存文件路径。
     #[must_use]
     pub fn path_for(
@@ -76,9 +83,10 @@ impl FullCache {
         base: EditBase,
         pipeline_version: u32,
     ) -> PathBuf {
-        self.root
-            .join(asset_id.to_string())
-            .join(format!("{issue}-{}-v{pipeline_version}.avif", base.as_str()))
+        self.root.join(asset_id.to_string()).join(format!(
+            "{issue}-{}-v{pipeline_version}.avif",
+            base.as_str()
+        ))
     }
 
     /// 读缓存（不存在 / 读不动都返回 `None` —— 缓存不该让界面报错）。
@@ -109,19 +117,7 @@ impl FullCache {
         data: &[u8],
     ) -> Result<()> {
         let path = self.path_for(asset_id, issue, base, pipeline_version);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let temp = path.with_extension("avif.tmp");
-        if let Err(error) = std::fs::write(&temp, data) {
-            let _ = std::fs::remove_file(&temp);
-            return Err(Error::Io(error));
-        }
-        if let Err(error) = std::fs::rename(&temp, &path) {
-            let _ = std::fs::remove_file(&temp);
-            return Err(Error::Io(error));
-        }
-        Ok(())
+        crate::fs_atomic::write(&path, data)
     }
 
     /// 删掉某个资产的全部大图缓存（**编辑落库后调**：旧结果立刻作废）。
@@ -136,12 +132,47 @@ impl FullCache {
         };
         let mut removed = 0;
         for entry in entries.flatten() {
-            if std::fs::remove_file(entry.path()).is_ok() {
+            if entry.file_name().to_string_lossy().starts_with("latest-")
+                && std::fs::remove_file(entry.path()).is_ok()
+            {
                 removed += 1;
             }
         }
-        let _ = std::fs::remove_dir(&dir); // 空了才删得掉；删不掉也无所谓
+        let _ = std::fs::remove_dir(&dir);
         removed
+    }
+
+    /// 源文件变化使所有定稿的派生图失效；profile 与 issue 本身保持不变。
+    pub fn invalidate_source(&self, asset_id: i64) -> Result<usize> {
+        let dir = self.root.join(asset_id.to_string());
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+            Err(e) => return Err(e.into()),
+        };
+        let mut removed = 0;
+        for entry in entries {
+            let entry = entry?;
+            if entry.path().extension().is_some_and(|ext| ext == "avif") {
+                std::fs::remove_file(entry.path())?;
+                removed += 1;
+            }
+        }
+        Ok(removed)
+    }
+
+    /// 只删除一个定稿的预览；latest 编辑不能触碰其它定稿的快照。
+    pub fn remove_issue(&self, asset_id: i64, issue_id: i64) -> usize {
+        let dir = self.root.join(asset_id.to_string());
+        let prefix = format!("issue-{issue_id}-");
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return 0;
+        };
+        entries
+            .flatten()
+            .filter(|entry| entry.file_name().to_string_lossy().starts_with(&prefix))
+            .filter(|entry| std::fs::remove_file(entry.path()).is_ok())
+            .count()
     }
 
     /// 清掉整个大图缓存（设置里的「清理缓存」）。返回删掉几个文件。
@@ -182,14 +213,20 @@ mod tests {
     #[test]
     fn open_creates_the_directory_inside_the_repository() {
         let (dir, cache) = cache();
-        assert!(dir.path().join("cache").join("full").is_dir(), "目录要建出来");
+        assert!(
+            dir.path().join("cache").join("full").is_dir(),
+            "目录要建出来"
+        );
         assert_eq!(cache.root(), dir.path().join("cache").join("full"));
     }
 
     #[test]
     fn write_then_read_round_trips_and_is_atomic() {
         let (_dir, cache) = cache();
-        assert!(cache.read(7, "latest", EditBase::Raw, 6).is_none(), "一开始没有");
+        assert!(
+            cache.read(7, "latest", EditBase::Raw, 6).is_none(),
+            "一开始没有"
+        );
         cache
             .write(7, "latest", EditBase::Raw, 6, b"hello avif")
             .expect("写");
@@ -209,9 +246,13 @@ mod tests {
     #[test]
     fn versions_issues_and_bases_do_not_collide() {
         let (_dir, cache) = cache();
-        cache.write(1, "latest", EditBase::Raw, 6, b"v6").expect("写");
+        cache
+            .write(1, "latest", EditBase::Raw, 6, b"v6")
+            .expect("写");
         cache.write(1, "raw", EditBase::Raw, 6, b"raw").expect("写");
-        cache.write(1, "latest", EditBase::Raw, 7, b"v7").expect("写");
+        cache
+            .write(1, "latest", EditBase::Raw, 7, b"v7")
+            .expect("写");
         assert_eq!(
             cache.read(1, "latest", EditBase::Raw, 6).as_deref(),
             Some(&b"v6"[..])
@@ -233,7 +274,9 @@ mod tests {
     #[test]
     fn edit_bases_have_their_own_files() {
         let (_dir, cache) = cache();
-        cache.write(9, "latest", EditBase::Raw, 6, b"from raw").expect("写");
+        cache
+            .write(9, "latest", EditBase::Raw, 6, b"from raw")
+            .expect("写");
         cache
             .write(9, "latest", EditBase::Sooc, 6, b"from sooc")
             .expect("写");
@@ -252,14 +295,22 @@ mod tests {
             .flatten()
             .map(|e| e.file_name().to_string_lossy().into_owned())
             .collect();
-        assert!(names.contains(&"latest-raw-v6.avif".to_string()), "{names:?}");
-        assert!(names.contains(&"latest-sooc-v6.avif".to_string()), "{names:?}");
+        assert!(
+            names.contains(&"latest-raw-v6.avif".to_string()),
+            "{names:?}"
+        );
+        assert!(
+            names.contains(&"latest-sooc-v6.avif".to_string()),
+            "{names:?}"
+        );
     }
 
     #[test]
     fn overwrite_replaces_the_same_file() {
         let (_dir, cache) = cache();
-        cache.write(3, "latest", EditBase::Raw, 6, b"first").expect("写");
+        cache
+            .write(3, "latest", EditBase::Raw, 6, b"first")
+            .expect("写");
         cache
             .write(3, "latest", EditBase::Raw, 6, b"second")
             .expect("再写");
@@ -270,14 +321,21 @@ mod tests {
     }
 
     #[test]
-    fn invalidate_removes_only_that_asset() {
+    fn invalidate_removes_only_latest_for_that_asset() {
         let (_dir, cache) = cache();
-        cache.write(1, "latest", EditBase::Raw, 6, b"a").expect("写");
+        cache
+            .write(1, "latest", EditBase::Raw, 6, b"a")
+            .expect("写");
         cache.write(1, "raw", EditBase::Raw, 6, b"b").expect("写");
-        cache.write(2, "latest", EditBase::Raw, 6, b"c").expect("写");
-        assert_eq!(cache.invalidate(1), 2);
+        cache
+            .write(2, "latest", EditBase::Raw, 6, b"c")
+            .expect("写");
+        assert_eq!(cache.invalidate(1), 1);
         assert!(cache.read(1, "latest", EditBase::Raw, 6).is_none());
-        assert!(cache.read(1, "raw", EditBase::Raw, 6).is_none());
+        assert_eq!(
+            cache.read(1, "raw", EditBase::Raw, 6).as_deref(),
+            Some(&b"b"[..])
+        );
         assert_eq!(
             cache.read(2, "latest", EditBase::Raw, 6).as_deref(),
             Some(&b"c"[..])
@@ -286,10 +344,32 @@ mod tests {
     }
 
     #[test]
+    fn latest_invalidation_preserves_named_issue_until_explicit_delete() {
+        let (_dir, cache) = cache();
+        cache
+            .write(1, "latest", EditBase::Raw, 6, b"working")
+            .unwrap();
+        cache
+            .write(1, "issue-42-abc", EditBase::Raw, 6, b"snapshot")
+            .unwrap();
+        assert_eq!(cache.invalidate(1), 1);
+        assert_eq!(
+            cache.read(1, "issue-42-abc", EditBase::Raw, 6).as_deref(),
+            Some(&b"snapshot"[..])
+        );
+        assert_eq!(cache.remove_issue(1, 42), 1);
+        assert!(cache.read(1, "issue-42-abc", EditBase::Raw, 6).is_none());
+    }
+
+    #[test]
     fn clear_removes_everything_and_is_idempotent() {
         let (_dir, cache) = cache();
-        cache.write(1, "latest", EditBase::Raw, 6, b"a").expect("写");
-        cache.write(2, "latest", EditBase::Raw, 6, b"b").expect("写");
+        cache
+            .write(1, "latest", EditBase::Raw, 6, b"a")
+            .expect("写");
+        cache
+            .write(2, "latest", EditBase::Raw, 6, b"b")
+            .expect("写");
         assert_eq!(cache.clear(), 2);
         assert!(cache.read(1, "latest", EditBase::Raw, 6).is_none());
         assert_eq!(cache.clear(), 0);
@@ -306,5 +386,22 @@ mod tests {
             cache.read(9, "latest", EditBase::Sooc, 6).is_none(),
             "空文件当没有（半个文件的兜底）"
         );
+    }
+    #[test]
+    fn changed_source_invalidates_all_issues_only_for_that_asset() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = FullCache::open(dir.path()).unwrap();
+        cache
+            .write(1, "latest-srcabc", EditBase::Raw, 6, b"a")
+            .unwrap();
+        cache
+            .write(1, "issue-42-hash-srcabc", EditBase::Sooc, 6, b"b")
+            .unwrap();
+        cache
+            .write(2, "latest-srcabc", EditBase::Raw, 6, b"c")
+            .unwrap();
+        assert_eq!(cache.invalidate_source(1).unwrap(), 2);
+        assert!(cache.read(2, "latest-srcabc", EditBase::Raw, 6).is_some());
+        assert_eq!(cache.invalidate_source(1).unwrap(), 0);
     }
 }

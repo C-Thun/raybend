@@ -257,7 +257,7 @@ export function createImportStore(deps: ImportStoreDeps): ImportStore {
     }
   };
 
-  /** 勾选时把它记进「最近」（这是「最近」唯一的写入时机，见 `plans/M1-5.md` §8）。 */
+  /** 勾选时把它记进「最近」（这是「最近」唯一的写入时机，见 `specs/M1-5.md` §8）。 */
   const remember = async (
     path: string,
     includeSubdirs: boolean,

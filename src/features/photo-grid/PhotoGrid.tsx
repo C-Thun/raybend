@@ -1,3 +1,4 @@
+import { clickMode } from "../../lib/selection.ts";
 /**
  * `PhotoGrid` —— **全项目唯一的照片网格**（`design/main.md` §3.2）。
  *
@@ -66,9 +67,17 @@ import {
   SLICE_HEADER,
   type GridRowModel,
 } from "../../components/ui/tiles/rows.ts";
-import type { GridStatus, TilesSource } from "../../components/ui/tiles/source.ts";
+import type { GridItem, GridStatus, TilesSource } from "../../components/ui/tiles/source.ts";
 
 export interface PhotoGridProps {
+  /** 在现有照片格下附加业务内容，仍复用同一网格、Tile 和虚拟行。 */
+  cellExtra?: (item: GridItem, slot: number) => JSX.Element;
+  listMode?: boolean;
+  cellOverlay?: (item: GridItem) => JSX.Element;
+  /** Enter 可交给当前工作流命令；双击仍可接明确的稿查看入口。 */
+  activate?: (id: string) => void;
+  commandEnter?: boolean;
+
   /** 数据源（导入侧 `importSource()`、浏览侧 `browseSource()`） */
   source: TilesSource;
   /**
@@ -182,7 +191,7 @@ export function PhotoGrid(props: PhotoGridProps): JSX.Element {
    * 每一像素都重建全部行（大库下就是卡顿的来源）。`createMemo` 默认 `===` 比较，
    * 列数没变就不往下游发。
    */
-  const columns = createMemo(() => flow().columns);
+  const columns = createMemo(() => props.listMode ? 1 : flow().columns);
   const fitRequest = useTilesFitChannel();
 
   /** 当前「铺满一行」算出来的格宽（给请求处理与可用性读数共用，不写两遍公式） */
@@ -200,7 +209,7 @@ export function PhotoGrid(props: PhotoGridProps): JSX.Element {
    */
   createEffect(() => {
     if (fitRequest === undefined) return;
-    fitRequest.setAvailable(width() > 0 && canFitRow({
+    fitRequest.setAvailable(props.listMode!==true && width() > 0 && canFitRow({
       containerWidth: width(),
       cellWidth: cellWidth(),
       gap: gap(),
@@ -238,6 +247,7 @@ export function PhotoGrid(props: PhotoGridProps): JSX.Element {
       count: source.count(),
       columns: columns(),
       cellSize: cellWidth(),
+      ...(source.extraHeight === undefined || props.listMode===true ? {} : {extraHeight: (index: number) => source.extraHeight!(index, cellWidth())}),
       ...(source.slices() === undefined ? {} : { slices: source.slices() }),
     }),
   );
@@ -264,6 +274,7 @@ export function PhotoGrid(props: PhotoGridProps): JSX.Element {
   const viewerPhotos = (): ViewerPhoto[] => photosFromSource(source);
 
   function openViewer(byId: string): void {
+    if (props.activate !== undefined) { props.activate(byId); return; }
     props.onOpeningViewer?.();
     const list = viewerPhotos();
     const at = list.findIndex((photo) => photo.id === byId);
@@ -309,7 +320,7 @@ export function PhotoGrid(props: PhotoGridProps): JSX.Element {
       });
       return;
     }
-    if (event.key !== "Enter") return;
+    if (event.key !== "Enter" || props.commandEnter === true) return;
     const selection = source.selection();
     if (selection.ids.size === 0) return;
     const anchor = selection.anchor;
@@ -550,6 +561,9 @@ export function PhotoGrid(props: PhotoGridProps): JSX.Element {
                 row={row}
                 gap={gap()}
                 onOpen={openViewer}
+                listMode={props.listMode}
+            cellExtra={props.cellExtra}
+                cellOverlay={props.cellOverlay}
                 {...(props.onInteract === undefined ? {} : { onInteract: props.onInteract })}
                 {...(props.onFocusIndex === undefined ? {} : { onFocusIndex: props.onFocusIndex })}
               />
@@ -580,6 +594,9 @@ function TileRow(props: {
   row: GridRowModel & { kind: "tiles" };
   gap: number;
   onOpen: (id: string) => void;
+  cellExtra?: (item: GridItem, slot: number) => JSX.Element;
+  listMode?: boolean;
+  cellOverlay?: (item: GridItem) => JSX.Element;
   onInteract?: () => void;
   onFocusIndex?: (index: number) => void;
 }): JSX.Element {
@@ -600,6 +617,9 @@ function TileRow(props: {
             source={props.source}
             slot={slot}
             onOpen={props.onOpen}
+            listMode={props.listMode}
+            cellExtra={props.cellExtra}
+            cellOverlay={props.cellOverlay}
             {...(props.onInteract === undefined ? {} : { onInteract: props.onInteract })}
             {...(props.onFocusIndex === undefined ? {} : { onFocusIndex: props.onFocusIndex })}
           />
@@ -614,6 +634,9 @@ function TileCell(props: {
   source: TilesSource;
   slot: number;
   onOpen: (id: string) => void;
+  cellExtra?: (item: GridItem, slot: number) => JSX.Element;
+  listMode?: boolean;
+  cellOverlay?: (item: GridItem) => JSX.Element;
   onInteract?: () => void;
   onFocusIndex?: (index: number) => void;
 }): JSX.Element {
@@ -646,10 +669,11 @@ function TileCell(props: {
 
   return (
     <div
-      class="relative"
+      class={props.listMode?"relative flex w-full items-center gap-3":"relative"}
       // **正方外框**：边长就是尺寸档。行高恒定才有得拖（见 Tile 的模块注释）
-      style={{ width: "var(--tile-cell)", height: "var(--tile-cell)" }}
+      style={{ width: props.listMode?"100%":"var(--tile-cell)", height: `${tileSizeAt(props.source.tileStep()) + (props.listMode?0:props.source.extraHeight?.(props.slot, tileSizeAt(props.source.tileStep())) ?? 0)}px` }}
     >
+      <div class="relative shrink-0" style={{height: "var(--tile-cell)",width:"var(--tile-cell)"}}>
       <Tile
         info={props.source.infoMode()}
         /*
@@ -697,17 +721,15 @@ function TileCell(props: {
         onClick={(event) => {
           const it = item();
           if (it === null) return;
-          const mode =
-            event.shiftKey && !event.ctrlKey && !event.metaKey
-              ? "range"
-              : event.ctrlKey || event.metaKey
-                ? "toggle"
-                : "replace";
+          const mode = clickMode(event, props.source.invertedCtrl);
           props.source.select(it.id, mode);
           props.onInteract?.();
           props.onFocusIndex?.(props.slot);
         }}
       />
+      {item() === null ? null : props.cellOverlay?.(item()!)}
+      </div>
+      {item() === null ? null : props.cellExtra?.(item()!, props.slot)}
     </div>
   );
 }
@@ -767,7 +789,7 @@ function GroupHeader(props: {
             ? "h-5 bg-state-selected text-fg-2 hover:text-fg-1"
             : "h-4.5 bg-state-hover text-fg-3 hover:text-fg-1",
         ].join(" ")}
-        onClick={(event) => props.source.selectGroupRange(props.row.start, props.row.count, event.ctrlKey || event.metaKey)}
+        onClick={() => props.source.selectGroupRange(props.row.start, props.row.count)}
       >
         {isDay() ? t("grid.select_all_day") : t("grid.select_all_range")}
       </button>

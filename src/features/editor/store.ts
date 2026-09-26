@@ -20,6 +20,7 @@
 import { batch, createSignal } from "solid-js";
 
 import type {
+  AutoAdjustBaseline,
   DevelopEditBase,
   DevelopNrMethod,
   DevelopParamsPayload,
@@ -83,6 +84,8 @@ export interface EditorStoreDeps {
   writePrefs?: (prefs: EditorPrefs) => void;
 }
 
+export type EditorResetStage = "none" | "edits" | "automatic";
+
 export interface EditorStore {
   /* ── 档位与面板（`lib/editor-chrome.ts`）────────────── */
   chromeStep: () => number;
@@ -136,6 +139,12 @@ export interface EditorStore {
   /** 这一项回到基线（= DB 里删掉这一行） */
   resetParam: (id: string) => void;
   resetParams: () => void;
+  autoAdjustBaseline: () => AutoAdjustBaseline | null;
+  /** 只记录自动算法实际产生的字段，不把已有手动调整当成基线。 */
+  applyAutoAdjust: (baseline: AutoAdjustBaseline) => void;
+  resetStage: () => EditorResetStage;
+  /** 第一层恢复自动基线；第二层清除自动结果及基础曲线。 */
+  resetDevelop: (stage: Exclude<EditorResetStage, "none">) => void;
   /** 这张照片的拍摄色温（K）—— 色温拉杆的基线；`null` = 渲染线程还没解出来 */
   asShotTemperature: () => number | null;
   /** 渲染线程报回来的拍摄色温（工作区写进来；**不算用户改动**，不抬 rev） */
@@ -180,10 +189,22 @@ export interface EditorStore {
     curves: Partial<Record<CurveChannel, readonly CurvePoint[]>>,
     settings?: DevelopSettings,
   ) => void;
+  /** 载入定稿为新的工作状态；保留 dirty 以便写入 latest 和撤销栈。 */
+  applyDevelop: EditorStore["loadDevelop"];
 
   /* ── 镜头 / 降噪方式（M3-W4）──────────────────────── */
   /** 镜头配置文件（`null` = 未选择；`"none"` = 显式关掉；否则是 `maker|model`） */
   lensProfile: () => string | null;
+  /** 当前照片 RAW 基础曲线：null 未选择，none 显式不用。 */
+  baseCurveProfile: () => string | null;
+  baseCurvePoints: () => readonly CurvePoint[] | null;
+  setBaseCurve: (id: string | null, points: readonly CurvePoint[] | null) => void;
+  lutId: () => string | null;
+  lutEnabled: () => boolean;
+  lutEnabledSetting: () => boolean | null;
+  setLut: (id: string | null, enabled: boolean) => void;
+  setLutEnabled: (enabled: boolean) => void;
+  setLutCategories: (categories: readonly LutCategory[]) => void;
   setLensProfile: (key: string | null) => void;
   /** 配置文件那一半的开关（`null` = 默认开；**手动三根拉杆不受它影响**） */
   lensEnabled: () => boolean | null;
@@ -321,8 +342,14 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
     }));
     bumpDevelop();
   };
+  const [baseCurveProfile, setBaseCurveProfile] = createSignal<string | null>(null);
+  const [baseCurvePoints, setBaseCurvePoints] = createSignal<CurvePoint[] | null>(null);
+  const [lutId, setLutId] = createSignal<string | null>(null);
+  const [lutEnabled, setLutEnabled] = createSignal(false);
+  const [lutEnabledExplicit, setLutEnabledExplicit] = createSignal(false);
   const [geometry, setGeometrySignal] = createSignal<EditGeometry | null>(null);
   const [nrMethod, setNrMethodSignal] = createSignal<DevelopNrMethod | null>(null);
+  const [autoAdjustBaseline, setAutoAdjustBaseline] = createSignal<AutoAdjustBaseline | null>(null);
   const [autoAdjusting, setAutoAdjusting] = createSignal(false);
   const [renderState, setRenderState] = createSignal<EditorRenderState | null>(null);
   const [holeActive, setHoleActive] = createSignal(false);
@@ -373,10 +400,58 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
       interactive: paramDragging(),
       // 镜头 / 降噪方式：它们是编辑栈的一级（会改变像素），跟着载荷一起发
       lensProfile: lensProfile(),
+      baseCurvePoints: editBase() === "raw" ? baseCurvePoints()?.map(([x,y]) => [x,y]) ?? null : null,
+      lutId: lutId(),
+      lutEnabled: lutEnabled(),
       lensEnabled: lensEnabled(),
       nrMethod: nrMethod(),
       geometry: geometry(),
     };
+  };
+
+  const automaticParams = (): Record<string, number> => ({
+    ...defaultParams(), temperature: paramBaseline("temperature"),
+    ...autoAdjustBaseline()?.values,
+  });
+  const automaticLens = (base: DevelopEditBase): LensSide => base === "raw"
+    ? { profile: autoAdjustBaseline()?.lensProfile ?? null, enabled: autoAdjustBaseline()?.lensEnabled ?? null }
+    : { profile: null, enabled: null };
+  const hasGeometryEdits = (): boolean => {
+    const value = geometry();
+    return value !== null && (value.rotation !== 0 || value.crop !== null);
+  };
+  const resetStage = (): EditorResetStage => {
+    const target = automaticParams();
+    const lens = automaticLens(editBase());
+    const automaticNr = autoAdjustBaseline()?.nrMethod ?? null;
+    const changed = Object.entries(params()).some(([id,value]) => value !== target[id])
+      || CURVE_CHANNELS.some((channel) => !isIdentityCurve(curves()[channel]))
+      || lensProfile() !== lens.profile || (lensEnabled() ?? true) !== (lens.enabled ?? true)
+      || (nrMethod() === "high") !== (automaticNr === "high")
+      || lutId() !== null || hasGeometryEdits();
+    if (changed) return "edits";
+    const automatic = autoAdjustBaseline();
+    const automaticHasEdits = automatic !== null && (
+      Object.entries(automatic.values).some(([id,value]) => value !== paramBaseline(id))
+      || automatic.lensProfile !== null || automatic.lensEnabled === false || automatic.nrMethod === "high"
+    );
+    return baseCurveProfile() !== null || baseCurvePoints() !== null || automaticHasEdits ? "automatic" : "none";
+  };
+  const restoreResetState = (keepAutomatic: boolean): void => {
+    batch(() => {
+      setTemperatureExplicit(keepAutomatic && Object.prototype.hasOwnProperty.call(autoAdjustBaseline()?.values ?? {}, "temperature"));
+      setParams(keepAutomatic ? automaticParams() : { ...defaultParams(), temperature: paramBaseline("temperature") });
+      setCurves(identityCurves());
+      setLensSides(keepAutomatic
+        ? { raw: automaticLens("raw"), sooc: automaticLens("sooc") } : emptyLensSides());
+      if (!keepAutomatic) {
+        setBaseCurveProfile(null); setBaseCurvePoints(null); setAutoAdjustBaseline(null);
+      }
+      setLutId(null); setLutEnabled(false); setLutEnabledExplicit(false);
+      setNrMethodSignal(keepAutomatic ? autoAdjustBaseline()?.nrMethod ?? null : null);
+      setGeometrySignal(null); restoreCropRatio(null);
+      bumpDevelop();
+    });
   };
 
   /** 面板状态一变就落盘（它只有开关两态，不需要防抖）。 */
@@ -386,6 +461,53 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
     } catch {
       // 写不进去不影响这次会话（偏好是锦上添花）
     }
+  };
+
+  const loadDevelopState = (values: Record<string, number>, loadedCurves: Partial<Record<CurveChannel, readonly CurvePoint[]>>, settings?: DevelopSettings): void => {
+      batch(() => {
+      // 换照片时把「拖动中」清掉：上一次拖到一半就换了图的话，
+      // 这个标志会一直挂在 true 上 —— 那样后面的渲染全被压成预览档（画面永远偏软）。
+      setParamDragging(false);
+      if (settings?.asShotK !== undefined) setAsShot(settings.asShotK);
+      const next = defaultParams();
+      setTemperatureExplicit(Object.prototype.hasOwnProperty.call(values, "temperature"));
+      next.temperature = paramBaseline("temperature");
+      for (const [id, value] of Object.entries(values)) {
+        if (typeof value === "number" && Number.isFinite(value)) next[id] = value;
+      }
+      setParams(next);
+      const merged = identityCurves();
+      for (const channel of CURVE_CHANNELS) {
+        const points = loadedCurves[channel];
+        if (points !== undefined && points.length >= 2) {
+          merged[channel] = points.map(([x, y]) => [x, y] as CurvePoint);
+        }
+      }
+      setCurves(merged);
+      // 镜头 / 降噪方式：库里没有就回到默认（`null` = 未选择 / 默认开 / 快速档）
+      const base = settings?.sourceBase ?? "raw";
+      const sides = emptyLensSides();
+      sides[base] = {
+        profile: settings?.lensProfile ?? null,
+        enabled: settings?.lensEnabled ?? null,
+      };
+      setLensSides(sides);
+      const automatic = settings?.autoAdjust;
+      setAutoAdjustBaseline(automatic == null ? null : { ...automatic, values: { ...automatic.values } });
+      setBaseCurveProfile(settings?.baseCurveProfile ?? null);
+      setBaseCurvePoints(settings?.baseCurvePoints ?? null);
+      setLutId(settings?.lutId ?? null);
+      setLutEnabled(settings?.lutEnabled === true);
+      setLutEnabledExplicit(settings?.lutEnabled !== null && settings?.lutEnabled !== undefined);
+      setEditBase(base);
+      setNrMethodSignal(settings?.nrMethod ?? null);
+      setGeometrySignal(settings?.geometry ?? null);
+      restoreCropRatio(settings?.geometry ?? null);
+      // 从库里读回来的就是「已落库」的状态
+      const nextRev = developRev() + 1;
+      setDevelopRev(nextRev);
+      setCommittedRev(nextRev);
+      });
   };
 
   const updateChrome = (produce: (state: EditorChromeState) => EditorChromeState): void => {
@@ -478,18 +600,29 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
       setParams((current) => ({ ...current, [id]: paramBaseline(id) }));
       bumpDevelop();
     },
-    resetParams: () => {
+    resetParams: () => restoreResetState(false),
+    autoAdjustBaseline,
+    applyAutoAdjust: (baseline) => {
       batch(() => {
-        setTemperatureExplicit(false);
-        setParams({ ...defaultParams(), temperature: paramBaseline("temperature") });
-        setCurves(identityCurves());
-        setLensSides(emptyLensSides());
-        setNrMethodSignal(null);
-        setGeometrySignal(null);
-        restoreCropRatio(null);
+        const values: Record<string, number> = {};
+        for (const [id,value] of Object.entries(baseline.values)) {
+          const spec = paramSpec(id);
+          if (spec === undefined || !Number.isFinite(value)) continue;
+          values[id] = Math.min(spec.max, Math.max(spec.min, value));
+        }
+        const automatic = { ...baseline, values };
+        setAutoAdjustBaseline(automatic);
+        setParams((current) => ({ ...current, ...values }));
+        if (Object.prototype.hasOwnProperty.call(values, "temperature")) setTemperatureExplicit(true);
+        if (automatic.lensProfile !== null || automatic.lensEnabled !== null) {
+          setLensSides((current) => ({ ...current, raw: { profile: automatic.lensProfile, enabled: automatic.lensEnabled } }));
+        }
+        if (automatic.nrMethod !== null) setNrMethodSignal(automatic.nrMethod);
         bumpDevelop();
       });
     },
+    resetStage,
+    resetDevelop: (stage) => restoreResetState(stage === "edits"),
     asShotTemperature: asShot,
     setAsShotTemperature: (kelvin) => {
       // 只换基线：**不抬 rev**（这不是用户的改动，标 dirty 会让「松手落库」误判）
@@ -523,47 +656,26 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
     setGeometry: (next) => {
       batch(() => { setGeometrySignal(next); restoreCropRatio(next); bumpDevelop(); });
     },
-    loadDevelop: (values, loadedCurves, settings) => {
-      batch(() => {
-      // 换照片时把「拖动中」清掉：上一次拖到一半就换了图的话，
-      // 这个标志会一直挂在 true 上 —— 那样后面的渲染全被压成预览档（画面永远偏软）。
-      setParamDragging(false);
-      const next = defaultParams();
-      setTemperatureExplicit(Object.prototype.hasOwnProperty.call(values, "temperature"));
-      next.temperature = paramBaseline("temperature");
-      for (const [id, value] of Object.entries(values)) {
-        if (typeof value === "number" && Number.isFinite(value)) next[id] = value;
-      }
-      setParams(next);
-      const merged = identityCurves();
-      for (const channel of CURVE_CHANNELS) {
-        const points = loadedCurves[channel];
-        if (points !== undefined && points.length >= 2) {
-          merged[channel] = points.map(([x, y]) => [x, y] as CurvePoint);
-        }
-      }
-      setCurves(merged);
-      // 镜头 / 降噪方式：库里没有就回到默认（`null` = 未选择 / 默认开 / 快速档）
-      const base = settings?.sourceBase ?? "raw";
-      const sides = emptyLensSides();
-      sides[base] = {
-        profile: settings?.lensProfile ?? null,
-        enabled: settings?.lensEnabled ?? null,
-      };
-      setLensSides(sides);
-      setEditBase(base);
-      setNrMethodSignal(settings?.nrMethod ?? null);
-      setGeometrySignal(settings?.geometry ?? null);
-      restoreCropRatio(settings?.geometry ?? null);
-      // 从库里读回来的就是「已落库」的状态
-      const nextRev = developRev() + 1;
-      setDevelopRev(nextRev);
-      setCommittedRev(nextRev);
-      });
-    },
+    loadDevelop: loadDevelopState,
+    applyDevelop: (values, curves, settings) => { loadDevelopState(values, curves, settings); bumpDevelop(); },
 
     curveChannel,
     lensProfile,
+    baseCurveProfile,
+    baseCurvePoints,
+    lutId,
+    lutEnabled,
+    lutEnabledSetting: () => lutEnabledExplicit() ? lutEnabled() : null,
+    setLut: (id, enabled) => { batch(() => { setLutId(id); setLutEnabled(enabled && id !== null); setLutEnabledExplicit(id !== null); bumpDevelop(); }); },
+    setLutEnabled: (enabled) => { if (enabled === lutEnabled()) return; setLutEnabled(enabled && lutId() !== null); setLutEnabledExplicit(lutId() !== null); bumpDevelop(); },
+    setLutCategories: (next) => { setCategories([...next]); },
+    setBaseCurve: (id, points) => {
+      batch(() => {
+        setBaseCurveProfile(id);
+        setBaseCurvePoints(points === null ? null : points.map(([x,y]) => [x,y] as CurvePoint));
+        bumpDevelop();
+      });
+    },
     setLensProfile: (key) => updateLensSide({ profile: key }),
     lensEnabled,
     setLensEnabled: (enabled) => updateLensSide({ enabled }),

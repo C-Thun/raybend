@@ -383,7 +383,7 @@ test("选择：单点 / Ctrl 增减 / Shift 区间 / 全选", async () => {
   assert.equal(store.selectedCount(), 4);
 });
 
-test("全选一组：日 / 时间片的「全选当天」「全选此段」", async () => {
+test("整段开关：日 / 时间片那颗药丸（全选中 → 全取消，否则 → 全选中）", async () => {
   const { api, state } = fakeApi();
   state.items = [item("a.jpg"), item("b.jpg"), item("c.jpg")];
   const store = createPhotoGridStore({ api });
@@ -391,16 +391,27 @@ test("全选一组：日 / 时间片的「全选当天」「全选此段」", as
   await flush();
   const ids = store.items().map(itemId);
 
-  store.selectGroup([ids[0], ids[1]]);
+  store.toggleGroup([ids[0], ids[1]]);
   assert.equal(store.selectedCount(), 2);
-  store.selectGroup([ids[2]]);
-  assert.equal(store.selectedCount(), 3, "默认是并集（可以连着选几段）");
+  store.toggleGroup([ids[2]]);
+  assert.equal(store.selectedCount(), 3, "另一段未全选 → 并进现有选择（连着点几段是加法）");
 
-  store.selectGroup([ids[2]], false);
-  assert.deepEqual([...store.selectedIds()], [ids[2]], "替换式全选");
+  store.toggleGroup([ids[0], ids[1]]);
+  assert.deepEqual(
+    [...store.selectedIds()],
+    [ids[2]],
+    "这一整段已全选 → 整段取消，其它段不动",
+  );
 
-  store.selectGroup([]);
-  assert.equal(store.selectedCount(), 1, "空组不动选择");
+  // 部分选中也是「全开」而不是逐项反转：
+  store.clearSelection();
+  store.toggleGroup([ids[0]]);
+  assert.equal(store.selectedCount(), 1);
+  store.toggleGroup([ids[0], ids[1], ids[2]]);
+  assert.equal(store.selectedCount(), 3, "部分选中 = 补齐，不是把已选的翻掉");
+
+  store.toggleGroup([]);
+  assert.equal(store.selectedCount(), 3, "空组不动选择");
 });
 
 /*

@@ -1,3 +1,4 @@
+import { onCatalogChanged } from "../../api/db.ts";
 /**
  * 编辑工作区：三列（`design/editor.md` §2）。
  *
@@ -40,19 +41,33 @@ import {
 import {
   bindEditorRenderer,
   commitDevelopStack,
+  developSettingsOf,
   confirmEditorTool,
   getDevelopEditTarget,
   getDevelopStack,
   getLensMatch,
+  getBaseCurveProfiles,
+  fitBaseCurveAndAutoAdjust,
   getEditorRenderState,
   refreshDevelopPreview,
-  resetDevelopStack,
+  renameBaseCurveProfile,
   setEditorParams,
   setEditorPhoto,
+  setEditorReferenceIssue,
   unbindEditorRenderer,
   sendEditorViewportIntent,
 } from "../../api/editor.ts";
+import { createEasyDestroy, type ShiftLikeEvent } from "../../lib/easy-destroy.ts";
+import { EasyDestroyHost } from "../../components/ui/EasyDestroy.tsx";
 import { createLatestCoalescer } from "../../lib/editor-intent.ts";
+import { getLutLibrary, createLutCategory, importLutDirectory, hideLut, type LutLibrary } from "../../api/lut.ts";
+import { getIssueLibrary, createIssue, deleteIssue, getIssueThumb, type IssueLibrary, type Issue } from "../../api/issues.ts";
+import { pendingLegacyLutCategories, markLegacyLutCategoriesImported } from "../../lib/editor-prefs.ts";
+import { pickDirectory } from "../../api/dialog.ts";
+import type { DevelopStack } from "../../api/editor.ts";
+import { newLutCategoryId } from "../../lib/lut-library.ts";
+import { Button } from "../../components/ui/Button.tsx";
+import { Dialog } from "../../components/ui/Dialog.tsx";
 import { isTauriRuntime } from "../../api/tauri-env.ts";
 import type {
   DevelopParamsPayload,
@@ -60,6 +75,7 @@ import type {
   EditorViewportIntent,
 } from "../../api/types.ts";
 import type { AssetItem, RepositoryView } from "../../api/types.ts";
+import type { BaseCurveLibrary } from "../../api/editor.ts";
 import { getHistogram, getThumbBytes, getViewImage, listRepositories } from "../../api/db.ts";
 import { formatDateTime } from "../../lib/datetime.ts";
 import { browseSource } from "../../features/browse/grid-source.ts";
@@ -114,6 +130,7 @@ export interface EditorWorkspaceProps {
 
 export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
   const store = props.browse;
+  const [sourceRevision, setSourceRevision] = createSignal(0);
   const [repositories, setRepositories] = createSignal<RepositoryView[]>([]);
 
   /** 胶片带/网格小图仍共用 grid 队列；总览取完整的 Screen 图。 */
@@ -124,6 +141,20 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
     load: (path) => getViewImage(path, "screen"),
     concurrency: 2,
     maxEntries: 24,
+  });
+  onMount(() => {
+    let disposed = false;
+    let off: (() => void) | undefined;
+    void onCatalogChanged((change) => {
+      if (change.repositoryId !== store.repositoryId()) return;
+      for (const path of change.paths) {
+        if (thumbs.get(path).status !== "idle") thumbs.refresh(path);
+        if (overviewImages.get(path).status !== "idle") overviewImages.refresh(path);
+      }
+      if (change.assetIds.includes(Number(currentAssetId()))) setSourceRevision((value) => value + 1);
+      void listRepositories().then(setRepositories).catch((error: unknown) => store.reportError(error));
+    }).then((unsubscribe) => { if (disposed) unsubscribe(); else off = unsubscribe; });
+    onCleanup(() => { disposed = true; off?.(); });
   });
   onCleanup(() => {
     thumbs.clear();
@@ -140,6 +171,55 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
       }
     })();
   });
+
+  const applyLutLibrary = (library: LutLibrary): void => {
+    props.store.setLutCategories(library.categories.map((category) => ({
+      ...category,
+      entries: library.entries.filter((entry) => entry.categoryId === category.id).map((entry) => ({
+        id: entry.id, name: entry.originalFilename, available: entry.available,
+        coverAvailable: entry.coverAvailable, hidden: entry.hidden,
+      })),
+    })));
+  };
+  onMount(() => {
+    void getLutLibrary(pendingLegacyLutCategories())
+      .then((library) => { if (library !== null) { applyLutLibrary(library); markLegacyLutCategoriesImported(); } })
+      .catch((error: unknown) => setDevelopError(String(error)));
+  });
+  const createCategory = async (name: string): Promise<boolean> => {
+    const trimmed = name.trim();
+    if (trimmed === "" || props.store.lutCategories().some((item) => item.name.toLowerCase() === trimmed.toLowerCase())) return false;
+    const id = newLutCategoryId(props.store.lutCategories());
+    try {
+      const library = await createLutCategory(id, trimmed);
+      if (library === null) return props.store.addCategory(trimmed);
+      applyLutLibrary(library);
+      props.store.toggleCategory(id);
+      return true;
+    } catch (error) { setDevelopError(String(error)); return false; }
+  };
+  const importDirectory = async (categoryId: string): Promise<string | null> => {
+    if (lutBusy()) return null;
+    const path = await pickDirectory({ title: t("editor.lut.import") });
+    if (path === null) return null;
+    setLutBusy(true);
+    try {
+      const result = await importLutDirectory(path, categoryId);
+      if (result !== null) {
+        applyLutLibrary(result.library);
+        if (result.skipped.length > 0) setDevelopError(result.skipped.slice(0, 3).join("；"));
+        return t("editor.lut.importSummary").replace("{imported}", String(result.imported))
+          .replace("{restored}", String(result.restored)).replace("{duplicates}", String(result.duplicates))
+          .replace("{failed}", String(result.skipped.length));
+      }
+    } catch (error) { setDevelopError(String(error)); }
+    finally { setLutBusy(false); }
+    return null;
+  };
+  const hideLutEntry = async (id: string): Promise<void> => {
+    try { const library = await hideLut(id); if (library !== null) applyLutLibrary(library); }
+    catch (error) { setDevelopError(String(error)); }
+  };
 
   /** 库根目录（拼缩略图绝对路径用）。 */
   const root = createMemo(
@@ -193,7 +273,9 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
   const current = createMemo(() => strip.current());
   // 只把稳定的 id 当作换图依赖：缩略图刷新会换 ViewerPhoto 对象引用。
   const currentAssetId = createMemo(() => current()?.id ?? null);
-  const [compareReference, setCompareReference] = createSignal<"sooc" | "raw">("sooc");
+  const [compareReference, setCompareReference] = createSignal<string>("sooc");
+  let compareReferenceSequence = 0;
+  let lastCompareReferenceKey = "";
   let toolAssetId: string | null | undefined;
   createEffect(() => {
     const id = currentAssetId();
@@ -237,6 +319,14 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
   /** 编辑栈落库 / 读取的错误（**不静默**：画面还是对的，但改动会丢，必须让人看见）。 */
   const [developError, setDevelopError] = createSignal<string | null>(null);
   const [resetOpen, setResetOpen] = createSignal(false);
+  let resetTarget: string | null = null;
+  const [lutBusy, setLutBusy] = createSignal(false);
+  const [issueLibrary, setIssueLibrary] = createSignal<IssueLibrary | null>(null);
+  const [issueFocusTick, setIssueFocusTick] = createSignal(0);
+  const [finalizeOpen, setFinalizeOpen] = createSignal(false);
+  const [finalizeName, setFinalizeName] = createSignal("");
+  const [finalizeBusy, setFinalizeBusy] = createSignal(false);
+  const issueDestroy = createEasyDestroy();
 
   const applyRenderState = (state: EditorRenderState | null): void => {
     const expected = untrack(expectedPhotoPath);
@@ -391,11 +481,34 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
   });
 
   createEffect(() => {
-    if (props.store.editBase() !== "raw") setCompareReference("sooc");
+    if (props.store.editBase() !== "raw" && compareReference() === "raw") setCompareReference("sooc");
   });
   createEffect(() => {
-    if (!rendererBound() || props.store.tool() !== "compare") return;
-    sendIntent({ kind: "setReferenceBase", base: compareReference() });
+    const bound = rendererBound();
+    const tool = props.store.tool();
+    const choice = compareReference();
+    const assetId = currentAssetId();
+    const repositoryId = store.repositoryId();
+    const path = expectedPhotoPath();
+    const library = issueLibrary();
+    if (!bound || tool !== "compare" || assetId == null || repositoryId === null || path === null) {
+      lastCompareReferenceKey = "";
+      return;
+    }
+    const issueId = choice.startsWith("issue:") ? Number(choice.slice(6)) : null;
+    if (issueId !== null && (!Number.isSafeInteger(issueId) || !library?.issues.some((issue) => issue.id === issueId))) return;
+    const key = `${repositoryId}:${assetId}:${path}:${choice}`;
+    if (lastCompareReferenceKey === key) return;
+    lastCompareReferenceKey = key;
+    const sequence = ++compareReferenceSequence;
+    if (issueId !== null) {
+      void setEditorReferenceIssue(repositoryId, Number(assetId), issueId, path, sequence)
+        .catch((error: unknown) => {
+          if (sequence === compareReferenceSequence && expectedPhotoPath() === path) setDevelopError(String(error));
+        });
+    } else if (choice === "sooc" || choice === "raw") {
+      sendIntent({ kind: "setReferenceBase", base: choice, sequence });
+    }
   });
 
   /** 三工具互斥由 store 管；渲染线程只接收对比开关并保存分线。 */
@@ -411,11 +524,13 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
     const assetId = currentAssetId();
     const repositoryId = store.repositoryId();
     const editBase = props.store.editBase();
+    sourceRevision();
     let active = true;
     onCleanup(() => {
       active = false;
     });
     setExpectedPhotoPath(null);
+    setCompareReference("sooc");
     untrack(() => applyRenderState(props.store.renderState()));
     if (assetId === null || assetId === undefined || repositoryId === null) {
       void setEditorPhoto(null).catch(() => undefined);
@@ -470,6 +585,17 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
     return pending;
   };
 
+  const currentDevelopStack = (): DevelopStack => {
+    const payload = props.store.developPayload();
+    return { values: payload.values, curves: payload.curves, asShotK: payload.asShotTemperature,
+      sourceBase: props.store.editBase(), lensProfile: payload.lensProfile,
+      baseCurveProfile: props.store.baseCurveProfile(),
+      baseCurvePoints: props.store.baseCurvePoints()?.map(([x,y]) => [x,y] as [number,number]) ?? null,
+      autoAdjust: props.store.autoAdjustBaseline(),
+      lutId: props.store.lutId(), lutEnabled: props.store.lutEnabledSetting(),
+      lensEnabled: payload.lensEnabled, nrMethod: payload.nrMethod, geometry: payload.geometry };
+  };
+
   /**
    * **落库**（覆盖式）：松手 / 点重置时把当前载荷写进 catalog。
    *
@@ -485,19 +611,10 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
     if (!props.store.developDirty()) return;
     const rev = props.store.developRev();
     const path = currentPath();
-    const payload = props.store.developPayload();
-    const stack = {
-      values: payload.values,
-      curves: payload.curves,
-      asShotK: payload.asShotTemperature,
-      sourceBase: props.store.editBase(),
-      lensProfile: payload.lensProfile,
-      lensEnabled: payload.lensEnabled,
-      nrMethod: payload.nrMethod,
-      geometry: payload.geometry,
-    };
+    const stack = currentDevelopStack();
     void persist(async () => {
-      await commitDevelopStack(repositoryId, Number(assetId), stack);
+      const committed = await commitDevelopStack(repositoryId, Number(assetId), stack);
+      store.noteDevelopCommit(committed);
       if (path !== null) {
         try {
           await refreshDevelopPreview(path);
@@ -541,31 +658,23 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
     }).catch((error: unknown) => setDevelopError(String(error)));
   };
 
-  /** 重置全部：库里清空 + 参数回默认（一次点击两个动作，别只做一半）。 */
-  const resetDevelop = (): void => {
-    const assetId = currentAssetId();
-    const repositoryId = store.repositoryId();
-    if (assetId === null || assetId === undefined || repositoryId === null) return;
-    if (developReadyAssetId() !== assetId) return;
-    props.store.resetParams();
-    props.store.setEditBase(props.store.editBaseAvailable().raw ? "raw" : "sooc");
-    const rev = props.store.developRev();
-    const path = currentPath();
-    void persist(() => resetDevelopStack(repositoryId, Number(assetId)))
-      .then(() => {
-        if (currentAssetId() === assetId && props.store.developRev() === rev) {
-          props.store.markCommitted(rev);
-        }
-        if (path !== null) {
-          thumbs.refresh(path);
-          overviewImages.refresh(path);
-        }
-      })
-      .catch((error: unknown) => {
-        console.error("[editor] 重置编辑栈失败", error); // i18n-exempt: 控制台诊断
-        setDevelopError(String(error));
-      });
+  const canReset = (): boolean => enabled() && !props.store.autoAdjusting() && props.store.resetStage() !== "none";
+  const resetContext = (): string => `${store.repositoryId()}:${currentAssetId()}:${props.store.editBase()}`;
+  const resetDevelop = (stage: "edits" | "automatic"): void => {
+    if (!canReset() || props.store.resetStage() !== stage) return;
+    props.store.resetDevelop(stage);
+    commitDevelop();
   };
+  const requestReset = (): void => {
+    if (!canReset()) return;
+    if (props.store.resetStage() === "automatic") { resetDevelop("automatic"); return; }
+    resetTarget = resetContext();
+    setResetOpen(true);
+  };
+  createEffect(() => {
+    const context = resetContext();
+    if (resetOpen() && resetTarget !== context) setResetOpen(false);
+  });
 
   /**
    * **撤销 / 重做之后重读编辑栈**。
@@ -583,13 +692,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
     void getDevelopStack(repositoryId, Number(assetId))
       .then(async (stack) => {
         if (stack === null || currentAssetId() !== assetId) return;
-        props.store.loadDevelop(stack.values, stack.curves, {
-          sourceBase: stack.sourceBase ?? "raw",
-          lensProfile: stack.lensProfile ?? null,
-          lensEnabled: stack.lensEnabled ?? null,
-          nrMethod: stack.nrMethod === "high" ? "high" : null,
-          geometry: stack.geometry ?? null,
-        });
+        props.store.loadDevelop(stack.values, stack.curves, developSettingsOf(stack));
         if (path !== null) {
           await refreshDevelopPreview(path);
           thumbs.refresh(path);
@@ -625,6 +728,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
   };
 
   const lensQuery = createLensQuery(getLensMatch);
+  const [baseCurveLibrary, setBaseCurveLibrary] = createSignal<BaseCurveLibrary | null>(null);
   let autoAdjustRevision = 0;
   onCleanup(() => { autoAdjustRevision++; lensQuery.dispose(); });
 
@@ -642,18 +746,9 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
       // 换照片 / 卸载：① 还没落库的改动存到**上一张**上；② 把 preview 更新到最后状态
       if (previous === null) return;
       if (untrack(() => props.store.developDirty())) {
-        const payload = untrack(() => props.store.developPayload());
+        const stack = untrack(currentDevelopStack);
         void persist(async () => {
-          await commitDevelopStack(previous.repositoryId, previous.assetId, {
-            values: payload.values,
-            curves: payload.curves,
-            asShotK: payload.asShotTemperature,
-            sourceBase: untrack(() => props.store.editBase()),
-            lensProfile: payload.lensProfile,
-            lensEnabled: payload.lensEnabled,
-            nrMethod: payload.nrMethod,
-            geometry: payload.geometry,
-          });
+          await commitDevelopStack(previous.repositoryId, previous.assetId, stack);
           // 落库之后才刷新，preview 才能读到这份栈。
           if (previous.path !== null) await refreshDevelopPreview(previous.path);
         })
@@ -669,9 +764,15 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
     setDevelopReadyAssetId(null);
     autoAdjustRevision++;
     lensQuery.select(previous?.repositoryId ?? null, previous?.assetId ?? null);
+    setBaseCurveLibrary(null);
     props.store.setAutoAdjusting(false);
     if (previous === null) return;
     const id = previous.assetId;
+    void getBaseCurveProfiles(previous.repositoryId, id).then((library) => {
+      if (active) setBaseCurveLibrary(library);
+    }).catch((error: unknown) => {
+      if (active) setDevelopError(String(error));
+    });
     // 旧图的参数不能在新图载入期间继续被送进显影线程。
     untrack(() => {
       props.store.loadDevelop({}, {}, {});
@@ -688,13 +789,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
         if (!active) return;
         // 读的过程中用户已经动过：**不要**用库里那份盖掉他的改动
         if (stack !== null && props.store.developRev() === revAtRequest) {
-          props.store.loadDevelop(stack.values, stack.curves, {
-            sourceBase: stack.sourceBase ?? "raw",
-            lensProfile: stack.lensProfile ?? null,
-            lensEnabled: stack.lensEnabled ?? null,
-            nrMethod: stack.nrMethod === "high" ? "high" : null,
-            geometry: stack.geometry ?? null,
-          });
+          props.store.loadDevelop(stack.values, stack.curves, developSettingsOf(stack));
         }
         setDevelopReadyAssetId(previous.assetId.toString());
       })
@@ -707,31 +802,66 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
 
   });
 
+  const canAutoAdjust = (): boolean => enabled() && props.store.editBase() === "raw"
+    && props.store.editBaseAvailable().raw && props.store.editBaseAvailable().bitmap
+    && baseCurveLibrary()?.cameraMake != null && baseCurveLibrary()?.cameraModel != null
+    && !props.store.autoAdjusting();
+
+  const selectBaseCurve = (id: string | null): void => {
+    if (!enabled() || props.store.editBase() !== "raw" || baseCurveLibrary()?.cameraMake == null) return;
+    const profile = baseCurveLibrary()?.profiles.find((entry) => entry.id === id);
+    if (id !== "none" && profile === undefined) return;
+    props.store.setBaseCurve(id, profile?.points ?? null);
+    commitDevelop();
+  };
+
+  const renameBaseCurve = async (id: string, name: string): Promise<void> => {
+    const assetId = currentAssetId();
+    const repositoryId = store.repositoryId();
+    if (!enabled() || assetId == null || repositoryId === null) throw new Error(t("editor.baseCurve.failed"));
+    const profile = await renameBaseCurveProfile(repositoryId, Number(assetId), id, name);
+    if (profile === null) throw new Error(t("editor.baseCurve.renameFailed"));
+    if (currentAssetId() !== assetId || store.repositoryId() !== repositoryId) return;
+    setBaseCurveLibrary((library) => library === null ? null : {
+      ...library, profiles: library.profiles.map((entry) => entry.id === id ? profile : entry),
+    });
+  };
+
   const autoAdjust = async (): Promise<void> => {
-    if (!enabled() || props.store.autoAdjusting()) return;
+    if (!canAutoAdjust()) return;
     const request = ++autoAdjustRevision;
     const photo = currentAssetId();
     const repository = store.repositoryId();
     const base = props.store.editBase();
-    const chosen = props.store.lensProfile();
+    const rev = props.store.developRev();
     props.store.setAutoAdjusting(true);
     try {
-      const result = await lensQuery.refresh();
+      const result = await fitBaseCurveAndAutoAdjust(repository!, Number(photo));
       if (request !== autoAdjustRevision || photo !== currentAssetId() ||
           repository !== store.repositoryId() || base !== props.store.editBase() ||
-          chosen !== props.store.lensProfile()) return;
-      if (result === null) {
-        setDevelopError(t("editor.lens.autoFailed"));
-      } else if (result.detected === null) {
-        setDevelopError(t("editor.lens.notFound"));
-      } else {
-        batch(() => {
-          props.store.setLensProfile(result.detected!.key);
-          props.store.setLensEnabled(true);
+          rev !== props.store.developRev()) return;
+      if (result === null) throw new Error(t("editor.baseCurve.failed"));
+      const lens = await lensQuery.refresh();
+      if (request !== autoAdjustRevision || photo !== currentAssetId() ||
+          repository !== store.repositoryId() || base !== props.store.editBase() ||
+          rev !== props.store.developRev()) return;
+      batch(() => {
+        props.store.setBaseCurve(result.profile.id, result.profile.points);
+        props.store.applyAutoAdjust({
+          values: { exposure: result.exposure, contrast: result.contrast, saturation: result.saturation },
+          lensProfile: lens?.detected?.key ?? null,
+          lensEnabled: lens?.detected ? true : null,
+          nrMethod: null,
         });
-        setDevelopError(null);
-        commitDevelop();
-      }
+      });
+      setBaseCurveLibrary((current) => current === null ? current : {
+        ...current,
+        profiles: [...current.profiles.filter((profile) => profile.id !== result.profile.id), result.profile],
+      });
+      setDevelopError(null);
+      commitDevelop();
+    } catch (error) {
+      if (request === autoAdjustRevision) setDevelopError(String(error));
     } finally {
       if (request === autoAdjustRevision) props.store.setAutoAdjusting(false);
     }
@@ -773,9 +903,13 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
     cycleChrome: () => props.store.cycleTab(),
     resetChrome: () => props.store.resetChrome(),
     hasPhoto: () => current() !== null,
-    resetDevelop: () => setResetOpen(true),
+    resetDevelop: requestReset,
+    canReset,
     commitDevelop,
     autoAdjust: () => void autoAdjust(),
+    canAutoAdjust,
+    canFinalize: () => enabled() && (issueLibrary()?.canFinalize ?? false),
+    finalize: () => { setFinalizeName(issueLibrary()?.suggestedName ?? ""); setFinalizeOpen(true); },
     fullscreenTarget,
   };
 
@@ -815,6 +949,67 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
 
   const enabled = (): boolean =>
     current() !== null && developReadyAssetId() === currentAssetId() && !locked();
+
+
+  createEffect(() => {
+    const assetId = currentAssetId();
+    const repositoryId = store.repositoryId();
+    const ready = developReadyAssetId();
+    props.store.developRev();
+    if (assetId === null || assetId === undefined || repositoryId === null || ready !== assetId) {
+      setIssueLibrary(null);
+      return;
+    }
+    const stack = currentDevelopStack();
+    let active = true;
+    const timer = window.setTimeout(() => {
+      void getIssueLibrary(repositoryId, Number(assetId), locale() === "en-US", stack)
+        .then((library) => { if (active) setIssueLibrary(library); })
+        .catch((error: unknown) => { if (active) setDevelopError(String(error)); });
+    }, 60);
+    onCleanup(() => { active = false; window.clearTimeout(timer); });
+  });
+  const selectIssue = (stack: DevelopStack): void => {
+    if (!enabled()) return;
+    props.store.applyDevelop(stack.values, stack.curves, developSettingsOf(stack));
+    commitDevelop();
+  };
+  const finalize = async (): Promise<void> => {
+    if (!enabled() || !issueLibrary()?.canFinalize || finalizeBusy()) return;
+    const repositoryId = store.repositoryId();
+    const assetId = currentAssetId();
+    if (repositoryId === null || assetId === null || assetId === undefined) return;
+    const name = finalizeName().trim();
+    if (name === "") return;
+    setFinalizeBusy(true);
+    try {
+      commitDevelop();
+      await persistTail;
+      const library = await createIssue(repositoryId, Number(assetId), name, locale() === "en-US");
+      if (library !== null) {
+        setIssueLibrary(library);
+        setFinalizeOpen(false);
+        setIssueFocusTick((value) => value + 1);
+        if (library.snapshotError !== null) setDevelopError(library.snapshotError);
+      }
+    } catch (error) { setDevelopError(String(error)); }
+    finally { setFinalizeBusy(false); }
+  };
+  const requestDeleteIssue = (target: Issue, event: ShiftLikeEvent): void => {
+    const repositoryId = store.repositoryId();
+    const assetId = currentAssetId();
+    if (repositoryId === null || assetId == null) return;
+    issueDestroy.request(t("editor.issue.deleteConfirm").replace("{name}", target.name), async () => {
+      const current = () => store.repositoryId() === repositoryId && currentAssetId() === assetId;
+      if (current() && compareReference() === `issue:${target.id}`) setCompareReference("sooc");
+      try {
+        const library = await deleteIssue(repositoryId, Number(assetId), target.id, locale() === "en-US");
+        if (current() && library !== null) setIssueLibrary(library);
+      } catch (error) { if (current()) setDevelopError(String(error)); }
+    }, event, t("editor.issue.deleteTitle"));
+  };
+  createEffect(() => { store.repositoryId(); currentAssetId(); issueDestroy.cancel(); });
+  onCleanup(issueDestroy.cancel);
 
   createEffect(() => {
     const item = store.anchorItem();
@@ -916,7 +1111,9 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
             .filter(Boolean)
             .join(" ")}
         >
-          <LutPanel store={props.store} />
+          <LutPanel store={props.store} onCreateCategory={createCategory} onImport={importDirectory}
+            onSelect={(id) => { if (!enabled()) return; props.store.setLut(id, true); commitDevelop(); }}
+            onToggle={commitDevelop} onHide={hideLutEntry} />
         </aside>
 
         {/*
@@ -957,14 +1154,20 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
           {/* 状态栏：与看图态**同一条**（`PhotoStatusBar`），只换内容 */}
           <PhotoStatusBar info={viewingInfoOf(current())}
             compare={props.store.tool() === "compare" ? {
-              reference: t(props.store.renderState()?.referenceBase === "sooc" ? "editor.base.sooc" : "editor.base.raw"),
+              reference: compareReference().startsWith("issue:")
+                ? (issueLibrary()?.issues.find((entry) => `issue:${entry.id}` === compareReference())?.name ?? t("editor.issue.latest"))
+                : t(compareReference() === "raw" ? "editor.base.raw" : "editor.base.sooc"),
               result: t("editor.compare.result"),
               choices: [
-                { value: "sooc", label: t("editor.base.sooc"), selected: props.store.renderState()?.referenceBase === "sooc", disabled: !props.store.editBaseAvailable().bitmap },
-                { value: "raw", label: t("editor.base.raw"), selected: props.store.renderState()?.referenceBase === "raw", disabled: props.store.editBase() !== "raw" },
+                { value: "sooc", label: t("editor.base.sooc"), selected: compareReference() === "sooc", disabled: !props.store.editBaseAvailable().bitmap },
+                { value: "raw", label: t("editor.base.raw"), selected: compareReference() === "raw", disabled: props.store.editBase() !== "raw" },
+                ...(issueLibrary()?.issues ?? []).map((issue) => ({
+                  value: `issue:${issue.id}`, label: `${issue.name} · ${issue.sourceBase.toUpperCase()}`,
+                  selected: compareReference() === `issue:${issue.id}`,
+                })),
               ],
               onReferenceChange: (value: string) => {
-                if (value === "sooc" || value === "raw") setCompareReference(value);
+                if (value === "sooc" || value === "raw" || value.startsWith("issue:")) setCompareReference(value);
               },
             } : undefined} />
         </main>
@@ -984,12 +1187,24 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
             current={current()}
             info={info()}
             lensQuery={lensQuery.state()}
+            baseCurveLibrary={baseCurveLibrary()}
+            issues={issueLibrary()}
+            issueFocusTick={issueFocusTick()}
+            onSelectIssue={selectIssue}
+            onDeleteIssue={requestDeleteIssue}
+            loadIssueThumb={(issueId) => {
+              const repo = store.repositoryId(); const asset = currentAssetId();
+              return repo === null || asset === null || asset === undefined ? Promise.resolve(null)
+                : getIssueThumb(repo, Number(asset), issueId, "strip");
+            }}
+            onSelectBaseCurve={selectBaseCurve}
+            onRenameBaseCurve={renameBaseCurve}
             onRefreshLens={() => { void lensQuery.refresh(); }}
             overviewImages={overviewImages}
             loadHistogram={loadHistogram}
             onCommit={commitDevelop}
             onToolConfirm={confirmTool}
-            error={developError()}
+            error={developError() ?? store.error()}
             locked={locked()}
             zoom={props.store.renderState()?.zoom ?? null}
             onZoomBy={(factor) => sendIntent({ kind: "zoomBy", factor })}
@@ -997,13 +1212,25 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
           />
         </aside>
       </div>
+      <Dialog open={finalizeOpen()} onOpenChange={setFinalizeOpen} title={t("editor.issue.newTitle")}
+        footer={<><Button variant="secondary" onClick={() => setFinalizeOpen(false)}>{t("common.cancel")}</Button>
+          <Button variant="primary" disabled={finalizeBusy() || finalizeName().trim() === ""}
+            onClick={() => void finalize()}>{t("editor.issue.save")}</Button></>}>
+        <input class="w-full rounded-ui bg-surface-track px-2 py-2 text-fg-1" value={finalizeName()}
+          maxlength={80} aria-label={t("editor.issue.name")}
+          onInput={(event) => setFinalizeName(event.currentTarget.value)} />
+      </Dialog>
+      <EasyDestroyHost open={issueDestroy.pending() !== null} title={issueDestroy.pending()?.title}
+        message={issueDestroy.pending()?.message ?? ""} confirmLabel={t("editor.issue.delete")}
+        onCancel={issueDestroy.cancel} onConfirm={issueDestroy.confirm} />
       <ConfirmDialog
         open={resetOpen()}
         title={t("editor.reset.title")}
         message={t("editor.reset.confirm")}
+        description={<p class="mt-2 text-fg-2">{t("editor.reset.keepBaseCurve")}</p>}
         confirmLabel={t("editor.reset.action")}
         onCancel={() => setResetOpen(false)}
-        onConfirm={() => { setResetOpen(false); resetDevelop(); }}
+        onConfirm={() => { const valid = resetTarget === resetContext(); setResetOpen(false); if (valid) resetDevelop("edits"); }}
       />
     </div>
   );

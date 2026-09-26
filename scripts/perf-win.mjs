@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 浏览模式**真机性能采样**（`plans/M2-W3.md` 步骤 6.4 —— M2 收口的最后一项编码活）。
+ * 浏览模式**真机性能采样**（`specs/M2-W3.md` 步骤 6.4 —— M2 收口的最后一项编码活）。
  *
  * ```bash
  * pnpm perf:win --launch     # 脚本自己拉起 Windows exe（带 CDP 参数），测完窗口留着，手动关
@@ -397,7 +397,7 @@ async function main() {
     for (const note of notes) console.log(`⚠ ${note}`);
     if (report.consoleErrors.length > 0) console.log(`控制台错误     ${JSON.stringify(report.consoleErrors)}`);
     console.log(`报告           ${REPORT}`);
-    console.log("\n✓ 采样完成 —— 窗口可以关了；60fps 与体感结论由人类填写（plans/M2-W3.md §5）");
+    console.log("\n✓ 采样完成 —— 窗口可以关了；60fps 与体感结论由人类填写（specs/M2-W3.md §5）");
   } finally {
     cdp.close();
   }

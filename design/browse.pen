@@ -10588,6 +10588,63 @@
                 },
                 {
                   "type": "frame",
+                  "id": "oBXY8",
+                  "name": "InfoSection / 展示定稿",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 6,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "fMQBt",
+                      "name": "InfoTitle / 展示定稿",
+                      "fill": "$fg-2",
+                      "content": "展示定稿",
+                      "fontFamily": "Inter",
+                      "fontSize": 15,
+                      "fontWeight": "600"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "GFILn",
+                      "name": "IssueChoice / 当前照片",
+                      "width": "fill_container",
+                      "height": 32,
+                      "fill": "$surface-layer",
+                      "cornerRadius": 4,
+                      "padding": [
+                        0,
+                        8
+                      ],
+                      "justifyContent": "space_between",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "NLeKI",
+                          "name": "IssueChoice / 选中名称",
+                          "fill": "$fg-1",
+                          "content": "清冷蓝调 01 · RAW",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "IRAjL",
+                          "name": "IssueChoice / 展开箭头",
+                          "fill": "$fg-3",
+                          "content": "⌄",
+                          "fontFamily": "Inter",
+                          "fontSize": 16,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
                   "id": "robhn",
                   "name": "InfoSection / 标签",
                   "width": "fill_container",

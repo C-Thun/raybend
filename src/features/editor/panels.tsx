@@ -1,3 +1,4 @@
+import type { ShiftLikeEvent } from "../../lib/easy-destroy.ts";
 import type { LensQueryState } from "./lens-query.ts";
 /**
  * 编辑右栏：**三个各自独立、同时在场**的页签组（`DESIGN.md` §14.9、`design/editor.md` §2.2）。
@@ -24,12 +25,14 @@ import type { LensQueryState } from "./lens-query.ts";
  * 裁切/旋转的画布草稿由 Rust 渲染线程持有，控制块只传选项与确认。
  */
 
-import { For, Show, createEffect, createSignal, onCleanup, type JSX } from "solid-js";
-import { IconChevronDown, IconLoader2 } from "@tabler/icons-solidjs";
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, type JSX } from "solid-js";
+import { IconChevronDown, IconLoader2, IconPencil, IconTrash } from "@tabler/icons-solidjs";
 
-import { Button } from "../../components/ui/Button.tsx";
+import { Button, IconButton } from "../../components/ui/Button.tsx";
 import { MetadataRows } from "../../components/ui/MetadataRows.tsx";
 import type { ExifTag } from "../../api/types.ts";
+import type { DevelopStack } from "../../api/editor.ts";
+import type { IssueLibrary, Issue } from "../../api/issues.ts";
 import { SegmentedControl } from "../../components/ui/SegmentedControl.tsx";
 import { HistogramPanel } from "../../components/ui/HistogramPanel.tsx";
 import { Switch } from "../../components/ui/Form.tsx";
@@ -39,6 +42,7 @@ import { appliedLensProfile, chosenLensProfile, searchLensProfiles, suggestedLen
 import { t } from "../../i18n/index.ts";
 import type { MessageKey } from "../../i18n/index.ts";
 import type { LensMatch } from "../../api/types.ts";
+import type { BaseCurveLibrary } from "../../api/editor.ts";
 import { CompactChoice } from "../../components/ui/CompactChoice.tsx";
 import { HISTOGRAM_SAMPLES, type HistogramCounts } from "../../lib/histogram.ts";
 import type { ThumbQueue } from "../../components/ui/thumb-queue.ts";
@@ -106,6 +110,14 @@ export interface EditorPanelsProps {
   info: EditorPhotoInfo | null;
   lensQuery: LensQueryState;
   onRefreshLens: () => void;
+  baseCurveLibrary: BaseCurveLibrary | null;
+  issues: IssueLibrary | null;
+  issueFocusTick: number;
+  onSelectIssue: (stack: DevelopStack) => void;
+  onDeleteIssue: (issue: Issue, event: ShiftLikeEvent) => void;
+  loadIssueThumb: (issueId: number) => Promise<Uint8Array | null>;
+  onSelectBaseCurve: (id: string | null) => void;
+  onRenameBaseCurve: (id: string, name: string) => Promise<void>;
   /** 总览专用 Screen 全图队列；胶片带继续使用 grid 小图。 */
   overviewImages: ThumbQueue;
   /** 直方图取数（Rust 算的；注入进来，本模块不碰 `api`） */
@@ -145,6 +157,7 @@ export function EditorPanels(props: EditorPanelsProps): JSX.Element {
     if (tool === "crop" || tool === "rotate") scrollHost?.scrollTo({ top: 0, behavior: "instant" });
   });
   const [viewTab, setViewTab] = createSignal<ViewTab>("view");
+  createEffect(() => { if (props.issueFocusTick > 0) { setViewTab("issues"); scrollHost?.scrollTo({ top: 0, behavior: "instant" }); } });
   const [paramTab, setParamTab] = createSignal<ParamGroup>("tone");
   const [curveTab] = createSignal<CurveTab>("curve");
 
@@ -193,7 +206,8 @@ export function EditorPanels(props: EditorPanelsProps): JSX.Element {
           />
         </Show>
         <Show when={viewTab() === "issues"}>
-          <IssuesTab enabled={props.enabled} />
+          <IssuesTab enabled={props.enabled} store={props.store} library={props.issues}
+            onSelect={props.onSelectIssue} onDelete={props.onDeleteIssue} loadThumb={props.loadIssueThumb} />
         </Show>
         <Show when={viewTab() === "info"}>
           <InfoTab info={props.info} />
@@ -213,7 +227,7 @@ export function EditorPanels(props: EditorPanelsProps): JSX.Element {
         />
         <div class="flex flex-col gap-2.5">
           {/* 清晰度页签多一块：**降噪方式**（快速 / 高质量）—— 人类 2026-09-25 拍板
-              「两档都做，先保底再移植」：快速档实时跟手，高质量档在后台跑（见 `plans/M3-W4.md` §2.1） */}
+              「两档都做，先保底再移植」：快速档实时跟手，高质量档在后台跑（见 `specs/M3-W4.md` §2.1） */}
           <Show when={paramTab() === "detail"}>
             <div class="flex items-center justify-between gap-2 pb-0.5">
               <span class="text-fs-0 text-fg-2">{t("editor.detail.nrMethod")}</span>
@@ -292,6 +306,9 @@ export function EditorPanels(props: EditorPanelsProps): JSX.Element {
           current={props.current}
           loadHistogram={props.loadHistogram}
           onCommit={props.onCommit}
+          onRenameBaseCurve={props.onRenameBaseCurve}
+          baseCurveLibrary={props.baseCurveLibrary}
+          onSelectBaseCurve={props.onSelectBaseCurve}
         />
       </section>
     </div>
@@ -351,29 +368,67 @@ function OverviewTab(props: {
   );
 }
 
-/** 定稿页签：W1 只有一条写死的 SOOC + 「编辑中」占位（issue 落库在 W3）。 */
-function IssuesTab(props: { enabled: boolean }): JSX.Element {
-  return (
-    <div class="flex flex-col gap-2" data-editor-issues>
-      <div class="flex items-center gap-2 rounded-ui bg-surface-track px-2 py-1.5">
-        <span class="rounded-ui bg-brand px-1.5 py-0.5 text-fs-0 text-fg-on-brand">
-          {t("editor.issue.sooc")}
-        </span>
-        <span class="min-w-0 flex-1 truncate text-fs-1 text-fg-3">
-          {t("editor.issue.soocHint")}
-        </span>
-      </div>
-      <div class="flex items-center gap-2 rounded-ui bg-surface-track px-2 py-1.5">
-        <span class="rounded-ui bg-state-selected px-1.5 py-0.5 text-fs-0 text-fg-1">
-          {t("editor.issue.current")}
-        </span>
-      </div>
-      <Button variant="secondary" disabled={!props.enabled}>
-        {t("editor.issue.finalize")}
-      </Button>
-      <PendingNote text={t("editor.issue.later")} />
+/** 定稿页签：选中态来自当前配置哈希；用户定稿永不覆盖。 */
+function IssuesTab(props: { enabled: boolean; store: EditorStore; library: IssueLibrary | null;
+  onSelect: (stack: DevelopStack) => void; onDelete: (issue: Issue, event: ShiftLikeEvent) => void;
+  loadThumb: (issueId: number) => Promise<Uint8Array | null> }): JSX.Element {
+  const isSelected = (kind: "sooc" | "raw" | "latest" | number): boolean => {
+    const selected = props.library?.selection;
+    return typeof kind === "number" ? typeof selected === "object" && selected.issue === kind : selected === kind;
+  };
+  const source = (base: "sooc" | "raw"): DevelopStack => ({
+    sourceBase: base, values: {}, curves: {}, asShotK: props.store.asShotTemperature(),
+    lensProfile: null, lensEnabled: null, baseCurveProfile: null, baseCurvePoints: null,
+    lutId: null, lutEnabled: null, nrMethod: null, geometry: null,
+  });
+  return <div class="flex flex-col gap-1" data-editor-issues>
+    <For each={(["sooc", "raw"] as const)}>{(base) =>
+      <button type="button" disabled={!props.enabled || !(base === "raw" ? props.store.editBaseAvailable().raw : props.store.editBaseAvailable().bitmap)}
+        class="flex min-h-12 items-center gap-2 rounded-ui px-1 text-left hover:bg-state-hover disabled:opacity-50"
+        classList={{ "bg-state-selected": isSelected(base) }} onClick={() => props.onSelect(source(base))}>
+        <span class="h-10 w-14 shrink-0 rounded-ui bg-surface-bar" />
+        <span class="min-w-0 flex-1"><span class="block text-fs-2 text-fg-1">{base.toUpperCase()}</span>
+          <span class="block text-fs-0 text-fg-3">{t(base === "raw" ? "editor.issue.rawHint" : "editor.issue.soocHint")}</span></span>
+      </button>}
+    </For>
+    <div class="flex min-h-12 items-center gap-2 rounded-ui px-1" classList={{ "bg-state-selected": isSelected("latest") }}>
+      <span class="h-10 w-14 shrink-0 rounded-ui bg-surface-bar" />
+      <span class="min-w-0 flex-1"><span class="block text-fs-2 text-fg-1">{t("editor.issue.latest")}</span>
+        <span class="block text-fs-0 text-fg-3">{t("editor.issue.latestHint")}</span></span>
     </div>
-  );
+    <For each={props.library?.issues ?? []}>{(issue) =>
+      <div class="group flex min-h-12 items-center gap-1 rounded-ui px-1 hover:bg-state-hover"
+        classList={{ "bg-state-selected": isSelected(issue.id) }}>
+        <button type="button" disabled={!props.enabled} onClick={() => props.onSelect(issue.stack)}
+          class="flex min-w-0 flex-1 items-center gap-2 text-left disabled:opacity-50">
+          <IssueThumb issueId={issue.id} load={props.loadThumb} />
+          <span class="min-w-0 flex-1"><span class="block truncate text-fs-2 text-fg-1">{issue.name}</span>
+            <span class="block text-fs-0 text-fg-3">{issue.sourceBase.toUpperCase()} · {new Date(issue.createdAt).toLocaleString()}</span></span>
+        </button>
+        <button type="button" class="opacity-0 group-hover:opacity-100 text-fg-3 hover:text-danger"
+          aria-label={t("editor.issue.delete")} title={t("editor.issue.delete")}
+          onClick={(event) => props.onDelete(issue, event)}><IconTrash size={14} /></button>
+      </div>}
+    </For>
+    <Show when={(props.library?.issues.length ?? 0) === 0}><p class="px-1 py-2 text-fs-0 text-fg-3">{t("editor.issue.empty")}</p></Show>
+  </div>;
+}
+
+function IssueThumb(props: { issueId: number; load: (id: number) => Promise<Uint8Array | null> }): JSX.Element {
+  const [url, setUrl] = createSignal<string | null>(null);
+  createEffect(() => {
+    const id = props.issueId;
+    let active = true;
+    void props.load(id).then((bytes) => {
+      if (!active || bytes === null) return;
+      const next = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: "image/avif" }));
+      setUrl((previous) => { if (previous !== null) URL.revokeObjectURL(previous); return next; });
+    }).catch(() => undefined);
+    onCleanup(() => { active = false; const previous = url(); if (previous !== null) URL.revokeObjectURL(previous); });
+  });
+  return <span class="flex h-10 w-14 shrink-0 overflow-hidden rounded-ui bg-surface-bar">
+    <Show when={url()}>{(src) => <img src={src()} alt="" class="h-full w-full object-cover" />}</Show>
+  </span>;
 }
 
 /** 信息页签：只展示拍摄时的原始文件信息，按调节相关项、拍摄与文件分组。 */
@@ -566,7 +621,53 @@ function CurveTab(props: {
   loadHistogram: (path: string, bins: number) => Promise<HistogramCounts | null>;
   onCommit?: () => void;
   onToolConfirm?: () => void;
+  baseCurveLibrary: BaseCurveLibrary | null;
+  onSelectBaseCurve: (id: string | null) => void;
+  onRenameBaseCurve: (id: string, name: string) => Promise<void>;
 }): JSX.Element {
+  const [baseOpen, setBaseOpen] = createSignal(false);
+  const selectedBase = () => props.baseCurveLibrary?.profiles.find((profile) => profile.id === props.store.baseCurveProfile());
+  const baseLabel = () => selectedBase()?.name ?? t(props.store.baseCurveProfile() === "none"
+    ? "editor.baseCurve.none" : "editor.baseCurve.empty");
+  const [renameTarget, setRenameTarget] = createSignal<string | null>(null);
+  const [renameName, setRenameName] = createSignal("");
+  const [renameBusy, setRenameBusy] = createSignal(false);
+  const [renameError, setRenameError] = createSignal<string | null>(null);
+  let renameRevision = 0;
+  const closeRename = (): void => {
+    renameRevision++;
+    setRenameTarget(null);
+    setRenameBusy(false);
+    setRenameError(null);
+  };
+  const validName = (): boolean => {
+    const name = renameName().trim();
+    return name.length > 0 && Array.from(name).length <= 80 && !/[\u0000-\u001f\u007f-\u009f]/u.test(name);
+  };
+  const profileContext = createMemo(() => JSON.stringify([
+    props.current?.path, props.store.editBase(),
+    props.baseCurveLibrary?.cameraMake, props.baseCurveLibrary?.cameraModel,
+  ]));
+  createEffect(() => {
+    profileContext();
+    closeRename();
+    setBaseOpen(false);
+  });
+  const rename = async (): Promise<void> => {
+    const id = renameTarget();
+    if (id === null || renameBusy() || !validName() || !props.enabled) return;
+    const revision = ++renameRevision;
+    setRenameBusy(true);
+    setRenameError(null);
+    try {
+      await props.onRenameBaseCurve(id, renameName().trim());
+      if (revision === renameRevision) closeRename();
+    } catch (error) {
+      if (revision === renameRevision) setRenameError(String(error));
+    } finally {
+      if (revision === renameRevision) setRenameBusy(false);
+    }
+  };
   /*
    * 背景那层直方图：与总览页签**同一个取数口**（`image_histogram`，Rust 算的）。
    *
@@ -597,6 +698,7 @@ function CurveTab(props: {
   });
 
   return (
+    <div class="flex flex-col gap-2">
     <CurveEditor
       store={props.store}
       histogram={props.store.renderState() === null
@@ -607,6 +709,52 @@ function CurveTab(props: {
       onDragStart={() => props.store.beginParamDrag()}
       onDragEnd={() => props.store.endParamDrag()}
     />
+    <Show when={props.store.editBase() === "raw" && props.baseCurveLibrary?.cameraMake && props.baseCurveLibrary?.cameraModel}>
+      <div class="flex flex-col gap-1" data-base-curve-selector>
+        <span class="text-fs-0 text-fg-2">{t("editor.baseCurve.label")}</span>
+        <Button variant="secondary" disabled={!props.enabled || props.store.autoAdjusting()} class="h-auto min-h-8 w-full justify-between py-1.5"
+          onClick={() => setBaseOpen(true)}>{baseLabel()}</Button>
+        <p class="text-fs-0 text-fg-3">{t("editor.baseCurve.cameraOnly")}</p>
+      </div>
+      <Dialog open={baseOpen()} onOpenChange={setBaseOpen} title={t("editor.baseCurve.label")}>
+        <div class="max-h-64 overflow-y-auto" data-base-curve-results>
+          <button type="button" class="w-full rounded-ui px-2 py-1.5 text-left text-fs-1 text-fg-1 hover:bg-state-hover"
+            aria-pressed={props.store.baseCurveProfile() === "none"}
+            onClick={() => { props.onSelectBaseCurve("none"); setBaseOpen(false); }}>
+            {t("editor.baseCurve.none")}</button>
+          <Show when={(props.baseCurveLibrary?.profiles.length ?? 0) === 0}>
+            <p class="px-2 py-2 text-fs-0 text-fg-3">{t("editor.baseCurve.noProfiles")}</p>
+          </Show>
+          <For each={props.baseCurveLibrary?.profiles ?? []}>{profile =>
+            <div class="flex items-center gap-1 rounded-ui hover:bg-state-hover">
+              <button type="button" class="min-w-0 flex-1 truncate rounded-ui px-2 py-1.5 text-left text-fs-1 text-fg-1"
+                disabled={!props.enabled || props.store.autoAdjusting()}
+                aria-pressed={props.store.baseCurveProfile() === profile.id}
+                onClick={() => { props.onSelectBaseCurve(profile.id); setBaseOpen(false); }}>
+                {profile.name}</button>
+              <IconButton label={t("editor.baseCurve.rename")} disabled={!props.enabled || props.store.autoAdjusting()}
+                onClick={() => { setBaseOpen(false); setRenameName(profile.name); setRenameError(null); setRenameTarget(profile.id); }}>
+                <IconPencil size={14} aria-hidden="true" />
+              </IconButton>
+            </div>
+          }</For>
+        </div>
+      </Dialog>
+      <Dialog open={renameTarget() !== null} onOpenChange={(open) => { if (!open) closeRename(); }}
+        title={t("editor.baseCurve.rename")}
+        footer={<>
+          <Button variant="secondary" onClick={closeRename}>{t("common.cancel")}</Button>
+          <Button variant="primary" disabled={renameBusy() || !validName() || !props.enabled} onClick={() => void rename()}>{t("common.save")}</Button>
+        </>}>
+        <input type="text" value={renameName()} maxLength={160} autofocus
+          aria-label={t("editor.baseCurve.rename")} disabled={renameBusy()}
+          class="h-9 w-full rounded-ui bg-surface-track px-2 text-fs-1 text-fg-1 outline-none"
+          onInput={(event) => setRenameName(event.currentTarget.value)}
+          onKeyDown={(event) => { if (event.key === "Enter" && !event.isComposing) { event.preventDefault(); void rename(); } }} />
+        <Show when={renameError()}><p role="alert" class="mt-2 text-fs-0 text-fg-2">{renameError()}</p></Show>
+      </Dialog>
+    </Show>
+    </div>
   );
 }
 

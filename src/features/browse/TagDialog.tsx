@@ -60,7 +60,7 @@ export interface TagDialogProps {
   store: BrowseStore;
   /** 关窗（保存与取消都走它；取消时草稿直接丢掉） */
   onClose: () => void;
-  /** 保存之后把结果交出去（位置留给 toast / 撤销：`plans/M2-W2-tail.md` 4.2） */
+  /** 保存之后把结果交出去（位置留给 toast / 撤销：`specs/M2-W2-tail.md` 4.2） */
   onDone?: (result: MarkResult | null) => void;
 }
 

@@ -16,9 +16,9 @@
 //! 往界面推进度）都通过注入的回调/接口拿进来，由 `src-tauri` 提供实现。
 
 pub mod fsops;
+pub mod plan;
 pub mod progress;
+pub mod runner;
 pub mod sink;
 pub mod space;
-pub mod runner;
-pub mod plan;
 pub mod template;

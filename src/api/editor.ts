@@ -21,6 +21,7 @@ import type {
   EditorViewportIntent,
   EditorViewportState,
   DevelopParamsPayload,
+  DevelopSettings,
   LensMatch,
   EditGeometry,
 } from "./types.ts";
@@ -85,6 +86,14 @@ export async function sendEditorViewportIntent(
   return call<void>("editor_viewport_intent", { intent });
 }
 
+/** 命名定稿对比参照：Rust 读独立 AVIF 快照并解码，序号挡住迟到结果。 */
+export async function setEditorReferenceIssue(
+  repositoryId: string, assetId: number, issueId: number, photoPath: string, sequence: number,
+): Promise<void> {
+  if (!isTauriRuntime()) return;
+  await call<void>("editor_set_reference_issue", { repositoryId, assetId, issueId, photoPath, sequence });
+}
+
 /** 读取 Rust 工具草稿；只有确认按钮会将它写入编辑栈。 */
 export async function confirmEditorTool(): Promise<EditGeometry | null> {
   if (!isTauriRuntime()) return null;
@@ -127,6 +136,7 @@ export async function getEditorRenderState(): Promise<EditorRenderState | null> 
 
 /** 一张照片的编辑栈（与 Rust 侧 `DevelopStackDto` 逐字对应）。 */
 export interface DevelopStack {
+  autoAdjust?: import("./types.ts").AutoAdjustBaseline | null;
   /** latest 的唯一源；其它调整参数在 SOOC/RAW 切换时共用。 */
   sourceBase?: DevelopEditBase;
   /** 参数 id → 值（**只装与基线不同的项**） */
@@ -146,11 +156,33 @@ export interface DevelopStack {
    * 自动调整和手动选择均保存具体稳定键；`"none"` 保留为兼容的显式清除值。
    */
   lensProfile?: string | null;
+  /** RAW 机型基础曲线的选择和像素快照。 */
+  baseCurveProfile?: string | null;
+  baseCurvePoints?: [number, number][] | null;
+  lutId?: string | null;
+  lutEnabled?: boolean | null;
   /** 配置文件那一半的开关（`null` = 默认开）。**手动三根拉杆不受它影响**。 */
   lensEnabled?: boolean | null;
   /** 降噪方式（`null` = 快速档；`"high"` = BM3D 高质量档）。 */
   nrMethod?: string | null;
   geometry?: EditGeometry | null;
+}
+
+/** 编辑栈 → store 设置的唯一适配，撤销与普通载图共用。 */
+export function developSettingsOf(stack: DevelopStack): DevelopSettings {
+  return {
+    autoAdjust: stack.autoAdjust ?? null,
+    sourceBase: stack.sourceBase ?? "raw",
+    baseCurveProfile: stack.baseCurveProfile ?? null,
+    baseCurvePoints: stack.baseCurvePoints ?? null,
+    lutId: stack.lutId ?? null,
+    lutEnabled: stack.lutEnabled ?? null,
+    asShotK: stack.asShotK ?? null,
+    lensProfile: stack.lensProfile ?? null,
+    lensEnabled: stack.lensEnabled ?? null,
+    nrMethod: stack.nrMethod === "high" ? "high" : null,
+    geometry: stack.geometry ?? null,
+  };
 }
 
 /** 按需读取这张照片的镜头匹配与全库候选；失败携带原因拒绝。 */
@@ -193,11 +225,16 @@ export async function commitDevelopStack(
   // 编辑栈整体作为**一个**参数发过去（不再把六个字段摊在命令参数上）——
   // 加一项设置时只改 DTO，不必再动命令签名
   const payload: DevelopStack = {
+    autoAdjust: stack.autoAdjust ?? null,
     sourceBase: stack.sourceBase ?? "raw",
     values: stack.values,
     curves: stack.curves,
     asShotK: stack.asShotK ?? null,
     lensProfile: stack.lensProfile ?? null,
+    baseCurveProfile: stack.baseCurveProfile ?? null,
+    baseCurvePoints: stack.baseCurvePoints ?? null,
+    lutId: stack.lutId ?? null,
+    lutEnabled: stack.lutEnabled ?? null,
     lensEnabled: stack.lensEnabled ?? null,
     nrMethod: stack.nrMethod ?? null,
     geometry: stack.geometry ?? null,
@@ -207,15 +244,6 @@ export async function commitDevelopStack(
     assetId,
     stack: payload,
   });
-}
-
-/** 重置全部（清掉这张照片的编辑栈）。 */
-export async function resetDevelopStack(
-  repositoryId: string,
-  assetId: number,
-): Promise<DevelopCommitResult | null> {
-  if (!isTauriRuntime()) return null;
-  return call<DevelopCommitResult>("develop_reset", { repositoryId, assetId });
 }
 
 /**
@@ -250,4 +278,35 @@ export async function getDevelopEditTarget(
 ): Promise<DevelopEditTarget | null> {
   if (!isTauriRuntime()) return null;
   return call<DevelopEditTarget>("develop_edit_target", { repositoryId, assetId, base });
+}
+
+/** 同机型基础曲线档案；没有品牌+型号时 camera 字段为 null。 */
+export interface BaseCurveProfile {
+  id: string;
+  name: string;
+  points: [number, number][];
+  sampleCount: number;
+}
+export interface BaseCurveLibrary {
+  cameraMake: string | null;
+  cameraModel: string | null;
+  profiles: BaseCurveProfile[];
+}
+export interface AutoAdjustResult {
+  profile: BaseCurveProfile;
+  exposure: number;
+  contrast: number;
+  saturation: number;
+}
+export async function getBaseCurveProfiles(repositoryId: string, assetId: number): Promise<BaseCurveLibrary | null> {
+  if (!isTauriRuntime()) return null;
+  return call<BaseCurveLibrary>("base_curve_profiles", { repositoryId, assetId });
+}
+export async function renameBaseCurveProfile(repositoryId: string, assetId: number, profileId: string, name: string): Promise<BaseCurveProfile | null> {
+  if (!isTauriRuntime()) return null;
+  return call<BaseCurveProfile>("base_curve_rename", { repositoryId, assetId, profileId, name });
+}
+export async function fitBaseCurveAndAutoAdjust(repositoryId: string, assetId: number): Promise<AutoAdjustResult | null> {
+  if (!isTauriRuntime()) return null;
+  return call<AutoAdjustResult>("base_curve_auto_adjust", { repositoryId, assetId });
 }

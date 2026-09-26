@@ -17,7 +17,7 @@
  * 拖动一条边界只在前后的两段之间挪，别的段一个字节都不动，总和守恒。
  */
 
-import { createSignal, For, type JSX } from "solid-js";
+import { createSignal, For, untrack, type JSX } from "solid-js";
 
 import { minRatiosFrom, moveBoundary, parseSize, toPercents } from "../../lib/stack-resize.ts";
 import { SplitHandle } from "./SplitHandle.tsx";
@@ -130,7 +130,7 @@ export function SplitStack(props: SplitStackProps) {
                */
               style={{ flex: `${sizes()[index()] ?? 0} 1 0%`, ...minCss(segment) }}
             >
-              {segment.content}
+              {untrack(()=>segment.content)}
             </div>
             {index() < props.segments.length - 1 ? (
               <SplitHandle

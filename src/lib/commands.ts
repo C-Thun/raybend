@@ -1,5 +1,5 @@
 /**
- * 命令与快捷键的**纯逻辑**（`plans/M2-W3.md` §2.2/§2.4）。
+ * 命令与快捷键的**纯逻辑**（`specs/M2-W3.md` §2.2/§2.4）。
  *
  * 这一层只认数据：`CommandSpec[]` + 覆盖表 ⇒ 有效键位 + 冲突报告。
  * 不认识 store、不认识 DOM、不 import 任何 feature（`lib/` 的规矩），所以：
@@ -172,7 +172,7 @@ const RISKY_SINGLE_KEYS = new Set(["escape", "enter", "tab", "space", "backspace
 /**
  * 冲突 / 提示报告。
  *
- * 判据见 `plans/M2-W3.md` §2.4：相交作用域的同键 = 冲突（拦）；不相交 = 提示（放行）；
+ * 判据见 `specs/M2-W3.md` §2.4：相交作用域的同键 = 冲突（拦）；不相交 = 提示（放行）；
  * 保留键 = 拦；破坏性命令绑危险单键 = 提示。
  */
 export function detectConflicts(

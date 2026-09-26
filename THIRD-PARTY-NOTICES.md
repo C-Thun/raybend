@@ -25,6 +25,9 @@
 | 【待 M0-4 引入】rusqlite（bundled SQLite） | — | MIT + SQLite 公有领域 | 本地数据库 | 兼容 |
 | ravif（含 rav1e、avif-serialize） | 0.13.0 / 0.8.1 / 0.8.9 | **BSD-3-Clause**（rav1e 为 BSD-2-Clause） | **AVIF 编码**（全系统缓存图的格式，M3-W3 引入） | 兼容（宽松许可，BSD 系与 AGPL-3.0 无冲突） |
 | **dav1d**（经 `image` 的 `avif-native` → `dav1d` / `dav1d-sys` / `av-data`，后三个是 MIT 的 Rust 绑定） | **1.5.0**（Windows 静态库）/ 1.4.1（WSL 系统库） | **BSD-2-Clause**（C 库）；绑定 crate MIT | **AVIF 解码**（Rust 侧要像素的地方：编辑器过渡帧、avif 导入；M3-W3 引入） | 兼容（宽松许可）。**不是 Rust 依赖而是系统/静态 C 库**：Windows 侧由 `scripts/build-dav1d-win.cmd` 从 `https://code.videolan.org/videolan/dav1d` 的 `1.5.0` tag 源码构建成静态库（`C:\rb-deps\dav1d-1.5.0\`，不打 DLL 进安装包）；WSL 侧用发行版包 `libdav1d-dev` |
+| notify / notify-types | 8.2.0 / 2.1.0 | **CC0-1.0** / **MIT OR Apache-2.0** | M4-W1 原生有界文件监听；Linux inotify（MIT）、Windows 系统接口；不递归全库 | 兼容（公有领域贡献许可） |
+| sha2 | 0.10.9 | **MIT OR Apache-2.0** | LUT 原文件字节 SHA-256，导入判重；已有间接依赖改为直接使用 | 兼容（宽松许可） |
+| webp / libwebp-sys / libwebp | 0.3.1 / 0.9.6 / 1.3.1（绑定随附源码） | **MIT OR Apache-2.0** / **MIT** / **BSD-3-Clause** | LUT 封面有损 WebP 质量 80；随 cargo 编译静态 C 编码器，无额外运行时 DLL；解码仍走 image-webp | 兼容（宽松许可）。2026-09-26 替换封面严重丢色的 webp-rust / bin-rs |
 | mp4parse（`avif-native` 带进来） | 0.17 | MPL-2.0 | AVIF/HEIF 容器解析（不碰 AV1 位流） | 兼容（MPL-2.0 为文件级 copyleft，可链接） |
 | rav1e / rayon | 1.12 | MIT / Apache-2.0 | ravif 的多线程编码（`image` 的 `rayon` feature 打开；不开的话 AVIF 编码慢 8 倍以上） | 兼容 |
 | **lensfun**（纯 Rust 移植 `vdavid/lensfun-rs`，crates.io 包名就是 `lensfun`） | **0.7.0** | **代码 LGPL-3.0-or-later**；**内置的 XML 校准库 CC BY-SA 3.0** | **镜头校正**（畸变 / 横向色差 / 暗角；M3-W4 引入）。用法：`Database::load_bundled()` —— XML 库 gzip 后**嵌在二进制里**（约 5 MB 解压后，1543 支镜头），不分发资源文件 | **兼容**：LGPL-3.0 可经 GPL-3.0 路径与本项目 AGPL-3.0 组合（与 rawler 同一套论证）；数据部分原样分发 + 署名（见下方「数据来源」）。⚠️ 上游 API 仍是 0.x（beta），**只允许在 `crates/raybend/src/lens/` 内使用** |
@@ -94,6 +97,7 @@
 | 2026-09-17 | 新增 §1c「官网依赖」：Lucide 图标数据(ISC)、Inter / Noto Sans SC(OFL-1.1)、官网的 Solid 2 线与构建/测试工具 |
 | 2026-09-17 | §1c 补 potrace(GPL-2.0，**开发期描摹工具**，只产坐标不进产物) |
 | 2026-09-24 | 新增 **dav1d 1.5.0（BSD-2-Clause）**：AVIF 解码（`image` 的 `avif-native`）；Windows 走一次性构建的静态库、WSL 走系统包。连带登记 `mp4parse`(MPL-2.0) |
+| 2026-09-26 | 新增 **webp-rust 0.3.1** 与 bin-rs 0.0.10（均 MIT）：LUT 封面质量 80 有损 WebP 编码 |
 | 2026-09-25 | 新增 **lensfun 0.7.0**（纯 Rust 移植，LGPL-3.0-or-later；内置 XML 库 CC BY-SA 3.0）：镜头校正。**数据来源**：LensFun 项目（https://lensfun.github.io/ ，作者 Andrew Zabolotny 与 LensFun 贡献者）的校准数据库，经 `vdavid/lensfun-rs` 原样打包分发；Rust 移植由 David Veszelovszki 完成。M3-W4 引入 |
 
 
@@ -106,3 +110,46 @@
 - 修改：剥离 Tauri / 烘焙落盘逻辑，改为线性 u16 编辑阶段；独立亮度/色度强度、有界并行 tile、取消；修正参考块覆盖、窗口零边缘、SSD 单位与坐标截断；确定性候选选择、两像素粗搜加最优候选邻域细搜。
 - BM3D 算法出处：K. Dabov, A. Foi, V. Katkovnik, K. Egiazarian, “Image Denoising by Sparse 3-D Transform-Domain Collaborative Filtering,” IEEE TIP 2007。https://webpages.tuni.fi/foi/GCF-BM3D/
 - 未引入该学术站点受单独许可约束的 MATLAB/Python 二进制或源代码；本次实际移植源是上述 AGPL 的 RapidRAW 实现。项目许可证全文见根目录 `LICENSE`。
+
+
+## LUT 封面编码修复（2026-09-26）
+
+封面编码改用 `webp`（Jared Forth / contributors，MIT OR Apache-2.0）与 `libwebp-sys`
+（XianYou / Kornel Lesiński / contributors，MIT）封装的 libwebp（Google / contributors，BSD-3-Clause）。
+仅用于封面编码；库随源码静态构建，Windows 复用现有 MSVC 工具链。
+
+- webp：https://github.com/jaredforth/webp
+- libwebp-sys：https://github.com/NoXF/libwebp-sys
+- libwebp：https://github.com/webmproject/libwebp
+
+### libwebp 版权与许可
+
+Copyright (c) 2010, Google Inc. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+  * Redistributions of source code must retain the above copyright
+    notice, this list of conditions and the following disclaimer.
+
+  * Redistributions in binary form must reproduce the above copyright
+    notice, this list of conditions and the following disclaimer in
+    the documentation and/or other materials provided with the
+    distribution.
+
+  * Neither the name of Google nor the names of its contributors may
+    be used to endorse or promote products derived from this software
+    without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.

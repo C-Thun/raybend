@@ -25,6 +25,7 @@ export interface FlowSwitcherOption<TValue extends string> {
   label: string;
   icon?: JSX.Element;
   disabled?: boolean;
+  processing?: boolean;
 }
 
 export interface FlowSwitcherProps<TValue extends string> {
@@ -83,7 +84,7 @@ export function FlowSwitcher<TValue extends string>(props: FlowSwitcherProps<TVa
                   {option.icon}
                 </span>
               </Show>
-              <ArkSegmentGroup.ItemText>{option.label}</ArkSegmentGroup.ItemText>
+              <ArkSegmentGroup.ItemText><span class="relative grid overflow-hidden" aria-busy={option.processing===true}><span class="col-start-1 row-start-1" classList={{"opacity-50":option.processing===true}}>{option.label}</span><Show when={option.processing}><span aria-hidden="true" data-flow-processing class="rb-shimmer-mask pointer-events-none col-start-1 row-start-1">{option.label}</span></Show></span></ArkSegmentGroup.ItemText>
             </ArkSegmentGroup.ItemControl>
             <ArkSegmentGroup.ItemHiddenInput />
           </ArkSegmentGroup.Item>

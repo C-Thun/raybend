@@ -1,6 +1,6 @@
 //! IPC 契约测试：Rust 侧序列化出来的键名，必须与前端 `src/api/types.ts` 的镜像一致。
 //!
-//! 这条测试存在的理由（`plans/M1-5.md` §3.1）：手写 TS 镜像最大的风险是**静默漂移** ——
+//! 这条测试存在的理由（`specs/M1-5.md` §3.1）：手写 TS 镜像最大的风险是**静默漂移** ——
 //! Rust 改个字段名（或忘了 `rename_all = "camelCase"`），前端就永远拿到 `undefined`，
 //! 界面表现为「某块一直空着」，既不报错也不崩，很难发现。
 //!
@@ -428,8 +428,18 @@ fn editor_render_state_matches_contract() {
 /// 全屏窗开着但永远黑屏，不报错也不崩。
 #[test]
 fn fullscreen_payload_matches_contract() {
-    use crate::fullscreen::{FullscreenItem, FullscreenPayload};
-    assert_eq!(keys_of::<FullscreenItem>(), contract_keys("FullscreenItem"));
+    use crate::fullscreen::{FullscreenItem, FullscreenPayload, FullscreenVariant};
+    let item = FullscreenItem {
+        export_variant: Some(FullscreenVariant {
+            repository_id: "repo".into(),
+            reference: raybend::export::VariantRef {
+                asset_id: 1,
+                variant: "issue:1".into(),
+            },
+        }),
+        ..Default::default()
+    };
+    assert_eq!(keys_of_value(&item), contract_keys("FullscreenItem"));
     assert_eq!(
         keys_of::<FullscreenPayload>(),
         contract_keys("FullscreenPayload")

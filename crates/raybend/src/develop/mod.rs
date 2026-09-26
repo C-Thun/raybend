@@ -32,28 +32,30 @@
 //! 它们都不许自己再算一遍色调。GPU 化（W4+）时也是**同一组测试向量喂两条路**做交叉验证，
 //! 不是另写一份。
 
+pub mod base_curve;
+pub mod bm3d;
 pub mod color;
 pub mod curve;
 pub mod denoise;
-pub mod bm3d;
 pub mod denoise_job;
-pub mod reference;
 pub mod filters;
 pub mod geometry;
 pub mod lens;
 pub mod local_tone;
 pub mod lut;
+pub mod lut_import;
 pub mod params;
 pub mod pipeline;
+pub mod reference;
 pub mod sharpen;
 
 pub use color::{linear_to_srgb, srgb_to_linear, temperature_gain_ratio};
 pub use curve::{Curve, CurveChannel, CurveSet};
 pub use denoise::{DenoisePlan, NrMethod};
 pub use lens::{LensCorrection, LensMap, ManualLens};
-pub use params::{Baseline, DevelopParams, Origin, ParamSpec, PARAMS, spec};
+pub use params::{Baseline, DevelopParams, Origin, PARAMS, ParamSpec, spec};
 pub use pipeline::{
     DevelopPlans, DevelopStages, LinearImage, Resolved, apply_chroma, blacks_curve, chain_image,
-    chain_linear, contrast_curve, encode_and_curve, highlights_curve, map_pixel_exact, render_develop,
-    render_rgb8, render_rgb8_with_local_tone,
+    chain_linear, contrast_curve, encode_and_curve, highlights_curve, map_pixel_exact,
+    render_develop, render_rgb8, render_rgb8_with_local_tone,
 };

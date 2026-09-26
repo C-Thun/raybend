@@ -26,6 +26,10 @@ export interface LutEntry {
   name: string;
   /** `.cube` 文件路径（W4 导入时才有） */
   path?: string;
+  available?: boolean;
+  coverAvailable?: boolean;
+  /** 已从图库移除，但旧编辑配置仍可引用。 */
+  hidden?: boolean;
 }
 
 /** 一个一级分类。 */
@@ -170,6 +174,10 @@ export function toggleExpandedCategory(
 }
 
 /** 分类里的 LUT 数量（界面上跟在分类名后面）。 */
+export function visibleLutCategories(categories: readonly LutCategory[]): LutCategory[] {
+  return categories.map((category) => ({ ...category, entries: category.entries.filter((entry) => !entry.hidden) }));
+}
+
 export function lutCount(categories: readonly LutCategory[]): number {
-  return categories.reduce((total, category) => total + category.entries.length, 0);
+  return categories.reduce((total, category) => total + category.entries.filter((entry) => !entry.hidden).length, 0);
 }

@@ -1,4 +1,4 @@
-//! 迁移 / 备份 / 故意损坏 演练（`plans/M1-7.md` 步骤 3）。
+//! 迁移 / 备份 / 故意损坏 演练（`specs/M1-7.md` 步骤 3）。
 //!
 //! 验四件事，都是「做不到就会丢用户数据」的级别：
 //!
@@ -31,7 +31,7 @@ use std::time::Duration;
 
 use raybend::import::fsops::{FsScanner, RepoFs};
 use raybend::import::progress::{BatchHandle, BatchProgress};
-use raybend::import::runner::{run_batch, Control, Deps, RunRequest};
+use raybend::import::runner::{Control, Deps, RunRequest, run_batch};
 use raybend::import::sink::CatalogSink;
 use raybend::import::template;
 use raybend::store::db::{CatalogDb, OpenOpts};
@@ -59,7 +59,9 @@ fn main() {
         "future" => future(rest, &mut check),
         "restore" => restore(rest, &mut check),
         _ => {
-            eprintln!("用法：migration-drill <seed|old|upgrade|retention|snapshot|corrupt|future|restore> …");
+            eprintln!(
+                "用法：migration-drill <seed|old|upgrade|retention|snapshot|corrupt|future|restore> …"
+            );
             std::process::exit(2);
         }
     }
@@ -72,7 +74,11 @@ fn main() {
     for line in &check.failed {
         println!("❌ {line}");
     }
-    println!("❌ {} 项断言失败（通过 {}）", check.failed.len(), check.passed);
+    println!(
+        "❌ {} 项断言失败（通过 {}）",
+        check.failed.len(),
+        check.passed
+    );
     std::process::exit(1);
 }
 
@@ -89,8 +95,11 @@ fn seed(args: &[String], check: &mut Checks) {
     let catalog = CatalogDb::create(&lib, "演练库", Some(TEMPLATE), OpenOpts::unbacked_up(now))
         .expect("建库");
     for index in 1..=count {
-        std::fs::write(src.join(format!("P{index:04}.jpg")), vec![0xABu8; FILE_BYTES])
-            .expect("写源文件");
+        std::fs::write(
+            src.join(format!("P{index:04}.jpg")),
+            vec![0xABu8; FILE_BYTES],
+        )
+        .expect("写源文件");
     }
     let (counts, _) = run_once(&catalog, &src, now);
     let (assets, files, imported) = counts_of(&catalog);
@@ -105,7 +114,10 @@ fn seed(args: &[String], check: &mut Checks) {
     .expect("写期望值");
 
     check.is("导入进来了照片", imported == count as i64);
-    check.is("写下了期望值（restore 之后要拿它对）", work.join("expected.txt").exists());
+    check.is(
+        "写下了期望值（restore 之后要拿它对）",
+        work.join("expected.txt").exists(),
+    );
 }
 
 // ── old：手工造一个 v1 schema 的库 ───────────────────────
@@ -120,13 +132,20 @@ fn old(args: &[String], check: &mut Checks) {
 
     // ① 先建一个真库，只为读出它的「身份行」—— 这样演练不用猜 `repository_meta` 里有哪些键
     let now = time::now_millis();
-    let reference = CatalogDb::create(&ref_dir, "旧版演练库", Some(TEMPLATE), OpenOpts::unbacked_up(now))
-        .expect("建参考库");
+    let reference = CatalogDb::create(
+        &ref_dir,
+        "旧版演练库",
+        Some(TEMPLATE),
+        OpenOpts::unbacked_up(now),
+    )
+    .expect("建参考库");
     let meta = reference
         .read(|conn| {
             let mut stmt = conn.prepare("SELECT key, value FROM repository_meta")?;
             let rows = stmt
-                .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?
                 .collect::<std::result::Result<Vec<_>, _>>()?;
             Ok(rows)
         })
@@ -137,7 +156,8 @@ fn old(args: &[String], check: &mut Checks) {
     let path = old_dir.join("catalog.db");
     let conn = rusqlite::Connection::open(&path).expect("开文件");
     conn.execute_batch(CATALOG_V1).expect("执行 v1 建表");
-    conn.pragma_update(None, "user_version", 1_i64).expect("写版本");
+    conn.pragma_update(None, "user_version", 1_i64)
+        .expect("写版本");
     for (key, value) in &meta {
         conn.execute(
             "INSERT INTO repository_meta (key, value) VALUES (?1, ?2)",
@@ -168,10 +188,7 @@ fn upgrade(args: &[String], check: &mut Checks) {
     let backups = work.join("backups");
     let now = time::now_millis();
 
-    let catalog = match CatalogDb::open(
-        &old_dir,
-        OpenOpts::new(Some(backups.as_path()), now),
-    ) {
+    let catalog = match CatalogDb::open(&old_dir, OpenOpts::new(Some(backups.as_path()), now)) {
         Ok(catalog) => catalog,
         Err(error) => {
             println!("❌ 旧版库打不开：{error}");
@@ -184,11 +201,15 @@ fn upgrade(args: &[String], check: &mut Checks) {
     println!("迁移结果：{outcome:?}");
 
     let migrated = outcome.clone();
+    let supported = migration::supported_version(DbKind::Catalog);
     check.is("打开旧版库时确实做了迁移", migrated.is_some());
     if let Some(outcome) = &migrated {
         check.is("是从 v1 升上来的", outcome.from == 1);
-        check.is("升到了当前版本", outcome.to == 3);
-        check.is("逐条执行了 2、3 号迁移", outcome.applied == vec![2, 3]);
+        check.is("升到了当前版本", outcome.to == supported);
+        check.is(
+            "逐条执行了 v1 后的所有迁移",
+            outcome.applied == (2..=supported).collect::<Vec<_>>(),
+        );
         check.is("迁移前留了快照", outcome.snapshot.is_some());
         if let Some(snapshot) = &outcome.snapshot {
             check.is("快照文件真的存在", snapshot.exists());
@@ -197,14 +218,16 @@ fn upgrade(args: &[String], check: &mut Checks) {
     }
 
     let version = version_of(&catalog.path().to_path_buf());
-    check.is("库文件的 user_version 也前进到了 3", version == 3);
+    check.is("库文件的 user_version 前进到当前版本", version == supported);
 
     // 数据一条不丢：身份行 + 演练标记还在
     let meta = catalog
         .read(|conn| {
             let mut stmt = conn.prepare("SELECT key, value FROM repository_meta")?;
             let rows = stmt
-                .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?
                 .collect::<std::result::Result<Vec<_>, _>>()?;
             Ok(rows)
         })
@@ -217,7 +240,10 @@ fn upgrade(args: &[String], check: &mut Checks) {
         "迁移之后标记行还在（数据没丢）",
         marker == Some("v1 时代写下的数据"),
     );
-    check.is("身份行还在", meta.iter().any(|(key, _)| key != "drill_marker"));
+    check.is(
+        "身份行还在",
+        meta.iter().any(|(key, _)| key != "drill_marker"),
+    );
 
     // 快照落在 backups/，并且能被轮转逻辑认出来
     let group = latest_snapshot_group(&backups, DbKind::Catalog);
@@ -231,7 +257,8 @@ fn retention(args: &[String], check: &mut Checks) {
     let work = PathBuf::from(args.first().expect("工作目录"));
     let backups = work.join("backups");
     std::fs::create_dir_all(&backups).expect("建 backups");
-    let group = latest_snapshot_group(&backups, DbKind::Catalog).unwrap_or_else(|| "catalog_drill".to_string());
+    let group = latest_snapshot_group(&backups, DbKind::Catalog)
+        .unwrap_or_else(|| "catalog_drill".to_string());
 
     // 造 10 份「同一个库」的快照（时间戳定宽 ⇒ 字典序 = 时间序）
     let mut names = Vec::new();
@@ -257,11 +284,17 @@ fn retention(args: &[String], check: &mut Checks) {
         .filter(|name| name.starts_with(&group))
         .collect();
 
-    println!("轮转前这组有 {before} 份，删掉 {removed} 份；还剩 {} 份", left.len());
+    println!(
+        "轮转前这组有 {before} 份，删掉 {removed} 份；还剩 {} 份",
+        left.len()
+    );
     // 别写死数字：backups 里可能还躺着前面步骤留下的真快照（同一个库的同一组）
     check.is("删掉的份数 = 原有的份数 − 7", removed + 7 == before);
     check.is("这组只留 7 份", left.len() == 7);
-    check.is("最旧的三份被删掉", !left.contains(&names[0]) && !left.contains(&names[2]));
+    check.is(
+        "最旧的三份被删掉",
+        !left.contains(&names[0]) && !left.contains(&names[2]),
+    );
     check.is("最新的那份还在", left.contains(&names[9]));
     check.is("别的库的快照没被牵连", backups.join(other).exists());
 }
@@ -292,13 +325,19 @@ fn corrupt(args: &[String], check: &mut Checks) {
 
     let before = std::fs::metadata(&path).expect("stat").len();
     {
-        let mut file = std::fs::OpenOptions::new().write(true).open(&path).expect("打开写");
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .expect("打开写");
         file.seek(SeekFrom::Start(0)).expect("定位");
         file.write_all(&[0xFFu8; 4096]).expect("写垃圾");
         file.sync_all().expect("落盘");
     }
     let poisoned = std::fs::read(&path).expect("读回");
-    println!("把 {} 的前 4KB 写成了垃圾（大小 {before} 字节）", path.display());
+    println!(
+        "把 {} 的前 4KB 写成了垃圾（大小 {before} 字节）",
+        path.display()
+    );
 
     let now = time::now_millis();
     match CatalogDb::open(&lib, OpenOpts::unbacked_up(now)) {
@@ -320,7 +359,8 @@ fn future(args: &[String], check: &mut Checks) {
     let version: i64 = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(99);
     {
         let conn = rusqlite::Connection::open(lib.join("catalog.db")).expect("开库");
-        conn.pragma_update(None, "user_version", version).expect("写版本");
+        conn.pragma_update(None, "user_version", version)
+            .expect("写版本");
     }
     let now = time::now_millis();
     match CatalogDb::open(&lib, OpenOpts::unbacked_up(now)) {
@@ -340,7 +380,9 @@ fn future(args: &[String], check: &mut Checks) {
 fn restore(args: &[String], check: &mut Checks) {
     let snapshot = PathBuf::from(args.first().expect("快照文件"));
     let lib = PathBuf::from(args.get(1).expect("库根"));
-    let work = lib.parent().map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+    let work = lib
+        .parent()
+        .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
     let expected = std::fs::read_to_string(work.join("expected.txt")).expect("读期望值");
 
     std::fs::copy(&snapshot, lib.join("catalog.db")).expect("还原");
@@ -368,7 +410,8 @@ fn restore(args: &[String], check: &mut Checks) {
 fn counts_of(catalog: &CatalogDb) -> (i64, i64, i64) {
     catalog
         .read(|conn| {
-            let assets: i64 = conn.query_row("SELECT count(*) FROM assets", [], |row| row.get(0))?;
+            let assets: i64 =
+                conn.query_row("SELECT count(*) FROM assets", [], |row| row.get(0))?;
             let files: i64 =
                 conn.query_row("SELECT count(*) FROM asset_files", [], |row| row.get(0))?;
             let imported: i64 = conn.query_row(
@@ -384,7 +427,10 @@ fn counts_of(catalog: &CatalogDb) -> (i64, i64, i64) {
 fn version_of(path: &PathBuf) -> i64 {
     rusqlite::Connection::open(path)
         .ok()
-        .and_then(|conn| conn.query_row("PRAGMA user_version", [], |row| row.get(0)).ok())
+        .and_then(|conn| {
+            conn.query_row("PRAGMA user_version", [], |row| row.get(0))
+                .ok()
+        })
         .unwrap_or(-1)
 }
 
@@ -403,7 +449,11 @@ fn latest_snapshot_group(dir: &Path, kind: DbKind) -> Option<String> {
         .then(|| last.split("_v").next().unwrap_or_default().to_string())
 }
 
-fn run_once(catalog: &CatalogDb, source: &Path, now: i64) -> (raybend::import::runner::RunCounts, usize) {
+fn run_once(
+    catalog: &CatalogDb,
+    source: &Path,
+    now: i64,
+) -> (raybend::import::runner::RunCounts, usize) {
     let parsed = template::parse(TEMPLATE).expect("模版");
     let job = RunRequest {
         index: 0,

@@ -1,5 +1,5 @@
 /**
- * Rust 侧 IPC 结构的 **TS 镜像**（`plans/M1-5.md` §3.1 的「手写镜像」决定）。
+ * Rust 侧 IPC 结构的 **TS 镜像**（`specs/M1-5.md` §3.1 的「手写镜像」决定）。
  *
  * 约定（**改这里必须同时改 Rust 侧**）：
  *   - 字段名与 Rust 的 `#[serde(rename_all = "camelCase")]` 输出**逐字一致**；
@@ -753,6 +753,10 @@ export interface DevelopParamsPayload {
   interactive: boolean;
   /** 镜头配置文件（`null` = 未选择；`"none"` = 显式关掉；否则是 `maker|model`） */
   lensProfile: string | null;
+  /** RAW 基础曲线快照，仅 RAW 编辑时发送。 */
+  baseCurvePoints: [number, number][] | null;
+  lutId?: string | null;
+  lutEnabled?: boolean | null;
   /** 配置文件那一半的开关（`null` = 默认开；**手动三根拉杆不受它影响**） */
   lensEnabled: boolean | null;
   /** 降噪方式（`null` = 快速档） */
@@ -801,8 +805,22 @@ export interface EditGeometry {
   cropRatio?: { id: string; width: number; height: number } | null;
 }
 
+/** 自动调整产生的可恢复基线；不包含用户曲线、LUT 或几何。 */
+export interface AutoAdjustBaseline {
+  values: Record<string, number>;
+  lensProfile: string | null;
+  lensEnabled: boolean | null;
+  nrMethod: DevelopNrMethod | null;
+}
+
 export interface DevelopSettings {
+  autoAdjust?: AutoAdjustBaseline | null;
   sourceBase?: DevelopEditBase;
+  asShotK?: number | null;
+  baseCurveProfile?: string | null;
+  baseCurvePoints?: [number, number][] | null;
+  lutId?: string | null;
+  lutEnabled?: boolean | null;
   lensProfile?: string | null;
   lensEnabled?: boolean | null;
   nrMethod?: DevelopNrMethod | null;
@@ -898,7 +916,7 @@ export type EditorViewportIntent =
   | { kind: "setCompare"; enabled: boolean }
   | { kind: "comparePointer"; phase: "down" | "move" | "up" | "cancel"; x: number; y: number }
   | { kind: "setTool"; tool: "crop" | "rotate" | null; initialRatio: number | null }
-  | { kind: "setReferenceBase"; base: "sooc" | "raw" }
+  | { kind: "setReferenceBase"; base: "sooc" | "raw"; sequence: number }
   | { kind: "setCropRatio"; ratio: number | null }
   | { kind: "setRotation"; degrees: number }
   | { kind: "toolPointer"; phase: "down" | "move" | "up" | "cancel"; x: number; y: number };
@@ -909,6 +927,7 @@ export type EditorViewportIntent =
 
 /** 全屏页需要的一张照片（与 `lib/fullscreen-target.ts` 的形状一致）。 */
 export interface FullscreenItem {
+  exportVariant?: {repositoryId:string;reference:{assetId:number;variant:string}};
   id: string;
   /** 绝对路径（`view_image` 直接吃它） */
   path: string;

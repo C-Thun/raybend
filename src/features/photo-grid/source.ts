@@ -67,12 +67,12 @@ export function importSource(
     selection: () => store.selection(),
     select: (id, mode) => store.clickItem(id, mode),
     setAnchor: (id) => store.setAnchor(id),
-    selectGroupRange: (start, count, additive) => {
+    selectGroupRange: (start, count) => {
       const ids = store
         .displayItems()
         .slice(start, start + count)
         .map((item) => itemId(item));
-      store.selectGroup(ids, additive ?? false);
+      store.toggleGroup(ids);
     },
     clearSelection: () => store.clearSelection(),
     infoMode: () => options.infoMode?.() ?? "off",

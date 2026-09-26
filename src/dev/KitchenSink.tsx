@@ -1,5 +1,5 @@
 /**
- * 组件陈列室（DESIGN.md §10.1 / plans/M1.md §4.2.1）。
+ * 组件陈列室（DESIGN.md §10.1 / specs/M1.md §4.2.1）。
  *
  * 目的：把 16 个基础组件的**全部状态 × 两主题 × 两密度**一眼铺开，
  * 供人（不是 Agent）与 `design/main.pen` 逐项比对。`AGENTS.md` §2.8：

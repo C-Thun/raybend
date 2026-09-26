@@ -714,7 +714,7 @@ test("重复设同一个库不会重复加载", async () => {
   open(store);
   await tick();
   calls.page = [];
-  open(store);
+  store.setRepository("RepoA");
   await tick();
   assert.deepEqual(calls.page, []);
 });
@@ -1008,4 +1008,41 @@ test("旗标条件：发查询时把当前旗标集合填进 ids（界面只给 
 
   store.patchFilter({ flag: null });
   assert.equal(store.query()?.filter?.flag ?? null, null, "取消条件后不带旗标条件");
+});
+
+test("M4 首屏：磁盘同步结束之前不查询，失败显示错误并保留已有结果", async () => {
+  const { api, calls } = fakeApi(3);
+  let release!: () => void;
+  let pending = new Promise<void>((resolve) => { release = resolve; });
+  api.syncScope = () => pending;
+  const store = createBrowseStore({ api });
+  open(store);
+  await tick();
+  assert.deepEqual(calls.page, []);
+  release(); await tick();
+  assert.equal(store.total(), 3);
+  const failure = new Error("权限错误");
+  api.syncScope = async () => { throw failure; };
+  await store.refresh();
+  assert.equal(store.total(), 3);
+  assert.equal(store.error(), failure.message);
+});
+test("M4 重进同目录读盘，保留选择；迟到同步不能查询旧目录", async () => {
+  const { api, calls } = fakeApi(3);
+  const store = createBrowseStore({ api });
+  open(store); await tick();
+  store.select(2, "replace");
+  calls.page = [];
+  store.setScope("photos/2026-08-15"); await tick();
+  assert.deepEqual(calls.page, [0]);
+  assert.deepEqual(store.selection().ids, new Set(["2"]));
+  let release!: () => void;
+  const pending = new Promise<void>((resolve) => { release = resolve; });
+  api.syncScope = (query) => query.scopePath === "photos/旧" ? pending : Promise.resolve();
+  store.setScope("photos/旧"); await tick();
+  store.setScope("photos/新"); await tick();
+  calls.page = [];
+  release(); await tick();
+  assert.deepEqual(calls.page, []);
+  assert.equal(store.scopePath(), "photos/新");
 });

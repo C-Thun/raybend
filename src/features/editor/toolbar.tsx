@@ -38,6 +38,8 @@ export interface EditorToolbarProps {
   store: EditorStore;
   /** 没有可编辑的照片时禁用（空态下工具无从作用） */
   enabled: boolean;
+  canAutoAdjust?: () => boolean;
+  onAutoAdjust?: () => void;
 }
 
 export interface EditorSourceHistoryProps extends EditorToolbarProps {
@@ -74,6 +76,9 @@ export function EditorToolbar(props: EditorSourceHistoryProps): JSX.Element {
       <Button variant="ghost" disabled={!props.history.state().canRedo} title={redoTitle()}
         aria-label={redoTitle()} icon={<IconArrowForwardUp size={14} />}
         onClick={props.history.redo}>{t("browse.redo")}</Button>
+      <Button variant="ghost" disabled={!props.canAutoAdjust?.()}
+        title={t("editor.autoAdjustHint")} icon={<IconWand size={14} />}
+        onClick={() => props.onAutoAdjust?.()}>{t(props.store.autoAdjusting() ? "editor.autoAdjusting" : "editor.autoAdjust")}</Button>
       <For each={TOOL_SPEC}>
         {(tool) => (
           <ToggleBlock
@@ -103,16 +108,19 @@ export function EditorPanelToggles(props: EditorToolbarProps): JSX.Element {
   </ToggleBlock>;
 }
 
-/** 右段：自动调整和统一重置；命令面板复用相同动作。 */
+/** 右段：重置之后是定稿；两者都走工作区动作槽。 */
 export function EditorResetTool(props: EditorToolbarProps & {
-  onRequestReset: () => void; onAutoAdjust: () => void;
+  onRequestReset: () => void;
+  canReset?: () => boolean;
+  canFinalize?: () => boolean;
+  onFinalize?: () => void;
 }): JSX.Element {
   return <div class="flex items-center gap-1">
-    <Button variant="ghost" disabled={!props.enabled || props.store.autoAdjusting()}
-      title={t("editor.autoAdjustHint")} icon={<IconWand size={14} />}
-      onClick={props.onAutoAdjust}>{t(props.store.autoAdjusting() ? "editor.autoAdjusting" : "editor.autoAdjust")}</Button>
-    <Button variant="ghost" disabled={!props.enabled} onClick={props.onRequestReset}>
+    <Button variant="ghost" disabled={!props.enabled || !(props.canReset?.() ?? props.store.resetStage() !== "none")} onClick={props.onRequestReset}>
       {t("editor.panel.resetAll")}
+    </Button>
+    <Button variant="primary" disabled={!props.canFinalize?.()} onClick={() => props.onFinalize?.()}>
+      {t("editor.issue.toolbar")}
     </Button>
   </div>;
 }

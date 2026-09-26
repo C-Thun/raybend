@@ -1,8 +1,8 @@
 //! **编辑栈**（M3-W3）：一张照片的调整参数与曲线 —— 无损编辑的真相源。
 //!
-//! # 三个 issue 里只有 `latest` 进库
+//! # latest 工作副本与不可变定稿
 //!
-//! 界面上能看到三个「版本」，但只有一个是**存下来的**（人类 2026-09-24 定）：
+//! 界面上能看到三个特殊版本；此外还有 `store::issues` 中的不可变命名定稿：
 //!
 //! | 版本 | 是什么 | 存哪 |
 //! | --- | --- | --- |
@@ -10,8 +10,9 @@
 //! | `RAW` | RAW 完整解码（该资产有 RAW 时才有） | **不存**：解码即得 |
 //! | `latest` | 当前编辑结果 | **本模块**：`develop_stacks` 三张表 |
 //!
-//! 所以「这张照片编辑过吗」= `develop_stacks` 里有没有这一行；
-//! 「重置全部」= 删掉这三张表里属于它的所有行。
+//! `latest` 是自动保存的工作副本；切换命名定稿会把其完整 profile 写入 latest。
+//! 画面是否有调整由 `DevelopStack::is_empty` 判断；只保留自动来源元数据的栈也可能没有像素调整。
+//! 两层重置通过同一覆盖提交写回目标 profile；自动来源元数据随撤销恢复。
 //!
 //! # 只存非默认值
 //!
@@ -35,8 +36,36 @@ use crate::develop::geometry::EditGeometry;
 use crate::develop::params::spec;
 use crate::error::{Error, Result};
 
+/// 自动调整的结果基线；只含允许的参数、镜头和降噪方式，不包含用户曲线 / LUT / 几何。
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoAdjustBaseline {
+    pub values: BTreeMap<String, f64>,
+    pub lens_profile: Option<String>,
+    pub lens_enabled: Option<bool>,
+    pub nr_method: Option<NrMethod>,
+}
+
+impl AutoAdjustBaseline {
+    pub fn validate(&self) -> Result<()> {
+        for (id, value) in &self.values {
+            if !spec(id).is_some_and(|spec| spec.accepts(*value)) {
+                return Err(Error::Unsupported(format!(
+                    "自动调整基线参数非法：{id}={value}"
+                )));
+            }
+        }
+        if self.lens_profile.as_ref().is_some_and(|key| {
+            key.is_empty() || key.len() > 1024 || key.chars().any(char::is_control)
+        }) {
+            return Err(Error::Unsupported("自动调整基线镜头配置无效".into()));
+        }
+        Ok(())
+    }
+}
+
 /// 一张照片的编辑栈（`latest`）。
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct DevelopStack {
     /// latest 的唯一源；SOOC/RAW 切换改变它，不复制其它调整参数。
     pub source_base: EditBase,
@@ -55,6 +84,14 @@ pub struct DevelopStack {
     /// * `None`   = 没动过 ⇒ 未选择配置文件
     /// * `"none"` = 用户**显式清除了配置**
     pub lens_profile: Option<String>,
+    /// NULL = 新照片未选择；"none" = 明确不用；其它 = 全局机型档案 ID。
+    pub base_curve_profile: Option<String>,
+    /// 被选中档案的曲线快照：旧照片不会被之后的机型统计悄悄改画面。
+    pub base_curve_points: Option<Vec<[f32; 2]>>,
+    /// 当前选择的应用级 LUT ID；禁用时仍保留选择。
+    pub lut_id: Option<String>,
+    /// LUT 开关；None 与 false 都表示未启用。
+    pub lut_enabled: Option<bool>,
     /// **配置文件那一半**的开关（`None` = 默认开）。
     ///
     /// ❗ 它只管配置文件：三根手动拉杆不受它影响（人类 2026-09-25 拍板）。
@@ -63,6 +100,9 @@ pub struct DevelopStack {
     pub nr_method: Option<NrMethod>,
     /// 成片旋转和裁切（`None` = 原图）。
     pub geometry: Option<EditGeometry>,
+    /// 重置时恢复的自动结果；不改变像素，不进入像素缓存 / 定稿匹配指纹。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_adjust: Option<AutoAdjustBaseline>,
 }
 
 impl DevelopStack {
@@ -75,6 +115,9 @@ impl DevelopStack {
         self.params.is_empty()
             && self.curves.is_empty()
             && self.lens_profile.is_none()
+            && self.base_curve_profile.is_none()
+            && self.lut_id.is_none()
+            && self.lut_enabled != Some(true)
             && self.lens_enabled != Some(false)
             && self.nr_method.is_none_or(NrMethod::is_default)
             && self.geometry.is_none_or(EditGeometry::is_identity)
@@ -86,9 +129,14 @@ impl DevelopStack {
         self.params.len()
             + self.curves.len()
             + usize::from(self.lens_profile.is_some())
+            + usize::from(self.base_curve_profile.is_some())
+            + usize::from(self.lut_id.is_some())
             + usize::from(self.lens_enabled == Some(false))
             + usize::from(self.nr_method.is_some_and(|method| !method.is_default()))
-            + usize::from(self.geometry.is_some_and(|geometry| !geometry.is_identity()))
+            + usize::from(
+                self.geometry
+                    .is_some_and(|geometry| !geometry.is_identity()),
+            )
     }
 
     /// **这份编辑栈的稳定指纹**（缓存键用）。
@@ -125,6 +173,20 @@ impl DevelopStack {
         text.push('|');
         text.push_str(self.lens_profile.as_deref().unwrap_or("-"));
         text.push('|');
+        text.push_str(self.base_curve_profile.as_deref().unwrap_or("-"));
+        if let Some(points) = &self.base_curve_points {
+            for point in points {
+                text.push_str(&format!("{:.5},{:.5};", point[0], point[1]));
+            }
+        }
+        text.push('|');
+        text.push_str(self.lut_id.as_deref().unwrap_or("-"));
+        text.push(if self.lut_enabled == Some(true) {
+            '1'
+        } else {
+            '0'
+        });
+        text.push('|');
         text.push_str(match self.lens_enabled {
             Some(true) => "on",
             Some(false) => "off",
@@ -136,7 +198,10 @@ impl DevelopStack {
         if let Some(geometry) = self.geometry.filter(|geometry| !geometry.is_identity()) {
             text.push_str(&format!("r{:.5}", geometry.rotation));
             if let Some(crop) = geometry.crop {
-                text.push_str(&format!("c{:.7},{:.7},{:.7},{:.7}", crop.x, crop.y, crop.width, crop.height));
+                text.push_str(&format!(
+                    "c{:.7},{:.7},{:.7},{:.7}",
+                    crop.x, crop.y, crop.width, crop.height
+                ));
             }
         }
 
@@ -157,8 +222,8 @@ impl DevelopStack {
 pub fn load(conn: &Connection, asset_id: i64) -> Result<DevelopStack> {
     let row = conn
         .query_row(
-            "SELECT as_shot_k, lens_profile, lens_enabled, nr_method, source_base, edit_geometry FROM develop_stacks \
-             WHERE asset_id = ?1",
+            "SELECT as_shot_k, lens_profile, lens_enabled, nr_method, source_base, edit_geometry, \
+                    base_curve_profile, base_curve_points, lut_id, lut_enabled, auto_adjust FROM develop_stacks WHERE asset_id = ?1",
             [asset_id],
             |row| {
                 Ok((
@@ -168,12 +233,30 @@ pub fn load(conn: &Connection, asset_id: i64) -> Result<DevelopStack> {
                     row.get::<_, Option<String>>(3)?,
                     row.get::<_, String>(4)?,
                     row.get::<_, Option<String>>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, Option<String>>(7)?,
+                    row.get::<_, Option<String>>(8)?,
+                    row.get::<_, Option<i64>>(9)?,
+                    row.get::<_, Option<String>>(10)?,
                 ))
             },
         )
         .optional()?;
     let mut stack = DevelopStack::default();
-    if let Some((as_shot_k, lens_profile, lens_enabled, nr_method, source_base, geometry)) = row {
+    if let Some((
+        as_shot_k,
+        lens_profile,
+        lens_enabled,
+        nr_method,
+        source_base,
+        geometry,
+        base_curve_profile,
+        base_curve_json,
+        lut_id,
+        lut_enabled,
+        auto_adjust,
+    )) = row
+    {
         stack.source_base = EditBase::parse(&source_base)
             .ok_or_else(|| Error::Unsupported(format!("未知的 issue 源：{source_base}")))?;
         #[allow(clippy::cast_possible_truncation)]
@@ -181,16 +264,38 @@ pub fn load(conn: &Connection, asset_id: i64) -> Result<DevelopStack> {
             stack.as_shot_k = as_shot_k.map(|value| value as f32);
         }
         stack.lens_profile = lens_profile;
+        stack.base_curve_profile = base_curve_profile;
+        stack.lut_id = lut_id;
+        stack.lut_enabled = lut_enabled.map(|value| value != 0);
+        stack.base_curve_points = base_curve_json
+            .map(|json| {
+                serde_json::from_str::<Vec<[f32; 2]>>(&json)
+                    .map_err(|error| Error::Unsupported(format!("基础曲线数据坏了：{error}")))
+            })
+            .transpose()?;
+        stack.auto_adjust = auto_adjust
+            .map(|json| {
+                serde_json::from_str::<AutoAdjustBaseline>(&json)
+                    .map_err(|error| Error::Unsupported(format!("自动调整基线数据坏了：{error}")))
+            })
+            .transpose()?;
+        if let Some(ref automatic) = stack.auto_adjust {
+            automatic.validate()?;
+        }
         stack.lens_enabled = lens_enabled.map(|value| value != 0);
         // 认不出的方式**当成默认**（不是错误）：库里存着一个以后版本才有的值，
         // 老版本应当照旧能打开照片（向前兼容的最低要求）
         stack.nr_method = nr_method.as_deref().and_then(NrMethod::parse);
-        stack.geometry = geometry.map(|json| serde_json::from_str::<EditGeometry>(&json)
-            .map_err(|error| Error::Unsupported(format!("成片几何数据坏了：{error}"))))
+        stack.geometry = geometry
+            .map(|json| {
+                serde_json::from_str::<EditGeometry>(&json)
+                    .map_err(|error| Error::Unsupported(format!("成片几何数据坏了：{error}")))
+            })
             .transpose()?;
     }
 
-    let mut statement = conn.prepare("SELECT param_id, value FROM develop_params WHERE asset_id = ?1")?;
+    let mut statement =
+        conn.prepare("SELECT param_id, value FROM develop_params WHERE asset_id = ?1")?;
     let rows = statement.query_map([asset_id], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
     })?;
@@ -222,6 +327,9 @@ pub fn load(conn: &Connection, asset_id: i64) -> Result<DevelopStack> {
 /// # Errors
 /// 校验不过（未知 id / 值非法 / 坏曲线）或数据库写失败。
 pub fn save(conn: &Connection, asset_id: i64, stack: &DevelopStack, now_ms: i64) -> Result<usize> {
+    if let Some(ref automatic) = stack.auto_adjust {
+        automatic.validate()?;
+    }
     // ① 先校验（**写之前**，别写一半才发现有错）
     for (id, value) in &stack.params {
         let Some(spec) = spec(id) else {
@@ -242,28 +350,69 @@ pub fn save(conn: &Connection, asset_id: i64, stack: &DevelopStack, now_ms: i64)
             .map_err(|e| Error::Unsupported(format!("曲线 {channel} 不合法：{e}")))?;
     }
 
-    if let Some(geometry) = stack.geometry
-        && (!geometry.rotation.is_finite() || geometry.rotation.abs() > 360.0
-            || geometry.crop.is_some_and(|crop| !crop.valid())
-            || geometry.crop_ratio.is_some_and(|setting| !setting.valid())) {
-            return Err(Error::Unsupported("成片几何不合法".into()));
+    if stack
+        .lut_id
+        .as_ref()
+        .is_some_and(|id| id.is_empty() || id.len() > 128 || id.contains(['/', '\\']))
+    {
+        return Err(Error::Unsupported("LUT ID 不合法".into()));
+    }
+    if stack.lut_enabled == Some(true) && stack.lut_id.is_none() {
+        return Err(Error::Unsupported("启用 LUT 时必须选择 LUT".into()));
+    }
+    match (
+        stack.base_curve_profile.as_deref(),
+        stack.base_curve_points.as_ref(),
+    ) {
+        (None | Some("none"), None) => {}
+        (Some(id), Some(points)) if id.parse::<i64>().is_ok_and(|id| id > 0) => {
+            Curve::from_points(points.clone()).map_err(Error::Unsupported)?;
         }
+        _ => return Err(Error::Unsupported("基础曲线档案与曲线快照不一致".into())),
+    }
+
+    if let Some(geometry) = stack.geometry
+        && (!geometry.rotation.is_finite()
+            || geometry.rotation.abs() > 360.0
+            || geometry.crop.is_some_and(|crop| !crop.valid())
+            || geometry.crop_ratio.is_some_and(|setting| !setting.valid()))
+    {
+        return Err(Error::Unsupported("成片几何不合法".into()));
+    }
 
     // ② 栈本体（没有就建一个；as-shot 与镜头 / 降噪那几项跟着一起写）
     ensure_stack(conn, asset_id, now_ms)?;
     conn.execute(
         "UPDATE develop_stacks SET as_shot_k = ?2, lens_profile = ?3, lens_enabled = ?4, \
-         nr_method = ?5, source_base = ?6, edit_geometry = ?7 WHERE asset_id = ?1",
+         nr_method = ?5, source_base = ?6, edit_geometry = ?7, base_curve_profile = ?8, \
+         base_curve_points = ?9, lut_id = ?10, lut_enabled = ?11, auto_adjust = ?12 WHERE asset_id = ?1",
         rusqlite::params![
             asset_id,
             stack.as_shot_k.map(f64::from),
             stack.lens_profile,
             stack.lens_enabled.map(i64::from),
-            stack.nr_method.filter(|method| !method.is_default()).map(NrMethod::as_str),
+            stack
+                .nr_method
+                .filter(|method| !method.is_default())
+                .map(NrMethod::as_str),
             stack.source_base.as_str(),
-            stack.geometry.filter(|geometry| !geometry.is_identity())
-                .map(|geometry| serde_json::to_string(&geometry)).transpose()
+            stack
+                .geometry
+                .filter(|geometry| !geometry.is_identity())
+                .map(|geometry| serde_json::to_string(&geometry))
+                .transpose()
                 .map_err(|error| Error::Unsupported(format!("成片几何序列化失败：{error}")))?,
+            stack.base_curve_profile,
+            stack
+                .base_curve_points
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()
+                .map_err(|error| Error::Unsupported(format!("基础曲线序列化失败：{error}")))?,
+            stack.lut_id,
+            stack.lut_enabled.map(i64::from),
+            stack.auto_adjust.as_ref().map(serde_json::to_string).transpose()
+                .map_err(|error| Error::Unsupported(format!("自动调整基线序列化失败：{error}")))?,
         ],
     )?;
 
@@ -323,7 +472,7 @@ pub fn save(conn: &Connection, asset_id: i64, stack: &DevelopStack, now_ms: i64)
     }
 
     // ⑤ 全空就把栈本体也删掉（「没编辑过」要能回到干净状态）
-    if stack.is_empty() {
+    if stack.is_empty() && stack.auto_adjust.is_none() && stack.source_base == EditBase::Raw {
         conn.execute("DELETE FROM develop_stacks WHERE asset_id = ?1", [asset_id])?;
     }
 
@@ -420,6 +569,16 @@ pub fn set_curve(
 /// 三项都是「一个可空的字符串/布尔」，各自的语义与校验写在 [`set_setting`] 里。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Setting {
+    /// 自动调整基线 JSON，作为整体参与撤销。
+    AutoAdjust,
+    /// 机型基础曲线档案选择（撤销时同时还原快照）。
+    BaseCurveProfile,
+    /// 被选档案的曲线快照，与选择一同撤销。
+    BaseCurvePoints,
+    /// 应用级 LUT ID。
+    LutId,
+    /// LUT 开关。
+    LutEnabled,
     /// 镜头配置文件（`None` = 没动过；`"none"` = 显式清除配置；否则是 `maker|model`）
     LensProfile,
     /// 配置文件那一半的开关（`"1"` / `"0"`）
@@ -437,6 +596,11 @@ impl Setting {
     #[must_use]
     pub fn key(self) -> &'static str {
         match self {
+            Self::AutoAdjust => "autoAdjust",
+            Self::BaseCurveProfile => "baseCurveProfile",
+            Self::BaseCurvePoints => "baseCurvePoints",
+            Self::LutId => "lutId",
+            Self::LutEnabled => "lutEnabled",
             Self::LensProfile => "lensProfile",
             Self::LensEnabled => "lensEnabled",
             Self::NrMethod => "nrMethod",
@@ -449,6 +613,11 @@ impl Setting {
     #[must_use]
     pub fn parse(key: &str) -> Option<Self> {
         match key {
+            "autoAdjust" => Some(Self::AutoAdjust),
+            "baseCurveProfile" => Some(Self::BaseCurveProfile),
+            "baseCurvePoints" => Some(Self::BaseCurvePoints),
+            "lutId" => Some(Self::LutId),
+            "lutEnabled" => Some(Self::LutEnabled),
             "lensProfile" => Some(Self::LensProfile),
             "lensEnabled" => Some(Self::LensEnabled),
             "nrMethod" => Some(Self::NrMethod),
@@ -461,6 +630,11 @@ impl Setting {
     /// 它在 `develop_stacks` 里对应的列名（**枚举自带的值，不是用户输入**）。
     const fn column(self) -> &'static str {
         match self {
+            Self::AutoAdjust => "auto_adjust",
+            Self::BaseCurveProfile => "base_curve_profile",
+            Self::BaseCurvePoints => "base_curve_points",
+            Self::LutId => "lut_id",
+            Self::LutEnabled => "lut_enabled",
             Self::LensProfile => "lens_profile",
             Self::LensEnabled => "lens_enabled",
             Self::NrMethod => "nr_method",
@@ -473,15 +647,31 @@ impl Setting {
     fn accepts(self, value: Option<&str>) -> bool {
         match (self, value) {
             (_, None) => true,
+            (Self::AutoAdjust, Some(text)) => serde_json::from_str::<AutoAdjustBaseline>(text)
+                .is_ok_and(|automatic| automatic.validate().is_ok()),
+            (Self::BaseCurveProfile, Some(text)) => {
+                text == "none" || text.parse::<i64>().is_ok_and(|id| id > 0)
+            }
+            (Self::BaseCurvePoints, Some(text)) => serde_json::from_str::<Vec<[f32; 2]>>(text)
+                .is_ok_and(|points| Curve::from_points(points).is_ok()),
+            (Self::LutId, Some(text)) => {
+                !text.is_empty() && text.len() <= 128 && !text.contains(['/', '\\'])
+            }
+            (Self::LutEnabled, Some("0" | "1")) => true,
+            (Self::LutEnabled, Some(_)) => false,
             (Self::LensProfile, Some(text)) => !text.is_empty(),
             (Self::LensEnabled, Some("0" | "1")) => true,
             (Self::LensEnabled, Some(_)) => false,
             (Self::NrMethod, Some(text)) => NrMethod::parse(text).is_some(),
             (Self::SourceBase, Some(text)) => EditBase::parse(text).is_some(),
-            (Self::Geometry, Some(text)) => serde_json::from_str::<EditGeometry>(text)
-                .is_ok_and(|geometry| geometry.rotation.is_finite() && geometry.rotation.abs() <= 360.0
-                    && geometry.crop.is_none_or(|crop| crop.valid())
-                    && geometry.crop_ratio.is_none_or(|setting| setting.valid())),
+            (Self::Geometry, Some(text)) => {
+                serde_json::from_str::<EditGeometry>(text).is_ok_and(|geometry| {
+                    geometry.rotation.is_finite()
+                        && geometry.rotation.abs() <= 360.0
+                        && geometry.crop.is_none_or(|crop| crop.valid())
+                        && geometry.crop_ratio.is_none_or(|setting| setting.valid())
+                })
+            }
         }
     }
 }
@@ -494,6 +684,19 @@ impl DevelopStack {
     #[must_use]
     pub fn setting_value(&self, setting: Setting) -> Option<String> {
         match setting {
+            Setting::AutoAdjust => self
+                .auto_adjust
+                .as_ref()
+                .and_then(|automatic| serde_json::to_string(automatic).ok()),
+            Setting::BaseCurveProfile => self.base_curve_profile.clone(),
+            Setting::BaseCurvePoints => self
+                .base_curve_points
+                .as_ref()
+                .and_then(|points| serde_json::to_string(points).ok()),
+            Setting::LutId => self.lut_id.clone(),
+            Setting::LutEnabled => self
+                .lut_enabled
+                .map(|enabled| if enabled { "1" } else { "0" }.to_string()),
             Setting::LensProfile => self.lens_profile.clone(),
             Setting::LensEnabled => self
                 .lens_enabled
@@ -503,7 +706,9 @@ impl DevelopStack {
                 .filter(|method| !method.is_default())
                 .map(|method| method.as_str().to_string()),
             Setting::SourceBase => Some(self.source_base.as_str().to_string()),
-            Setting::Geometry => self.geometry.filter(|geometry| !geometry.is_identity())
+            Setting::Geometry => self
+                .geometry
+                .filter(|geometry| !geometry.is_identity())
                 .and_then(|geometry| serde_json::to_string(&geometry).ok()),
         }
     }
@@ -556,7 +761,7 @@ fn ensure_stack(conn: &Connection, asset_id: i64, now_ms: i64) -> Result<()> {
     Ok(())
 }
 
-/// 栈空了就把本体删掉（「没编辑过」要能回到干净状态）。
+/// 像素设置与自动来源都为空才删除栈；删除最后一个手动参数不丢自动基线。
 ///
 /// 镜头 / 降噪那几列也要看：只设了配置文件、没动过参数的照片**仍然算编辑过**
 /// （配置文件会改变画面）。
@@ -564,7 +769,12 @@ fn prune_empty_stack(conn: &Connection, asset_id: i64) -> Result<()> {
     conn.execute(
         "DELETE FROM develop_stacks
           WHERE asset_id = ?1
+            AND source_base = 'raw'
+            AND auto_adjust IS NULL
             AND lens_profile IS NULL
+            AND base_curve_profile IS NULL
+            AND lut_id IS NULL
+            AND (lut_enabled IS NULL OR lut_enabled = 0)
             AND nr_method IS NULL
             AND edit_geometry IS NULL
             AND NOT EXISTS (SELECT 1 FROM develop_params WHERE asset_id = ?1)
@@ -585,7 +795,7 @@ pub fn clear(conn: &Connection, asset_id: i64) -> Result<usize> {
 
 /// 这张照片该显示哪个**版本**（人类 2026-09-24 定的规则）。
 ///
-/// 三个「issue」里只有 `latest` 是存下来的，另两个是虚拟的（见模块文档）。
+/// 这里是当前工作副本的显示源；命名定稿保存在 `store::issues`，由 profile 哈希识别。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IssueChoice {
     /// 相机直出的 JPG（该资产有 JPG 且没编辑过）。
@@ -637,8 +847,9 @@ pub fn needs_preview(choice: IssueChoice, stack: &DevelopStack) -> bool {
 /// 编辑**落在哪个文件上**（人类 2026-09-24 定：编辑器里可切，**默认 RAW**）。
 ///
 /// 它不是「显示哪个 issue」（那是 [`IssueChoice`]），而是「这次编辑拿哪个当底」——
-/// 将来每个 issue 会带上「基于 sooc 还是基于 raw 编辑」的标签（登记在 `FUTURE.md`）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// 命名定稿记录了编辑基准，切换定稿时随完整 profile 一起恢复。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum EditBase {
     /// 相机直出的位图（JPG）—— 「基于 SOOC 编辑」
     Sooc,
@@ -727,19 +938,9 @@ pub fn edit_target(conn: &Connection, asset_id: i64, base: EditBase) -> Result<O
 /// # Errors
 /// 数据库读失败。
 pub fn has_edits(conn: &Connection, asset_id: i64) -> Result<bool> {
-    // ❗镜头配置 / 降噪方式也算「编辑过」：它们会改变画面（`choose_issue` 靠这条
-    // 决定显示 SOOC 还是 latest）—— 只数参数与曲线的话，一张只挑了镜头的照片
-    // 会被当成「没编辑过」，于是浏览侧显示相机直出、编辑器里却是校正过的两张图。
-    let count: i64 = conn.query_row(
-        "SELECT
-            (SELECT count(*) FROM develop_params WHERE asset_id = ?1)
-          + (SELECT count(*) FROM develop_curves WHERE asset_id = ?1)
-          + (SELECT count(*) FROM develop_stacks
-              WHERE asset_id = ?1 AND (lens_profile IS NOT NULL OR nr_method IS NOT NULL OR edit_geometry IS NOT NULL))",
-        [asset_id],
-        |row| row.get(0),
-    )?;
-    Ok(count > 0)
+    // 可用 latest 的判据只有 DevelopStack::is_empty；显式关闭镜头也算编辑，
+    // 快速降噪/恒等几何与自动基线本身不算。浏览和导出不得各自维护第二套 SQL 判据。
+    Ok(!load(conn, asset_id)?.is_empty())
 }
 
 #[cfg(test)]
@@ -774,6 +975,94 @@ mod tests {
             as_shot_k: None,
             ..DevelopStack::default()
         }
+    }
+
+    #[test]
+    fn automatic_baseline_roundtrips_but_does_not_change_pixel_signature() {
+        let (conn, asset_id) = catalog_with_asset();
+        let original = stack(&[("exposure", 1.0)], &[]);
+        let mut edited = original.clone();
+        edited.auto_adjust = Some(AutoAdjustBaseline {
+            values: [("exposure".to_owned(), 0.5), ("lumaNr".to_owned(), 9.0)].into(),
+            lens_profile: Some("Maker|镜头".into()),
+            lens_enabled: Some(true),
+            nr_method: Some(NrMethod::High),
+        });
+        save(&conn, asset_id, &edited, 1).unwrap();
+        assert_eq!(load(&conn, asset_id).unwrap(), edited);
+        assert_eq!(edited.signature(), original.signature());
+        let encoded = serde_json::to_string(&original).unwrap();
+        assert!(!encoded.contains("auto_adjust"));
+        assert_eq!(
+            serde_json::from_str::<DevelopStack>(&encoded)
+                .unwrap()
+                .auto_adjust,
+            None
+        );
+    }
+
+    #[test]
+    fn baseline_only_stack_survives_pruning_and_is_reversible_as_a_setting() {
+        let (conn, asset_id) = catalog_with_asset();
+        let edited = DevelopStack {
+            auto_adjust: Some(AutoAdjustBaseline {
+                values: [("exposure".to_owned(), 0.5)].into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert!(edited.is_empty());
+        save(&conn, asset_id, &edited, 1).unwrap();
+        assert_eq!(load(&conn, asset_id).unwrap(), edited);
+        set_param(&conn, asset_id, "exposure", Some(0.7), 2).unwrap();
+        set_param(&conn, asset_id, "exposure", None, 3).unwrap();
+        assert_eq!(
+            load(&conn, asset_id).unwrap(),
+            edited,
+            "删除最后一个参数不丢自动来源"
+        );
+        let json = edited.setting_value(Setting::AutoAdjust).unwrap();
+        assert_eq!(Setting::parse("autoAdjust"), Some(Setting::AutoAdjust));
+        set_setting(&conn, asset_id, Setting::AutoAdjust, None, 4).unwrap();
+        assert_eq!(load(&conn, asset_id).unwrap(), DevelopStack::default());
+        set_setting(&conn, asset_id, Setting::AutoAdjust, Some(&json), 5).unwrap();
+        assert_eq!(load(&conn, asset_id).unwrap(), edited);
+    }
+
+    #[test]
+    fn automatic_baseline_rejects_invalid_inputs_before_writing() {
+        let (conn, asset_id) = catalog_with_asset();
+        for (id, value) in [
+            ("bogus", 1.0),
+            ("exposure", f64::NAN),
+            ("exposure", f64::INFINITY),
+            ("exposure", 100.0),
+        ] {
+            let automatic = AutoAdjustBaseline {
+                values: [(id.to_owned(), value)].into(),
+                ..Default::default()
+            };
+            assert!(automatic.validate().is_err());
+            let edited = DevelopStack {
+                auto_adjust: Some(automatic),
+                ..Default::default()
+            };
+            assert!(save(&conn, asset_id, &edited, 1).is_err());
+        }
+        for key in ["", "bad\nkey", &"x".repeat(1025)] {
+            assert!(
+                AutoAdjustBaseline {
+                    lens_profile: Some(key.into()),
+                    ..Default::default()
+                }
+                .validate()
+                .is_err()
+            );
+        }
+        for value in ["{}", "{\"values\":{\"bogus\":1}}", "invalid JSON"] {
+            assert!(set_setting(&conn, asset_id, Setting::AutoAdjust, Some(value), 1).is_err());
+        }
+        assert_eq!(load(&conn, asset_id).unwrap(), DevelopStack::default());
     }
 
     #[test]
@@ -818,23 +1107,42 @@ mod tests {
         let (conn, asset_id) = catalog_with_asset();
         let baseline = DevelopStack::default();
         let mut edited = DevelopStack {
-            geometry: Some(EditGeometry { rotation: 8.0,
-                crop: Some(CropRect { x: 0.25, y: 0.25, width: 0.5, height: 0.5 }), crop_ratio: None }),
+            geometry: Some(EditGeometry {
+                rotation: 8.0,
+                crop: Some(CropRect {
+                    x: 0.25,
+                    y: 0.25,
+                    width: 0.5,
+                    height: 0.5,
+                }),
+                crop_ratio: None,
+            }),
             ..baseline.clone()
         };
         assert_ne!(baseline.signature(), edited.signature());
         assert!(needs_preview(IssueChoice::Latest, &edited));
         save(&conn, asset_id, &edited, now_millis()).expect("存几何");
-        assert_eq!(load(&conn, asset_id).expect("读几何").geometry, edited.geometry);
+        assert_eq!(
+            load(&conn, asset_id).expect("读几何").geometry,
+            edited.geometry
+        );
         let signature = edited.signature();
         edited.geometry.as_mut().expect("几何").crop_ratio =
             Some(crate::develop::geometry::CropRatioSetting {
                 id: crate::develop::geometry::CropRatioId::Custom,
-                width: 5.0, height: 4.0,
+                width: 5.0,
+                height: 4.0,
             });
-        assert_eq!(edited.signature(), signature, "比例面板元数据不能改变像素缓存键");
+        assert_eq!(
+            edited.signature(),
+            signature,
+            "比例面板元数据不能改变像素缓存键"
+        );
         save(&conn, asset_id, &edited, now_millis()).expect("存比例配置");
-        assert_eq!(load(&conn, asset_id).expect("读比例配置").geometry, edited.geometry);
+        assert_eq!(
+            load(&conn, asset_id).expect("读比例配置").geometry,
+            edited.geometry
+        );
         assert!(has_edits(&conn, asset_id).expect("编辑标记"));
         edited.geometry = None;
         save(&conn, asset_id, &edited, now_millis()).expect("清几何");
@@ -852,7 +1160,13 @@ mod tests {
         )
         .expect("第一次");
         // 第二次只带一个参数：另一个必须**被删掉**（这就是「重置这一项」）
-        save(&conn, asset_id, &stack(&[("exposure", 0.25)], &[]), now_millis()).expect("第二次");
+        save(
+            &conn,
+            asset_id,
+            &stack(&[("exposure", 0.25)], &[]),
+            now_millis(),
+        )
+        .expect("第二次");
         let loaded = load(&conn, asset_id).expect("读");
         assert_eq!(loaded.params.len(), 1);
         assert_eq!(loaded.params.get("exposure"), Some(&0.25));
@@ -862,10 +1176,19 @@ mod tests {
     #[test]
     fn saving_an_empty_stack_cleans_the_row_up() {
         let (conn, asset_id) = catalog_with_asset();
-        save(&conn, asset_id, &stack(&[("exposure", 1.0)], &[]), now_millis()).expect("写");
+        save(
+            &conn,
+            asset_id,
+            &stack(&[("exposure", 1.0)], &[]),
+            now_millis(),
+        )
+        .expect("写");
         assert!(has_edits(&conn, asset_id).expect("查"));
         save(&conn, asset_id, &DevelopStack::default(), now_millis()).expect("清空");
-        assert!(!has_edits(&conn, asset_id).expect("查"), "全空就该回到没编辑过");
+        assert!(
+            !has_edits(&conn, asset_id).expect("查"),
+            "全空就该回到没编辑过"
+        );
         let stacks: i64 = conn
             .query_row("SELECT count(*) FROM develop_stacks", [], |row| row.get(0))
             .expect("数");
@@ -901,7 +1224,10 @@ mod tests {
         .expect("第二次");
         let loaded = load(&conn, asset_id).expect("读");
         assert_eq!(loaded.curves.len(), 1);
-        assert_eq!(loaded.curves.get("rgb"), Some(&vec![[0.0, 0.1], [1.0, 1.0]]));
+        assert_eq!(
+            loaded.curves.get("rgb"),
+            Some(&vec![[0.0, 0.1], [1.0, 1.0]])
+        );
     }
 
     #[test]
@@ -910,7 +1236,15 @@ mod tests {
         // 未知参数
         assert!(save(&conn, asset_id, &stack(&[("nope", 1.0)], &[]), now_millis()).is_err());
         // 超范围
-        assert!(save(&conn, asset_id, &stack(&[("exposure", 99.0)], &[]), now_millis()).is_err());
+        assert!(
+            save(
+                &conn,
+                asset_id,
+                &stack(&[("exposure", 99.0)], &[]),
+                now_millis()
+            )
+            .is_err()
+        );
         // 未知通道
         assert!(
             save(
@@ -945,7 +1279,10 @@ mod tests {
         save(
             &conn,
             asset_id,
-            &stack(&[("exposure", 1.0)], &[("rgb", vec![[0.0, 0.0], [1.0, 1.0]])]),
+            &stack(
+                &[("exposure", 1.0)],
+                &[("rgb", vec![[0.0, 0.0], [1.0, 1.0]])],
+            ),
             now_millis(),
         )
         .expect("写");
@@ -972,7 +1309,11 @@ mod tests {
     fn signature_is_stable_and_sensitive() {
         let base = stack(&[("exposure", 1.0), ("contrast", 20.0)], &[]);
         let same = stack(&[("contrast", 20.0), ("exposure", 1.0)], &[]);
-        assert_eq!(base.signature(), same.signature(), "顺序不同、内容相同 ⇒ 同一个指纹");
+        assert_eq!(
+            base.signature(),
+            same.signature(),
+            "顺序不同、内容相同 ⇒ 同一个指纹"
+        );
         let changed = stack(&[("exposure", 1.5), ("contrast", 20.0)], &[]);
         assert_ne!(base.signature(), changed.signature(), "改一个参数就要变");
         // 曲线参与指纹
@@ -994,16 +1335,31 @@ mod tests {
         // 只有 JPG：没编辑 → SOOC
         let (conn, asset_id) = catalog_with_asset();
         add_file(&conn, asset_id, "bitmap", "photos/a.jpg");
-        assert_eq!(choose_issue(&conn, asset_id).expect("解析"), IssueChoice::Sooc);
+        assert_eq!(
+            choose_issue(&conn, asset_id).expect("解析"),
+            IssueChoice::Sooc
+        );
 
         // 编辑过 → latest（不管有没有 JPG）
-        save(&conn, asset_id, &stack(&[("exposure", 1.0)], &[]), now_millis()).expect("写");
-        assert_eq!(choose_issue(&conn, asset_id).expect("解析"), IssueChoice::Latest);
+        save(
+            &conn,
+            asset_id,
+            &stack(&[("exposure", 1.0)], &[]),
+            now_millis(),
+        )
+        .expect("写");
+        assert_eq!(
+            choose_issue(&conn, asset_id).expect("解析"),
+            IssueChoice::Latest
+        );
 
         // 只有 RAW：没编辑 → RAW
         let (conn, raw_asset) = catalog_with_asset();
         add_file(&conn, raw_asset, "raw", "photos/_RAW/a.RW2");
-        assert_eq!(choose_issue(&conn, raw_asset).expect("解析"), IssueChoice::Raw);
+        assert_eq!(
+            choose_issue(&conn, raw_asset).expect("解析"),
+            IssueChoice::Raw
+        );
 
         // JPG + RAW：没编辑 → SOOC（默认看相机直出）
         let (conn, both) = catalog_with_asset();
@@ -1016,7 +1372,10 @@ mod tests {
         add_file(&conn, missing, "bitmap", "photos/gone.jpg");
         conn.execute("UPDATE asset_files SET missing_since = 1", [])
             .expect("标缺失");
-        assert_eq!(choose_issue(&conn, missing).expect("解析"), IssueChoice::Raw);
+        assert_eq!(
+            choose_issue(&conn, missing).expect("解析"),
+            IssueChoice::Raw
+        );
     }
 
     #[test]
@@ -1024,22 +1383,30 @@ mod tests {
         let (conn, asset_id) = catalog_with_asset();
         add_file(&conn, asset_id, "bitmap", "photos/2026/a.jpg");
         assert_eq!(
-            edit_target(&conn, asset_id, EditBase::Raw).expect("解析").as_deref(),
+            edit_target(&conn, asset_id, EditBase::Raw)
+                .expect("解析")
+                .as_deref(),
             Some("photos/2026/a.jpg"),
             "只有 JPG 时编辑 JPG（RAW 基准也没 RAW 可给）"
         );
         assert_eq!(
-            edit_target(&conn, asset_id, EditBase::Sooc).expect("解析").as_deref(),
+            edit_target(&conn, asset_id, EditBase::Sooc)
+                .expect("解析")
+                .as_deref(),
             Some("photos/2026/a.jpg")
         );
         add_file(&conn, asset_id, "raw", "photos/2026/_RAW/a.RW2");
         assert_eq!(
-            edit_target(&conn, asset_id, EditBase::Raw).expect("解析").as_deref(),
+            edit_target(&conn, asset_id, EditBase::Raw)
+                .expect("解析")
+                .as_deref(),
             Some("photos/2026/_RAW/a.RW2"),
             "RAW 基准：编辑落在 RAW 上"
         );
         assert_eq!(
-            edit_target(&conn, asset_id, EditBase::Sooc).expect("解析").as_deref(),
+            edit_target(&conn, asset_id, EditBase::Sooc)
+                .expect("解析")
+                .as_deref(),
             Some("photos/2026/a.jpg"),
             "SOOC 基准：编辑落在相机直出的位图上"
         );
@@ -1048,7 +1415,9 @@ mod tests {
         let (conn, raw_only) = catalog_with_asset();
         add_file(&conn, raw_only, "raw", "photos/_RAW/b.RW2");
         assert_eq!(
-            edit_target(&conn, raw_only, EditBase::Sooc).expect("解析").as_deref(),
+            edit_target(&conn, raw_only, EditBase::Sooc)
+                .expect("解析")
+                .as_deref(),
             Some("photos/_RAW/b.RW2")
         );
 
@@ -1056,10 +1425,15 @@ mod tests {
         let (conn, gone) = catalog_with_asset();
         add_file(&conn, gone, "bitmap", "photos/gone.jpg");
         add_file(&conn, gone, "raw", "photos/_RAW/c.RW2");
-        conn.execute("UPDATE asset_files SET missing_since = 1 WHERE role = 'bitmap'", [])
-            .expect("标缺失");
+        conn.execute(
+            "UPDATE asset_files SET missing_since = 1 WHERE role = 'bitmap'",
+            [],
+        )
+        .expect("标缺失");
         assert_eq!(
-            edit_target(&conn, gone, EditBase::Sooc).expect("解析").as_deref(),
+            edit_target(&conn, gone, EditBase::Sooc)
+                .expect("解析")
+                .as_deref(),
             Some("photos/_RAW/c.RW2"),
             "位图没了就退回 RAW，而不是给一条死路径"
         );
@@ -1103,14 +1477,36 @@ mod tests {
         )
         .expect("插第二张");
         let second = conn.last_insert_rowid();
-        save(&conn, first, &stack(&[("exposure", 1.0)], &[]), now_millis()).expect("写一");
-        save(&conn, second, &stack(&[("blacks", -30.0)], &[]), now_millis()).expect("写二");
+        save(
+            &conn,
+            first,
+            &stack(&[("exposure", 1.0)], &[]),
+            now_millis(),
+        )
+        .expect("写一");
+        save(
+            &conn,
+            second,
+            &stack(&[("blacks", -30.0)], &[]),
+            now_millis(),
+        )
+        .expect("写二");
         assert_eq!(
             load(&conn, first).expect("读一").params.get("exposure"),
             Some(&1.0)
         );
-        assert!(!load(&conn, first).expect("读一").params.contains_key("blacks"));
-        assert!(!load(&conn, second).expect("读二").params.contains_key("exposure"));
+        assert!(
+            !load(&conn, first)
+                .expect("读一")
+                .params
+                .contains_key("blacks")
+        );
+        assert!(
+            !load(&conn, second)
+                .expect("读二")
+                .params
+                .contains_key("exposure")
+        );
     }
 
     #[test]
@@ -1196,11 +1592,32 @@ mod tests {
         edited.source_base = EditBase::Sooc;
         assert_ne!(edited.signature(), raw_signature);
         save(&conn, asset_id, &edited, now_millis()).expect("存 SOOC issue");
-        assert_eq!(load(&conn, asset_id).expect("读").source_base, EditBase::Sooc);
-        set_setting(&conn, asset_id, Setting::SourceBase, Some("raw"), now_millis())
-            .expect("撤销源切换");
-        assert_eq!(load(&conn, asset_id).expect("读").source_base, EditBase::Raw);
-        assert!(set_setting(&conn, asset_id, Setting::SourceBase, Some("jpeg"), now_millis()).is_err());
+        assert_eq!(
+            load(&conn, asset_id).expect("读").source_base,
+            EditBase::Sooc
+        );
+        set_setting(
+            &conn,
+            asset_id,
+            Setting::SourceBase,
+            Some("raw"),
+            now_millis(),
+        )
+        .expect("撤销源切换");
+        assert_eq!(
+            load(&conn, asset_id).expect("读").source_base,
+            EditBase::Raw
+        );
+        assert!(
+            set_setting(
+                &conn,
+                asset_id,
+                Setting::SourceBase,
+                Some("jpeg"),
+                now_millis()
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -1220,7 +1637,8 @@ mod tests {
             conn.execute(
                 "INSERT INTO develop_stacks (asset_id, created_at, updated_at) VALUES (?1, 0, 0)",
                 [id],
-            ).expect("旧栈");
+            )
+            .expect("旧栈");
             conn.execute(
                 "INSERT INTO develop_params (asset_id, param_id, value) VALUES (?1, 'exposure', 0.5)",
                 [id],
@@ -1228,9 +1646,21 @@ mod tests {
             assets.push(id);
         }
         apply(&mut conn, DbKind::Catalog, Backups::none(), 0).expect("升到 v7");
-        assert_eq!(load(&conn, assets[0]).expect("RAW 旧栈").source_base, EditBase::Raw);
-        assert_eq!(load(&conn, assets[1]).expect("位图旧栈").source_base, EditBase::Sooc);
-        assert_eq!(load(&conn, assets[0]).expect("旧参数").params.get("exposure"), Some(&0.5));
+        assert_eq!(
+            load(&conn, assets[0]).expect("RAW 旧栈").source_base,
+            EditBase::Raw
+        );
+        assert_eq!(
+            load(&conn, assets[1]).expect("位图旧栈").source_base,
+            EditBase::Sooc
+        );
+        assert_eq!(
+            load(&conn, assets[0])
+                .expect("旧参数")
+                .params
+                .get("exposure"),
+            Some(&0.5)
+        );
     }
 
     #[test]
@@ -1250,7 +1680,10 @@ mod tests {
         // 降噪方式同样改画面 ⇒ 也要进指纹，而且要能存下来
         base.nr_method = Some(NrMethod::High);
         save(&conn, asset_id, &base, now_millis()).expect("写");
-        assert_eq!(load(&conn, asset_id).expect("读").nr_method, Some(NrMethod::High));
+        assert_eq!(
+            load(&conn, asset_id).expect("读").nr_method,
+            Some(NrMethod::High)
+        );
 
         // 开关也要存住（它只影响配置文件那一半）
         base.lens_enabled = Some(false);
@@ -1310,7 +1743,11 @@ mod tests {
         assert_eq!(loaded.nr_method, Some(NrMethod::High));
         assert_eq!(loaded.lens_enabled, Some(false));
         // 键 ↔ 设置一一对应（撤销操作靠它）
-        for setting in [Setting::LensProfile, Setting::LensEnabled, Setting::NrMethod] {
+        for setting in [
+            Setting::LensProfile,
+            Setting::LensEnabled,
+            Setting::NrMethod,
+        ] {
             assert_eq!(Setting::parse(setting.key()), Some(setting));
         }
         assert_eq!(Setting::parse("不存在"), None);
@@ -1347,7 +1784,13 @@ mod tests {
         assert_eq!(rating, 3);
         assert_eq!(flag, "pick");
         // 新表可用
-        save(&conn, asset_id, &stack(&[("exposure", 0.5)], &[]), now_millis()).expect("写");
+        save(
+            &conn,
+            asset_id,
+            &stack(&[("exposure", 0.5)], &[]),
+            now_millis(),
+        )
+        .expect("写");
         assert!(has_edits(&conn, asset_id).expect("查"));
     }
 }

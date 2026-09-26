@@ -51,11 +51,11 @@ import type { LoadStatus } from "../../lib/load-status.ts";
 import {
   applySelection,
   EMPTY_SELECTION,
-  extendSelection,
   focusSelection,
   hasSelection as anySelected,
   selectAll as selectAllIds,
   selectionCount,
+  toggleGroupSelection,
   type SelectionState,
 } from "../../lib/selection.ts";
 import { groupByTime, type TimeGrouping } from "../../lib/time-group.ts";
@@ -163,8 +163,11 @@ export interface PhotoGridStore {
   clickItem: (id: string, mode: "replace" | "toggle" | "range") => void;
   /** 只挪当前锚点，不改变多选集合。 */
   setAnchor: (id: string) => void;
-  /** 全选一组（日 / 时间片）；`additive = false` 表示替换掉现有选择 */
-  selectGroup: (ids: readonly string[], additive?: boolean) => void;
+  /**
+   * 日 / 时间片那颗药丸的**整段开关**（全选中 → 全取消；否则 → 全选中）。
+   * 语义与口径在 `lib/selection.ts::toggleGroupSelection`，这里只是转发。
+   */
+  toggleGroup: (ids: readonly string[]) => void;
   selectAll: () => void;
   clearSelection: () => void;
 
@@ -549,13 +552,9 @@ export function createPhotoGridStore(deps: PhotoGridDeps): PhotoGridStore {
     setSelection((current) => applySelection(current, orderedIds(), id, mode));
   };
 
-  const selectGroup = (ids: readonly string[], additive = true): void => {
+  const toggleGroup = (ids: readonly string[]): void => {
     if (ids.length === 0) return;
-    setSelection((current) =>
-      additive
-        ? extendSelection(current, ids)
-        : extendSelection(EMPTY_SELECTION, ids),
-    );
+    setSelection((current) => toggleGroupSelection(current, ids));
   };
 
   const setAnchor = (id: string): void => {
@@ -604,7 +603,7 @@ export function createPhotoGridStore(deps: PhotoGridDeps): PhotoGridStore {
     selectedCount: () => selectionCount(selection(), orderedIds()),
     clickItem,
     setAnchor,
-    selectGroup,
+    toggleGroup,
     selectAll,
     clearSelection,
 

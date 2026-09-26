@@ -27,7 +27,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crate::error::Result;
-use crate::media::exif::{self, source_rank, ExifData, TakenAt};
+use crate::media::exif::{self, ExifData, TakenAt, source_rank};
 use crate::media::meta::{orientation_swaps_axes, read_photo_meta};
 use crate::store::assets;
 use crate::store::db::CatalogDb;
@@ -51,6 +51,8 @@ struct FileRow {
     role: String,
     rel_path: String,
     mtime_ms: Option<i64>,
+    size_bytes: Option<i64>,
+    identity: Option<Vec<u8>>,
 }
 
 /// 回填一个库（真实现：从磁盘读 EXIF）。
@@ -79,6 +81,22 @@ pub fn refresh_metadata(catalog: &CatalogDb, now_ms: i64) -> Result<BackfillRepo
     })
 }
 
+/// 范围同步只重读变化的资产，沿用与全库重建相同的优先级和写入规则。
+pub fn refresh_assets(
+    catalog: &CatalogDb,
+    now_ms: i64,
+    ids: &std::collections::BTreeSet<i64>,
+) -> Result<BackfillReport> {
+    sync_with(catalog, now_ms, false, Some(ids), |abs, name, mtime| {
+        if !abs.is_file() {
+            return None;
+        }
+        let data = read_disk_metadata(abs);
+        let taken = exif::resolve_taken_at(Some(&data), name, mtime);
+        Some((data, taken))
+    })
+}
+
 /// EXIF 提供器材/时间；真实图像头提供更可信的尺寸。
 ///
 /// `read_photo_meta` 返回已应用方向的展示尺寸，catalog 仍存原始像素轴，所以写入前换回去。
@@ -102,7 +120,7 @@ pub fn backfill_with<F>(catalog: &CatalogDb, now_ms: i64, read: F) -> Result<Bac
 where
     F: Fn(&Path, &str, Option<i64>) -> Option<(ExifData, Option<TakenAt>)>,
 {
-    sync_with(catalog, now_ms, true, read)
+    sync_with(catalog, now_ms, true, None, read)
 }
 
 /// 可注入读法的全量刷新（测试与重建共用）。
@@ -110,13 +128,14 @@ pub fn refresh_with<F>(catalog: &CatalogDb, now_ms: i64, read: F) -> Result<Back
 where
     F: Fn(&Path, &str, Option<i64>) -> Option<(ExifData, Option<TakenAt>)>,
 {
-    sync_with(catalog, now_ms, false, read)
+    sync_with(catalog, now_ms, false, None, read)
 }
 
 fn sync_with<F>(
     catalog: &CatalogDb,
     now_ms: i64,
     only_missing: bool,
+    asset_ids: Option<&std::collections::BTreeSet<i64>>,
     read: F,
 ) -> Result<BackfillReport>
 where
@@ -125,33 +144,42 @@ where
     let root: PathBuf = catalog.root().to_path_buf();
     let grouped: BTreeMap<i64, Vec<FileRow>> = catalog.read(|conn| {
         let sql = if only_missing {
-            "SELECT f.asset_id, f.role, f.rel_path, f.mtime_ms
+            "SELECT f.asset_id, f.role, f.rel_path, f.mtime_ms, f.size_bytes, f.file_id
                FROM asset_files f
                JOIN assets a ON a.id = f.asset_id
               WHERE a.taken_at IS NULL AND f.missing_since IS NULL
               ORDER BY f.asset_id, (f.role = 'raw'), f.rel_path"
         } else {
-            "SELECT f.asset_id, f.role, f.rel_path, f.mtime_ms
+            "SELECT f.asset_id, f.role, f.rel_path, f.mtime_ms, f.size_bytes, f.file_id
                FROM asset_files f
               WHERE f.missing_since IS NULL
               ORDER BY f.asset_id, (f.role = 'raw'), f.rel_path"
         };
         // 位图排在 RAW 前面（`role = 'raw'` 为真时排后面）。
-        let mut stmt = conn.prepare(sql)?;
-        let rows = stmt.query_map([], |row| {
+        let sql = sql.replace(
+            "ORDER BY",
+            "AND (?1 IS NULL OR f.asset_id IN (SELECT value FROM json_each(?1))) ORDER BY",
+        );
+        let selected = asset_ids.map(serde_json::to_string).transpose()?;
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map([selected], |row| {
             Ok((
                 row.get::<_, i64>(0)?,
                 FileRow {
                     role: row.get(1)?,
                     rel_path: row.get(2)?,
                     mtime_ms: row.get(3)?,
+                    size_bytes: row.get(4)?,
+                    identity: row.get(5)?,
                 },
             ))
         })?;
         let mut grouped: BTreeMap<i64, Vec<FileRow>> = BTreeMap::new();
         for row in rows {
             let (asset_id, file) = row?;
-            grouped.entry(asset_id).or_default().push(file);
+            if asset_ids.is_none_or(|ids| ids.contains(&asset_id)) {
+                grouped.entry(asset_id).or_default().push(file);
+            }
         }
         Ok(grouped)
     })?;
@@ -160,7 +188,7 @@ where
         candidates: grouped.len(),
         ..BackfillReport::default()
     };
-    let mut updates: Vec<(i64, ExifData, Option<TakenAt>)> = Vec::new();
+    let mut updates: Vec<(i64, ExifData, Option<TakenAt>, Vec<FileRow>)> = Vec::new();
 
     for (asset_id, files) in &grouped {
         let mut reads: Vec<(ExifData, Option<TakenAt>)> = Vec::new();
@@ -187,9 +215,8 @@ where
         let mut best: Option<TakenAt> = None;
         for (_, taken) in &reads {
             let Some(candidate) = taken else { continue };
-            let better = best.is_none_or(|current| {
-                source_rank(candidate.source) > source_rank(current.source)
-            });
+            let better = best
+                .is_none_or(|current| source_rank(candidate.source) > source_rank(current.source));
             if better {
                 best = Some(*candidate);
             }
@@ -202,14 +229,33 @@ where
             report.still_missing += 1;
             continue;
         }
-        updates.push((*asset_id, primary, best));
+        updates.push((*asset_id, primary, best, files.clone()));
     }
 
     if !updates.is_empty() {
         let total = updates.len();
         let count = catalog.write_tx(move |tx| {
             let mut written = 0usize;
-            for (asset_id, data, taken) in &updates {
+            for (asset_id, data, taken, expected) in &updates {
+                let mut stmt = tx.prepare(
+                    "SELECT role, rel_path, mtime_ms, size_bytes, file_id FROM asset_files
+                    WHERE asset_id=?1 AND missing_since IS NULL ORDER BY (role='raw'), rel_path",
+                )?;
+                let current = stmt
+                    .query_map([asset_id], |row| {
+                        Ok(FileRow {
+                            role: row.get(0)?,
+                            rel_path: row.get(1)?,
+                            mtime_ms: row.get(2)?,
+                            size_bytes: row.get(3)?,
+                            identity: row.get(4)?,
+                        })
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                if &current != expected {
+                    continue;
+                }
+
                 if only_missing {
                     // 回填期间用户又改了这一行 → 不覆盖（只填空值）
                     let still_empty: bool = tx.query_row(
@@ -222,6 +268,7 @@ where
                     }
                 }
                 assets::apply_exif(tx, *asset_id, data, *taken, now_ms)?;
+                super::fts::refresh_asset(tx, *asset_id)?;
                 written += 1;
             }
             Ok(written)
@@ -325,9 +372,11 @@ mod tests {
         assert_eq!(offset, Some(480));
         let model: Option<String> = catalog
             .read(move |conn| {
-                Ok(conn.query_row("SELECT camera_model FROM assets WHERE id = ?1", [id], |r| {
-                    r.get(0)
-                })?)
+                Ok(
+                    conn.query_row("SELECT camera_model FROM assets WHERE id = ?1", [id], |r| {
+                        r.get(0)
+                    })?,
+                )
             })
             .expect("读回");
 
@@ -349,7 +398,10 @@ mod tests {
             .expect("预置时间");
 
         let report = backfill_with(&catalog, T0 + 100, |_abs, _name, _mtime| {
-            Some((ExifData::default(), Some(taken(T0 - 5000, TakenAtSource::Exif))))
+            Some((
+                ExifData::default(),
+                Some(taken(T0 - 5000, TakenAtSource::Exif)),
+            ))
         })
         .expect("回填");
 
@@ -444,9 +496,15 @@ mod tests {
         let report = backfill_with(&catalog, T0 + 100, |abs, _name, _mtime| {
             // 位图给真时间，RAW 只能退到 mtime（典型情形）
             if abs.to_string_lossy().ends_with(".jpg") {
-                Some((ExifData::default(), Some(taken(T0 - 9000, TakenAtSource::Exif))))
+                Some((
+                    ExifData::default(),
+                    Some(taken(T0 - 9000, TakenAtSource::Exif)),
+                ))
             } else {
-                Some((ExifData::default(), Some(taken(T0, TakenAtSource::FileMtime))))
+                Some((
+                    ExifData::default(),
+                    Some(taken(T0, TakenAtSource::FileMtime)),
+                ))
             }
         })
         .expect("回填");
@@ -461,8 +519,8 @@ mod tests {
     fn a_missing_file_is_counted_and_left_alone() {
         let (_dir, catalog) = temp_catalog();
         let id = asset_with_file(&catalog, "photos/gone.jpg", "bitmap", Some(T0));
-        let report = backfill_with(&catalog, T0 + 100, |_abs: &Path, _name, _mtime| None)
-            .expect("回填");
+        let report =
+            backfill_with(&catalog, T0 + 100, |_abs: &Path, _name, _mtime| None).expect("回填");
 
         assert_eq!(report.candidates, 1);
         assert_eq!(report.unreadable, 1);
@@ -501,7 +559,11 @@ mod tests {
         let (at, source, offset) = read_time(&catalog, id);
         assert_eq!(at, Some(T0 - 3000));
         assert_eq!(source.as_deref(), Some("file_mtime"));
-        assert_eq!(offset, Some(480), "来源是 mtime 也要带上偏移（这里由假读法给的）");
+        assert_eq!(
+            offset,
+            Some(480),
+            "来源是 mtime 也要带上偏移（这里由假读法给的）"
+        );
     }
 
     #[test]
@@ -509,11 +571,17 @@ mod tests {
         let (_dir, catalog) = temp_catalog();
         let _ = asset_with_file(&catalog, "photos/a.jpg", "bitmap", None);
         let first = backfill_with(&catalog, T0 + 100, |_abs, _name, _mtime| {
-            Some((ExifData::default(), Some(taken(T0 - 5000, TakenAtSource::Exif))))
+            Some((
+                ExifData::default(),
+                Some(taken(T0 - 5000, TakenAtSource::Exif)),
+            ))
         })
         .expect("第一次");
         let second = backfill_with(&catalog, T0 + 200, |_abs, _name, _mtime| {
-            Some((ExifData::default(), Some(taken(T0 - 6000, TakenAtSource::Exif))))
+            Some((
+                ExifData::default(),
+                Some(taken(T0 - 6000, TakenAtSource::Exif)),
+            ))
         })
         .expect("第二次");
 
@@ -529,15 +597,49 @@ mod tests {
     #[test]
     fn unicode_paths_and_multiple_files_are_handled() {
         let (_dir, catalog) = temp_catalog();
-        let id = asset_with_file(&catalog, "photos/2026-08-15 婚礼/IMG_0001.JPG", "bitmap", None);
+        let id = asset_with_file(
+            &catalog,
+            "photos/2026-08-15 婚礼/IMG_0001.JPG",
+            "bitmap",
+            None,
+        );
         let report = backfill_with(&catalog, T0 + 100, |abs, name, _mtime| {
             // 路径拼对了没有：目录 + 文件名都要能对上
             assert!(abs.to_string_lossy().contains("婚礼"));
             assert_eq!(name, "IMG_0001.JPG");
-            Some((ExifData::default(), Some(taken(T0 - 7, TakenAtSource::Exif))))
+            Some((
+                ExifData::default(),
+                Some(taken(T0 - 7, TakenAtSource::Exif)),
+            ))
         })
         .expect("回填");
         assert_eq!(report.filled, 1);
         assert_eq!(read_time(&catalog, id).0, Some(T0 - 7));
+    }
+    #[test]
+    fn concurrent_file_fact_change_does_not_apply_stale_metadata() {
+        let (_dir, catalog) = temp_catalog();
+        let id = asset_with_file(&catalog, "photos/a.jpg", "bitmap", Some(100));
+        let report = refresh_with(&catalog, T0, |_, _, _| {
+            catalog
+                .write_tx(move |conn| {
+                    conn.execute(
+                        "UPDATE asset_files SET mtime_ms=200 WHERE asset_id=?1",
+                        [id],
+                    )?;
+                    Ok(())
+                })
+                .unwrap();
+            Some((
+                ExifData {
+                    width: Some(999),
+                    ..ExifData::default()
+                },
+                Some(taken(100, TakenAtSource::Exif)),
+            ))
+        })
+        .unwrap();
+        assert_eq!(report.filled, 0);
+        assert_eq!(read_time(&catalog, id).0, None);
     }
 }

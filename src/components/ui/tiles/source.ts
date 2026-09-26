@@ -55,6 +55,12 @@ export type GridStatus = "idle" | "loading" | "ready" | "error";
 export interface TilesSource {
   /** 显示序下一共有几格 */
   count(): number;
+  /** 只读显示序身份，允许分页洞参与组选择。 */
+  idAt?(index: number): string | null;
+  /** 附加区高度由适配层数据决定，像素值由唯一行模型汇总。 */
+  extraHeight?(index: number, cellSize: number): number;
+  /** 工作流手势适配；默认仍为统一 clickMode。 */
+  invertedCtrl?: boolean;
   /** 显示序第 `index` 格；`null` = 这一页还没取回来（渲染成占位块） */
   itemAt(index: number): GridItem | null;
   /** 按 id 取（看图、锚定、键盘导航用） */
@@ -79,13 +85,16 @@ export interface TilesSource {
   /** 只挪当前锚点，不改变多选集合（对比视图点某一幅时用）。 */
   setAnchor(id: string): void;
   /**
-   * 选中**显示序区间**里的所有照片（日 / 时间片标题上的「全选」）。
+   * 选中**显示序区间**里的所有照片（日 / 时间片标题上的那颗药丸）。
    *
    * 为什么给区间而不是 id 列表：浏览的时间线**包含还没取回来的页**，
-   * 「全选这一天」不该漏掉它们 —— 而网格手上只有已加载的格子。
+   * 「这一天」不该漏掉它们 —— 而网格手上只有已加载的格子。
    * 区间 → id 的换算由数据源做（它知道置换与分页）。
+   *
+   * 语义是**整段开关**（全选中 → 全取消；否则 → 全选中），与「点单张照片」不同：
+   * 不看修饰键。完整口径见 `lib/selection.ts::toggleGroupSelection`。
    */
-  selectGroupRange(start: number, count: number, additive?: boolean): void;
+  selectGroupRange(start: number, count: number): void;
   clearSelection(): void;
   /** 当前工作区自己的信息显示档位。 */
   infoMode(): TileInfoMode;

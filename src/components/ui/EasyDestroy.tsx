@@ -15,7 +15,7 @@
  * 所以：禁行图标、文案不含「删除」、确认按钮用主色而不是红色。
  */
 
-import { Show, splitProps, type JSX } from "solid-js";
+import { splitProps, type JSX } from "solid-js";
 import { t } from "../../i18n";
 import { createEasyDestroy } from "../../lib/easy-destroy.ts";
 import { ConfirmDialog } from "./Dialog.tsx";
@@ -29,6 +29,7 @@ export interface EasyDestroyButtonProps {
   /** 确认框正文。默认「确定要移除吗？」 */
   confirmMessage?: string;
   confirmTitle?: string;
+  confirmLabel?: string;
   /** 图标大小（省略时走密度令牌） */
   size?: number | string;
   disabled?: boolean;
@@ -41,14 +42,13 @@ export function EasyDestroyButton(props: EasyDestroyButtonProps) {
     "label",
     "confirmMessage",
     "confirmTitle",
+    "confirmLabel",
     "size",
     "disabled",
     "class",
   ]);
 
   const destroy = createEasyDestroy();
-
-  const skipHint = () => t("common.easy_destroy.shift_hint");
 
   return (
     <>
@@ -70,17 +70,10 @@ export function EasyDestroyButton(props: EasyDestroyButtonProps) {
         open={destroy.pending() !== null}
         title={destroy.pending()?.title}
         message={destroy.pending()?.message ?? ""}
+        confirmLabel={local.confirmLabel}
         onConfirm={destroy.confirm}
         onCancel={destroy.cancel}
       />
-      {/*
-        把「Shift 可跳过确认」写在弹窗里 —— 这条捷径只有被看见才会被用。
-        这里用 `Show` 而不是把它塞进 ConfirmDialog 的 description，
-        是为了不把范式细节耦合进那个通用弹窗。
-      */}
-      <Show when={destroy.pending() !== null}>
-        <span class="sr-only">{skipHint()}</span>
-      </Show>
     </>
   );
 }
@@ -95,6 +88,7 @@ export interface EasyDestroyHostProps {
   onConfirm: () => void;
   onCancel: () => void;
   description?: JSX.Element;
+  confirmLabel?: string;
 }
 
 /** 由调用方自己持有控制器时用的确认框外壳 */
@@ -104,6 +98,8 @@ export function EasyDestroyHost(props: EasyDestroyHostProps) {
       open={props.open}
       title={props.title}
       message={props.message}
+      confirmLabel={props.confirmLabel}
+      description={props.description}
       onConfirm={props.onConfirm}
       onCancel={props.onCancel}
     />

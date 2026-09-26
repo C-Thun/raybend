@@ -8,7 +8,7 @@
 //! 为什么单独一层而不是直接在 Tauri 命令里写：这些是**业务规则**（跳过什么、按什么排序、
 //! 拍摄时间怎么兜底），要有单测；`src-tauri` 只该做「参数转换 + 错误转字符串」。
 //!
-//! 拍摄时间分两级（`plans/M1-5.md` §3.1）：
+//! 拍摄时间分两级（`specs/M1-5.md` §3.1）：
 //!
 //! | 阶段 | 数据来源 | 代价 |
 //! | --- | --- | --- |
@@ -24,6 +24,27 @@ use crate::error::{Error, Result};
 use super::exif::{self, TakenAt};
 use super::kind::{self, MediaKind};
 use super::scan::{self, Cancel, ScanEvent, ScanOptions};
+
+/// 源文件缓存签名：同路径替换或同 inode 改写都不能命中旧派生图。
+/// 不读像素；大小、精确修改时间和 FileId 在 Rust 里统一计算。
+pub fn source_signature(path: &Path) -> Result<String> {
+    use sha2::{Digest, Sha256};
+    let metadata = std::fs::metadata(path)?;
+    let mut hash = Sha256::new();
+    hash.update(metadata.len().to_le_bytes());
+    let (before_epoch, modified) = match metadata.modified()?.duration_since(std::time::UNIX_EPOCH)
+    {
+        Ok(value) => (false, value),
+        Err(error) => (true, error.duration()),
+    };
+    hash.update([u8::from(before_epoch)]);
+    hash.update(modified.as_nanos().to_le_bytes());
+    if let Some(id) = crate::store::file_id::FileId::try_read(path) {
+        hash.update(id.volume_serial.to_le_bytes());
+        hash.update(id.file_id);
+    }
+    Ok(format!("{:x}", hash.finalize()))
+}
 
 /// 目录树里的一个子目录。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -317,7 +338,9 @@ pub fn read_times(paths: &[PathBuf]) -> Vec<TimeEntry> {
         .collect();
     if super::pairing::inherit_times_from_bitmaps(&mut pairs) > 0 {
         for (entry, pair) in out.iter_mut().zip(pairs.iter()) {
-            let Some(millis) = pair.taken_at else { continue };
+            let Some(millis) = pair.taken_at else {
+                continue;
+            };
             if entry.taken_at.map(|t| t.millis) == Some(millis) {
                 continue;
             }
@@ -368,10 +391,7 @@ pub fn ensure_dir(path: &Path) -> Result<()> {
     if meta.is_dir() {
         Ok(())
     } else {
-        Err(Error::Unsupported(format!(
-            "不是目录：{}",
-            path.display()
-        )))
+        Err(Error::Unsupported(format!("不是目录：{}", path.display())))
     }
 }
 
@@ -409,7 +429,11 @@ mod tests {
         write(&root.join("notes.txt"), 10);
 
         let dirs = list_dirs(root).unwrap();
-        assert_eq!(names(&dirs), vec!["apple", "Banana", "Zebra"], "按名排序、只目录");
+        assert_eq!(
+            names(&dirs),
+            vec!["apple", "Banana", "Zebra"],
+            "按名排序、只目录"
+        );
         // 不下钻：inner 不出现（它是 apple 的子目录）
         assert!(!names(&dirs).contains(&"inner"));
         assert_eq!(dirs[0].path, root.join("apple"));
@@ -527,12 +551,12 @@ mod tests {
         write(&root.join("a.xmp"), 5);
 
         let listing = scan_photos(root, false).unwrap();
-        let files: Vec<&str> = listing
-            .items
-            .iter()
-            .map(|i| i.file_name.as_str())
-            .collect();
-        assert_eq!(files, vec!["a.jpg", "b.RW2"], "只列直属照片，侧车与非照片不算");
+        let files: Vec<&str> = listing.items.iter().map(|i| i.file_name.as_str()).collect();
+        assert_eq!(
+            files,
+            vec!["a.jpg", "b.RW2"],
+            "只列直属照片，侧车与非照片不算"
+        );
         assert_eq!(listing.items[0].ext.as_deref(), Some("jpg"));
         assert_eq!(listing.items[1].kind, MediaKind::Raw);
         assert_eq!(listing.items[0].size_bytes, 10);
@@ -547,11 +571,7 @@ mod tests {
         write(&root.join("a.jpg"), 10);
         write(&root.join("sub/deep/c.jpg"), 30);
         let listing = scan_photos(root, true).unwrap();
-        let files: Vec<&str> = listing
-            .items
-            .iter()
-            .map(|i| i.file_name.as_str())
-            .collect();
+        let files: Vec<&str> = listing.items.iter().map(|i| i.file_name.as_str()).collect();
         assert_eq!(files, vec!["a.jpg", "c.jpg"]);
     }
 
@@ -664,7 +684,10 @@ mod tests {
         let times = read_times(std::slice::from_ref(&missing));
         assert_eq!(times.len(), 1);
         assert_eq!(times[0].path, missing);
-        assert!(times[0].taken_at.is_none(), "文件都不在了，不该编出一个时间");
+        assert!(
+            times[0].taken_at.is_none(),
+            "文件都不在了，不该编出一个时间"
+        );
     }
 
     #[test]
@@ -748,5 +771,27 @@ mod availability_tests {
 
         std::fs::rename(&unplugged, &root).unwrap();
         assert_eq!(paths_are_dirs(&[path]), vec![true], "改回来 → 又可用");
+    }
+}
+
+#[cfg(test)]
+mod signature_tests {
+    use super::*;
+    #[test]
+    fn source_signature_tracks_exact_time_replacement_and_unicode_paths() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("中文.jpg");
+        std::fs::write(&path, b"same size").unwrap();
+        let first = source_signature(&path).unwrap();
+        assert_eq!(first, source_signature(&path).unwrap());
+        let file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+        file.set_times(
+            std::fs::FileTimes::new()
+                .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(123)),
+        )
+        .unwrap();
+        assert_ne!(first, source_signature(&path).unwrap());
+        assert!(source_signature(&root.path().join("missing.jpg")).is_err());
+        assert_eq!(source_signature(&path).unwrap().len(), 64);
     }
 }

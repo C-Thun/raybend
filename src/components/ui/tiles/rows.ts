@@ -89,6 +89,7 @@ export interface GridRowsInput {
   cellSize: number;
   /** 分组；**省略 = 平铺模式** */
   slices?: readonly RowSlice[];
+  extraHeight?: (index: number) => number;
 }
 
 /** 构建行数组。空列表 → 空数组（视图显示空态）。 */
@@ -97,7 +98,7 @@ export function buildGridRows(input: GridRowsInput): GridRowModel[] {
   const rowHeight = tileRowHeight(input.cellSize);
 
   if (input.slices === undefined) {
-    return chunkTiles(input.count, 0, columns, rowHeight, "tiles");
+    return chunkTiles(input.count, 0, columns, rowHeight, "tiles", input.extraHeight);
   }
 
   const rows: GridRowModel[] = [];
@@ -135,7 +136,7 @@ export function buildGridRows(input: GridRowsInput): GridRowModel[] {
         unknown: false,
       });
     }
-    rows.push(...chunkTiles(slice.count, slice.start, columns, rowHeight, slice.id));
+    rows.push(...chunkTiles(slice.count, slice.start, columns, rowHeight, slice.id, input.extraHeight));
   }
   return rows;
 }
@@ -147,12 +148,13 @@ function chunkTiles(
   columns: number,
   height: number,
   keyPrefix: string,
+  extraHeight?: (index: number) => number,
 ): TileRowModel[] {
   const rows: TileRowModel[] = [];
   for (let at = 0; at < count; at += columns) {
     const slots: number[] = [];
     for (let index = at; index < Math.min(at + columns, count); index += 1) slots.push(from + index);
-    rows.push({ kind: "tiles", key: `${keyPrefix}@${at / columns}`, height, slots });
+    rows.push({ kind: "tiles", key: `${keyPrefix}@${at / columns}`, height: height + Math.max(0, ...slots.map((slot) => { const value = extraHeight?.(slot) ?? 0; return Number.isFinite(value) ? Math.max(0, value) : 0; })), slots });
   }
   return rows;
 }

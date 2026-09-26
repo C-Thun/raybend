@@ -497,3 +497,75 @@ test("visibleRect：与适配倍率一致（fit 状态下框正好等于整张�
   assert.equal(Math.round(rect.width), natural.width);
   assert.equal(Math.round(rect.height), natural.height);
 });
+
+test("定稿切换重取当前图时保留缩放和旧帧，新的 Screen 到达后原位替换", async () => {
+  let finish: ((bytes: Uint8Array) => void) | undefined;
+  let calls = 0;
+  const store = createViewerStore({
+    loadScreen: () => {
+      calls += 1;
+      if (calls === 1) return Promise.resolve(new Uint8Array([1]));
+      return new Promise<Uint8Array>((resolve) => { finish = resolve; });
+    },
+    makeUrl: (bytes) => `blob:${bytes[0]}`,
+    revokeUrl: () => undefined,
+  });
+  store.setViewport({ width: 800, height: 600 });
+  store.show([{ ...PHOTOS[0]!, natural: { width: 1600, height: 1200 } }], 0);
+  await flush();
+  store.zoomTo(1);
+  const before = store.state();
+  assert.equal(store.imageUrl(), "blob:1");
+  store.reloadCurrent();
+  assert.equal(store.imageUrl(), "blob:1", "旧帧留着直到新图解码好");
+  assert.equal(store.state().zoom, before.zoom);
+  assert.deepEqual(store.state().pan, before.pan);
+  finish?.(new Uint8Array([2]));
+  await flush();
+  assert.equal(store.imageUrl(), "blob:2");
+  assert.equal(store.state().zoom, before.zoom);
+});
+
+
+test("源变化失效非锚点比较图，保留无关图片 URL", async () => {
+  const fake = fakeDeps();
+  const store = createViewerStore(fake.deps);
+  store.show(PHOTOS, 0); await flush();
+  await Promise.all(PHOTOS.map((photo) => store.ensureImage(photo)));
+  const changed = PHOTOS[1]!;
+  const before = store.imageUrlFor(changed);
+  const unchanged = store.imageUrlFor(PHOTOS[0]!);
+  store.invalidatePaths([changed.path]);
+  assert.equal(store.imageUrlFor(changed), null);
+  assert.equal(store.imageUrlFor(PHOTOS[0]!), unchanged);
+  assert.ok(fake.revoked.includes(before!));
+  await flush();
+  assert.notEqual(store.imageUrlFor(changed), null, "源变更自动重取比较图，不等待重新打开视图");
+  assert.notEqual(store.imageUrlFor(changed), before);
+});
+
+
+test("源变化只取消受影响的在途比较图，旧结果不能覆盖新图", async () => {
+  const pending = new Map<string, ((bytes: Uint8Array) => void)[]>();
+  const revoked: string[] = [];
+  const store = createViewerStore({
+    loadScreen: (path) => new Promise<Uint8Array>((resolve) => {
+      const list = pending.get(path) ?? []; list.push(resolve); pending.set(path, list);
+    }),
+    makeUrl: (bytes) => `blob:${bytes[0]}`,
+    revokeUrl: (url) => revoked.push(url),
+  });
+  store.show(PHOTOS, 0);
+  pending.get("/a.jpg")![0]!(new Uint8Array([1])); await flush();
+  const b = store.ensureImage(PHOTOS[1]!);
+  const c = store.ensureImage(PHOTOS[2]!);
+  store.invalidatePaths(["/b.jpg"]);
+  assert.equal(pending.get("/b.jpg")!.length, 2);
+  pending.get("/b.jpg")![1]!(new Uint8Array([4])); await flush();
+  pending.get("/b.jpg")![0]!(new Uint8Array([2]));
+  pending.get("/c.jpg")![0]!(new Uint8Array([3]));
+  await Promise.all([b, c]);
+  assert.equal(store.imageUrlFor(PHOTOS[1]!), "blob:4");
+  assert.equal(store.imageUrlFor(PHOTOS[2]!), "blob:3");
+  assert.ok(!revoked.includes("blob:3"));
+});

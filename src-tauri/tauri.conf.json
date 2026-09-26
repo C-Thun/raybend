@@ -44,6 +44,12 @@
       "csp": null
     }
   },
+  "plugins": {
+    "desktop-behavior": {
+      "browserContextMenus": false,
+      "browserAcceleratorKeys": false
+    }
+  },
   "bundle": {
     "active": true,
     "targets": ["nsis", "msi"],

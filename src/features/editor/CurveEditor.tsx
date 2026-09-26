@@ -222,6 +222,13 @@ export function CurveEditor(props: CurveEditorProps): JSX.Element {
             </For>
           </g>
 
+          {/* RAW 基础曲线是只读参考线，独立于用户四通道曲线。 */}
+          <Show when={props.store.editBase() === "raw" && props.store.baseCurvePoints()}>
+            <path d={curvePath(props.store.baseCurvePoints()!, VIEW, VIEW)} fill="none"
+              stroke="var(--brand-2)" opacity="0.45" stroke-width="1"
+              stroke-dasharray="2 2" vector-effect="non-scaling-stroke" data-base-curve-line />
+          </Show>
+
           {/* ③ 曲线本体（`non-scaling-stroke`：线条粗细不随容器缩放而变） */}
           <path
             d={curvePath(points(), VIEW, VIEW)}

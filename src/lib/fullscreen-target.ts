@@ -17,7 +17,7 @@
  *    ←/→ 与网格里的邻居**逐张一致**，筛选 / 排序也一致；
  * 2. **锚点不在清单里就是 `null`**（刚换目录、被筛掉、还没分页到）—— 宁可不开，
  *    也不开到一个「看起来对但不一致」的位置；
- * 3. **只装页面真的用到的三个字段**（`id` / `path` / `fileName`）——
+ * 3. **只装页面用到的字段**（`id` / `path` / `fileName`，导出另带明确 variant）——
  *    清单可能上千条，把 `marks` 那种壳层字段塞进去只会让 IPC 变胖。
  *
  * ⚠️ 这里**只有「造清单」这一件事**：步进（←/→、PageUp/PageDown）直接用看图 store 的
@@ -31,6 +31,10 @@
 
 /** 清单里的一张照片（`path` 是**绝对路径**，`view_image` 直接吃它）。 */
 export interface FullscreenTargetPhoto {
+  exportVariant?: {
+    repositoryId: string;
+    reference: { assetId: number; variant: string };
+  };
   id: string;
   path: string;
   fileName: string;
@@ -58,6 +62,9 @@ export function buildFullscreenTarget(
       id: photo.id,
       path: photo.path,
       fileName: photo.fileName,
+      ...(photo.exportVariant === undefined
+        ? {}
+        : { exportVariant: photo.exportVariant }),
     })),
     index,
   };

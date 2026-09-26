@@ -27,7 +27,7 @@
  * 这是浏览模式最独特的一条机制，也是用户点名的「很爽」用法。
  *
  * 旗标**不进筛选**：它只活在内存里（库里没有这一列），按旗标过滤要动网格的可见集合，
- * 属 W2（`plans/M2.md` 的阶段 6 只出控件本身）。
+ * 属 W2（`specs/M2.md` 的阶段 6 只出控件本身）。
  */
 
 import { For, Show } from "solid-js";
@@ -99,7 +99,7 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
    */
   const clearFlags = createEasyDestroy();
   /**
-   * 标记之后的提示语（被锁挡住 / 什么都没改）—— `plans/M2-W2-tail.md` 3.1。
+   * 标记之后的提示语（被锁挡住 / 什么都没改）—— `specs/M2-W2-tail.md` 3.1。
    *
    * 2026-09-19：从「工具条里的一行小字」改成 **toast**（4.2 落地）；
    * 2026-09-20（W3）：判定与渲染一起搬进 `mark-actions.ts` ——
@@ -239,7 +239,7 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
   return (
     <div class="flex items-center gap-1">
       {/*
-        撤销 / 重做（`plans/M2-W2-tail.md` 4.1）：按钮的可用性与文案都来自
+        撤销 / 重做（`specs/M2-W2-tail.md` 4.1）：按钮的可用性与文案都来自
         后端每次动作回的 `undoLabel` / `redoLabel`（「标 3 星」这种可读动作名）——
         前端不猜栈里有什么，也不自己拼动作名。
       */}
@@ -510,7 +510,7 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
         </For>
       </div>
 
-      {/* 「清空旗标」的确认弹窗（Shift 可跳过，提示语在弹窗里） */}
+      {/* 「清空旗标」的确认弹窗（Shift 可跳过，不展示快捷操作说明） */}
       <ConfirmDialog
         open={clearFlags.pending() !== null}
         title={clearFlags.pending()?.title}

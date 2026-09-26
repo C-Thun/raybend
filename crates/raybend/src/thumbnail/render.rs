@@ -135,7 +135,8 @@ pub fn encode_avif(rgb: &[u8], width: u32, height: u32) -> Result<Vec<u8>> {
 /// 于是同一张照片在网格与编辑器里会是两张不同的图（`dynamicContrast` 完全没体现）。
 /// v11（M3-W5）：成片几何先于网格展示夹取，并为紧裁切保留源像素。
 // v12: lens profiles apply only after an explicit selection / auto-adjust action.
-pub const PIPELINE_VERSION: u32 = 12;
+// v13: optional camera base curve before the editable user curve.
+pub const PIPELINE_VERSION: u32 = 13;
 
 /// 缩略图尺度。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
@@ -202,9 +203,9 @@ impl SizeClass {
 #[must_use]
 pub const fn render_sig(size: SizeClass) -> &'static str {
     match size {
-        SizeClass::Grid => "avif-q90-grid-v12",
-        SizeClass::Strip => "avif-q90-strip-v12",
-        SizeClass::Screen => "avif-q90-screen-v12",
+        SizeClass::Grid => "avif-q90-grid-v13",
+        SizeClass::Strip => "avif-q90-strip-v13",
+        SizeClass::Screen => "avif-q90-screen-v13",
     }
 }
 
@@ -365,11 +366,21 @@ pub fn render_file_with_edit(
     edit: Option<&DevelopStack>,
     lens: Option<&crate::develop::lens::LensCorrection>,
 ) -> Result<Option<Thumb>> {
+    render_file_with_edit_and_lut(path, size, edit, lens, None)
+}
+
+pub fn render_file_with_edit_and_lut(
+    path: &Path,
+    size: SizeClass,
+    edit: Option<&DevelopStack>,
+    lens: Option<&crate::develop::lens::LensCorrection>,
+    lut: Option<&crate::develop::lut::Lut>,
+) -> Result<Option<Thumb>> {
     let kind = path
         .file_name()
         .map_or(MediaKind::Other, |n| kind_of_file(&n.to_string_lossy()));
     if kind == MediaKind::Raw {
-        return render_raw_file(path, size, edit, lens);
+        return render_raw_file(path, size, edit, lens, lut);
     }
 
     let bytes = std::fs::read(path)?;
@@ -383,7 +394,7 @@ pub fn render_file_with_edit(
     let orientation = crate::media::exif::read_bytes(&bytes)
         .and_then(|data| data.orientation)
         .map(|raw| crate::media::meta::normalize_orientation(Some(raw)));
-    render_bytes_with_edit(&bytes, size, orientation, edit, lens)
+    render_bytes_with_edit_and_lut(&bytes, size, orientation, edit, lens, lut)
 }
 
 /// 给 RAW 缩放时多要的倍数：最终尺寸的 Lanczos 由 [`encode`] 在小图上做，
@@ -392,9 +403,15 @@ const RAW_OVERSAMPLE: u32 = 2;
 
 /// 裁切前需要保留足够源像素：成片若只占原图 1/4，先缩到目标长边会让结果只剩 1/4 尺寸。
 /// RAW 与位图共用这个口径，最后仍由 `encode` 收至请求的档位。
-fn geometry_input_edge(size: SizeClass, source: (u32, u32), geometry: Option<crate::develop::geometry::EditGeometry>) -> u32 {
+fn geometry_input_edge(
+    size: SizeClass,
+    source: (u32, u32),
+    geometry: Option<crate::develop::geometry::EditGeometry>,
+) -> u32 {
     let base = size.long_edge().saturating_mul(RAW_OVERSAMPLE);
-    let Some(geometry) = geometry.filter(|g| !g.is_identity()) else { return base; };
+    let Some(geometry) = geometry.filter(|g| !g.is_identity()) else {
+        return base;
+    };
     let crop = geometry.output_rect(source);
     let fraction = crop.width.min(crop.height).max(0.01);
     ((base as f32 / fraction).ceil() as u32).clamp(base, 8192)
@@ -406,9 +423,12 @@ fn render_raw_file(
     size: SizeClass,
     edit: Option<&DevelopStack>,
     lens: Option<&crate::develop::lens::LensCorrection>,
+    lut: Option<&crate::develop::lut::Lut>,
 ) -> Result<Option<Thumb>> {
-    let source_size = crate::media::meta::read_photo_meta(path).ok()
-        .map(|meta| (meta.width, meta.height)).unwrap_or((1, 1));
+    let source_size = crate::media::meta::read_photo_meta(path)
+        .ok()
+        .map(|meta| (meta.width, meta.height))
+        .unwrap_or((1, 1));
     let want = geometry_input_edge(size, source_size, edit.and_then(|stack| stack.geometry)).max(1);
     // latest 基于 RAW 时必须从传感器线性像素显影。内嵌 JPEG 是机内 SOOC，
     // 在它上面套参数会让总览/胶片带与编辑视口成为两张不同的照片。
@@ -424,7 +444,7 @@ fn render_raw_file(
         let linear = LinearImage::from_raw16(decoded)
             .ok_or_else(|| Error::Unsupported("RAW 线性像素尺寸不合法".to_string()))?
             .downscaled_to(want);
-        let rgb = apply_develop_linear(&linear, stack, lens, shot_k)?;
+        let rgb = apply_develop_linear(&linear, stack, lens, shot_k, lut)?;
         return encode(DynamicImage::ImageRgb8(rgb), size, None, false, None, None).map(Some);
     }
     let Some(decoded) = decode_raw_file(path, DecodeSpec::thumb(want))? else {
@@ -452,7 +472,10 @@ fn decode_raw_file(path: &Path, spec: DecodeSpec) -> Result<Option<DecodedSource
         match worker.decode(&request) {
             Ok(image) => image,
             Err(e) => {
-                eprintln!("[thumb] RAW 解码失败（改用占位图）：{} —— {e}", path.display());
+                eprintln!(
+                    "[thumb] RAW 解码失败（改用占位图）：{} —— {e}",
+                    path.display()
+                );
                 return Ok(None);
             }
         }
@@ -500,10 +523,21 @@ pub fn render_bytes_with_edit(
     edit: Option<&DevelopStack>,
     lens: Option<&crate::develop::lens::LensCorrection>,
 ) -> Result<Option<Thumb>> {
+    render_bytes_with_edit_and_lut(bytes, size, orientation, edit, lens, None)
+}
+
+pub fn render_bytes_with_edit_and_lut(
+    bytes: &[u8],
+    size: SizeClass,
+    orientation: Option<u16>,
+    edit: Option<&DevelopStack>,
+    lens: Option<&crate::develop::lens::LensCorrection>,
+    lut: Option<&crate::develop::lut::Lut>,
+) -> Result<Option<Thumb>> {
     let Ok(img) = image::load_from_memory(bytes) else {
         return Ok(None); // 不是能解码的图像（RAW、损坏文件…）
     };
-    encode(img, size, orientation, false, edit, lens).map(Some)
+    encode_with_lut(img, size, orientation, false, edit, lens, lut).map(Some)
 }
 
 /// 网格/胶片带小图的**最大展示宽高比**（两侧都算：3:1 与 1:3）。
@@ -564,12 +598,15 @@ fn apply_develop(
     img: &image::RgbImage,
     stack: &DevelopStack,
     lens: Option<&crate::develop::lens::LensCorrection>,
+    lut: Option<&crate::develop::lut::Lut>,
 ) -> Result<image::RgbImage> {
     let (width, height) = img.dimensions();
     let Some(linear) = LinearImage::from_srgb8(width, height, img.as_raw()) else {
-        return Err(Error::Unsupported("编辑渲染：像素长度与尺寸对不上".to_string()));
+        return Err(Error::Unsupported(
+            "编辑渲染：像素长度与尺寸对不上".to_string(),
+        ));
     };
-    apply_develop_linear(&linear, stack, lens, None)
+    apply_develop_linear(&linear, stack, lens, None, lut)
 }
 
 /// 位图与真 RAW 共用同一套编辑阶段；RAW 的 as-shot 色温由本次解码优先提供。
@@ -578,23 +615,30 @@ fn apply_develop_linear(
     stack: &DevelopStack,
     lens: Option<&crate::develop::lens::LensCorrection>,
     decoded_as_shot_k: Option<f32>,
+    lut: Option<&crate::develop::lut::Lut>,
 ) -> Result<image::RgbImage> {
     let (width, height) = (linear.width, linear.height);
     let params = DevelopParams::from_values(
-        stack
-            .params
-            .iter()
-            .map(|(id, value)| (id.clone(), *value)),
+        stack.params.iter().map(|(id, value)| (id.clone(), *value)),
         decoded_as_shot_k.or(stack.as_shot_k),
     )
     .map_err(|e| Error::Unsupported(format!("编辑栈里的参数不合法：{e}")))?;
     let mut curves = CurveSet::identity();
+    if stack.source_base == crate::store::develop::EditBase::Raw
+        && let Some(points) = &stack.base_curve_points
+    {
+        curves.base = Curve::from_points(points.clone())
+            .map_err(|e| Error::Unsupported(format!("编辑栈里的基础曲线不合法：{e}")))?;
+    }
     for (channel, points) in &stack.curves {
         let Some(channel) = CurveChannel::parse(channel) else {
-            return Err(Error::Unsupported(format!("编辑栈里有未知的曲线通道：{channel}")));
+            return Err(Error::Unsupported(format!(
+                "编辑栈里有未知的曲线通道：{channel}"
+            )));
         };
-        let curve = Curve::from_points(points.clone())
-            .map_err(|e| Error::Unsupported(format!("编辑栈里的曲线不合法（{}）：{e}", channel.as_str())))?;
+        let curve = Curve::from_points(points.clone()).map_err(|e| {
+            Error::Unsupported(format!("编辑栈里的曲线不合法（{}）：{e}", channel.as_str()))
+        })?;
         curves.set_channel(channel, curve);
     }
     // 可选阶段（降噪 / 锐化 / 镜头手动微调）与动态反差：
@@ -620,6 +664,7 @@ fn apply_develop_linear(
         denoise: Some(&plans.denoise),
         local_tone: local_state.as_ref().map(|state| (state, plans.local_tone)),
         sharpen: Some(&plans.sharpen),
+        lut,
     };
     let rgb = render_develop(linear, &params, &curves, &stages);
     let (out_w, out_h, rgb) = match stack.geometry.filter(|geometry| !geometry.is_identity()) {
@@ -644,6 +689,18 @@ pub fn encode(
     edit: Option<&DevelopStack>,
     lens: Option<&crate::develop::lens::LensCorrection>,
 ) -> Result<Thumb> {
+    encode_with_lut(img, size, orientation, placeholder, edit, lens, None)
+}
+
+pub fn encode_with_lut(
+    img: DynamicImage,
+    size: SizeClass,
+    orientation: Option<u16>,
+    placeholder: bool,
+    edit: Option<&DevelopStack>,
+    lens: Option<&crate::develop::lens::LensCorrection>,
+    lut: Option<&crate::develop::lut::Lut>,
+) -> Result<Thumb> {
     let img = match orientation {
         Some(o) if o != 1 => apply_orientation(&img, o),
         _ => img,
@@ -652,27 +709,40 @@ pub fn encode(
      * 小图（网格 / 胶片带）先按 3:1 居中截取，再缩放；
      * `Screen`（看图）不截取 —— 查看器必须看到完整照片（2026-09-16 口径）。
      */
-    let geometry = edit.and_then(|stack| stack.geometry).filter(|g| !g.is_identity());
+    let geometry = edit
+        .and_then(|stack| stack.geometry)
+        .filter(|g| !g.is_identity());
     // 成片几何先于网格的 3:1 展示夹取：编辑框以整张原图为基准。
     // 紧裁切要先多取像素，最后再收至目标尺度。
     let img = if geometry.is_none() && size.clamps_display_aspect() {
         clamp_display_aspect(img, MAX_DISPLAY_ASPECT)
-    } else { img };
+    } else {
+        img
+    };
     let source_edge = if geometry.is_some() {
         geometry_input_edge(size, (img.width(), img.height()), geometry)
-    } else { size.long_edge() };
+    } else {
+        size.long_edge()
+    };
     let resized = resize_for_thumb(img, source_edge);
     let rgb = resized.to_rgb8();
     let developed = match edit {
-        Some(stack) if !stack.is_empty() => apply_develop(&rgb, stack, lens)?,
+        Some(stack) if !stack.is_empty() => apply_develop(&rgb, stack, lens, lut)?,
         _ => rgb,
     };
     let result = if geometry.is_some() {
         resize_for_thumb(DynamicImage::ImageRgb8(developed), size.long_edge()).to_rgb8()
-    } else { developed };
+    } else {
+        developed
+    };
     let (width, height) = result.dimensions();
     let data = encode_avif(result.as_raw(), width, height)?;
-    Ok(Thumb { data, width, height, placeholder })
+    Ok(Thumb {
+        data,
+        width,
+        height,
+        placeholder,
+    })
 }
 
 /// 缩到长边 `long`（不放大）。
@@ -997,22 +1067,50 @@ mod tests {
     #[test]
     fn tight_crop_requests_more_source_pixels_before_final_resize() {
         use crate::develop::geometry::{CropRect, EditGeometry};
-        let geometry = EditGeometry { rotation: 0.0,
-            crop: Some(CropRect { x: 0.9, y: 0.0, width: 0.1, height: 1.0 }), crop_ratio: None };
-        assert_eq!(geometry_input_edge(SizeClass::Grid, (8000, 1000), None), 768);
-        assert_eq!(geometry_input_edge(SizeClass::Grid, (8000, 1000), Some(geometry)), 7680);
-        assert_eq!(geometry_input_edge(SizeClass::Screen, (8000, 1000), Some(geometry)), 8192);
+        let geometry = EditGeometry {
+            rotation: 0.0,
+            crop: Some(CropRect {
+                x: 0.9,
+                y: 0.0,
+                width: 0.1,
+                height: 1.0,
+            }),
+            crop_ratio: None,
+        };
+        assert_eq!(
+            geometry_input_edge(SizeClass::Grid, (8000, 1000), None),
+            768
+        );
+        assert_eq!(
+            geometry_input_edge(SizeClass::Grid, (8000, 1000), Some(geometry)),
+            7680
+        );
+        assert_eq!(
+            geometry_input_edge(SizeClass::Screen, (8000, 1000), Some(geometry)),
+            8192
+        );
     }
 
     #[test]
     fn crop_is_applied_before_grid_display_aspect_clamp() {
         use crate::develop::geometry::{CropRect, EditGeometry};
-        let stack = DevelopStack { geometry: Some(EditGeometry { rotation: 0.0,
-            crop: Some(CropRect { x: 0.9, y: 0.0, width: 0.1, height: 1.0 }), crop_ratio: None }),
-            ..DevelopStack::default() };
+        let stack = DevelopStack {
+            geometry: Some(EditGeometry {
+                rotation: 0.0,
+                crop: Some(CropRect {
+                    x: 0.9,
+                    y: 0.0,
+                    width: 0.1,
+                    height: 1.0,
+                }),
+                crop_ratio: None,
+            }),
+            ..DevelopStack::default()
+        };
         let bytes = png_of(800, 100);
         let thumb = render_bytes_with_edit(&bytes, SizeClass::Grid, None, Some(&stack), None)
-            .expect("裁切缩略图").expect("位图");
+            .expect("裁切缩略图")
+            .expect("位图");
         assert!(thumb.height > thumb.width, "右侧窄幅裁切应得到竖图");
         assert!(thumb.width <= GRID_LONG_EDGE && thumb.height <= GRID_LONG_EDGE);
     }
@@ -1193,7 +1291,11 @@ mod tests {
          */
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("portrait.jpg");
-        std::fs::write(&path, jpeg_with_orientation(&jpeg_of(80, 40, [120, 90, 60]), 6)).unwrap();
+        std::fs::write(
+            &path,
+            jpeg_with_orientation(&jpeg_of(80, 40, [120, 90, 60]), 6),
+        )
+        .unwrap();
 
         let thumb = render_file(&path, SizeClass::Grid).unwrap().unwrap();
         assert!(
@@ -1208,7 +1310,11 @@ mod tests {
     fn landscape_photo_is_left_alone() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("landscape.jpg");
-        std::fs::write(&path, jpeg_with_orientation(&jpeg_of(80, 40, [30, 60, 90]), 1)).unwrap();
+        std::fs::write(
+            &path,
+            jpeg_with_orientation(&jpeg_of(80, 40, [30, 60, 90]), 1),
+        )
+        .unwrap();
 
         let thumb = render_file(&path, SizeClass::Grid).unwrap().unwrap();
         assert!(
@@ -1218,7 +1324,6 @@ mod tests {
             thumb.height
         );
     }
-
 
     // ---------- 3:1 展示比例夹取（2026-09-16 口径）----------
 
@@ -1272,9 +1377,7 @@ mod tests {
     #[test]
     fn tall_photos_clamp_the_other_way() {
         let tall = jpeg_of(100, 800, [200, 60, 60]);
-        let grid = render_bytes(&tall, SizeClass::Grid, None)
-            .unwrap()
-            .unwrap();
+        let grid = render_bytes(&tall, SizeClass::Grid, None).unwrap().unwrap();
         let aspect = f64::from(grid.height) / f64::from(grid.width);
         assert!(
             (aspect - 3.0).abs() < 0.05,

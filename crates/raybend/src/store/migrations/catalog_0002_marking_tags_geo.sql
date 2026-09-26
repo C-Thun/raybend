@@ -1,6 +1,6 @@
 -- catalog.db（每库一个）schema v2：标记、标签关联、地理、EXIF 时区
 --
--- 出处：BROWSE.md（浏览模式规格）§3 标记体系 / §7 标签体系 / §9 右栏；plans/M1-3.md §3.A。
+-- 出处：BROWSE.md（浏览模式规格）§3 标记体系 / §7 标签体系 / §9 右栏；specs/M1-3.md §3.A。
 -- v1 只有 rating / flag；浏览要用的色标、喜欢、锁、作者、描述、地理在本条补齐。
 
 -- ── 1. 标记类字段（全部可空；NULL = 用户没设过）──
@@ -24,7 +24,7 @@ ALTER TABLE assets ADD COLUMN city           TEXT;
 ALTER TABLE assets ADD COLUMN sublocation    TEXT;
 
 -- ── 3. EXIF 时区 ──
--- EXIF 的 DateTimeOriginal **不带时区**。口径（plans/M1-3.md §10，据 RapidRAW 调研定）：
+-- EXIF 的 DateTimeOriginal **不带时区**。口径（specs/M1-3.md §10，据 RapidRAW 调研定）：
 --   * 有 OffsetTime* 标签 → 按它换算成 UTC 毫秒，并在本列记下换算用的偏移（分钟）；
 --   * 没有 → 把墙上时间**原样当 UTC 存**，本列置 NULL。
 --     显示端遇 NULL 就按「无偏移」渲染 —— 这样用户看到的数字与相机/其它软件一致，

@@ -344,6 +344,7 @@
     "zoom"
   ],
   "FullscreenItem": [
+    "exportVariant",
     "fileName",
     "id",
     "path"

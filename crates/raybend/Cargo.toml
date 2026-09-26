@@ -22,6 +22,9 @@ unicode-normalization.workspace = true
 wgpu.workspace = true
 pollster.workspace = true
 lensfun.workspace = true
+sha2 = "0.10.9"
+webp = { version = "0.3.1", default-features = false }
+notify = { version = "8.2.0", default-features = false }
 
 [lints]
 workspace = true

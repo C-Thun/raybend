@@ -32,10 +32,15 @@
 //! * **panic 必须被 `catch_unwind` 接住**并重启 + 上报（spike 那次「界面照旧响应、图永远冻住」
 //!   就是没接住）。
 
+use raybend::develop::{
+    denoise::NrMethod,
+    denoise_job::{DenoiseKey, HighDenoise},
+    geometry::{CropHandle, CropRect, EditGeometry, drag_crop, hit_crop, largest_centered_rect},
+    reference::{ReferenceCache, ReferenceFrame},
+};
 use std::panic::AssertUnwindSafe;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use raybend::develop::{denoise::NrMethod, denoise_job::{DenoiseKey, HighDenoise}, geometry::{EditGeometry, CropRect, CropHandle, hit_crop, drag_crop, largest_centered_rect}, reference::{ReferenceCache, ReferenceFrame}};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, TryRecvError, channel};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
@@ -46,8 +51,8 @@ use tauri::{AppHandle, Manager, Runtime, State, WebviewWindow};
 use raybend::develop::lens::{LensCorrection, LensMap};
 use raybend::develop::local_tone::{LocalToneOpts, LocalToneState};
 use raybend::develop::{
-    Curve, CurveChannel, CurveSet, DevelopParams, DevelopPlans, DevelopStages, LinearImage, Resolved,
-    chain_image, render_develop,
+    Curve, CurveChannel, CurveSet, DevelopParams, DevelopPlans, DevelopStages, LinearImage,
+    Resolved, chain_image, render_develop,
 };
 use raybend::display::{self, FullCache, PixelSize};
 use raybend::render::{
@@ -335,19 +340,34 @@ impl StoredViewport {
 /// （`docs/native-viewport-coordinate-guide.md` §6 第 2 条：缺 DPR 必须报错，
 /// 字段名不许靠猜）。这一条有单测钉着。
 #[derive(Debug, Clone, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum ViewportIntent {
     /// 以某个 **CSS 窗口坐标**（`clientX/clientY`）为锚点缩放。
-    ZoomAt { x: f32, y: f32, factor: f32 },
+    ZoomAt {
+        x: f32,
+        y: f32,
+        factor: f32,
+    },
     /// 以**洞口中心**为锚点缩放（按钮 / 快捷键 —— 与「滚轮以光标为锚点」区分开）。
     ///
     /// 前端不自己算中心：中心在哪只有 Rust 知道（洞口是它存的），
     /// 让前端去减洞口原点再加一半，就是又把坐标数学搬回了前端。
-    ZoomBy { factor: f32 },
+    ZoomBy {
+        factor: f32,
+    },
     /// 平移（CSS 像素位移）。
-    Pan { dx: f32, dy: f32 },
+    Pan {
+        dx: f32,
+        dy: f32,
+    },
     /// 档位：`fit` / `fill` / `oneToOne` / `free`。
-    Fit { mode: String },
+    Fit {
+        mode: String,
+    },
     /// **适合窗口 ↔ 1:1**（双击 / `0` 键；与看图件同一条语义）。
     ///
     /// 为什么做成一个意图而不是前端先读状态再决定：状态是 250ms 轮询来的，
@@ -356,16 +376,39 @@ pub enum ViewportIntent {
     /// 复位：适合窗口 + 零旋转 + 零平移。
     Reset,
     /// 命中测试：把 CSS 坐标换算成图像像素（**不动视口**；W5 的三个工具要用）。
-    HitTest { x: f32, y: f32 },
+    HitTest {
+        x: f32,
+        y: f32,
+    },
     /// 对比开关；每次重新打开从中点开始。参考帧未就绪时先记住状态。
-    SetCompare { enabled: bool },
+    SetCompare {
+        enabled: bool,
+    },
     /// 对比分线的原始 CSS 窗口指针事实；命中和移动由 Rust 决定。
-    ComparePointer { phase: String, x: f32, y: f32 },
-    SetTool { tool: Option<String>, initial_ratio: Option<f32> },
-    SetReferenceBase { base: String },
-    SetCropRatio { ratio: Option<f32> },
-    SetRotation { degrees: f32 },
-    ToolPointer { phase: String, x: f32, y: f32 },
+    ComparePointer {
+        phase: String,
+        x: f32,
+        y: f32,
+    },
+    SetTool {
+        tool: Option<String>,
+        initial_ratio: Option<f32>,
+    },
+    SetReferenceBase {
+        base: String,
+        sequence: u64,
+    },
+    SetCropRatio {
+        ratio: Option<f32>,
+    },
+    SetRotation {
+        degrees: f32,
+    },
+    ToolPointer {
+        phase: String,
+        x: f32,
+        y: f32,
+    },
 }
 
 /// 档位名 → [`FitMode`]（大小写不敏感；不认识的**报错**，不静默回退）。
@@ -416,7 +459,10 @@ enum RenderCommand {
     /// 洞口事实（含 DPR 与底色）
     Viewport(SetViewportArgs),
     /// 窗口客户区尺寸变化（物理像素；**主线程推来**，渲染线程不查窗口）
-    Resize { width: u32, height: u32 },
+    Resize {
+        width: u32,
+        height: u32,
+    },
     /// 窗口移动可能只让 WebView 重绘；同尺寸的 GPU surface 也必须重新呈现一帧。
     Redraw,
     /// 换照片 / 清空照片
@@ -429,6 +475,13 @@ enum RenderCommand {
     },
     /// 视口意图
     Intent(ViewportIntent),
+    /// 已缓存的命名定稿 1920 预览作为对比参照；序号与照片路径挡住迟到结果。
+    ReferenceIssue {
+        frame: Arc<ReferenceFrame>,
+        issue_id: i64,
+        photo_path: String,
+        sequence: u64,
+    },
     /// 显影参数（拉杆 / 曲线）变了 —— 只重算像素，不重新解码
     ///
     /// 带的是**已经校验过的**解析结果（命令层负责校验，线程里不再解析一遍）。
@@ -444,6 +497,7 @@ enum RenderCommand {
         /// 在显影线程里从参数合并，所以拖动时它们是实时的）。
         /// `Box` 是因为它比其它变体大得多（clippy 的 `large_enum_variant`）。
         lens: Option<Box<raybend::develop::lens::LensCorrection>>,
+        lut: Option<Arc<raybend::develop::lut::Lut>>,
         geometry: Option<EditGeometry>,
     },
     /// 显影完了一张（新照片或新参数）
@@ -471,6 +525,13 @@ pub struct DevelopParamsDto {
     /// 通道（`rgb` / `r` / `g` / `b`）→ 控制点 `[[x, y], …]`（归一化 0..1）
     #[serde(default)]
     pub curves: std::collections::BTreeMap<String, Vec<[f32; 2]>>,
+    /// RAW 专用的机型基础曲线快照，位于用户曲线之前。
+    #[serde(default)]
+    pub base_curve_points: Option<Vec<[f32; 2]>>,
+    #[serde(default)]
+    pub lut_id: Option<String>,
+    #[serde(default)]
+    pub lut_enabled: Option<bool>,
     /// **手指还按在滑杆 / 曲线上**（人类 2026-09-24）：
     /// 拖动中只算屏幕那一档，松手那一下才按缩放补全尺寸（`tier_for_params`）。
     #[serde(default)]
@@ -496,6 +557,9 @@ impl DevelopParamsDto {
     pub fn into_parts(self) -> Result<(DevelopParams, CurveSet), String> {
         let params = DevelopParams::from_values(self.values, self.as_shot_temperature)?;
         let mut curves = CurveSet::identity();
+        if let Some(points) = self.base_curve_points {
+            curves.base = Curve::from_points(points)?;
+        }
         for (channel, points) in self.curves {
             let Some(channel) = CurveChannel::parse(&channel) else {
                 return Err(format!("未知的曲线通道：{channel}"));
@@ -568,6 +632,7 @@ struct DevelopJob {
     /// 已解析的镜头校正（配置文件那一半；`None` = 不用配置文件）。
     /// 手动三根拉杆不在这里 —— 显影线程从 `params` 里合并（那样拖动才是实时的）。
     lens: Option<raybend::develop::lens::LensCorrection>,
+    lut: Option<Arc<raybend::develop::lut::Lut>>,
     curves: CurveSet,
     geometry: Option<EditGeometry>,
     prefer_sooc: bool,
@@ -581,6 +646,7 @@ struct CachedSource {
     reference: ReferenceCache,
     sooc: Option<std::path::PathBuf>,
     source_revision: u64,
+    source_signature: Option<String>,
     path: String,
     /// 全尺寸线性源（显影的唯一输入）
     full: Arc<LinearImage>,
@@ -761,6 +827,7 @@ pub struct EditorState {
     params_request: RequestGate,
     /// 同一照片/镜头选择的解析只做一次（实际工作仍在阻塞线程里）。
     lens_cache: Arc<Mutex<Option<(LensCacheKey, Option<LensCorrection>)>>>,
+    lut_cache: Arc<Mutex<Option<(String, Arc<raybend::develop::lut::Lut>)>>>,
 }
 
 type LensCacheKey = (String, i64, Option<String>, Option<bool>);
@@ -772,7 +839,10 @@ struct RequestGate(Mutex<u64>);
 
 impl RequestGate {
     fn begin(&self) -> Result<u64, String> {
-        let mut request = self.0.lock().map_err(|_| "编辑请求序号锁中毒".to_string())?;
+        let mut request = self
+            .0
+            .lock()
+            .map_err(|_| "编辑请求序号锁中毒".to_string())?;
         *request = request.wrapping_add(1);
         Ok(*request)
     }
@@ -782,7 +852,10 @@ impl RequestGate {
         request: u64,
         send: impl FnOnce() -> Result<(), String>,
     ) -> Result<bool, String> {
-        let latest = self.0.lock().map_err(|_| "编辑请求序号锁中毒".to_string())?;
+        let latest = self
+            .0
+            .lock()
+            .map_err(|_| "编辑请求序号锁中毒".to_string())?;
         if *latest != request {
             return Ok(false);
         }
@@ -1087,14 +1160,19 @@ fn transition_plan<R: Runtime>(app: &AppHandle<R>, path: &str) -> Option<Transit
     let asset = crate::develop::resolve_asset(app, path)?;
     let base = raybend::store::develop::EditBase::of_file(path);
 
-    let latest_cache = FullCache::open(&asset.root).ok().map(|cache| {
-        cache.path_for(
-            asset.asset_id,
-            "latest",
-            base,
-            raybend::thumbnail::render::PIPELINE_VERSION,
-        )
-    });
+    let signature = raybend::media::source::source_signature(path).ok();
+    let latest_cache =
+        FullCache::open(&asset.root)
+            .ok()
+            .zip(signature)
+            .map(|(cache, signature)| {
+                cache.path_for(
+                    asset.asset_id,
+                    &FullCache::source_name("latest", &signature),
+                    base,
+                    raybend::thumbnail::render::PIPELINE_VERSION,
+                )
+            });
     let sooc = crate::develop::source_path_of(app, &asset, raybend::store::develop::EditBase::Sooc);
     let sources = transition_sources(path, base, latest_cache, sooc.clone());
     if sources.is_empty() {
@@ -1137,19 +1215,54 @@ pub async fn editor_set_params<R: Runtime>(
     let request = state.params_request.begin()?;
     let interactive = params.interactive;
     let geometry = params.geometry.filter(|value| !value.is_identity());
-    if let Some(value) = geometry {
-        if !value.rotation.is_finite() || value.rotation.abs() > 360.0
+    if let Some(value) = geometry
+        && (!value.rotation.is_finite()
+            || value.rotation.abs() > 360.0
             || value.crop.is_some_and(|crop| !crop.valid())
-            || value.crop_ratio.is_some_and(|setting| !setting.valid()) {
-            return Err("成片几何参数无效".into());
-        }
+            || value.crop_ratio.is_some_and(|setting| !setting.valid()))
+    {
+        return Err("成片几何参数无效".into());
     }
-    let nr_method = params.nr_method.as_deref().map(NrMethod::parse).unwrap_or(Some(NrMethod::Fast))
+    let nr_method = params
+        .nr_method
+        .as_deref()
+        .map(NrMethod::parse)
+        .unwrap_or(Some(NrMethod::Fast))
         .ok_or_else(|| "未知的降噪方式".to_string())?;
+    let lut_id = if params.lut_enabled == Some(true) {
+        Some(params.lut_id.clone().ok_or("启用 LUT 时必须选择一支 LUT")?)
+    } else {
+        None
+    };
+    let lut = if let Some(id) = lut_id {
+        let cache = Arc::clone(&state.lut_cache);
+        let handle = app.clone();
+        Some(
+            crate::source::blocking(move || {
+                let mut cached = cache.lock().map_err(|_| "LUT 缓存锁中毒".to_string())?;
+                if let Some((stored_id, value)) = cached.as_ref()
+                    && *stored_id == id
+                {
+                    return Ok(Arc::clone(value));
+                }
+                let value = crate::lut::resolve(&handle, &id)?;
+                *cached = Some((id, Arc::clone(&value)));
+                Ok(value)
+            })
+            .await?,
+        )
+    } else {
+        None
+    };
     let key = repository_id
         .zip(asset_id)
         .map(|(repository_id, asset_id)| {
-            (repository_id, asset_id, params.lens_profile.clone(), params.lens_enabled)
+            (
+                repository_id,
+                asset_id,
+                params.lens_profile.clone(),
+                params.lens_enabled,
+            )
         });
     let (parsed, curves) = params.into_parts()?;
     // catalog 读取和 lensfun 解析不能占住 Tauri 的同步命令线程。拖动期间
@@ -1164,13 +1277,8 @@ pub async fn editor_set_params<R: Runtime>(
             {
                 return Ok(value.clone());
             }
-            let value = crate::lens::render_correction(
-                &handle,
-                &key.0,
-                key.1,
-                key.2.as_deref(),
-                key.3,
-            );
+            let value =
+                crate::lens::render_correction(&handle, &key.0, key.1, key.2.as_deref(), key.3);
             *cached = Some((key, value.clone()));
             Ok(value)
         })
@@ -1187,6 +1295,7 @@ pub async fn editor_set_params<R: Runtime>(
                     curves,
                     interactive,
                     lens: lens.map(Box::new),
+                    lut,
                     geometry,
                 })
                 .map_err(|_| "渲染线程不在了".to_string())?;
@@ -1200,8 +1309,11 @@ pub async fn editor_set_params<R: Runtime>(
 pub async fn editor_confirm_tool(state: State<'_, EditorState>) -> Result<EditGeometry, String> {
     let sender = session_sender(&state).ok_or_else(|| "渲染线程还没起来".to_string())?;
     let (reply, receiver) = channel();
-    sender.send(RenderCommand::ConfirmTool(reply)).map_err(|_| "渲染线程不在了".to_string())?;
-    crate::source::blocking(move || receiver.recv().map_err(|_| "渲染线程不在了".to_string())?).await
+    sender
+        .send(RenderCommand::ConfirmTool(reply))
+        .map_err(|_| "渲染线程不在了".to_string())?;
+    crate::source::blocking(move || receiver.recv().map_err(|_| "渲染线程不在了".to_string())?)
+        .await
 }
 
 #[tauri::command]
@@ -1211,7 +1323,41 @@ pub fn editor_viewport_intent(
 ) -> Result<(), String> {
     let sender = session_sender(&state).ok_or_else(|| "渲染线程还没起来".to_string())?;
     // 高频指针只入队；此刻复制的快照还没应用该意图，返回它既费时又会误导调用方。
-    sender.send(RenderCommand::Intent(intent)).map_err(|_| "渲染线程不在了".to_string())
+    sender
+        .send(RenderCommand::Intent(intent))
+        .map_err(|_| "渲染线程不在了".to_string())
+}
+
+/// 按命名定稿自身的 1920 快照设置对比左侧；在后台读缓存/解 AVIF。
+#[tauri::command]
+pub async fn editor_set_reference_issue<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, EditorState>,
+    repository_id: String,
+    asset_id: i64,
+    issue_id: i64,
+    photo_path: String,
+    sequence: u64,
+) -> Result<(), String> {
+    let sender = session_sender(&state).ok_or_else(|| "渲染线程还没起来".to_string())?;
+    let handle = app.clone();
+    crate::source::blocking(move || {
+        let bytes = crate::issues::preview_bytes(&handle, &repository_id, asset_id, issue_id)?;
+        let image = image::load_from_memory_with_format(&bytes, image::ImageFormat::Avif)
+            .map_err(|error| format!("定稿对比预览解码失败：{error}"))?
+            .to_rgb8();
+        let frame = ReferenceFrame::from_rgb(image.width(), image.height(), image.into_raw())
+            .ok_or("定稿对比预览尺寸无效")?;
+        sender
+            .send(RenderCommand::ReferenceIssue {
+                frame: Arc::new(frame),
+                issue_id,
+                photo_path,
+                sequence,
+            })
+            .map_err(|_| "渲染线程不在了".to_string())
+    })
+    .await
 }
 
 /// 读渲染线程的状态（前端每 250ms 一次：既是握手也是**上报通道**）。
@@ -1415,20 +1561,28 @@ struct SessionParams {
     /// 已解析的镜头校正（配置文件那一半；`None` = 不用配置文件）。
     /// **手动微调不在这里** —— 它每次从 `params` 里合并（那样拖动才是实时的）。
     lens: Option<raybend::develop::lens::LensCorrection>,
+    lut: Option<Arc<raybend::develop::lut::Lut>>,
     interactive: bool,
     geometry: Option<EditGeometry>,
     tool: Option<ToolDraft>,
     prefer_sooc: bool,
+    reference_issue: Option<(Arc<ReferenceFrame>, i64)>,
+    reference_sequence: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ToolKind { Crop, Rotate }
+enum ToolKind {
+    Crop,
+    Rotate,
+}
 
 fn crop_after_ratio_change(
-    source: (u32, u32), rotation: f32, current: CropRect, ratio: f32,
+    source: (u32, u32),
+    rotation: f32,
+    current: CropRect,
+    ratio: f32,
 ) -> CropRect {
-    let current_ratio = current.width * source.0 as f32
-        / (current.height * source.1.max(1) as f32);
+    let current_ratio = current.width * source.0 as f32 / (current.height * source.1.max(1) as f32);
     if (current_ratio - ratio).abs() <= ratio * 0.001 {
         current
     } else {
@@ -1437,10 +1591,22 @@ fn crop_after_ratio_change(
 }
 
 #[derive(Debug, Clone, Copy)]
-struct CropDrag { handle: CropHandle, start: CropRect, pointer: (f32, f32) }
+struct CropDrag {
+    handle: CropHandle,
+    start: CropRect,
+    pointer: (f32, f32),
+}
 
 #[derive(Debug, Clone, Copy)]
-struct ToolDraft { kind: ToolKind, geometry: EditGeometry, crop: CropRect, ratio: Option<f32>, drag: Option<CropDrag>, line_start: Option<(f32, f32)>, line_end: Option<(f32, f32)> }
+struct ToolDraft {
+    kind: ToolKind,
+    geometry: EditGeometry,
+    crop: CropRect,
+    ratio: Option<f32>,
+    drag: Option<CropDrag>,
+    line_start: Option<(f32, f32)>,
+    line_end: Option<(f32, f32)>,
+}
 
 impl Default for SessionParams {
     fn default() -> Self {
@@ -1449,19 +1615,19 @@ impl Default for SessionParams {
             params: DevelopParams::new(None),
             curves: CurveSet::identity(),
             lens: None,
+            lut: None,
             interactive: false,
             geometry: None,
             tool: None,
             prefer_sooc: true,
+            reference_issue: None,
+            reference_sequence: 0,
         }
     }
 }
 
 /// 一批窗口事件只保留最后一个尺寸；其它命令原样继续处理。
-fn defer_resize(
-    command: RenderCommand,
-    pending: &mut Option<(u32, u32)>,
-) -> Option<RenderCommand> {
+fn defer_resize(command: RenderCommand, pending: &mut Option<(u32, u32)>) -> Option<RenderCommand> {
     match command {
         RenderCommand::Resize { width, height } => {
             *pending = Some((width, height));
@@ -1509,18 +1675,19 @@ fn session_loop(
             Ok(command) => {
                 if let Some(command) = defer_resize(command, &mut pending_resize)
                     && let Err(error) = apply_command(
-                    command,
-                    context,
-                    shared,
-                    developer,
-                    &mut latest_job,
-                    &mut dirty,
-                    &mut session,
-                )
-                    && let Ok(mut state) = shared.lock() {
-                        state.last_error = Some(error.clone());
-                        state.note(format!("命令被拒：{error}"));
-                    }
+                        command,
+                        context,
+                        shared,
+                        developer,
+                        &mut latest_job,
+                        &mut dirty,
+                        &mut session,
+                    )
+                    && let Ok(mut state) = shared.lock()
+                {
+                    state.last_error = Some(error.clone());
+                    state.note(format!("命令被拒：{error}"));
+                }
             }
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => return SessionExit::Stopped,
@@ -1535,14 +1702,15 @@ fn session_loop(
                 Ok(command) => {
                     if let Some(command) = defer_resize(command, &mut pending_resize)
                         && let Err(error) = apply_command(
-                        command,
-                        context,
-                        shared,
-                        developer,
-                        &mut latest_job,
-                        &mut dirty,
-                        &mut session,
-                    ) && let Ok(mut state) = shared.lock()
+                            command,
+                            context,
+                            shared,
+                            developer,
+                            &mut latest_job,
+                            &mut dirty,
+                            &mut session,
+                        )
+                        && let Ok(mut state) = shared.lock()
                     {
                         state.last_error = Some(error.clone());
                     }
@@ -1575,11 +1743,14 @@ fn session_loop(
         let tool_overlay = session.tool.and_then(|tool| {
             let state = lock_state(shared);
             let size = state.original_image?;
-            if state.image != Some(size) { return None; }
+            if state.image != Some(size) {
+                return None;
+            }
             Some(raybend::render::overlay::ToolOverlay {
-                crop: tool.crop, source: (size.width as u32, size.height as u32),
+                crop: tool.crop,
+                source: (size.width as u32, size.height as u32),
                 handles: tool.kind == ToolKind::Crop,
-                straighten: tool.line_start.zip(tool.line_end).map(|(a,b)| [a,b]),
+                straighten: tool.line_start.zip(tool.line_end).map(|(a, b)| [a, b]),
             })
         });
         context.set_tool_overlay(tool_overlay);
@@ -1689,12 +1860,21 @@ fn apply_command(
             let validated = validate(&args)?;
             if let Some(colors) = args.overlay_colors {
                 let [Some(line), Some(halo), Some(crop), Some(rotate)] =
-                    colors.map(|color| raybend::render::Srgb8::parse_css(&color)) else {
-                        return Err("工具覆盖层颜色无效".into());
-                    };
-                context.set_overlay_palette(raybend::render::overlay::OverlayPalette { line, halo, crop, rotate });
+                    colors.map(|color| raybend::render::Srgb8::parse_css(&color))
+                else {
+                    return Err("工具覆盖层颜色无效".into());
+                };
+                context.set_overlay_palette(raybend::render::overlay::OverlayPalette {
+                    line,
+                    halo,
+                    crop,
+                    rotate,
+                });
             }
-            let previous = context.viewport().clip_rect.map(|rect| (rect.width, rect.height));
+            let previous = context
+                .viewport()
+                .clip_rect
+                .map(|rect| (rect.width, rect.height));
             let hole = physical_rect(validated.hole, validated.dpr);
             let next = raybend::render::ClipRect {
                 x: hole.x as f32,
@@ -1723,6 +1903,9 @@ fn apply_command(
         }
         RenderCommand::SetPhoto { path, transition } => {
             let mut state = lock_state(shared);
+            if state.photo_path != path {
+                session.reference_issue = None;
+            }
             match path {
                 Some(path) => {
                     // 旧纹理可能是整张 RAW 的 RGBA。换图时马上释放，避免把旧图
@@ -1734,10 +1917,10 @@ fn apply_command(
                         state.original_image = None;
                         state.origin = None;
                         state.histogram = None;
-                    state.reference_ready = false;
-                    state.reference_base = None;
-                    state.nr_pending = false;
-                    state.nr_error = None;
+                        state.reference_ready = false;
+                        state.reference_base = None;
+                        state.nr_pending = false;
+                        state.nr_error = None;
                     }
                     state.photo_path = Some(path.clone());
                     state.decode = "loading".to_string();
@@ -1756,8 +1939,13 @@ fn apply_command(
                         interactive: session.interactive,
                         params: session.params.clone(),
                         lens: session.lens.clone(),
+                        lut: session.lut.clone(),
                         curves: session.curves.clone(),
-                        geometry: if session.tool.is_some() { None } else { session.geometry },
+                        geometry: if session.tool.is_some() {
+                            None
+                        } else {
+                            session.geometry
+                        },
                         prefer_sooc: session.prefer_sooc,
                         transition,
                     };
@@ -1791,18 +1979,46 @@ fn apply_command(
             *dirty = true;
             Ok(())
         }
+        RenderCommand::ReferenceIssue {
+            frame,
+            issue_id,
+            photo_path,
+            sequence,
+        } => {
+            let current_path = lock_state(shared).photo_path.clone();
+            if !accept_issue_reference(
+                sequence,
+                session.reference_sequence,
+                &photo_path,
+                current_path.as_deref(),
+            ) {
+                return Ok(());
+            }
+            session.reference_sequence = sequence;
+            session.reference_issue = Some((Arc::clone(&frame), issue_id));
+            if let Some(image) = RenderImage::from_rgb8(frame.width, frame.height, &frame.rgb) {
+                context.set_reference_image(frame.id, image);
+                let mut state = lock_state(shared);
+                state.reference_ready = true;
+                state.reference_base = Some(format!("issue:{issue_id}"));
+                *dirty = true;
+            }
+            Ok(())
+        }
         RenderCommand::SetParams {
             nr_method,
             params,
             curves,
             interactive,
             lens,
+            lut,
             geometry,
         } => {
             session.nr_method = nr_method;
             session.params = params;
             session.curves = curves;
             session.lens = lens.map(|boxed| *boxed);
+            session.lut = lut;
             session.interactive = interactive;
             session.geometry = geometry;
             let mut state = lock_state(shared);
@@ -1821,7 +2037,7 @@ fn apply_command(
                 state.decode = "loading".to_string();
                 *latest_job += 1;
                 let job = DevelopJob {
-                        nr_method: session.nr_method,
+                    nr_method: session.nr_method,
                     id: *latest_job,
                     rev,
                     photo: None,
@@ -1829,9 +2045,14 @@ fn apply_command(
                     interactive,
                     params: session.params.clone(),
                     lens: session.lens.clone(),
+                    lut: session.lut.clone(),
                     curves: session.curves.clone(),
-                    geometry: if session.tool.is_some() { None } else { session.geometry },
-                        prefer_sooc: session.prefer_sooc,
+                    geometry: if session.tool.is_some() {
+                        None
+                    } else {
+                        session.geometry
+                    },
+                    prefer_sooc: session.prefer_sooc,
                     // 参数任务不发过渡帧（图已经在屏幕上，只是要重算）
                     transition: None,
                 };
@@ -1844,27 +2065,53 @@ fn apply_command(
             Ok(())
         }
         RenderCommand::DenoiseReady => {
-            if session.nr_method != NrMethod::High || session.interactive { return Ok(()); }
+            if session.nr_method != NrMethod::High || session.interactive {
+                return Ok(());
+            }
             let state = lock_state(shared);
-            let Some(path) = state.photo_path.clone() else { return Ok(()); };
+            let Some(path) = state.photo_path.clone() else {
+                return Ok(());
+            };
             *latest_job += 1;
-            let job = DevelopJob { nr_method: session.nr_method, id: *latest_job,
-                rev: state.params_rev, photo: Some(path), tier: state.wanted_tier.or(state.tier).unwrap_or(ImageTier::Preview),
-                interactive: false, params: session.params.clone(), lens: session.lens.clone(),
-                curves: session.curves.clone(), geometry: if session.tool.is_some() { None } else { session.geometry },
-                        prefer_sooc: session.prefer_sooc, transition: None };
+            let job = DevelopJob {
+                nr_method: session.nr_method,
+                id: *latest_job,
+                rev: state.params_rev,
+                photo: Some(path),
+                tier: state
+                    .wanted_tier
+                    .or(state.tier)
+                    .unwrap_or(ImageTier::Preview),
+                interactive: false,
+                params: session.params.clone(),
+                lens: session.lens.clone(),
+                lut: session.lut.clone(),
+                curves: session.curves.clone(),
+                geometry: if session.tool.is_some() {
+                    None
+                } else {
+                    session.geometry
+                },
+                prefer_sooc: session.prefer_sooc,
+                transition: None,
+            };
             drop(state);
-            developer.send(job).map_err(|_| "显影线程不在了".to_string())
+            developer
+                .send(job)
+                .map_err(|_| "显影线程不在了".to_string())
         }
         RenderCommand::ConfirmTool(reply) => {
             let result = match session.tool {
                 Some(tool) => {
                     let mut geometry = tool.geometry;
                     geometry.crop = Some(tool.crop);
-                    let size = lock_state(shared).original_image
+                    let size = lock_state(shared)
+                        .original_image
                         .map(|s| (s.width as u32, s.height as u32));
-                    match size { Some(size) => geometry.validate(size).map(|()| geometry),
-                        None => Err("照片还未就绪".into()) }
+                    match size {
+                        Some(size) => geometry.validate(size).map(|()| geometry),
+                        None => Err("照片还未就绪".into()),
+                    }
                 }
                 None => Err("没有正在操作的裁切或旋转工具".into()),
             };
@@ -1905,7 +2152,10 @@ fn apply_command(
                             width: source_size.0 as f64,
                             height: source_size.1 as f64,
                         });
-                        state.original_image = Some(SizeDto { width: image.original_width as f64, height: image.original_height as f64 });
+                        state.original_image = Some(SizeDto {
+                            width: image.original_width as f64,
+                            height: image.original_height as f64,
+                        });
                         state.origin = Some(outcome.origin);
                     }
                 }
@@ -1913,14 +2163,26 @@ fn apply_command(
                 return Ok(());
             }
             let mut state = lock_state(shared);
-            if outcome.reference.is_some() {
+            let (reference, reference_base) = match &session.reference_issue {
+                Some((frame, issue_id)) => {
+                    (Some(Arc::clone(frame)), Some(format!("issue:{issue_id}")))
+                }
+                None => (
+                    outcome.reference,
+                    outcome.reference_base.map(str::to_string),
+                ),
+            };
+            if reference.is_some() {
                 state.reference_ready = true;
-                state.reference_base = outcome.reference_base.map(str::to_string);
+                state.reference_base = reference_base;
             }
-            if let Some(reference) = outcome.reference
+            if let Some(reference) = reference
                 && context.reference_id() != Some(reference.id)
-                && let Some(image) = RenderImage::from_rgb8(reference.width, reference.height, &reference.rgb)
-            { context.set_reference_image(reference.id, image); }
+                && let Some(image) =
+                    RenderImage::from_rgb8(reference.width, reference.height, &reference.rgb)
+            {
+                context.set_reference_image(reference.id, image);
+            }
             state.nr_pending = outcome.nr_pending;
             state.nr_error = outcome.nr_error;
             state.wanted_tier = None;
@@ -1948,7 +2210,9 @@ fn apply_command(
                     context.set_image(render_image, source_size);
                     if let Some(tool) = session.tool {
                         context.viewport_mut().rotation = tool.geometry.rotation;
-                        if previous_size != source_size { context.viewport_mut().refit_rotated(); }
+                        if previous_size != source_size {
+                            context.viewport_mut().refit_rotated();
+                        }
                     } else {
                         context.viewport_mut().rotation = 0.0;
                     }
@@ -1958,7 +2222,10 @@ fn apply_command(
                         width: source_size.0 as f64,
                         height: source_size.1 as f64,
                     });
-                    state.original_image = Some(SizeDto { width: image.original_width as f64, height: image.original_height as f64 });
+                    state.original_image = Some(SizeDto {
+                        width: image.original_width as f64,
+                        height: image.original_height as f64,
+                    });
                     state.tier = Some(outcome.tier);
                     state.origin = Some(outcome.origin);
                     if let Some(histogram) = outcome.histogram {
@@ -2026,21 +2293,37 @@ fn apply_command(
                     if !matches!(phase.as_str(), "down" | "move" | "up" | "cancel") {
                         return Err(format!("未知的对比指针阶段：{phase}"));
                     }
-                    if !x.is_finite() || !y.is_finite() { return Err("对比指针坐标无效".into()); }
-                    if !context.compare_pointer(&phase, (x, y)) { return Ok(()); }
-                }
-                ViewportIntent::SetReferenceBase { base } => {
-                    let prefer = match base.as_str() {
-                        "sooc" => true, "raw" => false,
-                        _ => return Err("未知的对比参照来源".into()),
-                    };
-                    if session.prefer_sooc != prefer {
-                        session.prefer_sooc = prefer;
-                        queue_geometry_job(context, shared, developer, latest_job, session)?;
+                    if !x.is_finite() || !y.is_finite() {
+                        return Err("对比指针坐标无效".into());
+                    }
+                    if !context.compare_pointer(&phase, (x, y)) {
+                        return Ok(());
                     }
                 }
-                ViewportIntent::SetTool { tool, initial_ratio } => {
-                    if initial_ratio.is_some_and(|value| !value.is_finite() || value <= 0.0 || value > 100.0) {
+                ViewportIntent::SetReferenceBase { base, sequence } => {
+                    let prefer = match base.as_str() {
+                        "sooc" => true,
+                        "raw" => false,
+                        _ => return Err("未知的对比参照来源".into()),
+                    };
+                    if sequence >= session.reference_sequence {
+                        session.reference_sequence = sequence;
+                        let changed =
+                            session.prefer_sooc != prefer || session.reference_issue.is_some();
+                        session.prefer_sooc = prefer;
+                        session.reference_issue = None;
+                        if changed {
+                            queue_geometry_job(context, shared, developer, latest_job, session)?;
+                        }
+                    }
+                }
+                ViewportIntent::SetTool {
+                    tool,
+                    initial_ratio,
+                } => {
+                    if initial_ratio
+                        .is_some_and(|value| !value.is_finite() || value <= 0.0 || value > 100.0)
+                    {
                         return Err("裁切比例无效".into());
                     }
                     let kind = match tool.as_deref() {
@@ -2052,37 +2335,70 @@ fn apply_command(
                     if kind != session.tool.map(|draft| draft.kind) {
                         session.tool = kind.map(|kind| {
                             let geometry = session.geometry.unwrap_or_default();
-                            let size = lock_state(shared).original_image
-                                .map(|s| (s.width as u32, s.height as u32)).unwrap_or((1, 1));
-                            ToolDraft { kind, geometry, crop: geometry.output_rect(size),
-                                ratio: if kind == ToolKind::Crop { initial_ratio } else { None },
-                                drag: None, line_start: None, line_end: None }
+                            let size = lock_state(shared)
+                                .original_image
+                                .map(|s| (s.width as u32, s.height as u32))
+                                .unwrap_or((1, 1));
+                            ToolDraft {
+                                kind,
+                                geometry,
+                                crop: geometry.output_rect(size),
+                                ratio: if kind == ToolKind::Crop {
+                                    initial_ratio
+                                } else {
+                                    None
+                                },
+                                drag: None,
+                                line_start: None,
+                                line_end: None,
+                            }
                         });
                         queue_geometry_job(context, shared, developer, latest_job, session)?;
                     }
                 }
                 ViewportIntent::SetCropRatio { ratio } => {
-                    if ratio.is_some_and(|value| !value.is_finite() || value <= 0.0 || value > 100.0) {
+                    if ratio
+                        .is_some_and(|value| !value.is_finite() || value <= 0.0 || value > 100.0)
+                    {
                         return Err("裁切比例无效".into());
                     }
-                    if let Some(tool) = session.tool.as_mut().filter(|tool| tool.kind == ToolKind::Crop) {
+                    if let Some(tool) = session
+                        .tool
+                        .as_mut()
+                        .filter(|tool| tool.kind == ToolKind::Crop)
+                    {
                         tool.ratio = ratio;
                         if let Some(ratio) = ratio {
-                            let size = lock_state(shared).original_image
-                                .map(|s| (s.width as u32, s.height as u32)).unwrap_or((1, 1));
+                            let size = lock_state(shared)
+                                .original_image
+                                .map(|s| (s.width as u32, s.height as u32))
+                                .unwrap_or((1, 1));
                             // 重进已确认的裁切时，面板会同步一次比例；同一比例不能
                             // 把原位置的框重新居中，否则框外内容也无法向外扩展。
                             tool.crop = crop_after_ratio_change(
-                                size, tool.geometry.rotation, tool.crop, ratio);
+                                size,
+                                tool.geometry.rotation,
+                                tool.crop,
+                                ratio,
+                            );
                         }
                     }
                 }
                 ViewportIntent::SetRotation { degrees } => {
-                    if !degrees.is_finite() || degrees.abs() > 360.0 { return Err("旋转角度无效".into()); }
-                    if let Some(tool) = session.tool.as_mut().filter(|tool| tool.kind == ToolKind::Rotate) {
-                        let size = lock_state(shared).original_image
-                            .map(|s| (s.width as u32, s.height as u32)).unwrap_or((1, 1));
-                        let aspect = tool.crop.width * size.0 as f32 / (tool.crop.height * size.1 as f32);
+                    if !degrees.is_finite() || degrees.abs() > 360.0 {
+                        return Err("旋转角度无效".into());
+                    }
+                    if let Some(tool) = session
+                        .tool
+                        .as_mut()
+                        .filter(|tool| tool.kind == ToolKind::Rotate)
+                    {
+                        let size = lock_state(shared)
+                            .original_image
+                            .map(|s| (s.width as u32, s.height as u32))
+                            .unwrap_or((1, 1));
+                        let aspect =
+                            tool.crop.width * size.0 as f32 / (tool.crop.height * size.1 as f32);
                         tool.geometry.rotation = degrees;
                         tool.crop = largest_centered_rect(size, degrees, aspect);
                         context.viewport_mut().rotation = degrees;
@@ -2091,38 +2407,70 @@ fn apply_command(
                 }
                 ViewportIntent::ToolPointer { phase, x, y } => {
                     if !matches!(phase.as_str(), "down" | "move" | "up" | "cancel")
-                        || !x.is_finite() || !y.is_finite() { return Err("工具指针事实无效".into()); }
+                        || !x.is_finite()
+                        || !y.is_finite()
+                    {
+                        return Err("工具指针事实无效".into());
+                    }
                     if let Some(tool) = session.tool.as_mut() {
-                        let size = lock_state(shared).original_image
-                            .map(|s| (s.width as u32, s.height as u32)).unwrap_or((1, 1));
+                        let size = lock_state(shared)
+                            .original_image
+                            .map(|s| (s.width as u32, s.height as u32))
+                            .unwrap_or((1, 1));
                         let point = context.viewport().frame_pointer_normalized((x, y), size);
                         match (tool.kind, phase.as_str()) {
                             (ToolKind::Crop, "down") => {
-                                tool.drag = point.and_then(|p| hit_crop(tool.crop, p,
-                                    context.viewport().frame_hit_tolerance(10.0, size))
-                                    .map(|handle| CropDrag { handle, start: tool.crop, pointer: p }));
+                                tool.drag = point.and_then(|p| {
+                                    hit_crop(
+                                        tool.crop,
+                                        p,
+                                        context.viewport().frame_hit_tolerance(10.0, size),
+                                    )
+                                    .map(|handle| CropDrag {
+                                        handle,
+                                        start: tool.crop,
+                                        pointer: p,
+                                    })
+                                });
                             }
                             (ToolKind::Crop, "move" | "up") => {
                                 if let (Some(drag), Some(p)) = (tool.drag, point) {
-                                    tool.crop = drag_crop(size, tool.geometry.rotation, drag.start,
-                                        drag.handle, (p.0 - drag.pointer.0, p.1 - drag.pointer.1), tool.ratio);
+                                    tool.crop = drag_crop(
+                                        size,
+                                        tool.geometry.rotation,
+                                        drag.start,
+                                        drag.handle,
+                                        (p.0 - drag.pointer.0, p.1 - drag.pointer.1),
+                                        tool.ratio,
+                                    );
                                 }
-                                if phase == "up" { tool.drag = None; }
+                                if phase == "up" {
+                                    tool.drag = None;
+                                }
                             }
-                            (ToolKind::Crop, "cancel") => { tool.drag = None; }
+                            (ToolKind::Crop, "cancel") => {
+                                tool.drag = None;
+                            }
                             (ToolKind::Rotate, "down") => {
-                                tool.line_start = Some((x, y)); tool.line_end = Some((x, y));
+                                tool.line_start = Some((x, y));
+                                tool.line_end = Some((x, y));
                             }
                             (ToolKind::Rotate, "move") => {
-                                if tool.line_start.is_some() { tool.line_end = Some((x, y)); }
+                                if tool.line_start.is_some() {
+                                    tool.line_end = Some((x, y));
+                                }
                             }
                             (ToolKind::Rotate, "up") => {
                                 tool.line_end = None;
                                 if let Some(start) = tool.line_start.take() {
-                                    let dx = x - start.0; let dy = y - start.1;
+                                    let dx = x - start.0;
+                                    let dy = y - start.1;
                                     if dx.hypot(dy) >= 8.0 {
-                                        let angle = (tool.geometry.rotation - dy.atan2(dx).to_degrees()).clamp(-360.0, 360.0);
-                                        let aspect = tool.crop.width * size.0 as f32 / (tool.crop.height * size.1 as f32);
+                                        let angle = (tool.geometry.rotation
+                                            - dy.atan2(dx).to_degrees())
+                                        .clamp(-360.0, 360.0);
+                                        let aspect = tool.crop.width * size.0 as f32
+                                            / (tool.crop.height * size.1 as f32);
                                         tool.geometry.rotation = angle;
                                         tool.crop = largest_centered_rect(size, angle, aspect);
                                         context.viewport_mut().rotation = angle;
@@ -2131,7 +2479,10 @@ fn apply_command(
                                     }
                                 }
                             }
-                            (ToolKind::Rotate, "cancel") => { tool.line_start = None; tool.line_end = None; }
+                            (ToolKind::Rotate, "cancel") => {
+                                tool.line_start = None;
+                                tool.line_end = None;
+                            }
                             _ => {}
                         }
                     }
@@ -2141,10 +2492,10 @@ fn apply_command(
                     let hit = if x < 0.0 || y < 0.0 {
                         None
                     } else {
-                        context.viewport().hit_test_css((x, y)).map(|(px, py)| PointDto {
-                            x: px,
-                            y: py,
-                        })
+                        context
+                            .viewport()
+                            .hit_test_css((x, y))
+                            .map(|(px, py)| PointDto { x: px, y: py })
                     };
                     if let Ok(mut state) = shared.lock() {
                         state.last_hit = hit;
@@ -2159,21 +2510,47 @@ fn apply_command(
     }
 }
 
-fn queue_geometry_job(context: &GpuContext, shared: &Arc<Mutex<RenderState>>,
-    developer: &Sender<DevelopJob>, latest_job: &mut u64, session: &SessionParams) -> Result<(), String> {
+fn queue_geometry_job(
+    context: &GpuContext,
+    shared: &Arc<Mutex<RenderState>>,
+    developer: &Sender<DevelopJob>,
+    latest_job: &mut u64,
+    session: &SessionParams,
+) -> Result<(), String> {
     let mut state = lock_state(shared);
-    let Some(path) = state.photo_path.clone() else { return Ok(()); };
+    let Some(path) = state.photo_path.clone() else {
+        return Ok(());
+    };
     *latest_job += 1;
-    let tier = tier_for(context.viewport().zoom, state.tier.unwrap_or(ImageTier::Preview));
+    let tier = tier_for(
+        context.viewport().zoom,
+        state.tier.unwrap_or(ImageTier::Preview),
+    );
     state.wanted_tier = Some(tier);
     state.decode = "loading".into();
-    let job = DevelopJob { nr_method: session.nr_method, id: *latest_job,
-        rev: state.params_rev, photo: Some(path), tier, interactive: false,
-        params: session.params.clone(), lens: session.lens.clone(), curves: session.curves.clone(),
-        geometry: if session.tool.is_some() { None } else { session.geometry },
-                        prefer_sooc: session.prefer_sooc, transition: None };
+    let job = DevelopJob {
+        nr_method: session.nr_method,
+        id: *latest_job,
+        rev: state.params_rev,
+        photo: Some(path),
+        tier,
+        interactive: false,
+        params: session.params.clone(),
+        lens: session.lens.clone(),
+        lut: session.lut.clone(),
+        curves: session.curves.clone(),
+        geometry: if session.tool.is_some() {
+            None
+        } else {
+            session.geometry
+        },
+        prefer_sooc: session.prefer_sooc,
+        transition: None,
+    };
     drop(state);
-    developer.send(job).map_err(|_| "显影线程不在了".to_string())
+    developer
+        .send(job)
+        .map_err(|_| "显影线程不在了".to_string())
 }
 
 /// 需要换档位吗（缩放跨过 `1:1` 就要全尺寸输出）—— 需要就让显影线程重出一张。
@@ -2207,9 +2584,14 @@ fn ensure_output(
         interactive: session.interactive,
         params: session.params.clone(),
         lens: session.lens.clone(),
+        lut: session.lut.clone(),
         curves: session.curves.clone(),
-        geometry: if session.tool.is_some() { None } else { session.geometry },
-                        prefer_sooc: session.prefer_sooc,
+        geometry: if session.tool.is_some() {
+            None
+        } else {
+            session.geometry
+        },
+        prefer_sooc: session.prefer_sooc,
         // 换档位不发过渡帧：源已经在显影线程手里（这一步只是换输出尺寸）
         transition: None,
     };
@@ -2244,13 +2626,22 @@ fn publish(state: &mut RenderState, context: &GpuContext, session: &SessionParam
     // 覆盖层矩阵：每次发布都算一遍（它只依赖视口状态，很便宜）
     state.overlay_transform = viewport.css_overlay_transform();
     state.comparing = context.compare_fraction().is_some();
-    state.compare_line_css = context.compare_fraction().and_then(|fraction| viewport.compare_css_x(fraction));
+    state.compare_line_css = context
+        .compare_fraction()
+        .and_then(|fraction| viewport.compare_css_x(fraction));
     state.tool_box_css = session.tool.and_then(|tool| {
         let size = state.original_image?;
-        if state.image != Some(size) { return None; }
-        viewport.frame_rect_css(tool.crop, (size.width as u32, size.height as u32))
-            .map(|rect| RectDto { x: rect.x as f64, y: rect.y as f64,
-                width: rect.width as f64, height: rect.height as f64 })
+        if state.image != Some(size) {
+            return None;
+        }
+        viewport
+            .frame_rect_css(tool.crop, (size.width as u32, size.height as u32))
+            .map(|rect| RectDto {
+                x: rect.x as f64,
+                y: rect.y as f64,
+                width: rect.width as f64,
+                height: rect.height as f64,
+            })
     });
 }
 
@@ -2304,7 +2695,9 @@ fn merge_jobs(older: DevelopJob, newer: DevelopJob) -> DevelopJob {
 /// * 把错误当作**这条任务的结果**交回渲染线程 → 界面上是可见的错误，而不是一张永远不动的旧帧。
 fn develop_loop(receiver: Receiver<DevelopJob>, commands: Sender<RenderCommand>, max_texture: u32) {
     let notify = commands.clone();
-    let mut high = HighDenoise::new(move || { let _ = notify.send(RenderCommand::DenoiseReady); });
+    let mut high = HighDenoise::new(move || {
+        let _ = notify.send(RenderCommand::DenoiseReady);
+    });
     let mut cached: Option<CachedSource> = None;
     // 最近一次被告知要显示的照片（**粘住**：参数任务不该把「要看哪张」弄丢）
     let mut wanted_photo: Option<String> = None;
@@ -2324,13 +2717,23 @@ fn develop_loop(receiver: Receiver<DevelopJob>, commands: Sender<RenderCommand>,
         }
 
         let outcome = match std::panic::catch_unwind(AssertUnwindSafe(|| {
-            run_develop_job(&mut cached, &wanted_photo, &job, max_texture, &commands, &mut high)
+            run_develop_job(
+                &mut cached,
+                &wanted_photo,
+                &job,
+                max_texture,
+                &commands,
+                &mut high,
+            )
         })) {
             Ok(outcome) => outcome,
             Err(payload) => {
                 cached = None; // 半路的状态不可信：下一次任务重新解码
                 Some(DevelopOutcome {
-                    nr_pending: false, nr_error: None, reference: None, reference_base: None,
+                    nr_pending: false,
+                    nr_error: None,
+                    reference: None,
+                    reference_base: None,
                     id: job.id,
                     rev: job.rev,
                     path: job
@@ -2364,6 +2767,28 @@ fn develop_loop(receiver: Receiver<DevelopJob>, commands: Sender<RenderCommand>,
 ///
 /// `commands`：**过渡帧直接从这儿发**（不等这条任务算完）——
 /// 「先出图、再解码」的关键就在这一行的位置上：它必须在 `decode_linear_source` **之前**。
+fn should_reload_source(
+    cached_path: Option<&str>,
+    cached_signature: Option<&str>,
+    wanted_path: &str,
+    observed_signature: Option<&str>,
+    explicit_photo: bool,
+) -> bool {
+    cached_path != Some(wanted_path)
+        || explicit_photo
+            && (observed_signature.is_none() || observed_signature != cached_signature)
+}
+fn source_dependency_signature(path: &str, sooc: Option<&Path>) -> Option<String> {
+    let mut signature = raybend::media::source::source_signature(Path::new(path)).ok()?;
+    if let Some(sooc) = sooc.filter(|source| *source != Path::new(path)) {
+        if let Ok(secondary) = raybend::media::source::source_signature(sooc) {
+            signature.push('/');
+            signature.push_str(&secondary);
+        }
+    }
+    Some(signature)
+}
+
 fn run_develop_job(
     cached: &mut Option<CachedSource>,
     wanted_photo: &Option<String>,
@@ -2375,8 +2800,34 @@ fn run_develop_job(
     // ① 需要的话先解码线性源（换照片 / 上一张解失败过）
     let mut decode_ms = None;
     let mut origin = "bitmap".to_string();
+    let signature = wanted_photo.as_deref().and_then(|path| {
+        if job.photo.is_none() && cached.as_ref().is_some_and(|entry| entry.path == path) {
+            return cached
+                .as_ref()
+                .and_then(|entry| entry.source_signature.clone());
+        }
+        let sooc = job
+            .transition
+            .as_ref()
+            .and_then(|plan| plan.sooc.as_deref())
+            .or_else(|| {
+                cached
+                    .as_ref()
+                    .filter(|entry| entry.path == path)
+                    .and_then(|entry| entry.sooc.as_deref())
+            });
+        source_dependency_signature(path, sooc)
+    });
     if let Some(path) = wanted_photo.clone()
-        && cached.as_ref().is_none_or(|entry| entry.path != path)
+        && should_reload_source(
+            cached.as_ref().map(|entry| entry.path.as_str()),
+            cached
+                .as_ref()
+                .and_then(|entry| entry.source_signature.as_deref()),
+            &path,
+            signature.as_deref(),
+            job.photo.is_some(),
+        )
     {
         // 旧线性源在换图时已经无用；先释放，再解新 RAW。否则旧源、
         // worker 回传缓冲和新源会在解码瞬间同时驻留。
@@ -2405,10 +2856,19 @@ fn run_develop_job(
                 origin = source.origin.clone();
                 *cached = Some(CachedSource {
                     reference: ReferenceCache::default(),
-                    sooc: job.transition.as_ref().and_then(|plan| plan.sooc.clone())
-                        .or_else(|| (!matches!(raybend::media::kind::kind_of_file(&path),
-                            raybend::media::kind::MediaKind::Raw)).then(|| std::path::PathBuf::from(&path))),
+                    sooc: job
+                        .transition
+                        .as_ref()
+                        .and_then(|plan| plan.sooc.clone())
+                        .or_else(|| {
+                            (!matches!(
+                                raybend::media::kind::kind_of_file(&path),
+                                raybend::media::kind::MediaKind::Raw
+                            ))
+                            .then(|| std::path::PathBuf::from(&path))
+                        }),
                     source_revision: job.id,
+                    source_signature: signature,
                     path,
                     full: Arc::new(source.image),
                     preview: None,
@@ -2420,7 +2880,10 @@ fn run_develop_job(
             }
             Err(error) => {
                 return Some(DevelopOutcome {
-                    nr_pending: false, nr_error: None, reference: None, reference_base: None,
+                    nr_pending: false,
+                    nr_error: None,
+                    reference: None,
+                    reference_base: None,
                     id: job.id,
                     rev: job.rev,
                     path,
@@ -2440,18 +2903,33 @@ fn run_develop_job(
     let Some(entry) = cached.as_mut() else {
         // 只有「还没让显示过任何照片」才会走到这里（开局那一条参数任务）。
         // 一旦要过照片，`wanted_photo` 就粘住了 —— 见 `merge_jobs` 的注释。
-        eprintln!("[editor] 参数任务先到、还没有照片可算（job #{}）：跳过", job.id);
+        eprintln!(
+            "[editor] 参数任务先到、还没有照片可算（job #{}）：跳过",
+            job.id
+        );
         return None;
     };
     let as_shot_temperature = entry.as_shot_temperature;
     origin = entry.origin.clone();
     if let Some(geometry) = job.geometry
-        && let Err(error) = geometry.validate((entry.full.width, entry.full.height)) {
+        && let Err(error) = geometry.validate((entry.full.width, entry.full.height))
+    {
         return Some(DevelopOutcome {
-            nr_pending: false, nr_error: None, reference: None, reference_base: None,
-            id: job.id, rev: job.rev, path: entry.path.clone(), tier: job.tier,
-            origin, transition: false, as_shot_temperature,
-            decode_ms, develop_ms: 0.0, histogram: None, result: Err(error),
+            nr_pending: false,
+            nr_error: None,
+            reference: None,
+            reference_base: None,
+            id: job.id,
+            rev: job.rev,
+            path: entry.path.clone(),
+            tier: job.tier,
+            origin,
+            transition: false,
+            as_shot_temperature,
+            decode_ms,
+            develop_ms: 0.0,
+            histogram: None,
+            result: Err(error),
         });
     }
     let develop_started = Instant::now();
@@ -2515,29 +2993,59 @@ fn run_develop_job(
     };
     let (reference, reference_base) = if job.interactive {
         (None, None)
-    } else if let Some(frame) = job.prefer_sooc.then_some(entry.sooc.as_deref()).flatten()
-        .and_then(|path| entry.reference.get_sooc(path, job.geometry)) {
+    } else if let Some(frame) = job
+        .prefer_sooc
+        .then_some(entry.sooc.as_deref())
+        .flatten()
+        .and_then(|path| entry.reference.get_sooc(path, job.geometry))
+    {
         (Some(frame), Some("sooc"))
     } else {
-        (Some(entry.reference.get(source, &correction, job.geometry)),
-            Some(if raybend::media::kind::kind_of_file(&entry.path) == raybend::media::kind::MediaKind::Raw { "raw" } else { "sooc" }))
+        (
+            Some(entry.reference.get(source, &correction, job.geometry)),
+            Some(
+                if raybend::media::kind::kind_of_file(&entry.path)
+                    == raybend::media::kind::MediaKind::Raw
+                {
+                    "raw"
+                } else {
+                    "sooc"
+                },
+            ),
+        )
     };
     let lens_map = LensMap::new(&correction);
     let (mut nr_pending, mut nr_error) = (false, None);
     let high_image = if job.nr_method == NrMethod::High && !plans.denoise.is_identity() {
-        let key = DenoiseKey { source: entry.source_revision, width, height, plan: plans.denoise, lens: correction };
+        let key = DenoiseKey {
+            source: entry.source_revision,
+            width,
+            height,
+            plan: plans.denoise,
+            lens: correction,
+        };
         match high.get_or_request(key, source, !job.interactive) {
             Some(Ok(image)) => Some(image),
-            Some(Err(error)) => { nr_error = Some(error); None },
-            None => { nr_pending = true; None },
+            Some(Err(error)) => {
+                nr_error = Some(error);
+                None
+            }
+            None => {
+                nr_pending = true;
+                None
+            }
         }
-    } else { high.cancel(); None };
+    } else {
+        high.cancel();
+        None
+    };
     let stages = DevelopStages {
         nr_method: Default::default(),
         lens: high_image.is_none().then_some(&lens_map),
         denoise: high_image.is_none().then_some(&plans.denoise),
         local_tone: local,
         sharpen: Some(&plans.sharpen),
+        lut: job.lut.as_deref(),
     };
     let started = std::time::Instant::now();
     let input = high_image.as_deref().unwrap_or(source);
@@ -2547,10 +3055,11 @@ fn run_develop_job(
             .expect("已按源尺寸校验成片几何"),
         None => (width, height, rgb),
     };
-    let (source_width, source_height) = job.geometry.map_or(
-        (entry.full.width, entry.full.height),
-        |geometry| geometry.output_size((entry.full.width, entry.full.height)),
-    );
+    let (source_width, source_height) = job
+        .geometry
+        .map_or((entry.full.width, entry.full.height), |geometry| {
+            geometry.output_size((entry.full.width, entry.full.height))
+        });
     let develop_ms = started.elapsed().as_secs_f64() * 1000.0;
     eprintln!(
         "[editor] 真帧：job #{id} 档 {tier:?} {w}×{h} 解码 {decode} 管线 {develop:.0}ms（整条 {total:.0}ms）",
@@ -2564,7 +3073,10 @@ fn run_develop_job(
     );
 
     Some(DevelopOutcome {
-        nr_pending, nr_error, reference, reference_base,
+        nr_pending,
+        nr_error,
+        reference,
+        reference_base,
         id: job.id,
         rev: job.rev,
         path: entry.path.clone(),
@@ -2634,9 +3146,8 @@ fn transition_outcome(
             );
             continue;
         };
-        let (source_width, source_height) = plan
-            .source_size
-            .unwrap_or((pixels.width, pixels.height));
+        let (source_width, source_height) =
+            plan.source_size.unwrap_or((pixels.width, pixels.height));
         eprintln!(
             "[editor] 过渡帧：{origin} {w}×{h}（逻辑 {sw}×{sh}）耗时 {ms:.0}ms；候选 {count} 个",
             origin = source.origin,
@@ -2648,7 +3159,10 @@ fn transition_outcome(
             ms = started.elapsed().as_secs_f64() * 1000.0,
         );
         return Some(DevelopOutcome {
-            nr_pending: false, nr_error: None, reference: None, reference_base: None,
+            nr_pending: false,
+            nr_error: None,
+            reference: None,
+            reference_base: None,
             id: job.id,
             rev: job.rev,
             path: path.to_string(),
@@ -2700,7 +3214,8 @@ fn decode_linear_source(path: &Path, max_texture: u32) -> Result<LinearSource, S
             .ok_or_else(|| format!("线性解码结果的尺寸对不上：{width}×{height}"))?;
         (image, "raw-linear".to_string(), as_shot_temperature)
     } else {
-        let Some(pixels) = display::pixels(path, PixelSize::Full).map_err(|e| e.to_string())? else {
+        let Some(pixels) = display::pixels(path, PixelSize::Full).map_err(|e| e.to_string())?
+        else {
             return Err(format!("解不开这张照片：{}", path.display()));
         };
         let image = LinearImage::from_srgb8(pixels.width, pixels.height, &pixels.rgb)
@@ -2726,15 +3241,34 @@ struct LinearSource {
     as_shot_temperature: Option<f32>,
 }
 
+/// 后台完成的旧快照不得覆盖更新的选择或另一张照片。
+fn accept_issue_reference(
+    sequence: u64,
+    latest_sequence: u64,
+    requested_path: &str,
+    current_path: Option<&str>,
+) -> bool {
+    sequence >= latest_sequence && current_path == Some(requested_path)
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn named_issue_reference_rejects_stale_sequence_and_other_photo() {
+        assert!(super::accept_issue_reference(3, 3, "a.raw", Some("a.raw")));
+        assert!(super::accept_issue_reference(4, 3, "a.raw", Some("a.raw")));
+        assert!(!super::accept_issue_reference(2, 3, "a.raw", Some("a.raw")));
+        assert!(!super::accept_issue_reference(4, 3, "a.raw", Some("b.raw")));
+        assert!(!super::accept_issue_reference(4, 3, "a.raw", None));
+    }
+
     use super::*;
 
     #[test]
     fn tool_open_intent_carries_initial_ratio_with_camel_case_fields() {
-        let intent: ViewportIntent = serde_json::from_str(
-            r#"{"kind":"setTool","tool":"crop","initialRatio":1.25}"#
-        ).expect("初始比例意图");
+        let intent: ViewportIntent =
+            serde_json::from_str(r#"{"kind":"setTool","tool":"crop","initialRatio":1.25}"#)
+                .expect("初始比例意图");
         assert!(matches!(intent, ViewportIntent::SetTool {
             tool: Some(tool), initial_ratio: Some(ratio)
         } if tool == "crop" && ratio == 1.25));
@@ -2743,13 +3277,19 @@ mod tests {
     #[test]
     fn confirmed_crop_reopens_in_place_and_can_expand_into_original() {
         let size = (400, 300);
-        let saved = CropRect { x: 0.2, y: 0.2, width: 0.6, height: 0.6 };
+        let saved = CropRect {
+            x: 0.2,
+            y: 0.2,
+            width: 0.6,
+            height: 0.6,
+        };
         let ratio = 4.0 / 3.0;
         assert_eq!(crop_after_ratio_change(size, 0.0, saved, ratio), saved);
-        let expanded = drag_crop(size, 0.0, saved, CropHandle::Se,
-            (0.1, 0.1), Some(ratio));
+        let expanded = drag_crop(size, 0.0, saved, CropHandle::Se, (0.1, 0.1), Some(ratio));
         assert!(expanded.width > saved.width && expanded.height > saved.height);
-        assert!(raybend::develop::geometry::contains_rect(size, 0.0, expanded));
+        assert!(raybend::develop::geometry::contains_rect(
+            size, 0.0, expanded
+        ));
         let changed = crop_after_ratio_change(size, 0.0, saved, 1.0);
         assert_ne!(changed, saved, "真正切换比例仍要更新裁切框");
         let outer = largest_centered_rect(size, 15.0, ratio);
@@ -2760,10 +3300,18 @@ mod tests {
             height: outer.height * 0.6,
         };
         assert_eq!(crop_after_ratio_change(size, 15.0, rotated, ratio), rotated);
-        let expanded = drag_crop(size, 15.0, rotated, CropHandle::Se,
-            (0.02, 0.02), Some(ratio));
+        let expanded = drag_crop(
+            size,
+            15.0,
+            rotated,
+            CropHandle::Se,
+            (0.02, 0.02),
+            Some(ratio),
+        );
         assert!(expanded.width > rotated.width && expanded.height > rotated.height);
-        assert!(raybend::develop::geometry::contains_rect(size, 15.0, expanded));
+        assert!(raybend::develop::geometry::contains_rect(
+            size, 15.0, expanded
+        ));
     }
 
     #[test]
@@ -2776,19 +3324,40 @@ mod tests {
             Ok(RenderOutcome::Drawn),
         ];
         let delays: Vec<_> = outcomes.iter().map(frame_retry_delay).collect();
-        assert_eq!(delays, [
-            Some(Duration::from_millis(16)),
-            Some(Duration::from_millis(200)),
-            Some(Duration::from_millis(16)),
-            None,
-        ]);
+        assert_eq!(
+            delays,
+            [
+                Some(Duration::from_millis(16)),
+                Some(Duration::from_millis(200)),
+                Some(Duration::from_millis(16)),
+                None,
+            ]
+        );
     }
 
     #[test]
     fn resize_batch_keeps_only_final_size_and_preserves_other_commands() {
         let mut pending = None;
-        assert!(defer_resize(RenderCommand::Resize { width: 800, height: 600 }, &mut pending).is_none());
-        assert!(defer_resize(RenderCommand::Resize { width: 1200, height: 900 }, &mut pending).is_none());
+        assert!(
+            defer_resize(
+                RenderCommand::Resize {
+                    width: 800,
+                    height: 600
+                },
+                &mut pending
+            )
+            .is_none()
+        );
+        assert!(
+            defer_resize(
+                RenderCommand::Resize {
+                    width: 1200,
+                    height: 900
+                },
+                &mut pending
+            )
+            .is_none()
+        );
         let command = defer_resize(RenderCommand::Stop, &mut pending);
         assert!(matches!(command, Some(RenderCommand::Stop)));
         assert_eq!(pending, Some((1200, 900)));
@@ -2800,14 +3369,21 @@ mod tests {
         let old = gate.begin().expect("第一张");
         let latest = gate.begin().expect("第二张");
         let mut sent = Vec::new();
-        assert!(!gate.send_if_latest(old, || {
-            sent.push("old");
-            Ok(())
-        }).expect("旧请求应被跳过"));
-        assert!(gate.send_if_latest(latest, || {
-            sent.push("latest");
-            Ok(())
-        }).expect("新请求应送出"));
+        assert!(
+            !gate
+                .send_if_latest(old, || {
+                    sent.push("old");
+                    Ok(())
+                })
+                .expect("旧请求应被跳过")
+        );
+        assert!(
+            gate.send_if_latest(latest, || {
+                sent.push("latest");
+                Ok(())
+            })
+            .expect("新请求应送出")
+        );
         assert_eq!(sent, ["latest"]);
     }
 
@@ -2835,6 +3411,7 @@ mod tests {
             params: DevelopParams::default(),
             curves: CurveSet::default(),
             lens: None,
+            lut: None,
             geometry: None,
             prefer_sooc: true,
             transition: None,
@@ -2861,10 +3438,7 @@ mod tests {
         let mut with_plan = job(1, 1, Some("a.rw2"));
         with_plan.transition = Some(plan("a.avif", TransitionKind::AvifCache, "preview-latest"));
         let merged = merge_jobs(with_plan, job(2, 2, None));
-        assert!(
-            merged.transition.is_some(),
-            "参数任务不能把过渡帧计划顶掉"
-        );
+        assert!(merged.transition.is_some(), "参数任务不能把过渡帧计划顶掉");
         assert_eq!(merged.photo.as_deref(), Some("a.rw2"));
 
         // 换到另一张时，计划取新的那一份
@@ -2897,12 +3471,19 @@ mod tests {
         );
         let outcome = transition_outcome(&plan, &job, &path.to_string_lossy()).expect("有过渡帧");
 
-        assert_eq!(outcome.id, 42, "任务号必须与当前任务一致，否则会被当过期结果丢掉");
+        assert_eq!(
+            outcome.id, 42,
+            "任务号必须与当前任务一致，否则会被当过期结果丢掉"
+        );
         assert_eq!(outcome.rev, 7);
         assert!(outcome.transition, "要标成过渡帧（渲染线程据此不置 ready）");
         assert_eq!(outcome.origin, "preview-photo");
         let image = outcome.result.expect("解得出这张 PNG");
-        assert_eq!((image.width, image.height), (64, 48), "纹理是这张图自己的尺寸");
+        assert_eq!(
+            (image.width, image.height),
+            (64, 48),
+            "纹理是这张图自己的尺寸"
+        );
         assert_eq!(
             (image.source_width, image.source_height),
             (4000, 3000),
@@ -2967,7 +3548,11 @@ mod tests {
         match first {
             RenderCommand::Developed(outcome) => {
                 assert!(outcome.transition, "第一条必须是过渡帧");
-                eprintln!("过渡帧 origin={} （{:?}）", outcome.origin, started.elapsed());
+                eprintln!(
+                    "过渡帧 origin={} （{:?}）",
+                    outcome.origin,
+                    started.elapsed()
+                );
             }
             _ => panic!("第一条不是 Developed"),
         }
@@ -2975,9 +3560,7 @@ mod tests {
         assert!(!real.transition);
         eprintln!(
             "真帧 origin={} 解码 {:?}ms 管线 {:.0}ms",
-            real.origin,
-            real.decode_ms,
-            real.develop_ms
+            real.origin, real.decode_ms, real.develop_ms
         );
     }
 
@@ -3030,7 +3613,15 @@ mod tests {
         assert_eq!(sources[0].origin, "preview-raw");
 
         // 文件不存在（路径是编出来的）→ 一个候选都没有
-        assert!(transition_sources(&dir.path().join("gone.rw2"), raybend::store::develop::EditBase::Raw, None, None).is_empty());
+        assert!(
+            transition_sources(
+                &dir.path().join("gone.rw2"),
+                raybend::store::develop::EditBase::Raw,
+                None,
+                None
+            )
+            .is_empty()
+        );
     }
 
     /// 要编的就是位图（SOOC 基准）：不重复推同一张（否则会白解两遍）。
@@ -3046,7 +3637,11 @@ mod tests {
             None,
             Some(jpg.clone()),
         );
-        assert_eq!(sources.len(), 1, "位图基准下 SOOC 与「要编的这张」是同一个：{sources:?}");
+        assert_eq!(
+            sources.len(),
+            1,
+            "位图基准下 SOOC 与「要编的这张」是同一个：{sources:?}"
+        );
         assert_eq!(sources[0].origin, "preview-bitmap");
     }
 
@@ -3197,7 +3792,10 @@ mod tests {
     #[test]
     fn validate_rejects_nonsense() {
         assert!(validate(&args(1.0)).is_ok());
-        assert!(validate(&args(0.0)).is_err(), "dpr 不能是 0：它是换算的分母");
+        assert!(
+            validate(&args(0.0)).is_err(),
+            "dpr 不能是 0：它是换算的分母"
+        );
         assert!(validate(&args(-1.0)).is_err());
         assert!(validate(&args(f64::NAN)).is_err());
         assert!(validate(&args(f64::INFINITY)).is_err());
@@ -3281,13 +3879,24 @@ mod tests {
 
     #[test]
     fn fit_mode_names_round_trip_and_reject_junk() {
-        for mode in [FitMode::Fit, FitMode::Fill, FitMode::OneToOne, FitMode::Free] {
+        for mode in [
+            FitMode::Fit,
+            FitMode::Fill,
+            FitMode::OneToOne,
+            FitMode::Free,
+        ] {
             let name = fit_mode_name(mode);
             assert_eq!(parse_fit_mode(name).expect("能解回来"), mode);
         }
         // 大小写不敏感（前端可能给 camelCase）
-        assert_eq!(parse_fit_mode("OneToOne").expect("大小写不敏感"), FitMode::OneToOne);
-        assert_eq!(parse_fit_mode(" onetoone ").expect("两侧空白容忍"), FitMode::OneToOne);
+        assert_eq!(
+            parse_fit_mode("OneToOne").expect("大小写不敏感"),
+            FitMode::OneToOne
+        );
+        assert_eq!(
+            parse_fit_mode(" onetoone ").expect("两侧空白容忍"),
+            FitMode::OneToOne
+        );
         assert!(parse_fit_mode("zoom").is_err(), "不认识的名字必须报错");
         assert!(parse_fit_mode("").is_err());
     }
@@ -3334,8 +3943,8 @@ mod tests {
         .expect("hitTest 能反序列化");
         assert!(matches!(hit, ViewportIntent::HitTest { .. }));
 
-        let reset: ViewportIntent =
-            serde_json::from_value(serde_json::json!({ "kind": "reset" })).expect("reset 能反序列化");
+        let reset: ViewportIntent = serde_json::from_value(serde_json::json!({ "kind": "reset" }))
+            .expect("reset 能反序列化");
         assert!(matches!(reset, ViewportIntent::Reset));
 
         // 缺字段必须报错（**不许静默回退** —— §7.9 的教训是「缺 DPR 悄悄用错坐标系」）
@@ -3363,7 +3972,10 @@ mod tests {
         assert!(args.backdrop.is_none());
         let validated = validate(&args).expect("缺底色照样合法");
         assert_eq!(validated.backdrop, raybend::render::Srgb8::DARK_SURFACE_BAR);
-        assert!(!validated.backdrop_reported, "用的是兜底色，状态里要看得出来");
+        assert!(
+            !validated.backdrop_reported,
+            "用的是兜底色，状态里要看得出来"
+        );
 
         // 报了但解不开：也是兜底 + 标记，而不是报错
         let mut broken = args;
@@ -3375,7 +3987,14 @@ mod tests {
         let mut reported = broken;
         reported.backdrop = Some("rgb(18, 20, 24)".to_string());
         let validated = validate(&reported).expect("能解开");
-        assert_eq!((validated.backdrop.r, validated.backdrop.g, validated.backdrop.b), (18, 20, 24));
+        assert_eq!(
+            (
+                validated.backdrop.r,
+                validated.backdrop.g,
+                validated.backdrop.b
+            ),
+            (18, 20, 24)
+        );
         assert!(validated.backdrop_reported);
     }
 
@@ -3392,7 +4011,10 @@ mod tests {
         assert!((color.r - 0.0231).abs() < 1e-3, "42 的线性值：{}", color.r);
         assert!((color.g - 0.0263).abs() < 1e-3, "45 的线性值：{}", color.g);
         assert!((color.b - 0.0331).abs() < 1e-3, "51 的线性值：{}", color.b);
-        assert!((color.a - 1.0).abs() < 1e-9, "洞口底色必须不透明（否则透出桌面）");
+        assert!(
+            (color.a - 1.0).abs() < 1e-9,
+            "洞口底色必须不透明（否则透出桌面）"
+        );
     }
 
     #[test]
@@ -3418,30 +4040,93 @@ mod tests {
     }
     #[test]
     fn high_quality_swaps_in_then_reuses_cache_for_tone_and_histogram() {
-        let dir=tempfile::tempdir().unwrap();
-        let path=dir.path().join("small.png");
-        image::RgbImage::from_pixel(17,13,image::Rgb([120,130,110])).save(&path).unwrap();
-        let (tx,_rx)=channel();
-        let (done,ready)=channel();
-        let mut high=HighDenoise::new(move || {let _=done.send(());});
-        let photo=Some(path.to_string_lossy().into_owned());
-        let mut request=job(1,1,photo.as_deref());
-        request.nr_method=NrMethod::High;
-        request.params.set("lumaNr",60.0).unwrap();
-        let mut cached=None;
-        let fast=run_develop_job(&mut cached,&photo,&request,8192,&tx,&mut high).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("small.png");
+        image::RgbImage::from_pixel(17, 13, image::Rgb([120, 130, 110]))
+            .save(&path)
+            .unwrap();
+        let (tx, _rx) = channel();
+        let (done, ready) = channel();
+        let mut high = HighDenoise::new(move || {
+            let _ = done.send(());
+        });
+        let photo = Some(path.to_string_lossy().into_owned());
+        let mut request = job(1, 1, photo.as_deref());
+        request.nr_method = NrMethod::High;
+        request.params.set("lumaNr", 60.0).unwrap();
+        let mut cached = None;
+        let fast = run_develop_job(&mut cached, &photo, &request, 8192, &tx, &mut high).unwrap();
         assert!(fast.nr_pending);
         assert!(fast.nr_error.is_none());
-        let reference=fast.reference.unwrap();
+        let reference = fast.reference.unwrap();
         ready.recv_timeout(Duration::from_secs(5)).unwrap();
-        request.id=2; request.rev=2; request.params.set("exposure",0.5).unwrap();
-        let final_frame=run_develop_job(&mut cached,&photo,&request,8192,&tx,&mut high).unwrap();
+        request.id = 2;
+        request.rev = 2;
+        request.params.set("exposure", 0.5).unwrap();
+        let final_frame =
+            run_develop_job(&mut cached, &photo, &request, 8192, &tx, &mut high).unwrap();
         assert!(!final_frame.nr_pending);
         assert!(final_frame.nr_error.is_none());
-        assert_eq!(reference.id,final_frame.reference.unwrap().id);
-        let image=final_frame.result.unwrap();
-        let expected=settled_histogram(&image.rgb,false).unwrap();
-        assert_eq!(serde_json::to_value(final_frame.histogram.unwrap()).unwrap(),serde_json::to_value(expected).unwrap());
+        assert_eq!(reference.id, final_frame.reference.unwrap().id);
+        let image = final_frame.result.unwrap();
+        let expected = settled_histogram(&image.rgb, false).unwrap();
+        assert_eq!(
+            serde_json::to_value(final_frame.histogram.unwrap()).unwrap(),
+            serde_json::to_value(expected).unwrap()
+        );
     }
-
+    #[test]
+    fn changed_source_reloads_but_unchanged_and_parameter_jobs_reuse() {
+        assert!(should_reload_source(
+            Some("a.jpg"),
+            Some("old"),
+            "a.jpg",
+            Some("new"),
+            true
+        ));
+        assert!(!should_reload_source(
+            Some("a.jpg"),
+            Some("old"),
+            "a.jpg",
+            Some("old"),
+            true
+        ));
+        assert!(!should_reload_source(
+            Some("a.jpg"),
+            Some("old"),
+            "a.jpg",
+            None,
+            false
+        ));
+        assert!(should_reload_source(
+            Some("a.jpg"),
+            Some("old"),
+            "b.jpg",
+            Some("old"),
+            false
+        ));
+        assert!(should_reload_source(
+            None,
+            None,
+            "a.jpg",
+            Some("new"),
+            false
+        ));
+        let root = tempfile::tempdir().unwrap();
+        let raw = root.path().join("x.raw");
+        let sooc = root.path().join("x.jpg");
+        std::fs::write(&raw, b"raw").unwrap();
+        std::fs::write(&sooc, b"old").unwrap();
+        let first = source_dependency_signature(&raw.to_string_lossy(), Some(&sooc));
+        std::fs::write(&sooc, b"new sooc").unwrap();
+        assert_ne!(
+            first,
+            source_dependency_signature(&raw.to_string_lossy(), Some(&sooc))
+        );
+        std::fs::remove_file(&sooc).unwrap();
+        assert_ne!(
+            first,
+            source_dependency_signature(&raw.to_string_lossy(), Some(&sooc))
+        );
+    }
 }

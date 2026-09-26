@@ -270,6 +270,10 @@ export interface ViewerStore {
   goTo: (index: number) => void;
   /** 只切换「当前照片」，保留缩放与平移（对比画幅切焦点用）。 */
   focus: (index: number) => void;
+  /** 同一张的显示配置已改变：保留视口变换，重取屏幕档。 */
+  reloadCurrent: () => void;
+  /** 磁盘源变化：保留无关比较图，失效这些路径的派生 URL。 */
+  invalidatePaths: (paths: readonly string[]) => void;
   setViewport: (size: ViewportSize) => void;
   setNatural: (size: NaturalSize) => void;
   zoomBy: (factor: number, anchor?: { x: number; y: number }) => void;
@@ -308,7 +312,7 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
 
   /** 换图时的作废令牌：迟到的结果直接丢掉（换得快时尤其重要） */
   let generation = 0;
-  let imageUrlsGeneration = 0;
+  let imageUrlsTicket = 0;
   /**
    * 在途的多图请求：key → `{ ticket, task }`。
    *
@@ -371,13 +375,13 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
     if (imageUrls().has(key)) return Promise.resolve();
     const pending = pendingImageUrls.get(key);
     if (pending !== undefined) return pending.task;
-    const ticket = imageUrlsGeneration;
+    const ticket = ++imageUrlsTicket;
     const task = (async () => {
       try {
         const bytes = await deps.loadScreen(photo.path);
-        if (bytes === null || ticket !== imageUrlsGeneration) return;
+        if (bytes === null || pendingImageUrls.get(key)?.ticket !== ticket) return;
         const url = makeUrl(bytes);
-        if (ticket !== imageUrlsGeneration) {
+        if (pendingImageUrls.get(key)?.ticket !== ticket) {
           revokeUrl(url);
           return;
         }
@@ -407,12 +411,16 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
     return task;
   }
 
-  function clearImageUrls(): void {
-    imageUrlsGeneration += 1;
-    pendingImageUrls.clear();
+  function clearImageUrls(paths?: ReadonlySet<string>): void {
+    for (const key of pendingImageUrls.keys()) {
+      if (paths === undefined || paths.has(key.slice(key.indexOf("\u0000") + 1))) pendingImageUrls.delete(key);
+    }
     const previous = imageUrls();
-    setImageUrls(new Map());
-    for (const cached of previous.values()) revokeUrl(cached.url);
+    const next = new Map(previous);
+    for (const [key, cached] of previous) {
+      if (paths === undefined || paths.has(cached.path)) { next.delete(key); revokeUrl(cached.url); }
+    }
+    setImageUrls(next);
   }
 
   /** 处在适配状态时，任何尺寸变化都要重新算适配倍率 */
@@ -425,7 +433,7 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
   }
 
   /** 取图：小图先上、大图再换（渐进），换图期间旧图留着不闪空 */
-  async function loadFor(photo: ViewerPhoto, ticket: number): Promise<void> {
+  async function loadFor(photo: ViewerPhoto, ticket: number, keepPrevious = false): Promise<void> {
     setImageStatus("loading");
     setSharp(false);
     setOverviewStatus("loading");
@@ -437,7 +445,7 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
      * 预载写下的 URL 只有对比视图读（`imageUrlFor`），单图路径根本不吃，
      * 于是「预载了还要等一秒多」（人类 2026-09-23 报的）。
      */
-    const prefetched = takeCachedImageUrl(photo);
+    const prefetched = keepPrevious ? null : takeCachedImageUrl(photo);
     if (prefetched !== null) {
       if (ticket !== generation) {
         revokeUrl(prefetched);
@@ -454,7 +462,7 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
      * ② 这张正在预载：**等它**，别发第二个请求。
      * RAW 解码在 Rust 侧是串行的单例 —— 重复请求只会排在自己后面，越等越久。
      */
-    const pending = pendingImageUrls.get(imageKey(photo));
+    const pending = keepPrevious ? undefined : pendingImageUrls.get(imageKey(photo));
     if (pending !== undefined) {
       await pending.task;
       if (ticket !== generation) return;
@@ -469,7 +477,7 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
       // 预载没成（取不到 / 已被作废）：落回下面的常规路径再试一次
     }
 
-    if (deps.loadThumb !== undefined) {
+    if (!keepPrevious && deps.loadThumb !== undefined) {
       try {
         const bytes = await deps.loadThumb(photo.path);
         if (ticket !== generation) return;
@@ -575,6 +583,30 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
       natural: photo.natural ?? prev.natural,
     }));
     void loadFor(photo, ticket);
+  }
+
+  function invalidatePaths(paths: readonly string[]): void {
+    const affected = new Set(paths);
+    const photo = current();
+    if (![...imageUrls().values()].some((entry) => affected.has(entry.path))
+      && ![...pendingImageUrls.keys()].some((key) => affected.has(key.slice(key.indexOf("\u0000") + 1)))
+      && (photo === null || !affected.has(photo.path))) return;
+    const tracked = new Set([...imageUrls().keys(), ...pendingImageUrls.keys()]);
+    clearImageUrls(affected);
+    // 比较视图按照片集合变化取图，源内容变化不改变该集合；在同一 store 内重取已跟踪的画幅。
+    for (const entry of photos()) {
+      if (affected.has(entry.path) && tracked.has(imageKey(entry)) && imageKey(entry) !== (photo === null ? null : imageKey(photo))) {
+        void ensureImage(entry);
+      }
+    }
+    if (photo !== null && affected.has(photo.path)) {
+      generation += 1;
+      void loadFor(photo, generation, true);
+    }
+  }
+  function reloadCurrent(): void {
+    const photo = current();
+    if (photo !== null) invalidatePaths([photo.path]);
   }
 
   function setViewport(size: ViewportSize): void {
@@ -687,6 +719,8 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
     close,
     goTo,
     focus,
+    reloadCurrent,
+    invalidatePaths,
     next: () => goTo(index() + 1),
     prev: () => goTo(index() - 1),
     setViewport,

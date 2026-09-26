@@ -12,7 +12,7 @@
 //!   再加上落盘 PNG（人也能看）。
 //!
 //! 它验的是**判定得了的**那部分：坐标变换与管线；人眼才判的那部分（透明合成、
-//! 1:1 锐利度、跨屏）留给 `plans/M2-W1-windows-gpu.md`。
+//! 1:1 锐利度、跨屏）留给 `specs/M2-W1-windows-gpu.md`。
 
 use std::path::PathBuf;
 

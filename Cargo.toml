@@ -49,9 +49,8 @@ trash = "5.2"
 #
 # `webp`：M3-W6c 的 LUT 封面需要 —— ① 人类 2026-09-25 给的内置样片本身就是 WebP；
 # ② 用户自带的演示图按规格也在支持列表里（`design/editor.md` §3.1.1）。
-# 纯 Rust（`image-webp`），没有系统库。
-# ⚠️ 但 `image` 的 WebP 编码器**只有无损**（`codecs/webp/encoder.rs` 的源码注释明说
-# “有损要 libwebp”）—— 封面要的“质量 80”是有损，方案待定（会动到新依赖，见 `PLAN.md` M3-W6c）。
+# WebP 解码走纯 Rust（`image-webp`）；有损封面编码单独使用 `webp` / 静态 libwebp。
+# `image` 只支持无损 WebP；2026-09-26 替换会严重丢失色度的 webp-rust，保留封面质量 80。
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "tiff", "avif", "avif-native", "webp", "rayon"] }
 # 渲染（M2-W1 spike；AGENTS.md §6.1 定的方案 B = webview 挖洞 + wgpu 直绘到窗口表面）。
 # 版本 30.0.1：**上游最新**。AGENTS.md §3 记着 RapidRAW 曾把 wgpu 降到 29.0 以规避

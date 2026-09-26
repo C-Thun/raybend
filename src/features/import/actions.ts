@@ -6,6 +6,7 @@
  * 所以它同样把自己那份动作注册进来，命令通过这里取用。
  */
 
+import { createActionSlot } from "../../lib/action-slot.ts";
 import type { FullscreenTarget } from "../../lib/fullscreen-target.ts";
 
 export interface ImportActions {
@@ -31,12 +32,12 @@ export interface ImportActions {
   fullscreenTarget: () => FullscreenTarget | null;
 }
 
-let current: ImportActions | null = null;
+const slot = createActionSlot<ImportActions>();
 
 export function registerImportActions(actions: ImportActions | null): void {
-  current = actions;
+  slot.register(actions);
 }
 
 export function importActions(): ImportActions | null {
-  return current;
+  return slot.read();
 }

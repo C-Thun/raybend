@@ -1,5 +1,5 @@
 /**
- * 胶片带（`BROWSE.md` §5.5、`design/browse.md` §2.5、`plans/M2-W2.md` 2.1）。
+ * 胶片带（`BROWSE.md` §5.5、`design/browse.md` §2.5、`specs/M2-W2.md` 2.1）。
  *
  * ```text
  * ┌───────────────────────────────────────────────────────────────┐  tile 高 + 上下各 8px
@@ -76,7 +76,7 @@ export interface FilmStripProps {
   thumbs: ThumbQueue;
   /**
    * **只显示这几张**（按给定顺序）—— 对比态下再按一次回车进入的那种状态
-   * （`BROWSE.md` §5.5、`plans/M2-W2.md` 2.4）。不传 = 显示全部。
+   * （`BROWSE.md` §5.5、`specs/M2-W2.md` 2.4）。不传 = 显示全部。
    *
    * 进入这个状态时：整条胶片带加 **1px 主色细边框**，而且**即使不按 Ctrl**，
    * 点一张也是「带 Ctrl 的效果」（点什么就把什么移出对比）。

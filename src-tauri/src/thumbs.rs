@@ -1,4 +1,4 @@
-//! 缩略图命令：**导入工作区里还没入库的源文件**也要能出图（`plans/M1-5.md` §3.1）。
+//! 缩略图命令：**导入工作区里还没入库的源文件**也要能出图（`specs/M1-5.md` §3.1）。
 //!
 //! # 为什么单独一个缓存库
 //!
@@ -21,11 +21,12 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use raybend::display::{self, FullCache, ImagePurpose, ImageRequest, DEFAULT_BINS};
+use raybend::display::{self, DEFAULT_BINS, FullCache, ImagePurpose, ImageRequest};
 use raybend::store::develop::IssueChoice;
 use raybend::store::time;
-use raybend::thumbnail::render::{PIPELINE_VERSION, render_file_with_edit};
-use raybend::thumbnail::{SizeClass, ThumbsDb, render_now, render_now_with_edit};
+use raybend::thumbnail::render::PIPELINE_VERSION;
+use raybend::thumbnail::worker::render_now_with_edit_and_lut;
+use raybend::thumbnail::{SizeClass, ThumbsDb, render_now};
 use tauri::{AppHandle, Manager, Runtime};
 
 use crate::develop::{self, ResolvedAsset};
@@ -47,7 +48,7 @@ pub struct SourcesThumbs {
 
 impl SourcesThumbs {
     /// 取（必要时打开）缓存库。
-    fn get(&self, dir: &Path, now_ms: i64) -> Result<Arc<ThumbsDb>, String> {
+    pub(crate) fn get(&self, dir: &Path, now_ms: i64) -> Result<Arc<ThumbsDb>, String> {
         let mut guard = self.inner.lock().map_err(|_| "内部锁已损坏".to_string())?;
         if let Some(db) = guard.as_ref() {
             return Ok(Arc::clone(db));
@@ -59,8 +60,10 @@ impl SourcesThumbs {
 }
 
 /// 源文件缩略图的存放目录（`<app data>/cache/_sources/`）。
-fn sources_cache_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
-    Ok(crate::db::data_dir(app)?.join("cache").join(SOURCES_CACHE_DIR))
+pub(crate) fn sources_cache_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
+    Ok(crate::db::data_dir(app)?
+        .join("cache")
+        .join(SOURCES_CACHE_DIR))
 }
 
 /// 取一张缩略图的字节。
@@ -97,13 +100,19 @@ pub async fn thumb_get<R: Runtime>(
             )
         });
         let bytes = match &edit {
-            Some((_, stack, source)) => render_now_with_edit(
+            Some((_, stack, source)) => render_now_with_edit_and_lut(
                 &db,
                 source,
                 size,
                 time::now_millis(),
                 Some(stack),
                 lens.as_ref(),
+                stack
+                    .lut_id
+                    .as_deref()
+                    .filter(|_| stack.lut_enabled == Some(true))
+                    .and_then(|id| crate::lut::resolve(&handle, id).ok())
+                    .as_deref(),
             ),
             None => render_now(&db, Path::new(&path), size, time::now_millis()),
         }
@@ -121,7 +130,14 @@ pub async fn thumb_get<R: Runtime>(
 fn edited_source<R: Runtime>(
     app: &AppHandle<R>,
     path: &str,
-) -> Result<Option<(ResolvedAsset, raybend::store::develop::DevelopStack, PathBuf)>, String> {
+) -> Result<
+    Option<(
+        ResolvedAsset,
+        raybend::store::develop::DevelopStack,
+        PathBuf,
+    )>,
+    String,
+> {
     let Some(asset) = develop::resolve_asset(app, Path::new(path)) else {
         return Ok(None);
     };
@@ -132,7 +148,10 @@ fn edited_source<R: Runtime>(
     let source = develop::source_path_of(app, &asset, stack.source_base)
         .ok_or_else(|| format!("latest 的 {} 源文件不存在", stack.source_base.as_str()))?;
     if raybend::store::develop::EditBase::of_file(&source) != stack.source_base {
-        return Err(format!("latest 的 {} 源文件不存在", stack.source_base.as_str()));
+        return Err(format!(
+            "latest 的 {} 源文件不存在",
+            stack.source_base.as_str()
+        ));
     }
     Ok(Some((asset, stack, source)))
 }
@@ -152,6 +171,14 @@ pub(crate) fn render_latest_cached<R: Runtime>(
     asset: &ResolvedAsset,
     stack: &raybend::store::develop::DevelopStack,
 ) -> Result<Vec<u8>, String> {
+    render_profile_cached(app, asset, stack, "latest")
+}
+
+/// 明确指定稿的显示缓存；导出画廊不改浏览/编辑的 latest 选择。
+pub(crate) fn render_profile_cached<R: Runtime>(
+    app: &AppHandle<R>, asset: &ResolvedAsset,
+    stack: &raybend::store::develop::DevelopStack, variant: &str,
+) -> Result<Vec<u8>, String> {
     let cache = FullCache::open(&asset.root).map_err(|e| e.to_string())?;
     let full = develop::source_path_of(app, asset, stack.source_base)
         .ok_or_else(|| format!("latest 的 {} 源文件不存在", stack.source_base.as_str()))?;
@@ -159,7 +186,9 @@ pub(crate) fn render_latest_cached<R: Runtime>(
     if raybend::store::develop::EditBase::of_file(&full) != base {
         return Err(format!("latest 的 {} 源文件不存在", base.as_str()));
     }
-    if let Some(bytes) = cache.read(asset.asset_id, "latest", base, PIPELINE_VERSION) {
+    let signature = raybend::media::source::source_signature(&full).map_err(|e| e.to_string())?;
+    let name = FullCache::source_name(variant, &signature);
+    if let Some(bytes) = cache.read(asset.asset_id, &name, base, PIPELINE_VERSION) {
         return Ok(bytes);
     }
     // 镜头配置文件（调用方解析 —— 渲染层不认识数据库）
@@ -170,17 +199,27 @@ pub(crate) fn render_latest_cached<R: Runtime>(
         stack.lens_profile.as_deref(),
         stack.lens_enabled,
     );
-    let thumb = render_file_with_edit(&full, SizeClass::Screen, Some(stack), lens.as_ref())
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("解不开这张照片：{}", full.display()))?;
-    if let Err(error) = cache.write(asset.asset_id, "latest", base, PIPELINE_VERSION, &thumb.data)
-    {
+    let lut = stack
+        .lut_id
+        .as_deref()
+        .filter(|_| stack.lut_enabled == Some(true))
+        .map(|id| crate::lut::resolve(app, id)).transpose()?;
+    let thumb = raybend::thumbnail::render::render_file_with_edit_and_lut(
+        &full,
+        SizeClass::Screen,
+        Some(stack),
+        lens.as_ref(),
+        lut.as_deref(),
+    )
+    .map_err(|e| e.to_string())?
+    .ok_or_else(|| format!("解不开这张照片：{}", full.display()))?;
+    if let Err(error) = cache.write(asset.asset_id, &name, base, PIPELINE_VERSION, &thumb.data) {
         eprintln!("[develop] 大图缓存写失败（不影响显示）：{error}");
     }
     Ok(thumb.data)
 }
 
-/// **统一取图口**（`crates/raybend/src/display`，口径见 `plans/M2-W2.md` §2.1）。
+/// **统一取图口**（`crates/raybend/src/display`，口径见 `specs/M2-W2.md` §2.1）。
 ///
 /// 与 `thumb_get` 的区别：那个是「给我一张源文件的网格/胶片带小图」的专用命令；
 /// 这个是 **view 与缩略图共用的总入口** —— 调用方只说「哪张、要多大、有没有编辑」，
@@ -200,8 +239,7 @@ pub async fn view_image<R: Runtime>(
     purpose: Option<String>,
 ) -> Result<tauri::ipc::Response, String> {
     let text = purpose.as_deref().unwrap_or("screen");
-    let purpose = ImagePurpose::parse(text)
-        .ok_or_else(|| format!("未知的取图用途：{text}"))?;
+    let purpose = ImagePurpose::parse(text).ok_or_else(|| format!("未知的取图用途：{text}"))?;
 
     /*
      * **编辑过的照片：非编辑器里也看编辑结果**（人类 2026-09-24 定的口径）。
@@ -240,7 +278,7 @@ pub async fn view_image<R: Runtime>(
     Ok(tauri::ipc::Response::new(bytes))
 }
 
-/// 看图态右栏的**直方图**（24 柱 RGB 合成；`plans/M2-W2.md` 1.6）。
+/// 看图态右栏的**直方图**（24 柱 RGB 合成；`specs/M2-W2.md` 1.6）。
 ///
 /// 统计在 Rust 侧做（`AGENTS.md` §6.1 的红线：前端不碰像素）——
 /// 前端只拿到 86 个浮点采样去画曲线。取的是**像素口**的 `Screen` 档（长边 1920）RGB 像素，

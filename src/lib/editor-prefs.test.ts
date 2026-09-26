@@ -5,6 +5,9 @@ import test from "node:test";
 import {
   DEFAULT_EDITOR_PREFS,
   EDITOR_PREFS_KEY,
+  LEGACY_EDITOR_PREFS_KEY,
+  pendingLegacyLutCategories,
+  markLegacyLutCategoriesImported,
   migrateEditorPrefs,
   readEditorPrefs,
   sanitizeEditorPrefs,
@@ -27,7 +30,7 @@ function fakeStorage(seed: Record<string, string> = {}): EditorPrefsStorage & {
 }
 
 test("存储键是版本化的（AGENTS.md §2.16）", () => {
-  assert.equal(EDITOR_PREFS_KEY, "raybend.editor.v1");
+  assert.equal(EDITOR_PREFS_KEY, "raybend.editor.v2");
 });
 
 test("默认值：面板默认开、没有分类", () => {
@@ -63,4 +66,15 @@ test("写失败不抛（隐私模式 / 配额满不该让面板开关崩掉）",
     },
   };
   assert.doesNotThrow(() => writeEditorPrefs(DEFAULT_EDITOR_PREFS, broken));
+});
+
+
+test("v1 分类升级 v2 后只上送一次 app.db，成功标记后不复活旧分类", () => {
+  const old = { lutOpen: false, lutCategories: [{ id: "film", name: "胶片", entries: [] }] };
+  const storage = fakeStorage({ [LEGACY_EDITOR_PREFS_KEY]: JSON.stringify(old) });
+  assert.deepEqual(readEditorPrefs(storage), old);
+  assert.equal(storage.written[EDITOR_PREFS_KEY], JSON.stringify(old));
+  assert.deepEqual(pendingLegacyLutCategories(storage), [{ id: "film", name: "胶片" }]);
+  markLegacyLutCategoriesImported(storage);
+  assert.deepEqual(pendingLegacyLutCategories(storage), []);
 });

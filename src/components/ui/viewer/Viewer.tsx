@@ -92,7 +92,7 @@ export function Viewer(props: ViewerProps) {
   };
 
   /**
-   * 键盘交给**命令分发器**（`plans/M2-W3.md` §2.5 步骤 3）：
+   * 键盘交给**命令分发器**（`specs/M2-W3.md` §2.5 步骤 3）：
    * 这里只把「当前挂载的这份实现」注册进 `viewer/actions.ts`，
    * 命令（`viewer.close` / `viewer.zoomIn` / `viewer.fit` …）通过它取用。
    *

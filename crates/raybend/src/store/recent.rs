@@ -20,7 +20,7 @@ use super::path_semantics::PathForms;
 
 /// 默认保留条数（用户要求「最近 50 条」）。
 ///
-/// 上限本身可以是配置项（`plans/M1-5.md` §8）：调用方从设置里读到值就传进来，
+/// 上限本身可以是配置项（`specs/M1-5.md` §8）：调用方从设置里读到值就传进来，
 /// 读不到就用它。**这里不写死上限**，只提供 [`prune`]。
 pub const DEFAULT_LIMIT: usize = 50;
 

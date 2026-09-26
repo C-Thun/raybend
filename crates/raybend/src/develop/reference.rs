@@ -20,6 +20,24 @@ pub struct ReferenceFrame {
     pub height: u32,
     pub rgb: Vec<u8>,
 }
+impl ReferenceFrame {
+    /// 已显影的定稿预览可直接作为对比参照；保留唯一帧 ID 供 GPU 纹理缓存。
+    pub fn from_rgb(width: u32, height: u32, rgb: Vec<u8>) -> Option<Self> {
+        let expected = usize::try_from(width)
+            .ok()?
+            .checked_mul(usize::try_from(height).ok()?)?
+            .checked_mul(3)?;
+        if width == 0 || height == 0 || rgb.len() != expected {
+            return None;
+        }
+        Some(Self {
+            id: NEXT_FRAME.fetch_add(1, Ordering::Relaxed),
+            width,
+            height,
+            rgb,
+        })
+    }
+}
 #[derive(Default)]
 pub struct ReferenceCache {
     cached: Option<(
@@ -104,6 +122,18 @@ mod tests {
     use super::*;
     use crate::develop::lens::ManualLens;
     #[test]
+    fn named_issue_reference_validates_dimensions_and_uses_unique_ids() {
+        assert!(ReferenceFrame::from_rgb(0, 1, vec![]).is_none());
+        assert!(ReferenceFrame::from_rgb(1, 0, vec![]).is_none());
+        assert!(ReferenceFrame::from_rgb(1, 1, vec![1, 2]).is_none());
+        assert!(ReferenceFrame::from_rgb(u32::MAX, u32::MAX, vec![]).is_none());
+        let first = ReferenceFrame::from_rgb(1, 1, vec![1, 2, 3]).expect("valid RGB");
+        let second = ReferenceFrame::from_rgb(1, 1, vec![1, 2, 3]).expect("another valid RGB");
+        assert_ne!(first.id, second.id);
+        assert_eq!(first.rgb, [1, 2, 3]);
+    }
+
+    #[test]
     fn paired_sooc_pixels_are_used_and_cached_with_geometry() {
         use image::{ImageFormat, Rgb, RgbImage};
         let path = std::env::temp_dir().join(format!("raybend-w5-sooc-{}.png", std::process::id()));
@@ -124,7 +154,9 @@ mod tests {
                 y: 0.0,
                 width: 0.5,
                 height: 1.0,
-            }), crop_ratio: None };
+            }),
+            crop_ratio: None,
+        };
         let frame = cache.get_sooc(&path, Some(crop)).expect("SOOC 帧");
         assert_eq!((frame.width, frame.height), (4, 4));
         assert!(frame.rgb.chunks_exact(3).all(|pixel| pixel == [200, 0, 0]));

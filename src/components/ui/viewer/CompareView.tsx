@@ -1,5 +1,5 @@
 /**
- * 对比视图（`BROWSE.md` §5.7、`plans/M2-W2.md` 2.2–2.3）。
+ * 对比视图（`BROWSE.md` §5.7、`specs/M2-W2.md` 2.2–2.3）。
  *
  * ## 一张**虚拟画布**，几个窗口（人类 2026-09-20 定的新方案）
  *
@@ -381,7 +381,7 @@ export function CompareView(props: CompareViewProps): JSX.Element {
   onCleanup(wheel.dispose);
 
   /*
-   * 键盘交给**命令分发器**（`plans/M2-W3.md` §2.5 步骤 3）：对比态的缩放/适配与单张看图
+   * 键盘交给**命令分发器**（`specs/M2-W3.md` §2.5 步骤 3）：对比态的缩放/适配与单张看图
    * 是**同一条命令**（`viewer.zoomIn` / `viewer.fit` …），只是实现不同 ——
    * 这里把对比自己那份（逐幅画幅的百分比同步）注册进 `viewer/actions.ts`。
    * `Esc`（返回）与 `Tab`（四态）由工作区那边注册的动作负责。

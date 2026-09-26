@@ -7,8 +7,10 @@
 //! M0-2 的渲染可行性验证会在这里另开一个 `spike-viewport` 调试窗口，
 //! 主窗口保持不透明、不受影响。
 
+pub mod base_curve;
 pub mod browse;
 pub mod db;
+mod desktop_behavior;
 /// 编辑栈的落库命令（M3-W3：读 / 落库 / 重置）。
 pub mod develop;
 /// 编辑视口：洞口契约（M3-W1）+ 渲染线程（M3-W2）。
@@ -16,7 +18,10 @@ pub mod editor;
 /// 全屏看图（另开无边框窗口，沉浸式无 UI）。
 pub mod fullscreen;
 mod import;
+pub mod issues;
+pub mod export;
 pub mod lens;
+pub mod lut;
 mod migration;
 /// 窗口 ↔ wgpu 的最小胶水（取裸句柄 / 读客户区尺寸）——spike 与编辑视口共用这一份。
 mod render_window;
@@ -74,7 +79,9 @@ fn remaining_until_min_visible(
     now: std::time::Instant,
 ) -> std::time::Duration {
     match shown_at {
-        Some(shown_at) => SPLASH_MIN_VISIBLE.saturating_sub(now.saturating_duration_since(shown_at)),
+        Some(shown_at) => {
+            SPLASH_MIN_VISIBLE.saturating_sub(now.saturating_duration_since(shown_at))
+        }
         None => std::time::Duration::ZERO,
     }
 }
@@ -82,7 +89,7 @@ fn remaining_until_min_visible(
 /// 命令行标记：带上它启动就顺手把 spike 窗口开出来。
 ///
 /// 为什么需要它：spike 窗口原先只能在**开发页**（`src/dev/SpikeViewport.tsx` 的按钮）里打开，
-/// 而打包版根本够不着开发页 —— 可「人类在真机上照 `plans/M2-W1-windows-gpu.md` 逐项验证 GPU」
+/// 而打包版根本够不着开发页 —— 可「人类在真机上照 `specs/M2-W1-windows-gpu.md` 逐项验证 GPU」
 /// 这条路必须能一键起窗口。`scripts/spike-win.mjs` 就靠它。
 const SPIKE_ARG: &str = "--spike=1";
 
@@ -175,11 +182,12 @@ fn reveal_main_after_splash_min(app: &tauri::AppHandle) {
 /// Tauri 运行时初始化失败时 panic —— 此时进程已无法提供任何功能。
 pub fn run() {
     tauri::Builder::default()
+        .plugin(desktop_behavior::init())
         // 目录选择器（建库弹窗的「浏览…」）。官方插件：Windows 走原生对话框。
         .plugin(tauri_plugin_dialog::init())
         .manage(db::DbState::default())
         .manage(thumbs::SourcesThumbs::default())
-        // 浏览过的目录的元信息缓存（会话级内存，不落盘 —— 见 plans/photo-meta-and-tile-display.md）
+        // 浏览过的目录的元信息缓存（会话级内存，不落盘 —— 见 specs/photo-meta-and-tile-display.md）
         .manage(source::SourcesMetaCache::default())
         // ⚠️ **导入批次表必须注册**：漏了它，`app.state::<ImportBatches>()` 一调用就 panic
         // （`state() called before manage()`），而且**编译期不报**。真机踩过：
@@ -257,13 +265,29 @@ pub fn run() {
             editor::editor_set_photo,
             editor::editor_set_params,
             lens::lens_match,
+            base_curve::base_curve_profiles,
+            base_curve::base_curve_rename,
+            base_curve::base_curve_auto_adjust,
             editor::editor_viewport_intent,
+            editor::editor_set_reference_issue,
             editor::editor_confirm_tool,
             editor::editor_render_state,
             // ── 编辑栈落库（M3-W3：松手才写库）──
+            export::export_variants,
+            export::export_snapshots,
+            export::export_preset_validate,
+            export::export_variant_image,
+            issues::issue_library,
+            issues::issue_create,
+            issues::issue_delete,
+            issues::issue_thumb_get,
+            lut::lut_library,
+            lut::lut_create_category,
+            lut::lut_import_directory,
+            lut::lut_cover,
+            lut::lut_hide,
             develop::develop_get,
             develop::develop_commit,
-            develop::develop_reset,
             develop::develop_edit_target,
             develop::develop_preview_refresh,
             // ── 全屏看图 ──
@@ -342,7 +366,7 @@ pub fn run() {
                     reveal_main(&handle);
                 });
             }
-            // 渲染 spike 的调试窗口（`plans/M2-W1-windows-gpu.md` 那张清单要用它）。
+            // 渲染 spike 的调试窗口（`specs/M2-W1-windows-gpu.md` 那张清单要用它）。
             // 位置放在闪屏逻辑**之后**：它是调试设施，正常启动路径不该受它影响。
             //
             // **成功也记一行**：这张日志是「窗口到底开没开」的**唯一外部证据** ——
@@ -378,18 +402,39 @@ mod tests {
         }
 
         // 两路各自都能单独触发
-        assert!(spike_requested_from(&args(&["raybend-desktop.exe", "--spike=1"]), None));
-        assert!(spike_requested_from(&args(&["raybend-desktop.exe"]), Some("1")));
-        assert!(spike_requested_from(&args(&["raybend-desktop.exe"]), Some("true")));
+        assert!(spike_requested_from(
+            &args(&["raybend-desktop.exe", "--spike=1"]),
+            None
+        ));
+        assert!(spike_requested_from(
+            &args(&["raybend-desktop.exe"]),
+            Some("1")
+        ));
+        assert!(spike_requested_from(
+            &args(&["raybend-desktop.exe"]),
+            Some("true")
+        ));
 
         // 不给标记就不开
         assert!(!spike_requested_from(&args(&["raybend-desktop.exe"]), None));
-        assert!(!spike_requested_from(&args(&["raybend-desktop.exe"]), Some("")));
-        assert!(!spike_requested_from(&args(&["raybend-desktop.exe"]), Some("0")));
+        assert!(!spike_requested_from(
+            &args(&["raybend-desktop.exe"]),
+            Some("")
+        ));
+        assert!(!spike_requested_from(
+            &args(&["raybend-desktop.exe"]),
+            Some("0")
+        ));
 
         // 形近参数不能误判（与 worker 标记那条测试同一个教训）
-        assert!(!spike_requested_from(&args(&["raybend-desktop.exe", "--spike"]), None));
-        assert!(!spike_requested_from(&args(&["raybend-desktop.exe", "--spike=0"]), None));
+        assert!(!spike_requested_from(
+            &args(&["raybend-desktop.exe", "--spike"]),
+            None
+        ));
+        assert!(!spike_requested_from(
+            &args(&["raybend-desktop.exe", "--spike=0"]),
+            None
+        ));
         assert!(!spike_requested_from(
             &args(&["raybend-desktop.exe", "--raybend-raw-worker"]),
             None

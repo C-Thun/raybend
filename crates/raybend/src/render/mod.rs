@@ -38,11 +38,12 @@ pub mod wavelet;
 
 pub use color::Srgb8;
 pub use gpu::{
-    GpuContext, GpuError, OffscreenRenderer, RawHandles, RenderOutcome, SurfaceComposition, SurfaceDetails,
+    GpuContext, GpuError, OffscreenRenderer, RawHandles, RenderOutcome, SurfaceComposition,
+    SurfaceDetails,
 };
 pub use image::RenderImage;
 pub use presentation::PresentationAdapter;
 pub use stats::{FrameStats, SpikeReport};
 pub use supervisor::{RestartPolicy, Verdict};
-pub use tier::{tier_for, tier_for_params, ImageTier};
+pub use tier::{ImageTier, tier_for, tier_for_params};
 pub use viewport::{AlphaMode, ClipRect, FitMode, Viewport};

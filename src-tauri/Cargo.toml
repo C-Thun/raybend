@@ -40,10 +40,15 @@ raybend.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tauri-plugin-dialog = "2.7.3"
+image.workspace = true
+
+# 与当前 Tauri 2.11 的 WebView2 COM 类型一致；依赖已在锁文件里，无额外 DLL。
+[target.'cfg(windows)'.dependencies]
+webview2-com = "=0.38.2"
+windows-core = "=0.61.2"
 
 [dev-dependencies]
-# 仅测试用：过渡帧那几条要真文件（缓存 AVIF / 位图）——与 `crates/raybend` 同一个包
-image.workspace = true
+rusqlite.workspace = true
 tempfile.workspace = true
 
 [lints]

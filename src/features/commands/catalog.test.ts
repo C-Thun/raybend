@@ -88,3 +88,25 @@ test('自动调整命令复用编辑动作且默认不占热键', () => {
   command.run();
   assert.equal(applied, 1);
 });
+
+test("重置命令共享可用性：无调整禁用，有手动或自动调整可用，无默认键", () => {
+  let available = false;
+  let calls = 0;
+  const deps = { editor: { active: () => true, hasPhoto: () => true, canReset: () => available, resetDevelop: () => calls++ } } as unknown as CommandDeps;
+  const command = createCommandRegistry(deps).find((item) => item.id === "editor.develop.reset")!;
+  assert.equal(command.defaultKey, undefined);
+  assert.equal(command.when?.(), false);
+  available = true;
+  assert.equal(command.when?.(), true);
+  command.run();
+  assert.equal(calls, 1);
+});
+
+test("导出命令默认 Enter 无冲突，Esc/Ctrl+A 复用取消和全选，切工作流失效",()=>{
+ let flow:CommandFlow="export";const calls:string[]=[];const deps={flow:()=>flow,viewer:{viewing:()=>false},export:{hasSelection:()=>true,canEnqueue:()=>true,enqueue:()=>calls.push("enqueue"),clearSelection:()=>calls.push("clear"),selectAll:()=>calls.push("all"),reset:()=>calls.push("reset"),canReset:()=>true,stopAll:()=>calls.push("stop"),canStop:()=>false,cycleScope:()=>calls.push("scope"),save:()=>calls.push("save")}} as unknown as CommandDeps;
+ const commands=createCommandRegistry(deps);for(const [id,key] of [["export.enqueue","Enter"],["edit.clearSelection","Esc"],["edit.selectAll","Mod+A"]]){const command=commands.find(c=>c.id===id)!;assert.equal(command.defaultKey,key);assert.equal(command.when?.(),true);command.run();}
+ assert.deepEqual(calls,["enqueue","clear","all"]);assert.equal(commands.find(c=>c.id==="export.stopAll")?.enabled?.(),false);
+ const conflicts=detectConflicts(commands,{});assert.deepEqual(conflicts.filter(issue=>issue.blocking&&issue.commandIds.some(id=>id.startsWith("export."))),[]);
+ for(const id of ["export.reset","export.stopAll","export.scope","export.save"])assert.equal(commands.find(c=>c.id===id)?.defaultKey,undefined);
+ flow="browse";assert.equal(commands.find(c=>c.id==="export.enqueue")?.when?.(),false);
+});

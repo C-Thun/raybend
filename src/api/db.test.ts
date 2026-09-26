@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   EMPTY_FILE_EXIF,
+  catalogChangeFromNotice,
   getBooleanSetting,
   getNumberSetting,
   getSetting,
@@ -99,4 +100,23 @@ test("toBytes 对认不出的东西返回 null（界面显示占位图，不崩�
 test("toBytes 处理空字节（合法：一张空图不代表出错）", () => {
   assert.deepEqual(toBytes(new ArrayBuffer(0)), new Uint8Array(0));
   assert.deepEqual(toBytes([]), new Uint8Array(0));
+});
+
+
+test("目录变更事件与图片队列使用一致的 Windows / UNC / POSIX 路径", () => {
+  for (const [root, expected] of [
+    ["C:\\照片\\库", "C:\\照片\\库\\photos\\中文 Café.JPG"],
+    ["C:/照片/库", "C:/照片/库/photos/中文 Café.JPG"],
+    ["\\\\NAS\\共享\\", "\\\\NAS\\共享\\photos\\中文 Café.JPG"],
+    ["/mnt/照片", "/mnt/照片/photos/中文 Café.JPG"],
+  ]) {
+    const change = catalogChangeFromNotice({
+      root, repositoryId: "库", scopePath: "photos", assetIds: [7],
+      relativePaths: ["photos/中文 Café.JPG"],
+    });
+    assert.deepEqual(change, {repositoryId: "库", scopePath: "photos", assetIds: [7], paths: [expected]});
+  }
+  const nfd = "Cafe\u0301.JPG";
+  assert.deepEqual(catalogChangeFromNotice({root: "/库", repositoryId: "库", scopePath: "photos", assetIds: [], relativePaths: [`photos/${nfd}`]}).paths, [`/库/photos/${nfd}`]);
+  assert.deepEqual(catalogChangeFromNotice({root: "C:\\库", repositoryId: "库", scopePath: "photos", assetIds: [], relativePaths: []}).paths, []);
 });

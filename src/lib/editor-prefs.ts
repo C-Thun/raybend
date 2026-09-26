@@ -2,8 +2,8 @@
  * 编辑工作区的**设备级偏好**（`localStorage`）。
  *
  * 口径（`AGENTS.md` §2.16）：设备级偏好必须走**版本化 key + 显式一次性迁移**，
- * 迁移逻辑与测试就放在偏好自己的模块里。现在的版本是 `v1`，还没有旧版本要迁 ——
- * 但 `migrateEditorPrefs` 这条通道先立好：以后加 `v2` 时只在这一个文件里加一段。
+ * 迁移逻辑与测试就放在偏好自己的模块里。现在的版本是 `v2`，旧版 LUT 分类需一次性转入 app.db ——
+ * `v1` 的 LUT 分类首次成功接入后导入 `app.db`，`v2` 只保留面板开关作为设备偏好。
  *
  * # 为什么 LUT 分类是**设备级**而不是库级
  *
@@ -14,8 +14,7 @@
  * # 存了什么
  *
  * * `lutOpen` —— LUT 面板开着没有（`design/editor.md` §3.1：人类 2026-09-23 定「默认开 + 持久化」）；
- * * `lutCategories` —— 一级分类（**只有一级**，`.pd` 明确）+ 每个分类里的 LUT 条目。
- *   W1 只用到分类本身（LUT 文件导入在 W4），但结构先按最终形状定，免得 W4 再迁一次。
+ * * `lutCategories` —— 仅用于读取 `v1` 旧分类并迁入 `app.db`；新分类以数据库为真源。
  */
 
 import {
@@ -26,16 +25,17 @@ import {
 
 export { LUT_NAME_MAX };
 
-/** 当前存储键（**版本化**：以后加字段就升 v2 并写一段迁移）。 */
-export const EDITOR_PREFS_KEY = "raybend.editor.v1";
+/** 当前存储键（版本化；以后改结构继续升版本并显式迁移）。 */
+export const EDITOR_PREFS_KEY = "raybend.editor.v2";
+export const LEGACY_EDITOR_PREFS_KEY = "raybend.editor.v1";
+const LUT_CATEGORY_IMPORT_KEY = "raybend.editor.lut-category-import.v1";
 
 /**
  * 更早版本的键（**按新→旧排列**）。
  *
- * 现在为空 —— 留着这条通道，是为了让「升版本时必须写迁移」这件事在代码里有个位置，
- * 而不是等到真要迁的时候才想起来（`lib/display-prefs.ts` 那边就是这样做的）。
+ * `v1` 的分类只读取一次，成功写入 `app.db` 后标记迁移完成。
  */
-export const LEGACY_EDITOR_PREFS_KEYS: readonly string[] = [];
+export const LEGACY_EDITOR_PREFS_KEYS: readonly string[] = [LEGACY_EDITOR_PREFS_KEY];
 
 export interface EditorPrefs {
   lutOpen: boolean;
@@ -63,8 +63,7 @@ export function sanitizeEditorPrefs(raw: unknown): EditorPrefs {
 /**
  * 旧版本 → 当前版本的一次性迁移。
  *
- * 现在没有旧版本可迁（通道已就位）；`raw` 是 `parse` 前的**原始字符串**，
- * 以后 `v2` 需要读旧键时在这里读 `storage`。
+ * `raw` 是 `parse` 前的原始字符串，来自当前版本或 `v1`。
  *
  * 返回值就是**当前版本的偏好形状**（不是 `unknown`）：调用方拿到即可直接用。
  * 解析失败一律回到默认值 —— 存储里的垃圾不该让编辑器起不来。
@@ -97,8 +96,12 @@ export function readEditorPrefs(
   if (!source) return { ...DEFAULT_EDITOR_PREFS };
   try {
     const raw = source.getItem(EDITOR_PREFS_KEY);
-    if (raw === null || raw === "") return { ...DEFAULT_EDITOR_PREFS };
-    return migrateEditorPrefs(raw);
+    if (raw !== null && raw !== "") return migrateEditorPrefs(raw);
+    const old = source.getItem(LEGACY_EDITOR_PREFS_KEY);
+    if (old === null || old === "") return { ...DEFAULT_EDITOR_PREFS };
+    const migrated = migrateEditorPrefs(old);
+    source.setItem(EDITOR_PREFS_KEY, JSON.stringify(migrated));
+    return migrated;
   } catch {
     return { ...DEFAULT_EDITOR_PREFS };
   }
@@ -115,4 +118,23 @@ export function writeEditorPrefs(
   } catch {
     // 静默：偏好是「锦上添花」，丢了不影响这次会话
   }
+}
+
+/** 旧分类仅首次成功接入 app.db 前上送；之后数据库就是唯一真源。 */
+export function pendingLegacyLutCategories(
+  source: EditorPrefsStorage | undefined = storage(),
+): Array<{ id: string; name: string }> {
+  if (!source) return [];
+  try {
+    if (source.getItem(LUT_CATEGORY_IMPORT_KEY) === "done") return [];
+    const old = source.getItem(LEGACY_EDITOR_PREFS_KEY);
+    if (!old) return [];
+    return migrateEditorPrefs(old).lutCategories.map(({ id, name }) => ({ id, name }));
+  } catch { return []; }
+}
+
+export function markLegacyLutCategoriesImported(
+  target: EditorPrefsStorage | undefined = storage(),
+): void {
+  try { target?.setItem(LUT_CATEGORY_IMPORT_KEY, "done"); } catch { /* DB 已是唯一真源 */ }
 }

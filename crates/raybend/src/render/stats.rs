@@ -190,7 +190,7 @@ pub struct SpikeReport {
     pub human: HumanNotes,
 }
 
-/// 只能由人回答的几项（`plans/M2-W1-windows-gpu.md` 里那张表）。
+/// 只能由人回答的几项（`specs/M2-W1-windows-gpu.md` 里那张表）。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct HumanNotes {
     /// 透明区看到的是桌面/其他窗口，还是有黑底/白边？

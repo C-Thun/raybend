@@ -317,6 +317,8 @@ impl Curve {
 /// 四个通道的曲线（管线里的一条参数）。
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct CurveSet {
+    /// 机型基础曲线：只读渲染层，不参与用户通道编辑。
+    pub base: Curve,
     pub rgb: Curve,
     pub r: Curve,
     pub g: Curve,
@@ -328,6 +330,7 @@ impl CurveSet {
     #[must_use]
     pub fn identity() -> Self {
         Self {
+            base: Curve::identity(),
             rgb: Curve::identity(),
             r: Curve::identity(),
             g: Curve::identity(),
@@ -359,7 +362,8 @@ impl CurveSet {
     /// 全恒等吗（决定要不要走曲线快路径）。
     #[must_use]
     pub fn is_identity(&self) -> bool {
-        self.rgb.is_identity()
+        self.base.is_identity()
+            && self.rgb.is_identity()
             && self.r.is_identity()
             && self.g.is_identity()
             && self.b.is_identity()

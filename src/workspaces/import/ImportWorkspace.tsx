@@ -133,7 +133,7 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
       subscribe: onImportProgress,
     },
   });
-  // 空间预检的结论：偏紧就先问一句再开工（`plans/M1-6.md` §3.3）
+  // 空间预检的结论：偏紧就先问一句再开工（`specs/M1-6.md` §3.3）
   const [spaceWarning, setSpaceWarning] = createSignal<string | null>(null);
 
   /** 已勾选目录 → 每个目录带自己的「包含子目录」开关。 */
@@ -251,7 +251,7 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
   });
 
   /*
-   * 键盘与「主要操作」统一交给**命令注册表**（`plans/M2-W3.md` §2.5）：
+   * 键盘与「主要操作」统一交给**命令注册表**（`specs/M2-W3.md` §2.5）：
    * 这里只把自己那份动作注册进 `features/import/actions.ts`，命令通过它取用 ——
    * 与浏览侧同一套（同一个键位表、同一份命令清单，改键才真的生效）。
    */

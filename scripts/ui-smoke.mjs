@@ -28,7 +28,7 @@
  * 用法：
  *   pnpm dev                       # 另开一个终端起开发服务器
  *   pnpm smoke:ui                  # 默认打 http://localhost:1420/dev/kitchen-sink
- *   pnpm smoke:ui http://localhost:1420/
+ *   pnpm smoke:ui http://localhost:1420/ --export-only  # 只检查导出启动
  *   CHROME_BIN=/path/to/chrome pnpm smoke:ui
  *
  * 退出码：发现问题（控制台错误 / 页面空白 / 断言不成立）→ 1。
@@ -239,6 +239,24 @@ try {
 
   collectConsoleProblems(events);
 
+  const exportProbe=()=>evaluate(`(async()=>{
+    const labels=[...document.querySelectorAll("label")];
+    labels.find(node=>/^(导出|Export)$/.test(node.textContent.trim()))?.click();
+    await new Promise(resolve=>setTimeout(resolve,300));
+    const workspace=document.querySelector("[data-export-workspace]");
+    const form=document.querySelector("[data-export-form]");
+    const name=form?.querySelector("input");
+    const run=[...document.querySelectorAll("[data-export-right] button")].find(node=>/开始导出|Start export/.test(node.textContent));
+    const result={workspace:workspace!==null,shells:workspace?.querySelectorAll("[data-tiles-shell]").length??0,form:form!==null,nameEmpty:name?.value==="",runDisabled:run?.disabled===true,shimmer:document.querySelector("[data-flow-processing]")!==null};
+    labels.find(node=>/^(导入|Import)$/.test(node.textContent.trim()))?.click();
+    await new Promise(resolve=>setTimeout(resolve,200));
+    return result;
+  })()`);
+  if(process.argv.includes("--export-only")) {
+    const exportBoot=await exportProbe();
+    if(!exportBoot.workspace||exportBoot.shells!==2||!exportBoot.form||!exportBoot.nameEmpty||!exportBoot.runDisabled||exportBoot.shimmer)problems.push("导出工作区启动契约失败："+JSON.stringify(exportBoot));
+    collectConsoleProblems(events);console.log(JSON.stringify({url,exportBoot,problems},null,2));
+  } else {
   const snapshot = await evaluate(`(() => {
     const root = document.documentElement;
     return {
@@ -1996,10 +2014,10 @@ try {
   }
 
   /*
-   * 编辑右栏：动态反差那根杆**只许出现一次**，且住在总览页的直方图下面。
+   * 编辑右栏：动态反差那根杆**只许出现一次**，并且在「影调」组。
    *
-   * 为什么值得一条断言（`AGENTS.md` §2.12）：它是「同一个东西两种表达」的高发区 ——
-   * 参数表里它归「影调」，但人类 2026-09-24 定它**暂时**挂在总览页；两处都渲染就是 bug。
+   * 人类 2026-09-24 把它归入影调，2026-09-25 定为该组首根拉杆；
+   * 同一根杆在总览和影调各出现一次仍然是 bug（`AGENTS.md` §2.12）。
    * 浏览器里没有库也没选中照片，但编辑右栏仍然要画出来（空态是「还没有选中照片」）。
    * 跑完**切回导入**：后面的左列断言找的是导入左列的「最近 / 来源」两个 pane。
    */
@@ -2018,7 +2036,6 @@ try {
     const occurrences = (text.match(/动态反差|Dynamic Contrast/g) ?? []).length;
     const sliderIndex = text.search(/动态反差|Dynamic Contrast/);
     const groupIndex = text.search(/影调|Tone/);
-    const histogramIndex = text.search(/直方图|Histogram/);
     (label("导入") ?? label("Import"))?.click();
     await sleep(400);
     return {
@@ -2026,7 +2043,6 @@ try {
       occurrences,
       sliderIndex,
       groupIndex,
-      histogramIndex,
     };
   })()`);
   if (editorPanel && editorPanel.hasPanels) {
@@ -2036,11 +2052,8 @@ try {
           "同一根杆不许两处渲染）",
       );
     }
-    if (editorPanel.histogramIndex >= 0 && editorPanel.sliderIndex < editorPanel.histogramIndex) {
-      problems.push("「动态反差」不在直方图下面（人类 2026-09-24 定的临时位置）");
-    }
-    if (editorPanel.groupIndex >= 0 && editorPanel.sliderIndex > editorPanel.groupIndex) {
-      problems.push("「动态反差」跑到参数组页签里去了（同一根杆不许两处渲染）");
+    if (editorPanel.groupIndex < 0 || editorPanel.sliderIndex <= editorPanel.groupIndex) {
+      problems.push("「动态反差」应在影调组里，且是该组第一根拉杆");
     }
   }
 
@@ -2174,6 +2187,10 @@ try {
       leftAfterToggle: leftAfterToggle,
     };
   })()`);
+
+  // M4-W2：真实导出分支启动、双 tiles 与空表单，不模拟队列运行。
+  const exportBoot=await exportProbe();
+  if(!exportBoot.workspace||exportBoot.shells!==2||!exportBoot.form||!exportBoot.nameEmpty||!exportBoot.runDisabled||exportBoot.shimmer)problems.push("导出工作区启动契约失败："+JSON.stringify(exportBoot));
 
   if (editor) {
     if (!editor.workspace) {
@@ -2737,6 +2754,7 @@ try {
       2,
     ),
   );
+  }
 } catch (error) {
   problems.push(`冒烟脚本自身失败：${error.message}`);
   // 带上堆栈：脚本自身的错（比如某段 evaluate 里的变量名写错）光看消息定不了位
@@ -2746,6 +2764,7 @@ try {
   ws?.close();
   chrome.kill("SIGKILL");
 }
+if (problems.length > 0) process.exitCode = 1;
 
 async function findTarget() {
   for (let attempt = 0; attempt < 40; attempt += 1) {

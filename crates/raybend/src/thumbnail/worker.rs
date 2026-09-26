@@ -268,7 +268,11 @@ impl RunStats {
 pub fn cache_key_for(abs_path: &Path, key_material: &str) -> Vec<u8> {
     let forms = PathForms::new(key_material);
     let identity = FileId::try_read(abs_path);
-    cache::cache_key(identity.as_ref(), forms.folded())
+    let mut key = cache::cache_key(identity.as_ref(), forms.folded());
+    if let Ok(signature) = crate::media::source::source_signature(abs_path) {
+        key.extend_from_slice(signature.as_bytes());
+    }
+    key
 }
 
 /// 干一条活：读文件 → 渲染（或占位图）→ 写缓存。
@@ -352,6 +356,18 @@ pub fn render_now_with_edit(
     edit: Option<&crate::store::develop::DevelopStack>,
     lens: Option<&crate::develop::lens::LensCorrection>,
 ) -> Result<Vec<u8>> {
+    render_now_with_edit_and_lut(thumbs, abs_path, size, now_ms, edit, lens, None)
+}
+
+pub fn render_now_with_edit_and_lut(
+    thumbs: &ThumbsDb,
+    abs_path: &Path,
+    size: SizeClass,
+    now_ms: i64,
+    edit: Option<&crate::store::develop::DevelopStack>,
+    lens: Option<&crate::develop::lens::LensCorrection>,
+    lut: Option<&crate::develop::lut::Lut>,
+) -> Result<Vec<u8>> {
     // 源文件还没入库，「身份字符串」就是**绝对路径**（见 `cache_key_for`）
     let material = abs_path.to_string_lossy().into_owned();
     let key = cache_key_for(abs_path, &material);
@@ -368,7 +384,7 @@ pub fn render_now_with_edit(
         .file_name()
         .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
     let kind = kind::kind_of_file(&file_name);
-    let thumb = match render::render_file_with_edit(abs_path, size, edit, lens)? {
+    let thumb = match render::render_file_with_edit_and_lut(abs_path, size, edit, lens, lut)? {
         Some(t) => t,
         // 不可解码（RAW）：先用占位图兜住（与队列那条路同一取舍）
         None => render::placeholder(kind, size)?,
@@ -384,9 +400,7 @@ pub fn render_now_with_edit(
     let key = cache_key_for(abs_path, &read_key);
     thumbs
         .read(move |conn| cache::get(conn, &key, size, &sig))?
-        .ok_or_else(|| {
-            crate::error::Error::Unsupported("缩略图刚写进缓存却读不回来".to_string())
-        })
+        .ok_or_else(|| crate::error::Error::Unsupported("缩略图刚写进缓存却读不回来".to_string()))
 }
 
 /// 一条「真的干过活」的任务的完整结果（给访问用）。
@@ -703,10 +717,7 @@ mod tests {
             Outcome::Placeholder
         );
 
-        let key = cache::cache_key(
-            FileId::try_read(root.join("photos/a.rw2")).as_ref(),
-            "photos/a.rw2",
-        );
+        let key = cache_key_for(&root.join("photos/a.rw2"), "photos/a.rw2");
         let bytes = cache::get(
             &conn,
             &key,
@@ -1004,7 +1015,11 @@ mod tests {
 
         let bytes = render_now(&thumbs, &photo.join("a.rw2"), SizeClass::Strip, T0).unwrap();
         assert!(render::is_valid_avif(&bytes), "占位图也是合法 AVIF");
-        assert_eq!(thumbs.read(cache::stats).unwrap().entries, 1, "占位图也入缓存");
+        assert_eq!(
+            thumbs.read(cache::stats).unwrap().entries,
+            1,
+            "占位图也入缓存"
+        );
     }
 
     #[test]

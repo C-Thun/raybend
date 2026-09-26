@@ -517,7 +517,7 @@ mod tests {
     #[test]
     fn 一千条规模_热路径的开销可以忽略() {
         /*
-         * 基准的意义（`plans/photo-meta-and-tile-display.md` §六 step 9）：
+         * 基准的意义（`specs/photo-meta-and-tile-display.md` §六 step 9）：
          * 「首次读头」与「会话内二次进入」差多少。
          *
          * 真机读头的数字在计划里实测过（ext4 0.022ms/张、9p 挂载 5.35ms/张），

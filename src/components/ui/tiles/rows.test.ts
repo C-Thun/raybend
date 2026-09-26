@@ -143,3 +143,10 @@ test("行键唯一（虚拟列表靠它复用 DOM）", () => {
   const keys = rows.map((row) => row.key);
   assert.equal(new Set(keys).size, keys.length, `键重复：${keys.join(",")}`);
 });
+
+test("issue 附加行高：每行取成员最大值，正常网格不改变，异常数值归零",()=>{
+ const rows=buildGridRows({count:5,columns:2,cellSize:CELL,extraHeight:(index)=>[40,80,NaN,-1,150][index]??0});
+ assert.deepEqual(tiles(rows).map(row=>row.height),[CELL+80,CELL,CELL+150]);
+ const grouped=buildGridRows({count:4,columns:2,cellSize:CELL,slices:[slice()],extraHeight:(index)=>index*10});
+ assert.deepEqual(tiles(grouped).map(row=>row.height),[CELL+10,CELL+30]);
+});

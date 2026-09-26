@@ -28,6 +28,7 @@
 import { createEffect, createSignal, onCleanup, onMount, Show } from "solid-js";
 import { IconLoader2 } from "@tabler/icons-solidjs";
 
+import { getExportVariantImage } from "../../api/export.ts";
 import { getViewImage } from "../../api/db.ts";
 import {
   closeFullscreen,
@@ -45,8 +46,9 @@ export function FullscreenViewer() {
   /** 清单还没到 / 清单为空：给一句话，别让人对着黑屏猜 */
   const [empty, setEmpty] = createSignal(false);
 
+  const variantImages=new Map<string, NonNullable<FullscreenPayload["items"][number]["exportVariant"]>>();
   const store = createViewerStore({
-    loadScreen: (path) => getViewImage(path, "screen"),
+    loadScreen: (path) => {const variant=variantImages.get(path);return variant===undefined?getViewImage(path,"screen"):getExportVariantImage(variant.repositoryId,variant.reference,"screen");},
     /*
      * 多图 URL 缓存：当前 + 前后各一张预载 = 3 张，给到 6 留余量。
      * 不加大也能跑，但换图时刚预载好的邻居可能已被挤出去，预载就白做了。
@@ -82,10 +84,12 @@ export function FullscreenViewer() {
     if (payload.revision <= appliedRevision) return;
     appliedRevision = payload.revision;
     setEmpty(false);
+    variantImages.clear();
+    for(const item of payload.items)if(item.exportVariant!==undefined)variantImages.set(JSON.stringify([payload.revision,item.id,item.exportVariant]),item.exportVariant);
     store.show(
       payload.items.map((item) => ({
         id: item.id,
-        path: item.path,
+        path: item.exportVariant===undefined?item.path:JSON.stringify([payload.revision,item.id,item.exportVariant]),
         fileName: item.fileName,
       })),
       payload.index,

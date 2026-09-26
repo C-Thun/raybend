@@ -151,7 +151,7 @@ pub fn list() -> Vec<Volume> {
 
 /// 系统自留的挂载点：列出来只是噪声。
 ///
-/// **为什么需要这条规则**（`plans/M1-8.md` §F，2026-09-16 的真机反馈）：
+/// **为什么需要这条规则**（`specs/M1-8.md` §F，2026-09-16 的真机反馈）：
 /// Linux 侧的卷来自 `/proc/mounts`，其中**必然**有根分区 `/`。在 `/` 上展开一次，
 /// 看到的就是 `mnt`、`home`、`usr`、`etc` 这一堆 —— 用户会以为「来源树在读一个莫名其妙的合集」。
 /// 真正有用的来源只有两类：**用户主目录**与**外挂/可移动盘**（含 WSL 里的 `/mnt/c`）。
@@ -399,7 +399,7 @@ mod tests {
 
     #[test]
     fn root_and_system_mounts_are_not_sources() {
-        // 根分区：用户在 `plans/M1-8.md` §F 里报的那个「奇怪的合集」就是它
+        // 根分区：用户在 `specs/M1-8.md` §F 里报的那个「奇怪的合集」就是它
         assert!(!is_useful_source_mount("/"));
         assert!(!is_useful_source_mount(""));
         assert!(!is_useful_source_mount("   "));

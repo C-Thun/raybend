@@ -15,6 +15,7 @@
 
 import { isTauriRuntime } from "./tauri-env.ts";
 import { onTauriEvent } from "./events.ts";
+import { joinPath } from "../lib/paths.ts";
 import { t } from "../i18n/index.ts";
 import type {
   DirEmptyView,
@@ -248,7 +249,7 @@ export async function getThumbBytes(
 export type ImagePurpose = "grid" | "strip" | "screen" | "original";
 
 /**
- * **统一取图口**（`plans/M2-W2.md` §2.1）：view 与缩略图共用。
+ * **统一取图口**（`specs/M2-W2.md` §2.1）：view 与缩略图共用。
  *
  * 调用方只说「哪张、要多大」，**不需要知道它是 RAW 还是位图** ——
  * 分派（以及「位图 + 原图 + 没编辑 ⇒ 直接给原文件」）都在 Rust 侧（`display` 模块）。
@@ -265,7 +266,7 @@ export async function getViewImage(
 }
 
 /**
- * 看图态右栏的**直方图**（24 柱 RGB 合成，`plans/M2-W2.md` 1.6）。
+ * 看图态右栏的**直方图**（24 柱 RGB 合成，`specs/M2-W2.md` 1.6）。
  *
  * 统计在 Rust 侧做 —— `AGENTS.md` §6.1 的红线：**前端不碰像素**。
  * 前端只拿回 24 个整数画柱子。取不到（浏览器里、认不出的文件）返回 `null`，
@@ -406,8 +407,8 @@ export async function repositoryCounts(
 }
 
 /**
- * **进目录时同步计数**（人类 2026-09-19）：读盘数一次这个目录，与库里那行对比，
- * 不一样就写回去并把差值滚到库级汇总。
+ * 进入/重读目录：先安全同步 catalog、元数据、FTS 与图片缓存，再更新计数。
+ * scopePaths 省略只扫本目录；空数组重扫有界活跃目录，事件风暴/回焦点使用。
  *
  * 返回 `[目录计数, 库级汇总]`，各是 `[相片, 图片]`；离线或没给目录时是 `null`。
  * 本地 `readdir` 是微秒级，所以**每次进目录都调**（`AGENTS.md` §2 #13 的实时性优先）。
@@ -415,11 +416,13 @@ export async function repositoryCounts(
 export async function syncDirectoryCounts(
   repositoryId: string,
   scopePath: string | null,
+  scopePaths?: readonly string[],
 ): Promise<[[number, number], [number, number]] | null> {
   if (!isTauriRuntime()) return null;
   return call<[[number, number], [number, number]] | null>("repository_sync_dir", {
     repositoryId,
     scopePath,
+    scopePaths: scopePaths ?? null,
   });
 }
 
@@ -525,4 +528,31 @@ export async function onMigrationNotice(
   return listen<MigrationNotice>(MIGRATION_EVENT, (event) =>
     handler(event.payload),
   );
+}
+
+/** 扫盘完成后的统一通知；paths 为绝对路径，用于现有图片队列定点失效。 */
+export interface CatalogChange {
+  repositoryId: string;
+  scopePath: string;
+  assetIds: number[];
+  paths: string[];
+}
+/** 原生 PathBuf 拼接可能保留混合分隔符；与网格/编辑器共用 joinPath 生成缓存键。 */
+export function catalogChangeFromNotice(
+  notice: Omit<CatalogChange, "paths"> & { root: string; relativePaths: string[] },
+): CatalogChange {
+  return {
+    repositoryId: notice.repositoryId,
+    scopePath: notice.scopePath,
+    assetIds: notice.assetIds,
+    paths: notice.relativePaths.map((path) => joinPath(notice.root, path)),
+  };
+}
+export function onCatalogChanged(handler: (change: CatalogChange) => void): Promise<() => void> {
+  return onTauriEvent<Parameters<typeof catalogChangeFromNotice>[0]>(
+    "catalog://changed", (notice) => handler(catalogChangeFromNotice(notice)),
+  );
+}
+export function onCatalogDirty(handler: (change: {repositoryId: string; scopes: string[]}) => void): Promise<() => void> {
+  return onTauriEvent("catalog://dirty", handler);
 }

@@ -1,4 +1,4 @@
-//! **统一取图口**（人类 2026-09-18 定；口径见 `plans/M2-W2.md` §2.1）。
+//! **统一取图口**（人类 2026-09-18 定；口径见 `specs/M2-W2.md` §2.1）。
 //!
 //! # 它解决什么
 //!
@@ -52,14 +52,14 @@ use std::path::Path;
 
 pub use full_cache::FullCache;
 pub use histogram::{
-    histogram_of_file, histogram_of_image, histogram_of_rgb8, Histogram, DEFAULT_BINS,
+    DEFAULT_BINS, Histogram, histogram_of_file, histogram_of_image, histogram_of_rgb8,
 };
 pub use pixels::{DisplayPixels, PixelSize, pixels, pixels_from_avif};
 
 use crate::error::Result;
 use crate::media::kind::{self, MediaKind};
 use crate::thumbnail::cache as thumb_cache;
-use crate::thumbnail::{render_file, render_sig, SizeClass, Thumb, ThumbsDb, cache_key_for};
+use crate::thumbnail::{SizeClass, Thumb, ThumbsDb, cache_key_for, render_file, render_sig};
 
 /// 取图目的 —— 决定走哪一档（以及能不能直接给原图）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -436,8 +436,7 @@ mod tests {
         img.save(&path).expect("写 JPEG");
         let db = ThumbsDb::open(dir.path().join("cache"), 0).expect("开缓存库");
 
-        // 走渲染的请求：第一次现算、第二次（源文件已经被**换成另一张图**）仍然给旧字节 ——
-        // 这就是磁盘缓存命中（注意：缓存键优先用文件身份，所以不能靠删文件来验）
+        // 未变更时命中；同一路径覆盖保存后必须重新渲染。
         let screen = ImageRequest::plain(&path, ImagePurpose::Screen);
         let first = cached_image(&db, &screen, 0)
             .expect("第一次不该报错")
@@ -445,13 +444,15 @@ mod tests {
         assert_eq!(first.origin, ImageOrigin::Rendered);
         assert!(first.size.is_some(), "渲染出来的带尺寸");
 
+        let unchanged = cached_image(&db, &screen, 1).unwrap().unwrap();
+        assert!(unchanged.bytes == first.bytes, "未变化时仍命中缓存");
         let other = image::RgbImage::from_fn(64, 48, |_, _| image::Rgb([250, 10, 10]));
         other.save(&path).expect("覆盖成另一张图");
         let second = cached_image(&db, &screen, 1)
             .expect("第二次不该报错")
             .expect("缓存里应当有");
-        assert_eq!(second.bytes, first.bytes, "第二次必须来自缓存（源文件已换掉）");
-        assert_eq!(second.size, first.size, "缓存里的尺寸也要带上");
+        assert!(second.bytes != first.bytes, "源文件覆盖保存必须作废旧渲染");
+        assert_ne!(second.size, first.size);
 
         // 「直接给原文件」那条路不缓存：读到的必须就是刚写进去的那张（而不是旧渲染）
         let original = ImageRequest::plain(&path, ImagePurpose::Original);

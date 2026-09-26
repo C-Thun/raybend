@@ -76,6 +76,10 @@ export interface TilesViewingInfo {
 export interface TilesControlBarProps {
   /** 当前列表里的张数 */
   count: number;
+  /** 业务计数/队列标识仍画在同一个状态栏。 */
+  countLabel?: string;
+  centerContent?: JSX.Element;
+  compactControls?: boolean;
   /** 选中的张数（`>0` 才显示「已选 n」——与导入侧原来的口径一致） */
   selectedCount?: number;
   /**
@@ -152,13 +156,13 @@ export function TilesControlBar(input: TilesControlBarComponentProps) {
       ? (props.dir ?? null)
       : null;
   const hasCenter = (): boolean =>
-    showDir() !== null || leadText() !== "" || (props.fileName ?? "") !== "";
+    props.centerContent !== undefined || showDir() !== null || leadText() !== "" || (props.fileName ?? "") !== "";
 
   return (
     <BarFrame mode="tiles" class={props.class}>
       {/* 计数：**含选中数**（人类 2026-09-19：导入侧本来就有，浏览侧也要有） */}
       <span class="shrink-0 text-fs-1 text-fg-2 tnum">
-        {t("grid.count", { n: formatCount(props.count, groupLocale()) })}
+        {props.countLabel ?? t("grid.count", { n: formatCount(props.count, groupLocale()) })}
       </span>
       <Show when={(props.selectedCount ?? 0) > 0}>
         <span class="shrink-0 text-fs-1 text-fg-2 tnum">
@@ -169,7 +173,8 @@ export function TilesControlBar(input: TilesControlBarComponentProps) {
       <span class="min-w-0 flex-1" />
 
       {/* 中间：容器 + 当前那张的文件名（真正居中） */}
-      <Show when={hasCenter()}>
+      {props.centerContent}
+      <Show when={props.centerContent === undefined && hasCenter()}>
         <span class="flex min-w-0 max-w-96 shrink-0 items-center gap-1.5 text-fs-1 text-fg-3">
           <Show when={showDir()}>
             {(dir) => <PathText path={dir()} maxLength={40} class="max-w-64 shrink-0" />}
@@ -229,6 +234,7 @@ export function TilesControlBar(input: TilesControlBarComponentProps) {
         )}
       </Show>
 
+      <Show when={!props.compactControls}>
       {/* `信息`档位由调用方控制；import 只会给 off / marks-name，browse 保留三态。 */}
       <button
         type="button"
@@ -256,6 +262,7 @@ export function TilesControlBar(input: TilesControlBarComponentProps) {
         <span class="whitespace-nowrap">{t("grid.by_time")}</span>
       </ToggleBlock>
 
+      </Show>
       {/* 缩放：17 个预设锚点之间允许连续落点，两端带加减号 */}
       <Slider
         value={props.tileStep}

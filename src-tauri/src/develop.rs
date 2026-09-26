@@ -1,4 +1,4 @@
-//! 编辑栈的 IPC（M3-W3）：读 / 落库 / 重置。
+//! 编辑栈的 IPC（M3-W3）：读 / 落库（含两层重置）。
 //!
 //! # 一条铁律：**松手才落库**
 //!
@@ -23,7 +23,9 @@ use tauri::{AppHandle, Manager, Runtime};
 use raybend::develop::denoise::NrMethod;
 use raybend::develop::geometry::EditGeometry;
 use raybend::store::assets;
-use raybend::store::develop::{self, DevelopStack, EditBase, IssueChoice, Setting};
+use raybend::store::develop::{
+    self, AutoAdjustBaseline, DevelopStack, EditBase, IssueChoice, Setting,
+};
 use raybend::store::marking::{ChangeSet, Op};
 use raybend::store::repository::{self, RepositoryState};
 use raybend::store::time;
@@ -46,9 +48,19 @@ pub struct DevelopStackDto {
     /// 拍摄色温（K）—— 色温拉杆的基线，**跟着 issue 一起存**（见 `store::develop::DevelopStack`）
     #[serde(default)]
     pub as_shot_k: Option<f32>,
-    /// 镜头配置文件（`null` = 自动识别；`"none"` = 显式关掉；否则是 `maker|model`）
+    /// 镜头配置文件（`null` = 未选择；`"none"` = 显式关掉；否则是 `maker|model`）
     #[serde(default)]
     pub lens_profile: Option<String>,
+    /// 机型基础曲线：NULL = 未选择；"none" = 明确不用；数字字符串 = 档案 ID。
+    #[serde(default)]
+    pub base_curve_profile: Option<String>,
+    /// 选中时的曲线快照；用于旧照片渲染稳定性与缓存指纹。
+    #[serde(default)]
+    pub base_curve_points: Option<Vec<[f32; 2]>>,
+    #[serde(default)]
+    pub lut_id: Option<String>,
+    #[serde(default)]
+    pub lut_enabled: Option<bool>,
     /// 配置文件那一半的开关（`null` = 默认开）
     #[serde(default)]
     pub lens_enabled: Option<bool>,
@@ -58,6 +70,8 @@ pub struct DevelopStackDto {
     /// 无损裁切/旋转。
     #[serde(default)]
     pub geometry: Option<EditGeometry>,
+    #[serde(default)]
+    pub auto_adjust: Option<AutoAdjustBaseline>,
 }
 
 impl From<DevelopStack> for DevelopStackDto {
@@ -68,9 +82,14 @@ impl From<DevelopStack> for DevelopStackDto {
             curves: stack.curves,
             as_shot_k: stack.as_shot_k,
             lens_profile: stack.lens_profile,
+            base_curve_profile: stack.base_curve_profile,
+            base_curve_points: stack.base_curve_points,
+            lut_id: stack.lut_id,
+            lut_enabled: stack.lut_enabled,
             lens_enabled: stack.lens_enabled,
             nr_method: stack.nr_method.map(|method| method.as_str().to_string()),
             geometry: stack.geometry,
+            auto_adjust: stack.auto_adjust,
         }
     }
 }
@@ -82,23 +101,32 @@ impl DevelopStackDto {
     /// 降噪方式认不出（前端只能发 `"fast"` / `"high"`；发别的就是 bug，**不静默当默认**）。
     pub fn into_stack(self) -> Result<DevelopStack, String> {
         let nr_method = match self.nr_method {
-            Some(text) => Some(NrMethod::parse(&text).ok_or_else(|| {
-                format!("未知的降噪方式：{text}（只认 fast / high）")
-            })?),
+            Some(text) => Some(
+                NrMethod::parse(&text)
+                    .ok_or_else(|| format!("未知的降噪方式：{text}（只认 fast / high）"))?,
+            ),
             None => None,
         };
-        let source_base = self.source_base.as_deref().map_or(Ok(EditBase::Raw), |text| {
-            EditBase::parse(text).ok_or_else(|| format!("未知的 issue 源：{text}"))
-        })?;
+        let source_base = self
+            .source_base
+            .as_deref()
+            .map_or(Ok(EditBase::Raw), |text| {
+                EditBase::parse(text).ok_or_else(|| format!("未知的 issue 源：{text}"))
+            })?;
         Ok(DevelopStack {
             source_base,
             params: self.values,
             curves: self.curves,
             as_shot_k: self.as_shot_k,
             lens_profile: self.lens_profile,
+            base_curve_profile: self.base_curve_profile,
+            base_curve_points: self.base_curve_points,
+            lut_id: self.lut_id,
+            lut_enabled: self.lut_enabled,
             lens_enabled: self.lens_enabled,
             nr_method,
             geometry: self.geometry,
+            auto_adjust: self.auto_adjust,
         })
     }
 }
@@ -288,9 +316,9 @@ pub async fn develop_edit_target<R: Runtime>(
                     .to_string_lossy()
                     .into_owned()
             });
-            let actual_base = path.as_deref().map(|path| {
-                EditBase::of_file(Path::new(path)).as_str().to_string()
-            });
+            let actual_base = path
+                .as_deref()
+                .map(|path| EditBase::of_file(Path::new(path)).as_str().to_string());
             Ok(EditTargetDto {
                 path,
                 has_bitmap,
@@ -415,14 +443,10 @@ pub async fn develop_commit<R: Runtime>(
             (None, false)
         } else {
             let change = ChangeSet::new(label, ops);
-            state
-                .with_undo(&undo_repository, |undo| {
-                    undo.push(change);
-                    (
-                        undo.undo_label().map(str::to_string),
-                        undo.can_undo(),
-                    )
-                })?
+            state.with_undo(&undo_repository, |undo| {
+                undo.push(change);
+                (undo.undo_label().map(str::to_string), undo.can_undo())
+            })?
         };
 
         Ok(DevelopCommitResult {
@@ -484,8 +508,19 @@ fn diff_stack(asset_id: i64, before: &DevelopStack, after: &DevelopStack) -> Vec
         }
     }
 
-    // 编辑栈设置（镜头配置文件 / 启用开关 / 降噪方式）：三项都是「一个可空字符串」
-    for setting in [Setting::LensProfile, Setting::LensEnabled, Setting::NrMethod, Setting::SourceBase, Setting::Geometry] {
+    // 设置统一以可空序列化值进入撤销；自动来源也走同一管道，但不改变像素。
+    for setting in [
+        Setting::AutoAdjust,
+        Setting::BaseCurveProfile,
+        Setting::BaseCurvePoints,
+        Setting::LutId,
+        Setting::LutEnabled,
+        Setting::LensProfile,
+        Setting::LensEnabled,
+        Setting::NrMethod,
+        Setting::SourceBase,
+        Setting::Geometry,
+    ] {
         let old = before.setting_value(setting);
         let new = after.setting_value(setting);
         if old != new {
@@ -520,74 +555,85 @@ fn undo_label(ops: &[Op]) -> String {
     }
 }
 
-/// **重置全部**：清掉这张照片的编辑栈（回到与 SOOC 一致）。
-///
-/// 返回值与 `develop_commit` 同一个形状（前端两条路共用一套读数）。
-///
-/// # Errors
-/// 库没打开 / 数据库写失败。
-#[tauri::command]
-pub async fn develop_reset<R: Runtime>(
-    app: AppHandle<R>,
-    repository_id: String,
-    asset_id: i64,
-) -> Result<DevelopCommitResult, String> {
-    let handle = app.clone();
-    let undo_repository = repository_id.clone();
-    blocking(move || {
-        let state = handle.state::<BrowseState>();
-        let ops = state.with_catalog(&handle, &repository_id, move |db| {
-            let before = db
-                .read(|conn| develop::load(conn, asset_id))
-                .map_err(|e| e.to_string())?;
-            db.write_tx(move |tx| develop::clear(tx, asset_id))
-                .map_err(|e| e.to_string())?;
-            // 「重置全部」也要能撤销：把旧值整份记下来
-            let ops = diff_stack(asset_id, &before, &DevelopStack::default());
-            Ok(ops)
-        })?;
-        if let Ok(root) = crate::browse::resolve_root(&handle, &undo_repository)
-            && let Ok(cache) = raybend::display::FullCache::open(&root)
-        {
-            cache.invalidate(asset_id);
-        }
-        let label = undo_label(&ops);
-        let (undo_label, can_undo) = if ops.is_empty() {
-            (None, false)
-        } else {
-            let change = ChangeSet::new(label, ops);
-            state.with_undo(&undo_repository, |undo| {
-                undo.push(change);
-                (undo.undo_label().map(str::to_string), undo.can_undo())
-            })?
-        };
-        Ok(DevelopCommitResult {
-            stack: DevelopStackDto::default(),
-            undo_label,
-            can_undo,
-        })
-    })
-    .await
-}
-
 #[cfg(test)]
 mod geometry_tests {
     use super::*;
     use raybend::develop::geometry::{CropRect, EditGeometry};
 
     #[test]
+    fn automatic_baseline_and_two_layer_resets_restore_through_shared_undo() {
+        use raybend::store::{
+            db::{CatalogDb, OpenOpts},
+            marking::{self, UndoStack},
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let db = CatalogDb::create(dir.path(), "重置测试", None, OpenOpts::unbacked_up(1)).unwrap();
+        db.write(|conn| {
+            conn.execute_batch("INSERT INTO assets(id,imported_at,updated_at) VALUES(7,1,1);")
+                .unwrap();
+            let automatic = DevelopStack {
+                params: [("exposure".to_owned(), 0.5)].into(),
+                base_curve_profile: Some("3".into()),
+                base_curve_points: Some(vec![[0.0, 0.0], [0.5, 0.6], [1.0, 1.0]]),
+                auto_adjust: Some(AutoAdjustBaseline {
+                    values: [("exposure".to_owned(), 0.5)].into(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            };
+            let mut manual = automatic.clone();
+            manual.params.insert("exposure".into(), 1.0);
+            manual.lut_id = Some("lut".into());
+            manual.lut_enabled = Some(true);
+            let cleared = DevelopStack::default();
+            let mut undo = UndoStack::new(10);
+            develop::save(conn, 7, &manual, 1).unwrap();
+            for (before, after) in [(&manual, &automatic), (&automatic, &cleared)] {
+                let change = ChangeSet::new("重置修改", diff_stack(7, before, after));
+                marking::apply(conn, &change).unwrap();
+                undo.push(change);
+                assert_eq!(develop::load(conn, 7).unwrap(), *after);
+            }
+            undo.undo(conn).unwrap();
+            assert_eq!(develop::load(conn, 7).unwrap(), automatic);
+            undo.undo(conn).unwrap();
+            assert_eq!(develop::load(conn, 7).unwrap(), manual);
+            undo.redo(conn).unwrap();
+            assert_eq!(develop::load(conn, 7).unwrap(), automatic);
+            undo.redo(conn).unwrap();
+            assert_eq!(develop::load(conn, 7).unwrap(), cleared);
+            let dto = DevelopStackDto::from(manual.clone());
+            assert_eq!(dto.into_stack().unwrap().auto_adjust, manual.auto_adjust);
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
     fn geometry_confirmation_and_reset_are_single_reversible_settings() {
         let baseline = DevelopStack::default();
         let edited = DevelopStack {
-            geometry: Some(EditGeometry { rotation: 15.0,
-                crop: Some(CropRect { x: 0.2, y: 0.2, width: 0.6, height: 0.6 }), crop_ratio: None }),
+            geometry: Some(EditGeometry {
+                rotation: 15.0,
+                crop: Some(CropRect {
+                    x: 0.2,
+                    y: 0.2,
+                    width: 0.6,
+                    height: 0.6,
+                }),
+                crop_ratio: None,
+            }),
             ..DevelopStack::default()
         };
         let forward = diff_stack(7, &baseline, &edited);
-        assert!(matches!(forward.as_slice(), [Op::DevelopSetting { asset_id: 7, key, before: None, after: Some(_) }]
-            if key == "geometry"));
+        assert!(
+            matches!(forward.as_slice(), [Op::DevelopSetting { asset_id: 7, key, before: None, after: Some(_) }]
+            if key == "geometry")
+        );
         let backward = diff_stack(7, &edited, &baseline);
-        assert!(matches!(backward.as_slice(), [Op::DevelopSetting { asset_id: 7, key, before: Some(_), after: None }]
-            if key == "geometry"));
+        assert!(
+            matches!(backward.as_slice(), [Op::DevelopSetting { asset_id: 7, key, before: Some(_), after: None }]
+            if key == "geometry")
+        );
     }
 }

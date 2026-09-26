@@ -18,6 +18,11 @@
  * 放进任何一边都会让另一边去钻内部实现。
  */
 
+import { createExportStore } from "./workspaces/export/store.ts";
+import { ExportWorkspace } from "./workspaces/export/ExportWorkspace.tsx";
+import { ExportToolbar, ExportScopeTool, ExportStopTool } from "./workspaces/export/Toolbar.tsx";
+import { exportActions } from "./workspaces/export/actions.ts";
+import { getExportVariants, getExportSnapshots, validateExportPreset } from "./api/export.ts";
 import { Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { uiReady, tauriWindowHandle } from "./api/window.ts";
 import { openFullscreen } from "./api/fullscreen.ts";
@@ -28,6 +33,7 @@ import * as db from "./api/db.ts";
 import { createSelectedFileMetadata } from "./features/exif-strip/index.ts";
 import { createPhotoGridStore } from "./features/photo-grid/index.ts";
 import { createAppearanceStore } from "./lib/appearance.ts";
+import { createCatalogRefresh } from "./lib/catalog-refresh.ts";
 import { createLayoutStore } from "./lib/layout-prefs.ts";
 import { FlowBar } from "./shell/FlowBar.tsx";
 import { createShellStore } from "./shell/store.ts";
@@ -106,6 +112,8 @@ function canvasBackground(): string {
 
 export default function App() {
   const shell = createShellStore();
+  const exportStore=createExportStore({getSetting:db.getSetting,setSetting:db.setSetting,variants:getExportVariants,snapshots:getExportSnapshots,validate:validateExportPreset});
+  onCleanup(()=>exportStore.dispose());
   /*
    * 编辑工作区的界面状态（档位 / LUT 面板 / 三个工具 / 参数草稿）。
    *
@@ -164,6 +172,7 @@ export default function App() {
      */
     metaEnsure: db.dirMetaEnsure,
     api: {
+      syncScope: (q) => db.syncDirectoryCounts(q.repositoryId, q.scopePath ?? null),
       page: browsePage,
       timeline: browseTimeline,
       facets: browseFacets,
@@ -177,6 +186,29 @@ export default function App() {
       flagsSet,
       flagsClear,
     },
+  });
+
+  // 只有一处消费原生文件事件；后台执行期间的新事件合并成下一次有界重扫。
+  let liveDisposed = false;
+  const liveRefresh = createCatalogRefresh(async (repositoryId, scopes) => {
+    if (repositoryId !== browseStore.repositoryId() || liveDisposed) return;
+    try {
+      const scope = browseStore.scopePath();
+      if (scope !== null) await db.syncDirectoryCounts(repositoryId, scope, scopes);
+      if (repositoryId === browseStore.repositoryId() && !liveDisposed) await browseStore.refresh();
+    } catch (error) { if (repositoryId === browseStore.repositoryId() && !liveDisposed) browseStore.reportError(error); }
+  });
+  onMount(() => {
+    let off: (() => void) | undefined;
+    void db.onCatalogDirty(({ repositoryId, scopes }) => {
+      void liveRefresh.request(repositoryId, scopes);
+    }).then((unsubscribe) => { if (liveDisposed) unsubscribe(); else off = unsubscribe; });
+    const focus = (): void => {
+      const repositoryId = browseStore.repositoryId();
+      if (repositoryId !== null && shell.workflow() !== "import") void liveRefresh.request(repositoryId);
+    };
+    window.addEventListener("focus", focus);
+    onCleanup(() => { liveDisposed = true; off?.(); window.removeEventListener("focus", focus); liveRefresh.dispose(); });
   });
 
   /*
@@ -299,7 +331,7 @@ export default function App() {
   const toast = createToastStore();
   onCleanup(toastDisposer(toast));
 
-  /* ── 命令体系（`features/commands/`）的组装（`plans/M2-W3.md` §2.1）── */
+  /* ── 命令体系（`features/commands/`）的组装（`specs/M2-W3.md` §2.1）── */
 
   const [paletteOpen, setPaletteOpen] = createSignal(false);
   const [shortcutsOpen, setShortcutsOpen] = createSignal(false);
@@ -325,9 +357,10 @@ export default function App() {
    * 这些命令才在编辑里生效 —— 命令调用的是**当前挂载的那个视图**注册进来的实现
    * （编辑视口那份在 `workspaces/editor/EditorWorkspace.tsx` 里注册）。
    */
-  const activeWorkspaceActions = () => browseActions() ?? importActions() ?? editorActions();
+  const activeWorkspaceActions = () => browseActions() ?? importActions() ?? editorActions() ?? exportActions();
   const viewing = (): boolean => activeWorkspaceActions()?.viewing() ?? false;
   const filmVisible = (): boolean => activeWorkspaceActions()?.filmVisible() ?? false;
+  const exportFlow=()=>shell.workflow()==="export";
   const importFlow = (): boolean => shell.workflow() === "import";
 
   /**
@@ -373,16 +406,16 @@ export default function App() {
     },
     openNewRepository: () => setNewRepositoryRequest((count) => count + 1),
     display: {
-      byTime: () => (importFlow() ? importDisplayByTime() : browseDisplayByTime()),
+      byTime: () => exportFlow()?exportStore.preferences.value().grouped:(importFlow() ? importDisplayByTime() : browseDisplayByTime()),
       setByTime: (value) =>
-        importFlow() ? setImportDisplayByTime(value) : setBrowseDisplayByTime(value),
-      infoMode: () => (importFlow() ? importDisplayInfoMode() : browseDisplayInfoMode()),
-      cycleInfo: () => (importFlow() ? toggleImportTileInfo() : cycleBrowseTileInfo()),
-      tileStep: () => (importFlow() ? importDisplayTileStep() : browseDisplayTileStep()),
+        exportFlow()?exportStore.preferences.update({grouped:value}):importFlow() ? setImportDisplayByTime(value) : setBrowseDisplayByTime(value),
+      infoMode: () => exportFlow()?exportStore.preferences.value().info:(importFlow() ? importDisplayInfoMode() : browseDisplayInfoMode()),
+      cycleInfo: () => exportFlow()?exportStore.preferences.update({info:exportStore.preferences.value().info==="off"?"marks":exportStore.preferences.value().info==="marks"?"marks-name":"off"}):(importFlow() ? toggleImportTileInfo() : cycleBrowseTileInfo()),
+      tileStep: () => exportFlow()?exportStore.preferences.value().topStep:(importFlow() ? importDisplayTileStep() : browseDisplayTileStep()),
       setTileStep: (value) =>
-        importFlow() ? setImportDisplayTileStep(value) : setBrowseDisplayTileStep(value),
+        exportFlow()?exportStore.preferences.update({topStep:value},false):importFlow() ? setImportDisplayTileStep(value) : setBrowseDisplayTileStep(value),
       commitTileStep: () =>
-        importFlow() ? commitImportDisplayTileStep() : commitBrowseDisplayTileStep(),
+        exportFlow()?exportStore.preferences.commit():importFlow() ? commitImportDisplayTileStep() : commitBrowseDisplayTileStep(),
     },
     viewer: {
       viewing,
@@ -430,6 +463,7 @@ export default function App() {
       cycleChrome: () => importActions()?.cycleChrome(),
       toggleCompareStrip: () => importActions()?.toggleCompareStrip(),
     },
+    export: {hasSelection:()=>exportStore.selection().ids.size>0,canEnqueue:()=>exportStore.selectedPreset()!==null&&exportStore.selection().ids.size>0&&!exportStore.busy(),enqueue:()=>exportActions()?.enqueue(),clearSelection:exportStore.clear,selectAll:()=>exportActions()?.selectAll(),reset:()=>exportActions()?.requestReset(),canReset:()=>[...exportStore.queues().values()].some(q=>q.length>0),stopAll:exportStore.stopAll,canStop:()=>exportStore.enabled().size>0,cycleScope:exportStore.cycleScope,save:()=>void exportStore.save()},
     editor: {
       active: () => shell.workflow() === "edit",
       hasPhoto: editorEnabled,
@@ -440,7 +474,11 @@ export default function App() {
       isToolActive: (tool) => editorStore.tool() === tool,
       // 重置全部调整要**同时清库**，所以走工作区注册的那一份实现（不是 store 单独能干的）
       resetDevelop: () => editorActions()?.resetDevelop(),
+      canReset: () => editorActions()?.canReset() ?? false,
+      canFinalize: () => editorActions()?.canFinalize() ?? false,
+      finalize: () => editorActions()?.finalize(),
       autoAdjust: () => editorActions()?.autoAdjust(),
+      canAutoAdjust: () => editorActions()?.canAutoAdjust() ?? false,
     },
   };
 
@@ -500,7 +538,7 @@ export default function App() {
         aboutOpen={aboutOpen()}
         onAboutOpenChange={setAboutOpen}
       />
-      <FlowBar store={shell} exif={selectedMetadata.data()} onFullscreen={fullscreen()} />
+      <FlowBar exportProcessing={exportStore.processing()} store={shell} exif={selectedMetadata.data()} onFullscreen={fullscreen()} />
 
       {/*
         批量排除（`DESIGN.md` §12.2 的**反转**语义）：没有选中项时禁用。
@@ -513,14 +551,16 @@ export default function App() {
         // 选中的照片清单来自网格 —— 外壳只负责把两边接起来
         onBatchExclude={() => importStore.toggleExcluded([...grid.selectedIds()])}
         // 插槽里到底有没有东西，由这里明说（理由见 ToolsBar 的 hasExtraTools）
-        hasExtraTools={shell.workflow() === "browse" || shell.workflow() === "edit"}
+        hasExtraTools={shell.workflow() === "browse" || shell.workflow() === "edit" || exportFlow()}
         /* left/right 盖在全宽 mid 上；mid 按整条 toolsbar 的中心对齐。 */
-        hasLeftTools={shell.workflow() === "edit"}
-        left={<EditorPanelToggles store={editorStore} enabled={editorEnabled()} />}
-        hasRightTools={shell.workflow() === "edit"}
-        right={<EditorResetTool store={editorStore} enabled={editorEnabled()}
+        hasLeftTools={shell.workflow() === "edit" || exportFlow()}
+        left={<Show when={exportFlow()} fallback={<EditorPanelToggles store={editorStore} enabled={editorEnabled()} />}><ExportScopeTool store={exportStore}/></Show>}
+        hasRightTools={shell.workflow() === "edit" || exportFlow()}
+        right={<Show when={exportFlow()} fallback={<EditorResetTool store={editorStore} enabled={editorEnabled()}
           onRequestReset={() => editorActions()?.resetDevelop()}
-          onAutoAdjust={() => editorActions()?.autoAdjust()} />}
+          canReset={() => editorActions()?.canReset() ?? false}
+          canFinalize={() => editorActions()?.canFinalize() ?? false}
+          onFinalize={() => editorActions()?.finalize()} />}><ExportStopTool store={exportStore}/></Show>}
       >
         {/* 浏览模式的工具（标记系列 / 筛选开关 / 锁）由那个模块自己给 —— 见 ToolsBar 的说明 */}
         <Show when={shell.workflow() === "browse"}>
@@ -533,6 +573,8 @@ export default function App() {
         {/* 编辑模式的 mid：画布工具、编辑源、历史动作在同一行整体居中。 */}
         <Show when={shell.workflow() === "edit"}>
           <EditorToolbar store={editorStore} enabled={editorEnabled()}
+            canAutoAdjust={() => editorActions()?.canAutoAdjust() ?? false}
+            onAutoAdjust={() => editorActions()?.autoAdjust()}
             onBaseChange={setEditorBase}
             history={{
               state: browseStore.undoState,
@@ -540,12 +582,13 @@ export default function App() {
               redo: () => void browseStore.redo(),
             }} />
         </Show>
+        <Show when={exportFlow()}><ExportToolbar store={exportStore}/></Show>
       </ToolsBar>
 
       {/*
         工作区跟着工作流走（`AGENTS.md` §11.1）：导入 → 三列导入工作区；
         浏览 → 三列浏览工作区（库目录选择器 / 网格 / 信息栏）。
-        编辑与导出还没做，落到导入那版（M1 的口径，切过去是空的）。
+        编辑与导出分别挂载自己的工作区；导出队列由根层持有。
       */}
       {/*
         标签弹窗（`BROWSE.md` §3.3）：挂在**根层**，不推进 `ToolsBar` 的插槽 ——
@@ -589,7 +632,7 @@ export default function App() {
       <ToastHost store={toast} />
 
       {/*
-        命令面板与快捷键设置（`plans/M2-W3.md`）：都挂在**根层** ——
+        命令面板与快捷键设置（`specs/M2-W3.md`）：都挂在**根层** ——
         它们自己带遮罩与层叠，不能困在条带或工作区的上下文里。
         面板的 `onRun` 走 `runCommand`（与菜单、分发器同一个入口）。
       */}
@@ -614,7 +657,7 @@ export default function App() {
 
       <Show when={shell.workflow() === "browse"} fallback={
         <Show when={shell.workflow() === "edit"} fallback={
-        <ImportWorkspace
+        <Show when={exportFlow()} fallback={<ImportWorkspace
           store={importStore}
           grid={grid}
           toast={toast}
@@ -627,7 +670,7 @@ export default function App() {
           onFilmStripStepChange={(step) => filmStripPrefs.setStep("import", step)}
           /* 命令面板里的「新建库…」靠它打开导入侧的弹窗（状态住在那个工作区） */
           openCreateRequest={newRepositoryRequest()}
-        />
+        />}><ExportWorkspace store={exportStore} browse={browseStore} selectedMetadata={selectedMetadata} leftWidth={layout.prefs().browseLeftWidth} onLeftWidthChange={width=>layout.setBrowseLeftWidth(width)} onOpenLibrarySettings={id=>setLibrarySettingsId(id)}/></Show>
         }>
           {/*
             编辑工作区（M3-W1）：中列的视口在 W2 才会出图；

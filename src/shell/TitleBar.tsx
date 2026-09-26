@@ -47,7 +47,7 @@ import type { AppearanceStore } from "../lib/appearance.ts";
 import { AboutDialog } from "./AboutDialog.tsx";
 import type { ShellStore } from "./store.ts";
 
-/** 标题栏上的菜单顺序（`plans/M2-W3.md` §2.6） */
+/** 标题栏上的菜单顺序（`specs/M2-W3.md` §2.6） */
 const MENU_ORDER = ["file", "edit", "view", "window", "help"] as const;
 type MenuName = (typeof MENU_ORDER)[number];
 

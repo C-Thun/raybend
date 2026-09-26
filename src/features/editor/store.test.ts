@@ -200,3 +200,180 @@ test("确认裁切的比例随照片恢复，取消草稿后重进回到确认�
   assert.equal(store.cropRatioId(), "free", "旧记录没有面板配置时保持已存裁切框，使用自由模式");
   assert.deepEqual(store.geometry()?.crop, saved.crop);
 });
+
+test("基础曲线只进 RAW 载荷，切到 SOOC 禁用，换照片清空", () => {
+  const store = makeStore();
+  store.setBaseCurve("7", [[0, 0], [0.5, 0.6], [1, 1]]);
+  assert.equal(store.baseCurveProfile(), "7");
+  assert.deepEqual(store.developPayload().baseCurvePoints, [[0, 0], [0.5, 0.6], [1, 1]]);
+  store.setEditBase("sooc");
+  assert.equal(store.developPayload().baseCurvePoints, null);
+  store.setEditBase("raw");
+  assert.equal(store.baseCurveProfile(), "7");
+  store.loadDevelop({}, {}, { baseCurveProfile: "none", baseCurvePoints: null });
+  assert.equal(store.baseCurveProfile(), "none");
+  assert.equal(store.developPayload().baseCurvePoints, null);
+  store.loadDevelop({}, {}, {});
+  assert.equal(store.baseCurveProfile(), null);
+});
+
+test("定稿读取保留 LUT 开关的 null/false 区别与拍摄色温", () => {
+  const store = makeStore();
+  store.loadDevelop({}, {}, { lutId: "film", lutEnabled: null, asShotK: 5400 });
+  assert.equal(store.lutEnabled(), false);
+  assert.equal(store.lutEnabledSetting(), null);
+  assert.equal(store.asShotTemperature(), 5400);
+  assert.deepEqual(store.developPayload().values, {});
+  store.applyDevelop({}, {}, { lutId: "film", lutEnabled: false, asShotK: 5600 });
+  assert.equal(store.lutEnabledSetting(), false);
+  assert.equal(store.asShotTemperature(), 5600);
+  store.setLutEnabled(true);
+  assert.equal(store.lutEnabledSetting(), true);
+  store.resetParams();
+  assert.equal(store.lutEnabledSetting(), null);
+});
+
+test("切换定稿与撤销重读完整 profile：编辑源、曲线、基础曲线、LUT、镜头和裁切同步", () => {
+  const store = makeStore();
+  const before = { sourceBase: "raw" as const, asShotK: 5100,
+    baseCurveProfile: "7", baseCurvePoints: [[0, 0], [0.5, 0.6], [1, 1]] as [number, number][],
+    lutId: "film", lutEnabled: true, lensProfile: "Maker|Lens", lensEnabled: true,
+    nrMethod: "high" as const,
+    geometry: { rotation: 2, crop: { x: 0.1, y: 0.1, width: 0.8, height: 0.8 } },
+  };
+  const curve = { rgb: [[0, 0], [0.5, 0.55], [1, 1]] as [number, number][] };
+  store.loadDevelop({ exposure: 0.4, temperature: 6000 }, curve, before);
+  store.applyDevelop({ contrast: 25 }, {}, {
+    sourceBase: "sooc", asShotK: 4800, lutId: "warm", lutEnabled: false,
+    lensProfile: "Other|Lens", lensEnabled: false, geometry: null,
+  });
+  assert.equal(store.editBase(), "sooc");
+  assert.equal(store.lutEnabledSetting(), false);
+  assert.equal(store.developDirty(), true, "切稿也要写入 latest 并进入撤销历史");
+  store.loadDevelop({ exposure: 0.4, temperature: 6000 }, curve, before);
+  assert.equal(store.editBase(), "raw");
+  assert.equal(store.asShotTemperature(), 5100);
+  assert.deepEqual(store.developPayload().values, { exposure: 0.4, temperature: 6000 });
+  assert.deepEqual(store.developPayload().curves, curve);
+  assert.equal(store.baseCurveProfile(), "7");
+  assert.deepEqual(store.baseCurvePoints(), before.baseCurvePoints);
+  assert.equal(store.lutId(), "film");
+  assert.equal(store.lutEnabledSetting(), true);
+  assert.equal(store.lensProfile(), "Maker|Lens");
+  assert.equal(store.lensEnabled(), true);
+  assert.equal(store.nrMethod(), "high");
+  assert.deepEqual(store.geometry(), before.geometry);
+});
+
+const automatic = () => ({ values: { exposure: 0.5, contrast: 12, saturation: 8, lumaNr: 9 },
+  lensProfile: "Maker|AutoLens", lensEnabled: true, nrMethod: "high" as const });
+const basePoints: [number,number][] = [[0,0],[0.5,0.65],[1,1]];
+
+test("两层重置：空照片不可用，返回默认值后也不可用", () => {
+  const store = makeStore();
+  store.setAsShotTemperature(4800);
+  assert.equal(store.resetStage(), "none");
+  store.setParam("exposure", 1);
+  assert.equal(store.resetStage(), "edits");
+  store.setParam("exposure", 0);
+  assert.equal(store.resetStage(), "none", "按实际值判断，不按 dirty 标志判断");
+  store.setNrMethod("fast");
+  store.setLensEnabled(true);
+  assert.equal(store.resetStage(), "none", "默认档与默认启用开关没有额外调整");
+});
+
+test("第一层恢复整套自动结果，保留当前基础曲线；第二层清空并回未选择", () => {
+  const store = makeStore();
+  store.setAsShotTemperature(4800);
+  store.setBaseCurve("5", basePoints);
+  store.applyAutoAdjust(automatic());
+  assert.equal(store.resetStage(), "automatic");
+  store.setParam("exposure", 1);
+  store.setParam("saturation", -20);
+  store.setParam("lumaNr", 30);
+  store.setParam("temperature", 6500);
+  store.setLensProfile("Maker|ManualLens");
+  store.setLensEnabled(false);
+  store.setNrMethod("fast");
+  store.setLut("lut", false);
+  store.setCurvePoints("rgb", [[0,0],[0.5,0.4],[1,1]]);
+  store.setGeometry({ rotation: 10, crop: null, cropRatio: null });
+  assert.equal(store.resetStage(), "edits");
+  const revision = store.developRev();
+  store.resetDevelop("edits");
+  assert.equal(store.developRev(), revision + 1);
+  assert.equal(store.resetStage(), "automatic");
+  assert.deepEqual(store.developPayload().values, automatic().values);
+  assert.equal(store.paramValue("temperature"), 4800);
+  assert.equal(store.lensProfile(), "Maker|AutoLens");
+  assert.equal(store.lensEnabled(), true);
+  assert.equal(store.nrMethod(), "high");
+  assert.deepEqual(store.developPayload().curves, {});
+  assert.equal(store.lutId(), null);
+  assert.equal(store.geometry(), null);
+  assert.equal(store.baseCurveProfile(), "5");
+  assert.deepEqual(store.baseCurvePoints(), basePoints);
+  store.resetDevelop("automatic");
+  assert.equal(store.resetStage(), "none");
+  assert.equal(store.baseCurveProfile(), null);
+  assert.equal(store.baseCurvePoints(), null);
+  assert.equal(store.autoAdjustBaseline(), null);
+  assert.equal(store.lensProfile(), null);
+  assert.equal(store.nrMethod(), null);
+  assert.deepEqual(store.developPayload().values, {});
+});
+
+test("重新读照片或撤销：自动结果恢复，元数据不被手动改写", () => {
+  const store = makeStore();
+  const baseline = automatic();
+  store.loadDevelop({ exposure: 1 }, {}, { autoAdjust: baseline, baseCurveProfile: "5", baseCurvePoints: basePoints });
+  baseline.values.exposure = -1;
+  assert.equal(store.autoAdjustBaseline()?.values.exposure, 0.5, "加载复制元数据");
+  assert.equal(store.resetStage(), "edits");
+  store.resetDevelop("edits");
+  assert.equal(store.paramValue("exposure"), 0.5);
+  store.loadDevelop({}, {}, { baseCurveProfile: "none" });
+  assert.equal(store.autoAdjustBaseline(), null, "新照片不串入自动基线");
+  assert.equal(store.resetStage(), "automatic");
+  store.resetDevelop("automatic");
+  assert.equal(store.baseCurveProfile(), null);
+});
+
+test("自动调整不收编已有手动值与镜头，第一层只保留实际生成项", () => {
+  const store = makeStore();
+  store.setParam("lumaNr", 25);
+  store.setLensProfile("Maker|ManualLens");
+  store.applyAutoAdjust({ values: { exposure: 0.5, bogus: 42, contrast: NaN }, lensProfile: null, lensEnabled: null, nrMethod: null });
+  assert.deepEqual(store.autoAdjustBaseline()?.values, { exposure: 0.5 });
+  assert.equal(store.paramValue("lumaNr"), 25);
+  assert.equal(store.lensProfile(), "Maker|ManualLens");
+  assert.equal(store.resetStage(), "edits");
+  store.resetDevelop("edits");
+  assert.equal(store.paramValue("lumaNr"), 0);
+  assert.equal(store.lensProfile(), null);
+  assert.equal(store.paramValue("exposure"), 0.5);
+});
+
+test("两层重置不切换编辑来源，SOOC 镜头不继承 RAW 自动镜头", () => {
+  const store = makeStore();
+  store.applyAutoAdjust(automatic());
+  store.setEditBase("sooc");
+  store.setLensProfile("Maker|SOOC");
+  store.resetDevelop("edits");
+  assert.equal(store.editBase(), "sooc");
+  assert.equal(store.lensProfile(), null);
+  assert.equal(store.paramValue("exposure"), 0.5);
+  store.resetDevelop("automatic");
+  assert.equal(store.editBase(), "sooc");
+  assert.equal(store.resetStage(), "none");
+});
+
+test("旧档案来源未知：第一层清手动值但保留基础曲线", () => {
+  const store = makeStore();
+  store.loadDevelop({ exposure: 0.8 }, {}, { baseCurveProfile: "5", baseCurvePoints: basePoints });
+  assert.equal(store.resetStage(), "edits");
+  store.resetDevelop("edits");
+  assert.deepEqual(store.developPayload().values, {});
+  assert.equal(store.baseCurveProfile(), "5");
+  assert.equal(store.resetStage(), "automatic");
+});

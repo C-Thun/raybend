@@ -211,11 +211,30 @@ pub fn diff(disk: &[DiskFile], db: &[DbFile]) -> DiffPlan {
         disk_by_path.entry(f.rel_path_folded.as_str()).or_insert(i);
     }
 
+    // 硬链接共用身份，不能任意把其中一条认作移动；歧义时走路径配对。
+    let mut db_identity_count = HashMap::new();
+    let mut disk_identity_count = HashMap::new();
+    for file in db {
+        if let Some(id) = file.identity.filter(|id| !id.is_zero()) {
+            *db_identity_count.entry(identity_key(&id)).or_insert(0) += 1;
+        }
+    }
+    for file in disk {
+        if let Some(id) = file.identity.filter(|id| !id.is_zero()) {
+            *disk_identity_count.entry(identity_key(&id)).or_insert(0) += 1;
+        }
+    }
+
     // ── 第一轮：身份配对（最强证据：改名/移动都认得出来）──
     for (i, f) in db.iter().enumerate() {
         let Some(id) = f.identity.as_ref().filter(|v| !v.is_zero()) else {
             continue;
         };
+        if db_identity_count.get(&identity_key(id)) != Some(&1)
+            || disk_identity_count.get(&identity_key(id)) != Some(&1)
+        {
+            continue;
+        }
         let Some(&j) = disk_by_identity.get(&identity_key(id)) else {
             continue;
         };
@@ -354,7 +373,7 @@ fn classify(
 
     let size_same = d.size_bytes == Some(s.size_bytes);
     let mtime_same = match (d.mtime_ms, s.mtime_ms) {
-        (Some(a), Some(b)) => (a - b).abs() <= MTIME_TOLERANCE_MS,
+        (Some(a), Some(b)) => a == b,
         // 有一边读不到时间戳：不据此判定「改过」，免得把只读不出的盘判成天天在变
         _ => true,
     };
@@ -522,11 +541,11 @@ mod tests {
     }
 
     #[test]
-    fn mtime_jitter_within_tolerance_is_unchanged() {
-        // 网络盘/FAT 的时间精度可能差一两秒，不该被判成「天天都在变」
+    fn small_mtime_change_is_modified() {
+        // 时间容差只用于猜测改名；同路径内容变化必须精确识别。
         let files = [disk("a.jpg", 100, 6_000)];
         let rows = [db(7, 3, "a.jpg", 100, 5_000)];
-        assert_eq!(diff(&files, &rows).unchanged.len(), 1);
+        assert_eq!(diff(&files, &rows).modified.len(), 1);
     }
 
     #[test]

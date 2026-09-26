@@ -1,6 +1,6 @@
 -- catalog.db（每库一个）schema v3：文件记录上的**源身份**列
 --
--- 出处：REPOSITORY.md §4.3（避免重复导入）、plans/M1-6.md §3.3。
+-- 出处：REPOSITORY.md §4.3（避免重复导入）、specs/M1-6.md §3.3。
 --
 -- 为什么不能复用现有的 volume_serial / file_id：那两列是**库内那个文件**的身份
 -- （M1-3 的差分、改名识别、缺失检测全靠它）。而「这张源文件之前导进来过吗」

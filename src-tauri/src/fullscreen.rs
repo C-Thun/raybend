@@ -36,9 +36,7 @@
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
-use tauri::{
-    AppHandle, Emitter, Manager, Runtime, State, WebviewUrl, WebviewWindowBuilder,
-};
+use tauri::{AppHandle, Emitter, Manager, Runtime, State, WebviewUrl, WebviewWindowBuilder};
 
 use crate::MAIN_WINDOW_LABEL;
 
@@ -48,14 +46,23 @@ pub const FULLSCREEN_LABEL: &str = "fullscreen-viewer";
 /// 清单更新事件（页面已在运行时换图用）。
 pub const FULLSCREEN_EVENT: &str = "fullscreen://payload";
 
-/// 全屏页需要的一张照片（**只有页面真的用到的三个字段**）。
+/// 全屏页需要的一张照片及可选的明确导出稿引用。
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FullscreenItem {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub export_variant: Option<FullscreenVariant>,
     pub id: String,
     /// 绝对路径（`view_image` 直接吃它）
     pub path: String,
     pub file_name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FullscreenVariant {
+    pub repository_id: String,
+    pub reference: raybend::export::VariantRef,
 }
 
 /// 一次全屏会话的清单与当前下标。
@@ -290,7 +297,10 @@ pub async fn fullscreen_open<R: Runtime>(
             let size = monitor.size();
             builder = builder
                 .position(f64::from(position.x) / scale, f64::from(position.y) / scale)
-                .inner_size(f64::from(size.width) / scale, f64::from(size.height) / scale);
+                .inner_size(
+                    f64::from(size.width) / scale,
+                    f64::from(size.height) / scale,
+                );
         }
     }
     if let Some(canvas) = canvas {
@@ -376,7 +386,33 @@ mod tests {
             id: format!("id-{name}"),
             path: format!("/photos/{name}"),
             file_name: name.to_string(),
+            export_variant: None,
         }
+    }
+
+    #[test]
+    fn issue_reference_roundtrips_and_legacy_items_remain_compatible() {
+        let legacy = serde_json::from_str::<FullscreenItem>(
+            r#"{"id":"1","path":"C:/photos/a.jpg","fileName":"a.jpg"}"#,
+        )
+        .unwrap();
+        assert!(legacy.export_variant.is_none());
+        let issue = FullscreenItem {
+            export_variant: Some(FullscreenVariant {
+                repository_id: "中文库".into(),
+                reference: raybend::export::VariantRef {
+                    asset_id: 1,
+                    variant: "issue:2".into(),
+                },
+            }),
+            ..legacy
+        };
+        let json = serde_json::to_value(&issue).unwrap();
+        assert_eq!(json["exportVariant"]["reference"]["assetId"], 1);
+        assert_eq!(
+            serde_json::from_value::<FullscreenItem>(json).unwrap(),
+            issue
+        );
     }
 
     #[test]

@@ -1,5 +1,5 @@
 /**
- * 看图动作的**当前挂载槽**（`plans/M2-W3.md` §2.5 步骤 3）。
+ * 看图动作的**当前挂载槽**（`specs/M2-W3.md` §2.5 步骤 3）。
  *
  * ## 为什么需要它
  *
@@ -16,6 +16,8 @@
  */
 
 /** 看图动作（两种形态各自实现同一套语义） */
+import { createActionSlot } from "../../../lib/action-slot.ts";
+
 export interface ViewerActions {
   /** 放大一档（锚点由实现自己决定：单张居中、对比按当前画幅） */
   zoomIn: () => void;
@@ -30,14 +32,14 @@ export interface ViewerActions {
   close: () => void;
 }
 
-let current: ViewerActions | null = null;
+const slot = createActionSlot<ViewerActions>();
 
 /** 视图挂载时注册自己那份实现；卸载时传 `null` 清空 */
 export function registerViewerActions(actions: ViewerActions | null): void {
-  current = actions;
+  slot.register(actions);
 }
 
 /** 当前生效的那一份（没挂载看图视图时为 `null`） */
 export function viewerActions(): ViewerActions | null {
-  return current;
+  return slot.read();
 }

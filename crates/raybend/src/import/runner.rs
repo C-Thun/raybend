@@ -20,7 +20,7 @@
 //!    ```
 //!
 //!    这样任何时刻被杀，重开都能凭 `target_rel` + 状态判断这条到底落没落
-//!    （`plans/M1-6.md` §3.3 的续跑语义）。
+//!    （`specs/M1-6.md` §3.3 的续跑语义）。
 //! 4. **跳过的文件不消耗序号**、**单条失败不打断整批**。
 //!
 //! ## 注入点
@@ -225,7 +225,7 @@ fn decode(value: u8) -> ImportState {
 /// 导入过程中所有落库动作的出口（真实实现见 `src-tauri`，用 `catalog.db`）。
 ///
 /// 拆这么细不是过度设计：每一行都对着 `import_items.status` 的一次状态迁移，
-/// 顺序错了崩溃续跑就会误判（`plans/M1-6.md` §3.3）。
+/// 顺序错了崩溃续跑就会误判（`specs/M1-6.md` §3.3）。
 pub trait ImportSink {
     /// 判重用的「已导入过的源」（关掉判重时不必调）。
     fn known_sources(&mut self) -> Result<KnownSources>;
@@ -463,7 +463,7 @@ impl Deps<'_> {
 
         // 续跑：上次「复制了但还没登记」且**大小相符**的目标路径。
         // 交给规划器当「我们自己占着的」—— 否则重名规则会给它加 `_01`，
-        // 同一张照片就有两份了（`plans/M1-6.md` §7 风险 10）。
+        // 同一张照片就有两份了（`specs/M1-6.md` §7 风险 10）。
         let stale = self.sink.stale_pending()?;
         let mut resumable: Reserved = Reserved::new();
         let mut adopt: plan::Adopt = plan::Adopt::new();

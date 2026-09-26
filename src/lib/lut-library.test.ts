@@ -125,3 +125,19 @@ test("默认分类：默认名字是垃圾时退回中文名（存储里的脏�
   const built = ensureDefaultLutCategory([], "   ", () => 0.5);
   assert.equal(built[0]!.name, "默认分类");
 });
+
+
+test("隐藏 LUT 不显示或计数，但其文件可用性仍保留给编辑引用", async () => {
+  const { visibleLutCategories, lutCount } = await import("./lut-library.ts");
+  const categories = [{ id: "one", name: "默认", entries: [
+    { id: "visible", name: "A", available: true },
+    { id: "hidden", name: "B", hidden: true, available: true },
+    { id: "missing", name: "C", available: false },
+  ] }, { id: "empty", name: "空分类", entries: [] }];
+  assert.equal(lutCount(categories), 2);
+  const visible = visibleLutCategories(categories);
+  assert.deepEqual(visible[0]?.entries.map((entry) => entry.id), ["visible", "missing"]);
+  assert.equal(visible[1]?.entries.length, 0);
+  assert.equal(categories[0]?.entries.length, 3);
+  assert.equal(categories[0]?.entries.find((entry) => entry.id === "hidden")?.available, true);
+});

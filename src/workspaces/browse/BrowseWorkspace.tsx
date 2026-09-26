@@ -34,7 +34,7 @@ import {
   listRepositories,
   readFileExif,
   remountRepository,
-  syncDirectoryCounts,
+  onCatalogChanged,
 } from "../../api/db.ts";
 import type { RepositoryView } from "../../api/types.ts";
 import {
@@ -68,7 +68,7 @@ import {
   setBrowseDisplayTileStep,
 } from "../../lib/display-prefs.ts";
 import { browseInfoMode, cycleBrowseTileInfo } from "../../components/ui/tile-info.ts";
-import { t } from "../../i18n/index.ts";
+import { locale, t } from "../../i18n/index.ts";
 import { Button } from "../../components/ui/Button.tsx";
 import { ConfirmDialog, Dialog } from "../../components/ui/Dialog.tsx";
 import type { ToastStore } from "../../components/ui/Toast.tsx";
@@ -77,7 +77,8 @@ import { SplitHandle } from "../../components/ui/SplitHandle.tsx";
 import { nudgeWidth, resizeWidth } from "../../lib/column-resize.ts";
 import { joinPath } from "../../lib/paths.ts";
 import { assetItemExif, toExifData, type SelectedFileMetadata } from "../../features/exif-strip/index.ts";
-import { getDevelopEditTarget } from "../../api/editor.ts";
+import { commitDevelopStack, getDevelopEditTarget, refreshDevelopPreview, type DevelopStack } from "../../api/editor.ts";
+import { getIssueLibrary, type IssueLibrary } from "../../api/issues.ts";
 import { LAYOUT_BOUNDS } from "../../lib/layout-prefs.ts";
 
 /**
@@ -177,7 +178,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
    */
   const [libsExpanded, setLibsExpanded] = createSignal(false);
   /**
-   * 排序的五个键（`plans/M2-W2-tail.md` 3.5；引擎 `BrowseSort` 早就支持）。
+   * 排序的五个键（`specs/M2-W2-tail.md` 3.5；引擎 `BrowseSort` 早就支持）。
    *
    * 文案用**静态映射**而不是拼键名：`t()` 的键是字面量联合类型，拼出来的字符串过不了类型检查
    * （这是有意为之 —— 拼错的键不会等到运行时才发现）。
@@ -232,7 +233,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
    * 看图（`components/ui/viewer/` 的共享件）。
    *
    * 取图走**统一取图口**（`getViewImage` → Rust 侧 `display` 模块，
-   * 见 `plans/M2-W2.md` §2.1）：屏幕档由它决定「给原图还是渲染」，
+   * 见 `specs/M2-W2.md` §2.1）：屏幕档由它决定「给原图还是渲染」，
    * 小图（秒显的底）还是网格那套缓存。这里只负责「谁触发打开」。
    */
   const viewer = createViewerStore({
@@ -241,7 +242,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
   });
 
   /*
-   * 缩略图队列：**网格与胶片带共用同一个**（`plans/M2-W2.md` 2.1）。
+   * 缩略图队列：**网格与胶片带共用同一个**（`specs/M2-W2.md` 2.1）。
    *
    * 为什么提到工作区这一层：两个消费方都在中列，展示的也是同一个目录的照片 ——
    * 各建一个的话，同一张照片会被取两遍（多一趟 IPC + 两份内存），
@@ -259,6 +260,67 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
     thumbs.clear();
   });
   onCleanup(() => thumbs.clear());
+  const [issueLibrary, setIssueLibrary] = createSignal<IssueLibrary | null>(null);
+  const [issueBusy, setIssueBusy] = createSignal(false);
+  const [issueError, setIssueError] = createSignal<string | null>(null);
+  const [issueRefreshTick, setIssueRefreshTick] = createSignal(0);
+  createEffect(() => {
+    const repositoryId = store.repositoryId();
+    const assetId = store.anchorItem()?.id;
+    store.undoTick();
+    issueRefreshTick();
+    if (repositoryId === null || assetId === undefined) { setIssueLibrary(null); return; }
+    let active = true;
+    void getIssueLibrary(repositoryId, assetId, locale() === "en-US")
+      .then((library) => { if (active) setIssueLibrary(library); })
+      .catch((error: unknown) => { if (active) { setIssueLibrary(null); setIssueError(String(error)); } });
+    onCleanup(() => { active = false; });
+  });
+  createEffect(() => {
+    const tick = store.undoTick();
+    if (tick === 0) return;
+    const item = store.anchorItem();
+    const base = root();
+    if (item === null || base === null) return;
+    const path = joinPath(base, item.relPath);
+    thumbs.refresh(path);
+    if (viewer.current()?.id === String(item.id)) viewer.reloadCurrent();
+  });
+  const selectBrowseIssue = async (choice: string): Promise<void> => {
+    if (issueBusy()) return;
+    const repositoryId = store.repositoryId();
+    const item = store.anchorItem();
+    const library = issueLibrary();
+    const base = root();
+    if (repositoryId === null || item === null || library === null || base === null) return;
+    if (choice === "latest") return;
+    const currentChoice = typeof library.selection === "string"
+      ? library.selection : `issue:${library.selection.issue}`;
+    if (choice === currentChoice) return;
+    let stack: DevelopStack;
+    if (choice === "raw" || choice === "sooc") {
+      stack = { sourceBase: choice, values: {}, curves: {} };
+    } else {
+      const issue = library.issues.find((entry) => `issue:${entry.id}` === choice);
+      if (issue === undefined) return;
+      stack = issue.stack;
+    }
+    const path = joinPath(base, item.relPath);
+    setIssueBusy(true);
+    setIssueError(null);
+    try {
+      const result = await commitDevelopStack(repositoryId, item.id, stack);
+      store.noteDevelopCommit(result);
+      if (store.repositoryId() === repositoryId && store.anchorItem()?.id === item.id) {
+        setIssueRefreshTick((value) => value + 1);
+        thumbs.refresh(path);
+        if (viewer.current()?.id === String(item.id)) viewer.reloadCurrent();
+      }
+      void refreshDevelopPreview(path).catch((error: unknown) => setIssueError(String(error)));
+    } catch (error) { setIssueError(String(error)); }
+    finally { setIssueBusy(false); }
+  };
+
 
   /*
    * view / film / compare 的状态、锚点与尺寸补读只在共享控制器里维护。
@@ -356,7 +418,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
    * 看图件只负责照片本身的缩放/平移（职责分开，换渲染层时这里不用动）。
    */
   /*
-   * 键盘（`plans/M2-W2-tail.md` 5.2）：「事件 → 意图」的映射在 `features/browse/keys.ts`
+   * 键盘（`specs/M2-W2-tail.md` 5.2）：「事件 → 意图」的映射在 `features/browse/keys.ts`
    * （纯函数、逐条有测），这里只把意图落到 store / viewer / 弹窗上。
    *
    * 冲突与分工：
@@ -367,7 +429,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
    * * `Delete` 永远要确认（人类 2026-09-19 的批注：删除能批量，不需要 easy destroy）。
    */
   /*
-   * 键盘与「主要操作」的入口统一交给**命令注册表**（`plans/M2-W3.md` §2.5）：
+   * 键盘与「主要操作」的入口统一交给**命令注册表**（`specs/M2-W3.md` §2.5）：
    * 这里只把自己那份**动作**注册进 `features/browse/actions.ts`，
    * 命令（`mark.rating.3` / `nav.open` / `viewer.close` / `view.chrome.cycle` …）通过它取用。
    *
@@ -571,30 +633,16 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
     }),
   );
 
-  /*
-   * **进目录时同步计数**（人类 2026-09-19 的数量体系）。
-   *
-   * 每次 scope 变化都读盘数一次这个目录（本目录 + 它自己的 `_RAW`），与 `app.db` 里那行对比；
-   * 不一样就写回去、并把差值滚到库级汇总 —— 于是「程序外面往目录里加了照片」这种事实
-   * 立刻体现在卡片上，不需要谁去点刷新。
-   */
-  createEffect(() => {
-    const id = store.repositoryId();
-    const scope = store.scopePath();
-    if (id === null || scope === null) return;
-    void syncDirectoryCounts(id, scope)
-      .then((result: [[number, number], [number, number]] | null) => {
-        // 数字变了才刷新列表（避免每次滚动都重读一遍库）
-        if (result === null) return;
-        const [, totals] = result;
-        const current = repositories().find((repo) => repo.id === id);
-        if (current === undefined) return;
-        if (current.photosCount === totals[0] && current.imagesCount === totals[1]) return;
-        void refreshRepositories();
-      })
-      .catch(() => {
-        // 同步失败不打扰用户：卡片上的数字保持上一次已知的值
-      });
+  onMount(() => {
+    let disposed = false;
+    let off: (() => void) | undefined;
+    void onCatalogChanged((change) => {
+      if (change.repositoryId !== store.repositoryId()) return;
+      for (const path of change.paths) if (thumbs.get(path).status !== "idle") thumbs.refresh(path);
+      viewer.invalidatePaths(change.paths);
+      void refreshRepositories();
+    }).then((unsubscribe) => { if (disposed) unsubscribe(); else off = unsubscribe; });
+    onCleanup(() => { disposed = true; off?.(); });
   });
 
   /**
@@ -762,6 +810,10 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
               /* 对比态不画视野框：好几个窗口，一个框描述不了 */
               comparing={viewing.comparing()}
               /* 「所属库」那一行：名字住在工作区（它拿着库列表） */
+              issueLibrary={issueLibrary()}
+              issueBusy={issueBusy()}
+              issueError={issueError()}
+              onSelectIssue={(choice) => void selectBrowseIssue(choice)}
               repositoryName={
                 repositories().find((repo) => repo.id === store.repositoryId())?.name ?? null
               }

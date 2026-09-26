@@ -222,6 +222,7 @@ export function browseSource(deps: BrowseSourceDeps): TilesSource {
 
   return {
     count: () => order().ids.length,
+    idAt: (index) => order().ids[index] ?? null,
     itemAt: (index) => {
       const dataIndex = dataIndexAt(index);
       return dataIndex === undefined ? null : toGridItem(dataIndex);
@@ -277,9 +278,8 @@ export function browseSource(deps: BrowseSourceDeps): TilesSource {
     },
     select: (id, mode) => store.select(Number(id), mode, [...order().ids]),
     setAnchor: (id) => store.setAnchor(Number(id)),
-    selectGroupRange: (start, count, additive) => {
-      const ids = order().ids.slice(start, start + count);
-      store.selectAll(additive === true ? ids : ids);
+    selectGroupRange: (start, count) => {
+      store.toggleGroup(order().ids.slice(start, start + count));
     },
     clearSelection: () => store.clearSelection(),
     infoMode: () => deps.infoMode(),

@@ -103,6 +103,21 @@ pub const APP_MIGRATIONS: &[Migration] = &[
         name: "directory_counts",
         sql: include_str!("migrations/app_0004_directory_counts.sql"),
     },
+    Migration {
+        version: 5,
+        name: "base_curves",
+        sql: include_str!("migrations/app_0005_base_curves.sql"),
+    },
+    Migration {
+        version: 6,
+        name: "luts",
+        sql: include_str!("migrations/app_0006_luts.sql"),
+    },
+    Migration {
+        version: 7,
+        name: "lut_hash",
+        sql: include_str!("migrations/app_0007_lut_hash.sql"),
+    },
 ];
 
 /// `catalog.db` 的迁移列表。**版本必须从 1 开始连续递增**。
@@ -163,6 +178,21 @@ pub const CATALOG_MIGRATIONS: &[Migration] = &[
         name: "edit_geometry",
         sql: include_str!("migrations/catalog_0009_edit_geometry.sql"),
     },
+    Migration {
+        version: 10,
+        name: "base_curve",
+        sql: include_str!("migrations/catalog_0010_base_curve.sql"),
+    },
+    Migration {
+        version: 11,
+        name: "issues",
+        sql: include_str!("migrations/catalog_0011_issues.sql"),
+    },
+    Migration {
+        version: 12,
+        name: "auto_adjust",
+        sql: include_str!("migrations/catalog_0012_auto_adjust.sql"),
+    },
 ];
 
 /// 缩略图缓存库 `thumbs.db` 的迁移列表。
@@ -180,7 +210,7 @@ pub const BACKUP_KEEP: usize = 7;
 /// 快照策略：往哪放、以及文件名里怎么区分。
 ///
 /// `app.db` 与所有 `catalog.db` 的快照**共用一个备份目录**（`<app data>/backups/`，
-/// 见 `plans/M1-2.md` §3.5），所以 catalog 必须带上库里身份的短标识 ——
+/// 见 `specs/M1-2.md` §3.5），所以 catalog 必须带上库里身份的短标识 ——
 /// 否则轮转时会把别的库的备份挤掉，那是最不该发生的事之一。
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Backups<'a> {
@@ -379,22 +409,28 @@ fn apply_list_with_hook(
     }
 
     // ①.5 告诉外壳「要开始升级了」——界面据此挡住用户操作，升级完再放开
-    notify(hook, MigrationNotice {
-        kind,
-        from: current,
-        to: target,
-        phase: MigrationPhase::Start,
-    });
+    notify(
+        hook,
+        MigrationNotice {
+            kind,
+            from: current,
+            to: target,
+            phase: MigrationPhase::Start,
+        },
+    );
 
     let outcome = run(conn, kind, migrations, backups, now_ms, current, target);
 
     // ⑤ 收尾通知：**成不成都发** —— 失败时界面同样要撤掉遮罩（错误由调用方抛给用户看）
-    notify(hook, MigrationNotice {
-        kind,
-        from: current,
-        to: target,
-        phase: MigrationPhase::Done,
-    });
+    notify(
+        hook,
+        MigrationNotice {
+            kind,
+            from: current,
+            to: target,
+            phase: MigrationPhase::Done,
+        },
+    );
 
     outcome
 }
@@ -647,8 +683,11 @@ mod tests {
             1_789_516_800_000,
         )
         .unwrap();
-        assert_eq!((out.from, out.to), (0, 9));
-        assert_eq!(out.applied, vec![1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        assert_eq!((out.from, out.to), (0, supported_version(DbKind::Catalog)));
+        assert_eq!(
+            out.applied,
+            (1..=supported_version(DbKind::Catalog)).collect::<Vec<_>>()
+        );
         for table in [
             "repository_meta",
             "assets",
@@ -727,6 +766,146 @@ mod tests {
     }
 
     #[test]
+    fn lut_hash_upgrade_keeps_legacy_ids_duplicates_and_missing_files() {
+        let mut conn = mem();
+        apply_list(
+            &mut conn,
+            DbKind::App,
+            &APP_MIGRATIONS[..6],
+            Backups::none(),
+            1,
+        )
+        .unwrap();
+        conn.execute_batch("INSERT INTO lut_categories VALUES ('default','默认分类',0,1);
+            INSERT INTO luts VALUES ('one','default','同名.cube','同名.cube','C:/old.cube','one/source.cube','one/cover.webp','cube',0,1);
+            INSERT INTO luts VALUES ('two','default','同名.cube','同名.cube','C:/old.cube','two/source.cube','two/cover.webp','cube',1,2);").unwrap();
+        let out = apply(&mut conn, DbKind::App, Backups::none(), 2).unwrap();
+        assert_eq!(out.from, 6);
+        assert!(out.applied.contains(&7));
+        let records = crate::store::luts::entries(&conn, true).unwrap();
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].id, "one");
+        assert_eq!(records[1].id, "two");
+        assert!(records.iter().all(|entry| entry.file_hash.is_none()));
+        assert!(records[1].hidden);
+        assert!(
+            apply(&mut conn, DbKind::App, Backups::none(), 3)
+                .unwrap()
+                .applied
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn legacy_edit_stack_migrates_to_explicit_no_base_curve() {
+        let mut conn = mem();
+        apply_list(
+            &mut conn,
+            DbKind::Catalog,
+            &CATALOG_MIGRATIONS[..9],
+            Backups::none(),
+            1,
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO assets(id, taken_at, imported_at, updated_at) VALUES (1, 1, 1, 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO develop_stacks(asset_id, created_at, updated_at) VALUES (1, 1, 1)",
+            [],
+        )
+        .unwrap();
+        let out = apply(&mut conn, DbKind::Catalog, Backups::none(), 2).unwrap();
+        assert_eq!(
+            out.applied,
+            (10..=supported_version(DbKind::Catalog)).collect::<Vec<_>>()
+        );
+        let (choice, points): (Option<String>, Option<String>) = conn.query_row(
+            "SELECT base_curve_profile, base_curve_points FROM develop_stacks WHERE asset_id = 1",
+            [], |row| Ok((row.get(0)?, row.get(1)?)),
+        ).unwrap();
+        assert_eq!(choice.as_deref(), Some("none"));
+        assert!(points.is_none());
+    }
+
+    #[test]
+    fn v10_latest_profile_survives_issue_schema_migration() {
+        let mut conn = mem();
+        apply_list(
+            &mut conn,
+            DbKind::Catalog,
+            &CATALOG_MIGRATIONS[..10],
+            Backups::none(),
+            1,
+        )
+        .unwrap();
+        conn.execute_batch("INSERT INTO assets(id,imported_at,updated_at) VALUES(1,1,1);
+            INSERT INTO develop_stacks(asset_id,source_base,base_curve_profile,created_at,updated_at)
+            VALUES(1,'sooc','none',1,1);
+            INSERT INTO develop_params(asset_id,param_id,value) VALUES(1,'exposure',0.65);").unwrap();
+        let before: (String, String, f64) = conn.query_row(
+            "SELECT source_base,base_curve_profile,(SELECT value FROM develop_params WHERE asset_id=1 AND param_id='exposure') FROM develop_stacks WHERE asset_id=1",
+            [], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?))).unwrap();
+        let result = apply(&mut conn, DbKind::Catalog, Backups::none(), 2).unwrap();
+        assert_eq!(
+            result.applied,
+            (11..=supported_version(DbKind::Catalog)).collect::<Vec<_>>()
+        );
+        let after: (String, String, f64) = conn.query_row(
+            "SELECT source_base,base_curve_profile,(SELECT value FROM develop_params WHERE asset_id=1 AND param_id='exposure') FROM develop_stacks WHERE asset_id=1",
+            [], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?))).unwrap();
+        assert_eq!(after, before);
+        let issue_count: i64 = conn
+            .query_row("SELECT count(*) FROM issues", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(issue_count, 0);
+    }
+
+    #[test]
+    fn v12_adds_unknown_automatic_baseline_without_changing_existing_profiles() {
+        let mut conn = mem();
+        apply_list(
+            &mut conn,
+            DbKind::Catalog,
+            &CATALOG_MIGRATIONS[..11],
+            Backups::none(),
+            1,
+        )
+        .unwrap();
+        conn.execute_batch("INSERT INTO assets(id,imported_at,updated_at) VALUES(1,1,1);
+            INSERT INTO develop_stacks(asset_id,source_base,base_curve_profile,created_at,updated_at) VALUES(1,'raw','5',1,1);
+            INSERT INTO develop_params(asset_id,param_id,value) VALUES(1,'exposure',0.65);").unwrap();
+        let old = super::super::develop::load(&conn, 1);
+        assert!(old.is_err(), "v11 不含 auto_adjust 列");
+        let legacy = super::super::develop::DevelopStack {
+            params: [("exposure".to_owned(), 0.65)].into(),
+            base_curve_profile: Some("5".into()),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&legacy).unwrap();
+        let hash = super::super::issues::profile_hash(&legacy).unwrap();
+        conn.execute("INSERT INTO issues(asset_id,name,profile_json,profile_hash,source_base,created_at) VALUES(1,'旧档案',?1,?2,'raw',1)", rusqlite::params![json,hash]).unwrap();
+        apply(&mut conn, DbKind::Catalog, Backups::none(), 2).unwrap();
+        let after = super::super::develop::load(&conn, 1).unwrap();
+        assert_eq!(after, legacy);
+        let issues = super::super::issues::list(&conn, 1).unwrap();
+        assert_eq!(issues[0].profile_hash, hash);
+        assert_eq!(issues[0].stack.auto_adjust, None);
+        assert_eq!(
+            super::super::issues::selection(&after, &issues).unwrap(),
+            super::super::issues::Selection::Issue(issues[0].id)
+        );
+        assert!(
+            apply(&mut conn, DbKind::Catalog, Backups::none(), 3)
+                .unwrap()
+                .applied
+                .is_empty()
+        );
+    }
+
+    #[test]
     fn existing_catalog_db_upgrades_from_v2_to_v3_without_losing_data() {
         // 真实升级路径：一个已经导入过照片的库（v2），升级后旧记录必须原样还在 ——
         // 用户最不可原谅的失败就是升级把库写坏（AGENTS.md §8 #5）
@@ -758,9 +937,22 @@ mod tests {
         )
         .unwrap();
 
-        let out = apply(&mut conn, DbKind::Catalog, Backups::none(), 1_789_516_800_001).unwrap();
-        assert_eq!((out.from, out.to), (2, 9), "只补跑 v3..v9");
-        assert_eq!(out.applied, vec![3, 4, 5, 6, 7, 8, 9]);
+        let out = apply(
+            &mut conn,
+            DbKind::Catalog,
+            Backups::none(),
+            1_789_516_800_001,
+        )
+        .unwrap();
+        assert_eq!(
+            (out.from, out.to),
+            (2, supported_version(DbKind::Catalog)),
+            "只补跑缺失版本"
+        );
+        assert_eq!(
+            out.applied,
+            (3..=supported_version(DbKind::Catalog)).collect::<Vec<_>>()
+        );
 
         // 旧行还在，且新列是 NULL（不是被填了垃圾值）
         let (path, size, src_vol): (String, i64, Option<i64>) = conn
@@ -1021,8 +1213,7 @@ mod tests {
         .unwrap_err();
         assert!(matches!(err, Error::Migration { version: 2, .. }));
 
-        let phases: Vec<MigrationPhase> =
-            seen.lock().unwrap().iter().map(|n| n.phase).collect();
+        let phases: Vec<MigrationPhase> = seen.lock().unwrap().iter().map(|n| n.phase).collect();
         assert_eq!(
             phases,
             vec![MigrationPhase::Start, MigrationPhase::Done],
@@ -1497,17 +1688,31 @@ mod tests {
     #[test]
     fn lens_channel_migration_preserves_legacy_red_and_blue_displacements() {
         let mut conn = mem();
-        apply_list(&mut conn, DbKind::Catalog, &CATALOG_MIGRATIONS[..7], Backups::none(), 1).unwrap();
+        apply_list(
+            &mut conn,
+            DbKind::Catalog,
+            &CATALOG_MIGRATIONS[..7],
+            Backups::none(),
+            1,
+        )
+        .unwrap();
         conn.execute_batch("INSERT INTO assets(id, taken_at, imported_at, updated_at) VALUES(1,1,1,1),(2,1,1,1);
             INSERT INTO develop_stacks(asset_id,created_at,updated_at) VALUES(1,1,1),(2,1,1);
             INSERT INTO develop_params(asset_id,param_id,value) VALUES(1,'chromatic',35),(2,'chromatic',-20);").unwrap();
-        let out = apply(&mut conn,DbKind::Catalog,Backups::none(),2).unwrap();
-        assert_eq!(out.applied,vec![8, 9]);
-        for (id, red) in [(1,35.0),(2,-20.0)] {
+        let out = apply(&mut conn, DbKind::Catalog, Backups::none(), 2).unwrap();
+        assert_eq!(
+            out.applied,
+            (8..=supported_version(DbKind::Catalog)).collect::<Vec<_>>()
+        );
+        for (id, red) in [(1, 35.0), (2, -20.0)] {
             let value: f64 = conn.query_row("SELECT value FROM develop_params WHERE asset_id=?1 AND param_id='chromaticBlue'",[id],|r|r.get(0)).unwrap();
-            assert_eq!(value,-red);
+            assert_eq!(value, -red);
         }
-        assert!(apply(&mut conn,DbKind::Catalog,Backups::none(),3).unwrap().applied.is_empty());
+        assert!(
+            apply(&mut conn, DbKind::Catalog, Backups::none(), 3)
+                .unwrap()
+                .applied
+                .is_empty()
+        );
     }
-
 }

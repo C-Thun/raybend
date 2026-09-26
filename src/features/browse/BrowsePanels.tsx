@@ -15,12 +15,13 @@ import {
   For,
   on,
   onCleanup,
+  onMount,
   Show,
   type JSX,
 } from "solid-js";
 import { IconDots, IconFolderMinus, IconFolderPlus } from "@tabler/icons-solidjs";
 
-import { dirCreate, dirEmptyCheck, dirRemoveEmpty, listDirs } from "../../api/db.ts";
+import { dirCreate, dirEmptyCheck, dirRemoveEmpty, listDirs, syncDirectoryCounts, onCatalogDirty } from "../../api/db.ts";
 import { Button } from "../../components/ui/Button.tsx";
 import { MetadataRows, type MetadataRow } from "../../components/ui/MetadataRows.tsx";
 import { RepositoryCard } from "../../components/ui/RepositoryCard.tsx";
@@ -28,6 +29,7 @@ import { ConfirmDialog, Dialog } from "../../components/ui/Dialog.tsx";
 import { Input } from "../../components/ui/Form.tsx";
 import { Menu } from "../../components/ui/Menu.tsx";
 import type { AssetItem, DirEmptyView, FileExif, RepositoryView } from "../../api/types.ts";
+import type { IssueLibrary } from "../../api/issues.ts";
 import { locale, t } from "../../i18n/index.ts";
 
 import type { ViewerStore } from "../../components/ui/viewer/index.ts";
@@ -184,12 +186,16 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
 
   /** 读某一级的子目录（懒加载，读到的存进 `children`）。
    *  `relPath` 是**库内相对路径**：树的根那一级传 `PHOTOS_DIR`（即 `photos`）。 */
-  async function loadChildren(relPath: string): Promise<void> {
+  async function loadChildren(relPath: string, reconcile = true): Promise<void> {
     const base = root();
     if (base === null) return;
     const abs = relPath === "" ? base : `${base.replace(/\/+$/, "")}/${relPath}`;
+    const repositoryId = store.repositoryId();
+    if (repositoryId === null) return;
     try {
       const entries = await listDirs(abs);
+      if (reconcile) await syncDirectoryCounts(repositoryId, store.scopePath() ?? relPath, [relPath]);
+      if (base !== root() || repositoryId !== store.repositoryId()) return;
       // 保留目录 `_RAW` 不进树（`REPOSITORY.md` §4.1），别的原样
       const visible = visibleChildDirs(entries);
       setChildren((prev) => {
@@ -207,11 +213,31 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
         }
         return next;
       });
-    } catch {
-      // 读不到就当作没有子目录（权限/离线都是常事，不该弹错）
-      setChildren((prev) => new Map(prev).set(relPath, []));
+    } catch (error) {
+      // 读失败保留上一次的树；权限错误不代表目录为空。
+      if (base === root() && repositoryId === store.repositoryId()) store.reportError(error);
     }
   }
+
+  onMount(() => {
+    let disposed = false;
+    let off: (() => void) | undefined;
+    const refreshTree = (): void => {
+      void loadChildren(PHOTOS_DIR, false);
+      for (const scope of expanded()) void loadChildren(scope, false);
+    };
+    void onCatalogDirty((change) => {
+      if (change.repositoryId === store.repositoryId()) refreshTree();
+    }).then((unsubscribe) => { if (disposed) unsubscribe(); else off = unsubscribe; });
+    const focus = (): void => {
+      const repositoryId = store.repositoryId();
+      if (repositoryId === null) return;
+      void syncDirectoryCounts(repositoryId, store.scopePath() ?? PHOTOS_DIR, [PHOTOS_DIR, ...expanded()].slice(0, 66))
+        .then(refreshTree).catch((error: unknown) => store.reportError(error));
+    };
+    window.addEventListener("focus", focus);
+    onCleanup(() => { disposed = true; off?.(); window.removeEventListener("focus", focus); });
+  });
 
   /**
    * 启动恢复到一个深层目录时，把它的祖先逐层读出并展开。
@@ -686,6 +712,10 @@ export interface AssetInfoProps {
    * 所以从上面传进来，拿不到就这一行不显示。
    */
   repositoryName?: string | null;
+  issueLibrary?: IssueLibrary | null;
+  issueBusy?: boolean;
+  issueError?: string | null;
+  onSelectIssue?: (choice: string) => void;
   class?: string;
 }
 
@@ -874,6 +904,11 @@ function AssetTags(props: { store: BrowseStore; item: AssetItem }): JSX.Element 
 
 export function AssetInfo(props: AssetInfoProps) {
   const item = () => props.item;
+  const selectedIssueChoice = (): string => {
+    const selection = props.issueLibrary?.selection;
+    if (selection === "raw" && item()?.hasRaw === false) return "sooc";
+    return typeof selection === "string" ? selection : selection === undefined ? "latest" : `issue:${selection.issue}`;
+  };
 
   /**
    * 创建日期：**文件在磁盘上被创建的时刻**（不是拍摄时间 —— 那个在「拍摄信息」里）。
@@ -928,6 +963,24 @@ export function AssetInfo(props: AssetInfoProps) {
           名字来自 store 的词典（`tags()`），id 来自这张照片的标记（`markings()`）——
           词典没拉到就退回 `#id`，不装作没有标签。
         */}
+        <Show when={props.issueLibrary}>
+          {(library) => <section class="mb-5" data-browse-issue-choice>
+            <h3 class="mb-1.5 text-fs-3 font-semibold text-fg-2">{t("browse.issueDisplay")}</h3>
+            <select class="h-row-h w-full rounded-ui bg-surface-track px-2 text-fs-2 text-fg-1"
+              aria-label={t("browse.issueDisplay")} disabled={props.issueBusy === true}
+              value={selectedIssueChoice()}
+              onChange={(event) => props.onSelectIssue?.(event.currentTarget.value)}>
+              <option value="latest">{t("editor.issue.latest")}</option>
+              <Show when={!item()!.isRaw}><option value="sooc">{t("editor.issue.sooc")}</option></Show>
+              <Show when={item()!.hasRaw}><option value="raw">{t("editor.base.raw")}</option></Show>
+              <For each={library().issues}>{(issue) =>
+                <option value={`issue:${issue.id}`}>{issue.name} · {issue.sourceBase.toUpperCase()}</option>
+              }</For>
+            </select>
+            <Show when={props.issueError}><p class="mt-1 text-fs-0 text-danger">{props.issueError}</p></Show>
+          </section>}
+        </Show>
+
         <AssetTags store={props.store} item={item()!} />
 
         {/*

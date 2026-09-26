@@ -4,7 +4,8 @@
 > 全局约定见 `~/.pi/agent/AGENTS.md`（包管理、URL 书写、plannotator 流程等），本文件不重复。
 >
 > 建立时间：2026-09-15 00:18:03 CST
-> 相关文档：近中期计划见 `PLAN.md`，远期方向见 `FUTURE.md`，**视觉与配色体系见 `DESIGN.md`**。
+> 相关文档：近中期计划见 `PLAN.md`，远期方向见 `FUTURE.md`，**视觉与配色体系见 `DESIGN.md`**，
+> **定期评审与方向修正见 `REVIEW.md`**（每轮 review 的结论账本，纪律见 §5.6）。
 
 <!-- -->
 
@@ -214,13 +215,15 @@ raybend/
 ├── DESIGN.md                  # 视觉与配色体系（唯一事实来源）
 ├── PLAN.md                    # 近中期计划：Milestone（阶段）→ Wave（波次）
 ├── FUTURE.md                  # 远期方向登记册
+├── REVIEW.md                  # 定期评审与方向修正：每轮 review 的判断、取舍与去向（§5.6）
 ├── THIRD-PARTY-NOTICES.md     # 第三方许可登记
 ├── LICENSE                    # AGPL-3.0-only
 ├── README.md
 ├── Cargo.toml                 # [workspace]；profile 也必须在这里
 ├── rust-toolchain.toml        # 锁定 Rust 1.98.1
 ├── package.json / pnpm-lock.yaml / vite.config.ts / index.html
-├── plans/                     # 单工作单元的计划（plans/M1-5.md；一次一个，见 §5.4）
+├── specs/                     # 单工作单元的详细计划/规格（specs/M1-5.md；一次一个，见 §5.4）
+│                              # ⚠️ 本目录原名 `plans/`，2026-09-26 人类改名。详见 §5.4
 ├── design/                    # Pencil 设计稿：xxx.pen + xxx.md（同名）
 ├── implementations/           # 实施记录：YYYY-MM-DD_<简述>.md（文件内首行写精确时间）
 ├── src/                       # 前端（Solid + Tailwind）
@@ -451,10 +454,24 @@ let dev = !custom_protocol;        // ← dev 由 feature 决定，不是 debug/
 ### 5.4 规划纪律
 
 - **一次规划只覆盖一个工作单元** 定义`工作单元`最小颗粒度为一个波次，禁止将一个波次内切分的小颗粒度任务作为一次工作范围，工作按波次进行，波次中**禁止停下**，详情见`5.5`。
-- **`PLAN.md` 只做路线级描述**（每个 milestone 含哪些波次、完成定义是什么）。**具体实现方案在每个工作单元开工前单独规划**，写入 `plans/<milestone>-<单元>.md`（如 `plans/M0-1.md`），并走 plannotator 评审。
+- **`PLAN.md` 只做路线级描述**（每个 milestone 含哪些波次、完成定义是什么）。**具体实现方案在每个工作单元开工前单独规划**，写入 `specs/<milestone>-<单元>.md`（如 `specs/M0-1.md`），并走 plannotator 评审。
 - **不提前细化未开工的工作单元** —— 项目规模决定了前置规划必然失真；开工时按当时情况重新规划。
 - **已归档的旧规划**放 `PLAN.md` 附录（如附录 A），并明确标注「仅供参考、不是待办清单」。
 - 规划文件中的勾选项会被 plannotator 进度跟踪，且 `mark_done` **会真实改写文件** —— 所以计划文件的范围要小、要准，否则勾选状态随变更失真、tracker 也会堆满未开工条目。
+
+#### 关于目录名：**以前是 `plans/`，现在是 `specs/`**（人类 2026-09-26 定）
+
+这个目录**一直是同一个东西**（每个工作单元开工前写的详细方案，走 plannotator 评审、
+做完后在里面勾选/记录），只是名字从 `plans/` 改成了 `specs/` —— 名字更准确：
+它装的是「这个东西要做到什么程度、怎么验收」的**规格**，不是「什么时候做」的排期
+（排期在 `PLAN.md`）。
+
+两条要点：
+
+1. **活文档、代码注释、脚本里一律写 `specs/`**（2026-09-26 已全仓替换过一次）。
+2. **`implementations/` 里的历史记录仍写着 `plans/`** —— 那是当时的真实路径，
+   **不要去改它们**（同样道理，`git show <commit>:plans/M0.md` 这类历史命令也不改）。
+   看到老记录里的 `plans/` 就把它当 `specs/` 读，并在新引用里用新名字。
 
 ### 5.5 连续工作范围
 
@@ -468,6 +485,27 @@ let dev = !custom_protocol;        // ← dev 由 feature 决定，不是 debug/
 - 当前任务尝试次数超过5次均难以解决
 
 **注意：当上述情况发生时，不代表要停止工作！** 而是先检查本次规划的任务列表中还有没有能继续做的事，**只要任务列表中还有要做的事，就跳过当前不能做的部分，继续工作** 直到todos/progress中每一项能做的全部做完，只剩需要人类协助的部分，统一时行汇报/请求协助。
+
+### 5.6 评审纪律（`REVIEW.md`）
+
+**`REVIEW.md` 是「每隔一段时间回顾开发内容、为未来方向做修正」的文档。**
+**每一次明确的 review 行为都要对它做出补充 / 更新 / 重写，用来确定未来要做的事。**
+
+- **触发**：人类说「review 一下 / 评审 / 复盘现在的设计 / 看看方向对不对」时；
+  或在一个 milestone 收口、一次真机验收之后，由人类点名。
+- **做法**：通读**当时的真实状态** —— 规格文档 + `design/*.md` + 实现侧 + 最近的 `implementations/`
+  记录，必要时加行业横向对照；产出的是**判断与去向**，不是功能清单。
+  每轮**追加一节**，历史不覆盖；结论变了写新一节并注明取代了哪一条。
+- **与其它文档的分工（关键，防第二份事实源）**：`REVIEW.md` 只记「判断 + 取舍 + 落到哪」。
+  一经采纳，**正式改动写进拥有它的那份文件**（`DESIGN.md` / `BROWSE.md` / `REPOSITORY.md` /
+  `IMAGING.md` / `PLAN.md` / `FUTURE.md` / 本文件），`REVIEW.md` 那一项只更新到「**已落地 + 落点**」。
+  ⚠️ **禁止把规格正文抄第二份**（§2.12）。
+- **不用 `- [ ]` 勾选框**：勾选项会被 plannotator 进度跟踪，而那个机制只属于 `specs/*.md`（§5.4）。
+  本文件的状态**写在表格的「状态」列**里（`待决` / `已采纳` / `已落地` / `不做` / `搁置`）。
+- **不是待办清单的替代品**：本轮要做的事仍然按 §5.5 走 `todos` / plannotator progress；
+  `REVIEW.md` 管的是「**方向对不对**」，不是「今天做哪件」。
+- **结论归人类拍板**：Agent 可以把待决项、理由与证据写齐（并给出推荐），
+  但**不得**把 `待决` 自行改成 `已采纳` —— 那是方向决策，不是实现细节。
 
 ---
 
@@ -522,14 +560,15 @@ Tauri 3.0 已进入 alpha（`3.0.0-alpha.0`），已知关键变更：
 目录布局：
 
 ```text
-%LOCALAPPDATA%\raybend\
-  app.db              # 全局：应用设置 / 库注册表（库 ID + 多路径 + 状态）/ 全局标签词典 / 任务队列
+%LOCALAPPDATA%\com.cthun.raybend\
+  app.db              # 全局：应用设置 / 库注册表 / 标签词典 / LUT 分类与文件元数据
   backups\            # 迁移前快照（VACUUM INTO，保留 7 份）
-  cache\<repository_id>\ # 默认缩略图与预览缓存（可在设置中改路径）
+  cache\_sources\thumbs.db # 当前缩略图缓存：源文件与命名 issue 的两档 AVIF
+  luts\<LUT id>\    # 用户导入的 .cube / Hald 本体与一张 384 或 768 宽 4:3 WebP 封面
   logs\
 
 <库根目录>\            # 用户指定，可多个
-  catalog.db          # 库真相源：库 ID、资产、元数据、导入模版、序号计数、编辑栈、修订
+  catalog.db          # 库真相源：库 ID、资产、元数据、编辑栈/latest、不可变 issue、修订
   photos\             # 导入的落地目录（模版决定 photos/ 内的相对路径）
     2026-08-15\
       MYP0001.png
@@ -537,7 +576,8 @@ Tauri 3.0 已进入 alpha（`3.0.0-alpha.0`），已知关键变更：
         MYP0001.ORF   # 同名 RAW 放同级的 _RAW/（见 REPOSITORY.md §4.1）
   cache\              # **库内缓存**（M3-W3 起）：大图（每 issue 一份 AVIF）
     full\<资产 id>\
-      latest-v6.avif  # 编辑结果；raw-v6.avif = RAW 基础解码
+      latest-raw-v6.avif  # latest 编辑结果（管线版本号随实现升级）
+      issue-42-<hash>-raw-v6.avif # 命名定稿独立的 1920 AVIF
   index.db            # 派生索引（缩略图索引、人脸、相似度）—— 可删可重建；真需要时才建
 ```
 
@@ -546,11 +586,11 @@ Tauri 3.0 已进入 alpha（`3.0.0-alpha.0`），已知关键变更：
 > **完整业务规格见 `REPOSITORY.md`**（库身份 / 同路径多库 / 同库多路径 / 在线离线 / 导入模版 / 序号 / 重名 / RAW 分流 / 目录透传）。
 
 - **缓存分两处**（M3-W3 定）：**小图**（网格 / 胶片带 / 看图的缩略图）在
-  `%LOCALAPPDATA%\raybend\cache\<库 id>\thumbs.db`（几万行小 BLOB，SQLite 合适）；
-  **大图**（每 issue 一张，几百 KB）在**库根**的 `cache/full/`（跟着库走，换机器/搬盘不用重渲染）。
+  `%LOCALAPPDATA%\com.cthun.raybend\cache\_sources\thumbs.db`（当前实现：源文件与定稿按不同缓存键共享一库；几万行小 BLOB）；
+  **大图**（每个命名 issue 独立一张 1920 AVIF）在**库根**的 `cache/full/`（跟着库走，换机器/搬盘不用重渲染）。
   两处的编码格式统一 **AVIF 质量 90 / 4:4:4**（人类 2026-09-24 定；快照恒为 AVIF，
   不考虑换 JXL —— 格式范围与 JXL 定位见 `FUTURE.md` C8）。
-- **真相源规则**：本地编辑/评分/关键词以 **DB 为准**，XMP 只是互操作通道；RAW 永不写回原文件（只写 `.xmp` sidecar）。
+- **真相源规则**：本地编辑/评分/关键词以 **DB 为准**，XMP 只是互操作通道；RAW 永不写回原文件（只写 `.xmp` sidecar）。issue 的 XMP 表达契约见 `docs/issue-xmp-contract.md`，当前尚未写出 sidecar。
 - **写并发**：SQLite 单写者 → 采用**单一写者 actor**（专属线程 + 专属连接，所有写操作串行化），读走连接池；批量事务；`PRAGMA journal_mode=WAL, synchronous=NORMAL, busy_timeout=5000, foreign_keys=ON`。
 - **库身份与多路径**（`REPOSITORY.md` §2）：库身份 = `catalog.db` 内的唯一 ID；`app.db` 记录「库 ID → 多个路径」。
   路径挂载了哪个库靠**读该路径下 catalog.db 的 ID** 比对，而不是靠路径字符串 —— 这是「同路径不同库 / 同库多路径」的机制。
@@ -564,13 +604,11 @@ Tauri 3.0 已进入 alpha（`3.0.0-alpha.0`），已知关键变更：
 > **三种图（thumb / preview / 大图）的规格、生成节点与显示规则见 `IMAGING.md`**
 > （唯一事实源，含格式支持范围）；本节只讲架构与红线。
 
-- 三个尺度：`GRID`(256–512) / `SCREEN`(视口分辨率) / `FULL`(1:1，默认不缓存或只缓存最近 N 张 + pinned)。
-- **两种语义必须分离**：中性缩略图（只依赖 RAW，永久缓存）与编辑后渲染（依赖编辑栈，频繁失效）。第一阶段只有中性缩略图。
-- 缓存键：`(asset_uid, kind, render_signature)`，`render_signature` 含 `pipeline_ver` → 算法升级后旧缓存自动变孤儿并被 GC。
-- 存储形态：512px 网格缩略图放 **SQLite BLOB**（WebP/QOI，20–60KB/张）；SCREEN 级放**文件系统分片目录**（两级十六进制分片）。
-- 淘汰策略：容量上限（默认 `max(10GB, 可用空间 10%)`）+ **frecency**（非纯 LRU）+ 保留期 + `pinned` + 孤儿回收；UI 提供缓存面板（按仓/类型/大小展示 + 一键清理）。
-- **红线**：删掉整个缓存目录后，功能降级但完全可用。
-- 默认位置 `%LOCALAPPDATA%\raybend\cache\`，设置中可按仓覆盖（例如随外接盘以便离线出图）。
+- 当前尺度：网格 384、胶片带 192、过渡/定稿预览 1920（最长边）；1:1 大图走实时解码和显影，不进持久缓存。
+- **中性缩略图与编辑结果分开**：未编辑源文件按来源生成；latest 参数变化后刷新当前小图与预览；每个命名 issue 的 384/192/1920 AVIF 快照独立保留，删除定稿才清理该定稿快照。
+- 缓存键包含资产/来源、尺寸档、渲染签名（含管线版本）；命名 issue 还含 issue ID 与 profile 哈希。latest 作废不能误删命名快照。
+- 当前小图存 `%LOCALAPPDATA%\com.cthun.raybend\cache\_sources\thumbs.db` 的 SQLite BLOB；1920 AVIF 存库根 `cache/full/<asset_id>/`。更细的按库迁移、容量上限、frecency 淘汰与缓存设置面板属于后续优化，不能写成 M3 已有功能。
+- **红线**：删掉整个缓存目录后，功能降级但可从原图和配置重建；`app.db`、`catalog.db` 与导入的 LUT 本体不是可删缓存。
 
 ---
 
@@ -742,13 +780,14 @@ IPC 单测（用**真实字段名**反序列化；缺 DPR 必须报错，不许�
 | `website/AGENTS.md` | **官网（`website/`）专属指南**：SolidStart 2.0 / Solid 2.0 选型、目录约定、命令、站点实现约定（i18n / 素材占位 / 下载信息注入）、**GitHub Pages 部署 + 自定义域名步骤** —— 技术栈与本体不同，别混用 |
 | `website/ASSETS.md` | **官网素材清单**：要人出手的截图（尺寸/取景要点/放哪）与 AI 生图提示词；给完图在 `src/data/media.ts` 填 `src` 即自动替换占位 |
 | `docs/native-viewport-coordinate-guide.md` | **原生视口的坐标契约**（2026-09-19 真机事故的完整报告）：四种量的区分、诊断红旗、验证顺序、`recover()` 的 panic 真因 —— 动原生视口前必读，摘要见 §7.9 |
-| `BROWSE.md` | **浏览模式规格**：三列结构、toolsbar 的筛选/标记/标签/锁、选择逻辑（Shift 区间翻转）、看图与对比、胶片带、信息栏、标签体系、两个通用浮层（模态 + 右上角 toast） |
+| `BROWSE.md` | **浏览模式规格**：三列结构、toolsbar 的筛选/标记/标签/锁、选择逻辑（单击 / `Shift` 区间选中 / `Ctrl` 多选 / 日组·时间片整段开关）、看图与对比、胶片带、信息栏、标签体系、两个通用浮层（模态 + 右上角 toast） |
 | `REPOSITORY.md` | **库与导入规格**：库物理结构、库身份与多路径、在线/离线、导入模版与变量、序号、重名、RAW 分流、目录透传 |
 | `IMAGING.md` | **图像格式与显示规格（唯一事实源）**：格式支持范围（位图 6 进 5 出、RAW 只进不出、JXL 定位、快照恒 AVIF）+ 库内三种图（thumb / preview / 大图）的尺寸、存放、**生成节点**、显示口径（只缩不扩、4:1 截断、小图必放大）、issue 与 latest 的切换语义、现状对照与待办 |
 | `DESIGN.md` | 视觉与配色体系（唯一事实来源） |
 | `PLAN.md` | 近中期开发计划：Milestone（阶段）→ Wave（波次），含初始化清单与完成定义 |
-| `plans/M0-1.md` 等 | 单个工作单元的详细计划与完成记录（一次一个，命名 `plans/<milestone>-<单元>.md`，见 §5.4） |
+| `specs/M0-1.md` 等 | 单个工作单元的详细方案（一次一个，命名 `specs/<milestone>-<单元>.md`，见 §5.4）。⚠️ **本目录原名 `plans/`**，历史记录里的老写法不改 |
 | `FUTURE.md` | 远期方向登记册：框架迁移、RAW 后端候选、渲染演进、编辑模块、AI、平台扩展 |
+| `REVIEW.md` | **定期评审与方向修正**：每轮 review 的**判断、取舍与去向**（含「当前待办总览」，那是全文件唯一的汇总视图）；维护与纪律见 §5.6。**它只记结论与落点，规格正文一律写回拥有它的那份文件** |
 | `THIRD-PARTY-NOTICES.md` | 第三方组件与参考项目的许可登记 |
 | `design/*.pen` + `design/*.md` | Pencil 设计稿与其说明（成对存在） |
 | `implementations/*.md` | 每次改动的实施记录（文件名带日期，内容首行带精确时间） |

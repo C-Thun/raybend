@@ -1,5 +1,5 @@
 /**
- * 浏览工作区的**动作槽**（`plans/M2-W3.md` §2.5 步骤 2）。
+ * 浏览工作区的**动作槽**（`specs/M2-W3.md` §2.5 步骤 2）。
  *
  * ## 为什么需要它
  *
@@ -20,6 +20,7 @@
  * * 槽里只有**动作**，没有状态：读状态一律走 `browseStore`（唯一事实来源）。
  */
 
+import { createActionSlot } from "../../lib/action-slot.ts";
 import type { FullscreenTarget } from "../../lib/fullscreen-target.ts";
 
 export interface BrowseActions {
@@ -50,12 +51,12 @@ export interface BrowseActions {
   fullscreenTarget: () => FullscreenTarget | null;
 }
 
-let current: BrowseActions | null = null;
+const slot = createActionSlot<BrowseActions>();
 
 export function registerBrowseActions(actions: BrowseActions | null): void {
-  current = actions;
+  slot.register(actions);
 }
 
 export function browseActions(): BrowseActions | null {
-  return current;
+  return slot.read();
 }

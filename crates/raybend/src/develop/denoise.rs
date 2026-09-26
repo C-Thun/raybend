@@ -70,7 +70,8 @@ const CHROMA_EDGE_THRESHOLD: f32 = 0.06;
 const LUMA_FLOOR: f32 = 1.0 / 65535.0;
 
 /// 降噪方式（**编辑栈的一级**，不是全局偏好 —— 见 `catalog_0006_lens.sql` 的注释）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum NrMethod {
     /// 快速档（默认）：wgpu 小波降噪；设备不可用时回退 CPU 多尺度保边
     #[default]

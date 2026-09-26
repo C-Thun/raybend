@@ -57,7 +57,9 @@ impl LinearImage {
     /// 从字节建（长度对不上返回 `None`，**不猜、不补零**）。
     #[must_use]
     pub fn new(width: u32, height: u32, rgb: Vec<u16>) -> Option<Self> {
-        let expected = (width as usize).checked_mul(height as usize)?.checked_mul(3)?;
+        let expected = (width as usize)
+            .checked_mul(height as usize)?
+            .checked_mul(3)?;
         if width == 0 || height == 0 || rgb.len() != expected {
             return None;
         }
@@ -78,7 +80,9 @@ impl LinearImage {
     /// 所以这条路的输入只能算「准线性」—— 实施记录与 `FUTURE.md` C7 都记着这件事。
     #[must_use]
     pub fn from_srgb8(width: u32, height: u32, rgb8: &[u8]) -> Option<Self> {
-        let expected = (width as usize).checked_mul(height as usize)?.checked_mul(3)?;
+        let expected = (width as usize)
+            .checked_mul(height as usize)?
+            .checked_mul(3)?;
         if width == 0 || height == 0 || rgb8.len() != expected {
             return None;
         }
@@ -148,7 +152,8 @@ impl LinearImage {
                     }
                     #[allow(clippy::cast_possible_truncation)]
                     let count = (end - start) as u32;
-                    out[(y * width as usize + x) * 3 + channel] = ((sum + count / 2) / count) as u16;
+                    out[(y * width as usize + x) * 3 + channel] =
+                        ((sum + count / 2) / count) as u16;
                 }
             }
         }
@@ -202,13 +207,13 @@ impl LinearImage {
             for dx in 0..out_w {
                 // 目标像素 (dx,dy) 取源像素 (sx,sy)；表与 `apply_orientation` 同源
                 let (sx, sy) = match orientation {
-                    2 => (w - 1 - dx, dy),          // 水平镜像
-                    3 => (w - 1 - dx, h - 1 - dy),  // 180°
-                    4 => (dx, h - 1 - dy),          // 垂直镜像
-                    5 => (dy, dx),                  // 转置
-                    6 => (dy, h - 1 - dx),          // 顺时针 90°
-                    7 => (w - 1 - dy, h - 1 - dx),  // 反转置
-                    8 => (w - 1 - dy, dx),          // 逆时针 90°
+                    2 => (w - 1 - dx, dy),         // 水平镜像
+                    3 => (w - 1 - dx, h - 1 - dy), // 180°
+                    4 => (dx, h - 1 - dy),         // 垂直镜像
+                    5 => (dy, dx),                 // 转置
+                    6 => (dy, h - 1 - dx),         // 顺时针 90°
+                    7 => (w - 1 - dy, h - 1 - dx), // 反转置
+                    8 => (w - 1 - dy, dx),         // 逆时针 90°
                     _ => (dx, dy),
                 };
                 let src = (sy as usize * w as usize + sx as usize) * 3;
@@ -353,7 +358,8 @@ pub fn chain_linear(linear: f32, gain: f32, resolved: &Resolved) -> f32 {
 pub fn encode_and_curve(linear: f32, channel: usize, curves: &CurveSet) -> f32 {
     let clamped = linear.clamp(0.0, 1.0);
     let encoded = linear_to_srgb(clamped);
-    let composite = curves.rgb.eval(encoded);
+    let based = curves.base.eval(encoded);
+    let composite = curves.rgb.eval(based);
     let per_channel = match channel {
         0 => curves.r.eval(composite),
         1 => curves.g.eval(composite),
@@ -375,16 +381,27 @@ pub fn map_pixel_exact(linear_rgb: [f32; 3], params: &DevelopParams) -> [f32; 3]
 
 /// 带曲线版本的参考实现（`map_pixel_exact` 的内部形态）。
 #[must_use]
-pub fn map_pixel_exact_with(linear_rgb: [f32; 3], resolved: &Resolved, curves: &CurveSet) -> [f32; 3] {
+pub fn map_pixel_exact_with(
+    linear_rgb: [f32; 3],
+    resolved: &Resolved,
+    curves: &CurveSet,
+) -> [f32; 3] {
     let mut display = [0.0f32; 3];
     for channel in 0..3 {
         let linear = chain_linear(linear_rgb[channel], resolved.gains[channel], resolved);
         display[channel] = encode_and_curve(linear, channel, curves);
     }
     if resolved.highlights > 0.0 {
-        let baseline = Resolved { highlights: 0.0, ..*resolved };
+        let baseline = Resolved {
+            highlights: 0.0,
+            ..*resolved
+        };
         let unadjusted = std::array::from_fn(|channel| {
-            encode_and_curve(chain_linear(linear_rgb[channel], baseline.gains[channel], &baseline), channel, curves)
+            encode_and_curve(
+                chain_linear(linear_rgb[channel], baseline.gains[channel], &baseline),
+                channel,
+                curves,
+            )
         });
         display = neutralize_positive_highlights(display, unadjusted);
     }
@@ -421,7 +438,11 @@ pub fn apply_chroma(rgb: [f32; 3], saturation: f32, vibrance: f32) -> [f32; 3] {
         let luma = luma_of(out);
         let max = out[0].max(out[1]).max(out[2]);
         let min = out[0].min(out[1]).min(out[2]);
-        let current = if max > 1e-6 { ((max - min) / max).clamp(0.0, 1.0) } else { 0.0 };
+        let current = if max > 1e-6 {
+            ((max - min) / max).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
         let factor = (1.0 + vibrance * (1.0 - current)).max(0.0);
         out = [
             luma + (out[0] - luma) * factor,
@@ -478,11 +499,7 @@ struct ChannelLuts {
 
 impl ChannelLuts {
     fn build(resolved: &Resolved, curves: &CurveSet) -> Self {
-        let mut tables: [Vec<u16>; 3] = [
-            vec![0; LUT_LEN],
-            vec![0; LUT_LEN],
-            vec![0; LUT_LEN],
-        ];
+        let mut tables: [Vec<u16>; 3] = [vec![0; LUT_LEN], vec![0; LUT_LEN], vec![0; LUT_LEN]];
         #[allow(clippy::cast_precision_loss)]
         let denominator = (LUT_LEN - 1) as f32;
         for (channel, table) in tables.iter_mut().enumerate() {
@@ -526,8 +543,15 @@ impl ChannelLuts {
 pub fn render_rgb8(source: &LinearImage, params: &DevelopParams, curves: &CurveSet) -> Vec<u8> {
     let resolved = Resolved::new(params);
     let luts = ChannelLuts::build(&resolved, curves);
-    let baseline_luts = (resolved.highlights > 0.0).then(||
-        ChannelLuts::build(&Resolved { highlights: 0.0, ..resolved }, curves));
+    let baseline_luts = (resolved.highlights > 0.0).then(|| {
+        ChannelLuts::build(
+            &Resolved {
+                highlights: 0.0,
+                ..resolved
+            },
+            curves,
+        )
+    });
     let mut out = vec![0u8; source.rgb.len()];
     let width = source.width as usize;
 
@@ -535,7 +559,13 @@ pub fn render_rgb8(source: &LinearImage, params: &DevelopParams, curves: &CurveS
         .map_or(1, std::num::NonZeroUsize::get)
         .min(16);
     if threads <= 1 || source.height < 32 {
-        map_rows(&source.rgb, &mut out, &luts, baseline_luts.as_ref(), &resolved);
+        map_rows(
+            &source.rgb,
+            &mut out,
+            &luts,
+            baseline_luts.as_ref(),
+            &resolved,
+        );
         return out;
     }
 
@@ -544,7 +574,9 @@ pub fn render_rgb8(source: &LinearImage, params: &DevelopParams, curves: &CurveS
         let mut remaining_in = source.rgb.as_slice();
         let mut remaining_out = out.as_mut_slice();
         while !remaining_out.is_empty() {
-            let rows = (remaining_out.len() / (width * 3)).min(rows_per_chunk).max(1);
+            let rows = (remaining_out.len() / (width * 3))
+                .min(rows_per_chunk)
+                .max(1);
             let take = rows * width * 3;
             let (chunk_out, rest_out) = remaining_out.split_at_mut(take);
             let (chunk_in, rest_in) = remaining_in.split_at(take);
@@ -553,7 +585,8 @@ pub fn render_rgb8(source: &LinearImage, params: &DevelopParams, curves: &CurveS
             let luts_ref = &luts;
             let baseline_ref = baseline_luts.as_ref();
             let resolved_ref = &resolved;
-            scope.spawn(move || map_rows(chunk_in, chunk_out, luts_ref, baseline_ref, resolved_ref));
+            scope
+                .spawn(move || map_rows(chunk_in, chunk_out, luts_ref, baseline_ref, resolved_ref));
         }
     });
     out
@@ -561,8 +594,11 @@ pub fn render_rgb8(source: &LinearImage, params: &DevelopParams, curves: &CurveS
 
 /// 一段像素的逐像素映射（**唯一**的像素循环）。
 fn map_rows(
-    input: &[u16], output: &mut [u8], luts: &ChannelLuts,
-    baseline_luts: Option<&ChannelLuts>, resolved: &Resolved,
+    input: &[u16],
+    output: &mut [u8],
+    luts: &ChannelLuts,
+    baseline_luts: Option<&ChannelLuts>,
+    resolved: &Resolved,
 ) {
     debug_assert_eq!(input.len(), output.len());
     let chroma = resolved.needs_chroma();
@@ -709,8 +745,12 @@ pub fn render_rgb8_with_local_tone(
         return render_rgb8(source, params, curves);
     }
     let resolved = Resolved::new(params);
-    let baseline_chain = (resolved.highlights > 0.0).then(||
-        LinearChainLuts::build(&Resolved { highlights: 0.0, ..resolved }));
+    let baseline_chain = (resolved.highlights > 0.0).then(|| {
+        LinearChainLuts::build(&Resolved {
+            highlights: 0.0,
+            ..resolved
+        })
+    });
     let pass = LocalPass {
         state,
         strength,
@@ -736,7 +776,9 @@ pub fn render_rgb8_with_local_tone(
         let mut remaining_out = out.as_mut_slice();
         let mut first_row = 0usize;
         while !remaining_out.is_empty() {
-            let rows = (remaining_out.len() / (pass.width * 3)).min(rows_per_chunk).max(1);
+            let rows = (remaining_out.len() / (pass.width * 3))
+                .min(rows_per_chunk)
+                .max(1);
             let take = rows * pass.width * 3;
             let (chunk_out, rest_out) = remaining_out.split_at_mut(take);
             let (chunk_in, rest_in) = remaining_in.split_at(take);
@@ -753,7 +795,7 @@ pub fn render_rgb8_with_local_tone(
 
 /// **显影的全部可选阶段**（M3-W4）：镜头校正 / 降噪 / 动态反差 / 锐化。
 ///
-/// 顺序**不能随便改**（改顺序 = 改画质，见 `plans/M3-W4.md` §1.3）：
+/// 顺序**不能随便改**（改顺序 = 改画质，见 `specs/M3-W4.md` §1.3）：
 ///
 /// ```text
 /// 线性源 → ① 镜头校正（暗角 + 畸变 + TCA，**一次重采样**）
@@ -777,6 +819,8 @@ pub struct DevelopStages<'a> {
     pub local_tone: Option<(&'a LocalToneState, f32)>,
     /// 锐化（显示域，**就地**改 8bit 输出）
     pub sharpen: Option<&'a super::sharpen::SharpenPlan>,
+    /// 选中的创意 LUT；在显示域最后应用。
+    pub lut: Option<&'a super::lut::Lut>,
 }
 
 /// **从编辑参数里解析出来的可选阶段**（显影线程与缩略图**共用一份**，免得两处各拼一遍 ——
@@ -844,12 +888,19 @@ pub fn render_develop(
         .filter(|plan| !plan.is_identity())
         .map(|plan| match stages.nr_method {
             super::denoise::NrMethod::Fast => super::denoise::denoise_fast(source, plan),
-            super::denoise::NrMethod::High => super::bm3d::denoise_high(source, plan, &std::sync::atomic::AtomicBool::new(false)).expect("not cancelled"),
+            super::denoise::NrMethod::High => {
+                super::bm3d::denoise_high(source, plan, &std::sync::atomic::AtomicBool::new(false))
+                    .expect("not cancelled")
+            }
         });
     let source = denoised.as_ref().unwrap_or(source);
     let mut out = render_rgb8_with_local_tone(source, params, curves, stages.local_tone);
     if let Some(plan) = stages.sharpen.filter(|plan| !plan.is_identity()) {
         super::sharpen::sharpen_display(&mut out, source.width, source.height, plan);
+    }
+    if let Some(lut) = stages.lut {
+        lut.apply_rgb8(&mut out, 1.0)
+            .expect("管线输出必为 RGB 三元组");
     }
     out
 }
@@ -894,18 +945,18 @@ impl LocalPass<'_> {
                 ];
                 if let Some(baseline) = self.baseline_chain {
                     let original = [
-                        self.display.lookup(0, baseline.lookup(0, pixel_in[0]) * ratio),
-                        self.display.lookup(1, baseline.lookup(1, pixel_in[1]) * ratio),
-                        self.display.lookup(2, baseline.lookup(2, pixel_in[2]) * ratio),
+                        self.display
+                            .lookup(0, baseline.lookup(0, pixel_in[0]) * ratio),
+                        self.display
+                            .lookup(1, baseline.lookup(1, pixel_in[1]) * ratio),
+                        self.display
+                            .lookup(2, baseline.lookup(2, pixel_in[2]) * ratio),
                     ];
                     display = neutralize_positive_highlights(display, original);
                 }
                 if self.chroma {
-                    display = apply_chroma(
-                        display,
-                        self.resolved.saturation,
-                        self.resolved.vibrance,
-                    );
+                    display =
+                        apply_chroma(display, self.resolved.saturation, self.resolved.vibrance);
                 }
                 for (channel, slot) in pixel_out.iter_mut().enumerate() {
                     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
@@ -940,15 +991,36 @@ mod tests {
         let after = map_pixel_exact(pixel, &raised);
         assert!(luma_of(after) > luma_of(before));
         for channel in 1..3 {
-            assert!(((after[0] - after[channel]) - (before[0] - before[channel])).abs() < 1e-5,
-                "正向高光应等量提亮，不把暖色高光推成蓝色");
+            assert!(
+                ((after[0] - after[channel]) - (before[0] - before[channel])).abs() < 1e-5,
+                "正向高光应等量提亮，不把暖色高光推成蓝色"
+            );
         }
         let clipped = [1.0, 1.0, 0.7];
-        assert_eq!(map_pixel_exact(clipped, &raised), map_pixel_exact(clipped, &none));
-        let source = LinearImage::new(2, 1, vec![linear(0.85), linear(0.8), linear(0.45), linear(1.0), linear(1.0), linear(0.7)]).expect("有效像素");
+        assert_eq!(
+            map_pixel_exact(clipped, &raised),
+            map_pixel_exact(clipped, &none)
+        );
+        let source = LinearImage::new(
+            2,
+            1,
+            vec![
+                linear(0.85),
+                linear(0.8),
+                linear(0.45),
+                linear(1.0),
+                linear(1.0),
+                linear(0.7),
+            ],
+        )
+        .expect("有效像素");
         let rendered = render_rgb8(&source, &raised, &CurveSet::identity());
         let baseline = render_rgb8(&source, &none, &CurveSet::identity());
-        assert_eq!(&rendered[3..6], &baseline[3..6], "截断的亮部不能因蓝通道单独增亮而发蓝");
+        assert_eq!(
+            &rendered[3..6],
+            &baseline[3..6],
+            "截断的亮部不能因蓝通道单独增亮而发蓝"
+        );
     }
 
     fn linear(value: f32) -> u16 {
@@ -1010,6 +1082,7 @@ mod tests {
             denoise: Some(&zero_denoise),
             local_tone: None,
             sharpen: Some(&zero_sharpen),
+            lut: None,
         };
         assert_eq!(render_develop(&source, &params, &curves, &stages), plain);
     }
@@ -1017,12 +1090,8 @@ mod tests {
     #[test]
     fn render_develop_stages_change_the_picture_in_the_expected_direction() {
         // 一块平坦灰：三件阶段各自都要真的动到画面（否则「接线了但没生效」看不出来）
-        let source = LinearImage::new(
-            48,
-            32,
-            (0..48 * 32 * 3).map(|_| linear(0.35)).collect(),
-        )
-        .expect("形状对得上");
+        let source = LinearImage::new(48, 32, (0..48 * 32 * 3).map(|_| linear(0.35)).collect())
+            .expect("形状对得上");
         let params = DevelopParams::new(None);
         let curves = CurveSet::identity();
         let plain = render_develop(&source, &params, &curves, &DevelopStages::default());
@@ -1120,7 +1189,11 @@ mod tests {
         assert_eq!(pixel_at(&rotated, 1, 0), [0, 1, 2], "源左上 → 目标右上");
 
         let missing = LinearImage::from_raw16(raw(None)).expect("形状对得上");
-        assert_eq!((missing.width, missing.height), (3, 2), "没有方向就按 1 处理");
+        assert_eq!(
+            (missing.width, missing.height),
+            (3, 2),
+            "没有方向就按 1 处理"
+        );
 
         // 形状对不上 → None（不猜、不补零）
         let broken = RawImage16 {
@@ -1164,9 +1237,11 @@ mod tests {
 
         for orientation in 1u16..=8 {
             let ours = ours.oriented(orientation);
-            let expected =
-                apply_orientation(&image::DynamicImage::ImageRgb8(reference.clone()), orientation)
-                    .to_rgb8();
+            let expected = apply_orientation(
+                &image::DynamicImage::ImageRgb8(reference.clone()),
+                orientation,
+            )
+            .to_rgb8();
             assert_eq!(
                 (ours.width, ours.height),
                 (expected.width(), expected.height()),
@@ -1243,12 +1318,13 @@ mod tests {
         let source = textured(64, 48);
         let params = params(&[("exposure", 0.5), ("contrast", 30.0), ("saturation", 20.0)]);
         let curves = CurveSet::identity();
-        let state = LocalToneState::analyze(
-            &chain_image(&source, &params),
-            &LocalToneOpts::default(),
-        );
+        let state =
+            LocalToneState::analyze(&chain_image(&source, &params), &LocalToneOpts::default());
         let plain = render_rgb8(&source, &params, &curves);
-        assert_eq!(render_rgb8_with_local_tone(&source, &params, &curves, None), plain);
+        assert_eq!(
+            render_rgb8_with_local_tone(&source, &params, &curves, None),
+            plain
+        );
         for strength in [0.0f32, -1.0, f32::NAN] {
             assert_eq!(
                 render_rgb8_with_local_tone(&source, &params, &curves, Some((&state, strength))),
@@ -1269,7 +1345,8 @@ mod tests {
         let state = LocalToneState::analyze(&chained, &LocalToneOpts::default());
         let strength = 0.7f32;
 
-        let fused = render_rgb8_with_local_tone(&source, &params, &curves, Some((&state, strength)));
+        let fused =
+            render_rgb8_with_local_tone(&source, &params, &curves, Some((&state, strength)));
 
         let mut reference_image = chained.clone();
         state.apply_inplace(&mut reference_image, strength);
@@ -1315,7 +1392,11 @@ mod tests {
             &params(&[("exposure", 1.0)]),
             &CurveSet::identity(),
         );
-        assert!((i16::from(out[0]) - 162).abs() <= 1, "曝光 +1EV 实测 {}", out[0]);
+        assert!(
+            (i16::from(out[0]) - 162).abs() <= 1,
+            "曝光 +1EV 实测 {}",
+            out[0]
+        );
 
         // ② 曝光 −1 EV：0.18 → 0.09 → sRGB = 0.331830 → 85
         let out = render_rgb8(
@@ -1323,7 +1404,11 @@ mod tests {
             &params(&[("exposure", -1.0)]),
             &CurveSet::identity(),
         );
-        assert!((i16::from(out[0]) - 85).abs() <= 1, "曝光 −1EV 实测 {}", out[0]);
+        assert!(
+            (i16::from(out[0]) - 85).abs() <= 1,
+            "曝光 −1EV 实测 {}",
+            out[0]
+        );
 
         // ③ 色温停在**基线**（元数据读不到时 = 表里的 6250K）时中性色不许被染色
         //    （这是「不动就不变」那条保证在管线上的样子；基线不是 6500K，别弄错）
@@ -1373,8 +1458,7 @@ mod tests {
             &CurveSet::identity(),
         );
         assert!(
-            i16::from(boosted[0]) - i16::from(boosted[1])
-                > i16::from(base[0]) - i16::from(base[1]),
+            i16::from(boosted[0]) - i16::from(boosted[1]) > i16::from(base[0]) - i16::from(base[1]),
             "饱和 +100 应当拉开 R−G：base={base:?} boosted={boosted:?}"
         );
 
@@ -1447,11 +1531,15 @@ mod tests {
         let mut curved = CurveSet::identity();
         curved.set_channel(
             super::super::curve::CurveChannel::Rgb,
-            super::super::curve::Curve::identity().with_point(0.5, 0.65).unwrap(),
+            super::super::curve::Curve::identity()
+                .with_point(0.5, 0.65)
+                .unwrap(),
         );
         curved.set_channel(
             super::super::curve::CurveChannel::Blue,
-            super::super::curve::Curve::identity().with_point(0.3, 0.2).unwrap(),
+            super::super::curve::Curve::identity()
+                .with_point(0.3, 0.2)
+                .unwrap(),
         );
         let cases: Vec<(DevelopParams, &CurveSet)> = vec![
             (DevelopParams::new(None), &curve),
@@ -1563,14 +1651,18 @@ mod tests {
     #[test]
     fn downscale_is_an_area_average() {
         // 2×2 → 1×1：四个像素求平均（1000+2000+3000+4000）/4 = 2500
-        let rgb = vec![1000u16, 1000, 1000, 2000, 2000, 2000, 3000, 3000, 3000, 4000, 4000, 4000];
+        let rgb = vec![
+            1000u16, 1000, 1000, 2000, 2000, 2000, 3000, 3000, 3000, 4000, 4000, 4000,
+        ];
         let source = LinearImage::new(2, 2, rgb).expect("形状对");
         let small = source.downscaled_to(1);
         assert_eq!((small.width, small.height), (1, 1));
         assert_eq!(small.rgb, vec![2500, 2500, 2500]);
 
         // 4×1 → 2×1：左半平均 (0+65535)/2 = 32768（四舍五入），右半同理
-        let rgb = vec![0u16, 0, 0, 65535, 65535, 65535, 65535, 65535, 65535, 0, 0, 0];
+        let rgb = vec![
+            0u16, 0, 0, 65535, 65535, 65535, 65535, 65535, 65535, 0, 0, 0,
+        ];
         let source = LinearImage::new(4, 1, rgb).expect("形状对");
         let small = source.downscaled_to(2);
         assert_eq!((small.width, small.height), (2, 1));
@@ -1579,10 +1671,29 @@ mod tests {
     }
     #[test]
     fn vibrance_does_not_reverse_after_saturation_pushes_a_channel_below_zero() {
-        let rgb=[0.9,0.1,0.05];
-        let saturated=apply_chroma(rgb,1.0,0.0);
-        let vibrant=apply_chroma(rgb,1.0,1.0);
-        assert_eq!(vibrant,saturated,"fully saturated colors should not lose saturation with positive vibrance");
+        let rgb = [0.9, 0.1, 0.05];
+        let saturated = apply_chroma(rgb, 1.0, 0.0);
+        let vibrant = apply_chroma(rgb, 1.0, 1.0);
+        assert_eq!(
+            vibrant, saturated,
+            "fully saturated colors should not lose saturation with positive vibrance"
+        );
     }
 
+    #[test]
+    fn base_curve_precedes_user_curve_without_changing_user_points() {
+        let mut curves = CurveSet::identity();
+        curves.base =
+            crate::develop::Curve::from_points(vec![[0.0, 0.0], [0.5, 0.7], [1.0, 1.0]]).unwrap();
+        curves.rgb =
+            crate::develop::Curve::from_points(vec![[0.0, 0.0], [0.5, 0.3], [1.0, 1.0]]).unwrap();
+        let input = 0.214;
+        let encoded = linear_to_srgb(input);
+        let expected = curves.rgb.eval(curves.base.eval(encoded));
+        let reversed = curves.base.eval(curves.rgb.eval(encoded));
+        let output = encode_and_curve(input, 0, &curves);
+        assert!((output - expected).abs() < 1e-5);
+        assert!((output - reversed).abs() > 0.02);
+        assert_eq!(curves.rgb.points(), &[[0.0, 0.0], [0.5, 0.3], [1.0, 1.0]]);
+    }
 }

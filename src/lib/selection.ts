@@ -7,14 +7,31 @@
  * | --- | --- |
  * | 单张点选 | 只选这张（替换掉之前的选择） |
  * | `Ctrl` / `Cmd` 点击 | 增减这一张（其余不动） |
- * | `Shift` 点击 | **翻转**「上一次的图（不含）」到「这次点的图（含）」之间每一项的选中状态；区间外一律不动 |
- * | 点日组 / 时间片标题 | 把那一组**全部**加进选择（`全选当天` / `全选此段`） |
+ * | `Shift` 点击 | 把「上一次的主选」到「这次点的主选」之间每一项**置为选中**；区间外一律不动 |
+ * | 点日组 / 时间片标题 | 「整段」开关：全选中 → 全取消；否则 → 全选中 |
  *
- * 锚点（anchor）是「上一次点过的那张」—— `Shift` 翻转从它**之后**一张开始算
- * （`BROWSE.md` §5.2 的严格语义，用户逐字描述：**不含**上一次的图、**含**这次点的图，
- * 且**不需要保存任何区间状态** —— 逻辑简单、每步都是纯粹的翻转）。
+ * ## 主选（锚点）—— 两端算法**固定不变**（人类 2026-09-26 重申）
+ *
+ * **主选目标 = 最后一次鼠标点到的那个**（不管当时有没有按 `Shift` / `Ctrl`，点一次就把它设为
+ * 主选）。它就是 `SelectionState.anchor`，也用于浏览侧右栏显示哪张的档案、胶片带定位等。
+ *
+ * `Shift` 的区间**两端永远是「前一个主选」与「当前主选」** ——
+ * **不是**「当前所有选中范围」到主选，也不是「最小/最大已选下标记」。
+ * 没有反选（`Ctrl` 取消某一项）时用户感觉不到两者差别，但算法是两回事，**不许改**：
+ * 以后不管加多少种新模式，这两端的取法都是一样的。
+ *
+ * 区间**不含起点主选、含终点主选**：起点那张已经是用户想要的样子了，再动它就会把
+ * 上一次点选的结果破坏掉。
+ *
  * 锚点不在当前列表里时（换了目录、列表被筛过）**退化成单张选中**，
  * 而不是猜一个位置：猜错会让用户一次选中一大片不该选的照片。
+ *
+ * ## 不支持「`Shift` + `Ctrl` 同按」
+ *
+ * 人类 2026-09-26：「这个功能不是我要求的，没人会这么操作」——
+ * 两个一起按时**两个都不算**，退化成单击（见 `clickMode`）。
+ * 相应地也**不提供区间取消选中**：需要大范围持续性的选中应该用
+ * 排除 / 旗标这类持久化手段，而不是“点一下就丢”的选中状态。
  *
  * 另外这里还有**排除**用的集合反转：`批量排除` 是**反转**语义
  * （未排除 → 排除；已排除 → 取消排除），不是「一律排除」。
@@ -66,23 +83,24 @@ export function applySelection(
       const to = Math.max(anchorIndex, targetIndex);
 
       /*
-       * **每一步都是纯粹的翻转**（`BROWSE.md` §5.2 的严格语义）：
-       *   * **不含**锚点（上一次的图）—— 它已经是用户想要的样子了；
-       *   * **含**这次点的图 —— 它必须跟着翻转；
-       *   * 区间外的每一项**原样不动**。
+       * **区间内的每一项置为选中**（人类 2026-09-26 定；在此之前是「翻转」）：
+       *   * **不含**起点主选（上一次点的那个）—— 它已经是用户想要的样子了；
+       *   * **含**终点主选（这一次点的）—— 它必须变成选中的；
+       *   * 区间外的每一项**原样不动**：已经选中的不会被顺手清掉。
        *
-       * 这里刻意**不保存「上一次的区间」**：人类明确要求「逻辑简单、无需保存复杂状态」。
-       * 曾经的实现是把区间**替换**进选择（`new Set(slice)`）—— 那会把区间外**已经选中**的
-       * 照片一并清掉（人类 2026-09-16 报的正是这个：「不在反转范围内的选择状态，
-       * 原来是什么现在还是什么，不改」）。
+       * 两端怎么取（从 `state.anchor` 到 `target`）是**固定算法**，不是本轮可调项 ——
+       * 人类原话：「不管有没有按 shift/ctrl 键，最后鼠标点到哪里那个就是主选」，
+       * 而区间永远是「前一个主选 → 当前主选」，与「当前所有选中范围」无关。
+       * 详见文件头的那一节。
+       *
+       * 因此这里也**不需要保存「上一次的区间」**：每一步都只看主选与本次目标。
        */
       const ids = new Set(state.ids);
       for (let index = from; index <= to; index += 1) {
         if (index === anchorIndex) continue;
         const id = orderedIds[index];
         if (id === undefined) continue;
-        if (ids.has(id)) ids.delete(id);
-        else ids.add(id);
+        ids.add(id);
       }
       return { ids, anchor: target };
     }
@@ -106,6 +124,40 @@ export function extendSelection(
   const ids = new Set(state.ids);
   for (const id of idsToAdd) ids.add(id);
   return { ids, anchor: state.anchor ?? idsToAdd[0] };
+}
+
+/**
+ * 「整段」开关：日组 / 时间片标题上那颗药丸的语义（人类 2026-09-26 定）。
+ *
+ * ```text
+ * 整段已全选中   →  整段取消
+ * 否则（含部分选中）→  整段置为选中（并进现有选择，其它段不动）
+ * ```
+ *
+ * 三条口径：
+ *
+ * 1. **不是逐项反转**。「部分选中」时是把缺的那些补上，**不是**把已选的那几张翻掉 ——
+ *    人类原话：「点一下全段选中，再点一下全段取消；全段选中状态下点其他段增加选中」。
+ * 2. **与「点单张照片」是两码事**：这里不走 `applySelection`、不看 `Shift` / `Ctrl` ——
+ *    它更接近「整体勾选」那个概念，鼠标怎么按都一样（`BROWSE.md` §3.2 的标记才是带修饰键的）。
+ * 3. **锚点取这一组的第一张**：这就是人类说的「主选目标」—— 点一下药丸也是一次点击，
+ *    所以主选跟着走到这一组的开头（接着按 `Shift` 点别处时，区间从组首算起）。
+ *
+ * 和 `extendSelection` 的区别：那个是**只加不减**（导出画廊的整组勾选还在用它），
+ * 这个是**开关**。两者不要互相代替。
+ */
+export function toggleGroupSelection(
+  state: SelectionState,
+  idsToToggle: readonly string[],
+): SelectionState {
+  if (idsToToggle.length === 0) return state;
+  const allSelected = idsToToggle.every((id) => state.ids.has(id));
+  const ids = new Set(state.ids);
+  for (const id of idsToToggle) {
+    if (allSelected) ids.delete(id);
+    else ids.add(id);
+  }
+  return { ids, anchor: idsToToggle[0] ?? state.anchor };
 }
 
 /** 全选（`Ctrl+A`） */
@@ -159,16 +211,31 @@ export function invertSet(
  * 但改一处忘一处就是「网格里 Shift 是区间、胶片带里 Shift 是替换」这种人肉 bug ——
  * 而那类 bug 只有用户按下去才会发现。
  *
- * 判定顺序也是规范的一部分：**Shift 优先于 Ctrl**（两个一起按时按区间算）。
+ * ## `Shift` + `Ctrl` 同按 = 退化成**单击**（人类 2026-09-26）
+ *
+ * 原话：「这个功能不是我要求的，没人会这么操作」——所以两个都**不算**，
+ * 既不是区间也不是加选／减选，就是一次普通点击。（曾经的实现是「`Shift` 优先」，
+ * 而网格那一份内联三元在同样情形下会退到 `toggle` —— 两边不一致，现已收归这里一处。）
+ *
+ * ## `invertedCtrl`（导出画廊，`design/export.md` §4.2）
+ *
+ * 导出画廊以 issue 为第一公民，**默认就是多选**语义，所以那里「单击 = 加/减一张」
+ * 而「`Ctrl` 单击 = 只选这一张」。这一个开关只翻转「有／无 `Ctrl`」这两个结果，
+ * `Shift` 与「同按退化」的规则两边一致。
  */
 export function clickMode(event: {
   shiftKey: boolean;
   ctrlKey: boolean;
   metaKey: boolean;
-}): SelectMode {
-  if (event.shiftKey) return "range";
-  if (event.ctrlKey || event.metaKey) return "toggle";
-  return "replace";
+}, invertedCtrl = false): SelectMode {
+  const plain: SelectMode = invertedCtrl ? "toggle" : "replace";
+  const withCtrl: SelectMode = invertedCtrl ? "replace" : "toggle";
+  const shift = event.shiftKey;
+  const ctrl = event.ctrlKey || event.metaKey;
+  // 同按 → 两个修饰键都不算；否则 `Shift` 只管区间、`Ctrl` 只管加选
+  if (shift && ctrl) return plain;
+  if (shift) return "range";
+  return ctrl ? withCtrl : plain;
 }
 
 /** 选择状态是否为空（`toolsbar` 的批量排除据此禁用） */

@@ -211,7 +211,7 @@ pub fn update_stat(
     conn.execute(
         "UPDATE asset_files
             SET size_bytes = ?1, mtime_ms = ?2,
-                file_created_ms = COALESCE(?5, file_created_ms), updated_at = ?3
+                file_created_ms = ?5, updated_at = ?3
           WHERE id = ?4",
         params![size_bytes as i64, mtime_ms, now_ms, row_id, file_created_ms],
     )?;
@@ -260,7 +260,7 @@ impl ApplyOutcome {
 
 /// 把一份变更计划落库。
 ///
-/// 调用方负责事务（`CatalogDb::write` 已经是一个事务；批量导入请用 `write_tx`）。
+/// 调用方负责事务（使用 `CatalogDb::write_tx`；`write` 本身不包事务）。
 /// `disk` 必须与生成 `plan` 时用的是同一份快照。
 pub fn apply_diff(
     conn: &Connection,
@@ -269,6 +269,38 @@ pub fn apply_diff(
     now_ms: i64,
 ) -> Result<ApplyOutcome> {
     let mut out = ApplyOutcome::default();
+
+    // 事务内先腾空所有改名路径，支持交换名字，以及移走后原位新增。
+    // NUL 不能出现在磁盘路径里，因此不会与真实文件撞名；中间态不出事务。
+    for rename in &plan.renamed {
+        update_path(
+            conn,
+            rename.row_id,
+            &format!("\0raybend-sync/{}", rename.row_id),
+            now_ms,
+        )?;
+    }
+
+    // ── 改名 / 移动 ──
+    for r in &plan.renamed {
+        update_path(conn, r.row_id, &r.new_path, now_ms)?;
+        clear_missing(conn, r.row_id, now_ms)?;
+        // 顺带把大小/时间刷新一遍：改名往往伴随替换（同一次操作里做掉）
+        if let Some(f) = disk.get(r.disk_index) {
+            update_stat(
+                conn,
+                r.row_id,
+                f.size_bytes,
+                f.mtime_ms,
+                f.created_ms,
+                now_ms,
+            )?;
+        }
+        out.renamed += 1;
+        if r.evidence == Evidence::Heuristic {
+            out.heuristic += 1;
+        }
+    }
 
     // ── 新文件：按 (目录, 名字主体) 分组，配对成一张照片 ──
     // 先看库里有没有已经存在的同组资产（例如 RAW 是后补进来的），有就挂上去。
@@ -288,23 +320,17 @@ pub fn apply_diff(
         }
     }
 
-    // ── 改名 / 移动 ──
-    for r in &plan.renamed {
-        update_path(conn, r.row_id, &r.new_path, now_ms)?;
-        // 顺带把大小/时间刷新一遍：改名往往伴随替换（同一次操作里做掉）
-        if let Some(f) = disk.get(r.disk_index) {
-            update_stat(conn, r.row_id, f.size_bytes, f.mtime_ms, f.created_ms, now_ms)?;
-        }
-        out.renamed += 1;
-        if r.evidence == Evidence::Heuristic {
-            out.heuristic += 1;
-        }
-    }
-
     // ── 内容变了 ──
     for m in &plan.modified {
         if let Some(f) = disk.get(m.disk_index) {
-            update_stat(conn, m.row_id, f.size_bytes, f.mtime_ms, f.created_ms, now_ms)?;
+            update_stat(
+                conn,
+                m.row_id,
+                f.size_bytes,
+                f.mtime_ms,
+                f.created_ms,
+                now_ms,
+            )?;
             out.modified += 1;
         }
     }
@@ -313,9 +339,38 @@ pub fn apply_diff(
     for m in &plan.returned {
         clear_missing(conn, m.row_id, now_ms)?;
         if let Some(f) = disk.get(m.disk_index) {
-            update_stat(conn, m.row_id, f.size_bytes, f.mtime_ms, f.created_ms, now_ms)?;
+            update_stat(
+                conn,
+                m.row_id,
+                f.size_bytes,
+                f.mtime_ms,
+                f.created_ms,
+                now_ms,
+            )?;
         }
         out.returned += 1;
+    }
+
+    // 每次成功配对都补齐身份；替换不能继续保留旧 inode / FileId。
+    for (row_id, index) in plan
+        .unchanged
+        .iter()
+        .chain(&plan.modified)
+        .chain(&plan.returned)
+        .map(|m| (m.row_id, m.disk_index))
+        .chain(plan.renamed.iter().map(|r| (r.row_id, r.disk_index)))
+    {
+        if let Some(file) = disk.get(index) {
+            let (volume, identity) = match file.identity.filter(|id| !id.is_zero()) {
+                Some(id) => (Some(id.volume_serial as i64), Some(id.file_id.to_vec())),
+                None => (None, None),
+            };
+            conn.execute(
+                "UPDATE asset_files SET volume_serial = ?1, file_id = ?2 WHERE id = ?3
+                AND (volume_serial IS NOT ?1 OR file_id IS NOT ?2)",
+                params![volume, identity, row_id],
+            )?;
+        }
     }
 
     // ── 缺失 ──
@@ -372,6 +427,7 @@ pub fn find_asset_for_group(
 ) -> Result<Option<i64>> {
     // 主体的比对在 Rust 侧做：SQLite 里没有「去扩展名 + 折叠」的函数，
     // 而按目录前缀筛完的候选很少（一个目录里的照片数）。
+    let dir_folded = normalize_raw_dir(dir_folded);
     let prefix = if dir_folded.is_empty() {
         String::new()
     } else {
@@ -391,7 +447,8 @@ pub fn find_asset_for_group(
         // 候选行如果在 `_RAW/` 里，折算回上一层再比
         let (dir, name) = path.rsplit_once('/').unwrap_or(("", path.as_str()));
         let dir = normalize_raw_dir(dir);
-        if dir == normalize_raw_dir(dir_folded) && crate::media::kind::stem_folded(name) == stem_folded
+        if dir == normalize_raw_dir(dir_folded)
+            && crate::media::kind::stem_folded(name) == stem_folded
         {
             return Ok(Some(asset_id));
         }
@@ -404,11 +461,17 @@ pub fn find_asset_for_group(
 /// 只有**最后一段**是 `_RAW` 才折算（中间叫 `_RAW` 的目录是用户自己的命名）。
 /// **大小写不敏感**：库里存的是折叠路径（`photos/2026/_raw`），
 /// 而调用方手里可能是原文（`photos/2026/_RAW`）—— 两头都得认（这里踩过一次坑）。
-fn normalize_raw_dir(dir: &str) -> &str {
+pub(crate) fn normalize_raw_dir(dir: &str) -> &str {
     const SUFFIX: &str = "/_RAW";
     let start = dir.len().checked_sub(SUFFIX.len());
     match start {
-        Some(at) if dir[at..].eq_ignore_ascii_case(SUFFIX) => &dir[..at],
+        Some(at)
+            if dir
+                .get(at..)
+                .is_some_and(|suffix| suffix.eq_ignore_ascii_case(SUFFIX)) =>
+        {
+            &dir[..at]
+        }
         _ => dir,
     }
 }
@@ -450,7 +513,7 @@ pub fn apply_exif(
             camera_make = ?4, camera_model = ?5, lens = ?6,
             focal_mm = ?7, f_number = ?8, exposure_ms = ?9, iso = ?10,
             width = ?11, height = ?12, orientation = ?13,
-            gps_lat = COALESCE(?14, gps_lat), gps_lon = COALESCE(?15, gps_lon),
+            gps_lat = ?14, gps_lon = ?15,
             updated_at = ?16
           WHERE id = ?17",
         params![
