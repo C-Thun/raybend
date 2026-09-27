@@ -42,6 +42,21 @@ SignPath Foundation 提供免费开源签名，可申请但需要审批、源仓
 
 Microsoft Store 当前新入口个人/公司注册免费，仍需身份验证：[开户文档](https://learn.microsoft.com/en-us/windows/apps/publish/partner-center/open-a-developer-account?tabs=individual)、[注册入口](https://storedeveloper.microsoft.com/)。MSIX 认证后商店代签；EXE/MSI 商店提交仍需自己的发布者签名。不是“把 EXE 上传就得到免费签名”。商店信任也不延伸到官网 EXE。
 
+### 证书路线对照（2026-09-27 核实）
+
+上面是当前可直接执行的路线；这一节是“以后要买/申请证书”时的对照，避免重复调研。共同前提：**最短路径是让证书进入本机 Windows 证书存储**（Token 中间件或导入 .pfx），再设 `RAYBEND_SIGN_CERT_SHA1` 并去掉 `--unsigned` —— 脚本现有 `signCommand` 就是 signtool + 证书存储指纹，云签名服务都要另补一层适配。
+
+| 路线 | 与当前脚本 | 关键限制 |
+| --- | --- | --- |
+| 证书存储（Token / .pfx） | **开箱可用** | Token 方案可能弹 PIN；续期换指纹 |
+| SignPath Foundation（免费开源） | 需适配，且其模型要求在 SignPath 构建链上验证来源 | 需审批、公开源仓与构建关联、MFA、签名政策、每版人工批准；发布者显示 SignPath Foundation |
+| 商业公开信任证书（OV / IV） | OV+Token 走证书存储路线即可 | 个人主体可走 IV 类（如 SSL.com IV 约 $379/年，可配 eSigner 云签名免 Token）；EV 不绕 SmartScreen，不必加钱 |
+| Azure Artifact Signing（原 Trusted Signing） | 需适配（云签名 CLI） | $9.99/月起含 5000 次签名；**地区限制**：公开信任证书的组织限于 US/CA/EU/UK/AU/NZ/JP/KR/SG/CH/NO/IL，个人开发者仅 US/CA —— 中国大陆当前不在名单，本项目不可用 |
+| 开源折扣证书 | 同“证书存储” | Certum Open Source Code Signing **不是免费**（约 €49 起），且需其加密卡或 SimplySign 云；官网当前显示 out of stock，需向 Certum 确认 |
+| 新兴免费开源签名服务 | 未核实 | OSSign https://ossign.org/ 、Necessary Code Signing https://sign.necessary.nu/ 等确实在运营，但签发主体与可持续性未经核实，只作观察项，不作为发行依赖 |
+
+来源：[微软签名选项](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/code-signing-options)、[Azure Artifact Signing 地区条款](https://learn.microsoft.com/en-us/azure/artifact-signing/quickstart)、[SSL.com IV](https://www.ssl.com/products/software-integrity/code-signing/iv/)、[Certum 开源证书](https://shop.certum.eu/open-source-code-signing-on-simplysign.html)。
+
 ## 2. 先核对计划
 
 ```bash
