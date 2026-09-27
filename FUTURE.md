@@ -355,6 +355,7 @@ commands panel、快捷键设置和标题栏菜单都是它的不同呈现。未
 
 ### F1　macOS
 
+* **2026-09-27 拍板：暂缓**，等 Windows 版成熟后再评估（REVIEW.md R3-01）。直接动因：签名 $99/年 无免费替代、无 Developer ID 签名的直下在 macOS 报「已损坏」不可用（`docs/release.md` §8）。
 * 解码：ImageIO / CoreImage（免费且质量好）
 * 渲染：Metal（wgpu 已支持）
 * 打包：签名与公证（notarization）、App Store 政策与 AGPL-3.0 的冲突（**注意：AGPL-3.0 与 App Store 条款不兼容**，需走独立分发）
@@ -362,14 +363,17 @@ commands panel、快捷键设置和标题栏菜单都是它的不同呈现。未
 
 ### F2　Linux
 
+* **2026-09-27 拍板：空闲时先行打包**（人类意向，非承诺；REVIEW.md R3-01）。开发与打包可在现有 WSL 环境完成（`pnpm tauri dev` 本就是 Linux/webkit2gtk 构建），真机/虚拟机仅用于验收；前置项：G11（`tauri.linux.conf.json` 的系统标题栏收尾）。
 * Tauri 3 起 GTK4；Flatpak 分发；RAW 解码与色彩管理差异
 * **优先级最低**
 
 ---
 
-### Windows MSIX / Microsoft Store 分发（2026-09-27 登记，未启动）
+### Windows MSIX / Microsoft Store 分发（2026-09-27 登记；同日拍板为直下链走通后的主攻方向）
 
 崔总定案：本轮 M5 先收口 NSIS/MSI 本地打包 → GitHub Release 安装包下载 → 官网自动更新；MSIX 后续另开工作单元，不要求现在申请商店或提供 Identity 来挡住直下发行。
+
+**2026-09-27 下午拍板（REVIEW.md R3-01）**：官网直下走通后即启动 MSIX，作为「零现金成本解决 Windows 安装体验」的主攻方向——商店重签与开发者账号均已免费（`docs/release.md` §6），代价是 MSIX 包装与双通道工程；macOS 暂缓（$99/年无免费替代）、Linux 空闲时先行（WSL 可构建）。
 
 后续开工输入：真实 Package Identity Name / Publisher、商店账号与认证要求；对接现有 `RAYBEND_DISTRIBUTION=store` 前后端身份，禁用直下 updater。另做 Windows SDK 包装与商店更新流水线，复用现有发布来源/许可/worker 校验，不把 NSIS 改后缀当 MSIX。
 
