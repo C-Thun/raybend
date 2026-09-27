@@ -3,13 +3,13 @@
  *
  * 最重要的一条是**跨语言一致性**：前端画曲线那份实现必须与 Rust 侧
  * （`crates/raybend/src/develop/curve.rs`）算出同一组值 ——
- * 基准是 `src/lib/curve-vectors.json`（外部给定，Rust 侧有同一条断言）。
+ * 基准是 `crates/raybend/assets/curve-vectors.json`（外部给定，Rust 侧有同一条断言）。
  */
 
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import vectors from "./curve-vectors.json" with { type: "json" };
+import vectors from "../../crates/raybend/assets/curve-vectors.json" with { type: "json" };
 import {
   IDENTITY_CURVE,
   MIN_X_GAP,

@@ -8,7 +8,7 @@
  *
  * # 两份实现怎么保证不漂
  *
- * `src/lib/curve-vectors.json` 是**外部给定的测试向量**（由 Rust 侧算出来、存成文件），
+ * `crates/raybend/assets/curve-vectors.json` 是**外部给定的测试向量**（由 Rust 侧算出来、存成文件），
  * **两侧都对着它断言**（Rust：`develop::curve` 的单测；TS：`curve.test.ts`）。
  * 公式一改，两边都得动，漏一处就红 —— 与 `dto-contract` / `develop-params.json` 同一套做法。
  *

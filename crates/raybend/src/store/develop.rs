@@ -17,7 +17,7 @@
 //! # 只存非默认值
 //!
 //! `develop_params` 里没有的行 = 这一项没动过（默认值的真相在
-//! `src/api/develop-params.json`，**不进库**）—— 这样改默认值不需要数据迁移，
+//! `crates/raybend/assets/develop-params.json`，**不进库**）—— 这样改默认值不需要数据迁移，
 //! 而「重置这一项」就是删一行。
 //!
 //! # 校验

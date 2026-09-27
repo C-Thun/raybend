@@ -1,10 +1,11 @@
 /**
  * 编辑参数表（`design/editor.md` §3.7 + `DESIGN.md` §14.10）。
  *
- * # 数字的真相在 `src/api/develop-params.json`
+ * # 数字的真相在 `crates/raybend/assets/develop-params.json`
  *
  * 范围 / 步长 / 默认值 / 填充原点 / 本波接没接管线 —— 这些**不是**写在这里的，
- * 而是从 `src/api/develop-params.json` 读进来；Rust 侧（`crates/raybend/src/develop/params.rs`）
+ * 而是从 `crates/raybend/assets/develop-params.json` 读进来（真相住在 Rust crate 内，
+ * crates.io 发布包只能含 crate 目录的文件）；Rust 侧（`crates/raybend/src/develop/params.rs`）
  * 对着同一份文件逐条断言。改数改那一处，两侧的测试会盯着。
  *
  * 本文件只补**界面装饰**：语言包 key、分组、小数位、单位、极值文案、要不要显示极值。
@@ -18,7 +19,7 @@
 import type { MessageKey } from "../../i18n/index.ts";
 // `with { type: "json" }` 不是多余的：`node --test` 跑单测时（`pnpm test`）
 // 没有它就报 ERR_IMPORT_ATTRIBUTE_MISSING —— Vite 那边两种写法都认。
-import contract from "../../api/develop-params.json" with { type: "json" };
+import contract from "../../../crates/raybend/assets/develop-params.json" with { type: "json" };
 
 /** 右栏第 2 组的四个页签（也是参数的分组名）。 */
 export type ParamGroup = "tone" | "color" | "detail" | "lens";

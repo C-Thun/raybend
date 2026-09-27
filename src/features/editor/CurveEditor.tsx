@@ -16,7 +16,7 @@
  * # 曲线数学在前端也有一份（画图要用），但与 Rust 有共同基准
  *
  * 求值在 `lib/curve.ts`（单调三次），与 `crates/raybend/src/develop/curve.rs`
- * 对着**同一份** `src/lib/curve-vectors.json` 断言 —— 两份实现不许各走各的。
+ * 对着**同一份** `crates/raybend/assets/curve-vectors.json` 断言 —— 两份实现不许各走各的。
  */
 
 import { For, Show, createSignal, type JSX } from "solid-js";

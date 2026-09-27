@@ -25,7 +25,7 @@ import {
   paramsInGroup,
   type ParamSpec,
 } from "./params.ts";
-import contract from "../../api/develop-params.json" with { type: "json" };
+import contract from "../../../crates/raybend/assets/develop-params.json" with { type: "json" };
 import {
   createEditorStrip,
   editorEmptyIcon,

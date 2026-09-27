@@ -1,6 +1,7 @@
 {
   "_comment": [
     "曲线求值的**外部给定测试向量**：由 Rust 侧 `develop::curve` 算出来，",
+    "住址在 Rust crate 内（crates.io 发布包只能含 crate 目录的文件）；TS 侧跨树 import 同一份。",
     "Rust（`curve.rs` 的单测）与 TS（`src/lib/curve.test.ts`）两侧都对着它断言。",
     "公式一改就得同时更新这里 —— 两份实现不许各走各的。",
     "`samples[i]` = 在 x = i / steps 处的取值（含两端）。"

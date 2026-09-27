@@ -1,9 +1,10 @@
-//! **显影参数的数字契约** —— 与 `src/api/develop-params.json` 逐条对齐。
+//! **显影参数的数字契约** —— 与 `crates/raybend/assets/develop-params.json` 逐条对齐。
 //!
 //! # 为什么是「镜像 + 断言」而不是「运行时读 JSON」
 //!
 //! 参数的**范围 / 步长 / 默认值**是界面与管线共同依赖的口径，只允许有一处真相
-//! （`AGENTS.md` §2.12）。真相放在 `src/api/develop-params.json`：
+//! （`AGENTS.md` §2.12）。真相放在 `crates/raybend/assets/develop-params.json`
+//! （住在 crate 内 —— crates.io 发布包只能含 crate 目录的文件，TS 侧跨树 import 同一份）：
 //!
 //! * 前端 `src/features/editor/params.ts` 读它建界面；
 //! * 本文件用 `include_str!` 把它嵌进二进制，单测**逐条比对**两张表。
@@ -106,8 +107,8 @@ pub const PARAMS: &[ParamSpec] = &[
     ParamSpec { id: "chromaticBlue", min: -100.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Center, wired: true, baseline: Baseline::Static },
 ];
 
-/// 前端那份契约文件（**唯一真相**，本文件与它逐条对齐）。
-pub const CONTRACT_JSON: &str = include_str!("../../../../src/api/develop-params.json");
+/// 契约文件（**唯一真相**，本文件与它逐条对齐）；前端 `params.ts` 跨树 import 同一份。
+pub const CONTRACT_JSON: &str = include_str!("../../assets/develop-params.json");
 
 /// 按 id 取参数口径。
 #[must_use]

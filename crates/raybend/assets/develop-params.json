@@ -1,6 +1,7 @@
 {
   "_comment": [
     "显影参数的数字契约 —— **唯一真相**（范围 / 步长 / 默认值 / 填充原点 / 本波接没接管线）。",
+    "住址在 Rust crate 内（crates.io 发布包只能含 crate 目录的文件）；TS 侧跨树 import 同一份。",
     "三处都对着它断言，改数就要一起改：",
     "  * TS：src/features/editor/params.ts 读它建界面（src/features/editor/params.test.ts 守着）；",
     "  * Rust：crates/raybend/src/develop/params.rs 的 PARAMS 表（该文件的单测逐条比对）；",

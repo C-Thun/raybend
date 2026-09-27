@@ -19,7 +19,7 @@
 --
 -- 表里没有的行 = 这一项没动过。于是「重置这一项」「重置全部」「这项动没动」
 -- 三个问题共用同一套判断（`develop::params::DevelopParams` 的 `dirty` 就是它）。
--- 默认值本身**不进库**（`src/api/develop-params.json` 是唯一真相）——
+-- 默认值本身**不进库**（`crates/raybend/assets/develop-params.json` 是唯一真相）——
 -- 否则改一次默认值就要写一次数据迁移。
 
 CREATE TABLE develop_stacks (

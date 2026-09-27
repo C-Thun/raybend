@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! develop/
-//! ├── params.rs    参数表（与 src/api/develop-params.json 逐条对齐）+ DevelopParams
+//! ├── params.rs    参数表（与 crates/raybend/assets/develop-params.json 逐条对齐）+ DevelopParams
 //! ├── color.rs     sRGB 传递函数、色温 ↔ 色度、白平衡增益（唯一一份色彩数学）
 //! ├── curve.rs     单调三次曲线（RGB / R / G / B）
 //! ├── denoise.rs   降噪（亮度 / 色度；快速档 = log 域多尺度保边收缩）

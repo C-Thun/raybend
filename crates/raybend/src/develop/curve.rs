@@ -386,12 +386,13 @@ pub fn curve_is_not_a_param() -> bool {
     spec("curve").is_none()
 }
 
-/// 与 TS 侧共用的**外部给定测试向量**（见 `src/lib/curve-vectors.json`）。
+/// 与 TS 侧共用的**外部给定测试向量**（见 `crates/raybend/assets/curve-vectors.json`，
+/// 住在 crate 内 —— crates.io 发布包只能含 crate 目录的文件）。
 ///
 /// 前端也要画这条曲线（拖动的每一帧），所以求值有两份实现 ——
 /// 这份文件是它们的**共同基准**：两侧都对着同一组采样值断言，公式一改漏一处就红。
 #[cfg(test)]
-const CURVE_VECTORS_JSON: &str = include_str!("../../../../src/lib/curve-vectors.json");
+const CURVE_VECTORS_JSON: &str = include_str!("../../assets/curve-vectors.json");
 
 #[cfg(test)]
 mod tests {
