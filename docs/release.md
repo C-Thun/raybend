@@ -72,6 +72,13 @@ Microsoft Store 当前新入口个人/公司注册免费，仍需身份验证：
 
 来源：[微软签名选项](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/code-signing-options)、[Azure Artifact Signing 地区条款](https://learn.microsoft.com/en-us/azure/artifact-signing/quickstart)、[SSL.com IV](https://www.ssl.com/products/software-integrity/code-signing/iv/)、[Certum 开源证书](https://shop.certum.eu/open-source-code-signing-on-simplysign.html)、[CSBR 硬件密钥条款](https://cabforum.org/working-groups/code-signing/requirements/)、[Ballot CSC-31](https://cabforum.org/2025/11/17/ballot-csc-31-maximum-validity-reduction/)、[Let's Encrypt 不做码签](https://community.letsencrypt.org/t/do-you-support-code-signing/370)、[SmartScreen 信誉规则](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation)、[SmartScreen 实操建议（Eric Lawrence）](https://textslashplain.com/2024/11/15/best-practices-for-smartscreen-apprep/)。
 
+### 生态现状与 Tauri 官方口径（2026-09-27 核实）
+
+- **抽样 12 个知名开源项目的 Windows 安装器**（GitHub latest release，读 PE 证书表与签发链）：公开信任签名 6 个（Notepad++/GlobalSign OV、OBS、HandBrake、VSCodium、Jan、Yaak）；无证书表 4 个（**7-Zip x64、qBittorrent、ShareX、Spotube**）；MSI 未判定 2 个（KeePassXC、Spacedrive）。头部项目约六成签名；往长尾走 unsigned 是常态——文件名直接带 `-unsigned` 的项目不少（SMPlayer、Block 公司的 Buzz 等），也有项目 signed/unsigned 双发。
+- 背景事实：Notepad++ 的 DigiCert 捐赠证书 2025-05 到期后续签被拒（开源项目无注册商业实体），一度只能自签（SmartScreen 视同未签名），后获 GlobalSign OV——顶级项目也会掉进拿不到证书的坑；ShareX 明言“几十年没签名，经费不足”；GitHub 官方社区存在请愿帖要求为开源项目提供签名支持。
+- **Tauri 官方文档口径**（v2 sign/windows）：签名“**不是 Windows 上运行的必要条件**，只要最终用户愿意忽略 SmartScreen 警告”；官方路径 = OV+signtool 证书存储（本仓当前这条）、Azure Key Vault（relic）、Azure Artifact Signing（artifact-signing-cli）、自定义 signCommand；**未提 SignPath**。
+- **Tauri 维护者补充口径**（官方讨论 #8046）：EV/OV 证书“蠢贵”；EV 自 2024 年起无特殊待遇；实操建议是“每版用同一张证书并长期持有、预期每个新版早期下载仍提示、为此别买 EV”；唯一彻底消除提示的是 Store 分发。
+
 ## 2. 先核对计划
 
 ```bash
