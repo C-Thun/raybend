@@ -3986,7 +3986,7 @@ dependencies = [
 
 [[package]]
 name = "raybend"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "flate2",
  "getrandom 0.4.3",
@@ -4013,7 +4013,7 @@ dependencies = [
 
 [[package]]
 name = "raybend-desktop"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "image",
  "raw-window-handle",

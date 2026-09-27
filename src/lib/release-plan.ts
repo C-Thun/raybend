@@ -69,7 +69,9 @@ export function parseReleaseArgs(argv: readonly string[]): ReleaseRequest {
   if ((flags.has("--unsigned") || flags.has("--with-updater")) && !flags.has("--windows")) throw new Error("--unsigned / --with-updater 需要 --windows");
   return { bump, channel, dryRun: flags.has("--dry-run"), allowDirty: flags.has("--allow-dirty"), skipBuild: flags.has("--skip-build"), windows: flags.has("--windows"), unsigned: flags.has("--unsigned"), withUpdater: flags.has("--with-updater") };
 }
-/** MSI 数值版本限制；预览版先只生成 NSIS，避免同一 MSI ProductVersion 冒充升级。 */
+/** MSI 数值版本限制。目前**不产出 MSI**（2026-09-27 起因 32 位 light.exe 读不了 WSL 路径，
+ * 见 implementations/2026-09-27_release-msi-wix-light-path.md），这条限制保留是为了版本号在 MSI
+ * 恢复时仍然合法，也避免旧出的 MSI 与新版冒充升级。 */
 export function windowsVersion(version: string): string {
   const v = parseVersion(version);
   if (v.major > 255 || v.minor > 255 || v.patch > 65535) throw new Error("版本超出 Windows MSI 限制（255.255.65535）");

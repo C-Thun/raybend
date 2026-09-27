@@ -1,6 +1,6 @@
 {
   "name": "raybend",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "相片管理软件（光伴）",
   "type": "module",
   "private": true,

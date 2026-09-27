@@ -6,13 +6,17 @@ export function windowsReleaseConfig(plan, env) {
   if (!unsigned && !/^[a-fA-F0-9]{40}$/.test(thumb)) throw new Error("Windows 签名需要 RAYBEND_SIGN_CERT_SHA1（Windows 证书存储中的 40 位指纹）；无签名显式 --unsigned");
   if (env.withUpdater && (!env.updaterPublicKey || !env.updaterPrivateKey)) throw new Error("更新产物需要 RAYBEND_UPDATER_PUBLIC_KEY 与 TAURI_SIGNING_PRIVATE_KEY；私钥只能由崔总配置");
   const timestamp = env.timestamp ?? "https://timestamp.digicert.com";
-  const url = new URL(timestamp);
-  if(url.protocol!=="https:" || url.username || url.password) throw new Error("时间戳服务须使用无凭据 HTTPS URL");
+  let parsed; // 解析失败也走同一条报错，不让裸 TypeError 冒到崔总面前。
+  try { parsed = new URL(timestamp); } catch { parsed = null; }
+  if(!parsed || parsed.protocol!=="https:" || parsed.username || parsed.password) throw new Error("时间戳服务须使用无凭据 HTTPS URL");
   return {
     plugins: {updater: {pubkey:env.updaterPublicKey ?? "",endpoints:[],windows:{installMode:"basicUi"}}},
     build: { beforeBuildCommand: null, frontendDist: env.frontendDist },
     bundle: {
-      targets: plan.channel === "release" ? ["nsis","msi"] : ["nsis"],
+      // 正式版也只出 NSIS（2026-09-27 崔总定）：MSI 那条被「32 位 light.exe 读不了 WSL 路径
+      // + tauri 的 bundle.resources 无法表达结对路径」结构性挡住。恢复路线登记在 FUTURE.md，
+      // 现场记录与实测矩阵见 implementations/2026-09-27_release-msi-wix-light-path.md。
+      targets: ["nsis"],
       createUpdaterArtifacts: env.withUpdater === true,
       windows: {
         allowDowngrades: false,
