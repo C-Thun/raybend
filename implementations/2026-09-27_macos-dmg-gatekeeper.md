@@ -14,7 +14,7 @@
 | --- | --- |
 | Developer ID 签名 + 已公证 | 无任何提示，直接打开 |
 | 有 Developer ID 签名、未公证 | 阻止；Sequoia 15 起右键绕过已移除，须「系统设置 → 隐私与安全性 → 仍要打开」多步操作；Apple 支持文档劝阻（称绕过是 Mac 中毒最常见方式） |
-| **完全未签名** | **「XXX.app 已损坏，无法打开。您应该将它移到废纸篓。」**——虚假报错（app 没坏）；唯一解除方法是终端执行 `xattr -r -d com.apple.quarantine`，普通用户不可能完成 |
+| **无有效 Developer ID 签名（完全未签名、ad-hoc 签名均算）** | **「XXX.app 已损坏，无法打开。您应该将它移到废纸篓。」**——虚假报错（app 没坏）；唯一解除方法是终端执行 `xattr -r -d com.apple.quarantine`，普通用户不可能完成 |
 
 要点：
 
