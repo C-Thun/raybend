@@ -55,7 +55,14 @@ Microsoft Store 当前新入口个人/公司注册免费，仍需身份验证：
 | 开源折扣证书 | 同“证书存储” | Certum Open Source Code Signing **不是免费**（约 €49 起），且需其加密卡或 SimplySign 云；官网当前显示 out of stock，需向 Certum 确认 |
 | 新兴免费开源签名服务 | 未核实 | OSSign https://ossign.org/ 、Necessary Code Signing https://sign.necessary.nu/ 等确实在运营，但签发主体与可持续性未经核实，只作观察项，不作为发行依赖 |
 
-来源：[微软签名选项](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/code-signing-options)、[Azure Artifact Signing 地区条款](https://learn.microsoft.com/en-us/azure/artifact-signing/quickstart)、[SSL.com IV](https://www.ssl.com/products/software-integrity/code-signing/iv/)、[Certum 开源证书](https://shop.certum.eu/open-source-code-signing-on-simplysign.html)。
+**为什么码签不像 SSL 那样能自助签发**（防止把“买张证书”想得和买域名证书一样简单）：
+
+- **验证对象不同**：DV 型 SSL 只验证“你能控制这个域名”（DNS/HTTP 自动核验），而码签验证“你是谁/你是哪个组织”。CA/B Forum 的码签基准要求（CSBR）强制身份验证（组织/个人），**不存在 DV 级的码签证书**。
+- **私钥必须进硬件**：CSBR §6.2.7.4.2 自 2023-06-01 起要求码签私钥在合规硬件加密模块中生成、存储、使用，满足方式实际只有“CA 寄送 Token”或“云签名服务”两种——这是云签名适配绕不开的法源原因，不是脚本挑食。
+- **没有免费的自动化 CA**：ACME 只服务域名验证；Let's Encrypt 官方明确不做码签（需真实身份验证，无法机器化）。同时有效期还在收紧（Ballot CSC-31：上限从 39 个月降到 460 天，2026-03-01 起生效），续期更频繁。
+- **口径差异**：SSL 无证书是硬门槛（浏览器直接拒绝），码签缺签名只是软门槛（Windows 提示仍可安装）——所以码签是自愿的信任投资，免费替代品因此稀少。
+
+来源：[微软签名选项](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/code-signing-options)、[Azure Artifact Signing 地区条款](https://learn.microsoft.com/en-us/azure/artifact-signing/quickstart)、[SSL.com IV](https://www.ssl.com/products/software-integrity/code-signing/iv/)、[Certum 开源证书](https://shop.certum.eu/open-source-code-signing-on-simplysign.html)、[CSBR 硬件密钥条款](https://cabforum.org/working-groups/code-signing/requirements/)、[Ballot CSC-31](https://cabforum.org/2025/11/17/ballot-csc-31-maximum-validity-reduction/)、[Let's Encrypt 不做码签](https://community.letsencrypt.org/t/do-you-support-code-signing/370)。
 
 ## 2. 先核对计划
 
