@@ -7,6 +7,9 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
+# 桌面外壳不发布到 crates.io（安装包走 M5 分发链路，见 docs/release.md）；
+# publish = false 是防误发守门 —— 工作区里只有 crates/raybend 允许发布。
+publish = false
 
 [lib]
 # 此处的 `_lib` 后缀看似冗余，但用于让 lib 名与 bin 名不冲突。

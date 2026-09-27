@@ -1,6 +1,9 @@
 [package]
 name = "raybend"
 description = "raybend（光伴）核心库：媒体、索引、RAW 解码、缩略图与渲染"
+# crates.io 页面呈现用（占名 + 社区可发现）。keywords 最多 5 个，categories 用官方枚举值。
+keywords = ["photo", "photography", "raw", "image"]
+categories = ["multimedia::images"]
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
