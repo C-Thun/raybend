@@ -159,7 +159,29 @@ pnpm release:finalize /mnt/c/rb-target/raybend-release/release/bundle \
 ## 7. 真机验收与失败恢复
 
 在干净 Win10 22H2 / Win11（至少一台干净配置，可用 VM）依次验：初次安装/首启建库与已有库、中文/Unicode/只读路径、浏览编辑保存及真实导出、自重启 worker、vN→vN+1 更新、下载断网、签名不匹配、安装失败/磁盘不足、导入或导出进行中尝试更新、卸载/重装保留照片与库。
-
 下载失败不启动安装；安装阶段系统行为需实测，不宣传“失败一定自动回滚”。更新后还没启动时可恢复安装；一旦数据库升级，旧程序会触发 SchemaTooNew 拒绝打开。迁移前快照用于按版本恢复，不能直接覆盖升级后新增照片/编辑。恢复需先复制当前库，确认要恢复的时间点，保留差异，不静默删库重建。
 
 未通过这些测试就不能勾选 M5 DoD。GUI/色彩/大库性能/E2E 由您确认；Agent 的编译和单测只属于冒烟。
+
+## 8. macOS / Linux 的签名要求（远期参考，2026-09-27 核实）
+
+三平台的结构完全不同，**按开发成本排序：Linux（$0）< macOS（$99/年）< Windows（$250–400/年）**。
+
+| | Windows | macOS | Linux |
+| --- | --- | --- | --- |
+| 未签名直下体验 | SmartScreen 提示，用户“更多信息 → 仍要运行”（两下） | **Sequoia 15 起不能右键绕过**，须去系统设置点“仍要打开”；Apple 支持文档劝阻（称其为 Mac 中毒最常见方式） | 无警告（AppImage/tar.gz）；deb/rpm 由发行版仓库机制负责 |
+| 签名颁发者 | 多家 CA（DigiCert/Sectigo/GlobalSign/SSL.com/Certum…），信任库由微软 Trusted Root Program 决定 | **只有 Apple**（Developer ID），无第三方入口 | 开发者自持 GPG 密钥，无 CA |
+| 成本与硬件 | $250–400/年；CSBR 强制私钥进硬件（Token 或云签名） | $99/年 Apple Developer Program（唯一入口，含其他服务） | $0 |
+| 公证/沙箱 | 无强制公证 | **强制公证**（2019-06 后构建的 Developer ID 软件）；App Store 另强制 App Sandbox | 无 |
+| 商店路线 | MSIX 认证后**微软重签**，可不买商业证书 | App Store 须**先有 $99 会员并自签**（Mac App Distribution + Installer 证书），Apple 再重签 | Flathub/发行版仓库各自审核 |
+
+要点：
+
+- **macOS 的 unsigned 直下基本不可行**：Sequoia 起绕过流程变成系统设置里的多步操作，Apple 还主动劝阻。远期做 macOS 版时，$99/年 是必选项而非可选项；好在它比 Windows 证书便宜且入口唯一、全自动。
+- **Apple 是签名权的唯一来源**：会员资格是“请求、下载和使用 Apple 颁发证书”的前提。Windows 至少是多 CA 竞争 + 微软守信任库；macOS 是单一厂商——三平台里最集中的结构。
+- **App Store 不是“免签名通道”**（与 Windows Store 不同）：微软 Store 的 MSIX 可不买商业证书（认证后重签）；Apple 必须先有 $99 会员并自行签名上传。
+- **沙箱是 macOS 的产品层门槛（比证书更重要）**：App Store 强制 App Sandbox，访问沙箱外目录需用户授权的 entitlement；照片管理软件若走 App Store，库目录、导入源、外部编辑器都要在授权模型内重新设计。直下分发（Developer ID + 公证）没有这条限制。
+- **Linux 的信任模型就是“密钥=身份”**：deb/rpm 走仓库级 GPG（apt-secure 签 Release 文件），Flatpak 走 OSTree commit 的 GPG 签名（`flatpak build-sign`），AppImage/tar.gz 无需签名。没有 CA、没有身份验证、没有硬件要求，用户自行决定信任谁的密钥。
+- **Sigstore 是同一思路的现实实现**：Fulcio 依 OIDC 身份签发约 10 分钟短期证书，Rekor 用 append-only 透明日志（Merkle 树）记录签名，免费、无 CA、无硬件。**落差点在平台侧：Windows/macOS 不查 Sigstore**，只认自家信任根——这类方案能解决“可审计”，不解决“被放行”。
+
+来源：[Apple Developer ID](https://developer.apple.com/developer-id/)、[macOS 公证](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution)、[Apple 证书与会员要求](https://developer.apple.com/support/certificates)、[macOS 15 绕过变更（Ars Technica）](https://arstechnica.com/gadgets/2024/08/macos-15-sequoia-makes-you-jump-through-more-hoops-to-disable-gatekeeper-app-checks/)、[Debian 包签名（apt-secure）](https://www.debian.org/doc/manuals/securing-debian-manual/deb-pack-sign.en.html)、[Flatpak build-sign](https://docs.flatpak.org/en/latest/flatpak-command-reference.html)、[Sigstore 安全模型](https://docs.sigstore.dev/about/security/)。
