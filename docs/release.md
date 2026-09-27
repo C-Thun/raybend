@@ -168,19 +168,27 @@ pnpm release:finalize /mnt/c/rb-target/raybend-release/release/bundle \
 
 ## 8. macOS / Linux 的签名要求（远期参考，2026-09-27 核实）
 
-三平台的结构完全不同，**按开发成本排序：Linux（$0）< macOS（$99/年）< Windows（$250–400/年）**。
+三平台的结构完全不同。**成本必须按「平台 × 分发路径」算，不能按平台一刀切**——按平台排序会得出「Windows 最贵」的错误结论，它只在「直下 + 自签」这一条路径上成立。
+
+| 平台 × 路径 | 现金成本 | 代价 |
+| --- | --- | --- |
+| Linux 直下（AppImage/tar.gz） | $0 | — |
+| Windows 直下 unsigned | $0 | 每版流失约 22–38% 安装（加预安装说明可压到约 22%） |
+| Windows 直下 + 自签（IV/OV） | $250–400/年 | 硬件 Token 或云订阅；签完仍需攒信誉 |
+| **Windows MSIX → 微软商店** | **$0**（开发者账号也已免费） | 需补 MSIX 包装与双通道构建；商店接管更新 |
+| macOS 任何路径 | **$99/年** | 唯一入口；直下另需公证，App Store 另加强制沙盒 |
 
 | | Windows | macOS | Linux |
 | --- | --- | --- | --- |
 | 未签名直下体验 | SmartScreen 提示，用户“更多信息 → 仍要运行”（两下） | **Sequoia 15 起不能右键绕过**，须去系统设置点“仍要打开”；Apple 支持文档劝阻（称其为 Mac 中毒最常见方式） | 无警告（AppImage/tar.gz）；deb/rpm 由发行版仓库机制负责 |
 | 签名颁发者 | 多家 CA（DigiCert/Sectigo/GlobalSign/SSL.com/Certum…），信任库由微软 Trusted Root Program 决定 | **只有 Apple**（Developer ID），无第三方入口 | 开发者自持 GPG 密钥，无 CA |
-| 成本与硬件 | $250–400/年；CSBR 强制私钥进硬件（Token 或云签名） | $99/年 Apple Developer Program（唯一入口，含其他服务） | $0 |
+| 成本与硬件 | 直下自签 $250–400/年（CSBR 强制私钥进硬件，Token 或云签名）；**MSIX 商店路径 $0** | $99/年 Apple Developer Program（唯一入口，含其他服务） | $0 |
 | 公证/沙箱 | 无强制公证 | **强制公证**（2019-06 后构建的 Developer ID 软件）；App Store 另强制 App Sandbox | 无 |
-| 商店路线 | MSIX 认证后**微软重签**，可不买商业证书 | App Store 须**先有 $99 会员并自签**（Mac App Distribution + Installer 证书），Apple 再重签 | Flathub/发行版仓库各自审核 |
+| 商店路线 | MSIX 认证后**微软重签，$0**，开发者账号也已免费 | App Store 须**先有 $99 会员并自签**（Mac App Distribution + Installer 证书），Apple 再重签 | Flathub/发行版仓库各自审核 |
 
 要点：
 
-- **macOS 的 unsigned 直下基本不可行**：Sequoia 起绕过流程变成系统设置里的多步操作，Apple 还主动劝阻。远期做 macOS 版时，$99/年 是必选项而非可选项；好在它比 Windows 证书便宜且入口唯一、全自动。
+- **macOS 的 unsigned 直下基本不可行**：Sequoia 起绕过流程变成系统设置里的多步操作，Apple 还主动劝阻。远期做 macOS 版时，$99/年 是**必选项**而非可选项——这一点比 Windows 更硬：Windows 至少有 unsigned 直下与 MSIX 商店两条 $0 路径，macOS 一条都没有。好处是入口唯一、全自动。
 - **Apple 是签名权的唯一来源**：会员资格是“请求、下载和使用 Apple 颁发证书”的前提。Windows 至少是多 CA 竞争 + 微软守信任库；macOS 是单一厂商——三平台里最集中的结构。
 - **App Store 不是“免签名通道”**（与 Windows Store 不同）：微软 Store 的 MSIX 可不买商业证书（认证后重签）；Apple 必须先有 $99 会员并自行签名上传。
 - **沙箱是 macOS 的产品层门槛（比证书更重要）**：App Store 强制 App Sandbox，访问沙箱外目录需用户授权的 entitlement；照片管理软件若走 App Store，库目录、导入源、外部编辑器都要在授权模型内重新设计。直下分发（Developer ID + 公证）没有这条限制。
