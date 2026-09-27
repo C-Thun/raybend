@@ -53,6 +53,7 @@ Microsoft Store 当前新入口个人/公司注册免费，仍需身份验证：
 | 商业公开信任证书（OV / IV） | OV+Token 走证书存储路线即可 | 个人主体可走 IV 类（如 SSL.com IV 约 $379/年，可配 eSigner 云签名免 Token）；EV 不绕 SmartScreen，不必加钱 |
 | Azure Artifact Signing（原 Trusted Signing） | 需适配（云签名 CLI） | $9.99/月起含 5000 次签名；**地区限制**：公开信任证书的组织限于 US/CA/EU/UK/AU/NZ/JP/KR/SG/CH/NO/IL，个人开发者仅 US/CA —— 中国大陆当前不在名单，本项目不可用 |
 | 开源折扣证书 | 同“证书存储” | Certum Open Source Code Signing **不是免费**（约 €49 起），且需其加密卡或 SimplySign 云；官网当前显示 out of stock，需向 Certum 确认 |
+| **国内代理通道** | 同“证书存储” | 国内**无**自主公开信任码签 CA（沃通 WoSign 的 5 张根已 2019-03 被微软正式废止），但有代理商卖国外品牌：沃通/天威诚信/零信/火山引擎。**个人主体只能买 IV**（OV/EV 需组织实体，沃通 EV 页明写“仅限单位用户申请”）。零信 ZoTrus 明确提供面向“未注册公司的个人软件开发者”的 IV，国产 UKey 顺丰快递 + 中文电话鉴证——省掉跨境验证与 Token 国际邮寄。沃通含税报价：标准 OV 3588 元/年、OV Pro 4888、EV 4288、EV Pro 6888 |
 | 新兴免费开源签名服务 | 未核实 | OSSign https://ossign.org/ 、Necessary Code Signing https://sign.necessary.nu/ 等确实在运营，但签发主体与可持续性未经核实，只作观察项，不作为发行依赖 |
 
 **为什么码签不像 SSL 那样能自助签发**（防止把“买张证书”想得和买域名证书一样简单）：
@@ -151,6 +152,8 @@ pnpm release:finalize /mnt/c/rb-target/raybend-release/release/bundle \
 崔总 2026-09-27 明确：登记 FUTURE 后续独立启动，本轮先完成直下发行链。正式落点为 FUTURE.md 的 Windows MSIX 分发条目；没有把它列成本轮发布的前置。
 
 仍需您开户、预留产品名并取得 Partner Center 的 Package Identity Name/Publisher；目前没有这些实际身份，不能提交有效 MSIX。Tauri 官方当前教程覆盖 EXE/MSI，MSIX 需要另用 Windows SDK MakeAppx/打包工具包装，不能复用 NSIS 直接上传冒充 MSIX。
+
+**商店签名与费用（2026-09-27 再次确认，比预期更优）**：微软官方原文——“MSIX/AppX 包不必用受信任 CA 的证书签名；认证通过后商店会自动用微软证书重签”，即**无需购买任何商业证书**。开发者账号费用已归零：个人 $19 于 2025-09 豁免（身份证+自拍验证，近 200 市场），公司 $99 于 2026-05 豁免。两个边界：**只有 MSIX/AppX 免签**，用 MSI/EXE 走商店仍需自己签；Tauri 原生只出 NSIS(.exe)/MSI，所以吃到这条红利的前提是先做 MSIX 包装（即本节描述的额外工程），不是现有产物换个后缀。
 
 包装前先准备编译时 RAYBEND_DISTRIBUTION=store 的构建（前端与 Rust 两端一致），内置更新由编译身份禁用。现有 CLI 直下包固定 direct；商店构建和包装流水线在拿到身份后另接，不能拿 direct 包换个后缀上架。
 
