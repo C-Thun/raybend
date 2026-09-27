@@ -180,7 +180,7 @@ pnpm release:finalize /mnt/c/rb-target/raybend-release/release/bundle \
 
 | | Windows | macOS | Linux |
 | --- | --- | --- | --- |
-| 未签名直下体验 | SmartScreen 提示，用户“更多信息 → 仍要运行”（两下） | **Sequoia 15 起不能右键绕过**，须去系统设置点“仍要打开”；Apple 支持文档劝阻（称其为 Mac 中毒最常见方式） | 无警告（AppImage/tar.gz）；deb/rpm 由发行版仓库机制负责 |
+| 未签名直下体验 | SmartScreen 提示，用户“更多信息 → 仍要运行”（两下） | **分三档**：已公证 → 无提示直开；有 Developer ID 签名未公证 → 阻止后去系统设置点“仍要打开”（Sequoia 15 起不能右键绕过，Apple 文档劝阻）；**完全未签名 → 报「已损坏，移到废纸篓」**，解除需终端命令，普通用户不可安装 | 无警告（AppImage/tar.gz）；deb/rpm 由发行版仓库机制负责 |
 | 签名颁发者 | 多家 CA（DigiCert/Sectigo/GlobalSign/SSL.com/Certum…），信任库由微软 Trusted Root Program 决定 | **只有 Apple**（Developer ID），无第三方入口 | 开发者自持 GPG 密钥，无 CA |
 | 成本与硬件 | 直下自签 $250–400/年（CSBR 强制私钥进硬件，Token 或云签名）；**MSIX 商店路径 $0** | $99/年 Apple Developer Program（唯一入口，含其他服务） | $0 |
 | 公证/沙箱 | 无强制公证 | **强制公证**（2019-06 后构建的 Developer ID 软件）；App Store 另强制 App Sandbox | 无 |
@@ -188,7 +188,7 @@ pnpm release:finalize /mnt/c/rb-target/raybend-release/release/bundle \
 
 要点：
 
-- **macOS 的 unsigned 直下基本不可行**：Sequoia 起绕过流程变成系统设置里的多步操作，Apple 还主动劝阻。远期做 macOS 版时，$99/年 是**必选项**而非可选项——这一点比 Windows 更硬：Windows 至少有 unsigned 直下与 MSIX 商店两条 $0 路径，macOS 一条都没有。好处是入口唯一、全自动。
+- **macOS 的 unsigned 直下不是「弹警告」而是「判损坏」**：Gatekeeper 对完全未签名的下载应用直接报「XXX.app 已损坏，无法打开，应移到废纸篓」（虚假报错；MarkText、LocalAI 等开源项目均有记录），唯一解除方法是终端执行 `xattr -r -d com.apple.quarantine`，普通用户不可能完成。「系统设置 → 仍要打开」的逃生门只在**有 Developer ID 签名但未公证**这一档存在（Sequoia 15 起右键绕过已移除，流程多步且 Apple 文档劝阻）。远期做 macOS 版时，$99/年 是**必选项**而非可选项——这一点比 Windows 更硬：Windows 至少有 unsigned 直下与 MSIX 商店两条 $0 路径，macOS 连 unsigned 直下都不可用；好处是入口唯一、公证全自动。
 - **Apple 是签名权的唯一来源**：会员资格是“请求、下载和使用 Apple 颁发证书”的前提。Windows 至少是多 CA 竞争 + 微软守信任库；macOS 是单一厂商——三平台里最集中的结构。
 - **App Store 不是“免签名通道”**（与 Windows Store 不同）：微软 Store 的 MSIX 可不买商业证书（认证后重签）；Apple 必须先有 $99 会员并自行签名上传。
 - **沙箱是 macOS 的产品层门槛（比证书更重要）**：App Store 强制 App Sandbox，访问沙箱外目录需用户授权的 entitlement；照片管理软件若走 App Store，库目录、导入源、外部编辑器都要在授权模型内重新设计。直下分发（Developer ID + 公证）没有这条限制。
