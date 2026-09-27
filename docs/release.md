@@ -62,7 +62,15 @@ Microsoft Store 当前新入口个人/公司注册免费，仍需身份验证：
 - **没有免费的自动化 CA**：ACME 只服务域名验证；Let's Encrypt 官方明确不做码签（需真实身份验证，无法机器化）。同时有效期还在收紧（Ballot CSC-31：上限从 39 个月降到 460 天，2026-03-01 起生效），续期更频繁。
 - **口径差异**：SSL 无证书是硬门槛（浏览器直接拒绝），码签缺签名只是软门槛（Windows 提示仍可安装）——所以码签是自愿的信任投资，免费替代品因此稀少。
 
-来源：[微软签名选项](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/code-signing-options)、[Azure Artifact Signing 地区条款](https://learn.microsoft.com/en-us/azure/artifact-signing/quickstart)、[SSL.com IV](https://www.ssl.com/products/software-integrity/code-signing/iv/)、[Certum 开源证书](https://shop.certum.eu/open-source-code-signing-on-simplysign.html)、[CSBR 硬件密钥条款](https://cabforum.org/working-groups/code-signing/requirements/)、[Ballot CSC-31](https://cabforum.org/2025/11/17/ballot-csc-31-maximum-validity-reduction/)、[Let's Encrypt 不做码签](https://community.letsencrypt.org/t/do-you-support-code-signing/370)。
+**SmartScreen 信誉的跨版本事实**（决定“先不签、攺够信誉再买证书”是无效策略）：
+
+- SmartScreen 只看两个信号：**发布者信誉**（需要签名证书）与**文件哈希信誉**（这一个确切文件）。未签名文件只剩后者可用。
+- 微软原文：未签名时“每个新版本都必须从零开始积累信誉，信誉不能从前一版本转移，除非两者由同一发布者身份签名”。未签名发布 ⇒ 每次发版重新弹窗，即使旧版已被下载百万次。
+- 签名不等于立即放行：**每张证书自己攺信誉**（EV 自约 2019 年起不再特殊对待）；换证书按新的发布者身份处理，须保持 Subject 一致（CN/O/L/S/C），并可在 Defender 提交门户用 “Software Developer” 流程提前登记新证书。
+- 唯一确定性绕过：**Microsoft Store（MSIX）**，商店重签，永不触发下载警告。Windows 11 的 Smart App Control 更严：未签名文件直接阻止（非提示）。
+- 结论：未签名发布是“能用但每版重新面对提示”；**信誉跨版本只能靠签名积累**，不能靠未签名阶段预存。
+
+来源：[微软签名选项](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/code-signing-options)、[Azure Artifact Signing 地区条款](https://learn.microsoft.com/en-us/azure/artifact-signing/quickstart)、[SSL.com IV](https://www.ssl.com/products/software-integrity/code-signing/iv/)、[Certum 开源证书](https://shop.certum.eu/open-source-code-signing-on-simplysign.html)、[CSBR 硬件密钥条款](https://cabforum.org/working-groups/code-signing/requirements/)、[Ballot CSC-31](https://cabforum.org/2025/11/17/ballot-csc-31-maximum-validity-reduction/)、[Let's Encrypt 不做码签](https://community.letsencrypt.org/t/do-you-support-code-signing/370)、[SmartScreen 信誉规则](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation)、[SmartScreen 实操建议（Eric Lawrence）](https://textslashplain.com/2024/11/15/best-practices-for-smartscreen-apprep/)。
 
 ## 2. 先核对计划
 
