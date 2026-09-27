@@ -73,7 +73,7 @@ export function importPhotoCount(
 }
 
 /**
- * 反转一组文件的排除状态（`DESIGN.md` §12.2：批量排除是**反转**，不是单向设置）：
+ * 反转一组文件的排除状态（`memory/DESIGN.md` §12.2：批量排除是**反转**，不是单向设置）：
  * 未排除的排除、已排除的恢复。返回新的集合（不改原集合）。
  */
 export function invertExcluded(

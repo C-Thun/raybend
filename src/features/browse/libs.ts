@@ -1,5 +1,5 @@
 /**
- * 库列表的**紧缩 / 展开**规则（`BROWSE.md` §4.2，人类 2026-09-18 逐条重述）。
+ * 库列表的**紧缩 / 展开**规则（`memory/FUNCTION-BROWSE.md` §4.2，人类 2026-09-18 逐条重述）。
  *
  * 为什么单独抽成纯函数：这一段全是「数几个、露几成、什么时候收」的判定，
  * 放在组件里既难测也容易被改回去 —— 而它恰恰是上一版实现做错的地方
@@ -21,7 +21,7 @@ export const COMPACT_REPO_LIMIT = 3;
 /** 展开态下目录树保留的最小高度（px）：够看到三四行，不至于「一点都不能点了」。 */
 export const TREE_MIN_HEIGHT_PX = 88;
 
-/** 展开态的自动收起时限（`BROWSE.md` §4.2 的三条件之一）。 */
+/** 展开态的自动收起时限（`memory/FUNCTION-BROWSE.md` §4.2 的三条件之一）。 */
 export const EXPANDED_IDLE_MS = 15_000;
 
 export interface CompactList<T> {

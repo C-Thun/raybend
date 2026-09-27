@@ -139,7 +139,7 @@ Rust 侧会话级缓存（Mutex<HashMap<目录, DirMetaEntry>>，进程退出即
 --tile-bar-fg       暗色主题 fg-1 / 浅色主题 fg-1（沿用前景阶梯，不另造）
 ```
 
-> 不做毛玻璃（`backdrop-filter`）—— `DESIGN.md` §6 明确不做模糊，半透明平涂即可。
+> 不做毛玻璃（`backdrop-filter`）—— `memory/DESIGN.md` §6 明确不做模糊，半透明平涂即可。
 
 | 状态 | 表现 |
 | --- | --- |
@@ -200,7 +200,7 @@ Rust 侧会话级缓存（Mutex<HashMap<目录, DirMetaEntry>>，进程退出即
 
 - `design/main.md` §3.2.1：换成新口径（正方外框 + 保比例居中 + 信息条 + 标记区 + 3:1 夹取）。
 - `AGENTS.md` §6.5：登记「库外目录元信息走**会话级内存缓存**（不落盘）」这条决定；
-  `FUTURE.md` 记「库内浏览复用同一 `照片 id → { 宽高, 方向, 比例 }` 接口」。
+  `memory/FUTURE.md` 记「库内浏览复用同一 `照片 id → { 宽高, 方向, 比例 }` 接口」。
 
 ---
 

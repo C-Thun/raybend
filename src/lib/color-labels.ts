@@ -1,5 +1,5 @@
 /**
- * 色标（color label）的**唯一取值表与唯一类名映射**（`DESIGN.md` §1.4）。
+ * 色标（color label）的**唯一取值表与唯一类名映射**（`memory/DESIGN.md` §1.4）。
  *
  * 为什么要收成一处：这份映射原先在**三处**各写了一遍
  * （`components/ui/Tile.tsx` 的 `LABEL_DOT`、`features/browse/BrowseToolbar.tsx` 的 `COLOR_DOT`、

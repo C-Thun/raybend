@@ -1,7 +1,7 @@
 import type { ShiftLikeEvent } from "../../lib/easy-destroy.ts";
 import type { LensQueryState } from "./lens-query.ts";
 /**
- * 编辑右栏：**三个各自独立、同时在场**的页签组（`DESIGN.md` §14.9、`design/editor.md` §2.2）。
+ * 编辑右栏：**三个各自独立、同时在场**的页签组（`memory/DESIGN.md` §14.9、`design/editor.md` §2.2）。
  *
  * ```text
  * ┌──────────────────────────┐   第 1 组：总览 · 定稿 · 信息
@@ -71,7 +71,7 @@ import { EditorZoomControl } from "./zoom-control.tsx";
  * 「信息」页签要的字段（**结构类型**，由工作区拼好传进来）。
  *
  * 为什么不让本模块自己去查：`features/*` 之间不许互相 import（分层规则），
- * 而照片数据属于浏览那一侧 —— 工作区把两块接起来正是它的职责（`ARCHITECTURE.md` §2）。
+ * 而照片数据属于浏览那一侧 —— 工作区把两块接起来正是它的职责（`memory/ARCHITECTURE.md` §2）。
  * 这里的字段**都是显示字符串**（格式化的唯一实现在 `features/exif-strip/exif-format.ts`
  * 与 `lib/datetime.ts`）。
  *

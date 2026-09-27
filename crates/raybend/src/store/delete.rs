@@ -1,13 +1,13 @@
 //! 删除：**移到系统回收站**，不提供永久删除。
 //!
-//! 出处：`BROWSE.md` §5.9（`Delete` 有确认、`Shift+Delete` 免确认、支持批量）与
+//! 出处：`memory/FUNCTION-BROWSE.md` §5.9（`Delete` 有确认、`Shift+Delete` 免确认、支持批量）与
 //! `specs/M2.md` §3 第 4 条（用户口述明确要删；`AGENTS.md` §11.3 的「第一阶段不做真删」
 //! 就此解除，但**只到回收站**）。
 //!
 //! # 三条纪律
 //!
 //! 1. **只到回收站**：可恢复是底线。没有「永久删除」这个选项 —— 那是文件管理器的事。
-//! 2. **一级锁挡住删除**（`BROWSE.md` §3.4：「一级不能删」）；二级锁自然也挡（更严）。
+//! 2. **一级锁挡住删除**（`memory/FUNCTION-BROWSE.md` §3.4：「一级不能删」）；二级锁自然也挡（更严）。
 //! 3. **文件先走、记录后走**：只有当一个资产的**所有**文件都进了回收站
 //!    （或本来就已经不在磁盘上），才删它的库记录。否则会出现「记录没了、文件还在」
 //!    这种谁也不知道的残留 —— 那种状态比留着一条错的记录更糟。
@@ -102,7 +102,7 @@ pub fn delete_assets_with(
         return Ok(report);
     }
 
-    // ① 锁：一级锁就挡住删除（BROWSE.md §3.4）
+    // ① 锁：一级锁就挡住删除（memory/FUNCTION-BROWSE.md §3.4）
     let mut deletable: Vec<i64> = Vec::new();
     for id in ids {
         let lock: Option<i64> = conn

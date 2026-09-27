@@ -1,5 +1,5 @@
 /**
- * ToggleBlock —— 可按下按钮（DESIGN.md §12.8）。
+ * ToggleBlock —— 可按下按钮（memory/DESIGN.md §12.8）。
  *
  * 用于「按下后切换某个模式」的按钮：**吸附**、**按时间** 等。
  *

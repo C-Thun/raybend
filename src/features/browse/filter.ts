@@ -1,5 +1,5 @@
 /**
- * **筛选条件**的纯逻辑（`BROWSE.md` §3.1、`specs/M2-W2-tail.md` 3.3/3.4）。
+ * **筛选条件**的纯逻辑（`memory/FUNCTION-BROWSE.md` §3.1、`specs/M2-W2-tail.md` 3.3/3.4）。
  *
  * ## 筛选是什么
  *
@@ -34,7 +34,7 @@
 
 import type { BrowseFilter, MarkingItem } from "../../api/types.ts";
 
-/** 一行 chip 描述（只讲结构，文案由界面查语言包 —— `DESIGN.md` §11.1） */
+/** 一行 chip 描述（只讲结构，文案由界面查语言包 —— `memory/DESIGN.md` §11.1） */
 export type FilterChip =
   | { kind: "rating"; value: number }
   | { kind: "color"; value: string }

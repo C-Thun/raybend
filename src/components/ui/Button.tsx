@@ -1,7 +1,7 @@
 /**
- * Button / IconButton（DESIGN.md §10.1 #1、#2）。
+ * Button / IconButton（memory/DESIGN.md §10.1 #1、#2）。
  *
- * 状态与全局反馈规则（DESIGN.md §5）：
+ * 状态与全局反馈规则（memory/DESIGN.md §5）：
  *   默认   → 无底
  *   指向   → **辅色底**（`bg-state-hover`）
  *   点击后 → **主色底**（`bg-state-selected` / 主按钮用实色 `bg-brand`）
@@ -11,7 +11,7 @@
  *
  * 危险（danger）变体**暂不实现** —— 它需要一个 `--danger` 令牌，而
  * 「窗口关闭键要不要红」还是 design/main.md §7 的待决项。在令牌定案前
- * 实现它必然要硬编码色值，违反 DESIGN.md §9.1。
+ * 实现它必然要硬编码色值，违反 memory/DESIGN.md §9.1。
  */
 
 import type { JSX } from "solid-js";
@@ -31,7 +31,7 @@ export interface ButtonProps
   icon?: JSX.Element;
 }
 
-/** 变体 → 态色的对应表。集中在这里，方便对照 DESIGN.md §5 复核。 */
+/** 变体 → 态色的对应表。集中在这里，方便对照 memory/DESIGN.md §5 复核。 */
 function variantClasses(variant: ButtonVariant, selected: boolean): string {
   if (selected) {
     // 选中：主色实色底（`fg-on-brand` 是唯一在品牌色上可读的前景色）
@@ -90,7 +90,7 @@ export function Button(props: ButtonProps) {
         "relative inline-flex select-none items-center justify-center rounded-ui font-medium transition-colors",
         SIZE_CLASSES[local.size ?? "md"],
         variantClasses(variant(), Boolean(local.selected)),
-        // 禁用态只降前景、不动面（DESIGN.md §5）
+        // 禁用态只降前景、不动面（memory/DESIGN.md §5）
         isDisabled()
           ? "pointer-events-none text-fg-3 opacity-60"
           : "cursor-pointer",

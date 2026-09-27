@@ -345,7 +345,7 @@ pub fn decode_file(path: &Path, spec: DecodeSpec) -> Result<Option<DecodedSource
 /// * **图像**（JPEG/PNG/TIFF…）直接解码；
 /// * **RAW** 走 [`crate::raw`] 的 worker 进程（内嵌预览优先，见 `decode_raw_file`）；
 /// * **都不是**（或解不开）返回 `Ok(None)` —— 调用方据此用占位图
-///   （`REPOSITORY.md` §4.1）。
+///   （`memory/FUNCTION-REPOSITORY.md` §4.1）。
 pub fn render_file(path: &Path, size: SizeClass) -> Result<Option<Thumb>> {
     render_file_with_edit(path, size, None, None)
 }
@@ -590,7 +590,7 @@ pub fn clamp_display_aspect(img: DynamicImage, max_aspect: f64) -> DynamicImage 
 ///
 /// 输入是已经解出来、缩好尺寸的显示数据 —— 所以这一步只做「线性化 → 管线 → 回到 8bit」。
 /// 对 JPG / RAW 内嵌预览来说它是**准线性**（8bit 里本来就没有更多信息），
-/// 与编辑器里那条 JPG 路同一个口径（`FUTURE.md` C7 记着收敛点）。
+/// 与编辑器里那条 JPG 路同一个口径（`memory/FUTURE.md` C7 记着收敛点）。
 ///
 /// # Errors
 /// 栈里的参数 / 曲线不合法（**不静默跳过** —— 那会让人看到一张「没生效」的图而不知道为什么）。
@@ -785,7 +785,7 @@ pub fn placeholder_image(kind: MediaKind, size: SizeClass) -> RgbImage {
 }
 
 // 占位图配色（这里**故意不引 tokens.css**：它是画布内容不是 UI 组件，
-// 但取值与 DESIGN.md 的 `--surface-bar` / `--fg-3` 保持一致，改了要同步。）
+// 但取值与 memory/DESIGN.md 的 `--surface-bar` / `--fg-3` 保持一致，改了要同步。）
 const BG: [u8; 3] = [0x2a, 0x2d, 0x33];
 const EDGE: [u8; 3] = [0x3a, 0x3e, 0x46];
 const FG: [u8; 3] = [0xb6, 0xb0, 0xaf];

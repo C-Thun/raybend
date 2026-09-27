@@ -1,6 +1,6 @@
 //! 库（相片仓）相关命令：列表、建库前的探测、建库、重挂载、计数与**重建数据**。
 //!
-//! 业务规则在 `raybend::store::repository`（`REPOSITORY.md` §2 的库身份/多路径/在线离线），
+//! 业务规则在 `raybend::store::repository`（`memory/FUNCTION-REPOSITORY.md` §2 的库身份/多路径/在线离线），
 //! 这里只做三件事：拿 `app.db` / `catalog.db`、把结构转成前端视图、把耗时活儿丢到后台线程。
 //!
 //! **计数（2026-09-19 的新口径）**：`photos_count`（相片，不含 `_RAW`）与
@@ -262,7 +262,7 @@ pub async fn repository_create<R: Runtime>(
 /// 重新挂载一个离线库：对**所有登记路径**找一遍，找到就转为在线。
 ///
 /// 找不到**不是错误** —— 返回的视图里 `online = false`，界面照常显示离线徽标
-/// （`REPOSITORY.md` §2.3：用户插上盘再点一次就行）。
+/// （`memory/FUNCTION-REPOSITORY.md` §2.3：用户插上盘再点一次就行）。
 #[tauri::command]
 pub async fn repository_remount<R: Runtime>(
     app: AppHandle<R>,
@@ -721,7 +721,7 @@ pub fn repository_template_preview(template_source: String) -> TemplatePreviewDt
         let (dir, name) = rendered.split_dir_name();
         let dir = dir.map_or(String::from("photos"), |d| format!("photos/{d}"));
         let path = match ext.eq_ignore_ascii_case("ORF") {
-            // RAW 有同名位图时进 `_RAW/`（`REPOSITORY.md` §4.1）
+            // RAW 有同名位图时进 `_RAW/`（`memory/FUNCTION-REPOSITORY.md` §4.1）
             true => format!("{dir}/_RAW/{name}.{ext}"),
             false => format!("{dir}/{name}.{ext}"),
         };

@@ -3,7 +3,7 @@
  *
  * 这个文件不渲染任何东西 —— 它解决两个**容易实现错**的问题：
  *
- * 1. **可见行 = 展开状态的结果**（DESIGN.md §12.4.1）
+ * 1. **可见行 = 展开状态的结果**（memory/DESIGN.md §12.4.1）
  *    树里「某一层没展开时，那些行根本不存在于视图中」。
  *    先把可见行摊平成一个数组，渲染层就是纯映射，不需要递归组件里做条件判断，
  *    也天然满足「选中不强制展开」——因为摊平只看展开集合，**不看选中集合**。
@@ -46,7 +46,7 @@ const DEFAULT_MAX_DEPTH = 64;
  * 按展开状态深度优先摊平，**折叠节点的子树整棵不出现**。
  *
  * `isExpanded` 只看用户的展开操作 —— 调用方**不要**把「选中」并进去，
- * 那会变成「为显示选中而强制展开」（DESIGN.md §12.4.1 明确禁止）。
+ * 那会变成「为显示选中而强制展开」（memory/DESIGN.md §12.4.1 明确禁止）。
  */
 export function flattenVisible<T>(
   nodes: readonly T[],
@@ -82,7 +82,7 @@ export function flattenVisible<T>(
 /**
  * 行的起始缩进（px）。
  *
- * 缩进是**间距类**尺寸（DESIGN.md §8.1：密度只影响间距），所以按当前档位传入的
+ * 缩进是**间距类**尺寸（memory/DESIGN.md §8.1：密度只影响间距），所以按当前档位传入的
  * 单位值计算；非法输入不产出 NaN（会一路传到布局里炸掉整列宽）。
  */
 export function indentPx(depth: number, unitPx: number): number {

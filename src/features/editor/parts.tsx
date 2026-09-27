@@ -2,7 +2,7 @@
  * 编辑右栏与左栏的**小零件**（都是「一句话 / 一个开关」那种，不值得各开一个文件）。
  *
  * * `PendingNote` —— 本波还没接线的地方**明说**，不假装能用（W1 的诚实边界）；
- * * `PanelTitle` —— 面板小标题（沿用 `DESIGN.md` §13 的面板口径）。
+ * * `PanelTitle` —— 面板小标题（沿用 `memory/DESIGN.md` §13 的面板口径）。
  */
 
 import { IconClockHour4 } from "@tabler/icons-solidjs";
@@ -23,7 +23,7 @@ export interface PendingNoteProps {
  * 右栏有一半控件要等 W2/W3 才有真实效果。把话说在界面上，比让用户以为「拖了没反应是坏了」好；
  * 也让人类评审时一眼分清「画错了」与「还没接」。
  *
- * 视觉：**不成卡、不加边框**（`DESIGN.md` §12.10 的水印口径），
+ * 视觉：**不成卡、不加边框**（`memory/DESIGN.md` §12.10 的水印口径），
  * 只用次级前景色 + 一颗小时钟 —— 它不该抢面板里真正控件的注意力。
  */
 export function PendingNote(props: PendingNoteProps): JSX.Element {

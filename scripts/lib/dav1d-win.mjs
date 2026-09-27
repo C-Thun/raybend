@@ -1,5 +1,5 @@
 /**
- * **Windows 侧构建要传给 cargo 的 dav1d 环境变量**（AVIF 解码，`IMAGING.md` §1）。
+ * **Windows 侧构建要传给 cargo 的 dav1d 环境变量**（AVIF 解码，`memory/FUNCTION-IMAGING.md` §1）。
  *
  * # 为什么需要它
  *

@@ -1,5 +1,5 @@
 /**
- * 剪贴板（`easy copy` 范式的底层，DESIGN.md §12.1）。
+ * 剪贴板（`easy copy` 范式的底层，memory/DESIGN.md §12.1）。
  *
  * 为什么不用 Ark UI 的 `Clipboard`：那个组件需要自己渲染 `Clipboard.Trigger`，
  * 而我们要的是「整组信息本身可点」—— 也就是把触发器**当成内容**用，

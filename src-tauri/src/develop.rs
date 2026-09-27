@@ -259,7 +259,7 @@ pub fn source_path_of<R: Runtime>(
 ///
 /// 返回**绝对路径**（前端直接拿去 `editor_set_photo`）；没有可编辑文件时返回 `None`。
 ///
-/// **编辑器该编辑哪个文件**（「编辑落在 RAW 上」，`REPOSITORY.md` §4.1）＋
+/// **编辑器该编辑哪个文件**（「编辑落在 RAW 上」，`memory/FUNCTION-REPOSITORY.md` §4.1）＋
 /// 这张照片**能不能切到另一侧**（人类 2026-09-24：总览图下的 SOOC / RAW 切换按钮）。
 ///
 /// `base`：`"sooc"` / `"raw"`（缺省 `"raw"`，人类定的默认值）；
@@ -330,7 +330,7 @@ pub async fn develop_edit_target<R: Runtime>(
     .await
 }
 
-/// **刷新 preview**（`IMAGING.md` §4）：编辑器**进 / 出**两个节点各调一次。
+/// **刷新 preview**（`memory/FUNCTION-IMAGING.md` §4）：编辑器**进 / 出**两个节点各调一次。
 ///
 /// preview = `<库根>/cache/full/<asset>/latest-v<pipeline>.avif`（长边 1920，AVIF）——
 /// 与 `view_image` 走的是**同一份**（`thumbs::render_latest_cached`：命中只读、未命中才渲染），

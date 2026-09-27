@@ -1,5 +1,5 @@
 /**
- * `exif-strip` 模块的**唯一对外出口**（`ARCHITECTURE.md` §2）。
+ * `exif-strip` 模块的**唯一对外出口**（`memory/ARCHITECTURE.md` §2）。
  *
  * 别的层（`shell/`、`workspaces/`）只从这里拿东西；模块内部的
  * `exif-format.ts` / `grouping.ts` 是私有实现，不对外暴露文件路径。

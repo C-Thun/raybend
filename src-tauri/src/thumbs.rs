@@ -162,7 +162,7 @@ fn edited_source<R: Runtime>(
 /// 只意味着下次再渲染一遍，不该让看图失败）。
 ///
 /// **基准从 `asset.rel_path` 推**（`EditBase::of_file`）：调用方拿哪个文件来渲染，
-/// 缓存就落在哪一侧 —— 否则切了基准会读到另一基准的旧图（`IMAGING.md` §4.3）。
+/// 缓存就落在哪一侧 —— 否则切了基准会读到另一基准的旧图（`memory/FUNCTION-IMAGING.md` §4.3）。
 ///
 /// `pub(crate)`：`view_image` 与 `develop_preview_refresh`（进/出编辑那两下）共用这一份 ——
 /// preview 只允许有一条生成路径。

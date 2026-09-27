@@ -6,7 +6,7 @@
 //! 关键约定：
 //!
 //! * **一条 `assets` = 一张照片**；它下面的 `asset_files` 是同一张照片的多个文件
-//!   （`bitmap` 位图 + `raw` 原始数据，见 `REPOSITORY.md` §4.1）。
+//!   （`bitmap` 位图 + `raw` 原始数据，见 `memory/FUNCTION-REPOSITORY.md` §4.1）。
 //!   新建时按「同目录 + 同名主体」把位图与 RAW 归到同一个资产下。
 //! * **绝不删记录**：磁盘上找不到只标 `missing_since`（`AGENTS.md` §6.4）。
 //! * **路径存两份**：`rel_path`（原始大小写，展示用）与 `rel_path_folded`
@@ -150,7 +150,7 @@ pub fn insert_file(
     Ok(conn.last_insert_rowid())
 }
 
-/// 补写一个文件的「来源」列（`REPOSITORY.md` §4.3 的判重靠它）。
+/// 补写一个文件的「来源」列（`memory/FUNCTION-REPOSITORY.md` §4.3 的判重靠它）。
 ///
 /// * `source_path`：源文件的**绝对路径**（溯源 + 兜底判重）；
 /// * `source_identity`：源文件身份 `(卷序列号, 文件 ID)`（读不到就传 `None`）。
@@ -416,7 +416,7 @@ fn group_new_files(plan: &DiffPlan, disk: &[DiskFile]) -> Vec<NewGroup> {
 
 /// 找一个已经存在的资产：同目录下已经有同名主体的文件（位图 ↔ RAW 配对）。
 ///
-/// **`_RAW/` 折算**（`REPOSITORY.md` §4.1）：RAW 落在 `<目录>/_RAW/` 里，
+/// **`_RAW/` 折算**（`memory/FUNCTION-REPOSITORY.md` §4.1）：RAW 落在 `<目录>/_RAW/` 里，
 /// 与位图天生不同目录 —— 两边都折算掉最后那段 `_RAW` 再比，
 /// 否则同一张照片会变成两条资产（网格里出现两个格子）。
 /// 于是「先导 RAW 再导位图」与「先导位图再导 RAW」都能配上对。

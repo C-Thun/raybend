@@ -1,5 +1,5 @@
 /**
- * 工作流模型与 toolsbar 装配表（`ARCHITECTURE.md` §1：`src/shell/` 只做布局与装配）。
+ * 工作流模型与 toolsbar 装配表（`memory/ARCHITECTURE.md` §1：`src/shell/` 只做布局与装配）。
  *
  * 为什么把「工作流有哪些」「某个工作流下 toolsbar 放什么」抽成纯数据：
  *   1. 它会被三处用到（titlebar 无、flowbar 的分段控件、toolsbar 的显隐），
@@ -59,7 +59,7 @@ export interface ToolSpec {
  labelKey: MessageKey;
  /**
   * 是否在「没有选中项」时禁用。
-  * `批量排除` 是**反转**操作（`DESIGN.md` §12.2）：没有选中项时无从反转，必须禁用。
+  * `批量排除` 是**反转**操作（`memory/DESIGN.md` §12.2）：没有选中项时无从反转，必须禁用。
   */
  disabledWhenEmpty?: boolean;
 }
@@ -90,7 +90,7 @@ export function toolsFor(workflow: WorkflowId): readonly ToolSpec[] {
  * 工具此刻是否该禁用。
  *
  * `hasSelection` 由上层（工作区）传入 —— shell 不知道照片选择的状态，
- * 那是 `photo-grid` 模块的事（`ARCHITECTURE.md` §3 的状态归属）。
+ * 那是 `photo-grid` 模块的事（`memory/ARCHITECTURE.md` §3 的状态归属）。
  */
 export function isToolDisabled(spec: ToolSpec, hasSelection: boolean): boolean {
  return Boolean(spec.disabledWhenEmpty) && !hasSelection;

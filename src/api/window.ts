@@ -1,5 +1,5 @@
 /**
- * 窗口控制的前端封装（`ARCHITECTURE.md` §1.1 的 `src/api/` 层）。
+ * 窗口控制的前端封装（`memory/ARCHITECTURE.md` §1.1 的 `src/api/` 层）。
  *
  * 覆盖两件事：
  *   1. **沉浸式外框的判定**：窗口是不是由我们接管（`decorations: false`）。

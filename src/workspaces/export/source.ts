@@ -102,7 +102,7 @@ export function exportGallerySource(
       if(main)void store.selectIssue(main.reference,mode,visibleAssets()).catch(store.reportError);
     },
     /*
-     * 日组 / 时间片那颗药丸 = **整段开关**（`BROWSE.md` §5.2.2）：全选中 → 全取消，否则 → 全开。
+     * 日组 / 时间片那颗药丸 = **整段开关**（`memory/FUNCTION-BROWSE.md` §5.2.2）：全选中 → 全取消，否则 → 全开。
      *
      * `store.group` **不带第二参**就是这条开关（内部走共享的 `toggleGroupSelection`）；
      * `additive = false` 那条分支是「**替换成只有这一组**」，给 `selectAllActive`（Mod+A）用 ——

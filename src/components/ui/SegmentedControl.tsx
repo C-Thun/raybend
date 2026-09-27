@@ -1,5 +1,5 @@
 /**
- * SegmentedControl —— 「小而安静」的分段控件（DESIGN.md §10.1 #5）。
+ * SegmentedControl —— 「小而安静」的分段控件（memory/DESIGN.md §10.1 #5）。
  *
  * **它不再是 flowbar 的牌子。** 用户 2026-09-15 明确：
  * 「横向选择器不要复用 flowbar 上的，flowbar 是非常特殊的部分……这种大模块切换的概念

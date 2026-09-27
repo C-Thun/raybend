@@ -1,5 +1,5 @@
 /**
- * `recent` 模块的唯一对外出口（`ARCHITECTURE.md` §2）。
+ * `recent` 模块的唯一对外出口（`memory/ARCHITECTURE.md` §2）。
  *
  * 这一层只导视图与它的 props：**数据与写入时机不在这里** ——
  * 「最近」的读写属于导入工作区的共享状态（`workspaces/import/store.ts`），

@@ -1,5 +1,5 @@
 /**
- * 标签弹窗（`BROWSE.md` §3.3、`design/browse.md` §2.6、画布帧 `Components / 标签弹窗`）。
+ * 标签弹窗（`memory/FUNCTION-BROWSE.md` §3.3、`design/browse.md` §2.6、画布帧 `Components / 标签弹窗`）。
  *
  * ```text
  * ┌ 标签 ───────────────────────────────┐

@@ -54,7 +54,7 @@ function findChrome() {
 /*
  * 假后端：**5 个**在线库。形状与 `RepositoryView` DTO 对齐（camelCase）。
  *
- * 为什么是 5 个而不是 1 个：库列表的紧缩/展开规则（`BROWSE.md` §4.2）只在 >3 个库时才生效 ——
+ * 为什么是 5 个而不是 1 个：库列表的紧缩/展开规则（`memory/FUNCTION-BROWSE.md` §4.2）只在 >3 个库时才生效 ——
  * 一个库的 fixture 根本测不到「查看所有库」那张伪卡片。
  */
 const REPOSITORIES = [
@@ -528,7 +528,7 @@ try {
   }
 
   /*
-   * 库列表的紧缩态（`BROWSE.md` §4.2）：5 个库 ⇒ 第 4 位是「查看所有库」的伪卡片。
+   * 库列表的紧缩态（`memory/FUNCTION-BROWSE.md` §4.2）：5 个库 ⇒ 第 4 位是「查看所有库」的伪卡片。
    * ≤3 个库时它**不该**出现（那种情况另有一条断言在下面「点开之后」的检查里覆盖不到，
    * 所以这里只说「>3 时必须出现」）。
    */
@@ -3206,7 +3206,7 @@ try {
   }
   if (shown.readout !== true) problems.push("右栏没换成预览 + 直方图（[data-viewer-readout=\"open\"] 不在）");
   /*
-   * 预览框按 BROWSE.md 当前规则随照片比例变化，夹在 3:1～3:4。
+   * 预览框按 memory/FUNCTION-BROWSE.md 当前规则随照片比例变化，夹在 3:1～3:4。
    * 量外框的宽高比，容差 2%（子像素与内边距）。
    */
   const previewFrame = await send("Runtime.evaluate", {
@@ -3224,7 +3224,7 @@ try {
     problems.push("量不到右栏预览框（4:3 这条验不了）");
   } else if (Math.abs(frame.ratio - frame.expected) > 0.03) {
     problems.push(
-      `右栏预览框应当按照片比例夹在 3:1～3:4（实测 ${JSON.stringify(frame)}）（BROWSE.md 当前规范）`,
+      `右栏预览框应当按照片比例夹在 3:1～3:4（实测 ${JSON.stringify(frame)}）（memory/FUNCTION-BROWSE.md 当前规范）`,
     );
   }
   // 2026-09-20 起直方图是**逐点填充折线**（加色分层），不再做三次曲线拟合
@@ -3421,7 +3421,7 @@ try {
     }
   }
 
-  /* 胶片带：点第 2 张 → 看的就是它，底部状态栏跟着走（BROWSE.md §5.7） */
+  /* 胶片带：点第 2 张 → 看的就是它，底部状态栏跟着走（memory/FUNCTION-BROWSE.md §5.7） */
   await send("Runtime.evaluate", {
     expression: `(() => {
       const item = document.querySelector('[data-strip-item="1"]');
@@ -3449,7 +3449,7 @@ try {
   if (shown.chrome !== "default") problems.push(`进看图时四态应当从默认开始，实测 ${shown.chrome}`);
 
   /* Tab：①默认 → ②只关左 → ③关两侧 → ④仅 view → ① */
-  /* 对比态：Ctrl 多选 → 自然进入对比；反选 → 自然退出（BROWSE.md §5.5） */
+  /* 对比态：Ctrl 多选 → 自然进入对比；反选 → 自然退出（memory/FUNCTION-BROWSE.md §5.5） */
   await send("Runtime.evaluate", {
     expression: `(() => {
       const item = document.querySelector('[data-strip-item="2"]');
@@ -3542,7 +3542,7 @@ try {
   }
 
   /*
-   * 2.5：在对比里**点某一幅画幅** = 把它当「当前那张」（BROWSE.md §5.7）——
+   * 2.5：在对比里**点某一幅画幅** = 把它当「当前那张」（memory/FUNCTION-BROWSE.md §5.7）——
    * 底部状态栏与右栏都跟着它，但**选择集合不变**（否则对比当场散掉）。
    */
   const beforeFocus = await send("Runtime.evaluate", {
@@ -4449,7 +4449,7 @@ try {
   /*
    * ══ 命令面板 / 快捷键体系（M2-W3）══
    *
-   * 三条判据（对 `PLAN.md` 的 DoD）：
+   * 三条判据（对 `memory/PLAN.md` 的 DoD）：
    *   ① `Ctrl+K` 开面板、搜得到、**每行右侧显示键位**；
    *   ② 回车真的执行了那条命令（用「按时间」开关当观测点）；
    *   ③ 快捷键能改：`Ctrl+,` 开设置 → 把「信息档位」改到 `Ctrl+Alt+I` → 保存 →
@@ -4936,7 +4936,7 @@ try {
     }
     if (layers.modalZ !== null && layers.titlebarZ !== null && !(layers.modalZ > layers.titlebarZ && layers.titlebarZ > layers.scrimZ)) {
       problems.push(
-        `弹窗应高于标题栏，标题栏高于遮罩（DESIGN.md 2026-09-25 规范，实测 titlebar=${layers.titlebarZ}, modal=${layers.modalZ}）`,
+        `弹窗应高于标题栏，标题栏高于遮罩（memory/DESIGN.md 2026-09-25 规范，实测 titlebar=${layers.titlebarZ}, modal=${layers.modalZ}）`,
       );
     }
     if (layers.titleHitIsDialog === true) {

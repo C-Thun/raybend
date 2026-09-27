@@ -1,5 +1,5 @@
 /**
- * 看图的**外壳档位**（`prompts/editor.pd` 2026-09-23 定；原 `BROWSE.md` §5.4 只有 browse 一套）。
+ * 看图的**外壳档位**（`prompts/editor.pd` 2026-09-23 定；原 `memory/FUNCTION-BROWSE.md` §5.4 只有 browse 一套）。
  *
  * 一个「档位」= 这一屏显示哪几块：**左列 / 右列 / 胶片带**（view 永远在）。
  * `Tab` 在同一个 flow 的档位表里循环。
@@ -43,7 +43,7 @@ export interface ChromeState {
   name: string;
 }
 
-/** 哪一套档位表（`ARCHITECTURE.md` §3：由工作区决定，不是全局开关）。 */
+/** 哪一套档位表（`memory/ARCHITECTURE.md` §3：由工作区决定，不是全局开关）。 */
 export type ChromeMode = "browse" | "import" | "editor";
 
 export const CHROME_MODES: readonly ChromeMode[] = ["browse", "import", "editor"];

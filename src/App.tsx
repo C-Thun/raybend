@@ -3,7 +3,7 @@ import { createExternalEditorStore } from "./features/external-editor/store.ts";
 import { ExternalEditorDialog } from "./features/external-editor/ExternalEditorDialog.tsx";
 import { externalApplications,externalTask,onExternalTask } from "./api/external-editor.ts";
 /**
- * 应用组装（`ARCHITECTURE.md` §1 的最上层）。
+ * 应用组装（`memory/ARCHITECTURE.md` §1 的最上层）。
  *
  * 结构就是设计稿的三行 + 工作区：
  *   titlebar   (bar)   —— 沉浸式，接管窗口拖动与三键
@@ -11,7 +11,7 @@ import { externalApplications,externalTask,onExternalTask } from "./api/external
  *   toolsbar   (main)  —— 随工作流装配，**无内容时整行不存在**
  *   workspace          —— 导入工作区三列
  *
- * 状态都在这一层创建、往下传（`ARCHITECTURE.md` §3 的状态归属）：
+ * 状态都在这一层创建、往下传（`memory/ARCHITECTURE.md` §3 的状态归属）：
  *   - **外壳状态**（当前工作流、菜单可见性）→ `shell/store.ts`
  *   - **外观状态**（主题、密度）→ `lib/appearance.ts`（建店时就会落到 `<html>` 上）
  *   - **导入工作区的共享状态** → `workspaces/import/store.ts`
@@ -130,7 +130,7 @@ export default function App() {
    *
    * 为什么建在组装层而不是工作区里：**toolsbar 也要用**（左段的 LUT 开关与中段的三个工具
    * 都是它的一部分），而 toolsbar 在外壳上 —— 两边必须读同一个 store
-   * （`ARCHITECTURE.md` §3 的状态归属：跨外壳与工作区的状态住这里）。
+   * （`memory/ARCHITECTURE.md` §3 的状态归属：跨外壳与工作区的状态住这里）。
    */
   const editorStore = createEditorStore();
   const setEditorBase = (base: DevelopEditBase): void => {
@@ -323,11 +323,11 @@ export default function App() {
   });
 
   /**
-   * 标签弹窗开着没有（`BROWSE.md` §3.3）。
+   * 标签弹窗开着没有（`memory/FUNCTION-BROWSE.md` §3.3）。
    *
    * 状态住在**组装层**而不是工具条里：工具条在 `ToolsBar` 的插槽里，弹窗要挂在
    * 更外层（模态不该被条带的层叠上下文困住），而且它要读 browse store 的选择状态 ——
-   * 两边都在这里汇合（`ARCHITECTURE.md` §2 的组合层职责）。
+   * 两边都在这里汇合（`memory/ARCHITECTURE.md` §2 的组合层职责）。
    */
   const [tagsOpen, setTagsOpen] = createSignal(false);
   /**
@@ -572,13 +572,13 @@ export default function App() {
       <FlowBar exportProcessing={exportStore.processing()} store={shell} exif={selectedMetadata.data()} onFullscreen={fullscreen()} />
 
       {/*
-        批量排除（`DESIGN.md` §12.2 的**反转**语义）：没有选中项时禁用。
+        批量排除（`memory/DESIGN.md` §12.2 的**反转**语义）：没有选中项时禁用。
         选择状态来自照片网格 —— 外壳不认识照片，只认「有没有选」。
       */}
       <ToolsBar
         store={shell}
         hasSelection={shell.workflow() === "browse" ? browseStore.selectedCount() > 0 : grid.hasSelection()}
-        // 批量排除是**反转**语义（DESIGN.md §12.2）：排除集合住在导入工作区，
+        // 批量排除是**反转**语义（memory/DESIGN.md §12.2）：排除集合住在导入工作区，
         // 选中的照片清单来自网格 —— 外壳只负责把两边接起来
         onBatchExclude={() => importStore.toggleExcluded([...grid.selectedIds()])}
         // 插槽里到底有没有东西，由这里明说（理由见 ToolsBar 的 hasExtraTools）
@@ -622,7 +622,7 @@ export default function App() {
         编辑与导出分别挂载自己的工作区；导出队列由根层持有。
       */}
       {/*
-        标签弹窗（`BROWSE.md` §3.3）：挂在**根层**，不推进 `ToolsBar` 的插槽 ——
+        标签弹窗（`memory/FUNCTION-BROWSE.md` §3.3）：挂在**根层**，不推进 `ToolsBar` 的插槽 ——
         模态有自己的遮罩与层叠（`--z-modal`），放进条带里会被那一层的上下文困住。
       */}
       <TagDialog

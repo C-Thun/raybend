@@ -154,7 +154,7 @@ pub fn is_raw_photo(path: &Path) -> bool {
 ///
 /// 为什么非要有它（`AGENTS.md` §6.1 的透明链）：编辑视口是 wgpu 直绘，纹理要的是像素；
 /// 浏览器能解 AVIF，但 GPU 直绘那条路绕不开 Rust 侧的解码器 —— 那就是 `image` 的
-/// `avif-native`（底层 dav1d）那一步（`IMAGING.md` §1，handoff §2）。
+/// `avif-native`（底层 dav1d）那一步（`memory/FUNCTION-IMAGING.md` §1，handoff §2）。
 ///
 /// 解不开（缓存被改坏 / 不是 AVIF）返回 `None` —— **不是错误**：
 /// 过渡帧解不出来只是少了那一下「先进先出图」，真帧照样会来。

@@ -9,7 +9,7 @@
  * | 用法 | 传参 | 勾选圈 |
  * | --- | --- | --- |
  * | 导入工作区 | 传 `isChecked` + `onToggleCheck` | 有（勾选 = 加入待导入集合） |
- * | 浏览侧（`BROWSE.md`） | **不传** `onToggleCheck` | **没有**（浏览时勾选毫无意义） |
+ * | 浏览侧（`memory/FUNCTION-BROWSE.md`） | **不传** `onToggleCheck` | **没有**（浏览时勾选毫无意义） |
  *
  * 这一层刻意用**「回调传没传」**来决定，而不是再加一个 `checkable` 布尔：
  * 少一个可能与回调矛盾的开关（`TreeNode` 也是同样的口径）。
@@ -18,7 +18,7 @@
  *
  * 1. **点行 = 选中；点箭头 = 展开**。箭头 `stopPropagation`，所以「点箭头顺带选中」不会发生；
  *    反过来，「选中某行就把它展开」在 `dir-tree/store.ts` 里**根本做不到** ——
- *    那个 store 里没有「选中」这个输入（`DESIGN.md` §12.4.1）；
+ *    那个 store 里没有「选中」这个输入（`memory/DESIGN.md` §12.4.1）；
  * 2. **双击行名 = 展开/折叠**（与点箭头同效，2026-09-16 人类要求）。只对**可展开**的行生效 ——
  *    空目录双击不做无意义的加载；
  * 3. **子目录懒加载**：展开才读（读过的会记住，折叠再展开是秒开）。
@@ -53,7 +53,7 @@ export interface DirTreeProps {
   isChecked?: (path: string) => boolean;
   onSelect: (path: string) => void;
   /**
-   * 勾选变化。**不传它就没有勾选圈** —— 浏览侧正是这么用的（`BROWSE.md`）。
+   * 勾选变化。**不传它就没有勾选圈** —— 浏览侧正是这么用的（`memory/FUNCTION-BROWSE.md`）。
    * 传了它，导入侧才有「勾选 = 加入待导入集合」这套交互。
    */
   onToggleCheck?: (path: string, checked: boolean) => void;

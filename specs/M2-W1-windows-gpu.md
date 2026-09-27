@@ -266,7 +266,7 @@ WGPU_BACKEND=gl     RAYBEND_SPIKE=1 /mnt/c/rb-target/raybend/debug/raybend-deskt
 
 答: `目前库内照片不多没测，但是我在import里试了感觉挺流畅的`
 
-> 记为：**无正式数字，主观流畅**。要真数字需要先有一个几百上千张的真实库（`PLAN.md` M0-6 行仍挂这条）。
+> 记为：**无正式数字，主观流畅**。要真数字需要先有一个几百上千张的真实库（`memory/FINISHED.md` §2（M0-6） 行仍挂这条）。
 
 ---
 
@@ -300,10 +300,10 @@ WGPU_BACKEND=gl     RAYBEND_SPIKE=1 /mnt/c/rb-target/raybend/debug/raybend-deskt
 
 收到报告后，Agent 侧会：
 
-1. 把数字写进 `implementations/` 与 `PLAN.md` 的 M0 表格（M0-2 / M0-6 两行）；
+1. 把数字写进 `implementations/` 与 `memory/PLAN.md` 的 M0 表格（M0-2 / M0-6 两行）；
 2. 任何一项不过，就按 `AGENTS.md` §2.11 判「能绕过」还是「绕不过去」：
    能绕过 → 记进 `ASSISTANCE.md` 的「绕过去了的问题」并继续；
-   绕不过去 → 升级为阻塞项，并评估退路（`FUTURE.md` A3 的 Tauri CEF 运行时 / 独立子窗口）；
+   绕不过去 → 升级为阻塞项，并评估退路（`memory/FUTURE.md` A3 的 Tauri CEF 运行时 / 独立子窗口）；
 3. 结论无论好坏都写下来 —— **这次 spike 的目的就是尽早知道这条路通不通**。
 
 ---

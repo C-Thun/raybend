@@ -1,5 +1,5 @@
 /**
- * 浏览工作区：三列（`BROWSE.md` §1、`design/browse.md` §2）。
+ * 浏览工作区：三列（`memory/FUNCTION-BROWSE.md` §1、`design/browse.md` §2）。
  *
  * ```text
  * ┌────────────┬──────────────────────────────┬──────────────┐
@@ -9,7 +9,7 @@
  * ```
  *
  * 这是**组装层**：把 feature 与工作区共享状态接起来，自己不做业务判断
- * （`ARCHITECTURE.md` §2）。库列表在这里拉一次 —— 属于工作区自己的生命周期。
+ * （`memory/ARCHITECTURE.md` §2）。库列表在这里拉一次 —— 属于工作区自己的生命周期。
  *
  * ⚠️ W1 的取舍（明确记下来，别当成遗漏）：
  * * 左右列宽度**固定**（拖拽调宽与导入工作区一样，属 W2 的活儿）；
@@ -175,7 +175,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
   const grouped = browseDisplayByTime;
   const setGrouped = setBrowseDisplayByTime;
   /**
-   * 库列表是否展开（`BROWSE.md` §4.2）。
+   * 库列表是否展开（`memory/FUNCTION-BROWSE.md` §4.2）。
    *
    * 状态住在工作区而不是左列里：**收起要由网格侧的点击触发**，
    * 而那个点击发生在左列之外。切走工作流时整个工作区卸载 → 自然回到缩起态（
@@ -408,7 +408,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
   }
 
   /*
-   * `Tab` 循环四态（`BROWSE.md` §5.4）：默认 → 仅关左 → 关两侧 → 仅 view。
+   * `Tab` 循环四态（`memory/FUNCTION-BROWSE.md` §5.4）：默认 → 仅关左 → 关两侧 → 仅 view。
    *
    * 监听挂在window上而不是看图件里：这是**外壳**的事（左右两列与胶片带的显隐），
    * 看图件只负责照片本身的缩放/平移（职责分开，换渲染层时这里不用动）。
@@ -549,7 +549,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
       } catch (error) {
         // 拿不到库列表不该让工作区崩掉；但**不能装作「你没有库」** —— 把原因显示在左列。
         // 同时打一条控制台：只上界面、日志里查不到，排障时只能靠人转述一句文案。
-        // 这是**控制台诊断**，不走语言包（`DESIGN.md` §11.1 的豁免项：终端/控制台输出）。
+        // 这是**控制台诊断**，不走语言包（`memory/DESIGN.md` §11.1 的豁免项：终端/控制台输出）。
         console.error("[browse] 读库列表失败", error); // i18n-exempt: 控制台诊断，不是界面文案
         setRepositories([]);
         setReposError(error instanceof Error ? error.message : String(error));
@@ -655,7 +655,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
   });
 
   /**
-   * 右栏（与 flowbar 的 flowinfo）显示谁：多选时是**锚点**那张（`BROWSE.md` §5.10）。
+   * 右栏（与 flowbar 的 flowinfo）显示谁：多选时是**锚点**那张（`memory/FUNCTION-BROWSE.md` §5.10）。
    *
    * 规则本身住在 store 的 `anchorItem()` 里 —— 组装层读的是**同一个方法**，
    * 所以「右栏显示谁」与「flowinfo 显示谁」不可能两边走偏。
@@ -674,7 +674,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
   );
 
   /**
-   * 状态条中间那段的**左侧**：`库名 / 最后一级目录`（`BROWSE.md` §5.10）。
+   * 状态条中间那段的**左侧**：`库名 / 最后一级目录`（`memory/FUNCTION-BROWSE.md` §5.10）。
    *
    * 文件名**不在这里拼**：那条状态条是两侧共用的组件，它自己会在后面接上
    * 「· 当前那张的文件名」（人类 2026-09-19：导入侧以前漏了这一段，统一时一起补）。
@@ -808,7 +808,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
           .join(" ")}
       >
         {/*
-          右栏在看图态换成**预览 + 直方图**（`BROWSE.md` §5.9）——
+          右栏在看图态换成**预览 + 直方图**（`memory/FUNCTION-BROWSE.md` §5.9）——
           看图件的 store 本身就是「当前看哪张 + 看到哪一块」的唯一事实来源，直接传进去。
         */}
         <AssetInfo

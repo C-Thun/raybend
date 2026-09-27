@@ -2,7 +2,7 @@
  * 轻量 i18n 运行时。
  *
  * 为什么不引第三方库（AGENTS.md §2.9：新增框架/大型依赖前先讨论）：
- *   - DESIGN.md §11 的 key 集规模很小（当前 ~60 条），没有复数、性别、日期格式化等需求
+ *   - memory/DESIGN.md §11 的 key 集规模很小（当前 ~60 条），没有复数、性别、日期格式化等需求
  *   - 需求只有两条：**零硬编码** + **中英切换**
  *   - 语言包类型由 TS 静态保证完整性（见 en-US.ts 的 Record 声明），比运行时检查更早发现问题
  *
@@ -124,7 +124,7 @@ export function t(key: MessageKey, params?: TParams): string {
  * 「超时」那句话的拼装（给 `lib/timeout.ts` 的调用方用）。
  *
  * 为什么拼装在**这里**而不是 `lib/timeout.ts`：那个文件在纯逻辑层，
- * 而分层检查器不允许 `lib` import `i18n`（`ARCHITECTURE.md` §1）——
+ * 而分层检查器不允许 `lib` import `i18n`（`memory/ARCHITECTURE.md` §1）——
  * 所以句子由应用层拼好再递给它，`TimeoutError.message` 就是成品。
  *
  * `whatKey` 是「哪个动作卡住了」（如 `import.timeout.start` =

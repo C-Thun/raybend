@@ -40,7 +40,7 @@ pub const PREVIEW_MIN_PERCENT: u32 = 75;
 
 /// 浏览用显影步骤。
 ///
-/// 刻意**不含**降噪 / 镜头校正 / 色调映射（那些属于编辑里程碑，见 `FUTURE.md` §D）。
+/// 刻意**不含**降噪 / 镜头校正 / 色调映射（那些属于编辑里程碑，见 `memory/FUTURE.md` §D）。
 /// 末了一步 `SRgb` 是伽马编码 —— 输出给显示器看的，不是线性数据。
 /// 显影管线要的是「到 `Calibrate` 为止的线性 f32」——就是 [`LINEAR_STEPS`]。
 const BROWSING_STEPS: &[ProcessingStep] = &[
@@ -180,7 +180,7 @@ impl RawBackend for RawlerBackend {
         trace.mark("open");
 
         // 线性这条路**不走内嵌预览**：相机写的 JPEG 已经被机内处理过，
-        // 拿它当「场景参考」的数据源等于自欺（`FUTURE.md` D1）。
+        // 拿它当「场景参考」的数据源等于自欺（`memory/FUTURE.md` D1）。
         let raw = decoder
             .raw_image(source, params, false)
             .map_err(|e| classify(e.to_string()))?;
@@ -396,7 +396,7 @@ fn loader() -> &'static RawLoader {
 /// 实测症状：双击点开 RAW 时看到模糊图变清晰的同时颜色/亮度也变了。
 /// **这是有意保留的**（崔总 2026-09-17 拍）：看图档位要的是清晰度。
 ///
-/// 真正的收敛点是「Rust 按规范渲染出位图 + 渲染结果缓存」（`FUTURE.md` C 段、
+/// 真正的收敛点是「Rust 按规范渲染出位图 + 渲染结果缓存」（`memory/FUTURE.md` C 段、
 /// W3 显影视口），那时两条路会并成一条。在此之前**别把这里当 bug 改**：
 /// 把阀值提到 100% 会让看图永远吃预览（糊），降下来会让小图也走完整解码（慢）。
 fn pick_embedded(

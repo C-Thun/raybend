@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * 禁止硬编码色值（DESIGN.md §9.1 的纪律落地）。
+ * 禁止硬编码色值（memory/DESIGN.md §9.1 的纪律落地）。
  *
- * 为什么需要：色值只允许出现在 `DESIGN.md` 与 `src/styles/tokens.css` 两处。
+ * 为什么需要：色值只允许出现在 `memory/DESIGN.md` 与 `src/styles/tokens.css` 两处。
  * 一旦组件里写了 `#8DB8AA` 或 `rgb(...)`，改色时就会漏改 ——
  * 而「主辅色出图后还要调」是用户明确的需求，漏改会直接导致两套颜色并存。
  *
@@ -77,6 +77,6 @@ for (const v of violations) {
 }
 console.error(`
 修正方式：改用语义工具类（bg-surface-bar / text-fg-1 / bg-state-selected …）
-或用令牌引用 var(--brand)。色值只允许写在 src/styles/tokens.css —— 见 DESIGN.md §9。
+或用令牌引用 var(--brand)。色值只允许写在 src/styles/tokens.css —— 见 memory/DESIGN.md §9。
 `);
 process.exit(1);

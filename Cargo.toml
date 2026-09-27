@@ -28,7 +28,7 @@ tempfile = "3"                                             # 仅测试用（临�
 
 # 元数据抽取（M1-3）：纯 Rust 的 EXIF 读取器。RapidRAW 也用同一个
 # （它另引 little_exif 只用于**写回**，本项目不写 EXIF）。
-# 注意：只读 EXIF；RAW 的元数据将来走 rawler（FUTURE.md B8）。
+# 注意：只读 EXIF；RAW 的元数据将来走 rawler（memory/FUTURE.md B8）。
 kamadak-exif = "0.6"
 
 # RAW 解码（M2-W1）：LGPL-2.1-only，与 AGPL-3.0 兼容（AGENTS.md §6.3）。
@@ -45,7 +45,7 @@ trash = "5.2"
 # `avif`：人类 2026-09-24 定「**系统中所有缓存图都用 AVIF，质量 90、次级采样 4:4:4**」——
 # 由 `image` 的 avif 编码器（底层 ravif，纯 Rust，无系统库）提供。
 # 走 **RGB8** 输入才会得到 4:4:4（ravif 的 `encode_rgba` 是 4:2:0），见 `thumbnail::render::encode_avif`。
-# 将来 JXL 生态成熟后换 JXL（已登记 `FUTURE.md` §C8）。
+# 将来 JXL 生态成熟后换 JXL（已登记 `memory/FUTURE.md` §C8）。
 #
 # `webp`：M3-W6c 的 LUT 封面需要 —— ① 人类 2026-09-25 给的内置样片本身就是 WebP；
 # ② 用户自带的演示图按规格也在支持列表里（`design/editor.md` §3.1.1）。

@@ -1,5 +1,5 @@
 /**
- * `repositories` 模块的唯一对外出口（`ARCHITECTURE.md` §2）。
+ * `repositories` 模块的唯一对外出口（`memory/ARCHITECTURE.md` §2）。
  */
 
 export { RepositoryList } from "./RepositoryList.tsx";

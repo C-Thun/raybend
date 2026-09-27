@@ -4,7 +4,7 @@
 //!
 //! 1. 为 Tauri 3.0 的运行时重构（`wry`/`cef` feature flag 移除、运行时 crate 化）
 //!    留出迁移空间 —— 见 `AGENTS.md` §6.2；
-//! 2. 未来可复用同一套代码做 CLI / 无头模式（见 `FUTURE.md` §G7）。
+//! 2. 未来可复用同一套代码做 CLI / 无头模式（见 `memory/FUTURE.md` §G7）。
 //!
 //! 模块划分对应 M0 的各验证波次：
 //!

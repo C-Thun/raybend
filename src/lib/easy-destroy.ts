@@ -1,5 +1,5 @@
 /**
- * `easy destroy` 范式（DESIGN.md §12.2）的**逻辑层**。
+ * `easy destroy` 范式（memory/DESIGN.md §12.2）的**逻辑层**。
  *
  * 规则：所有「移除 / 排除」类操作默认弹确认框；**按住 `Shift` 再点可跳过确认**。
  *

@@ -1,10 +1,10 @@
 //! 标签：**全局词典**（`app.db`）+ **每库关联**（`catalog.db`）。
 //!
-//! 规格出处：`BROWSE.md` §7（标签体系）。设计要点：
+//! 规格出处：`memory/FUNCTION-BROWSE.md` §7（标签体系）。设计要点：
 //!
 //! * **词典与关联分居两库**：标签名是跨库公用的（在 A 库建的词，在 B 库也该能选到），
 //!   所以名字住 `app.db` 的 `tags`，而「哪张照片打了哪个标签」住各库的 `asset_tags`。
-//! * **跨库引用故意不加外键**：`catalog.db` 必须能**单独搬走**（`REPOSITORY.md` §2）。
+//! * **跨库引用故意不加外键**：`catalog.db` 必须能**单独搬走**（`memory/FUNCTION-REPOSITORY.md` §2）。
 //!   由此可能出现「关联里的 tag_id 在词典里查不到」——这不是错误，UI 按「待命名」显示；
 //!   库打开时用 [`distinct_tag_ids`] + [`ensure_tags_by_id`] 做一次**词典对齐**即可。
 //! * **相等判据 = 折叠名**（NFC + 小写，与 `store::path_semantics` 同一套思路）：

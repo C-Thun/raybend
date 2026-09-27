@@ -10,7 +10,7 @@
  * └────────────┴──────────────────────────────┴──────────────┘
  * ```
  *
- * 这是**组装层**：把 feature 与工作区共享状态接起来（`ARCHITECTURE.md` §2），
+ * 这是**组装层**：把 feature 与工作区共享状态接起来（`memory/ARCHITECTURE.md` §2），
  * 自己不做业务判断。初始数据（最近目录 / 驱动器 / 库列表）在这里拉一次 ——
  * 属于工作区自己的生命周期，跟着它挂载与卸载。
  *
@@ -348,7 +348,7 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
 
   return (
     /*
-     * 工作区 = 普通 flex 行 + **自写的宽度把手**（原则见 DESIGN.md §8.6：只给左边）。
+     * 工作区 = 普通 flex 行 + **自写的宽度把手**（原则见 memory/DESIGN.md §8.6：只给左边）。
      * 右列宽度固定（`--panel-w-right`），不参与拖拽。
      */
     <div ref={rowEl} class="flex min-h-0 flex-1">

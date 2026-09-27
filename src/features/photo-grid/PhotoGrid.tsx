@@ -10,7 +10,7 @@ import { clickMode } from "../../lib/selection.ts";
  *
  * 四件事值得说明：
  *
- * 1. **tile 尺寸由 JS 拥有**（`DESIGN.md` §12.6）：档位 → `--tile-cell` 写在容器上，
+ * 1. **tile 尺寸由 JS 拥有**（`memory/DESIGN.md` §12.6）：档位 → `--tile-cell` 写在容器上，
  *    `Tile` 读它画画面区；换行数学用 `computeTileFlow`（行模型那边有单测）。
  * 2. **缩略图只在行被渲染时才请求**：虚拟化已经把「可见」算好了，
  *    `TileCell` 在自己的 `createEffect` 里请求，滚出视口就不再管它。
@@ -470,7 +470,7 @@ export function PhotoGrid(props: PhotoGridProps): JSX.Element {
   };
 
   /*
-   * 看图关掉 ⇒ 把焦点还给网格（`BROWSE.md` §5.4 的键盘接续）。
+   * 看图关掉 ⇒ 把焦点还给网格（`memory/FUNCTION-BROWSE.md` §5.4 的键盘接续）。
    *
    * **盯的就是看图的开关本身**（人类 2026-09-20 统一）：看图的 store 就在这个组件
    * 手里（`viewer`），所以这条不需要外面接线 —— 以前是工作区把「关了」变成计数器

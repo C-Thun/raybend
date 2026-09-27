@@ -986,7 +986,7 @@ fn pick_format(caps: &wgpu::SurfaceCapabilities) -> wgpu::TextureFormat {
 /// 1. **没有真窗口的环境里也能验证管线**（本机 WSL 只有 lavapipe，开不了 Tauri 窗口）——
 ///    `GpuContext` 必须挂在一个真窗口上，而这一条不需要；
 /// 2. **产出可核对的像素证据**：报告里的「画没画出来」不再只能靠人眼；
-/// 3. 将来**导出/生成缩略图**本来就要走离屏路径（`FUTURE.md` C 段），
+/// 3. 将来**导出/生成缩略图**本来就要走离屏路径（`memory/FUTURE.md` C 段），
 ///    现在写好过以后从 `GpuContext` 里拆。
 ///
 /// M3-W2 起它多了一个身份：**编辑视口的像素证据入口** ——

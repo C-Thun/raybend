@@ -1,5 +1,5 @@
 /**
- * `easy destroy` 的**组件封装**（DESIGN.md §12.2）。
+ * `easy destroy` 的**组件封装**（memory/DESIGN.md §12.2）。
  *
  * 逻辑在 `src/lib/easy-destroy.ts`（判定 + 待确认动作），这里只做呈现：
  * 一个 `RemoveButton`（禁行图标、点击区 ≥22×22）+ 一个 `ConfirmDialog`。

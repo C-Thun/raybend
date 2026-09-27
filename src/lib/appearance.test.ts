@@ -34,7 +34,7 @@ function memoryStorage(seed: Record<string, string> = {}): AppearanceStorage & {
   };
 }
 
-test("默认外观：深色 + 紧凑（DESIGN.md §3 默认暗房）", () => {
+test("默认外观：深色 + 紧凑（memory/DESIGN.md §3 默认暗房）", () => {
   assert.deepEqual(DEFAULT_APPEARANCE, { theme: "dark", density: "compact" });
 });
 

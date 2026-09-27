@@ -16,7 +16,7 @@
  * 用法：`await withTimeout(deps.api.start(...), timeoutMs, timeoutMessage("import.timeout.start", timeoutMs))`
  *
  * ⚠️ **第三个参数是「已经翻好的一句话」，不是动作名**。为什么这么定：
- * 本文件在**纯逻辑层**（`ARCHITECTURE.md` §1），而分层检查器不允许 `lib` import `i18n` ——
+ * 本文件在**纯逻辑层**（`memory/ARCHITECTURE.md` §1），而分层检查器不允许 `lib` import `i18n` ——
  * 所以句子的拼装交给**应用层**（`src/i18n/index.ts` 的 `timeoutMessage`）。
  */
 

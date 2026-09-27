@@ -29,7 +29,7 @@
 //! | `description` | 用户写的描述（v2 新增） |
 //!
 //! ⚠️ **标签不进 FTS**：标签名住在 `app.db`，在每库冗余一份会漂移；搜标签时用
-//! `asset_tags` 关联去查（`FUTURE.md` H8）。
+//! `asset_tags` 关联去查（`memory/FUTURE.md` H8）。
 
 use rusqlite::Connection;
 

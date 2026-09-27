@@ -2,7 +2,7 @@
  * 导入工作区共享状态的单元测试。
  *
  * 重点覆盖三类**真会咬人**的地方：
- *   1. **选中与勾选互不影响**（`AGENTS.md` §11.2 / `DESIGN.md` §12.4）——
+ *   1. **选中与勾选互不影响**（`AGENTS.md` §11.2 / `memory/DESIGN.md` §12.4）——
  *      合并两者是最容易犯、也最难在界面上看出问题的错；
  *   2. **跨面板的路径比较**（`D:\Photos` 与 `d:/photos/` 是同一个目录）；
  *   3. **异步的计数与「最近」写入**：计数没回来时不能编一个数字出来。
@@ -419,7 +419,7 @@ test("排除：反转语义，且**换目录不丢**", () => {
     ["/src/a/1.jpg", "/src/a/2.jpg"],
   );
 
-  // 再反转一次：这一张恢复（`DESIGN.md` §12.2：批量排除是个反转动作）
+  // 再反转一次：这一张恢复（`memory/DESIGN.md` §12.2：批量排除是个反转动作）
   store.toggleExcluded(["/src/a/1.jpg"]);
   assert.deepEqual([...store.excluded()], ["/src/a/2.jpg"]);
 
@@ -539,7 +539,7 @@ test("避免重复导入：默认开、写回设置、能读回", async () => {
   const { api, state } = fakeApi();
   const store = createImportStore({ api });
 
-  assert.equal(store.avoidDuplicates(), true, "默认勾上（REPOSITORY.md §4.3）");
+  assert.equal(store.avoidDuplicates(), true, "默认勾上（memory/FUNCTION-REPOSITORY.md §4.3）");
   store.setAvoidDuplicates(false);
   await flush();
   assert.equal(state.settings.get("import.avoid_duplicates"), "0");

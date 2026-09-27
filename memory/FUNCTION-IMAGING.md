@@ -1,10 +1,11 @@
-# IMAGING.md — 图像格式与显示规格
+# raybend — 图像格式与显示规格（memory/FUNCTION-IMAGING.md）
 
 > **单一事实来源**：**图片格式支持范围**（§1）+ **库内三种图（thumb / preview / 大图）的规格**（§2–§7）。
 > 人类 2026-09-24 口述定案（**原文照录**，Agent 只做整理与现状对照）；差异与待办集中在 §8。
+> 原文件名 `IMAGING.md`，2026-09-27 记忆体重构改名并迁入 `memory/`。
 >
-> 相关文件：`AGENTS.md` §6.4/§6.5（缓存架构与红线）、`REPOSITORY.md`（库与导入）、
-> `FUTURE.md` §C8（AVIF 决策、编码代价实测、JXL 定位）、`PLAN.md` §M4-W2（导出）。
+> 相关文件：`memory/ARCHITECTURE.md` §6.4/§6.5（存储与缓存架构红线）、`memory/FUNCTION-REPOSITORY.md`（库与导入）、
+> `memory/FUTURE.md` §C8（AVIF 决策、编码代价实测、JXL 定位）、`memory/FINISHED.md` §7（M4 导出波次）。
 
 ---
 
@@ -29,7 +30,7 @@
 ### 1.2 RAW
 
 - **导出：不支持** —— 我们不导出 RAW（导出的是 issue 渲染结果 / 位图）。
-- **导入：尽量支持**，能力跟着 **rawler 基础库**走（后端候选见 `FUTURE.md` §B）：
+- **导入：尽量支持**，能力跟着 **rawler 基础库**走（后端候选见 `memory/FUTURE.md` §B）：
   * 普通马赛克（Bayer）先支持全；
   * 早期的 **X3**（Sigma Foveon）可以不支持；
   * 富士 **X-Trans** 看工具（rawler）是否支持决定。
@@ -38,7 +39,7 @@
 
 - **JXL**：未来支持**导入 / 导出全流程**（等生态成熟）；**不用于缓存 / 快照**。
 - **issue 大图快照**：**恒为 AVIF**（收回「将来换 JXL 做快照」的设想）。
-- AVIF 的编码代价实测与「为什么是 AVIF」见 `FUTURE.md` §C8。
+- AVIF 的编码代价实测与「为什么是 AVIF」见 `memory/FUTURE.md` §C8。
 
 ### 1.4 实现前提（现状事实，别忘）
 
@@ -187,7 +188,7 @@ M3-W6c 的定稿模型以当前 editor profile 为真相：`latest` 是自动保
 * **限流两层**：前端按帧合并（同一帧只发最后那个值，`createLatestCoalescer`）；
   后端显影线程收任务前把队列里被顶替的**合并掉**（`merge_jobs`），渲染线程只认最新任务号。
 * **仍未做**：1:1 时**只算可见区域**（视口裁切）—— 现在是整张算完再让 GPU 采样可见部分。
-  登记在 `FUTURE.md` §D1.5。
+  登记在 `memory/FUTURE.md` §D1.5。
 
 ---
 
@@ -222,7 +223,7 @@ M3-W6c 的定稿模型以当前 editor profile 为真相：`latest` 是自动保
 | 截断比例（§3.1-2） | `MAX_DISPLAY_ASPECT = 3.0`（3:1），只作用于 Grid/Strip | ✅ **保持 3:1**（人类 2026-09-24 认可，不改） |
 | 只缩不扩（§3.1-3） | ✅ `resize_for_thumb` 不放大 | — |
 | 小图显示**填满**（§3.1-4） | 网格 `Tile` = `object-cover` ✅；胶片带 = `object-contain` ✅（两者都是 `h-full w-full`，**会放大**）；**`PreviewFrame` 过渡态用过 `max-h-full max-w-full`**（= 小图不放大） | ✅ **已修**：`PreviewFrame` 过渡态改 `h-full w-full object-contain`；口径见 §3.1-4（含 padding、小图必放大、`max-*` 那套禁用） |
-| 编辑视口两档与拖动中只算预览档（§5.1） | ✅ 已做：`tier_for_params`（拖动中一律 Preview，松手按缩放补全尺寸）+ 两层限流 | 仅剩「1:1 只算可见区域」（视口裁切）—— `FUTURE.md` §D1.5 |
+| 编辑视口两档与拖动中只算预览档（§5.1） | ✅ 已做：`tier_for_params`（拖动中一律 Preview，松手按缩放补全尺寸）+ 两层限流 | 仅剩「1:1 只算可见区域」（视口裁切）—— `memory/FUTURE.md` §D1.5 |
 | 进 tiles/film 补缺失缩略图（§3.1-5） | ✅ 按需：可见 tile 请求时渲染并写缓存（虚拟列表只请求可见项）——**满足该条**（「缺就补，自然维护完整」） | 不做全目录预扫（大目录全扫是浪费，且违背「实时优先」）；若要「导入收尾时一次补齐」，算导入流程的事，另议 |
 | 编辑落库刷新当前张（§3.1-6） | ✅ 本轮刚做（`ThumbQueue.refresh`，只动当前张） | — |
 | 缩略图默认 = sooc/raw（§3.1-7） | ✅ 没编辑过就走 SOOC/RAW 解码那条路 | — |

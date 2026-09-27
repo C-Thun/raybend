@@ -1,5 +1,5 @@
 /**
- * 按时间分组与时间片（`DESIGN.md` §12.7、`design/main.md` §4.8.2）。
+ * 按时间分组与时间片（`memory/DESIGN.md` §12.7、`design/main.md` §4.8.2）。
  *
  * ```text
  * 一级：按拍摄日期（本地日期）→ 一天一组

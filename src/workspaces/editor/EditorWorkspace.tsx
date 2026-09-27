@@ -10,7 +10,7 @@ import { onCatalogChanged } from "../../api/db.ts";
  * └────────────┴──────────────────────────────┴──────────────┘
  * ```
  *
- * 这是**组装层**（`ARCHITECTURE.md` §2）：把浏览侧的数据（库 / 目录 / 清单 / 选择）
+ * 这是**组装层**（`memory/ARCHITECTURE.md` §2）：把浏览侧的数据（库 / 目录 / 清单 / 选择）
  * 与编辑器自己的界面状态（档位 / 工具 / 参数）接起来，自己不做业务判断。
  *
  * # 三条结构纪律（`AGENTS.md` §11.1 / §11.4）
@@ -715,7 +715,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
    *    松手落库是主路径，这一条是兜底（拖动中途换照片、或松手事件被别的东西吃掉）。
    */
   /**
-   * **preview 的刷新**（`IMAGING.md` §4）：编辑器**进 / 出**两个节点各一次。
+   * **preview 的刷新**（`memory/FUNCTION-IMAGING.md` §4）：编辑器**进 / 出**两个节点各一次。
    *
    * 这是**后台那一路** —— 不等它（一张 1920 的 AVIF 要几百毫秒），失败也只记日志：
    * 预览没备好最多让下次看图慢一点，不该影响编辑。

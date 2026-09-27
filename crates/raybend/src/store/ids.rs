@@ -1,4 +1,4 @@
-//! 库 ID：**可排序的定长 base62**（`REPOSITORY.md` §2.5）。
+//! 库 ID：**可排序的定长 base62**（`memory/FUNCTION-REPOSITORY.md` §2.5）。
 //!
 //! 形制来自用户的 Luclin `Gid` 方案（时间戳 + 随机数 → 压缩成定长字符串），
 //! 针对本项目做了两点裁剪：

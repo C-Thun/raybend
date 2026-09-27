@@ -1,4 +1,4 @@
-//! 最近导入过的目录（`app.db` 侧，`REPOSITORY.md` / `design/main.md` §3.1.1）。
+//! 最近导入过的目录（`app.db` 侧，`memory/FUNCTION-REPOSITORY.md` / `design/main.md` §3.1.1）。
 //!
 //! 「最近」不是一个需要用户维护的收藏夹：每次用户**挑中**一个目录（勾选进「已选目录」），
 //! 这里就记一条，并按上限裁剪。记录的是**完整路径**，界面上显示的是 `shortpath`。

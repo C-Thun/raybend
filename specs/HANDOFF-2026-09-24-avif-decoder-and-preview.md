@@ -5,7 +5,7 @@
 > §5 是登记项，**别顺手做**。
 > **本文件的性质**：§2/§3/§4 都做过**查证预调研**（读代码 + 实测本机工具链 + 查了上游 crate 的构建方式），
 > 不是转述猜测。凡**没查实**的都写明「未查实」。
-> **上一段会话交付**：见 §1（六个提交；`IMAGING.md` 立成唯一事实源；编辑基准可切）。
+> **上一段会话交付**：见 §1（六个提交；`memory/FUNCTION-IMAGING.md` 立成唯一事实源；编辑基准可切）。
 > **人类已经拍板的三个方向**（不要再问一遍）：① 接 `avif-native`（dav1d）；
 > ② 总览图下 SOOC/RAW 切换（**已实现**，issue 打标签那部分只登记）；
 > ③ §2.5 切图优先「等 AVIF 解码器一起做」。
@@ -35,8 +35,8 @@ cargo clippy -q -p raybend -p raybend-desktop --all-targets   # 只应剩 store/
 
 | 想知道什么 | 去哪 |
 | --- | --- |
-| 三种图（thumb / preview / 大图）的规格与现状 | **`IMAGING.md`**（唯一事实源；§1 格式范围、§4.3 编辑基准、§5.1 档位、§8 现状对照、§9 未决点） |
-| 格式支持范围 / AVIF 编码代价 | `IMAGING.md` §1、`FUTURE.md` §C8 |
+| 三种图（thumb / preview / 大图）的规格与现状 | **`memory/FUNCTION-IMAGING.md`**（唯一事实源；§1 格式范围、§4.3 编辑基准、§5.1 档位、§8 现状对照、§9 未决点） |
+| 格式支持范围 / AVIF 编码代价 | `memory/FUNCTION-IMAGING.md` §1、`memory/FUTURE.md` §C8 |
 | 编辑视口与显影线程 | `src-tauri/src/editor.rs`（`develop_loop` / `run_develop_job` / `decode_linear_source` / `RenderCommand` / `DevelopedImage`） |
 | 取图口（view / 缩略图 / 直方图） | `src-tauri/src/thumbs.rs`（`view_image`、`render_latest_cached`）、`crates/raybend/src/display/`（`pixels.rs`、`full_cache.rs`） |
 | 渲染管线（thumb/preview 都走它） | `crates/raybend/src/thumbnail/render.rs`（`render_file_with_edit`、`PIPELINE_VERSION = 6`、`SizeClass`） |
@@ -67,7 +67,7 @@ cargo run -q -p raybend --example avif-probe                                    
 | `c44117c` | **拖动中只算预览档**：`render::tier::tier_for_params`（手指按着时一律 Preview，松手按缩放补全尺寸）+ 载荷 `interactive` + 滑杆/曲线接线 |
 | `ca6c52f` | **preview 生成节点**：`store::develop::needs_preview` + 命令 `develop_preview_refresh`（进/出编辑），复用 `render_latest_cached` |
 | `67e2422` | 小图必须放大（`PreviewFrame` 过渡态去掉 `max-*`）+ 载入提示改半透毛玻璃（只遮 view、`pointer-events-none`） |
-| `d385144` | **`IMAGING.md` 立项**（格式范围 + 三种图规格 + 现状对照 + 未决点）；FUTURE §C8 / PLAN §M4-W2 改成指向它 |
+| `d385144` | **`memory/FUNCTION-IMAGING.md` 立项**（格式范围 + 三种图规格 + 现状对照 + 未决点）；FUTURE §C8 / PLAN §M4-W2 改成指向它 |
 | `e0b63d8` | **编辑基准可切**（SOOC / RAW，默认 RAW）：`EditBase` + `develop_edit_target(base)` + 总览下 `SegmentedControl` |
 | `0a9968d` | 三项拍板登记 + 实施记录 `implementations/2026-09-24_edit-base-switch-and-decisions.md` |
 
@@ -83,7 +83,7 @@ cargo run -q -p raybend --example avif-probe                                    
 1. **「进来先读 preview」**（§3）：preview 是 AVIF（`<库根>/cache/full/<asset>/latest-v6.avif`），
    编辑视口是 Rust 直绘（wgpu 要像素），**浏览器能解 AVIF 但 GPU 纹理那条路绕不开解码器**。
 2. **§2.5 切图优先**（§4）：latest 那份就是 AVIF。
-3. **导入 avif**（`IMAGING.md` §1.1 的 6 种之一）：现在是占位图（解不开）。
+3. **导入 avif**（`memory/FUNCTION-IMAGING.md` §1.1 的 6 种之一）：现在是占位图（解不开）。
 
 > 注意 **HEIC 不在这件事里**：`image` 完全不支持 HEIC，要另接 libheif 系 —— 另行安排。
 
@@ -149,7 +149,7 @@ cargo run -q -p raybend --example avif-probe                                    
   * 把基准编进缓存名（如 `latest-raw-v6.avif` / `latest-sooc-v6.avif`）—— 干净，但要动
     `full_cache.rs` 的命名与 `render_latest_cached` / `view_image` 的读法；
   * 切基准时**作废**该资产的 latest 缓存（简单，但来回切会反复重渲）。
-* 这条**没有登记在任何文档里**（写本文件时才发现）—— 定下来之后请补进 `IMAGING.md` §4/§8。
+* 这条**没有登记在任何文档里**（写本文件时才发现）—— 定下来之后请补进 `memory/FUNCTION-IMAGING.md` §4/§8。
 
 ---
 
@@ -162,7 +162,7 @@ cargo run -q -p raybend --example avif-probe                                    
 * 载入提示已经是半透毛玻璃、只遮 view、`pointer-events-none`（`67e2422`）——
   **这一条已经就位，不用再做**。
 
-### 3.2 目标行为（`IMAGING.md` §5，人类原话）
+### 3.2 目标行为（`memory/FUNCTION-IMAGING.md` §5，人类原话）
 
 > 「接 avif 支持，进来先读 preview，因为本身这个分辨率就只有 1920，所以自然有点糊也正常」
 
@@ -170,7 +170,7 @@ cargo run -q -p raybend --example avif-probe                                    
 
 ### 3.3 实现要点（这里每一条都是踩过的坑或已定的口径）
 
-1. **过渡帧从哪来**（按 `IMAGING.md` §2/§4 的口径）：
+1. **过渡帧从哪来**（按 `memory/FUNCTION-IMAGING.md` §2/§4 的口径）：
    * 编辑过的照片：`FullCache::read(asset_id, "latest", PIPELINE_VERSION)` —— 命中即用
      （进/出编辑已经保证它被写过，见 `develop_preview_refresh`）；
    * 没编辑过：preview 不存在（`needs_preview` = false），**SOOC 位图 / RAW 内嵌预览就代替它** ——
@@ -191,7 +191,7 @@ cargo run -q -p raybend --example avif-probe                                    
      确认不了就退回「过渡帧不 refit、只换纹理」那条路。
 4. **档位交互**：`tier_for_params` 的 `interactive` 只影响参数任务；`SetPhoto` 那条本来就是
    `ImageTier::Preview` 起步 —— 过渡帧天然是预览档，不用额外处理。
-5. **直方图**：`IMAGING.md` 的实时口径是「像素由显影线程当前帧直接给出」——
+5. **直方图**：`memory/FUNCTION-IMAGING.md` 的实时口径是「像素由显影线程当前帧直接给出」——
    过渡帧期间直方图会是 preview 的直方图，真帧到了再刷新。**这是可接受的**（但要知道，
    否则会被当成「直方图不跟着走」的 bug）。
 6. **别把 preview 当正式帧缓存**：过渡帧只是画一下，**不许**写进任何缓存
@@ -215,7 +215,7 @@ cargo run -q -p raybend --example avif-probe                                    
   切图时按 `latest`（缓存里有就读）→ `SOOC`（位图）→ `RAW`（内嵌预览）找第一个能用的当过渡帧。
 * 相关既有件：`store::develop::choose_issue`（显示哪个 issue 的规则）、`needs_preview`、
   `develop_edit_target(base)`（编辑基准已可切）、`FullCache::read`。
-* 做完请更新 `IMAGING.md` §8 那两行（§2.5 与「先读 preview」）+ 写实施记录。
+* 做完请更新 `memory/FUNCTION-IMAGING.md` §8 那两行（§2.5 与「先读 preview」）+ 写实施记录。
 
 ---
 
@@ -223,13 +223,13 @@ cargo run -q -p raybend --example avif-probe                                    
 
 | 项 | 在哪登记 | 备注 |
 | --- | --- | --- |
-| avif **导入**支持 | `IMAGING.md` §1.4/§8 | 与 §2 同一个解码器；接完解码器后大概率「自然就好了」，但要补一条真文件冒烟 |
+| avif **导入**支持 | `memory/FUNCTION-IMAGING.md` §1.4/§8 | 与 §2 同一个解码器；接完解码器后大概率「自然就好了」，但要补一条真文件冒烟 |
 | HEIC 导入 | 同上 | 要 libheif 系，**另一件事** |
-| issue 打「基于 sooc / 基于 raw」标签 + 点 issue 同步切换按钮 | `FUTURE.md`「issue 与 SOOC」、`IMAGING.md` §4.3 | 等 issue 体系 |
-| 1:1 只算可见区域（视口裁切渲染） | `FUTURE.md` §D1.5 | 架构级，别顺手做 |
-| develop 分期 + 节点缓存 | `FUTURE.md` §D1.5 | 同上 |
+| issue 打「基于 sooc / 基于 raw」标签 + 点 issue 同步切换按钮 | `memory/FUTURE.md`「issue 与 SOOC」、`memory/FUNCTION-IMAGING.md` §4.3 | 等 issue 体系 |
+| 1:1 只算可见区域（视口裁切渲染） | `memory/FUTURE.md` §D1.5 | 架构级，别顺手做 |
+| develop 分期 + 节点缓存 | `memory/FUTURE.md` §D1.5 | 同上 |
 | `design/editor.pen` 补画：缩放控制 / 信息三组 / 编辑基准按钮 / 毛玻璃提示 | `design/editor.md` 已同步文字 | **需要人类把该文件在 VS Code 里打开**（Pencil 才连得上） |
-| `REPOSITORY.md` §4.1「编辑落在 RAW 上」的措辞 | — | 现在多了用户可切的基准，下次顺手对齐 |
+| `memory/FUNCTION-REPOSITORY.md` §4.1「编辑落在 RAW 上」的措辞 | — | 现在多了用户可切的基准，下次顺手对齐 |
 
 ---
 

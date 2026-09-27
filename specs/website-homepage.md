@@ -28,7 +28,7 @@ raybend 需要一个**官方落地页**当门面：一眼知道这是什么软�
 | **默认分支** | **`master`**（不是 `main`） |
 | 自定义域名 | `raybend.cthun.com` 是**子域** → 只需要一条 `CNAME`，`base` 保持 `/` |
 | 现有产物形态 | `website` 已是 turnkey 客户端模式：`pnpm build` → **纯静态 `website/dist/client`** |
-| 品牌色 | 主色 `#52C6AB`、辅色 `#F0B033`、浅面 `#F6F8F4`、深面 `#202226`（`DESIGN.md` §1.1） |
+| 品牌色 | 主色 `#52C6AB`、辅色 `#F0B033`、浅面 `#F6F8F4`、深面 `#202226`（`memory/DESIGN.md` §1.1） |
 | 品牌素材 | `public/` 里的 name/slogan 是**白色墨迹 + 透明底**（实测墨迹 `#FFFFFF`、alpha=0）→ 可直接做 CSS mask |
 | Pages 自定义域名 | 走 Actions 发布时**不需要 CNAME 文件**；域名只存在仓库设置里（GitHub 官方文档原文核实） |
 
@@ -190,7 +190,7 @@ raybend 需要一个**官方落地页**当门面：一眼知道这是什么软�
 | `website/package.json` | 补 `packageManager: pnpm@12.3.4`、`typecheck` / `test:run` 脚本、两个字体依赖 |
 | `website/AGENTS.md` | 站点结构、i18n 约定、占位图与素材约定、下发版流程、字体与配色落地位置 |
 | 根 `.gitignore` + `website/.gitignore` | 加 `*:Zone.Identifier`（Windows 附加流残留） |
-| 根 `AGENTS.md` / `PLAN.md` | 登记这条支线 |
+| 根 `AGENTS.md` / `memory/PLAN.md` | 登记这条支线 |
 
 **删除（模板残留）**
 
@@ -204,8 +204,8 @@ raybend 需要一个**官方落地页**当门面：一眼知道这是什么软�
 | 需要 | 已有的 |
 | --- | --- |
 | 静态构建 + 文件式路由 + 预渲染外壳 | `website/vite.config.ts`、`website/src/router.ts`、`Document.tsx` |
-| 品牌色/字体选型 | `DESIGN.md` §1.1 / §7.1 |
-| 产品与技术文案 | `README.md`、`PLAN.md`（M1–M4）、`BROWSE.md` §0–§3、`REPOSITORY.md` §3–§4、`AGENTS.md` §7.4 |
+| 品牌色/字体选型 | `memory/DESIGN.md` §1.1 / §7.1 |
+| 产品与技术文案 | `README.md`、`memory/PLAN.md`（M1–M4）、`memory/FUNCTION-BROWSE.md` §0–§3、`memory/FUNCTION-REPOSITORY.md` §3–§4、`AGENTS.md` §7.4 |
 | 品牌素材 | `website/public/{logo*,name-*,slogan-*,splash_v1-*}` |
 | 测试基建 | `website` 已有 Vitest + jsdom + `@solidjs/testing-library` + `@solidjs/diagnostics` |
 | 标签约定 | `scripts/release-plan.ts`：tag 形如 `v<version>`（人类执行 tag/push） |
@@ -324,7 +324,7 @@ prerelease 事件会被忽略（`if: github.event.release.prerelease == false`�
 - [x] 13. 其它单测（i18n 判定与切换、占位块、下载态渲染）
 - [x] 14. `.github/workflows/website.yml`
 - [x] 15. `website/ASSETS.md`（截图清单 + AI 提示词 + 尺寸表）
-- [x] 16. 文档：`website/AGENTS.md`（结构/i18n/素材/发版）、根 `AGENTS.md` 与 `PLAN.md` 登记、`implementations/` 实施记录
+- [x] 16. 文档：`website/AGENTS.md`（结构/i18n/素材/发版）、根 `AGENTS.md` 与 `memory/PLAN.md` 登记、`implementations/` 实施记录
 - [x] 17. 本地验收（见下）
 
 ---

@@ -31,7 +31,7 @@
 
 use std::collections::BTreeMap;
 
-/// 拉杆填充从哪长（`DESIGN.md` §14.10）。
+/// 拉杆填充从哪长（`memory/DESIGN.md` §14.10）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Origin {
     /// 双极：填充从正中向把手长。

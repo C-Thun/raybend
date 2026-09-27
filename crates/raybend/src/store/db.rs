@@ -49,7 +49,7 @@ pub const BACKUPS_DIR: &str = "backups";
 
 /// 打开一个库时的选项。
 ///
-/// 备份目录**不在库目录里**（`REPOSITORY.md` §1 规定库根只有 `catalog.db` 与 `photos/`），
+/// 备份目录**不在库目录里**（`memory/FUNCTION-REPOSITORY.md` §1 规定库根只有 `catalog.db` 与 `photos/`），
 /// 而是由调用方指定 —— 生产环境一律是 `<app data>/backups/`。
 #[derive(Debug, Clone, Copy)]
 pub struct OpenOpts<'a> {
@@ -611,7 +611,7 @@ mod tests {
 
     #[test]
     fn catalogue_snapshots_do_not_pollute_the_library_root() {
-        // REPOSITORY.md §1：库根只有 catalog.db 与 photos/。
+        // memory/FUNCTION-REPOSITORY.md §1：库根只有 catalog.db 与 photos/。
         // 快照统一放调用方给的目录（生产是 app data 下的 backups/）。
         let dir = tmp();
         let backups = dir.path().join("app数据").join(BACKUPS_DIR);

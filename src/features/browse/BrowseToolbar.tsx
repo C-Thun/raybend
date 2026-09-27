@@ -1,5 +1,5 @@
 /**
- * 浏览模式的 `toolsbar` 装配（`BROWSE.md` §3、`design/browse.md` §2.1）。
+ * 浏览模式的 `toolsbar` 装配（`memory/FUNCTION-BROWSE.md` §3、`design/browse.md` §2.1）。
  *
  * 四组能力，从左到右：
  *
@@ -20,7 +20,7 @@
  * 「混合」绝不能被当成「无值」：那样点一下会把一批已经打了标的照片全部清掉
  * （语义在 `lib/marking-state.ts`，那里有测试）。
  *
- * # 筛选模式（`BROWSE.md` §3.1）
+ * # 筛选模式（`memory/FUNCTION-BROWSE.md` §3.1）
  *
  * 顶部那个开关一打开，**后面的标记控件全部从「设置」变成「筛选」**：
  * 点 3 星不再是「给选中的照片打 3 星」，而是「只看 3 星的照片」。
@@ -271,7 +271,7 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
         pressed={filterMode()}
         onPressedChange={(pressed) => {
           /*
-           * 打开筛选的那一刻**从选中照片取同类**（`BROWSE.md` §3.1 的「爽用法」）：
+           * 打开筛选的那一刻**从选中照片取同类**（`memory/FUNCTION-BROWSE.md` §3.1 的「爽用法」）：
            * 选一张 3 星红标图 → 打开 → 所有 3 星或红标图留下。
            * 没有选中就不预置条件（空条件 + 一句提示，见 `FilterBar`）。
            */
@@ -295,7 +295,7 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
 
       {/*
         旗标（人类 2026-09-19 重定）：
-        * **不是「留下 / 丢弃」，就是开关一个旗标**（旗标只活在内存、可跨目录，`BROWSE.md` §3.2）；
+        * **不是「留下 / 丢弃」，就是开关一个旗标**（旗标只活在内存、可跨目录，`memory/FUNCTION-BROWSE.md` §3.2）；
         * 标记态：**一个按钮开/关**（图标是**实心旗**）+ 右边一个「清空旗标」；
         * 筛选态：**两个按钮**「有旗标」（实心旗）/「无旗标」（空心旗），再点一次取消条件。
 

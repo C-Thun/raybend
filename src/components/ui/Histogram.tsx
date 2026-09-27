@@ -96,7 +96,7 @@ export function Histogram(props: HistogramProps) {
         onPointerLeave={() => setLevel(null)}
       >
         {/*
-          很浅的细密虚线（`DESIGN.md` §13.1）：纵向 4 等分（3 根）+ 横向上下 2 等分（1 根）。
+          很浅的细密虚线（`memory/DESIGN.md` §13.1）：纵向 4 等分（3 根）+ 横向上下 2 等分（1 根）。
           用 DOM 画而不是 SVG `stroke-dasharray`：SVG 被 `preserveAspectRatio="none"` 拉伸时
           虚线段长会跟着变形（竖线拉长、横线压扁）。
 

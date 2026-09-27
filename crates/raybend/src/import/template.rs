@@ -1,4 +1,4 @@
-//! 导入模版：解析、校验与渲染（`REPOSITORY.md` §3）。
+//! 导入模版：解析、校验与渲染（`memory/FUNCTION-REPOSITORY.md` §3）。
 //!
 //! 模版是**库级设置**，决定每张照片落进 `photos/` 里的哪条相对路径。默认值：
 //!
@@ -12,7 +12,7 @@
 //! ## 三条容易做错的规则（都在测试里钉着）
 //!
 //! 1. **变量名按最长前缀匹配**：`:FILENAMEGO` 是 `FILENAME` + 字面量 `GO`，
-//!    不是「未知变量 FILENAMEGO」（`REPOSITORY.md` §3.2 用户特别说明过）。
+//!    不是「未知变量 FILENAMEGO」（`memory/FUNCTION-REPOSITORY.md` §3.2 用户特别说明过）。
 //! 2. **序号宽度即身份**：`:SEQ000` 与 `:SEQ0000` 是两个不同的计数器，
 //!    所以 [`Template::seq_widths`] 返回的是**用到的宽度集合**，而不是一个位数。
 //! 3. **变量取「每张照片自己」的值**：同一天的照片才共享目标根目录，
@@ -84,7 +84,7 @@ pub const KNOWN_VARS: &[Var] = &[
 /// 序号变量的前缀（后面跟的全是 `0`，几个 `0` 就是几位数）。
 pub const SEQ_PREFIX: &str = "SEQ";
 
-/// 序号最多几位。再宽没有意义（计数器写满会回绕，见 `REPOSITORY.md` §3.3）。
+/// 序号最多几位。再宽没有意义（计数器写满会回绕，见 `memory/FUNCTION-REPOSITORY.md` §3.3）。
 pub const MAX_SEQ_WIDTH: usize = 9;
 
 /// 一个路径分段的长度上限。
@@ -118,7 +118,7 @@ pub struct Template {
     warnings: Vec<Warning>,
 }
 
-/// 不致命、但要给用户看一眼的问题（`REPOSITORY.md` §3.5）。
+/// 不致命、但要给用户看一眼的问题（`memory/FUNCTION-REPOSITORY.md` §3.5）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Warning {
     /// 不认识的变量 —— 会原文照抄，几乎肯定不是用户想要的。
@@ -238,7 +238,7 @@ impl TemplateError {
 /// 各宽度序号的值（`(宽度, 值)` 对）—— 缺的宽度按 0 渲染。
 ///
 /// 用「宽度 → 值」而不是单个数字：`:SEQ000` 与 `:SEQ0000` 是两个独立的计数器
-/// （`REPOSITORY.md` §3.3），一个模版里同时出现时各自的当前值不一样。
+/// （`memory/FUNCTION-REPOSITORY.md` §3.3），一个模版里同时出现时各自的当前值不一样。
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SeqValues<'a> {
     pairs: &'a [(usize, u64)],
@@ -685,7 +685,7 @@ mod tests {
         parse(source).expect("模版应当能解析").render(ctx).text
     }
 
-    /* ── 默认模版与示例（REPOSITORY.md §3.1） ───────────────────────── */
+    /* ── 默认模版与示例（memory/FUNCTION-REPOSITORY.md §3.1） ───────────────────────── */
 
     #[test]
     fn default_template_matches_the_spec_example() {
@@ -765,7 +765,7 @@ mod tests {
 
     #[test]
     fn each_width_has_its_own_value() {
-        // 同一张照片、同一个模版：两个宽度的计数器各走各的（REPOSITORY.md §3.3）
+        // 同一张照片、同一个模版：两个宽度的计数器各走各的（memory/FUNCTION-REPOSITORY.md §3.3）
         let values = [(3usize, 12u64), (4, 345)];
         let c = RenderCtx {
             seqs: SeqValues::new(&values),
@@ -933,7 +933,7 @@ mod tests {
         assert!(!parse(":FILENAME").expect("能解析").needs_date());
     }
 
-    /* ── 解析期的硬错误（REPOSITORY.md §3.5） ──────────────────────── */
+    /* ── 解析期的硬错误（memory/FUNCTION-REPOSITORY.md §3.5） ──────────────────────── */
 
     #[test]
     fn empty_template_is_rejected() {

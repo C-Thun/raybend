@@ -1,5 +1,5 @@
 /**
- * Badge / CountBadge（DESIGN.md §10.1 #16）。
+ * Badge / CountBadge（memory/DESIGN.md §10.1 #16）。
  *
  * 计数与状态小标签。两种形态共用一个组件：
  *   - 计数：`CountBadge`（数字，**必须** tabular-nums —— 一排计数上下跳动很难看，§7.2）

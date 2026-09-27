@@ -1,7 +1,7 @@
 /**
  * 外观状态：主题（dark / light）与密度（compact / loose）。
  *
- * 设计约束（DESIGN.md §3 / §8.1）：
+ * 设计约束（memory/DESIGN.md §3 / §8.1）：
  *   - 默认主题 = **dark**（相片软件的行业惯例）
  *   - 主题**不跟随系统**，由用户手动切换
  *   - 密度只有两档，切换方式是 `<html data-theme data-density>`，

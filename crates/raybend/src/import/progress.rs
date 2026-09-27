@@ -1,4 +1,4 @@
-//! 导入进度的状态与快照（`REPOSITORY.md` §4.4）。
+//! 导入进度的状态与快照（`memory/FUNCTION-REPOSITORY.md` §4.4）。
 //!
 //! 一次「按下导入」= 一个 **batch**；batch 里**每个源目录一个 run**
 //! （`source_root` 一列只装得下一个根目录，且各目录的计数天然独立 —— `specs/M1-6.md` §3.4）。
@@ -21,7 +21,7 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
-/// 导入的四个阶段（`REPOSITORY.md` §4.4 的「当前阶段 / 总阶段」）。
+/// 导入的四个阶段（`memory/FUNCTION-REPOSITORY.md` §4.4 的「当前阶段 / 总阶段」）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ImportStage {
@@ -49,7 +49,7 @@ pub enum ImportState {
     Paused,
     /// 收到取消请求，正在收尾。
     Cancelling,
-    /// 已取消：**已导入的部分保留**（`REPOSITORY.md` §4.5）。
+    /// 已取消：**已导入的部分保留**（`memory/FUNCTION-REPOSITORY.md` §4.5）。
     Cancelled,
     /// 全部完成。
     Done,

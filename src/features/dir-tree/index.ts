@@ -1,5 +1,5 @@
 /**
- * `dir-tree` 模块的唯一对外出口（`ARCHITECTURE.md` §2）。
+ * `dir-tree` 模块的唯一对外出口（`memory/ARCHITECTURE.md` §2）。
  *
  * 视图、它自己的内部 store（展开/懒加载）、以及行模型都从这里出。
  * 「选中」「勾选」不在这个模块里 —— 它们是工作区的共享状态，

@@ -1,5 +1,5 @@
 /**
- * 库的**中央状态**（`REPOSITORY.md` §5）。
+ * 库的**中央状态**（`memory/FUNCTION-REPOSITORY.md` §5）。
  *
  * ## 为什么要有它（人类 2026-09-16 的原话）
  *
@@ -146,7 +146,7 @@ export function createRepositoryState(deps: {
       const view = await deps.api.remountRepository(repositoryId);
       upsert(view);
       clearRemountError(repositoryId);
-      // 没找到**不是错误**（`REPOSITORY.md` §2.3），但要给用户一句可读的话
+      // 没找到**不是错误**（`memory/FUNCTION-REPOSITORY.md` §2.3），但要给用户一句可读的话
       if (!view.online) {
         setRemountError(repositoryId, {
           kind: "not_found",

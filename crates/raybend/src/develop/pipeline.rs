@@ -17,7 +17,7 @@
 //!
 //! ## 为什么色度（饱和/自然饱和）放在显示参考域
 //!
-//! 调性与白平衡在**线性域**做（scene-referred，暗部拉伸不会出色带，这是 `FUTURE.md` D1 的要求）；
+//! 调性与白平衡在**线性域**做（scene-referred，暗部拉伸不会出色带，这是 `memory/FUTURE.md` D1 的要求）；
 //! 但色度缩放放在显示参考域，理由有两条，都很实际：
 //!
 //! 1. **整条链只剩一层 LUT**（线性域那半条 + 显示变换 + 曲线可以合成 3×4096 张表）——
@@ -80,7 +80,7 @@ impl LinearImage {
     /// 8bit **sRGB 编码**的像素 → 线性（JPEG / RAW 内嵌预览那条路）。
     ///
     /// 这一步是有损的（8bit 显示数据里暗部本来就没有更多信息），
-    /// 所以这条路的输入只能算「准线性」—— 实施记录与 `FUTURE.md` C7 都记着这件事。
+    /// 所以这条路的输入只能算「准线性」—— 实施记录与 `memory/FUTURE.md` C7 都记着这件事。
     #[must_use]
     pub fn from_srgb8(width: u32, height: u32, rgb8: &[u8]) -> Option<Self> {
         let expected = (width as usize)

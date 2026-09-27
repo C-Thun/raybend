@@ -1,6 +1,6 @@
 //! 数据底座：本地 SQLite 库的打开、迁移、备份与写并发。
 //!
-//! 见 `AGENTS.md` §6.4（存储架构）、§7.1–§7.3，以及 `REPOSITORY.md`（库与导入规格）。
+//! 见 `AGENTS.md` §6.4（存储架构）、§7.1–§7.3，以及 `memory/FUNCTION-REPOSITORY.md`（库与导入规格）。
 //!
 //! 本模块只依赖 `rusqlite` 与标准库：**不认识 Tauri、不认识渲染**。
 //! 路径与目录由调用方注入（`src-tauri` 从 Tauri 的 path API 取到后传进来）。
@@ -19,11 +19,11 @@
 //! | [`ids`] | 库 ID：可排序的定长 base62（时间 + 随机） |
 //! | [`repository`] | 库身份、元信息、`app.db` 登记与在线/离线解析 |
 //! | [`marking`] | 标记写入（评分/色标/喜欢/锁/标签）+ 撤销栈 |
-//! | [`flags`] | 旗标：内存态、跨库跨目录的临时工作集（`BROWSE.md` §3.2） |
-//! | [`delete`] | 删除：只到系统回收站，一级锁挡住（`BROWSE.md` §5.9） |
+//! | [`flags`] | 旗标：内存态、跨库跨目录的临时工作集（`memory/FUNCTION-BROWSE.md` §3.2） |
+//! | [`delete`] | 删除：只到系统回收站，一级锁挡住（`memory/FUNCTION-BROWSE.md` §5.9） |
 //! | [`query`] | 资产查询：范围 + 筛选 + 排序 + 分页（浏览网格的数据源） |
 //! | [`fts`] | 全文检索索引的维护（派生索引，过期即在查询前重建） |
-//! | [`tags`] | 标签：全局词典（`app.db`）+ 每库关联（`catalog.db`），`BROWSE.md` §7 |
+//! | [`tags`] | 标签：全局词典（`app.db`）+ 每库关联（`catalog.db`），`memory/FUNCTION-BROWSE.md` §7 |
 //! | [`assets`] | 资产与文件记录的读写：差分计划的落库、配对、缺失标记 |
 //! | [`backfill`] | 老库的元数据回填（`taken_at IS NULL` 的资产重读 EXIF） |
 //! | [`recent`] | 最近导入过的目录（`app.db`）——「最近」列表的存取与裁剪 |

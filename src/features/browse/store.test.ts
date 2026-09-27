@@ -562,7 +562,7 @@ test("换范围（目录）也会清选择", async () => {
 
 // ─────────────────────────── 选择 ───────────────────────────
 
-test("点击 / Ctrl / Shift 三种模式按 BROWSE.md 的语义走", async () => {
+test("点击 / Ctrl / Shift 三种模式按 memory/FUNCTION-BROWSE.md 的语义走", async () => {
   const { api } = fakeApi(5);
   const store = createBrowseStore({ api });
   open(store);

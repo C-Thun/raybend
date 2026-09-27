@@ -24,7 +24,7 @@ export interface ToolsBarProps {
    *
    * 为什么用插槽而不是往 `TOOL_CATALOG` 里塞：那张表描述的是「外壳认识的简单按钮」，
    * 而浏览的标记控件带**三态**、编辑的三个工具带**互斥状态**，都要读各自模块的状态 ——
-   * 那是模块自己的事（`ARCHITECTURE.md` §3 的状态归属）。外壳只负责**条带与三段布局**。
+   * 那是模块自己的事（`memory/ARCHITECTURE.md` §3 的状态归属）。外壳只负责**条带与三段布局**。
    */
   children?: JSX.Element;
   /*

@@ -2,7 +2,7 @@
 //!
 //! ## 为什么需要它
 //!
-//! 「同一张照片的 JPG 与 RAW 是同一时刻」这件事是确定的（`REPOSITORY.md` §4.1 的配对规则
+//! 「同一张照片的 JPG 与 RAW 是同一时刻」这件事是确定的（`memory/FUNCTION-REPOSITORY.md` §4.1 的配对规则
 //! 就是照这个来的）。但**相机不一定给 RAW 写 `DateTimeOriginal`** —— 这时 RAW 会退到
 //! 文件名 / mtime 兜底，而 mtime 是**拷贝时间**，常常和拍摄时间差几小时。
 //!
@@ -14,7 +14,7 @@
 //! * 配对键 = **目录**（折叠：小写、分隔符归一、去掉结尾斜杠）+ **主名**（`kind::stem_folded`，
 //!   即 NFC + 小写 + 去扩展名）；
 //! * 目录末尾若是 `_RAW` 就**去掉那一级** —— 库里 RAW 落在同级的 `_RAW/` 下
-//!   （`REPOSITORY.md` §4.1），去掉之后与位图同键；
+//!   （`memory/FUNCTION-REPOSITORY.md` §4.1），去掉之后与位图同键；
 //! * 只有 `is_raw && taken_at.is_none()` 的条目会被填；
 //! * 同一键位上有多张位图时取**最早**的那个时间（顺序确定，不依赖遍历顺序）；
 //! * 同键没有位图、或位图自己也没时间 → 不动。
@@ -148,7 +148,7 @@ mod tests {
 
     #[test]
     fn library_raw_under_raw_subdir_pairs_with_its_bitmap() {
-        // 库内布局：photos/<day>/MYP1.JPG + photos/<day>/_RAW/MYP1.RW2（REPOSITORY.md §4.1）
+        // 库内布局：photos/<day>/MYP1.JPG + photos/<day>/_RAW/MYP1.RW2（memory/FUNCTION-REPOSITORY.md §4.1）
         let mut list = pairs(&[
             ("/lib/photos/2026-09-13/MYP1000035.JPG", false, Some(7000)),
             ("/lib/photos/2026-09-13/_RAW/MYP1000035.RW2", true, None),

@@ -1,5 +1,5 @@
 /**
- * 编辑参数表（`design/editor.md` §3.7 + `DESIGN.md` §14.10）。
+ * 编辑参数表（`design/editor.md` §3.7 + `memory/DESIGN.md` §14.10）。
  *
  * # 数字的真相在 `crates/raybend/assets/develop-params.json`
  *
@@ -48,7 +48,7 @@ export interface ParamSpec {
   max: number;
   step: number;
   /**
-   * 填充从哪长（`DESIGN.md` §14.10）：
+   * 填充从哪长（`memory/DESIGN.md` §14.10）：
    * `center` = 双极参数（曝光 / 反差 / 色温…），`start` = 单极参数（降噪 / 锐化）。
    * 与「把手在哪」无关 —— 把手永远只由当前值决定。
    */
@@ -167,7 +167,7 @@ export const PARAMS: readonly ParamSpec[] = CONTRACT.params.map((param) => {
     origin: parseOrigin(param.id, param.origin),
     wired: param.wired,
     baseline: parseBaseline(param.id, param.baseline),
-    // 极值一律显示（`DESIGN.md` §14.10 的槽位规则由组件保证）
+    // 极值一律显示（`memory/DESIGN.md` §14.10 的槽位规则由组件保证）
     limits: true,
     decimals: decoration.decimals,
     ...(decoration.unit === undefined ? {} : { unit: decoration.unit }),

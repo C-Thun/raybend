@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 「界面文案零硬编码」的落地守门（`DESIGN.md` §11.1 规则 1）。
+ * 「界面文案零硬编码」的落地守门（`memory/DESIGN.md` §11.1 规则 1）。
  *
  * 为什么需要脚本：语言包本身有类型与 `locale-parity.test.ts` 双重保证 ——
  * 两个包**永远同步、永远不为空**。真正会漏的是**根本没进包的那句话**：
@@ -114,7 +114,7 @@ for (const file of walk(SRC)) {
 }
 
 if (violations.length > 0) {
-  console.error(`✗ 发现 ${violations.length} 处硬编码中文文案（DESIGN.md §11.1）\n`);
+  console.error(`✗ 发现 ${violations.length} 处硬编码中文文案（memory/DESIGN.md §11.1）\n`);
   for (const { at, snippet } of violations) {
     console.error(`  ${at}`);
     console.error(`      ${snippet.slice(0, 100)}`);

@@ -53,7 +53,7 @@
 - import 与 browse 都能：三态切换（Tab）、进对比（多选 ≥2）、Esc 返回；
 - 两边的 tiles 排版一致（同一份 `lib/tile-flow.ts` + 同一个 `Tile`）；
 - `pnpm test` / `cargo test` / `check:browse` / `smoke:ui` 全绿；
-- `BROWSE.md` §5.4 与 `DESIGN.md` 的口径同步更新；
+- `memory/FUNCTION-BROWSE.md` §5.4 与 `memory/DESIGN.md` 的口径同步更新；
 - 一份 `implementations/` 记录（含「import tiles 未被改变」的证据）。
 
 ---

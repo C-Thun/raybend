@@ -1,209 +1,77 @@
 # raybend — 项目指南（AGENTS.md）
 
-> 本文件是 raybend 的**项目级 AGENTS.md**：核心信息、硬纪律、目录说明、记忆/文档索引，以及调研阶段挖出的**必须处理的关键问题**。
-> 全局约定见 `~/.pi/agent/AGENTS.md`（包管理、URL 书写、plannotator 流程等），本文件不重复。
+> 本文件是 raybend 的**项目级 AGENTS.md**，只保留**每次会话都需要**的纪律、命令与索引；
+> 细节记忆按主题放在 `memory/`（§10 有完整索引与记忆体规范），用到再读。
+> 全局约定（包管理、URL 书写、称呼等）见 `~/.pi/agent/AGENTS.md`，本文件不重复。
 >
-> 建立时间：2026-09-15 00:18:03 CST
-> 相关文档：近中期计划见 `PLAN.md`，远期方向见 `FUTURE.md`，**视觉与配色体系见 `DESIGN.md`**，
-> **定期评审与方向修正见 `REVIEW.md`**（每轮 review 的结论账本，纪律见 §5.6）。
+> **需要人类做的事**（装工具链、授权、提供样本、目视确认、真机 E2E 等）**直接在对话里说**，
+> 不维护「待办清单」文件；需要留痕的写进 `implementations/` 记录或相应文档，
+> 人类做完之后 Agent 要**自己验证**并把结论记进同一处。
+>
+> 建立时间：2026-09-15 ｜ 最近重构：2026-09-27（记忆体分层：本文件瘦身，细节迁入 `memory/`）
 
-<!-- -->
-
-> **需要人类做的事**（装工具链、授权、提供样本、目视确认、真机 E2E 等）**直接在对话里说** ——
-> 不用维护「待办清单」文件。需要留痕的写进 `implementations/` 记录或相应文档（`PLAN.md` / `FUTURE.md` / `REPO
-SITORY.md` 等）；
-> 人类做完之后 Agent 要**自己验证**，并把结论记进同一处。
-> （2026-09-19 人类定：废除原先的 `ASSISTANCE.md` 机制 —— 那份清单既没人用也不好用。）
 ---
 
 ## 1. 项目定位
 
 raybend（中文名**「光伴」**，产品名 `RayBend`）是一个**相片管理软件**，目标是成为 ON1 Photo RAW 这类商业软件的优秀开源替代。
 
-**命名规则（用户 2026-09-17 定）**：开源/技术侧一律小写 `raybend`（仓库名、路径、URL、存储键、包名）；
+**命名规则**：开源/技术侧一律小写 `raybend`（仓库名、路径、URL、存储键、包名）；
 **对外产品宣称英文一律 `RayBend`**（界面文案、官网、安装包与窗口标题、分享卡片）；中文名「光伴」。
-两层不要互相渗透：官网页面上不出现小写 `raybend`（域名与仓库链接除外，那是 URL）。
+两层不互相渗透：官网页面上不出现小写 `raybend`（域名与仓库链接除外，那是 URL）。
 
-- **主战场**：相片管理全流程 —— 导入 → 浏览 → 评级/打标 → 筛选/搜索 → 集合整理 → 导出。
-- **编辑已进入第一阶段主线**（2026-09-21 重排）：M3 = GPU 显影工作台，同一界面对 RAW/JPG 做无损（非破坏性）编辑，
-  含常规调整、CUBE LUT、SOOC/issue；路线与波次见 `PLAN.md`，技术方向见 `FUTURE.md` D 节。
-- **平台**：Windows 优先（Win10/11 近两年版本即可，不考虑 Win7/8）；macOS / Linux 属远期。
+- **主战场**：相片管理全流程——导入 → 浏览 → 评级/打标 → 筛选/搜索 → 集合整理 → 导出。
+- **编辑已是第一阶段主线**（2026-09-21 重排）：M3 = GPU 显影工作台，同一界面对 RAW/JPG 做无损编辑，
+  含常规调整、CUBE LUT、SOOC/issue；路线见 `memory/PLAN.md`，技术方向见 `memory/FUTURE.md` D 节。
+- **平台**：Windows 优先（Win10/11）；macOS / Linux 属远期。
 - **相机支持策略**：不追求最新机型即时适配，跟得上主流即可。
-- **许可**：**AGPL-3.0-only**（见 `LICENSE`）。选它的原因很实际：本项目主体是本地桌面应用，AGPL 的额外网络条款只在「对外提供网络服务」时才咬合；而它带来的好处是 rawler（LGPL-2.1-only）、darktable / RawTherapee（GPL-3.0）与 RapidRAW（AGPL-3.0）的代码都可以合法复用。项目以开源方式发布，不计划闭源收费。
-- **设计立场**：要有行业软件的质感，但不做 20 年前那种拥挤界面；同时主动吸收 Web 应用的易用性与高可视化特性。不做 Affinity 的克隆，也不是 Web 应用的桌面壳。
+- **许可**：**AGPL-3.0-only**（见根下 `LICENSE`）。本项目主体是本地桌面应用，AGPL 的网络条款只在「对外提供网络服务」时咬合；它带来的好处是 rawler（LGPL-2.1-only）、darktable / RawTherapee（GPL-3.0）与 RapidRAW（AGPL-3.0）的代码都可合法复用。项目以开源方式发布，不计划闭源收费。
+- **设计立场**：要有行业软件的质感，但不做 20 年前那种拥挤界面；主动吸收 Web 应用的易用性与高可视化特性。不做 Affinity 的克隆，也不是 Web 应用的桌面壳。
 
 ---
 
 ## 2. 硬约束（不可违反）
 
-1. **发布与推送必须由人类执行**：`git push`、打 tag、生成/上传发布物、上传到任何包注册表（npm/商店/发布页），全部由人操作。Agent 不得代劳。
-2. **commit 可以由 Agent 自行管理**：实现完成后可自行 `git commit`。提交信息用中文，格式 `<type>: <subject>`（如 `feat: 实现相片仓注册表`）。
-   - 例外：处于 plannotator review 流程时，遵守全局规则 —— 审查期间**禁止** commit。
-3. **工具链只有 pnpm + cargo**：前端与脚本用 **pnpm**，Rust 用 **cargo**。禁止引入 npm / yarn / bun 或混用锁文件——仓库只允许 `pnpm-lock.yaml` 与 `Cargo.lock`。（`npm install -g` 仅用于本机全局 CLI 工具，不用于本项目依赖。）
+1. **发布与推送必须由人类执行**：`git push`、打 tag、生成/上传发布物、上传到任何包注册表，全部由人操作。
+2. **commit 可由 Agent 自行管理**：提交信息用中文，格式 `<type>: <subject>`。
+   例外：处于 plannotator review 流程时**禁止** commit（审查的是未提交改动）。
+3. **工具链只有 pnpm + cargo**：前端与脚本用 pnpm，Rust 用 cargo。禁止 npm / yarn / bun 或混用锁文件——仓库只允许 `pnpm-lock.yaml` 与 `Cargo.lock`。（`npm install -g` 仅限本机全局 CLI 工具。）
 4. **前端不写图像算法**：像素、色彩空间、视口变换、渲染管线全部属于 Rust。前端只负责交互状态、矢量覆盖层与 UI。
-5. **不引入 SolidStart**（桌面应用无 SSR 需求，SolidStart v2 面向 Solid v1，与 Solid 2 不配套）。
-6. **Pencil 设计纪律**：所有界面设计用 Pencil MCP 绘制 `.pen` 文件，存放于 `design/`；每个 `.pen` 必须配一个**同名 `.md`** 说明界面结构、状态与交互。
-7. **实施记录纪律**：每次编写/改动完成后，在 `implementations/` 下写一个 `.md` 记录，文件名以 `YYYY-MM-DD_` 开头后接简短命名；**文件内容开头必须写明本次改动的具体完成时间（精确到秒）**。
-8. **测试分工：Agent 只做冒烟，E2E 归人类**：
-   - **Agent 只做冒烟测试**：编译通过、命令能跑通、进程能启动、日志无报错、单元测试通过 —— 到此为止。
-   - **真正的 E2E 测试交给人类执行**：涉及 GUI 交互与视觉正确性、多显示器与 DPI、真实照片库、性能体感、色彩正确性这类验证，一律由人类在真实环境确认，Agent 不得声称它已验证过。
-   - **E2E 若要自动化**：除非用户特别指定要实现，否则不由 Agent 临时手跑一遍完事；需要时写成**可重复执行的自动化测试代码**。
-   - 推而广之：**“进程起来了”不等于“功能对了”**。Agent 报告中必须清楚区分「已验证（冒烟）」与「未经人类验证」两部分。
-9. 新增顶层框架或大型依赖前先在会话中讨论，候选方案统一登记到 `FUTURE.md`。
-10. **单元测试必须齐备**——交付任一模块时，必须同时交付与之匹配的单元测试：
-    - **覆盖边界，不只测正常路径**：空输入 / 单元素 / 上下限 / 非法值 / Unicode 与中文 / 超长与非法路径 / 大小写与规范化差异 / 并发竞争 / 溢出与截断……按模块性质取用。
-    - **考虑执行效率**：`cargo test` 必须保持在秒级。真实照片、大文件、十万行数据这类重负载要降为小规模合成数据，或标记为 `#[ignore]` 的手动基准，不要拖慢日常测试。
-    - 与第 8 条不冲突：**单元测试属于 Agent 的职责**（冒烟的一部分），E2E 才归人类。
-11. **遇到难题：先绕过、记录、继续走；攒到绕不过去再统一报告**（用户 2026-09-16 定）。
-    碰到实在不好解决的问题时**立刻评估**一次：这是不是已经触到能力边界？
-    - **能绕过** → 绕过它，把「问题 + 绕法 + 风险」写进 `implementations/` 记录、
-      **在对话里说一声**，然后**继续往前走**。不要在单个问题上原地磨。
-    - **绕不过去**（继续走会踩空，或者会把已经做完的部分污染掉）→ 跳过继续做其他能做的部分，直到没有任何任务能即时开工时，汇总报告找用户帮忙，**此时不要自己硬试**
-    - 判据不是「难不难」，而是**「绕过之后剩下的事还成不成立」**。
-    - 例：某条命令在 Windows 上偶发失败但重试能过 → 绕过并记录；
-      某个依赖根本没有 Windows 实现 → 停下来问。
-    目的：**进度只能往前走**。把一堆小问题攒成一次汇报，比每碰到一个就停一次有效得多；
-    但也不能攒着不说 —— 「绕不过去」就是必须开口的那一刻。
-
-
-12. **复用优先于重复硬编码**（人类 2026-09-19 明确、且从项目开头反复强调）：
-    - **同一个能力只允许有一套实现**：拖拽把手、tile 排版与取图、目录树行模型、锚点规则……
-      发现第二份就地收敛（抽象、下沉到 `lib/` 或 `components/ui/`，然后让两边都用它）。
-    - 动手前**先找现成的**：`components/ui/`、`lib/`、以及同类工作区里已经跑通的那一份。
-      本仓已经因此踩过三次坑：拖拽把手三套实现（其中 Ark 那套卡死）、tile 竖图只在导入侧做了、
-      锚点规则两处各写一份。
-    - **Pencil 画稿只是参考**（大致放什么、什么风格），不是逐像素铁律；
-      实现时优先去现代组件库/已有组件里找能复用的东西，不要照着画稿重新硬编码一套。
-    - 重构是**日常动作**，不是专门的批次：改到哪儿顺手收敛到哪儿（并留下记录）。
-
-    **动手之前的第一件事 = 找现成的**（人类 2026-09-19 强调，别再犯）：
-    接到任务不要先写代码，先按这个顺序问一遍自己 ——
-
-      1. **仓里有没有已经在做同一件事的东西？** 同类工作区里那一份、`components/ui/`、`lib/`；
-         找到就先读它的源码（**读，不是猜**），把它的显示/隐藏/边界规则读明白。
-      2. **有 → 改它、把它一般化**（加参数、抽契约），让两边都用这一份。
-         **绝不允许写第二份**；也**不允许**「同一个东西在同一处用两种形态表达」
-         （例：RAW 角标已经有一个，就不许在文件名条上再造一个 `RAW` 文本）。
-      3. **没有 → 才新建**，并且在 `implementations/` 里写清「为什么现有的那份扩不了」。
-      4. 新建之前再想一层：**这件事能不能变成「一份实现 + 一层数据适配」**？
-         两侧数据形状不同（一次性拿到 vs 按页取、有洞、置换）不是写两份的理由 ——
-         差异属于**适配层**（数据源契约），不属于视图层。
-
-    - 判据（人类原话）：**「同一个东西两个组件 / 两种表达」本身就是 bug**，
-      比功能没做对更严重 —— 它保证以后每次改动都要改两遍，第二遍必然漏。
-    - 反面教材（本仓真实发生过的）：`BrowseGrid` 与 `PhotoGrid` 两份网格 + 两份行模型 +
-      两份时间分组（`browse/rows.ts::browseGroups` 与 `lib/time-group.ts`）；
-      RAW 角标一份在 `Tile`、我又在浏览侧文件名条造了第二份。
-
-13. **本地应用实时性优先，丢掉 web 式缓存思维**（人类 2026-09-19 明确）：
-    - 这是**桌面程序**，不是网页。目录内容、文件系统状态会**在程序外面变化**，
-      「载入一遍就不动、等用户刷新」是错的；正确的默认是**每次进入/展开/重读时重新读盘**。
-    - **多扫几遍硬盘不是问题**（本机磁盘，一次 readdir 是微秒级）；
-      真正要防的是「疯狂扫描」（同一秒内反复全盘扫描、无上限递归、大目录无分页）。
-      代价该花在「立刻看到真相」上，不该花在「省一次读盘」上。
-    - 判据：**先满足实时性，再考虑性能**。若两者冲突，把「多久算过期」写出来并让人类拍板，
-      不要默默按缓存优先做。
-    - 具体的「多扫一层」先例：`list_dirs` 会顺手探一层子目录（`has_children`），
-      因为「目录下没子目录却画展开箭头」误导人。
-
-14. **一轮清单要连续做完，不要做一两项就回来确认**（人类 2026-09-19 明确）：
-    - 人类一次给一批事项（todos）时，默认是「**一直做到没有可做的**」，
-      不要每做完一两项就停下等人点头。
-    - 停下来只有两种正当理由：① **真的需要人类协助**（**在对话里直接说**，不用写文件）；
-      ② 继续做会**踩空或污染已完成的部分**（§2.11 的「绕不过去」）。
-    - 确实要停时：**先把还能做的全做掉**，再把「剩下要做的 + 报告」**一次性**汇总给人，
-      而不是逐项请示。汇报时机 = 一个工作单元收口、或整批做完。
-    - 中间过程只写进 `implementations/`，不逐项要确认 —— 他是要看结果，不是要看进度条。
-
-15. **新增功能必须评估命令体系接入**（人类 2026-09-20 明确；2026-09-23 补强热键那一层）：
-    - 命令面板与快捷键设置不是原始产品规划的一部分，但 M2-W3 已经完成，**保留并复用**；
-    - 以后增加任何用户可触发的功能，都要明确检查它是否适合登记进统一命令注册表，进而出现在
-      **commands panel（`Ctrl+K`）、快捷键设置与标题栏菜单**中；不能再另写一套菜单动作或硬编码快捷键；
-    - ❗ **热键是这一步的必选项，不是事后审计**（人类 2026-09-23：「这个事要在做功能的时候自动
-      一起做掉，而不是做完了让我来打地鼠找漏洞」）：每条新命令必须在**同一次改动里**给出
-      **默认热键**（`defaultKey`）或者**明确留空**——留空也要写清理由（例：太常用会被误触、
-      与输入态冲突、等待后续批量规划）；
-      * 默认键一律写在 `features/commands/catalog.ts` 的命令条目上，**不在别处硬编码监听**；
-      * 选键前先过一遍冲突与保留规则（`lib/commands.ts::detectConflicts`、
-        `lib/key-chords.ts::RESERVED_CHORDS`）——保留键只有 `Alt+F4` /
-        `Ctrl+Alt+Delete` / `Ctrl+Shift+Esc`，F1–F12 由 `normalizeKey` 原生支持；
-      * 键位文案要走 `keyLabel` / `formatChord`（`F11` 这种多字符键要能正确显示）；
-    - 不是所有功能都必须变成命令（例如列表内部 roving focus、弹窗自己的确认/取消），但实施记录里
-      要写清“已接入”或“不适合接入及理由”，**接入的要连同热键决定一起写**。
-      判断基准是摄影师的实际工作流，不以“像 VS Code”作为目标。
-
-16. **数据库 schema 变化只走现有迁移框架**（人类 2026-09-20 重申）：
-    - 已有框架在 `crates/raybend/src/store/migration.rs` + `store/migrations/*.sql`：版本闸门、
-      `VACUUM INTO` 迁移前快照、逐条事务、完整性检查、Start/Done 通知与全窗口 `MigrationGate`；
-    - `app.db` / `catalog.db` / `thumbs.db` 新增或修改字段时，必须增加对应版本迁移并登记到该框架，
-      **禁止**启动时临时 `ALTER`、另造迁移通道、静默删库重建；
-    - localStorage 等设备级偏好也必须使用**版本化 key + 显式一次性迁移**（例如
-      `raybend.display.v1 → v2`），迁移逻辑与测试放在偏好自己的模块里。
-17. **Solid：包装组件透传 children —— `untrack` 必须写在「插入点」，一步错两头坏**（人类 2026-09-23 定：
-    「那个提示要并行说明，这两者的教训」）：
-
-    同一个手法有**两面**，2026-09-23 一天里各踩一次 —— 先踩 A 面，修 A 面时又踩 B 面：
-
-    - **A 面：不 `untrack`（原样写 `{props.children}`）**
-      → `{props.children}` 会被编译成 `insert(el, () => props.children)` —— 那是一个 **render effect**，
-      **不是一次性插入**；而 children 的 getter 每求值一次，里面的 `createComponent(...)` 就重跑一遍。
-      于是**「创建 children 期间被读到的任何信号」都成了「重建整棵子树」的开关**。
-      真凶实例：Ark 的 `SliderRoot` 用 `createSplitProps()` **同步**读走 `props.value`
-      （= tiles 的 `tileStep`）→ 拖动第一格值一变 → 整条状态栏重建 → 正在拖的 Ark Slider 实例
-      被换掉 → 「拖一格就断、焦点也丢」。
-    - **B 面：把 `untrack` 提到组件 body 里**（`const children = untrack(() => props.children)`）
-      → children 在本组件返回的 `<XxxContext.Provider>` **之前**就被造出来了，而 Solid 的
-      `useContext` 走的是**「创建时的 owner 链」** —— 子组件于是落在 Provider **外面**，
-      拿到 `undefined`。真凶实例：`TilesShell` 的 children（网格）被提前造 →
-      `PhotoGrid` 的 `useTilesFitRequest()` 拿到 `undefined` → **「横向适合窗口」按钮按了毫无反应**
-      （当时正治着拖动，于是变成「修好一个、按死另一个」）。
-    - **✅ 正解：在插入点就地 untrack** —— `{untrack(() => props.children)}`（就写在 JSX 里那一行）。
-      两个毛病同时消失：重建开关没了（A 面），children 仍在 Provider 的 owner 链里（B 面）。
-    - **规矩**：凡是把 children 透传出去的壳组件（`BarFrame` / `TilesShell` 这类），
-      **一律在插入点 untrack 一次**；**禁止**提到组件 body 里提前求值。
-    - **两面必须成对验**：只验一边就会出现「按下葫芦浮起瓢」。现成回归在
-      `scripts/check-browse-boot.mjs`：
-      * 「缩放滑块拖动」——断言**一路跟手** + 滑块/状态栏/网格**节点身份不变**（A 面）；
-      * 「横向适合窗口」——断言点击后**当前行真的铺满**（= 网格确实收到了 fit 请求，B 面）。
-      两条各自去掉对应的一半就立刻报红（已反面验证）。
-    - **判据不能只看「值变了没有」**：重建 + 拿新值重画一遍也会让第一步的值变（假绿）。
-      要断言**节点身份**（`el === 上次那个 el`），并把网格/列表一起钉住 ——
-      它们被重建就意味着滚动位置与选择丢了。
-    - **诊断手法**（下次别再从零查）：给 `Node.prototype.insertBefore/appendChild/replaceChild`
-      挂钩子，只记录「插入目标在关注的容器内」的那些调用并打印 `new Error().stack`；
-      再配合 `element === 上次那个` 的身份比对，就能定位到是哪一层被重建。
-      B 面更快：在子组件里读一次那个 context，把结果（`yes` / `no`）写到 DOM 属性上看一眼。
-
-18. **禁止全盘搜索：只在「确定路径」上检索，不要从根目录往下扫**（人类 2026-09-24 明确）。
-    - **不许**出现 `find /`、`grep -r /`、从 `/` 起步的递归 `ls` / `fd` 这类命令 ——
-      它们会把 WSL 之外的 `/mnt`（主系统）一起卷进来，慢、无意义，还挤占正常工作时间。
-    - 检索顺序：**先 cwd（本仓）**；仓外的第三方源码走**已知的确定路径**：
-      cargo 依赖在 `~/.cargo/registry/src/index.crates.io-*/<crate>-<version>/`、
-      pnpm 依赖在仓内 `node_modules/`、参考实现在 `/home/andares/repos/refers/<name>/`。
-      不确定路径时**先 `ls` 那个父目录**（一层），不要用全盘 find 去找。
-    - 唯一例外：`/mnt/c/...` 上的**构建产物**（如 `C:\rb-target\raybend\`）是明确路径，直接用。
+5. **不引入 SolidStart**（桌面应用无 SSR 需求；Start v2 面向 Solid v1，与 Solid 2 不配套）。
+6. **Pencil 设计纪律**：界面设计用 Pencil 画 `.pen` 存 `design/`，每个 `.pen` 配**同名 `.md`**（§5.1）。
+7. **实施记录纪律**：每次编写/改动完成后在 `implementations/` 写一份记录（§5.2）。
+8. **测试分工——Agent 只做冒烟，E2E 归人类**：编译通过、命令能跑、进程能起、日志无报错、单元测试通过，到此为止；GUI 交互与视觉正确性、多显示器与 DPI、真实照片库、性能体感、色彩正确性由人类在真实环境确认。**「进程起来了」≠「功能对了」**；报告必须区分「已验证（冒烟）」与「未经人类验证」。E2E 自动化须写成可重复执行的测试代码，不临时手跑。
+9. 新增顶层框架或大型依赖前先在会话中讨论，候选方案登记到 `memory/FUTURE.md`。
+10. **单元测试必须齐备**（交付模块必须同时交付测试）：覆盖边界（空输入/单元素/上下限/非法值/Unicode 与中文/超长路径/大小写规范化/并发竞争/溢出截断），`cargo test` 与 `pnpm test` 保持秒级；重负载降为小规模合成数据或 `#[ignore]` 手动基准。
+11. **遇到难题：先绕过、记录、继续走**。能绕过就把「问题 + 绕法 + 风险」写进 `implementations/` 并在对话里说一声；绕不过去（继续会踩空或污染已完成部分）就先做其它能做的，攒到没有可开工任务时汇总请求协助，不要自己硬试。判据是「绕过之后剩下的事还成不成立」，不是「难不难」。**进度只能往前走。**
+12. **复用优先于重复硬编码**——同一个能力只允许有一套实现；「同一个东西两个组件 / 两种表达」本身就是 bug。动手前先找现成的：① 仓里已有的（`components/ui/`、`lib/`、同类工作区那份）→ **读它的源码**（读，不是猜）；② 有 → 改它、一般化它，**绝不写第二份**；③ 没有 → 才新建，并在 `implementations/` 写清「为什么现有的扩不了」；④ 两侧数据形状不同属**适配层**，不是写两份的理由。Pencil 画稿只是参考，优先复用现代组件库。重构是日常动作：改到哪儿顺手收敛到哪儿。
+13. **本地应用实时性优先，丢掉 web 式缓存思维**：桌面程序外部的磁盘状态会变，「载入一遍不动」是错的；默认每次进入/展开/重读重新读盘（readdir 是微秒级）。要防的是「疯狂扫描」（同秒反复全盘扫描、无上限递归），不是多扫几遍。实时性与性能冲突时，把「多久算过期」写出来让人类拍板。
+14. **一轮清单要连续做完**：人类一次给一批事项 = 「一直做到没有可做的」；停下来只有两种正当理由——真的需要人类协助（直接说）、继续会踩空或污染已完成部分。中间过程只写 `implementations/`，不逐项请示（§5.5）。
+15. **新增功能必须评估命令体系接入**：用户可触发的功能要检查是否登记进统一命令注册表（`features/commands/catalog.ts`），进而出现在命令面板（`Ctrl+K`）、快捷键设置与标题栏菜单；❗**默认热键（`defaultKey`）或明确留空（写明理由）必须在同一次改动里给出**，不做事后审计。选键先过冲突与保留规则（`lib/commands.ts::detectConflicts`、`lib/key-chords.ts::RESERVED_CHORDS`）；键位文案走 `keyLabel` / `formatChord`。不是所有功能都必须变成命令，但实施记录要写清「已接入（含热键决定）」或「不接入及理由」。
+16. **数据库 schema 变化只走现有迁移框架**（`crates/raybend/src/store/migration.rs` + `store/migrations/*.sql`）：版本闸门、`VACUUM INTO` 迁移前快照、逐条事务、完整性检查。禁止启动时临时 `ALTER`、另造迁移通道、静默删库重建；localStorage 等设备级偏好用**版本化 key + 显式一次性迁移**。
+17. **Solid 壳组件透传 children：`untrack` 写在插入点**——`{untrack(() => props.children)}`（就写在 JSX 那一行）；**禁止**提到组件 body 里提前求值。A/B 两面的完整教训、判据与回归脚本见 `memory/ARCHITECTURE.md` §9。
+18. **禁止全盘搜索**：不许 `find /`、`grep -r /` 这类从根往下的扫描（会把 `/mnt` 一起卷进来）。先查本仓；第三方源码走确定路径：cargo 依赖在 `~/.cargo/registry/src/index.crates.io-*/`、pnpm 依赖在仓内 `node_modules/`、参考实现在 `/home/andares/repos/refers/<name>/`；不确定路径先 `ls` 父目录一层。
 
 ---
 
 ## 3. 版本基线（2026-09-15 核实）
 
-> ⚠️ **下表只描述 raybend 软件本体。** `website/`（官方站点）走的是**另一套完全不同的选型**
-> （Solid 2.0 线、Tailwind v4、Lucide、纯静态站），对照见 §4 的「`website/` 是官网」。
+> ⚠️ 下表只描述 raybend 软件本体；`website/`（官网）是**另一套选型**，见 §4 与 `website/AGENTS.md`。
 
 | 层 | 选型 | 当前版本 | 备注 |
 | --- | --- | --- | --- |
-| 外壳 | Tauri | `@tauri-apps/cli` 2.11.4（3.0 处于 alpha） | 分层为 3.0 迁移做准备，见 §6.2 |
-| 构建 | Vite | 8.x | RapidRAW 亦用 Vite 8 |
-| UI | Solid | **1.9.x（选定）**；`@solidjs/router` 1.0.0 | Solid 2.0 仍是 RC（2.0.0-rc.8），迁移登记 `FUTURE.md` |
-| 样式 | Tailwind CSS | 4.3.3 | CSS-first 配置 + CSS 变量令牌层 |
-| 组件原语 | **Ark UI**（`@ark-ui/solid`） | 5.39.x | 已定；实测对比见 §7.6 |
-| 图标 | **Tabler**（`@tabler/icons-solidjs`） | 3.46.0 | 已定；实测对比见 §7.7 |
-| RAW 解码 | rawler 0.8.0（LGPL-2.1-only） | 上游 dnglab | 可插拔后端，候选见 `FUTURE.md` |
-| 渲染 | wgpu + WGSL | 需锁定版本 | **版本锁定有前例教训**：RapidRAW 将 wgpu 降到 29.0 以规避 Apple 设备 P3 色偏 |
-| DB | SQLite（rusqlite + 迁移工具） | — | 见 §6.4 存储架构 |
+| 外壳 | Tauri | `@tauri-apps/cli` 2.11.4（3.0 alpha） | 分层为 3.0 迁移做准备（`memory/ARCHITECTURE.md` §6.2） |
+| 构建 | Vite | 8.x | |
+| UI | Solid | **1.9.x**；`@solidjs/router` 1.0.0 | Solid 2 仍 RC，迁移登记 `memory/FUTURE.md` |
+| 样式 | Tailwind CSS | 4.3.3 | CSS-first + CSS 变量令牌层 |
+| 组件原语 | Ark UI | 5.39.x | 选型对比 `memory/ARCHITECTURE.md` §7.6 |
+| 图标 | Tabler | 3.46.0 | 选型对比 `memory/ARCHITECTURE.md` §7.7 |
+| RAW 解码 | rawler 0.8.0（LGPL-2.1-only） | 上游 dnglab | 可插拔后端（`memory/ARCHITECTURE.md` §6.3） |
+| 渲染 | wgpu + WGSL | 需锁定版本 | RapidRAW 曾降到 29.0 规避 Apple P3 色偏 |
+| DB | SQLite（rusqlite + 迁移框架） | — | `memory/ARCHITECTURE.md` §6.4 |
 | 色彩 | lcms2（预留，后期接入） | — | 第一阶段不做色彩管理 |
-| 类型桥 | specta / tauri-specta | — | Rust 类型 → TS 类型，避免手写漂移 |
-| Rust 工具链 | **1.98.1**（`rust-toolchain.toml` 锁定，不改全局默认） | rawler 要 1.89，Tauri 3 要 1.95 | 全局默认仍是用户自己的版本，仓库内自动切换 |
+| 类型桥 | specta / tauri-specta | — | Rust 类型 → TS 类型 |
+| Rust 工具链 | **1.98.1**（`rust-toolchain.toml` 锁定） | | 不改全局默认 |
 
 ---
 
@@ -211,58 +79,36 @@ raybend（中文名**「光伴」**，产品名 `RayBend`）是一个**相片管
 
 ```text
 raybend/
-├── AGENTS.md                  # 本文件：核心信息与纪律
-├── DESIGN.md                  # 视觉与配色体系（唯一事实来源）
-├── PLAN.md                    # 近中期计划：Milestone（阶段）→ Wave（波次）
-├── FUTURE.md                  # 远期方向登记册
-├── REVIEW.md                  # 定期评审与方向修正：每轮 review 的判断、取舍与去向（§5.6）
-├── THIRD-PARTY-NOTICES.md     # 第三方许可登记
-├── LICENSE                    # AGPL-3.0-only
-├── README.md
-├── Cargo.toml                 # [workspace]；profile 也必须在这里
-├── rust-toolchain.toml        # 锁定 Rust 1.98.1
-├── package.json / pnpm-lock.yaml / vite.config.ts / index.html
-├── specs/                     # 单工作单元的详细计划/规格（specs/M1-5.md；一次一个，见 §5.4）
-│                              # ⚠️ 本目录原名 `plans/`，2026-09-26 人类改名。详见 §5.4
-├── design/                    # Pencil 设计稿：xxx.pen + xxx.md（同名）
-├── implementations/           # 实施记录：YYYY-MM-DD_<简述>.md（文件内首行写精确时间）
+├── AGENTS.md                  # 本文件：每次会话的纪律核心与索引
+├── README.md / README.zh-CN.md # 对外说明（给用户/访客）
+├── LICENSE                    # AGPL-3.0 原文（留在根下：GitHub/SPDX 识别）
+├── THIRD-PARTY-NOTICES.md     # 第三方许可登记（根下）
+├── memory/                    # ★ 记忆库（文件主名全部大写）
+│   ├── PLAN.md                # 近期计划（未完成的部分）
+│   ├── FINISHED.md            # 已完成部分：摘要 + 证据指针 + 历史附录
+│   ├── FUTURE.md              # 远期方向登记册
+│   ├── ARCHITECTURE.md        # 架构与工程基线（分层/版本/架构决定/调研/构建排障）
+│   ├── DESIGN.md              # 视觉与配色体系（唯一事实来源）
+│   ├── REVIEW.md              # 定期评审与方向修正的结论账本
+│   └── FUNCTION-<模块>.md     # 模块功能记忆（BROWSE / IMAGING / REPOSITORY，可按需增加）
+├── specs/                     # 设计规范：具体需求的总结文档（文件名小写，如 m4-w1.md）
+├── design/                    # 设计稿：xxx.pen + 同名 xxx.md 成对
+├── implementations/           # 实施报告：YYYY-MM-DD_<简述>.md（首行精确到秒）
+├── docs/                      # 给用户/开发者看的信息类文档（指南、手册、发布说明）
+├── legal/                     # 协议原文与许可数据（第三方许可文本、overrides）
 ├── src/                       # 前端（Solid + Tailwind）
-├── src-tauri/                 # Tauri 外壳（窗口 / 命令 / IPC 边界），package.name = "raybend-desktop"
-│   ├── tauri.conf.json        # productName = "RayBend"
-│   └── src/{main.rs, lib.rs}
-├── website/                   # ⚠️ 官方站点（**独立技术栈**，见下方「`website/` 是官网」）
-└── crates/
-    └── raybend/               # 核心库（package.name = "raybend"，不依赖 Tauri）
-        └── src/{lib.rs, error.rs, media/, index/, raw/, thumbnail/, render/}
+├── src-tauri/                 # Tauri 外壳（package.name = "raybend-desktop"）
+├── crates/raybend/            # 核心库（不依赖 tauri）
+├── website/                   # 官网（独立技术栈，见 website/AGENTS.md）
+└── prompts/                   # 功能口述原文（.pd，模块功能意图的原始输入）
 ```
 
-`crates/raybend-ipc`（IPC 契约与 specta 生成）在 M1 出现真实契约时再拆，不提前建空壳。
+**分层原则**：`src-tauri` 只做「窗口 + WebView + 命令转发」薄壳，业务逻辑全部在 `crates/` 内且**不依赖 tauri**（为 Tauri 3 迁移与 CLI/无头模式留路）。前端分层与依赖方向见 `memory/ARCHITECTURE.md` §0–§4。
 
-### `website/` 是官网，不是应用本体（**不要弄错**）
+### `website/` 是官网，不是应用本体
 
-**`website/` 是本项目的官方站点**（官网）源码；**应用本体**是上面的 `src/` + `src-tauri/` + `crates/`。
-两者**技术栈不同、依赖各自独立、构建与发布流程也不同**：
-
-| 维度 | 应用本体 | 官网（`website/`） |
-| --- | --- | --- |
-| 框架 | SolidJS **1.9.x** + `@solidjs/router` 1.x | **SolidStart 2.0 + SolidJS 2.0**（`@solidjs/vite-plugin` 的 start 模式 + `filesystem-routing` + `@solidjs/router` 2.x） |
-| 样式 | Tailwind CSS 4.3 + CSS 变量令牌层 | Tailwind CSS v4（CSS-first，**没有** `tailwind.config.js`） |
-| 组件原语 / 图标 | Ark UI + **Tabler** | 不用组件原语库；图标用 **Lucide**（`lucide-solid`） |
-| 形态 | Tauri 2 桌面应用（Windows 优先） | **纯静态站点**，与 Tauri 无关 |
-| 发布 | 人类打安装包（NSIS / MSI） | **GitHub Actions 构建 → 发布到 GitHub Pages**（GitHub 的 pages 服务） |
-
-- **依赖各自独立**：官网有自己的 `package.json` / `pnpm-lock.yaml` / `pnpm-workspace.yaml` / `node_modules`，
-  **不在本仓的 pnpm 关系内** —— 根目录 `pnpm install` 不会装上它，改官网要在 `website/` 里单独跑命令。
-- **本文件其余部分（§3 版本基线、§5 纪律、§6 架构决定、§7 调研结论）默认只约束应用本体**，
-  不要把本体的选型或纪律硬套到官网（官网不用 Ark UI / Tabler，也不是 Tauri 应用）。
-- 官网编译产物是 `website/dist/client` 的**纯静态文件**，**不进** `pnpm release` / Tauri 发版流程；
-  它的构建与发布由 **`.github/workflows/website.yml`** 负责（push `master` / 正式版 release / 手动触发 →
-  GitHub Pages），一次性配置与自定义域名步骤见 `website/AGENTS.md` §5。
-- 官网的细则（选型版本、目录约定、命令、部署、Solid 2 反应式纪律）见 **`website/AGENTS.md`**。
-
-**分层原则**：`src-tauri` 只做「窗口 + WebView + 命令转发」的薄壳，业务逻辑全部在 `crates/` 内，且**业务 crate 不依赖 tauri**。这是为了 Tauri 3.0 迁移（见 §6.2）与未来做 CLI/无头模式时不需要重写。
-
-`crates/raybend` 内的模块按职责划分，后续可能拆分为独立 crate（如 `raybend-raw`、`raybend-cache`、`raybend-jobs`），拆分时机由 PLAN 的里程碑决定。
+独立技术栈（SolidStart 2.0 + Solid 2.0 + Tailwind v4 + Lucide，纯静态站）、独立依赖、
+GitHub Actions → Pages 发布，**不进** `pnpm release` 流程。细则见 `website/AGENTS.md`。
 
 ---
 
@@ -270,691 +116,238 @@ raybend/
 
 ### 5.1 设计纪律（`design/`）
 
-- 命名：`design/<模块>-<视图>.pen` 与 `design/<模块>-<视图>.md` 成对存在，**文件名必须一致**。
-- `.md` 内容至少包含：视图用途、区域划分、每个区域包含的控件、状态（默认/hover/激活/禁用/空态/加载态）、交互与快捷键、与其它视图的跳转关系。
-- 设计稿先行：界面实现前先出 `.pen`，实现过程中如需偏离设计，先改 `.pen` 再改代码。
+- 命名：`design/<模块>-<视图>.pen` 与同名 `.md` 成对；`.md` 至少含视图用途、区域划分、控件、状态（默认/hover/激活/禁用/空态/加载态）、交互与快捷键、与其它视图的跳转关系。
+- **设计稿先行**：界面实现前先出 `.pen`，人类定案后才写代码；实现中要偏离设计，先改 `.pen` 再改代码。
 
 ### 5.2 实施记录纪律（`implementations/`）
 
-- 命名：`implementations/YYYY-MM-DD_<简短英文或中文描述>.md`，例如 `2026-09-16_catalog-schema-init.md`。
-- 内容开头必须写明确切的完成时间，精确到秒，例如：
+- 命名 `implementations/YYYY-MM-DD_<简短描述>.md`；内容开头必须写明确切完成时间（精确到秒）。
+- 正文至少含：改动范围、涉及文件、关键决策与理由、验证方式（跑了什么命令/看到什么结果）、遗留问题。
+- 一天多次改动写多个文件，不堆叠进同一文件。
 
-  ```text
-  # catalog schema 初始化
-  完成时间：2026-09-16 21:34:07 CST
-  ```
-
-- 正文至少包含：本次改动的范围、涉及文件、关键决策与理由、验证方式（跑了什么命令/看到什么结果）、遗留问题。
-- 一天内多次改动写多个文件；不要追加到同一个文件里堆叠。
-
-### 5.3 构建与运行命令（已实测，2026-09-15）
+### 5.3 构建与质量门
 
 ```bash
 # —— WSL 侧（日常开发）——
 pnpm install
-pnpm tauri dev            # Linux/webkit2gtk 版窗口（经 WSLg 显示）
-cargo check --workspace   # Rust 侧快速检查（WSL 侧 target/）
+pnpm tauri dev            # Linux/webkit2gtk 窗口（WSLg 显示）
+cargo check --workspace
 
-# —— 前端质量门（改完就跑这几条；CI 尚未建立，先靠习惯）——
-pnpm typecheck            # 类型检查
-pnpm test                 # 单元测试（node --test，零依赖，应当保持在秒级）
-pnpm lint:colors          # 色值只允许出现在 tokens.css
-pnpm lint:arch            # 分层依赖方向（ARCHITECTURE.md §1/§2）
-pnpm lint:i18n            # 界面文案只允许出现在语言包（DESIGN.md §11.1）
-pnpm build                # 生产构建
+# —— 前端质量门（改完就跑）——
+pnpm typecheck && pnpm test
+pnpm lint:colors && pnpm lint:arch && pnpm lint:i18n
+pnpm build
 
-# —— 运行时冒烟（需另一个终端先 `pnpm dev`）——
-pnpm smoke:ui                  # 默认打应用外壳；也可传 URL
-pnpm smoke:ui http://localhost:1420/dev/kitchen-sink
+# —— 运行时冒烟（需另一终端 pnpm dev）——
+pnpm smoke:ui [url]
 
-# —— 发版（只准备产物；**不** commit / tag / push，那些由人做）——
-pnpm release test              # 自测包（版本号不变）
-pnpm release patch --dry-run   # 先看计划
-
-# —— Windows 侧（真实产品环境：WebView2）——
-# 前端在 WSL 构建，Windows 只跑 Rust，不需要在 Windows 装 Node。
-#
-# ⚠️ 日常就用 `pnpm debug:win`（脚本已封装下面这几条，含 dav1d 环境变量）——
-#    下面这份是**排障时对照用的原命令**。
-pnpm build                              # ① WSL 里产出 dist/
-export CARGO_TARGET_DIR='C:\rb-target\raybend'
-# ② dav1d（AVIF 解码）静态库位置 —— 没这几条 Windows 侧 cargo 会在 dav1d-sys 报「找不到 dav1d」。
-#    库由 scripts/build-dav1d-win.cmd 一次性构建（换机器/换盘才需要再跑），默认 C:\rb-deps\dav1d-1.5.0。
-export SYSTEM_DEPS_DAV1D_NO_PKG_CONFIG=1
-export SYSTEM_DEPS_DAV1D_LIB=dav1d
-export SYSTEM_DEPS_DAV1D_LINK=static
-export SYSTEM_DEPS_DAV1D_SEARCH_NATIVE='C:\rb-deps\dav1d-1.5.0\lib'
-export SYSTEM_DEPS_DAV1D_INCLUDE='C:\rb-deps\dav1d-1.5.0\include'
-export WSLENV='CARGO_TARGET_DIR:SYSTEM_DEPS_DAV1D_NO_PKG_CONFIG:SYSTEM_DEPS_DAV1D_LIB:SYSTEM_DEPS_DAV1D_LINK:SYSTEM_DEPS_DAV1D_SEARCH_NATIVE:SYSTEM_DEPS_DAV1D_INCLUDE'
-# ③ 跨 WSL→Windows 透传环境变量（cmd 的 set 经互操作不可靠）
-cmd.exe /c 'pushd \\wsl.localhost\Ubuntu-24.04\home\andares\repos\c-thun\raybend & cargo build -p raybend-desktop -p raybend --features custom-protocol'
-/mnt/c/rb-target/raybend/debug/raybend-desktop.exe   # ④ 运行（产物在 C: 本地）
+# —— Windows 侧（真实产品环境；日常用封装脚本）——
+pnpm debug:win             # build + 跨编译 + check:win + 运行（含 dav1d 环境）
+pnpm check:win             # 产物时间与内容核对（见下）
+pnpm release [patch|minor|major] --windows ...   # 发版准备；publish 由人类执行
 ```
 
-**十 条硬规矩（实测踩坑）：**
+**关键红线**（完整排障手册、十条硬规矩与事故案例在 `memory/ARCHITECTURE.md` §8）：
 
-1. **Windows 构建的产物必须落在 Windows 本地盘**（`C:\rb-target\...`）。9p 共享（`\\wsl.localhost`）不支持 rustc 增量编译的锁文件语义，会报 `os error -2147024895`，且会把 Windows 产物污染进 WSL 的 `target/`。
-2. **跨 WSL→Windows 传环境变量用 `WSLENV`**，不要用 cmd 的 `set VAR=x & ...`（`&` 前的空格会进值，且引号经互操作会丢）。
-3. 前端改动后必须重新 `pnpm build`（dist 是编译期嵌入的）；Rust 改动则只需重跑 cargo。
-4. **`--features custom-protocol` 必须加，否则 Windows 版会白屏/页面打不开**。
-5. **启动 Windows 的 exe 直接用 `/mnt/c/...` 路径跑，不要经 `cmd.exe /c "start \"标题\" 路径"`**。
-   实测：那种写法的引号会被 WSL→cmd 的互操作吃掉，结果弹出 **「Windows 找不到文件 '\RayBend\'」**——
-   参数被切碎，一个标题字串被当成了文件路径。直接跑最稳：
-
-   ```bash
-   (cd /mnt/c/rb-target/raybend/debug && ./raybend-desktop.exe >/dev/null 2>&1 &)
-   ```
-
-   （若确实需要用 `start`，就得接受这层引号嵌套很难写对；直接执行免去全部转义问题。）
-
-6. **`src-tauri/tauri.linux.conf.json` 是开发期便利，不是最终形态**（M1-4 加的）：
-   它保留系统标题栏，只为 WSLg 下还能拖边缩放（产品在 Windows 上是沉浸式 `decorations: false`）。
-   **发布 Linux 版之前必须处理**（`FUTURE.md` G11）。
-   另：Tauri 的平台配置合并是 **RFC 7396 merge patch** —— **数组会被整体替换**，
-   所以那个文件必须重复整份窗口配置，改主配置的窗口尺寸时别忘了同步它。
-
-7. **Windows 构建必须带上 `-p raybend`**（2026-09-24 教训）：`raybend-raw-worker` 是
-   `raybend` 包里的 **bin 目标**，只选 `raybend-desktop` 时**根本不会被构建** ——
-   于是「主程序是新的、worker 是旧的」，而旧 worker 不认新协议：
-   表现是**编辑器永远卡在「正在载入照片」**（那次卡了整整一轮人工测试）。
-   现在 `pnpm check:win` 会核对 worker 的**内容**（二进制里必须有当前 `PROTOCOL_TAG`）
-   与时间（不比 Rust 源码旧），过期直接报错。
-   另外主程序与 worker 之间还有**协议版本握手**：对不上会当面报错并给出重建命令，
-   不会再静默失败。
-8. **先 `pnpm build` 再构建 Windows，构建完必须 `pnpm check:win`**（2026-09-16 血的教训）：
-   `dist/` 是**编译期嵌进 exe** 的，改了前端不重建 dist，产物里就是旧界面 ——
-   而当时「exe 里有资源名」的核对是**假绿**（dist 自己旧，旧名字当然对得上），
-   结果让人类拿着「没有修复的版本」白测一轮。
-   `pnpm check:win` 既比**时间**（exe 必须比 dist 新）也比**内容**（资源名逐个命中），
-   不合格会直接打印补救命令。
-9. **dav1d 静态库是 Windows 构建的前置**（2026-09-24，AVIF 解码）：   `image` 的 `avif-native` 拉进 `dav1d-sys`，它用 `system-deps` 找 dav1d 库；
-   Windows 上没有 pkg-config，所以**位置靠环境变量告诉它**（见上面的原命令）。
-   * 库不在仓库里，用 **`scripts/build-dav1d-win.cmd`** 一次性构建
-     （meson + ninja + nasm + VS Build Tools，约 3 分钟，产物 `C:\rb-deps\dav1d-1.5.0\`）；
-   * 环境变量已封进 **`scripts/lib/dav1d-win.mjs`**，`pnpm debug:win` / `pnpm spike:win`
-     会自动带上 —— **别在别处再写一份**（`AGENTS.md` §2.12）；
-   * 链的是**静态库**（`SYSTEM_DEPS_DAV1D_LINK=static`）⇒ 安装包里不需要带 `dav1d.dll`；
-   * WSL 侧不同：用系统库（`sudo apt install libdav1d-dev`，1.4.1）走 pkg-config，**不需要**这些变量；
-   * 许可与版本登记在 `THIRD-PARTY-NOTICES.md`。
-10. **target 目录会只进不出，靠 `pnpm clean:win` / `clean:wsl` 自然清**（2026-09-25）：
-    cargo **从不回收**「不再是当前构建图一部分」的产物 —— 每换一次依赖版本 / feature 组合 /
-    构建参数就多留一份（实测：一个 target 目录攒到 11.6 GiB，`deps/` 里 `libtoml` 11 份、
-    `incremental/` 里 `raybend_desktop_lib-*` 10 个不同 unit-hash 目录；WSL 侧一次就清出 15 GB）。
-    * `pnpm debug:win` 的第 ④ 步会自动带上（复用该次构建的 `--message-format=json` 单元清单，
-      **不额外编译**）；想单独打就 `pnpm clean:win` / `pnpm clean:wsl`；
-    * 判据是**权威的**：cargo 的 JSON 输出会把构建图里**每个单元**都报出来（已最新的也报，带
-      `fresh:true`），「不在图里 **且** 已凉 ≥ `--keep-days`（默认 3 天）」才删 ——
-      宽限期是为了不碰**另一个会话正在用的另一套构建参数**产出的东西；
-    * `.fingerprint/` 不碰（只几十 MB，删错会让 cargo 白重编）；
-    * 先看后删：`pnpm clean:win --dry-run`（会列出最占空间的几项）。
-    * 什么时候仍需 `cargo clean`：规则/目录结构大改、或想彻底重来 —— 代价是一次冷构建。
-
-### 5.3.1 为什么必须加 `--features custom-protocol`（重要，别拆掉）
-
-已定位到源码级。`tauri` 的 `build.rs`：
-
-```rust
-let custom_protocol = has_feature("custom-protocol");
-let dev = !custom_protocol;        // ← dev 由 feature 决定，不是 debug/release！
-```
-
-而 `tauri-codegen` 在 `dev == true` 且配置了 `devUrl` 时，**产出的嵌入资源是空的**：
-
-```rust
-} else if dev && config.build.dev_url.is_some() {
-    let assets = EmbeddedAssets::default();   // ← 空资源
-```
-
-于是 webview 只能去连 `devUrl`（`http://localhost:1420`）—— 本机没服务时就报「无法访问此页面」。
-
-**表现对照**：
-
-| 路径 | 命令 | 结果 |
-| --- | --- | --- |
-| WSL 开发 | `pnpm tauri dev` | ✅ 正常（Vite 在 1420 上服务，且 CLI 不加该 feature → `dev=true` 是对的） |
-| WSL 开发 | `cargo run` | 同上（**也会去连 1420**，所以不走这条） |
-| Windows 裸 `cargo build` | 无 feature | ❌ 窗口出来了但页面打不开 |
-| Windows 生产 | `--features custom-protocol` | ✅ 嵌入真实资源 |
-
-> Tauri CLI 的 `tauri build` 会自动加这个 feature；**但我们的 Windows 构建路径不走 CLI**，必须手写。
-> `src-tauri/Cargo.toml` 的 `[features]` 段里已注明这一点 —— **不要当模板残留删掉**
-> （M0-1 “删净模板演示”时曾把它误删，直接导致了这个 bug）。
-
-### 5.3.2 Windows 侧验证纪律
-
-**“窗口出现了”不等于“功能对了”。** Windows 侧跑完必须至少确认：
-
-1. 页面**真的画出来了**（不是白屏/错误页）—— **由人类目视**（`AGENTS.md` §2.8）
-2. 产物**比 `dist/` 新**（否则跑的可能是旧前端）
-3. Agent 侧可做的程序化冒烟：检查 exe 里含的是 **`dist/assets/` 当前的资源文件名**
-   （含则说明资源确实被嵌入；内容字节是 brotli 压缩的，搜原始字符串搜不到是正常的）
-4. **「进程起来了」不等于「功能对了」，而「主程序对了」也不等于「它的子进程对了」**
-   （2026-09-24）：RAW 解码跑在**独立进程**里，主程序重建不会顺带重建它。
-   凡是「主程序 + 伙伴二进制」的形态，验证清单里都要有**伙伴的那一份**。
-5. **换了图标后，「看起来没换」多半是 Windows 的图标缓存，不是产物没换**（2026-09-17 实测）：
-   同一个路径的 exe 被覆盖时，资源管理器/任务栏会继续显示旧图标。
-   判定要用**证据**，别用眼睛：
-   - 文件图标 = exe 的 `RT_ICON` 资源（6 张，与 `src-tauri/icons/icon.ico` 逐字节比对）；
-   - 窗口/任务栏图标 = `icons/icon.ico` 的**第 1 个条目**（tauri-codegen 取 `entries()[0]`）解码成 RGBA 后的字节；
-   - 想「眼见为实」就把 exe 复制成**新文件名**（新路径不撞缓存），或清缓存：`ie4uinit.exe -show`、
-     删 `%LOCALAPPDATA%\Microsoft\Windows\Explorer\iconcache_*.db` 后重启资源管理器。
-   已固定的任务栏图钉把图标缓存在 `.lnk` 里，要**取消固定再固定**。
-
-### 5.3.3 本次「吃一堑」汇总（2026-09-15）
-
-| # | 坑 | 后果 | 教训 |
-| --- | --- | --- | --- |
-| 1 | M0-1 清理模板时把 `[features] custom-protocol` 当成模板残留删了 | **Windows 版一直是白屏**，而 WSL 侧因为走 `pnpm tauri dev` 完全正常，所以问题被掩盖了很久 | **「模板自带」不等于「模板残留」**。删配置性代码前先搞清它的用途；`tauri build` 才注入的东西，我们走裸 cargo 就必须自己写明 |
-| 2 | 验证只看 `MainWindowHandle` / `MainWindowTitle` | 声称「Windows 运行验证通过」，而实际页面根本打不开 | **“窗口出现了”不等于“功能对了”**（§2.8）。验证清单必须包含「内容看得见」 |
-| 3 | 用 `cmd.exe /c "start \"标题\" 路径"` 启动 exe | 弹「找不到文件 `\RayBend\`」，干扰用户 | WSL→Windows 的**引号嵌套不可靠**；直接用 `/mnt/c/...` 跑 |
-| 4 | exe（02:50）比 `dist/`（10:28）旧 | 即使逻辑正确，跑的也是旧前端 | **产物时间戳必须晚于 `dist/`**，构建前先 `pnpm build` |
-
-实测参考：首次 Windows 全量构建约 3–4 分钟；WSL 侧 `cargo check` 首次约 2–3 分钟。
+- **先 `pnpm build` 再构建 Windows，构建完必须 `pnpm check:win`**——`dist/` 是编译期嵌进 exe 的；
+  「主程序新、worker 旧」也要防（`-p raybend-desktop -p raybend` 一起建，协议版本握手会报错）。
+- Windows 构建产物必须落在 Windows 本地盘（`C:\rb-target\...`）；跨 WSL 传环境变量用 `WSLENV`；
+  `--features custom-protocol` 必须加（否则白屏）；启动 exe 直接用 `/mnt/c/...` 路径，不经 `cmd start`。
+- dav1d 静态库环境变量已封进 `scripts/lib/dav1d-win.mjs`，别在别处再写一份。
+- `pnpm clean:win` / `clean:wsl` 清理只进不出的 target 产物（cargo 从不回收旧单元）。
+- 换图标后「看起来没换」多半是 Windows 图标缓存——用 exe 资源字节比对判定，别用眼睛。
 
 ### 5.4 规划纪律
 
-- **一次规划只覆盖一个工作单元** 定义`工作单元`最小颗粒度为一个波次，禁止将一个波次内切分的小颗粒度任务作为一次工作范围，工作按波次进行，波次中**禁止停下**，详情见`5.5`。
-- **`PLAN.md` 只做路线级描述**（每个 milestone 含哪些波次、完成定义是什么）。**具体实现方案在每个工作单元开工前单独规划**，写入 `specs/<milestone>-<单元>.md`（如 `specs/M0-1.md`），并走 plannotator 评审。
-- **不提前细化未开工的工作单元** —— 项目规模决定了前置规划必然失真；开工时按当时情况重新规划。
-- **已归档的旧规划**放 `PLAN.md` 附录（如附录 A），并明确标注「仅供参考、不是待办清单」。
-- 规划文件中的勾选项会被 plannotator 进度跟踪，且 `mark_done` **会真实改写文件** —— 所以计划文件的范围要小、要准，否则勾选状态随变更失真、tracker 也会堆满未开工条目。
-
-#### 关于目录名：**以前是 `plans/`，现在是 `specs/`**（人类 2026-09-26 定）
-
-这个目录**一直是同一个东西**（每个工作单元开工前写的详细方案，走 plannotator 评审、
-做完后在里面勾选/记录），只是名字从 `plans/` 改成了 `specs/` —— 名字更准确：
-它装的是「这个东西要做到什么程度、怎么验收」的**规格**，不是「什么时候做」的排期
-（排期在 `PLAN.md`）。
-
-两条要点：
-
-1. **活文档、代码注释、脚本里一律写 `specs/`**（2026-09-26 已全仓替换过一次）。
-2. **`implementations/` 里的历史记录仍写着 `plans/`** —— 那是当时的真实路径，
-   **不要去改它们**（同样道理，`git show <commit>:plans/M0.md` 这类历史命令也不改）。
-   看到老记录里的 `plans/` 就把它当 `specs/` 读，并在新引用里用新名字。
+- **一次规划只覆盖一个工作单元**（最小颗粒度 = 一个波次）；`memory/PLAN.md` 只做路线级描述，
+  具体方案开工前写入 `specs/<milestone>-<单元>.md` 并走 plannotator 评审；不提前细化未开工单元。
+- 完整规划原则见 `memory/PLAN.md` §0。规划文件里的勾选项会被 plannotator 跟踪（`mark_done` 会真实改写文件）。
+- 目录名沿革：`specs/` 原名 `plans/`（2026-09-26 改名）；`implementations/` 历史记录里的旧写法不改。
 
 ### 5.5 连续工作范围
 
-**这是工作铁律**
+- 规划任务列表时：plannotator plan 状态下只用 plannotator progress，否则用 pi 的 `todos`。
+- **规划好后必须做到列表任务全部无法进行时再停下**；无法进行的判据：需人类介入（E2E、授权、设计意图缺失等），或同一任务尝试超 5 次仍难解。
+- 此时**不是停止工作**：跳过卡住的部分，继续做清单里其它能做的，直到只剩需要人类协助的部分，再一次性汇总汇报。
 
-在一次规范完成之后，视当前状态，若在plannotator的plan状态下仅使用plannotator progress，否则使用pi提供的`todos`对任务进行规划分配。
+### 5.6 评审纪律（`memory/REVIEW.md`）
 
-**一旦规划好任务列表后，必须做到列表中任务全部无法进行时再停下** 任务无法进行判定如下:
-
-- 当前任务按约定需要人类介入，比如完成后到了e2e环节，比如pencil连接不上需要人类开vscode，比如明确的设计意图缺失需要人类提供下一步方向等
-- 当前任务尝试次数超过5次均难以解决
-
-**注意：当上述情况发生时，不代表要停止工作！** 而是先检查本次规划的任务列表中还有没有能继续做的事，**只要任务列表中还有要做的事，就跳过当前不能做的部分，继续工作** 直到todos/progress中每一项能做的全部做完，只剩需要人类协助的部分，统一时行汇报/请求协助。
-
-### 5.6 评审纪律（`REVIEW.md`）
-
-**`REVIEW.md` 是「每隔一段时间回顾开发内容、为未来方向做修正」的文档。**
-**每一次明确的 review 行为都要对它做出补充 / 更新 / 重写，用来确定未来要做的事。**
-
-- **触发**：人类说「review 一下 / 评审 / 复盘现在的设计 / 看看方向对不对」时；
-  或在一个 milestone 收口、一次真机验收之后，由人类点名。
-- **做法**：通读**当时的真实状态** —— 规格文档 + `design/*.md` + 实现侧 + 最近的 `implementations/`
-  记录，必要时加行业横向对照；产出的是**判断与去向**，不是功能清单。
-  每轮**追加一节**，历史不覆盖；结论变了写新一节并注明取代了哪一条。
-- **与其它文档的分工（关键，防第二份事实源）**：`REVIEW.md` 只记「判断 + 取舍 + 落到哪」。
-  一经采纳，**正式改动写进拥有它的那份文件**（`DESIGN.md` / `BROWSE.md` / `REPOSITORY.md` /
-  `IMAGING.md` / `PLAN.md` / `FUTURE.md` / 本文件），`REVIEW.md` 那一项只更新到「**已落地 + 落点**」。
-  ⚠️ **禁止把规格正文抄第二份**（§2.12）。
-- **不用 `- [ ]` 勾选框**：勾选项会被 plannotator 进度跟踪，而那个机制只属于 `specs/*.md`（§5.4）。
-  本文件的状态**写在表格的「状态」列**里（`待决` / `已采纳` / `已落地` / `不做` / `搁置`）。
-- **不是待办清单的替代品**：本轮要做的事仍然按 §5.5 走 `todos` / plannotator progress；
-  `REVIEW.md` 管的是「**方向对不对**」，不是「今天做哪件」。
-- **结论归人类拍板**：Agent 可以把待决项、理由与证据写齐（并给出推荐），
-  但**不得**把 `待决` 自行改成 `已采纳` —— 那是方向决策，不是实现细节。
+`REVIEW.md` 记「每轮 review 的判断、取舍与去向」，只记结论与落点，**规格正文写回拥有它的那份文件**；
+维护规则见该文件 §0。结论归人类拍板，Agent 不得把「待决」自行改成「已采纳」。
 
 ---
 
 ## 6. 已确定的架构决定
 
-### 6.1 渲染架构 = 原生 wgpu + 透明挖洞（方案 B）
+> 本节是**摘要**；完整论证、目录布局、风险与退路在 `memory/ARCHITECTURE.md` §6。
 
-- WebView2 是覆盖整个窗口的一层；照片视口在 webview 中间**挖洞（透明）**，Rust/wgpu 绘制其下的原生 GPU 底板；Windows 底板通过 DirectComposition visual 呈现。
-- **Windows 产品呈现默认 = DX12 + DirectComposition visual + Opaque**（2026-09-25 真机确认）：
-  Tauri 透明窗口在重绘时会用 softbuffer/GDI 清底；GPU 若直接呈现到同一 HWND，会在窗口边缘越出屏幕时闪烁。
-  必须让产品 GPU 表面通过 `DxgiFromVisual` 位于独立合成层，不能退回「同 HWND + 移动时补帧」。
-  `GpuContext` 仍是一份实现，后端/呈现配置在 `render/presentation.rs::PresentationAdapter` 收口；
-  `SurfaceComposition` 只管 alpha，不能用透明度隐式决定平台后端。macOS/Linux 暂留默认策略入口，
-  不提前做跨平台框架。保留 `WGPU_BACKEND` / `WGPU_DX12_PRESENTATION_SYSTEM` 显式诊断覆盖。
-  适配边界见 `ARCHITECTURE.md` §2.1，源码证据与经验见 `docs/native-viewport-coordinate-guide.md` §8。
-- **接口纪律（防返工的三条红线）**：
-  1. 视口状态由 Rust 独有：`Viewport { zoom, pan_px, rotation, fit_mode, clip_rect, dpr, surface_format }`；前端只发送交互意图，不做坐标数学。
-  2. 覆盖层（蒙版、裁剪柄、直方图采样框等）使用 Rust 提供的**同一变换矩阵**，禁止前端自行推导像素对齐。
-  3. WGSL 源码与 uniform 结构体属于 Rust crate，前端不接触像素格式与色彩空间。
-- **分类使用**：Library/网格视图用 DOM 虚拟化（webview 内，便于选中/键盘/拖拽）；Develop 视口用原生 wgpu 直绘。
-- **透明链是硬约束（2026-09-24 血泪）**：wgpu 直绘在 webview **底下**，所以洞口之上（一直到 `html` / `body`）**任何一层都不能有底色**。`html` / `body` 必须**常驻透明**（`index.css` 里显式写 `transparent` —— `color-scheme: dark` 下「没有背景」的画布会被刷成不透明的默认深色），底色由各页面自己的根容器画。W2 只做了「根 div → main → 洞口」、漏了 `html/body` → 编辑器视口**从来没出过图**（spike 页在 JS 里自己置了透明所以看着正常）。冒烟有断言盯着这两层。
-- **风险与退路**：Tauri 官方未一级支持「webview 上叠加原生 GPU 内容」（相关 issue #8246、#13740），但社区已有多例可用实现（RapidRAW 的 WGPU 直绘、`clearlysid/tauri-wgpu-cam`）。若 Windows 上出现不可解的合成/DWM 问题，退路是切换 Tauri 的 CEF 运行时（自带宽高一致的 Chromium），已登记 `FUTURE.md`。
-- 色彩管理**预留不做**：第一阶段只保证 SDR 下不变形，ICC/HDR 在后期里程碑接入。
-- **坐标契约（原生视口开工前必读）**：见 §7.9 与 `docs/native-viewport-coordinate-guide.md`。
-  三条真机踩出来的铁律：**WebView DPR ≠ 系统缩放**（文字缩放 110% 会叠加）、
-  **wgpu 的 layout 与设备绑定**（设备重建必须连 layout 一起重建）、
-  **渲染线程的 panic 会静默冻住画面**（界面照旧响应 —— 必须捕获并重启）。
-
-### 6.2 为 Tauri 3.0 迁移做准备（现在就要遵守）
-
-Tauri 3.0 已进入 alpha（`3.0.0-alpha.0`），已知关键变更：
-
-- **运行时 crate 化**：移除了 `wry` / `cef` feature flag，`tauri::Wry` 被移除，改为显式依赖 `tauri-runtime-wry` / `tauri-runtime-cef`。
-  → **纪律**：不要在任何地方引用 `tauri::Wry` 具体类型，也不要在 `Cargo.toml` 里假定 feature flag；把窗口句柄抽象成我们自己的 `NativeWindowHandle` 类型，包在 `src-tauri` 内。
-- `tauri-build` 不再把 resources 复制到 cargo target 目录，dev 运行改为从源路径解析资源。
-  → **纪律**：资源路径一律走 Tauri 的 path API，不硬编码相对路径，不假设 target 目录里有资源。
-- 顶层导出整理（issue #14011）：避免深层 `use tauri::...` 的边角导出，只用稳定的一级 API。
-- MSRV 提升到 1.95；Linux 端迁 GTK4（对 Windows 优先的本项目暂不相关）。
-- **迁移预案**：等 3.0 进入 beta/rc 时，执行顺序为「先升 `tauri` 与 `tauri-build` → 再改运行时 crate 依赖 → 最后处理插件 API 变动」。因为业务逻辑不在 `src-tauri` 内，预期工作量可控。
-
-### 6.3 RAW 解码层（可插拔）
-
-- 首选 **rawler 0.8.0**（上游 [dnglab](https://github.com/dnglab/dnglab)），但必须在 `raybend-raw` 内做成**后端可插拔**接口，禁止其它模块直接依赖 rawler 类型。
-- 已知事实：rawler 是 **LGPL-2.1-only**（已核实与 GPLv3 兼容〔LGPL v2.1 → GPLv3 的转换路径〕，因而可静态链接进本项目的 AGPL-3.0）、**API 不稳定且不遵循 SemVer**、**没有 GPU 依赖（纯 CPU，rayon）**、dnglab README 明说 **Windows 未官方支持**，且明确声明「**不要把 dnglab/rawler 用于处理不可信文件**」。
-  → **纪律**：RAW 解码必须在**独立 worker 进程**中执行，崩溃不得带走主进程；对文件做大小/格式预检。
-- rawler 提供：CFA 像素、black/white level、白平衡系数、色彩矩阵（`xyz_to_cam` / `color_matrix`）、active/crop area、orientation、以及**嵌入式预览与缩略图**。
-- rawler 不提供：高质量去马赛克、降噪、镜头校正、色调映射、色彩管理。这些属于未来的 `raybend-develop`，第一阶段只有最基础处理。
-- 第一阶段策略：**优先使用 RAW 内嵌 JPEG 预览**做网格缩略图与快速查看（毫秒级，比解码快 1–2 个数量级），真正解码走后台任务。
-
-### 6.4 存储架构 = 全局库 + 每仓 catalog（分层）
-
-目录布局：
-
-```text
-%LOCALAPPDATA%\com.cthun.raybend\
-  app.db              # 全局：应用设置 / 库注册表 / 标签词典 / LUT 分类与文件元数据
-  backups\            # 迁移前快照（VACUUM INTO，保留 7 份）
-  cache\_sources\thumbs.db # 当前缩略图缓存：源文件与命名 issue 的两档 AVIF
-  luts\<LUT id>\    # 用户导入的 .cube / Hald 本体与一张 384 或 768 宽 4:3 WebP 封面
-  logs\
-
-<库根目录>\            # 用户指定，可多个
-  catalog.db          # 库真相源：库 ID、资产、元数据、编辑栈/latest、不可变 issue、修订
-  photos\             # 导入的落地目录（模版决定 photos/ 内的相对路径）
-    2026-08-15\
-      MYP0001.png
-      _RAW\
-        MYP0001.ORF   # 同名 RAW 放同级的 _RAW/（见 REPOSITORY.md §4.1）
-  cache\              # **库内缓存**（M3-W3 起）：大图（每 issue 一份 AVIF）
-    full\<资产 id>\
-      latest-raw-v6.avif  # latest 编辑结果（管线版本号随实现升级）
-      issue-42-<hash>-raw-v6.avif # 命名定稿独立的 1920 AVIF
-  index.db            # 派生索引（缩略图索引、人脸、相似度）—— 可删可重建；真需要时才建
-```
-
-> **布局于 2026-09-15 按用户口述变更**：`catalog.db` **直接在库根**（不再藏于 `.raybend/`），
-> 导入物落在库根的 `photos/`，`repo.json` 取消（库身份记在 `catalog.db` 内 + 中央 `app.db` 登记）。
-> **完整业务规格见 `REPOSITORY.md`**（库身份 / 同路径多库 / 同库多路径 / 在线离线 / 导入模版 / 序号 / 重名 / RAW 分流 / 目录透传）。
-
-- **缓存分两处**（M3-W3 定）：**小图**（网格 / 胶片带 / 看图的缩略图）在
-  `%LOCALAPPDATA%\com.cthun.raybend\cache\_sources\thumbs.db`（当前实现：源文件与定稿按不同缓存键共享一库；几万行小 BLOB）；
-  **大图**（每个命名 issue 独立一张 1920 AVIF）在**库根**的 `cache/full/`（跟着库走，换机器/搬盘不用重渲染）。
-  两处的编码格式统一 **AVIF 质量 90 / 4:4:4**（人类 2026-09-24 定；快照恒为 AVIF，
-  不考虑换 JXL —— 格式范围与 JXL 定位见 `FUTURE.md` C8）。
-- **真相源规则**：本地编辑/评分/关键词以 **DB 为准**，XMP 只是互操作通道；RAW 永不写回原文件（只写 `.xmp` sidecar）。issue 的 XMP 表达契约见 `docs/issue-xmp-contract.md`，当前尚未写出 sidecar。
-- **写并发**：SQLite 单写者 → 采用**单一写者 actor**（专属线程 + 专属连接，所有写操作串行化），读走连接池；批量事务；`PRAGMA journal_mode=WAL, synchronous=NORMAL, busy_timeout=5000, foreign_keys=ON`。
-- **库身份与多路径**（`REPOSITORY.md` §2）：库身份 = `catalog.db` 内的唯一 ID；`app.db` 记录「库 ID → 多个路径」。
-  路径挂载了哪个库靠**读该路径下 catalog.db 的 ID** 比对，而不是靠路径字符串 —— 这是「同路径不同库 / 同库多路径」的机制。
-  读库前一律先走统一的状态解析（在线/离线），失败转离线而非报错。
-- **跨库搜索**：`ATTACH` 多库 + `UNION ALL`；必要时在 `app.db` 维护轻量定位表做快速筛选。
-- **备份**：升级前自动 `VACUUM INTO` 快照（保留 7 份）；程序版本低于库版本时**拒绝打开**并提示。
-- **禁止**把 catalog 放在云同步盘 / 网络盘上 —— 启动时检测并警告（SQLite 数据损坏的头号来源）。
-
-### 6.5 缩略图 / 预览缓存
-
-> **三种图（thumb / preview / 大图）的规格、生成节点与显示规则见 `IMAGING.md`**
-> （唯一事实源，含格式支持范围）；本节只讲架构与红线。
-
-- 当前尺度：网格 384、胶片带 192、过渡/定稿预览 1920（最长边）；1:1 大图走实时解码和显影，不进持久缓存。
-- **中性缩略图与编辑结果分开**：未编辑源文件按来源生成；latest 参数变化后刷新当前小图与预览；每个命名 issue 的 384/192/1920 AVIF 快照独立保留，删除定稿才清理该定稿快照。
-- 缓存键包含资产/来源、尺寸档、渲染签名（含管线版本）；命名 issue 还含 issue ID 与 profile 哈希。latest 作废不能误删命名快照。
-- 当前小图存 `%LOCALAPPDATA%\com.cthun.raybend\cache\_sources\thumbs.db` 的 SQLite BLOB；1920 AVIF 存库根 `cache/full/<asset_id>/`。更细的按库迁移、容量上限、frecency 淘汰与缓存设置面板属于后续优化，不能写成 M3 已有功能。
-- **红线**：删掉整个缓存目录后，功能降级但可从原图和配置重建；`app.db`、`catalog.db` 与导入的 LUT 本体不是可删缓存。
+- **6.1 渲染架构 = 原生 wgpu + 透明挖洞（方案 B）**：WebView2 覆盖全窗，照片视口在 webview 中间挖透明洞，Rust/wgpu 绘制其下原生 GPU 底板（Windows 产品默认 **DX12 + DirectComposition visual + Opaque**）。Library/网格用 DOM 虚拟化，Develop 视口用原生 wgpu 直绘。**接口三条红线**：① 视口状态由 Rust 独有，前端只发交互意图；② 覆盖层用 Rust 提供的同一变换矩阵，禁止前端自行推导像素对齐；③ WGSL 与 uniform 属于 Rust crate，前端不接触像素格式与色彩空间。透明链是硬约束：`html`/`body` 必须常驻透明。坐标契约（四种量不得混用、DPR 读运行时值）见 §7.9 与 `docs/native-viewport-coordinate-guide.md`。
+- **6.2 为 Tauri 3.0 迁移做准备**：不引用 `tauri::Wry` 具体类型与 feature flag，窗口句柄包成自己的 `NativeWindowHandle`；资源路径走 Tauri path API。
+- **6.3 RAW 解码层（可插拔）**：首选 rawler 0.8.0，后端可插拔接口在 `raybend` 内，禁止其它模块直接依赖 rawler 类型；**解码必须在独立 worker 进程**执行（崩溃不带崩主进程），对文件做大小/格式预检；第一阶段优先用内嵌 JPEG 预览做缩略图（快 1–2 个数量级）。
+- **6.4 存储架构 = 全局库 + 每仓 catalog（分层）**：`%LOCALAPPDATA%\com.cthun.raybend\`（app.db、备份、缩略图缓存、luts、日志）+ 库根（catalog.db 真相源、photos/、cache/full/ 大图）。真相源规则：本地编辑以 DB 为准、XMP 只是互操作通道、RAW 永不写回。写并发 = 单写者 actor + 读连接池 + WAL。库身份 = catalog.db 内唯一 ID，app.db 记多路径；路径挂了哪个库靠**读 ID 比对**。禁止 catalog 放云同步/网络盘。完整目录布局与规则见 `memory/ARCHITECTURE.md` §6.4，业务规格见 `memory/FUNCTION-REPOSITORY.md`。
+- **6.5 缩略图 / 预览缓存**：三种图（thumb 384 / 胶片带 192 / 预览 1920）的规格与生成节点见 `memory/FUNCTION-IMAGING.md`（唯一事实源）。小图在 `%LOCALAPPDATA%\...\cache\_sources\thumbs.db`，1920 AVIF 在库根 `cache/full/`；AVIF 质量 90 / 4:4:4。红线：删掉整个缓存目录后功能降级但可从原图重建；`app.db` / `catalog.db` / LUT 本体不是可删缓存。
 
 ---
 
-## 7. 调研挖出的关键真相（必须记住）
+## 7. 调研挖出的关键真相
 
-### 7.1 SQLite 的边界（结论：够用，风险在写并发）
+> 完整调研记录在 `memory/ARCHITECTURE.md` §7；这里只留一句话结论 + §7.9 坐标契约摘要。
 
-- 单库上限 281TB；WAL 下「多读者 + 单写者」，现代 NVMe 上写者可达数千 TPS。
-- 量级估算：10 万张照片的元数据约 100–300MB，100 万张约 1–3GB（含索引）。行业先例：Lightroom `.lrcat`、darktable `data.db`+`library.db`、digiKam 四个 SQLite 库，没有一个是「SQLite 撑不住」。
-- **真正的风险是并发写**（导入 + 缩略图生成 + AI 分析同时写）：用 §5.4 的单写者 actor 解决。
+- **7.1 SQLite**：够用（行业先例 Lightroom/darktable/digiKam），真风险在写并发——用单写者 actor 解决。
+- **7.2 中文搜索**：FTS5 必须 `tokenize='trigram'`（unicode61 对中文无效）。
+- **7.3 文件身份**：不用路径做主键（Windows `FileIdInfo`）；路径 NFC 存储 + 原始名 + 大小写折叠列。
+- **7.4 嵌入式预览优先**：读内嵌 JPEG 比完整解码快 1–2 个数量级。
+- **7.5 参考实现 RapidRAW**（https://github.com/CyberTimon/RapidRAW ）：Tauri 图像软件的实证（wgpu 直绘 20fps→120fps）；AGPL-3.0 与本项目兼容，找不到方案时优先参考（注意其 rawler 是 LGPL fork）。
+- **7.6 / 7.7 已决选型**：Ark UI（splitter/tree-view 只有它提供）+ Tabler 图标（描边/填充成对、MIT、6 千余枚）；实测数据见 `memory/FINISHED.md` 附录 A.10 与 `memory/ARCHITECTURE.md` §7.6/§7.7。
+- **7.8 Tauri 分发**：桌面应用不发 npm；签名与更新通道属发布里程碑（R3-01 已拍板 unsigned 直下）。
 
-### 7.2 中文搜索
+### 7.9 原生视口的坐标契约（2026-09-19 真机血泪；完整报告 `docs/native-viewport-coordinate-guide.md`）
 
-SQLite FTS5 默认 `unicode61` 分词器**对中文基本无效**；必须使用 `tokenize='trigram'`（SQLite 3.34+），英文列可另建 `porter` 索引。
+**四种量不能混用**：
 
-### 7.3 文件身份与跨平台路径
+| 量 | 来源 | 用途 |
+| --- | --- |
+| native scale | Tauri `scale_factor()` | 原生窗口逻辑尺寸、诊断 |
+| **WebView DPR** | `window.devicePixelRatio` | **DOM CSS → surface 物理像素**（含显示 DPI × 文字缩放 × 页面缩放） |
+| DOM viewport | `window.innerWidth/innerHeight` | WebView 实际 CSS 视口 |
+| image zoom | Rust `Viewport.zoom` | 图像像素 → 物理像素（1:1 恒为 1.0） |
 
-- **不要用路径做主键**：Windows 用 `GetFileInformationByHandleEx(FileIdInfo)` 得到 `(VolumeSerial, FileId128)`，可稳定追踪重命名/移动（NTFS 上可靠）；路径只作展示与 fallback。
-- 跨平台注意：**macOS 使用 NFD 规范化且大小写不敏感，Linux 是字节串且大小写敏感，Windows 大小写不敏感**。
-  → 现在就定死：路径存储用 **NFC 规范化值 + 保留原始名 + 额外的大小写折叠列**用于唯一索引。
-
-### 7.4 嵌入式预览优先
-
-几乎所有相机 RAW 都内嵌全尺寸 JPEG 预览与缩略图。读取它比解码快 1–2 个数量级。导入与浏览先取内嵌预览，真正做到「瞬间出图」；只有进入 1:1 或显影时才做完整解码。
-
-### 7.5 参考实现：RapidRAW（`https://github.com/CyberTimon/RapidRAW`）
-
-在相片编辑与「Tauri 做图像软件」这件事上做得很好，**找不到方案时优先参考它的实现思路**（注意许可，见下）。
-真实技术栈（来自其 `src-tauri/Cargo.toml` 与 `package.json`）：
-
-- **Rust 侧**：`rawler`（**用自己的 fork**：`CyberTimon/RapidRAW-DngLab`）、`wgpu 29.0`（注释：降级以规避 Apple 设备 P3 色偏）、`ort`（ONNX Runtime，`load-dynamic`）+ `tokenizers`（AI）、`image_hasher`（感知哈希/相似度）、`mozjpeg-rs` / `webp` / `jxl-encoder` / `jxl-oxide`（编解码）、`nalgebra` + `glam` + `half`（色彩数学 / f16）、`mimalloc`、`trash`、`kamadak-exif` + `little_exif`、`quick-xml`（XMP）、`fuzzy-matcher`（命令面板模糊搜索）、`gphoto2`（联机拍摄，仅 Unix）。
-- **前端侧**：React 19 + **`lucide-react`** + **`react-window`**（网格是虚拟列表，**不是 canvas tile**）+ `konva` / `react-konva`（蒙版与裁剪的 canvas 覆盖层）+ `dnd-kit` + `zustand` + `i18next`（从一开始就国际化）。
-- **没有 SQLite 依赖**：它是**sidecar 流派**（编辑状态写文件），没有 catalog 数据库。这正是 raybend 要走与之不同的路线的地方。
-- **渲染**：编辑器视口用「透明挖洞 + wgpu 直绘」；官方博文记录改造前后**拖动滑块 20fps → 120fps**，瓶颈原本是「JPEG 编码 → IPC → 浏览器解码」。
-- **许可：AGPL-3.0**（已核实 `LICENSE` 为 GNU Affero GPL v3）。
-  → **本项目同样采用 AGPL-3.0-only，两边许可一致**：在保留版权与许可声明、并注明来源的前提下，其代码可被借鉴/移植进 raybend（需逐文件确认文件头的许可标注）。
-  → 其 fork 的 rawler（`CyberTimon/RapidRAW-DngLab`）仍属 **LGPL-2.1 派生**，可直接作为我们的 rawler 来源（用于吸收其解码修复），使用前确认 fork 新增代码的许可标注。
-  → 反向约束：一旦 raybend 对外提供网络服务，就必须按 AGPL 第 13 条向使用者提供对应源码。
-
-### 7.6 组件原语：Kobalte vs Ark UI
-
-两者都是 headless（无样式 + 无障碍）组件库，都要自己写样式（与 Tailwind 搭配无冲突）。区别：
-
-| 维度 | Kobalte | Ark UI |
-| --- | --- | --- |
-| 出品 | kobaltedev 社区（Solid 原生） | Chakra 团队（`chakra-ui/ark`） |
-| 底层 | Solid 原生实现 | 基于 **Zag.js 状态机**，多框架同构（React/Solid/Vue/Svelte） |
-| 定位 | SolidJS 专属 UI 工具包 | 跨框架设计系统底座，45+ 组件 |
-| 文档/生态 | 面向 Solid 用户 | 文档更完整，跨框架资料多 |
-| 风险 | 跟随 Solid 版本演进 | 多框架抽象层厚，Solid 端偶有滞后；但 Zag 的状态机在复杂控件（日期选择、滑块、菜单）上逻辑更严谨 |
-| 关键结论 | 若选 Solid 1.9，二者都可用；**Kobalte 更「薄」、Ark 更「全」** | 复杂的组合控件（日期区间、级联菜单）Ark 的状态机更省心 |
-
-决策留到设计阶段（用 Pencil 画出第一批界面控件后再定），结论写入 `PLAN.md` 对应里程碑。
-
-**✅ 已决（2026-09-15）**：本项目选 **Ark UI**（`@ark-ui/solid`）—— 原因是 `splitter`（可拖拽分栏）
-与 `tree-view`（标签层级树）是我们最需要且最难自研的两个组件，只有它提供；其活跃度也明显领先。
-实测数据（版本号、组件数、活跃度）见 `PLAN.md` 附录 A.10。
-
-### 7.7 图标体系（核实结果，2026-09-15）
-
-| 图标集 | 数量 | 风格 | 许可 | 填充态 | 影像领域覆盖 |
-| --- | --- | --- | --- | --- | --- |
-| **Lucide** | ~1600（sitemap 实测） | 仅描边（24px 网格） | ISC（Feather 派生部分 MIT） | ❌ **官方明确不支持 fill**；可用 `fill=currentColor; strokeWidth=0` 变通，官方 issue 自述「对约 60–70% 图标可用」 | **比预期好**：实测存在 `pipette`(吸管)、`contrast`、`crop`、`frame`、`proportions`、`layers`、`tags`、`folder-tree`、`gallery-thumbnails`、`git-compare`、`badge-check`、`star-half`、`grip-vertical`、`sliders-horizontal`、`combine`、`lasso`、`swatch-book`、`table-2`、`map-pin`(及多种变体)；实测**缺失** `history`、`flip-horizontal` |
-| **Tabler** | 6,184（5,130 描边 + **1,054 填充**） | 24px / 2px 描边，描边与填充**成对文件** | MIT | ✅ 独立 filled 文件 + `icon-filled` class | 数量最大，领域图标较全 |
-| **Phosphor** | 1,248 图标 × 6 字重 | thin/light/regular/bold/**fill**/**duotone** | MIT | ✅ 官方 fill + duotone，**按 16px 起设计** | 中等 |
-| **Heroicons** | ~300（含变体约 888 文件） | outline / solid / mini(20) / micro(16) | MIT | ✅ solid 变体 | 弱，纯通用 UI |
-| **Material Symbols** | 2,500+ | outlined / rounded / sharp × **FILL 可变轴**（0↔1 连续插值） | Apache-2.0 | ✅✅ 单一可变字体即可切换 | **最强**：实测含 `raw_on`、`tonality`、`vignette`、`dehaze`、`healing`、`gradient`、`auto_fix_high`、`burst_mode`、`tune`、`straighten`、`exposure`、`add_photo_alternate` |
-
-**结论与纪律**：
-
-- 第一阶段**不需要自绘几十个图标**；原则是「**选定一套 → 只用套内图标做组合 → 降低数量**」。
-- 首选 **Tabler**（唯一同时满足「数量大 + 描边/填充成对 + MIT + 小尺寸清晰」）；次选 Lucide（生态最成熟、风格最现代，但激活态需用别的手段表达而非填充）。
-- 编辑模块的领域专用图标（histogram / vignette / tonality / dehaze 等）从 **Material Symbols** 借用（Apache-2.0 可与 MIT 混用，但混用需注意描边粗细与网格差异）。
-- 图标尺寸规范：16 / 20 / 24 三档，激活态优先用**强调色 + 背景块**表达（Web 设计里有大量成熟做法），不依赖填充变体。
-- **✅ 已决（2026-09-15）**：本项目选 **Tabler**（`@tabler/icons-solidjs`）；
-  实测数据见 `PLAN.md` 附录 A.10。选型原则仍是「只用套内图标做组合、降低数量」，不自绘几十个图标。
-
-### 7.8 Tauri 分发与 npm
-
-- **Tauri 桌面应用不需要发布到 npm**，也不需要占位：分发物是安装包（NSIS / MSI）与自动更新元数据，npm 只服务于 JS 库消费者。`@tauri-apps/cli` 是构建期依赖，不是产品发布物。
-- 只有当 raybend 将来对外提供**可被 JS 项目引用的库/插件**（例如 CLI 封装、SDK、编辑器 Web 组件）时才需要占位 npm 包名；届时再评估（当前只能占用 `@cthun/*` 作用域）。
-- 待办：代码签名方案（避免 SmartScreen 拦截）与自动更新通道，属于发布里程碑。
+铁律：**前端只上报原始事实**（rect、clientX/Y、DPR），物理换算全在 Rust；**DPR 必须读运行时值**
+（本机 125% × 文字 110% = 1.375，写死必错）；别用 `screenX/Y × dpr` 猜容器偏移。
+诊断红旗与验证顺序见 `memory/ARCHITECTURE.md` §7.9。
 
 ---
 
-### 7.9 原生视口的坐标契约（2026-09-19 真机血泪）
+## 8. 必须处理的问题清单
 
-> 完整推导、证据与验证方法见 **`docs/native-viewport-coordinate-guide.md`**（Astro 的报告）。
-> 这一节只留**必须记住的结论**，防止重犯。
-
-**事故**：spike 把 Windows 的**显示缩放**当成 WebView 的 CSS 像素比例。本机显示缩放 125%、
-辅助功能文字大小 110% → WebView2 的有效比例是 **1.25 × 1.10 = 1.375**，而旧代码只取了
-`scale_factor() = 1.25` → 洞口、命中测试、拖动、缩放锚点**共用错比例** → 灰块、裁剪边界、
-鼠标集体错位。**这不是「差一个标题栏」也不是「减固定偏移」能修的**：比例错造成的偏差随位置增大，
-固定平移只能碰巧修好一个点。
-
-**四条铁律**：
-
-1. **四种量不能混用**：
-
-   | 量 | 来源 | 用途 |
-   | --- | --- | --- |
-   | native scale | Tauri `scale_factor()` / 显示器 DPI | 原生窗口逻辑尺寸、环境诊断 |
-   | **WebView DPR** | `window.devicePixelRatio` | **DOM client/CSS → surface 物理像素** |
-   | DOM viewport | `window.innerWidth/innerHeight` | WebView 实际 CSS 视口（别拿 native 尺寸÷native scale 冒充） |
-   | image zoom | Rust `Viewport.zoom` | 图像像素 → 物理像素（1:1 永远是 1.0） |
-
-2. **前端只上报原始事实**（`getBoundingClientRect()`、`clientX/Y`、CSS 位移、DPR）——
-   **物理换算全部在 Rust**。上报 DPR ≠ 把变换数学搬到前端。
-3. **DPR 必须读运行时值**：`devicePixelRatio` 已经含显示器 DPI + 系统文字缩放 + 页面缩放，
-   不要写死乘 1.1，也**不许**用「强制文字缩放 100%」来掩盖问题（那正是本次 bug 的成因）。
-4. **别用 `screenX/Y × dpr` 猜容器偏移**：屏幕坐标、窗口外框、客户区、混合 DPI 桌面不是同一坐标域。
-
-**诊断红旗（这些「通过」全是假的）**：「物理洞口 = CSS × 左栏 DPR」（程序用了自己的 DPR，
-证明不了 DPR 对）；「CSS = 客户区 ÷ native scale」（算出来的，不是量的）；
-「数学往返误差 = 0」（只证明互逆，**共同用错单位也是 0**）；「命中中心 ✅」（只证明自洽）；
-节流上报必须**保留尾样本**（停手那一次也要发）。
-
-**变化要收口**：CSS 洞口是布局真相，DPR 变了就**按新 DPR 重建**物理洞口（别反复缩放上次整数化过的矩形）；
-跨屏/过渡用**带递增 revision 的整包布局事务**，别让旧输入套用新布局。
-
-**验证顺序（便宜→贵）**：纯状态单测（把 OS 1.25 与 WebView 1.375 当**不同输入**，别只测两者相等的档）→
-IPC 单测（用**真实字段名**反序列化；缺 DPR 必须报错，不许静默回退）→
-离屏 GPU 像素回读（**期望值必须外部给定**，别让被测函数自己生成）→ 构建核对 →
-**最短真机门槛**（复位 → 1:1 → 十字缩放，这三步不过就停，别做完 25 分钟全套才发现第一步就错）。
-
-**工程侧的血（同样记牢）**：
-
-- **wgpu 的 `BindGroupLayout` 与设备绑定**：设备重建后**必须重建 layout**，跨设备复用会在
-  `create_bind_group` 抛校验错 —— 在 spike 里表现为 **panic 打死渲染线程**：界面照旧响应、
-  图永远冻住（逐字日志见 `implementations/2026-09-19_windows-spike-verified-and-device-loss.md` §3.4）。
-  → **编辑模块的渲染线程必须「捕获 panic + 重启 + 上报」**。
-- **`Surface::configure()` 返回 `()`**：失败只能靠 `push_error_scope` 或 panic 看见。
-- **`device.destroy()` 之后** surface 的 presentation 仍指向已销毁设备 → 下次取帧必报 `Validation`
-  （`wgpu-core` 的 `present.rs:168` `check_is_valid()`）—— 这是「演练丢失」应有的样子，**不是 bug**。
-- **日志**：本仓曾经**没装任何 logger**（wgpu 的 `log::*` 全被丢弃），所以「去看 wgpu 报错日志」
-  是张空头支票。要原文就得装 logger（`RUST_LOG`）或走 error scope。
-- **`WSLENV`**：WSL→Windows **只转发 `WSLENV` 里列出的变量**（§5.3 第 2 条）。
-  `WGPU_BACKEND=dx12 pnpm spike:win` 曾经是假的（变量被丢掉，窗口照旧跑 Vulkan）；
-  脚本已把 `WGPU_BACKEND` 并进 `WSLENV`。
-
-## 8. 必须处理的问题清单（按优先级）
-
-| # | 问题 | 影响 | 处理时机 |
-| --- | --- | --- | --- |
-| 1 | **去马赛克与画质算法自研成本高**（GPL 实现需移植而非直接可用） | 决定编辑质量与性能 | **M3 编辑里程碑**（2026-09-21 已提前为第一阶段主线）；开工时按 `FUTURE.md` D2/D3 候选取舍 |
-| 2 | 渲染架构的 Windows 合成/DPI 风险（透明 webview + 原生 GPU 内容） | 返工成本极高 | M0 可行性验证首要项 |
-| 3 | rawler 的 LGPL 派生 + API 不稳定 + 无 GPU + 不保证恶意文件安全 | 崩溃/合规 | M0 起就用可插拔接口 + worker 进程隔离 |
-| 4 | 文件身份主键与跨平台路径语义定错 → 后期迁移灾难 | 高 | catalog schema 设计时（M1） |
-| 5 | catalog 损坏 / 升级丢数据（用户最不可原谅的失败） | 极高 | M1 就引入快照备份与版本闸门 |
-| 6 | 范围失控：一人做 ON1 级产品 | 项目死亡 | 严格按 PLAN 的里程碑走，编辑一律后置 |
-| 7 | 代码签名 / 分发 / SmartScreen / 自动更新 | 发布期阻塞 | 发布里程碑 |
-| 8 | GPU 驱动兼容与回退（DX12/Vulkan/软件渲染）、device lost 恢复 | 稳定性 | M1 渲染层实现时 |
-| 9 | 中文分词与本地化（i18n 从第一天留位，参考 RapidRAW 用 i18next） | 后期返工 | M1 UI 骨架 |
-
----
+已迁至 `memory/PLAN.md` §5（按优先级、含 2026-09-27 状态核对）。
 
 ## 9. 初始化状态
 
-**项目初始化由人类完成**（避免 Agent 在没有对话环境时硬来）。初始化清单见 `PLAN.md` 的「M0 前置：初始化」。
+项目初始化已完成（M0，2026-09-15，由人类执行）；记录见 `memory/FINISHED.md`。
 
 ---
 
-## 10. 文档索引
+## 10. 文档索引与记忆体规范
 
-| 文件 | 内容 |
+**根下只放三份**：`README.md`（对外）、`AGENTS.md`（本文件）、`THIRD-PARTY-NOTICES.md`（许可登记）、`LICENSE`（协议原文，留给工具链识别）。
+
+**记忆体规范**：agent 记忆存 `memory/`，**文件主名全部大写**；与具体模块功能相关的记忆一律
+`memory/FUNCTION-<模块>.md`（现有 BROWSE / IMAGING / REPOSITORY，新模块照此增加）。
+本表以外的目录/文件不属于记忆体（如 `prompts/` 是口述原文输入，`legal/` 是协议存放处）。
+
+| 文件 / 目录 | 内容 |
 | --- | --- |
-| `AGENTS.md` | 本文件：定位、硬约束、版本基线、目录、纪律、架构决定、关键真相、问题清单 |
-| `website/AGENTS.md` | **官网（`website/`）专属指南**：SolidStart 2.0 / Solid 2.0 选型、目录约定、命令、站点实现约定（i18n / 素材占位 / 下载信息注入）、**GitHub Pages 部署 + 自定义域名步骤** —— 技术栈与本体不同，别混用 |
-| `website/ASSETS.md` | **官网素材清单**：要人出手的截图（尺寸/取景要点/放哪）与 AI 生图提示词；给完图在 `src/data/media.ts` 填 `src` 即自动替换占位 |
-| `docs/native-viewport-coordinate-guide.md` | **原生视口的坐标契约**（2026-09-19 真机事故的完整报告）：四种量的区分、诊断红旗、验证顺序、`recover()` 的 panic 真因 —— 动原生视口前必读，摘要见 §7.9 |
-| `BROWSE.md` | **浏览模式规格**：三列结构、toolsbar 的筛选/标记/标签/锁、选择逻辑（单击 / `Shift` 区间选中 / `Ctrl` 多选 / 日组·时间片整段开关）、看图与对比、胶片带、信息栏、标签体系、两个通用浮层（模态 + 右上角 toast） |
-| `REPOSITORY.md` | **库与导入规格**：库物理结构、库身份与多路径、在线/离线、导入模版与变量、序号、重名、RAW 分流、目录透传 |
-| `IMAGING.md` | **图像格式与显示规格（唯一事实源）**：格式支持范围（位图 6 进 5 出、RAW 只进不出、JXL 定位、快照恒 AVIF）+ 库内三种图（thumb / preview / 大图）的尺寸、存放、**生成节点**、显示口径（只缩不扩、4:1 截断、小图必放大）、issue 与 latest 的切换语义、现状对照与待办 |
-| `DESIGN.md` | 视觉与配色体系（唯一事实来源） |
-| `PLAN.md` | 近中期开发计划：Milestone（阶段）→ Wave（波次），含初始化清单与完成定义 |
-| `specs/M0-1.md` 等 | 单个工作单元的详细方案（一次一个，命名 `specs/<milestone>-<单元>.md`，见 §5.4）。⚠️ **本目录原名 `plans/`**，历史记录里的老写法不改 |
-| `FUTURE.md` | 远期方向登记册：框架迁移、RAW 后端候选、渲染演进、编辑模块、AI、平台扩展 |
-| `REVIEW.md` | **定期评审与方向修正**：每轮 review 的**判断、取舍与去向**（含「当前待办总览」，那是全文件唯一的汇总视图）；维护与纪律见 §5.6。**它只记结论与落点，规格正文一律写回拥有它的那份文件** |
-| `THIRD-PARTY-NOTICES.md` | 第三方组件与参考项目的许可登记 |
-| `design/*.pen` + `design/*.md` | Pencil 设计稿与其说明（成对存在） |
-| `implementations/*.md` | 每次改动的实施记录（文件名带日期，内容首行带精确时间） |
+| `AGENTS.md` | 本文件：定位、硬约束、目录、纪律核心、术语、索引 |
+| `memory/PLAN.md` | 近期计划（未完成排期）、问题清单、决策记录 |
+| `memory/FINISHED.md` | 已完成部分摘要 + 证据指针 + 历史路线附录 |
+| `memory/FUTURE.md` | 远期方向登记册（框架迁移、RAW 后端、渲染演进、AI、平台扩展） |
+| `memory/ARCHITECTURE.md` | 架构与工程基线：前端分层、版本基线、架构决定、调研存档、构建排障、untrack 纪律 |
+| `memory/DESIGN.md` | 视觉与配色体系（唯一事实来源） |
+| `memory/REVIEW.md` | 定期评审与方向修正（结论账本，维护规则见其 §0） |
+| `memory/FUNCTION-BROWSE.md` | 浏览模式规格：三列结构、toolsbar、选择逻辑、看图/对比、胶片带、标签、浮层、术语细则 |
+| `memory/FUNCTION-IMAGING.md` | 图像格式与显示规格（唯一事实源）：格式范围 + 三种图规格 + issue/latest 切换语义 |
+| `memory/FUNCTION-REPOSITORY.md` | 库与导入规格：库身份、导入模版、序号、重名、RAW 分流、目录透传 |
+| `specs/` | 单工作单元的详细方案与需求规格（`<milestone>-<单元>.md`，文件名小写） |
+| `design/*.pen` + `.md` | Pencil 设计稿与说明（成对） |
+| `implementations/*.md` | 实施记录（文件名带日期，内容首行带精确时间） |
+| `docs/` | 给人看的信息文档（用户指南、隐私、发布手册、坐标契约报告等） |
+| `legal/` | 协议原文与许可数据（说明见 `legal/README.md`） |
+| `website/AGENTS.md` | 官网专属指南（独立技术栈） |
+| `docs/native-viewport-coordinate-guide.md` | 原生视口坐标契约完整报告（动原生视口前必读） |
 
 ---
 
 ## 11. 术语约定（词汇表）
 
-> 目的：人机协作时避免歧义。**代码、设计稿、文档、提交信息一律用本表的叫法。**
-> 详细视觉规则见 `DESIGN.md`；本表只管「叫什么」。
+> 代码、设计稿、文档、提交信息一律用本表叫法；详细视觉规则见 `memory/DESIGN.md`，
+> 界面结构细则见 `memory/FUNCTION-BROWSE.md`。
 
 ### 11.1 界面区域
 
-| 术语 | 含义 | 对应节点名 |
+| 术语 | 含义 | 对应节点 |
 | --- | --- | --- |
-| **`titlebar`** | 最上一条：应用图标/名、菜单、拖拽区、主题开关、密度开关、窗口三键 | `TitleBar` |
+| **`titlebar`** | 最上一条：应用图标/名、菜单、拖拽区、主题/密度开关、窗口三键 | `TitleBar` |
 | **`flowbar`** | 第二条：工作流切换（导入/浏览/编辑/导出）+ 图片信息区 + 开关组 | `FlowBar` |
-| **`toolsbar`** | 第三条：工具按钮，**内容居中**、随工作流变、无内容时整行隐藏 | `ToolsBar` |
+| **`toolsbar`** | 第三条：工具按钮，**内容居中**、随工作流变、无内容整行隐藏 | `ToolsBar` |
 | **`workspace`** | 三条下面的工作区，完全跟着工作流走 | `Workspace` |
-| **工作流**（flow） | 导入 / 浏览 / 编辑 / 导出 四个阶段。**是有序流水线**，不是并列选项 | `FlowChip / …` |
-| **`statusbar`** | `mid`（工作区中列）最底部的状态/控制位置；它是**位置术语**，不保证所有前缀都对应同一个组件 | `…StatusBar` / `TilesControlBar` |
+| **工作流**（flow） | 导入 / 浏览 / 编辑 / 导出，**有序流水线** | `FlowChip` |
+| **`statusbar`** | 中列最底部的状态/控制位置；**位置术语**，不保证对应同一组件 | `…StatusBar` |
 
-#### `toolsbar` 的三段式：`left` / `center` / `right`（人类 2026-09-23 口述）
+**toolsbar 三段式**（left / center / right，人类 2026-09-23 定）：mid 按整窗居中占满整条；
+left / right 叠在 mid 之上各自贴边（分别装 workspace 左列 / 右列相关的**面板开关**），
+不参与 mid 宽度计算；挤压时 left/right 不透明底遮住 mid、内侧 20px 渐隐；无内容整行隐藏。
+一组互斥开关：按一个关其它，再按同一个整组关掉；任何档位都允许鼠标开回来。
+细则与画稿见 `memory/FUNCTION-BROWSE.md` §13.1 与 `design/editor.md`。
 
-`toolsbar` 只有 left / mid / right 三层：**mid 始终占整条工具栏 100% 宽度，按钮一组按整窗中心居中**；left/right 叠在 mid 上方，各自贴边，不参与 mid 的宽度计算。
+**statusbar 命名规则**：说 `statusbar` 必须带当前 mid 内容前缀（`tiles statusbar` / `view statusbar` /
+`film statusbar`）——它**跟 mid 组件走，不跟 flow 走**；同一套 tiles 在 import / browse 都叫
+`tiles statusbar`。view 与 film statusbar 服务单张照片，视为同一个东西。
 
-| 说法 | 位置 | 装什么 |
-| --- | --- | --- |
-| **`toolsbar left`** | 最左 | 与 **workspace 左列**内容相关的**面板开关** |
-| **`toolsbar`** / **`toolsbar center`** | 中间 | 该工作流的具体功能按钮（**不加前缀时默认指这里**） |
-| **`toolsbar right`** | 最右 | 与 **workspace 右列**内容相关的**面板开关** |
+**workspace 结构红线**（人类 2026-09-20，不可违反）：workspace 下**只有纵向分列，没有跨列行**，
+每条列自己到底；一切「底部信息条」住在它所属的那一列里。
+（三处同源记述：本节 + `memory/DESIGN.md` §8.7 + `memory/FUNCTION-BROWSE.md` §5.8。）
 
-- **不加前缀的 `toolsbar` 就是 mid 的居中按钮组**；组内「最左/最右」只表示顺序，不另分对齐区域。
-- 一侧可以是一**组互斥开关**（如 editor 左段的「多个左列面板」）：按下其中一个会关掉同组其他项，
-  再按同一个则整组关掉；**任何档位下都允许用户用鼠标把它们开回来**。
-- **挤压行为**：窗口变窄时，mid 仍保持全宽且按钮组按整窗居中；left/right 的不透明底遮住底下的 mid，
-  各自内侧附 20px 渐隐。渐隐只负责遮罩，不承载按钮。
-- 无内容时整行隐藏（原规则不变）。
-
-设计稿：`design/editor.pen` 的 `Components / Editor / ToolsBar 三段式`（常态 + 挤压态）。
-
-#### `statusbar` 的命名规则（人类 2026-09-20 口述）
-
-- 说 `statusbar` 时通常必须带**当前 mid 内容**前缀：`tiles statusbar`、`view statusbar`、
-  `film statusbar`；不要按 flow 说 `import statusbar` / `browse statusbar`。
-- 原因：statusbar **跟着 mid 的组件走，不跟 flow 走**。同一套 tiles 无论出现在 import 还是 browse，
-  都叫 `tiles statusbar`（组件相同、配置与持久化数据源可以不同）。
-- `statusbar` 只是“中列最底这个位置”的统称，**不意味着是同一个控件**：
-  `tiles statusbar` 与 `film statusbar` 可以是不同内容/组件。
-- 目前 `view statusbar` 与 `film statusbar` 都服务单张照片，视为同一个东西，不必人为拆成两套；
-  compare 也复用看图状态栏的照片事实。
-
-#### `workspace` 的结构红线（人类 2026-09-20 口述，**不可违反**）
-
-> 「记住在 workspace 下**只有纵向分列，没有跨列行**！workspace 必然是每一列到底。」
-
-- workspace 里只有**竖着切出来的列**（左 / 中 / 右），**没有横跨整个工作区的行**；
-  每一条列都**自己到底**（从条带下面一直伸到窗口底边）。
-- 所以**不允许**任何“在三列下面再铺一条全宽的东西”的布局：
-  它一跨列，左右两列的底边就参差不齐，看着像贴了两个断层。
-- 一切“底部信息条”都住在**它所属的那一列里面**：
-  * 中列 = `tiles` 的状态栏（`components/ui/tiles/TilesControlBar.tsx`，
-    **看图（view / compare / film）与 tiles 是同一条**，看图时只换内容：
-    文件名 + 锁 + 标记 —— 见 `components/ui/tiles/TilesControlBar.tsx` 的 `PhotoStatusBar`）；
-  * 左列 = 库列表 / 目录树自己的容器（目录树往下延伸到底）；
-  * 右列 = 信息栏（EXIF / 预览 + 直方图）自己滚到底。
-- 反例（2026-09-20 修掉的）：看图时那条 `ViewerStatusBar` 曾是三列下面**全宽**的一行；
-  它既跨列，又与 tiles 状态栏重复了一份“当前照片”的实现 —— 两个错加在一起。
-
-> 这条与 `DESIGN.md` §8.7、`BROWSE.md` §5.8 是同一件事的三处记述（术语 / 视觉 / 功能），
-> 改一处要同时改另外两处。
-
-### 11.2 两个最容易混淆的状态（**必须分清**）
+### 11.2 勾选（check）vs 选中（select）——必须分清
 
 | 术语 | 含义 | 表现 | 范围 |
 | --- | --- | --- | --- |
-| **勾选**（check） | 「**已加入待处理集合**」（如加入待导入目录） | 左侧**圆形主色勾选框** | **可多选**，互不影响 |
-| **选中**（select） | 「**当前正在看/正在操作的对象**」 | 整行/整片**主色底** | **同一时间全局只有一个**（按时间模式下选中可以是一个时间片或一天） |
+| **勾选** | 「已加入待处理集合」 | 左侧圆形主色勾选框 | 可多选，互不影响 |
+| **选中** | 「当前正在看/正在操作的对象」 | 整行/整片主色底 | **同一时间全局只有一个** |
 
-- 两者**互相独立**：一行可以「已勾选且未选中」。
-- **勾选**要用户显式去点那个圈；**选中**往往是「点行本身」的结果。
-- 跨面板（`最近` ↔ `来源`）的**选中状态是同一个状态**，必须同步。
-- ❗ **不要因为某目录被选中而强制展开树** —— 展开只跟用户操作相关（`DESIGN.md` §12.4.1）。
+两者互相独立；勾选要显式点圈，选中是「点行本身」的结果；跨面板的选中状态是同一个状态，必须同步。
+❗ 不要因为某目录被选中而强制展开树（`memory/DESIGN.md` §12.4.1）。
 
-### 11.3 移除 / 排除 / 删除（三者不同）
+### 11.3 移除 / 排除 / 删除（三者不同，统一用禁行图标，不用叉号）
 
-| 术语 | 含义 | 图标 | 弹窗 |
-| --- | --- | --- | --- |
-| **移除**（remove） | 从**当前集合**里拿掉（如从「最近」列表、已选目录中去掉） | **禁行图标**（填充圆 + 横杠） | 默认要，`Shift` 点击跳过 |
-| **排除**（exclude） | 本次导入**不带这张照片**（但不动库、不动磁盘） | **同一个禁行图标** | 同上 |
-| **删除**（delete） | **移到系统回收站**（`trash` crate）—— **不提供永久删除** | 走 `⋯` / 右键菜单，不给常驻按钮 | 要（**不做 `Shift` 快通道**：它真在动磁盘） |
+| 术语 | 含义 | 弹窗 |
+| --- | --- | --- |
+| **移除**（remove） | 从**当前集合**里拿掉 | 默认要，`Shift` 跳过（`easy destroy`） |
+| **排除**（exclude） | 本次导入不带这张（不动库、不动磁盘） | 同上 |
+| **删除**（delete） | **移到系统回收站**（不提供永久删除；先文件后记录，回收失败不动 DB） | 要（**无 `Shift` 快通道**，它真动磁盘） |
 
-> **统一用禁行图标，不用叉号** —— 因为它们都不是破坏性删除。
->
-> **删除的定案（M2-W1 阶段 4 落地）**：第一阶段只做「移到系统回收站」，**不实现永久删除**。
-> 顺序是**先文件后记录**（回收失败就不动数据库，绝不出现「库里有、磁盘没」）；
-> 空目录的删除（目录树 `⋯` 菜单）同样只删**空**目录，底层只调 `remove_dir` ——
-> 那条路径不可能删到用户的照片。两边都**不走 `easy destroy` 的 `Shift` 快通道**：
-> 那条规则是给「从集合里移除」定的，而这两个动作真在磁盘上留痕。
+### 11.4 组件 × 工作流的组合表达
 
-### 11.4 组件 × 工作流的组合表达（用户 2026-09-18 定）
-
-**四个工作流**：`import` / `browse` / `edit` / `export`（顺序即流水线顺序）。
-
-**workspace 里的组件**（中间列会在前三个之间切换）：
+四个工作流 `import` / `browse` / `edit` / `export`（顺序即流水线）。workspace 中列组件：
 
 | 词 | 指什么 |
 | --- | --- |
-| **`tiles`** | **图片列表**组件（网格 / 列表，一次多张） |
-| **`view`** | **单张图片查看**组件 |
-| **`film`** | 上下结构：上面看图片（一张或多张），下面是一行**横向**把该目录下照片排开的胶片带 |
-| **`editor`** | **Rust 原生 GPU 驱动**的相片编辑界面 |
+| **`tiles`** | 图片列表组件（网格/列表，一次多张） |
+| **`view`** | 单张图片查看 |
+| **`film`** | 上看图 + 下横向胶片带 |
+| **`editor`** | Rust 原生 GPU 驱动的编辑界面 |
 
-**workspace 的左 / 中 / 右**三列，用「工作流 + 位置」组合表达：
+位置组合：`import left` / `browse mid` / `export right`（位置级）；更常说 `browse tiles` / `browse view` / `browse film`。
+这套词只描述位置与职责，不指定实现文件。
 
-- `import left` / `browse mid` / `export right` —— 位置级；
-- 中间更常说具体模式：**`browse tiles`** / **`browse view`** / **`browse film`**。
-
-> 这套词只描述**位置与职责**，不指定实现文件；文档、设计稿、提交信息里一律用这套叫法。
-
-**tiles / view / film / compare 的结构红线（2026-09-20）**：
-
-- import 与 browse 的中列照片区域必须经过同一个 `PhotoViewingStage` 与
-  `PhotoViewingController`；工作区只提供 `TilesSource` 数据适配、statusbar 配置与外围栏数据。
-- `PhotoGrid` 进入 view / film / compare 时**只能隐藏，不能卸载**。虚拟列表、scrollTop、
-  选择与退出后的焦点接续都依赖同一颗长期存在的网格实例。
-- 胶片带选择与对比锚点只能调用 `TilesSource.select / setAnchor`，不得在工作区再拼一套选择逻辑；
-  import / browse 的 id、分页、元数据补读差异留在 adapter / store。
-- 胶片带尺寸组件仍只有一份，但 import / browse 的尺寸偏好必须分开：根层的
-  `film-strip-prefs.ts` 通过通用 `setting_get / setting_set` 写 `app.db.settings`，各自 2 秒防抖；
-  禁止把数据库调用塞进 `FilmStrip` 或再建第二套胶片带。view 与胶片带交界处的三点缩放把手
-  必须复用 `SplitHandle`，并且只把位移量化到同一套 17 档，禁止另存一份自由高度。
-- tiles statusbar 只能由 `TilesShell` 装配。受控滑杆更新配置时不得重建 `TilesControlBar` DOM，
-  否则拖动会在第一格之后断掉。
-  **这条 2026-09-23 又犯了一次，而且修的时候按死了另一个功能 —— 教训成对记在 §2.17**：
-  * A 面：`BarFrame` 透传 children 没 `untrack` → Ark 的 `SliderRoot` 创建时**同步**读走
-    `props.value`（tileStep），那次读被记在 `insert()` 那个 render effect 头上 → 值一变整条栏重建
-    → 缩放杆「拖一格就断」；
-  * B 面：把 `untrack` 提到 `TilesShell` 的组件 body 里 → 网格在 `TilesFitRequestContext.Provider`
-    **外面**被造 → `useTilesFitRequest()` 拿到 `undefined` →「横向适合窗口」按钮按不动
-    （**修好拖动、按死自动宽度**）；
-  * ✅ 正解：`{untrack(() => props.children)}` 写在**插入点**（见 §2.17）；
-  * 回归：`scripts/check-browse-boot.mjs` 的「缩放滑块拖动」+「横向适合窗口」**两段**，
-    分别钉住 A 面与 B 面；新增「拖拽类」控件时照抄这份判据 —— **别只断言值变了**。
+**结构红线**（详见 `memory/FUNCTION-BROWSE.md` §5.1/§5.8/§13.2）：
+import 与 browse 的照片区必须经同一个 `PhotoViewingStage` / `PhotoViewingController`；
+`PhotoGrid` 进 view / film / compare **只能隐藏，不能卸载**；胶片带选择只调 `TilesSource.select / setAnchor`；
+胶片带尺寸组件只有一份、偏好按工作流分开持久化；`TilesControlBar` 只能由 `TilesShell` 装配
+（受控滑杆不得重建它的 DOM——untrack 纪律见 §2.17 / `memory/ARCHITECTURE.md` §9）。
 
 ### 11.5 其他常用术语
 
 | 术语 | 含义 |
 | --- | --- |
-| **库**（repository / repo） | 用户选择的相片仓根目录。**没有库就无法导入** |
+| **库**（repository） | 用户选择的相片仓根目录；**没有库就无法导入** |
 | **来源**（source） | 待导入的目录（磁盘 / NAS / 云） |
-| **最近**（Recent） | 自动记录的最近 50 个导入目录（**不需要用户收藏**） |
-| **已选目录** | 已勾选、准备导入的目录集合（**横条列表**形式） |
-| **`shortpath`** | 路径缩写形式：盘符 + 中间各级首字母 + 末级全名。两层算法见 `DESIGN.md` §12.3 |
-| **`flowinfo`** | **flowbar 右侧的图片信息区**（机型/曝光/尺寸三组 `easy copy`）。口径（人类 2026-09-19 定）：**跟随当前工作流** —— 切到哪个 flow 就显示那个 flow 当前选中的那张，没选中就**清空**（不留上一个 flow 的残留）。实现见 `App.tsx` 的 `flowInfo` |
-| **`easy copy`** | 指向某个信息组 → 出细边框 + `点击复制` 气泡；点击后弹 `已复制` |
-| **`easy destroy`** | 移除类操作的快速通道：默认弹确认，**按住 `Shift` 跳过** |
-| **反转**（inversion / `TilesSource.invertedCtrl`） | **单击 ↔ `Ctrl`+单击 可以对调**（人类 2026-09-26 钉定：「那个叫**反转**，反转是一种**固有能力**」）。标准：单击 = 替换只选这一张、`Ctrl` = 加减一张；反转后：单击 = 多选、`Ctrl` = 只要这一张。⚠️ **这是一等的、受支持的能力，不是特例也不是 bug**（人类明确要求「正统支持」，并要求在 M4 里完善）。开关挂在**数据源**上 ⇒ **按工作流 / 按面**适配，**不是全局设置**；判定唯一一处 `lib/selection.ts::clickMode`，新增反转面**不许另写第二份修饰键判定**。目前开启：**导出画廊**（issue 小片 + 画廊网格）。完整口径见 `BROWSE.md` §5.2.4 |
-| **回退**（fallback） | **`Shift`+`Ctrl`+单击不是操作**（人类 2026-09-26 钉定：「设定上不存在这个操作，可能永远也不会出现」——他**从来反对按住两个辅助键才能实现的功能**，类比苹果反对鼠标右键）。为避免出现意外的操作功能，对该组合做了**捕获**，并**回退到「当前场景的单击」**。❗**回退到什么由当前场景决定**：标准场景回退到 `replace`（只选这一张），反转场景回退到 `toggle`（加减这一张）。它**没有自己的语义**，**不要**给它设计行为。见 `BROWSE.md` §5.2 表下的注 |
-| **`issue`（定稿）** | 一张图的一个**非破坏性定稿版本**。一张图可有多个 issue，各有独立预览；`SOOC` 是**写死的特殊 issue**（= 相机直出 JPG），不可编辑、不可被改名占用。见 `FUTURE.md`「issue 与 SOOC」 |
-| **取消 / 确认 的按钮顺序** | **全系统统一：取消一律在左，确认（往前进类，如「创建」「导入」「定稿」）一律在右**（人类 2026-09-23 定） |
+| **最近**（Recent） | 自动记录的最近 50 个导入目录 |
+| **已选目录** | 已勾选、准备导入的目录集合（横条列表） |
+| **`shortpath`** | 路径缩写：盘符 + 中间各级首字母 + 末级全名（`memory/DESIGN.md` §12.3） |
+| **`flowinfo`** | flowbar 右侧图片信息区；**跟随当前工作流**，没选中就清空 |
+| **`easy copy`** | 指向信息组 → 细边框 +「点击复制」气泡；点击后变「已复制」 |
+| **`easy destroy`** | 移除类快速通道：默认弹确认，`Shift` 跳过 |
+| **反转**（inversion） | 单击 ↔ `Ctrl`+单击可对调的**固有能力**（开关挂在数据源上，按工作流/面适配）；判定唯一处 `lib/selection.ts::clickMode`。口径 `memory/FUNCTION-BROWSE.md` §5.2.4 |
+| **回退**（fallback） | `Shift`+`Ctrl`+单击**不是操作**（设定上不存在）；该组合被捕获并回退到当前场景的单击（标准=replace，反转=toggle）。**没有自己的语义，不要为它设计行为** |
+| **`issue`（定稿）** | 一张图的一个非破坏性定稿版本，可多个、各有独立预览；`SOOC` 是写死的特殊 issue（相机直出 JPG）。见 `memory/FUNCTION-IMAGING.md` 与 `specs/issue-xmp-contract.md` |
+| **取消 / 确认按钮顺序** | 全系统统一：**取消在左，确认（往前进类）在右** |
 | **中性面**（neutral surface） | 四级灰面：`surface-track` < `surface-main` < `surface-bar` < `surface-layer` |
-| **主色底 / 辅色底** | 全局反馈规则：**指向=辅色底，点击后=主色底**（`DESIGN.md` §5） |
-| **紧凑 / 宽松**（compact / loose） | 全局只有两档密度。**只影响间距类尺寸，不影响字号与图标大小** |
-| **按时间分组 / 时间片** | 见 `DESIGN.md` §12.7。同一拍摄日内，相邻间隔 > 1 小时则断为新片 |
-| **内嵌预览**（embedded preview） | 相机写在 RAW 里的 JPEG 预览。提取比完整解码快 1–2 个数量级 |
-| **编辑栈**（develop stack） | 对一张照片的全部非破坏性编辑操作的序列；定稿后落成一个 **issue**。M3 起进入主线（不再后置） |
-| **`fullscreen`**（全屏看图） | **无 UI 的沉浸式单图浏览**：另开一扇**无边框窗口**、按**主窗口所在那块屏幕**全屏，默认适应窗口、双击 100%、滚轮缩放、`←/→`/`PgUp/PgDn` 切图（到头停）、`Esc`/`Enter` 退出。命令 `viewer.fullscreen`，默认键 **`F11`**；入口在 flowbar 右端（跟随 picture info 显示）。实现：`src/features/fullscreen/` + `src-tauri/src/fullscreen.rs`。⚠️ 与「主窗口里的看图态」（view / film / compare）是**两回事**，别混 |
-| **`shortcut`**（快捷键） | 统一命令注册表里的**默认键位**（`CommandSpec.defaultKey`）：它决定该命令出现在**快捷键设置面板**与 `Ctrl+K` 命令面板里的键位；冲突检测与保留键规则见 `lib/commands.ts` / `lib/key-chords.ts`。新增功能时的必选动作见 §2.15 |
-| **动态反差**（Dynamic Contrast） | 一根拉杆的**局部色调映射**（参数 id `dynamicContrast`，0–100 单极，0 = 完全不动画面）：**压整体光比 + 抬局部反差**。与 `contrast`（全局反差曲线）不是一回事 —— 它多了一个**空间维度**，所以能同时做这两件在逐像素曲线上数学互斥的事。算法见 `crates/raybend/src/develop/local_tone.rs`（分解用 `filters.rs` 的引导滤波）。住在编辑器「影调」页签（与曝光/反差同组），走与其它参数一样的落库 / 撤销 / 重置链路 |
+| **主色底 / 辅色底** | 全局反馈：**指向=辅色底，点击后=主色底** |
+| **紧凑 / 宽松** | 全局两档密度；只影响间距，不影响字号与图标大小 |
+| **按时间分组 / 时间片** | 同一拍摄日内相邻间隔 > 1 小时断为新片（`memory/DESIGN.md` §12.7） |
+| **内嵌预览**（embedded preview） | 相机写在 RAW 里的 JPEG 预览，提取快 1–2 个数量级 |
+| **编辑栈**（develop stack） | 全部非破坏性编辑操作的序列；定稿落成 issue |
+| **`fullscreen`** | 无 UI 沉浸式单图浏览（独立无边框窗口，`F11`）；与主窗口看图态是两回事 |
+| **`shortcut`（快捷键）** | 命令注册表里的默认键位（`CommandSpec.defaultKey`）；新功能必选项（§2.15） |
+| **动态反差**（Dynamic Contrast） | 一根拉杆的局部色调映射（`dynamicContrast`，0–100 单极）；与全局 `contrast` 不是一回事 |

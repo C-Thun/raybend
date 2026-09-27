@@ -149,7 +149,7 @@ pnpm release:finalize /mnt/c/rb-target/raybend-release/release/bundle \
 
 ## 6. MSIX 商店路线（本轮后移）
 
-崔总 2026-09-27 明确：登记 FUTURE 后续独立启动，本轮先完成直下发行链。正式落点为 FUTURE.md 的 Windows MSIX 分发条目；没有把它列成本轮发布的前置。同日下午拍板（REVIEW.md R3-01）：**官网直下走通后即启动 MSIX**，定位是「零现金成本解决 Windows 安装体验」的主攻方向——它与直下是并行的两条分发通道，不是证书的替代品；发布顺序见 REVIEW.md §8。
+崔总 2026-09-27 明确：登记 FUTURE 后续独立启动，本轮先完成直下发行链。正式落点为 memory/FUTURE.md 的 Windows MSIX 分发条目；没有把它列成本轮发布的前置。同日下午拍板（memory/REVIEW.md R3-01）：**官网直下走通后即启动 MSIX**，定位是「零现金成本解决 Windows 安装体验」的主攻方向——它与直下是并行的两条分发通道，不是证书的替代品；发布顺序见 memory/REVIEW.md §8。
 
 仍需您开户、预留产品名并取得 Partner Center 的 Package Identity Name/Publisher；目前没有这些实际身份，不能提交有效 MSIX。Tauri 官方当前教程覆盖 EXE/MSI，MSIX 需要另用 Windows SDK MakeAppx/打包工具包装，不能复用 NSIS 直接上传冒充 MSIX。
 

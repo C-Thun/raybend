@@ -1,5 +1,5 @@
 /**
- * 命令模块的对外出口（`ARCHITECTURE.md` §2：别的层只能从这里拿东西）。
+ * 命令模块的对外出口（`memory/ARCHITECTURE.md` §2：别的层只能从这里拿东西）。
  */
 
 export { createCommandRegistry, type CommandDeps } from "./catalog.ts";

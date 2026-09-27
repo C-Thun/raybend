@@ -1,5 +1,5 @@
 /**
- * 渲染 spike 的 IPC 封装（`src/` 里只有本目录可以直接 `import invoke`，见 `ARCHITECTURE.md` §1.1）。
+ * 渲染 spike 的 IPC 封装（`src/` 里只有本目录可以直接 `import invoke`，见 `memory/ARCHITECTURE.md` §1.1）。
  *
  * ⚠️ **这里的类型不进 `dto-contract.json`**：契约那套是给**产品**的 IPC 用的
  * （防的是产品功能静默漂移）。spike 是开发期诊断工具，`?spike=1` 才会加载，

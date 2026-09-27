@@ -1,5 +1,5 @@
 /**
- * 胶片带（`BROWSE.md` §5.5、`design/browse.md` §2.5、`specs/M2-W2.md` 2.1）。
+ * 胶片带（`memory/FUNCTION-BROWSE.md` §5.5、`design/browse.md` §2.5、`specs/M2-W2.md` 2.1）。
  *
  * ```text
  * ┌───────────────────────────────────────────────────────────────┐  tile 高 + 上下各 8px
@@ -19,7 +19,7 @@
  *
  * ## 三条纪律
  *
- * 1. **选择逻辑与 tiles 完全一致**（`BROWSE.md` §5.2）——不是「照着写一遍」，
+ * 1. **选择逻辑与 tiles 完全一致**（`memory/FUNCTION-BROWSE.md` §5.2）——不是「照着写一遍」，
  *    而是真的共用：修饰键 → 模式走 `lib/selection.ts` 的 `clickMode()`，
  *    区间/翻转语义走同一个 `store.select()`。这里**没有**第二套选择代码。
  * 2. 列表就是**看图件手里那份**（`viewer.state().photos`）——所以胶片带与看图
@@ -76,7 +76,7 @@ export interface FilmStripProps {
   thumbs: ThumbQueue;
   /**
    * **只显示这几张**（按给定顺序）—— 对比态下再按一次回车进入的那种状态
-   * （`BROWSE.md` §5.5、`specs/M2-W2.md` 2.4）。不传 = 显示全部。
+   * （`memory/FUNCTION-BROWSE.md` §5.5、`specs/M2-W2.md` 2.4）。不传 = 显示全部。
    *
    * 进入这个状态时：整条胶片带加 **1px 主色细边框**，而且**即使不按 Ctrl**，
    * 点一张也是「带 Ctrl 的效果」（点什么就把什么移出对比）。
@@ -190,7 +190,7 @@ export function FilmStrip(props: FilmStripProps): JSX.Element {
   /**
    * 移出一张之后，画面落到**还在对比里的那一张**（就近）。
    *
-   * `BROWSE.md` §5.5 的收尾：「直到只剩一幅图时……**在胶片带中定位到这最后一张图的位位置**」。
+   * `memory/FUNCTION-BROWSE.md` §5.5 的收尾：「直到只剩一幅图时……**在胶片带中定位到这最后一张图的位位置**」。
    * 推而广之：只要被点掉的正是当前那张，就该退到仍在对比里的邻居 ——
    * 否则画面会停在**已经移出对比**的那张上（右栏与状态栏也会跟着错位）。
    */
@@ -233,7 +233,7 @@ export function FilmStrip(props: FilmStripProps): JSX.Element {
       if (wasCurrent) goToSurvivor(photo, keep);
       return;
     }
-    // ② 看哪张：点它就切到它（`BROWSE.md` §5.7）；下标要按**全列表**算
+    // ② 看哪张：点它就切到它（`memory/FUNCTION-BROWSE.md` §5.7）；下标要按**全列表**算
     if (at >= 0) props.viewer.goTo(at);
   };
 
@@ -394,7 +394,7 @@ export function FilmStrip(props: FilmStripProps): JSX.Element {
                 )}
               </Show>
 
-              {/* 锁徽标（`BROWSE.md` §3.1：锁在 tiles / 看图 / 胶片带上都要看得出来） */}
+              {/* 锁徽标（`memory/FUNCTION-BROWSE.md` §3.1：锁在 tiles / 看图 / 胶片带上都要看得出来） */}
               <Show when={lockLevel() > 0}>
                 <span
                   class="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-ui text-fg-1"

@@ -5,7 +5,7 @@
  *
  * 1. **不需要用户收藏**：这份列表由「勾选目录」这个动作自动维护（写入在
  *    `workspaces/import/store.ts` 里），界面只负责显示与移除；
- * 2. **显示缩写路径（`shortpath`），完整路径走悬停**（`DESIGN.md` §12.3）——
+ * 2. **显示缩写路径（`shortpath`），完整路径走悬停**（`memory/DESIGN.md` §12.3）——
  *    所以行内容用 `PathText` 而不是纯文字（`TreeNode` 的 `labelNode` 槽）；
  * 3. **勾选与选中是两件事**：左侧圆圈管勾选（可多选），整行底色管选中
  *    （同一时间只有一个）；点行只选中，点圆圈只勾选。
@@ -32,7 +32,7 @@ export interface RecentListProps {
   status: LoadStatus;
   /** 读失败时给用户看的原因（`status === "error"` 时才有意义） */
   error: string | null;
-  /** 这一条是不是**当前被浏览**的目录（跨面板同步由调用方决定，见 `DESIGN.md` §12.4.1） */
+  /** 这一条是不是**当前被浏览**的目录（跨面板同步由调用方决定，见 `memory/DESIGN.md` §12.4.1） */
   isSelected: (path: string) => boolean;
   /** 这一条有没有被勾选（要加入导入） */
   isChecked: (path: string) => boolean;

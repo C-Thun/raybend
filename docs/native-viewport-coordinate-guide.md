@@ -235,7 +235,7 @@ WGSL 着色器共用原实现，没有增加像素回读/IPC/浏览器解码的�
   不能据此推导它已经实现 DirectComposition 隔离或解决所有拖动问题。
 
 平台接入现收口到 `PresentationAdapter`，接口边界与以后 macOS/Linux 的扩展方式以
-[ARCHITECTURE.md §2.1](../ARCHITECTURE.md) 为准。
+[memory/ARCHITECTURE.md §2.1](../memory/ARCHITECTURE.md) 为准。
 详细依赖版本、调用点及官方依据见
 [调查记录](../implementations/2026-09-25_editor-offscreen-composition-investigation.md)；
 默认固化与适配器验证见

@@ -3,7 +3,7 @@
 > **处理状态（2026-09-24 14:55 更新）**：§2 的十条里 **九条已完成**，
 > 实施记录见 `implementations/2026-09-24_w3-bug-batch-histogram-orientation-panels.md`；
 > **§2.5 未做**（语义歧义 + latest 缓存是 AVIF、当前没有 AV1 解码器，需要人类拍板）；
-> §3 的优化设想按约定未动（已登记 `FUTURE.md` D1.5）。
+> §3 的优化设想按约定未动（已登记 `memory/FUTURE.md` D1.5）。
 >
 > **交接时间**：2026-09-24 12:35:23 CST
 > **上一段会话做了什么**：见 §1（六个提交，M3-W3 已交付：显影管线 / 编辑栈 / 曲线 / 撤销 / AVIF 缓存 / 大图缓存 / issue 解析）。
@@ -60,7 +60,7 @@ pnpm debug:win            # 上面这一整套 + 产物核对（worker 也查）
 实施记录：`implementations/2026-09-24_m3-w3-develop-pipeline-and-cache.md`（含全部实测数字、AVIF 编码耗时、验收清单、遗留项）。
 计划：`specs/M3-W3.md`（标注已交付）。
 
-**关键口径（别改错）**：参数只存非默认值；issue 只有 `latest` + 虚拟 SOOC/RAW；编辑落在 `_RAW/` 的 RAW 上（`REPOSITORY.md` §4.1）；
+**关键口径（别改错）**：参数只存非默认值；issue 只有 `latest` + 虚拟 SOOC/RAW；编辑落在 `_RAW/` 的 RAW 上（`memory/FUNCTION-REPOSITORY.md` §4.1）；
 色温是绝对 K（基线 = as-shot，随 issue 存 `develop_stacks.as_shot_k`）；缓存图一律 AVIF 90 / 4:4:4。
 
 ---
@@ -134,7 +134,7 @@ pnpm debug:win            # 上面这一整套 + 产物核对（worker 也查）
   每次都去解码 RAW（20MP ≈ 1.6s），而磁盘上可能已经有 `cache/full/<asset>/latest-v6.avif` 或那张 JPG。
 * **建议方向（有一层歧义，动手前先跟人类对齐）**：
   * 若只是「**先看到图**」：先显示 latest 缓存 / SOOC / RAW 的既有渲染（秒开），
-    再在后台解码 RAW 供编辑用（编辑必须落在 RAW 上 —— `REPOSITORY.md` §4.1 的口径不变）；
+    再在后台解码 RAW 供编辑用（编辑必须落在 RAW 上 —— `memory/FUNCTION-REPOSITORY.md` §4.1 的口径不变）；
   * 若人类要的是「**就用那份**」：那要注意 latest 缓存是**按当时参数渲染的**，拿它当编辑源会丢参数；
     真要这么做得先把参数读回来再套用（可行，但等于用缓存当「预览底」）。
   * 两条路都要**保持「编辑目标仍是 RAW」**，否则「编辑落在 RAW 上」这条口径就破了。

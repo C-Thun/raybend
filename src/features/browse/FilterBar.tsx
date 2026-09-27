@@ -1,5 +1,5 @@
 /**
- * 筛选结果区（`BROWSE.md` §3.1、`specs/M2-W2-tail.md` 3.3/3.4、画布 `States / 浏览状态` 的 ②）。
+ * 筛选结果区（`memory/FUNCTION-BROWSE.md` §3.1、`specs/M2-W2-tail.md` 3.3/3.4、画布 `States / 浏览状态` 的 ②）。
  *
  * ```text
  * │ (≥3 星 ×) (红色 ×) (有旗标 ×)   共 42 张            [全部 | 任一] │
@@ -65,7 +65,7 @@ export function FilterBar(props: FilterBarProps): JSX.Element {
       <div
         data-filter-bar="open"
         class={[
-          // **无边线设计**（DESIGN.md §6）：面板之间靠面色区分，不上分隔线
+          // **无边线设计**（memory/DESIGN.md §6）：面板之间靠面色区分，不上分隔线
         "flex min-h-8 shrink-0 flex-wrap items-center gap-1.5 px-2 py-1",
           props.class ?? "",
         ]

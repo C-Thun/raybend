@@ -21,7 +21,7 @@
 //! - [`stats`]：帧时间统计与 spike 报告（自记录，供 `pnpm spike:win` 落盘）
 //!
 //! 调试窗口开在 `src-tauri/src/spike_viewport.rs`（`label = "spike-viewport"`），
-//! **不动主窗口** —— 即使透明挖洞彻底失败也不影响别的部分（`PLAN.md` A.2 的窗口策略）。
+//! **不动主窗口** —— 即使透明挖洞彻底失败也不影响别的部分（`memory/PLAN.md` A.2 的窗口策略）。
 //! 主窗口里的编辑视口是 `src-tauri/src/editor.rs`（M3-W2），**复用**同一个 [`gpu::GpuContext`]。
 
 pub mod color;

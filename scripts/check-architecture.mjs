@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
- * 分层依赖检查（ARCHITECTURE.md §4 的落地）。
+ * 分层依赖检查（memory/ARCHITECTURE.md §4 的落地）。
  *
  * 为什么需要脚本而不是靠自觉：分层规则一旦被违反，**不会报错、不会崩**，
  * 只会在半年后表现为「改一个模块要连着改五处」。那种债只能靠机器拦住。
  *
- * 规则（`ARCHITECTURE.md` §1/§2）：
+ * 规则（`memory/ARCHITECTURE.md` §1/§2）：
  *   1. import 只能来自**允许的更低层**（见 LAYERS 的 mayImport）
  *   2. `src/features/` 下的模块**互不 import**（同一个模块内部怎么互相引都行）
  *   3. `src/dev/**` 是开发期陈列室，**豁免**（它天生要 import 一切）
@@ -192,7 +192,7 @@ for (const file of walk(SRC)) {
 }
 
 if (violations.length === 0) {
-  console.log("✓ 分层依赖合规（ARCHITECTURE.md §1/§2）");
+  console.log("✓ 分层依赖合规（memory/ARCHITECTURE.md §1/§2）");
   process.exit(0);
 }
 
@@ -202,7 +202,7 @@ for (const v of violations) {
   console.error(`    ${v.detail}`);
 }
 console.error(`
-允许的依赖方向见 ARCHITECTURE.md §1；一级模块之间要通信，请经过
+允许的依赖方向见 memory/ARCHITECTURE.md §1；一级模块之间要通信，请经过
 src/workspaces/ 的组合层或 App 提供的 app store，不要在模块之间直接 import。
 
 如果命中的是「前端不碰像素」：像素/色彩的处理属于 Rust 侧（AGENTS.md §6.1 的红线），

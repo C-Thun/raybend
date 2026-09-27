@@ -5,7 +5,7 @@
  * that is the completeness guarantee (no runtime test needed).
  *
  * Wording follows UI conventions for photo software rather than word-for-word
- * translation of the Chinese. See DESIGN.md §11.
+ * translation of the Chinese. See memory/DESIGN.md §11.
  */
 
 import type { MessageKey } from "./index.ts";
@@ -533,7 +533,7 @@ export const enUS: Record<MessageKey, string> = {
  // ── 命令注册表 / 命令面板 / 快捷键（M2-W3）────────────────
  "palette.placeholder": "Type a command…",
  "palette.empty": "No matching commands",
- // 灰掉的行要说明「为什么现在不能用」（DESIGN.md §12.11 第 3 条）
+ // 灰掉的行要说明「为什么现在不能用」（memory/DESIGN.md §12.11 第 3 条）
  "palette.unavailable.when": "Not available here",
  "palette.unavailable.enabled": "Not available right now",
  "shortcuts.title": "Keyboard shortcuts",

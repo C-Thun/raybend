@@ -1,7 +1,7 @@
 # 品牌资产落地 + 启动闪屏（M2 前的题外工作）
 
 > 状态：**已定稿（人类 2026-09-17 答复了 4 个问题，见文末「已定」）**
-> 关联：`AGENTS.md` §2.9（新依赖先讨论）、§5.3（Windows 构建与校验）、§6.1（透明挖洞的渲染风险）、`DESIGN.md` §1.1（品牌色）
+> 关联：`AGENTS.md` §2.9（新依赖先讨论）、§5.3（Windows 构建与校验）、§6.1（透明挖洞的渲染风险）、`memory/DESIGN.md` §1.1（品牌色）
 
 ## Context
 
@@ -109,7 +109,7 @@ public/splash/splash-en.webp
 > **数组整体替换** —— `AGENTS.md` §5.3 第 6 条），所以 WSL 侧的 dev 构建里**根本没有 splash 窗口**、
 > 主窗口也没有 `visible: false` —— 与「dev 不弹」的目标一致。`lib.rs` 里一律用
 > `get_webview_window(...)` 的 `Option` 判断，窗口不存在时静默跳过。
-> Linux 产品版要不要闪屏属于远期（`FUTURE.md` 的平台扩展），本次不碰。
+> Linux 产品版要不要闪屏属于远期（`memory/FUTURE.md` 的平台扩展），本次不碰。
 
 **随机中/英**：`public/splash.html` 里一段**内联同步脚本**，在首次绘制前把 `<img>` 的 `src`
 设成 cn 或 en（`Math.random() < 0.5`），并把结果记在 `<html data-splash="cn|en">` 上便于排查。
@@ -256,7 +256,7 @@ onMount(() => {
 | `src-tauri/tauri.linux.conf.json` | **不用改** —— 它重复了整份 `app.windows`（数组整体替换），于是 Linux dev 里没有 splash 窗口、主窗口也保持可见，正好就是「dev 不弹且不等」 |
 | `src-tauri/src/lib.rs` | `setup()` 里 `show()` 闪屏 + 兜底线程；新命令 `ui_ready` |
 | `src-tauri/icons/*` | 由 `pnpm tauri icon` 重新生成 |
-| `design/main.md`、`DESIGN.md` | 记一笔：标题栏图标换成真 logo；闪屏的规格 |
+| `design/main.md`、`memory/DESIGN.md` | 记一笔：标题栏图标换成真 logo；闪屏的规格 |
 | `THIRD-PARTY-NOTICES.md` | 若 logo/splash 是外部素材（AI 生成或委托），注明来源与授权 |
 | `src/i18n/index.ts`、`src/i18n/en-US.ts`、`src/api/import.ts` | pi-lens 的 4 条真·琐碎（补 `.ts` 扩展名 ×3、去掉中转变量 ×1） |
 | `src/components/ui/Form.tsx`、`RemoveButton.tsx`、`tokens.ts`、`src/lib/build-info.ts`、`src/lib/clipboard.ts` | 给「误报但每次都刷屏」的几处加 `// pi-lens-ignore:` 注释（含理由） |
@@ -280,10 +280,10 @@ onMount(() => {
 - [x] 6. `lib.rs`：setup 里 `show()` 闪屏 + `ui_ready` 命令（关闪屏 + 显示主窗口）+ 3 秒兜底
 - [x] 7. `src/api/window.ts` + `App.tsx`：首屏挂载后调 `ui_ready`（浏览器里静默降级）
 - [x] 8. 单测：随机选择（若抽成纯函数）、`ui_ready` 的降级路径；冒烟如需调整（dev 不弹则不用）
-- [x] 9. 文档：`design/main.md` §2.1（标题栏图标）、`DESIGN.md` 变更记录、`THIRD-PARTY-NOTICES.md`（素材来源）
+- [x] 9. 文档：`design/main.md` §2.1（标题栏图标）、`memory/DESIGN.md` 变更记录、`THIRD-PARTY-NOTICES.md`（素材来源）
 - [x] 10. pi-lens：修 4 条真·琐碎 + 给设计使然的加压制注释，重扫确认警告数下降
 - [x] 11. 收尾：`pnpm build` → Windows 产物重建 → `pnpm check:win` → 写 `implementations/` 记录
-      → 把「闪屏目视项」写进 `PLAN.md` 的人类验收清单
+      → 把「闪屏目视项」写进 `memory/PLAN.md` 的人类验收清单
 
 ## Verification
 

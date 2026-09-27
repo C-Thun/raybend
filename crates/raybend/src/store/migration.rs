@@ -79,7 +79,7 @@ pub struct Migration {
 /// `app.db` 的迁移列表。**版本必须从 1 开始连续递增**（有测试守着）。
 ///
 /// * v1 `init`：库注册表 / 路径 / 设置 / 任务队列 / 应用元信息
-/// * v2 `tags`：**标签词典**（跨库公用，BROWSE.md §7.1）
+/// * v2 `tags`：**标签词典**（跨库公用，memory/FUNCTION-BROWSE.md §7.1）
 /// * v3 `recent_dirs`：最近导入过的目录（design/main.md §3.1.1 的「最近」）
 /// * v4 `directory_counts`：**目录级计数**（相片/图片两个数）+ 库级汇总列（人类 2026-09-19）
 pub const APP_MIGRATIONS: &[Migration] = &[
@@ -124,8 +124,8 @@ pub const APP_MIGRATIONS: &[Migration] = &[
 ///
 /// * v1 `init`：库元信息 / 资产 / 文件 / 全文索引 / 序号 / 导入批次
 /// * v2 `marking_tags_geo`：色标·喜欢·锁 / 作者·描述·地理 / EXIF 时区 /
-///   资产↔标签关联 / 全文索引加 `description`（BROWSE.md §3·§7·§9）
-/// * v3 `source_identity`：`asset_files` 的**源身份**列（判重用，REPOSITORY.md §4.3）
+///   资产↔标签关联 / 全文索引加 `description`（memory/FUNCTION-BROWSE.md §3·§7·§9）
+/// * v3 `source_identity`：`asset_files` 的**源身份**列（判重用，memory/FUNCTION-REPOSITORY.md §4.3）
 /// * v5 `develop`：编辑栈（`develop_stacks` / `develop_params` / `develop_curves`，M3-W3）
 /// * v6 `lens`：镜头配置文件 / 启用开关 / 降噪方式（M3-W4）
 /// * v7 `issue_source`：latest 明确基于 SOOC 还是 RAW
@@ -1552,7 +1552,7 @@ mod tests {
 
     #[test]
     fn seq_counters_are_independent_per_width() {
-        // REPOSITORY.md §3.3：同一目录下不同位数各自计数
+        // memory/FUNCTION-REPOSITORY.md §3.3：同一目录下不同位数各自计数
         let mut conn = mem();
         apply(&mut conn, DbKind::Catalog, Backups::none(), 0).unwrap();
         for w in [3, 4, 5] {
@@ -1664,7 +1664,7 @@ mod tests {
 
     #[test]
     fn app_db_allows_same_path_for_different_libraries() {
-        // 「同路径不同库」是明确需求（REPOSITORY.md §2.1）
+        // 「同路径不同库」是明确需求（memory/FUNCTION-REPOSITORY.md §2.1）
         let mut conn = mem();
         apply(&mut conn, DbKind::App, Backups::none(), 0).unwrap();
         for id in ["libA", "libB"] {

@@ -1,4 +1,4 @@
-//! 目标路径规划：一张源照片该落到库里的哪条路径（`REPOSITORY.md` §3.3–§4.3）。
+//! 目标路径规划：一张源照片该落到库里的哪条路径（`memory/FUNCTION-REPOSITORY.md` §3.3–§4.3）。
 //!
 //! 这一步**不碰磁盘、不写数据库**（复制与登记是 `runner` 的事），它只回答两个问题：
 //!
@@ -7,7 +7,7 @@
 //! 2. 要导的话，落到 photos/ 下的哪条相对路径？
 //! ```
 //!
-//! ## 三步算法（顺序不能换，`REPOSITORY.md` §4.2）
+//! ## 三步算法（顺序不能换，`memory/FUNCTION-REPOSITORY.md` §4.2）
 //!
 //! ```text
 //! ① 目录透传：目标目录**从文件反推** —— 每张照片算出自己的目标根，再把源相对层级原样搬下去
@@ -170,7 +170,7 @@ impl Role {
     }
 }
 
-/// 「这张源文件之前导进来过吗」——判重用（`REPOSITORY.md` §4.3）。
+/// 「这张源文件之前导进来过吗」——判重用（`memory/FUNCTION-REPOSITORY.md` §4.3）。
 ///
 /// 两层：**源身份**优先，**源绝对路径折叠 + 大小 + mtime** 兜底
 /// （网络盘/权限不足时读不到身份，那也不能退化成「每张都当新的」）。
@@ -271,7 +271,7 @@ pub trait FsProbe {
     fn file_exists(&self, rel_path: &str) -> bool;
 }
 
-/// 序号分配：按「最终目标目录 + 位数」独立计数（`REPOSITORY.md` §3.3）。
+/// 序号分配：按「最终目标目录 + 位数」独立计数（`memory/FUNCTION-REPOSITORY.md` §3.3）。
 #[derive(Debug, Default, Clone)]
 pub struct Sequences {
     values: HashMap<(String, usize), u64>,
@@ -299,7 +299,7 @@ impl Sequences {
             .unwrap_or(0)
     }
 
-    /// 取下一个值：**从 1 开始**，写满（全 9）回绕到 1（`REPOSITORY.md` §3.3）。
+    /// 取下一个值：**从 1 开始**，写满（全 9）回绕到 1（`memory/FUNCTION-REPOSITORY.md` §3.3）。
     pub fn next(&mut self, directory: &str, width: usize) -> u64 {
         let cap = max_value(width);
         let entry = self
@@ -333,7 +333,7 @@ fn max_value(width: usize) -> u64 {
 /// 规划参数。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlanOptions {
-    /// 库内放照片的目录名（`REPOSITORY.md` §1，默认 `photos`）。
+    /// 库内放照片的目录名（`memory/FUNCTION-REPOSITORY.md` §1，默认 `photos`）。
     pub photos_dir: String,
     /// 是否透传子目录（界面上的「包含子目录」）。
     pub include_subdirs: bool,
@@ -376,7 +376,7 @@ impl PlannedItem {
         }
     }
 
-    /// 要写进 `import_items.status` 的词（`REPOSITORY.md` §4.5）。
+    /// 要写进 `import_items.status` 的词（`memory/FUNCTION-REPOSITORY.md` §4.5）。
     #[must_use]
     pub fn status_str(&self) -> &'static str {
         match &self.outcome {
@@ -639,7 +639,7 @@ pub fn plan(
     }
 }
 
-/// `RAW` 的分流目录名（`REPOSITORY.md` §4.1）。
+/// `RAW` 的分流目录名（`memory/FUNCTION-REPOSITORY.md` §4.1）。
 const RAW_DIR: &str = "_RAW";
 
 /// 这张源文件要不要跳。
@@ -705,7 +705,7 @@ fn render_target(
         file.source_dir(),
     ]);
 
-    // 每个宽度各取一个号（`REPOSITORY.md` §3.3：宽度不同就是不同的计数器）
+    // 每个宽度各取一个号（`memory/FUNCTION-REPOSITORY.md` §3.3：宽度不同就是不同的计数器）
     let values: Vec<(usize, u64)> = tpl
         .seq_widths()
         .into_iter()
@@ -742,7 +742,7 @@ fn render_ctx<'a>(file: &'a SourceFile, seqs: template::SeqValues<'a>) -> Render
 }
 
 /// 冲突消解：目标已存在（盘上或本批已占）就加 `_01`…`_99`、`_100`…
-/// （`REPOSITORY.md` §3.4；主序号不因此后退，追加位置在扩展名之前）。
+/// （`memory/FUNCTION-REPOSITORY.md` §3.4；主序号不因此后退，追加位置在扩展名之前）。
 fn resolve_conflict(
     dir: &str,
     stem: &str,
@@ -942,7 +942,7 @@ mod tests {
     const DEFAULT_TPL: &str = ":CYEAR-:CMONTH-:CDAY/MY:FILENAME";
 
     /* ══════════════════════════════════════════════════════════════
-     * 目录透传（REPOSITORY.md §4.2 那张表，逐条对照）
+     * 目录透传（memory/FUNCTION-REPOSITORY.md §4.2 那张表，逐条对照）
      * ══════════════════════════════════════════════════════════════ */
 
     #[test]
@@ -1025,7 +1025,7 @@ mod tests {
     }
 
     /* ══════════════════════════════════════════════════════════════
-     * 位图 / RAW 分流（REPOSITORY.md §4.1）
+     * 位图 / RAW 分流（memory/FUNCTION-REPOSITORY.md §4.1）
      * ══════════════════════════════════════════════════════════════ */
 
     #[test]
@@ -1100,7 +1100,7 @@ mod tests {
     }
 
     /* ══════════════════════════════════════════════════════════════
-     * 序号（REPOSITORY.md §3.3）
+     * 序号（memory/FUNCTION-REPOSITORY.md §3.3）
      * ══════════════════════════════════════════════════════════════ */
 
     #[test]
@@ -1182,7 +1182,7 @@ mod tests {
     }
 
     /* ══════════════════════════════════════════════════════════════
-     * 重名（REPOSITORY.md §3.4）
+     * 重名（memory/FUNCTION-REPOSITORY.md §3.4）
      * ══════════════════════════════════════════════════════════════ */
 
     #[test]
@@ -1294,7 +1294,7 @@ mod tests {
     }
 
     /* ══════════════════════════════════════════════════════════════
-     * 避免重复导入（REPOSITORY.md §4.3）
+     * 避免重复导入（memory/FUNCTION-REPOSITORY.md §4.3）
      * ══════════════════════════════════════════════════════════════ */
 
     #[test]

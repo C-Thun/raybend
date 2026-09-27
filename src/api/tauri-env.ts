@@ -1,5 +1,5 @@
 /**
- * 运行环境判定（`ARCHITECTURE.md` §1.1：`src/api/` 是唯一的数据出入口）。
+ * 运行环境判定（`memory/ARCHITECTURE.md` §1.1：`src/api/` 是唯一的数据出入口）。
  *
  * 为什么要判定：「窗口控制」这类能力**只在 Tauri 里存在**。而我们的日常开发有一半时间
  * 是在普通浏览器里跑 `pnpm dev`（看陈列室、调样式、跑 `pnpm smoke:ui`）。

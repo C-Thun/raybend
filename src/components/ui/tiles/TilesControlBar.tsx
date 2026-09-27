@@ -65,7 +65,7 @@ export interface TilesSortConfig {
 export interface TilesViewingInfo {
   /** 当前那张的文件名 */
   fileName: string | null;
-  /** 锁级别（0/1/2）—— **紧挨着文件名右边**显示（`BROWSE.md` §5.8） */
+  /** 锁级别（0/1/2）—— **紧挨着文件名右边**显示（`memory/FUNCTION-BROWSE.md` §5.8） */
   lockLevel: number;
   rating: number;
   colorLabel: string | null;
@@ -366,7 +366,7 @@ function BarFrame(props: {
 
 /**
  * **看图态的**内容（与 `TilesControlBar` 同一条栏、同一个 `BarFrame`）：
- * 左 = 文件名 + **紧挨着**的锁徽标；右 = 这一张的标记（`BROWSE.md` §5.8）。
+ * 左 = 文件名 + **紧挨着**的锁徽标；右 = 这一张的标记（`memory/FUNCTION-BROWSE.md` §5.8）。
  *
  * 人类 2026-09-20 把旧的那条全宽 `ViewerStatusBar` 删了换成它 ——
  * 理由见 `AGENTS.md` §11.1 的结构红线：workspace 只有纵向分列、没有跨列行。

@@ -4,7 +4,7 @@
 //! 但扩展名判定决定「要不要读这个文件的头」，是扫描阶段的第一道过滤。
 //!
 //! 规格与出处：
-//! * 位图 / RAW 分流 —— `REPOSITORY.md` §4.1（同路径同名的一对文件是一个资产的两个文件）
+//! * 位图 / RAW 分流 —— `memory/FUNCTION-REPOSITORY.md` §4.1（同路径同名的一对文件是一个资产的两个文件）
 //! * 相机支持策略 —— `AGENTS.md` §1「跟得上主流即可」
 //! * 自家库文件必须跳过 —— `AGENTS.md` §6.4（`catalog.db` 就在被扫描的目录里）
 
@@ -32,7 +32,7 @@ impl MediaKind {
     pub fn from_extension(ext: &str) -> Self {
         let ext = ext.trim_start_matches('.').to_ascii_lowercase();
         match ext.as_str() {
-            // RAW：与首选后端 rawler 支持的格式对齐（FUTURE.md §B）
+            // RAW：与首选后端 rawler 支持的格式对齐（memory/FUTURE.md §B）
             "ari" | "cr3" | "cr2" | "crw" | "erf" | "raf" | "3fr" | "kdc" | "dcs" | "dcr"
             | "iiq" | "mos" | "mef" | "mrw" | "nef" | "nrw" | "orf" | "rw2" | "pef" | "srw"
             | "arw" | "srf" | "sr2" | "dng" => Self::Raw,
@@ -95,7 +95,7 @@ pub fn is_sidecar(file_name: &str) -> bool {
 /// 文件名主体（去扩展名）的**折叠形式**：NFC + 小写。
 ///
 /// 用途：把 `IMG_0001.JPG` 与 `img_0001.rw2` 认成同一张照片的两个文件
-/// （`REPOSITORY.md` §4.1 的位图 / RAW 配对），以及跨平台比较（Windows 大小写
+/// （`memory/FUNCTION-REPOSITORY.md` §4.1 的位图 / RAW 配对），以及跨平台比较（Windows 大小写
 /// 不敏感、macOS 用 NFD）—— 见 `AGENTS.md` §7.3。
 #[must_use]
 pub fn stem_folded(file_name: &str) -> String {

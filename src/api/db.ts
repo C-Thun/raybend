@@ -1,5 +1,5 @@
 /**
- * 数据层的前端封装（`ARCHITECTURE.md` §1.1：**只有 `src/api/` 里 `import invoke`**）。
+ * 数据层的前端封装（`memory/ARCHITECTURE.md` §1.1：**只有 `src/api/` 里 `import invoke`**）。
  *
  * 三件事：
  *   1. **命令名与参数在一处收口** —— 界面层看不到字符串形式的命令名；
@@ -142,7 +142,7 @@ export async function listDirs(path: string): Promise<DirEntry[]> {
 }
 
 /*
- * 库内目录的菜单动作（`BROWSE.md` §4.3 行尾 `⋯`）。
+ * 库内目录的菜单动作（`memory/FUNCTION-BROWSE.md` §4.3 行尾 `⋯`）。
  *
  * 传的是 `root + rel`（**库根 + 库内相对路径**），不是绝对路径：
  * Rust 侧会拿 `rel` 过一遍越界检查（`..`、绝对路径、盘符一律拒）——

@@ -1,5 +1,5 @@
 /**
- * 导入工作区的共享状态（`ARCHITECTURE.md` §3：跨模块的状态归 app store）。
+ * 导入工作区的共享状态（`memory/ARCHITECTURE.md` §3：跨模块的状态归 app store）。
  *
  * 为什么这些状态必须放在**一个**store 里，而不是各 feature 自己存：
  *
@@ -101,7 +101,7 @@ export interface ImportStore {
    */
   excluded: () => ReadonlySet<string>;
   isExcluded: (path: string) => boolean;
-  /** 反转一批文件的排除状态（`DESIGN.md` §12.2 的批量排除就这么来的） */
+  /** 反转一批文件的排除状态（`memory/DESIGN.md` §12.2 的批量排除就这么来的） */
   toggleExcluded: (paths: readonly string[]) => void;
   /**
    * 落在**已勾选目录**范围内的排除张数 —— 右列底部的统计与真正传给后端的清单都用它。
@@ -156,7 +156,7 @@ export interface ImportStore {
 
   /* ── 导入偏好 ─────────────────────────────── */
   /**
-   * 「避免重复导入」——默认**开**（`REPOSITORY.md` §4.3）。
+   * 「避免重复导入」——默认**开**（`memory/FUNCTION-REPOSITORY.md` §4.3）。
    * 它跨会话记住（放 `app.db` 的设置表），因为这是用户的稳定偏好。
    */
   avoidDuplicates: () => boolean;

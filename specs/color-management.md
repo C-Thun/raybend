@@ -5,9 +5,9 @@
 > 本文件只定**方向、边界、分层、验收判据与坑**，不提前细化未开工波次的实施步骤。
 >
 > 建立：2026-09-26（人类要求把方案落成可排期的执行方案）｜状态：**方案待拍板，未排期**
-> 相关：`AGENTS.md` §6.1（渲染架构）、`FUTURE.md` C1/C2（原登记）、`IMAGING.md`（格式与三种图）、
-> `DESIGN.md` §14.9（编辑右栏页签）/ §14.10（拉杆）、`BROWSE.md` §6（右栏信息区）、
-> `REVIEW.md` R1-01（本条的来源）
+> 相关：`AGENTS.md` §6.1（渲染架构）、`memory/FUTURE.md` C1/C2（原登记）、`memory/FUNCTION-IMAGING.md`（格式与三种图）、
+> `memory/DESIGN.md` §14.9（编辑右栏页签）/ §14.10（拉杆）、`memory/FUNCTION-BROWSE.md` §6（右栏信息区）、
+> `memory/REVIEW.md` R1-01（本条的来源）
 
 ---
 
@@ -16,7 +16,7 @@
 **一句话目标**：**让「看到的」与「存下的」颜色都是对的** —— 输入认得出、工作空间装得下、
 显示器显示得准、导出说得清。
 
-| 做 | 不做（明确出局，写进 `FUTURE.md` 即可） |
+| 做 | 不做（明确出局，写进 `memory/FUTURE.md` 即可） |
 | --- | --- |
 | 读位图**内嵌 ICC** 并正确解释 | 自研显示器校准引擎（需要色度计硬件，交给 ArgyllCMS / DisplayCAL） |
 | **显示器 profile** 的获取与应用（Windows 优先） | 内嵌 Adobe 的 DCP 出厂档（专有许可，只支持用户自备） |
@@ -35,7 +35,7 @@
 | 位图 | **一律当 sRGB**：`LinearImage::from_srgb8(...)`，内嵌 ICC 被忽略 | `crates/raybend/src/thumbnail/render.rs:604` |
 | 工作空间 | **线性 sRGB**（`develop/color.rs` 自称「这一份是唯一的色彩数学」） | `crates/raybend/src/develop/color.rs` |
 | 显示 | 纹理 `Rgba8UnormSrgb`（硬件做 sRGB 解码/编码）；surface 策略 `SurfaceColorSpace::Auto` | `crates/raybend/src/render/gpu.rs:248,856` |
-| 导出 | 只有 5 种格式的约定，**没有** 输出 profile / 渲染意图 / 嵌不嵌 profile | `IMAGING.md` §1.1 |
+| 导出 | 只有 5 种格式的约定，**没有** 输出 profile / 渲染意图 / 嵌不嵌 profile | `memory/FUNCTION-IMAGING.md` §1.1 |
 
 **后果（两类，都不是理论）**：
 
@@ -69,7 +69,7 @@ L3 是唯一会**动数据**的一级（哈希与缓存），越早定工作空�
 
 | 资源 | 用途 | 许可 | 备注 |
 | --- | --- | --- | --- |
-| **lcms2**（Rust 绑定）https://github.com/kornelski/rust-lcms2 | ICC 解析 / transform / 烘 3D LUT | **MIT** | 最新 **6.2.0**，MSRV 1.65；`FUTURE.md` C1 已选它 |
+| **lcms2**（Rust 绑定）https://github.com/kornelski/rust-lcms2 | ICC 解析 / transform / 烘 3D LUT | **MIT** | 最新 **6.2.0**，MSRV 1.65；`memory/FUTURE.md` C1 已选它 |
 | Little CMS 本体 https://github.com/mm2/Little-CMS | 底层 C 引擎 | MIT | 由上面那个 crate 内置 |
 | **Compact-ICC-Profiles** https://github.com/saucecontrol/Compact-ICC-Profiles | **内置色彩空间**：sRGB / scRGB(线性) / Display P3 / Adobe RGB / ProPhoto / Rec.2020 | **CC0-1.0** | ⭐ 单个 **372–456 字节**，可直接编进二进制，不必装数据文件 |
 | Elle Stone 的 well-behaved ICC https://github.com/ellelstone/elles_icc_profiles | 参考用标准空间 | ⚠️ **CC BY-SA 3.0** | **不捆绑**：Share-Alike 与 AGPL-3.0 组合有解释风险（CC BY-SA **4.0** 才是单向兼容 GPLv3 的那版）→ 用上面那份 CC0 替代 |
@@ -139,7 +139,7 @@ ICC 变换的输出是**设备编码值**（已含显示器 TRC）。当前 surf
 
 ### 5.4 覆盖层要用同一个变换
 
-`--overlay-line` / `--overlay-halo`（`DESIGN.md` §14.8）是铺在照片上的 sRGB UI 颜色。
+`--overlay-line` / `--overlay-halo`（`memory/DESIGN.md` §14.8）是铺在照片上的 sRGB UI 颜色。
 照片走了显示变换、覆盖层没走 ⇒ 两块颜色不再可比，裁剪框在广色域屏上会偏。
 **做法**：这几个 token 的颜色在 CPU 侧过一次同一个变换，作为 uniform 传给 `overlay.wgsl`
 （颜色数量极少，成本为零）。
@@ -168,7 +168,7 @@ ICC 变换的输出是**设备编码值**（已含显示器 TRC）。当前 surf
 
 ### 6.2 Editor：第三个页签组加一个页签
 
-现状（`DESIGN.md` §14.9）：右栏三组 = ① `总览 · 定稿 · 信息` ② `影调 · 色彩 · 清晰度 · 镜头` ③ `曲线`。
+现状（`memory/DESIGN.md` §14.9）：右栏三组 = ① `总览 · 定稿 · 信息` ② `影调 · 色彩 · 清晰度 · 镜头` ③ `曲线`。
 → 第三组变成 **`曲线 · 色彩管理`**。
 
 > ⚠️ **命名冲突**：第二组已经有一个 **`色彩`**（色温/饱和度那组）。新页签**不能**也叫「色彩」。
@@ -190,7 +190,7 @@ ICC 是**同一件事的第二个 kind** —— 按 `AGENTS.md` §2.12 把「文
 
 ### 6.3 Browse：右栏加一个只读分组 + toolsbar 一个批量入口
 
-**右栏（`BROWSE.md` §6）新增 `色彩` 分组**，与「标签信息」同级，tiles 与看图两种模式都显示：
+**右栏（`memory/FUNCTION-BROWSE.md` §6）新增 `色彩` 分组**，与「标签信息」同级，tiles 与看图两种模式都显示：
 
 | 行 | 内容 |
 | --- | --- |
@@ -305,8 +305,8 @@ ICC 是**同一件事的第二个 kind** —— 按 `AGENTS.md` §2.12 把「文
 | **本文件** | 方向、边界、分层、验收判据、坑、待拍板项 |
 | `specs/CM-W<n>.md` | **各波次开工前**写的实施步骤（一次一个，走 plannotator） |
 | `AGENTS.md` §6.1 | 渲染架构与本方案的三条硬纪律（落地时补） |
-| `FUTURE.md` C1/C2 | 只剩「登记」职能（L5/L6 与 macOS/Linux）；正文指向本文件 |
-| `IMAGING.md` | 三种图的规格；本方案给「缓存绝不做显示变换」这条加约束 |
-| `DESIGN.md` §14.9 | editor 右栏三组页签 → 第三组增加 `色彩管理` 页签 |
-| `BROWSE.md` §6 | 右栏信息区新增 `色彩` 分组 |
-| `REVIEW.md` R1-01 | 本条规格的来源 |
+| `memory/FUTURE.md` C1/C2 | 只剩「登记」职能（L5/L6 与 macOS/Linux）；正文指向本文件 |
+| `memory/FUNCTION-IMAGING.md` | 三种图的规格；本方案给「缓存绝不做显示变换」这条加约束 |
+| `memory/DESIGN.md` §14.9 | editor 右栏三组页签 → 第三组增加 `色彩管理` 页签 |
+| `memory/FUNCTION-BROWSE.md` §6 | 右栏信息区新增 `色彩` 分组 |
+| `memory/REVIEW.md` R1-01 | 本条规格的来源 |

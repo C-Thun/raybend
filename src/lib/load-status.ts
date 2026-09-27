@@ -1,5 +1,5 @@
 /**
- * 异步加载的四态（`ARCHITECTURE.md` §1 的纯逻辑层）。
+ * 异步加载的四态（`memory/ARCHITECTURE.md` §1 的纯逻辑层）。
  *
  * 为什么单独一个类型而不是各 feature 自己声明：它同时出现在
  * **feature 的 props**（视图要区分「还在读」与「读完了但没内容」）与

@@ -37,7 +37,7 @@ pub mod thumbs;
 #[cfg(test)]
 mod contract;
 pub mod dirs;
-/// 渲染可行性 spike 的调试窗口（`PLAN.md` A.2）。**按需建窗**，不影响主窗口。
+/// 渲染可行性 spike 的调试窗口（`memory/PLAN.md` A.2）。**按需建窗**，不影响主窗口。
 pub mod spike_viewport;
 
 /// 主窗口标签（与 `tauri.conf.json` 的窗口配置、`capabilities/default.json` 对应）。
@@ -311,7 +311,7 @@ pub fn run() {
             fullscreen::fullscreen_open,
             fullscreen::fullscreen_payload,
             fullscreen::fullscreen_close,
-            // ── 库内目录树的菜单（新建子目录 / 删除空目录，BROWSE.md §4.3）──
+            // ── 库内目录树的菜单（新建子目录 / 删除空目录，memory/FUNCTION-BROWSE.md §4.3）──
             dirs::dir_empty_check,
             dirs::dir_remove_empty,
             dirs::dir_create,

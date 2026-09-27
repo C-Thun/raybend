@@ -7,7 +7,7 @@
 //! * 同一个路径可以先后/同时属于不同的库（看路径下那份 `catalog.db` 里的 ID 是谁）；
 //! * 同一个库可以登记多条路径（换盘符、U 盘、镜像备份）。
 //!
-//! 详见 `REPOSITORY.md` §1–§2。
+//! 详见 `memory/FUNCTION-REPOSITORY.md` §1–§2。
 
 use std::path::{Path, PathBuf};
 
@@ -28,10 +28,10 @@ pub const META_CREATED_AT: &str = "created_at";
 /// 库展示名键名（跟着库走，换台机器也认得）。
 pub const META_NAME: &str = "name";
 
-/// 默认导入模版（`REPOSITORY.md` §3.1）。
+/// 默认导入模版（`memory/FUNCTION-REPOSITORY.md` §3.1）。
 pub const DEFAULT_IMPORT_TEMPLATE: &str = ":CYEAR-:CMONTH-:CDAY/MY:FILENAME";
 
-/// 库内导入落地目录名（`REPOSITORY.md` §1；FUTURE G14：将来可配）。
+/// 库内导入落地目录名（`memory/FUNCTION-REPOSITORY.md` §1；FUTURE G14：将来可配）。
 pub const DEFAULT_PHOTOS_DIR: &str = "photos";
 
 /// catalog 的文件名（**必须在库根**）。
@@ -185,7 +185,7 @@ pub fn create_or_open_catalog(
     Ok(meta)
 }
 
-/// 库的在线状态（`REPOSITORY.md` §2.2）。
+/// 库的在线状态（`memory/FUNCTION-REPOSITORY.md` §2.2）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RepositoryState {
     /// 在某条已登记路径下找到了它。
@@ -230,7 +230,7 @@ pub fn path_holds_repository(root: &Path, repository_id: &str) -> bool {
     read_repository_meta(&catalog).is_ok_and(|m| m.id == repository_id)
 }
 
-/// 解析一个库当前在不在线（`REPOSITORY.md` §2.2）。
+/// 解析一个库当前在不在线（`memory/FUNCTION-REPOSITORY.md` §2.2）。
 ///
 /// 从**最近见过的路径开始**依次探测；都不在 → 离线。
 /// 调用方（界面层）可以缓存结果；这里每次都真查，保证正确性。
@@ -299,7 +299,7 @@ pub fn register_repository(conn: &Connection, meta: &RepositoryMeta, now_ms: i64
     Ok(())
 }
 
-/// 给一个库登记一条路径（`REPOSITORY.md` §2.4：同库多路径）。
+/// 给一个库登记一条路径（`memory/FUNCTION-REPOSITORY.md` §2.4：同库多路径）。
 ///
 /// 同一路径重复登记是安全的（幂等）。
 pub fn add_repository_path(
@@ -404,7 +404,7 @@ pub fn forget_repository(conn: &Connection, repository_id: &str) -> Result<bool>
     Ok(n > 0)
 }
 
-/// 重新挂载探测（`REPOSITORY.md` §2.3）：挨个登记路径找一遍，把结果写回
+/// 重新挂载探测（`memory/FUNCTION-REPOSITORY.md` §2.3）：挨个登记路径找一遍，把结果写回
 /// `repository_paths.status`，返回找到的库根（都没找到就 `None`）。
 ///
 /// 与 [`resolve_repository`] 的区别：那个**只读**（碰到就返回），这个会**写状态**、
@@ -965,7 +965,7 @@ mod tests {
         let n: i64 = app
             .query_row("SELECT count(*) FROM repository_paths", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(n, 2, "同路径不同库是允许的（REPOSITORY.md §2.1）");
+        assert_eq!(n, 2, "同路径不同库是允许的（memory/FUNCTION-REPOSITORY.md §2.1）");
     }
 
     #[test]

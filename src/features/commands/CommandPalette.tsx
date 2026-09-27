@@ -1,5 +1,5 @@
 /**
- * 命令面板（`BROWSE.md` §8 浮层、`specs/M2-W3.md` §4 阶段 1）。
+ * 命令面板（`memory/FUNCTION-BROWSE.md` §8 浮层、`specs/M2-W3.md` §4 阶段 1）。
  *
  * ```text
  * ┌──────────────────────────────────────────────┐
@@ -16,7 +16,7 @@
  * ## 三条口径
  *
  * 1. **全量列出**，不按 `when` 过滤 —— 此刻不能用的**灰掉 + 说明原因**，不是消失。
- *    与菜单「暗着但可见」同一条纪律（`DESIGN.md` §12.11 第 3 条：用户能看出能力存在，
+ *    与菜单「暗着但可见」同一条纪律（`memory/DESIGN.md` §12.11 第 3 条：用户能看出能力存在，
  *    也知道为什么现在点不了）。2026-09-23 人类报「F11 / 全屏看图在 Ctrl+K 里搜不到」，
  *    旧实现就是按 `when` 过滤 —— 命令直接消失，用户无法区分「没登记」还是「被过滤」。
  *    行模型与排序在 `palette.ts`（纯函数、有单测）。
@@ -153,7 +153,7 @@ export function CommandPalette(props: CommandPaletteProps) {
     }
     /*
      * 翻页（人类 2026-09-24 要求）：一次跳「一屏能放下的行数」，与 ↑/↓ 同一套回绕。
-     * 这是**面板内部键**（与 ↑/↓/Enter/Esc 同类，`DESIGN.md` §13.7 的「内建键位」）——
+     * 这是**面板内部键**（与 ↑/↓/Enter/Esc 同类，`memory/DESIGN.md` §13.7 的「内建键位」）——
      * 不进命令注册表：它只在面板打开时成立，没有「改键」的语义。
      */
     if (event.key === "PageDown") {
@@ -244,7 +244,7 @@ export function CommandPalette(props: CommandPaletteProps) {
                           // 指向/光标 = 辅色底（全局反馈规则）；**不靠改字色**表达
                           index() === cursor() ? "bg-state-hover" : "",
                           /*
-                           * 字色只分两档（`DESIGN.md` §4 的标准档位 + §5 的 disabled 规则）：
+                           * 字色只分两档（`memory/DESIGN.md` §4 的标准档位 + §5 的 disabled 规则）：
                            *   能用   → `fg-1`（正文/标题级，高反差）
                            *   不能用 → `fg-2`（次级；「前景降为次级色，面不变」）
                            *

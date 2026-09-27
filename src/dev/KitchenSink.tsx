@@ -1,5 +1,5 @@
 /**
- * 组件陈列室（DESIGN.md §10.1 / specs/M1.md §4.2.1）。
+ * 组件陈列室（memory/DESIGN.md §10.1 / specs/M1.md §4.2.1）。
  *
  * 目的：把 16 个基础组件的**全部状态 × 两主题 × 两密度**一眼铺开，
  * 供人（不是 Agent）与 `design/main.pen` 逐项比对。`AGENTS.md` §2.8：
@@ -206,7 +206,7 @@ export default function KitchenSink() {
         <div class="mx-auto flex max-w-5xl flex-col">
           {/* ── 表面分层与前景 ───────────────────────────── */}
           <Section
-            title="表面分层与前景（DESIGN.md §2 / §4）"
+            title="表面分层与前景（memory/DESIGN.md §2 / §4）"
             note="四级面 track < main < bar < layer；前景 fg-1/2/3 + fg-on-brand"
           >
             <div class="flex flex-wrap gap-3">

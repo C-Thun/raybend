@@ -223,7 +223,7 @@ pub trait DisplayBackend {
     fn render(&self, request: &ImageRequest<'_>) -> Result<Option<DisplayImage>>;
 }
 
-/// 位图后端：**没编辑过的原图直接给文件本身**（`REPOSITORY.md` §1 的落地文件）。
+/// 位图后端：**没编辑过的原图直接给文件本身**（`memory/FUNCTION-REPOSITORY.md` §1 的落地文件）。
 #[derive(Debug, Clone, Copy, Default)]
 pub struct BitmapBackend;
 

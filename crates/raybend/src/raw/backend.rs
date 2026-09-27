@@ -64,7 +64,7 @@ impl RawImage8 {
 /// rawler 的显影链在 `Calibrate` 步就把相机空间映射到了 **sRGB 原色的线性光**
 /// （`rgb2cam = normalize(xyz2cam · SRGB_TO_XYZ_D65)` 的伪逆）—— 所以到 `Calibrate`
 /// 为止、**去掉 `SRgb` 伽马步**，拿到的就是「线性 sRGB」。
-/// 这正是 `FUTURE.md` D1 要的 scene-referred 输入：调性在它上面做，不会在 8bit 显示空间里出色带。
+/// 这正是 `memory/FUTURE.md` D1 要的 scene-referred 输入：调性在它上面做，不会在 8bit 显示空间里出色带。
 ///
 /// # 精度
 ///
@@ -175,7 +175,7 @@ pub trait RawBackend: Send + Sync {
 
     /// 解码一张 RAW 成**线性 16 位**（给显影管线）。
     ///
-    /// 默认实现报「不支持」—— 换后端时（`FUTURE.md` §B）若新后端没有线性输出，
+    /// 默认实现报「不支持」—— 换后端时（`memory/FUTURE.md` §B）若新后端没有线性输出，
     /// 失败是显式的，而不是静默退回 8bit（那会让「scene-referred」变成一句空话）。
     ///
     /// # Errors

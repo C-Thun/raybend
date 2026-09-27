@@ -1,5 +1,5 @@
 /**
- * 编辑视口的 IPC 封装（`src/` 里只有本目录可以直接 `invoke`，见 `ARCHITECTURE.md` §1.1）。
+ * 编辑视口的 IPC 封装（`src/` 里只有本目录可以直接 `invoke`，见 `memory/ARCHITECTURE.md` §1.1）。
  *
  * 契约的两条纪律：
  *
@@ -247,7 +247,7 @@ export async function commitDevelopStack(
 }
 
 /**
- * **刷新 preview**（`IMAGING.md` §4）：编辑器**进 / 出**两个节点各调一次。
+ * **刷新 preview**（`memory/FUNCTION-IMAGING.md` §4）：编辑器**进 / 出**两个节点各调一次。
  *
  * preview = 库内大图缓存（长边 1920 的 AVIF，`<库根>/cache/full/…`）—— 与 `view_image`
  * 走的是同一份（命中只读、未命中才渲染）。没编辑过时 Rust 侧**直接跳过**：
@@ -261,7 +261,7 @@ export async function refreshDevelopPreview(path: string): Promise<boolean> {
 }
 
 /**
- * **编辑器该编辑哪个文件**（「编辑落在 RAW 上」，`REPOSITORY.md` §4.1）。
+ * **编辑器该编辑哪个文件**（「编辑落在 RAW 上」，`memory/FUNCTION-REPOSITORY.md` §4.1）。
  *
  * `base` 是总览图下那个切换按钮选的基准（人类 2026-09-24，**默认 `"raw"`**）：
  * `"raw"` 时返回 `_RAW/` 里那个 RAW 的绝对路径（没 RAW 就退回位图）；

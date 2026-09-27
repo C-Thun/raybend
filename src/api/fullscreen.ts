@@ -1,5 +1,5 @@
 /**
- * 全屏看图的 IPC 封装（`ARCHITECTURE.md` §1.1：只有 `src/api/` 能 `invoke`）。
+ * 全屏看图的 IPC 封装（`memory/ARCHITECTURE.md` §1.1：只有 `src/api/` 能 `invoke`）。
  *
  * 三条命令 + 一个事件：
  *

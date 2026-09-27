@@ -833,7 +833,7 @@ pub fn choose_issue(conn: &Connection, asset_id: i64) -> Result<IssueChoice> {
     })
 }
 
-/// **这张照片要不要生成 preview**（`IMAGING.md` §4，人类 2026-09-24 定）。
+/// **这张照片要不要生成 preview**（`memory/FUNCTION-IMAGING.md` §4，人类 2026-09-24 定）。
 ///
 /// 一句话：**只有「编辑过的」才有 preview** —— 没编辑过时 `SOOC` / `RAW` 的内置位图
 /// 就代替 preview，**不额外生成**。
@@ -905,7 +905,7 @@ pub fn edit_base_available(conn: &Connection, asset_id: i64) -> Result<(bool, bo
     Ok((has("bitmap"), has("raw")))
 }
 
-/// 编辑器该**编辑哪个文件**（「编辑落在 RAW 上」，`REPOSITORY.md` §4.1）。
+/// 编辑器该**编辑哪个文件**（「编辑落在 RAW 上」，`memory/FUNCTION-REPOSITORY.md` §4.1）。
 ///
 /// `base` 是用户在编辑器里选的编辑基准（人类 2026-09-24）：
 ///

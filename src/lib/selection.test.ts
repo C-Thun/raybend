@@ -80,7 +80,7 @@ test("Shift 区间：主选与目标相同 → 选择集合不变，主选仍是
   assert.equal(next.anchor, "c");
 });
 
-test("Shift 区间：`BROWSE.md` §5.2 的 ABCDE 走查（人类 2026-09-26 重新描述）", () => {
+test("Shift 区间：`memory/FUNCTION-BROWSE.md` §5.2 的 ABCDE 走查（人类 2026-09-26 重新描述）", () => {
   const letters = ["a", "b", "c", "d", "e"];
   // 1. 点 A → A 选中，A 成为主选
   let state2 = applySelection(state([], null), letters, "a", "replace");

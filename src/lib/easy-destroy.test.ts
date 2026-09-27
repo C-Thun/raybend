@@ -1,5 +1,5 @@
 /**
- * `easy destroy`（DESIGN.md §12.2）的单元测试。
+ * `easy destroy`（memory/DESIGN.md §12.2）的单元测试。
  *
  * 这是**会真的动数据**的一条路径，所以要覆盖：
  * Shift 跳过 / 不跳过 / 取消不执行 / 确认才执行 / 重复请求的覆盖行为 /

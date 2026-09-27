@@ -66,7 +66,7 @@ export function pageStep(args: {
 /**
  * 造面板行：**全量命令** → 按查询排序 → 带回展示字段与可用性。
  *
- * ⚠️ **不过滤 `when`**（与菜单「暗着但可见」同一条纪律，`DESIGN.md` §12.11）：
+ * ⚠️ **不过滤 `when`**（与菜单「暗着但可见」同一条纪律，`memory/DESIGN.md` §12.11）：
  * 过滤的代价是「用户根本不知道有这条命令」；灰掉的代价只是多看一眼。
  */
 export function buildPaletteRows(sources: PaletteRowSources): PaletteRow[] {

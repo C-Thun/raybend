@@ -1,5 +1,5 @@
 /**
- * `easy copy` —— 悬停即知可复制（DESIGN.md §12.1）。
+ * `easy copy` —— 悬停即知可复制（memory/DESIGN.md §12.1）。
  *
  * 范式（用户指定的四个阶段）：
  *   1. 悬停某个组 → 该组加一圈**淡淡的细边框**（固定品牌主色、约 40% 透明度），
@@ -23,7 +23,7 @@
  *
  * 两条实现纪律：
  *   - 边框用 `outline` 而不是 `border`：outline 不参与布局，出现时**不会把内容挤动 1px**
- *   - 边框用 `outline-*` 而非 `ring-*`：DESIGN.md §6 不做阴影，ring 在 Tailwind v4 里
+ *   - 边框用 `outline-*` 而非 `ring-*`：memory/DESIGN.md §6 不做阴影，ring 在 Tailwind v4 里
  *     是 box-shadow 实现，语义上就违反纪律了
  *
  * 复制失败时**什么都不显示**（不翻转成「已复制」）—— 假成功比不反馈更糟。

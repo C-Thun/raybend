@@ -190,7 +190,7 @@ export interface RepositoryView {
    * **相片数量**（不含 `_RAW/` 里的文件）。
    *
    * **`null` 不等于 0**：还没数过时是 `null`，界面显示「—」。
-   * 口径与来源见 `DESIGN.md`：由 `app.db` 的 `directories` 表汇总而来。
+   * 口径与来源见 `memory/DESIGN.md`：由 `app.db` 的 `directories` 表汇总而来。
    */
   photosCount: number | null;
   /** **图片数量**（含 `_RAW/` 里的文件）—— 库卡片上不显示，齿轮弹窗里显示。 */
@@ -708,7 +708,7 @@ export type EditorDecodeState = "idle" | "loading" | "ready" | "error";
  * **编辑基准**：这次编辑拿哪个当底（人类 2026-09-24 定：总览图下可切，**默认 RAW**）。
  *
  * 它不是「显示哪个 issue」，而是「编辑落在哪个文件上」——
- * 将来每个 issue 会带上「基于 sooc / 基于 raw 编辑」的标签（`FUTURE.md`）。
+ * 将来每个 issue 会带上「基于 sooc / 基于 raw 编辑」的标签（`memory/FUTURE.md`）。
  */
 export type DevelopEditBase = "sooc" | "raw";
 

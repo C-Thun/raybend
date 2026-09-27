@@ -1,5 +1,5 @@
 /**
- * TreeNode —— 树形行（DESIGN.md §10.1 #12、§12.4）。
+ * TreeNode —— 树形行（memory/DESIGN.md §10.1 #12、§12.4）。
  *
  * 一行里同时可能出现**两套独立状态**，这是本组件最容易做错的地方：
  *
@@ -33,7 +33,7 @@ export interface TreeNodeProps {
   /**
    * 行内容的替代渲染（省略时用 `label` 画文字）。
    *
-   * `Recent` 列表用它换行 `PathText`（缩写路径 + 悬停看完整路径，`DESIGN.md` §12.3）；
+   * `Recent` 列表用它换行 `PathText`（缩写路径 + 悬停看完整路径，`memory/DESIGN.md` §12.3）；
    * 目录树则用默认的纯名字。行本身的语义（勾选 / 选中 / 指向）不分家。
    */
   labelNode?: JSX.Element;

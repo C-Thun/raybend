@@ -424,7 +424,7 @@ function ViewportMessage(props: { props: EditorViewportProps }): JSX.Element {
 
           <Show when={detail() === null}>
             {/*
-              载入提示（`IMAGING.md` §5，人类 2026-09-24）：**半透毛玻璃**，
+              载入提示（`memory/FUNCTION-IMAGING.md` §5，人类 2026-09-24）：**半透毛玻璃**，
               与全屏模式那条观感一致（`FullscreenViewer` 的载入遮罩）。
 
               两条纪律：

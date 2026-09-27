@@ -1,5 +1,5 @@
 /**
- * **对比态**的数学（`BROWSE.md` §5.5/§5.7、`specs/M2-W2.md` 2.2–2.3）。
+ * **对比态**的数学（`memory/FUNCTION-BROWSE.md` §5.5/§5.7、`specs/M2-W2.md` 2.2–2.3）。
  *
  * ## 状态从哪来：不需要「进入对比」这个动作
  *
@@ -60,7 +60,7 @@
  * 对比数学只关心两件事：**这张是谁**（`id`）与**它的原始尺寸**（`natural`）。
  *
  * 刻意**不** import UI 层里那个照片类型 —— 那是 `components/` 的定义，
- * 而 `lib/` 只能向下依赖（`ARCHITECTURE.md` §1，`pnpm lint:arch` 会拦）。
+ * 而 `lib/` 只能向下依赖（`memory/ARCHITECTURE.md` §1，`pnpm lint:arch` 会拦）。
  * 声明「我需要的形状」而不是「我要谁的类型」，两侧（import / browse）就都能用它：
  * 真实照片对象在结构上满足它，直接传进来即可。
  */

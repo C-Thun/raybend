@@ -310,7 +310,7 @@ interface WindowButtonProps {
 /**
  * 窗口三键之一。**方正、贴边、撑满标题行高度** —— 与系统标题栏的位置感一致，
  * 所以这里不用圆角、也不留外边距。
- * 关闭键的悬停红来自 `--danger` 令牌（`DESIGN.md` §9.2，用户指定）。
+ * 关闭键的悬停红来自 `--danger` 令牌（`memory/DESIGN.md` §9.2，用户指定）。
  */
 function WindowButton(props: WindowButtonProps) {
   return (

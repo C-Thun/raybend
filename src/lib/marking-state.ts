@@ -1,5 +1,5 @@
 /**
- * 标记的三态语义（`BROWSE.md` §3.2 的「三态控件」）。
+ * 标记的三态语义（`memory/FUNCTION-BROWSE.md` §3.2 的「三态控件」）。
  *
  * 这是 `toolsbar` 上每个标记控件要回答的问题：**当前选中的这些照片，这个标记是什么状态？**
  *
@@ -12,7 +12,7 @@
  * ⚠️ 三个状态**必须互相可分**。最容易写错的是把「混合」当成「无值」——
  * 那样用户点一下会把一批已经打了标的照片全部清掉。
  *
- * 纯函数、不碰 DOM、不依赖框架（`ARCHITECTURE.md` §1 的纯逻辑层要求）。
+ * 纯函数、不碰 DOM、不依赖框架（`memory/ARCHITECTURE.md` §1 的纯逻辑层要求）。
  */
 
 /** 一个标记字段的取值：可能是数字（星级 / 锁）或字符串（色标 / 喜欢），也可能是「无」。 */
@@ -56,7 +56,7 @@ export function allEqual<T extends MarkValue>(
 }
 
 /**
- * 点一下星级按钮该设成几星（`BROWSE.md` §3.2：「在已选中且为 1 星时再点一次 → 扣成 0 星」）。
+ * 点一下星级按钮该设成几星（`memory/FUNCTION-BROWSE.md` §3.2：「在已选中且为 1 星时再点一次 → 扣成 0 星」）。
  *
  * 规则复述：点第 n 颗星 →
  * * 当前**全部**都是 n 星 → 归零（再点一次就是取消）；
@@ -100,7 +100,7 @@ export function ratingDisplay(rating: number, compact: boolean): RatingDisplay |
  */
 export { COLOR_VALUES, type ColorLabel } from "./color-labels.ts";
 
-/** 锁的两级（`BROWSE.md` §3.4）。 */
+/** 锁的两级（`memory/FUNCTION-BROWSE.md` §3.4）。 */
 export const LOCK_LEVELS = {
   none: 0,
   /** 一级：不能删。 */

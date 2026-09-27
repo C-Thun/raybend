@@ -1,5 +1,5 @@
 /**
- * `import` 工作区的唯一对外出口（`ARCHITECTURE.md` §2）。
+ * `import` 工作区的唯一对外出口（`memory/ARCHITECTURE.md` §2）。
  *
  * 组装层（`src/App.tsx`）只需要两样东西：工作区视图与它的 store 工厂。
  * 其余一律不从这扇门出去 —— 公开面越小，能改的地方越多。

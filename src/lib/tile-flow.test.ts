@@ -1,5 +1,5 @@
 /**
- * Tile 流换行与尺寸档位的单元测试（DESIGN.md §12.6）。
+ * Tile 流换行与尺寸档位的单元测试（memory/DESIGN.md §12.6）。
  *
  * 运行：`pnpm test`（node --test，零依赖）
  *

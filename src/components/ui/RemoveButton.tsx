@@ -1,5 +1,5 @@
 /**
- * RemoveButton —— 「移除 / 排除」按钮（DESIGN.md §12.2、AGENTS.md §11.3）。
+ * RemoveButton —— 「移除 / 排除」按钮（memory/DESIGN.md §12.2、AGENTS.md §11.3）。
  *
  * 图标是**禁行标志 = 填充圆 + 中间一条横杠**，不是叉号 ——
  * 因为移除/排除**不是破坏性删除**，用叉号会让人以为文件要没了。

@@ -1,5 +1,5 @@
 /**
- * 标记类取值 → 界面文案（`DESIGN.md` §11.1：界面文字只出现在语言包）。
+ * 标记类取值 → 界面文案（`memory/DESIGN.md` §11.1：界面文字只出现在语言包）。
  *
  * 为什么单独一个文件：同一句文案在**三处**要用 —— 工具条的 `aria-label`、
  * 筛选 chips、以及看图状态栏的提示。以前工具条里直接拿原始值当标签
@@ -12,7 +12,7 @@
 
 import { t } from "../../i18n/index.ts";
 
-/** 色标（`BROWSE.md` §3.2 的 7 态：红黄绿青蓝紫 + 无） */
+/** 色标（`memory/FUNCTION-BROWSE.md` §3.2 的 7 态：红黄绿青蓝紫 + 无） */
 export function colorText(color: string | null): string {
   switch (color) {
     case "red":

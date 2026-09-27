@@ -6,11 +6,11 @@
  * 1. **查询**：库 / 目录范围 / 筛选 / 排序 —— 任何一项变了就重新加载；
  * 2. **窗口数据**：照片是按页取的（虚拟网格只看得见几十行，没必要一次拿十万条），
  *    所以内部是一张**稀疏表** `(AssetItem | null)[]`，`null` = 这一格还没到；
- * 3. **选择**：完全复用 `lib/selection.ts`（`BROWSE.md` §5.2 的点击/Shift/Ctrl 语义
+ * 3. **选择**：完全复用 `lib/selection.ts`（`memory/FUNCTION-BROWSE.md` §5.2 的点击/Shift/Ctrl 语义
  *    在那里实现并有测试），这里只负责把「可见顺序」喂给它；
  * 4. **标记**：把选中集合交给后端，并维护一份「这些照片现在是什么状态」的缓存
  *    （`toolsbar` 的三态控件要用）；
- * 5. **旗标**：内存态、跨库（`BROWSE.md` §3.2），所以在本地维护 pick/reject 集合。
+ * 5. **旗标**：内存态、跨库（`memory/FUNCTION-BROWSE.md` §3.2），所以在本地维护 pick/reject 集合。
  *
  * # 三条容易写错的地方（都有测试盯着）
  *
@@ -148,7 +148,7 @@ export interface BrowseStore {
   filter(): BrowseFilter;
   sort(): BrowseSort;
   /**
-   * 筛选模式（`BROWSE.md` §3.1）：开着时 toolsbar 的标记控件是**筛选条件**，
+   * 筛选模式（`memory/FUNCTION-BROWSE.md` §3.1）：开着时 toolsbar 的标记控件是**筛选条件**，
    * 而不是「给选中的照片设值」。关掉时会把四组标记条件清干净 ——
    * 否则界面看起来「没筛」却还少着照片（原先这件事在工具条里做，现在收到这里，
    * 因为工具条与结果区（chips）两边都要读它）。
@@ -244,7 +244,7 @@ export interface BrowseStore {
   /**
    * **只把「当前那张」（锚点）挪过去**，不动选择集合。
    *
-   * 对比视图里点某一幅画幅就是这件事（`BROWSE.md` §5.7：点哪张图就是当前实际选中的图，
+   * 对比视图里点某一幅画幅就是这件事（`memory/FUNCTION-BROWSE.md` §5.7：点哪张图就是当前实际选中的图，
    * 决定右栏与状态栏显示谁）—— 那里**不能**走 `select()`：那会把选择改成只剩这一张，
    * 对比当场散掉。
    *

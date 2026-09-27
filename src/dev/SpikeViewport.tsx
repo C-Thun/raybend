@@ -7,7 +7,7 @@
  *
  * # 这一页在验证什么
  *
- * `PLAN.md` A.2 那张清单里，**人眼才能判**的部分：
+ * `memory/PLAN.md` A.2 那张清单里，**人眼才能判**的部分：
  *
  * | 界面上的东西 | 对应 A.2 的哪一项 |
  * | --- | --- |
@@ -217,7 +217,7 @@ export default function SpikeViewport() {
         data-tauri-drag-region
         class="flex shrink-0 items-center gap-2 border-b border-line-1 bg-surface-bar px-3 py-1.5"
       >
-        <span class="font-600">渲染 spike（M2-W1 · PLAN.md A.2）</span>
+        <span class="font-600">渲染 spike（M2-W1 · memory/PLAN.md A.2）</span>
         <span class="text-fg-3">
           {isTauriRuntime() ? "Tauri 环境" : "浏览器预览（没有后端，数据全空）"}
         </span>

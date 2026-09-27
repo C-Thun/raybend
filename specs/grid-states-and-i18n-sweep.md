@@ -2,8 +2,8 @@
 
 > 状态：**待评审**（四个口径已由人类 2026-09-17 定；Pencil 阶段明确跳过）
 > 关联：`AGENTS.md` §2.7（实施记录）、§2.8（E2E 归人类）、§5.3（质量门）；
-> `DESIGN.md` §11（i18n）、§12.9；`design/main.md` §3.2 / §9.5；`FUTURE.md` G6
-> 不属于 `PLAN.md` 主线（M2-W1）—— 是穿插的两个小优化。
+> `memory/DESIGN.md` §11（i18n）、§12.9；`design/main.md` §3.2 / §9.5；`memory/FUTURE.md` G6
+> 不属于 `memory/PLAN.md` 主线（M2-W1）—— 是穿插的两个小优化。
 
 ---
 
@@ -31,7 +31,7 @@
 | --- | --- | --- |
 | 1 | 载入动画覆盖到哪一刻 | **扫描 + 头部缓存都铺完**再一次性显示照片（比例一次到位，不再「长大」）。缩略图仍逐张到位 |
 | 2 | 空态/载入态铺到哪些地方 | **只两个照片网格**。导入网格：载入 / 目录为空 / 未选目录；浏览网格：载入 / 库内无照片（其余面板维持现状） |
-| 3 | i18n 范围 | **前端（`src/`）可见文案 + `pnpm lint:i18n` 守门**；Rust 错误串登记 `FUTURE.md`；`src/dev/**` 与 CLI 脚本明确排除 |
+| 3 | i18n 范围 | **前端（`src/`）可见文案 + `pnpm lint:i18n` 守门**；Rust 错误串登记 `memory/FUTURE.md`；`src/dev/**` 与 CLI 脚本明确排除 |
 | 4 | 设计稿 | **跳过 Pencil 阶段**：`.pen` 一个字节都不动；只在 `design/main.md` §9.5 补一条「画布无帧、待补」的登记（将来要补也是**新增帧**，不是改既有帧） |
 
 ---
@@ -257,19 +257,19 @@ export interface StateWatermarkProps {
 | `src/lib/marking-state.ts` | 删 `COLOR_LABELS` |
 | `src/i18n/zh-CN.ts` / `en-US.ts` | 新增 §4.E 的 key |
 | `scripts/check-i18n.mjs`（新）+ `package.json` | `lint:i18n` |
-| `AGENTS.md` §5.3 / `DESIGN.md` §12（新小节）/ `design/main.md` §9.5 / `FUTURE.md` G18 | 文档登记（见 §6） |
+| `AGENTS.md` §5.3 / `memory/DESIGN.md` §12（新小节）/ `design/main.md` §9.5 / `memory/FUTURE.md` G18 | 文档登记（见 §6） |
 | `implementations/2026-09-17_*.md`（新） | 实施记录（精确时间，§2.7 纪律） |
 
 ---
 
 ## 6. 文档登记（本轮要写的四处）
 
-1. `DESIGN.md` §12 新增小节「**网格状态水印**」：组件语义（载入/空态/错误/提示）、
+1. `memory/DESIGN.md` §12 新增小节「**网格状态水印**」：组件语义（载入/空态/错误/提示）、
    图标 64px stroke 1、浓度、动画时长、`prefers-reduced-motion`，
    以及 **motion.css 的两类时长口径**（反馈 ≤150ms / 状态指示为秒级慢循环）。
 2. `design/main.md` §9.5（有意不做、需记一笔）：补一行「网格载入态 / 空态水印：画布无帧，
    本轮按人类指示**跳过 Pencil**；将来补也只是**新增帧**」。
-3. `FUTURE.md` **G18**：后端（Rust）错误文案的 i18n —— 现状（`error.rs` 等直接给中文句）、
+3. `memory/FUTURE.md` **G18**：后端（Rust）错误文案的 i18n —— 现状（`error.rs` 等直接给中文句）、
    做法（错误码 + 参数走 IPC，前端 `error.*` 映射）、触发条件（真要做多语言分发时）。
 4. `AGENTS.md` §5.3：质量门列表加 `pnpm lint:i18n`。
 
@@ -313,7 +313,7 @@ export interface StateWatermarkProps {
 ## 9. 明确不做（写下来免得被当成遗漏）
 
 * **不动任何 `.pen` 文件**（人类 2026-09-17 指示）；将来要补也只新增帧。
-* 不把 Rust 侧错误文案改成 i18n（体量另算，登记为 `FUTURE.md` G18）。
+* 不把 Rust 侧错误文案改成 i18n（体量另算，登记为 `memory/FUTURE.md` G18）。
 * 不把 `src/dev/**`、CLI 脚本、`console.*` 诊断日志纳入语言包。
 * 不做 tile 级别的载入动画改版（`Tile` 现有的占位脉冲保持不动）。
 * 不给「目录树 / 最近 / 已选目录 / 信息栏」等其它面板换空态（人类选了「只两个照片网格」）。

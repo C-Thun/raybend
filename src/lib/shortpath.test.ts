@@ -1,5 +1,5 @@
 /**
- * `shortpath` 单元测试（DESIGN.md §12.3）。
+ * `shortpath` 单元测试（memory/DESIGN.md §12.3）。
  *
  * 运行：`pnpm test`（= `node --test`，Node 26 原生跑 TS，无需任何测试依赖）
  *

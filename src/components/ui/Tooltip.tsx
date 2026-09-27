@@ -1,5 +1,5 @@
 /**
- * Tooltip —— 提示气泡（DESIGN.md §10.1 #7）。
+ * Tooltip —— 提示气泡（memory/DESIGN.md §10.1 #7）。
  *
  * 它同时是 `easy copy`（§12.1）的载体：那套范式里的「点击复制 / 已复制」小窗
  * 就是一个由下向上弹出、内容会翻转的 tooltip。所以本组件支持**受控 `open`**

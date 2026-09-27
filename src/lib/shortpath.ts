@@ -1,5 +1,5 @@
 /**
- * `shortpath` —— 路径缩写（DESIGN.md §12.3）。
+ * `shortpath` —— 路径缩写（memory/DESIGN.md §12.3）。
  *
  * 形态：
  *   Windows   盘符 + 中间各级目录首字母 + 最后一级目录全名

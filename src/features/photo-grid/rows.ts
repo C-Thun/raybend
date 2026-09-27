@@ -1,5 +1,5 @@
 /**
- * 照片网格的行模型（纯函数；`DESIGN.md` §12.6 的 Tile 流 + §12.7 的按时间分组）。
+ * 照片网格的行模型（纯函数；`memory/DESIGN.md` §12.6 的 Tile 流 + §12.7 的按时间分组）。
  *
  * 两种模式共用同一份行数组：
  *
@@ -61,7 +61,7 @@ export interface GroupRowModel {
 export type GridRowModel = TileRowModel | GroupRowModel;
 
 /*
- * 分组标题的排版（`DESIGN.md` §12.7）：**没有横线、没有色块，全靠留白与大小的层次**。
+ * 分组标题的排版（`memory/DESIGN.md` §12.7）：**没有横线、没有色块，全靠留白与大小的层次**。
  *
  * `rowHeight = contentHeight + 上方留白` —— 留白只加在上面，标题就贴着自己这一组、
  * 与上一组拉开距离。**单一事实源**：渲染方从这两个对象里同时取行高与留白，

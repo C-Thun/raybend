@@ -33,7 +33,7 @@
 | --- | --- | --- |
 | §2 PhotoGrid 合并（BrowseGrid → 删除） | ✅ 已完成 | `src/` 下无 `BrowseGrid.tsx`；唯一 `features/photo-grid/PhotoGrid.tsx`，import/browse 两侧经 `TilesSource` 适配接入（`AGENTS.md` §11.4） |
 | §3 浏览右栏（分区 + 可编辑字段） | ✅ 前端已完成 | `BrowsePanels.tsx`：`EditableField`（作者/描述/地理四项，走 `store.setText` 进撤销栈）、创建日期 `createdMs`、所属库名、view 模式预览+视口框在直方图前 |
-| §3 的「EXIF Artist 导入时自动带出」 | ↪ 转为远期意图 | `marking.rs`：`author` 注释「将来支持某库导入时自动填」；登记在 `FUTURE.md` 的库级默认 author 意图，不在 M2 |
+| §3 的「EXIF Artist 导入时自动带出」 | ↪ 转为远期意图 | `marking.rs`：`author` 注释「将来支持某库导入时自动填」；登记在 `memory/FUTURE.md` 的库级默认 author 意图，不在 M2 |
 | §4.1 库卡片两份 | ✅ 已统一 | `components/ui/RepositoryCard.tsx` 一份，`RepositoryList` 与 `BrowsePanels` 两侧引用 |
 | §4.3 工具条两份 | ✅ 已按插槽收敛 | `shell/ToolsBar.tsx`（条带 + 居中）+ `flow.ts` 简单工具目录 + children 槽（浏览标记系列从 `BrowseToolbar` 进槽）——一份条带，各流控件即配置 |
 | §4.4 `repository_rebuild` 进度事件 | ✅ 已做 | `src-tauri/src/repo.rs`：`RebuildProgressDto` + `emit_progress`（阶段/done/total） |

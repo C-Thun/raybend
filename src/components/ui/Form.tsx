@@ -1,10 +1,10 @@
 /**
- * 表单原语（DESIGN.md §10.1 #3、#4、#6 + Switch）。
+ * 表单原语（memory/DESIGN.md §10.1 #3、#4、#6 + Switch）。
  *
  * 交互与无障碍逻辑交给 Ark UI（焦点管理、键盘、aria 这些自己写容易漏），
  * 样式按本项目的令牌与反馈规则改写。
  *
- * 状态与反馈规则（DESIGN.md §5）：指向=辅色底，选中/开启=主色底。
+ * 状态与反馈规则（memory/DESIGN.md §5）：指向=辅色底，选中/开启=主色底。
  */
 
 import { Checkbox as ArkCheckbox, Switch as ArkSwitch, RadioGroup as ArkRadioGroup } from "@ark-ui/solid";
@@ -63,7 +63,7 @@ export function Checkbox(props: CheckboxProps) {
 }
 
 /* ══════════════════════════════════════════════════════════════
- * RadioCircle —— 圆形主色勾选框（DESIGN.md §12.4）
+ * RadioCircle —— 圆形主色勾选框（memory/DESIGN.md §12.4）
  *
  * 表达「已加入待处理集合」（勾选），**可多选**，
  * 与表达「当前正在浏览」的整行主色底（选中）是两套独立状态。
@@ -121,7 +121,7 @@ export function RadioCircle(props: RadioCircleProps) {
 /* ══════════════════════════════════════════════════════════════
  * Switch —— 属性开关（如「包含子目录」「避免重复导入」）
  *
- * 注意与 `ToggleBlock`（按下式按钮，见 DESIGN.md §12.8）区分：
+ * 注意与 `ToggleBlock`（按下式按钮，见 memory/DESIGN.md §12.8）区分：
  *   Switch      = 左右滑动的圆点开关，表达「某个属性开/关」
  *   ToggleBlock = 方块按下，表达「切换到某个模式」
  * ══════════════════════════════════════════════════════════════ */
@@ -176,7 +176,7 @@ export function Switch(props: SwitchProps) {
 }
 
 /* ══════════════════════════════════════════════════════════════
- * Input —— 文本框。**唯一保留描边的控件之一**（DESIGN.md §6）
+ * Input —— 文本框。**唯一保留描边的控件之一**（memory/DESIGN.md §6）
  * ══════════════════════════════════════════════════════════════ */
 
 export interface InputProps extends JSX.InputHTMLAttributes<HTMLInputElement> {

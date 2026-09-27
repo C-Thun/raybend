@@ -1,5 +1,5 @@
 /**
- * Dialog / ConfirmDialog —— 模态弹窗（DESIGN.md §10.1 #9）。
+ * Dialog / ConfirmDialog —— 模态弹窗（memory/DESIGN.md §10.1 #9）。
  *
  * 用在建库、`easy destroy` 确认这类地方。
  *

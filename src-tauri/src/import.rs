@@ -327,7 +327,7 @@ pub fn import_resume<R: Runtime>(
     app.state::<ImportBatches>().snapshot(&batch_id)
 }
 
-/// 取消（**已导入的部分保留**，`REPOSITORY.md` §4.5）。
+/// 取消（**已导入的部分保留**，`memory/FUNCTION-REPOSITORY.md` §4.5）。
 #[tauri::command]
 pub fn import_cancel<R: Runtime>(
     app: AppHandle<R>,

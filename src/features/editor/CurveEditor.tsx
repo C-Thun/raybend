@@ -253,7 +253,7 @@ export function CurveEditor(props: CurveEditorProps): JSX.Element {
                     rx={0.8}
                     /* 包边用**面板底色**（`--surface-bar`）：控制点压在曲线/直方图上时
                        自带一圈「挖空」，比 `--overlay-line` 那种给照片用的覆盖线更合适
-                       （那两个令牌是画在**照片**上的，见 `DESIGN.md` §14.8） */
+                       （那两个令牌是画在**照片**上的，见 `memory/DESIGN.md` §14.8） */
                     class="fill-brand stroke-surface-bar"
                     stroke-width="1"
                     vector-effect="non-scaling-stroke"

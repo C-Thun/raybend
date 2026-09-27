@@ -66,7 +66,7 @@ import {
   type ThumbQueue,
 } from "../../components/ui/thumb-queue.ts";
 
-/** 时间片阈值的默认值（分钟）——`DESIGN.md` §12.7 的「1 小时」 */
+/** 时间片阈值的默认值（分钟）——`memory/DESIGN.md` §12.7 的「1 小时」 */
 export const DEFAULT_GAP_MINUTES = 60;
 
 /**
@@ -425,7 +425,7 @@ export function createPhotoGridStore(deps: PhotoGridDeps): PhotoGridStore {
        */
       if (missed > 0) {
         console.warn(
-          // i18n-exempt: 控制台诊断（不是界面文案），见 DESIGN.md §11.1 的豁免项
+          // i18n-exempt: 控制台诊断（不是界面文案），见 memory/DESIGN.md §11.1 的豁免项
           `[photo-grid] 补读拍摄时间：合并 ${merged} 条，有 ${missed} 条没对上（按时间分组可能因此分层）`,
         );
       }

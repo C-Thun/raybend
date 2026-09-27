@@ -1,6 +1,6 @@
 # M3-W6a　可选基础曲线与机型档案
 
-> 按 2026-09-26 人类方案实施；工作边界见 `PLAN.md` M3-W6a。与 W6c LUT/issue 独立。
+> 按 2026-09-26 人类方案实施；工作边界见 `memory/FINISHED.md` §6（M3-W6a）。与 W6c LUT/issue 独立。
 
 ## 交付
 

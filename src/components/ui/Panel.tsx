@@ -1,5 +1,5 @@
 /**
- * Panel —— 面板容器（DESIGN.md §10.1 #13）。
+ * Panel —— 面板容器（memory/DESIGN.md §10.1 #13）。
  *
  * 带标题行、可折叠、可被放进 `Splitter` 参与拖拽分段。
  *

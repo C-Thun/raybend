@@ -1,7 +1,7 @@
 /**
  * 看图的共享件（store + 视图）。**2026-09-18 从 `features/photo-grid/viewer/` 搬到这里。**
  *
- * 为什么住在 `components/ui/`：架构规则（`ARCHITECTURE.md` §1、`check-architecture.mjs` 规则 2）
+ * 为什么住在 `components/ui/`：架构规则（`memory/ARCHITECTURE.md` §1、`check-architecture.mjs` 规则 2）
  * **不允许 feature 之间互相 import**，而看图现在有两个消费方 —— 导入工作区的网格（M1）
  * 与浏览工作区（M2-W2）。放进基础组件层，两边都能用（features / workspaces → ui 是允许的方向），
  * 也不必为它单开一层。
