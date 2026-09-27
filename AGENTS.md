@@ -34,7 +34,6 @@ raybend（中文名**「光伴」**，产品名 `RayBend`）是一个**相片管
 
 1. **发布与推送必须由人类执行**：`git push`、打 tag、生成/上传发布物、上传到任何包注册表，全部由人操作。
 2. **commit 可由 Agent 自行管理**：提交信息用中文，格式 `<type>: <subject>`。
-   例外：处于 plannotator review 流程时**禁止** commit（审查的是未提交改动）。
 3. **工具链只有 pnpm + cargo**：前端与脚本用 pnpm，Rust 用 cargo。禁止 npm / yarn / bun 或混用锁文件——仓库只允许 `pnpm-lock.yaml` 与 `Cargo.lock`。（`npm install -g` 仅限本机全局 CLI 工具。）
 4. **前端不写图像算法**：像素、色彩空间、视口变换、渲染管线全部属于 Rust。前端只负责交互状态、矢量覆盖层与 UI。
 5. **不引入 SolidStart**（桌面应用无 SSR 需求；Start v2 面向 Solid v1，与 Solid 2 不配套）。
@@ -160,13 +159,14 @@ pnpm release [patch|minor|major] --windows ...   # 发版准备；publish 由人
 ### 5.4 规划纪律
 
 - **一次规划只覆盖一个工作单元**（最小颗粒度 = 一个波次）；`memory/PLAN.md` 只做路线级描述，
-  具体方案开工前写入 `specs/<milestone>-<单元>.md` 并走 plannotator 评审；不提前细化未开工单元。
-- 完整规划原则见 `memory/PLAN.md` §0。规划文件里的勾选项会被 plannotator 跟踪（`mark_done` 会真实改写文件）。
+  具体方案开工前写入 `specs/<milestone>-<单元>.md`；不提前细化未开工单元。
+- 完整规划原则见 `memory/PLAN.md` §0。specs 里的勾选项是**验收清单**：做完即勾、状态如实；
+  工作进度的唯一事实来源是 `todo`（全局纪律）。历史文件中对 plannotator 的提及是当时流程的记录，不回改。
 - 目录名沿革：`specs/` 原名 `plans/`（2026-09-26 改名）；`implementations/` 历史记录里的旧写法不改。
 
 ### 5.5 连续工作范围
 
-- 规划任务列表时：plannotator plan 状态下只用 plannotator progress，否则用 pi 的 `todos`。
+- 规划任务列表用 pi 的 `todo` 工具（单份事实来源，纪律见 `~/.pi/agent/AGENTS.md`）。
 - **规划好后必须做到列表任务全部无法进行时再停下**；无法进行的判据：需人类介入（E2E、授权、设计意图缺失等），或同一任务尝试超 5 次仍难解。
 - 此时**不是停止工作**：跳过卡住的部分，继续做清单里其它能做的，直到只剩需要人类协助的部分，再一次性汇总汇报。
 
