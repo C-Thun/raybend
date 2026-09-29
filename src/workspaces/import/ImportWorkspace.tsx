@@ -59,6 +59,7 @@ import { SplitHandle } from "../../components/ui/SplitHandle.tsx";
 import { withTimeout } from "../../lib/timeout.ts";
 import { timeoutMessage } from "../../i18n/index.ts";
 import { LeftColumn } from "./LeftColumn.tsx";
+import { ImportConfirmDialog } from "./ImportConfirmDialog.tsx";
 import type { ToastStore } from "../../components/ui/toast.ts";
 import { importInfoMode, toggleImportTileInfo } from "../../components/ui/tile-info.ts";
 
@@ -93,6 +94,7 @@ export interface ImportWorkspaceProps {
    * 比把 `setCreating` 本身搬出去少一层搬运（也供得住连续点两次）。
    */
   openCreateRequest?: number;
+  onOpenLibrarySettings?: (id: string) => void;
 }
 
 /** 空间预检的时限：与导入命令同量级（15 秒只可能是「后端挂了」）。 */
@@ -109,6 +111,8 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
   const store = props.store;
   const grid = props.grid;
   const [creating, setCreating] = createSignal(false);
+  /** 导入前的确认弹窗开着吗（`startImport` 之前的那一道闸） */
+  const [confirmingImport, setConfirmingImport] = createSignal(false);
 
   /* 命令面板 / 菜单里的「新建库…」：计数一变就开弹窗（首次挂载时不响应 —— 那时计数是 0） */
   createEffect(
@@ -142,6 +146,17 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
       path: dir.path,
       includeSubdirs: dir.includeSubdirs,
     }));
+
+  /**
+   * 点「导入」：**先确认再开工**（2026-09-28 崔总要求）。
+   *
+   * 两个入口（右列按钮、以后可能有的命令）都走这里，不要直接调 `startImport` ——
+   * 跳过确认的那条路只剩「空间不够但用户已经确认继续」那个例外。
+   */
+  function requestImport(): void {
+    if (store.selectedRepository() === null || sources().length === 0) return;
+    setConfirmingImport(true);
+  }
 
   /** 真正开始导入（`avoidDuplicates` 用右列那个复选框的状态）。 */
   async function startImport(): Promise<void> {
@@ -202,6 +217,10 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
 
   // 左列选中哪个目录，中列就跟着换（选中是**一个**状态，跨面板同步）
   createEffect(() => grid.setSourceDir(store.selectedDir()));
+  createEffect(on(store.sourceRevision, () => {
+    const path = store.selectedDir();
+    if (path !== null) grid.refreshSource(!store.isUnavailable(path));
+  }, { defer: true }));
 
   /*
    * ── 左列宽度：**自己写的把手**，不用 Ark 的 Splitter ──────────────────────
@@ -450,6 +469,8 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
           error={store.repositoriesError()}
           selectedId={store.selectedRepositoryId()}
           remountingId={store.remountingId()}
+          isRemounting={store.isRemounting}
+          {...(props.onOpenLibrarySettings ? { onOpenSettings: props.onOpenLibrarySettings } : {})}
           remountErrors={store.remountErrors()}
           onSelect={store.selectRepository}
           onRemount={(id) => void store.remount(id)}
@@ -470,7 +491,7 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
           repositoryOnline={store.selectedRepository()?.online ?? false}
           avoidDuplicates={store.avoidDuplicates()}
           onAvoidDuplicatesChange={store.setAvoidDuplicates}
-          onImport={() => void startImport()}
+          onImport={requestImport}
           locale={groupingLocale()}
         />
 
@@ -507,6 +528,22 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
           {...(props.onRevealInLibrary === undefined
             ? {}
             : { onRevealInLibrary: props.onRevealInLibrary })}
+        />
+
+        {/*
+          确认弹窗（崔总 2026-09-28）：上面是选了哪些目录，中间一个宽扁的向下箭头，
+          下面是选中的库卡片 —— 确认后关自己，接上上面那个「导入中」进度窗。
+        */}
+        <ImportConfirmDialog
+          open={confirmingImport()}
+          dirs={store.checkedDirs()}
+          repository={store.selectedRepository()}
+          onCancel={() => setConfirmingImport(false)}
+          onConfirm={() => {
+            setConfirmingImport(false);
+            void startImport();
+          }}
+          locale={groupingLocale()}
         />
 
         <CreateRepositoryDialog

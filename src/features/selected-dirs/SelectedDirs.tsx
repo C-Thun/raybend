@@ -21,9 +21,15 @@ import type { CheckedDir } from "../../lib/checked-dir.ts";
 export interface SelectedDirsProps {
   entries: readonly CheckedDir[];
   /** 点路径 → 选中并浏览这个目录（不改变勾选） */
-  onSelect: (path: string) => void;
-  onRemove: (path: string) => void;
-  onIncludeSubdirsChange: (path: string, value: boolean) => void;
+  onSelect?: (path: string) => void;
+  onRemove?: (path: string) => void;
+  onIncludeSubdirsChange?: (path: string, value: boolean) => void;
+  /**
+   * 只读（**导入确认弹窗**用，2026-09-28）：只展示「选了哪些目录、各自含不含子目录」，
+   * 不给移除与开关 —— 那里是拍板的地方，不是改清单的地方。
+   * 只读时三个回调都不需要（也就不用传）。
+   */
+  readOnly?: boolean;
   class?: string;
 }
 
@@ -55,15 +61,17 @@ export function SelectedDirs(props: SelectedDirsProps) {
                 <button
                   type="button"
                   class="min-w-0 flex-1 cursor-pointer text-start"
-                  onClick={() => props.onSelect(entry.path)}
+                  onClick={() => props.onSelect?.(entry.path)}
                   aria-label={entry.path}
                 >
                   <PathText path={entry.path} full class="min-w-0 w-full" />
                 </button>
-                <EasyDestroyButton
-                  label={t("source.remove_dir", { path: entry.path })}
-                  onRemove={() => props.onRemove(entry.path)}
-                />
+                <Show when={props.readOnly !== true}>
+                  <EasyDestroyButton
+                    label={t("source.remove_dir", { path: entry.path })}
+                    onRemove={() => props.onRemove?.(entry.path)}
+                  />
+                </Show>
               </div>
 
               {/*
@@ -71,19 +79,26 @@ export function SelectedDirs(props: SelectedDirsProps) {
                 **文字必须真的渲染出来** —— 设计稿里它是 `SubdirLabel`（`$fg-3` / 13px），
                 只给 `aria-label` 的话屏幕上什么都没有（2026-09-16 人类报的「文字看不见」）。
                 `aria-hidden`：读屏交给 Switch 自己的无障碍名，避免念两遍。
+
+                只读时不给开关，但**开了子目录的目录要把这句写出来**（它改变导入范围，
+                不能在确认时隐身）；没开的就不占位。
               */}
-              <div class="flex items-center justify-end gap-1.5">
-                <span class="text-fs-1 text-fg-3" aria-hidden="true">
-                  {t("source.include_subdirs")}
-                </span>
-                <Switch
-                  checked={entry.includeSubdirs}
-                  onCheckedChange={(value) =>
-                    props.onIncludeSubdirsChange(entry.path, value)
-                  }
-                  label={t("source.include_subdirs")}
-                />
-              </div>
+              <Show when={props.readOnly !== true || entry.includeSubdirs}>
+                <div class="flex items-center justify-end gap-1.5">
+                  <span class="text-fs-1 text-fg-3" aria-hidden="true">
+                    {t("source.include_subdirs")}
+                  </span>
+                  <Show when={props.readOnly !== true}>
+                    <Switch
+                      checked={entry.includeSubdirs}
+                      onCheckedChange={(value) =>
+                        props.onIncludeSubdirsChange?.(entry.path, value)
+                      }
+                      label={t("source.include_subdirs")}
+                    />
+                  </Show>
+                </div>
+              </Show>
             </div>
           )}
         </For>

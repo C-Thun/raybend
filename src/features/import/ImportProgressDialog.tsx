@@ -85,7 +85,7 @@ export function ImportProgressDialog(props: ImportProgressDialogProps) {
       onOpenChange={(open) => {
         if (!open) requestCancel();
       }}
-      title={store.finished() ? t("import.done_title") : t("import.title")}
+      title={store.finished() ? t("import.done_title") : store.state() === "waiting" ? t("import.waiting_title") : t("import.title")}
       footer={
         <>
           <Show when={store.errors().length > 0}>
@@ -97,6 +97,7 @@ export function ImportProgressDialog(props: ImportProgressDialogProps) {
             when={store.finished()}
             fallback={
               <>
+                <Show when={store.state() === "waiting"} fallback={<>
                 <Show
                   when={store.state() === "paused"}
                   fallback={
@@ -129,6 +130,10 @@ export function ImportProgressDialog(props: ImportProgressDialogProps) {
                   <Button variant="secondary" onClick={requestCancel}>
                     {t("import.cancel_button")}
                   </Button>
+                </Show>
+                </>}>
+                  <Button variant="secondary" onClick={requestCancel}>{t("import.cancel_button")}</Button>
+                  <Button variant="primary" disabled={store.busy()} onClick={() => void store.resume()}>{t("import.recheck")}</Button>
                 </Show>
               </>
             }
@@ -251,7 +256,7 @@ export function ImportProgressDialog(props: ImportProgressDialogProps) {
           </Show>
 
           <Show when={store.runNote()}>
-            {(note) => <p class="text-fs-0 text-fg-3">{note()}</p>}
+            {(note) => <p class="text-fs-0 text-fg-3">{note().startsWith("storage.wait.") ? t(note() === "storage.wait.repository" ? "import.waiting_target" : "import.waiting_source") : note()}</p>}
           </Show>
           <Show when={exportedTo()}>
             {(path) => (

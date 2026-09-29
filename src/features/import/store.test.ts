@@ -513,3 +513,11 @@ function state_api(state: FakeState): ImportApi {
 
 // 让 `stageOf` 不被当成死代码（它给上面几处快照读起来更直观）
 void stageOf;
+
+test("等待保留部分成功与订阅，允许继续；终态拒绝迟到的运行中快照", async()=>{
+ const {store,emit,state}=await startedStore();
+ emit(snapshot({state:"waiting",imported:1,runs:[runSnapshot({state:"waiting",imported:1,note:"storage.wait.source"})]}));
+ assert.equal(store.finished(),false); assert.equal(store.counts().imported,1); assert.equal(store.runNote(),"storage.wait.source");
+ state.commandSnapshot=snapshot({state:"waiting"}); await store.resume(); assert.equal(lastCall(state.calls),"resume");
+ emit(snapshot({state:"done",finishedAt:1,imported:2})); emit(snapshot({state:"running",imported:0})); assert.equal(store.state(),"done"); assert.equal(store.counts().imported,2);
+});

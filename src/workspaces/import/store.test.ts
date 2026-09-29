@@ -13,6 +13,57 @@ import { test } from "node:test";
 import type { DirEntry, RecentDir, RepositoryView, Volume } from "../../api/types.ts";
 import { createImportStore, errorText, type ImportApi } from "./store.ts";
 
+test("来源变化重查最近/勾选/当前目录，保留意图并重新计数", async () => {
+  const f = fakeApi({ recent: [{ path: "D:\\相片", includeSubdirs: true, usedAt: 1, useCount: 1 }] });
+  const store = createImportStore({ api: f.api });
+  await store.reloadRecent();
+  store.selectDir("D:\\相片"); store.toggleChecked("D:\\相片", true);
+  store.toggleExcluded(["D:\\相片\\甲.jpg"]);
+  await flush();
+  store.updateVolumes([{ path: "D:\\", kind: "removable", kindLabel: "" }]);
+  f.state.unavailable = ["D:\\相片"];
+  store.updateVolumes([]); await flush();
+  assert.equal(store.isUnavailable("d:/相片/"), true);
+  assert.equal(store.checkedPhotoCount(), null);
+  assert.equal(store.checkedDirs().length, 1);
+  assert.equal(store.selectedDir(), "D:\\相片");
+  assert.equal(store.isExcluded("D:\\相片\\甲.jpg"), true);
+  f.state.unavailable = []; f.state.counts.set("d:\\相片:true", 7);
+  store.updateVolumes([{ path: "D:\\", kind: "removable", kindLabel: "" }]); await flush();
+  assert.equal(store.isUnavailable("d:/相片"), false);
+  assert.equal(store.checkedPhotoCount(), 7);
+});
+
+test("最近晚返回仍探测，缺失状态项不冒充在线", async () => {
+  let resolve!: (rows: RecentDir[]) => void;
+  const f = fakeApi(); f.api.listRecentDirs = () => new Promise(done => { resolve = done; });
+  f.api.pathsStatus = async () => [];
+  const store = createImportStore({ api: f.api });
+  const loading = store.reloadRecent(); await store.hydratePreferences();
+  resolve([{ path: "D:\\café", includeSubdirs: false, usedAt: 0, useCount: 1 }]); await loading;
+  assert.equal(store.isUnavailable("d:/cafe\u0301/"), true);
+});
+
+test("旧计数不能覆盖递归切换或移除再勾选", async () => {
+  const f = fakeApi(); const pending: Array<(photos: number) => void> = [];
+  f.api.countSourcePhotos = () => new Promise(done => pending.push(photos => done({ photos, skipped: 0, truncated: false })));
+  const store = createImportStore({ api: f.api });
+  store.toggleChecked("/甲"); store.setIncludeSubdirs("/甲", true);
+  pending[1]!(8); await flush(); pending[0]!(99); await flush();
+  assert.equal(store.checkedPhotoCount(), 8);
+  store.removeChecked("/甲"); store.toggleChecked("/甲");
+  pending[pending.length - 1]!(3); await flush(); assert.equal(store.checkedPhotoCount(), 3);
+});
+
+test("来源探测只单飞，后来的拔插触发补读，旧结果丢弃", async () => {
+  const f = fakeApi(); const pending: Array<(available: boolean[]) => void> = [];
+  f.api.pathsStatus = () => new Promise(done => pending.push(done));
+  const store = createImportStore({ api: f.api }); store.selectDir("/甲");
+  const again = store.refreshSources(); assert.equal(pending.length, 1);
+  pending[0]!([true]); await flush(); assert.equal(pending.length, 2);
+  pending[1]!([false]); await again; assert.equal(store.isUnavailable("/甲"), true);
+});
+
 /* ══════════════════════════════════════════════════════════════
  * 测试替身
  * ══════════════════════════════════════════════════════════════ */
@@ -398,6 +449,60 @@ test("驱动器：加载、失败要有错误信息（树显示空态而不是�
   assert.equal(store.volumesStatus(), "error");
   assert.match(store.volumesError() ?? "", /枚列驱动器失败/);
   assert.equal(store.volumes().length, 2, "失败不该把已有列表清空");
+});
+
+/** 手动时钟：只跑「到点了」这一步，间隔本身不关心（那是 `SOURCE_POLL_MS` 的事） */
+function fakeTimers() {
+  const jobs = new Map<number, () => void>();
+  let next = 0;
+  return {
+    timers: {
+      repeat(fn: () => void) {
+        const handle = ++next;
+        jobs.set(handle, fn);
+        return () => jobs.delete(handle);
+      },
+    },
+    tick() {
+      for (const fn of [...jobs.values()]) fn();
+    },
+    count: () => jobs.size,
+  };
+}
+
+test("来源轮询：挂载期间到点就重列，上一次还在飞就不叠加，停掉之后不再拉", async () => {
+  const clock = fakeTimers();
+  const { api, state } = fakeApi();
+  const store = createImportStore({ api, timers: clock.timers });
+  const calls = () => state.calls.filter((call) => call === "listVolumes").length;
+
+  store.startSourceWatch();
+  store.startSourceWatch();
+  assert.equal(clock.count(), 1, "重复 start 只留一份定时器");
+  assert.equal(calls(), 0, "开始盯着不该顺手拉一次（挂载时那一次由工作区发起）");
+
+  // 插上盘：到点自己重列
+  state.volumes = [{ path: "E:\\", kind: "removable", kindLabel: "可移动磁盘" }];
+  clock.tick();
+  clock.tick();
+  assert.equal(calls(), 1, "还在飞的时候不叠请求");
+  await flush();
+  assert.deepEqual(
+    store.volumes().map((volume) => volume.path),
+    ["E:\\"],
+    "新挂上的盘出现在列表里",
+  );
+
+  clock.tick();
+  await flush();
+  assert.equal(calls(), 2, "完成后下一拍照常重列");
+
+  store.stopSourceWatch();
+  store.stopSourceWatch();
+  assert.equal(clock.count(), 0, "停掉之后定时器不留在表里");
+  clock.tick();
+  await flush();
+  assert.equal(calls(), 2, "停掉之后不再拉");
 });
 
 /* ══════════════════════════════════════════════════════════════

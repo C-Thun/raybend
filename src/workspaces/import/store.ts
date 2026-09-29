@@ -34,11 +34,12 @@ import {
 } from "../../lib/checked-dir.ts";
 import { countExcludedInDirs, invertExcluded, isUnderDir } from "../../lib/excluded.ts";
 import type { LoadStatus } from "../../lib/load-status.ts";
-import { samePath } from "../../lib/tree.ts";
+import { pathKey, samePath } from "../../lib/tree.ts";
 import {
   createRepositoryState,
   type RemountError,
   type RepositoryStateApi,
+  type RepositoryStateStore,
 } from "../../features/repositories/state.ts";
 
 /**
@@ -121,6 +122,10 @@ export interface ImportStore {
 
   /* ── 来源树的第一层（驱动器 / 挂载点）───────── */
   volumes: () => readonly Volume[];
+  updateVolumes: (rows: Volume[]) => void;
+  /** 已观察到来源变化；树与图片区复用同一恢复代次。 */
+  sourceRevision: () => number;
+  refreshSources: () => Promise<void>;
   /**
    * 读一个目录的直接子目录（树的懒加载用）。
    *
@@ -131,6 +136,14 @@ export interface ImportStore {
   volumesStatus: () => LoadStatus;
   volumesError: () => string | null;
   reloadVolumes: () => Promise<void>;
+  /**
+   * 盯住「来源」列表（**导入工作流挂载时调，切走就停**）。
+   *
+   * 盘会在程序外面出现/消失（插 U 盘、挂网络盘、拔掉），而窗口焦点不一定变 ——
+   * 只靠焦点重列会出现「插上了但列表里没有」。幂等：重复 start 只有一份定时器。
+   */
+  startSourceWatch: () => void;
+  stopSourceWatch: () => void;
 
   /* ── 库（右列）────────────────────────────── */
   repositories: () => readonly RepositoryView[];
@@ -149,6 +162,7 @@ export interface ImportStore {
   applyRepositoryTemplate: (repositoryId: string, template: string) => void;
   /** 正在重新查找的库 id */
   remountingId: () => string | null;
+  isRemounting: (id: string) => boolean;
   /** 重新查找失败的原因（库 id → 原因；句子由视图拼，见 `RemountError`） */
   remountErrors: () => Readonly<Record<string, RemountError>>;
   /** 对所有登记路径重新查找一次（离线徽标点它） */
@@ -166,12 +180,31 @@ export interface ImportStore {
 }
 
 export interface ImportStoreDeps {
+  repositories?: RepositoryStateStore;
+  /** 应用级卷观察器接管生产轮询；测试可沿用原独立定时器。 */
+  observeVolumes?: (handler: (rows: Volume[]) => void) => () => void;
   api: ImportApi;
   /** 最近目录保留条数（与 Rust 侧的默认值一致） */
   recentLimit?: number;
+  /** 定时器（注入以便测试）；缺省用全局 */
+  timers?: ImportTimers;
+}
+
+export interface ImportTimers {
+  /** 每隔 `ms` 调一次 `fn`，返回**停止它**的函数（句柄类型不外露） */
+  repeat(fn: () => void, ms: number): () => void;
 }
 
 export const DEFAULT_RECENT_LIMIT = 50;
+
+/**
+ * 「来源」轮询间隔（毫秒）。
+ *
+ * 2 秒是「插上就看见」与「不刷屏」之间的取舍：`volumes_list` 在 Windows 上只走
+ * `GetLogicalDrives` + `GetDriveTypeW`（**不取卷标**，见 `store/volumes.rs` 的已知取舍），
+ * 一次几微秒，不构成 `AGENTS.md` §2.13 说的「疯狂扫描」。
+ */
+export const SOURCE_POLL_MS = 2000;
 
 /** 设置键：「避免重复导入」（与 `src/api/db.ts` 的 `SETTING_KEYS` 一致） */
 const IMPORT_AVOID_DUPLICATES_KEY = "import.avoid_duplicates";
@@ -201,7 +234,7 @@ export function createImportStore(deps: ImportStoreDeps): ImportStore {
    * 这里只做转发（这层的公开 API 不变），好处是别的地方（库设置弹窗、
    * 将来的浏览侧）可以直接读写同一份 —— 一个地方变了，所有界面都跟着变。
    */
-  const repos = createRepositoryState({ api: deps.api });
+  const repos = deps.repositories ?? createRepositoryState({ api: deps.api });
   const [selectedRepositoryId, setSelectedRepositoryId] = createSignal<
     string | null
   >(null);
@@ -215,9 +248,10 @@ export function createImportStore(deps: ImportStoreDeps): ImportStore {
     samePath(selectedDir(), path);
 
   const selectDir = (path: string | null): void => {
+    const repeated = samePath(path, selectedDir());
     setSelectedDir(path);
     // **每次重新选中都重查一次**（人类 2026-09-16）：盘可能刚插上/刚拔掉
-    if (path !== null) void recheckAvailability(path);
+    if (path !== null) void refreshSources().then(() => { if (repeated) changedSources(); });
   }
 
   /* ══════════════════════════════════════════════════════════
@@ -244,16 +278,21 @@ export function createImportStore(deps: ImportStoreDeps): ImportStore {
    * 这里**不取消**上一次的请求：用户来回勾选时，旧结果写回会被 `patchChecked`
    * 的路径匹配挡掉（那一条已经不在列表里了）。
    */
+  const countVersions = new Map<string, number>();
   const startCount = async (
     path: string,
     includeSubdirs: boolean,
   ): Promise<void> => {
+    const key = pathKey(path);
+    const token = (countVersions.get(key) ?? 0) + 1;
+    countVersions.set(key, token);
+    const current = () => countVersions.get(key) === token && checkedDirs().some(row => samePath(row.path, path) && row.includeSubdirs === includeSubdirs);
     patchChecked(path, { counting: true });
     try {
       const result = await deps.api.countSourcePhotos(path, includeSubdirs);
-      patchChecked(path, { photoCount: result.photos, counting: false });
+      if (current()) patchChecked(path, { photoCount: result.truncated ? null : result.photos, counting: false });
     } catch {
-      patchChecked(path, { photoCount: null, counting: false });
+      if (current()) patchChecked(path, { photoCount: null, counting: false });
     }
   };
 
@@ -291,6 +330,7 @@ export function createImportStore(deps: ImportStoreDeps): ImportStore {
   };
 
   function removeChecked(path: string): void {
+    const key = pathKey(path); countVersions.set(key, (countVersions.get(key) ?? 0) + 1);
     setCheckedDirs((prev) =>
       prev.filter((entry) => !samePath(entry.path, path)),
     );
@@ -344,14 +384,19 @@ export function createImportStore(deps: ImportStoreDeps): ImportStore {
    * 最近
    * ══════════════════════════════════════════════════════════ */
 
+  let recentVersion = 0;
   async function reloadRecent(): Promise<void> {
+    const token = ++recentVersion;
     setRecentStatus("loading");
     try {
       const rows = await deps.api.listRecentDirs();
+      if (token !== recentVersion) return;
       setRecentDirs(rows.slice(0, limit));
       setRecentError(null);
       setRecentStatus("ready");
+      await refreshSources();
     } catch (error) {
+      if (token !== recentVersion) return;
       setRecentError(errorText(error));
       setRecentStatus("error");
     }
@@ -364,6 +409,7 @@ export function createImportStore(deps: ImportStoreDeps): ImportStore {
       setRecentError(errorText(error));
       return;
     }
+    recentVersion += 1;
     // 本地先摘掉（不等重载）：用户点了「移除」就该立刻看到它消失
     setRecentDirs((prev) => prev.filter((row) => !samePath(row.path, path)));
   }
@@ -384,7 +430,7 @@ export function createImportStore(deps: ImportStoreDeps): ImportStore {
 
   async function hydratePreferences(): Promise<void> {
     // 启动就把「最近」的挂载情况认一遍（不等用户点）
-    void refreshRecentAvailability();
+    void refreshSources();
     try {
       const raw = await deps.api.getSetting(IMPORT_AVOID_DUPLICATES_KEY);
       if (raw === null) return;
@@ -402,13 +448,56 @@ export function createImportStore(deps: ImportStoreDeps): ImportStore {
     setVolumesStatus("loading");
     try {
       const rows = await deps.api.listVolumes();
-      setVolumes(rows);
-      setVolumesError(null);
-      setVolumesStatus("ready");
+      updateVolumes(rows);
     } catch (error) {
       setVolumesError(errorText(error));
       setVolumesStatus("error");
     }
+  }
+
+  /*
+   * 「来源」轮询（间隔与理由见 `SOURCE_POLL_MS`）。
+   *
+   * 上一次还在飞就跳过这一拍：后端慢的时候不要叠请求；失败的那一拍下一拍会自己重试
+   * （状态已经回到 `error`）。只在导入工作流挂载期间跑 —— 切走就 `stopSourceWatch`。
+   */
+  const timers: ImportTimers = deps.timers ?? {
+    repeat: (fn, ms) => {
+      const handle = globalThis.setInterval(fn, ms);
+      return () => globalThis.clearInterval(handle);
+    },
+  };
+  const [sourceRevision, setSourceRevision] = createSignal(0);
+  const changedSources = () => setSourceRevision(value => value + 1);
+  let volumeSignature: string | null = null;
+  function updateVolumes(rows: Volume[]): void {
+    const signature = JSON.stringify(rows.map(row => [pathKey(row.path), row.kind]).sort());
+    const changed = volumeSignature !== null && volumeSignature !== signature;
+    volumeSignature = signature;
+    setVolumes(rows); setVolumesStatus("ready"); setVolumesError(null);
+    if (changed) {
+      // 探测完成再通知视图，以免把刚拔掉的目录当恢复重扫。
+      for (const row of checkedDirs()) {
+        const key = pathKey(row.path); countVersions.set(key, (countVersions.get(key) ?? 0) + 1);
+        patchChecked(row.path, { photoCount: null, counting: false });
+      }
+      void refreshSources().then(changedSources);
+    }
+  }
+  let sourceWatch: (() => void) | null = null;
+  function startSourceWatch(): void {
+    if (sourceWatch !== null) return;
+    void refreshSources();
+    if (deps.observeVolumes) { sourceWatch = deps.observeVolumes(updateVolumes); return; }
+    sourceWatch = timers.repeat(() => {
+      if (volumesStatus() === "loading") return;
+      void reloadVolumes();
+    }, SOURCE_POLL_MS);
+  }
+  function stopSourceWatch(): void {
+    if (sourceWatch === null) return;
+    sourceWatch();
+    sourceWatch = null;
   }
 
   /* ══════════════════════════════════════════════════════════
@@ -423,49 +512,47 @@ export function createImportStore(deps: ImportStoreDeps): ImportStore {
     new Set(),
   );
 
-  /** 比路径用的键：与 `samePath` 同口径（大小写折叠），但集合键要的是稳定字符串 */
-  const availabilityKey = (path: string): string => path.toLowerCase();
-
-  const isUnavailable = (path: string): boolean =>
-    unavailable().has(availabilityKey(path));
-
-  function setAvailability(paths: readonly string[], available: boolean[]): void {
-    setUnavailable((prev) => {
-      const next = new Set(prev);
-      let touched = false;
-      paths.forEach((path, index) => {
-        const key = availabilityKey(path);
-        const ok = available[index] ?? true;
-        if (ok && next.delete(key)) touched = true;
-        else if (!ok && !next.has(key)) {
-          next.add(key);
-          touched = true;
-        }
-      });
-      return touched ? next : prev;
-    });
-  }
-
-  /** 启动时（`hydrate`）把整份「最近」查一遍 */
-  async function refreshRecentAvailability(): Promise<void> {
-    const paths = recentDirs().map((row) => row.path);
-    if (paths.length === 0) return;
-    try {
-      const available = await deps.api.pathsStatus(paths);
-      setAvailability(paths, available);
-    } catch {
-      // 查不了不该打扰用户：保持上一次的判断（新装的盘顶多显示成旧的灰）
-    }
-  }
-
-  /** 选中某个目录时**重查这一条** —— 盘可能刚插上，也可能刚拔掉 */
-  async function recheckAvailability(path: string): Promise<void> {
-    try {
-      const [available] = await deps.api.pathsStatus([path]);
-      setAvailability([path], [available ?? true]);
-    } catch {
-      // 同上：查不动就不动
-    }
+  const isUnavailable = (path: string): boolean => unavailable().has(pathKey(path));
+  let availabilityFlight: Promise<void> | null = null;
+  let availabilityAgain = false;
+  async function refreshSources(): Promise<void> {
+    availabilityAgain = true;
+    if (availabilityFlight) return availabilityFlight;
+    availabilityFlight = (async () => {
+      while (availabilityAgain) {
+        availabilityAgain = false;
+        const paths = [...new Map([
+          ...recentDirs().map(row => row.path), ...checkedDirs().map(row => row.path),
+          ...(selectedDir() === null ? [] : [selectedDir()!]),
+        ].map(path => [pathKey(path), path])).values()];
+        if (!paths.length) continue;
+        try {
+          const status = await deps.api.pathsStatus(paths);
+          // 期间发生卷变化/改选，结果已过期；下一轮按当前事实重新取。
+          if (availabilityAgain) continue;
+          const previous = unavailable();
+          const next = new Set(previous);
+          const recovered: string[] = [];
+          paths.forEach((path, index) => {
+            const key = pathKey(path);
+            if (status[index] === true) { if (next.delete(key)) recovered.push(path); }
+            else next.add(key);
+          });
+          const changed = paths.some(path => previous.has(pathKey(path)) !== next.has(pathKey(path)));
+          setUnavailable(next);
+          if (changed) changedSources();
+          for (const row of checkedDirs()) {
+            if (next.has(pathKey(row.path))) {
+              const key = pathKey(row.path); countVersions.set(key, (countVersions.get(key) ?? 0) + 1);
+              patchChecked(row.path, { photoCount: null, counting: false });
+            } else if (recovered.some(path => samePath(path, row.path)) || (row.photoCount === null && !row.counting)) {
+              void startCount(row.path, row.includeSubdirs);
+            }
+          }
+        } catch { /* 探测失败保留上次事实，不把未知冒充在线。 */ }
+      }
+    })().finally(() => { availabilityFlight = null; });
+    return availabilityFlight;
   }
 
   /* ══════════════════════════════════════════════════════════
@@ -499,7 +586,9 @@ export function createImportStore(deps: ImportStoreDeps): ImportStore {
 
   /** 有地方发现这个库读不到了（如库设置读 catalog 失败）→ 立刻降级为离线 */
   const markRepositoryOffline = (repositoryId: string): void => {
-    repos.markOffline(repositoryId);
+    // 设置读取失败先通过统一入口查明原因，不能把模板/输入错误直接当拔盘。
+    if (deps.repositories) void repos.remount(repositoryId, true);
+    else repos.markOffline(repositoryId);
   };
 
   /** 模版改了 → 就地同步进列表（不用整表重拉） */
@@ -528,9 +617,14 @@ export function createImportStore(deps: ImportStoreDeps): ImportStore {
     excludedInChecked,
     excludedForImport: excludedInCheckedList,
     volumes,
+    updateVolumes,
+    sourceRevision,
+    refreshSources,
     volumesStatus,
     volumesError,
     reloadVolumes,
+    startSourceWatch,
+    stopSourceWatch,
     loadDirs: (path) => deps.api.listDirs(path),
     recentDirs,
     recentStatus,
@@ -548,6 +642,7 @@ export function createImportStore(deps: ImportStoreDeps): ImportStore {
     markRepositoryOffline,
     applyRepositoryTemplate,
     remountingId: repos.remountingId,
+    isRemounting: repos.isRemounting,
     remountErrors: repos.remountErrors,
     remount,
     avoidDuplicates,

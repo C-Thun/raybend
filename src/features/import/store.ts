@@ -178,6 +178,8 @@ export function createImportStore(deps: ImportStoreDeps): ImportStore {
   }
 
   function apply(snapshot: ImportBatchProgress): void {
+    const previous=progress();
+    if (previous?.batchId === snapshot.batchId && isFinal(previous.state) && !isFinal(snapshot.state)) return;
     setProgress(snapshot);
     // 终态到了就退订：后端不会再发有意义的事件了
     if (isFinal(snapshot.state)) unsubscribe();
@@ -278,6 +280,8 @@ export function createImportStore(deps: ImportStoreDeps): ImportStore {
     runNote: () => {
       const snapshot = progress();
       if (snapshot === null) return null;
+      const waiting = snapshot.runs.find(run => run.state === "waiting" && run.note?.startsWith("storage.wait."));
+      if (waiting?.note) return waiting.note;
       for (const run of snapshot.runs) {
         if (run.note !== null && run.note !== "") return run.note;
       }

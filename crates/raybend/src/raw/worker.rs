@@ -761,6 +761,7 @@ fn spawn_proc(path: &std::path::Path) -> Result<Proc, WorkerError> {
     if needs_marker {
         cmd.arg(WORKER_ARG);
     }
+    suppress_console_window(&mut cmd);
     let mut child = cmd
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -784,6 +785,37 @@ fn spawn_proc(path: &std::path::Path) -> Result<Proc, WorkerError> {
         stdout: Some(BufReader::new(stdout)),
     })
 }
+
+/// 不让 worker 弹出一个**新的控制台窗口**（Windows）。
+///
+/// 2026-09-28 真机反馈：从构建目录直接跑 release 的 `raybend-desktop.exe`，一启动就多出一块
+/// 黑框。查下来是 worker —— `raybend-raw-worker.exe` 是**控制台子系统**的可执行文件
+/// （`windows_subsystem` 只加在主程序 `src-tauri/src/main.rs` 上），而父进程是 GUI 子系统、
+/// 自己**没有**控制台，Windows 于是给子进程新开一个（实测：worker 的子进程里出现
+/// `conhost.exe 0x4`）。
+///
+/// 修法不是把 worker 改成 GUI 子系统（那样它就不能单独跑给人看日志了），而是**按需**加
+/// `CREATE_NO_WINDOW`：
+///
+/// * 父进程**没有**控制台（双击 / 资源管理器 / 打包后的应用）→ 加标志，子进程不再弹窗；
+///   它继承来的 stderr 句柄无效就静默失败（实测过：worker 照常握手、退出码 0，不会 panic）；
+/// * 父进程**有**控制台（开发期从终端跑 debug）→ 什么都不加，worker 照旧继承那个终端，
+///   解码器日志与 panic 落在你看得见的地方（开发期要的就是这个）。
+///
+/// 见 <https://learn.microsoft.com/en-us/windows/win32/procthread/process-creation-flags>。
+#[cfg(windows)]
+fn suppress_console_window(cmd: &mut Command) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    // SAFETY: 无参数、无副作用，只读当前进程的控制台窗口句柄。
+    let has_console = !unsafe { windows_sys::Win32::System::Console::GetConsoleWindow() }.is_null();
+    if !has_console {
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+}
+
+#[cfg(not(windows))]
+fn suppress_console_window(_cmd: &mut Command) {}
 
 fn describe_exit(status: &std::process::ExitStatus) -> String {
     match status.code() {

@@ -51,11 +51,19 @@ export function LeftColumn(props: LeftColumnProps) {
    * **刻意不做「刷新」按钮**（2026-09-16 人类定的原则）：目录树的每一级在**展开时**
    * 都会重读（见 `features/dir-tree/store.ts` 的 `expand`），不需要用户去按什么；
    * 把正确性推给用户是设计错误 —— 没有哪个文件管理器是这样的。
+   *
+   * 2026-09-28 补：**光靠焦点不够** —— 插上 U 盘但没点窗口时，列表不会自己长出来
+   * （崔总真机问的就是这个）。挂载期间按 `SOURCE_POLL_MS` 轮询一次，代价见那里的说明；
+   * 切走这个工作流就停（本组件的挂载期就是它的生命周期）。
    */
   onMount(() => {
-    const onFocus = (): void => void store.reloadVolumes();
+    const onFocus = (): void => { void store.reloadVolumes(); void store.refreshSources(); };
     window.addEventListener("focus", onFocus);
-    onCleanup(() => window.removeEventListener("focus", onFocus));
+    store.startSourceWatch();
+    onCleanup(() => {
+      window.removeEventListener("focus", onFocus);
+      store.stopSourceWatch();
+    });
   });
 
   return (
@@ -108,6 +116,7 @@ export function LeftColumn(props: LeftColumnProps) {
               <Panel title={t("source.tree")} scroll pad={false}>
                 <DirTree
                   volumes={store.volumes()}
+                  sourceRevision={store.sourceRevision()}
                   status={store.volumesStatus()}
                   error={store.volumesError()}
                   isSelected={store.isSelected}
