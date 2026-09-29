@@ -85,6 +85,7 @@ export const zhCN = {
   "external.application": "外部应用",
   "external.noApplications": "请先添加应用",
   "external.addApplication": "+ 应用",
+  "external.addApplicationShort": "添加",
   "external.browseDirectory": "浏览",
   "external.directory": "TIFF 保存目录",
   "external.confirm": "导出并打开",

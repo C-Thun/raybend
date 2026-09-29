@@ -85,6 +85,7 @@ export const enUS: Record<MessageKey, string> = {
   "external.application": "Application",
   "external.noApplications": "Add an application first",
   "external.addApplication": "+ App",
+  "external.addApplicationShort": "Add",
   "external.browseDirectory": "Browse",
   "external.directory": "TIFF destination",
   "external.confirm": "Export and open",

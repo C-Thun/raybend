@@ -15,14 +15,34 @@ export function ExternalEditorDialog(props:{store:ExternalEditorStore}){
   <Dialog open={store.open()} title={t('external.title')} onOpenChange={open=>{if(!open)store.close();}}>
    <div data-external-editor class="flex flex-col gap-3">
     <p class="truncate text-fs-1 text-fg-2">{store.target()?.name}</p>
-    <div class="flex items-center gap-2">
-     <select data-external-application class="h-row-h min-w-0 flex-1 rounded-ui bg-surface-track px-2 text-fs-1 text-fg-1" aria-label={t('external.application')} disabled={store.loading()||store.running()||store.busy()}
-       value={store.selectedApplication()?.path??''} onChange={event=>void store.chooseApplication(event.currentTarget.value)}>
-      <Show when={store.preferences().applications.length===0}><option value="">{t('external.noApplications')}</option></Show>
-      <For each={store.preferences().applications}>{app=><option value={app.path}>{app.name}</option>}</For>
-     </select>
-     <Button data-external-add disabled={store.loading()||store.running()||store.busy()} onClick={()=>void store.discover()}>{t('external.addApplication')}</Button>
+    {/*
+      应用选择器（崔总 2026-09-29）：不要黑底框 —— 直接在窗口底色上按手机应用网格排
+      方形图标块，末尾固定一个虚线 + 格新增；没登记过就只有 + 格。点块选中（选中 =
+      主色描边 + 选中底），其余逻辑（发现/手动添加弹窗、目录、启动）一律不动。
+      没有真 exe 图标可用（登记模型只有 name+path，图标抽取是后续项），
+      v1 用应用名首字的方砖代位。
+    */}
+    <div data-external-application role="list" aria-label={t('external.application')} class="grid grid-cols-5 gap-x-2 gap-y-2">
+     <For each={store.preferences().applications}>{app=>{
+      const selected=()=>{const current=store.selectedApplication();return current!==null&&applicationKey(current.path)===applicationKey(app.path);};
+      return <button type="button" role="listitem" data-external-app aria-pressed={selected()}
+       class="flex min-w-0 flex-col items-center gap-1 rounded-ui p-1 hover:bg-state-hover disabled:opacity-50"
+       disabled={store.loading()||store.running()||store.busy()} title={app.path}
+       onClick={()=>void store.chooseApplication(app.path)}>
+       <span classList={{"bg-state-selected outline-1 -outline-offset-1 outline-brand":selected(),"bg-surface-bar":!selected()}}
+        class="flex aspect-square w-full shrink-0 items-center justify-center rounded-ui text-fs-3 font-600 text-fg-1" aria-hidden="true">
+        {(app.name.trim()[0]??'?').toUpperCase()}
+       </span>
+       <span classList={{"text-fg-1":selected(),"text-fg-2":!selected()}} class="w-full truncate text-center text-fs-0">{app.name}</span>
+      </button>;}}</For>
+     <button type="button" role="listitem" data-external-add aria-label={t('external.addApplication')}
+      class="flex min-w-0 flex-col items-center gap-1 rounded-ui p-1 hover:bg-state-hover disabled:opacity-50"
+      disabled={store.loading()||store.running()||store.busy()} onClick={()=>void store.discover()}>
+      <span class="flex aspect-square w-full shrink-0 items-center justify-center rounded-ui border border-dashed border-fg-3 text-fs-3 text-fg-3" aria-hidden="true">+</span>
+      <span class="w-full truncate text-center text-fs-0 text-fg-3">{t('external.addApplicationShort')}</span>
+     </button>
     </div>
+    <Show when={store.preferences().applications.length===0}><p class="text-fs-0 text-fg-3">{t('external.noApplications')}</p></Show>
     <label class="flex flex-col gap-1 text-fs-1 text-fg-2">{t('external.directory')}
      <span class="flex gap-2"><Input data-external-directory class="min-w-0 flex-1" value={store.preferences().directory} disabled={store.loading()||store.running()||store.busy()} onInput={event=>void store.directory(event.currentTarget.value)}/>
       <Button disabled={store.loading()||store.running()||store.busy()} onClick={()=>void pickDirectory({title:t('external.directory')}).then(dir=>{if(dir!==null)return store.directory(dir);}).catch(store.reportError)}>{t('external.browseDirectory')}</Button>
