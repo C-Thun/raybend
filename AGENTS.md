@@ -99,7 +99,8 @@ raybend/
 ├── src-tauri/                 # Tauri 外壳（package.name = "raybend-desktop"）
 ├── crates/raybend/            # 核心库（不依赖 tauri）
 ├── website/                   # 官网（独立技术栈，见 website/AGENTS.md）
-└── prompts/                   # 功能口述原文（.pd，模块功能意图的原始输入）
+├── prompts/                   # 功能口述原文（.pd，模块功能意图的原始输入）
+└── todos/                     # 临时需求记录（还没开工的复杂需求原文；开工后转 specs/）
 ```
 
 **分层原则**：`src-tauri` 只做「窗口 + WebView + 命令转发」薄壳，业务逻辑全部在 `crates/` 内且**不依赖 tauri**（为 Tauri 3 迁移与 CLI/无头模式留路）。前端分层与依赖方向见 `memory/ARCHITECTURE.md` §0–§4。
@@ -144,6 +145,8 @@ pnpm smoke:ui [url]
 pnpm debug:win             # build + 跨编译 + check:win + 运行（含 dav1d 环境）
 pnpm check:win             # 产物时间与内容核对（见下）
 pnpm release [patch|minor|major] --windows ...   # 发版准备；publish 由人类执行
+# ❗ release 只在**任务清单里真有发版任务**时才跑（崔总 2026-09-28 定）：
+#    给崔总出测试产物用 pnpm debug:win（快）；release 一次 15 分钟起，还会顶版本号。
 ```
 
 **关键红线**（完整排障手册、十条硬规矩与事故案例在 `memory/ARCHITECTURE.md` §8）：
@@ -234,7 +237,12 @@ pnpm release [patch|minor|major] --windows ...   # 发版准备；publish 由人
 
 **记忆体规范**：agent 记忆存 `memory/`，**文件主名全部大写**；与具体模块功能相关的记忆一律
 `memory/FUNCTION-<模块>.md`（现有 BROWSE / IMAGING / REPOSITORY，新模块照此增加）。
-本表以外的目录/文件不属于记忆体（如 `prompts/` 是口述原文输入，`legal/` 是协议存放处）。
+本表以外的目录/文件不属于记忆体（如 `prompts/` 是口述原文输入，`legal/` 是协议存放处，`todos/` 是**临时需求记录**）。
+
+**`todos/` 约定（崔总 2026-09-28 定）**：复杂需求先在对话里接到、还没开工的，除了登记进
+pi 的 todo 工具，**同时把需求原文落一份到 `todos/`**（文件名 `YYYY-MM-DD-<简述>.md`，
+内含原文、背景、落点提示与验收要点）—— 防「todo 工具里的描述丢细节」。开工时以它为源
+写 `specs/`，做完删除或移走；它是需求暂存，不是进度表（进度只看 todo 工具），也不是 spec。
 
 | 文件 / 目录 | 内容 |
 | --- | --- |

@@ -29,7 +29,9 @@
 
 ### 1.2 RAW
 
-- **导出：不支持** —— 我们不导出 RAW（导出的是 issue 渲染结果 / 位图）。
+- **导出（2026-09-28 定）：只导出「标记为 RAW 的 issue」** —— RAW 以一条标记行回到 export tiles 的 issue 条，
+  选中它导出的 **IRA = RAW 直接转码的灰度图**（空栈直走解码管线，**不经任何曲线与修改**，供与原图对比）。
+  **原 RAW 文件本身没有「导出」概念**（将来或另给「复制出去 / 打开所在目录」）；导出格式仍是 webp/avif/jpg/png 四种。
 - **导入：尽量支持**，能力跟着 **rawler 基础库**走（后端候选见 `memory/FUTURE.md` §B）：
   * 普通马赛克（Bayer）先支持全；
   * 早期的 **X3**（Sigma Foveon）可以不支持；
@@ -101,6 +103,8 @@
 ### 3.2 issue 切换与缩略图（2026-09-26 更新）
 
 M3-W6c 的定稿模型以当前 editor profile 为真相：`latest` 是自动保存的工作副本；命名 issue 是不可变完整 profile 快照。切换 SOOC、RAW 或命名 issue 时，把该 profile 写入 latest，同时进入统一撤销/重做历史，刷新当前图的小图、看图和预览。继续调整只修改 latest；配置哈希加完整比较推导当前选中的 issue，不另存选择 ID。匹配优先级为命名定稿 → SOOC/RAW 原始源 → latest；新调整没有其它匹配时选中 latest。定稿资格只排除原始源和已有命名定稿，latest 工作副本不参与去重。
+
+**issue 导出序号（2026-09-28，规格 `specs/export-issue-ordinal.md`）**：每个命名定稿带一个**每照片唯一的序号**（`issues.ordinal`，0–99，最多 100 个定稿、全满拒绝保存）；分配从 `assets.issue_counter` 游标顺找空位、绕圈复用删除留下的洞。导出文件名 = 模版主名 + 强制尾号：定稿 `I00`–`I99`、原片 `ISO`、RAW 标记 issue `IRA`、未匹配 latest `ILA`（latest 优先按哈希匹配已有定稿，匹配上按那个定稿的序号算——export tiles 的显示与导出同一口径）。
 
 原先“切 issue 时保留旧 latest 供返回”的设想已由人类在 2026-09-26 明确替换为“编辑状态一变即更新 latest，包括选中 issue”；返回切换前状态走撤销/重做。
 
