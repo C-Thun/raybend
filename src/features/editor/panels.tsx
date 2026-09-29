@@ -32,7 +32,7 @@ import { Button, IconButton } from "../../components/ui/Button.tsx";
 import { MetadataRows } from "../../components/ui/MetadataRows.tsx";
 import type { ExifTag } from "../../api/types.ts";
 import type { DevelopStack } from "../../api/editor.ts";
-import type { IssueLibrary, Issue } from "../../api/issues.ts";
+import type { IssueLibrary, Issue, IssueSelection } from "../../api/issues.ts";
 import { SegmentedControl } from "../../components/ui/SegmentedControl.tsx";
 import { HistogramPanel } from "../../components/ui/HistogramPanel.tsx";
 import { Switch } from "../../components/ui/Form.tsx";
@@ -113,7 +113,12 @@ export interface EditorPanelsProps {
   baseCurveLibrary: BaseCurveLibrary | null;
   issues: IssueLibrary | null;
   issueFocusTick: number;
-  onSelectIssue: (stack: DevelopStack) => void;
+  /**
+   * 选中态的**本地先行值**（崔总 2026-09-28：切定稿时面板要立刻亮，不能等后端）。
+   * 点击后由工作区立刻写入，`issues.selection` 追上来或换图时清空；`null` = 没在先行。
+   */
+  issueSelectionOverride?: IssueSelection | null;
+  onSelectIssue: (stack: DevelopStack, selection: IssueSelection) => void;
   onDeleteIssue: (issue: Issue, event: ShiftLikeEvent) => void;
   loadIssueThumb: (issueId: number) => Promise<Uint8Array | null>;
   onSelectBaseCurve: (id: string | null) => void;
@@ -151,19 +156,19 @@ type ViewTab = "view" | "issues" | "info";
 type CurveTab = "curve";
 
 export function EditorPanels(props: EditorPanelsProps): JSX.Element {
-  let scrollHost: HTMLDivElement | undefined;
-  createEffect(() => {
-    const tool = props.store.tool();
-    if (tool === "crop" || tool === "rotate") scrollHost?.scrollTo({ top: 0, behavior: "instant" });
-  });
+  /*
+   * 右栏**不许自己跳顶**（崔总 2026-09-28，点名过两次）：点裁切/旋转只是把工具块
+   * 插在这一栏顶部，点定稿只是切到「定稿」页签 —— 阅读位置是用户的，不能替他重置。
+   * 以前两处都 `scrollHost.scrollTo({top:0})`，看着像界面在乱跳；要定位到具体条目
+   * 时用 `scrollIntoView({block:"nearest"})` 那种最小位移，不要整栏重置。
+   */
   const [viewTab, setViewTab] = createSignal<ViewTab>("view");
-  createEffect(() => { if (props.issueFocusTick > 0) { setViewTab("issues"); scrollHost?.scrollTo({ top: 0, behavior: "instant" }); } });
+  createEffect(() => { if (props.issueFocusTick > 0) setViewTab("issues"); });
   const [paramTab, setParamTab] = createSignal<ParamGroup>("tone");
   const [curveTab] = createSignal<CurveTab>("curve");
 
   return (
     <div
-      ref={scrollHost}
       data-editor-panels
       class={[
         /* 滚动条落在预留空间里；横向 padding 走密度令牌（与 browse 右栏同一口径） */
@@ -207,6 +212,7 @@ export function EditorPanels(props: EditorPanelsProps): JSX.Element {
         </Show>
         <Show when={viewTab() === "issues"}>
           <IssuesTab enabled={props.enabled} store={props.store} library={props.issues}
+            selectionOverride={props.issueSelectionOverride ?? null}
             onSelect={props.onSelectIssue} onDelete={props.onDeleteIssue} loadThumb={props.loadIssueThumb} />
         </Show>
         <Show when={viewTab() === "info"}>
@@ -370,10 +376,12 @@ function OverviewTab(props: {
 
 /** 定稿页签：选中态来自当前配置哈希；用户定稿永不覆盖。 */
 function IssuesTab(props: { enabled: boolean; store: EditorStore; library: IssueLibrary | null;
-  onSelect: (stack: DevelopStack) => void; onDelete: (issue: Issue, event: ShiftLikeEvent) => void;
+  selectionOverride: IssueSelection | null;
+  onSelect: (stack: DevelopStack, selection: IssueSelection) => void; onDelete: (issue: Issue, event: ShiftLikeEvent) => void;
   loadThumb: (issueId: number) => Promise<Uint8Array | null> }): JSX.Element {
   const isSelected = (kind: "sooc" | "raw" | "latest" | number): boolean => {
-    const selected = props.library?.selection;
+    // 先行值优先：点击那一刻就亮；后端的 selection 追上来后两者自然一致
+    const selected = props.selectionOverride ?? props.library?.selection;
     return typeof kind === "number" ? typeof selected === "object" && selected.issue === kind : selected === kind;
   };
   const source = (base: "sooc" | "raw"): DevelopStack => ({
@@ -385,7 +393,7 @@ function IssuesTab(props: { enabled: boolean; store: EditorStore; library: Issue
     <For each={(["sooc", "raw"] as const)}>{(base) =>
       <button type="button" disabled={!props.enabled || !(base === "raw" ? props.store.editBaseAvailable().raw : props.store.editBaseAvailable().bitmap)}
         class="flex min-h-12 items-center gap-2 rounded-ui px-1 text-left hover:bg-state-hover disabled:opacity-50"
-        classList={{ "bg-state-selected": isSelected(base) }} onClick={() => props.onSelect(source(base))}>
+        classList={{ "bg-state-selected": isSelected(base) }} onClick={() => props.onSelect(source(base), base)}>
         <span class="h-10 w-14 shrink-0 rounded-ui bg-surface-bar" />
         <span class="min-w-0 flex-1"><span class="block text-fs-2 text-fg-1">{base.toUpperCase()}</span>
           <span class="block text-fs-0 text-fg-3">{t(base === "raw" ? "editor.issue.rawHint" : "editor.issue.soocHint")}</span></span>
@@ -399,7 +407,7 @@ function IssuesTab(props: { enabled: boolean; store: EditorStore; library: Issue
     <For each={props.library?.issues ?? []}>{(issue) =>
       <div class="group flex min-h-12 items-center gap-1 rounded-ui px-1 hover:bg-state-hover"
         classList={{ "bg-state-selected": isSelected(issue.id) }}>
-        <button type="button" disabled={!props.enabled} onClick={() => props.onSelect(issue.stack)}
+        <button type="button" disabled={!props.enabled} onClick={() => props.onSelect(issue.stack, { issue: issue.id })}
           class="flex min-w-0 flex-1 items-center gap-2 text-left disabled:opacity-50">
           <IssueThumb issueId={issue.id} load={props.loadThumb} />
           <span class="min-w-0 flex-1"><span class="block truncate text-fs-2 text-fg-1">{issue.name}</span>

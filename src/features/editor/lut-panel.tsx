@@ -20,6 +20,7 @@
 
 import { For, Show, createSignal, createEffect, onCleanup, type JSX } from "solid-js";
 import {
+  IconCheck,
   IconChevronDown,
   IconChevronRight,
   IconFolderPlus,
@@ -28,6 +29,7 @@ import {
 } from "@tabler/icons-solidjs";
 
 import { Button } from "../../components/ui/Button.tsx";
+import { Switch } from "../../components/ui/Form.tsx";
 import { EasyDestroyButton } from "../../components/ui/EasyDestroy.tsx";
 import { Dialog } from "../../components/ui/Dialog.tsx";
 import { Tooltip } from "../../components/ui/Tooltip.tsx";
@@ -120,9 +122,20 @@ export function LutPanel(props: LutPanelProps): JSX.Element {
 
       <div class="flex shrink-0 items-center justify-between px-panel-pad pb-1 text-fs-1 text-fg-2">
         <span>{t("editor.lut.apply")}</span>
-        <input type="checkbox" aria-label={t("editor.lut.apply")}
-          checked={props.store.lutEnabled()} disabled={props.store.lutId() === null}
-          onChange={(event) => { props.store.setLutEnabled(event.currentTarget.checked); props.onToggle?.(); }} />
+        {/*
+          开关一律用全系统同一份 `Switch`（`memory/DESIGN.md` 的控件分工）。
+          这里曾经是一颗原生 `<input type="checkbox">`（崔总多次指出）—— 原生控件
+          不吃主题令牌，深浅色下都足一截，而且键盘/读屏行为跟别处不一致。
+        */}
+        <Switch
+          checked={props.store.lutEnabled()}
+          disabled={props.store.lutId() === null}
+          onCheckedChange={(checked) => {
+            props.store.setLutEnabled(checked);
+            props.onToggle?.();
+          }}
+          label={t("editor.lut.apply")}
+        />
       </div>
       <Show when={importSummary()}><p role="status" class="px-panel-pad pb-2 text-fs-0 text-fg-2">{importSummary()}</p></Show>
       <Show when={selectedMissing()}><p class="px-panel-pad pb-1 text-fs-0 text-danger">{t("editor.lut.selectedMissing")}</p></Show>
@@ -283,7 +296,12 @@ function LutTile(props: { entry: LutEntry; selected: boolean; enabled: boolean; 
       class="relative block aspect-[4/3] w-full overflow-hidden rounded-ui bg-surface-bar disabled:opacity-50"
       classList={{ "ring-1 ring-brand": props.selected && props.enabled }}>
       <Show when={cover()}>{(url) => <img src={url()} alt="" class="h-full w-full object-cover" />}</Show>
-      <Show when={props.selected && props.enabled}><span class="absolute right-1 top-1 rounded-full bg-brand px-1 text-fg-on-brand">✓</span></Show>
+      {/*
+        选中勾：**定尺寸的圆**。以前是文本 `✓` 靠行高撑高 —— 宽只有字宽加 padding、
+        高却跟着全应用的行高走（1.45），于是成了竖着的椭圆（崔总 2026-09-28 报的）。
+        改成固定 size + 居中的 Tabler 勾，与全库图标口径一致。
+      */}
+      <Show when={props.selected && props.enabled}><span class="absolute right-1 top-1 flex size-4.5 items-center justify-center rounded-full bg-brand text-fg-on-brand" aria-hidden="true"><IconCheck size={12} /></span></Show>
     </button>
     <div class="flex items-center gap-0.5">
       <span class="min-w-0 flex-1 truncate text-center text-fs-0 text-fg-2" title={props.entry.name}>{props.entry.name}</span>

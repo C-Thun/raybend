@@ -61,7 +61,8 @@ import { createEasyDestroy, type ShiftLikeEvent } from "../../lib/easy-destroy.t
 import { EasyDestroyHost } from "../../components/ui/EasyDestroy.tsx";
 import { createLatestCoalescer } from "../../lib/editor-intent.ts";
 import { getLutLibrary, createLutCategory, importLutDirectory, hideLut, type LutLibrary } from "../../api/lut.ts";
-import { getIssueLibrary, createIssue, deleteIssue, getIssueThumb, type IssueLibrary, type Issue } from "../../api/issues.ts";
+import { getIssueLibrary, createIssue, deleteIssue, getIssueThumb, type IssueLibrary, type Issue, type IssueSelection } from "../../api/issues.ts";
+import { IconLoader2 } from "@tabler/icons-solidjs";
 import { pendingLegacyLutCategories, markLegacyLutCategoriesImported } from "../../lib/editor-prefs.ts";
 import { pickDirectory } from "../../api/dialog.ts";
 import type { DevelopStack } from "../../api/editor.ts";
@@ -322,6 +323,41 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
   let resetTarget: string | null = null;
   const [lutBusy, setLutBusy] = createSignal(false);
   const [issueLibrary, setIssueLibrary] = createSignal<IssueLibrary | null>(null);
+  /*
+   * 切定稿的**选中态先行**（崔总 2026-09-28）：面板的高亮不能等后端 ——
+   * `issues.selection` 要走 60ms 防抖 + IPC + 重算才追上来，那一下看着像「点不动」。
+   * 点击时立刻写入 override，`selection` 追平或换图时清掉。
+   */
+  const [issueSelectionOverride, setIssueSelectionOverride] = createSignal<IssueSelection | null>(null);
+  /*
+   * 同一次切换的**中央提示**（崔总 2026-09-28）：渲染超过短阈值才显示（不闪），
+   * 「画完了」的判据用 `renderState` 里现成的 `appliedParamsRev >= paramsRev`
+   * （那两个字段就是干这个的：我发的那次参数画上屏幕没有）。
+   */
+  const [issueSwitching, setIssueSwitching] = createSignal(false);
+  let issueSwitchTimer: number | undefined;
+  let issueSwitchPending = false;
+  const sameSelection = (a: IssueSelection | null | undefined, b: IssueSelection | null): boolean => {
+    if (a === undefined) return false;
+    if (typeof a === "object" && a !== null && typeof b === "object" && b !== null) return a.issue === b.issue;
+    return a === b;
+  };
+  createEffect(() => {
+    // 后端追平了先行值，或换了库/照片 —— 先行值功成身退
+    if (sameSelection(issueLibrary()?.selection, issueSelectionOverride())) setIssueSelectionOverride(null);
+  });
+  createEffect(() => {
+    void currentAssetId(); void store.repositoryId();
+    setIssueSelectionOverride(null);
+  });
+  createEffect(() => {
+    const state = props.store.renderState();
+    if (state === null) return;
+    if (issueSwitchPending && state.paramsRev > 0 && state.appliedParamsRev >= state.paramsRev) {
+      issueSwitchPending = false;
+      setIssueSwitching(false);
+    }
+  });
   const [issueFocusTick, setIssueFocusTick] = createSignal(0);
   const [finalizeOpen, setFinalizeOpen] = createSignal(false);
   const [finalizeName, setFinalizeName] = createSignal("");
@@ -908,7 +944,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
     commitDevelop,
     autoAdjust: () => void autoAdjust(),
     canAutoAdjust,
-    canFinalize: () => enabled() && (issueLibrary()?.canFinalize ?? false),
+    canFinalize: () => enabled() && !finalizeBusy() && (issueLibrary()?.canFinalize ?? false),
     finalize: () => { setFinalizeName(issueLibrary()?.suggestedName ?? ""); setFinalizeOpen(true); },
     fullscreenTarget,
   };
@@ -969,10 +1005,17 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
     }, 60);
     onCleanup(() => { active = false; window.clearTimeout(timer); });
   });
-  const selectIssue = (stack: DevelopStack): void => {
+  const selectIssue = (stack: DevelopStack, selection: IssueSelection): void => {
     if (!enabled()) return;
     props.store.applyDevelop(stack.values, stack.curves, developSettingsOf(stack));
     commitDevelop();
+    // 面板高亮立刻切过去；渲染提示晚 300ms 才亮（快的时候不闪）
+    setIssueSelectionOverride(selection);
+    issueSwitchPending = true;
+    window.clearTimeout(issueSwitchTimer);
+    issueSwitchTimer = window.setTimeout(() => {
+      if (issueSwitchPending) setIssueSwitching(true);
+    }, 300);
   };
   const finalize = async (): Promise<void> => {
     if (!enabled() || !issueLibrary()?.canFinalize || finalizeBusy()) return;
@@ -981,19 +1024,37 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
     if (repositoryId === null || assetId === null || assetId === undefined) return;
     const name = finalizeName().trim();
     if (name === "") return;
+    /*
+     * **先关窗再干活**（崔总 2026-09-28 的口径：UI 先行，重活在后台）。
+     *
+     * `issue_create` 里同步跑整套定稿渲染（管线 + AVIF 编码），旧实现把弹窗押在它上面：
+     * 后端慢/卡时按钮一直「按下」、弹窗关不掉；手动关掉后回填也不会来 —— 真机踩过
+     * 「保存其实成功了，列表却要等进出对比模式才出现」。现在：点了就关窗，`busy`
+     * 只用来拦重复保存；完成后回填列表（换过照片就不回填，免得把别的照片的列表盖上来）；
+     * **成败都再拉一次列表**，让列表反映真相，而不是停留在旧态。
+     */
+    setFinalizeOpen(false);
     setFinalizeBusy(true);
+    const stillCurrent = () =>
+      store.repositoryId() === repositoryId && currentAssetId() === assetId;
     try {
       commitDevelop();
       await persistTail;
       const library = await createIssue(repositoryId, Number(assetId), name, locale() === "en-US");
-      if (library !== null) {
+      if (library !== null && stillCurrent()) {
         setIssueLibrary(library);
-        setFinalizeOpen(false);
         setIssueFocusTick((value) => value + 1);
         if (library.snapshotError !== null) setDevelopError(library.snapshotError);
       }
-    } catch (error) { setDevelopError(String(error)); }
-    finally { setFinalizeBusy(false); }
+    } catch (error) {
+      setDevelopError(String(error));
+    } finally {
+      setFinalizeBusy(false);
+      // 失败也要让「其实已经存进去的定稿」立刻现身：直接拉一次列表。
+      void getIssueLibrary(repositoryId, Number(assetId), locale() === "en-US", currentDevelopStack())
+        .then((library) => { if (stillCurrent()) setIssueLibrary(library); })
+        .catch(() => undefined);
+    }
   };
   const requestDeleteIssue = (target: Issue, event: ShiftLikeEvent): void => {
     const repositoryId = store.repositoryId();
@@ -1138,6 +1199,21 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
             onRetry={startRenderer}
           />
 
+          {/*
+            切定稿的中央提示（崔总 2026-09-28）：渲染超过短阈值才亮（不闪），
+            画完（appliedParamsRev 追平 paramsRev）自动灭。样式同全屏看图的载入遮罩
+            （毛玻璃小力一点，不铺满屏、不拦输入 —— 它只是说明，不是闸门）。
+          */}
+          <Show when={issueSwitching()}>
+            <div class="pointer-events-none absolute inset-0 z-30 flex items-center justify-center backdrop-blur-[2px]"
+              data-issue-switching="on" aria-live="polite">
+              <div class="flex items-center gap-2 rounded-ui bg-surface-layer/70 px-4 py-2">
+                <IconLoader2 size={16} class="animate-spin text-fg-2" aria-hidden="true" />
+                <span class="text-fs-2 text-fg-1">{t("editor.issue.switching")}</span>
+              </div>
+            </div>
+          </Show>
+
           {/* 胶片带（自带顶部三点缩放把手，全项目唯一那一份） */}
           <Show when={props.store.showsFilm()}>
             <FilmStrip
@@ -1161,7 +1237,18 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
               choices: [
                 { value: "sooc", label: t("editor.base.sooc"), selected: compareReference() === "sooc", disabled: !props.store.editBaseAvailable().bitmap },
                 { value: "raw", label: t("editor.base.raw"), selected: compareReference() === "raw", disabled: props.store.editBase() !== "raw" },
-                ...(issueLibrary()?.issues ?? []).map((issue) => ({
+                /*
+                  右边正在显示的那个定稿不能跟自己比（崔总 2026-09-28）：按 **profileHash**
+                  过滤而不是名字 —— 同名定稿可能是不同的图（不该误伤），同哈希才是「同一张」；
+                  重新定稿出的同名同参数版本（新 id、同哈希）也会一起滤掉。
+                */
+                ...(issueLibrary()?.issues ?? []).filter((issue) => {
+                  const library = issueLibrary();
+                  const selection = library?.selection;
+                  if (typeof selection !== "object" || selection === null) return true;
+                  const displayed = library?.issues.find((entry) => entry.id === selection.issue);
+                  return displayed === undefined || issue.profileHash !== displayed.profileHash;
+                }).map((issue) => ({
                   value: `issue:${issue.id}`, label: `${issue.name} · ${issue.sourceBase.toUpperCase()}`,
                   selected: compareReference() === `issue:${issue.id}`,
                 })),
@@ -1190,6 +1277,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
             baseCurveLibrary={baseCurveLibrary()}
             issues={issueLibrary()}
             issueFocusTick={issueFocusTick()}
+            issueSelectionOverride={issueSelectionOverride()}
             onSelectIssue={selectIssue}
             onDeleteIssue={requestDeleteIssue}
             loadIssueThumb={(issueId) => {

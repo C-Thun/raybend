@@ -121,8 +121,23 @@ export function CompareView(props: CompareViewProps): JSX.Element {
    * 到的（老库）或栏区被拉大了，只要还在「适合窗口」状态就跟着重算。
    */
   const [fitId, setFitId] = createSignal<string | null>(null);
-  const [dragging, setDragging] = createSignal<{ x: number; y: number } | null>(null);
+  const [dragging, setDragging] = createSignal<{
+    x: number;
+    y: number;
+    /** 0 = 左键（同步拖所有格）；2 = 右键（只拖 `paneId` 那一格，崔总 2026-09-28） */
+    button: number;
+    paneId: string | null;
+  } | null>(null);
   const [cursor, setCursor] = createSignal<{ x: number; y: number } | null>(null);
+  /*
+   * **每格的错位**（崔总 2026-09-28）：右键拖出来的，叠在共享 pan 之上（key = 照片 id）。
+   * 生效变换 = clamp(共享 pan + 本格错位) —— 左键同步拖时共享 pan 原始地动，
+   * 拖不过去的格被 clamp 钉在边上、其余继续跟：错位就在这个过程中被自动修正。
+   * 松手时把 clamp 结果写回（归一化），下一次手势不会踩在看不见的越界偏移上。
+   */
+  const [paneOffsets, setPaneOffsets] = createSignal<ReadonlyMap<string, { x: number; y: number }>>(
+    new Map(),
+  );
 
   const layout = () => compareLayout(props.photos.length);
   const canvas = createMemo(() => compareCanvas(props.photos));
@@ -171,20 +186,22 @@ export function CompareView(props: CompareViewProps): JSX.Element {
     height: canvas().size.height * scale,
   });
 
-  /** 适配到某张图（居中）。其他图跟着同一个倍率走 —— 这就是「统一倍率」 */
+  /** 适配到某张图（居中）。其他图跟着同一个倍率走 —— 这就是「统一倍率」；也是**归位**（清错位） */
   const fitTo = (photo: ViewerPhoto): void => {
     batch(() => {
       setFitId(photo.id);
       setPan({ x: 0, y: 0 });
+      setPaneOffsets(new Map());
     });
   };
 
-  /** 100%：画布 1:1（与单张看图同一口径） */
+  /** 100%：画布 1:1（与单张看图同一口径）；同样是归位（清错位） */
   const goToOneToOne = (): void => {
     batch(() => {
       setFitId(null);
       setManualZoom(clampZoom(1));
       setPan({ x: 0, y: 0 });
+      setPaneOffsets(new Map());
     });
   };
 
@@ -211,16 +228,57 @@ export function CompareView(props: CompareViewProps): JSX.Element {
     });
   };
 
-  /** 平移：按**画布**夹取（画布比窗口小时锁在中间） */
+  /** 平移：共享 pan **原始地**动（不在这里 clamp）—— 边界在渲染时逐格夹取，
+   * 这才有「拖不过去的格钉住、其余继续跟」的自动修正（见 paneOffsets 的说明）。 */
   const panBy = (dx: number, dy: number): void => {
-    const viewport = pane();
-    setPan((previous) => {
+    setPan((previous) => ({ x: previous.x + dx, y: previous.y + dy }));
+  };
+
+  /** 某一格的生效平移 = 共享 pan + 本格错位，再按画布夹取 */
+  const effectivePanFor = (photoId: string): { x: number; y: number } => {
+    const offset = paneOffsets().get(photoId) ?? { x: 0, y: 0 };
+    return clampPan({
+      pan: { x: pan().x + offset.x, y: pan().y + offset.y },
+      content: contentBox(zoom()),
+      viewport: pane(),
+    });
+  };
+
+  /** 右键拖：只动一格的错位（clamp 在生效层，所以「到边就停」） */
+  const offsetPaneBy = (photoId: string, dx: number, dy: number): void => {
+    setPaneOffsets((previous) => {
+      const base = effectivePanFor(photoId);
       const next = clampPan({
-        pan: { x: previous.x + dx, y: previous.y + dy },
+        pan: { x: base.x + dx, y: base.y + dy },
         content: contentBox(zoom()),
-        viewport,
+        viewport: pane(),
       });
-      return next.x === previous.x && next.y === previous.y ? previous : next;
+      const nextOffset = { x: next.x - pan().x, y: next.y - pan().y };
+      if (nextOffset.x === 0 && nextOffset.y === 0) return previous;
+      const map = new Map(previous);
+      map.set(photoId, nextOffset);
+      return map;
+    });
+  };
+
+  /**
+   * 松手时**归一化**：把每格被 clamp 钉住的那份写回错位表。
+   * 不写回的话，下一次手势会踩在看不见的越界偏移上（拖了没反应）。
+   */
+  const normalizePaneOffsets = (): void => {
+    setPaneOffsets((previous) => {
+      if (previous.size === 0) return previous;
+      const map = new Map<string, { x: number; y: number }>();
+      for (const photo of props.photos) {
+        const offset = previous.get(photo.id);
+        if (offset === undefined) continue;
+        const effective = effectivePanFor(photo.id);
+        const normalized = { x: effective.x - pan().x, y: effective.y - pan().y };
+        if (normalized.x !== 0 || normalized.y !== 0) map.set(photo.id, normalized);
+      }
+      return map.size === previous.size && [...map].every(([id, v]) => previous.get(id) === v)
+        ? previous
+        : map;
     });
   };
 
@@ -430,10 +488,20 @@ export function CompareView(props: CompareViewProps): JSX.Element {
   };
 
   const onPointerDown = (event: PointerEvent): void => {
-    if (event.button !== 0 || isViewerControlTarget(event.target)) return;
+    if (isViewerControlTarget(event.target)) return;
+    if (event.button !== 0 && event.button !== 2) return;
     // pointer capture 会改变后续 click 的目标，所以在捕获前就确定当前画幅
     focusFromTarget(event.target);
-    setDragging({ x: event.clientX, y: event.clientY });
+    const paneId =
+      event.button === 2
+        ? (focusFromTarget(event.target)?.id ?? null)
+        : null;
+    if (event.button === 2) {
+      // 右键是我们自己的手势（错位拖动）：从这一刻起不把菜单放出来
+      event.preventDefault();
+      if (paneId === null) return;
+    }
+    setDragging({ x: event.clientX, y: event.clientY, button: event.button, paneId });
     host?.setPointerCapture(event.pointerId);
   };
 
@@ -448,14 +516,18 @@ export function CompareView(props: CompareViewProps): JSX.Element {
     trackCursor(event);
     const from = dragging();
     if (from === null) return;
-    setDragging({ x: event.clientX, y: event.clientY });
-    // pan 的单位就是 CSS px：鼠标走 80px，画面也走 80px
-    panBy(event.clientX - from.x, event.clientY - from.y);
+    setDragging({ ...from, x: event.clientX, y: event.clientY });
+    const dx = event.clientX - from.x;
+    const dy = event.clientY - from.y;
+    // 右键 = 只拖这一格（错位）；左键 = 所有格同步（各自保持错位，clamp 自动修正）
+    if (from.button === 2 && from.paneId !== null) offsetPaneBy(from.paneId, dx, dy);
+    else panBy(dx, dy);
   };
 
   const endDrag = (event: PointerEvent): void => {
     if (dragging() === null) return;
     setDragging(null);
+    normalizePaneOffsets();
     if (host?.hasPointerCapture(event.pointerId)) host.releasePointerCapture(event.pointerId);
   };
 
@@ -491,6 +563,10 @@ export function CompareView(props: CompareViewProps): JSX.Element {
       onPointerLeave={() => setCursor(null)}
       onPointerUp={endDrag}
       onPointerCancel={endDrag}
+      /* 右键拖动是本视图自己的手势（错位），不能让浏览器菜单播进来；控件上的照常 */
+      onContextMenu={(event) => {
+        if (!isViewerControlTarget(event.target)) event.preventDefault();
+      }}
       onDblClick={(event) => {
         // 双击落在缩放/返回按钮上时不当成「切换适配」—— 那两个按钮自己有点击行为
         if (isViewerControlTarget(event.target)) return;
@@ -521,6 +597,10 @@ export function CompareView(props: CompareViewProps): JSX.Element {
           <div
             data-compare-frame={at}
             data-compare-photo-id={placement().photo.id}
+            data-compare-offset={(() => {
+              const offset = paneOffsets().get(placement().photo.id);
+              return offset === undefined ? undefined : `${Math.round(offset.x)},${Math.round(offset.y)}`;
+            })()}
             data-current={props.store.current()?.id === placement().photo.id ? "true" : undefined}
             aria-label={placement().photo.fileName}
             /* 窗口：可见/裁剪的边界（画布放大后铺满整格，而不是被画布关住） */
@@ -553,7 +633,11 @@ export function CompareView(props: CompareViewProps): JSX.Element {
                 style={{
                   width: `${layoutBox().width}px`,
                   height: `${layoutBox().height}px`,
-                  transform: `translate3d(${pan().x}px, ${pan().y}px, 0) scale(${transformScale()})`,
+                  /*
+                    生效平移 = 共享 pan + 本格错位，再逐格 clamp：同步拖动时拖不过去的
+                    格被钉在边界上（错位被自动修正），右键拖的单格也一样到边就停。
+                  */
+                  transform: `translate3d(${effectivePanFor(placement().photo.id).x}px, ${effectivePanFor(placement().photo.id).y}px, 0) scale(${transformScale()})`,
                   "transform-origin": "center",
                   "will-change": "transform",
                 }}
