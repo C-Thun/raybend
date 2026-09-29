@@ -759,6 +759,7 @@ export const enUS: Record<MessageKey, string> = {
  "editor.issue.rawHint": "Original RAW decode · read only",
  "editor.issue.toolbar": "Finalize",
  "editor.issue.switching": "Switching issue…",
+ "editor.issue.generating": "Generating preview…",
  "editor.base.label": "Edit base",
  "editor.base.sooc": "SOOC",
  "editor.base.raw": "RAW",

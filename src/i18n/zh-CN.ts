@@ -771,6 +771,7 @@ export const zhCN = {
  "editor.issue.rawHint": "原始 RAW 解码 · 固定不可编辑",
  "editor.issue.toolbar": "定稿",
  "editor.issue.switching": "切换定稿中…",
+ "editor.issue.generating": "预览生成中…",
  "editor.base.label": "编辑基准",
  "editor.base.sooc": "SOOC",
  "editor.base.raw": "RAW",

@@ -362,6 +362,11 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
   const [finalizeOpen, setFinalizeOpen] = createSignal(false);
   const [finalizeName, setFinalizeName] = createSignal("");
   const [finalizeBusy, setFinalizeBusy] = createSignal(false);
+  /*
+   * 正在生成的定稿（2026-09-29 崔总）：确认后**立刻**在定稿页签现身（占位 + 预览位转圈），
+   * 后端渲染/编码完成回填列表后由真实条目接替。换照片、成败、异常都清掉。
+   */
+  const [pendingIssue, setPendingIssue] = createSignal<{ name: string; sourceBase: "raw" | "sooc" } | null>(null);
   const issueDestroy = createEasyDestroy();
 
   const applyRenderState = (state: EditorRenderState | null): void => {
@@ -1035,6 +1040,13 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
      */
     setFinalizeOpen(false);
     setFinalizeBusy(true);
+    /*
+     * 占位先行（2026-09-29 崔总：「先生出条目，生成过程中预览图转圈，生成完显示出图」）。
+     * `issue_create` 里同步跑整套定稿渲染 + AVIF 编码要好几秒 —— 那几秒里列表必须有动静。
+     * 同时立刻把页签切到「定稿」，让用户看得到占位出现的那一刻。
+     */
+    setPendingIssue({ name, sourceBase: currentDevelopStack().sourceBase ?? "raw" });
+    setIssueFocusTick((value) => value + 1);
     const stillCurrent = () =>
       store.repositoryId() === repositoryId && currentAssetId() === assetId;
     try {
@@ -1050,6 +1062,8 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
       setDevelopError(String(error));
     } finally {
       setFinalizeBusy(false);
+      // 占位退出：成功时真实条目已进列表；失败时也不能一直转圈
+      setPendingIssue(null);
       // 失败也要让「其实已经存进去的定稿」立刻现身：直接拉一次列表。
       void getIssueLibrary(repositoryId, Number(assetId), locale() === "en-US", currentDevelopStack())
         .then((library) => { if (stillCurrent()) setIssueLibrary(library); })
@@ -1069,7 +1083,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
       } catch (error) { if (current()) setDevelopError(String(error)); }
     }, event, t("editor.issue.deleteTitle"));
   };
-  createEffect(() => { store.repositoryId(); currentAssetId(); issueDestroy.cancel(); });
+  createEffect(() => { store.repositoryId(); currentAssetId(); issueDestroy.cancel(); setPendingIssue(null); });
   onCleanup(issueDestroy.cancel);
 
   createEffect(() => {
@@ -1276,6 +1290,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
             lensQuery={lensQuery.state()}
             baseCurveLibrary={baseCurveLibrary()}
             issues={issueLibrary()}
+            pendingIssue={pendingIssue()}
             issueFocusTick={issueFocusTick()}
             issueSelectionOverride={issueSelectionOverride()}
             onSelectIssue={selectIssue}

@@ -112,6 +112,8 @@ export interface EditorPanelsProps {
   onRefreshLens: () => void;
   baseCurveLibrary: BaseCurveLibrary | null;
   issues: IssueLibrary | null;
+  /** 正在生成的定稿（确认后立刻现身，预览位转圈；成功后由真实条目接替）—— 2026-09-29 崔总定 */
+  pendingIssue?: { name: string; sourceBase: "raw" | "sooc" } | null;
   issueFocusTick: number;
   /**
    * 选中态的**本地先行值**（崔总 2026-09-28：切定稿时面板要立刻亮，不能等后端）。
@@ -213,6 +215,7 @@ export function EditorPanels(props: EditorPanelsProps): JSX.Element {
         <Show when={viewTab() === "issues"}>
           <IssuesTab enabled={props.enabled} store={props.store} library={props.issues}
             selectionOverride={props.issueSelectionOverride ?? null}
+            pending={props.pendingIssue ?? null}
             onSelect={props.onSelectIssue} onDelete={props.onDeleteIssue} loadThumb={props.loadIssueThumb} />
         </Show>
         <Show when={viewTab() === "info"}>
@@ -377,6 +380,7 @@ function OverviewTab(props: {
 /** 定稿页签：选中态来自当前配置哈希；用户定稿永不覆盖。 */
 function IssuesTab(props: { enabled: boolean; store: EditorStore; library: IssueLibrary | null;
   selectionOverride: IssueSelection | null;
+  pending: { name: string; sourceBase: "raw" | "sooc" } | null;
   onSelect: (stack: DevelopStack, selection: IssueSelection) => void; onDelete: (issue: Issue, event: ShiftLikeEvent) => void;
   loadThumb: (issueId: number) => Promise<Uint8Array | null> }): JSX.Element {
   const isSelected = (kind: "sooc" | "raw" | "latest" | number): boolean => {
@@ -404,6 +408,21 @@ function IssuesTab(props: { enabled: boolean; store: EditorStore; library: Issue
       <span class="min-w-0 flex-1"><span class="block text-fs-2 text-fg-1">{t("editor.issue.latest")}</span>
         <span class="block text-fs-0 text-fg-3">{t("editor.issue.latestHint")}</span></span>
     </div>
+    {/*
+      正在生成的定稿（占位）：确认弹窗一关它就现身，预览位转圈（崔总 2026-09-29：
+      「先生出条目，生成过程中预览图转圈，生成完显示出图」，不再是几秒无事发生）。
+      列表按 created_at 倒序，新定稿落在最顶 —— 占位也放最顶，接替时无跳变。
+      不可点选：后端还在渲染，选它没有意义。
+    */}
+    <Show when={props.pending}>{(pending) =>
+      <div class="flex min-h-12 items-center gap-1 rounded-ui px-1" data-editor-issue-pending aria-busy="true">
+        <span class="flex h-10 w-14 shrink-0 items-center justify-center overflow-hidden rounded-ui bg-surface-bar">
+          <IconLoader2 size={16} class="animate-spin text-fg-3" aria-hidden="true" />
+        </span>
+        <span class="min-w-0 flex-1"><span class="block truncate text-fs-2 text-fg-1">{pending().name}</span>
+          <span class="block text-fs-0 text-fg-3">{pending().sourceBase.toUpperCase()} · {t("editor.issue.generating")}</span></span>
+      </div>}
+    </Show>
     <For each={props.library?.issues ?? []}>{(issue) =>
       <div class="group flex min-h-12 items-center gap-1 rounded-ui px-1 hover:bg-state-hover"
         classList={{ "bg-state-selected": isSelected(issue.id) }}>
@@ -418,7 +437,7 @@ function IssuesTab(props: { enabled: boolean; store: EditorStore; library: Issue
           onClick={(event) => props.onDelete(issue, event)}><IconTrash size={14} /></button>
       </div>}
     </For>
-    <Show when={(props.library?.issues.length ?? 0) === 0}><p class="px-1 py-2 text-fs-0 text-fg-3">{t("editor.issue.empty")}</p></Show>
+    <Show when={(props.library?.issues.length ?? 0) === 0 && props.pending === null}><p class="px-1 py-2 text-fs-0 text-fg-3">{t("editor.issue.empty")}</p></Show>
   </div>;
 }
 
