@@ -108,3 +108,37 @@ export const LOCK_LEVELS = {
   /** 二级：不能编辑（更严）。 */
   noEdit: 2,
 } as const;
+
+/*
+ * ↓↓ 合并锁键（2026-09-28 崔总定：一级/二级并成一个循环键）↓↓
+ *
+ * 点一下在三档间循环：0（未锁）→ 1（一级：辅色）→ 2（二级：主色）→ 0；
+ * 筛选态的「0」不是「筛未锁」而是「**不按锁筛选**」（崔总原话：查询条件不需要
+ * 覆盖所有可能性）。「解除」也不发 0 —— 标记态/筛选态的既有语义都是 toggle
+ * （对已达到该级的再发一次同级 = 清），所以第 2 档的下一步仍是 2。
+ */
+
+/** 选中照片的锁 → 档位；mixed 与无值都当 0（混合态另有自己的视觉，不进档位）。 */
+export function lockStep(levels: readonly (number | null | undefined)[]): number {
+  const state = triState(levels as (number | undefined)[]);
+  return state.kind === "value" ? state.value : LOCK_LEVELS.none;
+}
+
+/**
+ * 筛选条件里的锁 → 档位。只认「单档」条件（`[2]`→2、`[1]`→1）；空或组合（如 `[1,2]`）
+ * 都当 0 —— 合并键不追求表达组合，遇到就当未设，点一下收敛成单档。
+ */
+export function lockFilterStep(
+  locks: readonly number[] | null | undefined,
+): number {
+  if (locks === null || locks === undefined || locks.length !== 1) return LOCK_LEVELS.none;
+  const only = locks[0];
+  return only === LOCK_LEVELS.noEdit || only === LOCK_LEVELS.noDelete
+    ? only
+    : LOCK_LEVELS.none;
+}
+
+/** 循环的下一步要发的级别：0→1、1→2、2→（再发 2，由 toggle 语义解释成解除）。 */
+export function lockCycleTarget(step: number): number {
+  return step >= LOCK_LEVELS.noEdit ? LOCK_LEVELS.noEdit : step + 1;
+}

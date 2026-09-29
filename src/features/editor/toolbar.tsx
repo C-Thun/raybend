@@ -7,8 +7,10 @@
 import { For, type JSX } from "solid-js";
 import {
   IconArrowsHorizontal,
+  IconBookmark,
   IconCrop,
   IconPalette,
+  IconRefresh,
   IconRotateClockwise,
   IconArrowBackUp,
   IconArrowForwardUp,
@@ -16,6 +18,7 @@ import {
 } from "@tabler/icons-solidjs";
 
 import { ToggleBlock } from "../../components/ui/ToggleBlock.tsx";
+import { ToolsSeparator } from "../../components/ui/ToolsSeparator.tsx";
 import { SegmentedControl } from "../../components/ui/SegmentedControl.tsx";
 import { Button } from "../../components/ui/Button.tsx";
 import type { DevelopEditBase } from "../../api/types.ts";
@@ -60,7 +63,8 @@ export function EditorToolbar(props: EditorSourceHistoryProps): JSX.Element {
     ? t("browse.redo")
     : t("browse.redoWith").replace("{label}", props.history.state().redoLabel ?? "");
   return (
-    <div class="flex h-full shrink-0 items-center gap-1">
+    <div class="flex h-full shrink-0 items-center">
+      {/* 编辑源（SOOC/RAW）自成一组；后面按 组内紧、组间分隔 的规矩排（DESIGN.md §12.12） */}
       <SegmentedControl
         value={props.store.editBase()}
         onValueChange={(value) => props.onBaseChange(value as DevelopEditBase)}
@@ -70,28 +74,43 @@ export function EditorToolbar(props: EditorSourceHistoryProps): JSX.Element {
           { value: "raw", label: t("editor.base.raw"), disabled: !props.enabled || !props.store.editBaseAvailable().raw },
         ]}
       />
-      <Button variant="ghost" disabled={!props.history.state().canUndo} title={undoTitle()}
-        aria-label={undoTitle()} icon={<IconArrowBackUp size={14} />}
-        onClick={props.history.undo}>{t("browse.undo")}</Button>
-      <Button variant="ghost" disabled={!props.history.state().canRedo} title={redoTitle()}
-        aria-label={redoTitle()} icon={<IconArrowForwardUp size={14} />}
-        onClick={props.history.redo}>{t("browse.redo")}</Button>
+
+      <ToolsSeparator />
+
+      {/* 可逆的历史动作是一组 */}
+      <div class="flex items-center gap-0.5">
+        <Button variant="ghost" disabled={!props.history.state().canUndo} title={undoTitle()}
+          aria-label={undoTitle()} icon={<IconArrowBackUp size={14} />}
+          onClick={props.history.undo}>{t("browse.undo")}</Button>
+        <Button variant="ghost" disabled={!props.history.state().canRedo} title={redoTitle()}
+          aria-label={redoTitle()} icon={<IconArrowForwardUp size={14} />}
+          onClick={props.history.redo}>{t("browse.redo")}</Button>
+      </div>
+
+      <ToolsSeparator />
+
       <Button variant="ghost" disabled={!props.canAutoAdjust?.()}
         title={t("editor.autoAdjustHint")} icon={<IconWand size={14} />}
         onClick={() => props.onAutoAdjust?.()}>{t(props.store.autoAdjusting() ? "editor.autoAdjusting" : "editor.autoAdjust")}</Button>
-      <For each={TOOL_SPEC}>
-        {(tool) => (
-          <ToggleBlock
-            pressed={props.store.tool() === tool.id}
-            disabled={!props.enabled}
-            icon={<tool.icon size={14} />}
-            label={t(tool.labelKey)}
-            onClick={() => props.store.toggleTool(tool.id)}
-          >
-            {t(tool.labelKey)}
-          </ToggleBlock>
-        )}
-      </For>
+
+      <ToolsSeparator />
+
+      {/* 画布工具（裁切/旋转/对比）：互斥的一组开关 */}
+      <div class="flex items-center gap-0.5">
+        <For each={TOOL_SPEC}>
+          {(tool) => (
+            <ToggleBlock
+              pressed={props.store.tool() === tool.id}
+              disabled={!props.enabled}
+              icon={<tool.icon size={14} />}
+              label={t(tool.labelKey)}
+              onClick={() => props.store.toggleTool(tool.id)}
+            >
+              {t(tool.labelKey)}
+            </ToggleBlock>
+          )}
+        </For>
+      </div>
     </div>
   );
 }
@@ -116,10 +135,10 @@ export function EditorResetTool(props: EditorToolbarProps & {
   onFinalize?: () => void;
 }): JSX.Element {
   return <div class="flex items-center gap-1">
-    <Button variant="ghost" disabled={!props.enabled || !(props.canReset?.() ?? props.store.resetStage() !== "none")} onClick={props.onRequestReset}>
+    <Button variant="ghost" icon={<IconRefresh size={14} />} disabled={!props.enabled || !(props.canReset?.() ?? props.store.resetStage() !== "none")} onClick={props.onRequestReset}>
       {t("editor.panel.resetAll")}
     </Button>
-    <Button variant="primary" disabled={!props.canFinalize?.()} onClick={() => props.onFinalize?.()}>
+    <Button variant="primary" icon={<IconBookmark size={14} />} disabled={!props.canFinalize?.()} onClick={() => props.onFinalize?.()}>
       {t("editor.issue.toolbar")}
     </Button>
   </div>;

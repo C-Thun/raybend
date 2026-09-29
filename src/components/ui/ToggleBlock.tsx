@@ -28,7 +28,14 @@ export interface ToggleBlockProps
   icon?: JSX.Element;
   /** 文字标签。省略则退化为纯图标方块 —— 那时必须给 `label` 作无障碍名 */
   children?: JSX.Element;
+  /** 无障碍名（纯图标时必须给；有文字时也可以给更完整的说明） */
   label?: string;
+  /**
+   * 按下底色（默认主色 `brand`）。`accent` = 辅色底 —— 用于「同一控件里的**另一档状态**」
+   * 而不是「另一档重要」（比如浏览工具条上合并后的锁：一级锁辅色、二级锁主色，
+   * 崔总 2026-09-28 定）。未按下时两种 tone 长得一样。
+   */
+  tone?: "brand" | "accent";
 }
 
 export function ToggleBlock(props: ToggleBlockProps) {
@@ -40,6 +47,7 @@ export function ToggleBlock(props: ToggleBlockProps) {
     "children",
     "label",
     "class",
+    "tone",
     "disabled",
   ]);
 
@@ -85,7 +93,9 @@ export function ToggleBlock(props: ToggleBlockProps) {
         // 方块尺寸随密度档变化，图标尺寸也跟着档位但**不随字号**（§8.1）
         "min-h-toggle-block min-w-toggle-block px-1.5",
         local.pressed
-          ? "bg-brand text-fg-on-brand hover:bg-brand"
+          ? local.tone === "accent"
+            ? "bg-brand-2 text-fg-on-brand hover:bg-brand-2"
+            : "bg-brand text-fg-on-brand hover:bg-brand"
           : "text-fg-2 hover:bg-state-hover hover:text-fg-1",
         local.disabled
           ? "pointer-events-none text-fg-3 opacity-60"

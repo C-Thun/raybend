@@ -1,11 +1,14 @@
 /**
  * 浏览模式的 `toolsbar` 装配（`memory/FUNCTION-BROWSE.md` §3、`design/browse.md` §2.1）。
  *
- * 四组能力，从左到右：
+ * 按钮按**组**从左到右：组内几乎无间距，组间用 `ToolsSeparator`（浅竖线）隔开
+ * （分组规则的唯一事实源：`memory/DESIGN.md` §12.12）：
  *
  * ```text
- * [筛选]  [旗标][弃掉][移除旗标]  [★★★★★]  [●色标×6]  [喜欢]  |  [标签]  [锁1][锁2]
+ * [删除] │ [撤销][重做] │ [筛选] │ [旗标][清空旗标] │ [★★★★★] │ [●色标×6] │ [赞][踩] │ [标签] │ [锁]
  * ```
+ *
+ * 删除与撤销之间的分隔是**语义性**的：它不可撤销（崔总 2026-09-28）。
  *
  * # 三态是这一行最容易写错的地方
  *
@@ -44,9 +47,11 @@ import {
   IconStarFilled,
   IconThumbDownFilled,
   IconThumbUpFilled,
+  IconTrash,
 } from "@tabler/icons-solidjs";
 
 import { ToggleBlock } from "../../components/ui/ToggleBlock.tsx";
+import { ToolsSeparator } from "../../components/ui/ToolsSeparator.tsx";
 import { ConfirmDialog } from "../../components/ui/Dialog.tsx";
 import { createEasyDestroy } from "../../lib/easy-destroy.ts";
 import { applyMarkIntent, type MarkIntent } from "./mark-actions.ts";
@@ -58,6 +63,9 @@ import { t } from "../../i18n/index.ts";
 import {
   COLOR_VALUES,
   LOCK_LEVELS,
+  lockCycleTarget,
+  lockFilterStep,
+  lockStep,
   triState,
   type TriState,
 } from "../../lib/marking-state.ts";
@@ -68,6 +76,11 @@ export interface BrowseToolbarProps {
   store: BrowseStore;
   /** 打开标签弹窗（W2 接线；现在只把按钮摆在那里并禁用）。 */
   onOpenTags?: () => void;
+  /**
+   * 删除（2026-09-28 崔总）：与 `Delete` 键**同一个入口** —— 组装层接
+   * `browseActions()?.requestDelete()`（含确认弹窗与回收站语义）。不在这里自己发删除。
+   */
+  onDelete?: () => void;
   /**
    * 提示通道（`components/ui/Toast.tsx`）。
    *
@@ -229,42 +242,94 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
    * 筛选态：**永远可用** —— 筛选不需要先选照片（人类 2026-09-19：
    * 「一旦开了筛选……顶部的那些图标就变成了设置筛选条件」）。
    */
-  const markDisabled = () => (filterMode() ? false : !hasSelection());
+  const markDisabled = () => (filterMode() ? false : !store.canWrite() || !hasSelection());
 
   const markRating = (star: number): void => apply({ kind: "rating", value: star });
   const markColor = (color: string | null): void => apply({ kind: "color", value: color });
   const markLike = (value: "like" | "dislike"): void => apply({ kind: "like", value });
-  const markLock = (level: number): void => apply({ kind: "lock", value: level });
+
+  /*
+   * 合并锁键（2026-09-28 崔总定：一级/二级并成一个，点击循环）：
+   *
+   *   未锁 → 一级锁（辅色底）→ 二级锁（主色底）→ 未锁
+   *
+   * 档位与循环目标的语义在 `lib/marking-state.ts`（有测试）；这里只负责显示与发意图。
+   * 「解除」不发 0：对已到二级的再发一次 2，mark-actions 的既有 toggle 语义会把它清掉 ——
+   * 所以工具条与命令面板的锁命令走的仍是同一套实现。
+   * 筛选态的「未锁」= **不按锁筛选**（不是「筛未锁的照片」，崔总：查询条件不追求覆盖全部组合）。
+   */
+  const lockDisplay = (): number =>
+    filterMode()
+      ? lockFilterStep(store.filter().locks)
+      : lockStep(selected().map((item) => item.lockLevel));
+  const cycleLock = (): void => {
+    apply({ kind: "lock", value: lockCycleTarget(lockDisplay()) });
+  };
+  const lockText = (): string => {
+    const step = lockDisplay();
+    return step === LOCK_LEVELS.noEdit
+      ? t("browse.lock2")
+      : step === LOCK_LEVELS.noDelete
+        ? t("browse.lock1")
+        : t("browse.lock");
+  };
+  const lockTitle = (): string => {
+    const hint = filterMode() ? t("browse.lockCycleFilter") : t("browse.lockCycle");
+    const step = lockDisplay();
+    if (step === LOCK_LEVELS.noEdit) return `${t("browse.lockNoEdit")} · ${hint}`;
+    if (step === LOCK_LEVELS.noDelete) return `${t("browse.lockNoDelete")} · ${hint}`;
+    return hint;
+  };
 
   return (
-    <div class="flex items-center gap-1">
+    <div class="flex items-center">
       {/*
-        撤销 / 重做（`specs/M2-W2-tail.md` 4.1）：按钮的可用性与文案都来自
-        后端每次动作回的 `undoLabel` / `redoLabel`（「标 3 星」这种可读动作名）——
-        前端不猜栈里有什么，也不自己拼动作名。
+        删除（崔总 2026-09-28）：与 `Delete` 键同一个入口（含确认弹窗与回收站语义），
+        由组装层接 `browseActions()?.requestDelete()`。它**不可撤销** ——
+        所以和撤销/重做之间必须有组分隔线，「长得像的按钮做的事不一样」要看得出来。
       */}
       <Button
         variant="ghost"
-        icon={<IconArrowBackUp size={14} />}
-        disabled={!store.undoState().canUndo}
-        title={undoTitle()}
-        aria-label={undoTitle()}
-        onClick={() => void runHistory("undo")}
+        icon={<IconTrash size={14} />}
+        disabled={!store.canWrite() || !hasSelection()}
+        title={t("cmd.edit.delete")}
+        aria-label={t("cmd.edit.delete")}
+        onClick={() => props.onDelete?.()}
       >
-        {t("browse.undo")}
-      </Button>
-      <Button
-        variant="ghost"
-        icon={<IconArrowForwardUp size={14} />}
-        disabled={!store.undoState().canRedo}
-        title={redoTitle()}
-        aria-label={redoTitle()}
-        onClick={() => void runHistory("redo")}
-      >
-        {t("browse.redo")}
+        {t("browse.delete")}
       </Button>
 
-      <span class="w-3" />
+      <ToolsSeparator />
+
+      {/*
+        撤销 / 重做（`specs/M2-W2-tail.md` 4.1）：按钮的可用性与文案都来自
+        后端每次动作回的 `undoLabel` / `redoLabel`（「标 3 星」这种可读动作名）——
+        前端不猜栈里有什么，也不自己拼动作名。可逆动作是一组：组内几乎无间距。
+      */}
+      <div class="flex items-center gap-0.5">
+        <Button
+          variant="ghost"
+          icon={<IconArrowBackUp size={14} />}
+          disabled={!store.canWrite() || !store.undoState().canUndo}
+          title={undoTitle()}
+          aria-label={undoTitle()}
+          onClick={() => void runHistory("undo")}
+        >
+          {t("browse.undo")}
+        </Button>
+        <Button
+          variant="ghost"
+          icon={<IconArrowForwardUp size={14} />}
+          disabled={!store.canWrite() || !store.undoState().canRedo}
+          title={redoTitle()}
+          aria-label={redoTitle()}
+          onClick={() => void runHistory("redo")}
+        >
+          {t("browse.redo")}
+        </Button>
+      </div>
+
+      <ToolsSeparator />
 
       {/* 筛选开关：打开后右侧控件全部变成筛选语义 */}
       <ToggleBlock
@@ -291,7 +356,7 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
         {t("browse.filter")}
       </ToggleBlock>
 
-      <span class="w-5" />
+      <ToolsSeparator />
 
       {/*
         旗标（人类 2026-09-19 重定）：
@@ -303,6 +368,7 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
         「不想要」由删除表达（有回收站兜底），再来一个「弃」按钮只会让工具条更挤、
         而且两张旗子长得很像、点错也看不出来。
       */}
+      <div class="flex items-center gap-0.5">
       <Show
         when={filterMode()}
         fallback={
@@ -358,11 +424,16 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
           {t("browse.flagWithout")}
         </ToggleBlock>
       </Show>
+      </div>
 
-      <span class="w-5" />
+      <ToolsSeparator />
 
-      {/* 星级：五颗；混合态用「短横 + 半亮」区分 */}
-      <div class="flex items-center gap-0.5">
+      {/*
+        星级：五颗；混合态用「短横 + 半亮」区分。
+        间距与色标对齐（崔总 2026-09-28）：按钮自身的 2px 内边距就是间隔，
+        容器不再另给 gap —— 星与星、点与点都是 4px。
+      */}
+      <div class="flex items-center">
         <Show when={ratingState().kind === "mixed"}>
           <MixedMark />
         </Show>
@@ -394,7 +465,7 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
         </For>
       </div>
 
-      <span class="w-3" />
+      <ToolsSeparator />
 
       {/* 色标：5 个实心点 + 1 个空心圈（无色） */}
       <div class="flex items-center gap-1">
@@ -443,9 +514,9 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
         </For>
       </div>
 
-      <span class="w-3" />
+      <ToolsSeparator />
 
-      {/* 喜欢：三态（喜欢 / 不喜欢 / 取消） */}
+      {/* 喜欢：三态（喜欢 / 不喜欢 / 取消）—— 赞与踩是一组，组内几乎无间距 */}
       <div class="flex items-center gap-0.5">
         <Show when={likeState().kind === "mixed"}>
           <MixedMark />
@@ -466,7 +537,7 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
         />
       </div>
 
-      <span class="w-5" />
+      <ToolsSeparator />
 
       {/* 标签：开弹窗（`TagDialog`，单张可增删、批量只加） */}
       <Button
@@ -478,36 +549,29 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
         {t("browse.tag")}
       </Button>
 
-      {/* 锁：两级（再点一次解锁） */}
+      <ToolsSeparator />
+
+      {/*
+        锁：**一个循环键**（崔总 2026-09-28：一级/二级并成一颗）。
+        未锁（平的）→ 一级锁（**辅色底**）→ 二级锁（**主色底**）→ 未锁；
+        内容跟着档位变（锁 / 一级锁 / 二级锁），一眼看出锁到哪级。
+        筛选态同一颗键：一级 → 二级 → **不按锁筛选**（不是「筛未锁」）。
+        档位与循环目标的语义在 `lib/marking-state.ts`（有测试）。
+      */}
       <div class="flex items-center gap-0.5">
         <Show when={lockState().kind === "mixed"}>
           <MixedMark />
         </Show>
-        <For each={[LOCK_LEVELS.noDelete, LOCK_LEVELS.noEdit]}>
-          {(level) => {
-            const isSet = () => {
-              const s = lockState();
-              return s.kind === "value" && s.value >= level;
-            };
-            const filtered = () =>
-              filterMode() && (store.filter().locks ?? []).includes(level);
-            return (
-              <ToggleBlock
-                pressed={isSet() || filtered()}
-                disabled={markDisabled()}
-                onPressedChange={() => void markLock(level)}
-                icon={<IconLock size={14} />}
-                label={
-                  level === LOCK_LEVELS.noDelete
-                    ? t("browse.lockNoDelete")
-                    : t("browse.lockNoEdit")
-                }
-              >
-                {level}
-              </ToggleBlock>
-            );
-          }}
-        </For>
+        <ToggleBlock
+          pressed={lockDisplay() > LOCK_LEVELS.none}
+          tone={lockDisplay() === LOCK_LEVELS.noEdit ? "brand" : "accent"}
+          disabled={markDisabled()}
+          onPressedChange={cycleLock}
+          icon={<IconLock size={14} />}
+          label={lockTitle()}
+        >
+          {lockText()}
+        </ToggleBlock>
       </div>
 
       {/* 「清空旗标」的确认弹窗（Shift 可跳过，不展示快捷操作说明） */}

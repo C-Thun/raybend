@@ -46,6 +46,10 @@
   --surface-main: #202226; /* 深色 */
   --surface-bar: #2a2d33; /* 浅深色 */
   --surface-layer: #33373e;
+  /* 中性线（hairline）：比所在面浅浅高一档，不承担语义。
+     2026-09-28 补：DESIGN.md 早就引用它（无色空心圈 / Toast 中性边框），
+     但令牌一直没落地 —— 那几处只能靠 currentColor 兑付。 */
+  --line-2: #3c4149;
 
   /* 前景 */
   --fg-1: #f6f8f4; /* 正文/标题 */
@@ -87,6 +91,7 @@
   --surface-main: #f6f8f4; /* 浅色 */
   --surface-bar: #edf0e9; /* 深浅色 */
   --surface-layer: #ffffff;
+  --line-2: #ccd1c5;
 
   --fg-1: #202226;
   --fg-2: #6e6866; /* 中间色的深变体，过 WCAG AA（DESIGN.md §13） */
@@ -487,6 +492,7 @@
   --color-surface-bar: var(--surface-bar);
   --color-surface-track: var(--surface-track);
   --color-surface-layer: var(--surface-layer);
+  --color-line-2: var(--line-2);
 
   /* 前景 */
   --color-fg-1: var(--fg-1);
