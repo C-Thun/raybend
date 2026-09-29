@@ -163,7 +163,10 @@ fn ensure_snapshots<R: Runtime>(
     repo: &str,
     issue: &Issue,
 ) -> Result<(), String> {
+    let _permit=app.state::<BrowseState>().sessions.begin_task(repo).map_err(|e|e.to_string())?;
+    let catalog=app.state::<BrowseState>().lease(app,repo)?;
     let asset = asset_for(app, repo, issue.asset_id)?;
+    if catalog.root()!=asset.root { return Err(raybend::Error::SessionExpired.to_string()); }
     let source = develop::source_path_of(app, &asset, issue.source_base)
         .ok_or_else(|| format!("定稿的 {} 源文件不可用", issue.source_base.as_str()))?;
     if !Path::new(&source).is_file() || EditBase::of_file(&source) != issue.source_base {
@@ -207,6 +210,7 @@ fn ensure_snapshots<R: Runtime>(
         )
         .map_err(|error| error.to_string())?
         .ok_or("无法渲染定稿预览")?;
+        catalog.ensure_current().map_err(|e|e.to_string())?;
         full.write(
             issue.asset_id,
             &name,
@@ -335,6 +339,7 @@ pub(crate) fn preview_bytes<R: Runtime>(
     asset_id: i64,
     issue_id: i64,
 ) -> Result<Vec<u8>, String> {
+    let _permit=app.state::<BrowseState>().sessions.begin_task(repo).map_err(|e|e.to_string())?;
     let issue = issue_of(app, repo, asset_id, issue_id)?;
     ensure_snapshots(app, repo, &issue)?;
     let root = crate::browse::resolve_root(app, repo)?;

@@ -13,6 +13,7 @@
 //! （下次导入会以为已经导过了）。`.part` 中转 + rename 让「就位」变成一个原子动作：
 //! 目标名要么不存在、要么是完整文件。残留的 `.part` 以 `.` 开头，扫描器本来就会跳过它。
 
+use crate::import::plan::SourceFile;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -50,6 +51,14 @@ pub trait FileOps {
     fn identity_of(&self, rel: &str) -> Option<FileId>;
     /// 目标卷剩余空间（拿不到 → `None`）。
     fn free_bytes(&self) -> Option<u64>;
+    /// pending 只有完整内容核对后可接纳，大小相同不足以证明复制完成。
+    fn source_unchanged(&self, _file: &SourceFile) -> bool {
+        true
+    }
+    fn verified_copy(&self, source: &Path, rel: &str) -> bool {
+        let _ = (source, rel);
+        false
+    }
 }
 
 /// 扫描源目录时要顺手读哪些信息。
@@ -69,7 +78,10 @@ pub struct ScanNeeds {
 impl ScanNeeds {
     /// 从「模版 + 判重开关」推出要读什么。
     #[must_use]
-    pub fn for_template(template: &crate::import::template::Template, avoid_duplicates: bool) -> Self {
+    pub fn for_template(
+        template: &crate::import::template::Template,
+        avoid_duplicates: bool,
+    ) -> Self {
         use crate::import::template::Var;
         let vars = template.vars();
         Self {
@@ -128,8 +140,12 @@ pub trait Scanner {
     /// 给一批文件补齐规划要用的信息（身份 / 拍摄时间 / 相机）。
     ///
     /// 结果**与输入同序**；单张失败就是 `None`，不该让整批失败。
-    fn enrich(&self, files: &[ScannedFile], needs: &ScanNeeds, cancel: &Cancel)
-    -> Vec<SourceExtras>;
+    fn enrich(
+        &self,
+        files: &[ScannedFile],
+        needs: &ScanNeeds,
+        cancel: &Cancel,
+    ) -> Vec<SourceExtras>;
 }
 
 /// 真实的扫描器：`media::scan` + 并行读元数据。
@@ -157,6 +173,12 @@ impl Scanner for FsScanner {
             }
             Ok(())
         })?;
+        if !outcome.problems.is_empty() {
+            return Err(Error::Unsupported(format!(
+                "来源扫描不完整：{}",
+                outcome.problems[0].message
+            )));
+        }
         out.skipped = outcome.skipped;
         out.cancelled = stop || outcome.cancelled;
         Ok(out)
@@ -256,7 +278,11 @@ fn extras_for(file: &ScannedFile, needs: &ScanNeeds, cancel: &Cancel) -> SourceE
         (
             taken,
             if needs.camera { data.camera_make } else { None },
-            if needs.camera { data.camera_model } else { None },
+            if needs.camera {
+                data.camera_model
+            } else {
+                None
+            },
         )
     } else {
         (None, None, None)
@@ -277,13 +303,42 @@ fn extras_for(file: &ScannedFile, needs: &ScanNeeds, cancel: &Cancel) -> SourceE
 #[derive(Debug, Clone)]
 pub struct RepoFs {
     root: PathBuf,
+    catalog: Option<std::sync::Arc<crate::store::db::CatalogDb>>,
+    task: Option<std::sync::Arc<crate::store::session::TaskCatalog>>,
 }
 
 impl RepoFs {
     /// 绑到一个库根目录。
     #[must_use]
     pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
+        Self {
+            root: root.into(),
+            catalog: None,
+            task: None,
+        }
+    }
+
+    pub fn for_catalog(catalog: std::sync::Arc<crate::store::db::CatalogDb>) -> Self {
+        Self {
+            root: catalog.root().to_path_buf(),
+            catalog: Some(catalog),
+            task: None,
+        }
+    }
+    pub fn for_task(task: std::sync::Arc<crate::store::session::TaskCatalog>) -> Self {
+        Self {
+            root: task.current().root().into(),
+            catalog: None,
+            task: Some(task),
+        }
+    }
+    fn check(&self) -> Result<()> {
+        if let Some(task) = &self.task {
+            return task.current().ensure_current();
+        }
+        self.catalog
+            .as_ref()
+            .map_or(Ok(()), |db| db.ensure_current())
     }
 
     /// 库根。
@@ -299,7 +354,10 @@ impl RepoFs {
     /// `..` 只能往上走到**库根为止**，再多的 `..` 直接忽略。
     #[must_use]
     pub fn abs(&self, rel: &str) -> PathBuf {
-        let mut out = self.root.clone();
+        let mut out = self
+            .task
+            .as_ref()
+            .map_or_else(|| self.root.clone(), |task| task.current().root().into());
         let mut depth = 0_usize;
         for segment in rel.split(['/', '\\']) {
             match segment {
@@ -322,15 +380,61 @@ impl RepoFs {
 }
 
 impl FileOps for RepoFs {
+    fn source_unchanged(&self, file: &SourceFile) -> bool {
+        let Ok(meta) = std::fs::metadata(&file.abs_path) else {
+            return false;
+        };
+        meta.is_file()
+            && meta.len() == file.size_bytes
+            && meta
+                .modified()
+                .ok()
+                .map(crate::store::time::from_system_time)
+                == file.mtime_ms
+            && file
+                .identity
+                .filter(|id| !id.is_zero())
+                .is_none_or(|id| FileId::try_read(&file.abs_path) == Some(id))
+    }
+    fn verified_copy(&self, source: &Path, rel: &str) -> bool {
+        use std::io::Read;
+        if self.check().is_err() {
+            return false;
+        }
+        let target = self.abs(rel);
+        let identity = FileId::try_read(source);
+        let verify = || -> std::io::Result<bool> {
+            let mut source_file = std::fs::File::open(source)?;
+            let mut target_file = std::fs::File::open(&target)?;
+            if source_file.metadata()?.len() != target_file.metadata()?.len() {
+                return Ok(false);
+            }
+            let mut left = [0u8; 32768];
+            let mut right = [0u8; 32768];
+            loop {
+                let n = source_file.read(&mut left)?;
+                if n == 0 {
+                    return Ok(true);
+                }
+                target_file.read_exact(&mut right[..n])?;
+                if left[..n] != right[..n] {
+                    return Ok(false);
+                }
+            }
+        };
+        verify().unwrap_or(false) && self.check().is_ok() && FileId::try_read(source) == identity
+    }
+
     fn exists(&self, rel: &str) -> bool {
-        self.abs(rel).is_file()
+        self.check().is_ok() && self.abs(rel).is_file()
     }
 
     fn dir_exists(&self, rel: &str) -> bool {
-        self.abs(rel).is_dir()
+        self.check().is_ok() && self.abs(rel).is_dir()
     }
 
     fn create_dir_all(&self, rel: &str) -> Result<()> {
+        self.check()?;
         let path = self.abs(rel);
         std::fs::create_dir_all(&path).map_err(|e| {
             Error::Io(std::io::Error::new(
@@ -341,6 +445,7 @@ impl FileOps for RepoFs {
     }
 
     fn copy(&self, source: &Path, rel: &str) -> Result<u64> {
+        self.check()?;
         let target = self.abs(rel);
         if target.exists() {
             return Err(Error::TargetExists(target.display().to_string()));
@@ -352,11 +457,22 @@ impl FileOps for RepoFs {
         // 临时名：同一目录下，`.` 开头（扫描器按隐藏项跳过）
         let part = part_path(&target);
         let outcome = (|| -> Result<u64> {
+            let original = std::fs::metadata(source)?;
+            let identity = FileId::try_read(source);
             let written = std::fs::copy(source, &part)?;
-            std::fs::rename(&part, &target)?;
+            let current = std::fs::metadata(source)?;
+            if original.len() != current.len()
+                || original.modified().ok() != current.modified().ok()
+                || FileId::try_read(source) != identity
+            {
+                return Err(Error::Unsupported("来源文件在复制期间发生变化".into()));
+            }
+            self.check()?;
+            std::fs::File::open(&part)?.sync_all()?;
+            crate::fs_atomic::publish_new(&part, &target)?;
             Ok(written)
         })();
-        if outcome.is_err() {
+        if outcome.is_err() && self.check().is_ok() {
             // 失败不留垃圾：临时文件清掉（目标本身没被碰过）
             let _ = std::fs::remove_file(&part);
         }
@@ -364,6 +480,7 @@ impl FileOps for RepoFs {
     }
 
     fn remove(&self, rel: &str) -> Result<()> {
+        self.check()?;
         let path = self.abs(rel);
         match std::fs::remove_file(&path) {
             Ok(()) => Ok(()),
@@ -381,7 +498,12 @@ impl FileOps for RepoFs {
     }
 
     fn free_bytes(&self) -> Option<u64> {
-        free_bytes_of(&self.root)
+        free_bytes_of(
+            &self
+                .task
+                .as_ref()
+                .map_or_else(|| self.root.clone(), |task| task.current().root().into()),
+        )
     }
 }
 
@@ -516,10 +638,7 @@ impl MemoryFs {
     /// 某个库内文件的字节（断言用）。
     #[must_use]
     pub fn bytes_of(&self, rel: &str) -> Option<Vec<u8>> {
-        self.files
-            .borrow()
-            .get(&fold(rel))
-            .map(|(_, b)| b.clone())
+        self.files.borrow().get(&fold(rel)).map(|(_, b)| b.clone())
     }
 
     /// 库内文件数（断言「没多也没少」）。
@@ -549,6 +668,12 @@ impl MemoryFs {
 }
 
 impl FileOps for MemoryFs {
+    fn verified_copy(&self, source: &Path, rel: &str) -> bool {
+        self.sources
+            .get(source)
+            .is_some_and(|bytes| self.bytes_of(rel).as_ref() == Some(bytes))
+    }
+
     fn exists(&self, rel: &str) -> bool {
         self.files.borrow().contains_key(&fold(rel))
     }
@@ -623,7 +748,9 @@ impl FileOps for MemoryFs {
 impl MemoryFs {
     /// 指定「读某个库内文件身份时返回什么」（默认 `None`）。
     pub fn set_identity(&self, rel: &str, id: FileId) {
-        self.identity_answers.borrow_mut().insert(rel.to_string(), id);
+        self.identity_answers
+            .borrow_mut()
+            .insert(rel.to_string(), id);
     }
 }
 
@@ -666,12 +793,7 @@ impl Scanner for MemoryFs {
     ) -> Vec<SourceExtras> {
         files
             .iter()
-            .map(|f| {
-                self.extras
-                    .get(&f.rel_path)
-                    .cloned()
-                    .unwrap_or_default()
-            })
+            .map(|f| self.extras.get(&f.rel_path).cloned().unwrap_or_default())
             .collect()
     }
 }
@@ -704,7 +826,9 @@ mod tests {
     fn memory_copy_moves_bytes_and_records_what_happened() {
         let mut fs = MemoryFs::new();
         fs.add_source("/src/a.jpg", b"hello");
-        let written = fs.copy(Path::new("/src/a.jpg"), "photos/a.jpg").expect("复制");
+        let written = fs
+            .copy(Path::new("/src/a.jpg"), "photos/a.jpg")
+            .expect("复制");
         assert_eq!(written, 5);
         assert_eq!(fs.bytes_of("photos/a.jpg").as_deref(), Some(&b"hello"[..]));
         assert_eq!(fs.paths(), vec!["photos/a.jpg"]);
@@ -814,6 +938,68 @@ mod tests {
     }
 
     #[test]
+    fn pending_content_and_scanned_source_require_more_than_equal_size() {
+        let dir = tmp();
+        let source = write_source(dir.path(), "中文源.jpg", &[1, 2, 3]);
+        let ops = RepoFs::new(dir.path().join("库"));
+        ops.copy(&source, "photos/a.jpg").unwrap();
+        assert!(ops.verified_copy(&source, "photos/a.jpg"));
+        std::fs::write(ops.abs("photos/a.jpg"), [3u8, 2, 1]).unwrap();
+        assert!(!ops.verified_copy(&source, "photos/a.jpg"));
+        let meta = std::fs::metadata(&source).unwrap();
+        let scanned = ScannedFile {
+            abs_path: source.clone(),
+            rel_path: "中文源.jpg".into(),
+            file_name: "中文源.jpg".into(),
+            ext: Some("jpg".into()),
+            kind: crate::media::kind::MediaKind::Image,
+            stem_folded: "中文源".into(),
+            size_bytes: 3,
+            mtime_ms: meta
+                .modified()
+                .ok()
+                .map(crate::store::time::from_system_time),
+            created_ms: None,
+        };
+        let file = SourceFile::from_scanned(
+            &scanned,
+            SourceExtras {
+                identity: FileId::try_read(&source),
+                ..SourceExtras::default()
+            },
+        );
+        assert!(ops.source_unchanged(&file));
+        std::fs::write(&source, [1u8, 2, 3, 4]).unwrap();
+        assert!(!ops.source_unchanged(&file));
+    }
+    #[test]
+    fn expired_catalog_lease_cannot_copy_create_or_remove_files() {
+        use crate::store::db::{CatalogDb, OpenOpts};
+        let dir = tmp();
+        let root = dir.path().join("库");
+        let catalog = std::sync::Arc::new(
+            CatalogDb::create(&root, "库", None, OpenOpts::new(None, 0)).unwrap(),
+        );
+        let fs = RepoFs::for_catalog(std::sync::Arc::clone(&catalog));
+        let source = write_source(dir.path(), "源.jpg", b"original");
+        fs.copy(&source, "photos/保留.jpg").unwrap();
+        catalog.invalidate();
+        assert!(matches!(
+            fs.copy(&source, "photos/禁止.jpg"),
+            Err(Error::SessionExpired)
+        ));
+        assert!(matches!(
+            fs.create_dir_all("photos/禁止目录"),
+            Err(Error::SessionExpired)
+        ));
+        assert!(matches!(
+            fs.remove("photos/保留.jpg"),
+            Err(Error::SessionExpired)
+        ));
+        assert!(root.join("photos/保留.jpg").is_file());
+        assert!(!root.join("photos/禁止.jpg").exists());
+    }
+    #[test]
     fn repo_fs_copies_files_into_place() {
         let dir = tmp();
         let source = write_source(dir.path(), "a.jpg", b"hello world");
@@ -904,8 +1090,14 @@ mod tests {
     #[test]
     fn repo_fs_abs_refuses_to_escape_the_root() {
         let fs = RepoFs::new("/repo/root");
-        assert_eq!(fs.abs("photos/a.jpg"), PathBuf::from("/repo/root/photos/a.jpg"));
-        assert_eq!(fs.abs("/photos/a.jpg"), PathBuf::from("/repo/root/photos/a.jpg"));
+        assert_eq!(
+            fs.abs("photos/a.jpg"),
+            PathBuf::from("/repo/root/photos/a.jpg")
+        );
+        assert_eq!(
+            fs.abs("/photos/a.jpg"),
+            PathBuf::from("/repo/root/photos/a.jpg")
+        );
         assert_eq!(
             fs.abs("photos/../../etc/passwd"),
             PathBuf::from("/repo/root/etc/passwd"),

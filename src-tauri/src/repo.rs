@@ -40,6 +40,7 @@ pub struct RepositoryViewDto {
     pub images_count: Option<i64>,
     /// 探测过几条路径（离线时给「已试过 N 处」的提示）。
     pub tried_paths: usize,
+    pub connection: raybend::store::availability::ConnectionStatus,
 }
 
 /// 一条登记路径。
@@ -52,9 +53,144 @@ pub struct RepositoryPathDto {
     pub last_seen_at: Option<i64>,
 }
 
+#[derive(Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryLocationErrorDto {
+    pub code: String,
+}
+impl From<raybend::Error> for RepositoryLocationErrorDto {
+    fn from(error: raybend::Error) -> Self {
+        eprintln!("[repository] 位置操作失败：{error}");
+        let code = match &error {
+            raybend::Error::InvalidRepositoryLocation(_) => "invalid_path".into(),
+            raybend::Error::RepositoryPathInUse(_) => "active_location".into(),
+            raybend::Error::Unsupported(_) => "io_failure".into(),
+            _ => {
+                let status = raybend::store::availability::ConnectionStatus::failed("", &error);
+                status.reason.map_or_else(
+                    || "not_found".into(),
+                    |reason| {
+                        serde_json::to_value(reason)
+                            .unwrap()
+                            .as_str()
+                            .unwrap()
+                            .into()
+                    },
+                )
+            }
+        };
+        Self { code }
+    }
+}
+
+/// 只登记已经核对为目标库的位置，探测线程超时后不会迟到修改 app.db。
+#[tauri::command]
+pub async fn repository_add_location<R: Runtime>(
+    app: AppHandle<R>,
+    repository_id: String,
+    path: String,
+) -> Result<RepositoryViewDto, RepositoryLocationErrorDto> {
+    let handle = app.clone();
+    let id = repository_id.clone();
+    let result = blocking(move || {
+        Ok((|| -> raybend::Result<RepositoryViewDto> {
+            view_one(&handle, &id).map_err(raybend::Error::Unsupported)?;
+            let root = PathBuf::from(path);
+            let probe_id = id.clone();
+            let probe_root = root.clone();
+            let budget = handle.state::<crate::browse::BrowseState>();
+            match budget.probes.run_endpoints(
+                &id,
+                &[raybend::store::availability::endpoint_hint(
+                    root.to_string_lossy().as_ref(),
+                )],
+                raybend::store::availability::PROBE_WAIT,
+                move || repository::validate_alternate_location(&probe_id, &probe_root),
+            ) {
+                Ok(result) => {
+                    result?;
+                }
+                Err(wait) => {
+                    return Err(match wait {
+                        raybend::store::availability::ProbeWait::Busy => {
+                            raybend::Error::StorageProbeBusy
+                        }
+                        raybend::store::availability::ProbeWait::Timeout => {
+                            raybend::Error::StorageProbeTimeout
+                        }
+                        raybend::store::availability::ProbeWait::WorkerGone => {
+                            raybend::Error::WriterGone
+                        }
+                    });
+                }
+            }
+            let location = root.to_string_lossy().into_owned();
+            handle
+                .state::<DbState>()
+                .with(&handle, |db| {
+                    Ok(db.write_tx(move |conn| {
+                        repository::add_repository_path(conn, &id, &location, time::now_millis())
+                    }))
+                })
+                .map_err(raybend::Error::Unsupported)??;
+            view_one(&handle, &repository_id).map_err(raybend::Error::Unsupported)
+        })()
+        .map_err(RepositoryLocationErrorDto::from))
+    })
+    .await
+    .map_err(|error| RepositoryLocationErrorDto::from(raybend::Error::Unsupported(error)))?;
+    let view = result?;
+    if view.online {
+        Ok(view)
+    } else {
+        repository_remount(app, view.id, Some(true))
+            .await
+            .map_err(|error| RepositoryLocationErrorDto::from(raybend::Error::Unsupported(error)))
+    }
+}
+
+#[tauri::command]
+pub async fn repository_remove_location<R: Runtime>(
+    app: AppHandle<R>,
+    repository_id: String,
+    path: String,
+) -> Result<RepositoryViewDto, RepositoryLocationErrorDto> {
+    blocking(move || {
+        Ok((|| -> raybend::Result<RepositoryViewDto> {
+            view_one(&app, &repository_id).map_err(raybend::Error::Unsupported)?;
+            app.state::<crate::browse::BrowseState>()
+                .sessions
+                .with_current(&repository_id, |current| {
+                    let active = current
+                        .filter(|db| db.ensure_alive().is_ok())
+                        .map(|db| db.root().to_path_buf());
+                    let id = repository_id.clone();
+                    app.state::<DbState>()
+                        .with(&app, |db| {
+                            Ok(db.write_tx(move |conn| {
+                                repository::remove_repository_path(
+                                    conn,
+                                    &id,
+                                    &path,
+                                    active.as_deref(),
+                                )
+                            }))
+                        })
+                        .map_err(raybend::Error::Unsupported)??;
+                    Ok(())
+                })?;
+            view_one(&app, &repository_id).map_err(raybend::Error::Unsupported)
+        })()
+        .map_err(RepositoryLocationErrorDto::from))
+    })
+    .await
+    .map_err(|error| RepositoryLocationErrorDto::from(raybend::Error::Unsupported(error)))?
+}
+
 impl From<repository::RepositoryView> for RepositoryViewDto {
     fn from(view: repository::RepositoryView) -> Self {
         Self {
+            connection: raybend::store::availability::ConnectionStatus::unknown(&view.id),
             id: view.id,
             name: view.name,
             import_template: view.import_template,
@@ -108,53 +244,43 @@ pub async fn repositories_list<R: Runtime>(
     .await
 }
 
-/// 库列表 + **给还没数过的库补一次盘扫**。
-///
-/// 为什么要「顺手补」：老库（或刚登记、还没导入过的库）在 `directories` 里没有行，
-/// 卡片上就是「—」。第一次列表时扫一遍 `photos/` 把数字建立起来（本机磁盘，毫秒到几十毫秒），
-/// 之后就都在 app.db 里了 —— 与「实时性优先于缓存」那条纪律同一个取向。
+/// 列表只取登记/计数/已观察状态，不递归扫描、不探测磁盘。
 fn views<R: Runtime>(
     app: &AppHandle<R>,
     state: &DbState,
 ) -> Result<Vec<RepositoryViewDto>, String> {
-    let list = state.with(app, |db| {
-        db.read(repository::build_views).map_err(|e| e.to_string())
+    let rows = state.with(app, |db| {
+        db.read(repository::build_registered_views)
+            .map_err(|e| e.to_string())
     })?;
-    for view in &list {
-        if view.photos_count.is_some() || !view.online {
-            continue;
-        }
-        let (Some(root), Some(folder)) = (view.root.as_deref(), Some(DEFAULT_PHOTOS_DIR)) else {
-            continue;
-        };
-        let (id, root) = (view.id.clone(), PathBuf::from(root));
-        // 写闭包要跨线程（`'static`）：把 id / root **move 进去**（外面已经 clone 好了）
-        let _ = state.with(app, move |db| {
-            db.write(move |conn| {
-                repository::count_library_on_disk(
-                    conn,
-                    &id,
-                    &root,
-                    folder,
-                    raybend::store::time::now_millis(),
-                )
-                .map(|_| ())
-            })
-            .map_err(|error| error.to_string())
-        });
+    Ok(rows.into_iter().map(|row| project(app, row)).collect())
+}
+fn project<R: Runtime>(app: &AppHandle<R>, row: repository::RepositoryView) -> RepositoryViewDto {
+    let status = app
+        .state::<crate::browse::BrowseState>()
+        .connections
+        .get(&row.id);
+    let mut view = RepositoryViewDto::from(row);
+    view.online = status.state == raybend::store::availability::Availability::Online;
+    view.root = status.root.clone();
+    if let Some(root) = &view.root {
+        view.display_path = root.clone();
     }
-    // 补完之后重读一次（这次数字都在 app.db 里了）
-    let list = if list
-        .iter()
-        .any(|view| view.photos_count.is_none() && view.online)
-    {
-        state.with(app, |db| {
-            db.read(repository::build_views).map_err(|e| e.to_string())
+    view.connection = status;
+    view
+}
+fn view_one<R: Runtime>(app: &AppHandle<R>, id: &str) -> Result<RepositoryViewDto, String> {
+    // 登记有限且无 I/O；只投影目标，不探测其它库。
+    let row = app
+        .state::<DbState>()
+        .with(app, |db| {
+            db.read(repository::build_registered_views)
+                .map_err(|e| e.to_string())
         })?
-    } else {
-        list
-    };
-    Ok(list.into_iter().map(RepositoryViewDto::from).collect())
+        .into_iter()
+        .find(|row| row.id == id)
+        .ok_or_else(|| format!("没有这个库：{id}"))?;
+    Ok(project(app, row))
 }
 
 /// `photos/` 目录名（库内落地目录；`FUTURE G14` 将来可配）。
@@ -219,6 +345,7 @@ pub async fn repository_create<R: Runtime>(
         let root = PathBuf::from(&path);
         let now = time::now_millis();
 
+        raybend::store::location::require_catalog_location(&root).map_err(|e| e.to_string())?;
         std::fs::create_dir_all(&root).map_err(|e| format!("无法创建目录 {path}：{e}"))?;
         if let repository::RootProbe::Broken(reason) = repository::probe_root(&root) {
             return Err(format!(
@@ -236,25 +363,140 @@ pub async fn repository_create<R: Runtime>(
             .filter(|n| !n.is_empty())
             .unwrap_or(fallback);
 
-        let backups = crate::db::data_dir(&handle)?.join(raybend::store::db::BACKUPS_DIR);
-        let catalog = CatalogDb::create(&root, &name, None, OpenOpts::new(Some(&backups), now))
-            .map_err(|e| e.to_string())?;
-        let meta = catalog.meta().clone();
-        drop(catalog); // 建完就放掉（写线程、读池都不需要一直占着）
+        let meta = match repository::probe_root(&root) {
+            repository::RootProbe::Existing(meta) => *meta,
+            repository::RootProbe::Broken(reason) => return Err(reason),
+            _ => {
+                let backups = crate::db::data_dir(&handle)?.join(raybend::store::db::BACKUPS_DIR);
+                let created =
+                    CatalogDb::create(&root, &name, None, OpenOpts::new(Some(&backups), now))
+                        .map_err(|e| e.to_string())?;
+                created.meta().clone() // 登记前关掉新建阶段写者；已有库不另开写者。
+            }
+        };
 
         let state = handle.state::<DbState>();
         state.with(&handle, |db| {
             db.register_repository(&meta, &root, now)
                 .map_err(|e| e.to_string())
         })?;
-        /*
-         * 视图在**锁外**再取：`views` 自己还要 `db.read` / `db.write`（补扫盘计数），
-         * 而 `state.with` 持着那把互斥锁 —— 在它里面再叫一次就是自己等自己（死锁）。
-         */
-        views(&handle, &state)?
-            .into_iter()
-            .find(|v| v.id == meta.id)
-            .ok_or_else(|| "库刚登记完却查不到，请重试".to_string())
+        handle
+            .state::<crate::browse::BrowseState>()
+            .lease(&handle, &meta.id)?;
+        view_one(&handle, &meta.id)
+    })
+    .await
+}
+
+/// 显式选择同 ID 副本；尚有任务时禁止转写。
+#[tauri::command]
+pub async fn repository_use_location<R: Runtime>(
+    app: AppHandle<R>,
+    repository_id: String,
+    path: String,
+) -> Result<RepositoryViewDto, RepositoryLocationErrorDto> {
+    let handle = app.clone();
+    let id = repository_id.clone();
+    blocking(move || {
+        let browse = handle.state::<crate::browse::BrowseState>();
+        if handle
+            .state::<crate::import::ImportBatches>()
+            .unfinished_repository(&id)
+            || handle
+                .state::<crate::export::ExportState>()
+                .unfinished_repository(&id)
+        {
+            return Err(raybend::Error::RepositoryBusy.to_string());
+        }
+        let root = PathBuf::from(path);
+        repository::validate_alternate_location(&id, &root).map_err(|e| e.to_string())?;
+        let identity =
+            raybend::store::file_id::FileId::try_read(root.join(repository::CATALOG_FILE_NAME))
+                .filter(|v| !v.is_zero())
+                .ok_or("此设备没有可靠的库实体身份，无法固定副本选择")?;
+        let preferred = raybend::store::availability::PreferredLocation {
+            path: root.to_string_lossy().into(),
+            identity,
+        };
+        browse
+            .sessions
+            .switch_location(&id, || {
+                repository::validate_alternate_location(&id, &root)?;
+                if raybend::store::file_id::FileId::try_read(
+                    root.join(repository::CATALOG_FILE_NAME),
+                ) != Some(identity)
+                {
+                    return Err(raybend::Error::RepositoryIdentityChanged(root.clone()));
+                }
+                handle
+                    .state::<DbState>()
+                    .with(&handle, |db| {
+                        db.write_tx({
+                            let id = id.clone();
+                            let path = preferred.path.clone();
+                            move |c| {
+                                repository::add_repository_path(c, &id, &path, time::now_millis())
+                            }
+                        })
+                        .map_err(|e| e.to_string())?;
+                        db.set_setting_json(
+                            &raybend::store::availability::preference_key(&id),
+                            &preferred,
+                        )
+                        .map_err(|e| e.to_string())
+                    })
+                    .map_err(raybend::Error::Unsupported)
+            })
+            .map_err(|e| e.to_string())?;
+        browse.clear_watch(&id);
+        browse.publish(
+            &handle,
+            raybend::store::availability::ConnectionStatus::unknown(&id),
+        );
+        Ok(())
+    })
+    .await
+    .map_err(|e| RepositoryLocationErrorDto {
+        code: if e.contains("未完成任务") {
+            "busy"
+        } else {
+            "io_failure"
+        }
+        .into(),
+    })?;
+    repository_remount(app, repository_id, None)
+        .await
+        .map_err(|_| RepositoryLocationErrorDto {
+            code: "io_failure".into(),
+        })
+}
+#[tauri::command]
+pub async fn repository_release<R: Runtime>(
+    app: AppHandle<R>,
+    repository_id: String,
+) -> Result<RepositoryViewDto, String> {
+    blocking(move || {
+        view_one(&app, &repository_id)?;
+        let browse = app.state::<crate::browse::BrowseState>();
+        if !browse.sessions.begin_release(&repository_id) {
+            return view_one(&app, &repository_id);
+        }
+        let mut status = raybend::store::availability::ConnectionStatus::unknown(&repository_id);
+        status.state = raybend::store::availability::Availability::Releasing;
+        browse.publish(&app, status);
+        app.state::<crate::import::ImportBatches>()
+            .cancel_repository(&repository_id);
+        app.state::<crate::export::ExportState>()
+            .suspend_repository(&repository_id)?;
+        browse.clear_watch(&repository_id);
+        browse
+            .sessions
+            .finish_release(&repository_id)
+            .map_err(|e| e.to_string())?;
+        let mut status = raybend::store::availability::ConnectionStatus::unknown(&repository_id);
+        status.state = raybend::store::availability::Availability::Released;
+        browse.publish(&app, status);
+        view_one(&app, &repository_id)
     })
     .await
 }
@@ -267,21 +509,124 @@ pub async fn repository_create<R: Runtime>(
 pub async fn repository_remount<R: Runtime>(
     app: AppHandle<R>,
     repository_id: String,
+    automatic: Option<bool>,
 ) -> Result<RepositoryViewDto, String> {
     let handle = app.clone();
     blocking(move || {
-        let state = handle.state::<DbState>();
+        let browse = handle.state::<crate::browse::BrowseState>();
+        if automatic != Some(true) {
+            browse
+                .sessions
+                .resume(&repository_id)
+                .map_err(|e| e.to_string())?;
+        }
+        if browse.sessions.is_released(&repository_id) {
+            return view_one(&handle, &repository_id);
+        }
+        let app_for_probe = handle.clone();
         let id = repository_id.clone();
-        let now = time::now_millis();
-        state.with(&handle, |db| {
-            db.write_tx(move |tx| repository::refresh_path_status(tx, &id, now))
+        let revision = browse.connections.get(&id).revision;
+        let paths = handle.state::<DbState>().with(&handle, |db| {
+            db.read(|conn| repository::registered_paths(conn, &id))
                 .map_err(|e| e.to_string())
         })?;
-        // 同上：视图要在锁外取（它会顺手补一次盘扫计数，内部还要拿锁）
-        views(&handle, &state)?
-            .into_iter()
-            .find(|v| v.id == repository_id)
-            .ok_or_else(|| format!("没有这个库：{repository_id}"))
+        let endpoints = paths
+            .iter()
+            .map(|path| raybend::store::availability::endpoint_hint(path))
+            .collect::<Vec<_>>();
+        let outcome = browse.probes.run_endpoints(
+            &repository_id,
+            &endpoints,
+            raybend::store::availability::PROBE_WAIT,
+            move || {
+                let browse = app_for_probe.state::<crate::browse::BrowseState>();
+                use raybend::store::availability::{Availability, Reason};
+                let observed = browse.connections.get(&id);
+                // 超时/排队只表示尚未得到结果，不能据此中断健康会话。
+                if observed.state == Availability::Offline
+                    || (observed.state == Availability::Unavailable
+                        && !matches!(observed.reason, Some(Reason::Timeout | Reason::Busy)))
+                {
+                    browse
+                        .sessions
+                        .invalidate_observed(&id, observed.generation.parse().unwrap_or(0))?;
+                    browse.clear_watch(&id);
+                }
+                browse.acquire_session(&app_for_probe, &id)
+            },
+        );
+        // 探测线程只返回事实；超时或旧请求不会迟到发布 online。
+        if browse.connections.get(&repository_id).revision == revision {
+            use raybend::store::availability::{Availability, ConnectionStatus, ProbeWait, Reason};
+            let mut status = ConnectionStatus::unknown(&repository_id);
+            match outcome {
+                Ok(Ok(db)) => {
+                    status.state = Availability::Online;
+                    status.root = Some(db.root().to_string_lossy().into());
+                    status.generation = db.generation().to_string();
+                }
+                Ok(Err(error)) => {
+                    eprintln!("[repository] 探测失败：{error}");
+                    status = ConnectionStatus::failed(&repository_id, &error);
+                }
+                Err(wait) => {
+                    status.state = if wait == ProbeWait::Busy {
+                        Availability::Checking
+                    } else {
+                        Availability::Unavailable
+                    };
+                    status.reason = Some(if wait == ProbeWait::Busy {
+                        Reason::Busy
+                    } else {
+                        Reason::Timeout
+                    });
+                }
+            }
+            if let Some(published) = browse.publish_if(&handle, status, Some(&revision)) {
+                let events = handle.clone();
+                let id = repository_id.clone();
+                handle.state::<DbState>().with(&handle, |db| {
+                    db.write_tx(move |conn| {
+                        // 不把过期探测持久化；这里只读 SQL/内存，不做磁盘探测。
+                        if events
+                            .state::<crate::browse::BrowseState>()
+                            .connections
+                            .get(&id)
+                            .revision
+                            != published.revision
+                        {
+                            return Ok(());
+                        }
+                        for path in paths {
+                            let code = match published.state {
+                                Availability::Online
+                                    if published.root.as_ref().is_some_and(|root| {
+                                        raybend::store::path_semantics::PathForms::new(root)
+                                            .folded()
+                                            == raybend::store::path_semantics::PathForms::new(&path)
+                                                .folded()
+                                    }) =>
+                                {
+                                    "online"
+                                }
+                                Availability::Offline => "offline",
+                                _ => "unknown",
+                            };
+                            repository::set_path_status(
+                                conn,
+                                &id,
+                                &path,
+                                code,
+                                published.observed_at,
+                            )?;
+                        }
+                        Ok(())
+                    })
+                    .map_err(|e| e.to_string())
+                })?;
+            }
+        }
+        view_one(&handle, &repository_id)
     })
     .await
 }
@@ -320,13 +665,15 @@ pub async fn repository_counts<R: Runtime>(
 fn invalidate_changes<R: Runtime>(
     app: &AppHandle<R>,
     repository_id: &str,
-    root: &Path,
+    catalog: &CatalogDb,
     _scope: &str,
     report: &raybend::store::rebuild::RescanReport,
 ) -> Result<(), String> {
     if report.changed_assets.is_empty() {
         return Ok(());
     }
+    catalog.ensure_current().map_err(|e| e.to_string())?;
+    let root = catalog.root();
     let full = raybend::display::FullCache::open(root).map_err(|e| e.to_string())?;
     let mut keys = Vec::new();
     for path in &report.changed_paths {
@@ -346,13 +693,11 @@ fn invalidate_changes<R: Runtime>(
         keys.push(raybend::thumbnail::cache::cache_key(None, forms.folded()));
     }
     for asset in &report.changed_assets {
+        catalog.ensure_current().map_err(|e| e.to_string())?;
         full.invalidate_source(*asset).map_err(|e| e.to_string())?;
-        let issues =
-            app.state::<crate::browse::BrowseState>()
-                .with_catalog(app, repository_id, |db| {
-                    db.read(|conn| raybend::store::issues::list(conn, *asset))
-                        .map_err(|e| e.to_string())
-                })?;
+        let issues = catalog
+            .read(|conn| raybend::store::issues::list(conn, *asset))
+            .map_err(|e| e.to_string())?;
         for issue in issues {
             keys.push(crate::issues::cache_key(repository_id, *asset, issue.id));
         }
@@ -382,24 +727,18 @@ pub async fn repository_sync_dir<R: Runtime>(
     let handle = app.clone();
     blocking(move || {
         let state = handle.state::<DbState>();
-        let Some(root) = state.with(&handle, |db| {
-            db.resolve_repository(&repository_id)
-                .map(|resolved| match resolved {
-                    repository::RepositoryState::Online { root } => Some(root),
-                    repository::RepositoryState::Offline { .. } => None,
-                })
-                .map_err(|e| e.to_string())
-        })?
-        else {
-            return Err(format!("库「{repository_id}」当前离线"));
-        };
+        let browse = handle.state::<crate::browse::BrowseState>();
+        let _permit = browse.sessions.begin_task(&repository_id).map_err(|e|e.to_string())?;
+        let catalog = browse.lease(&handle, &repository_id)?;
+        let result = (|| {
+        let root = catalog.root().to_path_buf();
         let Some(scope) = scope_path.filter(|path| !path.is_empty()) else {
             return Ok(None);
         };
         let refresh_active = scope_paths.as_ref().is_some_and(Vec::is_empty);
         let mut scopes = scope_paths.unwrap_or_default();
         if refresh_active
-            && let Some((id, _, watcher)) = handle.state::<crate::browse::BrowseState>().live_watch.lock().map_err(|e| e.to_string())?.as_ref()
+            && let Some((id, _, _, watcher)) = handle.state::<crate::browse::BrowseState>().live_watch.lock().map_err(|e| e.to_string())?.as_ref()
                 && id == &repository_id { scopes = watcher.active_scopes(); }
         if scopes.len() > raybend::media::watch::MAX_SCOPES * 2 + 2 {
             return Err("同步范围过多".into());
@@ -407,57 +746,54 @@ pub async fn repository_sync_dir<R: Runtime>(
         scopes.push(scope.clone());
         scopes.sort();
         scopes.dedup();
-        let browse = handle.state::<crate::browse::BrowseState>();
-        let _single_flight = browse.disk_sync.lock().map_err(|e| e.to_string())?;
-        browse.with_catalog(&handle, &repository_id, |_| Ok(()))?;
-        {
-            let mut watch = browse.live_watch.lock().map_err(|e| e.to_string())?;
-            if watch
-                .as_ref()
-                .is_none_or(|(id, path, _)| id != &repository_id || path != &root)
-            {
-                *watch = None;
-                let app = handle.clone();
-                let id = repository_id.clone();
-                let watcher = raybend::media::watch::CatalogWatcher::new(&root, move |scopes| {
-                    if let Err(e) = app.emit(
-                        "catalog://dirty",
-                        serde_json::json!({"repositoryId": id, "scopes": scopes}),
-                    ) {
-                        eprintln!("[catalog] 发送目录变更失败：{e}");
-                    }
-                })?;
-                *watch = Some((repository_id.clone(), root.clone(), watcher));
+        let disk_gate = browse.disk_gate(&repository_id);
+        let _single_flight = disk_gate.lock().map_err(|e| e.to_string())?;
+        let generation = catalog.generation();
+        let previous = browse.live_watch.lock().map_err(|e| e.to_string())?.take();
+        let mut watcher = match previous {
+            Some((id, path, old_generation, watcher)) if id == repository_id && path == root && old_generation == generation => watcher,
+            retired => {
+                drop(retired); // join 和原生监听创建均在全局锁外
+                let app = handle.clone(); let id = repository_id.clone();
+                raybend::media::watch::CatalogWatcher::new(&root, move |scopes| {
+                    if let Err(e) = app.emit("catalog://dirty", serde_json::json!({"repositoryId": id, "scopes": scopes})) { eprintln!("[catalog] 发送目录变更失败：{e}"); }
+                })?
             }
-            if let Some((_, _, watcher)) = watch.as_mut() {
-                for scoped in &scopes { watcher.visit(scoped)?; }
-                watcher.visit(&scope)?;
-            }
-        }
+        };
+        for scoped in &scopes { watcher.visit(scoped)?; }
+        watcher.visit(&scope)?;
+        catalog.ensure_current().map_err(|e|e.to_string())?;
+        let unused = {
+            let mut slot = browse.live_watch.lock().map_err(|e|e.to_string())?;
+            if slot.is_none() { *slot = Some((repository_id.clone(),root.clone(),generation,watcher)); None } else {Some(watcher)}
+        };
+        drop(unused);
         let now = time::now_millis();
         let mut current_counts = repository::Counts::default();
         for scoped in &scopes {
-            let (report, counts) = browse.with_catalog(&handle, &repository_id, |catalog| {
-                raybend::store::rebuild::rescan_scope(catalog, "photos", scoped, now)
-                    .map_err(|e| e.to_string())
-            })?;
+            catalog.ensure_current().map_err(|e| e.to_string())?;
+            let (report, counts) = raybend::store::rebuild::rescan_scope(&catalog, "photos", scoped, now)
+                .map_err(|e| e.to_string())?;
             // 缓存的失效在发送事件前完成；调用失败会明确反馈，不能静默显示旧计数。
-            invalidate_changes(&handle, &repository_id, &root, scoped, &report)?;
+            invalidate_changes(&handle, &repository_id, &catalog, scoped, &report)?;
             if *scoped == scope {
                 current_counts = counts;
             }
             let id = repository_id.clone();
             let updates = report.directory_counts.clone();
             let reset = report.reset_counts;
+            catalog.ensure_current().map_err(|e| e.to_string())?;
+            let counts_session = std::sync::Arc::clone(&catalog);
             state.with(&handle, |db| {
                 db.write_tx(move |conn| {
+                    counts_session.ensure_alive()?;
                     if reset { repository::clear_directories(conn, &id)?; }
                     for (path, photos, images) in updates { repository::set_directory_counts(conn, &id, &path, repository::Counts { photos, images }, now)?; }
                     Ok(())
                 })
                 .map_err(|e| e.to_string())
             })?;
-            browse.with_catalog(&handle, &repository_id, |catalog| raybend::store::rebuild::acknowledge_changes(catalog, &report).map_err(|e| e.to_string()))?;
+            raybend::store::rebuild::acknowledge_changes(&catalog, &report).map_err(|e| e.to_string())?;
             handle.emit("catalog://changed", serde_json::json!({"repositoryId": repository_id, "scopePath": scoped,
                 "assetIds": report.changed_assets, "root": root.to_string_lossy(), "relativePaths": report.changed_paths
             })).map_err(|e| e.to_string())?;
@@ -472,6 +808,9 @@ pub async fn repository_sync_dir<R: Runtime>(
             [current_counts.photos, current_counts.images],
             [totals.photos, totals.images],
         ]))
+        })();
+        browse.observe_session(&handle, &catalog);
+        result
     })
     .await
 }
@@ -532,10 +871,14 @@ pub async fn repository_rebuild<R: Runtime>(
     let handle = app.clone();
     blocking(move || {
         let state = handle.state::<DbState>();
-        let root = online_root(&handle, &repository_id)?;
-        let now = time::now_millis();
         let browse = handle.state::<crate::browse::BrowseState>();
-        let _single_flight = browse.disk_sync.lock().map_err(|e| e.to_string())?;
+        let _permit = browse.sessions.begin_task(&repository_id).map_err(|e|e.to_string())?;
+        let catalog = browse.lease(&handle, &repository_id)?;
+        let result = (|| {
+        let root = catalog.root().to_path_buf();
+        let now = time::now_millis();
+        let disk_gate = browse.disk_gate(&repository_id);
+        let _single_flight = disk_gate.lock().map_err(|e| e.to_string())?;
 
         // ①② 磁盘 ↔ catalog 对齐 + 元数据重读（**带进度**：每一步都往前端报一次）
         let emitter = handle.clone();
@@ -551,17 +894,18 @@ pub async fn repository_rebuild<R: Runtime>(
                 },
             );
         };
-        let rescan = browse.with_catalog(&handle, &repository_id, |catalog| {
-            raybend::store::rebuild::rescan_library_with_progress(catalog, &root, DEFAULT_PHOTOS_DIR, now,
-                &mut |p| emit_progress(p.phase, p.done, p.total)).map_err(|e| e.to_string())
-        })?;
-        invalidate_changes(&handle, &repository_id, &root, DEFAULT_PHOTOS_DIR, &rescan)?;
+        let rescan = raybend::store::rebuild::rescan_library_with_progress(&catalog, &root, DEFAULT_PHOTOS_DIR, now,
+            &mut |p| emit_progress(p.phase, p.done, p.total)).map_err(|e| e.to_string())?;
+        invalidate_changes(&handle, &repository_id, &catalog, DEFAULT_PHOTOS_DIR, &rescan)?;
 
         // ③④ 计数：清空重来（这一份在 app.db 里）
         let (id, counts) = (repository_id.clone(), rescan.directory_counts.clone());
+        catalog.ensure_current().map_err(|e| e.to_string())?;
+        let counts_session = std::sync::Arc::clone(&catalog);
         let totals = state
             .with(&handle, move |db| {
                 db.write_tx(move |conn| {
+                    counts_session.ensure_alive()?;
                     repository::clear_directories(conn, &id)?;
                     for (path, photos, images) in counts {
                         repository::set_directory_counts(conn, &id, &path, repository::Counts { photos, images }, now)?;
@@ -572,7 +916,7 @@ pub async fn repository_rebuild<R: Runtime>(
             })
             .map_err(|e| e.to_string())?;
 
-        browse.with_catalog(&handle, &repository_id, |catalog| raybend::store::rebuild::acknowledge_changes(catalog, &rescan).map_err(|e| e.to_string()))?;
+        raybend::store::rebuild::acknowledge_changes(&catalog, &rescan).map_err(|e| e.to_string())?;
         handle.emit("catalog://changed", serde_json::json!({"repositoryId": repository_id, "scopePath": DEFAULT_PHOTOS_DIR,
             "assetIds": rescan.changed_assets, "root": root.to_string_lossy(), "relativePaths": rescan.changed_paths
         })).map_err(|e| e.to_string())?;
@@ -591,6 +935,9 @@ pub async fn repository_rebuild<R: Runtime>(
             photos_count: totals.photos,
             images_count: totals.images,
         })
+        })();
+        browse.observe_session(&handle, &catalog);
+        result
     })
     .await
 }
@@ -634,13 +981,17 @@ pub async fn repository_settings<R: Runtime>(
 ) -> Result<RepositorySettingsDto, String> {
     let handle = app.clone();
     blocking(move || {
-        let root = online_root(&handle, &repository_id)?;
-        let now = time::now_millis();
-        let catalog = CatalogDb::open(&root, OpenOpts::new(backups(&handle).as_deref(), now))
+        let catalog = handle
+            .state::<crate::browse::BrowseState>()
+            .lease(&handle, &repository_id)?;
+        let import_template = catalog
+            .read(
+                |conn| Ok(repository::RepositoryMeta::read(conn, catalog.path())?.import_template),
+            )
             .map_err(|e| e.to_string())?;
         Ok(RepositorySettingsDto {
             repository_id: repository_id.clone(),
-            import_template: catalog.meta().import_template.clone(),
+            import_template,
         })
     })
     .await
@@ -660,10 +1011,11 @@ pub async fn repository_set_template<R: Runtime>(
     blocking(move || {
         // 先校验：模版坏了就别写进库（否则下次导入才发现）
         template::parse(&template_source).map_err(|e| e.to_string())?;
-        let root = online_root(&handle, &repository_id)?;
+        let catalog = handle
+            .state::<crate::browse::BrowseState>()
+            .lease(&handle, &repository_id)?;
+        let root = catalog.root().to_path_buf();
         let now = time::now_millis();
-        let catalog = CatalogDb::open(&root, OpenOpts::new(backups(&handle).as_deref(), now))
-            .map_err(|e| e.to_string())?;
         catalog
             .set_import_template(&template_source)
             .map_err(|e| e.to_string())?;
@@ -733,30 +1085,4 @@ pub fn repository_template_preview(template_source: String) -> TemplatePreviewDt
         warnings: parsed.warnings().iter().map(ToString::to_string).collect(),
         paths,
     }
-}
-
-/// 在线库的根目录（离线给一句人话）。
-fn online_root<R: Runtime>(
-    app: &AppHandle<R>,
-    repository_id: &str,
-) -> Result<std::path::PathBuf, String> {
-    let state = app.state::<DbState>();
-    state.with(app, |db| {
-        match db
-            .resolve_repository(repository_id)
-            .map_err(|e| e.to_string())?
-        {
-            repository::RepositoryState::Online { root } => Ok(root),
-            repository::RepositoryState::Offline { tried } => {
-                Err(format!("库当前离线：登记过的 {tried} 个路径下都没有找到它"))
-            }
-        }
-    })
-}
-
-/// 迁移前快照目录。
-fn backups<R: Runtime>(app: &AppHandle<R>) -> Option<std::path::PathBuf> {
-    crate::db::data_dir(app)
-        .ok()
-        .map(|dir| dir.join(raybend::store::db::BACKUPS_DIR))
 }

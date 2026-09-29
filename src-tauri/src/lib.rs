@@ -7,22 +7,21 @@
 //! M0-2 的渲染可行性验证会在这里另开一个 `spike-viewport` 调试窗口，
 //! 主窗口保持不透明、不受影响。
 
-mod distribution;
-mod updates;
 pub mod base_curve;
 pub mod browse;
 pub mod db;
 mod desktop_behavior;
 /// 编辑栈的落库命令（M3-W3：读 / 落库 / 重置）。
 pub mod develop;
+mod distribution;
 /// 编辑视口：洞口契约（M3-W1）+ 渲染线程（M3-W2）。
 pub mod editor;
+pub mod export;
+pub mod external_editor;
 /// 全屏看图（另开无边框窗口，沉浸式无 UI）。
 pub mod fullscreen;
 mod import;
 pub mod issues;
-pub mod export;
-pub mod external_editor;
 pub mod lens;
 pub mod lut;
 mod migration;
@@ -32,6 +31,7 @@ pub mod repo;
 pub mod source;
 pub mod tags;
 pub mod thumbs;
+mod updates;
 
 /// IPC 契约测试（拉把 Rust 序列化出的键名与前端 ts 镜像对齐）。
 #[cfg(test)]
@@ -241,6 +241,10 @@ pub fn run() {
             repo::repository_probe,
             repo::repository_create,
             repo::repository_remount,
+            repo::repository_release,
+            repo::repository_use_location,
+            repo::repository_add_location,
+            repo::repository_remove_location,
             repo::repository_counts,
             repo::repository_sync_dir,
             repo::repository_rebuild,

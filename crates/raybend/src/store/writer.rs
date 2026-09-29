@@ -54,6 +54,8 @@ enum Msg {
     Barrier(Sender<()>),
     /// 关线程（前面排队的东西仍然跑完）
     Shutdown(Sender<()>),
+    #[cfg(test)]
+    Crash,
 }
 
 /// 单写者句柄：克隆共享同一条消息队列，可跨线程使用。
@@ -70,6 +72,11 @@ impl Writer {
     pub fn open(path: impl Into<PathBuf>) -> Result<Self> {
         let path = path.into();
         let conn = Connection::open(&path)?;
+        Self::from_connection(path, conn)
+    }
+
+    /// 已核对身份的连接直接交给 actor，避免另开连接期间换库。
+    pub(crate) fn from_connection(path: PathBuf, conn: Connection) -> Result<Self> {
         pragma::apply(&conn, false)?;
 
         let (tx, rx) = mpsc::channel::<Msg>();
@@ -99,13 +106,19 @@ impl Writer {
         T: Send + 'static,
         F: FnOnce(&mut Connection) -> Result<T> + Send + 'static,
     {
+        self.enqueue(f)?.recv().map_err(|_| Error::WriterGone)?
+    }
+
+    pub(crate) fn enqueue<T, F>(&self, f: F) -> Result<Receiver<Result<T>>>
+    where
+        T: Send + 'static,
+        F: FnOnce(&mut Connection) -> Result<T> + Send + 'static,
+    {
         let (reply_tx, reply_rx) = mpsc::channel();
-        let job: JobFn = Box::new(move |conn| {
-            // 结果送不出去（调用方已经不等了）也不算错，忽略即可
+        self.send(Msg::Job(Box::new(move |conn| {
             let _ = reply_tx.send(f(conn));
-        });
-        self.send(Msg::Job(job))?;
-        reply_rx.recv().map_err(|_| Error::WriterGone)?
+        })))?;
+        Ok(reply_rx)
     }
 
     /// 在**一个事务**里执行多条写：`Ok` 提交，`Err` 回滚。
@@ -136,13 +149,13 @@ impl Writer {
     ///
     /// 重复调用是安全的（第二次直接返回）。
     pub fn shutdown(&self) -> Result<()> {
-        let handle = {
-            let mut guard = self
-                .handle
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            guard.take()
-        };
+        // 这把锁只属于本写者。并发关闭者也必须等 join 完成，不能提前
+        // 宣称已退场，让同一 catalog 的新写者与旧线程重叠。
+        let mut guard = self
+            .handle
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let handle = guard.take();
         let Some(handle) = handle else {
             return Ok(());
         };
@@ -188,6 +201,8 @@ fn worker(rx: Receiver<Msg>, mut conn: Connection) {
             Msg::Barrier(reply) => {
                 let _ = reply.send(());
             }
+            #[cfg(test)]
+            Msg::Crash => panic!("模拟 actor 退出时失败"),
             Msg::Shutdown(reply) => {
                 let _ = reply.send(());
                 return;
@@ -203,6 +218,52 @@ mod tests {
     use crate::store::pool::ReadPool;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn concurrent_shutdown_never_returns_before_actor_exit() {
+        let dir = file_db();
+        let writer = Arc::new(Writer::open(dir.path().join("catalog.db")).unwrap());
+        let (started, start_rx) = mpsc::channel();
+        let (release, release_rx) = mpsc::channel();
+        let job = writer
+            .enqueue(move |_| {
+                started.send(()).unwrap();
+                release_rx.recv().unwrap();
+                Ok(())
+            })
+            .unwrap();
+        start_rx.recv().unwrap();
+        let (done, done_rx) = mpsc::channel();
+        let mut tasks = Vec::new();
+        for _ in 0..2 {
+            let w = Arc::clone(&writer);
+            let done = done.clone();
+            tasks.push(std::thread::spawn(move || done.send(w.shutdown()).unwrap()));
+        }
+        assert!(matches!(
+            done_rx.recv_timeout(std::time::Duration::from_millis(20)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ));
+        release.send(()).unwrap();
+        job.recv().unwrap().unwrap();
+        for _ in 0..2 {
+            done_rx
+                .recv_timeout(std::time::Duration::from_secs(2))
+                .unwrap()
+                .unwrap();
+        }
+        for task in tasks {
+            task.join().unwrap();
+        }
+    }
+    #[test]
+    fn actor_close_failure_is_reported_then_close_is_idempotent() {
+        let dir = file_db();
+        let writer = Writer::open(dir.path().join("catalog.db")).unwrap();
+        writer.send(Msg::Crash).unwrap();
+        assert!(matches!(writer.shutdown(), Err(Error::WriterGone)));
+        writer.shutdown().unwrap();
+    }
 
     /// 建一个有 schema 的文件库。
     fn file_db() -> tempfile::TempDir {

@@ -37,6 +37,7 @@ pub struct ReadPool {
 
 #[derive(Default)]
 struct Inner {
+    closed: bool,
     idle: Vec<Connection>,
     /// 已打开（含借出）的连接总数
     total: usize,
@@ -56,6 +57,7 @@ impl ReadPool {
         let first = open_read_conn(&path, false)?;
         Ok(Self {
             inner: Mutex::new(Inner {
+                closed: false,
                 idle: vec![first],
                 total: 1,
             }),
@@ -74,6 +76,7 @@ impl ReadPool {
         let first = open_read_conn(Path::new(&uri), true)?;
         Ok(Self {
             inner: Mutex::new(Inner {
+                closed: false,
                 idle: vec![first],
                 total: 1,
             }),
@@ -117,6 +120,9 @@ impl ReadPool {
     fn acquire(&self) -> Result<Connection> {
         let mut st = lock(&self.inner);
         loop {
+            if st.closed {
+                return Err(Error::SessionExpired);
+            }
             if let Some(conn) = st.idle.pop() {
                 return Ok(conn);
             }
@@ -124,7 +130,16 @@ impl ReadPool {
                 st.total += 1;
                 drop(st);
                 match open_read_conn(&self.path, self.uri) {
-                    Ok(conn) => return Ok(conn),
+                    Ok(conn) => {
+                        let mut st = lock(&self.inner);
+                        if st.closed {
+                            st.total -= 1;
+                            drop(st);
+                            drop(conn);
+                            return Err(Error::SessionExpired);
+                        }
+                        return Ok(conn);
+                    }
                     Err(e) => {
                         // 开不出来就把名额还回去，别让池子永久少一个位置
                         let mut st = lock(&self.inner);
@@ -142,12 +157,25 @@ impl ReadPool {
     fn release(&self, conn: Connection) {
         let healthy = conn_is_healthy(&conn);
         let mut st = lock(&self.inner);
-        if healthy {
+        if healthy && !st.closed {
             st.idle.push(conn);
         } else {
             st.total -= 1;
         }
         self.cv.notify_one();
+    }
+
+    /// 作废时丢弃闲置连接；借出的连接归还时也不会再进入池。
+    pub(crate) fn close(&self) {
+        let idle = {
+            let mut st = lock(&self.inner);
+            st.closed = true;
+            let idle = std::mem::take(&mut st.idle);
+            st.total -= idle.len();
+            self.cv.notify_all();
+            idle
+        };
+        drop(idle);
     }
 }
 

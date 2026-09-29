@@ -29,9 +29,9 @@
 //! 缩略图入队（回调）全部从外面给 —— 于是「跑完整整一批」在单测里
 //! 只用内存实现，一个真文件都不碰（`AGENTS.md` §2.10）。
 
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::error::Result;
@@ -201,6 +201,7 @@ impl Control {
 fn encode(state: ImportState) -> u8 {
     match state {
         ImportState::Running => 0,
+        ImportState::Waiting => 7,
         ImportState::Pausing => 1,
         ImportState::Paused => 2,
         ImportState::Cancelling => 3,
@@ -218,6 +219,7 @@ fn decode(value: u8) -> ImportState {
         4 => ImportState::Cancelled,
         5 => ImportState::Done,
         6 => ImportState::Failed,
+        7 => ImportState::Waiting,
         _ => ImportState::Running,
     }
 }
@@ -227,8 +229,15 @@ fn decode(value: u8) -> ImportState {
 /// 拆这么细不是过度设计：每一行都对着 `import_items.status` 的一次状态迁移，
 /// 顺序错了崩溃续跑就会误判（`specs/M1-6.md` §3.3）。
 pub trait ImportSink {
+    /// 文件之间的租约闸门；源失败仍可继续，目标会话失效必须停止整批。
+    fn check_session(&self) -> Result<()> {
+        Ok(())
+    }
     /// 判重用的「已导入过的源」（关掉判重时不必调）。
     fn known_sources(&mut self) -> Result<KnownSources>;
+    fn interrupted_sources(&mut self) -> Result<KnownSources> {
+        Ok(KnownSources::new())
+    }
     /// 序号分配器（从 `seq_counters` 播种）。
     fn sequences(&mut self) -> Result<Sequences>;
     /// 把序号写回库。
@@ -268,6 +277,8 @@ pub trait ImportSink {
 
 /// 执行器需要的一切（都从外面给，便于换成内存实现单测）。
 pub struct Deps<'a> {
+    /// 生产设备恢复闸门；无恢复适配器的合成调用保持失效即停止语义。
+    pub recovery: Option<&'a dyn StorageRecovery>,
     /// 落库出口。
     pub sink: &'a mut dyn ImportSink,
     /// 文件操作。
@@ -288,6 +299,15 @@ pub struct Deps<'a> {
     pub throttle: Duration,
 }
 
+/// 来源与目标身份核对由同一生产适配器提供，不把路径存在当作恢复。
+pub trait StorageRecovery {
+    fn source_ready(&self, root: &std::path::Path) -> bool;
+    fn target_ready(&self) -> bool;
+    fn wait(&self) {
+        std::thread::sleep(Duration::from_millis(500));
+    }
+}
+
 /// 跑一整批（顺序跑每个源目录 —— 复制串行对 HDD 友好，错误顺序也可读）。
 pub fn run_batch(mut deps: Deps<'_>, jobs: &[RunRequest]) -> BatchOutcome {
     let mut outcome = BatchOutcome::default();
@@ -304,94 +324,355 @@ pub fn run_batch(mut deps: Deps<'_>, jobs: &[RunRequest]) -> BatchOutcome {
         return outcome;
     }
 
-    for (idx, job) in jobs.iter().enumerate() {
+    // 逐个来源保存规划和复制游标；失联来源让出执行机会，不拖住其它来源。
+    let mut work: Vec<Option<Work>> = (0..jobs.len()).map(|_| None).collect();
+    let mut queue: VecDeque<usize> = (0..jobs.len()).collect();
+    deps.handle.with(|p| {
+        p.runs = jobs
+            .iter()
+            .enumerate()
+            .map(|(i, job)| RunProgress::new(-(i as i64) - 1, display_root(job)))
+            .collect();
+    });
+    let mut deferred = 0usize;
+    while let Some(idx) = queue.pop_front() {
+        let job = &jobs[idx];
         if deps.control.is_cancelling() {
-            // 取消之后剩下的源目录**连 run 都不开**（免得在库里留下空 run）。
-            // 一个 run 都没开的话，整批也得显示成「已取消」，不能停在「运行中」。
-            let _ = idx;
             deps.handle.with(|p| {
-                p.refresh_state();
-                if p.runs.is_empty() {
-                    p.state = ImportState::Cancelled;
+                for run in &mut p.runs {
+                    if !run.state.is_final() {
+                        run.state = ImportState::Cancelled;
+                    }
                 }
+                p.refresh_state();
             });
             break;
         }
-        match deps.run_one(job) {
-            Ok(result) => {
-                outcome.run_ids.push(result.run_id);
-                outcome.counts.total += result.counts.total;
-                outcome.counts.imported += result.counts.imported;
-                outcome.counts.skipped += result.counts.skipped;
-                outcome.counts.duplicates += result.counts.duplicates;
-                outcome.counts.failed += result.counts.failed;
-                outcome.counts.bytes += result.counts.bytes;
+        deps.handle.with(|p| p.current_run = Some(idx));
+        if let Err(error) = deps.ensure_target() {
+            if deps.control.is_cancelling() {
+                deps.handle.with(|p| {
+                    for run in &mut p.runs {
+                        if !run.state.is_final() {
+                            run.state = ImportState::Cancelled;
+                        }
+                    }
+                });
+            } else {
+                deps.handle.with(|p| {
+                    for run in &mut p.runs {
+                        if !run.state.is_final() {
+                            run.state = ImportState::Failed;
+                        }
+                    }
+                    p.push_error(ImportError {
+                        source: display_root(job),
+                        target: None,
+                        reason: error.to_string(),
+                        status: "failed".into(),
+                    });
+                });
+            }
+            break;
+        }
+        let source_ready = deps
+            .recovery
+            .is_none_or(|gate| gate.source_ready(&job.source_root));
+        let result = if source_ready {
+            deps.run_one(job, &mut work[idx])
+        } else {
+            Ok(None)
+        };
+        match result {
+            Ok(Some(result)) => {
+                deferred = 0;
                 for path in result.thumbs {
                     if !outcome.thumb_paths.contains(&path) {
                         outcome.thumb_paths.push(path);
                     }
                 }
             }
+            Ok(None) => {
+                deps.set_waiting(idx, "storage.wait.source");
+                queue.push_back(idx);
+                deferred += 1;
+            }
+            Err(error) if deps.control.is_cancelling() => {
+                let _ = error;
+                deps.handle.with(|p| {
+                    for run in &mut p.runs {
+                        if !run.state.is_final() {
+                            run.state = ImportState::Cancelled;
+                        }
+                    }
+                });
+                break;
+            }
+            Err(_error)
+                if deps
+                    .recovery
+                    .is_some_and(|gate| !gate.source_ready(&job.source_root)) =>
+            {
+                deps.set_waiting(idx, "storage.wait.source");
+                queue.push_back(idx);
+                deferred += 1;
+            }
             Err(error) => {
-                // 一个源目录整个跑不起来（例如目录没了）：记一笔，继续下一个
                 let reason = error.to_string();
                 deps.handle.with(|p| {
-                    if let Some(run) = p.runs.iter_mut().find(|r| r.source_root == display_root(job)) {
-                        run.state = ImportState::Failed;
-                        run.note = Some(reason.clone());
-                    }
+                    p.runs[idx].state = ImportState::Failed;
+                    p.runs[idx].note = Some(reason.clone());
                     p.push_error(ImportError {
                         source: display_root(job),
                         target: None,
-                        reason: reason.clone(),
-                        status: "failed".to_string(),
+                        reason,
+                        status: "failed".into(),
                     });
                     p.refresh_state();
                 });
                 deps.emit(true);
+                deferred = 0;
+                if deps.sink.check_session().is_err() && deps.recovery.is_none() {
+                    break;
+                }
             }
+        }
+        if !queue.is_empty() && deferred >= queue.len() {
+            if let Some(gate) = deps.recovery {
+                gate.wait();
+            }
+            deferred = 0;
         }
     }
 
+    let expired = deps.sink.check_session().is_err();
     let final_state = deps.handle.with(|p| {
         p.recompute();
         p.refresh_state();
         p.finished_at = Some(now);
+        if deps.control.is_cancelling() {
+            p.state = ImportState::Cancelled;
+        } else if expired {
+            p.state = ImportState::Failed;
+        }
         p.state
     });
     deps.emit(true);
     outcome.state = Some(final_state);
+    let progress = deps.handle.snapshot();
+    outcome.counts = RunCounts {
+        total: progress.total,
+        imported: progress.imported,
+        skipped: progress.skipped,
+        duplicates: progress.duplicates,
+        failed: progress.failed,
+        bytes: progress.bytes,
+    };
+    outcome.run_ids = progress
+        .runs
+        .iter()
+        .filter(|run| run.run_id > 0)
+        .map(|run| run.run_id)
+        .collect();
     outcome
 }
 
 /// 一个 run 的结果。
 struct RunOutcome {
+    thumbs: Vec<String>,
+}
+struct Work {
     run_id: i64,
+    files: Vec<SourceFile>,
+    items: Vec<PlannedItem>,
+    sequences: Sequences,
     counts: RunCounts,
     thumbs: Vec<String>,
+    cursor: usize,
+    prepared: bool,
 }
 
 impl Deps<'_> {
     /// 跑一个源目录。
-    fn run_one(&mut self, job: &RunRequest) -> Result<RunOutcome> {
-        let root = display_root(job);
-        let run_id = self.sink.begin_run(job)?;
-        // run 行立刻落库：不然崩溃之后根本不知道「上次在导什么」
-        self.sink.commit()?;
-        self.handle.with(|p| {
-            let mut run = RunProgress::new(run_id, root.clone());
-            run.note = None;
-            p.runs.push(run);
-            p.current_run = Some(job.index);
-            p.recompute();
-            p.refresh_state();
+    fn run_one(
+        &mut self,
+        job: &RunRequest,
+        context: &mut Option<Work>,
+    ) -> Result<Option<RunOutcome>> {
+        if context.is_none() {
+            let run_id = self.target_call(|sink| sink.begin_run(job))?;
+            self.target_call(|sink| sink.commit())?;
+            self.handle.with(|p| {
+                p.runs[job.index] = RunProgress::new(run_id, display_root(job));
+                p.current_run = Some(job.index);
+                p.refresh_state();
+            });
+            *context = Some(Work {
+                run_id,
+                files: Vec::new(),
+                items: Vec::new(),
+                sequences: Sequences::default(),
+                counts: RunCounts::default(),
+                thumbs: Vec::new(),
+                cursor: 0,
+                prepared: false,
+            });
+            self.emit(true);
+        }
+        let work = context.as_mut().expect("work was initialized");
+        let run_id = work.run_id;
+        self.set_run(run_id, |run| {
+            run.state = ImportState::Running;
+            if run
+                .note
+                .as_deref()
+                .is_some_and(|note| note.starts_with("storage.wait."))
+            {
+                run.note = None;
+            }
         });
+        if !work.prepared {
+            self.prepare(job, work)?;
+            if self.control.is_cancelling() {
+                return self
+                    .finish(
+                        run_id,
+                        job,
+                        ImportState::Cancelled,
+                        work.counts,
+                        std::mem::take(&mut work.thumbs),
+                    )
+                    .map(Some);
+            }
+        }
+        let mut throttle = Throttle::new(self.throttle);
+        let mut commit = BatchCommit::new(200, Duration::from_millis(500), Instant::now());
+        while work.cursor < work.items.len() {
+            self.ensure_target()?;
+            if self.wait_at_safe_point(run_id) {
+                self.target_call(|sink| sink.save_sequences(&work.sequences))?;
+                self.target_call(|sink| sink.commit())?;
+                return self
+                    .finish(
+                        run_id,
+                        job,
+                        ImportState::Cancelled,
+                        work.counts,
+                        std::mem::take(&mut work.thumbs),
+                    )
+                    .map(Some);
+            }
+            if self
+                .recovery
+                .is_some_and(|gate| !gate.source_ready(&job.source_root))
+            {
+                self.target_call(|sink| sink.commit())?;
+                return Ok(None);
+            }
+            let item = &work.items[work.cursor];
+            let Some(target) = item.target_rel() else {
+                work.cursor += 1;
+                continue;
+            };
+            if item.status_str() != "pending" {
+                work.cursor += 1;
+                continue;
+            }
+            let file = &work.files[item.index];
+            self.set_run(run_id, |run| {
+                run.current = Some(CurrentItem {
+                    source: file.rel_path.clone(),
+                    target: Some(target.to_string()),
+                })
+            });
+            // 完整内容核验后才能接纳 pending；正常未落地的文件直接复制。
+            let copied = self.ops.exists(target) && self.ops.verified_copy(&file.abs_path, target);
+            if !copied || !self.ops.source_unchanged(file) {
+                let copy = if !self.ops.source_unchanged(file) {
+                    Err(crate::Error::Unsupported("来源文件在扫描后发生变化".into()))
+                } else {
+                    self.copy_one(file, target).and_then(|_| {
+                        if self.ops.source_unchanged(file) {
+                            Ok(())
+                        } else {
+                            Err(crate::Error::Unsupported(
+                                "来源文件在复制期间发生变化".into(),
+                            ))
+                        }
+                    })
+                };
+                if let Err(error) = copy {
+                    if self
+                        .recovery
+                        .is_some_and(|gate| !gate.source_ready(&job.source_root))
+                    {
+                        self.target_call(|sink| sink.commit())?;
+                        return Ok(None);
+                    }
+                    if self.sink.check_session().is_err() && self.recovery.is_some() {
+                        self.ensure_target()?;
+                        continue;
+                    }
+                    let reason = error.to_string();
+                    work.counts.failed += 1;
+                    self.target_call(|sink| sink.mark(run_id, item, "failed", Some(&reason)))?;
+                    self.note_error(file, Some(target), &reason, "failed");
+                    self.bump(run_id, 0, 0, 1);
+                    work.cursor += 1;
+                    self.emit_if_due(&mut throttle);
+                    continue;
+                }
+            }
+            let copy_identity = self.ops.identity_of(target);
+            match self.target_call(|sink| sink.register(run_id, item, file, copy_identity)) {
+                Ok(()) => {
+                    self.target_call(|sink| sink.mark(run_id, item, "imported", None))?;
+                    work.counts.imported += 1;
+                    self.bump(run_id, 1, 0, 0);
+                    if item.role != Some(plan::Role::Raw) {
+                        work.thumbs.push(target.to_string());
+                    }
+                }
+                Err(error) => {
+                    let reason = error.to_string();
+                    work.counts.failed += 1;
+                    self.target_call(|sink| sink.mark(run_id, item, "failed", Some(&reason)))?;
+                    self.note_error(file, Some(target), &reason, "failed");
+                    self.bump(run_id, 0, 0, 1);
+                }
+            }
+            work.cursor += 1;
+            if commit.tick(Instant::now()) {
+                self.target_call(|sink| sink.save_sequences(&work.sequences))?;
+                self.target_call(|sink| sink.commit())?;
+            }
+            self.emit_if_due(&mut throttle);
+        }
+        self.set_run(run_id, |run| run.current = None);
+        self.set_stage(run_id, ImportStage::Thumbs);
         self.emit(true);
+        if !work.thumbs.is_empty()
+            && let Err(error) = (self.enqueue_thumbs)(&work.thumbs) {
+                self.set_run(run_id, |run| {
+                    run.note = Some(format!("缩略图入队失败：{error}"))
+                });
+            }
+        self.target_call(|sink| sink.save_sequences(&work.sequences))?;
+        self.finish(
+            run_id,
+            job,
+            ImportState::Done,
+            work.counts,
+            std::mem::take(&mut work.thumbs),
+        )
+        .map(Some)
+    }
 
-        let mut counts = RunCounts::default();
+    fn prepare(&mut self, job: &RunRequest, work: &mut Work) -> Result<()> {
+        let run_id = work.run_id;
         let cancel = Cancel::new();
         let mut throttle = Throttle::new(self.throttle);
-
+        self.set_stage(run_id, ImportStage::Scan);
         /* ── ① 扫描 ───────────────────────────────────── */
         let mut scanned: Vec<ScannedFile> = Vec::new();
         let control = self.control;
@@ -402,19 +683,17 @@ impl Deps<'_> {
             scanned.push(file);
             true
         };
-        let walk = self.scanner.walk(
-            &job.source_root,
-            &job.scan_options(),
-            &cancel,
-            &mut on_file,
-        )?;
+        let walk =
+            self.scanner
+                .walk(&job.source_root, &job.scan_options(), &cancel, &mut on_file)?;
         self.set_run(run_id, |run| {
             run.scanned = walk.files as u64;
         });
         self.emit(true);
 
         if walk.cancelled || self.control.is_cancelling() {
-            return self.finish(run_id, job, ImportState::Cancelled, counts, Vec::new());
+            self.control.cancel();
+            return Ok(());
         }
 
         /*
@@ -426,25 +705,35 @@ impl Deps<'_> {
          * （「不导入这张」不等于「尝试过但跳过了」）。
          */
         if !job.excluded.is_empty() {
-            scanned.retain(|file| !job.excluded.contains(file.abs_path.to_string_lossy().as_ref()));
+            scanned.retain(|file| {
+                !job.excluded
+                    .contains(file.abs_path.to_string_lossy().as_ref())
+            });
             let kept = scanned.len() as u64;
             self.set_run(run_id, |run| run.scanned = kept);
             self.emit(true);
         }
 
         /* ── ② 读元数据（模版要用才读）─────────────────── */
-        let needs = ScanNeeds::for_template(&job.template, job.avoid_duplicates);
+        if self
+            .recovery
+            .is_some_and(|gate| !gate.source_ready(&job.source_root))
+        {
+            return Err(crate::Error::PathNotFound(job.source_root.clone()));
+        }
+        let mut needs = ScanNeeds::for_template(&job.template, job.avoid_duplicates);
+        needs.identity |= self.recovery.is_some();
         let mut extras: Vec<SourceExtras> = Vec::with_capacity(scanned.len());
         for chunk in scanned.chunks(ENRICH_CHUNK) {
             if self.cancel_requested(run_id) {
-                return self.finish(run_id, job, ImportState::Cancelled, counts, Vec::new());
+                return Ok(());
             }
             extras.extend(self.scanner.enrich(chunk, &needs, &cancel));
             let read = extras.len() as u64;
             self.set_run(run_id, |run| run.scanned = read);
             self.emit_if_due(&mut throttle);
         }
-        let files: Vec<SourceFile> = scanned
+        let mut files: Vec<SourceFile> = scanned
             .iter()
             .zip(extras)
             .map(|(scan, extra)| SourceFile::from_scanned(scan, extra))
@@ -454,31 +743,36 @@ impl Deps<'_> {
         self.set_stage(run_id, ImportStage::Plan);
         self.emit(true);
         let known = if job.avoid_duplicates {
-            self.sink.known_sources()?
+            self.target_call(|sink| sink.known_sources())?
         } else {
             KnownSources::new()
         };
-        let mut sequences = self.sink.sequences()?;
+        let interrupted = self.target_call(|sink| sink.interrupted_sources())?;
+        files.retain(|file| !interrupted.contains(file));
+        let mut sequences = self.target_call(|sink| sink.sequences())?;
         let options = job.plan_options();
 
         // 续跑：上次「复制了但还没登记」且**大小相符**的目标路径。
         // 交给规划器当「我们自己占着的」—— 否则重名规则会给它加 `_01`，
         // 同一张照片就有两份了（`specs/M1-6.md` §7 风险 10）。
-        let stale = self.sink.stale_pending()?;
+        let stale = self.target_call(|sink| sink.stale_pending())?;
         let mut resumable: Reserved = Reserved::new();
         let mut adopt: plan::Adopt = plan::Adopt::new();
         for (target, source_abs) in &stale {
             // 比对的是**绝对路径**：`import_items.source_path` 存的是绝对路径（`sink.rs` 写的），
             // 曾经拿它跟 `rel_path` 比 —— 于是这段「续跑要落回原名字」的逻辑在真机上一直是空转的。
-            let Some(file) = files
-                .iter()
-                .find(|f| f.abs_path.display().to_string() == *source_abs)
-            else {
+            let Some(file) = files.iter().find(|f| {
+                crate::store::path_semantics::PathForms::new(f.abs_path.to_string_lossy().as_ref())
+                    .folded()
+                    == crate::store::path_semantics::PathForms::new(source_abs).folded()
+            }) else {
                 continue;
             };
             // 只有「上次真的把文件放到那儿了（大小相符）」才认 —— 光有条 pending 行不算，
             // 那种情况照常编号即可（计数器是单调的，不会撞名）。
-            if self.ops.size_of(target) == Some(file.size_bytes) {
+            if self.ops.size_of(target) == Some(file.size_bytes)
+                && self.ops.verified_copy(&file.abs_path, target)
+            {
                 resumable.insert(target);
                 adopt.insert(file.rel_path.clone(), target.clone());
             }
@@ -495,107 +789,101 @@ impl Deps<'_> {
             &resumable,
             &adopt,
         );
-        self.sink.record_plan(run_id, &files, &planned.items)?;
-        self.sink.save_sequences(&sequences)?;
-        self.sink.commit()?;
+        if self
+            .recovery
+            .is_some_and(|gate| !gate.source_ready(&job.source_root))
+        {
+            return Err(crate::Error::PathNotFound(job.source_root.clone()));
+        }
+        self.target_call(|sink| sink.record_plan(run_id, &files, &planned.items))?;
+        self.target_call(|sink| sink.save_sequences(&sequences))?;
+        self.target_call(|sink| sink.commit())?;
 
-        counts.total = planned.items.len() as u64;
-        counts.skipped = planned.counts.skipped as u64;
-        counts.duplicates = planned.counts.duplicates as u64;
-        counts.failed = planned.counts.failed as u64;
+        work.counts.total = planned.items.len() as u64;
+        work.counts.skipped = planned.counts.skipped as u64;
+        work.counts.duplicates = planned.counts.duplicates as u64;
+        work.counts.failed = planned.counts.failed as u64;
         self.set_run(run_id, |run| {
             run.stage = ImportStage::Import;
-            run.total = counts.total;
-            run.skipped = counts.skipped;
-            run.duplicates = counts.duplicates;
-            run.failed = counts.failed;
-            // 跳过与失败的条目在规划阶段就已经处理完了
-            run.done = counts.skipped + counts.failed;
+            run.total = work.counts.total;
+            run.skipped = work.counts.skipped;
+            run.duplicates = work.counts.duplicates;
+            run.failed = work.counts.failed;
+            run.done = work.counts.skipped + work.counts.failed;
         });
-        self.emit(true);
-
-        // 规划里失败的条目也要进错误清单（用户在弹窗里要能看到原因）
         self.collect_plan_errors(&planned.items);
+        work.files = files;
+        work.items = planned.items;
+        work.sequences = sequences;
+        work.prepared = true;
+        self.emit(true);
+        Ok(())
+    }
 
-        /* ── ④ 复制 + 登记 ─────────────────────────────── */
-        let mut commit = BatchCommit::new(200, Duration::from_millis(500), Instant::now());
-        let mut thumbs: Vec<String> = Vec::new();
-
-        for item in planned.planned() {
-            if self.wait_at_safe_point(run_id) {
-                self.sink.save_sequences(&sequences)?;
-                self.sink.commit()?;
-                return self.finish(run_id, job, ImportState::Cancelled, counts, thumbs);
-            }
-            let Some(target) = item.target_rel() else {
-                continue;
-            };
-            let file = &files[item.index];
-            self.set_run(run_id, |run| {
-                run.current = Some(CurrentItem {
-                    source: file.rel_path.clone(),
-                    target: Some(target.to_string()),
+    fn set_waiting(&mut self, index: usize, reason: &str) {
+        let changed = self.handle.with(|p| {
+            let run = &mut p.runs[index];
+            let changed = run.state != ImportState::Waiting || run.note.as_deref() != Some(reason);
+            run.state = ImportState::Waiting;
+            run.note = Some(reason.into());
+            p.refresh_state();
+            changed
+        });
+        if changed {
+            self.emit(true);
+        }
+    }
+    fn ensure_target(&mut self) -> Result<()> {
+        if self.sink.check_session().is_ok() {
+            return Ok(());
+        }
+        let Some(gate) = self.recovery else {
+            return self.sink.check_session();
+        };
+        while !self.control.is_cancelling() {
+            if gate.target_ready() && self.sink.check_session().is_ok() {
+                self.handle.with(|p| {
+                    for run in &mut p.runs {
+                        if run.note.as_deref() == Some("storage.wait.repository") {
+                            run.state = ImportState::Running;
+                            run.note = None;
+                        }
+                    }
+                    p.refresh_state();
                 });
-            });
-
-            // 续跑：上次「复制了但没登记」的痕迹 + 目标在且大小相符 → 直接登记，不重拷
-            let resume_ok = stale.contains_key(target)
-                && self.ops.size_of(target) == Some(file.size_bytes);
-
-            if !resume_ok
-                && let Err(error) = self.copy_one(file, target) {
-                    let reason = error.to_string();
-                    counts.failed += 1;
-                    self.sink.mark(run_id, item, "failed", Some(&reason))?;
-                    self.note_error(file, Some(target), &reason, "failed");
-                    self.bump(run_id, 0, 0, 1);
-                    self.emit_if_due(&mut throttle);
-                    continue;
-                }
-
-            let copy_identity = self.ops.identity_of(target);
-            match self.sink.register(run_id, item, file, copy_identity) {
-                Ok(()) => {
-                    self.sink.mark(run_id, item, "imported", None)?;
-                    counts.imported += 1;
-                    self.bump(run_id, 1, 0, 0);
-                    if item.role != Some(plan::Role::Raw) {
-                        thumbs.push(target.to_string());
+                self.emit(true);
+                return Ok(());
+            }
+            let changed = self.handle.with(|p| {
+                let mut changed = false;
+                for run in &mut p.runs {
+                    if !run.state.is_final() {
+                        changed |= run.note.as_deref() != Some("storage.wait.repository");
+                        run.state = ImportState::Waiting;
+                        run.note = Some("storage.wait.repository".into());
                     }
                 }
-                Err(error) => {
-                    let reason = error.to_string();
-                    counts.failed += 1;
-                    self.sink.mark(run_id, item, "failed", Some(&reason))?;
-                    self.note_error(file, Some(target), &reason, "failed");
-                    self.bump(run_id, 0, 0, 1);
-                }
+                p.refresh_state();
+                changed
+            });
+            if changed {
+                self.emit(true);
             }
-
-            if commit.tick(Instant::now()) {
-                self.sink.save_sequences(&sequences)?;
-                self.sink.commit()?;
-            }
-            self.emit_if_due(&mut throttle);
+            gate.wait();
         }
-
-        self.set_run(run_id, |run| run.current = None);
-        self.emit_if_due(&mut throttle);
-
-        /* ── ⑤ 缩略图入队（入队即算这一阶段完成）────────── */
-        self.set_stage(run_id, ImportStage::Thumbs);
-        self.emit(true);
-        if !thumbs.is_empty() {
-            // 入队失败不该把导入算失败：文件已经进库了，缩略图补得回来
-            if let Err(error) = (self.enqueue_thumbs)(&thumbs) {
-                self.handle.with(|p| {
-                    run_of(p, run_id).note = Some(format!("缩略图入队失败：{error}"));
-                });
+        Err(crate::Error::Unsupported("导入已取消".into()))
+    }
+    fn target_call<T>(
+        &mut self,
+        mut action: impl FnMut(&mut dyn ImportSink) -> Result<T>,
+    ) -> Result<T> {
+        loop {
+            self.ensure_target()?;
+            match action(self.sink) {
+                Err(_) if self.recovery.is_some() && self.sink.check_session().is_err() => continue,
+                result => return result,
             }
         }
-
-        self.sink.save_sequences(&sequences)?;
-        self.finish(run_id, job, ImportState::Done, counts, thumbs)
     }
 
     /// 复制一个文件（先建目录）。
@@ -607,11 +895,11 @@ impl Deps<'_> {
         let bytes = self.ops.copy(&file.abs_path, target)?;
         self.handle.with(|p| {
             // 字节数记在「当前那个跑着的 run」上
-            if let Some(run) = p
-                .runs
-                .iter_mut()
-                .find(|r| r.current.as_ref().is_some_and(|c| c.target.as_deref() == Some(target)))
-            {
+            if let Some(run) = p.runs.iter_mut().find(|r| {
+                r.current
+                    .as_ref()
+                    .is_some_and(|c| c.target.as_deref() == Some(target))
+            }) {
                 run.bytes += bytes;
             }
         });
@@ -630,8 +918,8 @@ impl Deps<'_> {
         let bytes = self.handle.with(|p| run_of(p, run_id).bytes);
         let mut counts = counts;
         counts.bytes = bytes;
-        self.sink.finish_run(run_id, state.run_state(), &counts)?;
-        self.sink.commit()?;
+        self.target_call(|sink| sink.finish_run(run_id, state.run_state(), &counts))?;
+        self.target_call(|sink| sink.commit())?;
         self.set_run(run_id, |run| {
             run.state = state;
             run.stage = if state == ImportState::Done {
@@ -645,11 +933,7 @@ impl Deps<'_> {
             p.refresh_state();
         });
         self.emit(true);
-        Ok(RunOutcome {
-            run_id,
-            counts,
-            thumbs,
-        })
+        Ok(RunOutcome { thumbs })
     }
 
     /// 规划阶段就失败的条目（路径不合法之类）要出现在错误清单里。
@@ -796,7 +1080,7 @@ mod tests {
     use crate::import::plan::SourceExtras;
     use crate::import::progress::BatchProgress;
     use crate::import::template::parse as parse_template;
-    
+
     use crate::media::scan::ScannedFile;
     use crate::store::file_id::FileId;
     use std::path::PathBuf;
@@ -843,6 +1127,7 @@ mod tests {
         next_id: i64,
         /// 让某个源文件的登记失败（测「单条失败不打断」）。
         fail_register_for: Option<String>,
+        session_valid: Option<Arc<std::sync::atomic::AtomicBool>>,
     }
 
     impl MemorySink {
@@ -870,6 +1155,17 @@ mod tests {
     }
 
     impl ImportSink for MemorySink {
+        fn check_session(&self) -> Result<()> {
+            if self
+                .session_valid
+                .as_ref()
+                .is_some_and(|flag| !flag.load(Ordering::Acquire))
+            {
+                Err(crate::Error::SessionExpired)
+            } else {
+                Ok(())
+            }
+        }
         fn known_sources(&mut self) -> Result<KnownSources> {
             Ok(self.known.clone())
         }
@@ -927,7 +1223,9 @@ mod tests {
             copy_identity: Option<FileId>,
         ) -> Result<()> {
             if self.fail_register_for.as_deref() == Some(file.rel_path.as_str()) {
-                return Err(crate::error::Error::Unsupported("索引里已有这条路径".into()));
+                return Err(crate::error::Error::Unsupported(
+                    "索引里已有这条路径".into(),
+                ));
             }
             if let Some(record) = self.items.iter_mut().find(|i| i.source == file.rel_path) {
                 record.copy_identity = copy_identity;
@@ -955,12 +1253,7 @@ mod tests {
             Ok(())
         }
 
-        fn finish_run(
-            &mut self,
-            run_id: i64,
-            state: &str,
-            counts: &RunCounts,
-        ) -> Result<()> {
+        fn finish_run(&mut self, run_id: i64, state: &str, counts: &RunCounts) -> Result<()> {
             if let Some(run) = self.runs.iter_mut().find(|r| r.id == run_id) {
                 run.state = state.to_string();
                 run.counts = *counts;
@@ -1000,7 +1293,10 @@ mod tests {
     /// 一个「源目录里有这些文件」的世界（照片内容都在）。
     fn world(files: &[(&str, u64)]) -> MemoryFs {
         let mut fs = MemoryFs::new();
-        let list: Vec<ScannedFile> = files.iter().map(|(rel, size)| scanned(rel, *size)).collect();
+        let list: Vec<ScannedFile> = files
+            .iter()
+            .map(|(rel, size)| scanned(rel, *size))
+            .collect();
         for (rel, size) in files {
             fs.add_source(format!("{SRC}/root/{rel}"), &vec![0u8; *size as usize]);
             fs.set_extras(
@@ -1054,7 +1350,19 @@ mod tests {
         }
 
         /// 跑一批（`hook` 在每次进度回调里被调，用来注入暂停/取消）。
-        fn run_with(&mut self, jobs: &[RunRequest], mut hook: impl FnMut(&BatchProgress, &Control)) -> BatchOutcome {
+        fn run_with(
+            &mut self,
+            jobs: &[RunRequest],
+            hook: impl FnMut(&BatchProgress, &Control),
+        ) -> BatchOutcome {
+            self.run_recovering(jobs, None, hook)
+        }
+        fn run_recovering(
+            &mut self,
+            jobs: &[RunRequest],
+            recovery: Option<&dyn StorageRecovery>,
+            mut hook: impl FnMut(&BatchProgress, &Control),
+        ) -> BatchOutcome {
             let Harness {
                 fs,
                 sink,
@@ -1076,6 +1384,7 @@ mod tests {
                 Ok(paths.len())
             };
             let deps = Deps {
+                recovery,
                 sink,
                 ops: fs,
                 scanner: fs,
@@ -1095,11 +1404,200 @@ mod tests {
         }
     }
 
+    struct RecoveryTest {
+        source: std::cell::Cell<bool>,
+        target: std::cell::Cell<bool>,
+        waits: std::cell::Cell<usize>,
+    }
+    impl StorageRecovery for RecoveryTest {
+        fn source_ready(&self, root: &std::path::Path) -> bool {
+            root.to_string_lossy().contains("other") || self.source.get()
+        }
+        fn target_ready(&self) -> bool {
+            self.target.get()
+        }
+        fn wait(&self) {
+            self.waits.set(self.waits.get() + 1);
+            self.source.set(true);
+            self.target.set(true);
+        }
+    }
+    #[test]
+    fn waiting_source_defers_only_itself_and_continues_from_safe_cursor() {
+        let mut h = Harness::new(world(&[("a.jpg", 5), ("b.jpg", 6)]));
+        h.fs.add_source("/other/c.jpg", &[1, 2, 3]);
+        h.fs.set_scan("/other", vec![scanned_at("/other", "c.jpg", 3)]);
+        let first = h.job(":FILENAME");
+        let mut second = first.clone();
+        second.index = 1;
+        second.source_root = "/other".into();
+        let gate = RecoveryTest {
+            source: true.into(),
+            target: true.into(),
+            waits: 0.into(),
+        };
+        h.run_recovering(&[first, second], Some(&gate), |p, _| {
+            if p.imported == 1 && gate.waits.get() == 0 {
+                gate.source.set(false);
+            }
+        });
+        assert_eq!(h.handle.snapshot().state, ImportState::Done);
+        assert_eq!(h.handle.snapshot().imported, 3);
+        assert!(h.events.iter().any(|p| p.imported == 2
+            && p.runs[0].state == ImportState::Waiting
+            && p.runs[1].state == ImportState::Done));
+        assert_eq!(h.fs.copied().len(), 3);
+        assert_eq!(gate.waits.get(), 1);
+    }
+    #[test]
+    fn cancellation_while_source_waits_does_not_create_a_run_or_failure() {
+        let mut h = Harness::new(world(&[("a.jpg", 5)]));
+        let job = h.job(":FILENAME");
+        let gate = RecoveryTest {
+            source: false.into(),
+            target: true.into(),
+            waits: 0.into(),
+        };
+        let result = h.run_recovering(&[job], Some(&gate), |p, c| {
+            if p.state == ImportState::Waiting {
+                c.cancel();
+            }
+        });
+        assert_eq!(result.state, Some(ImportState::Cancelled));
+        assert!(result.run_ids.is_empty());
+        assert_eq!(result.counts.failed, 0);
+        assert_eq!(h.fs.copied().len(), 0);
+    }
+    #[test]
+    fn real_target_disconnect_preserves_buffer_and_rebinds_original_entity() {
+        use crate::import::fsops::{FsScanner, RepoFs};
+        use crate::import::sink::CatalogSink;
+        use crate::store::db::{CatalogDb, OpenOpts};
+        use crate::store::session::{CatalogSessions, TaskCatalog};
+        use std::sync::Arc;
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("source");
+        let root = dir.path().join("库");
+        let detached = dir.path().join("detached");
+        std::fs::create_dir(&source).unwrap();
+        std::fs::write(source.join("a.jpg"), [1u8, 2, 3]).unwrap();
+        std::fs::write(source.join("b.jpg"), [4u8, 5, 6]).unwrap();
+        let created = CatalogDb::create(&root, "库", None, OpenOpts::new(None, 0)).unwrap();
+        let id = created.meta().id.clone();
+        drop(created);
+        let sessions = CatalogSessions::default();
+        let db = sessions
+            .acquire(&id, || Ok(root.clone()), OpenOpts::new(None, 0))
+            .unwrap();
+        let task = Arc::new(TaskCatalog::new(db.clone()));
+        struct Gate<'a> {
+            task: &'a TaskCatalog,
+            sessions: &'a CatalogSessions,
+            root: &'a std::path::Path,
+            detached: &'a std::path::Path,
+            id: &'a str,
+            attempts: std::cell::Cell<usize>,
+        }
+        impl StorageRecovery for Gate<'_> {
+            fn source_ready(&self, _: &std::path::Path) -> bool {
+                true
+            }
+            fn target_ready(&self) -> bool {
+                let attempt = self.attempts.get();
+                self.attempts.set(attempt + 1);
+                if attempt == 0 {
+                    self.sessions.invalidate(self.id).unwrap();
+                    return false;
+                }
+                if self.detached.exists() {
+                    std::fs::rename(self.detached, self.root).unwrap();
+                }
+                self.sessions
+                    .acquire(self.id, || Ok(self.root.into()), OpenOpts::new(None, 0))
+                    .is_ok_and(|db| self.task.install(db).is_ok())
+            }
+            fn wait(&self) {}
+        }
+        let gate = Gate {
+            task: &task,
+            sessions: &sessions,
+            root: &root,
+            detached: &detached,
+            id: &id,
+            attempts: 0.into(),
+        };
+        let mut sink = CatalogSink::recovering(&db, &task, 0);
+        let ops = RepoFs::for_task(task.clone());
+        let scanner = FsScanner;
+        let control = Control::new();
+        let handle = BatchHandle::new(BatchProgress::new("real", 0));
+        let mut disconnected = false;
+        let mut waiting = false;
+        let mut events = |p: &BatchProgress| {
+            if p.imported == 1 && !disconnected {
+                std::fs::rename(&root, &detached).unwrap();
+                disconnected = true;
+            }
+            waiting |= p.state == ImportState::Waiting;
+        };
+        let mut thumbs = |_: &[String]| Ok(0);
+        let mut job = Harness::new(MemoryFs::new()).job(":FILENAME");
+        job.source_root = source;
+        let result = run_batch(
+            Deps {
+                sink: &mut sink,
+                ops: &ops,
+                scanner: &scanner,
+                control: &control,
+                handle: &handle,
+                on_progress: &mut events,
+                enqueue_thumbs: &mut thumbs,
+                recovery: Some(&gate),
+                now_ms: 0,
+                throttle: Duration::ZERO,
+            },
+            &[job],
+        );
+        assert!(waiting);
+        assert_eq!(result.state, Some(ImportState::Done));
+        assert_eq!(result.counts.imported, 2);
+        assert_eq!(result.counts.failed, 0);
+        assert_eq!(
+            task.current()
+                .read(
+                    |c| Ok(c.query_row("SELECT count(*) FROM asset_files", [], |r| r
+                        .get::<_, i64>(0))?)
+                )
+                .unwrap(),
+            2
+        );
+    }
     const TPL: &str = ":CYEAR-:CMONTH-:CDAY/MY:FILENAME";
 
     /* ══════════════════════════════════════════════════════════
      * 主流程
      * ══════════════════════════════════════════════════════════ */
+
+    #[test]
+    fn expired_session_stops_remaining_items_and_sources_but_retains_success() {
+        let mut h = Harness::new(world(&[("a.jpg", 5), ("b.jpg", 6)]));
+        let valid = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        h.sink.session_valid = Some(Arc::clone(&valid));
+        let mut next = h.job(TPL);
+        next.index = 1;
+        next.source_root = PathBuf::from("/next-source");
+        let outcome = h.run_with(&[h.job(TPL), next], |progress, _| {
+            if progress.imported == 1 {
+                valid.store(false, Ordering::Release);
+            }
+        });
+        assert_eq!(outcome.state, Some(ImportState::Failed));
+        assert_eq!(outcome.counts.imported, 1);
+        assert_eq!(h.fs.file_count(), 1);
+        assert_eq!(h.sink.runs.len(), 1);
+        assert_eq!(h.sink.item("a.jpg").status, "imported");
+        assert!(h.handle.snapshot().errors_total > 0);
+    }
 
     #[test]
     fn a_full_run_copies_registers_and_enqueues_thumbnails() {
@@ -1110,10 +1608,13 @@ mod tests {
         assert_eq!(outcome.state, Some(ImportState::Done));
         assert_eq!(outcome.counts.imported, 2);
         assert_eq!(outcome.counts.failed, 0);
-        assert_eq!(h.fs.paths(), vec![
-            "photos/2026-08-15/MYP0001.png",
-            "photos/2026-08-15/_RAW/MYP0001.ORF",
-        ]);
+        assert_eq!(
+            h.fs.paths(),
+            vec![
+                "photos/2026-08-15/MYP0001.png",
+                "photos/2026-08-15/_RAW/MYP0001.ORF",
+            ]
+        );
         // 落库：两条都是 imported
         assert_eq!(
             h.sink.statuses(),
@@ -1169,7 +1670,12 @@ mod tests {
         assert_eq!(outcome.state, Some(ImportState::Done), "有失败也要走到完成");
         assert_eq!(h.sink.item("bad.jpg").status, "failed");
         assert!(
-            h.sink.item("bad.jpg").reason.as_deref().unwrap_or_default().contains("读不了"),
+            h.sink
+                .item("bad.jpg")
+                .reason
+                .as_deref()
+                .unwrap_or_default()
+                .contains("读不了"),
             "{:?}",
             h.sink.item("bad.jpg").reason
         );
@@ -1266,12 +1772,12 @@ mod tests {
             h.fs.copied().is_empty() && h.fs.file_count() == 0,
             "取消在开工前 → 一个文件都不碰"
         );
+        assert_eq!(h.sink.runs.len(), 0, "连 run 都不开：库里不该留下空 run 行");
         assert_eq!(
-            h.sink.runs.len(),
-            0,
-            "连 run 都不开：库里不该留下空 run 行"
+            h.handle.snapshot().state,
+            ImportState::Cancelled,
+            "整批要显示成已取消"
         );
-        assert_eq!(h.handle.snapshot().state, ImportState::Cancelled, "整批要显示成已取消");
         assert_eq!(h.sink.commits, 0, "什么都没做，不该有提交");
     }
 
@@ -1297,14 +1803,20 @@ mod tests {
         });
         resumer.join().expect("恢复线程");
 
-        assert_eq!(outcome.state, Some(ImportState::Done), "暂停之后要能接着跑完");
+        assert_eq!(
+            outcome.state,
+            Some(ImportState::Done),
+            "暂停之后要能接着跑完"
+        );
         assert_eq!(outcome.counts.imported, 2);
         assert!(
             h.events.iter().any(|e| e.state == ImportState::Paused),
             "暂停要真的被宣布出去（不然界面看不到）"
         );
         assert!(
-            h.events.iter().any(|e| e.runs.iter().any(|r| r.state == ImportState::Paused)),
+            h.events
+                .iter()
+                .any(|e| e.runs.iter().any(|r| r.state == ImportState::Paused)),
             "run 级也要有暂停态"
         );
         assert_eq!(h.control.state(), ImportState::Running, "恢复后回到运行中");
@@ -1428,7 +1940,10 @@ mod tests {
         assert_eq!(h.sink.sources(), vec!["a.jpg"], "被排除的文件不该被登记");
         assert_eq!(outcome.counts.imported, 1);
         assert_eq!(outcome.counts.total, 1, "被排除的不计入 total");
-        assert_eq!(outcome.counts.skipped, 0, "排除不是「跳过」——它本来就不属于这批");
+        assert_eq!(
+            outcome.counts.skipped, 0,
+            "排除不是「跳过」——它本来就不属于这批"
+        );
         let snap = h.handle.snapshot();
         assert_eq!(snap.total, 1);
         assert_eq!(snap.runs[0].scanned, 1, "扫描计数也按剔除后的算");
@@ -1451,12 +1966,19 @@ mod tests {
         h.thumb_fails = true;
         let outcome = h.run(&[h.job(TPL)]);
 
-        assert_eq!(outcome.counts.imported, 1, "文件已经进库了，缩略图不该拖垮它");
+        assert_eq!(
+            outcome.counts.imported, 1,
+            "文件已经进库了，缩略图不该拖垮它"
+        );
         assert_eq!(outcome.state, Some(ImportState::Done));
         assert_eq!(h.sink.run(1).state, "done");
         let snap = h.handle.snapshot();
         assert!(
-            snap.runs[0].note.as_deref().unwrap_or_default().contains("缩略图"),
+            snap.runs[0]
+                .note
+                .as_deref()
+                .unwrap_or_default()
+                .contains("缩略图"),
             "{:?}",
             snap.runs[0].note
         );
@@ -1503,9 +2025,17 @@ mod tests {
         control.cancel();
         assert_eq!(control.state(), ImportState::Cancelling);
         control.pause();
-        assert_eq!(control.state(), ImportState::Cancelling, "取消之后暂停不生效");
+        assert_eq!(
+            control.state(),
+            ImportState::Cancelling,
+            "取消之后暂停不生效"
+        );
         control.resume();
-        assert_eq!(control.state(), ImportState::Cancelling, "取消之后恢复不生效");
+        assert_eq!(
+            control.state(),
+            ImportState::Cancelling,
+            "取消之后恢复不生效"
+        );
 
         let control = Control::new();
         control.pause();

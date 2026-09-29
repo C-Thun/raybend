@@ -97,6 +97,18 @@ pub fn delete_assets_with(
     root: &Path,
     ids: &[i64],
 ) -> Result<DeleteReport> {
+    delete_assets_checked(trasher, conn, root, ids, || Ok(()))
+}
+
+/// 每次文件操作及数据库清理前核对同一库会话。
+pub fn delete_assets_checked(
+    trasher: &dyn Trasher,
+    conn: &Connection,
+    root: &Path,
+    ids: &[i64],
+    check_session: impl Fn() -> Result<()>,
+) -> Result<DeleteReport> {
+    check_session()?;
     let mut report = DeleteReport::default();
     if ids.is_empty() {
         return Ok(report);
@@ -125,6 +137,7 @@ pub fn delete_assets_with(
     for plan in &plans {
         let mut all_moved = true;
         for rel in &plan.rel_paths {
+            check_session()?;
             let abs = root.join(rel);
             if !abs.exists() {
                 report.already_gone += 1;
@@ -147,6 +160,7 @@ pub fn delete_assets_with(
 
     // ③ 记录后走（asset_files / asset_tags 由外键级联）
     for id in &to_forget {
+        check_session()?;
         conn.execute("DELETE FROM assets WHERE id = ?1", [id])?;
         // 全文索引跟着清（删了照片还搜得到它是很怪的）
         crate::store::fts::refresh_asset(conn, *id)?;

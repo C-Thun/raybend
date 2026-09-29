@@ -109,6 +109,8 @@ export interface BrowseApi {
 
 export interface BrowseDeps {
   api: BrowseApi;
+  /** 当前库写能力来自 App 的共享状态；测试可省略。 */
+  canWrite?: (repositoryId: string) => boolean;
   /**
    * 补读几个文件的展示元信息（宽高）—— **只在库里没这两列时才用**。
    *
@@ -140,6 +142,7 @@ export const EMPTY_UNDO_STATE: UndoState = {
 };
 
 export interface BrowseStore {
+  canWrite: () => boolean;
   // ── 查询 ──
   repositoryId(): string | null;
   /** 查询范围（**库内相对路径**，如 `photos/2026-08-15`）。
@@ -708,10 +711,11 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
     }
   };
 
+  const canWrite = (): boolean => { const id = repositoryId(); return id !== null && (deps.canWrite?.(id) ?? true); };
   const mark = async (action: MarkAction): Promise<MarkResult | null> => {
     const id = repositoryId();
     const ids = selectedIds();
-    if (id === null || ids.length === 0) return null;
+    if (id === null || ids.length === 0 || !canWrite()) return null;
     const result = await api.mark(id, ids, action);
     rememberUndo(result);
     // 打完标要把这批照片的新状态读回来（三态控件显示的就是它）
@@ -875,13 +879,14 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
     },
 
     markings,
+    canWrite,
     refreshMarkings,
     async mark(action) {
       return rememberUndo(await mark(action));
     },
     async undo() {
       const id = repositoryId();
-      if (id === null) return null;
+      if (id === null || !canWrite()) return null;
       const result = await api.undo(id);
       await reload(); // 撤销改的是库里的值，最稳的是重新取一遍
       // 撤销可能动的是**编辑栈**（显影参数也是撤销栈里的一步）—— 通知编辑器重读
@@ -890,7 +895,7 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
     },
     async redo() {
       const id = repositoryId();
-      if (id === null) return null;
+      if (id === null || !canWrite()) return null;
       const result = await api.redo(id);
       await reload();
       setUndoTick((current) => current + 1);
@@ -899,7 +904,7 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
     async removeSelected() {
       const id = repositoryId();
       const ids = selectedIds();
-      if (id === null || ids.length === 0) return null;
+      if (id === null || ids.length === 0 || !canWrite()) return null;
       const result = await api.remove(id, ids);
       setSelection(clearSelection());
       await reload();

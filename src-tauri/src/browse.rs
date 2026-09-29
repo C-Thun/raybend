@@ -13,8 +13,9 @@
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
+use raybend::store::availability::{self, Availability, ConnectionStatus, ProbeBudget, Snapshots};
 use raybend::store::db::{CatalogDb, OpenOpts};
 use raybend::store::delete::DeleteReport;
 use raybend::store::flags::{Flag, FlagKey, FlagSet};
@@ -26,7 +27,7 @@ use raybend::store::repository;
 use raybend::store::tags;
 use raybend::store::time;
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, Runtime};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 use crate::db::DbState;
 use crate::source::blocking;
@@ -37,52 +38,168 @@ pub struct BrowseState {
     undo: Mutex<HashMap<String, UndoStack>>,
     flags: Mutex<FlagSet>,
     /// 当前打开的库（`CatalogDb` 自带连接池与写者线程，重开一次不便宜）。
-    open: Mutex<Option<OpenCatalog>>,
-    pub(crate) disk_sync: Mutex<()>,
-    pub(crate) live_watch: Mutex<Option<(String, PathBuf, raybend::media::watch::CatalogWatcher)>>,
-}
-
-struct OpenCatalog {
-    repository_id: String,
-    root: PathBuf,
-    db: CatalogDb,
+    pub(crate) sessions: raybend::store::session::CatalogSessions,
+    pub(crate) connections: Snapshots,
+    pub(crate) probes: ProbeBudget,
+    disk_sync: Mutex<HashMap<String, std::sync::Weak<Mutex<()>>>>,
+    pub(crate) live_watch:
+        Mutex<Option<(String, PathBuf, u64, raybend::media::watch::CatalogWatcher)>>,
 }
 
 impl BrowseState {
-    /// 借出当前库；`repository_id` 变了就换一个开。
-    ///
-    /// **为什么要缓存**：`CatalogDb::open` 要做迁移检查 + 开读池 + 起写者线程，
-    /// 一次十几毫秒。网格滚动时每个窗口都是一次查询 —— 每次重开一遍是白白浪费，
-    /// 而且会把写者线程翻来覆去地起停。
-    ///
-    /// 锁序（避免死锁的最重要一条）：**任何地方都先拿 `open`、再拿 `undo`**，
-    /// 绝不反过来。
+    /// 同库所有工作流共享租约，固定根目录；I/O 与退场不持 app.db/全局锁。
+    pub(crate) fn lease<R: Runtime>(
+        &self,
+        app: &AppHandle<R>,
+        id: &str,
+    ) -> Result<Arc<CatalogDb>, String> {
+        if self.sessions.is_released(id) { return Err(raybend::Error::RepositoryReleased.to_string()); }
+        let before = self.connections.get(id).revision;
+        let result = self.acquire_session(app, id);
+        match result {
+            Ok(db) => {
+                let current = self.connections.get(id);
+                if current.state != Availability::Online
+                    || current.generation != db.generation().to_string()
+                {
+                    let mut status = ConnectionStatus::unknown(id);
+                    status.state = Availability::Online;
+                    status.root = Some(db.root().to_string_lossy().into());
+                    status.generation = db.generation().to_string();
+                    self.publish(app, status);
+                }
+                Ok(db)
+            }
+            Err(error) => {
+                if self
+                    .publish_if(app, ConnectionStatus::failed(id, &error), Some(&before))
+                    .is_some()
+                {
+                    self.clear_watch(id);
+                }
+                Err(error.to_string())
+            }
+        }
+    }
+    pub(crate) fn acquire_session<R: Runtime>(
+        &self,
+        app: &AppHandle<R>,
+        id: &str,
+    ) -> raybend::Result<Arc<CatalogDb>> {
+        let backups = crate::db::data_dir(app)
+            .map_err(raybend::Error::Unsupported)?
+            .join(raybend::store::db::BACKUPS_DIR);
+        self.sessions.acquire(
+            id,
+            || {
+                let paths = app
+                    .state::<DbState>()
+                    .with(app, |db| {
+                        db.read(|conn| repository::registered_paths(conn, id))
+                            .map_err(|e| e.to_string())
+                    })
+                    .map_err(raybend::Error::Unsupported)?;
+                let preferred = app.state::<DbState>().with(app, |db| db.get_setting_json::<availability::PreferredLocation>(&availability::preference_key(id)).map_err(|e|e.to_string())).map_err(raybend::Error::Unsupported)?;
+                availability::resolve_preferred(id, &paths, preferred.as_ref())
+            },
+            OpenOpts::new(Some(&backups), time::now_millis()),
+        )
+    }
+    pub(crate) fn publish<R: Runtime>(&self, app: &AppHandle<R>, status: ConnectionStatus) {
+        self.publish_if(app, status, None);
+    }
+    pub(crate) fn publish_if<R: Runtime>(
+        &self,
+        app: &AppHandle<R>,
+        status: ConnectionStatus,
+        revision: Option<&str>,
+    ) -> Option<ConnectionStatus> {
+        match self.connections.publish_if(status, revision) {
+            Ok(Some(status)) => {
+                if let Err(e) = app.emit("repository://connection", &status) {
+                    eprintln!("[repository] 状态事件失败：{e}");
+                }
+                Some(status)
+            }
+            Ok(None) => None,
+            Err(e) => {
+                eprintln!("[repository] 状态代次失败：{e}");
+                None
+            }
+        }
+    }
+    pub(crate) fn disk_gate(&self, id: &str) -> Arc<Mutex<()>> {
+        let mut gates = self
+            .disk_sync
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        gates.retain(|_, gate| gate.strong_count() > 0);
+        if let Some(gate) = gates.get(id).and_then(std::sync::Weak::upgrade) {
+            return gate;
+        }
+        let gate = Arc::new(Mutex::new(()));
+        gates.insert(id.into(), Arc::downgrade(&gate));
+        gate
+    }
+    pub(crate) fn clear_watch(&self, id: &str) {
+        let retired = {
+            let mut watcher = self
+                .live_watch
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if watcher.as_ref().is_some_and(|(repo, _, _, _)| repo == id) {
+                watcher.take()
+            } else {
+                None
+            }
+        };
+        drop(retired);
+    }
+    pub(crate) fn observe_session<R: Runtime>(&self, app: &AppHandle<R>, db: &CatalogDb) {
+        if self.sessions.is_released(&db.meta().id) { return; }
+        if let Err(error) = db.ensure_current() {
+            let id = &db.meta().id;
+            // 旧任务迟到失败不能使新连接再次离线。
+            let observed = self.connections.get(id);
+            if observed.generation == db.generation().to_string() {
+                let mut status = db
+                    .connection_failure()
+                    .unwrap_or_else(|| ConnectionStatus::failed(id, &error));
+                status.generation = db.generation().to_string();
+                if self
+                    .publish_if(app, status, Some(&observed.revision))
+                    .is_some()
+                {
+                    self.clear_watch(id);
+                }
+            }
+        }
+    }
+    /// 按登记位置识别读图任务，释放后不可把库照片退回普通来源绕过屏障。
+    pub(crate) fn path_task<R: Runtime>(&self, app: &AppHandle<R>, path: &std::path::Path) -> Result<Option<raybend::store::session::TaskPermit>, String> {
+        use raybend::store::path_semantics::PathForms;
+        let wanted=PathForms::new(path.to_string_lossy().as_ref());
+        let rows=app.state::<DbState>().with(app,|db|db.list_repositories().map_err(|e|e.to_string()))?;
+        for row in rows {
+            if row.paths.iter().any(|position| { let root=PathForms::new(&position.path); wanted.folded()==root.folded() || wanted.folded().starts_with(&format!("{}/",root.folded().trim_end_matches('/'))) }) {
+                let permit=self.sessions.begin_task(&row.id).map_err(|e|e.to_string())?;
+                self.lease(app,&row.id)?;
+                return Ok(Some(permit));
+            }
+        }
+        Ok(None)
+    }
     pub(crate) fn with_catalog<R: Runtime, T>(
         &self,
         app: &AppHandle<R>,
-        repository_id: &str,
+        id: &str,
         f: impl FnOnce(&CatalogDb) -> Result<T, String>,
     ) -> Result<T, String> {
-        let mut guard = self.open.lock().map_err(|_| "内部锁已损坏".to_string())?;
-        let root = resolve_root(app, repository_id)?;
-        let stale = guard.as_ref().is_none_or(|open| {
-            open.repository_id != repository_id || open.root != root || !open.root.is_dir()
-        });
-        if stale {
-            // 先放掉旧库（让它的写者线程收摊），再开新的
-            *guard = None;
-            *self.live_watch.lock().map_err(|e| e.to_string())? = None;
-            let backups = crate::db::data_dir(app)?.join(raybend::store::db::BACKUPS_DIR);
-            let db = CatalogDb::open(&root, OpenOpts::new(Some(&backups), time::now_millis()))
-                .map_err(|e| e.to_string())?;
-            *guard = Some(OpenCatalog {
-                repository_id: repository_id.to_string(),
-                root,
-                db,
-            });
-        }
-        let open = guard.as_ref().ok_or_else(|| "库未打开".to_string())?;
-        f(&open.db)
+        let _permit = self.sessions.begin_task(id).map_err(|e|e.to_string())?;
+        let db = self.lease(app, id)?;
+        let result = f(&db);
+        self.observe_session(app, &db);
+        result
     }
 
     /// 撤销栈的入口（`open` 之后才会拿它）。
@@ -97,25 +214,13 @@ impl BrowseState {
     }
 }
 
-/// 打开库需要的 root：先从 `app.db` 解析出在线路径。
-///
-/// `pub(crate)`：编辑器要拿库根拼绝对路径（`develop::develop_edit_target`），
-/// 而它**不能**在 `with_catalog` 里调（那把 `open` 锁正被持着 —— 会死锁）。
+/// 通过已验证会话取得库根。一次操作同时使用 DB 与根时，应从同一租约取值。
 pub(crate) fn resolve_root<R: Runtime>(
     app: &AppHandle<R>,
     repository_id: &str,
 ) -> Result<PathBuf, String> {
-    let state = app.state::<DbState>();
-    state.with(app, |db| {
-        db.resolve_repository(repository_id)
-            .map_err(|e| e.to_string())
-            .and_then(|resolved| match resolved {
-                repository::RepositoryState::Online { root } => Ok(root),
-                repository::RepositoryState::Offline { .. } => {
-                    Err(format!("库「{repository_id}」当前离线"))
-                }
-            })
-    })
+    let db = app.state::<BrowseState>().lease(app, repository_id)?;
+    Ok(db.root().to_path_buf())
 }
 
 // ─────────────────────────── 输入 DTO ───────────────────────────
@@ -1013,12 +1118,20 @@ pub async fn browse_delete<R: Runtime>(
     let handle = app.clone();
     blocking(move || {
         let state = handle.state::<BrowseState>();
-        let report = state.with_catalog(&handle, &repository_id, move |db| {
-            let root = db.root().to_path_buf();
-            db.write_tx(move |conn| raybend::store::delete::delete_assets(conn, &root, &ids))
-                .map_err(|e| e.to_string())
-        })?;
-        Ok(DeleteResult::from(report))
+        let catalog = state.lease(&handle, &repository_id)?;
+        let root = catalog.root().to_path_buf();
+        let guard = Arc::clone(&catalog);
+        let report = catalog.write_tx(move |conn| {
+            raybend::store::delete::delete_assets_checked(
+                &raybend::store::delete::SystemTrash,
+                conn,
+                &root,
+                &ids,
+                || guard.ensure_current(),
+            )
+        });
+        state.observe_session(&handle, &catalog);
+        report.map(DeleteResult::from).map_err(|e| e.to_string())
     })
     .await
 }

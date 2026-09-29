@@ -12,8 +12,7 @@
  *
  * 三条规则（都在 `memory/FUNCTION-REPOSITORY.md` §2 / §5 里）：
  *   * **一个库可能有多条路径**：卡片显示**当前在线的那条**；离线时显示上次已知路径 + 徽标；
- *   * **在线时那一格是齿轮**（开库设置）、**离线时是离线图标**（点它 = 对所有登记路径
- *     重新查找一次，找不到不是错误）—— **一律图标化，不写「离线」二字**（人类 2026-09-16）；
+ *   * 行尾齿轮始终可开设置；左侧连接图标可对登记路径重查，状态不增加卡片行；
  *   * **照片数读不到时显示「—」而不是 0** —— 0 会让用户以为库是空的。
  */
 
@@ -42,6 +41,8 @@ export interface RepositoryListProps {
   remountErrors?: Record<string, RemountError>;
   onSelect: (id: string) => void;
   onRemount: (id: string) => void;
+  onOpenSettings?: (id: string) => void;
+  isRemounting?: (id: string) => boolean;
   /** 模版保存成功后通知外面（列表拿到的是缓存的模版，要重新读一遍） */
   onTemplateSaved?: (id: string, template: string) => void;
   /** 库设置里发现这个库读不到了 → 交给中央状态降级（所有界面同步） */
@@ -55,7 +56,7 @@ export interface RepositoryListProps {
 
 export function RepositoryList(props: RepositoryListProps) {
   const locale = (): GroupingLocale => props.locale ?? "zh-CN";
-  /** 正在看设置的库（`null` = 没开）；对话框由列表自己持有，调用方不必管 */
+  /** 陈列室独立使用的回退入口；生产工作区通过 onOpenSettings 进入 App 同一弹窗。 */
   const [settingsId, setSettingsId] = createSignal<string | null>(null);
   /** 正在看设置的那个库**当前的状态行**（中央状态里那一份，不是副本） */
   const repository = (): RepositoryView | undefined =>
@@ -101,13 +102,14 @@ export function RepositoryList(props: RepositoryListProps) {
                   displayPath={repository.displayPath}
                   photosCount={repository.photosCount}
                   online={repository.online}
+                  connection={repository.connection}
                   selected={repository.id === props.selectedId}
-                  remounting={props.remountingId === repository.id}
+                  remounting={props.isRemounting?.(repository.id) ?? props.remountingId === repository.id}
                   remountError={props.remountErrors?.[repository.id] ?? null}
                   locale={locale()}
                   onSelect={() => props.onSelect(repository.id)}
                   onRemount={() => props.onRemount(repository.id)}
-                  onOpenSettings={() => setSettingsId(repository.id)}
+                  onOpenSettings={() => props.onOpenSettings ? props.onOpenSettings(repository.id) : setSettingsId(repository.id)}
                 />
               )}
             </For>

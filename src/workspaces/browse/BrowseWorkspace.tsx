@@ -32,12 +32,10 @@ import {
 import {
   getThumbBytes,
   getViewImage,
-  listRepositories,
   readFileExif,
-  remountRepository,
   onCatalogChanged,
 } from "../../api/db.ts";
-import type { RepositoryView } from "../../api/types.ts";
+import type { RepositoryStateStore } from "../../features/repositories/state.ts";
 import {
   AssetInfo,
   BrowseLeftColumn,
@@ -97,6 +95,7 @@ import type { BrowseSort, DeleteFailure } from "../../api/types.ts";
 export interface BrowseWorkspaceProps {
   onExternalEditor?: (target:import("../../lib/external-editor.ts").ExternalTarget)=>void;
   store: BrowseStore;
+  repositories: RepositoryStateStore;
   selectedMetadata: SelectedFileMetadata;
   /**
    * 点库卡片上的齿轮 → 打开**库设置**。
@@ -160,11 +159,9 @@ function ColumnHandle(props: {
 
 export function BrowseWorkspace(props: BrowseWorkspaceProps) {
   const store = props.store;
-  const [repositories, setRepositories] = createSignal<RepositoryView[]>([]);
-  /** 还在读库列表；用来把「还没读到」与「真的没有库」分开显示。 */
-  const [reposLoading, setReposLoading] = createSignal(true);
-  /** 读库列表失败时的原因（不再是静默空态）。 */
-  const [reposError, setReposError] = createSignal<string | null>(null);
+  const repositories = props.repositories.list;
+  const reposLoading = () => props.repositories.status() === "loading" || props.repositories.status() === "idle";
+  const reposError = props.repositories.error;
   /*
    * 「按时间」与格子尺寸档位走 browse 自己的设备级偏好（`lib/display-prefs.ts`）：
    * 与 import 复用同一套迁移/持久化实现，但两边的值互相隔离并可跨会话还原。
@@ -270,10 +267,15 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
       return bytes ?? null;
     },
   });
-  createEffect(() => {
-    if (root() === null) return;
-    thumbs.clear();
+  const displaySession = createMemo(() => {
+    const row = props.repositories.byId(store.repositoryId() ?? "");
+    return row?.online ? `${row.id}:${row.connection?.generation ?? "0"}` : null;
   });
+  createEffect(on(displaySession, session => {
+    if (session === null) return;
+    thumbs.clear();
+    if (viewer.current()) viewer.reloadCurrent();
+  }));
   onCleanup(() => thumbs.clear());
   const [issueLibrary, setIssueLibrary] = createSignal<IssueLibrary | null>(null);
   const [issueBusy, setIssueBusy] = createSignal(false);
@@ -533,61 +535,22 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
     void store.refresh();
   });
 
-  onMount(() => {
-    void (async () => {
-      try {
-        const list = await listRepositories();
-        setRepositories(list);
-        // 第一次进来：默认选最近打开的库（没有就选第一个在线的）
-        if (store.repositoryId() === null && list.length > 0) {
-          const preferred =
-            list.find((r) => r.online && r.lastOpenedAt !== null) ??
-            list.find((r) => r.online) ??
-            list[0];
-          store.setRepository(preferred.id);
-        }
-      } catch (error) {
-        // 拿不到库列表不该让工作区崩掉；但**不能装作「你没有库」** —— 把原因显示在左列。
-        // 同时打一条控制台：只上界面、日志里查不到，排障时只能靠人转述一句文案。
-        // 这是**控制台诊断**，不走语言包（`memory/DESIGN.md` §11.1 的豁免项：终端/控制台输出）。
-        console.error("[browse] 读库列表失败", error); // i18n-exempt: 控制台诊断，不是界面文案
-        setRepositories([]);
-        setReposError(error instanceof Error ? error.message : String(error));
-      } finally {
-        setReposLoading(false);
-      }
-    })();
-  });
-
-  /** 重新读一次库列表（重挂载、重建、改模版之后都会调它）。 */
-  async function refreshRepositories(): Promise<void> {
-    try {
-      setRepositories(await listRepositories());
-    } catch (error) {
-      console.error("[browse] 重读库列表失败", error); // i18n-exempt: 控制台诊断，不是界面文案
+  onMount(() => { void props.repositories.load().then(() => {
+    const list = repositories();
+    if (store.repositoryId() === null && list.length > 0) {
+      const preferred = list.find(r => r.online && r.lastOpenedAt !== null) ?? list.find(r => r.online) ?? list[0];
+      store.setRepository(preferred.id);
     }
-  }
-
-  /**
-   * 点离线图标：对登记过的路径重新找一遍（与导入侧同一套语义）。
-   * 找不到**不是错误** —— 列表照旧显示离线徽标。
-   *
-   * ⚠️ 名字别叫 `remountRepository`（与上面 import 进来的那个**同名会自己调自己**，
-   * 类型还会退化成 `void`）—— 这类影子错误编译期只说「类型不匹配」，很难一眼看出。
-   */
-  async function remountLibrary(id: string): Promise<void> {
-    try {
-      const updated = await remountRepository(id);
-      setRepositories((prev) => prev.map((repo) => (repo.id === id ? updated : repo)));
-    } catch (error) {
-      console.error("[browse] 重挂载失败", error); // i18n-exempt: 控制台诊断
-      await refreshRepositories();
-    }
-  }
+  }); });
+  const refreshRepositories = props.repositories.load;
+  const remountLibrary = props.repositories.remount;
 
   /** 库根目录（库内相对路径 → 绝对路径） */
   const root = createMemo(
-    () => repositories().find((r) => r.id === store.repositoryId())?.root ?? null,
+    () => {
+      const id = store.repositoryId(); repositories();
+      return id === null ? null : props.repositories.lastVerifiedRoot(id);
+    },
   );
   createEffect(() => {
     const item = store.anchorItem();
@@ -596,7 +559,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
     props.selectedMetadata.select(path, item === null ? null : assetItemExif(item));
     // 组合 tile 展示的是位图；若它缺镜头等拍摄字段，用同一资产的 RAW 补足
     // FlowBar 的内存信息。RAW 路径由现有后端解析，不在前端猜 `_RAW` 目录。
-    if (path === null || item === null || !item.hasRaw || item.isRaw) return;
+    if (path === null || item === null || !item.hasRaw || item.isRaw || !store.canWrite()) return;
     const repositoryId = store.repositoryId();
     if (repositoryId === null) return;
     let cancelled = false;
@@ -723,6 +686,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
             onCollapseLibs={() => setLibsExpanded(false)}
             onOpenSettings={(id) => props.onOpenLibrarySettings?.(id)}
             onRemount={(id) => void remountLibrary(id)}
+            isRemounting={props.repositories.isRemounting}
           />
         </aside>
 

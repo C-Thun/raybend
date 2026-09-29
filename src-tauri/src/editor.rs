@@ -599,6 +599,7 @@ struct TransitionSource {
 /// 它是个普通线程，够不着数据库。
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct TransitionPlan {
+    _permit: Option<Arc<raybend::store::session::TaskPermit>>,
     sources: Vec<TransitionSource>,
     /// **原图尺寸**（已按方向摆正）—— 过渡帧的逻辑尺寸。
     ///
@@ -643,6 +644,7 @@ struct DevelopJob {
 
 /// 显影线程手里缓存的**线性源**（一张照片一份，含按档位缩好的预览副本）。
 struct CachedSource {
+    storage: Option<raybend::store::session::TaskAccess>,
     reference: ReferenceCache,
     sooc: Option<std::path::PathBuf>,
     source_revision: u64,
@@ -1079,7 +1081,15 @@ pub async fn editor_set_photo<R: Runtime>(
         Some(path) => {
             let handle = app.clone();
             let path = path.to_string();
-            crate::source::blocking(move || Ok(transition_plan(&handle, &path))).await?
+            crate::source::blocking(move || {
+                let permit=handle.state::<crate::browse::BrowseState>().path_task(&handle,Path::new(&path))?;
+                let mut plan=transition_plan(&handle,&path);
+                if let Some(permit)=permit {
+                    let saved=plan.get_or_insert_with(||TransitionPlan{_permit:None,sources:Vec::new(),source_size:None,sooc:None});
+                    saved._permit=Some(Arc::new(permit));
+                }
+                Ok(plan)
+            }).await?
         }
         None => None,
     };
@@ -1187,6 +1197,7 @@ fn transition_plan<R: Runtime>(app: &AppHandle<R>, path: &str) -> Option<Transit
         .map(|meta| (meta.width, meta.height));
 
     Some(TransitionPlan {
+        _permit: None,
         sources,
         source_size,
         sooc: sooc.filter(|path| path.is_file()),
@@ -2797,6 +2808,12 @@ fn run_develop_job(
     high: &mut HighDenoise,
 ) -> Option<DevelopOutcome> {
     // ① 需要的话先解码线性源（换照片 / 上一张解失败过）
+    let access = job.transition.as_ref().and_then(|plan| plan._permit.as_ref().map(|permit|permit.access()))
+        .or_else(||cached.as_ref().and_then(|source|source.storage.clone()));
+    let _permit = match access.as_ref().map(|access|access.enter()).transpose() {
+        Ok(permit) => permit,
+        Err(_) => return None,
+    };
     let mut decode_ms = None;
     let mut origin = "bitmap".to_string();
     let signature = wanted_photo.as_deref().and_then(|path| {
@@ -2854,6 +2871,7 @@ fn run_develop_job(
                 let as_shot_temperature = source.as_shot_temperature;
                 origin = source.origin.clone();
                 *cached = Some(CachedSource {
+                    storage: access,
                     reference: ReferenceCache::default(),
                     sooc: job
                         .transition
@@ -3420,6 +3438,7 @@ mod tests {
     /// 一份只有一个候选的过渡帧计划（写测试用）。
     fn plan(path: &str, kind: TransitionKind, origin: &'static str) -> TransitionPlan {
         TransitionPlan {
+            _permit: None,
             sources: vec![TransitionSource {
                 path: std::path::PathBuf::from(path),
                 kind,
@@ -3512,6 +3531,7 @@ mod tests {
         image::RgbImage::new(64, 48).save(&sooc).expect("写假 SOOC");
 
         let plan = TransitionPlan {
+            _permit: None,
             sources: vec![
                 TransitionSource {
                     path: sooc,
@@ -3672,6 +3692,7 @@ mod tests {
         std::fs::write(&junk, b"not an avif").expect("写垃圾");
         let missing = dir.path().join("missing.avif");
         let plan = TransitionPlan {
+            _permit: None,
             sources: vec![
                 TransitionSource {
                     path: missing,
@@ -3709,6 +3730,7 @@ mod tests {
         std::fs::write(&cached, &bytes).expect("写缓存");
 
         let plan = TransitionPlan {
+            _permit: None,
             sources: vec![TransitionSource {
                 path: cached,
                 kind: TransitionKind::AvifCache,

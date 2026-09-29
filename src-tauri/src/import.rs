@@ -20,21 +20,21 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use raybend::import::fsops::{FsScanner, RepoFs};
-use raybend::import::progress::{BatchHandle, BatchProgress, ImportState};
-use raybend::import::runner::{run_batch, Control, Deps, RunRequest};
+use raybend::import::progress::{BatchHandle, BatchProgress};
+use raybend::import::runner::{Control, Deps, RunRequest, run_batch};
 use raybend::import::sink::CatalogSink;
 use raybend::import::space;
 use raybend::import::template;
 use raybend::media::scan::Cancel;
-use raybend::store::db::{CatalogDb, OpenOpts, BACKUPS_DIR};
-use raybend::store::repository::{self, RepositoryState};
+use raybend::store::db::CatalogDb;
+use raybend::store::repository;
 use raybend::store::time;
-use raybend::thumbnail::worker::{enqueue_many, ThumbJob};
 use raybend::thumbnail::SizeClass;
+use raybend::thumbnail::worker::{ThumbJob, enqueue_many};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
-use crate::db::{data_dir, DbState};
+use crate::db::DbState;
 
 /// 进度事件名（前端 `listen` 的就是它）。
 pub const PROGRESS_EVENT: &str = "import://progress";
@@ -54,11 +54,35 @@ pub struct ImportBatches {
 struct Batch {
     handle: BatchHandle,
     control: Control,
+    repository_id: String,
 }
 
 impl ImportBatches {
+    pub(crate) fn cancel_repository(&self, id: &str) {
+        for batch in self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .values()
+        {
+            if batch.repository_id == id && !batch.handle.snapshot().state.is_final() {
+                batch.control.cancel();
+            }
+        }
+    }
+    pub(crate) fn unfinished_repository(&self, id: &str) -> bool {
+        self.inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .values()
+            .any(|batch| batch.repository_id == id && !batch.handle.snapshot().state.is_final())
+    }
     pub(crate) fn has_unfinished(&self) -> Result<bool, String> {
-        Ok(self.inner.lock().map_err(|_| "内部锁已损坏")?.values()
+        Ok(self
+            .inner
+            .lock()
+            .map_err(|_| "内部锁已损坏")?
+            .values()
             .any(|batch| !batch.handle.snapshot().state.is_final()))
     }
     fn insert(&self, batch_id: String, batch: Batch) {
@@ -95,10 +119,7 @@ impl ImportBatches {
     }
 
     fn control<T>(&self, batch_id: &str, f: impl FnOnce(&Control) -> T) -> Result<T, String> {
-        let guard = self
-            .inner
-            .lock()
-            .map_err(|_| "内部锁已损坏".to_string())?;
+        let guard = self.inner.lock().map_err(|_| "内部锁已损坏".to_string())?;
         let batch = guard
             .get(batch_id)
             .ok_or_else(|| format!("没有这个导入批次：{batch_id}"))?;
@@ -228,20 +249,37 @@ pub async fn import_start<R: Runtime>(
 
     let handle = app.clone();
     let repository_id_for_lookup = repository_id.clone();
-    let (root, template_source) = tauri::async_runtime::spawn_blocking(move || {
-        let root = resolve_root(&handle, &repository_id_for_lookup)?;
-        let now = time::now_millis();
-        let catalog = CatalogDb::open(&root, OpenOpts::new(backups_dir(&handle).as_deref(), now))
-            .map_err(|e| e.to_string())?;
-        // 模版从库里**现读**（刚在库设置里改过时也能拿到最新的）
-        let template = catalog.meta().import_template.clone();
-        Ok::<_, String>((root, template))
-    })
-    .await
-    .map_err(|e| format!("读取库信息失败：{e}"))??;
+    let source_paths: Vec<PathBuf> = sources
+        .iter()
+        .map(|source| PathBuf::from(&source.path))
+        .collect();
+    let (catalog, template_source, permit, identities) =
+        tauri::async_runtime::spawn_blocking(move || {
+            let browse = handle.state::<crate::browse::BrowseState>();
+            let permit = browse
+                .sessions
+                .begin_task(&repository_id_for_lookup)
+                .map_err(|e| e.to_string())?;
+            let catalog = browse.lease(&handle, &repository_id_for_lookup)?;
+            let template = catalog
+                .read(|conn| {
+                    Ok(repository::RepositoryMeta::read(conn, catalog.path())?.import_template)
+                })
+                .map_err(|e| e.to_string())?;
+            let identities = source_paths
+                .into_iter()
+                .map(|path| {
+                    let identity = raybend::store::session::SourceIdentity::capture(&path);
+                    (path, identity)
+                })
+                .collect();
+            Ok::<_, String>((catalog, template, permit, identities))
+        })
+        .await
+        .map_err(|e| format!("读取库信息失败：{e}"))??;
 
-    let parsed = template::parse(&template_source)
-        .map_err(|e| format!("这个库的导入模版有问题：{e}"))?;
+    let parsed =
+        template::parse(&template_source).map_err(|e| format!("这个库的导入模版有问题：{e}"))?;
 
     let batch_id = format!("b{}", time::now_millis());
     let progress = BatchProgress::new(batch_id.clone(), time::now_millis());
@@ -282,6 +320,7 @@ pub async fn import_start<R: Runtime>(
             Batch {
                 handle: batch_handle.clone(),
                 control: control.clone(),
+                repository_id: repository_id.clone(),
             },
         );
     }
@@ -289,13 +328,15 @@ pub async fn import_start<R: Runtime>(
     let app_for_thread = app.clone();
     let repository_id_for_thread = repository_id.clone();
     std::thread::spawn(move || {
+        let _permit = permit;
         run_import_thread(
             app_for_thread,
-            root,
+            catalog,
             repository_id_for_thread,
             jobs,
             batch_handle,
             control,
+            identities,
         );
     });
 
@@ -388,10 +429,9 @@ pub async fn import_interrupted<R: Runtime>(
 ) -> Result<Vec<InterruptedRunDto>, String> {
     let handle = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let root = resolve_root(&handle, &repository_id)?;
-        let now = time::now_millis();
-        let catalog = CatalogDb::open(&root, OpenOpts::new(backups_dir(&handle).as_deref(), now))
-            .map_err(|e| e.to_string())?;
+        let catalog = handle
+            .state::<crate::browse::BrowseState>()
+            .lease(&handle, &repository_id)?;
         catalog
             .read(|conn| {
                 let mut stmt = conn.prepare(
@@ -423,40 +463,66 @@ pub async fn import_interrupted<R: Runtime>(
  * 内部
  * ══════════════════════════════════════════════════════════════ */
 
+struct ImportRecovery<'a, R: Runtime> {
+    app: &'a AppHandle<R>,
+    repository: &'a str,
+    task: &'a raybend::store::session::TaskCatalog,
+    sources: HashMap<PathBuf, raybend::store::session::SourceIdentity>,
+}
+impl<R: Runtime> raybend::import::runner::StorageRecovery for ImportRecovery<'_, R> {
+    fn source_ready(&self, root: &std::path::Path) -> bool {
+        self.sources.get(root).is_some_and(|source| source.ready())
+    }
+    fn target_ready(&self) -> bool {
+        let old = self.task.current();
+        if old.ensure_current().is_ok() {
+            return true;
+        }
+        let browse = self.app.state::<crate::browse::BrowseState>();
+        browse.observe_session(self.app, &old);
+        let app = self.app.clone();
+        let id = self.repository.to_string();
+        let endpoint =
+            raybend::store::availability::endpoint_hint(old.root().to_string_lossy().as_ref());
+        browse
+            .probes
+            .run_endpoints(
+                self.repository,
+                &[endpoint],
+                raybend::store::availability::PROBE_WAIT,
+                move || {
+                    app.state::<crate::browse::BrowseState>()
+                        .acquire_session(&app, &id)
+                },
+            )
+            .is_ok_and(|result| result.is_ok_and(|next| self.task.install(next).is_ok()))
+    }
+}
+
 /// 导入线程：自己开一个 `catalog.db`，把注入点接好后跑完整批。
 ///
-/// **不能复用命令期的 `CatalogDb`**：那一份属于某次命令调用，
-/// 命令返回后就该释放；导入要活几分钟，得自己持有一份。
+/// 导入线程持有命令期取得的共享租约，固定根和代次，直到本批结束。
 fn run_import_thread<R: Runtime>(
     app: AppHandle<R>,
-    root: PathBuf,
+    catalog: std::sync::Arc<CatalogDb>,
     repository_id: String,
     jobs: Vec<RunRequest>,
     handle: BatchHandle,
     control: Control,
+    identities: HashMap<PathBuf, raybend::store::session::SourceIdentity>,
 ) {
     let now = time::now_millis();
-    let catalog = match CatalogDb::open(&root, OpenOpts::new(backups_dir(&app).as_deref(), now)) {
-        Ok(catalog) => catalog,
-        Err(error) => {
-            // 库打不开：整批判失败，并把原因写进快照（弹窗要能看到）
-            handle.with(|progress| {
-                progress.state = ImportState::Failed;
-                progress.finished_at = Some(time::now_millis());
-                progress.push_error(raybend::import::progress::ImportError {
-                    source: root.display().to_string(),
-                    target: None,
-                    reason: format!("打不开库：{error}"),
-                    status: "failed".to_string(),
-                });
-            });
-            let _ = app.emit(PROGRESS_EVENT, &handle.snapshot());
-            return;
-        }
+    let task = std::sync::Arc::new(raybend::store::session::TaskCatalog::new(
+        std::sync::Arc::clone(&catalog),
+    ));
+    let recovery = ImportRecovery {
+        app: &app,
+        repository: &repository_id,
+        task: &task,
+        sources: identities,
     };
-
-    let mut sink = CatalogSink::new(&catalog, now);
-    let ops = RepoFs::new(&root);
+    let mut sink = CatalogSink::recovering(&catalog, &task, now);
+    let ops = RepoFs::for_task(std::sync::Arc::clone(&task));
     let scanner = FsScanner;
 
     let mut on_progress = |progress: &BatchProgress| {
@@ -479,6 +545,7 @@ fn run_import_thread<R: Runtime>(
     };
 
     let deps = Deps {
+        recovery: Some(&recovery),
         sink: &mut sink,
         ops: &ops,
         scanner: &scanner,
@@ -500,7 +567,13 @@ fn run_import_thread<R: Runtime>(
      * 父目录去重）——模版是可变的、还可能带子目录透传，从结果反推永远比从参数正推准。
      * 每个目录一次 `readdir`（本目录 + `_RAW`），本地盘上是微秒级。
      */
-    refresh_directory_counts(&app, &repository_id, &root);
+    let current = task.current();
+    if current.ensure_current().is_ok() {
+        refresh_directory_counts(&app, &current);
+    }
+
+    app.state::<crate::browse::BrowseState>()
+        .observe_session(&app, &catalog);
 
     // 终态一定再发一条（节流不该让「已完成」这件事丢在路上）
     let _ = app.emit(PROGRESS_EVENT, &handle.snapshot());
@@ -517,20 +590,27 @@ fn run_import_thread<R: Runtime>(
 /// 多走一遍 `readdir` 树（本地盘、毫秒级）不值得为它省。
 ///
 /// 失败**不打扰用户**：导入本身已经成功了，计数只是展示数字；下次进目录的增量同步会补上。
-fn refresh_directory_counts<R: Runtime>(
-    app: &AppHandle<R>,
-    repository_id: &str,
-    root: &std::path::Path,
-) {
+fn refresh_directory_counts<R: Runtime>(app: &AppHandle<R>, original: &std::sync::Arc<CatalogDb>) {
     let now = time::now_millis();
-    let (id, root) = (repository_id.to_string(), root.to_path_buf());
+    let (id, root) = (original.meta().id.clone(), original.root().to_path_buf());
+    let catalog = std::sync::Arc::clone(original);
     let state = app.state::<DbState>();
-    let result = state.with(app, move |db| {
-        db.write(move |conn| {
-            repository::count_library_on_disk(conn, &id, &root, PHOTOS_DIR, now).map(|_| ())
+    let result = (|| {
+        catalog.ensure_current().map_err(|e| e.to_string())?;
+        let rows =
+            repository::scan_directory_counts(&root, PHOTOS_DIR).map_err(|e| e.to_string())?;
+        catalog.ensure_current().map_err(|e| e.to_string())?;
+        state.with(app, move |db| {
+            db.write_tx(move |tx| {
+                catalog.ensure_alive()?;
+                for (rel, counts) in rows {
+                    repository::set_directory_counts(tx, &id, &rel, counts, now)?;
+                }
+                Ok(())
+            })
+            .map_err(|e| e.to_string())
         })
-        .map_err(|error| error.to_string())
-    });
+    })();
     if let Err(error) = result {
         eprintln!("[raybend] 写目录计数失败：{error}");
     }
@@ -541,33 +621,5 @@ const PHOTOS_DIR: &str = "photos";
 
 /// 库根：离线库直接给一句人话。
 fn resolve_root<R: Runtime>(app: &AppHandle<R>, repository_id: &str) -> Result<PathBuf, String> {
-    let state = app.state::<DbState>();
-    state.with(app, |db| {
-        let resolved = db
-            .resolve_repository(repository_id)
-            .map_err(|e| e.to_string())?;
-        match resolved {
-            RepositoryState::Online { root } => Ok(root),
-            RepositoryState::Offline { tried } => {
-                // 离线时把库名带上（`RepositoryState` 只给了「试过几处」）
-                let name = db
-                    .list_repositories()
-                    .ok()
-                    .and_then(|rows| {
-                        rows.into_iter()
-                            .find(|row| row.id == repository_id)
-                            .map(|row| row.name)
-                    })
-                    .unwrap_or_else(|| repository_id.to_string());
-                Err(format!(
-                    "库「{name}」当前离线：登记过的 {tried} 个路径下都没有找到它"
-                ))
-            }
-        }
-    })
-}
-
-/// 迁移前快照的目录（`AGENTS.md` §6.4）。
-fn backups_dir<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
-    data_dir(app).ok().map(|dir| dir.join(BACKUPS_DIR))
+    crate::browse::resolve_root(app, repository_id)
 }

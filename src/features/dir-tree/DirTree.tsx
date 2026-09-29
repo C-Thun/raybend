@@ -24,7 +24,7 @@
  * 3. **子目录懒加载**：展开才读（读过的会记住，折叠再展开是秒开）。
  */
 
-import { createMemo, For, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, createMemo, on, For, onCleanup, onMount, Show } from "solid-js";
 import {
   IconAlertTriangle,
   IconCloud,
@@ -60,12 +60,15 @@ export interface DirTreeProps {
   /** 读子目录（默认走 `src/api/db.ts`；测试可注入） */
   loadDirs: (path: string) => Promise<DirEntry[]>;
   onRetry?: () => void;
+  sourceRevision?: number;
   class?: string;
 }
 
 export function DirTree(props: DirTreeProps) {
   // 树自己的状态（展开 / 已读子目录 / 加载与错误）—— 不进共享 store
   const tree = createDirTreeStore({ loadDirs: (path) => props.loadDirs(path) });
+
+  createEffect(on(() => props.sourceRevision, () => void tree.refreshAll(), { defer: true }));
 
   /*
    * 窗口重新获得焦点 → 把展开着的目录重读一遍。

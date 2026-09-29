@@ -19,6 +19,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { repositoryErrorKeys } from "../i18n/repository-feedback.ts";
 
 import type {
   AssetItem,
@@ -56,9 +57,11 @@ import type {
   RebuildProgress,
   RebuildReport,
   RepositoryPath,
+  RepositoryLocationError,
   RepositoryProbe,
   RepositorySettings,
   RepositoryView,
+  RepositoryConnection,
   TemplatePreview,
   SourceItem,
   SourceScan,
@@ -67,6 +70,10 @@ import type {
   TimelineEntry,
   Volume,
 } from "./types.ts";
+
+// 所有 IPC 位置错误均必须有文案；i18n/UI 无需反向依赖 api 的领域 DTO。
+const locationErrorCoverage: Record<RepositoryLocationError["code"], string> = repositoryErrorKeys;
+test("库位置错误码的文案完整", () => assert.ok(locationErrorCoverage.active_location));
 
 /* ══════════════════════════════════════════════════════════════
  * 键表 + 编译期覆盖检查
@@ -162,6 +169,7 @@ const FILE_EXIF_KEYS = [
   "width",
 ] as const satisfies readonly (keyof FileExif)[];
 const REPOSITORY_VIEW_KEYS = [
+  "connection",
   "createdAt",
   "displayPath",
   "id",
@@ -175,6 +183,7 @@ const REPOSITORY_VIEW_KEYS = [
   "root",
   "triedPaths",
 ] as const satisfies readonly (keyof RepositoryView)[];
+const REPOSITORY_CONNECTION_KEYS = ["generation", "observedAt", "reason", "repositoryId", "revision", "root", "state"] as const satisfies readonly (keyof RepositoryConnection)[];
 const REPOSITORY_PATH_KEYS = [
   "lastSeenAt",
   "path",
@@ -452,6 +461,8 @@ const KEY_TABLES = {
   TimeEntry: checkKeys<TimeEntry, typeof TIME_ENTRY_KEYS>(TIME_ENTRY_KEYS),
   PhotoCount: checkKeys<PhotoCount, typeof PHOTO_COUNT_KEYS>(PHOTO_COUNT_KEYS),
   FileExif: checkKeys<FileExif, typeof FILE_EXIF_KEYS>(FILE_EXIF_KEYS),
+  RepositoryConnection: checkKeys<RepositoryConnection, typeof REPOSITORY_CONNECTION_KEYS>(REPOSITORY_CONNECTION_KEYS),
+  RepositoryLocationError: checkKeys<RepositoryLocationError, readonly ["code"]>(["code"]),
   RepositoryView: checkKeys<RepositoryView, typeof REPOSITORY_VIEW_KEYS>(
     REPOSITORY_VIEW_KEYS,
   ),

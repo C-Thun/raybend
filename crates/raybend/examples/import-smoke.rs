@@ -170,6 +170,7 @@ fn run_once(
         Ok(paths.len())
     };
     let deps = Deps {
+        recovery: None,
         sink: &mut sink,
         ops: &ops,
         scanner: &scanner,

@@ -27,7 +27,6 @@ use raybend::store::develop::{
     self, AutoAdjustBaseline, DevelopStack, EditBase, IssueChoice, Setting,
 };
 use raybend::store::marking::{ChangeSet, Op};
-use raybend::store::repository::{self, RepositoryState};
 use raybend::store::time;
 
 use crate::browse::BrowseState;
@@ -164,23 +163,23 @@ pub struct ResolvedAsset {
 pub fn resolve_asset<R: Runtime>(app: &AppHandle<R>, path: &Path) -> Option<ResolvedAsset> {
     let app_db = app.state::<DbState>();
     let candidates = app_db
-        .with(app, |db| {
-            let rows = db
-                .read(repository::list_repositories)
-                .map_err(|e| e.to_string())?;
-            let mut out: Vec<(String, PathBuf)> = Vec::new();
-            for row in rows {
-                if let Ok(RepositoryState::Online { root }) =
-                    db.read(|conn| repository::resolve_repository(conn, &row.id))
-                {
-                    out.push((row.id.clone(), root));
-                }
-            }
-            Ok(out)
-        })
+        .with(app, |db| db.list_repositories().map_err(|e| e.to_string()))
         .ok()?;
+    for row in candidates {
+        // 只探测绝对路径实际落入的登记位置，避免看一张图扫所有库。
+        if !row
+            .paths
+            .iter()
+            .any(|p| path.starts_with(Path::new(&p.path)))
+        {
+            continue;
+        }
+        let Ok(catalog) = app.state::<BrowseState>().lease(app, &row.id) else {
+            continue;
+        };
+        let repository_id = row.id;
+        let root = catalog.root().to_path_buf();
 
-    for (repository_id, root) in candidates {
         let Ok(relative) = path.strip_prefix(&root) else {
             continue;
         };
@@ -188,13 +187,8 @@ pub fn resolve_asset<R: Runtime>(app: &AppHandle<R>, path: &Path) -> Option<Reso
         if rel_path.is_empty() {
             continue;
         }
-        let rel_for_query = rel_path.clone();
-        let browse = app.state::<BrowseState>();
-        let found = browse
-            .with_catalog(app, &repository_id, move |db| {
-                db.read(move |conn| assets::find_by_rel_path(conn, &rel_for_query))
-                    .map_err(|e| e.to_string())
-            })
+        let found = catalog
+            .read(|conn| assets::find_by_rel_path(conn, &rel_path))
             .ok()
             .flatten();
         if let Some(asset_id) = found {
@@ -299,10 +293,9 @@ pub async fn develop_edit_target<R: Runtime>(
     let base = parse_edit_base(base.as_deref())?;
     let handle = app.clone();
     blocking(move || {
-        // 先把库根解析出来（**不能**在 `with_catalog` 里做：那把锁正被持着）
-        let root = crate::browse::resolve_root(&handle, &repository_id)?;
         let state = handle.state::<BrowseState>();
         state.with_catalog(&handle, &repository_id, |db| {
+            let root = db.root().to_path_buf();
             let (rel, available) = db
                 .read(move |conn| {
                     let rel = develop::edit_target(conn, asset_id, base)?;

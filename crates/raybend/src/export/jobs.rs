@@ -32,6 +32,7 @@ pub enum Outcome {
     Done(String),
     FileExists(String),
     Skipped,
+    Waiting(String),
 }
 type Executor = dyn Fn(&Item) -> Result<Outcome, String> + Send + Sync;
 type Notify = dyn Fn(View) + Send + Sync;
@@ -40,6 +41,7 @@ struct State {
     view: View,
     active: BTreeSet<(u64, String)>,
     sequence: u64,
+    cancelled: BTreeSet<String>,
 }
 #[derive(Clone)]
 pub struct Engine {
@@ -140,7 +142,8 @@ impl Engine {
         self.change(|s| {
             for q in s.view.queues.values_mut() {
                 q.retain(|i| {
-                    !ids.contains(&i.id) || !matches!(i.status.as_str(), "pending" | "failed")
+                    !ids.contains(&i.id)
+                        || !matches!(i.status.as_str(), "pending" | "failed" | "waiting")
                 });
             }
             Ok(())
@@ -153,6 +156,44 @@ impl Engine {
                     if ids.contains(&i.id) && i.status == "failed" && i.output.is_none() {
                         i.status = "pending".into();
                         i.error = None;
+                    }
+                }
+            }
+            Ok(())
+        })
+    }
+    /// 存储事实变化后才重试等待项；不会重新开启用户已停止的预设。
+    pub fn wake(&self) -> Result<View, String> {
+        if !self
+            .view()
+            .queues
+            .values()
+            .flatten()
+            .any(|item| item.status == "waiting")
+        {
+            return Ok(self.view());
+        }
+        self.change(|s| {
+            for item in s.view.queues.values_mut().flatten() {
+                if item.status == "waiting" {
+                    item.status = "pending".into();
+                    item.error = None;
+                }
+            }
+            Ok(())
+        })
+    }
+    pub fn suspend_repository(&self, repository: &str) -> Result<View, String> {
+        self.change(|s| {
+            for item in s.view.queues.values_mut().flatten() {
+                if item.repository_id == repository
+                    && matches!(item.status.as_str(), "pending" | "waiting" | "running")
+                {
+                    if item.status == "running" {
+                        s.cancelled.insert(item.id.clone());
+                    } else {
+                        item.status = "failed".into();
+                        item.error = Some("storage.released".into());
                     }
                 }
             }
@@ -204,6 +245,13 @@ impl Engine {
                     let view = {
                         let mut s = engine.state.lock().unwrap();
                         s.active.remove(&(epoch, preset));
+                        let result = if s.cancelled.remove(&item.id)
+                            && !matches!(&result, Ok(Outcome::Done(_) | Outcome::FileExists(_)))
+                        {
+                            Err("storage.released".into())
+                        } else {
+                            result
+                        };
                         if s.view.generation == epoch {
                             if matches!(&result, Ok(Outcome::Skipped)) {
                                 // Invalid hashes leave no history, selection or dedup shadow.
@@ -227,6 +275,10 @@ impl Engine {
                                         saved.status = "skipped".into();
                                         saved.output = Some(path);
                                         saved.error = None;
+                                    }
+                                    Ok(Outcome::Waiting(reason)) => {
+                                        saved.status = "waiting".into();
+                                        saved.error = Some(reason);
                                     }
                                     Err(error) => {
                                         saved.status = "failed".into();
@@ -312,6 +364,41 @@ mod tests {
             assert!(start.elapsed() < Duration::from_secs(3));
             std::thread::yield_now();
         }
+    }
+    #[test]
+    fn waiting_releases_slot_and_stopped_queue_does_not_restart_when_storage_wakes() {
+        use std::sync::atomic::AtomicBool;
+        let ready = Arc::new(AtomicBool::new(false));
+        let captured = ready.clone();
+        let engine = Engine::new(
+            move |i| {
+                if i.snapshot.reference.asset_id == 1 && !captured.load(Ordering::SeqCst) {
+                    Ok(Outcome::Waiting("storage.wait.repository".into()))
+                } else {
+                    Ok(Outcome::Done("done.png".into()))
+                }
+            },
+            |_| {},
+        );
+        engine.enqueue(0, vec![item("p", 1), item("p", 2)]).unwrap();
+        engine.enable("p".into(), true).unwrap();
+        wait(&engine, |v| {
+            v.queues["p"].iter().any(|i| i.status == "waiting")
+                && v.queues["p"].iter().any(|i| i.status == "done")
+        });
+        engine.stop_all().unwrap();
+        ready.store(true, Ordering::SeqCst);
+        engine.wake().unwrap();
+        assert!(engine.view().enabled.is_empty());
+        assert!(
+            engine.view().queues["p"]
+                .iter()
+                .any(|i| i.status == "pending")
+        );
+        engine.enable("p".into(), true).unwrap();
+        wait(&engine, |v| {
+            v.queues["p"].iter().all(|i| i.status == "done")
+        });
     }
     #[test]
     fn existing_file_skip_is_terminal_deduplicated_and_not_hash_invalidation() {

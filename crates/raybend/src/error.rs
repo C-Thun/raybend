@@ -75,6 +75,33 @@ pub enum Error {
     #[error("数据库写线程已停止（程序内部错误）")]
     WriterGone,
 
+    #[error("库会话已失效，请重新连接库")]
+    SessionExpired,
+    #[error("库已释放，请明确重新连接")]
+    RepositoryReleased,
+    #[error("发现同一库的多个副本，请在库设置中选择使用位置")]
+    RepositoryCopies,
+    #[error("库还有未完成任务，不能切换位置")]
+    RepositoryBusy,
+
+    #[error("位置的库身份已变化，拒绝访问：{}", .0.display())]
+    RepositoryIdentityChanged(PathBuf),
+
+    #[error("库不能放在网络盘或云同步目录：{}", .0.display())]
+    UnsupportedCatalogLocation(PathBuf),
+
+    #[error("请选择有效的库根目录：{}", .0.display())]
+    InvalidRepositoryLocation(PathBuf),
+
+    #[error("这个库位置正在使用，不能移除登记：{}", .0.display())]
+    RepositoryPathInUse(PathBuf),
+
+    #[error("存储位置正在探测，请稍后重试")]
+    StorageProbeBusy,
+
+    #[error("存储位置探测尚未返回，请稍后重试")]
+    StorageProbeTimeout,
+
     /// 库当前处于离线状态（登记的路径下找不到它的 `catalog.db`）。
     #[error("库「{name}」当前离线：登记过的 {tried} 个路径下都没有找到它")]
     RepositoryOffline { name: String, tried: usize },

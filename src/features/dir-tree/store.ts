@@ -10,6 +10,7 @@
  */
 
 import { createSignal } from "solid-js";
+import { pathKey } from "../../lib/tree.ts";
 import type { DirEntry } from "../../api/types.ts";
 
 export interface DirTreeDeps {
@@ -50,18 +51,24 @@ export function createDirTreeStore(deps: DirTreeDeps): DirTreeStore {
 
   /** 正在飞的请求：合并同一个目录的并发展开（点两下不要再读一遍） */
   const inFlight = new Map<string, Promise<void>>();
+  const versions = new Map<string, number>();
+  const reread = new Set<string>();
+  const originalPaths = new Map<string, string>();
+  let refreshFlight: Promise<void> | null = null;
+  let refreshAgain = false;
 
-  const isExpanded = (path: string): boolean => expanded()[path] === true;
+  const isExpanded = (path: string): boolean => expanded()[pathKey(path)] === true;
   const childrenOf = (path: string): readonly DirEntry[] | undefined =>
-    children()[path];
-  const isLoading = (path: string): boolean => loading()[path] === true;
-  const errorOf = (path: string): string | undefined => errors()[path];
+    children()[pathKey(path)];
+  const isLoading = (path: string): boolean => loading()[pathKey(path)] === true;
+  const errorOf = (path: string): string | undefined => errors()[pathKey(path)];
 
   const setFlag = (
     setter: (updater: (prev: Record<string, true>) => Record<string, true>) => void,
     path: string,
     value: boolean,
   ): void => {
+    path = pathKey(path);
     setter((prev) => {
       if (value) return { ...prev, [path]: true };
       const next = { ...prev };
@@ -71,6 +78,7 @@ export function createDirTreeStore(deps: DirTreeDeps): DirTreeStore {
   };
 
   const clearError = (path: string): void => {
+    path = pathKey(path);
     setErrors((prev) => {
       if (!(path in prev)) return prev;
       const next = { ...prev };
@@ -79,20 +87,32 @@ export function createDirTreeStore(deps: DirTreeDeps): DirTreeStore {
     });
   };
 
-  async function load(path: string): Promise<void> {
-    setFlag(setLoading, path, true);
-    try {
-      const list = await deps.loadDirs(path);
-      setChildren((prev) => ({ ...prev, [path]: list }));
-      clearError(path);
-    } catch (error) {
-      setErrors((prev) => ({ ...prev, [path]: message(error) }));
-    } finally {
-      setFlag(setLoading, path, false);
-    }
+  function load(path: string, fresh = false): Promise<void> {
+    const key = pathKey(path);
+    if (fresh) { versions.set(key, (versions.get(key) ?? 0) + 1); if (inFlight.has(key)) reread.add(key); }
+    const existing = inFlight.get(key);
+    if (existing) return existing;
+    const task = (async () => {
+      setFlag(setLoading, key, true);
+      do {
+        reread.delete(key);
+        const token = versions.get(key) ?? 0;
+        try {
+          const list = await deps.loadDirs(path);
+          if (token !== (versions.get(key) ?? 0)) continue;
+          setChildren(prev => ({ ...prev, [key]: list })); clearError(key);
+        } catch (error) {
+          if (token === (versions.get(key) ?? 0)) setErrors(prev => ({ ...prev, [key]: message(error) }));
+        }
+      } while (reread.has(key));
+      setFlag(setLoading, key, false);
+    })().finally(() => inFlight.delete(key));
+    inFlight.set(key, task);
+    return task;
   }
 
   async function expand(path: string): Promise<void> {
+    originalPaths.set(pathKey(path), path);
     setFlag(setExpanded, path, true);
     /*
      * **展开就重读这一级**（只这一级的直接子目录，**不递归**）。
@@ -105,11 +125,7 @@ export function createDirTreeStore(deps: DirTreeDeps): DirTreeStore {
      * 重读期间**旧内容留着不动**（`load` 只在成功时覆盖）：熟悉的内容秒现，
      * 新数据到了悄悄替换；读失败也不会把已经看到的内容清空。
      */
-    const existing = inFlight.get(path);
-    if (existing) return existing;
-    const task = load(path).finally(() => inFlight.delete(path));
-    inFlight.set(path, task);
-    return task;
+    return load(path);
   }
 
   function collapse(path: string): void {
@@ -125,7 +141,7 @@ export function createDirTreeStore(deps: DirTreeDeps): DirTreeStore {
   }
 
   async function refresh(path: string): Promise<void> {
-    await load(path);
+    await load(path, true);
   }
 
   /**
@@ -139,9 +155,23 @@ export function createDirTreeStore(deps: DirTreeDeps): DirTreeStore {
    *   * **保留展开状态**：按刷新是为了看新内容，不是为了把树折叠回去；
    *   * **只刷展开着的**：没展开的分支用户看不到，刷它纯属白读磁盘。
    */
-  async function refreshAll(): Promise<void> {
-    const paths = Object.keys(expanded());
-    await Promise.all(paths.map((path) => load(path)));
+  function refreshAll(): Promise<void> {
+    refreshAgain = true;
+    if (refreshFlight) {
+      for (const key of Object.keys(expanded())) { versions.set(key, (versions.get(key) ?? 0) + 1); if (inFlight.has(key)) reread.add(key); }
+      return refreshFlight;
+    }
+    refreshFlight = (async () => {
+      while (refreshAgain) {
+        refreshAgain = false;
+        const paths = Object.keys(expanded()).map(key => originalPaths.get(key) ?? key);
+        let index = 0;
+        await Promise.all(Array.from({ length: Math.min(4, paths.length) }, async () => {
+          while (index < paths.length) await load(paths[index++]!, true);
+        }));
+      }
+    })().finally(() => { refreshFlight = null; });
+    return refreshFlight;
   }
 
   return {

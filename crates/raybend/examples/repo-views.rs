@@ -51,7 +51,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             continue;
         };
         let t = Instant::now();
-        let counted = repository::count_dir_on_disk(Path::new(root), "photos");
+        let counted = repository::count_dir_on_disk(Path::new(root), "photos")?;
         println!(
             "  `{}`：单独扫一遍 photos/ = {:?}，结果 相片 {} / 图片 {}",
             v.name,

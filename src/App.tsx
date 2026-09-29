@@ -35,7 +35,7 @@ import { Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { uiReady, tauriWindowHandle } from "./api/window.ts";
 import { openFullscreen } from "./api/fullscreen.ts";
 import { isTauriRuntime } from "./api/tauri-env.ts";
-import type { BrowseSort, DevelopEditBase } from "./api/types.ts";
+import type { BrowseSort, DevelopEditBase, Volume } from "./api/types.ts";
 import { t, timeoutMessage } from "./i18n/index.ts";
 import * as db from "./api/db.ts";
 import { createSelectedFileMetadata } from "./features/exif-strip/index.ts";
@@ -83,6 +83,8 @@ import {
   toggleImportTileInfo,
 } from "./components/ui/tile-info.ts";
 import { locale, nextLocale, setLocale } from "./i18n/index.ts";
+import { createRepositoryMonitor } from "./features/repositories/monitor.ts";
+import { createRepositoryState } from "./features/repositories/state.ts";
 import { LibrarySettingsDialog } from "./features/repositories/index.ts";
 import { browseDelete, browseFacets, browseMark, browseMarkings, browsePage, browseRedo, browseTimeline, browseUndo, flagsClear, flagsGet, flagsSet, tagList } from "./api/browse.ts";
 import { BrowseWorkspace } from "./workspaces/browse/index.ts";
@@ -102,6 +104,7 @@ import {
 import { readBrowseSession, writeBrowseSession } from "./lib/browse-session.ts";
 import { withTimeout } from "./lib/timeout.ts";
 import { createFilmStripPreferenceStore } from "./lib/film-strip-prefs.ts";
+import { IconExternalLink } from "@tabler/icons-solidjs";
 
 const STARTUP_REPOSITORIES_TIMEOUT_MS = 15_000;
 
@@ -120,10 +123,10 @@ function canvasBackground(): string {
 
 export default function App() {
   const shell = createShellStore();
-  const exportStore=createExportStore({getSetting:db.getSetting,setSetting:db.setSetting,variants:getExportVariants,snapshots:getExportSnapshots,validate:validateExportPreset,runtime:exportQueue,subscribe:onExportState});
+  const exportStore=createExportStore({repositoryAvailable:id=>repositories.byId(id)?.online===true,getSetting:db.getSetting,setSetting:db.setSetting,variants:getExportVariants,snapshots:getExportSnapshots,validate:validateExportPreset,runtime:exportQueue,subscribe:onExportState});
   onCleanup(()=>exportStore.dispose());
   const externalEditor=createExternalEditorStore({getSetting:db.getSetting,setSetting:db.setSetting,applications:externalApplications,task:externalTask,subscribe:onExternalTask,
-    snapshot:async target=>{const [captured]=await getExportSnapshots(target.repositoryId,[target.reference]);if(!captured)throw Error(t("export.error.incomplete"));return captured;}});
+    snapshot:async target=>{const [captured]=await getExportSnapshots(target.repositoryId,[target.reference]);if(!captured)throw new Error(t("export.error.incomplete"));return captured;}});
   onCleanup(externalEditor.dispose);
   /*
    * 编辑工作区的界面状态（档位 / LUT 面板 / 三个工具 / 参数草稿）。
@@ -139,7 +142,7 @@ export default function App() {
     editorActions()?.commitDevelop();
   };
   /** 编辑里有没有可编辑的照片（工具与右栏控件的可用性都看它） */
-  const editorEnabled = (): boolean => browseStore.anchorItem() !== null;
+  const editorEnabled = (): boolean => browseStore.anchorItem() !== null && repositories.byId(browseStore.repositoryId() ?? "")?.online === true;
   const appearance = createAppearanceStore();
   // 布局偏好（设备级）：左列宽度与左列内部的比例，拖拽结束落盘、下次启动还原
   const layout = createLayoutStore();
@@ -166,7 +169,12 @@ export default function App() {
    * 比例本来就是**初始值**（Ark 只在首次渲染用它），所以读一次就够。
    */
   const initialLayout = layout.prefs();
-  const importStore = createImportStore({ api: db });
+  const repositories = createRepositoryState({ api: db });
+  onCleanup(repositories.dispose);
+  const volumeObservers = new Set<(rows: Volume[]) => void>();
+  const importStore = createImportStore({ api: { ...db, listVolumes: () => repositoryMonitor.listVolumes() }, repositories,
+    observeVolumes: handler => { volumeObservers.add(handler); return () => volumeObservers.delete(handler); },
+  });
   const grid = createPhotoGridStore({ api: db });
   /*
    * 浏览工作区的状态（`features/browse/store.ts`）。
@@ -177,6 +185,7 @@ export default function App() {
    * 见 `BrowseWorkspace` 的 `onMount`。
    */
   const browseStore = createBrowseStore({
+    canWrite: id => repositories.byId(id)?.online ?? false,
     /*
      * 补读元信息的口子：老库里 `assets.width/height` 可能是 NULL（2026-09-18 之前的导入
      * 不写 EXIF），那批照片的 tile 比例与对比尺寸都靠它兜底。
@@ -222,6 +231,23 @@ export default function App() {
     onCleanup(() => { liveDisposed = true; off?.(); window.removeEventListener("focus", focus); liveRefresh.dispose(); });
   });
 
+  const repositoryMonitor = createRepositoryMonitor({ repositories, listVolumes: db.listVolumes, subscribe: db.onRepositoryConnection,
+    onVolumes: rows => { for (const handler of volumeObservers) handler(rows); void exportQueue("wake").catch(() => {}); },
+    onRecovery: id => { if (id === browseStore.repositoryId()) void liveRefresh.request(id); },
+  });
+  const repositoriesReady = repositoryMonitor.start();
+  onCleanup(repositoryMonitor.dispose);
+  onMount(() => {
+    const focus = () => repositoryMonitor.request();
+    window.addEventListener("focus", focus);
+    onCleanup(() => window.removeEventListener("focus", focus));
+  });
+  createEffect(() => {
+    shell.workflow();
+    const id = shell.workflow() === "import" ? importStore.selectedRepositoryId() : browseStore.repositoryId();
+    if (id !== null) repositoryMonitor.request([id]);
+  });
+
   /*
    * 启动落点（人类 2026-09-20）：只要登记过库就进 browse；完全没有库才进 import。
    * 选库优先级 = 上次会话明确记录 → `lastOpenedAt` 最新 → 列表第一项；目录只在库也匹配时恢复。
@@ -233,7 +259,7 @@ export default function App() {
   const closeWelcome = () => { acknowledgeWelcome(); setWelcomeOpen(false); };
   const [startupResolved, setStartupResolved] = createSignal(false);
   const startupReady = withTimeout(
-    db.listRepositories(),
+    repositoriesReady.then(() => repositories.list()),
     STARTUP_REPOSITORIES_TIMEOUT_MS,
     timeoutMessage("startup.timeout.repositories", STARTUP_REPOSITORIES_TIMEOUT_MS),
   )
@@ -331,13 +357,13 @@ export default function App() {
    */
   const [tagsOpen, setTagsOpen] = createSignal(false);
   /**
-   * 库设置弹窗（齿轮）：**导入侧与浏览侧共用同一个弹窗**，由组装层持有。
-   *
-   * 为什么放这里：导入侧的齿轮长在 `RepositoryList` 里（那边自己持有弹窗），
-   * 而浏览侧的库卡片在 `BrowseLeftColumn` 里 —— 两个工作区都放一份弹窗状态就是两份真相。
-   * 浏览侧从这里开；导入侧维持原样（它还要把「模版已保存」回写给列表）。
+   * 所有工作流的齿轮与库命令都进入这一份根层库设置弹窗。
+   * 位置、连接与模版变更回到 repositories 中央状态，卡片与面板随之同步。
    */
   const [librarySettingsId, setLibrarySettingsId] = createSignal<string | null>(null);
+  const [locateRequest, setLocateRequest] = createSignal(0);
+  const [releaseRequest, setReleaseRequest] = createSignal(0);
+  const activeRepositoryId = () => shell.workflow() === "import" ? importStore.selectedRepositoryId() : browseStore.repositoryId();
   /**
    * 提示通道（`components/ui/Toast.tsx`）：挂在**根层** —— 模态/条带都有自己的层叠上下文，
    * 提示要永远在最上面（`--z-toast`），所以由组装层建、往下传。
@@ -421,8 +447,17 @@ export default function App() {
     openUpdates: () => setUpdatesOpen(true),
     openTags: () => setTagsOpen(true),
     openLibrarySettings: () => {
-      const id = browseStore.repositoryId();
+      const id = activeRepositoryId();
       if (id !== null) setLibrarySettingsId(id);
+    },
+    repository: {
+      canRelease: () => { const id=activeRepositoryId(); return id !== null && !["released","releasing"].includes(repositories.byId(id)?.connection?.state ?? ""); },
+      release: () => { const id=activeRepositoryId(); if (id !== null) { setLibrarySettingsId(id); setReleaseRequest(value=>value+1); } },
+      canSettings: () => activeRepositoryId() !== null,
+      canLocate: () => { const id = activeRepositoryId(); return id !== null && !repositories.isChangingLocation(id); },
+      locate: () => { const id = activeRepositoryId(); if (id !== null) { setLibrarySettingsId(id); setLocateRequest(value => value + 1); } },
+      canReconnect: () => { const id = shell.workflow() === "import" ? importStore.selectedRepositoryId() : browseStore.repositoryId(); return id !== null && repositories.byId(id)?.online !== true && !repositories.isRemounting(id); },
+      reconnect: () => { const id = shell.workflow() === "import" ? importStore.selectedRepositoryId() : browseStore.repositoryId(); if (id !== null) void repositories.remount(id); },
     },
     openNewRepository: () => setNewRepositoryRequest((count) => count + 1),
     display: {
@@ -454,9 +489,9 @@ export default function App() {
       repositoryId: browseStore.repositoryId,
       undo: () => void browseStore.undo(),
       redo: () => void browseStore.redo(),
-      canUndo: () => browseStore.undoState().canUndo,
-      canRedo: () => browseStore.undoState().canRedo,
-      hasSelection: () => browseStore.selectedCount() > 0,
+      canUndo: () => browseStore.canWrite() && browseStore.undoState().canUndo,
+      canRedo: () => browseStore.canWrite() && browseStore.undoState().canRedo,
+      hasSelection: () => browseStore.canWrite() && browseStore.selectedCount() > 0,
       selectedCount: browseStore.selectedCount,
       selectAll: () => browseStore.selectAll(),
       clearSelection: () => browseStore.clearSelection(),
@@ -591,7 +626,7 @@ export default function App() {
           onRequestReset={() => editorActions()?.resetDevelop()}
           canReset={() => editorActions()?.canReset() ?? false}
           canFinalize={() => editorActions()?.canFinalize() ?? false}
-          onFinalize={() => editorActions()?.finalize()} />}><ExportStopTool store={exportStore}/></Show>}><Button data-browse-external-editor size="sm" variant="ghost" disabled={!(browseActions()?.canExternalEditor()??false)} onClick={()=>browseActions()?.externalEditor()}>{t("external.title")}</Button></Show>}
+          onFinalize={() => editorActions()?.finalize()} />}><ExportStopTool store={exportStore}/></Show>}><Button data-browse-external-editor variant="ghost" icon={<IconExternalLink size={14} />} disabled={!(browseActions()?.canExternalEditor()??false)} onClick={()=>browseActions()?.externalEditor()}>{t("external.title")}</Button></Show>}
       >
         {/* 浏览模式的工具（标记系列 / 筛选开关 / 锁）由那个模块自己给 —— 见 ToolsBar 的说明 */}
         <Show when={shell.workflow() === "browse"}>
@@ -599,6 +634,7 @@ export default function App() {
             store={browseStore}
             toast={toast}
             onOpenTags={() => setTagsOpen(true)}
+            onDelete={() => browseActions()?.requestDelete()}
           />
         </Show>
         {/* 编辑模式的 mid：画布工具、编辑源、历史动作在同一行整体居中。 */}
@@ -649,11 +685,18 @@ export default function App() {
       <LibrarySettingsDialog
         open={librarySettingsId() !== null}
         repositoryId={librarySettingsId()}
+        repository={repositories.byId(librarySettingsId() ?? "")}
+        repositories={repositories}
+        locateRequest={locateRequest()}
+        releaseRequest={releaseRequest()}
+        onStale={id => void repositories.remount(id, true)}
         toast={toast}
         onOpenChange={(open) => {
           if (!open) setLibrarySettingsId(null);
         }}
-        onSaved={() => {
+        onSaved={(template) => {
+          const id = librarySettingsId();
+          if (id !== null) repositories.patch(id, { importTemplate: template });
           // 改了模版：库列表那份缓存也要跟着刷新（它显示的是模版与计数）
           void browseStore.reload();
         }}
@@ -693,6 +736,7 @@ export default function App() {
           store={importStore}
           grid={grid}
           toast={toast}
+          onOpenLibrarySettings={id => setLibrarySettingsId(id)}
           onRevealInLibrary={() => shell.setWorkflow("browse")}
           leftRatio={initialLayout.leftRatio}
           onLeftRatioChange={layout.setLeftRatio}
@@ -702,7 +746,7 @@ export default function App() {
           onFilmStripStepChange={(step) => filmStripPrefs.setStep("import", step)}
           /* 命令面板里的「新建库…」靠它打开导入侧的弹窗（状态住在那个工作区） */
           openCreateRequest={newRepositoryRequest()}
-        />}><ExportWorkspace store={exportStore} browse={browseStore} selectedMetadata={selectedMetadata} leftWidth={layout.prefs().browseLeftWidth} onLeftWidthChange={width=>layout.setBrowseLeftWidth(width)} onOpenLibrarySettings={id=>setLibrarySettingsId(id)}/></Show>
+        />}><ExportWorkspace repositories={repositories} store={exportStore} browse={browseStore} selectedMetadata={selectedMetadata} leftWidth={layout.prefs().browseLeftWidth} onLeftWidthChange={width=>layout.setBrowseLeftWidth(width)} onOpenLibrarySettings={id=>setLibrarySettingsId(id)}/></Show>
         }>
           {/*
             编辑工作区（M3-W1）：中列的视口在 W2 才会出图；
@@ -721,6 +765,7 @@ export default function App() {
         <BrowseWorkspace
           onExternalEditor={target=>void externalEditor.show(target)}
           store={browseStore}
+          repositories={repositories}
           selectedMetadata={selectedMetadata}
           onOpenLibrarySettings={(id) => setLibrarySettingsId(id)}
           toast={toast}

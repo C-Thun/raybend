@@ -138,6 +138,7 @@ export interface PhotoGridStore {
   /** 切换到某个来源目录（`null` = 清空） */
   setSourceDir: (dir: string | null) => void;
   reload: () => void;
+  refreshSource: (available: boolean) => void;
 
   /* ── 展示偏好 ─────────────────────────── */
   tileStep: () => number;
@@ -371,11 +372,15 @@ export function createPhotoGridStore(deps: PhotoGridDeps): PhotoGridStore {
     });
     if (files.length === 0) return;
 
+    const token = generation;
     try {
       const metas = await deps.api.dirMetaEnsure(current, files);
+      if (token !== generation) return;
       setPhotoMeta((prev) => {
         const merged = new Map(prev);
-        missing.forEach((path, index) => {
+        files.forEach((file, index) => {
+          const path = items().find(item => item.fileName === file.relative)?.path;
+          if (path === undefined) return;
           const meta = metas[index];
           if (meta !== undefined) merged.set(path, meta);
         });
@@ -444,6 +449,24 @@ export function createPhotoGridStore(deps: PhotoGridDeps): PhotoGridStore {
       return;
     }
     void load(next);
+  };
+
+  let refreshFlight: Promise<void> | null = null;
+  let refreshAgain = false;
+  const refreshSource = (available: boolean): void => {
+    const current = dir();
+    if (current === null) return;
+    generation += 1;
+    setLoadingTimes(false);
+    setError(null);
+    refreshAgain = available;
+    if (!available) { setStatus(items().length ? "ready" : "idle"); return; }
+    if (refreshFlight) return;
+    thumbs.clear();
+    refreshFlight = (async () => {
+      do { refreshAgain = false; await load(current); }
+      while (refreshAgain && dir() === current);
+    })().finally(() => { refreshFlight = null; });
   };
 
   const reload = (): void => {
@@ -585,6 +608,7 @@ export function createPhotoGridStore(deps: PhotoGridDeps): PhotoGridStore {
     problems,
     setSourceDir,
     reload,
+    refreshSource,
 
     tileStep,
     setTileStep,

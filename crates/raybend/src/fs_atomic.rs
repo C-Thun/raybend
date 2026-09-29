@@ -53,7 +53,7 @@ fn write_impl(path: &Path, bytes: &[u8], no_replace: bool) -> Result<()> {
 /// removable filesystems without hard links. Unix hard-link publication retains
 /// the no-overwrite primitive used by the existing implementation.
 #[cfg(windows)]
-fn publish_new(temp: &Path, target: &Path) -> std::io::Result<()> {
+pub(crate) fn publish_new(temp: &Path, target: &Path) -> std::io::Result<()> {
     use std::os::windows::ffi::OsStrExt;
     let temp: Vec<_> = temp.as_os_str().encode_wide().chain(Some(0)).collect();
     let target: Vec<_> = target.as_os_str().encode_wide().chain(Some(0)).collect();
@@ -68,7 +68,7 @@ fn publish_new(temp: &Path, target: &Path) -> std::io::Result<()> {
     }
 }
 #[cfg(not(windows))]
-fn publish_new(temp: &Path, target: &Path) -> std::io::Result<()> {
+pub(crate) fn publish_new(temp: &Path, target: &Path) -> std::io::Result<()> {
     std::fs::hard_link(temp, target)?;
     let _ = std::fs::remove_file(temp);
     Ok(())

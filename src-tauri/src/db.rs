@@ -11,7 +11,7 @@
 //! schema 版本对得上、设置在重启后还在。
 
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use raybend::store::db::AppDb;
 use raybend::store::location;
@@ -21,7 +21,8 @@ use tauri::{AppHandle, Manager, Runtime, State};
 /// `app.db` 的持有者（延迟打开；打开失败时保持 `None` 并把错误交给调用方）。
 #[derive(Default)]
 pub struct DbState {
-    inner: Mutex<Option<AppDb>>,
+    inner: Mutex<Option<Arc<AppDb>>>,
+    opening: Mutex<()>,
 }
 
 impl DbState {
@@ -33,11 +34,23 @@ impl DbState {
                 return Ok(());
             }
         }
+        let _opening = self
+            .opening
+            .lock()
+            .map_err(|_| "内部锁已损坏".to_string())?;
+        if self
+            .inner
+            .lock()
+            .map_err(|_| "内部锁已损坏".to_string())?
+            .is_some()
+        {
+            return Ok(());
+        }
         let path = data_dir(app)?;
         let db =
             AppDb::open(&path, raybend::store::time::now_millis()).map_err(|e| e.to_string())?;
         let mut guard = self.inner.lock().map_err(|_| "内部锁已损坏".to_string())?;
-        *guard = Some(db);
+        *guard = Some(Arc::new(db));
         Ok(())
     }
 
@@ -49,8 +62,12 @@ impl DbState {
     ) -> Result<T, String> {
         self.get_or_open(app)?;
         let guard = self.inner.lock().map_err(|_| "内部锁已损坏".to_string())?;
-        let db = guard.as_ref().ok_or_else(|| "数据库尚未打开".to_string())?;
-        f(db)
+        let db = guard
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| "数据库尚未打开".to_string())?;
+        drop(guard);
+        f(&db)
     }
 }
 

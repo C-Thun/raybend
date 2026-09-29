@@ -173,8 +173,25 @@ export interface RepositoryPath {
   lastSeenAt: number | null;
 }
 
+export type RepositoryAvailability = "unknown" | "checking" | "online" | "offline" | "unavailable" | "releasing" | "released";
+export type RepositoryUnavailableReason = "multiple_locations" | "identity_mismatch" | "access_denied" | "read_only" | "catalog_invalid" | "io_failure" | "storage_full" | "connection_lost" | "schema_too_new" | "migration_failed" | "timeout" | "unsupported_location" | "busy";
+export interface RepositoryLocationError {
+  code: RepositoryUnavailableReason | "invalid_path" | "active_location" | "not_found";
+}
+export interface RepositoryConnection {
+  repositoryId: string;
+  state: RepositoryAvailability;
+  reason: RepositoryUnavailableReason | null;
+  root: string | null;
+  generation: string;
+  revision: string;
+  observedAt: number;
+}
+
 /** 一个库（右列的库卡片）。 */
 export interface RepositoryView {
+  /** 生产 IPC 必带；旧测试/浏览器样本允许省略。online 由此派生。 */
+  connection?: RepositoryConnection;
   id: string;
   name: string;
   importTemplate: string | null;
@@ -234,6 +251,7 @@ export type ImportStage = "scan" | "plan" | "import" | "thumbs" | "done";
 
 /** 整批状态。`cancelled` / `done` / `failed` 是终态。 */
 export type ImportState =
+  | "waiting"
   | "running"
   | "pausing"
   | "paused"

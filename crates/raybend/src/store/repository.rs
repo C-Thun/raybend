@@ -209,7 +209,7 @@ impl RepositoryState {
 }
 
 /// 在 `app.db` 里查这个库登记过哪些路径（折叠形式，用于存在性判断）。
-fn registered_paths(conn: &Connection, repository_id: &str) -> Result<Vec<String>> {
+pub fn registered_paths(conn: &Connection, repository_id: &str) -> Result<Vec<String>> {
     let mut stmt = conn.prepare(
         "SELECT path FROM repository_paths WHERE repository_id = ?1 ORDER BY last_seen_at DESC NULLS LAST, path",
     )?;
@@ -223,27 +223,24 @@ fn registered_paths(conn: &Connection, repository_id: &str) -> Result<Vec<String
 /// 不是路径字符串。
 #[must_use]
 pub fn path_holds_repository(root: &Path, repository_id: &str) -> bool {
-    let catalog = root.join(CATALOG_FILE_NAME);
-    if !catalog.is_file() {
-        return false;
-    }
-    read_repository_meta(&catalog).is_ok_and(|m| m.id == repository_id)
+    super::availability::resolve_paths(repository_id, &[root.to_string_lossy().into_owned()])
+        .is_ok()
 }
 
 /// 解析一个库当前在不在线（`memory/FUNCTION-REPOSITORY.md` §2.2）。
 ///
 /// 从**最近见过的路径开始**依次探测；都不在 → 离线。
-/// 调用方（界面层）可以缓存结果；这里每次都真查，保证正确性。
+/// 旧二态 API 的适配器。生产入口使用 availability 的具体原因与会话闸门，
+/// 本方法不另实现探测，也不缓存在线结论。
 pub fn resolve_repository(conn: &Connection, repository_id: &str) -> Result<RepositoryState> {
     let paths = registered_paths(conn, repository_id)?;
     let tried = paths.len();
-    for p in paths {
-        let root = PathBuf::from(&p);
-        if path_holds_repository(&root, repository_id) {
-            return Ok(RepositoryState::Online { root });
-        }
-    }
-    Ok(RepositoryState::Offline { tried })
+    Ok(
+        match super::availability::resolve_paths(repository_id, &paths) {
+            Ok(root) => RepositoryState::Online { root },
+            Err(_) => RepositoryState::Offline { tried },
+        },
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -317,6 +314,48 @@ pub fn add_repository_path(
         params![repository_id, forms.raw(), forms.folded(), now_ms],
     )?;
     Ok(())
+}
+
+/// 定位只能识别同库，绝不走创建/迁移；在 app.db 锁与事务外调用。
+pub fn validate_alternate_location(id: &str, root: &Path) -> Result<RepositoryMeta> {
+    if id.is_empty() || !root.is_absolute() || root.as_os_str().is_empty() {
+        return Err(Error::InvalidRepositoryLocation(root.into()));
+    }
+    super::location::require_catalog_location(root)?;
+    match std::fs::metadata(root) {
+        Ok(meta) if !meta.is_dir() => return Err(Error::InvalidRepositoryLocation(root.into())),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Err(Error::PathNotFound(root.into()));
+        }
+        Err(error) => return Err(error.into()),
+        _ => {}
+    }
+    super::availability::resolve_paths(id, &[root.to_string_lossy().into_owned()])?;
+    // resolve 后的第二次实际读取仍核对身份，位置中途替换不能进入登记。
+    let meta = read_repository_meta(&root.join(CATALOG_FILE_NAME))?;
+    if meta.id != id {
+        return Err(Error::RepositoryIdentityChanged(root.into()));
+    }
+    Ok(meta)
+}
+
+/// 只移除 app.db 的位置登记。active_root 必须在会话锁内取得并保持到事务结束。
+pub fn remove_repository_path(
+    conn: &Connection,
+    id: &str,
+    path: &str,
+    active_root: Option<&Path>,
+) -> Result<bool> {
+    let folded = PathForms::new(path).folded().to_owned();
+    if active_root
+        .is_some_and(|root| PathForms::new(root.to_string_lossy().as_ref()).folded() == folded)
+    {
+        return Err(Error::RepositoryPathInUse(PathBuf::from(path)));
+    }
+    Ok(conn.execute(
+        "DELETE FROM repository_paths WHERE repository_id = ?1 AND path_folded = ?2",
+        params![id, folded],
+    )? > 0)
 }
 
 /// 更新某条路径的探测状态。
@@ -485,43 +524,74 @@ fn is_photo_file(name: &str) -> bool {
 
 /// **从磁盘数一个目录**：本目录 + 本目录下的 `_RAW`。
 ///
-/// * 目录不存在（还没导入过东西）→ 全 0，**不是错误**；
-/// * 读不了的条目跳过（权限/坏链接）—— 计数是展示用的数字，不该因为一个怪文件就报错。
-pub fn count_dir_on_disk(root: &Path, rel_path: &str) -> Counts {
-    let dir = if rel_path.is_empty() {
-        root.to_path_buf()
-    } else {
-        root.join(rel_path.replace('/', std::path::MAIN_SEPARATOR_STR))
-    };
+/// 目录不存在/任一条目读取失败均返回错误，调用方保留上次计数；
+/// 只有完整读完的空目录才返回 0。
+pub fn count_dir_on_disk(root: &Path, rel_path: &str) -> Result<Counts> {
+    let dir = root.join(rel_path.replace('/', std::path::MAIN_SEPARATOR_STR));
     let mut counts = Counts::default();
-    if let Ok(entries) = std::fs::read_dir(&dir) {
-        for entry in entries.flatten() {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            if name == RAW_DIR_NAME {
-                continue; // `_RAW` 由下面的单独一轮统计（它的文件**不算相片**）
-            }
-            if is_photo_file(&name) {
-                counts.photos += 1;
-                counts.images += 1;
-            }
+    for entry in std::fs::read_dir(&dir)? {
+        let entry = entry?;
+        if entry.file_type()?.is_file() && is_photo_file(&entry.file_name().to_string_lossy()) {
+            counts.photos = counts
+                .photos
+                .checked_add(1)
+                .ok_or_else(|| Error::Unsupported("计数溢出".into()))?;
+            counts.images = counts
+                .images
+                .checked_add(1)
+                .ok_or_else(|| Error::Unsupported("计数溢出".into()))?;
         }
     }
     let raw = dir.join(RAW_DIR_NAME);
-    if let Ok(entries) = std::fs::read_dir(&raw) {
-        for entry in entries.flatten() {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            if is_photo_file(&name) {
-                counts.images += 1;
+    match std::fs::read_dir(raw) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e.into()),
+        Ok(entries) => {
+            for entry in entries {
+                let entry = entry?;
+                if entry.file_type()?.is_file()
+                    && is_photo_file(&entry.file_name().to_string_lossy())
+                {
+                    counts.images = counts
+                        .images
+                        .checked_add(1)
+                        .ok_or_else(|| Error::Unsupported("计数溢出".into()))?;
+                }
             }
         }
     }
-    counts
+    Ok(counts)
 }
 
-/// 把**整个库**（`photos/` 之下）按目录数一遍 —— 老库还没有目录行时用它建立第一版。
-///
-/// 每个「含照片的目录」写一行；`_RAW` 不算目录（它的文件计入它父目录的 `images`）。
-/// 返回汇总值。
+/// 完整收集后才落计数；任一目录读取失败均保留最后成功值。
+/// 单次最多 100000 个目录、64 层，超限明确拒绝发布部分统计。
+pub fn scan_directory_counts(root: &Path, photos_dir: &str) -> Result<Vec<(String, Counts)>> {
+    let mut pending = vec![(photos_dir.to_string(), 0usize)];
+    let mut result = Vec::new();
+    while let Some((rel, depth)) = pending.pop() {
+        if depth > 64 || result.len() + pending.len() >= 100_000 {
+            return Err(Error::Unsupported("计数扫描超出范围，保留原计数".into()));
+        }
+        let dir = root.join(&rel);
+        for entry in std::fs::read_dir(&dir)? {
+            let entry = entry?;
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name != RAW_DIR_NAME && !name.starts_with('.') && entry.file_type()?.is_dir() {
+                pending.push((
+                    if rel.is_empty() {
+                        name
+                    } else {
+                        format!("{rel}/{name}")
+                    },
+                    depth + 1,
+                ));
+            }
+        }
+        result.push((rel.clone(), count_dir_on_disk(root, &rel)?));
+    }
+    Ok(result)
+}
+
 pub fn count_library_on_disk(
     conn: &Connection,
     repository_id: &str,
@@ -529,46 +599,20 @@ pub fn count_library_on_disk(
     photos_dir: &str,
     now_ms: i64,
 ) -> Result<Counts> {
-    let base = if photos_dir.is_empty() {
-        root.to_path_buf()
-    } else {
-        root.join(photos_dir)
-    };
-    let mut dirs: Vec<String> = Vec::new();
-    collect_dirs(&base, photos_dir, &mut dirs);
+    let rows = scan_directory_counts(root, photos_dir)?;
     let mut total = Counts::default();
-    for rel in dirs {
-        let counts = count_dir_on_disk(root, &rel);
+    for (rel, counts) in rows {
         set_directory_counts(conn, repository_id, &rel, counts, now_ms)?;
-        total.photos += counts.photos;
-        total.images += counts.images;
+        total.photos = total
+            .photos
+            .checked_add(counts.photos)
+            .ok_or_else(|| Error::Unsupported("计数溢出".into()))?;
+        total.images = total
+            .images
+            .checked_add(counts.images)
+            .ok_or_else(|| Error::Unsupported("计数溢出".into()))?;
     }
     Ok(total)
-}
-
-/// 递归收集 `photos/` 之下的目录（含 `photos/` 本身；**不含** `_RAW` ——
-/// 它的内容计入父目录的 `images`）。
-fn collect_dirs(dir: &Path, rel: &str, out: &mut Vec<String>) {
-    out.push(rel.to_string());
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if name == RAW_DIR_NAME || name.starts_with('.') {
-            continue;
-        }
-        let is_dir = entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false);
-        if !is_dir {
-            continue;
-        }
-        let child = if rel.is_empty() {
-            name.clone()
-        } else {
-            format!("{rel}/{name}")
-        };
-        collect_dirs(&entry.path(), &child, out);
-    }
 }
 
 /// 写一个目录的计数，并**在同一个事务外**把库级汇总重算一遍（调用方负责事务）。
@@ -645,7 +689,10 @@ pub fn totals(conn: &Connection, repository_id: &str) -> Result<Option<Counts>> 
 
 /// 清空一个库的目录行（**重建数据**之前调；之后重新扫盘建立）。
 pub fn clear_directories(conn: &Connection, repository_id: &str) -> Result<usize> {
-    let removed = conn.execute("DELETE FROM directories WHERE repository_id = ?1", [repository_id])?;
+    let removed = conn.execute(
+        "DELETE FROM directories WHERE repository_id = ?1",
+        [repository_id],
+    )?;
     refresh_totals(conn, repository_id)?;
     Ok(removed)
 }
@@ -684,9 +731,25 @@ pub struct RepositoryView {
 /// 这样这一层不把「开库」这件事硬编进来，测试也能直接给个假数。
 /// 注入的闭包拿到的是**库根目录**，返回 `None` 表示读不到（离线、损坏…）。
 pub fn build_views(conn: &Connection) -> Result<Vec<RepositoryView>> {
+    build_views_with(conn, |row| resolve_repository(conn, &row.id))
+}
+
+/// 仅取登记与最后成功计数；探测由会话服务在连接/全局锁外执行。
+pub fn build_registered_views(conn: &Connection) -> Result<Vec<RepositoryView>> {
+    build_views_with(conn, |row| {
+        Ok(RepositoryState::Offline {
+            tried: row.paths.len(),
+        })
+    })
+}
+
+fn build_views_with(
+    conn: &Connection,
+    resolve: impl Fn(&RepositoryRow) -> Result<RepositoryState>,
+) -> Result<Vec<RepositoryView>> {
     let mut views = Vec::new();
     for row in list_repositories(conn)? {
-        let state = resolve_repository(conn, &row.id)?;
+        let state = resolve(&row)?;
         let (online, root, display_path, tried) = match &state {
             RepositoryState::Online { root } => (
                 true,
@@ -696,7 +759,11 @@ pub fn build_views(conn: &Connection) -> Result<Vec<RepositoryView>> {
             ),
             RepositoryState::Offline { tried } => {
                 // 离线：显示上次已知路径（`list_repositories` 已按「最近见过」排好）
-                let last = row.paths.first().map(|p| p.path.clone()).unwrap_or_default();
+                let last = row
+                    .paths
+                    .first()
+                    .map(|p| p.path.clone())
+                    .unwrap_or_default();
                 (false, None, last, *tried)
             }
         };
@@ -950,6 +1017,93 @@ mod tests {
     }
 
     #[test]
+    fn locating_same_catalog_after_move_preserves_identity_and_never_creates() {
+        let parent = tmp();
+        let old = parent.path().join("旧盘符中文库");
+        let new = parent.path().join("新位置 é 照片");
+        std::fs::create_dir(&old).unwrap();
+        let meta =
+            create_or_open_catalog(&old.join(CATALOG_FILE_NAME), "照片库", None, T0).unwrap();
+        let app = app_db();
+        register_repository(&app, &meta, T0).unwrap();
+        add_repository_path(&app, &meta.id, old.to_str().unwrap(), T0).unwrap();
+        std::fs::rename(&old, &new).unwrap();
+        let verified = validate_alternate_location(&meta.id, &new).unwrap();
+        assert_eq!(verified, meta);
+        add_repository_path(&app, &meta.id, new.to_str().unwrap(), T0 + 1).unwrap();
+        add_repository_path(&app, &meta.id, new.to_str().unwrap(), T0 + 2).unwrap();
+        assert_eq!(list_repositories(&app).unwrap().len(), 1);
+        assert_eq!(registered_paths(&app, &meta.id).unwrap().len(), 2);
+        let db = crate::store::db::CatalogDb::open_session(
+            &new,
+            &meta.id,
+            1,
+            crate::store::db::OpenOpts::new(None, T0),
+        )
+        .unwrap();
+        db.write_tx(|conn| write_meta(conn, META_NAME, "重新连上"))
+            .unwrap();
+        assert_eq!(
+            db.read(|conn| read_meta(conn, META_NAME))
+                .unwrap()
+                .as_deref(),
+            Some("重新连上")
+        );
+        for root in [PathBuf::new(), PathBuf::from("relative/照片"), old] {
+            assert!(validate_alternate_location(&meta.id, &root).is_err());
+            assert!(!root.join(CATALOG_FILE_NAME).exists());
+        }
+        assert!(matches!(
+            validate_alternate_location("another-id", &new),
+            Err(Error::RepositoryIdentityChanged(_))
+        ));
+        assert_eq!(db.meta().id, meta.id);
+        let file = parent.path().join("不是目录");
+        std::fs::write(&file, b"untouched").unwrap();
+        assert!(matches!(
+            validate_alternate_location(&meta.id, &file),
+            Err(Error::InvalidRepositoryLocation(_))
+        ));
+        assert_eq!(std::fs::read(&file).unwrap(), b"untouched");
+        let empty = parent.path().join("空目录");
+        std::fs::create_dir(&empty).unwrap();
+        assert!(validate_alternate_location(&meta.id, &empty).is_err());
+        assert!(!empty.join(CATALOG_FILE_NAME).exists());
+    }
+
+    #[test]
+    fn removing_position_is_scoped_idempotent_and_protects_active_path() {
+        let app = app_db();
+        for id in ["library-a", "library-b"] {
+            register_repository(
+                &app,
+                &RepositoryMeta {
+                    id: id.into(),
+                    name: "库".into(),
+                    import_template: DEFAULT_IMPORT_TEMPLATE.into(),
+                    created_at: T0,
+                },
+                T0,
+            )
+            .unwrap();
+            add_repository_path(&app, id, "D:/中文库", T0).unwrap();
+        }
+        assert!(matches!(
+            remove_repository_path(
+                &app,
+                "library-a",
+                "d:\\中文库",
+                Some(Path::new("D:/中文库"))
+            ),
+            Err(Error::RepositoryPathInUse(_))
+        ));
+        assert!(remove_repository_path(&app, "library-a", "d:\\中文库", None).unwrap());
+        assert!(!remove_repository_path(&app, "library-a", "D:/中文库", None).unwrap());
+        assert_eq!(registered_paths(&app, "library-b").unwrap().len(), 1);
+        assert_eq!(list_repositories(&app).unwrap().len(), 2);
+    }
+
+    #[test]
     fn same_path_can_belong_to_two_libraries() {
         let app = app_db();
         for (id, name) in [("libA000000000000", "库A"), ("libB000000000000", "库B")] {
@@ -965,7 +1119,10 @@ mod tests {
         let n: i64 = app
             .query_row("SELECT count(*) FROM repository_paths", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(n, 2, "同路径不同库是允许的（memory/FUNCTION-REPOSITORY.md §2.1）");
+        assert_eq!(
+            n, 2,
+            "同路径不同库是允许的（memory/FUNCTION-REPOSITORY.md §2.1）"
+        );
     }
 
     #[test]
@@ -1109,13 +1266,7 @@ mod tests {
         // ③ 插到**别的**位置：登记这条新路径之后同样能挂上（「换挂载点」）
         std::fs::rename(&root, &unplugged).unwrap();
         assert!(!resolve_repository(&app, &meta.id).unwrap().is_online());
-        add_repository_path(
-            &app,
-            &meta.id,
-            unplugged.to_string_lossy().as_ref(),
-            T0 + 1,
-        )
-        .unwrap();
+        add_repository_path(&app, &meta.id, unplugged.to_string_lossy().as_ref(), T0 + 1).unwrap();
         match resolve_repository(&app, &meta.id).unwrap() {
             RepositoryState::Online { root } => assert_eq!(root, unplugged),
             other => panic!("登记新路径之后应当在线，实际 {other:?}"),
@@ -1224,7 +1375,11 @@ mod tests {
         )
         .unwrap();
 
-        assert!(refresh_path_status(&app, &meta.id, T0 + 1).unwrap().is_none());
+        assert!(
+            refresh_path_status(&app, &meta.id, T0 + 1)
+                .unwrap()
+                .is_none()
+        );
         let status: String = app
             .query_row(
                 "SELECT status FROM repository_paths WHERE repository_id = ?1",
@@ -1259,14 +1414,18 @@ mod tests {
         let base = dir.path();
 
         assert_eq!(probe_root(base), RootProbe::Empty, "空目录可以建库");
-        assert_eq!(probe_root(&base.join("没有这个目录")), RootProbe::NotADirectory);
+        assert_eq!(
+            probe_root(&base.join("没有这个目录")),
+            RootProbe::NotADirectory
+        );
 
         let file = base.join("note.txt");
         std::fs::write(&file, b"x").unwrap();
         assert_eq!(probe_root(&file), RootProbe::NotADirectory, "文件不是目录");
 
         let root = base.join("已有库");
-        let meta = create_or_open_catalog(&root.join(CATALOG_FILE_NAME), "已有库", None, T0).unwrap();
+        let meta =
+            create_or_open_catalog(&root.join(CATALOG_FILE_NAME), "已有库", None, T0).unwrap();
         match probe_root(&root) {
             RootProbe::Existing(meta2) => {
                 assert_eq!(meta2.id, meta.id);
@@ -1295,6 +1454,44 @@ mod tests {
 
     // ---------- 库视图 ----------
 
+    #[test]
+    fn failed_or_partial_count_scan_keeps_registered_totals() {
+        let app = app_db();
+        let dir = tempfile::tempdir().unwrap();
+        let meta = RepositoryMeta {
+            id: "counts0000000000".into(),
+            name: "计数".into(),
+            import_template: DEFAULT_IMPORT_TEMPLATE.into(),
+            created_at: T0,
+        };
+        register_repository(&app, &meta, T0).unwrap();
+        set_directory_counts(
+            &app,
+            &meta.id,
+            "photos",
+            Counts {
+                photos: 7,
+                images: 9,
+            },
+            T0,
+        )
+        .unwrap();
+        std::fs::create_dir(dir.path().join("photos")).unwrap();
+        assert_eq!(
+            count_dir_on_disk(dir.path(), "photos").unwrap(),
+            Counts::default()
+        );
+        std::fs::write(dir.path().join("photos/_RAW"), "不是目录".as_bytes()).unwrap();
+        assert!(count_library_on_disk(&app, &meta.id, dir.path(), "photos", T0).is_err());
+        assert_eq!(
+            totals(&app, &meta.id).unwrap(),
+            Some(Counts {
+                photos: 7,
+                images: 9
+            })
+        );
+        assert!(count_dir_on_disk(dir.path(), "missing").is_err());
+    }
     #[test]
     fn build_views_reports_online_offline_and_photo_counts() {
         let dir = tmp();
@@ -1352,7 +1549,10 @@ mod tests {
         assert_eq!(online_view.images_count, Some(50), "图片数量含 _RAW");
         assert_eq!(online_view.display_path, online_root.to_string_lossy());
         assert_eq!(online_view.paths.len(), 1);
-        assert_eq!(online_view.import_template.as_deref(), Some(DEFAULT_IMPORT_TEMPLATE));
+        assert_eq!(
+            online_view.import_template.as_deref(),
+            Some(DEFAULT_IMPORT_TEMPLATE)
+        );
 
         let offline_view = views.iter().find(|v| v.id == offline_id).unwrap();
         assert!(!offline_view.online);

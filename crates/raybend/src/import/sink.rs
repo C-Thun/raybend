@@ -91,6 +91,7 @@ enum Op {
 /// 真实的落库出口（`catalog.db`，走单写者）。
 pub struct CatalogSink<'a> {
     catalog: &'a CatalogDb,
+    recovery: Option<&'a crate::store::session::TaskCatalog>,
     now_ms: i64,
     ops: Vec<Op>,
 }
@@ -101,11 +102,30 @@ impl<'a> CatalogSink<'a> {
     pub fn new(catalog: &'a CatalogDb, now_ms: i64) -> Self {
         Self {
             catalog,
+            recovery: None,
             now_ms,
             ops: Vec::new(),
         }
     }
 
+    pub fn recovering(
+        catalog: &'a CatalogDb,
+        task: &'a crate::store::session::TaskCatalog,
+        now_ms: i64,
+    ) -> Self {
+        Self {
+            catalog,
+            recovery: Some(task),
+            now_ms,
+            ops: Vec::new(),
+        }
+    }
+    fn active(&self) -> ActiveCatalog<'_> {
+        match self.recovery {
+            Some(task) => ActiveCatalog::Shared(task.current()),
+            None => ActiveCatalog::Borrowed(self.catalog),
+        }
+    }
     /// 还攒着几条没提交（诊断与测试用）。
     #[must_use]
     pub fn pending_ops(&self) -> usize {
@@ -117,26 +137,57 @@ impl<'a> CatalogSink<'a> {
         if self.ops.is_empty() {
             return Ok(());
         }
-        let ops = std::mem::take(&mut self.ops);
+        let ops = self.ops.clone();
         let now = self.now_ms;
-        self.catalog.write_tx(move |tx| {
+        self.active().write_tx(move |tx| {
             for op in &ops {
                 apply(tx, op, now)?;
             }
+            let mut runs = std::collections::HashSet::new();
+            for op in &ops {
+                match op { Op::InsertItem { run_id, .. } | Op::Register { run_id, .. } | Op::Mark { run_id, .. } => { runs.insert(*run_id); }, _ => {} }
+            }
+            for id in runs {
+                tx.execute("UPDATE import_runs SET imported=(SELECT count(*) FROM import_items WHERE run_id=?1 AND status='imported'), skipped=(SELECT count(*) FROM import_items WHERE run_id=?1 AND status='skipped'), failed=(SELECT count(*) FROM import_items WHERE run_id=?1 AND status='failed') WHERE id=?1 AND state='running'", [id])?;
+            }
             Ok(())
-        })
+        })?;
+        self.ops.clear();
+        Ok(())
+    }
+}
+
+enum ActiveCatalog<'a> {
+    Borrowed(&'a CatalogDb),
+    Shared(std::sync::Arc<CatalogDb>),
+}
+impl std::ops::Deref for ActiveCatalog<'_> {
+    type Target = CatalogDb;
+    fn deref(&self) -> &CatalogDb {
+        match self {
+            Self::Borrowed(db) => db,
+            Self::Shared(db) => db,
+        }
     }
 }
 
 impl ImportSink for CatalogSink<'_> {
+    fn check_session(&self) -> Result<()> {
+        self.active().ensure_current()
+    }
     fn known_sources(&mut self) -> Result<KnownSources> {
         self.flush()?;
-        self.catalog.read(load_known_sources)
+        self.active().read(load_known_sources)
     }
 
+    fn interrupted_sources(&mut self) -> Result<KnownSources> {
+        self.flush()?;
+        self.active()
+            .read(|conn| load_known_sources_filtered(conn, true))
+    }
     fn sequences(&mut self) -> Result<Sequences> {
         self.flush()?;
-        self.catalog.read(load_sequences)
+        self.active().read(load_sequences)
     }
 
     fn save_sequences(&mut self, sequences: &Sequences) -> Result<()> {
@@ -151,7 +202,7 @@ impl ImportSink for CatalogSink<'_> {
         let template = request.template_source.clone();
         let include_subdirs = request.include_subdirs;
         let now = self.now_ms;
-        self.catalog.write(move |conn| {
+        self.active().write(move |conn| {
             conn.execute(
                 "INSERT INTO import_runs
                     (source_root, template, include_subdirs, started_at, state, imported, skipped, failed)
@@ -182,7 +233,7 @@ impl ImportSink for CatalogSink<'_> {
 
     fn stale_pending(&mut self) -> Result<HashMap<String, String>> {
         self.flush()?;
-        self.catalog.read(|conn| {
+        self.active().read(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT i.target_rel, i.source_path
                    FROM import_items i
@@ -222,7 +273,7 @@ impl ImportSink for CatalogSink<'_> {
          * 兜底用的 mtime 要传**源文件的**（`file.mtime_ms`）—— 副本的 mtime 是复制时间，
          * 拿它当拍摄时间是错的（而且与导入网格显示的那个值对不上）。
          */
-        let abs = self.catalog.root().join(target_rel);
+        let abs = self.active().root().join(target_rel);
         let exif = exif::read_file_for(&abs);
         let file_name = target_rel.rsplit('/').next().unwrap_or(target_rel);
         let taken = exif::resolve_taken_at(Some(&exif), file_name, file.mtime_ms);
@@ -288,7 +339,7 @@ fn apply(conn: &rusqlite::Connection, op: &Op, now_ms: i64) -> Result<()> {
             conn.execute(
                 "INSERT INTO import_items
                     (run_id, asset_id, source_path, target_rel, status, reason, created_at)
-                 VALUES (?1, NULL, ?2, ?3, ?4, ?5, ?6)",
+                 SELECT ?1, NULL, ?2, ?3, ?4, ?5, ?6 WHERE NOT EXISTS(SELECT 1 FROM import_items WHERE run_id=?1 AND source_path=?2 AND target_rel IS ?3)",
                 params![run_id, source_path, target_rel, status, reason, now_ms],
             )?;
         }
@@ -317,13 +368,7 @@ fn apply(conn: &rusqlite::Connection, op: &Op, now_ms: i64) -> Result<()> {
                 identity: *copy_identity,
             };
             assets::insert_file(conn, asset_id, &disk, assets::role_of(*kind), now_ms)?;
-            assets::set_source(
-                conn,
-                forms.folded(),
-                source_path,
-                *source_identity,
-                now_ms,
-            )?;
+            assets::set_source(conn, forms.folded(), source_path, *source_identity, now_ms)?;
             /*
              * EXIF 只由**位图**写，RAW 只在「这个资产没有位图」时才写。
              *
@@ -365,7 +410,7 @@ fn apply(conn: &rusqlite::Connection, op: &Op, now_ms: i64) -> Result<()> {
                     "INSERT INTO seq_counters(directory, width, value, updated_at)
                      VALUES (?1, ?2, ?3, ?4)
                      ON CONFLICT(directory, width)
-                     DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+                     DO UPDATE SET value = max(seq_counters.value, excluded.value), updated_at = excluded.updated_at",
                     params![
                         directory,
                         i64::try_from(*width).unwrap_or(9),
@@ -470,14 +515,20 @@ fn strip_raw_segment(dir: &str) -> &str {
 
 /// 库里记着「哪些源已经导进来过」（`memory/FUNCTION-REPOSITORY.md` §4.3）。
 fn load_known_sources(conn: &rusqlite::Connection) -> Result<KnownSources> {
+    load_known_sources_filtered(conn, false)
+}
+fn load_known_sources_filtered(
+    conn: &rusqlite::Connection,
+    interrupted: bool,
+) -> Result<KnownSources> {
     let mut known = KnownSources::new();
     let mut stmt = conn.prepare(
         "SELECT source_path, size_bytes, mtime_ms, source_volume_serial, source_file_id
-           FROM asset_files
-          WHERE missing_since IS NULL
-            AND (source_path IS NOT NULL OR source_volume_serial IS NOT NULL)",
+           FROM asset_files f
+          WHERE missing_since IS NULL AND (source_path IS NOT NULL OR source_volume_serial IS NOT NULL)
+            AND (?1=0 OR EXISTS(SELECT 1 FROM import_items i JOIN import_runs r ON r.id=i.run_id WHERE i.asset_id=f.asset_id AND i.target_rel=f.rel_path AND i.status='imported' AND r.state='running'))",
     )?;
-    let mut rows = stmt.query([])?;
+    let mut rows = stmt.query([interrupted])?;
     while let Some(row) = rows.next()? {
         let source_path: Option<String> = row.get(0)?;
         let size: Option<i64> = row.get(1)?;
@@ -486,11 +537,7 @@ fn load_known_sources(conn: &rusqlite::Connection) -> Result<KnownSources> {
         let blob: Option<Vec<u8>> = row.get(4)?;
 
         if let Some(path) = source_path {
-            known.insert_fallback(
-                &path,
-                u64::try_from(size.unwrap_or(0)).unwrap_or(0),
-                mtime,
-            );
+            known.insert_fallback(&path, u64::try_from(size.unwrap_or(0)).unwrap_or(0), mtime);
         }
         if let (Some(volume), Some(blob)) = (volume, blob)
             && let Some(id) = FileId::from_blob(u64::try_from(volume).unwrap_or(0), &blob)
@@ -600,6 +647,94 @@ mod tests {
         }
     }
 
+    #[test]
+    fn replay_is_idempotent_and_deferred_source_never_rewinds_sequence() {
+        let dir = tmp();
+        let db = catalog(dir.path());
+        let mut sink = CatalogSink::new(&db, T0);
+        let id = sink.begin_run(&request("/中文源")).unwrap();
+        let file = source_file("a.jpg", MediaKind::Image, "/中文源/a.jpg", 3);
+        let item = planned(0, "a.jpg", "photos/a.jpg", Role::Bitmap);
+        sink.record_plan(id, std::slice::from_ref(&file), std::slice::from_ref(&item))
+            .unwrap();
+        let replay = sink.ops.clone();
+        sink.commit().unwrap();
+        sink.ops = replay;
+        sink.commit().unwrap();
+        assert_eq!(
+            db.read(
+                |c| Ok(c.query_row("SELECT count(*) FROM import_items", [], |r| r
+                    .get::<_, i64>(0))?)
+            )
+            .unwrap(),
+            1
+        );
+        let mut latest = Sequences::new();
+        latest.seed("photos", 3, 10);
+        sink.save_sequences(&latest).unwrap();
+        sink.commit().unwrap();
+        let mut delayed = Sequences::new();
+        delayed.seed("photos", 3, 2);
+        sink.save_sequences(&delayed).unwrap();
+        sink.commit().unwrap();
+        assert_eq!(
+            db.read(|c| Ok(
+                c.query_row("SELECT value FROM seq_counters", [], |r| r.get::<_, i64>(0))?
+            ))
+            .unwrap(),
+            10
+        );
+    }
+    #[test]
+    fn failed_commit_retains_operations_for_verified_rebind_and_partial_counts() {
+        use crate::store::session::{CatalogSessions, TaskCatalog};
+        use std::sync::Arc;
+        let dir = tmp();
+        let root = dir.path().join("库");
+        let db = catalog(&root);
+        let id = db.meta().id.clone();
+        drop(db);
+        let sessions = CatalogSessions::default();
+        let old = sessions
+            .acquire(&id, || Ok(root.clone()), OpenOpts::unbacked_up(T0))
+            .unwrap();
+        let task = TaskCatalog::new(Arc::clone(&old));
+        let mut sink = CatalogSink::recovering(&old, &task, T0);
+        let run = sink.begin_run(&request("/src")).unwrap();
+        let file = source_file("a.jpg", MediaKind::Image, "/src/a.jpg", 5);
+        let item = planned(0, "a.jpg", "photos/a.jpg", Role::Bitmap);
+        sink.record_plan(
+            run,
+            std::slice::from_ref(&file),
+            std::slice::from_ref(&item),
+        )
+        .unwrap();
+        sink.register(run, &item, &file, None).unwrap();
+        sink.mark(run, &item, "imported", None).unwrap();
+        let pending = sink.pending_ops();
+        sessions.invalidate(&id).unwrap();
+        assert!(sink.commit().is_err());
+        assert_eq!(sink.pending_ops(), pending);
+        let next = sessions
+            .acquire(&id, || Ok(root.clone()), OpenOpts::unbacked_up(T0))
+            .unwrap();
+        task.install(next.clone()).unwrap();
+        sink.commit().unwrap();
+        assert_eq!(sink.pending_ops(), 0);
+        assert_eq!(
+            next.read(|c| Ok(c.query_row(
+                "SELECT imported FROM import_runs WHERE id=?1",
+                [run],
+                |r| r.get::<_, i64>(0)
+            )?))
+            .unwrap(),
+            1
+        );
+        assert!(sink.interrupted_sources().unwrap().contains(&file));
+        sink.finish_run(run, "done", &counts(1, 0, 0)).unwrap();
+        sink.commit().unwrap();
+        assert!(!sink.interrupted_sources().unwrap().contains(&file));
+    }
     /* ══════════════════════════════════════════════════════════ */
 
     #[test]
@@ -680,8 +815,12 @@ mod tests {
         let run_id = sink.begin_run(&request("/src")).unwrap();
         let file = source_file("a.jpg", MediaKind::Image, "/src/2026/a.jpg", 10);
         let item = planned(0, "a.jpg", "photos/2026/a.jpg", Role::Bitmap);
-        sink.record_plan(run_id, std::slice::from_ref(&file), std::slice::from_ref(&item))
-            .unwrap();
+        sink.record_plan(
+            run_id,
+            std::slice::from_ref(&file),
+            std::slice::from_ref(&item),
+        )
+        .unwrap();
         sink.register(run_id, &item, &file, Some(FileId::new(9, [1u8; 16])))
             .unwrap();
         sink.mark(run_id, &item, "imported", None).unwrap();
@@ -772,8 +911,7 @@ mod tests {
                     conn.query_row("SELECT count(*) FROM assets", [], |r| r.get(0))?;
                 let files_n: i64 =
                     conn.query_row("SELECT count(*) FROM asset_files", [], |r| r.get(0))?;
-                let mut stmt =
-                    conn.prepare("SELECT role FROM asset_files ORDER BY id")?;
+                let mut stmt = conn.prepare("SELECT role FROM asset_files ORDER BY id")?;
                 let roles = stmt
                     .query_map([], |r| r.get::<_, String>(0))?
                     .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -793,8 +931,12 @@ mod tests {
         let run_id = sink.begin_run(&request("/src")).unwrap();
         let raw = source_file("only.ORF", MediaKind::Raw, "/src/only.ORF", 20);
         let item = planned(0, "only.ORF", "photos/2026/MYonly.ORF", Role::Raw);
-        sink.record_plan(run_id, std::slice::from_ref(&raw), std::slice::from_ref(&item))
-            .unwrap();
+        sink.record_plan(
+            run_id,
+            std::slice::from_ref(&raw),
+            std::slice::from_ref(&item),
+        )
+        .unwrap();
         sink.register(run_id, &item, &raw, None).unwrap();
         sink.commit().unwrap();
 
@@ -818,16 +960,24 @@ mod tests {
         // 先导位图
         let bitmap = source_file("P1.png", MediaKind::Image, "/src/P1.png", 10);
         let item_b = planned(0, "P1.png", "photos/2026/MYP1.png", Role::Bitmap);
-        sink.record_plan(run_id, std::slice::from_ref(&bitmap), std::slice::from_ref(&item_b))
-            .unwrap();
+        sink.record_plan(
+            run_id,
+            std::slice::from_ref(&bitmap),
+            std::slice::from_ref(&item_b),
+        )
+        .unwrap();
         sink.register(run_id, &item_b, &bitmap, None).unwrap();
         sink.commit().unwrap();
 
         // 再导同名的 RAW（正常目录，不是 _RAW/）—— 应当挂到同一条资产上
         let raw = source_file("P1.ORF", MediaKind::Raw, "/src/P1.ORF", 20);
         let item_r = planned(0, "P1.ORF", "photos/2026/MYP1.ORF", Role::Raw);
-        sink.record_plan(run_id, std::slice::from_ref(&raw), std::slice::from_ref(&item_r))
-            .unwrap();
+        sink.record_plan(
+            run_id,
+            std::slice::from_ref(&raw),
+            std::slice::from_ref(&item_r),
+        )
+        .unwrap();
         sink.register(run_id, &item_r, &raw, None).unwrap();
         sink.commit().unwrap();
 
@@ -850,8 +1000,12 @@ mod tests {
         let run_id = sink.begin_run(&request("/src")).unwrap();
         let file = source_file("a.jpg", MediaKind::Image, "/src/2026/a.jpg", 10);
         let item = planned(0, "a.jpg", "photos/2026/a.jpg", Role::Bitmap);
-        sink.record_plan(run_id, std::slice::from_ref(&file), std::slice::from_ref(&item))
-            .unwrap();
+        sink.record_plan(
+            run_id,
+            std::slice::from_ref(&file),
+            std::slice::from_ref(&item),
+        )
+        .unwrap();
         sink.register(run_id, &item, &file, None).unwrap();
         sink.commit().unwrap();
 
@@ -875,8 +1029,12 @@ mod tests {
         let run_id = sink.begin_run(&request("/src")).unwrap();
         let file = source_file("a.jpg", MediaKind::Image, "/src/a.jpg", 10);
         let item = planned(0, "a.jpg", "photos/2026/a.jpg", Role::Bitmap);
-        sink.record_plan(run_id, std::slice::from_ref(&file), std::slice::from_ref(&item))
-            .unwrap();
+        sink.record_plan(
+            run_id,
+            std::slice::from_ref(&file),
+            std::slice::from_ref(&item),
+        )
+        .unwrap();
         sink.register(run_id, &item, &file, None).unwrap();
         sink.commit().unwrap();
         db.write(|conn| assets::mark_missing(conn, 1, T0)).unwrap();
@@ -902,7 +1060,11 @@ mod tests {
         let mut fresh = CatalogSink::new(&db, T0);
         let loaded = fresh.sequences().unwrap();
         assert_eq!(loaded.last("photos/2026-08-15", 3), 41);
-        assert_eq!(loaded.last("photos/2026-08-15", 4), 1, "宽度不同 = 不同计数器");
+        assert_eq!(
+            loaded.last("photos/2026-08-15", 4),
+            1,
+            "宽度不同 = 不同计数器"
+        );
 
         // 再存一次是覆盖而不是插重
         let mut again = Sequences::new();
@@ -917,7 +1079,10 @@ mod tests {
             .unwrap();
         assert_eq!(rows, 2);
         assert_eq!(
-            CatalogSink::new(&db, T0).sequences().unwrap().last("photos/2026-08-15", 3),
+            CatalogSink::new(&db, T0)
+                .sequences()
+                .unwrap()
+                .last("photos/2026-08-15", 3),
             42
         );
     }
@@ -954,10 +1119,17 @@ mod tests {
             outcome: ItemOutcome::Failed("路径不合法".to_string()),
             missing: Vec::new(),
         };
-        sink.record_plan(run_b, &[source_file("b.jpg", MediaKind::Image, "/src/b/b.jpg", 5)], &[item])
-            .unwrap();
+        sink.record_plan(
+            run_b,
+            &[source_file("b.jpg", MediaKind::Image, "/src/b/b.jpg", 5)],
+            &[item],
+        )
+        .unwrap();
         sink.commit().unwrap();
-        assert!(sink.stale_pending().unwrap().is_empty(), "只有 pending 才算半成品");
+        assert!(
+            sink.stale_pending().unwrap().is_empty(),
+            "只有 pending 才算半成品"
+        );
     }
 
     #[test]
@@ -966,11 +1138,12 @@ mod tests {
         let db = catalog(dir.path());
         let mut sink = CatalogSink::new(&db, T0);
         let run_id = sink.begin_run(&request("/src")).unwrap();
-        sink.finish_run(run_id, "cancelled", &counts(3, 1, 2)).unwrap();
+        sink.finish_run(run_id, "cancelled", &counts(3, 1, 2))
+            .unwrap();
         sink.commit().unwrap();
 
-        let (state, imported, skipped, failed, finished): (String, i64, i64, i64, Option<i64>) =
-            db.read(|conn| {
+        let (state, imported, skipped, failed, finished): (String, i64, i64, i64, Option<i64>) = db
+            .read(|conn| {
                 conn.query_row(
                     "SELECT state, imported, skipped, failed, finished_at
                        FROM import_runs WHERE id = ?1",
@@ -980,7 +1153,10 @@ mod tests {
                 .map_err(Into::into)
             })
             .unwrap();
-        assert_eq!((state.as_str(), imported, skipped, failed), ("cancelled", 3, 1, 2));
+        assert_eq!(
+            (state.as_str(), imported, skipped, failed),
+            ("cancelled", 3, 1, 2)
+        );
         assert_eq!(finished, Some(T0));
     }
 
@@ -1040,6 +1216,10 @@ mod tests {
         assert_eq!(strip_raw_segment("photos/2026/_raw"), "photos/2026");
         assert_eq!(strip_raw_segment("photos/2026"), "photos/2026");
         assert_eq!(strip_raw_segment("_RAW"), "_RAW", "根目录下这段不算");
-        assert_eq!(strip_raw_segment("photos/_RAWx"), "photos/_RAWx", "不是整段");
+        assert_eq!(
+            strip_raw_segment("photos/_RAWx"),
+            "photos/_RAWx",
+            "不是整段"
+        );
     }
 }

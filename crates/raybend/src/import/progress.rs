@@ -43,6 +43,8 @@ pub enum ImportStage {
 pub enum ImportState {
     /// 正在跑。
     Running,
+    /// 原来源或目标库失联，等待核对身份后续跑。
+    Waiting,
     /// 收到暂停请求，还没有停在安全点上。
     Pausing,
     /// 已停在安全点（文件之间）。
@@ -251,13 +253,19 @@ impl BatchProgress {
         self.failed = failed;
         self.bytes = bytes;
 
-        // 整批阶段取「最靠后」的那个 run：一个在导入、一个还没扫完时，
-        // 进度条该按导入算，否则会往回跳
+        // 先展示尚未结束的来源，不能让某个已完成来源把等待中的整批显示为完成。
         self.stage = self
             .runs
             .iter()
+            .filter(|r| !r.state.is_final())
             .map(|r| r.stage)
             .max_by_key(|s| stage_rank(*s))
+            .or_else(|| {
+                self.runs
+                    .iter()
+                    .map(|r| r.stage)
+                    .max_by_key(|s| stage_rank(*s))
+            })
             .unwrap_or(ImportStage::Scan);
     }
 
@@ -266,28 +274,33 @@ impl BatchProgress {
         if self.runs.is_empty() {
             return;
         }
-        if self.runs.iter().any(|r| r.state == ImportState::Cancelled) {
-            // 取消之后：用户按下取消那一刻就已经是终局，别的 run 也跟着停
-            self.state = ImportState::Cancelled;
-            return;
-        }
-        if self.runs.iter().any(|r| r.state == ImportState::Failed) {
-            self.state = ImportState::Failed;
-            return;
-        }
-        if self.runs.iter().all(|r| r.state == ImportState::Done) {
-            self.state = ImportState::Done;
-            return;
-        }
-        if self
+        if self.runs.iter().all(|run| run.state.is_final()) {
+            self.state = if self
+                .runs
+                .iter()
+                .any(|run| run.state == ImportState::Cancelled)
+            {
+                ImportState::Cancelled
+            } else if self.runs.iter().any(|run| run.state == ImportState::Failed) {
+                ImportState::Failed
+            } else {
+                ImportState::Done
+            };
+        } else if self
             .runs
             .iter()
-            .any(|r| matches!(r.state, ImportState::Running | ImportState::Pausing))
+            .any(|run| matches!(run.state, ImportState::Running | ImportState::Pausing))
         {
             self.state = ImportState::Running;
-            return;
+        } else if self
+            .runs
+            .iter()
+            .any(|run| run.state == ImportState::Waiting)
+        {
+            self.state = ImportState::Waiting;
+        } else {
+            self.state = ImportState::Paused;
         }
-        self.state = ImportState::Paused;
     }
 
     /// 记一条错误（清单截断、计数不截断）。
@@ -464,6 +477,21 @@ mod tests {
     }
 
     #[test]
+    fn completed_source_does_not_hide_waiting_source_or_invent_full_progress() {
+        let mut batch = BatchProgress::new("batch", 0);
+        let mut done = RunProgress::new(1, "done");
+        done.state = ImportState::Done;
+        done.stage = ImportStage::Done;
+        let mut waiting = RunProgress::new(2, "offline");
+        waiting.state = ImportState::Waiting;
+        batch.runs = vec![done, waiting];
+        batch.recompute();
+        batch.refresh_state();
+        assert_eq!(batch.state, ImportState::Waiting);
+        assert_eq!(batch.stage, ImportStage::Scan);
+        assert_eq!(batch.percent(), None);
+    }
+    #[test]
     fn recompute_sums_every_run() {
         let mut batch = BatchProgress::new("b1", 1_000);
         batch.runs = vec![
@@ -572,7 +600,11 @@ mod tests {
             });
         }
         assert_eq!(batch.errors.len(), ERROR_LIST_CAP, "清单留尾巴");
-        assert_eq!(batch.errors_total as usize, ERROR_LIST_CAP + 5, "计数不截断");
+        assert_eq!(
+            batch.errors_total as usize,
+            ERROR_LIST_CAP + 5,
+            "计数不截断"
+        );
         assert_eq!(
             batch.errors.last().map(|e| e.source.as_str()),
             Some("a204.jpg"),
@@ -623,13 +655,20 @@ mod tests {
 
         assert!(!commit.flush(t0), "没有待提交的就不提交");
         commit.tick(t0 + Duration::from_millis(700));
-        assert!(commit.flush(t0 + Duration::from_millis(701)), "收尾时强制提交");
+        assert!(
+            commit.flush(t0 + Duration::from_millis(701)),
+            "收尾时强制提交"
+        );
     }
 
     #[test]
     fn run_state_words_match_the_schema_comment() {
         assert_eq!(ImportState::Running.run_state(), "running");
-        assert_eq!(ImportState::Paused.run_state(), "running", "暂停不是库里的状态");
+        assert_eq!(
+            ImportState::Paused.run_state(),
+            "running",
+            "暂停不是库里的状态"
+        );
         assert_eq!(ImportState::Done.run_state(), "done");
         assert_eq!(ImportState::Cancelled.run_state(), "cancelled");
         assert_eq!(ImportState::Failed.run_state(), "failed");

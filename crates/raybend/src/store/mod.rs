@@ -32,6 +32,7 @@
 //! | [`location`] | 位置判定：本地 / 网络 / 云同步（放 catalog 的风险提示） |
 
 pub mod assets;
+pub mod availability;
 pub mod backfill;
 pub mod base_curve;
 pub mod db;
@@ -53,6 +54,7 @@ pub mod query;
 pub mod rebuild;
 pub mod recent;
 pub mod repository;
+pub mod session;
 pub mod tags;
 pub mod time;
 pub mod volumes;

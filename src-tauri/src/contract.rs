@@ -240,6 +240,14 @@ fn file_exif_keys_match_contract() {
 #[test]
 fn repository_view_keys_match_contract() {
     assert_eq!(
+        keys_of::<crate::repo::RepositoryLocationErrorDto>(),
+        contract_keys("RepositoryLocationError")
+    );
+    assert_eq!(
+        keys_of::<raybend::store::availability::ConnectionStatus>(),
+        contract_keys("RepositoryConnection")
+    );
+    assert_eq!(
         keys_of::<RepositoryViewDto>(),
         contract_keys("RepositoryView")
     );
@@ -283,6 +291,8 @@ fn every_contract_entry_has_a_test() {
         "PhotoCount",
         "FileExif",
         "RepositoryView",
+        "RepositoryLocationError",
+        "RepositoryConnection",
         "RepositoryPath",
         "RepositoryProbe",
         "ThumbCacheStats",

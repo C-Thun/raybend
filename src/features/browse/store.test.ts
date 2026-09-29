@@ -1060,3 +1060,17 @@ test("refresh：删除前面的照片后，保留页按资产 ID 重排且仍需
  calls.page=[];await store.ensureRange(PAGE_SIZE,PAGE_SIZE+1);assert.deepEqual(calls.page,[PAGE_SIZE]);
  assert.equal(store.itemAt(PAGE_SIZE)?.id,PAGE_SIZE+2);
 });
+
+test("共享库状态离线后保留内容与选择，标记/撤销/重做/删除不再发请求", async () => {
+  let online = true, writes = 0;
+  const { api, calls } = fakeApi(3);
+  api.undo = api.redo = async () => { writes++; return EMPTY_MARK; };
+  api.remove = async () => { writes++; return EMPTY_DELETE; };
+  const store = createBrowseStore({ api, canWrite: () => online }); open(store); await tick();
+  store.selectAll(); const selected = store.selectedIds(); const before = store.itemAt(0); online = false;
+  assert.equal(store.canWrite(), false);
+  await store.mark({ kind: "rating", value: 3 }); await store.setText("author", "保留草稿"); await store.undo(); await store.redo(); await store.removeSelected();
+  assert.equal(calls.mark.length, 0); assert.equal(writes, 0);
+  assert.deepEqual(store.selectedIds(), selected); assert.equal(store.itemAt(0), before);
+  online = true; assert.equal(store.canWrite(), true);
+});

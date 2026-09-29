@@ -1,23 +1,25 @@
 /**
- * `LibrarySettingsDialog` —— 库设置（画布 `Dialog / 库设置` `A9vPG`）。
- *
- * M1 里**只有一项**：导入模版。三件事让它好用：
- *
- * 1. **变量 chip 可点** —— 插到光标处，不用记拼写；
- * 2. **实时预览** —— 示例照片会落到哪，边打字边看（校验在 Rust 侧，一份规则不重写两遍）；
- * 3. **保存前先校验** —— 模版坏了根本不写进库（否则下次导入才发现）。
+ * `LibrarySettingsDialog` —— 库位置、数量、重建与导入模版。
+ * W1 画稿 `ZhVcs`：离线仍可管理登记位置，仅 catalog 操作需要连接。
+ * 模版校验与预览沿用 Rust 同一套规则；位置与连接事实由中央状态提供。
  */
 
-import { createEffect, createSignal, For, onCleanup, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, on, onCleanup, Show } from "solid-js";
 import * as db from "../../api/db.ts";
 import type { RebuildProgress, RepositoryView, TemplatePreview } from "../../api/types.ts";
 import { Button } from "../../components/ui/Button.tsx";
 import type { ToastStore } from "../../components/ui/toast.ts";
-import { IconCloudOff, IconRefresh } from "@tabler/icons-solidjs";
+import { IconBan, IconCloudOff, IconRefresh } from "@tabler/icons-solidjs";
 import { ConfirmDialog, Dialog } from "../../components/ui/Dialog.tsx";
 import { Input } from "../../components/ui/Form.tsx";
 import { locale, t } from "../../i18n/index.ts";
 import { formatCount } from "../../lib/format.ts";
+import { pickDirectory } from "../../api/dialog.ts";
+import { EasyCopy } from "../../components/ui/EasyCopy.tsx";
+import { samePath } from "../../lib/tree.ts";
+import { locationErrorKey } from "../../i18n/repository-feedback.ts";
+import type { RepositoryStateStore } from "./state.ts";
+import { createLocationController } from "./location-controller.ts";
 import { rebuildProgressMessage } from "./rebuild-progress.ts";
 
 /** 可用的模版变量（与 Rust 的 `KNOWN_VARS` 一致；点一下插到光标处）。 */
@@ -45,6 +47,9 @@ export interface LibrarySettingsDialogProps {
    * 所有挂在这套数据上的界面都会同步变更」）。
    */
   repository?: RepositoryView;
+  repositories?: RepositoryStateStore;
+  locateRequest?: number;
+  releaseRequest?: number;
   onSaved?: (template: string) => void;
   /**
    * **发现它其实读不到**（读 `catalog.db` 失败）时调一次。
@@ -77,45 +82,80 @@ export function LibrarySettingsDialog(props: LibrarySettingsDialogProps) {
 
   onCleanup(() => stopRebuildProgress?.());
 
-  // 打开时读一次当前模版
-  createEffect(() => {
-    if (!props.open) return;
-    const id = props.repositoryId;
-    if (id === null) return;
-    setRebuildProgress(null);
-    setRebuilt(null);
-    setLoading(true);
-    setError(null);
-    /*
-     * 两个计数**自己读一次**：外面的库卡片可能有（导入侧），也可能没有（浏览侧只拿得到 id）。
-     * 读不到就是「—」—— 数字缺一个不该让整个弹窗打不开。
-     */
-    void db
-      .repositoryCounts(id)
-      .then(setCounts)
-      .catch(() => setCounts(null));
-    void db
-      .repositorySettings(id)
-      .then((settings) => {
-        setTemplate(settings.importTemplate);
-        return db.previewTemplate(settings.importTemplate);
-      })
-      .then(setPreview)
-      .catch((caught: unknown) => {
-        setError(caught instanceof Error ? caught.message : String(caught));
-        // 读不到它的 catalog，基本就是离线了 —— 立刻把这条状态同步给所有界面
-        props.onStale?.(id);
-      })
-      .finally(() => setLoading(false));
+  const [locationBusy, setLocationBusy] = createSignal(false);
+  const [locationError, setLocationError] = createSignal<unknown | null>(null);
+  const [removePath, setRemovePath] = createSignal<string | null>(null);
+  const [usePath, setUsePath] = createSignal<string | null>(null);
+  const [releaseOpen, setReleaseOpen] = createSignal(false);
+  const released = () => props.repository?.connection?.state === "released";
+  const releasing = () => props.repository?.connection?.state === "releasing";
+  async function manageLocation(path: string | null): Promise<void> {
+    const id = props.repositoryId; if (id === null || changingLocation()) return;
+    const epoch=dialogEpoch; setLocationBusy(true); setLocationError(null);
+    try {
+      const view = path === null ? await (props.repositories?.release(id) ?? db.releaseRepository(id)) : await (props.repositories?.useLocation(id,path) ?? db.useRepositoryLocation(id,path));
+      if (epoch === dialogEpoch) props.repositories?.upsert(view);
+    } catch (caught) { if (epoch === dialogEpoch) setLocationError(caught); }
+    finally { if (epoch === dialogEpoch) setLocationBusy(false); }
+  }
+  let dialogEpoch = 0;
+  const locations = createLocationController({
+    target: () => props.open ? props.repositoryId : null,
+    pick: () => pickDirectory({ title: t("repo.locations.choose") }),
+    add: (id, path) => props.repositories ? props.repositories.addLocation(id, path) : db.addRepositoryLocation(id, path),
+    remove: (id, path) => props.repositories ? props.repositories.removeLocation(id, path) : db.removeRepositoryLocation(id, path),
+    busy: setLocationBusy,
+    error: setLocationError,
   });
+  createEffect(() => {
+    const open = props.open, id = props.repositoryId;
+    void open; void id;
+    dialogEpoch++;
+    locations.reset(); setRemovePath(null); setUsePath(null); setReleaseOpen(false); setSaving(false);
+  });
+  createEffect(on(() => props.locateRequest ?? 0, (request, previous) => {
+    if (request > 0 && request !== previous && props.open) void locations.choose();
+  }, { defer: true }));
+  createEffect(on(() => props.releaseRequest ?? 0, (value, previous) => { if (value > 0 && value !== previous && props.open) setReleaseOpen(true); }, {defer:true}));
+  onCleanup(locations.reset);
+  const changingLocation = () => locationBusy() || (props.repositoryId !== null && props.repositories?.isChangingLocation(props.repositoryId) === true);
+  const currentPath = (path: string) => props.repository?.online === true && !!props.repository.root && samePath(path, props.repository.root);
+
+  let draftId: string | null = null, dirty = false;
+  const settingsContext = createMemo(() => props.open && props.repositoryId !== null ? `${props.repositoryId}:${props.repository?.online === true}` : null);
+  createEffect(on(settingsContext, context => {
+    if (context === null) { draftId = null; return; }
+    const id = props.repositoryId!;
+    let stale = false;
+    onCleanup(() => { stale = true; });
+    const current = () => !stale && props.open && props.repositoryId === id;
+    if (draftId !== id) {
+      draftId = id; dirty = false;
+      setTemplate(props.repository?.importTemplate ?? ""); setPreview(null); setCounts(null);
+      setRebuildProgress(null); setRebuilt(null); setError(null);
+    }
+    void db.repositoryCounts(id).then(value => { if (current()) setCounts(value); }).catch(() => {});
+    if (props.repository?.online !== true) { setLoading(false); setError(null); return; }
+    setLoading(true); setError(null);
+    void db.repositorySettings(id).then(async settings => {
+      if (!current()) return;
+      if (!dirty) setTemplate(settings.importTemplate);
+      const value = await db.previewTemplate(template()).catch(() => null);
+      if (current()) setPreview(value);
+    }).catch(() => {
+      if (current()) { setError(t("repo.location_error.connection_lost")); props.onStale?.(id); }
+    }).finally(() => { if (current()) setLoading(false); });
+  }));
 
   /** 改模版 → 顺手问一次预览（Rust 侧的纯函数命令，很快）。 */
   function onTemplateInput(value: string): void {
+    dirty = true;
     setTemplate(value);
+    const id = props.repositoryId;
     void db
       .previewTemplate(value)
-      .then(setPreview)
-      .catch(() => setPreview(null));
+      .then(result => { if (props.open && props.repositoryId === id && template() === value) setPreview(result); })
+      .catch(() => { if (props.open && props.repositoryId === id && template() === value) setPreview(null); });
   }
 
   /** 变量 chip：插到光标处（没聚焦就追加到末尾）。 */
@@ -139,24 +179,27 @@ export function LibrarySettingsDialog(props: LibrarySettingsDialogProps) {
 
   async function save(): Promise<void> {
     const id = props.repositoryId;
-    if (id === null || saving()) return;
+    if (id === null || !canSave()) return;
+    const epoch = dialogEpoch;
+    const current = () => epoch === dialogEpoch && props.open && props.repositoryId === id;
     setSaving(true);
     setError(null);
     try {
       const saved = await db.setRepositoryTemplate(id, template());
+      if (!current()) return;
       props.onSaved?.(saved.importTemplate);
       props.onOpenChange(false);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
+      if (current()) setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
-      setSaving(false);
+      if (current()) setSaving(false);
     }
   }
 
   /** 真跑一次重建，把结果拼成一句人话（数字都在里面，不假装「已优化」）。 */
   async function runRebuild(): Promise<void> {
     const id = props.repositoryId;
-    if (id === null || rebuilding()) return;
+    if (id === null || offline() || rebuilding()) return;
     setRebuildOpen(false);
     setRebuilding(true);
     setRebuilt(null);
@@ -215,7 +258,7 @@ export function LibrarySettingsDialog(props: LibrarySettingsDialogProps) {
     props.repository?.imagesCount ?? counts()?.[1] ?? null;
 
   /** 离线时不给保存：改了也写不进去（`repository_settings` 本身就会失败） */
-  const offline = (): boolean => props.repository?.online === false;
+  const offline = (): boolean => props.repository?.online !== true;
 
   const canSave = () =>
     !saving() &&
@@ -228,6 +271,7 @@ export function LibrarySettingsDialog(props: LibrarySettingsDialogProps) {
       open={props.open}
       onOpenChange={props.onOpenChange}
       title={t("repo.settings_title")}
+      class="max-h-[calc(100dvh-2rem)] overflow-y-auto"
       footer={
         <>
           <Button variant="secondary" onClick={() => props.onOpenChange(false)}>
@@ -245,22 +289,43 @@ export function LibrarySettingsDialog(props: LibrarySettingsDialogProps) {
       }
     >
       <div class="flex flex-col gap-3">
-        {/*
-          离线：一行说明 + 保存按钮禁用。
-          这条状态**不是这里自己判断的** —— 它来自中央状态里那一份（外面列表读的是同一份），
-          所以「弹窗说离线、列表说在线」这种自相矛盾不会出现。
-        */}
-        <Show when={offline()}>
-          <p class="flex items-start gap-1.5 text-fs-1 text-fg-2">
-            <IconCloudOff size={14} class="mt-0.5 shrink-0" aria-hidden="true" />
-            <span class="min-w-0">{t("repo.settings_offline")}</span>
-          </p>
-        </Show>
-        <p class="text-fs-1 text-fg-2">
-          {props.repositoryName === undefined
-            ? t("repo.settings_hint")
-            : t("repo.settings_hint_named", { name: props.repositoryName })}
-        </p>
+        <div class="flex flex-col gap-2 rounded-ui bg-surface-track p-3" data-repository-locations>
+          <p class="text-fs-2 text-fg-1">{t("repo.locations.title")}</p>
+          <p class="text-fs-1 text-fg-2">{t("repo.locations.hint")}</p>
+          <Show when={offline()}><p class="flex items-center gap-1.5 text-fs-1 text-fg-2"><IconCloudOff size={14} />{t("repo.settings_offline")}</p></Show>
+          <For each={props.repository?.paths ?? []} fallback={<p class="text-fs-1 text-fg-3">{t("repo.locations.empty")}</p>}>
+            {position => <div class="flex min-w-0 items-center gap-2" data-repository-position={position.path}>
+              <div class="min-w-0 flex-1">
+                <EasyCopy value={position.path} class="max-w-full"><span class="min-w-0 break-all text-fs-1" title={position.path}>{position.path}</span></EasyCopy>
+                <p class="text-fs-0 text-fg-3">{t(currentPath(position.path) ? "repo.locations.current" : position.status === "offline" ? "repo.locations.missing" : position.status === "online" ? "repo.locations.available" : "repo.locations.unknown")}</p>
+              </div>
+              <Show when={!currentPath(position.path) && !releasing()}>
+                <Button variant="secondary" size="sm" disabled={changingLocation()} onClick={() => setUsePath(position.path)}>{t("repo.locations.use")}</Button>
+              </Show>
+              <span title={currentPath(position.path) ? t("repo.locations.in_use") : t("repo.locations.remove")}>
+                <Button variant="ghost" size="sm" disabled={changingLocation() || currentPath(position.path)} aria-label={t("repo.locations.remove")}
+                  onClick={event => { if (event.shiftKey) void locations.remove(position.path); else setRemovePath(position.path); }}>
+                  <IconBan size={14} />
+                </Button>
+              </span>
+            </div>}
+          </For>
+          <div class="flex gap-2">
+            <Button variant="primary" loading={changingLocation()} onClick={() => void locations.choose()} data-repository-locate>
+              {t(offline() ? "repo.locations.locate" : "repo.locations.add")}
+            </Button>
+            <Button variant="secondary" disabled={releasing() || changingLocation() || (props.repositoryId !== null && props.repositories?.isRemounting(props.repositoryId) === true)}
+              onClick={() => { const id = props.repositoryId; if (id !== null) { if (props.repositories) void props.repositories.remount(id); else props.onStale?.(id); } }}>
+              {t("repo.remount")}
+            </Button>
+          </div>
+          <Show when={locationError() !== null}><p role="status" class="text-fs-1 text-fg-2">{t(locationErrorKey(locationError()))}</p></Show>
+        </div>
+
+        <div class="flex items-center gap-3 rounded-ui bg-surface-track p-3" data-repository-release>
+          <p class="min-w-0 flex-1 text-fs-1 text-fg-2">{t(releasing() ? "repo.connection.releasing" : released() ? "repo.connection.released" : "repo.release_hint")}</p>
+          <Show when={!released()}><Button variant="secondary" loading={releasing()} disabled={changingLocation() || releasing()} onClick={() => setReleaseOpen(true)}>{t("repo.release")}</Button></Show>
+        </div>
 
         {/*
           两个计数（人类 2026-09-19）：**相片数量**不含 `_RAW/`，**图片数量**含 ——
@@ -318,7 +383,7 @@ export function LibrarySettingsDialog(props: LibrarySettingsDialogProps) {
               inputEl = el;
             }}
             value={template()}
-            disabled={loading()}
+            disabled={loading() || offline()}
             onInput={(event) => onTemplateInput(event.currentTarget.value)}
             onKeyDown={(event) => {
               if (event.key === "Enter") void save();
@@ -333,6 +398,7 @@ export function LibrarySettingsDialog(props: LibrarySettingsDialogProps) {
               <button
                 type="button"
                 class="cursor-pointer rounded-ui bg-surface-track px-1.5 py-0.5 text-fs-0 text-fg-2 hover:text-fg-1"
+                disabled={offline() || loading()}
                 onClick={() => insertVariable(name)}
               >
                 {name}
@@ -345,7 +411,7 @@ export function LibrarySettingsDialog(props: LibrarySettingsDialogProps) {
         <Show
           when={preview()?.ok}
           fallback={
-            <Show when={preview()?.error ?? error()}>
+            <Show when={!offline() && (preview()?.error ?? error())}>
               {(message) => <p class="text-fs-1 text-danger">{message()}</p>}
             </Show>
           }
@@ -363,10 +429,20 @@ export function LibrarySettingsDialog(props: LibrarySettingsDialogProps) {
           </For>
         </Show>
 
-        <Show when={error()}>
+        <Show when={!offline() && error()}>
           {(message) => <p class="text-fs-1 text-danger">{message()}</p>}
         </Show>
       </div>
+
+      <ConfirmDialog open={usePath() !== null} scrim={false} title={t("repo.locations.use")}
+        message={t("repo.locations.use_confirm", {path:usePath() ?? ""})} confirmLabel={t("common.confirm")}
+        onCancel={() => setUsePath(null)} onConfirm={() => { const path=usePath(); setUsePath(null); if (path !== null) void manageLocation(path); }} />
+      <ConfirmDialog open={releaseOpen()} scrim={false} title={t("repo.release")} message={t("repo.release_confirm")} confirmLabel={t("repo.release")}
+        onCancel={() => setReleaseOpen(false)} onConfirm={() => { setReleaseOpen(false); void manageLocation(null); }} />
+      <ConfirmDialog open={removePath() !== null} scrim={false}
+        title={t("repo.locations.remove_title")} message={t("repo.locations.remove_confirm", { path: removePath() ?? "" })}
+        confirmLabel={t("repo.locations.remove")} onCancel={() => setRemovePath(null)}
+        onConfirm={() => { const path = removePath(); setRemovePath(null); if (path !== null) void locations.remove(path); }} />
 
       {/*
         二级确认：**透明遮罩**（人类 2026-09-19）—— 一级窗口已经在压暗背景了，

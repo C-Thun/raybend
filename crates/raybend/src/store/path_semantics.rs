@@ -131,8 +131,28 @@ pub fn equivalent(a: &str, b: &str) -> bool {
 /// 是否为 UNC 路径（`\\server\share\...`）。
 #[must_use]
 pub fn is_unc(path: &str) -> bool {
-    let t = path.trim_start();
+    let location = location_path(path.trim_start());
+    let t = location.as_ref();
     t.starts_with("\\\\") || t.starts_with("//")
+}
+
+/// Windows 的扩展/设备命名空间前缀不是网络身份。仅供位置分类，
+/// 不改原始 I/O 路径或已持久化的 normalized/folded 键。
+pub(crate) fn location_path(path: &str) -> std::borrow::Cow<'_, str> {
+    let Some(rest) = [r"\\?\", r"\\.\", "//?/", "//./", r"\\?/", r"\\./"]
+        .iter()
+        .find_map(|prefix| path.strip_prefix(prefix))
+    else {
+        return std::borrow::Cow::Borrowed(path);
+    };
+    if rest
+        .get(..4)
+        .is_some_and(|head| head.eq_ignore_ascii_case(r"UNC\") || head.eq_ignore_ascii_case("UNC/"))
+    {
+        std::borrow::Cow::Owned(format!(r"\\{}", &rest[4..]))
+    } else {
+        std::borrow::Cow::Borrowed(rest)
+    }
 }
 
 /// 是否为（类）绝对路径：Windows 盘符、UNC、或 POSIX `/` 开头。
@@ -141,7 +161,11 @@ pub fn is_absolute_like(path: &str) -> bool {
     if is_unc(path) {
         return true;
     }
+    // Win32 扩展/设备命名空间本身也是绝对路径，即使不是 UNC。
     let t = path.trim_start();
+    if location_path(t).as_ref() != t {
+        return true;
+    }
     if t.starts_with('/') {
         return true;
     }
@@ -301,6 +325,30 @@ mod tests {
         assert!(!is_unc(r"C:\server\share"));
         // UNC 的规范化不能被当成 POSIX 的 //
         assert!(!equivalent(r"\\srv\share\a.jpg", "//srv/share/a.jpg"));
+    }
+
+    #[test]
+    fn windows_namespace_preserves_network_identity_without_changing_path_keys() {
+        for path in [
+            r"\\?\C:\照片",
+            r"\\.\C:\照片",
+            "//?/C:/照片",
+            r"\\?\Volume{01234567}\照片",
+        ] {
+            assert!(!is_unc(path), "{path}");
+            assert!(is_absolute_like(path), "{path}");
+        }
+        for path in [
+            r"\\?\UNC\nas\share\照片",
+            r"\\?\unc\nas\share",
+            "//?/UNC/nas/share",
+        ] {
+            assert!(is_unc(path), "{path}");
+        }
+        assert_eq!(location_path(r"\\?\C:\照片"), r"C:\照片");
+        assert_eq!(PathForms::new(r"\\?\C:\照片").normalized(), r"\\?/C:/照片");
+        assert_eq!(location_path("照片"), "照片");
+        assert_eq!(location_path(""), "");
     }
 
     #[test]

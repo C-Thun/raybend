@@ -26,6 +26,22 @@ import {
 } from "./store.ts";
 import { DEFAULT_TILE_STEP_INDEX, TILE_SIZE_STEPS } from "../../lib/tile-flow.ts";
 
+test("同路径离线与恢复保留选择并重读照片清单", async () => {
+  const f = fakeApi({ items: [item("甲.jpg")] }); const store = createPhotoGridStore({ api: f.api });
+  store.setSourceDir("/src"); await flush(); store.clickItem("/src/甲.jpg", "replace");
+  store.refreshSource(false); assert.equal(store.items().length, 1); assert.equal(store.selection().anchor, "/src/甲.jpg");
+  f.state.items = [item("甲.jpg"), item("乙.jpg")]; store.refreshSource(true); await flush();
+  assert.equal(store.items().length, 2); assert.equal(store.selection().anchor, "/src/甲.jpg");
+  assert.equal(store.selectedCount(), 1); assert.equal(f.state.calls.filter(call => call.startsWith("scan:")).length, 2);
+});
+
+test("离线使在途扫描失效，不把迟到清单当当前盘内容", async () => {
+  const f = fakeApi({ items: [item("甲.jpg")] }); const store = createPhotoGridStore({ api: f.api });
+  store.setSourceDir("/src"); await flush(); f.state.holdScan = true;
+  store.refreshSource(true); store.refreshSource(false); f.state.items = [item("旧盘.jpg")]; f.release(); await flush();
+  assert.equal(store.items()[0]?.fileName, "甲.jpg"); assert.equal(store.error(), null);
+});
+
 const CST = 480;
 
 function item(name: string, takenAtMs: number | null = null): SourceItem {

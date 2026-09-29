@@ -3,8 +3,8 @@
 //! 为什么要有它：**把 SQLite 库放在云同步盘或网络盘上，是 SQLite 数据损坏的头号来源**。
 //! 同步客户端会在文件被写入的过程中复制/回滚它，网络盘则可能在任何一次事务中途断开。
 //!
-//! 判定结果**只用来警告，不拒绝**（`specs/M1-2.md` §3.6）：用户可能确实想这么放
-//! （例如把整库放在挂载好的 NAS 上、并接受风险），程序该做的是**让他知道**。
+//! catalog 的创建、登记和打开按现行 AGENTS.md §6.4 拒绝已识别的网络/云同步位置。
+//! 来源读取仍可使用这些位置；未知位置及客户端改名的识别限制需如实说明。
 //!
 //! 判定分三层，从最可靠到最不可靠：
 //!
@@ -76,7 +76,8 @@ pub fn classify(path: impl AsRef<str>) -> LocationKind {
     if raw.trim().is_empty() {
         return LocationKind::Unknown;
     }
-    let forms = PathForms::new(raw);
+    let location = path_semantics::location_path(raw);
+    let forms = PathForms::new(&location);
     let normalized = forms.normalized();
 
     // ① UNC / 双斜杠开头：一定是网络位置
@@ -330,6 +331,31 @@ pub fn catalog_suitability(path: impl AsRef<str>) -> Option<LocationKind> {
     kind.is_risky_for_database().then_some(kind)
 }
 
+/// catalog 的硬边界；来源读取不调用此函数。
+pub fn require_catalog_location(root: &Path) -> crate::Result<()> {
+    if catalog_suitability(root.to_string_lossy()).is_some() {
+        return Err(crate::Error::UnsupportedCatalogLocation(root.to_path_buf()));
+    }
+    // 实际位置也核对，防符号链接/联接目录绕过分类；新建位置只向上
+    // 找最近存在的祖先，不扫目录内容。权限错误按真实原因传回。
+    for ancestor in root.ancestors() {
+        if ancestor.as_os_str().is_empty() {
+            continue;
+        }
+        match ancestor.canonicalize() {
+            Ok(actual) => {
+                if catalog_suitability(actual.to_string_lossy()).is_some() {
+                    return Err(crate::Error::UnsupportedCatalogLocation(actual));
+                }
+                break;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(())
+}
+
 /// 路径是否看起来像个盘/目录（用于提示文案，不做 I/O）。
 #[must_use]
 pub fn is_probably_a_directory_path(path: &str) -> bool {
@@ -350,6 +376,23 @@ mod tests {
 
     // ---------- UNC ----------
 
+    #[cfg(unix)]
+    #[test]
+    fn catalog_symlink_into_cloud_directory_is_rejected_but_sources_can_classify_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let cloud = dir.path().join("Dropbox");
+        std::fs::create_dir(&cloud).unwrap();
+        let link = dir.path().join("普通目录");
+        std::os::unix::fs::symlink(&cloud, &link).unwrap();
+        assert!(matches!(
+            require_catalog_location(&link.join("新库")),
+            Err(crate::Error::UnsupportedCatalogLocation(_))
+        ));
+        assert!(matches!(
+            classify(cloud.to_string_lossy()),
+            LocationKind::CloudSync { .. }
+        ));
+    }
     #[test]
     fn unc_paths_are_network() {
         for p in [
@@ -366,6 +409,31 @@ mod tests {
     fn drive_paths_are_not_confused_with_unc() {
         let k = classify(r"C:\照片");
         assert_eq!(k, LocationKind::Local, "{k:?}");
+    }
+
+    #[test]
+    fn extended_windows_local_paths_are_not_network_but_unc_and_cloud_still_are() {
+        for path in [
+            r"\\?\C:\照片",
+            "//?/C:/照片",
+            r"\\.\C:\照片",
+            r"\\?\Volume{01234567}\照片",
+        ] {
+            assert_eq!(classify(path), LocationKind::Local, "{path}");
+        }
+        for path in [
+            r"\\?\UNC\nas\share\照片",
+            r"\\?\unc\nas\share",
+            "//?/UNC/nas/share",
+        ] {
+            assert_eq!(classify(path), LocationKind::Network, "{path}");
+        }
+        assert_eq!(
+            classify(r"\\?\C:\Users\me\OneDrive\照片").provider(),
+            Some("OneDrive")
+        );
+        let long = format!(r"\\?\C:\{}照片", "长目录\\".repeat(100));
+        assert_eq!(classify(long), LocationKind::Local);
     }
 
     // ---------- 云同步 ----------
@@ -571,6 +639,8 @@ server:/x /media/disk/远程 nfs rw 0 0
         let k = classify_existing(dir.path());
         // 临时目录通常是 tmpfs 或 overlay，都属于本地
         assert!(!k.is_risky_for_database() || k.code() == "network", "{k:?}");
+        #[cfg(windows)]
+        require_catalog_location(dir.path()).unwrap(); // canonicalize 返回 \\?\C:\…，仍须接受本地库。
     }
 
     #[test]

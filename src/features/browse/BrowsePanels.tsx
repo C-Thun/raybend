@@ -81,6 +81,7 @@ export interface BrowseLeftColumnProps {
   onOpenSettings?: (repositoryId: string) => void;
   /** 点离线图标：对登记过的路径重新找一遍（与导入侧同一套语义）。 */
   onRemount?: (repositoryId: string) => void;
+  isRemounting?: (id: string) => boolean;
   class?: string;
 }
 
@@ -447,7 +448,7 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
         ].join(" ")}
         style={!libsOpen() && compact().clipped ? { height: listHeightStyle(true) } : undefined}
       >
-        <Show when={props.reposLoading === true}>
+        <Show when={props.reposLoading === true && props.repositories.length === 0}>
           <p class="px-1 py-2 text-fs-2 text-fg-3">{t("browse.reposLoading")}</p>
         </Show>
         <Show when={(props.reposError ?? "") !== ""}>
@@ -479,6 +480,8 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
                 displayPath={repo().displayPath}
                 photosCount={repo().photosCount}
                 online={repo().online}
+                connection={repo().connection}
+                remounting={props.isRemounting?.(repo().id) ?? false}
                 selected={store.repositoryId() === repo().id}
                 locale={locale()}
                 onSelect={() => selectRepository(repo().id)}
@@ -751,6 +754,7 @@ function EditableField(props: {
   label: string;
   value: string | null;
   placeholder: string;
+  disabled?: boolean;
   onCommit: (value: string) => void;
 }): JSX.Element {
   const [editing, setEditing] = createSignal(false);
@@ -758,6 +762,7 @@ function EditableField(props: {
   let inputEl: HTMLInputElement | undefined;
 
   const begin = (): void => {
+    if (props.disabled) return;
     setDraft(props.value ?? "");
     setEditing(true);
     queueMicrotask(() => {
@@ -767,7 +772,7 @@ function EditableField(props: {
   };
 
   const commit = (): void => {
-    if (!editing()) return;
+    if (!editing() || props.disabled) return;
     setEditing(false);
     const next = draft().trim();
     if (next === (props.value ?? "")) return;
@@ -782,6 +787,7 @@ function EditableField(props: {
         fallback={
           <button
             type="button"
+            disabled={props.disabled}
             class="min-w-0 flex-1 cursor-text truncate text-left text-fs-2 text-fg-1 hover:text-brand"
             title={props.value ?? props.placeholder}
             onClick={begin}
@@ -799,6 +805,7 @@ function EditableField(props: {
           class="min-w-0 flex-1 rounded-ui bg-surface-bar px-1.5 py-0.5 text-fs-2 text-fg-1 outline-none"
           value={draft()}
           aria-label={props.label}
+          disabled={props.disabled}
           onInput={(event) => setDraft(event.currentTarget.value)}
           onBlur={commit}
           onKeyDown={(event) => {
@@ -997,12 +1004,14 @@ export function AssetInfo(props: AssetInfoProps) {
             <Field label={t("browse.fieldPath")} value={item()!.relPath} />
             <Field label={t("browse.fieldRepository")} value={props.repositoryName ?? null} />
             <EditableField
+              disabled={!props.store.canWrite()}
               label={t("browse.fieldAuthor")}
               value={item()!.author}
               placeholder={t("browse.fieldEmpty")}
               onCommit={(value) => void props.store.setText("author", value)}
             />
             <EditableField
+              disabled={!props.store.canWrite()}
               label={t("browse.fieldDescription")}
               value={item()!.description}
               placeholder={t("browse.fieldEmpty")}
@@ -1023,24 +1032,28 @@ export function AssetInfo(props: AssetInfoProps) {
           <div class="flex flex-col gap-1.5">
             <Field label={t("browse.fieldGps")} value={gpsText()} />
             <EditableField
+              disabled={!props.store.canWrite()}
               label={t("browse.fieldCountry")}
               value={item()!.country}
               placeholder={t("browse.fieldEmpty")}
               onCommit={(value) => void props.store.setText("country", value)}
             />
             <EditableField
+              disabled={!props.store.canWrite()}
               label={t("browse.fieldProvince")}
               value={item()!.provinceState}
               placeholder={t("browse.fieldEmpty")}
               onCommit={(value) => void props.store.setText("provinceState", value)}
             />
             <EditableField
+              disabled={!props.store.canWrite()}
               label={t("browse.fieldCity")}
               value={item()!.city}
               placeholder={t("browse.fieldEmpty")}
               onCommit={(value) => void props.store.setText("city", value)}
             />
             <EditableField
+              disabled={!props.store.canWrite()}
               label={t("browse.fieldSublocation")}
               value={item()!.sublocation}
               placeholder={t("browse.fieldEmpty")}

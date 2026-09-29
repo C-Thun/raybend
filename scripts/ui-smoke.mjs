@@ -875,10 +875,8 @@ try {
   }
 
   /*
-   * 库卡片（M1-9）：**在线 = 齿轮**（开库设置）、**离线 = 离线图标**（点它重新查找），
-   * 而且**两者都不带可见文字** —— 人类 2026-09-16 的原话：
-   * 「离线不要做成现在这样带文字的……点击离线图标检查是否上线」。
-   * 顺带在这里证明「库设置」真的接线了：点齿轮必须弹出弹窗、里面有模版输入框。
+   * 库卡片：所有状态保留齿轮，离线状态图标负责重查，两行卡片无状态文字。
+   * 离线设置仍能显示位置，仅模版保存/重建等依赖 catalog 的操作禁用。
    */
   const repoCards = await evaluate(`(async () => {
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -893,6 +891,7 @@ try {
 
     const out = {
       gearCount: gear.length,
+      cardCount: demo.querySelectorAll('[role=option]').length,
       offlineCount: offline.length,
       offlineText: offline.length > 0 ? offline[0].textContent.trim() : null,
       visibleText: demo.innerText.replace(/\\s+/g, " ").trim().slice(0, 120),
@@ -917,14 +916,23 @@ try {
     document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
     await sleep(300);
     out.settingsClosed = document.querySelector('[data-scope="dialog"][data-part="content"]') === null;
+    gear[1]?.click();
+    await sleep(300);
+    const offlineSettings = document.querySelector('[data-scope="dialog"][data-part="content"]');
+    out.offlineSettingsOpen = offlineSettings !== null;
+    out.offlineLocations = offlineSettings?.querySelector('[data-repository-locations]')?.textContent.includes('E:\\\\Backup\\\\Photos') ?? false;
+    out.offlineTemplateDisabled = offlineSettings?.querySelector('input')?.disabled ?? false;
+    out.offlineLocateEnabled = offlineSettings?.querySelector('[data-repository-locate]')?.disabled === false;
+    document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    await sleep(300);
     return out;
   })()`);
 
   if (repoCards === null) {
     problems.push("画廊里没有库卡片样例（data-demo=repo-cards）");
   } else {
-    if (repoCards.gearCount < 1) {
-      problems.push("在线的库卡片上没有齿轮（库设置入口）——「配置功能没实装」就是这个症状");
+    if (repoCards.gearCount !== repoCards.cardCount || repoCards.cardCount < 2) {
+      problems.push("库卡片没有在所有连接状态保留齿轮");
     }
     if (repoCards.offlineCount < 1) {
       problems.push("离线的库卡片上没有离线图标");
@@ -944,6 +952,9 @@ try {
       problems.push("点齿轮没有打开库设置弹窗");
     } else if (!repoCards.hasTemplateInput || !repoCards.templateValue) {
       problems.push("库设置弹窗里没有导入模版输入框（或没读到当前模版）");
+    }
+    if (!repoCards.offlineSettingsOpen || !repoCards.offlineLocations || !repoCards.offlineTemplateDisabled || !repoCards.offlineLocateEnabled) {
+      problems.push("离线库设置没有完整接通位置区，或依赖连接的操作未禁用");
     }
   }
 

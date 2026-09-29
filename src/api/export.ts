@@ -55,7 +55,7 @@ export async function getExportVariantImage(
 }
 
 export interface ExportQueueView {revision:number;generation:number;queues:Record<string,import("../lib/export-model.ts").ExportQueueItem[]>;enabled:string[]}
-export type ExportQueueAction="status"|"enqueue"|"enable"|"disable"|"stop"|"reset"|"remove"|"retry";
+export type ExportQueueAction="wake"|"status"|"enqueue"|"enable"|"disable"|"stop"|"reset"|"remove"|"retry";
 export async function exportQueue(action:ExportQueueAction,payload:Record<string,unknown>={}):Promise<ExportQueueView> {
   return isTauriRuntime()?call("export_queue",{action,generation:null,items:null,presetId:null,ids:null,...payload}):{revision:0,generation:0,queues:{},enabled:[]};
 }

@@ -31,6 +31,7 @@
 //! ```
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use rusqlite::Connection;
 
@@ -209,6 +210,7 @@ impl AppDb {
         root: &Path,
         now_ms: i64,
     ) -> Result<()> {
+        super::location::require_catalog_location(root)?;
         let meta = meta.clone();
         let root = root.to_string_lossy().into_owned();
         self.write_tx(move |tx| {
@@ -243,6 +245,7 @@ pub struct CatalogDb {
     writer: Writer,
     meta: RepositoryMeta,
     report: OpenReport,
+    guard: Arc<super::session::SessionGuard>,
 }
 
 impl CatalogDb {
@@ -251,29 +254,53 @@ impl CatalogDb {
     /// 缺文件 / 不是库 → 明确的错误；库更新 → [`Error::SchemaTooNew`]（拒绝打开）。
     pub fn open(root: impl AsRef<Path>, opts: OpenOpts<'_>) -> Result<Self> {
         let root = root.as_ref();
-        let path = root.join(repository::CATALOG_FILE_NAME);
-        if !path.is_file() {
+        if !root.join(repository::CATALOG_FILE_NAME).is_file() {
             return Err(Error::NotARepository {
-                path: root.to_path_buf(),
-                reason: format!("目录下没有 {}", repository::CATALOG_FILE_NAME),
+                path: root.into(),
+                reason: "目录下没有 catalog.db".into(),
             });
         }
-        // 先在只读连接上确认身份（避免对「不是库」的目录做迁移这种重活）
-        let meta = repository::read_repository_meta(&path)?;
+        let meta = repository::read_repository_meta(&root.join(repository::CATALOG_FILE_NAME))?;
+        Self::open_session(root, &meta.id, 0, opts)
+    }
 
-        let outcome = migrate_file(
-            &path,
+    pub fn open_expected(root: impl AsRef<Path>, id: &str, opts: OpenOpts<'_>) -> Result<Self> {
+        Self::open_session(root.as_ref(), id, 0, opts)
+    }
+
+    pub(crate) fn open_session(
+        root: &Path,
+        id: &str,
+        generation: u64,
+        opts: OpenOpts<'_>,
+    ) -> Result<Self> {
+        super::location::require_catalog_location(root)?;
+        let path = root.join(repository::CATALOG_FILE_NAME);
+        let guard = Arc::new(super::session::SessionGuard::new(&path, id, generation));
+        guard.check()?;
+        // 不带 CREATE；在将用于迁移、写线程的实际连接上核对身份。
+        let mut conn =
+            Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+        let meta = repository::RepositoryMeta::read(&conn, &path)?;
+        if meta.id != id {
+            return Err(Error::RepositoryIdentityChanged(path));
+        }
+        pragma::apply(&conn, false)?;
+        let outcome = migration::apply(
+            &mut conn,
             DbKind::Catalog,
-            backups_for(&opts, &meta.id),
+            backups_for(&opts, id),
             opts.now_ms,
-            false,
         )?;
+        guard.check()?;
         let pool = ReadPool::open(&path)?;
-        let writer = Writer::open(&path)?;
+        let writer = Writer::from_connection(path.clone(), conn)?;
+        guard.check()?;
         Ok(Self {
             pool,
             writer,
             meta,
+            guard,
             report: OpenReport {
                 path,
                 migration: Some(outcome),
@@ -289,27 +316,34 @@ impl CatalogDb {
         opts: OpenOpts<'_>,
     ) -> Result<Self> {
         let root = root.as_ref();
+        super::location::require_catalog_location(root)?;
         let path = root.join(repository::CATALOG_FILE_NAME);
         let meta = repository::create_or_open_catalog(&path, name, template, opts.now_ms)?;
+        Self::open_session(root, &meta.id, 0, opts)
+    }
 
-        let outcome = migrate_file(
-            &path,
-            DbKind::Catalog,
-            backups_for(&opts, &meta.id),
-            opts.now_ms,
-            false,
-        )?;
-        let pool = ReadPool::open(&path)?;
-        let writer = Writer::open(&path)?;
-        Ok(Self {
-            pool,
-            writer,
-            meta,
-            report: OpenReport {
-                path,
-                migration: Some(outcome),
-            },
-        })
+    pub fn physical_identity(&self) -> Option<super::file_id::FileId> {
+        self.guard.physical_identity()
+    }
+    pub fn generation(&self) -> u64 {
+        self.guard.generation()
+    }
+    pub fn ensure_current(&self) -> Result<()> {
+        self.guard.check()
+    }
+    pub fn ensure_alive(&self) -> Result<()> {
+        self.guard.check_active()
+    }
+    pub fn connection_failure(&self) -> Option<super::availability::ConnectionStatus> {
+        self.guard.failure()
+    }
+    pub fn invalidate(&self) {
+        self.guard.invalidate();
+    }
+    pub fn retire(&self) -> Result<()> {
+        self.invalidate();
+        self.pool.close();
+        self.writer.shutdown()
     }
 
     /// 库元信息。
@@ -338,7 +372,11 @@ impl CatalogDb {
 
     /// 读。
     pub fn read<T>(&self, f: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
-        self.pool.with(f)
+        self.ensure_current()?;
+        self.guard.observe(self.pool.with(|conn| {
+            self.guard.check_connection(conn)?;
+            f(conn)
+        }))
     }
 
     /// 写。
@@ -347,7 +385,23 @@ impl CatalogDb {
         T: Send + 'static,
         F: FnOnce(&mut Connection) -> Result<T> + Send + 'static,
     {
-        self.writer.run(f)
+        let result = self
+            .enqueue_write(f)
+            .and_then(|reply| reply.recv().map_err(|_| Error::WriterGone)?);
+        self.guard.observe(result)
+    }
+    fn enqueue_write<T, F>(&self, f: F) -> Result<std::sync::mpsc::Receiver<Result<T>>>
+    where
+        T: Send + 'static,
+        F: FnOnce(&mut Connection) -> Result<T> + Send + 'static,
+    {
+        self.ensure_current()?;
+        let guard = Arc::clone(&self.guard);
+        self.writer.enqueue(move |conn| {
+            guard.check()?;
+            guard.check_connection(conn)?;
+            guard.observe(f(conn))
+        })
     }
 
     /// 事务写。
@@ -356,7 +410,12 @@ impl CatalogDb {
         T: Send + 'static,
         F: FnOnce(&rusqlite::Transaction<'_>) -> Result<T> + Send + 'static,
     {
-        self.writer.transaction(f)
+        self.write(move |conn| {
+            let tx = conn.transaction()?;
+            let out = f(&tx)?;
+            tx.commit()?;
+            Ok(out)
+        })
     }
 
     /// 等写落盘。
@@ -392,11 +451,16 @@ pub(crate) fn migrate_file(
     now_ms: i64,
     create_if_missing: bool,
 ) -> Result<MigrationOutcome> {
-    let _ = create_if_missing;
     if !create_if_missing && !path.is_file() {
         return Err(Error::PathNotFound(path.to_path_buf()));
     }
-    let mut conn = Connection::open(path)?;
+    let flags = rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
+        | if create_if_missing {
+            rusqlite::OpenFlags::SQLITE_OPEN_CREATE
+        } else {
+            rusqlite::OpenFlags::empty()
+        };
+    let mut conn = Connection::open_with_flags(path, flags)?;
     pragma::apply(&conn, false)?;
     let outcome = migration::apply(&mut conn, kind, backups, now_ms)?;
     Ok(outcome)
@@ -720,5 +784,35 @@ mod tests {
         // 现在这个路径上是 B → A 离线、B 在线（判据是文件里的 ID，不是路径）
         assert!(app.resolve_repository(&b.meta().id).unwrap().is_online());
         assert!(!app.resolve_repository(&a_id).unwrap().is_online());
+    }
+    #[test]
+    fn already_queued_write_is_rejected_at_execution_and_running_write_returns_actual_result() {
+        let dir = tmp();
+        let db = CatalogDb::create(dir.path(), "排队", None, OpenOpts::new(None, T0)).unwrap();
+        let (started, start_rx) = std::sync::mpsc::channel();
+        let (release, release_rx) = std::sync::mpsc::channel();
+        let first = db
+            .enqueue_write(move |conn| {
+                let transaction = conn.transaction()?;
+                repository::write_meta(&transaction, repository::META_NAME, "已提交")?;
+                started.send(()).unwrap();
+                release_rx.recv().unwrap();
+                transaction.commit()?;
+                Ok(7)
+            })
+            .unwrap();
+        start_rx.recv().unwrap();
+        let queued = db
+            .enqueue_write(|conn| repository::write_meta(conn, repository::META_NAME, "不能写入"))
+            .unwrap();
+        db.invalidate();
+        release.send(()).unwrap();
+        assert_eq!(first.recv().unwrap().unwrap(), 7);
+        assert!(matches!(queued.recv().unwrap(), Err(Error::SessionExpired)));
+        db.retire().unwrap();
+        assert_eq!(
+            repository::read_repository_meta(db.path()).unwrap().name,
+            "已提交"
+        );
     }
 }

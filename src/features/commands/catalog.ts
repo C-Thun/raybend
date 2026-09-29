@@ -81,6 +81,7 @@ export interface CommandDeps {
   openTags: () => void;
   openLibrarySettings: () => void;
   openNewRepository: () => void;
+  repository?: { canRelease?: () => boolean; release?: () => void; canReconnect: () => boolean; reconnect: () => void; canSettings?: () => boolean; canLocate?: () => boolean; locate?: () => void };
 
   /* ── 网格显示（两个工作区共用命令契约，偏好按作用域隔离） ───── */
   display: {
@@ -234,8 +235,31 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       group: "file",
       menu: "file",
       scope: "global",
-      enabled: () => deps.browse.repositoryId() !== null,
+      defaultKey: undefined,
+      enabled: () => deps.repository?.canSettings?.() ?? deps.browse.repositoryId() !== null,
       run: () => deps.openLibrarySettings(),
+    }),
+    spec({
+      id: "repository.reconnect",
+      titleKey: "cmd.repository.reconnect",
+      group: "file", menu: "file", scope: "global",
+      // 低频维护，通过 Ctrl+K/文件菜单可达，不占照片操作键。
+      defaultKey: undefined,
+      enabled: () => deps.repository?.canReconnect() ?? false,
+      run: () => deps.repository?.reconnect(),
+    }),
+    spec({
+      id: "repository.release", titleKey: "cmd.repository.release", group: "file", menu: "file", scope: "global",
+      // 低频且需确认，避免误触；通过菜单和命令面板可达。
+      defaultKey: undefined, enabled: () => deps.repository?.canRelease?.() ?? false, run: () => deps.repository?.release?.(),
+    }),
+    spec({
+      id: "repository.locate", titleKey: "cmd.repository.locate",
+      group: "file", menu: "file", scope: "global",
+      // 低频位置维护，通过 Ctrl+K/文件菜单可达，不占照片操作键。
+      defaultKey: undefined,
+      enabled: () => deps.repository?.canLocate?.() ?? false,
+      run: () => deps.repository?.locate?.(),
     }),
     spec({
       id: "file.import",

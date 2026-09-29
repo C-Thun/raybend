@@ -15,6 +15,35 @@ import { test } from "node:test";
 import type { DirEntry } from "../../api/types.ts";
 import { createDirTreeStore } from "./store.ts";
 
+test("拔插刷新复用原始 Windows 根路径，展开意图保留", async () => {
+  const calls: string[] = [];
+  const store = createDirTreeStore({ loadDirs: async path => { calls.push(path); return []; } });
+  await store.expand("D:\\"); await store.refreshAll();
+  assert.deepEqual(calls, ["D:\\", "D:\\"]);
+  assert.equal(store.isExpanded("d:/"), true);
+});
+
+test("恢复作废迟到的目录读取并在同一单飞请求中补读", async () => {
+  const pending: Array<(rows: DirEntry[]) => void> = [];
+  const store = createDirTreeStore({ loadDirs: () => new Promise(done => pending.push(done)) });
+  const opening = store.expand("/甲"); const refreshing = store.refresh("/甲");
+  assert.equal(pending.length, 1); pending[0]!([dir("/甲/旧")]);
+  await new Promise(done => setImmediate(done));
+  assert.equal(store.childrenOf("/甲"), undefined);
+  assert.equal(pending.length, 2); pending[1]!([dir("/甲/新")]);
+  await Promise.all([opening, refreshing]); assert.equal(store.childrenOf("/甲")?.[0]?.path, "/甲/新");
+});
+
+test("大量展开目录恢复最多四个读取在途", async () => {
+  let active = 0, max = 0, hold = false;
+  const store = createDirTreeStore({ loadDirs: async () => {
+    if (!hold) return [];
+    active++; max = Math.max(max, active); await new Promise(done => setImmediate(done)); active--; return [];
+  } });
+  for (let i = 0; i < 15; i++) await store.expand(`/甲/${i}`);
+  hold = true; await store.refreshAll(); assert.equal(max, 4);
+});
+
 function dir(path: string): DirEntry {
   // 夹具默认「还有下一层」：与「未读过就乐观画箭头」的旧口径一致，测试意图不变
   return { path, name: path, hasChildren: true };

@@ -205,6 +205,24 @@ macOS 暂缓、Linux 空闲时先行（`memory/FUTURE.md` F1/F2）。
 
 ---
 
+## 10. 可卸载存储 W1–W4 —— 开发与 Agent 冒烟收口 ◐ 2026-09-29
+
+四波连续完成：统一 catalog 会话/状态、有界探测与永久齿轮；离线设置可定位换盘符后的同库位置，
+正常未找到用中性反馈；卷变化更新来源树/最近/勾选及同路径图片区，保留选择意图。
+导入/导出失联等待，恢复核对原实体，部分成功不重计；同 ID 多实体明确选择，活动任务不静默换根。
+主动释放排干本库任务/watcher/数据库，保留登记与文件，自动观察不能解除释放屏障。
+
+W1 修订稿和 W3/W4 补充 Pencil 稿均由崔总定案。全量 Rust 单元、前端 112 个文件级测试、质量门、
+导入/浏览/导出合成冒烟通过；Windows debug 主程序/worker 成套构建、资源与协议校验通过。
+规格 `specs/storage-recovery-w1.md` 至 `storage-recovery-w4.md`；证据分别为
+`implementations/2026-09-29_storage-recovery-w1-completion.md`、`2026-09-29_storage-recovery-w2.md`、
+`2026-09-29_storage-recovery-w3.md`、`2026-09-29_storage-recovery-w4.md`。
+
+真机拔插、换盘符、句柄退场、DPI/观感和真实照片仍待崔总统一验收，步骤见
+`docs/removable-storage-acceptance.md`。NAS 已有定位/状态/探测及文件操作/恢复接缝，实际协议未接。
+
+---
+
 > 以下两个附录为**历史路线归档**（原文照搬，仅随全仓更新了文件路径引用），
 > 2026-09-27 随本文件自 memory/PLAN.md 迁入。仅供参考，不是待办清单。
 

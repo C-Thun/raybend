@@ -408,6 +408,22 @@ commands panel、快捷键设置和标题栏菜单都是它的不同呈现。未
 
 ---
 
+### G23. NAS 来源与远程库的存储边界（2026-09-28 摸排建议，待决）
+
+崔总要求为可卸载来源/库的完善评估未来 NAS 接口。先复用本地恢复工作统一定位、结构化可用性、连接代次与库会话；来源侧扩展既有 `Scanner` / `FileOps`，不提前引入远程 SDK。**NAS 作导入源与 NAS 承载库是不同能力**；现行 catalog 不放网络盘/云同步位置的约束不变，远程库需另定 catalog 访问边界、身份与写入一致性。
+
+候选接口、现有缺口及取舍统一见 `implementations/2026-09-28_removable-storage-audit.md` §2.E / §4；原话在 `specs/storage-recovery-w1.md` 附录，决策索引为 `memory/REVIEW.md` R5-03。尚未选定协议、框架或排期。
+
+同日规划跟进：本地存储最小接缝随 `specs/storage-recovery-w1.md` 实施范围编排，专项路线见 `memory/PLAN.md` §1.1；这不代表 NAS 协议或远程 catalog 已进入实施范围。
+
+2026-09-29 W1–W4 工程落地：已有位置分类/端点提示、ConnectionStatus、共享 ProbeBudget 与
+CatalogSessions；来源扩展继续复用 Scanner/FileOps，长任务恢复通过 StorageRecovery 适配
+设备可用性并固定实体身份。没有引入远程 SDK 或空壳 provider 框架。后续远程实现应接入这些
+边界，另行确定远程对象身份与暂存/提交语义；本地 FileId 不直接当 NAS 对象身份。
+实际协议、认证、远程 catalog 与多机写入仍待决，证据见 W3/W4 实施记录。
+
+---
+
 ## H. 导入与浏览的界面演进
 
 > 这两项来自 2026-09-15 的界面设计评审，**当时明确不做**，但已确定是方向。

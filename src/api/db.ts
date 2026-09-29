@@ -32,6 +32,7 @@ import type {
   RebuildProgress,
   RepositoryProbe,
   RepositoryView,
+  RepositoryConnection,
   SourceScan,
   ThumbCacheStats,
   ThumbSize,
@@ -343,6 +344,17 @@ export async function probeRepository(path: string): Promise<RepositoryProbe> {
   return call<RepositoryProbe>("repository_probe", { path });
 }
 
+/** 仅验证并登记同库备用位置，不创建目录或 catalog。 */
+export async function addRepositoryLocation(repositoryId: string, path: string): Promise<RepositoryView> {
+  if (!isTauriRuntime()) throw new Error(t("common.desktop_only"));
+  return call<RepositoryView>("repository_add_location", { repositoryId, path });
+}
+/** 仅改本机位置登记；正在使用的根由后端会话闸门保护。 */
+export async function removeRepositoryLocation(repositoryId: string, path: string): Promise<RepositoryView> {
+  if (!isTauriRuntime()) throw new Error(t("common.desktop_only"));
+  return call<RepositoryView>("repository_remove_location", { repositoryId, path });
+}
+
 /** 一个库的设置（离线/打不开会抛错 —— 设置必须在线改）。 */
 export async function repositorySettings(
   repositoryId: string,
@@ -389,9 +401,17 @@ export async function createRepository(
 /** 重新挂载一个离线库；找不到**不是错误**（返回的 `online` 会是 false）。 */
 export async function remountRepository(
   repositoryId: string,
+  automatic = false,
 ): Promise<RepositoryView> {
   if (!isTauriRuntime()) throw new Error(t("common.desktop_only"));
-  return call<RepositoryView>("repository_remount", { repositoryId });
+  return call<RepositoryView>("repository_remount", { repositoryId, automatic });
+}
+
+export async function releaseRepository(repositoryId: string): Promise<RepositoryView> {
+  return call<RepositoryView>("repository_release", { repositoryId });
+}
+export async function useRepositoryLocation(repositoryId: string, path: string): Promise<RepositoryView> {
+  return call<RepositoryView>("repository_use_location", { repositoryId, path });
 }
 
 /**
@@ -555,4 +575,8 @@ export function onCatalogChanged(handler: (change: CatalogChange) => void): Prom
 }
 export function onCatalogDirty(handler: (change: {repositoryId: string; scopes: string[]}) => void): Promise<() => void> {
   return onTauriEvent("catalog://dirty", handler);
+}
+
+export function onRepositoryConnection(handler: (status: RepositoryConnection) => void): Promise<() => void> {
+  return onTauriEvent("repository://connection", handler);
 }

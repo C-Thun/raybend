@@ -89,6 +89,7 @@ pub async fn thumb_get<R: Runtime>(
     // 不能让这些同步工作占住 IPC executor，拖慢编辑换图与状态轮询。
     let handle = app.clone();
     let bytes = crate::source::blocking(move || {
+        let _permit=handle.state::<crate::browse::BrowseState>().path_task(&handle,Path::new(&path))?;
         let edit = edited_source(&handle, &path)?;
         let lens = edit.as_ref().and_then(|(asset, stack, _)| {
             crate::lens::render_correction(
@@ -179,6 +180,9 @@ pub(crate) fn render_profile_cached<R: Runtime>(
     app: &AppHandle<R>, asset: &ResolvedAsset,
     stack: &raybend::store::develop::DevelopStack, variant: &str,
 ) -> Result<Vec<u8>, String> {
+    let _permit=app.state::<crate::browse::BrowseState>().sessions.begin_task(&asset.repository_id).map_err(|e|e.to_string())?;
+    let catalog=app.state::<crate::browse::BrowseState>().lease(app,&asset.repository_id)?;
+    if catalog.root()!=asset.root { return Err(raybend::Error::SessionExpired.to_string()); }
     let cache = FullCache::open(&asset.root).map_err(|e| e.to_string())?;
     let full = develop::source_path_of(app, asset, stack.source_base)
         .ok_or_else(|| format!("latest 的 {} 源文件不存在", stack.source_base.as_str()))?;
@@ -213,6 +217,7 @@ pub(crate) fn render_profile_cached<R: Runtime>(
     )
     .map_err(|e| e.to_string())?
     .ok_or_else(|| format!("解不开这张照片：{}", full.display()))?;
+    catalog.ensure_current().map_err(|e|e.to_string())?;
     if let Err(error) = cache.write(asset.asset_id, &name, base, PIPELINE_VERSION, &thumb.data) {
         eprintln!("[develop] 大图缓存写失败（不影响显示）：{error}");
     }
@@ -239,6 +244,8 @@ pub async fn view_image<R: Runtime>(
     purpose: Option<String>,
 ) -> Result<tauri::ipc::Response, String> {
     let text = purpose.as_deref().unwrap_or("screen");
+    let handle=app.clone(); let task_path=path.clone();
+    let _permit = crate::source::blocking(move || handle.state::<crate::browse::BrowseState>().path_task(&handle,Path::new(&task_path))).await?;
     let purpose = ImagePurpose::parse(text).ok_or_else(|| format!("未知的取图用途：{text}"))?;
 
     /*
@@ -268,6 +275,7 @@ pub async fn view_image<R: Runtime>(
         state.get(&cache_dir, now)?
     };
     let bytes = crate::source::blocking(move || {
+        let _permit=app.state::<crate::browse::BrowseState>().path_task(&app,Path::new(&path))?;
         let request = ImageRequest::plain(Path::new(&path), purpose);
         let image = display::cached_image(&db, &request, time::now_millis())
             .map_err(|e| e.to_string())?
@@ -284,11 +292,12 @@ pub async fn view_image<R: Runtime>(
 /// 前端只拿到 86 个浮点采样去画曲线。取的是**像素口**的 `Screen` 档（长边 1920）RGB 像素，
 /// **不经过编码**（直方图只要像素；2026-09-24 起不再绕道字节）。
 #[tauri::command]
-pub async fn image_histogram(path: String, bins: Option<usize>) -> Result<HistogramDto, String> {
+pub async fn image_histogram<R:Runtime>(app:AppHandle<R>, path: String, bins: Option<usize>) -> Result<HistogramDto, String> {
     // 采样口径固定为 86（0 单独，其余每 3 级平均）；保留参数只为旧前端兼容。
     let _requested_bins = bins;
     let bins = DEFAULT_BINS;
     crate::source::blocking(move || {
+        let _permit=app.state::<crate::browse::BrowseState>().path_task(&app,Path::new(&path))?;
         let histogram = raybend::display::histogram_of_file(Path::new(&path), bins)
             .map_err(|e| e.to_string())?
             .unwrap_or_else(|| raybend::display::Histogram::empty(bins));

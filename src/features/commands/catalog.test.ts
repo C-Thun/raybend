@@ -139,3 +139,30 @@ test("M5 帮助动作共用回调，F1 无冲突，低频设置明确不占热�
  assert.deepEqual(calls,["help","licenses","welcome","updates"]);
  assert.deepEqual(detectConflicts(commands,{}).filter(c=>c.blocking&&c.commandIds.includes("help.docs")),[]);
 });
+
+test("库重新查找走统一动作，文件菜单可达且明确不占热键", () => {
+  let allowed = false, calls = 0;
+  const registry = createCommandRegistry({ repository: { canReconnect: () => allowed, reconnect: () => { calls++; } } } as unknown as CommandDeps);
+  const command = registry.find(item => item.id === "repository.reconnect");
+  assert.ok(command); assert.equal(command.defaultKey, undefined);
+  assert.equal(command.scope, "global"); assert.equal(command.menu, "file");
+  assert.equal(command.enabled?.(), false); allowed = true; assert.equal(command.enabled?.(), true);
+  command.run(); assert.equal(calls, 1);
+  assert.deepEqual(detectConflicts(registry, {}).filter(issue => issue.commandIds.includes(command.id)), []);
+});
+
+test("定位与设置按当前工作流库可达，离线不封死入口且不占默认键", () => {
+  let selected = true, busy = false, calls = 0;
+  const deps = { repository: { canReconnect: () => true, reconnect: () => {}, canSettings: () => selected,
+    canLocate: () => selected && !busy, locate: () => { calls++; } }, openLibrarySettings: () => { calls++; } } as unknown as CommandDeps;
+  const commands = createCommandRegistry(deps);
+  for (const id of ["file.repositorySettings", "repository.locate"]) {
+    const command = commands.find(item => item.id === id)!;
+    assert.equal(command.enabled?.(), true); assert.equal(command.defaultKey, undefined);
+    command.run(); assert.equal(command.menu, "file");
+    assert.deepEqual(detectConflicts(commands, {}).filter(issue => issue.commandIds.includes(id)), []);
+  }
+  assert.equal(calls, 2); busy = true;
+  assert.equal(commands.find(item => item.id === "repository.locate")!.enabled?.(), false);
+  selected = false; assert.equal(commands.find(item => item.id === "file.repositorySettings")!.enabled?.(), false);
+});

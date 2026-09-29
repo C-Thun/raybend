@@ -22,7 +22,7 @@ use std::path::Path;
 ///
 /// `file_id` 的 16 字节在 Windows 上是 `FILE_ID_INFO.FileId`；
 /// 在 Unix 上是 inode 号（高 8 字节为 0，保持同样 16 字节宽度便于统一存储）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 pub struct FileId {
     /// 卷序列号（Windows）或设备号（Unix `dev`）。
     pub volume_serial: u64,
@@ -125,8 +125,11 @@ mod platform {
     pub(super) fn read(path: &Path) -> Result<FileId, FileIdError> {
         use std::os::windows::io::AsRawHandle;
 
-        // 目录也要能打开：Rust 的 File::open 会带 FILE_FLAG_BACKUP_SEMANTICS
-        let file = std::fs::File::open(path)?;
+        // 目录身份也要能读：显式带 FILE_FLAG_BACKUP_SEMANTICS。
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS;
+        let file = std::fs::OpenOptions::new().read(true)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS).open(path)?;
         let mut info: FILE_ID_INFO = FILE_ID_INFO {
             VolumeSerialNumber: 0,
             FileId: windows_sys::Win32::Storage::FileSystem::FILE_ID_128 {
