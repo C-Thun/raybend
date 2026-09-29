@@ -76,9 +76,10 @@ const REPOSITORIES = [
         status: "unknown",
       },
     ],
-    photoCount: 8,
-    triesPathsPlaceholder: undefined,
+    photosCount: 8,
+    imagesCount: 8,
     triedPaths: 0,
+    connection: {repositoryId:"repro0000000000",state:"online",reason:null,root:"C:/Photos/demo",generation:"1",revision:"1",observedAt:1700000000000},
   },
   ...["第二个库", "第三个库", "第四个库", "第五个库"].map((name, i) => ({
     id: `repro000000000${i + 1}`,
@@ -90,9 +91,10 @@ const REPOSITORIES = [
     root: `C:\\Photos\\demo${i + 1}`,
     displayPath: `C:\\Photos\\demo${i + 1}`,
     paths: [],
-    photoCount: 3,
-    triesPathsPlaceholder: undefined,
+    photosCount: 3,
+    imagesCount: 3,
     triedPaths: 0,
+    connection: {repositoryId:`repro000000000${i+1}`,state:"online",reason:null,root:`C:/Photos/demo${i+1}`,generation:"1",revision:"1",observedAt:1700000000000},
   })),
 ];
 
@@ -200,7 +202,7 @@ const FIXTURES = {
 
 /** 1×1 的透明 PNG：缩略图/大图都拿它当字节（只看链路通不通，不看画质）。 */
 const ONE_PIXEL_PNG =
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGNgAAIAAAUAAXpeqz8AAAAASUVORK5CYII=";
 
 /*
  * 目录列表按**路径**回答（这是 2026-09-18 三条口径的观测点）：
@@ -365,6 +367,7 @@ try {
             window.__SETTING_CALLS.push(args);
           }
           const fixtures = window.__FIXTURES;
+          if (cmd === "repository_remount") return Promise.resolve(fixtures.repositories_list.find(row => row.id === args.repositoryId));
           if (cmd === "thumb_get" || cmd === "view_image") {
             // 前端 toBytes() 认 ArrayBuffer / Uint8Array / number[]，给哪个都行
             const raw = atob(${JSON.stringify(ONE_PIXEL_PNG)});
@@ -2773,6 +2776,65 @@ try {
     problems.push(
       `筛选态星标是阈值（≥3 星 ⇒ 1..3 颗点亮、4/5 不亮，实测 ${JSON.stringify(st)}）`,
     );
+  }
+
+  /*
+   * 锁是**一个循环键**（崔总 2026-09-28：一级/二级并成一颗）：
+   * 筛选态点三下 = 一级锁（辅色底）→ 二级锁（主色底）→ 不按锁筛选（回到未按下）。
+   * 按内容找按钮（锁 / 一级锁 / 二级锁），不靠 aria-label —— 那个随档位变。
+   */
+  const readLockButton = async () => {
+    const r = await send("Runtime.evaluate", {
+      expression: `(() => {
+        const findLock = () => [...document.querySelectorAll("[data-toolsbar] button")]
+          .find((b) => ["锁", "一级锁", "二级锁"].includes(b.textContent.trim()));
+        const b = findLock();
+        return b === undefined
+          ? null
+          : {
+              text: b.textContent.trim(),
+              pressed: b.getAttribute("aria-pressed"),
+              accent: b.className.includes("bg-brand-2"),
+              brand: b.className.includes("bg-brand") && !b.className.includes("bg-brand-2"),
+            };
+      })()`,
+      returnByValue: true,
+    });
+    return r.result?.value;
+  };
+  const clickLock = async () => {
+    await send("Runtime.evaluate", {
+      expression: `(() => {
+        const b = [...document.querySelectorAll("[data-toolsbar] button")]
+          .find((el) => ["锁", "一级锁", "二级锁"].includes(el.textContent.trim()));
+        b?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        return Boolean(b);
+      })()`,
+      returnByValue: true,
+    });
+    await sleep(500);
+  };
+  const lockStart = await readLockButton();
+  if (lockStart === null) {
+    problems.push("工具条上找不到合并后的锁循环键（锁 / 一级锁 / 二级锁）");
+  } else {
+    await clickLock();
+    const lock1 = await readLockButton();
+    if (lock1?.text !== "一级锁" || lock1.pressed !== "true" || lock1.accent !== true) {
+      problems.push(`筛选态第一下：一级锁 + 按下 + **辅色底**（实测 ${JSON.stringify(lock1)}）`);
+    }
+    await clickLock();
+    const lock2 = await readLockButton();
+    if (lock2?.text !== "二级锁" || lock2.pressed !== "true" || lock2.brand !== true) {
+      problems.push(`筛选态第二下：二级锁 + 按下 + **主色底**（实测 ${JSON.stringify(lock2)}）`);
+    }
+    await clickLock();
+    const lockOff = await readLockButton();
+    if (lockOff?.text !== "锁" || lockOff.pressed === "true") {
+      problems.push(
+        `筛选态第三下：回到**不按锁筛选**（未按下，不是「筛未锁」，实测 ${JSON.stringify(lockOff)}）`,
+      );
+    }
   }
   // 收尾：再点一次第 3 颗取消阈值，免得给后面的断言留条件
   await send("Runtime.evaluate", {
