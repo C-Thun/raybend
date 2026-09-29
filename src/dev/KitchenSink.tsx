@@ -620,6 +620,8 @@ export default function KitchenSink() {
                 位图 + RAW 的复合（`+RAW`）：展示的是 SOOC 位图，但同一张还有可编辑的 RAW。
                 它可点选（与下面那一排共用 `selectedTile`）—— 冒烟靠它验
                 「选中之后角标退场」那条（角标与信息条二选一）。
+                2026-09-29 起它还带 2 个定稿：左下「扇形卡片 + 数字」与右下 `+RAW`
+                同层同显隐，选中后两角标一起退场（冒烟两角一起断言）。
               */}
               <Tile
                 label="P1000027.JPG"
@@ -627,8 +629,29 @@ export default function KitchenSink() {
                 src={demoImage()}
                 aspect={3 / 2}
                 raw="plus"
+                issueCount={2}
                 selected={selectedTile() === 4}
                 onClick={() => setSelectedTile(4)}
+              />
+              {/*
+                左下角「编辑 / 定稿」标记的另两种形态（人类 2026-09-29 定）：
+                定稿数到顶（100）与「没定稿但编辑过」的毛笔。勾边样式与按 i 的
+                常显标记同款；显隐与 RAW 角标完全一致。
+              */}
+              <Tile
+                label="P1000028.RW2"
+                tag="RW2"
+                src={demoImage()}
+                aspect={4 / 3}
+                raw="raw"
+                issueCount={100}
+              />
+              <Tile
+                label="P1000029.JPG"
+                tag="JPG"
+                src={demoImage()}
+                aspect={3 / 4}
+                edited
               />
             <Row label="有图 / 选中 / 悬停">
               <Tile

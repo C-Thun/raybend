@@ -427,6 +427,16 @@ export interface AssetItem {
   orientation: number | null;
   sizeBytes: number | null;
   missing: boolean;
+  /**
+   * 命名定稿数（0–100；SOOC / RAW / latest 不计入）。
+   * tile 左下角：≥1 时显示定稿图标（扇形卡片）+ 这个数字。
+   */
+  issueCount: number;
+  /**
+   * 编辑过（编辑栈与原始源不同，判据在后端 `DevelopStack::is_empty`）。
+   * tile 左下角：没有定稿但编辑过时显示编辑图标（毛笔）。
+   */
+  edited: boolean;
 }
 
 /** 一页结果。 */

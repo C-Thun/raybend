@@ -37,6 +37,10 @@ export interface GridItem {
   isRaw?: boolean;
   /** 同一张还有 RAW → 角标 `+RAW` */
   hasRaw?: boolean;
+  /** 命名定稿数（0–100；SOOC/RAW/latest 不计入）→ 左下角定稿图标 + 数字（库内才有） */
+  issueCount?: number;
+  /** 编辑过且无定稿 → 左下角编辑图标（毛笔；库内才有） */
+  edited?: boolean;
   missing?: boolean;
   selectionFrame?: boolean;
   selectionLocked?: boolean;

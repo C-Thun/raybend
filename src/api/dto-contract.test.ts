@@ -286,6 +286,8 @@ const TEMPLATE_PREVIEW_KEYS = [
 
 const ASSET_ITEM_KEYS = [
   "hasRaw",
+  "edited",
+  "issueCount",
   "author",
   "description",
   "gpsLat",

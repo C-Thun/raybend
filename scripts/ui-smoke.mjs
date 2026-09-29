@@ -74,7 +74,13 @@ import { join } from "node:path";
 const requestedUrl = process.argv[2] ?? "http://localhost:1420/dev/kitchen-sink";
 // Full smoke checks the component gallery first, then navigates to the app shell.
 // An explicit app root should use that same route sequence, not assert gallery demos there.
-const requestedPage=new URL(requestedUrl);
+let requestedPage;
+try {
+  requestedPage = new URL(requestedUrl);
+} catch {
+  console.error(`✗ 传入的地址不是合法 URL：${requestedUrl}`);
+  process.exit(2);
+}
 const url=!process.argv.includes("--export-only") && requestedPage.pathname==="/"
   ? new URL("/dev/kitchen-sink",requestedPage).href : requestedUrl;
 const PORT = Number(process.env.CDP_PORT ?? 9333);
@@ -1280,6 +1286,20 @@ try {
               bottom: Math.round(rect.bottom - issueBox.bottom),
             }
           : null,
+        /*
+         * 左下角「编辑 / 定稿」标记（2026-09-29 实装）：结构判据与 RAW 角标同一套。
+         * 毛笔是「垫底副本 + 正稿」两层 svg，扇形卡片是一层 —— 认结构不认数量，svg 数只作诊断。
+         */
+        issueMark: issueSlot
+          ? {
+              inCorners: issueSlot.closest("[data-tile-corners]") !== null,
+              inPhotoBox: pictureBoxEl ? pictureBoxEl.contains(issueSlot) : null,
+              hasIcon: issueSlot.querySelector("svg") !== null,
+              svgCount: issueSlot.querySelectorAll("svg").length,
+              text: (issueSlot.textContent ?? "").trim(),
+              opacity: getComputedStyle(issueSlot).opacity,
+            }
+          : null,
       };
     };
     const out = tiles.map(describe);
@@ -1423,29 +1443,73 @@ try {
     }
 
     /*
-     * 左下角的**预留位**（人类 2026-09-22 让先留好，M3 的编辑 / issue 数用）。
+     * 左下角的标记位（人类 2026-09-22 预留、2026-09-29 实装为「编辑 / 定稿」标记）。
      *
      * 它必须每个 tile 都在，而且与右下角的 RAW 角标**镜像对应**（同一条水平线、
-     * 到左右边缘的距离相等）—— 将来往里放正式图标时就不用再算一遍距离。
+     * 到左右边缘的距离相等）—— 标记位锚在外框上，不随照片比例乱跑。
      */
     const missingSlot = tileGrid.tiles.filter((t) => t.issueSlot === null);
     if (missingSlot.length > 0) {
       problems.push(
-        `有 ${missingSlot.length} 个 tile 没有左下角的 issue 预留位（[data-tile-corner="issue"]）`,
+        `有 ${missingSlot.length} 个 tile 没有左下角的标记位（[data-tile-corner="issue"]）`,
       );
     }
     for (const tile of badged) {
       if (tile.issueSlot === null) continue;
       if (tile.issueSlot.bottom !== tile.badge.bottom) {
         problems.push(
-          `issue 预留位与 RAW 角标不在同一条水平线上（下 ${tile.issueSlot.bottom} vs ${tile.badge.bottom}）`,
+          `左下标记位与 RAW 角标不在同一条水平线上（下 ${tile.issueSlot.bottom} vs ${tile.badge.bottom}）`,
         );
       }
       if (tile.issueSlot.left !== tile.badge.right) {
         problems.push(
-          `issue 预留位与 RAW 角标到左右边缘的距离不对应（左 ${tile.issueSlot.left} vs 右 ${tile.badge.right}）`,
+          `左下标记位与 RAW 角标到左右边缘的距离不对应（左 ${tile.issueSlot.left} vs 右 ${tile.badge.right}）`,
         );
       }
+    }
+
+    /*
+     * 左下角「编辑 / 定稿」标记的内容与可见性（2026-09-29 实装）：
+     * 有定稿 → 扇形卡片 + 数字（1–100）；没定稿但编辑过 → 毛笔（无数字）。
+     * 结构判据与 RAW 角标同一套：在角落层里、不在照片盒里、可见、带图标。
+     */
+    const issueTiles = tileGrid.tiles.filter(
+      (t) => t.issueMark !== null && (t.issueMark.hasIcon || t.issueMark.text !== ""),
+    );
+    if (issueTiles.length === 0) {
+      problems.push("画廊里没有带「编辑 / 定稿」标记的样例 —— 左下角那几条断言没法量");
+    }
+    for (const tile of issueTiles) {
+      if (tile.issueMark.inCorners !== true) {
+        problems.push("编辑/定稿标记不在角落层（[data-tile-corners]）里 —— 它会跟着照片走");
+      }
+      if (tile.issueMark.inPhotoBox !== false) {
+        problems.push("编辑/定稿标记落在照片盒里了 —— 必须锚外框");
+      }
+      if (!tile.issueMark.hasIcon) {
+        problems.push("编辑/定稿标记里没有图标 —— 光一个数字不成标记");
+      }
+      if (!(Number(tile.issueMark.opacity) > 0)) {
+        problems.push(
+          `编辑/定稿标记不可见（opacity=${tile.issueMark.opacity}）—— 未指向未选中时它该常显`,
+        );
+      }
+    }
+    const numbered = issueTiles.filter((t) => t.issueMark.text !== "");
+    if (numbered.length === 0) {
+      problems.push("没有「定稿卡片 + 数字」形态的样例 —— 数字那条断言验不了");
+    }
+    for (const tile of numbered) {
+      const n = Number(tile.issueMark.text);
+      if (!Number.isInteger(n) || n < 1 || n > 100) {
+        problems.push(`定稿数字不在 1–100（读到 ${tile.issueMark.text}）—— 与序号体系的上限对不上`);
+      }
+    }
+    const brushed = issueTiles.filter(
+      (t) => t.issueMark.text === "" && t.issueMark.hasIcon,
+    );
+    if (brushed.length === 0) {
+      problems.push("没有「没定稿但编辑过」的毛笔形态样例 —— 互斥那条验不了");
     }
 
     for (const theme of ["dark", "light"]) {
@@ -1466,11 +1530,12 @@ try {
   }
 
   /*
-   * 角标与信息条**二选一**（人类 2026-09-22 重申「原来的功能不能丢」）：
-   * **选中之后角标必须退场** —— 否则它和底部那条文件名条同时亮着，右下角就成了双层。
+   * 角标与信息条**二选一**（人类 2026-09-22 重申「原来的功能不能丢」；
+   * 2026-09-29 起左下角的编辑/定稿标记**同套规则、一起退场**）：
+   * **选中之后两个角标都必须退场** —— 否则它们和底部那条文件名条同时亮着，两角就成了双层。
    *
-   * 用画廊里那张 `+RAW` 样例（它可点选）验一下。指向态在这里验不了
-   *（无头浏览器没有真鼠标），那条由 `check:browse` 的 hover 断言守着。
+   * 用画廊里那张 `+RAW` 样例（它可点选，2026-09-29 起还带 2 个定稿）验一下。
+   * 指向态在这里验不了（无头浏览器没有真鼠标），那条由 `check:browse` 的 hover 断言守着。
    */
   const selectBadgeTile = await evaluate(`(() => {
     const demo = document.querySelector('[data-demo="tile"]');
@@ -1480,12 +1545,16 @@ try {
     );
     if (!tile) return null;
     const before = tile.querySelector('[data-tile-badge="raw"]');
+    const issue = tile.querySelector('[data-tile-corner="issue"]');
     // ⚠️ 必须在 click **之前**读：Solid 的更新是同步的，点完这个元素就带上 hidden 了
     const beforeDisplay = before ? getComputedStyle(before).display : null;
+    const beforeIssue = issue ? getComputedStyle(issue).display : null;
     tile.click();
     return {
       hadBadge: before !== null,
+      hadIssue: issue !== null,
       beforeDisplay,
+      beforeIssue,
     };
   })()`);
   await sleep(200);
@@ -1497,9 +1566,11 @@ try {
     );
     if (!tile) return null;
     const badge = tile.querySelector('[data-tile-badge="raw"]');
+    const issue = tile.querySelector('[data-tile-corner="issue"]');
     return {
       selected: tile.getAttribute("aria-selected"),
       display: badge ? getComputedStyle(badge).display : null,
+      issueDisplay: issue ? getComputedStyle(issue).display : null,
       // 底部文件名条这时应当亮着（“二选一”的另一半）
       nameBar: (() => {
         const bar = tile.querySelector('[data-tile-bar="name"]');
@@ -1513,6 +1584,9 @@ try {
     if (selectBadgeTile.hadBadge !== true || selectBadgeTile.beforeDisplay === "none") {
       problems.push("点选之前 `+RAW` 角标就没显示（量不到“退场”这个变化）");
     }
+    if (selectBadgeTile.hadIssue !== true || selectBadgeTile.beforeIssue === "none") {
+      problems.push("点选之前左下角的定稿标记就没显示 —— 一起退场那条量不到变化");
+    }
     if (selectedBadgeState.selected !== "true") {
       problems.push("点了一下那张 `+RAW` 样例，但它没被选中");
     }
@@ -1520,6 +1594,12 @@ try {
       problems.push(
         `选中之后 RAW 角标还在（display=${selectedBadgeState.display}）—— ` +
           "角标与信息条必须二选一",
+      );
+    }
+    if (selectedBadgeState.issueDisplay !== "none") {
+      problems.push(
+        `选中之后左下角的定稿标记还在（display=${selectedBadgeState.issueDisplay}）—— ` +
+          "它必须与 RAW 角标一起退场（人类 2026-09-29）",
       );
     }
     if (selectedBadgeState.nameBar !== "1") {

@@ -106,6 +106,8 @@ M3-W6c 的定稿模型以当前 editor profile 为真相：`latest` 是自动保
 
 **issue 导出序号（2026-09-28，规格 `specs/export-issue-ordinal.md`）**：每个命名定稿带一个**每照片唯一的序号**（`issues.ordinal`，0–99，最多 100 个定稿、全满拒绝保存）；分配从 `assets.issue_counter` 游标顺找空位、绕圈复用删除留下的洞。导出文件名 = 模版主名 + 强制尾号：定稿 `I00`–`I99`、原片 `ISO`、RAW 标记 issue `IRA`、未匹配 latest `ILA`（latest 优先按哈希匹配已有定稿，匹配上按那个定稿的序号算——export tiles 的显示与导出同一口径）。
 
+**browse tiles 左下角的定稿标记（2026-09-29，完整口径 `memory/DESIGN.md` §12.9.2）**：有命名定稿 → 扇形卡片图标 + **定稿数（1–100，不含 SOOC/RAW/latest）**；没定稿但编辑过（编辑栈与原始源不同）→ 毛笔图标。数据由浏览分页查询带出（`AssetRow.issue_count` / `edited`），与缩略图「编辑过走编辑管线」的判据同一份。
+
 原先“切 issue 时保留旧 latest 供返回”的设想已由人类在 2026-09-26 明确替换为“编辑状态一变即更新 latest，包括选中 issue”；返回切换前状态走撤销/重做。
 
 ---

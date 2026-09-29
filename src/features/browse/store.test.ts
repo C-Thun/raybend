@@ -61,6 +61,8 @@ function item(id: number, overrides: Partial<AssetItem> = {}): AssetItem {
     orientation: 1,
     sizeBytes: 1000,
     missing: false,
+    issueCount: 0,
+    edited: false,
     ...overrides,
   };
 }

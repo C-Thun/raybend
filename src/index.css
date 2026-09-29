@@ -195,6 +195,17 @@ textarea,
   paint-order: stroke;
 }
 
+/*
+ * **描边型**图标的勾边底（Tile 左下角的毛笔）：Tabler 只有 filled 图标能用上面那招
+ * （`paint-order` 需要 fill 才成立），描边型得叠一层「粗描边、勾边色」的副本在正稿下面
+ * —— 两层同尺寸叠放，正稿在上用 `currentColor`（由 `.tile-info-text` 给浅色）。
+ * 不用 8 向 `drop-shadow`：大网格滚动时每个 tile 两个滤镜太奢侈。
+ */
+.tile-info-icon-under {
+  stroke: var(--tile-info-outline);
+  stroke-width: 3;
+}
+
 .tile-info-dot {
   box-shadow: 0 0 0 1px var(--tile-info-outline);
 }

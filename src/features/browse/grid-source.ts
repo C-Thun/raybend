@@ -205,6 +205,8 @@ export function browseSource(deps: BrowseSourceDeps): TilesSource {
       aspect: clampDisplayAspect(natural?.width ?? 0, natural?.height ?? 0),
       isRaw: item.isRaw,
       hasRaw: item.hasRaw,
+      issueCount: item.issueCount,
+      edited: item.edited,
       missing: item.missing,
       marks: {
         rating: item.rating,

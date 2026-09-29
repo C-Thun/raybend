@@ -707,6 +707,12 @@ function TileCell(props: {
         label={item()?.fileName ?? ""}
         tag={item()?.ext?.toUpperCase() ?? undefined}
         raw={rawMode()}
+        /*
+         * 左下角「编辑 / 定稿」标记（人类 2026-09-29）：与 RAW 角标同层同显隐。
+         * 两态互斥在 Tile 里判：有定稿就不显示毛笔。
+         */
+        issueCount={item()?.issueCount ?? 0}
+        edited={item()?.edited === true}
         aspect={props.source.aspectOf(id())}
         // 小尺寸档（96/120/144）星标退化成「一颗星 + 数字」
         compact={tileSize() <= 144}

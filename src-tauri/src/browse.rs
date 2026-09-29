@@ -426,6 +426,10 @@ pub struct AssetItem {
     pub orientation: Option<i64>,
     pub size_bytes: Option<i64>,
     pub missing: bool,
+    /// 命名定稿数（0–100；SOOC / RAW / latest 不计入）—— tile 左下角定稿图标旁的数字。
+    pub issue_count: u16,
+    /// 编辑过（编辑栈与原始源不同）—— 没有定稿时 tile 左下角显示编辑图标的判据。
+    pub edited: bool,
 }
 
 impl From<AssetRow> for AssetItem {
@@ -468,6 +472,8 @@ impl From<AssetRow> for AssetItem {
             orientation: row.orientation,
             size_bytes: row.size_bytes,
             missing: row.missing,
+            issue_count: row.issue_count,
+            edited: row.edited,
         }
     }
 }

@@ -40,6 +40,8 @@ function item(overrides: Partial<AssetItem> = {}): AssetItem {
     orientation: 1,
     sizeBytes: 20_000_000,
     missing: false,
+    issueCount: 0,
+    edited: false,
     ...overrides,
   };
 }

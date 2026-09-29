@@ -943,6 +943,38 @@ pub fn has_edits(conn: &Connection, asset_id: i64) -> Result<bool> {
     Ok(!load(conn, asset_id)?.is_empty())
 }
 
+/// 一批照片里**编辑过的那些**（浏览分页每行要带一个 `edited` 用，2026-09-29）。
+///
+/// 判据与 [`has_edits`] 完全同一份（`DevelopStack::is_empty`），不另立 SQL 判据 ——
+/// 这里只是把「哪些照片有栈」合成一趟 `IN` 查询，再对真正有栈的少数几张 `load`。
+/// 分页一次几十上百行，逐张 `load` 是纯浪费。
+///
+/// # Errors
+/// 数据库读失败。
+pub fn has_edits_batch(conn: &Connection, asset_ids: &[i64]) -> Result<Vec<i64>> {
+    let mut edited = Vec::new();
+    // SQLite 默认变量上限 999，按 500 一段切（分页远小于它，这里只是保险）
+    for chunk in asset_ids.chunks(500) {
+        let placeholders = vec!["?"; chunk.len()].join(",");
+        let sql = format!("SELECT asset_id FROM develop_stacks WHERE asset_id IN ({placeholders})");
+        let candidates: Vec<i64> = {
+            let mut statement = conn.prepare(&sql)?;
+            let mut rows = statement.query(rusqlite::params_from_iter(chunk.iter()))?;
+            let mut out = Vec::new();
+            while let Some(row) = rows.next()? {
+                out.push(row.get::<_, i64>(0)?);
+            }
+            out
+        };
+        for id in candidates {
+            if !load(conn, id)?.is_empty() {
+                edited.push(id);
+            }
+        }
+    }
+    Ok(edited)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1086,6 +1118,43 @@ mod tests {
         let loaded = load(&conn, asset_id).expect("读");
         assert!(loaded.is_empty());
         assert!(!has_edits(&conn, asset_id).expect("查"));
+    }
+
+    #[test]
+    fn batch_flags_match_the_single_photo_judge() {
+        // 三张：没编辑过 / 编辑过（动了一个参数）/ 有栈但只剩自动基线（不算编辑）
+        let (conn, first) = catalog_with_asset();
+        let mut add_asset = || {
+            conn.execute(
+                "INSERT INTO assets (rating, flag, imported_at, updated_at) VALUES (0, 'none', 0, 0)",
+                [],
+            )
+            .expect("插资产");
+            conn.last_insert_rowid()
+        };
+        let edited = add_asset();
+        let baseline_only = add_asset();
+
+        save(&conn, edited, &stack(&[("exposure", 0.5)], &[]), 1).expect("存编辑");
+        let mut baseline = stack(&[], &[]);
+        baseline.auto_adjust = Some(AutoAdjustBaseline {
+            values: [("exposure".to_owned(), 0.5)].into(),
+            lens_profile: None,
+            lens_enabled: None,
+            nr_method: None,
+        });
+        save(&conn, baseline_only, &baseline, 1).expect("存基线");
+
+        // 空切片与不存在的 id 都安全
+        assert!(has_edits_batch(&conn, &[]).expect("空批").is_empty());
+        assert!(has_edits_batch(&conn, &[999_999]).expect("无栈").is_empty());
+        // 判据与逐张 has_edits 完全一致：动过参数的才算，只剩自动基线的不算
+        let flagged = has_edits_batch(&conn, &[first, edited, baseline_only, edited])
+            .expect("批量查")
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(flagged, [edited].into_iter().collect());
+        assert_eq!(flagged.len(), 1);
     }
 
     #[test]

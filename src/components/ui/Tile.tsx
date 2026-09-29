@@ -10,14 +10,14 @@
  * │   │     照片     │ │  ← 照片按自己的宽高比居中，四角圆角，四周留 --tile-pad
  * │   │              │ │     超过 3:1 / 1:3 的由**后端**居中截取（原图不受影响）
  * │   ╰──────────────╯ │
- * │ [编辑/issue]  RAW │  ← 角落覆盖层：锚在**外框**四角，不跟照片走
+ * │ [笔/卡+N]     RAW │  ← 角落覆盖层：锚在**外框**四角，不跟照片走（笔=编辑过，卡+N=定稿数）
  * │ ▒ 文件名      ORF ▒ │  ← 底部信息条：**覆盖在照片上**，默认隐藏
  * └────────────────────┘     指向/聚焦/选中时出现；选中时常亮
  * ```
  *
  * ## 角落覆盖层（2026-09-22 收口）
  *
- * 角标（`RAW` / `+RAW`，以后还有编辑数 / issue 数）一律挂在 **外框**的角上，
+ * 角标（`RAW` / `+RAW`，左下还有编辑 / 定稿标记）一律挂在 **外框**的角上，
  * **不跟照片走**（`[data-tile-corners]` 那一层）。原因很具体：照片在正方外框里是
  * 保比例居中的，极端比例（1:3 的长条）下它只占外框中间的一条 —— 角标如果挂在照片上，
  * 同一行里比例不同的两张就会一个贴外边、一个缩在中间（人类 2026-09-22 报的那条）。
@@ -50,13 +50,16 @@
  * | --- | --- |
  * | 外框右上角 * | 动作槽（排除等，指向/聚焦时出现）—— `actions` |
  * | 外框右下角 * | `RAW` / `+RAW`（未指向、未选中时浮出）—— `raw` |
- * | 外框左下角 * | **编辑数 / issue 数**（M3 编辑里程碑）—— 已留好空位（`data-tile-corner="issue"`），直接往里放 |
+ * | 外框左下角 * | **编辑 / 定稿标记**（2026-09-29 实装）：有定稿 → 扇形卡片 + 数字；
+ * |                | 没定稿但编辑过 → 毛笔。勾边样式、显隐规则与 RAW 角标同款 —— `issueCount` / `edited` |
  * | 顶部条（**库内**） | 星标 / 颜色 / 旗标 / 赞踩 —— `rating` / `colorLabel` / `flag` / `like` |
  * | 底部条右端 | 加锁标记 `locked`；再往后还有别的属性也往这放 |
  */
 
 import {
   IconBan,
+  IconBrush,
+  IconCardsFilled,
   IconLock,
 } from "@tabler/icons-solidjs";
 import { Show, splitProps, type JSX } from "solid-js";
@@ -108,6 +111,16 @@ export interface TileProps
   excluded?: boolean;
   /** 动作槽（照片右上角，指向/聚焦时出现） */
   actions?: JSX.Element;
+  /**
+   * 命名定稿数（0–100；SOOC / RAW / latest 不计入）。≥1 时左下角显示
+   * 定稿图标（扇形卡片）+ 这个数字（人类 2026-09-29 定）。
+   */
+  issueCount?: number;
+  /**
+   * 编辑过（编辑栈与原始源不同）。没有定稿但编辑过时，左下角显示
+   * 编辑图标（毛笔）；有定稿时不再显示它（定稿已隐含编辑过）。
+   */
+  edited?: boolean;
   /** 库内才有的信息（导入工作流里这些事都不存在，槽位直接不渲染） */
   context?: "library" | "source";
   /**
@@ -183,6 +196,8 @@ export function Tile(props: TileProps) {
     "context",
     "info",
     "raw",
+    "issueCount",
+    "edited",
     "rating",
     "flag",
     "like",
@@ -372,7 +387,7 @@ export function Tile(props: TileProps) {
 
         为什么必须锚外框（人类 2026-09-22）：照片是保比例居中的，极端比例（比如 1:3
         的长条）只占外框中间一条 —— 角标挂在照片上就会随照片跑，同一行里比例不同的两张
-        一个贴外边、一个缩在中间；而以后左下角还要放「编辑 / issue 数」，
+        一个贴外边、一个缩在中间；而左下角还挂着编辑 / 定稿标记，
         几个角各自贴不同的面就彻底收不住了。
 
         坐标：这一层 = 外框内缩一个 `--tile-pad`（照片贴满时就是它的边缘），
@@ -382,7 +397,7 @@ export function Tile(props: TileProps) {
         角标本来就只在「未指向、未选中」时显示，那时信息条也不在。
 
         已占用的角：右下 = `RAW` / `+RAW`；右上 = 动作槽（暂时没人用）；
-        左下 = **留给 M3 的编辑 / issue 数**（直接进这一层，不要再另算距离）。
+        左下 = **编辑 / 定稿标记**（直接进这一层，不要再另算距离）。
       */}
       <div data-tile-corners class="pointer-events-none absolute inset-(--tile-pad)">
         <Show when={local.raw}>
@@ -422,13 +437,48 @@ export function Tile(props: TileProps) {
         </Show>
 
         {/*
-          左下角：**编辑数 / issue 数的预留位**（人类 2026-09-22 让先留好）。
+          左下角：**编辑 / 定稿标记**（人类 2026-09-29 定案，取代此前的空预留位）。
 
-          坐标与右下角的 `RAW` 角标**镜像对应**（`start-1 bottom-1` vs `end-1 bottom-1`），
-          两者在同一条水平线上。M3 把正式图标塞进来即可 —— 不要挪到照片那一层，
-          也不要另算距离；这里空着的时候是 0 尺寸，不占地方也不遮照片。
+          * ≥1 个命名定稿 → 定稿图标（扇形卡片）+ 数字（1–100；SOOC/RAW/latest 不计入）；
+          * 没有定稿但编辑过（编辑栈与原始源不同）→ 毛笔图标；
+          * 两者**互斥**：有定稿就不显示毛笔 —— 定稿本身已隐含「编辑过」。
+
+          样式与按 i 的常显标记同款：浅色 + 深色勾边、无底色（不是 RAW 那种实底药丸）——
+          文字/数字走 `.tile-info-text`；**填充型**图标（扇形卡片）走 `.tile-info-icon`；
+          **描边型**图标（毛笔，Tabler 没有 filled 变体）用「粗描边副本垫底」
+          （`.tile-info-icon-under` 叠在正稿下面）。
+
+          显隐与 `RAW` / `+RAW` **完全一致、一起进退**（人类 2026-09-29：
+          「其显示的规则与 RAW/+RAW 完全一致，一起显隐」）：
+          选中 / `marks-name` 档强制文件名条 → 不渲染；指向 / 键盘聚焦 → 淡出。
+          两角角标互不干扰（左下与右下各自贴边，同一水平线）。
         */}
-        <div data-tile-corner="issue" class="absolute start-1 bottom-1 flex items-center gap-1" />
+        <div
+          data-tile-corner="issue"
+          class={[
+            "pointer-events-none absolute start-1 bottom-1 flex items-center gap-1",
+            "tile-info-text font-600 text-fs-0 transition-opacity",
+            local.selected || forceNameBar()
+              ? "hidden"
+              : "group-hover/tile:opacity-0 group-focus-within/tile:opacity-0",
+          ].join(" ")}
+        >
+          <Show
+            when={(local.issueCount ?? 0) > 0}
+            fallback={
+              <Show when={local.edited}>
+                {/* 毛笔没有 filled 变体：勾边靠「粗描边、勾边色」的副本垫在正稿下面 */}
+                <span class="relative inline-flex size-3" aria-hidden="true">
+                  <IconBrush size={12} class="tile-info-icon-under absolute inset-0" />
+                  <IconBrush size={12} class="relative" />
+                </span>
+              </Show>
+            }
+          >
+            <IconCardsFilled size={12} class="tile-info-icon" aria-hidden="true" />
+            <span class="tnum">{local.issueCount}</span>
+          </Show>
+        </div>
 
         {/* 动作槽：外框右上角，指向 / 键盘聚焦时出现 */}
         <Show when={local.actions}>

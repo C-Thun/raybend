@@ -548,6 +548,12 @@ pub struct AssetRow {
     pub size_bytes: Option<i64>,
     /// 展示用文件已被标记为缺失（磁盘上找不到了）。
     pub missing: bool,
+    /// 命名定稿数（0–100；写侧 ordinal 上限本就保证 ≤100，这里再夹一道保险）。
+    /// SOOC / RAW / latest 是固定或虚拟 issue，不计入 —— tile 左下角定稿图标旁的数字。
+    pub issue_count: u16,
+    /// 编辑过吗（编辑栈与原始源不同，判据 `DevelopStack::is_empty`，由分页统一充实）。
+    /// tile 左下角：没有定稿但编辑过时显示编辑图标。
+    pub edited: bool,
 }
 
 /// 文件名（含扩展名）——从库内相对路径取最后一段。
@@ -566,7 +572,8 @@ const ROW_COLUMNS: &str = "\
     a.width, a.height, a.orientation, f.size_bytes, f.missing_since,     EXISTS(SELECT 1 FROM asset_files r WHERE r.asset_id = a.id AND r.role = 'raw') AS has_raw, \
     a.author, a.description, a.gps_lat, a.gps_lon, \
     a.country, a.province_state, a.city, a.sublocation, \
-    COALESCE(f.file_created_ms, f.mtime_ms) AS created_ms";
+    COALESCE(f.file_created_ms, f.mtime_ms) AS created_ms, \
+    (SELECT COUNT(*) FROM issues i WHERE i.asset_id = a.id) AS issue_count";
 
 /// 展示用文件的选取规则：**有位图就位图，没有就 RAW**。
 ///
@@ -613,6 +620,13 @@ fn row_from(row: &Row<'_>) -> rusqlite::Result<AssetRow> {
         orientation: row.get(19)?,
         size_bytes: row.get(20)?,
         missing: row.get::<_, Option<i64>>(21)?.is_some(),
+        // 定稿数：子查询计数永远非负；100 夹取只是对「旧库脏数据」的保险
+        #[allow(clippy::cast_possible_truncation)]
+        issue_count: u16::try_from(row.get::<_, i64>(32).unwrap_or(0))
+            .unwrap_or(0)
+            .min(100),
+        // 「编辑过」由 page() 统一批量充实（判据见 develop::has_edits_batch）
+        edited: false,
     })
 }
 
@@ -663,6 +677,19 @@ pub fn page(
     let mut out = Vec::with_capacity(limit.min(4096));
     for row in rows {
         out.push(row?);
+    }
+    /*
+     * 左下角「编辑过」标记（人类 2026-09-29 定）：判据统一在 develop 侧
+     * （`DevelopStack::is_empty`），这里只把本页有栈的照片批量判一遍 ——
+     * 逐行 SQL 判据是被明令禁止的第二套真相，不写。
+     */
+    if !out.is_empty() {
+        let ids: Vec<i64> = out.iter().map(|row| row.id).collect();
+        let edited: std::collections::HashSet<i64> =
+            super::develop::has_edits_batch(conn, &ids)?.into_iter().collect();
+        for row in &mut out {
+            row.edited = edited.contains(&row.id);
+        }
     }
     Ok(out)
 }
@@ -911,6 +938,43 @@ mod tests {
         let query = Query::new(Scope::Repository);
         assert!(page(&conn, &query, 5, 10).unwrap().is_empty());
         assert!(page(&conn, &query, 0, 0).unwrap().is_empty());
+    }
+
+    // ---------- 左下角「编辑 / 定稿」标记（2026-09-29） ----------
+
+    #[test]
+    fn issue_count_and_edited_flag_come_through_the_page() {
+        use crate::store::develop::{self, DevelopStack};
+        use crate::store::issues;
+
+        let conn = catalog();
+        let plain = add(&conn, Spec::default());
+        let edited = add(&conn, Spec::default());
+        let finalized = add(&conn, Spec::default());
+
+        // 只动一个参数 → 编辑过、但还没定稿
+        let mut stack = DevelopStack::default();
+        stack.params.insert("exposure".to_string(), 0.5);
+        develop::save(&conn, edited, &stack, T0).unwrap();
+        // 另一份不同的参数 → 定两次稿（两次都是不同的配置，不触去重）
+        issues::create(&conn, finalized, "婚礼版", &stack, T0).unwrap();
+        let mut other = stack.clone();
+        other.params.insert("contrast".to_string(), 0.3);
+        develop::save(&conn, finalized, &other, T0).unwrap();
+        issues::create(&conn, finalized, "黑白版", &other, T0).unwrap();
+
+        let query = Query::new(Scope::Repository);
+        let rows = page(&conn, &query, 0, 10).unwrap();
+        let by_id = |id: i64| rows.iter().find(|row| row.id == id).unwrap();
+        // 没碰过的照片：两个标记都是「无」
+        assert_eq!(by_id(plain).issue_count, 0);
+        assert!(!by_id(plain).edited);
+        // 编辑过、没定稿：只有 edited
+        assert_eq!(by_id(edited).issue_count, 0);
+        assert!(by_id(edited).edited);
+        // 定过两次稿：issue_count = 2（latest 是工作副本，不计入）
+        assert_eq!(by_id(finalized).issue_count, 2);
+        assert!(by_id(finalized).edited);
     }
 
     // ---------- 展示用文件的选择 ----------
