@@ -114,6 +114,8 @@ M3-W6c 的定稿模型以当前 editor profile 为真相：`latest` 是自动保
 
 **browse tiles 左下角的定稿标记（2026-09-29，完整口径 `memory/DESIGN.md` §12.9.2）**：有命名定稿 → 扇形卡片图标 + **定稿数（1–100，不含 SOOC/RAW/latest）**；没定稿但编辑过（编辑栈与原始源不同）→ 毛笔图标。数据由浏览分页查询带出（`AssetRow.issue_count` / `edited`），与缩略图「编辑过走编辑管线」的判据同一份。
 
+**定稿面板占位先行（2026-09-29）**：editor 点定稿确认后，条目**立刻**出现在定稿面板顶部（名称 + 来源 · 预览生成中，缩略图位转圈），`issue_create` 的整套渲染/AVIF 编码完成后由真实条目原位接替（列表 created_at 倒序，无跳变）；失败/换照片/异常即清占位。实施记录 `implementations/2026-09-29_finalize-pending-placeholder.md`。
+
 原先“切 issue 时保留旧 latest 供返回”的设想已由人类在 2026-09-26 明确替换为“编辑状态一变即更新 latest，包括选中 issue”；返回切换前状态走撤销/重做。
 
 ---
