@@ -31,18 +31,17 @@ import { SegmentedControl } from "../../components/ui/SegmentedControl.tsx";
 import { SplitStack } from "../../components/ui/SplitStack.tsx";
 import { SplitHandle } from "../../components/ui/SplitHandle.tsx";
 import { ConfirmDialog, Dialog } from "../../components/ui/Dialog.tsx";
+import { EasyDestroyButton } from "../../components/ui/EasyDestroy.tsx";
 import { StateWatermark } from "../../components/ui/StateWatermark.tsx";
 import { createThumbQueue } from "../../components/ui/thumb-queue.ts";
 import {
   getThumbBytes,
-  listRepositories,
   onCatalogChanged,
-  remountRepository,
 } from "../../api/db.ts";
 import { getExportVariantImage } from "../../api/export.ts";
 import { openFullscreen } from "../../api/fullscreen.ts";
 import { pickDirectory } from "../../api/dialog.ts";
-import type { RepositoryView } from "../../api/types.ts";
+import type { RepositoryStateStore } from "../../features/repositories/state.ts";
 import type { SelectedFileMetadata } from "../../features/exif-strip/index.ts";
 import { nudgeWidth, resizeWidth } from "../../lib/column-resize.ts";
 import { LAYOUT_BOUNDS } from "../../lib/layout-prefs.ts";
@@ -50,7 +49,7 @@ import { clickMode } from "../../lib/selection.ts";
 import { joinPath } from "../../lib/paths.ts";
 import {
   variantKey,
-  exportGalleryState, mainVariant,
+  exportGalleryState, mainVariant, variantSuffix,
   formatSupportsQuality, EXPORT_FORMATS, EXISTING_FILE_POLICIES,
   type VariantSummary,
 } from "../../lib/export-model.ts";
@@ -70,6 +69,7 @@ import type { ExportStore } from "./store.ts";
 
 export interface ExportWorkspaceProps {
   store: ExportStore;
+  repositories: RepositoryStateStore;
   browse: BrowseStore;
   selectedMetadata: SelectedFileMetadata;
   leftWidth: number;
@@ -79,9 +79,9 @@ export interface ExportWorkspaceProps {
 export function ExportWorkspace(props: ExportWorkspaceProps) {
   const store = props.store;
   const prefs = store.preferences;
-  const [repositories, setRepositories] = createSignal<RepositoryView[]>([]);
-  const [reposLoading, setReposLoading] = createSignal(true);
-  const [reposError, setReposError] = createSignal<string | null>(null);
+  const repositories = props.repositories.list;
+  const reposLoading = () => props.repositories.status() === "loading" || props.repositories.status() === "idle";
+  const reposError = props.repositories.error;
   const [libsExpanded, setLibsExpanded] = createSignal(false);
   const [leftWidth, setLeftWidth] = createSignal(props.leftWidth);
   let dragStart = 0;
@@ -89,7 +89,7 @@ export function ExportWorkspace(props: ExportWorkspaceProps) {
   const [allIssues, setAllIssues] = createSignal<number|null>(null);
   const root = () =>
     repositories().find((r) => r.id === props.browse.repositoryId())?.root ??
-    null;
+    props.repositories.lastVerifiedRoot(props.browse.repositoryId() ?? "");
   const photoThumbs = createThumbQueue({
     load: (path) => getThumbBytes(path, "grid"),
   });
@@ -97,7 +97,11 @@ export function ExportWorkspace(props: ExportWorkspaceProps) {
   const issueThumbs = createThumbQueue({
     load: async (key) => {
       if (!key.startsWith("[")) return getThumbBytes(key, "grid");
-      const [repo, reference, hash] = JSON.parse(key) as [
+      // 键是自己 JSON.stringify 出来的；解析不了属于内部错误，抛给队列的 error 态。
+      let parsed: unknown;
+      try { parsed = JSON.parse(key); }
+      catch { throw new Error(`坏掉的定稿图键：${key}`); } // i18n-exempt: 队列内部诊断，不上界面
+      const [repo, reference, hash] = parsed as [
         string,
         { assetId: number; variant: string },
         string | null,
@@ -135,6 +139,29 @@ export function ExportWorkspace(props: ExportWorkspaceProps) {
       Number(gallery.idAt?.(i)),
     ).filter((id) => id > 0),
   );
+  createEffect(on(() => {
+    const id = props.browse.repositoryId();
+    const repository = id === null ? undefined : props.repositories.byId(id);
+    return repository?.online ? `${id}:${repository.connection?.generation ?? "0"}` : null;
+  }, (session, previous) => {
+    if (session === null || session === previous) return;
+    // 离线保留现有内容；恢复后重读当前代次，不卸载网格。
+    untrack(() => {
+      const dir = root();
+      for (const id of assets()) {
+        const asset = props.browse.itemById(id);
+        if (dir && asset) {
+          const path = joinPath(dir, asset.relPath);
+          if (photoThumbs.get(path).status !== "idle") photoThumbs.refresh(path);
+        }
+        for (const variant of store.listFor(id)) {
+          const key = JSON.stringify([store.repository(), variant.reference, variant.profileHash]);
+          if (issueThumbs.get(key).status !== "idle") issueThumbs.refresh(key);
+        }
+      }
+      void store.invalidate(assets());
+    });
+  }, {defer:true}));
   const queue = exportQueueSource(store, issueThumbs);
   const currentIssue = createMemo(
     () =>
@@ -174,21 +201,7 @@ export function ExportWorkspace(props: ExportWorkspaceProps) {
       0,
     ).catch(store.reportError);
   };
-  let repoRefresh = 0;
-  const refreshRepos = async () => {
-    const ticket = ++repoRefresh;
-    if (repositories().length === 0) setReposLoading(true);
-    try {
-      const next = await listRepositories();
-      if (ticket !== repoRefresh) return;
-      setRepositories(next);
-      setReposError(null);
-    } catch (e) {
-      if (ticket === repoRefresh) setReposError(String(e));
-    } finally {
-      if (ticket === repoRefresh) setReposLoading(false);
-    }
-  };
+  const refreshRepos = props.repositories.load;
   createEffect(() => {
     const v = currentIssue(), dir = root(), item=queueCurrent();
     const path = store.activeArea()==="queue" ? (item===null?null:joinPath(item.root,item.snapshot.relPath)) : (v===null||dir===null?null:joinPath(dir,v.relPath));
@@ -306,14 +319,29 @@ export function ExportWorkspace(props: ExportWorkspaceProps) {
       text={state === "repository" ? t("browse.noRepository") : state === "directory" ? t("browse.pickDirectory") : state === "loading" ? t("browse.loading") : state === "error" ? (store.error() ?? props.browse.error() ?? "") : t("export.noIssues")}
     />;
   };
-  type DragBatch = {variants:readonly VariantSummary[];repository:string;x:number;y:number;target:string|null};
+  /**
+   * 拖动落点：预设卡片（`kind: "preset"`）或下方队列区（`kind: "queue"`）。
+   *
+   * 队列区**只在有选中预设时**才接得住 —— 没有预设就没有地方可放，
+   * 这与 toolsbar 上「送入队列」按钮的启用条件同一门槛（不亮高亮、不响应松手）。
+   */
+  type DragTarget = {kind:"preset";id:string}|{kind:"queue"}|null;
+  type DragBatch = {variants:readonly VariantSummary[];repository:string;x:number;y:number;target:DragTarget};
   const [dragBatch,setDragBatch]=createSignal<DragBatch|null>(null);
   const [countDrops,setCountDrops]=createSignal(new Map<string,{from:number;to?:number}>());
   let cancelDrag:(()=>void)|undefined;
   let clickTimer:ReturnType<typeof setTimeout>|undefined;
   const blockClick=(event:MouseEvent)=>{event.preventDefault();event.stopImmediatePropagation();};
   const clearDragClick=()=>{clearTimeout(clickTimer);window.removeEventListener("click",blockClick,true);};
-  const hoveredPreset=(point:{x:number;y:number})=>document.elementFromPoint(point.x,point.y)?.closest<HTMLElement>("[data-export-preset]")?.dataset.exportPreset??null;
+  const hitTarget=(point:{x:number;y:number}):DragTarget=>{
+    const hit=document.elementFromPoint(point.x,point.y);
+    const preset=hit?.closest<HTMLElement>("[data-export-preset]")?.dataset.exportPreset;
+    if(preset)return {kind:"preset",id:preset};
+    if(hit?.closest("[data-export-area=queue]") && store.selectedPreset()!==null)return {kind:"queue"};
+    return null;
+  };
+  const presetTarget=(id:string)=>{const target=dragBatch()?.target;return target?.kind==="preset" && target.id===id;};
+  const queueTarget=()=>dragBatch()?.target?.kind==="queue";
   async function dropIntoPreset(batch:DragBatch,id:string):Promise<void>{
     const dir=root();if(!dir || batch.repository!==store.repository())return;
     const request={from:store.progress(id).total};
@@ -321,6 +349,11 @@ export function ExportWorkspace(props: ExportWorkspaceProps) {
     const added=await store.enqueue(dir,{presetId:id,references:batch.variants.map(v=>v.reference),preserveSelection:true});
     setCountDrops(old=>{const next=new Map(old);if(old.get(id)!==request)return old;
       if(added>0)next.set(id,{from:request.from,to:store.progress(id).total});else next.delete(id);return next;});
+  }
+  /** 拖到下方队列区：与 toolsbar 的「送入队列」同一个落点 —— 当前选中的预设。 */
+  function dropIntoQueue(batch:DragBatch):void{
+    const id=store.selectedPreset()?.id;
+    if(id!==undefined)void dropIntoPreset(batch,id);
   }
   function beginIssueDrag(event:PointerEvent):void{
     if(event.button!==0 || event.ctrlKey || event.metaKey || event.shiftKey || store.busy())return;
@@ -333,11 +366,13 @@ export function ExportWorkspace(props: ExportWorkspaceProps) {
     if(!variant || !store.selection().ids.has(variantKey(store.repository()??"",variant.reference)))return;
     const variants=[...store.selectedVariants()];const repository=store.repository();if(!repository)return;
     cancelDrag?.();
-    cancelDrag=trackPointerDrag(event,{threshold:6,
+    cancelDrag=trackPointerDrag(event,{threshold:6,cancelOutsideWindow:true,
       start:point=>{clearDragClick();window.addEventListener("click",blockClick,true);variants.slice(0,4).forEach(v=>issueThumbs.request(JSON.stringify([repository,v.reference,v.profileHash]),true));setDragBatch({variants,repository,...point,target:null});},
-      move:point=>setDragBatch(old=>old?{...old,...point,target:hoveredPreset(point)}:null),
+      move:point=>setDragBatch(old=>old?{...old,...point,target:hitTarget(point)}:null),
       end:(point,cancelled,started)=>{const batch=dragBatch();setDragBatch(null);
-        if(started){clickTimer=setTimeout(clearDragClick,0);if(!cancelled&&batch){const id=hoveredPreset(point);if(id)void dropIntoPreset(batch,id);}}
+        if(started){clickTimer=setTimeout(clearDragClick,0);if(!cancelled&&batch){const target=hitTarget(point);
+          if(target?.kind==="preset")void dropIntoPreset(batch,target.id);
+          else if(target?.kind==="queue")dropIntoQueue(batch);}}
       },
     });
   }
@@ -370,8 +405,8 @@ export function ExportWorkspace(props: ExportWorkspaceProps) {
   }
   function QueueBadge(p: { status?: string; error?: string|null }) {
     const text=()=>p.status?t(`export.status.${p.status}` as "export.status.pending"):"";
-    return <Show when={p.status}><span data-export-status={p.status} title={p.error??text()} aria-label={text()} class="pointer-events-none absolute left-1 top-1 rounded-ui bg-surface-layer p-0.5 text-fg-1">
-      <Show when={p.status==="pending"}><IconClock size={14}/></Show>
+    return <Show when={p.status}><span data-export-status={p.status} title={p.status === "waiting" ? t(p.error === "storage.wait.target" ? "export.waiting_target" : "export.waiting_library") : p.error??text()} aria-label={text()} class="pointer-events-none absolute left-1 top-1 rounded-ui bg-surface-layer p-0.5 text-fg-1">
+      <Show when={(p.status==="pending" || p.status==="waiting")}><IconClock size={14}/></Show>
       <Show when={p.status==="running"}><IconLoader2 size={14} class="animate-spin"/></Show>
       <Show when={p.status==="done"}><IconCheck size={14}/></Show>
       <Show when={p.status==="skipped"}><IconPlayerSkipForward size={14}/></Show>
@@ -390,6 +425,8 @@ export function ExportWorkspace(props: ExportWorkspaceProps) {
         onClick={event=>{event.stopPropagation();void store.selectIssue(p.variant.reference,clickMode(event,true),assets()).catch(store.reportError);}}
         onActivate={()=>showIssue(p.variant)}/>
       <QueueBadge status={state()?.status} error={state()?.error}/>
+      {/* 导出尾号（specs/export-issue-ordinal.md）：I00–I99 / ISO / IRA / ILA，右上角小徽标 */}
+      <span data-export-suffix={variantSuffix(p.variant)} class="pointer-events-none absolute right-1 top-1 rounded-ui bg-surface-layer px-1 text-fs-0 leading-4 text-fg-2">{variantSuffix(p.variant)}</span>
     </div>;
   }
   function IssueStrip(p: { assetId: number }) {
@@ -403,8 +440,8 @@ export function ExportWorkspace(props: ExportWorkspaceProps) {
     const item = () => store.queueItems().find(entry => entry.id === p.id);
     return <Show when={item()?.status === "failed"}>
       <div data-export-queue-error class={prefs.value().queueList ? "min-w-0 flex-1" : "mt-1 flex h-16 min-w-0 flex-col justify-between"}>
-        <p class="line-clamp-2 break-words text-fs-0 text-danger" title={item()?.error ?? t("export.failedUnknown")}>
-          {t("export.failureReason", {reason: item()?.error ?? t("export.failedUnknown")})}
+        <p class="line-clamp-2 break-words text-fs-0 text-danger" title={item()?.error === "storage.released" ? t("repo.connection.released") : item()?.error ?? t("export.failedUnknown")}>
+          {t("export.failureReason", {reason: item()?.error === "storage.released" ? t("repo.connection.released") : item()?.error ?? t("export.failedUnknown")})}
         </p>
         <Button data-export-retry class="self-start" size="sm" onClick={() => store.retry([p.id])}>{t("export.retry")}</Button>
       </div>
@@ -431,7 +468,7 @@ export function ExportWorkspace(props: ExportWorkspaceProps) {
     </TilesShell></div>
   );
   const bottom = (
-    <div data-export-area="queue" class="flex min-h-0 flex-1 border" classList={{"border-brand-2":store.activeArea()==="queue","border-surface-layer":store.activeArea()!=="queue"}} onPointerDown={()=>store.focusArea("queue")} onFocusIn={()=>store.focusArea("queue")}><TilesShell bar={bar(true)}>
+    <div data-export-area="queue" data-export-drop={queueTarget()?"queue":undefined} class="flex min-h-0 flex-1 border" classList={{"border-brand":queueTarget(),"border-brand-2":store.activeArea()==="queue"&&!queueTarget(),"border-surface-layer":store.activeArea()!=="queue"&&!queueTarget()}} onPointerDown={()=>store.focusArea("queue")} onFocusIn={()=>store.focusArea("queue")}><TilesShell bar={bar(true)}>
       <PhotoGrid
         source={queue}
         listMode={prefs.value().queueList}
@@ -474,10 +511,9 @@ export function ExportWorkspace(props: ExportWorkspaceProps) {
           onExpandLibs={() => setLibsExpanded(true)}
           onCollapseLibs={() => setLibsExpanded(false)}
           onOpenSettings={props.onOpenLibrarySettings}
+          isRemounting={props.repositories.isRemounting}
           onRemount={(id) =>
-            void remountRepository(id)
-              .then(refreshRepos)
-              .catch(store.reportError)
+            void props.repositories.remount(id)
           }
         />
       </div>
@@ -554,32 +590,56 @@ export function ExportWorkspace(props: ExportWorkspaceProps) {
         <div data-export-preset-list class="min-h-0 flex-1 overflow-auto">
           <For each={store.presets()} fallback={<p class="text-fs-1 text-fg-3">{t("export.noPresets")}</p>}>
             {(preset) => (
-              <button
-                type="button"
+              /*
+                卡片是「容器 + 两个动作」（2026-09-28）：点正文 = 选中这个预设；
+                右下的移除（easy destroy）删预设。「未完成/总数」计数挪到右上，
+                给移除让出右下角。`data-export-preset` 挂在容器上：拖放命中与冒烟都靠它。
+              */
+              <div
                 data-export-preset={preset.id}
-                aria-pressed={store.selectedPreset()?.id===preset.id}
-                class="border-2 mb-1 flex w-full items-center gap-2 rounded-ui p-2 text-left text-fs-1"
+                onClick={(event) => {
+                  // 点卡片任意处 = 选中这个预设（旧卡片的整卡可点语义）；
+                  // 点里面的按钮（选择/移除）不重复处理。
+                  if ((event.target as HTMLElement).closest("button")) return;
+                  store.choosePreset(preset.id);
+                }}
+                class="border-2 mb-1 flex w-full items-center gap-2 rounded-ui p-2 text-fs-1"
                 classList={{
-                  "border-brand-2":dragBatch()?.target===preset.id,
-                  "border-transparent":dragBatch()?.target!==preset.id,
+                  "border-brand-2":presetTarget(preset.id),
+                  "border-transparent":!presetTarget(preset.id),
                   "bg-state-selected":store.selectedPreset()?.id===preset.id,
                   "bg-surface-track":store.selectedPreset()?.id!==preset.id,
                   "hover:bg-state-hover":store.selectedPreset()?.id!==preset.id,
                 }}
-                onClick={() => store.choosePreset(preset.id)}
               >
-                <span class="min-w-0 flex-1">
+                <button
+                  type="button"
+                  class="min-w-0 flex-1 text-left"
+                  aria-pressed={store.selectedPreset()?.id===preset.id}
+                  onClick={() => store.choosePreset(preset.id)}
+                >
                   <span class="block truncate text-fg-1">{preset.name}</span>
                   <span class="block truncate text-fs-0 text-fg-3">
                     {preset.format.toUpperCase()} ·{" "}
                     {preset.sizeMode === "original" ? t("export.originalSize") : preset.sizeMode === "percent" ? preset.percent + "%" : preset.maxEdge + "px"}
                   </span>
-                </span>
-                <Show when={store.enabled().has(preset.id)}><IconCheck size={14} class="shrink-0 text-brand" aria-label={t("export.start")}/></Show>
-                <Show when={store.progress(preset.id).total > 0}>
-                  <PresetQueueCount id={preset.id}/>
-                </Show>
-              </button>
+                </button>
+                <div class="flex shrink-0 flex-col items-end justify-end gap-0.5">
+                  <div class="flex items-center gap-1">
+                    <Show when={store.enabled().has(preset.id)}><IconCheck size={14} class="shrink-0 text-brand" aria-label={t("export.start")}/></Show>
+                    <Show when={store.progress(preset.id).total > 0}>
+                      <PresetQueueCount id={preset.id}/>
+                    </Show>
+                  </div>
+                  <EasyDestroyButton
+                    label={t("export.preset.delete")}
+                    confirmTitle={t("export.preset.deleteTitle")}
+                    confirmMessage={t("export.preset.deleteConfirm").replace("{name}", preset.name)}
+                    confirmLabel={t("export.preset.deleteAction")}
+                    onRemove={() => void store.deletePreset(preset.id)}
+                  />
+                </div>
+              </div>
             )}
           </For>
         </div>
@@ -728,11 +788,22 @@ export function ExportWorkspace(props: ExportWorkspaceProps) {
         </section>
       </aside>
       <Show when={dragBatch()}>{batch=><Portal>
-        <div data-export-drag-preview aria-hidden="true" class="pointer-events-none fixed z-(--z-modal) size-[200px] opacity-80" style={{left:`${Math.min(batch().x+14,window.innerWidth-205)}px`,top:`${Math.min(batch().y+14,window.innerHeight-205)}px`}}>
-          <For each={batch().variants.slice(0,4)}>{(v,i)=><div class="rb-export-drag-card absolute size-[132px] overflow-hidden rounded-ui border border-fg-3 bg-surface-layer" style={{left:`${26+i()*9}px`,top:`${38-i()*3}px`,transform:`rotate(${(i()-(Math.min(4,batch().variants.length)-1)/2)*8}deg)`,'transform-origin':'50% 85%'}}>
-            <Show when={issueThumbs.get(JSON.stringify([batch().repository,v.reference,v.profileHash])).url} fallback={<IconPhoto size={48} class="m-auto mt-10 text-fg-3"/>}>{url=><img class="size-full object-contain" src={url()} alt="" draggable={false}/>}</Show>
-          </div>}</For>
-          <span class="absolute bottom-2 right-2 rounded-ui bg-surface-layer px-2 py-1 text-fs-2 text-fg-1 tnum">{batch().variants.length}</span>
+        {/*
+          指针预览：整叠卡片的**中心落在指针上**（再 +8px，看着像「捏着」而不是「贴着」）。
+
+          旧版把卡片摆在指针右下 100px 开外（容器内 26/38 的定位 + 14px 偏移），拖动时
+          目光要在指针与幽灵之间来回跳；现在中心对齐，瞄准半径只剩一张卡片。
+
+          也不再向窗口内夹取：夹取会在指针出窗时把幽灵钉在窗口边缘，看着像拖动卡死了。
+          出窗已经由 `cancelOutsideWindow` 中止，幽灵跟着指针走就行。
+        */}
+        <div data-export-drag-preview aria-hidden="true" class="pointer-events-none fixed z-(--z-modal) opacity-80" style={{left:`${batch().x+8}px`,top:`${batch().y+8}px`,transform:"translate(-50%,-50%)"}}>
+          <div class="relative size-[132px]">
+            <For each={batch().variants.slice(0,4)}>{(v,i)=><div class="rb-export-drag-card absolute inset-0 overflow-hidden rounded-ui border border-fg-3 bg-surface-layer" style={{transform:`translate(${i()*9}px,${-i()*3}px) rotate(${(i()-(Math.min(4,batch().variants.length)-1)/2)*8}deg)`,'transform-origin':'50% 85%'}}>
+              <Show when={issueThumbs.get(JSON.stringify([batch().repository,v.reference,v.profileHash])).url} fallback={<IconPhoto size={48} class="m-auto mt-10 text-fg-3"/>}>{url=><img class="size-full object-contain" src={url()} alt="" draggable={false}/>}</Show>
+            </div>}</For>
+            <span data-export-drag-count class="absolute bottom-0 right-0 rounded-ui bg-surface-layer px-2 py-1 text-fs-2 text-fg-1 tnum">{batch().variants.length}</span>
+          </div>
         </div>
       </Portal>}</Show>
       <Dialog open={store.limitOpen()} onOpenChange={store.setLimitOpen} title={t("export.limit")}><p class="text-fg-2">{t("export.limitBody")}</p></Dialog>

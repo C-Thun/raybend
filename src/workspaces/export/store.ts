@@ -33,6 +33,7 @@ export const EXPORT_PRESETS_KEY = "export.presets.v3";
 export const PREVIOUS_EXPORT_PRESETS_KEY = "export.presets.v2";
 export const LEGACY_EXPORT_PRESETS_KEY = "export.presets.v1";
 export interface ExportStoreDeps {
+  repositoryAvailable?: (repositoryId: string) => boolean;
   getSetting(key: string): Promise<string | null>;
   setSetting(key: string, value: string): Promise<void>;
   variants(
@@ -156,7 +157,8 @@ export function createExportStore(deps: ExportStoreDeps) {
   const activeSelection = () => activeArea()==="gallery"?selection():queueSelection();
   const selectedVariants = () => [...variants().values()].flat().filter(v => selection().ids.has(variantKey(repository()??"",v.reference)));
   const chosenVariants = () => selectedVariants().filter(v => !locked(v));
-  const canEnqueue = () => activeArea()==="gallery" && selectedPreset()!==null && !busy() && !resetting() && chosenVariants().some(v => queueState(v.reference,v.profileHash)===undefined);
+  const repositoryAvailable = () => { const id = repository(); return id !== null && (deps.repositoryAvailable?.(id) ?? true); };
+  const canEnqueue = () => repositoryAvailable() && activeArea()==="gallery" && selectedPreset()!==null && !busy() && !resetting() && chosenVariants().some(v => queueState(v.reference,v.profileHash)===undefined);
   const removable = () => queueItems().filter(item => ["pending","failed"].includes(item.status) && (activeArea()==="queue" ? queueSelection().ids.has(item.id) : chosenVariants().some(v => queueState(v.reference,v.profileHash)?.id===item.id)));
   const canRemove = () => !busy() && !resetting() && removable().length>0;
   const orderedKeys = (assets: readonly number[]) =>
@@ -415,6 +417,7 @@ export function createExportStore(deps: ExportStoreDeps) {
     if (
       preset === null ||
       repo === null ||
+      !repositoryAvailable() ||
       busy() ||
       selection().ids.size === 0
     )
@@ -434,14 +437,14 @@ export function createExportStore(deps: ExportStoreDeps) {
     try {
       const snapshots: VariantSnapshot[] = [];
       for (let i = 0; i < refs.length; i += 128)
-        snapshots.push(...(await deps.snapshots(repo, refs.slice(i, i + 128))));
-      if (ticket !== revision || queueTicket !== queueRevision || disposed) return 0;
+        { if (!repositoryAvailable()) return 0; snapshots.push(...(await deps.snapshots(repo, refs.slice(i, i + 128)))); }
+      if (ticket !== revision || queueTicket !== queueRevision || disposed || !repositoryAvailable()) return 0;
       if (snapshots.length !== refs.length)
         throw new Error(t("export.error.incomplete"));
       if(deps.runtime){
         const entries=snapshots.map(snapshot=>({id:"",repositoryId:repo,root,snapshot,preset:{...preset},status:"pending",error:null,sequence:0,output:null}));
         for(let i=0;i<entries.length;i+=128){
-          if(ticket!==revision||queueTicket!==queueRevision||disposed)return 0;
+          if(ticket!==revision||queueTicket!==queueRevision||disposed||!repositoryAvailable())return 0;
           await runtime("enqueue",{generation:capturedGeneration,items:entries.slice(i,i+128)});
         }
         return Math.max(0,targetQueue().length-before);
@@ -494,6 +497,31 @@ export function createExportStore(deps: ExportStoreDeps) {
     canRun,
     toggleRun(){const p=selectedPreset();if(!p || !canRun())return;const on=!enabled().has(p.id);if(on&&enabled().size>=4){setLimitOpen(true);return;}void runtime(on?"enable":"disable",{presetId:p.id});},
     retry(ids:readonly string[]){void runtime("retry",{ids:[...ids]});},
+    /** 删除一个预设（卡片右下角的移除，2026-09-28 崔总要的）：从列表拿掉并落盘。
+     * 正在运行 / 队列里还有没干完的条目时拦下来说原因 —— 那种预设删了会把
+     * 悬在半空的执行状态留成孤儿；只剩终态历史的可以删（历史随卡片一起消失）。
+     */
+    async deletePreset(id: string) {
+      if (busy() || resetting()) return;
+      const preset = presets().find(p => p.id === id);
+      if (preset === undefined) return;
+      if (enabled().has(id)) { setError(t("export.preset.deleteRunning")); return; }
+      const unfinished = (queues().get(id) ?? []).some(i => ["pending", "failed", "running", "waiting"].includes(i.status));
+      if (unfinished) { setError(t("export.preset.deletePending")); return; }
+      setBusy(true);
+      try {
+        const next = presets().filter(p => p.id !== id);
+        // 要在 setPresets **之前**记：selectedPreset() 是从 presets() 里找的，
+        // 删完再查它就已经是 null，永远判断下成「删的不是选中的」。
+        const wasSelected = preferences.value().selectedPreset === id;
+        writeChain = writeChain.catch(() => {}).then(() => deps.setSetting(EXPORT_PRESETS_KEY, serializePresets(next)));
+        await writeChain;
+        if (disposed) return;
+        setPresets(next);
+        if (wasSelected) choosePreset(null);
+      } catch (e) { if (!disposed) setError(String(e)); }
+      finally { if (!disposed) setBusy(false); }
+    },
     /** 暂不启用：预设文件交换，无工作区/命令入口。 */
     async importPresets(raw:string){
       const incoming=readPresets(raw);if(incoming.length===0){setError(t("export.invalidPresets"));return;}

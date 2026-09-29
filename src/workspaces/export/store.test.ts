@@ -485,3 +485,50 @@ test('Ctrl+A follows active area; bottom Delete excludes running, done and skipp
  assert.equal(s.queueItems().length,3);assert.deepEqual([...s.selection().ids],upper);assert.equal(s.queueSelection().ids.size,0);
  s.selectAllActive([]);assert.equal(s.queueSelection().ids.size,0);s.dispose();
 });
+
+test("deletePreset：删掉选中的预设会清选中并只把剩下的落盘", async () => {
+  const other = { ...preset, id: "other", name: "另一个" };
+  const { s, writes } = setup({ getSetting: async () => serializePresets([preset, other]) });
+  await s.ready;
+  s.choosePreset(preset.id);
+  await s.deletePreset(preset.id);
+  assert.equal(s.presets().length, 1);
+  assert.equal(s.presets()[0]?.id, "other");
+  assert.equal(s.selectedPreset(), null, "删的是选中的预设 → 选中要清掉");
+  assert.equal(s.draft().name, "");
+  assert.match(writes[0] ?? "", /另一个/, "落盘只剩另一个");
+  s.dispose();
+});
+test("deletePreset：队列里还有未完成条目时拦下来说原因，不动列表", async () => {
+  const { s, writes } = setup();
+  await s.ready;
+  s.choosePreset(preset.id);
+  await s.ensure([1]);
+  await s.selectIssue({ assetId: 1, variant: "latest" }, "replace", [1]);
+  await s.enqueue("C:/库");
+  assert.ok((s.queues().get(preset.id) ?? []).length > 0);
+  await s.deletePreset(preset.id);
+  assert.equal(s.presets().length, 1, "没删成");
+  assert.equal(writes.length, 0, "没写盘");
+  assert.match(s.error() ?? "", /未完成/);
+  // 清掉队列（重置）之后就放行
+  await s.reset();
+  await s.deletePreset(preset.id);
+  assert.equal(s.presets().length, 0);
+  s.dispose();
+});
+
+
+test("共享库离线阻止加入导出队列；保留选择，拒绝离线期间迟到的快照", async () => {
+  let online = true, captures = 0;
+  const pending = deferred<VariantSnapshot[]>();
+  const {s} = setup({repositoryAvailable: () => online, snapshots: async () => {captures++; return pending.promise;}});
+  await s.ready; s.choosePreset(preset.id); await s.group([1], false);
+  const selected = [...s.selection().ids];
+  assert(s.canEnqueue()); online = false; assert(!s.canEnqueue());
+  assert.equal(await s.enqueue("C:/库"), 0); assert.equal(captures, 0);
+  online = true; const queued = s.enqueue("C:/库"); online = false;
+  pending.resolve(s.selectedVariants().map(value=>snapshot(value.reference)));
+  assert.equal(await queued, 0); assert.equal(s.queues().size, 0);
+  assert.deepEqual([...s.selection().ids], selected); online = true; assert(s.canEnqueue()); s.dispose();
+});

@@ -31397,6 +31397,842 @@
           ]
         }
       ]
+    },
+    {
+      "type": "frame",
+      "id": "qEDiW",
+      "x": 6340,
+      "y": 0,
+      "name": "库连接状态 W1 · 同 main.pen 已确认",
+      "theme": {
+        "mode": "dark",
+        "density": "compact"
+      },
+      "width": 900,
+      "fill": "$surface-main",
+      "layout": "vertical",
+      "gap": 16,
+      "padding": 24,
+      "children": [
+        {
+          "type": "text",
+          "id": "JwObI",
+          "name": "标题",
+          "fill": "$fg-1",
+          "content": "库 · 连接状态",
+          "fontFamily": "Inter",
+          "fontSize": 18,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "XwlD6",
+          "name": "在线 / 展示",
+          "width": "fill_container",
+          "gap": 24,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "D9SgSc",
+              "name": "在线 / 状态说明",
+              "fill": "$fg-2",
+              "textGrowth": "fixed-width",
+              "width": 100,
+              "content": "在线",
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "IUWxM",
+              "name": "在线 / 共享库卡片",
+              "width": 330,
+              "height": 62,
+              "fill": "$state-selected",
+              "cornerRadius": 4,
+              "layout": "vertical",
+              "gap": 4,
+              "padding": [
+                8,
+                12
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "dbjfT",
+                  "name": "图标 / 库名 / 状态按钮",
+                  "width": "fill_container",
+                  "gap": 8,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "pASAY",
+                      "name": "RepoIconBox",
+                      "width": 24,
+                      "height": 24,
+                      "fill": "$brand",
+                      "cornerRadius": 4,
+                      "layout": "vertical",
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "Vtgni",
+                          "name": "Glyph / library",
+                          "width": 16,
+                          "height": 16,
+                          "icon": "library",
+                          "library": "lucide",
+                          "fill": "$fg-on-brand"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "N1GCxO",
+                      "name": "RepoName / Kowloon Studio",
+                      "fill": "$fg-1",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Kowloon Studio",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "T6CSYP",
+                      "name": "RepoGear / 库设置",
+                      "width": 24,
+                      "height": 24,
+                      "cornerRadius": 4,
+                      "layout": "vertical",
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "fNp39",
+                          "name": "Glyph / settings",
+                          "width": 14,
+                          "height": 14,
+                          "icon": "settings",
+                          "library": "lucide",
+                          "fill": "$fg-2"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "moPGI",
+                  "name": "路径 / 最后成功计数",
+                  "width": "fill_container",
+                  "gap": 8,
+                  "padding": [
+                    0,
+                    0,
+                    0,
+                    32
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "y75qZC",
+                      "name": "RepoPath / D:\\Libraries\\Main",
+                      "fill": "$fg-3",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "D:\\Libraries\\Main",
+                      "fontFamily": "Inter",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "T3zMT",
+                      "name": "RepoCount / 12 480 张",
+                      "fill": "$fg-3",
+                      "content": "12 480 张",
+                      "fontFamily": "Inter",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "NWkzJ",
+              "name": "在线 / 图标提示",
+              "fill": "$fg-2",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "已连接 · 设置",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "k53F70",
+          "name": "离线 / 展示",
+          "width": "fill_container",
+          "gap": 24,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "QDLCV",
+              "name": "离线 / 状态说明",
+              "fill": "$fg-2",
+              "textGrowth": "fixed-width",
+              "width": 100,
+              "content": "离线",
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "GYDXO",
+              "name": "离线 / 共享库卡片",
+              "width": 330,
+              "height": 62,
+              "fill": "$surface-track",
+              "cornerRadius": 4,
+              "layout": "vertical",
+              "gap": 4,
+              "padding": [
+                8,
+                12
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "fLUvD",
+                  "name": "图标 / 库名 / 状态按钮",
+                  "width": "fill_container",
+                  "gap": 8,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "h3p2S",
+                      "name": "RepoIconBox",
+                      "width": 24,
+                      "height": 24,
+                      "fill": "$surface-bar",
+                      "cornerRadius": 4,
+                      "layout": "vertical",
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "AvNQc",
+                          "name": "Glyph / library",
+                          "width": 16,
+                          "height": 16,
+                          "icon": "cloud-off",
+                          "library": "lucide",
+                          "fill": "$fg-3"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "DlAdG",
+                      "name": "RepoName / Kowloon Studio",
+                      "fill": "$fg-1",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Kowloon Studio",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "hRZF4",
+                      "name": "RepoGear / 库设置",
+                      "width": 24,
+                      "height": 24,
+                      "cornerRadius": 4,
+                      "layout": "vertical",
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "UABZg",
+                          "name": "Glyph / settings",
+                          "width": 14,
+                          "height": 14,
+                          "icon": "settings",
+                          "library": "lucide",
+                          "fill": "$fg-2"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "pFcZ8",
+                  "name": "路径 / 最后成功计数",
+                  "width": "fill_container",
+                  "gap": 8,
+                  "padding": [
+                    0,
+                    0,
+                    0,
+                    32
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "pKpxy",
+                      "name": "RepoPath / D:\\Libraries\\Main",
+                      "fill": "$fg-3",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "D:\\Libraries\\Main",
+                      "fontFamily": "Inter",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "ILaxy",
+                      "name": "RepoCount / 12 480 张",
+                      "fill": "$fg-3",
+                      "content": "12 480 张",
+                      "fontFamily": "Inter",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "UbdZ3",
+              "name": "离线 / 图标提示",
+              "fill": "$fg-2",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "设备未连接 · 重新查找",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "v3PKtr",
+          "name": "正在查找 / 展示",
+          "width": "fill_container",
+          "gap": 24,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "M5PA7",
+              "name": "正在查找 / 状态说明",
+              "fill": "$fg-2",
+              "textGrowth": "fixed-width",
+              "width": 100,
+              "content": "正在查找",
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "gmx0O",
+              "name": "正在查找 / 共享库卡片",
+              "width": 330,
+              "height": 62,
+              "fill": "$surface-track",
+              "cornerRadius": 4,
+              "layout": "vertical",
+              "gap": 4,
+              "padding": [
+                8,
+                12
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "S6TuQW",
+                  "name": "图标 / 库名 / 状态按钮",
+                  "width": "fill_container",
+                  "gap": 8,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "D8VKl",
+                      "name": "RepoIconBox",
+                      "width": 24,
+                      "height": 24,
+                      "fill": "$surface-bar",
+                      "cornerRadius": 4,
+                      "layout": "vertical",
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "Q97qrq",
+                          "name": "Glyph / library",
+                          "width": 16,
+                          "height": 16,
+                          "icon": "loader-circle",
+                          "library": "lucide",
+                          "fill": "$fg-3"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "E99h1",
+                      "name": "RepoName / Kowloon Studio",
+                      "fill": "$fg-1",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Kowloon Studio",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "njwrc",
+                      "name": "RepoGear / 库设置",
+                      "width": 24,
+                      "height": 24,
+                      "cornerRadius": 4,
+                      "layout": "vertical",
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "n5Hjm4",
+                          "name": "Glyph / settings",
+                          "width": 14,
+                          "height": 14,
+                          "icon": "settings",
+                          "library": "lucide",
+                          "fill": "$fg-2"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "tDil4",
+                  "name": "路径 / 最后成功计数",
+                  "width": "fill_container",
+                  "gap": 8,
+                  "padding": [
+                    0,
+                    0,
+                    0,
+                    32
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "y7rAu",
+                      "name": "RepoPath / D:\\Libraries\\Main",
+                      "fill": "$fg-3",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "D:\\Libraries\\Main",
+                      "fontFamily": "Inter",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "F5kVcH",
+                      "name": "RepoCount / 12 480 张",
+                      "fill": "$fg-3",
+                      "content": "12 480 张",
+                      "fontFamily": "Inter",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "Z7ECt",
+              "name": "正在查找 / 图标提示",
+              "fill": "$fg-2",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "正在查找登记位置…",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "f3sPtp",
+          "name": "未找到 / 展示",
+          "width": "fill_container",
+          "gap": 24,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "B8g3R4",
+              "name": "未找到 / 状态说明",
+              "fill": "$fg-2",
+              "textGrowth": "fixed-width",
+              "width": 100,
+              "content": "未找到",
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "bmNmT",
+              "name": "未找到 / 共享库卡片",
+              "width": 330,
+              "height": 62,
+              "fill": "$surface-track",
+              "cornerRadius": 4,
+              "layout": "vertical",
+              "gap": 4,
+              "padding": [
+                8,
+                12
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "RknOM",
+                  "name": "图标 / 库名 / 状态按钮",
+                  "width": "fill_container",
+                  "gap": 8,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "PCvop",
+                      "name": "RepoIconBox",
+                      "width": 24,
+                      "height": 24,
+                      "fill": "$surface-bar",
+                      "cornerRadius": 4,
+                      "layout": "vertical",
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "R2kox",
+                          "name": "Glyph / library",
+                          "width": 16,
+                          "height": 16,
+                          "icon": "cloud-off",
+                          "library": "lucide",
+                          "fill": "$fg-3"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "mztYj",
+                      "name": "RepoName / Kowloon Studio",
+                      "fill": "$fg-1",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Kowloon Studio",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "wEz2D",
+                      "name": "RepoGear / 库设置",
+                      "width": 24,
+                      "height": 24,
+                      "cornerRadius": 4,
+                      "layout": "vertical",
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "fKaGT",
+                          "name": "Glyph / settings",
+                          "width": 14,
+                          "height": 14,
+                          "icon": "settings",
+                          "library": "lucide",
+                          "fill": "$fg-2"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "x4oCcu",
+                  "name": "路径 / 最后成功计数",
+                  "width": "fill_container",
+                  "gap": 8,
+                  "padding": [
+                    0,
+                    0,
+                    0,
+                    32
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "uveJN",
+                      "name": "RepoPath / D:\\Libraries\\Main",
+                      "fill": "$fg-3",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "D:\\Libraries\\Main",
+                      "fontFamily": "Inter",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "THFgV",
+                      "name": "RepoCount / 12 480 张",
+                      "fill": "$fg-3",
+                      "content": "12 480 张",
+                      "fontFamily": "Inter",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "FakFf",
+              "name": "未找到 / 图标提示",
+              "fill": "$fg-2",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "尚未找到这个库（已试过 2 处）· 插入设备后重试",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "zaANP",
+          "name": "不可用 / 展示",
+          "width": "fill_container",
+          "gap": 24,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "Pei9i",
+              "name": "不可用 / 状态说明",
+              "fill": "$fg-2",
+              "textGrowth": "fixed-width",
+              "width": 100,
+              "content": "不可用",
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "YjfR3",
+              "name": "不可用 / 共享库卡片",
+              "width": 330,
+              "height": 62,
+              "fill": "$surface-track",
+              "cornerRadius": 4,
+              "layout": "vertical",
+              "gap": 4,
+              "padding": [
+                8,
+                12
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "mdcNS",
+                  "name": "图标 / 库名 / 状态按钮",
+                  "width": "fill_container",
+                  "gap": 8,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "ulR27",
+                      "name": "RepoIconBox",
+                      "width": 24,
+                      "height": 24,
+                      "fill": "$surface-bar",
+                      "cornerRadius": 4,
+                      "layout": "vertical",
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "dv0Dt",
+                          "name": "Glyph / library",
+                          "width": 16,
+                          "height": 16,
+                          "icon": "triangle-alert",
+                          "library": "lucide",
+                          "fill": "$danger"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "IGUC0",
+                      "name": "RepoName / Kowloon Studio",
+                      "fill": "$fg-1",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Kowloon Studio",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "YAkCM",
+                      "name": "RepoGear / 库设置",
+                      "width": 24,
+                      "height": 24,
+                      "cornerRadius": 4,
+                      "layout": "vertical",
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "hVxsR",
+                          "name": "Glyph / settings",
+                          "width": 14,
+                          "height": 14,
+                          "icon": "settings",
+                          "library": "lucide",
+                          "fill": "$fg-2"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "JwVur",
+                  "name": "路径 / 最后成功计数",
+                  "width": "fill_container",
+                  "gap": 8,
+                  "padding": [
+                    0,
+                    0,
+                    0,
+                    32
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "kInaI",
+                      "name": "RepoPath / D:\\Libraries\\Main",
+                      "fill": "$fg-3",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "D:\\Libraries\\Main",
+                      "fontFamily": "Inter",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "KccQb",
+                      "name": "RepoCount / 12 480 张",
+                      "fill": "$fg-3",
+                      "content": "12 480 张",
+                      "fontFamily": "Inter",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "QyS0P",
+              "name": "不可用 / 图标提示",
+              "fill": "$fg-2",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "位置已换成别的库 · 检查设备与路径",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "igdJ6",
+          "name": "交互说明",
+          "fill": "$fg-2",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "所有状态保留右侧齿轮；左侧状态图标负责重查。离线与未找到保持两行卡片，计数保留最近成功值。\n库设置顶部管理同库备用位置；离线可定位新位置，仅依赖连接的操作禁用。\n导入、浏览、导出共用 RepositoryCard；两密度仅改变间距。",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "normal"
+        }
+      ]
     }
   ],
   "themes": {
