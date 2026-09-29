@@ -8,7 +8,7 @@ import {
   serializePresets,
   variantKey,
   variantAssetId,
-  visibleVariants, admitsPhoto, mainVariant, orderedIssues,
+  visibleVariants, admitsPhoto, mainVariant, orderedIssues, variantSuffix,
   type ExportPreset,
   type ExportQueueItem,
   type VariantSummary,
@@ -81,15 +81,28 @@ test("variantAssetId 与 variantKey 成对：坏输入一律 null 不抛，位�
 });
 test("photo filters never restrict the admitted photo's issue list", () => {
   const items=[{reference:{assetId:1,variant:"sooc"},profileHash:"base",sourceBase:"sooc"},
+    {reference:{assetId:1,variant:"raw"},profileHash:null,sourceBase:"raw"},
     {reference:{assetId:1,variant:"latest"},main:true,edited:true,profileHash:"edited",sourceBase:"sooc"},
-    {reference:{assetId:1,variant:"issue:1"},profileHash:"edited",sourceBase:"sooc"}] as VariantSummary[];
-  for(const scope of ["all","issues","edited"] as const)assert.equal(visibleVariants(items,scope).length,3);
+    {reference:{assetId:1,variant:"issue:1"},profileHash:"edited",sourceBase:"sooc",ordinal:3}] as VariantSummary[];
+  for(const scope of ["all","issues","edited"] as const)assert.equal(visibleVariants(items,scope).length,4);
   assert(admitsPhoto(items,"edited"));assert(admitsPhoto(items,"issues"));
   assert.equal(mainVariant(items)?.reference.variant,"latest");
-  assert.deepEqual(orderedIssues(items,()=>false).map(v=>v.reference.variant),["sooc"]);
+  const strip=orderedIssues(items,()=>false).map(v=>v.reference.variant);
+  assert(strip.includes("raw"),"RAW 行回到 issue 条（标记为 RAW 的 issue）");
+  assert.equal(strip[strip.length-1],"sooc");
   const reset=items.map(v=>v.main?{...v,edited:false}:v);
   assert(!admitsPhoto(reset,"edited"));assert(admitsPhoto(reset,"issues"));
   assert(admitsPhoto([],"all"));assert(!admitsPhoto([],"issues"));
+});
+test("variant suffixes map four ways", () => {
+  assert.equal(variantSuffix({relPath:"p",reference:{assetId:1,variant:"sooc"},name:"SOOC",sourceBase:"sooc",profileHash:null}),"ISO");
+  assert.equal(variantSuffix({relPath:"p",reference:{assetId:1,variant:"raw"},name:"RAW",sourceBase:"raw",profileHash:null}),"IRA");
+  assert.equal(variantSuffix({relPath:"p",reference:{assetId:1,variant:"issue:7"},name:"夕照",sourceBase:"sooc",profileHash:"h",ordinal:3}),"I03");
+  assert.equal(variantSuffix({relPath:"p",reference:{assetId:1,variant:"issue:8"},name:"晨雾",sourceBase:"sooc",profileHash:"h",ordinal:99}),"I99");
+  assert.equal(variantSuffix({relPath:"p",reference:{assetId:1,variant:"latest"},name:"latest",sourceBase:"sooc",profileHash:null}),"ILA");
+  assert.equal(variantSuffix({relPath:"p",reference:{assetId:1,variant:"latest"},name:"latest",sourceBase:"sooc",profileHash:"h",ordinal:0}),"I00");
+  assert.equal(variantSuffix({relPath:"p",reference:{assetId:1,variant:"issue:9"},name:"旧档",sourceBase:"sooc",profileHash:"h",ordinal:null}),"ILA");
+  assert.equal(variantSuffix({relPath:"p",reference:{assetId:1,variant:"issue:9"},name:"坏档",sourceBase:"sooc",profileHash:"h",ordinal:100}),"ILA");
 });
 test("promoted issues precede newest-first remaining issues and unselected SOOC is last",()=>{
   const items=[{reference:{assetId:1,variant:"latest"},main:true},...Array.from({length:8},(_,i)=>({reference:{assetId:1,variant:`issue:${i}`},createdAt:i})),{reference:{assetId:1,variant:"sooc"}}] as VariantSummary[];

@@ -34,6 +34,8 @@ export interface VariantSummary {
   main?: boolean;
   edited?: boolean;
   createdAt?: number | null;
+  /** 命名定稿的导出尾号序号（I00–I99）；原片/RAW/latest 行没有（尾号固定 ISO/IRA/ILA）。 */
+  ordinal?: number | null;
 }
 export interface AssetVariants {
   assetId: number;
@@ -53,7 +55,7 @@ export interface ExportQueueItem {
   root: string;
   snapshot: VariantSnapshot;
   preset: ExportPreset;
-  status: "pending" | "running" | "done" | "skipped" | "failed";
+  status: "waiting" | "pending" | "running" | "done" | "skipped" | "failed";
   error: string | null;
   output?: string | null;
   sequence: number;
@@ -84,7 +86,9 @@ export function visibleVariants(
   _scope: ExportScope,
 ): readonly VariantSummary[] {
   // Filtering belongs to photos. Every admitted photo exposes the full deduplicated list.
-  return variants.filter(v => v.main === true || v.reference.variant !== "raw");
+  // RAW 行（标记为 RAW 的 issue，崔总 2026-09-28）与其它行一样可见；未编辑且基准即 RAW 时
+  // 它就是主行，不会重复出现（后端 summaries 已去重）。
+  return variants;
 }
 export function mainVariant(variants: readonly VariantSummary[]): VariantSummary | null {
   return variants.find(v => v.main) ?? variants.find(v => v.reference.variant === "latest") ?? variants[0] ?? null;
@@ -96,11 +100,24 @@ export function admitsPhoto(variants: readonly VariantSummary[], scope: ExportSc
 }
 export function orderedIssues(variants: readonly VariantSummary[], promoted: (v: VariantSummary) => boolean): readonly VariantSummary[] {
   const main=mainVariant(variants);
-  return variants.filter(v => v !== main && v.reference.variant !== "raw" &&
+  return variants.filter(v => v !== main &&
     !(main?.profileHash && v.profileHash === main.profileHash && v.sourceBase === main.sourceBase))
     .sort((a,b) => Number(promoted(b))-Number(promoted(a)) ||
       Number(a.reference.variant === "sooc")-Number(b.reference.variant === "sooc") ||
       (b.createdAt??0)-(a.createdAt??0) || b.reference.variant.localeCompare(a.reference.variant));
+}
+
+/**
+ * 导出尾号（specs/export-issue-ordinal.md §2）：原片 ISO、RAW 直出 IRA、
+ * 命名定稿 I00–I99（后端分配的序号）、未匹配 latest ILA。与后端 `issue_suffix` 同一口径。
+ */
+export function variantSuffix(v: VariantSummary): string {
+  if (v.reference.variant === "sooc") return "ISO";
+  if (v.reference.variant === "raw") return "IRA";
+  if (typeof v.ordinal === "number" && Number.isSafeInteger(v.ordinal) && v.ordinal >= 0 && v.ordinal <= 99) {
+    return `I${String(v.ordinal).padStart(2, "0")}`;
+  }
+  return "ILA";
 }
 
 export function queueFinished(status: ExportQueueItem["status"]): boolean {

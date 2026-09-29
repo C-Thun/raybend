@@ -168,6 +168,33 @@ pub fn write_tiff(
     cancel: &AtomicBool,
     phase: impl Fn(&str),
 ) -> Result<PathBuf> {
+    write_tiff_checked(
+        source,
+        captured,
+        directory,
+        metadata,
+        lens,
+        lut,
+        cancel,
+        phase,
+        || Ok(()),
+        "",
+    )
+}
+#[allow(clippy::too_many_arguments)]
+pub fn write_tiff_checked(
+    source: &Path,
+    captured: &crate::export::VariantSnapshot,
+    directory: &Path,
+    metadata: &crate::export::metadata::Metadata,
+    lens: Option<&crate::develop::lens::LensCorrection>,
+    lut: Option<&crate::develop::lut::Lut>,
+    cancel: &AtomicBool,
+    phase: impl Fn(&str),
+    check_session: impl Fn() -> Result<()>,
+    suffix: &str,
+) -> Result<PathBuf> {
+    check_session()?;
     if !directory.is_absolute() || !directory.is_dir() {
         return Err(Error::Unsupported("TIFF 保存目录不可用".into()));
     }
@@ -192,7 +219,8 @@ pub fn write_tiff(
         template: ":FILENAME".into(),
         existing_file: crate::export::ExistingFile::Append,
     };
-    let relative = crate::export::output::relative_name(&preset, source, &Default::default(), 1)?;
+    let relative = crate::export::output::relative_name(&preset, source, &Default::default(), 1, suffix)?;
+    check_session()?;
     crate::export::output::publish(directory, &relative, &bytes, source)
 }
 #[cfg(test)]
@@ -292,6 +320,36 @@ mod tests {
             source_signature: crate::media::source::source_signature(&source).unwrap(),
         };
         (dir, source, snap)
+    }
+    #[test]
+    fn session_expiring_during_render_never_publishes_output() {
+        let (dir, source, snap) = fixture();
+        let cancel = AtomicBool::new(false);
+        let valid = AtomicBool::new(true);
+        let result = write_tiff_checked(
+            &source,
+            &snap,
+            dir.path(),
+            &Default::default(),
+            None,
+            None,
+            &cancel,
+            |phase| {
+                if phase == "writing" {
+                    valid.store(false, Ordering::Release);
+                }
+            },
+            || {
+                if valid.load(Ordering::Acquire) {
+                    Ok(())
+                } else {
+                    Err(Error::SessionExpired)
+                }
+            },
+            "",
+        );
+        assert!(matches!(result, Err(Error::SessionExpired)));
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
     }
     #[test]
     fn tiff_shared_precision_metadata_no_overwrite_and_source_hash() {

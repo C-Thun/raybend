@@ -86,6 +86,7 @@ fn one_and_thousand() {
                     item.sequence,
                     None,
                     None,
+                    &format!("I{:02}", item.snapshot.reference.asset_id % 100),
                 )
                 .map(|result| match result {
                     super::output::Publication::Written(path) => {

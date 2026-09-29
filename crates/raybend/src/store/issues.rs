@@ -17,6 +17,8 @@ pub struct Issue {
     pub profile_hash: String,
     pub source_base: EditBase,
     pub created_at: i64,
+    /// 导出尾号序号（I00–I99）；每资产唯一，分配见 `allocate_ordinal`。
+    pub ordinal: i64,
     pub stack: DevelopStack,
 }
 
@@ -45,7 +47,7 @@ pub fn profile_hash(stack: &DevelopStack) -> Result<String> {
 
 pub fn list(conn: &Connection, asset_id: i64) -> Result<Vec<Issue>> {
     let mut statement = conn.prepare(
-        "SELECT id, asset_id, name, profile_hash, source_base, created_at, schema_version, profile_json \
+        "SELECT id, asset_id, name, profile_hash, source_base, created_at, schema_version, profile_json, ordinal \
          FROM issues WHERE asset_id = ?1 ORDER BY created_at DESC, id DESC",
     )?;
     let rows = statement.query_map([asset_id], |row| {
@@ -58,10 +60,11 @@ pub fn list(conn: &Connection, asset_id: i64) -> Result<Vec<Issue>> {
             row.get::<_, i64>(5)?,
             row.get::<_, i64>(6)?,
             row.get::<_, String>(7)?,
+            row.get::<_, i64>(8)?,
         ))
     })?;
     rows.map(|row| {
-        let (id, asset_id, name, profile_hash, base, created_at, schema_version, json) = row?;
+        let (id, asset_id, name, profile_hash, base, created_at, schema_version, json, ordinal) = row?;
         if schema_version != PROFILE_SCHEMA_VERSION {
             return Err(Error::Unsupported(format!(
                 "定稿 {id} 的配置版本 {schema_version} 尚不支持"
@@ -81,6 +84,7 @@ pub fn list(conn: &Connection, asset_id: i64) -> Result<Vec<Issue>> {
             profile_hash,
             source_base,
             created_at,
+            ordinal,
             stack,
         })
     })
@@ -130,6 +134,35 @@ pub fn can_finalize(stack: &DevelopStack, issues: &[Issue]) -> Result<bool> {
     Ok(!stack.is_empty() && matching_issue(stack, issues)?.is_none())
 }
 
+/// 序号分配（specs/export-issue-ordinal.md §3）：从 assets.issue_counter 起步向上找
+/// 第一个空位，99 后绕回 0；全满拒绝。写侧由单写者 actor 串行化，配合
+/// UNIQUE(asset_id, ordinal) 索引双保险。
+fn allocate_ordinal(conn: &Connection, asset_id: i64) -> Result<i64> {
+    let counter: i64 = conn
+        .query_row(
+            "SELECT issue_counter FROM assets WHERE id = ?1",
+            [asset_id],
+            |row| row.get(0),
+        )
+        .map_err(|_| Error::Unsupported("照片不存在，无法分配定稿序号".into()))?;
+    let mut statement = conn.prepare("SELECT ordinal FROM issues WHERE asset_id = ?1")?;
+    let occupied: std::collections::BTreeSet<i64> = statement
+        .query_map([asset_id], |row| row.get::<_, i64>(0))?
+        .collect::<std::result::Result<_, _>>()?;
+    if occupied.len() >= 100 {
+        return Err(Error::Unsupported("已达 100 个定稿上限（序号 0–99 全部占用）".into()));
+    }
+    let mut candidate = counter.rem_euclid(100);
+    while occupied.contains(&candidate) {
+        candidate = (candidate + 1) % 100;
+    }
+    conn.execute(
+        "UPDATE assets SET issue_counter = ?2 WHERE id = ?1",
+        params![asset_id, (candidate + 1) % 100],
+    )?;
+    Ok(candidate)
+}
+
 pub fn create(
     conn: &Connection,
     asset_id: i64,
@@ -155,10 +188,11 @@ pub fn create(
     let hash = profile_hash(stack)?;
     let json = serde_json::to_string(stack)
         .map_err(|error| Error::Unsupported(format!("定稿配置序列化失败：{error}")))?;
+    let ordinal = allocate_ordinal(conn, asset_id)?;
     conn.execute(
-        "INSERT INTO issues (asset_id, schema_version, name, profile_json, profile_hash, source_base, created_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        params![asset_id, PROFILE_SCHEMA_VERSION, name, json, hash, stack.source_base.as_str(), now_ms],
+        "INSERT INTO issues (asset_id, schema_version, name, profile_json, profile_hash, source_base, created_at, ordinal) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![asset_id, PROFILE_SCHEMA_VERSION, name, json, hash, stack.source_base.as_str(), now_ms, ordinal],
     )?;
     get(conn, asset_id, conn.last_insert_rowid())?
         .ok_or_else(|| Error::Unsupported("刚创建的定稿无法读回".into()))
@@ -303,6 +337,67 @@ mod tests {
     }
 
     #[test]
+    fn ordinals_allocate_in_sequence_reuse_holes_and_wrap() {
+        let conn = db();
+        conn.execute_batch("INSERT INTO assets(id, imported_at, updated_at) VALUES(1,1,1);")
+            .unwrap();
+        let stack = |exposure: f64| {
+            let mut stack = DevelopStack::default();
+            stack.params.insert("exposure".into(), exposure);
+            stack
+        };
+        let a = create(&conn, 1, "甲", &stack(0.1), 1).unwrap();
+        let b = create(&conn, 1, "乙", &stack(0.2), 2).unwrap();
+        let c = create(&conn, 1, "丙", &stack(0.3), 3).unwrap();
+        assert_eq!((a.ordinal, b.ordinal, c.ordinal), (0, 1, 2));
+        // 删中间留洞：分配从游标顺找（不急着补洞），接着 3、4
+        assert!(delete(&conn, 1, b.id).unwrap());
+        let d = create(&conn, 1, "丁", &stack(0.4), 4).unwrap();
+        assert_eq!(d.ordinal, 3);
+        let e = create(&conn, 1, "戊", &stack(0.5), 5).unwrap();
+        assert_eq!(e.ordinal, 4);
+        // 游标指到 99：下一个拿 99，再下一个绕回后跳过 0、复用洞 1
+        conn.execute("UPDATE assets SET issue_counter = 99 WHERE id = 1", [])
+            .unwrap();
+        let f = create(&conn, 1, "己", &stack(0.6), 6).unwrap();
+        assert_eq!(f.ordinal, 99);
+        let g = create(&conn, 1, "庚", &stack(0.7), 7).unwrap();
+        assert_eq!(g.ordinal, 1);
+    }
+
+    #[test]
+    fn ordinal_cap_at_one_hundred_rejects_new_issues_and_reuses_freed_slot() {
+        let conn = db();
+        conn.execute_batch("INSERT INTO assets(id, imported_at, updated_at) VALUES(1,1,1);")
+            .unwrap();
+        for number in 0..100 {
+            let mut stack = DevelopStack::default();
+            stack.params.insert("exposure".into(), number as f64);
+            create(&conn, 1, &format!("第{number}"), &stack, number + 1).unwrap();
+        }
+        let mut ordinals: Vec<i64> = list(&conn, 1)
+            .unwrap()
+            .iter()
+            .map(|issue| issue.ordinal)
+            .collect();
+        ordinals.sort_unstable();
+        assert_eq!(ordinals, (0..100).collect::<Vec<_>>());
+        let mut stack = DevelopStack::default();
+        stack.params.insert("exposure".into(), 9.9);
+        let full = create(&conn, 1, "第一百零一", &stack, 999).unwrap_err();
+        assert!(full.to_string().contains("100"));
+        // 删掉一个，位置立刻可用
+        let victim = list(&conn, 1)
+            .unwrap()
+            .into_iter()
+            .find(|issue| issue.ordinal == 42)
+            .unwrap();
+        assert!(delete(&conn, 1, victim.id).unwrap());
+        let again = create(&conn, 1, "补位", &stack, 1000).unwrap();
+        assert_eq!(again.ordinal, 42);
+    }
+
+    #[test]
     fn automatic_provenance_is_saved_without_affecting_issue_matching_or_legacy_hash() {
         let conn = db();
         conn.execute_batch("INSERT INTO assets(id, imported_at, updated_at) VALUES(1,1,1);")
@@ -425,6 +520,7 @@ mod tests {
             profile_hash: profile_hash(&stack).unwrap(),
             source_base: EditBase::Raw,
             created_at: 1,
+            ordinal: 0,
             stack: stack.clone(),
         };
         assert_eq!(selection(&stack, &[issue]).unwrap(), Selection::Issue(7));
@@ -446,6 +542,7 @@ mod tests {
             profile_hash: profile_hash(&current).unwrap(),
             source_base: EditBase::Raw,
             created_at: 1,
+            ordinal: 1,
             stack,
         };
         assert_eq!(

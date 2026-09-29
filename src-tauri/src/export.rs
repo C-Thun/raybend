@@ -30,14 +30,14 @@ pub async fn export_snapshots<R: Runtime>(
     crate::source::blocking(move || {
         raybend::export::validate_batch(&references.iter().map(|r| r.asset_id).collect::<Vec<_>>())
             .map_err(|e| e.to_string())?;
-        let root = crate::browse::resolve_root(&handle, &repository_id)?;
         handle
             .state::<BrowseState>()
             .with_catalog(&handle, &repository_id, |db| {
+                let root = db.root();
                 db.read(|conn| {
                     references
                         .iter()
-                        .map(|r| raybend::export::snapshot(conn, &root, r))
+                        .map(|r| raybend::export::snapshot(conn, root, r))
                         .collect()
                 })
                 .map_err(|e| e.to_string())
@@ -68,61 +68,68 @@ pub async fn export_variant_image<R: Runtime>(
         ) {
             return Err("导出只提供显示档预览".into());
         }
-        let root = crate::browse::resolve_root(&handle, &repository_id)?;
-        let (snap, rel_path) =
-            handle
-                .state::<BrowseState>()
-                .with_catalog(&handle, &repository_id, |db| {
-                    db.read(|conn| match captured {
-                        Some(ref saved) => {
-                            raybend::export::validate_captured(conn, &root, &reference, saved)?;
-                            let path =
-                                raybend::export::resolve_captured_source(conn, &root, saved)?;
-                            let rel = path
-                                .strip_prefix(root.canonicalize()?)
-                                .map_err(|_| {
-                                    raybend::Error::Unsupported("导出源位于照片库之外".into())
-                                })?
-                                .to_string_lossy()
-                                .replace('\\', "/");
-                            Ok((saved.clone(), rel))
-                        }
-                        None => {
-                            let snap = raybend::export::snapshot(conn, &root, &reference)?;
-                            let rel = snap.rel_path.clone();
-                            Ok((snap, rel))
-                        }
-                    })
-                    .map_err(|e| e.to_string())
-                })?;
-        let asset = crate::develop::ResolvedAsset {
-            repository_id: repository_id.clone(),
-            asset_id: reference.asset_id,
-            root,
-            rel_path,
-        };
-        let profile_key = format!(
-            "export-{}-{}",
-            reference.variant.replace(':', "-"),
-            snap.profile_hash
-        );
-        let preview =
-            crate::thumbs::render_profile_cached(&handle, &asset, &snap.stack, &profile_key)?;
-        if class == raybend::thumbnail::SizeClass::Screen {
-            return Ok(preview);
-        }
-        // 尺寸适配复用 image 与现有 AVIF 编码；前端不碰像素。
-        let image = image::load_from_memory_with_format(&preview, image::ImageFormat::Avif)
+        let browse = handle.state::<BrowseState>();
+        let _permit = browse
+            .sessions
+            .begin_task(&repository_id)
             .map_err(|e| e.to_string())?;
-        let image = raybend::thumbnail::render::clamp_display_aspect(
-            image,
-            raybend::thumbnail::render::MAX_DISPLAY_ASPECT,
-        );
-        let image = image
-            .thumbnail(class.long_edge(), class.long_edge())
-            .to_rgb8();
-        raybend::thumbnail::render::encode_avif(image.as_raw(), image.width(), image.height())
-            .map_err(|e| e.to_string())
+        let catalog = browse.lease(&handle, &repository_id)?;
+        let result = (|| {
+            let root = catalog.root().to_path_buf();
+            let (snap, rel_path) = catalog
+                .read(|conn| match captured {
+                    Some(ref saved) => {
+                        raybend::export::validate_captured(conn, &root, &reference, saved)?;
+                        let path = raybend::export::resolve_captured_source(conn, &root, saved)?;
+                        let rel = path
+                            .strip_prefix(root.canonicalize()?)
+                            .map_err(|_| {
+                                raybend::Error::Unsupported("导出源位于照片库之外".into())
+                            })?
+                            .to_string_lossy()
+                            .replace('\\', "/");
+                        Ok((saved.clone(), rel))
+                    }
+                    None => {
+                        let snap = raybend::export::snapshot(conn, &root, &reference)?;
+                        let rel = snap.rel_path.clone();
+                        Ok((snap, rel))
+                    }
+                })
+                .map_err(|e| e.to_string())?;
+            let asset = crate::develop::ResolvedAsset {
+                repository_id: repository_id.clone(),
+                asset_id: reference.asset_id,
+                root,
+                rel_path,
+            };
+            let profile_key = format!(
+                "export-{}-{}",
+                reference.variant.replace(':', "-"),
+                snap.profile_hash
+            );
+            catalog.ensure_current().map_err(|e| e.to_string())?;
+            let preview =
+                crate::thumbs::render_profile_cached(&handle, &asset, &snap.stack, &profile_key)?;
+            catalog.ensure_current().map_err(|e| e.to_string())?;
+            if class == raybend::thumbnail::SizeClass::Screen {
+                return Ok(preview);
+            }
+            // 尺寸适配复用 image 与现有 AVIF 编码；前端不碰像素。
+            let image = image::load_from_memory_with_format(&preview, image::ImageFormat::Avif)
+                .map_err(|e| e.to_string())?;
+            let image = raybend::thumbnail::render::clamp_display_aspect(
+                image,
+                raybend::thumbnail::render::MAX_DISPLAY_ASPECT,
+            );
+            let image = image
+                .thumbnail(class.long_edge(), class.long_edge())
+                .to_rgb8();
+            raybend::thumbnail::render::encode_avif(image.as_raw(), image.width(), image.height())
+                .map_err(|e| e.to_string())
+        })();
+        browse.observe_session(&handle, &catalog);
+        result
     })
     .await?;
     Ok(tauri::ipc::Response::new(bytes))
@@ -175,21 +182,26 @@ pub async fn export_tiff16<R: Runtime>(
 ) -> Result<(u32, u32), String> {
     let handle = app.clone();
     crate::source::blocking(move || {
-        let root = crate::browse::resolve_root(&handle, &repository_id)?;
-        let source = handle
+        let _permit = handle
             .state::<BrowseState>()
-            .with_catalog(&handle, &repository_id, |db| {
-                db.read(|conn| raybend::export::resolve_captured_source(conn, &root, &captured))
-                    .map_err(|e| e.to_string())
-            })?;
+            .sessions
+            .begin_task(&repository_id)
+            .map_err(|e| e.to_string())?;
+        let catalog = handle
+            .state::<BrowseState>()
+            .lease(&handle, &repository_id)?;
+        let source = catalog
+            .read(|conn| raybend::export::resolve_captured_source(conn, catalog.root(), &captured))
+            .map_err(|e| e.to_string())?;
         let (lens, lut) = resources(&handle, &repository_id, &captured)?;
-        raybend::export::write_tiff16(
+        raybend::export::write_tiff16_checked(
             &source,
             std::path::Path::new(&target),
             &captured,
             lens.as_ref(),
             lut.as_deref(),
             max_edge,
+            || catalog.ensure_current(),
         )
         .map_err(|e| e.to_string())
     })
@@ -197,11 +209,43 @@ pub async fn export_tiff16<R: Runtime>(
 }
 
 #[derive(Default)]
-pub struct ExportState(std::sync::Mutex<Option<raybend::export::jobs::Engine>>);
+pub struct ExportState {
+    engine: std::sync::Mutex<Option<raybend::export::jobs::Engine>>,
+    leases: std::sync::Arc<
+        std::sync::Mutex<
+            std::collections::HashMap<
+                (String, String),
+                std::sync::Arc<raybend::store::session::TaskCatalog>,
+            >,
+        >,
+    >,
+    targets: std::sync::Arc<
+        std::sync::Mutex<
+            std::collections::HashMap<
+                (String, String),
+                std::sync::Arc<raybend::store::session::SourceIdentity>,
+            >,
+        >,
+    >,
+}
 impl ExportState {
+    pub(crate) fn suspend_repository(&self, id: &str) -> Result<(), String> {
+        if let Some(engine) = self.engine.lock().map_err(|_| "内部锁已损坏")?.as_ref() {
+            engine.suspend_repository(id)?;
+        }
+        Ok(())
+    }
+    pub(crate) fn unfinished_repository(&self, id: &str) -> bool {
+        self.engine.lock().unwrap().as_ref().is_some_and(|engine| {
+            engine.view().queues.values().flatten().any(|item| {
+                item.repository_id == id
+                    && matches!(item.status.as_str(), "pending" | "running" | "waiting")
+            })
+        })
+    }
     pub(crate) fn has_unfinished(&self) -> Result<bool, String> {
         Ok(self
-            .0
+            .engine
             .lock()
             .map_err(|_| "内部锁已损坏")?
             .as_ref()
@@ -216,15 +260,113 @@ impl ExportState {
             }))
     }
     fn engine<R: Runtime>(&self, app: &AppHandle<R>) -> raybend::export::jobs::Engine {
-        let mut guard = self.0.lock().unwrap();
+        let mut guard = self.engine.lock().unwrap();
         guard
             .get_or_insert_with(|| {
                 let worker = app.clone();
                 let events = app.clone();
+                // 同一队列代次/库在还有任务时固定租约。掉线后的后续项目
+                // 使用已作废租约失败，不静默切同 ID 副本；显式重试可开新租约。
+                let leases = std::sync::Arc::clone(&self.leases);
+                let targets = std::sync::Arc::clone(&self.targets);
+                let task_leases = std::sync::Arc::clone(&leases);
+                let cleanup_targets = std::sync::Arc::clone(&targets);
                 raybend::export::jobs::Engine::new(
-                    move |item| run_item(&worker, item),
+                    move |item| {
+                        let key = (
+                            item.id.split(':').next().unwrap_or_default().to_string(),
+                            item.repository_id.clone(),
+                        );
+                        let existing = task_leases.lock().unwrap().get(&key).cloned();
+                        use raybend::export::jobs::Outcome;
+                        let browse = worker.state::<BrowseState>();
+                        let _permit = match browse.sessions.begin_task(&item.repository_id) {
+                            Ok(permit) => permit,
+                            Err(_) => return Err("storage.released".into()),
+                        };
+                        let Some(task) = existing else {
+                            return Err("导出任务缺少原库身份，请重新入队".into());
+                        };
+                        let mut catalog = task.current();
+                        if catalog.ensure_current().is_err() {
+                            let browse = worker.state::<BrowseState>();
+                            browse.observe_session(&worker, &catalog);
+                            if !browse
+                                .lease(&worker, &item.repository_id)
+                                .is_ok_and(|next| task.install(next).is_ok())
+                            {
+                                return Ok(Outcome::Waiting("storage.wait.repository".into()));
+                            }
+                            catalog = task.current();
+                        }
+                        let target_key = (key.0.clone(), item.preset.directory.clone());
+                        let target = targets
+                            .lock()
+                            .unwrap()
+                            .get(&target_key)
+                            .cloned()
+                            .ok_or("导出目标缺少设备身份")?;
+                        if !target.ready() {
+                            return Ok(Outcome::Waiting("storage.wait.target".into()));
+                        }
+                        let result = run_item(&worker, item, &catalog, &target);
+                        worker
+                            .state::<BrowseState>()
+                            .observe_session(&worker, &catalog);
+                        if result.is_ok() {
+                            return result;
+                        }
+                        if catalog.ensure_current().is_err() {
+                            return Ok(Outcome::Waiting("storage.wait.repository".into()));
+                        }
+                        if !target.ready() {
+                            return Ok(Outcome::Waiting("storage.wait.target".into()));
+                        }
+                        result
+                    },
                     move |view| {
                         use tauri::Emitter;
+                        let active: std::collections::HashSet<_> = view
+                            .queues
+                            .values()
+                            .flatten()
+                            .filter(|item| {
+                                matches!(item.status.as_str(), "pending" | "running" | "waiting")
+                            })
+                            .map(|item| {
+                                (
+                                    item.id.split(':').next().unwrap_or_default().to_string(),
+                                    item.repository_id.clone(),
+                                )
+                            })
+                            .collect();
+                        let retired = {
+                            let mut guard = leases.lock().unwrap();
+                            let keys: Vec<_> = guard
+                                .keys()
+                                .filter(|key| !active.contains(*key))
+                                .cloned()
+                                .collect();
+                            keys.into_iter()
+                                .filter_map(|key| guard.remove(&key))
+                                .collect::<Vec<_>>()
+                        };
+                        drop(retired);
+                        let active_targets: std::collections::HashSet<_> = view
+                            .queues
+                            .values()
+                            .flatten()
+                            .filter(|item| {
+                                matches!(item.status.as_str(), "pending" | "running" | "waiting")
+                            })
+                            .map(|item| {
+                                (view.generation.to_string(), item.preset.directory.clone())
+                            })
+                            .collect();
+                        cleanup_targets
+                            .lock()
+                            .unwrap()
+                            .retain(|key, _| active_targets.contains(key));
                         let _ = events.emit("export://state", view);
                     },
                 )
@@ -233,27 +375,47 @@ impl ExportState {
     }
 }
 pub(crate) struct Prepared {
+    _permit: Option<raybend::store::session::TaskPermit>,
+    pub(crate) catalog: std::sync::Arc<raybend::store::db::CatalogDb>,
     pub(crate) source: std::path::PathBuf,
     naming: raybend::export::output::Naming,
     author: Option<String>,
     description: Option<String>,
     tags: Vec<i64>,
+    /// 导出尾号（I00–I99 / ISO / IRA / ILA）；latest 在这里就完成哈希匹配判定
+    pub(crate) suffix: String,
 }
 pub(crate) fn prepare<R: Runtime>(
     app: &AppHandle<R>,
     repository: &str,
     captured: &VariantSnapshot,
 ) -> Result<Option<Prepared>, String> {
-    let root = crate::browse::resolve_root(app, repository)?;
-    app.state::<BrowseState>().with_catalog(app,repository,|db|db.read(|conn|{
-        // Current identity is checked once immediately before execution. The immutable
-        // enqueued stack remains the rendering input, never a live latest edit.
-        if !raybend::export::still_current(conn,&root,captured)?{return Ok(None)}
-        let source=raybend::export::resolve_captured_source(conn,&root,captured)?;
-        let(taken_at,brand,model,author,description)=conn.query_row("SELECT taken_at,camera_make,camera_model,author,description FROM assets WHERE id=?1",[captured.reference.asset_id],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?)))?;
-        Ok(Some(Prepared{source,naming:raybend::export::output::Naming{taken_at,brand,model},author,description,tags:raybend::store::tags::tags_of_asset(conn,captured.reference.asset_id)?}))
-    }).map_err(|e|e.to_string()))
+    let permit = app
+        .state::<BrowseState>()
+        .sessions
+        .begin_task(repository)
+        .map_err(|e| e.to_string())?;
+    let catalog = app.state::<BrowseState>().lease(app, repository)?;
+    let mut prepared = prepare_with_catalog(catalog, captured)?;
+    if let Some(prepared) = &mut prepared {
+        prepared._permit = Some(permit);
+    }
+    Ok(prepared)
 }
+fn prepare_with_catalog(
+    catalog: std::sync::Arc<raybend::store::db::CatalogDb>,
+    captured: &VariantSnapshot,
+) -> Result<Option<Prepared>, String> {
+    let root = catalog.root().to_path_buf();
+    catalog.read(|conn| {
+        if !raybend::export::still_current(conn,&root,captured)? { return Ok(None); }
+        let source=raybend::export::resolve_captured_source(conn,&root,captured)?;
+        let suffix=raybend::export::issue_suffix(conn,&captured.reference)?;
+        let(taken_at,brand,model,author,description)=conn.query_row("SELECT taken_at,camera_make,camera_model,author,description FROM assets WHERE id=?1",[captured.reference.asset_id],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?)))?;
+        Ok(Some(Prepared{_permit:None,catalog:std::sync::Arc::clone(&catalog),source,naming:raybend::export::output::Naming{taken_at,brand,model},author,description,tags:raybend::store::tags::tags_of_asset(conn,captured.reference.asset_id)?,suffix}))
+    }).map_err(|e|e.to_string())
+}
+
 pub(crate) fn resources<R: Runtime>(
     app: &AppHandle<R>,
     repository: &str,
@@ -318,9 +480,12 @@ pub(crate) fn metadata_for<R: Runtime>(
 fn run_item<R: Runtime>(
     app: &AppHandle<R>,
     item: &raybend::export::jobs::Item,
+    catalog: &std::sync::Arc<raybend::store::db::CatalogDb>,
+    target_identity: &raybend::store::session::SourceIdentity,
 ) -> Result<raybend::export::jobs::Outcome, String> {
     use raybend::export::jobs::Outcome;
-    let Some(prepared) = prepare(app, &item.repository_id, &item.snapshot)? else {
+    let Some(prepared) = prepare_with_catalog(std::sync::Arc::clone(catalog), &item.snapshot)?
+    else {
         return Ok(Outcome::Skipped);
     };
     if let Some(path) = raybend::export::output::skip_existing(
@@ -328,6 +493,7 @@ fn run_item<R: Runtime>(
         &item.preset,
         &prepared.naming,
         item.sequence,
+        &prepared.suffix,
     )
     .map_err(|e| e.to_string())?
     {
@@ -335,7 +501,7 @@ fn run_item<R: Runtime>(
     }
     let metadata = metadata_for(app, &prepared)?;
     let (lens, lut) = resources(app, &item.repository_id, &item.snapshot)?;
-    let target = raybend::export::output::execute(
+    let target = raybend::export::output::execute_checked(
         &prepared.source,
         &item.snapshot,
         &item.preset,
@@ -344,6 +510,15 @@ fn run_item<R: Runtime>(
         item.sequence,
         lens.as_ref(),
         lut.as_deref(),
+        || {
+            prepared.catalog.ensure_current()?;
+            if target_identity.ready() {
+                Ok(())
+            } else {
+                Err(raybend::Error::SessionExpired)
+            }
+        },
+        &prepared.suffix,
     )
     .map_err(|e| e.to_string())?;
     Ok(match target {
@@ -370,8 +545,46 @@ pub async fn export_queue<R: Runtime>(
         match action.as_str() {
             "status" => Ok(engine.view()),
             "enqueue" => {
-                engine.enqueue(generation.ok_or("缺少队列代次")?, items.unwrap_or_default())
+                let generation = generation.ok_or("缺少队列代次")?;
+                let items = items.unwrap_or_default();
+                let state = app.state::<ExportState>();
+                let permits = items
+                    .iter()
+                    .map(|item| {
+                        app.state::<BrowseState>()
+                            .sessions
+                            .begin_task(&item.repository_id)
+                            .map_err(|e| e.to_string())
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                for item in &items {
+                    let key = (generation.to_string(), item.repository_id.clone());
+                    if !state.leases.lock().unwrap().contains_key(&key) {
+                        let db = app
+                            .state::<BrowseState>()
+                            .lease(&app, &item.repository_id)?;
+                        state.leases.lock().unwrap().entry(key).or_insert_with(|| {
+                            std::sync::Arc::new(raybend::store::session::TaskCatalog::new(db))
+                        });
+                    }
+                    state
+                        .targets
+                        .lock()
+                        .unwrap()
+                        .entry((generation.to_string(), item.preset.directory.clone()))
+                        .or_insert_with(|| {
+                            std::sync::Arc::new(
+                                raybend::store::session::SourceIdentity::capture_output(
+                                    std::path::Path::new(&item.preset.directory),
+                                ),
+                            )
+                        });
+                }
+                let result = engine.enqueue(generation, items);
+                drop(permits);
+                result
             }
+            "wake" => engine.wake(),
             "enable" | "disable" => {
                 engine.enable(preset_id.ok_or("未选择预设")?, action == "enable")
             }
@@ -403,14 +616,16 @@ pub async fn export_preview<R: Runtime>(
         if !preset.validate(false).errors.is_empty() {
             return Err("请先修正导出设置".into());
         }
-        let root = crate::browse::resolve_root(&app, &repository_id)?;
-        let snapshot = app
+        let _permit = app
             .state::<BrowseState>()
-            .with_catalog(&app, &repository_id, |db| {
-                db.read(|conn| raybend::export::snapshot(conn, &root, &reference))
-                    .map_err(|e| e.to_string())
-            })?;
-        let p = prepare(&app, &repository_id, &snapshot)?.ok_or("定稿已失效")?;
+            .sessions
+            .begin_task(&repository_id)
+            .map_err(|e| e.to_string())?;
+        let catalog = app.state::<BrowseState>().lease(&app, &repository_id)?;
+        let snapshot = catalog
+            .read(|conn| raybend::export::snapshot(conn, catalog.root(), &reference))
+            .map_err(|e| e.to_string())?;
+        let p = prepare_with_catalog(catalog, &snapshot)?.ok_or("定稿已失效")?;
         let (lens, lut) = resources(&app, &repository_id, &snapshot)?;
         let image = raybend::export::render_for_preset(
             &p.source,
@@ -420,8 +635,9 @@ pub async fn export_preview<R: Runtime>(
             &preset,
         )
         .map_err(|e| e.to_string())?;
-        let relative = raybend::export::output::relative_name(&preset, &p.source, &p.naming, 1)
-            .map_err(|e| e.to_string())?;
+        let relative =
+            raybend::export::output::relative_name(&preset, &p.source, &p.naming, 1, &p.suffix)
+                .map_err(|e| e.to_string())?;
         Ok(ExportPreview {
             target: std::path::Path::new(&preset.directory)
                 .join(relative)

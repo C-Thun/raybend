@@ -34,6 +34,8 @@ pub struct VariantSummary {
     pub main: bool,
     pub edited: bool,
     pub created_at: Option<i64>,
+    /// 命名定稿的导出尾号序号（I00–I99）；原片/RAW/latest 行为 None（尾号固定 ISO/IRA/ILA）。
+    pub ordinal: Option<i64>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -99,7 +101,27 @@ pub fn summaries(conn: &Connection, ids: &[i64]) -> Result<Vec<AssetVariants>> {
             main: false,
             edited: false,
             created_at: None,
+            ordinal: None,
         });
+        // JPG+RAW 同存：RAW 作为「标记为 RAW 的 issue」回到变体表（崔总 2026-09-28；
+        // specs/export-issue-ordinal.md §4）——导出即 IRA（空栈直转，不经曲线与修改）。
+        // 放在 retain 之前：未编辑且基准本就是 RAW 时，它会被主行吸收（去重，不重复出两行）。
+        if base == EditBase::Sooc && roles.contains_key("raw") {
+            variants.push(VariantSummary {
+                rel_path: roles.get("raw").unwrap().clone(),
+                reference: VariantRef {
+                    asset_id: id,
+                    variant: "raw".into(),
+                },
+                name: "RAW".into(),
+                source_base: EditBase::Raw,
+                profile_hash: None,
+                main: false,
+                edited: false,
+                created_at: None,
+                ordinal: None,
+            });
+        }
         let mut latest = develop::load(conn, id)?;
         if latest.is_empty()
             && !roles.contains_key(if latest.source_base == EditBase::Raw {
@@ -135,6 +157,7 @@ pub fn summaries(conn: &Connection, ids: &[i64]) -> Result<Vec<AssetVariants>> {
                 main: true,
                 edited,
                 created_at: None,
+                ordinal: None,
             },
         );
         result.insert(
@@ -145,7 +168,7 @@ pub fn summaries(conn: &Connection, ids: &[i64]) -> Result<Vec<AssetVariants>> {
             },
         );
     }
-    let mut stmt=conn.prepare("SELECT asset_id,id,name,source_base,profile_hash,created_at FROM issues WHERE asset_id IN (SELECT value FROM json_each(?1)) ORDER BY created_at DESC,id DESC")?;
+    let mut stmt=conn.prepare("SELECT asset_id,id,name,source_base,profile_hash,created_at,ordinal FROM issues WHERE asset_id IN (SELECT value FROM json_each(?1)) ORDER BY created_at DESC,id DESC")?;
     for row in stmt.query_map([&json], |r| {
         Ok((
             r.get::<_, i64>(0)?,
@@ -154,9 +177,10 @@ pub fn summaries(conn: &Connection, ids: &[i64]) -> Result<Vec<AssetVariants>> {
             r.get::<_, String>(3)?,
             r.get::<_, String>(4)?,
             r.get::<_, i64>(5)?,
+            r.get::<_, Option<i64>>(6)?,
         ))
     })? {
-        let (asset, id, name, base, hash, created) = row?;
+        let (asset, id, name, base, hash, created, ordinal) = row?;
         let base =
             EditBase::parse(&base).ok_or_else(|| Error::Unsupported("定稿源类型无效".into()))?;
         if let Some(entry) = result.get_mut(&asset) {
@@ -172,6 +196,7 @@ pub fn summaries(conn: &Connection, ids: &[i64]) -> Result<Vec<AssetVariants>> {
                 main: false,
                 edited: false,
                 created_at: Some(created),
+                ordinal,
             });
         }
     }
@@ -194,6 +219,47 @@ pub fn summaries(conn: &Connection, ids: &[i64]) -> Result<Vec<AssetVariants>> {
         }
     }
     Ok(result.into_values().collect())
+}
+
+/// 导出尾号（specs/export-issue-ordinal.md §2）：模板主名之后强制追加的身份段。
+/// 原片 ISO、RAW 直出 IRA；latest 先按哈希匹配已有定稿（匹配上用那个序号），对不上 ILA。
+pub fn issue_suffix(conn: &Connection, reference: &VariantRef) -> Result<String> {
+    match reference.variant.as_str() {
+        "sooc" => Ok("ISO".into()),
+        "raw" => Ok("IRA".into()),
+        "latest" => {
+            let stack = develop::load(conn, reference.asset_id)?;
+            let hash = issues::profile_hash(&stack)?;
+            let ordinal: Option<i64> = conn
+                .query_row(
+                    "SELECT ordinal FROM issues WHERE asset_id=?1 AND profile_hash=?2 AND source_base=?3 LIMIT 1",
+                    rusqlite::params![reference.asset_id, hash, stack.source_base.as_str()],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            Ok(match ordinal {
+                Some(n) => format!("I{n:02}"),
+                None => "ILA".into(),
+            })
+        }
+        key => {
+            let id = key
+                .strip_prefix("issue:")
+                .and_then(|id| id.parse::<i64>().ok())
+                .filter(|id| *id > 0)
+                .ok_or_else(|| Error::Unsupported("无效的导出 issue".into()))?;
+            let ordinal: Option<i64> = conn
+                .query_row(
+                    "SELECT ordinal FROM issues WHERE asset_id=?1 AND id=?2",
+                    rusqlite::params![reference.asset_id, id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            ordinal
+                .map(|n| format!("I{n:02}"))
+                .ok_or_else(|| Error::Unsupported("定稿已不存在".into()))
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -403,6 +469,18 @@ pub fn write_tiff16(
     lut: Option<&crate::develop::lut::Lut>,
     max_edge: u32,
 ) -> Result<(u32, u32)> {
+    write_tiff16_checked(path, target, captured, lens, lut, max_edge, || Ok(()))
+}
+pub fn write_tiff16_checked(
+    path: &Path,
+    target: &Path,
+    captured: &VariantSnapshot,
+    lens: Option<&crate::develop::lens::LensCorrection>,
+    lut: Option<&crate::develop::lut::Lut>,
+    max_edge: u32,
+    check_session: impl Fn() -> Result<()>,
+) -> Result<(u32, u32)> {
+    check_session()?;
     if !target.is_absolute()
         || !target
             .extension()
@@ -418,6 +496,7 @@ pub fn write_tiff16(
     let image = render_captured(path, captured, lens, lut, max_edge)?;
     let bytes = encode_tiff16(&image)?;
     check_source(path, captured)?;
+    check_session()?;
     crate::fs_atomic::write_new(target, &bytes)?;
     Ok(image.dimensions())
 }
@@ -639,6 +718,64 @@ mod tests {
                 .to_rgb16()
                 .into_raw(),
             values
+        );
+    }
+    #[test]
+    fn raw_variant_returns_to_issue_strip_and_suffixes_map_four_ways() {
+        let c = catalog();
+        c.execute(
+            "INSERT INTO assets(id,imported_at,updated_at)VALUES(1,0,0)",
+            [],
+        )
+        .unwrap();
+        c.execute("INSERT INTO asset_files(asset_id,role,rel_path,rel_path_folded,ext,created_at,updated_at)VALUES(1,'bitmap','photos/中文.jpg','photos/中文.jpg','jpg',0,0)",[]).unwrap();
+        c.execute("INSERT INTO asset_files(asset_id,role,rel_path,rel_path_folded,ext,created_at,updated_at)VALUES(1,'raw','photos/中文.dng','photos/中文.dng','dng',0,0)",[]).unwrap();
+        let s = DevelopStack {
+            source_base: EditBase::Sooc,
+            params: BTreeMap::from([("exposure".into(), 1.0)]),
+            ..Default::default()
+        };
+        develop::save(&c, 1, &s, 0).unwrap();
+        let issue = issues::create(&c, 1, "中文定稿", &s, 0).unwrap();
+        let a = summaries(&c, &[1]).unwrap();
+        // latest 与定稿同哈希 → 主行即那个 issue（带序号）；SOOC 与 RAW（标记 issue）都回到行里
+        assert!(a[0].variants[0].main);
+        assert_eq!(
+            a[0].variants[0].reference.variant,
+            format!("issue:{}", issue.id)
+        );
+        assert_eq!(a[0].variants[0].ordinal, Some(issue.ordinal));
+        assert!(a[0].variants.iter().any(|v| v.reference.variant == "sooc"));
+        let raw = a[0]
+            .variants
+            .iter()
+            .find(|v| v.reference.variant == "raw")
+            .expect("RAW 行应回到变体表（标记为 RAW 的 issue）");
+        assert_eq!(raw.source_base, EditBase::Raw);
+        assert_eq!(raw.name, "RAW");
+        // 尾号四类：原片 ISO、RAW 直出 IRA、匹配 latest 与命名定稿 IXX、未匹配 ILA
+        assert_eq!(
+            issue_suffix(&c, &VariantRef { asset_id: 1, variant: "sooc".into() }).unwrap(),
+            "ISO"
+        );
+        assert_eq!(
+            issue_suffix(&c, &VariantRef { asset_id: 1, variant: "raw".into() }).unwrap(),
+            "IRA"
+        );
+        assert_eq!(
+            issue_suffix(&c, &VariantRef { asset_id: 1, variant: "latest".into() }).unwrap(),
+            format!("I{:02}", issue.ordinal)
+        );
+        assert_eq!(
+            issue_suffix(&c, &VariantRef { asset_id: 1, variant: format!("issue:{}", issue.id) }).unwrap(),
+            format!("I{:02}", issue.ordinal)
+        );
+        let mut other = s.clone();
+        other.params.insert("exposure".into(), 2.0);
+        develop::save(&c, 1, &other, 1).unwrap();
+        assert_eq!(
+            issue_suffix(&c, &VariantRef { asset_id: 1, variant: "latest".into() }).unwrap(),
+            "ILA"
         );
     }
     #[test]

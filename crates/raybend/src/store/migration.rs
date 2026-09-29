@@ -193,6 +193,11 @@ pub const CATALOG_MIGRATIONS: &[Migration] = &[
         name: "auto_adjust",
         sql: include_str!("migrations/catalog_0012_auto_adjust.sql"),
     },
+    Migration {
+        version: 13,
+        name: "issue_ordinal",
+        sql: include_str!("migrations/catalog_0013_issue_ordinal.sql"),
+    },
 ];
 
 /// 缩略图缓存库 `thumbs.db` 的迁移列表。
@@ -794,6 +799,54 @@ mod tests {
                 .applied
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn v12_issues_backfill_ordinals_and_counters() {
+        let mut conn = mem();
+        apply_list(
+            &mut conn,
+            DbKind::Catalog,
+            &CATALOG_MIGRATIONS[..12],
+            Backups::none(),
+            1,
+        )
+        .unwrap();
+        conn.execute_batch(
+            "INSERT INTO assets(id, imported_at, updated_at) VALUES (1,1,1),(2,1,1);",
+        )
+        .unwrap();
+        for asset in 1..=2_i64 {
+            for nth in 0..2_i64 {
+                let name = format!("旧版{nth}");
+                conn.execute(
+                    "INSERT INTO issues(asset_id, schema_version, name, profile_json, profile_hash, source_base, created_at) \
+                     VALUES (?1, 1, ?2, '{}', 'hash', 'raw', ?3)",
+                    rusqlite::params![asset, name, nth],
+                )
+                .unwrap();
+            }
+        }
+        let out = apply(&mut conn, DbKind::Catalog, Backups::none(), 2).unwrap();
+        assert!(out.applied.contains(&13));
+        let mut stmt = conn
+            .prepare("SELECT asset_id, ordinal FROM issues ORDER BY asset_id, created_at")
+            .unwrap();
+        let ordinals: Vec<(i64, i64)> = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<std::result::Result<_, _>>()
+            .unwrap();
+        assert_eq!(ordinals, vec![(1, 0), (1, 1), (2, 0), (2, 1)]);
+        let mut stmt = conn
+            .prepare("SELECT id, issue_counter FROM assets ORDER BY id")
+            .unwrap();
+        let counters: Vec<(i64, i64)> = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<std::result::Result<_, _>>()
+            .unwrap();
+        assert_eq!(counters, vec![(1, 2), (2, 2)]);
     }
 
     #[test]

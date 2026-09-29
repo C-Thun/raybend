@@ -112,12 +112,14 @@ pub async fn external_task<R: Runtime>(
         "cancel" => Ok(state.cancel()),
         "start" => {
             let request = request.ok_or("缺少外部编辑参数")?;
+            let permit = app.state::<crate::browse::BrowseState>().sessions.begin_task(&request.repository_id).map_err(|e|e.to_string())?;
             let (id, cancel) = state.reserve()?;
             let events = app.clone();
             let worker_state = state.clone();
             if let Err(error) = std::thread::Builder::new()
                 .name("external-editor-export".into())
                 .spawn(move || {
+                    let _permit = permit;
                     let mut output = None;
                     let mut missing = None;
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
@@ -138,7 +140,7 @@ pub async fn external_task<R: Runtime>(
                                 &request.repository_id,
                                 &request.captured,
                             )?;
-                            let target = raybend::external_editor::write_tiff(
+                            let target = raybend::external_editor::write_tiff_checked(
                                 &prepared.source,
                                 &request.captured,
                                 std::path::Path::new(&request.directory),
@@ -150,6 +152,8 @@ pub async fn external_task<R: Runtime>(
                                     worker_state
                                         .update(&events, id, |view| view.status = phase.into())
                                 },
+                                || prepared.catalog.ensure_current(),
+                                &prepared.suffix,
                             )
                             .map_err(|error| error.to_string())?;
                             output = Some(target.to_string_lossy().into_owned());

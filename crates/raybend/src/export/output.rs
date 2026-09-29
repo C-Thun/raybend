@@ -119,6 +119,7 @@ pub fn relative_name(
     source: &Path,
     naming: &Naming,
     sequence: u64,
+    suffix: &str,
 ) -> Result<String> {
     let parsed =
         crate::import::template::parse(&preset.template).map_err(|e| fail(e.to_string()))?;
@@ -140,6 +141,9 @@ pub fn relative_name(
             seqs: crate::import::template::SeqValues::new(&seqs),
         })
         .text;
+    // 尾号（I00–I99 / ISO / IRA / ILA）直接接在模板主名后，无其它分隔符（I 即分隔）；
+    // 设备名/长度检查对含尾号的最终分段生效（specs/export-issue-ordinal.md §2）。
+    let text = format!("{text}{suffix}");
     crate::import::template::check_output(&text).map_err(|e| fail(e.to_string()))?;
     for part in text.split('/') {
         let base = part.split('.').next().unwrap_or("").to_uppercase();
@@ -271,11 +275,12 @@ pub fn skip_existing(
     preset: &Preset,
     naming: &Naming,
     sequence: u64,
+    suffix: &str,
 ) -> Result<Option<PathBuf>> {
     if preset.existing_file != super::ExistingFile::Skip {
         return Ok(None);
     }
-    let relative = relative_name(preset, source, naming, sequence)?;
+    let relative = relative_name(preset, source, naming, sequence, suffix)?;
     let parent = target_parent(Path::new(&preset.directory), &relative)?;
     let target = parent.join(
         Path::new(&relative)
@@ -294,18 +299,47 @@ pub fn execute(
     sequence: u64,
     lens: Option<&crate::develop::lens::LensCorrection>,
     lut: Option<&crate::develop::lut::Lut>,
+    suffix: &str,
 ) -> Result<Publication> {
+    execute_checked(
+        source,
+        captured,
+        preset,
+        naming,
+        metadata,
+        sequence,
+        lens,
+        lut,
+        || Ok(()),
+        suffix,
+    )
+}
+
+pub fn execute_checked(
+    source: &Path,
+    captured: &VariantSnapshot,
+    preset: &Preset,
+    naming: &Naming,
+    metadata: &Metadata,
+    sequence: u64,
+    lens: Option<&crate::develop::lens::LensCorrection>,
+    lut: Option<&crate::develop::lut::Lut>,
+    check: impl Fn() -> Result<()>,
+    suffix: &str,
+) -> Result<Publication> {
+    check()?;
     let validation = preset.validate(true);
     if !validation.errors.is_empty() {
         return Err(fail(format!("导出预设无效：{:?}", validation.errors)));
     }
-    let relative = relative_name(preset, source, naming, sequence)?;
-    if let Some(target) = skip_existing(source, preset, naming, sequence)? {
+    let relative = relative_name(preset, source, naming, sequence, suffix)?;
+    if let Some(target) = skip_existing(source, preset, naming, sequence, suffix)? {
         return Ok(Publication::Skipped(target));
     }
     let image = super::render_for_preset(source, captured, lens, lut, preset)?;
     let bytes = encode(&image, &preset.format, preset.quality, metadata)?;
     super::check_source(source, captured)?;
+    check()?;
     publish_with_policy(
         Path::new(&preset.directory),
         &relative,
@@ -318,6 +352,100 @@ pub fn execute(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn expired_catalog_blocks_export_publication_after_render_and_external_tiff() {
+        use crate::store::db::{CatalogDb, OpenOpts};
+        use std::cell::Cell;
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("原片.png");
+        crate::display::output::Rgb16Image::from_fn(8, 6, |x, y| {
+            image::Rgb([(x * 1000) as u16, (y * 1000) as u16, 32768])
+        })
+        .save(&source)
+        .unwrap();
+        let original = std::fs::read(&source).unwrap();
+        let stack = crate::store::develop::DevelopStack {
+            source_base: crate::store::develop::EditBase::Sooc,
+            ..Default::default()
+        };
+        let captured = VariantSnapshot {
+            reference: super::super::VariantRef {
+                asset_id: 1,
+                variant: "sooc".into(),
+            },
+            name: "SOOC".into(),
+            rel_path: "原片.png".into(),
+            profile_hash: crate::store::issues::profile_hash(&stack).unwrap(),
+            stack,
+            source_signature: crate::media::source::source_signature(&source).unwrap(),
+        };
+        let output = dir.path().join("输出");
+        std::fs::create_dir(&output).unwrap();
+        let preset = Preset {
+            id: "p".into(),
+            name: "预设".into(),
+            format: "png".into(),
+            quality: 90,
+            max_edge: 0,
+            size_mode: super::super::SizeMode::Original,
+            percent: 100,
+            directory: output.to_string_lossy().into_owned(),
+            template: ":FILENAME".into(),
+            existing_file: super::super::ExistingFile::Append,
+        };
+        for external in [false, true] {
+            let catalog = CatalogDb::create(
+                &dir.path()
+                    .join(if external { "external" } else { "export" }),
+                "库",
+                None,
+                OpenOpts::new(None, 0),
+            )
+            .unwrap();
+            let checks = Cell::new(0);
+            let check = || {
+                checks.set(checks.get() + 1);
+                if checks.get() == 2 {
+                    catalog.invalidate();
+                }
+                catalog.ensure_current()
+            };
+            let result = if external {
+                super::super::write_tiff16_checked(
+                    &source,
+                    &output.join("外部.tif"),
+                    &captured,
+                    None,
+                    None,
+                    0,
+                    check,
+                )
+                .map(|_| ())
+            } else {
+                execute_checked(
+                    &source,
+                    &captured,
+                    &preset,
+                    &Naming::default(),
+                    &Metadata::default(),
+                    1,
+                    None,
+                    None,
+                    check,
+                    "ISO",
+                )
+                .map(|_| ())
+            };
+            assert!(matches!(result, Err(Error::SessionExpired)));
+            assert_eq!(
+                checks.get(),
+                2,
+                "必须在真实渲染后、发布文件前重新检查原会话"
+            );
+            assert_eq!(std::fs::read_dir(&output).unwrap().count(), 0);
+            assert_eq!(std::fs::read(&source).unwrap(), original);
+        }
+    }
     #[test]
     fn collision_policies_survive_cleared_queues_and_preserve_sources() {
         use super::super::ExistingFile::*;
@@ -342,7 +470,12 @@ mod tests {
         for index in 1..=2 {
             assert_eq!(
                 publish_with_policy(dir.path(), "子/输出.jpg", b"append", &source, Append).unwrap(),
-                Publication::Written(dir.path().join(format!("子/输出_{index:02}.jpg")).canonicalize().unwrap())
+                Publication::Written(
+                    dir.path()
+                        .join(format!("子/输出_{index:02}.jpg"))
+                        .canonicalize()
+                        .unwrap()
+                )
             );
         }
         assert!(publish_with_policy(dir.path(), "源.png", b"destroy", &source, Overwrite).is_err());
@@ -473,7 +606,7 @@ mod tests {
             template: ":FILENAME".into(),
             existing_file: super::super::ExistingFile::Skip,
         };
-        let target = dir.path().join("原片.png");
+        let target = dir.path().join("原片ISO.png");
         std::fs::write(&target, b"existing image").unwrap();
         assert_eq!(
             execute(
@@ -484,7 +617,8 @@ mod tests {
                 &Metadata::default(),
                 1,
                 None,
-                None
+                None,
+                "ISO",
             )
             .unwrap(),
             Publication::Skipped(target.canonicalize().unwrap())
@@ -500,7 +634,8 @@ mod tests {
                 &Metadata::default(),
                 1,
                 None,
-                None
+                None,
+                "ISO",
             )
             .is_err()
         );
