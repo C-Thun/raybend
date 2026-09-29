@@ -510,7 +510,7 @@ test("deletePreset：队列里还有未完成条目时拦下来说原因，不�
   await s.deletePreset(preset.id);
   assert.equal(s.presets().length, 1, "没删成");
   assert.equal(writes.length, 0, "没写盘");
-  assert.match(s.error() ?? "", /未完成/);
+  assert.match(s.error() ?? "", /未完成|unfinished/);
   // 清掉队列（重置）之后就放行
   await s.reset();
   await s.deletePreset(preset.id);

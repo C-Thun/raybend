@@ -218,6 +218,47 @@ test("show：越界的下标会被夹回来（别信任调用方）", () => {
   assert.equal(store.state().index, 0);
 });
 
+test("overview retains the last screen and its dimensions until replacement, then releases each URL once", async () => {
+  const pending: ((bytes: Uint8Array | null) => void)[] = [];
+  const revoked: string[] = [];
+  let nextUrl = 0;
+  const store = createViewerStore({
+    loadThumb: async () => new Uint8Array([1]),
+    loadScreen: () => new Promise(resolve => pending.push(resolve)),
+    makeUrl: () => `blob:${++nextUrl}`,
+    revokeUrl: url => { revoked.push(url); },
+  });
+  const photos = PHOTOS.map((photo, i) => ({ ...photo, natural: { width: 400 + i, height: 300 } }));
+  store.show(photos, 0);
+  await flush();
+  pending.shift()!(new Uint8Array([2]));
+  await flush();
+  const first = store.overviewImageUrl()!;
+  store.setNatural({ width: 900, height: 1600 });
+  const natural = store.overviewNatural();
+  store.goTo(1);
+  await flush();
+  assert.equal(store.overviewImageUrl(), first);
+  assert.deepEqual(store.overviewNatural(), natural);
+  assert.ok(!revoked.includes(first));
+  const stale = pending.shift()!;
+  store.goTo(2);
+  await flush();
+  stale(new Uint8Array([3]));
+  await flush();
+  assert.equal(store.overviewImageUrl(), first, "late screen must not replace the retained overview");
+  pending.shift()!(new Uint8Array([4]));
+  await flush();
+  const latest = store.overviewImageUrl()!;
+  assert.notEqual(latest, first);
+  assert.deepEqual(store.overviewNatural(), photos[2].natural);
+  assert.ok(revoked.includes(first));
+  store.close();
+  assert.equal(store.overviewImageUrl(), null);
+  assert.ok(revoked.includes(latest));
+  assert.equal(new Set(revoked).size, revoked.length, "URL ownership must not double-revoke");
+});
+
 test("show/goTo：元数据尺寸随当前照片切换，不沿用上一张", () => {
   const fake = fakeDeps();
   const store = createViewerStore(fake.deps);

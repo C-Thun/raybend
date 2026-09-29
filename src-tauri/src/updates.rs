@@ -165,7 +165,12 @@ pub fn updates_install<R: Runtime>(app: AppHandle<R>, source: UpdateSource) -> R
         .state::<crate::import::ImportBatches>()
         .has_unfinished()?
         || app.state::<crate::export::ExportState>().has_unfinished()?
-        || app.state::<crate::external_editor::ExternalState>().has_unfinished()?
+        || app
+            .state::<crate::external_editor::ExternalState>()
+            .has_unfinished()?
+        || app
+            .state::<crate::migration::MigrationState>()
+            .is_running()?
     {
         return Err("UPDATE_TASKS_ACTIVE".into());
     }

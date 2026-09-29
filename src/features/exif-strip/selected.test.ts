@@ -13,10 +13,12 @@ test("current selection uses catalog values immediately, then one file read upda
   assert.equal(selected.path(), "/photos/a.RW2");
   assert.equal(selected.data()?.lens, "catalog lens");
   assert.equal(selected.file(), null);
+  assert.equal(selected.settled(), null);
   resolve(file("LEICA DG 12-60/F2.8-4.0"));
   await tick();
   assert.equal(selected.data()?.lens, "LEICA DG 12-60/F2.8-4.0");
   assert.equal(selected.file()?.lens, "LEICA DG 12-60/F2.8-4.0");
+  assert.equal(selected.settled()?.path, "/photos/a.RW2");
 
 });
 
@@ -28,12 +30,14 @@ test("late file response cannot replace a newer selection or an empty state", as
   pending.get("a")!(file("old"));
   await tick();
   assert.equal(selected.data()?.lens, "b");
+  assert.equal(selected.settled(), null);
   pending.get("b")!(file("new"));
   await tick();
   assert.equal(selected.data()?.lens, "new");
   selected.select(null);
   assert.equal(selected.data(), null);
   assert.equal(selected.file(), null);
+  assert.equal(selected.settled(), null);
 });
 
 test("failed file read keeps the memory fallback", async () => {
@@ -42,6 +46,7 @@ test("failed file read keeps the memory fallback", async () => {
   await tick();
   assert.equal(selected.data()?.cameraMake, "OLYMPUS");
   assert.equal(selected.file(), null);
+  assert.deepEqual(selected.settled(), { path: "missing", file: null });
 });
 
 test("missing fields in a disk response retain the current catalog values", async () => {

@@ -13,10 +13,7 @@ export function windowsReleaseConfig(plan, env) {
     plugins: {updater: {pubkey:env.updaterPublicKey ?? "",endpoints:[],windows:{installMode:"basicUi"}}},
     build: { beforeBuildCommand: null, frontendDist: env.frontendDist },
     bundle: {
-      // 正式版也只出 NSIS（2026-09-27 崔总定）：MSI 那条被「32 位 light.exe 读不了 WSL 路径
-      // + tauri 的 bundle.resources 无法表达结对路径」结构性挡住。恢复路线登记在 FUTURE.md，
-      // 现场记录与实测矩阵见 implementations/2026-09-27_release-msi-wix-light-path.md。
-      targets: ["nsis"],
+      targets: [...plan.windowsTargets],
       createUpdaterArtifacts: env.withUpdater === true,
       windows: {
         allowDowngrades: false,
@@ -31,14 +28,19 @@ export function cmdPath(value) {
   return `"${value}"`;
 }
 export function windowsReleaseCommands(repo, config, {signed=false}={}) {
+  // WiX 32 位 light.exe 必须从本地盘读资源；禁止重新落回 UNC / pushd 映射盘。
+  for (const path of [repo, config]) {
+    if (!/^[A-Za-z]:\\/.test(path)) throw new Error("Windows 发行构建必须使用本地盘绝对路径");
+  }
   return [
     "@echo off",
-    `pushd ${cmdPath(repo)} || exit /b 1`,
+    "chcp 65001 >nul",
+    `cd /d ${cmdPath(repo)} || exit /b 1`,
     "where cargo-tauri >nul 2>&1 || (echo Install tauri-cli with cargo before packaging. & exit /b 1)",
     ...(signed ? ["where signtool.exe >nul 2>&1 || (echo Add Windows SDK signtool to PATH before signing. & exit /b 1)"] : []),
     "cargo build -p raybend --release --locked || exit /b 1",
     `cargo tauri build --no-bundle --features custom-protocol --config ${cmdPath(config)} -- --locked || exit /b 1`,
-    `cargo tauri bundle --config ${cmdPath(config)} || exit /b 1`,
-    "popd",
+    `cargo tauri bundle -vv --features custom-protocol --config ${cmdPath(config)} || exit /b 1`,
+    "exit /b 0",
   ].join("\r\n")+"\r\n";
 }

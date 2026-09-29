@@ -183,7 +183,8 @@
   --z-titlebar: 70; /* 标题栏在遮罩上、弹窗下 */
   --z-modal: 80; /* 弹窗本体 */
   --z-easy-copy-tip: 90; /* easy copy 的 Portal 气泡；触发元素仍留在遮罩下 */
-  --z-toast: 100; /* message 永远最上面 */
+  --z-toast: 100; /* 普通 message 高于弹窗 */
+  --z-migration: 110; /* 升级锁覆盖全部操作，包括已打开的弹窗与提示 */
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -569,3 +570,6 @@
   /* 小倒角：两档（DESIGN.md §8.2） */
   --radius-ui: var(--radius);
 }
+
+/* RAW 原始稿缺少真实小图时的 UI 模拟，不进入像素缓存与导出。 */
+.photo-raw-approximate { filter: brightness(0.72) saturate(0.35); }

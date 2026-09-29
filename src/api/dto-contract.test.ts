@@ -22,6 +22,7 @@ import { fileURLToPath } from "node:url";
 import { repositoryErrorKeys } from "../i18n/repository-feedback.ts";
 
 import type {
+  SystemPreferencesSnapshot,
   AssetItem,
   LensProfile,
   LensMatch,
@@ -48,6 +49,7 @@ import type {
   MarkingItem,
   MarkResult,
   MigrationNotice,
+  MigrationSnapshot,
   MetaFile,
   ImportPlannedRun,
   InterruptedRun,
@@ -367,11 +369,13 @@ const REBUILD_PROGRESS_KEYS = [
 ] as const satisfies readonly (keyof RebuildProgress)[];
 const MIGRATION_NOTICE_KEYS = [
   "from",
+  "id",
   "kind",
   "label",
   "running",
   "to",
 ] as const satisfies readonly (keyof MigrationNotice)[];
+const MIGRATION_SNAPSHOT_KEYS = ["active", "revision"] as const satisfies readonly (keyof MigrationSnapshot)[];
 const FLAGS_VIEW_KEYS = ["picks", "rejects", "total"] as const satisfies readonly (keyof FlagsView)[];
 const DIR_EMPTY_VIEW_KEYS = [
   "empty",
@@ -451,6 +455,7 @@ const LENS_PROFILE_KEYS = ["key", "maker", "model", "rectilinear", "focalMin", "
 const LENS_MATCH_KEYS = ["ready", "detected", "lensName", "focalMm", "candidates", "warnings"] as const;
 
 const KEY_TABLES = {
+  SystemPreferencesSnapshot: checkKeys<SystemPreferencesSnapshot, readonly ["language", "theme"]>(["language", "theme"]),
   LensProfile: checkKeys<LensProfile, typeof LENS_PROFILE_KEYS>(LENS_PROFILE_KEYS),
   LensMatch: checkKeys<LensMatch, typeof LENS_MATCH_KEYS>(LENS_MATCH_KEYS),
   RecentDir: checkKeys<RecentDir, typeof RECENT_DIR_KEYS>(RECENT_DIR_KEYS),
@@ -521,6 +526,7 @@ const KEY_TABLES = {
   MigrationNotice: checkKeys<MigrationNotice, typeof MIGRATION_NOTICE_KEYS>(
     MIGRATION_NOTICE_KEYS,
   ),
+  MigrationSnapshot: checkKeys<MigrationSnapshot, typeof MIGRATION_SNAPSHOT_KEYS>(MIGRATION_SNAPSHOT_KEYS),
   DirEmptyView: checkKeys<DirEmptyView, typeof DIR_EMPTY_VIEW_KEYS>(DIR_EMPTY_VIEW_KEYS),
   EditorViewportState: checkKeys<EditorViewportState, typeof EDITOR_VIEWPORT_STATE_KEYS>(
     EDITOR_VIEWPORT_STATE_KEYS,

@@ -577,6 +577,7 @@ fn run_import_thread<R: Runtime>(
 
     // 终态一定再发一条（节流不该让「已完成」这件事丢在路上）
     let _ = app.emit(PROGRESS_EVENT, &handle.snapshot());
+    consume_source_images(&app, &current);
 }
 
 /// 把库里的**目录计数**重算一遍（导入结束时调；`重建数据`也走同一条路）。
@@ -622,4 +623,51 @@ const PHOTOS_DIR: &str = "photos";
 /// 库根：离线库直接给一句人话。
 fn resolve_root<R: Runtime>(app: &AppHandle<R>, repository_id: &str) -> Result<PathBuf, String> {
     crate::browse::resolve_root(app, repository_id)
+}
+
+/// 拷贝/登记结束后串行消费持久化小图任务；读取的是库内文件，不再回读慢来源盘。
+fn consume_source_images<R: Runtime>(app: &AppHandle<R>, catalog: &std::sync::Arc<CatalogDb>) {
+    use raybend::thumbnail::worker;
+    let repo = catalog.meta().id.clone();
+    loop {
+        if catalog.ensure_current().is_err() { break; }
+        let repository = repo.clone();
+        let claimed = app.state::<DbState>().with(app, |db| db.write(move |conn|
+            worker::claim_next_for(conn, time::now_millis(), Some(&repository))).map_err(|e| e.to_string()));
+        let job = match claimed { Ok(Some(job)) => job, Ok(None) => break,
+            Err(error) => { eprintln!("[thumb] 认领失败：{error}"); break; } };
+        let result = (|| {
+            catalog.ensure_current().map_err(|e| e.to_string())?;
+            let relative = std::path::Path::new(&job.job.rel_path);
+            if relative.is_absolute() || relative.components().any(|part| matches!(part,
+                std::path::Component::ParentDir | std::path::Component::Prefix(_) | std::path::Component::RootDir)) {
+                return Err("缩略图任务路径超出照片库".to_string());
+            }
+            let path = catalog.root().join(relative);
+            let canonical = path.canonicalize().map_err(|e| e.to_string())?;
+            let root = catalog.root().canonicalize().map_err(|e| e.to_string())?;
+            if !canonical.starts_with(&root) { return Err("缩略图源超出照片库".to_string()); }
+            let asset = crate::develop::resolve_asset(app, &path).ok_or("缩略图任务找不到资产")?;
+            if asset.repository_id != repo { return Err("缩略图任务的库身份不匹配".to_string()); }
+            if raybend::store::develop::EditBase::of_file(&path) == raybend::store::develop::EditBase::Sooc {
+                crate::thumbs::prepare_source_images(app, &asset, raybend::store::develop::EditBase::Sooc)?;
+            } else {
+                // RAW-only 导入只备小图。真实 RAW 原始快照推迟到明确进入编辑。
+                let db = app.state::<crate::thumbs::SourcesThumbs>().get(
+                    &crate::thumbs::sources_cache_dir(app)?, time::now_millis())?;
+                for size in [SizeClass::Grid, SizeClass::Strip] {
+                    raybend::thumbnail::render_now(&db, &path, size, time::now_millis()).map_err(|e| e.to_string())?;
+                }
+            }
+            catalog.ensure_current().map_err(|e| e.to_string())
+        })();
+        let id = job.job_id;
+        let failure = result.err();
+        if let Some(error) = &failure { eprintln!("[thumb] 导入派生图生成失败：{error}"); }
+        let settled = app.state::<DbState>().with(app, |db| db.write(move |conn| {
+            if let Some(error) = failure { worker::fail(conn, id, &error, time::now_millis()).map(|_| ()) }
+            else { worker::complete(conn, id, time::now_millis()) }
+        }).map_err(|e| e.to_string()));
+        if let Err(error) = settled { eprintln!("[thumb] 写生成结果失败：{error}"); break; }
+    }
 }

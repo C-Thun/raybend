@@ -80,6 +80,8 @@ export function importSource(
     setTileStep: (step) => store.setTileStep(step),
     commitTileStep: () => store.commitTileStep(),
     thumb: (path) => store.thumb(path),
+    tileNatural: false,
+    cancelThumb: store.thumbQueue.cancel,
     requestThumb: (path) => store.requestThumb(path),
   };
 }

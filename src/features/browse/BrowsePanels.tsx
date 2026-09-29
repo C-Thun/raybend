@@ -701,6 +701,8 @@ export interface AssetInfoProps {
   item: AssetItem | null;
   /** 当前展示文件的绝对路径；只为选中项按需读完整 EXIF。 */
   fileExif?: FileExif | null;
+  /** A retained snapshot is read-only until the new selection is ready. */
+  pending?: boolean;
   /**
    * 看图态下把看图件的 store 传进来：右栏的**拍摄信息让位给预览 + 直方图**
    * （`memory/FUNCTION-BROWSE.md` §5.9）；tiles 模式下传 `null`，保持原来的 EXIF。
@@ -760,6 +762,7 @@ function EditableField(props: {
   const [editing, setEditing] = createSignal(false);
   const [draft, setDraft] = createSignal("");
   let inputEl: HTMLInputElement | undefined;
+  createEffect(() => { if (props.disabled) setEditing(false); });
 
   const begin = (): void => {
     if (props.disabled) return;
@@ -916,6 +919,7 @@ function AssetTags(props: { store: BrowseStore; item: AssetItem }): JSX.Element 
 
 export function AssetInfo(props: AssetInfoProps) {
   const item = () => props.item;
+  const readOnly = () => props.pending === true || !props.store.canWrite();
   const selectedIssueChoice = () => props.displayedIssueChoice ?? "latest";
 
   /**
@@ -944,6 +948,8 @@ export function AssetInfo(props: AssetInfoProps) {
      *     padding **外面**那一层，所以这里只需留一道窄空隙。
      */
     <div
+      aria-busy={props.pending === true}
+      data-browse-info
       class={[
         "scroll-y-reserved min-h-0 flex-1 pl-panel-pad pr-panel-pad-scroll py-panel-pad",
         props.class ?? "",
@@ -964,7 +970,7 @@ export function AssetInfo(props: AssetInfoProps) {
           {(library) => <section class="mb-5" data-browse-issue-choice>
             <h3 class="mb-1.5 text-fs-3 font-semibold text-fg-2">{t("browse.issueDisplay")}</h3>
             <select class="h-row-h w-full rounded-ui bg-surface-track px-2 text-fs-2 text-fg-1"
-              aria-label={t("browse.issueDisplay")} disabled={props.issueBusy === true}
+              aria-label={t("browse.issueDisplay")} disabled={props.issueBusy === true || props.pending === true}
               value={selectedIssueChoice()}
               onChange={(event) => props.onSelectIssue?.(event.currentTarget.value)}>
               <option value="latest">{t("editor.issue.latest")}</option>
@@ -1004,14 +1010,14 @@ export function AssetInfo(props: AssetInfoProps) {
             <Field label={t("browse.fieldPath")} value={item()!.relPath} />
             <Field label={t("browse.fieldRepository")} value={props.repositoryName ?? null} />
             <EditableField
-              disabled={!props.store.canWrite()}
+              disabled={readOnly()}
               label={t("browse.fieldAuthor")}
               value={item()!.author}
               placeholder={t("browse.fieldEmpty")}
               onCommit={(value) => void props.store.setText("author", value)}
             />
             <EditableField
-              disabled={!props.store.canWrite()}
+              disabled={readOnly()}
               label={t("browse.fieldDescription")}
               value={item()!.description}
               placeholder={t("browse.fieldEmpty")}
@@ -1032,28 +1038,28 @@ export function AssetInfo(props: AssetInfoProps) {
           <div class="flex flex-col gap-1.5">
             <Field label={t("browse.fieldGps")} value={gpsText()} />
             <EditableField
-              disabled={!props.store.canWrite()}
+              disabled={readOnly()}
               label={t("browse.fieldCountry")}
               value={item()!.country}
               placeholder={t("browse.fieldEmpty")}
               onCommit={(value) => void props.store.setText("country", value)}
             />
             <EditableField
-              disabled={!props.store.canWrite()}
+              disabled={readOnly()}
               label={t("browse.fieldProvince")}
               value={item()!.provinceState}
               placeholder={t("browse.fieldEmpty")}
               onCommit={(value) => void props.store.setText("provinceState", value)}
             />
             <EditableField
-              disabled={!props.store.canWrite()}
+              disabled={readOnly()}
               label={t("browse.fieldCity")}
               value={item()!.city}
               placeholder={t("browse.fieldEmpty")}
               onCommit={(value) => void props.store.setText("city", value)}
             />
             <EditableField
-              disabled={!props.store.canWrite()}
+              disabled={readOnly()}
               label={t("browse.fieldSublocation")}
               value={item()!.sublocation}
               placeholder={t("browse.fieldEmpty")}

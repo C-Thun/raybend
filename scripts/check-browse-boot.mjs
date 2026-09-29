@@ -16,6 +16,7 @@
  * 用法：
  *   pnpm dev                      # 另开一个终端起开发服务器
  *   pnpm check:browse             # 默认打 http://localhost:1420/
+ *   pnpm check:browse --stability-only # 520 张合成照片：跨页点选滚动 + tiles/film 信息保持
  *
  * 退出码：左列出现「读库失败」或控制台有 RangeError → 1。
  *
@@ -28,6 +29,9 @@ import { spawn } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { checkBrowseStability } from "./lib/check-browse-stability.mjs";
+
+const STABILITY_ONLY = process.argv.includes("--stability-only");
 
 const PORT = 9467;
 const APP = process.env.APP_URL ?? "http://localhost:1420/";
@@ -104,7 +108,7 @@ const REPOSITORIES = [
  * 为什么要给数据：没有照片就测不到「双击进看图 / 状态栏 / Tab 四态」这条链 ——
  * 而那正是 M2-W2 阶段 1 的主要交付。
  */
-const DEMO_ITEMS = [1, 2, 3, 4, 5, 6].map((i) => ({
+const DEMO_ITEMS = Array.from({ length: STABILITY_ONLY ? 520 : 6 }, (_, i) => i + 1).map((i) => ({
   id: i,
   relPath: `photos/2026-08-15/MY00${i}.JPG`,
   fileName: `MY00${i}.JPG`,
@@ -361,12 +365,24 @@ try {
           if (cmd === "external_applications") return Promise.resolve([]);
           if (cmd === "external_task") return Promise.resolve({id:0,revision:0,status:"idle",output:null,error:null,missingApplication:null});
           if (cmd === "export_queue") return Promise.resolve({revision:0,generation:0,queues:{},enabled:[]});
-          if (cmd === "file_exif") return Promise.resolve({...window.__FIXTURES.browse_page?.items?.[0],tags:[],cameraMake:null,cameraModel:null,lens:null,software:null,width:4000,height:3000,orientation:1});
+          if (cmd === "file_exif" || cmd === "issue_library") {
+            const result = cmd === "file_exif"
+              ? {...window.__FIXTURES.browse_page?.items?.[0],tags:[],cameraMake:null,cameraModel:null,lens:null,software:"camera",width:4000,height:3000,orientation:1}
+              : {issues:[],selection:"sooc",canFinalize:false,suggestedName:null,snapshotError:null};
+            if (window.__DELAY_INFO) return new Promise(resolve => {
+              (window.__INFO_PENDING ??= []).push({cmd, args, finish:()=>resolve(result)});
+            });
+            return Promise.resolve(result);
+          }
           if (cmd === "setting_set") {
             window.__SETTING_CALLS = window.__SETTING_CALLS || [];
             window.__SETTING_CALLS.push(args);
           }
           const fixtures = window.__FIXTURES;
+          if (${STABILITY_ONLY} && cmd === "browse_page") return Promise.resolve({
+            total: fixtures.browse_page.total, offset: args.offset,
+            items: fixtures.browse_page.items.slice(args.offset, args.offset + args.limit),
+          });
           if (cmd === "repository_remount") return Promise.resolve(fixtures.repositories_list.find(row => row.id === args.repositoryId));
           if (cmd === "thumb_get" || cmd === "view_image") {
             // 前端 toBytes() 认 ArrayBuffer / Uint8Array / number[]，给哪个都行
@@ -605,6 +621,9 @@ try {
   if ((afterPick.result?.value ?? 0) < 1) {
     problems.push("点了目录之后没有去读库（browse_page 没被调用）");
   }
+  if (STABILITY_ONLY) {
+    await checkBrowseStability(send);
+  } else {
   /*
    * tiles 下的多选 → **回车进对比**（人类 2026-09-19 报：只能在 film 里 Ctrl 多选，
    * tiles 里多选按回车没反应）。顺带把「老库宽高为 NULL」那条兜底路径也验掉：
@@ -5136,6 +5155,7 @@ try {
     );
   }
 
+  }
   const stackOverflow = consoleErrors.find((text) => /Maximum call stack/.test(text));
   if (stackOverflow) {
     problems.push("控制台出现爆栈（很可能是响应式自激）：" + stackOverflow.split("\n")[0]);

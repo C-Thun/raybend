@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex};
 use raybend::store::db::AppDb;
 use raybend::store::location;
 use serde::Serialize;
-use tauri::{AppHandle, Manager, Runtime, State};
+use tauri::{AppHandle, Manager, Runtime};
 
 /// `app.db` 的持有者（延迟打开；打开失败时保持 `None` 并把错误交给调用方）。
 #[derive(Default)]
@@ -49,6 +49,9 @@ impl DbState {
         let path = data_dir(app)?;
         let db =
             AppDb::open(&path, raybend::store::time::now_millis()).map_err(|e| e.to_string())?;
+        // 在 AppDb 对其它请求可见之前只恢复一次，不能重置本进程正在生成的任务。
+        db.write(|conn| raybend::thumbnail::worker::requeue_running(conn, raybend::store::time::now_millis()))
+            .map_err(|e| e.to_string())?;
         let mut guard = self.inner.lock().map_err(|_| "内部锁已损坏".to_string())?;
         *guard = Some(Arc::new(db));
         Ok(())
@@ -143,48 +146,52 @@ pub struct DbStatus {
 
 /// 打开（必要时创建）`app.db` 并返回状态。
 #[tauri::command]
-pub fn db_status<R: Runtime>(
-    app: AppHandle<R>,
-    state: State<'_, DbState>,
-) -> Result<DbStatus, String> {
-    let data_kind = location::classify(data_dir(&app)?.to_string_lossy().as_ref())
-        .code()
-        .to_string();
-    state.with(&app, |db| {
-        let version = db
-            .read(raybend::store::migration::schema_version)
-            .map_err(|e| e.to_string())?;
-        let repositories = db.list_repositories().map_err(|e| e.to_string())?.len();
-        Ok(DbStatus {
-            path: db.path().to_string_lossy().into_owned(),
-            schema_version: version,
-            repositories,
-            data_dir_kind: data_kind,
+pub async fn db_status<R: Runtime>(app: AppHandle<R>) -> Result<DbStatus, String> {
+    crate::source::blocking(move || {
+        let data_kind = location::classify(data_dir(&app)?.to_string_lossy().as_ref())
+            .code()
+            .to_string();
+        app.state::<DbState>().with(&app, |db| {
+            let version = db
+                .read(raybend::store::migration::schema_version)
+                .map_err(|e| e.to_string())?;
+            let repositories = db.list_repositories().map_err(|e| e.to_string())?.len();
+            Ok(DbStatus {
+                path: db.path().to_string_lossy().into_owned(),
+                schema_version: version,
+                repositories,
+                data_dir_kind: data_kind,
+            })
         })
     })
+    .await
 }
 
-/// 读一条设置。
+/// 读写也走既有 blocking，等待 startup 打开锁不能卡住 splash 的事件线程。
 #[tauri::command]
-pub fn setting_get<R: Runtime>(
+pub async fn setting_get<R: Runtime>(
     app: AppHandle<R>,
-    state: State<'_, DbState>,
     key: String,
 ) -> Result<Option<String>, String> {
-    state.with(&app, |db| db.get_setting(&key).map_err(|e| e.to_string()))
+    crate::source::blocking(move || {
+        app.state::<DbState>()
+            .with(&app, |db| db.get_setting(&key).map_err(|e| e.to_string()))
+    })
+    .await
 }
 
-/// 写一条设置。
 #[tauri::command]
-pub fn setting_set<R: Runtime>(
+pub async fn setting_set<R: Runtime>(
     app: AppHandle<R>,
-    state: State<'_, DbState>,
     key: String,
     value: String,
 ) -> Result<(), String> {
-    state.with(&app, |db| {
-        db.set_setting(&key, &value).map_err(|e| e.to_string())
+    crate::source::blocking(move || {
+        app.state::<DbState>().with(&app, |db| {
+            db.set_setting(&key, &value).map_err(|e| e.to_string())
+        })
     })
+    .await
 }
 
 /// 启动时尝试打开一次（失败只记日志，不阻止窗口出现）。

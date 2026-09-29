@@ -55,12 +55,16 @@ describe('formatBytes', () => {
 });
 
 describe('pickInstaller', () => {
-  it('优先 exe，其次是 msi / zip，签名文件不算', () => {
+  it('优先 MSI，缺少时选 NSIS，zip 与签名文件不算', () => {
     expect(pickInstaller(FULL_RELEASE.assets)?.name).toBe('RayBend_0.1.0_x64-setup.exe');
     expect(pickInstaller([{ name: 'a.zip', url: 'z' }])).toBeUndefined();
     expect(pickInstaller([{ name: 'RayBend_0.1.0_x64_en-US.msi', url: 'https://github.com/C-Thun/raybend/releases/download/v0.1.0/RayBend_0.1.0_x64_en-US.msi' }, { name: 'a.exe.sig', url: 's' }])?.name).toBe(
       'RayBend_0.1.0_x64_en-US.msi',
     );
+    const msi = { name: 'RayBend_0.1.0_x64_en-US.msi', url: 'https://github.com/C-Thun/raybend/releases/download/v0.1.0/RayBend_0.1.0_x64_en-US.msi' };
+    expect(pickInstaller([...FULL_RELEASE.assets!, msi])?.name).toBe(msi.name);
+    expect(pickInstaller([{ ...msi, url: 'https://example.com/untrusted.msi' }, ...FULL_RELEASE.assets!])?.name).toBe('RayBend_0.1.0_x64-setup.exe');
+    expect(resolveRelease({ ...FULL_RELEASE, assets: [...FULL_RELEASE.assets!, msi] })).toMatchObject({ fileName: msi.name, downloadUrl: msi.url });
   });
 
   it('没有资产或资产没有直链时返回 undefined', () => {

@@ -58,7 +58,7 @@ export function PhotoViewingStage(props: PhotoViewingStageProps): JSX.Element {
           onOpeningViewer={props.controller.prepareViewer}
           class={gridClass()}
           {...(props.pinsKey === undefined ? {} : { pinsKey: props.pinsKey })}
-          {...(props.focusId === undefined ? {} : { focusId: props.focusId })}
+          focusId={props.focusId}
           {...(props.movesWithArrowKeys === undefined
             ? {}
             : { movesWithArrowKeys: props.movesWithArrowKeys })}

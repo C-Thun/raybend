@@ -12,7 +12,10 @@ import "./index.css";
  */
 import "@fontsource-variable/noto-sans-sc/wght.css";
 import { installEscapeBlur } from "./lib/dom-focus.ts";
-import { hydrateLocale } from "./i18n/index.ts";
+import { hydrateLocale, readSavedLocale } from "./i18n/index.ts";
+import { createAppearanceStore, readSavedTheme } from "./lib/appearance.ts";
+import { systemDefaults } from "./lib/system-preferences.ts";
+import { readSystemPreferences } from "./api/system-preferences.ts";
 const SpikeViewport = __RAYBEND_DIAGNOSTICS__ ? lazy(() => import("./dev/SpikeViewport.tsx")) : undefined;
 import FullscreenViewer from "./features/fullscreen/FullscreenViewer.tsx";
 
@@ -34,12 +37,8 @@ import FullscreenViewer from "./features/fullscreen/FullscreenViewer.tsx";
  * （根因与顺序纪律见 `lib/dom-focus.ts`）。热重载时先卸再装，免得越挂越多。
  */
 const disposeEscapeBlur = installEscapeBlur();
-/*
- * 语言必须在**首次渲染前**读回来：它是设备级偏好（localStorage），
- * 放渲染后再读会先闪一帧中文再跳成英文。
- */
-hydrateLocale();
-import.meta.hot?.dispose(() => disposeEscapeBlur());
+let disposed = false;
+import.meta.hot?.dispose(() => { disposed = true; disposeEscapeBlur(); });
 
 const KitchenSink = import.meta.env.DEV
   ? lazy(() => import("./dev/KitchenSink.tsx"))
@@ -59,30 +58,42 @@ const SPIKE_MODE = __RAYBEND_DIAGNOSTICS__ && new URLSearchParams(window.locatio
 const FULLSCREEN_MODE =
   new URLSearchParams(window.location.search).get("fullscreen") === "1";
 
-render(
-  () =>
-    SPIKE_MODE && SpikeViewport ? (
-      <SpikeViewport />
-    ) : FULLSCREEN_MODE ? (
-      <FullscreenViewer />
-    ) : (
-      <Router>
-      {/*
-        ⚠️ 路由**必须用 JSX 子节点形式**（`<Route …/>`）而不是把 `RouteDefinition[]`
-        数组喂给 `<Router>` —— 实测数组形式下路由一条都不匹配，页面**静默空白**，
-        控制台连一句报错都没有（`@solidjs/router` 1.0 的 `createBranches` 在那种输入下不出声）。
-      */}
-      {KitchenSink ? (
-        <Route path="/dev/kitchen-sink" component={KitchenSink} />
-      ) : null}
+async function start(): Promise<void> {
+  // 已有的两项设置都合法时，不再探测系统。分别缺失时只为缺失项提供默认。
+  const defaults = readSavedTheme() && readSavedLocale()
+    ? systemDefaults(null)
+    : systemDefaults(await readSystemPreferences());
+  if (disposed) return;
+  hydrateLocale(undefined, defaults.locale);
+  // 所有页面都先落主题；App 使用同一个 store，避免建第二份覆盖首次默认值。
+  const appearance = createAppearanceStore({ systemTheme: defaults.theme });
+  render(
+    () =>
+      SPIKE_MODE && SpikeViewport ? (
+        <SpikeViewport />
+      ) : FULLSCREEN_MODE ? (
+        <FullscreenViewer />
+      ) : (
+        <Router>
+          {/*
+            ⚠️ 路由**必须用 JSX 子节点形式**（`<Route …/>`）而不是把 `RouteDefinition[]`
+            数组喂给 `<Router>` —— 实测数组形式下路由一条都不匹配，页面**静默空白**，
+            控制台连一句报错都没有（`@solidjs/router` 1.0 的 `createBranches` 在那种输入下不出声）。
+          */}
+          {KitchenSink ? (
+            <Route path="/dev/kitchen-sink" component={KitchenSink} />
+          ) : null}
 
-      {/*
-        兜底路由用 `path="*"` 而不是 `path="/"` 是刻意的：桌面应用的页面来自
-        `tauri://localhost/` 或开发期的 `http://localhost:1420/`，
-        兜底路由可以避免 URL 形态差异导致白屏。
-      */}
-      <Route path="*" component={App} />
-      </Router>
-    ),
-  document.getElementById("root") as HTMLElement,
-);
+          {/*
+            兜底路由用 `path="*"` 而不是 `path="/"` 是刻意的：桌面应用的页面来自
+            `tauri://localhost/` 或开发期的 `http://localhost:1420/`，
+            兜底路由可以避免 URL 形态差异导致白屏。
+          */}
+          <Route path="*" component={() => <App appearance={appearance} />} />
+        </Router>
+      ),
+    document.getElementById("root") as HTMLElement,
+  );
+}
+
+void start();

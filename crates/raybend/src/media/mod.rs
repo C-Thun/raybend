@@ -14,6 +14,7 @@
 //! 在 `store::path_semantics`。相关真相与约束见 `AGENTS.md` §7.3。
 
 pub mod diff;
+pub(crate) mod embedded;
 pub mod exif;
 pub mod kind;
 pub mod meta;

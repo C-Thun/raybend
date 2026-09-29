@@ -85,7 +85,7 @@ export const enUS: Record<MessageKey, string> = {
   "external.application": "Application",
   "external.noApplications": "Add an application first",
   "external.addApplication": "+ App",
-  "external.addApplicationShort": "Add",
+ "external.addApplicationShort": "Add",
   "external.browseDirectory": "Browse",
   "external.directory": "TIFF destination",
   "external.confirm": "Export and open",
@@ -118,8 +118,9 @@ export const enUS: Record<MessageKey, string> = {
   "cmd.export.save": "Save export preset",
 
  // ── Database upgrade (M2-W2) ──────────────────────────
- "migration.title": "Upgrading the database",
- "migration.body": "{label} needs its structure upgraded from v{from} to v{to} \u2014 rewriting data…",
+ "migration.title": "Upgrading app data",
+ "migration.title_catalog": "Upgrading library data",
+ "migration.body": "Preparing data for this version. Please wait…",
  "migration.hint": "The interface is locked until this finishes. Please do not close the app.",
 
   "import.waiting_title": "Waiting for storage",

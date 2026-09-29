@@ -5,7 +5,7 @@
  * 而画廊页（以及冒烟脚本跑的 Chromium）里没有后端 —— 于是这个组件用
  * **真的状态机 + 假通知**把它驱动起来：
  *
- * * 真状态机：`features/migration/notice.ts`（生产同一份代码，含「按库种类记账」）；
+ * * 真状态机：`features/migration/notice.ts`（按执行编号记账）；
  * * 假通知：按钮往状态机里塞一条 `MigrationNotice`。
  *
  * 于是 `scripts/ui-smoke.mjs` 能断言「遮罩出现 → 键盘被挡住 → 收到 Done 后消失」，
@@ -19,6 +19,7 @@ import type { MigrationNotice } from "../api/types.ts";
 
 /** 一次典型的升级：`catalog.db` v3 → v4。 */
 const CATALOG: MigrationNotice = {
+  id: "1",
   kind: "catalog",
   label: "照片库",
   from: 3,

@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { activeNotice, applyNotice, NO_MIGRATIONS, type MigrationMap } from "./notice.ts";
+import { activeNotice, applyNotice, applySnapshot, NO_MIGRATION_STATE, NO_MIGRATIONS, type MigrationMap } from "./notice.ts";
 import type { MigrationNotice } from "../../api/types.ts";
 
 function notice(
@@ -17,7 +17,7 @@ function notice(
   from = 3,
   to = 4,
 ): MigrationNotice {
-  return { kind, label: `库-${kind}`, from, to, running };
+  return { id: kind === "app" ? "1" : kind === "catalog" ? "2" : "3", kind, label: `库-${kind}`, from, to, running };
 }
 
 /** 把一串通知喂进去，返回最终状态。 */
@@ -84,4 +84,29 @@ test("入参不被修改（纯函数）", () => {
   assert.equal(before.size, 1, "旧表不能被动过");
   assert.equal(after.size, 2);
   assert.notEqual(before, after);
+});
+
+
+test("两个 catalog 并发升级，只有最后一个结束才撤罩", () => {
+  const a = { ...notice("catalog", true), id: "9007199254740992" };
+  const b = { ...notice("catalog", true), id: "9007199254740993" };
+  const both = feed(a, b);
+  assert.equal(both.size, 2);
+  const remaining = applyNotice(both, { ...a, running: false });
+  assert.equal(remaining.size, 1);
+  assert.equal(activeNotice(remaining)?.id, b.id);
+  assert.equal(applyNotice(remaining, { ...b, running: false }).size, 0);
+  assert.equal(activeNotice(feed(b, a))?.id, a.id, "同种类按精确编号稳定显示");
+});
+
+test("晚监听以完整快照恢复，旧事件不能复活已结束的升级", () => {
+  const snapshot = { revision: "9007199254740992", active: [notice("catalog", true)] };
+  const started = applySnapshot(NO_MIGRATION_STATE, snapshot);
+  assert.equal(started.notices.size, 1);
+  const done = applySnapshot(started, { revision: "9007199254740993", active: [] });
+  assert.equal(done.notices.size, 0);
+  assert.equal(applySnapshot(done, snapshot), done);
+  assert.equal(applySnapshot(done, { revision: done.revision, active: snapshot.active }), done);
+  assert.equal(applySnapshot(done, { revision: "invalid", active: snapshot.active }), done);
+  assert.equal(applySnapshot(NO_MIGRATION_STATE, { revision: "0", active: [] }), NO_MIGRATION_STATE);
 });

@@ -69,16 +69,7 @@ import {
 /** 时间片阈值的默认值（分钟）——`memory/DESIGN.md` §12.7 的「1 小时」 */
 export const DEFAULT_GAP_MINUTES = 60;
 
-/**
- * 等「文件头缓存」的时限（毫秒）。
- *
- * 网格现在**依赖** `dirMetaEnsure` 回来才铺 tile（见 `load`），所以它一旦不回来
- * （后端命令 panic 时 promise 永远不 settle，见 `lib/timeout.ts` 文件头），
- * 界面就会永远停在水印上。这道时限把那种情况变成「按占位比例照常铺照片」。
- *
- * 给得比普通命令（15s）宽：它扫的是整个目录的头，慢盘上本来就慢 ——
- * 时限防的是「卡死」，不是「慢」。
- */
+/** view/compare 按需读原片尺寸的等待上限；tiles 不等待元数据。 */
 export const DEFAULT_META_TIMEOUT_MS = 20_000;
 
 /**
@@ -225,7 +216,10 @@ export function createPhotoGridStore(deps: PhotoGridDeps): PhotoGridStore {
   /** 这条路径的展示比例（没读到元信息时给默认占位比例） */
   const aspectOf = (id: string): number => {
     const meta = photoMeta().get(id);
-    if (meta === undefined) return clampDisplayAspect(0, 0);
+    if (meta === undefined) {
+      const thumb = thumbs.get(id);
+      return clampDisplayAspect(thumb.width ?? 0, thumb.height ?? 0);
+    }
     return clampDisplayAspect(meta.width, meta.height);
   };
 
@@ -271,20 +265,10 @@ export function createPhotoGridStore(deps: PhotoGridDeps): PhotoGridStore {
     try {
       const scan = await deps.api.scanSourceDir(next);
       if (token !== generation) return; // 用户又换了目录
-      /*
-       * 清单一到手就先把 items 摆上：计数（控制条）与「已选 N 张」这类东西
-       * 不必等头部缓存 —— 它们在载入期间显示出来反而让人知道「目录读到了，
-       * 正在补每张的宽高」。
-       */
+      // 清单一到手就展示；首次小图携带方向和显示尺寸，不等全目录读头。
       setItems(scan.items);
       setProblems(scan.problems);
-      /*
-       * **等头部缓存铺完再铺 tile**（人类 2026-09-17 定）：照片的比例一次到位，
-       * 不再先按 3:2 占位再各自「长大」。代价是首开大目录要多等这几秒 ——
-       * 同目录二次打开命中会话级缓存，几乎是瞬时的。
-       */
-      await loadPhotoMeta(next, scan.items, token);
-      if (token !== generation) return; // 等的时候用户又换了目录
+      // 列目录不读取照片内容；小图带回显示比例，view/compare 才补原片尺寸。
       setStatus("ready");
       if (byTime()) void loadTimes();
     } catch (caught) {
@@ -294,63 +278,7 @@ export function createPhotoGridStore(deps: PhotoGridDeps): PhotoGridStore {
     }
   }
 
-  /**
-   * 补读真实拍摄时间（用户按下「按时间」时才调）。
-   *
-   * 只补**还没读到真相**的那些（`takenAtSource !== "exif"`）——
-   * 换目录后重新读一遍时，已经准确的不用再读。
-   */
-  /**
-   * 取这一批照片的展示元信息（宽高 + 方向）。
-   *
-   * 失败**不打扰用户**：比例退化成默认占位，网格照铺（读不到一个头不该让整个目录列不出来）。
-   * 时限同理 —— 它防的是「后端卡死」，不是「慢盘」。
-   *
-   * ⚠️ 现在它是**阻塞 `ready`** 的一步（见 `load`），所以这里的每一条出路
-   * （成功 / 失败 / 超时）都必须把控制权交回去。
-   */
-  async function loadPhotoMeta(
-    dir: string,
-    items: readonly SourceItem[],
-    token: number,
-  ): Promise<void> {
-    if (items.length === 0) return;
-    try {
-      const metas = await withTimeout(
-        deps.api.dirMetaEnsure(
-          dir,
-          items.map((item) => ({
-            relative: item.fileName,
-            fileSize: item.sizeBytes,
-            mtimeMs: item.mtimeMs ?? 0,
-          })),
-        ),
-        metaTimeout,
-        timeoutMessage("grid.timeout.meta", metaTimeout),
-      );
-      if (token !== generation) return; // 用户又换了目录，迟到的结果丢掉
-      /*
-       * **按顺序一一对应**（后端契约：返回顺序与传入的 `files` 一致）。
-       * 不用「目录 + 文件名」拼 key —— Windows 与 POSIX 的分隔符不同，
-       * 拼出来的字符串一旦不一致就会静默查不到（比例永远是占位）。
-       */
-      const next = new Map<string, PhotoMeta>();
-      items.forEach((item, index) => {
-        const meta = metas[index];
-        if (meta !== undefined) next.set(itemId(item), meta);
-      });
-      setPhotoMeta(next);
-    } catch {
-      // 读不到元信息不是错误：按默认比例显示就是了
-    }
-  }
-
-  /**
-   * 按需补读宽高并**合并**进现有元数据。
-   *
-   * 与 `loadPhotoMeta` 的区别很关键：那个是「换目录，整套重来」（`setPhotoMeta(next)` 覆盖），
-   * 这里只补几张、**必须保留**已有的 —— 否则补读会把可见 tile 的比例清掉。
-   */
+  /** view/compare 按需补原片尺寸，不能用缩略图尺寸替代。 */
   async function ensureNatural(paths: readonly string[]): Promise<void> {
     const current = dir();
     if (current === null || paths.length === 0) return;
@@ -374,7 +302,8 @@ export function createPhotoGridStore(deps: PhotoGridDeps): PhotoGridStore {
 
     const token = generation;
     try {
-      const metas = await deps.api.dirMetaEnsure(current, files);
+      const metas = await withTimeout(deps.api.dirMetaEnsure(current, files), metaTimeout,
+        timeoutMessage("grid.timeout.meta", metaTimeout));
       if (token !== generation) return;
       setPhotoMeta((prev) => {
         const merged = new Map(prev);
@@ -391,8 +320,11 @@ export function createPhotoGridStore(deps: PhotoGridDeps): PhotoGridStore {
     }
   }
 
+  let timesRevision = 0;
+  /** 显式按时间分组才分批补读；关闭或重开后旧批次停止。 */
   async function loadTimes(): Promise<void> {
     const token = generation;
+    const revision = ++timesRevision;
     const pending = items()
       .filter((item) => item.takenAtSource !== "exif")
       .map(itemId);
@@ -400,8 +332,14 @@ export function createPhotoGridStore(deps: PhotoGridDeps): PhotoGridStore {
 
     setLoadingTimes(true);
     try {
-      const times = await deps.api.readSourceTimes(pending);
+      const times: TimeEntry[] = [];
+      for (let start = 0; start < pending.length; start += 8) {
+        if (token !== generation || revision !== timesRevision || !byTime()) return;
+        times.push(...await deps.api.readSourceTimes(pending.slice(start, start + 8)));
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      }
       if (token !== generation) return;
+      if (revision !== timesRevision || !byTime()) return;
       const byPath = new Map(times.map((entry) => [entry.path, entry]));
       let merged = 0;
       let missed = 0;
@@ -437,7 +375,7 @@ export function createPhotoGridStore(deps: PhotoGridDeps): PhotoGridStore {
     } catch {
       // 读不到时间不该把网格变成错误态：退回「未知时间」组即可
     } finally {
-      if (token === generation) setLoadingTimes(false);
+      if (token === generation && revision === timesRevision) setLoadingTimes(false);
     }
   }
 
@@ -502,6 +440,7 @@ export function createPhotoGridStore(deps: PhotoGridDeps): PhotoGridStore {
     if (value === byTime()) return;
     setImportDisplayByTime(value);
     if (value) void loadTimes();
+    else { timesRevision += 1; setLoadingTimes(false); }
   };
 
   const grouping = (): TimeGrouping | undefined => {

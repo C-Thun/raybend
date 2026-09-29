@@ -17,7 +17,7 @@ export function issueExtraHeight(count: number, cellSize: number): number {
 export function exportGallerySource(
   base: TilesSource,
   store: ExportStore,
-  thumbs?: { get(key:string):ThumbEntry;request(key:string):void },
+  thumbs?: { get(key:string):ThumbEntry;request(key:string):void;cancel?(key:string):void },
 ): TilesSource {
   const order = createMemo(() =>
     Array.from({ length: base.count() }, (_, i) => i).filter((i) => {
@@ -91,6 +91,7 @@ export function exportGallerySource(
         anchor: anchorAsset === null ? null : String(anchorAsset),
       };
     }),
+    cancelThumb: thumbs?.cancel,
     thumb: thumbs?.get ?? base.thumb,
     requestThumb: thumbs?.request ?? base.requestThumb,
     aspectOf: () => 1,
@@ -161,7 +162,7 @@ export function exportGallerySource(
 }
 export function exportQueueSource(
   store: ExportStore,
-  thumbs: { get(key: string): ThumbEntry; request(key: string): void },
+  thumbs: { get(key: string): ThumbEntry; request(key: string): void; cancel?(key: string): void },
 ): TilesSource {
   const entries = () =>
     store.queues().get(store.selectedPreset()?.id ?? "") ?? [];
@@ -199,6 +200,7 @@ export function exportQueueSource(
     tileStep: () => store.preferences.value().queueStep,
     setTileStep: (queueStep) => store.preferences.update({ queueStep }, false),
     commitTileStep: () => store.preferences.commit(),
+    cancelThumb: thumbs.cancel,
     thumb: thumbs.get,
     requestThumb: thumbs.request,
   };

@@ -4,15 +4,15 @@
 
 ## 日常发行只用两条指令
 
-前提：先审阅并提交当前开发工作树；不要把并行未完成的改动混入发行。下面以当前 0.1.0 升到 0.1.1、暂不配置 Windows 发布者证书/内置更新为例。执行者是崔总：
+前提：先审阅并提交当前开发工作树；不要把并行未完成的改动混入发行。下面以当前 0.1.1 升到 0.1.2、暂不配置 Windows 发布者证书/内置更新为例。执行者是崔总：
 
 ```bash
-pnpm release patch --windows --unsigned
-# 在 Windows 验收本版安装器，并核对/编辑 release-out/v0.1.1/RELEASE-NOTES.md 后：
-pnpm release:publish release-out/v0.1.1 --execute
+pnpm release patch --win-msi --unsigned
+# 在 Windows 验收本版安装器，并核对/编辑 release-out/v0.1.2/RELEASE-NOTES.md 后：
+pnpm release:publish release-out/v0.1.2 --execute
 ```
 
-第一条同步版本、重生成许可、构建一次前端、构建 Windows 主程序/worker、打全部稳定版 NSIS/MSI、核对嵌入前端和 worker 协议、验证签名（或显式 unsigned）、生成完整 `release-out/v版本/`。输出目录含安装器、可选 .sig、SHA256SUMS、release-index.json、raybend-build.json、可选 latest.json 和发布说明；只收本次版本，缺目标安装器直接失败，旧包不混入。输出目录必须全新，不覆盖旧产物或并行文件。第一条成功后不再另跑 finalize。test 为单独带时间的输出目录且不能公开上传；beta 仅 NSIS。
+第一条同步版本、重生成许可、构建一次前端、构建 Windows 主程序/worker、自动镜像到 Windows 本地盘并打所选的 MSI、核对嵌入前端和 worker 协议、验证签名（或显式 unsigned）、生成完整 `release-out/v版本/`。输出目录含安装器、可选 .sig、SHA256SUMS、release-index.json、raybend-build.json、可选 latest.json 和发布说明；只收本次版本，缺目标安装器直接失败，旧包不混入。输出目录必须全新，不覆盖旧产物或并行文件。第一条成功后不再另跑 finalize。官网优先选择同版 MSI，没有 MSI 时选择 NSIS。test 为单独带时间的输出目录且不能公开上传；beta 仅 NSIS。
 
 第二条核对安装器哈希、更新签名/地址、版本事务、许可锁摘要和构建时源码快照；只自动提交 package.json / Cargo.toml / Cargo.lock / public/legal/third-party.json，创建本版 tag，原子推送 master + 本版 tag，然后创建草稿 Release、上传全部资产、核对远程 SHA-256，最后公开 Release。正式版本发布事件触发既有官网 Actions：从完整事件资产注入版本和安装包直链、测试/构建静态站、发布 Pages；脚本等待该工作流成功并输出发布页和下载地址。没有修改官网源码或另做一次 website commit。GitHub 的对应源码归档来自该 tag，完整构建步骤保留在同一 tag 中。
 
@@ -22,7 +22,7 @@ pnpm release:publish release-out/v0.1.1 --execute
 
 ### 一次性准备（不属于每版重复操作）
 
-- 当前 Windows Rust/MSVC 与 dav1d 静态库已存在；**2026-09-27 核查未找到 Windows cargo-tauri**。WSL 前端 CLI 为 2.11.4，Windows 需匹配。第一条指令缺工具时会在改版本之前提示；首次可多执行这条（一次配置后每版仍只用上面两条）：
+- 需要 Windows Rust/MSVC、dav1d 静态库，以及和 WSL 前端 CLI 匹配的 Windows cargo-tauri。**2026-09-29 本机只读核查 cargo-tauri 2.11.4 已就绪**。换机器须自行配置这些工具，WSL 的 Windows 互操作须启用，且能调用 `powershell.exe`、`cmd.exe` 与 `wslpath`；Windows 不需要 Node/pnpm。第一条指令缺工具时会在改版本之前提示；首次可多执行这条（一次配置后每版仍只用上面两条）：
 
   ```bash
   cmd.exe /d /c "cargo install tauri-cli --version 2.11.4 --locked"
@@ -33,6 +33,32 @@ pnpm release:publish release-out/v0.1.1 --execute
 - 如需签名更新，先自己生成/备份私钥并设置 §4 的公私钥环境变量；第一条加 `--with-updater`，第二条不变。没有该参数时新构建默认关闭内置更新，手动下载升级可先发行。有 Authenticode 证书时配置指纹并去掉 `--unsigned`；二者与发行指令数量无关。
 
 GitHub 草稿/资产与 --verify-tag 参数依据：https://cli.github.com/manual/gh_release_create 。Release 触发 Pages 与令牌触发边界依据：https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#release 、https://docs.github.com/en/actions/how-tos/writing-workflows/choosing-when-your-workflow-runs/triggering-a-workflow 。脚本已用模拟后端验证；真实安装器/账户/线上链路仍需首次执行验收。
+
+## Windows 安装器与目录选择
+
+日常以 `--win-msi` 为主；`--win-nsis` 生成 NSIS 的 `-setup.exe`；两开关同时指定时只编译一次并打两种安装器。旧 `--windows` 已移除，会提示新参数。Beta 及带预发布标签的 test 只能用 `--win-nsis`，脚本不会静默改目标。
+
+```bash
+# 首次验证，不升版；产物进 release-out/test-时间/
+pnpm release test --win-msi --unsigned
+# 同时准备两种安装器
+pnpm release patch --win-msi --win-nsis --unsigned
+# 只读核对计划和真实路径映射
+pnpm release test --win-msi --unsigned --dry-run
+# 可选：指定其他本地盘（Windows 路径或实际 WSL 挂载路径均可）
+pnpm release test --win-msi --unsigned --win-dir 'D:\raybend-build'
+pnpm release test --win-msi --unsigned --win-dir '/windows/d/raybend-build'
+```
+
+最后两条是**同一个目录的两种写法示例**，应使用自己机器实际的盘和挂载点。默认不需要填路径，也不假定 C 盘、`/mnt/c`、用户名或 WSL 发行版。`--win-dir` 优先于环境变量 `RAYBEND_WIN_BUILD_DIR`；没有覆盖时读取 Windows 的 LocalApplicationData 已知目录。`wslpath` 负责正反转换，脚本检查盘可用且为本地盘、挂载点存在、回译一致，打印 Windows/WSL 两侧路径；未挂载盘、网络盘、Linux/UNC 构建目录、`D:relative` 直接拒绝。
+
+本地镜像只含 Cargo 清单、Rust 工具链文件、`crates/`、`src-tauri/`、`src/`（Rust 编译引用 DTO）、`public/`、许可与本轮前端，含工作区实际未提交文件；不带 Git、node_modules、target、官网或历史安装器。未变化文件保留时间戳，已删除输入从镜像同步移除。专用镜像必须有脚本归属标记，拒绝覆盖同名的其他目录；不使用符号链接/junction 指回 WSL。首次使用新构建目录会冷编译，随后复用 `target/`，不会迁移或删除旧的 `C:\rb-target` 产物。
+
+工作区 `.release/build.lock` 和镜像同级 `source.lock` 阻止并发发行。正常成功/失败均释放；强制终止后若报残留锁，确认 WSL 与 Windows 的构建进程均已结束，再手动删除报错指出的锁。每次打包清空本构建目录的 `target/release/bundle` 暂存后重新生成，最终 `release-out/` 保留，不能覆盖已有版本目录。
+
+路径统一转换也覆盖文件型 `TAURI_SIGNING_PRIVATE_KEY` 和自定义 `RAYBEND_DAV1D_WIN_DIR`（接受 Windows 路径或 WSL 挂载路径；内联签名私钥保持原值）。dav1d 仍须按 `scripts/build-dav1d-win.cmd` 预先安装，默认依赖位置沿用原模块。Windows 批处理在本地镜像目录启动，配置与 `CARGO_TARGET_DIR` 使用盘符绝对路径；WSLENV 不再对这些已转换路径重复应用 `/p`。
+
+**验证边界**：2026-09-29 已通过脚本单测、真实路径探测和 dry-run；尚未用新版流水线生成 MSI，也未验证安装、升级、卸载或 NSIS → MSI 切换。已有 NSIS 安装是否能平滑转 MSI 必须真机验收，不能把固定 MSI upgradeCode 当作跨安装器升级保证。MSI 由 Windows WiX 生成的限制见 [Tauri 官方说明](https://v2.tauri.app/distribute/windows-installer/)；如 Windows 缺 VBScript 可选功能，按该文档配置，不将 `light.exe` 失败一律归咎于路径。
 
 ## 1. 不花钱也能开始
 
@@ -85,7 +111,7 @@ Microsoft Store 当前新入口个人/公司注册免费，仍需身份验证：
 ```bash
 pnpm release patch --dry-run
 pnpm release minor --channel beta --dry-run
-pnpm release test --windows --unsigned --dry-run
+pnpm release test --win-msi --unsigned --dry-run
 ```
 
 package.json 为产品版本来源，Cargo.toml 与 Cargo.lock 的两个本地包同步，Tauri 直接读取 package.json。test 不升版，前端落 dist/test-build；beta/release 落 dist。脚本不 commit/tag/push/上传。manifest 的 gitHash 记录升版前已提交代码的 commit，版本改动随后由您提交；它不是最终版本提交的 hash。源代码 tag 必须保留该次升版与生成许可资源。工作树非干净时，beta/release 默认阻断；--allow-dirty 是明确接受脏树来源的选项，不建议用于公开版。
@@ -98,17 +124,17 @@ Windows 本机需要 Rust/MSVC、Windows SDK signtool（签名路线需要，加
 
 ```bash
 # 无 Windows 发布者签名的自测包：
-pnpm release test --windows --unsigned
+pnpm release test --win-msi --unsigned
 
 # 有 Windows 证书存储证书的包（指纹为公开标识，不是私钥）：
 export RAYBEND_SIGN_CERT_SHA1='<Windows 证书存储的 40 位 SHA-1 指纹>'
-pnpm release patch --windows
+pnpm release patch --win-msi
 
 # 明确选择无发布者签名的公开包：
-pnpm release patch --windows --unsigned
+pnpm release patch --win-msi --unsigned
 ```
 
-发布 target 使用 C:\rb-target\raybend-release，前端只构建一次，再由 Windows cargo 构建核心 worker 与桌面应用、Tauri bundle。安装包采用同进程自重启 RAW worker，不附带容易过期的另一份 worker；check:win 在自重启模式检查主程序内协议标签。NSIS 每用户安装且支持英/简中；MSI 使用固定 upgradeCode，禁用降级。beta 仅 NSIS（MSI 数值版本不能可靠区分 beta.N）。未添加任何删除用户照片/库的卸载钩子，但仍需要实际验证安装器行为。
+发布目录自动从 Windows 获取（默认 `%LOCALAPPDATA%\raybend\build`），`source/` 是本地构建镜像，`target/` 是持久编译缓存。前端在 WSL 只构建一次，再复制必要输入，由 Windows cargo 构建核心 worker 与桌面应用、Tauri bundle。安装包采用同进程自重启 RAW worker，不附带容易过期的另一份 worker；check:win 在自重启模式检查主程序内协议标签。NSIS 每用户安装且支持英/简中；MSI 使用固定 upgradeCode，禁用降级。beta 仅 NSIS（MSI 数值版本不能可靠区分 beta.N）。未添加任何删除用户照片/库的卸载钩子，但仍需要实际验证安装器行为。
 
 证书存储签名是已准备的一条路线。SignPath 等远程服务需要其签名流程适配，不能把 Foundation 私钥导入本机；暂不伪造 CI 工作流和服务账户。
 
@@ -123,7 +149,7 @@ pnpm tauri signer generate -w /您自己选择的仓外安全目录/raybend-upda
 以安全环境变量/密钥管理提供 RAYBEND_UPDATER_PUBLIC_KEY、TAURI_SIGNING_PRIVATE_KEY（Tauri 支持私钥内容或绝对路径）与 TAURI_SIGNING_PRIVATE_KEY_PASSWORD；本机存在的私钥文件路径会经 wslpath 转成 Windows 可访问路径，内容型密钥不转换；密钥不会打印到计划中。公开公钥可进发布配置。私钥不能由 Agent 代您保管。
 
 ```bash
-pnpm release patch --windows --with-updater --unsigned
+pnpm release patch --win-msi --with-updater --unsigned
 # 有发布者证书时去掉 --unsigned
 ```
 
@@ -134,7 +160,7 @@ pnpm release patch --windows --with-updater --unsigned
 把最终签名后的 NSIS/MSI 与对应 .sig 放在一个只含发行安装器的目录；不要混入裸 exe 或旧包。日常两指令已自动完成此步。以下仅供签名服务返回最终包后手工收口，输出完整待上传目录，**不会上传**；--out 必须不存在。
 
 ```bash
-pnpm release:finalize /mnt/c/rb-target/raybend-release/release/bundle \
+pnpm release:finalize '<日志中的 WSL 构建目录>/target/release/bundle' \
   --manifest dist/raybend-build.json --out release-out/所选版本 \
   --base-url https://github.com/C-Thun/raybend/releases/download/v所选版本/
 # 明确无 Authenticode 签名时另加 --allow-unsigned

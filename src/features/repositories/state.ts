@@ -18,6 +18,7 @@
  * * `patch` 是**就地**的：不重新拉全表、不重建行对象，挂着的界面拿到的是同一个信号。
  */
 
+import { revision } from "../../lib/revision.ts";
 import { createSignal } from "solid-js";
 import type { RepositoryView, RepositoryConnection } from "../../api/types.ts";
 import type { RepositoryRemountError } from "../../components/ui/RepositoryCard.tsx";
@@ -102,7 +103,6 @@ export function createRepositoryState(deps: {
   const touch = (id: string): symbol => { const token = Symbol(); versions.set(id, token); return token; };
   const remountingId = (): string | null => remountingIds().values().next().value ?? null;
   const isRemounting = (id: string): boolean => remountingIds().has(id);
-  const revision = (value: string): bigint => /^\d+$/.test(value) ? BigInt(value) : -1n;
   function normalize(row: RepositoryView): RepositoryView {
     const cached = connections.get(row.id);
     const connection = cached && (!row.connection || revision(cached.revision) > revision(row.connection.revision)) ? cached : row.connection;

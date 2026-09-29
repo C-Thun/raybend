@@ -112,15 +112,21 @@ pub fn enqueue_many(conn: &Connection, jobs: &[ThumbJob], now_ms: i64) -> Result
 ///
 /// 用 `UPDATE ... RETURNING` 一条语句完成「挑 + 改」，避免自己拼两步。
 pub fn claim_next(conn: &Connection, now_ms: i64) -> Result<Option<Claimed>> {
+    claim_next_for(conn, now_ms, None)
+}
+
+/// 桌面后台按库消费，绝不拿其它库的任务到当前根目录执行。
+pub fn claim_next_for(conn: &Connection, now_ms: i64, repository: Option<&str>) -> Result<Option<Claimed>> {
     let row: Option<(i64, String, i64)> = conn
         .query_row(
             "UPDATE jobs SET state = 'running', attempts = attempts + 1, updated_at = ?1
               WHERE id = (
                   SELECT id FROM jobs
                    WHERE kind = ?2 AND state = 'pending' AND updated_at <= ?1
+                     AND (?3 IS NULL OR CASE WHEN json_valid(payload) THEN json_extract(payload, '$.repository_id') = ?3 ELSE 1 END)
                    ORDER BY priority DESC, id ASC LIMIT 1)
             RETURNING id, payload, attempts",
-            params![now_ms, JOB_KIND],
+            params![now_ms, JOB_KIND, repository],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .optional()?;
@@ -134,7 +140,7 @@ pub fn claim_next(conn: &Connection, now_ms: i64) -> Result<Option<Claimed>> {
             "UPDATE jobs SET state = 'failed', error = ?1, updated_at = ?2 WHERE id = ?3",
             params!["任务载荷不是合法 JSON", now_ms, job_id],
         )?;
-        return claim_next(conn, now_ms); // 接着拿下一条
+        return claim_next_for(conn, now_ms, repository); // 接着拿下一条
     };
     Ok(Some(Claimed {
         job_id,
@@ -368,6 +374,20 @@ pub fn render_now_with_edit_and_lut(
     lens: Option<&crate::develop::lens::LensCorrection>,
     lut: Option<&crate::develop::lut::Lut>,
 ) -> Result<Vec<u8>> {
+    render_cached_with(thumbs, abs_path, size, now_ms, edit, || {
+        render::render_file_with_edit_and_lut(abs_path, size, edit, lens, lut)
+    })
+}
+
+/// Shared small-image cache. Resolve previews/lens/LUT and decode only on a miss.
+pub fn render_cached_with(
+    thumbs: &ThumbsDb,
+    abs_path: &Path,
+    size: SizeClass,
+    now_ms: i64,
+    edit: Option<&crate::store::develop::DevelopStack>,
+    render: impl FnOnce() -> Result<Option<render::Thumb>>,
+) -> Result<Vec<u8>> {
     // 源文件还没入库，「身份字符串」就是**绝对路径**（见 `cache_key_for`）
     let material = abs_path.to_string_lossy().into_owned();
     let key = cache_key_for(abs_path, &material);
@@ -384,23 +404,18 @@ pub fn render_now_with_edit_and_lut(
         .file_name()
         .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
     let kind = kind::kind_of_file(&file_name);
-    let thumb = match render::render_file_with_edit_and_lut(abs_path, size, edit, lens, lut)? {
+    let thumb = match render()? {
         Some(t) => t,
         // 不可解码（RAW）：先用占位图兜住（与队列那条路同一取舍）
         None => render::placeholder(kind, size)?,
     };
     let (data, width, height) = (thumb.data, thumb.width, thumb.height);
 
-    let write_sig = sig.clone();
+    let bytes = data.clone();
     thumbs.write(move |conn| {
-        cache::put(conn, &key, size, &write_sig, &data, width, height, now_ms)
+        cache::put(conn, &key, size, &sig, &data, width, height, now_ms)
     })?;
-    // 写进缓存的那份已由闭包持有，这里再取一次（一次 BLOB 读，微不足道）
-    let read_key = abs_path.to_string_lossy().into_owned();
-    let key = cache_key_for(abs_path, &read_key);
-    thumbs
-        .read(move |conn| cache::get(conn, &key, size, &sig))?
-        .ok_or_else(|| crate::error::Error::Unsupported("缩略图刚写进缓存却读不回来".to_string()))
+    Ok(bytes)
 }
 
 /// 一条「真的干过活」的任务的完整结果（给访问用）。
@@ -538,6 +553,16 @@ mod tests {
                 )?)
             })
             .unwrap()
+    }
+
+    #[test]
+    fn claiming_for_one_repository_leaves_other_repository_pending() {
+        let conn = app();
+        let other = enqueue(&conn, &ThumbJob::new("另一个库", "photos/a.jpg", SizeClass::Grid), T0).unwrap();
+        let own = enqueue(&conn, &ThumbJob::new("当前库", "photos/竖片.JPG", SizeClass::Grid), T0).unwrap();
+        assert_eq!(claim_next_for(&conn, T0, Some("当前库")).unwrap().unwrap().job_id, own);
+        assert!(claim_next_for(&conn, T0, Some("当前库")).unwrap().is_none());
+        assert_eq!(claim_next_for(&conn, T0, Some("另一个库")).unwrap().unwrap().job_id, other);
     }
 
     // ---------- 载荷 ----------
@@ -979,6 +1004,51 @@ mod tests {
     }
 
     // ---------- render_now（导入工作区的滚动加载）----------
+
+    #[test]
+    fn latest_preview_and_small_cache_never_decode_raw_on_a_hit() {
+        let dir = tempfile::tempdir().unwrap();
+        let raw = dir.path().join("中文.RW2");
+        // Deliberately undecodable: a warm preview must not touch these bytes.
+        std::fs::write(&raw, b"not a raw image").unwrap();
+        let preview_path = dir.path().join("preview.jpg");
+        write_jpeg(&preview_path, 32, 24);
+        let preview = std::fs::read(preview_path).unwrap();
+        let thumbs = thumbs_db(dir.path());
+        let mut stack = crate::store::develop::DevelopStack::default();
+        stack.params.insert("exposure".into(), 1.0);
+        for size in [SizeClass::Grid, SizeClass::Strip] {
+            let first = render_cached_with(&thumbs, &raw, size, T0, Some(&stack), || {
+                render::render_preview_or_else(Some(&preview), size, || panic!("RAW decoded"))
+            }).unwrap();
+            assert!(render::is_valid_avif(&first));
+            let second = render_cached_with(&thumbs, &raw, size, T0, Some(&stack), || {
+                panic!("small cache hit should not even read the preview")
+            }).unwrap();
+            assert_eq!(first, second);
+        }
+        // A source replacement must invalidate the small image too.
+        std::fs::write(&raw, b"changed raw source with a different length").unwrap();
+        let mut rerendered = false;
+        render_cached_with(&thumbs, &raw, SizeClass::Grid, T0, Some(&stack), || {
+            rerendered = true;
+            render::render_preview_or_else(Some(&preview), SizeClass::Grid, || panic!("RAW decoded"))
+        }).unwrap();
+        assert!(rerendered);
+    }
+
+    #[test]
+    fn missing_or_corrupt_preview_uses_the_source_fallback_once() {
+        for preview in [None, Some(&b""[..]), Some(&b"corrupt"[..])] {
+            let mut calls = 0;
+            let result = render::render_preview_or_else(preview, SizeClass::Grid, || {
+                calls += 1;
+                Ok(None)
+            }).unwrap();
+            assert!(result.is_none());
+            assert_eq!(calls, 1);
+        }
+    }
 
     #[test]
     fn render_now_returns_bytes_and_then_hits_the_cache() {

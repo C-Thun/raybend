@@ -184,7 +184,7 @@ test("clear：回收全部 URL、清空表，并丢掉上一个目录还在飞�
   assert.equal(queue.stats().inflight, 1);
 
   queue.clear();
-  assert.deepEqual(queue.stats(), { entries: 0, inflight: 0, queued: 0 });
+  assert.deepEqual(queue.stats(), { entries: 0, inflight: 1, queued: 0 });
 
   // 上一个目录的请求结果回来：不能补进新表
   loader.state.hold = false;
@@ -338,4 +338,34 @@ test("failure waits for an explicit retry instead of restarting by itself",async
  let loads=0;const q=createThumbQueue({load:async()=>{loads++;throw Error("offline");},toUrl:()=>"",revokeUrl:()=>{}});
  q.request("offline");await Promise.resolve();await Promise.resolve();await Promise.resolve();assert.equal(q.get("offline").status,"error");assert.equal(loads,1);
  q.request("offline");await Promise.resolve();await Promise.resolve();await Promise.resolve();assert.equal(loads,2);q.clear();
+});
+
+
+test("换目录仍遵守真实并发上限，离屏的排队照片不读盘", async () => {
+  const loader = fakeLoader({ hold: true });
+  const queue = createThumbQueue({ load: loader.load, ...fakeUrls(), concurrency: 1 });
+  queue.request("old"); queue.request("old-pending"); queue.clear();
+  queue.request("offscreen"); queue.cancel("offscreen"); queue.request("visible");
+  assert.deepEqual(queue.stats(), { entries: 1, inflight: 1, queued: 1 });
+  assert.equal(queue.get("offscreen").status, "idle");
+  loader.state.hold = false; loader.releaseAll(); await flush();
+  assert.equal(queue.get("visible").status, "ready");
+  assert.equal(queue.get("old").status, "idle");
+  assert.equal(queue.stats().inflight, 0);
+});
+
+test("摆正后的显示尺寸与 RAW 模拟标记原子发布，真实图替换后清标记", async () => {
+  let approximate = true;
+  const queue = createThumbQueue({
+    load: async () => ({ bytes: new Uint8Array([1]), approximate }), ...fakeUrls(),
+    prepareUrl: async () => ({ width: 192, height: 256 }),
+  });
+  queue.request("raw"); await flush();
+  assert.equal(queue.get("raw").width, 192); assert.equal(queue.get("raw").height, 256);
+  assert.equal(queue.get("raw").approximate, true);
+  approximate = false; queue.refresh("raw");
+  assert.equal(queue.get("raw").approximate, true, "旧图仍在时不能先去掉滤镜");
+  assert.equal(queue.get("raw").height, 256);
+  await flush();
+  assert.equal(queue.get("raw").approximate, undefined);
 });

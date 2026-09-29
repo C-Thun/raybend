@@ -13,6 +13,8 @@
  * 谁改了字段名而没同步，就有一侧先红。
  */
 
+export type { SystemPreferencesSnapshot } from "../lib/system-preferences.ts";
+
 /** 来源类型（`raybend::store::volumes::VolumeKind::code`） */
 export type VolumeKind =
   | "local"
@@ -628,6 +630,8 @@ export type MarkAction =
  * （**失败也会发 `false`**，所以界面不会卡在遮罩里）。
  */
 export interface MigrationNotice {
+  /** 每次升级的唯一 u64 编号，以十进制字符串传输 */
+  id: string;
   /** 库的种类：`app` / `catalog` / `thumbs` */
   kind: "app" | "catalog" | "thumbs";
   /** 中文名（提示文案直接用，界面不自己拼） */
@@ -638,6 +642,12 @@ export interface MigrationNotice {
   to: number;
   /** `true` = 开始（弹遮罩）；`false` = 结束（撤遮罩） */
   running: boolean;
+}
+
+/** 活动升级的完整快照；事件与查询共用同一 DTO。 */
+export interface MigrationSnapshot {
+  revision: string;
+  active: MigrationNotice[];
 }
 
 /** 「重建数据」的结果（齿轮弹窗里那句摘要用它）。 */

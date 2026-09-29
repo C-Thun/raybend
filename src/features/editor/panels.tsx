@@ -122,7 +122,8 @@ export interface EditorPanelsProps {
   issueSelectionOverride?: IssueSelection | null;
   onSelectIssue: (stack: DevelopStack, selection: IssueSelection) => void;
   onDeleteIssue: (issue: Issue, event: ShiftLikeEvent) => void;
-  loadIssueThumb: (issueId: number) => Promise<Uint8Array | null>;
+  issueThumbs: ThumbQueue;
+  issueThumbKey: (choice: string) => string;
   onSelectBaseCurve: (id: string | null) => void;
   onRenameBaseCurve: (id: string, name: string) => Promise<void>;
   /** 总览专用 Screen 全图队列；胶片带继续使用 grid 小图。 */
@@ -216,7 +217,7 @@ export function EditorPanels(props: EditorPanelsProps): JSX.Element {
           <IssuesTab enabled={props.enabled} store={props.store} library={props.issues}
             selectionOverride={props.issueSelectionOverride ?? null}
             pending={props.pendingIssue ?? null}
-            onSelect={props.onSelectIssue} onDelete={props.onDeleteIssue} loadThumb={props.loadIssueThumb} />
+            onSelect={props.onSelectIssue} onDelete={props.onDeleteIssue} thumbs={props.issueThumbs} thumbKey={props.issueThumbKey} />
         </Show>
         <Show when={viewTab() === "info"}>
           <InfoTab info={props.info} />
@@ -382,7 +383,7 @@ function IssuesTab(props: { enabled: boolean; store: EditorStore; library: Issue
   selectionOverride: IssueSelection | null;
   pending: { name: string; sourceBase: "raw" | "sooc" } | null;
   onSelect: (stack: DevelopStack, selection: IssueSelection) => void; onDelete: (issue: Issue, event: ShiftLikeEvent) => void;
-  loadThumb: (issueId: number) => Promise<Uint8Array | null> }): JSX.Element {
+  thumbs: ThumbQueue; thumbKey: (choice: string) => string }): JSX.Element {
   const isSelected = (kind: "sooc" | "raw" | "latest" | number): boolean => {
     // 先行值优先：点击那一刻就亮；后端的 selection 追上来后两者自然一致
     const selected = props.selectionOverride ?? props.library?.selection;
@@ -398,19 +399,19 @@ function IssuesTab(props: { enabled: boolean; store: EditorStore; library: Issue
       <button type="button" disabled={!props.enabled || !(base === "raw" ? props.store.editBaseAvailable().raw : props.store.editBaseAvailable().bitmap)}
         class="flex min-h-12 items-center gap-2 rounded-ui px-1 text-left hover:bg-state-hover disabled:opacity-50"
         classList={{ "bg-state-selected": isSelected(base) }} onClick={() => props.onSelect(source(base), base)}>
-        <span class="h-10 w-14 shrink-0 rounded-ui bg-surface-bar" />
+        <IssueThumb imageKey={props.thumbKey(base)} thumbs={props.thumbs} />
         <span class="min-w-0 flex-1"><span class="block text-fs-2 text-fg-1">{base.toUpperCase()}</span>
           <span class="block text-fs-0 text-fg-3">{t(base === "raw" ? "editor.issue.rawHint" : "editor.issue.soocHint")}</span></span>
       </button>}
     </For>
     <div class="flex min-h-12 items-center gap-2 rounded-ui px-1" classList={{ "bg-state-selected": isSelected("latest") }}>
-      <span class="h-10 w-14 shrink-0 rounded-ui bg-surface-bar" />
+      <IssueThumb imageKey={props.thumbKey("latest")} thumbs={props.thumbs} />
       <span class="min-w-0 flex-1"><span class="block text-fs-2 text-fg-1">{t("editor.issue.latest")}</span>
         <span class="block text-fs-0 text-fg-3">{t("editor.issue.latestHint")}</span></span>
     </div>
     {/*
       正在生成的定稿（占位）：确认弹窗一关它就现身，预览位转圈（崔总 2026-09-29：
-      「先生出条目，生成过程中预览图转圈，生成完显示出图」，不再是几秒无事发生）。
+      「先生出条目，生成完再显示出图」，不再是几秒无事发生）。
       列表按 created_at 倒序，新定稿落在最顶 —— 占位也放最顶，接替时无跳变。
       不可点选：后端还在渲染，选它没有意义。
     */}
@@ -428,7 +429,7 @@ function IssuesTab(props: { enabled: boolean; store: EditorStore; library: Issue
         classList={{ "bg-state-selected": isSelected(issue.id) }}>
         <button type="button" disabled={!props.enabled} onClick={() => props.onSelect(issue.stack, { issue: issue.id })}
           class="flex min-w-0 flex-1 items-center gap-2 text-left disabled:opacity-50">
-          <IssueThumb issueId={issue.id} load={props.loadThumb} />
+          <IssueThumb imageKey={props.thumbKey(`issue:${issue.id}`)} thumbs={props.thumbs} />
           <span class="min-w-0 flex-1"><span class="block truncate text-fs-2 text-fg-1">{issue.name}</span>
             <span class="block text-fs-0 text-fg-3">{issue.sourceBase.toUpperCase()} · {new Date(issue.createdAt).toLocaleString()}</span></span>
         </button>
@@ -441,20 +442,16 @@ function IssuesTab(props: { enabled: boolean; store: EditorStore; library: Issue
   </div>;
 }
 
-function IssueThumb(props: { issueId: number; load: (id: number) => Promise<Uint8Array | null> }): JSX.Element {
-  const [url, setUrl] = createSignal<string | null>(null);
+function IssueThumb(props: { imageKey: string; thumbs: ThumbQueue }): JSX.Element {
   createEffect(() => {
-    const id = props.issueId;
-    let active = true;
-    void props.load(id).then((bytes) => {
-      if (!active || bytes === null) return;
-      const next = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: "image/avif" }));
-      setUrl((previous) => { if (previous !== null) URL.revokeObjectURL(previous); return next; });
-    }).catch(() => undefined);
-    onCleanup(() => { active = false; const previous = url(); if (previous !== null) URL.revokeObjectURL(previous); });
+    const key = props.imageKey;
+    if (key !== "") props.thumbs.request(key);
+    onCleanup(() => props.thumbs.cancel(key));
   });
+  const thumb = () => props.thumbs.get(props.imageKey);
   return <span class="flex h-10 w-14 shrink-0 overflow-hidden rounded-ui bg-surface-bar">
-    <Show when={url()}>{(src) => <img src={src()} alt="" class="h-full w-full object-cover" />}</Show>
+    <Show when={thumb().url}>{(src) => <img src={src()} alt="" class="h-full w-full object-cover"
+      classList={{ "photo-raw-approximate": thumb().approximate === true }} />}</Show>
   </span>;
 }
 

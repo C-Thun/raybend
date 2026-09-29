@@ -191,6 +191,8 @@ HEIC 解码仍是未完成导入能力，不因五格式导出标成完成。
 （GitHub Release + 官网 + 预安装说明 + SHA-256），不买证书；直下链走通后启动 MSIX 打通微软商店；
 macOS 暂缓、Linux 空闲时先行（`memory/FUTURE.md` F1/F2）。
 
+**2026-09-29 MSI 脚本推进（仅工程冒烟）**：参数拆为 `--win-msi` / `--win-nsis`，Windows 本地镜像、盘/挂载探测、路径转换、锁和旧包隔离已实现；官网优先 MSI。未实际生成安装器，M5 验收状态不变。证据 `implementations/2026-09-29_release-windows-msi.md`。
+
 **剩余验收与发行操作清单在 `memory/PLAN.md` §3**（M5 DoD 未勾选，不计作完成）。
 
 ---

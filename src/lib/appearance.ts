@@ -2,8 +2,8 @@
  * 外观状态：主题（dark / light）与密度（compact / loose）。
  *
  * 设计约束（memory/DESIGN.md §3 / §8.1）：
- *   - 默认主题 = **dark**（相片软件的行业惯例）
- *   - 主题**不跟随系统**，由用户手动切换
+ *   - 首次使用系统外观，检测不到时 **dark**
+ *   - 保存后主题**不跟随系统**，由用户手动切换
  *   - 密度只有两档，切换方式是 `<html data-theme data-density>`，
  *     **禁止**用 `transform: scale()`
  *
@@ -11,7 +11,7 @@
  * 界面（标题栏的两个分段控件）属于 M1-4，本文件先被陈列室用上。
  *
  * 存储用 `localStorage` 而不是 `app.db`：外观是**设备级**偏好（换台机器该重来一次），
- * 而且要在 React/Solid 首次渲染前就能拿到，走 IPC 进 DB 反而会闪一帧。
+ * 已保存值能在 Solid 首次渲染前同步读取；仅首次缺失时等待有时限的系统探测。
  */
 
 import { createSignal } from "solid-js";
@@ -55,17 +55,30 @@ export function normalizeDensity(value: unknown): DensityMode {
     : DEFAULT_APPEARANCE.density;
 }
 
+/** 尚未保存合法主题时返回 null，由启动 adapter 提供首次默认值。 */
+export function readSavedTheme(
+  storage: AppearanceStorage | undefined = defaultStorage(),
+): ThemeMode | null {
+  try {
+    const theme = storage?.getItem(THEME_STORAGE_KEY);
+    return theme === "dark" || theme === "light" ? theme : null;
+  } catch {
+    return null;
+  }
+}
+
 export function readAppearance(
   storage: AppearanceStorage | undefined = defaultStorage(),
+  systemTheme: ThemeMode = DEFAULT_APPEARANCE.theme,
 ): Appearance {
-  if (!storage) return { ...DEFAULT_APPEARANCE };
+  const theme = readSavedTheme(storage) ?? normalizeTheme(systemTheme);
   try {
     return {
-      theme: normalizeTheme(storage.getItem(THEME_STORAGE_KEY)),
-      density: normalizeDensity(storage.getItem(DENSITY_STORAGE_KEY)),
+      theme,
+      density: normalizeDensity(storage?.getItem(DENSITY_STORAGE_KEY)),
     };
   } catch {
-    return { ...DEFAULT_APPEARANCE };
+    return { theme, density: DEFAULT_APPEARANCE.density };
   }
 }
 
@@ -130,6 +143,8 @@ export interface AppearanceStore {
 export interface AppearanceStoreOptions {
   /** 初始值；省略时从存储读（读不到就是默认） */
   initial?: Partial<Appearance>;
+  /** 首次启动 adapter 的探测结果；仅用于没有合法保存值的主题。 */
+  systemTheme?: ThemeMode;
   /** 注入存储（测试用） */
   storage?: AppearanceStorage | undefined;
   /** 注入「落到 DOM」的动作（测试用；Node 环境里没有 document） */
@@ -147,7 +162,7 @@ export function createAppearanceStore(
 ): AppearanceStore {
   const storage = "storage" in options ? options.storage : defaultStorage();
   const apply = options.apply ?? applyAppearance;
-  const persisted = readAppearance(storage);
+  const persisted = readAppearance(storage, options.systemTheme);
   /*
    * 开发期允许 URL 覆盖（`?theme=light&density=loose`），见 readAppearanceOverride。
    *

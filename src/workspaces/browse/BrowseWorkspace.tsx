@@ -32,7 +32,6 @@ import {
 import {
   getThumbBytes,
   getViewImage,
-  readFileExif,
   onCatalogChanged,
 } from "../../api/db.ts";
 import type { RepositoryStateStore } from "../../features/repositories/state.ts";
@@ -75,10 +74,10 @@ import { registerBrowseActions } from "../../features/browse/actions.ts";
 import { SplitHandle } from "../../components/ui/SplitHandle.tsx";
 import { nudgeWidth, resizeWidth } from "../../lib/column-resize.ts";
 import { joinPath } from "../../lib/paths.ts";
-import { assetItemExif, toExifData, type SelectedFileMetadata } from "../../features/exif-strip/index.ts";
-import { getDevelopEditTarget } from "../../api/editor.ts";
+import { assetItemExif, type SelectedFileMetadata } from "../../features/exif-strip/index.ts";
 import { getIssueLibrary, type IssueLibrary } from "../../api/issues.ts";
 import { createBrowseDisplay } from "../../features/browse/display-variants.ts";
+import { retainBrowseInfo, type BrowseInfoSnapshot } from "../../features/browse/info-snapshot.ts";
 import { displayedReference, readDisplayVariantKey } from "../../lib/display-variant.ts";
 import { getExportSnapshots, getExportVariantImage, getExportVariantDetails } from "../../api/export.ts";
 import { LAYOUT_BOUNDS } from "../../lib/layout-prefs.ts";
@@ -159,6 +158,7 @@ function ColumnHandle(props: {
 
 export function BrowseWorkspace(props: BrowseWorkspaceProps) {
   const store = props.store;
+  const anchor = createMemo(() => store.anchorItem());
   const repositories = props.repositories.list;
   const reposLoading = () => props.repositories.status() === "loading" || props.repositories.status() === "idle";
   const reposError = props.repositories.error;
@@ -227,6 +227,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
 
   /** 「当前那张」在列表里的下标 —— 键盘导航与「把它滚进视野」都靠它 */
   const [focusIndex, setFocusIndex] = createSignal<number | undefined>(undefined);
+  const [focusId, setFocusId] = createSignal<string | undefined>(undefined);
   /** 待确认的删除（张数；`null` = 没在确认） */
   const [pendingDelete, setPendingDelete] = createSignal<number | null>(null);
   /** 删除失败清单（有它就弹模态逐条列出来） */
@@ -281,17 +282,20 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
   const [issueBusy, setIssueBusy] = createSignal(false);
   const [issueError, setIssueError] = createSignal<string | null>(null);
   const [issueRefreshTick, setIssueRefreshTick] = createSignal(0);
+  const [issueResolvedContext, setIssueResolvedContext] = createSignal<string | null>(null);
   const issueContext=createMemo(()=>JSON.stringify([store.repositoryId(),store.anchorItem()?.id??null,store.undoTick(),issueRefreshTick(),locale()]));
   let issueAssetKey='';
   createEffect(on(issueContext,()=>{
+    const context = issueContext();
+    setIssueResolvedContext(null);
     const repositoryId=store.repositoryId(),assetId=store.anchorItem()?.id;
     const key=JSON.stringify([repositoryId,assetId]);
     if(key!==issueAssetKey){issueAssetKey=key;setIssueLibrary(null);setIssueError(null);}
     if(repositoryId===null||assetId===undefined)return;
     let active=true;
     void getIssueLibrary(repositoryId,assetId,locale()==='en-US')
-      .then(library=>{if(active)setIssueLibrary(library);})
-      .catch(error=>{if(active){setIssueLibrary(null);setIssueError(String(error));}});
+      .then(library=>{if(active){setIssueLibrary(library);setIssueResolvedContext(context);}})
+      .catch(error=>{if(active){setIssueLibrary(null);setIssueError(String(error));setIssueResolvedContext(context);}});
     onCleanup(()=>{active=false;});
   }));
   createEffect(() => {
@@ -342,12 +346,6 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
     },
     onPreparingViewer: () => setLibsExpanded(false),
   });
-
-  /** 「当前那张」的 id（键盘导航换了它之后把那一行滚进视野） */
-  const focusId = (): string | undefined => {
-    const item = store.anchorItem();
-    return item === null ? undefined : String(item.id);
-  };
 
   /**
    * 空态 / 加载 / 错误的水印（文案是浏览侧的：没选库 / 没选目录 / 空库）。
@@ -466,7 +464,8 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
 
   /** 移动「当前那张」（网格里 `←` / `→`）：等价于点它一下 —— 与点击同一套选择语义 */
   function moveFocus(delta: -1 | 1): void {
-    const total = store.total();
+    const source = gridSource();
+    const total = source.count();
     if (total === 0) return;
     const current = focusIndex();
     const next =
@@ -475,15 +474,16 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
           ? 0
           : total - 1
         : Math.min(total - 1, Math.max(0, current + delta));
-    const item = store.itemAt(next);
+    const item = source.itemAt(next);
     if (item === null) {
       // 那一段还没取到（分页）：让它去取，并把焦点先挪过去，下一按就能落上
-      void store.ensureRange(next, next + 1);
+      void source.ensureRange?.(next, next + 1);
       setFocusIndex(next);
       return;
     }
     setFocusIndex(next);
-    store.select(item.id, "replace");
+    source.select(item.id, "replace");
+    setFocusId(item.id);
   }
 
   /** 删除选中的照片：走回收站；结果用提示说清楚，失败清单进模态逐条列 */
@@ -553,25 +553,10 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
     },
   );
   createEffect(() => {
-    const item = store.anchorItem();
+    const item = anchor();
     const base = root();
     const path = item !== null && base !== null ? joinPath(base, item.relPath) : null;
     props.selectedMetadata.select(path, item === null ? null : assetItemExif(item));
-    // 组合 tile 展示的是位图；若它缺镜头等拍摄字段，用同一资产的 RAW 补足
-    // FlowBar 的内存信息。RAW 路径由现有后端解析，不在前端猜 `_RAW` 目录。
-    if (path === null || item === null || !item.hasRaw || item.isRaw || !store.canWrite()) return;
-    const repositoryId = store.repositoryId();
-    if (repositoryId === null) return;
-    let cancelled = false;
-    void getDevelopEditTarget(repositoryId, item.id, "raw")
-      .then((target) => target?.path && target.path !== path ? readFileExif(target.path) : null)
-      .then((raw) => {
-        if (!cancelled && raw !== null && props.selectedMetadata.path() === path) {
-          props.selectedMetadata.enrich(toExifData(raw));
-        }
-      })
-      .catch(() => {});
-    onCleanup(() => { cancelled = true; });
   });
 
   /**
@@ -623,7 +608,18 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
    * 规则本身住在 store 的 `anchorItem()` 里 —— 组装层读的是**同一个方法**，
    * 所以「右栏显示谁」与「flowinfo 显示谁」不可能两边走偏。
    */
-  const anchor = createMemo(() => store.anchorItem());
+  const info = createMemo<BrowseInfoSnapshot | null>((previous) => {
+    const item = anchor(), base = root();
+    return retainBrowseInfo(previous, {
+      context: JSON.stringify([store.repositoryId(), store.scopePath()]),
+      item, path: item && base ? joinPath(base, item.relPath) : null,
+      metadata: props.selectedMetadata.settled(),
+      issuesReady: issueResolvedContext() === issueContext(),
+      library: issueLibrary(), error: issueError(),
+    });
+  }, null);
+  const infoPending = () => info()?.item.id !== anchor()?.id ||
+    props.selectedMetadata.settled() === null || issueResolvedContext() !== issueContext();
 
   /**
    * 全屏看图要的清单（flowbar 那个全屏按钮 + `viewer.fullscreen` 命令）。
@@ -755,7 +751,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
           focusId={focusId()}
           pinsKey={`${store.repositoryId() ?? ""}:${store.scopePath() ?? ""}:${store.filterMode() ? "on" : "off"}:${JSON.stringify(store.filter())}`}
           onInteract={() => setLibsExpanded(false)}
-          onFocusIndex={(index) => setFocusIndex(index)}
+          onFocusIndex={(index) => { setFocusIndex(index); setFocusId(undefined); }}
           watermark={() => gridWatermark()}
         />
       </main>
@@ -777,17 +773,18 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
         */}
         <AssetInfo
               store={store}
-              item={anchor()}
-              fileExif={props.selectedMetadata.file()}
+              item={info()?.item ?? null}
+              fileExif={info()?.file ?? null}
+              pending={infoPending()}
               viewer={viewer.state().active ? viewer : null}
               /* 对比态不画视野框：好几个窗口，一个框描述不了 */
               comparing={viewing.comparing()}
               /* 「所属库」那一行：名字住在工作区（它拿着库列表） */
-              displayedIssueChoice={display.get(anchor()?.id ?? -1)?.choice ?? "latest"}
-              displayHistogram={display.get(anchor()?.id ?? -1)?.histogram}
-              issueLibrary={issueLibrary()}
+              displayedIssueChoice={display.get(info()?.item.id ?? -1)?.choice ?? "latest"}
+              displayHistogram={display.get(info()?.item.id ?? -1)?.histogram}
+              issueLibrary={info()?.library ?? null}
               issueBusy={issueBusy()}
-              issueError={issueError()}
+              issueError={info()?.error ?? null}
               onSelectIssue={(choice) => void selectBrowseIssue(choice)}
               repositoryName={
                 repositories().find((repo) => repo.id === store.repositoryId())?.name ?? null

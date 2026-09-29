@@ -392,7 +392,7 @@ test("浏览器降级：没有后端时给一句人话，不订阅、不空转",
     avoidDuplicates: true,
   });
   assert.equal(store.batchId(), null);
-  assert.match(store.error() ?? "", /开发预览/);
+  assert.match(store.error() ?? "", /开发预览|dev preview/);
   assert.equal(fake.state.calls.includes("subscribe"), false, "没有后端就别订阅");
   assert.equal(fake.state.calls.includes("status:"), false);
   // 快照仍是空的：弹窗该显示「原因」，而不是一个永远转圈的进度条

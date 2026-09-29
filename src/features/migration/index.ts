@@ -6,6 +6,8 @@ export { MigrationGate, type MigrationGateProps } from "./MigrationGate.tsx";
 export {
   activeNotice,
   applyNotice,
+  applySnapshot,
   NO_MIGRATIONS,
   type MigrationMap,
 } from "./notice.ts";
+export { createMigrationMonitor } from "./monitor.ts";

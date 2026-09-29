@@ -15,6 +15,7 @@ import {
   normalizeDensity,
   normalizeTheme,
   readAppearance,
+  readSavedTheme,
   readAppearanceOverride,
   writeAppearance,
   type Appearance,
@@ -81,6 +82,27 @@ test("读取：部分缺失 → 缺的那一项回落，另一项保留", () => 
     theme: "light",
     density: "compact",
   });
+});
+
+test("首次主题使用系统值，已有选择与密度仍优先", () => {
+  const storage = memoryStorage({ [DENSITY_STORAGE_KEY]: "loose" });
+  assert.equal(readSavedTheme(storage), null);
+  const first = createAppearanceStore({ storage, systemTheme: "light", apply: () => {} });
+  assert.deepEqual(first.appearance(), { theme: "light", density: "loose" });
+  first.setTheme("dark");
+  const restart = createAppearanceStore({ storage, systemTheme: "light", apply: () => {} });
+  assert.deepEqual(restart.appearance(), { theme: "dark", density: "loose" });
+  assert.equal(readSavedTheme(storage), "dark");
+});
+
+test("非法主题、存储无法访问时仍使用系统默认；密度读取失败不丢失已存主题", () => {
+  assert.equal(readSavedTheme(memoryStorage({ [THEME_STORAGE_KEY]: "Dark" })), null);
+  assert.equal(readAppearance(memoryStorage({ [THEME_STORAGE_KEY]: "Dark" }), "light").theme, "light");
+  const hostile = { getItem: () => { throw new Error("blocked"); }, setItem: () => { throw new Error("blocked"); } };
+  assert.equal(readSavedTheme(hostile), null);
+  assert.deepEqual(createAppearanceStore({ storage: hostile, systemTheme: "light", apply: () => {} }).appearance(), { theme: "light", density: "compact" });
+  const partial = { ...hostile, getItem: (key: string) => { if (key === THEME_STORAGE_KEY) return "light"; throw new Error("blocked"); } };
+  assert.deepEqual(readAppearance(partial), { theme: "light", density: "compact" });
 });
 
 test("读取：存储里的垃圾值 → 回落默认，不把非法值带到 DOM 上", () => {

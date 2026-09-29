@@ -38,7 +38,7 @@ import {
   getThumbBytes,
   onCatalogChanged,
 } from "../../api/db.ts";
-import { getExportVariantImage } from "../../api/export.ts";
+import { getVariantThumb } from "../../api/export.ts";
 import { openFullscreen } from "../../api/fullscreen.ts";
 import { pickDirectory } from "../../api/dialog.ts";
 import type { RepositoryStateStore } from "../../features/repositories/state.ts";
@@ -109,7 +109,7 @@ export function ExportWorkspace(props: ExportWorkspaceProps) {
       const captured = [...store.queues().values()]
         .flat()
         .find((item) => queueImageKey(item) === key)?.snapshot;
-      return getExportVariantImage(
+      return getVariantThumb(
         repo,
         reference,
         "grid",
@@ -416,9 +416,9 @@ export function ExportWorkspace(props: ExportWorkspaceProps) {
   function IssueTile(p: { variant: VariantSummary; size: number }) {
     const key=()=>JSON.stringify([store.repository(),p.variant.reference,p.variant.profileHash]);
     const state=()=>store.queueState(p.variant.reference,p.variant.profileHash);
-    createEffect(()=>issueThumbs.request(key()));
+    createEffect(()=>{ const value=key(); issueThumbs.request(value); onCleanup(()=>issueThumbs.cancel(value)); });
     return <div data-export-issue={p.variant.reference.variant} class="relative" title={p.variant.name} style={{width:`${p.size}px`,height:`${p.size}px`,"--tile-cell":`${p.size}px`}}>
-      <Tile keyboardActivate={false} label={p.variant.name} src={issueThumbs.get(key()).url} aspect={1} minimal selectionFrame
+      <Tile keyboardActivate={false} label={p.variant.name} src={issueThumbs.get(key()).url} approximate={issueThumbs.get(key()).approximate} aspect={1} minimal selectionFrame
         selected={store.selection().ids.has(variantKey(store.repository()??"",p.variant.reference))}
         disabled={store.locked(p.variant)} selectionLocked={store.locked(p.variant)}
         loading={issueThumbs.get(key()).status==="loading"}

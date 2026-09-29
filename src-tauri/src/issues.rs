@@ -367,13 +367,22 @@ pub async fn issue_thumb_get<R: Runtime>(
         let size = SizeClass::parse(&size)
             .filter(|value| matches!(value, SizeClass::Grid | SizeClass::Strip))
             .ok_or("定稿缩略图只支持 grid/strip")?;
-        let issue = issue_of(&handle, &repository_id, asset_id, issue_id)?;
-        let db = handle.state::<SourcesThumbs>().get(
-            &crate::thumbs::sources_cache_dir(&handle)?,
+        thumb_bytes(&handle, &repository_id, asset_id, issue_id, size)
+    })
+    .await?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// 编辑器和 export 复用既有定稿 thumb，不重复建立 export 缓存。
+pub(crate) fn thumb_bytes<R: Runtime>(app: &AppHandle<R>, repo: &str,
+    asset_id: i64, issue_id: i64, size: SizeClass) -> Result<Vec<u8>, String> {
+        let issue = issue_of(app, repo, asset_id, issue_id)?;
+        let db = app.state::<SourcesThumbs>().get(
+            &crate::thumbs::sources_cache_dir(app)?,
             time::now_millis(),
         )?;
-        let key = cache_key(&repository_id, asset_id, issue_id);
-        let sig = render_signature(&issue, &source_signature(&handle, &repository_id, &issue)?);
+        let key = cache_key(repo, asset_id, issue_id);
+        let sig = render_signature(&issue, &source_signature(app, repo, &issue)?);
         let read_key = key.clone();
         let read_sig = sig.clone();
         if let Some(bytes) = db
@@ -382,11 +391,18 @@ pub async fn issue_thumb_get<R: Runtime>(
         {
             return Ok(bytes);
         }
-        ensure_snapshots(&handle, &repository_id, &issue)?;
+        let asset = asset_for(app, repo, asset_id)?;
+        let source = develop::source_path_of(app, &asset, issue.source_base).ok_or("定稿源文件不可用")?;
+        let bytes = crate::thumbs::render_profile_thumb(app, &db, &asset, &source, &issue.stack,
+            size, Some(&format!("issue-{}-{}", issue.id, issue.profile_hash)))
+            .map_err(|error| error.to_string())?;
+        let image = image::load_from_memory(&bytes).map_err(|error| error.to_string())?;
+        let (width, height) = (image.width(), image.height());
+        let write_key = key.clone(); let write_sig = sig.clone();
+        db.write(move |conn| cache::put(conn, &write_key, size, &write_sig, &bytes, width, height, time::now_millis()))
+            .map_err(|error| error.to_string())?;
         db.read(move |conn| cache::get(conn, &key, size, &sig))
             .map_err(|error| error.to_string())?
             .ok_or("定稿缩略图生成后无法读取".into())
-    })
-    .await?;
-    Ok(tauri::ipc::Response::new(bytes))
+
 }

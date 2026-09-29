@@ -89,7 +89,7 @@ test("photo filters never restrict the admitted photo's issue list", () => {
   assert.equal(mainVariant(items)?.reference.variant,"latest");
   const strip=orderedIssues(items,()=>false).map(v=>v.reference.variant);
   assert(strip.includes("raw"),"RAW 行回到 issue 条（标记为 RAW 的 issue）");
-  assert.equal(strip[strip.length-1],"sooc");
+  assert.equal(strip[strip.length-1],"raw");
   const reset=items.map(v=>v.main?{...v,edited:false}:v);
   assert(!admitsPhoto(reset,"edited"));assert(admitsPhoto(reset,"issues"));
   assert(admitsPhoto([],"all"));assert(!admitsPhoto([],"issues"));
@@ -231,4 +231,14 @@ test("file collision choices migrate append, preserve explicit v3 policies and r
  }
  for(const existingFile of [undefined,"bad",null])assert.deepEqual(readPresets(JSON.stringify({version:3,presets:[{...preset,existingFile}]})),[]);
  assert.deepEqual(queueProgress([{status:"skipped"} as ExportQueueItem]),{remaining:0,total:1,processing:false});
+});
+
+
+test("原始 RAW 始终在 SOOC 后；提升状态不把原始源挤到命名定稿前", () => {
+  const variants = ["latest", "raw", "sooc", "issue:3"].map((variant, i) => ({
+    reference: { assetId: 1, variant }, name: variant, sourceBase: "raw", profileHash: String(i),
+    main: i === 0, createdAt: i,
+  })) as VariantSummary[];
+  assert.deepEqual(orderedIssues(variants, v => v.reference.variant === "raw").map(v => v.name),
+    ["issue:3", "sooc", "raw"]);
 });

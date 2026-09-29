@@ -1,5 +1,5 @@
 /** One in-memory source for the currently selected file's metadata across the three workflows. */
-import { createSignal } from "solid-js";
+import { batch, createSignal } from "solid-js";
 import type { FileExif } from "../../api/types.ts";
 import { toExifData } from "./from-file.ts";
 import type { ExifData } from "./types.ts";
@@ -8,6 +8,8 @@ export interface SelectedFileMetadata {
   path(): string | null;
   file(): FileExif | null;
   data(): ExifData | null;
+  /** Null while reading; a failed read still settles with file=null. */
+  settled(): { path: string; file: FileExif | null } | null;
   select(path: string | null, fallback?: ExifData | null): void;
   enrich(extra: ExifData): void;
 }
@@ -16,17 +18,25 @@ export function createSelectedFileMetadata(load: (path: string) => Promise<FileE
   const [path, setPath] = createSignal<string | null>(null);
   const [file, setFile] = createSignal<FileExif | null>(null);
   const [fallback, setFallback] = createSignal<ExifData | null>(null);
+  const [settled, setSettled] = createSignal<{ path: string; file: FileExif | null } | null>(null);
   let revision = 0;
 
   const select = (nextPath: string | null, nextFallback: ExifData | null = null): void => {
     const current = ++revision;
-    setPath(nextPath);
-    setFile(null);
-    setFallback(nextFallback);
+    batch(() => {
+      setSettled(null);
+      setPath(nextPath);
+      setFile(null);
+      setFallback(nextFallback);
+    });
     if (nextPath === null) return;
+    const finish = (result: FileExif | null): void => {
+      if (current !== revision) return;
+      batch(() => { setFile(result); setSettled({ path: nextPath, file: result }); });
+    };
     void load(nextPath).then(
-      (result) => { if (current === revision) setFile(result); },
-      () => { if (current === revision) setFile(null); },
+      finish,
+      () => finish(null),
     );
   };
 
@@ -44,6 +54,7 @@ export function createSelectedFileMetadata(load: (path: string) => Promise<FileE
   return {
     path,
     file,
+    settled,
     data: () => {
       const base = fallback();
       const loaded = file();

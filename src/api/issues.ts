@@ -1,3 +1,4 @@
+import { toBytes } from "./db.ts";
 import { isTauriRuntime } from "./tauri-env.ts";
 import type { DevelopStack } from "./editor.ts";
 
@@ -37,6 +38,10 @@ export async function deleteIssue(repositoryId: string, assetId: number, issueId
 }
 export async function getIssueThumb(repositoryId: string, assetId: number, issueId: number, size: "grid" | "strip"): Promise<Uint8Array | null> {
   if (!isTauriRuntime()) return null;
-  const bytes = await call<number[] | Uint8Array>("issue_thumb_get", { repositoryId, assetId, issueId, size });
-  return bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  const bytes = await call<number[] | Uint8Array | ArrayBuffer>("issue_thumb_get", { repositoryId, assetId, issueId, size });
+  return toBytes(bytes);
+}
+
+export async function prepareIssueSources(path: string): Promise<void> {
+  if (isTauriRuntime()) await call("issue_sources_prepare", { path });
 }

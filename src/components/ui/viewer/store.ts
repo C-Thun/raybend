@@ -58,7 +58,7 @@
  * 这类 API 会直接报错（注释里提到不算）。
  */
 
-import { createSignal } from "solid-js";
+import { batch, createSignal } from "solid-js";
 
 import { imageMimeOfBytes } from "../../../lib/image-mime.ts";
 
@@ -251,6 +251,7 @@ export interface ViewerStore {
   imageUrl: () => string | null;
   /** 总览只用完整 Screen 图；过渡用的 grid 小图不进入这里。 */
   overviewImageUrl: () => string | null;
+  overviewNatural: () => ViewerState["natural"] | null;
   overviewStatus: () => "idle" | "loading" | "ready" | "error";
   /** 多图视图用：指定照片自己的 URL，绝不能把当前图 URL 填给全部画幅。 */
   imageUrlFor: (photo: ViewerPhoto) => string | null;
@@ -292,6 +293,7 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
     createSignal<"idle" | "loading" | "ready" | "error">("idle");
   const [sharp, setSharp] = createSignal(false);
   const [overviewStatus, setOverviewStatus] = createSignal<"idle" | "loading" | "ready" | "error">("idle");
+  const [overview, setOverview] = createSignal<{ url: string; natural: ViewerState["natural"] } | null>(null);
   /**
    * 多图视图的独立 URL 表。单张看图的 `currentUrl` 会在换图时立刻回收，不能拿它给
    * 四个对比画幅共用；这里每张照片各持有自己的 URL，并按有限容量回收。
@@ -337,7 +339,23 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
     const previous = currentUrl;
     currentUrl = url;
     setImageUrl(url);
-    if (previous !== null && previous !== url) revokeUrl(previous);
+    if (previous !== null && previous !== url && previous !== overview()?.url) revokeUrl(previous);
+  }
+
+  function replaceOverview(url: string | null): void {
+    const previous = overview()?.url;
+    setOverview(url === null ? null : { url, natural: state().natural });
+    if (previous && previous !== url && previous !== currentUrl) revokeUrl(previous);
+  }
+
+  function publishScreen(url: string): void {
+    batch(() => {
+      replaceUrl(url);
+      replaceOverview(url);
+      setSharp(true);
+      setOverviewStatus("ready");
+      setImageStatus("ready");
+    });
   }
 
   const photos = (): readonly ViewerPhoto[] => state().photos;
@@ -454,10 +472,7 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
         revokeUrl(prefetched);
         return;
       }
-      replaceUrl(prefetched);
-      setSharp(true);
-      setOverviewStatus("ready");
-      setImageStatus("ready");
+      publishScreen(prefetched);
       return;
     }
 
@@ -471,10 +486,7 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
       if (ticket !== generation) return;
       const arrived = takeCachedImageUrl(photo);
       if (arrived !== null) {
-        replaceUrl(arrived);
-        setSharp(true);
-        setOverviewStatus("ready");
-        setImageStatus("ready");
+        publishScreen(arrived);
         return;
       }
       // 预载没成（取不到 / 已被作废）：落回下面的常规路径再试一次
@@ -501,16 +513,15 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
       }
       if (bytes === null) {
         if (imageUrl() === null) setImageStatus("error");
+        replaceOverview(null);
         setOverviewStatus("error");
         return;
       }
-      replaceUrl(makeUrl(bytes));
-      setSharp(true);
-      setOverviewStatus("ready");
-      setImageStatus("ready");
+      publishScreen(makeUrl(bytes));
     } catch {
       if (ticket === generation) {
         if (imageUrl() === null) setImageStatus("error");
+        replaceOverview(null);
         setOverviewStatus("error");
       }
     }
@@ -555,6 +566,7 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
   function close(): void {
     generation += 1;
     replaceUrl(null);
+    replaceOverview(null);
     clearImageUrls();
     setSharp(false);
     setOverviewStatus("idle");
@@ -637,6 +649,11 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
   }
 
   function setNatural(size: NaturalSize): void {
+    // The image's load event can refine dimensions after the Screen URL arrives.
+    // Retain that final aspect too, instead of the initial catalog/previous estimate.
+    if (overviewStatus() === "ready") {
+      setOverview(previous => previous === null ? null : { ...previous, natural: size });
+    }
     setState((prev) => {
       if (prev.natural.width === size.width && prev.natural.height === size.height) {
         return prev;
@@ -723,7 +740,8 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
     state,
     current,
     imageUrl,
-    overviewImageUrl: () => overviewStatus() === "ready" ? imageUrl() : null,
+    overviewImageUrl: () => overview()?.url ?? null,
+    overviewNatural: () => overviewStatus() === "ready" ? state().natural : overview()?.natural ?? null,
     overviewStatus,
     imageUrlFor,
     ensureImage,

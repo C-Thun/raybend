@@ -15,6 +15,10 @@ import { test } from "node:test";
 
 import {
   locale,
+  LOCALE_STORAGE_KEY,
+  hydrateLocale,
+  normalizeLocale,
+  readSavedLocale,
   setLocale,
   t,
   timeoutMessage,
@@ -71,4 +75,46 @@ test("setLocale 会把语言写到 <html lang>（WebView 的断行与字体回�
     assert.equal(locale(), "en-US");
   });
   assert.equal(locale(), "zh-CN");
+});
+
+test("首次默认按系统语言保存，后续启动不跟随系统或覆盖手动选择", () => {
+  const data: Record<string, string> = {};
+  const storage = { getItem: (key: string) => data[key] ?? null, setItem: (key: string, value: string) => { data[key] = value; } };
+  try {
+    assert.equal(readSavedLocale(storage), null);
+    assert.equal(hydrateLocale(storage, "zh-CN"), "zh-CN");
+    assert.equal(data[LOCALE_STORAGE_KEY], "zh-CN");
+    assert.equal(hydrateLocale(storage, "en-US"), "zh-CN");
+    setLocale("en-US", storage);
+    assert.equal(hydrateLocale(storage, "zh-CN"), "en-US");
+  } finally { setLocale("zh-CN"); }
+});
+
+test("语言缺失、非法或存储禁用使用系统默认，检测不到默认英文", () => {
+  try {
+    for (const value of [null, "", "ZH-CN", "fr", "中文"]) {
+      const storage = { getItem: () => value };
+      assert.equal(readSavedLocale(storage), null);
+      assert.equal(hydrateLocale(storage, "zh-CN"), "zh-CN");
+      assert.equal(hydrateLocale(storage), "en-US");
+      assert.equal(normalizeLocale(value), "en-US");
+    }
+    const hostile = { getItem: () => { throw new Error("blocked"); }, setItem: () => { throw new Error("blocked"); } };
+    assert.equal(hydrateLocale(hostile, "zh-CN"), "zh-CN");
+    assert.equal(hydrateLocale(hostile), "en-US");
+  } finally { setLocale("zh-CN"); }
+});
+
+test("访问 localStorage 本身抛错也不能让首次启动失败", () => {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  Object.defineProperty(globalThis, "localStorage", { configurable: true, get: () => { throw new Error("SecurityError"); } });
+  try {
+    assert.equal(readSavedLocale(), null);
+    assert.equal(hydrateLocale(undefined, "zh-CN"), "zh-CN");
+    assert.doesNotThrow(() => setLocale("en-US"));
+  } finally {
+    if (descriptor) Object.defineProperty(globalThis, "localStorage", descriptor);
+    else Reflect.deleteProperty(globalThis, "localStorage");
+    setLocale("zh-CN");
+  }
 });

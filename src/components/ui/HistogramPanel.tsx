@@ -60,7 +60,7 @@ export interface HistogramPanelProps {
 export function HistogramPanel(props: HistogramPanelProps): JSX.Element {
   const [counts, setCounts] = createSignal<HistogramCounts | null>(null);
 
-  // 取直方图：跟着「当前这张」走，取完之前先是空态（不阻塞任何东西）
+  // Keep the previous histogram while the next one loads; clear only on deselect/failure.
   createEffect(() => {
     if (props.countsOverride !== undefined) return;
     const path = props.path;
@@ -72,7 +72,6 @@ export function HistogramPanel(props: HistogramPanelProps): JSX.Element {
       setCounts(histogramCache.get(path) ?? null);
       return;
     }
-    setCounts(null);
     let alive = true;
     onCleanup(() => {
       alive = false;

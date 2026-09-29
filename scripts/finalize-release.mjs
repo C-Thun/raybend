@@ -6,6 +6,7 @@ import { resolve, join, basename, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sha256 } from './lib/release-files.mjs';
 import { releaseMetadata } from './lib/release-artifacts.mjs';
+import { toWindowsPath } from './lib/windows-paths.mjs';
 
 export function finalizeRelease({ argv = process.argv.slice(2), run = execFileSync, log = console.log, selectVersion, requiredTargets = [] } = {}) {
   const [directory, ...args] = argv;
@@ -33,10 +34,12 @@ export function finalizeRelease({ argv = process.argv.slice(2), run = execFileSy
       if (entry.isDirectory()) walk(path);
       else if (/\.(exe|msi)$/i.test(entry.name)) {
         if (selectVersion && !entry.name.startsWith(`RayBend_${selectVersion}_`)) continue;
+        const target = entry.name.toLowerCase().endsWith('.msi') ? 'msi' : 'nsis';
+        if (requiredTargets.length && !requiredTargets.includes(target)) continue;
         const bytes = readFileSync(path);
         let verified = false;
         if (!allowUnsigned) {
-          const windowsPath = String(run('wslpath', ['-w', path], { encoding: 'utf8' })).trim();
+          const windowsPath = toWindowsPath(path, { run });
           run('signtool.exe', ['verify', '/pa', '/all', windowsPath], { stdio: 'inherit' });
           verified = true;
         }

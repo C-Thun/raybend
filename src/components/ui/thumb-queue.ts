@@ -32,6 +32,11 @@ export interface ThumbEntry {
   status: ThumbStatus;
   /** `ready` 时的图片地址（`blob:` URL） */
   url: string | null;
+  /** 原始 RAW 内嵌模拟图才加 UI 滤镜，真实缩略图不加。 */
+  approximate?: boolean;
+  /** 已摆正的小图尺寸，仅供 tiles 排版，不是原片自然尺寸。 */
+  width?: number;
+  height?: number;
 }
 
 /** 还没请求过的条目（视图据此显示占位） */
@@ -39,13 +44,13 @@ export const IDLE_THUMB: ThumbEntry = { status: "idle", url: null };
 
 export interface ThumbQueueDeps {
   /** 取一个文件的缩略图字节；`null` 表示拿不到（浏览器里就是这样） */
-  load: (path: string) => Promise<Uint8Array | null>;
+  load: (path: string) => Promise<Uint8Array | { bytes: Uint8Array; approximate: boolean } | null>;
   /** 字节 → 可显示的 URL（默认 `Blob` + `createObjectURL`） */
   toUrl?: (bytes: Uint8Array) => string;
   /** 回收 URL（默认 `URL.revokeObjectURL`） */
   revokeUrl?: (url: string) => void;
   /** 刷新替换前先解码新图，避免 URL 已切换而 WebView 尚未出图的闪白。 */
-  prepareUrl?: (url: string) => Promise<void>;
+  prepareUrl?: (url: string) => Promise<void | { width: number; height: number }>;
   /** 同时在飞的请求数上限（默认 4） */
   concurrency?: number;
   /** 缓存条数上限（默认 600 —— 384px 的 JPEG 约 30–60KB，600 条 ≈ 20–35MB） */
@@ -64,6 +69,8 @@ export interface ThumbQueue {
    * 在飞的旧请求按**按路径的代号**丢弃：旧结果回来时对不上就丢，不会把旧图盖在新图上。
    */
   refresh: (path: string) => void;
+  /** 撤掉尚未开始的离屏请求，已在飞的请求仍计入并发。 */
+  cancel: (path: string) => void;
   /** 队内统计（排错与「加载中」提示用） */
   stats: () => { entries: number; inflight: number; queued: number };
   /** 丢弃全部缓存并回收 URL（换目录、卸载时调） */
@@ -91,11 +98,12 @@ function defaultRevoke(url: string): void {
   URL.revokeObjectURL(url);
 }
 
-async function defaultPrepareUrl(url: string): Promise<void> {
+async function defaultPrepareUrl(url: string): Promise<void | { width: number; height: number }> {
   if (typeof Image === "undefined") return;
   const image = new Image();
   image.src = url;
   await image.decode();
+  return { width: image.naturalWidth, height: image.naturalHeight };
 }
 
 export function createThumbQueue(deps: ThumbQueueDeps): ThumbQueue {
@@ -154,22 +162,25 @@ export function createThumbQueue(deps: ThumbQueueDeps): ThumbQueue {
       if (!current || current.status === "ready") continue;
 
       setInflight((n) => n + 1);
-      patch(path, { status: "loading", url: current.url });
+      patch(path, { ...current, status: "loading", url: current.url });
 
       const issuedAt = generation;
       const issuedRev = revOf(path);
       void deps
         .load(path)
-        .then(async (bytes) => {
+        .then(async (loaded) => {
+          const bytes = loaded instanceof Uint8Array ? loaded : loaded?.bytes ?? null;
+          const approximate = loaded !== null && !(loaded instanceof Uint8Array) && loaded.approximate;
           // 上一个目录的 / 被 `refresh()` 作废的旧结果，丢掉
           if (issuedAt !== generation || issuedRev !== revOf(path)) return;
           if (bytes === null) {
-            patch(path, { status: "error", url: entries()[path]?.url ?? null });
+            patch(path, { ...entries()[path], status: "error", url: entries()[path]?.url ?? null });
             return;
           }
           const url = toUrl(bytes);
+          let dimensions: void | { width: number; height: number };
           try {
-            await prepareUrl(url);
+            dimensions = await prepareUrl(url);
           } catch {
             // 新图解码失败，旧图继续显示；新 URL 不能泄漏。
             revokeUrl(url);
@@ -181,17 +192,16 @@ export function createThumbQueue(deps: ThumbQueueDeps): ThumbQueue {
           }
           const oldUrl = entries()[path]?.url;
           touch(path);
-          patch(path, { status: "ready", url });
+          patch(path, { status: "ready", url, ...(approximate ? { approximate: true } : {}), ...dimensions });
           if (oldUrl) revokeUrl(oldUrl);
           evict();
         })
         .catch(() => {
           if (issuedAt === generation && issuedRev === revOf(path)) {
-            patch(path, { status: "error", url: entries()[path]?.url ?? null });
+            patch(path, { ...entries()[path], status: "error", url: entries()[path]?.url ?? null });
           }
         })
         .finally(() => {
-          if (issuedAt !== generation) return;
           setInflight((n) => Math.max(0, n - 1));
           pump();
         });
@@ -223,6 +233,14 @@ export function createThumbQueue(deps: ThumbQueueDeps): ThumbQueue {
     // Otherwise an error publication immediately retries forever from the same effect.
     request: (path, priority) => untrack(() => request(path, priority)),
 
+    cancel: (path) => untrack(() => {
+      if (!queued.includes(path)) return;
+      queued = queued.filter((item) => item !== path);
+      const current = entries()[path];
+      if (current?.url) patch(path, { ...current, status: "ready" });
+      else setEntries((prev) => { const next = { ...prev }; delete next[path]; return next; });
+    }),
+
     stats: () => ({
       entries: Object.keys(entries()).length,
       inflight: inflight(),
@@ -235,7 +253,7 @@ export function createThumbQueue(deps: ThumbQueueDeps): ThumbQueue {
       pathRevs.set(path, revOf(path) + 1);
       const current = untrack(entries)[path];
       queued = queued.filter((item) => item !== path);
-      patch(path, { status: "loading", url: current?.url ?? null });
+      patch(path, { ...current, status: "loading", url: current?.url ?? null });
       queued.push(path);
       untrack(pump);
     },
@@ -253,7 +271,7 @@ export function createThumbQueue(deps: ThumbQueueDeps): ThumbQueue {
       queued = [];
       recent = [];
       setEntries({});
-      setInflight(0);
+      // 旧目录仍在飞的 I/O 继续占用配额，完成时统一释放。
     },
   };
 }

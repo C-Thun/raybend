@@ -88,3 +88,16 @@ test('自动收口只收本版、目标完整；旧 Windows bundle 不混入',()
   assert.equal(githubReleasePlan(f.out).assets.filter(p=>/\.(exe|msi)$/i.test(p)).length,2);
  }finally{f.dispose();}
 });
+
+test('只选择 MSI 时排除同版本 NSIS 和其旧签名',()=>{
+ const f=fixture();try{
+  rmSync(join(f.input,f.name));rmSync(join(f.input,f.name+'.sig'));
+  writeFileSync(join(f.input,'RayBend_1.2.3_x64-setup.exe'),'unselected NSIS');
+  writeFileSync(join(f.input,'RayBend_1.2.3_x64-setup.exe.sig'),'stale signature');
+  writeFileSync(join(f.input,'RayBend_1.2.3_x64_en-US.msi'),'selected MSI');
+  finalizeRelease({argv:f.argv.slice(0,-2),selectVersion:'1.2.3',requiredTargets:['msi'],log:()=>{}});
+  const index=JSON.parse(readFileSync(join(f.out,'release-index.json'),'utf8'));
+  assert.deepEqual(index.artifacts.map(a=>a.name),['RayBend_1.2.3_x64_en-US.msi']);
+  assert.equal(existsSync(join(f.out,'RayBend_1.2.3_x64-setup.exe')),false);
+ }finally{f.dispose();}
+});

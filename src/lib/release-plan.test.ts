@@ -17,6 +17,7 @@ import {
   parseVersion,
   PRERELEASE_LABEL,
   stableVersion,
+  windowsVersion,
 } from "./release-plan.ts";
 import type { ReleaseRequest } from "./release-plan.ts";
 
@@ -27,7 +28,8 @@ const request = (over: Partial<ReleaseRequest> = {}): ReleaseRequest => ({
   dryRun: false,
   allowDirty: false,
   skipBuild: false,
-  windows: false,
+  windowsTargets: [],
+  windowsDir: undefined,
   unsigned: false,
   withUpdater: false,
   ...over,
@@ -252,7 +254,28 @@ test("人要做的事被明确列出来（脚本只准备，不推送）", () =>
 
 test("参数的两个 channel 写法、非法值、未知与重复参数",()=>{
   assert.equal(parseReleaseArgs(["minor","--channel","beta"]).channel,"beta");
-  for(const args of [["patch","--channel"],["patch","--channel=bad"],["patch","--unknown"],["patch","--dry-run","--dry-run"],["patch","--channel=beta","--channel=release"],["test","--channel=beta"],["minor","--channel=test"],["patch","--unsigned"],["test","--windows","--skip-build"]]) assert.throws(()=>parseReleaseArgs(args));
+  for(const args of [["patch","--channel"],["patch","--channel=bad"],["patch","--unknown"],["patch","--dry-run","--dry-run"],["patch","--channel=beta","--channel=release"],["test","--channel=beta"],["minor","--channel=test"],["patch","--unsigned"],["patch","--with-updater"],["test","--win-msi","--skip-build"],["test","--win-nsis","--skip-build"],["test","--win-msi","--win-msi"]]) assert.throws(()=>parseReleaseArgs(args));
+});
+test("Windows 目标独立选择、组合顺序固定；旧参数给出迁移提示",()=>{
+  assert.deepEqual(parseReleaseArgs(["test","--win-msi","--unsigned"]),request({windowsTargets:["msi"],unsigned:true}));
+  assert.deepEqual(parseReleaseArgs(["test","--win-nsis"]).windowsTargets,["nsis"]);
+  assert.deepEqual(parseReleaseArgs(["patch","--win-msi","--win-nsis","--with-updater"]).windowsTargets,["nsis","msi"]);
+  assert.throws(()=>parseReleaseArgs(["patch","--windows"]),/--win-msi \/ --win-nsis/);
+});
+test("Windows 构建目录接受两种参数写法，不吞后续开关，拒绝空值/重复/无目标",()=>{
+  assert.equal(parseReleaseArgs(["test","--win-msi","--win-dir","/windows/d/中文 构建"]).windowsDir,"/windows/d/中文 构建");
+  assert.equal(parseReleaseArgs(["test","--win-msi","--win-dir=E:\\build"]).windowsDir,"E:\\build");
+  for(const args of [["test","--win-msi","--win-dir"],["test","--win-msi","--win-dir="],["test","--win-msi","--win-dir","--unsigned"],["test","--win-msi","--win-dir=a","--win-dir=b"],["test","--win-dir=a"]])assert.throws(()=>parseReleaseArgs(args));
+});
+test("MSI 仅支持稳定数值版本，预发布 test 不绕过限制；NSIS beta 仍支持",()=>{
+  const plan=(version:string,args:string[])=>createReleasePlan({version,request:parseReleaseArgs(args),dirty:false,gitHash:"abc"});
+  assert.deepEqual(plan("1.2.3",["test","--win-msi"]).windowsTargets,["msi"]);
+  assert.equal(plan("1.2.3-beta.1",["patch","--win-msi"]).targetVersion,"1.2.3");
+  assert.throws(()=>plan("1.2.3",["patch","--channel=beta","--win-msi"]),/MSI 不支持预发布/);
+  assert.throws(()=>plan("1.2.3-beta.1",["test","--win-msi"]),/MSI 不支持预发布/);
+  assert.equal(plan("1.2.3",["patch","--channel=beta","--win-nsis"]).channel,"beta");
+  assert.equal(windowsVersion("255.255.65535"),"255.255.65535");
+  for(const version of ["256.0.0","0.256.0","0.0.65536"])assert.throws(()=>windowsVersion(version),/MSI 限制/);
 });
 test("版本规范、计数和进位溢出",()=>{
   for(const version of ["01.2.3","1.2.3-beta..1","1.2.3-beta.01","9007199254740992.0.0"])assert.throws(()=>parseVersion(version));

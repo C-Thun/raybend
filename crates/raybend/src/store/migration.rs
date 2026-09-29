@@ -313,6 +313,8 @@ pub enum MigrationPhase {
 /// 一条迁移通知：哪个库、从哪版到哪版、处于哪个阶段。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MigrationNotice {
+    /// 一次执行的唯一编号；同种类的多个 catalog 可并发，不能按种类配对。
+    pub id: u64,
     /// 哪一类库（`app.db` / `catalog.db` / `thumbs.db`）
     pub kind: DbKind,
     /// 迁移前的 schema 版本
@@ -330,8 +332,21 @@ pub struct MigrationNotice {
 /// 让它挡住用户操作」是外壳的事。钩子让两边各守本分 ——
 /// store 只说「我要开始/结束迁移了（哪个库、从哪版到哪版）」，外壳决定怎么展示。
 ///
-/// 只在**真的要跑迁移**时触发：全新的库（0 → N）与已是最新版的库都不会响。
+/// 只在执行迁移时触发（含首次建库 0 → N）；已是最新版与版本闸门拒绝不发通知。
 static PROGRESS_HOOK: std::sync::OnceLock<Hook> = std::sync::OnceLock::new();
+
+static NOTICE_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn next_notice_id(counter: &std::sync::atomic::AtomicU64) -> Result<u64> {
+    counter
+        .fetch_update(
+            std::sync::atomic::Ordering::Relaxed,
+            std::sync::atomic::Ordering::Relaxed,
+            |id| id.checked_add(1),
+        )
+        .map(|id| id + 1)
+        .map_err(|_| Error::Unsupported("升级通知编号已耗尽，请重启应用".into()))
+}
 
 /// 通知钩子的类型别名（`Box<dyn Fn…>` 写在签名里太长）。
 pub type Hook = Box<dyn Fn(MigrationNotice) + Send + Sync + 'static>;
@@ -413,10 +428,12 @@ fn apply_list_with_hook(
         });
     }
 
+    let id = next_notice_id(&NOTICE_ID)?;
     // ①.5 告诉外壳「要开始升级了」——界面据此挡住用户操作，升级完再放开
     notify(
         hook,
         MigrationNotice {
+            id,
             kind,
             from: current,
             to: target,
@@ -430,6 +447,7 @@ fn apply_list_with_hook(
     notify(
         hook,
         MigrationNotice {
+            id,
             kind,
             from: current,
             to: target,
@@ -632,6 +650,26 @@ mod tests {
 
     fn tmp() -> tempfile::TempDir {
         tempfile::tempdir().expect("临时目录")
+    }
+
+    #[test]
+    fn notice_ids_are_unique_under_concurrency_and_overflow_is_explicit() {
+        use std::sync::{Mutex, atomic::AtomicU64};
+        let counter = AtomicU64::new(0);
+        let ids = Mutex::new(Vec::new());
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
+                let counter = &counter;
+                let ids = &ids;
+                scope.spawn(move || ids.lock().unwrap().push(next_notice_id(counter).unwrap()));
+            }
+        });
+        let mut ids = ids.into_inner().unwrap();
+        ids.sort_unstable();
+        assert_eq!(ids, (1..=8).collect::<Vec<_>>());
+        let last = AtomicU64::new(u64::MAX - 1);
+        assert_eq!(next_notice_id(&last).unwrap(), u64::MAX);
+        assert!(next_notice_id(&last).is_err());
     }
 
     // ---------- 真实迁移列表 ----------
@@ -1180,16 +1218,21 @@ mod tests {
         )
         .unwrap();
 
+        let seen = seen.into_inner().unwrap();
+        let id = seen[0].id;
+        assert_ne!(id, 0);
         assert_eq!(
-            *seen.lock().unwrap(),
+            seen,
             vec![
                 MigrationNotice {
+                    id,
                     kind: DbKind::Catalog,
                     from: 1,
                     to: 2,
                     phase: MigrationPhase::Start,
                 },
                 MigrationNotice {
+                    id,
                     kind: DbKind::Catalog,
                     from: 1,
                     to: 2,

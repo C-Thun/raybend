@@ -45,8 +45,8 @@ export interface ViewerReadoutProps {
 }
 
 export function ViewerReadout(props: ViewerReadoutProps): JSX.Element {
-  const natural = () => props.store.state().natural;
-  const rect = () => visibleRect(props.store.state());
+  const natural = () => props.store.overviewNatural();
+  const rect = () => props.store.overviewStatus() === "ready" ? visibleRect(props.store.state()) : null;
 
   return (
     <>

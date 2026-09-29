@@ -21,6 +21,7 @@
     "lint:i18n": "node scripts/check-i18n.mjs",
     "release": "node scripts/release.mjs",
     "smoke:ui": "node --check scripts/ui-smoke.mjs && node scripts/ui-smoke.mjs",
+    "check:startup": "node --check scripts/check-system-preferences.mjs && node scripts/check-system-preferences.mjs",
     "check:flowbar": "node --check scripts/check-flowbar.mjs && node scripts/check-flowbar.mjs",
     "check:export": "node --check scripts/check-export-boot.mjs && node scripts/check-export-boot.mjs",
     "check:external": "node --check scripts/check-external-editor.mjs && node scripts/check-external-editor.mjs",

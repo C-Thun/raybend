@@ -1,3 +1,4 @@
+import { getVariantThumb } from "../../api/export.ts";
 import { onCatalogChanged } from "../../api/db.ts";
 /**
  * 编辑工作区：三列（`design/editor.md` §2）。
@@ -61,7 +62,7 @@ import { createEasyDestroy, type ShiftLikeEvent } from "../../lib/easy-destroy.t
 import { EasyDestroyHost } from "../../components/ui/EasyDestroy.tsx";
 import { createLatestCoalescer } from "../../lib/editor-intent.ts";
 import { getLutLibrary, createLutCategory, importLutDirectory, hideLut, type LutLibrary } from "../../api/lut.ts";
-import { getIssueLibrary, createIssue, deleteIssue, getIssueThumb, type IssueLibrary, type Issue, type IssueSelection } from "../../api/issues.ts";
+import { getIssueLibrary, createIssue, deleteIssue, prepareIssueSources, type IssueLibrary, type Issue, type IssueSelection } from "../../api/issues.ts";
 import { IconLoader2 } from "@tabler/icons-solidjs";
 import { pendingLegacyLutCategories, markLegacyLutCategoriesImported } from "../../lib/editor-prefs.ts";
 import { pickDirectory } from "../../api/dialog.ts";
@@ -134,10 +135,28 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
   const [sourceRevision, setSourceRevision] = createSignal(0);
   const [repositories, setRepositories] = createSignal<RepositoryView[]>([]);
 
-  /** 胶片带/网格小图仍共用 grid 队列；总览取完整的 Screen 图。 */
+  /** editor 胶片带只取 192 小图；总览独立取 Screen，主视口读取原片。 */
   const thumbs = createThumbQueue({
-    load: async (path) => (await getThumbBytes(path, "grid")) ?? null,
+    load: async (path) => (await getThumbBytes(path, "strip")) ?? null,
   });
+  const [issueThumbRevision, setIssueThumbRevision] = createSignal(0);
+  const issueThumbs = createThumbQueue({
+    load: (key) => {
+      const [repo, asset, variant] = JSON.parse(key) as [string, number, string];
+      return getVariantThumb(repo, { assetId: asset, variant }, "strip");
+    }, concurrency: 2, maxEntries: 128,
+  });
+  const issueThumbKey = (choice: string): string => {
+    const repo = store.repositoryId(), asset = currentAssetId();
+    if (repo === null || asset == null) return "";
+    let variant = choice;
+    if (choice === "latest" && !source().itemById(String(asset))?.edited) {
+      variant = props.store.editBaseAvailable().bitmap ? "sooc" : "raw";
+    }
+    if ((variant === "sooc" && !props.store.editBaseAvailable().bitmap) ||
+        (variant === "raw" && !props.store.editBaseAvailable().raw)) return "";
+    return JSON.stringify([repo, Number(asset), variant, issueThumbRevision(), choice]);
+  };
   const overviewImages = createThumbQueue({
     load: (path) => getViewImage(path, "screen"),
     concurrency: 2,
@@ -160,6 +179,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
   onCleanup(() => {
     thumbs.clear();
     overviewImages.clear();
+    issueThumbs.clear();
   });
 
   onMount(() => {
@@ -308,6 +328,26 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
   });
   // 目标文件由 Rust 解析（RAW / SOOC）。状态轮询里旧照片的帧不能冒充它。
   const [expectedPhotoPath, setExpectedPhotoPath] = createSignal<string | null>(null);
+  let sourcePrepareTail = Promise.resolve();
+  const sourceToPrepare = createMemo(() => {
+    const state = props.store.renderState();
+    return state?.decode === "ready" && state.photoPath === expectedPhotoPath()
+      ? currentPath() : null;
+  });
+  createEffect(() => {
+    const path = sourceToPrepare();
+    if (path === null) return;
+    let active = true;
+    // 连续扫过胶片带不排满解码队列；当前真帧就绪、停留 300ms 后串行补图。
+    const timer = setTimeout(() => {
+      sourcePrepareTail = sourcePrepareTail.then(async () => {
+        if (!active || sourceToPrepare() !== path) return;
+        await prepareIssueSources(path);
+        if (active && currentPath() === path) setIssueThumbRevision((value) => value + 1);
+      }).catch((error: unknown) => console.error("[editor] 原始源小图生成失败", error)); // i18n-exempt: 后台缓存诊断
+    }, 300);
+    onCleanup(() => { active = false; clearTimeout(timer); });
+  });
 
   /**
    * 状态回写：渲染线程说「画出来了」才把洞口切成透明。
@@ -670,6 +710,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
         }
         if (path !== null) {
           thumbs.refresh(path);
+          setIssueThumbRevision((value) => value + 1);
           overviewImages.refresh(path);
         }
       })
@@ -737,6 +778,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
         if (path !== null) {
           await refreshDevelopPreview(path);
           thumbs.refresh(path);
+          setIssueThumbRevision((value) => value + 1);
           overviewImages.refresh(path);
         }
       })
@@ -1295,11 +1337,8 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
             issueSelectionOverride={issueSelectionOverride()}
             onSelectIssue={selectIssue}
             onDeleteIssue={requestDeleteIssue}
-            loadIssueThumb={(issueId) => {
-              const repo = store.repositoryId(); const asset = currentAssetId();
-              return repo === null || asset === null || asset === undefined ? Promise.resolve(null)
-                : getIssueThumb(repo, Number(asset), issueId, "strip");
-            }}
+            issueThumbs={issueThumbs}
+            issueThumbKey={issueThumbKey}
             onSelectBaseCurve={selectBaseCurve}
             onRenameBaseCurve={renameBaseCurve}
             onRefreshLens={() => { void lensQuery.refresh(); }}

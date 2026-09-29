@@ -106,9 +106,15 @@ pub struct DecodeRequest {
     pub max_edge: Option<u32>,
     /// 允许走内嵌预览快路径（够大就用它）。
     pub allow_preview: bool,
+    /// 小图只允许内嵌图；没有也不能触发传感器解码。
+    pub embedded_only: bool,
 }
 
 impl DecodeRequest {
+    pub fn embedded(path: impl Into<PathBuf>, max_edge: u32) -> Self {
+        Self { embedded_only: true, ..Self::thumb(path, max_edge) }
+    }
+
     /// 缩略图请求（网格 / 胶片带 / 看图都用它）。
     #[must_use]
     pub fn thumb(path: impl Into<PathBuf>, max_edge: u32) -> Self {
@@ -116,6 +122,7 @@ impl DecodeRequest {
             path: path.into(),
             max_edge: Some(max_edge),
             allow_preview: true,
+            embedded_only: false,
         }
     }
 
@@ -126,6 +133,7 @@ impl DecodeRequest {
             path: path.into(),
             max_edge: None,
             allow_preview: false,
+            embedded_only: false,
         }
     }
 

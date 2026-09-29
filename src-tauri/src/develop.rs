@@ -355,6 +355,13 @@ pub async fn develop_preview_refresh<R: Runtime>(
             return Ok(false);
         }
         crate::thumbs::render_latest_cached(&handle, &asset, &stack)?;
+        let db = handle.state::<crate::thumbs::SourcesThumbs>().get(
+            &crate::thumbs::sources_cache_dir(&handle)?, time::now_millis())?;
+        let source = source_path_of(&handle, &asset, stack.source_base).ok_or("最新编辑源不可用")?;
+        for size in [raybend::thumbnail::SizeClass::Grid, raybend::thumbnail::SizeClass::Strip] {
+            crate::thumbs::render_profile_thumb(&handle, &db, &asset, &source, &stack, size, Some("latest"))
+                .map_err(|e| e.to_string())?;
+        }
         Ok(true)
     })
     .await

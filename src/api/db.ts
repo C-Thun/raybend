@@ -20,7 +20,7 @@ import { t } from "../i18n/index.ts";
 import type {
   DirEmptyView,
   DirEntry,
-  MigrationNotice,
+  MigrationSnapshot,
   RepositorySettings,
   TemplatePreview,
   FileExif,
@@ -529,25 +529,16 @@ export async function getBooleanSetting(
 /** 数据库升级事件名（与 `src-tauri/src/migration.rs` 的 `MIGRATION_EVENT` 一致）。 */
 export const MIGRATION_EVENT = "db://migration";
 
-/** 缓存的事件模块（浏览器里根本不会加载它）。 */
-let eventModule: Promise<typeof import("@tauri-apps/api/event")> | undefined;
-
-/**
- * 订阅数据库升级通知；返回**取消订阅**的函数。
- *
- * 一次升级有头有尾（`running: true` / `false`），失败也会发 `false` ——
- * 界面据此弹/撤阻塞遮罩（`src/features/migration/`），不会卡在里面。
- * 浏览器里返回一个什么都不做的函数（开发预览没有后端）。
- */
+/** 订阅完整升级快照；晚订阅再用 migrationSnapshot 补齐。 */
 export async function onMigrationNotice(
-  handler: (notice: MigrationNotice) => void,
+  handler: (snapshot: MigrationSnapshot) => void,
 ): Promise<() => void> {
-  if (!isTauriRuntime()) return () => {};
-  eventModule ??= import("@tauri-apps/api/event");
-  const { listen } = await eventModule;
-  return listen<MigrationNotice>(MIGRATION_EVENT, (event) =>
-    handler(event.payload),
-  );
+  return onTauriEvent<MigrationSnapshot>(MIGRATION_EVENT, handler);
+}
+
+export async function migrationSnapshot(): Promise<MigrationSnapshot> {
+  if (!isTauriRuntime()) return { revision: "0", active: [] };
+  return call<MigrationSnapshot>("migration_snapshot");
 }
 
 /** 扫盘完成后的统一通知；paths 为绝对路径，用于现有图片队列定点失效。 */

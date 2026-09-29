@@ -119,6 +119,48 @@ pub(crate) fn is_tiff_family(bytes: &[u8]) -> bool {
     family_order(bytes).is_some()
 }
 
+/// 内嵌 JPEG 的位置；复用同一份 TIFF 类型/字节序解析，不读取传感器数据。
+/// 只走有界头部内的 IFD 链和 SubIFD，偏移循环、越界或过大的目录直接略过。
+pub(crate) fn embedded_jpeg_spans(bytes: &[u8]) -> Vec<(u64, usize)> {
+    let Some(order) = family_order(bytes) else { return Vec::new() };
+    let mut pending = vec![order.u32(bytes, 4).unwrap_or(0) as usize];
+    let mut seen = Vec::new();
+    let mut spans = Vec::new();
+    while let Some(offset) = pending.pop() {
+        if offset == 0 || seen.contains(&offset) || seen.len() >= 16 { continue; }
+        seen.push(offset);
+        let Some(count) = order.u16(bytes, offset).map(usize::from).filter(|n| *n <= MAX_ENTRIES) else { continue };
+        let Some(entries) = read_ifd(bytes, order, offset) else { continue };
+        let (mut start, mut len) = (None, None);
+        for entry in entries {
+            match entry.tag {
+                0x0201 => start = entry.int_value(order),
+                0x0202 => len = entry.int_value(order),
+                // Panasonic JpgFromRaw: UNDEFINED payload, offset in the value slot.
+                0x002e if entry.field_type == 7 && entry.count > 4 => {
+                    if let Some(at) = order.u32(&entry.value_bytes, 0) {
+                        spans.push((u64::from(at), entry.count as usize));
+                    }
+                }
+                0x014a if entry.field_type == 4 && entry.count <= 16 => {
+                    if let Some(data) = entry.data(bytes, order) {
+                        for chunk in data.as_chunks::<4>().0 {
+                            if let Some(at) = order.u32(chunk, 0) { pending.push(at as usize); }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        if let (Some(start), Some(len)) = (start, len)
+            && start > 0 && len > 0 { spans.push((start as u64, len as usize)); }
+        if let Some(at) = order.u32(bytes, offset + 2 + count * 12) { pending.push(at as usize); }
+    }
+    spans.sort_unstable_by_key(|(_, len)| *len);
+    spans.dedup();
+    spans
+}
+
 /// Read typed EXIF/GPS/XMP fields from the same IFD families as parse/read_fields.
 /// RW2 and ORF keep TIFF directory offsets/types but use a vendor magic. Adapt
 /// only the owned parser buffer; never mutate source bytes or the original file.

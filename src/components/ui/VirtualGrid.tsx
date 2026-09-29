@@ -16,10 +16,12 @@
 
 import {
   createEffect,
+  createMemo,
   createSignal,
   For,
   onCleanup,
   onMount,
+  on,
   type JSX,
 } from "solid-js";
 import { computeVirtualWindow, rowScrollTop, rowTop } from "../../lib/virtual-window.ts";
@@ -108,16 +110,18 @@ export function VirtualGrid<TRow extends VirtualGridRow>(
   });
 
   // 换目录 / 换模式：回到顶部（否则会停在一个不存在的滚动位置）
-  createEffect(() => {
-    const key = props.resetKey;
+  // Dynamic prop spreads may invalidate every getter when focus changes.
+  // Compare the actual scope value before resetting the user's scroll position.
+  const resetKey = createMemo(() => props.resetKey);
+  createEffect(on(resetKey, (key) => {
     if (key === undefined || !scroller) return;
     scroller.scrollTop = 0;
     setScrollTop(0);
-  });
+  }));
 
   // 键盘导航：把目标行滚进视野（已经看得见就不动）
-  createEffect(() => {
-    const target = props.focusRow;
+  const focusRow = createMemo(() => props.focusRow);
+  createEffect(on(focusRow, (target) => {
     if (target === undefined || !scroller) return;
     const next = rowScrollTop({
       rows: props.rows,
@@ -129,7 +133,7 @@ export function VirtualGrid<TRow extends VirtualGridRow>(
       scroller.scrollTop = next;
       setScrollTop(next);
     }
-  });
+  }));
 
   // 精确钉位：只有 key 变了才执行一次（见 props.scrollTo 的说明）
   createEffect<string | number | undefined>((applied) => {

@@ -85,7 +85,7 @@ export const zhCN = {
   "external.application": "外部应用",
   "external.noApplications": "请先添加应用",
   "external.addApplication": "+ 应用",
-  "external.addApplicationShort": "添加",
+ "external.addApplicationShort": "添加",
   "external.browseDirectory": "浏览",
   "external.directory": "TIFF 保存目录",
   "external.confirm": "导出并打开",
@@ -119,8 +119,9 @@ export const zhCN = {
 
  // ── 应用 ───────────────────────────────────────────────
  // ── 数据库升级（M2-W2）────────────────────────────────
- "migration.title": "正在升级数据库",
- "migration.body": "{label}的结构要从 v{from} 升到 v{to}，正在改写数据…",
+ "migration.title": "应用数据升级中",
+ "migration.title_catalog": "库数据升级中",
+ "migration.body": "正在准备新版所需的数据，请稍候…",
  "migration.hint": "升级期间界面暂时不可操作，完成后自动恢复。请不要关闭程序。",
 
  // ── 应用 ───────────────────────────────────────────────

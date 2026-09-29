@@ -77,14 +77,14 @@ pub fn shared() -> &'static Mutex<RawWorker> {
 /// 光靠「记得重建」不够 —— 所以现在版本对不上就**当面报错**，并且错误里写清怎么修。
 ///
 /// 版本史：v1 = 只有 `srgb8`；v2 = 加 `linear16` + `as_shot_temperature`。
-pub const PROTOCOL_VERSION: u32 = 3;
+pub const PROTOCOL_VERSION: u32 = 4;
 
 /// 版本标签（**机器可读**，给「产物是不是这一份源码建的」用）。
 ///
 /// `scripts/check-win-artifact.mjs` 会在 Windows 的 worker 可执行文件里找这个串 ——
 /// 找不到就说明**主程序新、worker 旧**（2026-09-24 那次真机事故的样子），当场报错。
 /// 它由 worker 启动时打到 stderr，所以一定在二进制里。**改协议就改它**（连同版本号）。
-pub const PROTOCOL_TAG: &str = "raybend-worker-proto-v3";
+pub const PROTOCOL_TAG: &str = "raybend-worker-proto-v4";
 
 /// 版本对不上时给人的那句话（客户端与测试共用一份文案）。
 fn protocol_mismatch(theirs: u32) -> String {
@@ -105,6 +105,8 @@ struct Request {
     max_edge: Option<u32>,
     #[serde(default)]
     allow_preview: bool,
+    #[serde(default)]
+    embedded_only: bool,
     /// 像素形态：缺省 / `"srgb8"` = 8bit sRGB（浏览用）；`"linear16"` = 线性 sRGB u16（显影用）。
     #[serde(default)]
     format: Option<String>,
@@ -461,6 +463,7 @@ impl RawWorker {
             path: req.path.to_string_lossy().into_owned(),
             max_edge: req.max_edge,
             allow_preview: req.allow_preview,
+            embedded_only: req.embedded_only,
             format: Some(format.as_str().to_string()),
             secs: 0,
             ..Request::default()
@@ -900,6 +903,7 @@ fn handle(request: Request) -> (Response, Vec<u8>) {
                 path: PathBuf::from(&request.path),
                 max_edge: request.max_edge,
                 allow_preview: request.allow_preview,
+                embedded_only: request.embedded_only,
             };
             let backend = RawlerBackend::new();
             let linear = request.format.as_deref() == Some("linear16");

@@ -1,4 +1,5 @@
 {
+  "SystemPreferencesSnapshot": ["language", "theme"],
   "RepositoryLocationError": ["code"],
   "_comment": [
     "IPC 契约的键名清单 —— TS 侧（src/api/dto-contract.test.ts）与 Rust 侧",
@@ -360,10 +361,15 @@
   ],
   "MigrationNotice": [
     "from",
+    "id",
     "kind",
     "label",
     "running",
     "to"
+  ],
+  "MigrationSnapshot": [
+    "active",
+    "revision"
   ],
   "RebuildProgress": [
     "done",

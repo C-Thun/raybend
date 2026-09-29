@@ -101,9 +101,9 @@ if (exeTime <= distTime) {
  *
  * 应用外壳：`index.html` 里引用到的每个 `assets/*`。
  * 启动闪屏：`splash.html` 里的图片路径是**运行时拼**出来的（`"splash/splash-" + lang + ".webp"`，
- * 因为要随机抽中/英），所以不按字面量匹配，改为查两件事：
+ * 因为要按软件语言选中/英），所以不按字面量匹配，改为查两件事：
  *   ① 页面里确实有 `splash/splash-` 这个拼装前缀；② `dist/splash/` 下的**每一个**文件都嵌进了 exe。
- * ②才是有分量的那条：少嵌一张，恰好抽到那张时闪屏就是个**透明空窗**（不报错、不明显）。
+ * ②才是有分量的那条：少嵌一张，选到该语言时闪屏就是个**透明空窗**（不报错、不明显）。
  */
 const referencedFromShell = (() => {
   const html = readFileSync(join(DIST, "index.html"), "utf8");

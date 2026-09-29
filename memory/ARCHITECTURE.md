@@ -163,10 +163,28 @@ Windows 当前是整个编辑视口的 wgpu 上下文使用 DX12，不存在 Vul
 
 | 状态 | 归属 | 理由 |
 | --- | --- | --- |
-| 主题、密度、语言 | `src/lib/appearance.ts` + 组装层 Provider | 全局、设备级偏好 |
+| 主题、密度、语言 | `src/lib/appearance.ts` / `src/i18n/index.ts` + 组装层 | 全局、设备级偏好（现有 localStorage 键） |
 | 当前工作流（导入/浏览/编辑/导出） | `src/shell/` 的 store | 外壳自己的状态 |
 | 当前仓、当前选中目录 | **app store**（`src/App.tsx` 提供） | 跨模块共享，且 `memory/DESIGN.md` §12.4.1 明确要求跨面板同步 |
 | 模块内部（Recent 列表、树的展开集合、已选目录集合…） | 该 feature 自己的 store | 换模块时整块丢弃，不需要全局清理 |
+
+**首次设备偏好（2026-09-29）**：`src/api/system-preferences.ts` 提供可替换的
+`SystemPreferencesAdapter`；桌面原生快照来自 `src-tauri/src/system_preferences.rs`，
+Windows/macOS 外观复用 Tauri，Windows 首选显示语言读取 Win32，WebView 的媒体查询/首选语言补齐未知项。
+Linux 外观暂走 WebView 媒体查询，避免把当前 Tao 未配置 portal 时固定返回的 Light 当成探测结果。
+`src/lib/system-preferences.ts` 只做纯默认值转换。`src/index.tsx` 在首屏前初始化并持久化：
+已有设置分别优先；没有主题时按系统选择，检测失败 dark；中文显示语言用 zh-CN，其它/未知用 en-US。
+原生探测限 800ms，之后不订阅系统变化。macOS/Linux 复用 adapter 接口，原生语言接入与真机验证留到相应平台阶段。
+app.db 继续经既有迁移框架创建，设备主题/语言不复制进数据库。规格与证据见
+`specs/first-start-system-preferences.md`、`implementations/2026-09-29_first-start-system-preferences.md`。
+
+**splash 启动语言**：`src-tauri/src/splash.rs` 在文档初始化脚本中嵌入
+`public/splash-locale.js`，先于主界面系统语言初始化捕获软件保存的语言；缺失/非法/读取失败时英文。
+本轮启动的各 WebView 复用 `raybend.splash-launch.v1` 派生快照，启动标识每次重建，
+只保留一条；软件语言的唯一来源仍是 `raybend.locale`。主界面首次保存中文或手动切换不改本次 splash，
+下次启动才重新读取。splash 不等待 IPC/app.db、不探测系统语言、没有新权限或网络请求。
+`pnpm check:startup [url]` 覆盖首次英文及后续中英文图片加载；Windows 原生窗口时序仍需真机确认。
+规格见 `specs/splash-language.md`，实施证据见 `implementations/2026-09-29_splash-language.md`。
 
 **展开状态与选中状态必须分开存**（`memory/DESIGN.md` §12.4.1）：
 树的展开集合属于 `source-tree` 模块内部；「当前选中目录」属于 app store。
@@ -309,6 +327,7 @@ Tauri 3.0 已进入 alpha（`3.0.0-alpha.0`），已知关键变更：
   前端连接事实由 App 唯一 store 持有；卡片只接所需呈现字段，错误文案归 i18n，避免 UI 反向依赖 IPC DTO。
 - **跨库搜索**：`ATTACH` 多库 + `UNION ALL`；必要时在 `app.db` 维护轻量定位表做快速筛选。
 - **备份**：升级前自动 `VACUUM INTO` 快照（保留 7 份）；程序版本低于库版本时**拒绝打开**并提示。
+- **升级等待（2026-09-29）**：app.db 后台打开/迁移，产品 splash 等它返回；设置与最近目录命令复用 blocking，等待打开锁不占窗口事件线程。catalog 经既有 CatalogSessions 开库迁移，外壳按执行 ID 保存活动快照；前端先订阅再查询、按精确十进制 revision 拒绝旧状态，订阅失败只降级查询内存快照。MigrationGate 复用现有视觉，专层拦截全窗输入；updater 原生端也检查正在执行的升级。新增必需预置图时须延长整体升级阶段并记录完成状态，当前只处理 SQL，详见 FUNCTION-REPOSITORY.md §2.2.1。
 - **禁止**把 catalog 放在云同步盘 / 网络盘上：创建/登记/打开经既有位置分类器执行策略；
   已登记库不删除，报告不支持的位置。解析最近存在祖先可识别部分符号链接/目录联接；
   云客户端与挂载识别仍有启发式限制。导入来源读取不受 catalog 策略牵连。
@@ -470,6 +489,8 @@ IPC 单测（用**真实字段名**反序列化；缺 DPR 必须报错，不许�
 
 ## 8. 构建与运行命令（已实测，2026-09-15）
 
+**2026-09-29 发行脚本更新**：`pnpm release … --win-msi` / `--win-nsis`（可组合）由 WSL 构建前端，再同步到探测到的 Windows 本地镜像执行 Cargo/Tauri；Windows 无需 Node。路径统一经 `scripts/lib/windows-paths.mjs` + `wslpath` 转换并回译核对，不猜盘符/挂载前缀；镜像/target 可用 `--win-dir` 或 `RAYBEND_WIN_BUILD_DIR` 覆盖。仍复用 WSLENV 与 dav1d 模块。debug/spike 命令不改。使用及验证边界见 `docs/release.md`、`specs/release-windows-msi.md`。
+
 ```bash
 # —— WSL 侧（日常开发）——
 pnpm install
@@ -514,7 +535,7 @@ cmd.exe /c 'pushd \\wsl.localhost\Ubuntu-24.04\home\andares\repos\c-thun\raybend
 
 **十 条硬规矩（实测踩坑）：**
 
-1. **Windows 构建的产物必须落在 Windows 本地盘**（`C:\rb-target\...`）。9p 共享（`\\wsl.localhost`）不支持 rustc 增量编译的锁文件语义，会报 `os error -2147024895`，且会把 Windows 产物污染进 WSL 的 `target/`。
+1. **Windows 构建的产物必须落在 Windows 本地盘**（debug 默认 `C:\rb-target\...`；release 自动探测 `%LOCALAPPDATA%\raybend\build`，可用 `--win-dir` 指定）。9p 共享（`\\wsl.localhost`）不支持 rustc 增量编译的锁文件语义，会报 `os error -2147024895`，且会把 Windows 产物污染进 WSL 的 `target/`。
 2. **跨 WSL→Windows 传环境变量用 `WSLENV`**，不要用 cmd 的 `set VAR=x & ...`（`&` 前的空格会进值，且引号经互操作会丢）。
 3. 前端改动后必须重新 `pnpm build`（dist 是编译期嵌入的）；Rust 改动则只需重跑 cargo。
 4. **`--features custom-protocol` 必须加，否则 Windows 版会白屏/页面打不开**。

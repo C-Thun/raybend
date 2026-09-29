@@ -112,6 +112,11 @@ impl RawBackend for RawlerBackend {
 
     fn decode(&self, req: &DecodeRequest) -> RawResult<RawImage8> {
         let trace = Tracer::new();
+        if req.embedded_only
+            && let Some(embedded) = crate::media::embedded::read(&req.path)
+                && let Ok(image) = image::load_from_memory_with_format(&embedded.bytes, image::ImageFormat::Jpeg) {
+                    return finish(image, req.max_edge, PixelSource::EmbeddedPreview, embedded.orientation);
+                }
         let opened = open(req)?;
         let Opened {
             source,
@@ -122,7 +127,7 @@ impl RawBackend for RawlerBackend {
         let need = req.max_edge.unwrap_or(u32::MAX);
 
         if req.allow_preview
-            && let Some(found) = pick_embedded(decoder.as_ref(), source, params, need)
+            && let Some(found) = pick_embedded(decoder.as_ref(), source, params, need, req.embedded_only)
         {
             let (img, source_kind) = found;
             trace.mark("embedded");
@@ -135,7 +140,15 @@ impl RawBackend for RawlerBackend {
              *
              * 拿不到方向不会让图崩，最多是「竖拍看起来是躺着的」；管线那边拿不到方向会按 1 处理。
              */
-            let orientation = if needs_metadata_orientation(&req.path) {
+            let orientation = if req.embedded_only && !needs_metadata_orientation(&req.path) {
+                // 兼容兜底仍只读有界头部，不让缺 EXIF 导致整 RAW 扫描。
+                use std::io::Read;
+                let mut head = Vec::new();
+                std::fs::File::open(&req.path).ok().and_then(|file|
+                    file.take(256 * 1024).read_to_end(&mut head).ok());
+                crate::media::tiff::parse(&head).and_then(|info| info.orientation)
+                    .map(|value| crate::media::meta::normalize_orientation(Some(value)))
+            } else if needs_metadata_orientation(&req.path) {
                 read_orientation(decoder.as_ref(), source, params)
             } else {
                 None
@@ -144,6 +157,10 @@ impl RawBackend for RawlerBackend {
             let out = finish(img, req.max_edge, source_kind, orientation);
             trace.mark("finish");
             return out;
+        }
+
+        if req.embedded_only {
+            return Err(RawError::Empty("RAW 没有可用内嵌图".into()));
         }
 
         // ── 真实解码（8bit sRGB：黑电平 / 白平衡 / 色彩矩阵 / sRGB 伽马）──
@@ -404,17 +421,19 @@ fn pick_embedded(
     source: &RawSource,
     params: &RawDecodeParams,
     need: u32,
+    embedded_only: bool,
 ) -> Option<(DynamicImage, PixelSource)> {
     let mut best: Option<DynamicImage> = None;
 
     // `thumbnail_image` 通常是几百像素的小图；先问它，命中就完全不必解码大预览
-    for candidate in [
-        decoder.thumbnail_image(source, params),
-        decoder.preview_image(source, params),
-    ] {
+    for candidate in (0..2).map(|index| if index == 0 {
+        decoder.thumbnail_image(source, params)
+    } else {
+        decoder.preview_image(source, params)
+    }) {
         let Ok(Some(img)) = candidate else { continue };
         let long = long_edge(&img);
-        if long >= need {
+        if long > 0 && (embedded_only || long >= need) {
             return Some((img, PixelSource::EmbeddedPreview));
         }
         if best.as_ref().is_none_or(|b| long_edge(b) < long) {

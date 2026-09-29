@@ -73,6 +73,11 @@ fn contract_file_is_readable() {
 }
 
 // ── 导入（M1-6）──────────────────────────────────────────────
+#[test]
+fn system_preferences_keys_match_contract() {
+    assert_eq!(keys_of::<crate::system_preferences::SystemPreferencesSnapshot>(), contract_keys("SystemPreferencesSnapshot"));
+}
+
 //
 // 进度快照是**事件载荷**，比命令返回值更容易漂（没有返回值类型提示），
 // 所以它也在契约里：字段名一改，前端拿到的就是 undefined，界面整块空着。
@@ -325,6 +330,7 @@ fn every_contract_entry_has_a_test() {
         "DirEmptyView",
         // 数据库升级通知（M2-W2）
         "MigrationNotice",
+        "MigrationSnapshot",
         // 重建数据（M2-W2 数量体系）
         "RebuildProgress",
         "RebuildReport",
@@ -336,6 +342,8 @@ fn every_contract_entry_has_a_test() {
         // 全屏看图（M3 晚：清单与下标跨 IPC）
         "FullscreenItem",
         "FullscreenPayload",
+        // 首启系统偏好（首启语言/主题，2026-09-29）
+        "SystemPreferencesSnapshot",
     ];
     for key in value.as_object().unwrap().keys() {
         if key.starts_with('_') {
@@ -381,12 +389,15 @@ fn migration_notice_matches_contract() {
     use raybend::store::migration::{DbKind, MigrationNotice, MigrationPhase};
 
     let start = crate::migration::to_event(MigrationNotice {
+        id: 1,
         kind: DbKind::Catalog,
         from: 3,
         to: 4,
         phase: MigrationPhase::Start,
     });
     assert_eq!(keys_of_value(&start), contract_keys("MigrationNotice"));
+    let snapshot = crate::migration::MigrationSnapshot { revision: "1".into(), active: vec![start] };
+    assert_eq!(keys_of_value(&snapshot), contract_keys("MigrationSnapshot"));
 }
 
 /// 「重建数据」的结果也要进契约（字段名漂了，界面上那句摘要就是一堆 `undefined`）。

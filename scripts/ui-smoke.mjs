@@ -197,6 +197,8 @@ try {
   await send("Runtime.enable");
   await send("Log.enable");
   await send("Page.enable");
+  // 本套历史交互断言固定使用中文/暗色；首次系统初始化另由 check:startup 覆盖。
+  await send("Page.addScriptToEvaluateOnNewDocument", { source: 'localStorage.setItem("raybend.locale", "zh-CN"); localStorage.setItem("raybend.theme", "dark");' });
   await send("Page.navigate", { url });
 
   /*
@@ -673,6 +675,9 @@ try {
       );
     press("ArrowRight");
     press("3");
+    press("Escape");
+    const wheel = new WheelEvent("wheel", { deltaY: 120, bubbles: true, cancelable: true });
+    document.body.dispatchEvent(wheel);
     await sleep(60);
     window.removeEventListener("keydown", spy);
 
@@ -683,6 +688,7 @@ try {
       visible: overlay !== null,
       text,
       leaked,
+      wheelBlocked: wheel.defaultPrevented,
       running: stateText.includes("遮罩开着：是"),
       gone: document.querySelector('[data-migration-gate="open"]') === null,
     };
@@ -693,12 +699,10 @@ try {
   } else {
     if (!migrationGate.visible) problems.push("发了升级通知但遮罩没出现");
     if (!migrationGate.running) problems.push("遮罩出现时状态没报「遮罩开着：是」");
-    if (!migrationGate.text.includes("正在升级数据库")) {
+    if (!migrationGate.text.includes("库数据升级中")) {
       problems.push(`遮罩没写标题（实测 ${JSON.stringify(migrationGate.text.slice(0, 60))}）`);
     }
-    if (!migrationGate.text.includes("v3") || !migrationGate.text.includes("v4")) {
-      problems.push("遮罩没写清版本跨度（v3 → v4）");
-    }
+    if (!migrationGate.wheelBlocked) problems.push("升级遮罩没有挡住滚轮");
     if (migrationGate.leaked) {
       problems.push("升级遮罩只挡鼠标没挡键盘（keydown 漏到了外壳）");
     }
@@ -2718,11 +2722,10 @@ try {
    * 它是纯静态页，四件事都能程序化量到：
    *   ① 透明背景（`html`/`body` 都必须是 rgba(0,0,0,0)，否则图的不规则边缘会被矩形底包住）
    *   ② 页面里**没有任何可交互元素**（人类明确要求「没有任何按钮」）
-   *   ③ 随机抽到的中/英与 `<img>` 的 src 一致（抽签与选图脱节就会红）
+   *   ③ 软件保存的语言与 `<img>` 的 src 一致（本套场景固定中文）
    *   ④ 图真的加载出来了，并且铺满整窗
    *
-   * 中/英「随机」本身按人类目视确认（连开几次看是不是两张都出过）——
-   * 断言里连开 3 次只是为了让「抽签 → src」这条链路被真的走过。
+   * 重复加载 3 次验证图片不会随机变化；首次英文与切换后下次生效由 check:startup 覆盖。
    */
   const splashEventsFrom = events.length;
   const splash = [];
@@ -2756,15 +2759,15 @@ try {
   }
 
   for (const page of splash) {
-    if (page.lang !== "cn" && page.lang !== "en") {
+    if (page.lang !== "cn") {
       problems.push(
-        `闪屏没有抽到中/英（data-splash=${JSON.stringify(page.lang)}）—— 随机选图那段没跑？`,
+        `软件保存中文，但闪屏不是中文（data-splash=${JSON.stringify(page.lang)}）`,
       );
       continue;
     }
     if (!page.src.endsWith("splash-" + page.lang + ".webp")) {
       problems.push(
-        `闪屏抽到 ${page.lang}，但 <img> 指向 ${page.src} —— 抽签与选图脱节了`,
+        `闪屏语言 ${page.lang}，但 <img> 指向 ${page.src} —— 语言与选图脱节了`,
       );
     }
     if (!(page.natural > 0)) {

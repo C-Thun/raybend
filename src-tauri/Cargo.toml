@@ -50,6 +50,7 @@ tauri-plugin-updater = "2"
 [target.'cfg(windows)'.dependencies]
 webview2-com = "=0.38.2"
 windows-core = "=0.61.2"
+windows-sys = { workspace = true, features = ["Win32_Globalization"] }
 
 [dev-dependencies]
 rusqlite.workspace = true

@@ -56,6 +56,7 @@ pub async fn export_variant_image<R: Runtime>(
     reference: VariantRef,
     size: String,
     captured: Option<VariantSnapshot>,
+    raw_original: Option<bool>,
 ) -> Result<tauri::ipc::Response, String> {
     let handle = app.clone();
     let bytes = crate::source::blocking(move || {
@@ -103,30 +104,42 @@ pub async fn export_variant_image<R: Runtime>(
                 root,
                 rel_path,
             };
-            let profile_key = format!(
-                "export-{}-{}",
-                reference.variant.replace(':', "-"),
-                snap.profile_hash
-            );
             catalog.ensure_current().map_err(|e| e.to_string())?;
-            let preview =
-                crate::thumbs::render_profile_cached(&handle, &asset, &snap.stack, &profile_key)?;
-            catalog.ensure_current().map_err(|e| e.to_string())?;
-            if class == raybend::thumbnail::SizeClass::Screen {
-                return Ok(preview);
+            if let Some(issue_id) = reference.variant.strip_prefix("issue:").and_then(|id| id.parse::<i64>().ok()) {
+                let bytes = if class == raybend::thumbnail::SizeClass::Screen {
+                    crate::issues::preview_bytes(&handle, &repository_id, reference.asset_id, issue_id)?
+                } else {
+                    crate::issues::thumb_bytes(&handle, &repository_id, reference.asset_id, issue_id, class)?
+                };
+                catalog.ensure_current().map_err(|e| e.to_string())?;
+                return Ok(bytes);
             }
-            // 尺寸适配复用 image 与现有 AVIF 编码；前端不碰像素。
-            let image = image::load_from_memory_with_format(&preview, image::ImageFormat::Avif)
-                .map_err(|e| e.to_string())?;
-            let image = raybend::thumbnail::render::clamp_display_aspect(
-                image,
-                raybend::thumbnail::render::MAX_DISPLAY_ASPECT,
-            );
-            let image = image
-                .thumbnail(class.long_edge(), class.long_edge())
-                .to_rgb8();
-            raybend::thumbnail::render::encode_avif(image.as_raw(), image.width(), image.height())
-                .map_err(|e| e.to_string())
+            if reference.variant == "raw" && class != raybend::thumbnail::SizeClass::Screen {
+                if raw_original != Some(false)
+                    && let Some(bytes) = crate::thumbs::raw_original_thumb(&handle, &asset, class)? { return Ok(bytes); }
+                if raw_original == Some(true) { return Ok(Vec::new()); }
+            }
+            // captured latest 可能早于当前栈：仅 hash 相同才允许复用 latest preview。
+            let current_hash = catalog.read(|conn| {
+                let current = raybend::store::develop::load(conn, reference.asset_id)?;
+                raybend::store::issues::profile_hash(&current)
+            }).map_err(|e| e.to_string())?;
+            let preview_variant = if reference.variant == "latest" && current_hash == snap.profile_hash {
+                "latest".to_string()
+            } else if reference.variant == "sooc" { "sooc".to_string() }
+            else { format!("export-{}-{}", reference.variant, snap.profile_hash) };
+            let bytes = if class == raybend::thumbnail::SizeClass::Screen {
+                crate::thumbs::render_profile_cached(&handle, &asset, &snap.stack, &preview_variant)?
+            } else {
+                let db = handle.state::<crate::thumbs::SourcesThumbs>().get(
+                    &crate::thumbs::sources_cache_dir(&handle)?, raybend::store::time::now_millis())?;
+                let source = crate::develop::source_path_of(&handle, &asset, snap.stack.source_base)
+                    .ok_or("定稿源文件不可用")?;
+                crate::thumbs::render_profile_thumb(&handle, &db, &asset, &source, &snap.stack,
+                    class, Some(&preview_variant)).map_err(|e| e.to_string())?
+            };
+            catalog.ensure_current().map_err(|e| e.to_string())?;
+            Ok(bytes)
         })();
         browse.observe_session(&handle, &catalog);
         result

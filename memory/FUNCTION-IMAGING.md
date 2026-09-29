@@ -13,7 +13,7 @@
 
 | | 范围 | 取数方式 |
 | --- | --- | --- |
-| **库外** | `import` 里的源目录（还没进库） | **实时取**（现状流畅）。后续只做格式支持（RAW 靠 rawler、位图按 §1 列表），**优化是后话** |
+| **库外** | `import` 里的源目录（还没进库） | **实时列目录、按可见区取小图**（2026-09-29 慢机械盘修订）：不先扫全目录元数据；首次小图仍须摆正方向 |
 | **库内** | `browse` / `editor` / `export` —— **全是库内** | 本文件 §2–§7 管的这块 |
 
 ---
@@ -65,8 +65,8 @@
 
 | | 谁在用 | 尺寸 / 格式 | 存在哪 | 生成节点 |
 | --- | --- | --- | --- | --- |
-| **thumb**（缩略图） | `tiles` 网格、`film` 胶片带 | 长边 **384**（tiles）/ **192**（film）· **AVIF 90 / 4:4:4** | **`thumbs.db`**（当前共用 `%LOCALAPPDATA%\com.cthun.raybend\cache\_sources\thumbs.db`） | 导入时生成；进 tiles/film 时补齐缺失；编辑落库后刷新当前张 |
-| **preview**（编辑预览图） | 编辑视口的过渡图、总览、将来的画廊 | 长边 **1920** · AVIF | **库根 `cache/full/<asset>/`**（跟着库走） | **进编辑 / 退出编辑**；存 issue 时也生成一张 |
+| **thumb**（缩略图） | `tiles` 网格、`film` 胶片带 | 长边 **384**（tiles）/ **192**（editor film / 定稿卡片）· **AVIF 90 / 4:4:4** | **`thumbs.db`**（当前共用 `%LOCALAPPDATA%\com.cthun.raybend\cache\_sources\thumbs.db`） | 导入时生成；进 tiles/film 时补齐缺失；编辑落库后刷新当前张 |
+| **preview**（编辑预览图） | 编辑视口的过渡图、总览、将来的画廊 | 长边 **1920** · AVIF | **库根 `cache/full/<asset>/`**（跟着库走） | **导入 SOOC 收尾**；编辑 latest 进/出编辑与提交时；存 issue 时 |
 | **大图**（直读） | `view` / `editor` 真正看的那张 | 原图尺寸 | 不缓存（每次从 sooc/raw 走渲染管线） | 实时 |
 
 > ⚠️ **事实纠正**：缩略图**不在 `catalog.db` 里** —— 在缓存库 `thumbs.db`（`AGENTS.md` §6.4 的「小图」那条）。
@@ -102,6 +102,12 @@
 
 ### 3.2 issue 切换与缩略图（2026-09-26 更新）
 
+**库内 tiles 读取优化（2026-09-29）**：latest 小图先查原有 `thumbs.db`；未命中时优先从
+同源版本、同编辑基准、同管线版本的 latest preview 缩小生成，不能重复套编辑栈/方向。
+只有预览缺失或损坏才回退原有原片渲染。镜头/LUT 解析同样延后到确需渲染时。
+`+RAW` 复用目录同步后的 catalog 配对信息，不为角标读 RAW；browse 不再顺带读取配对 RAW 的 EXIF。
+tiles 的旧 RAW 记录若缺宽高，先用占位比例；明确打开看图/对比时才允许补读。目录实时同步不变。
+
 M3-W6c 的定稿模型以当前 editor profile 为真相：`latest` 是自动保存的工作副本；命名 issue 是不可变完整 profile 快照。切换 SOOC、RAW 或命名 issue 时，把该 profile 写入 latest，同时进入统一撤销/重做历史，刷新当前图的小图、看图和预览。继续调整只修改 latest；配置哈希加完整比较推导当前选中的 issue，不另存选择 ID。匹配优先级为命名定稿 → SOOC/RAW 原始源 → latest；新调整没有其它匹配时选中 latest。定稿资格只排除原始源和已有命名定稿，latest 工作副本不参与去重。
 
 **issue 导出序号（2026-09-28，规格 `specs/export-issue-ordinal.md`）**：每个命名定稿带一个**每照片唯一的序号**（`issues.ordinal`，0–99，最多 100 个定稿、全满拒绝保存）；分配从 `assets.issue_counter` 游标顺找空位、绕圈复用删除留下的洞。导出文件名 = 模版主名 + 强制尾号：定稿 `I00`–`I99`、原片 `ISO`、RAW 标记 issue `IRA`、未匹配 latest `ILA`（latest 优先按哈希匹配已有定稿，匹配上按那个定稿的序号算——export tiles 的显示与导出同一口径）。
@@ -123,14 +129,15 @@ M3-W6c 的定稿模型以当前 editor profile 为真相：`latest` 是自动保
 | --- | --- |
 | **进编辑** | 生成 / 刷新 preview |
 | **退出编辑** | **最后状态更新 preview** |
-| **不编辑** | **sooc/raw 内置就代替 preview**（不额外生成） |
+| **未编辑 SOOC** | 导入收尾生成 SOOC preview；初始 latest 显示复用它，不重复存一份 |
+| **原始 RAW** | import/export 缺小图取内嵌图；进编辑后只为当前照片补真实 384/192，不额外生成 RAW 1920 |
 | **存 issue** | **为 issue 生成一张 preview** 供快捷显示 |
 | 总览（右上角） | **在合适的时间基于 preview 展示** |
 
 ### 4.2 与现有「大图缓存」的关系
 
 现状 `FullCache`：`<库根>/cache/full/<asset_id>/<issue>-<base>-v<pipeline>.avif`
-（`issue` ∈ `latest` / `issue-<id>-<profile_hash>`；SOOC 不进缓存 —— 那就是原文件本身；
+（`issue` ∈ `latest` / `issue-<id>-<profile_hash>` / `sooc`，文件名还含源版本签名；
 `base` ∈ `sooc`/`raw` = **编辑基准**，见 §4.3）。
 本文件的 **preview ≈ 这个 cache**：`latest-raw-v*.avif` 就是「基于 RAW 的编辑结果那张 1920」。
 命名定稿创建时生成独立 1920 AVIF，命名包含 ID 与 profile 哈希；latest 缓存失效不删除命名快照。独立 384/192 缩略图保存在 `thumbs.db`，删除定稿才删除其快照。
@@ -202,10 +209,10 @@ M3-W6c 的定稿模型以当前 editor profile 为真相：`latest` 是自动保
 
 | 动作 | thumb | preview |
 | --- | --- | --- |
-| 导入一张 | 生成（384 + 192） | — |
+| 导入一张 | 收尾任务生成 384 + 192；RAW-only 取内嵌图 | SOOC 生成 1920，作为初始 latest 的显示来源 |
 | 进 tiles/film，发现缺 | **补齐** | — |
-| 调参（松手 / 确定） | **刷新当前这一张**（`ThumbQueue.refresh`） | 编辑内是实时管线；preview 在**退出编辑**时写 |
-| 进编辑 | — | 生成 / 刷新 |
+| 调参（松手 / 确定） | **刷新当前这一张的两档**（`ThumbQueue.refresh`） | 提交后刷新 latest preview，并供小图缩小复用 |
+| 进编辑 | 当前真帧就绪并停留 300ms 后，后台串行补原始 RAW 384/192；SOOC 缺失也补 | latest 生成 / 刷新 |
 | 退出编辑 | — | **按最后状态更新** |
 | 存 issue | **为该 issue 单独生成 384/192 两套** | **为该 issue 单独生成一张 1920** |
 | 切 issue | 选中 profile 写入 latest 后刷新当前图缩略图 | latest 重新渲染，命名快照保持独立 |
@@ -215,8 +222,9 @@ M3-W6c 的定稿模型以当前 editor profile 为真相：`latest` 是自动保
 
 ## 7. export 与画廊（未来）
 
-- **导出 / 画廊 / 快捷显示都用 preview** 来方便地看预览图（人类原话：
-  「后续 export 的画廊等，都需要用到这个 preview 来方便地看预览图的」）。
+- **2026-09-29 修订**：export tiles（latest / issue / SOOC）先用 thumb，缺失才从已有 preview 缩小；不因显示格子而生成 export 专属 1920。未来大画廊可用 preview。
+- 原始 RAW 排在 SOOC 后。优先原始真实 thumb；没有才用内嵌图 + CSS `brightness(0.72) saturate(0.35)`。真实图与模拟图用不同缓存身份，真实图不加滤镜。
+- CSS 仅改变照片层观感，不参与编辑栈、文件缓存和导出；实际导出仍从原始 RAW 按原逻辑生成。
 - 普通导出格式范围见 §1.1（位图 4 种）；TIFF 仅供外部编辑。
 
 ---
@@ -230,7 +238,7 @@ M3-W6c 的定稿模型以当前 editor profile 为真相：`latest` 是自动保
 | 只缩不扩（§3.1-3） | ✅ `resize_for_thumb` 不放大 | — |
 | 小图显示**填满**（§3.1-4） | 网格 `Tile` = `object-cover` ✅；胶片带 = `object-contain` ✅（两者都是 `h-full w-full`，**会放大**）；**`PreviewFrame` 过渡态用过 `max-h-full max-w-full`**（= 小图不放大） | ✅ **已修**：`PreviewFrame` 过渡态改 `h-full w-full object-contain`；口径见 §3.1-4（含 padding、小图必放大、`max-*` 那套禁用） |
 | 编辑视口两档与拖动中只算预览档（§5.1） | ✅ 已做：`tier_for_params`（拖动中一律 Preview，松手按缩放补全尺寸）+ 两层限流 | 仅剩「1:1 只算可见区域」（视口裁切）—— `memory/FUTURE.md` §D1.5 |
-| 进 tiles/film 补缺失缩略图（§3.1-5） | ✅ 按需：可见 tile 请求时渲染并写缓存（虚拟列表只请求可见项）——**满足该条**（「缺就补，自然维护完整」） | 不做全目录预扫（大目录全扫是浪费，且违背「实时优先」）；若要「导入收尾时一次补齐」，算导入流程的事，另议 |
+| 进 tiles/film 补缺失缩略图（§3.1-5） | ✅ 按需：可见 tile 请求时渲染并写缓存（虚拟列表只请求可见项）——**满足该条**（「缺就补，自然维护完整」） | 来源目录不做全目录预扫；已导入文件的持久化任务在导入收尾串行生成 SOOC preview + 两档 thumb |
 | 编辑落库刷新当前张（§3.1-6） | ✅ 本轮刚做（`ThumbQueue.refresh`，只动当前张） | — |
 | 缩略图默认 = sooc/raw（§3.1-7） | ✅ 没编辑过就走 SOOC/RAW 解码那条路 | — |
 | issue 切换语义（§3.2） | ✅ 命名 issue、SOOC/RAW/latest、浏览与编辑切换、哈希选中和撤销/重做已接入 | Windows 真机切换流畅度待人类确认 |
@@ -239,19 +247,20 @@ M3-W6c 的定稿模型以当前 editor profile 为真相：`latest` 是自动保
 | 浏览器侧读 AVIF（view） | ✅ `view_image` 给 AVIF 字节，`<img>` 自己解 | — |
 | HEIC / AVIF **导入** | ✅ avif **已通**（解码器接上了；导入路径本来就是通用位图那条）—— 待补真文件冒烟；❌ HEIC 仍是占位图 | HEIC 要 libheif 系（§1.4） |
 | 编辑基准进缓存名（§4.2/§4.3） | ✅ 已做：`latest-<base>-v<pipeline>.avif`，两个基准各存一份 | — |
-| export 用 preview（§7） | 未开工（M4） | — |
+| export 小图（§7） | ✅ 改用共享 thumb → 已有 preview → 按请求尺寸重建；RAW 先真 thumb，后内嵌模拟 | 真机慢盘、滚动与模拟观感待人类确认 |
 
 ---
 
-## 9. 未决点（实现前需要人类拍板）
+## 9. 2026-09-29 读取审计补记
 
-1. **AVIF 解码器已定**（人类 2026-09-24 拍板）：`image` 的 `avif-native`（底层 **dav1d**），
-   2026-09-24 接上并落地（构建代价与脚本见 §1.4）。
-   **仍待人类拍板的**：RAW + JPG 成对时 preview 从哪个文件渲染（下一条）。
-2. **RAW + JPG 成对时，preview 从哪个文件渲染**：现在两条路（`view_image` 与
-   `develop_preview_refresh`）都按**前端给的显示路径**（= JPG）渲染，而编辑器编的是
-   `_RAW/` 里那个 RAW —— 同一份编辑栈落在两种像素上，观感会略有差异。
-   要不要统一到 RAW（编辑目标）上，待人类拍板（会影响已有的 latest 缓存口径）。
+- 两档 thumb 为 384/192，preview 为 1920。browse/import 的 film 与网格仍共享 384 队列；editor film 已独立使用 192。编辑主视口仍解码实际源文件并走原生 GPU 管线。
+- JPG 可能有 EXIF 内嵌 JPEG，缺失则需解码主 JPG。RAW 小图在隔离 worker 内先做有界提取，再兼容 rawler 内嵌图接口；小图请求禁止回退传感器解码。部分 RAW 容器的兼容路径仍可能读更多头部/预览数据。
+- 方向没有取消：小图生成时读取并在 Rust 摆正；WebView 解码所得尺寸只用于 tile 排版。view/compare 再取原片自然尺寸。
+- import 显式按拍摄时间分组仍须读取时间；每批 8 张，关闭/换目录后停掉后续批次。离屏待执行小图请求可取消；切目录仍在飞的请求继续占用并发配额。
+- browse 选中照片仍会为 flowbar/信息栏取这**一张** EXIF；不是仅 view/compare 才读元数据。整屏小图不因信息栏而解码原片。
+- latest preview 的源文件实际由 profile 的 `source_base` 解析；旧的“成对时必从 JPG 渲染”记述已经失效。命名 issue 使用自己的不可变 profile。
+- 导入原有持久化任务现已接消费：批次拷贝/登记完成后读取库内文件生成，避免回读慢来源盘。重启将 running 任务退回 pending；后续同库导入消费积压任务，缺图的 tiles/编辑入口同时保留按需修复。
+- 实施证据：`implementations/2026-09-29_tiles-disk-read.md`。
 
 
 ## LUT 封面缓存（2026-09-26）

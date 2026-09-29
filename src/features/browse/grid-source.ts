@@ -258,7 +258,11 @@ export function browseSource(deps: BrowseSourceDeps): TilesSource {
       return dataIndex === undefined ? null : store.naturalOf(Number(id));
     },
     ensureNatural: async (entries) => {
-      await store.ensureNatural(entries.map((entry) => ({ id: Number(entry.id), path: entry.path })));
+      // Tiles need the catalog aspect, not a RAW metadata read. Legacy RAW rows
+      // without dimensions use the placeholder until explicitly opened in view.
+      await store.ensureNatural(entries
+        .filter((entry) => store.itemById(Number(entry.id))?.isRaw === false)
+        .map((entry) => ({ id: Number(entry.id), path: entry.path })));
     },
     slices: () => order().slices,
     /*

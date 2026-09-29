@@ -149,7 +149,7 @@ fill=var(--color-brand) + stroke=var(--color-white) + paint-order="stroke"
   `RAYBEND_TAG` 查指定已公开版本，或 CI 查询 `releases/latest`。尚无版本 404 为 pending；网络/认证/指定 tag
   错误停止部署，保留已部署网站，不伪造版本。
   本地 `pnpm build` **不联网**。
-- 纯逻辑在 `src/data/release.ts`（`resolveRelease()`：选本版 Windows x64 NSIS/MSI → 退化为发布页，忽略 draft/prerelease，
+- 纯逻辑在 `src/data/release.ts`（`resolveRelease()`：选本版 Windows x64 MSI 优先、NSIS 回退 → 退化为发布页，忽略 draft/prerelease，
   校验 tag 形状），单测在 `release.test.ts` 与 `scripts/release-info.test.ts`。**页面只消费它的结果**，不要在组件里写解析逻辑。
 - 预发布版（prerelease）**不上官网**。
 

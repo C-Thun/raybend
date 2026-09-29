@@ -25,7 +25,7 @@ use raybend::display::{self, DEFAULT_BINS, FullCache, ImagePurpose, ImageRequest
 use raybend::store::develop::IssueChoice;
 use raybend::store::time;
 use raybend::thumbnail::render::PIPELINE_VERSION;
-use raybend::thumbnail::worker::render_now_with_edit_and_lut;
+use raybend::thumbnail::worker::render_cached_with;
 use raybend::thumbnail::{SizeClass, ThumbsDb, render_now};
 use tauri::{AppHandle, Manager, Runtime};
 
@@ -91,30 +91,9 @@ pub async fn thumb_get<R: Runtime>(
     let bytes = crate::source::blocking(move || {
         let _permit=handle.state::<crate::browse::BrowseState>().path_task(&handle,Path::new(&path))?;
         let edit = edited_source(&handle, &path)?;
-        let lens = edit.as_ref().and_then(|(asset, stack, _)| {
-            crate::lens::render_correction(
-                &handle,
-                &asset.repository_id,
-                asset.asset_id,
-                stack.lens_profile.as_deref(),
-                stack.lens_enabled,
-            )
-        });
         let bytes = match &edit {
-            Some((_, stack, source)) => render_now_with_edit_and_lut(
-                &db,
-                source,
-                size,
-                time::now_millis(),
-                Some(stack),
-                lens.as_ref(),
-                stack
-                    .lut_id
-                    .as_deref()
-                    .filter(|_| stack.lut_enabled == Some(true))
-                    .and_then(|id| crate::lut::resolve(&handle, id).ok())
-                    .as_deref(),
-            ),
+            Some((asset, stack, source)) => render_profile_thumb(
+                &handle, &db, asset, source, stack, size, Some("latest")),
             None => render_now(&db, Path::new(&path), size, time::now_millis()),
         }
         .map_err(|e| e.to_string())?;
@@ -123,6 +102,30 @@ pub async fn thumb_get<R: Runtime>(
     .await?;
 
     Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// 所有 profile 小图共用：thumb → 已有 preview 缩小 → 按请求尺寸重建。
+/// 不因读取小图而创建一份新的 1920 缓存。
+pub(crate) fn render_profile_thumb<R: Runtime>(
+    app: &AppHandle<R>, db: &ThumbsDb, asset: &ResolvedAsset, source: &Path,
+    stack: &raybend::store::develop::DevelopStack, size: SizeClass,
+    preview_variant: Option<&str>,
+) -> raybend::Result<Vec<u8>> {
+    render_cached_with(db, source, size, time::now_millis(), Some(stack), || {
+        let signature = raybend::media::source::source_signature(source)?;
+        let preview = preview_variant.and_then(|variant| FullCache::open(&asset.root).ok()
+            .and_then(|cache| cache.read(asset.asset_id, &FullCache::source_name(variant, &signature),
+                stack.source_base, PIPELINE_VERSION)));
+        raybend::thumbnail::render::render_preview_or_else(preview.as_deref(), size, || {
+            let lens = crate::lens::render_correction(app, &asset.repository_id, asset.asset_id,
+                stack.lens_profile.as_deref(), stack.lens_enabled);
+            let lut = stack.lut_id.as_deref().filter(|_| stack.lut_enabled == Some(true))
+                .map(|id| crate::lut::resolve(app, id)).transpose()
+                .map_err(raybend::Error::Unsupported)?;
+            raybend::thumbnail::render::render_file_with_edit_and_lut(
+                source, size, Some(stack), lens.as_ref(), lut.as_deref())
+        })
+    })
 }
 
 /// 这个路径的资产编辑过吗？编辑过就把它的编辑栈取出来（给渲染用）。
@@ -343,4 +346,105 @@ pub async fn thumb_sources_stats<R: Runtime>(
     let db = state.get(&cache_dir, time::now_millis())?;
     db.read(raybend::thumbnail::cache::stats)
         .map_err(|e| e.to_string())
+}
+
+/// 原始 RAW 真显影与内嵌模拟小图使用不同缓存键，不能相互冒充。
+fn raw_thumb_key(asset: &ResolvedAsset) -> Vec<u8> {
+    format!("raw-original:{}:{}", asset.repository_id, asset.asset_id).into_bytes()
+}
+fn raw_thumb_sig(signature: &str) -> String {
+    format!("raw-original-v{PIPELINE_VERSION}-src{signature}")
+}
+pub(crate) fn raw_original_thumb<R: Runtime>(
+    app: &AppHandle<R>, asset: &ResolvedAsset, size: SizeClass,
+) -> Result<Option<Vec<u8>>, String> {
+    let Some(source) = develop::source_path_of(app, asset, raybend::store::develop::EditBase::Raw) else { return Ok(None) };
+    let signature = raybend::media::source::source_signature(&source).map_err(|e| e.to_string())?;
+    let db = app.state::<SourcesThumbs>().get(&sources_cache_dir(app)?, time::now_millis())?;
+    let key = raw_thumb_key(asset); let sig = raw_thumb_sig(&signature);
+    let read_key = key.clone(); let read_sig = sig.clone();
+    if let Some(bytes) = db.read(move |conn| raybend::thumbnail::cache::get(conn, &read_key, size, &read_sig)).map_err(|e| e.to_string())? {
+        return Ok(Some(bytes));
+    }
+    let Some(preview) = FullCache::open(&asset.root).ok().and_then(|cache|
+        cache.read(asset.asset_id, &FullCache::source_name("raw-original", &signature),
+            raybend::store::develop::EditBase::Raw, PIPELINE_VERSION)) else { return Ok(None) };
+    let Some(thumb) = raybend::thumbnail::render::render_bytes(&preview, size, None).map_err(|e| e.to_string())? else { return Ok(None) };
+    let bytes = thumb.data.clone();
+    db.write(move |conn| raybend::thumbnail::cache::put(conn, &key, size, &sig, &thumb.data,
+        thumb.width, thumb.height, time::now_millis())).map_err(|e| e.to_string())?;
+    Ok(Some(bytes))
+}
+
+/// SOOC 生成 1920 + 384/192；RAW 仅补 384/192。只在导入收尾/当前编辑照片后台调用。
+/// SOOC 不重复存 initial-latest：未编辑 latest 的显示复用同一份源快照。
+pub(crate) fn prepare_source_images<R: Runtime>(
+    app: &AppHandle<R>, asset: &ResolvedAsset, base: raybend::store::develop::EditBase,
+) -> Result<(), String> {
+    use raybend::store::develop::EditBase;
+    let browse = app.state::<crate::browse::BrowseState>();
+    let _permit = browse.sessions.begin_task(&asset.repository_id).map_err(|e| e.to_string())?;
+    let catalog = browse.lease(app, &asset.repository_id)?;
+    if catalog.root() != asset.root { return Err(raybend::Error::SessionExpired.to_string()); }
+    let reference = raybend::export::VariantRef { asset_id: asset.asset_id, variant: base.as_str().into() };
+    let snapshot = catalog.read(|conn| raybend::export::snapshot(conn, &asset.root, &reference)).map_err(|e| e.to_string())?;
+    let source = develop::source_path_of(app, asset, base).ok_or("原始源不存在")?;
+    let signature = raybend::media::source::source_signature(&source).map_err(|e| e.to_string())?;
+    let db = app.state::<SourcesThumbs>().get(&sources_cache_dir(app)?, time::now_millis())?;
+    if base == EditBase::Raw {
+        let mut missing = Vec::new();
+        for size in [SizeClass::Grid, SizeClass::Strip] {
+            if raw_original_thumb(app, asset, size)?.is_none() { missing.push(size); }
+        }
+        if missing.is_empty() { return Ok(()); }
+        // 当前照片后台只需要两档真小图，不另编码一份没人用的 1920 RAW 预览。
+        let rgb = raybend::export::render_captured(&source, &snapshot, None, None,
+            SizeClass::Grid.long_edge()).map_err(|e| e.to_string())?;
+        catalog.ensure_current().map_err(|e| e.to_string())?;
+        if raybend::media::source::source_signature(&source).map_err(|e| e.to_string())? != signature {
+            return Err("源文件在生成缩略图时发生变化".into());
+        }
+        for size in missing {
+            let thumb = raybend::thumbnail::render::encode(image::DynamicImage::ImageRgb16(rgb.clone()),
+                size, None, false, None, None).map_err(|e| e.to_string())?;
+            let key = raw_thumb_key(asset); let sig = raw_thumb_sig(&signature);
+            db.write(move |conn| raybend::thumbnail::cache::put(conn, &key, size, &sig,
+                &thumb.data, thumb.width, thumb.height, time::now_millis())).map_err(|e| e.to_string())?;
+        }
+    } else {
+        let full = FullCache::open(&asset.root).map_err(|e| e.to_string())?;
+        let name = FullCache::source_name("sooc", &signature);
+        let preview = match full.read(asset.asset_id, &name, base, PIPELINE_VERSION) {
+            Some(bytes) if image::load_from_memory(&bytes).is_ok() => bytes,
+            _ => {
+                let image = raybend::thumbnail::render::render_file(&source, SizeClass::Screen)
+                    .map_err(|e| e.to_string())?.ok_or("无法生成 SOOC 预览")?;
+                catalog.ensure_current().map_err(|e| e.to_string())?;
+                if raybend::media::source::source_signature(&source).map_err(|e| e.to_string())? != signature {
+                    return Err("源文件在生成预览时发生变化".into());
+                }
+                full.write(asset.asset_id, &name, base, PIPELINE_VERSION, &image.data).map_err(|e| e.to_string())?;
+                image.data
+            }
+        };
+        for size in [SizeClass::Grid, SizeClass::Strip] {
+            render_cached_with(&db, &source, size, time::now_millis(), None, ||
+                raybend::thumbnail::render::render_bytes(&preview, size, None)).map_err(|e| e.to_string())?;
+        }
+    }
+    catalog.ensure_current().map_err(|e| e.to_string())
+}
+
+/// 仅当前选中的编辑照片：首帧就绪后后台补原始源快照，不阻塞首帧。
+#[tauri::command]
+pub async fn issue_sources_prepare<R: Runtime>(app: AppHandle<R>, path: String) -> Result<(), String> {
+    crate::source::blocking(move || {
+        let Some(asset) = develop::resolve_asset(&app, Path::new(&path)) else { return Ok(()) };
+        for base in [raybend::store::develop::EditBase::Sooc, raybend::store::develop::EditBase::Raw] {
+            if develop::source_path_of(&app, &asset, base).is_some() {
+                prepare_source_images(&app, &asset, base)?;
+            }
+        }
+        Ok(())
+    }).await
 }

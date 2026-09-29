@@ -111,5 +111,7 @@ export interface TilesSource {
   setTileStep(step: number): void;
   commitTileStep(): void;
   thumb(path: string): ThumbEntry;
+  cancelThumb?(path: string): void;
+  tileNatural?: boolean;
   requestThumb(path: string): void;
 }

@@ -144,7 +144,7 @@ pnpm smoke:ui [url]
 # —— Windows 侧（真实产品环境；日常用封装脚本）——
 pnpm debug:win             # build + 跨编译 + check:win + 运行（含 dav1d 环境）
 pnpm check:win             # 产物时间与内容核对（见下）
-pnpm release [patch|minor|major] --windows ...   # 发版准备；publish 由人类执行
+pnpm release [patch|minor|major] --win-msi ...   # 或 --win-nsis（可组合）；打包/publish 由人类执行
 # ❗ release 只在**任务清单里真有发版任务**时才跑（崔总 2026-09-28 定）：
 #    给崔总出测试产物用 pnpm debug:win（快）；release 一次 15 分钟起，还会顶版本号。
 ```
@@ -153,7 +153,7 @@ pnpm release [patch|minor|major] --windows ...   # 发版准备；publish 由人
 
 - **先 `pnpm build` 再构建 Windows，构建完必须 `pnpm check:win`**——`dist/` 是编译期嵌进 exe 的；
   「主程序新、worker 旧」也要防（`-p raybend-desktop -p raybend` 一起建，协议版本握手会报错）。
-- Windows 构建产物必须落在 Windows 本地盘（`C:\rb-target\...`）；跨 WSL 传环境变量用 `WSLENV`；
+- Windows 构建产物必须落在 Windows 本地盘（debug 默认 `C:\rb-target\...`；release 自动探测 `%LOCALAPPDATA%\raybend\build`，可用 `--win-dir` 覆盖）；跨 WSL 传环境变量用 `WSLENV`；
   `--features custom-protocol` 必须加（否则白屏）；启动 exe 直接用 `/mnt/c/...` 路径，不经 `cmd start`。
 - dav1d 静态库环境变量已封进 `scripts/lib/dav1d-win.mjs`，别在别处再写一份。
 - `pnpm clean:win` / `clean:wsl` 清理只进不出的 target 产物（cargo 从不回收旧单元）。

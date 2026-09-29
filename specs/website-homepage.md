@@ -138,7 +138,7 @@ raybend 需要一个**官方落地页**当门面：一眼知道这是什么软�
   3. 都没有 → `null`（页面走「即将发布」占位态）。
 - **纯逻辑单独成模块** `src/data/release.ts`：把 `{ tag, assets }`（或 `null`）算成
   `{ state: 'available' | 'pending', version, downloadUrl, releaseUrl, sizeLabel?, fileName? }`。
-  选择顺序：`*.exe`（NSIS 安装包）→ `*.msi` → `*.zip` → 退化为 release 页；`prerelease` 一律忽略。
+  选择顺序（2026-09-29）：本版 Windows x64 `*.msi` → `*-setup.exe`（NSIS）→ 退化为 release 页；不选裸 exe/zip/签名，`draft` / `prerelease` 一律忽略。
 - **单测** `src/data/release.test.ts` 覆盖：正常 tag + exe 资产 / 只有 zip / 无资产 → release 页 /
   `null` → pending / 非法 tag / prerelease 被忽略。
 - 页面两处用它：hero 主按钮 + 下载区大卡（版本号、文件名、大小、平台、系统要求）。

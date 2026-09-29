@@ -21,7 +21,6 @@ import {
 import {
   createPhotoGridStore,
   DEFAULT_GAP_MINUTES,
-  DEFAULT_META_TIMEOUT_MS,
   type PhotoGridApi,
 } from "./store.ts";
 import { DEFAULT_TILE_STEP_INDEX, TILE_SIZE_STEPS } from "../../lib/tile-flow.ts";
@@ -527,7 +526,8 @@ test("元信息：拿到的宽高决定展示比例（竖图就是竖的）", as
   state.items = [item("a.jpg"), item("b.jpg"), item("c.jpg")];
   const store = createPhotoGridStore({ api });
   store.setSourceDir("/photos");
-  await flush(); // 扫描 + 头部缓存都在这次 flush 里落地（载入门已等它）
+  await flush();
+  await store.ensureNatural(store.items().map(item => item.path));
 
   const items = store.items();
   const byName = new Map(items.map((item) => [item.fileName, item.path]));
@@ -551,115 +551,31 @@ test("元信息：读不到就用默认占位比例，不报错", async () => {
   assert.ok(Math.abs(store.aspectOf(store.items()[0]!.path) - 1.5) < 1e-9);
 });
 
-/* ══════════════════════════════════════════════════════════════
- * 载入门（2026-09-17）：**扫描 + 头部缓存都铺完**才 ready
- *
- * 口径来自人类：打开库外目录时，照片应当**一次性以正确比例出现**，
- * 而不是先按 3:2 占位再各自「长大」。代价是首开大目录要多等几秒 ——
- * 所以这里的四条出路（等到了 / 失败 / 超时 / 迟到）每一条都得钉住，
- * 否则网格会停在载入态（那是最难查的一类问题）。
- * ══════════════════════════════════════════════════════════════ */
-
-test("载入门：头部缓存没回来之前一直是 loading（但清单已就位）", async () => {
+test("慢盘目录立即 ready，不读任何原片 metadata；view 才补方向与自然尺寸", async () => {
   const { api, state, releaseMeta } = fakeApi({ holdMeta: true });
-  state.items = [item("a.jpg")];
+  state.items = Array.from({ length: 500 }, (_, i) => item(`照片${i}.jpg`));
+  state.dirMeta = [{ relative: "照片0.jpg", width: 3000, height: 4000, orientation: 6 }];
   const store = createPhotoGridStore({ api });
-
-  store.setSourceDir("/photos");
-  await flush();
-  assert.equal(store.status(), "loading", "扫描回来不等于准备好了");
-  assert.equal(
-    store.items().length,
-    1,
-    "清单先摆上：控制条的计数不必等头部缓存",
-  );
-
-  releaseMeta();
-  await flush();
+  store.setSourceDir("/photos"); await flush();
   assert.equal(store.status(), "ready");
+  assert.equal(state.calls.some(c => c.startsWith("dirMeta:")), false);
+  const first = store.items()[0]!.path;
+  assert.equal(store.naturalOf(first), null);
+  const read = store.ensureNatural([first]);
+  assert.equal(state.calls.filter(c => c.startsWith("dirMeta:")).slice(-1)[0], "dirMeta:1");
+  releaseMeta(); await read;
+  assert.deepEqual(store.naturalOf(first), { width: 3000, height: 4000 });
+  assert.equal(store.aspectOf(first), 0.75);
 });
 
-test("载入门：ready 那一刻比例已经就位（不会先占位再长大）", async () => {
+test("view 迟到的原片尺寸不能污染新目录", async () => {
   const { api, state, releaseMeta } = fakeApi({ holdMeta: true });
-  state.items = [item("a.jpg")];
-  state.dirMeta = [
-    { relative: "a.jpg", width: 3000, height: 4000, orientation: 6 },
-  ];
-  const store = createPhotoGridStore({ api });
-  store.setSourceDir("/photos");
-  await flush();
-
-  releaseMeta();
-  await flush();
-  assert.equal(store.status(), "ready");
-  assert.ok(
-    Math.abs(store.aspectOf(store.items()[0]!.path) - 0.75) < 1e-9,
-    "ready 的那一帧就应该是真比例（竖图 3:4）",
-  );
-});
-
-test("载入门：头部缓存报错也照铺照片（比例退回占位，不把网格变成错误态）", async () => {
-  const { api, state } = fakeApi({ failMeta: true });
-  state.items = [item("a.jpg")];
-  const store = createPhotoGridStore({ api });
-  store.setSourceDir("/photos");
-  await flush();
-
-  assert.equal(store.status(), "ready");
-  assert.equal(store.error(), null);
-  assert.ok(Math.abs(store.aspectOf(store.items()[0]!.path) - 1.5) < 1e-9);
-});
-
-test("载入门：头部缓存永不返回 → 时限一到仍然铺照片（不卡在水印上）", async () => {
-  // 默认时限得给得宽 —— 它防的是「后端卡死」，不是「慢盘」
-  assert.ok(
-    DEFAULT_META_TIMEOUT_MS >= 10_000,
-    `默认时限不能是秒级的：现在 ${DEFAULT_META_TIMEOUT_MS}ms`,
-  );
-
-  const { api, state } = fakeApi({ holdMeta: true });
-  state.items = [item("a.jpg")];
-  const store = createPhotoGridStore({ api, metaTimeoutMs: 20 });
-  store.setSourceDir("/photos");
-  await flush();
-  assert.equal(store.status(), "loading");
-
-  await new Promise((resolve) => setTimeout(resolve, 60));
-  assert.equal(store.status(), "ready", "时限是「把卡死变成能用的界面」");
-  assert.ok(Math.abs(store.aspectOf(store.items()[0]!.path) - 1.5) < 1e-9);
-});
-
-test("载入门：换目录后，旧目录迟到的头部缓存既不污染新目录也不把它顶成 ready", async () => {
-  const { api, state, releaseMeta } = fakeApi({ holdMeta: true });
-  state.items = [item("old.jpg")];
-  state.dirMeta = [
-    { relative: "old.jpg", width: 3000, height: 4000, orientation: 6 },
-  ];
-  const store = createPhotoGridStore({ api });
-  store.setSourceDir("/first");
-  await flush(); // 清单回来了，卡在头部缓存
-  assert.equal(store.status(), "loading");
-
-  // 换目录：新目录不卡（holdMeta 关掉），头部缓存正常回来
-  state.items = [item("new.jpg")];
-  state.dirMeta = [
-    { relative: "new.jpg", width: 4000, height: 3000, orientation: 1 },
-  ];
-  state.holdMeta = false;
-  store.setSourceDir("/second");
-  await flush();
-  assert.equal(store.status(), "ready");
-  const fresh = store.items()[0]!;
-  assert.ok(Math.abs(store.aspectOf(fresh.path) - 4 / 3) < 1e-9);
-
-  // 旧目录那次请求现在才回来：它的结果必须被丢掉
-  releaseMeta();
-  await flush();
-  assert.equal(store.dir(), "/second");
-  assert.ok(
-    Math.abs(store.aspectOf(fresh.path) - 4 / 3) < 1e-9,
-    "迟到的旧元信息不能把新目录的比例冲回占位",
-  );
+  state.items = [item("old.jpg")]; state.dirMeta = [{ relative: "old.jpg", width: 3000, height: 4000, orientation: 6 }];
+  const store = createPhotoGridStore({ api }); store.setSourceDir("/old"); await flush();
+  const oldPath = store.items()[0]!.path; const read = store.ensureNatural([oldPath]);
+  state.items = [item("new.jpg")]; store.setSourceDir("/new"); await flush();
+  releaseMeta(); await read;
+  assert.equal(store.naturalOf(oldPath), null); assert.equal(store.status(), "ready");
 });
 
 test("按时间：同名 JPG 与 RW2 补读 EXIF 后落进同一片，并且片内挨着", async () => {
@@ -707,4 +623,25 @@ test("按时间：同名 JPG 与 RW2 补读 EXIF 后落进同一片，并且片�
     ["P1000019.JPG", "P1000019.RW2", "P1000020.JPG", "P1000020.RW2"],
     "片内按文件名自然序，同名的 JPG 与 RAW 挨着",
   );
+});
+
+
+test("按时间补读只提交小批次，关闭后不再读后续照片", async () => {
+  resetDisplayPrefsForTests();
+  const f = fakeApi({ items: Array.from({ length: 40 }, (_, i) => item(`${i}.JPG`)) });
+  const batches: number[] = [];
+  let release: (() => void) | undefined;
+  f.api.readSourceTimes = async (paths) => {
+    batches.push(paths.length);
+    await new Promise<void>((resolve) => { release = resolve; });
+    return [];
+  };
+  const store = createPhotoGridStore({ api: f.api });
+  store.setSourceDir("/src"); await flush();
+  store.setByTime(true); await flush();
+  assert.deepEqual(batches, [8]);
+  store.setByTime(false); release?.(); await flush();
+  assert.deepEqual(batches, [8]);
+  assert.equal(store.loadingTimes(), false);
+  resetDisplayPrefsForTests();
 });

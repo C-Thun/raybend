@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en-US">
   <head>
     <meta charset="utf-8" />
     <title>RayBend</title>
@@ -14,11 +14,12 @@
            `decorations: false`（见 `tauri.conf.json`）。图本身是**不规则边缘**的透明图，
            所以整窗必须真的能透出桌面 —— 这也顺手验证了「Windows 上 webview 能不能透明」
            （`AGENTS.md` §6.1 的渲染风险项）。
-        3. **随机中/英在首次绘制前决定**：脚本紧跟在 `<img>` 之后（元素已在、页面尚未绘制），
-           直接设 `src`。这样既不闪白、也不会把两张图都下载一遍，
-           还不需要 IPC 或任何窗口权限（`capabilities/` 不用动 —— 这页不碰 Tauri API）。
+        3. **启动前的语言在首次绘制前决定**：首启/未知用英文，之后按软件保存的语言选图。
+           Tauri 文档初始化脚本已固定本轮快照，主界面随后检测系统语言不影响这次 splash。
+           静态浏览器预览直接读同一保存键。脚本紧跟 `<img>` 设置 src，不等待 IPC，
+           不会先加载英文图再切中文图，不增加窗口权限或请求。
 
-      退出由 Rust 负责（`lib.rs` 的 `reveal_main`：前端就绪或 3 秒兜底）。
+      退出由 Rust 负责（最短 3 秒，数据库就绪后前端 4 秒兜底）。
       这页**没有任何按钮**，也不该有 —— 用户不需要在这里做任何决定。
     -->
     <style>
@@ -51,9 +52,15 @@
     <img id="splash" alt="" />
     <script>
       (function () {
-        // 每次启动随机 —— 中/英两张同构图
-        var lang = Math.random() < 0.5 ? "cn" : "en";
-        // 记在 <html> 上：排查 / 冒烟一眼能看出这次抽到哪张
+        var locale = window.__RAYBEND_SPLASH_LOCALE__;
+        if (locale !== "zh-CN" && locale !== "en-US") {
+          // 静态预览没有 Tauri 的文档初始化脚本；仍只读软件语言，不探测系统。
+          locale = "en-US";
+          try { if (localStorage.getItem("raybend.locale") === "zh-CN") locale = "zh-CN"; } catch (_) {}
+        }
+        var lang = locale === "zh-CN" ? "cn" : "en";
+        document.documentElement.lang = locale;
+        // 记在 <html> 上：排查 / 冒烟一眼能看出当前语言的图片
         document.documentElement.dataset.splash = lang;
         var img = document.getElementById("splash");
         img.src = "splash/splash-" + lang + ".webp";

@@ -26,10 +26,11 @@ const ENTRIES = [
   { id: 2, relPath: "photos/2026-08-15/MY0002.JPG", takenAt: T0 + 60_000 },
 ] as const;
 
-function sourceWith(byTime: () => boolean) {
+function sourceWith(byTime: () => boolean, overrides: Partial<BrowseStore> = {}) {
   const store = {
     timeline: () => ENTRIES,
     itemById: (id: number) => ({ id, takenAtOffsetMin: CST }),
+    ...overrides,
   } as unknown as BrowseStore;
   return browseSource({
     store,
@@ -62,4 +63,18 @@ test("按时间：开关一变，slices 立刻重算（时间线没换也要变�
   // 再开一次：仍然要算得出来（缓存不能在两个状态之间来回错位）
   byTime = true;
   assert.equal(source.slices()?.length, 1);
+});
+
+test("tiles do not open RAW to recover legacy dimensions or determine +RAW", async () => {
+  const asked: number[] = [];
+  const source = sourceWith(() => false, {
+    itemById: id => id === 3 ? null : ({ id, isRaw: id === 1, hasRaw: id === 2 } as ReturnType<BrowseStore["itemById"]>),
+    ensureNatural: async entries => { asked.push(...entries.map(entry => entry.id)); },
+  });
+  await source.ensureNatural([
+    { id: "1", path: "库/_RAW/中文.RW2" },
+    { id: "2", path: "库/中文.JPG" },
+    { id: "3", path: "not-loaded.RW2" },
+  ]);
+  assert.deepEqual(asked, [2]);
 });

@@ -30,17 +30,22 @@ test("失败恢复与外部改动保护",()=>{
   assert.throws(()=>applyVersionEdits(edits,io),/已被修改/);
 });
 test("Windows 配置签名、通道和前端只构建一次",()=>{
-  const base={targetVersion:"1.2.3",channel:"release"},env={frontendDist:"../dist",certThumbprint:"A".repeat(40)};
-  const stable=windowsReleaseConfig(base,env);assert.deepEqual(stable.bundle.targets,["nsis"]);assert.equal(stable.build.beforeBuildCommand,null);
+  const base={targetVersion:"1.2.3",channel:"release",windowsTargets:["msi"]},env={frontendDist:"../dist",certThumbprint:"A".repeat(40)};
+  const stable=windowsReleaseConfig(base,env);assert.deepEqual(stable.bundle.targets,["msi"]);assert.equal(stable.build.beforeBuildCommand,null);
+  assert.deepEqual(windowsReleaseConfig({...base,windowsTargets:["nsis","msi"]},env).bundle.targets,["nsis","msi"]);
   assert.equal(stable.bundle.windows.signCommand.args.at(-1),"%1");assert.equal(stable.bundle.windows.allowDowngrades,false);
   assert.equal(windowsReleaseConfig(base,{...env,unsigned:true,certThumbprint:""}).bundle.windows.signCommand,null);
   assert.throws(()=>windowsReleaseConfig(base,{...env,withUpdater:true}),/私钥/);
   assert.throws(()=>windowsReleaseConfig(base,{...env,timestamp:"http://example.com"}),/HTTPS/);
   assert.throws(()=>windowsReleaseConfig(base,{...env,timestamp:"not a url"}),/HTTPS/);
-  const beta=windowsReleaseConfig({...base,targetVersion:"1.2.3-beta.1",channel:"beta"},{frontendDist:"../dist",unsigned:true});
+  const beta=windowsReleaseConfig({...base,targetVersion:"1.2.3-beta.1",channel:"beta",windowsTargets:["nsis"]},{frontendDist:"../dist",unsigned:true});
   assert.deepEqual(beta.bundle.targets,["nsis"]);assert.equal(beta.bundle.windows.signCommand,null);
   assert.throws(()=>windowsReleaseConfig({...base,targetVersion:"256.0.0"},env),/MSI/);
-  const cmd=windowsReleaseCommands('\\\\wsl.localhost\\Ubuntu\\home\\中文 相册','C:\\staging area\\config.json');
-  assert.ok(cmd.includes('pushd "\\\\wsl.localhost'));assert.ok(cmd.includes("--locked"));
+  const cmd=windowsReleaseCommands('C:\\中文 相册','C:\\staging area\\config.json');
+  assert.ok(cmd.includes('cd /d "C:\\中文 相册"'));assert.ok(cmd.includes("--locked"));
+  assert.ok(cmd.includes("cargo build -p raybend"));assert.ok(cmd.includes("--features custom-protocol"));
+  assert.ok(cmd.includes("cargo tauri bundle -vv"));assert.ok(!cmd.includes("pushd"));
+  assert.throws(()=>windowsReleaseCommands('\\\\wsl.localhost\\Ubuntu\\home\\repo','C:\\config.json'),/本地盘/);
+  assert.throws(()=>windowsReleaseCommands('C:\\repo','config.json'),/本地盘/);
   for(const path of ['a&echo bad','a%PATH%','a\nb','a"b','a!b'])assert.throws(()=>cmdPath(path));
 });

@@ -40,7 +40,7 @@ import { t, timeoutMessage } from "./i18n/index.ts";
 import * as db from "./api/db.ts";
 import { createSelectedFileMetadata } from "./features/exif-strip/index.ts";
 import { createPhotoGridStore } from "./features/photo-grid/index.ts";
-import { createAppearanceStore } from "./lib/appearance.ts";
+import { createAppearanceStore, type AppearanceStore } from "./lib/appearance.ts";
 import { createCatalogRefresh } from "./lib/catalog-refresh.ts";
 import { createLayoutStore } from "./lib/layout-prefs.ts";
 import { FlowBar } from "./shell/FlowBar.tsx";
@@ -96,7 +96,7 @@ import {
   EditorToolbar,
 } from "./features/editor/index.ts";
 import {
-  applyNotice,
+  createMigrationMonitor,
   MigrationGate,
   NO_MIGRATIONS,
   type MigrationMap,
@@ -121,7 +121,7 @@ function canvasBackground(): string {
     .trim();
 }
 
-export default function App() {
+export default function App(props: { appearance?: AppearanceStore } = {}) {
   const shell = createShellStore();
   const exportStore=createExportStore({repositoryAvailable:id=>repositories.byId(id)?.online===true,getSetting:db.getSetting,setSetting:db.setSetting,variants:getExportVariants,snapshots:getExportSnapshots,validate:validateExportPreset,runtime:exportQueue,subscribe:onExportState});
   onCleanup(()=>exportStore.dispose());
@@ -143,7 +143,7 @@ export default function App() {
   };
   /** 编辑里有没有可编辑的照片（工具与右栏控件的可用性都看它） */
   const editorEnabled = (): boolean => browseStore.anchorItem() !== null && repositories.byId(browseStore.repositoryId() ?? "")?.online === true;
-  const appearance = createAppearanceStore();
+  const appearance = props.appearance ?? createAppearanceStore();
   // 布局偏好（设备级）：左列宽度与左列内部的比例，拖拽结束落盘、下次启动还原
   const layout = createLayoutStore();
   const filmStripPrefs = createFilmStripPreferenceStore({
@@ -310,14 +310,19 @@ export default function App() {
    * 数据库升级的阻塞遮罩（人类 2026-09-19）：外壳只做**订阅**这件事，
    * 「哪些库正在升级、显示哪一条」是 `features/migration/notice.ts` 的纯逻辑。
    *
-   * 为什么挂在组装层：升级可能在启动时就发生（`app.db`），也可能在用户第一次点库时
-   * 才发生（`catalog.db` —— 人类要求「只在真正用到时才检查 + 升级」）。
+   * app.db 先在 splash 等待；catalog 自动重连/打开时迁移。先订阅后查询活动快照，
+   * 启动期间或前端重载都不能漏掉正在执行的升级。
    * 遮罩要盖住**整个窗口**，所以它属于最外层，不属于某个工作区。
    */
   const [migrations, setMigrations] = createSignal<MigrationMap>(NO_MIGRATIONS);
-  void db.onMigrationNotice((notice) => {
-    setMigrations((previous) => applyNotice(previous, notice));
+  const migrationMonitor = createMigrationMonitor({
+    subscribe: db.onMigrationNotice,
+    snapshot: db.migrationSnapshot,
+    onChange: setMigrations,
+    onSubscriptionError: (error) => console.error("[migration] Events unavailable; querying native state", error),
   });
+  void migrationMonitor.start().catch((error) => console.error("[migration] State observation failed", error));
+  onCleanup(migrationMonitor.dispose);
 
   onMount(() => {
     const fontsReady =

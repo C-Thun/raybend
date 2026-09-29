@@ -388,7 +388,7 @@ export function PhotoGrid(props: PhotoGridProps): JSX.Element {
       const row = list[index];
       if (row === undefined || row.kind !== "tiles") continue;
       for (const slot of row.slots) {
-        if (source.itemAt(slot)?.id === id) return index;
+        if ((source.idAt?.(slot) ?? source.itemAt(slot)?.id) === id) return index;
       }
     }
     return -1;
@@ -515,7 +515,7 @@ export function PhotoGrid(props: PhotoGridProps): JSX.Element {
       if (item === null) continue;
       entries.push({ id: item.id, path: item.path });
     }
-    void source.ensureNatural(entries);
+    if (source.tileNatural !== false) void source.ensureNatural(entries);
   }
 
   const groupingLocale = (): GroupingLocale => (locale() === "en-US" ? "en-US" : "zh-CN");
@@ -550,7 +550,7 @@ export function PhotoGrid(props: PhotoGridProps): JSX.Element {
           overscan={2}
           resetKey={source.scopeKey()}
           scrollTo={scrollRequest()}
-          {...(focusRow() === undefined ? {} : { focusRow: focusRow() })}
+          focusRow={focusRow()}
           onVisibleRange={onVisibleRange}
           /* Ctrl+滚轮调档位（两侧同一个手势）；松手那次由 commitTileStep 落盘 */
           onZoomWheel={(step) => {
@@ -650,6 +650,7 @@ function TileCell(props: {
 }): JSX.Element {
   // 被渲染（= 可见）时才请求 —— 虚拟化保证了这一点
   let requestedPath: string | null = null;
+  onCleanup(() => { if (requestedPath !== null) props.source.cancelThumb?.(requestedPath); });
   createEffect(() => {
     const item = props.source.itemAt(props.slot);
     // A same-range disk refresh can invalidate a page without scrolling. Reread
@@ -658,6 +659,8 @@ function TileCell(props: {
     if (item !== null) {
       const idle = props.source.thumb(item.imageKey ?? item.path).status === "idle";
       if (requestedPath !== (item.imageKey ?? item.path) || idle) {
+        if (requestedPath !== null && requestedPath !== (item.imageKey ?? item.path))
+          props.source.cancelThumb?.(requestedPath);
         requestedPath = item.imageKey ?? item.path;
         props.source.requestThumb(item.imageKey ?? item.path);
       }
@@ -717,6 +720,7 @@ function TileCell(props: {
         // 小尺寸档（96/120/144）星标退化成「一颗星 + 数字」
         compact={tileSize() <= 144}
         src={thumb().url ?? undefined}
+        approximate={thumb().approximate}
         selected={isSelected()}
         selectionFrame={item()?.selectionFrame}
         selectionLocked={item()?.selectionLocked}

@@ -94,6 +94,8 @@ export interface TileProps
    */
   aspect?: number;
   src?: string | null;
+  /** 仅原始 RAW 的内嵌模拟图使用；不改变图片字节。 */
+  approximate?: boolean;
   icon?: JSX.Element;
   selected?: boolean;
   disabled?: boolean;
@@ -186,6 +188,7 @@ export function Tile(props: TileProps) {
     "tag",
     "aspect",
     "src",
+    "approximate",
     "icon",
     "selected",
     "disabled",
@@ -352,6 +355,7 @@ export function Tile(props: TileProps) {
               class={[
                 local.minimal || local.selectionFrame ? "size-full object-contain" : "size-full object-cover",
                 local.excluded ? "opacity-35" : "",
+                local.approximate ? "photo-raw-approximate" : "",
               ]
                 .filter(Boolean)
                 .join(" ")}

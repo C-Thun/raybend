@@ -27,13 +27,15 @@ export const DAV1D_WIN_DIR =
   process.env.RAYBEND_DAV1D_WIN_DIR ?? "C:\\rb-deps\\dav1d-1.5.0";
 
 /** 给 Windows 侧 cargo 的 dav1d 变量（值必须是 Windows 路径）。 */
-export const DAV1D_WIN_ENV = {
+export const DAV1D_WIN_ENV = dav1dWindowsEnv(DAV1D_WIN_DIR);
+
+export function dav1dWindowsEnv(directory) { return {
   SYSTEM_DEPS_DAV1D_NO_PKG_CONFIG: "1",
   SYSTEM_DEPS_DAV1D_LIB: "dav1d",
   SYSTEM_DEPS_DAV1D_LINK: "static",
-  SYSTEM_DEPS_DAV1D_SEARCH_NATIVE: `${DAV1D_WIN_DIR}\\lib`,
-  SYSTEM_DEPS_DAV1D_INCLUDE: `${DAV1D_WIN_DIR}\\include`,
-};
+  SYSTEM_DEPS_DAV1D_SEARCH_NATIVE: `${directory}\\lib`,
+  SYSTEM_DEPS_DAV1D_INCLUDE: `${directory}\\include`,
+}; }
 
 /**
  * 拼出这次 `cmd.exe` 调用要用的环境变量：
@@ -42,9 +44,11 @@ export const DAV1D_WIN_ENV = {
  * @param {Record<string, string | undefined>} extra 额外要传的变量（如 `CARGO_TARGET_DIR`）
  * @param {string[]} extraWslEnv 额外要并进 `WSLENV` 的名字（如 `WGPU_BACKEND`）
  */
-export function windowsBuildEnv(extra = {}, extraWslEnv = []) {
-  const vars = { ...DAV1D_WIN_ENV, ...extra };
+export function windowsBuildEnv(extra = {}, extraWslEnv = [], environment = process.env) {
+  const vars = { ...dav1dWindowsEnv(environment.RAYBEND_DAV1D_WIN_DIR ?? DAV1D_WIN_DIR), ...extra };
   const names = [...Object.keys(vars), ...extraWslEnv];
-  const wslEnv = [process.env.WSLENV, ...names].filter(Boolean).join(":");
-  return { ...process.env, ...vars, WSLENV: wslEnv };
+  // 我们传的路径已经是 Windows 形式，不继承旧的 /p 翻译标志，否则会被 WSL 再翻一次。
+  const existing = (environment.WSLENV ?? "").split(":").filter(item => item && !names.includes(item.split("/")[0]));
+  const wslEnv = [...new Set([...existing, ...names])].join(":");
+  return { ...environment, ...vars, WSLENV: wslEnv };
 }

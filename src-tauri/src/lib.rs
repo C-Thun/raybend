@@ -29,6 +29,8 @@ mod migration;
 mod render_window;
 pub mod repo;
 pub mod source;
+mod splash;
+pub mod system_preferences;
 pub mod tags;
 pub mod thumbs;
 mod updates;
@@ -54,7 +56,7 @@ const SPLASH_MIN_VISIBLE: std::time::Duration = std::time::Duration::from_secs(3
 
 /// 等「界面就绪」的上限（硬兜底）。
 ///
-/// 超时就直接把主窗口显出来 —— **宁可少一个闪屏，也不能把用户卡在闪屏上**。
+/// app.db 已返回后，超时允许显示主窗口；仍在迁移则继续留在 splash。
 /// 前端挂了（白屏、抛错、dev server 没起）时，这条路径就是「和以前一样，直接看到界面」。
 ///
 /// **比最短停留多 1 秒是刻意的**：这样「是前端说好了、还是兜底放的行」从计时上就能分辨，
@@ -126,6 +128,18 @@ fn spike_requested() -> bool {
 /// （2026-09-17 我自己就被它误导过一轮：日志里同时出现「主窗口已就绪」与「仍未报就绪」）。
 static UI_READY_REPORTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// 成功/失败均算返回；首屏和超时都不能跳过仍在执行的 app.db 打开/迁移。
+static APP_DB_INITIALIZED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+fn startup_can_reveal(
+    db_finished: bool,
+    ui_ready: bool,
+    elapsed: Option<std::time::Duration>,
+) -> bool {
+    db_finished && (ui_ready || elapsed.is_none_or(|elapsed| elapsed >= SPLASH_TIMEOUT))
+}
+
 /// 收尾：显示主窗口（并把焦点交给它）+ 关掉闪屏。
 ///
 /// **幂等**：`ui_ready`（前端首屏就绪）、兜底线程、以及「等满最短停留」的那条路径都会调它，先后不定，
@@ -133,6 +147,9 @@ static UI_READY_REPORTED: std::sync::atomic::AtomicBool = std::sync::atomic::Ato
 /// 窗口不存在时静默跳过：Linux 开发配置会整体替掉 `app.windows`（见 `tauri.linux.conf.json`），
 /// 那里本来就没有闪屏窗口。
 fn reveal_main(app: &tauri::AppHandle) {
+    if !APP_DB_INITIALIZED.load(std::sync::atomic::Ordering::Acquire) {
+        return;
+    }
     use tauri::Manager;
     if let Some(main) = app.get_webview_window(MAIN_WINDOW_LABEL) {
         let _ = main.show();
@@ -185,6 +202,7 @@ fn reveal_main_after_splash_min(app: &tauri::AppHandle) {
 /// Tauri 运行时初始化失败时 panic —— 此时进程已无法提供任何功能。
 pub fn run() {
     tauri::Builder::default()
+        .append_invoke_initialization_script(splash::initialization_script())
         .plugin(desktop_behavior::init())
         // 目录选择器（建库弹窗的「浏览…」）。官方插件：Windows 走原生对话框。
         .plugin(tauri_plugin_dialog::init())
@@ -201,6 +219,7 @@ pub fn run() {
         .manage(import::ImportBatches::default())
         // 浏览会话态：撤销栈（每库一份）+ 旗标（跨库，内存）+ 当前打开的库缓存
         .manage(browse::BrowseState::default())
+        .manage(migration::MigrationState::default())
         .manage(export::ExportState::default())
         .manage(external_editor::ExternalState::default())
         // 编辑视口的洞口事实（M3-W1）：前端报原始值，这里存着并算物理像素版本
@@ -213,7 +232,9 @@ pub fn run() {
             updates::updates_download,
             updates::updates_install,
             db::app_paths,
+            system_preferences::system_preferences,
             db::db_status,
+            migration::migration_snapshot,
             db::setting_get,
             db::setting_set,
             // ── 来源：最近目录 / 驱动器 / 目录树 / 照片清单 ──
@@ -230,6 +251,7 @@ pub fn run() {
             source::file_exif,
             // ── 缩略图（未入库的源文件也要能出图）──
             thumbs::thumb_get,
+            thumbs::issue_sources_prepare,
             thumbs::thumb_sources_stats,
             // ── 统一取图口（view 与缩略图共用的总入口，M2-W2）──
             thumbs::view_image,
@@ -334,19 +356,9 @@ pub fn run() {
             use tauri::Manager;
             /*
              * 迁移通知的钩子要**赶在第一次开库之前**装上：
-             * 下面那行 `db::warm_up` 就可能触发 `app.db` 的升级，
-             * 而升级开始时界面得能弹阻塞遮罩（人类 2026-09-19 的要求）。
+             * 后台 `db::warm_up` 可能触发 `app.db` 升级；快照必须先可用。
              */
             migration::install(app.handle());
-            // 先把数据底座打开（命令也可以懒打开，这里做一次是为了启动日志能立刻反映问题）。
-            // **失败不阻止启动**：窗口该出来还是要出来，错误让前端在需要时再报。
-            let state = app.state::<db::DbState>();
-            db::warm_up(app.handle(), &state);
-
-            // 镜头库（lensfun）在**后台**预热：解压 + 解析约 5 MB XML 要几十毫秒，
-            // 不挡窗口（面板先用 `isReady` 显示「加载中」）。
-            lens::warm_up();
-
             /*
              * 启动闪屏（见 `tauri.conf.json` 的 `splash` 窗口与 `public/splash.html`）。
              *
@@ -377,8 +389,10 @@ pub fn run() {
                 std::thread::spawn(move || {
                     std::thread::sleep(SPLASH_TIMEOUT);
                     // 只在**真的**没等到前端就绪时才这样印：报过就绪之后这里只是保险
-                    // （那时主窗口早该由 `reveal_main_after_splash_min` 显示过了）。
-                    if !UI_READY_REPORTED.load(std::sync::atomic::Ordering::Relaxed) {
+                    // （app.db 若还在迁移，reveal_main 会保留 splash）。
+                    if !APP_DB_INITIALIZED.load(std::sync::atomic::Ordering::Acquire) {
+                        eprintln!("[raybend] 应用数据仍在打开/升级，继续显示闪屏");
+                    } else if !UI_READY_REPORTED.load(std::sync::atomic::Ordering::Relaxed) {
                         eprintln!(
                             "[raybend] 闪屏已露满 {} 秒但前端仍未报就绪，按兜底显示主窗口",
                             SPLASH_TIMEOUT.as_secs()
@@ -387,6 +401,21 @@ pub fn run() {
                     reveal_main(&handle);
                 });
             }
+            // setup 先返回让 splash 有机会绘制；数据库打开不占窗口事件线程。
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                db::warm_up(&handle, &handle.state::<db::DbState>());
+                APP_DB_INITIALIZED.store(true, std::sync::atomic::Ordering::Release);
+                let elapsed = SPLASH_SHOWN_AT.get().map(std::time::Instant::elapsed);
+                if startup_can_reveal(
+                    true,
+                    UI_READY_REPORTED.load(std::sync::atomic::Ordering::Relaxed),
+                    elapsed,
+                ) {
+                    reveal_main_after_splash_min(&handle);
+                }
+            });
+            lens::warm_up();
             // 渲染 spike 的调试窗口（`specs/M2-W1-windows-gpu.md` 那张清单要用它）。
             // 位置放在闪屏逻辑**之后**：它是调试设施，正常启动路径不该受它影响。
             //
@@ -468,6 +497,7 @@ mod tests {
         ("db.rs", include_str!("db.rs")),
         ("import.rs", include_str!("import.rs")),
         ("updates.rs", include_str!("updates.rs")),
+        ("migration.rs", include_str!("migration.rs")),
         ("repo.rs", include_str!("repo.rs")),
         ("source.rs", include_str!("source.rs")),
         ("thumbs.rs", include_str!("thumbs.rs")),
@@ -547,6 +577,26 @@ mod tests {
             remaining(Some(shown), shown + Duration::from_secs(86_400)),
             Duration::ZERO
         );
+    }
+
+    #[test]
+    fn startup_waits_for_app_db_even_after_ui_ready_or_timeout() {
+        use std::time::Duration;
+        let reveal = super::startup_can_reveal;
+        assert!(!reveal(false, true, Some(Duration::from_secs(30))));
+        assert!(!reveal(false, false, Some(super::SPLASH_TIMEOUT)));
+        assert!(!reveal(false, true, None));
+        assert!(!reveal(true, false, Some(Duration::ZERO)));
+        assert!(!reveal(
+            true,
+            false,
+            Some(super::SPLASH_TIMEOUT - Duration::from_nanos(1))
+        ));
+        assert!(reveal(true, false, Some(super::SPLASH_TIMEOUT)));
+        assert!(reveal(true, true, Some(Duration::ZERO)));
+        assert!(reveal(true, false, None));
+        // db_finished 表示成功或失败都已返回；不能把错误当永久 pending。
+        assert!(reveal(true, false, Some(Duration::from_secs(30))));
     }
 
     /// 兜底必须**晚于**最短停留：否则它会抢在「等满 3 秒」前面把闪屏关掉，

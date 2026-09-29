@@ -10,15 +10,15 @@
 //! 放在主线程上就是「界面卡住」。所以凡是碰文件系统的命令都写成 `async`，
 //! 真正的活在 `spawn_blocking` 里干（见 [`blocking`]）。
 
+use raybend::media::meta_cache::{MetaCache, MetaInput};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
-use raybend::media::meta_cache::{MetaCache, MetaInput};
 
 use raybend::media::source;
 use raybend::store::{recent, volumes};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Runtime, State};
+use tauri::{AppHandle, Manager, Runtime};
 
 use crate::db::DbState;
 
@@ -279,49 +279,53 @@ fn kind_code(kind: raybend::media::kind::MediaKind) -> &'static str {
 
 /// 最近的导入目录（最新的在前）。
 #[tauri::command]
-pub fn recent_dirs_list<R: Runtime>(
-    app: AppHandle<R>,
-    state: State<'_, DbState>,
-) -> Result<Vec<RecentDirView>, String> {
-    state.with(&app, |db| {
-        let limit = recent_limit(db);
-        db.read(|conn| recent::list(conn, limit))
-            .map(|rows| rows.into_iter().map(RecentDirView::from).collect())
-            .map_err(|e| e.to_string())
+pub async fn recent_dirs_list<R: Runtime>(app: AppHandle<R>) -> Result<Vec<RecentDirView>, String> {
+    blocking(move || {
+        app.state::<DbState>().with(&app, |db| {
+            let limit = recent_limit(db);
+            db.read(|conn| recent::list(conn, limit))
+                .map(|rows| rows.into_iter().map(RecentDirView::from).collect())
+                .map_err(|e| e.to_string())
+        })
     })
+    .await
 }
 
-/// 记一条最近目录（勾选目录时调）—— 顺手把列表裁到上限。
+/// 记一条最近目录，仍复用既有写者和裁剪逻辑。
 #[tauri::command]
-pub fn recent_dir_remember<R: Runtime>(
+pub async fn recent_dir_remember<R: Runtime>(
     app: AppHandle<R>,
-    state: State<'_, DbState>,
     path: String,
     include_subdirs: bool,
 ) -> Result<(), String> {
-    state.with(&app, |db| {
-        let limit = recent_limit(db);
-        let now = raybend::store::time::now_millis();
-        db.write_tx(move |tx| {
-            recent::remember(tx, &path, include_subdirs, now)?;
-            recent::prune(tx, limit)?;
-            Ok(())
+    blocking(move || {
+        app.state::<DbState>().with(&app, |db| {
+            let limit = recent_limit(db);
+            let now = raybend::store::time::now_millis();
+            db.write_tx(move |tx| {
+                recent::remember(tx, &path, include_subdirs, now)?;
+                recent::prune(tx, limit)?;
+                Ok(())
+            })
+            .map_err(|e| e.to_string())
         })
-        .map_err(|e| e.to_string())
     })
+    .await
 }
 
-/// 从最近列表里移除一条（**不动磁盘上的任何东西**）。
+/// 从最近列表移除，不动磁盘；startup 等待也不占窗口线程。
 #[tauri::command]
-pub fn recent_dir_forget<R: Runtime>(
+pub async fn recent_dir_forget<R: Runtime>(
     app: AppHandle<R>,
-    state: State<'_, DbState>,
     path: String,
 ) -> Result<bool, String> {
-    state.with(&app, |db| {
-        db.write(move |conn| recent::forget(conn, &path))
-            .map_err(|e| e.to_string())
+    blocking(move || {
+        app.state::<DbState>().with(&app, |db| {
+            db.write(move |conn| recent::forget(conn, &path))
+                .map_err(|e| e.to_string())
+        })
     })
+    .await
 }
 
 /// 最近目录条数上限（设置里可改）。
@@ -393,7 +397,9 @@ fn item_view(item: source::SourceItem) -> SourceItemView {
         size_bytes: item.size_bytes,
         mtime_ms: item.mtime_ms,
         taken_at_ms: item.taken_at.map(|t| t.millis),
-        taken_at_source: item.taken_at.map(|t| taken_source_code(t.source).to_string()),
+        taken_at_source: item
+            .taken_at
+            .map(|t| taken_source_code(t.source).to_string()),
         taken_at_offset_min: item.taken_at.and_then(|t| t.offset_min),
     }
 }
@@ -402,8 +408,7 @@ fn item_view(item: source::SourceItem) -> SourceItemView {
 #[tauri::command]
 pub async fn source_count(path: String, recursive: bool) -> Result<PhotoCountView, String> {
     blocking(move || {
-        let count =
-            source::count_photos(Path::new(&path), recursive).map_err(|e| e.to_string())?;
+        let count = source::count_photos(Path::new(&path), recursive).map_err(|e| e.to_string())?;
         Ok(PhotoCountView {
             photos: count.photos,
             skipped: count.skipped,

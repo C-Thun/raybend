@@ -203,8 +203,8 @@ impl SizeClass {
 #[must_use]
 pub const fn render_sig(size: SizeClass) -> &'static str {
     match size {
-        SizeClass::Grid => "avif-q90-grid-v14",
-        SizeClass::Strip => "avif-q90-strip-v14",
+        SizeClass::Grid => "avif-q90-grid-v14-embedded-v1",
+        SizeClass::Strip => "avif-q90-strip-v14-embedded-v1",
         SizeClass::Screen => "avif-q90-screen-v14",
     }
 }
@@ -383,6 +383,12 @@ pub fn render_file_with_edit_and_lut(
         return render_raw_file(path, size, edit, lens, lut);
     }
 
+    if size.clamps_display_aspect() && edit.is_none_or(DevelopStack::is_empty)
+        && let Some(embedded) = crate::media::embedded::read(path)
+            && let Ok(Some(thumb)) = render_bytes(&embedded.bytes, size, embedded.orientation) {
+                return Ok(Some(thumb));
+            }
+
     let bytes = std::fs::read(path)?;
     /*
      * **方向必须在这里读**：竖拍照片（EXIF 方向 6/8）不摆正就会**躺着**显示 ——
@@ -425,6 +431,12 @@ fn render_raw_file(
     lens: Option<&crate::develop::lens::LensCorrection>,
     lut: Option<&crate::develop::lut::Lut>,
 ) -> Result<Option<Thumb>> {
+    if size.clamps_display_aspect() && edit.is_none_or(DevelopStack::is_empty) {
+        let Some(decoded) = decode_raw_file(path, DecodeSpec::thumb(size.long_edge()))? else {
+            return Ok(None);
+        };
+        return encode(decoded.image, size, decoded.orientation, false, None, None).map(Some);
+    }
     let source_size = crate::media::meta::read_photo_meta(path)
         .ok()
         .map(|meta| (meta.width, meta.height))
@@ -459,6 +471,8 @@ fn render_raw_file(
 /// 一张解不开的 RAW 不该让整个导入挂掉，所以这里 `Ok(None)`、由调用方用占位图兜底。
 fn decode_raw_file(path: &Path, spec: DecodeSpec) -> Result<Option<DecodedSource>> {
     let request = match spec.max_edge {
+        Some(max_edge) if spec.allow_preview && max_edge <= GRID_LONG_EDGE =>
+            crate::raw::DecodeRequest::embedded(path, max_edge.max(1)),
         Some(max_edge) => crate::raw::DecodeRequest::thumb(path, max_edge.max(1)),
         None => crate::raw::DecodeRequest::full(path),
     }
@@ -494,7 +508,8 @@ fn decode_raw_file(path: &Path, spec: DecodeSpec) -> Result<Option<DecodedSource
      * 规则与优先级反过一次的教训都在 `media::exif::raw_orientation`（编辑器的线性解码
      * 也用同一个函数，不许各写一套）。
      */
-    let orientation = crate::media::exif::raw_orientation(path, decoded.orientation);
+    let orientation = if request.embedded_only { decoded.orientation }
+        else { crate::media::exif::raw_orientation(path, decoded.orientation) };
 
     Ok(Some(DecodedSource {
         image: DynamicImage::ImageRgb8(buffer),
@@ -510,6 +525,21 @@ pub fn render_bytes(
     orientation: Option<u16>,
 ) -> Result<Option<Thumb>> {
     render_bytes_with_edit(bytes, size, orientation, None, None)
+}
+
+/// A preview already contains the edit and orientation: only resize/crop it.
+/// Missing or corrupt disposable previews use the existing source renderer.
+pub fn render_preview_or_else(
+    preview: Option<&[u8]>,
+    size: SizeClass,
+    fallback: impl FnOnce() -> Result<Option<Thumb>>,
+) -> Result<Option<Thumb>> {
+    if let Some(bytes) = preview
+        && let Some(thumb) = render_bytes(bytes, size, None)?
+    {
+        return Ok(Some(thumb));
+    }
+    fallback()
 }
 
 /// 从内存渲染（可带编辑栈）—— [`render_bytes`] 的完整形态。

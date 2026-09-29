@@ -102,9 +102,11 @@ export function orderedIssues(variants: readonly VariantSummary[], promoted: (v:
   const main=mainVariant(variants);
   return variants.filter(v => v !== main &&
     !(main?.profileHash && v.profileHash === main.profileHash && v.sourceBase === main.sourceBase))
-    .sort((a,b) => Number(promoted(b))-Number(promoted(a)) ||
-      Number(a.reference.variant === "sooc")-Number(b.reference.variant === "sooc") ||
-      (b.createdAt??0)-(a.createdAt??0) || b.reference.variant.localeCompare(a.reference.variant));
+    .sort((a,b) => {
+      const rank = (v: VariantSummary) => v.reference.variant === "raw" ? 2 : v.reference.variant === "sooc" ? 1 : 0;
+      return rank(a)-rank(b) || Number(promoted(b))-Number(promoted(a)) ||
+        (b.createdAt??0)-(a.createdAt??0) || b.reference.variant.localeCompare(a.reference.variant);
+    });
 }
 
 /**

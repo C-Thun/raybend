@@ -60,10 +60,10 @@ export type ReleaseView =
       publishedAt?: string;
     };
 
-/** 安装包优先级：NSIS 安装包 → MSI；签名/校验文件不算资产 */
+/** 安装包优先级：MSI → NSIS 安装包；签名/校验文件不算资产 */
 const ASSET_PREFERENCE: readonly (readonly [string, readonly string[]])[] = [
-  ['exe', ['.exe']],
   ['msi', ['.msi']],
+  ['exe', ['.exe']],
 ];
 
 /** 校验 tag 合法性：必须像 `v1.2.3` 或 `1.2.3(-beta.1)`，别的当没发布处理 */
