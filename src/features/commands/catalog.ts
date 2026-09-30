@@ -111,6 +111,16 @@ export interface CommandDeps {
 
   /* ── 浏览 ───────────────────────────────────────── */
   browse: {
+    organization?: {
+      panel: (mode: "library" | "buckets" | "tags") => void;
+      addSelected: () => void;
+      addFlags: () => void;
+      newAuto: () => void;
+      hasFlags: () => boolean;
+      hasOrganizationSelection: () => boolean;
+      canRemoveSelected: () => boolean;
+      removeSelected: () => void;
+    };
     canExternalEditor?: () => boolean;
     externalEditor?: () => void;
     repositoryId: () => string | null;
@@ -203,6 +213,15 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
 
   const inExport=()=>deps.flow()==="export";
   return [
+    spec({id:"organization.library",titleKey:"cmd.organization.library",group:"view",menu:"view",scope:"global",defaultKey:"Alt+1",when:()=>deps.flow()==="browse",run:()=>deps.browse.organization?.panel("library")}),
+    spec({id:"organization.buckets",titleKey:"cmd.organization.buckets",group:"view",menu:"view",scope:"global",defaultKey:"Alt+2",when:()=>deps.flow()==="browse",run:()=>deps.browse.organization?.panel("buckets")}),
+    spec({id:"organization.tags",titleKey:"cmd.organization.tags",group:"view",menu:"view",scope:"global",defaultKey:"Alt+3",when:()=>deps.flow()==="browse",run:()=>deps.browse.organization?.panel("tags")}),
+    // Dialog actions are reachable from the toolbar and command palette; no default
+    // chord so they do not steal photo marking keys.
+    spec({id:"organization.addSelected",titleKey:"cmd.organization.addSelected",group:"edit",menu:"edit",scope:"global",defaultKey:undefined,when:()=>deps.flow()==="browse",enabled:()=>deps.browse.hasSelection() || (deps.browse.organization?.hasOrganizationSelection()??false),run:()=>deps.browse.organization?.addSelected()}),
+    spec({id:"organization.addFlags",titleKey:"cmd.organization.addFlags",group:"edit",menu:"edit",scope:"global",defaultKey:undefined,when:()=>deps.flow()==="browse",enabled:()=>deps.browse.organization?.hasFlags()??false,run:()=>deps.browse.organization?.addFlags()}),
+    spec({id:"organization.removeSelected",titleKey:"cmd.organization.removeSelected",group:"edit",menu:"edit",scope:"global",defaultKey:undefined,when:()=>deps.flow()==="browse",enabled:()=>deps.browse.organization?.canRemoveSelected()??false,run:()=>deps.browse.organization?.removeSelected()}),
+    spec({id:"organization.newAuto",titleKey:"cmd.organization.newAuto",group:"file",menu:"file",scope:"global",defaultKey:undefined,when:()=>deps.flow()==="browse",run:()=>deps.browse.organization?.newAuto()}),
     // Seconds-long output with a dialog; deliberately no default shortcut.
     spec({id:"browse.externalEditor",titleKey:"cmd.browse.externalEditor",group:"file",menu:"file",scope:"global",defaultKey:undefined,when:()=>deps.flow()==="browse",enabled:()=>deps.browse.canExternalEditor?.()??false,run:()=>deps.browse.externalEditor?.()}),
     spec({id:"export.run",titleKey:"cmd.export.run",group:"file",menu:"file",scope:"global",defaultKey:"Mod+Enter",when:inExport,enabled:()=>deps.export?.canRun()??false,run:()=>deps.export?.toggleRun()}),

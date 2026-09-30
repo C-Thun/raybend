@@ -31,11 +31,11 @@ import { ExportWorkspace } from "./workspaces/export/ExportWorkspace.tsx";
 import { ExportToolbar, ExportScopeTool, ExportStopTool } from "./workspaces/export/Toolbar.tsx";
 import { exportActions } from "./workspaces/export/actions.ts";
 import { getExportVariants, exportQueue, onExportState, getExportSnapshots, validateExportPreset } from "./api/export.ts";
-import { Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
+import { Show, createEffect, createRenderEffect, createSignal, on, onCleanup, onMount } from "solid-js";
 import { uiReady, tauriWindowHandle } from "./api/window.ts";
 import { openFullscreen } from "./api/fullscreen.ts";
 import { isTauriRuntime } from "./api/tauri-env.ts";
-import type { BrowseSort, DevelopEditBase, Volume } from "./api/types.ts";
+import type { AssetItem, BrowseSort, DevelopEditBase, MarkResult, MarkingItem, Volume } from "./api/types.ts";
 import { t, timeoutMessage } from "./i18n/index.ts";
 import * as db from "./api/db.ts";
 import { createSelectedFileMetadata } from "./features/exif-strip/index.ts";
@@ -49,7 +49,12 @@ import { TitleBar } from "./shell/TitleBar.tsx";
 import { ToolsBar } from "./shell/ToolsBar.tsx";
 import { createImportStore, ImportWorkspace } from "./workspaces/import/index.ts";
 import { createToastStore, ToastHost, toastDisposer } from "./components/ui/Toast.tsx";
-import { BrowseToolbar, createBrowseStore, TagDialog } from "./features/browse/index.ts";
+import { BrowseToolbar, BucketDialog, BucketPickerDialog, createBrowseStore, TagDialog, type BrowseStore } from "./features/browse/index.ts";
+import { createPhotoBucket, reconcileOrganization, removePhotoFromBucket, savePhotoBucketRules, type AssetIdentity, type PhotoBucket, type RuleSet } from "./api/organization.ts";
+import { rulesFromBrowseFilter } from "./features/browse/organization-rules.ts";
+import { createOrganizationWorker } from "./lib/organization-worker.ts";
+import { ToggleBlock } from "./components/ui/ToggleBlock.tsx";
+import { ConfirmDialog } from "./components/ui/Dialog.tsx";
 import { browseActions } from "./features/browse/actions.ts";
 import { applyMarkIntent } from "./features/browse/mark-actions.ts";
 import { importActions } from "./features/import/actions.ts";
@@ -104,7 +109,7 @@ import {
 import { readBrowseSession, writeBrowseSession } from "./lib/browse-session.ts";
 import { withTimeout } from "./lib/timeout.ts";
 import { createFilmStripPreferenceStore } from "./lib/film-strip-prefs.ts";
-import { IconExternalLink } from "@tabler/icons-solidjs";
+import { IconAlbum, IconExternalLink, IconFolder, IconTag } from "@tabler/icons-solidjs";
 
 const STARTUP_REPOSITORIES_TIMEOUT_MS = 15_000;
 
@@ -123,7 +128,9 @@ function canvasBackground(): string {
 
 export default function App(props: { appearance?: AppearanceStore } = {}) {
   const shell = createShellStore();
-  const exportStore=createExportStore({repositoryAvailable:id=>repositories.byId(id)?.online===true,getSetting:db.getSetting,setSetting:db.setSetting,variants:getExportVariants,snapshots:getExportSnapshots,validate:validateExportPreset,runtime:exportQueue,subscribe:onExportState});
+  const exportStore=createExportStore({repositoryAvailable:id=>repositories.byId(id)?.online===true,
+    repositoryRoot:id=>repositories.byId(id)?.root ?? repositories.lastVerifiedRoot(id),
+    getSetting:db.getSetting,setSetting:db.setSetting,variants:getExportVariants,snapshots:getExportSnapshots,validate:validateExportPreset,runtime:exportQueue,subscribe:onExportState});
   onCleanup(()=>exportStore.dispose());
   const externalEditor=createExternalEditorStore({getSetting:db.getSetting,setSetting:db.setSetting,applications:externalApplications,task:externalTask,subscribe:onExternalTask,
     snapshot:async target=>{const [captured]=await getExportSnapshots(target.repositoryId,[target.reference]);if(!captured)throw new Error(t("export.error.incomplete"));return captured;}});
@@ -142,7 +149,13 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
     editorActions()?.commitDevelop();
   };
   /** 编辑里有没有可编辑的照片（工具与右栏控件的可用性都看它） */
-  const editorEnabled = (): boolean => browseStore.anchorItem() !== null && repositories.byId(browseStore.repositoryId() ?? "")?.online === true;
+  const editorEnabled = (): boolean => {
+    const item = browseStore.anchorItem();
+    const repo = browseStore.repositoryId();
+    if (!item || !repo || repositories.byId(repo)?.online !== true) return false;
+    const organizationPhoto = organizationPhotoView() ? organizationAnchor() : null;
+    return !organizationPhoto || (organizationPhoto.repositoryId === repo && organizationPhoto.assetId === item.id);
+  };
   const appearance = props.appearance ?? createAppearanceStore();
   // 布局偏好（设备级）：左列宽度与左列内部的比例，拖拽结束落盘、下次启动还原
   const layout = createLayoutStore();
@@ -361,6 +374,160 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
    * 两边都在这里汇合（`memory/ARCHITECTURE.md` §2 的组合层职责）。
    */
   const [tagsOpen, setTagsOpen] = createSignal(false);
+  const [organizationPanel, setOrganizationPanel] = createSignal<"library" | "buckets" | "tags">("library");
+  const [organizationRevision, setOrganizationRevision] = createSignal(0);
+  const onlineOrganizationRepositories = () => repositories.list().filter((repo) => repo.online).map((repo) => repo.id);
+  const organizationWorker = createOrganizationWorker({
+    repositories: onlineOrganizationRepositories,
+    reconcile: reconcileOrganization,
+    onChanged: () => setOrganizationRevision((value) => value + 1),
+    onError: (error) => {
+      console.error("[organization] reconciliation failed", error); // i18n-exempt: 控制台诊断
+      toast.show({ tone: "danger", message: t("org.reconcileFailed") });
+    },
+    onPartialFailure: (repositoryIds) => toast.show({ tone: "danger",
+      message: t("org.reconcilePartial").replace("{n}", String(repositoryIds.length)) }),
+  });
+  createEffect(() => { onlineOrganizationRepositories().join("|"); organizationWorker.wake(); });
+  onMount(() => {
+    let disposed = false;
+    let offDirty: (() => void) | undefined;
+    let offChanged: (() => void) | undefined;
+    void db.onCatalogDirty(() => organizationWorker.wake()).then((off) => {
+      if (disposed) off(); else offDirty = off;
+    });
+    void db.onCatalogChanged(() => organizationWorker.wake()).then((off) => {
+      if (disposed) off(); else offChanged = off;
+    });
+    const timer = window.setInterval(() => organizationWorker.wake(), 30_000);
+    const focus = () => organizationWorker.wake();
+    window.addEventListener("focus", focus);
+    onCleanup(() => {
+      disposed = true; organizationWorker.dispose(); offDirty?.(); offChanged?.();
+      window.clearInterval(timer); window.removeEventListener("focus", focus);
+    });
+  });
+  const [bucketDialog, setBucketDialog] = createSignal<{ bucket: PhotoBucket | null; seed: RuleSet | null } | null>(null);
+  const [bucketPicker, setBucketPicker] = createSignal<AssetIdentity[] | null>(null);
+  const [organizationSelected, setOrganizationSelected] = createSignal<AssetIdentity[]>([]);
+  const [organizationSelectedItems, setOrganizationSelectedItems] = createSignal<AssetItem[]>([]);
+  const [organizationPhotoView, setOrganizationPhotoView] = createSignal(false);
+  const [organizationAnchor, setOrganizationAnchor] = createSignal<AssetIdentity | null>(null);
+  createRenderEffect(on(shell.workflow, (flow) => {
+    if (flow === "export") exportStore.setOrganizationHandoff(organizationPhotoView() ? organizationSelected() : []);
+  }));
+  let organizationAnchorGeneration = 0;
+  let lastOrganizationAnchorSync = "";
+  function receiveOrganizationAnchor(photo: AssetIdentity | null, item: AssetItem | null): void {
+    setOrganizationAnchor(photo);
+    const syncKey = photo && item ? JSON.stringify([photo.repositoryId, photo.assetId, item.relPath]) : "";
+    if (syncKey === lastOrganizationAnchorSync) return;
+    lastOrganizationAnchorSync = syncKey;
+    const mine = ++organizationAnchorGeneration;
+    if (!photo || !item) return;
+    // Persist across the BrowseWorkspace unmount when the user immediately enters Edit/Export.
+    void (async () => {
+      browseStore.setRepository(photo.repositoryId);
+      browseStore.setScope(item.relPath.slice(0, item.relPath.lastIndexOf("/")));
+      await browseStore.reload();
+      if (mine !== organizationAnchorGeneration) return;
+      const index = browseStore.timeline().findIndex((row) => row.id === photo.assetId);
+      if (index < 0) return;
+      await browseStore.ensureRange(index, index + 1);
+      if (mine === organizationAnchorGeneration) browseStore.select(photo.assetId, "replace");
+    })().catch((reason: unknown) => browseStore.reportError(reason));
+  }
+  const [organizationSingleMarkings, setOrganizationSingleMarkings] = createSignal<ReadonlyMap<number, MarkingItem>>(new Map());
+  let organizationMarkingGeneration = 0;
+  function receiveOrganizationSelection(photos: AssetIdentity[]): void {
+    setOrganizationSelected(photos);
+    const mine = ++organizationMarkingGeneration;
+    if (photos.length !== 1) { setOrganizationSingleMarkings(new Map()); return; }
+    const photo = photos[0];
+    void browseMarkings(photo.repositoryId, [photo.assetId]).then((items) => {
+      if (mine === organizationMarkingGeneration) setOrganizationSingleMarkings(new Map(items.map((item) => [item.id, item])));
+    }).catch(() => { if (mine === organizationMarkingGeneration) setOrganizationSingleMarkings(new Map()); });
+  }
+  let organizationActions: { selectAll: () => void; clearSelection: () => void } | null = null;
+  const [organizationBucketId, setOrganizationBucketId] = createSignal<number | null>(null);
+  const [pendingBucketRemoval, setPendingBucketRemoval] = createSignal(false);
+  let lastOrganizationMarkRepositories: string[] = [];
+  const organizationMarkStore: BrowseStore = {
+    ...browseStore,
+    canWrite: () => organizationSelected().length > 0 &&
+      organizationSelectedItems().length === organizationSelected().length &&
+      organizationSelected().every((photo) => repositories.byId(photo.repositoryId)?.online === true),
+    selectedCount: () => organizationSelected().length,
+    selectedIds: () => organizationSelected().map((photo) => photo.assetId),
+    selectedItems: organizationSelectedItems,
+    anchorItem: () => organizationSelectedItems()[0] ?? null,
+    markings: organizationSingleMarkings,
+    mark: async (action) => {
+      if (!organizationMarkStore.canWrite()) return null;
+      const groups = new Map<string, number[]>();
+      for (const photo of organizationSelected()) groups.set(photo.repositoryId,
+        [...(groups.get(photo.repositoryId) ?? []), photo.assetId]);
+      const successes: Array<{ repositoryId: string; result: MarkResult }> = [];
+      let failures = 0;
+      for (const [repositoryId, ids] of groups) {
+        try { successes.push({ repositoryId, result: await browseMark(repositoryId, ids, action) }); }
+        catch { failures += 1; }
+      }
+      if (failures > 0) toast.show({ tone: "danger", message: t("org.markFailed").replace("{n}", String(failures)) });
+      if (successes.length === 0) return null;
+      lastOrganizationMarkRepositories = successes.map((entry) => entry.repositoryId);
+      setOrganizationRevision((value) => value + 1);
+      return {
+        changed: successes.reduce((sum, entry) => sum + entry.result.changed, 0),
+        skippedLocked: successes.flatMap((entry) => entry.result.skippedLocked),
+        canUndo: successes.every((entry) => entry.result.canUndo),
+        canRedo: false,
+        undoLabel: successes[0].result.undoLabel,
+        redoLabel: null,
+      };
+    },
+    undo: async () => {
+      let result: MarkResult | null = null;
+      for (const repositoryId of [...lastOrganizationMarkRepositories].reverse()) {
+        try { result = await browseUndo(repositoryId); }
+        catch (error) { toast.show({ tone: "danger", message: String(error) }); }
+      }
+      lastOrganizationMarkRepositories = [];
+      setOrganizationRevision((value) => value + 1);
+      return result;
+    },
+  };
+  async function removeFromCurrentBucket(): Promise<void> {
+    const bucketId = organizationBucketId();
+    if (bucketId === null) return;
+    const results = await Promise.allSettled(organizationSelected().map((photo) => removePhotoFromBucket(bucketId, photo)));
+    const removed = results.filter((result) => result.status === "fulfilled" && result.value).length;
+    const failures = results.filter((result) => result.status === "rejected").length;
+    setPendingBucketRemoval(false);
+    setOrganizationRevision((value) => value + 1);
+    if (removed > 0) toast.show({ tone: "success", message: t("org.removedCount").replace("{n}", String(removed)) });
+    if (failures > 0) toast.show({ tone: "danger", message: t("org.removeFailed").replace("{n}", String(failures)) });
+  }
+  function openBucketPicker(kind: "selected" | "flags"): void {
+    if (kind === "selected" && organizationPhotoView()) {
+      if (organizationSelected().length > 0) setBucketPicker(organizationSelected());
+      return;
+    }
+    const repositoryId = browseStore.repositoryId();
+    if (repositoryId === null) return;
+    const ids = kind === "selected" ? browseStore.selectedIds() : [...browseStore.picks()];
+    if (ids.length === 0) return;
+    setBucketPicker(ids.map((assetId) => ({ repositoryId, assetId })));
+  }
+  async function openAutoBucket(): Promise<void> {
+    await browseStore.loadTags();
+    const draft = rulesFromBrowseFilter(browseStore.filter(), browseStore.tags());
+    if (!draft.ok) {
+      toast.show({ tone: "danger", message: t("org.unsupportedFilter").replace("{fields}", draft.unsupported.join(", ")) });
+      return;
+    }
+    setBucketDialog({ bucket: null, seed: draft.rules });
+  }
   /**
    * 所有工作流的齿轮与库命令都进入这一份根层库设置弹窗。
    * 位置、连接与模版变更回到 repositories 中央状态，卡片与面板随之同步。
@@ -489,20 +656,40 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
       fullscreen,
     },
     browse: {
-      canExternalEditor:()=>browseActions()?.canExternalEditor() ?? false,
+      organization: {
+        panel: setOrganizationPanel,
+        addSelected: () => openBucketPicker("selected"),
+        addFlags: () => openBucketPicker("flags"),
+        newAuto: () => void openAutoBucket(),
+        hasFlags: () => browseStore.picks().size > 0,
+        hasOrganizationSelection: () => organizationPhotoView() && organizationSelected().length > 0,
+        canRemoveSelected: () => organizationBucketId() !== null && organizationSelected().length > 0,
+        removeSelected: () => setPendingBucketRemoval(true),
+      },
+      canExternalEditor:()=>!organizationPhotoView() && (browseActions()?.canExternalEditor() ?? false),
       externalEditor:()=>browseActions()?.externalEditor(),
       repositoryId: browseStore.repositoryId,
-      undo: () => void browseStore.undo(),
-      redo: () => void browseStore.redo(),
-      canUndo: () => browseStore.canWrite() && browseStore.undoState().canUndo,
-      canRedo: () => browseStore.canWrite() && browseStore.undoState().canRedo,
-      hasSelection: () => browseStore.canWrite() && browseStore.selectedCount() > 0,
-      selectedCount: browseStore.selectedCount,
-      selectAll: () => browseStore.selectAll(),
-      clearSelection: () => browseStore.clearSelection(),
+      undo: () => void (!organizationPhotoView() ? browseStore.undo() : organizationMarkStore.undo()),
+      redo: () => { if (!organizationPhotoView()) void browseStore.redo(); },
+      canUndo: () => !organizationPhotoView() ? browseStore.canWrite() && browseStore.undoState().canUndo : lastOrganizationMarkRepositories.length > 0,
+      canRedo: () => !organizationPhotoView() && browseStore.canWrite() && browseStore.undoState().canRedo,
+      hasSelection: () => !organizationPhotoView() ? browseStore.canWrite() && browseStore.selectedCount() > 0 : organizationMarkStore.canWrite(),
+      selectedCount: () => !organizationPhotoView() ? browseStore.selectedCount() : organizationSelected().length,
+      selectAll: () => !organizationPhotoView() ? browseStore.selectAll() : organizationActions?.selectAll(),
+      clearSelection: () => !organizationPhotoView() ? browseStore.clearSelection() : organizationActions?.clearSelection(),
       // **与工具条同一份实现**（`features/browse/mark-actions.ts`）：筛选态改条件、标记态打标
-      mark: (action) => void applyMarkIntent(browseStore, action, toast),
-      setFlag: (value) => void browseStore.setFlag(browseStore.selectedIds(), value),
+      mark: (action) => void applyMarkIntent(!organizationPhotoView() ? browseStore : organizationMarkStore, action, toast),
+      setFlag: (value) => {
+        if (!organizationPhotoView()) { void browseStore.setFlag(browseStore.selectedIds(), value); return; }
+        const groups = new Map<string, number[]>();
+        for (const photo of organizationSelected()) groups.set(photo.repositoryId, [...(groups.get(photo.repositoryId) ?? []), photo.assetId]);
+        void Promise.allSettled([...groups].map(([repositoryId, ids]) => flagsSet(repositoryId, ids, value)))
+          .then((results) => {
+            const failures = results.filter((result) => result.status === "rejected").length;
+            if (failures > 0) toast.show({ tone: "danger", message: t("org.flagFailed").replace("{n}", String(failures)) });
+            setOrganizationRevision((revision) => revision + 1);
+          });
+      },
       filterMode: browseStore.filterMode,
       toggleFilter: () => browseStore.setFilterMode(!browseStore.filterMode()),
       clearFilter: () => browseStore.setFilterMode(false),
@@ -526,7 +713,7 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
       cycleChrome: () => importActions()?.cycleChrome(),
       toggleCompareStrip: () => importActions()?.toggleCompareStrip(),
     },
-    export: {hasSelection:()=>exportStore.activeSelection().ids.size>0,canEnqueue:exportStore.canEnqueue,canRemove:exportStore.canRemove,remove:exportStore.removeSelected,enqueue:()=>exportActions()?.enqueue(),clearSelection:exportStore.clear,selectAll:()=>exportActions()?.selectAll(),reset:()=>exportActions()?.requestReset(),canReset:()=>[...exportStore.queues().values()].some(q=>q.length>0),stopAll:exportStore.stopAll,canStop:()=>exportStore.enabled().size>0,cycleScope:exportStore.cycleScope,toggleRun:exportStore.toggleRun,canRun:exportStore.canRun,canSave:exportStore.canSave,save:()=>void exportStore.save()},
+    export: {hasSelection:()=>exportStore.activeSelection().ids.size>0 || exportStore.organizationHandoff().length>0,canEnqueue:exportStore.canEnqueue,canRemove:exportStore.canRemove,remove:exportStore.removeSelected,enqueue:()=>exportActions()?.enqueue(),clearSelection:exportStore.clear,selectAll:()=>exportActions()?.selectAll(),reset:()=>exportActions()?.requestReset(),canReset:()=>[...exportStore.queues().values()].some(q=>q.length>0),stopAll:exportStore.stopAll,canStop:()=>exportStore.enabled().size>0,cycleScope:exportStore.cycleScope,toggleRun:exportStore.toggleRun,canRun:exportStore.canRun,canSave:exportStore.canSave,save:()=>void exportStore.save()},
     editor: {
       active: () => shell.workflow() === "edit",
       hasPhoto: editorEnabled,
@@ -617,30 +804,53 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
       */}
       <ToolsBar
         store={shell}
-        hasSelection={shell.workflow() === "browse" ? browseStore.selectedCount() > 0 : grid.hasSelection()}
+        hasSelection={shell.workflow() === "browse" ? (organizationPhotoView() ? organizationSelected().length > 0 : browseStore.selectedCount() > 0) : grid.hasSelection()}
         // 批量排除是**反转**语义（memory/DESIGN.md §12.2）：排除集合住在导入工作区，
         // 选中的照片清单来自网格 —— 外壳只负责把两边接起来
         onBatchExclude={() => importStore.toggleExcluded([...grid.selectedIds()])}
         // 插槽里到底有没有东西，由这里明说（理由见 ToolsBar 的 hasExtraTools）
         hasExtraTools={shell.workflow() === "browse" || shell.workflow() === "edit" || exportFlow()}
         /* left/right 盖在全宽 mid 上；mid 按整条 toolsbar 的中心对齐。 */
-        hasLeftTools={shell.workflow() === "edit" || exportFlow()}
-        left={<Show when={exportFlow()} fallback={<EditorPanelToggles store={editorStore} enabled={editorEnabled()} />}><ExportScopeTool store={exportStore}/></Show>}
+        hasLeftTools={shell.workflow() === "browse" || shell.workflow() === "edit" || exportFlow()}
+        left={<Show when={shell.workflow() === "browse"} fallback={<Show when={exportFlow()} fallback={<EditorPanelToggles store={editorStore} enabled={editorEnabled()} />}><ExportScopeTool store={exportStore}/></Show>}>
+          <ToggleBlock pressed={organizationPanel() === "library"} icon={<IconFolder size={16} />} label={t("org.library")}
+            onPressedChange={() => setOrganizationPanel("library")} />
+          <ToggleBlock pressed={organizationPanel() === "buckets"} icon={<IconAlbum size={16} />} label={t("org.buckets")}
+            onDragEnter={() => setOrganizationPanel("buckets")}
+            onPressedChange={() => setOrganizationPanel("buckets")} />
+          <ToggleBlock pressed={organizationPanel() === "tags"} icon={<IconTag size={16} />} label={t("org.tags")}
+            onPressedChange={() => setOrganizationPanel("tags")} />
+        </Show>}
         hasRightTools={shell.workflow() === "browse" || shell.workflow() === "edit" || exportFlow()}
         right={<Show when={shell.workflow()==="browse"} fallback={<Show when={exportFlow()} fallback={<EditorResetTool store={editorStore} enabled={editorEnabled()}
           onRequestReset={() => editorActions()?.resetDevelop()}
           canReset={() => editorActions()?.canReset() ?? false}
           canFinalize={() => editorActions()?.canFinalize() ?? false}
-          onFinalize={() => editorActions()?.finalize()} />}><ExportStopTool store={exportStore}/></Show>}><Button data-browse-external-editor variant="ghost" icon={<IconExternalLink size={14} />} disabled={!(browseActions()?.canExternalEditor()??false)} onClick={()=>browseActions()?.externalEditor()}>{t("external.title")}</Button></Show>}
+          onFinalize={() => editorActions()?.finalize()} />}><ExportStopTool store={exportStore}/></Show>}><Button data-browse-external-editor variant="ghost" icon={<IconExternalLink size={14} />} disabled={organizationPhotoView() || !(browseActions()?.canExternalEditor()??false)} onClick={()=>browseActions()?.externalEditor()}>{t("external.title")}</Button></Show>}
       >
         {/* 浏览模式的工具（标记系列 / 筛选开关 / 锁）由那个模块自己给 —— 见 ToolsBar 的说明 */}
-        <Show when={shell.workflow() === "browse"}>
+        <Show when={shell.workflow() === "browse" && !organizationPhotoView()}>
           <BrowseToolbar
             store={browseStore}
             toast={toast}
             onOpenTags={() => setTagsOpen(true)}
+            onAddSelectedToBucket={() => openBucketPicker("selected")}
+            onAddFlagsToBucket={() => openBucketPicker("flags")}
+            onNewAutoBucket={() => void openAutoBucket()}
             onDelete={() => browseActions()?.requestDelete()}
           />
+        </Show>
+        <Show when={shell.workflow() === "browse" && organizationPhotoView()}>
+          <BrowseToolbar store={organizationMarkStore} collectionMode toast={toast}
+            onOpenTags={() => setTagsOpen(true)}
+            onAddSelectedToBucket={() => openBucketPicker("selected")}
+            onNewAutoBucket={() => void openAutoBucket()} />
+          <Show when={organizationBucketId() !== null}>
+            <Button variant="ghost" disabled={organizationSelected().length === 0}
+              onClick={(event) => { if (event.shiftKey) void removeFromCurrentBucket(); else setPendingBucketRemoval(true); }}>
+              {t("org.removeSelected")}
+            </Button>
+          </Show>
         </Show>
         {/* 编辑模式的 mid：画布工具、编辑源、历史动作在同一行整体居中。 */}
         <Show when={shell.workflow() === "edit"}>
@@ -668,7 +878,7 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
       */}
       <TagDialog
         open={tagsOpen()}
-        store={browseStore}
+        store={!organizationPhotoView() ? browseStore : organizationMarkStore}
         onClose={() => setTagsOpen(false)}
         onDone={(result) => {
           // 标签改动也是「会进撤销栈」的动作：给一条带撤销的提示（与打标同一套口径）
@@ -677,11 +887,35 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
             tone: "success",
             message: t("browse.tagsSaved").replace("{n}", String(result.changed)),
             action: result.canUndo
-              ? { label: t("browse.undo"), onAction: () => void browseStore.undo() }
+              ? { label: t("browse.undo"), onAction: () => void (!organizationPhotoView() ? browseStore.undo() : organizationMarkStore.undo()) }
               : undefined,
           });
         }}
       />
+      <BucketDialog
+        open={bucketDialog() !== null}
+        bucket={bucketDialog()?.bucket}
+        seed={bucketDialog()?.seed}
+        repositories={repositories.list()}
+        onClose={() => setBucketDialog(null)}
+        onSave={async (name, rules) => {
+          const current = bucketDialog()?.bucket;
+          if (current) await savePhotoBucketRules(current.id, name, rules);
+          else await createPhotoBucket(name, rules);
+          setOrganizationRevision((value) => value + 1);
+          organizationWorker.wake();
+        }}
+      />
+      <BucketPickerDialog open={bucketPicker() !== null} photos={bucketPicker() ?? []}
+        onClose={() => setBucketPicker(null)}
+        onDone={(count) => {
+          setOrganizationRevision((value) => value + 1);
+          toast.show({ tone: "success", message: t("org.addedCount").replace("{n}", String(count)) });
+        }} />
+      <ConfirmDialog open={pendingBucketRemoval()} title={t("org.removeSelected")}
+        message={t("org.removeConfirm").replace("{n}", String(organizationSelected().length))}
+        confirmLabel={t("org.removeSelected")}
+        onCancel={() => setPendingBucketRemoval(false)} onConfirm={() => void removeFromCurrentBucket()} />
 
       {/*
         库设置（齿轮）：浏览侧的那条路。弹窗自带「两个计数 + 重建数据」，
@@ -768,6 +1002,17 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
         </Show>
       }>
         <BrowseWorkspace
+          organizationPanel={organizationPanel()}
+          organizationRevision={organizationRevision()}
+          onNewBucket={() => setBucketDialog({ bucket: null, seed: null })}
+          onEditBucket={(bucket) => setBucketDialog({ bucket, seed: null })}
+          onOrganizationChanged={() => { setOrganizationRevision((value) => value + 1); organizationWorker.wake(); }}
+          onOrganizationSelection={receiveOrganizationSelection}
+          onOrganizationViewChange={setOrganizationPhotoView}
+          onOrganizationAnchor={receiveOrganizationAnchor}
+          onOrganizationItems={setOrganizationSelectedItems}
+          onOrganizationActions={(actions) => { organizationActions = actions; }}
+          onOrganizationBucketSelection={setOrganizationBucketId}
           onExternalEditor={target=>void externalEditor.show(target)}
           store={browseStore}
           repositories={repositories}

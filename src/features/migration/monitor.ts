@@ -24,7 +24,12 @@ export function createMigrationMonitor(deps: {
   }
   function refresh(): Promise<void> {
     if (disposed) return Promise.resolve();
-    return refreshing ??= deps.snapshot().then(receive).finally(() => { refreshing = undefined; });
+    if (refreshing) return refreshing;
+    // IPC adapter 也可能在返回 Promise 前同步抛错；统一转成拒绝，轮询回调才能捕获。
+    let request: Promise<MigrationSnapshot>;
+    try { request = deps.snapshot(); }
+    catch (error) { request = Promise.reject(error); }
+    return refreshing = request.then(receive).finally(() => { refreshing = undefined; });
   }
   function start(): Promise<void> {
     return started ??= (async () => {

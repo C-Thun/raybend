@@ -25,6 +25,7 @@ function backend() {
     change(empty=false) { for (const [id, h] of handlers) if(h.event === "catalog://changed") h.handler({id,event:h.event,payload:{repositoryId:repo.id,root:repo.root,scopePath:"photos/2026-08-15",assetIds:empty?[]:[1],relativePaths:empty?[]:[photo.relPath]}}); }
   };
   localStorage.clear();
+  localStorage.setItem("raybend.locale", "zh-CN");
   localStorage.setItem("raybend.browse-session.v1", JSON.stringify({repositoryId:repo.id,scopePath:"photos/2026-08-15"}));
   window.__TAURI_EVENT_PLUGIN_INTERNALS__={unregisterListener:()=>{}};
   window.__TAURI_INTERNALS__={metadata:{currentWindow:{label:"main"},currentWebview:{label:"main"}},transformCallback:cb=>cb,unregisterCallback:()=>{},convertFileSrc:p=>p,
@@ -32,6 +33,9 @@ function backend() {
       const state=window.__exportTest;state.calls.push(cmd);
       if(cmd==="plugin:event|listen") { const id=++next;handlers.set(id,args);return id; }
       if(cmd==="plugin:event|unlisten") {handlers.delete(args.eventId);return;}
+      if(cmd==="migration_snapshot")return {revision:"1",active:[]};
+      if(cmd==="organization_reconcile")return {processedBatches:0,failedRepositories:[]};
+      if(cmd==="organization_buckets")return [];
       if(cmd==="repository_remount") return structuredClone(repo);
       if(cmd==="plugin:dialog|open") {
         if(state.pickerDelay)return new Promise(resolve=>{state.pickerResolve=resolve;});

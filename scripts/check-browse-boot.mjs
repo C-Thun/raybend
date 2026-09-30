@@ -332,6 +332,7 @@ try {
   await send("Page.addScriptToEvaluateOnNewDocument", {
     source: `
       Error.stackTraceLimit = 60;
+      localStorage.setItem("raybend.locale", "zh-CN");
       // 抓「未处理的 Promise 拒绝」与运行期错误：Solid 里这类异常常常只留在控制台，
       // 而静默失败会让冒烟只能看到「后面全都不对」这种二手症状
       window.__REJECTIONS = [];
@@ -365,6 +366,9 @@ try {
           if (cmd === "external_applications") return Promise.resolve([]);
           if (cmd === "external_task") return Promise.resolve({id:0,revision:0,status:"idle",output:null,error:null,missingApplication:null});
           if (cmd === "export_queue") return Promise.resolve({revision:0,generation:0,queues:{},enabled:[]});
+          if (cmd === "migration_snapshot") return Promise.resolve({revision:"1",active:[]});
+          if (cmd === "organization_reconcile") return Promise.resolve({processedBatches:0,failedRepositories:[]});
+          if (cmd === "organization_buckets") return Promise.resolve([]);
           if (cmd === "file_exif" || cmd === "issue_library") {
             const result = cmd === "file_exif"
               ? {...window.__FIXTURES.browse_page?.items?.[0],tags:[],cameraMake:null,cameraModel:null,lens:null,software:"camera",width:4000,height:3000,orientation:1}

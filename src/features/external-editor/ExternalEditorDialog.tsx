@@ -22,10 +22,10 @@ export function ExternalEditorDialog(props:{store:ExternalEditorStore}){
       没有真 exe 图标可用（登记模型只有 name+path，图标抽取是后续项），
       v1 用应用名首字的方砖代位。
     */}
-    <div data-external-application role="list" aria-label={t('external.application')} class="grid grid-cols-5 gap-x-2 gap-y-2">
+    <div data-external-application role="group" aria-label={t('external.application')} class="grid grid-cols-5 gap-x-2 gap-y-2">
      <For each={store.preferences().applications}>{app=>{
       const selected=()=>{const current=store.selectedApplication();return current!==null&&applicationKey(current.path)===applicationKey(app.path);};
-      return <button type="button" role="listitem" data-external-app aria-pressed={selected()}
+      return <button type="button" data-external-app aria-pressed={selected()}
        class="flex min-w-0 flex-col items-center gap-1 rounded-ui p-1 hover:bg-state-hover disabled:opacity-50"
        disabled={store.loading()||store.running()||store.busy()} title={app.path}
        onClick={()=>void store.chooseApplication(app.path)}>
@@ -35,7 +35,7 @@ export function ExternalEditorDialog(props:{store:ExternalEditorStore}){
        </span>
        <span classList={{"text-fg-1":selected(),"text-fg-2":!selected()}} class="w-full truncate text-center text-fs-0">{app.name}</span>
       </button>;}}</For>
-     <button type="button" role="listitem" data-external-add aria-label={t('external.addApplication')}
+     <button type="button" data-external-add aria-label={t('external.addApplication')}
       class="flex min-w-0 flex-col items-center gap-1 rounded-ui p-1 hover:bg-state-hover disabled:opacity-50"
       disabled={store.loading()||store.running()||store.busy()} onClick={()=>void store.discover()}>
       <span class="flex aspect-square w-full shrink-0 items-center justify-center rounded-ui border border-dashed border-fg-3 text-fs-3 text-fg-3" aria-hidden="true">+</span>

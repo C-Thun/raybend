@@ -159,6 +159,23 @@ Windows 当前是整个编辑视口的 wgpu 上下文使用 DX12，不存在 Vul
 
 ---
 
+### 2.2 系统互操作统一采用 adapter（2026-09-30 崔总明确要求）
+
+**新增或重构系统互操作时，先设计 adapter 边界，再接系统 API；不能等实现散落后再抽象。**
+包括系统状态/资源读取、设备识别、变更通知、系统设置入口和原生呈现协作。
+业务层依赖自有类型与能力契约，平台 adapter 封装原生句柄、API、路径、版本探测与兼容回退；
+前端仍只经既有 API 层发意图，Tauri 薄壳负责生命周期与装配，不承担色彩业务。
+
+沿用已有 `PresentationAdapter`、窗口句柄胶水与 `SystemPreferencesAdapter`，按职责扩展；
+不因采用 adapter 就新建顶层框架、重复 GPU 上下文或渲染循环。接口须表达不支持/未知/失败，
+不能把回退伪装成检测成功；监听应可释放，异步快照/结果应防止旧状态覆盖新状态。
+提供 fake adapter 支持确定性的无头测试，真实平台行为仍由真机验证。
+
+色彩管理的具体 adapter 分工、快照/事件与状态范围见
+[`specs/color-management.md` §5.3](../specs/color-management.md)。本轮是架构约束，尚未实施系统色彩适配。
+
+---
+
 ## 3. 状态归属
 
 | 状态 | 归属 | 理由 |
@@ -314,7 +331,7 @@ Tauri 3.0 已进入 alpha（`3.0.0-alpha.0`），已知关键变更：
   **大图**（每个命名 issue 独立一张 1920 AVIF）在**库根**的 `cache/full/`（跟着库走，换机器/搬盘不用重渲染）。
   两处的编码格式统一 **AVIF 质量 90 / 4:4:4**（人类 2026-09-24 定；快照恒为 AVIF，
   不考虑换 JXL —— 格式范围与 JXL 定位见 `memory/FUTURE.md` C8）。
-- **真相源规则**：本地编辑/评分/关键词以 **DB 为准**，XMP 只是互操作通道；RAW 永不写回原文件（只写 `.xmp` sidecar）。issue 的 XMP 表达契约见 `specs/issue-xmp-contract.md`，当前尚未写出 sidecar。
+- **真相源规则**：本地编辑/评分/关键词以 **DB 为准**，XMP 只是互操作通道；RAW 永不写回原文件（只写 `.xmp` sidecar）。issue 的 XMP 表达契约见 `specs/issue-xmp-contract.md`，实现规格见 `specs/xmp-w1.md`（2026-09-30 草案待审）；**XMP 不是第一公民**，整库备份 = 直接拷 repos 目录；当前尚未写出 sidecar。
 - **写并发**：SQLite 单写者 → 采用**单一写者 actor**（专属线程 + 专属连接，所有写操作串行化），读走连接池；批量事务；`PRAGMA journal_mode=WAL, synchronous=NORMAL, busy_timeout=5000, foreign_keys=ON`。
 - **库身份与多路径**（`memory/FUNCTION-REPOSITORY.md` §2）：库身份 = `catalog.db` 内的唯一 ID；`app.db` 记录「库 ID → 多个路径」。
   路径挂载了哪个库靠**读该路径下 catalog.db 的 ID** 比对，而不是靠路径字符串 —— 这是「同路径不同库 / 同库多路径」的机制。

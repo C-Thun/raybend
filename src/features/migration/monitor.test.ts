@@ -86,3 +86,29 @@ test("事件降级查询单飞，慢 IPC 不叠加请求，销毁后不再发查
   query.resolve(snapshot("1")); await starting;
   monitor.dispose(); poll(); assert.equal(calls, 1);
 });
+
+test("轮询适配器同步抛错后仍能继续接收快照", async () => {
+  let poll!: () => void;
+  let calls = 0;
+  const errors: string[] = [];
+  const states: number[] = [];
+  const monitor = createMigrationMonitor({
+    subscribe: async () => { throw new Error("listen"); },
+    snapshot: () => {
+      calls++;
+      if (calls <= 2) throw new Error("sync IPC failure");
+      return Promise.resolve(snapshot("1"));
+    },
+    onChange: state => states.push(state.size),
+    onSubscriptionError: error => errors.push(String(error)),
+    repeat: fn => { poll = fn; return () => {}; },
+  });
+  await assert.rejects(monitor.start(), /sync IPC failure/);
+  poll();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(errors.length, 2, "监听失败与轮询失败都已报告");
+  poll();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.deepEqual(states, [1]);
+  monitor.dispose();
+});

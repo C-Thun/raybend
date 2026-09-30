@@ -24,6 +24,7 @@ use raybend::store::query::{
     self, AssetRow, Combinator, Filter, FlagFilter, Query, Scope, Sort, SortKey,
 };
 use raybend::store::repository;
+use raybend::store::organization;
 use raybend::store::tags;
 use raybend::store::time;
 use serde::{Deserialize, Serialize};
@@ -279,7 +280,7 @@ pub struct FlagFilterDto {
 }
 
 impl FilterDto {
-    fn into_filter(self) -> Filter {
+    pub(crate) fn into_filter(self) -> Filter {
         Filter {
             min_rating: self.min_rating.and_then(|r| u8::try_from(r).ok()),
             flag: self.flag.map(|flag| FlagFilter {
@@ -302,6 +303,7 @@ impl FilterDto {
             focal_from: self.focal_from,
             focal_to: self.focal_to,
             tags: self.tags,
+            tag_keys: Vec::new(),
             text: self.text,
             combinator: match self.combinator.as_deref() {
                 Some("and") => Combinator::And,
@@ -861,11 +863,23 @@ pub async fn browse_mark<R: Runtime>(
     blocking(move || {
         let state = handle.state::<BrowseState>();
         let id = repository_id.clone();
+        let attached_terms = match &action {
+            MarkActionDto::AttachTags { tag_ids } => Some(
+                handle.state::<DbState>().with(&handle, |db| {
+                    db.read(|conn| tags::tags_by_ids(conn, tag_ids)).map_err(|e| e.to_string())
+                })?
+            ),
+            _ => None,
+        };
         /*
          * 「读旧值 → 写新值」必须在**同一个写事务**里：分成两次调用的话，
          * 两次之间别人改了这张照片，撤销栈里记的就是错的旧值。
          */
         let (applied, change) = state.with_catalog(&handle, &repository_id, move |db| {
+            if let Some(dictionary) = attached_terms {
+                db.write(move |conn| organization::sync_legacy_terms(conn, &dictionary))
+                    .map_err(|e| e.to_string())?;
+            }
             // 写事务的闭包要求 `Send + 'static` —— 参数要先克隆一份进去
             let action = action.clone();
             let ids = ids.clone();

@@ -26,6 +26,7 @@ import {
   on,
   onMount,
   Show,
+  untrack,
   type JSX,
 } from "solid-js";
 
@@ -38,10 +39,15 @@ import type { RepositoryStateStore } from "../../features/repositories/state.ts"
 import {
   AssetInfo,
   BrowseLeftColumn,
+  OrganizationPanel,
+  type OrganizationSelection,
   type BrowseStore,
 } from "../../features/browse/index.ts";
+import type { AssetIdentity, PhotoBucket } from "../../api/organization.ts";
 import { FilterBar } from "../../features/browse/FilterBar.tsx";
 import { browseSource } from "../../features/browse/grid-source.ts";
+import { createOrganizationSource } from "../../features/browse/organization-source.ts";
+import { PHOTO_DRAG_TYPE } from "../../features/browse/organization-drag.ts";
 import {
   createPhotoViewingController,
   PhotoViewingStage,
@@ -89,9 +95,20 @@ import { LAYOUT_BOUNDS } from "../../lib/layout-prefs.ts";
  * 2026-09-20 下限与 import left 对齐为 220px。
  */
 const SIDEBAR_BOUNDS = LAYOUT_BOUNDS.browseLeftWidth;
-import type { BrowseSort, DeleteFailure } from "../../api/types.ts";
+import type { AssetItem, BrowseSort, DeleteFailure } from "../../api/types.ts";
 
 export interface BrowseWorkspaceProps {
+  organizationPanel: "library" | "buckets" | "tags";
+  organizationRevision?: number;
+  onNewBucket: () => void;
+  onEditBucket: (bucket: PhotoBucket) => void;
+  onOrganizationChanged?: () => void;
+  onOrganizationSelection?: (photos: AssetIdentity[]) => void;
+  onOrganizationViewChange?: (active: boolean) => void;
+  onOrganizationAnchor?: (photo: AssetIdentity | null, item: AssetItem | null) => void;
+  onOrganizationItems?: (items: AssetItem[]) => void;
+  onOrganizationActions?: (actions: { selectAll: () => void; clearSelection: () => void } | null) => void;
+  onOrganizationBucketSelection?: (bucketId: number | null) => void;
   onExternalEditor?: (target:import("../../lib/external-editor.ts").ExternalTarget)=>void;
   store: BrowseStore;
   repositories: RepositoryStateStore;
@@ -158,6 +175,19 @@ function ColumnHandle(props: {
 
 export function BrowseWorkspace(props: BrowseWorkspaceProps) {
   const store = props.store;
+  const [organizationSelection, setOrganizationSelection] = createSignal<OrganizationSelection>(null);
+  const organizationPhotos = () => organizationSelection()?.kind === "tag" || organizationSelection()?.kind === "bucket";
+  const organizationInfoAligned = () => {
+    const id = organization.selection().anchor;
+    const entry = id ? organization.entryById(id) : null;
+    return entry !== null && entry !== undefined &&
+      store.repositoryId() === entry.repositoryId && store.anchorItem()?.id === entry.assetId;
+  };
+  createEffect(() => props.onOrganizationViewChange?.(organizationPhotos()));
+  createEffect(() => {
+    const selected = organizationSelection();
+    props.onOrganizationBucketSelection?.(selected?.kind === "bucket" ? selected.id : null);
+  });
   const anchor = createMemo(() => store.anchorItem());
   const repositories = props.repositories.list;
   const reposLoading = () => props.repositories.status() === "loading" || props.repositories.status() === "idle";
@@ -268,6 +298,47 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
       return bytes ?? null;
     },
   });
+  const organization = createOrganizationSource({
+    repositories,
+    thumbs,
+    tileStep,
+    setTileStep,
+    commitTileStep: commitBrowseDisplayTileStep,
+    infoMode: browseInfoMode,
+    filter: store.filter,
+    onPartialFailure: (repositoryIds) => props.toast?.show({ tone: "danger",
+      message: t("org.queryPartial").replace("{n}", String(repositoryIds.length)) }),
+  });
+  onMount(() => {
+    props.onOrganizationActions?.({ selectAll: organization.selectAll, clearSelection: organization.clearSelection });
+    onCleanup(() => props.onOrganizationActions?.(null));
+  });
+  createEffect(on(() => [organizationSelection(),
+    repositories().filter((repo) => repo.online).map((repo) => `${repo.id}:${repo.connection?.generation}`).join("|"),
+    props.organizationRevision, JSON.stringify(store.filter())] as const, ([selected]) => {
+    void organization.load(selected);
+  }));
+  createEffect(() => {
+    const selected = organization.selection().ids;
+    props.onOrganizationSelection?.([...selected].flatMap((id) => {
+      const entry = organization.entryById(id);
+      return entry ? [{ repositoryId: entry.repositoryId, assetId: entry.assetId }] : [];
+    }));
+    untrack(organization.ensureSelected);
+  });
+  createEffect(() => {
+    const selected = organization.selection().ids;
+    props.onOrganizationItems?.([...selected].flatMap((id) => {
+      const item = organization.itemById(id);
+      return item ? [item] : [];
+    }));
+  });
+  createEffect(() => {
+    const id = organizationPhotos() ? organization.selection().anchor : null;
+    const entry = id ? organization.entryById(id) : null;
+    props.onOrganizationAnchor?.(entry ? { repositoryId: entry.repositoryId, assetId: entry.assetId } : null,
+      id ? organization.itemById(id) : null);
+  });
   const displaySession = createMemo(() => {
     const row = props.repositories.byId(store.repositoryId() ?? "");
     return row?.online ? `${row.id}:${row.connection?.generation ?? "0"}` : null;
@@ -332,10 +403,14 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
     viewer,
     /* browse 保持 M2 的**四档**（人类 2026-09-23 明确：browse 不动） */
     chromeMode: () => "browse",
-    selection: store.selection,
-    setAnchor: (id) => store.setAnchor(Number(id)),
-    naturalOf: (id) => display.get(Number(id))?.natural ?? store.naturalOf(Number(id)),
+    selection: () => organizationPhotos() ? organization.selection() : store.selection(),
+    setAnchor: (id) => organizationPhotos() ? organization.source.setAnchor(id) : store.setAnchor(Number(id)),
+    naturalOf: (id) => organizationPhotos() ? organization.source.naturalOf(id) : display.get(Number(id))?.natural ?? store.naturalOf(Number(id)),
     ensureNatural: (ids) => {
+      if (organizationPhotos()) return organization.source.ensureNatural(ids.flatMap((id) => {
+        const item = organization.source.itemById(id);
+        return item ? [{ id, path: item.path }] : [];
+      }));
       const base = root();
       if (base === null) return;
       const entries = ids.flatMap((id) => {
@@ -352,6 +427,17 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
    * 这些条件本来写在 `BrowseGrid` 里 —— 那是**视图配置**，谁开这个视图谁给文案。
    */
   function gridWatermark(): JSX.Element | null {
+    if (organizationPhotos()) {
+      if (organization.error()) return <StateWatermark tone="error" icon={<IconAlertTriangle size={64} />}
+        text={organization.error() ?? ""} action={{ label: t("common.retry"), run: () => void organization.load(organizationSelection()) }} />;
+      if (organization.source.status() === "loading") return <StateWatermark animate delayMs={1500}
+        icon={<IconPhoto size={64} />} text={t("browse.loading")} />;
+      if (!repositories().some((repo) => repo.online && repo.root !== null))
+        return <StateWatermark icon={<IconAlbumOff size={64} />} text={t("org.mountLibrary")} />;
+      if (organization.source.count() === 0) return <StateWatermark icon={<IconPhotoOff size={64} />}
+        text={t("org.noMatchingPhotos")} />;
+      return null;
+    }
     if (store.repositoryId() === null) {
       return (
         <StateWatermark
@@ -570,7 +656,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
    * `ReferenceError: Cannot access 'root' before initialization`，
    * 表现为「点了『浏览』状态切了但界面不动」）。
    */
-  const gridSource = createMemo(() =>
+  const gridSource = createMemo(() => organizationPhotos() ? organization.source :
     display.adapt(browseSource({
       store,
       // 传取值函数（不是值）：库列表是异步来的，见 `BrowseSourceDeps.root` 的说明
@@ -584,6 +670,9 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
       infoMode: browseInfoMode,
     })),
   );
+  createEffect(on(organizationSelection, () => {
+    if (viewer.state().active) viewer.close();
+  }, { defer: true }));
 
   // Page-cache refreshes can temporarily contain holes. Only a display-choice change
   // replaces viewer images; ordinary paging must preserve the active viewer.
@@ -629,7 +718,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
    * 这里不另建一份清单（§2.12）。
    */
   const fullscreenTarget = createMemo(() =>
-    buildFullscreenTarget(photosFromSource(gridSource()), store.selection().anchor),
+    buildFullscreenTarget(photosFromSource(gridSource()), gridSource().selection().anchor),
   );
 
   /**
@@ -672,8 +761,28 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
             .join(" ")}
           style={{ width: `${leftWidth()}px` }}
         >
+          <Show when={props.organizationPanel === "library"} fallback={
+            <OrganizationPanel
+              mode={props.organizationPanel === "tags" ? "tags" : "buckets"}
+              refreshKey={props.organizationRevision}
+              repositories={repositories()}
+              selection={organizationSelection()}
+              onSelectTag={(tag) => setOrganizationSelection({ kind: "tag", key: tag.name.normalize("NFC").toLowerCase() })}
+              onSelectBucket={(bucket) => setOrganizationSelection({ kind: "bucket", id: bucket.id })}
+              onSelectDirectory={(repositoryId, path) => {
+                setOrganizationSelection({ kind: "directory", repositoryId, path });
+                store.setRepository(repositoryId);
+                store.setScope(path);
+              }}
+              onNewBucket={props.onNewBucket}
+              onEditBucket={props.onEditBucket}
+              onError={(error) => store.reportError(error)}
+              onChanged={props.onOrganizationChanged}
+            />
+          }>
           <BrowseLeftColumn
             store={store}
+            onSelectDirectory={(repositoryId, path) => setOrganizationSelection({ kind: "directory", repositoryId, path })}
             repositories={repositories()}
             reposLoading={reposLoading()}
             reposError={reposError()}
@@ -684,6 +793,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
             onRemount={(id) => void remountLibrary(id)}
             isRemounting={props.repositories.isRemounting}
           />
+          </Show>
         </aside>
 
         {/* 拖拽手柄：左列 ↔ 中列（看图第 ② 档起与左列一起收起来） */}
@@ -709,7 +819,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
       >
         {/** 筛选结果区（chips + 共 N 张 + 任一/全部）：看图时不占位置 */}
         <Show when={!viewer.state().active}>
-          <FilterBar store={store} />
+          <FilterBar store={store} count={organizationPhotos() ? organization.source.count() : undefined} />
         </Show>
 
         {/**
@@ -725,18 +835,18 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
           filmStripStep={props.filmStripStep}
           onFilmStripStepChange={props.onFilmStripStepChange}
           tilesBar={{
-            count: store.total(),
-            selectedCount: store.selectedCount(),
-            label: currentLead(),
-            fileName: anchor()?.fileName ?? null,
-            byTime: grouped(),
+            count: gridSource().count(),
+            selectedCount: gridSource().selection().ids.size,
+            label: organizationPhotos() ? (organizationSelection()?.kind === "tag" ? t("org.tags") : t("org.buckets")) : currentLead(),
+            fileName: organizationPhotos() ? organization.itemById(gridSource().selection().anchor ?? "")?.fileName ?? null : anchor()?.fileName ?? null,
+            byTime: organizationPhotos() ? false : grouped(),
             onByTimeChange: (value) => setGrouped(value),
             infoMode: browseInfoMode(),
             onInfoToggle: cycleBrowseTileInfo,
             tileStep: tileStep(),
             onTileStepChange: setTileStep,
             onTileStepCommit: () => commitBrowseDisplayTileStep(),
-            sort: {
+            sort: organizationPhotos() ? undefined : {
               keys: Object.keys(SORT_LABELS) as NonNullable<BrowseSort["key"]>[],
               value: store.sort().key ?? "takenAt",
               labelOf: (key) => SORT_LABELS[key as NonNullable<BrowseSort["key"]>](),
@@ -749,9 +859,24 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
           }}
           viewingInfo={viewingInfo()}
           focusId={focusId()}
-          pinsKey={`${store.repositoryId() ?? ""}:${store.scopePath() ?? ""}:${store.filterMode() ? "on" : "off"}:${JSON.stringify(store.filter())}`}
+          pinsKey={organizationPhotos() ? organization.source.scopeKey() : `${store.repositoryId() ?? ""}:${store.scopePath() ?? ""}:${store.filterMode() ? "on" : "off"}:${JSON.stringify(store.filter())}`}
           onInteract={() => setLibsExpanded(false)}
           onFocusIndex={(index) => { setFocusIndex(index); setFocusId(undefined); }}
+          onPhotoDragStart={(id, event) => {
+            const selected = gridSource().selection().ids;
+            const ids = selected.has(id) ? [...selected] : [id];
+            const photos: AssetIdentity[] = ids.flatMap((value) => {
+              if (organizationPhotos()) {
+                const entry = organization.entryById(value);
+                return entry ? [{ repositoryId: entry.repositoryId, assetId: entry.assetId }] : [];
+              }
+              const repositoryId = store.repositoryId(), assetId = Number(value);
+              return repositoryId && Number.isSafeInteger(assetId) ? [{ repositoryId, assetId }] : [];
+            });
+            if (photos.length === 0) { event.preventDefault(); return; }
+            event.dataTransfer?.setData(PHOTO_DRAG_TYPE, JSON.stringify(photos));
+            if (event.dataTransfer) event.dataTransfer.effectAllowed = "copy";
+          }}
           watermark={() => gridWatermark()}
         />
       </main>
@@ -771,7 +896,10 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
           右栏在看图态换成**预览 + 直方图**（`memory/FUNCTION-BROWSE.md` §5.9）——
           看图件的 store 本身就是「当前看哪张 + 看到哪一块」的唯一事实来源，直接传进去。
         */}
-        <AssetInfo
+        <Show when={!organizationPhotos() || organizationInfoAligned()} fallback={<div class="p-panel-pad text-fs-1 text-fg-2">
+          <p class="font-semibold text-fg-1">{organization.itemById(gridSource().selection().anchor ?? "")?.fileName ?? t("org.selectPhoto")}</p>
+          <p>{repositories().find((repo) => repo.id === organization.entryById(gridSource().selection().anchor ?? "")?.repositoryId)?.name ?? ""}</p>
+        </div>}><AssetInfo
               store={store}
               item={info()?.item ?? null}
               fileExif={info()?.file ?? null}
@@ -789,7 +917,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
               repositoryName={
                 repositories().find((repo) => repo.id === store.repositoryId())?.name ?? null
               }
-            />
+            /></Show>
       </aside>
       </div>
 

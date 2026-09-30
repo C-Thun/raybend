@@ -82,6 +82,8 @@ pub struct Migration {
 /// * v2 `tags`：**标签词典**（跨库公用，memory/FUNCTION-BROWSE.md §7.1）
 /// * v3 `recent_dirs`：最近导入过的目录（design/main.md §3.1.1 的「最近」）
 /// * v4 `directory_counts`：**目录级计数**（相片/图片两个数）+ 库级汇总列（人类 2026-09-19）
+/// * v8 `presets`：编辑预设（一级目录 + 大类快照 JSON，specs/editor-presets.md）
+/// * v9 `photo_organization`：相片桶、持久成员与排除
 pub const APP_MIGRATIONS: &[Migration] = &[
     Migration {
         version: 1,
@@ -117,6 +119,16 @@ pub const APP_MIGRATIONS: &[Migration] = &[
         version: 7,
         name: "lut_hash",
         sql: include_str!("migrations/app_0007_lut_hash.sql"),
+    },
+    Migration {
+        version: 8,
+        name: "presets",
+        sql: include_str!("migrations/app_0008_presets.sql"),
+    },
+    Migration {
+        version: 9,
+        name: "photo_organization",
+        sql: include_str!("migrations/app_0009_photo_organization.sql"),
     },
 ];
 
@@ -197,6 +209,11 @@ pub const CATALOG_MIGRATIONS: &[Migration] = &[
         version: 13,
         name: "issue_ordinal",
         sql: include_str!("migrations/catalog_0013_issue_ordinal.sql"),
+    },
+    Migration {
+        version: 14,
+        name: "photo_organization",
+        sql: include_str!("migrations/catalog_0014_photo_organization.sql"),
     },
 ];
 

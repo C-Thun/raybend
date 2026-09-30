@@ -2056,6 +2056,41 @@ try {
     await sleep(220);
     result.rightPadLoose = infoPad();
 
+    const panelButton = (zh, en) =>
+      document.querySelector('button[aria-label="' + zh + '"]') ??
+      document.querySelector('button[aria-label="' + en + '"]');
+    const libraries = panelButton("库目录", "Libraries");
+    const buckets = panelButton("相片桶", "Photo buckets");
+    const tags = panelButton("标签", "Tags");
+    tags?.click();
+    await sleep(100);
+    const tagSearch = document.querySelector('input[aria-label="搜索标签"],input[aria-label="Search tags"]');
+    const tagsPressed = tags?.getAttribute("aria-pressed") === "true";
+    tags?.click();
+    await sleep(50);
+    const sameButtonKeepsPanel = tags?.getAttribute("aria-pressed") === "true";
+    buckets?.click();
+    await sleep(100);
+    const bucketsPressed = buckets?.getAttribute("aria-pressed") === "true" &&
+      tags?.getAttribute("aria-pressed") === "false";
+    (panelButton("新建相片桶", "New photo bucket"))?.click();
+    await sleep(100);
+    const ruleDialog = document.querySelector('[role="dialog"]');
+    const hasRuleEditor = /桶名|Bucket name/.test(ruleDialog?.innerText ?? "") &&
+      /添加一组|Add a group/.test(ruleDialog?.innerText ?? "");
+    const cancel = [...(ruleDialog?.querySelectorAll("button") ?? [])].find((button) =>
+      /^(取消|Cancel)$/.test(button.innerText.trim()));
+    cancel?.click();
+    await sleep(50);
+    libraries?.click();
+    await sleep(50);
+    result.organization = {
+      threeButtons: Boolean(libraries && buckets && tags),
+      tagSearch: Boolean(tagSearch), tagsPressed, sameButtonKeepsPanel,
+      bucketsPressed, hasRuleEditor,
+      libraryPressed: libraries?.getAttribute("aria-pressed") === "true",
+    };
+
     (labelFor("导入") ?? labelFor("Import"))?.click();
     await sleep(300);
     result.restoredImport = document.querySelector('input[type="search"]') === null;
@@ -2107,6 +2142,9 @@ try {
     }
     if (browseWorkspace.browseTools === 0) {
       problems.push("「浏览」工作流下没看到标记工具（筛选开关等，memory/FUNCTION-BROWSE.md §3）");
+    }
+    if (Object.values(browseWorkspace.organization ?? {}).some((value) => !value)) {
+      problems.push("相片整理三入口、标签搜索或共用规则弹窗冒烟失败");
     }
     if (!browseWorkspace.restoredImport) {
       problems.push("从「浏览」切回「导入」后，浏览左列的搜索框还在");

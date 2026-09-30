@@ -37,6 +37,7 @@ export interface PhotoViewingStageProps {
   movesWithArrowKeys?: boolean;
   onInteract?: () => void;
   onFocusIndex?: (index: number) => void;
+  onPhotoDragStart?: (id: string, event: DragEvent) => void;
   watermark?: PhotoGridProps["watermark"];
   class?: string;
 }
@@ -66,6 +67,7 @@ export function PhotoViewingStage(props: PhotoViewingStageProps): JSX.Element {
           {...(props.onFocusIndex === undefined
             ? {}
             : { onFocusIndex: props.onFocusIndex })}
+          onPhotoDragStart={props.onPhotoDragStart}
           {...(props.watermark === undefined ? {} : { watermark: props.watermark })}
         />
 

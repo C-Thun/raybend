@@ -96,6 +96,7 @@ export interface PhotoGridProps {
   onInteract?: () => void;
   /** 点了第几格（显示序下标）：浏览侧据此记住「当前那张」，键盘导航从它接着走 */
   onFocusIndex?: (index: number) => void;
+  onPhotoDragStart?: (id: string, event: DragEvent) => void;
   /**
    * 打开看图的**前一刻**回调（浏览侧要在这里复位四态 `chrome`、收起库列表）。
    * 网格自己不认识那些概念 —— 它只负责「打开前打个招呼」。
@@ -571,6 +572,7 @@ export function PhotoGrid(props: PhotoGridProps): JSX.Element {
                 cellOverlay={props.cellOverlay}
                 {...(props.onInteract === undefined ? {} : { onInteract: props.onInteract })}
                 {...(props.onFocusIndex === undefined ? {} : { onFocusIndex: props.onFocusIndex })}
+                onPhotoDragStart={props.onPhotoDragStart}
               />
             ) : (
               <GroupHeader source={source} row={row} locale={groupingLocale()} />
@@ -605,6 +607,7 @@ function TileRow(props: {
   cellOverlay?: (item: GridItem) => JSX.Element;
   onInteract?: () => void;
   onFocusIndex?: (index: number) => void;
+  onPhotoDragStart?: (id: string, event: DragEvent) => void;
 }): JSX.Element {
   return (
     <div
@@ -629,6 +632,7 @@ function TileRow(props: {
             cellOverlay={props.cellOverlay}
             {...(props.onInteract === undefined ? {} : { onInteract: props.onInteract })}
             {...(props.onFocusIndex === undefined ? {} : { onFocusIndex: props.onFocusIndex })}
+            onPhotoDragStart={props.onPhotoDragStart}
           />
         )}
       </For>
@@ -647,6 +651,7 @@ function TileCell(props: {
   cellOverlay?: (item: GridItem) => JSX.Element;
   onInteract?: () => void;
   onFocusIndex?: (index: number) => void;
+  onPhotoDragStart?: (id: string, event: DragEvent) => void;
 }): JSX.Element {
   // 被渲染（= 可见）时才请求 —— 虚拟化保证了这一点
   let requestedPath: string | null = null;
@@ -699,6 +704,11 @@ function TileCell(props: {
     >
       <div class="relative shrink-0" style={{height: "var(--tile-cell)",width:"var(--tile-cell)"}}>
       <Tile
+        draggable={props.onPhotoDragStart !== undefined && item() !== null}
+        onDragStart={(event) => {
+          const current = item();
+          if (current) props.onPhotoDragStart?.(current.id, event);
+        }}
         keyboardActivate={props.commandEnter !== true}
         info={props.source.infoMode()}
         /*

@@ -58,8 +58,10 @@ import {
   type ParamGroup,
 } from "./params.ts";
 import { PendingNote } from "./parts.tsx";
+import { PresetPanel } from "./preset-panel.tsx";
 import { SliderRow } from "./SliderRow.tsx";
 import type { EditorStore } from "./store.ts";
+import type { PresetGroup } from "../../lib/presets.ts";
 import { CurveEditor } from "./CurveEditor.tsx";
 import { EditorZoomControl } from "./zoom-control.tsx";
 
@@ -148,6 +150,12 @@ export interface EditorPanelsProps {
   onZoomBy?: (factor: number) => void;
   /** 手动输入的目标缩放（`1.0` = 100%） */
   onZoomTo?: (zoom: number) => void;
+  /* ── 预设（specs/editor-presets.md）：持久化动作由工作区注入 ── */
+  onCreatePresetDirectory: (name: string) => Promise<boolean>;
+  onCreatePreset: (name: string, directoryId: string, groups: readonly PresetGroup[]) => Promise<boolean>;
+  onDeletePreset: (id: string) => Promise<void>;
+  onDeletePresetDirectory: (id: string) => Promise<void>;
+  onMovePresets: (ids: readonly string[], directoryId: string) => Promise<void>;
   class?: string;
 }
 
@@ -156,7 +164,16 @@ export interface EditorPanelsProps {
  * ══════════════════════════════════════════════════════════════ */
 
 type ViewTab = "view" | "issues" | "info";
-type CurveTab = "curve";
+type CurveTab = "curve" | "preset";
+
+/**
+ * 第 1 组页签等高（`design/editor.md` §3.11，崔总 2026-09-30 定案）：
+ * 定稿 / 信息默认高度 = 总览在 3:2 画幅下的自然高度 =
+ * 预览（内容宽 / 1.5）+ gap 8 + 缩放行 24 + gap 8 + 直方图块 213
+ * （HistogramPanel：标题 ~19 + mb 6 + py 12 + `h-44` 176；组件改版时这里要跟着核）。
+ */
+const GROUP1_TAB_HEIGHT =
+  "calc((var(--panel-w-right) - var(--panel-pad) - var(--panel-pad-scroll)) / 1.5 + 253px)";
 
 export function EditorPanels(props: EditorPanelsProps): JSX.Element {
   /*
@@ -168,7 +185,7 @@ export function EditorPanels(props: EditorPanelsProps): JSX.Element {
   const [viewTab, setViewTab] = createSignal<ViewTab>("view");
   createEffect(() => { if (props.issueFocusTick > 0) setViewTab("issues"); });
   const [paramTab, setParamTab] = createSignal<ParamGroup>("tone");
-  const [curveTab] = createSignal<CurveTab>("curve");
+  const [curveTab, setCurveTab] = createSignal<CurveTab>("curve");
 
   return (
     <div
@@ -304,22 +321,40 @@ export function EditorPanels(props: EditorPanelsProps): JSX.Element {
 
       {/* ── 第 3 组：曲线 ─────────────────────────────────── */}
       <section class="flex flex-col gap-2" data-editor-group="curve">
+        {/* 曲线 · 预设：两页签等高，切换不伸缩（design/editor.md §3.10） */}
         <SegmentedControl
           value={curveTab()}
-          onValueChange={() => undefined}
+          onValueChange={(value) => setCurveTab(value as CurveTab)}
           label={t("editor.group.curve")}
-          options={[{ value: "curve", label: t("editor.group.curve") }]}
+          options={[
+            { value: "curve", label: t("editor.group.curve") },
+            { value: "preset", label: t("editor.preset.title") },
+          ]}
         />
-        <CurveTab
-          store={props.store}
-          enabled={props.enabled}
-          current={props.current}
-          loadHistogram={props.loadHistogram}
-          onCommit={props.onCommit}
-          onRenameBaseCurve={props.onRenameBaseCurve}
-          baseCurveLibrary={props.baseCurveLibrary}
-          onSelectBaseCurve={props.onSelectBaseCurve}
-        />
+        <Show when={curveTab() === "curve"}>
+          <CurveTab
+            store={props.store}
+            enabled={props.enabled}
+            current={props.current}
+            loadHistogram={props.loadHistogram}
+            onCommit={props.onCommit}
+            onRenameBaseCurve={props.onRenameBaseCurve}
+            baseCurveLibrary={props.baseCurveLibrary}
+            onSelectBaseCurve={props.onSelectBaseCurve}
+          />
+        </Show>
+        <Show when={curveTab() === "preset"}>
+          <PresetPanel
+            store={props.store}
+            enabled={props.enabled}
+            onCommit={props.onCommit}
+            createDirectory={props.onCreatePresetDirectory}
+            createPreset={props.onCreatePreset}
+            deletePreset={props.onDeletePreset}
+            deleteDirectory={props.onDeletePresetDirectory}
+            movePresets={props.onMovePresets}
+          />
+        </Show>
       </section>
     </div>
   );
@@ -394,7 +429,8 @@ function IssuesTab(props: { enabled: boolean; store: EditorStore; library: Issue
     lensProfile: null, lensEnabled: null, baseCurveProfile: null, baseCurvePoints: null,
     lutId: null, lutEnabled: null, nrMethod: null, geometry: null,
   });
-  return <div class="flex flex-col gap-1" data-editor-issues>
+  return <div class="flex flex-col gap-1 overflow-y-auto pr-1" data-editor-issues
+    style={{ height: GROUP1_TAB_HEIGHT }}>
     <For each={(["sooc", "raw"] as const)}>{(base) =>
       <button type="button" disabled={!props.enabled || !(base === "raw" ? props.store.editBaseAvailable().raw : props.store.editBaseAvailable().bitmap)}
         class="flex min-h-12 items-center gap-2 rounded-ui px-1 text-left hover:bg-state-hover disabled:opacity-50"
@@ -502,7 +538,8 @@ function InfoTab(props: { info: EditorPhotoInfo | null }): JSX.Element {
   };
 
   return (
-    <div class="flex max-h-96 flex-col gap-3 overflow-y-auto pr-1" data-editor-info>
+    <div class="flex flex-col gap-3 overflow-y-auto pr-1" data-editor-info
+      style={{ height: GROUP1_TAB_HEIGHT }}>
       <Show
         when={props.info !== null}
         fallback={<p class="py-2 text-fs-1 text-fg-3">{t("exif.empty")}</p>}

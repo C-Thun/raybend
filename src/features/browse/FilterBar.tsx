@@ -29,6 +29,7 @@ import type { BrowseStore } from "./store.ts";
 
 export interface FilterBarProps {
   store: BrowseStore;
+  count?: number;
   class?: string;
 }
 
@@ -101,7 +102,7 @@ export function FilterBar(props: FilterBarProps): JSX.Element {
 
           {/* 筛完还剩多少张：`store.total()` 跟的是当前查询 */}
           <span class="ml-1 text-fs-2 text-fg-2" data-filter-count>
-            {t("browse.count").replace("{n}", String(props.store.total()))}
+            {t("browse.count").replace("{n}", String(props.count ?? props.store.total()))}
           </span>
         </Show>
 

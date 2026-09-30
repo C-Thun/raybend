@@ -218,6 +218,7 @@ export function ExportWorkspace(props: ExportWorkspaceProps) {
       filmVisible: () => false,
       fullscreenTarget,
       enqueue: () => {
+        if (store.organizationHandoff().length > 0) { void store.enqueueOrganizationHandoff(); return; }
         const dir = root();
         if (dir !== null) void store.enqueue(dir);
       },
@@ -293,8 +294,10 @@ export function ExportWorkspace(props: ExportWorkspaceProps) {
           remaining: store.progress(store.selectedPreset()?.id ?? "").remaining,
           total: queue.count(),
         })
-      : undefined,
-    selectedCount: bottom ? store.queueSelection().ids.size : store.selection().ids.size,
+      : store.organizationHandoff().length > 0
+        ? t("export.handoffCount").replace("{n}", String(store.organizationHandoff().length))
+        : undefined,
+    selectedCount: bottom ? store.queueSelection().ids.size : store.organizationHandoff().length > 0 ? 0 : store.selection().ids.size,
     byTime: prefs.value().grouped,
     onByTimeChange: (grouped: boolean) => prefs.update({ grouped }),
     infoMode: prefs.value().info,

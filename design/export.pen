@@ -6,7 +6,7 @@
       "id": "bi8Au",
       "x": 0,
       "y": 0,
-      "name": "Frame | 2026-09-29：命名定稿后为 SOOC、RAW；RAW 优先真实 thumb，缺失时内嵌图 brightness(0.72) saturate(0.35)，仅照片层；原片导出不受影响。",
+      "name": "Frame",
       "clip": true,
       "width": 800,
       "height": 600,
@@ -32230,6 +32230,230 @@
           "lineHeight": 1.5,
           "fontFamily": "Inter",
           "fontSize": 12,
+          "fontWeight": "normal"
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "wLvOF",
+      "x": 0,
+      "y": 3270,
+      "name": "Components / Export / RAW 真缩略图与内嵌模拟",
+      "theme": {
+        "mode": "dark",
+        "density": "compact"
+      },
+      "width": 440,
+      "height": 212,
+      "fill": "$surface-main",
+      "layout": "vertical",
+      "gap": 12,
+      "padding": 16,
+      "children": [
+        {
+          "type": "text",
+          "id": "T8Fk9",
+          "name": "排序规则",
+          "fill": "$fg-1",
+          "content": "命名定稿 → SOOC → RAW",
+          "fontFamily": "Inter",
+          "fontSize": 14,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "CZhTS",
+          "name": "原始源小图状态",
+          "width": "fill_container",
+          "height": 118,
+          "gap": 12,
+          "children": [
+            {
+              "type": "frame",
+              "id": "y3GNY",
+              "name": "原始源 / SOOC",
+              "clip": true,
+              "width": 118,
+              "height": 118,
+              "fill": "$surface-bar",
+              "cornerRadius": "$radius",
+              "stroke": "$surface-main",
+              "strokeWidth": 1,
+              "strokeAlignment": "inner",
+              "layout": "none",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "Wl1vs",
+                  "layoutPosition": "absolute",
+                  "x": 2,
+                  "y": 64,
+                  "name": "名称反差底",
+                  "width": 114,
+                  "height": 18,
+                  "fill": "$scrim",
+                  "padding": [
+                    0,
+                    3
+                  ],
+                  "alignItems": "center"
+                },
+                {
+                  "type": "text",
+                  "id": "hbwq3",
+                  "x": 4,
+                  "y": 65,
+                  "name": "定稿名称",
+                  "fill": "$fg-1",
+                  "textGrowth": "fixed-width",
+                  "width": 76,
+                  "content": "SOOC",
+                  "fontFamily": "Inter",
+                  "fontSize": 10,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "icon",
+                  "id": "M3olzW",
+                  "x": 43,
+                  "y": 25,
+                  "name": "照片内容 / SOOC",
+                  "width": 32,
+                  "height": 32,
+                  "icon": "image",
+                  "library": "lucide",
+                  "fill": "$fg-2"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "ClPOc",
+              "name": "原始源 / RAW · 真图",
+              "clip": true,
+              "width": 118,
+              "height": 118,
+              "fill": "$surface-bar",
+              "cornerRadius": "$radius",
+              "stroke": "$surface-main",
+              "strokeWidth": 1,
+              "strokeAlignment": "inner",
+              "layout": "none",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "c7dWtU",
+                  "layoutPosition": "absolute",
+                  "x": 2,
+                  "y": 64,
+                  "name": "名称反差底",
+                  "width": 114,
+                  "height": 18,
+                  "fill": "$scrim",
+                  "padding": [
+                    0,
+                    3
+                  ],
+                  "alignItems": "center"
+                },
+                {
+                  "type": "text",
+                  "id": "oOaL6",
+                  "x": 4,
+                  "y": 65,
+                  "name": "定稿名称",
+                  "fill": "$fg-1",
+                  "textGrowth": "fixed-width",
+                  "width": 76,
+                  "content": "RAW · 真图",
+                  "fontFamily": "Inter",
+                  "fontSize": 10,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "icon",
+                  "id": "hcl1n",
+                  "x": 43,
+                  "y": 25,
+                  "name": "照片内容 / RAW · 真图",
+                  "width": 32,
+                  "height": 32,
+                  "icon": "image",
+                  "library": "lucide",
+                  "fill": "$fg-2"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "Somm4",
+              "name": "原始源 / RAW · 模拟",
+              "clip": true,
+              "width": 118,
+              "height": 118,
+              "fill": "$surface-track",
+              "cornerRadius": "$radius",
+              "stroke": "$surface-main",
+              "strokeWidth": 1,
+              "strokeAlignment": "inner",
+              "layout": "none",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "zu3bY",
+                  "layoutPosition": "absolute",
+                  "x": 2,
+                  "y": 64,
+                  "name": "名称反差底",
+                  "width": 114,
+                  "height": 18,
+                  "fill": "$scrim",
+                  "padding": [
+                    0,
+                    3
+                  ],
+                  "alignItems": "center"
+                },
+                {
+                  "type": "text",
+                  "id": "ggBrg",
+                  "x": 4,
+                  "y": 65,
+                  "name": "定稿名称",
+                  "fill": "$fg-1",
+                  "textGrowth": "fixed-width",
+                  "width": 76,
+                  "content": "RAW · 模拟",
+                  "fontFamily": "Inter",
+                  "fontSize": 10,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "icon",
+                  "id": "tJGiF",
+                  "x": 43,
+                  "y": 25,
+                  "name": "照片内容 / RAW · 模拟",
+                  "opacity": 0.55,
+                  "width": 32,
+                  "height": 32,
+                  "icon": "image",
+                  "library": "lucide",
+                  "fill": "$fg-2"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "waVxj",
+          "name": "读取规则",
+          "fill": "$fg-2",
+          "content": "有真实 thumb 直接显示；缺失才暗化、降饱和内嵌图。",
+          "fontFamily": "Inter",
+          "fontSize": 11,
           "fontWeight": "normal"
         }
       ]

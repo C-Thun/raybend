@@ -35,6 +35,7 @@
 
 import { For, Show } from "solid-js";
 import {
+  IconAlbum,
   IconFlag,
   IconLock,
   IconArrowBackUp,
@@ -51,6 +52,7 @@ import {
 } from "@tabler/icons-solidjs";
 
 import { ToggleBlock } from "../../components/ui/ToggleBlock.tsx";
+import { Menu } from "../../components/ui/Menu.tsx";
 import { ToolsSeparator } from "../../components/ui/ToolsSeparator.tsx";
 import { ConfirmDialog } from "../../components/ui/Dialog.tsx";
 import { createEasyDestroy } from "../../lib/easy-destroy.ts";
@@ -74,8 +76,13 @@ import { COLOR_DOT_CLASS, isColorLabel } from "../../lib/color-labels.ts";
 
 export interface BrowseToolbarProps {
   store: BrowseStore;
+  /** 跨库来源复用同一套标记/筛选控件，单库删除/历史/标签弹窗不适用。 */
+  collectionMode?: boolean;
   /** 打开标签弹窗（W2 接线；现在只把按钮摆在那里并禁用）。 */
   onOpenTags?: () => void;
+  onAddSelectedToBucket?: () => void;
+  onAddFlagsToBucket?: () => void;
+  onNewAutoBucket?: () => void;
   /**
    * 删除（2026-09-28 崔总）：与 `Delete` 键**同一个入口** —— 组装层接
    * `browseActions()?.requestDelete()`（含确认弹窗与回收站语义）。不在这里自己发删除。
@@ -288,7 +295,7 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
         由组装层接 `browseActions()?.requestDelete()`。它**不可撤销** ——
         所以和撤销/重做之间必须有组分隔线，「长得像的按钮做的事不一样」要看得出来。
       */}
-      <Button
+      <Show when={!props.collectionMode}><Button
         variant="ghost"
         icon={<IconTrash size={14} />}
         disabled={!store.canWrite() || !hasSelection()}
@@ -297,16 +304,16 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
         onClick={() => props.onDelete?.()}
       >
         {t("browse.delete")}
-      </Button>
+      </Button></Show>
 
-      <ToolsSeparator />
+      <Show when={!props.collectionMode}><ToolsSeparator /></Show>
 
       {/*
         撤销 / 重做（`specs/M2-W2-tail.md` 4.1）：按钮的可用性与文案都来自
         后端每次动作回的 `undoLabel` / `redoLabel`（「标 3 星」这种可读动作名）——
         前端不猜栈里有什么，也不自己拼动作名。可逆动作是一组：组内几乎无间距。
       */}
-      <div class="flex items-center gap-0.5">
+      <Show when={!props.collectionMode}><div class="flex items-center gap-0.5">
         <Button
           variant="ghost"
           icon={<IconArrowBackUp size={14} />}
@@ -327,9 +334,9 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
         >
           {t("browse.redo")}
         </Button>
-      </div>
+      </div></Show>
 
-      <ToolsSeparator />
+      <Show when={!props.collectionMode}><ToolsSeparator /></Show>
 
       {/* 筛选开关：打开后右侧控件全部变成筛选语义 */}
       <ToggleBlock
@@ -368,7 +375,7 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
         「不想要」由删除表达（有回收站兜底），再来一个「弃」按钮只会让工具条更挤、
         而且两张旗子长得很像、点错也看不出来。
       */}
-      <div class="flex items-center gap-0.5">
+      <Show when={!props.collectionMode || filterMode()}><div class="flex items-center gap-0.5">
       <Show
         when={filterMode()}
         fallback={
@@ -424,9 +431,9 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
           {t("browse.flagWithout")}
         </ToggleBlock>
       </Show>
-      </div>
+      </div></Show>
 
-      <ToolsSeparator />
+      <Show when={!props.collectionMode || filterMode()}><ToolsSeparator /></Show>
 
       {/*
         星级：五颗；混合态用「短横 + 半亮」区分。
@@ -548,6 +555,24 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
       >
         {t("browse.tag")}
       </Button>
+      <Menu
+        label={t("org.bucketActions")}
+        items={[
+          { value: "selected", label: t("org.addSelected"), disabled: !hasSelection() },
+          ...(!props.collectionMode ? [{ value: "flags", label: t("org.addFlags"), disabled: store.picks().size === 0 }] : []),
+          { value: "auto", label: t("org.newAutoBucket"), separatorBefore: true },
+        ]}
+        onSelect={(value) => {
+          if (value === "selected") props.onAddSelectedToBucket?.();
+          if (value === "flags") props.onAddFlagsToBucket?.();
+          if (value === "auto") props.onNewAutoBucket?.();
+        }}
+      >
+        {(trigger) => <button {...trigger} type="button" aria-label={t("org.bucketActions")}
+          class="flex size-7 items-center justify-center rounded-ui text-fg-2 hover:bg-state-hover">
+          <IconAlbum size={16} />
+        </button>}
+      </Menu>
 
       <ToolsSeparator />
 

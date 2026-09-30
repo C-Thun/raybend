@@ -9,6 +9,9 @@
 export { browseSource, type BrowseSourceDeps } from "./grid-source.ts";
 export { BrowseToolbar, type BrowseToolbarProps } from "./BrowseToolbar.tsx";
 export { TagDialog, type TagDialogProps } from "./TagDialog.tsx";
+export { OrganizationPanel, type OrganizationSelection } from "./OrganizationPanel.tsx";
+export { BucketDialog } from "./BucketDialog.tsx";
+export { BucketPickerDialog } from "./BucketPickerDialog.tsx";
 export {
   AssetInfo,
   BrowseLeftColumn,

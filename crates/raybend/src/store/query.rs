@@ -52,6 +52,10 @@ pub enum Scope {
     Repository,
     /// 某个目录**子树**（库内相对路径，`'\'` 与 `'/'` 都接受；空串 = 库根）。
     Subtree { rel_path: String },
+    /// 桶成员或单张事件的受限集合；始终与普通筛选 AND。
+    AssetIds { ids: Vec<i64> },
+    /// Direct photo tag; independent of the optional filter's AND/OR mode.
+    TagKey { key: String },
 }
 
 impl Scope {
@@ -112,6 +116,8 @@ pub struct Filter {
     pub focal_to: Option<f64>,
     /// 标签（任一命中即算）。
     pub tags: Vec<i64>,
+    /// 本库文字标签键。相片整理与未来 AI 均查询同一个有效照片标签来源。
+    pub tag_keys: Vec<String>,
     /// 文本（文件名 / 机型 / 镜头 / 描述；中文走 FTS5 trigram，短词回退 LIKE）。
     pub text: Option<String>,
     /// 多条件组合方式。
@@ -238,6 +244,13 @@ impl Filter {
                      WHERE t.asset_id = a.id AND t.tag_id IN ({placeholders}))"
                 ),
                 params,
+            ));
+        }
+        if !self.tag_keys.is_empty() {
+            let placeholders = placeholders(self.tag_keys.len());
+            out.push((
+                format!("EXISTS (SELECT 1 FROM asset_tag_sources ts WHERE ts.asset_id = a.id AND ts.tag_key IN ({placeholders}))"),
+                self.tag_keys.iter().cloned().map(Value::Text).collect(),
             ));
         }
 
@@ -451,6 +464,18 @@ impl Query {
             params.push(Value::Text(prefix));
             params.push(Value::Text(lower));
             params.push(Value::Text(upper));
+        }
+        if let Scope::AssetIds { ids } = &self.scope {
+            if ids.is_empty() {
+                parts.push("0 = 1".to_string());
+            } else {
+                parts.push(format!("a.id IN ({})", placeholders(ids.len())));
+                params.extend(ids.iter().copied().map(Value::Integer));
+            }
+        }
+        if let Scope::TagKey { key } = &self.scope {
+            parts.push("EXISTS (SELECT 1 FROM asset_tag_sources ats WHERE ats.asset_id = a.id AND ats.tag_key = ?)".to_string());
+            params.push(Value::Text(key.clone()));
         }
 
         let conditions = self.filter.conditions();
@@ -1364,6 +1389,22 @@ mod tests {
         let mut query = Query::new(Scope::Repository);
         query.filter.tags = vec![9];
         assert_eq!(ids_of(&page(&conn, &query, 0, 10).unwrap()), vec![a]);
+    }
+
+    #[test]
+    fn direct_tag_scope_stays_required_when_other_filters_use_or() {
+        let conn = catalog();
+        let tagged = add(&conn, Spec { rating: 4, ..Spec::default() });
+        let untagged = add(&conn, Spec { rating: 5, ..Spec::default() });
+        conn.execute("INSERT INTO tag_terms(tag_key, display_name) VALUES ('旅行', '旅行')", []).unwrap();
+        conn.execute("INSERT INTO asset_tag_sources(asset_id, tag_key, source, tagged_at) VALUES (?1, '旅行', 'manual', ?2)",
+            rusqlite::params![tagged, T0]).unwrap();
+        let mut query = Query::new(Scope::TagKey { key: "旅行".into() });
+        query.filter.min_rating = Some(3);
+        query.filter.colors = vec!["red".into()];
+        query.filter.combinator = Combinator::Or;
+        assert_eq!(ids_of(&page(&conn, &query, 0, 10).unwrap()), vec![tagged]);
+        assert_ne!(tagged, untagged);
     }
 
     // ---------- 组合子 ----------

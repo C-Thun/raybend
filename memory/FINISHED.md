@@ -225,6 +225,14 @@ W1 修订稿和 W3/W4 补充 Pencil 稿均由崔总定案。全量 Rust 单元�
 
 ---
 
+## 11. 相片整理上期 —— 开发与 Agent 冒烟收口 ◐ 2026-09-30
+
+库目录／相片桶／标签三入口已落地；照片与目录标签独立，手动桶及多组自动规则共用一套照片来源与规则语义。跨挂载库选择保留复合身份，进入导出后可将全部选中照片的主定稿送入同一预设队列；离线库留待重试。下期 AI 仍未实施。
+
+规格 `specs/photo-organization.md`、`specs/photo-organization-phase1.md`；实现与验证证据见 `implementations/2026-09-30_photo-organization-phase1-implementation.md`、`implementations/2026-09-30_photo-organization-export-handoff.md`。Rust 单元、前端测试、静态检查、UI 与浏览／导出启动冒烟、Windows debug 产物核对通过。真实照片库、Windows 操作、DPI 和大库性能待崔总验收。
+
+---
+
 > 以下两个附录为**历史路线归档**（原文照搬，仅随全仓更新了文件路径引用），
 > 2026-09-27 随本文件自 memory/PLAN.md 迁入。仅供参考，不是待办清单。
 

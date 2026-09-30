@@ -19,7 +19,7 @@ import {
   Show,
   type JSX,
 } from "solid-js";
-import { IconDots, IconFolderMinus, IconFolderPlus } from "@tabler/icons-solidjs";
+import { IconDots, IconFolderMinus, IconFolderPlus, IconTag } from "@tabler/icons-solidjs";
 
 import { dirCreate, dirEmptyCheck, dirRemoveEmpty, listDirs, syncDirectoryCounts, onCatalogDirty } from "../../api/db.ts";
 import { Button } from "../../components/ui/Button.tsx";
@@ -31,6 +31,7 @@ import { Menu } from "../../components/ui/Menu.tsx";
 import type { AssetItem, DirEmptyView, FileExif, RepositoryView } from "../../api/types.ts";
 import type { IssueLibrary } from "../../api/issues.ts";
 import { locale, t } from "../../i18n/index.ts";
+import { setDirectoryTag, tagsForDirectory } from "../../api/organization.ts";
 
 import type { ViewerStore } from "../../components/ui/viewer/index.ts";
 
@@ -79,6 +80,8 @@ export interface BrowseLeftColumnProps {
    * 点开的是同一个 `LibrarySettingsDialog`（由组装层持有）。
    */
   onOpenSettings?: (repositoryId: string) => void;
+  /** 目录树明确导航时通知照片来源适配层；切换左栏本身不改变照片来源。 */
+  onSelectDirectory?: (repositoryId: string, path: string) => void;
   /** 点离线图标：对登记过的路径重新找一遍（与导入侧同一套语义）。 */
   onRemount?: (repositoryId: string) => void;
   isRemounting?: (id: string) => boolean;
@@ -123,6 +126,9 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
   const [newName, setNewName] = createSignal("");
   const [busy, setBusy] = createSignal(false);
   const [formError, setFormError] = createSignal<string | null>(null);
+  const [tagTarget, setTagTarget] = createSignal<{ repositoryId: string; path: string } | null>(null);
+  const [directoryTags, setDirectoryTags] = createSignal<string[]>([]);
+  const [directoryTagName, setDirectoryTagName] = createSignal("");
 
   const root = createMemo(
     () => props.repositories.find((r) => r.id === store.repositoryId())?.root ?? null,
@@ -413,6 +419,8 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
       if (parentRel !== "") setExpanded((prev) => new Set(prev).add(parentRel));
       await loadChildren(parentRel);
       store.setScope(created);
+      const repositoryId = store.repositoryId();
+      if (repositoryId !== null) props.onSelectDirectory?.(repositoryId, created);
       setCreateRel(null);
       setNewName("");
     } catch (error) {
@@ -425,6 +433,27 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
   /** `⋯` 菜单里那一行给菜单项用的禁用判定。 */
   const canDeleteEmpty = (relPath: string): boolean =>
     emptyInfo().get(relPath)?.empty === true;
+
+  async function openDirectoryTags(path: string): Promise<void> {
+    const repositoryId = store.repositoryId();
+    if (repositoryId === null) return;
+    setTagTarget({ repositoryId, path });
+    setDirectoryTagName(""); setFormError(null);
+    try { setDirectoryTags(await tagsForDirectory(repositoryId, path)); }
+    catch (error) { setFormError(String(error)); }
+  }
+
+  async function changeDirectoryTag(name: string, enabled: boolean): Promise<void> {
+    const target = tagTarget();
+    if (target === null || busy()) return;
+    setBusy(true); setFormError(null);
+    try {
+      await setDirectoryTag(target.repositoryId, target.path, name, enabled);
+      setDirectoryTags(await tagsForDirectory(target.repositoryId, target.path));
+      setDirectoryTagName("");
+    } catch (error) { setFormError(String(error)); }
+    finally { setBusy(false); }
+  }
 
   return (
     <div class={["flex min-h-0 flex-col gap-2 p-2", props.class ?? ""].filter(Boolean).join(" ")}>
@@ -548,7 +577,11 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
                 </button>
                 <button
                   type="button"
-                  onClick={() => store.setScope(row.relPath)}
+                  onClick={() => {
+                    store.setScope(row.relPath);
+                    const repositoryId = store.repositoryId();
+                    if (repositoryId !== null) props.onSelectDirectory?.(repositoryId, row.relPath);
+                  }}
                   class="min-w-0 flex-1 truncate py-1 text-left text-fs-2"
                   title={row.relPath}
                 >
@@ -576,10 +609,16 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
                       label: t("browse.createSubdir"),
                       icon: <IconFolderPlus size={14} />,
                     },
+                    {
+                      value: "directory-tags",
+                      label: t("org.directoryTags"),
+                      icon: <IconTag size={14} />,
+                    },
                   ]}
                   onSelect={(value) => {
                     setFormError(null);
                     if (value === "delete-empty") setConfirmRel(row.relPath);
+                    if (value === "directory-tags") void openDirectoryTags(row.relPath);
                     if (value === "create-subdir") {
                       setNewName("");
                       setCreateRel(row.relPath);
@@ -682,6 +721,23 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
         <Show when={formError() !== null}>
           <p class="text-fs-0 text-fg-2">{formError()}</p>
         </Show>
+      </Dialog>
+      <Dialog open={tagTarget() !== null} onOpenChange={(open) => { if (!open) setTagTarget(null); }}
+        title={t("org.directoryTags")} description={tagTarget()?.path}>
+        <div class="flex flex-wrap gap-2">
+          <For each={directoryTags()} fallback={<p class="text-fg-3">{t("org.noDirectoryTags")}</p>}>
+            {(name) => <button type="button" disabled={busy()} class="rounded-ui bg-surface-bar px-2 py-1 text-fg-1 hover:bg-state-hover"
+              title={t("org.removeDirectoryTag")} onClick={() => void changeDirectoryTag(name, false)}>{name} ×</button>}
+          </For>
+        </div>
+        <div class="mt-3 flex gap-2">
+          <Input value={directoryTagName()} onInput={(event) => setDirectoryTagName(event.currentTarget.value)}
+            placeholder={t("org.newDirectoryTag")} aria-label={t("org.newDirectoryTag")}
+            onKeyDown={(event) => { if (event.key === "Enter" && directoryTagName().trim()) void changeDirectoryTag(directoryTagName().trim(), true); }} />
+          <Button variant="primary" disabled={busy() || !directoryTagName().trim()}
+            onClick={() => void changeDirectoryTag(directoryTagName().trim(), true)}>{t("org.addDirectoryTag")}</Button>
+        </div>
+        <Show when={formError()}><p role="alert" class="mt-2 text-danger">{formError()}</p></Show>
       </Dialog>
     </div>
   );

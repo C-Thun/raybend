@@ -11,6 +11,7 @@ import {
   variantKey,
   type AssetVariants,
   type ExportPreset,
+  type ExportQueueItem,
   type VariantSnapshot,
 } from "../../lib/export-model.ts";
 const preset: ExportPreset = {
@@ -197,6 +198,120 @@ test("issue enqueue snapshots, deduplicates and private queues survive context c
   s.reset();
   assert.equal(s.queues().size, 0);
   assert.equal(s.presets().length, 2);
+  s.dispose();
+});
+test("organization handoff queues the main version of every selected photo across repositories", async () => {
+  const requested: [string, string][] = [];
+  const { s } = setup({
+    repositoryRoot: id => id === "甲" ? "C:/甲" : id === "乙" ? "D:/乙" : null,
+    variants: async (repo, ids) => {
+      requested.push([repo, ids.join(",")]);
+      return variants(ids);
+    },
+  });
+  await s.ready;
+  s.choosePreset(preset.id);
+  s.setOrganizationHandoff([
+    { repositoryId: "甲", assetId: 1 }, { repositoryId: "乙", assetId: 1 },
+    { repositoryId: "甲", assetId: 2 }, { repositoryId: "甲", assetId: 1 },
+  ]);
+  assert.equal(s.organizationHandoff().length, 3);
+  assert(s.canEnqueue());
+  assert.equal(await s.enqueueOrganizationHandoff(), 3);
+  assert.deepEqual(requested, [["甲", "1,2"], ["乙", "1"]]);
+  assert.equal(s.organizationHandoff().length, 0);
+  assert.deepEqual(new Set(s.queueItems().map(item => JSON.stringify([
+    item.repositoryId, item.root, item.snapshot.reference.assetId, item.snapshot.reference.variant,
+  ]))), new Set([
+    '["甲","C:/甲",1,"latest"]', '["甲","C:/甲",2,"latest"]',
+    '["乙","D:/乙",1,"latest"]',
+  ]));
+  s.dispose();
+});
+test("organization handoff keeps offline photos for retry without re-queuing successful libraries", async () => {
+  let otherOnline = false;
+  const { s } = setup({
+    repositoryAvailable: id => id !== "乙" || otherOnline,
+    repositoryRoot: id => `${id}:/库`,
+  });
+  await s.ready;
+  s.choosePreset(preset.id);
+  s.setOrganizationHandoff([{ repositoryId: "甲", assetId: 1 }, { repositoryId: "乙", assetId: 1 }]);
+  assert.equal(await s.enqueueOrganizationHandoff(), 1);
+  assert.deepEqual(s.organizationHandoff(), [{ repositoryId: "乙", assetId: 1 }]);
+  assert.equal(s.canEnqueue(), false);
+  assert.match(s.error() ?? "", /1/);
+  otherOnline = true;
+  assert(s.canEnqueue());
+  assert.equal(await s.enqueueOrganizationHandoff(), 1);
+  assert.equal(s.organizationHandoff().length, 0);
+  assert.equal(s.queueItems().length, 2);
+  s.dispose();
+});
+test("clearing a handoff or resetting queues aborts stale asynchronous cross-library enqueue", async () => {
+  const gate = deferred<AssetVariants[]>();
+  const { s } = setup({
+    repositoryRoot: () => "C:/库",
+    variants: async () => gate.promise,
+  });
+  await s.ready;
+  s.choosePreset(preset.id);
+  s.setOrganizationHandoff([{ repositoryId: "甲", assetId: 1 }]);
+  const pending = s.enqueueOrganizationHandoff();
+  s.clear();
+  gate.resolve(variants([1]));
+  assert.equal(await pending, 0);
+  assert.equal(s.queueItems().length, 0);
+  s.setOrganizationHandoff([{ repositoryId: "甲", assetId: 1 }]);
+  const second = s.enqueueOrganizationHandoff();
+  s.reset();
+  assert.equal(await second, 0);
+  assert.equal(s.queueItems().length, 0);
+  s.dispose();
+});
+test("organization handoff batches large selections and rejects invalid identities", async () => {
+  const batches: number[] = [];
+  const { s } = setup({
+    repositoryRoot: () => "C:/照片/很长的中文目录/📷",
+    variants: async (_, ids) => { batches.push(ids.length); return variants(ids); },
+  });
+  await s.ready;
+  s.choosePreset(preset.id);
+  s.setOrganizationHandoff([
+    ...Array.from({ length: 130 }, (_, index) => ({ repositoryId: "甲", assetId: index + 1 })),
+    { repositoryId: "", assetId: 1 }, { repositoryId: "甲", assetId: 0 },
+    { repositoryId: "甲", assetId: Number.MAX_SAFE_INTEGER + 1 },
+  ]);
+  assert.equal(s.organizationHandoff().length, 130);
+  assert.equal(await s.enqueueOrganizationHandoff(), 130);
+  assert.deepEqual(batches, [128, 2]);
+  assert.equal(s.queueItems().length, 130);
+  s.dispose();
+});
+test("organization handoff sends both libraries through the production queue runtime", async () => {
+  const queues: Record<string, ExportQueueItem[]> = {};
+  let revision = 0;
+  const payloads: string[][] = [];
+  const { s } = setup({
+    repositoryRoot: id => `${id}:/库`,
+    runtime: async (action, payload) => {
+      if (action === "enqueue") {
+        const items = payload?.items as ExportQueueItem[];
+        payloads.push(items.map(item => item.repositoryId));
+        for (const item of items) (queues[item.preset.id] ??= []).push({
+          ...item, id: String(++revision), sequence: revision,
+        });
+      }
+      return { revision: ++revision, generation: 0, queues: structuredClone(queues), enabled: [] };
+    },
+  });
+  await s.ready;
+  s.choosePreset(preset.id);
+  s.setOrganizationHandoff([{ repositoryId: "甲", assetId: 1 }, { repositoryId: "乙", assetId: 1 }]);
+  assert.equal(await s.enqueueOrganizationHandoff(), 2);
+  assert.deepEqual(payloads, [["甲"], ["乙"]]);
+  assert.equal(s.organizationHandoff().length, 0);
+  assert.equal(s.queueItems().length, 2);
   s.dispose();
 });
 test("newest batch at top; captured objects independent; saved parameter changes leave old entries intact", async () => {

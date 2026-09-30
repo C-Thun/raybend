@@ -68,6 +68,22 @@ import { pendingLegacyLutCategories, markLegacyLutCategoriesImported } from "../
 import { pickDirectory } from "../../api/dialog.ts";
 import type { DevelopStack } from "../../api/editor.ts";
 import { newLutCategoryId } from "../../lib/lut-library.ts";
+import {
+  createPreset as createPresetApi,
+  createPresetDirectory as createPresetDirectoryApi,
+  deletePreset as deletePresetApi,
+  deletePresetDirectory as deletePresetDirectoryApi,
+  getPresetLibrary,
+  movePreset as movePresetApi,
+} from "../../api/presets.ts";
+import {
+  isDirectoryNameTaken,
+  isPresetNameTaken,
+  newPresetDirectoryId,
+  newPresetId,
+  sanitizePresetLibrary,
+  type PresetGroup,
+} from "../../lib/presets.ts";
 import { Button } from "../../components/ui/Button.tsx";
 import { Dialog } from "../../components/ui/Dialog.tsx";
 import { isTauriRuntime } from "../../api/tauri-env.ts";
@@ -142,8 +158,13 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
   const [issueThumbRevision, setIssueThumbRevision] = createSignal(0);
   const issueThumbs = createThumbQueue({
     load: (key) => {
-      const [repo, asset, variant] = JSON.parse(key) as [string, number, string];
-      return getVariantThumb(repo, { assetId: asset, variant }, "strip");
+      // key 由 issueThumbKey 生成（JSON.stringify）；包一层防异常路径的坏 key 崩掉队列
+      try {
+        const [repo, asset, variant] = JSON.parse(key) as [string, number, string];
+        return getVariantThumb(repo, { assetId: asset, variant }, "strip");
+      } catch {
+        return Promise.resolve(null);
+      }
     }, concurrency: 2, maxEntries: 128,
   });
   const issueThumbKey = (choice: string): string => {
@@ -207,6 +228,63 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
       .then((library) => { if (library !== null) { applyLutLibrary(library); markLegacyLutCategoriesImported(); } })
       .catch((error: unknown) => setDevelopError(String(error)));
   });
+  /* 预设库（specs/editor-presets.md）：与 LUT 同一条路 —— 拿整库、清洗后进 store */
+  const applyPresetLibrary = (raw: unknown): void => {
+    props.store.setPresetLibrary(sanitizePresetLibrary(raw));
+  };
+  onMount(() => {
+    void getPresetLibrary()
+      .then((library) => { if (library !== null) applyPresetLibrary(library); })
+      .catch((error: unknown) => setDevelopError(String(error)));
+  });
+  const createPresetDirectoryW = async (name: string): Promise<boolean> => {
+    const trimmed = name.trim();
+    const existing = props.store.presetDirectories();
+    if (trimmed === "" || isDirectoryNameTaken(trimmed, existing)) return false;
+    const id = newPresetDirectoryId(existing);
+    try {
+      const library = await createPresetDirectoryApi(id, trimmed);
+      if (library === null) return false;
+      applyPresetLibrary(library);
+      props.store.selectPresetDirectory(id);
+      return true;
+    } catch (error) { setDevelopError(String(error)); return false; }
+  };
+  const createPresetW = async (name: string, directoryId: string, groups: readonly PresetGroup[]): Promise<boolean> => {
+    const trimmed = name.trim();
+    if (trimmed === "" || isPresetNameTaken(trimmed, directoryId, props.store.presets())) return false;
+    const id = newPresetId(props.store.presets());
+    const payload = JSON.stringify(props.store.presetSnapshot(groups));
+    try {
+      const library = await createPresetApi(id, directoryId, trimmed, payload);
+      if (library === null) return false;
+      applyPresetLibrary(library);
+      props.store.selectPreset(id, { shiftKey: false });
+      return true;
+    } catch (error) { setDevelopError(String(error)); return false; }
+  };
+  const deletePresetW = async (id: string): Promise<void> => {
+    try {
+      const library = await deletePresetApi(id);
+      if (library !== null) applyPresetLibrary(library);
+    } catch (error) { setDevelopError(String(error)); }
+  };
+  const deletePresetDirectoryW = async (id: string): Promise<void> => {
+    try {
+      const library = await deletePresetDirectoryApi(id);
+      if (library !== null) applyPresetLibrary(library);
+    } catch (error) { setDevelopError(String(error)); }
+  };
+  const movePresetsW = async (ids: readonly string[], directoryId: string): Promise<void> => {
+    try {
+      for (const id of ids) {
+        const library = await movePresetApi(id, directoryId);
+        if (library !== null) applyPresetLibrary(library);
+      }
+    } catch (error) { setDevelopError(String(error)); }
+    // 释放后打开移入的目录（specs §5.3；原目录展开态从未被动过，自动还原）
+    if (!props.store.presetExpanded(directoryId)) props.store.togglePresetDirectory(directoryId);
+  };
   const createCategory = async (name: string): Promise<boolean> => {
     const trimmed = name.trim();
     if (trimmed === "" || props.store.lutCategories().some((item) => item.name.toLowerCase() === trimmed.toLowerCase())) return false;
@@ -1034,11 +1112,20 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
     current() !== null && developReadyAssetId() === currentAssetId() && !locked();
 
 
+  let issueLibraryOwner = "";
   createEffect(() => {
     const assetId = currentAssetId();
     const repositoryId = store.repositoryId();
     const ready = developReadyAssetId();
     props.store.developRev();
+    const owner = JSON.stringify([repositoryId, assetId]);
+    if (owner !== issueLibraryOwner) {
+      issueLibraryOwner = owner;
+      setIssueLibrary(null);
+    }
+    // 定稿期间旧的延时查询可能比 createIssue 更晚返回，覆盖刚生成的列表。
+    // busy 结束后本 effect 会重新取当前照片的真实列表。
+    if (finalizeBusy()) return;
     if (assetId === null || assetId === undefined || repositoryId === null || ready !== assetId) {
       setIssueLibrary(null);
       return;
@@ -1071,6 +1158,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
     if (repositoryId === null || assetId === null || assetId === undefined) return;
     const name = finalizeName().trim();
     if (name === "") return;
+    const finalizeStack = currentDevelopStack();
     /*
      * **先关窗再干活**（崔总 2026-09-28 的口径：UI 先行，重活在后台）。
      *
@@ -1087,7 +1175,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
      * `issue_create` 里同步跑整套定稿渲染 + AVIF 编码要好几秒 —— 那几秒里列表必须有动静。
      * 同时立刻把页签切到「定稿」，让用户看得到占位出现的那一刻。
      */
-    setPendingIssue({ name, sourceBase: currentDevelopStack().sourceBase ?? "raw" });
+    setPendingIssue({ name, sourceBase: finalizeStack.sourceBase ?? "raw" });
     setIssueFocusTick((value) => value + 1);
     const stillCurrent = () =>
       store.repositoryId() === repositoryId && currentAssetId() === assetId;
@@ -1101,15 +1189,12 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
         if (library.snapshotError !== null) setDevelopError(library.snapshotError);
       }
     } catch (error) {
-      setDevelopError(String(error));
+      if (stillCurrent()) setDevelopError(String(error));
     } finally {
       setFinalizeBusy(false);
       // 占位退出：成功时真实条目已进列表；失败时也不能一直转圈
-      setPendingIssue(null);
-      // 失败也要让「其实已经存进去的定稿」立刻现身：直接拉一次列表。
-      void getIssueLibrary(repositoryId, Number(assetId), locale() === "en-US", currentDevelopStack())
-        .then((library) => { if (stillCurrent()) setIssueLibrary(library); })
-        .catch(() => undefined);
+      if (stillCurrent()) setPendingIssue(null);
+      // finalizeBusy 变化会驱动上方的 effect 重取列表；异常后也覆盖「写入成功但响应失败」。
     }
   };
   const requestDeleteIssue = (target: Issue, event: ShiftLikeEvent): void => {
@@ -1351,6 +1436,11 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
             zoom={props.store.renderState()?.zoom ?? null}
             onZoomBy={(factor) => sendIntent({ kind: "zoomBy", factor })}
             onZoomTo={zoomTo}
+            onCreatePresetDirectory={createPresetDirectoryW}
+            onCreatePreset={createPresetW}
+            onDeletePreset={deletePresetW}
+            onDeletePresetDirectory={deletePresetDirectoryW}
+            onMovePresets={movePresetsW}
           />
         </aside>
       </div>

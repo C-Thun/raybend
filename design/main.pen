@@ -18611,6 +18611,523 @@
           ]
         }
       ]
+    },
+    {
+      "type": "frame",
+      "id": "Cwm1c",
+      "x": 13336,
+      "y": -34,
+      "name": "Global Settings / Dark Compact",
+      "theme": {
+        "mode": "dark",
+        "density": "compact"
+      },
+      "clip": true,
+      "width": 930,
+      "height": 650,
+      "fill": "$surface-layer",
+      "cornerRadius": 8,
+      "stroke": "$surface-bar",
+      "strokeWidth": 1,
+      "layout": "vertical",
+      "children": [
+        {
+          "type": "frame",
+          "id": "NafGr",
+          "name": "Header / global settings",
+          "width": "fill_container",
+          "height": 88,
+          "fill": "$surface-layer",
+          "gap": 12,
+          "padding": [
+            0,
+            28
+          ],
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "HDpqF",
+              "name": "Heading stack",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 4,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "nAUY2",
+                  "name": "Title / 设置",
+                  "fill": "$fg-1",
+                  "content": "设置",
+                  "fontFamily": "Inter",
+                  "fontSize": 23,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "text",
+                  "id": "S1EO1v",
+                  "name": "Subtitle / all device preferences",
+                  "fill": "$fg-2",
+                  "content": "显示、色彩和操作方式，由你掌控。",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "UIeqt",
+              "name": "Close button",
+              "width": 32,
+              "height": 32,
+              "fill": "$surface-bar",
+              "cornerRadius": "$radius",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "uch94",
+                  "name": "Close glyph",
+                  "width": 18,
+                  "height": 18,
+                  "icon": "x",
+                  "library": "lucide",
+                  "fill": "$fg-2"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "SlUmu",
+          "name": "Settings body",
+          "width": "fill_container",
+          "height": "fill_container",
+          "fill": "$surface-main",
+          "children": [
+            {
+              "type": "frame",
+              "id": "IkzC7",
+              "name": "Settings navigation",
+              "width": 198,
+              "height": "fill_container",
+              "fill": "$surface-bar",
+              "layout": "vertical",
+              "gap": 7,
+              "padding": [
+                28,
+                14
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "id": "dLI88",
+                  "name": "Navigation label",
+                  "fill": "$fg-3",
+                  "content": "偏好设置",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "frame",
+                  "id": "c9vqdy",
+                  "name": "Nav / 色彩管理",
+                  "width": "fill_container",
+                  "height": 42,
+                  "fill": "$state-selected",
+                  "cornerRadius": "$radius",
+                  "gap": 11,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "XGhXq",
+                      "name": "Icon / 色彩管理",
+                      "width": 18,
+                      "height": 18,
+                      "icon": "palette",
+                      "library": "lucide",
+                      "fill": "$brand"
+                    },
+                    {
+                      "type": "text",
+                      "id": "D7Qvkq",
+                      "name": "Label / 色彩管理",
+                      "fill": "$fg-1",
+                      "content": "色彩管理",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "600"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "OcRpp",
+                  "name": "Nav / 配置文件",
+                  "width": "fill_container",
+                  "height": 42,
+                  "fill": "$surface-bar",
+                  "cornerRadius": "$radius",
+                  "gap": 11,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "YXSgC",
+                      "name": "Icon / 配置文件",
+                      "width": 18,
+                      "height": 18,
+                      "icon": "files",
+                      "library": "lucide",
+                      "fill": "$fg-2"
+                    },
+                    {
+                      "type": "text",
+                      "id": "Pz1Hg",
+                      "name": "Label / 配置文件",
+                      "fill": "$fg-2",
+                      "content": "配置文件",
+                      "fontFamily": "Inter",
+                      "fontSize": 14
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "w5ETgb",
+                  "name": "Nav / 快捷键",
+                  "width": "fill_container",
+                  "height": 42,
+                  "fill": "$surface-bar",
+                  "cornerRadius": "$radius",
+                  "gap": 11,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "C0msWh",
+                      "name": "Icon / 快捷键",
+                      "width": 18,
+                      "height": 18,
+                      "icon": "keyboard",
+                      "library": "lucide",
+                      "fill": "$fg-2"
+                    },
+                    {
+                      "type": "text",
+                      "id": "x2G46",
+                      "name": "Label / 快捷键",
+                      "fill": "$fg-2",
+                      "content": "快捷键",
+                      "fontFamily": "Inter",
+                      "fontSize": 14
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "BXJTK",
+              "name": "Settings content",
+              "width": "fill_container",
+              "height": "fill_container",
+              "fill": "$surface-main",
+              "layout": "vertical",
+              "gap": 18,
+              "padding": [
+                25,
+                30
+              ],
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "G85aCq",
+                  "name": "Color page heading",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 5,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "F9Lji",
+                      "name": "Color title",
+                      "fill": "$fg-1",
+                      "content": "色彩管理",
+                      "fontFamily": "Inter",
+                      "fontSize": 21,
+                      "fontWeight": "600"
+                    },
+                    {
+                      "type": "text",
+                      "id": "JBFqz",
+                      "name": "Color subtitle",
+                      "fill": "$fg-2",
+                      "content": "让照片在导入、编辑与导出时都有明确的色彩身份。",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "ExDYF",
+                  "name": "Display status feature",
+                  "width": "fill_container",
+                  "height": 116,
+                  "fill": "$surface-layer",
+                  "cornerRadius": "$radius",
+                  "gap": 17,
+                  "padding": [
+                    0,
+                    20
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "mblir",
+                      "name": "Display accent rail",
+                      "width": 4,
+                      "height": 62,
+                      "fill": "$brand",
+                      "cornerRadius": 2
+                    },
+                    {
+                      "type": "frame",
+                      "id": "YjKbK",
+                      "name": "Display status copy",
+                      "width": "fill_container",
+                      "layout": "vertical",
+                      "gap": 5,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "oTN2j",
+                          "name": "Display label",
+                          "fill": "$fg-2",
+                          "content": "当前屏幕  ·  Windows 自动色彩管理",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "KFMEO",
+                          "name": "Display status",
+                          "fill": "$fg-1",
+                          "content": "由系统管理显示颜色",
+                          "fontFamily": "Inter",
+                          "fontSize": 19,
+                          "fontWeight": "600"
+                        },
+                        {
+                          "type": "text",
+                          "id": "XBCBw",
+                          "name": "Display detail",
+                          "fill": "$fg-2",
+                          "content": "RayBend 输出带色彩标记的画面，显示器转换由系统完成。",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "ccr9n",
+                  "name": "Input defaults section",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 9,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "agD7l",
+                      "name": "Input section title",
+                      "fill": "$fg-1",
+                      "content": "输入默认规则",
+                      "fontFamily": "Inter",
+                      "fontSize": 15,
+                      "fontWeight": "600"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "xR0H6",
+                      "name": "Input rule row",
+                      "width": "fill_container",
+                      "height": 50,
+                      "gap": 12,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "evdDC",
+                          "name": "Input rule description",
+                          "width": "fill_container",
+                          "layout": "vertical",
+                          "gap": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "CPQ97",
+                              "name": "Input main",
+                              "fill": "$fg-1",
+                              "content": "优先使用照片内嵌配置",
+                              "fontFamily": "Inter",
+                              "fontSize": 14,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "text",
+                              "id": "eymx8",
+                              "name": "Input helper",
+                              "fill": "$fg-2",
+                              "content": "无配置的 RGB 照片按 sRGB 解释；RAW 使用相机矩阵。",
+                              "fontFamily": "Inter",
+                              "fontSize": 12,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "icon",
+                          "id": "bIeHL",
+                          "name": "Input rule chevron",
+                          "width": 17,
+                          "height": 17,
+                          "icon": "chevron-right",
+                          "library": "lucide",
+                          "fill": "$fg-3"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "FXBdh",
+                  "name": "Divider / input output",
+                  "width": "fill_container",
+                  "height": 1,
+                  "fill": "$surface-bar"
+                },
+                {
+                  "type": "frame",
+                  "id": "ohAaX",
+                  "name": "Output default section",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 9,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "gWOcS",
+                      "name": "Output title",
+                      "fill": "$fg-1",
+                      "content": "默认导出",
+                      "fontFamily": "Inter",
+                      "fontSize": 15,
+                      "fontWeight": "600"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "x3rD0",
+                      "name": "Output rule row",
+                      "width": "fill_container",
+                      "height": 50,
+                      "gap": 12,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "O57ClC",
+                          "name": "Output rule description",
+                          "width": "fill_container",
+                          "layout": "vertical",
+                          "gap": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "GIYn9",
+                              "name": "Output main",
+                              "fill": "$fg-1",
+                              "content": "sRGB  ·  嵌入色彩配置",
+                              "fontFamily": "Inter",
+                              "fontSize": 14,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "text",
+                              "id": "tEZas",
+                              "name": "Output helper",
+                              "fill": "$fg-2",
+                              "content": "具体导出任务仍可在导出预设中指定目标色彩空间。",
+                              "fontFamily": "Inter",
+                              "fontSize": 12,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "icon",
+                          "id": "WNWRb",
+                          "name": "Output rule chevron",
+                          "width": 17,
+                          "height": 17,
+                          "icon": "chevron-right",
+                          "library": "lucide",
+                          "fill": "$fg-3"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "PYCZE",
+                  "name": "Divider / output notice",
+                  "width": "fill_container",
+                  "height": 1,
+                  "fill": "$surface-bar"
+                },
+                {
+                  "type": "text",
+                  "id": "bBDBm",
+                  "name": "Color rule note",
+                  "fill": "$fg-3",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "默认规则只作用于以后导入的照片；已有定稿保留原来的色彩解释。",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        }
+      ]
     }
   ],
   "themes": {

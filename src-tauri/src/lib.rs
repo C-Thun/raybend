@@ -22,9 +22,12 @@ pub mod external_editor;
 pub mod fullscreen;
 mod import;
 pub mod issues;
+pub mod organization;
 pub mod lens;
 pub mod lut;
 mod migration;
+/// 编辑预设 IPC（specs/editor-presets.md）。
+pub mod presets;
 /// 窗口 ↔ wgpu 的最小胶水（取裸句柄 / 读客户区尺寸）——spike 与编辑视口共用这一份。
 mod render_window;
 pub mod repo;
@@ -258,6 +261,26 @@ pub fn run() {
             thumbs::image_histogram,
             tags::tag_list,
             tags::tag_ensure,
+            organization::organization_buckets,
+            organization::organization_bucket_create,
+            organization::organization_bucket_rename,
+            organization::organization_bucket_rules,
+            organization::organization_bucket_pin,
+            organization::organization_bucket_pause,
+            organization::organization_bucket_delete,
+            organization::organization_bucket_add,
+            organization::organization_bucket_remove,
+            organization::organization_bucket_members,
+            organization::organization_tag_sync,
+            organization::organization_directory_tag,
+            organization::organization_tag_directories,
+            organization::organization_tag_directory_counts,
+            organization::organization_directory_tags,
+            organization::organization_tag_timeline,
+            organization::organization_bucket_timeline,
+            organization::organization_assets,
+            organization::organization_reconcile,
+            organization::organization_rules_preview,
             // ── 库（相片仓）──
             repo::repositories_list,
             repo::repository_probe,
@@ -329,6 +352,13 @@ pub fn run() {
             lut::lut_import_directory,
             lut::lut_cover,
             lut::lut_hide,
+            // ── 编辑预设（specs/editor-presets.md）──
+            presets::preset_library,
+            presets::preset_create_directory,
+            presets::preset_delete_directory,
+            presets::preset_create,
+            presets::preset_delete,
+            presets::preset_move,
             develop::develop_get,
             develop::develop_commit,
             develop::develop_edit_target,

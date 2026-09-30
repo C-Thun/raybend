@@ -55,11 +55,24 @@ import {
 } from "../../lib/lut-library.ts";
 import { isIdentityCurve, type CurvePoint } from "../../lib/curve.ts";
 import {
+  buildPresetSnapshot,
+  planPresetApply,
+  type GroupParams,
+  type PresetDirectory,
+  type PresetGroup,
+  type PresetLibrary,
+  type PresetRecord,
+  type PresetSelection,
+  type PresetSnapshot,
+} from "../../lib/presets.ts";
+import {
   CROP_RATIOS,
   defaultParams,
   invertRatio,
   paramSpec,
+  paramsInGroup,
   PARAM_DEFAULTS,
+  PARAM_IDS,
   type CropRatio,
 } from "./params.ts";
 
@@ -72,6 +85,17 @@ export const EDITOR_TOOLS: readonly EditorTool[] = ["crop", "rotate", "compare"]
 export type CurveChannel = "rgb" | "r" | "g" | "b";
 
 export const CURVE_CHANNELS: readonly CurveChannel[] = ["rgb", "r", "g", "b"];
+
+/**
+ * 预设的大类 → 参数 id（**从参数表派生**，specs §3 规则 3：不手写第二份；
+ * 参数表加项时预设自动跟上）。curve / lut 不走数值表，快照逻辑单独处理。
+ */
+const PRESET_GROUP_PARAMS: GroupParams = {
+  tone: paramsInGroup("tone").map((spec) => spec.id),
+  color: paramsInGroup("color").map((spec) => spec.id),
+  detail: paramsInGroup("detail").map((spec) => spec.id),
+  lens: paramsInGroup("lens").map((spec) => spec.id),
+};
 
 /** 轮询得到相同拍摄色温时，保留参数对象身份，避免空闲显影重复提交。 */
 export function withTemperatureBaseline(current: Record<string, number>, baseline: number): Record<string, number> {
@@ -232,6 +256,22 @@ export interface EditorStore {
   expandedCategory: () => string | null;
   toggleCategory: (id: string) => void;
 
+  /* ── 预设（设备级资产，specs/editor-presets.md）──── */
+  presetDirectories: () => readonly PresetDirectory[];
+  presets: () => readonly PresetRecord[];
+  setPresetLibrary: (library: PresetLibrary) => void;
+  presetSelection: () => PresetSelection;
+  selectPresetDirectory: (id: string) => void;
+  /** 点预设行：无 Shift = 单选替换；Shift = 加/减多选 */
+  selectPreset: (id: string, event: { shiftKey: boolean }) => void;
+  /** 目录展开态（缺省 = 展开；换照片/切页签不重置） */
+  presetExpanded: (id: string) => boolean;
+  togglePresetDirectory: (id: string) => void;
+  /** 当前编辑栈的大类快照（新建预设用；序列化由工作区完成）。 */
+  presetSnapshot: (groups: readonly PresetGroup[]) => PresetSnapshot;
+  /** 按快照保存的大类**整体覆盖**当前编辑栈（LUT 丢失静默忽略；specs §3）。 */
+  applyPresetSnapshot: (snapshot: PresetSnapshot) => void;
+
   /* ── GPU 视口（M3-W2）────────────────────────────── */
   /**
    * 渲染线程的最近一次快照。
@@ -298,6 +338,11 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
     ...initialCategories,
   ]);
   const [expanded, setExpanded] = createSignal<string | null>(null);
+  /* 预设：整库放 store（页签切换不丢选中/展开态）；选中/展开是会话内状态，不持久化 */
+  const [presetDirectories, setPresetDirectories] = createSignal<PresetDirectory[]>([]);
+  const [presetList, setPresetList] = createSignal<PresetRecord[]>([]);
+  const [presetSelectionState, setPresetSelectionState] = createSignal<PresetSelection>(null);
+  const [presetCollapsed, setPresetCollapsed] = createSignal<Record<string, boolean>>({});
   const [tool, setTool] = createSignal<EditorTool | null>(null);
   const [cropRatioId, setCropRatioId] = createSignal<string>("free");
   const [cropSize, setCropSizeSignal] = createSignal({ width: 3, height: 2 });
@@ -718,6 +763,65 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
     },
     expandedCategory: expanded,
     toggleCategory: (id) => setExpanded((current) => toggleExpandedCategory(current, id)),
+
+    presetDirectories: () => presetDirectories(),
+    presets: () => presetList(),
+    setPresetLibrary: (library) => {
+      setPresetDirectories([...library.directories]);
+      setPresetList([...library.presets]);
+    },
+    presetSelection: () => presetSelectionState(),
+    selectPresetDirectory: (id) => setPresetSelectionState({ kind: "directory", id }),
+    selectPreset: (id, event) => {
+      if (!event.shiftKey) {
+        setPresetSelectionState({ kind: "presets", ids: [id] });
+        return;
+      }
+      setPresetSelectionState((current) => {
+        if (current?.kind !== "presets") return { kind: "presets", ids: [id] };
+        const ids = current.ids.includes(id)
+          ? current.ids.filter((entry) => entry !== id)
+          : [...current.ids, id];
+        return { kind: "presets", ids };
+      });
+    },
+    presetExpanded: (id) => presetCollapsed()[id] !== true,
+    togglePresetDirectory: (id) =>
+      setPresetCollapsed((current) => ({ ...current, [id]: current[id] !== true })),
+    presetSnapshot: (groups) => buildPresetSnapshot(groups, {
+      // 镜像返回对象里 `paramValue` 的取值口径（色温未动过时用基线）
+      values: Object.fromEntries(PARAM_IDS.map((id) => [id,
+        id === "temperature" && !temperatureExplicit()
+          ? paramBaseline(id)
+          : params()[id] ?? PARAM_DEFAULTS[id] ?? 0])),
+      curves: curves(),
+      nrMethod: nrMethod(),
+      lensProfile: lensProfile(),
+      lensEnabled: lensEnabled(),
+      lutId: lutId(),
+      lutEnabled: lutEnabled(),
+    }, PRESET_GROUP_PARAMS),
+    applyPresetSnapshot: (snapshot) => {
+      const plan = planPresetApply(snapshot, PRESET_GROUP_PARAMS, PARAM_DEFAULTS, (id) =>
+        categories().some((category) =>
+          category.entries.some((entry) => entry.id === id && entry.available !== false)));
+      if (plan.appliedGroups.length === 0) return;
+      batch(() => {
+        setParams((current) => ({ ...current, ...plan.values }));
+        if (Object.prototype.hasOwnProperty.call(plan.values, "temperature")) {
+          setTemperatureExplicit(true);
+        }
+        setCurves((current) => ({ ...current, ...plan.curves }));
+        if (plan.hasDetail) setNrMethodSignal(plan.nrMethod === "high" ? "high" : null);
+        if (plan.hasLens) updateLensSide({ profile: plan.lens.profile, enabled: plan.lens.enabled });
+        if (plan.lut !== null && plan.lut !== "missing") {
+          setLutId(plan.lut.id);
+          setLutEnabled(plan.lut.enabled && plan.lut.id !== null);
+          setLutEnabledExplicit(plan.lut.id !== null);
+        }
+        bumpDevelop();
+      });
+    },
 
     renderState,
     setRenderState,

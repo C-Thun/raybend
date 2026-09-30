@@ -28,12 +28,14 @@ import { t } from "../../i18n/index.ts";
 import { presetErrors } from "../../lib/export-model.ts";
 
 import type {ExportQueueAction,ExportQueueView} from "../../api/export.ts";
+import type {AssetIdentity} from "../../api/organization.ts";
 
 export const EXPORT_PRESETS_KEY = "export.presets.v3";
 export const PREVIOUS_EXPORT_PRESETS_KEY = "export.presets.v2";
 export const LEGACY_EXPORT_PRESETS_KEY = "export.presets.v1";
 export interface ExportStoreDeps {
   repositoryAvailable?: (repositoryId: string) => boolean;
+  repositoryRoot?: (repositoryId: string) => string | null;
   getSetting(key: string): Promise<string | null>;
   setSetting(key: string, value: string): Promise<void>;
   variants(
@@ -70,10 +72,12 @@ export function createExportStore(deps: ExportStoreDeps) {
   const [busy, setBusy] = createSignal(false);
   const [loading, setLoading] = createSignal(true);
   const [repository, setRepository] = createSignal<string | null>(null);
+  const [organizationHandoff, setHandoffPhotos] = createSignal<readonly AssetIdentity[]>([]);
   let contextKey = "";
   let revision = 0;
   let selectionRevision = 0;
   let queueRevision = 0;
+  let handoffRevision = 0;
   let sequence = 0;
   let runtimeRevision=-1,generation=0,minimumGeneration=0;
   const [resetting,setResetting]=createSignal(false);
@@ -158,7 +162,10 @@ export function createExportStore(deps: ExportStoreDeps) {
   const selectedVariants = () => [...variants().values()].flat().filter(v => selection().ids.has(variantKey(repository()??"",v.reference)));
   const chosenVariants = () => selectedVariants().filter(v => !locked(v));
   const repositoryAvailable = () => { const id = repository(); return id !== null && (deps.repositoryAvailable?.(id) ?? true); };
-  const canEnqueue = () => repositoryAvailable() && activeArea()==="gallery" && selectedPreset()!==null && !busy() && !resetting() && chosenVariants().some(v => queueState(v.reference,v.profileHash)===undefined);
+  const canEnqueue = () => activeArea()==="gallery" && selectedPreset()!==null && !busy() && !resetting() &&
+    (organizationHandoff().length > 0
+      ? organizationHandoff().some(photo => (deps.repositoryAvailable?.(photo.repositoryId) ?? true) && !!deps.repositoryRoot?.(photo.repositoryId))
+      : repositoryAvailable() && chosenVariants().some(v => queueState(v.reference,v.profileHash)===undefined));
   const removable = () => queueItems().filter(item => ["pending","failed"].includes(item.status) && (activeArea()==="queue" ? queueSelection().ids.has(item.id) : chosenVariants().some(v => queueState(v.reference,v.profileHash)?.id===item.id)));
   const canRemove = () => !busy() && !resetting() && removable().length>0;
   const orderedKeys = (assets: readonly number[]) =>
@@ -288,6 +295,7 @@ export function createExportStore(deps: ExportStoreDeps) {
     mode: "replace" | "toggle" | "range",
     assets: readonly number[],
   ): Promise<void> {
+    setOrganizationHandoff([]);
     const repo = repository();
     if (repo === null) return;
     setActiveArea("gallery");
@@ -313,6 +321,7 @@ export function createExportStore(deps: ExportStoreDeps) {
     mode: "replace" | "toggle" | "range",
     order: readonly number[],
   ): Promise<void> {
+    setOrganizationHandoff([]);
     preserveDragSelection = false;
     const ticket = revision;
     const gesture = ++selectionRevision;
@@ -339,6 +348,7 @@ export function createExportStore(deps: ExportStoreDeps) {
     assets: readonly number[],
     additive = true,
   ): Promise<void> {
+    setOrganizationHandoff([]);
     preserveDragSelection = false;
     const ticket = revision;
     const gesture = ++selectionRevision;
@@ -411,6 +421,54 @@ export function createExportStore(deps: ExportStoreDeps) {
     confirmName(draft().name);
     setValidation({ errors: {}, warnings: [] });
   }
+  async function appendSnapshots(
+    preset: ExportPreset, repo: string, root: string, snapshots: readonly VariantSnapshot[],
+    capturedGeneration: number, valid: () => boolean,
+  ): Promise<number> {
+    const targetQueue = () => queues().get(preset.id) ?? [];
+    const before = targetQueue().length;
+    const queued = new Set(targetQueue().map(item => JSON.stringify([
+      item.repositoryId, item.snapshot.reference.assetId, item.snapshot.profileHash,
+    ])));
+    const fresh = snapshots.filter(snapshot => !queued.has(JSON.stringify([
+      repo, snapshot.reference.assetId, snapshot.profileHash,
+    ])));
+    if (fresh.length === 0 || !valid()) return 0;
+    if (deps.runtime) {
+      const entries = fresh.map(snapshot => ({
+        id: "", repositoryId: repo, root, snapshot, preset: { ...preset },
+        status: "pending", error: null, sequence: 0, output: null,
+      }));
+      for (let i = 0; i < entries.length; i += 128) {
+        if (!valid()) return Math.max(0, targetQueue().length - before);
+        applyRuntime(await deps.runtime("enqueue", {
+          generation: capturedGeneration, items: entries.slice(i, i + 128),
+        }));
+      }
+      return Math.max(0, targetQueue().length - before);
+    }
+    setQueues(old => {
+      const next = new Map(old);
+      const entries = [...(old.get(preset.id) ?? [])];
+      const seen = new Set(entries.map(item => JSON.stringify([
+        item.repositoryId, item.snapshot.reference.assetId, item.snapshot.profileHash,
+      ])));
+      for (const snapshot of fresh) {
+        const identity = JSON.stringify([repo, snapshot.reference.assetId, snapshot.profileHash]);
+        if (seen.has(identity)) continue;
+        seen.add(identity);
+        sequence++;
+        entries.unshift({
+          id: `${preset.id}:${sequence}`, repositoryId: repo, root,
+          snapshot: structuredClone(snapshot), preset: { ...preset },
+          status: "pending", error: null, sequence,
+        });
+      }
+      next.set(preset.id, entries);
+      return next;
+    });
+    return Math.max(0, targetQueue().length - before);
+  }
   async function enqueue(root: string, options: {presetId?:string;references?:readonly VariantRef[];preserveSelection?:boolean} = {}): Promise<number> {
     const preset = options.presetId === undefined ? selectedPreset() : presets().find(p=>p.id===options.presetId)??null;
     const repo = repository();
@@ -429,7 +487,6 @@ export function createExportStore(deps: ExportStoreDeps) {
     const refs = candidates.filter(v => (!requested || requested.has(variantKey(repo,v.reference))) &&
       !queued.has(JSON.stringify([repo,v.reference.assetId,v.profileHash]))).map(v=>v.reference);
     if (refs.length === 0) return 0;
-    const before=targetQueue().length;
     if (options.preserveSelection) preserveDragSelection = true;
     setBusy(true);
     setError(null);
@@ -441,53 +498,83 @@ export function createExportStore(deps: ExportStoreDeps) {
       if (ticket !== revision || queueTicket !== queueRevision || disposed || !repositoryAvailable()) return 0;
       if (snapshots.length !== refs.length)
         throw new Error(t("export.error.incomplete"));
-      if(deps.runtime){
-        const entries=snapshots.map(snapshot=>({id:"",repositoryId:repo,root,snapshot,preset:{...preset},status:"pending",error:null,sequence:0,output:null}));
-        for(let i=0;i<entries.length;i+=128){
-          if(ticket!==revision||queueTicket!==queueRevision||disposed||!repositoryAvailable())return 0;
-          await runtime("enqueue",{generation:capturedGeneration,items:entries.slice(i,i+128)});
-        }
-        return Math.max(0,targetQueue().length-before);
-      }
-      setQueues((old) => {
-        const next = new Map(old);
-        const entries = [...(old.get(preset.id) ?? [])];
-        const seen = new Set(
-          entries.map((item) =>
-            JSON.stringify([
-              item.repositoryId,
-              item.snapshot.reference.assetId,
-              item.snapshot.profileHash,
-            ]),
-          ),
-        );
-        for (const snapshot of snapshots) {
-          const identity = JSON.stringify([
-            repo,
-            snapshot.reference.assetId,
-            snapshot.profileHash,
-          ]);
-          if (seen.has(identity)) continue;
-          seen.add(identity);
-          sequence++;
-          entries.unshift({
-            id: `${preset.id}:${sequence}`,
-            repositoryId: repo,
-            root,
-            snapshot: structuredClone(snapshot),
-            preset: { ...preset },
-            status: "pending",
-            error: null,
-            sequence,
-          });
-        }
-        next.set(preset.id, entries);
-        return next;
-      });
-      return Math.max(0,targetQueue().length-before);
+      return await appendSnapshots(preset, repo, root, snapshots, capturedGeneration,
+        () => ticket === revision && queueTicket === queueRevision && !disposed && repositoryAvailable());
     } catch (e) {
       if (ticket === revision) setError(String(e));
       return 0;
+    } finally {
+      setBusy(false);
+    }
+  }
+  function setOrganizationHandoff(photos: readonly AssetIdentity[]): void {
+    handoffRevision++;
+    const seen = new Set<string>();
+    setHandoffPhotos(photos.filter(photo => {
+      if (!photo.repositoryId || !Number.isSafeInteger(photo.assetId) || photo.assetId <= 0) return false;
+      const key = JSON.stringify([photo.repositoryId, photo.assetId]);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }).map(photo => ({ ...photo })));
+    if (photos.length > 0) setActiveArea("gallery");
+  }
+  async function enqueueOrganizationHandoff(): Promise<number> {
+    const preset = selectedPreset();
+    const photos = organizationHandoff();
+    if (!preset || photos.length === 0 || busy() || resetting() || activeArea() !== "gallery") return 0;
+    const ticket = handoffRevision, queueTicket = queueRevision, capturedGeneration = generation;
+    const valid = () => !disposed && ticket === handoffRevision && queueTicket === queueRevision && !resetting();
+    const groups = new Map<string, number[]>();
+    for (const photo of photos) {
+      let ids = groups.get(photo.repositoryId);
+      if (!ids) { ids = []; groups.set(photo.repositoryId, ids); }
+      ids.push(photo.assetId);
+    }
+    const captured: { repositoryId: string; snapshot: VariantSnapshot }[] = [];
+    setBusy(true);
+    setError(null);
+    let added = 0;
+    try {
+      for (const [repo, ids] of groups) {
+        if (!valid()) break;
+        const root = deps.repositoryRoot?.(repo);
+        if (!root || !(deps.repositoryAvailable?.(repo) ?? true)) continue;
+        try {
+          const snapshots: VariantSnapshot[] = [];
+          for (let i = 0; i < ids.length; i += 128) {
+            const batch = ids.slice(i, i + 128);
+            const rows = await deps.variants(repo, batch);
+            if (!valid()) break;
+            const byId = new Map(rows.map(row => [row.assetId, row.variants]));
+            const refs = batch.map(id => mainVariant(byId.get(id) ?? [])?.reference);
+            if (refs.some(ref => ref === undefined)) throw new Error(t("export.error.incomplete"));
+            const captured = await deps.snapshots(repo, refs as VariantRef[]);
+            if (captured.length !== refs.length) throw new Error(t("export.error.incomplete"));
+            snapshots.push(...captured);
+          }
+          if (!valid() || !(deps.repositoryAvailable?.(repo) ?? true)) continue;
+          for (const snapshot of snapshots) captured.push({ repositoryId: repo, snapshot });
+          added += await appendSnapshots(preset, repo, root, snapshots, capturedGeneration, valid);
+        } catch (e) {
+          if (valid()) setError(String(e));
+        }
+      }
+      if (valid()) {
+        const queued = new Set((queues().get(preset.id) ?? []).map(item => JSON.stringify([
+          item.repositoryId, item.snapshot.reference.assetId, item.snapshot.profileHash,
+        ])));
+        const completed = new Set(captured.filter(({ repositoryId, snapshot }) => queued.has(JSON.stringify([
+          repositoryId, snapshot.reference.assetId, snapshot.profileHash,
+        ]))).map(({ repositoryId, snapshot }) => JSON.stringify([repositoryId, snapshot.reference.assetId])));
+        const remaining = photos.filter(photo => !completed.has(JSON.stringify([photo.repositoryId, photo.assetId])));
+        setHandoffPhotos(remaining);
+        if (remaining.length > 0) {
+          const summary = t("export.handoffPartial").replace("{n}", String(remaining.length));
+          setError(error() ? `${summary} ${error()}` : summary);
+        }
+      }
+      return added;
     } finally {
       setBusy(false);
     }
@@ -534,6 +621,7 @@ export function createExportStore(deps: ExportStoreDeps) {
       }catch(e){setError(String(e));}finally{setBusy(false);}
     },
     selectedVariants, activeArea, activeSelection, queueSelection, queueItems, queueState, locked, smallFor, canEnqueue, canRemove,
+    organizationHandoff, setOrganizationHandoff, enqueueOrganizationHandoff,
     focusArea(area: "gallery"|"queue") {setActiveArea(area);},
     selectQueue(id: string, mode: "replace"|"toggle"|"range") {
       setActiveArea("queue");
@@ -612,6 +700,7 @@ export function createExportStore(deps: ExportStoreDeps) {
     clear() {
       preserveDragSelection=false;
       selectionRevision++;
+      setOrganizationHandoff([]);
       if(activeArea()==="queue")setQueueSelection(clearSelection());else setSelection(clearSelection());
     },
     cycleScope() {

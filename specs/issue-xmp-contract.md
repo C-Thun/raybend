@@ -1,6 +1,7 @@
 # issue 的 XMP 互操作契约（M3-W7）
 
-此文档定义未来 sidecar 读写时的数据表示；M3 的真相源仍是 `catalog.db`，**当前版本尚未实现 XMP 写入或导入**。原始照片文件始终不写回。
+此文档定义 sidecar 读写时的数据表示；真相源仍是 `catalog.db`（**XMP 不是第一公民**），原始照片文件始终不写回。
+实现规格（文件位置/命名、写出触发、自家导入）见 `specs/xmp-w1.md`（2026-09-30）。
 
 ## 语义
 
@@ -10,7 +11,7 @@
 
 ## 表达
 
-使用自有命名空间 `https://raybend.app/ns/issue/1.0/`（前缀示例 `rb`）。XMP RDF 中 `rb:profiles` 是有序 `rdf:Seq`：每个 `rdf:li` 是资源，含 `rb:name`（UTF-8）、`rb:sourceBase`、`rb:createdAtMs`、`rb:schemaVersion`、`rb:profileHash`、`rb:profileJson`。`rb:profileJson` 是 `DevelopStack` 当前版本的规范 JSON，写入 XML 时做实体转义；字段顺序由有序 map 保证。`rb:latest` 使用相同结构表达工作副本，另设 `rb:latestSchemaVersion`，不复用定稿 ID。数据库自增 ID 仅在本库有效，不写进 sidecar 作为跨库身份。
+使用自有命名空间 `https://raybend.app/ns/issue/1.0/`（前缀示例 `rb`）。XMP RDF 中 `rb:profiles` 是有序 `rdf:Seq`：每个 `rdf:li` 是资源，含 `rb:name`（UTF-8）、`rb:sourceBase`、`rb:createdAtMs`、`rb:ordinal`、`rb:schemaVersion`、`rb:profileHash`、`rb:profileJson`。`rb:profileJson` 是 `DevelopStack` 的规范 JSON（**剔除 `auto_adjust`** —— 与 `profileHash` 同一口径，读者可直接重算校验），写入 XML 时做实体转义；字段顺序由有序 map 保证。`rb:latest` 使用相同结构表达工作副本，另设 `rb:latestSchemaVersion`，不复用定稿 ID。`rb:ordinal` 是定稿的导出尾号（0–99），**提示性、不是跨库身份**；导入时优先沿用、冲突则重分配。数据库自增 ID 仅在本库有效，不写进 sidecar 作为跨库身份。
 
 `rb:profileHash` 为当前实现的 64 位 FNV-1a 十六进制；导入时重新计算并验证完整 JSON。未知 `schemaVersion` 必须保留原 XMP 并报不支持，不能按旧版本硬解析。未来修改 profile 结构时升版本并编写明确迁移。
 

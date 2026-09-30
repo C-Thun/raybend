@@ -49,7 +49,7 @@ export function ExportToolbar(props: { store: ExportStore }) {
       <ToolsSeparator />
       <Button
         icon={<IconSquareOff size={14} />}
-        disabled={props.store.activeSelection().ids.size === 0}
+        disabled={props.store.activeSelection().ids.size === 0 && props.store.organizationHandoff().length === 0}
         onClick={() => props.store.clear()}
       >
         {t("export.clear")}

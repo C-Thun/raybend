@@ -29,6 +29,9 @@ function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   return coreModule.then((core) => core.invoke<T>(cmd, args));
 }
 
+/** 同属浏览业务的相片整理 API 复用此 IPC 入口。 */
+export { call as invokeBrowseCommand };
+
 /** 浏览器里没有后端 —— 返回空结果，界面自然显示空态（不抛错、不影响预览）。 */
 const NO_BACKEND_WINDOW: BrowseWindow = { total: 0, offset: 0, items: [] };
 const NO_BACKEND_TIMELINE: BrowseTimeline = { total: 0, entries: [] };

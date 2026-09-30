@@ -1,0 +1,55 @@
+{
+  "node": "v26.5.0",
+  "sqlite": "3.53.3",
+  "assets": 100000,
+  "files": 150000,
+  "direct": 253433,
+  "queries": {
+    "稀有": {
+      "matches": 100,
+      "correlatedPageMs": 108.331,
+      "indexedPageMs": 0.076,
+      "boundedHybridPageMs": 4.29,
+      "correlatedCountMs": 55.962,
+      "indexedCountMs": 0.036
+    },
+    "常见": {
+      "matches": 62862,
+      "correlatedPageMs": 0.514,
+      "indexedPageMs": 25.596,
+      "boundedHybridPageMs": 0.56,
+      "correlatedCountMs": 64.926,
+      "indexedCountMs": 23.496
+    },
+    "不存在": {
+      "matches": 0,
+      "correlatedPageMs": 88.428,
+      "indexedPageMs": 0.002,
+      "boundedHybridPageMs": 3.993,
+      "correlatedCountMs": 55.464,
+      "indexedCountMs": 0.002
+    }
+  },
+  "directoryWrite": {
+    "virtualMs": 0.003,
+    "materializedMs": 24.839,
+    "virtualRows": 1,
+    "materializedRows": 100000
+  },
+  "assertions": "all passed: query equivalence, deduplication, fallback, mask, source refresh",
+  "plan": [
+    "CO-ROUTINE candidate",
+    "MERGE (UNION)",
+    "LEFT",
+    "SEARCH direct USING COVERING INDEX direct_tag (tag=?)",
+    "RIGHT",
+    "SEARCH d USING COVERING INDEX dirs_tag (tag=?)",
+    "SEARCH f USING COVERING INDEX files_parent (parent=?)",
+    "USE TEMP B-TREE FOR ORDER BY",
+    "SCAN c",
+    "SEARCH a USING INTEGER PRIMARY KEY (rowid=?)",
+    "CORRELATED SCALAR SUBQUERY 3",
+    "SEARCH m USING PRIMARY KEY (asset_id=? AND tag=?)",
+    "USE TEMP B-TREE FOR ORDER BY"
+  ]
+}
