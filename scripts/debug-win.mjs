@@ -35,6 +35,8 @@ import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
+import {parseAiArgs,resolveAiBuild,aiBuildEnv,ensureBuildRuntime,syncAiOutput} from "./lib/ai-build.mjs";
+
 import { windowsBuildEnv } from "./lib/dav1d-win.mjs";
 
 /** 仓库根（脚本自身位置向上一级） */
@@ -314,7 +316,12 @@ function run(title, command, args, options = {}) {
 
 reapStaleInstance();
 
-run("① 前端构建（dist/ 嵌进 exe，必须最新）", "pnpm", ["build"]);
+const parsedAi = parseAiArgs(process.argv.slice(2));
+if (parsedAi.args.length) throw new Error("debug:win 仅支持 --ai=auto|required|off");
+const aiPlan = resolveAiBuild({root:ROOT,mode:parsedAi.mode,fetchRuntime:ensureBuildRuntime});
+const aiEnv = aiBuildEnv(aiPlan);
+
+run("① 前端构建（dist/ 嵌进 exe，必须最新）", "pnpm", ["build"], {env:aiEnv});
 
 run("② Windows 侧 cargo 构建（debug + custom-protocol）", "cmd.exe", [
   "/c",
@@ -333,10 +340,12 @@ run("② Windows 侧 cargo 构建（debug + custom-protocol）", "cmd.exe", [
    * 落到 `last-build.json` —— 第 ④ 步的瘦身脚本靠它判断「谁还活着」。
    * 进度信息走 stderr，所以终端上照旧能看到 `Compiling …`。
    */
-  `pushd ${windowsRepoPath()} & cargo build -p raybend-desktop -p raybend --features custom-protocol --message-format=json > ${BUILD_UNITS}`,
+  `pushd ${windowsRepoPath()} & cargo build -p raybend-desktop -p raybend --features ${aiPlan.features.join(",")} --message-format=json > ${BUILD_UNITS}`,
 ], {
-  env: windowsBuildEnv({ CARGO_TARGET_DIR }),
+  env: windowsBuildEnv({ CARGO_TARGET_DIR,TAURI_CONFIG:aiEnv.TAURI_CONFIG,RAYBEND_PHOTO_AI:aiEnv.RAYBEND_PHOTO_AI }),
 });
+
+syncAiOutput(ROOT,aiPlan,"/mnt/c/rb-target/raybend/debug");
 
 run("③ 产物核对（时间戳 + 资源名）", "node", ["scripts/check-win-artifact.mjs"]);
 

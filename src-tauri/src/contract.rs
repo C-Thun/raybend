@@ -25,6 +25,27 @@ use crate::source::{
 /// 前端契约文件（与 TS 侧共用同一份）。
 const CONTRACT_JSON: &str = include_str!("../../src/api/dto-contract.json");
 
+#[test]
+fn color_profile_and_batch_review_keys_match_contract() {
+    use crate::color_profiles::{ProfileEntryDto,ProfileLibraryDto,ProfileImportDto};
+    let entry=ProfileEntryDto {key:"profile".into(),profile_id:"a".repeat(64),name:"摄影棚".into(),original_filename:"摄影棚.icc".into(),profile_class:raybend::store::color_profiles::ColorProfileClass::Display,built_in:false,hidden:false,available:true};
+    assert_eq!(keys_of_value(&entry),contract_keys("ColorProfileEntry"));
+    let library=ProfileLibraryDto {entries:vec![entry]};
+    assert_eq!(keys_of_value(&library),contract_keys("ColorProfileLibrary"));
+    let import=ProfileImportDto {library,imported:1,duplicates:0,restored:0,skipped:vec![]};
+    assert_eq!(keys_of_value(&import),contract_keys("ColorProfileImport"));
+    let review=crate::color_batch::Review {token:"1".into(),selected:1,applicable:1,existing:0,skipped:vec![],profile_name:Some("摄影棚".into())};
+    assert_eq!(keys_of_value(&review),contract_keys("ColorBatchReview"));
+}
+
+#[test]
+fn actual_display_presentation_keys_match_contract() {
+    let value = crate::color_status::DisplayPresentation::applied(
+        &Err(raybend::color::system::ColorSystemError::Unavailable("配置无法读取".into())), false,
+    );
+    assert_eq!(keys_of_value(&value), contract_keys("DisplayPresentation"));
+}
+
 /// 一个响应结构的**真实**键集合（排序后）。
 fn keys_of<T: Serialize + Default>() -> Vec<String> {
     let value = serde_json::to_value(T::default()).expect("响应结构必须能序列化");
@@ -287,6 +308,15 @@ fn thumb_cache_stats_keys_match_contract() {
 fn every_contract_entry_has_a_test() {
     let value: serde_json::Value = serde_json::from_str(CONTRACT_JSON).unwrap();
     let tested: Vec<&str> = vec![
+        "AiModelStatus",
+        "AiTask",
+        "PhotoTagState",
+        "AiTagResult",
+        "AiTagEvidence",
+        "ColorBatchReview",
+        "ColorProfileEntry",
+        "ColorProfileLibrary",
+        "ColorProfileImport",
         "RecentDir",
         "Volume",
         "DirEntry",
@@ -337,6 +367,7 @@ fn every_contract_entry_has_a_test() {
         // 编辑视口（M3-W1 洞口契约 / M3-W2 渲染线程）
         "EditorViewportState",
         "EditorRenderState",
+        "DisplayPresentation",
         "LensProfile",
         "LensMatch",
         // 全屏看图（M3 晚：清单与下标跨 IPC）
@@ -489,4 +520,17 @@ fn lens_match_keys_match_contract() {
         warnings: vec!["metadata unavailable".into()],
     };
     assert_eq!(keys_of_value(&response), contract_keys("LensMatch"));
+}
+
+#[test]
+fn photo_ai_keys_match_contract() {
+    assert_eq!(keys_of::<crate::photo_ai::ModelStatus>(),contract_keys("AiModelStatus"));
+    assert_eq!(keys_of::<raybend::ai::status::Task>(),contract_keys("AiTask"));
+    use raybend::store::photo_tags::{TagState,AiResult,AiEvidence,AiOrigin};
+    let state=TagState {version:1,manual:vec![],ai:vec![],masks:vec![],result:None};
+    let result=AiResult {source_key:"source".into(),model_sha256:"a".repeat(64),pipeline_sha256:"b".repeat(64),generated_at:1,origin:AiOrigin::Local,valid:true,evidence:vec![]};
+    let evidence=AiEvidence {concept_key:"bird".into(),tag_name:"鸟".into(),score:0.2,accepted:true};
+    assert_eq!(keys_of_value(&state),contract_keys("PhotoTagState"));
+    assert_eq!(keys_of_value(&result),contract_keys("AiTagResult"));
+    assert_eq!(keys_of_value(&evidence),contract_keys("AiTagEvidence"));
 }

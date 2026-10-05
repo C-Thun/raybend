@@ -132,6 +132,9 @@ pub struct GpuContext {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     presentation: String,
+    presentation_adapter:PresentationAdapter,
+    system_managed:bool,
+    white_nits:Option<f32>,
     /// 资源标签前缀（`spike` / `editor`）——wgpu 的报错会带上它，
     /// 本文件里两次「旧设备的那一件」事故全靠它认出来。
     label: String,
@@ -142,13 +145,18 @@ pub struct GpuContext {
     uniform: wgpu::Buffer,
     texture: wgpu::Texture,
     sampler: wgpu::Sampler,
-    image: RenderImage,
+    screen_color: super::color_transform::GpuScreenTransform,
+    tone: super::tone::GpuTone,
+    proof: super::proof::GpuProof,
+    image: Arc<RenderImage>,
     /// **画不画这个四边形**。`false` = 只有洞口底色（还没有照片 / 刚换掉）。
     ///
     /// 为什么不靠 `image_size == 0` 表达：「没有照片」不是「图像尺寸为 0」这种异常
     /// （`Viewport::sanity_problems` 会把它当问题报出来），两件事得分开。
     has_image: bool,
-    reference: Option<(u64, RenderImage, wgpu::Texture)>,
+    upload_error: Option<String>,
+    uploads: super::upload::ImageUploader,
+    reference: Option<(u64, Arc<RenderImage>, wgpu::Texture)>,
     reference_bind_group: Option<wgpu::BindGroup>,
     compare_fraction: Option<f32>,
     compare_dragging: bool,
@@ -187,7 +195,8 @@ impl GpuContext {
         let has_image = image.is_some();
         // 没有照片时也得有一张**合法**的纹理（wgpu 不接受 0 尺寸）：
         // 「画不画」由 `has_image` 管，不由纹理尺寸管。
-        let image = image.unwrap_or_else(RenderImage::transparent_1x1);
+        let image = Arc::new(image.unwrap_or_else(RenderImage::transparent_1x1));
+        let presentation_adapter=presentation;
         let descriptor = presentation.instance_descriptor();
         let dx12_presentation = descriptor.backend_options.dx12.presentation_system;
         let instance = wgpu::Instance::new(descriptor);
@@ -273,12 +282,18 @@ impl GpuContext {
             queue,
             config,
             presentation,
+            presentation_adapter,
+            system_managed:false,
+            white_nits:None,
             layout: resources.layout,
             pipeline: resources.pipeline,
             bind_group: resources.bind_group,
             uniform: resources.uniform,
             texture: resources.texture,
             sampler: resources.sampler,
+            screen_color: resources.screen_color,
+            tone: resources.tone,
+            proof: resources.proof,
             image,
             has_image,
             reference: None,
@@ -293,6 +308,8 @@ impl GpuContext {
                 SurfaceComposition::Transparent => wgpu::Color::TRANSPARENT,
             },
             viewport,
+            upload_error: resources.upload_error,
+            uploads: Default::default(),
             device_lost,
             frames_drawn: 0,
             reconfigure_pending: false,
@@ -342,6 +359,39 @@ impl GpuContext {
     }
 
     /// 设洞口底色（照片没盖住的部分画它）。
+    pub fn set_proof(&mut self, source: Option<Arc<crate::color::proof::ProofTransform>>, warning: bool) {
+        self.proof.set(&self.queue,source,warning);
+    }
+
+    pub fn set_global_tone(&mut self, tone: Option<Arc<crate::develop::working::GpuToneDescription>>) {
+        self.tone.set(&self.device, &self.queue, tone);
+    }
+
+    pub fn set_display_transform(&mut self, transform: Option<Arc<crate::color::display::ScreenTransform>>) {
+        self.screen_color.set(&self.device, &self.queue, transform);
+    }
+
+    /// Called only between frames by the display adapter. Never runs while a
+    /// SurfaceOutput is alive. A monitor change may rebuild the format pipeline;
+    /// sliders and panning never enter this negotiation.
+    pub fn configure_color_output(&mut self,managed:bool,white_nits:Option<f32>)->bool {
+        self.system_managed=managed;self.white_nits=white_nits;
+        let caps=self.surface.get_capabilities(&self.adapter);
+        let output=super::output_space::negotiate(self.presentation_adapter,&caps,pick_format(&caps),managed,white_nits);
+        if self.config.format!=output.format || self.config.color_space!=output.space {
+            self.config.format=output.format;self.config.color_space=output.space;
+            self.surface.configure(&self.device,&self.config);
+            let resources=build_device_resources(&self.device,&self.queue,&self.image,output.format,&self.label);
+            self.replace_resources(resources);
+        }
+        self.screen_color.set_output_scale(&self.device,&self.queue,output.sc_rgb_scale);
+        output.sc_rgb_scale.is_some()
+    }
+    fn surface_backdrop(&self)->wgpu::Color {
+        let scale=f64::from(self.screen_color.output_scale.unwrap_or(1.0));
+        wgpu::Color {r:self.backdrop.r*scale,g:self.backdrop.g*scale,b:self.backdrop.b*scale,a:self.backdrop.a}
+    }
+
     pub fn set_backdrop(&mut self, color: wgpu::Color) {
         self.backdrop = color;
     }
@@ -352,16 +402,50 @@ impl GpuContext {
     /// 纹理只是「当前清晰度」。换档位（预览 ↔ 全尺寸）时逻辑尺寸不变 ⇒ **几何不变**，
     /// 只换清晰度（M3-W4 修「双击 1:1 变成预览图的 1:1」时定）。
     pub fn set_image(&mut self, image: RenderImage, source_size: (u32, u32)) {
+        self.set_shared_image(Arc::new(image), source_size);
+    }
+
+    /// Parameter-only V2 updates keep the same source allocation and GPU texture.
+    pub fn set_shared_image(&mut self, image: Arc<RenderImage>, source_size: (u32, u32)) {
+        if Arc::ptr_eq(&self.image, &image) || self.image.shares_source(&image) {
+            self.set_source_size(source_size);
+            return;
+        }
         self.image = image;
         self.set_source_size(source_size);
         self.upload_image(true);
     }
 
+    /// Prepare both sides of a frame without changing texture/tone/geometry.
+    /// Caller polls while processing input, then commits its entire frame only
+    /// after this returns true. Existing installed textures require no upload.
+    pub fn prepare_frame_images(&mut self, images: &[Arc<RenderImage>]) -> Result<bool,String> {
+        let mut needed:Vec<Arc<RenderImage>>=Vec::new();
+        for image in images {
+            if Arc::ptr_eq(image,&self.image) || image.shares_source(&self.image)
+                || self.reference.as_ref().is_some_and(|(_,source,_)|Arc::ptr_eq(image,source)||image.shares_source(source))
+                || needed.iter().any(|source|Arc::ptr_eq(image,source)||image.shares_source(source)) {continue;}
+            needed.push(image.clone());
+        }
+        assert!(needed.len()<=2,"a frame has at most main and reference sources");
+        if needed.is_empty() {self.uploads.cancel();return Ok(true);}
+        let result=self.uploads.prepare(&self.device,&self.queue,needed);
+        if let Err(error)=&result {self.upload_error=Some(error.clone());}
+        result
+    }
+    pub fn cancel_prepared_images(&mut self) {self.uploads.cancel();}
+
     /// 对比数据侧第二张纹理；独立于当前结果，使用同一个视口几何。
     pub fn set_reference_image(&mut self, id: u64, image: RenderImage) {
-        let texture = create_image_texture(&self.device, &self.queue, &image, &self.label);
+        self.set_shared_reference_image(id, Arc::new(image));
+    }
+
+    pub fn set_shared_reference_image(&mut self, id: u64, image: Arc<RenderImage>) {
+        if self.reference_id() == Some(id) { return; }
+        let (texture,error) = if Arc::ptr_eq(&self.image, &image) || self.image.shares_source(&image) { (self.texture.clone(),None) } else if let Some(texture)=self.uploads.texture(&image) {(texture,None)} else { create_image_texture(&self.device, &self.queue, &image, &self.label) };
+        if error.is_some() { self.upload_error=error;return; }
         self.reference_bind_group = Some(make_bind_group(
-            &self.device, &self.layout, &texture, &self.sampler, &self.uniform, &self.label,
+            &self.device, &self.layout, &texture, &self.sampler, &self.uniform, &self.label, image.encoding, false,
         ));
         self.reference = Some((id, image, texture));
     }
@@ -409,15 +493,17 @@ impl GpuContext {
     }
 
     pub fn reference_id(&self) -> Option<u64> { self.reference.as_ref().map(|(id,_,_)| *id) }
+    pub fn reference_image(&self,id:u64)->Option<Arc<RenderImage>> {self.reference.as_ref().filter(|(current,_,_)|*current==id).map(|(_,image,_)|image.clone())}
 
     /// W5 对分显示可绑定这张纹理；本轮仅提供数据与上传，不添加新的交互动作。
     pub fn reference_texture(&self) -> Option<&wgpu::Texture> { self.reference.as_ref().map(|(_,_,texture)| texture) }
 
     /// **清空照片**：换成 1×1 占位纹理，并且不再画那个四边形（只剩洞口底色）。
     pub fn clear_image(&mut self) {
+        self.cancel_prepared_images();
         self.reference = None;
         self.reference_bind_group = None;
-        self.image = RenderImage::transparent_1x1();
+        self.image = Arc::new(RenderImage::transparent_1x1());
         self.set_source_size((1, 1));
         self.upload_image(false);
     }
@@ -439,7 +525,13 @@ impl GpuContext {
 
     /// 把 `self.image` 传上设备（`has_image` 决定画不画）。
     fn upload_image(&mut self, has_image: bool) {
-        self.texture = create_image_texture(&self.device, &self.queue, &self.image, &self.label);
+        let (texture,error) = if let Some((_, image, texture)) = &self.reference
+            && (Arc::ptr_eq(image,&self.image) || image.shares_source(&self.image)) {
+                (texture.clone(),None)
+            } else if let Some(texture)=self.uploads.texture(&self.image) {(texture,None)} else {create_image_texture(&self.device, &self.queue, &self.image, &self.label)};
+        self.upload_error=error;
+        if self.upload_error.is_some() {return;}
+        self.texture=texture;
         self.bind_group = make_bind_group(
             &self.device,
             &self.layout,
@@ -447,6 +539,8 @@ impl GpuContext {
             &self.sampler,
             &self.uniform,
             &self.label,
+            self.image.encoding,
+            true,
         );
         self.has_image = has_image;
     }
@@ -521,6 +615,7 @@ impl GpuContext {
 
     /// 画一帧：写 uniform → 开 render pass（scissor = 洞口）→ 呈现。
     pub fn render(&mut self) -> Result<RenderOutcome, GpuError> {
+        if let Some(error)=&self.upload_error {return Err(GpuError::Device(error.clone()));}
         // config 保留最近一次合法的非零尺寸；最小化事实在 viewport 上。
         if self.viewport.viewport_size.0 <= 0.0 || self.viewport.viewport_size.1 <= 0.0 {
             return Ok(RenderOutcome::Skipped);
@@ -542,7 +637,7 @@ impl GpuContext {
         }
         self.write_uniforms();
         self.overlay.prepare(&self.queue, &self.viewport, self.tool_overlay,
-            self.compare_fraction.filter(|_| self.reference_bind_group.is_some()), self.overlay_palette);
+            self.compare_fraction.filter(|_| self.reference_bind_group.is_some()), self.overlay_palette,self.screen_color.output_scale.unwrap_or(1.0));
 
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame) => frame,
@@ -592,7 +687,7 @@ impl GpuContext {
                              * 洞口之外盖不到的地方全在 DOM 底下，所以颜色看不见 ——
                              * 但这也意味着**洞口底色不能是透明+依赖 DOM**，否则就是「透出桌面」。
                              */
-                            load: wgpu::LoadOp::Clear(self.backdrop),
+                            load: wgpu::LoadOp::Clear(self.surface_backdrop()),
                             store: wgpu::StoreOp::Store,
                         },
                     })],
@@ -607,6 +702,9 @@ impl GpuContext {
                     && let Some((x, y, w, h)) = self.viewport.scissor()
                 {
                     pass.set_pipeline(&self.pipeline);
+                    pass.set_bind_group(1, &self.screen_color.bind_group, &[]);
+                    pass.set_bind_group(2, &self.tone.resources.bind_group, &[]);
+                    pass.set_bind_group(3, &self.proof.bind_group, &[]);
                     if let (Some(fraction), Some(reference)) = (self.compare_fraction, &self.reference_bind_group)
                         && let Some([left, right]) = self.viewport.compare_scissors(fraction)
                     {
@@ -638,7 +736,7 @@ impl GpuContext {
 
     fn write_uniforms(&self) {
         // 与离屏那条路共用同一份布局写法人（矩阵只有一处推导，见 `Viewport::matrix`）
-        write_matrix(&self.queue, &self.uniform, &self.viewport);
+        write_matrix(&self.queue, &self.uniform, &self.viewport, self.image.encoding);
     }
 
     /// 演练设备丢失：`device.destroy()`。
@@ -656,6 +754,7 @@ impl GpuContext {
     ///
     /// **适配器可以复用**（`adapter` 在设备销毁后仍然有效），所以不必从头建 instance。
     pub fn recover(&mut self) -> Result<(), GpuError> {
+        self.cancel_prepared_images();
         let (device, queue) = pollster::block_on(self.adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("raybend-spike-recovered"),
             required_features: wgpu::Features::empty(),
@@ -668,6 +767,9 @@ impl GpuContext {
         install_device_lost_logger(&device, self.device_lost.clone());
         self.device = device;
         self.queue = queue;
+        let caps=self.surface.get_capabilities(&self.adapter);
+        let output=super::output_space::negotiate(self.presentation_adapter,&caps,pick_format(&caps),self.system_managed,self.white_nits);
+        self.config.format=output.format;self.config.color_space=output.space;
         self.surface.configure(&self.device, &self.config);
 
         // 纹理 / 采样器 / uniform / layout / 绑定组 / 管线**跟着设备走，必须整套重建**；
@@ -682,6 +784,17 @@ impl GpuContext {
             self.config.format,
             &self.label,
         );
+        self.replace_resources(resources);
+        if let Some(error)=&self.upload_error {return Err(GpuError::Device(error.clone()));}
+        self.screen_color.set_output_scale(&self.device,&self.queue,output.sc_rgb_scale);
+        if let Ok(mut log) = self.device_lost.lock() {
+            log.push("恢复：设备/管线/纹理已重建".to_string());
+        }
+        Ok(())
+    }
+
+    fn replace_resources(&mut self,resources:DeviceResources) {
+        self.upload_error=resources.upload_error;
         self.overlay = resources.overlay;
         self.layout = resources.layout;
         self.pipeline = resources.pipeline;
@@ -689,17 +802,27 @@ impl GpuContext {
         self.uniform = resources.uniform;
         self.texture = resources.texture;
         self.sampler = resources.sampler;
+        let output_scale=self.screen_color.output_scale;
+        let source = self.screen_color.source.clone();
+        let proof_source = self.proof.source.clone();
+        let warning = self.proof.warning;
+        self.proof = resources.proof;
+        self.proof.set(&self.queue,proof_source,warning);
+        self.screen_color = resources.screen_color;
+        if source.is_some() { self.screen_color.set(&self.device, &self.queue, source); }
+        self.screen_color.set_output_scale(&self.device,&self.queue,output_scale);
+        let source = self.tone.source.clone();
+        self.tone = resources.tone;
+        if source.is_some() { self.tone.set(&self.device, &self.queue, source); }
         if let Some((_, image, texture)) = &mut self.reference {
-            *texture = create_image_texture(&self.device, &self.queue, image, &self.label);
+            let (new_texture,error)=if Arc::ptr_eq(image,&self.image) || image.shares_source(&self.image) {(self.texture.clone(),None)} else {create_image_texture(&self.device, &self.queue, image, &self.label)};
+            if error.is_some() {self.upload_error=error;return;}
+            *texture=new_texture;
             self.reference_bind_group = Some(make_bind_group(
-                &self.device, &self.layout, texture, &self.sampler, &self.uniform, &self.label,
+                &self.device, &self.layout, texture, &self.sampler, &self.uniform, &self.label, image.encoding, false,
             ));
         }
 
-        if let Ok(mut log) = self.device_lost.lock() {
-            log.push("恢复：设备/管线/纹理已重建".to_string());
-        }
-        Ok(())
     }
 
     /// 重建 instance 与 surface（窗口换了、或者 surface 彻底不可用时的退路）。
@@ -714,6 +837,7 @@ impl GpuContext {
                 .map_err(|e| GpuError::Surface(e.to_string()))?
         };
         self.surface = surface;
+        self.configure_color_output(self.system_managed,self.white_nits);
         self.surface.configure(&self.device, &self.config);
         Ok(())
     }
@@ -732,12 +856,16 @@ impl GpuContext {
 /// 第一次漏的是 bind group layout，补上之后第二次漏的是 uniform buffer —— 都是「手写重建」惹的。
 /// 所以现在只剩一个入口：资源集合是设备局部的，**换个设备就整套重建**。
 struct DeviceResources {
+    upload_error: Option<String>,
     layout: wgpu::BindGroupLayout,
     pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
     uniform: wgpu::Buffer,
     texture: wgpu::Texture,
     sampler: wgpu::Sampler,
+    screen_color: super::color_transform::GpuScreenTransform,
+    tone: super::tone::GpuTone,
+    proof: super::proof::GpuProof,
     overlay: super::overlay::OverlayRenderer,
 }
 
@@ -752,7 +880,7 @@ fn build_device_resources(
     format: wgpu::TextureFormat,
     label_prefix: &str,
 ) -> DeviceResources {
-    let texture = create_image_texture(device, queue, image, label_prefix);
+    let (texture,upload_error) = create_image_texture(device, queue, image, label_prefix);
     let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
         label: Some(&format!("{label_prefix}-sampler")),
         // 放大用最近邻：1:1 档位要能看出「一个图像像素就是一个屏幕像素」
@@ -769,9 +897,13 @@ fn build_device_resources(
         mapped_at_creation: false,
     });
     let layout = create_bind_group_layout(device);
-    let bind_group = make_bind_group(device, &layout, &texture, &sampler, &uniform, label_prefix);
-    let pipeline = create_pipeline(device, &layout, format, label_prefix);
+    let bind_group = make_bind_group(device, &layout, &texture, &sampler, &uniform, label_prefix, image.encoding, true);
+    let screen_color = super::color_transform::GpuScreenTransform::new(device, queue);
+    let tone = super::tone::GpuTone::new(device, queue);
+    let proof = super::proof::GpuProof::new(device, queue);
+    let pipeline = create_pipeline(device, &layout, &screen_color.layout, &tone.layout, &proof.layout, format, label_prefix);
     DeviceResources {
+        upload_error,
         overlay: super::overlay::OverlayRenderer::new(device, format),
         layout,
         pipeline,
@@ -779,6 +911,9 @@ fn build_device_resources(
         uniform,
         texture,
         sampler,
+        screen_color,
+        tone,
+        proof,
     }
 }
 
@@ -822,6 +957,16 @@ fn create_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
                 ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                 count: None,
             },
+            wgpu::BindGroupLayoutEntry {
+                binding: 3,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
         ],
     })
 }
@@ -840,13 +985,20 @@ fn create_image_texture(
     queue: &wgpu::Queue,
     image: &RenderImage,
     label_prefix: &str,
-) -> wgpu::Texture {
+) -> (wgpu::Texture, Option<String>) {
+    create_image_texture_cancellable(device,queue,image,label_prefix,&||false)
+}
+
+pub(super) fn create_image_texture_cancellable(
+    device:&wgpu::Device, queue:&wgpu::Queue, image:&RenderImage,
+    label_prefix:&str, cancelled:&dyn Fn()->bool,
+) -> (wgpu::Texture,Option<String>) {
     let size = wgpu::Extent3d {
         width: image.width,
         height: image.height,
         depth_or_array_layers: 1,
     };
-    let bytes_per_row = image.width * 4;
+    let bytes_per_row = image.width * image.encoding.bytes_per_pixel();
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some(&format!("{label_prefix}-image")),
         size,
@@ -855,38 +1007,36 @@ fn create_image_texture(
         dimension: wgpu::TextureDimension::D2,
         // 图是 sRGB 数据：采样时硬件转线性，写回 surface 时再转回去
         // （色彩管理整体是后期里程碑，第一阶段只要「不二次转换」）
-        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        format: image.encoding.texture_format(),
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         view_formats: &[],
     });
-    let encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some(&format!("{label_prefix}-upload")),
-    });
-    /*
-     * 整块上传（6000×4000×4 = 96MB 一次拷完）。
-     *
-     * 本来担心要分块（`write_texture` 对单次大小有上限），但这里用的是
-     * `queue.write_texture` 而不是 encoder 拷贝 —— 它没有分块要求，
-     * 不需要为一个不存在的限制写一堆积木。真在 Windows 上碰到上限（报告里有上传耗时）
-     * 再改成按行分块，改法就是在 `bytes` 上切 `bytes_per_row × rows`。
-     */
-    queue.write_texture(
-        wgpu::TexelCopyTextureInfo {
-            texture: &texture,
-            mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::All,
-        },
-        &image.pixels,
-        wgpu::TexelCopyBufferLayout {
-            offset: 0,
-            bytes_per_row: Some(bytes_per_row),
-            rows_per_image: Some(image.height),
-        },
-        size,
-    );
-    queue.submit(Some(encoder.finish()));
-    texture
+    // Keep staging bounded. Queue writes retain staging until submission completes;
+    // submitting/polling each 8 MiB tile prevents a hidden full-image staging copy.
+    const UPLOAD_BYTES: u32 = 8 * 1024 * 1024;
+    let rows_per_tile = (UPLOAD_BYTES / bytes_per_row).max(1);
+    let mut packed = super::image::HalfUpload::default();
+    for first in (0..image.height).step_by(rows_per_tile as usize) {
+        if cancelled() {return (texture,Some("GPU source upload cancelled".into()));}
+        let rows = rows_per_tile.min(image.height-first);
+        let pixels = if image.linear_source.is_some() {
+            image.pack_rows(first,rows,&mut packed);
+            packed.bytes.as_slice()
+        } else {
+            let start = first as usize*bytes_per_row as usize;
+            &image.pixels[start..start+rows as usize*bytes_per_row as usize]
+        };
+        queue.write_texture(wgpu::TexelCopyTextureInfo {texture:&texture,mip_level:0,origin:wgpu::Origin3d {x:0,y:first,z:0},aspect:wgpu::TextureAspect::All},
+            pixels,wgpu::TexelCopyBufferLayout {offset:0,bytes_per_row:Some(bytes_per_row),rows_per_image:Some(rows)},
+            wgpu::Extent3d {width:image.width,height:rows,depth_or_array_layers:1});
+        let submitted = queue.submit([]);
+        if image.height > rows_per_tile
+            && let Err(error)=device.poll(wgpu::PollType::Wait { submission_index:Some(submitted),timeout:Some(std::time::Duration::from_secs(5)) }) {
+                return (texture,Some(format!("GPU source upload failed: {error}")));
+            }
+    }
+    if cancelled() {return (texture,Some("GPU source upload cancelled".into()));}
+    (texture,None)
 }
 
 fn make_bind_group(
@@ -896,8 +1046,22 @@ fn make_bind_group(
     sampler: &wgpu::Sampler,
     uniform: &wgpu::Buffer,
     label_prefix: &str,
+    encoding: super::image::RenderEncoding,
+    apply_tone: bool,
 ) -> wgpu::BindGroup {
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let image_config = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("raybend-image-color-encoding"), size: 16,
+        usage: wgpu::BufferUsages::UNIFORM, mapped_at_creation: true,
+    });
+    let flag = if encoding == super::image::RenderEncoding::LinearRec2020Half { 1.0_f32 } else { 0.0 };
+    {
+        let mut data = [0_u8; 16];
+        data[..4].copy_from_slice(&flag.to_ne_bytes());
+        data[4..8].copy_from_slice(&(if apply_tone { 1.0_f32 } else { 0.0 }).to_ne_bytes());
+        image_config.slice(..).get_mapped_range_mut().expect("new mapped buffer").copy_from_slice(&data);
+    }
+    image_config.unmap();
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some(&format!("{label_prefix}-bind-group")),
         layout,
@@ -914,6 +1078,7 @@ fn make_bind_group(
                 binding: 2,
                 resource: wgpu::BindingResource::Sampler(sampler),
             },
+            wgpu::BindGroupEntry { binding: 3, resource: image_config.as_entire_binding() },
         ],
     })
 }
@@ -921,6 +1086,9 @@ fn make_bind_group(
 fn create_pipeline(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
+    color_layout: &wgpu::BindGroupLayout,
+    tone_layout: &wgpu::BindGroupLayout,
+    proof_layout: &wgpu::BindGroupLayout,
     format: wgpu::TextureFormat,
     label_prefix: &str,
 ) -> wgpu::RenderPipeline {
@@ -930,7 +1098,7 @@ fn create_pipeline(
     });
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some(&format!("{label_prefix}-pipeline-layout")),
-        bind_group_layouts: &[Some(layout)],
+        bind_group_layouts: &[Some(layout), Some(color_layout), Some(tone_layout), Some(proof_layout)],
         // 不用 immediate / push constant 数据
         immediate_size: 0,
     });
@@ -1001,8 +1169,13 @@ pub struct OffscreenRenderer {
     bind_group: wgpu::BindGroup,
     uniform: wgpu::Buffer,
     sampler: wgpu::Sampler,
+    screen_color: super::color_transform::GpuScreenTransform,
+    tone: super::tone::GpuTone,
+    proof: super::proof::GpuProof,
     texture: wgpu::Texture,
-    image: RenderImage,
+    image: Arc<RenderImage>,
+    uploads: super::upload::ImageUploader,
+    output_format:wgpu::TextureFormat,
     /// 清屏色（默认透明；编辑器那条路设成洞口底色）。
     backdrop: wgpu::Color,
     /// 设备重建要用（`GpuContext::recover` 同一套：**适配器可以复用**，不必从头建 instance）
@@ -1012,6 +1185,27 @@ pub struct OffscreenRenderer {
 }
 
 impl OffscreenRenderer {
+    /// Exercise exactly the native scRGB shader/attachment pair without a window.
+    pub fn set_sc_rgb_reference(&mut self,scale:Option<f32>) {
+        self.output_format=if scale.is_some() {wgpu::TextureFormat::Rgba16Float}else{wgpu::TextureFormat::Rgba8UnormSrgb};
+        self.pipeline=create_pipeline(&self.device,&self.layout,&self.screen_color.layout,&self.tone.layout,&self.proof.layout,self.output_format,"offscreen-output");
+        self.screen_color.set_output_scale(&self.device,&self.queue,scale);
+    }
+    /// Reuses one render target. Each duration includes command submission and
+    /// GPU completion, excluding photo upload, ICC preparation and readback.
+    pub fn measure_draws(&mut self,viewport:&Viewport,size:(u32,u32),samples:usize)->Result<Vec<std::time::Duration>,GpuError> {
+        let size=wgpu::Extent3d {width:size.0.max(1),height:size.1.max(1),depth_or_array_layers:1};
+        let target=self.device.create_texture(&wgpu::TextureDescriptor {label:Some("color-cost-target"),size,mip_level_count:1,sample_count:1,dimension:wgpu::TextureDimension::D2,format:self.output_format,usage:wgpu::TextureUsages::RENDER_ATTACHMENT,view_formats:&[]});
+        let view=target.create_view(&Default::default());let mut times=Vec::with_capacity(samples);
+        for i in 0..samples+5 {
+            let start=std::time::Instant::now();write_matrix(&self.queue,&self.uniform,viewport,self.image.encoding);
+            let mut encoder=self.device.create_command_encoder(&Default::default());self.draw_into(&mut encoder,&view,viewport);
+            let submission=self.queue.submit(Some(encoder.finish()));
+            self.device.poll(wgpu::PollType::Wait {submission_index:Some(submission),timeout:Some(std::time::Duration::from_secs(10))}).map_err(|e|GpuError::Device(e.to_string()))?;
+            if i>=5 {times.push(start.elapsed());}
+        }
+        Ok(times)
+    }
     /// 建离屏渲染器（默认把合成测试图放进纹理；`WGPU_BACKEND` 同样生效）。
     pub fn new(handles_hint: Option<RawHandles>) -> Result<Self, GpuError> {
         Self::with_image(
@@ -1054,6 +1248,7 @@ impl OffscreenRenderer {
             wgpu::TextureFormat::Rgba8UnormSrgb,
             label,
         );
+        if let Some(error)=resources.upload_error {return Err(GpuError::Device(error));}
         Ok(Self {
             device,
             queue,
@@ -1062,8 +1257,13 @@ impl OffscreenRenderer {
             bind_group: resources.bind_group,
             uniform: resources.uniform,
             sampler: resources.sampler,
+            screen_color: resources.screen_color,
+            tone: resources.tone,
+            proof: resources.proof,
             texture: resources.texture,
-            image,
+            image:Arc::new(image),
+            uploads:Default::default(),
+            output_format:wgpu::TextureFormat::Rgba8UnormSrgb,
             backdrop: wgpu::Color::TRANSPARENT,
             adapter,
             readback: None,
@@ -1076,8 +1276,10 @@ impl OffscreenRenderer {
 
     /// 换图（像素证据要多组图对比时用）。
     pub fn set_image(&mut self, image: RenderImage) {
-        self.image = image;
-        let texture = create_image_texture(&self.device, &self.queue, &self.image, "offscreen");
+        self.uploads.cancel();
+        self.image = Arc::new(image);
+        let (texture,error) = create_image_texture(&self.device, &self.queue, &self.image, "offscreen");
+        assert!(error.is_none(),"offscreen source upload failed: {error:?}");
         self.bind_group = make_bind_group(
             &self.device,
             &self.layout,
@@ -1085,12 +1287,38 @@ impl OffscreenRenderer {
             &self.sampler,
             &self.uniform,
             "offscreen",
+            self.image.encoding,
+            true,
         );
         // 旧纹理由这个字段持有、新纹理接上（不靠绑定组隐式提寿 —— 显式持有最不容易误判）
         self.texture = texture;
     }
 
+    /// Same background uploader as the window path; diagnostics keep drawing
+    /// the old complete frame until explicitly committing the prepared source.
+    pub fn prepare_shared_image(&mut self,image:Arc<RenderImage>)->Result<bool,GpuError> {
+        self.uploads.prepare(&self.device,&self.queue,vec![image]).map_err(GpuError::Device)
+    }
+    pub fn cancel_prepared_image(&mut self) {self.uploads.cancel();}
+    pub fn commit_prepared_image(&mut self,image:Arc<RenderImage>)->Result<(),GpuError> {
+        let texture=self.uploads.texture(&image).ok_or_else(||GpuError::Device("source upload is not complete".into()))?;
+        self.bind_group=make_bind_group(&self.device,&self.layout,&texture,&self.sampler,&self.uniform,"offscreen",image.encoding,true);
+        self.image=image;self.texture=texture;Ok(())
+    }
+
     /// 设清屏色（「洞口底色」那条断言靠它：底色必须原样出现在照片之外）。
+    pub fn set_proof(&mut self, source: Option<Arc<crate::color::proof::ProofTransform>>, warning: bool) {
+        self.proof.set(&self.queue,source,warning);
+    }
+
+    pub fn set_global_tone(&mut self, tone: Option<Arc<crate::develop::working::GpuToneDescription>>) {
+        self.tone.set(&self.device, &self.queue, tone);
+    }
+
+    pub fn set_display_transform(&mut self, transform: Option<Arc<crate::color::display::ScreenTransform>>) {
+        self.screen_color.set(&self.device, &self.queue, transform);
+    }
+
     pub fn set_backdrop(&mut self, color: wgpu::Color) {
         self.backdrop = color;
     }
@@ -1110,6 +1338,7 @@ impl OffscreenRenderer {
     /// # Errors
     /// 请求新设备失败时返回错误（调用方交给监督器重建整套）。
     pub fn recover(&mut self) -> Result<(), GpuError> {
+        self.uploads.cancel();
         let (device, queue) = pollster::block_on(self.adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("raybend-offscreen-recovered"),
             required_features: wgpu::Features::empty(),
@@ -1124,62 +1353,49 @@ impl OffscreenRenderer {
             &self.device,
             &self.queue,
             &self.image,
-            wgpu::TextureFormat::Rgba8UnormSrgb,
+            self.output_format,
             "offscreen",
         );
+        if let Some(error)=resources.upload_error {return Err(GpuError::Device(error));}
         self.layout = resources.layout;
         self.pipeline = resources.pipeline;
         self.bind_group = resources.bind_group;
         self.uniform = resources.uniform;
         self.texture = resources.texture;
         self.sampler = resources.sampler;
+        let output_scale=self.screen_color.output_scale;
+        let source = self.screen_color.source.clone();
+        let proof_source = self.proof.source.clone();
+        let warning = self.proof.warning;
+        self.proof = resources.proof;
+        self.proof.set(&self.queue,proof_source,warning);
+        self.screen_color = resources.screen_color;
+        if source.is_some() { self.screen_color.set(&self.device, &self.queue, source); }
+        self.screen_color.set_output_scale(&self.device,&self.queue,output_scale);
+        let source = self.tone.source.clone();
+        self.tone = resources.tone;
+        if source.is_some() { self.tone.set(&self.device, &self.queue, source); }
         Ok(())
     }
 
     /// 适配器信息（报告里要）。
     pub fn adapter_info(&self) -> AdapterInfo {
-        // 离屏不保留适配器对象，这里返回类型名占位 —— 真窗口那条路才需要完整信息
+        let info = self.adapter.get_info();
         AdapterInfo {
-            backend: "(离屏)".to_string(),
-            ..Default::default()
+            backend: format!("{:?}", info.backend),
+            name: info.name.clone(),
+            device_type: format!("{:?}", info.device_type),
+            driver: info.driver.clone(),
+            driver_info: info.driver_info.clone(),
         }
     }
 
-    /// 按给定视口渲染一帧，回读 RGBA8 像素（行主序，尺寸 = `size`）。
-    ///
-    /// 注意**回读的是 sRGB 编码后的字节**（纹理是 `Rgba8UnormSrgb`），
-    /// 也就是「人眼看到的那个值」—— 断言里比对颜色时按这个口径。
-    pub fn render(&mut self, viewport: &Viewport, size: (u32, u32)) -> Vec<u8> {
-        let (width, height) = (size.0.max(1), size.1.max(1));
-        let format = wgpu::TextureFormat::Rgba8UnormSrgb;
-        let target = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("spike-offscreen-target"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
-        let view = target.create_view(&wgpu::TextureViewDescriptor::default());
-
-        write_matrix(&self.queue, &self.uniform, viewport);
-
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("offscreen-frame"),
-            });
+    fn draw_into(&self,encoder:&mut wgpu::CommandEncoder,view:&wgpu::TextureView,viewport:&Viewport) {
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("offscreen-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
+                    view,
                     resolve_target: None,
                     depth_slice: None,
                     ops: wgpu::Operations {
@@ -1196,13 +1412,50 @@ impl OffscreenRenderer {
             if let Some((x, y, w, h)) = viewport.scissor() {
                 pass.set_scissor_rect(x, y, w, h);
                 pass.set_pipeline(&self.pipeline);
+                    pass.set_bind_group(1, &self.screen_color.bind_group, &[]);
+                    pass.set_bind_group(2, &self.tone.resources.bind_group, &[]);
+                    pass.set_bind_group(3, &self.proof.bind_group, &[]);
                 pass.set_bind_group(0, &self.bind_group, &[]);
                 pass.draw(0..4, 0..1);
             }
         }
 
+    }
+
+    /// 按给定视口渲染一帧，回读 RGBA8 像素（行主序，尺寸 = `size`）。
+    ///
+    /// 注意**回读的是 sRGB 编码后的字节**（纹理是 `Rgba8UnormSrgb`），
+    /// 也就是「人眼看到的那个值」—— 断言里比对颜色时按这个口径。
+    pub fn render(&mut self, viewport: &Viewport, size: (u32, u32)) -> Vec<u8> {
+        let (width, height) = (size.0.max(1), size.1.max(1));
+        let format = self.output_format;
+        let target = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("spike-offscreen-target"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = target.create_view(&wgpu::TextureViewDescriptor::default());
+
+        write_matrix(&self.queue, &self.uniform, viewport, self.image.encoding);
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("offscreen-frame"),
+            });
+        self.draw_into(&mut encoder,&view,viewport);
+
         // 回读：每行必须按 256 字节对齐（wgpu 的 COPY_BYTES_PER_ROW_ALIGNMENT）
-        let unpadded = width * 4;
+        let unpadded = width * if self.output_format==wgpu::TextureFormat::Rgba16Float {8} else {4};
         let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
         let padded = unpadded.div_ceil(align) * align;
         let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
@@ -1270,7 +1523,7 @@ impl OffscreenRenderer {
 /// 布局：`mat4x4`（0..64）+ `params: vec4`（64..80，`.x` = 不透明度）+
 /// `image_size: vec4`（80..96，`.xy` = 逻辑图像尺寸）。**尺寸必须与 WGSL 的 struct 一致** ——
 /// 差一个字段 wgpu 会在绘制时报「expects N bytes」（不报错、直接不出图的那种）。
-fn write_matrix(queue: &wgpu::Queue, uniform: &wgpu::Buffer, viewport: &Viewport) {
+fn write_matrix(queue: &wgpu::Queue, uniform: &wgpu::Buffer, viewport: &Viewport, encoding: super::image::RenderEncoding) {
     let matrix = viewport.matrix();
     let mut bytes = [0u8; 96];
     for (column, values) in matrix.iter().enumerate() {
@@ -1280,6 +1533,7 @@ fn write_matrix(queue: &wgpu::Queue, uniform: &wgpu::Buffer, viewport: &Viewport
         }
     }
     bytes[64..68].copy_from_slice(&1.0f32.to_ne_bytes());
+    bytes[68..72].copy_from_slice(&(if encoding == super::image::RenderEncoding::LinearRec2020Half { 1.0f32 } else { 0.0 }).to_ne_bytes());
     // 顶点按**逻辑尺寸**铺四边形（不是纹理尺寸）：当前纹理可能只是预览档（1920），
     // 逻辑尺寸却是 6000 —— 按纹理尺寸铺，「1:1」就变成预览图的 1:1（2026-09-24 修）
     bytes[80..84].copy_from_slice(&(viewport.image_size.0 as f32).to_ne_bytes());
@@ -1290,6 +1544,40 @@ fn write_matrix(queue: &wgpu::Queue, uniform: &wgpu::Buffer, viewport: &Viewport
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "GPU upload/cancellation/recovery integration smoke"]
+    fn asynchronous_upload_commits_only_latest_complete_frame_and_cancels_on_recovery() {
+        let mut renderer=OffscreenRenderer::with_image(None,RenderImage::solid(16,16,[7,17,27,255]),"async-upload").unwrap();
+        let mut viewport=Viewport {image_size:(16,16),viewport_size:(16.0,16.0),..Default::default()};viewport.refit();
+        let original=renderer.render(&viewport,(16,16));
+        let first=Arc::new(RenderImage::solid(2048,2048,[220,10,30,255]));
+        let latest=Arc::new(RenderImage::solid(2048,2048,[20,230,40,255]));
+        assert!(!renderer.prepare_shared_image(first.clone()).unwrap());
+        assert!(!renderer.prepare_shared_image(latest.clone()).unwrap());
+        let deadline=std::time::Instant::now()+std::time::Duration::from_secs(10);
+        while !renderer.prepare_shared_image(latest.clone()).unwrap() {
+            assert_eq!(renderer.render(&viewport,(16,16)),original);
+            assert!(std::time::Instant::now()<deadline);
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert!(renderer.commit_prepared_image(first.clone()).is_err());
+        renderer.commit_prepared_image(latest.clone()).unwrap();
+        assert_eq!(&renderer.render(&viewport,(16,16))[..4],&[20,230,40,255]);
+        renderer.cancel_prepared_image();
+        assert!(renderer.commit_prepared_image(latest.clone()).is_err());
+        assert!(!renderer.prepare_shared_image(first.clone()).unwrap());
+        renderer.recover().unwrap();
+        assert!(renderer.commit_prepared_image(first.clone()).is_err(),"old-device result became installable");
+        assert_eq!(&renderer.render(&viewport,(16,16))[..4],&[20,230,40,255]);
+        let deadline=std::time::Instant::now()+std::time::Duration::from_secs(10);
+        while !renderer.prepare_shared_image(first.clone()).unwrap() {
+            assert!(std::time::Instant::now()<deadline);
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        renderer.commit_prepared_image(first).unwrap();
+        assert_eq!(&renderer.render(&viewport,(16,16))[..4],&[220,10,30,255]);
+    }
     use crate::render::viewport::FitMode;
 
     #[test]
@@ -1388,7 +1676,7 @@ mod tests {
             usage:wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,mapped_at_creation:false,
         });
         for (fraction, x) in [(0.5,32),(0.75,48)] {
-            overlay.prepare(&queue,&viewport,None,Some(fraction),Some(palette));
+            overlay.prepare(&queue,&viewport,None,Some(fraction),Some(palette),1.0);
             let view=target.create_view(&Default::default());
             let mut encoder=device.create_command_encoder(&Default::default());
             {

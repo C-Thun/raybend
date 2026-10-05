@@ -7,9 +7,13 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { pickDirectory } from "./dialog.ts";
+import { pickDirectory, pickOpenFiles } from "./dialog.ts";
 
 test("不在 Tauri 里：返回 null 而不是抛错", async () => {
   assert.equal(await pickDirectory(), null);
   assert.equal(await pickDirectory({ title: "选择库目录" }), null);
+});
+
+test("不在 Tauri 里：批量文件选择返回空数组", async () => {
+  assert.deepEqual(await pickOpenFiles({ filters: [{ name: "ICC", extensions: ["icc", "icm"] }] }), []);
 });

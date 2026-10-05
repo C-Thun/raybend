@@ -558,6 +558,20 @@ fn run_import_thread<R: Runtime>(
     };
     run_batch(deps, &jobs);
 
+    // 新登记资产的 sidecar 采纳（`specs/xmp-sidecar.md` §7：自动发现，无需用户操作）
+    let current = task.current();
+    let new_assets = sink.take_new_assets();
+    if !new_assets.is_empty() {
+        let items: Vec<crate::sidecar::NewAsset> = new_assets
+            .into_iter()
+            .map(|item| crate::sidecar::NewAsset {
+                asset_id: item.asset_id,
+                file_abs: std::path::PathBuf::from(&item.source_file_abs),
+            })
+            .collect();
+        crate::sidecar::adopt_new_assets(&app, &current, &items);
+    }
+
     /*
      * 导入之后的**目录计数**（人类 2026-09-19 的数量体系）：
      * 「导入时，是先统计导入目录……随后将这个库下的所有 directories 的这两个 count 加起来，
@@ -567,13 +581,12 @@ fn run_import_thread<R: Runtime>(
      * 父目录去重）——模版是可变的、还可能带子目录透传，从结果反推永远比从参数正推准。
      * 每个目录一次 `readdir`（本目录 + `_RAW`），本地盘上是微秒级。
      */
-    let current = task.current();
     if current.ensure_current().is_ok() {
         refresh_directory_counts(&app, &current);
     }
 
     app.state::<crate::browse::BrowseState>()
-        .observe_session(&app, &catalog);
+        .observe_session(&app, &current);
 
     // 终态一定再发一条（节流不该让「已完成」这件事丢在路上）
     let _ = app.emit(PROGRESS_EVENT, &handle.snapshot());

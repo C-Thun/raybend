@@ -52,6 +52,7 @@ function setup(patch: Partial<ExportStoreDeps> = {}) {
   const writes: string[] = [];
   const s = createExportStore({
     getSetting: async (key) => {
+      if (key === "color.defaults.v1") return null;
       assert.equal(key, EXPORT_PRESETS_KEY);
       return serializePresets([preset]);
     },
@@ -79,6 +80,20 @@ function deferred<T>() {
   });
   return { promise, resolve };
 }
+test("color defaults update only a new untouched draft and cannot replace a manual choice",async ()=> {
+  const first=deferred<string|null>();let calls=0;
+  const {s}=setup({getSetting:async key=>key==="color.defaults.v1"?(++calls===1?first.promise:JSON.stringify({untagged_input:{kind:"srgb"},output:{kind:"display_p3"}})):serializePresets([preset])});
+  await s.ready;s.choosePreset(null);await Promise.resolve();await Promise.resolve();
+  assert.deepEqual(s.draft().outputColor,{kind:"display_p3"});
+  s.edit({outputColor:{kind:"adobe_rgb"}});first.resolve(JSON.stringify({untagged_input:{kind:"srgb"},output:{kind:"srgb"}}));
+  await Promise.resolve();await Promise.resolve();assert.deepEqual(s.draft().outputColor,{kind:"adobe_rgb"});s.dispose();
+});
+test("late color defaults cannot modify an existing export preset",async ()=> {
+  const late=deferred<string|null>();
+  const {s}=setup({getSetting:async key=>key==="color.defaults.v1"?late.promise:serializePresets([{...preset,outputColor:{kind:"adobe_rgb"}}])});
+  await s.ready;s.choosePreset(preset.id);late.resolve(JSON.stringify({untagged_input:{kind:"srgb"},output:{kind:"display_p3"}}));
+  await Promise.resolve();await Promise.resolve();assert.deepEqual(s.draft().outputColor,{kind:"adobe_rgb"});s.dispose();
+});
 test("one asset contributes several independently selectable issues", async () => {
   const { s } = setup();
   await s.ready;
@@ -548,7 +563,7 @@ test("v2 migration preserves settings and makes collision policy explicitly appe
  const writes:string[]=[];
  const deps={getSetting:async(key:string)=>storage.get(key)??null,setSetting:async(key:string,value:string)=>{writes.push(key);storage.set(key,value);}};
  const {s}=setup(deps);await s.ready;assert.equal(s.presets()[0]?.existingFile,"append");s.dispose();
- assert.equal(JSON.parse(storage.get(EXPORT_PRESETS_KEY)!).version,3);
+ assert.equal(JSON.parse(storage.get(EXPORT_PRESETS_KEY)!).version,4);
  const {s:next}=setup(deps);await next.ready;assert.deepEqual(writes,[EXPORT_PRESETS_KEY]);next.dispose();
 });
 

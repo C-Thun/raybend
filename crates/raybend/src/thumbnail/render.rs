@@ -95,7 +95,8 @@ pub fn encode_avif_with_metadata(rgb: &[u8], width:u32,height:u32,quality:u8,exi
     encoder
         .write_image(rgb, width, height, image::ExtendedColorType::Rgb8)
         .map_err(|e| Error::Unsupported(format!("AVIF 编码失败：{e}")))?;
-    Ok(data)
+    let profile=crate::color::icc::srgb_icc().map_err(|e|Error::Unsupported(e.to_string()))?;
+    crate::media::isobmff::attach_icc(&data,profile.bytes())
 }
 /// 渲染管线版本：**算法一改就 +1**（缓存靠它自动失效）。
 ///
@@ -136,7 +137,8 @@ pub fn encode_avif_with_metadata(rgb: &[u8], width:u32,height:u32,quality:u8,exi
 // v12: lens profiles apply only after an explicit selection / auto-adjust action.
 // v13: optional camera base curve before the editable user curve.
 // v14: RGB16 display stages; quantize only after sharpen/LUT/geometry.
-pub const PIPELINE_VERSION: u32 = 14;
+// v15: append an sRGB ICC to AVIF without changing or re-encoding AV1 samples.
+pub const PIPELINE_VERSION: u32 = 15;
 
 /// 缩略图尺度。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
@@ -203,9 +205,9 @@ impl SizeClass {
 #[must_use]
 pub const fn render_sig(size: SizeClass) -> &'static str {
     match size {
-        SizeClass::Grid => "avif-q90-grid-v14-embedded-v1",
-        SizeClass::Strip => "avif-q90-strip-v14-embedded-v1",
-        SizeClass::Screen => "avif-q90-screen-v14",
+        SizeClass::Grid => "avif-q90-grid-v15-embedded-v1",
+        SizeClass::Strip => "avif-q90-strip-v15-embedded-v1",
+        SizeClass::Screen => "avif-q90-screen-v15",
     }
 }
 
@@ -376,6 +378,29 @@ pub fn render_file_with_edit_and_lut(
     lens: Option<&crate::develop::lens::LensCorrection>,
     lut: Option<&crate::develop::lut::Lut>,
 ) -> Result<Option<Thumb>> {
+    render_file_with_profiles(path, size, edit, lens, lut, |id, _| {
+        Err(Error::Unsupported(format!("缩略图缺少输入 ICC：{}", id.as_str())))
+    })
+}
+
+/// The same preview/cache entry point resolves frozen V2 color before resizing.
+pub fn render_file_with_profiles(
+    path: &Path, size: SizeClass, edit: Option<&DevelopStack>,
+    lens: Option<&crate::develop::lens::LensCorrection>, lut: Option<&crate::develop::lut::Lut>,
+    profile: impl FnMut(&crate::color::ProfileId, crate::color::icc::IccRole) -> Result<crate::color::icc::RgbIcc>,
+) -> Result<Option<Thumb>> {
+    if let Some(stack) = edit && let Some(color) = &stack.color {
+        let (source, shot) = crate::display::output::decode_working_source(path, color, profile)?;
+        let edge = geometry_input_edge(size, source.dimensions(), stack.geometry);
+        let source = crate::develop::working::WorkingReferenceImage::from_working(source.into_downscaled(edge))
+            .map_err(|e| Error::Unsupported(e.to_string()))?;
+        let working = crate::display::output::render_working(&source, stack, lens, shot, lut, 0)?;
+        let target = crate::color::icc::srgb_icc().map_err(|e| Error::Unsupported(e.to_string()))?;
+        let (w, h) = working.dimensions();
+        let rgb = image::ImageBuffer::from_raw(w, h, working.to_rgb16_flat(&target).map_err(|e| Error::Unsupported(e.to_string()))?)
+            .ok_or_else(|| Error::Unsupported("色彩缩略图尺寸与像素不符".into()))?;
+        return encode_with_lut(DynamicImage::ImageRgb16(rgb), size, None, false, None, None, None).map(Some);
+    }
     let kind = path
         .file_name()
         .map_or(MediaKind::Other, |n| kind_of_file(&n.to_string_lossy()));
@@ -920,6 +945,39 @@ pub fn rgb8_layout() -> ExtendedColorType {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 手动基准：显式 nclx 的 RGB 内部模型有可见耗时和体积回归，
+    /// 保留数据供后续设计低成本容器标记方案时比较，不作为默认编码。
+    #[test]
+    #[ignore]
+    fn bench_avif_srgb_marker_cost() {
+        use image::ImageEncoder;
+        use std::time::Instant;
+        let (width, height) = (1920_u32, 1280_u32);
+        let rgb: Vec<u8> = (0..width as usize * height as usize * 3)
+            .map(|index| (index.wrapping_mul(71) % 256) as u8)
+            .collect();
+        let mut legacy = Vec::new();
+        let started = Instant::now();
+        image::codecs::avif::AvifEncoder::new_with_speed_quality(&mut legacy, AVIF_SPEED, AVIF_QUALITY)
+            .with_num_threads(Some(1))
+            .write_image(&rgb, width, height, image::ExtendedColorType::Rgb8)
+            .unwrap();
+        let legacy_elapsed = started.elapsed();
+        let start=Instant::now();
+        let tagged=crate::media::isobmff::attach_icc(&legacy,crate::color::icc::srgb_icc().unwrap().bytes()).unwrap();
+        eprintln!("ICC container only {:?}/{} bytes; AV1 payload retained",start.elapsed(),tagged.len());
+        let mut marked = Vec::new();
+        let started = Instant::now();
+        image::codecs::avif::AvifEncoder::new_with_speed_quality(&mut marked, AVIF_SPEED, AVIF_QUALITY)
+            .with_colorspace(image::codecs::avif::ColorSpace::Srgb)
+            .with_num_threads(Some(1))
+            .write_image(&rgb, width, height, image::ExtendedColorType::Rgb8)
+            .unwrap();
+        let marked_elapsed = started.elapsed();
+        assert!(marked.windows(8).any(|window| window == b"nclx\0\x01\0\x0d"));
+        eprintln!("1920×1280 AVIF old {:?}/{} bytes, explicit sRGB {:?}/{} bytes", legacy_elapsed, legacy.len(), marked_elapsed, marked.len());
+    }
 
     fn jpeg_of(w: u32, h: u32, color: [u8; 3]) -> Vec<u8> {
         let img = RgbImage::from_pixel(w, h, Rgb(color));

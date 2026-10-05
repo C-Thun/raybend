@@ -23,6 +23,7 @@ pub mod fullscreen;
 mod import;
 pub mod issues;
 pub mod organization;
+pub mod photo_ai;
 pub mod lens;
 pub mod lut;
 mod migration;
@@ -31,6 +32,7 @@ pub mod presets;
 /// 窗口 ↔ wgpu 的最小胶水（取裸句柄 / 读客户区尺寸）——spike 与编辑视口共用这一份。
 mod render_window;
 pub mod repo;
+mod sidecar;
 pub mod source;
 mod splash;
 pub mod system_preferences;
@@ -41,6 +43,10 @@ mod updates;
 /// IPC 契约测试（拉把 Rust 序列化出的键名与前端 ts 镜像对齐）。
 #[cfg(test)]
 mod contract;
+mod color_system;
+mod color_status;
+mod color_profiles;
+mod color_batch;
 pub mod dirs;
 /// 渲染可行性 spike 的调试窗口（`memory/PLAN.md` A.2）。**按需建窗**，不影响主窗口。
 pub mod spike_viewport;
@@ -212,6 +218,8 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(updates::UpdateState::default())
         .manage(db::DbState::default())
+        .manage(color_batch::ColorBatchState::default())
+        .manage(photo_ai::PhotoAiState::default())
         .manage(thumbs::SourcesThumbs::default())
         // 浏览过的目录的元信息缓存（会话级内存，不落盘 —— 见 specs/photo-meta-and-tile-display.md）
         .manage(source::SourcesMetaCache::default())
@@ -236,6 +244,17 @@ pub fn run() {
             updates::updates_install,
             db::app_paths,
             system_preferences::system_preferences,
+            color_system::color_display_snapshot,
+            color_system::color_open_system_settings,
+            color_profiles::color_profile_library,
+            color_profiles::color_prepare_photo,
+            color_batch::color_batch_review,
+            color_batch::color_batch_commit,
+            editor::editor_set_proof,
+            color_profiles::color_profile_import_files,
+            color_profiles::color_profile_hide,
+            color_profiles::color_get_defaults,
+            color_profiles::color_set_defaults,
             db::db_status,
             migration::migration_snapshot,
             db::setting_get,
@@ -261,7 +280,15 @@ pub fn run() {
             thumbs::image_histogram,
             tags::tag_list,
             tags::tag_ensure,
+            photo_ai::photo_ai_model_status,
+            photo_ai::photo_ai_model_install,
+            photo_ai::photo_ai_model_uninstall,
+            photo_ai::photo_ai_start,
+            photo_ai::photo_ai_foreground,
+            photo_ai::photo_ai_tasks,
+            photo_ai::photo_ai_task_action,
             organization::organization_buckets,
+            organization::organization_photo_tag_state,
             organization::organization_bucket_create,
             organization::organization_bucket_rename,
             organization::organization_bucket_rules,
@@ -383,6 +410,7 @@ pub fn run() {
         ])
         .manage(spike_viewport::SpikeState::default())
         .setup(|app| {
+            color_system::install(app.handle());
             use tauri::Manager;
             /*
              * 迁移通知的钩子要**赶在第一次开库之前**装上：
@@ -460,8 +488,8 @@ pub fn run() {
             }
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("启动 Tauri 应用失败");
+        .build(tauri::generate_context!())
+        .expect("启动 Tauri 应用失败").run(|app,event| {if matches!(event,tauri::RunEvent::Exit){photo_ai::shutdown(app);}});
 }
 
 #[cfg(test)]

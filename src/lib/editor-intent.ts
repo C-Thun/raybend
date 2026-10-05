@@ -199,6 +199,8 @@ export interface LatestCoalescer<T> {
 export interface LatestCoalescerDeps<T> {
   /** 真正发出去（IPC / 测试里换成数组收集） */
   send: (value: T) => void;
+  /** 换照片/库或载入未就绪时丢弃旧作用域的尾样本。 */
+  isCurrent?: (value: T) => boolean;
   /** 相等判定（默认为 `Object.is`） */
   equals?: (a: T, b: T) => boolean;
   /** 帧调度（默认真实 rAF；测试注入确定实现） */
@@ -214,6 +216,7 @@ export function createLatestCoalescer<T>(deps: LatestCoalescerDeps<T>): LatestCo
   let sent = 0;
 
   const emit = (value: T): void => {
+    if (deps.isCurrent && !deps.isCurrent(value)) return;
     if (last !== null && equals(last.value, value)) return;
     last = { value };
     sent += 1;

@@ -26,7 +26,7 @@ import type { LensQueryState } from "./lens-query.ts";
  */
 
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, type JSX } from "solid-js";
-import { IconChevronDown, IconLoader2, IconPencil, IconTrash } from "@tabler/icons-solidjs";
+import { IconChevronDown, IconExternalLink, IconLoader2, IconPencil, IconTrash } from "@tabler/icons-solidjs";
 
 import { Button, IconButton } from "../../components/ui/Button.tsx";
 import { MetadataRows } from "../../components/ui/MetadataRows.tsx";
@@ -36,6 +36,10 @@ import type { IssueLibrary, Issue, IssueSelection } from "../../api/issues.ts";
 import { SegmentedControl } from "../../components/ui/SegmentedControl.tsx";
 import { HistogramPanel } from "../../components/ui/HistogramPanel.tsx";
 import { Switch } from "../../components/ui/Form.tsx";
+import { ProfileSelect } from "../../components/ui/ProfileSelect.tsx";
+import { DisplayColorStatus } from "../../components/ui/DisplayColorStatus.tsx";
+import type { ColorProfileEntry } from "../../api/color.ts";
+import { outputColorChoice, outputColorFromChoice } from "../../lib/color-model.ts";
 import { Menu } from "../../components/ui/Menu.tsx";
 import { Dialog } from "../../components/ui/Dialog.tsx";
 import { appliedLensProfile, chosenLensProfile, searchLensProfiles, suggestedLensProfiles } from "./lens-options.ts";
@@ -156,6 +160,13 @@ export interface EditorPanelsProps {
   onDeletePreset: (id: string) => Promise<void>;
   onDeletePresetDirectory: (id: string) => Promise<void>;
   onMovePresets: (ids: readonly string[], directoryId: string) => Promise<void>;
+  onOpenColorProfiles: () => void;
+  profileEntries: readonly ColorProfileEntry[];
+  onRefreshProfiles: () => void;
+  onApplyColor: (profileId: string | null) => Promise<void>;
+  colorBatchCount:number;
+  onReviewColorBatch:(profileId:string|null)=>Promise<void>;
+  onApplyPreset: (snapshot: import("../../lib/presets.ts").PresetSnapshot) => Promise<void>;
   class?: string;
 }
 
@@ -164,7 +175,7 @@ export interface EditorPanelsProps {
  * ══════════════════════════════════════════════════════════════ */
 
 type ViewTab = "view" | "issues" | "info";
-type CurveTab = "curve" | "preset";
+type CurveTab = "curve" | "preset" | "color";
 
 /**
  * 第 1 组页签等高（`design/editor.md` §3.11，崔总 2026-09-30 定案）：
@@ -185,7 +196,8 @@ export function EditorPanels(props: EditorPanelsProps): JSX.Element {
   const [viewTab, setViewTab] = createSignal<ViewTab>("view");
   createEffect(() => { if (props.issueFocusTick > 0) setViewTab("issues"); });
   const [paramTab, setParamTab] = createSignal<ParamGroup>("tone");
-  const [curveTab, setCurveTab] = createSignal<CurveTab>("curve");
+  const curveTab = props.store.advancedTab;
+  const setCurveTab = props.store.setAdvancedTab;
 
   return (
     <div
@@ -321,7 +333,7 @@ export function EditorPanels(props: EditorPanelsProps): JSX.Element {
 
       {/* ── 第 3 组：曲线 ─────────────────────────────────── */}
       <section class="flex flex-col gap-2" data-editor-group="curve">
-        {/* 曲线 · 预设：两页签等高，切换不伸缩（design/editor.md §3.10） */}
+        {/* 曲线 · 预设 · 色彩管理：输入操作在新管线接通前保持只读。 */}
         <SegmentedControl
           value={curveTab()}
           onValueChange={(value) => setCurveTab(value as CurveTab)}
@@ -329,6 +341,7 @@ export function EditorPanels(props: EditorPanelsProps): JSX.Element {
           options={[
             { value: "curve", label: t("editor.group.curve") },
             { value: "preset", label: t("editor.preset.title") },
+            { value: "color", label: t("editor.colorManagement.title") },
           ]}
         />
         <Show when={curveTab() === "curve"}>
@@ -353,9 +366,70 @@ export function EditorPanels(props: EditorPanelsProps): JSX.Element {
             deletePreset={props.onDeletePreset}
             deleteDirectory={props.onDeletePresetDirectory}
             movePresets={props.onMovePresets}
+            applyPreset={props.onApplyPreset}
           />
         </Show>
+        <Show when={curveTab() === "color"}>
+          <ColorManagementTab store={props.store} enabled={props.enabled} hasPhoto={props.current !== null} profileEntries={props.profileEntries} onRefreshProfiles={props.onRefreshProfiles} onApplyColor={props.onApplyColor} onOpenProfiles={props.onOpenColorProfiles} colorBatchCount={props.colorBatchCount} onReviewColorBatch={props.onReviewColorBatch} />
+        </Show>
       </section>
+    </div>
+  );
+}
+
+function ColorManagementTab(props: { store: EditorStore; enabled: boolean; hasPhoto: boolean; profileEntries: readonly ColorProfileEntry[]; onRefreshProfiles: () => void; onApplyColor: (profileId: string | null) => Promise<void>; onOpenProfiles: () => void; colorBatchCount:number;onReviewColorBatch:(profileId:string|null)=>Promise<void> }): JSX.Element {
+  const [choice,setChoice] = createSignal("auto");
+  const [busy,setBusy] = createSignal(false);
+  const [error,setError] = createSignal<string|null>(null);
+  const color = () => props.store.colorState();
+  createEffect(() => { const source=color()?.source; setChoice(source?.kind === "assigned_rgb_icc" ? source.profile_id : "auto"); setError(null); });
+  const apply = async (automatic=false,batch=false): Promise<void> => {
+    if (!props.enabled || busy()) return;
+    const selected = automatic ? "auto" : choice();
+    const id = selected === "srgb" ? props.profileEntries.find(entry=>entry.key === "builtin:srgb-v1")?.profileId : selected;
+    if (!id) return;
+    setBusy(true); setError(null);
+    try { await (batch ? props.onReviewColorBatch : props.onApplyColor)(id === "auto" ? null : id); }
+    catch(error) { setError(String(error)); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div class="flex flex-col gap-2 text-fs-1" data-editor-color-management>
+      <div class="flex flex-col gap-2">
+        <div class="font-semibold text-fg-1">{t("editor.colorManagement.input")}</div>
+        <p class="mt-1 leading-relaxed text-fg-2">
+          {t(!props.hasPhoto ? "editor.colorManagement.noPhoto" : color() ? "editor.colorManagement.frozen" : "editor.colorManagement.inputPending")}
+        </p>
+        <ProfileSelect role="input" allowAutomatic label={t("editor.colorManagement.input")} class="w-full" entries={props.profileEntries} value={choice()} disabled={!props.enabled || busy()} onFocus={props.onRefreshProfiles} onChange={setChoice} />
+        <div class="flex gap-2"><Button class="flex-1" variant="primary" disabled={!props.enabled || busy()} onClick={()=>void apply()}>{t(busy() ? "editor.colorManagement.preparing" : "editor.colorManagement.apply")}</Button>
+          <Button class="flex-1" variant="secondary" disabled={!props.enabled || busy()} onClick={()=>void apply(true)}>{t("editor.colorManagement.restore")}</Button></div>
+        <Button variant="secondary" disabled={!props.enabled || busy() || props.colorBatchCount<2} onClick={()=>void apply(false,true)}>{t("editor.colorManagement.batch",{count:props.colorBatchCount})}</Button>
+        <Show when={color()}>{value=><p class="text-fs-0 text-fg-3">{t(`editor.colorManagement.source.${value().source.kind}` as Parameters<typeof t>[0])}</p>}</Show>
+        <Show when={error()}>{message=><p role="alert" class="text-fs-0 text-danger">{message()}</p>}</Show>
+      </div>
+      <div class="rounded-ui bg-surface-bar p-3">
+        <div class="font-semibold text-fg-1">{t("editor.colorManagement.working")}</div>
+        <p class="mt-1 text-fg-2">{t(color() ? "editor.colorManagement.linear" : "editor.colorManagement.legacy")}</p>
+      </div>
+      <div class="rounded-ui bg-surface-bar p-3">
+        <div class="font-semibold text-fg-1">{t("editor.colorManagement.display")}</div>
+        <div class="mt-2"><DisplayColorStatus status={props.store.renderState()?.displayColor ?? null} /></div>
+      </div>
+      <div class="rounded-ui bg-surface-bar p-3">
+        <Switch label={t("editor.colorManagement.proof")} checked={props.store.proofEnabled()} disabled={!props.hasPhoto} onCheckedChange={props.store.setProofEnabled} />
+        <ProfileSelect role="output" label={t("editor.colorManagement.proofTarget")} class="mt-2 w-full" entries={props.profileEntries} value={outputColorChoice(props.store.proofTarget())} onFocus={props.onRefreshProfiles} onChange={value=>{const target=outputColorFromChoice(value);if(target)props.store.setProofTarget(target);}} />
+        <div class="mt-2"><Switch label={t("editor.colorManagement.gamutWarning")} checked={props.store.proofWarning()} disabled={!props.store.proofEnabled()} onCheckedChange={props.store.setProofWarning} /></div>
+        <p class="mt-1 text-fs-0 text-fg-3">{t("editor.colorManagement.proofLimit")}</p>
+      </div>
+      <button
+        type="button"
+        class="flex min-h-9 items-center justify-between rounded-ui px-3 text-left font-medium text-brand hover:bg-state-hover"
+        onClick={props.onOpenProfiles}
+      >
+        {t("editor.colorManagement.manage")}
+        <IconExternalLink size={16} aria-hidden="true" />
+      </button>
+      <p class="px-1 text-fs-0 leading-relaxed text-fg-3">{t("editor.colorManagement.cacheHint")}</p>
     </div>
   );
 }

@@ -73,6 +73,7 @@ export interface CommandDeps {
   /* ── 弹窗 ───────────────────────────────────────── */
   openPalette: () => void;
   openShortcuts: () => void;
+  openSettings: () => void;
   openAbout: () => void;
   openWelcome?: () => void;
   openUpdates?: () => void;
@@ -111,6 +112,7 @@ export interface CommandDeps {
 
   /* ── 浏览 ───────────────────────────────────────── */
   browse: {
+    ai?: { available?: () => boolean; recognize: (rerun: boolean) => void; tasks: () => void; models: () => void };
     organization?: {
       panel: (mode: "library" | "buckets" | "tags") => void;
       addSelected: () => void;
@@ -188,6 +190,7 @@ export interface CommandDeps {
     finalize: () => void;
     autoAdjust: () => void;
     canAutoAdjust: () => boolean;
+    color?: { open: () => void; proof: () => void; warning: () => void; restore: () => void; batch?:()=>void; };
   };
 }
 
@@ -213,6 +216,17 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
 
   const inExport=()=>deps.flow()==="export";
   return [
+    // 色彩查看及输入恢复低频，默认键位留空；菜单、命令面板与快捷键设置同源。
+    spec({id:"editor.color.open",titleKey:"cmd.editor.color.open",group:"view",menu:"view",scope:"viewer",defaultKey:undefined,when:()=>deps.editor.active(),run:()=>deps.editor.color?.open()}),
+    spec({id:"editor.color.proof",titleKey:"cmd.editor.color.proof",group:"view",menu:"view",scope:"viewer",defaultKey:undefined,when:()=>deps.editor.active() && deps.editor.hasPhoto(),run:()=>deps.editor.color?.proof()}),
+    spec({id:"editor.color.gamutWarning",titleKey:"cmd.editor.color.gamutWarning",group:"view",menu:"view",scope:"viewer",defaultKey:undefined,when:()=>deps.editor.active() && deps.editor.hasPhoto(),run:()=>deps.editor.color?.warning()}),
+    spec({id:"editor.color.restore",titleKey:"cmd.editor.color.restore",group:"edit",menu:"edit",scope:"viewer",defaultKey:undefined,when:()=>deps.editor.active() && deps.editor.hasPhoto(),run:()=>deps.editor.color?.restore()}),
+    spec({id:"editor.color.batch",titleKey:"cmd.editor.color.batch",group:"edit",menu:"edit",scope:"viewer",defaultKey:undefined,when:()=>deps.editor.active() && deps.editor.hasPhoto(),run:()=>deps.editor.color?.batch?.()}),
+    // AI 批量动作/设置低频且必须明确范围，defaultKey 留空，不占用照片标记热键。
+    spec({id:"ai.recognize",titleKey:"cmd.ai.recognize",group:"edit",menu:"edit",scope:"global",defaultKey:undefined,when:()=>deps.flow()==="browse" && (deps.browse.ai?.available?.()??false),run:()=>deps.browse.ai?.recognize(false)}),
+    spec({id:"ai.recognizeAgain",titleKey:"cmd.ai.recognizeAgain",group:"edit",menu:"edit",scope:"global",defaultKey:undefined,when:()=>deps.flow()==="browse" && (deps.browse.ai?.available?.()??false),run:()=>deps.browse.ai?.recognize(true)}),
+    spec({id:"ai.tasks",titleKey:"cmd.ai.tasks",group:"view",menu:"view",scope:"global",defaultKey:undefined,when:()=>deps.browse.ai?.available?.()??false,run:()=>deps.browse.ai?.tasks()}),
+    spec({id:"ai.models",titleKey:"cmd.ai.models",group:"view",menu:"view",scope:"global",defaultKey:undefined,when:()=>deps.browse.ai?.available?.()??false,run:()=>deps.browse.ai?.models()}),
     spec({id:"organization.library",titleKey:"cmd.organization.library",group:"view",menu:"view",scope:"global",defaultKey:"Alt+1",when:()=>deps.flow()==="browse",run:()=>deps.browse.organization?.panel("library")}),
     spec({id:"organization.buckets",titleKey:"cmd.organization.buckets",group:"view",menu:"view",scope:"global",defaultKey:"Alt+2",when:()=>deps.flow()==="browse",run:()=>deps.browse.organization?.panel("buckets")}),
     spec({id:"organization.tags",titleKey:"cmd.organization.tags",group:"view",menu:"view",scope:"global",defaultKey:"Alt+3",when:()=>deps.flow()==="browse",run:()=>deps.browse.organization?.panel("tags")}),
@@ -257,6 +271,15 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       defaultKey: undefined,
       enabled: () => deps.repository?.canSettings?.() ?? deps.browse.repositoryId() !== null,
       run: () => deps.openLibrarySettings(),
+    }),
+    spec({
+      id: "settings.open",
+      titleKey: "cmd.settings.open",
+      group: "file",
+      menu: "file",
+      scope: "global",
+      defaultKey: "Mod+,",
+      run: () => deps.openSettings(),
     }),
     spec({
       id: "repository.reconnect",
@@ -728,7 +751,8 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       group: "help",
       menu: "help",
       scope: "global",
-      defaultKey: "Mod+,",
+      // 旧入口保留给熟悉「帮助 → 快捷键」的用户，默认键转给统一设置。
+      defaultKey: undefined,
       run: () => deps.openShortcuts(),
     }),
     spec({

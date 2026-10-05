@@ -1,0 +1,22 @@
+{
+  "format": 1,
+  "version": "1.28.0",
+  "platform": "win-x64",
+  "archive": {
+    "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.28.0/onnxruntime-win-x64-1.28.0.zip",
+    "sha256": "abef733dacbe2f571547a7150b479b5cb9cc0df22f96c24983a42cadb1b4f8bc",
+    "bytes": 78796801
+  },
+  "files": [
+    {
+      "name": "onnxruntime.dll",
+      "bytes": 15809848,
+      "sha256": "18370c375f07357fa5874344a9d9ac17e6b6fe1eb18b1dd209d79483b4470257"
+    },
+    {
+      "name": "onnxruntime_providers_shared.dll",
+      "bytes": 21856,
+      "sha256": "599629fa643707defe9156140ae5edd73531f221aa97b7585b1c9bb0a93586f8"
+    }
+  ]
+}

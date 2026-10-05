@@ -23,6 +23,15 @@ fn main() {
         // worker 模式：跑协议循环，退出码按协议结果（0 正常 / 非 0 交给调用方判断）
         std::process::exit(raybend::raw::worker::run_worker_main());
     }
+    if std::env::args().any(|arg| arg == raybend::ai::WORKER_ARG) {
+        #[cfg(feature = "photo-ai-runtime")]
+        std::process::exit(raybend::ai::worker::run_worker_main());
+        #[cfg(not(feature = "photo-ai-runtime"))]
+        {
+            eprintln!("此构建未包含 AI 识别");
+            std::process::exit(2);
+        }
+    }
     raybend_desktop_lib::run();
 }
 

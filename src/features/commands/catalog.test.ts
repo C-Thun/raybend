@@ -2,6 +2,16 @@ import assert from "node:assert/strict";
 import { detectConflicts } from "../../lib/commands.ts";
 import test from "node:test";
 
+test("色彩面板、输入恢复、批量指定、打样和警告共用命令入口且不占默认键",()=> {
+  const calls:string[]=[];
+  const deps={editor:{active:()=>true,hasPhoto:()=>true,color:{open:()=>calls.push("open"),restore:()=>calls.push("restore"),batch:()=>calls.push("batch"),proof:()=>calls.push("proof"),warning:()=>calls.push("warning")}}} as unknown as CommandDeps;
+  const registry=createCommandRegistry(deps);
+  for(const [id,name] of [["open","open"],["restore","restore"],["batch","batch"],["proof","proof"],["gamutWarning","warning"]]) {
+    const command=registry.find(c=>c.id===`editor.color.${id}`)!;
+    assert.equal(command.defaultKey,undefined);assert.equal(command.when?.(),true);command.run();assert.equal(calls[calls.length - 1],name);
+  }
+});
+
 import {
   createCommandRegistry,
   type CommandDeps,
@@ -151,6 +161,25 @@ test("库重新查找走统一动作，文件菜单可达且明确不占热键",
   assert.deepEqual(detectConflicts(registry, {}).filter(issue => issue.commandIds.includes(command.id)), []);
 });
 
+test("全局设置和旧快捷键入口都走命令；Mod+, 只属于设置", () => {
+  const calls: string[] = [];
+  const registry = createCommandRegistry({
+    openSettings: () => calls.push("settings"),
+    openShortcuts: () => calls.push("shortcuts"),
+  } as unknown as CommandDeps);
+  const settings = registry.find((item) => item.id === "settings.open");
+  const shortcuts = registry.find((item) => item.id === "help.shortcuts");
+  assert.ok(settings);
+  assert.ok(shortcuts);
+  assert.equal(settings.menu, "file");
+  assert.equal(settings.defaultKey, "Mod+,");
+  assert.equal(shortcuts.defaultKey, undefined);
+  settings.run();
+  shortcuts.run();
+  assert.deepEqual(calls, ["settings", "shortcuts"]);
+  assert.deepEqual(detectConflicts(registry, {}).filter((issue) => issue.blocking && issue.commandIds.includes("settings.open")), []);
+});
+
 test("定位与设置按当前工作流库可达，离线不封死入口且不占默认键", () => {
   let selected = true, busy = false, calls = 0;
   const deps = { repository: { canReconnect: () => true, reconnect: () => {}, canSettings: () => selected,
@@ -165,4 +194,23 @@ test("定位与设置按当前工作流库可达，离线不封死入口且不�
   assert.equal(calls, 2); busy = true;
   assert.equal(commands.find(item => item.id === "repository.locate")!.enabled?.(), false);
   selected = false; assert.equal(commands.find(item => item.id === "file.repositorySettings")!.enabled?.(), false);
+});
+
+test("AI actions have explicit context, reuse callbacks and reserve no default hotkeys", () => {
+  const calls: string[] = [];
+  const deps = { flow: () => "browse", browse: { ai: { recognize: (rerun: boolean) => calls.push(rerun ? "again" : "recognize"), tasks: () => calls.push("tasks"), models: () => calls.push("models") } } } as unknown as CommandDeps;
+  const commands = createCommandRegistry(deps);
+  for (const id of ["ai.recognize", "ai.recognizeAgain", "ai.tasks", "ai.models"]) {
+    const command = commands.find((item) => item.id === id)!;
+    assert.ok(command); assert.equal(command.defaultKey, undefined); command.run();
+  }
+  assert.deepEqual(calls, ["recognize", "again", "tasks", "models"]);
+});
+
+test("AI 命令按实际构建能力隐藏，既有标签命令保持可用", () => {
+ let available=false;
+ const deps={flow:()=>"browse",browse:{ai:{available:()=>available,recognize:()=>{},tasks:()=>{},models:()=>{}}}} as unknown as CommandDeps;
+ const commands=createCommandRegistry(deps).filter(c=>c.id.startsWith("ai."));
+ assert.equal(commands.length,4);for(const c of commands){assert.equal(c.when?.(),false);assert.equal(c.defaultKey,undefined);}
+ available=true;for(const c of commands)assert.equal(c.when?.(),true);
 });

@@ -1,0 +1,32 @@
+RayBend TinyCLIP tag model v1
+Checkpoint: wkcn/TinyCLIP-ViT-40M-32-Text-19M-LAION400M
+Revision: 95ec8197b3f2fe7f747865c61ca556cf0768b2f7
+Model card (license: MIT): https://huggingface.co/wkcn/TinyCLIP-ViT-40M-32-Text-19M-LAION400M/blob/95ec8197b3f2fe7f747865c61ca556cf0768b2f7/README.md
+TinyCLIP source: https://github.com/microsoft/Cream/tree/main/TinyCLIP
+Export: image encoder only, fixed English class vectors; ONNX opset 17.
+The model card declares MIT. The upstream Cream repository MIT text follows verbatim.
+No separate model-specific copyright holder/year is invented.
+
+    MIT License
+    Copyright (c) Microsoft Corporation.
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+    
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE
+
+

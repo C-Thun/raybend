@@ -37,7 +37,7 @@
 | M4 可试用闭环 | 实时一致性 + 导出 + 外部编辑 | ◐ 2026-09-27 开发冒烟收口 → `memory/FINISHED.md` §7 |
 | M5 分发与发布 | 安装 / 更新 / 文档 / 发行 | ◐ 工程就绪，**剩余见本文件 §3** |
 | 可卸载存储收口 | 库恢复与手动定位 → 来源恢复 → 任务续跑 → 副本冲突/释放 | ◐ 四波开发与 Agent 冒烟收口；剩余统一 Windows 真机验收，见 §1.1 |
-| M5 之后 | 三条主线（色彩管理 / XMP / 相片整理；原 #4 编辑 preset 已于 2026-09-30 提前开工） | 相片整理上期代码与 Agent 冒烟已完成（含跨库多选导出）；真机验收待崔总，下期 AI 未实施。其余见 §4 |
+| M5 之后 | 三条主线（色彩管理 / XMP / 相片整理；原 #4 编辑 preset 已于 2026-09-30 提前开工） | 相片整理上下期代码与 Agent 冒烟已收口（含 TinyCLIP 默认 CPU/模型资源与 XMP），真实图库/GUI/安装器待崔总验收；本期模型不再选型，SigLIP 2 留 FUTURE E1。其余见 §4 |
 
 **基线（2026-09-27）**：四大模块（导入 / 浏览 / 编辑 / 导出）当时的开发与 Agent 冒烟已收口；
 真机验收（§2）与发行操作（§3，由崔总执行）仍单列。2026-09-28 自用摸排后新增可卸载存储收口专项（§1.1）；
@@ -63,7 +63,7 @@ NAS 实际协议、认证、远程 catalog 和多机写入继续在 `memory/FUTU
 | 3 | **M5 真实安装 / 升级 / 卸载 / 权限**（含独立磁盘重载） | §3 W1 |
 | 4 | **M5 自动更新真机链路**：密钥、更新 JSON 部署、两版升级与失败恢复 | §3 W2 |
 | 5 | **正式发行**：tag / push / Release 上传 / Pages（`pnpm release:publish --execute` 由崔总执行） | §3；`docs/release.md` |
-| 6 | **三条主线逐条开工前的方案讨论**（色彩管理待拍板工作空间选型；相片整理上期已有获批视觉稿和实现，下期 AI 待开工） | §4 |
+| 6 | **三条主线逐条开工前的方案讨论**（色彩管理 Rec.2020 工作域及 W1–W5 首版路径已实施，W3 复杂显示配置/高分辨率后台上传已有工程证据，整窗性能与色彩仍待真机验收；相片整理按各自规格推进） | §4 |
 
 ---
 
@@ -127,19 +127,21 @@ NAS 实际协议、认证、远程 catalog 和多机写入继续在 `memory/FUTU
 > 需求原文在 `todos/2026-09-30-editor-presets.md`），不再属于本节。
 > **2026-09-30 XMP 口径修正**：#2 的范围改为**写出优先 + 自家导入**；跨家兼容不做（边界之外）。
 > 目的是**表态**（开放态度、数据资产归用户）+ best-effort 恢复；**XMP 不是第一公民**，整库备份 = 直接拷 repos。
-> 落地规格已写：`specs/xmp-w1.md`（同日草案，**待崔总审**；审后交 GLM 实施）。
+> 落地规格已写：`specs/xmp-sidecar.md`（同日草案，**待崔总审**；审后交 GLM 实施）。
 > （原话见 `docs/user-requirements.md` 2026-09-30 两节；结论账本 `memory/REVIEW.md` R6-01～R6-04。）
 >
 > **定位**：M5 发版之后，**最重要的事就是这几件**。其余（多仓、缓存治理、数据安全、通用 AI、跨平台、
 > 打印/HDR……）仍留在 `memory/FUTURE.md`；2026-09-30 崔总明确将有限本地 AI 标签列入相片整理下期，范围仅见下表 #3。
-> **状态**：相片整理上期功能（含跨库多选导出）已实现并通过 Agent 冒烟，Windows 真机交互与大库性能待验收；下期 AI 保留在规划中。其余主线按开工前规格继续细化。
+> **状态**：相片整理上期功能（含跨库多选导出）已实现并通过 Agent 冒烟，Windows 真机交互与大库性能待验收；下期 TinyCLIP 折中阈值、任务/来源纠错/获批 UI/XMP 与默认 CPU 模型资源已接线，通过开发与 Windows worker 冒烟；可进入上线前真机测试。人物漏标、海类误标/漏标及真实图库/GUI/安装器尚待验收；证据见 `docs/ai/tinyclip-v1/README.md`。其余主线按开工前规格继续细化。
 > （背景：当时 M4-W3 在开发中、M5 未开工；同日已授权 M5 独立工程准备并行，状态见上表。）
 
 | # | 主线 | 是什么 | 现状与落点 |
 | --- | --- | --- | --- |
 | 1 | **色彩管理** | 输入认得出（位图内嵌 ICC / 相机 profile）、工作空间装得下（线性广色域）、**显示器显示得准**、导出说得清 | **2026-09-30 崔总授权开工**；主题契约 `specs/color-management.md`。先补 Pencil 画稿并自行审视，接着按下表波次持续实施，直到只剩真机验收或无法绕过的外部条件。系统互操作提前按 adapter 设计。 |
-| 2 | **XMP**（**写出 + 自家导入**；跨家导入不急） | 让本库成果能**跟着照片走**：写出 `rb:`（全部 issue + latest）+ 标准层（raw-based latest 的 `crs:` 调整 + 基础元数据：评级/色标/关键词/说明/作者/地点）；自家导入在新登记资产时自动发现读回。目的是**表态**（开放、数据资产归用户）+ best-effort 恢复；**XMP 不是第一公民**，备份靠直接拷 repos 目录 | **规格已写**：`specs/xmp-w1.md`（2026-09-30 草案，**待崔总审**；审后由 GLM 实施）。契约：`specs/issue-xmp-contract.md`（本波小幅修订：`rb:ordinal`、`profileJson` 剔除 `auto_adjust`）。跨家方言导入仍不做（`memory/REVIEW.md` R6-01）；R6-02/03/04 均已结案。材料存档：`todos/2026-09-30-xmp-export-first.md` |
-| 3 | **相片整理：bucket + tag** | 照片与目录分别打标签，桶承担持久工作集合；H6 图片筒并入 | **上期代码与 Agent 冒烟已完成（含跨库多选导出），真机验收待崔总；下期 AI 未实施。** 上期为三入口整栏、独立照片/目录标签、手动桶、共享规则弹窗、多组 OR / 组内 AND 自动桶和挂载库浏览；目录标签不传播到照片，筛选转桶不保存导航范围。正文 `specs/photo-organization.md`；分期见 `specs/photo-organization-phase1.md`、`specs/photo-organization-phase2.md`。 |
+| 2 | **XMP**（**写出 + 自家导入**；**范围已冻结**，2026-10-01） | 让本库成果能**跟着照片走**：写出 `rb:`（全部 issue + latest）+ 标准层（raw-based latest 的 `crs:` 调整 + 基础元数据：评级/色标/关键词/说明/作者/地点）；自家导入在新登记资产时自动发现读回。目的是**表态**（开放、数据资产归用户）+ best-effort 恢复；**XMP 不是第一公民**，备份靠直接拷 repos 目录 | **已完成，待验收（崔总 2026-10-04 最新口径）**；本轮缺陷修复与回归见 `implementations/2026-10-04_xmp-audit-fixes.md`，Windows 真机验收尚未进行；已冻结的功能范围仍见 `specs/xmp-sidecar.md`（旧名 `specs/xmp-w1.md`），原实施报告保留作阶段证据；主体交付与真机验收状态分开记录。契约：`specs/issue-xmp-contract.md`（随规格小幅修订：`rb:ordinal`、`profileJson` 剔除 `auto_adjust`）。**跨家导入不做**（不是延后；R6-01/R6-05）；R6-02/03/04/05 均已结案。材料存档：`todos/2026-09-30-xmp-export-first.md` |
+| 3 | **相片整理：bucket + tag** | 照片与目录分别打标签，桶承担持久工作集合；H6 图片筒并入 | **上期代码与 Agent 冒烟已完成（含跨库多选导出），真机验收待崔总。** 上期为三入口整栏、独立照片/目录标签、手动桶、共享规则弹窗、多组 OR / 组内 AND 自动桶和挂载库浏览；目录标签不传播到照片，筛选转桶不保存导航范围。正文 `specs/photo-organization.md`、`specs/photo-organization-phase1.md`。**下期 TinyCLIP 已定案，折中阈值、数据/任务/默认 CPU worker/模型资源/来源纠错/获批 UI/XMP 已接线，并通过开发及 Windows worker 冒烟；进入真机测试阶段，效果/GUI/安装器尚待验收。** 实施记录 `implementations/2026-10-04_photo-organization-ai-tinyclip-delivery.md`。 正文 `specs/photo-organization-phase2.md`；首个有界模型验证单元 `specs/photo-organization-ai-w1.md`。点击蒙版留 FUTURE D4/E2，不纳入照片整理。 |
+
+**2026-10-04 收尾顺序（崔总确认）**：XMP 与 editor presets 已完成、待验收；当前完善色彩管理与文件管理，等两项完善并验收后最后推进 CI 和发版，由崔总在其它会话处理。
 
 ### 色彩管理执行波次（本轮获准开工）
 
@@ -151,16 +153,18 @@ NAS 实际协议、认证、远程 catalog 和多机写入继续在 `memory/FUTU
 | CM-W4 | editor 面板、全局资源/默认与批量指定、预设可选组，XMP 色彩扩展与依赖保全 | 命令、存储、撤销、旧定稿与资源迁移回归 |
 | CM-W5 | 软打样、目标色域警告与本轮范围收口 | 单测/冒烟后交真机色彩和观感验收 |
 
+2026-10-04 色彩管理实施证据：`implementations/2026-10-04_color-management-float-gpu-and-persistence.md` 与 `2026-10-04_color-management-core-hardening.md`。W2 新处理路径已有显式入口，复杂输入 LCMS 精确并行、RAW 新标度与旧身份重放接通；W4 资产/默认/批量/预设/XMP 接通；W5 已验证矩阵/TRC RGB 打样（复杂 CLUT 打样仍不支持）。W3 已接 Windows adapter、GPU/scRGB、受验证原生 mBA/PCS CLUT 显示及大图后台完整帧提交，真实 DX12 离屏和 60MP 独立进程资源已有证据；整窗/DPI/多屏/RAW 与显示色彩仍待崔总统一验收。旧照片/issue 不自动升级。常规显示状态本地化/共享组件与实际呈现接线也已完成，最终单元/UI冒烟和Windows配套构建通过，首版开发可统一验收；见 `implementations/2026-10-04_color-management-ready-for-acceptance.md`，不能仅以工程验证宣布五波真机验收通过。
+
 各波次开工时只细化**当前一个**到 `specs/cm-w<n>.md`，按 `AGENTS.md` 的设计先行与实施记录纪律推进。打印、完整 HDR 照片功能、硬件校准及跨平台实装留 `memory/FUTURE.md` C1/C2；不把它们混入本轮完成定义。
 
-### 相片整理的两期交付
+### 相片整理上期交付与下期去向
 
-| 期 | 工作单元顺序（规划，非进度表） | 完成定义 |
+| 期 | 工作单元顺序 | 完成定义 |
 | --- | --- | --- |
 | 上期：主要功能 | U1 交互稿/契约 → U2 标签导航与多库数据源 → U3 桶本体与共享规则编辑 → U4 自动收片及收口 | 不依赖 AI 即可用标签找照片/目录、跨库装桶、按多组规则持续收片；可靠性与已有编辑/导出闭环成立 |
-| 下期：AI 增强 | L1 模型/类别可行性 → L2 AI 来源/遮罩设计 → L3 推理任务接入 → L4 联动与收口 | 本地 384px 缩略图产生少量大类标签；可纠错/禁止，重跑尊重遮罩，复用上期标签与自动桶 |
 
-上期已按获批 Pencil 稿实施，并保留来源与统一标签入口；下期不提前实施或锁定模型。AI 分割/人脸/语义搜索等仍在 FUTURE，不随本线扩围。
+上期已按获批 Pencil 稿实施，并保留来源与统一标签入口。**2026-10-04 下期代码与 Agent 冒烟收口，进入上线前真机测试**：崔总指定 TinyCLIP，逐类按校准 precision 目标85%、F0.5、至少5个真阳性固定阈值，人物/海类加入固定负描述；七类独立评分，可返回空标签。数据/来源禁止/撤销/消费方/XMP、范围冻结/持久队列/串行 CPU worker 与获批三稿均已接线。可信清单含固定 v1，默认桌面启用 CPU；固定模型与 ORT 资源随应用提供，设置中主动安装，可损坏修复/卸载与可信离线导入。Windows debug 资源核对及完整桌面 worker 真图编码冒烟通过。公开回归中人物漏标、海类误标/漏标仍明显，不宣称所有类别达到旧90%/60%门槛；GUI、真实图库、盘上 XMP 与干净 Win10/11 安装仍待验收。在线下载留后续分发优化，SigLIP 2 留 FUTURE E1，不阻塞本期。本轮独立 Windows 测试副本为 `C:\rb-target\raybend-ai-test-2026-10-04\raybend-desktop.exe`（13:21:13源码快照，AI源与交付时原仓一致）；后续整体发行另按届时源码统一构建。主题契约 `specs/photo-organization-phase2.md`；当前依据 `docs/ai/tinyclip-v1/README.md`；实施记录 `implementations/2026-10-04_photo-organization-ai-tinyclip-delivery.md`。
+XMP 已完成、待真机验收（2026-10-04）；AI新增标签来源已接入现有sidecar，并通过标准关键词/rb:tagState往返回归；真实库仍未验收。点击生成蒙版已整合 FUTURE D4/E2，分割/人脸/语义搜索不随本线扩围。
 
 ### 三条主线的共同约束（沿用既有纪律，不另立规矩）
 
@@ -168,7 +172,7 @@ NAS 实际协议、认证、远程 catalog 和多机写入继续在 `memory/FUTU
   色彩管理本轮崔总已明确授权设计后自行审视并直接实施，无需中途等设计确认；其余工作单元按各自授权执行。
 - **命令体系接入**：新增的用户可触发动作要登记进命令注册表，且在**同一次改动里**给出默认热键
   或写明留空理由（`AGENTS.md` §2.15）。
-- **数据库变更走迁移框架**：相片集与 XMP 都会加表/加列，一律走 `store/migration.rs`（`AGENTS.md` §2.16），
+- **数据库变更走迁移框架**：需要新增表/列时一律走 `store/migration.rs`（`AGENTS.md` §2.16），
   不许启动时临时 `ALTER`、不许另造迁移通道。
 - **开工顺序**：每条开工前另写 `specs/<主线>-W<n>.md`（`AGENTS.md` §5.4），不提前细化未开工的波次。
 
@@ -198,6 +202,7 @@ NAS 实际协议、认证、远程 catalog 和多机写入继续在 `memory/FUTU
 
 | 日期 | 决策 | 结论 | 依据 |
 | --- | --- | --- | --- |
+| 2026-10-04 | **AI 首版定案** | 本期采用 TinyCLIP，逐类阈值折中且偏向减少误标，尽快进入上线前测试；SigLIP 2 只留 FUTURE E1 远期考查，不继续模型选型 | 崔总本轮明确指示；`specs/photo-organization-phase2.md`、`docs/ai/tinyclip-v1/README.md` |
 | 2026-09-15 | 许可 | **AGPL-3.0-only**（不闭源盈利） | 用户决定；使 rawler(LGPL-2.1) 与 darktable/RawTherapee(GPL-3.0) 的算法均可合法使用，并额外解锁 RapidRAW 与 zenraw（均 AGPL-3.0）的代码复用 |
 | 2026-09-15 | 渲染架构 | 原生 wgpu + 透明挖洞（方案 B） | 用户决定；RapidRAW 实证性能 |
 | 2026-09-15 | 存储架构 | 全局库 + 每仓 catalog（分层） | 用户决定；可移动/隔离损坏/按仓备份 |
@@ -216,8 +221,9 @@ NAS 实际协议、认证、远程 catalog 和多机写入继续在 `memory/FUTU
 | 2026-09-24 | 外部编辑器（人类定案） | **纯单向输出进 M4-W4；候选表首批 9 个（含 RawTherapee/RapidRAW）；应用发现走 Windows 系统级接口（可插拔 adapter），不做全系统枚举** | 取回链路跑不顺（外部编辑器不配合，LR 自身的 Edit-In 回收都长期故障），单向先行；我们 RAW 开发不做极致（至少现在完全不想），专业 RAW 开发送外部 |
 | 2026-09-25 | Windows 编辑视口呈现 | DX12 + DirectComposition visual + Opaque；最小 `PresentationAdapter` 预留 macOS/Linux 接入 | 同 HWND 的 GPU 与 Tauri/GDI 绘制竞争；隔离呈现层后原越屏场景真机确认通过，详 `docs/native-viewport-coordinate-guide.md` §8 |
 | 2026-09-30 | **XMP 主线范围修正** | **导出优先**（自有格式表达 + sidecar 写出，目的是开放表态、数据资产归用户）；**导入不急、不排期**，有真实需求再拉回（留 `memory/FUTURE.md` I 节登记）；取代「方便导入迁移 / 读也纳入」的范围口径 | 人类决定（原话见 `docs/user-requirements.md` 2026-09-30 节；`memory/REVIEW.md` R6-01；依据含 Agent 2026-09-30 生态查实材料） |
-| 2026-09-30 | **XMP 细则定案（写出 + 自家导入）** | `rb:` 记录全部 issue（含 raw/sooc 基准）+ latest；标准层 = raw-based latest 的 `crs:` 调整 + 基础元数据（评级/色标/关键词/说明/作者/地点）；文件名 `<主体名>.xmp` 放非 `_RAW` 目录；仅编辑/标记时写出（不补历史）；自家导入在新登记资产时自动发现。**XMP 不是第一公民**（备份 = 拷 repos） | 人类决定（原话 `docs/user-requirements.md` 2026-09-30 两节；规格 `specs/xmp-w1.md` 待审） |
+| 2026-09-30 | **XMP 细则定案（写出 + 自家导入）** | `rb:` 记录全部 issue（含 raw/sooc 基准）+ latest；标准层 = raw-based latest 的 `crs:` 调整 + 基础元数据（评级/色标/关键词/说明/作者/地点）；文件名 `<主体名>.xmp` 放非 `_RAW` 目录；仅编辑/标记时写出（不补历史）；自家导入在新登记资产时自动发现。**XMP 不是第一公民**（备份 = 拷 repos） | 人类决定（原话 `docs/user-requirements.md` 2026-09-30 两节；规格 `specs/xmp-sidecar.md` 待审） |
 
+| 2026-10-01 | **XMP 范围冻结** | XMP 功能到此为止：不适配其他家的导入（**不做，非延后**）；`crs:` 扩展映射、GPS/版权写出同样不在范围；规格更名 `specs/xmp-w1.md` → `specs/xmp-sidecar.md` 并移除分波次表述（无 W2） | 人类决定（崔总 2026-10-01；`memory/REVIEW.md` R6-05） |
 ---
 
 

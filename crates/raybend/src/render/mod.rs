@@ -25,10 +25,16 @@
 //! 主窗口里的编辑视口是 `src-tauri/src/editor.rs`（M3-W2），**复用**同一个 [`gpu::GpuContext`]。
 
 pub mod color;
+mod color_transform;
+mod tone;
+mod proof;
+pub mod working_preview;
+mod upload;
 pub mod gpu;
 pub mod image;
 pub mod overlay;
 pub mod presentation;
+pub mod output_space;
 pub mod scene;
 pub mod stats;
 pub mod supervisor;

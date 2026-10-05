@@ -395,6 +395,7 @@
 
   --toggle-block: 30px;
   --toggle-block-icon: 16px;
+  --flow-icon-hit: 32px;
 
   /* 窗口三键（`design/main.md` §2.1 的 46×32，尺寸随密度档） */
   --win-ctl-w: 52px;
@@ -456,6 +457,7 @@
 
   --toggle-block: 34px;
   --toggle-block-icon: 18px;
+  --flow-icon-hit: 38px;
 
   /* 注：`--tile-pad` / `--tile-bar-h` / `--tile-gap` **不在这里** ——
      tiles 组件不参与密度调节（人类 2026-09-23 定），它们定义在基础 `:root` 里。 */
@@ -550,6 +552,7 @@
   --spacing-switch-h: var(--switch-h);
   --spacing-switch-knob: var(--switch-knob);
   --spacing-toggle-block: var(--toggle-block);
+  --spacing-flow-icon-hit: var(--flow-icon-hit);
   --spacing-win-ctl-w: var(--win-ctl-w);
   --spacing-scrollbar-w: var(--scrollbar-w);
   --spacing-action-btn-h: var(--action-btn-h);

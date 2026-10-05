@@ -506,7 +506,7 @@
 
 **要点（照落地核对用）**：
 
-- **规格已写**：`specs/xmp-w1.md`（2026-09-30 草案，**待崔总审**；通过后交 GLM 实施）。
+- **规格已写**：`specs/xmp-sidecar.md`（原名 `specs/xmp-w1.md`，2026-10-01 随范围冻结更名；已实施完成）。
 - **兼容层口径**：`crs:` 调整**仅当 latest 基于 raw**；latest 基于 sooc ⇒ 无兼容层；只写能直映的项（成本受控）。
 - **rb: 域**：全部 issue（含 `sourceBase` raw/sooc）+ latest；`rb:profiles` 有序 `rdf:Seq`。
 - **文件位置**：`<主体名>.xmp`，放非 `_RAW` 目录（位图旁；RAW-only 在自身目录）；由此 RAW 的 sidecar 通常在其上层目录——属导入软件要处理的事。

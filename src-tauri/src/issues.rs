@@ -201,12 +201,13 @@ fn ensure_snapshots<R: Runtime>(
             .filter(|_| issue.stack.lut_enabled == Some(true))
             .map(|id| crate::lut::resolve(app, id))
             .transpose()?;
-        let rendered = render::render_file_with_edit_and_lut(
+        let rendered = render::render_file_with_profiles(
             &source,
             SizeClass::Screen,
             Some(&issue.stack),
             lens.as_ref(),
             lut.as_deref(),
+            |id, role| crate::color_profiles::resolve(app, id, role),
         )
         .map_err(|error| error.to_string())?
         .ok_or("无法渲染定稿预览")?;
@@ -280,6 +281,8 @@ pub async fn issue_create<R: Runtime>(
             })
             .map_err(|error| error.to_string())
         })?;
+        // sidecar 镜像：定稿清单变了（`specs/xmp-w1.md` §6.1）
+        crate::sidecar::queue_sync(handle.clone(), &repository_id, vec![asset_id]);
         let snapshot_error = ensure_snapshots(&handle, &repository_id, &issue).err();
         let mut result = library(
             &handle,
@@ -309,6 +312,8 @@ pub async fn issue_delete<R: Runtime>(
             db.write_tx(move |conn| issues::delete(conn, asset_id, issue_id))
                 .map_err(|error| error.to_string())
         })?;
+        // sidecar 镜像：定稿清单变了（`specs/xmp-w1.md` §6.1）
+        crate::sidecar::queue_sync(handle.clone(), &repository_id, vec![asset_id]);
         if let Ok(root) = crate::browse::resolve_root(&handle, &repository_id)
             && let Ok(cache) = FullCache::open(&root)
         {

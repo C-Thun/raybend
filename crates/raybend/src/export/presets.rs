@@ -37,7 +37,7 @@ pub fn validate(text: &str) -> Result<Vec<Preset>> {
     }
     let mut ids = BTreeSet::new();
     let mut names = BTreeSet::new();
-    if ![1, 2, 3].contains(&e.version)
+    if ![1, 2, 3, 4].contains(&e.version)
         || e.presets.len() > 256
         || e.presets.iter().any(|p| {
             !p.validate(false).errors.is_empty() || !ids.insert(&p.id) || !names.insert(&p.name)
@@ -120,6 +120,7 @@ mod tests {
     #[test]
     fn envelope_rejects_future_versions_invalid_values_and_runtime_fields() {
         let p = Preset {
+            output_color: crate::color::OutputColor::Srgb,
             id: "p".into(),
             name: "中文".into(),
             format: "png".into(),
@@ -135,7 +136,7 @@ mod tests {
         assert_eq!(validate(&text).unwrap()[0], p);
         for text in [
             "{}".into(),
-            serde_json::json!({"version":4,"presets":[p.clone()]}).to_string(),
+            serde_json::json!({"version":5,"presets":[p.clone()]}).to_string(),
             serde_json::json!({"version":1,"presets":[p.clone(),p.clone()]}).to_string(),
             serde_json::json!({"version":1,"presets":[p],"queues":[]}).to_string(),
             "x".repeat(LIMIT + 1),

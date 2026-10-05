@@ -63,6 +63,9 @@ use raybend::render::{
 use crate::MAIN_WINDOW_LABEL;
 use crate::render_window::{client_size, raw_handles};
 
+#[path = "editor_working.rs"]
+mod working_editor;
+
 /* ══════════════════════════════════════════════════════════════
  * 一、洞口契约（M3-W1；前端**只报原始事实**）
  * ══════════════════════════════════════════════════════════════ */
@@ -456,6 +459,8 @@ const MAX_COMMANDS_PER_FRAME: usize = 32;
 /// 为什么合成一个通道：渲染线程只需要一个「醒来」的理由，醒来之后把攒下的命令
 /// 全部吃掉再画一帧（不做「一条命令一帧」）。多通道就要 `select`，那是白送的复杂度。
 enum RenderCommand {
+    Proof { transform: Option<Arc<raybend::color::proof::ProofTransform>>, warning: bool },
+    Display(Result<raybend::color::display::PreparedDisplay, raybend::color::system::ColorSystemError>),
     /// 洞口事实（含 DPR 与底色）
     Viewport(SetViewportArgs),
     /// 窗口客户区尺寸变化（物理像素；**主线程推来**，渲染线程不查窗口）
@@ -470,6 +475,7 @@ enum RenderCommand {
     /// `transition`：**过渡帧计划**（进编辑先出图，handoff §3）——
     /// 命令层算好（那里有库、有 catalog），显影线程只管试。`None` = 不发过渡帧。
     SetPhoto {
+        color: Option<Arc<working_editor::Input>>,
         path: Option<String>,
         transition: Option<TransitionPlan>,
     },
@@ -489,6 +495,7 @@ enum RenderCommand {
     /// `interactive` = 手指还按着（人类 2026-09-24）：拖动中只算预览档，
     /// 松手那一下才按缩放补全尺寸（`tier_for_params`）。
     SetParams {
+        color: Option<Arc<working_editor::Input>>,
         nr_method: NrMethod,
         params: DevelopParams,
         curves: CurveSet,
@@ -502,6 +509,8 @@ enum RenderCommand {
     },
     /// 显影完了一张（新照片或新参数）
     Developed(DevelopOutcome),
+    /// Both source textures are prepared before any frame state is committed.
+    Present(PreparedPresentation),
     /// 高质量缓存已更新：用当前参数重出帧，结果仍经过任务号闸门。
     DenoiseReady,
     ConfirmTool(Sender<Result<EditGeometry, String>>),
@@ -516,6 +525,8 @@ enum RenderCommand {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DevelopParamsDto {
+    #[serde(default)]
+    pub color: Option<raybend::color::PhotoColorState>,
     /// 参数 id → 值（只装与基线不同的项）
     #[serde(default)]
     pub values: std::collections::BTreeMap<String, f64>,
@@ -619,6 +630,7 @@ struct TransitionPlan {
 /// 把源缓存在线程里，参数一变就只跑第二段 —— 这就是「拖拉杆要跟得上手」的全部秘密。
 #[derive(Clone)]
 struct DevelopJob {
+    color: Option<Arc<working_editor::Input>>,
     nr_method: NrMethod,
     /// 单调递增的任务号：**只有最新那个的结果有效**（换照片 / 换档位 / 又拖了一下）
     id: u64,
@@ -669,6 +681,7 @@ struct CachedSource {
 
 /// 一次显影的结果（显影线程 → 渲染线程）。
 struct DevelopOutcome {
+    working_reference: Option<(u64, Arc<RenderImage>)>,
     reference: Option<Arc<ReferenceFrame>>,
     reference_base: Option<&'static str>,
     nr_pending: bool,
@@ -693,12 +706,19 @@ struct DevelopOutcome {
     result: Result<DevelopedImage, String>,
 }
 
+struct PreparedPresentation {
+    outcome: DevelopOutcome,
+    reference: Option<(u64, Arc<RenderImage>)>,
+    reference_base: Option<String>,
+    reference_sequence: u64,
+}
+
 /// 显影好的像素（RGBA8 由渲染线程扩；这里给 RGB8）。
 struct DevelopedImage {
     /// **这一档纹理**的尺寸（预览档可能是 1920）。
     width: u32,
     height: u32,
-    rgb: Vec<u8>,
+    pixels: DevelopedPixels,
     /// **逻辑图像尺寸**（原图 / 解码尺寸）—— 视口摆图与「1:1」按它算，
     /// 与当前是哪一档无关（M3-W4 修「双击 1:1 变成预览图的 1:1」）。
     source_width: u32,
@@ -707,10 +727,26 @@ struct DevelopedImage {
     original_height: u32,
 }
 
+enum DevelopedPixels {
+    Legacy(Vec<u8>),
+    Working(raybend::render::working_preview::PreparedWorkingFrame),
+}
+
+impl DevelopedPixels {
+    fn render(&self, width:u32, height:u32) -> Option<(Arc<RenderImage>, Option<Arc<raybend::develop::working::GpuToneDescription>>)> {
+        match self {
+            Self::Legacy(rgb) => RenderImage::from_rgb8(width,height,rgb).map(|image| (Arc::new(image),None)),
+            Self::Working(frame) => Some((Arc::clone(&frame.image),frame.tone.clone())),
+        }
+    }
+}
+
 /// 渲染线程的共享状态 —— **前端轮询读的就是它**（序列化后直接回给前端）。
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RenderState {
+    /// Native display policy, including explicit fallback reasons.
+    pub display_color: Option<crate::color_status::DisplayPresentation>,
     pub reference_ready: bool,
     pub reference_base: Option<String>,
     pub comparing: bool,
@@ -823,13 +859,17 @@ pub struct EditorState {
     sink: Arc<Mutex<Option<Sender<RenderCommand>>>>,
     /// 窗口事件是否已经装过（装过就不再装 —— 否则进出编辑器一次就多一份回调）
     events_installed: Arc<AtomicBool>,
+    display_watch: Mutex<Option<raybend::color::system::DisplayWatcher>>,
     /// editor_set_photo 的异步过渡帧计划可能乱序完成；只有最后一次请求可发命令。
     photo_request: RequestGate,
     /// 高频参数命令的旧解析结果不能在新值后面入队。
     params_request: RequestGate,
+    proof_request: RequestGate,
+    proof_cache: Arc<Mutex<Option<(raybend::color::OutputColor,Arc<raybend::color::proof::ProofTransform>)>>>,
     /// 同一照片/镜头选择的解析只做一次（实际工作仍在阻塞线程里）。
     lens_cache: Arc<Mutex<Option<(LensCacheKey, Option<LensCorrection>)>>>,
     lut_cache: Arc<Mutex<Option<(String, Arc<raybend::develop::lut::Lut>)>>>,
+    input_cache: Arc<Mutex<Option<Arc<working_editor::Input>>>>,
 }
 
 type LensCacheKey = (String, i64, Option<String>, Option<bool>);
@@ -948,6 +988,7 @@ pub async fn editor_bind_renderer<R: Runtime>(
         .sink
         .lock()
         .map_err(|_| "渲染通道槽锁中毒".to_string())? = Some(commands.clone());
+    if let Some(watcher) = state.display_watch.lock().unwrap_or_else(|e| e.into_inner()).as_ref() { watcher.refresh(true); }
 
     // 初值：主线程上取一次窗口事实（**渲染线程零窗口查询**，所以初值在这里取好交给它）
     let initial = InitialFacts {
@@ -1077,7 +1118,7 @@ pub async fn editor_set_photo<R: Runtime>(
     let request = state.photo_request.begin()?;
     // 旧照片还在后台解析的参数绝不能套到新照片上。
     state.params_request.begin()?;
-    let plan = match path.as_deref() {
+    let (plan, color) = match path.as_deref() {
         Some(path) => {
             let handle = app.clone();
             let path = path.to_string();
@@ -1088,10 +1129,11 @@ pub async fn editor_set_photo<R: Runtime>(
                     let saved=plan.get_or_insert_with(||TransitionPlan{_permit:None,sources:Vec::new(),source_size:None,sooc:None});
                     saved._permit=Some(Arc::new(permit));
                 }
-                Ok(plan)
+                let color = working_editor::saved(&handle, Path::new(&path))?;
+                Ok((plan, color))
             }).await?
         }
-        None => None,
+        None => (None, None),
     };
     // 查库/读元数据在后台完成：若期间用户已经选了另一张，这条旧请求
     // 不能再进渲染队列，否则会在新照片之后把旧照片装回来。
@@ -1099,6 +1141,7 @@ pub async fn editor_set_photo<R: Runtime>(
         let sender = session_sender(&state).ok_or_else(|| "渲染线程还没起来".to_string())?;
         sender
             .send(RenderCommand::SetPhoto {
+                color,
                 path,
                 transition: plan,
             })
@@ -1224,6 +1267,18 @@ pub async fn editor_set_params<R: Runtime>(
     params: DevelopParamsDto,
 ) -> Result<RenderState, String> {
     let request = state.params_request.begin()?;
+    let color = if let Some(color) = params.color.clone() {
+        color.validate_frozen().map_err(str::to_owned)?;
+        let cache = state.input_cache.clone();
+        let handle = app.clone();
+        Some(crate::source::blocking(move || {
+            let mut cached = cache.lock().map_err(|_| "输入色彩缓存锁中毒".to_owned())?;
+            if let Some(input) = cached.as_ref() && input.state == color { return Ok(input.clone()); }
+            let input = working_editor::prepare(&handle, color)?;
+            *cached = Some(input.clone());
+            Ok(input)
+        }).await?)
+    } else { None };
     let interactive = params.interactive;
     let geometry = params.geometry.filter(|value| !value.is_identity());
     if let Some(value) = geometry
@@ -1301,6 +1356,7 @@ pub async fn editor_set_params<R: Runtime>(
         if let Some(sender) = session_sender(&state) {
             sender
                 .send(RenderCommand::SetParams {
+                    color,
                     nr_method,
                     params: parsed,
                     curves,
@@ -1371,6 +1427,32 @@ pub async fn editor_set_reference_issue<R: Runtime>(
     .await
 }
 
+#[tauri::command]
+pub async fn editor_set_proof<R: Runtime>(app:AppHandle<R>,state:State<'_,EditorState>,target:Option<raybend::color::OutputColor>,warning:bool)->Result<(),String> {
+    let request=state.proof_request.begin()?;
+    let sender=session_sender(&state).ok_or("渲染线程还没起来")?;
+    let cache=Arc::clone(&state.proof_cache);
+    let prepared=crate::source::blocking(move || -> Result<_,String> {
+        let Some(target)=target else {return Ok(None);};
+        if let Some((previous,transform))=&*cache.lock().unwrap_or_else(|e|e.into_inner()) && previous==&target {
+            return Ok(Some(Arc::clone(transform)));
+        }
+        let mut resolver = |id: &raybend::color::ProfileId,role| crate::color_profiles::resolve(&app,id,role);
+        let profile=raybend::export::output::resolve_output(&target,&mut resolver).map_err(|e|e.to_string())?;
+        let transform=Arc::new(raybend::color::proof::ProofTransform::from_icc(&profile).map_err(|e|format!("该目标暂不能精确软打样：{e}"))?);
+        *cache.lock().unwrap_or_else(|e|e.into_inner())=Some((target,Arc::clone(&transform)));
+        Ok(Some(transform))
+    }).await;
+    let command=prepared.map(|transform|RenderCommand::Proof {transform,warning});
+    state.proof_request.send_if_latest(request,|| {
+        match command {
+            Ok(command)=>sender.send(command).map_err(|_|"渲染线程不在了".into()),
+            Err(error)=>{let _=sender.send(RenderCommand::Proof {transform:None,warning:false});Err(error)}
+        }
+    })?;
+    Ok(())
+}
+
 /// 读渲染线程的状态（前端每 250ms 一次：既是握手也是**上报通道**）。
 #[tauri::command]
 pub fn editor_render_state(state: State<'_, EditorState>) -> Result<RenderState, String> {
@@ -1399,7 +1481,23 @@ fn install_window_events<R: Runtime>(state: &EditorState, window: &WebviewWindow
         return;
     }
     let sink = state.sink.clone();
+    let display_sink = sink.clone();
+    let watcher = crate::color_system::watch_window(window, move |prepared| {
+        if let Some(sender) = display_sink.lock().ok().and_then(|slot| slot.clone()) {
+            let _ = sender.send(RenderCommand::Display(prepared));
+        }
+    }).map_err(|e| eprintln!("[color] display watch unavailable: {e}")).ok();
+    *state.display_watch.lock().unwrap_or_else(|e| e.into_inner()) = watcher.clone();
     window.on_window_event(move |event| {
+        if let Some(watcher) = &watcher {
+            match event {
+                tauri::WindowEvent::Moved(position) => watcher.update(|rect| { rect.x = position.x; rect.y = position.y; }, false),
+                tauri::WindowEvent::Resized(size) => watcher.update(|rect| { rect.width = size.width; rect.height = size.height; }, false),
+                tauri::WindowEvent::Focused(true) | tauri::WindowEvent::ScaleFactorChanged { .. } => watcher.refresh(true),
+                tauri::WindowEvent::Destroyed => watcher.close(),
+                _ => {},
+            }
+        }
         // 同尺寸移动仅请求重呈现，不能重配 swapchain。防止透出桌面的根本约束
         // 是产品 surface 使用 Opaque；这里的补帧只负责唤醒被遮挡后恢复的视图。
         let command = match event {
@@ -1564,8 +1662,9 @@ fn run_session<R: Runtime>(
 }
 
 /// 会话主线程手里那份「当前参数」（渲染线程算 job 时要用）。
-#[derive(Debug, Clone)]
 struct SessionParams {
+    pending_presentation: Option<PreparedPresentation>,
+    color: Option<Arc<working_editor::Input>>,
     nr_method: NrMethod,
     params: DevelopParams,
     curves: CurveSet,
@@ -1622,6 +1721,8 @@ struct ToolDraft {
 impl Default for SessionParams {
     fn default() -> Self {
         Self {
+            pending_presentation: None,
+            color: None,
             nr_method: NrMethod::Fast,
             params: DevelopParams::new(None),
             curves: CurveSet::identity(),
@@ -1678,6 +1779,10 @@ fn session_loop(
         let mut pending_resize = None;
         let received = if dirty {
             receiver.recv_timeout(retry_delay)
+        } else if session.pending_presentation.is_some() {
+            // Completion is observed even with no mouse/keyboard events. Input
+            // still wakes this wait immediately; never wait for GPU on this thread.
+            receiver.recv_timeout(Duration::from_millis(16))
         } else {
             receiver.recv().map_err(|_| RecvTimeoutError::Disconnected)
         };
@@ -1747,6 +1852,11 @@ fn session_loop(
             state.last_error = Some(error);
         }
 
+        if let Some(frame)=session.pending_presentation.take() {
+            if let Err(error)=apply_command(RenderCommand::Present(frame),context,shared,developer,&mut latest_job,&mut dirty,&mut session) {
+                lock_state(shared).last_error=Some(error);
+            }
+        }
         if !dirty {
             continue;
         }
@@ -1852,6 +1962,25 @@ fn apply_command(
 ) -> Result<(), String> {
     match command {
         RenderCommand::Stop => Ok(()),
+        RenderCommand::Proof { transform,warning } => {
+            context.set_proof(transform,warning); *dirty=true; Ok(())
+        }
+        RenderCommand::Display(prepared) => {
+            use raybend::color::display::DisplayStrategy;
+            let (transform, managed, white_nits) = match &prepared {
+                Ok(prepared) => match &prepared.strategy {
+                    DisplayStrategy::Icc(transform) => (Some(Arc::clone(transform)), false, None),
+                    DisplayStrategy::SystemManaged { sdr_white_nits, .. } => (None, true, *sdr_white_nits),
+                    DisplayStrategy::SrgbFallback { .. } | DisplayStrategy::Unavailable { .. } => (None, false, None),
+                },
+                Err(_) => (None, false, None),
+            };
+            context.set_display_transform(transform);
+            let sc_rgb_active = context.configure_color_output(managed, white_nits);
+            lock_state(shared).display_color = Some(crate::color_status::DisplayPresentation::applied(&prepared, sc_rgb_active));
+            *dirty = true;
+            Ok(())
+        }
         RenderCommand::Redraw => {
             *dirty = true;
             Ok(())
@@ -1912,7 +2041,10 @@ fn apply_command(
             *dirty = true;
             Ok(())
         }
-        RenderCommand::SetPhoto { path, transition } => {
+        RenderCommand::SetPhoto { path, transition, color } => {
+            session.pending_presentation=None;
+            context.cancel_prepared_images();
+            session.color = color;
             let mut state = lock_state(shared);
             if state.photo_path != path {
                 session.reference_issue = None;
@@ -1942,6 +2074,7 @@ fn apply_command(
                     state.history_photo(&path);
                     *latest_job += 1;
                     let job = DevelopJob {
+                        color: session.color.clone(),
                         nr_method: session.nr_method,
                         id: *latest_job,
                         rev: state.params_rev,
@@ -2017,6 +2150,7 @@ fn apply_command(
             Ok(())
         }
         RenderCommand::SetParams {
+            color,
             nr_method,
             params,
             curves,
@@ -2025,6 +2159,9 @@ fn apply_command(
             lut,
             geometry,
         } => {
+            // Frontend sends only the loaded photo's complete payload. Null is
+            // meaningful: undo can restore a legacy process version.
+            session.color = color;
             session.nr_method = nr_method;
             session.params = params;
             session.curves = curves;
@@ -2048,6 +2185,7 @@ fn apply_command(
                 state.decode = "loading".to_string();
                 *latest_job += 1;
                 let job = DevelopJob {
+                    color: session.color.clone(),
                     nr_method: session.nr_method,
                     id: *latest_job,
                     rev,
@@ -2085,6 +2223,7 @@ fn apply_command(
             };
             *latest_job += 1;
             let job = DevelopJob {
+                color: session.color.clone(),
                 nr_method: session.nr_method,
                 id: *latest_job,
                 rev: state.params_rev,
@@ -2135,10 +2274,49 @@ fn apply_command(
             let _ = reply.send(result);
             Ok(())
         }
-        RenderCommand::Developed(outcome) => {
-            if outcome.id != *latest_job {
-                return Ok(()); // 过期结果：丢掉（换照片/换参数之后的旧任务）
+        RenderCommand::Developed(mut outcome) => {
+            if outcome.id != *latest_job {return Ok(());}
+            // Normalize legacy bytes once; retries keep the identical Arc and
+            // never allocate another whole RGBA source while upload is pending.
+            if let Ok(image)=&mut outcome.result {
+                if let Some((source,tone))=image.pixels.render(image.width,image.height) {
+                    image.pixels=DevelopedPixels::Working(raybend::render::working_preview::PreparedWorkingFrame {image:source,tone});
+                }
             }
+            let (reference,reference_base)=if outcome.transition {(None,None)} else if let Some((reference,id))=&session.reference_issue {
+                (context.reference_image(reference.id).or_else(||RenderImage::from_rgb8(reference.width,reference.height,&reference.rgb).map(Arc::new)).map(|image|(reference.id,image)),Some(format!("issue:{id}")))
+            } else if let Some(reference)=outcome.working_reference.clone() {
+                (Some(reference),outcome.reference_base.map(str::to_string))
+            } else {
+                (outcome.reference.as_ref().and_then(|reference|context.reference_image(reference.id).or_else(||RenderImage::from_rgb8(reference.width,reference.height,&reference.rgb).map(Arc::new)).map(|image|(reference.id,image))),outcome.reference_base.map(str::to_string))
+            };
+            apply_command(RenderCommand::Present(PreparedPresentation {outcome,reference,reference_base,reference_sequence:session.reference_sequence}),context,shared,developer,latest_job,dirty,session)
+        }
+        RenderCommand::Present(frame) => {
+            if frame.outcome.id != *latest_job {
+                // A newer tone-only result may share this source. Retain the
+                // single pending payload/upload until it arrives, without restart.
+                session.pending_presentation=Some(frame);return Ok(());
+            }
+            if frame.reference_sequence!=session.reference_sequence {
+                return apply_command(RenderCommand::Developed(frame.outcome),context,shared,developer,latest_job,dirty,session);
+            }
+            let mut sources=Vec::new();
+            if let Ok(image)=&frame.outcome.result {
+                if let Some((source,_))=image.pixels.render(image.width,image.height) {sources.push(source);}
+                if let Some((id,reference))=&frame.reference && context.reference_id()!=Some(*id) {sources.push(reference.clone());}
+            }
+            match context.prepare_frame_images(&sources) {
+                Ok(true)=>{},
+                Ok(false)=>{session.pending_presentation=Some(frame);return Ok(());},
+                Err(error)=>{
+                    context.cancel_prepared_images();*dirty=true;
+                    let mut state=lock_state(shared);state.decode="error".into();state.decode_error=Some(error.clone());
+                    return Err(error);
+                }
+            }
+            session.pending_presentation=None;
+            let outcome=frame.outcome;
             /*
              * **过渡帧**（进编辑先出图，handoff §3）：把图先画上去，但**状态留在「载入中」**——
              * 真帧还在路上，不许把它当「算完了」：
@@ -2155,10 +2333,11 @@ fn apply_command(
                 let mut state = lock_state(shared);
                 if let Ok(image) = outcome.result {
                     let source_size = (image.source_width, image.source_height);
-                    if let Some(render_image) =
-                        RenderImage::from_rgb8(image.width, image.height, &image.rgb)
+                    if let Some((render_image, tone)) =
+                        image.pixels.render(image.width, image.height)
                     {
-                        context.set_image(render_image, source_size);
+                        context.set_global_tone(tone);
+                    context.set_shared_image(render_image, source_size);
                         state.image = Some(SizeDto {
                             width: source_size.0 as f64,
                             height: source_size.1 as f64,
@@ -2174,25 +2353,10 @@ fn apply_command(
                 return Ok(());
             }
             let mut state = lock_state(shared);
-            let (reference, reference_base) = match &session.reference_issue {
-                Some((frame, issue_id)) => {
-                    (Some(Arc::clone(frame)), Some(format!("issue:{issue_id}")))
-                }
-                None => (
-                    outcome.reference,
-                    outcome.reference_base.map(str::to_string),
-                ),
-            };
-            if reference.is_some() {
-                state.reference_ready = true;
-                state.reference_base = reference_base;
-            }
-            if let Some(reference) = reference
-                && context.reference_id() != Some(reference.id)
-                && let Some(image) =
-                    RenderImage::from_rgb8(reference.width, reference.height, &reference.rgb)
-            {
-                context.set_reference_image(reference.id, image);
+            if let Some((id,image))=frame.reference {
+                context.set_shared_reference_image(id,image);
+                state.reference_ready=true;
+                state.reference_base=frame.reference_base;
             }
             state.nr_pending = outcome.nr_pending;
             state.nr_error = outcome.nr_error;
@@ -2202,8 +2366,8 @@ fn apply_command(
             match outcome.result {
                 Ok(image) => {
                     let source_size = (image.source_width, image.source_height);
-                    let Some(render_image) =
-                        RenderImage::from_rgb8(image.width, image.height, &image.rgb)
+                    let Some((render_image, tone)) =
+                        image.pixels.render(image.width, image.height)
                     else {
                         state.decode = "error".to_string();
                         state.decode_error = Some(format!(
@@ -2218,7 +2382,8 @@ fn apply_command(
                      * 几何必须原地不动 —— 否则「切到 1:1 要等全图算完」那段会跳一下。
                      */
                     let previous_size = context.viewport().image_size;
-                    context.set_image(render_image, source_size);
+                    context.set_global_tone(tone);
+                    context.set_shared_image(render_image, source_size);
                     if let Some(tool) = session.tool {
                         context.viewport_mut().rotation = tool.geometry.rotation;
                         if previous_size != source_size {
@@ -2540,6 +2705,7 @@ fn queue_geometry_job(
     state.wanted_tier = Some(tier);
     state.decode = "loading".into();
     let job = DevelopJob {
+        color: session.color.clone(),
         nr_method: session.nr_method,
         id: *latest_job,
         rev: state.params_rev,
@@ -2587,6 +2753,7 @@ fn ensure_output(
     state.decode = "loading".to_string();
     *latest_job += 1;
     let job = DevelopJob {
+        color: session.color.clone(),
         nr_method: session.nr_method,
         id: *latest_job,
         rev: state.params_rev,
@@ -2709,7 +2876,10 @@ fn develop_loop(receiver: Receiver<DevelopJob>, commands: Sender<RenderCommand>,
     let mut high = HighDenoise::new(move || {
         let _ = notify.send(RenderCommand::DenoiseReady);
     });
+    let notify=commands.clone();
+    let mut working_high=raybend::develop::denoise_job::WorkingHighDenoise::new(move || {let _=notify.send(RenderCommand::DenoiseReady);});
     let mut cached: Option<CachedSource> = None;
+    let mut working: Option<working_editor::Cached> = None;
     // 最近一次被告知要显示的照片（**粘住**：参数任务不该把「要看哪张」弄丢）
     let mut wanted_photo: Option<String> = None;
 
@@ -2728,19 +2898,21 @@ fn develop_loop(receiver: Receiver<DevelopJob>, commands: Sender<RenderCommand>,
         }
 
         let outcome = match std::panic::catch_unwind(AssertUnwindSafe(|| {
-            run_develop_job(
-                &mut cached,
-                &wanted_photo,
-                &job,
-                max_texture,
-                &commands,
-                &mut high,
-            )
+            if job.color.is_some() {
+                cached = None;
+                high.clear();
+                working_editor::run(&mut working, &wanted_photo, &job, max_texture,&mut working_high)
+            } else {
+                working = None; working_high.clear();
+                run_develop_job(&mut cached, &wanted_photo, &job, max_texture, &commands, &mut high)
+            }
         })) {
             Ok(outcome) => outcome,
             Err(payload) => {
                 cached = None; // 半路的状态不可信：下一次任务重新解码
+                working = None; working_high.clear(); high.clear();
                 Some(DevelopOutcome {
+                    working_reference: None,
                     nr_pending: false,
                     nr_error: None,
                     reference: None,
@@ -2897,6 +3069,7 @@ fn run_develop_job(
             }
             Err(error) => {
                 return Some(DevelopOutcome {
+                    working_reference: None,
                     nr_pending: false,
                     nr_error: None,
                     reference: None,
@@ -2932,6 +3105,7 @@ fn run_develop_job(
         && let Err(error) = geometry.validate((entry.full.width, entry.full.height))
     {
         return Some(DevelopOutcome {
+                    working_reference: None,
             nr_pending: false,
             nr_error: None,
             reference: None,
@@ -3090,6 +3264,7 @@ fn run_develop_job(
     );
 
     Some(DevelopOutcome {
+                    working_reference: None,
         nr_pending,
         nr_error,
         reference,
@@ -3107,7 +3282,7 @@ fn run_develop_job(
         result: Ok(DevelopedImage {
             width,
             height,
-            rgb,
+            pixels: DevelopedPixels::Legacy(rgb),
             // 逻辑尺寸 = 完整线性源（不是这一档的渲染尺寸）
             source_width,
             source_height,
@@ -3176,6 +3351,7 @@ fn transition_outcome(
             ms = started.elapsed().as_secs_f64() * 1000.0,
         );
         return Some(DevelopOutcome {
+                    working_reference: None,
             nr_pending: false,
             nr_error: None,
             reference: None,
@@ -3194,7 +3370,7 @@ fn transition_outcome(
             result: Ok(DevelopedImage {
                 width: pixels.width,
                 height: pixels.height,
-                rgb: pixels.rgb,
+                pixels: DevelopedPixels::Legacy(pixels.rgb),
                 source_width,
                 source_height,
                 original_width: source_width,
@@ -3417,8 +3593,9 @@ mod tests {
         assert!(histogram.g[display::DEFAULT_BINS - 1] > 0.0);
     }
 
-    fn job(id: u64, rev: u64, photo: Option<&str>) -> DevelopJob {
+    pub(super) fn job(id: u64, rev: u64, photo: Option<&str>) -> DevelopJob {
         DevelopJob {
+            color: None,
             nr_method: NrMethod::Fast,
             id,
             rev,
@@ -3745,7 +3922,8 @@ mod tests {
         let image = outcome.result.expect("有像素");
         assert_eq!((image.width, image.height), (32, 24));
         assert_eq!((image.source_width, image.source_height), (6000, 4500));
-        assert_eq!(image.rgb.len(), 32 * 24 * 3);
+        let DevelopedPixels::Legacy(rgb) = image.pixels else { panic!("legacy transition expected"); };
+        assert_eq!(rgb.len(), 32 * 24 * 3);
     }
 
     #[test]
@@ -4090,7 +4268,8 @@ mod tests {
         assert!(final_frame.nr_error.is_none());
         assert_eq!(reference.id, final_frame.reference.unwrap().id);
         let image = final_frame.result.unwrap();
-        let expected = settled_histogram(&image.rgb, false).unwrap();
+        let DevelopedPixels::Legacy(rgb) = image.pixels else { panic!("legacy frame expected"); };
+        let expected = settled_histogram(&rgb, false).unwrap();
         assert_eq!(
             serde_json::to_value(final_frame.histogram.unwrap()).unwrap(),
             serde_json::to_value(expected).unwrap()

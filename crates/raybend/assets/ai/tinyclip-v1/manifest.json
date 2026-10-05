@@ -1,0 +1,28 @@
+{
+  "format": 2,
+  "model_id": "wkcn/TinyCLIP-ViT-40M-32-Text-19M-LAION400M",
+  "revision": "95ec8197b3f2fe7f747865c61ca556cf0768b2f7",
+  "ort_version": "1.28.0",
+  "opset": 17,
+  "image_input": "pixel_values",
+  "image_output": "image_features",
+  "resize": "center_crop",
+  "thresholds_calibrated": true,
+  "files": [
+    {
+      "name": "image_encoder.onnx",
+      "bytes": 158885258,
+      "sha256": "a8576f0f9916d6e92237996d41c256e1e3150db5cf6db48758bb63c87537bb24"
+    },
+    {
+      "name": "classes.json",
+      "bytes": 141513,
+      "sha256": "5e57b4761296991b94a8255ef34709bfc0d6aa23ee134d21aca8179514411e35"
+    },
+    {
+      "name": "LICENSE.txt",
+      "bytes": 1726,
+      "sha256": "ed28672d56eeeeb5d03144494f9022322f643f80b826e88ddcb7b50d6ec2d9f8"
+    }
+  ]
+}

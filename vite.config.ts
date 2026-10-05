@@ -1,3 +1,4 @@
+import { resolveAiBuild } from "./scripts/lib/ai-build.mjs";
 import { defineConfig, type Plugin } from "vite";
 import solid from "vite-plugin-solid";
 import tailwindcss from "@tailwindcss/vite";
@@ -175,6 +176,7 @@ export default defineConfig(() => ({
    */
   define: {
     __RAYBEND_BUILD__: JSON.stringify(readBuildInfo()),
+    __RAYBEND_PHOTO_AI__: process.env.RAYBEND_PHOTO_AI !== undefined ? process.env.RAYBEND_PHOTO_AI === "1" : resolveAiBuild({root:process.cwd(),materialize:false,log:()=>{}}).enabled,
     __RAYBEND_UPDATER_PUBLIC_KEY__: JSON.stringify(process.env.RAYBEND_UPDATER_PUBLIC_KEY || ""),
     __RAYBEND_DISTRIBUTION__: JSON.stringify(process.env.RAYBEND_DISTRIBUTION || "direct"),
     __RAYBEND_DIAGNOSTICS__: JSON.stringify(["dev","test"].includes(process.env.RAYBEND_CHANNEL?.trim() || "dev")),

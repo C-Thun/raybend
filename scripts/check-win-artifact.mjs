@@ -24,6 +24,8 @@
  * 退出码：0 = 一致；1 = 产物过期或对不上（打印补救命令）。
  */
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
+import {AI_ON_MARKER,AI_OFF_MARKER} from "./lib/ai-build.mjs";
+import { checkAiAssets } from "./lib/ai-assets.mjs";
 import { dirname, join } from "node:path";
 
 const DIST = process.env.WIN_DIST ?? "dist";
@@ -176,6 +178,19 @@ if (workerTime < newestRustSource("crates/raybend/src")) {
     "    cmd.exe /c 'pushd \\\\wsl.localhost\\Ubuntu-24.04\\home\\andares\\repos\\c-thun\\raybend & cargo build -p raybend-desktop -p raybend --features custom-protocol'",
   );
 }
+
+const aiRecordPath=join(dirname(exePath),"raybend-ai-build.json");
+if(!existsSync(aiRecordPath)) fail("Windows 产物缺少 AI 构建身份记录", "  pnpm debug:win");
+const aiRecord=JSON.parse(readFileSync(aiRecordPath,"utf8"));
+if(aiRecord.schema!==1||typeof aiRecord.ai?.enabled!=="boolean")fail("AI 构建记录无效", "  pnpm debug:win");
+const nativeMarker=aiRecord.ai.enabled?AI_ON_MARKER:AI_OFF_MARKER;
+if(!binary.includes(nativeMarker))fail("原生 AI 能力与本次构建记录不一致", "  pnpm debug:win");
+if(aiRecord.ai.enabled){
+ const aiAssets=checkAiAssets(process.cwd(),dirname(exePath));
+ if(aiRecord.ai.manifestSha256!==aiAssets.manifestSha256||!binary.includes(aiAssets.manifestSha256))fail("Windows 产物的可信 AI 模型版本过期", "  pnpm debug:win");
+ if(!binary.includes("--raybend-ai-worker"))fail("Windows 产物缺少 AI worker 入口", "  pnpm debug:win");
+}else if(["ai-model","ai-runtime"].some(name=>existsSync(join(dirname(exePath),name))))fail("无 AI 产物含上次残留的模型/CPU资源", "  pnpm debug:win");
+console.log(`  AI: ${aiRecord.ai.enabled?"启用（CPU）":"未启用"}`);
 
 console.log(
   `✓ Windows 产物与前端一致\n  exe:  ${exePath}（${new Date(exeTime).toISOString()}）\n  dist: ${referenced.length} 个引用资源全部命中（最新 ${new Date(distTime).toISOString()}）\n  worker: ${workerPath}（${selfWorker ? "主程序自重启" : "独立进程"}）（${new Date(workerTime).toISOString()}，含 ${PROTOCOL_TAG}）`,

@@ -1,5 +1,5 @@
 {
-  "version": "2.19",
+  "version": "2.20",
   "children": [
     {
       "type": "frame",
@@ -16,8 +16,8 @@
     {
       "type": "frame",
       "id": "P1JiB",
-      "x": 880,
-      "y": 0,
+      "x": 0,
+      "y": 4810,
       "name": "Shell / Editor / Dark-Compact",
       "theme": {
         "mode": "dark",
@@ -25,7 +25,7 @@
       },
       "clip": true,
       "width": 1600,
-      "height": 1000,
+      "height": 1120,
       "fill": "$surface-main",
       "layout": "vertical",
       "children": [
@@ -474,6 +474,28 @@
             },
             {
               "type": "frame",
+              "id": "NzDv9",
+              "name": "IconButton / settings / idle",
+              "width": 32,
+              "height": 32,
+              "cornerRadius": "$radius",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "ha9rY",
+                  "name": "Glyph / settings",
+                  "width": 16,
+                  "height": 16,
+                  "icon": "settings",
+                  "library": "lucide",
+                  "fill": "$fg-2"
+                }
+              ]
+            },
+            {
+              "type": "frame",
               "id": "IIJ21",
               "name": "SpacerFlex",
               "width": "fill_container",
@@ -648,7 +670,7 @@
             {
               "type": "frame",
               "id": "CYXcQ",
-              "name": "ToggleBlock / 吸附 / 未开启",
+              "name": "IconButton / fullscreen / idle",
               "width": 32,
               "height": 32,
               "cornerRadius": 4,
@@ -659,10 +681,10 @@
                 {
                   "type": "icon",
                   "id": "E70RN",
-                  "name": "Glyph / magnet",
+                  "name": "Glyph / fullscreen",
                   "width": 16,
                   "height": 16,
-                  "icon": "magnet",
+                  "icon": "maximize",
                   "library": "lucide",
                   "fill": "$fg-2"
                 }
@@ -1604,13 +1626,13 @@
                   "name": "EditorViewport",
                   "width": "fill_container",
                   "height": "fill_container",
-                  "layout": "vertical",
-                  "justifyContent": "center",
-                  "alignItems": "center",
+                  "layout": "none",
                   "children": [
                     {
                       "type": "frame",
                       "id": "yTG6y",
+                      "x": 52,
+                      "y": 38,
                       "name": "PhotoBox / 照片（Fit）",
                       "width": 960,
                       "height": 640,
@@ -1639,6 +1661,33 @@
                           "fontFamily": "Inter",
                           "fontSize": 13,
                           "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "CEWEe",
+                      "x": 12,
+                      "y": 12,
+                      "name": "RGB soft proof viewing badge",
+                      "height": 26,
+                      "fill": "$surface-layer",
+                      "cornerRadius": "$radius",
+                      "padding": [
+                        0,
+                        10
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "ERbCy",
+                          "name": "RGB proof active label",
+                          "fill": "$brand",
+                          "content": "RGB 打样中",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "600"
                         }
                       ]
                     }
@@ -1752,33 +1801,6 @@
                       "type": "frame",
                       "id": "nXyUc",
                       "name": "StripThumb / 6",
-                      "width": 158,
-                      "height": 132,
-                      "fill": "$surface-bar",
-                      "cornerRadius": 4
-                    },
-                    {
-                      "type": "frame",
-                      "id": "xqsiD",
-                      "name": "StripThumb / 7",
-                      "width": 158,
-                      "height": 132,
-                      "fill": "$surface-bar",
-                      "cornerRadius": 4
-                    },
-                    {
-                      "type": "frame",
-                      "id": "G0H2bv",
-                      "name": "StripThumb / 8",
-                      "width": 158,
-                      "height": 132,
-                      "fill": "$surface-bar",
-                      "cornerRadius": 4
-                    },
-                    {
-                      "type": "frame",
-                      "id": "lWVMm",
-                      "name": "StripThumb / 9",
                       "width": 158,
                       "height": 132,
                       "fill": "$surface-bar",
@@ -2003,7 +2025,6 @@
                   "id": "ajjwB",
                   "name": "TabContent / 预览",
                   "width": "fill_container",
-                  "height": "fill_container",
                   "layout": "vertical",
                   "gap": 12,
                   "children": [
@@ -3304,15 +3325,6 @@
                                     {
                                       "type": "frame",
                                       "id": "Ife0g",
-                                      "name": "Dash",
-                                      "opacity": 0.58,
-                                      "width": "fill_container",
-                                      "height": 1,
-                                      "fill": "$fg-3"
-                                    },
-                                    {
-                                      "type": "frame",
-                                      "id": "NPCch",
                                       "name": "Dash",
                                       "opacity": 0.58,
                                       "width": "fill_container",
@@ -5109,7 +5121,7 @@
                         {
                           "type": "frame",
                           "id": "K6gw2q",
-                          "name": "TabStrip / 曲线",
+                          "name": "TabStrip / 曲线·预设·色彩管理",
                           "width": "fill_container",
                           "height": 30,
                           "fill": "$surface-track",
@@ -5163,6 +5175,32 @@
                                   "name": "TabLabel / 预设",
                                   "fill": "$fg-2",
                                   "content": "预设",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 13,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "Zhj7v",
+                              "name": "Tab / 色彩管理",
+                              "height": 26,
+                              "fill": "$surface-track",
+                              "cornerRadius": 3,
+                              "padding": [
+                                0,
+                                10
+                              ],
+                              "justifyContent": "center",
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "yGEIK",
+                                  "name": "TabLabel / 色彩管理",
+                                  "fill": "$fg-2",
+                                  "content": "色彩管理",
                                   "fontFamily": "Inter",
                                   "fontSize": 13,
                                   "fontWeight": "normal"
@@ -5906,6 +5944,28 @@
             },
             {
               "type": "frame",
+              "id": "B5zMJX",
+              "name": "IconButton / settings / idle",
+              "width": 32,
+              "height": 32,
+              "cornerRadius": "$radius",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "d9izOI",
+                  "name": "Glyph / settings",
+                  "width": 16,
+                  "height": 16,
+                  "icon": "settings",
+                  "library": "lucide",
+                  "fill": "$fg-2"
+                }
+              ]
+            },
+            {
+              "type": "frame",
               "id": "Szoss",
               "name": "SpacerFlex",
               "width": "fill_container",
@@ -6079,8 +6139,8 @@
             },
             {
               "type": "frame",
-              "id": "Ogg4w",
-              "name": "ToggleBlock / 吸附 / 未开启",
+              "id": "S3nc15",
+              "name": "IconButton / fullscreen / idle",
               "width": 32,
               "height": 32,
               "cornerRadius": 4,
@@ -6090,11 +6150,11 @@
               "children": [
                 {
                   "type": "icon",
-                  "id": "J1fOk1",
-                  "name": "Glyph / magnet",
+                  "id": "aY7Mc",
+                  "name": "Glyph / fullscreen",
                   "width": 16,
                   "height": 16,
-                  "icon": "magnet",
+                  "icon": "maximize",
                   "library": "lucide",
                   "fill": "$fg-2"
                 }
@@ -10767,7 +10827,7 @@
                         {
                           "type": "frame",
                           "id": "Hzhww",
-                          "name": "TabStrip / 曲线",
+                          "name": "TabStrip / 曲线·预设·色彩管理",
                           "width": "fill_container",
                           "height": 30,
                           "fill": "$surface-track",
@@ -10821,6 +10881,32 @@
                                   "name": "TabLabel / 预设",
                                   "fill": "$fg-2",
                                   "content": "预设",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 13,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "V1zLQi",
+                              "name": "Tab / 色彩管理",
+                              "height": 26,
+                              "fill": "$surface-track",
+                              "cornerRadius": 3,
+                              "padding": [
+                                0,
+                                10
+                              ],
+                              "justifyContent": "center",
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "ddtSr",
+                                  "name": "TabLabel / 色彩管理",
+                                  "fill": "$fg-2",
+                                  "content": "色彩管理",
                                   "fontFamily": "Inter",
                                   "fontSize": 13,
                                   "fontWeight": "normal"
@@ -11564,6 +11650,28 @@
             },
             {
               "type": "frame",
+              "id": "c9VPqt",
+              "name": "IconButton / settings / idle",
+              "width": 32,
+              "height": 32,
+              "cornerRadius": "$radius",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "yam6n",
+                  "name": "Glyph / settings",
+                  "width": 16,
+                  "height": 16,
+                  "icon": "settings",
+                  "library": "lucide",
+                  "fill": "$fg-2"
+                }
+              ]
+            },
+            {
+              "type": "frame",
               "id": "WOSDF",
               "name": "SpacerFlex",
               "width": "fill_container",
@@ -11737,8 +11845,8 @@
             },
             {
               "type": "frame",
-              "id": "l7iV5",
-              "name": "ToggleBlock / 吸附 / 未开启",
+              "id": "Yy407",
+              "name": "IconButton / fullscreen / idle",
               "width": 32,
               "height": 32,
               "cornerRadius": 4,
@@ -11748,11 +11856,11 @@
               "children": [
                 {
                   "type": "icon",
-                  "id": "J4cu7c",
-                  "name": "Glyph / magnet",
+                  "id": "U9FL2",
+                  "name": "Glyph / fullscreen",
                   "width": 16,
                   "height": 16,
-                  "icon": "magnet",
+                  "icon": "maximize",
                   "library": "lucide",
                   "fill": "$fg-2"
                 }
@@ -16293,7 +16401,7 @@
                         {
                           "type": "frame",
                           "id": "V7JG8n",
-                          "name": "TabStrip / 曲线",
+                          "name": "TabStrip / 曲线·预设·色彩管理",
                           "width": "fill_container",
                           "height": 30,
                           "fill": "$surface-track",
@@ -16347,6 +16455,32 @@
                                   "name": "TabLabel / 预设",
                                   "fill": "$fg-2",
                                   "content": "预设",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 13,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "utKDN",
+                              "name": "Tab / 色彩管理",
+                              "height": 26,
+                              "fill": "$surface-track",
+                              "cornerRadius": 3,
+                              "padding": [
+                                0,
+                                10
+                              ],
+                              "justifyContent": "center",
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "V62Mp",
+                                  "name": "TabLabel / 色彩管理",
+                                  "fill": "$fg-2",
+                                  "content": "色彩管理",
                                   "fontFamily": "Inter",
                                   "fontSize": 13,
                                   "fontWeight": "normal"
@@ -17090,6 +17224,28 @@
             },
             {
               "type": "frame",
+              "id": "lMNUc",
+              "name": "IconButton / settings / idle",
+              "width": 32,
+              "height": 32,
+              "cornerRadius": "$radius",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "g354Ac",
+                  "name": "Glyph / settings",
+                  "width": 16,
+                  "height": 16,
+                  "icon": "settings",
+                  "library": "lucide",
+                  "fill": "$fg-2"
+                }
+              ]
+            },
+            {
+              "type": "frame",
               "id": "EWQkI",
               "name": "SpacerFlex",
               "width": "fill_container",
@@ -17263,8 +17419,8 @@
             },
             {
               "type": "frame",
-              "id": "GJXHw",
-              "name": "ToggleBlock / 吸附 / 未开启",
+              "id": "o8QH4",
+              "name": "IconButton / fullscreen / idle",
               "width": 32,
               "height": 32,
               "cornerRadius": 4,
@@ -17274,11 +17430,11 @@
               "children": [
                 {
                   "type": "icon",
-                  "id": "nL7Rs",
-                  "name": "Glyph / magnet",
+                  "id": "ssTjn",
+                  "name": "Glyph / fullscreen",
                   "width": 16,
                   "height": 16,
-                  "icon": "magnet",
+                  "icon": "maximize",
                   "library": "lucide",
                   "fill": "$fg-2"
                 }
@@ -21356,7 +21512,7 @@
                         {
                           "type": "frame",
                           "id": "YkfXh",
-                          "name": "TabStrip / 曲线",
+                          "name": "TabStrip / 曲线·预设·色彩管理",
                           "width": "fill_container",
                           "height": 30,
                           "fill": "$surface-track",
@@ -21410,6 +21566,32 @@
                                   "name": "TabLabel / 预设",
                                   "fill": "$fg-2",
                                   "content": "预设",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 13,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "S7H3l2",
+                              "name": "Tab / 色彩管理",
+                              "height": 26,
+                              "fill": "$surface-track",
+                              "cornerRadius": 3,
+                              "padding": [
+                                0,
+                                10
+                              ],
+                              "justifyContent": "center",
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "Cp6qC",
+                                  "name": "TabLabel / 色彩管理",
+                                  "fill": "$fg-2",
+                                  "content": "色彩管理",
                                   "fontFamily": "Inter",
                                   "fontSize": 13,
                                   "fontWeight": "normal"
@@ -21696,14 +21878,14 @@
       "type": "frame",
       "id": "Ltq5G",
       "x": 0,
-      "y": 1060,
+      "y": 6010,
       "name": "Components / Editor / 调整面板",
       "theme": {
         "mode": "dark",
         "density": "compact"
       },
-      "width": 2170,
-      "height": 620,
+      "width": 2441,
+      "height": 930,
       "gap": 16,
       "children": [
         {
@@ -25261,7 +25443,7 @@
             {
               "type": "frame",
               "id": "x32NQb",
-              "name": "TabStrip / 曲线·预设",
+              "name": "TabStrip / 曲线·预设·色彩管理",
               "width": "fill_container",
               "height": 30,
               "fill": "$surface-track",
@@ -25318,6 +25500,32 @@
                       "fontFamily": "Inter",
                       "fontSize": 13,
                       "fontWeight": "500"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "p7eE1",
+                  "name": "Tab / 色彩管理",
+                  "height": 26,
+                  "fill": "$surface-track",
+                  "cornerRadius": 3,
+                  "padding": [
+                    0,
+                    10
+                  ],
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "yT9PG",
+                      "name": "TabLabel / 色彩管理",
+                      "fill": "$fg-2",
+                      "content": "色彩管理",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
                     }
                   ]
                 }
@@ -25743,6 +25951,580 @@
               "content": "悬浮行尾出删除（Shift 直删）；目录清空后才能删；拖动时目录全折叠 + 边缘自动滚动",
               "fontFamily": "Inter",
               "fontSize": 10,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "Ic3cN",
+          "name": "RightPanel / 高级 · 色彩管理",
+          "width": 255,
+          "height": 700,
+          "fill": "$surface-main",
+          "layout": "vertical",
+          "gap": 10,
+          "padding": 8,
+          "children": [
+            {
+              "type": "text",
+              "id": "EU9gI",
+              "name": "GroupCaption / 色彩身份",
+              "fill": "$fg-3",
+              "content": "第 3 组 · 色彩身份与查看目标",
+              "fontFamily": "Inter",
+              "fontSize": 11,
+              "fontWeight": "600"
+            },
+            {
+              "type": "frame",
+              "id": "uZMAz",
+              "name": "TabStrip / 曲线·预设·色彩管理",
+              "width": "fill_container",
+              "height": 30,
+              "fill": "$surface-track",
+              "cornerRadius": "$radius",
+              "gap": 2,
+              "padding": 2,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "IzvcM",
+                  "name": "Tab / 曲线",
+                  "height": 26,
+                  "fill": "$surface-track",
+                  "cornerRadius": 3,
+                  "padding": [
+                    0,
+                    10
+                  ],
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "CsiAL",
+                      "name": "TabLabel / 曲线",
+                      "fill": "$fg-2",
+                      "content": "曲线",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "axGW8",
+                  "name": "Tab / 预设",
+                  "height": 26,
+                  "fill": "$surface-track",
+                  "cornerRadius": 3,
+                  "padding": [
+                    0,
+                    10
+                  ],
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "N6f11u",
+                      "name": "TabLabel / 预设",
+                      "fill": "$fg-2",
+                      "content": "预设",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "hePP7",
+                  "name": "Tab / 色彩管理",
+                  "height": 26,
+                  "fill": "$brand",
+                  "cornerRadius": 3,
+                  "padding": [
+                    0,
+                    10
+                  ],
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "eyJjG",
+                      "name": "TabLabel / 色彩管理",
+                      "fill": "$fg-on-brand",
+                      "content": "色彩管理",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "600"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "mINOD",
+              "name": "Input profile section",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 5,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "aZW9F",
+                  "name": "Input section caption",
+                  "fill": "$fg-2",
+                  "content": "输入",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "frame",
+                  "id": "ikGC8",
+                  "name": "Input profile selector",
+                  "width": "fill_container",
+                  "height": 33,
+                  "fill": "$surface-bar",
+                  "cornerRadius": "$radius",
+                  "gap": 7,
+                  "padding": [
+                    0,
+                    9
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "wowM6",
+                      "name": "Input profile glyph",
+                      "width": 16,
+                      "height": 16,
+                      "icon": "scan-eye",
+                      "library": "lucide",
+                      "fill": "$brand"
+                    },
+                    {
+                      "type": "text",
+                      "id": "TdNEt",
+                      "name": "Input profile choice",
+                      "fill": "$fg-1",
+                      "content": "sRGB IEC61966-2.1",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "FIRq7",
+                      "name": "Input spacer",
+                      "width": "fill_container",
+                      "height": 1
+                    },
+                    {
+                      "type": "icon",
+                      "id": "PZWKD",
+                      "name": "Selector chevron",
+                      "width": 14,
+                      "height": 14,
+                      "icon": "chevron-down",
+                      "library": "lucide",
+                      "fill": "$fg-2"
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "OHNt3",
+                  "name": "Input frozen source status",
+                  "fill": "$fg-3",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "已固化 · 手动指定 RGB 配置",
+                  "fontFamily": "Inter",
+                  "fontSize": 11,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "f38jGs",
+                  "name": "Input assignment actions",
+                  "width": "fill_container",
+                  "height": 32,
+                  "gap": "$gap",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "Rv65I",
+                      "name": "Apply input",
+                      "width": "fill_container",
+                      "height": 30,
+                      "fill": "$brand",
+                      "cornerRadius": "$radius",
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "S5HQ3",
+                          "name": "Apply input label",
+                          "fill": "$fg-on-brand",
+                          "content": "应用输入",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "Rm69Y",
+                      "name": "Restore automatic",
+                      "width": "fill_container",
+                      "height": 30,
+                      "fill": "$surface-bar",
+                      "cornerRadius": "$radius",
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "A7cp4F",
+                          "name": "Restore automatic label",
+                          "fill": "$fg-2",
+                          "content": "恢复自动",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "p6JpCm",
+                  "name": "Batch input assignment",
+                  "width": "fill_container",
+                  "height": 30,
+                  "fill": "$surface-bar",
+                  "cornerRadius": "$radius",
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "mFrDj",
+                      "name": "Batch assignment label",
+                      "fill": "$fg-2",
+                      "content": "批量指定 · 已选 24 张",
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "Uk1Z2",
+              "name": "Panel divider",
+              "width": "fill_container",
+              "height": 1,
+              "fill": "$surface-bar"
+            },
+            {
+              "type": "frame",
+              "id": "xRZLJ",
+              "name": "Status / 工作空间",
+              "width": "fill_container",
+              "height": 34,
+              "gap": 7,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "oMbJO",
+                  "name": "Glyph / 工作空间",
+                  "width": 15,
+                  "height": 15,
+                  "icon": "layers",
+                  "library": "lucide",
+                  "fill": "$fg-3"
+                },
+                {
+                  "type": "text",
+                  "id": "N1d3H8",
+                  "name": "Label / 工作空间",
+                  "fill": "$fg-2",
+                  "content": "工作空间",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "EcekQ",
+                  "name": "Spacer / 工作空间",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "text",
+                  "id": "b27svr",
+                  "name": "Value / 工作空间",
+                  "fill": "$fg-1",
+                  "content": "线性 Rec.2020",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "rfGMH",
+              "name": "Status / 显示",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": "$gap",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "hxtph",
+                  "name": "Label / 显示",
+                  "fill": "$fg-3",
+                  "content": "当前显示 · 编辑画布",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "cYXmS",
+                  "name": "Value / 显示",
+                  "fill": "$fg-1",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "系统管理 · 广色域输出",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "text",
+                  "id": "xTtrH",
+                  "name": "Actual display detail",
+                  "fill": "$fg-2",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "画布以 scRGB 提交，系统负责显示器转换。",
+                  "fontFamily": "Inter",
+                  "fontSize": 11,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "dpunw",
+              "name": "Panel divider / proof",
+              "width": "fill_container",
+              "height": 1,
+              "fill": "$surface-bar"
+            },
+            {
+              "type": "frame",
+              "id": "cgzUe",
+              "name": "Soft proof row",
+              "width": "fill_container",
+              "height": 34,
+              "gap": 7,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "FcyXl",
+                  "name": "Soft proof label",
+                  "fill": "$fg-1",
+                  "content": "软打样",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "frame",
+                  "id": "WJNxM",
+                  "name": "Soft proof spacer",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "text",
+                  "id": "NPgPO",
+                  "name": "Soft proof off",
+                  "fill": "$fg-3",
+                  "content": "关闭",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "YQ1yU",
+                  "name": "Soft proof switch",
+                  "width": 26,
+                  "height": 15,
+                  "fill": "$surface-track",
+                  "cornerRadius": 8,
+                  "padding": 2,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "ellipse",
+                      "id": "L1X3Xf",
+                      "name": "Switch thumb",
+                      "fill": "$fg-3",
+                      "width": 11,
+                      "height": 11
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "JvvsV",
+              "name": "RGB proof target",
+              "width": "fill_container",
+              "height": 32,
+              "fill": "$surface-bar",
+              "cornerRadius": "$radius",
+              "gap": "$gap",
+              "padding": [
+                0,
+                9
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "URpaJ",
+                  "name": "Proof target choice",
+                  "fill": "$fg-2",
+                  "content": "sRGB · 相对色度",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "O1g4Ik",
+                  "name": "Proof target spacer",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "icon",
+                  "id": "O3d3n",
+                  "name": "Proof target chevron",
+                  "width": 14,
+                  "height": 14,
+                  "icon": "chevron-down",
+                  "library": "lucide",
+                  "fill": "$fg-3"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "PEs0S",
+              "name": "Target gamut warning",
+              "width": "fill_container",
+              "height": 34,
+              "gap": 7,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "y1YQYy",
+                  "name": "Soft proof label",
+                  "fill": "$fg-1",
+                  "content": "目标色域警告",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "frame",
+                  "id": "XNmjW",
+                  "name": "Soft proof spacer",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "text",
+                  "id": "rYEbS",
+                  "name": "Soft proof off",
+                  "fill": "$fg-3",
+                  "content": "关闭",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "ag9CS",
+                  "name": "Soft proof switch",
+                  "width": 26,
+                  "height": 15,
+                  "fill": "$surface-track",
+                  "cornerRadius": 8,
+                  "padding": 2,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "ellipse",
+                      "id": "TKQr3",
+                      "name": "Switch thumb",
+                      "fill": "$fg-3",
+                      "width": 11,
+                      "height": 11
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "UXcDc",
+              "name": "RGB proof capability",
+              "fill": "$fg-3",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "仅改变查看效果。可切换目标色域警告；复杂配置、纸白模拟另行支持。",
+              "fontFamily": "Inter",
+              "fontSize": 11,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "I7Tnb",
+              "name": "Panel footnote",
+              "fill": "$fg-3",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "输入更改可撤销。打开面板、换屏与打样不重建缓存；应用输入只更新受影响的照片预览。",
+              "fontFamily": "Inter",
+              "fontSize": 11,
               "fontWeight": "normal"
             }
           ]
@@ -44909,6 +45691,7 @@
           "id": "qrzun",
           "name": "Modal / 新建预设",
           "width": 420,
+          "height": 332,
           "fill": "$surface-layer",
           "cornerRadius": 6,
           "layout": "vertical",
@@ -44996,7 +45779,7 @@
                   "id": "RBmze",
                   "name": "FieldLabel / 包含大类",
                   "fill": "$fg-2",
-                  "content": "包含大类（默认全选）",
+                  "content": "包含大类（色彩管理默认不选）",
                   "fontFamily": "Inter",
                   "fontSize": 12,
                   "fontWeight": "normal"
@@ -45162,6 +45945,42 @@
                           "fontFamily": "Inter",
                           "fontSize": 12,
                           "fontWeight": "600"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "iCfbR",
+                  "name": "Optional color management group",
+                  "width": "fill_container",
+                  "height": 26,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "nYDP4",
+                      "name": "Chip / 色彩管理 · 默认不选",
+                      "height": 26,
+                      "fill": "$surface-bar",
+                      "cornerRadius": 4,
+                      "padding": [
+                        0,
+                        10
+                      ],
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "qin1Z",
+                          "name": "ChipLabel / 镜头",
+                          "fill": "$fg-2",
+                          "content": "色彩管理",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
                         }
                       ]
                     }
@@ -49188,6 +50007,306 @@
           "fontFamily": "Inter",
           "fontSize": 11,
           "fontWeight": "normal"
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "m6UxMn",
+      "x": 0,
+      "y": 4380,
+      "name": "Dialog / Batch color / Dark Compact",
+      "theme": {
+        "mode": "dark",
+        "density": "compact"
+      },
+      "width": 560,
+      "height": 350,
+      "fill": "$surface-layer",
+      "cornerRadius": "$radius",
+      "layout": "vertical",
+      "gap": 16,
+      "padding": 24,
+      "children": [
+        {
+          "type": "text",
+          "id": "bqAvE",
+          "name": "Batch dialog title",
+          "fill": "$fg-1",
+          "content": "批量指定输入配置",
+          "fontFamily": "Inter",
+          "fontSize": 16,
+          "fontWeight": "600"
+        },
+        {
+          "type": "text",
+          "id": "ZL80B",
+          "name": "Batch dialog scope",
+          "fill": "$fg-2",
+          "content": "已选 24 张 · sRGB IEC61966-2.1",
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "e8Xdc",
+          "name": "Batch compatibility summary",
+          "width": "fill_container",
+          "height": 78,
+          "fill": "$surface-bar",
+          "cornerRadius": "$radius",
+          "layout": "vertical",
+          "gap": 8,
+          "padding": 14,
+          "children": [
+            {
+              "type": "text",
+              "id": "L1f73Y",
+              "name": "Compatible count",
+              "fill": "$fg-1",
+              "content": "18 张可应用 · 其中 5 张已有色彩解释",
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "600"
+            },
+            {
+              "type": "text",
+              "id": "E4Tf7",
+              "name": "Skipped count",
+              "fill": "$fg-3",
+              "content": "跳过 6 张：RAW 不接受 RGB 配置 / 已锁定",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "I09Rc8",
+          "name": "Batch action explanation",
+          "fill": "$fg-2",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "只更改最新编辑的输入解释，保留已有调整。命名定稿保持原样，整批可一步撤销。提交前会再次核对原文件和编辑状态。",
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "ndvhy",
+          "name": "Batch dialog spacer",
+          "width": 1,
+          "height": "fill_container"
+        },
+        {
+          "type": "frame",
+          "id": "AuuZm",
+          "name": "Batch dialog footer",
+          "width": "fill_container",
+          "height": 34,
+          "gap": 8,
+          "justifyContent": "end",
+          "children": [
+            {
+              "type": "frame",
+              "id": "pwI50",
+              "name": "Cancel batch",
+              "width": 88,
+              "height": 34,
+              "fill": "$surface-bar",
+              "cornerRadius": "$radius",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "VKvJD",
+                  "name": "Cancel batch label",
+                  "fill": "$fg-1",
+                  "content": "取消",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "fbwbg",
+              "name": "Confirm batch",
+              "width": 140,
+              "height": 34,
+              "fill": "$brand",
+              "cornerRadius": "$radius",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "AkEdu",
+                  "name": "Confirm batch label",
+                  "fill": "#FFFFFF",
+                  "content": "应用到 18 张",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "rBgAX",
+      "x": 640,
+      "y": 4380,
+      "name": "Dialog / Batch color / Light Loose",
+      "theme": {
+        "mode": "light",
+        "density": "loose"
+      },
+      "width": 560,
+      "height": 350,
+      "fill": "$surface-layer",
+      "cornerRadius": "$radius",
+      "layout": "vertical",
+      "gap": 16,
+      "padding": 24,
+      "children": [
+        {
+          "type": "text",
+          "id": "IDng9",
+          "name": "Batch dialog title",
+          "fill": "$fg-1",
+          "content": "批量指定输入配置",
+          "fontFamily": "Inter",
+          "fontSize": 16,
+          "fontWeight": "600"
+        },
+        {
+          "type": "text",
+          "id": "WKmhW",
+          "name": "Batch dialog scope",
+          "fill": "$fg-2",
+          "content": "已选 24 张 · sRGB IEC61966-2.1",
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "QejED",
+          "name": "Batch compatibility summary",
+          "width": "fill_container",
+          "height": 78,
+          "fill": "$surface-bar",
+          "cornerRadius": "$radius",
+          "layout": "vertical",
+          "gap": 8,
+          "padding": 14,
+          "children": [
+            {
+              "type": "text",
+              "id": "Gozil",
+              "name": "Compatible count",
+              "fill": "$fg-1",
+              "content": "18 张可应用 · 其中 5 张已有色彩解释",
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "600"
+            },
+            {
+              "type": "text",
+              "id": "Xhe3H",
+              "name": "Skipped count",
+              "fill": "$fg-3",
+              "content": "跳过 6 张：RAW 不接受 RGB 配置 / 已锁定",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "fMngY",
+          "name": "Batch action explanation",
+          "fill": "$fg-2",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "只更改最新编辑的输入解释，保留已有调整。命名定稿保持原样，整批可一步撤销。提交前会再次核对原文件和编辑状态。",
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "eQFLv",
+          "name": "Batch dialog spacer",
+          "width": 1,
+          "height": "fill_container"
+        },
+        {
+          "type": "frame",
+          "id": "uQEMt",
+          "name": "Batch dialog footer",
+          "width": "fill_container",
+          "height": 34,
+          "gap": 8,
+          "justifyContent": "end",
+          "children": [
+            {
+              "type": "frame",
+              "id": "Z7PLZ",
+              "name": "Cancel batch",
+              "width": 88,
+              "height": 34,
+              "fill": "$surface-bar",
+              "cornerRadius": "$radius",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "iC4dd",
+                  "name": "Cancel batch label",
+                  "fill": "$fg-1",
+                  "content": "取消",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "U7sZob",
+              "name": "Confirm batch",
+              "width": 140,
+              "height": 34,
+              "fill": "$brand",
+              "cornerRadius": "$radius",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "LgETU",
+                  "name": "Confirm batch label",
+                  "fill": "#FFFFFF",
+                  "content": "应用到 18 张",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
         }
       ]
     }

@@ -13,6 +13,8 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
 };
 static NEXT_FRAME: AtomicU64 = AtomicU64::new(1);
+/// Shared identity namespace for legacy and floating point comparison frames.
+pub fn next_frame_id() -> u64 { NEXT_FRAME.fetch_add(1, Ordering::Relaxed) }
 #[derive(Debug)]
 pub struct ReferenceFrame {
     pub id: u64,
@@ -31,7 +33,7 @@ impl ReferenceFrame {
             return None;
         }
         Some(Self {
-            id: NEXT_FRAME.fetch_add(1, Ordering::Relaxed),
+            id: next_frame_id(),
             width,
             height,
             rgb,
@@ -66,7 +68,7 @@ impl ReferenceCache {
             None => (pixels.width, pixels.height, pixels.rgb),
         };
         let frame = Arc::new(ReferenceFrame {
-            id: NEXT_FRAME.fetch_add(1, Ordering::Relaxed),
+            id: next_frame_id(),
             width,
             height,
             rgb,
@@ -108,7 +110,7 @@ impl ReferenceCache {
             None => (source.width, source.height, rgb),
         };
         let frame = Arc::new(ReferenceFrame {
-            id: NEXT_FRAME.fetch_add(1, Ordering::Relaxed),
+            id: next_frame_id(),
             width,
             height,
             rgb,

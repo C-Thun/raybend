@@ -20,29 +20,42 @@ pub struct DenoiseKey {
     pub plan: DenoisePlan,
     pub lens: LensCorrection,
 }
-type CachedResult = Result<Arc<LinearImage>, String>;
-#[derive(Default)]
-struct State {
+pub trait DenoiseImage: Sized + Send + Sync + 'static {
+    fn process(&self,key:&DenoiseKey,cancel:&AtomicBool)->Option<Self>;
+}
+impl DenoiseImage for LinearImage {
+    fn process(&self,key:&DenoiseKey,cancel:&AtomicBool)->Option<Self> {
+        let warped=warp_lens(self,&LensMap::new(&key.lens));
+        denoise_high(&warped,&key.plan,cancel)
+    }
+}
+impl DenoiseImage for super::working::WorkingReferenceImage {
+    fn process(&self,key:&DenoiseKey,cancel:&AtomicBool)->Option<Self> {
+        let warped=super::lens::warp_rgb(self.view(),&LensMap::new(&key.lens));
+        if cancel.load(Ordering::Relaxed) {return None;}
+        let rgb=super::bm3d::denoise_high_rgb(super::sample::RgbView {width:self.width,height:self.height,rgb:&warped},&key.plan,cancel)?;
+        Some(Self {width:self.width,height:self.height,rgb})
+    }
+}
+type CachedResult<T> = Result<Arc<T>, String>;
+struct State<T> {
     wanted: Option<DenoiseKey>,
-    ready: Option<(DenoiseKey, CachedResult)>,
+    ready: Option<(DenoiseKey, CachedResult<T>)>,
 }
-struct Request {
-    key: DenoiseKey,
-    image: Arc<LinearImage>,
-    cancel: Arc<AtomicBool>,
+impl<T> Default for State<T> {fn default()->Self {Self {wanted:None,ready:None}}}
+struct Request<T> {key:DenoiseKey,image:Arc<T>,cancel:Arc<AtomicBool>}
+pub struct BackgroundDenoise<T: DenoiseImage> {
+    shared:Arc<Mutex<State<T>>>, sender:Option<Sender<Request<T>>>,
+    thread:Option<std::thread::JoinHandle<()>>,cancel:Arc<AtomicBool>,
 }
-pub struct HighDenoise {
-    shared: Arc<Mutex<State>>,
-    sender: Option<Sender<Request>>,
-    thread: Option<std::thread::JoinHandle<()>>,
-    cancel: Arc<AtomicBool>,
-}
-impl HighDenoise {
+pub type HighDenoise=BackgroundDenoise<LinearImage>;
+pub type WorkingHighDenoise=BackgroundDenoise<super::working::WorkingReferenceImage>;
+impl<T: DenoiseImage> BackgroundDenoise<T> {
     /// 回调只通知「有结果了」，读缓存仍校验完整键，不把旧照片结果推给当前帧。
     pub fn new(notify: impl Fn() + Send + 'static) -> Self {
         let shared = Arc::new(Mutex::new(State::default()));
         let state = Arc::clone(&shared);
-        let (sender, receiver) = mpsc::channel::<Request>();
+        let (sender, receiver) = mpsc::channel::<Request<T>>();
         let thread = std::thread::Builder::new()
             .name("develop-bm3d".into())
             .spawn(move || {
@@ -54,8 +67,7 @@ impl HighDenoise {
                         continue;
                     }
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        let warped = warp_lens(&request.image, &LensMap::new(&request.key.lens));
-                        denoise_high(&warped, &request.key.plan, &request.cancel).map(Arc::new)
+                        request.image.process(&request.key,&request.cancel).map(Arc::new)
                     }));
                     if request.cancel.load(Ordering::Relaxed) {
                         continue;
@@ -88,9 +100,9 @@ impl HighDenoise {
     pub fn get_or_request(
         &mut self,
         key: DenoiseKey,
-        image: &Arc<LinearImage>,
+        image: &Arc<T>,
         start: bool,
-    ) -> Option<CachedResult> {
+    ) -> Option<CachedResult<T>> {
         let mut state = self
             .shared
             .lock()
@@ -151,7 +163,7 @@ impl HighDenoise {
             .wanted = None;
     }
 }
-impl Drop for HighDenoise {
+impl<T: DenoiseImage> Drop for BackgroundDenoise<T> {
     fn drop(&mut self) {
         self.cancel();
         self.sender.take();
@@ -166,6 +178,22 @@ mod tests {
     use super::super::lens::ManualLens;
     use super::*;
     use std::time::Duration;
+    #[test]
+    fn floating_source_uses_the_same_cancellable_worker_without_clipping() {
+        let working=crate::color::working::WorkingImage::from_linear_srgb(2,1,vec![[-0.1,0.2,1.2];2]).unwrap();
+        let image=Arc::new(super::super::working::WorkingReferenceImage::from_working(working).unwrap());
+        let (sender,receiver)=std::sync::mpsc::channel();
+        let mut worker=WorkingHighDenoise::new(move || {let _=sender.send(());});
+        let mut wanted=key(4001); wanted.width=2;wanted.height=1;wanted.plan=DenoisePlan::default();
+        wanted.lens=LensCorrection::manual_only(2,1,Default::default());
+        assert!(worker.get_or_request(wanted.clone(),&image,true).is_none());
+        receiver.recv_timeout(Duration::from_secs(2)).unwrap();
+        let actual=worker.get_or_request(wanted.clone(),&image,false).unwrap().unwrap();
+        for (a,b) in actual.view().rgb.iter().zip(image.view().rgb) {assert!((a-b).abs()<0.000001);}
+        assert!(actual.view().rgb[0]<0.0 && actual.view().rgb[2]>1.0);
+        worker.clear();
+        assert!(worker.get_or_request(wanted,&image,false).is_none());
+    }
     fn key(source: u64) -> DenoiseKey {
         DenoiseKey {
             source,

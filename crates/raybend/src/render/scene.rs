@@ -117,6 +117,8 @@ pub fn make_test_image(width: u32, height: u32) -> RenderImage {
     }
 
     RenderImage {
+        linear_source: None,
+        encoding: super::image::RenderEncoding::Srgb8,
         width,
         height,
         pixels,

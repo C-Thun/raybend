@@ -394,7 +394,7 @@ pub(crate) struct Prepared {
     naming: raybend::export::output::Naming,
     author: Option<String>,
     description: Option<String>,
-    tags: Vec<i64>,
+    tags: Vec<String>,
     /// 导出尾号（I00–I99 / ISO / IRA / ILA）；latest 在这里就完成哈希匹配判定
     pub(crate) suffix: String,
 }
@@ -409,6 +409,10 @@ pub(crate) fn prepare<R: Runtime>(
         .begin_task(repository)
         .map_err(|e| e.to_string())?;
     let catalog = app.state::<BrowseState>().lease(app, repository)?;
+    let dictionary = app.state::<crate::db::DbState>().with(app, |db| {
+        db.read(raybend::store::tags::list_all).map_err(|e| e.to_string())
+    })?;
+    catalog.write(move |conn| raybend::store::organization::sync_legacy_terms(conn, &dictionary)).map_err(|e| e.to_string())?;
     let mut prepared = prepare_with_catalog(catalog, captured)?;
     if let Some(prepared) = &mut prepared {
         prepared._permit = Some(permit);
@@ -425,7 +429,7 @@ fn prepare_with_catalog(
         let source=raybend::export::resolve_captured_source(conn,&root,captured)?;
         let suffix=raybend::export::issue_suffix(conn,&captured.reference)?;
         let(taken_at,brand,model,author,description)=conn.query_row("SELECT taken_at,camera_make,camera_model,author,description FROM assets WHERE id=?1",[captured.reference.asset_id],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?)))?;
-        Ok(Some(Prepared{_permit:None,catalog:std::sync::Arc::clone(&catalog),source,naming:raybend::export::output::Naming{taken_at,brand,model},author,description,tags:raybend::store::tags::tags_of_asset(conn,captured.reference.asset_id)?,suffix}))
+        Ok(Some(Prepared{_permit:None,catalog:std::sync::Arc::clone(&catalog),source,naming:raybend::export::output::Naming{taken_at,brand,model},author,description,tags:raybend::store::photo_tags::effective_names(conn,captured.reference.asset_id)?,suffix}))
     }).map_err(|e|e.to_string())
 }
 
@@ -463,7 +467,7 @@ pub(crate) fn resources<R: Runtime>(
     Ok((lens, lut))
 }
 pub(crate) fn metadata_for<R: Runtime>(
-    app: &AppHandle<R>,
+    _app: &AppHandle<R>,
     prepared: &Prepared,
 ) -> Result<raybend::export::metadata::Metadata, String> {
     use raybend::export::metadata::Metadata;
@@ -474,18 +478,8 @@ pub(crate) fn metadata_for<R: Runtime>(
     if prepared.description.is_some() {
         metadata.description = prepared.description.clone();
     }
-    let catalog_keywords: Vec<String> = app.state::<crate::db::DbState>().with(app, |db| {
-        db.read(|conn| {
-            let tags = raybend::store::tags::list_all(conn)?;
-            Ok(tags
-                .into_iter()
-                .filter(|tag| prepared.tags.contains(&tag.id))
-                .map(|tag| tag.name)
-                .collect())
-        })
-        .map_err(|e| e.to_string())
-    })?;
-    metadata.keywords.extend(catalog_keywords);
+    // catalog 是关键词真相；不能把原文件中已屏蔽的关键词重新合回来。
+    metadata.keywords = prepared.tags.clone();
     metadata.keywords.sort();
     metadata.keywords.dedup();
     Ok(metadata)
@@ -514,7 +508,7 @@ fn run_item<R: Runtime>(
     }
     let metadata = metadata_for(app, &prepared)?;
     let (lens, lut) = resources(app, &item.repository_id, &item.snapshot)?;
-    let target = raybend::export::output::execute_checked(
+    let target = raybend::export::output::execute_checked_with_profiles(
         &prepared.source,
         &item.snapshot,
         &item.preset,
@@ -532,6 +526,7 @@ fn run_item<R: Runtime>(
             }
         },
         &prepared.suffix,
+        |id, role| crate::color_profiles::resolve(app, id, role),
     )
     .map_err(|e| e.to_string())?;
     Ok(match target {
@@ -640,14 +635,13 @@ pub async fn export_preview<R: Runtime>(
             .map_err(|e| e.to_string())?;
         let p = prepare_with_catalog(catalog, &snapshot)?.ok_or("定稿已失效")?;
         let (lens, lut) = resources(&app, &repository_id, &snapshot)?;
-        let image = raybend::export::render_for_preset(
-            &p.source,
-            &snapshot,
-            lens.as_ref(),
-            lut.as_deref(),
-            &preset,
-        )
-        .map_err(|e| e.to_string())?;
+        let dimensions = if snapshot.stack.color.is_some() {
+            raybend::export::render_working_for_preset(&p.source, &snapshot, lens.as_ref(), lut.as_deref(), &preset,
+                |id, role| crate::color_profiles::resolve(&app, id, role)).map_err(|e| e.to_string())?.dimensions()
+        } else {
+            raybend::export::render_for_preset(&p.source, &snapshot, lens.as_ref(), lut.as_deref(), &preset)
+                .map_err(|e| e.to_string())?.dimensions()
+        };
         let relative =
             raybend::export::output::relative_name(&preset, &p.source, &p.naming, 1, &p.suffix)
                 .map_err(|e| e.to_string())?;
@@ -656,8 +650,8 @@ pub async fn export_preview<R: Runtime>(
                 .join(relative)
                 .to_string_lossy()
                 .into(),
-            width: image.width(),
-            height: image.height(),
+            width: dimensions.0,
+            height: dimensions.1,
         })
     })
     .await

@@ -1,6 +1,8 @@
-# XMP sidecar（W1）：自有 rb: 表达 + 标准层输出 + 自家导入
+# XMP sidecar：自有 rb: 表达 + 标准层输出 + 自家导入
 
-**状态**：**已批准并开工**（崔总 2026-09-30「按照 spec 实施吧」）—— 实施进行中：核心模块文件已落（`crates/raybend/src/xmp/`），尚未接进 `lib.rs` 与命令层；实施交接状态见 `implementations/2026-09-30_xmp-sidecar-w1.md`
+**状态**：**已实施完成**（崔总 2026-09-30 批准「按照 spec 实施」，Agent 同夜完成——单测/编译/lint 门全绿，真机验收待崔总，见 §10 与 `implementations/2026-09-30_xmp-sidecar-w1.md`）。
+**范围已冻结（崔总 2026-10-01）**：XMP 功能到此为止，**不适配其他家的导入**（不是延后，是不做）；
+本规格即**全部**实现方案，**没有分波次**——本文件就是一次性做完的那一份（原文件名中的「W1」已随更名移除）。
 **一句话**：编辑/标记照片时在照片旁自动写 `<主体名>.xmp`；自家导入（新登记资产）自动发现并读回；不读别家方言、不做历史补写。
 **关联**：
 `specs/issue-xmp-contract.md`（rb: 表达契约，本文件细化并小幅修订它）、`memory/PLAN.md` §4 #2、
@@ -14,8 +16,8 @@
 - **XMP 不是第一公民**：真相源永远是 `catalog.db`；sidecar 只是互操作副本，不承担备份与完整性职责。
 - 它的两个目的：① **宣示开放**——用户的数据资产归用户、随时可带走；② **照片 + sidecar 离开库时能恢复可观信息**（best-effort，**不承诺完整**）。
 - **备份不是 XMP 的事**：整库备份/迁移的正路是**直接拷贝 repos 目录**（`catalog.db`、`photos/`、`cache/` 都在仓内）；
-  崔总 2026-09-30：`catalog` 结构**可能连导出都不需要做**，顶多后续在「创建库」流程加一个「引用已有目录」的入口（另立登记，不在本波）。
-- 因此本波取舍一律服从「够用即可」：宁可少映射、少承诺，不多做界面与自动化。
+  崔总 2026-09-30：`catalog` 结构**可能连导出都不需要做**，顶多后续在「创建库」流程加一个「引用已有目录」的入口（归 `memory/FUTURE.md` J 节的备份概念，与本规格无关）。
+- 因此全部取舍服从「够用即可」：宁可少映射、少承诺，不多做界面与自动化。
 
 ## 1. 范围
 
@@ -29,7 +31,7 @@
 
 ### 1.2 不做（边界，防蔓延）
 
-- 不读别家方言（Lightroom `crs:`/`lr:`、darktable 等）——跨家导入留后续波次（`memory/REVIEW.md` R6-01）。
+- 不读别家方言（Lightroom `crs:`/`lr:`、darktable 等）——**不做**（崔总 2026-10-01 定：不适配其他家的导入；`memory/REVIEW.md` R6-01/R6-05）。
 - 不为历史数据补写 sidecar（升级不回溯；「编辑了才有」）。
 - 不映射几何/裁切/旋转、镜头手动项与配置文件、LUT、动态反差、降噪方式、基准曲线（理由见 §5.1）。
 - 不写旗标/喜欢/锁/桶/集合/目录标签/GPS/版权（无标准意义、无 DB 字段或已有 EXIF 承载，见 §5.2）。
@@ -78,8 +80,8 @@ sidecar_path(asset) = <照片目录>/<主体名>.xmp
 
 | 情况 | 处理 |
 | --- | --- |
-| 含 `rb:`，`schemaVersion ≤ 1` | 正常覆盖（原子替换） |
-| 含 `rb:`，版本更高/无法解析 | **不覆盖**，跳过并记录（契约：保留原 XMP 并报不支持） |
+| 含 `rb:`，版本已知且所有条目完整可读 | 正常覆盖（原子替换） |
+| 含 `rb:`，版本未知/非法、编码或 XML 损坏、条目校验失败/未知资源 | **不覆盖**，跳过并记录（契约：保留原 XMP 并报不支持） |
 | **不含 `rb:`**（别家软件的文件） | 先重命名为 `<名>.xmp.bak`（`.bak` 已存在则覆盖该 `.bak`），再写我们的——不静默毁掉别人的数据 |
 
 ## 4. rb: 域（自有 schema）
@@ -89,10 +91,11 @@ sidecar_path(asset) = <照片目录>/<主体名>.xmp
 | 属性 | 形式 | 说明 |
 | --- | --- | --- |
 | `rb:latest` | 资源（`rdf:parseType="Resource"`） | 工作副本：`rb:latestSchemaVersion`、`rb:sourceBase`、`rb:profileHash`、`rb:profileJson` |
-| `rb:profiles` | `rdf:Seq` | 全部不可变定稿；每个 `rdf:li` 含：`rb:name`（UTF-8）、`rb:sourceBase`（raw/sooc）、`rb:createdAtMs`、`rb:ordinal`、`rb:schemaVersion`、`rb:profileHash`、`rb:profileJson` |
+| `rb:profiles` | `rdf:Seq` | 全部不可变定稿；每个 `rdf:li` 含：`rb:name`（UTF-8）、`rb:sourceBase`（raw/sooc）、`rb:createdAtMs`、`rb:ordinal`、`rb:schemaVersion`、`rb:profileHash`、`rb:profileJson`。**即使没有定稿也写出空的 `rb:profiles`**——它是 §3.3「我们的文件」判据的载体，纯元数据 sidecar 靠它不被自己误判为外来文件 |
 
-- `rb:profileJson` = `DevelopStack` 的规范 JSON，**剔除 `auto_adjust`**——与 `profile_hash` 同一口径，任何读者可**直接重算哈希**校验（本波修订契约，见 `specs/issue-xmp-contract.md`）。
-- `rb:profileHash` = 现有实现（`issues::profile_hash`）的 FNV-1a 64 位十六进制。
+- `rb:profileJson` = `DevelopStack` 的规范 JSON，**剔除 `auto_adjust`**——与 `profile_hash` 同一口径，任何读者可**直接重算哈希**校验（本规格同步修订契约，见 `specs/issue-xmp-contract.md`）。
+- 版本由核心 `issues::profile_schema_version` 决定；没有色彩状态的旧 profile 继续写 1，新色彩状态写 2，不因程序支持上限提升而统一升级旧配置。色彩管理和照片标签来源的新增字段按各自规格同步接入，沿用本文件的损坏/未知保护与事务读回。
+- `rb:profileHash` = 现有实现（`issues::profile_hash`）的 FNV-1a 64 位十六进制。 JSON 解析必须保持浮点精确往返，现有 serde_json 启用 float_roundtrip；不改哈希算法或旧 profile 的格式。
 - `rb:ordinal` = 定稿的导出尾号（0–99），**提示性、不是跨库身份**；导入时优先沿用，冲突/超限由现有分配器另取（`allocate_ordinal` 本就会跳过已占用的号）。
 - 未知 `schemaVersion` / `latestSchemaVersion`：**跳过该条并记录**，不按旧版本硬解析。
 - 体积上界：100 个定稿 × 每个 profile JSON 约 2–5 KB ⇒ 单文件最坏数百 KB；不压缩（保持人可读）。
@@ -208,10 +211,10 @@ sidecar_path(asset) = <照片目录>/<主体名>.xmp
 | --- | --- |
 | `develop_commit` | 该资产 |
 | `issue_create` / `issue_delete` | 该资产 |
-| `browse_apply`（评级 / 色标 / 标签 / 文字） | 受影响资产集合（`marking::apply` 的 ops） |
+| `browse_mark`（评级 / 色标 / 标签 / 文字） | 受影响资产集合（`marking::apply` 的 ops；喜欢/锁不进 sidecar） |
 | `browse_undo` / `browse_redo` | 补丁里受影响的资产（develop 与标记 op 都要覆盖） |
 
-- **统一判据**：触发后重算「该资产有没有可表达内容」= `latest` 非空 ∥ 有 issue ∥ 任一映射字段非空。
+- **统一判据**：触发后重算「该资产有没有可表达内容」= `latest` 有调整或明确选择 SOOC ∥ 有 issue ∥ 任一映射字段非空。空 SOOC 栈仍须记住 sourceBase，只有空 RAW 栈可省略。
   有 ⇒ 写出；全空 ⇒ 见 §6.2。注意：崔总原话「创建时机仅限于编辑」因**元数据纳入**扩展为「编辑或标记」。
 - 写出在 **DB 事务提交之后**、`blocking` 线程里做（不阻塞界面）；批量标记（一次几百张）按资产排队。
 - 复用 `fs_atomic::write`（临时文件 + 原子替换）。
@@ -220,9 +223,9 @@ sidecar_path(asset) = <照片目录>/<主体名>.xmp
 
 ### 6.2 清空与删除
 
-- 内容全空（无 issue、latest 空、所有映射字段为空）：**删除**同名 sidecar（**仅当含 `rb:`**）——「没有就没有」。
-- 照片进回收站（`store/delete.rs`）：同名 sidecar 一并进回收站（仅当含 `rb:`；外来文件不动）。
-- 库内移动/改名：应用当前没有该功能，本波不做；将来有则由 §3.1 同一路径函数跟随。
+- 内容全空（无 issue、latest 无需表达、所有映射字段为空）：**删除**同名 sidecar（**仅当含 `rb:` 且本版本完整可读**）；版本未知/损坏文件依 §3.3 保留——「没有就没有」。
+- 照片的全部文件成功进回收站（`store/delete.rs`）后：同名 sidecar 一并进回收站（仅当含 `rb:`；外来文件不动）。任一照片文件回收失败则保留 sidecar，回收前核对库会话。
+- 库内移动/改名：应用当前没有该功能，不在范围内；将来若有，由 §3.1 同一路径函数跟随。
 
 ### 6.3 不补写
 
@@ -236,13 +239,15 @@ sidecar_path(asset) = <照片目录>/<主体名>.xmp
 - **仅新登记资产**时探测同名 sidecar：`import/sink.rs`（导入落库）与 `store/rebuild.rs`（重扫/重建）。
 - 已存在的资产**不读、不覆盖**（DB 为真相源）。
 - 探测路径：源文件目录（`_RAW/` 折算后）的 `<主体名>.xmp`；大小写折叠匹配。
-- **源目录里的 sidecar 不复制、不移动**进库（只读采纳）；库内 sidecar 由后续编辑/标记自然生成。
+- **源目录里的 sidecar 不复制、不移动**进库（只读采纳）；库内 sidecar 由编辑/标记动作自然生成。
 - 导入流程内不得在 DB 写事务中做文件 IO：sidecar 在登记前读取、随登记批次落库（或登记提交后独立小事务）。
 
 ### 7.2 读取与落库
 
 - 只认 `rb:` 域与 §5.2 的标准元数据字段；别家命名空间**不读**（不构成「跨家导入」）。
-- 校验：`schemaVersion` 已知（≤1）→ 继续；`profileJson` 可解析回 `DevelopStack` → 继续；重算 `profileHash` 与文件内一致 → 继续；否则**跳过该条并记录**（不影响导入本身）。
+- 校验：`schemaVersion` 已知（沿用 `issues::profile_schema_version`：旧配置为 1，含色彩状态的配置为 2）→ 继续；`profileJson` 可解析回 `DevelopStack` → 继续；重算 `profileHash` 与文件内一致 → 继续；否则**跳过该条并记录**（不影响导入本身）。
+- 编辑栈同时复用 `DevelopStack::validate` 完整校验参数、曲线控制点、LUT/基础曲线和几何；非法编辑条目跳过，不影响有效元数据。声明 sourceBase 在原始 JSON 的哈希通过后对齐，latest 与 issue 同一口径。
+- latest、issue、元数据及关键词关联在同一 catalog 事务中采纳，事务内确认资产仍无用户编辑/标记/标签；缺省元数据不清空已有字段，说明同步刷新 FTS。任何数据库写失败整体回滚。
 - 落库：
   - `rb:latest` → 写 `develop_stacks`（`auto_adjust` 置空）；
   - `rb:profiles` → 逐条建 issue（保留 name / sourceBase / createdAtMs；`ordinal` 优先沿用，冲突则重新分配；**同哈希 + 同配置的重复定稿跳过**）；
@@ -256,14 +261,14 @@ sidecar_path(asset) = <照片目录>/<主体名>.xmp
 - 新模块：`crates/raybend/src/xmp/` —— `mod.rs`、`path.rs`（§3.1 规则）、`packet.rs`（build/parse）、`mapping.rs`（§5 映射）。
 - 复用：`export/metadata.rs` 的 `escape` 与 dc: 构造抽到 `xmp` 共享；导出侧改为调用（行为不变，既有测试即回归网）。
 - 读：`roxmltree`（已有依赖；**不新引 XML 库**）。写：手写序列化（结构固定、转义集中一处）。
-- 命令层接入：`src-tauri/src/develop.rs`、`issues.rs`、`browse.rs`（apply / undo / redo）；`store/delete.rs`（§6.2）。
+- 命令层接入：`src-tauri/src/develop.rs`、`issues.rs`、`browse.rs`（mark / undo / redo）；`store/delete.rs`（§6.2）。
 - 导入接入：`import/sink.rs`、`store/rebuild.rs`（§7.1）。
-- **DB 迁移：本波不需要**（无新表/新列、无 sidecar 状态跟踪——每次触发重算）；实现中若确需，走 `store/migration.rs` + `store/migrations/`（`AGENTS.md` §2.16）。
+- **DB 迁移：不需要**（无新表/新列、无 sidecar 状态跟踪——每次触发重算）；实现中若确需，走 `store/migration.rs` + `store/migrations/`（`AGENTS.md` §2.16）。
 - 并发：DB 仍走单写者；sidecar 文件写在事务外、`blocking` 线程。
 
 ## 9. 界面、命令与设置（`AGENTS.md` §2.15 合规声明）
 
-- **本波无任何用户可触发命令**，不进命令注册表（也就没有默认热键问题）；实施记录须写明此结论与理由。
+- **本功能无任何用户可触发命令**，不进命令注册表（也就没有默认热键问题）；实施记录须写明此结论与理由。
 - **无设置开关**：写出是数据资产表态的一部分，默认且唯一行为 = 编辑/标记时自动写——避免误关造成数据残缺。将来若确有需求再加（另立波次）。
 - **界面零新增**：最多在导入摘要/日志里出现采纳计数。
 
@@ -273,10 +278,10 @@ sidecar_path(asset) = <照片目录>/<主体名>.xmp
 
 - 路径：位图 + `_RAW`、RAW-only、`_RAW` 折算、中文主体名、超长路径、大小写折叠、`.xmp` 不被当照片。
 - 序列化：XML 转义（`& < > " '`、中文、emoji、控制字符）、dc: 各形状、`rdf:Seq` 顺序、空字段省略、100 个定稿上限。
-- 往返：build → parse → 与内存模型相等；哈希重算一致。
+- 往返：build → parse → 与内存模型相等；哈希重算一致；空 SOOC 基准、换行/制表符文本与属性、多 Description、未知版本与非法编辑条目。
 - 映射：每个 `crs:` 项的换算与舍入（0 与边界）、曲线 0..1→0..255 与规范化（去重/补端点/降采样）、无可映射项时不写 `crs:`、sooc latest 无 `crs:`。
 - 元数据：rating=0 不写、六色映射、`dc:subject` Bag、地点字段、空值省略。
-- 生命周期：全空 → 删除；外来文件 → `.bak` 接管；未知版本 → 不改写；注入写失败不回滚 DB。
+- 生命周期：全空 → 删除已知版本；未知/损坏文件清空仍保留；大小写折叠文件复用/备份/删除；照片回收失败与会话失效保留 sidecar；外来文件 → `.bak` 接管；未知版本 → 不改写；注入写失败不回滚 DB。
 - 导入：新资产采纳（latest + issues + ordinal + 元数据 + 关键词词典 ensure）、重复跳过、哈希不符跳过、未知版本跳过、已存在资产不采纳。
 - 竞态：同资产连续两次写（后写覆盖）、批量标记后写出集合正确。
 
@@ -294,9 +299,9 @@ sidecar_path(asset) = <照片目录>/<主体名>.xmp
 6. 用 ExifTool / Bridge / Lightroom 打开带 sidecar 的照片 → 能读到评级、色标、关键词与基础调整（近似）。
 7. 删除一张照片 → 回收站里能看到照片与它的 `.xmp`。
 
-## 11. 自主决定与待审项（审阅时重点看）
+## 11. 实施中采用的设计决定（原「自主决定与待审项」，已随批准实施生效）
 
-以下是我写规格时**替崔总定**的（不同意就改，改动点均在本文对应小节）：
+以下是写规格时**替崔总定**的七项（崔总批准实施时一并生效；如需反悔，改动点均在对应小节）：
 
 1. **内容全空 ⇒ 删除 sidecar**（「没有就没有」的一致化；仅删含 `rb:` 的文件）。
 2. **外来同名文件（无 `rb:`）⇒ 备份为 `.xmp.bak` 后接管**（不静默毁掉别家数据）。
@@ -306,8 +311,12 @@ sidecar_path(asset) = <照片目录>/<主体名>.xmp
 6. **无设置开关、无命令、界面零新增**（§9）。
 7. 导入采纳同时覆盖**重扫/重建**路径（灾难恢复语义）。
 
-## 12. 分期
+## 12. 范围冻结（崔总 2026-10-01）
 
-- **本波（本文件）**：§1.1 的三项。
-- **后续（不在本波，登记即可）**：跨家方言导入（Lightroom / darktable）；`crs:` 更全映射（几何/裁切/温度）；
-  GPS/版权；「创建库时引用已有目录」；标签改名/合并后的批量刷新（依赖 H4 标签管理面板）。
+- **本规格的全部范围 = §1.1 的三项，已一次性实施完成；没有分波次，也没有 W2。**
+- **适配其他家的导入（Lightroom / darktable 等方言读取）不会做**——不是延后，是不做（崔总原话）。
+- 同样不在范围内：`crs:` 扩展映射（几何/裁切/温度）、GPS/版权字段写出——范围就这些。
+- 「创建库时引用已有目录」不属于 XMP，归 `memory/FUTURE.md` J 节的备份概念。
+- 唯一的持续义务：`AGENTS.md` §2.19——将来改动会进 sidecar 的功能（如地理位置落地）时，
+  必须在同一次改动里接好 XMP 侧影响；若 H4 标签管理面板开工，标签改名/合并须同步刷新受影响资产的 sidecar。
+  这不是 XMP 的后续功能，而是其它功能对 XMP 的**联动义务**。

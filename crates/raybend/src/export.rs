@@ -396,6 +396,15 @@ pub fn render_captured(
     lut: Option<&crate::develop::lut::Lut>,
     max_edge: u32,
 ) -> Result<crate::display::output::Rgb16Image> {
+    verify_capture(path, captured, lut, max_edge)?;
+    let (linear, shot) = crate::display::output::decode_linear_source(path)?;
+    let image =
+        crate::display::output::render_linear(&linear, &captured.stack, lens, shot, lut, max_edge)?;
+    check_source(path, captured)?;
+    Ok(image)
+}
+
+fn verify_capture(path: &Path, captured: &VariantSnapshot, lut: Option<&crate::develop::lut::Lut>, max_edge: u32) -> Result<()> {
     if max_edge > 65535 || issues::profile_hash(&captured.stack)? != captured.profile_hash {
         return Err(Error::Unsupported("导出快照或输出尺寸无效".into()));
     }
@@ -412,9 +421,19 @@ pub fn render_captured(
         return Err(Error::Unsupported("导出源类型与定稿不符".into()));
     }
     check_source(path, captured)?;
-    let (linear, shot) = crate::display::output::decode_linear_source(path)?;
-    let image =
-        crate::display::output::render_linear(&linear, &captured.stack, lens, shot, lut, max_edge)?;
+    Ok(())
+}
+
+pub fn render_working_captured(
+    path: &Path, captured: &VariantSnapshot, lens: Option<&crate::develop::lens::LensCorrection>,
+    lut: Option<&crate::develop::lut::Lut>, max_edge: u32,
+    profile: impl FnMut(&crate::color::ProfileId, crate::color::icc::IccRole) -> Result<crate::color::icc::RgbIcc>,
+) -> Result<crate::color::working::WorkingImage> {
+    verify_capture(path, captured, lut, max_edge)?;
+    let color = captured.stack.color.as_ref().ok_or_else(|| Error::Unsupported("定稿不属于新版色彩管线".into()))?;
+    let (working, shot) = crate::display::output::decode_working_source(path, color, profile)?;
+    let source = crate::develop::working::WorkingReferenceImage::from_working(working).map_err(|e| Error::Unsupported(e.to_string()))?;
+    let image = crate::display::output::render_working(&source, &captured.stack, lens, shot, lut, max_edge)?;
     check_source(path, captured)?;
     Ok(image)
 }
@@ -444,16 +463,35 @@ pub fn resize_for_preset(
     image: crate::display::output::Rgb16Image,
     preset: &Preset,
 ) -> Result<crate::display::output::Rgb16Image> {
+    let edge = preset_max_edge(image.dimensions(), preset)?;
+    Ok(crate::display::output::resize_output(image, edge))
+}
+
+/// Shared sizing contract for legacy integer and float working images.
+pub fn preset_max_edge(dimensions: (u32, u32), preset: &Preset) -> Result<u32> {
     validate_size(preset)?;
+    if dimensions.0 == 0 || dimensions.1 == 0 { return Err(Error::Unsupported("导出图像尺寸无效".into())); }
     let edge = match preset.size_mode {
         SizeMode::Original => 0,
         SizeMode::MaxEdge => preset.max_edge,
         SizeMode::Percent => {
-            ((u64::from(image.width().max(image.height())) * u64::from(preset.percent) + 50) / 100)
+            ((u64::from(dimensions.0.max(dimensions.1)) * u64::from(preset.percent) + 50) / 100)
                 .max(1) as u32
         }
     };
-    Ok(crate::display::output::resize_output(image, edge))
+    Ok(edge)
+}
+
+pub fn render_working_for_preset(
+    path: &Path, captured: &VariantSnapshot,
+    lens: Option<&crate::develop::lens::LensCorrection>, lut: Option<&crate::develop::lut::Lut>,
+    preset: &Preset,
+    profile: impl FnMut(&crate::color::ProfileId, crate::color::icc::IccRole) -> Result<crate::color::icc::RgbIcc>,
+) -> Result<crate::color::working::WorkingImage> {
+    validate_size(preset)?;
+    let image = render_working_captured(path, captured, lens, lut, 0, profile)?;
+    let edge = preset_max_edge(image.dimensions(), preset)?;
+    Ok(image.into_downscaled(edge))
 }
 
 pub fn encode_tiff16(image: &crate::display::output::Rgb16Image) -> Result<Vec<u8>> {
@@ -526,6 +564,8 @@ fn default_percent() -> u32 {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Preset {
+    #[serde(default)]
+    pub output_color: crate::color::OutputColor,
     pub id: String,
     pub name: String,
     pub format: String,
@@ -549,6 +589,9 @@ pub struct PresetValidation {
 impl Preset {
     pub fn validate(&self, check_disk: bool) -> PresetValidation {
         let mut errors = BTreeMap::new();
+        if self.format == "avif" && self.output_color != crate::color::OutputColor::Srgb {
+            errors.insert("outputColor".into(), "AVIF 暂不支持广色域输出配置".into());
+        }
         if self.id.is_empty() || self.id.len() > 128 || self.id.contains(['\0', '/', '\\']) {
             errors.insert("id".into(), "预设标识无效".into());
         }
@@ -947,6 +990,7 @@ mod tests {
     #[test]
     fn output_size_modes_share_geometry_and_preserve_precision() {
         let mut preset = Preset {
+            output_color: crate::color::OutputColor::Srgb,
             id: "p".into(),
             name: "尺寸".into(),
             format: "png".into(),
@@ -1001,6 +1045,7 @@ mod tests {
     fn preset_validates_unicode_quality_paths_and_templates() {
         let dir = tempfile::tempdir().unwrap();
         let mut p = Preset {
+            output_color: crate::color::OutputColor::Srgb,
             id: "stable".into(),
             name: "中文 📷".into(),
             format: "png".into(),

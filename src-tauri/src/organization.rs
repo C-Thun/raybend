@@ -320,3 +320,14 @@ pub async fn organization_reconcile<R: Runtime>(
         Ok(report)
     }).await
 }
+
+
+#[tauri::command]
+pub async fn organization_photo_tag_state<R:Runtime>(app:AppHandle<R>,repository_id:String,asset_id:i64)->Result<raybend::store::photo_tags::TagState,String> {
+    blocking(move || {
+        let dictionary=app.state::<DbState>().with(&app,|db|db.read(tags::list_all).map_err(|e|e.to_string()))?;
+        let catalog=app.state::<BrowseState>().lease(&app,&repository_id)?;
+        catalog.write(move|conn|organization::sync_legacy_terms(conn,&dictionary)).map_err(|e|e.to_string())?;
+        catalog.read(move|conn|raybend::store::photo_tags::snapshot(conn,asset_id)).map_err(|e|e.to_string())
+    }).await
+}

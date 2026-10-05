@@ -89,3 +89,13 @@ test("独占锁阻止并发，释放后可重入；不抢残留锁", () => {
     assert.equal(readFileSync(path, "utf8"), "interrupted");
   } finally { f.dispose(); }
 });
+
+test("AI 镜像只消费本次冻结输入，关闭时清除旧包；软件侧残留大文件不入镜像", () => {
+ const f=fixture();try{
+  const legacy=join(f.root,'crates/raybend/assets/ai/old');mkdirSync(legacy,{recursive:true});writeFileSync(join(legacy,'encoder.onnx'),'old model');writeFileSync(join(legacy,'runtime.dll'),'old dll');
+  const snapshot=join(f.root,'.release/ai-input');mkdirSync(join(snapshot,'ai-model'),{recursive:true});mkdirSync(join(snapshot,'ai-runtime'));writeFileSync(join(snapshot,'ai-model/encoder.onnx'),'frozen model');writeFileSync(join(snapshot,'ai-runtime/runtime.dll'),'frozen dll');
+  syncReleaseMirror({...f,aiSnapshot:snapshot});assert.equal(readFileSync(join(f.destination,'.ai-bundle/ai-model/encoder.onnx'),'utf8'),'frozen model');assert.equal(existsSync(join(f.destination,'crates/raybend/assets/ai/old/encoder.onnx')),false);
+  f.sync();assert.equal(existsSync(join(f.destination,'.ai-bundle')),false);
+  syncReleaseMirror({...f,aiSnapshot:snapshot});assert.equal(readFileSync(join(f.destination,'.ai-bundle/ai-runtime/runtime.dll'),'utf8'),'frozen dll');
+ }finally{f.dispose();}
+});

@@ -378,6 +378,7 @@ pub enum MarkActionDto {
     AttachTags { tag_ids: Vec<i64> },
     /// 摘标签（单张编辑标签弹窗）。
     DetachTags { tag_ids: Vec<i64> },
+    PhotoTags { edits:Vec<raybend::store::photo_tags::Edit> },
     /// 改一个可编辑的文字字段（右栏：作者 / 描述 / 国家 / 省州 / 城市 / 具体地点）。
     /// `field` 只认 `TextField::parse` 认的那几个名字，其余报错（**不做静默忽略**）。
     SetText {
@@ -810,7 +811,7 @@ pub async fn browse_markings<R: Runtime>(
                             like_state: m.like_state,
                             lock_level: i64::from(m.lock_level),
                             // 一次动作最多是「一屏里选中的那些」，逐张读关联足够快
-                            tag_ids: tags::tags_of_asset(conn, id)?,
+                            tag_ids: raybend::store::photo_tags::effective_ids(conn, id)?,
                         });
                     }
                     Ok(out)
@@ -829,26 +830,11 @@ pub async fn browse_markings<R: Runtime>(
 ///
 /// **失败不影响已经落库的关联**：`use_count` 只用来给标签排序（常用的排前面），
 /// 为它让整个标记动作失败是不划算的 —— 所以这里吞掉错误、只在控制台留一行。
-fn sync_tag_counts<R: Runtime>(app: &AppHandle<R>, ops: &[marking::Op]) {
-    let mut delta = tags::TagDelta::default();
-    for op in ops {
-        match op {
-            marking::Op::TagAttach { tag_id, .. } => delta.added.push(*tag_id),
-            marking::Op::TagDetach { tag_id, .. } => delta.removed.push(*tag_id),
-            _ => {}
-        }
-    }
-    if delta.is_empty() {
-        return;
-    }
-    let state = app.state::<DbState>();
-    let result = state.with(app, |db| {
-        db.write(move |conn| tags::apply_delta(conn, &delta))
-            .map_err(|e| e.to_string())
-    });
-    if let Err(message) = result {
-        eprintln!("[raybend] ⚠️ 标签使用次数同步失败（不影响这次改动）：{message}");
-    }
+fn sync_tag_counts<R: Runtime>(app: &AppHandle<R>, delta: &tags::TagDelta) {
+    if delta.is_empty() { return; }
+    let delta = delta.clone();
+    let result = app.state::<DbState>().with(app, |db| db.write(move |conn| tags::apply_delta(conn, &delta)).map_err(|e| e.to_string()));
+    if let Err(message) = result { eprintln!("[raybend] 标签使用次数同步失败：{message}"); }
 }
 
 /// 打标记 / 改标签（**会进撤销栈**）。
@@ -869,6 +855,9 @@ pub async fn browse_mark<R: Runtime>(
                     db.read(|conn| tags::tags_by_ids(conn, tag_ids)).map_err(|e| e.to_string())
                 })?
             ),
+            MarkActionDto::PhotoTags { edits } => { let edits=edits.clone(); Some(handle.state::<DbState>().with(&handle,|db| {
+                db.write(move |conn| {let mut dictionary=Vec::new();for e in edits {let id=tags::ensure_tag(conn,&e.name,raybend::store::time::now_millis())?;dictionary.push(tags::tag_by_id(conn,id)?.ok_or_else(||raybend::Error::Unsupported("标签词典创建失败".into()))?);}Ok(dictionary)}).map_err(|e|e.to_string())
+            })?) },
             _ => None,
         };
         /*
@@ -921,6 +910,7 @@ pub async fn browse_mark<R: Runtime>(
                     MarkActionDto::DetachTags { tag_ids } => {
                         marking::detach_tags(conn, &ids, tag_ids, "摘标签")?
                     }
+                    MarkActionDto::PhotoTags {edits} => raybend::store::photo_tags::edits(conn,&ids,edits,"修改标签")?,
                     MarkActionDto::SetText { field, value } => {
                         let parsed = marking::TextField::parse(field).ok_or_else(|| {
                             raybend::Error::Unsupported(format!("右栏没有这个可编辑字段：{field}"))
@@ -937,13 +927,18 @@ pub async fn browse_mark<R: Runtime>(
                     }
                 };
                 let applied = marking::apply(conn, &change)?;
+                let mut change = change;
+                // 被锁跳过的操作不能留下可在解锁后撤销的幽灵改动。
+                change.ops.retain(|op| !op.respects_edit_lock() || !applied.skipped_locked.contains(&op.asset_id()));
                 Ok((applied, change))
             })
             .map_err(|e| e.to_string())
         })?;
 
         // 标签的使用次数记在全局词典里，这里按本次差量同步（失败不影响落库的关联）
-        sync_tag_counts(&handle, &change.ops);
+        sync_tag_counts(&handle, &applied.tag_delta);
+        // sidecar 镜像：评级 / 色标 / 标签 / 文字变了（喜欢与锁不进 sidecar，见 marked_assets）
+        crate::sidecar::queue_sync(handle.clone(), &id, crate::sidecar::marked_assets(&change.ops));
 
         // 记进撤销栈（只记真的改到了东西的动作 —— 空补丁不该占一步撤销）
         let (undo_label, redo_label, can_undo, can_redo) = state.with_undo(&id, |stack| {
@@ -990,13 +985,18 @@ pub async fn browse_undo<R: Runtime>(
         // 补丁要进闭包（会被移动），但同步标签计数还要用它 —— 先留一份
         let applied_ops = patch.ops.clone();
         let outcome = state.with_catalog(&handle, &repository_id, move |db| {
-            db.write_tx(move |conn| marking::apply(conn, &patch).map(|_| ()))
+            db.write_tx(move |conn| marking::apply(conn, &patch))
                 .map_err(|e| e.to_string())
         });
         match outcome {
-            Ok(()) => {
-                sync_tag_counts(&handle, &applied_ops);
+            Ok(applied) => {
+                sync_tag_counts(&handle, &applied.tag_delta);
                 invalidate_edited_previews(&handle, &repository_id, &applied_ops);
+                crate::sidecar::queue_sync(
+                    handle.clone(),
+                    &id,
+                    crate::sidecar::marked_assets(&applied_ops),
+                );
                 state.with_undo(&id, |stack| stack.commit_undo(change))?;
             }
             Err(e) => {
@@ -1044,13 +1044,18 @@ pub async fn browse_redo<R: Runtime>(
         // 补丁要进闭包（会被移动），但同步标签计数还要用它 —— 先留一份
         let applied_ops = patch.ops.clone();
         let outcome = state.with_catalog(&handle, &repository_id, move |db| {
-            db.write_tx(move |conn| marking::apply(conn, &patch).map(|_| ()))
+            db.write_tx(move |conn| marking::apply(conn, &patch))
                 .map_err(|e| e.to_string())
         });
         match outcome {
-            Ok(()) => {
-                sync_tag_counts(&handle, &applied_ops);
+            Ok(applied) => {
+                sync_tag_counts(&handle, &applied.tag_delta);
                 invalidate_edited_previews(&handle, &repository_id, &applied_ops);
+                crate::sidecar::queue_sync(
+                    handle.clone(),
+                    &id,
+                    crate::sidecar::marked_assets(&applied_ops),
+                );
                 state.with_undo(&id, |stack| stack.commit_redo(change))?;
             }
             Err(e) => {

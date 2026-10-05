@@ -52,6 +52,8 @@ pub enum Scope {
     Repository,
     /// 某个目录**子树**（库内相对路径，`'\'` 与 `'/'` 都接受；空串 = 库根）。
     Subtree { rel_path: String },
+    /// 直属照片；_RAW/ 作为透明相机原片目录。
+    Directory { rel_path: String },
     /// 桶成员或单张事件的受限集合；始终与普通筛选 AND。
     AssetIds { ids: Vec<i64> },
     /// Direct photo tag; independent of the optional filter's AND/OR mode.
@@ -240,7 +242,7 @@ impl Filter {
             params.extend(self.tags.iter().map(|t| Value::Integer(*t)));
             out.push((
                 format!(
-                    "EXISTS (SELECT 1 FROM asset_tags t \
+                    "EXISTS (SELECT 1 FROM effective_photo_tag_ids t \
                      WHERE t.asset_id = a.id AND t.tag_id IN ({placeholders}))"
                 ),
                 params,
@@ -249,7 +251,7 @@ impl Filter {
         if !self.tag_keys.is_empty() {
             let placeholders = placeholders(self.tag_keys.len());
             out.push((
-                format!("EXISTS (SELECT 1 FROM asset_tag_sources ts WHERE ts.asset_id = a.id AND ts.tag_key IN ({placeholders}))"),
+                format!("EXISTS (SELECT 1 FROM effective_photo_tags ts WHERE ts.asset_id = a.id AND ts.tag_key IN ({placeholders}))"),
                 self.tag_keys.iter().cloned().map(Value::Text).collect(),
             ));
         }
@@ -441,7 +443,7 @@ impl Query {
 
         // 范围永远是「与」——它是「我在看哪一块」，不是筛选条件。
         // 空前缀 = 库根 = 整库：不产生任何条件（否则会变成 `LIKE '/%'` 一条都匹配不上）
-        if let Scope::Subtree { rel_path } = &self.scope
+        if let Scope::Subtree { rel_path } | Scope::Directory { rel_path } = &self.scope
             && !normalize_rel_prefix(rel_path).is_empty()
         {
             let prefix = normalize_rel_prefix(rel_path);
@@ -465,6 +467,13 @@ impl Query {
             params.push(Value::Text(lower));
             params.push(Value::Text(upper));
         }
+        if let Scope::Directory { rel_path } = &self.scope {
+            let prefix = normalize_rel_prefix(rel_path);
+            let lower = if prefix.is_empty() { String::new() } else { format!("{prefix}/") };
+            let offset = lower.chars().count() as i64 + 1;
+            parts.push("EXISTS (SELECT 1 FROM asset_files df WHERE df.asset_id=a.id AND substr(df.rel_path_folded,1,?)=? AND (instr(substr(df.rel_path_folded,?),'/')=0 OR (substr(df.rel_path_folded,?,5)='_raw/' AND instr(substr(df.rel_path_folded,?),'/')=0)))".into());
+            params.extend([Value::Integer(lower.chars().count() as i64),Value::Text(lower),Value::Integer(offset),Value::Integer(offset),Value::Integer(offset+5)]);
+        }
         if let Scope::AssetIds { ids } = &self.scope {
             if ids.is_empty() {
                 parts.push("0 = 1".to_string());
@@ -474,7 +483,7 @@ impl Query {
             }
         }
         if let Scope::TagKey { key } = &self.scope {
-            parts.push("EXISTS (SELECT 1 FROM asset_tag_sources ats WHERE ats.asset_id = a.id AND ats.tag_key = ?)".to_string());
+            parts.push("EXISTS (SELECT 1 FROM effective_photo_tags ats WHERE ats.asset_id = a.id AND ats.tag_key = ?)".to_string());
             params.push(Value::Text(key.clone()));
         }
 
@@ -679,6 +688,23 @@ pub fn count(conn: &Connection, query: &Query) -> Result<i64> {
     let sql = format!("SELECT count(*) FROM assets a {where_sql}");
     let total = conn.query_row(&sql, params_from_iter(params.iter()), |r| r.get(0))?;
     Ok(total)
+}
+
+/// 冻结任务范围的上界；后续新增照片不进入这次范围。
+pub fn identity_upper_bound(conn: &Connection) -> Result<i64> {
+    Ok(conn.query_row("SELECT COALESCE(MAX(id),0) FROM assets",[],|r|r.get(0))?)
+}
+/// 仅身份的 keyset 页，复用唯一范围/筛选 SQL；不读图片与编辑栈。
+pub fn identity_page(conn: &Connection, query: &Query, after: i64, upper: i64, limit: usize) -> Result<Vec<(i64,String)>> {
+    if after<0 || upper<0 || limit>500 {return Err(crate::Error::Unsupported("身份分页范围无效".into()));}
+    if limit==0 || upper<=after {return Ok(Vec::new());}
+    prepare(conn,query)?;
+    let (mut sql, mut values)=query.where_clause();
+    sql.push_str(if sql.is_empty() {" WHERE "} else {" AND "});
+    sql.push_str("a.id > ? AND a.id <= ?");
+    values.extend([Value::Integer(after),Value::Integer(upper),Value::Integer(limit as i64)]);
+    let mut q=conn.prepare(&format!("SELECT a.id,a.organization_uid FROM assets a {sql} ORDER BY a.id LIMIT ?"))?;
+    Ok(q.query_map(params_from_iter(values.iter()),|r|Ok((r.get(0)?,r.get(1)?)))?.collect::<rusqlite::Result<_>>()?)
 }
 
 /// 取可视窗口那一页（虚拟网格只要这几十行）。

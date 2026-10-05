@@ -1,5 +1,5 @@
 {
-  "version": "2.19",
+  "version": "2.20",
   "children": [
     {
       "type": "frame",
@@ -6109,6 +6109,66 @@
                     },
                     {
                       "type": "frame",
+                      "id": "WW9hw",
+                      "name": "Output color choice",
+                      "width": "fill_container",
+                      "height": 32,
+                      "gap": 8,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "b6qecM",
+                          "name": "Output color label",
+                          "fill": "$fg-2",
+                          "content": "输出色彩",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "mDS3b",
+                          "name": "Output profile select",
+                          "width": "fill_container",
+                          "height": 30,
+                          "fill": "$surface-track",
+                          "cornerRadius": "$radius",
+                          "gap": 8,
+                          "padding": [
+                            0,
+                            8
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "lLwWB",
+                              "name": "Output profile value",
+                              "fill": "$fg-1",
+                              "textGrowth": "fixed-width",
+                              "width": "fill_container",
+                              "content": "sRGB",
+                              "fontFamily": "Inter",
+                              "fontSize": 12,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "icon",
+                              "id": "PuS7O",
+                              "name": "Output profile chevron",
+                              "width": 14,
+                              "height": 14,
+                              "icon": "chevron-down",
+                              "library": "lucide",
+                              "fill": "$fg-3"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
                       "id": "kHJPb",
                       "name": "QualityHeader / 仅 JPEG WebP AVIF 显示；TIFF PNG 隐藏整行",
                       "width": "fill_container",
@@ -6324,7 +6384,8 @@
                                 {
                                   "type": "icon",
                                   "id": "qG3wB",
-                                  "x": 239,
+                                  "layoutPosition": "absolute",
+                                  "x": 74,
                                   "y": 8.5,
                                   "name": "Glyph / px",
                                   "enabled": false,
@@ -6409,7 +6470,8 @@
                                 {
                                   "type": "icon",
                                   "id": "sduVy",
-                                  "x": 239,
+                                  "layoutPosition": "absolute",
+                                  "x": 74,
                                   "y": 8.5,
                                   "name": "Glyph / px",
                                   "enabled": false,
@@ -12857,6 +12919,66 @@
                     },
                     {
                       "type": "frame",
+                      "id": "W0FTDd",
+                      "name": "Output color choice",
+                      "width": "fill_container",
+                      "height": 32,
+                      "gap": 8,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "NCwR7",
+                          "name": "Output color label",
+                          "fill": "$fg-2",
+                          "content": "输出色彩",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "D5xCdL",
+                          "name": "Output profile select",
+                          "width": "fill_container",
+                          "height": 30,
+                          "fill": "$surface-track",
+                          "cornerRadius": "$radius",
+                          "gap": 8,
+                          "padding": [
+                            0,
+                            8
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "aejmy",
+                              "name": "Output profile value",
+                              "fill": "$fg-1",
+                              "textGrowth": "fixed-width",
+                              "width": "fill_container",
+                              "content": "sRGB",
+                              "fontFamily": "Inter",
+                              "fontSize": 12,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "icon",
+                              "id": "VQcF8",
+                              "name": "Output profile chevron",
+                              "width": 14,
+                              "height": 14,
+                              "icon": "chevron-down",
+                              "library": "lucide",
+                              "fill": "$fg-3"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
                       "id": "dvicn",
                       "name": "QualityHeader",
                       "width": "fill_container",
@@ -13072,7 +13194,8 @@
                                 {
                                   "type": "icon",
                                   "id": "iNoIO",
-                                  "x": 239,
+                                  "layoutPosition": "absolute",
+                                  "x": 74,
                                   "y": 8.5,
                                   "name": "Glyph / px",
                                   "enabled": false,
@@ -13157,7 +13280,8 @@
                                 {
                                   "type": "icon",
                                   "id": "yvDks",
-                                  "x": 239,
+                                  "layoutPosition": "absolute",
+                                  "x": 74,
                                   "y": 8.5,
                                   "name": "Glyph / px",
                                   "enabled": false,
@@ -21766,7 +21890,7 @@
                   "name": "Section / 导出设置：空间不足时内部滚动",
                   "clip": true,
                   "width": "fill_container",
-                  "height": "fill_container",
+                  "height": 480,
                   "layout": "vertical",
                   "gap": 6,
                   "children": [
@@ -21950,6 +22074,66 @@
                               "fontFamily": "Inter",
                               "fontSize": 12,
                               "fontWeight": "normal"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "P5s0OA",
+                      "name": "Output color choice",
+                      "width": "fill_container",
+                      "height": 32,
+                      "gap": 8,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "Wi4rz",
+                          "name": "Output color label",
+                          "fill": "$fg-2",
+                          "content": "输出色彩",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "Sh8ub",
+                          "name": "Output profile select",
+                          "width": "fill_container",
+                          "height": 30,
+                          "fill": "$surface-track",
+                          "cornerRadius": "$radius",
+                          "gap": 8,
+                          "padding": [
+                            0,
+                            8
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "T8ZCS0",
+                              "name": "Output profile value",
+                              "fill": "$fg-1",
+                              "textGrowth": "fixed-width",
+                              "width": "fill_container",
+                              "content": "sRGB",
+                              "fontFamily": "Inter",
+                              "fontSize": 12,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "icon",
+                              "id": "RkLrE",
+                              "name": "Output profile chevron",
+                              "width": 14,
+                              "height": 14,
+                              "icon": "chevron-down",
+                              "library": "lucide",
+                              "fill": "$fg-3"
                             }
                           ]
                         }
@@ -22172,7 +22356,8 @@
                                 {
                                   "type": "icon",
                                   "id": "B5Eka",
-                                  "x": 239,
+                                  "layoutPosition": "absolute",
+                                  "x": 74,
                                   "y": 8.5,
                                   "name": "Glyph / px",
                                   "enabled": false,
@@ -22257,7 +22442,8 @@
                                 {
                                   "type": "icon",
                                   "id": "iOHXN",
-                                  "x": 239,
+                                  "layoutPosition": "absolute",
+                                  "x": 74,
                                   "y": 8.5,
                                   "name": "Glyph / px",
                                   "enabled": false,
@@ -22454,7 +22640,7 @@
                       "id": "G8oO2g",
                       "name": "Input / 命名模版",
                       "width": "fill_container",
-                      "height": 30,
+                      "height": 26,
                       "fill": "$surface-track",
                       "cornerRadius": 4,
                       "gap": 6,
@@ -22812,6 +22998,66 @@
             },
             {
               "type": "frame",
+              "id": "o1GHX",
+              "name": "Output color choice",
+              "width": "fill_container",
+              "height": 32,
+              "gap": 8,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "n3fPXS",
+                  "name": "Output color label",
+                  "fill": "$fg-2",
+                  "content": "输出色彩",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "ahUUK",
+                  "name": "Output profile select",
+                  "width": "fill_container",
+                  "height": 30,
+                  "fill": "$surface-track",
+                  "cornerRadius": "$radius",
+                  "gap": 8,
+                  "padding": [
+                    0,
+                    8
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "KZ6K5",
+                      "name": "Output profile value",
+                      "fill": "$fg-1",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "sRGB",
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "icon",
+                      "id": "TBr8p",
+                      "name": "Output profile chevron",
+                      "width": 14,
+                      "height": 14,
+                      "icon": "chevron-down",
+                      "library": "lucide",
+                      "fill": "$fg-3"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
               "id": "LiqJw",
               "name": "QualityHeader",
               "width": "fill_container",
@@ -23027,7 +23273,8 @@
                         {
                           "type": "icon",
                           "id": "DABsn",
-                          "x": 275,
+                          "layoutPosition": "absolute",
+                          "x": 74,
                           "y": 8.5,
                           "name": "Glyph / px",
                           "enabled": false,
@@ -23112,7 +23359,8 @@
                         {
                           "type": "icon",
                           "id": "Oyc2U",
-                          "x": 275,
+                          "layoutPosition": "absolute",
+                          "x": 74,
                           "y": 8.5,
                           "name": "Glyph / px",
                           "enabled": false,
@@ -29928,6 +30176,66 @@
                     },
                     {
                       "type": "frame",
+                      "id": "qOjma",
+                      "name": "Output color choice",
+                      "width": "fill_container",
+                      "height": 32,
+                      "gap": 8,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "yUesE",
+                          "name": "Output color label",
+                          "fill": "$fg-2",
+                          "content": "输出色彩",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "m6Vhpj",
+                          "name": "Output profile select",
+                          "width": "fill_container",
+                          "height": 30,
+                          "fill": "$surface-track",
+                          "cornerRadius": "$radius",
+                          "gap": 8,
+                          "padding": [
+                            0,
+                            8
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "U55aja",
+                              "name": "Output profile value",
+                              "fill": "$fg-1",
+                              "textGrowth": "fixed-width",
+                              "width": "fill_container",
+                              "content": "sRGB",
+                              "fontFamily": "Inter",
+                              "fontSize": 12,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "icon",
+                              "id": "fkAgk",
+                              "name": "Output profile chevron",
+                              "width": 14,
+                              "height": 14,
+                              "icon": "chevron-down",
+                              "library": "lucide",
+                              "fill": "$fg-3"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
                       "id": "p1midN",
                       "name": "QualityHeader",
                       "width": "fill_container",
@@ -30143,7 +30451,8 @@
                                 {
                                   "type": "icon",
                                   "id": "IDx8y",
-                                  "x": 251,
+                                  "layoutPosition": "absolute",
+                                  "x": 74,
                                   "y": 8.5,
                                   "name": "Glyph / px",
                                   "enabled": false,
@@ -30228,7 +30537,8 @@
                                 {
                                   "type": "icon",
                                   "id": "OCMNl",
-                                  "x": 251,
+                                  "layoutPosition": "absolute",
+                                  "x": 74,
                                   "y": 8.5,
                                   "name": "Glyph / px",
                                   "enabled": false,

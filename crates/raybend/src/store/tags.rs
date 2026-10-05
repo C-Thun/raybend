@@ -336,6 +336,16 @@ impl TagDelta {
     }
 }
 
+/// 规范化的有效投影差量；一个 ID 最多计一次。
+pub fn projected_delta(before:&[i64],after:&[i64])->TagDelta {
+    let before=before.iter().copied().collect::<std::collections::BTreeSet<_>>();let after=after.iter().copied().collect::<std::collections::BTreeSet<_>>();
+    TagDelta{added:after.difference(&before).copied().collect(),removed:before.difference(&after).copied().collect()}
+}
+pub fn ensure_names(conn:&Connection,names:&[String],now:i64)->Result<Vec<Tag>> {
+    if names.len()>4096 {return Err(Error::Unsupported("标签词典同步超过上限".into()));}
+    let mut out=Vec::new();for name in names {let id=ensure_tag(conn,name,now)?;out.push(tag_by_id(conn,id)?.ok_or_else(||Error::Unsupported("标签词典同步失败".into()))?);}Ok(out)
+}
+
 /// 给一张照片挂一个标签。返回是否**新挂上**（重复挂返回 `false`）。
 pub fn attach_tag(conn: &Connection, asset_id: i64, tag_id: i64, now_ms: i64) -> Result<bool> {
     let n = conn.execute(
@@ -430,7 +440,7 @@ pub fn assets_with_tag(
     offset: usize,
 ) -> Result<Vec<i64>> {
     let sql =
-        "SELECT asset_id FROM asset_tags WHERE tag_id = ?1 ORDER BY asset_id LIMIT ?2 OFFSET ?3";
+        "SELECT asset_id FROM effective_photo_tag_ids WHERE tag_id = ?1 ORDER BY asset_id LIMIT ?2 OFFSET ?3";
     let limit = if limit == 0 { -1 } else { limit as i64 };
     let mut stmt = conn.prepare(sql)?;
     let rows = stmt.query_map(params![tag_id, limit, offset as i64], |r| {
@@ -452,7 +462,7 @@ pub fn distinct_tag_ids(conn: &Connection) -> Result<Vec<i64>> {
 /// 拿它去 `app.db` 用 [`set_use_count`] 重算，比上下增减更不容易漂移。
 pub fn tag_usage(conn: &Connection) -> Result<Vec<(i64, i64)>> {
     let mut stmt =
-        conn.prepare("SELECT tag_id, count(*) FROM asset_tags GROUP BY tag_id ORDER BY tag_id")?;
+        conn.prepare("SELECT tag_id, count(*) FROM effective_photo_tag_ids GROUP BY tag_id ORDER BY tag_id")?;
     let rows = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)))?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }

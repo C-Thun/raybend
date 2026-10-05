@@ -223,6 +223,14 @@ impl Lut {
         result.map(|value| value.clamp(0.0, 1.0))
     }
 
+    /// A bounded creative LUT modifies its defined input domain; out-of-domain
+    /// residuals survive the bridge instead of clipping the working image.
+    pub fn eval_extended(&self, input: [f32; 3]) -> [f32; 3] {
+        let bounded = std::array::from_fn(|c| input[c].clamp(self.domain_min[c], self.domain_max[c]));
+        let mapped = self.eval(bounded);
+        std::array::from_fn(|c| mapped[c] + input[c] - bounded[c])
+    }
+
     pub fn apply_rgb8(&self, rgb: &mut [u8], strength: f32) -> Result<()> {
         self.apply_rgb(rgb, strength)
     }

@@ -1,0 +1,41 @@
+{
+  "date": "2026-10-04",
+  "scope": "Windows desktop executable AI worker, bundled CPU DLL and model; no GUI/catalog E2E",
+  "samples": [
+    {
+      "feature_count": 512,
+      "original_preprocess_encode_ms": 153.0986,
+      "image": "C:\\rb-target\\raybend-ai-probe-data\\samples\\astronaut.jpg"
+    },
+    {
+      "feature_count": 512,
+      "original_preprocess_encode_ms": 114.68700000000001,
+      "image": "C:\\rb-target\\raybend-ai-probe-data\\samples\\rocket.jpg"
+    }
+  ],
+  "process": {
+    "worker_pid": 44536,
+    "peak_working_set_bytes": 219897856,
+    "worker_exited": true,
+    "load_includes_contract_probe_ms": 1098.8608000000002,
+    "exit_code": 0
+  },
+  "protocol_mismatch_rejected": true,
+  "missing_original_rejected": true,
+  "cuda_required": false,
+  "python_required": false,
+  "iterations": 2,
+  "limitations": "Not a cold-disk or throughput distribution measurement; no real RAW/library verification",
+  "machine": {
+    "cpu": "Intel(R) Core(TM) Ultra 9 185H",
+    "cores": 16,
+    "logical": 22,
+    "version": "10.0.26200",
+    "ram_bytes": 33945935872
+  },
+  "threads": {
+    "intra_op": 2,
+    "inter_op": 1,
+    "batch": 1
+  }
+}

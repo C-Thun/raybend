@@ -18,6 +18,20 @@ function makeStore(): ReturnType<typeof createEditorStore> {
   });
 }
 
+test("屏幕打样不污染照片编辑版本或便携载荷",()=> {
+  const store=makeStore();
+  const before=store.developPayload(); const revision=store.developRev();
+  store.setProofEnabled(true); store.setProofWarning(true); store.setProofTarget({kind:"display_p3"});
+  store.setAdvancedTab("color");
+  assert.equal(store.developRev(),revision);
+  assert.deepEqual(store.developPayload(),before);
+  store.loadDevelop({}, {}, {color:{process_version:"linear_rec2020_v2",source:{kind:"assumed_srgb"}}});
+  const snapshot=store.presetSnapshot(["colorManagement"]);
+  assert.deepEqual(snapshot,{version:2,colorManagement:{processVersion:"linear_rec2020_v2",input:"automatic"}});
+  store.setColorState({process_version:"linear_rec2020_v2",source:{kind:"assigned_rgb_icc",profile_id:"a".repeat(64)}});
+  assert.deepEqual(store.presetSnapshot(["colorManagement"]).colorManagement?.input,{profileId:"a".repeat(64)});
+});
+
 test("载荷默认不在拖动中；按下 / 松手跟着走", () => {
   const store = makeStore();
   assert.equal(store.developPayload().interactive, false, "默认不在拖");

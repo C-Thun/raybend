@@ -21,14 +21,62 @@ pub fn encode(
     quality: u8,
     metadata: &Metadata,
 ) -> Result<Vec<u8>> {
+    // 旧 issue 始终保留现有 sRGB 语义；新工作图单独从 encode_working 进入。
+    let srgb = crate::color::icc::srgb_icc().map_err(|error| fail(error.to_string()))?;
+    encode_rgb16_with_profile(image, format, quality, metadata, &srgb, true)
+}
+
+/// 新处理版本的输出边界：只在成片时从线性 Rec.2020 转换、量化一次，
+/// 随后复用原有格式编码器并嵌入同一个目标 ICC。
+pub fn encode_working(
+    image: &crate::color::working::WorkingImage,
+    format: &str,
+    quality: u8,
+    metadata: &Metadata,
+    target: &crate::color::icc::RgbIcc,
+) -> Result<Vec<u8>> {
+    if !target.accepts_role(crate::color::icc::IccRole::RgbOutput) {
+        return Err(fail("目标 ICC 不可用作 RGB 输出"));
+    }
     let (w, h) = image.dimensions();
+    let srgb = crate::color::icc::srgb_icc().map_err(|error| fail(error.to_string()))?;
+    let is_srgb = target.id() == srgb.id();
+    validate_encoder_request(w, h, format, quality, is_srgb)?;
+    let raw = image
+        .to_rgb16_flat(target)
+        .map_err(|error| fail(error.to_string()))?;
+    let encoded = crate::display::output::Rgb16Image::from_raw(w, h, raw)
+        .ok_or_else(|| fail("输出像素尺寸不合法"))?;
+    encode_rgb16_with_profile(&encoded, format, quality, metadata, target, is_srgb)
+}
+
+fn validate_encoder_request(w: u32, h: u32, format: &str, quality: u8, is_srgb: bool) -> Result<()> {
     if w == 0 || h == 0 {
         return Err(fail("输出尺寸不能为空"));
     }
     if !matches!(format, "tiff" | "png") && !(1..=100).contains(&quality) {
         return Err(fail("质量应为 1–100"));
     }
-    let exif = metadata.exif(w, h)?;
+    if format == "avif" && !is_srgb {
+        return Err(fail("当前 AVIF 编码器不能安全标记非 sRGB 输出配置"));
+    }
+    if !matches!(format, "tiff" | "png" | "jpeg" | "webp" | "avif") {
+        return Err(fail("不支持此导出格式"));
+    }
+    Ok(())
+}
+
+fn encode_rgb16_with_profile(
+    image: &crate::display::output::Rgb16Image,
+    format: &str,
+    quality: u8,
+    metadata: &Metadata,
+    target: &crate::color::icc::RgbIcc,
+    is_srgb: bool,
+) -> Result<Vec<u8>> {
+    let (w, h) = image.dimensions();
+    validate_encoder_request(w, h, format, quality, is_srgb)?;
+    let exif = metadata.exif_for_profile(w, h, is_srgb)?;
     let xmp = metadata.xmp();
     let mut data = Vec::new();
     let rgb = || {
@@ -40,7 +88,8 @@ pub fn encode(
     };
     match format {
         "tiff" => {
-            let mut fields = metadata.normalized(w, h);
+            let mut fields = metadata.normalized_for_profile(w, h, is_srgb);
+            fields.retain(|field| field.tag != exif::Tag(exif::Context::Tiff, 34675));
             for (tag, value) in [
                 (exif::Tag::BitsPerSample, exif::Value::Short(vec![16; 3])),
                 (exif::Tag::Compression, exif::Value::Short(vec![1])),
@@ -59,6 +108,11 @@ pub fn encode(
                     value,
                 });
             }
+            fields.push(exif::Field {
+                tag: exif::Tag(exif::Context::Tiff, 34675),
+                ifd_num: exif::In::PRIMARY,
+                value: exif::Value::Byte(target.bytes().to_vec()),
+            });
             let samples: Vec<u8> = image
                 .as_raw()
                 .iter()
@@ -74,6 +128,9 @@ pub fn encode(
                 .collect();
             let mut encoder = image::codecs::png::PngEncoder::new(&mut data);
             encoder
+                .set_icc_profile(target.bytes().to_vec())
+                .map_err(|e| fail(e.to_string()))?;
+            encoder
                 .set_exif_metadata(exif)
                 .map_err(|e| fail(e.to_string()))?;
             encoder
@@ -85,6 +142,9 @@ pub fn encode(
             let mut encoder =
                 image::codecs::jpeg::JpegEncoder::new_with_quality(&mut data, quality);
             encoder
+                .set_icc_profile(target.bytes().to_vec())
+                .map_err(|e| fail(e.to_string()))?;
+            encoder
                 .set_exif_metadata(exif)
                 .map_err(|e| fail(e.to_string()))?;
             encoder
@@ -94,7 +154,7 @@ pub fn encode(
         }
         "webp" => {
             let encoded = webp::Encoder::from_rgb(&rgb(), w, h).encode(f32::from(quality));
-            metadata::webp_metadata(&encoded, &exif, &xmp, w, h)
+            metadata::webp_metadata(&encoded, &exif, &xmp, target.bytes(), w, h)
         }
         "avif" => {
             data =
@@ -327,6 +387,16 @@ pub fn execute_checked(
     check: impl Fn() -> Result<()>,
     suffix: &str,
 ) -> Result<Publication> {
+    execute_checked_with_profiles(source, captured, preset, naming, metadata, sequence, lens, lut, check, suffix,
+        |_, _| Err(fail("精确导出引用的自定义 ICC 无法解析")))
+}
+
+pub fn execute_checked_with_profiles(
+    source: &Path, captured: &VariantSnapshot, preset: &Preset, naming: &Naming, metadata: &Metadata,
+    sequence: u64, lens: Option<&crate::develop::lens::LensCorrection>, lut: Option<&crate::develop::lut::Lut>,
+    check: impl Fn() -> Result<()>, suffix: &str,
+    mut profile: impl FnMut(&crate::color::ProfileId, crate::color::icc::IccRole) -> Result<crate::color::icc::RgbIcc>,
+) -> Result<Publication> {
     check()?;
     let validation = preset.validate(true);
     if !validation.errors.is_empty() {
@@ -336,8 +406,20 @@ pub fn execute_checked(
     if let Some(target) = skip_existing(source, preset, naming, sequence, suffix)? {
         return Ok(Publication::Skipped(target));
     }
-    let image = super::render_for_preset(source, captured, lens, lut, preset)?;
-    let bytes = encode(&image, &preset.format, preset.quality, metadata)?;
+    let target = resolve_output(&preset.output_color, &mut profile)?;
+    let bytes = if captured.stack.color.is_some() {
+        let image = super::render_working_for_preset(source, captured, lens, lut, preset, &mut profile)?;
+        encode_working(&image, &preset.format, preset.quality, metadata, &target)?
+    } else {
+        let image = super::render_for_preset(source, captured, lens, lut, preset)?;
+        let srgb = crate::color::icc::srgb_icc().map_err(|e| fail(e.to_string()))?;
+        if srgb.id() == target.id() { encode(&image, &preset.format, preset.quality, metadata)? }
+        else {
+            let converted = crate::color::icc::input_rgb16_to_working(&srgb, image.as_raw().as_chunks::<3>().0).map_err(|e| fail(e.to_string()))?;
+            let working = crate::color::working::WorkingImage::new(image.width(), image.height(), converted).map_err(|e| fail(e.to_string()))?;
+            encode_working(&working, &preset.format, preset.quality, metadata, &target)?
+        }
+    };
     super::check_source(source, captured)?;
     check()?;
     publish_with_policy(
@@ -349,9 +431,66 @@ pub fn execute_checked(
     )
 }
 
+pub fn resolve_output(
+    output: &crate::color::OutputColor,
+    mut profile: impl FnMut(&crate::color::ProfileId, crate::color::icc::IccRole) -> Result<crate::color::icc::RgbIcc>,
+) -> Result<crate::color::icc::RgbIcc> {
+    use crate::color::{OutputColor, icc};
+    let target = match output {
+        OutputColor::Srgb => icc::srgb_icc().map_err(|e| fail(e.to_string()))?,
+        OutputColor::DisplayP3 => icc::display_p3_icc().map_err(|e| fail(e.to_string()))?,
+        OutputColor::AdobeRgb => icc::adobe_rgb_icc().map_err(|e| fail(e.to_string()))?,
+        OutputColor::CustomRgbIcc { profile_id } => {
+            let target = profile(profile_id, icc::IccRole::RgbOutput)?;
+            if target.id() != profile_id { return Err(fail("输出 ICC 与固化身份不符")); }
+            target
+        }
+    };
+    if !target.accepts_role(icc::IccRole::RgbOutput) { return Err(fail("目标 ICC 不可用作 RGB 输出")); }
+    Ok(target)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn frozen_v2_export_resolves_source_once_and_embeds_the_selected_target() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("广色域原片.png");
+        let input = crate::color::icc::display_p3_icc().unwrap();
+        let output = crate::color::icc::adobe_rgb_icc().unwrap();
+        let rgb = crate::display::output::Rgb16Image::from_raw(2, 1, vec![65535, 0, 0, 127, 32768, 60000]).unwrap();
+        rgb.save(&source).unwrap();
+        let stack = crate::store::develop::DevelopStack {
+            source_base: crate::store::develop::EditBase::Sooc,
+            color: Some(crate::color::PhotoColorState::new_pipeline(crate::color::SourceColor::AssignedRgbIcc { profile_id: input.id().clone() })),
+            ..Default::default()
+        };
+        let snapshot = VariantSnapshot { reference: super::super::VariantRef { asset_id: 1, variant: "latest".into() }, name: "高精度".into(),
+            rel_path: "广色域原片.png".into(), profile_hash: crate::store::issues::profile_hash(&stack).unwrap(), stack,
+            source_signature: crate::media::source::source_signature(&source).unwrap() };
+        let preset = Preset { output_color: crate::color::OutputColor::AdobeRgb, id: "p".into(), name: "成片".into(), format: "png".into(), quality: 90,
+            max_edge: 0, size_mode: super::super::SizeMode::Original, percent: 100, directory: dir.path().join("输出").to_string_lossy().into_owned(),
+            template: ":FILENAME".into(), existing_file: super::super::ExistingFile::Append };
+        let reads = std::cell::Cell::new(0);
+        std::fs::create_dir(dir.path().join("输出")).unwrap();
+        let publication = execute_checked_with_profiles(&source, &snapshot, &preset, &Naming::default(), &Metadata::default(), 1,
+            None, None, || Ok(()), "", |id, role| {
+                reads.set(reads.get() + 1); assert_eq!(id, input.id()); assert_eq!(role, crate::color::icc::IccRole::PhotoInput); Ok(input.clone())
+            }).unwrap();
+        assert_eq!(reads.get(), 1);
+        let Publication::Written(path) = publication else { panic!("export skipped") };
+        let decoded = crate::color::input::decode_bitmap(&std::fs::read(path).unwrap()).unwrap();
+        assert_eq!(decoded.embedded_icc.as_ref().unwrap().id(), output.id());
+        let expected_working = crate::color::icc::input_rgb16_to_working_reference(&input, rgb.as_raw().as_chunks::<3>().0).unwrap();
+        let expected = crate::color::icc::working_to_output_rgb16_reference(&output, &expected_working).unwrap();
+        let actual = decoded.image.to_rgb16();
+        for (a, e) in actual.as_raw().iter().zip(expected.iter().flatten()) { assert!(a.abs_diff(*e) <= 32, "{a} vs {e}"); }
+        let before = std::fs::read_dir(dir.path().join("输出")).unwrap().count();
+        assert!(execute_checked_with_profiles(&source, &snapshot, &preset, &Naming::default(), &Metadata::default(), 1,
+            None, None, || Ok(()), "", |_, _| Ok(crate::color::icc::srgb_icc().unwrap())).is_err());
+        assert_eq!(std::fs::read_dir(dir.path().join("输出")).unwrap().count(), before);
+    }
     #[test]
     fn expired_catalog_blocks_export_publication_after_render_and_external_tiff() {
         use crate::store::db::{CatalogDb, OpenOpts};
@@ -382,6 +521,7 @@ mod tests {
         let output = dir.path().join("输出");
         std::fs::create_dir(&output).unwrap();
         let preset = Preset {
+            output_color: crate::color::OutputColor::Srgb,
             id: "p".into(),
             name: "预设".into(),
             format: "png".into(),
@@ -595,6 +735,7 @@ mod tests {
             source_signature: crate::media::source::source_signature(&source).unwrap(),
         };
         let mut preset = Preset {
+            output_color: crate::color::OutputColor::Srgb,
             id: "p".into(),
             name: "预设".into(),
             format: "png".into(),
@@ -656,6 +797,32 @@ mod tests {
         };
         for format in ["jpeg", "tiff", "png", "webp", "avif"] {
             let bytes = encode(&image, format, 85, &md).unwrap();
+            if matches!(format, "jpeg" | "tiff" | "png" | "webp") {
+                if format == "tiff" {
+                    let parsed = exif::Reader::new()
+                        .read_from_container(&mut std::io::Cursor::new(&bytes))
+                        .unwrap();
+                    let field = parsed
+                        .get_field(exif::Tag(exif::Context::Tiff, 34675), exif::In::PRIMARY)
+                        .expect("TIFF ICC tag absent");
+                    assert!(
+                        matches!(field.value, exif::Value::Byte(_)),
+                        "TIFF ICC tag type: {:?}",
+                        field.value
+                    );
+                }
+                let managed = crate::color::input::decode_bitmap(&bytes).unwrap();
+                assert_eq!(
+                    managed.evidence,
+                    crate::color::input::SourceEvidence::EmbeddedIcc,
+                    "{format}"
+                );
+                assert_eq!(
+                    managed.embedded_icc.unwrap().id(),
+                    crate::color::icc::srgb_icc().unwrap().id(),
+                    "{format}"
+                );
+            }
             let decoded = image::load_from_memory(&bytes).unwrap();
             assert_eq!((decoded.width(), decoded.height()), (8, 6), "{format}");
             if matches!(format, "tiff" | "png") {
@@ -701,6 +868,43 @@ mod tests {
                 "{format}"
             );
         }
+    }
+    #[test]
+    fn working_output_embeds_matching_p3_and_rejects_unmarked_avif() {
+        let working = crate::color::working::WorkingImage::new(
+            2,
+            1,
+            vec![[0.8, 0.12, 0.03], [0.1, 0.65, 0.9]],
+        )
+        .unwrap();
+        let target = crate::color::icc::display_p3_icc().unwrap();
+        let expected: Vec<u16> = working
+            .to_rgb16(&target)
+            .unwrap()
+            .into_iter()
+            .flatten()
+            .collect();
+        let metadata = Metadata::default();
+        for format in ["png", "tiff", "jpeg", "webp"] {
+            let bytes = encode_working(&working, format, 85, &metadata, &target).unwrap();
+            let decoded = crate::color::input::decode_bitmap(&bytes).unwrap();
+            assert_eq!(decoded.embedded_icc.unwrap().id(), target.id(), "{format}");
+            let exif = exif::Reader::new()
+                .read_from_container(&mut std::io::Cursor::new(&bytes))
+                .unwrap();
+            assert_eq!(
+                exif.get_field(exif::Tag::ColorSpace, exif::In::PRIMARY)
+                    .unwrap()
+                    .value
+                    .get_uint(0),
+                Some(0xffff),
+                "{format}"
+            );
+            if matches!(format, "png" | "tiff") {
+                assert_eq!(decoded.image.to_rgb16().as_raw(), &expected, "{format}");
+            }
+        }
+        assert!(encode_working(&working, "avif", 85, &metadata, &target).is_err());
     }
     #[test]
     fn illegal_and_concurrent_publication() {

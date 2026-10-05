@@ -1,0 +1,38 @@
+[
+  {
+    "image": "astronaut.jpg",
+    "policy": "CenterCrop",
+    "input_max_abs": 0.06003117561340332,
+    "input_mean_abs": 0.004397179000079632,
+    "feature_max_abs": 0.011969879269599915,
+    "score_max_abs": 0.000520564615726471,
+    "quality_validated": false
+  },
+  {
+    "image": "astronaut.jpg",
+    "policy": "Fit",
+    "input_max_abs": 0.06003117561340332,
+    "input_mean_abs": 0.004397179000079632,
+    "feature_max_abs": 0.011969879269599915,
+    "score_max_abs": 0.000520564615726471,
+    "quality_validated": false
+  },
+  {
+    "image": "rocket.jpg",
+    "policy": "CenterCrop",
+    "input_max_abs": 0.05839359760284424,
+    "input_mean_abs": 0.003677038010209799,
+    "feature_max_abs": 0.0767749696969986,
+    "score_max_abs": 0.002426430583000183,
+    "quality_validated": false
+  },
+  {
+    "image": "rocket.jpg",
+    "policy": "Fit",
+    "input_max_abs": 0.03001558780670166,
+    "input_mean_abs": 0.0026961409021168947,
+    "feature_max_abs": 0.06516015529632568,
+    "score_max_abs": 0.0010931789875030518,
+    "quality_validated": false
+  }
+]

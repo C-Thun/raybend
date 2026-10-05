@@ -43,6 +43,19 @@ fn high_with_threads(
     threads: usize,
     tile_size: usize,
 ) -> Option<LinearImage> {
+    let view = super::sample::RgbView::new(source.width, source.height, &source.rgb)?;
+    high_rgb_with_threads(view, plan, cancel, threads, tile_size)
+        .map(|rgb| LinearImage { width: source.width, height: source.height, rgb })
+}
+
+pub fn denoise_high_rgb<T: super::sample::RgbSample>(source: super::sample::RgbView<'_, T>, plan: &DenoisePlan, cancel: &AtomicBool) -> Option<Vec<T>> {
+    if cancel.load(Ordering::Relaxed) { return None; }
+    if plan.is_identity() { return Some(source.rgb.to_vec()); }
+    let threads = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get).saturating_sub(2).clamp(1, 8);
+    high_rgb_with_threads(source, plan, cancel, threads, TILE)
+}
+
+fn high_rgb_with_threads<T: super::sample::RgbSample>(source: super::sample::RgbView<'_, T>, plan: &DenoisePlan, cancel: &AtomicBool, threads: usize, tile_size: usize) -> Option<Vec<T>> {
     let (w, h) = (source.width as usize, source.height as usize);
     let jobs: Vec<_> = (0..h)
         .step_by(tile_size)
@@ -55,7 +68,7 @@ fn high_with_threads(
         strength(plan.chroma) * 15.0,
         strength(plan.chroma) * 15.0,
     ];
-    let mut out = source.clone();
+    let mut out = source.rgb.to_vec();
     std::thread::scope(|scope| {
         let (sender, receiver) = std::sync::mpsc::sync_channel(threads.max(1));
         for _ in 0..threads.max(1).min(jobs.len()) {
@@ -69,7 +82,7 @@ fn high_with_threads(
                     let Some(&(x, y)) = jobs.get(next.fetch_add(1, Ordering::Relaxed)) else {
                         break;
                     };
-                    let Some(tile) = process_tile(source, x, y, tile_size, &sigma, tables, cancel)
+                    let Some(tile) = process_tile(&source, x, y, tile_size, &sigma, tables, cancel)
                     else {
                         break;
                     };
@@ -84,7 +97,7 @@ fn high_with_threads(
             let tw = tile_size.min(w - x);
             for (dy, row) in tile.chunks_exact(tw * 3).enumerate() {
                 let start = ((y + dy) * w + x) * 3;
-                out.rgb[start..start + row.len()].copy_from_slice(row);
+                out[start..start + row.len()].copy_from_slice(row);
             }
         }
     });
@@ -99,15 +112,15 @@ fn strength(value: f32) -> f32 {
     }
 }
 
-fn process_tile(
-    source: &LinearImage,
+fn process_tile<T: super::sample::RgbSample>(
+    source: &super::sample::RgbView<'_, T>,
     x: usize,
     y: usize,
     tile_size: usize,
     sigma: &[f32; 3],
     tables: &DctTables,
     cancel: &AtomicBool,
-) -> Option<Vec<u16>> {
+) -> Option<Vec<T>> {
     let (sw, sh) = (source.width as usize, source.height as usize);
     let (tw, th) = (tile_size.min(sw - x), tile_size.min(sh - y));
     let (left, top) = (x.saturating_sub(HALO), y.saturating_sub(HALO));
@@ -119,9 +132,9 @@ fn process_tile(
     for py in 0..h {
         for px in 0..w {
             let at = (((top + py).min(sh - 1) * sw) + (left + px).min(sw - 1)) * 3;
-            let r = f32::from(source.rgb[at]) / 257.0;
-            let g = f32::from(source.rgb[at + 1]) / 257.0;
-            let b = f32::from(source.rgb[at + 2]) / 257.0;
+            let r = if T::MAX == 65535.0 { source.rgb[at].value() / 257.0 } else { source.rgb[at].value() * (255.0 / T::MAX) };
+            let g = if T::MAX == 65535.0 { source.rgb[at + 1].value() / 257.0 } else { source.rgb[at + 1].value() * (255.0 / T::MAX) };
+            let b = if T::MAX == 65535.0 { source.rgb[at + 2].value() / 257.0 } else { source.rgb[at + 2].value() * (255.0 / T::MAX) };
             let l = luma_of([r, g, b]);
             channels[0][py * w + px] = l;
             channels[1][py * w + px] = b - l;
@@ -138,7 +151,7 @@ fn process_tile(
             let r = l + result[2][i];
             let b = l + result[1][i];
             let g = (l - 0.2126 * r - 0.0722 * b) / 0.7152;
-            rgb.extend([r, g, b].map(|v| (v * 257.0).round().clamp(0.0, 65535.0) as u16));
+            rgb.extend([r, g, b].map(|v| T::encode(v * (T::MAX / 255.0))));
         }
     }
     Some(rgb)

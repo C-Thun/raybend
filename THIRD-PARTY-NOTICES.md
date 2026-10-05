@@ -19,6 +19,8 @@
 | 【待 M0-1 落定】Tauri 及其官方插件 | 2.x | MIT / Apache-2.0 | 应用外壳 | 兼容（宽松许可） |
 | wgpu / naga | **30.0.1**（2026-09-17 落定，见 `FUTURE.md` C6） | MIT / Apache-2.0 | GPU 渲染（方案 B：webview 挖洞 + 直绘） | 兼容 |
 | pollster | 0.4 | MIT / Apache-2.0 | 在渲染线程里跑 wgpu 的 async 初始化 | 兼容 |
+| lcms2 / lcms2-sys（含 Little CMS 静态 C 库） | 6.2.0 / 4.0.7 | MIT | RGB ICC v2/v4 验证、输入/输出参考变换；Windows 静态编入，无外部 DLL | 宽松许可；分发清单从绑定 LICENSE 和 vendor/LICENSE 收录原文与署名 |
+| half | 2.7.1 | MIT / Apache-2.0 | GPU RGBA16F 工作图打包，CPU/导出保留 f32 | 宽松许可 |
 | 【待 M0-1 落定】Solid / Vite / Tailwind CSS | 见 `package.json` | MIT | 前端框架与构建 | 兼容 |
 | 【待 UI 设计阶段引入】Ark UI（`@ark-ui/solid`） | 5.x | MIT | UI 组件原语 | 兼容 |
 | 【待 UI 设计阶段引入】Tabler Icons（`@tabler/icons-solidjs`） | 3.x | MIT | 图标 | 兼容 |
@@ -33,6 +35,9 @@
 | mp4parse（`avif-native` 带进来） | 0.17 | MPL-2.0 | AVIF/HEIF 容器解析（不碰 AV1 位流） | 兼容（MPL-2.0 为文件级 copyleft，可链接） |
 | rav1e / rayon | 1.12 | MIT / Apache-2.0 | ravif 的多线程编码（`image` 的 `rayon` feature 打开；不开的话 AVIF 编码慢 8 倍以上） | 兼容 |
 | **lensfun**（纯 Rust 移植 `vdavid/lensfun-rs`，crates.io 包名就是 `lensfun`） | **0.7.0** | **代码 LGPL-3.0-or-later**；**内置的 XML 校准库 CC BY-SA 3.0** | **镜头校正**（畸变 / 横向色差 / 暗角；M3-W4 引入）。用法：`Database::load_bundled()` —— XML 库 gzip 后**嵌在二进制里**（约 5 MB 解压后，1543 支镜头），不分发资源文件 | **兼容**：LGPL-3.0 可经 GPL-3.0 路径与本项目 AGPL-3.0 组合（与 rawler 同一套论证）；数据部分原样分发 + 署名（见下方「数据来源」）。⚠️ 上游 API 仍是 0.x（beta），**只允许在 `crates/raybend/src/lens/` 内使用** |
+
+| ort / ort-sys | **2.0.0-rc.13** | **MIT OR Apache-2.0** | 精确锁定的 CPU 推理绑定，核心 `ai-runtime`、可选桌面 `photo-ai-runtime`；`ai-probe` 为实验兼容别名 | 兼容；崔总已定案 TinyCLIP 首版，RC 状态与 API27 边界已记录 |
+| ONNX Runtime CPU | **1.28.0** | **MIT**，另含上游第三方许可 | Windows 本地标签识别的私有 CPU 动态库；随应用提供 | 兼容；原文在 `legal/onnxruntime-1.28.0/`，应用资源内保留 LICENSE 与 ThirdPartyNotices.txt |
 
 > **完整分发清单已在 M5 工程准备中补齐**：`pnpm licenses:generate` 从锁定 Windows 依赖图与 pnpm 生产依赖生成 `public/legal/third-party.json`（含传递依赖、原文和来源）；上表保留关键组件的用途/取舍，具体版本以生成清单与锁文件为准。
 
@@ -79,6 +84,9 @@
 | [RawTherapee](https://rawtherapee.com/) | GPL-3.0 | AMaZE / DCB 去马赛克等算法参考，同上 |
 | [lensfun](https://lensfun.github.io/) | LGPL-3.0 | 镜头校正数据库（未来接入） |
 | [zenraw](https://github.com/imazen/zenraw) | AGPL-3.0-only 或商业授权 | RAW 解码备选后端；**AGPL-3.0-only 与本项目许可一致**，无许可障碍 |
+
+| [TinyCLIP](https://huggingface.co/wkcn/TinyCLIP-ViT-40M-32-Text-19M-LAION400M) | 模型卡 **MIT** | 本期默认模型，固定 revision `95ec8197b3f2fe7f747865c61ca556cf0768b2f7`；图像编码器158,885,258 bytes；模型卡与上游许可原文见 `legal/tinyclip-95ec8197/`，模型包随附 LICENSE.txt |
+| [SigLIP 2](https://huggingface.co/google/siglip2-base-patch16-224) | 模型卡 **Apache-2.0** | 远期考查，仅保留实验，固定 revision `75de2d55ec2d0b4efc50b3e9ad70dba96a7b2fa2`；仅实验 |
 
 **明确不可用**：
 

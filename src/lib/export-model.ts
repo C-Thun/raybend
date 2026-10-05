@@ -1,4 +1,5 @@
 /** 导出纯数据契约；queue 不进任何持久化载荷。 */
+import { validOutputColor, type OutputColor } from "./color-model.ts";
 export function formatSupportsQuality(format: ExportFormat): boolean {
   return ["jpeg", "webp", "avif"].includes(format);
 }
@@ -10,6 +11,7 @@ export type ExportSizeMode = "original" | "percent" | "maxEdge";
 export const DEFAULT_EXPORT_TEMPLATE = ":CYEAR-:CMONTH-:CDAY/:FILENAME";
 export type ExportScope = "all" | "edited" | "issues";
 export interface ExportPreset {
+  outputColor?: OutputColor;
   id: string;
   name: string;
   format: ExportFormat;
@@ -138,6 +140,8 @@ export function queueProgress(items: readonly ExportQueueItem[]): {
 }
 export function presetErrors(p: ExportPreset): Record<string, string> {
   const errors: Record<string, string> = {};
+  if (p.outputColor !== undefined && (!validOutputColor(p.outputColor) ||
+    (p.format === "avif" && p.outputColor.kind !== "srgb"))) errors.outputColor = "outputColor";
   if (
     !p.name.trim() ||
     [...p.name].length > 128 ||
@@ -166,7 +170,7 @@ export function readPresets(raw: string | null): ExportPreset[] {
       typeof parsed !== "object" ||
       parsed === null ||
       !("version" in parsed) ||
-      ![1, 2, 3].includes(parsed.version as number) ||
+      ![1, 2, 3, 4].includes(parsed.version as number) ||
       !("presets" in parsed) ||
       !Array.isArray(parsed.presets)
     )
@@ -199,6 +203,7 @@ export function readPresets(raw: string | null): ExportPreset[] {
         return true;
       })
       .map((p: ExportPreset) => ({
+        ...(p.outputColor === undefined ? {} : { outputColor: structuredClone(p.outputColor) }),
         id: p.id,
         name: p.name,
         format: p.format,
@@ -216,8 +221,9 @@ export function readPresets(raw: string | null): ExportPreset[] {
 }
 export function serializePresets(presets: readonly ExportPreset[]): string {
   return JSON.stringify({
-    version: 3,
+    version: 4,
     presets: presets.map((p) => ({
+      ...(p.outputColor === undefined ? {} : { outputColor: structuredClone(p.outputColor) }),
       id: p.id,
       name: p.name,
       format: p.format,

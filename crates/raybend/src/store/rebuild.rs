@@ -48,6 +48,10 @@ pub struct RescanReport {
     pub changed_paths: Vec<String>,
     pub directory_counts: Vec<(String, i64, i64)>,
     pub reset_counts: bool,
+    /// 本批**真创建**的资产：`(asset_id, 库内相对路径)` —— sidecar 采纳用
+    /// （`specs/xmp-w1.md` §7；磁盘上手动拷进来的照片+sidecar 由此被自动读回）。
+    pub new_assets: Vec<(i64, String)>,
+    pub ai_invalidated: Vec<i64>,
 }
 
 /// 重扫一个库：`photos/` → 与 `asset_files` 对比 → 落库 → 重读元数据。
@@ -519,6 +523,8 @@ fn synchronize(
             changed_paths: changed_paths.into_iter().collect(),
             directory_counts,
             reset_counts,
+            new_assets: applied.new_asset_rows,
+            ai_invalidated: applied.ai_invalidated,
         },
         counts,
     ))

@@ -150,15 +150,28 @@ pub fn denoise_fast(source: &LinearImage, plan: &DenoisePlan) -> LinearImage {
 
 /// 线程数可注入，让回归测试在单核机器上也实际覆盖分块路径。
 fn denoise_with_threads(source: &LinearImage, plan: &DenoisePlan, threads: usize) -> LinearImage {
-    if plan.is_identity() || !source.is_consistent() {
+    let Some(view) = super::sample::RgbView::new(source.width, source.height, &source.rgb) else {
         return source.clone();
+    };
+    LinearImage { width: source.width, height: source.height, rgb: denoise_rgb_with_threads(view, plan, threads) }
+}
+
+/// The same spatial operator on unbounded linear-reference float samples.
+pub fn denoise_rgb<T: super::sample::RgbSample>(source: super::sample::RgbView<'_, T>, plan: &DenoisePlan) -> Vec<T> {
+    let threads = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get).min(16);
+    denoise_rgb_with_threads(source, plan, threads)
+}
+
+fn denoise_rgb_with_threads<T: super::sample::RgbSample>(source: super::sample::RgbView<'_, T>, plan: &DenoisePlan, threads: usize) -> Vec<T> {
+    if plan.is_identity() {
+        return source.rgb.to_vec();
     }
     let threads = threads.clamp(1, 16);
     let luma = finite_strength(plan.luma);
     let chroma = finite_strength(plan.chroma);
 
     // ── 分析（低分辨率平面一个并行单趟算出，之后全在 1/4 分辨率上做）──
-    let low = low_planes_from(source, ANALYSIS_SCALE, threads);
+    let low = low_planes_from(&source, ANALYSIS_SCALE, threads);
     let long = source.width.max(source.height);
     let r1_full = band_radius(long, 1200, 8);
     let r1 = (r1_full / ANALYSIS_SCALE).max(1) as usize;
@@ -182,7 +195,7 @@ fn denoise_with_threads(source: &LinearImage, plan: &DenoisePlan, threads: usize
     // ── 回到全分辨率（逐行上采样 + 逐像素收缩）──
     let width = source.width as usize;
     let height = source.height as usize;
-    let mut out = vec![0u16; source.rgb.len()];
+    let mut out = vec![T::default(); source.rgb.len()];
     let luma_sigma = LUMA_SIGMA_MAX * luma * LN2;
     let stage = Stage {
         b1: &b1,
@@ -195,7 +208,7 @@ fn denoise_with_threads(source: &LinearImage, plan: &DenoisePlan, threads: usize
         height: source.height,
     };
     if threads <= 1 || height < 32 {
-        stage.run(&source.rgb, &mut out, 0);
+        stage.run(source.rgb, &mut out, 0);
     } else {
         let rows_per_chunk = height.div_ceil(threads);
         let chunk_len = rows_per_chunk * width * 3;
@@ -212,11 +225,7 @@ fn denoise_with_threads(source: &LinearImage, plan: &DenoisePlan, threads: usize
             }
         });
     }
-    LinearImage {
-        width: source.width,
-        height: source.height,
-        rgb: out,
-    }
+    out
 }
 
 /// 全分辨率那一趟要用的东西（低分辨率平面 + 上采样器）。
@@ -234,7 +243,7 @@ struct Stage<'a> {
 
 impl Stage<'_> {
     /// 输入输出都必须是同一段行；first_row 是它们在整张图上的纵坐标。
-    fn run(&self, input: &[u16], output: &mut [u16], first_row: usize) {
+    fn run<T: super::sample::RgbSample>(&self, input: &[T], output: &mut [T], first_row: usize) {
         let width = self.width as usize;
         debug_assert_eq!(input.len(), output.len());
         debug_assert_eq!(input.len() % (width * 3), 0);
@@ -265,9 +274,9 @@ impl Stage<'_> {
             }
             for (x, (pixel_in, pixel_out)) in line_in.iter().zip(line_out.iter_mut()).enumerate() {
                 let mut rgb = [
-                    f32::from(pixel_in[0]) / 65535.0,
-                    f32::from(pixel_in[1]) / 65535.0,
-                    f32::from(pixel_in[2]) / 65535.0,
+                    pixel_in[0].value() / T::MAX,
+                    pixel_in[1].value() / T::MAX,
+                    pixel_in[2].value() / T::MAX,
                 ];
                 let y0 = luma_of(rgb);
                 if y0 > LUMA_FLOOR {
@@ -302,7 +311,7 @@ impl Stage<'_> {
                 for channel in 0..3 {
                     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
                     {
-                        pixel_out[channel] = (rgb[channel].clamp(0.0, 1.0) * 65535.0 + 0.5) as u16;
+                        pixel_out[channel] = T::encode(rgb[channel] * T::MAX);
                     }
                 }
             }
@@ -338,7 +347,7 @@ struct LowPlanes {
 /// 块取法与 `LinearImage::downscaled_to` 同一套口径（`x·src/dst` 的整数区间），
 /// 但**只读一遍三通道、直接出三张 1/4 分辨率的平面**（而那条路要两遍扫描 + 一张三通道中间图，
 /// 且无法并行）。色度那两张多花每像素 4 次加减 —— 比起省下的那一趟，值。
-fn low_planes_from(source: &LinearImage, factor: u32, threads: usize) -> LowPlanes {
+fn low_planes_from<T: super::sample::RgbSample>(source: &super::sample::RgbView<'_, T>, factor: u32, threads: usize) -> LowPlanes {
     let step = factor.max(1) as usize;
     let source_width = source.width as usize;
     let source_height = source.height as usize;
@@ -370,9 +379,9 @@ fn low_planes_from(source: &LinearImage, factor: u32, threads: usize) -> LowPlan
                             let base = y * source_width * 3;
                             for x in x0..x1 {
                                 let index = base + x * 3;
-                                let r = f32::from(rgb[index]) / 65535.0;
-                                let g = f32::from(rgb[index + 1]) / 65535.0;
-                                let b = f32::from(rgb[index + 2]) / 65535.0;
+                                let r = rgb[index].value() / T::MAX;
+                                let g = rgb[index + 1].value() / T::MAX;
+                                let b = rgb[index + 2].value() / T::MAX;
                                 let luma = luma_of([r, g, b]);
                                 sum[0] += luma;
                                 sum[1] += b - luma;
@@ -688,7 +697,7 @@ mod tests {
         for (w, h) in [(1, 1), (1, 7), (5, 7), (19, 37)] {
             let source = spatial_pattern(w, h);
             for factor in [1, 4, 64] {
-                let low = low_planes_from(&source, factor, 3);
+                let low = low_planes_from(&super::super::sample::RgbView::new(source.width, source.height, &source.rgb).unwrap(), factor, 3);
                 for (channel, plane) in [(0, &low.luma), (1, &low.cb), (2, &low.cr)] {
                     let full = Plane::from_fn(w, h, |x, y| {
                         let index = (y * w as usize + x) * 3;

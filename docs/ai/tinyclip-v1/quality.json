@@ -1,0 +1,1544 @@
+{
+  "samples": 1296,
+  "usable": 1294,
+  "excluded": 2,
+  "split_counts": {
+    "calibration": 641,
+    "validation": 653
+  },
+  "split_group": "photographer",
+  "policies": {
+    "CenterCrop": {
+      "classes": {
+        "person": {
+          "threshold": 0.009986002929508686,
+          "calibration": {
+            "tp": 34,
+            "fp": 6,
+            "fn": 95,
+            "positives": 129,
+            "negatives": 122,
+            "precision": 0.85,
+            "recall": 0.26356589147286824
+          },
+          "validation": {
+            "tp": 26,
+            "fp": 4,
+            "fn": 106,
+            "positives": 132,
+            "negatives": 115,
+            "precision": 0.8666666666666667,
+            "recall": 0.19696969696969696
+          },
+          "enough_support": true,
+          "passed": false,
+          "errors": [
+            {
+              "id": "00e1d2263a7ec1e8",
+              "expected": 1,
+              "score": -0.01503664255142212
+            },
+            {
+              "id": "0175f160ca091e7e",
+              "expected": 1,
+              "score": -0.010137100704014301
+            },
+            {
+              "id": "027cffb13d932cf2",
+              "expected": 1,
+              "score": -0.010967075824737549
+            },
+            {
+              "id": "02b85aaf5e24630e",
+              "expected": 1,
+              "score": 0.0012657076586037874
+            },
+            {
+              "id": "0572b61a4613221d",
+              "expected": 1,
+              "score": 0.007712982129305601
+            },
+            {
+              "id": "05798ca4c1946ae1",
+              "expected": 1,
+              "score": 0.008896546438336372
+            },
+            {
+              "id": "0ab10a6417ef2301",
+              "expected": 1,
+              "score": -0.01354275830090046
+            },
+            {
+              "id": "0bd32a5f3acd0f06",
+              "expected": 1,
+              "score": 0.001147770555689931
+            },
+            {
+              "id": "1076753c4c6ddb22",
+              "expected": 1,
+              "score": 0.008421271108090878
+            },
+            {
+              "id": "10bbfc431482c3a0",
+              "expected": 1,
+              "score": -0.004055947531014681
+            },
+            {
+              "id": "1c8402fd2ae24567",
+              "expected": 1,
+              "score": -0.00821533054113388
+            },
+            {
+              "id": "1ce30a806ce1bd8d",
+              "expected": 1,
+              "score": 0.0005427864962257445
+            },
+            {
+              "id": "1fbfc8e2a6256904",
+              "expected": 1,
+              "score": 0.006439225748181343
+            },
+            {
+              "id": "206684f0aa5dcc01",
+              "expected": 1,
+              "score": 0.005969557911157608
+            },
+            {
+              "id": "23f93f485b7bf344",
+              "expected": 1,
+              "score": -0.0055994377471506596
+            },
+            {
+              "id": "23fcc5f6f2dfeebf",
+              "expected": 1,
+              "score": 0.002619824605062604
+            },
+            {
+              "id": "2551daa537c23108",
+              "expected": 1,
+              "score": -0.006446128711104393
+            },
+            {
+              "id": "295c5ba37ac90882",
+              "expected": 1,
+              "score": 0.003323722630739212
+            },
+            {
+              "id": "2a8a86be9ef3e35f",
+              "expected": 1,
+              "score": 0.006167221814393997
+            },
+            {
+              "id": "2ae7b29752f82465",
+              "expected": 1,
+              "score": -0.003658674191683531
+            }
+          ]
+        },
+        "bird": {
+          "threshold": 0.25507643818855286,
+          "calibration": {
+            "tp": 33,
+            "fp": 2,
+            "fn": 22,
+            "positives": 55,
+            "negatives": 61,
+            "precision": 0.9428571428571428,
+            "recall": 0.6
+          },
+          "validation": {
+            "tp": 33,
+            "fp": 3,
+            "fn": 20,
+            "positives": 53,
+            "negatives": 63,
+            "precision": 0.9166666666666666,
+            "recall": 0.6226415094339622
+          },
+          "enough_support": true,
+          "passed": true,
+          "errors": [
+            {
+              "id": "05887f57bc232041",
+              "expected": 1,
+              "score": 0.24597449600696564
+            },
+            {
+              "id": "0ea657df47f0dcbb",
+              "expected": 1,
+              "score": 0.25238409638404846
+            },
+            {
+              "id": "2680638c0fc998fa",
+              "expected": 1,
+              "score": 0.2513220012187958
+            },
+            {
+              "id": "28c6046282542825",
+              "expected": 1,
+              "score": 0.24621525406837463
+            },
+            {
+              "id": "39d4571c699674a4",
+              "expected": 1,
+              "score": 0.25370973348617554
+            },
+            {
+              "id": "3cbe1abf796daea1",
+              "expected": 0,
+              "score": 0.2593926787376404
+            },
+            {
+              "id": "3f77c3bd35a2dbc3",
+              "expected": 0,
+              "score": 0.27426645159721375
+            },
+            {
+              "id": "407616dc1ddc4b4f",
+              "expected": 1,
+              "score": 0.160743847489357
+            },
+            {
+              "id": "4b90c890c50ebd26",
+              "expected": 0,
+              "score": 0.27607429027557373
+            },
+            {
+              "id": "509f8b65f57b64f4",
+              "expected": 1,
+              "score": 0.226048544049263
+            },
+            {
+              "id": "5caf44b69c9472d9",
+              "expected": 1,
+              "score": 0.15503636002540588
+            },
+            {
+              "id": "6063972a8e6fd41f",
+              "expected": 1,
+              "score": 0.24326694011688232
+            },
+            {
+              "id": "7ab575b8b0392c3d",
+              "expected": 1,
+              "score": 0.24653325974941254
+            },
+            {
+              "id": "82e5bdfa040010d7",
+              "expected": 1,
+              "score": 0.25372084975242615
+            },
+            {
+              "id": "8ce73741c8472b54",
+              "expected": 1,
+              "score": 0.24341793358325958
+            },
+            {
+              "id": "8ffd88cc86165f99",
+              "expected": 1,
+              "score": 0.25478750467300415
+            },
+            {
+              "id": "930b3620023fc41b",
+              "expected": 1,
+              "score": 0.24075064063072205
+            },
+            {
+              "id": "c3f4f4d05f97235c",
+              "expected": 1,
+              "score": 0.22411766648292542
+            },
+            {
+              "id": "cfd929aa5bbb5090",
+              "expected": 1,
+              "score": 0.2502349019050598
+            },
+            {
+              "id": "d4c5a72898facacb",
+              "expected": 1,
+              "score": 0.21337945759296417
+            }
+          ]
+        },
+        "car": {
+          "threshold": 0.2368336319923401,
+          "calibration": {
+            "tp": 37,
+            "fp": 4,
+            "fn": 19,
+            "positives": 56,
+            "negatives": 81,
+            "precision": 0.9024390243902439,
+            "recall": 0.6607142857142857
+          },
+          "validation": {
+            "tp": 39,
+            "fp": 6,
+            "fn": 13,
+            "positives": 52,
+            "negatives": 83,
+            "precision": 0.8666666666666667,
+            "recall": 0.75
+          },
+          "enough_support": true,
+          "passed": false,
+          "errors": [
+            {
+              "id": "041f9231a69f7981",
+              "expected": 1,
+              "score": 0.13528071343898773
+            },
+            {
+              "id": "0c2e7519953b8e24",
+              "expected": 0,
+              "score": 0.25619885325431824
+            },
+            {
+              "id": "10c7d8ade78f4c83",
+              "expected": 0,
+              "score": 0.25523069500923157
+            },
+            {
+              "id": "19eb3b4e1c9a6c9c",
+              "expected": 1,
+              "score": 0.221587672829628
+            },
+            {
+              "id": "26cae54dbe94ab89",
+              "expected": 1,
+              "score": 0.2315831333398819
+            },
+            {
+              "id": "2ff8fd5d95b7ea73",
+              "expected": 1,
+              "score": 0.17975719273090363
+            },
+            {
+              "id": "38003a56305f8095",
+              "expected": 0,
+              "score": 0.24260666966438293
+            },
+            {
+              "id": "68c6cdee76b5f017",
+              "expected": 1,
+              "score": 0.21028369665145874
+            },
+            {
+              "id": "7356f79b46dee75c",
+              "expected": 0,
+              "score": 0.27155664563179016
+            },
+            {
+              "id": "81c17626b764da61",
+              "expected": 1,
+              "score": 0.16789624094963074
+            },
+            {
+              "id": "840342f6862336ca",
+              "expected": 0,
+              "score": 0.2516253888607025
+            },
+            {
+              "id": "93533791a4353337",
+              "expected": 1,
+              "score": 0.23665682971477509
+            },
+            {
+              "id": "9d2aad58b0bf0451",
+              "expected": 1,
+              "score": 0.13044781982898712
+            },
+            {
+              "id": "ac628e194e96fe9c",
+              "expected": 1,
+              "score": 0.22196057438850403
+            },
+            {
+              "id": "c6324f32dbc3a847",
+              "expected": 1,
+              "score": 0.17864841222763062
+            },
+            {
+              "id": "c9ab41f474058b25",
+              "expected": 1,
+              "score": 0.1569773405790329
+            },
+            {
+              "id": "d226048fa11a41dc",
+              "expected": 1,
+              "score": 0.21359926462173462
+            },
+            {
+              "id": "e1d49318e481b41f",
+              "expected": 0,
+              "score": 0.2587740421295166
+            },
+            {
+              "id": "f9b78d9e207daa7a",
+              "expected": 1,
+              "score": 0.22682428359985352
+            }
+          ]
+        },
+        "mountain": {
+          "threshold": 0.22525842487812042,
+          "calibration": {
+            "tp": 45,
+            "fp": 6,
+            "fn": 12,
+            "positives": 57,
+            "negatives": 19,
+            "precision": 0.8823529411764706,
+            "recall": 0.7894736842105263
+          },
+          "validation": {
+            "tp": 39,
+            "fp": 6,
+            "fn": 17,
+            "positives": 56,
+            "negatives": 14,
+            "precision": 0.8666666666666667,
+            "recall": 0.6964285714285714
+          },
+          "enough_support": false,
+          "passed": false,
+          "errors": [
+            {
+              "id": "02b85aaf5e24630e",
+              "expected": 1,
+              "score": 0.21599262952804565
+            },
+            {
+              "id": "031a81e87a37f447",
+              "expected": 1,
+              "score": 0.19035916030406952
+            },
+            {
+              "id": "067ff59ab1193cd3",
+              "expected": 0,
+              "score": 0.2524908185005188
+            },
+            {
+              "id": "19c027351a250dcd",
+              "expected": 1,
+              "score": 0.15791848301887512
+            },
+            {
+              "id": "2a8a86be9ef3e35f",
+              "expected": 1,
+              "score": 0.2251778542995453
+            },
+            {
+              "id": "41e092c947498605",
+              "expected": 1,
+              "score": 0.2223193347454071
+            },
+            {
+              "id": "5f35130b3d0e988a",
+              "expected": 0,
+              "score": 0.22598150372505188
+            },
+            {
+              "id": "7124f78ac66bcd4d",
+              "expected": 1,
+              "score": 0.2056647539138794
+            },
+            {
+              "id": "81355c3c8b87d421",
+              "expected": 1,
+              "score": 0.1919255405664444
+            },
+            {
+              "id": "83c2bebe5cda1a6c",
+              "expected": 0,
+              "score": 0.24442969262599945
+            },
+            {
+              "id": "8abae3f2baea1e72",
+              "expected": 0,
+              "score": 0.23842017352581024
+            },
+            {
+              "id": "98d6418a486a0427",
+              "expected": 0,
+              "score": 0.22831997275352478
+            },
+            {
+              "id": "99200bc11b5412b1",
+              "expected": 1,
+              "score": 0.17188110947608948
+            },
+            {
+              "id": "ac628e194e96fe9c",
+              "expected": 1,
+              "score": 0.18294250965118408
+            },
+            {
+              "id": "afbdb2b18f1604f0",
+              "expected": 1,
+              "score": 0.1760682612657547
+            },
+            {
+              "id": "ba8626b7e3320903",
+              "expected": 1,
+              "score": 0.2172025591135025
+            },
+            {
+              "id": "c0316392ea0f9036",
+              "expected": 1,
+              "score": 0.21308448910713196
+            },
+            {
+              "id": "c8a4a228c9df91ef",
+              "expected": 1,
+              "score": 0.21637137234210968
+            },
+            {
+              "id": "cc8a4dd7bd2ef62e",
+              "expected": 1,
+              "score": 0.2032427042722702
+            },
+            {
+              "id": "cc996b07d0c694de",
+              "expected": 1,
+              "score": 0.197287455201149
+            }
+          ]
+        },
+        "sea": {
+          "threshold": 0.02342614345252514,
+          "calibration": {
+            "tp": 20,
+            "fp": 3,
+            "fn": 30,
+            "positives": 50,
+            "negatives": 80,
+            "precision": 0.8695652173913043,
+            "recall": 0.4
+          },
+          "validation": {
+            "tp": 18,
+            "fp": 5,
+            "fn": 34,
+            "positives": 52,
+            "negatives": 78,
+            "precision": 0.782608695652174,
+            "recall": 0.34615384615384615
+          },
+          "enough_support": true,
+          "passed": false,
+          "errors": [
+            {
+              "id": "0053c82117318945",
+              "expected": 0,
+              "score": 0.03662838786840439
+            },
+            {
+              "id": "055fd8e43b35b58b",
+              "expected": 1,
+              "score": 0.022816717624664307
+            },
+            {
+              "id": "08e304246d440866",
+              "expected": 1,
+              "score": 0.0018221320351585746
+            },
+            {
+              "id": "08fa752062b7e598",
+              "expected": 1,
+              "score": 0.005378958769142628
+            },
+            {
+              "id": "11cce5cfe03b38ab",
+              "expected": 1,
+              "score": 0.020193060860037804
+            },
+            {
+              "id": "1d024ed21dc9cb48",
+              "expected": 1,
+              "score": 0.011962607502937317
+            },
+            {
+              "id": "2ec8092ecbdd5e5e",
+              "expected": 1,
+              "score": 0.014066080562770367
+            },
+            {
+              "id": "3e8b86e2b5d7f7b9",
+              "expected": 1,
+              "score": -0.010406572371721268
+            },
+            {
+              "id": "41f6998d787b3736",
+              "expected": 1,
+              "score": 0.008529010228812695
+            },
+            {
+              "id": "43ed3ae7ac6b9557",
+              "expected": 1,
+              "score": 0.0006596320308744907
+            },
+            {
+              "id": "47ad21f5f57e16af",
+              "expected": 1,
+              "score": 0.010102377273142338
+            },
+            {
+              "id": "4cc6f003aeb59536",
+              "expected": 1,
+              "score": 0.011486792005598545
+            },
+            {
+              "id": "5743ee45c188688e",
+              "expected": 1,
+              "score": 0.0017252742545679212
+            },
+            {
+              "id": "58be183707696e29",
+              "expected": 1,
+              "score": 0.011793643236160278
+            },
+            {
+              "id": "5da2941bab9c2f4a",
+              "expected": 0,
+              "score": 0.02710604853928089
+            },
+            {
+              "id": "66c23cb3a1a469f8",
+              "expected": 1,
+              "score": -0.004822665825486183
+            },
+            {
+              "id": "6819aecf456e9253",
+              "expected": 1,
+              "score": 0.014536113478243351
+            },
+            {
+              "id": "69abafd1450b5203",
+              "expected": 0,
+              "score": 0.027179058641195297
+            },
+            {
+              "id": "6efa7ff4580fb6ff",
+              "expected": 1,
+              "score": -0.030374163761734962
+            },
+            {
+              "id": "7ae4c3710d1d4765",
+              "expected": 1,
+              "score": 0.012683972716331482
+            }
+          ]
+        },
+        "forest": {
+          "threshold": 0.1931089609861374,
+          "calibration": {
+            "tp": 48,
+            "fp": 6,
+            "fn": 2,
+            "positives": 50,
+            "negatives": 8,
+            "precision": 0.8888888888888888,
+            "recall": 0.96
+          },
+          "validation": {
+            "tp": 47,
+            "fp": 5,
+            "fn": 3,
+            "positives": 50,
+            "negatives": 6,
+            "precision": 0.9038461538461539,
+            "recall": 0.94
+          },
+          "enough_support": false,
+          "passed": false,
+          "errors": [
+            {
+              "id": "25bed79c007ca4ef",
+              "expected": 0,
+              "score": 0.20946504175662994
+            },
+            {
+              "id": "4e9c99614a4c91a4",
+              "expected": 0,
+              "score": 0.22351430356502533
+            },
+            {
+              "id": "55caa212630a8b11",
+              "expected": 1,
+              "score": 0.1829216480255127
+            },
+            {
+              "id": "56a1621b1f4f3161",
+              "expected": 1,
+              "score": 0.16497038304805756
+            },
+            {
+              "id": "617b9d06c9531aaf",
+              "expected": 1,
+              "score": 0.1822596788406372
+            },
+            {
+              "id": "7de596bdf547149d",
+              "expected": 0,
+              "score": 0.2629808485507965
+            },
+            {
+              "id": "8f2c1c02fb21237d",
+              "expected": 0,
+              "score": 0.24968865513801575
+            },
+            {
+              "id": "e48bd03916bda8b7",
+              "expected": 0,
+              "score": 0.2669353187084198
+            }
+          ]
+        },
+        "night": {
+          "threshold": 0.2187633514404297,
+          "calibration": {
+            "tp": 46,
+            "fp": 4,
+            "fn": 4,
+            "positives": 50,
+            "negatives": 6,
+            "precision": 0.92,
+            "recall": 0.92
+          },
+          "validation": {
+            "tp": 44,
+            "fp": 4,
+            "fn": 6,
+            "positives": 50,
+            "negatives": 7,
+            "precision": 0.9166666666666666,
+            "recall": 0.88
+          },
+          "enough_support": false,
+          "passed": false,
+          "errors": [
+            {
+              "id": "0b8613dd5b9d1700",
+              "expected": 1,
+              "score": 0.20513547956943512
+            },
+            {
+              "id": "119d94a4214e3177",
+              "expected": 0,
+              "score": 0.25736409425735474
+            },
+            {
+              "id": "29d0801fa64c0ebb",
+              "expected": 1,
+              "score": 0.1867975890636444
+            },
+            {
+              "id": "5db1bf4fd366b073",
+              "expected": 1,
+              "score": 0.21260672807693481
+            },
+            {
+              "id": "5f05dc65d48d3531",
+              "expected": 0,
+              "score": 0.26801857352256775
+            },
+            {
+              "id": "67b7484f6ba06dbb",
+              "expected": 1,
+              "score": 0.1796451061964035
+            },
+            {
+              "id": "6895d3142cd4e559",
+              "expected": 0,
+              "score": 0.26938533782958984
+            },
+            {
+              "id": "aa2e7a6fe6517be6",
+              "expected": 0,
+              "score": 0.22153407335281372
+            },
+            {
+              "id": "c87cbbc2aa54e8af",
+              "expected": 1,
+              "score": 0.21319232881069183
+            },
+            {
+              "id": "cc1a072635a7c36d",
+              "expected": 1,
+              "score": 0.1707761436700821
+            }
+          ]
+        }
+      },
+      "quality_validated": false
+    },
+    "Fit": {
+      "classes": {
+        "person": {
+          "threshold": 0.008452573791146278,
+          "calibration": {
+            "tp": 17,
+            "fp": 3,
+            "fn": 112,
+            "positives": 129,
+            "negatives": 122,
+            "precision": 0.85,
+            "recall": 0.13178294573643412
+          },
+          "validation": {
+            "tp": 11,
+            "fp": 5,
+            "fn": 121,
+            "positives": 132,
+            "negatives": 115,
+            "precision": 0.6875,
+            "recall": 0.08333333333333333
+          },
+          "enough_support": true,
+          "passed": false,
+          "errors": [
+            {
+              "id": "00e1d2263a7ec1e8",
+              "expected": 1,
+              "score": -0.011998028494417667
+            },
+            {
+              "id": "0175f160ca091e7e",
+              "expected": 1,
+              "score": -0.012648005969822407
+            },
+            {
+              "id": "027cffb13d932cf2",
+              "expected": 1,
+              "score": -0.022175371646881104
+            },
+            {
+              "id": "02b85aaf5e24630e",
+              "expected": 1,
+              "score": 0.0004188383463770151
+            },
+            {
+              "id": "0572b61a4613221d",
+              "expected": 1,
+              "score": -0.006412021350115538
+            },
+            {
+              "id": "05798ca4c1946ae1",
+              "expected": 1,
+              "score": 0.0048809717409312725
+            },
+            {
+              "id": "07cfc82bdbd06eb2",
+              "expected": 1,
+              "score": 0.00013837593724019825
+            },
+            {
+              "id": "0ab10a6417ef2301",
+              "expected": 1,
+              "score": -0.006712013389915228
+            },
+            {
+              "id": "0bd32a5f3acd0f06",
+              "expected": 1,
+              "score": 0.004292139783501625
+            },
+            {
+              "id": "0fa1f463189c8e42",
+              "expected": 1,
+              "score": 0.0018002924043685198
+            },
+            {
+              "id": "10bbfc431482c3a0",
+              "expected": 1,
+              "score": -0.020653218030929565
+            },
+            {
+              "id": "15237209137736ba",
+              "expected": 1,
+              "score": 0.0024542268365621567
+            },
+            {
+              "id": "1c8402fd2ae24567",
+              "expected": 1,
+              "score": -0.027118459343910217
+            },
+            {
+              "id": "1ce30a806ce1bd8d",
+              "expected": 1,
+              "score": 0.001958516426384449
+            },
+            {
+              "id": "1fbfc8e2a6256904",
+              "expected": 1,
+              "score": -0.007664522621780634
+            },
+            {
+              "id": "206684f0aa5dcc01",
+              "expected": 1,
+              "score": 0.007330276537686586
+            },
+            {
+              "id": "23f93f485b7bf344",
+              "expected": 1,
+              "score": -0.005173080135136843
+            },
+            {
+              "id": "23fcc5f6f2dfeebf",
+              "expected": 1,
+              "score": -0.007256763521581888
+            },
+            {
+              "id": "2551daa537c23108",
+              "expected": 1,
+              "score": -0.009731022641062737
+            },
+            {
+              "id": "25f6c6dcf46bcb29",
+              "expected": 1,
+              "score": 0.0011429181322455406
+            }
+          ]
+        },
+        "bird": {
+          "threshold": 0.2682235538959503,
+          "calibration": {
+            "tp": 24,
+            "fp": 4,
+            "fn": 31,
+            "positives": 55,
+            "negatives": 61,
+            "precision": 0.8571428571428571,
+            "recall": 0.43636363636363634
+          },
+          "validation": {
+            "tp": 23,
+            "fp": 2,
+            "fn": 30,
+            "positives": 53,
+            "negatives": 63,
+            "precision": 0.92,
+            "recall": 0.4339622641509434
+          },
+          "enough_support": true,
+          "passed": false,
+          "errors": [
+            {
+              "id": "05887f57bc232041",
+              "expected": 1,
+              "score": 0.25409895181655884
+            },
+            {
+              "id": "0ea657df47f0dcbb",
+              "expected": 1,
+              "score": 0.2471548467874527
+            },
+            {
+              "id": "148b8c049bf6a361",
+              "expected": 1,
+              "score": 0.23441411554813385
+            },
+            {
+              "id": "2680638c0fc998fa",
+              "expected": 1,
+              "score": 0.23676833510398865
+            },
+            {
+              "id": "28c6046282542825",
+              "expected": 1,
+              "score": 0.24932579696178436
+            },
+            {
+              "id": "3f77c3bd35a2dbc3",
+              "expected": 0,
+              "score": 0.2744746208190918
+            },
+            {
+              "id": "407616dc1ddc4b4f",
+              "expected": 1,
+              "score": 0.22084291279315948
+            },
+            {
+              "id": "509f8b65f57b64f4",
+              "expected": 1,
+              "score": 0.22660686075687408
+            },
+            {
+              "id": "5b555d3984cb0185",
+              "expected": 1,
+              "score": 0.25220987200737
+            },
+            {
+              "id": "5caf44b69c9472d9",
+              "expected": 1,
+              "score": 0.14904004335403442
+            },
+            {
+              "id": "6063972a8e6fd41f",
+              "expected": 1,
+              "score": 0.2417672574520111
+            },
+            {
+              "id": "7ab575b8b0392c3d",
+              "expected": 1,
+              "score": 0.24582116305828094
+            },
+            {
+              "id": "82e5bdfa040010d7",
+              "expected": 1,
+              "score": 0.2382115125656128
+            },
+            {
+              "id": "8ce73741c8472b54",
+              "expected": 1,
+              "score": 0.26623404026031494
+            },
+            {
+              "id": "8ffd88cc86165f99",
+              "expected": 1,
+              "score": 0.2589499354362488
+            },
+            {
+              "id": "930b3620023fc41b",
+              "expected": 1,
+              "score": 0.25230321288108826
+            },
+            {
+              "id": "96aca2e565ed04ca",
+              "expected": 1,
+              "score": 0.26442867517471313
+            },
+            {
+              "id": "a036426e74f3739e",
+              "expected": 1,
+              "score": 0.2462906390428543
+            },
+            {
+              "id": "a6a875a9f6d1f829",
+              "expected": 1,
+              "score": 0.26560044288635254
+            },
+            {
+              "id": "b63a5763d1a2b6c3",
+              "expected": 1,
+              "score": 0.2650807499885559
+            }
+          ]
+        },
+        "car": {
+          "threshold": 0.2309187352657318,
+          "calibration": {
+            "tp": 39,
+            "fp": 4,
+            "fn": 17,
+            "positives": 56,
+            "negatives": 81,
+            "precision": 0.9069767441860465,
+            "recall": 0.6964285714285714
+          },
+          "validation": {
+            "tp": 40,
+            "fp": 9,
+            "fn": 12,
+            "positives": 52,
+            "negatives": 83,
+            "precision": 0.8163265306122449,
+            "recall": 0.7692307692307693
+          },
+          "enough_support": true,
+          "passed": false,
+          "errors": [
+            {
+              "id": "041f9231a69f7981",
+              "expected": 1,
+              "score": 0.1429983675479889
+            },
+            {
+              "id": "0c2e7519953b8e24",
+              "expected": 0,
+              "score": 0.26605960726737976
+            },
+            {
+              "id": "10c7d8ade78f4c83",
+              "expected": 0,
+              "score": 0.2386794239282608
+            },
+            {
+              "id": "25d586466b884c00",
+              "expected": 0,
+              "score": 0.2414642572402954
+            },
+            {
+              "id": "2c9c54c0749358dd",
+              "expected": 0,
+              "score": 0.24349980056285858
+            },
+            {
+              "id": "2ff8fd5d95b7ea73",
+              "expected": 1,
+              "score": 0.19190117716789246
+            },
+            {
+              "id": "4f897cdec7ce4f17",
+              "expected": 1,
+              "score": 0.22984744608402252
+            },
+            {
+              "id": "68e023f0c618a369",
+              "expected": 0,
+              "score": 0.23873676359653473
+            },
+            {
+              "id": "6ee11e994b3b597c",
+              "expected": 0,
+              "score": 0.23318980634212494
+            },
+            {
+              "id": "7356f79b46dee75c",
+              "expected": 0,
+              "score": 0.276041716337204
+            },
+            {
+              "id": "81c17626b764da61",
+              "expected": 1,
+              "score": 0.17786796391010284
+            },
+            {
+              "id": "840342f6862336ca",
+              "expected": 0,
+              "score": 0.26172199845314026
+            },
+            {
+              "id": "968cdc5dd720229f",
+              "expected": 1,
+              "score": 0.2029096484184265
+            },
+            {
+              "id": "97f3115886e6535d",
+              "expected": 1,
+              "score": 0.2280893325805664
+            },
+            {
+              "id": "9d2aad58b0bf0451",
+              "expected": 1,
+              "score": 0.12001388520002365
+            },
+            {
+              "id": "ac628e194e96fe9c",
+              "expected": 1,
+              "score": 0.2253226935863495
+            },
+            {
+              "id": "c23a9d929074c38e",
+              "expected": 1,
+              "score": 0.2119806706905365
+            },
+            {
+              "id": "c6324f32dbc3a847",
+              "expected": 1,
+              "score": 0.20345740020275116
+            },
+            {
+              "id": "c9ab41f474058b25",
+              "expected": 1,
+              "score": 0.1569773405790329
+            },
+            {
+              "id": "d226048fa11a41dc",
+              "expected": 1,
+              "score": 0.1945687085390091
+            }
+          ]
+        },
+        "mountain": {
+          "threshold": 0.2358509600162506,
+          "calibration": {
+            "tp": 36,
+            "fp": 5,
+            "fn": 21,
+            "positives": 57,
+            "negatives": 19,
+            "precision": 0.8780487804878049,
+            "recall": 0.631578947368421
+          },
+          "validation": {
+            "tp": 34,
+            "fp": 3,
+            "fn": 22,
+            "positives": 56,
+            "negatives": 14,
+            "precision": 0.918918918918919,
+            "recall": 0.6071428571428571
+          },
+          "enough_support": false,
+          "passed": false,
+          "errors": [
+            {
+              "id": "02b85aaf5e24630e",
+              "expected": 1,
+              "score": 0.2153220772743225
+            },
+            {
+              "id": "031a81e87a37f447",
+              "expected": 1,
+              "score": 0.21210253238677979
+            },
+            {
+              "id": "067ff59ab1193cd3",
+              "expected": 0,
+              "score": 0.25121259689331055
+            },
+            {
+              "id": "19c027351a250dcd",
+              "expected": 1,
+              "score": 0.15828733146190643
+            },
+            {
+              "id": "2a8a86be9ef3e35f",
+              "expected": 1,
+              "score": 0.1984817087650299
+            },
+            {
+              "id": "36dd6edc436272aa",
+              "expected": 1,
+              "score": 0.18744893372058868
+            },
+            {
+              "id": "69676b83397896b7",
+              "expected": 1,
+              "score": 0.23260530829429626
+            },
+            {
+              "id": "6efa7ff4580fb6ff",
+              "expected": 1,
+              "score": 0.225199356675148
+            },
+            {
+              "id": "7124f78ac66bcd4d",
+              "expected": 1,
+              "score": 0.2097242921590805
+            },
+            {
+              "id": "72c3eec0fb600b38",
+              "expected": 0,
+              "score": 0.24711807072162628
+            },
+            {
+              "id": "81355c3c8b87d421",
+              "expected": 1,
+              "score": 0.22415709495544434
+            },
+            {
+              "id": "8144adc983ae33f7",
+              "expected": 1,
+              "score": 0.2288457453250885
+            },
+            {
+              "id": "8abae3f2baea1e72",
+              "expected": 0,
+              "score": 0.24034470319747925
+            },
+            {
+              "id": "99200bc11b5412b1",
+              "expected": 1,
+              "score": 0.17594176530838013
+            },
+            {
+              "id": "a041259adda42a96",
+              "expected": 1,
+              "score": 0.22147415578365326
+            },
+            {
+              "id": "ac628e194e96fe9c",
+              "expected": 1,
+              "score": 0.22486136853694916
+            },
+            {
+              "id": "afbdb2b18f1604f0",
+              "expected": 1,
+              "score": 0.18760773539543152
+            },
+            {
+              "id": "b051b798174bb2d5",
+              "expected": 1,
+              "score": 0.22452780604362488
+            },
+            {
+              "id": "c0316392ea0f9036",
+              "expected": 1,
+              "score": 0.2110414057970047
+            },
+            {
+              "id": "c8a4a228c9df91ef",
+              "expected": 1,
+              "score": 0.21315288543701172
+            }
+          ]
+        },
+        "sea": {
+          "threshold": 0.02950236201286316,
+          "calibration": {
+            "tp": 9,
+            "fp": 1,
+            "fn": 41,
+            "positives": 50,
+            "negatives": 80,
+            "precision": 0.9,
+            "recall": 0.18
+          },
+          "validation": {
+            "tp": 11,
+            "fp": 0,
+            "fn": 41,
+            "positives": 52,
+            "negatives": 78,
+            "precision": 1.0,
+            "recall": 0.21153846153846154
+          },
+          "enough_support": true,
+          "passed": false,
+          "errors": [
+            {
+              "id": "055fd8e43b35b58b",
+              "expected": 1,
+              "score": 0.024654606357216835
+            },
+            {
+              "id": "08e304246d440866",
+              "expected": 1,
+              "score": 0.0034250025637447834
+            },
+            {
+              "id": "08fa752062b7e598",
+              "expected": 1,
+              "score": 0.011473072692751884
+            },
+            {
+              "id": "096789cdb612445f",
+              "expected": 1,
+              "score": 0.017554664984345436
+            },
+            {
+              "id": "11cce5cfe03b38ab",
+              "expected": 1,
+              "score": 0.024222830310463905
+            },
+            {
+              "id": "18050c01fdbeb025",
+              "expected": 1,
+              "score": 0.02619565650820732
+            },
+            {
+              "id": "1931fd197b7c7e25",
+              "expected": 1,
+              "score": 0.028603503480553627
+            },
+            {
+              "id": "1d024ed21dc9cb48",
+              "expected": 1,
+              "score": 0.016990499570965767
+            },
+            {
+              "id": "2ec8092ecbdd5e5e",
+              "expected": 1,
+              "score": 0.01634823903441429
+            },
+            {
+              "id": "3e8b86e2b5d7f7b9",
+              "expected": 1,
+              "score": -0.013939405791461468
+            },
+            {
+              "id": "41f6998d787b3736",
+              "expected": 1,
+              "score": 0.009592159651219845
+            },
+            {
+              "id": "43ed3ae7ac6b9557",
+              "expected": 1,
+              "score": -0.003430620301514864
+            },
+            {
+              "id": "47ad21f5f57e16af",
+              "expected": 1,
+              "score": 0.021667180582880974
+            },
+            {
+              "id": "4cc6f003aeb59536",
+              "expected": 1,
+              "score": 0.004878069274127483
+            },
+            {
+              "id": "508b18c3ab8228e9",
+              "expected": 1,
+              "score": 0.028161203488707542
+            },
+            {
+              "id": "5743ee45c188688e",
+              "expected": 1,
+              "score": -0.0026656496338546276
+            },
+            {
+              "id": "58be183707696e29",
+              "expected": 1,
+              "score": 0.016505736857652664
+            },
+            {
+              "id": "66c23cb3a1a469f8",
+              "expected": 1,
+              "score": -0.0026161044370383024
+            },
+            {
+              "id": "6819aecf456e9253",
+              "expected": 1,
+              "score": 0.021065380424261093
+            },
+            {
+              "id": "6efa7ff4580fb6ff",
+              "expected": 1,
+              "score": -0.02966652438044548
+            }
+          ]
+        },
+        "forest": {
+          "threshold": 0.1715974509716034,
+          "calibration": {
+            "tp": 50,
+            "fp": 7,
+            "fn": 0,
+            "positives": 50,
+            "negatives": 8,
+            "precision": 0.8771929824561403,
+            "recall": 1.0
+          },
+          "validation": {
+            "tp": 49,
+            "fp": 5,
+            "fn": 1,
+            "positives": 50,
+            "negatives": 6,
+            "precision": 0.9074074074074074,
+            "recall": 0.98
+          },
+          "enough_support": false,
+          "passed": false,
+          "errors": [
+            {
+              "id": "25bed79c007ca4ef",
+              "expected": 0,
+              "score": 0.2349362075328827
+            },
+            {
+              "id": "4e9c99614a4c91a4",
+              "expected": 0,
+              "score": 0.2198275327682495
+            },
+            {
+              "id": "7de596bdf547149d",
+              "expected": 0,
+              "score": 0.2685028612613678
+            },
+            {
+              "id": "8f2c1c02fb21237d",
+              "expected": 0,
+              "score": 0.2034466415643692
+            },
+            {
+              "id": "d5bbb181c24bc534",
+              "expected": 1,
+              "score": 0.16846789419651031
+            },
+            {
+              "id": "e48bd03916bda8b7",
+              "expected": 0,
+              "score": 0.2449144572019577
+            }
+          ]
+        },
+        "night": {
+          "threshold": 0.20404794812202454,
+          "calibration": {
+            "tp": 47,
+            "fp": 4,
+            "fn": 3,
+            "positives": 50,
+            "negatives": 6,
+            "precision": 0.9215686274509803,
+            "recall": 0.94
+          },
+          "validation": {
+            "tp": 47,
+            "fp": 6,
+            "fn": 3,
+            "positives": 50,
+            "negatives": 7,
+            "precision": 0.8867924528301887,
+            "recall": 0.94
+          },
+          "enough_support": false,
+          "passed": false,
+          "errors": [
+            {
+              "id": "119d94a4214e3177",
+              "expected": 0,
+              "score": 0.2394360899925232
+            },
+            {
+              "id": "4e0260bfbe8820d3",
+              "expected": 0,
+              "score": 0.21324552595615387
+            },
+            {
+              "id": "5f05dc65d48d3531",
+              "expected": 0,
+              "score": 0.25760701298713684
+            },
+            {
+              "id": "67b7484f6ba06dbb",
+              "expected": 1,
+              "score": 0.20190653204917908
+            },
+            {
+              "id": "6895d3142cd4e559",
+              "expected": 0,
+              "score": 0.26938533782958984
+            },
+            {
+              "id": "aa2e7a6fe6517be6",
+              "expected": 0,
+              "score": 0.29302895069122314
+            },
+            {
+              "id": "cc1a072635a7c36d",
+              "expected": 1,
+              "score": 0.17415747046470642
+            },
+            {
+              "id": "ccdca77d26fa5325",
+              "expected": 0,
+              "score": 0.21226176619529724
+            },
+            {
+              "id": "effe4af5f99ec1cc",
+              "expected": 1,
+              "score": 0.1736685037612915
+            }
+          ]
+        }
+      },
+      "quality_validated": false
+    }
+  },
+  "limitations": [
+    "Open Images labels describe its concepts, not RayBend acceptance on real libraries.",
+    "Unlabeled classes remain unknown; this is a selected cohort, not a natural class prevalence estimate.",
+    "No guarantee against near duplicates across different photographers."
+  ],
+  "threshold_policy": {
+    "precision_target": 0.85,
+    "beta": 0.5,
+    "min_tp": 5,
+    "selected_on": "calibration only",
+    "strict_previous_gate_retained": true
+  }
+}

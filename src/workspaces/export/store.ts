@@ -25,13 +25,15 @@ import {
 } from "../../lib/export-model.ts";
 import { createExportPreferences } from "../../lib/export-prefs.ts";
 import { t } from "../../i18n/index.ts";
+import { readColorDefaults, type OutputColor } from "../../lib/color-model.ts";
 import { presetErrors } from "../../lib/export-model.ts";
 
 import type {ExportQueueAction,ExportQueueView} from "../../api/export.ts";
 import type {AssetIdentity} from "../../api/organization.ts";
 
-export const EXPORT_PRESETS_KEY = "export.presets.v3";
-export const PREVIOUS_EXPORT_PRESETS_KEY = "export.presets.v2";
+export const EXPORT_PRESETS_KEY = "export.presets.v4";
+export const PREVIOUS_EXPORT_PRESETS_KEY = "export.presets.v3";
+const OLDER_EXPORT_PRESETS_KEY = "export.presets.v2";
 export const LEGACY_EXPORT_PRESETS_KEY = "export.presets.v1";
 export interface ExportStoreDeps {
   repositoryAvailable?: (repositoryId: string) => boolean;
@@ -89,7 +91,10 @@ export function createExportStore(deps: ExportStoreDeps) {
   const inflight = new Map<number, Promise<void>>();
   const variantRevisions = new Map<number, number>();
   const staleVariants = new Set<number>();
+  let defaultOutput: OutputColor = {kind:"srgb"};
+  let defaultRequest = 0, outputRevision = 0;
   const blank = (): ExportPreset => ({
+    outputColor: structuredClone(defaultOutput),
     id: "new",
     name: "",
     format: "webp",
@@ -108,6 +113,18 @@ export function createExportStore(deps: ExportStoreDeps) {
   }>({ errors: {}, warnings: [] });
   const selectedPreset = () =>
     presets().find((p) => p.id === preferences.value().selectedPreset) ?? null;
+  function refreshDefaultOutput(): void {
+    const request = ++defaultRequest, revision = outputRevision;
+    void deps.getSetting("color.defaults.v1").then(raw => {
+      const defaults = readColorDefaults(raw);
+      if (disposed || request !== defaultRequest || defaults === null) return;
+      defaultOutput = defaults.output;
+      if (selectedPreset() === null && draft().id === "new" && revision === outputRevision) {
+        setDraft(old => ({...old, outputColor: structuredClone(defaultOutput)}));
+      }
+    }).catch((error: unknown) => { if (!disposed) setError(String(error)); });
+  }
+  refreshDefaultOutput();
   const [confirmedName, setConfirmedName] = createSignal("");
   const [nameChecking, setNameChecking] = createSignal(false);
   let nameTimer: ReturnType<typeof setTimeout> | undefined;
@@ -192,9 +209,10 @@ export function createExportStore(deps: ExportStoreDeps) {
     .then(async (stored) => {
       if (disposed) return;
       const previous = stored === null ? await deps.getSetting(PREVIOUS_EXPORT_PRESETS_KEY) : null;
-      const legacy = stored === null && previous === null ? await deps.getSetting(LEGACY_EXPORT_PRESETS_KEY) : null;
-      const loaded = readPresets(stored ?? previous ?? legacy);
-      // Explicit one-time device-setting migration; an empty v3 also marks completion.
+      const older = stored === null && previous === null ? await deps.getSetting(OLDER_EXPORT_PRESETS_KEY) : null;
+      const legacy = stored === null && previous === null && older === null ? await deps.getSetting(LEGACY_EXPORT_PRESETS_KEY) : null;
+      const loaded = readPresets(stored ?? previous ?? older ?? legacy);
+      // Explicit one-time device-setting migration; an empty v4 also marks completion.
       if (stored === null) await deps.setSetting(EXPORT_PRESETS_KEY, serializePresets(loaded));
       if (disposed) return;
       setPresets(loaded);
@@ -414,12 +432,14 @@ export function createExportStore(deps: ExportStoreDeps) {
     }
   }
   function choosePreset(id: string | null): void {
+    outputRevision++;
     preferences.update({ selectedPreset: id });
     setQueueSelection(clearSelection());
     pruneLockedSelection();
     setDraft({ ...(presets().find((p) => p.id === id) ?? blank()) });
     confirmName(draft().name);
     setValidation({ errors: {}, warnings: [] });
+    if (id === null) refreshDefaultOutput();
   }
   async function appendSnapshots(
     preset: ExportPreset, repo: string, root: string, snapshots: readonly VariantSnapshot[],
@@ -678,6 +698,7 @@ export function createExportStore(deps: ExportStoreDeps) {
     choosePreset,
     enqueue,
     edit(patch: Partial<ExportPreset>) {
+      if (patch.outputColor !== undefined) outputRevision++;
       setDraft((old) => {
         const next = {...old,...patch};
         if (patch.sizeMode !== undefined) {

@@ -660,6 +660,29 @@ pub async fn repository_counts<R: Runtime>(
 /// 为什么每次进目录都做：**本地应用实时性优先**（`AGENTS.md` §2 #13）——
 /// 程序外面往目录里加/删文件是常事，一次 `readdir` 是微秒级，没必要为省它去承担「数字对不上」。
 ///
+/// 重扫后对**新建**资产采纳旁边的自家 sidecar（`specs/xmp-w1.md` §7）。
+/// `report.new_assets` 平时是空的，这里几乎总是空转；只有磁盘上真的出现了新文件才工作。
+fn adopt_sidecars_for_report<R: Runtime>(
+    handle: &tauri::AppHandle<R>,
+    catalog: &std::sync::Arc<raybend::store::db::CatalogDb>,
+    root: &std::path::Path,
+    report: &raybend::store::rebuild::RescanReport,
+) {
+    crate::sidecar::queue_sync(handle.clone(),&catalog.meta().id,report.ai_invalidated.clone());
+    if report.new_assets.is_empty() {
+        return;
+    }
+    let items: Vec<crate::sidecar::NewAsset> = report
+        .new_assets
+        .iter()
+        .map(|(id, rel)| crate::sidecar::NewAsset {
+            asset_id: *id,
+            file_abs: root.join(rel.replace('/', std::path::MAIN_SEPARATOR_STR)),
+        })
+        .collect();
+    crate::sidecar::adopt_new_assets(handle, catalog, &items);
+}
+
 /// 返回：[目录的计数, 库级汇总]。
 /// 变更只通过这一条链失效：目录元信息 → 持久小图/预览 → 清单订阅。
 fn invalidate_changes<R: Runtime>(
@@ -774,6 +797,8 @@ pub async fn repository_sync_dir<R: Runtime>(
             catalog.ensure_current().map_err(|e| e.to_string())?;
             let (report, counts) = raybend::store::rebuild::rescan_scope(&catalog, "photos", scoped, now)
                 .map_err(|e| e.to_string())?;
+            // 新建资产的 sidecar 采纳（specs/xmp-w1.md §7：手动拷进库的照片+sidecar 自动读回）
+            adopt_sidecars_for_report(&handle, &catalog, &root, &report);
             // 缓存的失效在发送事件前完成；调用失败会明确反馈，不能静默显示旧计数。
             invalidate_changes(&handle, &repository_id, &catalog, scoped, &report)?;
             if *scoped == scope {
@@ -896,6 +921,8 @@ pub async fn repository_rebuild<R: Runtime>(
         };
         let rescan = raybend::store::rebuild::rescan_library_with_progress(&catalog, &root, DEFAULT_PHOTOS_DIR, now,
             &mut |p| emit_progress(p.phase, p.done, p.total)).map_err(|e| e.to_string())?;
+        // 新建资产的 sidecar 采纳（specs/xmp-w1.md §7 —— 灾难恢复语义：catalog 重建后从 sidecar 读回）
+        adopt_sidecars_for_report(&handle, &catalog, &root, &rescan);
         invalidate_changes(&handle, &repository_id, &catalog, DEFAULT_PHOTOS_DIR, &rescan)?;
 
         // ③④ 计数：清空重来（这一份在 app.db 里）

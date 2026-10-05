@@ -122,6 +122,7 @@ export default function KitchenSink() {
   const appearance = createAppearanceStore();
   /** 外壳状态：演示 flowbar/toolsbar 的显隐规则（与 App 用的是同一个 store 实现） */
   const shell = createShellStore();
+  const [demoSettingsOpen, setDemoSettingsOpen] = createSignal(false);
   const [exifDemo, setExifDemo] = createSignal<ExifData | null>(DEMO_EXIF);
 
   const [checked, setChecked] = createSignal(true);
@@ -249,7 +250,7 @@ export default function KitchenSink() {
             note="切到「浏览 / 编辑 / 导出」时工具行整行消失（design/main.md §2.3）"
           >
             <div class="flex flex-col overflow-hidden rounded-ui bg-surface-main">
-              <FlowBar store={shell} exif={exifDemo()} />
+              <FlowBar store={shell} exif={exifDemo()} settingsOpen={demoSettingsOpen()} onSettings={() => setDemoSettingsOpen((value) => !value)} />
               <ToolsBar
                 store={shell}
                 hasSelection={false}

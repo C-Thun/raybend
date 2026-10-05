@@ -45,6 +45,12 @@ test("普通载图与撤销共用完整基础曲线适配", () => {
     baseCurveProfile: "8", baseCurvePoints: [[0, 0], [0.4, 0.55], [1, 1]],
     nrMethod: "high" }), {
     sourceBase: "raw", baseCurveProfile: "8", baseCurvePoints: [[0, 0], [0.4, 0.55], [1, 1]],
-    autoAdjust: null, lutId: null, lutEnabled: null, asShotK: null, lensProfile: null, lensEnabled: null, nrMethod: "high", geometry: null,
+    color: null, autoAdjust: null, lutId: null, lutEnabled: null, asShotK: null, lensProfile: null, lensEnabled: null, nrMethod: "high", geometry: null,
   });
+});
+
+test("色彩身份经过普通载图与撤销适配后保持不变", () => {
+  const color = { process_version: "linear_rec2020_v2" as const,
+    source: { kind: "assigned_rgb_icc" as const, profile_id: "a".repeat(64) } };
+  assert.deepEqual(developSettingsOf({ color, values: {}, curves: {}, sourceBase: "raw" }).color, color);
 });

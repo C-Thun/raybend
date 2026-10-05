@@ -84,6 +84,9 @@ pub struct RawImage16 {
     /// 它是编辑器里色温拉杆的**基线**（`AGENTS.md` §11.5：载入照片时标尺要移到这个位置）。
     /// `None` = 这台相机/这个文件里算不出来，调用方退回默认值。
     pub as_shot_temperature: Option<f32>,
+    /// rawler Calibrate 选用的相机矩阵身份（含照明类型和原始 f32 位型）。
+    /// 这不是显示器 ICC，也不表示像素仍在相机 RGB 空间。
+    pub camera_matrix_id: crate::color::ProfileId,
 }
 
 impl RawImage16 {
@@ -94,6 +97,17 @@ impl RawImage16 {
             && self.height > 0
             && self.rgb.len() == (self.width as usize) * (self.height as usize) * 3
     }
+}
+
+/// 新版 RAW 入口：绕开 rawler `Calibrate` 的高光/负值裁切，校准到 f32 线性 Rec.2020。
+/// 旧 `RawImage16` 仍供既有 issue 使用，不能隐式切换。
+#[derive(Debug, Clone, PartialEq)]
+pub struct RawWorkingImage {
+    pub image: crate::color::working::WorkingImage,
+    pub source: PixelSource,
+    pub orientation: Option<u16>,
+    pub as_shot_temperature: Option<f32>,
+    pub camera_matrix_id: crate::color::ProfileId,
 }
 
 /// 一次解码请求。
@@ -108,11 +122,16 @@ pub struct DecodeRequest {
     pub allow_preview: bool,
     /// 小图只允许内嵌图；没有也不能触发传感器解码。
     pub embedded_only: bool,
+    /// Frozen RAW interpretation; None selects the current scale revision.
+    pub expected_camera_matrix_id: Option<crate::color::ProfileId>,
 }
 
 impl DecodeRequest {
     pub fn embedded(path: impl Into<PathBuf>, max_edge: u32) -> Self {
-        Self { embedded_only: true, ..Self::thumb(path, max_edge) }
+        Self {
+            embedded_only: true,
+            ..Self::thumb(path, max_edge)
+        }
     }
 
     /// 缩略图请求（网格 / 胶片带 / 看图都用它）。
@@ -123,6 +142,7 @@ impl DecodeRequest {
             max_edge: Some(max_edge),
             allow_preview: true,
             embedded_only: false,
+            expected_camera_matrix_id: None,
         }
     }
 
@@ -134,7 +154,13 @@ impl DecodeRequest {
             max_edge: None,
             allow_preview: false,
             embedded_only: false,
+            expected_camera_matrix_id: None,
         }
+    }
+
+    pub fn with_camera_matrix(mut self, id: crate::color::ProfileId) -> Self {
+        self.expected_camera_matrix_id = Some(id);
+        self
     }
 
     /// 改「允不允许内嵌预览快路径」（两个构造函数之外的第三个开关）。
@@ -192,6 +218,15 @@ pub trait RawBackend: Send + Sync {
         let _ = req;
         Err(RawError::Unsupported(format!(
             "后端 {} 不支持线性解码",
+            self.name()
+        )))
+    }
+
+    /// 新版高精度工作域。默认明确拒绝，不能把旧 u16/已裁切结果冒充为宽域 f32。
+    fn decode_working(&self, req: &DecodeRequest) -> RawResult<RawWorkingImage> {
+        let _ = req;
+        Err(RawError::Unsupported(format!(
+            "后端 {} 不支持高精度工作域解码",
             self.name()
         )))
     }

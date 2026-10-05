@@ -23,6 +23,7 @@ import {
   IconFolderDown,
   IconMaximize,
   IconPhoto,
+  IconSettings,
   IconUpload,
 } from "@tabler/icons-solidjs";
 import { IconButton } from "../components/ui/Button.tsx";
@@ -42,6 +43,9 @@ export interface FlowBarProps {
    * 传了才渲染按钮，所以不会出现「按下去没反应」的按钮。
    */
   onFullscreen?: () => void;
+  /** 全局设置始终可用，与图片是否选中无关。 */
+  onSettings: () => void;
+  settingsOpen: boolean;
 }
 
 export function FlowBar(props: FlowBarProps) {
@@ -59,13 +63,17 @@ export function FlowBar(props: FlowBarProps) {
   }));
 
   return (
-    <div class="flex h-bar-flow-h shrink-0 items-center gap-2 bg-surface-main px-pad-x">
+    <div data-flowbar class="flex h-bar-flow-h shrink-0 items-center gap-2 bg-surface-main px-pad-x">
       <FlowSwitcher<WorkflowId>
         label={t("flow.label")}
         value={props.store.workflow()}
         onValueChange={props.store.setWorkflow}
         options={options}
       />
+
+      <IconButton size="large" selected={props.settingsOpen} label={t("settings.title")} onClick={props.onSettings}>
+        <IconSettings size={16} aria-hidden="true" />
+      </IconButton>
 
       {/* 弹性空白：把 EXIF 与开关推到右边 */}
       <div class="h-px min-w-2 flex-1" />
@@ -79,6 +87,7 @@ export function FlowBar(props: FlowBarProps) {
       */}
       <Show when={props.exif !== null && props.exif !== undefined && props.onFullscreen !== undefined}>
         <IconButton
+          size="large"
           label={t("flow.tool.fullscreen")}
           onClick={() => props.onFullscreen?.()}
         >

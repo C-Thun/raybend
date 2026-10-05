@@ -26,6 +26,9 @@ import { TilesShell } from "../../components/ui/tiles/TilesShell.tsx";
 import { Tile } from "../../components/ui/Tile.tsx";
 import { Button, IconButton } from "../../components/ui/Button.tsx";
 import { Input, RadioChoices } from "../../components/ui/Form.tsx";
+import { ProfileSelect } from "../../components/ui/ProfileSelect.tsx";
+import { getColorProfileLibrary, type ColorProfileEntry } from "../../api/color.ts";
+import { outputColorChoice, outputColorFromChoice } from "../../lib/color-model.ts";
 import { Slider } from "../../components/ui/Slider.tsx";
 import { SegmentedControl } from "../../components/ui/SegmentedControl.tsx";
 import { SplitStack } from "../../components/ui/SplitStack.tsx";
@@ -87,6 +90,18 @@ export function ExportWorkspace(props: ExportWorkspaceProps) {
   let dragStart = 0;
   const [resetOpen, setResetOpen] = createSignal(false);
   const [allIssues, setAllIssues] = createSignal<number|null>(null);
+  const [profileEntries, setProfileEntries] = createSignal<readonly ColorProfileEntry[]>([]);
+  const [profileEntriesError, setProfileEntriesError] = createSignal<string | null>(null);
+  let profileRequest = 0, profilesDisposed = false;
+  const refreshProfiles = async () => {
+    const request = ++profileRequest;
+    try {
+      const library = await getColorProfileLibrary();
+      if (!profilesDisposed && request === profileRequest) { setProfileEntries(library?.entries ?? []); setProfileEntriesError(null); }
+    } catch (error) { if (!profilesDisposed && request === profileRequest) setProfileEntriesError(String(error)); }
+  };
+  void refreshProfiles();
+  onCleanup(() => { profilesDisposed = true; });
   const root = () =>
     repositories().find((r) => r.id === props.browse.repositoryId())?.root ??
     props.repositories.lastVerifiedRoot(props.browse.repositoryId() ?? "");
@@ -677,6 +692,15 @@ export function ExportWorkspace(props: ExportWorkspaceProps) {
             options={EXPORT_FORMATS.map((value) => ({ value, label: value === "jpeg" ? "JPG" : value.toUpperCase() }))}
             onValueChange={(format) => store.edit({ format })}
           />
+          <div class="flex items-center justify-between gap-2 text-fs-1 text-fg-2">
+            <span>{t("export.outputColor")}</span>
+            <ProfileSelect label={t("export.outputColor")} role="output" entries={profileEntries()} value={outputColorChoice(store.draft().outputColor)}
+              srgbOnly={store.draft().format === "avif"} onFocus={() => void refreshProfiles()}
+              onChange={value => { const outputColor = outputColorFromChoice(value); if (outputColor) store.edit({outputColor}); }} />
+          </div>
+          <Show when={store.draft().format === "avif"}><p class="text-fs-0 text-fg-3">{t("export.avifSrgb")}</p></Show>
+          <Show when={fieldError("outputColor")}><p class="text-fs-0 text-danger" role="alert">{fieldError("outputColor")}</p></Show>
+          <Show when={profileEntriesError()}>{error => <p class="text-fs-0 text-danger" role="alert">{error()}</p>}</Show>
           <Show when={formatSupportsQuality(store.draft().format)}>
           <div data-export-quality class="flex justify-between text-fs-1 text-fg-2">
             <span>{t("export.quality")}</span>

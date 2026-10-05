@@ -1,0 +1,314 @@
+{
+  "tinyclip_export": {
+    "model_id": "wkcn/TinyCLIP-ViT-40M-32-Text-19M-LAION400M",
+    "revision": "95ec8197b3f2fe7f747865c61ca556cf0768b2f7",
+    "onnx_sha256": "a8576f0f9916d6e92237996d41c256e1e3150db5cf6db48758bb63c87537bb24",
+    "bytes": 158885258,
+    "torch": "2.14.1+cpu",
+    "onnxruntime": "1.28.0",
+    "transformers": "4.57.6",
+    "opset": 17,
+    "input": [
+      1,
+      3,
+      224,
+      224
+    ],
+    "output": [
+      1,
+      512
+    ],
+    "processor": {
+      "_processor_class": null,
+      "do_resize": true,
+      "size": {
+        "shortest_edge": 224
+      },
+      "resample": 3,
+      "do_center_crop": true,
+      "crop_size": {
+        "height": 224,
+        "width": 224
+      },
+      "do_rescale": true,
+      "rescale_factor": 0.00392156862745098,
+      "do_normalize": true,
+      "image_mean": [
+        0.48145466,
+        0.4578275,
+        0.40821073
+      ],
+      "image_std": [
+        0.26862954,
+        0.26130258,
+        0.27577711
+      ],
+      "do_convert_rgb": true,
+      "image_processor_type": "CLIPImageProcessor"
+    },
+    "load_s": 0.1883854399993652,
+    "p50_s": 0.024149678500180016,
+    "p95_s": 0.02896608159962852,
+    "max_abs_error": 6.3478946685791016e-06,
+    "mean_abs_error": 1.0919366104644723e-06,
+    "quality_validated": false
+  },
+  "siglip2_export": {
+    "model_id": "google/siglip2-base-patch16-224",
+    "revision": "75de2d55ec2d0b4efc50b3e9ad70dba96a7b2fa2",
+    "bytes": 371679748,
+    "load_s": 0.6110481519999666,
+    "p50_s": 0.20378488400001515,
+    "p95_s": 0.2302237595997667,
+    "max_abs_error": 2.3543834686279297e-06,
+    "shape": [
+      1,
+      768
+    ],
+    "processor": {
+      "_processor_class": "SiglipProcessor",
+      "image_processor_type": "SiglipImageProcessor",
+      "do_resize": true,
+      "size": {
+        "height": 224,
+        "width": 224
+      },
+      "resample": 2,
+      "do_rescale": true,
+      "rescale_factor": 0.00392156862745098,
+      "do_normalize": true,
+      "image_mean": [
+        0.5,
+        0.5,
+        0.5
+      ],
+      "image_std": [
+        0.5,
+        0.5,
+        0.5
+      ],
+      "do_convert_rgb": null
+    },
+    "quality_validated": false,
+    "opset": 17,
+    "onnx_sha256": "83770e4cc3f239846cd7ce41c549c70b5fa67533534f85b66d26081cf69298c3"
+  },
+  "windows_machine": {
+    "cpu": "Intel(R) Core(TM) Ultra 9 185H",
+    "cores": 16,
+    "logical": 22,
+    "windows": "Windows 11 (caption encoding omitted)",
+    "version": "10.0.26200",
+    "ram_bytes": 33945935872
+  },
+  "wsl_tinyclip": [
+    {
+      "library": "/tmp/raybend-ai-venv/lib/python3.12/site-packages/onnxruntime/capi/libonnxruntime.so.1.28.0",
+      "load_s": 0.318737214,
+      "max_abs_error": 6.3478946685791016e-06,
+      "p50_s": 0.026686427,
+      "p95_s": 0.036199092,
+      "provider": "CPUExecutionProvider",
+      "quality_validated": false,
+      "samples": 30
+    }
+  ],
+  "wsl_siglip2": [
+    {
+      "library": "/tmp/raybend-ai-venv/lib/python3.12/site-packages/onnxruntime/capi/libonnxruntime.so.1.28.0",
+      "load_includes_contract_probe": true,
+      "load_s": 0.802395374,
+      "max_abs_error": 2.3543834686279297e-06,
+      "p50_s": 0.184822895,
+      "p95_s": 0.192778099,
+      "provider": "CPUExecutionProvider",
+      "quality_validated": false,
+      "samples": 30
+    }
+  ],
+  "windows_tinyclip": [
+    {
+      "library": "C:\\rb-target\\raybend-ai-probe-data\\onnxruntime.dll",
+      "load_includes_contract_probe": true,
+      "load_s": 1.7802054,
+      "max_abs_error": 6.3478946685791016e-06,
+      "p50_s": 0.0666576,
+      "p95_s": 0.1182048,
+      "provider": "CPUExecutionProvider",
+      "quality_validated": false,
+      "samples": 30
+    },
+    {
+      "image": "C:\\rb-target\\raybend-ai-probe-data\\samples\\astronaut.jpg",
+      "policy": "center_crop",
+      "quality_validated": false,
+      "scores": {
+        "bird": 0.10977741330862045,
+        "car": 0.1270749717950821,
+        "forest": 0.06949082016944885,
+        "mountain": 0.10041080415248871,
+        "night": 0.10677206516265869,
+        "person": 0.1764906942844391,
+        "sea": 0.10019839555025101
+      },
+      "worker_max_abs_error": 0.0
+    },
+    {
+      "image": "C:\\rb-target\\raybend-ai-probe-data\\samples\\astronaut.jpg",
+      "policy": "fit",
+      "quality_validated": false,
+      "scores": {
+        "bird": 0.10977741330862045,
+        "car": 0.1270749717950821,
+        "forest": 0.06949082016944885,
+        "mountain": 0.10041080415248871,
+        "night": 0.10677206516265869,
+        "person": 0.1764906942844391,
+        "sea": 0.10019839555025101
+      },
+      "worker_max_abs_error": 0.0
+    },
+    {
+      "image": "C:\\rb-target\\raybend-ai-probe-data\\samples\\rocket.jpg",
+      "policy": "center_crop",
+      "quality_validated": false,
+      "scores": {
+        "bird": 0.1410667896270752,
+        "car": 0.16040411591529846,
+        "forest": 0.08480938524007797,
+        "mountain": 0.13071174919605255,
+        "night": 0.2273290604352951,
+        "person": 0.14882870018482208,
+        "sea": 0.13527683913707733
+      },
+      "worker_max_abs_error": 0.0
+    },
+    {
+      "image": "C:\\rb-target\\raybend-ai-probe-data\\samples\\rocket.jpg",
+      "policy": "fit",
+      "quality_validated": false,
+      "scores": {
+        "bird": 0.16813555359840393,
+        "car": 0.1615077257156372,
+        "forest": 0.1253238320350647,
+        "mountain": 0.1754191666841507,
+        "night": 0.25952136516571045,
+        "person": 0.1746850311756134,
+        "sea": 0.17433395981788635
+      },
+      "worker_max_abs_error": 0.0
+    },
+    {
+      "peak_working_set_bytes": 224944128,
+      "exit_code": 0
+    }
+  ],
+  "dataset_metadata": {
+    "classes.csv": {
+      "bytes": 479142,
+      "sha256": "e986e083116974d9553d02dfb2ba2defe141efe5a1c93d6027aa2f33dff676b4"
+    },
+    "labels.csv": {
+      "bytes": 24824095,
+      "sha256": "c2bc8b312ee7ed01ac4c58a62c2432c7f6b83b320874cbb0644e2f51aed3faad"
+    },
+    "images.csv": {
+      "bytes": 15245485,
+      "sha256": "ed93a0e121fe345effdfc7359b848dbc64a1ff6778c8c73563157cb500b33a17"
+    }
+  },
+  "windows_tinyclip_final": [
+    {
+      "library": "C:\\rb-target\\raybend-ai-probe-data\\onnxruntime.dll",
+      "load_includes_contract_probe": true,
+      "load_s": 0.7240789,
+      "max_abs_error": 6.3478946685791016e-06,
+      "p50_s": 0.0476176,
+      "p95_s": 0.0650398,
+      "provider": "CPUExecutionProvider",
+      "quality_validated": false,
+      "samples": 30
+    },
+    {
+      "image": "C:\\rb-target\\raybend-ai-probe-data\\samples\\astronaut.jpg",
+      "policy": "center_crop",
+      "quality_validated": false,
+      "scores": {
+        "bird": 0.10977741330862045,
+        "car": 0.1270749717950821,
+        "forest": 0.06949082016944885,
+        "mountain": 0.10041080415248871,
+        "night": 0.10677206516265869,
+        "person": 0.1764906942844391,
+        "sea": 0.10019839555025101
+      },
+      "worker_max_abs_error": 0.0
+    },
+    {
+      "image": "C:\\rb-target\\raybend-ai-probe-data\\samples\\astronaut.jpg",
+      "policy": "fit",
+      "quality_validated": false,
+      "scores": {
+        "bird": 0.10977741330862045,
+        "car": 0.1270749717950821,
+        "forest": 0.06949082016944885,
+        "mountain": 0.10041080415248871,
+        "night": 0.10677206516265869,
+        "person": 0.1764906942844391,
+        "sea": 0.10019839555025101
+      },
+      "worker_max_abs_error": 0.0
+    },
+    {
+      "image": "C:\\rb-target\\raybend-ai-probe-data\\samples\\rocket.jpg",
+      "policy": "center_crop",
+      "quality_validated": false,
+      "scores": {
+        "bird": 0.1410667896270752,
+        "car": 0.16040411591529846,
+        "forest": 0.08480938524007797,
+        "mountain": 0.13071174919605255,
+        "night": 0.2273290604352951,
+        "person": 0.14882870018482208,
+        "sea": 0.13527683913707733
+      },
+      "worker_max_abs_error": 0.0
+    },
+    {
+      "image": "C:\\rb-target\\raybend-ai-probe-data\\samples\\rocket.jpg",
+      "policy": "fit",
+      "quality_validated": false,
+      "scores": {
+        "bird": 0.16813555359840393,
+        "car": 0.1615077257156372,
+        "forest": 0.1253238320350647,
+        "mountain": 0.1754191666841507,
+        "night": 0.25952136516571045,
+        "person": 0.1746850311756134,
+        "sea": 0.17433395981788635
+      },
+      "worker_max_abs_error": 0.0
+    },
+    {
+      "shutdown_probed": true,
+      "stopped": true
+    },
+    {
+      "parent_peak_working_set_bytes": 218775552,
+      "child_peak_working_set_bytes": 219582464,
+      "observed_children": 1,
+      "orphan_count": 0,
+      "exit_code": 0
+    }
+  ],
+  "runtime_dlls": {
+    "onnxruntime.dll": {
+      "bytes": 15809848,
+      "sha256": "18370c375f07357fa5874344a9d9ac17e6b6fe1eb18b1dd209d79483b4470257"
+    },
+    "onnxruntime_providers_shared.dll": {
+      "bytes": 21856,
+      "sha256": "599629fa643707defe9156140ae5edd73531f221aa97b7585b1c9bb0a93586f8"
+    }
+  }
+}

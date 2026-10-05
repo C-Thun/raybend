@@ -39,6 +39,8 @@ use crate::source::blocking;
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DevelopStackDto {
+    #[serde(default)]
+    pub color: Option<raybend::color::PhotoColorState>,
     pub values: BTreeMap<String, f64>,
     /// latest 的唯一来源；旧 IPC 调用没有此项时沿用编辑器默认 RAW。
     #[serde(default)]
@@ -76,6 +78,7 @@ pub struct DevelopStackDto {
 impl From<DevelopStack> for DevelopStackDto {
     fn from(stack: DevelopStack) -> Self {
         Self {
+            color: stack.color,
             values: stack.params,
             source_base: Some(stack.source_base.as_str().to_string()),
             curves: stack.curves,
@@ -113,6 +116,7 @@ impl DevelopStackDto {
                 EditBase::parse(text).ok_or_else(|| format!("未知的 issue 源：{text}"))
             })?;
         Ok(DevelopStack {
+            color: self.color,
             source_base,
             params: self.values,
             curves: self.curves,
@@ -449,6 +453,9 @@ pub async fn develop_commit<R: Runtime>(
             })?
         };
 
+        // ⑥ sidecar 镜像（`specs/xmp-w1.md` §6.1：落库后异步写出，不阻塞提交）
+        crate::sidecar::queue_sync(handle.clone(), &undo_repository, vec![asset_id]);
+
         Ok(DevelopCommitResult {
             stack: DevelopStackDto::from(stored),
             undo_label,
@@ -510,6 +517,7 @@ fn diff_stack(asset_id: i64, before: &DevelopStack, after: &DevelopStack) -> Vec
 
     // 设置统一以可空序列化值进入撤销；自动来源也走同一管道，但不改变像素。
     for setting in [
+        Setting::Color,
         Setting::AutoAdjust,
         Setting::BaseCurveProfile,
         Setting::BaseCurvePoints,

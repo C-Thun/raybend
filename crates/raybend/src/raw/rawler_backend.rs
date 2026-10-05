@@ -22,12 +22,15 @@ use image::{DynamicImage, GenericImageView};
 use rawler::RawImage;
 use rawler::RawLoader;
 use rawler::decoders::{Decoder, RawDecodeParams};
+use rawler::imgop::chromatic_adaption::adapt_bradford;
 use rawler::imgop::develop::{Intermediate, ProcessingStep, RawDevelop};
+use rawler::imgop::matrix::{IDENTITY_MATRIX_3, multiply, normalize, pseudo_inverse, transform_1d};
 use rawler::imgop::xyz::Illuminant;
 use rawler::rawsource::RawSource;
 
 use super::backend::{
-    DecodeRequest, PixelSource, RawBackend, RawError, RawImage16, RawImage8, RawResult,
+    DecodeRequest, PixelSource, RawBackend, RawError, RawImage8, RawImage16, RawResult,
+    RawWorkingImage,
 };
 use super::precheck::{Precheck, precheck};
 
@@ -71,6 +74,17 @@ const LINEAR_STEPS: &[ProcessingStep] = &[
     ProcessingStep::CropDefault,
 ];
 
+/// 新版工作域停在 `Calibrate` 之前：该上游步骤会把负值裁到 0，并对 >1
+/// 执行非线性色度压缩。保持去马赛克/裁切一致，随后由本 adapter 映射到 Rec.2020。
+const WORKING_STEPS: &[ProcessingStep] = &[
+    ProcessingStep::Rescale,
+    ProcessingStep::Demosaic,
+    ProcessingStep::FujiRotate,
+    ProcessingStep::CropActiveArea,
+    ProcessingStep::WhiteBalance,
+    ProcessingStep::CropDefault,
+];
+
 /// 找色彩矩阵时优先要的照明（与 `develop_intermediate` 里的 `Calibrate` 同一张表）。
 const CALIBRATION_ILLUMINANTS: &[Illuminant] = &[
     Illuminant::D65,
@@ -94,12 +108,28 @@ impl RawlerBackend {
         Self
     }
 
+    /// Metadata/dummy decode supplies the exact selected matrix without sensor
+    /// decompression, demosaic, f32 image allocation or transfer to the host.
+    pub fn working_color_identity(path:&Path)->RawResult<crate::color::ProfileId> {
+        let opened=open(&DecodeRequest::full(path))?;
+        let raw=opened.decoder.raw_image(&opened.source,&opened.params,true).map_err(|e|classify(e.to_string()))?;
+        if !matches!(raw.cpp,1|3|4) {return Err(RawError::Unsupported("RAW 通道数不支持工作域".into()));}
+        if let Some((illuminant,matrix))=selected_matrix(&raw) {
+            match matrix.len() {9=>{d65_matrix::<3>(&matrix,illuminant)?;},12=>{d65_matrix::<4>(&matrix,illuminant)?;},_=>return Err(RawError::Unsupported("RAW 相机矩阵维度不支持工作域".into()))};
+        }
+        Ok(working_matrix_id(&camera_matrix_id(&raw)))
+    }
+
     /// 只解析 RAW 头和厂商 MakerNote；镜头识别留在隔离 worker 内。
     pub fn lens_name(path: &Path) -> RawResult<Option<String>> {
         let opened = open(&DecodeRequest::full(path))?;
-        let metadata = opened.decoder.raw_metadata(&opened.source, &opened.params)
+        let metadata = opened
+            .decoder
+            .raw_metadata(&opened.source, &opened.params)
             .map_err(|e| classify(e.to_string()))?;
-        Ok(metadata.exif.lens_model
+        Ok(metadata
+            .exif
+            .lens_model
             .or_else(|| metadata.lens.map(|lens| lens.lens_name))
             .filter(|name| !name.trim().is_empty()))
     }
@@ -114,9 +144,16 @@ impl RawBackend for RawlerBackend {
         let trace = Tracer::new();
         if req.embedded_only
             && let Some(embedded) = crate::media::embedded::read(&req.path)
-                && let Ok(image) = image::load_from_memory_with_format(&embedded.bytes, image::ImageFormat::Jpeg) {
-                    return finish(image, req.max_edge, PixelSource::EmbeddedPreview, embedded.orientation);
-                }
+            && let Ok(image) =
+                image::load_from_memory_with_format(&embedded.bytes, image::ImageFormat::Jpeg)
+        {
+            return finish(
+                image,
+                req.max_edge,
+                PixelSource::EmbeddedPreview,
+                embedded.orientation,
+            );
+        }
         let opened = open(req)?;
         let Opened {
             source,
@@ -127,7 +164,19 @@ impl RawBackend for RawlerBackend {
         let need = req.max_edge.unwrap_or(u32::MAX);
 
         if req.allow_preview
-            && let Some(found) = pick_embedded(decoder.as_ref(), source, params, need, req.embedded_only)
+            && let Some(found) = pick_embedded(
+                (0..2)
+                    .map(|index| {
+                        if index == 0 {
+                            decoder.thumbnail_image(source, params)
+                        } else {
+                            decoder.preview_image(source, params)
+                        }
+                    })
+                    .map(|candidate| candidate.ok().flatten()),
+                need,
+                req.embedded_only,
+            )
         {
             let (img, source_kind) = found;
             trace.mark("embedded");
@@ -144,9 +193,11 @@ impl RawBackend for RawlerBackend {
                 // 兼容兜底仍只读有界头部，不让缺 EXIF 导致整 RAW 扫描。
                 use std::io::Read;
                 let mut head = Vec::new();
-                std::fs::File::open(&req.path).ok().and_then(|file|
-                    file.take(256 * 1024).read_to_end(&mut head).ok());
-                crate::media::tiff::parse(&head).and_then(|info| info.orientation)
+                std::fs::File::open(&req.path)
+                    .ok()
+                    .and_then(|file| file.take(256 * 1024).read_to_end(&mut head).ok());
+                crate::media::tiff::parse(&head)
+                    .and_then(|info| info.orientation)
                     .map(|value| crate::media::meta::normalize_orientation(Some(value)))
             } else if needs_metadata_orientation(&req.path) {
                 read_orientation(decoder.as_ref(), source, params)
@@ -205,6 +256,7 @@ impl RawBackend for RawlerBackend {
 
         // 色温估计要在 `raw` 还在的时候算（后面 develop 只是借用它）
         let as_shot_temperature = as_shot_temperature(&raw);
+        let camera_matrix_id = camera_matrix_id(&raw);
         let orientation = Some(raw.orientation.to_u16());
         let develop = RawDevelop::new_with(LINEAR_STEPS);
         let intermediate = develop
@@ -212,7 +264,12 @@ impl RawBackend for RawlerBackend {
             .map_err(|e| RawError::Decode(e.to_string()))?;
         trace.mark("develop");
 
-        let mut image = linear_from_intermediate(intermediate, orientation, as_shot_temperature)?;
+        let mut image = linear_from_intermediate(
+            intermediate,
+            orientation,
+            as_shot_temperature,
+            camera_matrix_id,
+        )?;
         if let Some(max_edge) = req.max_edge.filter(|edge| *edge > 0) {
             let long = image.width.max(image.height);
             if long > max_edge {
@@ -222,6 +279,200 @@ impl RawBackend for RawlerBackend {
         trace.mark("finish");
         Ok(image)
     }
+
+    fn decode_working(&self, req: &DecodeRequest) -> RawResult<RawWorkingImage> {
+        let opened = open(req)?;
+        let mut raw = opened
+            .decoder
+            .raw_image(&opened.source, &opened.params, false)
+            .map_err(|error| classify(error.to_string()))?;
+        let as_shot_temperature = as_shot_temperature(&raw);
+        let legacy_id = camera_matrix_id(&raw);
+        let current_id = working_matrix_id(&legacy_id);
+        let legacy = use_legacy_scaling(req.expected_camera_matrix_id.as_ref(), &legacy_id, &current_id)?;
+        let camera_matrix_id = if legacy { legacy_id } else { current_id };
+        if !legacy { normalize_raw_unbounded(&mut raw)?; }
+        let orientation = Some(raw.orientation.to_u16());
+        let steps: Vec<_> = WORKING_STEPS.iter().copied()
+            .filter(|step| legacy || *step != ProcessingStep::Rescale).collect();
+        let intermediate = RawDevelop::new_with(&steps)
+            .develop_intermediate(&raw)
+            .map_err(|error| RawError::Decode(error.to_string()))?;
+        // Only metadata is needed after demosaic; release full sensor storage now.
+        raw.data = rawler::RawImageData::Float(Vec::new());
+        let image = camera_intermediate_to_working(intermediate, &raw)?
+            .into_downscaled(req.max_edge.unwrap_or(0));
+        Ok(RawWorkingImage {
+            image,
+            source: PixelSource::Decoded,
+            orientation,
+            as_shot_temperature,
+            camera_matrix_id,
+        })
+    }
+}
+
+fn working_matrix_id(legacy: &crate::color::ProfileId) -> crate::color::ProfileId {
+    crate::color::ProfileId::of_bytes(format!("rawler-0.8-unbounded-scale-v2\0{}", legacy.as_str()).as_bytes())
+}
+fn use_legacy_scaling(expected: Option<&crate::color::ProfileId>, legacy: &crate::color::ProfileId, current: &crate::color::ProfileId) -> RawResult<bool> {
+    match expected {
+        Some(id) if id == legacy => Ok(true),
+        Some(id) if id != current => Err(RawError::Unsupported("固化 RAW 相机矩阵/标度身份不匹配".into())),
+        _ => Ok(false),
+    }
+}
+
+/// Adapter replaces upstream's lower clipping only. BlackLevelRepeatDim is
+/// honored for odd dimensions, CFA patterns and interleaved linear/mono data.
+/// White level is normalization, not an instruction to clip saturated samples.
+fn normalize_raw_unbounded(raw: &mut RawImage) -> RawResult<()> {
+    let black = raw.blacklevel.as_vec();
+    let white = raw.whitelevel.as_vec();
+    let grid = (raw.blacklevel.width, raw.blacklevel.height, raw.blacklevel.cpp);
+    let shape = (raw.width, raw.height, raw.cpp);
+    let cfa = matches!(raw.photometric, rawler::rawimage::RawPhotometricInterpretation::Cfa(_));
+    let mut pixels = match std::mem::replace(&mut raw.data, rawler::RawImageData::Float(Vec::new())) {
+        rawler::RawImageData::Integer(values) => values.into_iter().map(f32::from).collect(),
+        rawler::RawImageData::Float(values) => values,
+    };
+    normalize_sensor(&mut pixels, shape, grid, &black, &white, cfa)?;
+    raw.data = rawler::RawImageData::Float(pixels);
+    // Rescale is omitted for this revision; downstream receives normalized data.
+    Ok(())
+}
+fn normalize_sensor(pixels: &mut [f32], (width,height,cpp): (usize,usize,usize), (bw,bh,bc): (usize,usize,usize), black: &[f32], white: &[f32], cfa: bool) -> RawResult<()> {
+    let invalid = || RawError::Unsupported("RAW 黑/白电平网格、通道或范围无效".into());
+    if width == 0 || height == 0 || !matches!(cpp,1|3|4) || bw == 0 || bh == 0 || !matches!(bc,1) && bc != cpp
+        || width.checked_mul(height).and_then(|v|v.checked_mul(cpp)) != Some(pixels.len())
+        || bw.checked_mul(bh).and_then(|v|v.checked_mul(bc)) != Some(black.len())
+        || !(white.len()==1 || white.len()==cpp || cfa && cpp==1 && white.len()==4)
+        || black.iter().chain(white).any(|v|!v.is_finite()) || pixels.iter().any(|v|!v.is_finite()) { return Err(invalid()); }
+    // Validate all actual pairings before changing a sample (no partial success).
+    // CFA white pattern repeats at 2×2; odd black periods need two repeats.
+    let repeat_w=if cfa && white.len()==4 && bw%2==1 {bw.saturating_mul(2)} else {bw};
+    let repeat_h=if cfa && white.len()==4 && bh%2==1 {bh.saturating_mul(2)} else {bh};
+    for y in 0..height.min(repeat_h) { for x in 0..width.min(repeat_w) { for c in 0..cpp {
+        let b=black[((y%bh)*bw+x%bw)*bc+if bc==1 {0}else{c}];
+        let w=white[if white.len()==1 {0}else if cfa {y%2*2+x%2}else{c}];
+        if w<=b || !(w-b).is_finite() {return Err(invalid());}
+    }}}
+    for (i,pixel) in pixels.chunks_exact_mut(cpp).enumerate() {
+        let (x,y)=(i%width,i/width);
+        for (c,value) in pixel.iter_mut().enumerate() {
+            let b=black[((y%bh)*bw+x%bw)*bc+if bc==1 {0}else{c}];
+            let w=white[if white.len()==1 {0}else if cfa {y%2*2+x%2}else{c}];
+            *value=(*value-b)/(w-b);
+            if !value.is_finite() {return Err(invalid());}
+        }
+    }
+    Ok(())
+}
+
+fn camera_intermediate_to_working(
+    intermediate: Intermediate,
+    raw: &RawImage,
+) -> RawResult<crate::color::working::WorkingImage> {
+    let (illuminant, matrix) = selected_matrix(raw).unwrap_or_else(|| {
+        (
+            Illuminant::D65,
+            IDENTITY_MATRIX_3.into_iter().flatten().collect(),
+        )
+    });
+    let wb = if raw.wb_coeffs[0].is_nan() {
+        [1.0; 4]
+    } else {
+        raw.wb_coeffs
+    };
+    match intermediate {
+        Intermediate::Monochrome(pixels) => {
+            let width = u32::try_from(pixels.dim().w)
+                .map_err(|_| RawError::Empty("RAW 宽度溢出".into()))?;
+            let height = u32::try_from(pixels.dim().h)
+                .map_err(|_| RawError::Empty("RAW 高度溢出".into()))?;
+            let rgb = pixels.data.into_iter().map(|value| [value; 3]).collect();
+            crate::color::working::WorkingImage::from_linear_srgb(width, height, rgb)
+                .map_err(|error| RawError::Empty(error.to_string()))
+        }
+        Intermediate::ThreeColor(pixels) => {
+            let matrix = d65_matrix::<3>(&matrix, illuminant)?;
+            let rgb = camera_rgb_to_srgb(&pixels.data, wb, matrix)?;
+            crate::color::working::WorkingImage::from_linear_srgb(
+                u32::try_from(pixels.width).map_err(|_| RawError::Empty("RAW 宽度溢出".into()))?,
+                u32::try_from(pixels.height).map_err(|_| RawError::Empty("RAW 高度溢出".into()))?,
+                rgb,
+            )
+            .map_err(|error| RawError::Empty(error.to_string()))
+        }
+        Intermediate::FourColor(pixels) => {
+            let matrix = d65_matrix::<4>(&matrix, illuminant)?;
+            let rgb = camera_rgb_to_srgb(&pixels.data, wb, matrix)?;
+            crate::color::working::WorkingImage::from_linear_srgb(
+                u32::try_from(pixels.width).map_err(|_| RawError::Empty("RAW 宽度溢出".into()))?,
+                u32::try_from(pixels.height).map_err(|_| RawError::Empty("RAW 高度溢出".into()))?,
+                rgb,
+            )
+            .map_err(|error| RawError::Empty(error.to_string()))
+        }
+    }
+}
+
+fn d65_matrix<const N: usize>(matrix: &[f32], illuminant: Illuminant) -> RawResult<[[f32; 3]; N]> {
+    let mut matrix = transform_1d::<N, 3>(matrix)
+        .ok_or_else(|| RawError::Unsupported(format!("RAW 相机矩阵需要 {} 个系数", N * 3)))?;
+    if !matrix.iter().flatten().all(|value| value.is_finite()) {
+        return Err(RawError::Unsupported("RAW 相机矩阵含非有限数".into()));
+    }
+    if illuminant != Illuminant::D65 {
+        if N != 3 {
+            return Err(RawError::Unsupported(
+                "非 D65 四通道相机矩阵尚不能安全适配".into(),
+            ));
+        }
+        let first_three = [matrix[0], matrix[1], matrix[2]];
+        let adapted = adapt_bradford(&illuminant, &Illuminant::D65, &first_three);
+        matrix[0..3].copy_from_slice(&adapted);
+    }
+    Ok(matrix)
+}
+
+/// 与 rawler 相同的矩阵归一化/伪逆和白平衡，但保留相机空间映射产生的负值和 >1。
+fn camera_rgb_to_srgb<const N: usize>(
+    pixels: &[[f32; N]],
+    white_balance: [f32; 4],
+    xyz_to_camera: [[f32; 3]; N],
+) -> RawResult<Vec<[f32; 3]>> {
+    if white_balance[..N].iter().any(|value| !value.is_finite()) {
+        return Err(RawError::Unsupported("RAW 白平衡含非有限数".into()));
+    }
+    let rgb_to_camera = normalize(multiply(
+        &xyz_to_camera,
+        &crate::develop::color::SRGB_TO_XYZ_D65,
+    ));
+    let camera_to_rgb = pseudo_inverse(rgb_to_camera);
+    if camera_to_rgb
+        .iter()
+        .flatten()
+        .any(|value| !value.is_finite())
+    {
+        return Err(RawError::Unsupported("RAW 相机矩阵不可逆".into()));
+    }
+    pixels
+        .iter()
+        .map(|pixel| {
+            let mut rgb = [0.0_f32; 3];
+            for output in 0..3 {
+                for channel in 0..N {
+                    rgb[output] +=
+                        camera_to_rgb[output][channel] * pixel[channel] * white_balance[channel];
+                }
+            }
+            if rgb.iter().any(|value| !value.is_finite()) {
+                return Err(RawError::Decode("RAW 校准结果含非有限数".into()));
+            }
+            Ok(rgb)
+        })
+        .collect()
 }
 
 /// 打开一次解码所需的全部东西（两条解码路径共用）。
@@ -282,6 +533,7 @@ fn linear_from_intermediate(
     intermediate: Intermediate,
     orientation: Option<u16>,
     as_shot_temperature: Option<f32>,
+    camera_matrix_id: crate::color::ProfileId,
 ) -> RawResult<RawImage16> {
     let Some(image) = intermediate.to_dynamic_image() else {
         return Err(RawError::Empty("显影结果无法转成图像".to_string()));
@@ -323,6 +575,7 @@ fn linear_from_intermediate(
         source: PixelSource::Decoded,
         orientation,
         as_shot_temperature,
+        camera_matrix_id,
     };
     if !out.is_consistent() {
         return Err(RawError::Empty(format!(
@@ -353,6 +606,29 @@ fn as_shot_temperature(raw: &RawImage) -> Option<f32> {
     crate::develop::color::cct_from_camera_neutral(neutral, xyz_to_cam)
 }
 
+/// 与 rawler Calibrate 相同的照明优先序。缺矩阵时 rawler 用 identity，
+/// 该退路也有稳定身份；矩阵本身不被错误地称作 ICC。
+fn camera_matrix_id(raw: &RawImage) -> crate::color::ProfileId {
+    let Some((illuminant, matrix)) = selected_matrix(raw) else {
+        return crate::color::ProfileId::of_bytes(b"rawler-0.8-calibrate-identity-v1");
+    };
+    matrix_id_from_parts(&format!("{illuminant:?}"), &matrix)
+}
+
+fn selected_matrix(raw: &RawImage) -> Option<(Illuminant, Vec<f32>)> {
+    raw.color_matrix_find_first(CALIBRATION_ILLUMINANTS.iter().copied())
+}
+
+fn matrix_id_from_parts(illuminant: &str, matrix: &[f32]) -> crate::color::ProfileId {
+    let mut bytes = b"rawler-0.8-calibrate-matrix-v1\0".to_vec();
+    bytes.extend_from_slice(illuminant.as_bytes());
+    bytes.push(0);
+    for value in matrix {
+        bytes.extend_from_slice(&value.to_bits().to_le_bytes());
+    }
+    crate::color::ProfileId::of_bytes(&bytes)
+}
+
 /// `wb_coeffs` → **相机空间的中性方向**（= 照明在相机里的响应）。
 ///
 /// ❗ 只看**前三个**系数：四色传感器才有第 4 个，三色机器上它是 `NaN`
@@ -374,7 +650,8 @@ fn camera_neutral_from_wb(wb: &[f32; 4]) -> Option<[f32; 3]> {
 
 /// 线性图的快速降采样（箱式平均，与 `develop::pipeline` 同一份实现）。
 fn downscale(image: RawImage16, long_edge: u32) -> RawImage16 {
-    let Some(linear) = crate::develop::LinearImage::new(image.width, image.height, image.rgb.clone())
+    let Some(linear) =
+        crate::develop::LinearImage::new(image.width, image.height, image.rgb.clone())
     else {
         return image;
     };
@@ -386,6 +663,7 @@ fn downscale(image: RawImage16, long_edge: u32) -> RawImage16 {
         source: image.source,
         orientation: image.orientation,
         as_shot_temperature: image.as_shot_temperature,
+        camera_matrix_id: image.camera_matrix_id,
     }
 }
 
@@ -400,7 +678,14 @@ fn loader() -> &'static RawLoader {
 /// 挑一张够用的内嵌图。
 ///
 /// 顺序：先问小的（`thumbnail_image`，解码便宜），不够大再问大的（`preview_image`）；
-/// 都不够大就把**最大的那张**带回去（够 75% 就用它，否则调用方去真解码）。
+/// 规则是「**最小够用**」——够 `need` 就立刻用（剩下的大图**不去解码**）；都不够时
+/// `embedded_only`（没有真解码兜底）拿**最大**的那张，否则要求 ≥[`PREVIEW_MIN_PERCENT`]%。
+///
+/// 「embedded_only 时代取最大」这条是 2026-10-05 补的：原先 embedded_only 会**无条件接受
+/// 第一张**（哪怕它只有 160×120），于是 Ricoh/Sigma 的 DNG 明明有 6000×4000 预览，网格却
+/// 拿 160×120 铺满 —— 小图挡大图不是「够用」，是错误。
+///
+/// 候选是**惰性迭代器**：这里只按需 `next()`，拿够就早退；测试可以直接喂现成的图。
 ///
 /// # 这个 75% 阀值是**观感分岔点**（人类 2026-09-17 定：保持现状）
 ///
@@ -417,38 +702,29 @@ fn loader() -> &'static RawLoader {
 /// W3 显影视口），那时两条路会并成一条。在此之前**别把这里当 bug 改**：
 /// 把阀值提到 100% 会让看图永远吃预览（糊），降下来会让小图也走完整解码（慢）。
 fn pick_embedded(
-    decoder: &dyn Decoder,
-    source: &RawSource,
-    params: &RawDecodeParams,
+    candidates: impl Iterator<Item = Option<DynamicImage>>,
     need: u32,
     embedded_only: bool,
 ) -> Option<(DynamicImage, PixelSource)> {
     let mut best: Option<DynamicImage> = None;
-
-    // `thumbnail_image` 通常是几百像素的小图；先问它，命中就完全不必解码大预览
-    for candidate in (0..2).map(|index| if index == 0 {
-        decoder.thumbnail_image(source, params)
-    } else {
-        decoder.preview_image(source, params)
-    }) {
-        let Ok(Some(img)) = candidate else { continue };
-        let long = long_edge(&img);
-        if long > 0 && (embedded_only || long >= need) {
-            return Some((img, PixelSource::EmbeddedPreview));
+    for image in candidates.flatten() {
+        let long = long_edge(&image);
+        if long == 0 {
+            continue;
+        }
+        // 够用就早退：`need` 之后的候选（大预览）根本不去解码
+        if long >= need {
+            return Some((image, PixelSource::EmbeddedPreview));
         }
         if best.as_ref().is_none_or(|b| long_edge(b) < long) {
-            best = Some(img);
+            best = Some(image);
         }
     }
-
-    if let Some(img) = best {
-        let long = long_edge(&img);
-        // 够了 75%：放大一点用（浏览场景比「等一次完整解码」划算）
-        if long.saturating_mul(100) >= need.saturating_mul(PREVIEW_MIN_PERCENT) {
-            return Some((img, PixelSource::EmbeddedPreview));
-        }
-    }
-    None
+    let image = best?;
+    let long = long_edge(&image);
+    // 够了 75%：放大一点用（浏览场景比「等一次完整解码」划算）
+    (embedded_only || long.saturating_mul(100) >= need.saturating_mul(PREVIEW_MIN_PERCENT))
+        .then_some((image, PixelSource::EmbeddedPreview))
 }
 
 /// 从 RAW 自己的元数据里取 EXIF 方向 —— CR3 这类容器读不到外层 EXIF，只能靠它。
@@ -540,6 +816,58 @@ pub fn is_readable(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::develop::color::XYZ_TO_SRGB_D65;
+
+    #[test]
+    fn unbounded_sensor_scaling_covers_repeat_grid_odd_sizes_and_old_identity() {
+        let mut values=vec![0.0,10.0,120.0,30.0,0.0,230.0,40.0,50.0,60.0];
+        normalize_sensor(&mut values,(3,3,1),(2,2,1),&[10.0,20.0,30.0,40.0],&[110.0,120.0,130.0,140.0],true).unwrap();
+        assert_eq!(values,vec![-0.1,-0.1,1.1,0.0,-0.4,2.0,0.3,0.3,0.5]);
+        let mut rgb=vec![0.0,60.0,230.0];
+        normalize_sensor(&mut rgb,(1,1,3),(1,1,3),&[10.0,20.0,30.0],&[110.0,120.0,130.0],false).unwrap();
+        assert_eq!(rgb,vec![-0.1,0.4,2.0]);
+        for (black,white) in [(vec![10.0],vec![10.0]),(vec![f32::NAN],vec![100.0]),(vec![0.0],vec![])] {
+            let mut v=vec![1.0];assert!(normalize_sensor(&mut v,(1,1,1),(1,1,1),&black,&white,false).is_err());assert_eq!(v,[1.0]);
+        }
+        assert!(normalize_sensor(&mut [],(0,1,1),(1,1,1),&[0.0],&[1.0],false).is_err());
+        let legacy=crate::color::ProfileId::of_bytes(b"matrix");let current=working_matrix_id(&legacy);
+        assert_ne!(legacy,current);
+        assert!(!use_legacy_scaling(None,&legacy,&current).unwrap());
+        assert!(use_legacy_scaling(Some(&legacy),&legacy,&current).unwrap());
+        assert!(!use_legacy_scaling(Some(&current),&legacy,&current).unwrap());
+        assert!(use_legacy_scaling(Some(&crate::color::ProfileId::of_bytes(b"wrong")),&legacy,&current).is_err());
+    }
+
+    #[test]
+    fn camera_calibration_keeps_out_of_range_values() {
+        let input = [[-0.25, 0.5, 1.5], [2.0, 0.0, 0.0]];
+        let output =
+            camera_rgb_to_srgb(&input, [1.0, 1.0, 1.0, f32::NAN], XYZ_TO_SRGB_D65).unwrap();
+        for (actual, expected) in output[0].iter().zip(input[0]) {
+            assert!((actual - expected).abs() < 1e-5);
+        }
+        assert!(output[0][0] < 0.0);
+        assert!(output[0][2] > 1.0);
+        assert!(output[1][0] > 1.0);
+        assert!(camera_rgb_to_srgb(&input, [f32::NAN; 4], XYZ_TO_SRGB_D65).is_err());
+        assert!(camera_rgb_to_srgb(&input, [1.0; 4], [[0.0; 3]; 3]).is_err());
+    }
+
+    #[test]
+    fn camera_matrix_rejects_unsupported_channel_and_illuminant_combinations() {
+        assert!(d65_matrix::<3>(&[1.0; 8], Illuminant::D65).is_err());
+        assert!(d65_matrix::<3>(&[f32::NAN; 9], Illuminant::D65).is_err());
+        assert!(d65_matrix::<4>(&[1.0; 12], Illuminant::D50).is_err());
+    }
+
+    #[test]
+    fn camera_matrix_identity_changes_with_illuminant_and_float_bits() {
+        let a = matrix_id_from_parts("D65", &[1.0, 0.0, -0.25]);
+        assert_eq!(a, matrix_id_from_parts("D65", &[1.0, 0.0, -0.25]));
+        assert_ne!(a, matrix_id_from_parts("D50", &[1.0, 0.0, -0.25]));
+        assert_ne!(a, matrix_id_from_parts("D65", &[1.0, -0.0, -0.25]));
+    }
 
     /// 假的 RAW 文件（TIFF 头 + 填充）：预检能过，解码必然失败 —— 用来验证
     /// 「失败是干净的错误，不是 panic、不是崩溃」。
@@ -635,7 +963,9 @@ mod tests {
     #[test]
     fn as_shot_temperature_follows_a_known_illuminant() {
         // 造一张「相机空间 = sRGB」的假图：相机中性 = 某色温的白 ⇒ 反查要回到那个色温
-        use crate::develop::color::{SRGB_TO_XYZ_D65, XYZ_TO_SRGB_D65, kelvin_to_xy, mat3_inverse, mat3_vec3, xy_to_xyz};
+        use crate::develop::color::{
+            SRGB_TO_XYZ_D65, XYZ_TO_SRGB_D65, kelvin_to_xy, mat3_inverse, mat3_vec3, xy_to_xyz,
+        };
         let xyz_to_cam = mat3_inverse(SRGB_TO_XYZ_D65).expect("可逆");
         let matrix: Vec<f32> = xyz_to_cam.iter().flatten().copied().collect();
         for kelvin in [3000.0f32, 5000.0, 6500.0] {
@@ -653,6 +983,31 @@ mod tests {
             );
         }
         let _ = &matrix;
+    }
+
+    #[test]
+    fn embedded_pick_uses_the_smallest_sufficient_then_the_largest() {
+        let img = |w: u32, h: u32| {
+            Some(image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+                w,
+                h,
+                image::Rgb([0, 0, 0]),
+            )))
+        };
+        // 颁略图够用：拿它，**不去解码大预览**（迭代器惰性：第二项根本不会被取）
+        let picked = pick_embedded([img(1024, 768), img(6000, 4000)].into_iter(), 384, true).unwrap();
+        assert_eq!(picked.0.width(), 1024);
+        // 颁略图太小：即便 embedded_only 也要拿大的那张（160×120 不许挡住 6000×4000）
+        let picked = pick_embedded([img(160, 120), img(6000, 4000)].into_iter(), 384, true).unwrap();
+        assert_eq!(picked.0.width(), 6000);
+        // 都不够 75%（非 embedded_only）→ 回去真解码
+        assert!(pick_embedded([img(160, 120), img(200, 150)].into_iter(), 384, false).is_none());
+        // 够 75% 就用（300/384 ≈ 78%）
+        let picked = pick_embedded([img(160, 120), img(300, 225)].into_iter(), 384, false).unwrap();
+        assert_eq!(picked.0.width(), 300);
+        // 一张都没有 / 尺寸为 0 → None
+        assert!(pick_embedded([None, None].into_iter(), 384, true).is_none());
+        assert!(pick_embedded([img(0, 0)].into_iter(), 384, true).is_none());
     }
 
     #[test]

@@ -20,11 +20,10 @@
  * 不需要为它加一条 IPC（真要换成系统对话框 + Rust 写盘，改的只有这一处）。
  */
 
-import { Dialog as ArkDialog } from "@ark-ui/solid";
 import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "solid-js";
-import { Portal } from "solid-js/web";
 
 import { Button } from "../../components/ui/Button.tsx";
+import { Dialog } from "../../components/ui/Dialog.tsx";
 import { blockingIssues, detectConflicts, rawChordOf, type CommandSpec } from "../../lib/commands.ts";
 import { chordFromEvent, formatChord, parseChord } from "../../lib/key-chords.ts";
 import {
@@ -50,7 +49,8 @@ export interface ShortcutSettingsDialogProps {
 /** 分组显示顺序（与命令面板同一套分组，顺序按这里） */
 const GROUP_ORDER = ["file", "edit", "view", "window", "help", "viewer", "mark", "navigate", "import"] as const;
 
-export function ShortcutSettingsDialog(props: ShortcutSettingsDialogProps) {
+/** 全局设置与旧入口共用这一份快捷键编辑逻辑。 */
+export function ShortcutSettingsPanel(props: ShortcutSettingsDialogProps) {
   /** 草稿：打开时从单例拷一份，保存时才写回 */
   const [draft, setDraft] = createSignal<Record<string, string | null>>({});
   /** 正在捕获哪一行（命令 id；`null` = 没在捕获） */
@@ -171,23 +171,11 @@ export function ShortcutSettingsDialog(props: ShortcutSettingsDialogProps) {
   };
 
   return (
-    <ArkDialog.Root
-      open={props.open}
-      onOpenChange={(details) => props.onOpenChange(details.open)}
-      lazyMount
-      unmountOnExit
-      role="dialog"
-    >
-      <Portal>
-        <ArkDialog.Backdrop class="fixed inset-0 bg-scrim" />
-        <ArkDialog.Positioner class="fixed inset-0 flex items-center justify-center p-4">
-          <ArkDialog.Content
+          <div
             data-shortcuts-dialog="open"
-            class="flex max-h-[80vh] w-full max-w-2xl flex-col gap-3 rounded-ui bg-surface-layer p-(--dialog-pad) outline-none"
+            class="flex min-h-0 flex-1 flex-col gap-3"
           >
-            <ArkDialog.Title class="text-[17px] leading-6 font-semibold text-fg-1">
-              {t("shortcuts.title")}
-            </ArkDialog.Title>
+            <h2 class="text-fs-3 leading-6 font-semibold text-fg-1">{t("shortcuts.title")}</h2>
             <p class="text-[13px] text-fg-2">{t("shortcuts.description")}</p>
 
             {/* 阻断冲突：红字逐条列出来（保存会被禁用） */}
@@ -314,9 +302,21 @@ export function ShortcutSettingsDialog(props: ShortcutSettingsDialogProps) {
                 {t("common.save")}
               </Button>
             </div>
-          </ArkDialog.Content>
-        </ArkDialog.Positioner>
-      </Portal>
-    </ArkDialog.Root>
+          </div>
+  );
+}
+
+/** 兼容旧的独立入口；设置导航使用上面的 Panel，不会建立第二份编辑实现。 */
+export function ShortcutSettingsDialog(props: ShortcutSettingsDialogProps) {
+  return (
+    <Dialog
+      open={props.open}
+      onOpenChange={props.onOpenChange}
+      title={t("shortcuts.title")}
+      size="wide"
+      class="max-h-[80vh]"
+    >
+      <ShortcutSettingsPanel {...props} />
+    </Dialog>
   );
 }

@@ -94,6 +94,17 @@ pub struct CatalogSink<'a> {
     recovery: Option<&'a crate::store::session::TaskCatalog>,
     now_ms: i64,
     ops: Vec<Op>,
+    /// 本批**新建**的资产（sidecar 采纳用；`take_new_assets` 取走）。
+    new_assets: Vec<NewAsset>,
+}
+
+/// 新登记时**真创建**了 `assets` 行的照片（往已有资产上补文件不算）。
+/// `source_file_abs` = 源文件绝对路径 —— sidecar 探测在源目录（`_RAW/` 折算后）。
+#[derive(Debug, Clone, PartialEq)]
+pub struct NewAsset {
+    pub asset_id: i64,
+    pub target_rel: String,
+    pub source_file_abs: String,
 }
 
 impl<'a> CatalogSink<'a> {
@@ -105,6 +116,7 @@ impl<'a> CatalogSink<'a> {
             recovery: None,
             now_ms,
             ops: Vec::new(),
+            new_assets: Vec::new(),
         }
     }
 
@@ -118,6 +130,7 @@ impl<'a> CatalogSink<'a> {
             recovery: Some(task),
             now_ms,
             ops: Vec::new(),
+            new_assets: Vec::new(),
         }
     }
     fn active(&self) -> ActiveCatalog<'_> {
@@ -132,6 +145,11 @@ impl<'a> CatalogSink<'a> {
         self.ops.len()
     }
 
+    /// 取走本批**新建**的资产（sidecar 采纳用，`specs/xmp-w1.md` §7；只回真创建的那些）。
+    pub fn take_new_assets(&mut self) -> Vec<NewAsset> {
+        std::mem::take(&mut self.new_assets)
+    }
+
     /// 把攒下的动作一次做完。
     fn flush(&mut self) -> Result<()> {
         if self.ops.is_empty() {
@@ -139,9 +157,10 @@ impl<'a> CatalogSink<'a> {
         }
         let ops = self.ops.clone();
         let now = self.now_ms;
-        self.active().write_tx(move |tx| {
+        let created = self.active().write_tx(move |tx| {
+            let mut created = Vec::new();
             for op in &ops {
-                apply(tx, op, now)?;
+                apply(tx, op, now, &mut created)?;
             }
             let mut runs = std::collections::HashSet::new();
             for op in &ops {
@@ -150,8 +169,9 @@ impl<'a> CatalogSink<'a> {
             for id in runs {
                 tx.execute("UPDATE import_runs SET imported=(SELECT count(*) FROM import_items WHERE run_id=?1 AND status='imported'), skipped=(SELECT count(*) FROM import_items WHERE run_id=?1 AND status='skipped'), failed=(SELECT count(*) FROM import_items WHERE run_id=?1 AND status='failed') WHERE id=?1 AND state='running'", [id])?;
             }
-            Ok(())
+            Ok(created)
         })?;
+        self.new_assets.extend(created);
         self.ops.clear();
         Ok(())
     }
@@ -326,8 +346,13 @@ impl ImportSink for CatalogSink<'_> {
     }
 }
 
-/// 在一个写事务/连接里做掉一条动作。
-fn apply(conn: &rusqlite::Connection, op: &Op, now_ms: i64) -> Result<()> {
+/// 在一个写事务/连接里做掉一条动作。`new_assets` 收集本批真创建的资产（Register 分支）。
+fn apply(
+    conn: &rusqlite::Connection,
+    op: &Op,
+    now_ms: i64,
+    new_assets: &mut Vec<NewAsset>,
+) -> Result<()> {
     match op {
         Op::InsertItem {
             run_id,
@@ -357,7 +382,14 @@ fn apply(conn: &rusqlite::Connection, op: &Op, now_ms: i64) -> Result<()> {
             taken,
         } => {
             let forms = PathForms::new(target_rel);
-            let asset_id = find_or_create_asset(conn, target_rel, now_ms)?;
+            let (asset_id, created) = find_or_create_asset(conn, target_rel, now_ms)?;
+            if created {
+                new_assets.push(NewAsset {
+                    asset_id,
+                    target_rel: target_rel.clone(),
+                    source_file_abs: source_path.clone(),
+                });
+            }
             let disk = DiskFile {
                 rel_path: target_rel.clone(),
                 rel_path_folded: forms.folded().to_string(),
@@ -488,7 +520,11 @@ fn keep_better_taken(
 }
 
 /// 找这张照片的资产：**把 `_RAW/` 折算回位图那个目录**再找；没有就新建一个。
-fn find_or_create_asset(conn: &rusqlite::Connection, target_rel: &str, now_ms: i64) -> Result<i64> {
+fn find_or_create_asset(
+    conn: &rusqlite::Connection,
+    target_rel: &str,
+    now_ms: i64,
+) -> Result<(i64, bool)> {
     let (dir, file_name) = match target_rel.rsplit_once('/') {
         Some((dir, name)) => (dir, name),
         None => ("", target_rel),
@@ -499,8 +535,8 @@ fn find_or_create_asset(conn: &rusqlite::Connection, target_rel: &str, now_ms: i
     let stem = crate::media::kind::stem_folded(file_name);
 
     match assets::find_asset_for_group(conn, &fold(pairing_dir), &stem)? {
-        Some(id) => Ok(id),
-        None => assets::insert_asset(conn, now_ms),
+        Some(id) => Ok((id, false)),
+        None => Ok((assets::insert_asset(conn, now_ms)?, true)),
     }
 }
 
@@ -805,6 +841,39 @@ mod tests {
         assert_eq!(rows[0].2, "pending", "规划出来的先落 pending");
         assert_eq!(rows[1].2, "skipped");
         assert!(rows[1].3.is_some(), "跳过要带原因");
+    }
+
+    #[test]
+    fn new_assets_track_creation_only_not_extension() {
+        let dir = tmp();
+        let db = catalog(dir.path());
+        let mut sink = CatalogSink::new(&db, T0);
+        let run_id = sink.begin_run(&request("/src")).unwrap();
+        // 位图先落：真创建资产
+        let bitmap = source_file("a.jpg", MediaKind::Image, "/src/2026/a.jpg", 10);
+        let bitmap_item = planned(0, "a.jpg", "photos/2026/a.jpg", Role::Bitmap);
+        sink.record_plan(run_id, std::slice::from_ref(&bitmap), std::slice::from_ref(&bitmap_item)).unwrap();
+        sink.register(run_id, &bitmap_item, &bitmap, None).unwrap();
+        sink.commit().unwrap();
+        let created = sink.take_new_assets();
+        assert_eq!(created.len(), 1);
+        assert_eq!(created[0].target_rel, "photos/2026/a.jpg");
+        assert_eq!(created[0].source_file_abs, "/src/2026/a.jpg");
+
+        // 后补同主体 RAW：挂到同一资产，不再产生新资产记录
+        let raw = source_file("a.orf", MediaKind::Raw, "/src/2026/a.orf", 20);
+        let raw_item = planned(0, "a.orf", "photos/2026/_RAW/a.orf", Role::Raw);
+        sink.record_plan(run_id, std::slice::from_ref(&raw), std::slice::from_ref(&raw_item)).unwrap();
+        sink.register(run_id, &raw_item, &raw, None).unwrap();
+        sink.commit().unwrap();
+        assert!(sink.take_new_assets().is_empty(), "往已有资产补文件不算新建");
+
+        let assets: i64 = db
+            .read(|conn| {
+                Ok(conn.query_row("SELECT count(*) FROM assets", [], |r| r.get(0))?)
+            })
+            .unwrap();
+        assert_eq!(assets, 1);
     }
 
     #[test]

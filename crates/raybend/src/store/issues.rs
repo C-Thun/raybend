@@ -7,7 +7,11 @@ use serde::{Deserialize, Serialize};
 use super::develop::{DevelopStack, EditBase};
 use crate::error::{Error, Result};
 
-pub const PROFILE_SCHEMA_VERSION: i64 = 1;
+pub const PROFILE_SCHEMA_VERSION: i64 = 2;
+
+pub fn profile_schema_version(stack: &DevelopStack) -> i64 {
+    if stack.color.is_some() { 2 } else { 1 }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Issue {
@@ -65,7 +69,7 @@ pub fn list(conn: &Connection, asset_id: i64) -> Result<Vec<Issue>> {
     })?;
     rows.map(|row| {
         let (id, asset_id, name, profile_hash, base, created_at, schema_version, json, ordinal) = row?;
-        if schema_version != PROFILE_SCHEMA_VERSION {
+        if !(1..=PROFILE_SCHEMA_VERSION).contains(&schema_version) {
             return Err(Error::Unsupported(format!(
                 "定稿 {id} 的配置版本 {schema_version} 尚不支持"
             )));
@@ -74,7 +78,8 @@ pub fn list(conn: &Connection, asset_id: i64) -> Result<Vec<Issue>> {
             .ok_or_else(|| Error::Unsupported(format!("定稿 {id} 的编辑源无效")))?;
         let stack: DevelopStack = serde_json::from_str(&json)
             .map_err(|error| Error::Unsupported(format!("定稿 {id} 的配置损坏：{error}")))?;
-        if stack.source_base != source_base || self::profile_hash(&stack)? != profile_hash {
+        stack.validate()?;
+        if schema_version != profile_schema_version(&stack) || stack.source_base != source_base || self::profile_hash(&stack)? != profile_hash {
             return Err(Error::Unsupported(format!("定稿 {id} 的配置指纹不一致")));
         }
         Ok(Issue {
@@ -192,7 +197,7 @@ pub fn create(
     conn.execute(
         "INSERT INTO issues (asset_id, schema_version, name, profile_json, profile_hash, source_base, created_at, ordinal) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-        params![asset_id, PROFILE_SCHEMA_VERSION, name, json, hash, stack.source_base.as_str(), now_ms, ordinal],
+        params![asset_id, profile_schema_version(stack), name, json, hash, stack.source_base.as_str(), now_ms, ordinal],
     )?;
     get(conn, asset_id, conn.last_insert_rowid())?
         .ok_or_else(|| Error::Unsupported("刚创建的定稿无法读回".into()))
@@ -203,6 +208,66 @@ pub fn delete(conn: &Connection, asset_id: i64, issue_id: i64) -> Result<bool> {
         "DELETE FROM issues WHERE asset_id = ?1 AND id = ?2",
         params![asset_id, issue_id],
     )? > 0)
+}
+
+/// 采纳（sidecar 导入）一条定稿：保留 sidecar 里的**名称 / 基准 / 创建时间**；
+/// 序号优先沿用，冲突或越界时重新分配；重复（同哈希同配置）或名称非法则跳过。
+///
+/// 与 [`create`] 的区别：不要求「与现有定稿不同」的交互语义（重复直接静默跳过），
+/// 也不用当前 latest —— 栈来自 sidecar（共用 `DevelopStack::validate` 校验）。
+/// 返回 `true` = 真的建了。
+pub fn import_issue(
+    conn: &Connection,
+    asset_id: i64,
+    raw_name: &str,
+    source_base: EditBase,
+    created_at_ms: i64,
+    ordinal_hint: Option<i64>,
+    stack: &DevelopStack,
+) -> Result<bool> {
+    let name = raw_name.trim();
+    if name.is_empty()
+        || name.chars().count() > 80
+        || name.chars().any(char::is_control)
+        || ["sooc", "raw", "latest"]
+            .iter()
+            .any(|reserved| name.eq_ignore_ascii_case(reserved))
+    {
+        return Ok(false);
+    }
+    // 栈自身的基准与声明对齐（手改过的 sidecar 可能两边不一致；声明值胜出）——
+    // 必须在去重判断**之前**做，否则两边基准不一致时哈希对不上、重复检测失效。
+    let mut stack = stack.clone();
+    stack.source_base = source_base;
+    stack.validate()?;
+    let existing = list(conn, asset_id)?;
+    if matching_issue(&stack, &existing)?.is_some() {
+        return Ok(false);
+    }
+    let occupied: std::collections::BTreeSet<i64> =
+        existing.iter().map(|issue| issue.ordinal).collect();
+    let ordinal = match ordinal_hint {
+        Some(hint) if (0..100).contains(&hint) && !occupied.contains(&hint) => hint,
+        _ => allocate_ordinal(conn, asset_id)?,
+    };
+    let hash = profile_hash(&stack)?;
+    let json = serde_json::to_string(&stack)
+        .map_err(|error| Error::Unsupported(format!("定稿配置序列化失败：{error}")))?;
+    conn.execute(
+        "INSERT INTO issues (asset_id, schema_version, name, profile_json, profile_hash, source_base, created_at, ordinal) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![
+            asset_id,
+            profile_schema_version(&stack),
+            name,
+            json,
+            hash,
+            source_base.as_str(),
+            created_at_ms,
+            ordinal
+        ],
+    )?;
+    Ok(true)
 }
 
 /// 影调与颜色取十档；这只是可编辑的建议名，不参与配置或画面。
@@ -337,6 +402,73 @@ mod tests {
     }
 
     #[test]
+    fn import_issue_keeps_fields_reuses_ordinal_and_skips_duplicates() {
+        let conn = db();
+        conn.execute_batch("INSERT INTO assets(id, imported_at, updated_at) VALUES(1,1,1);")
+            .unwrap();
+        let stack = |exposure: f64| {
+            let mut stack = DevelopStack::default();
+            stack.params.insert("exposure".into(), exposure);
+            stack
+        };
+        // 序号沿用提示值；名称与创建时间保留
+        assert!(import_issue(
+            &conn,
+            1,
+            "暖调",
+            EditBase::Sooc,
+            1_759_000_000_000,
+            Some(7),
+            &stack(0.1)
+        )
+        .unwrap());
+        let imported = list(&conn, 1).unwrap();
+        assert_eq!(imported.len(), 1);
+        assert_eq!(imported[0].name, "暖调");
+        assert_eq!(imported[0].ordinal, 7);
+        assert_eq!(imported[0].created_at, 1_759_000_000_000);
+        assert_eq!(imported[0].source_base, EditBase::Sooc);
+
+        // 同配置重复导入：静默跳过
+        assert!(!import_issue(
+            &conn,
+            1,
+            "另一个名字",
+            EditBase::Sooc,
+            2,
+            Some(8),
+            &stack(0.1)
+        )
+        .unwrap());
+
+        // 序号冲突（7 已占）：重新分配
+        assert!(import_issue(&conn, 1, "冷调", EditBase::Raw, 3, Some(7), &stack(0.2)).unwrap());
+        let imported = list(&conn, 1).unwrap();
+        assert_eq!(imported.len(), 2);
+        // list 按 created_at DESC 排（第一条的时间戳更大），序号比集合不比顺序
+        let mut ordinals: Vec<i64> = imported.iter().map(|i| i.ordinal).collect();
+        ordinals.sort_unstable();
+        assert_eq!(ordinals, vec![0, 7]);
+
+        // 非法名称 / 越界序号：跳过 / 重分配
+        assert!(!import_issue(&conn, 1, "  ", EditBase::Raw, 4, None, &stack(0.3)).unwrap());
+        assert!(!import_issue(
+            &conn,
+            1,
+            "SOOC",
+            EditBase::Raw,
+            5,
+            None,
+            &stack(0.4)
+        )
+        .unwrap(), "保留名不许用");
+        assert!(import_issue(&conn, 1, "远端", EditBase::Raw, 6, Some(999), &stack(0.5)).unwrap());
+        let imported = list(&conn, 1).unwrap();
+        assert_eq!(imported.len(), 3);
+        assert!(imported.iter().all(|i| (0..100).contains(&i.ordinal)));
+    }
+
+    #[test]
     fn ordinals_allocate_in_sequence_reuse_holes_and_wrap() {
         let conn = db();
         conn.execute_batch("INSERT INTO assets(id, imported_at, updated_at) VALUES(1,1,1);")
@@ -372,7 +504,7 @@ mod tests {
             .unwrap();
         for number in 0..100 {
             let mut stack = DevelopStack::default();
-            stack.params.insert("exposure".into(), number as f64);
+            stack.params.insert("exposure".into(), -2.0 + number as f64 / 25.0);
             create(&conn, 1, &format!("第{number}"), &stack, number + 1).unwrap();
         }
         let mut ordinals: Vec<i64> = list(&conn, 1)
@@ -383,7 +515,7 @@ mod tests {
         ordinals.sort_unstable();
         assert_eq!(ordinals, (0..100).collect::<Vec<_>>());
         let mut stack = DevelopStack::default();
-        stack.params.insert("exposure".into(), 9.9);
+        stack.params.insert("exposure".into(), 1.999);
         let full = create(&conn, 1, "第一百零一", &stack, 999).unwrap_err();
         assert!(full.to_string().contains("100"));
         // 删掉一个，位置立刻可用
@@ -431,6 +563,31 @@ mod tests {
         assert!(!can_finalize(&with_auto, &list(&conn, 1).unwrap()).unwrap());
         with_auto.params.insert("exposure".into(), 0.8);
         assert!(can_finalize(&with_auto, &list(&conn, 1).unwrap()).unwrap());
+    }
+
+    #[test]
+    fn color_issues_have_schema_two_and_legacy_issues_stay_immutable() {
+        let conn = db();
+        conn.execute_batch("INSERT INTO assets(id, imported_at, updated_at) VALUES(1,1,1);").unwrap();
+        let mut legacy = DevelopStack::default();
+        legacy.params.insert("exposure".into(), 0.5);
+        let first = create(&conn, 1, "旧定稿", &legacy, 1).unwrap();
+        let mut modern = legacy.clone();
+        modern.color = Some(crate::color::PhotoColorState::new_pipeline(crate::color::SourceColor::AssumedSrgb));
+        let second = create(&conn, 1, "色彩定稿", &modern, 2).unwrap();
+        assert_ne!(first.profile_hash, second.profile_hash);
+        let rows: Vec<(i64, i64)> = conn.prepare("SELECT id,schema_version FROM issues ORDER BY id").unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().collect::<rusqlite::Result<_>>().unwrap();
+        assert_eq!(rows, vec![(first.id, 1), (second.id, 2)]);
+        let saved = list(&conn, 1).unwrap();
+        let saved_first = saved.iter().find(|issue| issue.id == first.id).unwrap();
+        let saved_second = saved.iter().find(|issue| issue.id == second.id).unwrap();
+        assert_eq!(saved_first.stack, legacy);
+        assert_eq!(saved_first.profile_hash, first.profile_hash);
+        assert_eq!(saved_second.stack, modern);
+        assert_eq!(selection(&modern, &saved).unwrap(), Selection::Issue(second.id));
+        conn.execute("UPDATE issues SET schema_version=1 WHERE id=?1", [second.id]).unwrap();
+        assert!(list(&conn, 1).is_err());
     }
 
     #[test]
@@ -597,4 +754,15 @@ mod tests {
         assert_eq!(style_words(&stack, false), ("柔和", "素净灰调"));
         assert_eq!(style_words(&stack, true), ("Soft", "Monochrome"));
     }
+
+    #[test]
+    fn invalid_imported_issue_is_rejected_before_insertion() {
+        let conn = db();
+        conn.execute_batch("INSERT INTO assets(id, imported_at, updated_at) VALUES(1,1,1);").unwrap();
+        let mut stack = DevelopStack::default();
+        stack.curves.insert("rgb".into(), vec![[0.2, 0.0], [0.2, 1.0]]);
+        assert!(import_issue(&conn, 1, "非法曲线", EditBase::Raw, 1, None, &stack).is_err());
+        assert!(list(&conn, 1).unwrap().is_empty());
+    }
+
 }

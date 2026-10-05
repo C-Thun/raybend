@@ -54,6 +54,21 @@ function collect() {
   return { out, send: (intent: PanIntent) => out.push(intent) };
 }
 
+test("编辑载荷尾样本在换照片/库和未载入时丢弃，已保存颜色不被空载荷覆盖",()=> {
+  const frames=fakeScheduler();
+  let current={asset:"A",repo:"库一",ready:false};
+  const sent:unknown[]=[];
+  const queue=createLatestCoalescer<{asset:string;repo:string;color:string|null}>({scheduler:frames.scheduler,
+    isCurrent:value=>current.ready && current.asset===value.asset && current.repo===value.repo,
+    send:value=>sent.push(value)});
+  queue.push({asset:"A",repo:"库一",color:null});frames.run();assert.equal(sent.length,0);
+  current.ready=true;
+  const saved={asset:"A",repo:"库一",color:"linear_rec2020_v2"};queue.push(saved);frames.run();assert.deepEqual(sent,[saved]);
+  queue.push({asset:"A",repo:"库一",color:null});current={asset:"B",repo:"库一",ready:true};frames.run();assert.equal(sent.length,1);
+  queue.push({asset:"B",repo:"库一",color:null});current={asset:"B",repo:"库二",ready:true};queue.flush();assert.equal(sent.length,1);
+  const legacy={asset:"B",repo:"库二",color:null};queue.push(legacy);frames.run();assert.deepEqual(sent,[saved,legacy]);
+});
+
 test("一次拖动里的多段位移合并成「一帧一条」，位移相加", () => {
   const frames = fakeScheduler();
   const sink = collect();

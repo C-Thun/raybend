@@ -31,6 +31,11 @@ roxmltree = "0.20.0"
 flate2 = "1.1.10"
 webp = { version = "0.3.1", default-features = false }
 notify = { version = "8.2.0", default-features = false }
+lcms2 = { version = "6.2.0", features = ["static"] }
+png = "0.18.1"
+# Already present through image; only packs the GPU presentation texture, CPU stays f32.
+half = "2.7.1"
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "load-dynamic", "api-27"], optional = true }
 
 [lints]
 workspace = true
@@ -43,3 +48,11 @@ windows-sys.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+
+[features]
+ai-runtime = ["dep:ort"]
+ai-probe = ["ai-runtime"]
+
+[[example]]
+name = "ai-probe"
+required-features = ["ai-probe"]

@@ -331,7 +331,7 @@ Tauri 3.0 已进入 alpha（`3.0.0-alpha.0`），已知关键变更：
   **大图**（每个命名 issue 独立一张 1920 AVIF）在**库根**的 `cache/full/`（跟着库走，换机器/搬盘不用重渲染）。
   两处的编码格式统一 **AVIF 质量 90 / 4:4:4**（人类 2026-09-24 定；快照恒为 AVIF，
   不考虑换 JXL —— 格式范围与 JXL 定位见 `memory/FUTURE.md` C8）。
-- **真相源规则**：本地编辑/评分/关键词以 **DB 为准**，XMP 只是互操作通道；RAW 永不写回原文件（只写 `.xmp` sidecar）。issue 的 XMP 表达契约见 `specs/issue-xmp-contract.md`，实现规格见 `specs/xmp-w1.md`（2026-09-30 草案待审）；**XMP 不是第一公民**，整库备份 = 直接拷 repos 目录；当前尚未写出 sidecar。
+- **真相源规则**：本地编辑/评分/关键词以 **DB 为准**，XMP 只是互操作通道；RAW 永不写回原文件（只写 `.xmp` sidecar）。issue 的 XMP 表达契约见 `specs/issue-xmp-contract.md`，实现规格见 `specs/xmp-sidecar.md`（2026-09-30 草案待审）；**XMP 不是第一公民**，整库备份 = 直接拷 repos 目录；当前尚未写出 sidecar。
 - **写并发**：SQLite 单写者 → 采用**单一写者 actor**（专属线程 + 专属连接，所有写操作串行化），读走连接池；批量事务；`PRAGMA journal_mode=WAL, synchronous=NORMAL, busy_timeout=5000, foreign_keys=ON`。
 - **库身份与多路径**（`memory/FUNCTION-REPOSITORY.md` §2）：库身份 = `catalog.db` 内的唯一 ID；`app.db` 记录「库 ID → 多个路径」。
   路径挂载了哪个库靠**读该路径下 catalog.db 的 ID** 比对，而不是靠路径字符串 —— 这是「同路径不同库 / 同库多路径」的机制。
@@ -671,6 +671,16 @@ let dev = !custom_protocol;        // ← dev 由 feature 决定，不是 debug/
 实测参考：首次 Windows 全量构建约 3–4 分钟；WSL 侧 `cargo check` 首次约 2–3 分钟。
 
 ---
+
+### 8.4 可选 AI 的构建输入（2026-10-04）
+
+模型制作归独立 `model-registry`，软件构建只读取 Git 忽略的 `ai-model-source.local.json`。编码器通用 artifact 和 RayBend 标签 profile 分开，三级定位+完整摘要，按现有可信 manifest 准入。
+
+`ai:export` 负责显式 CPU 制作、Git 库的受限自动提交和成功后的原子源登记；`ai:use` 只校验并登记。普通 debug/release/Tauri 构建复用 `scripts/lib/ai-build.mjs`；auto 输入不可用时提示基础版，required 构建前失败，off 跳过源检查。CPU ORT 固定官方 ZIP/摘要有缓存；普通构建不下载权重、不导出 ONNX、不改模型 Git。
+
+同一个冻结计划控制 Vite capability、Rust `photo-ai-runtime`、Tauri 资源和 `raybend-ai-build.json`。裸 cargo 默认无推理依赖。`check:win` 按产物记录与原生编译标记核对，禁止按当前模型源猜测旧 exe 能力；关闭 AI 要清理构建输出的 ai-model/ai-runtime。独立 bundle 需与先前 build 记录一致。
+
+详细协议与环境检查见 `specs/ai-model-library-build.md`，构建/制作使用见 `docs/ai/tinyclip-v1/README.md`。升级基础版保留既有标签/XMP/人工纠错；安装器切换与干净机 CPU 依赖仍由崔总验收。
 
 ## 9. Solid：包装组件透传 children —— `untrack` 必须写在「插入点」
 

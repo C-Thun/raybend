@@ -44,11 +44,15 @@ import { createAppearanceStore, type AppearanceStore } from "./lib/appearance.ts
 import { createCatalogRefresh } from "./lib/catalog-refresh.ts";
 import { createLayoutStore } from "./lib/layout-prefs.ts";
 import { FlowBar } from "./shell/FlowBar.tsx";
+import { GlobalSettingsDialog, type SettingsPage } from "./shell/GlobalSettingsDialog.tsx";
 import { createShellStore } from "./shell/store.ts";
 import { TitleBar } from "./shell/TitleBar.tsx";
 import { ToolsBar } from "./shell/ToolsBar.tsx";
 import { createImportStore, ImportWorkspace } from "./workspaces/import/index.ts";
 import { createToastStore, ToastHost, toastDisposer } from "./components/ui/Toast.tsx";
+import { aiBuildEnabled, aiCapability } from "./lib/ai-capability.ts";
+import { aiModelStatus, aiForeground } from "./api/photo-ai.ts";
+import { AiDialog } from "./features/browse/AiDialog.tsx";
 import { BrowseToolbar, BucketDialog, BucketPickerDialog, createBrowseStore, TagDialog, type BrowseStore } from "./features/browse/index.ts";
 import { createPhotoBucket, reconcileOrganization, removePhotoFromBucket, savePhotoBucketRules, type AssetIdentity, type PhotoBucket, type RuleSet } from "./api/organization.ts";
 import { rulesFromBrowseFilter } from "./features/browse/organization-rules.ts";
@@ -62,7 +66,6 @@ import { editorActions } from "./features/editor/actions.ts";
 import { viewerActions } from "./components/ui/viewer/actions.ts";
 import {
   CommandPalette,
-  ShortcutSettingsDialog,
   createCommandDispatcher,
   createCommandRegistry,
   type CommandDeps,
@@ -145,8 +148,7 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
   const editorStore = createEditorStore();
   const setEditorBase = (base: DevelopEditBase): void => {
     if (editorStore.editBase() === base) return;
-    editorStore.setEditBase(base);
-    editorActions()?.commitDevelop();
+    editorActions()?.setBase(base);
   };
   /** 编辑里有没有可编辑的照片（工具与右栏控件的可用性都看它） */
   const editorEnabled = (): boolean => {
@@ -374,7 +376,14 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
    * 两边都在这里汇合（`memory/ARCHITECTURE.md` §2 的组合层职责）。
    */
   const [tagsOpen, setTagsOpen] = createSignal(false);
+  const [aiAvailable, setAiAvailable] = createSignal(false);
+  onMount(() => { void aiModelStatus().then(status => setAiAvailable(aiCapability(aiBuildEnabled(), status.compiled))).catch(() => setAiAvailable(false)); });
+  const [aiDialog, setAiDialog] = createSignal<{ mode: "recognize" | "tasks"; rerun: boolean } | null>(null);
   const [organizationPanel, setOrganizationPanel] = createSignal<"library" | "buckets" | "tags">("library");
+  createEffect(() => {
+    const busy = shell.workflow() === "edit" || shell.workflow() === "import" || exportStore.processing();
+    void aiForeground(busy).catch((error: unknown) => console.error("[photo-ai] foreground update", error)); // i18n-exempt: 控制台诊断
+  });
   const [organizationRevision, setOrganizationRevision] = createSignal(0);
   const onlineOrganizationRepositories = () => repositories.list().filter((repo) => repo.online).map((repo) => repo.id);
   const organizationWorker = createOrganizationWorker({
@@ -454,6 +463,7 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
   let lastOrganizationMarkRepositories: string[] = [];
   const organizationMarkStore: BrowseStore = {
     ...browseStore,
+    repositoryId: () => organizationSelected().length === 1 ? organizationSelected()[0]!.repositoryId : browseStore.repositoryId(),
     canWrite: () => organizationSelected().length > 0 &&
       organizationSelectedItems().length === organizationSelected().length &&
       organizationSelected().every((photo) => repositories.byId(photo.repositoryId)?.online === true),
@@ -546,7 +556,8 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
   /* ── 命令体系（`features/commands/`）的组装（`specs/M2-W3.md` §2.1）── */
 
   const [paletteOpen, setPaletteOpen] = createSignal(false);
-  const [shortcutsOpen, setShortcutsOpen] = createSignal(false);
+  const [settingsOpen, setSettingsOpen] = createSignal(false);
+  const [settingsPage, setSettingsPage] = createSignal<SettingsPage>("color");
   const [aboutOpen, setAboutOpen] = createSignal(false);
   const [updatesOpen,setUpdatesOpen]=createSignal(false);
   const [aboutPage,setAboutPage]=createSignal<"about"|"help"|"licenses">("about");
@@ -611,7 +622,8 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
       close: () => void withWindow((handle) => handle.close()),
     },
     openPalette: () => setPaletteOpen(true),
-    openShortcuts: () => setShortcutsOpen(true),
+    openShortcuts: () => { setSettingsPage("shortcuts"); setSettingsOpen(true); },
+    openSettings: () => setSettingsOpen(true),
     openAbout: () => {setAboutPage("about");setAboutOpen(true);},
     openHelp: () => {setAboutPage("help");setAboutOpen(true);},
     openLicenses: () => {setAboutPage("licenses");setAboutOpen(true);},
@@ -656,6 +668,12 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
       fullscreen,
     },
     browse: {
+      ai: {
+        available: aiAvailable,
+        recognize: (rerun) => { if (aiAvailable()) setAiDialog({ mode: "recognize", rerun }); },
+        tasks: () => setAiDialog({ mode: "tasks", rerun: false }),
+        models: () => { setSettingsPage("ai"); setSettingsOpen(true); },
+      },
       organization: {
         panel: setOrganizationPanel,
         addSelected: () => openBucketPicker("selected"),
@@ -729,6 +747,7 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
       finalize: () => editorActions()?.finalize(),
       autoAdjust: () => editorActions()?.autoAdjust(),
       canAutoAdjust: () => editorActions()?.canAutoAdjust() ?? false,
+      color: {open:()=>{editorStore.resetChrome();editorStore.setAdvancedTab("color");},proof:()=>editorStore.setProofEnabled(!editorStore.proofEnabled()),warning:()=>editorStore.setProofWarning(!editorStore.proofWarning()),restore:()=>editorActions()?.restoreColor(),batch:()=>editorActions()?.reviewColorBatch()},
     },
   };
 
@@ -745,11 +764,11 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
     overrides: shortcutOverrides,
     blocked: () =>
       paletteOpen() ||
-      shortcutsOpen() ||
+      settingsOpen() ||
       aboutOpen() ||
       document.querySelector('[role="dialog"]') !== null,
     allowedWhileBlocked: (command) => document.querySelector("[data-export-all-issues]") !== null &&
-      !paletteOpen() && !shortcutsOpen() && !aboutOpen() &&
+      !paletteOpen() && !settingsOpen() && !aboutOpen() &&
       ["edit.selectAll", "edit.delete", "export.enqueue"].includes(command.id),
     onRun: (command) => {
       // 「打开面板」这类命令会把面板开开关关，别让分发器的日志把它们写成递归
@@ -796,7 +815,8 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
         aboutOpen={aboutOpen()}
         onAboutOpenChange={setAboutOpen}
       />
-      <FlowBar exportProcessing={exportStore.processing()} store={shell} exif={selectedMetadata.data()} onFullscreen={fullscreen()} />
+      <FlowBar exportProcessing={exportStore.processing()} store={shell} exif={selectedMetadata.data()} onFullscreen={fullscreen()}
+        settingsOpen={settingsOpen()} onSettings={() => { const command = commands.find((item) => item.id === "settings.open"); if (command) runCommand(command); }} />
 
       {/*
         批量排除（`memory/DESIGN.md` §12.2 的**反转**语义）：没有选中项时禁用。
@@ -833,6 +853,7 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
           <BrowseToolbar
             store={browseStore}
             toast={toast}
+            onOpenAi={aiAvailable() ? () => setAiDialog({ mode: "recognize", rerun: false }) : undefined}
             onOpenTags={() => setTagsOpen(true)}
             onAddSelectedToBucket={() => openBucketPicker("selected")}
             onAddFlagsToBucket={() => openBucketPicker("flags")}
@@ -842,6 +863,7 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
         </Show>
         <Show when={shell.workflow() === "browse" && organizationPhotoView()}>
           <BrowseToolbar store={organizationMarkStore} collectionMode toast={toast}
+            onOpenAi={aiAvailable() ? () => setAiDialog({ mode: "recognize", rerun: false }) : undefined}
             onOpenTags={() => setTagsOpen(true)}
             onAddSelectedToBucket={() => openBucketPicker("selected")}
             onNewAutoBucket={() => void openAutoBucket()} />
@@ -876,6 +898,11 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
         标签弹窗（`memory/FUNCTION-BROWSE.md` §3.3）：挂在**根层**，不推进 `ToolsBar` 的插槽 ——
         模态有自己的遮罩与层叠（`--z-modal`），放进条带里会被那一层的上下文困住。
       */}
+      <AiDialog open={aiDialog() !== null} mode={aiDialog()?.mode ?? "recognize"} rerun={aiDialog()?.rerun ?? false}
+        photos={organizationPhotoView() ? organizationSelected() : browseStore.selectedIds().map((assetId) => ({ repositoryId: browseStore.repositoryId() ?? "", assetId }))}
+        repositoryId={browseStore.repositoryId()} directory={browseStore.scopePath()} repositories={repositories.list()}
+        onClose={() => setAiDialog(null)} onStarted={() => setAiDialog({ mode: "tasks", rerun: false })}
+        onModels={() => { setAiDialog(null); setSettingsPage("ai"); setSettingsOpen(true); }} />
       <TagDialog
         open={tagsOpen()}
         store={!organizationPhotoView() ? browseStore : organizationMarkStore}
@@ -959,11 +986,13 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
         }}
       />
       <ExternalEditorDialog store={externalEditor}/>
-      <ShortcutSettingsDialog
-        open={shortcutsOpen()}
-        onOpenChange={setShortcutsOpen}
+      <GlobalSettingsDialog
+        open={settingsOpen()}
+        onOpenChange={setSettingsOpen}
+        page={settingsPage()}
+        onPageChange={setSettingsPage}
         commands={commands}
-        onSaved={() => toast.show({ tone: "success", message: t("shortcuts.saved") })}
+        onShortcutsSaved={() => toast.show({ tone: "success", message: t("shortcuts.saved") })}
       />
 
       {/* 数据库升级：全窗口阻塞遮罩（不给出口 —— 升级是原子操作，只能等） */}
@@ -998,6 +1027,7 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
             filmStripStep={filmStripPrefs.step("editor")}
             onFilmStripStepChange={(step) => filmStripPrefs.setStep("editor", step)}
             onOpenImport={() => shell.setWorkflow("import")}
+            onOpenColorProfiles={() => { setSettingsPage("profiles"); const command = commands.find((item) => item.id === "settings.open"); if (command) runCommand(command); }}
           />
         </Show>
       }>

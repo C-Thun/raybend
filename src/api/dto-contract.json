@@ -1,6 +1,11 @@
 {
-  "SystemPreferencesSnapshot": ["language", "theme"],
-  "RepositoryLocationError": ["code"],
+  "SystemPreferencesSnapshot": [
+    "language",
+    "theme"
+  ],
+  "RepositoryLocationError": [
+    "code"
+  ],
   "_comment": [
     "IPC 契约的键名清单 —— TS 侧（src/api/dto-contract.test.ts）与 Rust 侧",
     "（src-tauri/src/contract.rs）都对着它断言。数组是**排序后**的 camelCase 键名。",
@@ -304,7 +309,18 @@
     "updates",
     "viewportCss"
   ],
+  "DisplayPresentation": [
+    "diagnostic",
+    "displayId",
+    "generation",
+    "kind",
+    "outputSpace",
+    "profilePath",
+    "reason",
+    "sdrWhiteNits"
+  ],
   "EditorRenderState": [
+    "displayColor",
     "nrPending",
     "nrError",
     "referenceReady",
@@ -411,5 +427,74 @@
     "revision",
     "root",
     "state"
+  ],
+  "AiModelStatus": [
+    "buildMarker",
+    "bundled",
+    "bytes",
+    "compiled",
+    "manifestSha256",
+    "state"
+  ],
+  "AiTask": [
+    "done",
+    "error",
+    "failed",
+    "id",
+    "label",
+    "skipped",
+    "state",
+    "total",
+    "waiting"
+  ],
+  "PhotoTagState": [
+    "ai",
+    "manual",
+    "masks",
+    "result",
+    "version"
+  ],
+  "AiTagResult": [
+    "evidence",
+    "generatedAt",
+    "modelSha256",
+    "origin",
+    "pipelineSha256",
+    "sourceKey",
+    "valid"
+  ],
+  "AiTagEvidence": [
+    "accepted",
+    "conceptKey",
+    "score",
+    "tagName"
+  ],
+  "ColorBatchReview": [
+    "applicable",
+    "existing",
+    "profileName",
+    "selected",
+    "skipped",
+    "token"
+  ],
+  "ColorProfileEntry": [
+    "available",
+    "builtIn",
+    "hidden",
+    "key",
+    "name",
+    "originalFilename",
+    "profileClass",
+    "profileId"
+  ],
+  "ColorProfileLibrary": [
+    "entries"
+  ],
+  "ColorProfileImport": [
+    "duplicates",
+    "imported",
+    "library",
+    "restored",
+    "skipped"
   ]
 }

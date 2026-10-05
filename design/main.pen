@@ -1,5 +1,5 @@
 {
-  "version": "2.19",
+  "version": "2.20",
   "children": [
     {
       "type": "frame",
@@ -526,6 +526,19 @@
             },
             {
               "type": "frame",
+              "id": "a8e35S",
+              "name": "Spacer / flow to settings",
+              "width": 8,
+              "height": 1
+            },
+            {
+              "id": "scxYN",
+              "type": "ref",
+              "ref": "TB6pJ",
+              "name": "Global settings / icon entry"
+            },
+            {
+              "type": "frame",
               "id": "xJjHL",
               "name": "SpacerFlex",
               "width": "fill_container",
@@ -669,10 +682,11 @@
             {
               "type": "frame",
               "id": "twdoH",
-              "name": "ToggleBlock / 吸附 / 未开启",
+              "name": "IconButton / 全屏",
               "width": 32,
               "height": 32,
-              "cornerRadius": 4,
+              "fill": "$transparent",
+              "cornerRadius": "$radius",
               "layout": "vertical",
               "justifyContent": "center",
               "alignItems": "center",
@@ -680,10 +694,10 @@
                 {
                   "type": "icon",
                   "id": "aouzL",
-                  "name": "Glyph / magnet",
+                  "name": "Glyph / fullscreen",
                   "width": 16,
                   "height": 16,
-                  "icon": "magnet",
+                  "icon": "maximize",
                   "library": "lucide",
                   "fill": "$fg-2"
                 }
@@ -5138,6 +5152,19 @@
             },
             {
               "type": "frame",
+              "id": "AETKL",
+              "name": "Spacer / flow to settings",
+              "width": 8,
+              "height": 1
+            },
+            {
+              "id": "pk8FE",
+              "type": "ref",
+              "ref": "TB6pJ",
+              "name": "Global settings / icon entry"
+            },
+            {
+              "type": "frame",
               "id": "itwzG",
               "name": "SpacerFlex",
               "width": "fill_container",
@@ -5281,10 +5308,11 @@
             {
               "type": "frame",
               "id": "qfSHT",
-              "name": "ToggleBlock / 吸附 / 未开启",
+              "name": "IconButton / 全屏",
               "width": 32,
               "height": 32,
-              "cornerRadius": 4,
+              "fill": "$transparent",
+              "cornerRadius": "$radius",
               "layout": "vertical",
               "justifyContent": "center",
               "alignItems": "center",
@@ -5292,10 +5320,10 @@
                 {
                   "type": "icon",
                   "id": "bM3ZJ",
-                  "name": "Glyph / magnet",
+                  "name": "Glyph / fullscreen",
                   "width": 16,
                   "height": 16,
-                  "icon": "magnet",
+                  "icon": "maximize",
                   "library": "lucide",
                   "fill": "$fg-2"
                 }
@@ -8267,6 +8295,21 @@
             },
             {
               "type": "frame",
+              "id": "rxFSJ",
+              "name": "Spacer / flow to settings",
+              "width": 8,
+              "height": 1
+            },
+            {
+              "id": "S69d2",
+              "type": "ref",
+              "ref": "TB6pJ",
+              "name": "Global settings / icon entry",
+              "width": 38,
+              "height": 38
+            },
+            {
+              "type": "frame",
               "id": "CdPoW",
               "name": "SpacerFlex",
               "width": "fill_container",
@@ -8410,10 +8453,11 @@
             {
               "type": "frame",
               "id": "t1KviU",
-              "name": "ToggleBlock / 吸附 / 未开启",
+              "name": "IconButton / 全屏",
               "width": 38,
               "height": 38,
-              "cornerRadius": 4,
+              "fill": "$transparent",
+              "cornerRadius": "$radius",
               "layout": "vertical",
               "justifyContent": "center",
               "alignItems": "center",
@@ -8421,10 +8465,10 @@
                 {
                   "type": "icon",
                   "id": "e0vHkv",
-                  "name": "Glyph / magnet",
+                  "name": "Glyph / fullscreen",
                   "width": 16,
                   "height": 16,
-                  "icon": "magnet",
+                  "icon": "maximize",
                   "library": "lucide",
                   "fill": "$fg-2"
                 }
@@ -18624,7 +18668,7 @@
       },
       "clip": true,
       "width": 930,
-      "height": 650,
+      "height": 750,
       "fill": "$surface-layer",
       "cornerRadius": 8,
       "stroke": "$surface-bar",
@@ -18801,7 +18845,8 @@
                       "fill": "$fg-2",
                       "content": "配置文件",
                       "fontFamily": "Inter",
-                      "fontSize": 14
+                      "fontSize": 14,
+                      "fontWeight": "normal"
                     }
                   ]
                 },
@@ -18837,7 +18882,8 @@
                       "fill": "$fg-2",
                       "content": "快捷键",
                       "fontFamily": "Inter",
-                      "fontSize": 14
+                      "fontSize": 14,
+                      "fontWeight": "normal"
                     }
                   ]
                 }
@@ -18892,7 +18938,7 @@
                   "id": "ExDYF",
                   "name": "Display status feature",
                   "width": "fill_container",
-                  "height": 116,
+                  "height": 158,
                   "fill": "$surface-layer",
                   "cornerRadius": "$radius",
                   "gap": 17,
@@ -18924,7 +18970,7 @@
                           "id": "oTN2j",
                           "name": "Display label",
                           "fill": "$fg-2",
-                          "content": "当前屏幕  ·  Windows 自动色彩管理",
+                          "content": "当前显示 · 编辑画布",
                           "fontFamily": "Inter",
                           "fontSize": 12,
                           "fontWeight": "normal"
@@ -18934,7 +18980,7 @@
                           "id": "KFMEO",
                           "name": "Display status",
                           "fill": "$fg-1",
-                          "content": "由系统管理显示颜色",
+                          "content": "系统管理 · 广色域输出",
                           "fontFamily": "Inter",
                           "fontSize": 19,
                           "fontWeight": "600"
@@ -18944,9 +18990,23 @@
                           "id": "XBCBw",
                           "name": "Display detail",
                           "fill": "$fg-2",
-                          "content": "RayBend 输出带色彩标记的画面，显示器转换由系统完成。",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "画布以 scRGB 提交，系统负责显示器转换。",
                           "fontFamily": "Inter",
                           "fontSize": 13,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "JKgyE",
+                          "name": "System detection facts",
+                          "fill": "$fg-3",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "系统检测 · Windows 高级色彩已开启",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
                           "fontWeight": "normal"
                         }
                       ]
@@ -18993,7 +19053,7 @@
                               "id": "CPQ97",
                               "name": "Input main",
                               "fill": "$fg-1",
-                              "content": "优先使用照片内嵌配置",
+                              "content": "无内嵌配置时",
                               "fontFamily": "Inter",
                               "fontSize": 14,
                               "fontWeight": "normal"
@@ -19003,7 +19063,9 @@
                               "id": "eymx8",
                               "name": "Input helper",
                               "fill": "$fg-2",
-                              "content": "无配置的 RGB 照片按 sRGB 解释；RAW 使用相机矩阵。",
+                              "textGrowth": "fixed-width",
+                              "width": "fill_container",
+                              "content": "有效内嵌配置始终优先；RAW 使用相机矩阵。",
                               "fontFamily": "Inter",
                               "fontSize": 12,
                               "fontWeight": "normal"
@@ -19011,14 +19073,43 @@
                           ]
                         },
                         {
-                          "type": "icon",
-                          "id": "bIeHL",
-                          "name": "Input rule chevron",
-                          "width": 17,
-                          "height": 17,
-                          "icon": "chevron-right",
-                          "library": "lucide",
-                          "fill": "$fg-3"
+                          "type": "frame",
+                          "id": "Xllwf",
+                          "name": "Input default selector",
+                          "width": 168,
+                          "height": 32,
+                          "fill": "$surface-track",
+                          "cornerRadius": "$radius",
+                          "gap": 8,
+                          "padding": [
+                            0,
+                            10
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "HeBHj",
+                              "name": "Selected profile",
+                              "fill": "$fg-1",
+                              "textGrowth": "fixed-width",
+                              "width": "fill_container",
+                              "content": "sRGB",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "icon",
+                              "id": "mqzKB",
+                              "name": "Choice chevron",
+                              "width": 16,
+                              "height": 16,
+                              "icon": "chevron-down",
+                              "library": "lucide",
+                              "fill": "$fg-3"
+                            }
+                          ]
                         }
                       ]
                     }
@@ -19072,7 +19163,7 @@
                               "id": "GIYn9",
                               "name": "Output main",
                               "fill": "$fg-1",
-                              "content": "sRGB  ·  嵌入色彩配置",
+                              "content": "新建导出预设的目标",
                               "fontFamily": "Inter",
                               "fontSize": 14,
                               "fontWeight": "normal"
@@ -19082,7 +19173,9 @@
                               "id": "tEZas",
                               "name": "Output helper",
                               "fill": "$fg-2",
-                              "content": "具体导出任务仍可在导出预设中指定目标色彩空间。",
+                              "textGrowth": "fixed-width",
+                              "width": "fill_container",
+                              "content": "已有导出预设保持原设置；成片嵌入对应 ICC。",
                               "fontFamily": "Inter",
                               "fontSize": 12,
                               "fontWeight": "normal"
@@ -19090,14 +19183,43 @@
                           ]
                         },
                         {
-                          "type": "icon",
-                          "id": "WNWRb",
-                          "name": "Output rule chevron",
-                          "width": 17,
-                          "height": 17,
-                          "icon": "chevron-right",
-                          "library": "lucide",
-                          "fill": "$fg-3"
+                          "type": "frame",
+                          "id": "tGjnt",
+                          "name": "Output default selector",
+                          "width": 168,
+                          "height": 32,
+                          "fill": "$surface-track",
+                          "cornerRadius": "$radius",
+                          "gap": 8,
+                          "padding": [
+                            0,
+                            10
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "pjOq1",
+                              "name": "Selected profile",
+                              "fill": "$fg-1",
+                              "textGrowth": "fixed-width",
+                              "width": "fill_container",
+                              "content": "sRGB",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "icon",
+                              "id": "Ks2CX",
+                              "name": "Choice chevron",
+                              "width": 16,
+                              "height": 16,
+                              "icon": "chevron-down",
+                              "library": "lucide",
+                              "fill": "$fg-3"
+                            }
+                          ]
                         }
                       ]
                     }
@@ -19118,9 +19240,3258 @@
                   "fill": "$fg-3",
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
-                  "content": "默认规则只作用于以后导入的照片；已有定稿保留原来的色彩解释。",
+                  "content": "在编辑器色彩页应用输入后启用新工作空间；旧照片与定稿不自动改版。默认规则用于后续色彩解释和新导出预设。",
                   "fontFamily": "Inter",
                   "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "EBqZp",
+                  "name": "Save color defaults row",
+                  "width": "fill_container",
+                  "height": 34,
+                  "gap": 12,
+                  "justifyContent": "end",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "Dk0AU",
+                      "name": "Defaults save state",
+                      "fill": "$fg-3",
+                      "content": "更改后保存",
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "UOZUW",
+                      "name": "Save defaults button",
+                      "height": 32,
+                      "fill": "$brand",
+                      "cornerRadius": "$radius",
+                      "padding": [
+                        0,
+                        16
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "H1ik8",
+                          "name": "Save defaults label",
+                          "fill": "$fg-on-brand",
+                          "content": "保存",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "600"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "TB6pJ",
+      "x": 13336,
+      "y": 676,
+      "name": "Component / Global settings icon button",
+      "theme": {
+        "mode": "dark",
+        "density": "compact"
+      },
+      "reusable": true,
+      "width": 32,
+      "height": 32,
+      "fill": "$transparent",
+      "cornerRadius": "$radius",
+      "justifyContent": "center",
+      "alignItems": "center",
+      "children": [
+        {
+          "type": "icon",
+          "id": "W91zcL",
+          "name": "Glyph / settings",
+          "width": 16,
+          "height": 16,
+          "icon": "settings",
+          "library": "lucide",
+          "fill": "$fg-2"
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "aybhP",
+      "x": 14346,
+      "y": -34,
+      "name": "Global Settings / Light Loose",
+      "theme": {
+        "mode": "light",
+        "density": "loose"
+      },
+      "clip": true,
+      "width": 930,
+      "height": 750,
+      "fill": "$surface-layer",
+      "cornerRadius": 8,
+      "stroke": "$surface-bar",
+      "strokeWidth": 1,
+      "layout": "vertical",
+      "children": [
+        {
+          "type": "frame",
+          "id": "aNvi4",
+          "name": "Header / global settings",
+          "width": "fill_container",
+          "height": 88,
+          "fill": "$surface-layer",
+          "gap": 12,
+          "padding": [
+            0,
+            28
+          ],
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "tjQAC",
+              "name": "Heading stack",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 4,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "Q45cY",
+                  "name": "Title / 设置",
+                  "fill": "$fg-1",
+                  "content": "设置",
+                  "fontFamily": "Inter",
+                  "fontSize": 23,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "text",
+                  "id": "Mueru",
+                  "name": "Subtitle / all device preferences",
+                  "fill": "$fg-2",
+                  "content": "显示、色彩和操作方式，由你掌控。",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "Afc0t",
+              "name": "Close button",
+              "width": 32,
+              "height": 32,
+              "fill": "$surface-bar",
+              "cornerRadius": "$radius",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "dyurs",
+                  "name": "Close glyph",
+                  "width": 18,
+                  "height": 18,
+                  "icon": "x",
+                  "library": "lucide",
+                  "fill": "$fg-2"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "YF9pT",
+          "name": "Settings body",
+          "width": "fill_container",
+          "height": "fill_container",
+          "fill": "$surface-main",
+          "children": [
+            {
+              "type": "frame",
+              "id": "N4qKp",
+              "name": "Settings navigation",
+              "width": 198,
+              "height": "fill_container",
+              "fill": "$surface-bar",
+              "layout": "vertical",
+              "gap": 7,
+              "padding": [
+                28,
+                14
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "id": "Je5bs",
+                  "name": "Navigation label",
+                  "fill": "$fg-3",
+                  "content": "偏好设置",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "frame",
+                  "id": "jAdrT",
+                  "name": "Nav / 色彩管理",
+                  "width": "fill_container",
+                  "height": 42,
+                  "fill": "$state-selected",
+                  "cornerRadius": "$radius",
+                  "gap": 11,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "zC3d9",
+                      "name": "Icon / 色彩管理",
+                      "width": 18,
+                      "height": 18,
+                      "icon": "palette",
+                      "library": "lucide",
+                      "fill": "$brand"
+                    },
+                    {
+                      "type": "text",
+                      "id": "orn43",
+                      "name": "Label / 色彩管理",
+                      "fill": "$fg-1",
+                      "content": "色彩管理",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "600"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "Rb8a8",
+                  "name": "Nav / 配置文件",
+                  "width": "fill_container",
+                  "height": 42,
+                  "fill": "$surface-bar",
+                  "cornerRadius": "$radius",
+                  "gap": 11,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "Hd9H6",
+                      "name": "Icon / 配置文件",
+                      "width": 18,
+                      "height": 18,
+                      "icon": "files",
+                      "library": "lucide",
+                      "fill": "$fg-2"
+                    },
+                    {
+                      "type": "text",
+                      "id": "G7GKf",
+                      "name": "Label / 配置文件",
+                      "fill": "$fg-2",
+                      "content": "配置文件",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "RJqey",
+                  "name": "Nav / 快捷键",
+                  "width": "fill_container",
+                  "height": 42,
+                  "fill": "$surface-bar",
+                  "cornerRadius": "$radius",
+                  "gap": 11,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "Y8rHE",
+                      "name": "Icon / 快捷键",
+                      "width": 18,
+                      "height": 18,
+                      "icon": "keyboard",
+                      "library": "lucide",
+                      "fill": "$fg-2"
+                    },
+                    {
+                      "type": "text",
+                      "id": "KmEVL",
+                      "name": "Label / 快捷键",
+                      "fill": "$fg-2",
+                      "content": "快捷键",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "pWmMX",
+              "name": "Settings content",
+              "width": "fill_container",
+              "height": "fill_container",
+              "fill": "$surface-main",
+              "layout": "vertical",
+              "gap": 18,
+              "padding": [
+                25,
+                30
+              ],
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "ktJHl",
+                  "name": "Color page heading",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 5,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "pCOQt",
+                      "name": "Color title",
+                      "fill": "$fg-1",
+                      "content": "色彩管理",
+                      "fontFamily": "Inter",
+                      "fontSize": 21,
+                      "fontWeight": "600"
+                    },
+                    {
+                      "type": "text",
+                      "id": "OLEqu",
+                      "name": "Color subtitle",
+                      "fill": "$fg-2",
+                      "content": "让照片在导入、编辑与导出时都有明确的色彩身份。",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "mbWGb",
+                  "name": "Display status feature",
+                  "width": "fill_container",
+                  "height": 158,
+                  "fill": "$surface-layer",
+                  "cornerRadius": "$radius",
+                  "gap": 17,
+                  "padding": [
+                    0,
+                    20
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "tlWeZ",
+                      "name": "Display accent rail",
+                      "width": 4,
+                      "height": 62,
+                      "fill": "$brand",
+                      "cornerRadius": 2
+                    },
+                    {
+                      "type": "frame",
+                      "id": "pMs00",
+                      "name": "Display status copy",
+                      "width": "fill_container",
+                      "layout": "vertical",
+                      "gap": 5,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "j9JBV",
+                          "name": "Display label",
+                          "fill": "$fg-2",
+                          "content": "当前显示 · 编辑画布",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "FYcvN",
+                          "name": "Display status",
+                          "fill": "$fg-1",
+                          "content": "系统管理 · 广色域输出",
+                          "fontFamily": "Inter",
+                          "fontSize": 19,
+                          "fontWeight": "600"
+                        },
+                        {
+                          "type": "text",
+                          "id": "NqdGa",
+                          "name": "Display detail",
+                          "fill": "$fg-2",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "画布以 scRGB 提交，系统负责显示器转换。",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "GZvHL",
+                          "name": "System detection facts",
+                          "fill": "$fg-3",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "系统检测 · Windows 高级色彩已开启",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "z3CvcR",
+                  "name": "Input defaults section",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 9,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "q2tO8t",
+                      "name": "Input section title",
+                      "fill": "$fg-1",
+                      "content": "输入默认规则",
+                      "fontFamily": "Inter",
+                      "fontSize": 15,
+                      "fontWeight": "600"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "GtpCK",
+                      "name": "Input rule row",
+                      "width": "fill_container",
+                      "height": 50,
+                      "gap": 12,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "DiR0a",
+                          "name": "Input rule description",
+                          "width": "fill_container",
+                          "layout": "vertical",
+                          "gap": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "K9l9s7",
+                              "name": "Input main",
+                              "fill": "$fg-1",
+                              "content": "无内嵌配置时",
+                              "fontFamily": "Inter",
+                              "fontSize": 14,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "text",
+                              "id": "L4Ndm1",
+                              "name": "Input helper",
+                              "fill": "$fg-2",
+                              "textGrowth": "fixed-width",
+                              "width": "fill_container",
+                              "content": "有效内嵌配置始终优先；RAW 使用相机矩阵。",
+                              "fontFamily": "Inter",
+                              "fontSize": 12,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "iUywf",
+                          "name": "Input default selector",
+                          "width": 168,
+                          "height": 32,
+                          "fill": "$surface-track",
+                          "cornerRadius": "$radius",
+                          "gap": 8,
+                          "padding": [
+                            0,
+                            10
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "u3hXZs",
+                              "name": "Selected profile",
+                              "fill": "$fg-1",
+                              "textGrowth": "fixed-width",
+                              "width": "fill_container",
+                              "content": "sRGB",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "icon",
+                              "id": "kL5Wi",
+                              "name": "Choice chevron",
+                              "width": 16,
+                              "height": 16,
+                              "icon": "chevron-down",
+                              "library": "lucide",
+                              "fill": "$fg-3"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "TXXZ7",
+                  "name": "Divider / input output",
+                  "width": "fill_container",
+                  "height": 1,
+                  "fill": "$surface-bar"
+                },
+                {
+                  "type": "frame",
+                  "id": "wgZCA",
+                  "name": "Output default section",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 9,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "WfWFk",
+                      "name": "Output title",
+                      "fill": "$fg-1",
+                      "content": "默认导出",
+                      "fontFamily": "Inter",
+                      "fontSize": 15,
+                      "fontWeight": "600"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "mD41u",
+                      "name": "Output rule row",
+                      "width": "fill_container",
+                      "height": 50,
+                      "gap": 12,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "iW5q7",
+                          "name": "Output rule description",
+                          "width": "fill_container",
+                          "layout": "vertical",
+                          "gap": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "b7972c",
+                              "name": "Output main",
+                              "fill": "$fg-1",
+                              "content": "新建导出预设的目标",
+                              "fontFamily": "Inter",
+                              "fontSize": 14,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "text",
+                              "id": "vcaUd",
+                              "name": "Output helper",
+                              "fill": "$fg-2",
+                              "textGrowth": "fixed-width",
+                              "width": "fill_container",
+                              "content": "已有导出预设保持原设置；成片嵌入对应 ICC。",
+                              "fontFamily": "Inter",
+                              "fontSize": 12,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "B5aRcF",
+                          "name": "Output default selector",
+                          "width": 168,
+                          "height": 32,
+                          "fill": "$surface-track",
+                          "cornerRadius": "$radius",
+                          "gap": 8,
+                          "padding": [
+                            0,
+                            10
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "aXVrO",
+                              "name": "Selected profile",
+                              "fill": "$fg-1",
+                              "textGrowth": "fixed-width",
+                              "width": "fill_container",
+                              "content": "sRGB",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "icon",
+                              "id": "fs7fX",
+                              "name": "Choice chevron",
+                              "width": 16,
+                              "height": 16,
+                              "icon": "chevron-down",
+                              "library": "lucide",
+                              "fill": "$fg-3"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "IGgDI",
+                  "name": "Divider / output notice",
+                  "width": "fill_container",
+                  "height": 1,
+                  "fill": "$surface-bar"
+                },
+                {
+                  "type": "text",
+                  "id": "BHkQl",
+                  "name": "Color rule note",
+                  "fill": "$fg-3",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "在编辑器色彩页应用输入后启用新工作空间；旧照片与定稿不自动改版。默认规则用于后续色彩解释和新导出预设。",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "I1vvjB",
+                  "name": "Save color defaults row",
+                  "width": "fill_container",
+                  "height": 34,
+                  "gap": 12,
+                  "justifyContent": "end",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "po6Fc",
+                      "name": "Defaults save state",
+                      "fill": "$fg-3",
+                      "content": "更改后保存",
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "IEZJA",
+                      "name": "Save defaults button",
+                      "height": 32,
+                      "fill": "$brand",
+                      "cornerRadius": "$radius",
+                      "padding": [
+                        0,
+                        16
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "SFcBL",
+                          "name": "Save defaults label",
+                          "fill": "$fg-on-brand",
+                          "content": "保存",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "600"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "lkvf9",
+      "x": 15356,
+      "y": -34,
+      "name": "Global Settings / Profiles / Dark Compact",
+      "theme": {
+        "mode": "dark",
+        "density": "compact"
+      },
+      "clip": true,
+      "width": 930,
+      "height": 650,
+      "fill": "$surface-layer",
+      "cornerRadius": 8,
+      "stroke": "$surface-bar",
+      "strokeWidth": 1,
+      "layout": "vertical",
+      "children": [
+        {
+          "type": "frame",
+          "id": "JJmdU",
+          "name": "Header / global settings",
+          "width": "fill_container",
+          "height": 88,
+          "fill": "$surface-layer",
+          "gap": 12,
+          "padding": [
+            0,
+            28
+          ],
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "J1LBbj",
+              "name": "Heading stack",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 4,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "hfX8r",
+                  "name": "Title / 设置",
+                  "fill": "$fg-1",
+                  "content": "设置",
+                  "fontFamily": "Inter",
+                  "fontSize": 23,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "text",
+                  "id": "owGFs",
+                  "name": "Subtitle / all device preferences",
+                  "fill": "$fg-2",
+                  "content": "显示、色彩和操作方式，由你掌控。",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "j55VX",
+              "name": "Close button",
+              "width": 32,
+              "height": 32,
+              "fill": "$surface-bar",
+              "cornerRadius": "$radius",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "p4rc4",
+                  "name": "Close glyph",
+                  "width": 18,
+                  "height": 18,
+                  "icon": "x",
+                  "library": "lucide",
+                  "fill": "$fg-2"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "VKnhX",
+          "name": "Settings body",
+          "width": "fill_container",
+          "height": "fill_container",
+          "fill": "$surface-main",
+          "children": [
+            {
+              "type": "frame",
+              "id": "i2AlTr",
+              "name": "Settings navigation",
+              "width": 198,
+              "height": "fill_container",
+              "fill": "$surface-bar",
+              "layout": "vertical",
+              "gap": 7,
+              "padding": [
+                28,
+                14
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "id": "X6P5w",
+                  "name": "Navigation label",
+                  "fill": "$fg-3",
+                  "content": "偏好设置",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "frame",
+                  "id": "eQMN6",
+                  "name": "Nav / 色彩管理",
+                  "width": "fill_container",
+                  "height": 42,
+                  "fill": "$surface-track",
+                  "cornerRadius": "$radius",
+                  "gap": 11,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "vHcoc",
+                      "name": "Icon / 色彩管理",
+                      "width": 18,
+                      "height": 18,
+                      "icon": "palette",
+                      "library": "lucide",
+                      "fill": "$fg-2"
+                    },
+                    {
+                      "type": "text",
+                      "id": "a0n26",
+                      "name": "Label / 色彩管理",
+                      "fill": "$fg-2",
+                      "content": "色彩管理",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "R6Nzag",
+                  "name": "Nav / 配置文件",
+                  "width": "fill_container",
+                  "height": 42,
+                  "fill": "$state-selected",
+                  "cornerRadius": "$radius",
+                  "gap": 11,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "Ft6r7",
+                      "name": "Icon / 配置文件",
+                      "width": 18,
+                      "height": 18,
+                      "icon": "files",
+                      "library": "lucide",
+                      "fill": "$brand"
+                    },
+                    {
+                      "type": "text",
+                      "id": "XjkLo",
+                      "name": "Label / 配置文件",
+                      "fill": "$fg-1",
+                      "content": "配置文件",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "600"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "t3xMx",
+                  "name": "Nav / 快捷键",
+                  "width": "fill_container",
+                  "height": 42,
+                  "fill": "$surface-bar",
+                  "cornerRadius": "$radius",
+                  "gap": 11,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "r46Bir",
+                      "name": "Icon / 快捷键",
+                      "width": 18,
+                      "height": 18,
+                      "icon": "keyboard",
+                      "library": "lucide",
+                      "fill": "$fg-2"
+                    },
+                    {
+                      "type": "text",
+                      "id": "Uo8jH",
+                      "name": "Label / 快捷键",
+                      "fill": "$fg-2",
+                      "content": "快捷键",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "EXcE5",
+              "name": "Profiles page",
+              "width": "fill_container",
+              "height": "fill_container",
+              "fill": "$surface-main",
+              "layout": "vertical",
+              "gap": 14,
+              "padding": [
+                25,
+                30
+              ],
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "U55vB",
+                  "name": "Profile library heading",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 4,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "u8m2zM",
+                      "name": "Title / 配置文件",
+                      "fill": "$fg-1",
+                      "content": "配置文件",
+                      "fontFamily": "Inter",
+                      "fontSize": 22,
+                      "fontWeight": "600"
+                    },
+                    {
+                      "type": "text",
+                      "id": "oMcsL",
+                      "name": "Subtitle / library",
+                      "fill": "$fg-3",
+                      "content": "可复用的 RGB 色彩配置，按文件内容识别。",
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "hJvyo",
+                  "name": "Library actions",
+                  "width": "fill_container",
+                  "height": 42,
+                  "justifyContent": "space_between",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "mJO1O",
+                      "name": "Library count",
+                      "fill": "$fg-2",
+                      "content": "4 份配置 · 3 份内置",
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "CROwZ",
+                      "name": "Import ICC button",
+                      "height": 34,
+                      "fill": "$state-selected",
+                      "cornerRadius": "$radius",
+                      "gap": 7,
+                      "padding": [
+                        0,
+                        12
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "q9JNN",
+                          "name": "Import plus icon",
+                          "width": 16,
+                          "height": 16,
+                          "icon": "plus",
+                          "library": "lucide",
+                          "fill": "$brand"
+                        },
+                        {
+                          "type": "text",
+                          "id": "x6zdKE",
+                          "name": "Import ICC label",
+                          "fill": "$fg-1",
+                          "content": "导入配置文件",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "600"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "XOcKy",
+                  "name": "Asset safety note",
+                  "width": "fill_container",
+                  "height": 52,
+                  "fill": "$surface-bar",
+                  "cornerRadius": "$radius",
+                  "gap": 12,
+                  "padding": [
+                    0,
+                    14
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "UygJF",
+                      "name": "Asset safety icon",
+                      "width": 18,
+                      "height": 18,
+                      "icon": "shield-check",
+                      "library": "lucide",
+                      "fill": "$brand"
+                    },
+                    {
+                      "type": "text",
+                      "id": "UWZo7",
+                      "name": "Asset safety copy",
+                      "fill": "$fg-2",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "批量导入 .icc / .icm；重复内容自动合并。被照片引用的文件会保留。",
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "a91Xxa",
+                  "name": "Profile list",
+                  "width": "fill_container",
+                  "fill": "$surface-layer",
+                  "cornerRadius": "$radius",
+                  "layout": "vertical",
+                  "padding": [
+                    8,
+                    14
+                  ],
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "CaafU",
+                      "name": "Profile list columns",
+                      "width": "fill_container",
+                      "height": 28,
+                      "gap": 10,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "x2vdp",
+                          "name": "Column / name",
+                          "fill": "$fg-3",
+                          "textGrowth": "fixed-width",
+                          "width": 218,
+                          "content": "名称",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "600"
+                        },
+                        {
+                          "type": "text",
+                          "id": "F016a",
+                          "name": "Column / use",
+                          "fill": "$fg-3",
+                          "textGrowth": "fixed-width",
+                          "width": 104,
+                          "content": "用途",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "600"
+                        },
+                        {
+                          "type": "text",
+                          "id": "fAvRI",
+                          "name": "Column / origin",
+                          "fill": "$fg-3",
+                          "textGrowth": "fixed-width",
+                          "width": 88,
+                          "content": "来源",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "600"
+                        },
+                        {
+                          "type": "text",
+                          "id": "dtju2",
+                          "name": "Column / state",
+                          "fill": "$fg-3",
+                          "textGrowth": "fixed-width",
+                          "width": 105,
+                          "content": "状态",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "600"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "C5kOL",
+                      "name": "Profile row divider / sRGB IEC61966-2.1",
+                      "width": "fill_container",
+                      "height": 1,
+                      "fill": "$surface-bar"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "SBrXy",
+                      "name": "Profile row / sRGB IEC61966-2.1",
+                      "width": "fill_container",
+                      "height": 47,
+                      "gap": 10,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "qVPwa",
+                          "name": "Profile name / sRGB IEC61966-2.1",
+                          "width": 218,
+                          "gap": 8,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "ellipse",
+                              "id": "qDTqW",
+                              "name": "Profile swatch / sRGB IEC61966-2.1",
+                              "fill": "$fg-3",
+                              "width": 8,
+                              "height": 8
+                            },
+                            {
+                              "type": "text",
+                              "id": "mvrJd",
+                              "name": "Profile label / sRGB IEC61966-2.1",
+                              "fill": "$fg-1",
+                              "textGrowth": "fixed-width",
+                              "width": 194,
+                              "content": "sRGB IEC61966-2.1",
+                              "fontFamily": "Inter",
+                              "fontSize": 12,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "id": "uPoHR",
+                          "name": "Profile use / sRGB IEC61966-2.1",
+                          "fill": "$fg-2",
+                          "textGrowth": "fixed-width",
+                          "width": 104,
+                          "content": "RGB · 输入/输出",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "Rljqt",
+                          "name": "Profile source / sRGB IEC61966-2.1",
+                          "fill": "$fg-2",
+                          "textGrowth": "fixed-width",
+                          "width": 88,
+                          "content": "内置",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "RyJnu",
+                          "name": "Profile state / sRGB IEC61966-2.1",
+                          "fill": "$brand",
+                          "textGrowth": "fixed-width",
+                          "width": 105,
+                          "content": "可用",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "o0kA43",
+                          "name": "Profile actions / sRGB IEC61966-2.1",
+                          "width": 17,
+                          "height": 17,
+                          "icon": "ellipsis",
+                          "library": "lucide",
+                          "fill": "$fg-3"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "MsDFx",
+                      "name": "Profile row divider / Display P3",
+                      "width": "fill_container",
+                      "height": 1,
+                      "fill": "$surface-bar"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "I7Aa7",
+                      "name": "Profile row / Display P3",
+                      "width": "fill_container",
+                      "height": 47,
+                      "gap": 10,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "Eu4EG",
+                          "name": "Profile name / Display P3",
+                          "width": 218,
+                          "gap": 8,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "ellipse",
+                              "id": "iMEVK",
+                              "name": "Profile swatch / Display P3",
+                              "fill": "$fg-3",
+                              "width": 8,
+                              "height": 8
+                            },
+                            {
+                              "type": "text",
+                              "id": "pTH0n",
+                              "name": "Profile label / Display P3",
+                              "fill": "$fg-1",
+                              "textGrowth": "fixed-width",
+                              "width": 194,
+                              "content": "Display P3",
+                              "fontFamily": "Inter",
+                              "fontSize": 12,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "id": "QwHkb",
+                          "name": "Profile use / Display P3",
+                          "fill": "$fg-2",
+                          "textGrowth": "fixed-width",
+                          "width": 104,
+                          "content": "RGB · 输入/输出",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "BRwb2",
+                          "name": "Profile source / Display P3",
+                          "fill": "$fg-2",
+                          "textGrowth": "fixed-width",
+                          "width": 88,
+                          "content": "内置",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "fdnVV",
+                          "name": "Profile state / Display P3",
+                          "fill": "$brand",
+                          "textGrowth": "fixed-width",
+                          "width": 105,
+                          "content": "可用",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "k4ZTxu",
+                          "name": "Profile actions / Display P3",
+                          "width": 17,
+                          "height": 17,
+                          "icon": "ellipsis",
+                          "library": "lucide",
+                          "fill": "$fg-3"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "YCfpB",
+                      "name": "Profile row divider / Adobe RGB (1998)",
+                      "width": "fill_container",
+                      "height": 1,
+                      "fill": "$surface-bar"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "HRHYD",
+                      "name": "Profile row / Adobe RGB (1998)",
+                      "width": "fill_container",
+                      "height": 47,
+                      "gap": 10,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "Q1kYHW",
+                          "name": "Profile name / Adobe RGB (1998)",
+                          "width": 218,
+                          "gap": 8,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "ellipse",
+                              "id": "joCeu",
+                              "name": "Profile swatch / Adobe RGB (1998)",
+                              "fill": "$fg-3",
+                              "width": 8,
+                              "height": 8
+                            },
+                            {
+                              "type": "text",
+                              "id": "WGOYS",
+                              "name": "Profile label / Adobe RGB (1998)",
+                              "fill": "$fg-1",
+                              "textGrowth": "fixed-width",
+                              "width": 194,
+                              "content": "Adobe RGB (1998)",
+                              "fontFamily": "Inter",
+                              "fontSize": 12,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "id": "KhNCR",
+                          "name": "Profile use / Adobe RGB (1998)",
+                          "fill": "$fg-2",
+                          "textGrowth": "fixed-width",
+                          "width": 104,
+                          "content": "RGB · 输入/输出",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "QiXNU",
+                          "name": "Profile source / Adobe RGB (1998)",
+                          "fill": "$fg-2",
+                          "textGrowth": "fixed-width",
+                          "width": 88,
+                          "content": "内置",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "BOZDr",
+                          "name": "Profile state / Adobe RGB (1998)",
+                          "fill": "$brand",
+                          "textGrowth": "fixed-width",
+                          "width": 105,
+                          "content": "可用",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "fWDjP",
+                          "name": "Profile actions / Adobe RGB (1998)",
+                          "width": 17,
+                          "height": 17,
+                          "icon": "ellipsis",
+                          "library": "lucide",
+                          "fill": "$fg-3"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "WBgc8",
+                      "name": "Profile row divider / 摄影棚-广色域.icc",
+                      "width": "fill_container",
+                      "height": 1,
+                      "fill": "$surface-bar"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "K77I48",
+                      "name": "Profile row / 摄影棚-广色域.icc",
+                      "width": "fill_container",
+                      "height": 47,
+                      "gap": 10,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "vzVe2",
+                          "name": "Profile name / 摄影棚-广色域.icc",
+                          "width": 218,
+                          "gap": 8,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "ellipse",
+                              "id": "d9G0pB",
+                              "name": "Profile swatch / 摄影棚-广色域.icc",
+                              "fill": "$brand",
+                              "width": 8,
+                              "height": 8
+                            },
+                            {
+                              "type": "text",
+                              "id": "y0LId",
+                              "name": "Profile label / 摄影棚-广色域.icc",
+                              "fill": "$fg-1",
+                              "textGrowth": "fixed-width",
+                              "width": 194,
+                              "content": "摄影棚-广色域.icc",
+                              "fontFamily": "Inter",
+                              "fontSize": 12,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "id": "s6D32",
+                          "name": "Profile use / 摄影棚-广色域.icc",
+                          "fill": "$fg-2",
+                          "textGrowth": "fixed-width",
+                          "width": 104,
+                          "content": "RGB · 输入/输出",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "H4Dte0",
+                          "name": "Profile source / 摄影棚-广色域.icc",
+                          "fill": "$fg-2",
+                          "textGrowth": "fixed-width",
+                          "width": 88,
+                          "content": "已导入",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "j4Wvp",
+                          "name": "Profile state / 摄影棚-广色域.icc",
+                          "fill": "$brand",
+                          "textGrowth": "fixed-width",
+                          "width": 105,
+                          "content": "可用",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "rwhBE",
+                          "name": "Profile actions / 摄影棚-广色域.icc",
+                          "width": 17,
+                          "height": 17,
+                          "icon": "ellipsis",
+                          "library": "lucide",
+                          "fill": "$fg-3"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "AGcpf",
+                  "name": "Profile library footer",
+                  "fill": "$fg-3",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "移除只隐藏选择入口；已用于定稿的原始字节不会被删除。",
+                  "fontFamily": "Inter",
+                  "fontSize": 11,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "ZjDBg",
+      "x": 16366,
+      "y": -34,
+      "name": "Global Settings / Profiles / Light Loose",
+      "theme": {
+        "mode": "light",
+        "density": "loose"
+      },
+      "clip": true,
+      "width": 930,
+      "height": 650,
+      "fill": "$surface-layer",
+      "cornerRadius": 8,
+      "stroke": "$surface-bar",
+      "strokeWidth": 1,
+      "layout": "vertical",
+      "children": [
+        {
+          "type": "frame",
+          "id": "vnvR1",
+          "name": "Header / global settings",
+          "width": "fill_container",
+          "height": 88,
+          "fill": "$surface-layer",
+          "gap": 12,
+          "padding": [
+            0,
+            28
+          ],
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "oYUMj",
+              "name": "Heading stack",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 4,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "HnrWU",
+                  "name": "Title / 设置",
+                  "fill": "$fg-1",
+                  "content": "设置",
+                  "fontFamily": "Inter",
+                  "fontSize": 23,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "text",
+                  "id": "C19bxh",
+                  "name": "Subtitle / all device preferences",
+                  "fill": "$fg-2",
+                  "content": "显示、色彩和操作方式，由你掌控。",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "VQyzq",
+              "name": "Close button",
+              "width": 32,
+              "height": 32,
+              "fill": "$surface-bar",
+              "cornerRadius": "$radius",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "ZV7YY",
+                  "name": "Close glyph",
+                  "width": 18,
+                  "height": 18,
+                  "icon": "x",
+                  "library": "lucide",
+                  "fill": "$fg-2"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "E0vut5",
+          "name": "Settings body",
+          "width": "fill_container",
+          "height": "fill_container",
+          "fill": "$surface-main",
+          "children": [
+            {
+              "type": "frame",
+              "id": "ff28i",
+              "name": "Settings navigation",
+              "width": 198,
+              "height": "fill_container",
+              "fill": "$surface-bar",
+              "layout": "vertical",
+              "gap": 7,
+              "padding": [
+                28,
+                14
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "id": "b1OmG",
+                  "name": "Navigation label",
+                  "fill": "$fg-3",
+                  "content": "偏好设置",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "frame",
+                  "id": "ioMBb",
+                  "name": "Nav / 色彩管理",
+                  "width": "fill_container",
+                  "height": 42,
+                  "fill": "$surface-track",
+                  "cornerRadius": "$radius",
+                  "gap": 11,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "Z6WyhA",
+                      "name": "Icon / 色彩管理",
+                      "width": 18,
+                      "height": 18,
+                      "icon": "palette",
+                      "library": "lucide",
+                      "fill": "$fg-2"
+                    },
+                    {
+                      "type": "text",
+                      "id": "j6fZd",
+                      "name": "Label / 色彩管理",
+                      "fill": "$fg-2",
+                      "content": "色彩管理",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "ZSfgY",
+                  "name": "Nav / 配置文件",
+                  "width": "fill_container",
+                  "height": 42,
+                  "fill": "$state-selected",
+                  "cornerRadius": "$radius",
+                  "gap": 11,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "V3Hhd3",
+                      "name": "Icon / 配置文件",
+                      "width": 18,
+                      "height": 18,
+                      "icon": "files",
+                      "library": "lucide",
+                      "fill": "$brand"
+                    },
+                    {
+                      "type": "text",
+                      "id": "tcRl7",
+                      "name": "Label / 配置文件",
+                      "fill": "$fg-1",
+                      "content": "配置文件",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "600"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "uj67b",
+                  "name": "Nav / 快捷键",
+                  "width": "fill_container",
+                  "height": 42,
+                  "fill": "$surface-bar",
+                  "cornerRadius": "$radius",
+                  "gap": 11,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "zmkYF",
+                      "name": "Icon / 快捷键",
+                      "width": 18,
+                      "height": 18,
+                      "icon": "keyboard",
+                      "library": "lucide",
+                      "fill": "$fg-2"
+                    },
+                    {
+                      "type": "text",
+                      "id": "q7Uc7p",
+                      "name": "Label / 快捷键",
+                      "fill": "$fg-2",
+                      "content": "快捷键",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "n9Gc74",
+              "name": "Profiles page / light",
+              "width": "fill_container",
+              "height": "fill_container",
+              "fill": "$surface-main",
+              "layout": "vertical",
+              "gap": 14,
+              "padding": [
+                25,
+                30
+              ],
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "yN7lU",
+                  "name": "Profile library heading",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 4,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "KYlGk",
+                      "name": "Title / 配置文件",
+                      "fill": "$fg-1",
+                      "content": "配置文件",
+                      "fontFamily": "Inter",
+                      "fontSize": 22,
+                      "fontWeight": "600"
+                    },
+                    {
+                      "type": "text",
+                      "id": "f4ngX",
+                      "name": "Subtitle / library",
+                      "fill": "$fg-3",
+                      "content": "可复用的 RGB 色彩配置，按文件内容识别。",
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "RFpbl",
+                  "name": "Library actions",
+                  "width": "fill_container",
+                  "height": 42,
+                  "justifyContent": "space_between",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "dO7Jk",
+                      "name": "Library count",
+                      "fill": "$fg-2",
+                      "content": "4 份配置 · 3 份内置",
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "ysCi0",
+                      "name": "Import ICC button",
+                      "height": 34,
+                      "fill": "$state-selected",
+                      "cornerRadius": "$radius",
+                      "gap": 7,
+                      "padding": [
+                        0,
+                        12
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "S6NczO",
+                          "name": "Import plus icon",
+                          "width": 16,
+                          "height": 16,
+                          "icon": "plus",
+                          "library": "lucide",
+                          "fill": "$brand"
+                        },
+                        {
+                          "type": "text",
+                          "id": "V1l1b",
+                          "name": "Import ICC label",
+                          "fill": "$fg-1",
+                          "content": "导入配置文件",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "600"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "QZb18",
+                  "name": "Asset safety note",
+                  "width": "fill_container",
+                  "height": 52,
+                  "fill": "$surface-bar",
+                  "cornerRadius": "$radius",
+                  "gap": 12,
+                  "padding": [
+                    0,
+                    14
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "P8HVq4",
+                      "name": "Asset safety icon",
+                      "width": 18,
+                      "height": 18,
+                      "icon": "shield-check",
+                      "library": "lucide",
+                      "fill": "$brand"
+                    },
+                    {
+                      "type": "text",
+                      "id": "g4agr",
+                      "name": "Asset safety copy",
+                      "fill": "$fg-2",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "批量导入 .icc / .icm；重复内容自动合并。被照片引用的文件会保留。",
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "dCQdf",
+                  "name": "Profile list",
+                  "width": "fill_container",
+                  "fill": "$surface-layer",
+                  "cornerRadius": "$radius",
+                  "layout": "vertical",
+                  "padding": [
+                    8,
+                    14
+                  ],
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "f91nR8",
+                      "name": "Profile list columns",
+                      "width": "fill_container",
+                      "height": 28,
+                      "gap": 10,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "kuwA3",
+                          "name": "Column / name",
+                          "fill": "$fg-3",
+                          "textGrowth": "fixed-width",
+                          "width": 218,
+                          "content": "名称",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "600"
+                        },
+                        {
+                          "type": "text",
+                          "id": "G39aCk",
+                          "name": "Column / use",
+                          "fill": "$fg-3",
+                          "textGrowth": "fixed-width",
+                          "width": 104,
+                          "content": "用途",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "600"
+                        },
+                        {
+                          "type": "text",
+                          "id": "jpSno",
+                          "name": "Column / origin",
+                          "fill": "$fg-3",
+                          "textGrowth": "fixed-width",
+                          "width": 88,
+                          "content": "来源",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "600"
+                        },
+                        {
+                          "type": "text",
+                          "id": "U49Fe",
+                          "name": "Column / state",
+                          "fill": "$fg-3",
+                          "textGrowth": "fixed-width",
+                          "width": 105,
+                          "content": "状态",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "600"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "i1iG0G",
+                      "name": "Profile row divider / sRGB IEC61966-2.1",
+                      "width": "fill_container",
+                      "height": 1,
+                      "fill": "$surface-bar"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "BXo6B",
+                      "name": "Profile row / sRGB IEC61966-2.1",
+                      "width": "fill_container",
+                      "height": 47,
+                      "gap": 10,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "t7f56",
+                          "name": "Profile name / sRGB IEC61966-2.1",
+                          "width": 218,
+                          "gap": 8,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "ellipse",
+                              "id": "l0UHR0",
+                              "name": "Profile swatch / sRGB IEC61966-2.1",
+                              "fill": "$fg-3",
+                              "width": 8,
+                              "height": 8
+                            },
+                            {
+                              "type": "text",
+                              "id": "Q7js3",
+                              "name": "Profile label / sRGB IEC61966-2.1",
+                              "fill": "$fg-1",
+                              "textGrowth": "fixed-width",
+                              "width": 194,
+                              "content": "sRGB IEC61966-2.1",
+                              "fontFamily": "Inter",
+                              "fontSize": 12,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "id": "t9Z4O",
+                          "name": "Profile use / sRGB IEC61966-2.1",
+                          "fill": "$fg-2",
+                          "textGrowth": "fixed-width",
+                          "width": 104,
+                          "content": "RGB · 输入/输出",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "lzTYA",
+                          "name": "Profile source / sRGB IEC61966-2.1",
+                          "fill": "$fg-2",
+                          "textGrowth": "fixed-width",
+                          "width": 88,
+                          "content": "内置",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "IlTK1",
+                          "name": "Profile state / sRGB IEC61966-2.1",
+                          "fill": "$brand",
+                          "textGrowth": "fixed-width",
+                          "width": 105,
+                          "content": "可用",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "u6H6Z",
+                          "name": "Profile actions / sRGB IEC61966-2.1",
+                          "width": 17,
+                          "height": 17,
+                          "icon": "ellipsis",
+                          "library": "lucide",
+                          "fill": "$fg-3"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "Guj8Z",
+                      "name": "Profile row divider / Display P3",
+                      "width": "fill_container",
+                      "height": 1,
+                      "fill": "$surface-bar"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "MCVt8",
+                      "name": "Profile row / Display P3",
+                      "width": "fill_container",
+                      "height": 47,
+                      "gap": 10,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "yLeUs",
+                          "name": "Profile name / Display P3",
+                          "width": 218,
+                          "gap": 8,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "ellipse",
+                              "id": "TQmMD",
+                              "name": "Profile swatch / Display P3",
+                              "fill": "$fg-3",
+                              "width": 8,
+                              "height": 8
+                            },
+                            {
+                              "type": "text",
+                              "id": "QGIP6",
+                              "name": "Profile label / Display P3",
+                              "fill": "$fg-1",
+                              "textGrowth": "fixed-width",
+                              "width": 194,
+                              "content": "Display P3",
+                              "fontFamily": "Inter",
+                              "fontSize": 12,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "id": "sZxD3",
+                          "name": "Profile use / Display P3",
+                          "fill": "$fg-2",
+                          "textGrowth": "fixed-width",
+                          "width": 104,
+                          "content": "RGB · 输入/输出",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "ZSp6L",
+                          "name": "Profile source / Display P3",
+                          "fill": "$fg-2",
+                          "textGrowth": "fixed-width",
+                          "width": 88,
+                          "content": "内置",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "Ru8D5",
+                          "name": "Profile state / Display P3",
+                          "fill": "$brand",
+                          "textGrowth": "fixed-width",
+                          "width": 105,
+                          "content": "可用",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "KBLaw",
+                          "name": "Profile actions / Display P3",
+                          "width": 17,
+                          "height": 17,
+                          "icon": "ellipsis",
+                          "library": "lucide",
+                          "fill": "$fg-3"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "OfkZZ",
+                      "name": "Profile row divider / Adobe RGB (1998)",
+                      "width": "fill_container",
+                      "height": 1,
+                      "fill": "$surface-bar"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "WZ1Z3",
+                      "name": "Profile row / Adobe RGB (1998)",
+                      "width": "fill_container",
+                      "height": 47,
+                      "gap": 10,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "AOLCS",
+                          "name": "Profile name / Adobe RGB (1998)",
+                          "width": 218,
+                          "gap": 8,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "ellipse",
+                              "id": "a6n7Cn",
+                              "name": "Profile swatch / Adobe RGB (1998)",
+                              "fill": "$fg-3",
+                              "width": 8,
+                              "height": 8
+                            },
+                            {
+                              "type": "text",
+                              "id": "g5qmg",
+                              "name": "Profile label / Adobe RGB (1998)",
+                              "fill": "$fg-1",
+                              "textGrowth": "fixed-width",
+                              "width": 194,
+                              "content": "Adobe RGB (1998)",
+                              "fontFamily": "Inter",
+                              "fontSize": 12,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "id": "z0QN6",
+                          "name": "Profile use / Adobe RGB (1998)",
+                          "fill": "$fg-2",
+                          "textGrowth": "fixed-width",
+                          "width": 104,
+                          "content": "RGB · 输入/输出",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "wYyie",
+                          "name": "Profile source / Adobe RGB (1998)",
+                          "fill": "$fg-2",
+                          "textGrowth": "fixed-width",
+                          "width": 88,
+                          "content": "内置",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "BHoRL",
+                          "name": "Profile state / Adobe RGB (1998)",
+                          "fill": "$brand",
+                          "textGrowth": "fixed-width",
+                          "width": 105,
+                          "content": "可用",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "SWKqE",
+                          "name": "Profile actions / Adobe RGB (1998)",
+                          "width": 17,
+                          "height": 17,
+                          "icon": "ellipsis",
+                          "library": "lucide",
+                          "fill": "$fg-3"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "I4Qb1R",
+                      "name": "Profile row divider / 摄影棚-广色域.icc",
+                      "width": "fill_container",
+                      "height": 1,
+                      "fill": "$surface-bar"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "Z8aNDQ",
+                      "name": "Profile row / 摄影棚-广色域.icc",
+                      "width": "fill_container",
+                      "height": 47,
+                      "gap": 10,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "ujRTc",
+                          "name": "Profile name / 摄影棚-广色域.icc",
+                          "width": 218,
+                          "gap": 8,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "ellipse",
+                              "id": "bSjyO",
+                              "name": "Profile swatch / 摄影棚-广色域.icc",
+                              "fill": "$brand",
+                              "width": 8,
+                              "height": 8
+                            },
+                            {
+                              "type": "text",
+                              "id": "c3wHe",
+                              "name": "Profile label / 摄影棚-广色域.icc",
+                              "fill": "$fg-1",
+                              "textGrowth": "fixed-width",
+                              "width": 194,
+                              "content": "摄影棚-广色域.icc",
+                              "fontFamily": "Inter",
+                              "fontSize": 12,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "id": "DKiWZ",
+                          "name": "Profile use / 摄影棚-广色域.icc",
+                          "fill": "$fg-2",
+                          "textGrowth": "fixed-width",
+                          "width": 104,
+                          "content": "RGB · 输入/输出",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "wvp6W",
+                          "name": "Profile source / 摄影棚-广色域.icc",
+                          "fill": "$fg-2",
+                          "textGrowth": "fixed-width",
+                          "width": 88,
+                          "content": "已导入",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "v3tdkt",
+                          "name": "Profile state / 摄影棚-广色域.icc",
+                          "fill": "$brand",
+                          "textGrowth": "fixed-width",
+                          "width": 105,
+                          "content": "可用",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "s8nJx",
+                          "name": "Profile actions / 摄影棚-广色域.icc",
+                          "width": 17,
+                          "height": 17,
+                          "icon": "ellipsis",
+                          "library": "lucide",
+                          "fill": "$fg-3"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "MjpIM",
+                  "name": "Profile library footer",
+                  "fill": "$fg-3",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "移除只隐藏选择入口；已用于定稿的原始字节不会被删除。",
+                  "fontFamily": "Inter",
+                  "fontSize": 11,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "s1SP3g",
+      "x": 17400,
+      "y": -34,
+      "name": "Global Settings / AI 标签 / Dark Compact",
+      "theme": {
+        "mode": "dark",
+        "density": "compact"
+      },
+      "clip": true,
+      "width": 930,
+      "height": 650,
+      "fill": "$surface-layer",
+      "cornerRadius": 8,
+      "stroke": "$surface-bar",
+      "strokeWidth": 1,
+      "layout": "vertical",
+      "children": [
+        {
+          "type": "frame",
+          "id": "kgLuv",
+          "name": "Header / global settings",
+          "width": "fill_container",
+          "height": 88,
+          "fill": "$surface-layer",
+          "gap": 12,
+          "padding": [
+            0,
+            28
+          ],
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "s9llr",
+              "name": "Heading stack",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 4,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "zJytW",
+                  "name": "Title / 设置",
+                  "fill": "$fg-1",
+                  "content": "设置",
+                  "fontFamily": "Inter",
+                  "fontSize": 23,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "text",
+                  "id": "YboNL",
+                  "name": "Subtitle / all device preferences",
+                  "fill": "$fg-2",
+                  "content": "显示、色彩和操作方式，由你掌控。",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "sqnfa",
+              "name": "Close button",
+              "width": 32,
+              "height": 32,
+              "fill": "$surface-bar",
+              "cornerRadius": "$radius",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "fmKSu",
+                  "name": "Close glyph",
+                  "width": 18,
+                  "height": 18,
+                  "icon": "x",
+                  "library": "lucide",
+                  "fill": "$fg-2"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "KevAW",
+          "name": "Settings body",
+          "width": "fill_container",
+          "height": "fill_container",
+          "fill": "$surface-main",
+          "children": [
+            {
+              "type": "frame",
+              "id": "zaE9e",
+              "name": "Settings navigation",
+              "width": 198,
+              "height": "fill_container",
+              "fill": "$surface-bar",
+              "layout": "vertical",
+              "gap": 7,
+              "padding": [
+                28,
+                14
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "id": "g0OqcY",
+                  "name": "Navigation label",
+                  "fill": "$fg-3",
+                  "content": "偏好设置",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "frame",
+                  "id": "YTOJt",
+                  "name": "Nav / 色彩管理",
+                  "width": "fill_container",
+                  "height": 42,
+                  "fill": "$surface-bar",
+                  "cornerRadius": "$radius",
+                  "gap": 11,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "pHuma",
+                      "name": "Icon / 色彩管理",
+                      "width": 18,
+                      "height": 18,
+                      "icon": "palette",
+                      "library": "lucide",
+                      "fill": "$fg-2"
+                    },
+                    {
+                      "type": "text",
+                      "id": "CDOO4",
+                      "name": "Label / 色彩管理",
+                      "fill": "$fg-2",
+                      "content": "色彩管理",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "HKySl",
+                  "name": "Nav / 配置文件",
+                  "width": "fill_container",
+                  "height": 42,
+                  "fill": "$surface-bar",
+                  "cornerRadius": "$radius",
+                  "gap": 11,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "hLQXQ",
+                      "name": "Icon / 配置文件",
+                      "width": 18,
+                      "height": 18,
+                      "icon": "files",
+                      "library": "lucide",
+                      "fill": "$fg-2"
+                    },
+                    {
+                      "type": "text",
+                      "id": "LLmKK",
+                      "name": "Label / 配置文件",
+                      "fill": "$fg-2",
+                      "content": "配置文件",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "cYP0w",
+                  "name": "Nav / 快捷键",
+                  "width": "fill_container",
+                  "height": 42,
+                  "fill": "$surface-bar",
+                  "cornerRadius": "$radius",
+                  "gap": 11,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "DcaoS",
+                      "name": "Icon / 快捷键",
+                      "width": 18,
+                      "height": 18,
+                      "icon": "keyboard",
+                      "library": "lucide",
+                      "fill": "$fg-2"
+                    },
+                    {
+                      "type": "text",
+                      "id": "D5JWS",
+                      "name": "Label / 快捷键",
+                      "fill": "$fg-2",
+                      "content": "快捷键",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "s21tqX",
+                  "name": "Nav / AI 标签",
+                  "width": "fill_container",
+                  "height": 42,
+                  "fill": "$state-selected",
+                  "cornerRadius": "$radius",
+                  "gap": 11,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "gd6Zu",
+                      "name": "Icon / AI 标签",
+                      "width": 18,
+                      "height": 18,
+                      "icon": "scan",
+                      "library": "lucide",
+                      "fill": "$brand"
+                    },
+                    {
+                      "type": "text",
+                      "id": "NYqQl",
+                      "name": "Label / AI 标签",
+                      "fill": "$fg-1",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "AI 标签",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "600"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "P3KIo",
+              "name": "Settings content",
+              "width": "fill_container",
+              "height": "fill_container",
+              "fill": "$surface-main",
+              "layout": "vertical",
+              "gap": 18,
+              "padding": [
+                25,
+                30
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "id": "T6vhik",
+                  "name": "AI title",
+                  "fill": "$fg-1",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "AI 标签",
+                  "fontFamily": "Inter",
+                  "fontSize": 21,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "DLg2C",
+                  "name": "AI subtitle",
+                  "fill": "$fg-2",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "识别照片中的常见物体和场景，在本机完成。",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "okz5P",
+                  "name": "Model / uninstalled",
+                  "width": "fill_container",
+                  "fill": "$surface-layer",
+                  "cornerRadius": "$radius",
+                  "layout": "vertical",
+                  "gap": 14,
+                  "padding": 20,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "u16pZ",
+                      "name": "Model name",
+                      "fill": "$fg-1",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "TinyCLIP 本地标签模型",
+                      "fontFamily": "Inter",
+                      "fontSize": 17,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "GT7Rd",
+                      "name": "Model scope",
+                      "fill": "$fg-2",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "人、鸟、车、山、海、森林、夜景",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "IgRKf",
+                      "name": "Model state",
+                      "fill": "$fg-1",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "尚未安装",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "xOV1g",
+                      "name": "Download size",
+                      "fill": "$fg-2",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "模型约 152 MiB，随应用提供，点击安装后可离线使用。",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "rz2Mi",
+                      "name": "Button / 安装模型",
+                      "width": 150,
+                      "height": 34,
+                      "fill": "$surface-bar",
+                      "cornerRadius": "$radius",
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "SeJ8s",
+                          "name": "Install label",
+                          "fill": "$fg-1",
+                          "textGrowth": "fixed-width",
+                          "width": 100,
+                          "content": "安装模型",
+                          "textAlign": "center",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "ZI975",
+                  "name": "Installed states",
+                  "fill": "$fg-2",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "安装中 → 等待校验；失败 → 说明原因、重试；已安装 → 查看版本、卸载。",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "guICK",
+                  "name": "Tags survival",
+                  "fill": "$fg-2",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "卸载模型保留已有 AI 标签、手动标签和禁止项。",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "lU41y",
+                  "name": "Explicit execution",
+                  "fill": "$fg-2",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "安装后由您选择照片开始识别，不自动扫描相片库。",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "dS8nP",
+                  "name": "Offline installation",
+                  "fill": "$fg-2",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "离线安装可选择经校验的官方模型包。",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "T8Ak4",
+                  "name": "Unavailable release",
+                  "fill": "$fg-2",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "识别偏向减少误标，仍可能漏标，可在标签来源中纠正。",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "y02Ugg",
+      "x": 18430,
+      "y": -34,
+      "name": "Global Settings / AI 标签 / 无 AI 构建",
+      "theme": {
+        "mode": "dark",
+        "density": "compact"
+      },
+      "clip": true,
+      "width": 930,
+      "height": 650,
+      "fill": "$surface-layer",
+      "cornerRadius": 8,
+      "stroke": "$surface-bar",
+      "strokeWidth": 1,
+      "layout": "vertical",
+      "children": [
+        {
+          "type": "frame",
+          "id": "kGi6e",
+          "name": "Header / global settings",
+          "width": "fill_container",
+          "height": 88,
+          "fill": "$surface-layer",
+          "gap": 12,
+          "padding": [
+            0,
+            28
+          ],
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "eML1g",
+              "name": "Heading stack",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 4,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "u7AXb",
+                  "name": "Title / 设置",
+                  "fill": "$fg-1",
+                  "content": "设置",
+                  "fontFamily": "Inter",
+                  "fontSize": 23,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "text",
+                  "id": "GCaZ3",
+                  "name": "Subtitle / all device preferences",
+                  "fill": "$fg-2",
+                  "content": "显示、色彩和操作方式，由你掌控。",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "pzc2c",
+              "name": "Close button",
+              "width": 32,
+              "height": 32,
+              "fill": "$surface-bar",
+              "cornerRadius": "$radius",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "walZa",
+                  "name": "Close glyph",
+                  "width": 18,
+                  "height": 18,
+                  "icon": "x",
+                  "library": "lucide",
+                  "fill": "$fg-2"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "USCtI",
+          "name": "Settings body",
+          "width": "fill_container",
+          "height": "fill_container",
+          "fill": "$surface-main",
+          "children": [
+            {
+              "type": "frame",
+              "id": "oaBJ2",
+              "name": "Settings navigation",
+              "width": 198,
+              "height": "fill_container",
+              "fill": "$surface-bar",
+              "layout": "vertical",
+              "gap": 7,
+              "padding": [
+                28,
+                14
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "id": "vLKV6",
+                  "name": "Navigation label",
+                  "fill": "$fg-3",
+                  "content": "偏好设置",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "frame",
+                  "id": "YZ6rG",
+                  "name": "Nav / 色彩管理",
+                  "width": "fill_container",
+                  "height": 42,
+                  "fill": "$surface-bar",
+                  "cornerRadius": "$radius",
+                  "gap": 11,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "x9sQKP",
+                      "name": "Icon / 色彩管理",
+                      "width": 18,
+                      "height": 18,
+                      "icon": "palette",
+                      "library": "lucide",
+                      "fill": "$fg-2"
+                    },
+                    {
+                      "type": "text",
+                      "id": "Imxf1",
+                      "name": "Label / 色彩管理",
+                      "fill": "$fg-2",
+                      "content": "色彩管理",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "PqJW6",
+                  "name": "Nav / 配置文件",
+                  "width": "fill_container",
+                  "height": 42,
+                  "fill": "$surface-bar",
+                  "cornerRadius": "$radius",
+                  "gap": 11,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "D9nlu",
+                      "name": "Icon / 配置文件",
+                      "width": 18,
+                      "height": 18,
+                      "icon": "files",
+                      "library": "lucide",
+                      "fill": "$fg-2"
+                    },
+                    {
+                      "type": "text",
+                      "id": "KF9fD",
+                      "name": "Label / 配置文件",
+                      "fill": "$fg-2",
+                      "content": "配置文件",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "dNJ50",
+                  "name": "Nav / 快捷键",
+                  "width": "fill_container",
+                  "height": 42,
+                  "fill": "$surface-bar",
+                  "cornerRadius": "$radius",
+                  "gap": 11,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "A4tUc8",
+                      "name": "Icon / 快捷键",
+                      "width": 18,
+                      "height": 18,
+                      "icon": "keyboard",
+                      "library": "lucide",
+                      "fill": "$fg-2"
+                    },
+                    {
+                      "type": "text",
+                      "id": "pe6GZ",
+                      "name": "Label / 快捷键",
+                      "fill": "$fg-2",
+                      "content": "快捷键",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "Sh1Ml",
+                  "name": "Nav / AI 标签",
+                  "width": "fill_container",
+                  "height": 42,
+                  "fill": "$state-selected",
+                  "cornerRadius": "$radius",
+                  "gap": 11,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "SYCGs",
+                      "name": "Icon / AI 标签",
+                      "width": 18,
+                      "height": 18,
+                      "icon": "scan",
+                      "library": "lucide",
+                      "fill": "$brand"
+                    },
+                    {
+                      "type": "text",
+                      "id": "IBvm9",
+                      "name": "Label / AI 标签",
+                      "fill": "$fg-1",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "AI 标签",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "600"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "DXq9X",
+              "name": "Settings content",
+              "width": "fill_container",
+              "height": "fill_container",
+              "fill": "$surface-main",
+              "layout": "vertical",
+              "gap": 18,
+              "padding": [
+                25,
+                30
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "id": "I8glOV",
+                  "name": "AI title",
+                  "fill": "$fg-1",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "AI 标签",
+                  "fontFamily": "Inter",
+                  "fontSize": 21,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "L8mmq",
+                  "name": "AI subtitle",
+                  "fill": "$fg-2",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "识别照片中的常见物体和场景，在本机完成。",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "l8aOW6",
+                  "name": "Model / uninstalled",
+                  "width": "fill_container",
+                  "fill": "$surface-layer",
+                  "cornerRadius": "$radius",
+                  "layout": "vertical",
+                  "gap": 14,
+                  "padding": 20,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "qyhZI",
+                      "name": "Model name",
+                      "fill": "$fg-1",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "此构建未包含 AI 识别",
+                      "fontFamily": "Inter",
+                      "fontSize": 17,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "DKHcF",
+                      "name": "Model scope",
+                      "fill": "$fg-2",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "您仍可正常使用手动标签、目录标签和相片桶。",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "i3SgFH",
+                      "name": "Download size",
+                      "fill": "$fg-2",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "已有 AI 标签、禁止项和纠错记录继续保留。",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "R97vUT",
+                  "name": "Tags survival",
+                  "fill": "$fg-2",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "需要识别照片时，请使用包含 AI 功能的应用版本。",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
                   "fontWeight": "normal"
                 }
               ]
@@ -19517,6 +22888,10 @@
           }
         }
       ]
+    },
+    "transparent": {
+      "type": "color",
+      "value": "#00000000"
     }
   },
   "fileToken": "b7f7e379-a976-4167-a32f-1ab7f3c9f386"

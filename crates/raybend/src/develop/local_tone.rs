@@ -190,7 +190,12 @@ impl LocalToneState {
     /// 因为用的是局部线性模型（`a·L + b`），边缘由 `apply` 那张全分辨率的 L 决定。
     #[must_use]
     pub fn analyze(chained: &LinearImage, opts: &LocalToneOpts) -> Self {
-        let luma = luma_plane(chained);
+        Self::analyze_rgb(super::sample::RgbView { width: chained.width, height: chained.height, rgb: &chained.rgb }, opts)
+    }
+
+    /// Analyze the same linear-sRGB reference domain, retaining float highlight range.
+    pub fn analyze_rgb<T: super::sample::RgbSample>(chained: super::sample::RgbView<'_, T>, opts: &LocalToneOpts) -> Self {
+        let luma = luma_plane(&chained);
         // ① 细尺度：base 贴边 ⇒ D1 里是纹理
         let fine = GuidedModel::analyze(&luma, opts.fine_radius, opts.fine_eps, 1);
         let base_fine = fine.apply(&luma);
@@ -239,25 +244,30 @@ impl LocalToneState {
     /// * 尺寸可以与 `analyze` 时不同（预览档 / 1:1 档共用同一个 `LocalToneState`）——
     ///   系数按归一化坐标插值，所以两个档位的观感一致。
     pub fn apply_inplace(&self, image: &mut LinearImage, strength: f32) {
+        if !image.is_consistent() { return; }
+        self.apply_rgb(&mut image.rgb, image.width, image.height, strength);
+    }
+
+    pub fn apply_rgb<T: super::sample::RgbSample>(&self, rgb: &mut [T], width: u32, height: u32, strength: f32) {
         // NaN 也要当 0 处理 —— 所以写「小于等于 0 或者是 NaN」而不是 `!(strength > 0.0)`
-        if strength <= 0.0 || strength.is_nan() || !image.is_consistent() {
+        if strength <= 0.0 || strength.is_nan() || super::sample::RgbView::new(width, height, rgb).is_none() {
             // 恒等：强度 0 或 NaN 一律不动画面
             return;
         }
         let strength = strength.min(1.0);
 
-        let width = image.width as usize;
+        let width = width as usize;
         let threads = std::thread::available_parallelism()
             .map_or(1, std::num::NonZeroUsize::get)
             .min(16);
-        let height = image.height as usize;
+        let height = height as usize;
         if threads <= 1 || height < 32 {
-            apply_rows(self, strength, &mut image.rgb, width, height, 0);
+            apply_rows(self, strength, rgb, width, height, 0);
             return;
         }
         let rows_per_chunk = height.div_ceil(threads);
         std::thread::scope(|scope| {
-            let mut remaining = image.rgb.as_mut_slice();
+            let mut remaining = rgb;
             let mut first_row = 0usize;
             while !remaining.is_empty() {
                 let rows = (remaining.len() / (width * 3)).min(rows_per_chunk).max(1);
@@ -374,10 +384,10 @@ impl<'a> LocalToneRows<'a> {
 /// `first_row` 只是这一段在整张图里的起始行 —— 两者不能混。
 /// ❗ 曾经把 `first_row + 本段行数` 当成 height 传进来：分析图是全图的 1/4 时，
 ///   每个块各自算出一个不同的缩放比，块边界会出现横向条带。
-fn apply_rows(
+fn apply_rows<T: super::sample::RgbSample>(
     state: &LocalToneState,
     strength: f32,
-    rows: &mut [u16],
+    rows: &mut [T],
     width: usize,
     height: usize,
     first_row: usize,
@@ -390,13 +400,13 @@ fn apply_rows(
         context.set_row(y);
         for (x, pixel) in line.iter_mut().enumerate() {
             let rgb = [
-                linear_of(pixel[0]),
-                linear_of(pixel[1]),
-                linear_of(pixel[2]),
+                pixel[0].value() / T::MAX,
+                pixel[1].value() / T::MAX,
+                pixel[2].value() / T::MAX,
             ];
             let ratio = context.ratio_for_rgb(x, rgb);
             for (channel, value) in pixel.iter_mut().enumerate() {
-                *value = encoded_of(rgb[channel] * ratio);
+                *value = T::encode(rgb[channel] * ratio * T::MAX);
             }
         }
     }
@@ -422,12 +432,14 @@ fn smoothstep(edge0: f32, edge1: f32, value: f32) -> f32 {
 
 /// 线性 sRGB u16 → f32。
 #[inline]
+#[cfg(test)]
 fn linear_of(encoded: u16) -> f32 {
     f32::from(encoded) / 65535.0
 }
 
 /// f32 线性 → u16（夹取 + 四舍五入；**不许出现 NaN 漏进编码**）。
 #[inline]
+#[cfg(test)]
 fn encoded_of(linear: f32) -> u16 {
     if !linear.is_finite() {
         return 0;
@@ -438,10 +450,10 @@ fn encoded_of(linear: f32) -> u16 {
 }
 
 /// 从线性图取 `log2` 亮度平面。
-fn luma_plane(image: &LinearImage) -> Plane {
+fn luma_plane<T: super::sample::RgbSample>(image: &super::sample::RgbView<'_, T>) -> Plane {
     let mut values = Vec::with_capacity(image.rgb.len() / 3);
     for pixel in image.rgb.as_chunks::<3>().0 {
-        let luma = luma_of([linear_of(pixel[0]), linear_of(pixel[1]), linear_of(pixel[2])]);
+        let luma = luma_of([pixel[0].value() / T::MAX, pixel[1].value() / T::MAX, pixel[2].value() / T::MAX]);
         values.push(luma.max(MIN_LINEAR).log2());
     }
     Plane {

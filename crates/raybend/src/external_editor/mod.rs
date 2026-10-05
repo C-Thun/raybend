@@ -194,20 +194,38 @@ pub fn write_tiff_checked(
     check_session: impl Fn() -> Result<()>,
     suffix: &str,
 ) -> Result<PathBuf> {
+    write_tiff_checked_with_profiles(source,captured,directory,metadata,lens,lut,cancel,phase,check_session,suffix,|_,_| Err(Error::Unsupported("外部编辑传递引用的输入 ICC 不可用".into())))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn write_tiff_checked_with_profiles(
+    source: &Path, captured: &crate::export::VariantSnapshot, directory: &Path,
+    metadata: &crate::export::metadata::Metadata,
+    lens: Option<&crate::develop::lens::LensCorrection>, lut: Option<&crate::develop::lut::Lut>,
+    cancel: &AtomicBool, phase: impl Fn(&str), check_session: impl Fn() -> Result<()>, suffix: &str,
+    profile: impl FnMut(&crate::color::ProfileId,crate::color::icc::IccRole) -> Result<crate::color::icc::RgbIcc>,
+) -> Result<PathBuf> {
     check_session()?;
     if !directory.is_absolute() || !directory.is_dir() {
         return Err(Error::Unsupported("TIFF 保存目录不可用".into()));
     }
     cancelled(cancel)?;
     phase("rendering");
-    let image = crate::export::render_captured(source, captured, lens, lut, 0)?;
-    cancelled(cancel)?;
-    phase("writing");
-    let bytes = crate::export::output::encode(&image, "tiff", 90, metadata)?;
+    let bytes = if captured.stack.color.is_some() {
+        let image=crate::export::render_working_captured(source,captured,lens,lut,0,profile)?;
+        cancelled(cancel)?; phase("writing");
+        let target=crate::color::icc::srgb_icc().map_err(|e|Error::Unsupported(e.to_string()))?;
+        crate::export::output::encode_working(&image,"tiff",90,metadata,&target)?
+    } else {
+        let image=crate::export::render_captured(source,captured,lens,lut,0)?;
+        cancelled(cancel)?; phase("writing");
+        crate::export::output::encode(&image,"tiff",90,metadata)?
+    };
     cancelled(cancel)?;
     crate::export::check_source(source, captured)?;
     // FILENAME expansion uses the same filename sanitization as ordinary exports.
     let preset = crate::export::Preset {
+        output_color: crate::color::OutputColor::Srgb,
         id: "external".into(),
         name: "external".into(),
         format: "tiff".into(),
@@ -386,6 +404,20 @@ mod tests {
         let bytes = std::fs::read(first).unwrap();
         assert!(bytes.windows("柔光".len()).any(|w| w == "柔光".as_bytes()));
         assert_eq!(before, Sha256::digest(std::fs::read(&source).unwrap()));
+    }
+    #[test]
+    fn floating_color_handoff_uses_shared_precision_and_embeds_srgb() {
+        let (dir,source,mut snap)=fixture();
+        snap.stack.color=Some(crate::color::PhotoColorState::new_pipeline(crate::color::SourceColor::AssumedSrgb));
+        snap.profile_hash=crate::store::issues::profile_hash(&snap.stack).unwrap();
+        let cancel=AtomicBool::new(false);
+        let path=write_tiff(&source,&snap,dir.path(),&Default::default(),None,None,&cancel,|_|{}).unwrap();
+        let working=crate::export::render_working_captured(&source,&snap,None,None,0,|_,_|Err(Error::Unsupported("unused".into()))).unwrap();
+        let expected=working.to_rgb16_flat(&crate::color::icc::srgb_icc().unwrap()).unwrap();
+        let image=image::open(&path).unwrap();assert_eq!(image.color(),image::ColorType::Rgb16);
+        assert_eq!(image.to_rgb16().as_raw(),&expected);
+        let decoded=crate::color::input::decode_bitmap(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(decoded.embedded_icc.unwrap().id(),crate::color::icc::srgb_icc().unwrap().id());
     }
     #[test]
     fn cancellation_before_and_after_render_never_publishes() {

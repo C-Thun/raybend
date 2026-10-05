@@ -136,6 +136,7 @@ export async function getEditorRenderState(): Promise<EditorRenderState | null> 
 
 /** 一张照片的编辑栈（与 Rust 侧 `DevelopStackDto` 逐字对应）。 */
 export interface DevelopStack {
+  color?: import("./color.ts").PhotoColorState | null;
   autoAdjust?: import("./types.ts").AutoAdjustBaseline | null;
   /** latest 的唯一源；其它调整参数在 SOOC/RAW 切换时共用。 */
   sourceBase?: DevelopEditBase;
@@ -171,6 +172,7 @@ export interface DevelopStack {
 /** 编辑栈 → store 设置的唯一适配，撤销与普通载图共用。 */
 export function developSettingsOf(stack: DevelopStack): DevelopSettings {
   return {
+    color: stack.color ?? null,
     autoAdjust: stack.autoAdjust ?? null,
     sourceBase: stack.sourceBase ?? "raw",
     baseCurveProfile: stack.baseCurveProfile ?? null,
@@ -225,6 +227,7 @@ export async function commitDevelopStack(
   // 编辑栈整体作为**一个**参数发过去（不再把六个字段摊在命令参数上）——
   // 加一项设置时只改 DTO，不必再动命令签名
   const payload: DevelopStack = {
+    color: stack.color ?? null,
     autoAdjust: stack.autoAdjust ?? null,
     sourceBase: stack.sourceBase ?? "raw",
     values: stack.values,

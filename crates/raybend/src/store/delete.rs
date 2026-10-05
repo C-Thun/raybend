@@ -151,6 +151,34 @@ pub fn delete_assets_checked(
                 }
             }
         }
+        // 照片回收失败时保留 sidecar；它仍是留在磁盘上的照片的恢复资料。
+        if all_moved {
+            // sidecar 跟着照片一起走：**我们的**（含 rb: 域）才动，别家的不碰；
+            // 移不走只记日志，不阻塞记录清理（它只是镜像，`specs/xmp-sidecar.md` §6.2）。
+            let mut sidecars: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+            for rel in &plan.rel_paths {
+                if let Some(sidecar_rel) = crate::xmp::rel_sidecar_of(rel) {
+                    sidecars.insert(sidecar_rel);
+                }
+            }
+            for rel in sidecars {
+                check_session()?;
+                let abs = match crate::xmp::resolve_sidecar(&root.join(&rel)) {
+                    Ok(Some(abs)) => abs,
+                    Ok(None) => continue,
+                    Err(error) => {
+                        eprintln!("[delete] sidecar {rel} 路径解析失败，保留：{error}");
+                        continue;
+                    }
+                };
+                if abs.is_file()
+                    && crate::xmp::is_ours(&abs)
+                    && let Err(reason) = trasher.trash(&abs)
+                {
+                    eprintln!("[delete] sidecar {rel} 未能移入回收站：{reason}");
+                }
+            }
+        }
         if all_moved {
             to_forget.push(plan.asset_id);
         } else {
@@ -419,6 +447,39 @@ mod tests {
         assert_eq!(plans[0].rel_paths.len(), 2);
     }
 
+    const OURS_SIDECAR: &str = "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\">\
+        <rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\
+        <rdf:Description rdf:about=\"\" xmlns:rb=\"https://raybend.app/ns/issue/1.0/\">\
+        <rb:profiles><rdf:Seq></rdf:Seq></rb:profiles>\
+        </rdf:Description></rdf:RDF></x:xmpmeta>";
+
+    #[test]
+    fn ours_sidecar_follows_the_photo_into_the_trash() {
+        let conn = catalog();
+        let dir = tempfile::tempdir().unwrap();
+        let id = asset_with_files(&conn, dir.path(), &["photos/a.jpg", "photos/_RAW/a.orf"]);
+        // 我们的 sidecar 放在非 _RAW 目录（位图旁）；另放一个别家的做对照
+        std::fs::write(dir.path().join("photos/a.xmp"), OURS_SIDECAR).unwrap();
+        std::fs::write(dir.path().join("photos/_RAW/a.orf.xmp"), "<x/> lightroom").unwrap();
+        let trasher = MovingTrasher::new();
+        delete_assets_with(&trasher, &conn, dir.path(), &[id]).unwrap();
+        let moved = trasher.moved();
+        assert!(moved.iter().any(|p| p.ends_with("photos/a.xmp")), "我们的 sidecar 跟着走");
+        assert!(!moved.iter().any(|p| p.ends_with("a.orf.xmp")), "别家的不动");
+    }
+
+    #[test]
+    fn foreign_sidecar_is_left_behind() {
+        let conn = catalog();
+        let dir = tempfile::tempdir().unwrap();
+        let id = asset_with_files(&conn, dir.path(), &["photos/b.jpg"]);
+        std::fs::write(dir.path().join("photos/b.xmp"), "<x/> not ours").unwrap();
+        let trasher = MovingTrasher::new();
+        delete_assets_with(&trasher, &conn, dir.path(), &[id]).unwrap();
+        assert!(!trasher.moved().iter().any(|p| p.ends_with("b.xmp")));
+        assert!(dir.path().join("photos/b.xmp").is_file(), "别家的留在原地");
+    }
+
     #[test]
     fn absolute_paths_handle_separators() {
         let root = Path::new("/lib");
@@ -445,4 +506,47 @@ mod tests {
         SystemTrash.trash(&path).expect("移进回收站失败");
         assert!(!path.exists(), "移走之后原位置不该还有它");
     }
+
+    #[test]
+    fn failed_photo_recycling_preserves_its_sidecar() {
+        let conn = catalog();
+        let dir = tempfile::tempdir().unwrap();
+        let id = asset_with_files(&conn, dir.path(), &["photos/a.jpg", "photos/_RAW/a.orf"]);
+        let sidecar = dir.path().join("photos/a.xmp");
+        std::fs::write(&sidecar, OURS_SIDECAR).unwrap();
+        let trasher = MovingTrasher::failing_on(&["a.orf"]);
+        let report = delete_assets_with(&trasher, &conn, dir.path(), &[id]).unwrap();
+        assert_eq!(report.deleted, 0);
+        assert!(asset_exists(&conn, id));
+        assert!(sidecar.is_file());
+        assert!(!trasher.moved().contains(&sidecar));
+    }
+
+    #[test]
+    fn folded_sidecar_follows_photo_recycling() {
+        let conn = catalog();
+        let dir = tempfile::tempdir().unwrap();
+        let id = asset_with_files(&conn, dir.path(), &["photos/Photo.jpg"]);
+        let sidecar = dir.path().join("photos/photo.XMP");
+        std::fs::write(&sidecar, OURS_SIDECAR).unwrap();
+        let trasher = MovingTrasher::new();
+        assert_eq!(delete_assets_with(&trasher, &conn, dir.path(), &[id]).unwrap().deleted, 1);
+        assert!(trasher.moved().contains(&sidecar));
+    }
+
+    #[test]
+    fn session_expiry_before_sidecar_recycling_preserves_sidecar() {
+        let conn = catalog();
+        let dir = tempfile::tempdir().unwrap();
+        let id = asset_with_files(&conn, dir.path(), &["photos/a.jpg"]);
+        let sidecar = dir.path().join("photos/a.xmp");
+        std::fs::write(&sidecar, OURS_SIDECAR).unwrap();
+        let result = delete_assets_checked(&MovingTrasher::new(), &conn, dir.path(), &[id], || {
+            if dir.path().join("photos/a.jpg").exists() { Ok(()) } else { Err(crate::Error::SessionExpired) }
+        });
+        assert!(matches!(result, Err(crate::Error::SessionExpired)));
+        assert!(sidecar.is_file());
+        assert!(asset_exists(&conn, id));
+    }
+
 }

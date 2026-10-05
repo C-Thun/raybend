@@ -1,0 +1,136 @@
+{
+  "completedAt": "2026-10-04T18:13:46+08:00",
+  "modelSha256": "a8576f0f9916d6e92237996d41c256e1e3150db5cf6db48758bb63c87537bb24",
+  "encoderBytes": 158885258,
+  "cpuExportMaxAbsError": 8.299946784973145e-06,
+  "tests": {
+    "modelRegistry": {
+      "pass": 11,
+      "fail": 0
+    },
+    "buildScripts": {
+      "pass": 78,
+      "fail": 0
+    },
+    "frontend": {
+      "pass": 1209,
+      "fail": 0
+    },
+    "coreWorkspace": {
+      "pass": 1437,
+      "ignored": 12,
+      "fail": 0
+    },
+    "desktopLib": {
+      "pass": 113,
+      "ignored": 1,
+      "fail": 0
+    },
+    "desktopMain": {
+      "pass": 2,
+      "fail": 0
+    },
+    "xmpSubset": {
+      "pass": 62,
+      "fail": 0
+    },
+    "aiSubset": {
+      "pass": 27,
+      "fail": 0
+    }
+  },
+  "buildSequence": [
+    {
+      "state": "on",
+      "exe_sha256": "9acc6f6bf2cade4c93e2c3fb54936fc16f0edf4ac92da97fe6f40c1872ceae98",
+      "worker_sha256": "b666618da32db0d60fc44e09c422a5b617a2b923ad0ef8ef6d0791f487a24f02",
+      "record": {
+        "schema": 1,
+        "ai": {
+          "enabled": true,
+          "reason": "ready",
+          "manifestSha256": "775a029ab0956f88acbd40dcb10e5fbbc174e3bb624c656b23923979684bbfc7",
+          "artifactSha256": "5bfe9c1ad365325e0a71e5737e3cd4b0b5e0a40a8f5550a75db03fc9bfc978c3",
+          "runtimeVersion": "1.28.0"
+        }
+      },
+      "build_duration": "5m 31s",
+      "artifact_check_passed": true,
+      "resource_directories": {
+        "ai-model": true,
+        "ai-runtime": true
+      }
+    },
+    {
+      "state": "off",
+      "exe_sha256": "696333506424aa0ab0236e4b4c0751f1904ab9efdbfdcdcda31f8401e12d8414",
+      "worker_sha256": "df7e72cf10dcd07d6d41f506ffa6860469954e6e18c3ac516f962397c00f434c",
+      "record": {
+        "schema": 1,
+        "ai": {
+          "enabled": false,
+          "reason": "explicit-off"
+        }
+      },
+      "build_duration": "6m 47s",
+      "artifact_check_passed": true,
+      "resource_directories": {
+        "ai-model": false,
+        "ai-runtime": false
+      }
+    },
+    {
+      "state": "on",
+      "exe_sha256": "a9523b0461ec8d64ad0126972a987ff6bc2e33cadf728f30ce12d5f8926356fd",
+      "worker_sha256": "85c3ab4610a7d1770a60f26a850a8a6caee7da46e07ecc1e4ad5b56a22aefccf",
+      "record": {
+        "schema": 1,
+        "ai": {
+          "enabled": true,
+          "reason": "ready",
+          "manifestSha256": "775a029ab0956f88acbd40dcb10e5fbbc174e3bb624c656b23923979684bbfc7",
+          "artifactSha256": "5bfe9c1ad365325e0a71e5737e3cd4b0b5e0a40a8f5550a75db03fc9bfc978c3",
+          "runtimeVersion": "1.28.0"
+        }
+      },
+      "build_duration": "3m 19s",
+      "artifact_check_passed": true,
+      "resource_directories": {
+        "ai-model": true,
+        "ai-runtime": true
+      }
+    }
+  ],
+  "onWorker": [
+    {
+      "feature_count": 512,
+      "original_preprocess_encode_ms": 201.2744,
+      "image": "C:\\rb-target\\raybend-ai-probe-data\\samples\\astronaut.jpg"
+    },
+    {
+      "feature_count": 512,
+      "original_preprocess_encode_ms": 138.0552,
+      "image": "C:\\rb-target\\raybend-ai-probe-data\\samples\\rocket.jpg"
+    },
+    {
+      "worker_pid": 43416,
+      "peak_working_set_bytes": 237445120,
+      "worker_exited": true,
+      "load_includes_contract_probe_ms": 1340.2032000000002,
+      "exit_code": 0
+    }
+  ],
+  "offWorker": [
+    {
+      "worker_rejected": true,
+      "error": "此构建未包含 AI 识别",
+      "output_bytes": 0,
+      "exit_code": 2
+    }
+  ],
+  "installerCreated": false,
+  "published": false,
+  "humanGuiValidated": false,
+  "freshPythonDependencyInstallValidated": false,
+  "researchAdapterProfileByteParity": true
+}

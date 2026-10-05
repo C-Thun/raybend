@@ -1,0 +1,55 @@
+{
+  "revision": "raybend-tinyclip-v1-contrastive",
+  "positive": {
+    "person": [
+      "a photo of a person",
+      "a photo of people",
+      "a photo of a man",
+      "a photo of a woman",
+      "a photo of a child",
+      "a portrait photo of a person"
+    ],
+    "bird": [
+      "a photo of a bird",
+      "a photo of birds"
+    ],
+    "car": [
+      "a photo of a car",
+      "a photo of cars"
+    ],
+    "mountain": [
+      "a photo of mountains",
+      "a photo of a mountain"
+    ],
+    "sea": [
+      "a photo of the sea",
+      "a photo of ocean waves",
+      "a photo of a sea coast",
+      "a seascape photograph",
+      "a photo of a beach by the ocean",
+      "a photo of a ship on the sea"
+    ],
+    "forest": [
+      "a photo of a forest",
+      "a photo of woodland"
+    ],
+    "night": [
+      "a photo of a night scene",
+      "a photo of a city at night"
+    ]
+  },
+  "negative": {
+    "person": [
+      "a photo without people",
+      "a landscape photo without people",
+      "a photo of a human statue",
+      "a photo of a doll"
+    ],
+    "sea": [
+      "a photo of a lake",
+      "a photo of a river",
+      "a photo of the sky",
+      "a photo of a swimming pool"
+    ]
+  }
+}

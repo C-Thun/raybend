@@ -50,7 +50,7 @@ raybend（中文名**「光伴」**，产品名 `RayBend`）是一个**相片管
 16. **数据库 schema 变化只走现有迁移框架**（`crates/raybend/src/store/migration.rs` + `store/migrations/*.sql`）：版本闸门、`VACUUM INTO` 迁移前快照、逐条事务、完整性检查。禁止启动时临时 `ALTER`、另造迁移通道、静默删库重建；localStorage 等设备级偏好用**版本化 key + 显式一次性迁移**。
 17. **Solid 壳组件透传 children：`untrack` 写在插入点**——`{untrack(() => props.children)}`（就写在 JSX 那一行）；**禁止**提到组件 body 里提前求值。A/B 两面的完整教训、判据与回归脚本见 `memory/ARCHITECTURE.md` §9。
 18. **禁止全盘搜索**：不许 `find /`、`grep -r /` 这类从根往下的扫描（会把 `/mnt` 一起卷进来）。先查本仓；第三方源码走确定路径：cargo 依赖在 `~/.cargo/registry/src/index.crates.io-*/`、pnpm 依赖在仓内 `node_modules/`、参考实现在 `/home/andares/repos/refers/<name>/`；不确定路径先 `ls` 父目录一层。
-19. **新增/改动功能必须同步评估 XMP 侧影响**（崔总 2026-09-30 定）：凡是改动会进 sidecar 的数据（编辑栈 / issue / 评级 / 色标 / 标签 / 文字 / 地点等）或其存储布局（目录、命名、`_RAW/` 规则），必须在**同一次改动**里判断并接好对 XMP sidecar 写出与读回的影响（规格：`specs/xmp-w1.md`），**不得延后欠账**——例：将来改地理位置功能的落地方式时，`photoshop:` / `Iptc4xmpCore:` 那一侧的映射要一起动。
+19. **新增/改动功能必须同步评估 XMP 侧影响**（崔总 2026-09-30 定）：凡是改动会进 sidecar 的数据（编辑栈 / issue / 评级 / 色标 / 标签 / 文字 / 地点等）或其存储布局（目录、命名、`_RAW/` 规则），必须在**同一次改动**里判断并接好对 XMP sidecar 写出与读回的影响（规格：`specs/xmp-sidecar.md`），**不得延后欠账**——例：将来改地理位置功能的落地方式时，`photoshop:` / `Iptc4xmpCore:` 那一侧的映射要一起动。
 
 ---
 

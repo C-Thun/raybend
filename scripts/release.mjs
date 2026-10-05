@@ -10,9 +10,11 @@ import { windowsReleaseConfig, windowsReleaseCommands } from "./lib/release-wind
 import { discoverWindowsReleasePaths, toHostPath, toWindowsPath, runWindowsReleaseBatch } from "./lib/windows-paths.mjs";
 import { acquireReleaseLock, syncReleaseMirror } from "./lib/release-mirror.mjs";
 import { finalizeRelease } from "./finalize-release.mjs";
+import {parseAiArgs,resolveAiBuild,aiBuildEnv,aiBuildMetadata,ensureBuildRuntime,syncAiOutput} from "./lib/ai-build.mjs";
 import { windowsBuildEnv } from "./lib/dav1d-win.mjs";
-export function runRelease({root=resolve(dirname(fileURLToPath(import.meta.url)),".."),argv=process.argv.slice(2),env=process.env,run=execFileSync,log=console.log,finalize=finalizeRelease,discover=discoverWindowsReleasePaths}={}) {
-  const request=parseReleaseArgs(argv),pkg=JSON.parse(readFileSync(join(root,"package.json"),"utf8"));
+export function runRelease({root=resolve(dirname(fileURLToPath(import.meta.url)),".."),argv=process.argv.slice(2),env=process.env,run=execFileSync,log=console.log,finalize=finalizeRelease,discover=discoverWindowsReleasePaths,aiResolver=resolveAiBuild}={}) {
+  const aiArgs=parseAiArgs(argv);
+  const request=parseReleaseArgs(aiArgs.args),pkg=JSON.parse(readFileSync(join(root,"package.json"),"utf8"));
   const windows=request.windowsTargets.length>0;
   let dirty=true,gitHash,gitAvailable=false;
   try {
@@ -34,7 +36,7 @@ export function runRelease({root=resolve(dirname(fileURLToPath(import.meta.url))
   if(windows)log(`Windows 构建目录：${paths.windowsBase}\nWSL 挂载目录：${paths.hostBase}\n本地源码：${paths.windowsSource}\n编译缓存：${paths.windowsTarget}\n最终安装器：${releaseOut}`);
   for(const warning of plan.warnings)log(`⚠ ${warning}`);
   for(const blocker of plan.blockers)log(`⛔ ${blocker}`);
-  if(request.dryRun){log("dry-run：没有改文件、构建、签名或发布");return plan;}
+  if(request.dryRun){aiResolver({root,mode:aiArgs.mode,materialize:false,log});log("dry-run：没有改文件、构建、签名或发布");return plan;}
   if(plan.blockers.length)throw new Error(plan.blockers.join("；"));
   if(windows && existsSync(releaseOut))throw new Error("本版本 release-out 已存在；保留已有产物，请先核对，不能重复覆盖");
   const windowsRoot=paths?.hostSource,windowsTarget=paths?.hostTarget;
@@ -45,6 +47,7 @@ export function runRelease({root=resolve(dirname(fileURLToPath(import.meta.url))
     catch {throw new Error(`Windows cargo-tauri 尚未就绪；先由崔总执行一次：cmd.exe /d /c "cargo install tauri-cli --version ${cliVersion} --locked"`);}
     if(/tauri-cli\s+(\S+)/.exec(windowsCli)?.[1]!==cliVersion)throw new Error(`Windows cargo-tauri 须与前端 CLI ${cliVersion} 一致；请先升级，未改版本或构建`);
   }
+  let aiPlan;
   const unlocks=[];
   let rollback=()=>{};
   try {
@@ -52,6 +55,9 @@ export function runRelease({root=resolve(dirname(fileURLToPath(import.meta.url))
       unlocks.push(acquireReleaseLock(join(root,".release","build.lock")));
       unlocks.push(acquireReleaseLock(`${windowsRoot}.lock`));
     }
+    aiPlan=aiResolver({root,mode:aiArgs.mode,materialize:!request.skipBuild,fetchRuntime:ensureBuildRuntime,log});
+    Object.assign(buildEnv,aiBuildEnv(aiPlan,buildEnv));
+    if(windows)winConfig.bundle.resources={"../LICENSE":"licenses/LICENSE","../THIRD-PARTY-NOTICES.md":"licenses/THIRD-PARTY-NOTICES.md",...(aiPlan.enabled?{"../.ai-bundle/ai-model/*":"ai-model/","../.ai-bundle/ai-runtime/*":"ai-runtime/"}:{})};
     rollback=applyVersionEdits(edits);
     if(!request.skipBuild){
       run("pnpm",["licenses:generate"],{cwd:root,stdio:"inherit",env:buildEnv});
@@ -61,18 +67,18 @@ export function runRelease({root=resolve(dirname(fileURLToPath(import.meta.url))
       walk(frontendRoot);files.sort((a,b)=>a.path.localeCompare(b.path));
       const protocol=/pub const PROTOCOL_TAG: &str = "([^"]+)"/.exec(readFileSync(join(root,"crates/raybend/src/raw/worker.rs"),"utf8"))?.[1];
       if(!protocol)throw new Error("找不到 RAW worker 协议标签");
-      const manifest={schema:1,version:plan.targetVersion,channel:plan.channel,builtAt,gitHash:gitHash??null,dirty,distribution:"direct",workerMode:"self",workerProtocol:protocol,files,sourceFiles:Object.fromEntries(RELEASE_SOURCE_FILES.map(path=>[path,sha256(readFileSync(join(root,path)))]))};
+      const manifest={schema:1,ai:aiBuildMetadata(aiPlan),version:plan.targetVersion,channel:plan.channel,builtAt,gitHash:gitHash??null,dirty,distribution:"direct",workerMode:"self",workerProtocol:protocol,files,sourceFiles:Object.fromEntries(RELEASE_SOURCE_FILES.map(path=>[path,sha256(readFileSync(join(root,path)))]))};
       writeFileSync(join(frontendRoot,"raybend-build.json"),JSON.stringify(manifest,null,2)+"\n");
       if(windows){
-        const synced=syncReleaseMirror({root,frontendRoot,destination:windowsRoot,windowsDestination:paths.windowsSource});
+        const synced=syncReleaseMirror({root,frontendRoot,destination:windowsRoot,windowsDestination:paths.windowsSource,aiSnapshot:aiPlan.snapshot});
         log(`Windows 镜像已同步：${synced.files} 个文件，更新 ${synced.copied} 个`);
         const stage=join(windowsRoot,".release");mkdirSync(stage,{recursive:true});
         const cfg=join(stage,"tauri.release.json"),script=join(stage,"build.cmd");
         // frontendDist 按镜像内 src-tauri 解析；源码、资源和前端全部在本地盘。
         writeFileSync(cfg,JSON.stringify(winConfig,null,2)+"\n");
         const cfgWin=win32.join(paths.windowsSource,".release","tauri.release.json");
-        writeFileSync(script,windowsReleaseCommands(paths.windowsSource,cfgWin,{signed:winConfig.bundle.windows.signCommand!==null}));
-        const names=["RAYBEND_VERSION","RAYBEND_CHANNEL","RAYBEND_BUILD_TIME","RAYBEND_GIT_HASH","RAYBEND_DIRTY","RAYBEND_UPDATER_PUBLIC_KEY","RAYBEND_DISTRIBUTION","TAURI_SIGNING_PRIVATE_KEY","TAURI_SIGNING_PRIVATE_KEY_PASSWORD"];
+        writeFileSync(script,windowsReleaseCommands(paths.windowsSource,cfgWin,{signed:winConfig.bundle.windows.signCommand!==null,features:aiPlan.features}));
+        const names=["RAYBEND_VERSION","RAYBEND_CHANNEL","RAYBEND_BUILD_TIME","RAYBEND_GIT_HASH","RAYBEND_DIRTY","RAYBEND_UPDATER_PUBLIC_KEY","RAYBEND_DISTRIBUTION","RAYBEND_PHOTO_AI","TAURI_SIGNING_PRIVATE_KEY","TAURI_SIGNING_PRIVATE_KEY_PASSWORD"];
         const dav1dEnv=env.RAYBEND_DAV1D_WIN_DIR ? {RAYBEND_DAV1D_WIN_DIR:toWindowsPath(env.RAYBEND_DAV1D_WIN_DIR,{run,cwd:root})} : {};
         const windowsEnv=windowsBuildEnv({...Object.fromEntries(names.map(name=>[name,buildEnv[name]])),CARGO_TARGET_DIR:paths.windowsTarget},names,{...buildEnv,...dav1dEnv});
         const privateKeyFile=env.TAURI_SIGNING_PRIVATE_KEY;
@@ -84,6 +90,7 @@ export function runRelease({root=resolve(dirname(fileURLToPath(import.meta.url))
         const bundle=join(windowsTarget,"release","bundle");
         rmSync(bundle,{recursive:true,force:true});
         runWindowsReleaseBatch(windowsRoot,{run,env:windowsEnv});
+        syncAiOutput(root,aiPlan,join(windowsTarget,"release"));
         run("pnpm",["check:win"],{cwd:root,stdio:"inherit",env:{...buildEnv,WIN_DIST:frontendRoot,WIN_EXE:join(windowsTarget,"release","raybend-desktop.exe"),WIN_WORKER_MODE:"self"}});
         finalize({argv:[bundle,"--manifest",join(frontendRoot,"raybend-build.json"),"--out",releaseOut,...(request.unsigned?["--allow-unsigned"]:[]),...(request.withUpdater?["--base-url",`https://github.com/C-Thun/raybend/releases/download/v${plan.targetVersion}/`]:[])],run,log,selectVersion:plan.targetVersion,requiredTargets:winConfig.bundle.targets});
         log(`本地准备完成；由崔总真机验收后执行：pnpm release:publish ${relative(root,releaseOut)} --execute`);

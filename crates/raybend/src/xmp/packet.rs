@@ -1,4 +1,4 @@
-//! XMP 数据包的**构建与解析**（`specs/xmp-w1.md` §4–§5）。
+//! XMP 数据包的**构建与解析**（`specs/xmp-sidecar.md` §4–§5）。
 //!
 //! * 写：手写序列化（结构固定、转义集中一处），带 `xpacket` 包装。
 //! * 读：`roxmltree`（既有依赖，不新引 XML 库）。
@@ -8,13 +8,12 @@
 //! `store::issues::profile_hash` 同一口径 —— 任何读者都能直接重算哈希校验。
 
 use crate::store::develop::{DevelopStack, EditBase};
-use crate::store::issues::{PROFILE_SCHEMA_VERSION, profile_hash};
+use crate::store::issues::{PROFILE_SCHEMA_VERSION, profile_hash, profile_schema_version};
 
 /// 自有命名空间（`specs/issue-xmp-contract.md`）。
 pub const RB_NS: &str = "https://raybend.app/ns/issue/1.0/";
 
 /// —— 模型（写出与读回共用）——
-
 /// 一份不可变定稿（sidecar 形态；不含库内自增 ID）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct SidecarProfile {
@@ -59,7 +58,9 @@ impl SidecarMetadata {
 /// 一张照片的 sidecar 全部内容。
 #[derive(Debug, Clone, Default)]
 pub struct SidecarContent {
-    /// latest 工作副本；`None` 或空栈 = 没有编辑。
+    /// 照片标签来源/屏蔽；标准 keywords 仍只表达有效集合。
+    pub tag_state: Option<crate::store::photo_tags::TagState>,
+    /// latest 工作副本；空 RAW 栈省略，空 SOOC 栈仍保留编辑源。
     pub latest: Option<DevelopStack>,
     pub profiles: Vec<SidecarProfile>,
     pub metadata: SidecarMetadata,
@@ -71,15 +72,24 @@ impl SidecarContent {
     /// 「编辑了才有」的判据：有可表达内容才写文件（规格 §6.1）。
     #[must_use]
     pub fn has_content(&self) -> bool {
-        self.latest.as_ref().is_some_and(|stack| !stack.is_empty())
+        self.latest.as_ref().is_some_and(latest_has_content)
             || !self.profiles.is_empty()
             || !self.metadata.is_empty()
+            || self
+                .tag_state
+                .as_ref()
+                .is_some_and(|state| state.has_content())
     }
+}
+
+fn latest_has_content(stack: &DevelopStack) -> bool {
+    stack.source_base != EditBase::Raw || !stack.is_empty()
 }
 
 /// 读回的结果（宽容解析：坏条目跳过并记 warning，不拖垮整份文件）。
 #[derive(Debug, Clone, Default)]
 pub struct ParsedSidecar {
+    pub tag_state: Option<crate::store::photo_tags::TagState>,
     pub latest: Option<DevelopStack>,
     pub profiles: Vec<SidecarProfile>,
     pub metadata: SidecarMetadata,
@@ -89,8 +99,7 @@ pub struct ParsedSidecar {
 }
 
 /// —— 共享的 XML 基础件（导出内嵌 XMP 与 sidecar 同一套）——
-
-/// 文本与属性值共用的转义；控制字符（XML 1.0 不允许）直接丢弃。
+/// 文本与属性值共用的转义；保留 XML 1.0 允许的换行/制表符，丢弃非法字符。
 #[must_use]
 pub fn escape(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
@@ -101,7 +110,10 @@ pub fn escape(text: &str) -> String {
             '>' => out.push_str("&gt;"),
             '"' => out.push_str("&quot;"),
             '\'' => out.push_str("&apos;"),
-            _ if ch.is_control() => {}
+            '\t' => out.push_str("&#x9;"),
+            '\n' => out.push_str("&#xA;"),
+            '\r' => out.push_str("&#xD;"),
+            _ if ch < '\u{20}' || matches!(ch, '\u{fffe}' | '\u{ffff}') => {}
             _ => out.push(ch),
         }
     }
@@ -130,7 +142,6 @@ pub fn rdf_alt(value: &str) -> String {
 }
 
 /// —— 构建 ——
-
 /// 组装整份 sidecar XML。`None` = 没有可表达内容（调用方据此删文件）。
 ///
 /// `tool`：`xmp:CreatorTool`（如 `RayBend 0.1.1`）；`now_ms`：`xmp:MetadataDate`（UTC）。
@@ -148,6 +159,14 @@ pub fn compose(content: &SidecarContent, now_ms: i64, tool: &str) -> Option<Stri
         escape(tool),
         iso8601_utc(now_ms)
     ));
+
+    if let Some(state) = &content.tag_state {
+        let json = serde_json::to_string(state).ok()?;
+        elements.push_str(&format!(
+            "<rb:tags><rb:tagStateJson>{}</rb:tagStateJson></rb:tags>",
+            escape(&json)
+        ));
+    }
 
     let meta = &content.metadata;
     if meta.rating > 0 {
@@ -169,10 +188,7 @@ pub fn compose(content: &SidecarContent, now_ms: i64, tool: &str) -> Option<Stri
         attrs.push_str(&format!(" photoshop:City=\"{}\"", escape(city)));
     }
     if let Some(location) = &meta.sublocation {
-        attrs.push_str(&format!(
-            " Iptc4xmpCore:Location=\"{}\"",
-            escape(location)
-        ));
+        attrs.push_str(&format!(" Iptc4xmpCore:Location=\"{}\"", escape(location)));
     }
     if !meta.keywords.is_empty() {
         elements.push_str(&format!(
@@ -183,11 +199,14 @@ pub fn compose(content: &SidecarContent, now_ms: i64, tool: &str) -> Option<Stri
     if let Some(author) = &meta.author {
         elements.push_str(&format!(
             "<dc:creator>{}</dc:creator>",
-            rdf_list(&[author.clone()], "Seq")
+            rdf_list(std::slice::from_ref(author), "Seq")
         ));
     }
     if let Some(description) = &meta.description {
-        elements.push_str(&format!("<dc:description>{}</dc:description>", rdf_alt(description)));
+        elements.push_str(&format!(
+            "<dc:description>{}</dc:description>",
+            rdf_alt(description)
+        ));
     }
 
     // 兼容层：仅 raw 基的 latest（崔总 2026-09-30）
@@ -216,19 +235,20 @@ pub fn compose(content: &SidecarContent, now_ms: i64, tool: &str) -> Option<Stri
     if let Some(latest) = content
         .latest
         .as_ref()
-        .filter(|stack| !stack.is_empty())
+        .filter(|stack| latest_has_content(stack))
         .and_then(canonical_payload)
     {
         elements.push_str(&format!(
             "<rb:latest rdf:parseType=\"Resource\">\
-                 <rb:latestSchemaVersion>{PROFILE_SCHEMA_VERSION}</rb:latestSchemaVersion>\
+                 <rb:latestSchemaVersion>{schema_version}</rb:latestSchemaVersion>\
                  <rb:sourceBase>{}</rb:sourceBase>\
                  <rb:profileHash>{}</rb:profileHash>\
                  <rb:profileJson>{}</rb:profileJson>\
              </rb:latest>",
             latest.source_base.as_str(),
             latest.hash,
-            escape(&latest.json)
+            escape(&latest.json),
+            schema_version = latest.schema_version,
         ));
     }
 
@@ -243,7 +263,7 @@ pub fn compose(content: &SidecarContent, now_ms: i64, tool: &str) -> Option<Stri
                      <rb:sourceBase>{}</rb:sourceBase>\
                      <rb:createdAtMs>{}</rb:createdAtMs>\
                      <rb:ordinal>{}</rb:ordinal>\
-                     <rb:schemaVersion>{PROFILE_SCHEMA_VERSION}</rb:schemaVersion>\
+                     <rb:schemaVersion>{schema_version}</rb:schemaVersion>\
                      <rb:profileHash>{}</rb:profileHash>\
                      <rb:profileJson>{}</rb:profileJson>\
                  </rdf:li>",
@@ -252,12 +272,15 @@ pub fn compose(content: &SidecarContent, now_ms: i64, tool: &str) -> Option<Stri
             profile.created_at_ms,
             profile.ordinal.unwrap_or(-1),
             stack.hash,
-            escape(&stack.json)
+            escape(&stack.json),
+            schema_version = stack.schema_version,
         ));
     }
     // 空的也要写：`rb:profiles` 元素本身就是「这是 raybend 的文件」的标记，
     // 否则只有元数据的 sidecar 会被误判成外来文件（写出侧会反复备份接管）。
-    elements.push_str(&format!("<rb:profiles><rdf:Seq>{items}</rdf:Seq></rb:profiles>"));
+    elements.push_str(&format!(
+        "<rb:profiles><rdf:Seq>{items}</rdf:Seq></rb:profiles>"
+    ));
 
     let mut xml = String::with_capacity(1024 + elements.len());
     xml.push_str("<?xpacket begin=\"\u{feff}\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>\n");
@@ -267,18 +290,30 @@ pub fn compose(content: &SidecarContent, now_ms: i64, tool: &str) -> Option<Stri
     ));
     xml.push_str("  <rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\n");
     xml.push_str(&format!(
-        "    <rdf:Description rdf:about=\"\"\
-             xmlns:xmp=\"http://ns.adobe.com/xap/1.0/\"\
-             xmlns:crs=\"http://ns.adobe.com/camera-raw-settings/1.0/\"\
-             xmlns:dc=\"http://purl.org/dc/elements/1.1/\"\
-             xmlns:photoshop=\"http://ns.adobe.com/photoshop/1.0/\"\
-             xmlns:Iptc4xmpCore=\"http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/\"\
+        "    <rdf:Description rdf:about=\"\" \
+             xmlns:xmp=\"http://ns.adobe.com/xap/1.0/\" \
+             xmlns:crs=\"http://ns.adobe.com/camera-raw-settings/1.0/\" \
+             xmlns:dc=\"http://purl.org/dc/elements/1.1/\" \
+             xmlns:photoshop=\"http://ns.adobe.com/photoshop/1.0/\" \
+             xmlns:Iptc4xmpCore=\"http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/\" \
              xmlns:rb=\"{RB_NS}\"{attrs}>\n"
     ));
     xml.push_str(&elements);
     xml.push_str("    </rdf:Description>\n  </rdf:RDF>\n</x:xmpmeta>\n");
     xml.push_str("<?xpacket end=\"w\"?>");
     Some(xml)
+}
+
+/// 写出入口对标签载荷做完整校验；非法状态不能解释成“全空、删 sidecar”。
+pub fn compose_checked(
+    content: &SidecarContent,
+    now_ms: i64,
+    tool: &str,
+) -> crate::Result<Option<String>> {
+    if let Some(state) = &content.tag_state {
+        state.validate()?;
+    }
+    Ok(compose(content, now_ms, tool))
 }
 
 /// `DevelopStack` 的规范载荷（剔除 `auto_adjust` 后的 JSON 与指纹）；序列化失败给 `None`。
@@ -289,6 +324,7 @@ fn canonical_payload(stack: &DevelopStack) -> Option<CanonicalStack> {
     let json = serde_json::to_string(&canonical).ok()?;
     let hash = profile_hash(&canonical).ok()?;
     Some(CanonicalStack {
+        schema_version: profile_schema_version(&canonical),
         source_base: canonical.source_base,
         json,
         hash,
@@ -296,6 +332,7 @@ fn canonical_payload(stack: &DevelopStack) -> Option<CanonicalStack> {
 }
 
 struct CanonicalStack {
+    schema_version: i64,
     source_base: crate::store::develop::EditBase,
     json: String,
     hash: String,
@@ -309,7 +346,6 @@ pub fn iso8601_utc(millis: i64) -> String {
 }
 
 /// —— 解析 ——
-
 /// 解析一份 sidecar 文本。
 ///
 /// * `Err`：XML 语法坏（调用方决定按「外来/损坏」处理）。
@@ -318,41 +354,110 @@ pub fn iso8601_utc(millis: i64) -> String {
 pub fn parse(text: &str) -> Result<Option<ParsedSidecar>, String> {
     let trimmed = text.trim_end_matches('\0');
     let doc = roxmltree::Document::parse(trimmed).map_err(|error| error.to_string())?;
-    let Some(description) = doc
+    // 归属按命名空间认；rb 域可在根声明，资源和标准元数据可拆成多个 Description。
+    if !doc
         .descendants()
-        .find(|node| node.tag_name().namespace() == Some(RDF_NS) && node.tag_name().name() == "Description")
-    else {
+        .filter(|node| node.is_element())
+        .any(|node| node.namespaces().any(|namespace| namespace.uri() == RB_NS))
+    {
         return Ok(None);
-    };
+    }
     let mut parsed = ParsedSidecar::default();
-    let mut saw_rb = false;
-
-    for node in description.children().filter(|node| node.is_element()) {
-        let namespace = node.tag_name().namespace();
-        let name = node.tag_name().name();
-        match (namespace, name) {
-            (Some(RB_NS), "latest") => {
-                saw_rb = true;
-                parse_rb_resource(&node, true, &mut parsed);
+    if doc.descendants().any(|node| {
+        node.has_tag_name((RDF_NS, "Description"))
+            && node
+                .attribute((RDF_NS, "about"))
+                .is_some_and(|about| !about.is_empty())
+            && node
+                .descendants()
+                .any(|child| child.tag_name().namespace() == Some(RB_NS))
+    }) {
+        parsed
+            .warnings
+            .push("非当前照片的 rb: 资源，保留原文件".into());
+    }
+    for description in doc.descendants().filter(|node| {
+        node.is_element()
+            && node.tag_name().namespace() == Some(RDF_NS)
+            && node.tag_name().name() == "Description"
+            && node
+                .parent()
+                .is_some_and(|parent| parent.has_tag_name((RDF_NS, "RDF")))
+            && node
+                .attribute((RDF_NS, "about"))
+                .unwrap_or_default()
+                .is_empty()
+    }) {
+        for node in description.children().filter(|node| node.is_element()) {
+            match (node.tag_name().namespace(), node.tag_name().name()) {
+                (Some(RB_NS), "tags") => {
+                    if parsed.tag_state.is_some() {
+                        parsed.warnings.push("重复 rb:tags，保留原文件".into());
+                    } else {
+                        let json = node
+                            .children()
+                            .find(|child| child.has_tag_name((RB_NS, "tagStateJson")))
+                            .and_then(|child| child.text());
+                        let state = json.filter(|s| s.len() <= 256 * 1024).and_then(|s| {
+                            serde_json::from_str::<crate::store::photo_tags::TagState>(s).ok()
+                        });
+                        match state {
+                            Some(state) if state.validate().is_ok() => {
+                                parsed.tag_state = Some(state)
+                            }
+                            _ => parsed
+                                .warnings
+                                .push("rb:tags 版本或内容无法识别，保留原文件".into()),
+                        }
+                    }
+                }
+                (Some(RB_NS), "latest") => parse_rb_resource(&node, true, &mut parsed),
+                (Some(RB_NS), "profiles") => {
+                    if let Some(seq) = node
+                        .children()
+                        .find(|child| child.has_tag_name((RDF_NS, "Seq")))
+                    {
+                        for item in seq.children().filter(|child| child.is_element()) {
+                            if item.has_tag_name((RDF_NS, "li")) {
+                                parse_rb_resource(&item, false, &mut parsed);
+                            } else {
+                                parsed.warnings.push("rb:profiles 含未知条目".to_string());
+                            }
+                        }
+                    } else {
+                        parsed.warnings.push("rb:profiles 缺 rdf:Seq".to_string());
+                    }
+                }
+                (Some(RB_NS), name) => parsed.warnings.push(format!("未知 rb: 属性：{name}")),
+                _ => parse_standard_element(&node, &mut parsed.metadata),
             }
-            (Some(RB_NS), "profiles") => {
-                saw_rb = true;
-                for item in node.children().filter(|node| node.is_element()) {
-                    parse_rb_resource(&item, false, &mut parsed);
+        }
+        for attr in description.attributes() {
+            if let Some(namespace) = attr.namespace() {
+                if namespace == RB_NS {
+                    parsed
+                        .warnings
+                        .push(format!("未知 rb: 属性：{}", attr.name()));
+                } else {
+                    apply_standard_attr(namespace, attr.name(), attr.value(), &mut parsed.metadata);
                 }
             }
-            _ => parse_standard_element(&node, &mut parsed.metadata),
         }
     }
-    // 属性形态的元数据（我们写出的就是属性；也认元素形态，见 parse_standard_element）
-    for (namespace, name, value) in description.attributes().filter_map(|attr| {
-        Some((attr.namespace()?, attr.name(), attr.value()))
+    if doc.descendants().any(|node| {
+        node.tag_name().namespace() == Some(RB_NS)
+            && !node.has_tag_name((RB_NS, "profiles"))
+            && !node.has_tag_name((RB_NS, "latest"))
+            && !node.has_tag_name((RB_NS, "tags"))
+            && !node.ancestors().any(|parent| {
+                parent.has_tag_name((RB_NS, "latest"))
+                    || parent.has_tag_name((RB_NS, "profiles"))
+                    || parent.has_tag_name((RB_NS, "tags"))
+            })
     }) {
-        apply_standard_attr(namespace, name, value, &mut parsed.metadata);
-    }
-
-    if !saw_rb {
-        return Ok(None);
+        parsed
+            .warnings
+            .push("未识别的 rb: 数据结构，保留原文件".into());
     }
     Ok(Some(parsed))
 }
@@ -363,18 +468,28 @@ const RDF_NS: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
 fn parse_rb_resource(node: &roxmltree::Node<'_, '_>, is_latest: bool, parsed: &mut ParsedSidecar) {
     let text = |tag: &str| {
         node.children()
-            .find(|child| child.is_element() && child.tag_name().namespace() == Some(RB_NS) && child.tag_name().name() == tag)
+            .find(|child| {
+                child.is_element()
+                    && child.tag_name().namespace() == Some(RB_NS)
+                    && child.tag_name().name() == tag
+            })
             .and_then(|child| child.text())
             .map(str::trim)
     };
-    let version = text(if is_latest { "latestSchemaVersion" } else { "schemaVersion" })
-        .and_then(|value| value.parse::<i64>().ok());
+    let version = text(if is_latest {
+        "latestSchemaVersion"
+    } else {
+        "schemaVersion"
+    })
+    .and_then(|value| value.parse::<i64>().ok());
     let version = match version {
         Some(version) if (1..=PROFILE_SCHEMA_VERSION).contains(&version) => version,
         other => {
-            parsed.max_schema_version = parsed
-                .max_schema_version
-                .max(other.unwrap_or(i64::MAX / 2));
+            parsed.max_schema_version = parsed.max_schema_version.max(
+                other
+                    .filter(|version| *version > PROFILE_SCHEMA_VERSION)
+                    .unwrap_or(i64::MAX),
+            );
             parsed.warnings.push(format!(
                 "跳过一个 schemaVersion={} 的{}（本版本最高认 {PROFILE_SCHEMA_VERSION}）",
                 other.map_or("?".to_string(), |v| v.to_string()),
@@ -386,7 +501,9 @@ fn parse_rb_resource(node: &roxmltree::Node<'_, '_>, is_latest: bool, parsed: &m
     parsed.max_schema_version = parsed.max_schema_version.max(version);
 
     let Some(json) = text("profileJson") else {
-        parsed.warnings.push("跳过一个缺 profileJson 的条目".to_string());
+        parsed
+            .warnings
+            .push("跳过一个缺 profileJson 的条目".to_string());
         return;
     };
     let mut stack: DevelopStack = match serde_json::from_str(json) {
@@ -398,6 +515,12 @@ fn parse_rb_resource(node: &roxmltree::Node<'_, '_>, is_latest: bool, parsed: &m
             return;
         }
     };
+    if version != profile_schema_version(&stack) {
+        parsed
+            .warnings
+            .push("跳过一个色彩载荷与 schemaVersion 不符的条目".into());
+        return;
+    }
     stack.auto_adjust = None;
     let recomputed = profile_hash(&stack).ok().unwrap_or_default();
     match text("profileHash") {
@@ -412,25 +535,47 @@ fn parse_rb_resource(node: &roxmltree::Node<'_, '_>, is_latest: bool, parsed: &m
     let source_base = match text("sourceBase").and_then(EditBase::parse) {
         Some(base) => base,
         None => {
-            parsed.warnings.push("跳过一个编辑基准不明的条目".to_string());
+            parsed
+                .warnings
+                .push("跳过一个编辑基准不明的条目".to_string());
             return;
         }
     };
 
+    // 原始 JSON 的指纹先验过，再与资源声明对齐；latest 与定稿遵循同一口径。
+    stack.source_base = source_base;
+    if let Err(error) = stack.validate() {
+        parsed
+            .warnings
+            .push(format!("跳过一个编辑栈不合法的条目：{error}"));
+        return;
+    }
     if is_latest {
         parsed.latest = Some(stack);
         return;
     }
     let name = text("name").unwrap_or_default().to_string();
-    if name.is_empty() || name.chars().count() > 80 || name.chars().any(char::is_control) {
+    if name.is_empty()
+        || name.chars().count() > 80
+        || name.chars().any(char::is_control)
+        || ["sooc", "raw", "latest"]
+            .iter()
+            .any(|reserved| name.eq_ignore_ascii_case(reserved))
+    {
         parsed.warnings.push("跳过一个名称无效的定稿".to_string());
         return;
     }
+    let Some(created_at_ms) = text("createdAtMs").and_then(|value| value.parse().ok()) else {
+        parsed.warnings.push("跳过一个创建时间无效的定稿".into());
+        return;
+    };
     parsed.profiles.push(SidecarProfile {
         name,
         source_base,
-        created_at_ms: text("createdAtMs").and_then(|v| v.parse().ok()).unwrap_or(0),
-        ordinal: text("ordinal").and_then(|v| v.parse::<i64>().ok()).filter(|v| (0..100).contains(v)),
+        created_at_ms,
+        ordinal: text("ordinal")
+            .and_then(|v| v.parse::<i64>().ok())
+            .filter(|v| (0..100).contains(v)),
         stack,
     });
 }
@@ -441,7 +586,11 @@ fn parse_standard_element(node: &roxmltree::Node<'_, '_>, meta: &mut SidecarMeta
     let name = node.tag_name().name();
     let list_values = |node: &roxmltree::Node<'_, '_>| {
         node.descendants()
-            .filter(|desc| desc.is_element() && desc.tag_name().namespace() == Some(RDF_NS) && desc.tag_name().name() == "li")
+            .filter(|desc| {
+                desc.is_element()
+                    && desc.tag_name().namespace() == Some(RDF_NS)
+                    && desc.tag_name().name() == "li"
+            })
             .filter_map(|li| li.text())
             .map(str::to_string)
             .collect::<Vec<_>>()
@@ -458,8 +607,15 @@ fn parse_standard_element(node: &roxmltree::Node<'_, '_>, meta: &mut SidecarMeta
         (Some("http://purl.org/dc/elements/1.1/"), "description") => {
             let preferred = node
                 .descendants()
-                .filter(|desc| desc.is_element() && desc.tag_name().namespace() == Some(RDF_NS) && desc.tag_name().name() == "li")
-                .find(|li| li.attribute("http://www.w3.org/XML/1998/namespace", "lang") == Some("x-default"))
+                .filter(|desc| {
+                    desc.is_element()
+                        && desc.tag_name().namespace() == Some(RDF_NS)
+                        && desc.tag_name().name() == "li"
+                })
+                .find(|li| {
+                    li.attribute(("http://www.w3.org/XML/1998/namespace", "lang"))
+                        == Some("x-default")
+                })
                 .or_else(|| {
                     node.descendants().find(|desc| {
                         desc.is_element()
@@ -540,8 +696,10 @@ mod tests {
     use super::*;
 
     fn stack(base: EditBase, params: &[(&str, f64)]) -> DevelopStack {
-        let mut stack = DevelopStack::default();
-        stack.source_base = base;
+        let mut stack = DevelopStack {
+            source_base: base,
+            ..DevelopStack::default()
+        };
         for (key, value) in params {
             stack.params.insert((*key).to_string(), *value);
         }
@@ -550,7 +708,11 @@ mod tests {
 
     fn sample() -> SidecarContent {
         SidecarContent {
-            latest: Some(stack(EditBase::Raw, &[("exposure", 0.35), ("contrast", 12.0)])),
+            tag_state: None,
+            latest: Some(stack(
+                EditBase::Raw,
+                &[("exposure", 0.35), ("contrast", 12.0)],
+            )),
             profiles: vec![SidecarProfile {
                 name: "暖调".to_string(),
                 source_base: EditBase::Sooc,
@@ -589,7 +751,10 @@ mod tests {
         assert_eq!(parsed.metadata.color_label.as_deref(), Some("green"));
         assert_eq!(parsed.metadata.keywords, vec!["旅行", "家庭"]);
         assert_eq!(parsed.metadata.author.as_deref(), Some("崔总"));
-        assert_eq!(parsed.metadata.description.as_deref(), Some("雨后的湖 & <西湖>"));
+        assert_eq!(
+            parsed.metadata.description.as_deref(),
+            Some("雨后的湖 & <西湖>")
+        );
         assert_eq!(parsed.metadata.city.as_deref(), Some("杭州"));
         assert_eq!(parsed.metadata.sublocation.as_deref(), Some("西湖"));
         assert_eq!(parsed.metadata.country.as_deref(), Some("中国"));
@@ -600,7 +765,10 @@ mod tests {
     fn crs_layer_follows_raw_base_only() {
         let mut content = sample();
         let xml = compose(&content, 0, "t").unwrap();
-        assert!(xml.contains("crs:Exposure2012=\"0.35\""), "raw 基 latest 有兼容层");
+        assert!(
+            xml.contains("crs:Exposure2012=\"0.35\""),
+            "raw 基 latest 有兼容层"
+        );
         assert!(xml.contains("crs:ProcessVersion=\"11.0\""));
 
         content.latest = Some(stack(EditBase::Sooc, &[("exposure", 0.35)]));
@@ -658,28 +826,26 @@ mod tests {
     #[test]
     fn tampered_hash_is_skipped_with_warning() {
         let xml = compose(&sample(), 0, "t").unwrap();
-        let tampered = xml.replace(
-            &format!("crs:Exposure2012=\"0.35\""),
-            "crs:Exposure2012=\"0.9\"",
-        );
-        // 动的是 crs 层（不在哈希里），latest 哈希仍应一致 —— 换个真正动 JSON 的方式：
-        let _ = tampered;
-        let json_marker = "\"exposure\":0.35";
+        // XML 里 JSON 的引号被转义成 &quot;，篡改时用 JSON 冒号前缀定位，只动 rb:profileJson 里的数值
+        let json_marker = ":0.35";
         assert!(xml.contains(json_marker), "规范 JSON 里应有 exposure");
-        let broken = xml.replace(json_marker, "\"exposure\":0.36");
+        let broken = xml.replace(json_marker, ":0.36");
         let parsed = parse(&broken).unwrap().expect("仍是我们的文件");
         assert!(parsed.latest.is_none(), "哈希不符 ⇒ latest 被跳过");
-        assert!(parsed
-            .warnings
-            .iter()
-            .any(|warning| warning.contains("哈希不符")));
+        assert!(
+            parsed
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("哈希不符"))
+        );
     }
 
     #[test]
     fn future_schema_version_is_preserved_as_warning() {
-        let xml = compose(&sample(), 0, "t")
-            .unwrap()
-            .replace("<rb:latestSchemaVersion>1</rb:latestSchemaVersion>", "<rb:latestSchemaVersion>7</rb:latestSchemaVersion>");
+        let xml = compose(&sample(), 0, "t").unwrap().replace(
+            "<rb:latestSchemaVersion>1</rb:latestSchemaVersion>",
+            "<rb:latestSchemaVersion>7</rb:latestSchemaVersion>",
+        );
         let parsed = parse(&xml).unwrap().expect("仍是我们的文件");
         assert!(parsed.latest.is_none());
         assert_eq!(parsed.max_schema_version, 7);
@@ -765,5 +931,207 @@ mod tests {
         };
         let xml = compose(&content, 0, "t").unwrap();
         assert!(!xml.contains("autoAdjust"), "规范 JSON 不含 auto_adjust");
+    }
+
+    #[test]
+    fn empty_sooc_latest_retains_the_edit_source() {
+        let content = SidecarContent {
+            latest: Some(stack(EditBase::Sooc, &[])),
+            ..Default::default()
+        };
+        let xml = compose(&content, 0, "t").unwrap();
+        assert!(!xml.contains("crs:HasSettings"));
+        let parsed = parse(&xml).unwrap().unwrap();
+        assert_eq!(parsed.latest.unwrap().source_base, EditBase::Sooc);
+        assert!(parsed.warnings.is_empty());
+    }
+
+    #[test]
+    fn valid_xml_whitespace_survives_text_and_attributes() {
+        let value = "第一行\n第二行\r\n缩进\t尾部 😀";
+        let mut content = sample();
+        content.metadata.description = Some(value.into());
+        content.metadata.sublocation = Some(value.into());
+        let xml = compose(&content, 0, "t").unwrap();
+        let parsed = parse(&xml).unwrap().unwrap();
+        assert_eq!(parsed.metadata.description.as_deref(), Some(value));
+        assert_eq!(parsed.metadata.sublocation.as_deref(), Some(value));
+        let invalid = "A\u{0}\u{b}\u{fffe}\u{ffff}B";
+        assert_eq!(escape(invalid), "AB");
+        roxmltree::Document::parse(&format!("<x>{}</x>", escape(invalid))).unwrap();
+    }
+
+    #[test]
+    fn own_namespace_and_split_descriptions_are_recognized() {
+        let xml = format!(
+            r#"<rdf:RDF xmlns:rdf="{RDF_NS}" xmlns:rb="{RB_NS}" xmlns:xmp="http://ns.adobe.com/xap/1.0/">
+            <rdf:Description rdf:about="" xmp:Rating="4"/>
+            <rdf:Description rdf:about=""><rb:profiles><rdf:Seq/></rb:profiles></rdf:Description>
+            <rdf:Description rdf:about="another-photo" xmp:Rating="5"/>
+            </rdf:RDF>"#
+        );
+        assert_eq!(parse(&xml).unwrap().unwrap().metadata.rating, 4);
+        let namespace_only = format!(r#"<x xmlns:rb="{RB_NS}"/>"#);
+        assert!(parse(&namespace_only).unwrap().is_some());
+    }
+
+    #[test]
+    fn invalid_schema_numbers_require_preservation() {
+        let xml = compose(&sample(), 0, "t").unwrap();
+        for version in ["0", "-1", "oops", "9223372036854775808"] {
+            let damaged = xml.replace(
+                "<rb:latestSchemaVersion>1",
+                &format!("<rb:latestSchemaVersion>{version}"),
+            );
+            let parsed = parse(&damaged).unwrap().unwrap();
+            assert!(parsed.latest.is_none());
+            assert!(parsed.max_schema_version > PROFILE_SCHEMA_VERSION);
+            assert!(!parsed.warnings.is_empty());
+            assert_eq!(parsed.metadata.rating, 4);
+        }
+    }
+
+    #[test]
+    fn declared_edit_source_wins_for_latest_and_profiles() {
+        let mut content = sample();
+        content.profiles.clear();
+        let xml = compose(&content, 0, "t")
+            .unwrap()
+            .replace("<rb:sourceBase>raw", "<rb:sourceBase>sooc");
+        assert_eq!(
+            parse(&xml).unwrap().unwrap().latest.unwrap().source_base,
+            EditBase::Sooc
+        );
+        content = sample();
+        let xml = compose(&content, 0, "t")
+            .unwrap()
+            .replace("<rb:sourceBase>sooc", "<rb:sourceBase>raw");
+        assert_eq!(
+            parse(&xml).unwrap().unwrap().profiles[0].stack.source_base,
+            EditBase::Raw
+        );
+    }
+
+    #[test]
+    fn invalid_full_stacks_are_skipped_without_losing_metadata() {
+        let mut invalid = Vec::new();
+        let mut curve = stack(EditBase::Raw, &[]);
+        curve
+            .curves
+            .insert("rgb".into(), vec![[0.2, 0.0], [0.2, 1.0]]);
+        invalid.push(curve);
+        invalid.push(DevelopStack {
+            lut_enabled: Some(true),
+            ..Default::default()
+        });
+        invalid.push(DevelopStack {
+            base_curve_profile: Some("1".into()),
+            ..Default::default()
+        });
+        invalid.push(DevelopStack {
+            geometry: Some(crate::develop::geometry::EditGeometry {
+                rotation: 361.0,
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        for stack in invalid {
+            let mut content = sample();
+            content.latest = Some(stack.clone());
+            content.profiles[0].stack = stack;
+            content.profiles[0].source_base = EditBase::Raw;
+            let parsed = parse(&compose(&content, 0, "t").unwrap()).unwrap().unwrap();
+            assert!(parsed.latest.is_none());
+            assert!(parsed.profiles.is_empty());
+            assert_eq!(parsed.metadata.rating, 4);
+            assert_eq!(parsed.warnings.len(), 2);
+        }
+    }
+    #[test]
+    fn invalid_profile_time_is_skipped_and_unknown_structure_is_preserved() {
+        let content = sample();
+        let xml = compose(&content, 0, "t").unwrap().replace(
+            &format!("<rb:createdAtMs>{}", content.profiles[0].created_at_ms),
+            "<rb:createdAtMs>oops",
+        );
+        let parsed = parse(&xml).unwrap().unwrap();
+        assert!(parsed.profiles.is_empty());
+        assert!(parsed.latest.is_some());
+        assert!(!parsed.warnings.is_empty());
+        let wrapped = format!(r#"<future xmlns:rb="{RB_NS}"><rb:state>opaque</rb:state></future>"#);
+        assert!(!parse(&wrapped).unwrap().unwrap().warnings.is_empty());
+    }
+    #[test]
+    fn profile_schema_tracks_the_canonical_stack_without_upgrading_legacy() {
+        let legacy = sample();
+        let old_xml = compose(&legacy, 0, "t").unwrap();
+        assert!(old_xml.contains("latestSchemaVersion>1<"));
+        assert!(old_xml.contains("schemaVersion>1<"));
+        let mut modern = sample();
+        let color =
+            crate::color::PhotoColorState::new_pipeline(crate::color::SourceColor::AssumedSrgb);
+        modern.latest.as_mut().unwrap().color = Some(color.clone());
+        modern.profiles[0].stack.color = Some(color);
+        let xml = compose(&modern, 0, "t").unwrap();
+        assert!(xml.contains("latestSchemaVersion>2<"));
+        assert!(xml.contains("schemaVersion>2<"));
+        let parsed = parse(&xml).unwrap().unwrap();
+        assert!(parsed.warnings.is_empty());
+        assert_eq!(parsed.latest, modern.latest);
+        assert_eq!(parsed.profiles, modern.profiles);
+        let invalid = xml
+            .replace("SchemaVersion>2<", "SchemaVersion>1<")
+            .replace("schemaVersion>2<", "schemaVersion>1<");
+        let parsed = parse(&invalid).unwrap().unwrap();
+        assert!(parsed.latest.is_none());
+        assert!(parsed.profiles.is_empty());
+        assert!(!parsed.warnings.is_empty());
+    }
+
+    #[test]
+    fn known_tag_state_does_not_trigger_unknown_structure_protection() {
+        let state = crate::store::photo_tags::TagState {
+            version: 1,
+            manual: vec!["旅行".into()],
+            ai: vec![],
+            masks: vec![],
+            result: None,
+        };
+        let content = SidecarContent {
+            tag_state: Some(state.clone()),
+            ..Default::default()
+        };
+        let xml = compose_checked(&content, 0, "t").unwrap().unwrap();
+        let parsed = parse(&xml).unwrap().unwrap();
+        assert!(parsed.warnings.is_empty(), "{:?}", parsed.warnings);
+        assert_eq!(parsed.tag_state, Some(state));
+    }
+    #[test]
+    fn floating_point_profiles_round_trip_without_hash_drift() {
+        let values = (0..100).map(|number| -2.0 + number as f64 / 25.0).chain([
+            -0.0,
+            0.0,
+            1.999,
+            f64::MIN_POSITIVE,
+            f64::from_bits(1),
+        ]);
+        for value in values {
+            let latest = stack(EditBase::Raw, &[("exposure", value)]);
+            let original_hash = profile_hash(&latest).unwrap();
+            let content = SidecarContent {
+                latest: Some(latest.clone()),
+                ..Default::default()
+            };
+            let xml = compose(&content, 0, "t").unwrap();
+            let parsed = parse(&xml).unwrap().unwrap();
+            assert!(
+                parsed.warnings.is_empty(),
+                "value={value:?}: {:?}",
+                parsed.warnings
+            );
+            let recovered = parsed.latest.unwrap();
+            assert_eq!(recovered.params["exposure"].to_bits(), value.to_bits());
+            assert_eq!(profile_hash(&recovered).unwrap(), original_hash);
+        }
     }
 }

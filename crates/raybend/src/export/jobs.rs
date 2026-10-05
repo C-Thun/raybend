@@ -341,6 +341,7 @@ mod tests {
                 source_signature: "sig".into(),
             },
             preset: Preset {
+                output_color: crate::color::OutputColor::Srgb,
                 id: p.into(),
                 name: p.into(),
                 format: "png".into(),

@@ -30,14 +30,13 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use super::backend::{PixelSource, RawBackend, RawImage8, RawImage16};
+use super::backend::{PixelSource, RawBackend, RawImage8, RawImage16, RawWorkingImage};
 use super::rawler_backend::RawlerBackend;
 
 /// worker 进程的启动标记：主程序看到它就走 worker 循环（`main` 里判断）。
@@ -48,10 +47,11 @@ pub const WORKER_ENV: &str = "RAYBEND_RAW_WORKER";
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(45);
 /// 握手超时（只验证对面会不会说协议，不该久）。
 pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
-/// 看门狗的轮询间隔。
-const WATCHDOG_TICK: Duration = Duration::from_millis(50);
 /// 头长度上限（防御：不能让对端用一个巨大的数字把我们撑爆）。
-const MAX_HEADER_BYTES: u32 = 64 * 1024;
+#[cfg(test)]
+const MAX_HEADER_BYTES: u32 = crate::worker_process::MAX_HEADER_BYTES;
+/// 约容纳 80MP 的三通道 f32；超限立即拒绝，不能按不可信头分配任意大小。
+const MAX_PAYLOAD_BYTES: u64 = 1024 * 1024 * 1024;
 
 /// 进程内**共享**的 worker（主进程只有一条解码管道）。
 ///
@@ -76,15 +76,16 @@ pub fn shared() -> &'static Mutex<RawWorker> {
 /// 更糟的是这个失败当时被「过期结果」那条路吞掉了，界面表现为**永远卡在「正在载入照片」**。
 /// 光靠「记得重建」不够 —— 所以现在版本对不上就**当面报错**，并且错误里写清怎么修。
 ///
-/// 版本史：v1 = 只有 `srgb8`；v2 = 加 `linear16` + `as_shot_temperature`。
-pub const PROTOCOL_VERSION: u32 = 4;
+/// 版本史：v1 = 只有 `srgb8`；v2 = 加 `linear16` + `as_shot_temperature`；
+/// v7 = 固化 RAW 标度身份请求；新无裁切标度与旧 V2 重放共存。
+pub const PROTOCOL_VERSION: u32 = 7;
 
 /// 版本标签（**机器可读**，给「产物是不是这一份源码建的」用）。
 ///
 /// `scripts/check-win-artifact.mjs` 会在 Windows 的 worker 可执行文件里找这个串 ——
 /// 找不到就说明**主程序新、worker 旧**（2026-09-24 那次真机事故的样子），当场报错。
 /// 它由 worker 启动时打到 stderr，所以一定在二进制里。**改协议就改它**（连同版本号）。
-pub const PROTOCOL_TAG: &str = "raybend-worker-proto-v4";
+pub const PROTOCOL_TAG: &str = "raybend-worker-proto-v7";
 
 /// 版本对不上时给人的那句话（客户端与测试共用一份文案）。
 fn protocol_mismatch(theirs: u32) -> String {
@@ -107,6 +108,8 @@ struct Request {
     allow_preview: bool,
     #[serde(default)]
     embedded_only: bool,
+    #[serde(default)]
+    expected_camera_matrix_id: Option<crate::color::ProfileId>,
     /// 像素形态：缺省 / `"srgb8"` = 8bit sRGB（浏览用）；`"linear16"` = 线性 sRGB u16（显影用）。
     #[serde(default)]
     format: Option<String>,
@@ -134,6 +137,12 @@ struct Response {
     /// 像素形态回执（与请求对得上；旧客户端不认它就当 `srgb8`）。
     #[serde(default)]
     format: Option<String>,
+    /// 响应像素的编码，与 format 分开：`linear16` 本身不说明原色与白点。
+    #[serde(default)]
+    color_encoding: Option<String>,
+    /// rawler Calibrate 选用的矩阵身份；只在线性传感器解码响应里存在。
+    #[serde(default)]
+    camera_matrix_id: Option<String>,
     /// **拍摄色温估计**（K，只有 `linear16` 会给）——色温拉杆的基线。
     #[serde(default)]
     as_shot_temperature: Option<f32>,
@@ -153,6 +162,8 @@ enum PixelFormat {
     Srgb8,
     /// 线性 sRGB u16（显影管线）。
     Linear16,
+    /// 线性 Rec.2020 D65 f32（新处理版本）。
+    LinearRec2020F32,
 }
 
 impl PixelFormat {
@@ -160,8 +171,39 @@ impl PixelFormat {
         match self {
             Self::Srgb8 => "srgb8",
             Self::Linear16 => "linear16",
+            Self::LinearRec2020F32 => "linear-rec2020-f32",
         }
     }
+}
+
+fn expected_color_encoding(format: PixelFormat, source: PixelSource) -> &'static str {
+    match (format, source) {
+        (PixelFormat::Srgb8, PixelSource::EmbeddedPreview) => "unresolved-embedded-preview-rgb8",
+        (PixelFormat::Srgb8, PixelSource::Decoded) => "srgb-iec61966-2-1-u8",
+        (PixelFormat::Linear16, _) => "linear-srgb-d65-u16",
+        (PixelFormat::LinearRec2020F32, _) => "linear-rec2020-d65-f32",
+    }
+}
+
+fn require_color_encoding(head: &Response, format: PixelFormat) -> Result<(), WorkerError> {
+    let expected = expected_color_encoding(format, source_of(head));
+    if head.color_encoding.as_deref() == Some(expected) {
+        Ok(())
+    } else {
+        Err(WorkerError::Protocol(format!(
+            "RAW worker 色彩编码不匹配：期望 {expected}，收到 {:?}",
+            head.color_encoding
+        )))
+    }
+}
+
+fn require_camera_matrix_id(head: &Response) -> Result<crate::color::ProfileId, WorkerError> {
+    crate::color::ProfileId::try_from(
+        head.camera_matrix_id
+            .clone()
+            .ok_or_else(|| WorkerError::Protocol("RAW worker 未回传相机矩阵身份".to_string()))?,
+    )
+    .map_err(|error| WorkerError::Protocol(error.to_string()))
 }
 
 /// 响应里的像素来源字符串 → 枚举（认不出就当内嵌预览 —— 旧协议没有这个字段）。
@@ -176,50 +218,13 @@ fn source_of(head: &Response) -> PixelSource {
 fn format_of(head: &Response) -> PixelFormat {
     match head.format.as_deref() {
         Some("linear16") => PixelFormat::Linear16,
+        Some("linear-rec2020-f32") => PixelFormat::LinearRec2020F32,
         _ => PixelFormat::Srgb8,
     }
 }
 
-/// worker 相关的一切失败（进程 / 协议 / 超时 / 解码）。
-#[derive(Debug, thiserror::Error)]
-pub enum WorkerError {
-    /// 找不到或起不来 worker 进程。
-    #[error("起不了 RAW 解码进程：{0}")]
-    Spawn(String),
-    /// 单次解码超时（子进程已被杀掉）。
-    #[error("RAW 解码超过 {0} 秒没有响应，已终止该解码进程")]
-    Timeout(u64),
-    /// 子进程非正常退出 —— 大概率就是它把解码器崩掉了。
-    #[error("RAW 解码进程异常退出（{0}）")]
-    Crashed(String),
-    /// 协议层面的错误（头太长、JSON 不合法、payload 长度对不上）。
-    #[error("RAW 解码进程通信异常：{0}")]
-    Protocol(String),
-    /// 解码本身失败（格式不支持、文件损坏…），**进程是健康的**。
-    #[error("{0}")]
-    Decode(String),
-}
-
-impl WorkerError {
-    /// 这次失败之后能不能立刻重试下一张？（进程崩溃/超时要重建，解码失败不用）
-    #[must_use]
-    pub const fn needs_respawn(&self) -> bool {
-        matches!(
-            self,
-            Self::Timeout(_) | Self::Crashed(_) | Self::Protocol(_)
-        )
-    }
-}
-
-// ─────────────────────────── 客户端 ───────────────────────────
-
-struct Proc {
-    child: Child,
-    stdin: ChildStdin,
-    /// 读响应时**先把它取出去**（见 [`exchange`]）—— 否则阻塞读会一直持锁，
-    /// 看门狗拿不到锁就杀不掉进程，超时形同虚设。
-    stdout: Option<BufReader<ChildStdout>>,
-}
+pub use crate::worker_process::WorkerError;
+use crate::worker_process::{Proc, kill_proc, write_frame, read_frame};
 
 /// 常驻 worker 的客户端。**不要求 `Sync`** —— 由缩略图后台线程独占使用。
 pub struct RawWorker {
@@ -286,6 +291,15 @@ impl RawWorker {
         self.proc.is_some()
     }
 
+    /// Same identity as a full current working decode, without transferring pixels.
+    pub fn working_color_identity(&mut self,path:&std::path::Path)->Result<crate::color::ProfileId,WorkerError> {
+        let request=Request {op:"color-identity".into(),path:path.to_string_lossy().into_owned(),..Default::default()};
+        let (head,payload)=self.round_trip_raw(&request)?;
+        if !head.ok {return Err(WorkerError::Decode(head.error.unwrap_or_else(||"RAW 色彩身份读取失败".into())));}
+        if !payload.is_empty() {return Err(WorkerError::Protocol("RAW 色彩身份响应不得包含像素".into()));}
+        require_camera_matrix_id(&head)
+    }
+
     /// 不解码像素，只从 RAW 厂商元数据读取镜头名称。
     pub fn lens_name(&mut self, path: &std::path::Path) -> Result<Option<String>, WorkerError> {
         let wire = Request {
@@ -295,7 +309,10 @@ impl RawWorker {
         };
         let (head, payload) = self.round_trip_raw(&wire)?;
         if !head.ok {
-            return Err(WorkerError::Decode(head.error.unwrap_or_else(|| "RAW 元数据读取失败".to_string())));
+            return Err(WorkerError::Decode(
+                head.error
+                    .unwrap_or_else(|| "RAW 元数据读取失败".to_string()),
+            ));
         }
         if !payload.is_empty() {
             return Err(WorkerError::Protocol("元数据响应不应包含像素".to_string()));
@@ -324,6 +341,7 @@ impl RawWorker {
         req: &super::backend::DecodeRequest,
     ) -> Result<RawImage8, WorkerError> {
         let (head, payload) = self.round_trip(req, PixelFormat::Srgb8)?;
+        require_color_encoding(&head, PixelFormat::Srgb8)?;
         let width = head.width;
         let height = head.height;
         let expected = u64::from(width) * u64::from(height) * 3;
@@ -357,6 +375,7 @@ impl RawWorker {
         req: &super::backend::DecodeRequest,
     ) -> Result<RawImage16, WorkerError> {
         let (head, payload) = self.round_trip(req, PixelFormat::Linear16)?;
+        require_color_encoding(&head, PixelFormat::Linear16)?;
         if format_of(&head) != PixelFormat::Linear16 {
             return Err(WorkerError::Protocol(format!(
                 "worker 回的像素形态不对：期望 linear16，收到 {:?}",
@@ -383,11 +402,54 @@ impl RawWorker {
             source: source_of(&head),
             orientation: head.orientation,
             as_shot_temperature: head.as_shot_temperature,
+            camera_matrix_id: require_camera_matrix_id(&head)?,
         };
         if !image.is_consistent() {
             return Err(WorkerError::Protocol("线性解码结果尺寸不合法".to_string()));
         }
         Ok(image)
+    }
+
+    /// 新版线性 Rec.2020 浮点解码，仅新处理版本消费。worker 内校准，主进程只接收
+    /// 已验证的色彩身份与有限值；当前大图载荷会在性能基准后评估传输方式。
+    pub fn decode_working(
+        &mut self,
+        req: &super::backend::DecodeRequest,
+    ) -> Result<RawWorkingImage, WorkerError> {
+        let (head, payload) = self.round_trip(req, PixelFormat::LinearRec2020F32)?;
+        require_color_encoding(&head, PixelFormat::LinearRec2020F32)?;
+        if format_of(&head) != PixelFormat::LinearRec2020F32 {
+            return Err(WorkerError::Protocol("worker 回的浮点像素形态不对".into()));
+        }
+        let expected = u64::from(head.width) * u64::from(head.height) * 3 * 4;
+        if payload.len() as u64 != expected {
+            return Err(WorkerError::Protocol(format!(
+                "浮点像素长度对不上：期望 {expected} 字节，收到 {}",
+                payload.len()
+            )));
+        }
+        let mut rgb = Vec::with_capacity(payload.len() / 12);
+        for chunk in payload.as_chunks::<12>().0 {
+            rgb.push([
+                f32::from_le_bytes(chunk[0..4].try_into().unwrap()),
+                f32::from_le_bytes(chunk[4..8].try_into().unwrap()),
+                f32::from_le_bytes(chunk[8..12].try_into().unwrap()),
+            ]);
+        }
+        let image = crate::color::working::WorkingImage::new(head.width, head.height, rgb)
+            .map_err(|error| WorkerError::Protocol(error.to_string()))?;
+        if source_of(&head) != PixelSource::Decoded {
+            return Err(WorkerError::Protocol(
+                "浮点 RAW 响应不能来自内嵌预览".into(),
+            ));
+        }
+        Ok(RawWorkingImage {
+            image,
+            source: PixelSource::Decoded,
+            orientation: head.orientation,
+            as_shot_temperature: head.as_shot_temperature,
+            camera_matrix_id: require_camera_matrix_id(&head)?,
+        })
     }
 
     /// 探活（不起解码，只验证进程与协议）。
@@ -464,6 +526,7 @@ impl RawWorker {
             max_edge: req.max_edge,
             allow_preview: req.allow_preview,
             embedded_only: req.embedded_only,
+            expected_camera_matrix_id: req.expected_camera_matrix_id.clone(),
             format: Some(format.as_str().to_string()),
             secs: 0,
             ..Request::default()
@@ -577,57 +640,14 @@ fn exchange(
     wire: &Request,
     timeout: Duration,
 ) -> Result<(Response, Vec<u8>), WorkerError> {
-    // ① 发请求（只在写这一段持锁）
-    let mut reader = {
-        let mut guard = proc.lock().unwrap_or_else(|p| p.into_inner());
-        let body = serde_json::to_vec(&stamp(wire))
-            .map_err(|e| WorkerError::Protocol(format!("请求序列化失败：{e}")))?;
-        write_frame(&mut guard.stdin, &body)
-            .map_err(|e| WorkerError::Crashed(format!("写请求失败：{e}")))?;
-        guard
-            .stdout
-            .take()
-            .ok_or_else(|| WorkerError::Protocol("子进程 stdout 已被取走".to_string()))?
-    };
-
-    // ② 看门狗（超时就 kill —— 它要能拿到锁，所以上面必须已经把 stdout 拿出来了）
-    let done = Arc::new(AtomicBool::new(false));
-    let timed_out = Arc::new(AtomicBool::new(false));
-    let watchdog = spawn_watchdog(proc.clone(), done.clone(), timed_out.clone(), timeout);
-
-    // ③ 读响应
-    let result = read_response(&mut reader);
-
-    done.store(true, Ordering::Relaxed);
-    let _ = watchdog.join();
-
-    // ④ 归还 stdout（进程还在的话），让下一次请求能复用
-    if let Ok(mut guard) = proc.lock()
-        && guard.stdout.is_none()
-    {
-        guard.stdout = Some(reader);
-    }
-
+    let body=serde_json::to_vec(&stamp(wire)).map_err(|e|WorkerError::Protocol(e.to_string()))?;
+    let result=crate::worker_process::exchange(proc,&body,timeout,read_response);
     match result {
-        // 版本核对：**过期 worker 不许静默工作**（它就是「卡在正在载入照片」那次的原因）
-        Ok((resp, _)) if resp.protocol != PROTOCOL_VERSION => {
-            Err(WorkerError::Protocol(protocol_mismatch(resp.protocol)))
-        }
-        Ok(v) => Ok(v),
-        // 超时：错误归档成 Timeout（真实的读取错误对用户没意义，超时才是）
-        Err(_) if timed_out.load(Ordering::Relaxed) => Err(WorkerError::Timeout(timeout.as_secs())),
-        Err(e) => {
-            // 读失败时顺手看一眼子进程死没死 —— “退出码 101”比
-            // “failed to fill whole buffer”有用得多
-            let status = proc
-                .lock()
-                .ok()
-                .and_then(|mut g| g.child.try_wait().ok().flatten())
-                .map(|s| describe_exit(&s));
-            Err(match status {
-                Some(what) => WorkerError::Crashed(format!("子进程已退出（{what}）：{e}")),
-                None => e,
-            })
+        Ok((resp,_)) if resp.protocol!=PROTOCOL_VERSION => Err(WorkerError::Protocol(protocol_mismatch(resp.protocol))),
+        Ok(v)=>Ok(v),
+        Err(e)=>{
+            let status=proc.lock().ok().and_then(|mut g|g.child.try_wait().ok().flatten()).map(|s|describe_exit(&s));
+            Err(match (&e,status) { (WorkerError::Timeout(_),_)=>e,(_,Some(what))=>WorkerError::Crashed(format!("子进程已退出（{what}）：{e}")),_=>e })
         }
     }
 }
@@ -637,6 +657,11 @@ fn read_response<R: BufRead>(reader: &mut R) -> Result<(Response, Vec<u8>), Work
     let head = read_frame(reader)?;
     let resp: Response = serde_json::from_slice(&head)
         .map_err(|e| WorkerError::Protocol(format!("响应头不是合法 JSON：{e}")))?;
+    if resp.payload_len > MAX_PAYLOAD_BYTES {
+        return Err(WorkerError::Protocol(
+            "RAW worker 像素载荷超过 1 GiB 上限".into(),
+        ));
+    }
     let payload = if resp.payload_len > 0 {
         let mut buf = vec![0u8; resp.payload_len as usize];
         reader
@@ -647,65 +672,6 @@ fn read_response<R: BufRead>(reader: &mut R) -> Result<(Response, Vec<u8>), Work
         Vec::new()
     };
     Ok((resp, payload))
-}
-
-/// 无条件杀掉子进程（换掉一个坏掉的 / 不会说协议的 worker）。
-fn kill_proc(proc: &Arc<Mutex<Proc>>) {
-    if let Ok(mut guard) = proc.lock() {
-        let _ = guard.child.kill();
-        let _ = guard.child.wait();
-    }
-}
-
-/// 看门狗：到点还没完成就杀掉子进程。返回的 `JoinHandle` 由调用方 `join`。
-fn spawn_watchdog(
-    proc: Arc<Mutex<Proc>>,
-    done: Arc<AtomicBool>,
-    timed_out: Arc<AtomicBool>,
-    timeout: Duration,
-) -> std::thread::JoinHandle<()> {
-    std::thread::spawn(move || {
-        let deadline = Instant::now() + timeout;
-        while Instant::now() < deadline {
-            if done.load(Ordering::Relaxed) {
-                return;
-            }
-            std::thread::sleep(WATCHDOG_TICK);
-        }
-        if done.load(Ordering::Relaxed) {
-            return;
-        }
-        // 超时：先立旗（调用方据此把错误归类成 Timeout），再杀掉子进程。
-        // **这是唯一能打断阻塞读的手段**（进程一死，管道就 EOF）。
-        timed_out.store(true, Ordering::Relaxed);
-        if let Ok(mut guard) = proc.lock() {
-            let _ = guard.child.kill();
-            let _ = guard.child.wait();
-        }
-    })
-}
-
-// ─────────────────────────── 帧读写 ───────────────────────────
-
-fn write_frame<W: Write>(w: &mut W, body: &[u8]) -> std::io::Result<()> {
-    let len = u32::try_from(body.len()).map_err(|_| std::io::Error::other("请求体过大"))?;
-    w.write_all(&len.to_le_bytes())?;
-    w.write_all(body)?;
-    w.flush()
-}
-
-fn read_frame<R: BufRead>(r: &mut R) -> Result<Vec<u8>, WorkerError> {
-    let mut len_bytes = [0u8; 4];
-    r.read_exact(&mut len_bytes)
-        .map_err(|e| WorkerError::Crashed(format!("读响应头失败：{e}")))?;
-    let len = u32::from_le_bytes(len_bytes);
-    if len > MAX_HEADER_BYTES {
-        return Err(WorkerError::Protocol(format!("响应头过长（{len} 字节）")));
-    }
-    let mut body = vec![0u8; len as usize];
-    r.read_exact(&mut body)
-        .map_err(|e| WorkerError::Crashed(format!("读响应头失败：{e}")))?;
-    Ok(body)
 }
 
 // ─────────────────────────── 进程启动 ───────────────────────────
@@ -757,68 +723,9 @@ pub fn resolve_worker() -> Result<(PathBuf, bool), String> {
 }
 
 fn spawn_proc(path: &std::path::Path) -> Result<Proc, WorkerError> {
-    let needs_marker = path
-        .file_name()
-        .is_none_or(|n| !n.to_string_lossy().starts_with("raybend-raw-worker"));
-    let mut cmd = Command::new(path);
-    if needs_marker {
-        cmd.arg(WORKER_ARG);
-    }
-    suppress_console_window(&mut cmd);
-    let mut child = cmd
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        // stderr 继承：解码器自己的日志/panic 直接进我们这边的日志，不吞掉
-        .stderr(Stdio::inherit())
-        .spawn()
-        .map_err(|e| WorkerError::Spawn(format!("{}：{e}", path.display())))?;
-
-    let stdin = child
-        .stdin
-        .take()
-        .ok_or_else(|| WorkerError::Spawn("拿不到子进程 stdin".to_string()))?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| WorkerError::Spawn("拿不到子进程 stdout".to_string()))?;
-
-    Ok(Proc {
-        child,
-        stdin,
-        stdout: Some(BufReader::new(stdout)),
-    })
+    let marker=path.file_name().is_none_or(|n|!n.to_string_lossy().starts_with("raybend-raw-worker"));
+    crate::worker_process::spawn_proc(path, &if marker {vec![WORKER_ARG.into()]} else {Vec::new()})
 }
-
-/// 不让 worker 弹出一个**新的控制台窗口**（Windows）。
-///
-/// 2026-09-28 真机反馈：从构建目录直接跑 release 的 `raybend-desktop.exe`，一启动就多出一块
-/// 黑框。查下来是 worker —— `raybend-raw-worker.exe` 是**控制台子系统**的可执行文件
-/// （`windows_subsystem` 只加在主程序 `src-tauri/src/main.rs` 上），而父进程是 GUI 子系统、
-/// 自己**没有**控制台，Windows 于是给子进程新开一个（实测：worker 的子进程里出现
-/// `conhost.exe 0x4`）。
-///
-/// 修法不是把 worker 改成 GUI 子系统（那样它就不能单独跑给人看日志了），而是**按需**加
-/// `CREATE_NO_WINDOW`：
-///
-/// * 父进程**没有**控制台（双击 / 资源管理器 / 打包后的应用）→ 加标志，子进程不再弹窗；
-///   它继承来的 stderr 句柄无效就静默失败（实测过：worker 照常握手、退出码 0，不会 panic）；
-/// * 父进程**有**控制台（开发期从终端跑 debug）→ 什么都不加，worker 照旧继承那个终端，
-///   解码器日志与 panic 落在你看得见的地方（开发期要的就是这个）。
-///
-/// 见 <https://learn.microsoft.com/en-us/windows/win32/procthread/process-creation-flags>。
-#[cfg(windows)]
-fn suppress_console_window(cmd: &mut Command) {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    // SAFETY: 无参数、无副作用，只读当前进程的控制台窗口句柄。
-    let has_console = !unsafe { windows_sys::Win32::System::Console::GetConsoleWindow() }.is_null();
-    if !has_console {
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
-}
-
-#[cfg(not(windows))]
-fn suppress_console_window(_cmd: &mut Command) {}
 
 fn describe_exit(status: &std::process::ExitStatus) -> String {
     match status.code() {
@@ -894,9 +801,27 @@ fn handle(request: Request) -> (Response, Vec<u8>) {
                 Vec::new(),
             )
         }
+        "color-identity" => match RawlerBackend::working_color_identity(std::path::Path::new(&request.path)) {
+            Ok(id)=>(Response {ok:true,camera_matrix_id:Some(id.as_str().into()),..Default::default()},Vec::new()),
+            Err(error)=>(Response {ok:false,error:Some(error.to_string()),..Default::default()},Vec::new()),
+        },
         "metadata" => match RawlerBackend::lens_name(std::path::Path::new(&request.path)) {
-            Ok(lens_name) => (Response { ok: true, lens_name, ..Response::default() }, Vec::new()),
-            Err(error) => (Response { ok: false, error: Some(error.to_string()), ..Response::default() }, Vec::new()),
+            Ok(lens_name) => (
+                Response {
+                    ok: true,
+                    lens_name,
+                    ..Response::default()
+                },
+                Vec::new(),
+            ),
+            Err(error) => (
+                Response {
+                    ok: false,
+                    error: Some(error.to_string()),
+                    ..Response::default()
+                },
+                Vec::new(),
+            ),
         },
         "decode" => {
             let req = super::backend::DecodeRequest {
@@ -904,10 +829,55 @@ fn handle(request: Request) -> (Response, Vec<u8>) {
                 max_edge: request.max_edge,
                 allow_preview: request.allow_preview,
                 embedded_only: request.embedded_only,
+                expected_camera_matrix_id: request.expected_camera_matrix_id.clone(),
             };
             let backend = RawlerBackend::new();
+            let float_working = request.format.as_deref() == Some("linear-rec2020-f32");
             let linear = request.format.as_deref() == Some("linear16");
-            if linear {
+            if float_working {
+                match backend.decode_working(&req) {
+                    Ok(image) => {
+                        let (width, height) = image.image.dimensions();
+                        let mut payload = Vec::with_capacity(image.image.pixels().len() * 12);
+                        for pixel in image.image.pixels() {
+                            for channel in pixel {
+                                payload.extend_from_slice(&channel.to_le_bytes());
+                            }
+                        }
+                        let payload_len = payload.len() as u64;
+                        (
+                            Response {
+                                ok: true,
+                                width,
+                                height,
+                                source: Some(image.source.as_str().to_string()),
+                                orientation: image.orientation,
+                                format: Some(PixelFormat::LinearRec2020F32.as_str().into()),
+                                color_encoding: Some(
+                                    expected_color_encoding(
+                                        PixelFormat::LinearRec2020F32,
+                                        image.source,
+                                    )
+                                    .into(),
+                                ),
+                                camera_matrix_id: Some(image.camera_matrix_id.as_str().into()),
+                                as_shot_temperature: image.as_shot_temperature,
+                                payload_len,
+                                ..Response::default()
+                            },
+                            payload,
+                        )
+                    }
+                    Err(error) => (
+                        Response {
+                            ok: false,
+                            error: Some(error.to_string()),
+                            ..Response::default()
+                        },
+                        Vec::new(),
+                    ),
+                }
+            } else if linear {
                 match backend.decode_linear(&req) {
                     Ok(image) => {
                         // u16 → 小端字节（协议层只搬字节，形态由 format 字段说明）
@@ -925,6 +895,11 @@ fn handle(request: Request) -> (Response, Vec<u8>) {
                                 source: Some(image.source.as_str().to_string()),
                                 orientation: image.orientation,
                                 format: Some("linear16".to_string()),
+                                color_encoding: Some(
+                                    expected_color_encoding(PixelFormat::Linear16, image.source)
+                                        .to_string(),
+                                ),
+                                camera_matrix_id: Some(image.camera_matrix_id.as_str().to_string()),
                                 as_shot_temperature: image.as_shot_temperature,
                                 payload_len,
                                 ..Response::default()
@@ -954,6 +929,10 @@ fn handle(request: Request) -> (Response, Vec<u8>) {
                                 source: Some(image.source.as_str().to_string()),
                                 orientation: image.orientation,
                                 format: Some("srgb8".to_string()),
+                                color_encoding: Some(
+                                    expected_color_encoding(PixelFormat::Srgb8, image.source)
+                                        .to_string(),
+                                ),
                                 as_shot_temperature: None,
                                 payload_len,
                                 ..Response::default()
@@ -1016,7 +995,10 @@ mod tests {
         assert_ne!(old.protocol, PROTOCOL_VERSION, "0 必须被判成过期");
 
         let message = protocol_mismatch(old.protocol);
-        assert!(message.contains("raybend-raw-worker"), "要说清是哪个文件过期：{message}");
+        assert!(
+            message.contains("raybend-raw-worker"),
+            "要说清是哪个文件过期：{message}"
+        );
         assert!(
             message.contains("cargo build -p raybend --bin raybend-raw-worker"),
             "要给一条能照抄的命令：{message}"
@@ -1064,6 +1046,80 @@ mod tests {
         let (resp, payload) = read_response(&mut reader).expect("读得回来");
         assert_eq!(resp.protocol, PROTOCOL_VERSION, "worker 的响应必须带版本");
         assert_eq!(payload.len(), 8);
+    }
+
+    #[test]
+    fn color_encoding_and_camera_matrix_are_required_on_linear_response() {
+        let id = crate::color::ProfileId::of_bytes("camera matrix / 中文".as_bytes());
+        let mut response = Response {
+            ok: true,
+            format: Some("linear16".to_string()),
+            color_encoding: Some(
+                expected_color_encoding(PixelFormat::Linear16, PixelSource::Decoded).to_string(),
+            ),
+            camera_matrix_id: Some(id.as_str().to_string()),
+            protocol: PROTOCOL_VERSION,
+            ..Response::default()
+        };
+        require_color_encoding(&response, PixelFormat::Linear16).unwrap();
+        assert_eq!(
+            crate::color::ProfileId::try_from(response.camera_matrix_id.clone().unwrap()).unwrap(),
+            id
+        );
+        response.color_encoding = Some("display-p3-u16".to_string());
+        assert!(require_color_encoding(&response, PixelFormat::Linear16).is_err());
+        response.color_encoding = None;
+        assert!(require_color_encoding(&response, PixelFormat::Linear16).is_err());
+        let old: Response = serde_json::from_str(&format!(
+            r#"{{"ok":true,"protocol":{},"format":"linear16"}}"#,
+            PROTOCOL_VERSION - 1
+        ))
+        .unwrap();
+        assert_ne!(old.protocol, PROTOCOL_VERSION);
+        assert!(require_color_encoding(&old, PixelFormat::Linear16).is_err());
+        let mut preview = Response {
+            source: Some(PixelSource::EmbeddedPreview.as_str().to_string()),
+            color_encoding: Some("unresolved-embedded-preview-rgb8".to_string()),
+            ..Response::default()
+        };
+        require_color_encoding(&preview, PixelFormat::Srgb8).unwrap();
+        preview.color_encoding = Some("srgb-iec61966-2-1-u8".to_string());
+        assert!(require_color_encoding(&preview, PixelFormat::Srgb8).is_err());
+    }
+
+    #[test]
+    fn float_working_response_has_distinct_encoding_and_bounded_payload() {
+        let id = crate::color::ProfileId::of_bytes(b"new camera matrix");
+        let mut response = Response {
+            ok: true,
+            format: Some(PixelFormat::LinearRec2020F32.as_str().into()),
+            color_encoding: Some("linear-rec2020-d65-f32".into()),
+            source: Some("decoded".into()),
+            camera_matrix_id: Some(id.as_str().into()),
+            ..Response::default()
+        };
+        assert_eq!(format_of(&response), PixelFormat::LinearRec2020F32);
+        require_color_encoding(&response, PixelFormat::LinearRec2020F32).unwrap();
+        assert_eq!(require_camera_matrix_id(&response).unwrap(), id);
+        response.color_encoding = Some("linear-srgb-d65-u16".into());
+        assert!(require_color_encoding(&response, PixelFormat::LinearRec2020F32).is_err());
+
+        let mut frame = Vec::new();
+        write_response(
+            &mut frame,
+            &Response {
+                ok: true,
+                payload_len: MAX_PAYLOAD_BYTES + 1,
+                ..Response::default()
+            },
+            &[],
+        )
+        .unwrap();
+        let mut reader = BufReader::new(std::io::Cursor::new(frame));
+        assert!(matches!(
+            read_response(&mut reader),
+            Err(WorkerError::Protocol(_))
+        ));
     }
 
     #[test]

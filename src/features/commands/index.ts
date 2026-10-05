@@ -5,5 +5,5 @@
 export { createCommandRegistry, type CommandDeps } from "./catalog.ts";
 export { createCommandDispatcher, type CommandDispatcher } from "./dispatcher.ts";
 export { CommandPalette, type CommandPaletteProps } from "./CommandPalette.tsx";
-export { ShortcutSettingsDialog, type ShortcutSettingsDialogProps } from "./ShortcutSettingsDialog.tsx";
+export { ShortcutSettingsDialog, ShortcutSettingsPanel, type ShortcutSettingsDialogProps } from "./ShortcutSettingsDialog.tsx";
 export { issueText, problemText } from "./messages.ts";

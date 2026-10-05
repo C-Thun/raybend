@@ -161,6 +161,9 @@ impl Metadata {
         Ok(())
     }
     pub fn normalized(&self, width: u32, height: u32) -> Vec<Field> {
+        self.normalized_for_profile(width, height, true)
+    }
+    pub fn normalized_for_profile(&self, width: u32, height: u32, srgb: bool) -> Vec<Field> {
         let mut fields = self.fields.clone();
         let mut set = |tag, value| {
             fields.retain(|f| f.tag != tag);
@@ -175,7 +178,9 @@ impl Metadata {
         set(Tag::ImageLength, Value::Long(vec![height]));
         set(Tag::PixelXDimension, Value::Long(vec![width]));
         set(Tag::PixelYDimension, Value::Long(vec![height]));
-        set(Tag::ColorSpace, Value::Short(vec![1]));
+        // EXIF 1 表示 sRGB；其它已嵌 ICC 的输出必须写 Uncalibrated，
+        // 否则读者可能按 EXIF 把 Display P3/Adobe RGB 像素误作 sRGB。
+        set(Tag::ColorSpace, Value::Short(vec![if srgb { 1 } else { 0xffff }]));
         for (tag, text) in [
             (Tag::Artist, &self.author),
             (Tag::Copyright, &self.copyright),
@@ -190,21 +195,20 @@ impl Metadata {
     pub fn exif(&self, width: u32, height: u32) -> Result<Vec<u8>> {
         write_fields(&self.normalized(width, height), None)
     }
+    pub fn exif_for_profile(&self, width: u32, height: u32, srgb: bool) -> Result<Vec<u8>> {
+        write_fields(&self.normalized_for_profile(width, height, srgb), None)
+    }
     pub fn xmp(&self) -> Vec<u8> {
-        fn list(values: impl IntoIterator<Item = String>, kind: &str) -> String {
-            format!(
-                "<rdf:{kind}>{}</rdf:{kind}>",
-                values
-                    .into_iter()
-                    .map(|s| format!("<rdf:li>{}</rdf:li>", escape(&s)))
-                    .collect::<String>()
-            )
-        }
-        let keywords = list(self.keywords.clone(), "Bag");
-        let author = list(self.author.clone(), "Seq");
-        let description = self.description.as_deref().unwrap_or("");
-        let copyright = self.copyright.as_deref().unwrap_or("");
-        format!("<x:xmpmeta xmlns:x=\"adobe:ns:meta/\"><rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\"><rdf:Description xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:subject>{keywords}</dc:subject><dc:creator>{author}</dc:creator><dc:description><rdf:Alt><rdf:li xml:lang=\"x-default\">{}</rdf:li></rdf:Alt></dc:description><dc:rights><rdf:Alt><rdf:li xml:lang=\"x-default\">{}</rdf:li></rdf:Alt></dc:rights></rdf:Description></rdf:RDF></x:xmpmeta>",escape(description),escape(copyright)).into_bytes()
+        // 转义与 dc: 列表构造走 `xmp::packet` 共享件（`AGENTS.md` §2.12：不写第二套）
+        use crate::xmp::packet::{rdf_alt, rdf_list};
+        let keywords = rdf_list(&self.keywords, "Bag");
+        let author = rdf_list(
+            &self.author.clone().into_iter().collect::<Vec<_>>(),
+            "Seq",
+        );
+        let description = rdf_alt(self.description.as_deref().unwrap_or(""));
+        let copyright = rdf_alt(self.copyright.as_deref().unwrap_or(""));
+        format!("<x:xmpmeta xmlns:x=\"adobe:ns:meta/\"><rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\"><rdf:Description xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:subject>{keywords}</dc:subject><dc:creator>{author}</dc:creator><dc:description>{description}</dc:description><dc:rights>{copyright}</dc:rights></rdf:Description></rdf:RDF></x:xmpmeta>").into_bytes()
     }
 }
 fn as_text(f: &Field) -> Option<String> {
@@ -214,13 +218,6 @@ fn as_text(f: &Field) -> Option<String> {
     } else {
         None
     }
-}
-fn escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&apos;")
 }
 pub fn write_fields(fields: &[Field], strips: Option<&[u8]>) -> Result<Vec<u8>> {
     let mut writer = exif::experimental::Writer::new();
@@ -240,32 +237,7 @@ pub fn write_fields(fields: &[Field], strips: Option<&[u8]>) -> Result<Vec<u8>> 
 fn error() -> Error {
     Error::Unsupported("编码后的元数据容器结构无效或过大".into())
 }
-fn be(v: u32) -> Vec<u8> {
-    v.to_be_bytes().to_vec()
-}
-fn bx(kind: &[u8; 4], data: &[u8]) -> Result<Vec<u8>> {
-    let len = u32::try_from(data.len() + 8).map_err(|_| error())?;
-    Ok([be(len), kind.to_vec(), data.to_vec()].concat())
-}
-fn boxes(data: &[u8]) -> Result<Vec<([u8; 4], Vec<u8>)>> {
-    let mut out = Vec::new();
-    let mut at = 0;
-    while at < data.len() {
-        if at + 8 > data.len() {
-            return Err(error());
-        }
-        let n = u32::from_be_bytes(data[at..at + 4].try_into().unwrap()) as usize;
-        if n < 8 || at + n > data.len() {
-            return Err(error());
-        }
-        out.push((
-            data[at + 4..at + 8].try_into().unwrap(),
-            data[at + 8..at + n].to_vec(),
-        ));
-        at += n;
-    }
-    Ok(out)
-}
+use crate::media::isobmff::{bx,boxes};
 /// avif-serialize emits version-0 iloc with 32-bit absolute extents. Add a standard
 /// MIME XMP item and cdsc reference, shifting every original extent by meta growth.
 /// This adapter accepts only that encoder's bounded schema and rejects other layouts.
@@ -286,7 +258,6 @@ pub fn avif_xmp(bytes: &[u8], xmp: &[u8]) -> Result<Vec<u8>> {
     new_item.extend(0u16.to_be_bytes());
     new_item.extend(b"mime\0application/rdf+xml\0");
     let infe = bx(b"infe", &new_item)?;
-    let mut offsets = Vec::new();
     for (kind, payload) in &mut children {
         if kind == b"iinf" {
             if payload.len() < 6 || payload[..4] != [0, 0, 0, 0] {
@@ -316,7 +287,6 @@ pub fn avif_xmp(bytes: &[u8], xmp: &[u8]) -> Result<Vec<u8>> {
                     if at + 8 > payload.len() {
                         return Err(error());
                     }
-                    offsets.push(at);
                     at += 8;
                 }
             }
@@ -348,12 +318,7 @@ pub fn avif_xmp(bytes: &[u8], xmp: &[u8]) -> Result<Vec<u8>> {
     let delta = u32::try_from(meta_len - old_meta.len()).map_err(|_| error())?;
     for (kind, p) in &mut children {
         if kind == b"iloc" {
-            for at in &offsets {
-                let v = u32::from_be_bytes(p[*at..*at + 4].try_into().unwrap())
-                    .checked_add(delta)
-                    .ok_or_else(error)?;
-                p[*at..*at + 4].copy_from_slice(&v.to_be_bytes());
-            }
+            crate::media::isobmff::shift_iloc(p,delta)?;
             let at = p.len() - 8;
             let end = u32::try_from(bytes.len())
                 .map_err(|_| error())?
@@ -392,7 +357,7 @@ fn riff_chunk(kind: &[u8; 4], data: &[u8]) -> Result<Vec<u8>> {
     }
     Ok(out)
 }
-pub fn webp_metadata(bytes: &[u8], exif: &[u8], xmp: &[u8], w: u32, h: u32) -> Result<Vec<u8>> {
+pub fn webp_metadata(bytes: &[u8], exif: &[u8], xmp: &[u8], icc: &[u8], w: u32, h: u32) -> Result<Vec<u8>> {
     if bytes.len() < 12
         || &bytes[..4] != b"RIFF"
         || &bytes[8..12] != b"WEBP"
@@ -404,10 +369,12 @@ pub fn webp_metadata(bytes: &[u8], exif: &[u8], xmp: &[u8], w: u32, h: u32) -> R
         return Err(error());
     }
     let mut body = b"WEBP".to_vec();
-    let mut vp8x = vec![0x0c, 0, 0, 0];
+    // VP8X bits: ICCP=0x20, EXIF=0x08, XMP=0x04. ICCP 必须排在图像块之前。
+    let mut vp8x = vec![0x2c, 0, 0, 0];
     vp8x.extend(&(w - 1).to_le_bytes()[..3]);
     vp8x.extend(&(h - 1).to_le_bytes()[..3]);
     body.extend(riff_chunk(b"VP8X", &vp8x)?);
+    body.extend(riff_chunk(b"ICCP", icc)?);
     body.extend(&bytes[12..]);
     body.extend(riff_chunk(b"EXIF", exif)?);
     body.extend(riff_chunk(b"XMP ", xmp)?);

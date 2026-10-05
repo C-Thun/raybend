@@ -194,6 +194,11 @@ impl Curve {
 
     /// 求值（表 + 线性插值）。
     #[must_use]
+    pub fn eval_extended(&self, value: f32) -> f32 {
+        let bounded = value.clamp(0.0, 1.0);
+        self.eval(bounded) + (value - bounded)
+    }
+
     pub fn eval(&self, x: f32) -> f32 {
         if !x.is_finite() {
             return 0.0;

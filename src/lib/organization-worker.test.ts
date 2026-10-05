@@ -2,12 +2,15 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createOrganizationWorker } from "./organization-worker.ts";
 
-test("reconcile drains bounded batches and a concurrent wake never starts a second writer", async () => {
+test("reconcile drains bounded batches and a concurrent wake never starts a second writer", { timeout: 1000 }, async () => {
+  let finish!: () => void;
+  const finished = new Promise<void>((resolve) => { finish = resolve; });
   let calls = 0;
   let active = 0;
   let maxActive = 0;
   const worker = createOrganizationWorker({
     repositories: () => ["A"],
+    onChanged: finish,
     reconcile: async () => {
       calls += 1;
       active += 1;
@@ -19,7 +22,7 @@ test("reconcile drains bounded batches and a concurrent wake never starts a seco
     },
   });
   worker.wake();
-  await new Promise<void>((resolve) => setTimeout(resolve, 30));
+  await finished;
   assert.equal(calls, 3);
   assert.equal(maxActive, 1);
   worker.dispose();
@@ -35,7 +38,8 @@ test("partial library failures surface once and reappear after recovery", async 
   });
   for (let index = 0; index < 4; index += 1) {
     worker.wake();
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await Promise.resolve();
+    await Promise.resolve();
   }
   assert.deepEqual(reports, [["A"], ["A"]]);
   worker.dispose();

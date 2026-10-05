@@ -65,3 +65,12 @@ export async function pickOpenFile(options:{title?:string;filters?:{name:string;
   const value=await(await dialogModule).open({directory:false,multiple:false,...options});
   return typeof value==="string"?value:null;
 }
+
+/** 多选文件；供受限资产库导入复用，取消时返回空数组。 */
+export async function pickOpenFiles(options: { title?: string; filters?: { name: string; extensions: string[] }[] } = {}): Promise<string[]> {
+  if (!isTauriRuntime()) return [];
+  dialogModule ??= import("@tauri-apps/plugin-dialog");
+  const value = await (await dialogModule).open({ directory: false, multiple: true, ...options });
+  if (Array.isArray(value)) return value.filter((path): path is string => typeof path === "string");
+  return typeof value === "string" ? [value] : [];
+}

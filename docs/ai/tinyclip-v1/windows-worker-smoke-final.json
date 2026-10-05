@@ -1,0 +1,43 @@
+{
+  "date": "2026-10-04",
+  "scope": "Final frozen desktop test copy, bundled CPU DLL/model; no GUI/catalog E2E",
+  "samples": [
+    {
+      "feature_count": 512,
+      "original_preprocess_encode_ms": 151.2624,
+      "image": "C:\\rb-target\\raybend-ai-probe-data\\samples\\astronaut.jpg"
+    },
+    {
+      "feature_count": 512,
+      "original_preprocess_encode_ms": 134.58350000000002,
+      "image": "C:\\rb-target\\raybend-ai-probe-data\\samples\\rocket.jpg"
+    }
+  ],
+  "process": {
+    "worker_pid": 42688,
+    "peak_working_set_bytes": 238080000,
+    "worker_exited": true,
+    "load_includes_contract_probe_ms": 1027.4897,
+    "exit_code": 0
+  },
+  "protocol_mismatch_rejected": true,
+  "missing_original_rejected": true,
+  "cuda_required": false,
+  "python_required": false,
+  "iterations": 2,
+  "limitations": "Not a cold-disk or throughput distribution measurement; no real RAW/library verification",
+  "machine": {
+    "cpu": "Intel(R) Core(TM) Ultra 9 185H",
+    "cores": 16,
+    "logical": 22,
+    "version": "10.0.26200",
+    "ram_bytes": 33945935872
+  },
+  "threads": {
+    "intra_op": 2,
+    "inter_op": 1,
+    "batch": 1
+  },
+  "test_executable": "C:\\rb-target\\raybend-ai-test-2026-10-04\\raybend-desktop.exe",
+  "executable_sha256": "713984e3c053cf84ef80216aef9cfe809b6e632c6ff558a1a7ea6d66b4627665"
+}

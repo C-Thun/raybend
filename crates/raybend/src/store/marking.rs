@@ -20,7 +20,7 @@
 
 use std::collections::BTreeSet;
 
-use rusqlite::Connection;
+use rusqlite::{Connection,OptionalExtension};
 
 use crate::error::{Error, Result};
 use crate::store::time::now_millis;
@@ -147,6 +147,12 @@ pub enum Op {
         asset_id: i64,
         tag_id: i64,
     },
+    PhotoTag {
+        asset_id:i64,
+        name:String,
+        before:super::photo_tags::ManualState,
+        after:super::photo_tags::ManualState,
+    },
     /// 改一个可编辑的文字字段（作者 / 描述 / 地理三项）。
     Text {
         asset_id: i64,
@@ -199,6 +205,7 @@ impl Op {
             | Self::Lock { asset_id, .. }
             | Self::TagAttach { asset_id, .. }
             | Self::TagDetach { asset_id, .. }
+            | Self::PhotoTag { asset_id, .. }
             | Self::Text { asset_id, .. }
             | Self::DevelopParam { asset_id, .. }
             | Self::DevelopCurve { asset_id, .. }
@@ -262,6 +269,7 @@ impl Op {
                 asset_id: *asset_id,
                 tag_id: *tag_id,
             },
+            Self::PhotoTag {asset_id,name,before,after} => Self::PhotoTag {asset_id:*asset_id,name:name.clone(),before:*after,after:*before},
             Self::Text {
                 asset_id,
                 field,
@@ -354,6 +362,8 @@ pub struct Applied {
     pub changed: usize,
     /// 因为二级锁被跳过的照片（升序、去重）。
     pub skipped_locked: Vec<i64>,
+    /// 有效集合的真实增减；屏蔽、AI 与手动重叠时不能按 Op 猜。
+    pub tag_delta: super::tags::TagDelta,
 }
 
 impl Applied {
@@ -379,6 +389,8 @@ pub fn apply(conn: &Connection, change: &ChangeSet) -> Result<Applied> {
         }
     }
 
+    let tag_assets: BTreeSet<_> = change.ops.iter().filter(|op| matches!(op, Op::TagAttach {..} | Op::TagDetach {..} | Op::PhotoTag {..})).map(Op::asset_id).collect();
+    let before_tags = tag_assets.iter().map(|id| Ok((*id, super::photo_tags::effective_ids(conn, *id)?.into_iter().collect::<BTreeSet<_>>()))).collect::<Result<Vec<_>>>()?;
     let mut changed: BTreeSet<i64> = BTreeSet::new();
     let mut skipped: BTreeSet<i64> = BTreeSet::new();
 
@@ -415,6 +427,10 @@ pub fn apply(conn: &Connection, change: &ChangeSet) -> Result<Applied> {
                     "UPDATE assets SET lock_level = ?1, updated_at = ?2 WHERE id = ?3",
                     rusqlite::params![i64::from(*after), now, asset_id],
                 )?;
+                changed.insert(asset_id);
+            }
+            Op::PhotoTag {name,after,..} => {
+                super::photo_tags::write_manual_state(conn,asset_id,name,*after,now)?;
                 changed.insert(asset_id);
             }
             Op::TagAttach { tag_id, .. } => {
@@ -485,9 +501,16 @@ pub fn apply(conn: &Connection, change: &ChangeSet) -> Result<Applied> {
         }
     }
 
+    let mut tag_delta = super::tags::TagDelta::default();
+    for (id, before) in before_tags {
+        let after: BTreeSet<_> = super::photo_tags::effective_ids(conn, id)?.into_iter().collect();
+        tag_delta.added.extend(after.difference(&before).copied());
+        tag_delta.removed.extend(before.difference(&after).copied());
+    }
     Ok(Applied {
         changed: changed.len(),
         skipped_locked: skipped.into_iter().collect(),
+        tag_delta,
     })
 }
 
@@ -690,6 +713,11 @@ pub fn attach_tags(
     let mut ops = Vec::new();
     for id in ids {
         for tag_id in tag_ids {
+            let name:Option<String>=conn.query_row("SELECT display_name FROM tag_terms WHERE legacy_tag_id=?1",[tag_id],|r|r.get(0)).optional()?;
+            if let Some(name)=name {
+                ops.extend(super::photo_tags::edits(conn,&[*id],&[super::photo_tags::Edit{name,manual:Some(true),masked:None}],label)?.ops);
+                continue;
+            }
             // 已经挂上的不再产生 op（幂等）
             let exists: i64 = conn.query_row(
                 "SELECT count(*) FROM asset_tags WHERE asset_id = ?1 AND tag_id = ?2",

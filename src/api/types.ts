@@ -620,6 +620,7 @@ export type MarkAction =
   | { kind: "lock"; value: number }
   | { kind: "attachTags"; tagIds: number[] }
   | { kind: "detachTags"; tagIds: number[] }
+  | { kind: "photoTags"; edits: { name: string; manual: boolean | null; masked: boolean | null }[] }
   /** 改右栏里可编辑的文字字段（空串 = 清空） */
   | { kind: "setText"; field: EditableTextField; value: string };
 
@@ -778,6 +779,7 @@ export interface DevelopEditTarget {
  *   只装动过的通道（恒等的不发）。
  */
 export interface DevelopParamsPayload {
+  color?: import("./color.ts").PhotoColorState | null;
   values: Record<string, number>;
   asShotTemperature: number | null;
   curves: Record<string, [number, number][]>;
@@ -852,6 +854,7 @@ export interface AutoAdjustBaseline {
 }
 
 export interface DevelopSettings {
+  color?: import("./color.ts").PhotoColorState | null;
   autoAdjust?: AutoAdjustBaseline | null;
   sourceBase?: DevelopEditBase;
   asShotK?: number | null;
@@ -866,6 +869,7 @@ export interface DevelopSettings {
 }
 
 export interface EditorRenderState {
+  displayColor: import("./color.ts").DisplayPresentation | null;
   nrPending: boolean;
   nrError: string | null;
   referenceReady: boolean;

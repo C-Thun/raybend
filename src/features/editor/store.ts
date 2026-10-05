@@ -221,6 +221,16 @@ export interface EditorStore {
   lensProfile: () => string | null;
   /** 当前照片 RAW 基础曲线：null 未选择，none 显式不用。 */
   baseCurveProfile: () => string | null;
+  colorState: () => import("../../api/color.ts").PhotoColorState | null;
+  setColorState: (next: import("../../api/color.ts").PhotoColorState | null) => void;
+  proofEnabled: () => boolean;
+  advancedTab: () => "curve" | "preset" | "color";
+  setAdvancedTab: (tab: "curve" | "preset" | "color") => void;
+  setProofEnabled: (enabled: boolean) => void;
+  proofTarget: () => import("../../lib/color-model.ts").OutputColor;
+  setProofTarget: (target: import("../../lib/color-model.ts").OutputColor) => void;
+  proofWarning: () => boolean;
+  setProofWarning: (enabled: boolean) => void;
   baseCurvePoints: () => readonly CurvePoint[] | null;
   setBaseCurve: (id: string | null, points: readonly CurvePoint[] | null) => void;
   lutId: () => string | null;
@@ -387,6 +397,11 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
     }));
     bumpDevelop();
   };
+  const [colorState, setColorState] = createSignal<import("../../api/color.ts").PhotoColorState | null>(null);
+  const [proofEnabled,setProofEnabled] = createSignal(false);
+  const [advancedTab,setAdvancedTab] = createSignal<"curve"|"preset"|"color">("curve");
+  const [proofTarget,setProofTarget] = createSignal<import("../../lib/color-model.ts").OutputColor>({kind:"srgb"});
+  const [proofWarning,setProofWarning] = createSignal(false);
   const [baseCurveProfile, setBaseCurveProfile] = createSignal<string | null>(null);
   const [baseCurvePoints, setBaseCurvePoints] = createSignal<CurvePoint[] | null>(null);
   const [lutId, setLutId] = createSignal<string | null>(null);
@@ -439,6 +454,7 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
     }
     return {
       values,
+      color: colorState(),
       asShotTemperature: asShot(),
       curves: dirtyCurves,
       // 拖动中：Rust 侧只算预览档（`tier_for_params`）
@@ -537,6 +553,7 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
         enabled: settings?.lensEnabled ?? null,
       };
       setLensSides(sides);
+      setColorState(settings?.color == null ? null : structuredClone(settings.color));
       const automatic = settings?.autoAdjust;
       setAutoAdjustBaseline(automatic == null ? null : { ...automatic, values: { ...automatic.values } });
       setBaseCurveProfile(settings?.baseCurveProfile ?? null);
@@ -706,6 +723,10 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
 
     curveChannel,
     lensProfile,
+    colorState,
+    proofEnabled, setProofEnabled, proofTarget, setProofTarget, proofWarning, setProofWarning,
+    advancedTab,setAdvancedTab,
+    setColorState: (next) => { setColorState(next == null ? null : structuredClone(next)); bumpDevelop(); },
     baseCurveProfile,
     baseCurvePoints,
     lutId,
@@ -789,6 +810,7 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
     togglePresetDirectory: (id) =>
       setPresetCollapsed((current) => ({ ...current, [id]: current[id] !== true })),
     presetSnapshot: (groups) => buildPresetSnapshot(groups, {
+      photoColor: colorState(),
       // 镜像返回对象里 `paramValue` 的取值口径（色温未动过时用基线）
       values: Object.fromEntries(PARAM_IDS.map((id) => [id,
         id === "temperature" && !temperatureExplicit()

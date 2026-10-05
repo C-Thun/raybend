@@ -43,7 +43,7 @@ export interface DialogProps {
    * 透明遮罩仍然拦住点击（该有的模态语义一个不少）。
    */
   scrim?: boolean;
-  size?: "md" | "wide";
+  size?: "md" | "wide" | "settings";
   class?: string;
 }
 
@@ -86,7 +86,7 @@ export function Dialog(props: DialogProps) {
                * 且内边距**不吃密度档**（`--dialog-pad`）—— 紧凑档缩到 6px 会「贴边」。
                */
               "flex w-full min-w-72 flex-col gap-3 rounded-ui bg-surface-layer p-(--dialog-pad) outline-none",
-              local.size === "wide" ? "max-w-2xl" : "max-w-md",
+              local.size === "settings" ? "h-160 max-h-dvh max-w-5xl" : local.size === "wide" ? "max-w-2xl" : "max-w-md",
               local.class ?? "",
             ].join(" ")}
           >
@@ -120,7 +120,7 @@ export function Dialog(props: DialogProps) {
             </div>
 
             <Show when={untrack(() => local.children) != null}>
-              <div class="min-w-0 text-[13px] leading-normal text-fg-1">
+              <div class={local.size === "settings" ? "flex min-h-0 flex-1 text-[13px] leading-normal text-fg-1" : "min-w-0 text-[13px] leading-normal text-fg-1"}>
                 {untrack(() => local.children)}
               </div>
             </Show>

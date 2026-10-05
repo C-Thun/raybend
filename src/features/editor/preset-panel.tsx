@@ -34,6 +34,7 @@ import { trackPointerDrag } from "../../lib/pointer-drag.ts";
 import {
   DEFAULT_DIRECTORY_ID,
   PRESET_GROUPS,
+  DEFAULT_PRESET_GROUPS,
   isDirectoryNameTaken,
   isPresetNameTaken,
   resolveCreateDirectory,
@@ -53,6 +54,7 @@ const GROUP_LABEL_KEY: Record<PresetGroup, MessageKey> = {
   lens: "editor.preset.group.lens",
   curve: "editor.preset.group.curve",
   lut: "editor.preset.group.lut",
+  colorManagement: "editor.colorManagement.title",
 };
 
 /**
@@ -68,6 +70,7 @@ export interface PresetPanelProps {
   enabled: boolean;
   /** 应用 / 新建后落库（与 LUT 选择的 `onSelect → commitDevelop` 同一条路） */
   onCommit?: () => void;
+  applyPreset: (snapshot: PresetSnapshot) => Promise<void>;
   createDirectory: (name: string) => Promise<boolean>;
   createPreset: (name: string, directoryId: string, groups: readonly PresetGroup[]) => Promise<boolean>;
   deletePreset: (id: string) => Promise<void>;
@@ -85,7 +88,7 @@ export function PresetPanel(props: PresetPanelProps): JSX.Element {
   /* ── 新建预设弹窗 ─────────────────────────────────── */
   const [presetOpen, setPresetOpen] = createSignal(false);
   const [presetDraft, setPresetDraft] = createSignal("");
-  const [presetGroups, setPresetGroups] = createSignal<PresetGroup[]>([...PRESET_GROUPS]);
+  const [presetGroups, setPresetGroups] = createSignal<PresetGroup[]>([...DEFAULT_PRESET_GROUPS]);
   const [presetDuplicate, setPresetDuplicate] = createSignal(false);
   const [busy, setBusy] = createSignal(false);
 
@@ -134,8 +137,7 @@ export function PresetPanel(props: PresetPanelProps): JSX.Element {
   const applySelected = (): void => {
     const record = selectedSingle();
     if (record === null) return;
-    props.store.applyPresetSnapshot(record.payload);
-    props.onCommit?.();
+    void props.applyPreset(record.payload);
   };
 
   /* ── 新建目录 ─────────────────────────────────────── */
@@ -311,7 +313,7 @@ export function PresetPanel(props: PresetPanelProps): JSX.Element {
               onClick={() => {
                 setPresetDraft("");
                 setPresetDuplicate(false);
-                setPresetGroups([...PRESET_GROUPS]);
+                setPresetGroups([...DEFAULT_PRESET_GROUPS]);
                 setPresetOpen(true);
               }}
             />
@@ -577,6 +579,7 @@ export function PresetPanel(props: PresetPanelProps): JSX.Element {
                       "bg-state-selected font-semibold text-fg-1": on(),
                       "bg-surface-bar text-fg-2": !on(),
                     }}
+                    disabled={group === "colorManagement" && props.store.colorState() === null}
                     aria-pressed={on()}
                     onClick={() => {
                       setPresetGroups((current) =>

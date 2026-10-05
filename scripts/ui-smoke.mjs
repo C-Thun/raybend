@@ -238,12 +238,10 @@ try {
         event.method === "Log.entryAdded" &&
         event.params.entry.level === "error" &&
         /*
-         * 浏览器自己会去要 `favicon.ico`，404 与页面无关（本项目目前真没放 favicon），
-         * 而这条日志里**不带 URL**，所以只能按状态码放行 —— 真正的模块加载失败
-         * 会在下面以「未捕获异常：Failed to fetch dynamically imported module」的形式出现，
-         * 不会因为这条放行而被掩盖。
+         * 浏览器自己会去要 `favicon.ico`；只放行明确带该URL的404。
+         * 无URL的404和JS模块404不能放行：静态import失败未必抛Runtime.exceptionThrown。
          */
-        !String(event.params.entry.text).includes("404")
+        !(String(event.params.entry.text).includes("404") && /\/favicon\.ico(?:[?#]|$)/.test(String(event.params.entry.url ?? "")))
       ) {
         problems.push(`浏览器日志：${event.params.entry.text}`);
       }
@@ -1928,6 +1926,27 @@ try {
     );
   }
 
+  const settings = await evaluate(`(async () => {
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const button = document.querySelector('[data-flowbar] button[aria-label="设置"]');
+    if (!button) return null;
+    const hit = Math.round(button.getBoundingClientRect().width);
+    const icon = Math.round(button.querySelector('svg')?.getBoundingClientRect().width ?? 0);
+    const before = button.getAttribute('aria-pressed');
+    button.click();
+    await sleep(250);
+    const dialog = document.querySelector('[role="dialog"]');
+    const opened = Boolean(dialog?.innerText.includes('色彩管理'));
+    const active = button.getAttribute('aria-pressed');
+    const close = dialog?.querySelector('button[aria-label="关闭"]');
+    close?.click();
+    await sleep(250);
+    return { hit, icon, density: document.documentElement.dataset.density, before, opened, active, closed: !document.querySelector('[role="dialog"]'), after: button.getAttribute('aria-pressed') };
+  })()`);
+  if (!settings || settings.hit !== (settings.density === 'loose' ? 38 : 32) || settings.icon !== 16 || settings.before !== null || !settings.opened || settings.active !== 'true' || !settings.closed || settings.after !== null) {
+    problems.push(`flowbar 设置齿轮尺寸或弹窗选中态错误：${JSON.stringify(settings)}`);
+  }
+
   /*
    * 导入侧的 tiles 状态条：**与浏览侧同一个组件**（人类 2026-09-19 的统一口径）。
    *
@@ -2885,6 +2904,7 @@ try {
         workspace,
         browseWorkspace,
         fullscreenPage,
+        settings,
         problems,
       },
       null,

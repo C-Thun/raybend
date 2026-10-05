@@ -202,6 +202,14 @@ export function Input(props: InputProps) {
   );
 }
 
+/** Native choice input with the same field tokens and feedback as Input. */
+export function Select(props: JSX.SelectHTMLAttributes<HTMLSelectElement>) {
+  const [local, rest] = splitProps(props, ["class", "children"]);
+  return <select {...rest} class={["min-h-8 rounded-ui border border-transparent bg-surface-track px-3 text-fs-2 text-fg-1 outline-none transition-colors hover:border-fg-3 focus:border-brand disabled:pointer-events-none disabled:opacity-60", local.class ?? ""].join(" ")}>
+    {untrack(() => props.children)}
+  </select>;
+}
+
 /** A vertical single-choice group with optional compact controls on each row. */
 export function RadioChoices<T extends string>(props: {
   label: string; value: T; options: readonly {value:T;label:string}[];

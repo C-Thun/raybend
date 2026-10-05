@@ -38,7 +38,7 @@ pub struct LegacyCategory {
     pub name: String,
 }
 
-fn root<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
+pub(crate) fn root<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
     Ok(crate::db::data_dir(app)?.join("luts"))
 }
 

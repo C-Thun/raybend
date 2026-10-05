@@ -122,8 +122,8 @@ pub(crate) fn render_profile_thumb<R: Runtime>(
             let lut = stack.lut_id.as_deref().filter(|_| stack.lut_enabled == Some(true))
                 .map(|id| crate::lut::resolve(app, id)).transpose()
                 .map_err(raybend::Error::Unsupported)?;
-            raybend::thumbnail::render::render_file_with_edit_and_lut(
-                source, size, Some(stack), lens.as_ref(), lut.as_deref())
+            raybend::thumbnail::render::render_file_with_profiles(
+                source, size, Some(stack), lens.as_ref(), lut.as_deref(), |id, role| crate::color_profiles::resolve(app, id, role))
         })
     })
 }
@@ -211,12 +211,13 @@ pub(crate) fn render_profile_cached<R: Runtime>(
         .as_deref()
         .filter(|_| stack.lut_enabled == Some(true))
         .map(|id| crate::lut::resolve(app, id)).transpose()?;
-    let thumb = raybend::thumbnail::render::render_file_with_edit_and_lut(
+    let thumb = raybend::thumbnail::render::render_file_with_profiles(
         &full,
         SizeClass::Screen,
         Some(stack),
         lens.as_ref(),
         lut.as_deref(),
+        |id, role| crate::color_profiles::resolve(app, id, role),
     )
     .map_err(|e| e.to_string())?
     .ok_or_else(|| format!("解不开这张照片：{}", full.display()))?;

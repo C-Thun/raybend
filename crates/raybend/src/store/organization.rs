@@ -403,7 +403,7 @@ pub fn tags_for_directory(conn: &Connection, directory_key: &str) -> Result<Vec<
 
 pub fn photo_tags(conn: &Connection, asset_id: i64) -> Result<Vec<String>> {
     let mut stmt = conn.prepare(
-        "SELECT DISTINCT tag_key FROM asset_tag_sources WHERE asset_id = ?1 ORDER BY tag_key"
+        "SELECT tag_key FROM effective_photo_tags WHERE asset_id = ?1 ORDER BY tag_key"
     )?;
     let rows = stmt.query_map([asset_id], |row| row.get(0))?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)

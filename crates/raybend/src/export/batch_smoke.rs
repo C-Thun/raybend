@@ -46,6 +46,7 @@ fn one_and_thousand() {
                 source_signature: crate::media::source::source_signature(&source).unwrap(),
             };
             let preset = Preset {
+                output_color: crate::color::OutputColor::Srgb,
                 id: format!("preset{}", id % 4),
                 name: format!("预设{}", id % 4),
                 format: "png".into(),

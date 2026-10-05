@@ -132,6 +132,7 @@ export type IconButtonShape = "square" | "circle";
 export interface IconButtonProps
   extends JSX.ButtonHTMLAttributes<HTMLButtonElement> {
   shape?: IconButtonShape;
+  size?: "regular" | "large";
   selected?: boolean;
   /** 无障碍名。**必填** —— 纯图标按钮没有可读文本，缺了它对屏幕阅读器就是空白。 */
   label: string;
@@ -140,6 +141,7 @@ export interface IconButtonProps
 export function IconButton(props: IconButtonProps) {
   const [local, rest] = splitProps(props, [
     "shape",
+    "size",
     "selected",
     "label",
     "class",
@@ -158,7 +160,7 @@ export function IconButton(props: IconButtonProps) {
       class={[
         "inline-flex shrink-0 select-none items-center justify-center transition-colors",
         (local.shape ?? "square") === "circle" ? "rounded-full" : "rounded-ui",
-        "size-6",
+        local.size === "large" ? "size-flow-icon-hit" : "size-6",
         local.selected
           ? "bg-brand text-fg-on-brand hover:bg-brand"
           : "text-fg-2 hover:bg-state-hover hover:text-fg-1",

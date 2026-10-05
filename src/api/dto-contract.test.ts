@@ -20,7 +20,10 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { repositoryErrorKeys } from "../i18n/repository-feedback.ts";
+import type { ColorBatchReview,ColorProfileEntry,ColorProfileLibrary,ColorProfileImport,DisplayPresentation } from "./color.ts";
 
+import type { AiModelStatus, AiTask } from "./photo-ai.ts";
+import type { PhotoTagState, AiTagResult, AiTagEvidence } from "./organization.ts";
 import type {
   SystemPreferencesSnapshot,
   AssetItem,
@@ -98,6 +101,12 @@ function checkKeys<T, const K extends readonly string[]>(
 ): K {
   return keys;
 }
+
+const AIMODELSTATUS_KEYS = ["buildMarker", "bundled", "bytes", "compiled", "manifestSha256", "state"] as const satisfies readonly (keyof AiModelStatus)[];
+const AITASK_KEYS = ["done", "error", "failed", "id", "label", "skipped", "state", "total", "waiting"] as const satisfies readonly (keyof AiTask)[];
+const PHOTOTAGSTATE_KEYS = ["ai", "manual", "masks", "result", "version"] as const satisfies readonly (keyof PhotoTagState)[];
+const AITAGRESULT_KEYS = ["evidence", "generatedAt", "modelSha256", "origin", "pipelineSha256", "sourceKey", "valid"] as const satisfies readonly (keyof AiTagResult)[];
+const AITAGEVIDENCE_KEYS = ["accepted", "conceptKey", "score", "tagName"] as const satisfies readonly (keyof AiTagEvidence)[];
 
 const RECENT_DIR_KEYS = [
   "includeSubdirs",
@@ -409,6 +418,7 @@ const EDITOR_RENDER_STATE_KEYS = [
   "decodeError",
   "decodeMs",
   "developMs",
+  "displayColor",
   "dpr",
   "drawnFrames",
   "fitMode",
@@ -438,6 +448,7 @@ const EDITOR_RENDER_STATE_KEYS = [
   "wantedTier",
   "zoom",
 ] as const satisfies readonly (keyof EditorRenderState)[];
+const DISPLAY_PRESENTATION_KEYS = ["diagnostic", "displayId", "generation", "kind", "outputSpace", "profilePath", "reason", "sdrWhiteNits"] as const satisfies readonly (keyof DisplayPresentation)[];
 const FULLSCREEN_ITEM_KEYS = [
   "exportVariant",
   "fileName",
@@ -455,6 +466,16 @@ const LENS_PROFILE_KEYS = ["key", "maker", "model", "rectilinear", "focalMin", "
 const LENS_MATCH_KEYS = ["ready", "detected", "lensName", "focalMm", "candidates", "warnings"] as const;
 
 const KEY_TABLES = {
+  ColorBatchReview:checkKeys<ColorBatchReview,readonly ["token","selected","applicable","existing","skipped","profileName"]>(["token","selected","applicable","existing","skipped","profileName"]),
+  ColorProfileEntry:checkKeys<ColorProfileEntry,readonly ["key","profileId","name","originalFilename","profileClass","builtIn","hidden","available"]>(["key","profileId","name","originalFilename","profileClass","builtIn","hidden","available"]),
+  ColorProfileLibrary:checkKeys<ColorProfileLibrary,readonly ["entries"]>(["entries"]),
+  ColorProfileImport:checkKeys<ColorProfileImport,readonly ["library","imported","duplicates","restored","skipped"]>(["library","imported","duplicates","restored","skipped"]),
+  AiModelStatus: checkKeys<AiModelStatus, typeof AIMODELSTATUS_KEYS>(AIMODELSTATUS_KEYS),
+  AiTask: checkKeys<AiTask, typeof AITASK_KEYS>(AITASK_KEYS),
+  PhotoTagState: checkKeys<PhotoTagState, typeof PHOTOTAGSTATE_KEYS>(PHOTOTAGSTATE_KEYS),
+  AiTagResult: checkKeys<AiTagResult, typeof AITAGRESULT_KEYS>(AITAGRESULT_KEYS),
+  AiTagEvidence: checkKeys<AiTagEvidence, typeof AITAGEVIDENCE_KEYS>(AITAGEVIDENCE_KEYS),
+
   SystemPreferencesSnapshot: checkKeys<SystemPreferencesSnapshot, readonly ["language", "theme"]>(["language", "theme"]),
   LensProfile: checkKeys<LensProfile, typeof LENS_PROFILE_KEYS>(LENS_PROFILE_KEYS),
   LensMatch: checkKeys<LensMatch, typeof LENS_MATCH_KEYS>(LENS_MATCH_KEYS),
@@ -534,6 +555,7 @@ const KEY_TABLES = {
   EditorRenderState: checkKeys<EditorRenderState, typeof EDITOR_RENDER_STATE_KEYS>(
     EDITOR_RENDER_STATE_KEYS,
   ),
+  DisplayPresentation: checkKeys<DisplayPresentation, typeof DISPLAY_PRESENTATION_KEYS>(DISPLAY_PRESENTATION_KEYS),
   FullscreenItem: checkKeys<FullscreenItem, typeof FULLSCREEN_ITEM_KEYS>(
     FULLSCREEN_ITEM_KEYS,
   ),

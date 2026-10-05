@@ -224,35 +224,9 @@ impl LinearImage {
     /// 同一张表；`pipeline.rs` 的测试拿 8bit 图**交叉验证**两份实现 —— 不许各走各的。
     #[must_use]
     pub fn oriented(&self, orientation: u16) -> Self {
-        let (w, h) = (self.width, self.height);
-        // 90°/270° 类的四个方向宽高互换
-        let swap = matches!(orientation, 5..=8);
-        let (out_w, out_h) = if swap { (h, w) } else { (w, h) };
-        let mut out = vec![0u16; self.rgb.len()];
-        // 按**目标**坐标遍历（旋转类方向的映射是「目标取源」，反过来算会越界）
-        for dy in 0..out_h {
-            for dx in 0..out_w {
-                // 目标像素 (dx,dy) 取源像素 (sx,sy)；表与 `apply_orientation` 同源
-                let (sx, sy) = match orientation {
-                    2 => (w - 1 - dx, dy),         // 水平镜像
-                    3 => (w - 1 - dx, h - 1 - dy), // 180°
-                    4 => (dx, h - 1 - dy),         // 垂直镜像
-                    5 => (dy, dx),                 // 转置
-                    6 => (dy, h - 1 - dx),         // 顺时针 90°
-                    7 => (w - 1 - dy, h - 1 - dx), // 反转置
-                    8 => (w - 1 - dy, dx),         // 逆时针 90°
-                    _ => (dx, dy),
-                };
-                let src = (sy as usize * w as usize + sx as usize) * 3;
-                let dst = (dy as usize * out_w as usize + dx as usize) * 3;
-                out[dst..dst + 3].copy_from_slice(&self.rgb[src..src + 3]);
-            }
-        }
-        Self {
-            width: out_w,
-            height: out_h,
-            rgb: out,
-        }
+        let view = super::sample::RgbView { width: self.width, height: self.height, rgb: &self.rgb };
+        let (width, height, rgb) = super::sample::orient_rgb(view, orientation);
+        Self { width, height, rgb }
     }
 }
 
@@ -301,6 +275,9 @@ impl Resolved {
             vibrance: (params.value("vibrance") / 100.0) as f32,
         }
     }
+
+    pub(crate) fn gains(&self) -> [f32; 3] { self.gains }
+    pub(crate) fn chroma(&self) -> (f32, f32) { (self.saturation, self.vibrance) }
 
     /// 这一组参数需要跨通道的色度步骤吗（决定逐像素循环里要不要跑 [`apply_chroma`]）。
     #[must_use]
@@ -451,6 +428,11 @@ fn neutralize_positive_highlights(adjusted: [f32; 3], baseline: [f32; 3]) -> [f3
 /// * 自然饱和度：低饱和的加得多 —— `f = 1 + v·(1 − 当前饱和度)`。
 #[must_use]
 pub fn apply_chroma(rgb: [f32; 3], saturation: f32, vibrance: f32) -> [f32; 3] {
+    apply_chroma_unbounded(rgb, saturation, vibrance).map(|v| v.clamp(0.0, 1.0))
+}
+
+/// Identical chroma math without clipping the float reference domain.
+pub fn apply_chroma_unbounded(rgb: [f32; 3], saturation: f32, vibrance: f32) -> [f32; 3] {
     let mut out = rgb;
     if saturation.abs() > 1e-6 {
         let luma = luma_of(out);
@@ -477,11 +459,7 @@ pub fn apply_chroma(rgb: [f32; 3], saturation: f32, vibrance: f32) -> [f32; 3] {
             luma + (out[2] - luma) * factor,
         ];
     }
-    [
-        out[0].clamp(0.0, 1.0),
-        out[1].clamp(0.0, 1.0),
-        out[2].clamp(0.0, 1.0),
-    ]
+    out
 }
 
 /// Rec.709 亮度（与 sRGB 的原色一致）。
@@ -1234,6 +1212,7 @@ mod tests {
             source: PixelSource::Decoded,
             orientation,
             as_shot_temperature: None,
+            camera_matrix_id: crate::color::ProfileId::of_bytes(b"test-matrix"),
         };
         let pixel_at = |image: &LinearImage, x: u32, y: u32| -> [u16; 3] {
             let index = ((y * image.width + x) * 3) as usize;
@@ -1264,6 +1243,7 @@ mod tests {
             source: PixelSource::Decoded,
             orientation: None,
             as_shot_temperature: None,
+            camera_matrix_id: crate::color::ProfileId::of_bytes(b"test-matrix"),
         };
         assert!(LinearImage::from_raw16(broken).is_none());
     }

@@ -82,10 +82,10 @@ pub fn normalize_curve(points: &[[f32; 2]]) -> Option<Vec<(u32, u32)>> {
     if normalized.len() <= 2 && normalized.iter().all(|(x, y)| x == y) {
         return None;
     }
-    if normalized.first().map_or(true, |(x, _)| *x > 0) {
+    if normalized.first().is_none_or(|(x, _)| *x > 0) {
         normalized.insert(0, (0, 0));
     }
-    if normalized.last().map_or(true, |(x, _)| *x < 255) {
+    if normalized.last().is_none_or(|(x, _)| *x < 255) {
         normalized.push((255, 255));
     }
     if normalized.len() > 32 {
@@ -148,7 +148,6 @@ pub fn label_from_xmp(text: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::BTreeMap;
 
     fn stack(params: &[(&str, f64)], curves: &[(&str, Vec<[f32; 2]>)]) -> DevelopStack {
         let mut stack = DevelopStack::default();
@@ -239,7 +238,7 @@ mod tests {
         assert_eq!(normalize_curve(&[[0.2, 0.2]]), None);
         let mut pts = Vec::new();
         for index in 0..40 {
-            let t = f32::from(index) / 39.0;
+            let t = f32::from(index as i16) / 39.0;
             pts.push([t, t.powi(2)]);
         }
         let normalized = normalize_curve(&pts).unwrap();

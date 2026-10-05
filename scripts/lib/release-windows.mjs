@@ -27,7 +27,9 @@ export function cmdPath(value) {
   if (!value || /[\r\n"%&|<>^!]/.test(value)) throw new Error("Windows 构建路径包含不支持的 cmd 字符");
   return `"${value}"`;
 }
-export function windowsReleaseCommands(repo, config, {signed=false}={}) {
+export function windowsReleaseCommands(repo, config, {signed=false,features=["custom-protocol"]}={}) {
+  if(features.some(f=>!/[a-z0-9-]+/.test(f))||features.some(f=>!/^[-a-z0-9]+$/.test(f)))throw new Error("非法构建 feature");
+  const featureArgs=features.join(",");
   // WiX 32 位 light.exe 必须从本地盘读资源；禁止重新落回 UNC / pushd 映射盘。
   for (const path of [repo, config]) {
     if (!/^[A-Za-z]:\\/.test(path)) throw new Error("Windows 发行构建必须使用本地盘绝对路径");
@@ -39,8 +41,8 @@ export function windowsReleaseCommands(repo, config, {signed=false}={}) {
     "where cargo-tauri >nul 2>&1 || (echo Install tauri-cli with cargo before packaging. & exit /b 1)",
     ...(signed ? ["where signtool.exe >nul 2>&1 || (echo Add Windows SDK signtool to PATH before signing. & exit /b 1)"] : []),
     "cargo build -p raybend --release --locked || exit /b 1",
-    `cargo tauri build --no-bundle --features custom-protocol --config ${cmdPath(config)} -- --locked || exit /b 1`,
-    `cargo tauri bundle -vv --features custom-protocol --config ${cmdPath(config)} || exit /b 1`,
+    `cargo tauri build --no-bundle --features ${featureArgs} --config ${cmdPath(config)} -- --locked || exit /b 1`,
+    `cargo tauri bundle -vv --features ${featureArgs} --config ${cmdPath(config)} || exit /b 1`,
     "exit /b 0",
   ].join("\r\n")+"\r\n";
 }

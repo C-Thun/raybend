@@ -5,28 +5,46 @@
 //! 补上「从 RGB8 来」「夹到设备上限」两件事 —— 而不是另造一个「照片类型」
 //! （`AGENTS.md` §2.12：同一个能力只允许有一套实现）。
 //!
-//! ## 为什么是 RGBA8、而不是直接用解码器给的 RGB8
-//!
-//! wgpu 的 `write_texture` 要求**每行字节数是 256 的倍数**
-//! （`COPY_BYTES_PER_ROW_ALIGNMENT`）。6000 宽的 RGB8 是 18000 字节/行 —— 不是 256 的倍数，
-//! 直接传会校验失败；按行补 padding 又要整块重排，代价与「扩成 4 通道」差不多。
-//! 而 WebGPU 里根本没有三通道的可采样格式（`rgba8unorm` 是标准），所以：
-//! **扩成 RGBA8 是唯一不需要额外缓冲的走法**（代价是 24MP 图多占 24MB 显存）。
-//!
-//! 色彩空间：纹理按 `Rgba8UnormSrgb` 采样（见 `create_image_texture`），
-//! 所以这里的字节就是「文件里/解码器给的那组 8bit 值」，不做任何转换 ——
-//! 色彩管理整体是后期里程碑（`AGENTS.md` §6.1）。
+//! 旧图保留 RGBA8 sRGB。V2 空间处理结果可打包 RGBA16F；无空间处理时
+//! 直接共享 f32 参考图，上传时按有界行块转换成 Rec.2020 half，不常驻整图打包副本。
+//! wgpu queue.write_texture 不要求 256 字节行对齐（encoder copy 才有此约束）。
 
 use image::{DynamicImage, RgbaImage};
 
-/// 一张 RGBA8（行主序紧密排列）的图。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RenderEncoding {
+    #[default]
+    Srgb8,
+    LinearRec2020Half,
+}
+
+impl RenderEncoding {
+    pub const fn bytes_per_pixel(self) -> u32 {
+        match self { Self::Srgb8 => 4, Self::LinearRec2020Half => 8 }
+    }
+    pub const fn texture_format(self) -> wgpu::TextureFormat {
+        match self {
+            Self::Srgb8 => wgpu::TextureFormat::Rgba8UnormSrgb,
+            Self::LinearRec2020Half => wgpu::TextureFormat::Rgba16Float,
+        }
+    }
+}
+
+/// 同一渲染器的编码字节或共享浮点源。
+#[derive(Debug, Clone, PartialEq)]
 pub struct RenderImage {
+    pub encoding: RenderEncoding,
     pub width: u32,
     pub height: u32,
-    /// 长度必须是 `width × height × 4`。
+    /// Encoded bytes; empty when `linear_source` owns the deferred pixels.
     pub pixels: Vec<u8>,
+    /// Shared f32 source for deferred, bounded upload. No resident half copy.
+    pub(crate) linear_source: Option<std::sync::Arc<crate::develop::working::WorkingReferenceImage>>,
 }
+
+/// Reused bounded upload scratch. SIMD conversion lives in the existing half crate.
+#[derive(Default)]
+pub(crate) struct HalfUpload {linear:Vec<f32>,half:Vec<half::f16>,pub bytes:Vec<u8>}
 
 impl RenderImage {
     /// 1×1 全透明 —— **「还没有照片」的占位纹理**。
@@ -37,9 +55,11 @@ impl RenderImage {
     #[must_use]
     pub fn transparent_1x1() -> Self {
         Self {
+            encoding: RenderEncoding::Srgb8,
             width: 1,
             height: 1,
             pixels: vec![0, 0, 0, 0],
+            linear_source: None,
         }
     }
 
@@ -53,10 +73,11 @@ impl RenderImage {
             pixels.extend_from_slice(&rgba);
         }
         Self {
+            encoding: RenderEncoding::Srgb8,
             width,
             height,
             pixels,
-        }
+            linear_source: None,        }
     }
 
     /// RGB8（解码器给的形态）→ RGBA8，alpha 一律 255。
@@ -77,18 +98,75 @@ impl RenderImage {
             pixels.extend_from_slice(&[chunk[0], chunk[1], chunk[2], 255]);
         }
         Some(Self {
+            encoding: RenderEncoding::Srgb8,
             width,
             height,
             pixels,
-        })
+            linear_source: None,        })
     }
 
     /// 长度与尺寸对不对得上（跨进程 / 跨线程边界上来的数据要防一手）。
     #[must_use]
     pub fn is_consistent(&self) -> bool {
+        if let Some(source) = &self.linear_source {
+            return self.encoding == RenderEncoding::LinearRec2020Half && self.pixels.is_empty()
+                && (source.width,source.height) == (self.width,self.height)
+                && source.view().rgb.len() == self.width as usize * self.height as usize * 3;
+        }
         self.width > 0
             && self.height > 0
-            && self.pixels.len() == (self.width as usize) * (self.height as usize) * 4
+            && (self.width as usize).checked_mul(self.height as usize)
+                .and_then(|n| n.checked_mul(self.encoding.bytes_per_pixel() as usize)) == Some(self.pixels.len())
+    }
+
+    /// Only the presentation texture is half precision. Negative and over-one
+    /// values survive; values beyond finite half range are rejected, never clipped.
+    pub fn from_working(image: &crate::color::working::WorkingImage) -> Option<Self> {
+        let (width, height) = image.dimensions();
+        let mut pixels = Vec::with_capacity(image.pixels().len() * 8);
+        for rgb in image.pixels() {
+            for value in rgb.iter().copied().chain(std::iter::once(1.0)) {
+                let value = half::f16::from_f32(value);
+                if !value.is_finite() { return None; }
+                pixels.extend_from_slice(&value.to_bits().to_le_bytes());
+            }
+        }
+        Some(Self { encoding: RenderEncoding::LinearRec2020Half, width, height, pixels, linear_source: None })
+    }
+
+    /// Share the prepared linear-sRGB source. Device upload converts only a tile
+    /// at a time into Rec.2020 half, and recovery can reuse this same allocation.
+    pub(crate) fn from_shared_linear(source: std::sync::Arc<crate::develop::working::WorkingReferenceImage>) -> Option<Self> {
+        for pixel in source.view().rgb.as_chunks::<3>().0 {
+            let rgb = crate::develop::color::mat3_vec3(crate::color::working::LINEAR_SRGB_TO_REC2020, *pixel);
+            if rgb.iter().any(|v| !v.is_finite() || v.abs() >= 65520.0) { return None; }
+        }
+        Some(Self { encoding: RenderEncoding::LinearRec2020Half, width:source.width,height:source.height,pixels:Vec::new(),linear_source:Some(source) })
+    }
+
+    pub(crate) fn shares_source(&self, other: &Self) -> bool {
+        match (&self.linear_source,&other.linear_source) {
+            (Some(a),Some(b)) => std::sync::Arc::ptr_eq(a,b),
+            _ => false,
+        }
+    }
+
+    /// Pack a bounded group of rows. Vec capacity is reused by the uploader.
+    pub(crate) fn pack_rows(&self, first:u32, rows:u32, output:&mut HalfUpload) {
+        use half::slice::HalfFloatSliceExt;
+        let source=self.linear_source.as_ref().expect("deferred float source");
+        let start=first as usize*self.width as usize*3;
+        let end=start+rows as usize*self.width as usize*3;
+        let count=rows as usize*self.width as usize*4;
+        output.linear.clear();output.linear.reserve(count);
+        for pixel in source.view().rgb[start..end].as_chunks::<3>().0 {
+            let rgb=crate::develop::color::mat3_vec3(crate::color::working::LINEAR_SRGB_TO_REC2020,*pixel);
+            output.linear.extend_from_slice(&[rgb[0],rgb[1],rgb[2],1.0]);
+        }
+        output.half.resize(count,half::f16::ZERO);
+        output.half.convert_from_f32_slice(&output.linear);
+        output.bytes.clear();output.bytes.reserve(count*2);
+        for value in &output.half {output.bytes.extend_from_slice(&value.to_bits().to_le_bytes());}
     }
 
     #[must_use]
@@ -108,6 +186,17 @@ impl RenderImage {
         if long <= max_edge || max_edge == 0 {
             return self.clone();
         }
+        if let Some(source) = &self.linear_source {
+            return Self::from_shared_linear(std::sync::Arc::new(source.downscaled_to(max_edge))).expect("averaging finite half values remains finite");
+        }
+        if self.encoding == RenderEncoding::LinearRec2020Half {
+            let rgb = self.pixels.as_chunks::<8>().0.iter().map(|pixel| std::array::from_fn(|c| {
+                half::f16::from_bits(u16::from_le_bytes([pixel[c * 2], pixel[c * 2 + 1]])).to_f32()
+            })).collect();
+            return crate::color::working::WorkingImage::new(self.width, self.height, rgb)
+                .ok().and_then(|image| Self::from_working(&image.into_downscaled(max_edge)))
+                .unwrap_or_else(|| self.clone());
+        }
         let source = RgbaImage::from_raw(self.width, self.height, self.pixels.clone());
         let Some(source) = source else {
             return self.clone(); // 长度不合法：原样返回，让调用方自己报错
@@ -116,9 +205,11 @@ impl RenderImage {
         let rgba = resized.to_rgba8();
         let (width, height) = (rgba.width(), rgba.height());
         Self {
+            encoding: RenderEncoding::Srgb8,
             width,
             height,
             pixels: rgba.into_raw(),
+            linear_source: None,
         }
     }
 }
@@ -126,6 +217,53 @@ impl RenderImage {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn half_working_texture_preserves_range_and_rejects_overflow() {
+        let image = crate::color::working::WorkingImage::new(2, 1, vec![[-0.2, 0.18, 2.0], [0.1; 3]]).unwrap();
+        let texture = RenderImage::from_working(&image).unwrap();
+        assert!(texture.is_consistent());
+        assert_eq!(texture.byte_len(), 16);
+        assert_eq!(texture.encoding.texture_format(), wgpu::TextureFormat::Rgba16Float);
+        for (actual, expected) in texture.pixels.chunks_exact(8).zip(image.pixels()) {
+            for c in 0..3 {
+                let value = half::f16::from_bits(u16::from_le_bytes([actual[c*2], actual[c*2+1]])).to_f32();
+                assert!((value - expected[c]).abs() < 0.001);
+            }
+        }
+        let enormous = crate::color::working::WorkingImage::new(1, 1, vec![[70_000.0, 0.0, 0.0]]).unwrap();
+        assert!(RenderImage::from_working(&enormous).is_none());
+        let smaller = texture.clamped_to_long_edge(1);
+        assert_eq!((smaller.width, smaller.height), (1, 1));
+        assert!(smaller.is_consistent());
+        assert_eq!(smaller.encoding, texture.encoding);
+    }
+
+    #[test]
+    fn deferred_tiles_match_scalar_half_at_range_and_rounding_boundaries() {
+        use crate::develop::working::WorkingReferenceImage;
+        let source = std::sync::Arc::new(WorkingReferenceImage {
+            width: 3, height: 2,
+            rgb: vec![-0.2, 0.18, 2.0, 1e-8, 0.000061, 0.3333, 65500.0, 65500.0, 65500.0,
+                -65500.0, -65500.0, -65500.0, 0.0, 1.0, 0.5, 12.0, -1.0, 0.2],
+        });
+        let image = RenderImage::from_shared_linear(source.clone()).unwrap();
+        let mut scratch = HalfUpload::default();
+        let mut tiles = Vec::new();
+        for row in 0..2 { image.pack_rows(row, 1, &mut scratch); tiles.extend_from_slice(&scratch.bytes); }
+        let expected: Vec<u8> = source.rgb.as_chunks::<3>().0.iter().flat_map(|rgb| {
+            crate::develop::color::mat3_vec3(crate::color::working::LINEAR_SRGB_TO_REC2020, *rgb)
+                .into_iter().chain([1.0]).flat_map(|v| half::f16::from_f32(v).to_bits().to_le_bytes())
+        }).collect();
+        assert_eq!(tiles, expected);
+        assert_eq!(image.byte_len(), 0);
+        for value in [65520.0, -65520.0, f32::INFINITY, f32::NAN] {
+            let source = WorkingReferenceImage { width:1, height:1, rgb:vec![value;3] };
+            let finite = crate::develop::color::mat3_vec3(crate::color::working::LINEAR_SRGB_TO_REC2020, [value;3])
+                .iter().all(|v| half::f16::from_f32(*v).is_finite());
+            assert_eq!(RenderImage::from_shared_linear(std::sync::Arc::new(source)).is_some(), finite);
+        }
+    }
 
     #[test]
     fn from_rgb8_expands_to_opaque_rgba() {

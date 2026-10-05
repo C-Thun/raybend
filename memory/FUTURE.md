@@ -10,9 +10,32 @@
 
 ## 已进入排期的方向（2026-09-30 崔总明确要求摘出）
 
-色彩管理、XMP 与相片整理的**顺序、范围、现状和工作波次**统一见 `memory/PLAN.md` §4；
+色彩管理、XMP 与相片整理上期的**顺序、范围、现状和工作波次**统一见 `memory/PLAN.md` §4；相片整理下期AI已于2026-10-04完成 TinyCLIP 定案、数据/任务/来源纠错/UI/XMP 与默认 CPU 模型资源接线，并通过开发及 Windows worker 冒烟；真实图库/GUI 与安装器仍待验收；见 `specs/photo-organization-phase2.md` 与 `specs/photo-organization-ai-w1.md`；本文件 E 节保留选型与后续蒙版方向。
 本文件不再复制一份三条主线清单。崔总本轮要求色彩管理现在开工，已纳入该处排期。
 本文件 C1 仅保留未纳入这轮的色彩方向及其触发条件，避免把已开工任务同时挂在 FUTURE。
+
+---
+
+## 🚀 Future Release：发版前必须完成（崔总 2026-10-01 设立）
+
+> **定义**：本板块只记**下一个 release 发出去之前必须完成**的工作。这里不做排期细化，
+> 每条只做指针与一句话状态，详情归各自 spec/登记项。四条主线的主体均已交付或在做，
+> 这里收的是**收尾与验收**。
+>
+> **2026-10-04 崔总确认**：**XMP 与 editor presets 已完成，待验收**；当前继续完善的是**色彩管理与文件管理**。
+> 等这两项完善并验收后，**最后做 CI 和发版**，由崔总在其它会话推进；本会话不执行 CI 改造或发版。
+
+| # | 事项 | 一句话状态 | 落点 |
+| --- | --- | --- | --- |
+| 1 | **editor presets** | **已完成，待验收（崔总 2026-10-04 确认）**；本轮审计发现的问题按报告核对，该状态不代表审计问题已全部修复 | `implementations/2026-09-30_editor-presets.md`；`implementations/2026-10-04_editor-presets-audit.md`；`design/editor.pen` |
+| 2 | **文件管理与相片整理完善** | **正在完善（崔总 2026-10-04 口径）**；已交付的相片整理上期（含跨库多选导出）仍待 Windows 真机交互与大库性能验收 | `specs/photo-organization.md`；`memory/PLAN.md` §4；`memory/FINISHED.md` §11 |
+| 3 | **XMP sidecar** | **已完成，待验收（崔总 2026-10-04 确认）**；本轮审查缺陷已修复并补回归，Windows 真实照片写出/读回与回收站链路待崔总验收；范围仍按冻结规格 | `specs/xmp-sidecar.md` §10；`implementations/2026-10-04_xmp-audit-fixes.md` |
+| 4 | **色彩管理第一版验收** | 首版开发、核心攻关、共享显示状态及 Agent 冒烟已完成；整窗性能、真实色彩/多屏待统一实机验收；不自动升级旧照片 | `specs/color-management.md` / `implementations/2026-10-04_color-management-ready-for-acceptance.md` |
+| 5 | **发版 CI 化** | tag → 自动构建 NSIS+MSI → 填 GitHub Release 下载资产；**官网下载地址用前端 JS（XHR/fetch）实时取 `/releases/latest`**（action 零 commit）；**色彩管理与文件管理完善、验收后最后推进；崔总在其它会话处理** | G24（查证与适配点在那里） |
+| 6 | **国内官网镜像** | 腾讯 EdgeOne Pages + `rb.cthun.com`（大陆节点；**备案前提已满足**——崔总 2026-10-01 确认已实名+已备案）；与 #5 同一套取版逻辑；EdgeOne 建站/域名接入属人类动作 | G24 补充小节 |
+| 7 | **官网占位内容切真实版本** | 下载/教程从占位切到真实版本信息（与 #5 的取版脚本一体完成） | `website/`（M5-W3 遗留） |
+| 8 | **spike 诊断页二选一** | 发版阻塞：从发布包摇掉或保留，**不许悄悄进包** | C6 |
+| 9 | **MSI 链路实际验收** | G22 脚本已实现；真机 MSI 生成/安装/升级/卸载待崔总验收 | G22、`specs/release-windows-msi.md` |
 
 ---
 
@@ -86,6 +109,27 @@
 
 **补充方向**：DNG 归档功能（把老 RAW 批量转 DNG 并嵌入原图）——rawler 本身是 DNG 写出器，这是少见的能力，可作为「档案化」卖点，但属于编辑/归档里程碑。
 
+### B-现状：已知未支持的解码 / 去马赛克（2026-10-05 登记，**不着急**）
+
+> 来源：`implementations/2026-10-05_orf-internal-preview.md` 的 11 品牌样张矩阵（样张在 `/mnt/c/src/tmp/raw-samples/`，
+> 全部 CC0 来自 raw.pixls.us，id 清单在该记录里）。
+> **预览不受影响** —— 网格/胶片带能出图（走 `media::tiff` 的有界内嵌预览提取器，不依赖 rawler 的机型库）；
+> 下表只影响**完整解码**（编辑视口 / 1:1 / issue 渲染）。
+>
+> **处理时机**：不单独排期；等 B2（RapidRAW fork）/B3（libraw 对照）真正提上来时一并做，或上游补了就直接受益。
+> 新机型永远会领先于上游机型库，这是常态而不是 bug（rawler 0.8.0 是当前最新版，`orf.rs` 等与上游 main 逐字节一致）。
+
+| # | 现象（实测原文） | 样本（raw.pixls.us id） | 影响面 | 出路 / 判据 |
+| --- | --- | --- | --- | --- |
+| B-1 | **Sigma X3F / Foveon 不能解码**：`X3fDecoder` 有实现但机型库为空，且 `raw_metadata` 是 `todo!()`（被调用会 panic，靠 worker 隔离兜住） | `sd Quattro` #6756 | 仅 X3/Foveon（sd Quattro、dp 系列）。**Sigma fp / fp L 是 Bayer + DNG，正常** | 口径已定（`memory/FUNCTION-IMAGING.md` §1.2）：**可以不支持**。真要支持不能只补机型库 —— 那个 `todo!()` 得先变成真实元数据 |
+| B-2 | **Nikon HE / HE★ 压缩不支持**：`NEF compression Some(HighEfficency) is not supported` | `Z 8` #6616（文件名标 Lossless，但实测走 HE 分支 —— 以解码器报错为准） | 新尼康的 HE 档（省空间模式；默认无损压缩档正常） | 上游补；或从 B2 fork 里吸收补丁 |
+| B-3 | **Sony arw6（新式压缩）机型库缺 mode 条目**：`Unknown camera, model 'ILCE-7M5', make: 'SONY', mode: 'arw6'` | `ILCE-7M5`（A7 V）#8846 | A7 V 一代起的新压缩档（A1 II / A9 III 等同理） | 上游机型表；我们这边只能等/换后端 |
+| B-4 | **Hasselblad CFV 100C 不在机型库**：机型串带快门模式 `CFV 100C/Electronic Shutter` | `CFV 100C` #7782 | CFV 100C / X2D 之后的新哈苏 | 同上；**预览已经能出**（strip 提取修好了），只缺完整解码 |
+| B-5 | **DNG 元数据尺寸取到缩略图**：Ricoh GR IIIx DNG 报 `160×120`（真尺寸 6000×4000 在 SubIFD）；CR3/RAF 报 `0×0` | `GR IIIx` #5818 等 | tile 比例、看图档位判定（不阻塞出图） | 归 `media::meta`：DNG 优先取 `NewSubFileType=0` 那个 SubIFD 的尺寸（或 `DefaultCropSize`），CR3 走 ISO-BMFF 的 `ispe`。独立小活，未排期 |
+| B-6 | **两个容器变体没接进扩展名表（优先级低）**：`media::kind` 的 RAW 列表里没有 `.ori`（奥林巴斯高分辨率）与 `.fff`（哈苏），这两类文件会被当作 `Other` 跳过；上游 rawler 的格式表里两者都在 | 暂无样本（需要一个 `.ori` / `.fff`） | 只有这两个扩展名；`.orf` / `.3fr` 正常 | 先拿到真样本再动：`.ori` 是 ORF 结构（预检的 `IIRO` 能过），`.fff` 的魔数待实测确认（若也是标准 TIFF 才能直加）。崔总 2026-10-05 定：**优先级低，不急**。见 `implementations/2026-10-05_readme-and-future.md` |
+
+（B-5 严格说属「RAW 支持矩阵」的缺口而非解码本身，一并放这里免得下次又翻一遍。）
+
 ---
 
 ## C. 渲染与色彩
@@ -94,7 +138,9 @@
 
 * **本轮排期之外**：完整 HDR 照片编辑/输出、打印布局/驱动与 CMYK 成片、显示器硬件校准引擎、macOS/Linux 色彩系统实装。它们不随“支持 ICC”暗中加入本轮验收；条件分别是 SDR 呈现稳定、打印需求成形、具备校准硬件与跨平台工作启动。
 * 高级相机 DCP/ICC 风格全面兼容、打印机打样能力也先留扩展位；基础 RAW 矩阵与照片 RGB ICC 属当前排期。遇到有代表性的真实样本再为这些高级项另立单元。
-* 已排期部分的唯一主题规格为 [`specs/color-management.md`](../specs/color-management.md)。系统互操作按 `memory/ARCHITECTURE.md` §2.2 的 adapter 约束实施。当前候选 ICC 引擎为 [lcms2](https://github.com/kornelski/rust-lcms2)；只有在对应波次评估与接入时增加依赖。
+* 首版只提供 RGB 矩阵/TRC 相对色度打样；CMYK、纸白/黑墨、感知表与 BPC 的验证属于后续打印需求。完整 alpha 编辑、原生浮点 fullscreen/browse 与每机型默认覆盖须另立实施单元，当前入口不能暗称已支持。
+* **当前排期的验收不挪到远期**：Astra 本轮已实现受验证复杂 CLUT GPU 显示、精确输入加速、60MP 有界后台上传与 RAW 新旧标度身份；真实 DX12/实际 ICC/真实 RW2 工程数值见 `implementations/2026-10-04_color-management-core-hardening.md`。整窗实时性、真实显示/RAW 观感、多屏仍归 CM-W3 统一验收。复杂 CLUT 软打样并未因显示路径完成而获得支持。
+* 已排期部分的唯一主题规格为 [`specs/color-management.md`](../specs/color-management.md)。系统互操作按 `memory/ARCHITECTURE.md` §2.2 的 adapter 约束实施。当前已接入的 ICC 引擎为 [lcms2](https://github.com/kornelski/rust-lcms2)，Windows 静态构建已通过；不要求用户安装系统 DLL。
 
 ### C2　HDR / 10bit 输出
 
@@ -267,8 +313,9 @@
 ### D4　局部调整与蒙版
 
 * 线性/径向渐变、画笔蒙版、色彩/亮度范围蒙版
-* AI 主体/天空分割（见 E 节）
-* 蒙版数据存储格式需要在 `develop_stack` 里预留字段（**M1 的 schema 设计时留位**）
+* **点击生成蒙版（2026-10-04 崔总明确）**：EfficientSAM 是优先验证候选，先点选/加减点，再用于局部调整；CPU 可运行，CUDA 不作产品依赖。源码结论与限制统一见 E2，不在这里维护第二套方案。
+* 主体/天空自动语义选择与精细抠图仍为后续，与点击分割分别验证。
+* 开工时按当前 develop stack / issue / latest 契约设计统一蒙版资产；已采用的像素结果与手动修正属于不可随缓存清除的编辑成果，不能只存 AI 重跑指令。同步对接届时 XMP 资源往返；不提前以旧 M1 schema 假设另造存储。
 
 ### D5　色调映射
 
@@ -322,31 +369,77 @@
 
 ## E. AI 能力
 
-> **2026-09-30 有限范围转入分期规划**：崔总要求相片整理上期完成主要功能，下期主要完成 AI 增强。仅“384px 缩略图本地大类标签 + 照片文字遮罩纠错 + 既有自动桶联动”纳入 `specs/photo-organization-phase2.md`；未实施、未选定模型或新依赖。以下推理后端仍是候选登记，分割/语义搜索/人脸聚类/MCP 助手不随本期扩围。
+> **当前状态（2026-10-04）**：上期代码与Agent冒烟已完成，Windows真机验收仍待崔总。下期 TinyCLIP 逐类折中阈值、标签来源/文字禁止/任务/默认 CPU worker/获批 UI/XMP/模型资源已接线并通过开发与 Windows worker 冒烟，设置中主动安装后可识别。**真实图库、GUI 与干净 Windows 安装尚待验收；人物漏标与海类误标/漏标仍明确存在。** 当前报告见 `docs/ai/tinyclip-v1/README.md`，原门槛失败实验保留在 `docs/ai/2026-10-04/README.md`；实施状态与验收仍归 `memory/PLAN.md`、`specs/photo-organization-phase2.md`。崔总已指定本期TinyCLIP收尾、SigLIP 2留远期考查；点击蒙版继续独立留未来，不纳入本次。
 
-### E1　推理后端引入方式
+### E0　相片整理：本地 AI 标签识别（已转实施规划）
 
-* 参考 RapidRAW：`ort`（ONNX Runtime，`load-dynamic` 动态加载）+ `tokenizers`
-* **优点**：不捆绑 ORT 二进制、许可证干净（MIT）、模型可外置
-* **前提**：模型分发策略（本地优先 vs 可选下载）、体积与首次启动体验
+* 范围：人、鸟、车、山、海、森林、夜景等有限多标签；manual/ai 分来源、按照片与文字屏蔽/恢复；复用现有标签导航、筛选、导出和累积自动桶，不传播目录标签。
+* 使用稳定的**原始 SOOC/RAW 内嵌预览**，不能误用随 latest 编辑变化的网格小图；长边 384 是初测代理规格，最终由模型预处理与效果实验确定。
+* 先主动识别明确范围，CPU 完整可用，不自动扫描历史全库；模型缺失不影响手动整理。
+* 实施正文和验收只维护在上述 specs，不在 FUTURE 复制另一份阶段清单。人脸/语义搜索/编辑蒙版不随本期扩围。
 
-### E2　分割类
+### E1　推理后端与模型分发
 
-* 主体 / 天空 / 背景分割（用于蒙版），及后续的「一键换背景」类功能
+* **2026-10-04 崔总定案：本期只用 TinyCLIP** ViT-40M/32 Text-19M LAION400M，FP32 图像编码器151.53 MiB。逐类阈值折中、偏向减少误标，不再将原拟定 P≥90%/R≥60% 当整期交付硬闸门；实测不足与漏标仍如实披露，不保证真实图库准确率。当前实施正文见 `specs/photo-organization-phase2.md`。
+  * https://huggingface.co/wkcn/TinyCLIP-ViT-40M-32-Text-19M-LAION400M
+* **SigLIP 2 留远期考查**：`google/siglip2-base-patch16-224`，Apache-2.0，revision `75de2d55ec2d0b4efc50b3e9ad70dba96a7b2fa2`。本次 FP32 图像编码器354.46 MiB，是TinyCLIP约2.34倍；WSL热编码P50/P95约185/193ms，未测Windows。公开样本中鸟类召回更高、人物接近原门槛，但不能据此承诺真实图库或场景收益。本期不安装、不并跑、不继续选型；将来重新考查须比较独立产品定义样本、量化后的效果/体积、Windows CPU资源成本，再决定是否替换默认模型。已有实验留在 `docs/ai/2026-10-04/`。
+  * https://huggingface.co/google/siglip2-base-patch16-224
+* 运行时方向：Rust `ort` + ONNX Runtime CPU；`load-dynamic` **不代表不用分发 DLL**，应用随包提供固定 CPU 运行库并按绝对路径加载。实验精确版本已固定ort 2.0.0-rc.13 / ORT 1.28.0 CPU / opset17；许可证与NOTICE已归档。默认桌面构建已启用 CPU 推理，固定 DLL/许可与 TinyCLIP 源包进入私有应用资源；Windows debug 核对通过，正式安装器与干净机运行尚待验收。
+  * https://github.com/pykeio/ort
+  * https://onnxruntime.ai/docs/get-started/with-cpp.html
+* 标签词表的文字向量预计算，首版不分发 tokenizer/文本编码器，不增加 `tokenizers` 运行依赖；与未来语义搜索分开。
+* 首版模型随应用提供，在设置中明确安装，保留可信离线目录导入；校验/原子安装/损坏修复已接线。在线下载作为后续分发优化，须先发布固定模型制品，首版不依赖下载站点；保留版本与许可；普通安装不要求 Python/PyTorch。设备级 models 目录独立于可删图片缓存，卸载模型不删标签/纠错。
+* **排除 MobileCLIP research-only 权重用于产品**：代码 MIT 与 LICENSE_MODELS 是两层，不能混淆。https://github.com/apple-aiml-research/ml-mobileclip/blob/main/LICENSE_MODELS
+* **CUDA 不作为照片软件运行依赖**（崔总 2026-10-04 明确）。GPU/NPU 后续可选，CPU 路径始终保留。DirectML 已进入 sustained engineering；WinML 可作后续候选，但必须单独核对 Win10/11 与 Rust 集成。https://onnxruntime.ai/docs/execution-providers/DirectML-ExecutionProvider.html
+
+### E2　点击生成编辑蒙版：EfficientSAM 候选（2026-10-04 调研）
+
+**崔总明确想要的交互**：在图片上点击物体得到蒙版，可进一步加点/减点修正，再用于局部调整。与标签识别分开实现，不要求共用模型；先登记未来，与 D4 整合，当前不实施。
+
+**源码核对结论**：
+* 官方实现**使用 PyTorch**：`efficient_sam/efficient_sam.py` 继承 `torch.nn.Module`；`setup.py` 的空 `install_requires` 不能证明无需 torch。README 没列依赖不等于没有。
+* **CUDA 不是推理必需项**：官方加载权重用 `map_location="cpu"`，导出脚本提供 ONNX（opset 17）及编码器/解码器分离；产品可用 Rust + ORT **显式 CPUExecutionProvider**。这是源码支持的部署路线，尚未在 RayBend/Windows 上实际跑通或测速度。
+* `export_to_onnx.py` 使用 PyTorch 做一次性转换；产品分发转换好的模型，不分发 Python/PyTorch/CUDA。已有共享推理/安装基础可复用，模型与缓存身份独立。
+* 先验证 ViT-T，ViT-S 作质量对照。图像编码一次，在同一输入版本上缓存 embedding，后续点选只跑解码器；官方示例 embedding 为 `1×256×64×64`，float32 约 4 MiB（仅特征，不含模型与中间激活）。
+* 当前源码 `decoder_max_num_input_points = 6`，超过会截断；界面必须明确点数限制或设计提交一笔后继续新蒙版笔划的策略，**不能无限收点后静默忽略**。
+* 预处理实际是缩放到 1024×1024 并归一化（注释的 pad 描述与实现不一致）；必须按代码验证坐标变换，不能套另一种 SAM 的等比补边算法。分离导出中的动态 shape/点数分支、负点及输出张量按实际导出物检验。
+* 原生/ONNX 路径输出低分辨率 logits 后插值，不是全尺寸发丝级抠图；默认最多三个候选按预测质量选择，预测 IoU 是估计分数。真实边缘、透明物体与 CPU 交互延迟待实测。
+
+**未来实现边界**：
+1. 进入智能蒙版工具才编码，选图变化取消旧结果；缓存绑定 source base（raw/sooc）、图像版本、预处理与模型摘要，绝不复用标签模型的 embedding。
+2. 使用当前编辑源的稳定基底和足够清晰的预览，原图坐标存点/蒙版；裁剪、旋转、镜头几何映射沿用 Rust 变换契约，不能由前端猜换算。DPR 与屏幕坐标不进蒙版真相。
+3. 点选、负点、候选预览、叠加/减去、确认后局部调整；单次点选可撤销。详细 UI 与热键在开工时由 Pencil 定案。
+4. **已采用蒙版是编辑成果**：存确定结果、坐标依据、来源/模型信息和手工修正，不只存“下次重跑 AI”的指令。模型升级/卸载与清缓存不得改变旧定稿；生成中间特征可删。
+5. 与 D4 的画笔/渐变/范围蒙版组合走同一蒙版数据与编辑管线；接入时同步评估 XMP `rb:` 编辑资产及资源引用往返，复用届时 sidecar 体系。
+6. 无 GPU 的 Windows 真机先测首张编码与后续点击延迟、内存、长宽比/旋转/边缘误差；未满足交互预算之前不承诺“实时”。GPU/NPU 只能是可选加速。
+
+许可：仓库根 LICENSE 为 Apache-2.0；实际采用的权重文件与派生 ONNX 仍需保留来源/许可/修改记录，发行前按具体制品复核。**本轮只核源码，没有安装、转换或跑模型。**
+
+官方证据（2026-10-04 查阅）：
+- 项目及演示：https://github.com/yformer/EfficientSAM
+- 核心模型/CPU 加载/点数/预处理：https://github.com/yformer/EfficientSAM/blob/main/efficient_sam/efficient_sam.py
+- ONNX 转换：https://github.com/yformer/EfficientSAM/blob/main/export_to_onnx.py
+- 分离图实现：https://github.com/yformer/EfficientSAM/blob/main/onnx_models.py
+- ONNX 推理示例：https://github.com/yformer/EfficientSAM/blob/main/EfficientSAM_onnx_example.py
+- 许可：https://github.com/yformer/EfficientSAM/blob/main/LICENSE
+
+主体/天空/背景自动语义选择、精细抠图和一键换背景继续保留为更后续方向；点击分割不自动等同于认识物体名称。
 
 ### E3　语义搜索
 
-* CLIP 类模型 + `tokenizers`：自然语言找照片（"海边日落"）
-* 与 FTS5 的关键词搜索互补，**不能替代**确定性搜索
+* CLIP 类模型 + 按需文本编码：自然语言找照片（“海边日落”）。与本期固定词表标签分开，不提前引入向量库或 tokenizer。
+* 与 FTS5 的关键词搜索互补，不能替代确定性搜索。
 
 ### E4　人脸聚类
 
-* 检测 + 嵌入 + 聚类；`index.db` 里已为此预留位置（`AGENTS.md` §6.4）
+* 检测 + 嵌入 + 聚类；未来开工时按当前分层 app.db/catalog.db 存储设计，不沿用过时的 index.db 假设。
 
 ### E5　原则
 
-* **本地优先**：不上传用户照片；模型本地运行
-* 硬件适配：CPU（ONNX）优先，DirectML/NPU 作为加速选项（需评估依赖复杂度）
+* 本地优先：不上传照片；明确范围、可停止、可恢复，模型资源与图片缓存分开。
+* CPU 完整可用，CUDA 不作运行前提；可选加速不能破坏跨显卡基础功能。
+* 能力接口、任务、安装机制可共享；标签与蒙版不强求同模型，不默认共享特征。
+
 
 ### E6　命令注册表 → MCP / AI 工具层
 
@@ -416,6 +509,7 @@ commands panel、快捷键设置和标题栏菜单都是它的不同呈现。未
 | G20 | **Gallery / 外部编辑器** | 外部编辑产物入库统一管理（新 flow + 与 browse 关联跳转）；**取回链路跑不顺**，现在只做「纯单向输出」。详见文末「Gallery / 外部编辑器」 | 单向输出 M4-W6 已开发，软件兼容待验收；Gallery 本体未排期 |
 | G21 | **导出的「来源标记」：元数据 → 水印 → 内容凭证** | **定位：它是「来源标记」，不是「防盗手段」**（当防拷手段宣传是错的期待）。三层按成本递进：① **元数据**（EXIF/IPTC 的作者·联系方式·版权）—— **M4 基座已有**（导出元数据矩阵已写作者/版权/说明与关键词）且**已在写入**，**再完善即可**，不单独开波次；缺点是一删就没。② **传统频域水印**（DCT/DWT 嵌短串，如用户 ID + 时间戳）—— 能抗压缩与轻度裁剪，适合「发到平台想证明是我拍的」这类**善意场景**；❗**不要宣传「不可去除」**，对抗性编辑下不堪一击。③ **内容凭证 C2PA** https://c2pa.org/ —— 记录来源与编辑历史、可密码学验证（徕卡已机内做签名）；它解决的是**信任链**而不是「把信息藏起来」，比传统隐形水印更值得投入，但**比较远** | ① 随时可做（不单独开波次）；② 有人提出「要能证明是我拍的」时；③ 更远，等生态与需求成形 |
 | G22 | **Windows 本地源码镜像 / MSI 恢复** | **2026-09-29 已实现脚本，待实际 MSI 验收**。旧失败原因：32 位 WiX light.exe 无法从 WSL 映射盘/UNC 源可靠创建 cabinet；历史实测见 `implementations/2026-09-27_release-msi-wix-light-path.md`。现方案从 WSL 一条 `pnpm release … --win-msi` 自动镜像并调用 Windows Cargo/Tauri；`--win-nsis` 可独立/组合。按崔总追加要求，自动探测 Windows LocalApplicationData、本地盘与 WSL 实际挂载，通过 `wslpath` 双向转换，支持 `--win-dir`，不写死 C 盘或 `/mnt/c`。复用现有版本/签名/dav1d/核查/收口，不复制依赖、target 或 Git。规格 `specs/release-windows-msi.md`，操作 `docs/release.md`，实施 `implementations/2026-09-29_release-windows-msi.md`。首次切换目录冷编译，后续复用固定镜像和缓存；仍须 WSLENV 转发环境 | 脚本与路径冒烟已落地；实际 MSI 生成、安装/升级/卸载及 NSIS → MSI 切换由崔总验收 |
+| G24 | **发版 CI 化：tag → 自动构建 → 填 Release 下载址 → 官网实时取版**（崔总 2026-10-01 登记：**发版验收通过后马上做；现在不动**，先验本地发版脚本） | 目标：push `v*` tag 到 GitHub → 一个 workflow 内自动：① windows runner 构建（NSIS + MSI）；② 创建 GitHub Release 并把安装包填进下载资产。**③ 官网版本号与下载地址由 website 前端 JS 运行时实时获取**（GitHub `/releases/latest`：天然只含非 draft/prerelease，恰合「最新有效版本」语义）——**action 不产生任何 commit**（崔总 2026-10-01 定，否掉「release workflow commit 版本文件」与「website 固定分支」两个 dirty 方案）。**查证结论（2026-10-01）：单 workflow 闭环可行**——`tauri-action` 官方支持 tag 触发→构建→建 Release→上传产物（含 updater `latest.json` 可选）；dav1d 静态库可在 windows runner 上 `meson + ninja + nasm` 一次构建并缓存（libavf CI 先例，本地等价脚本 `scripts/build-dav1d-win.cmd`）。已知适配点：① `release.mjs` 加 CI 模式（tag 即版本、无人工交互、与 tauri-action 的产物路径对齐，不再需要 WSL→Windows 镜像）；② dav1d 构建结果用 actions cache 复用；③ 建议 Release 先建 **draft**、人类点 publish（保留人类发布把关，`AGENTS.md` §2.1 精神）；④ updater/latest.json 是否上传随 M5 更新通道实配再定；⑤ `check:win` 的产物校验要在 CI 里跑同一套逻辑；⑥ 官网取版脚本带**静态兑底**（内置最低已知版本；`api.github.com` 国内可达性与匿名限流 60 次/时/IP 是现实风险，失败/超时回退静态值）；备选更稳形态：release workflow 发 `repository_dispatch` 触发 website 重构建、构建期注入（静态输出、访客不碰 GitHub API）——开工时二选一。参考：https://v2.tauri.app/distribute/pipelines/github/ 、https://github.com/tauri-apps/tauri-action | 崔总发版验收通过后立即排期 |
 
 ---
 
@@ -432,6 +526,14 @@ CatalogSessions；来源扩展继续复用 Scanner/FileOps，长任务恢复通�
 设备可用性并固定实体身份。没有引入远程 SDK 或空壳 provider 框架。后续远程实现应接入这些
 边界，另行确定远程对象身份与暂存/提交语义；本地 FileId 不直接当 NAS 对象身份。
 实际协议、认证、远程 catalog 与多机写入仍待决，证据见 W3/W4 实施记录。
+
+### G24 补充：国内分发与下载加速（2026-10-01 查证，崔总提出 rb.cthun.com 国内专供）
+
+- **Gitee Pages：已死，排除**。2024-05 无公告下线（至今未恢复；蓝点网报道 https://www.landian.news/archives/103754.html 、Gitee 官方 issue https://gitee.com/oschina/git-osc/issues/I9RGKI ，Vant 等项目已被迫迁移）。Gitee 仓库镜像本身还能用（代码可见性/国内 clone 快），但页面托管没这个选项了。
+- **Deno Deploy：无大陆节点，不解决国内问题**。官方区域表 https://docs.deno.org.cn/deploy/manual/regions/ 无中国大陆；社区实测国内流量走香港 GCP、移动绕德国。CI 倒是方便（GitHub 集成自动部署），但换了也不比 GitHub Pages 快。
+- **首选候选：腾讯 EdgeOne Pages（现名 EdgeOne Makers）** https://pages.edgeone.ai/ —— 免费、静态托管、**GitHub 仓库集成自动构建部署**（CI 方便，不用镜像仓库）、腾讯 CDN **含大陆节点**、自带媒体存储（可放下载文件，额度待查）。✅ **前提已满足（2026-10-01 崔总确认）：`cthun.com` 托管于腾讯云个人账号，已实名认证且已 ICP 备案**——域名、托管、EdgeOne 同在腾讯体系，无接入商变更障碍；`rb.cthun.com` 子域共享主域备案，CNAME 到 EdgeOne 分配地址即可。
+- **零成本补充**：官网取版 JS 可给 GitHub 资产 URL 拼 ghproxy 类加速前缀做「加速下载」入口——不需镜像仓库/新站，但公共代理稳定性自担，只作兑底选项。
+- **MSIX 进商店**：崔总 2026-10-01 重申「觉得有用」——维持 R3-01 拍板（直下链走通后即启动，零现金成本签名主攻）；与 G24 同属发版验收后的分发收口。
 
 ---
 
@@ -505,7 +607,7 @@ M1 里「导入模版」**纯手输**（`LibrarySettingsDialog`：一个输入�
 * **与现有机制的关系**：浏览模式的**旗标（flag）**目前承担了「临时工作集」的角色 ——
   但它**只在内存、不持久化**。picture bucket 是它的**持久化、可命名、可多桶**版本。
 * **同时解决**：浏览模式**暂不支持跨目录选择**（`memory/FUNCTION-BROWSE.md` §5.2）—— 有了桶就能跨目录批量操作。
-* **状态**：**已并入「强化相片集」主线**（2026-09-29 崔总定：图片桶放进这次相片整理功能里一起做掉，见 `memory/PLAN.md` §4 #3 与 `todos/2026-09-29-photo-collections.md`；届时用集合承接，不另造一套桶）
+* **状态**：已并入相片整理上期并完成代码与 Agent 冒烟；跨目录／跨库的持久相片桶及批量操作已落地，Windows 真机验收待崔总。见 `memory/FINISHED.md` §11；不另造一套桶。
 
 ### H7　每库导入时自动写 `author`
 
@@ -556,9 +658,9 @@ M1 里「导入模版」**纯手输**（`LibrarySettingsDialog`：一个输入�
   高级筛选面板（分面计数 + 文本/标签/日期/机型/镜头/ISO/焦段，H10）
 * **标签体系收尾**：层级、改名/合并/删除、同义词、孤儿清理、标签管理面板（H4）
 * **集合与智能集合**：手动集合 + 保存查询的智能集合，承接跨目录工作集（H6 的图片筒由它实现）
-* **XMP 互操作**（**已转入当前工作**）：规格 `specs/xmp-w1.md`（2026-09-30 草案，待崔总审；审后 GLM 实施）。
+* **XMP 互操作**（**已实施完成，范围已冻结**）：规格 `specs/xmp-sidecar.md`（原名 `xmp-w1.md`，2026-10-01 随冻结更名；真机验收待崔总）。
   范围：写出 `rb:`（全部 issue + latest）+ 标准层（raw-based latest 的 `crs:` 调整 + 基础元数据：评级/色标/关键词/作者/说明/地点）；
-  自家导入在新登记资产时**自动发现**；跨家方言读入（Lightroom/darktable）**仍不做**；
+  自家导入在新登记资产时**自动发现**；跨家方言读入（Lightroom/darktable）**不做**（崔总 2026-10-01 定：不适配其他家的导入，非延后）；
   「DB 为真相源、XMP 为通道」冲突规则不变；**XMP 不是第一公民**——整库备份/迁移靠**直接拷 repos 目录**（见 J 节）。
   issue 的 XMP 表示契约在 `specs/issue-xmp-contract.md`（本波同步 `rb:ordinal` 与 `auto_adjust` 说明）。
 * **发现视图**：时间线聚合导航、地图（底图依赖需先评估，G 系列另有登记）、感知哈希重复/相似、
@@ -571,7 +673,7 @@ M1 里「导入模版」**纯手输**（`LibrarySettingsDialog`：一个输入�
 > **2026-09-29 崔总再次确认：备份功能要做**——仍留本节未排期，拉回开工前先出方案。
 > **2026-09-30 崔总口径（备份路线收窄）**：catalog 结构**可能连导出都不需要做**——**直接把 repos 目录拷过去就行**；
 > 顶多在「创建库」流程加一个**「引用已有目录」**的入口。定期策略/恢复 UI 等条目按此重新审视、拉回时再细化；
-> XMP 不承担备份职责（见 I 节与 `specs/xmp-w1.md` §0）。
+> XMP 不承担备份职责（见 I 节与 `specs/xmp-sidecar.md` §0）。
 
 * **多仓与离线卷**：多仓同时打开、跨仓搜索、拔插盘降级与自动重定位
 * **缓存治理与任务中心**：容量/保留期/路径设置、缓存面板与一键清理、统一任务中心
@@ -584,7 +686,14 @@ M1 里「导入模版」**纯手输**（`LibrarySettingsDialog`：一个输入�
 
 | 日期 | 变更 |
 | --- | --- |
-| 2026-09-30 | **XMP 细则定案 + 定位修正**：写出 `rb:`（全部 issue + latest）+ 标准层（raw-based latest 的调整 + 元数据）；自家导入自动发现；**XMP 不是第一公民**——备份 = 直接拷 repos 目录（J 节按此收窄口径）；规格 `specs/xmp-w1.md`（待审）。I 节 XMP 条目随之转入当前工作 |
+| 2026-10-04 | 崔总确认 XMP 与 editor presets **已完成，待验收**；本轮 XMP 审查缺陷修复见 `implementations/2026-10-04_xmp-audit-fixes.md`。当前完善色彩管理与文件管理，二者完成并验收后最后推进 CI 和发版，由其它会话处理。 |
+| 2026-10-01 | **新增 G24（发版 CI 化，崔总指示登记）**：发版验收通过后马上做——tag 触发 GitHub Actions 自动构建 NSIS+MSI、填 Release 下载资产、同步官网（单 workflow 闭环已查证可行）；当前不动，崔总先验本地发版脚本 |
+| 2026-10-01 | **G24 官网同步方案修正（崔总同日定）**：否掉「action 内 commit 版本文件」与「website 固定分支」（都 dirty）；改为 **website 前端 JS 运行时实时获取** GitHub `/releases/latest`（action 零 commit）；登记静态兑底与 `repository_dispatch` 备选，开工时二选一 |
+| 2026-10-01 | **G24 补：国内分发查证**：Gitee Pages 已于 2024-05 无公告下线（排除）；Deno Deploy 无大陆节点（不解决）；首选 **腾讯 EdgeOne Pages**（GitHub 集成自动部署 + 大陆节点，前提 `rb.cthun.com` ICP 备案——崔总提出，备案状态待确认）；MSIX 进商店崔总重申有用（维持 R3-01） |
+| 2026-10-01 | **G24 补的硬前提已确认**：崔总告知 `cthun.com` 托管在腾讯云个人账号、已实名认证且已备案——EdgeOne 大陆节点方案无障碍，`rb.cthun.com` 子域共享备案、CNAME 接入即可 |
+| 2026-10-01 | **XMP 范围冻结 + 规格更名**：崔总定「XMP 到此为止，不适配其他家导入（不做）」；规格 `specs/xmp-w1.md` 更名 `specs/xmp-sidecar.md`，移除全部 W1/分波次表述（无 W2）；活文档引用同步，历史存档（todos/implementations）按惯例不改 |
+| 2026-10-01 | **设立「Future Release」板块**（崔总指示）：发版前必做项统一归口——四条主线收尾（presets 基本完成、相片整理真机验收、XMP W1 真机验收、色彩管理第一版收尾）+ 发版 CI 化（含官网 XHR 实时取版）+ 国内镜像（EdgeOne/rb.cthun.com）+ spike 页二选一 + MSI 实际验收；锁定块注记收尾归此板块 |
+| 2026-09-30 | **XMP 细则定案 + 定位修正**：写出 `rb:`（全部 issue + latest）+ 标准层（raw-based latest 的调整 + 元数据）；自家导入自动发现；**XMP 不是第一公民**——备份 = 直接拷 repos 目录（J 节按此收窄口径）；规格 `specs/xmp-sidecar.md`（待审）。I 节 XMP 条目随之转入当前工作 |
 | 2026-09-30 | **XMP 口径修正（崔总定）**：**导出优先、导入不急**——先建立自有格式表达与 sidecar，目的是表态开放、用户数据资产归用户；导入兼容降级为远期待需求拉回；「能否被别的软件兼容属边界之外」。原话 `docs/user-requirements.md` 2026-09-30 节；`memory/REVIEW.md` R6-01、`memory/PLAN.md` §4 #2 同步 |
 | 2026-09-30 | **「四条主线」收缩为三条**：崔总指示「编辑器 preset 现在就做，future 里有就删掉」——#4 从锁定清单移除，转为当前工作（设计稿先行，`design/editor.pen` + `todos/2026-09-30-editor-presets.md`）；`memory/PLAN.md` §4 同步 |
 | 2026-09-29 | **文件开头新增「发版后最优先四条主线」锁定块**（崔总指示写入）：四条主线清单与顺序未经崔总明确要求不可改动；详情以 `memory/PLAN.md` §4 为准 |

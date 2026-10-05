@@ -17,6 +17,14 @@ try {
   const ready = 'document.querySelector("[data-part=item] input[value=import]") !== null';
   const deadline = Date.now() + 30_000;
   while (!(await evaluate(ready)) && Date.now() < deadline) await sleep(100);
+  if (!(await evaluate(ready))) {
+    console.error(JSON.stringify({
+      url: await evaluate('location.href'),
+      body: await evaluate('document.body?.textContent?.slice(0, 400)'),
+      exceptions: cdp.exceptions,
+      consoleErrors: cdp.consoleErrors,
+    }, null, 2));
+  }
   assert(await evaluate(ready), "FlowBar must mount");
 
   // Use Vite's exact module URLs so the fixture shares the application's Solid runtime.
@@ -26,7 +34,8 @@ try {
   ]);
   const solidUrl = storeSource.match(/from\s+["']([^"']*\/solid-js\.js[^"']*)["']/)?.[1];
   const webUrl = flowSource.match(/from\s+["']([^"']*\/solid-js_web\.js[^"']*)["']/)?.[1];
-  assert(solidUrl && webUrl, "Run against pnpm dev (the fixture imports source components)");
+  const i18nUrl = flowSource.match(/from\s+["']([^"']*\/src\/i18n\/index\.ts[^"']*)["']/)?.[1];
+  assert(solidUrl && webUrl && i18nUrl, "Run against pnpm dev (the fixture imports source components)");
 
   const results = await evaluate(`(async () => {
     const { createComponent, createSignal } = await import(${JSON.stringify(solidUrl)});
@@ -34,7 +43,7 @@ try {
     const { FlowBar } = await import('/src/shell/FlowBar.tsx');
     const { createShellStore } = await import('/src/shell/store.ts');
     const { WORKFLOWS, WORKFLOW_LABEL_KEY } = await import('/src/shell/flow.ts');
-    const { locale, setLocale, t } = await import('/src/i18n/index.ts');
+    const { locale, setLocale, t } = await import(${JSON.stringify(i18nUrl)});
     const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
     const settle = async () => { await new Promise(requestAnimationFrame); await pause(220); };
     const checks = [];
@@ -70,7 +79,7 @@ try {
         // Queue snapshots invalidate processing() even when its boolean result stays false.
         const [processing, update] = createSignal(false, { equals: false });
         setProcessing = update;
-        return createComponent(FlowBar, { store, get exportProcessing() { return processing(); } });
+        return createComponent(FlowBar, { store, get exportProcessing() { return processing(); }, settingsOpen: false, onSettings: () => {} });
       }, host);
       const root = host.querySelector('[data-scope=segment-group][data-part=root]');
       const original = { root, indicator: root.querySelector('[data-part=indicator]'), items: [...root.querySelectorAll('[data-part=item]')] };
@@ -102,8 +111,11 @@ try {
             check(language + ' / ' + density + ' / ' + flow, root, flow, original);
           }
         }
-        checks.push({ name: 'translated labels ' + language, ok: original.items.every((item, index) =>
-          item.querySelector('[data-part=item-text]').textContent === t(WORKFLOW_LABEL_KEY[WORKFLOWS[index]])) });
+        const actualLabels = original.items.map((item) => item.querySelector('[data-part=item-text]').textContent);
+        const expectedLabels = WORKFLOWS.map((flow) => t(WORKFLOW_LABEL_KEY[flow]));
+        checks.push({ name: 'translated labels ' + language,
+          ok: actualLabels.every((label, index) => label === expectedLabels[index]),
+          actualLabels, expectedLabels });
       }
       for (let i = 0; i < 16; i++) {
         store.setWorkflow(WORKFLOWS[i % WORKFLOWS.length]);

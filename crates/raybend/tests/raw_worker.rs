@@ -46,6 +46,19 @@ fn a_non_raw_file_is_a_decode_error_and_the_process_survives() {
 }
 
 #[test]
+fn float_working_request_preserves_worker_isolation_on_bad_input() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("色彩样本.RW2");
+    std::fs::write(&path, b"not a raw photograph").unwrap();
+    let mut w = worker();
+    let err = w
+        .decode_working(&DecodeRequest::full(&path))
+        .expect_err("坏 RAW 不能产生工作域像素");
+    assert!(matches!(err, WorkerError::Decode(_)), "{err:?}");
+    w.ping().expect("高精度请求失败不能拖垮 worker");
+}
+
+#[test]
 fn a_missing_file_is_a_clean_error() {
     let mut w = worker();
     let err = w

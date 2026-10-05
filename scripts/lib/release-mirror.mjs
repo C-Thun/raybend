@@ -8,12 +8,12 @@ const INPUTS = ["Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "package.json
 const EXCLUDED = new Set(["target", "node_modules", ".git", ".release", "release-out"]);
 
 /** 锁覆盖整个发行事务，共享 Windows 本地 mirror / target 的各工作区不能并发构建。 */
-export function acquireReleaseLock(path) {
+export function acquireReleaseLock(path, label = "Windows 发行任务") {
   mkdirSync(dirname(path), { recursive: true });
   try {
     writeFileSync(path, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }) + "\n", { flag: "wx" });
   } catch (error) {
-    if (error.code === "EEXIST") throw new Error(`Windows 发行任务锁已存在：${path}；确认没有打包进程后再手动移除残留锁`);
+    if (error.code === "EEXIST") throw new Error(`${label}锁已存在：${path}；确认没有准备或打包进程后再手动移除残留锁`);
     throw error;
   }
   return () => rmSync(path);
@@ -36,7 +36,7 @@ function ordinary(path) {
 }
 
 /** 先校验全部输入，再同步；固定目录允许 Cargo 复用缓存。仅删除带归属标记的镜像内容。 */
-export function syncReleaseMirror({ root, frontendRoot, destination, windowsDestination = "" }) {
+export function syncReleaseMirror({ root, frontendRoot, destination, windowsDestination = "", aiSnapshot }) {
   root = resolve(root); frontendRoot = resolve(frontendRoot); destination = resolve(destination);
   for (const source of [root, frontendRoot]) {
     if (destination === source || destination.startsWith(source + sep) || source.startsWith(destination + sep)) {
@@ -45,6 +45,7 @@ export function syncReleaseMirror({ root, frontendRoot, destination, windowsDest
   }
   const files = new Map(), directories = new Set(), names = new Map();
   const collect = (source, path, frontend = false) => {
+    if (path.startsWith("crates/raybend/assets/ai/") && /\.(onnx|dll)$/i.test(path)) return;
     validatePath(path, windowsDestination);
     const folded = path.normalize("NFC").toLowerCase();
     if (names.has(folded)) throw new Error(`构建输入在 Windows 下重名：${names.get(folded)} / ${path}`);
@@ -61,6 +62,7 @@ export function syncReleaseMirror({ root, frontendRoot, destination, windowsDest
   for (const input of INPUTS) collect(join(root, input), input);
   if (existsSync(join(root, ".cargo"))) collect(join(root, ".cargo"), ".cargo");
   collect(frontendRoot, "dist", true);
+  if (aiSnapshot) collect(aiSnapshot,".ai-bundle");
   if (!files.has("dist/index.html") || !files.has("dist/raybend-build.json")) throw new Error("构建镜像缺本轮前端 index.html / raybend-build.json");
 
   const marker = join(destination, MARKER);

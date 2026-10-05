@@ -6,7 +6,23 @@
  */
 
 import assert from "node:assert/strict";
+import { DEFAULT_PRESET_GROUPS, presetColorChoice } from "./presets.ts";
 import test from "node:test";
+
+test("色彩预设组默认不选，缺配置或未来处理版本拒绝整份应用",()=> {
+  assert.equal(DEFAULT_PRESET_GROUPS.includes("colorManagement" as never),false);
+  const valid={version:2,colorManagement:{processVersion:"linear_rec2020_v2",input:{profileId:"b".repeat(64)}}} as const;
+  assert.deepEqual(sanitizePresetSnapshot(valid),valid);
+  assert.equal(presetColorChoice(valid),"b".repeat(64));
+  assert.equal(presetColorChoice({version:1,tone:{exposure:1}}),undefined);
+  assert.equal(presetColorChoice({version:2,colorManagement:{processVersion:"linear_rec2020_v2",input:"automatic"}}),null);
+  for(const input of [null,{processVersion:"future_v3",input:"automatic"},{processVersion:"linear_rec2020_v2",input:{profileId:"C:/相机.icc"}},{processVersion:"linear_rec2020_v2",input:"automatic",monitor:"x"}]) {
+    const original={version:2,tone:{exposure:1},colorManagement:input};
+    const saved=sanitizePresetSnapshot(original)!;
+    assert.deepEqual(saved.colorManagement,input);
+    assert.throws(()=>presetColorChoice(saved),/PRESET_COLOR_UNSUPPORTED/);
+  }
+});
 
 import {
   DEFAULT_DIRECTORY_ID,
@@ -268,5 +284,5 @@ test("id 生成器本地唯一", () => {
 });
 
 test("PRESET_GROUPS 顺序即界面顺序", () => {
-  assert.deepEqual([...PRESET_GROUPS], ["tone", "color", "detail", "lens", "curve", "lut"]);
+  assert.deepEqual([...PRESET_GROUPS], ["tone", "color", "detail", "lens", "curve", "lut", "colorManagement"]);
 });

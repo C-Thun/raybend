@@ -28,7 +28,7 @@ const GAIN_MAX: f32 = 1.5;
 /// 软限幅的拐点（0..255 亮度单位）：光晕被压在约 `±2×16 = ±32` 级以内。
 const DETAIL_LIMIT: f32 = 16.0;
 /// u16 定点与 0..255 之间的换算（`257 = 65535/255`）。
-const FIXED_POINT: f32 = 257.0;
+
 
 /// 锐化计划：`amount` 0..1（0 = 不动），`radius` 单位是像素。
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -89,7 +89,7 @@ pub fn sharpen_display<T: RgbSample>(rgb: &mut [T], width: u32, height: u32, pla
     let gain = plan.gain();
 
     // ① 横向箱式模糊（亮度，u16 定点）
-    let mut horizontal = vec![0u16; w * h];
+    let mut horizontal = vec![T::Blur::default(); w * h];
     let threads = std::thread::available_parallelism()
         .map_or(1, std::num::NonZeroUsize::get)
         .min(16);
@@ -117,7 +117,7 @@ pub fn sharpen_display<T: RgbSample>(rgb: &mut [T], width: u32, height: u32, pla
 
     // ② 纵向模糊 + 加回细节
     {
-        let blurred: &[u16] = &horizontal;
+        let blurred: &[T::Blur] = &horizontal;
         let mut remaining: &mut [T] = rgb;
         std::thread::scope(|scope| {
             let mut first_row = 0usize;
@@ -138,14 +138,14 @@ pub fn sharpen_display<T: RgbSample>(rgb: &mut [T], width: u32, height: u32, pla
                         for row in lo..=hi {
                             let source = &blurred[row * w..(row + 1) * w];
                             for (slot, value) in accumulator.iter_mut().zip(source.iter()) {
-                                *slot += f32::from(*value);
+                                *slot += T::blur_value(*value);
                             }
                         }
                         #[allow(clippy::cast_precision_loss)]
                         let count = (hi - lo + 1) as f32;
                         for (x, pixel) in line.iter_mut().enumerate() {
                             let original = luma_of_rgb(pixel);
-                            let blur = accumulator[x] / count / FIXED_POINT;
+                            let blur = accumulator[x] / count / T::BLUR_SCALE;
                             let delta = added_detail(original - blur, gain, DETAIL_LIMIT);
                             for channel in pixel.iter_mut() {
                                 let value = channel.value() + delta * (T::MAX / 255.0);
@@ -163,7 +163,7 @@ pub fn sharpen_display<T: RgbSample>(rgb: &mut [T], width: u32, height: u32, pla
 }
 
 /// 一行亮度的横向箱式模糊（滑动窗，O(宽)，与半径无关）。
-fn blur_row_luma<T: RgbSample>(rgb: &[T], out: &mut [u16], y: usize, width: usize, radius: usize) {
+fn blur_row_luma<T: RgbSample>(rgb: &[T], out: &mut [T::Blur], y: usize, width: usize, radius: usize) {
     let row = &rgb[y * width * 3..(y + 1) * width * 3];
     let luma = |x: usize| luma_of_rgb(&row[x * 3..x * 3 + 3]);
     let first_hi = radius.min(width - 1);
@@ -188,7 +188,7 @@ fn blur_row_luma<T: RgbSample>(rgb: &[T], out: &mut [u16], y: usize, width: usiz
         let count = (hi - lo + 1) as f32;
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         {
-            *slot = ((sum / count) * FIXED_POINT + 0.5).clamp(0.0, 65535.0) as u16;
+            *slot = T::store_blur(sum / count);
         }
     }
 }

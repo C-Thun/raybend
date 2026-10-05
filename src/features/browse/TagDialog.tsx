@@ -39,8 +39,10 @@ import {
   Show,
   type JSX,
 } from "solid-js";
-import { IconPlus, IconSearch, IconX } from "@tabler/icons-solidjs";
+import { IconPlus, IconSearch, IconBan } from "@tabler/icons-solidjs";
 
+import { photoTagState, type PhotoTagState } from "../../api/organization.ts";
+import { stageTagEdit, tagDraftRows, tagKey, type TagEdit } from "./tag-draft.ts";
 import { tagEnsure, tagList } from "../../api/browse.ts";
 import type { MarkResult, Tag } from "../../api/types.ts";
 import { Button } from "../../components/ui/Button.tsx";
@@ -74,6 +76,16 @@ export function TagDialog(props: TagDialogProps): JSX.Element {
   /** 草稿：待摘掉的标签 id（只有单张模式会用到） */
   const [removing, setRemoving] = createSignal<readonly number[]>([]);
   const [busy, setBusy] = createSignal(false);
+  const [sources, setSources] = createSignal<PhotoTagState | null>(null);
+  const [edits, setEdits] = createSignal<TagEdit[]>([]);
+  const [detail, setDetail] = createSignal<string | null>(null);
+  const [sourceError, setSourceError] = createSignal<string | null>(null);
+  const [sourceLoading, setSourceLoading] = createSignal(false);
+  const [loadRevision, setLoadRevision] = createSignal(0);
+  const [saveError, setSaveError] = createSignal<string | null>(null);
+  const rows = createMemo(() => sources() ? tagDraftRows(sources()!, edits()) : []);
+  const stage = (name: string, manual: boolean | null, masked: boolean | null) => setEdits((current) => stageTagEdit(current, { name, manual, masked }));
+  let dialogEpoch = 0;
   let inputEl: HTMLInputElement | undefined;
 
   const selectedIds = () => props.store.selectedIds();
@@ -104,6 +116,7 @@ export function TagDialog(props: TagDialogProps): JSX.Element {
 
   /** 已经挂上的（扣掉草稿里要摘的）+ 草稿里要加的 —— 这就是界面上的那把标签 */
   const shownTags = createMemo<{ id: number; name: string; staged: boolean }[]>(() => {
+    if (single() && sources()) return rows().filter((row) => !row.masked).map((row, index) => ({ id: dictionary().find((tag) => tagKey(tag.name) === tagKey(row.name))?.id ?? -index - 1, name: row.name, staged: edits().some((edit) => tagKey(edit.name) === tagKey(row.name)) }));
     const out: { id: number; name: string; staged: boolean }[] = [];
     for (const id of existingIds()) {
       if (removing().includes(id)) continue;
@@ -116,22 +129,48 @@ export function TagDialog(props: TagDialogProps): JSX.Element {
     return out;
   });
 
+  let searchRevision = 0;
   async function refreshSearch(text: string): Promise<void> {
-    setResults(await tagList(text, SEARCH_LIMIT));
-    setHighlight(-1);
+    const revision = ++searchRevision;
+    try {
+      const found = await tagList(text, SEARCH_LIMIT);
+      if (!props.open || revision !== searchRevision || text !== query()) return;
+      setResults(found); setHighlight(-1);
+    } catch (error) { if (props.open && revision === searchRevision) setSaveError(String(error)); }
   }
+
+  createEffect(() => {
+    loadRevision();
+    const open = props.open;
+    const repo = props.store.repositoryId();
+    const ids = selectedIds();
+    setSources(null); setEdits([]); setDetail(null); setSourceError(null); setSourceLoading(false);
+    if (!open || ids.length !== 1 || !repo) return;
+    let active = true;
+    setSourceLoading(true);
+    void photoTagState(repo, ids[0]!).then((value) => { if (active) setSources(value); })
+      .catch((error: unknown) => { if (active) setSourceError(String(error)); })
+      .finally(() => { if (active) setSourceLoading(false); });
+    onCleanup(() => { active = false; });
+  });
 
   // 打开：清草稿、读一份词典（给「已有标签」查名字）、聚焦输入
   createEffect(() => {
+    dialogEpoch += 1;
     if (!props.open) return;
     setQuery("");
+    setSaveError(null);
     setAdding([]);
     setRemoving([]);
     setHighlight(-1);
     setResults([]);
+    const epoch = dialogEpoch;
     void (async () => {
-      setDictionary(await tagList("", DICTIONARY_LIMIT));
-      await refreshSearch("");
+      try {
+        const found = await tagList("", DICTIONARY_LIMIT);
+        if (!props.open || dialogEpoch !== epoch) return;
+        setDictionary(found); await refreshSearch("");
+      } catch (error) { if (props.open && dialogEpoch === epoch) setSaveError(String(error)); }
     })();
     // 输入框要拿到焦点，否则「输入即搜」根本没法开始
     queueMicrotask(() => inputEl?.focus());
@@ -147,6 +186,7 @@ export function TagDialog(props: TagDialogProps): JSX.Element {
 
   /** 挂上一条草稿（已挂着的会先从「待摘」里撤回来 —— 点错了能反悔） */
   function stageTag(tag: Tag): void {
+    if (single() && sources()) { stage(tag.name, true, null); setQuery(""); setHighlight(-1); inputEl?.focus(); return; }
     setRemoving((current) => current.filter((id) => id !== tag.id));
     setAdding((current) =>
       current.some((item) => item.id === tag.id) ||
@@ -170,6 +210,7 @@ export function TagDialog(props: TagDialogProps): JSX.Element {
 
   /** 回车：选中了就挂它，没选就**创建新标签**（即使已经有匹配结果） */
   async function commitInput(): Promise<void> {
+    const epoch = dialogEpoch;
     const index = highlight();
     const list = results();
     if (index >= 0 && index < list.length) {
@@ -179,14 +220,15 @@ export function TagDialog(props: TagDialogProps): JSX.Element {
     const name = query().trim();
     if (name === "") return;
     // 词典里已有同名（折叠后相等）→ 直接当它，不必新建
-    const folded = name.toLocaleLowerCase();
-    const existing = dictionary().find((tag) => tag.name.toLocaleLowerCase() === folded);
+    const folded = tagKey(name);
+    const existing = dictionary().find((tag) => tagKey(tag.name) === folded);
     if (existing !== undefined) {
       stageTag(existing);
       return;
     }
     const created = await tagEnsure(name);
-    if (created === null) return;
+    if (created === null) throw new Error(t("ai.saveFailed"));
+    if (!props.open || dialogEpoch !== epoch) return;
     setDictionary((current) => [created, ...current]);
     // 同步进 store 的词典：右栏「标签」那一段当场就能显示它（不必等下次刷新）
     props.store.rememberTag(created);
@@ -207,12 +249,12 @@ export function TagDialog(props: TagDialogProps): JSX.Element {
     }
     if (event.key === "Enter") {
       event.preventDefault();
-      void commitInput();
+      void commitInput().catch((error: unknown) => setSaveError(String(error)));
     }
   }
 
   async function save(): Promise<void> {
-    if (busy()) return;
+    if (busy() || sourceLoading() || sourceError()) return;
     /*
      * **输入框里还有没提交的名字 ⇒ 先把它当一条标签**（人类 2026-09-19：
      * 「第一次点了保存没反应，后面好了」—— 真因就在这里：
@@ -221,25 +263,27 @@ export function TagDialog(props: TagDialogProps): JSX.Element {
      *
      * 与回车同一个入口（`commitInput`），所以「回车新建」「点保存新建」结果一致。
      */
+    setBusy(true);
+    setSaveError(null);
+    try {
     if (query().trim() !== "") await commitInput();
     const add = adding()
       .map((tag) => tag.id)
       .filter((id) => !existingIds().includes(id));
     const remove = single() ? [...removing()] : [];
-    if (add.length === 0 && remove.length === 0) {
+    if (add.length === 0 && remove.length === 0 && edits().length === 0) {
       props.onClose();
       return;
     }
-    setBusy(true);
-    try {
-      let last: MarkResult | null = null;
-      if (add.length > 0) last = await props.store.mark({ kind: "attachTags", tagIds: add });
-      if (remove.length > 0) last = await props.store.mark({ kind: "detachTags", tagIds: remove });
-      props.onDone?.(last);
-      props.onClose();
-    } finally {
-      setBusy(false);
-    }
+      const draft: TagEdit[] = single() && sources() ? edits() : [
+        ...adding().map((tag) => ({ name: tag.name, manual: true, masked: null })),
+        ...remove.map((id) => ({ name: nameOf(id), manual: false, masked: null })),
+      ];
+      const last = draft.length > 0 ? await props.store.mark({ kind: "photoTags", edits: draft }) : null;
+      if (draft.length > 0 && last === null) throw new Error(t("ai.saveFailed"));
+      props.onDone?.(last); props.onClose();
+    } catch (error) { setSaveError(String(error)); }
+    finally { setBusy(false); }
   }
 
   const title = () =>
@@ -258,22 +302,26 @@ export function TagDialog(props: TagDialogProps): JSX.Element {
     <Dialog
       open={props.open}
       onOpenChange={(open) => {
-        if (!open) props.onClose();
+        if (!open && !busy()) props.onClose();
       }}
       title={title()}
       description={description()}
       footer={
         <>
-          <Button variant="secondary" onClick={props.onClose}>
+          <Button variant="secondary" disabled={busy()} onClick={props.onClose}>
             {t("common.cancel")}
           </Button>
-          <Button variant="primary" disabled={busy()} onClick={() => void save()}>
+          <Button variant="primary" disabled={busy() || sourceLoading() || sourceError() !== null} onClick={() => void save()}>
             {single() ? t("common.save") : t("browse.tagsAdd")}
           </Button>
         </>
       }
     >
       <div class="flex flex-col gap-3" data-tag-dialog={single() ? "single" : "batch"}>
+        <Show when={sourceLoading()}><p class="text-fs-1 text-fg-3" role="status">{t("ai.loadingTags")}</p></Show>
+        <Show when={sourceError()}>{(error) => <div class="space-y-2"><p class="text-fs-1 text-danger" role="alert">{error()}</p><Button variant="secondary" size="sm" onClick={() => setLoadRevision((n) => n + 1)}>{t("ai.retry")}</Button></div>}</Show>
+        <Show when={saveError()}>{(error) => <p class="text-fs-1 text-danger" role="alert">{error()}</p>}</Show>
+        <fieldset class="contents" disabled={busy() || sourceLoading() || sourceError() !== null}>
         {/* 输入即搜 */}
         <div class="flex h-8 items-center gap-2 rounded-ui bg-surface-bar px-2">
           <IconSearch size={14} class="shrink-0 text-fg-3" aria-hidden="true" />
@@ -283,7 +331,7 @@ export function TagDialog(props: TagDialogProps): JSX.Element {
             placeholder={t("browse.tagsPlaceholder")}
             value={query()}
             aria-label={t("browse.tagsPlaceholder")}
-            onInput={(event) => setQuery(event.currentTarget.value)}
+            onInput={(event) => { setQuery(event.currentTarget.value); setHighlight(-1); setResults([]); }}
             onKeyDown={onInputKeyDown}
           />
         </div>
@@ -326,7 +374,7 @@ export function TagDialog(props: TagDialogProps): JSX.Element {
               type="button"
               data-tag-create="open"
               class="mt-1 flex w-full items-center gap-1.5 rounded-ui px-1.5 py-0.5 text-left text-fs-2 text-brand hover:bg-state-hover"
-              onClick={() => void commitInput()}
+              onClick={() => void commitInput().catch((error: unknown) => setSaveError(String(error)))}
             >
               <IconPlus size={12} aria-hidden="true" />
               {t("browse.tagsCreate").replace("{name}", query().trim())}
@@ -347,8 +395,9 @@ export function TagDialog(props: TagDialogProps): JSX.Element {
                 data-tag-chip={tag.id}
                 data-tag-staged={tag.staged ? "true" : undefined}
               >
-                {tag.name}
-                <Show when={single()}>
+                <button type="button" class="rounded-full px-1 hover:bg-state-hover" onClick={() => setDetail(tag.name)}>{tag.name}</button>
+                <Show when={single() && sources()}><span class="pr-2 text-fs-0 text-fg-3">{t(rows().find((row) => tagKey(row.name) === tagKey(tag.name))?.manual ? rows().find((row) => tagKey(row.name) === tagKey(tag.name))?.ai ? "ai.both" : "ai.manual" : "ai.source")}</span></Show>
+                <Show when={single() && !sources()}>
                   <button
                     type="button"
                     aria-label={t("browse.tagsRemove").replace("{name}", tag.name)}
@@ -361,7 +410,7 @@ export function TagDialog(props: TagDialogProps): JSX.Element {
                       }
                     }}
                   >
-                    <IconX size={11} aria-hidden="true" />
+                    <IconBan size={11} aria-hidden="true" />
                   </button>
                 </Show>
               </span>
@@ -369,10 +418,40 @@ export function TagDialog(props: TagDialogProps): JSX.Element {
           </For>
         </div>
 
+        <Show when={single() && sources() && detail()}>
+          <div class="space-y-2 rounded-ui bg-surface-bar p-3">
+            <p class="font-semibold text-fg-1">{detail()}</p>
+            <Show when={rows().find((row) => tagKey(row.name) === tagKey(detail() ?? ""))?.manual}><p class="text-fs-1 text-fg-2">{t("ai.manual")}</p></Show>
+            <Show when={sources()?.ai.some((name) => tagKey(name) === tagKey(detail() ?? ""))}>
+              <p class="text-fs-1 text-fg-2">{t(sources()?.result?.origin === "sidecar" ? "ai.sidecar" : "ai.source")} · {t(sources()?.result?.valid ? "ai.valid" : "ai.invalid")}</p>
+              <p class="break-all text-fs-0 text-fg-3">{sources()?.result?.modelSha256.slice(0, 12)} · {new Date(sources()?.result?.generatedAt ?? 0).toLocaleString()}</p>
+            </Show>
+            <div class="flex flex-wrap gap-2">
+              <Button variant="secondary" size="sm" onClick={() => stage(detail()!, true, null)}>{t("ai.retain")}</Button>
+              <Show when={rows().find((row) => tagKey(row.name) === tagKey(detail() ?? ""))?.manual}><Button variant="secondary" size="sm" onClick={() => stage(detail()!, false, null)}>{t("ai.removeManual")}</Button></Show>
+              <Button variant="secondary" size="sm" icon={<IconBan size={14} />} onClick={() => { stage(detail()!, null, true); setDetail(null); }}>{t("ai.mask")}</Button>
+            </div>
+            <p class="text-fs-0 text-fg-3">{t("ai.removeHint")}</p>
+          </div>
+        </Show>
+        <Show when={single() && sources()?.result?.valid === false && (sources()?.ai.length ?? 0) > 0}>
+          <details class="rounded-ui bg-surface-bar p-3 text-fs-1 text-fg-2">
+            <summary class="cursor-pointer">{t("ai.invalid")}</summary>
+            <For each={sources()?.ai ?? []}>{(name) => <button type="button" class="mt-2 mr-2 rounded-ui px-1.5 hover:bg-state-hover" onClick={() => setDetail(name)}>{name}</button>}</For>
+          </details>
+        </Show>
+        <Show when={single() && rows().some((row) => row.masked)}>
+          <details class="rounded-ui bg-surface-bar p-3 text-fs-1 text-fg-2">
+            <summary class="cursor-pointer">{t("ai.maskedTags")}</summary>
+            <For each={rows().filter((row) => row.masked)}>{(row) => <div class="mt-2 flex items-center justify-between gap-2"><button type="button" class="text-left hover:text-fg-1" onClick={() => setDetail(row.name)}>{row.name}</button><Button variant="secondary" size="sm" onClick={() => stage(row.name, null, false)}>{t("ai.unmask")}</Button></div>}</For>
+          </details>
+        </Show>
+
         {/* 批量：说清楚为什么没有叉（画布上就写着这句） */}
         <Show when={!single()}>
           <p class="text-fs-0 text-fg-3">{t("browse.tagsBatchHint")}</p>
         </Show>
+        </fieldset>
       </div>
     </Dialog>
   );

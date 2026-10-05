@@ -227,9 +227,19 @@ W1 修订稿和 W3/W4 补充 Pencil 稿均由崔总定案。全量 Rust 单元�
 
 ## 11. 相片整理上期 —— 开发与 Agent 冒烟收口 ◐ 2026-09-30
 
-库目录／相片桶／标签三入口已落地；照片与目录标签独立，手动桶及多组自动规则共用一套照片来源与规则语义。跨挂载库选择保留复合身份，进入导出后可将全部选中照片的主定稿送入同一预设队列；离线库留待重试。下期 AI 仍未实施。
+库目录／相片桶／标签三入口已落地；照片与目录标签独立，手动桶及多组自动规则共用一套照片来源与规则语义。跨挂载库选择保留复合身份，进入导出后可将全部选中照片的主定稿送入同一预设队列；离线库留待重试。上期未引入 AI；下期当前交付见 §11.1。
 
 规格 `specs/photo-organization.md`、`specs/photo-organization-phase1.md`；实现与验证证据见 `implementations/2026-09-30_photo-organization-phase1-implementation.md`、`implementations/2026-09-30_photo-organization-export-handoff.md`。Rust 单元、前端测试、静态检查、UI 与浏览／导出启动冒烟、Windows debug 产物核对通过。真实照片库、Windows 操作、DPI 和大库性能待崔总验收。
+
+### 11.1 相片整理下期：TinyCLIP AI 标签 —— 代码与 Agent 冒烟收口 ◐ 2026-10-04
+
+崔总指定 TinyCLIP 并接受偏向减少误标的折中。固定七类、逐类校准 precision 目标85% / F0.5 / 至少5个真阳性，人/海加入固定易混淆负描述；一次图像编码后共用评分器，允许零标签，不显示概率。原90%/60%门槛失败记录保留；人物漏标、海类误标/漏标及困难负例不足仍如实披露。
+
+有效 manual/ai 来源、文字禁止/恢复/保留与撤销、统一消费方/累积自动桶/XMP、范围冻结/持久任务/暂停取消/默认暂停恢复、原始输入版本守卫与独立串行 CPU worker 已接线。已配置有效本地模型源时桌面启用 CPU，固定约152MiB图像编码器与约15MiB ORT DLL 随应用资源提供；未配置或资源不可用时构建基础版；设置中主动安装/可信离线导入，可修复损坏与卸载，保留标签与纠错。不要求 CUDA/Python/PyTorch，不自动扫描图库；在线下载留后续分发，SigLIP 2 留 FUTURE E1。
+
+Rust 核心1437项、桌面108项、前端1203项测试及质量门通过；Windows debug 资源/可信摘要/RAW协议核对与完整桌面 CPU worker 两图编码、非法协议/缺原片拒绝、正常退出冒烟通过。真实图库、GUI/DPI、盘上 XMP 往返、并发性能体感及干净 Win10/11 安装仍待崔总验收；未生成安装器或发布。规格 `specs/photo-organization-phase2.md`，实测 `docs/ai/tinyclip-v1/README.md`，实施记录 `implementations/2026-10-04_photo-organization-ai-tinyclip-delivery.md`。
+
+2026-10-04 续修：独立 model-registry/LFS 和可选 AI 构建已收口；本地源登记 Git ignored，普通构建不导出模型。Windows有→无→有切换、实际CPU导出与worker拒绝、默认无AI数据/XMP往返通过冒烟；当前debug已恢复有AI。记录 `implementations/2026-10-04_ai-model-registry-optional-build.md`，协议 `specs/ai-model-library-build.md`。GUI/真实库/安装器仍待崔总验收。
 
 ---
 
@@ -454,3 +464,8 @@ Tabler 是唯一同时满足「数量大 + 描边/填充成对 + MIT + 有 Solid
 
 
 2026-09-27 M4-W6/W7 开发收口：证据与限制见 `implementations/2026-09-27_m4-finalization.md`，真机验收仍独立。
+
+
+## 2026-10-04 色彩管理首版：开发与 Agent 冒烟收口
+
+在既有 W1–W5 首版上完成 Astra 的复杂显示 ICC、精确输入加速、60MP 有界后台上传与 RAW 新旧标度重放，再完成 Sol 的实际呈现状态/系统事实分离、共享组件、本地化和设置刷新接线。最终 Rust 1562 项、前端 1207 项通过；中英组件22项与UI冒烟、Windows主程序/worker配套构建核对通过。统一实机验收尚未完成，不自动升级旧照片，复杂CLUT打样/完整HDR/打印仍按既有范围留后续。证据与验收路径：`implementations/2026-10-04_color-management-ready-for-acceptance.md`；核心数值与性能：`implementations/2026-10-04_color-management-core-hardening.md`。Pencil内存稿仍须崔总手动保存，代码未提交。

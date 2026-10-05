@@ -1,5 +1,5 @@
 {
-  "version": "2.19",
+  "version": "2.20",
   "children": [
     {
       "type": "frame",
@@ -36461,6 +36461,1044 @@
                           "fontWeight": "600"
                         }
                       ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "hqlQz",
+      "x": 5400,
+      "y": 3350,
+      "name": "AI / 识别范围与任务",
+      "theme": {
+        "mode": "dark",
+        "density": "compact"
+      },
+      "width": 1180,
+      "height": 720,
+      "fill": "$surface-main",
+      "layout": "vertical",
+      "gap": 20,
+      "padding": 24,
+      "children": [
+        {
+          "type": "text",
+          "id": "CYlZd",
+          "name": "Title / AI 标签",
+          "fill": "$fg-1",
+          "content": "AI 标签 · 识别与任务",
+          "fontFamily": "Inter",
+          "fontSize": 21,
+          "fontWeight": "600"
+        },
+        {
+          "type": "frame",
+          "id": "Q5X0ev",
+          "name": "Toolsbar / 标签菜单入口",
+          "width": "fill_container",
+          "height": 40,
+          "gap": 8,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "EFyYf",
+              "name": "ToolButton / 设置标签",
+              "width": 28,
+              "height": 28,
+              "cornerRadius": 4,
+              "layout": "vertical",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "b8vB2",
+                  "name": "Glyph / tag",
+                  "width": 16,
+                  "height": 16,
+                  "icon": "tag",
+                  "library": "lucide",
+                  "fill": "$fg-2"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "pq1V6",
+              "name": "ToolButton / 识别照片",
+              "width": 28,
+              "height": 28,
+              "cornerRadius": 4,
+              "layout": "vertical",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "q5YW2",
+                  "name": "Glyph / 识别照片",
+                  "width": 16,
+                  "height": 16,
+                  "icon": "scan",
+                  "library": "lucide",
+                  "fill": "$fg-2"
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "xxj9v",
+              "name": "Entry description",
+              "fill": "$fg-2",
+              "content": "标签旁的识别入口；库 / 目录菜单提供明确范围入口",
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "VIivf",
+          "name": "Dialogs / scope and progress",
+          "width": "fill_container",
+          "height": "fill_container",
+          "gap": 20,
+          "children": [
+            {
+              "type": "frame",
+              "id": "DHRIU",
+              "name": "Dialog / 识别照片",
+              "width": 540,
+              "height": "fill_container",
+              "fill": "$surface-layer",
+              "cornerRadius": 6,
+              "layout": "vertical",
+              "gap": 16,
+              "padding": 20,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "igmol",
+                  "name": "Title",
+                  "fill": "$fg-1",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "识别照片",
+                  "fontFamily": "Inter",
+                  "fontSize": 19,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "M5Fq1",
+                  "name": "Range label",
+                  "fill": "$fg-2",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "识别范围",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "WtuEk",
+                  "name": "Scope / frozen explicit choice",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 6,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "IZEDx",
+                      "name": "Scope / ◉  选中照片    24 张",
+                      "width": "fill_container",
+                      "height": 36,
+                      "fill": "$state-selected",
+                      "cornerRadius": "$radius",
+                      "padding": [
+                        0,
+                        10
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "iPyXL",
+                          "name": "Scope label",
+                          "fill": "$fg-1",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "◉  选中照片    24 张",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "qkQF1",
+                      "name": "Scope / ○  当前目录    2026 / 海边    含子目录",
+                      "width": "fill_container",
+                      "height": 36,
+                      "fill": "$surface-bar",
+                      "cornerRadius": "$radius",
+                      "padding": [
+                        0,
+                        10
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "NuRqE",
+                          "name": "Scope label",
+                          "fill": "$fg-2",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "○  当前目录    2026 / 海边    含子目录",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "gmPMP",
+                      "name": "Scope / ○  指定相片库    旅行库",
+                      "width": "fill_container",
+                      "height": 36,
+                      "fill": "$surface-bar",
+                      "cornerRadius": "$radius",
+                      "padding": [
+                        0,
+                        10
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "Ii0Lf",
+                          "name": "Scope label",
+                          "fill": "$fg-2",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "○  指定相片库    旅行库",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "JuiWa",
+                  "name": "Range note",
+                  "fill": "$fg-2",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "开始时固定照片名单；当前筛选不会自动加入。",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "H0I72",
+                  "name": "Model summary",
+                  "fill": "$fg-1",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "本地标签模型 · 人、鸟、车、山、海、森林、夜景",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "i08qS",
+                  "name": "Mode",
+                  "fill": "$fg-2",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "☑ 跳过已识别照片    ☐ 重新识别",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "nVwNY",
+                  "name": "Replace explanation",
+                  "fill": "$fg-2",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "重新识别只更新 AI 来源，保留手动标签和禁止项。照片在本机处理。",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "z56Ki",
+                  "name": "ModalButtons",
+                  "width": "fill_container",
+                  "height": 32,
+                  "gap": 8,
+                  "justifyContent": "end",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "gm8Bc",
+                      "name": "Button / 取消",
+                      "height": 32,
+                      "fill": "$surface-track",
+                      "cornerRadius": 4,
+                      "padding": [
+                        0,
+                        14
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "N5FbGR",
+                          "name": "ButtonLabel",
+                          "fill": "$fg-1",
+                          "content": "取消",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "dJdRV",
+                      "name": "Button / 保存",
+                      "height": 32,
+                      "fill": "$brand",
+                      "cornerRadius": 4,
+                      "padding": [
+                        0,
+                        14
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "KxpEy",
+                          "name": "ButtonLabel",
+                          "fill": "$fg-on-brand",
+                          "content": "开始识别",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "j77yxv",
+              "name": "Dialog / AI 任务",
+              "width": "fill_container",
+              "height": "fill_container",
+              "fill": "$surface-layer",
+              "cornerRadius": 6,
+              "layout": "vertical",
+              "gap": 16,
+              "padding": 20,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "v5IivX",
+                  "name": "Title",
+                  "fill": "$fg-1",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "AI 任务",
+                  "fontFamily": "Inter",
+                  "fontSize": 19,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "FtC6w",
+                  "name": "Run range",
+                  "fill": "$fg-1",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "选中照片 · 24 张    旅行库 / 海边",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "RYOJG",
+                  "name": "Task state",
+                  "fill": "$brand",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "正在识别    12 / 24",
+                  "fontFamily": "Inter",
+                  "fontSize": 16,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "TYpwH",
+                  "name": "Progress / track",
+                  "width": "fill_container",
+                  "height": 6,
+                  "fill": "$surface-track",
+                  "cornerRadius": "$radius",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "T9U8K",
+                      "name": "Progress / fill",
+                      "width": 230,
+                      "height": 6,
+                      "fill": "$brand",
+                      "cornerRadius": "$radius"
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "YXJ8R",
+                  "name": "Counts",
+                  "fill": "$fg-2",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "成功 10    已识别跳过 1    失败 1",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "zw5Gv",
+                  "name": "Current photo",
+                  "fill": "$fg-2",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "当前照片    DSC_1824.JPG",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "C8ThPM",
+                  "name": "Task / recoverable issue",
+                  "width": "fill_container",
+                  "fill": "$surface-bar",
+                  "cornerRadius": "$radius",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "padding": 12,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "fhas1",
+                      "name": "Issue",
+                      "fill": "$fg-1",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "DSC_1821.NEF    缺少内嵌预览",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "QqeZY",
+                      "name": "Issue hint",
+                      "fill": "$fg-2",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "已跳过。可以重试失败项，成功结果会保留。",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "gXRdQ",
+                  "name": "Offline note",
+                  "fill": "$fg-2",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "库离线 → 等待挂载；重开应用 → 暂停，手动继续。",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "rKltw",
+                  "name": "ModalButtons",
+                  "width": "fill_container",
+                  "height": 32,
+                  "gap": 8,
+                  "justifyContent": "end",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "W4dov",
+                      "name": "Button / 取消",
+                      "height": 32,
+                      "fill": "$surface-track",
+                      "cornerRadius": 4,
+                      "padding": [
+                        0,
+                        14
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "AO5SW",
+                          "name": "ButtonLabel",
+                          "fill": "$fg-1",
+                          "content": "取消任务",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "Ptw4i",
+                      "name": "Button / 保存",
+                      "height": 32,
+                      "fill": "$brand",
+                      "cornerRadius": 4,
+                      "padding": [
+                        0,
+                        14
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "pShon",
+                          "name": "ButtonLabel",
+                          "fill": "$fg-on-brand",
+                          "content": "暂停",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "lSYNl",
+                  "name": "Close note",
+                  "fill": "$fg-2",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "关闭窗口后继续处理；任务入口可重新打开。",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "xaQdZ",
+      "x": 6660,
+      "y": 3350,
+      "name": "AI / 单张标签来源与禁止",
+      "theme": {
+        "mode": "dark",
+        "density": "compact"
+      },
+      "width": 650,
+      "height": 740,
+      "fill": "$surface-main",
+      "layout": "vertical",
+      "gap": 18,
+      "padding": 24,
+      "children": [
+        {
+          "type": "text",
+          "id": "j1GQ3",
+          "name": "Title",
+          "fill": "$fg-1",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "标签 · 单张来源与纠错",
+          "fontFamily": "Inter",
+          "fontSize": 21,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "i3VQvX",
+          "name": "Dialog / 标签来源",
+          "width": "fill_container",
+          "fill": "$surface-layer",
+          "cornerRadius": 6,
+          "layout": "vertical",
+          "gap": 14,
+          "padding": 20,
+          "children": [
+            {
+              "type": "text",
+              "id": "t2g63a",
+              "name": "Title",
+              "fill": "$fg-1",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "标签",
+              "fontFamily": "Inter",
+              "fontSize": 19,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "gZBmK",
+              "name": "Photo",
+              "fill": "$fg-2",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "DSC_1824.JPG",
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "dhDxb",
+              "name": "TextField",
+              "width": "fill_container",
+              "height": 32,
+              "fill": "$surface-bar",
+              "cornerRadius": 4,
+              "padding": [
+                0,
+                8
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "uLPbn",
+                  "name": "FieldText",
+                  "fill": "$fg-1",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "搜索或输入新标签",
+                  "fontFamily": "Inter",
+                  "fontSize": 14,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "fIsb2",
+              "name": "Description",
+              "fill": "$fg-2",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "点击标签查看来源；手动添加会解除同名禁止。",
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "wcnet",
+              "name": "Effective tags / chips",
+              "width": "fill_container",
+              "gap": 8,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "W270QD",
+                  "name": "Chip / 旅行",
+                  "height": 24,
+                  "fill": "$surface-bar",
+                  "cornerRadius": 999,
+                  "gap": 4,
+                  "padding": [
+                    0,
+                    10
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "PckPc",
+                      "name": "ChipLabel",
+                      "fill": "$fg-1",
+                      "content": "旅行  手动",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "s420Xd",
+                  "name": "Chip / 海",
+                  "height": 24,
+                  "fill": "$surface-bar",
+                  "cornerRadius": 999,
+                  "gap": 4,
+                  "padding": [
+                    0,
+                    10
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "Xa1PP",
+                      "name": "ChipLabel",
+                      "fill": "$fg-1",
+                      "content": "海  手动 + AI",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "M1cUmE",
+                  "name": "Chip / 人物",
+                  "height": 24,
+                  "fill": "$surface-bar",
+                  "cornerRadius": 999,
+                  "gap": 4,
+                  "padding": [
+                    0,
+                    10
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "E7oH7",
+                      "name": "ChipLabel",
+                      "fill": "$fg-1",
+                      "content": "人物  AI",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "h2J5Z",
+              "name": "Expanded / 海 sources",
+              "width": "fill_container",
+              "fill": "$surface-bar",
+              "cornerRadius": "$radius",
+              "layout": "vertical",
+              "gap": 10,
+              "padding": 14,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "GXD3J",
+                  "name": "Selected tag",
+                  "fill": "$fg-1",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "海",
+                  "fontFamily": "Inter",
+                  "fontSize": 16,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "ctcwJ",
+                  "name": "Manual source",
+                  "fill": "$fg-2",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "手动来源    已添加",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "zblJF",
+                  "name": "AI source",
+                  "fill": "$fg-2",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "AI 来源    本地标签模型 · 2026-10-04 10:24",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "I0XUNQ",
+                  "name": "AI validity",
+                  "fill": "$fg-2",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "识别版本有更新时提示；源照片变化则显示已失效。",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "ONRAl",
+                  "name": "Tag actions",
+                  "width": "fill_container",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "w3HMTq",
+                      "name": "Button / 取消",
+                      "height": 32,
+                      "fill": "$surface-track",
+                      "cornerRadius": 4,
+                      "padding": [
+                        0,
+                        14
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "kJBDL",
+                          "name": "ButtonLabel",
+                          "fill": "$fg-1",
+                          "content": "移除手动来源",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "tEjeD",
+                      "name": "Button / 取消",
+                      "height": 32,
+                      "fill": "$surface-track",
+                      "cornerRadius": 4,
+                      "padding": [
+                        0,
+                        14
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "BM2C3",
+                          "name": "ButtonLabel",
+                          "fill": "$fg-1",
+                          "content": "禁止这个标签",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "rm3EP",
+                  "name": "Manual explanation",
+                  "fill": "$fg-2",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "只剩 AI 时提供“保留为手动”。移除手动来源后，有效 AI 来源仍可显示。",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "B2UBd",
+              "name": "Expanded / 禁止的标签",
+              "width": "fill_container",
+              "fill": "$surface-bar",
+              "cornerRadius": "$radius",
+              "layout": "vertical",
+              "gap": 10,
+              "padding": 14,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "l2zuAB",
+                  "name": "Masked section",
+                  "fill": "$fg-1",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "⌄ 禁止的标签    1",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "tLr3P",
+                  "name": "Masked tag / 夜景",
+                  "width": "fill_container",
+                  "gap": 10,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "o4e1Jc",
+                      "name": "Masked name",
+                      "fill": "$fg-2",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "夜景    AI 来源保留，所有来源都不显示",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "EFKI4",
+                      "name": "Button / 取消",
+                      "height": 32,
+                      "fill": "$surface-track",
+                      "cornerRadius": 4,
+                      "padding": [
+                        0,
+                        14
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "r658E",
+                          "name": "ButtonLabel",
+                          "fill": "$fg-1",
+                          "content": "解除禁止",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "k5eOu",
+              "name": "Draft behavior",
+              "fill": "$fg-2",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "取消不写入；保存作为一次可撤销操作。批量标签仍只添加，不提供批量禁止。",
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "t5ToM",
+              "name": "ModalButtons",
+              "width": "fill_container",
+              "height": 32,
+              "gap": 8,
+              "justifyContent": "end",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "HeL6g",
+                  "name": "Button / 取消",
+                  "height": 32,
+                  "fill": "$surface-track",
+                  "cornerRadius": 4,
+                  "padding": [
+                    0,
+                    14
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "K2ZFG6",
+                      "name": "ButtonLabel",
+                      "fill": "$fg-1",
+                      "content": "取消",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "D8bHnh",
+                  "name": "Button / 保存",
+                  "height": 32,
+                  "fill": "$brand",
+                  "cornerRadius": 4,
+                  "padding": [
+                    0,
+                    14
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "rcCyb",
+                      "name": "ButtonLabel",
+                      "fill": "$fg-on-brand",
+                      "content": "保存",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
                     }
                   ]
                 }

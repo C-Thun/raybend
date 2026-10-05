@@ -254,6 +254,7 @@ impl OverlayRenderer {
         tool: Option<ToolOverlay>,
         compare: Option<f32>,
         palette: Option<OverlayPalette>,
+        white_scale:f32,
     ) {
         self.count = 0;
         let Some(palette) = palette else {
@@ -270,9 +271,9 @@ impl OverlayRenderer {
             for value in [
                 2.0 * x / width - 1.0,
                 1.0 - 2.0 * y / height,
-                *r,
-                *g,
-                *b,
+                *r*white_scale,
+                *g*white_scale,
+                *b*white_scale,
                 *a,
             ] {
                 bytes.extend_from_slice(&value.to_ne_bytes());

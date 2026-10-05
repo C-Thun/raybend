@@ -140,7 +140,7 @@ pub async fn external_task<R: Runtime>(
                                 &request.repository_id,
                                 &request.captured,
                             )?;
-                            let target = raybend::external_editor::write_tiff_checked(
+                            let target = raybend::external_editor::write_tiff_checked_with_profiles(
                                 &prepared.source,
                                 &request.captured,
                                 std::path::Path::new(&request.directory),
@@ -154,6 +154,7 @@ pub async fn external_task<R: Runtime>(
                                 },
                                 || prepared.catalog.ensure_current(),
                                 &prepared.suffix,
+                                |id,role| crate::color_profiles::resolve(&events,id,role),
                             )
                             .map_err(|error| error.to_string())?;
                             output = Some(target.to_string_lossy().into_owned());

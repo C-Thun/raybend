@@ -742,24 +742,28 @@ fn inverse_map(correction: &LensCorrection, x: f32, y: f32) -> (f32, f32) {
 /// 映射是恒等时直接 `clone`（**逐位一致**，不是「近似不变」）。
 #[must_use]
 pub fn warp_lens(source: &LinearImage, map: &LensMap) -> LinearImage {
-    if map.is_identity() || !source.is_consistent() {
+    let Some(view) = super::sample::RgbView::new(source.width, source.height, &source.rgb) else {
         return source.clone();
+    };
+    LinearImage { width: source.width, height: source.height, rgb: warp_rgb(view, map) }
+}
+
+/// Shared lens sampler; float samples are not clipped or quantized.
+pub fn warp_rgb<T: super::sample::RgbSample>(source: super::sample::RgbView<'_, T>, map: &LensMap) -> Vec<T> {
+    if map.is_identity() {
+        return source.rgb.to_vec();
     }
     let resized = map.for_image(source.width, source.height);
     let map = &resized;
     let width = source.width as usize;
     let height = source.height as usize;
-    let mut out = vec![0u16; source.rgb.len()];
+    let mut out = vec![T::default(); source.rgb.len()];
     let threads = std::thread::available_parallelism()
         .map_or(1, std::num::NonZeroUsize::get)
         .min(16);
     if threads <= 1 || height < 32 {
-        warp_rows(source, &mut out, map, 0);
-        return LinearImage {
-            width: source.width,
-            height: source.height,
-            rgb: out,
-        };
+        warp_rows(&source, &mut out, map, 0);
+        return out;
     }
     let rows_per_chunk = height.div_ceil(threads);
     std::thread::scope(|scope| {
@@ -772,14 +776,10 @@ pub fn warp_lens(source: &LinearImage, map: &LensMap) -> LinearImage {
             remaining = rest;
             let start = first_row;
             first_row += rows;
-            scope.spawn(move || warp_rows(source, chunk, map, start));
+            scope.spawn(move || warp_rows(&source, chunk, map, start));
         }
     });
-    LinearImage {
-        width: source.width,
-        height: source.height,
-        rgb: out,
-    }
+    out
 }
 
 /// 一段行（**唯一**的镜头校正像素循环）。
@@ -787,7 +787,7 @@ pub fn warp_lens(source: &LinearImage, map: &LensMap) -> LinearImage {
 /// 这一趟是显影里最贵的两件事之一，所以内循环里只留「每像素真的必须做」的事：
 /// 所有 f64 → f32 的转换、常量乘法、上限值都提到**行外**；归一化 x 沿行**累加**（不再每像素乘一次）；
 /// 没有 TCA 时三通道共用一套坐标；没有暗角时一次都不查。
-fn warp_rows(source: &LinearImage, out: &mut [u16], map: &LensMap, first_row: usize) {
+fn warp_rows<T: super::sample::RgbSample>(source: &super::sample::RgbView<'_, T>, out: &mut [T], map: &LensMap, first_row: usize) {
     let width = source.width as usize;
     let height = source.height as usize;
     #[allow(clippy::cast_possible_truncation)]
@@ -809,7 +809,7 @@ fn warp_rows(source: &LinearImage, out: &mut [u16], map: &LensMap, first_row: us
     #[allow(clippy::cast_precision_loss)]
     let (max_x, max_y) = ((width - 1) as f32, (height - 1) as f32);
     let sampler = Sampler {
-        rgb: &source.rgb,
+        rgb: source.rgb,
         width,
         height,
         max_x,
@@ -842,9 +842,9 @@ fn warp_rows(source: &LinearImage, out: &mut [u16], map: &LensMap, first_row: us
             let green = sampler.at(sx, sy, 1);
             let red = sampler.at(rx, ry, 0);
             let blue = sampler.at(bx, by, 2);
-            pixel[0] = quantize(red * gain);
-            pixel[1] = quantize(green * gain);
-            pixel[2] = quantize(blue * gain);
+            pixel[0] = T::encode(red * gain);
+            pixel[1] = T::encode(green * gain);
+            pixel[2] = T::encode(blue * gain);
             nx += x_step;
         }
     }
@@ -853,15 +853,15 @@ fn warp_rows(source: &LinearImage, out: &mut [u16], map: &LensMap, first_row: us
 /// 双线性采样（越界夹取 —— 自动缩放已保证不会用到，这里是兜底）。
 ///
 /// 把「行外能算的都算一次」的东西攒在这里，内循环只传坐标与通道。
-struct Sampler<'a> {
-    rgb: &'a [u16],
+struct Sampler<'a, T> {
+    rgb: &'a [T],
     width: usize,
     height: usize,
     max_x: f32,
     max_y: f32,
 }
 
-impl Sampler<'_> {
+impl<T: super::sample::RgbSample> Sampler<'_, T> {
     /// 取一个样本（`x0`/`y0` 用截断代替 `floor`：已夹到非负）。
     #[inline]
     fn at(&self, x: f32, y: f32, channel: usize) -> f32 {
@@ -881,20 +881,11 @@ impl Sampler<'_> {
         let row0 = y0 * self.width * 3 + channel;
         let row1 = y1 * self.width * 3 + channel;
         let (c0, c1) = (x0 * 3, x1 * 3);
-        let p00 = f32::from(self.rgb[row0 + c0]);
-        let top = p00 + (f32::from(self.rgb[row0 + c1]) - p00) * fx;
-        let p10 = f32::from(self.rgb[row1 + c0]);
-        let bottom = p10 + (f32::from(self.rgb[row1 + c1]) - p10) * fx;
+        let p00 = self.rgb[row0 + c0].value();
+        let top = p00 + (self.rgb[row0 + c1].value() - p00) * fx;
+        let p10 = self.rgb[row1 + c0].value();
+        let bottom = p10 + (self.rgb[row1 + c1].value() - p10) * fx;
         top + (bottom - top) * fy
-    }
-}
-
-/// 浮点 → u16（四舍五入 + 夹取）。
-#[inline]
-fn quantize(value: f32) -> u16 {
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    {
-        (value + 0.5).clamp(0.0, 65535.0) as u16
     }
 }
 

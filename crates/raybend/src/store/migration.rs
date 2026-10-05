@@ -84,6 +84,7 @@ pub struct Migration {
 /// * v4 `directory_counts`：**目录级计数**（相片/图片两个数）+ 库级汇总列（人类 2026-09-19）
 /// * v8 `presets`：编辑预设（一级目录 + 大类快照 JSON，specs/editor-presets.md）
 /// * v9 `photo_organization`：相片桶、持久成员与排除
+/// * v10 `color_profiles`：用户 RGB ICC 原件索引与隐藏状态
 pub const APP_MIGRATIONS: &[Migration] = &[
     Migration {
         version: 1,
@@ -129,6 +130,16 @@ pub const APP_MIGRATIONS: &[Migration] = &[
         version: 9,
         name: "photo_organization",
         sql: include_str!("migrations/app_0009_photo_organization.sql"),
+    },
+    Migration {
+        version: 10,
+        name: "color_profiles",
+        sql: include_str!("migrations/app_0010_color_profiles.sql"),
+    },
+    Migration {
+        version: 11,
+        name: "photo_ai_jobs",
+        sql: include_str!("migrations/app_0011_photo_ai_jobs.sql"),
     },
 ];
 
@@ -214,6 +225,21 @@ pub const CATALOG_MIGRATIONS: &[Migration] = &[
         version: 14,
         name: "photo_organization",
         sql: include_str!("migrations/catalog_0014_photo_organization.sql"),
+    },
+    Migration {
+        version: 15,
+        name: "photo_ai_tags",
+        sql: include_str!("migrations/catalog_0015_photo_ai_tags.sql"),
+    },
+    Migration {
+        version: 16,
+        name: "color_state",
+        sql: include_str!("migrations/catalog_0016_color_state.sql"),
+    },
+    Migration {
+        version: 17,
+        name: "ai_vocabulary",
+        sql: include_str!("migrations/catalog_0017_ai_vocabulary.sql"),
     },
 ];
 
@@ -983,13 +1009,14 @@ mod tests {
         )
         .unwrap();
         conn.execute_batch("INSERT INTO assets(id,imported_at,updated_at) VALUES(1,1,1);
-            INSERT INTO develop_stacks(asset_id,source_base,base_curve_profile,created_at,updated_at) VALUES(1,'raw','5',1,1);
+            INSERT INTO develop_stacks(asset_id,source_base,base_curve_profile,base_curve_points,created_at,updated_at) VALUES(1,'raw','5','[[0,0],[1,1]]',1,1);
             INSERT INTO develop_params(asset_id,param_id,value) VALUES(1,'exposure',0.65);").unwrap();
         let old = super::super::develop::load(&conn, 1);
         assert!(old.is_err(), "v11 不含 auto_adjust 列");
         let legacy = super::super::develop::DevelopStack {
             params: [("exposure".to_owned(), 0.65)].into(),
             base_curve_profile: Some("5".into()),
+            base_curve_points: Some(vec![[0.0, 0.0], [1.0, 1.0]]),
             ..Default::default()
         };
         let json = serde_json::to_string(&legacy).unwrap();

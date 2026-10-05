@@ -21,3 +21,16 @@ prompts/
 .release/
 
 release-out/
+
+# 固定 AI 构建资源由校验脚本导入，权重/DLL 不进 Git
+crates/raybend/assets/ai/tinyclip-v1/*.onnx
+crates/raybend/assets/ai/ort-win-x64/*.dll
+crates/raybend/assets/ai/*/*.stage-*
+scripts/ai/__pycache__/
+
+# 固定 AI 构建下载缓存（不进入 Git 或发布镜像）
+.cache/ai-build/
+
+# 本机模型库引用，不随软件 Git/镜像分发
+ai-model-source.local.json
+ai-model-source.local.json.stage-*

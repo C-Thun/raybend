@@ -5,7 +5,7 @@
   "type": "module",
   "private": true,
   "license": "AGPL-3.0-only",
-  "packageManager": "pnpm@12.3.4",
+  "packageManager": "pnpm@12.9.1",
   "engines": {
     "node": ">=22.12.0",
     "pnpm": ">=10"
@@ -15,7 +15,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "tauri": "tauri",
+    "tauri": "node scripts/tauri.mjs",
     "lint:colors": "node scripts/check-hardcoded-colors.mjs",
     "lint:arch": "node scripts/check-architecture.mjs",
     "lint:i18n": "node scripts/check-i18n.mjs",
@@ -27,13 +27,17 @@
     "check:external": "node --check scripts/check-external-editor.mjs && node scripts/check-external-editor.mjs",
     "check:browse": "node --check scripts/check-browse-boot.mjs && node scripts/check-browse-boot.mjs",
     "check:import": "node --check scripts/check-import-boot.mjs && node scripts/check-import-boot.mjs",
+    "check:color-status": "node --check scripts/check-color-status.mjs && node scripts/check-color-status.mjs",
     "perf:browse": "node --check scripts/perf-browse.mjs && node scripts/perf-browse.mjs",
+    "perf:grid": "node --check scripts/grid-bench.mjs && node --experimental-strip-types scripts/grid-bench.mjs",
     "perf:win": "node --check scripts/perf-win.mjs && node scripts/perf-win.mjs",
     "test": "node --test \"src/**/*.test.ts\"",
     "shot": "node scripts/shot.mjs",
     "crash:drill": "bash scripts/crash-drill.sh",
     "migrate:drill": "bash scripts/migration-drill.sh",
     "check:win": "node scripts/check-win-artifact.mjs",
+    "check:color-win": "node --check scripts/check-color-win.mjs && node scripts/check-color-win.mjs",
+    "check:lens-ipc-win": "node --check scripts/check-lens-ipc-win.mjs && node scripts/check-lens-ipc-win.mjs",
     "clean:win": "node --check scripts/clean-target.mjs && node scripts/clean-target.mjs",
     "clean:wsl": "node --check scripts/clean-target.mjs && node scripts/clean-target.mjs --target-dir ./target",
     "debug:win": "node --check scripts/debug-win.mjs && node scripts/debug-win.mjs",
@@ -41,7 +45,11 @@
     "test:release": "node --test \"src/lib/release-plan.test.ts\" \"scripts/lib/*.test.mjs\"",
     "licenses:generate": "node scripts/generate-licenses.mjs",
     "release:finalize": "node scripts/finalize-release.mjs",
-    "release:publish": "node scripts/release-publish.mjs"
+    "release:publish": "node scripts/release-publish.mjs",
+    "ai:prepare": "node scripts/ai/prepare-assets.mjs",
+    "ai:library:init": "node scripts/ai/registry.mjs init",
+    "ai:export": "node scripts/ai/registry.mjs export",
+    "ai:use": "node scripts/ai/registry.mjs use"
   },
   "dependencies": {
     "@ark-ui/solid": "^5.39.2",

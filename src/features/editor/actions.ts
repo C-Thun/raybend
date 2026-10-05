@@ -38,6 +38,9 @@ export interface EditorActions {
   finalize: () => void;
   /** 切换编辑源后保存 latest 来源。 */
   commitDevelop: () => void;
+  setBase: (base: "raw" | "sooc") => void;
+  restoreColor: () => void;
+  reviewColorBatch:()=>void;
   /** 全屏看图要的清单（编辑侧同样是「当前目录显示序 + 锚点」）；没有照片时为 `null` */
   fullscreenTarget: () => FullscreenTarget | null;
 }

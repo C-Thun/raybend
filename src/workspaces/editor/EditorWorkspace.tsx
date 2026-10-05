@@ -1,4 +1,6 @@
 import { getVariantThumb } from "../../api/export.ts";
+import { getColorProfileLibrary, preparePhotoColor, setEditorProof, reviewPhotoColors,commitPhotoColors,type ColorBatchReview,type ColorProfileEntry } from "../../api/color.ts";
+import {ColorBatchDialog} from "../../features/editor/color-batch-dialog.tsx";
 import { onCatalogChanged } from "../../api/db.ts";
 /**
  * 编辑工作区：三列（`design/editor.md` §2）。
@@ -83,6 +85,7 @@ import {
   newPresetId,
   sanitizePresetLibrary,
   type PresetGroup,
+  presetColorChoice,
 } from "../../lib/presets.ts";
 import { Button } from "../../components/ui/Button.tsx";
 import { Dialog } from "../../components/ui/Dialog.tsx";
@@ -143,6 +146,7 @@ export interface EditorWorkspaceProps {
   onFilmStripStepChange: (step: number) => void;
   /** 「去导入」（空态里那颗按钮） */
   onOpenImport: () => void;
+  onOpenColorProfiles: () => void;
   class?: string;
 }
 
@@ -565,14 +569,14 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
    * 拖动中每帧一条完全没问题：Rust 侧按「最新者优先」丢弃过期任务，
    * 而且管线跑在**显影线程**上 —— 渲染线程永远只管画上一张，拖动与缩放不会卡。
    */
-  const paramsSender = createLatestCoalescer<DevelopParamsPayload>({
-    send: (payload) => {
+  const paramsSender = createLatestCoalescer<{payload:DevelopParamsPayload;assetId:string;repositoryId:string|null}>({
+    isCurrent:({assetId,repositoryId})=>currentAssetId()===assetId && store.repositoryId()===repositoryId && developReadyAssetId()===assetId,
+    send: ({payload,assetId,repositoryId}) => {
       // 镜头配置要后端读这张照片的拍摄参数 —— 载荷走的是**高频**那条路，
       // 所以这里只传两个标量（`null` = 还没有当前照片，后端就不解析镜头）
-      const assetId = currentAssetId();
       void setEditorParams(
-        store.repositoryId(),
-        assetId === null || assetId === undefined ? null : Number(assetId),
+        repositoryId,
+        Number(assetId),
         payload,
       ).catch((error: unknown) => {
         // 参数被拒（非法值 / 渲染线程没了）**不能只进控制台**：画面会停在最后一帧，
@@ -589,7 +593,9 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
   createEffect(() => {
     const payload = props.store.developPayload();
     if (!rendererBound()) return;
-    paramsSender.push(payload);
+    const assetId=currentAssetId();const repositoryId=store.repositoryId();
+    if(assetId==null || developReadyAssetId()!==assetId)return;
+    paramsSender.push({payload,assetId,repositoryId});
   });
 
   const rotationSender = createLatestCoalescer<number>({
@@ -726,7 +732,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
         if (!active) return;
         // 换图命令会作废上一张仍在解析的参数请求。照片入队后再补发
         // 当前参数，保证「空栈的新图」也不会短暂套着上一张的调整。
-        paramsSender.push(props.store.developPayload());
+        paramsSender.push({payload:props.store.developPayload(),assetId,repositoryId});
         paramsSender.flush();
       })
       .catch((error: unknown) => {
@@ -746,13 +752,43 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
 
   const currentDevelopStack = (): DevelopStack => {
     const payload = props.store.developPayload();
-    return { values: payload.values, curves: payload.curves, asShotK: payload.asShotTemperature,
+    return { color: payload.color ?? null, values: payload.values, curves: payload.curves, asShotK: payload.asShotTemperature,
       sourceBase: props.store.editBase(), lensProfile: payload.lensProfile,
       baseCurveProfile: props.store.baseCurveProfile(),
       baseCurvePoints: props.store.baseCurvePoints()?.map(([x,y]) => [x,y] as [number,number]) ?? null,
       autoAdjust: props.store.autoAdjustBaseline(),
       lutId: props.store.lutId(), lutEnabled: props.store.lutEnabledSetting(),
       lensEnabled: payload.lensEnabled, nrMethod: payload.nrMethod, geometry: payload.geometry };
+  };
+
+  const [profileEntries,setProfileEntries] = createSignal<ColorProfileEntry[]>([]);
+  const refreshProfiles = (): void => { void getColorProfileLibrary().then(library=>setProfileEntries(library?.entries ?? []))
+    .catch(error=>setDevelopError(String(error))); };
+  onMount(refreshProfiles);
+  let proofRevision = 0;
+  createEffect(() => {
+    if (!rendererBound()) return;
+    const target = props.store.proofEnabled() ? props.store.proofTarget() : null;
+    const warning = props.store.proofWarning(); const revision = ++proofRevision;
+    void setEditorProof(target,warning).catch(error=> {
+      if (revision !== proofRevision) return;
+      props.store.setProofEnabled(false); setDevelopError(String(error));
+    });
+  });
+  const applyColor = async (profileId: string|null): Promise<void> => {
+    const path=expectedPhotoPath(); const assetId=currentAssetId();
+    if (!enabled() || path === null || assetId == null) return;
+    const color=await preparePhotoColor(path,profileId);
+    if (!enabled() || expectedPhotoPath() !== path || currentAssetId() !== assetId) return;
+    props.store.setColorState(color);
+    commitDevelop();
+  };
+  const [colorBatchReview,setColorBatchReview]=createSignal<ColorBatchReview|null>(null);
+  const reviewColorBatch=async (profileId:string|null):Promise<void>=> {
+    const repositoryId=store.repositoryId();if(repositoryId===null)return;
+    const ids=[...store.selection().ids].map(Number);
+    const review=await reviewPhotoColors(repositoryId,ids,profileId);
+    if(store.repositoryId()===repositoryId)setColorBatchReview(review);
   };
 
   /**
@@ -1067,6 +1103,24 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
     resetDevelop: requestReset,
     canReset,
     commitDevelop,
+    restoreColor: ()=> { void applyColor(null).catch(error=>setDevelopError(String(error))); },
+    reviewColorBatch:()=> {void reviewColorBatch(null).catch(error=>setDevelopError(String(error)));},
+    setBase: (base) => {
+      const assetId = currentAssetId(); const repositoryId = store.repositoryId();
+      if (!enabled() || assetId == null || repositoryId === null || props.store.editBase() === base) return;
+      const previousBase=props.store.editBase();
+      void (async () => {
+        let color=props.store.colorState();
+        if (color !== null) {
+          const target=await getDevelopEditTarget(repositoryId,Number(assetId),base);
+          if (!target || target.path === null || target.actualBase !== base) return;
+          color=await preparePhotoColor(target.path,null);
+        }
+        if (!enabled() || currentAssetId() !== assetId || props.store.editBase() !== previousBase) return;
+        batch(()=> { props.store.setEditBase(base); if(color !== null)props.store.setColorState(color); });
+        commitDevelop();
+      })().catch(error=>setDevelopError(String(error)));
+    },
     autoAdjust: () => void autoAdjust(),
     canAutoAdjust,
     canFinalize: () => enabled() && !finalizeBusy() && (issueLibrary()?.canFinalize ?? false),
@@ -1339,6 +1393,11 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
             onOpenImport={props.onOpenImport}
             onRetry={startRenderer}
           />
+          <Show when={props.store.proofEnabled() && current() !== null}>
+            <div class="pointer-events-none absolute left-3 top-3 z-20 rounded-ui bg-surface-layer px-3 py-1 text-fs-0 font-medium text-brand" role="status" data-editor-proof-active>
+              {t("editor.colorManagement.proofActive")}
+            </div>
+          </Show>
 
           {/*
             切定稿的中央提示（崔总 2026-09-28）：渲染超过短阈值才亮（不闪），
@@ -1441,9 +1500,27 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
             onDeletePreset={deletePresetW}
             onDeletePresetDirectory={deletePresetDirectoryW}
             onMovePresets={movePresetsW}
+            onOpenColorProfiles={props.onOpenColorProfiles}
+            profileEntries={profileEntries()}
+            onRefreshProfiles={refreshProfiles}
+            onApplyColor={applyColor}
+            colorBatchCount={store.selection().ids.size}
+            onReviewColorBatch={reviewColorBatch}
+            onApplyPreset={async snapshot=> {
+              const path=expectedPhotoPath(); const assetId=currentAssetId();
+              if (!enabled() || path === null || assetId == null) return;
+              try {
+                const choice=presetColorChoice(snapshot);
+                const color=choice === undefined ? undefined : await preparePhotoColor(path,choice);
+                if (!enabled() || expectedPhotoPath() !== path || currentAssetId() !== assetId) return;
+                batch(()=> { props.store.applyPresetSnapshot(snapshot); if(color !== undefined)props.store.setColorState(color); });
+                commitDevelop();
+              } catch(error) {setDevelopError(String(error));}
+            }}
           />
         </aside>
       </div>
+      <ColorBatchDialog review={colorBatchReview()} onClose={()=>setColorBatchReview(null)} onCommit={commitPhotoColors} />
       <Dialog open={finalizeOpen()} onOpenChange={setFinalizeOpen} title={t("editor.issue.newTitle")}
         footer={<><Button variant="secondary" onClick={() => setFinalizeOpen(false)}>{t("common.cancel")}</Button>
           <Button variant="primary" disabled={finalizeBusy() || finalizeName().trim() === ""}

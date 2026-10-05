@@ -67,6 +67,45 @@ pub fn role_of(kind: MediaKind) -> &'static str {
     }
 }
 
+/// 采纳 sidecar 时的基础元数据落列（`specs/xmp-sidecar.md` §7.2；只写有值的字段，
+/// 调用方先判过「全空就不调」）。SQL 住 store 层 —— 外壳不拼库内语句。
+#[allow(clippy::too_many_arguments)]
+pub fn apply_sidecar_metadata(
+    conn: &Connection,
+    asset_id: i64,
+    rating: u8,
+    color_label: Option<&str>,
+    author: Option<&str>,
+    description: Option<&str>,
+    country: Option<&str>,
+    province_state: Option<&str>,
+    city: Option<&str>,
+    sublocation: Option<&str>,
+    now_ms: i64,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE assets SET rating = CASE WHEN ?2 > 0 THEN ?2 ELSE rating END,
+         color_label = COALESCE(?3, color_label), author = COALESCE(?4, author),
+         description = COALESCE(?5, description), country = COALESCE(?6, country),
+         province_state = COALESCE(?7, province_state), city = COALESCE(?8, city),
+         sublocation = COALESCE(?9, sublocation), updated_at = ?10 WHERE id = ?1",
+        params![
+            asset_id,
+            i64::from(rating),
+            color_label,
+            author,
+            description,
+            country,
+            province_state,
+            city,
+            sublocation,
+            now_ms
+        ],
+    )?;
+    crate::store::fts::refresh_asset(conn, asset_id)?;
+    Ok(())
+}
+
 /// 读全库的文件记录（含已标缺失的）。
 ///
 /// 十万张照片这个量级下一次读全部也就几十毫秒，换来的是差分算法可以完全在内存里
@@ -218,6 +257,16 @@ pub fn update_stat(
     Ok(())
 }
 
+/// 差分扫描与 AI 调度共用同一身份写入，不按路径冒认原片。
+pub fn update_identity(conn: &Connection, row_id: i64, identity: Option<FileId>) -> Result<()> {
+    let (volume, identity) = match identity.filter(|id| !id.is_zero()) {
+        Some(id) => (Some(id.volume_serial as i64), Some(id.file_id.to_vec())),
+        None => (None, None),
+    };
+    conn.execute("UPDATE asset_files SET volume_serial=?1,file_id=?2 WHERE id=?3 AND (volume_serial IS NOT ?1 OR file_id IS NOT ?2)", params![volume,identity,row_id])?;
+    Ok(())
+}
+
 /// 标记缺失（幂等：已经有了就不动，保留最早发现的时间）。
 pub fn mark_missing(conn: &Connection, row_id: i64, now_ms: i64) -> Result<()> {
     conn.execute(
@@ -249,6 +298,10 @@ pub struct ApplyOutcome {
     pub missing: usize,
     /// 推测配对（[`Evidence::Heuristic`]）的条数 —— UI 该给出「可能是重命名」的措辞。
     pub heuristic: usize,
+    /// 本批**真创建**的资产：`(asset_id, 库内相对路径)`。sidecar 采纳用
+    /// （`specs/xmp-sidecar.md` §7 —— 往已有资产上补文件不算）。
+    pub new_asset_rows: Vec<(i64, String)>,
+    pub ai_invalidated: Vec<i64>,
 }
 
 impl ApplyOutcome {
@@ -310,6 +363,13 @@ pub fn apply_diff(
             None => {
                 let id = insert_asset(conn, now_ms)?;
                 out.new_assets += 1;
+                out.new_asset_rows.push((
+                    id,
+                    group
+                        .files
+                        .first()
+                        .map_or_else(String::new, |&idx| disk[idx].rel_path.clone()),
+                ));
                 id
             }
         };
@@ -361,15 +421,7 @@ pub fn apply_diff(
         .chain(plan.renamed.iter().map(|r| (r.row_id, r.disk_index)))
     {
         if let Some(file) = disk.get(index) {
-            let (volume, identity) = match file.identity.filter(|id| !id.is_zero()) {
-                Some(id) => (Some(id.volume_serial as i64), Some(id.file_id.to_vec())),
-                None => (None, None),
-            };
-            conn.execute(
-                "UPDATE asset_files SET volume_serial = ?1, file_id = ?2 WHERE id = ?3
-                AND (volume_serial IS NOT ?1 OR file_id IS NOT ?2)",
-                params![volume, identity, row_id],
-            )?;
+            update_identity(conn, row_id, file.identity)?;
         }
     }
 
@@ -379,6 +431,17 @@ pub fn apply_diff(
         out.missing += 1;
     }
 
+    // 复用差分的受影响文件集合；不扫描全库、不因路径或编辑变化失效 AI。
+    let rows: std::collections::BTreeSet<i64> = plan.modified.iter().chain(&plan.returned).map(|m|m.row_id)
+        .chain(plan.renamed.iter().map(|r|r.row_id)).chain(plan.missing.iter().copied()).collect();
+    let mut affected=Vec::new();
+    for row_id in rows { affected.push(conn.query_row("SELECT asset_id FROM asset_files WHERE id=?1",[row_id],|r|r.get(0))?); }
+    for row in &out.new_asset_rows { affected.push(row.0); }
+    // 新 SOOC 加到已有 RAW 资产时，来源优先级会变化。
+    for group in group_new_files(plan,disk) { if let Some(id)=find_asset_for_group(conn,&group.dir_folded,&group.stem_folded)? {affected.push(id);} }
+    for id in affected.into_iter().collect::<std::collections::BTreeSet<_>>() {
+        if crate::ai::source::reconcile(conn,&[id])? > 0 {out.ai_invalidated.push(id);}
+    }
     Ok(out)
 }
 
@@ -636,6 +699,77 @@ mod tests {
             volume_serial: 7,
             file_id: bytes,
         }
+    }
+
+    #[test]
+    fn apply_sidecar_metadata_writes_present_fields() {
+        let conn = catalog();
+        conn.execute_batch("INSERT INTO assets(id, imported_at, updated_at) VALUES(1,1,1);")
+            .unwrap();
+        apply_sidecar_metadata(
+            &conn,
+            1,
+            4,
+            Some("green"),
+            Some("崔总"),
+            Some("雨后的湖"),
+            Some("中国"),
+            Some("浙江"),
+            Some("杭州"),
+            Some("西湖"),
+            T0,
+        )
+        .unwrap();
+        let row: (i64, String, String, String, String, String, String, String) = conn
+            .query_row(
+                "SELECT rating, color_label, author, description, country, province_state, city, sublocation \
+                 FROM assets WHERE id = 1",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(row.0, 4);
+        assert_eq!(row.1, "green");
+        assert_eq!(row.2, "崔总");
+        assert_eq!(row.3, "雨后的湖");
+        assert_eq!(row.4, "中国");
+        assert_eq!(row.5, "浙江");
+        assert_eq!(row.6, "杭州");
+        assert_eq!(row.7, "西湖");
+    }
+
+    #[test]
+    fn new_asset_rows_only_track_real_creation() {
+        let conn = catalog();
+        // 位图 + 同主体 RAW 一次进来：一个新资产，两条新文件
+        let out = round(
+            &conn,
+            &[
+                disk("photos/2026/a.jpg", 10, T0),
+                disk("photos/2026/_RAW/a.orf", 20, T0),
+            ],
+            T0,
+        );
+        assert_eq!(out.new_assets, 1);
+        assert_eq!(out.new_asset_rows.len(), 1);
+        let (asset_id, rel) = &out.new_asset_rows[0];
+        assert!(rel.starts_with("photos/2026/a.jpg"));
+        // 再来一个同主体的另一扩展名位图：不新建资产
+        let out = round(&conn, &[disk("photos/2026/a.png", 30, T0)], T0 + 1);
+        assert_eq!(out.new_assets, 0);
+        assert!(out.new_asset_rows.is_empty());
+        let _ = asset_id;
     }
 
     /// 跑一轮「扫描 → 差分 → 落库」，返回落库结果。
@@ -1031,4 +1165,17 @@ mod tests {
         let again = round(&conn, &files, T0 + 1);
         assert_eq!(again.total(), 0);
     }
+
+    #[test]
+    fn sidecar_missing_fields_preserve_metadata_and_refresh_search() {
+        let conn = catalog();
+        conn.execute_batch("INSERT INTO assets(id, imported_at, updated_at, rating, author, description, city) VALUES(1,1,1,3,'原作者','旧说明','杭州');").unwrap();
+        crate::store::fts::rebuild(&conn).unwrap();
+        apply_sidecar_metadata(&conn, 1, 0, None, None, Some("新的湖边说明"), None, None, None, None, T0).unwrap();
+        let row: (i64, String, String, String) = conn.query_row("SELECT rating, author, description, city FROM assets WHERE id=1", [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))).unwrap();
+        assert_eq!(row, (3, "原作者".into(), "新的湖边说明".into(), "杭州".into()));
+        let found: i64 = conn.query_row("SELECT count(*) FROM assets_fts WHERE assets_fts MATCH '湖边说明'", [], |row| row.get(0)).unwrap();
+        assert_eq!(found, 1);
+    }
+
 }

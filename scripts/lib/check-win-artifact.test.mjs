@@ -6,9 +6,10 @@ test('自重启模式不依赖第二份 worker，但协议或前端缺失仍拒�
  mkdirSync(join(root,'dist/splash'),{recursive:true});mkdirSync(join(root,'crates/raybend/src/raw'),{recursive:true});
  writeFileSync(join(root,'dist/index.html'),'<script src="assets/main.js"></script>');writeFileSync(join(root,'dist/splash.html'),'splash/splash-');writeFileSync(join(root,'dist/splash/splash-cn.webp'),'image fixture');
  writeFileSync(join(root,'crates/raybend/src/raw/worker.rs'),'pub const PROTOCOL_TAG: &str = "proto-current";');
- const exe=join(root,'app.exe');const write=text=>{writeFileSync(exe,text);const future=new Date(Date.now()+5000);utimesSync(exe,future,future);};
+ const exe=join(root,'app.exe');const write=text=>{writeFileSync(exe,text+' raybend-photo-ai-build-v1=off');const future=new Date(Date.now()+5000);utimesSync(exe,future,future);};
+ writeFileSync(join(root,'raybend-ai-build.json'),JSON.stringify({schema:1,ai:{enabled:false}}));
  const run=mode=>execFileSync(process.execPath,[checker],{cwd:root,encoding:'utf8',stdio:['ignore','pipe','pipe'],env:{...process.env,WIN_DIST:'dist',WIN_EXE:exe,WIN_WORKER_MODE:mode}});
- write('assets/main.js splash/splash-cn.webp proto-current');assert.match(run('self'),/主程序自重启/);assert.throws(()=>run('standalone'));
+ write('assets/main.js splash/splash-cn.webp proto-current');assert.match(run('self'),/主程序自重启/);mkdirSync(join(root,'ai-runtime'));assert.throws(()=>run('self'));rmSync(join(root,'ai-runtime'),{recursive:true});writeFileSync(join(root,'raybend-ai-build.json'),JSON.stringify({schema:1,ai:{enabled:true}}));assert.throws(()=>run('self'));writeFileSync(join(root,'raybend-ai-build.json'),JSON.stringify({schema:1,ai:{enabled:false}}));assert.throws(()=>run('standalone'));
  write('assets/main.js splash/splash-cn.webp proto-old');assert.throws(()=>run('self'));
  write('assets/old.js splash/splash-cn.webp proto-current');assert.throws(()=>run('self'));
  }finally{rmSync(root,{recursive:true,force:true});}

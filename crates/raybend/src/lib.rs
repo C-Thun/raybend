@@ -19,6 +19,8 @@
 //! - [`display`]：**统一取图口**（位图 / RAW 两个后端，服务 view 与缩略图缓存，M2-W2）
 //! - [`develop`]：**显影**（参数模型 / 色彩数学 / 曲线 / 管线，M3-W3）
 
+pub mod ai;
+pub mod color;
 pub mod develop;
 pub mod display;
 pub mod export;
@@ -32,9 +34,12 @@ pub mod render;
 pub mod repo;
 pub mod store;
 pub mod thumbnail;
+pub mod xmp;
 
+mod worker_process;
 mod error;
 mod fs_atomic;
+mod fs_asset;
 
 pub use error::{Error, Result};
 

@@ -119,8 +119,32 @@ pub(crate) fn is_tiff_family(bytes: &[u8]) -> bool {
     family_order(bytes).is_some()
 }
 
+/// 厂商 MakerNote（EXIF 0x927C）—— Olympus / OM System 的 ORF 预览就住在这里。
+const TAG_MAKER_NOTE: u16 = 0x927c;
+
+/// 单个内嵌 JPEG 的**上限**（`read()` 那边还会按 16 MiB 与文件长度再筛一次）。
+/// 这里只是不让一个坏标签把长度撑成天文数字。
+const JPEG_SPAN_LIMIT: usize = 64 * 1024 * 1024;
+
+/// TIFF 的 JPEG 压缩值（`Compression`）：6 = 旧式 JPEG，7 = 新式 JPEG。
+const COMPRESSION_JPEG: [i64; 2] = [6, 7];
+/// `PhotometricInterpretation` 的两个「这是真 RAW」取值：CFA 与 LinearRaw。
+/// 它们也可能是 JPEG 压缩（lossless JPEG）的，不能当预览。
+const PHOTOMETRIC_CFA: i64 = 32803;
+const PHOTOMETRIC_LINEAR_RAW: i64 = 34892;
+
 /// 内嵌 JPEG 的位置；复用同一份 TIFF 类型/字节序解析，不读取传感器数据。
 /// 只走有界头部内的 IFD 链和 SubIFD，偏移循环、越界或过大的目录直接略过。
+///
+/// 认得四种写法：标准 `0x0201/0x0202`、Panasonic `0x002e JpgFromRaw`、
+/// **JPEG 压缩的整块 strip**（DNG / 3FR：`Compression=6/7` + `0x0111/0x0117`，
+/// 排除 CFA/LinearRaw 的真 RAW 条带）、以及 Olympus 厂商 MakerNote（见
+/// [`olympus_maker_note_spans`]）。
+///
+/// **大的在前**（`sort` 是倒序）：调用方 [`crate::media::embedded::read`] 取第一个能解开的，
+/// 而小图请求（网格 384 / 胶片带 192 / AI 224）要的是「缩下去」而不是「放大上来」——
+/// 一张 160×120 放大到 tile 只会糊。ORF 的 3200×2400 预览与 160×120 缩略图同时存在，
+/// 就是靠这条规则拿到大的那张。
 pub(crate) fn embedded_jpeg_spans(bytes: &[u8]) -> Vec<(u64, usize)> {
     let Some(order) = family_order(bytes) else { return Vec::new() };
     let mut pending = vec![order.u32(bytes, 4).unwrap_or(0) as usize];
@@ -132,10 +156,19 @@ pub(crate) fn embedded_jpeg_spans(bytes: &[u8]) -> Vec<(u64, usize)> {
         let Some(count) = order.u16(bytes, offset).map(usize::from).filter(|n| *n <= MAX_ENTRIES) else { continue };
         let Some(entries) = read_ifd(bytes, order, offset) else { continue };
         let (mut start, mut len) = (None, None);
+        // JPEG 压缩的「整块条带」预览（DNG / 3FR / 部分厂商）：
+        // Compression=6/7 且不是 CFA/LinearRaw —— 真 RAW 也用 JPEG 系 lossless 压缩，
+        // 不排掉它就会拿传感器条带当预览（实测 Sigma fp DNG 的 raw 条带 28 MB）。
+        let (mut compression, mut photometric) = (None, None);
+        let (mut strip_start, mut strip_len) = (None, None);
         for entry in entries {
             match entry.tag {
                 0x0201 => start = entry.int_value(order),
                 0x0202 => len = entry.int_value(order),
+                0x0103 if entry.count == 1 => compression = entry.int_value(order),
+                0x0106 if entry.count == 1 => photometric = entry.int_value(order),
+                0x0111 if entry.count == 1 => strip_start = entry.int_value(order),
+                0x0117 if entry.count == 1 => strip_len = entry.int_value(order),
                 // Panasonic JpgFromRaw: UNDEFINED payload, offset in the value slot.
                 0x002e if entry.field_type == 7 && entry.count > 4 => {
                     if let Some(at) = order.u32(&entry.value_bytes, 0) {
@@ -149,16 +182,155 @@ pub(crate) fn embedded_jpeg_spans(bytes: &[u8]) -> Vec<(u64, usize)> {
                         }
                     }
                 }
+                // Exif 子 IFD：绝大多数厂商的 MakerNote 在这里，必须走下去
+                TAG_EXIF_IFD => {
+                    if let Some(at) = entry.int_value(order).and_then(|v| usize::try_from(v).ok()) {
+                        pending.push(at);
+                    }
+                }
+                // Olympus / OM System：预览图不在标准 IFD 里，而在厂商 MakerNote 里
+                TAG_MAKER_NOTE if entry.field_type == 7 && entry.count > 4 => {
+                    if let Some(at) = order.u32(&entry.value_bytes, 0) {
+                        spans.extend(olympus_maker_note_spans(bytes, order, at as usize));
+                    }
+                }
                 _ => {}
             }
         }
         if let (Some(start), Some(len)) = (start, len)
             && start > 0 && len > 0 { spans.push((start as u64, len as usize)); }
+        if compression.is_some_and(|value| COMPRESSION_JPEG.contains(&value))
+            && !matches!(photometric, Some(PHOTOMETRIC_CFA | PHOTOMETRIC_LINEAR_RAW))
+            && let (Some(start), Some(len)) = (strip_start, strip_len)
+            && start > 0 && len > 0
+        {
+            spans.push((start as u64, len as usize));
+        }
         if let Some(at) = order.u32(bytes, offset + 2 + count * 12) { pending.push(at as usize); }
     }
-    spans.sort_unstable_by_key(|(_, len)| *len);
+    spans.sort_unstable_by_key(|(_, len)| std::cmp::Reverse(*len));
     spans.dedup();
     spans
+}
+
+/// MakerNote 自己的字节序标记（`OLYMPUS\0` / `OM SYSTEM\0` 后面那两字节）。
+fn maker_note_order(note: &[u8], at: usize) -> Option<ByteOrder> {
+    match note.get(at..at + 2)? {
+        b"II" => Some(ByteOrder::Little),
+        b"MM" => Some(ByteOrder::Big),
+        _ => None,
+    }
+}
+
+/// 「MakerNote 相对偏移 + 长度」→ 绝对区间；正负离谱或超限一律 `None`。
+fn checked_span(base: usize, offset: i64, len: i64) -> Option<(u64, usize)> {
+    if offset <= 0 || len < 4 { return None; }
+    let at = base.checked_add(usize::try_from(offset).ok()?)?;
+    let len = usize::try_from(len).ok()?;
+    (len <= JPEG_SPAN_LIMIT).then_some((at as u64, len))
+}
+
+/// 只认「单值整数」（SHORT/LONG，count=1）。厂商段里同编号的数组用法很多
+/// —— 例：ImageProcessing 的 0x0100/0x0101/0x0102 是 `WB_RBLevels` 这类 count=4 的数组，
+/// 不筛就会拿数组第一项当偏移/长度，白读一大段。
+fn single_int(entry: Entry, order: ByteOrder) -> Option<i64> {
+    (matches!(entry.field_type, 3 | 4) && entry.count == 1)
+        .then(|| entry.int_value(order))
+        .flatten()
+}
+
+/// Olympus / OM System 厂商 MakerNote 里的内嵌 JPEG。
+///
+/// ORF **不写**标准 TIFF 的 `0x0201/0x0202`（缩略图指针）。奥林巴斯把图放在这里：
+///
+/// * 主 IFD 的 `0x0100 ThumbnailImage` —— 160×120 小图（UNDEFINED，值槽是偏移）；
+/// * CameraSettings 子 IFD 的 `0x0100/0x0101/0x0102` =
+///   `PreviewImageValid/Start/Length` —— 大预览（E-M5 Mark II 实测 3200×2400）；
+/// * 新机型也可能写在主 IFD 的 `0x1035/0x1036/0x1037`（ExifTool 同一组标签的新位置）。
+///
+/// 偏移语义照 ExifTool 的 `MakerNoteOlympus2/3`：`OLYMPUS\0`（IFD 在 +12）与
+/// `OM SYSTEM\0`（+16）的**所有偏移都相对 MakerNote 起点**。实测（2026-10-05，
+/// `/mnt/c/src/tmp/pic/AM300135.ORF`）：`PreviewImageStart=48652` + MakerNote 起点 3572
+/// = 文件 offset 52224 —— 正是那张 3200×2400 JPEG 的 SOI。
+/// 老式 `OLYMP\0`（IFD 在 +8，E-1/E-300 那代）没有 Base 覆盖，偏移按文件起点解释。
+///
+/// 依据：ExifTool `Image::ExifTool::MakerNotes` 的 MakerNoteOlympus2/3 与
+/// `Olympus::Main` / `Olympus::CameraSettings` 标签表
+/// （https://exiftool.sourceforge.net/TagNames/Olympus.html）。
+///
+/// 全程 `bytes.get`，MakerNote 签名/起点/子 IFD/条目数任何一步越界就返回空 ——
+/// RAW 是不可信输入，坏文件不许 panic。
+fn olympus_maker_note_spans(bytes: &[u8], outer: ByteOrder, note_at: usize) -> Vec<(u64, usize)> {
+    let Some(note) = bytes.get(note_at..) else { return Vec::new() };
+    let (ifd_at, base, order) = if note.starts_with(b"OLYMPUS\0") {
+        (note_at + 12, note_at, maker_note_order(note, 8).unwrap_or(outer))
+    } else if note.starts_with(b"OM SYSTEM\0") {
+        (note_at + 16, note_at, maker_note_order(note, 12).unwrap_or(outer))
+    } else if note.starts_with(b"OLYMP\0") {
+        (note_at + 8, 0, outer)
+    } else {
+        return Vec::new();
+    };
+    let Some(entries) = read_ifd(bytes, order, ifd_at) else { return Vec::new() };
+    let mut spans = Vec::new();
+    let mut sub_ifds = Vec::new();
+    let (mut valid, mut start, mut len) = (None, None, None);
+    for entry in entries {
+        match entry.tag {
+            // ThumbnailImage：UNDEFINED，>4 字节时值槽是偏移
+            0x0100 if entry.field_type == 7 && entry.count > 4 => {
+                if let Some(at) = order.u32(&entry.value_bytes, 0)
+                    && let Some(span) = checked_span(base, i64::from(at), entry.count as i64)
+                {
+                    spans.push(span);
+                }
+            }
+            0x1035 => valid = single_int(entry, order),
+            0x1036 => start = single_int(entry, order),
+            0x1037 => len = single_int(entry, order),
+            // 子 IFD 指针（Equipment / CameraSettings / RawDevelopment / …）：
+            // 新版是 IFD(13)，被旧 ExifTool 改写过的可能变成 LONG(4)
+            0x2010..=0x2050 if matches!(entry.field_type, 4 | 13) && entry.count <= 1 => {
+                if let Some(at) = order.u32(&entry.value_bytes, 0)
+                    && let Some(at) = base.checked_add(at as usize)
+                {
+                    sub_ifds.push(at);
+                }
+            }
+            _ => {}
+        }
+    }
+    push_makernote_preview(&mut spans, base, valid, start, len);
+    for ifd in sub_ifds.into_iter().take(8) {
+        let Some(entries) = read_ifd(bytes, order, ifd) else { continue };
+        let (mut valid, mut start, mut len) = (None, None, None);
+        for entry in entries {
+            match entry.tag {
+                0x0100 => valid = single_int(entry, order),
+                0x0101 => start = single_int(entry, order),
+                0x0102 => len = single_int(entry, order),
+                _ => {}
+            }
+        }
+        push_makernote_preview(&mut spans, base, valid, start, len);
+    }
+    spans
+}
+
+/// `PreviewImageValid/Start/Length` 三件套都齐了才算数（`Valid` 缺省当「有」）。
+fn push_makernote_preview(
+    spans: &mut Vec<(u64, usize)>,
+    base: usize,
+    valid: Option<i64>,
+    start: Option<i64>,
+    len: Option<i64>,
+) {
+    if valid == Some(0) { return; }
+    if let (Some(start), Some(len)) = (start, len)
+        && let Some(span) = checked_span(base, start, len)
+    {
+        spans.push(span);
+    }
 }
 
 /// Read typed EXIF/GPS/XMP fields from the same IFD families as parse/read_fields.
@@ -1048,5 +1220,236 @@ mod tests {
             info.datetime.is_some(),
             "样本的拍摄时间应当读得出来：{info:?}"
         );
+    }
+
+    /// 往 IFD 里写一条 12 字节的条目（小端）。
+    fn put_le_entry(out: &mut [u8], at: usize, tag: u16, field_type: u16, count: u32, value: u32) {
+        out[at..at + 2].copy_from_slice(&tag.to_le_bytes());
+        out[at + 2..at + 4].copy_from_slice(&field_type.to_le_bytes());
+        out[at + 4..at + 8].copy_from_slice(&count.to_le_bytes());
+        out[at + 8..at + 12].copy_from_slice(&value.to_le_bytes());
+    }
+
+    /// 合成一个「ORF + Olympus MakerNote」的最小文件（小端）。
+    ///
+    /// `synth_orf` 的布局照真实样本（`AM300135.ORF`）简化而来：
+    /// IFD0 →(0x8769) Exif → (0x927C) MakerNote「OLYMPUS\0II\x03\0」+ 主 IFD。
+    /// 主 IFD 里一定有 `0x0100 ThumbnailImage`（160×120 那张小图）；
+    /// 大预览按 `via_main_tags` 二选一：
+    ///   * `false`：CameraSettings 子 IFD（0x2020）的 `0x0100/0x0101/0x0102`（E-M5 Mark II 写法）
+    ///   * `true` ：主 IFD 的 `0x1035/0x1036/0x1037`（ExifTool 记的另一种写法）
+    ///
+    /// 返回（文件字节，预览图绝对偏移，预览图长度）—— 偏移**相对 MakerNote 起点**，
+    /// 正是要验证的那条语义。
+    #[allow(clippy::too_many_lines)]
+    fn synth_orf(
+        thumb: &[u8],
+        preview: &[u8],
+        valid: u32,
+        via_main_tags: bool,
+    ) -> (Vec<u8>, usize, usize) {
+        const IFD0: usize = 8;
+        const EXIF: usize = 26;
+        const NOTE: usize = 44;
+        const SIGNATURE: usize = 12;
+        // CameraSettings 子 IFD：count + 3 条 + next
+        const CS_SIZE: usize = 2 + 3 * 12 + 4;
+        let main_entries = if via_main_tags { 4 } else { 2 };
+        let main_ifd = NOTE + SIGNATURE;
+        let thumb_at = main_ifd + 2 + main_entries * 12 + 4;
+        let preview_at = if via_main_tags {
+            thumb_at + thumb.len()
+        } else {
+            thumb_at + thumb.len() + CS_SIZE
+        };
+        let note_len = preview_at + preview.len() - NOTE;
+
+        let mut out = vec![0u8; preview_at + preview.len()];
+        out[0..2].copy_from_slice(b"II");
+        out[2..4].copy_from_slice(&MAGIC_ORF_RO.to_le_bytes());
+        out[4..8].copy_from_slice(&(IFD0 as u32).to_le_bytes());
+        // IFD0 → Exif IFD → MakerNote
+        out[IFD0..IFD0 + 2].copy_from_slice(&1u16.to_le_bytes());
+        put_le_entry(&mut out, IFD0 + 2, TAG_EXIF_IFD, 4, 1, EXIF as u32);
+        out[EXIF..EXIF + 2].copy_from_slice(&1u16.to_le_bytes());
+        put_le_entry(
+            &mut out,
+            EXIF + 2,
+            TAG_MAKER_NOTE,
+            7,
+            note_len as u32,
+            NOTE as u32,
+        );
+        out[NOTE..NOTE + SIGNATURE].copy_from_slice(b"OLYMPUS\0II\x03\0");
+        out[main_ifd..main_ifd + 2].copy_from_slice(&(main_entries as u16).to_le_bytes());
+        // 主 IFD 第一條：小缩略图（值槽 = 相对 NOTE 的偏移）
+        put_le_entry(
+            &mut out,
+            main_ifd + 2,
+            0x0100,
+            7,
+            thumb.len() as u32,
+            (thumb_at - NOTE) as u32,
+        );
+        let second = main_ifd + 2 + 12;
+        if via_main_tags {
+            put_le_entry(&mut out, second, 0x1035, 4, 1, valid);
+            put_le_entry(&mut out, second + 12, 0x1036, 4, 1, (preview_at - NOTE) as u32);
+            put_le_entry(&mut out, second + 24, 0x1037, 4, 1, preview.len() as u32);
+        } else {
+            let cs_at = thumb_at + thumb.len();
+            put_le_entry(&mut out, second, 0x2020, 13, 1, (cs_at - NOTE) as u32);
+            out[cs_at..cs_at + 2].copy_from_slice(&3u16.to_le_bytes());
+            put_le_entry(&mut out, cs_at + 2, 0x0100, 4, 1, valid);
+            put_le_entry(
+                &mut out,
+                cs_at + 14,
+                0x0101,
+                4,
+                1,
+                (preview_at - NOTE) as u32,
+            );
+            put_le_entry(&mut out, cs_at + 26, 0x0102, 4, 1, preview.len() as u32);
+        }
+        out[thumb_at..thumb_at + thumb.len()].copy_from_slice(thumb);
+        out[preview_at..preview_at + preview.len()].copy_from_slice(preview);
+        (out, preview_at, preview.len())
+    }
+
+    /// 合成一个「DNG 形状」的最小文件：IFD0 是 **CFA 原始条带**（Compression=7 —— 真 RAW 也用
+    /// JPEG 系 lossless 压缩，正是要排除的那种），SubIFD 是 **JPEG 预览条带**（Photometric=YCbCr）。
+    /// 返回（字节，预览偏移，预览长度）。
+    fn synth_dng_with_strip_preview(
+        preview: &[u8],
+        raw_photometric: i64,
+    ) -> (Vec<u8>, usize, usize) {
+        const IFD0: usize = 8;
+        const IFD0_ENTRIES: usize = 5;
+        const SUB_ENTRIES: usize = 4;
+        let sub_ifd = IFD0 + 2 + IFD0_ENTRIES * 12 + 4;
+        let raw_at = sub_ifd + 2 + SUB_ENTRIES * 12 + 4;
+        let raw_len = 32usize;
+        let preview_at = raw_at + raw_len;
+        let mut out = vec![0u8; preview_at + preview.len()];
+        out[0..2].copy_from_slice(b"II");
+        out[2..4].copy_from_slice(&MAGIC_TIFF.to_le_bytes());
+        out[4..8].copy_from_slice(&(IFD0 as u32).to_le_bytes());
+        // IFD0 = 真 RAW 条带（Photometric 由调用方给：CFA / LinearRaw）
+        out[IFD0..IFD0 + 2].copy_from_slice(&(IFD0_ENTRIES as u16).to_le_bytes());
+        put_le_entry(&mut out, IFD0 + 2, 0x0103, 3, 1, 7);
+        put_le_entry(&mut out, IFD0 + 14, 0x0106, 3, 1, raw_photometric as u32);
+        put_le_entry(&mut out, IFD0 + 26, 0x0111, 4, 1, raw_at as u32);
+        put_le_entry(&mut out, IFD0 + 38, 0x0117, 4, 1, raw_len as u32);
+        put_le_entry(&mut out, IFD0 + 50, 0x014a, 4, 1, sub_ifd as u32);
+        // SubIFD = JPEG 预览条带
+        out[sub_ifd..sub_ifd + 2].copy_from_slice(&(SUB_ENTRIES as u16).to_le_bytes());
+        put_le_entry(&mut out, sub_ifd + 2, 0x0103, 3, 1, 7);
+        put_le_entry(&mut out, sub_ifd + 14, 0x0106, 3, 1, 6); // YCbCr
+        put_le_entry(&mut out, sub_ifd + 26, 0x0111, 4, 1, preview_at as u32);
+        put_le_entry(&mut out, sub_ifd + 38, 0x0117, 4, 1, preview.len() as u32);
+        // 真 RAW 条带故意也以 FFD8 开头 —— 只看魔术字节会误判成预览
+        out[raw_at] = 0xff;
+        out[raw_at + 1] = 0xd8;
+        out[preview_at..preview_at + preview.len()].copy_from_slice(preview);
+        (out, preview_at, preview.len())
+    }
+
+    /// ORF 的预览图在厂商 MakerNote 里，且**相对 MakerNote 起点**；
+    /// 3200×2400 那张必须排在小缩略图前面（小图放大到 384 只会糊）。
+    #[test]
+    fn orf_maker_note_preview_is_found_and_beats_the_tiny_thumbnail() {
+        let thumb = [0xff, 0xd8, 0xff, 0xd9, 1, 2, 3, 4];
+        let preview = [0xff, 0xd8, 0xff, 0xd9, 9, 8, 7, 6, 5, 4, 3, 2];
+        for via_main_tags in [false, true] {
+            let (bytes, preview_at, preview_len) = synth_orf(&thumb, &preview, 1, via_main_tags);
+            let spans = embedded_jpeg_spans(&bytes);
+            assert_eq!(
+                spans.first(),
+                Some(&(preview_at as u64, preview_len)),
+                "大预览要排在最前面（via_main_tags={via_main_tags}）：{spans:?}"
+            );
+            assert!(
+                spans.iter().any(|(_, len)| *len == thumb.len()),
+                "小图要保留在列表里兜底：{spans:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn orf_preview_is_read_end_to_end() {
+        use crate::media::embedded;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("竖片样片.ORF");
+        let thumb = [0xff, 0xd8, 0xff, 0xd9, 1, 2, 3, 4];
+        let preview = vec![0xff, 0xd8, 0xff, 0xd9, 5, 6, 7, 8, 9, 10, 11, 12];
+        let (bytes, _, _) = synth_orf(&thumb, &preview, 1, false);
+        std::fs::write(&path, &bytes).unwrap();
+        let found = embedded::read(&path).expect("应当找到内嵌预览");
+        assert_eq!(found.bytes, preview, "要读到大预览那一段，不是小图");
+    }
+
+    #[test]
+    fn orf_maker_note_preview_valid_zero_falls_back_to_the_thumbnail() {
+        let thumb = [0xff, 0xd8, 0xff, 0xd9, 1, 2, 3, 4];
+        let preview = [0xff, 0xd8, 0xff, 0xd9, 9, 8, 7, 6, 5, 4, 3, 2];
+        let (bytes, _, _) = synth_orf(&thumb, &preview, 0, false);
+        let spans = embedded_jpeg_spans(&bytes);
+        assert_eq!(spans, vec![(spans[0].0, thumb.len())], "Valid=0 时只剩小图");
+    }
+
+    #[test]
+    fn foreign_maker_note_is_not_parsed_as_olympus() {
+        let thumb = [0xff, 0xd8, 0xff, 0xd9, 1, 2, 3, 4];
+        let preview = [0xff, 0xd8, 0xff, 0xd9, 9, 8, 7, 6, 5, 4, 3, 2];
+        let (mut bytes, _, _) = synth_orf(&thumb, &preview, 1, false);
+        // 把签名换成别家 —— 别的厂商的 MakerNote 布局完全不同，不能硬按 Olympus 解
+        bytes[44..51].copy_from_slice(b"NOTOLYM");
+        assert!(
+            embedded_jpeg_spans(&bytes).is_empty(),
+            "非 Olympus 签名不许产出任何 span"
+        );
+    }
+
+    #[test]
+    fn dng_strip_preview_is_extracted_and_the_cfa_strip_is_not() {
+        let preview = vec![0xff, 0xd8, 0xff, 0xd9, 5, 6, 7, 8, 9, 10, 11, 12];
+        for raw_photometric in [PHOTOMETRIC_CFA, PHOTOMETRIC_LINEAR_RAW] {
+            let (bytes, preview_at, preview_len) =
+                synth_dng_with_strip_preview(&preview, raw_photometric);
+            let spans = embedded_jpeg_spans(&bytes);
+            assert_eq!(
+                spans,
+                vec![(preview_at as u64, preview_len)],
+                "Photometric={raw_photometric} 的条带是真 RAW，不许当预览"
+            );
+        }
+        // 端到端：`read()` 拿到的就是预览那一段（不是那个也以 FFD8 开头的 raw 条带）
+        let (bytes, _, _) = synth_dng_with_strip_preview(&preview, PHOTOMETRIC_CFA);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("样片.DNG");
+        std::fs::write(&path, &bytes).unwrap();
+        assert_eq!(
+            super::super::embedded::read(&path).unwrap().bytes,
+            preview
+        );
+    }
+
+    #[test]
+    fn parses_a_real_orf_preview_when_the_sample_is_present() {
+        // 样本在这台机器上（`AGENTS.md` 记的样本目录）；别的机器上跳过。
+        let path = std::path::Path::new("/mnt/c/src/tmp/pic/AM300135.ORF");
+        if !path.exists() {
+            return;
+        }
+        let found = super::super::embedded::read(path).expect("真 ORF 应当找得到内嵌预览");
+        assert!(found.bytes.starts_with(&[0xff, 0xd8]));
+        assert!(
+            found.bytes.len() > 1_000_000,
+            "要的是 3200×2400 那张大预览（实测 1096496 B），不是 160×120：{} B",
+            found.bytes.len()
+        );
+        let image = image::load_from_memory_with_format(&found.bytes, image::ImageFormat::Jpeg)
+            .expect("预览图要能解码");
+        assert_eq!((image.width(), image.height()), (3200, 2400));
     }
 }

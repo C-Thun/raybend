@@ -140,3 +140,11 @@ export async function reconcileOrganization(repositoryIds: string[]): Promise<Re
     ? invokeBrowseCommand("organization_reconcile", { repositoryIds })
     : { processedBatches: 0, failedRepositories: [] };
 }
+
+
+export interface AiTagEvidence { conceptKey: string; tagName: string; score: number; accepted: boolean }
+export interface AiTagResult { sourceKey: string; modelSha256: string; pipelineSha256: string; generatedAt: number; origin: "local" | "sidecar"; valid: boolean; evidence: AiTagEvidence[] }
+export interface PhotoTagState { version: number; manual: string[]; ai: string[]; masks: string[]; result: AiTagResult | null }
+export async function photoTagState(repositoryId: string, assetId: number): Promise<PhotoTagState | null> {
+  return isTauriRuntime() ? invokeBrowseCommand("organization_photo_tag_state", { repositoryId, assetId }) : null;
+}

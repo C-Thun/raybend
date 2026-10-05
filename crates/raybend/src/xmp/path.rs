@@ -1,4 +1,4 @@
-//! Sidecar 的**路径规则**（`specs/xmp-w1.md` §3.1）—— 全项目唯一一处实现。
+//! Sidecar 的**路径规则**（`specs/xmp-sidecar.md` §3.1）—— 全项目唯一一处实现。
 //!
 //! ```text
 //! sidecar_path(asset) = <照片目录>/<主体名>.xmp
@@ -19,20 +19,18 @@ use crate::store::assets::{FileRow, normalize_raw_dir};
 /// 退回任一记录（路径还在库里，写出去总能对上）。
 #[must_use]
 pub fn sidecar_rel_path(files: &[FileRow]) -> Option<String> {
-    let pick = |role: &str| {
-        files
-            .iter()
-            .filter(|file| file.role == role && file.ext != "xmp")
-            .find(|file| !file.missing)
-            .or_else(|| {
-                files
-                    .iter()
-                    .find(|file| file.role == role && file.ext != "xmp")
-            })
-            .map(|file| file.rel_path.clone())
+    let pick = |role: &str, online_only: bool| {
+        files.iter().find(|file| {
+            file.role == role
+                && !file.ext.eq_ignore_ascii_case("xmp")
+                && (!online_only || !file.missing)
+        })
     };
-    let rel = pick("bitmap").or_else(|| pick("raw"))?;
-    rel_sidecar_of(&rel)
+    let file = pick("bitmap", true)
+        .or_else(|| pick("raw", true))
+        .or_else(|| pick("bitmap", false))
+        .or_else(|| pick("raw", false))?;
+    rel_sidecar_of(&file.rel_path)
 }
 
 /// 由一个**库内相对路径**推出 sidecar 的相对路径（`_RAW/` 折算 + 去扩展名 + `.xmp`）。
@@ -40,9 +38,9 @@ pub fn sidecar_rel_path(files: &[FileRow]) -> Option<String> {
 /// 单独公开是因为删除照片（`store::delete`）与导入采纳拿到的就是文件路径，而不是文件行。
 #[must_use]
 pub fn rel_sidecar_of(rel_path: &str) -> Option<String> {
-    let (dir, name) = rel_path.rsplit_once('/')?;
-    let stem = crate::media::kind::extension(name)
-        .map_or(name, |ext| &name[..name.len() - ext.len() - 1]);
+    let (dir, name) = rel_path.rsplit_once('/').unwrap_or(("", rel_path));
+    let stem =
+        crate::media::kind::extension(name).map_or(name, |ext| &name[..name.len() - ext.len() - 1]);
     if stem.is_empty() {
         return None;
     }
@@ -60,26 +58,64 @@ pub fn rel_sidecar_of(rel_path: &str) -> Option<String> {
 /// 找不到返回 `None`（大多数照片旁边本来就没有 sidecar，这是常态而不是错误）。
 #[must_use]
 pub fn probe_sidecar(file_abs: &std::path::Path) -> Option<std::path::PathBuf> {
-    let dir = file_abs.parent()?;
+    // 照片在 `_RAW/` 里时，sidecar 在它的上一层（`specs/xmp-sidecar.md` §3.1 的折算规则）
+    let mut dir = file_abs.parent()?.to_path_buf();
+    if dir
+        .file_name()
+        .is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case("_RAW"))
+        && dir.parent().is_some()
+    {
+        dir = dir.parent()?.to_path_buf();
+    }
     let name = file_abs.file_name()?.to_string_lossy().into_owned();
+    // 照片的折叠主体名（不带扩展名）——与位图/RAW 配对同一套口径
     let stem = crate::media::kind::extension(&name)
         .map_or(name.as_str(), |ext| &name[..name.len() - ext.len() - 1]);
-    let wanted = format!("{}.xmp", crate::media::kind::stem_folded(&format!("{stem}.xmp")));
     let direct = dir.join(format!("{stem}.xmp"));
-    if direct.is_file() {
-        return Some(direct);
+    resolve_sidecar(&direct).ok().flatten()
+}
+
+/// 解析实际存在的 sidecar 路径。读回、发布、清空和回收共用大小写折叠规则。
+/// 文件系统错误向上传递，避免读取失败后误当作「不存在」另建文件。
+pub fn resolve_sidecar(path: &std::path::Path) -> crate::Result<Option<std::path::PathBuf>> {
+    match std::fs::metadata(path) {
+        Ok(meta) if meta.is_file() => return Ok(Some(path.to_path_buf())),
+        Ok(_) => return Err(crate::Error::Unsupported("sidecar 路径不是文件".into())),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
     }
-    let entries = std::fs::read_dir(dir).ok()?;
-    for entry in entries.flatten() {
+    let dir = path
+        .parent()
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .unwrap_or(std::path::Path::new("."));
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    let wanted_stem =
+        crate::media::kind::stem_folded(&path.file_name().unwrap_or_default().to_string_lossy());
+    let mut matches = Vec::new();
+    for entry in entries {
+        let entry = entry?;
         let file_name = entry.file_name().to_string_lossy().into_owned();
-        if crate::media::kind::stem_folded(&file_name) == wanted {
+        // 只认 .xmp，且主体名（折叠后）与照片一致
+        if crate::media::kind::extension(&file_name).as_deref() == Some("xmp")
+            && crate::media::kind::stem_folded(&file_name) == wanted_stem
+        {
             let path = entry.path();
             if path.is_file() {
-                return Some(path);
+                matches.push(path);
             }
         }
     }
-    None
+    match matches.len() {
+        0 => Ok(None),
+        1 => Ok(matches.pop()),
+        _ => Err(crate::Error::Unsupported(
+            "多个大小写折叠同名 sidecar，保留文件等待消除歧义".into(),
+        )),
+    }
 }
 
 #[cfg(test)]
@@ -152,16 +188,23 @@ mod tests {
             rel_sidecar_of("photos/旅行/照片 甲.CR3"),
             Some("photos/旅行/照片 甲.xmp".to_string())
         );
-        assert_eq!(rel_sidecar_of("photos/nofile"), None);
+        // 无扩展名的文件：主体名就是全名（罕见，但行为要确定）
+        assert_eq!(
+            rel_sidecar_of("photos/nofile"),
+            Some("photos/nofile.xmp".to_string())
+        );
     }
 
     #[test]
     fn missing_bitmap_falls_back_to_raw() {
         let files = [
-            file("bitmap", "photos/a.JPG", "jpg", true),
-            file("raw", "photos/_RAW/a.ORF", "orf", false),
+            file("bitmap", "photos/offline/a.JPG", "jpg", true),
+            file("raw", "photos/online/_RAW/a.ORF", "orf", false),
         ];
-        assert_eq!(sidecar_rel_path(&files), Some("photos/a.xmp".to_string()));
+        assert_eq!(
+            sidecar_rel_path(&files),
+            Some("photos/online/a.xmp".to_string())
+        );
     }
 
     #[test]
@@ -196,5 +239,36 @@ mod tests {
         let sc = dir.path().join("IMG_0001.xmp");
         std::fs::write(&sc, b"<x/>").unwrap();
         assert_eq!(probe_sidecar(&raw), Some(sc));
+    }
+
+    #[test]
+    fn bare_empty_and_long_unicode_relative_paths() {
+        assert_eq!(rel_sidecar_of(""), None);
+        assert_eq!(rel_sidecar_of("照片.JPG").as_deref(), Some("照片.xmp"));
+        let dir = "旅行/".repeat(200);
+        assert_eq!(
+            rel_sidecar_of(&format!("{dir}照片.CR3")),
+            Some(format!("{dir}照片.xmp"))
+        );
+        let files = [file("sidecar", "photos/a.xmp", "xmp", false)];
+        assert_eq!(sidecar_rel_path(&files), None);
+    }
+
+    #[test]
+    fn fully_offline_asset_keeps_a_sidecar_location() {
+        let files = [
+            file("bitmap", "photos/a.jpg", "jpg", true),
+            file("raw", "photos/_RAW/a.orf", "orf", true),
+        ];
+        assert_eq!(sidecar_rel_path(&files).as_deref(), Some("photos/a.xmp"));
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn ambiguous_folded_names_are_not_overwritten() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("PHOTO.XMP"), "a").unwrap();
+        std::fs::write(dir.path().join("photo.XMP"), "b").unwrap();
+        assert!(resolve_sidecar(&dir.path().join("Photo.xmp")).is_err());
     }
 }

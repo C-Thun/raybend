@@ -9,42 +9,12 @@ pub const MAX_LUT_BYTES: u64 = 128 * 1024 * 1024;
 
 /// 文件身份按原始字节计算，与文件名、目录、分类无关。
 pub fn file_hash(path: &Path) -> Result<String> {
-    hash_reader(std::fs::File::open(path)?, MAX_LUT_BYTES)
-}
-
-fn hash_reader(reader: impl std::io::Read, limit: u64) -> Result<String> {
-    use sha2::{Digest, Sha256};
-    use std::io::Read;
-    let mut reader = reader.take(limit + 1);
-    let mut digest = Sha256::new();
-    let mut buffer = [0_u8; 32 * 1024];
-    let mut length = 0_u64;
-    loop {
-        let count = reader.read(&mut buffer)?;
-        if count == 0 {
-            break;
-        }
-        length += count as u64;
-        if length > limit {
-            return Err(unsupported("LUT 文件超过大小上限"));
-        }
-        digest.update(&buffer[..count]);
-    }
-    Ok(format!("{:x}", digest.finalize()))
+    crate::fs_asset::hash_file(path, MAX_LUT_BYTES, "LUT")
 }
 
 /// 发布同一份字节快照，再对应用内文件计算身份；来源中途改名 / 替换不会让记录错配。
 pub fn copy_for_import(source: &Path, target: &Path) -> Result<String> {
-    use std::io::Read;
-    let mut bytes = Vec::new();
-    std::fs::File::open(source)?
-        .take(MAX_LUT_BYTES + 1)
-        .read_to_end(&mut bytes)?;
-    if bytes.len() as u64 > MAX_LUT_BYTES {
-        return Err(unsupported("LUT 文件超过 128 MB"));
-    }
-    crate::fs_atomic::write(target, &bytes)?;
-    file_hash(target)
+    crate::fs_asset::copy_snapshot(source, target, MAX_LUT_BYTES, "LUT")
 }
 
 const COVER_SUFFIXES: [&str; 7] = ["jpg", "jpeg", "png", "tif", "tiff", "avif", "webp"];
@@ -268,20 +238,21 @@ pub fn cached_cover(lut_path: &Path, cover_path: &Path, original_lut: &Path) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fs_asset::hash_reader;
 
     #[test]
     fn sha256_known_vectors_and_small_size_boundary() {
         assert_eq!(
-            hash_reader(&b""[..], 3).unwrap(),
+            hash_reader(&b""[..], 3, "LUT").unwrap(),
             "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         );
         assert_eq!(
-            hash_reader(&b"abc"[..], 3).unwrap(),
+            hash_reader(&b"abc"[..], 3, "LUT").unwrap(),
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         );
-        assert!(hash_reader(&b"abcd"[..], 3).is_err());
-        assert!(hash_reader(&b"a"[..], 0).is_err());
-        assert!(hash_reader(&b""[..], 0).is_ok());
+        assert!(hash_reader(&b"abcd"[..], 3, "LUT").is_err());
+        assert!(hash_reader(&b"a"[..], 0, "LUT").is_err());
+        assert!(hash_reader(&b""[..], 0, "LUT").is_ok());
     }
 
     #[test]

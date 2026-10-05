@@ -67,6 +67,9 @@ impl AutoAdjustBaseline {
 /// 一张照片的编辑栈（`latest`）。
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct DevelopStack {
+    /// Missing color preserves the historical pipeline and canonical issue hash.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<crate::color::PhotoColorState>,
     /// latest 的唯一源；SOOC/RAW 切换改变它，不复制其它调整参数。
     pub source_base: EditBase,
     /// 参数 id → 值（**只装非默认项**）
@@ -106,13 +109,71 @@ pub struct DevelopStack {
 }
 
 impl DevelopStack {
+    /// 完整编辑栈校验；交互保存、定稿读回和 XMP 共用，写入前调用。
+    pub fn validate(&self) -> Result<()> {
+        if let Some(color) = &self.color { color.validate_frozen().map_err(|e| Error::Unsupported(e.into()))?; }
+        if let Some(ref automatic) = self.auto_adjust {
+            automatic.validate()?;
+        }
+        // ① 先校验（**写之前**，别写一半才发现有错）
+        for (id, value) in &self.params {
+            let Some(spec) = spec(id) else {
+                return Err(Error::Unsupported(format!("未知的显影参数：{id}")));
+            };
+            if !spec.accepts(*value) {
+                return Err(Error::Unsupported(format!(
+                    "参数 {id} 的值非法：{value}（允许 {}..{}）",
+                    spec.min, spec.max
+                )));
+            }
+        }
+        for (channel, points) in &self.curves {
+            if CurveChannel::parse(channel).is_none() {
+                return Err(Error::Unsupported(format!("未知的曲线通道：{channel}")));
+            }
+            Curve::from_points(points.clone())
+                .map_err(|e| Error::Unsupported(format!("曲线 {channel} 不合法：{e}")))?;
+        }
+
+        if self
+            .lut_id
+            .as_ref()
+            .is_some_and(|id| id.is_empty() || id.len() > 128 || id.contains(['/', '\\']))
+        {
+            return Err(Error::Unsupported("LUT ID 不合法".into()));
+        }
+        if self.lut_enabled == Some(true) && self.lut_id.is_none() {
+            return Err(Error::Unsupported("启用 LUT 时必须选择 LUT".into()));
+        }
+        match (
+            self.base_curve_profile.as_deref(),
+            self.base_curve_points.as_ref(),
+        ) {
+            (None | Some("none"), None) => {}
+            (Some(id), Some(points)) if id.parse::<i64>().is_ok_and(|id| id > 0) => {
+                Curve::from_points(points.clone()).map_err(Error::Unsupported)?;
+            }
+            _ => return Err(Error::Unsupported("基础曲线档案与曲线快照不一致".into())),
+        }
+
+        if let Some(geometry) = self.geometry
+            && (!geometry.rotation.is_finite()
+                || geometry.rotation.abs() > 360.0
+                || geometry.crop.is_some_and(|crop| !crop.valid())
+                || geometry.crop_ratio.is_some_and(|setting| !setting.valid()))
+        {
+            return Err(Error::Unsupported("成片几何不合法".into()));
+        }
+        Ok(())
+    }
+
     /// 什么都没动过吗（没动过 = 与 SOOC 一样，不必渲染）。
     ///
     /// `as_shot_k` **不算「动过」**：它只是色温的解释基准，参数一个都没改就是没编辑过。
     /// 关闭已选择的镜头校正本身会改变像素，因此显式 `false` 也算编辑。
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.params.is_empty()
+        self.color.is_none() && self.params.is_empty()
             && self.curves.is_empty()
             && self.lens_profile.is_none()
             && self.base_curve_profile.is_none()
@@ -126,7 +187,7 @@ impl DevelopStack {
     /// 动过的项数（参数 + 曲线 + 镜头配置 + 非默认的降噪方式）。
     #[must_use]
     pub fn len(&self) -> usize {
-        self.params.len()
+        usize::from(self.color.is_some()) + self.params.len()
             + self.curves.len()
             + usize::from(self.lens_profile.is_some())
             + usize::from(self.base_curve_profile.is_some())
@@ -205,6 +266,10 @@ impl DevelopStack {
             }
         }
 
+        if let Some(color) = &self.color {
+            text.push_str("|color:");
+            text.push_str(&serde_json::to_string(color).expect("finite color identity"));
+        }
         // FNV-1a（64 位）：短、稳定、够散 —— 这里不需要密码学强度
         let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
         for byte in text.as_bytes() {
@@ -223,7 +288,7 @@ pub fn load(conn: &Connection, asset_id: i64) -> Result<DevelopStack> {
     let row = conn
         .query_row(
             "SELECT as_shot_k, lens_profile, lens_enabled, nr_method, source_base, edit_geometry, \
-                    base_curve_profile, base_curve_points, lut_id, lut_enabled, auto_adjust FROM develop_stacks WHERE asset_id = ?1",
+                    base_curve_profile, base_curve_points, lut_id, lut_enabled, auto_adjust, color_state FROM develop_stacks WHERE asset_id = ?1",
             [asset_id],
             |row| {
                 Ok((
@@ -238,6 +303,7 @@ pub fn load(conn: &Connection, asset_id: i64) -> Result<DevelopStack> {
                     row.get::<_, Option<String>>(8)?,
                     row.get::<_, Option<i64>>(9)?,
                     row.get::<_, Option<String>>(10)?,
+                    row.get::<_, Option<String>>(11)?,
                 ))
             },
         )
@@ -255,8 +321,12 @@ pub fn load(conn: &Connection, asset_id: i64) -> Result<DevelopStack> {
         lut_id,
         lut_enabled,
         auto_adjust,
+        color_state,
     )) = row
     {
+        stack.color = color_state.map(|json| serde_json::from_str::<crate::color::PhotoColorState>(&json)
+            .map_err(|e| Error::Unsupported(format!("色彩状态损坏：{e}")))).transpose()?;
+        if let Some(color) = &stack.color { color.validate_frozen().map_err(|e| Error::Unsupported(e.into()))?; }
         stack.source_base = EditBase::parse(&source_base)
             .ok_or_else(|| Error::Unsupported(format!("未知的 issue 源：{source_base}")))?;
         #[allow(clippy::cast_possible_truncation)]
@@ -327,65 +397,14 @@ pub fn load(conn: &Connection, asset_id: i64) -> Result<DevelopStack> {
 /// # Errors
 /// 校验不过（未知 id / 值非法 / 坏曲线）或数据库写失败。
 pub fn save(conn: &Connection, asset_id: i64, stack: &DevelopStack, now_ms: i64) -> Result<usize> {
-    if let Some(ref automatic) = stack.auto_adjust {
-        automatic.validate()?;
-    }
-    // ① 先校验（**写之前**，别写一半才发现有错）
-    for (id, value) in &stack.params {
-        let Some(spec) = spec(id) else {
-            return Err(Error::Unsupported(format!("未知的显影参数：{id}")));
-        };
-        if !spec.accepts(*value) {
-            return Err(Error::Unsupported(format!(
-                "参数 {id} 的值非法：{value}（允许 {}..{}）",
-                spec.min, spec.max
-            )));
-        }
-    }
-    for (channel, points) in &stack.curves {
-        if CurveChannel::parse(channel).is_none() {
-            return Err(Error::Unsupported(format!("未知的曲线通道：{channel}")));
-        }
-        Curve::from_points(points.clone())
-            .map_err(|e| Error::Unsupported(format!("曲线 {channel} 不合法：{e}")))?;
-    }
-
-    if stack
-        .lut_id
-        .as_ref()
-        .is_some_and(|id| id.is_empty() || id.len() > 128 || id.contains(['/', '\\']))
-    {
-        return Err(Error::Unsupported("LUT ID 不合法".into()));
-    }
-    if stack.lut_enabled == Some(true) && stack.lut_id.is_none() {
-        return Err(Error::Unsupported("启用 LUT 时必须选择 LUT".into()));
-    }
-    match (
-        stack.base_curve_profile.as_deref(),
-        stack.base_curve_points.as_ref(),
-    ) {
-        (None | Some("none"), None) => {}
-        (Some(id), Some(points)) if id.parse::<i64>().is_ok_and(|id| id > 0) => {
-            Curve::from_points(points.clone()).map_err(Error::Unsupported)?;
-        }
-        _ => return Err(Error::Unsupported("基础曲线档案与曲线快照不一致".into())),
-    }
-
-    if let Some(geometry) = stack.geometry
-        && (!geometry.rotation.is_finite()
-            || geometry.rotation.abs() > 360.0
-            || geometry.crop.is_some_and(|crop| !crop.valid())
-            || geometry.crop_ratio.is_some_and(|setting| !setting.valid()))
-    {
-        return Err(Error::Unsupported("成片几何不合法".into()));
-    }
+    stack.validate()?;
 
     // ② 栈本体（没有就建一个；as-shot 与镜头 / 降噪那几项跟着一起写）
     ensure_stack(conn, asset_id, now_ms)?;
     conn.execute(
         "UPDATE develop_stacks SET as_shot_k = ?2, lens_profile = ?3, lens_enabled = ?4, \
          nr_method = ?5, source_base = ?6, edit_geometry = ?7, base_curve_profile = ?8, \
-         base_curve_points = ?9, lut_id = ?10, lut_enabled = ?11, auto_adjust = ?12 WHERE asset_id = ?1",
+         base_curve_points = ?9, lut_id = ?10, lut_enabled = ?11, auto_adjust = ?12, color_state = ?13 WHERE asset_id = ?1",
         rusqlite::params![
             asset_id,
             stack.as_shot_k.map(f64::from),
@@ -413,6 +432,8 @@ pub fn save(conn: &Connection, asset_id: i64, stack: &DevelopStack, now_ms: i64)
             stack.lut_enabled.map(i64::from),
             stack.auto_adjust.as_ref().map(serde_json::to_string).transpose()
                 .map_err(|error| Error::Unsupported(format!("自动调整基线序列化失败：{error}")))?,
+            stack.color.as_ref().map(serde_json::to_string).transpose()
+                .map_err(|error| Error::Unsupported(format!("色彩状态序列化失败：{error}")))?,
         ],
     )?;
 
@@ -569,6 +590,7 @@ pub fn set_curve(
 /// 三项都是「一个可空的字符串/布尔」，各自的语义与校验写在 [`set_setting`] 里。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Setting {
+    Color,
     /// 自动调整基线 JSON，作为整体参与撤销。
     AutoAdjust,
     /// 机型基础曲线档案选择（撤销时同时还原快照）。
@@ -596,6 +618,7 @@ impl Setting {
     #[must_use]
     pub fn key(self) -> &'static str {
         match self {
+            Self::Color => "color",
             Self::AutoAdjust => "autoAdjust",
             Self::BaseCurveProfile => "baseCurveProfile",
             Self::BaseCurvePoints => "baseCurvePoints",
@@ -613,6 +636,7 @@ impl Setting {
     #[must_use]
     pub fn parse(key: &str) -> Option<Self> {
         match key {
+            "color" => Some(Self::Color),
             "autoAdjust" => Some(Self::AutoAdjust),
             "baseCurveProfile" => Some(Self::BaseCurveProfile),
             "baseCurvePoints" => Some(Self::BaseCurvePoints),
@@ -630,6 +654,7 @@ impl Setting {
     /// 它在 `develop_stacks` 里对应的列名（**枚举自带的值，不是用户输入**）。
     const fn column(self) -> &'static str {
         match self {
+            Self::Color => "color_state",
             Self::AutoAdjust => "auto_adjust",
             Self::BaseCurveProfile => "base_curve_profile",
             Self::BaseCurvePoints => "base_curve_points",
@@ -647,6 +672,8 @@ impl Setting {
     fn accepts(self, value: Option<&str>) -> bool {
         match (self, value) {
             (_, None) => true,
+            (Self::Color, Some(text)) => serde_json::from_str::<crate::color::PhotoColorState>(text)
+                .is_ok_and(|color| color.validate_frozen().is_ok()),
             (Self::AutoAdjust, Some(text)) => serde_json::from_str::<AutoAdjustBaseline>(text)
                 .is_ok_and(|automatic| automatic.validate().is_ok()),
             (Self::BaseCurveProfile, Some(text)) => {
@@ -684,6 +711,7 @@ impl DevelopStack {
     #[must_use]
     pub fn setting_value(&self, setting: Setting) -> Option<String> {
         match setting {
+            Setting::Color => self.color.as_ref().and_then(|color| serde_json::to_string(color).ok()),
             Setting::AutoAdjust => self
                 .auto_adjust
                 .as_ref()
@@ -770,6 +798,7 @@ fn prune_empty_stack(conn: &Connection, asset_id: i64) -> Result<()> {
         "DELETE FROM develop_stacks
           WHERE asset_id = ?1
             AND source_base = 'raw'
+            AND color_state IS NULL
             AND auto_adjust IS NULL
             AND lens_profile IS NULL
             AND base_curve_profile IS NULL
@@ -992,6 +1021,40 @@ mod tests {
         .expect("插资产");
         let asset_id = conn.last_insert_rowid();
         (conn, asset_id)
+    }
+
+    #[test]
+    fn frozen_color_roundtrips_and_uses_existing_undo_without_changing_legacy() {
+        use crate::store::marking::{self, ChangeSet, Op, UndoStack};
+        let (conn, asset_id) = catalog_with_asset();
+        let legacy = DevelopStack::default();
+        let json = serde_json::to_string(&legacy).unwrap();
+        assert!(!json.contains("color"));
+        let original_signature = legacy.signature();
+        let color = crate::color::PhotoColorState::new_pipeline(crate::color::SourceColor::AssumedSrgb);
+        let encoded = serde_json::to_string(&color).unwrap();
+        let change = ChangeSet::new("指定输入色彩", vec![Op::DevelopSetting {
+            asset_id, key: "color".into(), before: None, after: Some(encoded.clone()),
+        }]);
+        marking::apply(&conn, &change).unwrap();
+        let loaded = load(&conn, asset_id).unwrap();
+        assert_eq!(loaded.color, Some(color));
+        assert!(!loaded.is_empty());
+        assert_ne!(loaded.signature(), original_signature);
+        assert!(has_edits(&conn, asset_id).unwrap());
+        let mut undo = UndoStack::default(); undo.push(change);
+        undo.undo(&conn).unwrap();
+        assert_eq!(load(&conn, asset_id).unwrap(), legacy);
+        assert_eq!(load(&conn, asset_id).unwrap().signature(), original_signature);
+        undo.redo(&conn).unwrap();
+        assert_eq!(load(&conn, asset_id).unwrap(), loaded);
+        for invalid in ["{}", r#"{"process_version":"linear_rec2020_v2","source":{"kind":"auto"}}"#,
+            r#"{"process_version":"linear_rec2020_v2","source":{"kind":"assumed_srgb"},"monitor":"x"}"#] {
+            assert!(set_setting(&conn, asset_id, Setting::Color, Some(invalid), 3).is_err());
+        }
+        assert_eq!(load(&conn, asset_id).unwrap(), loaded);
+        save(&conn, asset_id, &loaded, 4).unwrap();
+        assert_eq!(load(&conn, asset_id).unwrap().setting_value(Setting::Color), Some(encoded));
     }
 
     fn stack(params: &[(&str, f64)], curves: &[(&str, Vec<[f32; 2]>)]) -> DevelopStack {

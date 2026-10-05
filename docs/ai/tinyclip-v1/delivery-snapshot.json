@@ -1,0 +1,44 @@
+{
+  "frozen_at_utc": "2026-10-04T05:21:13+00:00",
+  "source_root": "/home/andares/repos/c-thun/raybend",
+  "snapshot_root": "/tmp/raybend-ai-delivery-snapshot",
+  "reason": "shared source changes during builds; AI delivery snapshot only, no original file reset",
+  "tinyclip_manifest_sha256": "775a029ab0956f88acbd40dcb10e5fbbc174e3bb624c656b23923979684bbfc7",
+  "ai_source_sha256": {
+    "crates/raybend/src/ai/jobs.rs": "0a5e664c5ec6e46d722ced6607f6c6950d742a1402c1d32ab1db0819cbad3c86",
+    "crates/raybend/src/ai/worker.rs": "4b098e64d71ad3252398a54c2ceb7f3b9a43e1c9ff3dea7186974309002da5bf",
+    "crates/raybend/src/ai/status.rs": "fadd5716c7bd9685a68a101512d62ac0eb54966788e70ef525e441b1ec2e3552",
+    "crates/raybend/src/ai/runtime.rs": "741ef4ac98a4b4419ec010ed4e144eb02d0a5196e0bcb5ba6c904be2b0df40b6",
+    "crates/raybend/src/ai/pack.rs": "6251b1c37c031b87f29dac7522c937983616fad0fdd419b170481adc5a53f8c7",
+    "crates/raybend/src/ai/scoring.rs": "d0273a4c7e2139111177ca64b1bc253f873510804ffd9181ed93d2d910f73689",
+    "crates/raybend/src/ai/result.rs": "86b8aaf44e531e12cae74f7a1f09e62e9b4467c2e54a2ab12b6b48ead98b1b89",
+    "crates/raybend/src/ai/range.rs": "4273e74682aef1c030c9d3a4de0321669849d61533f7659ea8c0ccad6322a2f7",
+    "crates/raybend/src/ai/mod.rs": "00fd6d5deb36b12a11d596ae1aa61d21c2d4e029c2c522c0f59612cad3b73013",
+    "crates/raybend/src/ai/preprocess.rs": "8ba4b75e31cea6b21edb915226b6e5872802426ec6b8d7f0e74b320fc48dbbcd",
+    "crates/raybend/src/ai/session.rs": "770e1646a1b6d662be8648e6455ec328f0f8217cc8e6bd2eac8fadae85e985a3",
+    "crates/raybend/src/ai/source.rs": "566bce286f2814a21272c94e9a9c7db489755c4b938a54779d44cdd7108ceeb0",
+    "crates/raybend/src/ai/registry.rs": "0915a805beab8849ead230506dc100c6ab6d494a5011a7e8469b9194afa3a3e8",
+    "crates/raybend/src/ai/coordinator.rs": "06efe93c80aab9ab759464af551362d1a85e1698d488b28e8af21fbb5bca339b",
+    "crates/raybend/src/ai/service.rs": "78a528c9972669f4aaa9195a6a5e09709428f42d9517df5161164248dea9e9cb",
+    "crates/raybend/assets/ai/tinyclip-v1/classes.json": "5e57b4761296991b94a8255ef34709bfc0d6aa23ee134d21aca8179514411e35",
+    "crates/raybend/assets/ai/tinyclip-v1/manifest.json": "775a029ab0956f88acbd40dcb10e5fbbc174e3bb624c656b23923979684bbfc7",
+    "src-tauri/src/main.rs": "c43fe935e19919068ff6ac80f88bdf85683615ff7cd6ef781073d6d06afe2699",
+    "src-tauri/src/photo_ai.rs": "e1bcd8ae9ccacc8c7023340ffb7a1aea54df04065f019a8869bf6ce2d6963018",
+    "src-tauri/src/lib.rs": "8e1d248cbd49ace3ff80468b399ccec47988288c19c0fa7dad143bdd2739ce64",
+    "src/api/dto-contract.json": "ccbfb4684c4e3de2bf2b0105239e8270612f2ea57f45e3b903ac565616671279",
+    "src/api/photo-ai.ts": "6023c2c061294bee5d1be55b15ff8c87c98b0d22f802e852d1a309204a391860",
+    "src/features/browse/TagDialog.tsx": "ab0082d1982924824d40769b01f4da1804b390573819c0b211b7ad7dd44f1048",
+    "src/features/browse/AiDialog.tsx": "3cee5a8eed852c3103c589043b587f31cb956095be9b0ff1a9f95a66065818c6",
+    "src/features/browse/AiModelSettings.tsx": "a0d54ba965f58e505b3f875dbe35dccdcaad287c34b3de8c736a19b683b21ab6"
+  },
+  "test_directory": "/mnt/c/rb-target/raybend-ai-test-2026-10-04",
+  "artifacts_sha256": {
+    "raybend-desktop.exe": "713984e3c053cf84ef80216aef9cfe809b6e632c6ff558a1a7ea6d66b4627665",
+    "raybend-raw-worker.exe": "a05dae9b035630b7d5214d3cf6331289cfcdc4b8aa55b1aac349c651ec3a5202"
+  },
+  "artifact_bytes": {
+    "raybend-desktop.exe": 62641664,
+    "raybend-raw-worker.exe": 14866944
+  },
+  "ai_source_matches_original_at_delivery": true
+}

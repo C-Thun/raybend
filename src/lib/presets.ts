@@ -10,12 +10,14 @@
  */
 
 import { IDENTITY_CURVE } from "./curve.ts";
+import type { PhotoColorState } from "./color-model.ts";
 
 /** `默认` 目录的固定 id（名称走语言包，DB 里的 `name` 只是占位）。 */
 export const DEFAULT_DIRECTORY_ID = "default";
 
 /** 六个大类（顺序即界面 chips 顺序；未来加「色彩管理」时在此追加）。 */
-export const PRESET_GROUPS = ["tone", "color", "detail", "lens", "curve", "lut"] as const;
+export const PRESET_GROUPS = ["tone", "color", "detail", "lens", "curve", "lut", "colorManagement"] as const;
+export const DEFAULT_PRESET_GROUPS = PRESET_GROUPS.filter(group=>group !== "colorManagement");
 export type PresetGroup = (typeof PRESET_GROUPS)[number];
 
 /** 带数值参数的四个大类（与 `ParamGroup` 同名同义；curve / lut 单独处理）。 */
@@ -35,6 +37,8 @@ export interface PresetSnapshot {
   lens?: PresetLensGroup;
   curve?: Partial<Record<string, [number, number][]>>;
   lut?: { id: string | null; enabled: boolean };
+  /** Reusable selection strategy, never a source file's embedded ICC or monitor. */
+  colorManagement?: { processVersion: "linear_rec2020_v2"; input: "automatic" | {profileId: string} };
 }
 
 /** 清晰度大类的载荷形状（索引签名放宽到 `number | string | null` 以容纳 `nrMethod`）。 */
@@ -131,8 +135,9 @@ function sanitizeCurve(raw: unknown): Partial<Record<string, [number, number][]>
 export function sanitizePresetSnapshot(raw: unknown): PresetSnapshot | null {
   if (typeof raw !== "object" || raw === null) return null;
   const record = raw as Record<string, unknown>;
-  if (record.version !== 1) return null;
-  const snapshot: PresetSnapshot = { version: 1 };
+  if (record.version !== 1 && record.version !== 2) return null;
+  if (record.version === 2 && !Object.prototype.hasOwnProperty.call(record,"colorManagement")) return null;
+  const snapshot: PresetSnapshot = { version: record.version };
   let present = false;
   for (const group of ["tone", "color", "detail", "lens"] as const) {
     if (typeof record[group] !== "object" || record[group] === null) continue;
@@ -161,6 +166,10 @@ export function sanitizePresetSnapshot(raw: unknown): PresetSnapshot | null {
       id: typeof lut.id === "string" && lut.id !== "" ? lut.id : null,
       enabled: lut.enabled === true,
     };
+    present = true;
+  }
+  if (Object.prototype.hasOwnProperty.call(record,"colorManagement")) {
+    snapshot.colorManagement = record.colorManagement as PresetSnapshot["colorManagement"];
     present = true;
   }
   return present ? snapshot : null;
@@ -221,6 +230,7 @@ export function snapshotGroups(snapshot: PresetSnapshot): PresetGroup[] {
 
 /** 构建快照的输入（由 store 提供**当前生效值**，不是 dirty 子集）。 */
 export interface PresetSnapshotSource {
+  photoColor?: PhotoColorState | null;
   values: Record<string, number>;
   curves: Record<string, readonly (readonly [number, number])[]>;
   nrMethod: string | null;
@@ -242,6 +252,14 @@ export function buildPresetSnapshot(
   const snapshot: PresetSnapshot = { version: 1 };
   for (const group of groups) {
     switch (group) {
+      case "colorManagement": {
+        const color=source.photoColor;
+        if (color?.process_version === "linear_rec2020_v2") {
+          snapshot.version=2;
+          snapshot.colorManagement={processVersion:"linear_rec2020_v2",input:color.source.kind === "assigned_rgb_icc" ? {profileId:color.source.profile_id} : "automatic"};
+        }
+        break;
+      }
       case "tone":
       case "color":
       case "detail":
@@ -279,6 +297,15 @@ export function buildPresetSnapshot(
   return snapshot;
 }
 
+export function presetColorChoice(snapshot: PresetSnapshot): string|null|undefined {
+  if (!Object.prototype.hasOwnProperty.call(snapshot,"colorManagement")) return undefined;
+  const group=snapshot.colorManagement;
+  if (snapshot.version !== 2 || !group || typeof group !== "object" || Object.keys(group).length !== 2 || group.processVersion !== "linear_rec2020_v2") throw new Error("PRESET_COLOR_UNSUPPORTED");
+  if (group.input === "automatic") return null;
+  if (typeof group.input === "object" && group.input !== null && Object.keys(group.input).length === 1 && /^[0-9a-f]{64}$/.test(group.input.profileId)) return group.input.profileId;
+  throw new Error("PRESET_COLOR_UNSUPPORTED");
+}
+
 /** 应用计划（store 拿到后逐项写入；纯函数便于单测）。 */
 export interface PresetApplyPlan {
   /** 逐项 `setParam`（含「回到默认」的项 —— 覆盖语义要求写全）。 */
@@ -306,6 +333,7 @@ export function planPresetApply(
   lutExists: (id: string) => boolean,
   channels: readonly string[] = ["rgb", "r", "g", "b"],
 ): PresetApplyPlan {
+  presetColorChoice(snapshot);
   const plan: PresetApplyPlan = {
     values: {},
     curves: {},

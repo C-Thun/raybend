@@ -49,6 +49,7 @@ pub mod pipeline;
 pub mod reference;
 pub mod sharpen;
 pub mod sample;
+pub mod working;
 
 pub use color::{linear_to_srgb, srgb_to_linear, temperature_gain_ratio};
 pub use curve::{Curve, CurveChannel, CurveSet};

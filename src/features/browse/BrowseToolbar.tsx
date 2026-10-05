@@ -44,6 +44,7 @@ import {
   IconFlagOff,
   IconArrowForwardUp,
   IconTag,
+  IconScan,
   IconStar,
   IconStarFilled,
   IconThumbDownFilled,
@@ -80,6 +81,7 @@ export interface BrowseToolbarProps {
   collectionMode?: boolean;
   /** 打开标签弹窗（W2 接线；现在只把按钮摆在那里并禁用）。 */
   onOpenTags?: () => void;
+  onOpenAi?: () => void;
   onAddSelectedToBucket?: () => void;
   onAddFlagsToBucket?: () => void;
   onNewAutoBucket?: () => void;
@@ -555,6 +557,7 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
       >
         {t("browse.tag")}
       </Button>
+      <Show when={props.onOpenAi}><Button variant="ghost" icon={<IconScan size={14} />} aria-label={t("ai.recognize")} onClick={props.onOpenAi} /></Show>
       <Menu
         label={t("org.bucketActions")}
         items={[

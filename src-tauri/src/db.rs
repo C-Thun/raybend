@@ -52,6 +52,7 @@ impl DbState {
         // 在 AppDb 对其它请求可见之前只恢复一次，不能重置本进程正在生成的任务。
         db.write(|conn| raybend::thumbnail::worker::requeue_running(conn, raybend::store::time::now_millis()))
             .map_err(|e| e.to_string())?;
+        db.write(|conn| raybend::ai::jobs::recover_paused(conn,raybend::store::time::now_millis())).map_err(|e|e.to_string())?;
         let mut guard = self.inner.lock().map_err(|_| "内部锁已损坏".to_string())?;
         *guard = Some(Arc::new(db));
         Ok(())
