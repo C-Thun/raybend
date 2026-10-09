@@ -57,6 +57,30 @@
 
 结论：**可以发布**，只剩崔总的 `cargo publish -p raybend` 本体（§2.1）。
 
+## 首次上传实测：被「未验证邮箱」拦住（400）
+
+崔总 2026-10-09 晚上执行 `cargo publish -p raybend`，打包与本地验证编译都过（236 文件 / 1.1 MiB /
+8.10s），在 `Uploading` 那一步被服务端拒：
+
+```text
+error: failed to publish raybend v0.1.1 to registry at https://crates.io
+Caused by:
+  the remote server responded with an error (status 400 Bad Request): A verified email address is
+  required to publish crates to crates.io. Visit https://crates.io/settings/profile to set and verify
+  your email address.
+```
+
+判读：
+
+* **token 是好的** —— 走到服务端业务校验才被拒，说明认证与作用域都通过了。
+* **未落盘任何东西**：复查 `GET /api/v1/crates/raybend` 仍为 `does not exist`，`0.1.1` 这个版本号还空着。
+* 原因：crates.io 有自己的邮箱字段，**GitHub 侧验证过不算数**；登录后必须在
+  https://crates.io/settings/profile 设置并点验证信里的链接。
+* 处置：验证邮箱后重跑 `cargo publish -p raybend` 即可，**不需重新 login**。
+
+已按实测修正 `docs/release.md` §9 的首次发布步骤（把「设置并验证邮箱」独立为第 2 步，并写明
+400 的失败形态与无副作用），顺带把 `cargo login <token>` 换成不带参数的写法（cargo 1.98.1 已弃用 argv传参）。
+
 ## 遗留 / 未决
 
 * **工作树是脏的**（41 个文件未提交，M3-W5/编辑预设那一批）：`cargo publish` 会因此拒绝。

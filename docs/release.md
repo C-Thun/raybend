@@ -236,12 +236,17 @@ crates.io 的[使用政策](https://crates.io/policies)把「只占名、无真�
 
 ### 首次发布（一次性）
 
-1. 用 GitHub 账号登录 https://crates.io —— **crates.io 没有独立注册**，GitHub OAuth 即账号，
-   且 GitHub 侧邮箱必须已验证。
-2. 在 https://crates.io/settings/tokens （账号设置）创建 API Token：
+1. 用 GitHub 账号登录 https://crates.io —— **crates.io 没有独立注册**，GitHub OAuth 即账号。
+2. **在 https://crates.io/settings/profile 设置并验证邮箱** —— crates.io 有自己的邮箱字段，
+   GitHub 侧验证过**不能代替**。未验证时 `cargo publish` 会在上传那一步（打包与本地编译都已过）返回
+   `400 Bad Request: A verified email address is required to publish crates to crates.io`。
+   **此失败无副作用**：没有落盘任何版本，验证完重跑同一条命令即可，token 不受影响
+   （2026-10-09 首次发布实测踩到）。
+3. 在 https://crates.io/settings/tokens （账号设置）创建 API Token：
    作用域只给 `publish-new`（首次需要）+ `publish-update`（后续版本），crate 范围写 `raybend`，有效期取最短。
    **token 只在创建时显示一次**，自管保存，不要写进仓库或脚本。
-3. 本机 `cargo login <token>`（写入 `~/.cargo/credentials.toml`，不进仓库）。
+4. 本机 `cargo login`（不带参数，token 从 stdin 读；写成 `cargo login <token>` 会警告已弃用，
+   且把密钥暴露在命令行参数与 shell 历史里）。写入 `~/.cargo/credentials.toml`，不进仓库。
 
 ### 每次发布
 
