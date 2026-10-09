@@ -82,15 +82,72 @@ export type PresetSelection =
   | { kind: "presets"; ids: readonly string[] }
   | null;
 
+/** 名称上限（**Unicode 字符数**，与 Rust `store::presets::valid_name` 同一口径）。 */
+export const PRESET_NAME_MAX = { directory: 40, preset: 80 } as const;
+export type PresetNameKind = keyof typeof PRESET_NAME_MAX;
+
+/** 名称不合法时的原因（面板换成本地化文案；`null` = 合法）。 */
+export type PresetNameError = "empty" | "tooLong" | "control";
+
+/**
+ * 名称校验：去首尾空白后按**字符**（不是 UTF-16 单元）计数 ——
+ * 80 个 emoji 是合法的 80 字符名，不能被 `String.length` 的 160 单元误伤。
+ * 控制字符与 Rust 侧 `valid_name` 一致一律拒绝。
+ */
+export function validatePresetName(raw: string, kind: PresetNameKind): PresetNameError | null {
+  const name = raw.trim();
+  if (name === "") return "empty";
+  if (Array.from(name).length > PRESET_NAME_MAX[kind]) return "tooLong";
+  if (/[\u0000-\u001f\u007f-\u009f]/u.test(name)) return "control";
+  return null;
+}
+
+/** 新建目录 / 预设的结果（面板据此区分「重名」与其它后端失败，审计 2026-10-04）。 */
+export type PresetCreateOutcome =
+  | { ok: true }
+  | { ok: false; message: string };
+
+/** 库刷新后收敛选中：失效的目录 / 预设不再留在选中态里（撤销全部则回 `null`）。 */
+export function prunePresetSelection(
+  selection: PresetSelection,
+  directoryIds: ReadonlySet<string>,
+  presetIds: ReadonlySet<string>,
+): PresetSelection {
+  if (selection === null) return null;
+  if (selection.kind === "directory") {
+    return directoryIds.has(selection.id) ? selection : null;
+  }
+  const ids = selection.ids.filter((id) => presetIds.has(id));
+  return ids.length === 0 ? null : { kind: "presets", ids };
+}
+
+/** 库刷新后收敛折叠记录：删掉的目录不再留残留键。 */
+export function prunePresetCollapsed(
+  record: Readonly<Record<string, boolean>>,
+  directoryIds: ReadonlySet<string>,
+): Record<string, boolean> {
+  const out: Record<string, boolean> = {};
+  for (const [id, collapsed] of Object.entries(record)) {
+    if (directoryIds.has(id)) out[id] = collapsed;
+  }
+  return out;
+}
+
 /* ══════════════════════════════════════════════════════════════
  * 清洗：任何输入 → 合法形状（坏条目丢弃，不抛错 —— 存储/IPC 里的垃圾
  * 不能让面板起不来；口径照 `lib/lut-library.ts` 的 `sanitize*`）
  * ══════════════════════════════════════════════════════════════ */
 
+/**
+ * 存储/IPC 里的名称 → 面板可用名称。`maxChars` 是**字符数**（与 Rust 同一口径）：
+ * 用 `Array.from` 数码点，`String.length` 会把 emoji 的代理对当成两个字符。
+ * 控制字符拒绝（Rust `valid_name` 同样拒绝）。
+ */
 function trimmedName(raw: unknown, maxChars: number): string | null {
   if (typeof raw !== "string") return null;
   const name = raw.trim();
-  if (name === "" || name.length > maxChars) return null;
+  if (name === "" || Array.from(name).length > maxChars) return null;
+  if (/[\u0000-\u001f\u007f-\u009f]/u.test(name)) return null;
   return name;
 }
 
@@ -186,7 +243,7 @@ export function sanitizePresetLibrary(raw: unknown): PresetLibrary {
       if (typeof item !== "object" || item === null) continue;
       const entry = item as Record<string, unknown>;
       const id = sanitizeId(entry.id);
-      const name = trimmedName(entry.name, 80);
+      const name = trimmedName(entry.name, PRESET_NAME_MAX.directory);
       const sortOrder = finiteNumber(entry.sortOrder);
       const createdAt = finiteNumber(entry.createdAt);
       if (id === null || name === null || sortOrder === null || createdAt === null) continue;
@@ -202,7 +259,7 @@ export function sanitizePresetLibrary(raw: unknown): PresetLibrary {
       const entry = item as Record<string, unknown>;
       const id = sanitizeId(entry.id);
       const directoryId = sanitizeId(entry.directoryId);
-      const name = trimmedName(entry.name, 160);
+      const name = trimmedName(entry.name, PRESET_NAME_MAX.preset);
       const createdAt = finiteNumber(entry.createdAt);
       const updatedAt = finiteNumber(entry.updatedAt);
       const payload = sanitizePresetSnapshot(entry.payload);

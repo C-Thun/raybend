@@ -607,6 +607,17 @@ cmd.exe /c 'pushd \\wsl.localhost\Ubuntu-24.04\home\andares\repos\c-thun\raybend
     * `.fingerprint/` 不碰（只几十 MB，删错会让 cargo 白重编）；
     * 先看后删：`pnpm clean:win --dry-run`（会列出最占空间的几项）。
     * 什么时候仍需 `cargo clean`：规则/目录结构大改、或想彻底重来 —— 代价是一次冷构建。
+    * **2026-10-05 扩充**：① 清理范围新盖 `examples/`（与 deps 同一套主干认领，含 rustc
+      中断残留的 `rustcXXXX` 临时目录；实测这里能积 43 GB）；② 清单只在没显式给 `--json`
+      时**每次重建**（旧 `last-build.json` 会被当作权威，拿 10 天前的图判活会误判）；
+      ③ WSL 侧清单 = **两段拼接**（`build --lib --bins` + `test --lib --bins --tests
+      --no-run`，cfg(test) 是另一套单元）；**不含 examples** —— `cargo test` / `--all-targets`
+      会重建它们，每个 ~200MB 调试信息，27 个一套 22 GB，只靠 3 天宽限期幸存；一次性
+      深清用 `--keep-days 0`（WSL 侧一次回收 41 GB：99 GB → 14 GB）。
+      剩余结构性选项（未采纳，待拍板）：`[profile.dev] debug = "line-tables-only"`、
+      `[profile.dev.package."*"] debug = false`（体积砍 3–5 倍，代价是调试器变量信息）。
+      另：`-p raybend` 与 `--workspace` 两种调用会各养一套依赖变体（实测差 107 个单元），
+      尽量用一致的构建调用。
 
 ### 8.1 为什么必须加 `--features custom-protocol`（重要，别拆掉）
 

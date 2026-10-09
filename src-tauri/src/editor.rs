@@ -1852,11 +1852,10 @@ fn session_loop(
             state.last_error = Some(error);
         }
 
-        if let Some(frame)=session.pending_presentation.take() {
-            if let Err(error)=apply_command(RenderCommand::Present(frame),context,shared,developer,&mut latest_job,&mut dirty,&mut session) {
+        if let Some(frame)=session.pending_presentation.take()
+            && let Err(error)=apply_command(RenderCommand::Present(frame),context,shared,developer,&mut latest_job,&mut dirty,&mut session) {
                 lock_state(shared).last_error=Some(error);
             }
-        }
         if !dirty {
             continue;
         }
@@ -2278,11 +2277,10 @@ fn apply_command(
             if outcome.id != *latest_job {return Ok(());}
             // Normalize legacy bytes once; retries keep the identical Arc and
             // never allocate another whole RGBA source while upload is pending.
-            if let Ok(image)=&mut outcome.result {
-                if let Some((source,tone))=image.pixels.render(image.width,image.height) {
+            if let Ok(image)=&mut outcome.result
+                && let Some((source,tone))=image.pixels.render(image.width,image.height) {
                     image.pixels=DevelopedPixels::Working(raybend::render::working_preview::PreparedWorkingFrame {image:source,tone});
                 }
-            }
             let (reference,reference_base)=if outcome.transition {(None,None)} else if let Some((reference,id))=&session.reference_issue {
                 (context.reference_image(reference.id).or_else(||RenderImage::from_rgb8(reference.width,reference.height,&reference.rgb).map(Arc::new)).map(|image|(reference.id,image)),Some(format!("issue:{id}")))
             } else if let Some(reference)=outcome.working_reference.clone() {

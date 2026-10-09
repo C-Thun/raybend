@@ -94,6 +94,21 @@ export function formatDateTime(
 const DAY_KEY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 /**
+ * **只到日**的日期串：`YYYY-MM-DD`（月/日**零填充**）。
+ *
+ * 崔总 2026-10-08（定稿列表）：日期只留到天，且**不许出现单位数月份** ——
+ * 所以不用 locale 的 `2026/10/8`，也不带时分秒。
+ * 本应用自己生成的记录（定稿创建时间）按**本机时区**算是对的：
+ * 它不是相机的墙上时间，没有 EXIF 偏移那回事（那套走 [`formatClock`]）。
+ */
+export function formatDay(ms: number): string {
+  if (!Number.isFinite(ms)) return "";
+  const date = new Date(ms);
+  const pad = (value: number): string => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+/**
  * 日组标题（`YYYY-MM-DD` → 本地化日期，如「2026年8月15日 周六」）。
  *
  * 认不出来的键**原样返回** —— 界面上出现 `2026-08-15` 也比出现 `Invalid Date` 强。

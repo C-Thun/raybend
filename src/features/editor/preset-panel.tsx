@@ -34,13 +34,18 @@ import { trackPointerDrag } from "../../lib/pointer-drag.ts";
 import {
   DEFAULT_DIRECTORY_ID,
   PRESET_GROUPS,
+  PRESET_NAME_MAX,
   DEFAULT_PRESET_GROUPS,
   isDirectoryNameTaken,
   isPresetNameTaken,
   resolveCreateDirectory,
   snapshotGroups,
+  validatePresetName,
+  type PresetCreateOutcome,
   type PresetDirectory,
   type PresetGroup,
+  type PresetNameError,
+  type PresetNameKind,
   type PresetRecord,
   type PresetSnapshot,
 } from "../../lib/presets.ts";
@@ -57,22 +62,20 @@ const GROUP_LABEL_KEY: Record<PresetGroup, MessageKey> = {
   colorManagement: "editor.colorManagement.title",
 };
 
-/**
- * 树区的最小高度：对齐「曲线页签在 RAW + 基础曲线块」时的内容高度
- * （CurveEditor 130 + 通道行 26 + 基础曲线块 78 + 间距）—— 切页签不伸缩
- * （`design/editor.md` §3.10；SOOC 下曲线较短时留白，可接受）。
+/*
+ * 树区高度由第 3 组等高容器给定（`panels.tsx` `data-editor-advanced-body`，
+ * 高度 = 曲线页签的自然高度）：这里 `flex-1` 填充、内部滚动，
+ * 预设再多也不把右栏撑长（审计 2026-10-04）。
  */
-const TREE_MIN_HEIGHT = "224px";
-
 export interface PresetPanelProps {
   store: EditorStore;
   /** 有没有可编辑的照片（空态下应用 / 新建预设禁用；目录管理不受影响） */
   enabled: boolean;
-  /** 应用 / 新建后落库（与 LUT 选择的 `onSelect → commitDevelop` 同一条路） */
-  onCommit?: () => void;
+  /** 应用 / 新建后落库（与 LUT 选择的 `onSelect → confirmEdit` 同一条路） */
+  onConfirm?: () => void;
   applyPreset: (snapshot: PresetSnapshot) => Promise<void>;
-  createDirectory: (name: string) => Promise<boolean>;
-  createPreset: (name: string, directoryId: string, groups: readonly PresetGroup[]) => Promise<boolean>;
+  createDirectory: (name: string) => Promise<PresetCreateOutcome>;
+  createPreset: (name: string, directoryId: string, groups: readonly PresetGroup[]) => Promise<PresetCreateOutcome>;
   deletePreset: (id: string) => Promise<void>;
   deleteDirectory: (id: string) => Promise<void>;
   movePresets: (ids: readonly string[], directoryId: string) => Promise<void>;
@@ -83,14 +86,20 @@ export function PresetPanel(props: PresetPanelProps): JSX.Element {
   /* ── 新建目录弹窗 ─────────────────────────────────── */
   const [dirOpen, setDirOpen] = createSignal(false);
   const [dirDraft, setDirDraft] = createSignal("");
-  const [dirDuplicate, setDirDuplicate] = createSignal(false);
+  const [dirError, setDirError] = createSignal<string | null>(null);
 
   /* ── 新建预设弹窗 ─────────────────────────────────── */
   const [presetOpen, setPresetOpen] = createSignal(false);
   const [presetDraft, setPresetDraft] = createSignal("");
   const [presetGroups, setPresetGroups] = createSignal<PresetGroup[]>([...DEFAULT_PRESET_GROUPS]);
-  const [presetDuplicate, setPresetDuplicate] = createSignal(false);
+  const [presetError, setPresetError] = createSignal<string | null>(null);
   const [busy, setBusy] = createSignal(false);
+
+  /** 前端名称校验的原因文案（与后端同一口径，审计 2026-10-04）。 */
+  const nameErrorText = (error: PresetNameError, kind: PresetNameKind): string =>
+    error === "tooLong"
+      ? t("editor.preset.nameTooLong").replace("{n}", String(PRESET_NAME_MAX[kind]))
+      : t("editor.preset.nameInvalid");
 
   /* ── 拖拽（多选整组移动 + 边缘自动滚动）────────────── */
   const [dragging, setDragging] = createSignal(false);
@@ -144,15 +153,20 @@ export function PresetPanel(props: PresetPanelProps): JSX.Element {
   const submitDirectory = async (): Promise<void> => {
     if (busy()) return;
     const name = dirDraft().trim();
-    if (name === "") return;
+    const problem = validatePresetName(name, "directory");
+    if (problem !== null) {
+      setDirError(nameErrorText(problem, "directory"));
+      return;
+    }
     if (isDirectoryNameTaken(name, directories())) {
-      setDirDuplicate(true);
+      setDirError(t("editor.preset.dirExists"));
       return;
     }
     setBusy(true);
     try {
-      if (await props.createDirectory(name)) setDirOpen(false);
-      else setDirDuplicate(true);
+      const outcome = await props.createDirectory(name);
+      if (outcome.ok) setDirOpen(false);
+      else setDirError(outcome.message);
     } finally {
       setBusy(false);
     }
@@ -163,16 +177,22 @@ export function PresetPanel(props: PresetPanelProps): JSX.Element {
     if (busy()) return;
     const name = presetDraft().trim();
     if (name === "" || presetGroups().length === 0) return;
+    const problem = validatePresetName(name, "preset");
+    if (problem !== null) {
+      setPresetError(nameErrorText(problem, "preset"));
+      return;
+    }
     // 落点：选中的目录 → 选中预设所在目录 → default（specs §5.3）
     const directoryId = resolveCreateDirectory(selection(), directories(), presets());
     if (isPresetNameTaken(name, directoryId, presets())) {
-      setPresetDuplicate(true);
+      setPresetError(t("editor.preset.exists"));
       return;
     }
     setBusy(true);
     try {
-      if (await props.createPreset(name, directoryId, presetGroups())) setPresetOpen(false);
-      else setPresetDuplicate(true);
+      const outcome = await props.createPreset(name, directoryId, presetGroups());
+      if (outcome.ok) setPresetOpen(false);
+      else setPresetError(outcome.message);
     } finally {
       setBusy(false);
     }
@@ -296,7 +316,7 @@ export function PresetPanel(props: PresetPanelProps): JSX.Element {
               icon={<IconFolderPlus size={14} />}
               onClick={() => {
                 setDirDraft("");
-                setDirDuplicate(false);
+                setDirError(null);
                 setDirOpen(true);
               }}
             />
@@ -312,7 +332,7 @@ export function PresetPanel(props: PresetPanelProps): JSX.Element {
               icon={<IconBookmarkPlus size={14} />}
               onClick={() => {
                 setPresetDraft("");
-                setPresetDuplicate(false);
+                setPresetError(null);
                 setPresetGroups([...DEFAULT_PRESET_GROUPS]);
                 setPresetOpen(true);
               }}
@@ -321,11 +341,11 @@ export function PresetPanel(props: PresetPanelProps): JSX.Element {
         </Tooltip>
       </div>
 
-      {/* 可滚动的目录 / 预设树 */}
+      {/* 可滚动的目录 / 预设树：父容器已限定高度，这里 flex 填充并自滚 */}
       <div
         ref={scrollHost}
-        class="flex min-h-0 flex-col gap-1 overflow-y-auto pb-1"
-        style={{ "min-height": TREE_MIN_HEIGHT }}
+        data-preset-tree
+        class="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto pb-1"
       >
         <For each={directories()}>
           {(directory) => {
@@ -508,7 +528,7 @@ export function PresetPanel(props: PresetPanelProps): JSX.Element {
             autofocus
             onInput={(event) => {
               setDirDraft(event.currentTarget.value);
-              setDirDuplicate(false);
+              setDirError(null);
             }}
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.isComposing) {
@@ -518,9 +538,9 @@ export function PresetPanel(props: PresetPanelProps): JSX.Element {
             }}
           />
         </label>
-        <Show when={dirDuplicate()}>
-          <p data-preset-dir-duplicate class="mt-1.5 text-fs-0 text-danger">
-            {t("editor.preset.dirExists")}
+        <Show when={dirError()}>
+          <p data-preset-dir-error class="mt-1.5 text-fs-0 text-danger">
+            {dirError()}
           </p>
         </Show>
       </Dialog>
@@ -555,7 +575,7 @@ export function PresetPanel(props: PresetPanelProps): JSX.Element {
             autofocus
             onInput={(event) => {
               setPresetDraft(event.currentTarget.value);
-              setPresetDuplicate(false);
+              setPresetError(null);
             }}
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.isComposing) {
@@ -597,9 +617,9 @@ export function PresetPanel(props: PresetPanelProps): JSX.Element {
           </div>
           <p class="text-fs-0 text-fg-3">{t("editor.preset.keepHint")}</p>
         </div>
-        <Show when={presetDuplicate()}>
-          <p data-preset-duplicate class="mt-1.5 text-fs-0 text-danger">
-            {t("editor.preset.exists")}
+        <Show when={presetError()}>
+          <p data-preset-error class="mt-1.5 text-fs-0 text-danger">
+            {presetError()}
           </p>
         </Show>
       </Dialog>

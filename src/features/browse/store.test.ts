@@ -399,6 +399,32 @@ test("refresh：不弄丢选择，只剔掉真的不在列表里的", async () =
   assert.equal(store.anchorItem()?.id, 2, "锚点被剔掉后退回第一张选中的");
 });
 
+/*
+ * 撤销 / 重做：**不许清空选择**（2026-10-09 修）。
+ *
+ * 症状：在编辑器里撤销一次，当前照片的选中被清掉、画布变空，得重新点进来。
+ * 根因：`undo()` 里用的是 `reload()`——语义是「清空重来、选择作废」，
+ * 属于「查询变了」那条路；而撤销改的只是库里的**值**，该走 `refresh()`
+ * （保留选择、只剔掉真的消失了的）。
+ */
+test("undo / redo：撤销与重做都不清空选择", async () => {
+  const { api } = fakeApi(PAGE_SIZE * 2);
+  const store = createBrowseStore({ api });
+  open(store);
+  await tick();
+
+  store.selectAll();
+  const selected = store.selectedIds();
+  assert.ok(selected.length > 0, "先得选中几张，下面的断言才有意义");
+
+  await store.mark({ kind: "rating", value: 3 });
+  await store.undo();
+  assert.deepEqual(store.selectedIds(), selected, "撤销后选择必须保留");
+
+  await store.redo();
+  assert.deepEqual(store.selectedIds(), selected, "重做后选择也必须保留");
+});
+
 test("refresh：旧页按资产身份保留画面，但再次访问仍重读", async () => {
   const { api, addItem, calls } = fakeApi(1000);
   const store = createBrowseStore({ api });

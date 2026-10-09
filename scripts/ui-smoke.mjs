@@ -1107,6 +1107,159 @@ try {
   }
 
   /*
+   * 对比（`compare-demo`）：每一格各有一份图片 URL，这批 URL 的一生跨三处持有者
+   * （单图槽位 / 总览槽位 / 多图缓存）。人类 2026-10-08 报的就是「点一张、另一张变空白」，
+   * 所以这里按那个动作序列来：缩放几次 → 逐格点 → 每次点击后每一格都必须还有图。
+   *
+   * 顺带把**探针**也验一遍（`Ctrl+Alt+Shift+D`）：这是「这类问题以后怎么查」的入口，
+   * 它自己坏了就没人能看现场了。
+   */
+  const compareDemo = await evaluate(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const demo = document.querySelector('[data-demo="compare"]');
+    if (!demo) return null;
+    const open = demo.querySelector('[data-demo-action="open-compare"]');
+    if (!open) return null;
+    open.click();
+    await sleep(600);
+
+    const host = demo.querySelector('[data-compare="open"]');
+    if (host === null) return { opened: false };
+    const frames = () => [...host.querySelectorAll('[data-compare-frame]')];
+    const snapshot = () => frames().map((frame) => ({
+      state: frame.getAttribute('data-compare-url'),
+      current: frame.getAttribute('data-current') === 'true',
+      image: frame.querySelector('img') !== null,
+    }));
+
+    const out = { opened: true, panes: frames().length, afterOpen: snapshot(), afterZoom: [], afterClicks: [], probe: {} };
+
+    // 缩放三次（人类报的正是「多次缩放之后」）
+    const rect = host.getBoundingClientRect();
+    for (let i = 0; i < 3; i += 1) {
+      host.dispatchEvent(new WheelEvent('wheel', {
+        bubbles: true, cancelable: true, deltaY: -180,
+        clientX: Math.round(rect.left + rect.width * 0.5),
+        clientY: Math.round(rect.top + rect.height * 0.5),
+      }));
+      await sleep(150);
+    }
+    out.afterZoom = snapshot();
+
+    // 逐格点三轮：每点一次都会换「当前照片」→ 换单图槽位那份 URL
+    for (let round = 0; round < 3; round += 1) {
+      for (const frame of frames()) {
+        frame.click();
+        await sleep(200);
+        out.afterClicks.push(snapshot());
+      }
+    }
+    out.finalCurrent = frames().filter((frame) => frame.getAttribute('data-current') === 'true').length;
+    out.probeFramesBefore = host.querySelectorAll('[data-compare-probe-frame]').length;
+
+    // 探针：开发版里 Ctrl+Alt+Shift+D 应当把浮层打开
+    window.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'd', ctrlKey: true, altKey: true, shiftKey: true, bubbles: true,
+    }));
+    await sleep(250);
+    const probeFrames = [...host.querySelectorAll('[data-compare-probe-frame]')];
+    out.probe = {
+      frames: probeFrames.length,
+      lines: probeFrames.map((node) => node.textContent),
+      panel: host.querySelector('[data-compare-probe-panel]') !== null,
+    };
+    // 收尾：关掉探针，别把浮层留在后面的断言里
+    window.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'd', ctrlKey: true, altKey: true, shiftKey: true, bubbles: true,
+    }));
+    await sleep(150);
+    out.probeFramesAfter = host.querySelectorAll('[data-compare-probe-frame]').length;
+    return out;
+  })()`);
+
+  if (compareDemo === null) {
+    problems.push("画廊里没有对比演示（src/dev/compare-demo.tsx 没挂上？）");
+  } else if (compareDemo.opened) {
+    if (compareDemo.panes < 3) {
+      problems.push(`对比演示应当有 3 格（现在是 ${compareDemo.panes}）`);
+    }
+    const snapshots = [
+      ...compareDemo.afterOpen,
+      ...compareDemo.afterZoom,
+      ...compareDemo.afterClicks.flat(),
+    ];
+    const broken = snapshots.filter((entry) => entry.state !== "ok" || !entry.image);
+    if (broken.length > 0) {
+      problems.push(
+        `对比里有 ${broken.length} 格丢了图片（点一张、另一张空白 —— 查 store.ts 的 URL 持有者检查）`,
+      );
+    }
+    if (compareDemo.finalCurrent !== 1) {
+      problems.push(`对比点画幅应当只有一格是「当前」（现在是 ${compareDemo.finalCurrent} 格）`);
+    }
+    if (compareDemo.probe.frames !== compareDemo.panes) {
+      problems.push(
+        `Ctrl+Alt+Shift+D 没打开探针浮层（每格应有读数，现在 ${compareDemo.probe.frames} 格）`,
+      );
+    } else if (compareDemo.probe.lines.some((line) => !line.includes("url ok"))) {
+      problems.push(`探针浮层报了「这格没有 URL」：${compareDemo.probe.lines.join(" | ")}`);
+    }
+    if (!compareDemo.probe.panel) {
+      problems.push("探针的事件流面板没出现（data-compare-probe-panel）");
+    }
+    if (compareDemo.probeFramesAfter !== 0) {
+      problems.push("探针关不掉（Ctrl+Alt+Shift+D 再按一次应当把浮层收回去）");
+    }
+  } else {
+    problems.push("点「打开对比」没打开对比视图");
+  }
+
+  /*
+   * 文本渐隐（`styles/fade.css`）：定稿列表的「名字很长也不撑开行」就靠它。
+   * 两个同宽的盒子里放一短一长两行，量三件事：
+   *   ① 行宽 == 盒子宽（不被文字撑开）；② 短名字不被裁；③ 长名字被裁且 mask 真的挂上了。
+   */
+  const textFade = await evaluate(`(() => {
+    const demo = document.querySelector('[data-demo="text-fade"]');
+    if (!demo) return null;
+    const read = (name) => {
+      const box = demo.querySelector('[data-fade-box="' + name + '"]');
+      if (!box) return null;
+      const line = box.querySelector('.fade-x-end');
+      if (!line) return null;
+      const style = getComputedStyle(line);
+      const boxStyle = getComputedStyle(box);
+      const padding = parseFloat(boxStyle.paddingLeft) + parseFloat(boxStyle.paddingRight);
+      return {
+        box: box.getBoundingClientRect().width,
+        available: box.clientWidth - padding,
+        line: line.getBoundingClientRect().width,
+        clipped: line.scrollWidth > line.clientWidth + 1,
+        masked: style.maskImage !== 'none' && style.maskImage !== '',
+      };
+    };
+    return { short: read('short'), long: read('long') };
+  })()`);
+
+  if (textFade === null || textFade.short === null || textFade.long === null) {
+    problems.push("画廊里没有文本渐隐演示（src/dev/KitchenSink.tsx 的 data-demo=text-fade 没挂上？）");
+  } else {
+    for (const [name, entry] of [["短", textFade.short], ["长", textFade.long]]) {
+      if (Math.abs(entry.box - 160) > 1) {
+        problems.push(`文本渐隐（${name}名字）：盒子被文字撑到 ${entry.box}（应恒为 160）`);
+      }
+      if (entry.line > entry.available + 1) {
+        problems.push(`文本渐隐（${name}名字）：文字行 ${entry.line} 超出了可用宽 ${entry.available}`);
+      }
+      if (!entry.masked) {
+        problems.push(`文本渐隐（${name}名字）：mask-image 没生效`);
+      }
+    }
+    if (textFade.short.clipped) problems.push("文本渐隐：短名字不该被裁");
+    if (!textFade.long.clipped) problems.push("文本渐隐：长名字应当被裁（否则测不到超长那条路）");
+  }
+
+  /*
    * 旧的「tile 画面区比例必须 1.5」断言已删除：格子的形状现在统一是**正方外框**，
    * 照片在里面的比例**每张不同**（来自元信息，还可能被 3:1 夹取）。
    * 对齐 / 居中 / 比例范围 / 信息条可见性由下面 `tileGrid` 那一段统一量。
@@ -2303,6 +2456,36 @@ try {
       : [...bar.querySelectorAll("*")].filter((el) => el.tabIndex >= 0).length;
 
     /*
+     * 第 3 组（曲线 / 预设）等高（审计 2026-10-04）：
+     * 两页签必须挂在同一个内容容器里 —— 切页签组高不变；
+     * 预设树在容器里自滚，不许把整条右栏撑长。
+     * 必须**在 Tab 切档位之前**量：切到「仅 view」档后右栏是收起的，组高会是 0。
+     */
+    const advancedGroup = document.querySelector('[data-editor-group="curve"]');
+    let advanced = null;
+    if (advancedGroup !== null) {
+      const tab = (text) =>
+        [...advancedGroup.querySelectorAll('[data-part="item"]')].find(
+          (node) => (node.textContent || "").trim() === text,
+        );
+      const height = () => Math.round(advancedGroup.getBoundingClientRect().height);
+      advanced = { curve: height() };
+      tab("预设")?.click();
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      advanced.preset = height();
+      const presetPanel = advancedGroup.querySelector("[data-editor-preset-panel]");
+      const presetTree = advancedGroup.querySelector("[data-preset-tree]");
+      advanced.treeOverflow = presetTree === null ? null : getComputedStyle(presetTree).overflowY;
+      advanced.treeInside = presetTree !== null && presetPanel !== null
+        ? Math.round(presetTree.getBoundingClientRect().height)
+          <= Math.round(presetPanel.getBoundingClientRect().height)
+        : null;
+      tab("曲线")?.click();
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      advanced.back = height();
+    }
+
+    /*
      * 仅 view 档里 LUT 开关**不锁**（人类 2026-09-23 晚）：
      * 按两下 Tab 进 ③（左列本来收起）→ 点 LUT 开关 → 左列必须真的出现。
      * 左列宽度是最好的判据（收起时那一列量出来是 0）。
@@ -2342,6 +2525,7 @@ try {
       toolsbarTabbable: tabbable,
       leftInViewOnly: leftInViewOnly,
       leftAfterToggle: leftAfterToggle,
+      advanced: advanced,
     };
   })()`);
 
@@ -2378,6 +2562,23 @@ try {
       problems.push(
         `「仅 view」档里点 LUT 开关左列没出现（宽度 ${editor.leftAfterToggle}px）—— 开关被档位锁住了`,
       );
+    }
+    if (editor.advanced === null) {
+      problems.push("编辑右栏第 3 组找不到（曲线 / 预设页签或预设面板不在）");
+    } else {
+      const advanced = editor.advanced;
+      if (advanced.curve !== advanced.preset || advanced.curve !== advanced.back) {
+        problems.push(
+          `第 3 组切「曲线 / 预设」时高度在变（${advanced.curve} → ${advanced.preset} → ${advanced.back}）` +
+            "—— 两页签必须同容器等高（审计 2026-10-04）",
+        );
+      }
+      if (advanced.treeOverflow !== "auto" || advanced.treeInside !== true) {
+        problems.push(
+          `预设树没有获得有界的内部滚动区（overflow-y=${advanced.treeOverflow}，在容器内=${advanced.treeInside}）` +
+            "—— 预设多时会把右栏撑长",
+        );
+      }
     }
   }
 
@@ -2902,6 +3103,8 @@ try {
         resizeProbe,
         dirTree,
         workspace,
+        editorPanel,
+        editor,
         browseWorkspace,
         fullscreenPage,
         settings,

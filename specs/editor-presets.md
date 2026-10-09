@@ -6,6 +6,9 @@
 > （`e4WYe` 面板本体 / `nxMA2` 浮层 / `WCT5O` 等高说明 / 主稿与三派生帧页签条）。
 > **纪律**：复用优先（§2.12）——结构照抄 LUT 面板、弹窗照抄 Dialog、删除照抄 EasyDestroy、
 > 提示照抄 Tooltip、拖拽复用 `lib/pointer-drag.ts`；不新造第二份。
+> **2026-10-07 审计修复**：`implementations/2026-10-04_editor-presets-audit.md` 的发现已逐条修复
+> （等高容器、选中收敛、名称上限、库串行、版本契约、错误区分、rev 单次、应用前重读 LUT），
+> 记录见 `implementations/2026-10-07_editor-presets-audit-fixes.md`；真机验收仍待崔总。
 
 ---
 
@@ -55,7 +58,8 @@ CREATE UNIQUE INDEX idx_presets_dir_name ON presets(directory_id, name);
 
 ## 3. payload 契约（大类快照）
 
-`payload` 是 JSON 对象（`TEXT` 存字符串；后端只做基本校验——可解析 + `version === 1`——语义归前端）：
+`payload` 是 JSON 对象（`TEXT` 存字符串；后端只做基本校验——可解析 + **受支持版本**（`version === 1`，或
+色彩管理接入后的 `version === 2` 且带 `colorManagement`）——语义归前端）：
 
 ```jsonc
 {
@@ -77,7 +81,7 @@ CREATE UNIQUE INDEX idx_presets_dir_name ON presets(directory_id, name);
    - `tone` / `color` / `detail`（4 个数值项）/ `lens`（5 个数值项）：逐项 `setParam(id, 值)`（值为 `payload` 缺项时回退 `PARAM_DEFAULTS[id]`）。
    - `detail.nrMethod` → store 的 `setNrMethod`；`lens.profile` / `lens.enabled` → `setLensProfile` / `setLensEnabled`。
    - `curve`：4 个通道全部 `setCurvePoints`（缺通道按恒等曲线 `[[0,0],[1,1]]`）。
-   - `lut`：`id === null` → `setLut(null, false)`（清除）；`id` 非空且**在当前 LUT 库中存在** → `setLut(id, enabled)`；`id` 非空但**不存在或不可用** → **忽略该项**（不动当前 LUT，不报错——崔总：LUT 丢失要有保底）。
+   - `lut`：`id === null` → `setLut(null, false)`（清除）；`id` 非空且**在当前 LUT 库中存在** → `setLut(id, enabled)`；`id` 非空但**不存在或不可用** → **忽略该项**（不动当前 LUT，不报错——崔总：LUT 丢失要有保底）。「存在」以**应用那一刻重读的 LUT 库**为准（工作区先 `lut_library` 刷新再跑应用计划），不用进入编辑器时的旧缓存；重读之后文件又被删的窗口仍走渲染层缺失资源错误契约。
 3. **参数表派生**：大类的数值参数 id 列表**从 `features/editor/params.ts` 的 `PARAMS`（`group` 字段）派生**，不手写第二份；`detail`/`lens` 的额外字段（`nrMethod` / `profile` / `enabled`）按本契约写死名字。
 4. **纯逻辑落点**：payload 的**构建 / 清洗 / 分组名列表 / 应用合并判定**全部放 `src/lib/presets.ts`（`lib` 不许 import `features`——参数 id 由调用方传入或映射表由 `features/editor/params.ts` 侧轻量派生后注入；实现时二选一，**保持分层检查 `pnpm lint:arch` 通过**）。
 5. 不含：基础曲线（`baseCurveProfile` / `baseCurvePoints`）、几何（裁切/旋转）、`asShotK`、`autoAdjust`、`sourceBase`。
@@ -98,12 +102,12 @@ struct PresetLibraryDto { directories: Vec<PresetDirectoryDto>, presets: Vec<Pre
 
 | 命令 | 入参 | 语义 / 错误 |
 | --- | --- | --- |
-| `preset_library` | — | 读全库；目录表为空则建 `default`。payload 以 **JSON 值**返回（解析失败的行跳过并记 warning，不让面板起不来） |
+| `preset_library` | — | 读全库；目录表为空则建 `default`。payload 以 **JSON 值**返回（解析失败**或版本不受支持**的行跳过并记一行诊断，不让面板起不来） |
 | `preset_create_directory` | `id, name` | 重名（NOCASE）→ Err（前端提示） |
 | `preset_delete_directory` | `id` | `id == "default"` → Err；**目录非空 → Err**（后端兜底，前端本就不显示按钮） |
-| `preset_create` | `id, directory_id, name, payload` | 目录不存在 → Err；同目录重名 → Err |
+| `preset_create` | `id, directory_id, name, payload` | 目录不存在 → Err；同目录重名 → Err；payload 不可解析或版本不受支持 → Err |
 | `preset_delete` | `id` | 直删（无关联副作用） |
-| `preset_move` | `id, directory_id` | 目标目录不存在 → Err；**目标同名时自动加 ` 2`/` 3` 后缀**（在同目录内循环找第一个可用名） |
+| `preset_move` | `id, directory_id` | 目标目录不存在 → Err；**目标同名时自动加 ` 2`/` 3` 后缀**（在同目录内循环找第一个可用名；后缀从基名里让位，**搬完仍在 80 字符上限内**） |
 
 - 注册进 `src-tauri/src/lib.rs` 的 `generate_handler!`（在 `lut::*` 附近）。
 - 存储层实现放 `crates/raybend/src/store/presets.rs`（`mod.rs` 挂载），风格照 `store/luts.rs`（`Connection` 函数 + `Error::Unsupported` 校验）。
@@ -164,8 +168,8 @@ applyPresetSnapshot: (snapshot: PresetSnapshot, groups: readonly PresetGroup[]) 
   - 新建预设 = `IconBookmarkPlus`。
 - **目录行**（`h-row-h`，`bg-surface-bar`，radius-ui）：点行 = 选中目录（`bg-state-selected`）；chevron 点 = 折叠切换；行尾删除按钮 `EasyDestroyButton` **仅当目录为空且非 default** 时渲染；拖着预设靠近时 = 投放高亮（`ring-1 ring-brand`）。
 - **预设行**（`h-row-h`）：点行 = 选中（单选替换 / Shift 多选）；选中 = `bg-state-selected`；悬浮 = `bg-state-hover` + 行尾 `EasyDestroyButton`（`opacity-0 group-hover:opacity-100 group-focus-within:opacity-100`，照 LUT tile）；行上 `Tooltip` 显示「包含：影调 · 色彩 · 曲线」（从 payload 已存大类派生，用 ` · ` 连接；空 payload 显示 `t("editor.preset.containsNone")`）。
-- **新建目录弹窗**：`Dialog`，标题 + 名称输入 + 取消/确认（取消左确认右 §11.5）；重名 → 弹窗内红字提示（照 LUT 新建分类的 `duplicate` 处理）。
-- **新建预设弹窗**：`Dialog`，名称输入 + **大类 chips 行**（六个 chip：选中 = `bg-state-selected` + `font-semibold text-fg-1`，未选 = `bg-surface-bar` + `text-fg-2`，照导入 LUT 弹窗的 `CategoryChips` 语言）+ 提示「未勾选的大类不覆盖照片当前值」；**默认全选**；名称为空或一个大类都没选时禁用「保存」。保存后关闭并选中新预设。
+- **新建目录弹窗**：`Dialog`，标题 + 名称输入 + 取消/确认（取消左确认右 §11.5）；名称先过前端校验（空 / 超长 40 字 / 控制字符）与重名检查，再调后端；重名与其它失败**分开提示**，后端真实原因显示在弹窗内（`PresetCreateOutcome`，审计 2026-10-07）。
+- **新建预设弹窗**：`Dialog`，名称输入 + **大类 chips 行**（六个 chip：选中 = `bg-state-selected` + `font-semibold text-fg-1`，未选 = `bg-surface-bar` + `text-fg-2`，照导入 LUT 弹窗的 `CategoryChips` 语言）+ 提示「未勾选的大类不覆盖照片当前值」；**默认全选**；名称为空或一个大类都没选时禁用「保存」（超长 80 字 / 控制字符同目录弹窗处理）。保存后关闭并选中新预设。
 - **拖拽**（复用 `lib/pointer-drag.ts::trackPointerDrag`，阈值 + `cancelOutsideWindow: true`）：
   - 起拖（阈值后）：标记 `dragging`；**所有目录显示为折叠**（临时覆盖，不改展开记录）；ghost = `position: fixed` 的行快照（`surface-layer` 底 + 1px `brand` 描边，照画稿）；多选时拖动任一选中行 = 整组移动。
   - move：命中判定对**可见目录行**做 hit test（`getBoundingClientRect`）→ 高亮目标；指针进入滚动容器上/下缘 24px 内且未到顶/底 → `requestAnimationFrame` 步进滚动（step 8px）。
@@ -238,11 +242,11 @@ min-height: calc((var(--panel-w-right) - var(--panel-pad) - var(--panel-pad-scro
 
 ## 7. 测试与验收
 
-**Rust（`cargo test`）**：`store/presets.rs` 的 CRUD 对内存 SQLite 逐条覆盖——建目录/重名/删 default 拒绝/删非空拒绝/建预设/同目录重名/移动/移动自动后缀/payload 非法 JSON 行。命令层薄，无需单独测试。
+**Rust（`cargo test`）**：`store/presets.rs` 的 CRUD 对内存 SQLite 逐条覆盖——建目录/重名/删 default 拒绝/删非空拒绝/建预设/同目录重名/移动/移动自动后缀（含**80 字上限撞名后仍合法**）/payload 非法 JSON 行/版本契约（v1、带 colorManagement 的 v2 接受；缺 version、v3、v2 缺字段拒绝）。命令层薄，无需单独测试。
 
-**前端（`pnpm test`）**：`lib/presets.test.ts` 覆盖 §5.1 纯函数（含 `PARAM_DEFAULTS` 回退与 LUT 忽略分支）；`locale-parity` 自动覆盖 i18n。
+**前端（`pnpm test`）**：`lib/presets.test.ts` 覆盖 §5.1 纯函数（含 `PARAM_DEFAULTS` 回退、LUT 忽略分支、名称字符计数与收敛纯函数）；`features/editor/store.test.ts` 覆盖库刷新收敛选中/折叠、应用 rev 单次、丢失 LUT 不动当前值；`locale-parity` 自动覆盖 i18n。
 
-**Agent 冒烟**：`pnpm typecheck && pnpm test && pnpm lint:colors && pnpm lint:arch && pnpm lint:i18n && pnpm build` + `cargo check --workspace`。**真机验收（人类）**：新建目录/预设、应用观感、拖拽（含多选与边缘滚动）、LUT 丢失应用、等高手感。
+**Agent 冒烟**：`pnpm typecheck && pnpm test && pnpm lint:colors && pnpm lint:arch && pnpm lint:i18n && pnpm build` + `cargo check --workspace` + `pnpm smoke:ui`（第 3 组切页签等高、预设树有界自滚）。**真机验收（人类）**：新建目录/预设（含超长名提示）、应用观感、拖拽（含多选与边缘滚动）、LUT 丢失应用、等高手感。
 
 **验收清单（崔总需求逐条）**：见 `todos/2026-09-30-editor-presets.md` §验收要点（14 条），实现后逐条核对。
 

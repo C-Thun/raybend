@@ -14,11 +14,13 @@ import {
   createViewerStore,
   MAX_ZOOM,
   MIN_ZOOM,
+  viewerPhotoKey,
   zoomPanAt,
   type ViewerPhoto,
   type ViewerState,
   visibleRect,
 } from "./store.ts";
+import { createViewerUrlProbe } from "./probe.ts";
 
 const PHOTOS: ViewerPhoto[] = [
   { id: "a", path: "/a.jpg", fileName: "a.jpg" },
@@ -402,6 +404,73 @@ test("多图 URL：取不到其中一张时只让该幅为空，不串用别张�
   assert.ok(store.imageUrlFor(PHOTOS[2]!) !== null);
 });
 
+test("对比：来回点画幅不能把另一幅的 URL 弄丢（点谁谁显示、另一幅空白）", async () => {
+  const fake = fakeDeps();
+  const store = createViewerStore(fake.deps);
+  const pair = PHOTOS.slice(0, 2);
+  const a = pair[0]!;
+  const b = pair[1]!;
+  store.show(pair, 0);
+  await flush();
+  // CompareView 进对比时会为每幅都 ensure 一次
+  await Promise.all(pair.map((photo) => store.ensureImage(photo)));
+  assert.ok(store.imageUrlFor(a) !== null, "a 一开始就有 URL");
+  assert.ok(store.imageUrlFor(b) !== null, "b 一开始就有 URL");
+
+  // 点 b 那格 → 当前照片切到 b
+  store.focus(1);
+  await flush();
+  assert.ok(store.imageUrlFor(a) !== null, "切到 b 之后 a 仍应可显示");
+  assert.ok(store.imageUrlFor(b) !== null, "切到 b 之后 b 应可显示");
+
+  // 再点 a 那格 → 当前照片切回 a（这时 b 不该空白）
+  store.focus(0);
+  await flush();
+  assert.ok(store.imageUrlFor(a) !== null, "切回 a 之后 a 应可显示");
+  assert.ok(store.imageUrlFor(b) !== null, "切回 a 之后 b 仍应可显示");
+
+  // 关闭：每个 URL 恰好回收一次（不双回收、不泄漏）
+  store.close();
+  assert.equal(new Set(fake.revoked).size, fake.revoked.length, "同一个 URL 不能回收两次");
+});
+
+test("URL 所有权：被挤出缓存的 URL 若单图还在显示则不回收，换走后只回收一次", async () => {
+  const revoked: string[] = [];
+  let counter = 0;
+  const six = "abcdef".split("").map((name) => ({
+    id: name,
+    path: `/${name}.jpg`,
+    fileName: `${name}.jpg`,
+  }));
+  const store = createViewerStore({
+    loadScreen: async () => new Uint8Array([1]),
+    makeUrl: () => `blob:${(counter += 1)}`,
+    revokeUrl: (url) => revoked.push(url),
+    cacheLimit: 2, // 实际下限也是 4（对比上限），下面按 4 条构造
+  });
+
+  store.show(six, 0);
+  await flush();
+  await store.ensureImage(six[1]!); // b 进缓存
+  const borrowed = store.imageUrlFor(six[1]!)!;
+  store.focus(1);
+  assert.equal(store.imageUrl(), borrowed, "单图槽位借的就是缓存里那份");
+
+  // 把缓存填满到上限（4 条：b/c/d/e），再挤一条 f 进来 → b 被挤出
+  for (const photo of [six[2]!, six[3]!, six[4]!]) await store.ensureImage(photo);
+  await store.ensureImage(six[5]!);
+  assert.ok(!revoked.includes(borrowed), "单图还在显示的那份不能被挤出回收");
+
+  // 单图换到 c → 没人再引用 b 那份了，这才会回收（而且只回收一次）
+  store.focus(2);
+  await flush();
+  assert.equal(revoked.filter((url) => url === borrowed).length, 1, "最后一次放手才回收，且只一次");
+  assert.ok(store.imageUrlFor(six[2]!) !== null, "c 仍在缓存里，可显示");
+
+  store.close();
+  assert.equal(new Set(revoked).size, revoked.length, "同一个 URL 不能回收两次");
+});
+
 test("loadFor：预载写下的 URL 会被单图路径直接吃掉（不再走第二次 IPC）", async () => {
   let screenCalls = 0;
   const fake = fakeDeps();
@@ -474,6 +543,54 @@ test("close：复位并回收 URL（不泄漏 blob）", async () => {
   assert.equal(store.state().active, false);
   assert.equal(store.imageUrl(), null);
   assert.ok(fake.revoked.includes(used!), `应当回收 ${used}`);
+});
+
+test("viewerPhotoKey：展示定稿（imageKey）算进身份 —— 同一 path 的两个变体不是同一张", () => {
+  const base: ViewerPhoto = { id: "a", path: "/a.jpg", fileName: "a.jpg" };
+  assert.equal(viewerPhotoKey(base), viewerPhotoKey({ ...base }), "同一张照片身份稳定");
+  assert.notEqual(viewerPhotoKey(base), viewerPhotoKey({ ...base, imageKey: "draft-1" }));
+  assert.notEqual(
+    viewerPhotoKey({ ...base, imageKey: "draft-1" }),
+    viewerPhotoKey({ ...base, imageKey: "draft-2" }),
+  );
+  /*
+   * 对比视图的取图指纹直接拿它拼 —— 变体一变指纹就变 ⇒ 会重新 ensureImage
+   * （browse 切「展示定稿」后那张变空的根因就是指纹少了这一段）。
+   */
+  const fingerprint = (photos: readonly ViewerPhoto[]): string => photos.map(viewerPhotoKey).join("\u0001");
+  assert.notEqual(fingerprint([base]), fingerprint([{ ...base, imageKey: "draft-1" }]));
+});
+
+test("探针：健康的对比流程里既不丢 URL，也能读出「放手但被缓存留住」，关掉后账要平", async () => {
+  const probe = createViewerUrlProbe({ enabled: true });
+  const fake = fakeDeps();
+  const store = createViewerStore({ ...fake.deps, probe });
+  const pair = PHOTOS.slice(0, 2);
+  store.show(pair, 0);
+  await flush();
+  await Promise.all(pair.map((photo) => store.ensureImage(photo)));
+  store.focus(1);
+  await flush();
+  store.focus(0);
+  await flush();
+
+  const events = probe.events();
+  assert.ok(
+    events.some((event) => event.kind === "borrow"),
+    "单图路径借用缓存那份 URL，探针要留下证据",
+  );
+  assert.ok(
+    events.some((event) => event.kind === "release" && event.detail.includes("kept by")),
+    "「放手但没回收（谁还持有）」要能读出来 —— 这就是 2026-10-08 那个 bug 的现场特征",
+  );
+  assert.equal(
+    events.filter((event) => event.kind === "missing").length,
+    0,
+    "健康流程里任何一格都不该丢 URL",
+  );
+
+  store.close();
+  assert.equal(probe.liveTotal(), 0, "关掉看图后探针账上不该还有活着的 URL（泄露检测）");
 });
 
 // ─────────────────── 视野框（右栏预览上的那块矩形）───────────────────

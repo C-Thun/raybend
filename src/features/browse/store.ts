@@ -888,7 +888,13 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
       const id = repositoryId();
       if (id === null || !canWrite()) return null;
       const result = await api.undo(id);
-      await reload(); // 撤销改的是库里的值，最稳的是重新取一遍
+      /*
+       * 用 `refresh()` 而**不是** `reload()`（2026-10-09 修）：
+       * 撤销改的是库里的**值**，查询本身没变 —— 而 `reload()` 的语义是「清空重来、选择作废」，
+       * 于是在编辑器里撤销一次就把当前照片的选中清掉、画布变空（崔总实测报的 bug）。
+       * `refresh()` 保留选择、只剔掉真的不见了的那些 —— 正是这条路径该用的那一个（见本文件顶部注释）。
+       */
+      await refresh();
       // 撤销可能动的是**编辑栈**（显影参数也是撤销栈里的一步）—— 通知编辑器重读
       setUndoTick((current) => current + 1);
       return rememberUndo(result);
@@ -897,7 +903,7 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
       const id = repositoryId();
       if (id === null || !canWrite()) return null;
       const result = await api.redo(id);
-      await reload();
+      await refresh(); // 同上：重做也不许清空选择
       setUndoTick((current) => current + 1);
       return rememberUndo(result);
     },

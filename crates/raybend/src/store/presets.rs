@@ -1,7 +1,7 @@
 //! 编辑预设的目录与条目（`specs/editor-presets.md` §2）。
 //!
 //! 设备级资产：目录只有一级，`default` 目录由读取侧惰性保证存在且不可删；
-//! `payload` 是大类快照 JSON，**这里只校验可解析且是对象**，语义归前端
+//! `payload` 是大类快照 JSON，这里校验**可解析 + 版本受支持**，语义归前端
 //! （`src/lib/presets.ts`）。风格与命名照 [`crate::store::luts`]。
 
 use crate::error::{Error, Result};
@@ -10,6 +10,10 @@ use serde::{Deserialize, Serialize};
 
 /// `默认` 目录的固定 id（名称走语言包，DB 里的 `name` 只是占位）。
 pub const DEFAULT_DIRECTORY_ID: &str = "default";
+
+/// 名称上限（**Unicode 字符数**，不是字节也不是 UTF-16 单元）。
+const DIRECTORY_NAME_MAX: usize = 40;
+const PRESET_NAME_MAX: usize = 80;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -44,11 +48,21 @@ fn valid_name(name: &str, max_chars: usize) -> bool {
     !name.is_empty() && name.chars().count() <= max_chars && !name.chars().any(char::is_control)
 }
 
-/** 校验 payload：必须是合法 JSON **对象**（语义校验在前端清洗层）。 */
-fn valid_payload(payload: &str) -> bool {
-    serde_json::from_str::<serde_json::Value>(payload)
-        .map(|value| value.is_object())
-        .unwrap_or(false)
+/**
+ * 解析并校验 payload：JSON **对象**且 `version` 在受支持集合里。
+ *
+ * 前端清洗层（`src/lib/presets.ts::sanitizePresetSnapshot`）只认 v1 与
+ * 「带 `colorManagement` 的 v2」；后端必须在**写入与读取**两侧用同一集合挡住，
+ * 否则会存下一行前端永远丢弃、用户又删不掉的记录（审计 2026-10-04）。
+ */
+fn parse_payload(payload: &str) -> Option<serde_json::Value> {
+    let value = serde_json::from_str::<serde_json::Value>(payload).ok()?;
+    let object = value.as_object()?;
+    match object.get("version").and_then(serde_json::Value::as_i64) {
+        Some(1) => Some(value),
+        Some(2) if object.contains_key("colorManagement") => Some(value),
+        _ => None,
+    }
 }
 
 pub fn directories(conn: &Connection) -> Result<Vec<PresetDirectory>> {
@@ -105,7 +119,7 @@ pub fn create_directory(
     now_ms: i64,
 ) -> Result<PresetDirectory> {
     let name = name.trim();
-    if !valid_id(id) || !valid_name(name, 40) {
+    if !valid_id(id) || !valid_name(name, DIRECTORY_NAME_MAX) {
         return Err(Error::Unsupported("预设目录 ID 或名称无效".into()));
     }
     if id == DEFAULT_DIRECTORY_ID || directory_name_taken(conn, name)? {
@@ -156,14 +170,16 @@ fn preset_name_taken(conn: &Connection, directory_id: &str, name: &str) -> Resul
 const PRESET_COLUMNS: &str = "id, directory_id, name, payload, created_at, updated_at";
 
 fn record(row: &rusqlite::Row<'_>) -> rusqlite::Result<Option<PresetRecord>> {
+    let id: String = row.get(0)?;
     let payload_text: String = row.get(3)?;
-    let payload = match serde_json::from_str::<serde_json::Value>(&payload_text) {
-        Ok(value) if value.is_object() => value,
-        // 坏行跳过（查询层用 flat_map 过滤 None）
-        _ => return Ok(None),
+    let Some(payload) = parse_payload(&payload_text) else {
+        // 坏行跳过（查询层用 flat_map 过滤 None）；留一条诊断，便于查
+        // 「目录显示空、后端却拒绝删除」这类不一致（审计 2026-10-04）。
+        eprintln!("[raybend] 预设 {id} 的 payload 不可用（JSON 或版本无效），读取时跳过");
+        return Ok(None);
     };
     Ok(Some(PresetRecord {
-        id: row.get(0)?,
+        id,
         directory_id: row.get(1)?,
         name: row.get(2)?,
         payload,
@@ -205,7 +221,7 @@ pub fn create(
     now_ms: i64,
 ) -> Result<PresetRecord> {
     let name = name.trim();
-    if !valid_id(id) || !valid_name(name, 80) || !valid_payload(payload) {
+    if !valid_id(id) || !valid_name(name, PRESET_NAME_MAX) || parse_payload(payload).is_none() {
         return Err(Error::Unsupported("预设 ID、名称或内容无效".into()));
     }
     if !directory_exists(conn, directory_id)? {
@@ -256,10 +272,15 @@ pub fn move_to(
     }
     let mut name = current.name.clone();
     if preset_name_taken(conn, directory_id, &name)? {
-        let base = current.name.clone();
         let mut suffix = 2;
         loop {
-            name = format!("{base} {suffix}");
+            let tail = format!(" {suffix}");
+            // 名称上限按**字符**算（与 `valid_name` 同一口径）：给后缀留出位置，
+            // 基名从尾部截短 —— 否则 80 字名称搬一次变 82 字，前端清洗层
+            // 会把整行丢弃、用户再也看不见也删不掉（审计 2026-10-04）。
+            let budget = PRESET_NAME_MAX.saturating_sub(tail.chars().count());
+            let base: String = current.name.chars().take(budget).collect();
+            name = format!("{}{tail}", base.trim_end());
             if !preset_name_taken(conn, directory_id, &name)? {
                 break;
             }
@@ -385,10 +406,61 @@ mod tests {
             params![DEFAULT_DIRECTORY_ID],
         )
         .unwrap();
+        // 版本不受支持的行同样跳过（前端清洗层会丢弃它；留着只会占住目录）
+        conn.execute(
+            "INSERT INTO presets (id, directory_id, name, payload, created_at, updated_at) \
+             VALUES ('p3', ?1, '未来版本', '{\"version\":9}', 22, 22)",
+            params![DEFAULT_DIRECTORY_ID],
+        )
+        .unwrap();
         let all = presets(&conn).unwrap();
         assert_eq!(all.len(), 1);
         assert_eq!(all[0].id, "p1");
         assert!(get(&conn, "p2").unwrap().is_none());
+        assert!(get(&conn, "p3").unwrap().is_none());
+    }
+
+    #[test]
+    fn payload_version_contract_matches_frontend_cleaner() {
+        let conn = db();
+        // 无 version / 未知 version / v2 缺 colorManagement → 写入即拒
+        assert!(create(&conn, "p1", DEFAULT_DIRECTORY_ID, "无版本", r#"{"tone":{}}"#, 20).is_err());
+        assert!(create(&conn, "p2", DEFAULT_DIRECTORY_ID, "未来版本", r#"{"version":3,"tone":{}}"#, 21).is_err());
+        assert!(create(&conn, "p3", DEFAULT_DIRECTORY_ID, "缺色彩管理", r#"{"version":2,"tone":{}}"#, 22).is_err());
+        // 受支持的两个版本
+        create(&conn, "p4", DEFAULT_DIRECTORY_ID, "v1", PAYLOAD, 23).unwrap();
+        create(
+            &conn,
+            "p5",
+            DEFAULT_DIRECTORY_ID,
+            "v2",
+            r#"{"version":2,"colorManagement":{"processVersion":"linear_rec2020_v2","input":"automatic"}}"#,
+            24,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn move_suffix_keeps_name_within_limit() {
+        let conn = db();
+        create_directory(&conn, "d1", "人像", 10).unwrap();
+        create_directory(&conn, "d2", "风景", 11).unwrap();
+        // 80 字（上限）名字撞名：后缀必须从基名里让位，搬完仍是 80 字
+        let long = "名".repeat(80);
+        create(&conn, "p1", "d1", &long, PAYLOAD, 20).unwrap();
+        create(&conn, "p2", "d2", &long, PAYLOAD, 21).unwrap();
+        let moved = move_to(&conn, "p1", "d2", 30).unwrap();
+        assert_eq!(moved.name.chars().count(), 80);
+        assert!(moved.name.ends_with(" 2"));
+        assert!(moved.name.starts_with('名'));
+        // emoji（非 BMP）：字符数 ≤ 80 时 UTF-16 单元也必然 ≤ 160（前端清洗上限）
+        let emoji = "🌄".repeat(80);
+        create(&conn, "p3", "d1", &emoji, PAYLOAD, 31).unwrap();
+        create(&conn, "p4", "d2", &emoji, PAYLOAD, 32).unwrap();
+        let moved_emoji = move_to(&conn, "p3", "d2", 33).unwrap();
+        assert_eq!(moved_emoji.name.chars().count(), 80);
+        assert!(moved_emoji.name.ends_with(" 2"));
+        assert!(moved_emoji.name.encode_utf16().count() <= 160);
     }
 
     #[test]

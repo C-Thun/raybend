@@ -175,18 +175,8 @@ pub fn create(
     stack: &DevelopStack,
     now_ms: i64,
 ) -> Result<Issue> {
-    let name = raw_name.trim();
-    if name.is_empty() || name.chars().count() > 80 || name.chars().any(char::is_control) {
-        return Err(Error::Unsupported("定稿名称必须是 1–80 个可见字符".into()));
-    }
-    if ["sooc", "raw", "latest"]
-        .iter()
-        .any(|reserved| name.eq_ignore_ascii_case(reserved))
-    {
-        return Err(Error::Unsupported(
-            "SOOC、RAW 与 latest 是保留定稿名".into(),
-        ));
-    }
+    let name = validated_name(raw_name)?;
+    ensure_name_free(conn, asset_id, name, None)?;
     if !can_finalize(stack, &list(conn, asset_id)?)? {
         return Err(Error::Unsupported("当前配置与现有定稿或原始源相同".into()));
     }
@@ -201,6 +191,66 @@ pub fn create(
     )?;
     get(conn, asset_id, conn.last_insert_rowid())?
         .ok_or_else(|| Error::Unsupported("刚创建的定稿无法读回".into()))
+}
+
+/// 定稿名称的合法性：1–80 个可见字符，且不能占保留名（`SOOC` / `RAW` / `latest`）。
+///
+/// [`create`] 与 [`rename`] 共用这一份 —— 两处各写一遍必然漂移：
+/// 「能建出来的名字」与「能改成去的名字」看起来就该是同一套规则。
+fn validated_name(raw_name: &str) -> Result<&str> {
+    let name = raw_name.trim();
+    if name.is_empty() || name.chars().count() > 80 || name.chars().any(char::is_control) {
+        return Err(Error::Unsupported("定稿名称必须是 1–80 个可见字符".into()));
+    }
+    if ["sooc", "raw", "latest"]
+        .iter()
+        .any(|reserved| name.eq_ignore_ascii_case(reserved))
+    {
+        return Err(Error::Unsupported(
+            "SOOC、RAW 与 latest 是保留定稿名".into(),
+        ));
+    }
+    Ok(name)
+}
+
+/// 同一张照片里名字不能撞车（DB 有 `UNIQUE(asset_id, name)`）——
+/// 在这里先拦住，是为了让用户看到「已有同名定稿」而不是一句 SQLite 约束错。
+///
+/// `ignore_id` = 改名时允许保留自己那个名字（改成同一个名字是无事发生）。
+fn ensure_name_free(
+    conn: &Connection,
+    asset_id: i64,
+    name: &str,
+    ignore_id: Option<i64>,
+) -> Result<()> {
+    let taken: Option<i64> = conn
+        .query_row(
+            "SELECT id FROM issues WHERE asset_id = ?1 AND name = ?2",
+            params![asset_id, name],
+            |row| row.get(0),
+        )
+        .optional()?;
+    match taken {
+        Some(id) if Some(id) != ignore_id => {
+            Err(Error::Unsupported(format!("已有同名定稿「{name}」")))
+        }
+        _ => Ok(()),
+    }
+}
+
+/// 改一条定稿的**名称**（崔总 2026-10-08）。
+///
+/// 只动 `name` 一列：配置 JSON / 哈希 / 基准 / 创建时间 / 序号全部不动 ——
+/// 改名前后是**同一份定稿**，选中态（按 `id`）与画面都不该受影响。
+/// 名字撞车与建定稿同一条规矩（DB 的唯一约束，先拦一步给人话）。
+/// 返回 `Ok(false)` = 这条定稿不存在（越权/踩空的 `id`，调用方按错误处理）。
+pub fn rename(conn: &Connection, asset_id: i64, issue_id: i64, raw_name: &str) -> Result<bool> {
+    let name = validated_name(raw_name)?;
+    ensure_name_free(conn, asset_id, name, Some(issue_id))?;
+    Ok(conn.execute(
+        "UPDATE issues SET name = ?3 WHERE asset_id = ?1 AND id = ?2",
+        params![asset_id, issue_id, name],
+    )? > 0)
 }
 
 pub fn delete(conn: &Connection, asset_id: i64, issue_id: i64) -> Result<bool> {
@@ -225,16 +275,10 @@ pub fn import_issue(
     ordinal_hint: Option<i64>,
     stack: &DevelopStack,
 ) -> Result<bool> {
-    let name = raw_name.trim();
-    if name.is_empty()
-        || name.chars().count() > 80
-        || name.chars().any(char::is_control)
-        || ["sooc", "raw", "latest"]
-            .iter()
-            .any(|reserved| name.eq_ignore_ascii_case(reserved))
-    {
+    if validated_name(raw_name).is_err() {
         return Ok(false);
     }
+    let name = raw_name.trim();
     // 栈自身的基准与声明对齐（手改过的 sidecar 可能两边不一致；声明值胜出）——
     // 必须在去重判断**之前**做，否则两边基准不一致时哈希对不上、重复检测失效。
     let mut stack = stack.clone();
@@ -588,6 +632,67 @@ mod tests {
         assert_eq!(selection(&modern, &saved).unwrap(), Selection::Issue(second.id));
         conn.execute("UPDATE issues SET schema_version=1 WHERE id=?1", [second.id]).unwrap();
         assert!(list(&conn, 1).is_err());
+    }
+
+    #[test]
+    fn rename_changes_only_the_name() {
+        let conn = db();
+        conn.execute_batch("INSERT INTO assets(id, imported_at, updated_at) VALUES (1,1,1), (2,1,1);")
+            .unwrap();
+        let mut stack = DevelopStack::default();
+        stack.params.insert("exposure".into(), 0.5);
+        let saved = create(&conn, 1, "旧名字", &stack, 100).unwrap();
+
+        assert!(rename(&conn, 1, saved.id, "  新名字  ").unwrap());
+        let renamed = get(&conn, 1, saved.id).unwrap().unwrap();
+        assert_eq!(renamed.name, "新名字", "首尾空白要去掉");
+        // 改成自己的名字：无事发生，不算撞车
+        assert!(rename(&conn, 1, saved.id, "新名字").unwrap());
+        // 改的只有名字：同一份定稿的一切都原样
+        assert_eq!(renamed.profile_hash, saved.profile_hash);
+        assert_eq!(renamed.stack, saved.stack);
+        assert_eq!(renamed.created_at, saved.created_at);
+        assert_eq!(renamed.ordinal, saved.ordinal);
+        assert_eq!(renamed.source_base, saved.source_base);
+        // 选中态按 id：改名不换选中
+        assert_eq!(
+            selection(&stack, &list(&conn, 1).unwrap()).unwrap(),
+            Selection::Issue(saved.id)
+        );
+        // 撞名要拦住（DB 有 UNIQUE(asset_id, name)），且要说人话
+        let mut other = stack.clone();
+        other.params.insert("contrast".into(), 10.0);
+        let second = create(&conn, 1, "另一个", &other, 200).unwrap();
+        let conflict = rename(&conn, 1, second.id, "新名字").unwrap_err();
+        assert!(conflict.to_string().contains("已有同名定稿"), "{conflict}");
+        assert_eq!(get(&conn, 1, second.id).unwrap().unwrap().name, "另一个");
+        // 另一张照片的同名不算撞（作用域是「每张照片」）
+        assert!(create(&conn, 2, "新名字", &stack, 300).is_ok());
+
+        // 误传的 id：改不到（不是「默默成功」）
+        assert!(!rename(&conn, 1, saved.id + 999, "无主名字").unwrap());
+        assert_eq!(get(&conn, 2, saved.id).unwrap(), None);
+    }
+
+    #[test]
+    fn rename_rejects_invalid_and_reserved_names() {
+        let conn = db();
+        conn.execute_batch("INSERT INTO assets(id, imported_at, updated_at) VALUES (1,1,1);")
+            .unwrap();
+        let mut stack = DevelopStack::default();
+        stack.params.insert("exposure".into(), 0.5);
+        let saved = create(&conn, 1, "正常名字", &stack, 100).unwrap();
+
+        for bad in ["", "   ", "bad\nname", "sooC", "RAW", "Latest"] {
+            assert!(rename(&conn, 1, saved.id, bad).is_err(), "非法名不许通过：{bad:?}");
+        }
+        assert!(rename(&conn, 1, saved.id, &"长".repeat(81)).is_err());
+        // 失败不许改到原有名字
+        assert_eq!(get(&conn, 1, saved.id).unwrap().unwrap().name, "正常名字");
+        // 边界：80 个字符正好可以
+        let name = "长".repeat(80);
+        assert!(rename(&conn, 1, saved.id, &name).unwrap());
+        assert_eq!(get(&conn, 1, saved.id).unwrap().unwrap().name, name);
     }
 
     #[test]

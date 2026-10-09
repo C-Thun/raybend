@@ -36,8 +36,8 @@ export interface EditorActions {
   autoAdjust: () => void;
   canFinalize: () => boolean;
   finalize: () => void;
-  /** 切换编辑源后保存 latest 来源。 */
-  commitDevelop: () => void;
+  /** 切换编辑源后保存 latest 来源（= 一次 confirm，见 `EditorWorkspace.confirmEdit`）。 */
+  confirmEdit: () => void;
   setBase: (base: "raw" | "sooc") => void;
   restoreColor: () => void;
   reviewColorBatch:()=>void;

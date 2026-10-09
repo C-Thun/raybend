@@ -21,13 +21,14 @@
  * `compiler-artifact`（**已经是最新的单元也在内**，带 `"fresh":true`）——
  * 这就是权威答案，不需要猜。
  *
- * 三类东西按这个集合清：
+ * 三类东西按这个集合清（2026-10-05 补第四类 `examples/`）：
  *
  * | 位置 | 规则 |
  * | --- | --- |
  * | `deps/` | 只留「文件名主干 ∈ 存活集合」的。`libX-hash.rlib` 的伴随文件（`X-hash.d` / `.rmeta` / `.pdb`）靠**去掉 `lib` 前缀**一起认领 —— 少留一个 `.d`，cargo 下次就会重编那个单元 |
  * | `build/` | 只留存活集合里出现过的 `<包>-<hash>/` 目录 |
  * | `incremental/` | 每 crate **保留 K 份**（K = 这个 crate 在存活集合里有几个 hash；最新的 K 份），多出来的删。⚠️ 目录名用的是**另一套 hash**（不是 rlib 那 16 位十六进制，映射不上），所以只能按「数量 + 时间」保 —— 但**它是纯缓存**，多删一份的代价只是那个 crate 下次重编慢一点 |
+ * | `examples/` | 与 `deps/` 同一套主干认领（`name` 规范名 / `name-<hash>` 副本及 `.d` / `.o` / `.rmeta` 伴随文件）；子目录只有 rustc 中断留下的临时目录（`rustcXXXX`，从不在构建图里）。实测这里能积到 43 GB（每个 example ~200MB × 每个 hash 一份），旧规则完全不管它 |
  * | `.fingerprint/` | **不碰**（只有几十 MB，而删错会让 cargo 白重编） |
  *
  * # 宽限期：`--keep-days`（默认 3 天）
@@ -38,12 +39,31 @@
  * 又已经凉了很久」的东西。这样每次构建自然清一点，而不会把别人正在用的东西删了
  * （真删错的代价也只是重建，但没必要的重建就是浪费）。
  *
+ * # 清单的口径（哪次构建说了算「谁活着」）
+ *
+ * * **Windows 侧**：住户就是产品构建（`debug:win` 的 `-p raybend-desktop -p raybend
+ *   --features custom-protocol`），清单也用它；
+ * * **WSL 侧**：**两段拼接** —— `build --workspace --lib --bins`（构建态）+
+ *   `test --workspace --lib --bins --tests --no-run`（测试态；`cargo test` 用 cfg(test)
+ *   编 lib/bins，是另一套单元，只取一段会漏）。应用二进制、worker、全部测试目标算存活
+ *   （日常开发环），**不含 examples**：27 个诊断 example 每个带 ~200MB 调试信息，一套就是
+ *   22 GB，远超「必要的增量基础」。注意 `cargo test` / `--all-targets` 会把它们重建出来，
+ *   所以 example 只靠宽限期幸存（3 天内用过的留下，凉了就清，下次用时重编 ~1–2 分钟）。一次性深清用 `--keep-days 0`：清掉所有不在清单里的东西；代价是下一次
+ *   `cargo test --workspace` 会把 examples 重建一遍（磁盘占用也随之回来）。需要 feature
+ *   才能编的 example（如 `ai-probe`）同理不在清单里，凉过宽限期后被清，下次带 feature 重编。
+ *
+ * 清单只在**没显式给 `--json`** 时才自动重建，且**每次都重建**（不是「没有才建」）：
+ * `target/last-build.json` 会过期 —— 上次清单之后又跑过别的构建，新单元不在旧图里，
+ * 拿旧图当权威会把后来建的东西当垃圾（2026-10-05 实测拿 10 天前的清单）。重建是
+ * 增量构建（单元都 fresh，秒级到分钟级）；`debug:win` 显式传 `--json` 的路径不受影响。
+ *
  * # 用法
  *
  * ```bash
  * pnpm clean:win --dry-run     # 只看会删什么（推荐先跑一次）
- * pnpm clean:win               # 自己跑一次 JSON 构建 → 清
- * pnpm clean:wsl --dry-run     # 同样的规则打 WSL 那个 target/
+ * pnpm clean:win               # 自己重建一遍产品清单 → 清
+ * pnpm clean:wsl --dry-run     # 同样的规则打 WSL 那个 target/（清单 = lib+bins+tests）
+ * pnpm clean:wsl --keep-days 0 # 一次性深清：凡不在清单里的一律清（examples 全下架）
  * ```
  *
  * `pnpm debug:win` 会在构建完自动带上它（复用那次构建的 JSON，不额外编译）——
@@ -103,36 +123,49 @@ if (TARGET === null) {
 if (!existsSync(TARGET)) fail(`target 目录不存在：${TARGET}`);
 const DEBUG = join(TARGET, "debug");
 const JSON_PATH = valueOf("--json", join(TARGET_WIN, "last-build.json"));
+/** 清单是调用方显式给的（`debug:win` 刚用它自己的构建落过）还是脚本自己挑的默认路径。 */
+const EXPLICIT_JSON = has("--json");
 const JSON_LOCAL = toLocalPath(JSON_PATH);
 
 
 /* ── 1. 拿到构建图（谁还活着） ─────────────────────────────── */
 
-if (!existsSync(JSON_LOCAL)) {
-  console.log(`没有现成的单元清单，跑一次 JSON 构建：${JSON_PATH}`);
-  const buildArgs = [
-    "build",
-    "-p",
-    "raybend-desktop",
-    "-p",
-    "raybend",
-    "--features",
-    "custom-protocol",
-    "--message-format=json",
-  ];
+/*
+ * 口径按端分叉（理由见文件头「清单的口径」）：
+ *   * Windows 侧 = 产品构建（`debug:win` 用的就是它）；
+ *   * WSL 侧 = **两段拼接**：`build --lib --bins`（构建态）+ `test --lib --bins --tests
+ *     --no-run`（测试态）—— `cargo test` 用 cfg(test) 编 lib/bins，是**另一套单元**，
+ *     只取一段会漏；两段都进清单，`cargo build` 与 `cargo test` 两个日常环都是热的，
+ *     且都不含 examples。
+ */
+const manifestCommands = IS_WINDOWS_TARGET
+  ? [["build", "-p", "raybend-desktop", "-p", "raybend", "--features", "custom-protocol", "--message-format=json"]]
+  : [
+      ["build", "--workspace", "--lib", "--bins", "--message-format=json"],
+      ["test", "--workspace", "--lib", "--bins", "--tests", "--no-run", "--message-format=json"],
+    ];
+
+if (!EXPLICIT_JSON) {
+  console.log(
+    `重建单元清单（${IS_WINDOWS_TARGET ? "产品构建" : "开发环 build 态 + test 态"}）：${JSON_PATH}`,
+  );
   let status = 1;
   if (IS_WINDOWS_TARGET) {
-    const command = `cargo ${buildArgs.join(" ")} > ${JSON_PATH}`;
+    const command = `cargo ${manifestCommands[0].join(" ")} > ${JSON_PATH}`;
     status = spawnSync("cmd.exe", ["/c", `pushd ${windowsRepoPath()} & ${command}`], {
       stdio: ["ignore", "inherit", "inherit"],
       env: windowsBuildEnv({ CARGO_TARGET_DIR: TARGET_WIN }),
     }).status;
   } else {
+    /* 两段 JSON 流按行拼进同一个清单文件：collectLive 逐行解析，天然兼容。 */
     const json = openSync(JSON_LOCAL, "w");
-    status = spawnSync("cargo", buildArgs, {
-      stdio: ["ignore", json, "inherit"],
-      env: { ...process.env, CARGO_TARGET_DIR: TARGET_WIN },
-    }).status;
+    for (const command of manifestCommands) {
+      status = spawnSync("cargo", command, {
+        stdio: ["ignore", json, "inherit"],
+        env: { ...process.env, CARGO_TARGET_DIR: TARGET_WIN },
+      }).status;
+      if (status !== 0) break;
+    }
     closeSync(json);
   }
   if (status !== 0) fail("JSON 构建失败", "先修构建：pnpm debug:win / cargo check");
@@ -166,7 +199,8 @@ function collectLive(jsonPath) {
     if (message.fresh === true) fresh += 1;
     for (const file of message.filenames ?? []) {
       const local = toLocalPath(file);
-      if (local !== null && local.startsWith(DEBUG)) files.add(local);
+      // 带 `/` 边界，避免 `debug-xxx` 这类同前缀目录被误认领
+      if (local !== null && local.startsWith(`${DEBUG}/`)) files.add(local);
     }
   }
   return { files, units, fresh };
@@ -299,6 +333,24 @@ for (const [crate, list] of byCrate) {
   }
 }
 
+/* 3d. examples/ —— 与 deps/ 同一套主干认领（`name` 规范名 / `name-<hash>` 副本及伴随文件），
+ *     子目录只有 rustc 中断留下的临时目录。2026-10-05 补：旧规则完全不管这里，实测积到 43 GB。 */
+const examplesRoot = join(DEBUG, "examples");
+if (existsSync(examplesRoot)) {
+  for (const entry of readdirSync(examplesRoot)) {
+    const full = join(examplesRoot, entry);
+    const info = statSync(full);
+    const stem = stemOf(entry);
+    if (liveStems.has(stem) || liveStems.has(stem.replaceAll("-", "_"))) continue;
+    if (freshEnough(info.mtimeMs)) continue;
+    if (info.isDirectory()) {
+      noteDir(full);
+    } else {
+      note(full, info.size);
+    }
+  }
+}
+
 /* ── 4. 报告 / 执行 ───────────────────────────────────────── */
 
 const mb = (bytes) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
@@ -310,7 +362,7 @@ if (plan.files.length === 0 && plan.dirs.length === 0) {
 
 console.log(
   `${DRY_RUN ? "（dry-run）" : ""}将清理：` +
-    `deps/ ${plan.files.length} 个文件、build/ + incremental/ ${plan.dirs.length} 个目录，` +
+    `deps/ + examples/ 共 ${plan.files.length} 个文件、build/ + incremental/ + examples/ 共 ${plan.dirs.length} 个目录，` +
     `合计 ${mb(plan.bytes)}（判定：不在本次构建图里，且已凉 ≥ ${KEEP_DAYS} 天）`,
 );
 // 最占空间的几项先亮出来 —— 一眼就能看出有没有误删大件（比如 400MB 的 .lib）

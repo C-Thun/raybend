@@ -70,6 +70,123 @@ pub enum AlphaMode {
     Opaque,
 }
 
+/// 「几下算拖动」的阈值（CSS px）——与前端那套同一个口径
+/// （`src/lib/editor-intent.ts` 的 `CLICK_SLOP_PX`）：手抖几像素不该被当成拖动。
+pub const COMPARE_DRAG_SLOP_PX: f32 = 3.0;
+
+/// 对比手势的下一步
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum CompareGestureStep {
+    /// 什么也没变（不需要重画）
+    Idle,
+    /// 分线移到这个归一化位置（0..1）
+    Handle(f32),
+    /// 图像平移这么多**物理像素**
+    Pan((f32, f32)),
+}
+
+/// 对比态的手势状态机（崔总 2026-10-08：对比态下也要能拖图）。
+///
+/// 判据只有一条，且**只看起手**：
+///
+/// * 起手命中分线把手 ⇒ 这一手势拖分线（与原行为一致）；
+/// * 否则 ⇒ 这一手势**平移图像**（与普通视口拖动同一条路：累加位移、
+///   松手补尾样本，只是这里不经过前端那个累加器 —— 指针的原始位置本来就在我们手里）。
+///
+/// 拖动阈值与普通拖动同一口径（[`COMPARE_DRAG_SLOP_PX`]）：手抖不算拖，
+/// 免得“点一下”就把「适合窗口」悄悄切成自由模式（`pan_by` 会置 `FitMode::Free`）。
+#[derive(Debug, Default, Clone, Copy)]
+pub struct CompareGesture {
+    /// 起手时抓的是分线把手
+    handle: bool,
+    /// 这一手势在平移图像
+    panning: bool,
+    /// 平移是否已经越过拖动阈值
+    started: bool,
+    /// 起手位置（CSS；阈值按它算）
+    origin: (f32, f32),
+    /// 上一次采样（CSS；逐样本位移按它算）
+    last: (f32, f32),
+}
+
+impl CompareGesture {
+    /// 换算一次位移：CSS → 物理像素（DPR 只在 Rust 里乘一次，与 `Pan` 意图同一规矩）
+    fn pan_step(&self, viewport: &Viewport, css: (f32, f32), include_origin: bool) -> CompareGestureStep {
+        let (dx, dy) = if include_origin {
+            (css.0 - self.origin.0, css.1 - self.origin.1)
+        } else {
+            (css.0 - self.last.0, css.1 - self.last.1)
+        };
+        if dx == 0.0 && dy == 0.0 {
+            return CompareGestureStep::Idle;
+        }
+        CompareGestureStep::Pan((dx * viewport.dpr, dy * viewport.dpr))
+    }
+
+    fn move_to(&mut self, viewport: &Viewport, css: (f32, f32)) -> CompareGestureStep {
+        if self.handle {
+            self.last = css;
+            return viewport
+                .compare_fraction_at(css.0)
+                .map_or(CompareGestureStep::Idle, CompareGestureStep::Handle);
+        }
+        if !self.panning {
+            return CompareGestureStep::Idle;
+        }
+        if !self.started {
+            let travelled = (css.0 - self.origin.0).hypot(css.1 - self.origin.1);
+            if travelled <= COMPARE_DRAG_SLOP_PX {
+                self.last = css;
+                return CompareGestureStep::Idle;
+            }
+            // 越过阈值：把**从起手算起**的位移一次补上（阈值内那几像素也要跟手，
+            // 不然图像会落后手指一小段）
+            self.started = true;
+            self.last = css;
+            return self.pan_step(viewport, css, true);
+        }
+        // ⚠️ 先算位移再更新 `last`（反过来的话 dx 永远是 0 —— 第一版就是这么写错的，
+        // 单测当场抽到）
+        let step = self.pan_step(viewport, css, false);
+        self.last = css;
+        step
+    }
+
+    pub fn step(
+        &mut self,
+        viewport: &Viewport,
+        fraction: f32,
+        phase: &str,
+        css: (f32, f32),
+    ) -> CompareGestureStep {
+        if !css.0.is_finite() || !css.1.is_finite() {
+            return CompareGestureStep::Idle;
+        }
+        match phase {
+            "down" => {
+                self.handle = viewport.compare_handle_hit(css, fraction);
+                self.panning = !self.handle;
+                self.started = false;
+                self.origin = css;
+                self.last = css;
+                CompareGestureStep::Idle
+            }
+            "move" => self.move_to(viewport, css),
+            "up" => {
+                // 松手那一下自带最终位置：尾样本不能丢，不然图像停在半路
+                let step = self.move_to(viewport, css);
+                *self = CompareGesture::default();
+                step
+            }
+            "cancel" => {
+                *self = CompareGesture::default();
+                CompareGestureStep::Idle
+            }
+            _ => CompareGestureStep::Idle,
+        }
+    }
+}
+
 /// 视口状态。**Rust 独有**。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Viewport {
@@ -299,8 +416,7 @@ impl Viewport {
         }
         Some((x as u32, y as u32, width as u32, height as u32))
     }
-
-    /// 对比分线在洞口宽度上的归一化位置。指针只上报窗口 CSS 坐标；
+/// 对比分线在洞口宽度上的归一化位置。指针只上报窗口 CSS 坐标；
     /// 洞口原点和 DPR 的换算只在这里做。
     #[must_use]
     pub fn compare_fraction_at(&self, css_x: f32) -> Option<f32> {
@@ -377,13 +493,24 @@ impl Viewport {
     ///
     /// NDC 的定义域是**整个 surface**（不是洞口）：洞口靠 scissor 裁，
     /// 这样矩阵只依赖视口尺寸，缩放窗口时不需要重算矩阵以外的东西。
+    ///
+    /// 实现只有 [`Self::matrix_for`] 一处 —— 这里只是把当前画布尺寸递进去。
     pub fn matrix(&self) -> [[f32; 4]; 4] {
+        self.matrix_for((self.image_size.0 as f32, self.image_size.1 as f32))
+    }
+
+    /// 与 [`Self::matrix`] **同一套推导**，但画布尺寸按参数给（列主序）。
+    ///
+    /// 用途只有一个：**对比参照**。传 [`Self::cover_size`] 的结果，就把参照帧
+    /// 等比放大后居中贴在同一块窗口上（多出来的部分在窗口外，由 scissor 裁掉）。
+    /// 矩阵数学仍然只有这一处 —— 别在外面再推一份。
+    pub fn matrix_for(&self, source: (f32, f32)) -> [[f32; 4]; 4] {
         let (w, h) = (self.viewport_size.0.max(1.0), self.viewport_size.1.max(1.0));
-        let center = self.image_center();
+        let center = (source.0 / 2.0, source.1 / 2.0);
         let area = self.rect_center();
         let (sin, cos) = self.rotation.to_radians().sin_cos();
         let scale = self.zoom;
-        // 平移：把图像中心搬到 (area + pan)，再换到 NDC
+        // 平移：把画布中心搬到 (area + pan)，再换到 NDC
         let tx = area.0 + self.pan_px.0;
         let ty = area.1 + self.pan_px.1;
         // physical = (tx + (vx·cos − vy·sin)·z, ty + (vx·sin + vy·cos)·z)
@@ -395,7 +522,7 @@ impl Viewport {
         let b = -sin * scale * 2.0 / w;
         let c = -sin * scale * 2.0 / h;
         let d = -cos * scale * 2.0 / h;
-        // 平移项里含 −center·R·z（把图像中心搬到原点）
+        // 平移项里含 −center·R·z（把画布中心搬到原点）
         let tx_ndc = (tx - (a * center.0 + b * center.1) * w / 2.0) * 2.0 / w - 1.0;
         let ty_ndc = 1.0 - (ty + (c * center.0 + d * center.1) * h / 2.0) * 2.0 / h;
         [
@@ -404,6 +531,73 @@ impl Viewport {
             [0.0, 0.0, 1.0, 0.0],
             [tx_ndc, ty_ndc, 0.0, 1.0],
         ]
+    }
+
+    /// 参照帧按**等比 cover** 填进当前画面后的画布尺寸（参照帧自己的像素坐标系）。
+    ///
+    /// 「只裁不空、不拉伸」（崔总 2026-10-08）：`s = max(cur.w/ref.w, cur.h/ref.h)` ——
+    /// 两个方向都不小于当前画面，多出来的那部分落在窗口外，由
+    /// [`Self::reference_scissor`] 裁掉。比例与参照帧自己一致，
+    /// 所以「不同裁切 / 不同像素尺寸的两张图」也能对比。
+    ///
+    /// 参照帧与当前画面**比例相同**时（例如 SOOC 路径：参照就是按当前几何裁的）
+    /// `s` 正好等于两边的尺寸比 ⇒ 贴出来与旧行为一模一样，不是新特效。
+    pub fn cover_size(&self, source: (u32, u32)) -> (f32, f32) {
+        let (w, h) = (source.0 as f32, source.1 as f32);
+        let (current_w, current_h) = (self.image_size.0 as f32, self.image_size.1 as f32);
+        if w <= 0.0 || h <= 0.0 {
+            return (w.max(1.0), h.max(1.0));
+        }
+        if current_w <= 0.0 || current_h <= 0.0 {
+            return (w, h);
+        }
+        let scale = (current_w / w).max(current_h / h);
+        (w * scale, h * scale)
+    }
+
+    /// 当前画面在屏幕上的矩形（物理像素）。
+    ///
+    /// 对比参照只在这块里画 —— **以当前画面为蒙版**（崔总 2026-10-08）：
+    /// cover 之后多出来的部分不该溢到画面外的留白区去。
+    /// 旋转时取外接矩形（对比与旋转工具不会同时开，这里只是不把话说死）。
+    #[must_use]
+    pub fn image_rect(&self) -> ClipRect {
+        let w = self.image_size.0 as f32 * self.zoom;
+        let h = self.image_size.1 as f32 * self.zoom;
+        let (sin, cos) = self.rotation.to_radians().sin_cos();
+        let area = self.rect_center();
+        let center = (area.0 + self.pan_px.0, area.1 + self.pan_px.1);
+        let width = w * cos.abs() + h * sin.abs();
+        let height = w * sin.abs() + h * cos.abs();
+        ClipRect {
+            x: center.0 - width / 2.0,
+            y: center.1 - height / 2.0,
+            width,
+            height,
+        }
+    }
+
+    /// 对比左侧参照的 scissor：洞口左半（[`Self::compare_scissors`] 的前半）∩ **当前画面矩形**。
+    ///
+    /// 焦点是「当前画面多大，参照就裁多大」：放大到铺满洞口时交集就是洞口左半
+    /// （与旧行为一致），适配时有留白则收进画面矩形里（不溢到留白上）。
+    #[must_use]
+    pub fn reference_scissor(&self, left: (u32, u32, u32, u32)) -> Option<(u32, u32, u32, u32)> {
+        let rect = self.image_rect();
+        let x0 = (left.0 as f32).max(rect.x).max(0.0);
+        let y0 = (left.1 as f32).max(rect.y).max(0.0);
+        let x1 = ((left.0 + left.2) as f32)
+            .min((rect.x + rect.width).max(0.0))
+            .min(self.viewport_size.0.max(0.0));
+        let y1 = ((left.1 + left.3) as f32)
+            .min((rect.y + rect.height).max(0.0))
+            .min(self.viewport_size.1.max(0.0));
+        let width = (x1 - x0).floor();
+        let height = (y1 - y0).floor();
+        if width < 1.0 || height < 1.0 {
+            return None;
+        }
+        Some((x0.floor() as u32, y0.floor() as u32, width as u32, height as u32))
     }
 
     /// **图像像素 → 洞口内 CSS 像素**的仿射变换（覆盖层专用，M3-W3 定契约）。
@@ -927,6 +1121,248 @@ mod tests {
         assert_eq!(right, (600, 75, 450, 600));
         assert_eq!(viewport.compare_scissors(0.0).unwrap()[0].2, 0);
         assert_eq!(viewport.compare_scissors(1.0).unwrap()[1].2, 0);
+    }
+
+    #[test]
+    fn compare_gesture_drags_the_handle_only_when_it_starts_on_it() {
+        let mut viewport = vp();
+        viewport.dpr = 1.5;
+        viewport.clip_rect = Some(ClipRect { x: 150.0, y: 75.0, width: 900.0, height: 600.0 });
+        let mut gesture = CompareGesture::default();
+
+        // 起手在分线上（CSS 400 = 物理 600 = 洞口 150+900×0.5）
+        assert_eq!(gesture.step(&viewport, 0.5, "down", (400.0, 100.0)), CompareGestureStep::Idle);
+        // 拖到 0.75（CSS 550 ⇒ 物理 825 = 150 + 900×0.75）
+        assert_eq!(
+            gesture.step(&viewport, 0.5, "move", (550.0, 100.0)),
+            CompareGestureStep::Handle(0.75),
+        );
+        // 松手那一下自带最终位置：尾样本要算进去
+        assert_eq!(
+            gesture.step(&viewport, 0.75, "up", (250.0, 120.0)),
+            CompareGestureStep::Handle(0.25),
+        );
+        // 手势结束：后面的 move 不再属于它
+        assert_eq!(gesture.step(&viewport, 0.5, "move", (600.0, 100.0)), CompareGestureStep::Idle);
+    }
+
+    #[test]
+    fn compare_gesture_pans_the_image_when_it_starts_off_the_handle() {
+        let mut viewport = vp();
+        viewport.dpr = 2.0;
+        viewport.clip_rect = Some(ClipRect { x: 150.0, y: 75.0, width: 900.0, height: 600.0 });
+        let mut gesture = CompareGesture::default();
+
+        // 起手离分线很远（0.5 的线在 CSS 400；在 100 处起手）
+        assert_eq!(gesture.step(&viewport, 0.5, "down", (100.0, 200.0)), CompareGestureStep::Idle);
+        // 阈值内（3 CSS px）不算拖动：免得点一下就退出「适合窗口」
+        assert_eq!(gesture.step(&viewport, 0.5, "move", (102.0, 200.0)), CompareGestureStep::Idle);
+        // 越过阈值：一次性把**从起手算起**的位移补上（CSS → 物理乘 DPR）
+        assert_eq!(
+            gesture.step(&viewport, 0.5, "move", (110.0, 190.0)),
+            CompareGestureStep::Pan((20.0, -20.0)),
+        );
+        // 之后按逐样本位移走
+        assert_eq!(
+            gesture.step(&viewport, 0.5, "move", (115.0, 200.0)),
+            CompareGestureStep::Pan((10.0, 20.0)),
+        );
+        // 松手：尾样本不能丢（否则图像停在半路）
+        assert_eq!(
+            gesture.step(&viewport, 0.5, "up", (120.0, 200.0)),
+            CompareGestureStep::Pan((10.0, 0.0)),
+        );
+        assert_eq!(gesture.step(&viewport, 0.5, "move", (200.0, 200.0)), CompareGestureStep::Idle);
+
+        // 全程位移 = 手指位移 × DPR（20−20−10−0 = 50 CSS ⇒ 100 物理）
+        let mut gesture = CompareGesture::default();
+        gesture.step(&viewport, 0.5, "down", (100.0, 200.0));
+        let mut moved = 0.0_f32;
+        for css in [110.0_f32, 115.0, 120.0] {
+            if let CompareGestureStep::Pan((dx, _)) = gesture.step(&viewport, 0.5, "move", (css, 200.0)) {
+                moved += dx;
+            }
+        }
+        assert!((moved - 40.0).abs() < 1e-4, "CSS 20 px ⇒ 物理 40 px，实际 {moved}");
+    }
+
+    #[test]
+    fn compare_gesture_cancel_and_bad_input_do_nothing() {
+        let mut viewport = vp();
+        viewport.dpr = 1.0;
+        viewport.clip_rect = Some(ClipRect { x: 0.0, y: 0.0, width: 800.0, height: 600.0 });
+        let mut gesture = CompareGesture::default();
+        gesture.step(&viewport, 0.5, "down", (10.0, 10.0));
+        assert_eq!(gesture.step(&viewport, 0.5, "cancel", (200.0, 200.0)), CompareGestureStep::Idle);
+        // 取消之后这个手势就死了
+        assert_eq!(gesture.step(&viewport, 0.5, "move", (300.0, 300.0)), CompareGestureStep::Idle);
+        // NaN 坐标不改变任何状态
+        gesture.step(&viewport, 0.5, "down", (10.0, 10.0));
+        assert_eq!(
+            gesture.step(&viewport, 0.5, "move", (f32::NAN, 10.0)),
+            CompareGestureStep::Idle,
+        );
+        assert_eq!(
+            gesture.step(&viewport, 0.5, "move", (100.0, 10.0)),
+            CompareGestureStep::Pan((90.0, 0.0)),
+        );
+    }
+
+    #[test]
+    fn cover_size_fills_the_window_without_distorting() {
+        let mut v = vp();
+        v.image_size = (3000, 2000); // 当前画面 3:2
+        // 比例相同（SOOC 那种：参照就是按当前几何裁的）⇒ cover 后正好等于当前画面
+        assert_eq!(v.cover_size((1500, 1000)), (3000.0, 2000.0));
+        assert_eq!(v.cover_size((3000, 2000)), (3000.0, 2000.0));
+        // 更方（4:3）⇒ 等比放大到宽度对齐，高比当前多（多出去的交给 scissor）
+        let (w, h) = v.cover_size((4000, 3000));
+        assert!(close(w, 3000.0, 1e-3) && close(h, 2250.0, 1e-3), "{w}x{h}");
+        assert!(h > 2000.0, "比当前高——这部分会被裁掉");
+        // 更宽（16:9）⇒ 高对齐、宽超出；比例始终是参照自己的比例
+        let (w, h) = v.cover_size((3840, 2160));
+        assert!(close(h, 2000.0, 1e-3) && w > 3000.0, "{w}x{h}");
+        assert!(close(w / h, 3840.0 / 2160.0, 1e-3), "不能硬拉伸");
+        // 退化输入不 panic（交回一个 1×1 级的可用值）
+        assert_eq!(v.cover_size((0, 0)), (1.0, 1.0));
+    }
+
+    /// 矩阵投影：图像像素 → NDC。**按 GPU 的做法带齐次 `w` 再除**：
+    /// 平移列的 w 写错（该 1 写成 0）时整个四边形会被裁掉 ——
+    /// 手写 `m[3][0]` 的投影看不出来，只有这把尺子能提前量到（2026-10-08 踩过）。
+    fn project(matrix: &[[f32; 4]; 4], point: (f32, f32)) -> (f32, f32) {
+        let x = matrix[0][0] * point.0 + matrix[1][0] * point.1 + matrix[3][0];
+        let y = matrix[0][1] * point.0 + matrix[1][1] * point.1 + matrix[3][1];
+        let w = matrix[0][3] * point.0 + matrix[1][3] * point.1 + matrix[3][3];
+        (x / w, y / w)
+    }
+
+    /// 一个画布在 NDC 里的矩形：`(left, top, right, bottom)`（top 的 NDC y 更大）
+    fn ndc_rect(viewport: &Viewport, matrix: &[[f32; 4]; 4], size: (f32, f32)) -> (f32, f32, f32, f32) {
+        let a = project(matrix, (0.0, 0.0));
+        let b = project(matrix, size);
+        (
+            a.0.min(b.0),
+            a.1.max(b.1),
+            a.0.max(b.0),
+            a.1.min(b.1),
+        )
+    }
+
+    #[test]
+    fn reference_cover_matrix_fills_the_current_window_and_keeps_its_own_aspect() {
+        let mut viewport = vp();
+        viewport.clip_rect = Some(ClipRect { x: 0.0, y: 0.0, width: 1600.0, height: 1200.0 });
+        viewport.image_size = (4000, 3000); // 当前画面 4:3
+        viewport.zoom = 0.3; // 适配那种情形：画面比洞口小（左右有留白）
+        let current = ndc_rect(&viewport, &viewport.matrix(), (4000.0, 3000.0));
+
+        // 参照 1:1（比当前更方）⇒ 应上下超出、左右对齐
+        let cover = viewport.cover_size((3000, 3000));
+        let reference = ndc_rect(&viewport, &viewport.matrix_for(cover), cover);
+        assert!(reference.0 <= current.0 + 1e-3 && reference.2 >= current.2 - 1e-3, "左右必须盖住：{reference:?} vs {current:?}");
+        assert!(reference.1 >= current.1 - 1e-3 && reference.3 <= current.3 + 1e-3, "上下必须盖住：{reference:?} vs {current:?}");
+        // 只应有一根轴超出（cover 的紧贴性：另一根轴正好对齐）
+        let over_w = (reference.2 - reference.0) - (current.2 - current.0);
+        let over_h = (reference.1 - reference.3) - (current.1 - current.3);
+        assert!(over_w.min(over_h).abs() < 2e-3, "只应一根轴超出：{over_w} / {over_h}（ref {reference:?} / cur {current:?}）");
+        assert!(over_w.max(over_h) > 1e-3, "另一根轴必须真的超出（才能盖满窗口）");
+        // 中心重合（超出部分两边均分 ⇒ 居中裁切）
+        let current_mid = ((current.0 + current.2) / 2.0, (current.1 + current.3) / 2.0);
+        let reference_mid = ((reference.0 + reference.2) / 2.0, (reference.1 + reference.3) / 2.0);
+        assert!(close(current_mid.0, reference_mid.0, 1e-3) && close(current_mid.1, reference_mid.1, 1e-3), "{current_mid:?} vs {reference_mid:?}");
+        /*
+         * 比例是参照自己的（没有硬拉伸）：1:1 的参照在屏幕上仍是 1:1。
+         * ⚠️ NDC 两轴刻度不同（除的是 viewport 宽高），比值必须换回**物理像素**再比。
+         */
+        let physical_aspect = ((reference.2 - reference.0) / 2.0 * viewport.viewport_size.0)
+            / ((reference.1 - reference.3) / 2.0 * viewport.viewport_size.1);
+        assert!(close(physical_aspect, 1.0, 2e-3), "参照 1:1 就该是 1:1，实际 {physical_aspect}");
+    }
+
+    #[test]
+    fn reference_scissor_is_the_image_rect_inside_the_hole() {
+        let mut viewport = vp();
+        viewport.viewport_size = (1000.0, 800.0);
+        viewport.clip_rect = Some(ClipRect { x: 100.0, y: 100.0, width: 800.0, height: 600.0 });
+        viewport.image_size = (1000, 1000);
+        viewport.pan_px = (0.0, 0.0);
+        viewport.zoom = 0.5; // 画面 500×500，居在洞口中心 (500, 400) ⇒ 矩形 (250,150)-(750,650)
+        let rect = viewport.image_rect();
+        assert!(close(rect.x, 250.0, 1e-3) && close(rect.y, 150.0, 1e-3) && close(rect.width, 500.0, 1e-3), "{rect:?}");
+        let [left, _] = viewport.compare_scissors(0.5).expect("有洞口");
+        // 洞口左半 = (100,100)-(500,700)：与画面矩形相交后，左边从 250 起、右边到 500
+        assert_eq!(viewport.reference_scissor(left), Some((250, 150, 250, 500)));
+        // 完全无交集（画面缩到左上角之外）⇒ 不画
+        viewport.zoom = 0.05;
+        viewport.pan_px = (-400.0, -350.0);
+        assert_eq!(viewport.reference_scissor(left), None);
+        // 放大到铺满洞口：交集就是洞口左半（与旧行为一致）
+        viewport.zoom = 3.0;
+        viewport.pan_px = (0.0, 0.0);
+        let [left, _] = viewport.compare_scissors(0.5).expect("有洞口");
+        assert_eq!(viewport.reference_scissor(left), Some(left));
+    }
+
+    #[test]
+    fn cover_reference_matches_the_old_shared_quad_when_the_aspect_is_the_same() {
+        /*
+         * **这就是「SOOC 路径行为不变」的机器证据**（崔总 2026-10-08 问的）：
+         * SOOC 参照帧是按**当前几何**裁出来的，比例与当前画面相同，只是像素尺寸不同
+         * （帧是 1920 档，当前画面是原图逻辑尺寸）—— cover 后缩放系数正好把参照放成当前画面大小，
+         * 于是参照的 quad/矩阵与「与主图共用同一个 uniform」的旧做法**逐位相同**。
+         */
+        let mut viewport = vp();
+        viewport.image_size = (4000, 3000);
+        viewport.clip_rect = Some(ClipRect { x: 0.0, y: 0.0, width: 1600.0, height: 1200.0 });
+        viewport.zoom = 0.4;
+        viewport.pan_px = (37.0, -12.0);
+        let cover = viewport.cover_size((1920, 1440)); // 同一 4:3 的 SOOC 帧
+        /*
+         * 比例相同 ⇒ cover 后就是当前画面尺寸。**不是逐位相等**：`w * scale` 里
+         * f32 除法与乘法各舍入一次，实测差 0.0002 图像像素（约 1 个 ULP）——
+         * 旧做法是把这同一个舍入差当拉伸吸收掉，谈不上「更准」。
+         */
+        assert!(close(cover.0, 4000.0, 0.001) && close(cover.1, 3000.0, 0.001), "{cover:?}");
+        // 零可见差异的判据：两套矩阵投出来的四角一致（1e-5 NDC ≈ 千分之几个屏幕像素）
+        let reference = ndc_rect(&viewport, &viewport.matrix_for(cover), cover);
+        let current = ndc_rect(&viewport, &viewport.matrix(), (4000.0, 3000.0));
+        for (left, right) in [
+            (reference.0, current.0),
+            (reference.1, current.1),
+            (reference.2, current.2),
+            (reference.3, current.3),
+        ] {
+            assert!(close(left, right, 1e-5), "SOOC 路径不该有可见差异：{reference:?} vs {current:?}");
+        }
+    }
+
+    #[test]
+    fn cover_reference_stays_sub_pixel_when_the_aspect_only_differs_by_rounding() {
+        /*
+         * 更接近真实的一种：SOOC 帧的比例与当前画面**只差舍入**（两边各自按自己的分辨率取整裁切）。
+         * 例：1920×1280 的帧（3:2）对 4000×2667 的当前画面。
+         * 旧做法：拉伸到当前矩形（非等比）——横/纵差约 0.01%；
+         * 新做法：等比 cover + 裁 ——纵向完全对齐，横向多出不到 1 物理像素。
+         * 两种做法在屏幕上都是零可见差异；下面把数字钉住，以后一眼能看出这个前提变了没有。
+         */
+        let mut viewport = vp();
+        viewport.image_size = (4000, 2667);
+        viewport.clip_rect = Some(ClipRect { x: 0.0, y: 0.0, width: 1600.0, height: 1200.0 });
+        viewport.zoom = 0.4;
+        let cover = viewport.cover_size((1920, 1280));
+        assert!(close(cover.1, 2667.0, 0.001), "高度对齐到当前画面：{}", cover.1);
+        let overflow_px = (cover.0 - 4000.0) * viewport.zoom; // 屏幕上多出来的物理像素
+        assert!(overflow_px >= 0.0 && overflow_px < 1.0, "横向多出 {overflow_px} 物理像素（应 < 1）");
+        let relative = (cover.0 - 4000.0) / 4000.0;
+        assert!(relative < 0.0002, "相对差 {relative} 应当小于 0.02%");
+        // 比例不变（参照自己的比例），且居中：中心与当前画面中心重合
+        assert!(close(cover.0 / cover.1, 1920.0 / 1280.0, 1e-4));
+        let reference = ndc_rect(&viewport, &viewport.matrix_for(cover), cover);
+        let current = ndc_rect(&viewport, &viewport.matrix(), (4000.0, 2667.0));
+        let reference_mid = ((reference.0 + reference.2) / 2.0, (reference.1 + reference.3) / 2.0);
+        let current_mid = ((current.0 + current.2) / 2.0, (current.1 + current.3) / 2.0);
+        assert!(close(reference_mid.0, current_mid.0, 1e-4) && close(reference_mid.1, current_mid.1, 1e-4));
     }
 
     #[test]

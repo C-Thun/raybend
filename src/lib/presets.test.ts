@@ -33,10 +33,13 @@ import {
   newPresetDirectoryId,
   newPresetId,
   planPresetApply,
+  prunePresetCollapsed,
+  prunePresetSelection,
   resolveCreateDirectory,
   sanitizePresetLibrary,
   sanitizePresetSnapshot,
   snapshotGroups,
+  validatePresetName,
   type GroupParams,
   type PresetSnapshot,
 } from "./presets.ts";
@@ -123,6 +126,50 @@ test("sanitizePresetLibrary 丢坏行且不抛错", () => {
   assert.equal(library.presets[0].id, "p1");
   // 整体是非对象也不抛
   assert.deepEqual(sanitizePresetLibrary("x"), { directories: [], presets: [] });
+});
+
+test("sanitizePresetLibrary 名称按字符计数（80 个 emoji 是合法的 80 字符）", () => {
+  const emoji80 = "🌄".repeat(80);
+  const library = sanitizePresetLibrary({
+    directories: [{ id: "default", name: "Default", sortOrder: 0, createdAt: 1 }],
+    presets: [
+      { id: "p1", directoryId: "default", name: emoji80, createdAt: 1, updatedAt: 1, payload: { version: 1, tone: {} } },
+      { id: "p2", directoryId: "default", name: `${emoji80}x`, createdAt: 2, updatedAt: 2, payload: { version: 1, tone: {} } },
+      { id: "p3", directoryId: "default", name: "带\u0007控制符", createdAt: 3, updatedAt: 3, payload: { version: 1, tone: {} } },
+    ],
+  });
+  assert.deepEqual(library.presets.map((preset) => preset.id), ["p1"]);
+  assert.equal(library.presets[0].name.length, 160, "80 个 emoji 在 UTF-16 里是 160 个单元");
+});
+
+test("validatePresetName 与 Rust 同口径：字符数 / 控制字符 / 空白", () => {
+  assert.equal(validatePresetName("", "preset"), "empty");
+  assert.equal(validatePresetName("   ", "directory"), "empty");
+  assert.equal(validatePresetName("名".repeat(80), "preset"), null);
+  assert.equal(validatePresetName("名".repeat(81), "preset"), "tooLong");
+  assert.equal(validatePresetName("名".repeat(40), "directory"), null);
+  assert.equal(validatePresetName("名".repeat(41), "directory"), "tooLong");
+  assert.equal(validatePresetName("🌄".repeat(80), "preset"), null, "emoji 按字符算，不是 UTF-16 单元");
+  assert.equal(validatePresetName("a\u0000b", "preset"), "control");
+  assert.equal(validatePresetName("a\u007fb", "preset"), "control");
+  assert.equal(validatePresetName(" 柔和 ", "preset"), null);
+});
+
+test("prunePresetSelection 收敛失效选中（目录与预设）", () => {
+  const directories = new Set(["default", "d1"]);
+  const presets = new Set(["p1"]);
+  assert.deepEqual(prunePresetSelection({ kind: "presets", ids: ["p1", "p2"] }, directories, presets), { kind: "presets", ids: ["p1"] });
+  assert.equal(prunePresetSelection({ kind: "presets", ids: ["p2"] }, directories, presets), null);
+  assert.deepEqual(prunePresetSelection({ kind: "directory", id: "d1" }, directories, presets), { kind: "directory", id: "d1" });
+  assert.equal(prunePresetSelection({ kind: "directory", id: "gone" }, directories, presets), null);
+  assert.equal(prunePresetSelection(null, directories, presets), null);
+});
+
+test("prunePresetCollapsed 丢掉已删目录的展开记录", () => {
+  assert.deepEqual(
+    prunePresetCollapsed({ d1: true, gone: true, default: false }, new Set(["default", "d1"])),
+    { d1: true, default: false },
+  );
 });
 
 /* ── 快照构建 ──────────────────────────────────────────── */

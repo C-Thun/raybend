@@ -10,18 +10,7 @@
 
 import { createSignal, Show } from "solid-js";
 import { createViewerStore, Viewer } from "../components/ui/viewer/index.ts";
-
-/** 一张 1600×1000 的图（SVG data URL：尺寸是真的、字节很小） */
-function fakeImageUrl(): string {
-  const svg =
-    '<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000">' +
-    // 具名颜色：色值只允许写在 tokens.css（`pnpm lint:colors` 管着）；
-    // 这里只是张占位图，像不像品牌色不重要，「尺寸真实」才重要
-    '<rect width="1600" height="1000" fill="darkslategray"/>' +
-    '<circle cx="800" cy="500" r="260" fill="mediumaquamarine"/>' +
-    "</svg>";
-  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
-}
+import { fakeImageUrl } from "./demo-photos.ts";
 
 const PHOTOS = [
   { id: "p1", path: "/demo/1.jpg", fileName: "P1000001.JPG" },
@@ -35,7 +24,7 @@ export function ViewerDemo() {
     // 字节只是触发器：URL 由 makeUrl 给（浏览器里没有真缩略图后端）
     loadThumb: async () => new Uint8Array([1]),
     loadScreen: async () => new Uint8Array([2]),
-    makeUrl: fakeImageUrl,
+    makeUrl: () => fakeImageUrl(),
     revokeUrl: () => {},
   });
 

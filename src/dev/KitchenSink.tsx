@@ -43,6 +43,7 @@ import { ToolsBar } from "../shell/ToolsBar.tsx";
 import type { ExifData } from "../features/exif-strip/index.ts";
 import { RepositoryList } from "../features/repositories/index.ts";
 import { ViewerDemo } from "./viewer-demo.tsx";
+import { CompareDemo } from "./compare-demo.tsx";
 import type { RepositoryView } from "../api/types.ts";
 import { Badge, CountBadge } from "../components/ui/Badge";
 import { Button, IconButton } from "../components/ui/Button";
@@ -397,6 +398,24 @@ export default function KitchenSink() {
             </Row>
             <Row label="看图">
               <ViewerDemo />
+            </Row>
+            <Row label="对比">
+              <CompareDemo />
+            </Row>
+            {/*
+              文本渐隐（`styles/fade.css`）：宽度受限时**不撑开结构**，超出部分右端淡出。
+              两个盒子同宽：上面一条是名字刚好放得下（不该被裁），下面一条故意超长（该淡出）。
+              冒烟脚本量「行宽 == 盒子宽」与「超长才被裁」两条 —— 页面里也因此能一眼看出来。
+            */}
+            <Row label="文本渐隐">
+              <div class="flex w-full flex-col gap-1" data-demo="text-fade">
+                <span class="w-40 rounded-ui bg-surface-track px-2 py-1" data-fade-box="short">
+                  <span class="fade-x-end block overflow-hidden whitespace-nowrap text-fs-2 leading-5 text-fg-1">2024 婚礼 001</span>
+                </span>
+                <span class="w-40 overflow-hidden rounded-ui bg-surface-track px-2 py-1" data-fade-box="long">
+                  <span class="fade-x-end block overflow-hidden whitespace-nowrap text-fs-2 leading-5 text-fg-1">2024 秋季外拍 逆光侧脸 精修第 3 版 最终定稿 A</span>
+                </span>
+              </div>
             </Row>
             <Row label="库卡片">
               <RepositoryCardsDemo />

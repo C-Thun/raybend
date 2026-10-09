@@ -210,7 +210,7 @@ sidecar_path(asset) = <照片目录>/<主体名>.xmp
 | 命令 | 触发的资产 |
 | --- | --- |
 | `develop_commit` | 该资产 |
-| `issue_create` / `issue_delete` | 该资产 |
+| `issue_create` / `issue_rename` / `issue_delete` | 该资产 |
 | `browse_mark`（评级 / 色标 / 标签 / 文字） | 受影响资产集合（`marking::apply` 的 ops；喜欢/锁不进 sidecar） |
 | `browse_undo` / `browse_redo` | 补丁里受影响的资产（develop 与标记 op 都要覆盖） |
 

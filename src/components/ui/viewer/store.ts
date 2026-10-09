@@ -61,6 +61,7 @@
 import { batch, createSignal } from "solid-js";
 
 import { imageMimeOfBytes } from "../../../lib/image-mime.ts";
+import { viewerUrlProbe, type ViewerUrlProbe } from "./probe.ts";
 
 /** 看图里的一张（id 与网格一致：用路径） */
 export interface ViewerPhoto {
@@ -112,6 +113,8 @@ export interface ViewerStoreDeps {
   /** 多图 URL 缓存上限（张）；对比最多 4 张，所以实际下限也是 4。 */
   cacheLimit?: number;
   revokeUrl?: (url: string) => void;
+  /** 取图探针（缺省用全局那个；测试可注一个开着的，断言事件流） */
+  probe?: ViewerUrlProbe;
 }
 
 export interface ViewerState {
@@ -286,6 +289,10 @@ export interface ViewerStore {
   toggleFit: () => void;
 }
 
+export function viewerPhotoKey(photo: ViewerPhoto): string {
+  return `${photo.id}\u0000${photo.imageKey ?? photo.path}`;
+}
+
 export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
   const [state, setState] = createSignal<ViewerState>(EMPTY_VIEWER);
   const [imageUrl, setImageUrl] = createSignal<string | null>(null);
@@ -314,6 +321,8 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
       return URL.createObjectURL(new Blob([buffer], { type: imageMimeOfBytes(bytes) }));
     });
   const revokeUrl = deps.revokeUrl ?? ((url: string): void => URL.revokeObjectURL(url));
+  /** 取图探针：默认关（`record` 第一件事就是返回）；开法见 `probe.ts` 文件头 */
+  const probe = deps.probe ?? viewerUrlProbe;
 
   /** 换图时的作废令牌：迟到的结果直接丢掉（换得快时尤其重要） */
   let generation = 0;
@@ -335,17 +344,61 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
   /** 已生成的 URL：换图/关闭时回收上一个 */
   let currentUrl: string | null = null;
 
-  function replaceUrl(url: string | null): void {
+  /*
+   * ── URL 的所有权：**谁都不用了才回收**（2026-10-08 修「对比点一张另一张空白」）──
+   *
+   * 同一个 URL 可能同时被三处用着：单图槽位（`currentUrl`）、总览槽位（`overview()`）、
+   * 多图缓存（`imageUrls()`）。以前是「取出即归调用方所有」——单图路径从多图缓存里
+   * **摘走**当前那张的 URL 并负责回收，于是焦点在画幅之间来回切时，上一张的 URL
+   * 既不在缓存里、又被单图槽位换掉回收 ⇒ 那一格查不到 URL 就整块空白。
+   *
+   * 现在改为**持有者检查**：任何一处放手都只在这个 URL 已无持有者时才 revoke。
+   * 不双回收（不会把还在显示的那份打断），也不泄漏（最后一个持有者放手时照样回收）。
+   */
+  function holderOf(url: string): string | null {
+    if (url === currentUrl) return "single";
+    if (overview()?.url === url) return "overview";
+    for (const [key, entry] of imageUrls()) {
+      if (entry.url === url) return `cache:${key}`;
+    }
+    return null;
+  }
+
+  /**
+   * 放手一个 URL：只有确实没人再引用它时才真正回收。
+   *
+   * 「放手但没回收（谁还持有）」也会记进探针 —— 对比空白案的现场就长这样：
+   * 一个 URL 被单图槽位放手、却被多图缓存留住；反过来丢 URL 时也能看到没人持有。
+   */
+  function releaseUrl(url: string | null, reason: string): void {
+    if (url === null) return;
+    const holder = holderOf(url);
+    probe.record({
+      kind: holder === null ? "revoke" : "release",
+      key: probe.keyOf(url),
+      url,
+      detail: holder === null ? reason : `${reason} · kept by ${holder}`,
+    });
+    if (holder === null) revokeUrl(url);
+  }
+
+  /** 回收一个**从未发布出去**的 URL（重复结果 / 迟到结果 / 解码失败）：没有别的持有者 */
+  function dropUrl(url: string, reason: string): void {
+    probe.record({ kind: "revoke", key: probe.keyOf(url), url, detail: reason });
+    revokeUrl(url);
+  }
+
+  function replaceUrl(url: string | null, reason = "single-replace"): void {
     const previous = currentUrl;
     currentUrl = url;
     setImageUrl(url);
-    if (previous !== null && previous !== url && previous !== overview()?.url) revokeUrl(previous);
+    if (previous !== null && previous !== url) releaseUrl(previous, reason);
   }
 
-  function replaceOverview(url: string | null): void {
+  function replaceOverview(url: string | null, reason = "overview-replace"): void {
     const previous = overview()?.url;
     setOverview(url === null ? null : { url, natural: state().natural });
-    if (previous && previous !== url && previous !== currentUrl) revokeUrl(previous);
+    if (previous !== undefined && previous !== url) releaseUrl(previous, reason);
   }
 
   function publishScreen(url: string): void {
@@ -362,31 +415,36 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
   const index = (): number => state().index;
   const current = (): ViewerPhoto | null => photos()[index()] ?? null;
 
-  const imageKey = (photo: ViewerPhoto): string => `${photo.id}\u0000${photo.imageKey ?? photo.path}`;
+  const imageKey = viewerPhotoKey;
 
   function imageUrlFor(photo: ViewerPhoto): string | null {
     const cached = imageUrls().get(imageKey(photo));
     if (cached !== undefined) return cached.url;
     const shown = current();
-    return shown?.id === photo.id && (shown.imageKey ?? shown.path) === (photo.imageKey ?? photo.path) ? imageUrl() : null;
+    const isCurrent =
+      shown?.id === photo.id &&
+      (shown.imageKey ?? shown.path) === (photo.imageKey ?? photo.path);
+    /*
+     * 「没有任何 URL 可用」= 视图里那一格会整块空白。这是探针最要紧的一条：
+     * 它把「空白」从眼睛看到的现象变成事件流里的一行（同 key 连续重复会被合并）。
+     * 当前那张不记：它进入时暂时为空是正常的（正在取图，`imageStatus` 自己表达）。
+     */
+    if (!isCurrent) {
+      probe.record({ kind: "missing", key: imageKey(photo), url: null, detail: photo.fileName });
+    }
+    return isCurrent ? imageUrl() : null;
   }
 
   /**
-   * 从多图缓存里**取出**一张的 URL（取出即归调用方所有）。
+   * 从多图缓存里**借用**一张的 URL（**不摘走**，缓存继续持有）。
    *
-   * 单图路径接管它之后会由 `replaceUrl` 回收 —— 不摘出来的话，同一个 URL
-   * 会被两处分别 revoke，先回收的那一处会把还在显示的另一处打断。
+   * 单图路径拿它当自己的显示源；因为回收要过 `releaseUrl` 的持有者检查，
+   * 缓存这一份不会被单图槽位的换图/关闭打断（对比的其它画幅还要用它）。
    */
-  function takeCachedImageUrl(photo: ViewerPhoto): string | null {
-    const key = imageKey(photo);
-    const cached = imageUrls().get(key);
+  function borrowCachedImageUrl(photo: ViewerPhoto): string | null {
+    const cached = imageUrls().get(imageKey(photo));
     if (cached === undefined) return null;
-    setImageUrls((previous) => {
-      if (!previous.has(key)) return previous;
-      const next = new Map(previous);
-      next.delete(key);
-      return next;
-    });
+    probe.record({ kind: "borrow", key: imageKey(photo), url: cached.url, detail: photo.fileName });
     return cached.url;
   }
 
@@ -397,18 +455,26 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
     const pending = pendingImageUrls.get(key);
     if (pending !== undefined) return pending.task;
     const ticket = ++imageUrlsTicket;
+    probe.record({ kind: "ensure", key, url: null, detail: photo.fileName });
     const task = (async () => {
       try {
         const bytes = await deps.loadScreen(photo.imageKey ?? photo.path);
         if (bytes === null || pendingImageUrls.get(key)?.ticket !== ticket) return;
         const url = makeUrl(bytes);
+        probe.record({ kind: "new", key, url, detail: photo.fileName });
         if (pendingImageUrls.get(key)?.ticket !== ticket) {
-          revokeUrl(url);
+          dropUrl(url, "stale-ticket");
           return;
         }
+        /*
+         * 被挤出缓存的 URL **要等状态落定再放手**：`releaseUrl` 读的是已提交的
+         * `imageUrls()`，在 updater 里提前 revoke 会看到旧表（还持有自己）而漏回收。
+         */
+        const dropped: string[] = [];
         setImageUrls((previous) => {
           if (previous.has(key)) {
-            revokeUrl(url);
+            // 这份 URL 从没被发布过，没有别的持有者
+            dropped.push(url);
             return previous;
           }
           const next = new Map(previous);
@@ -416,12 +482,13 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
           while (next.size > imageUrlsLimit) {
             const oldest = next.keys().next().value as string | undefined;
             if (oldest === undefined) break;
-            const dropped = next.get(oldest);
+            const evicted = next.get(oldest);
             next.delete(oldest);
-            if (dropped !== undefined) revokeUrl(dropped.url);
+            if (evicted !== undefined) dropped.push(evicted.url);
           }
           return next;
         });
+        for (const victim of dropped) releaseUrl(victim, "evict");
       } catch {
         // 单幅取不到不影响其它画幅；该框保留底色，后续重新进入还能再试。
       } finally {
@@ -432,16 +499,26 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
     return task;
   }
 
-  function clearImageUrls(paths?: ReadonlySet<string>): void {
+  function clearImageUrls(paths?: ReadonlySet<string>, reason = "clear"): void {
     for (const key of pendingImageUrls.keys()) {
-      if (paths === undefined || paths.has(key.slice(key.indexOf("\u0000") + 1))) pendingImageUrls.delete(key);
+      if (paths === undefined || paths.has(key.slice(key.indexOf("\u0000") + 1))) {
+        pendingImageUrls.delete(key);
+        probe.record({ kind: "invalidate", key, url: null, detail: `${reason} · pending cancelled` });
+      }
     }
     const previous = imageUrls();
     const next = new Map(previous);
+    const dropped: string[] = [];
     for (const [key, cached] of previous) {
-      if (paths === undefined || paths.has(cached.path)) { next.delete(key); revokeUrl(cached.url); }
+      if (paths === undefined || paths.has(cached.path)) {
+        next.delete(key);
+        dropped.push(cached.url);
+        probe.record({ kind: "invalidate", key, url: cached.url, detail: reason });
+      }
     }
     setImageUrls(next);
+    // 状态落定后再放手：单图槽位/总览还在用的那份不回收（`releaseUrl` 自己判）
+    for (const victim of dropped) releaseUrl(victim, reason);
   }
 
   /** 处在适配状态时，任何尺寸变化都要重新算适配倍率 */
@@ -466,10 +543,10 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
      * 预载写下的 URL 只有对比视图读（`imageUrlFor`），单图路径根本不吃，
      * 于是「预载了还要等一秒多」（人类 2026-09-23 报的）。
      */
-    const prefetched = keepPrevious ? null : takeCachedImageUrl(photo);
+    const prefetched = keepPrevious ? null : borrowCachedImageUrl(photo);
     if (prefetched !== null) {
       if (ticket !== generation) {
-        revokeUrl(prefetched);
+        releaseUrl(prefetched, "stale-borrow");
         return;
       }
       publishScreen(prefetched);
@@ -484,7 +561,7 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
     if (pending !== undefined) {
       await pending.task;
       if (ticket !== generation) return;
-      const arrived = takeCachedImageUrl(photo);
+      const arrived = borrowCachedImageUrl(photo);
       if (arrived !== null) {
         publishScreen(arrived);
         return;
@@ -497,7 +574,10 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
         const bytes = await deps.loadThumb(photo.imageKey ?? photo.path);
         if (ticket !== generation) return;
         if (bytes !== null) {
-          replaceUrl(makeUrl(bytes));
+          const url = makeUrl(bytes);
+          // 探针要把**每一个**建出来的 URL 都记上，不然「还活着几个」的账会漏
+          probe.record({ kind: "new", key: imageKey(photo), url, detail: `${photo.fileName} · thumb` });
+          replaceUrl(url);
           setImageStatus("ready");
         }
       } catch {
@@ -508,7 +588,7 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
     try {
       const bytes = await deps.loadScreen(photo.imageKey ?? photo.path);
       if (ticket !== generation) {
-        if (bytes !== null) revokeUrl(makeUrl(bytes)); // 迟到的大图直接丢掉
+        if (bytes !== null) dropUrl(makeUrl(bytes), "late-screen"); // 迟到的大图直接丢掉
         return;
       }
       if (bytes === null) {
@@ -517,7 +597,9 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
         setOverviewStatus("error");
         return;
       }
-      publishScreen(makeUrl(bytes));
+      const url = makeUrl(bytes);
+      probe.record({ kind: "new", key: imageKey(photo), url, detail: `${photo.fileName} · screen` });
+      publishScreen(url);
     } catch {
       if (ticket === generation) {
         if (imageUrl() === null) setImageStatus("error");
@@ -565,9 +647,9 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
 
   function close(): void {
     generation += 1;
-    replaceUrl(null);
-    replaceOverview(null);
-    clearImageUrls();
+    replaceUrl(null, "close");
+    replaceOverview(null, "close");
+    clearImageUrls(undefined, "close");
     setSharp(false);
     setOverviewStatus("idle");
     setImageStatus("idle");
@@ -618,7 +700,7 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
       && ![...pendingImageUrls.keys()].some((key) => affected.has(key.slice(key.indexOf("\u0000") + 1)))
       && (photo === null || !affected.has(photo.path))) return;
     const tracked = new Set([...imageUrls().keys(), ...pendingImageUrls.keys()]);
-    clearImageUrls(affected);
+    clearImageUrls(affected, "invalidate");
     // 比较视图按照片集合变化取图，源内容变化不改变该集合；在同一 store 内重取已跟踪的画幅。
     for (const entry of photos()) {
       if (affected.has(entry.path) && tracked.has(imageKey(entry)) && imageKey(entry) !== (photo === null ? null : imageKey(photo))) {

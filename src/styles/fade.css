@@ -1,0 +1,35 @@
+/*
+ * 文本的**渐隐收尾**（DESIGN.md §8.7 一行的「宽度受限但不撑开结构」）。
+ *
+ * 为什么要有它：列表里可能出现很长的名字（定稿名上限 80 字），而列表行的宽度是别人给的
+ * （右栏可拖、可窄）。要「读得出来还有字」又**不许把行撑宽**，就得让文字自己淡出。
+ *
+ * 为什么用 `mask` 而不是「盖一层背景色渐变」（`shell/ToolsBar.tsx` 的 `FadeEdge` 那种做法）：
+ * 那个做法要求渐变色**等于当前底色**，而列表行的底色会随悬停/选中变（`state-hover` /
+ * `state-selected`）—— 盖一层就得每个状态配一份，错一个状态就露馅。
+ * mask 直接作用于文字自身，与底色无关，所以列表行用这条。
+ *
+ * 用法（宽度由外层给足，本类只管收尾）：
+ *
+ * ```html
+ * <span class="block overflow-hidden whitespace-nowrap fade-x-end">很长的名字…</span>
+ * ```
+ *
+ * * 文字**没超长**时渐隐区是空白 ⇒ 看不出来（这是关键性质，不是巧合）；
+ * * 文字超长时右端 `1.25rem`（= 20px，与工具条内侧渐隐同一长度）一段淡出，
+ *   且**不出现省略号**（省略号与渐隐叠在一起会糊）。
+ */
+
+.fade-x-end {
+  /* 长度直接写在这里而不是做令牌：它只服务这一条“文本收尾”，与工具条那个 20px 渐隐同口径 */
+  mask-image: linear-gradient(
+    to right,
+    black calc(100% - 1.25rem),
+    transparent 100%
+  );
+  -webkit-mask-image: linear-gradient(
+    to right,
+    black calc(100% - 1.25rem),
+    transparent 100%
+  );
+}

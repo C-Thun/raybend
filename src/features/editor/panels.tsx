@@ -44,6 +44,7 @@ import { Menu } from "../../components/ui/Menu.tsx";
 import { Dialog } from "../../components/ui/Dialog.tsx";
 import { appliedLensProfile, chosenLensProfile, searchLensProfiles, suggestedLensProfiles } from "./lens-options.ts";
 import { t } from "../../i18n/index.ts";
+import { formatDay } from "../../lib/datetime.ts";
 import type { MessageKey } from "../../i18n/index.ts";
 import type { LensMatch } from "../../api/types.ts";
 import type { BaseCurveLibrary } from "../../api/editor.ts";
@@ -65,7 +66,7 @@ import { PendingNote } from "./parts.tsx";
 import { PresetPanel } from "./preset-panel.tsx";
 import { SliderRow } from "./SliderRow.tsx";
 import type { EditorStore } from "./store.ts";
-import type { PresetGroup } from "../../lib/presets.ts";
+import type { PresetCreateOutcome, PresetGroup } from "../../lib/presets.ts";
 import { CurveEditor } from "./CurveEditor.tsx";
 import { EditorZoomControl } from "./zoom-control.tsx";
 
@@ -128,6 +129,8 @@ export interface EditorPanelsProps {
   issueSelectionOverride?: IssueSelection | null;
   onSelectIssue: (stack: DevelopStack, selection: IssueSelection) => void;
   onDeleteIssue: (issue: Issue, event: ShiftLikeEvent) => void;
+  /** 点定稿名字旁的笔：由工作区弹出改名弹窗（与「保存为新定稿」同一个对话框形状） */
+  onRenameIssue: (issue: Issue) => void;
   issueThumbs: ThumbQueue;
   issueThumbKey: (choice: string) => string;
   onSelectBaseCurve: (id: string | null) => void;
@@ -142,7 +145,7 @@ export interface EditorPanelsProps {
    * 拖动过程中只改画面不落库（`AGENTS.md` 的口径：松手才落库），
    * 所以这里只给一个「可以存了」的信号，具体存什么由 store 的载荷决定。
    */
-  onCommit?: () => void;
+  onConfirm?: () => void;
   onToolConfirm?: () => void;
   /** 落库 / 读库失败的原因（有值就显示一行提示 —— 不静默吞掉） */
   error?: string | null;
@@ -155,8 +158,8 @@ export interface EditorPanelsProps {
   /** 手动输入的目标缩放（`1.0` = 100%） */
   onZoomTo?: (zoom: number) => void;
   /* ── 预设（specs/editor-presets.md）：持久化动作由工作区注入 ── */
-  onCreatePresetDirectory: (name: string) => Promise<boolean>;
-  onCreatePreset: (name: string, directoryId: string, groups: readonly PresetGroup[]) => Promise<boolean>;
+  onCreatePresetDirectory: (name: string) => Promise<PresetCreateOutcome>;
+  onCreatePreset: (name: string, directoryId: string, groups: readonly PresetGroup[]) => Promise<PresetCreateOutcome>;
   onDeletePreset: (id: string) => Promise<void>;
   onDeletePresetDirectory: (id: string) => Promise<void>;
   onMovePresets: (ids: readonly string[], directoryId: string) => Promise<void>;
@@ -246,7 +249,8 @@ export function EditorPanels(props: EditorPanelsProps): JSX.Element {
           <IssuesTab enabled={props.enabled} store={props.store} library={props.issues}
             selectionOverride={props.issueSelectionOverride ?? null}
             pending={props.pendingIssue ?? null}
-            onSelect={props.onSelectIssue} onDelete={props.onDeleteIssue} thumbs={props.issueThumbs} thumbKey={props.issueThumbKey} />
+            onSelect={props.onSelectIssue} onDelete={props.onDeleteIssue} onRename={props.onRenameIssue}
+            thumbs={props.issueThumbs} thumbKey={props.issueThumbKey} />
         </Show>
         <Show when={viewTab() === "info"}>
           <InfoTab info={props.info} />
@@ -279,7 +283,7 @@ export function EditorPanels(props: EditorPanelsProps): JSX.Element {
                 ]}
                 onValueChange={(value) => {
                   props.store.setNrMethod(value === "high" ? "high" : null);
-                  props.onCommit?.();
+                  props.onConfirm?.();
                 }}
               />
             </div>
@@ -300,7 +304,7 @@ export function EditorPanels(props: EditorPanelsProps): JSX.Element {
           </Show>
           {/* 镜头页签多两块非拉杆控件（`.pd`：配置文件 + 启用校正开关） */}
           <Show when={paramTab() === "lens"}>
-            <LensExtras store={props.store} enabled={props.enabled} onCommit={props.onCommit}
+            <LensExtras store={props.store} enabled={props.enabled} onConfirm={props.onConfirm}
               queryState={props.lensQuery} onRefresh={props.onRefreshLens} />
           </Show>
           <For each={paramsInGroup(paramTab())}>
@@ -311,11 +315,11 @@ export function EditorPanels(props: EditorPanelsProps): JSX.Element {
                 /* 参数表的 wired 字段与 Rust 契约保持一致。 */
                 disabled={!props.enabled || !spec.wired}
                 onValueChange={(value) => props.store.setParam(spec.id, value)}
-                onValueCommit={() => props.onCommit?.()}
+                onValueCommit={() => props.onConfirm?.()}
                 onReset={() => {
                   props.store.endParamDrag();
                   props.store.resetParam(spec.id);
-                  props.onCommit?.();
+                  props.onConfirm?.();
                 }}
                 /* 拖动中只算预览档、松手补全尺寸（人类 2026-09-24，`store.beginParamDrag`） */
                 onDragStart={() => props.store.beginParamDrag()}
@@ -344,31 +348,42 @@ export function EditorPanels(props: EditorPanelsProps): JSX.Element {
             { value: "color", label: t("editor.colorManagement.title") },
           ]}
         />
-        <Show when={curveTab() === "curve"}>
-          <CurveTab
-            store={props.store}
-            enabled={props.enabled}
-            current={props.current}
-            loadHistogram={props.loadHistogram}
-            onCommit={props.onCommit}
-            onRenameBaseCurve={props.onRenameBaseCurve}
-            baseCurveLibrary={props.baseCurveLibrary}
-            onSelectBaseCurve={props.onSelectBaseCurve}
-          />
-        </Show>
-        <Show when={curveTab() === "preset"}>
-          <PresetPanel
-            store={props.store}
-            enabled={props.enabled}
-            onCommit={props.onCommit}
-            createDirectory={props.onCreatePresetDirectory}
-            createPreset={props.onCreatePreset}
-            deletePreset={props.onDeletePreset}
-            deleteDirectory={props.onDeletePresetDirectory}
-            movePresets={props.onMovePresets}
-            applyPreset={props.onApplyPreset}
-          />
-        </Show>
+        {/*
+         * 曲线 / 预设共用一个内容容器：曲线在流内定高（切到预设时隐藏但**留位**），
+         * 预设绝对定位填满同一格 —— 切页签高度不伸缩；预设树在容器里 flex 填充、
+         * 内部滚动。审计 2026-10-04：此前两页签各挂各的、只有自然高度，
+         * 预设多时整条右栏被撑长。
+         */}
+        <div class="relative flex min-h-0 flex-col" data-editor-advanced-body>
+          <div classList={{ invisible: curveTab() !== "curve" }} data-editor-curve-slot>
+            <CurveTab
+              store={props.store}
+              enabled={props.enabled}
+              current={props.current}
+              loadHistogram={props.loadHistogram}
+              onConfirm={props.onConfirm}
+              onRenameBaseCurve={props.onRenameBaseCurve}
+              baseCurveLibrary={props.baseCurveLibrary}
+              onSelectBaseCurve={props.onSelectBaseCurve}
+            />
+          </div>
+          <Show when={curveTab() === "preset"}>
+            <div class="absolute inset-0 flex min-h-0 flex-col" data-editor-preset-slot>
+              <PresetPanel
+                store={props.store}
+                enabled={props.enabled}
+                onConfirm={props.onConfirm}
+                createDirectory={props.onCreatePresetDirectory}
+                createPreset={props.onCreatePreset}
+                deletePreset={props.onDeletePreset}
+                deleteDirectory={props.onDeletePresetDirectory}
+                movePresets={props.onMovePresets}
+                applyPreset={props.onApplyPreset}
+                class="min-h-0 flex-1"
+              />
+            </div>
+          </Show>
+        </div>
         <Show when={curveTab() === "color"}>
           <ColorManagementTab store={props.store} enabled={props.enabled} hasPhoto={props.current !== null} profileEntries={props.profileEntries} onRefreshProfiles={props.onRefreshProfiles} onApplyColor={props.onApplyColor} onOpenProfiles={props.onOpenColorProfiles} colorBatchCount={props.colorBatchCount} onReviewColorBatch={props.onReviewColorBatch} />
         </Show>
@@ -492,6 +507,8 @@ function IssuesTab(props: { enabled: boolean; store: EditorStore; library: Issue
   selectionOverride: IssueSelection | null;
   pending: { name: string; sourceBase: "raw" | "sooc" } | null;
   onSelect: (stack: DevelopStack, selection: IssueSelection) => void; onDelete: (issue: Issue, event: ShiftLikeEvent) => void;
+  /** 改名：只对**已保存的定稿**开口（SOOC / RAW / 最近编辑是三种基准，不是条目） */
+  onRename: (issue: Issue) => void;
   thumbs: ThumbQueue; thumbKey: (choice: string) => string }): JSX.Element {
   const isSelected = (kind: "sooc" | "raw" | "latest" | number): boolean => {
     // 先行值优先：点击那一刻就亮；后端的 selection 追上来后两者自然一致
@@ -510,14 +527,12 @@ function IssuesTab(props: { enabled: boolean; store: EditorStore; library: Issue
         class="flex min-h-12 items-center gap-2 rounded-ui px-1 text-left hover:bg-state-hover disabled:opacity-50"
         classList={{ "bg-state-selected": isSelected(base) }} onClick={() => props.onSelect(source(base), base)}>
         <IssueThumb imageKey={props.thumbKey(base)} thumbs={props.thumbs} />
-        <span class="min-w-0 flex-1"><span class="block text-fs-2 text-fg-1">{base.toUpperCase()}</span>
-          <span class="block text-fs-0 text-fg-3">{t(base === "raw" ? "editor.issue.rawHint" : "editor.issue.soocHint")}</span></span>
+        <span class="block text-fs-2 text-fg-1">{base.toUpperCase()}</span>
       </button>}
     </For>
     <div class="flex min-h-12 items-center gap-2 rounded-ui px-1" classList={{ "bg-state-selected": isSelected("latest") }}>
       <IssueThumb imageKey={props.thumbKey("latest")} thumbs={props.thumbs} />
-      <span class="min-w-0 flex-1"><span class="block text-fs-2 text-fg-1">{t("editor.issue.latest")}</span>
-        <span class="block text-fs-0 text-fg-3">{t("editor.issue.latestHint")}</span></span>
+      <span class="block text-fs-2 text-fg-1">{t("editor.issue.latest")}</span>
     </div>
     {/*
       正在生成的定稿（占位）：确认弹窗一关它就现身，预览位转圈（崔总 2026-09-29：
@@ -530,8 +545,11 @@ function IssuesTab(props: { enabled: boolean; store: EditorStore; library: Issue
         <span class="flex h-10 w-14 shrink-0 items-center justify-center overflow-hidden rounded-ui bg-surface-bar">
           <IconLoader2 size={16} class="animate-spin text-fg-3" aria-hidden="true" />
         </span>
-        <span class="min-w-0 flex-1"><span class="block truncate text-fs-2 text-fg-1">{pending().name}</span>
-          <span class="block text-fs-0 text-fg-3">{pending().sourceBase.toUpperCase()} · {t("editor.issue.generating")}</span></span>
+        <span class="flex min-w-0 flex-1 flex-col">
+          <span class="fade-x-end block overflow-hidden whitespace-nowrap text-fs-2 leading-5 text-fg-1"
+            title={pending().name}>{pending().name}</span>
+          <span class="block truncate text-fs-0 leading-5 text-fg-3">{pending().sourceBase.toUpperCase()} · {t("editor.issue.generating")}</span>
+        </span>
       </div>}
     </Show>
     <For each={props.library?.issues ?? []}>{(issue) =>
@@ -540,12 +558,29 @@ function IssuesTab(props: { enabled: boolean; store: EditorStore; library: Issue
         <button type="button" disabled={!props.enabled} onClick={() => props.onSelect(issue.stack, { issue: issue.id })}
           class="flex min-w-0 flex-1 items-center gap-2 text-left disabled:opacity-50">
           <IssueThumb imageKey={props.thumbKey(`issue:${issue.id}`)} thumbs={props.thumbs} />
-          <span class="min-w-0 flex-1"><span class="block truncate text-fs-2 text-fg-1">{issue.name}</span>
-            <span class="block text-fs-0 text-fg-3">{issue.sourceBase.toUpperCase()} · {new Date(issue.createdAt).toLocaleString()}</span></span>
+          {/*
+            文字区固定**两行**（名称 / 基准+日期），两行都是 `leading-5`（20px）——
+            右边那列图标于是能与两行一一对齐（崔总 2026-10-09），中间那片也因此更宽。
+            第一行**不撑行宽**：宽度由这一列给足，超出部分右端渐隐（`.fade-x-end`，
+            没超出时渐隐区是空白，看不出来）；整名仍可以在悬停提示里读到。
+            第二行宽度受这一列约束，超长才截断（带省略号）。
+          */}
+          <span class="flex min-w-0 flex-1 flex-col">
+            <span class="fade-x-end block overflow-hidden whitespace-nowrap text-fs-2 leading-5 text-fg-1"
+              title={issue.name}>{issue.name}</span>
+            <span class="block truncate text-fs-0 leading-5 text-fg-3">{issue.sourceBase.toUpperCase()} · {formatDay(issue.createdAt)}</span>
+          </span>
         </button>
-        <button type="button" class="opacity-0 group-hover:opacity-100 text-fg-3 hover:text-danger"
-          aria-label={t("editor.issue.delete")} title={t("editor.issue.delete")}
-          onClick={(event) => props.onDelete(issue, event)}><IconTrash size={14} /></button>
+        {/* 动作列：上=改名（对齐第一行）、下=删除（对齐第二行），与两行文字同高 */}
+        <span class="flex shrink-0 flex-col">
+          <button type="button" class="grid h-5 w-6 place-items-center rounded-ui text-fg-3 opacity-0 hover:text-fg-1 group-hover:opacity-100"
+            aria-label={t("editor.issue.renameTitle")} title={t("editor.issue.renameTitle")}
+            disabled={!props.enabled}
+            onClick={() => props.onRename(issue)}><IconPencil size={14} /></button>
+          <button type="button" class="grid h-5 w-6 place-items-center rounded-ui text-fg-3 opacity-0 hover:text-danger group-hover:opacity-100"
+            aria-label={t("editor.issue.delete")} title={t("editor.issue.delete")}
+            onClick={(event) => props.onDelete(issue, event)}><IconTrash size={14} /></button>
+        </span>
       </div>}
     </For>
     <Show when={(props.library?.issues.length ?? 0) === 0 && props.pending === null}><p class="px-1 py-2 text-fs-0 text-fg-3">{t("editor.issue.empty")}</p></Show>
@@ -642,7 +677,7 @@ function InfoTab(props: { info: EditorPhotoInfo | null }): JSX.Element {
  * 口径（人类 2026-09-25 拍板）：**配置文件负责自动/库校正，手动拉杆是微调叠加其上**；
  * 「启用校正」开关**只管配置文件那一半** —— 关掉它之后手动拉杆照常生效
  * （与 Lightroom 的 Lens Corrections 面板一致）。 */
-function LensExtras(props: { store: EditorStore; enabled: boolean; onCommit?: () => void;
+function LensExtras(props: { store: EditorStore; enabled: boolean; onConfirm?: () => void;
   queryState: LensQueryState; onRefresh: () => void }): JSX.Element {
   const [open, setOpen] = createSignal(false);
   const [query, setQuery] = createSignal("");
@@ -663,7 +698,7 @@ function LensExtras(props: { store: EditorStore; enabled: boolean; onCommit?: ()
   const choose = (key: string): void => {
     props.store.setLensProfile(key);
     if (key !== "none") props.store.setLensEnabled(true);
-    props.onCommit?.();
+    props.onConfirm?.();
     setOpen(false);
   };
   const profiles = () => {
@@ -710,7 +745,7 @@ function LensExtras(props: { store: EditorStore; enabled: boolean; onCommit?: ()
       </div>
       <p class="text-fs-0 text-fg-3">{t("editor.lens.manualHint")}</p>
       <Switch checked={props.store.lensEnabled() ?? true}
-        onCheckedChange={(value) => { props.store.setLensEnabled(value); props.onCommit?.(); }}
+        onCheckedChange={(value) => { props.store.setLensEnabled(value); props.onConfirm?.(); }}
         disabled={!props.enabled} label={t("editor.lens.enable")} />
       <Dialog open={open()} onOpenChange={setOpen} title={t("editor.lens.choose")}>
         <div class="flex flex-col gap-2">
@@ -754,7 +789,7 @@ function CurveTab(props: {
   enabled: boolean;
   current: ViewerPhoto | null;
   loadHistogram: (path: string, bins: number) => Promise<HistogramCounts | null>;
-  onCommit?: () => void;
+  onConfirm?: () => void;
   onToolConfirm?: () => void;
   baseCurveLibrary: BaseCurveLibrary | null;
   onSelectBaseCurve: (id: string | null) => void;
@@ -840,7 +875,7 @@ function CurveTab(props: {
         ? histogram()
         : props.store.renderState()?.histogram ?? null}
       disabled={!props.enabled}
-      onCommit={props.onCommit}
+      onConfirm={props.onConfirm}
       onDragStart={() => props.store.beginParamDrag()}
       onDragEnd={() => props.store.endParamDrag()}
     />

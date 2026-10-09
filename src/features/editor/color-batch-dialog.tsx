@@ -5,13 +5,13 @@ import {t} from "../../i18n";
 import type {ColorBatchReview} from "../../api/color.ts";
 
 /** Review has a fixed backend token; changing selection cannot change the commit scope. */
-export function ColorBatchDialog(props:{review:ColorBatchReview|null;onClose:()=>void;onCommit:(token:string)=>Promise<number>}):JSX.Element {
+export function ColorBatchDialog(props:{review:ColorBatchReview|null;onClose:()=>void;onConfirm:(token:string)=>Promise<number>}):JSX.Element {
   const [busy,setBusy]=createSignal(false);const [error,setError]=createSignal<string|null>(null);
   createEffect(()=> {void props.review?.token;setError(null);});
   const commit=async ():Promise<void>=> {
     const review=props.review;if(!review || busy())return;
     setBusy(true);setError(null);
-    try {await props.onCommit(review.token);props.onClose();}catch(error){setError(String(error));}finally{setBusy(false);}
+    try {await props.onConfirm(review.token);props.onClose();}catch(error){setError(String(error));}finally{setBusy(false);}
   };
   return <Dialog open={props.review!==null} title={t("editor.colorManagement.batchTitle")} onOpenChange={open=>{if(!open&&!busy()){setError(null);props.onClose();}}}
     footer={<><Button variant="secondary" disabled={busy()} onClick={props.onClose}>{t("common.cancel")}</Button>

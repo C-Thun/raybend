@@ -298,6 +298,39 @@ pub async fn issue_create<R: Runtime>(
 }
 
 #[tauri::command]
+pub async fn issue_rename<R: Runtime>(
+    app: AppHandle<R>,
+    repository_id: String,
+    asset_id: i64,
+    issue_id: i64,
+    name: String,
+    english: Option<bool>,
+) -> Result<IssueLibraryDto, String> {
+    let handle = app.clone();
+    crate::source::blocking(move || {
+        let browse = handle.state::<BrowseState>();
+        let renamed = browse.with_catalog(&handle, &repository_id, |db| {
+            db.write_tx(move |conn| issues::rename(conn, asset_id, issue_id, &name))
+                .map_err(|error| error.to_string())
+        })?;
+        if !renamed {
+            return Err("定稿不存在".into());
+        }
+        // sidecar 镜像：`rb:profiles` 每条都带 name（`specs/xmp-sidecar.md` §4），
+        // 改名一样要把这张照片重新同步出去。
+        crate::sidecar::queue_sync(handle.clone(), &repository_id, vec![asset_id]);
+        library(
+            &handle,
+            &repository_id,
+            asset_id,
+            english.unwrap_or(false),
+            None,
+        )
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn issue_delete<R: Runtime>(
     app: AppHandle<R>,
     repository_id: String,

@@ -34,7 +34,7 @@ use wgpu::rwh::{RawDisplayHandle, RawWindowHandle};
 use super::image::RenderImage;
 use super::presentation::PresentationAdapter;
 use super::stats::AdapterInfo;
-use super::viewport::{AlphaMode, Viewport};
+use super::viewport::{AlphaMode, CompareGesture, CompareGestureStep, Viewport};
 
 /// 从窗口上取下来的一对裸句柄（rwh 0.6）。
 #[derive(Debug, Clone, Copy)]
@@ -143,6 +143,8 @@ pub struct GpuContext {
     pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
     uniform: wgpu::Buffer,
+    /// 参照自己的 uniform（与主图同布局、不同内容：矩阵与画布尺寸都不同）
+    reference_uniform: wgpu::Buffer,
     texture: wgpu::Texture,
     sampler: wgpu::Sampler,
     screen_color: super::color_transform::GpuScreenTransform,
@@ -159,7 +161,8 @@ pub struct GpuContext {
     reference: Option<(u64, Arc<RenderImage>, wgpu::Texture)>,
     reference_bind_group: Option<wgpu::BindGroup>,
     compare_fraction: Option<f32>,
-    compare_dragging: bool,
+    /// 对比态手势（拖分线 / 拖图；崔总 2026-10-08：对比态下也要能拖图）
+    compare_gesture: CompareGesture,
     overlay: super::overlay::OverlayRenderer,
     overlay_palette: Option<super::overlay::OverlayPalette>,
     tool_overlay: Option<super::overlay::ToolOverlay>,
@@ -289,6 +292,7 @@ impl GpuContext {
             pipeline: resources.pipeline,
             bind_group: resources.bind_group,
             uniform: resources.uniform,
+            reference_uniform: resources.reference_uniform,
             texture: resources.texture,
             sampler: resources.sampler,
             screen_color: resources.screen_color,
@@ -299,7 +303,7 @@ impl GpuContext {
             reference: None,
             reference_bind_group: None,
             compare_fraction: None,
-            compare_dragging: false,
+            compare_gesture: CompareGesture::default(),
             overlay,
             overlay_palette: None,
             tool_overlay: None,
@@ -444,8 +448,9 @@ impl GpuContext {
         if self.reference_id() == Some(id) { return; }
         let (texture,error) = if Arc::ptr_eq(&self.image, &image) || self.image.shares_source(&image) { (self.texture.clone(),None) } else if let Some(texture)=self.uploads.texture(&image) {(texture,None)} else { create_image_texture(&self.device, &self.queue, &image, &self.label) };
         if error.is_some() { self.upload_error=error;return; }
+        // ⚠️ 用**参照自己的** uniform：主图按当前画面铺，参照帧按 cover 尺寸铺（两个矩阵）
         self.reference_bind_group = Some(make_bind_group(
-            &self.device, &self.layout, &texture, &self.sampler, &self.uniform, &self.label, image.encoding, false,
+            &self.device, &self.layout, &texture, &self.sampler, &self.reference_uniform, &self.label, image.encoding, false,
         ));
         self.reference = Some((id, image, texture));
     }
@@ -453,7 +458,7 @@ impl GpuContext {
     /// `None` 关闭对比；位置由 Rust 视口换算后的 0..1 洞口比例表示。
     pub fn set_compare_fraction(&mut self, fraction: Option<f32>) {
         self.compare_fraction = fraction.filter(|value| value.is_finite()).map(|value| value.clamp(0.0, 1.0));
-        self.compare_dragging = false;
+        self.compare_gesture = CompareGesture::default();
     }
 
     pub fn set_overlay_palette(&mut self, palette: super::overlay::OverlayPalette) {
@@ -466,29 +471,25 @@ impl GpuContext {
 
     pub fn compare_fraction(&self) -> Option<f32> { self.compare_fraction }
 
-    /// 原始 CSS 窗口指针事实。起手必须命中把手，随后拖动可夹到洞口两端。
+    /// 原始 CSS 窗口指针事实（对比态手势）。
+    ///
+    /// 起手**命中分线把手** ⇒ 这一手势拖分线（随后可夹到洞口两端）；
+    /// 否则 ⇒ 这一手势**平移图像** —— 对比态下也要能拖着看图
+    /// （崔总 2026-10-08：只靠滚轮定向缩放看细节很别扭，补上拖动）。
+    /// 返回「这一帧变了没有」，让调用方决定要不要重画。
     pub fn compare_pointer(&mut self, phase: &str, css: (f32, f32)) -> bool {
         let Some(fraction) = self.compare_fraction else { return false; };
-        match phase {
-            "down" => {
-                self.compare_dragging = self.viewport.compare_handle_hit(css, fraction);
-                false
-            }
-            "move" if self.compare_dragging => {
-                let Some(next) = self.viewport.compare_fraction_at(css.0) else { return false; };
+        let step = self.compare_gesture.step(&self.viewport, fraction, phase, css);
+        match step {
+            CompareGestureStep::Idle => false,
+            CompareGestureStep::Handle(next) => {
                 self.compare_fraction = Some(next);
                 true
             }
-            "up" => {
-                let changed = self.compare_dragging;
-                if changed && let Some(next) = self.viewport.compare_fraction_at(css.0) {
-                    self.compare_fraction = Some(next);
-                }
-                self.compare_dragging = false;
-                changed
+            CompareGestureStep::Pan(delta) => {
+                self.viewport.pan_by(delta);
+                true
             }
-            "cancel" => { self.compare_dragging = false; false }
-            _ => false,
         }
     }
 
@@ -708,8 +709,14 @@ impl GpuContext {
                     if let (Some(fraction), Some(reference)) = (self.compare_fraction, &self.reference_bind_group)
                         && let Some([left, right]) = self.viewport.compare_scissors(fraction)
                     {
-                        if left.2 > 0 {
-                            pass.set_scissor_rect(left.0, left.1, left.2, left.3);
+                        /*
+                         * 左侧参照：**以当前画面为准的窗口**（崔总 2026-10-08）。
+                         * scissor 是「洞口左半 ∩ 当前画面矩形」—— cover 之后多出来的
+                         * 部分不会溢到画面外的留白区；参照自己是等比放大的，不拉伸。
+                         * 当前画面那一半照旧（它本来就不出画面）。
+                         */
+                        if let Some(clip) = self.viewport.reference_scissor(left) {
+                            pass.set_scissor_rect(clip.0, clip.1, clip.2, clip.3);
                             pass.set_bind_group(0, reference, &[]);
                             pass.draw(0..4, 0..1);
                         }
@@ -736,7 +743,28 @@ impl GpuContext {
 
     fn write_uniforms(&self) {
         // 与离屏那条路共用同一份布局写法人（矩阵只有一处推导，见 `Viewport::matrix`）
-        write_matrix(&self.queue, &self.uniform, &self.viewport, self.image.encoding);
+        write_uniform(
+            &self.queue,
+            &self.uniform,
+            &self.viewport.matrix(),
+            (self.viewport.image_size.0 as f32, self.viewport.image_size.1 as f32),
+            self.image.encoding,
+        );
+        /*
+         * 参照帧：**自己的** uniform。矩阵用 [`Viewport::matrix_for`] 推，画布尺寸
+         * 是 [`Viewport::cover_size`] 的结果 —— 等比 cover 进当前画面（只裁不空、不拉伸）。
+         * 每帧重写：缩放/平移一变，两个矩阵都要跟着变（参考图不能停在上一个视角）。
+         */
+        if let Some((_, reference, _)) = &self.reference {
+            let cover = self.viewport.cover_size((reference.width, reference.height));
+            write_uniform(
+                &self.queue,
+                &self.reference_uniform,
+                &self.viewport.matrix_for(cover),
+                cover,
+                reference.encoding,
+            );
+        }
     }
 
     /// 演练设备丢失：`device.destroy()`。
@@ -800,6 +828,7 @@ impl GpuContext {
         self.pipeline = resources.pipeline;
         self.bind_group = resources.bind_group;
         self.uniform = resources.uniform;
+        self.reference_uniform = resources.reference_uniform;
         self.texture = resources.texture;
         self.sampler = resources.sampler;
         let output_scale=self.screen_color.output_scale;
@@ -819,7 +848,7 @@ impl GpuContext {
             if error.is_some() {self.upload_error=error;return;}
             *texture=new_texture;
             self.reference_bind_group = Some(make_bind_group(
-                &self.device, &self.layout, texture, &self.sampler, &self.uniform, &self.label, image.encoding, false,
+                &self.device, &self.layout, texture, &self.sampler, &self.reference_uniform, &self.label, image.encoding, false,
             ));
         }
 
@@ -861,6 +890,9 @@ struct DeviceResources {
     pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
     uniform: wgpu::Buffer,
+    /// 对比参照自己的 uniform（矩阵 + 画布尺寸与主图不同）：
+    /// 主图照当前画面铺，参照帧按 [`Viewport::cover_size`] 等比 cover 铺。
+    reference_uniform: wgpu::Buffer,
     texture: wgpu::Texture,
     sampler: wgpu::Sampler,
     screen_color: super::color_transform::GpuScreenTransform,
@@ -896,6 +928,13 @@ fn build_device_resources(
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
+    // 参照的 uniform 与主图同布局、不同内容（同一个设备生命周期：必须一起重建）
+    let reference_uniform = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some(&format!("{label_prefix}-reference-uniforms")),
+        size: 96,
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
     let layout = create_bind_group_layout(device);
     let bind_group = make_bind_group(device, &layout, &texture, &sampler, &uniform, label_prefix, image.encoding, true);
     let screen_color = super::color_transform::GpuScreenTransform::new(device, queue);
@@ -909,6 +948,7 @@ fn build_device_resources(
         pipeline,
         bind_group,
         uniform,
+        reference_uniform,
         texture,
         sampler,
         screen_color,
@@ -1198,7 +1238,7 @@ impl OffscreenRenderer {
         let target=self.device.create_texture(&wgpu::TextureDescriptor {label:Some("color-cost-target"),size,mip_level_count:1,sample_count:1,dimension:wgpu::TextureDimension::D2,format:self.output_format,usage:wgpu::TextureUsages::RENDER_ATTACHMENT,view_formats:&[]});
         let view=target.create_view(&Default::default());let mut times=Vec::with_capacity(samples);
         for i in 0..samples+5 {
-            let start=std::time::Instant::now();write_matrix(&self.queue,&self.uniform,viewport,self.image.encoding);
+            let start=std::time::Instant::now();write_uniform(&self.queue,&self.uniform,&viewport.matrix(),(viewport.image_size.0 as f32, viewport.image_size.1 as f32),self.image.encoding);
             let mut encoder=self.device.create_command_encoder(&Default::default());self.draw_into(&mut encoder,&view,viewport);
             let submission=self.queue.submit(Some(encoder.finish()));
             self.device.poll(wgpu::PollType::Wait {submission_index:Some(submission),timeout:Some(std::time::Duration::from_secs(10))}).map_err(|e|GpuError::Device(e.to_string()))?;
@@ -1445,7 +1485,7 @@ impl OffscreenRenderer {
         });
         let view = target.create_view(&wgpu::TextureViewDescriptor::default());
 
-        write_matrix(&self.queue, &self.uniform, viewport, self.image.encoding);
+        write_uniform(&self.queue, &self.uniform, &viewport.matrix(), (viewport.image_size.0 as f32, viewport.image_size.1 as f32), self.image.encoding);
 
         let mut encoder = self
             .device
@@ -1523,8 +1563,7 @@ impl OffscreenRenderer {
 /// 布局：`mat4x4`（0..64）+ `params: vec4`（64..80，`.x` = 不透明度）+
 /// `image_size: vec4`（80..96，`.xy` = 逻辑图像尺寸）。**尺寸必须与 WGSL 的 struct 一致** ——
 /// 差一个字段 wgpu 会在绘制时报「expects N bytes」（不报错、直接不出图的那种）。
-fn write_matrix(queue: &wgpu::Queue, uniform: &wgpu::Buffer, viewport: &Viewport, encoding: super::image::RenderEncoding) {
-    let matrix = viewport.matrix();
+fn write_uniform(queue: &wgpu::Queue, uniform: &wgpu::Buffer, matrix: &[[f32; 4]; 4], image_size: (f32, f32), encoding: super::image::RenderEncoding) {
     let mut bytes = [0u8; 96];
     for (column, values) in matrix.iter().enumerate() {
         for (row, value) in values.iter().enumerate() {
@@ -1534,10 +1573,11 @@ fn write_matrix(queue: &wgpu::Queue, uniform: &wgpu::Buffer, viewport: &Viewport
     }
     bytes[64..68].copy_from_slice(&1.0f32.to_ne_bytes());
     bytes[68..72].copy_from_slice(&(if encoding == super::image::RenderEncoding::LinearRec2020Half { 1.0f32 } else { 0.0 }).to_ne_bytes());
-    // 顶点按**逻辑尺寸**铺四边形（不是纹理尺寸）：当前纹理可能只是预览档（1920），
-    // 逻辑尺寸却是 6000 —— 按纹理尺寸铺，「1:1」就变成预览图的 1:1（2026-09-24 修）
-    bytes[80..84].copy_from_slice(&(viewport.image_size.0 as f32).to_ne_bytes());
-    bytes[84..88].copy_from_slice(&(viewport.image_size.1 as f32).to_ne_bytes());
+    // 顶点按**传入的画布尺寸**铺四边形（不是纹理尺寸）：当前纹理可能只是预览档（1920），
+    // 逻辑尺寸却是 6000 —— 按纹理尺寸铺，「1:1」就变成预览图的 1:1（2026-09-24 修）。
+    // 对比参照传的是 cover 后的尺寸：它在那块窗口上是等比放大、居中，多出来的由 scissor 裁。
+    bytes[80..84].copy_from_slice(&image_size.0.to_ne_bytes());
+    bytes[84..88].copy_from_slice(&image_size.1.to_ne_bytes());
     queue.write_buffer(uniform, 0, &bytes);
 }
 

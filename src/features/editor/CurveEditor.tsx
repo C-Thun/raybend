@@ -75,7 +75,7 @@ export interface CurveEditorProps {
   /** 整块禁用（空态 / 二级锁） */
   disabled?: boolean;
   /** 松手 / 改动完成 → 工作区落库 */
-  onCommit?: () => void;
+  onConfirm?: () => void;
   /** 拖拽开始（拖动中只算预览档，见 `store.beginParamDrag`） */
   onDragStart?: () => void;
   /** 拖拽结束 */
@@ -122,7 +122,7 @@ export function CurveEditor(props: CurveEditorProps): JSX.Element {
       const next = removePoint(current, hit);
       if (next.length !== current.length) {
         props.store.setCurvePoints(channel(), next);
-        props.onCommit?.();
+        props.onConfirm?.();
       }
       return;
     }
@@ -176,7 +176,7 @@ export function CurveEditor(props: CurveEditorProps): JSX.Element {
     }
     // 先松开「拖动中」再落库：松手这一下要让 Rust 侧补全尺寸（`tier_for_params`）
     props.onDragEnd?.();
-    props.onCommit?.();
+    props.onConfirm?.();
   }
 
   return (
@@ -295,7 +295,7 @@ export function CurveEditor(props: CurveEditorProps): JSX.Element {
           disabled={props.disabled === true}
           onClick={() => {
             props.store.resetCurve(channel());
-            props.onCommit?.();
+            props.onConfirm?.();
           }}
           class="rounded-ui px-1.5 py-0.5 text-fs-0 text-fg-3 transition-colors hover:bg-state-hover hover:text-fg-1 disabled:opacity-50"
           data-curve-reset

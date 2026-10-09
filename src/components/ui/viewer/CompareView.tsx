@@ -46,6 +46,7 @@ import {
   createEffect,
   createMemo,
   createSignal,
+  For,
   Index,
   onCleanup,
   onMount,
@@ -66,11 +67,13 @@ import {
   clampPan,
   clampZoom,
   computeFitScale,
+  viewerPhotoKey,
   zoomPanAt,
   type ViewerPhoto,
   type ViewerStore,
   type ViewportSize,
 } from "./store.ts";
+import { viewerUrlProbe } from "./probe.ts";
 import {
   createWheelZoom,
   isViewerControlTarget,
@@ -381,10 +384,15 @@ export function CompareView(props: CompareViewProps): JSX.Element {
    *
    * 判据是**照片集合的指纹**而不是 `props.photos` 的引用 —— 后者每次读都是新数组
    * （调用方现算的），拿它当依赖会把「点某一格切当前照片」也当成换组。
+   *
+   * ⚠️ 指纹必须用 `viewerPhotoKey`（= 存储层认的那把身份），不是 `id + path`：
+   * browse 的「展示定稿」会把同一张照片换成另一个变体（`imageKey` 变），
+   * 而 path 一动不动 —— 少了变体这一段，换变体后这一格不会重新取图，
+   * 一旦焦点移走就再也拿不到 URL（崔总 2026-10-08 报的「指定了 issue 的相片会变空」）。
    */
   let photoKey = "";
   createEffect(() => {
-    const nextKey = props.photos.map((photo) => `${photo.id}\u0000${photo.path}`).join("\u0001");
+    const nextKey = props.photos.map(viewerPhotoKey).join("\u0001");
     if (nextKey === photoKey) return;
     photoKey = nextKey;
 
@@ -459,6 +467,26 @@ export function CompareView(props: CompareViewProps): JSX.Element {
     });
     onCleanup(() => registerViewerActions(null));
   });
+
+  /**
+   * 探针读数（只在探针开着时用；`data-*` 属性则永远带上，用不着探针也能在 devtools 里看）。
+   * 空白那一格的判据就一条：`url === null`。
+   */
+  const urlStateFor = (photo: ViewerPhoto): "ok" | "missing" =>
+    props.store.imageUrlFor(photo) === null ? "missing" : "ok";
+
+  const probeLineFor = (photo: ViewerPhoto, at: number): string => {
+    const current = props.store.current()?.id === photo.id ? " · cur" : "";
+    return `#${at} ${photo.fileName} · url ${urlStateFor(photo)}${current} · live ${viewerUrlProbe.liveFor(viewerPhotoKey(photo))}`;
+  };
+
+  const probeTail = (): string[] => {
+    // 读一下版本号：探针每记一条它就跳一下，这张表跟着刷新
+    viewerUrlProbe.version();
+    return viewerUrlProbe.events().slice(-6).map((event) =>
+      `#${event.seq} ${event.kind} ${event.key.slice(0, 24)} ${event.url ?? ""}${event.detail === "" ? "" : ` · ${event.detail}`}`
+    );
+  };
 
   const controlsVisible = (): boolean =>
     viewerControlsVisible(cursor(), {
@@ -602,6 +630,8 @@ export function CompareView(props: CompareViewProps): JSX.Element {
               return offset === undefined ? undefined : `${Math.round(offset.x)},${Math.round(offset.y)}`;
             })()}
             data-current={props.store.current()?.id === placement().photo.id ? "true" : undefined}
+            /* 「这一格现在有没有 URL」——空白症状的机器可读形态（devtools / 脚本 / 探针都读它）*/
+            data-compare-url={urlStateFor(placement().photo)}
             aria-label={placement().photo.fileName}
             /* 窗口：可见/裁剪的边界（画布放大后铺满整格，而不是被画布关住） */
             class={[
@@ -614,6 +644,18 @@ export function CompareView(props: CompareViewProps): JSX.Element {
             /* 保留 click 入口给键盘/自动化；真实指针在 pointerdown 已先切焦点 */
             onClick={() => props.onFocus?.(placement().photo)}
           >
+            <Show when={viewerUrlProbe.enabled()}>
+              <span
+                data-compare-probe-frame="open"
+                class={[
+                  // i18n-exempt: 开发期探针浮层（英文技术读数，不进语言包、不面向用户）
+                  "pointer-events-none absolute start-1 top-1 z-20 max-w-[calc(100%-0.5rem)] overflow-hidden text-ellipsis whitespace-nowrap rounded-ui bg-surface-layer/95 px-1.5 py-0.5 font-mono text-fs-0",
+                  urlStateFor(placement().photo) === "missing" ? "text-danger" : "text-fg-3",
+                ].join(" ")}
+              >
+                {probeLineFor(placement().photo, at)}
+              </span>
+            </Show>
             <Show
               when={canvas().size.width > 0 && placement().natural.width > 0}
               fallback={
@@ -663,6 +705,19 @@ export function CompareView(props: CompareViewProps): JSX.Element {
           </div>
         )}
       </Index>
+
+      <Show when={viewerUrlProbe.enabled()}>
+        <div
+          data-compare-probe-panel="open"
+          class="pointer-events-none absolute end-1 top-1 z-30 max-w-[60ch] overflow-hidden rounded-ui bg-surface-layer/95 px-2 py-1 font-mono text-fs-0 text-fg-3"
+        >
+          <div class="text-fg-2">
+            {/* i18n-exempt: 开发期探针浮层（技术读数，不进语言包） */}
+            {`probe · live ${viewerUrlProbe.liveTotal()} · keys ${canvas().placements.length} · Ctrl+Alt+Shift+D`}
+          </div>
+          <For each={probeTail()}>{(line) => <div class="whitespace-nowrap">{line}</div>}</For>
+        </div>
+      </Show>
 
       <ViewerControls
         store={props.store}

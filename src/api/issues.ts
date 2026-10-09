@@ -32,6 +32,16 @@ export async function createIssue(repositoryId: string, assetId: number, name: s
   if (!isTauriRuntime()) return null;
   return call<IssueLibrary>("issue_create", { repositoryId, assetId, name, english });
 }
+/**
+ * 改一条定稿的名字（只动名字：配置 / 基准 / 创建时间都不变）。
+ *
+ * 与 `create` / `delete` 同一条口径：返回**整份列表**，调用方拿它直接回填
+ * （改完不用再拉一次）。
+ */
+export async function renameIssue(repositoryId: string, assetId: number, issueId: number, name: string, english: boolean): Promise<IssueLibrary | null> {
+  if (!isTauriRuntime()) return null;
+  return call<IssueLibrary>("issue_rename", { repositoryId, assetId, issueId, name, english });
+}
 export async function deleteIssue(repositoryId: string, assetId: number, issueId: number, english: boolean): Promise<IssueLibrary | null> {
   if (!isTauriRuntime()) return null;
   return call<IssueLibrary>("issue_delete", { repositoryId, assetId, issueId, english });
