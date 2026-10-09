@@ -43,6 +43,20 @@
 3. 本机 `cargo login <token>`（当前 `~/.cargo/credentials.toml` 不存在 = 还没登录过）。
 4. 干净树上 `cargo publish -p raybend`。
 
+## 发布前最终确认（2026-10-09 21:40:51 CST，去掉 `--allow-dirty` 后的第一次真闸门复验）
+
+`crates/raybend` 内已提交干净（提交 `ae07a01` / `4947fcd`），于是在**干净树**上重跑了不带 `--allow-dirty` 的检查：
+
+* `cargo publish -p raybend --dry-run` ✅ 无脏树报错；`Packaged 236 files, 3.9MiB (1.1MiB compressed)`；
+  验证编译 9.78s（`target/package/raybend-0.1.1` 已热）；收尾 `Uploading raybend v0.1.1` →
+  `warning: aborting upload due to dry run`。**这是发布前的通过判据。**
+* `cargo test -p raybend --lib` ✅ 1461 通过 / 0 失败 / 12 ignored（15.17s）。
+* `cargo test -p raybend --test raw_worker` ✅ 7 通过 / 0 失败（worker 协议 v7 握手正常）。
+* 名字 2026-10-09 21:40 仍未被占（`does not exist`）。
+* 待发布版本：**`0.1.1`**（`Cargo.toml` 里 `version.workspace = true`）。
+
+结论：**可以发布**，只剩崔总的 `cargo publish -p raybend` 本体（§2.1）。
+
 ## 遗留 / 未决
 
 * **工作树是脏的**（41 个文件未提交，M3-W5/编辑预设那一批）：`cargo publish` 会因此拒绝。
