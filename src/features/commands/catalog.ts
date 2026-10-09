@@ -67,7 +67,22 @@ export interface CommandDeps {
     available: () => boolean;
     minimize: () => void;
     toggleMaximize: () => void;
+    /** 调整到所在屏幕工作区内的留白矩形（Shift+点击最大化键的语义；几何在 Rust） */
+    fitWorkArea: () => void;
     close: () => void;
+  };
+
+  /* ── 历史（撤销 / 重做）—— **场景层**：入口唯一，逻辑按场景转换 ── */
+  history: {
+    /**
+     * 当前场景适不适用：浏览 = 有打开的库；编辑 = 编辑工作区有可编辑的照片。
+     * 导入 / 导出里不适用（那里没有可撤销的东西）。
+     */
+    applies: () => boolean;
+    canUndo: () => boolean;
+    canRedo: () => boolean;
+    undo: () => void;
+    redo: () => void;
   };
 
   /* ── 弹窗 ───────────────────────────────────────── */
@@ -205,6 +220,11 @@ const COLOR_VALUES = ["red", "yellow", "green", "cyan", "blue", "purple"] as con
  *
  * **顺序即命令面板的默认顺序**（空查询时按它排；同分也按它稳定排序）——
  * 所以这里的分组顺序是**人工编排**的：文件 → 编辑 → 视图 → 看图 → 标记 → 导航 → 导入。
+ *
+ * **菜单只留逃生通道**（2026-10-09，崔总「弱菜单」要求）：凡界面里已有入口的（编辑器工具栏、
+ * 色彩面板、AI、组织面板、标题栏开关、网格控件、导出工具栏……）都不带 `menu` 字段 ——
+ * 视图菜单曾堆到 23 项、屏幕都显示不下。菜单现在只剩：工作流切换、撤销/重做、文件与库的
+ * 低频入口、窗口三键与帮助；被移出菜单的命令仍在命令面板与快捷键里（能力不减，只是不重复占版面）。
  */
 export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
   const inTiles = (): boolean => !deps.viewer.viewing() && deps.flow() !== "edit" && deps.flow() !== "export";
@@ -217,34 +237,34 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
   const inExport=()=>deps.flow()==="export";
   return [
     // 色彩查看及输入恢复低频，默认键位留空；菜单、命令面板与快捷键设置同源。
-    spec({id:"editor.color.open",titleKey:"cmd.editor.color.open",group:"view",menu:"view",scope:"viewer",defaultKey:undefined,when:()=>deps.editor.active(),run:()=>deps.editor.color?.open()}),
-    spec({id:"editor.color.proof",titleKey:"cmd.editor.color.proof",group:"view",menu:"view",scope:"viewer",defaultKey:undefined,when:()=>deps.editor.active() && deps.editor.hasPhoto(),run:()=>deps.editor.color?.proof()}),
-    spec({id:"editor.color.gamutWarning",titleKey:"cmd.editor.color.gamutWarning",group:"view",menu:"view",scope:"viewer",defaultKey:undefined,when:()=>deps.editor.active() && deps.editor.hasPhoto(),run:()=>deps.editor.color?.warning()}),
-    spec({id:"editor.color.restore",titleKey:"cmd.editor.color.restore",group:"edit",menu:"edit",scope:"viewer",defaultKey:undefined,when:()=>deps.editor.active() && deps.editor.hasPhoto(),run:()=>deps.editor.color?.restore()}),
-    spec({id:"editor.color.batch",titleKey:"cmd.editor.color.batch",group:"edit",menu:"edit",scope:"viewer",defaultKey:undefined,when:()=>deps.editor.active() && deps.editor.hasPhoto(),run:()=>deps.editor.color?.batch?.()}),
+    spec({id:"editor.color.open",titleKey:"cmd.editor.color.open",group:"view",scope:"viewer",defaultKey:undefined,when:()=>deps.editor.active(),run:()=>deps.editor.color?.open()}),
+    spec({id:"editor.color.proof",titleKey:"cmd.editor.color.proof",group:"view",scope:"viewer",defaultKey:undefined,when:()=>deps.editor.active() && deps.editor.hasPhoto(),run:()=>deps.editor.color?.proof()}),
+    spec({id:"editor.color.gamutWarning",titleKey:"cmd.editor.color.gamutWarning",group:"view",scope:"viewer",defaultKey:undefined,when:()=>deps.editor.active() && deps.editor.hasPhoto(),run:()=>deps.editor.color?.warning()}),
+    spec({id:"editor.color.restore",titleKey:"cmd.editor.color.restore",group:"edit",scope:"viewer",defaultKey:undefined,when:()=>deps.editor.active() && deps.editor.hasPhoto(),run:()=>deps.editor.color?.restore()}),
+    spec({id:"editor.color.batch",titleKey:"cmd.editor.color.batch",group:"edit",scope:"viewer",defaultKey:undefined,when:()=>deps.editor.active() && deps.editor.hasPhoto(),run:()=>deps.editor.color?.batch?.()}),
     // AI 批量动作/设置低频且必须明确范围，defaultKey 留空，不占用照片标记热键。
-    spec({id:"ai.recognize",titleKey:"cmd.ai.recognize",group:"edit",menu:"edit",scope:"global",defaultKey:undefined,when:()=>deps.flow()==="browse" && (deps.browse.ai?.available?.()??false),run:()=>deps.browse.ai?.recognize(false)}),
-    spec({id:"ai.recognizeAgain",titleKey:"cmd.ai.recognizeAgain",group:"edit",menu:"edit",scope:"global",defaultKey:undefined,when:()=>deps.flow()==="browse" && (deps.browse.ai?.available?.()??false),run:()=>deps.browse.ai?.recognize(true)}),
-    spec({id:"ai.tasks",titleKey:"cmd.ai.tasks",group:"view",menu:"view",scope:"global",defaultKey:undefined,when:()=>deps.browse.ai?.available?.()??false,run:()=>deps.browse.ai?.tasks()}),
-    spec({id:"ai.models",titleKey:"cmd.ai.models",group:"view",menu:"view",scope:"global",defaultKey:undefined,when:()=>deps.browse.ai?.available?.()??false,run:()=>deps.browse.ai?.models()}),
-    spec({id:"organization.library",titleKey:"cmd.organization.library",group:"view",menu:"view",scope:"global",defaultKey:"Alt+1",when:()=>deps.flow()==="browse",run:()=>deps.browse.organization?.panel("library")}),
-    spec({id:"organization.buckets",titleKey:"cmd.organization.buckets",group:"view",menu:"view",scope:"global",defaultKey:"Alt+2",when:()=>deps.flow()==="browse",run:()=>deps.browse.organization?.panel("buckets")}),
-    spec({id:"organization.tags",titleKey:"cmd.organization.tags",group:"view",menu:"view",scope:"global",defaultKey:"Alt+3",when:()=>deps.flow()==="browse",run:()=>deps.browse.organization?.panel("tags")}),
+    spec({id:"ai.recognize",titleKey:"cmd.ai.recognize",group:"edit",scope:"global",defaultKey:undefined,when:()=>deps.flow()==="browse" && (deps.browse.ai?.available?.()??false),run:()=>deps.browse.ai?.recognize(false)}),
+    spec({id:"ai.recognizeAgain",titleKey:"cmd.ai.recognizeAgain",group:"edit",scope:"global",defaultKey:undefined,when:()=>deps.flow()==="browse" && (deps.browse.ai?.available?.()??false),run:()=>deps.browse.ai?.recognize(true)}),
+    spec({id:"ai.tasks",titleKey:"cmd.ai.tasks",group:"view",scope:"global",defaultKey:undefined,when:()=>deps.browse.ai?.available?.()??false,run:()=>deps.browse.ai?.tasks()}),
+    spec({id:"ai.models",titleKey:"cmd.ai.models",group:"view",scope:"global",defaultKey:undefined,when:()=>deps.browse.ai?.available?.()??false,run:()=>deps.browse.ai?.models()}),
+    spec({id:"organization.library",titleKey:"cmd.organization.library",group:"view",scope:"global",defaultKey:"Alt+1",when:()=>deps.flow()==="browse",run:()=>deps.browse.organization?.panel("library")}),
+    spec({id:"organization.buckets",titleKey:"cmd.organization.buckets",group:"view",scope:"global",defaultKey:"Alt+2",when:()=>deps.flow()==="browse",run:()=>deps.browse.organization?.panel("buckets")}),
+    spec({id:"organization.tags",titleKey:"cmd.organization.tags",group:"view",scope:"global",defaultKey:"Alt+3",when:()=>deps.flow()==="browse",run:()=>deps.browse.organization?.panel("tags")}),
     // Dialog actions are reachable from the toolbar and command palette; no default
     // chord so they do not steal photo marking keys.
-    spec({id:"organization.addSelected",titleKey:"cmd.organization.addSelected",group:"edit",menu:"edit",scope:"global",defaultKey:undefined,when:()=>deps.flow()==="browse",enabled:()=>deps.browse.hasSelection() || (deps.browse.organization?.hasOrganizationSelection()??false),run:()=>deps.browse.organization?.addSelected()}),
-    spec({id:"organization.addFlags",titleKey:"cmd.organization.addFlags",group:"edit",menu:"edit",scope:"global",defaultKey:undefined,when:()=>deps.flow()==="browse",enabled:()=>deps.browse.organization?.hasFlags()??false,run:()=>deps.browse.organization?.addFlags()}),
-    spec({id:"organization.removeSelected",titleKey:"cmd.organization.removeSelected",group:"edit",menu:"edit",scope:"global",defaultKey:undefined,when:()=>deps.flow()==="browse",enabled:()=>deps.browse.organization?.canRemoveSelected()??false,run:()=>deps.browse.organization?.removeSelected()}),
-    spec({id:"organization.newAuto",titleKey:"cmd.organization.newAuto",group:"file",menu:"file",scope:"global",defaultKey:undefined,when:()=>deps.flow()==="browse",run:()=>deps.browse.organization?.newAuto()}),
+    spec({id:"organization.addSelected",titleKey:"cmd.organization.addSelected",group:"edit",scope:"global",defaultKey:undefined,when:()=>deps.flow()==="browse",enabled:()=>deps.browse.hasSelection() || (deps.browse.organization?.hasOrganizationSelection()??false),run:()=>deps.browse.organization?.addSelected()}),
+    spec({id:"organization.addFlags",titleKey:"cmd.organization.addFlags",group:"edit",scope:"global",defaultKey:undefined,when:()=>deps.flow()==="browse",enabled:()=>deps.browse.organization?.hasFlags()??false,run:()=>deps.browse.organization?.addFlags()}),
+    spec({id:"organization.removeSelected",titleKey:"cmd.organization.removeSelected",group:"edit",scope:"global",defaultKey:undefined,when:()=>deps.flow()==="browse",enabled:()=>deps.browse.organization?.canRemoveSelected()??false,run:()=>deps.browse.organization?.removeSelected()}),
+    spec({id:"organization.newAuto",titleKey:"cmd.organization.newAuto",group:"file",scope:"global",defaultKey:undefined,when:()=>deps.flow()==="browse",run:()=>deps.browse.organization?.newAuto()}),
     // Seconds-long output with a dialog; deliberately no default shortcut.
-    spec({id:"browse.externalEditor",titleKey:"cmd.browse.externalEditor",group:"file",menu:"file",scope:"global",defaultKey:undefined,when:()=>deps.flow()==="browse",enabled:()=>deps.browse.canExternalEditor?.()??false,run:()=>deps.browse.externalEditor?.()}),
-    spec({id:"export.run",titleKey:"cmd.export.run",group:"file",menu:"file",scope:"global",defaultKey:"Mod+Enter",when:inExport,enabled:()=>deps.export?.canRun()??false,run:()=>deps.export?.toggleRun()}),
+    spec({id:"browse.externalEditor",titleKey:"cmd.browse.externalEditor",group:"file",scope:"global",defaultKey:undefined,when:()=>deps.flow()==="browse",enabled:()=>deps.browse.canExternalEditor?.()??false,run:()=>deps.browse.externalEditor?.()}),
+    spec({id:"export.run",titleKey:"cmd.export.run",group:"file",scope:"global",defaultKey:"Mod+Enter",when:inExport,enabled:()=>deps.export?.canRun()??false,run:()=>deps.export?.toggleRun()}),
     // 预设文件交换暂不启用；目标预览、失败清单不再作为产品命令。
-    spec({id:"export.enqueue",titleKey:"cmd.export.enqueue",group:"file",menu:"file",scope:"tiles",defaultKey:"Enter",when:inExport,enabled:()=>deps.export?.canEnqueue()??false,run:()=>deps.export?.enqueue()}),
-    spec({id:"export.reset",titleKey:"cmd.export.reset",group:"edit",menu:"edit",scope:"global",defaultKey:undefined,when:inExport,enabled:()=>deps.export?.canReset()??false,dangerous:true,run:()=>deps.export?.reset()}),
-    spec({id:"export.stopAll",titleKey:"cmd.export.stopAll",group:"file",menu:"file",scope:"global",defaultKey:undefined,when:inExport,enabled:()=>deps.export?.canStop()??false,run:()=>deps.export?.stopAll()}),
-    spec({id:"export.scope",titleKey:"cmd.export.scope",group:"view",menu:"view",scope:"tiles",defaultKey:undefined,when:inExport,run:()=>deps.export?.cycleScope()}),
-    spec({id:"export.save",titleKey:"cmd.export.save",group:"file",menu:"file",scope:"global",defaultKey:undefined,when:inExport,enabled:()=>deps.export?.canSave()??false,run:()=>deps.export?.save()}),
+    spec({id:"export.enqueue",titleKey:"cmd.export.enqueue",group:"file",scope:"tiles",defaultKey:"Enter",when:inExport,enabled:()=>deps.export?.canEnqueue()??false,run:()=>deps.export?.enqueue()}),
+    spec({id:"export.reset",titleKey:"cmd.export.reset",group:"edit",scope:"global",defaultKey:undefined,when:inExport,enabled:()=>deps.export?.canReset()??false,dangerous:true,run:()=>deps.export?.reset()}),
+    spec({id:"export.stopAll",titleKey:"cmd.export.stopAll",group:"file",scope:"global",defaultKey:undefined,when:inExport,enabled:()=>deps.export?.canStop()??false,run:()=>deps.export?.stopAll()}),
+    spec({id:"export.scope",titleKey:"cmd.export.scope",group:"view",scope:"tiles",defaultKey:undefined,when:inExport,run:()=>deps.export?.cycleScope()}),
+    spec({id:"export.save",titleKey:"cmd.export.save",group:"file",scope:"global",defaultKey:undefined,when:inExport,enabled:()=>deps.export?.canSave()??false,run:()=>deps.export?.save()}),
     /* ══ 文件 ══════════════════════════════════════════ */
     spec({
       id: "file.newRepository",
@@ -284,20 +304,25 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
     spec({
       id: "repository.reconnect",
       titleKey: "cmd.repository.reconnect",
-      group: "file", menu: "file", scope: "global",
+      group: "file",
+      menu: "file",
+      scope: "global",
       // 低频维护，通过 Ctrl+K/文件菜单可达，不占照片操作键。
       defaultKey: undefined,
       enabled: () => deps.repository?.canReconnect() ?? false,
       run: () => deps.repository?.reconnect(),
     }),
     spec({
-      id: "repository.release", titleKey: "cmd.repository.release", group: "file", menu: "file", scope: "global",
+      id: "repository.release", titleKey: "cmd.repository.release", group: "file",
+      menu: "file", scope: "global",
       // 低频且需确认，避免误触；通过菜单和命令面板可达。
       defaultKey: undefined, enabled: () => deps.repository?.canRelease?.() ?? false, run: () => deps.repository?.release?.(),
     }),
     spec({
       id: "repository.locate", titleKey: "cmd.repository.locate",
-      group: "file", menu: "file", scope: "global",
+      group: "file",
+      menu: "file",
+      scope: "global",
       // 低频位置维护，通过 Ctrl+K/文件菜单可达，不占照片操作键。
       defaultKey: undefined,
       enabled: () => deps.repository?.canLocate?.() ?? false,
@@ -324,26 +349,35 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
 
     /* ══ 编辑 ══════════════════════════════════════════ */
     spec({
+      /*
+       * **撤销**：入口唯一（id / 标题 / 键 / 菜单），业务逻辑由组装层按**场景**转换
+       * （`CommandDeps.history`，崔总 2026-10-09 定）：浏览场景撤的是网格/标记动作，
+       * 编辑场景撤的是同一个后端栈里的照片编辑步骤 —— 对用户是同一套操作。
+       *
+       * `scope: "global"` 是刻意的：这条键在浏览（`tiles`）与编辑（`viewer`）两面都要生效，
+       * 静态归属就得覆盖两面；冲突检测因此会拦住别的命令占用 `Mod+Z`（正确）。
+       */
       id: "edit.undo",
       titleKey: "cmd.edit.undo",
       group: "edit",
       menu: "edit",
-      scope: "tiles",
+      scope: "global",
       defaultKey: "Mod+Z",
-      when: inBrowse,
-      enabled: () => deps.browse.canUndo(),
-      run: () => deps.browse.undo(),
+      when: () => deps.history.applies(),
+      enabled: () => deps.history.canUndo(),
+      run: () => deps.history.undo(),
     }),
     spec({
+      /* 重做：与撤销同一套结构；默认键 `Ctrl+Y`（崔总 2026-10-09 定，Windows 惯例）。 */
       id: "edit.redo",
       titleKey: "cmd.edit.redo",
       group: "edit",
       menu: "edit",
-      scope: "tiles",
-      defaultKey: "Mod+Shift+Z",
-      when: inBrowse,
-      enabled: () => deps.browse.canRedo(),
-      run: () => deps.browse.redo(),
+      scope: "global",
+      defaultKey: "Mod+Y",
+      when: () => deps.history.applies(),
+      enabled: () => deps.history.canRedo(),
+      run: () => deps.history.redo(),
     }),
     spec({
       id: "edit.selectAll",
@@ -359,7 +393,6 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       id: "edit.clearSelection",
       titleKey: "cmd.edit.clearSelection",
       group: "edit",
-      menu: "edit",
       scope: "tiles",
       defaultKey: "Esc",
       when: () => inBrowse() || inExport(),
@@ -452,7 +485,6 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       id: "view.theme.toggle",
       titleKey: "cmd.view.theme.toggle",
       group: "view",
-      menu: "view",
       scope: "global",
       run: () => deps.toggleTheme(),
     }),
@@ -460,7 +492,6 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       id: "view.density.compact",
       titleKey: "cmd.view.density.compact",
       group: "view",
-      menu: "view",
       scope: "global",
       enabled: () => deps.density() !== "compact",
       run: () => deps.setDensity("compact"),
@@ -469,7 +500,6 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       id: "view.density.loose",
       titleKey: "cmd.view.density.loose",
       group: "view",
-      menu: "view",
       scope: "global",
       enabled: () => deps.density() !== "loose",
       run: () => deps.setDensity("loose"),
@@ -478,7 +508,6 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       id: "view.filter.toggle",
       titleKey: "cmd.view.filter.toggle",
       group: "view",
-      menu: "view",
       scope: "tiles",
       when: inBrowse,
       run: () => deps.browse.toggleFilter(),
@@ -487,7 +516,6 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       id: "view.filter.clear",
       titleKey: "cmd.view.filter.clear",
       group: "view",
-      menu: "view",
       scope: "tiles",
       when: inBrowse,
       enabled: () => deps.browse.filterMode(),
@@ -497,7 +525,6 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       id: "view.tiles.byTime",
       titleKey: "cmd.view.tiles.byTime",
       group: "view",
-      menu: "view",
       scope: "tiles",
       when:()=>inTiles()||inExport(),
       run: () => deps.display.setByTime(!deps.display.byTime()),
@@ -506,7 +533,6 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       id: "view.tiles.info",
       titleKey: "cmd.view.tiles.info",
       group: "view",
-      menu: "view",
       scope: "tiles",
       defaultKey: "i",
       when: () =>
@@ -518,7 +544,6 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       id: "view.tiles.zoomIn",
       titleKey: "cmd.view.tiles.zoomIn",
       group: "view",
-      menu: "view",
       scope: "tiles",
       when:()=>inTiles()||inExport(),
       enabled: () => deps.display.tileStep() < tileSizeSteps(deps.display.sizeBounds?.()).length - 1,
@@ -531,7 +556,6 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       id: "view.tiles.zoomOut",
       titleKey: "cmd.view.tiles.zoomOut",
       group: "view",
-      menu: "view",
       scope: "tiles",
       when:()=>inTiles()||inExport(),
       enabled: () => deps.display.tileStep() > 0,
@@ -545,7 +569,6 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
         id: `view.sort.${key}`,
         titleKey: `cmd.view.sort.${key}`,
         group: "view",
-        menu: "view",
         scope: "tiles",
         when: inBrowse,
         enabled: () => deps.browse.sortKey() !== key,
@@ -556,7 +579,6 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       id: "view.sort.direction",
       titleKey: "cmd.view.sort.direction",
       group: "view",
-      menu: "view",
       scope: "tiles",
       when: inBrowse,
       run: () => deps.browse.toggleSortDirection(),
@@ -617,7 +639,6 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       id: "editor.base.sooc",
       titleKey: "cmd.editor.baseSooc",
       group: "edit",
-      menu: "view",
       scope: "viewer",
       when: () => deps.editor.active() && deps.editor.hasPhoto(),
       run: () => deps.editor.setBase("sooc"),
@@ -626,7 +647,6 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       id: "editor.base.raw",
       titleKey: "cmd.editor.baseRaw",
       group: "edit",
-      menu: "view",
       scope: "viewer",
       when: () => deps.editor.active() && deps.editor.hasPhoto(),
       run: () => deps.editor.setBase("raw"),
@@ -635,7 +655,6 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       id: "editor.lut.toggle",
       titleKey: "cmd.editor.lut",
       group: "view",
-      menu: "view",
       scope: "viewer",
       when: () => deps.editor.active(),
       run: () => deps.editor.toggleLut(),
@@ -645,7 +664,6 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       defaultKey: "C",
       titleKey: "cmd.editor.crop",
       group: "view",
-      menu: "view",
       scope: "viewer",
       // 没有照片时进工具没有意义（空态下工具按钮也是禁用的）
       when: () => deps.editor.active() && deps.editor.hasPhoto(),
@@ -656,7 +674,6 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       defaultKey: "R",
       titleKey: "cmd.editor.rotate",
       group: "view",
-      menu: "view",
       scope: "viewer",
       when: () => deps.editor.active() && deps.editor.hasPhoto(),
       run: () => deps.editor.toggleTool("rotate"),
@@ -666,7 +683,6 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       id: "editor.develop.autoAdjust",
       titleKey: "cmd.editor.autoAdjust",
       group: "edit",
-      menu: "edit",
       scope: "viewer",
       when: () => deps.editor.active() && deps.editor.canAutoAdjust(),
       run: () => deps.editor.autoAdjust(),
@@ -676,7 +692,6 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       id: "editor.issue.finalize",
       titleKey: "cmd.editor.finalize",
       group: "edit",
-      menu: "edit",
       scope: "viewer",
       when: () => deps.editor.active() && deps.editor.canFinalize(),
       run: () => deps.editor.finalize(),
@@ -699,7 +714,6 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       defaultKey: "B",
       titleKey: "cmd.editor.compare",
       group: "view",
-      menu: "view",
       scope: "viewer",
       when: () => deps.editor.active() && deps.editor.hasPhoto(),
       run: () => deps.editor.toggleTool("compare"),
@@ -723,6 +737,22 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       scope: "global",
       enabled: () => deps.window.available(),
       run: () => deps.window.toggleMaximize(),
+    }),
+    spec({
+      /*
+       * 「调整到工作区」—— Shift+点击最大化键的键盘可达形态（`specs/window-work-area-layout.md`）。
+       *
+       * **默认键明确留空**（崔总 2026-10-08 拍板）：这条动作的原生触发是鼠标修饰手势
+       * （Shift+左键点最大化键），键盘上没有自然键位；但它必须能被搜到、能手动绑键，
+       * 所以登记成正式命令而不是只藏在 titlebar 里。
+       */
+      id: "window.fitWorkArea",
+      titleKey: "cmd.window.fitWorkArea",
+      group: "window",
+      menu: "window",
+      scope: "global",
+      enabled: () => deps.window.available(),
+      run: () => deps.window.fitWorkArea(),
     }),
     spec({
       id: "window.close",

@@ -47,7 +47,13 @@ export interface CommandSpec {
   /** i18n key（`lib/` 不许 import i18n，所以这里只是字符串；类型收窄在 features 层） */
   titleKey: string;
   group: CommandGroup;
-  /** 进哪个菜单；不填就只出现在命令面板 */
+  /**
+   * 进哪个菜单；不填就只出现在命令面板。
+   *
+   * **弱菜单原则**（崔总 2026-10-09）：界面里已有入口的动作/开关**不进菜单** ——
+   * 菜单是逃生通道，不是功能索引。不填菜单的命令照样能在命令面板（`Ctrl+K`）里搜到、
+   * 也能在快捷键设置里绑键 —— 「不进菜单」只是不重复占版面，不是砍能力。
+   */
   menu?: CommandMenu;
   scope: CommandScope;
   /** 默认键位串（`Mod+K` / `P` / `Delete` …）。不填 = 默认不绑键 */

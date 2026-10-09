@@ -3,10 +3,12 @@
  * 默认规则和配置资产入口。尚未接线的功能用明确的状态说明，避免虚假的可操作控件。
  */
 
-import { IconDeviceDesktop, IconEyeOff, IconFileDescription, IconKeyboard, IconPalette, IconPlus, IconRefresh, IconScan } from "@tabler/icons-solidjs";
+import { IconAdjustments, IconDeviceDesktop, IconEyeOff, IconFileDescription, IconKeyboard, IconPalette, IconPlus, IconRefresh, IconScan } from "@tabler/icons-solidjs";
 import { createEffect, createSignal, For, onCleanup, Show, type Component } from "solid-js";
 import { getColorDefaults, setColorDefaults, getColorProfileLibrary, getDisplaySnapshot, hideColorProfile, importColorProfileFiles, onDisplayEnvironmentChange, openSystemDisplaySettings, type ColorDefaults, type ColorProfileEntry, type ColorProfileImport, type ColorProfileLibrary, type DisplaySnapshot } from "../api/color.ts";
 import { ProfileSelect } from "../components/ui/ProfileSelect.tsx";
+import { SegmentedControl } from "../components/ui/SegmentedControl.tsx";
+import type { EditorResponseStore } from "../lib/editor-response.ts";
 import { DisplayColorStatus } from "../components/ui/DisplayColorStatus.tsx";
 import { getEditorRenderState } from "../api/editor.ts";
 import type { EditorRenderState } from "../api/types.ts";
@@ -21,7 +23,7 @@ import { t, type MessageKey } from "../i18n/index.ts";
 import { AiModelSettings } from "../features/browse/AiModelSettings.tsx";
 import { ShortcutSettingsPanel } from "../features/commands/index.ts";
 
-export type SettingsPage = "color" | "profiles" | "shortcuts" | "ai";
+export type SettingsPage = "color" | "profiles" | "editor" | "shortcuts" | "ai";
 
 export interface GlobalSettingsDialogProps {
   open: boolean;
@@ -30,11 +32,14 @@ export interface GlobalSettingsDialogProps {
   onPageChange: (page: SettingsPage) => void;
   commands: readonly CommandSpec[];
   onShortcutsSaved?: () => void;
+  /** 编辑调节响应率（设备级偏好，住在组装层）：这里只改它 */
+  response: EditorResponseStore;
 }
 
 const PAGES: readonly { id: SettingsPage; label: MessageKey; icon: Component<{ size?: number }> }[] = [
   { id: "color", label: "settings.color.title", icon: IconPalette },
   { id: "profiles", label: "settings.profiles.title", icon: IconFileDescription },
+  { id: "editor", label: "settings.editor.title", icon: IconAdjustments },
   { id: "ai", label: "ai.title", icon: IconScan },
   { id: "shortcuts", label: "settings.shortcuts.title", icon: IconKeyboard },
 ];
@@ -367,6 +372,33 @@ export function GlobalSettingsDialog(props: GlobalSettingsDialogProps) {
                 </Show>
               </div>
               <p class="text-fs-0 text-fg-3">{t("settings.profiles.footer")}</p>
+            </div>
+          </Show>
+
+          {/*
+            编辑页（2026-10-09）：目前只有「调节响应率」一项。
+            界面不给固定说明文字（`AGENTS.md` §2.20）—— 解释放在标题的原生 tooltip 里，
+            两档的具体秒数直接写在选项标签上（那才是用户要看的量）。
+          */}
+          <Show when={props.page === "editor"}>
+            <div class="space-y-5">
+              <header>
+                <h2 class="text-fs-3 font-semibold text-fg-1">{t("settings.editor.title")}</h2>
+              </header>
+              <div class="flex items-center gap-5 border-b border-surface-bar py-5">
+                <h3 class="min-w-0 flex-1 text-fs-2 font-semibold text-fg-1" title={t("settings.editor.response.hint")}>
+                  {t("settings.editor.response.title")}
+                </h3>
+                <SegmentedControl
+                  label={t("settings.editor.response.title")}
+                  value={props.response.rate()}
+                  onValueChange={props.response.setRate}
+                  options={[
+                    { value: "high", label: t("settings.editor.response.high") },
+                    { value: "low", label: t("settings.editor.response.low") },
+                  ]}
+                />
+              </div>
             </div>
           </Show>
 

@@ -320,31 +320,121 @@ pub fn contrast_curve(value: f32, amount: f32) -> f32 {
     }
 }
 
+/// 影调窗口的**感知域指数**：`t = y^(1/2.2)`。
+///
+/// 为什么窗口定义在感知域：高光与黑区是**视觉**概念（亮部 / 暗部），而线性值差得远 ——
+/// 线性 0.8 已是显示域 0.91 的一小块、线性 0.2 是显示域 0.48 的**中间调**。
+/// 旧实现把窗口钉在这两个线性值上，实测症状就是「高光拉不动、黑区像在调中间调曝光」
+/// （崔总 2026-10-09 反馈；对照 RapidRAW 的 `apply_highlights_adjustment` /
+/// `apply_tonal_adjustments`，它同样在感知域 `pow(luma, 0.4545)` 上定义高光/黑区窗口）。
+const TONE_PERCEPTUAL_GAMMA: f32 = 1.0 / 2.2;
+const TONE_LINEAR_GAMMA: f32 = 2.2;
+
+/// 高光的**基础**跨度（感知域≈显示域）：amount≈0 时只动**最亮 30%**（≥177 级）。
+///
+/// 演进（崔总 2026-10-09 反馈循环）：初版①（最亮 17%）完全没效果；初版②（最亮 55% 起、±38 级）
+/// 「有效果但很弱」；线性动态区间版（最亮 50% → 75%）「按我说的方式动作了」，但中途就开始扩范围。
+/// **v4（本版）**：跨度律改成 `base + E·a²` —— 开头精细（a=0.1 只动最亮 20%），越拉张得越快。
+/// 拉满仍是 0.75，与上一版**完全一致**，不动已被接受的拉满观感。
+/// （崔总 2026-10-09 追加：起始区再收窄一档，便于精确调整。）
+const HIGHLIGHTS_SPAN_BASE: f32 = 0.20;
+/// 高光跨度加速度：`span(a) = 0.20 + 0.55·a²` ⇒ 拉满 0.75（最亮 75%，= 上一版）。
+const HIGHLIGHTS_SPAN_ACCEL: f32 = 0.55;
+/// 高光幅度（感知域）：±1 时窗口峰值处约 ±0.15（≈ 38 个 8bit 级）。
+///
+/// **单调性**：`max_a a/span(a) = 1.508`（在 a≈0.603 处）⇒ 最大斜率 `0.15π×1.508 ≈ 0.71 < 1`。
+const HIGHLIGHTS_GAIN: f32 = 0.15;
+
+/// 黑区的**基础**跨度：amount≈0 时只动**最暗 12%**（≤31 级）—— 小幅拉动是纯「救死黑」。
+const BLACKS_SPAN_BASE: f32 = 0.12;
+/// 黑区跨度加速度：`span(a) = 0.12 + 0.36·a²` ⇒ 拉满 0.48（最暗 48%；2026-10-09 崔总真机反馈后由 0.60 降 20%）。
+const BLACKS_SPAN_ACCEL: f32 = 0.36;
+/// 黑区幅度（感知域）：±1 时约 ±0.072（2026-10-09 崔总真机反馈「20→30 太快」后降 40%）。
+/// 最大斜率 `0.072π×2.406 ≈ 0.54 < 1`（a≈0.577 处最紧）。
+const BLACKS_GAIN: f32 = 0.072;
+
+/// 抬黑时的**对比补偿**（对照 RapidRAW `apply_tonal_adjustments` 的做法）：
+/// 纯加性抬黑会压低暗部反差（观感「发灰」），把抬起的量围绕 `pivot` 拉伸一下再按 `mix` 混回。
+/// 只在 `amount > 0`（抬黑）时生效；压暗一侧不动。三个数直接沿用 RR。
+const BLACKS_COMP_PIVOT: f32 = 0.20;
+const BLACKS_COMP_STRETCH: f32 = 1.3;
+const BLACKS_COMP_MIX: f32 = 0.85;
+
+/// 高光的作用下界：跨度 `span(a) = base + E·a²`，区间 `[1 − span, 1]`。
+fn highlights_floor(amount: f32) -> f32 {
+    let a = amount.abs();
+    1.0 - (HIGHLIGHTS_SPAN_BASE + HIGHLIGHTS_SPAN_ACCEL * a * a)
+}
+
+/// 黑区的作用上界：跨度 `span(a) = base + E·a²`，区间 `[0, span]`。
+fn blacks_ceil(amount: f32) -> f32 {
+    let a = amount.abs();
+    BLACKS_SPAN_BASE + BLACKS_SPAN_ACCEL * a * a
+}
+
+/// 感知域窗口 `sin²(πu)`：`u = 0 / 1` 两端为 0、中点 1，**两端导数也是 0**。
+///
+/// 端点取 0 是「窗口外恒等」的来源（黑点 / 白点固定）；导数连续则保证衔接处没有折角
+/// ——折角在平滑渐变上会显成一条淡淡的带。
+/// 最大斜率 `|w′| = π`，因此「幅度 × π / 窗口跨度 < 1」就能证明合成的映射仍然单调。
+fn tone_window(u: f32) -> f32 {
+    let s = (std::f32::consts::PI * u).sin();
+    s * s
+}
+
 /// **高光**：亮部的软调整，白点固定。
 ///
-/// `y + h·y⁴(1−y)`：`h < 0` 压高光（找回细节），`h > 0` 提亮高光。
-/// 导数 = `1 + h(4y³ − 5y⁴) ≥ 1 − |h|` ⇒ `|h| ≤ 1` 时**严格单调**（不会出现亮暗反转）。
+/// * `amount < 0`：压高光、找回细节（「救高光」的主用法）；
+/// * `amount > 0`：提亮高光 —— 允许把高光推爆（想炸就炸得对，不做人为回卷）。
+///
+/// 作用区间是**动态**的（`HIGHLIGHTS_SPAN_BASE/ACCEL`）：小幅只动最亮 30%，拉满扩到最亮 75%。
+/// 单调性：`幅度 × π / span(a)` 的全程最大值 ≈ 0.64 < 1（推导见常量注释）。
 #[must_use]
 pub fn highlights_curve(value: f32, amount: f32) -> f32 {
-    if amount.abs() < 1e-6 || !(0.0..=1.0).contains(&value) {
+    if amount.abs() < 1e-6 || !(0.0..=1.0).contains(&value) || value <= 0.0 || value >= 1.0 {
         return value;
     }
-    let y4 = value * value * value * value;
-    value + amount * y4 * (1.0 - value)
+    let t = value.powf(TONE_PERCEPTUAL_GAMMA);
+    let floor = highlights_floor(amount);
+    if t <= floor {
+        return value;
+    }
+    let u = (t - floor) / (1.0 - floor);
+    let lifted = t + amount * HIGHLIGHTS_GAIN * tone_window(u);
+    lifted.clamp(0.0, 1.0).powf(TONE_LINEAR_GAMMA)
 }
 
 /// **黑区**：暗部的软调整，黑点固定。
 ///
-/// `y + b·(1−y)⁴y`：`b < 0` 压暗黑区（更实的黑），`b > 0` 抬亮暗部。
-/// 导数 = `1 + b(1−y)³(1−5y)`，`|b| ≤ 1` 时最小值 ≈ `0.78 > 0` ⇒ 单调。
+/// * `amount > 0`：抬死黑、托起暗部（「救死黑」的主用法）；
+/// * `amount < 0`：压暗部、让黑更实。
+///
+/// 作用区间同样随 `|amount|` 以 `a²` 加速扩展（`BLACKS_SPAN_BASE/ACCEL`）。
+///
+/// 抬黑（`amount > 0`）时额外做**对比补偿**（`BLACKS_COMP_*`）：把抬起的量围绕 pivot 拉伸后按 85% 混回，
+/// 抵掉「抬黑发灰」；压暗（`amount < 0`）不走补偿。
+/// 实测（削弱后·拉满）：峰值 64 级处 **+21 级**（补偿贡献 +2；小幅度时补偿反而把抬升压低 ~0.7 级）。
 #[must_use]
 pub fn blacks_curve(value: f32, amount: f32) -> f32 {
-    if amount.abs() < 1e-6 || !(0.0..=1.0).contains(&value) {
+    if amount.abs() < 1e-6 || !(0.0..=1.0).contains(&value) || value <= 0.0 {
         return value;
     }
-    let one_minus = 1.0 - value;
-    let w = one_minus * one_minus * one_minus * one_minus * value;
-    value + amount * w
+    let t = value.powf(TONE_PERCEPTUAL_GAMMA);
+    let ceil = blacks_ceil(amount);
+    if t >= ceil {
+        return value;
+    }
+    let u = t / ceil;
+    let lift = amount * BLACKS_GAIN * tone_window(u);
+    let lifted = (t + lift).clamp(0.0, 1.0);
+    let compensated = if lift > 0.0 {
+        let stretched =
+            BLACKS_COMP_PIVOT + (lifted - BLACKS_COMP_PIVOT) * (1.0 + BLACKS_COMP_STRETCH * lift);
+        lifted + (stretched - lifted) * BLACKS_COMP_MIX
+    } else {
+        lifted
+    };
+    compensated.clamp(0.0, 1.0).powf(TONE_LINEAR_GAMMA)
 }
 
 /// 线性域那半条链：增益 → 反差 → 高光 → 黑区（**逐通道**，不含色度与显示变换）。
@@ -1022,6 +1112,37 @@ mod tests {
     }
 
     #[test]
+    fn tone_change_profile_diagnostic() {
+        // 诊断（2026-10-09 崔总真机：高光只让直方图低部动、峰不动）：
+        // 打印中性灰在各显示亮度的实际变化量 —— 含 `map_pixel_exact` 的全部逻辑（含高光中和）。
+        let none = params(&[]);
+        for (key, amount) in [
+            ("highlights", 100.0f64),
+            ("highlights", -100.0),
+            ("blacks", 100.0),
+            ("blacks", -100.0),
+            ("blacks", 20.0),
+            ("blacks", 30.0),
+            ("blacks", 40.0),
+            ("highlights", 50.0),
+            ("highlights", -50.0),
+        ] {
+            let adjusted = params(&[(key, amount)]);
+            println!("=== {key} {amount:+.0}");
+            for step in 0..=16 {
+                let target = step as f32 / 16.0;
+                let linear = target.powf(TONE_LINEAR_GAMMA);
+                let base = map_pixel_exact([linear, linear, linear], &none)[1];
+                let out = map_pixel_exact([linear, linear, linear], &adjusted)[1];
+                println!(
+                    "  显示 {target:5.3} → 基础 {base:5.3} / 调整 {out:5.3}   Δ {:+.1} 级",
+                    (out - base) * 255.0
+                );
+            }
+        }
+    }
+
+    #[test]
     fn positive_highlights_preserve_bright_pixel_hue_and_clipped_white() {
         let none = params(&[]);
         let raised = params(&[("highlights", 100.0)]);
@@ -1083,7 +1204,10 @@ mod tests {
         assert_eq!(highlights_curve(-0.2, 1.0), -0.2);
         assert_eq!(blacks_curve(-0.2, -1.0), -0.2);
         assert!(highlights_curve(0.8, 1.0) > 0.8);
-        assert!(blacks_curve(0.2, 1.0) > 0.2);
+        // 黑区作用在最暗 40%（感知域 ≤ 0.60 ⇒ 线性 ≤ 0.1 的极暗端）；线性 0.4（显示域 0.66）
+        // 这类中高调不该被它影响
+        assert!((blacks_curve(0.4, 1.0) - 0.4).abs() < 1e-6);
+        assert!(blacks_curve(0.005, 1.0) > 0.005);
     }
 
     #[test]
@@ -1530,12 +1654,13 @@ mod tests {
         assert_eq!(contrast_curve(0.0, 1.0), 0.0);
         assert_eq!(contrast_curve(1.0, 1.0), 1.0);
 
-        // ⑧ 高光 −100 只压亮部、不动黑点
+        // ⑧ 高光 −100 只压亮部、不动黑点与极暗端
         assert!(highlights_curve(0.8, -1.0) < 0.8);
-        assert!((highlights_curve(0.05, -1.0) - 0.05).abs() < 1e-4);
+        // 作用带在显示域高段（拉满从 0.374 起）；显示域 0.1 以下的极暗端始终不动
+        assert!((highlights_curve(0.004, -1.0) - 0.004).abs() < 1e-4);
         assert_eq!(highlights_curve(0.0, -1.0), 0.0);
         // ⑨ 黑区 +100 只抬暗部、不动白点
-        assert!(blacks_curve(0.05, 1.0) > 0.05);
+        assert!(blacks_curve(0.005, 1.0) > 0.005);
         assert!((blacks_curve(0.8, 1.0) - 0.8).abs() < 0.02);
         assert_eq!(blacks_curve(1.0, 1.0), 1.0);
     }
@@ -1562,6 +1687,98 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn tone_curve_windows_land_on_the_perceptual_ends() {
+        // 在**显示域**（感知域 `t = y^(1/2.2)`）网格上量「拉满时的效果」：
+        // 高光峰值在显示域 ≈ 0.66（159 级）±38 级、黑区峰值 ≈ 0.25（64 级）±21 级 ——
+        // 峰值落在有内容的暗部/中高调，而不是空的高光/黑端点。
+        let sweep = |curve: fn(f32, f32) -> f32| {
+            let mut peak = (0.0f32, 0.0f32); // (显示域位置, 显示域增量)
+            for step in 0..=1_000 {
+                let display = step as f32 / 1_000.0;
+                let value = display.powf(TONE_LINEAR_GAMMA);
+                let positive = curve(value, 1.0).powf(TONE_PERCEPTUAL_GAMMA) - display;
+                let negative = display - curve(value, -1.0).powf(TONE_PERCEPTUAL_GAMMA);
+                let delta = positive.max(negative);
+                if delta > peak.1 {
+                    peak = (display, delta);
+                }
+            }
+            peak
+        };
+        let (highlight_at, highlight_gain) = sweep(highlights_curve);
+        let (black_at, black_gain) = sweep(blacks_curve);
+        assert!(
+            (highlight_at - 0.66).abs() < 0.08,
+            "高光峰值应落在中高调（显示域 0.65 附近），实测 {highlight_at}"
+        );
+        assert!(highlight_gain > 0.10, "高光拉满至少 10 个显示点（实测 ≈0.15 = 38 个 8bit 级）");
+        assert!(
+            (black_at - 0.25).abs() < 0.07,
+            "黑区峰值应在显示域 0.25 附近（最暗 48% 带·拉满时），实测 {black_at}"
+        );
+        assert!(black_gain > 0.06, "黑区拉满至少 6 个显示点（削弱后实测 ≈0.081 = 21 个 8bit 级）");
+    }
+
+    #[test]
+    fn tone_windows_expand_with_amount() {
+        // 动态区间 v4（崔总 2026-10-09）：`span(a) = base + E·a²` —— 开头精细、越拉张得越快。
+        //
+        // a≈0：高光只动最亮 20%（≥204 级）、黑区只动最暗 12%（≤31 级）。
+        assert!((highlights_floor(0.0) - 0.80).abs() < 1e-6);
+        assert!((blacks_ceil(0.0) - 0.12).abs() < 1e-6);
+        // a=0.5（前半程终点）：只吃掉 1/4 的扩张量 —— 这正是「前半程精修」的来源。
+        assert!((1.0 - highlights_floor(0.5) - 0.3375).abs() < 1e-5);
+        assert!((blacks_ceil(0.5) - 0.21).abs() < 1e-5);
+        // a=1（拉满）：高光 span 0.75（floor 0.25）、黑区 span 0.48 —— 黑区比 v4 初版窄 20%。
+        assert!((1.0 - highlights_floor(1.0) - 0.75).abs() < 1e-5);
+        assert!((blacks_ceil(1.0) - 0.48).abs() < 1e-5);
+        // 与方向无关：±100 的区间一样大（只看 |amount|）。
+        assert!((highlights_floor(-1.0) - highlights_floor(1.0)).abs() < 1e-6);
+        assert!((blacks_ceil(-1.0) - blacks_ceil(1.0)).abs() < 1e-6);
+        // 随 |amount| 只扩不回缩。
+        let mut previous = 0.0f32;
+        for step in 0..=20 {
+            let amount = step as f32 / 20.0;
+            let span = 1.0 - highlights_floor(amount);
+            assert!(span >= previous - 1e-6, "高光区间不许回缩（amount={amount}）");
+            previous = span;
+        }
+    }
+
+    #[test]
+    fn blacks_lift_compensation_keeps_the_curve_monotone() {
+        // 对比补偿不许破坏单调性（全程斜率 > 0），正负两侧都要查。
+        for step in 0..=20 {
+            let amount = step as f32 / 10.0 - 1.0;
+            let mut previous = f32::NEG_INFINITY;
+            for i in 0..=2_000 {
+                let t = i as f32 / 2_000.0;
+                let out = blacks_curve(t.powf(TONE_LINEAR_GAMMA), amount).powf(TONE_PERCEPTUAL_GAMMA);
+                assert!(out >= previous - 1e-5, "黑区曲线在 amount={amount} t={t} 处回退");
+                previous = out;
+            }
+        }
+    }
+
+    #[test]
+    fn blacks_lift_compensation_restores_mid_contrast() {
+        let value = |display: f32| display.powf(TONE_LINEAR_GAMMA);
+        let lift = |display: f32, amount: f32| {
+            blacks_curve(value(display), amount).powf(TONE_PERCEPTUAL_GAMMA) - display
+        };
+        // 64 级处：补偿把它从 ≈+18 抬到 ≈+21 级（拉满；小幅度时补偿反而压低，见函数注释）。
+        assert!(
+            lift(0.25, 1.0) > 0.062,
+            "补偿后峰值（64 级附近）应明显超过无补偿的 ≈0.072，实测 {}",
+            lift(0.25, 1.0)
+        );
+        // 中段（≈64 级）明显高于暗端（≈26 级）—— 拉回反差，而不是整体平移。
+        assert!(lift(0.25, 1.0) > lift(0.10, 1.0) + 0.03);
+        // 压暗一侧不走补偿：仍是对称的原始幅度（≈ −0.072）。
+        assert!((-0.08..-0.06).contains(&lift(0.25, -1.0)));
     }
 
     #[test]

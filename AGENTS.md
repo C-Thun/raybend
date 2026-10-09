@@ -51,6 +51,15 @@ raybend（中文名**「光伴」**，产品名 `RayBend`）是一个**相片管
 17. **Solid 壳组件透传 children：`untrack` 写在插入点**——`{untrack(() => props.children)}`（就写在 JSX 那一行）；**禁止**提到组件 body 里提前求值。A/B 两面的完整教训、判据与回归脚本见 `memory/ARCHITECTURE.md` §9。
 18. **禁止全盘搜索**：不许 `find /`、`grep -r /` 这类从根往下的扫描（会把 `/mnt` 一起卷进来）。先查本仓；第三方源码走确定路径：cargo 依赖在 `~/.cargo/registry/src/index.crates.io-*/`、pnpm 依赖在仓内 `node_modules/`、参考实现在 `/home/andares/repos/refers/<name>/`；不确定路径先 `ls` 父目录一层。
 19. **新增/改动功能必须同步评估 XMP 侧影响**（崔总 2026-09-30 定）：凡是改动会进 sidecar 的数据（编辑栈 / issue / 评级 / 色标 / 标签 / 文字 / 地点等）或其存储布局（目录、命名、`_RAW/` 规则），必须在**同一次改动**里判断并接好对 XMP sidecar 写出与读回的影响（规格：`specs/xmp-sidecar.md`），**不得延后欠账**——例：将来改地理位置功能的落地方式时，`photoshop:` / `Iptc4xmpCore:` 那一侧的映射要一起动。
+20. **界面不加「不带变量的固定说明文字」**（崔总 2026-10-08 定）：用户没明确要求时，不要在界面上写解释性句子 —— 界面不是说明书。判据：**这句话里有没有随数据变化的量**（名称、日期、数量、状态）。
+    - 该留：`RAW · 2026-10-08`（带日期）、`已选择 3 张`（带数量）、错误原因与禁用理由（讲清**这一次**为什么不行）。
+    - 该去：`固定不可编辑`、`工作副本 · 自动保存` 这类对每个用户、每次打开都一样的注解；要解释概念就写进 `docs/` 或 hover 提示（tooltip 可以有，但不能占版面）。
+    - 它与 §11.1「界面文案零硬编码」不冲突：那条管**文字怎么进语言包**，这条管**该不该出现**。两处同源记述：`memory/DESIGN.md` §11.1 规则 6。
+21. **编辑器的快照只在 confirm 时建立**（崔总 2026-10-09 定）：`EditorWorkspace.confirmEdit` 是**唯一**建立快照（撤销栈条目）的入口；拖动过程中只发内存参数给渲染线程，**绝不落库**。
+    - **每加一个编辑功能，先列出它有哪些「操作节点」**（松手 / 双击归位 / 重置 / 选择 / 开关 / 应用 / 工具确认…），把每个节点接到 `onConfirm` 上，并在 `confirmEdit` 的节点清单表里补一行 —— 漏一个，撤销就会跳步或出现用户看不懂的中间快照。
+    - 走**工具草稿**的功能（如旋转角度）其 confirm 是工具的「确认」那一步，不是草稿内的拖动；载入/换照片时的自动纠正（`setEditBase(target.actualBase)`）也不是用户操作 —— 这两类要在清单里写明。
+    - 排查抓手：`EditorStore.confirmTick` / `confirmNote`（计数与摘要）与 `console.debug("[editor] confirm", …)`（每次 confirm 都打，生产也在）。
+    - 变更点反查法（崔总提供、已验证有效）：**看 profile 结构里有哪些项**（`values` / `curves` / `lutId` / `lensProfile` / `sourceBase` / `geometry` / `color`…），把「会改每一项的 store 方法」全列出来，再找它们的 UI 调用点 —— 这就是需要 confirm 的完备集合。
 
 ---
 
@@ -358,5 +367,8 @@ import 与 browse 的照片区必须经同一个 `PhotoViewingStage` / `PhotoVie
 | **内嵌预览**（embedded preview） | 相机写在 RAW 里的 JPEG 预览，提取快 1–2 个数量级 |
 | **编辑栈**（develop stack） | 全部非破坏性编辑操作的序列；定稿落成 issue |
 | **`fullscreen`** | 无 UI 沉浸式单图浏览（独立无边框窗口，`F11`）；与主窗口看图态是两回事 |
+| **`fitWorkArea`（调整到工作区）** | 最大化键的 **Shift+点击**：窗口调整成所在屏工作区内按比例留白的矩形（左右上 2.5%、下 5%；幂等，不做 toggle）。几何全在 Rust（命令 `window_fit_work_area`）；规格 `specs/window-work-area-layout.md` |
 | **`shortcut`（快捷键）** | 命令注册表里的默认键位（`CommandSpec.defaultKey`）；新功能必选项（§2.15） |
+| **场景（scene）** | 命令体系的一层（崔总 2026-10-09 定）：**入口唯一，逻辑按场景转换** —— 撤销/重做对用户是一套操作，在浏览与编辑背后是两套内部逻辑。落地见 `CommandDeps.history` 与 `App.tsx` 的 `historyScene()`；`scope` 只管静态归属与冲突检测 |
+| **弱菜单** | 菜单是**逃生通道**不是功能索引：界面里已有入口的动作/开关不进菜单（仍留在命令面板与快捷键里）。见 `CommandSpec.menu` 注释与 `implementations/2026-10-09_menu-weak-menu-cleanup.md` |
 | **动态反差**（Dynamic Contrast） | 一根拉杆的局部色调映射（`dynamicContrast`，0–100 单极）；与全局 `contrast` 不是一回事 |

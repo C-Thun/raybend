@@ -1,10 +1,11 @@
 /**
  * 窗口控制的单元测试。
  *
- * 用假句柄跑，不启动 Tauri、不需要 DOM。重点覆盖三类真会咬人的情况：
+ * 用假句柄跑，不启动 Tauri、不需要 DOM。重点覆盖四类真会咬人的情况：
  *   1. **浏览器降级**：不在 Tauri 里时一个窗口方法都不能被调用
  *   2. **状态同步**：最大化/还原（含用 Win 快捷键触发的）要让图标跟着变
  *   3. **失败路径**：API 抛错不能把界面带崩，也不能让窗口变得关不掉
+ *   4. **Shift 判定**：最大化键的 Shift+点击走工作区布局，普通点击才 toggle（判定唯一处）
  */
 
 import assert from "node:assert/strict";
@@ -12,6 +13,7 @@ import { test } from "node:test";
 import {
   createWindowChrome,
   INITIAL_WINDOW_CHROME,
+  maximizeKeyAction,
   uiReady,
   windowControlView,
   type WindowChromeState,
@@ -43,6 +45,10 @@ function fakeHandle(
     async toggleMaximize() {
       guard("toggleMaximize");
       maximized = !maximized;
+    },
+    async fitWorkArea() {
+      guard("fitWorkArea");
+      maximized = false; // 与真实路径一致：它先取消最大化再摆位
     },
     async close() {
       guard("close");
@@ -143,6 +149,7 @@ test("不在 Tauri 里：不取句柄、不订阅、动作一律不调用", asyn
 
   assert.equal(await chrome.minimize(), false);
   assert.equal(await chrome.toggleMaximize(), false);
+  assert.equal(await chrome.fitWorkArea(), false);
   assert.equal(await chrome.close(), false);
   assert.deepEqual(fake.calls, []);
   chrome.dispose();
@@ -291,8 +298,7 @@ test("最大化状态：toggle 之后图标变成「还原」", async () => {
   chrome.dispose();
 });
 
-test("尺寸事件（含 Win 快捷键最大化）会让状态跟上", async () => {
-  const fake = fakeHandle({ maximized: false });
+test("尺寸事件（含 Win 快捷键最大化）会让状态跟上", async () => {  const fake = fakeHandle({ maximized: false });
   const chrome = createWindowChrome({
     handle: fake.handle,
     runtime: () => true,
@@ -313,6 +319,43 @@ test("尺寸事件（含 Win 快捷键最大化）会让状态跟上", async () 
   fake.emitResize();
   await tick();
   assert.equal(chrome.state().maximized, false);
+  chrome.dispose();
+});
+
+/* ─── 工作区布局（Shift+点击最大化键） ─────────────────── */
+
+test("maximizeKeyAction：Shift+点击走工作区布局，普通点击才 toggle", () => {
+  assert.equal(maximizeKeyAction({ shiftKey: true }), "fitWorkArea");
+  assert.equal(maximizeKeyAction({ shiftKey: false }), "toggle");
+});
+
+test("fitWorkArea 转发到句柄并返回 true", async () => {
+  const fake = fakeHandle();
+  const chrome = createWindowChrome({
+    handle: fake.handle,
+    runtime: () => true,
+  });
+  await tick();
+
+  assert.equal(await chrome.fitWorkArea(), true);
+  assert.ok(
+    fake.calls.includes("fitWorkArea"),
+    "必须真的把意图发给窗口句柄（几何在 Rust 侧）",
+  );
+  chrome.dispose();
+});
+
+test("fitWorkArea 失败 → false，不把异常丢给界面", async () => {
+  const fake = fakeHandle({ failOn: ["fitWorkArea"] });
+  const chrome = createWindowChrome({
+    handle: fake.handle,
+    runtime: () => true,
+  });
+  await tick();
+
+  assert.equal(await chrome.fitWorkArea(), false);
+  // 失败之后窗口控制仍然可用（不能因为一次布局动作把三键带崩）
+  assert.equal(await chrome.minimize(), true);
   chrome.dispose();
 });
 

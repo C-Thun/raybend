@@ -391,3 +391,66 @@ test("旧档案来源未知：第一层清手动值但保留基础曲线", () =>
   assert.equal(store.baseCurveProfile(), "5");
   assert.equal(store.resetStage(), "automatic");
 });
+
+/* ── 预设（审计 2026-10-04 回归）────────────────────────── */
+
+const presetLibrary = (): Parameters<ReturnType<typeof createEditorStore>["setPresetLibrary"]>[0] => ({
+  directories: [
+    { id: "default", name: "Default", sortOrder: 0, createdAt: 1 },
+    { id: "d1", name: "人像", sortOrder: 1, createdAt: 2 },
+  ],
+  presets: [
+    { id: "p1", directoryId: "default", name: "柔和", payload: { version: 1, tone: { exposure: 0.5 } }, createdAt: 1, updatedAt: 1 },
+    { id: "p2", directoryId: "d1", name: "夜景", payload: { version: 1, tone: { contrast: 10 } }, createdAt: 2, updatedAt: 2 },
+  ],
+});
+
+const click = (shiftKey: boolean): MouseEvent => ({ shiftKey } as unknown as MouseEvent);
+
+test("setPresetLibrary 收敛失效选中与折叠记录（删掉的条目不能留在选中态）", () => {
+  const store = makeStore();
+  store.setPresetLibrary(presetLibrary());
+  store.selectPreset("p1", click(false));
+  store.selectPreset("p2", click(true));
+  store.togglePresetDirectory("d1");
+  assert.deepEqual(store.presetSelection(), { kind: "presets", ids: ["p1", "p2"] });
+
+  // 删除 p2 后的整库回写：选中收敛到只剩 p1
+  store.setPresetLibrary({
+    directories: presetLibrary().directories,
+    presets: presetLibrary().presets.filter((preset) => preset.id !== "p2"),
+  });
+  assert.deepEqual(store.presetSelection(), { kind: "presets", ids: ["p1"] });
+
+  // 选中目录被删 → 回 null；该目录的折叠记录一并清掉（缺省展开）
+  store.selectPresetDirectory("d1");
+  store.setPresetLibrary({ directories: presetLibrary().directories.filter((d) => d.id !== "d1"), presets: [] });
+  assert.equal(store.presetSelection(), null);
+  assert.equal(store.presetExpanded("d1"), true);
+});
+
+test("applyPresetSnapshot 只抬一次 rev（含镜头组）", () => {
+  const store = makeStore();
+  const before = store.developRev();
+  store.applyPresetSnapshot({
+    version: 1,
+    lens: { distortion: -12, vignette: 20, profile: "m|l", enabled: true },
+  });
+  assert.equal(store.developRev(), before + 1, "镜头与数值项写入只抬一次 rev");
+  assert.equal(store.paramValue("distortion"), -12);
+  assert.equal(store.paramValue("vignette"), 20);
+  assert.equal(store.lensProfile(), "m|l");
+  assert.equal(store.lensEnabled(), true);
+});
+
+test("applyPresetSnapshot：LUT 不在当前库里 → 不动当前 LUT，也不抬 rev", () => {
+  const store = makeStore();
+  store.setLut("old", true);
+  store.setLutCategories([
+    { id: "c", name: "分类", entries: [{ id: "old", name: "old.cube", available: true }] },
+  ]);
+  const rev = store.developRev();
+  store.applyPresetSnapshot({ version: 1, lut: { id: "lost", enabled: true } });
+  assert.equal(store.lutId(), "old");
+  assert.equal(store.developRev(), rev, "整份快照只有丢失的 LUT → 没有任何写入");
+});

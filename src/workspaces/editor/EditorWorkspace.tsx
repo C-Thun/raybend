@@ -63,8 +63,9 @@ import {
 import { createEasyDestroy, type ShiftLikeEvent } from "../../lib/easy-destroy.ts";
 import { EasyDestroyHost } from "../../components/ui/EasyDestroy.tsx";
 import { createLatestCoalescer } from "../../lib/editor-intent.ts";
+import type { EditorResponseStore } from "../../lib/editor-response.ts";
 import { getLutLibrary, createLutCategory, importLutDirectory, hideLut, type LutLibrary } from "../../api/lut.ts";
-import { getIssueLibrary, createIssue, deleteIssue, prepareIssueSources, type IssueLibrary, type Issue, type IssueSelection } from "../../api/issues.ts";
+import { getIssueLibrary, createIssue, renameIssue, deleteIssue, prepareIssueSources, type IssueLibrary, type Issue, type IssueSelection } from "../../api/issues.ts";
 import { IconLoader2 } from "@tabler/icons-solidjs";
 import { pendingLegacyLutCategories, markLegacyLutCategoriesImported } from "../../lib/editor-prefs.ts";
 import { pickDirectory } from "../../api/dialog.ts";
@@ -79,11 +80,10 @@ import {
   movePreset as movePresetApi,
 } from "../../api/presets.ts";
 import {
-  isDirectoryNameTaken,
-  isPresetNameTaken,
   newPresetDirectoryId,
   newPresetId,
   sanitizePresetLibrary,
+  type PresetCreateOutcome,
   type PresetGroup,
   presetColorChoice,
 } from "../../lib/presets.ts";
@@ -147,6 +147,8 @@ export interface EditorWorkspaceProps {
   /** 「去导入」（空态里那颗按钮） */
   onOpenImport: () => void;
   onOpenColorProfiles: () => void;
+  /** 调节响应率（设备级偏好；设置页改它、这里读它） */
+  response: EditorResponseStore;
   class?: string;
 }
 
@@ -236,53 +238,74 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
   const applyPresetLibrary = (raw: unknown): void => {
     props.store.setPresetLibrary(sanitizePresetLibrary(raw));
   };
+  /*
+   * 预设库的读写全部走**同一条串行链**（与 `persist` 同一个理由）：
+   * IPC 完成顺序可能与发起顺序不同 —— 连续删除 / 移动时，晚回的旧整库
+   * 会把已删条目重新显示（审计 2026-10-04）。串行后每次回写都是最新状态。
+   */
+  let presetTail: Promise<void> = Promise.resolve();
+  const presetCall = <T,>(task: () => Promise<T>): Promise<T> => {
+    const pending = presetTail.then(task, task);
+    presetTail = pending.then(() => undefined, () => undefined);
+    return pending;
+  };
   onMount(() => {
-    void getPresetLibrary()
+    void presetCall(() => getPresetLibrary())
       .then((library) => { if (library !== null) applyPresetLibrary(library); })
       .catch((error: unknown) => setDevelopError(String(error)));
   });
-  const createPresetDirectoryW = async (name: string): Promise<boolean> => {
+  /** 无 Tauri 运行时的统一回话（浏览器预览里点了保存也得说清原因）。 */
+  const unavailable = (): PresetCreateOutcome =>
+    ({ ok: false, message: t("editor.preset.unavailable") });
+  const createPresetDirectoryW = async (name: string): Promise<PresetCreateOutcome> => {
     const trimmed = name.trim();
-    const existing = props.store.presetDirectories();
-    if (trimmed === "" || isDirectoryNameTaken(trimmed, existing)) return false;
-    const id = newPresetDirectoryId(existing);
+    const id = newPresetDirectoryId(props.store.presetDirectories());
     try {
-      const library = await createPresetDirectoryApi(id, trimmed);
-      if (library === null) return false;
+      const library = await presetCall(() => createPresetDirectoryApi(id, trimmed));
+      if (library === null) return unavailable();
       applyPresetLibrary(library);
       props.store.selectPresetDirectory(id);
-      return true;
-    } catch (error) { setDevelopError(String(error)); return false; }
+      return { ok: true };
+    } catch (error) {
+      setDevelopError(String(error));
+      return { ok: false, message: String(error) };
+    }
   };
-  const createPresetW = async (name: string, directoryId: string, groups: readonly PresetGroup[]): Promise<boolean> => {
+  const createPresetW = async (name: string, directoryId: string, groups: readonly PresetGroup[]): Promise<PresetCreateOutcome> => {
     const trimmed = name.trim();
-    if (trimmed === "" || isPresetNameTaken(trimmed, directoryId, props.store.presets())) return false;
     const id = newPresetId(props.store.presets());
     const payload = JSON.stringify(props.store.presetSnapshot(groups));
     try {
-      const library = await createPresetApi(id, directoryId, trimmed, payload);
-      if (library === null) return false;
+      const library = await presetCall(() => createPresetApi(id, directoryId, trimmed, payload));
+      if (library === null) return unavailable();
       applyPresetLibrary(library);
       props.store.selectPreset(id, { shiftKey: false });
-      return true;
-    } catch (error) { setDevelopError(String(error)); return false; }
+      return { ok: true };
+    } catch (error) {
+      setDevelopError(String(error));
+      return { ok: false, message: String(error) };
+    }
   };
   const deletePresetW = async (id: string): Promise<void> => {
     try {
-      const library = await deletePresetApi(id);
+      const library = await presetCall(() => deletePresetApi(id));
       if (library !== null) applyPresetLibrary(library);
     } catch (error) { setDevelopError(String(error)); }
   };
   const deletePresetDirectoryW = async (id: string): Promise<void> => {
     try {
-      const library = await deletePresetDirectoryApi(id);
+      const library = await presetCall(() => deletePresetDirectoryApi(id));
       if (library !== null) applyPresetLibrary(library);
     } catch (error) { setDevelopError(String(error)); }
   };
   const movePresetsW = async (ids: readonly string[], directoryId: string): Promise<void> => {
     try {
-      for (const id of ids) {
-        const library = await movePresetApi(id, directoryId);
+      // 选中态在库刷新时已收敛，这里再排一次不存在的条目（审计 2026-10-04：
+      // 拖动可能夹带已被其他操作删掉的幽灵 id）
+      const known = new Set(props.store.presets().map((preset) => preset.id));
+      const moving = ids.filter((id) => known.has(id));
+      for (const id of moving) {
+        const library = await presetCall(() => movePresetApi(id, directoryId));
         if (library !== null) applyPresetLibrary(library);
       }
     } catch (error) { setDevelopError(String(error)); }
@@ -483,6 +506,15 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
   const [issueFocusTick, setIssueFocusTick] = createSignal(0);
   const [finalizeOpen, setFinalizeOpen] = createSignal(false);
   const [finalizeName, setFinalizeName] = createSignal("");
+  /*
+   * 改名：与「保存为新定稿」同一个对话框形状（只换标题与按钮文案），
+   * 差处只有一个 —— 名字的初始值是**这条定稿的名字**，已经填好。
+   */
+  const [renameTarget, setRenameTarget] = createSignal<Issue | null>(null);
+  const [renameName, setRenameName] = createSignal("");
+  const [renameBusy, setRenameBusy] = createSignal(false);
+  const [renameError, setRenameError] = createSignal<string | null>(null);
+  let renameRevision = 0;
   const [finalizeBusy, setFinalizeBusy] = createSignal(false);
   /*
    * 正在生成的定稿（2026-09-29 崔总）：确认后**立刻**在定稿页签现身（占位 + 预览位转圈），
@@ -570,6 +602,9 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
    * 而且管线跑在**显影线程**上 —— 渲染线程永远只管画上一张，拖动与缩放不会卡。
    */
   const paramsSender = createLatestCoalescer<{payload:DevelopParamsPayload;assetId:string;repositoryId:string|null}>({
+    // 调节响应率（设置页两档）：拖动期间两次发送至少隔这么久；
+    // 松手那一次由 `confirmEdit()` 调 `flush()` 发出，不受限流影响。
+    intervalMs: () => props.response.intervalMs(),
     isCurrent:({assetId,repositoryId})=>currentAssetId()===assetId && store.repositoryId()===repositoryId && developReadyAssetId()===assetId,
     send: ({payload,assetId,repositoryId}) => {
       // 镜头配置要后端读这张照片的拍摄参数 —— 载荷走的是**高频**那条路，
@@ -781,7 +816,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
     const color=await preparePhotoColor(path,profileId);
     if (!enabled() || expectedPhotoPath() !== path || currentAssetId() !== assetId) return;
     props.store.setColorState(color);
-    commitDevelop();
+    confirmEdit();
   };
   const [colorBatchReview,setColorBatchReview]=createSignal<ColorBatchReview|null>(null);
   const reviewColorBatch=async (profileId:string|null):Promise<void>=> {
@@ -792,13 +827,39 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
   };
 
   /**
-   * **落库**（覆盖式）：松手 / 点重置时把当前载荷写进 catalog。
+   * **confirm（确认）—— 用户一次编辑操作节点结束，唯一的快照建立入口。**
    *
-   * 拖动中每帧都写库会把单写者线程淹掉，而且没有任何意义 ——
-   * 所以高频那条路是 `setEditorParams`（只发内存参数给渲染线程），
-   * 这一条只在**松手**时走一次。
+   * 崔总 2026-10-09 定的结构（纪律抄在 `AGENTS.md` §2.21）：
+   * **快照只在 confirm 时建立**，拖动过程中绝不落库；每加一个编辑功能，
+   * 先问「它有哪些操作节点」，把每个节点接到 `onConfirm` 上。
+   *
+   * 拖动中每帧都写库会把单写者线程淹掉，而且没有意义 ——
+   * 高频那条路是 `setEditorParams`（只发内存参数给渲染线程）。
+   *
+   * ## 现有 confirm 节点（逐面板核对，2026-10-09；变更点用「哪些方法会改 profile」反查得到）
+   *
+   * | 面板 / 控件 | 节点 |
+   * | --- | --- |
+   * | 参数拉杆 `SliderRow` | 松手（Zag `onValueChangeEnd`）；双击把手归位（`onReset`） |
+   * | 降噪方式 `CompactChoice` | 选择即确认 |
+   * | 镜头 `LensExtras` | 选配置文件；启用开关 |
+   * | 曲线 `CurveEditor` | 拖动松手（`pointerup`/`cancel`）；双击删点；重置 |
+   * | LUT `LutPanel` | 选中一条；应用开关 |
+   * | 预设 `PresetPanel` | 应用预设（`onApplyPreset`） |
+   * | 色彩输入 | 「应用 / 恢复自动 / 批量」按钮（选 profile 只是预览） |
+   * | 工具栏 | 自动调整；重置修改 / 恢复自动；编辑源 SOOC↔RAW |
+   * | 定稿 | 切定稿；创建定稿（先 confirm 再渲染） |
+   * | 画布工具 | 裁切 / 旋转的「确认」（`confirmTool`） |
+   *
+   * **不是** confirm 节点：旋转角度拉杆（工具草稿，落库在工具确认那一步）、
+   * 载入/换照片时后端回填的实际基线（`setEditBase(target.actualBase)` —— 自动纠正不是用户操作）。
    */
-  const commitDevelop = (): void => {
+  const confirmEdit = (): void => {
+    /*
+     * **松手必然触发一次计算**（崔总 2026-10-09）：限流只压拖动期间，
+     * 最后那一下不能被压住 —— 先把挂起的参数发出去，再走落库与预览刷新。
+     */
+    paramsSender.flush();
     const assetId = currentAssetId();
     const repositoryId = store.repositoryId();
     if (assetId === null || assetId === undefined || repositoryId === null) return;
@@ -822,6 +883,28 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
         if (currentAssetId() === assetId && props.store.developRev() === rev) {
           props.store.markCommitted(rev);
         }
+        /*
+         * 快照已建立：记一次 confirm（诊断计数）。
+         * 真机上「快照少了/多了」时先看这个计数（见 `EditorStore.confirmTick` 的注释）；
+         * DEV 下额外打一行摘要，能直接看见每次 confirm 带了什么。
+         */
+        props.store.noteConfirm(
+          // i18n-exempt: confirm 诊断摘要（只进 console 与诊断计数，不进界面）
+          `rev ${rev} · ${Object.keys(stack.values).length} 参数 · ${Object.keys(stack.curves).length} 曲线`,
+        );
+        /*
+         * 诊断日志**不进 DEV 守卫**（崔总 2026-10-09 排查快照问题时要在真机上抓它）：
+         * `console.debug` 是 verbose 级别，平时不打扰；排查时打开控制台就能对照
+         * 「每一次 confirm 带了什么」—— 与 `confirmTick` 是同一份事实的两个形式。
+         */
+        console.debug("[editor] confirm", { // i18n-exempt: 控制台诊断
+          rev,
+          values: stack.values,
+          curves: Object.keys(stack.curves),
+          lutId: stack.lutId,
+          lutEnabled: stack.lutEnabled,
+          sourceBase: stack.sourceBase,
+        });
         if (path !== null) {
           thumbs.refresh(path);
           setIssueThumbRevision((value) => value + 1);
@@ -850,7 +933,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
         props.store.closeTool();
         props.store.setGeometry(confirmed);
       });
-      commitDevelop();
+      confirmEdit();
     }).catch((error: unknown) => setDevelopError(String(error)));
   };
 
@@ -859,7 +942,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
   const resetDevelop = (stage: "edits" | "automatic"): void => {
     if (!canReset() || props.store.resetStage() !== stage) return;
     props.store.resetDevelop(stage);
-    commitDevelop();
+    confirmEdit();
   };
   const requestReset = (): void => {
     if (!canReset()) return;
@@ -1009,7 +1092,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
     const profile = baseCurveLibrary()?.profiles.find((entry) => entry.id === id);
     if (id !== "none" && profile === undefined) return;
     props.store.setBaseCurve(id, profile?.points ?? null);
-    commitDevelop();
+    confirmEdit();
   };
 
   const renameBaseCurve = async (id: string, name: string): Promise<void> => {
@@ -1056,7 +1139,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
         profiles: [...current.profiles.filter((profile) => profile.id !== result.profile.id), result.profile],
       });
       setDevelopError(null);
-      commitDevelop();
+      confirmEdit();
     } catch (error) {
       if (request === autoAdjustRevision) setDevelopError(String(error));
     } finally {
@@ -1102,7 +1185,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
     hasPhoto: () => current() !== null,
     resetDevelop: requestReset,
     canReset,
-    commitDevelop,
+    confirmEdit,
     restoreColor: ()=> { void applyColor(null).catch(error=>setDevelopError(String(error))); },
     reviewColorBatch:()=> {void reviewColorBatch(null).catch(error=>setDevelopError(String(error)));},
     setBase: (base) => {
@@ -1118,7 +1201,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
         }
         if (!enabled() || currentAssetId() !== assetId || props.store.editBase() !== previousBase) return;
         batch(()=> { props.store.setEditBase(base); if(color !== null)props.store.setColorState(color); });
-        commitDevelop();
+        confirmEdit();
       })().catch(error=>setDevelopError(String(error)));
     },
     autoAdjust: () => void autoAdjust(),
@@ -1196,7 +1279,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
   const selectIssue = (stack: DevelopStack, selection: IssueSelection): void => {
     if (!enabled()) return;
     props.store.applyDevelop(stack.values, stack.curves, developSettingsOf(stack));
-    commitDevelop();
+    confirmEdit();
     // 面板高亮立刻切过去；渲染提示晚 300ms 才亮（快的时候不闪）
     setIssueSelectionOverride(selection);
     issueSwitchPending = true;
@@ -1234,7 +1317,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
     const stillCurrent = () =>
       store.repositoryId() === repositoryId && currentAssetId() === assetId;
     try {
-      commitDevelop();
+      confirmEdit();
       await persistTail;
       const library = await createIssue(repositoryId, Number(assetId), name, locale() === "en-US");
       if (library !== null && stillCurrent()) {
@@ -1264,7 +1347,50 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
       } catch (error) { if (current()) setDevelopError(String(error)); }
     }, event, t("editor.issue.deleteTitle"));
   };
-  createEffect(() => { store.repositoryId(); currentAssetId(); issueDestroy.cancel(); setPendingIssue(null); });
+  const requestRenameIssue = (target: Issue): void => {
+    renameRevision += 1;
+    setRenameTarget(target);
+    setRenameName(target.name);
+    setRenameError(null);
+    setRenameBusy(false);
+  };
+  const closeRenameIssue = (): void => {
+    renameRevision += 1;
+    setRenameTarget(null);
+    setRenameName("");
+    setRenameBusy(false);
+    setRenameError(null);
+  };
+  /*
+   * 改名：只动名字（Rust 侧也只改 `name` 一列），配置 / 基准 / 创建时间都不变。
+   * 与删除同一条口径：**换过照片就不回填**，免得把别的照片的列表盖上来。
+   */
+  const submitRenameIssue = async (): Promise<void> => {
+    const target = renameTarget();
+    const repositoryId = store.repositoryId();
+    const assetId = currentAssetId();
+    const name = renameName().trim();
+    if (target === null || renameBusy() || name === "" || repositoryId === null || assetId === null || assetId === undefined) return;
+    // 名字没变：不当成一次改名（也免得白跑一趟后端）
+    if (name === target.name) { closeRenameIssue(); return; }
+    const revision = ++renameRevision;
+    const stillCurrent = () => store.repositoryId() === repositoryId && currentAssetId() === assetId;
+    setRenameBusy(true);
+    setRenameError(null);
+    try {
+      const library = await renameIssue(repositoryId, Number(assetId), target.id, name, locale() === "en-US");
+      if (revision === renameRevision) {
+        if (library !== null && stillCurrent()) setIssueLibrary(library);
+        closeRenameIssue();
+      }
+    } catch (error) {
+      // 撞名 / 非法名由后端报人话，直接贴在输入框下面（不关窗、不改列表）
+      if (revision === renameRevision) setRenameError(String(error));
+    } finally {
+      if (revision === renameRevision) setRenameBusy(false);
+    }
+  };
+  createEffect(() => { store.repositoryId(); currentAssetId(); issueDestroy.cancel(); setPendingIssue(null); closeRenameIssue(); });
   onCleanup(issueDestroy.cancel);
 
   createEffect(() => {
@@ -1368,8 +1494,8 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
             .join(" ")}
         >
           <LutPanel store={props.store} onCreateCategory={createCategory} onImport={importDirectory}
-            onSelect={(id) => { if (!enabled()) return; props.store.setLut(id, true); commitDevelop(); }}
-            onToggle={commitDevelop} onHide={hideLutEntry} />
+            onSelect={(id) => { if (!enabled()) return; props.store.setLut(id, true); confirmEdit(); }}
+            onToggle={confirmEdit} onHide={hideLutEntry} />
         </aside>
 
         {/*
@@ -1481,6 +1607,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
             issueSelectionOverride={issueSelectionOverride()}
             onSelectIssue={selectIssue}
             onDeleteIssue={requestDeleteIssue}
+            onRenameIssue={requestRenameIssue}
             issueThumbs={issueThumbs}
             issueThumbKey={issueThumbKey}
             onSelectBaseCurve={selectBaseCurve}
@@ -1488,7 +1615,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
             onRefreshLens={() => { void lensQuery.refresh(); }}
             overviewImages={overviewImages}
             loadHistogram={loadHistogram}
-            onCommit={commitDevelop}
+            onConfirm={confirmEdit}
             onToolConfirm={confirmTool}
             error={developError() ?? store.error()}
             locked={locked()}
@@ -1513,14 +1640,20 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
                 const choice=presetColorChoice(snapshot);
                 const color=choice === undefined ? undefined : await preparePhotoColor(path,choice);
                 if (!enabled() || expectedPhotoPath() !== path || currentAssetId() !== assetId) return;
+                // LUT 的存在性以**此刻磁盘**为准：应用预设前重读一次 LUT 库，
+                // 否则进入编辑器时的旧缓存会把已从磁盘删掉的 LUT 覆盖上去
+                // （审计 2026-10-04 P1：丢失保底失效）。
+                const lutLibrary = await getLutLibrary(pendingLegacyLutCategories());
+                if (lutLibrary !== null) applyLutLibrary(lutLibrary);
+                if (!enabled() || expectedPhotoPath() !== path || currentAssetId() !== assetId) return;
                 batch(()=> { props.store.applyPresetSnapshot(snapshot); if(color !== undefined)props.store.setColorState(color); });
-                commitDevelop();
+                confirmEdit();
               } catch(error) {setDevelopError(String(error));}
             }}
           />
         </aside>
       </div>
-      <ColorBatchDialog review={colorBatchReview()} onClose={()=>setColorBatchReview(null)} onCommit={commitPhotoColors} />
+      <ColorBatchDialog review={colorBatchReview()} onClose={()=>setColorBatchReview(null)} onConfirm={commitPhotoColors} />
       <Dialog open={finalizeOpen()} onOpenChange={setFinalizeOpen} title={t("editor.issue.newTitle")}
         footer={<><Button variant="secondary" onClick={() => setFinalizeOpen(false)}>{t("common.cancel")}</Button>
           <Button variant="primary" disabled={finalizeBusy() || finalizeName().trim() === ""}
@@ -1528,6 +1661,18 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
         <input class="w-full rounded-ui bg-surface-track px-2 py-2 text-fg-1" value={finalizeName()}
           maxlength={80} aria-label={t("editor.issue.name")}
           onInput={(event) => setFinalizeName(event.currentTarget.value)} />
+      </Dialog>
+      <Dialog open={renameTarget() !== null} onOpenChange={(open) => { if (!open) closeRenameIssue(); }}
+        title={t("editor.issue.renameTitle")}
+        footer={<><Button variant="secondary" onClick={closeRenameIssue}>{t("common.cancel")}</Button>
+          <Button variant="primary" disabled={renameBusy() || renameName().trim() === ""}
+            onClick={() => void submitRenameIssue()}>{t("common.save")}</Button></>}>
+        <input type="text" value={renameName()} maxLength={80} autofocus disabled={renameBusy()}
+          aria-label={t("editor.issue.name")}
+          class="h-9 w-full rounded-ui bg-surface-track px-2 text-fs-1 text-fg-1 outline-none"
+          onInput={(event) => setRenameName(event.currentTarget.value)}
+          onKeyDown={(event) => { if (event.key === "Enter" && !event.isComposing) { event.preventDefault(); void submitRenameIssue(); } }} />
+        <Show when={renameError()}>{(message) => <p role="alert" class="mt-2 text-fs-0 text-danger">{message()}</p>}</Show>
       </Dialog>
       <EasyDestroyHost open={issueDestroy.pending() !== null} title={issueDestroy.pending()?.title}
         message={issueDestroy.pending()?.message ?? ""} confirmLabel={t("editor.issue.delete")}

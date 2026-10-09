@@ -18,7 +18,9 @@ import { zhCN } from "./zh-CN.ts";
  * （缓存刷新锚点：M3-W1 加了 editor.* 一整段（工具 / LUT / 三组页签 / 14 条参数 / 空态）；
  * 2026-09-23 晚加了 palette.unavailable.* 两条（命令面板灰显原因）；
  * 2026-09-24 加了 editor.info.adjustGroup/temperatureBaseline/temperatureCurrent/exposureBias/
- * shotGroup/takenAt/fileGroup 七条（编辑右栏信息页签重组，改本文件即刷新检查器缓存）。）
+ * shotGroup/takenAt/fileGroup 七条（编辑右栏信息页签重组，改本文件即刷新检查器缓存）。
+ * 2026-10-05 加了 editor.preset.nameTooLong/nameInvalid/unavailable 三条
+ * （预设审计修复：前端名称校验与错误区分）。）
  *
  * ⚠️ 加了新键之后若类型检查器仍报「键不存在」，那是**陈旧快照**误报（不是真错）：
  * 判据与验证配方见 编译器诊断纪律：以 `tsc` 为准（必要时用 `MessageKey[]` 临时证明文件 + 退出码）。

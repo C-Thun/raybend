@@ -287,3 +287,99 @@ test("工具取消、换工具、卸载清除未发送的指针样本", () => {
   clock.run();
   assert.equal(sent.length, 2);
 });
+
+/*
+ * 时间限流（崔总 2026-10-09：编辑调节响应率两档）。
+ * 与帧合并叠乘：每帧最多一条 **且** 窗口内最多一条；`flush()`（松手）无视限流。
+ */
+function fakeClock() {
+  let now = 0;
+  let nextId = 1;
+  const timers = new Map<ReturnType<typeof setTimeout>, { at: number; run: () => void }>();
+  return {
+    now: () => now,
+    schedule: (run: () => void, delay: number) => {
+      // SAFETY: 假定时器只把数字 id 当句柄（测试里绝不把它交给真的 clearTimeout）；
+      // TimerHandle 在两个运行时里不同（DOM = number / Node = Timeout），这里只对齐签名
+      const handle = nextId as unknown as ReturnType<typeof setTimeout>;
+      nextId += 1;
+      timers.set(handle, { at: now + delay, run });
+      return handle;
+    },
+    cancel: (handle: ReturnType<typeof setTimeout>) => {
+      timers.delete(handle);
+    },
+    /** 推进时间，并把到点的定时器都跑掉（回调里若又排了定时器，继续跑） */
+    advance: (ms: number) => {
+      now += ms;
+      let ran = true;
+      while (ran) {
+        ran = false;
+        for (const [handle, timer] of [...timers]) {
+          if (timer.at <= now) {
+            timers.delete(handle);
+            timer.run();
+            ran = true;
+          }
+        }
+      }
+    },
+  };
+}
+
+test("时间限流：窗口内只发最新值，到点补发，松手无视限流必发", () => {
+  const frames = fakeScheduler();
+  const clock = fakeClock();
+  const sent: number[] = [];
+  const queue = createLatestCoalescer<number>({
+    scheduler: frames.scheduler,
+    now: clock.now,
+    schedule: clock.schedule,
+    cancelSchedule: clock.cancel,
+    intervalMs: () => 100,
+    send: (value) => sent.push(value),
+  });
+
+  queue.push(1);
+  frames.run();
+  assert.deepEqual(sent, [1], "第一条立刻发（距上次发送早已超过窗口）");
+
+  queue.push(2);
+  frames.run();
+  clock.advance(30);
+  assert.deepEqual(sent, [1], "窗口内不发");
+
+  queue.push(3);
+  frames.run();
+  assert.deepEqual(sent, [1], "窗口内继续推也只留最新值");
+
+  clock.advance(70);
+  assert.deepEqual(sent, [1, 3], "窗口到点补发的是最新值（不是更早的 2）");
+
+  queue.push(4);
+  frames.run();
+  clock.advance(10);
+  queue.flush();
+  assert.deepEqual(sent, [1, 3, 4], "松手（flush）无视限流立刻发 —— 松开鼠标必然触发一次计算");
+
+  queue.push(5);
+  queue.dispose();
+  clock.advance(500);
+  assert.deepEqual(sent, [1, 3, 4], "dispose 之后不再发");
+});
+
+test("不限流（缺省）时仍是帧级行为：同帧合并、尾样本必发", () => {
+  const frames = fakeScheduler();
+  const sent: number[] = [];
+  const queue = createLatestCoalescer<number>({
+    scheduler: frames.scheduler,
+    send: (value) => sent.push(value),
+  });
+  queue.push(1);
+  queue.push(2);
+  frames.run();
+  assert.deepEqual(sent, [2], "同帧只发最后一个");
+  queue.push(3);
+  queue.flush();
+  assert.deepEqual(sent, [2, 3], "flush 立刻发尾样本");
+});

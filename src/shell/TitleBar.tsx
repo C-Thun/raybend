@@ -34,7 +34,7 @@ import {
   IconX,
 } from "@tabler/icons-solidjs";
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
-import { createWindowChrome, tauriWindowHandle } from "../api/window.ts";
+import { createWindowChrome, maximizeKeyAction, tauriWindowHandle } from "../api/window.ts";
 import { IconButton } from "../components/ui/Button.tsx";
 import { Menu } from "../components/ui/Menu.tsx";
 import { SegmentedControl } from "../components/ui/SegmentedControl.tsx";
@@ -275,7 +275,15 @@ export function TitleBar(props: TitleBarProps) {
                   ? t("titlebar.window.restore")
                   : t("titlebar.window.maximize")
               }
-              onClick={() => void chrome.toggleMaximize()}
+              hint={t("titlebar.window.shiftFit")}
+              onClick={(event) => {
+                // 判定唯一处：`maximizeKeyAction`（Shift = 工作区布局，见图标旁提示）
+                if (maximizeKeyAction(event) === "fitWorkArea") {
+                  void chrome.fitWorkArea();
+                } else {
+                  void chrome.toggleMaximize();
+                }
+              }}
             >
               <Show
                 when={controls().action === "restore"}
@@ -302,8 +310,13 @@ export function TitleBar(props: TitleBarProps) {
 
 interface WindowButtonProps {
   label: string;
+  /**
+   * 可选附加提示：拼进原生 `title` 的第二段。
+   * 最大化键用它暴露「Shift+点击 = 调整到工作区」这条隐藏手势 —— 不提示就没人会知道。
+   */
+  hint?: string;
   danger?: boolean;
-  onClick: () => void;
+  onClick: (event: MouseEvent) => void;
   children: JSX.Element;
 }
 
@@ -317,8 +330,8 @@ function WindowButton(props: WindowButtonProps) {
     <button
       type="button"
       aria-label={props.label}
-      title={props.label}
-      onClick={props.onClick}
+      title={props.hint ? `${props.label} · ${props.hint}` : props.label}
+      onClick={(event) => props.onClick(event)}
       class={[
         "flex h-full w-win-ctl-w shrink-0 items-center justify-center transition-colors",
         props.danger

@@ -1,12 +1,14 @@
 /**
  * 窗口控制的前端封装（`memory/ARCHITECTURE.md` §1.1 的 `src/api/` 层）。
  *
- * 覆盖两件事：
+ * 覆盖三件事：
  *   1. **沉浸式外框的判定**：窗口是不是由我们接管（`decorations: false`）。
  *      判定用运行时的 `isDecorated()`，而不是把平台配置抄成前端常量 ——
  *      `src-tauri/tauri.linux.conf.json` 会在 Linux/WSL 下保留系统标题栏，
  *      抄常量就必然漂移，而 `isDecorated()` 永远等于真相。
  *   2. **窗口三键**：最小化 / 最大化-还原 / 关闭，以及最大化状态的同步。
+ *   3. **工作区布局**：Shift+点击最大化键时调整到所在屏幕工作区内的留白矩形
+ *      （几何全在 Rust 的 `window_fit_work_area`，这里只发意图）。
  *
  * 全部依赖以参数注入（`WindowHandle`），所以单元测试不需要启动 Tauri、
  * 也不需要 DOM —— 这是刻意的：窗口控制出错的代价是「关不掉窗口」。
@@ -19,6 +21,13 @@ import { isTauriRuntime } from "./tauri-env.ts";
 export interface WindowHandle {
   minimize: () => Promise<void>;
   toggleMaximize: () => Promise<void>;
+  /**
+   * 把窗口调整到所在屏幕工作区内的留白矩形（Shift+点击最大化键的语义）。
+   *
+   * **几何计算全在 Rust**（命令 `window_fit_work_area`，`specs/window-work-area-layout.md`）：
+   * 这里只发意图，前端不碰工作区矩形、边框偏移与事业像素换算（`AGENTS.md` §6.1 红线 ②）。
+   */
+  fitWorkArea: () => Promise<void>;
   close: () => Promise<void>;
   isMaximized: () => Promise<boolean>;
   isDecorated: () => Promise<boolean>;
@@ -60,6 +69,21 @@ export function windowControlView(state: WindowChromeState): WindowControlView {
   };
 }
 
+/**
+ * 纯函数：最大化键被点击 → 走哪条路。
+ *
+ * **Shift+点击 = 工作区布局**：不管当前是最大化、还原、半屏 snap 还是已经在该布局，
+ * 都统一调整到同一矩形（语义幂等，不做 toggle —— 崔总 2026-10-08 拍板）。
+ *
+ * 判定只写在这里：组件只接线，测试打这里 —— 与 `lib/selection.ts::clickMode`
+ * 同一套「判定唯一处」纪律。
+ */
+export function maximizeKeyAction(event: {
+  shiftKey: boolean;
+}): "fitWorkArea" | "toggle" {
+  return event.shiftKey ? "fitWorkArea" : "toggle";
+}
+
 export interface WindowChromeDeps {
   /**
    * 测试路径：直接注入句柄（`null` 表示「在 Tauri 里但拿不到句柄」）。
@@ -82,6 +106,8 @@ export interface WindowChrome {
   attach: (handle: WindowHandle | null) => Promise<void>;
   minimize: () => Promise<boolean>;
   toggleMaximize: () => Promise<boolean>;
+  /** 调整到工作区留白矩形（Shift+点击）；不等尺寸事件，调用方只看成败 */
+  fitWorkArea: () => Promise<boolean>;
   close: () => Promise<boolean>;
   /** 取消订阅（组件卸载时调用） */
   dispose: () => void;
@@ -183,6 +209,11 @@ export function createWindowChrome(deps: WindowChromeDeps = {}): WindowChrome {
       if (ok) await readMaximized();
       return ok;
     },
+    /*
+     * 工作区布局不主动读状态：它会先取消最大化，而尺寸事件会像平时一样
+     * 触发 `readMaximized()` —— 图标跟着事件翻转，不在这里抢跑。
+     */
+    fitWorkArea: () => run((win) => win.fitWorkArea(), "fitWorkArea"),
     close: () => run((win) => win.close(), "close"),
     dispose: () => {
       disposed = true;
@@ -205,6 +236,11 @@ export async function tauriWindowHandle(): Promise<WindowHandle | null> {
   return {
     minimize: () => win.minimize(),
     toggleMaximize: () => win.toggleMaximize(),
+    fitWorkArea: async () => {
+      // 几何与窗口 API 都在 Rust 侧（同步命令）；这里只发意图
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("window_fit_work_area");
+    },
     close: () => win.close(),
     isMaximized: () => win.isMaximized(),
     isDecorated: () => win.isDecorated(),

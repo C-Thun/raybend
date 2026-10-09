@@ -196,6 +196,9 @@ export interface LatestCoalescer<T> {
   sentCount: () => number;
 }
 
+/** 定时器句柄：DOM 是 number、Node 是 Timeout 对象 —— 用 `ReturnType` 两边都对，不写死类型。 */
+export type TimerHandle = ReturnType<typeof setTimeout>;
+
 export interface LatestCoalescerDeps<T> {
   /** 真正发出去（IPC / 测试里换成数组收集） */
   send: (value: T) => void;
@@ -205,15 +208,34 @@ export interface LatestCoalescerDeps<T> {
   equals?: (a: T, b: T) => boolean;
   /** 帧调度（默认真实 rAF；测试注入确定实现） */
   scheduler?: FrameScheduler;
+  /**
+   * **时间限流**（ms）：拖动期间两次真实发送至少隔这么久（缺省 0 = 不限流，保持原行为）。
+   *
+   * 崔总 2026-10-09：编辑调节的响应率分两档（高档 0.1s / 低档 0.5s）。
+   * 重算很重的大图上，这能省掉「算完一帧就立刻开始下一帧（参数已经过期）」的无用功。
+   * 松手那条路（`flush()`）**无视限流** —— 「松开鼠标必然触发一次计算」是硬要求。
+   */
+  intervalMs?: () => number;
+  /** 时钟（测试注入；默认 `Date.now`） */
+  now?: () => number;
+  /** 定时器（测试注入；默认 `setTimeout`） */
+  schedule?: (handler: () => void, delayMs: number) => TimerHandle;
+  /** 取消定时器（测试注入；默认 `clearTimeout`） */
+  cancelSchedule?: (handle: TimerHandle) => void;
 }
 
 export function createLatestCoalescer<T>(deps: LatestCoalescerDeps<T>): LatestCoalescer<T> {
   const scheduler = deps.scheduler ?? createFrameScheduler();
   const equals = deps.equals ?? Object.is;
+  const now = deps.now ?? (() => Date.now());
+  const schedule = deps.schedule ?? ((handler: () => void, delay: number) => setTimeout(handler, delay));
+  const cancelSchedule = deps.cancelSchedule ?? ((handle: TimerHandle) => clearTimeout(handle));
   let pending: { value: T } | null = null;
   let ticket: FrameTicket | null = null;
   let last: { value: T } | null = null;
   let sent = 0;
+  let lastSentAt = Number.NEGATIVE_INFINITY;
+  let throttleTimer: TimerHandle | null = null;
 
   const emit = (value: T): void => {
     if (deps.isCurrent && !deps.isCurrent(value)) return;
@@ -223,30 +245,55 @@ export function createLatestCoalescer<T>(deps: LatestCoalescerDeps<T>): LatestCo
     deps.send(value);
   };
 
-  const flushPending = (): void => {
-    ticket = null;
+  /** 把挂起的值发出去；`force` = 无视时间限流（松手 / 卸载前的尾样本） */
+  const emitPending = (force: boolean): void => {
     if (pending === null) return;
+    const interval = force ? 0 : Math.max(0, deps.intervalMs?.() ?? 0);
+    const elapsed = now() - lastSentAt;
+    if (interval > 0 && elapsed < interval) {
+      // 还没到下一个窗口：留着；到点时取那时候的最新值（中途来的新值会覆盖 pending）
+      throttleTimer ??= schedule(() => {
+        throttleTimer = null;
+        emitPending(false);
+      }, interval - elapsed);
+      return;
+    }
     const value = pending.value;
     pending = null;
+    lastSentAt = now();
     emit(value);
+  };
+
+  const flushPending = (): void => {
+    ticket = null;
+    emitPending(false);
   };
 
   return {
     push: (value) => {
       pending = { value };
-      ticket ??= scheduler.request(flushPending);
+      // 已在限流等待中就交给定时器（它到点会取最新值）；否则排一个帧回调
+      if (throttleTimer === null) ticket ??= scheduler.request(flushPending);
     },
     flush: () => {
       if (ticket !== null) {
         scheduler.cancel(ticket);
         ticket = null;
       }
-      flushPending();
+      if (throttleTimer !== null) {
+        cancelSchedule(throttleTimer);
+        throttleTimer = null;
+      }
+      emitPending(true);
     },
     dispose: () => {
       if (ticket !== null) {
         scheduler.cancel(ticket);
         ticket = null;
+      }
+      if (throttleTimer !== null) {
+        cancelSchedule(throttleTimer);
+        throttleTimer = null;
       }
       pending = null;
     },

@@ -41,6 +41,7 @@ import * as db from "./api/db.ts";
 import { createSelectedFileMetadata } from "./features/exif-strip/index.ts";
 import { createPhotoGridStore } from "./features/photo-grid/index.ts";
 import { createAppearanceStore, type AppearanceStore } from "./lib/appearance.ts";
+import { createEditorResponseStore } from "./lib/editor-response.ts";
 import { createCatalogRefresh } from "./lib/catalog-refresh.ts";
 import { createLayoutStore } from "./lib/layout-prefs.ts";
 import { FlowBar } from "./shell/FlowBar.tsx";
@@ -159,6 +160,8 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
     return !organizationPhoto || (organizationPhoto.repositoryId === repo && organizationPhoto.assetId === item.id);
   };
   const appearance = props.appearance ?? createAppearanceStore();
+  /** 编辑调节响应率（设备级偏好）：设置页写、编辑器读，所以住在组装层 */
+  const editorResponse = createEditorResponseStore();
   // 布局偏好（设备级）：左列宽度与左列内部的比例，拖拽结束落盘、下次启动还原
   const layout = createLayoutStore();
   const filmStripPrefs = createFilmStripPreferenceStore({
@@ -569,6 +572,7 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
   const withWindow = async (act: (handle: {
     minimize: () => Promise<void>;
     toggleMaximize: () => Promise<void>;
+    fitWorkArea: () => Promise<void>;
     close: () => Promise<void>;
   }) => Promise<void>): Promise<void> => {
     const handle = await tauriWindowHandle();
@@ -607,6 +611,30 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
     };
   };
 
+  /*
+   * ── 撤销 / 重做的**场景转换**（崔总 2026-10-09）──────────────────────
+   *
+   * 命令入口唯一（`edit.undo` / `edit.redo`，键 `Mod+Z` / `Mod+Y`），背后按**场景**接：
+   *
+   *   * `tiles`（浏览网格 / 看图 / 组织视图）→ 网格、标记动作的撤销；
+   *   * `editor`（编辑工作区看着一张照片）→ 同一个后端撤销栈（每库一份，显影步骤与
+   *     标记步骤都在里面），差别在副作用：编辑器靠 `undoTick()` 收到通知后重读编辑栈
+   *     并刷新预览（`EditorWorkspace` 监听那一处）。
+   *
+   * 两个场景现在**共用 `browseStore` 这一份实现** —— 后端就一个栈，前端没必要造两份状态；
+   * 场景层保证的是「入口唯一 + 判定与副作用按场景」。将来任一侧要分化（比如编辑器撤销后
+   * 还要额外落库或重算），只改这一处。
+   */
+  const historyScene = (): "editor" | "tiles" =>
+    shell.workflow() === "edit" && editorEnabled() ? "editor" : "tiles";
+
+  /** 撤销/重做的实际句柄（命令与编辑工具栏共用这一份：同一能力不许两套入口） */
+  const historyActions = {
+    state: browseStore.undoState,
+    undo: () => void browseStore.undo(),
+    redo: () => void browseStore.redo(),
+  };
+
   const commandDeps: CommandDeps = {
     flow: shell.workflow,
     setFlow: shell.setWorkflow,
@@ -619,7 +647,18 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
       available: isTauriRuntime,
       minimize: () => void withWindow((handle) => handle.minimize()),
       toggleMaximize: () => void withWindow((handle) => handle.toggleMaximize()),
+      fitWorkArea: () => void withWindow((handle) => handle.fitWorkArea()),
       close: () => void withWindow((handle) => handle.close()),
+    },
+    history: {
+      applies: () => {
+        if (historyScene() === "editor") return editorEnabled();
+        return shell.workflow() === "browse" && browseStore.repositoryId() !== null;
+      },
+      canUndo: () => browseStore.canWrite() && browseStore.undoState().canUndo,
+      canRedo: () => browseStore.canWrite() && browseStore.undoState().canRedo,
+      undo: historyActions.undo,
+      redo: historyActions.redo,
     },
     openPalette: () => setPaletteOpen(true),
     openShortcuts: () => { setSettingsPage("shortcuts"); setSettingsOpen(true); },
@@ -880,11 +919,7 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
             canAutoAdjust={() => editorActions()?.canAutoAdjust() ?? false}
             onAutoAdjust={() => editorActions()?.autoAdjust()}
             onBaseChange={setEditorBase}
-            history={{
-              state: browseStore.undoState,
-              undo: () => void browseStore.undo(),
-              redo: () => void browseStore.redo(),
-            }} />
+            history={historyActions} />
         </Show>
         <Show when={exportFlow()}><ExportToolbar store={exportStore}/></Show>
       </ToolsBar>
@@ -993,6 +1028,7 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
         onPageChange={setSettingsPage}
         commands={commands}
         onShortcutsSaved={() => toast.show({ tone: "success", message: t("shortcuts.saved") })}
+        response={editorResponse}
       />
 
       {/* 数据库升级：全窗口阻塞遮罩（不给出口 —— 升级是原子操作，只能等） */}
@@ -1028,6 +1064,7 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
             onFilmStripStepChange={(step) => filmStripPrefs.setStep("editor", step)}
             onOpenImport={() => shell.setWorkflow("import")}
             onOpenColorProfiles={() => { setSettingsPage("profiles"); const command = commands.find((item) => item.id === "settings.open"); if (command) runCommand(command); }}
+            response={editorResponse}
           />
         </Show>
       }>

@@ -88,13 +88,15 @@ test("W5 三工具默认键位在命令注册表内且不冲突", () => {
     issue.commandIds.some((id) => id in expected)), []);
 });
 
-test('自动调整命令复用编辑动作且默认不占热键', () => {
+test('自动调整命令复用编辑动作且默认不占热键（不进菜单：工具栏是入口）', () => {
   let applied = 0;
   const deps = {editor:{active:()=>true, hasPhoto:()=>true, autoAdjust:()=>{applied++;}}} as unknown as CommandDeps;
   const command = createCommandRegistry(deps).find(item=>item.id==='editor.develop.autoAdjust');
   assert.ok(command);
   assert.equal(command.defaultKey, undefined);
-  assert.equal(command.menu, 'edit');
+  // 2026-10-09「弱菜单」整理：编辑器工具栏已有「自动调整」按钮，菜单不再重复入口
+  // （命令仍在注册表里：Ctrl+K 可搜、快捷键设置里可绑键）
+  assert.equal(command.menu, undefined);
   command.run();
   assert.equal(applied, 1);
 });

@@ -39,6 +39,8 @@ pub mod system_preferences;
 pub mod tags;
 pub mod thumbs;
 mod updates;
+/// 窗口「工作区布局」（Shift+点击最大化键，`specs/window-work-area-layout.md`）。
+mod window_layout;
 
 /// IPC 契约测试（拉把 Rust 序列化出的键名与前端 ts 镜像对齐）。
 #[cfg(test)]
@@ -372,6 +374,7 @@ pub fn run() {
             export::export_presets_file,
             issues::issue_library,
             issues::issue_create,
+            issues::issue_rename,
             issues::issue_delete,
             issues::issue_thumb_get,
             lut::lut_library,
@@ -390,6 +393,8 @@ pub fn run() {
             develop::develop_commit,
             develop::develop_edit_target,
             develop::develop_preview_refresh,
+            // ── 窗口布局（Shift+点击最大化键：调整到工作区内的留白矩形）──
+            window_layout::window_fit_work_area,
             // ── 全屏看图 ──
             fullscreen::fullscreen_open,
             fullscreen::fullscreen_payload,

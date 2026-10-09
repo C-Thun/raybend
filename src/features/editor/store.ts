@@ -57,6 +57,8 @@ import { isIdentityCurve, type CurvePoint } from "../../lib/curve.ts";
 import {
   buildPresetSnapshot,
   planPresetApply,
+  prunePresetCollapsed,
+  prunePresetSelection,
   type GroupParams,
   type PresetDirectory,
   type PresetGroup,
@@ -183,6 +185,16 @@ export interface EditorStore {
   markCommitted: (rev: number) => void;
   /** 有没有还没落库的改动 */
   developDirty: () => boolean;
+  /**
+   * **confirm（快照建立）的计数与最近一条说明** —— 纯诊断。
+   *
+   * 快照只在 confirm 时建立（见 `EditorWorkspace.confirmEdit` 的节点清单）：
+   * 真机上「快照少了/多了」时，先看这个计数涨没涨 —— 涨了说明 confirm 发生了
+   * （那问题在快照内容），没涨说明某个节点没接到 confirm（那问题在接线）。
+   */
+  confirmTick: () => number;
+  confirmNote: () => string | null;
+  noteConfirm: (note: string | null) => void;
   /**
    * **手指还按在滑杆 / 曲线上**（人类 2026-09-24）。
    *
@@ -378,6 +390,9 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
   );
   const [developRev, setDevelopRev] = createSignal(0);
   const [committedRev, setCommittedRev] = createSignal(0);
+  /** confirm 计数与说明（诊断；见接口上的注释） */
+  const [confirmTick, setConfirmTick] = createSignal(0);
+  const [confirmNote, setConfirmNote] = createSignal<string | null>(null);
   const [paramDragging, setParamDragging] = createSignal(false);
   const [editBase, setEditBase] = createSignal<DevelopEditBase>("raw");
   const [editBaseAvailable, setEditBaseAvailable] = createSignal({ bitmap: false, raw: false });
@@ -389,12 +404,16 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
   const [lensSides, setLensSides] = createSignal(emptyLensSides());
   const lensProfile = (): string | null => lensSides()[editBase()].profile;
   const lensEnabled = (): boolean | null => lensSides()[editBase()].enabled;
-  const updateLensSide = (change: Partial<LensSide>): void => {
+  /** 只写值不抬 rev：预设的应用路径自己统一抬一次（审计 2026-10-04，rev 只许 +1）。 */
+  const applyLensSide = (change: Partial<LensSide>): void => {
     const base = editBase();
     setLensSides((current) => ({
       ...current,
       [base]: { ...current[base], ...change },
     }));
+  };
+  const updateLensSide = (change: Partial<LensSide>): void => {
+    applyLensSide(change);
     bumpDevelop();
   };
   const [colorState, setColorState] = createSignal<import("../../api/color.ts").PhotoColorState | null>(null);
@@ -701,6 +720,12 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
     committedRev,
     markCommitted: (rev) => setCommittedRev(rev),
     developDirty: () => developRev() !== committedRev(),
+    confirmTick,
+    confirmNote,
+    noteConfirm: (note) => {
+      setConfirmTick((current) => current + 1);
+      setConfirmNote(note);
+    },
     paramDragging,
     beginParamDrag: () => setParamDragging(true),
     endParamDrag: () => setParamDragging(false),
@@ -788,8 +813,17 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
     presetDirectories: () => presetDirectories(),
     presets: () => presetList(),
     setPresetLibrary: (library) => {
-      setPresetDirectories([...library.directories]);
-      setPresetList([...library.presets]);
+      const directories = [...library.directories];
+      const presets = [...library.presets];
+      const directoryIds = new Set(directories.map((directory) => directory.id));
+      const presetIds = new Set(presets.map((preset) => preset.id));
+      setPresetDirectories(directories);
+      setPresetList(presets);
+      // 整库回写后**收敛选中与折叠记录**（审计 2026-10-04）：
+      // 删掉的条目不能留在选中态里（拖拽 / 应用按钮会按幽灵 id 行动）。
+      setPresetSelectionState((current) =>
+        prunePresetSelection(current, directoryIds, presetIds));
+      setPresetCollapsed((current) => prunePresetCollapsed(current, directoryIds));
     },
     presetSelection: () => presetSelectionState(),
     selectPresetDirectory: (id) => setPresetSelectionState({ kind: "directory", id }),
@@ -835,7 +869,7 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
         }
         setCurves((current) => ({ ...current, ...plan.curves }));
         if (plan.hasDetail) setNrMethodSignal(plan.nrMethod === "high" ? "high" : null);
-        if (plan.hasLens) updateLensSide({ profile: plan.lens.profile, enabled: plan.lens.enabled });
+        if (plan.hasLens) applyLensSide({ profile: plan.lens.profile, enabled: plan.lens.enabled });
         if (plan.lut !== null && plan.lut !== "missing") {
           setLutId(plan.lut.id);
           setLutEnabled(plan.lut.enabled && plan.lut.id !== null);

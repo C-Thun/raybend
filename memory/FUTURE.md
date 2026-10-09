@@ -27,7 +27,7 @@
 
 | # | 事项 | 一句话状态 | 落点 |
 | --- | --- | --- | --- |
-| 1 | **editor presets** | **已完成，待验收（崔总 2026-10-04 确认）**；本轮审计发现的问题按报告核对，该状态不代表审计问题已全部修复 | `implementations/2026-09-30_editor-presets.md`；`implementations/2026-10-04_editor-presets-audit.md`；`design/editor.pen` |
+| 1 | **editor presets** | **已完成，待验收（崔总 2026-10-04 确认）**；审计发现的问题已于 2026-10-07 逐条修复并补回归（等高容器 / 选中收敛 / 名称上限 / 库串行 / 版本契约 / 错误区分 / rev 单次 / 应用前重读 LUT），真机验收待崔总 | `implementations/2026-09-30_editor-presets.md`；`implementations/2026-10-04_editor-presets-audit.md`；`implementations/2026-10-07_editor-presets-audit-fixes.md`；`design/editor.pen` |
 | 2 | **文件管理与相片整理完善** | **正在完善（崔总 2026-10-04 口径）**；已交付的相片整理上期（含跨库多选导出）仍待 Windows 真机交互与大库性能验收 | `specs/photo-organization.md`；`memory/PLAN.md` §4；`memory/FINISHED.md` §11 |
 | 3 | **XMP sidecar** | **已完成，待验收（崔总 2026-10-04 确认）**；本轮审查缺陷已修复并补回归，Windows 真实照片写出/读回与回收站链路待崔总验收；范围仍按冻结规格 | `specs/xmp-sidecar.md` §10；`implementations/2026-10-04_xmp-audit-fixes.md` |
 | 4 | **色彩管理第一版验收** | 首版开发、核心攻关、共享显示状态及 Agent 冒烟已完成；整窗性能、真实色彩/多屏待统一实机验收；不自动升级旧照片 | `specs/color-management.md` / `implementations/2026-10-04_color-management-ready-for-acceptance.md` |
@@ -36,6 +36,20 @@
 | 7 | **官网占位内容切真实版本** | 下载/教程从占位切到真实版本信息（与 #5 的取版脚本一体完成） | `website/`（M5-W3 遗留） |
 | 8 | **spike 诊断页二选一** | 发版阻塞：从发布包摇掉或保留，**不许悄悄进包** | C6 |
 | 9 | **MSI 链路实际验收** | G22 脚本已实现；真机 MSI 生成/安装/升级/卸载待崔总验收 | G22、`specs/release-windows-msi.md` |
+| 10 | **应用内回收站** | **必加（崔总 2026-10-09 定）**，形态待崔总规划后再写规格；⚠️ 与既有「删除 = 移到系统回收站」（`AGENTS.md` §2.3）是两回事：那条是删除动作的目的地，这条是应用内可见/可恢复的回收站形态 | 待规划（规划后转 `specs/`） |
+
+---
+
+## 🧊 发版后（after release）可立即做（崔总 2026-10-09 设立）
+
+> **定义**：本板块记**发版之后马上可以动手**的项目 —— 不阻塞 release，但已经想清楚、成本可控。
+> 与上面「发版前必须完成」的区别：那些不做不能发，这些是发完就有空做的。
+
+* **高光改「luma 比值回贴」+ 高亮去饱和**（对照 RapidRAW `apply_highlights_adjustment`）：
+  负向高光也从逐通道曲线改成「按亮度比值回贴」（严格保色相），并在 luma 进入 >1 区域时向白点去饱和。
+  收益：压高光不出彩边、极端亮色更稳；成本：中等（要动显示链的颜色回贴方式）。
+  现状：正向高光已有近似（`neutralize_positive_highlights`），负向仍是逐通道。
+  落点：`crates/raybend/src/develop/pipeline.rs`。评估依据：本会话 2026-10-09 的 RR 对比报告。
 
 ---
 
@@ -365,6 +379,23 @@
 * **触发条件**：① 用 [dcamprof](https://github.com/Beep6581/dcamprof)（GPL-3.0，需 ColorChecker 实拍 + Argyll CMS 测量）
   自己生成 profile 的流程跑通之后；或 ② 用户群体明确要求读写 Adobe 的 DCP。两者都不是第一版的事。
 
+### D10　RapidRAW 参考：暗部局部细节/噪声保护 + HDR 高光压缩（2026-10-09 登记）
+
+* **来源**：RapidRAW `src-tauri/src/shaders/shader.wgsl` 的 `apply_tonal_adjustments`（阴影/黑区）与
+  `apply_highlights_adjustment`（高光）。2026-10-09 的高光/黑区算法对比评估认定值得记下、暂不实现的两条。
+* **① 暗部抬升的局部细节保护 + 噪声保护**（RapidRaw 暗部处理的王牌）：
+  * 用**模糊 luma** 算细节比 `t_pixel / t_blurred`，夹在 `[0.8, 1.25]`，按抬升量放大后乘回；
+  * 噪声保护：细节放大量再乘 `smoothstep(0.0, 0.1, t_blurred)` —— 深阴影里的噪点不跟着放大。
+  * 解决的问题：**抬黑之后画面发灰、噪点炸**（纯全局曲线做不到）。
+  * 我们的落地前提：需要带邻域的算子与模糊图（`develop/local_tone` 有现成设施，但它现在服务
+    `dynamicContrast`，不是这一级）；还要决定它落在 LUT 快路径还是融合路径 —— 属独立工作单元。
+  * 备注：同一条函数里的**对比补偿**（pivot 0.2 / stretch 1+1.3·lift / 85% 混合）已于 2026-10-09
+    落地，见 `crates/raybend/src/develop/pipeline.rs` 的 `BLACKS_COMP_*`；这里只留尚未做的部分。
+* **② HDR 高光压缩 + AgX tone mapper**：
+  * RR 对 `luma > 1` 走有理压缩 `excess / (1 + excess·k)`，再交给 AgX 显示变换 —— 曝光推爆的高光**还能压回来**；
+  * 我们目前 `highlights_curve` 对 `value ≥ 1` 直接早退、后面裁到白点 ⇒ 推爆的区域救不回。
+  * 前提：把显示链从 display-referred 改成 scene-referred（与 D1 / D5 同一件事），属架构级。
+
 ---
 
 ## E. AI 能力
@@ -686,6 +717,8 @@ M1 里「导入模版」**纯手输**（`LibrarySettingsDialog`：一个输入�
 
 | 日期 | 变更 |
 | --- | --- |
+| 2026-10-09 | 崔总定：**应用内回收站发版前必加**，形态待规划；登记为 Future Release #10（与「删除=系统回收站」区分）。 |
+| 2026-10-07 | editor presets 审计问题逐条修复并补回归（等高容器、选中收敛、名称上限、库串行、payload 版本契约、新建错误区分、rev 单次、应用前重读 LUT）；记录 `implementations/2026-10-07_editor-presets-audit-fixes.md`。状态仍为**已完成、待真机验收**。 |
 | 2026-10-04 | 崔总确认 XMP 与 editor presets **已完成，待验收**；本轮 XMP 审查缺陷修复见 `implementations/2026-10-04_xmp-audit-fixes.md`。当前完善色彩管理与文件管理，二者完成并验收后最后推进 CI 和发版，由其它会话处理。 |
 | 2026-10-01 | **新增 G24（发版 CI 化，崔总指示登记）**：发版验收通过后马上做——tag 触发 GitHub Actions 自动构建 NSIS+MSI、填 Release 下载资产、同步官网（单 workflow 闭环已查证可行）；当前不动，崔总先验本地发版脚本 |
 | 2026-10-01 | **G24 官网同步方案修正（崔总同日定）**：否掉「action 内 commit 版本文件」与「website 固定分支」（都 dirty）；改为 **website 前端 JS 运行时实时获取** GitHub `/releases/latest`（action 零 commit）；登记静态兑底与 `repository_dispatch` 备选，开工时二选一 |
