@@ -222,3 +222,39 @@ pnpm release:finalize '<日志中的 WSL 构建目录>/target/release/bundle' \
 - **Sigstore 是同一思路的现实实现**：Fulcio 依 OIDC 身份签发约 10 分钟短期证书，Rekor 用 append-only 透明日志（Merkle 树）记录签名，免费、无 CA、无硬件。**落差点在平台侧：Windows/macOS 不查 Sigstore**，只认自家信任根——这类方案能解决“可审计”，不解决“被放行”。
 
 来源：[Apple Developer ID](https://developer.apple.com/developer-id/)、[macOS 公证](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution)、[Apple 证书与会员要求](https://developer.apple.com/support/certificates)、[macOS 15 绕过变更（Ars Technica）](https://arstechnica.com/gadgets/2024/08/macos-15-sequoia-makes-you-jump-through-more-hoops-to-disable-gatekeeper-app-checks/)、[Debian 包签名（apt-secure）](https://www.debian.org/doc/manuals/securing-debian-manual/deb-pack-sign.en.html)、[Flatpak build-sign](https://docs.flatpak.org/en/latest/flatpak-command-reference.html)、[Sigstore 安全模型](https://docs.sigstore.dev/about/security/)。
+
+## 9. crates.io 核心库发布（`cargo publish`，与安装包互不相干）
+
+发布对象只有 `crates/raybend`（核心库）；`src-tauri` 带 `publish = false` 守门，防误发桌面外壳。
+**发布本体由崔总执行**（AGENTS.md §2.1）。这条链路**不进** `pnpm release` 流程，与 Windows 安装包无关。
+
+### 发布的是什么
+
+发的是**真实核心库源码**（当前约 8 万行 Rust + 单测），不是 `0.0.0-reserved` 空壳——
+crates.io 的[使用政策](https://crates.io/policies)把「只占名、无真实功能」列为可回收行为。
+目的是让项目在 crates.io 上占住 `raybend` 这个名字（首来先得），同时社区能查到真东西。
+
+### 首次发布（一次性）
+
+1. 用 GitHub 账号登录 https://crates.io —— **crates.io 没有独立注册**，GitHub OAuth 即账号，
+   且 GitHub 侧邮箱必须已验证。
+2. 在 https://crates.io/settings/tokens （账号设置）创建 API Token：
+   作用域只给 `publish-new`（首次需要）+ `publish-update`（后续版本），crate 范围写 `raybend`，有效期取最短。
+   **token 只在创建时显示一次**，自管保存，不要写进仓库或脚本。
+3. 本机 `cargo login <token>`（写入 `~/.cargo/credentials.toml`，不进仓库）。
+
+### 每次发布
+
+```bash
+cargo publish -p raybend --dry-run   # 打包 + 真编译校验，约 3 分钟，不上传
+cargo publish -p raybend             # 上传（崔总执行）
+```
+
+* **必须在干净工作树上发布**；有未提交改动时 `cargo publish` 会拒绝，加 `--allow-dirty` 会把未提交源码
+  打进包里（不可撤回），不要用。
+* **发出去不可覆盖、不可删除**，只能 `yank`；要改就升版本号（`Cargo.toml` 里 `version.workspace = true`）。
+* 体积红线：crates.io 单包上限 **10 MiB**（本包约 1.1 MiB / 236 个文件）。`crates/raybend/assets/ai/` 下的
+  ONNX 模型与 onnxruntime DLL 已被 `.gitignore` 排除，不会进包。
+* docs.rs 文档为自动构建（可能因缺系统库失败），**失败不影响发布本体**，只是页面上没有 API 文档。
+* 将来可选配置 Trusted Publishing（GitHub Actions 免长期 token），但**首次发布不适用**（crate 必须先存在）；
+  是否启用属发布方式变更，需崔总拍板。
