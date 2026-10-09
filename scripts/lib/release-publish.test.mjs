@@ -7,7 +7,8 @@ import { finalizeRelease } from '../finalize-release.mjs';
 import { publishRelease, RELEASE_SOURCE_FILES } from './release-publish.mjs';
 import { versionEdits, sha256 } from './release-files.mjs';
 
-function fixture(licensePadding=0) {
+function fixture(licensePadding=0, { version = '1.2.3', channel = 'release' } = {}) {
+  const tag = `v${version}`;
   const root = mkdtempSync(join(tmpdir(), 'raybend-publish-fixture-'));
   mkdirSync(join(root, 'public/legal'), { recursive: true });
   mkdirSync(join(root, 'bundle'));
@@ -17,16 +18,16 @@ function fixture(licensePadding=0) {
     'Cargo.lock': '[[package]]\nname = "raybend"\nversion = "1.2.2"\n\n[[package]]\nname = "raybend-desktop"\nversion = "1.2.2"\n',
   };
   for (const [path, text] of Object.entries(original)) writeFileSync(join(root, path), text);
-  versionEdits(root, '1.2.3').forEach(e => writeFileSync(e.path, e.after));
+  versionEdits(root, version).forEach(e => writeFileSync(e.path, e.after));
   writeFileSync(join(root, 'pnpm-lock.yaml'), 'synthetic lock');
   writeFileSync(join(root, 'public/legal/third-party.json'), JSON.stringify({ fixturePadding: 'x'.repeat(licensePadding), locks: { cargo: sha256(readFileSync(join(root, 'Cargo.lock'))), pnpm: sha256(readFileSync(join(root, 'pnpm-lock.yaml'))) } }));
   const base = 'a'.repeat(40), releaseHead = 'b'.repeat(40);
-  const manifest = { schema: 1, channel: 'release', version: '1.2.3', builtAt: '2026-09-27T00:00:00Z', dirty: false, gitHash: base, sourceFiles: Object.fromEntries(RELEASE_SOURCE_FILES.map(p => [p, sha256(readFileSync(join(root, p)))])) };
+  const manifest = { schema: 1, channel, version, builtAt: '2026-09-27T00:00:00Z', dirty: false, gitHash: base, sourceFiles: Object.fromEntries(RELEASE_SOURCE_FILES.map(p => [p, sha256(readFileSync(join(root, p)))])) };
   writeFileSync(join(root, 'manifest.json'), JSON.stringify(manifest));
-  writeFileSync(join(root, 'bundle/RayBend_1.2.3_x64-setup.exe'), 'synthetic bytes, not an installer');
+  writeFileSync(join(root, `bundle/RayBend_${version}_x64-setup.exe`), 'synthetic bytes, not an installer');
   const out = join(root, 'out');
   finalizeRelease({ argv: [join(root, 'bundle'), '--manifest', join(root, 'manifest.json'), '--out', out, '--allow-unsigned'], log: () => {} });
-  const state = { head: base, paths: [...RELEASE_SOURCE_FILES], staged: false, tag: null, release: null, calls: [], partialOnce: false, siteFailed: false, previousSiteFailure:false, placeholderOnce:false, authFailed: false };
+  const state = { head: base, paths: [...RELEASE_SOURCE_FILES], staged: false, tag: null, release: null, calls: [], crateCalls: [], partialOnce: false, siteFailed: false, previousSiteFailure:false, placeholderOnce:false, authFailed: false };
   const run = (cmd, args, options) => {
     state.calls.push([cmd, ...args]);
     if (cmd === 'git') {
@@ -43,8 +44,8 @@ function fixture(licensePadding=0) {
       if (args[0] === 'diff') return state.staged ? 'somebody-else.txt' : '';
       if (args[0] === 'add') { assert.deepEqual(args.slice(2), RELEASE_SOURCE_FILES); return ''; }
       if (args[0] === 'commit') { state.head = releaseHead; state.paths = []; return ''; }
-      if (args[0] === 'tag') { if (args[1] === '--list') return state.tag ? 'v1.2.3' : ''; state.tag = state.head; return ''; }
-      if (args[0] === 'push') { assert.deepEqual(args, ['push', '--atomic', 'origin', 'HEAD:refs/heads/master', 'refs/tags/v1.2.3:refs/tags/v1.2.3']); return ''; }
+      if (args[0] === 'tag') { if (args[1] === '--list') return state.tag ? tag : ''; state.tag = state.head; return ''; }
+      if (args[0] === 'push') { assert.deepEqual(args, ['push', '--atomic', 'origin', 'HEAD:refs/heads/master', `refs/tags/${tag}:refs/tags/${tag}`]); return ''; }
     }
     if (cmd === 'gh') {
       if (args[0] === 'auth') { if(state.authFailed)throw new Error('auth failed'); return ''; }
@@ -52,7 +53,7 @@ function fixture(licensePadding=0) {
         if (!state.release) { const e = new Error('not found'); e.stderr = 'HTTP 404'; throw e; }
         return JSON.stringify(state.release);
       }
-      if (args[0] === 'release' && args[1] === 'create') { state.release = { tag_name: 'v1.2.3', prerelease: false, draft: true, assets: [], published_at: '2026-09-27T00:00:00Z' }; return ''; }
+      if (args[0] === 'release' && args[1] === 'create') { state.release = { tag_name: tag, prerelease: channel === 'beta', draft: true, assets: [], published_at: '2026-09-27T00:00:00Z' }; return ''; }
       if (args[0] === 'release' && args[1] === 'upload') {
         for (const path of args.slice(3, args.indexOf('--repo'))) {
           const bytes = readFileSync(path);
@@ -71,7 +72,8 @@ function fixture(licensePadding=0) {
     }
     throw new Error(`unexpected synthetic command: ${cmd} ${args}`);
   };
-  return { root, out, state, run, call: execute => publishRelease({ root, directory: out, execute, run, log: () => {}, wait: () => {} }), dispose: () => rmSync(root, { recursive: true, force: true }) };
+  const crates = ({ version: published }) => { state.crateCalls.push(published); state.calls.push(['crates', 'publish', published]); return { action: 'published', checksum: 'c'.repeat(64), verified: true }; };
+  return { root, out, state, run, crates, call: (execute, extra = {}) => publishRelease({ root, directory: out, execute, run, log: () => {}, wait: () => {}, crates, ...extra }), dispose: () => rmSync(root, { recursive: true, force: true }) };
 }
 test('默认只读；显式执行顺序为精确提交/tag/原子推送/草稿完整上传/公开/等待官网', () => {
   const f = fixture();
@@ -139,6 +141,32 @@ test('草稿中断上传的 starter 零字节占位可移除重传，已完成�
  assert.equal(f.state.release.assets.length,4);
  assert.equal(f.state.calls.filter(c=>c[2]==='delete-asset').length,1);
  }finally{f.dispose();}
+});
+
+test('crates.io 同步：正式版默认发一次，位置在 Release 公开之后、官网等待之前', () => {
+  const f = fixture();
+  try {
+    f.call(false);
+    assert.deepEqual(f.state.crateCalls, [], '预览不得触发 crates.io');
+    f.call(true);
+    assert.deepEqual(f.state.crateCalls, ['1.2.3']);
+    const order = f.state.calls.map(call => call.join(' '));
+    const crateAt = order.findIndex(line => line.startsWith('crates publish'));
+    assert.ok(crateAt > order.findIndex(line => line.startsWith('gh release edit')), 'crate 必须在 Release 公开之后');
+    assert.ok(crateAt < order.findIndex(line => line.startsWith('gh run watch')), 'crate 在官网等待之前');
+    f.call(true, { noCrates: true });
+    assert.deepEqual(f.state.crateCalls, ['1.2.3'], '--no-crates 不应重发');
+  } finally { f.dispose(); }
+});
+
+test('crates.io 同步：预发布版（beta）不发，Release 照常公开', () => {
+  const f = fixture(0, { version: '1.2.3-beta.1', channel: 'beta' });
+  try {
+    f.call(true);
+    assert.deepEqual(f.state.crateCalls, [], 'beta 不得同步核心库');
+    assert.equal(f.state.release.draft, false);
+    assert.equal(f.state.release.tag_name, 'v1.2.3-beta.1');
+  } finally { f.dispose(); }
 });
 
 test('真实清单量级超过 exec 默认 1MiB 时仍能核对并发布，不截断许可',()=>{

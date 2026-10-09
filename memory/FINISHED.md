@@ -193,6 +193,11 @@ macOS 暂缓、Linux 空闲时先行（`memory/FUTURE.md` F1/F2）。
 
 **2026-09-29 MSI 脚本推进（仅工程冒烟）**：参数拆为 `--win-msi` / `--win-nsis`，Windows 本地镜像、盘/挂载探测、路径转换、锁和旧包隔离已实现；官网优先 MSI。未实际生成安装器，M5 验收状态不变。证据 `implementations/2026-09-29_release-windows-msi.md`。
 
+**2026-10-09 crates.io 支线收口**：核心库 `raybend` 已上 crates.io（`0.1.1`，2026-10-09T13:59:06Z，发布账号 `andares`；打包 236 文件 / 1.1 MiB；docs.rs 构建成功），
+且**同步发布已接入发版流程**：正式版走 `pnpm release:publish <目录> --execute` 时会在 GitHub Release 公开之后自动同步核心库，`--no-crates` 跳过、beta/test 不发；重跑靠「索引 `cksum` vs 本地重打包 sha256」判定，一致跳过、不一致硬报错。
+→ 规格 `specs/m5-crates-publish.md`，操作 `docs/release.md` §9，证据 `implementations/2026-10-09_crates-io-release-integration.md`。
+（`memory/PLAN.md` §3 的 M5 DoD 不因此改变：仍待真机安装/升级与一次实发验证。）
+
 **剩余验收与发行操作清单在 `memory/PLAN.md` §3**（M5 DoD 未勾选，不计作完成）。
 
 ---

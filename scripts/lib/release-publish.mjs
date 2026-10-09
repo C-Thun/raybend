@@ -3,13 +3,15 @@ import { readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { githubReleasePlan } from './release-upload.mjs';
 import { sha256, versionEdits, RELEASE_SOURCE_FILES } from './release-files.mjs';
+import { CRATE_NAME, crateEligibility, publishCrate } from './crates-release.mjs';
+import { parseJson } from './json-text.mjs';
 
 export { RELEASE_SOURCE_FILES } from './release-files.mjs';
 
 /** 发布副作用只在崔总显式 --execute 时执行；run 注入用于完全离线的合成回归。 */
-export function publishRelease({ root, directory, execute = false, run = execFileSync, log = console.log, wait = () => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2000) }) {
+export function publishRelease({ root, directory, execute = false, noCrates = false, run = execFileSync, log = console.log, crates = publishCrate, wait = () => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2000) }) {
   const plan = githubReleasePlan(directory);
-  const manifest = JSON.parse(readFileSync(join(directory, 'raybend-build.json'), 'utf8'));
+  const manifest = parseJson(readFileSync(join(directory, 'raybend-build.json'), 'utf8'), '构建清单 raybend-build.json');
   const command = (cmd, args, extra = {}) => run(cmd, args, { cwd: root, encoding: 'utf8', maxBuffer: 64*1024*1024, stdio: ['ignore', 'pipe', 'pipe'], ...extra });
   const git = (...args) => String(command('git', args)).trim();
   const gh = (...args) => command('gh', args);
@@ -27,7 +29,7 @@ export function publishRelease({ root, directory, execute = false, run = execFil
   for (const edit of expected) {
     if (readFileSync(edit.path, 'utf8') !== edit.after) throw new Error(`版本文件含升版以外的改动：${relative(root, edit.path)}`);
   }
-  const license = JSON.parse(readFileSync(join(root, 'public/legal/third-party.json'), 'utf8'));
+  const license = parseJson(readFileSync(join(root, 'public/legal/third-party.json'), 'utf8'), 'public/legal/third-party.json');
   if (license.locks?.cargo !== sha256(readFileSync(join(root, 'Cargo.lock'))) || license.locks?.pnpm !== sha256(readFileSync(join(root, 'pnpm-lock.yaml')))) throw new Error('许可清单锁摘要不匹配');
   const statusPaths = () => String(command('git', ['status', '--porcelain=v1', '-z'])).split('\0').filter(Boolean).map(entry => {
     if (!/^[ MARC?!]{2} /.test(entry) || entry.startsWith('R') || entry[1] === 'R') throw new Error('发行期间存在重命名或未知状态');
@@ -41,7 +43,8 @@ export function publishRelease({ root, directory, execute = false, run = execFil
   const changes = checkParallel();
   if (git('diff', '--cached', '--name-only')) throw new Error('暂存区非空；请先人工处理，避免混入发布提交');
   if (!execute) {
-    log(`预览：${plan.tag}；将只提交版本/许可资源，创建精确 tag，原子推送 master + 该 tag，上传草稿并核对全部字节，再公开发布。\n官网由 release:published 事件自动构建并部署 Pages。没有执行 git 写入或联网。`);
+    const crate = crateEligibility({ version: plan.version, prerelease: plan.prerelease, noCrates });
+    log(`预览：${plan.tag}；将只提交版本/许可资源，创建精确 tag，原子推送 master + 该 tag，上传草稿并核对全部字节，再公开发布。\n官网由 release:published 事件自动构建并部署 Pages。没有执行 git 写入或联网。\ncrates.io（只在本指令实际执行时）：${crate.publish ? crate.reason : crate.reason}`);
     return plan;
   }
   try {gh('auth', 'status');} catch {throw new Error('需在 WSL 安装并登录 GitHub CLI gh（https://cli.github.com/），尚未改写 git 或上传');} // 在任何 git 写入之前检查账户。
@@ -100,11 +103,18 @@ export function publishRelease({ root, directory, execute = false, run = execFil
     verifyAssets(release, true);
     gh('release', 'edit', plan.tag, '--repo', 'C-Thun/raybend', '--draft=false', `--latest=${!plan.prerelease}`);
   }
+  // crates.io 同步（崔总 2026-10-09 定：正式版默认发、--no-crates 跳过、预发布不发）。
+  // 放在这里而不是最后：它是最不可撤回的一步，但官网等待只是监控，失败不应拖住它；
+  // 失败时重跑同一指令只补做未完成的部分（Release 已公开、资产已核对）。
+  const crate = crateEligibility({ version: plan.version, prerelease: plan.prerelease, noCrates });
+  let crateResult;
+  if (crate.publish) crateResult = crates({ root, version: plan.version, run, log, wait });
+  else log(`crates.io：${crate.reason}，未同步核心库`);
   if (!plan.prerelease) {
     release=readRemote();
     let siteRun;
     for(let attempt=0;attempt<30;attempt++){
-      const runs=JSON.parse(String(gh('run','list','--repo','C-Thun/raybend','--workflow','website.yml','--event','release','--limit','20','--json','databaseId,createdAt,headSha,status,conclusion')));
+      const runs=parseJson(String(gh('run','list','--repo','C-Thun/raybend','--workflow','website.yml','--event','release','--limit','20','--json','databaseId,createdAt,headSha,status,conclusion')), 'gh run list 输出');
       siteRun=runs.find(r=>r.headSha===head && Date.parse(r.createdAt)>=Date.parse(release.published_at)-5000);
       if(siteRun)break;
       wait();
@@ -116,6 +126,6 @@ export function publishRelease({ root, directory, execute = false, run = execFil
     }
     command('gh',['run','watch',String(siteRun.databaseId),'--repo','C-Thun/raybend','--exit-status'],{stdio:'inherit'});
   }
-  log(`已发布：https://github.com/C-Thun/raybend/releases/tag/${plan.tag}\n安装器：https://github.com/C-Thun/raybend/releases/download/${plan.tag}/${encodeURIComponent(plan.assets.find(p=>p.toLowerCase().endsWith('.exe'))?.split(/[\\/]/).at(-1) ?? '')}\n${plan.prerelease ? '预览版不上官网；beta 更新 JSON 部署仍按 docs/release.md。' : '官网 Actions 构建/Pages 部署已通过：https://github.com/C-Thun/raybend/actions/workflows/website.yml\n下载区已由本版 Release 数据自动生成；仍需您打开官网确认访问结果。'}`);
+  log(`已发布：https://github.com/C-Thun/raybend/releases/tag/${plan.tag}\n安装器：https://github.com/C-Thun/raybend/releases/download/${plan.tag}/${encodeURIComponent(plan.assets.find(p=>p.toLowerCase().endsWith('.exe'))?.split(/[\\/]/).at(-1) ?? '')}\n${crate.publish ? `crates.io：${CRATE_NAME} ${plan.version} ${crateResult?.action === 'already-published' ? '此前已发布（内容与本地一致）' : '已发布'} · https://crates.io/crates/${CRATE_NAME}/${plan.version}${crateResult?.warning === 'index-lag' ? '（索引尚未刷新，稍后自查）' : ''}${crateResult?.warning === 'checksum-mismatch' ? '（❗索引 checksum 与本地包不一致，请人工核对）' : ''}` : `crates.io：未同步（${crate.reason}）`}\n${plan.prerelease ? '预览版不上官网；beta 更新 JSON 部署仍按 docs/release.md。' : '官网 Actions 构建/Pages 部署已通过：https://github.com/C-Thun/raybend/actions/workflows/website.yml\n下载区已由本版 Release 数据自动生成；仍需您打开官网确认访问结果。'}`);
   return plan;
 }

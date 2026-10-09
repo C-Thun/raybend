@@ -223,43 +223,59 @@ pnpm release:finalize '<日志中的 WSL 构建目录>/target/release/bundle' \
 
 来源：[Apple Developer ID](https://developer.apple.com/developer-id/)、[macOS 公证](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution)、[Apple 证书与会员要求](https://developer.apple.com/support/certificates)、[macOS 15 绕过变更（Ars Technica）](https://arstechnica.com/gadgets/2024/08/macos-15-sequoia-makes-you-jump-through-more-hoops-to-disable-gatekeeper-app-checks/)、[Debian 包签名（apt-secure）](https://www.debian.org/doc/manuals/securing-debian-manual/deb-pack-sign.en.html)、[Flatpak build-sign](https://docs.flatpak.org/en/latest/flatpak-command-reference.html)、[Sigstore 安全模型](https://docs.sigstore.dev/about/security/)。
 
-## 9. crates.io 核心库发布（`cargo publish`，与安装包互不相干）
+## 9. crates.io 核心库同步发布（已接入发版流程）
 
 发布对象只有 `crates/raybend`（核心库）；`src-tauri` 带 `publish = false` 守门，防误发桌面外壳。
-**发布本体由崔总执行**（AGENTS.md §2.1）。这条链路**不进** `pnpm release` 流程，与 Windows 安装包无关。
+**发布本体由崔总执行**（AGENTS.md §2.1）。规格与判定细则见 `specs/m5-crates-publish.md`。
+
+### 日常：跟着发版走，不用单独操作
+
+正式版（`--channel release`）走既有那条发布指令时，核心库会在 **GitHub Release 公开之后**自动同步到
+crates.io：
+
+```bash
+pnpm release patch --win-nsis          # 准备（Agent 可跑；不产生外部副作用）
+pnpm release:publish release-out/v0.1.2 --execute   # 发布（崔总；提交/tag/推送/Release + crates.io）
+```
+
+* **`--no-crates`** 跳过 crates.io（只发安装包）；**beta / test 版不发**（预发布版本不可撤回，不值当）。
+* **重跑安全**：同一条指令重跑时，若该版本已在 crates.io，本地会重新 `cargo package` 并与索引里的
+  sha256 比对——一致就跳过，不一致就报错（版本号在 crates.io 不可覆盖，只能升版）。
+* **登录凭据是前提**：脚本只检查 `~/.cargo/credentials.toml` 或 `CARGO_REGISTRY_TOKEN` 是否存在，
+  缺了会在动手前报错（不会发一半）。
+* 不带 `--execute` 的预览**不联网、不写 git**；它只把「执行时会做什么」打出来。
 
 ### 发布的是什么
 
-发的是**真实核心库源码**（当前约 8 万行 Rust + 单测），不是 `0.0.0-reserved` 空壳——
-crates.io 的[使用政策](https://crates.io/policies)把「只占名、无真实功能」列为可回收行为。
-目的是让项目在 crates.io 上占住 `raybend` 这个名字（首来先得），同时社区能查到真东西。
+真实核心库源码（当前约 8 万行 Rust + 单测），不是 `0.0.0-reserved` 空壳——crates.io 的
+[使用政策](https://crates.io/policies)把「只占名、无真实功能」列为可回收行为。
 
-### 首次发布（一次性）
+### 首次发布（一次性，2026-10-09 已完成）
 
 1. 用 GitHub 账号登录 https://crates.io —— **crates.io 没有独立注册**，GitHub OAuth 即账号。
 2. **在 https://crates.io/settings/profile 设置并验证邮箱** —— crates.io 有自己的邮箱字段，
    GitHub 侧验证过**不能代替**。未验证时 `cargo publish` 会在上传那一步（打包与本地编译都已过）返回
    `400 Bad Request: A verified email address is required to publish crates to crates.io`。
-   **此失败无副作用**：没有落盘任何版本，验证完重跑同一条命令即可，token 不受影响
-   （2026-10-09 首次发布实测踩到）。
-3. 在 https://crates.io/settings/tokens （账号设置）创建 API Token：
-   作用域只给 `publish-new`（首次需要）+ `publish-update`（后续版本），crate 范围写 `raybend`，有效期取最短。
-   **token 只在创建时显示一次**，自管保存，不要写进仓库或脚本。
+   **此失败无副作用**：没有落盘任何版本，验证完重跑同一条命令即可，token 不受影响（当天实测踩到）。
+3. 在 https://crates.io/settings/tokens 创建 API Token：作用域 `publish-new`（首次需要）+
+   `publish-update`，crate 范围写 `raybend`，有效期取最短。**token 只在创建时显示一次**，
+   自管保存，不要写进仓库或脚本。
 4. 本机 `cargo login`（不带参数，token 从 stdin 读；写成 `cargo login <token>` 会警告已弃用，
    且把密钥暴露在命令行参数与 shell 历史里）。写入 `~/.cargo/credentials.toml`，不进仓库。
 
-### 每次发布
+### 手工兜底（脱离发版流程单独发核心库时）
 
 ```bash
-cargo publish -p raybend --dry-run   # 打包 + 真编译校验，约 3 分钟，不上传
+cargo publish -p raybend --dry-run   # 打包 + 真编译校验，不上传
 cargo publish -p raybend             # 上传（崔总执行）
 ```
 
 * **必须在干净工作树上发布**；有未提交改动时 `cargo publish` 会拒绝，加 `--allow-dirty` 会把未提交源码
-  打进包里（不可撤回），不要用。
-* **发出去不可覆盖、不可删除**，只能 `yank`；要改就升版本号（`Cargo.toml` 里 `version.workspace = true`）。
+  打进包里（不可撤回），不要用。手工发时不比对索引——重复版本会被 crates.io 直接拒绝（无副作用）。
+* **发出去不可覆盖、不可删除**，只能 `yank`；要改就升版本号（`Cargo.toml` 里 `version.workspace = true`，
+  `pnpm release` 会自动同步 package.json / Cargo.toml / Cargo.lock 三处）。
 * 体积红线：crates.io 单包上限 **10 MiB**（本包约 1.1 MiB / 236 个文件）。`crates/raybend/assets/ai/` 下的
   ONNX 模型与 onnxruntime DLL 已被 `.gitignore` 排除，不会进包。
-* docs.rs 文档为自动构建（可能因缺系统库失败），**失败不影响发布本体**，只是页面上没有 API 文档。
+* docs.rs 文档为异步自动构建（可能因缺系统库失败），**失败不影响发布本体**，只是页面上没有 API 文档。
 * 将来可选配置 Trusted Publishing（GitHub Actions 免长期 token），但**首次发布不适用**（crate 必须先存在）；
   是否启用属发布方式变更，需崔总拍板。

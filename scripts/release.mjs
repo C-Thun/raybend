@@ -6,6 +6,7 @@ import { dirname, join, resolve, relative, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseReleaseArgs, createReleasePlan } from "../src/lib/release-plan.ts";
 import { versionEdits, applyVersionEdits, sha256, RELEASE_SOURCE_FILES } from "./lib/release-files.mjs";
+import { parseJson } from "./lib/json-text.mjs";
 import { windowsReleaseConfig, windowsReleaseCommands } from "./lib/release-windows.mjs";
 import { discoverWindowsReleasePaths, toHostPath, toWindowsPath, runWindowsReleaseBatch } from "./lib/windows-paths.mjs";
 import { acquireReleaseLock, syncReleaseMirror } from "./lib/release-mirror.mjs";
@@ -14,7 +15,7 @@ import {parseAiArgs,resolveAiBuild,aiBuildEnv,aiBuildMetadata,ensureBuildRuntime
 import { windowsBuildEnv } from "./lib/dav1d-win.mjs";
 export function runRelease({root=resolve(dirname(fileURLToPath(import.meta.url)),".."),argv=process.argv.slice(2),env=process.env,run=execFileSync,log=console.log,finalize=finalizeRelease,discover=discoverWindowsReleasePaths,aiResolver=resolveAiBuild}={}) {
   const aiArgs=parseAiArgs(argv);
-  const request=parseReleaseArgs(aiArgs.args),pkg=JSON.parse(readFileSync(join(root,"package.json"),"utf8"));
+  const request=parseReleaseArgs(aiArgs.args),pkg=parseJson(readFileSync(join(root,"package.json"),"utf8"),"package.json");
   const windows=request.windowsTargets.length>0;
   let dirty=true,gitHash,gitAvailable=false;
   try {
@@ -23,7 +24,7 @@ export function runRelease({root=resolve(dirname(fileURLToPath(import.meta.url))
   } catch { /* 正式计划阻断；test 记录来源未知。 */ }
   const plan=createReleasePlan({version:pkg.version,request,dirty,gitHash,gitAvailable});
   const edits=versionEdits(root,plan.targetVersion);
-  const config=JSON.parse(readFileSync(join(root,"src-tauri/tauri.conf.json"),"utf8"));
+  const config=parseJson(readFileSync(join(root,"src-tauri/tauri.conf.json"),"utf8"),"src-tauri/tauri.conf.json");
   if(config.version!=="../package.json")throw new Error("Tauri 必须从 ../package.json 读取产品版本");
   const builtAt=env.RAYBEND_BUILD_TIME || new Date().toISOString();
   if(!Number.isFinite(Date.parse(builtAt)))throw new Error("非法 RAYBEND_BUILD_TIME");
@@ -32,6 +33,7 @@ export function runRelease({root=resolve(dirname(fileURLToPath(import.meta.url))
   const winConfig=windows ? windowsReleaseConfig(plan,{unsigned:request.unsigned,withUpdater:request.withUpdater,frontendDist:"../dist",certThumbprint:env.RAYBEND_SIGN_CERT_SHA1,updaterPublicKey:publicKey,updaterPrivateKey:env.TAURI_SIGNING_PRIVATE_KEY,timestamp:env.RAYBEND_SIGN_TIMESTAMP}):undefined;
   const releaseOut=join(root,"release-out",plan.channel==="test"?`test-${builtAt.replaceAll(":","-")}`:`v${plan.targetVersion}`);
   log(`发布计划：${plan.currentVersion} → ${plan.targetVersion} · ${plan.channel}\n前端：${plan.outputDir}\nWindows：${windows ? winConfig.bundle.targets.join(" / ") : "未生成；使用 --win-msi 或 --win-nsis"}\n版本同步：${edits.map(e=>relative(root,e.path)).join(" / ")||"无需改动"}`);
+  log(plan.channel==="release" ? "crates.io：release:publish 会同步发布 raybend 核心库（不可撤回；--no-crates 跳过）" : "crates.io：本通道不同步（只有正式版发核心库）");
   const paths=windows ? discover({directory:request.windowsDir ?? env.RAYBEND_WIN_BUILD_DIR,run,cwd:root}) : undefined;
   if(windows)log(`Windows 构建目录：${paths.windowsBase}\nWSL 挂载目录：${paths.hostBase}\n本地源码：${paths.windowsSource}\n编译缓存：${paths.windowsTarget}\n最终安装器：${releaseOut}`);
   for(const warning of plan.warnings)log(`⚠ ${warning}`);
@@ -41,7 +43,7 @@ export function runRelease({root=resolve(dirname(fileURLToPath(import.meta.url))
   if(windows && existsSync(releaseOut))throw new Error("本版本 release-out 已存在；保留已有产物，请先核对，不能重复覆盖");
   const windowsRoot=paths?.hostSource,windowsTarget=paths?.hostTarget;
   if(windows){
-    const cliVersion=JSON.parse(readFileSync(new URL("../node_modules/@tauri-apps/cli/package.json",import.meta.url),"utf8")).version;
+    const cliVersion=parseJson(readFileSync(new URL("../node_modules/@tauri-apps/cli/package.json",import.meta.url),"utf8"),"node_modules/@tauri-apps/cli/package.json").version;
     let windowsCli;
     try {windowsCli=String(run("cmd.exe",["/d","/c","cargo tauri --version"],{cwd:paths.hostDrive,encoding:"utf8"}));}
     catch {throw new Error(`Windows cargo-tauri 尚未就绪；先由崔总执行一次：cmd.exe /d /c "cargo install tauri-cli --version ${cliVersion} --locked"`);}
