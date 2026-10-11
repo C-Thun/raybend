@@ -9,6 +9,7 @@
 
 pub mod base_curve;
 pub mod browse;
+mod crashpad;
 pub mod db;
 mod desktop_behavior;
 /// 编辑栈的落库命令（M3-W3：读 / 落库 / 重置）。
@@ -41,6 +42,7 @@ pub mod thumbs;
 mod updates;
 /// 窗口「工作区布局」（Shift+点击最大化键，`specs/window-work-area-layout.md`）。
 mod window_layout;
+mod work;
 
 /// IPC 契约测试（拉把 Rust 序列化出的键名与前端 ts 镜像对齐）。
 #[cfg(test)]
@@ -50,6 +52,8 @@ mod color_status;
 mod color_profiles;
 mod color_batch;
 pub mod dirs;
+/// 诊断目录命令（打开日志/崩溃记录所在目录；报告包与发送属 W3，未开工）。
+mod diagnostics_cmd;
 /// 渲染可行性 spike 的调试窗口（`memory/PLAN.md` A.2）。**按需建窗**，不影响主窗口。
 pub mod spike_viewport;
 
@@ -223,6 +227,9 @@ pub fn run() {
         .manage(color_batch::ColorBatchState::default())
         .manage(photo_ai::PhotoAiState::default())
         .manage(thumbs::SourcesThumbs::default())
+        .manage(thumbs::SourcesMemory::default())
+        // 后台重活的优先级队列（编辑会话管道 W2：一条有优先级、去重的重活入口）
+        .manage(work::WorkQueue::default())
         // 浏览过的目录的元信息缓存（会话级内存，不落盘 —— 见 specs/photo-meta-and-tile-display.md）
         .manage(source::SourcesMetaCache::default())
         // ⚠️ **导入批次表必须注册**：漏了它，`app.state::<ImportBatches>()` 一调用就 panic
@@ -242,6 +249,13 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             // ── 数据底座的诊断与设置（M1-2）──
             updates::updates_check,
+            // ── 诊断（W1/W2：日志与崩溃记录所在目录；W3-α：崩溃报告导出）──
+            diagnostics_cmd::diagnostics_open_folder,
+            diagnostics_cmd::diagnostics_pending_crash,
+            diagnostics_cmd::diagnostics_dismiss_crash,
+            diagnostics_cmd::diagnostics_export_bundle,
+            // 仅开发构建：故意崩一次，验「panic → 记录 + dump」整条链（发布构建里调用会被拒）
+            diagnostics_cmd::diagnostics_self_test_crash,
             updates::updates_download,
             updates::updates_install,
             db::app_paths,
@@ -269,9 +283,9 @@ pub fn run() {
             source::dir_list,
             source::source_scan,
             source::source_count,
-            source::source_times,
             source::source_paths_status,
             source::dir_meta_ensure,
+            source::dir_meta_forget,
             source::file_exif,
             // ── 缩略图（未入库的源文件也要能出图）──
             thumbs::thumb_get,
@@ -342,6 +356,10 @@ pub fn run() {
             browse::browse_undo,
             browse::browse_redo,
             browse::browse_delete,
+            browse::browse_recycle_restore,
+            browse::browse_recycle_purge,
+            browse::browse_recycle_empty,
+            browse::browse_recycle_summary,
             browse::flags_get,
             browse::flags_set,
             browse::flags_clear,
@@ -358,6 +376,7 @@ pub fn run() {
             base_curve::base_curve_auto_adjust,
             editor::editor_viewport_intent,
             editor::editor_set_reference_issue,
+            editor::editor_prefetch_neighbors,
             editor::editor_confirm_tool,
             editor::editor_render_state,
             // ── 编辑栈落库（M3-W3：松手才写库）──
@@ -377,6 +396,7 @@ pub fn run() {
             issues::issue_rename,
             issues::issue_delete,
             issues::issue_thumb_get,
+            issues::issue_snapshots_ensure,
             lut::lut_library,
             lut::lut_create_category,
             lut::lut_import_directory,
@@ -386,6 +406,7 @@ pub fn run() {
             presets::preset_library,
             presets::preset_create_directory,
             presets::preset_delete_directory,
+            presets::preset_rename_directory,
             presets::preset_create,
             presets::preset_delete,
             presets::preset_move,
@@ -415,6 +436,32 @@ pub fn run() {
         ])
         .manage(spike_viewport::SpikeState::default())
         .setup(|app| {
+            /*
+             * **诊断层（运行日志 + 崩溃记录）要最早起来**（`specs/logging-and-crash-report.md`）：
+             * 后面的任何一步初始化崩了、或运行期崩了，都得有东西可查。
+             * 根目录用 Tauri path API 解析（`AGENTS.md` §6.2），核心库只接收路径。
+             *
+             * 日志与崩溃记录在（Windows）：
+             *   `%LOCALAPPDATA%\com.cthun.raybend\logs\raybend.log`
+             *   `%LOCALAPPDATA%\com.cthun.raybend\crashes\RB-<日期>-<短码>\`
+             */
+            if let Ok(data_dir) = crate::db::data_dir(app.handle()) {
+                let diagnostics = raybend::diagnostics::init(&data_dir);
+                log::info!(
+                    target: "app",
+                    "应用启动 session={} previous_unclean={} diagnostics_root={}",
+                    diagnostics.session_id(),
+                    diagnostics.previous_unclean(),
+                    diagnostics.root().display(),
+                );
+                // 崩溃助手（W4）：起不来只是少一份 dump，日志与 panic 记录照旧
+                let _ = crashpad::attach(
+                    diagnostics.recorder(),
+                    &raybend::diagnostics::paths::crashes_dir(diagnostics.root()),
+                );
+            } else {
+                eprintln!("[diagnostics] 应用数据目录解析失败 —— 本次没有落盘日志");
+            }
             color_system::install(app.handle());
             use tauri::Manager;
             /*
@@ -494,7 +541,20 @@ pub fn run() {
             Ok(())
         })
         .build(tauri::generate_context!())
-        .expect("启动 Tauri 应用失败").run(|app,event| {if matches!(event,tauri::RunEvent::Exit){photo_ai::shutdown(app);}});
+        .expect("启动 Tauri 应用失败").run(|app,event| {
+            if matches!(event,tauri::RunEvent::Exit) {
+                photo_ai::shutdown(app);
+                // 正常退出：flush 日志 + 删 session.lock（不删的话下次启动会被判成「未正常退出」）
+                if let Some(diagnostics) = raybend::diagnostics::current() {
+                    log::info!(target: "app", "正常退出");
+                    diagnostics.shutdown();
+                }
+                // 助手靠「client 断开」自行退出，这里再 kill 兜底（避免孤儿进程）
+                if let Some(crashpad) = crashpad::current() {
+                    crashpad.shutdown();
+                }
+            }
+        });
 }
 
 #[cfg(test)]

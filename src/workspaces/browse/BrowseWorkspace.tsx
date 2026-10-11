@@ -43,11 +43,11 @@ import {
   type OrganizationSelection,
   type BrowseStore,
 } from "../../features/browse/index.ts";
-import type { AssetIdentity, PhotoBucket } from "../../api/organization.ts";
+import { addPhotosToBucket, type AssetIdentity, type PhotoBucket } from "../../api/organization.ts";
 import { FilterBar } from "../../features/browse/FilterBar.tsx";
 import { browseSource } from "../../features/browse/grid-source.ts";
 import { createOrganizationSource } from "../../features/browse/organization-source.ts";
-import { PHOTO_DRAG_TYPE } from "../../features/browse/organization-drag.ts";
+import { beginPhotoDrag, dragIdsFor, photoDrag } from "../../features/browse/photo-drag.ts";
 import {
   createPhotoViewingController,
   PhotoViewingStage,
@@ -59,6 +59,7 @@ import {
   IconFolder,
   IconPhoto,
   IconPhotoOff,
+  IconTrash,
 } from "@tabler/icons-solidjs";
 import { createThumbQueue } from "../../components/ui/thumb-queue.ts";
 import { buildFullscreenTarget } from "../../lib/fullscreen-target.ts";
@@ -75,16 +76,18 @@ import { browseInfoMode, cycleBrowseTileInfo } from "../../components/ui/tile-in
 import { locale, t } from "../../i18n/index.ts";
 import { Button } from "../../components/ui/Button.tsx";
 import { ConfirmDialog, Dialog } from "../../components/ui/Dialog.tsx";
+import { DragPreview } from "../../components/ui/DragPreview.tsx";
 import type { ToastStore } from "../../components/ui/Toast.tsx";
 import { registerBrowseActions } from "../../features/browse/actions.ts";
 import { SplitHandle } from "../../components/ui/SplitHandle.tsx";
 import { nudgeWidth, resizeWidth } from "../../lib/column-resize.ts";
 import { joinPath } from "../../lib/paths.ts";
 import { assetItemExif, type SelectedFileMetadata } from "../../features/exif-strip/index.ts";
-import { getIssueLibrary, type IssueLibrary } from "../../api/issues.ts";
+import { ensureIssueSnapshots, getIssueLibrary, type IssueLibrary } from "../../api/issues.ts";
 import { createBrowseDisplay } from "../../features/browse/display-variants.ts";
 import { retainBrowseInfo, type BrowseInfoSnapshot } from "../../features/browse/info-snapshot.ts";
 import { displayedReference, readDisplayVariantKey } from "../../lib/display-variant.ts";
+import { displaySizeOf, issueOf, sourceBaseOf } from "../../lib/display-size.ts";
 import { getExportSnapshots, getExportVariantImage, getExportVariantDetails } from "../../api/export.ts";
 import { LAYOUT_BOUNDS } from "../../lib/layout-prefs.ts";
 
@@ -95,7 +98,7 @@ import { LAYOUT_BOUNDS } from "../../lib/layout-prefs.ts";
  * 2026-09-20 下限与 import left 对齐为 220px。
  */
 const SIDEBAR_BOUNDS = LAYOUT_BOUNDS.browseLeftWidth;
-import type { AssetItem, BrowseSort, DeleteFailure } from "../../api/types.ts";
+import type { AssetItem, BrowseSort, DeleteFailure, PurgeResult, RecycleResult } from "../../api/types.ts";
 
 export interface BrowseWorkspaceProps {
   organizationPanel: "library" | "buckets" | "tags";
@@ -210,7 +213,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
    */
   const [libsExpanded, setLibsExpanded] = createSignal(false);
   /**
-   * 排序的五个键（`specs/M2-W2-tail.md` 3.5；引擎 `BrowseSort` 早就支持）。
+   * 排序的六个键（`specs/M2-W2-tail.md` 3.5；`deletedAt` 是回收站专用，正常视图的控件里不出现）。
    *
    * 文案用**静态映射**而不是拼键名：`t()` 的键是字面量联合类型，拼出来的字符串过不了类型检查
    * （这是有意为之 —— 拼错的键不会等到运行时才发现）。
@@ -221,6 +224,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
     fileName: () => t("browse.sortFileName"),
     rating: () => t("browse.sortRating"),
     camera: () => t("browse.sortCamera"),
+    deletedAt: () => t("browse.sortDeletedAt"),
   };
 
   /*
@@ -260,6 +264,8 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
   const [focusId, setFocusId] = createSignal<string | undefined>(undefined);
   /** 待确认的删除（张数；`null` = 没在确认） */
   const [pendingDelete, setPendingDelete] = createSignal<number | null>(null);
+  /** 待确认的清空回收站（`true` = 弹着强确认） */
+  const [pendingEmpty, setPendingEmpty] = createSignal(false);
   /** 删除失败清单（有它就弹模态逐条列出来） */
   const [deleteFailures, setDeleteFailures] = createSignal<DeleteFailure[]>([]);
   /*
@@ -274,15 +280,29 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
       const [snapshot]=await getExportSnapshots(repository,[{assetId:asset,variant:choice}]);
       if(!snapshot)throw Error(t("export.error.incomplete"));return snapshot;
     },details:getExportVariantDetails,
+    // 选中定稿变体：后台把该定稿的三档图补齐（静默、幂等；失败下一次再试）
+    onVariantSelected: (repository, asset, choice) => {
+      if (choice.startsWith("issue:")) void ensureIssueSnapshots(repository, asset);
+    },
   });
   createEffect(()=>display.context(JSON.stringify([store.repositoryId(),store.scopePath()])));
   onCleanup(display.dispose);
-  const loadDisplay = (key:string,size:"screen"|"grid")=>{
+  /*
+   * 三个档一起走这一张口（2026-10-11）：
+   *   screen = **载入占位**（1920，快）；full = **真身**（该变体自己的像素）；
+   *   grid = 网格/胶片带小图。变体键（定稿/编辑结果）走 `export_variant_image`，
+   *   普通文件路径走 `view_image` —— 后者对「没编辑过的位图 + full」直接给原文件字节。
+   */
+  const loadDisplay = (key:string,size:"screen"|"grid"|"full")=>{
     const target=readDisplayVariantKey(key);
     return target?getExportVariantImage(target.repositoryId,target.reference,size,target.captured):
-      size==='screen'?getViewImage(key,'screen'):getThumbBytes(key,'grid');
+      size==='screen'?getViewImage(key,'screen'):size==='full'?getViewImage(key,'full'):getThumbBytes(key,'grid');
   };
-  const viewer = createViewerStore({loadScreen:key=>loadDisplay(key,'screen'),loadThumb:key=>loadDisplay(key,'grid')});
+  const viewer = createViewerStore({
+    loadScreen:key=>loadDisplay(key,'screen'),
+    loadFull:key=>loadDisplay(key,'full'),
+    loadThumb:key=>loadDisplay(key,'grid'),
+  });
 
   /*
    * 缩略图队列：**网格与胶片带共用同一个**（`specs/M2-W2.md` 2.1）。
@@ -530,6 +550,9 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
       comparing: viewing.comparing,
       filmVisible: viewing.filmVisible,
       requestDelete: () => setPendingDelete(store.selectedCount()),
+      requestRestoreRecycle: () => void runRestoreRecycle(),
+      requestEmptyRecycle: () => setPendingEmpty(true),
+      requestPurgeRecycle: () => void runPurgeRecycle(),
       moveFocus,
       openViewer: viewing.requestOpen,
       cycleChrome: viewing.cycleChrome,
@@ -545,9 +568,13 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
         props.onExternalEditor?.({...choice?.target,repositoryId:repo,reference:choice?.target.reference??displayedReference(item.id,'latest',latest),name:choice?.target.captured?.name??t('editor.issue.latest')});
       },
     });
-    onCleanup(() => registerBrowseActions(null));
+    onCleanup(() => {
+      // 诊断（生产也打）：注册/注销的时序 —— 命令与工具条按钮都靠这个槽（slot）
+      console.debug("[browse] actions unregistered");
+      registerBrowseActions(null);
+    });
+    console.debug("[browse] actions registered");
   });
-
   /** 移动「当前那张」（网格里 `←` / `→`）：等价于点它一下 —— 与点击同一套选择语义 */
   function moveFocus(delta: -1 | 1): void {
     const source = gridSource();
@@ -572,15 +599,26 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
     setFocusId(item.id);
   }
 
-  /** 删除选中的照片：走回收站；结果用提示说清楚，失败清单进模态逐条列 */
-  async function runDelete(): Promise<void> {
-    setPendingDelete(null);
-    const result = await store.removeSelected();
+  /**
+   * 写操作抛出来的错误必须**说出来**（2026-10-11 真机教训）：
+   * 后端报「数据库错误：cannot start a transaction within a transaction」时，
+   * 界面因为只 `void` 掉 Promise，看起来就是「点了没反应」——用户只能靠猜。
+   * `store.error()` 的水印只在列表为空时出现，所以这里直接走 toast。
+   */
+  function reportFailure(error: unknown): void {
+    props.toast?.show({
+      tone: "danger",
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  /** 移入回收站的结果提示（按钮路径与拖动路径共用一份）。 */
+  function reportRecycle(result: RecycleResult | null): void {
     if (result === null) return;
-    if (result.deleted > 0) {
+    if (result.moved > 0) {
       props.toast?.show({
         tone: "success",
-        message: t("browse.deleteDone").replace("{n}", String(result.deleted)),
+        message: t("browse.deleteDone").replace("{n}", String(result.moved)),
       });
     }
     if (result.blockedLocked.length > 0) {
@@ -595,8 +633,122 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
         message: t("browse.deleteGone").replace("{n}", String(result.alreadyGone)),
       });
     }
-    if (result.failed.length > 0) {
-      setDeleteFailures([...result.failed]);
+    if (result.failed.length > 0) setDeleteFailures([...result.failed]);
+  }
+
+  /** 真删的结果提示（按钮路径与拖动路径共用一份）。 */
+  function reportPurge(result: PurgeResult | null): void {
+    if (result === null) return;
+    if (result.purged > 0) {
+      props.toast?.show({
+        tone: "danger",
+        message: t("browse.recyclePurgeDone").replace("{n}", String(result.purged)),
+      });
+    }
+    if (result.failed.length > 0) setDeleteFailures([...result.failed]);
+  }
+
+  /** 删除选中的照片（按钮 / `Delete` 键）：移入库内回收站。 */
+  async function runDelete(): Promise<void> {
+    setPendingDelete(null);
+    try {
+      reportRecycle(await store.removeSelected());
+    } catch (error) {
+      reportFailure(error);
+    }
+  }
+
+  /** 拖动删除（**按拖动的那批 ids**：拖未选中项时只删它）。 */
+  async function runDeleteIds(ids: readonly string[]): Promise<void> {
+    try {
+      reportRecycle(await store.removeIds(ids));
+    } catch (error) {
+      reportFailure(error);
+    }
+  }
+
+  /** 还原选中的照片：结果用提示说清楚（重名改名时多说一句）。 */
+  async function runRestoreRecycle(): Promise<void> {
+    try {
+      const result = await store.restoreSelected();
+      if (result === null) return;
+      if (result.restored > 0) {
+        props.toast?.show({
+          tone: "success",
+          message: t("browse.recycleRestoreDone").replace("{n}", String(result.restored)),
+        });
+      }
+      if (result.renamed > 0) {
+        props.toast?.show({ tone: "info", message: t("browse.recycleRestoreRenamed") });
+      }
+      if (result.failed.length > 0) setDeleteFailures([...result.failed]);
+    } catch (error) {
+      reportFailure(error);
+    }
+  }
+
+  /** 真删选中的照片（命令/动作槽入口）。 */
+  async function runPurgeRecycle(): Promise<void> {
+    try {
+      reportPurge(await store.purgeSelected());
+    } catch (error) {
+      reportFailure(error);
+    }
+  }
+
+  /** 真删拖动的那批（回收站内拖动粉碎）。 */
+  async function runPurgeRecycleIds(ids: readonly string[]): Promise<void> {
+    try {
+      reportPurge(await store.purgeIds(ids));
+    } catch (error) {
+      reportFailure(error);
+    }
+  }
+
+  /** 拖到相片桶：把身份映射成 `AssetIdentity`（跨库来源用 entry 里的身份）。 */
+  async function dropIdsIntoBucket(
+    bucketId: number,
+    name: string,
+    ids: readonly string[],
+  ): Promise<void> {
+    const photos: AssetIdentity[] = ids.flatMap((value) => {
+      if (organizationPhotos()) {
+        const entry = organization.entryById(value);
+        return entry ? [{ repositoryId: entry.repositoryId, assetId: entry.assetId }] : [];
+      }
+      const repositoryId = store.repositoryId();
+      const assetId = Number(value);
+      return repositoryId && Number.isSafeInteger(assetId) ? [{ repositoryId, assetId }] : [];
+    });
+    if (photos.length === 0) return;
+    try {
+      await addPhotosToBucket(bucketId, photos);
+      props.onOrganizationChanged?.();
+      props.toast?.show({
+        tone: "success",
+        message: t("org.addedCount").replace("{n}", String(photos.length)),
+      });
+      void name;
+    } catch (error) {
+      store.reportError(error);
+    }
+  }
+
+  /** 清空回收站（永久；强确认之后才走到这里）。 */
+  async function runEmptyRecycle(): Promise<void> {
+    setPendingEmpty(false);
+    try {
+      const result = await store.emptyRecycle();
+      if (result === null) return;
+      if (result.purged > 0) {
+        props.toast?.show({
+          tone: "success",
+          message: t("browse.recycleEmptyDone").replace("{n}", String(result.purged)),
+        });
+      }
+      if (result.failed.length > 0) setDeleteFailures([...result.failed]);
+    } catch (error) {
+      reportFailure(error);
     }
   }
 
@@ -642,7 +794,28 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
     const item = anchor();
     const base = root();
     const path = item !== null && base !== null ? joinPath(base, item.relPath) : null;
-    props.selectedMetadata.select(path, item === null ? null : assetItemExif(item));
+    /*
+     * 尺寸 + 文件类型 = **当前显示变体**的（`lib/display-size.ts` 是唯一读口）。
+     * 读 `display.get` 与 `issueLibrary()` 就在这里建立响应式依赖 —— 切变体 / 定稿改名删除
+     * 都会重发一次 select，flowinfo 的「尺寸 / MP / 文件类型」跟着变
+     * （`specs/display-size-source.md` §6.1）。
+     *
+     * 尺寸优先用变体装载时那份 snapshot（切变体时毫秒级拿到，与列表项**同源**
+     * —— 都是 Rust `store::sizes::display_size` 的答案）：文件行刚被懒回填过时，
+     * 列表项还是载入时那份旧值，而 snapshot 是新的。默认变体（latest）没有 snapshot，
+     * 走列表项（后端读侧已按当前栈现算过）。
+     */
+    const choice = item === null ? undefined : display.get(item.id)?.choice;
+    const issue = item === null ? undefined : issueOf(issueLibrary(), choice);
+    const snapped = item === null ? undefined : display.get(item.id)?.natural;
+    const size = snapped ?? (item === null ? null : displaySizeOf(item, choice, issue));
+    props.selectedMetadata.select(
+      path,
+      item === null ? null : assetItemExif(item),
+      item === null || size === null
+        ? null
+        : { width: size.width, height: size.height, base: sourceBaseOf(item, choice, issue) },
+    );
   });
 
   /**
@@ -670,6 +843,9 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
       infoMode: browseInfoMode,
     })),
   );
+
+  /** 拖动中的照片 id（网格半透明表现；`gridSource().selection().ids` 是字符串口径）。 */
+  const draggingIds = createMemo(() => new Set(photoDrag()?.ids ?? []));
   createEffect(on(organizationSelection, () => {
     if (viewer.state().active) viewer.close();
   }, { defer: true }));
@@ -808,7 +984,11 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
 
       {/* 中列 */}
       <main
-        class="relative flex min-h-0 min-w-0 flex-1 flex-col bg-surface-bar"
+        class={[
+          "relative flex min-h-0 min-w-0 flex-1 flex-col",
+          // 回收站语境：tiles 底 = 低浓辅色（`specs/library-recycle-bin.md` §4.2 的 `--state-recycle`）
+          store.recycleMode() ? "bg-state-recycle" : "bg-surface-bar",
+        ].join(" ")}
         /*
          * 四态在 DOM 上留痕：左右两列的显隐已经生效（就是那两个 `hidden`），
          * **胶片带那一条要等 2.1 才落地** —— 但状态本身现在就可观测，
@@ -818,8 +998,41 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
         data-film={viewing.filmVisible() ? "on" : "off"}
       >
         {/** 筛选结果区（chips + 共 N 张 + 任一/全部）：看图时不占位置 */}
-        <Show when={!viewer.state().active}>
+        <Show when={!viewer.state().active && !store.recycleMode()}>
           <FilterBar store={store} count={organizationPhotos() ? organization.source.count() : undefined} />
+        </Show>
+
+        {/*
+          拖动热区（`specs/library-recycle-bin.md` §5.1）：拖动开始才出现，浮在网格左上。
+          photos 侧 = 移入回收站；回收站侧 = 永久删除（粉碎）。命中判定用它的矩形。
+        */}
+        <Show when={photoDrag() !== null && !organizationPhotos()}>
+          <div
+            data-photo-drop-zone
+            class={[
+              // 正方块、无文字（崔总 2026-10-11）：命中态只靠外轮廓加一圈
+              "absolute left-3 top-3 z-20 grid size-14 place-items-center rounded-heat bg-heat-surface select-none",
+              // 凸面（内高光 + 内暗影）+ 外圈（浅色主题浅阴影 / 深色主题浅发光）
+              "shadow-[inset_0_1px_0_var(--heat-light),inset_0_-1px_1px_var(--heat-shade),0_2px_10px_var(--heat-outer)]",
+              // 命中（松手可生效）：深色外轮廓 —— 底本身就是辅色，再闪辅色看不出来；
+              // 回收站里拖到它 = 真删，用危险色。
+              photoDrag()?.target?.kind === "recycle"
+                ? store.recycleMode()
+                  ? "outline outline-2 outline-offset-1 outline-danger"
+                  : "outline outline-2 outline-offset-1 outline-fg-1"
+                : "",
+            ].join(" ")}
+          >
+            <IconTrash
+              size={26}
+              class={[
+                // 底是辅色 ⇒ 图标用品牌色上的前景色；回收站里拖到它 = 真删，用危险色
+                photoDrag()?.target?.kind === "recycle" && store.recycleMode()
+                  ? "text-danger"
+                  : "text-fg-on-brand",
+              ].join(" ")}
+            />
+          </div>
         </Show>
 
         {/**
@@ -846,7 +1059,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
             tileStep: tileStep(),
             onTileStepChange: setTileStep,
             onTileStepCommit: () => commitBrowseDisplayTileStep(),
-            sort: organizationPhotos() ? undefined : {
+            sort: organizationPhotos() || store.recycleMode() ? undefined : {
               keys: Object.keys(SORT_LABELS) as NonNullable<BrowseSort["key"]>[],
               value: store.sort().key ?? "takenAt",
               labelOf: (key) => SORT_LABELS[key as NonNullable<BrowseSort["key"]>](),
@@ -862,24 +1075,45 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
           pinsKey={organizationPhotos() ? organization.source.scopeKey() : `${store.repositoryId() ?? ""}:${store.scopePath() ?? ""}:${store.filterMode() ? "on" : "off"}:${JSON.stringify(store.filter())}`}
           onInteract={() => setLibsExpanded(false)}
           onFocusIndex={(index) => { setFocusIndex(index); setFocusId(undefined); }}
-          onPhotoDragStart={(id, event) => {
-            const selected = gridSource().selection().ids;
-            const ids = selected.has(id) ? [...selected] : [id];
-            const photos: AssetIdentity[] = ids.flatMap((value) => {
-              if (organizationPhotos()) {
-                const entry = organization.entryById(value);
-                return entry ? [{ repositoryId: entry.repositoryId, assetId: entry.assetId }] : [];
-              }
-              const repositoryId = store.repositoryId(), assetId = Number(value);
-              return repositoryId && Number.isSafeInteger(assetId) ? [{ repositoryId, assetId }] : [];
+          draggingIds={draggingIds}
+          onPhotoPointerDown={(id, event) => {
+            const ids = dragIdsFor(id, gridSource().selection().ids);
+            beginPhotoDrag(event, {
+              ids,
+              onRecycle: () => {
+                // 诊断（生产也打）：拖动链路的入口 —— 看到这一行说明热区命中与松手都对
+                console.debug("[recycle] drop on heat zone", {
+                  ids,
+                  recycle: store.recycleMode(),
+                });
+                // 热区只在单库来源下渲染；回收站里拖到它 = 真删（粉碎），照片侧 = 移入回收站
+                if (store.recycleMode()) void runPurgeRecycleIds(ids);
+                else void runDeleteIds(ids);
+              },
+              onBucket: (bucketId, name) => void dropIdsIntoBucket(bucketId, name, ids),
             });
-            if (photos.length === 0) { event.preventDefault(); return; }
-            event.dataTransfer?.setData(PHOTO_DRAG_TYPE, JSON.stringify(photos));
-            if (event.dataTransfer) event.dataTransfer.effectAllowed = "copy";
           }}
           watermark={() => gridWatermark()}
         />
       </main>
+
+      {/* 拖动预览：**与 export 同一个组件**（`components/ui/DragPreview.tsx`） */}
+      <Show when={photoDrag()}>
+        {(drag) => (
+          <DragPreview
+            x={drag().x}
+            y={drag().y}
+            count={drag().ids.length}
+            items={drag().ids.slice(0, 4).map((photoId) => {
+              const entry = gridSource().itemById(photoId);
+              if (entry === null) return {};
+              const thumb = thumbs.get(entry.path);
+              if (thumb.status === "idle") thumbs.request(entry.path);
+              return { url: () => thumbs.get(entry.path).url };
+            })}
+          />
+        )}
+      </Show>
 
       {/* 右列**没有把手**：宽度固定（人类 2026-09-19 定「把手只加左边界」） */}
 
@@ -932,6 +1166,15 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
         message={t("browse.deleteConfirm").replace("{n}", String(pendingDelete() ?? 0))}
         onConfirm={() => void runDelete()}
         onCancel={() => setPendingDelete(null)}
+      />
+
+      {/* 清空回收站：**永久删除**，强确认（`specs/library-recycle-bin.md` §1） */}
+      <ConfirmDialog
+        open={pendingEmpty()}
+        title={t("browse.recycleEmptyTitle")}
+        message={t("browse.recycleEmptyConfirm").replace("{n}", String(store.recycleSummary().count))}
+        onConfirm={() => void runEmptyRecycle()}
+        onCancel={() => setPendingEmpty(false)}
       />
 
       {/* 删除失败清单：一条都不许闷掉（用户得知道哪几个没删掉、为什么） */}

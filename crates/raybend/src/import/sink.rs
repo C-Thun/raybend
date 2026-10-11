@@ -70,6 +70,10 @@ enum Op {
         exif: Box<ExifData>,
         /// 由那份 EXIF 定出的拍摄时间（含来源与时区偏移）。
         taken: Option<TakenAt>,
+        /// 该文件的**展示尺寸 + 自己的方向**（`media::meta::read_photo_meta`，
+        /// 与 EXIF 同一次登记里读的头；位图与 RAW 各一份，`specs/display-size-source.md` §3.2）。
+        /// 读不到尺寸时是 `None` —— 那些列就留 NULL（消费方回退）。
+        display: Option<crate::media::meta::PhotoMeta>,
     },
     /// 更新一条的状态。
     Mark {
@@ -295,6 +299,20 @@ impl ImportSink for CatalogSink<'_> {
          */
         let abs = self.active().root().join(target_rel);
         let exif = exif::read_file_for(&abs);
+        /*
+         * 展示尺寸与方向**只读这一次头**（`specs/display-size-source.md` §3.2）：
+         * `read_photo_meta` 自己会先试真栅格格式的头部、再退 EXIF —— 与 EXIF 那次
+         * 读法分开（`image_dimensions` 拿到的尺寸比 EXIF 字段可信）。
+         * sidecar（`.xmp`）没有像素，不读。
+         */
+        let display = match file.kind {
+            MediaKind::Other => None,
+            // RAW 的展示尺寸 = **出图尺寸**（rawler 显影管线的输出），不是文件头整帧
+            // —— 与懒回填 / 批量回填同一个口径（`store::sizes`）。
+            _ => crate::media::meta::read_photo_meta(&abs)
+                .ok()
+                .map(|meta| crate::store::sizes::apply_display_size_source(&abs, meta)),
+        };
         let file_name = target_rel.rsplit('/').next().unwrap_or(target_rel);
         let taken = exif::resolve_taken_at(Some(&exif), file_name, file.mtime_ms);
         self.ops.push(Op::Register {
@@ -309,6 +327,7 @@ impl ImportSink for CatalogSink<'_> {
             source_identity: file.identity,
             exif: Box::new(exif),
             taken,
+            display,
         });
         Ok(())
     }
@@ -380,6 +399,7 @@ fn apply(
             source_identity,
             exif,
             taken,
+            display,
         } => {
             let forms = PathForms::new(target_rel);
             let (asset_id, created) = find_or_create_asset(conn, target_rel, now_ms)?;
@@ -399,7 +419,14 @@ fn apply(
                 created_ms: *created_ms,
                 identity: *copy_identity,
             };
-            assets::insert_file(conn, asset_id, &disk, assets::role_of(*kind), now_ms)?;
+            assets::insert_file(
+                conn,
+                asset_id,
+                &disk,
+                assets::role_of(*kind),
+                *display,
+                now_ms,
+            )?;
             assets::set_source(conn, forms.folded(), source_path, *source_identity, now_ms)?;
             /*
              * EXIF 只由**位图**写，RAW 只在「这个资产没有位图」时才写。
@@ -952,6 +979,85 @@ mod tests {
         assert_eq!(after.source_volume, Some(5), "源身份要落库");
         assert_eq!(after.item_status, "imported");
         assert!(after.item_asset_id.is_some(), "import_items 要关联到资产");
+    }
+
+    #[test]
+    fn importing_records_each_files_own_display_size_and_orientation() {
+        // `specs/display-size-source.md` §3.2：导入时给**每个文件**各写一份展示尺寸 + 自己的方向
+        // （位图与 RAW 可以不同；不用 `assets.orientation` 代替）。
+        let dir = tmp();
+        let db = catalog(dir.path());
+        let photos = dir.path().join("photos/2026");
+        std::fs::create_dir_all(photos.join("_RAW")).unwrap();
+        // 位图：普通 JPEG 40×20（无方向）
+        image::RgbImage::new(40, 20)
+            .save(photos.join("MYP0001.jpg"))
+            .unwrap();
+        // RAW：裸 TIFF 6000×4000 + 方向 6（竖拍 ⇒ 展示 4000×6000）
+        write_bare_tiff(&photos.join("_RAW/MYP0001.rw2"), 6, 6000, 4000);
+
+        let mut sink = CatalogSink::new(&db, T0);
+        let run_id = sink.begin_run(&request("/src")).unwrap();
+        let bitmap = source_file("MYP0001.jpg", MediaKind::Image, "/src/MYP0001.jpg", 10);
+        let raw = source_file("MYP0001.rw2", MediaKind::Raw, "/src/MYP0001.rw2", 20);
+        let items = [
+            planned(0, "MYP0001.jpg", "photos/2026/MYP0001.jpg", Role::Bitmap),
+            planned(1, "MYP0001.rw2", "photos/2026/_RAW/MYP0001.rw2", Role::Raw),
+        ];
+        let files = [bitmap, raw];
+        sink.record_plan(run_id, &files, &items).unwrap();
+        sink.register(run_id, &items[0], &files[0], None).unwrap();
+        sink.register(run_id, &items[1], &files[1], None).unwrap();
+        sink.commit().unwrap();
+
+        let rows: Vec<(String, Option<i64>, Option<i64>, Option<i64>)> = db
+            .read(|conn| {
+                let mut statement = conn.prepare(
+                    "SELECT role, display_width, display_height, orientation FROM asset_files ORDER BY role",
+                )?;
+                Ok(statement
+                    .query_map([], |row| {
+                        Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()?)
+            })
+            .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                ("bitmap".into(), Some(40), Some(20), Some(1)),
+                ("raw".into(), Some(4000), Some(6000), Some(6)),
+            ],
+            "位图与 RAW 各写自己的那一份"
+        );
+    }
+
+    /// 裸 TIFF：`MM` 大端 + 一个 IFD，含 Orientation / ImageWidth / ImageLength
+    /// （与 `media::meta` 的 RAW 读法同一形状）。
+    fn write_bare_tiff(path: &Path, orientation: u16, width: u32, height: u32) {
+        let mut bytes: Vec<u8> = Vec::new();
+        bytes.extend_from_slice(b"MM\x00\x2a");
+        bytes.extend_from_slice(&8u32.to_be_bytes());
+        let entries: [(u16, u16, u32); 3] = [
+            (0x0112, 3, u32::from(orientation)),
+            (0x0100, 4, width),
+            (0x0101, 4, height),
+        ];
+        bytes.extend_from_slice(&(entries.len() as u16).to_be_bytes());
+        for (tag, kind, value) in entries {
+            bytes.extend_from_slice(&tag.to_be_bytes());
+            bytes.extend_from_slice(&kind.to_be_bytes());
+            bytes.extend_from_slice(&1u32.to_be_bytes());
+            let mut slot = [0u8; 4];
+            if kind == 3 {
+                slot[..2].copy_from_slice(&(value as u16).to_be_bytes());
+            } else {
+                slot.copy_from_slice(&value.to_be_bytes());
+            }
+            bytes.extend_from_slice(&slot);
+        }
+        bytes.extend_from_slice(&0u32.to_be_bytes());
+        std::fs::write(path, bytes).unwrap();
     }
 
     #[test]

@@ -24,8 +24,10 @@ use rawler::RawLoader;
 use rawler::decoders::{Decoder, RawDecodeParams};
 use rawler::imgop::chromatic_adaption::adapt_bradford;
 use rawler::imgop::develop::{Intermediate, ProcessingStep, RawDevelop};
+use rawler::imgop::Rect;
 use rawler::imgop::matrix::{IDENTITY_MATRIX_3, multiply, normalize, pseudo_inverse, transform_1d};
 use rawler::imgop::xyz::Illuminant;
+use rawler::rawimage::RawPhotometricInterpretation;
 use rawler::rawsource::RawSource;
 
 use super::backend::{
@@ -133,6 +135,72 @@ impl RawlerBackend {
             .or_else(|| metadata.lens.map(|lens| lens.lens_name))
             .filter(|name| !name.trim().is_empty()))
     }
+
+    /// **rawler 的出图尺寸**：显影管线跑到 `CropDefault` 之后的真实像素尺寸。
+    ///
+    /// 口径（崔总 2026-10-11）：「对外展示的分辨率」必须等于**出图尺寸** ——
+    /// 出多少像素就报多少。文件头给的是**整帧**，会比出图大一圈（RW2 实测
+    /// 5264×3904 vs 出图 5184×3888），两者对不上就是 bug。
+    ///
+    /// 所以这里不自己定尺寸，而是照抄 rawler `RawDevelop` 里 `CropDefault` 那一段
+    /// 的算法（`src/imgop/develop.rs`，2026-10-11 逐行对照）：我们的三条步骤表
+    /// （`BROWSING` / `LINEAR` / `WORKING`）都含 `Demosaic` + `CropActiveArea` +
+    /// `CropDefault`，于是规则收敛成 [`crop_size_from`]。
+    ///
+    /// 只读元数据（`dummy=true`）：不解压传感器、不做去马赛克。
+    pub fn output_size(path: &Path) -> RawResult<Option<(u32, u32)>> {
+        let opened = open(&DecodeRequest::full(path))?;
+        let raw = opened
+            .decoder
+            .raw_image(&opened.source, &opened.params, true)
+            .map_err(|e| classify(e.to_string()))?;
+        Ok(crop_output_size(&raw))
+    }
+}
+
+/// `CropDefault` 之后的尺寸（[`RawlerBackend::output_size`] 的主注释）。
+fn crop_output_size(raw: &RawImage) -> Option<(u32, u32)> {
+    let four_color = matches!(
+        &raw.photometric,
+        RawPhotometricInterpretation::Cfa(config) if config.cfa.unique_colors() == 4
+    );
+    crop_size_from(raw.crop_area, raw.active_area, four_color)
+}
+
+/// 照抄 rawler `CropDefault` 的算法（纯函数，好测）。
+///
+/// 1. 目标矩形 = `crop_area`，没有就 `active_area`，都没有 → 不裁（`None`：调用方
+///    退回文件头尺寸）；
+/// 2. 有 `active_area` 时，把矩形**适配**到有效区（rawler 直接 `Rect::adapt`，
+///    越界会 panic —— 我们保守地只在包含时才适配，宁可差一圈也不炸）；
+/// 3. 四色 CFA 走 superpixel 去马赛克（`Bilinear4Channel`）→ 输出半分辨率，
+///    矩形一起减半。
+fn crop_size_from(
+    crop_area: Option<Rect>,
+    active_area: Option<Rect>,
+    four_color: bool,
+) -> Option<(u32, u32)> {
+    let mut crop = crop_area.or(active_area)?;
+    if let Some(active) = active_area
+        && rect_contains(&active, &crop)
+    {
+        crop = crop.adapt(&active);
+    }
+    if four_color {
+        crop.scale(0.5);
+    }
+    if crop.d.w == 0 || crop.d.h == 0 {
+        return None;
+    }
+    Some((u32::try_from(crop.d.w).ok()?, u32::try_from(crop.d.h).ok()?))
+}
+
+/// `crop` 是否落在 `master` 内 —— 与 rawler `Rect::adapt` 里那四条断言一致。
+fn rect_contains(master: &Rect, crop: &Rect) -> bool {
+    crop.p.x >= master.p.x
+        && crop.p.y >= master.p.y
+        && crop.d.w <= master.d.w
+        && crop.d.h <= master.d.h
 }
 
 impl RawBackend for RawlerBackend {
@@ -1008,6 +1076,31 @@ mod tests {
         // 一张都没有 / 尺寸为 0 → None
         assert!(pick_embedded([None, None].into_iter(), 384, true).is_none());
         assert!(pick_embedded([img(0, 0)].into_iter(), 384, true).is_none());
+    }
+
+    #[test]
+    fn raw_output_size_follows_rawlers_crop_default_rule() {
+        use rawler::imgop::{Dim2, Point};
+
+        let rect = |x: usize, y: usize, w: usize, h: usize| {
+            Rect::new(Point::new(x, y), Dim2::new(w, h))
+        };
+        let full = rect(0, 0, 5264, 3904);
+        let official = rect(40, 8, 5184, 3888);
+
+        // 有 crop_area → 用它（G9 实测：文件自带官方裁切 5184×3888）
+        assert_eq!(crop_size_from(Some(official), Some(full), false), Some((5184, 3888)));
+        // 没有 crop_area → 用 active_area
+        assert_eq!(crop_size_from(None, Some(official), false), Some((5184, 3888)));
+        // 两个都没有 → 不裁，调用方退回文件头尺寸
+        assert_eq!(crop_size_from(None, None, false), None);
+        // crop 落在 active 内 → 先 adapt（尺寸不变）
+        let inner = rect(80, 20, 5000, 3800);
+        assert_eq!(crop_size_from(Some(inner), Some(official), false), Some((5000, 3800)));
+        // 四色 CFA（superpixel 去马赛克）→ 半分辨率
+        assert_eq!(crop_size_from(Some(official), Some(full), true), Some((2592, 1944)));
+        // 空矩形 → None
+        assert_eq!(crop_size_from(Some(rect(0, 0, 0, 0)), None, false), None);
     }
 
     #[test]

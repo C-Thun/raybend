@@ -171,7 +171,7 @@ export function LutPanel(props: LutPanelProps): JSX.Element {
                     >
                       <IconChevronDown size={12} class="shrink-0 text-fg-3" />
                     </Show>
-                    <span class="min-w-0 flex-1 truncate text-fs-2 text-fg-1">
+                    <span class="min-w-0 flex-1 overflow-hidden whitespace-nowrap fade-x-end text-fs-2 text-fg-1">
                       {category.name}
                     </span>
                     <span class="shrink-0 text-fs-0 tabular-nums text-fg-3">
@@ -304,7 +304,7 @@ function LutTile(props: { entry: LutEntry; selected: boolean; enabled: boolean; 
       <Show when={props.selected && props.enabled}><span class="absolute right-1 top-1 flex size-4.5 items-center justify-center rounded-full bg-brand text-fg-on-brand" aria-hidden="true"><IconCheck size={12} /></span></Show>
     </button>
     <div class="flex items-center gap-0.5">
-      <span class="min-w-0 flex-1 truncate text-center text-fs-0 text-fg-2" title={props.entry.name}>{props.entry.name}</span>
+      <span class="min-w-0 flex-1 overflow-hidden whitespace-nowrap fade-x-end text-center text-fs-0 text-fg-2" title={props.entry.name}>{props.entry.name}</span>
       <EasyDestroyButton class="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
         label={t("editor.lut.remove")}
         confirmTitle={t("editor.lut.removeTitle")} confirmLabel={t("editor.lut.removeAction")}

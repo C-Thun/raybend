@@ -10,7 +10,6 @@ export type {
   SourceItem,
   SourceScan,
   ThumbSize,
-  TimeEntry,
 } from "../../api/types.ts";
 
 /**

@@ -1,0 +1,21 @@
+[package]
+name = "raybend-crashpad"
+description = "raybend 的崩溃助手进程：主程序崩溃时在它自己身上落 minidump"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+# ❗这个二进制必须**小且独立**：不许依赖 `raybend` 主库、不许引入 tauri ——
+# 它的职责只有一个：别人崩了的时候把 dump 写下来。依赖树越短越不容易自己崩。
+[dependencies]
+crash-handler = "0.8"
+minidumper = "0.11"
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

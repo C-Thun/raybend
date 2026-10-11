@@ -46,6 +46,8 @@ const snapshot = (reference: {
   profileHash: reference.variant,
   relPath: "photos/中文.jpg",
   sourceSignature: "sig",
+  width: 4000,
+  height: 3000,
   stack: { values: { exposure: 1 } },
 });
 function setup(patch: Partial<ExportStoreDeps> = {}) {
@@ -215,6 +217,29 @@ test("issue enqueue snapshots, deduplicates and private queues survive context c
   assert.equal(s.presets().length, 2);
   s.dispose();
 });
+test("RAW 变体按普通定稿走选择/入队（崔总 2026-10-11 第二轮：它只住弹窗，不再有专用按钮）", async () => {
+  const rawVariants = (ids: readonly number[]): AssetVariants[] =>
+    ids.map((assetId) => ({
+      assetId,
+      variants: [
+        { reference: { assetId, variant: "latest" }, name: "latest", sourceBase: "sooc", profileHash: "edited", relPath: "photos/中文.orf", main: true, edited: true },
+        { reference: { assetId, variant: "raw" }, name: "RAW", sourceBase: "raw", profileHash: null, relPath: "photos/中文.orf" },
+      ],
+    }));
+  const { s } = setup({ variants: async (_, ids) => rawVariants(ids) });
+  await s.ready;
+  await s.ensure([1]);
+  // 它在弹窗里就是一张普通的定稿片：选中它 = 选中了这一行（不改别的行）
+  await s.selectIssue({ assetId: 1, variant: "raw" }, "replace", [1]);
+  assert.equal(s.selection().ids.size, 1);
+  s.choosePreset(preset.id);
+  assert.equal(s.canEnqueue(), true, "选中 RAW 也能入队（导出即 IRA）");
+  assert.equal(await s.enqueue("C:\\库"), 1);
+  assert.equal(s.progress(preset.id).total, 1);
+  assert.equal(s.queueState({ assetId: 1, variant: "raw" }, null)?.status, "pending");
+  s.dispose();
+});
+
 test("organization handoff queues the main version of every selected photo across repositories", async () => {
   const requested: [string, string][] = [];
   const { s } = setup({

@@ -2,7 +2,7 @@ import test from 'node:test';import assert from 'node:assert/strict';
 import {createExternalEditorStore,type ExternalEditorDeps} from './store.ts';
 import {applicationKey,emptyExternalTask,EXTERNAL_PREFERENCES_KEY,type ExternalTask} from '../../lib/external-editor.ts';
 const app={name:'编辑器',path:'C:/Editor/app.exe'},target={repositoryId:'repo',reference:{assetId:1,variant:'sooc'},name:'SOOC'};
-const captured={reference:target.reference,name:'SOOC',relPath:'照片.png',profileHash:'sooc',sourceSignature:'signature',stack:{values:{}}};
+const captured={reference:target.reference,name:'SOOC',relPath:'照片.png',profileHash:'sooc',sourceSignature:'signature',width:640,height:480,stack:{values:{}}};
 function setup(overrides:Partial<ExternalEditorDeps>={}){
  const writes:string[]=[],calls:string[]=[];let handler!:(task:ExternalTask)=>void;
  const store=createExternalEditorStore({getSetting:async()=>JSON.stringify({version:1,applications:[app],lastApplication:app.path,directory:'D:/照片'}),setSetting:async(key,value)=>{assert.equal(key,EXTERNAL_PREFERENCES_KEY);writes.push(value);},

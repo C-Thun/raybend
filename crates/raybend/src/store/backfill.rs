@@ -48,11 +48,55 @@ pub struct BackfillReport {
 /// 一个候选资产下的一条文件记录。
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct FileRow {
+    row_id: i64,
     role: String,
     rel_path: String,
     mtime_ms: Option<i64>,
     size_bytes: Option<i64>,
     identity: Option<Vec<u8>>,
+    /// 已写下的展示尺寸与方向（写前比较用；NULL = 还没补过）。
+    display_width: Option<i64>,
+    display_height: Option<i64>,
+    orientation: Option<i64>,
+}
+
+/// 回填的**范围**（候选集与写哪一半）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Scope {
+    /// 只补 `taken_at IS NULL` 的资产（普通回填）。
+    MissingTime,
+    /// 全量刷新在线资产（重建数据）。
+    AllOnline,
+    /// 只补缺展示尺寸的**文件行**（老库升级后的尺寸专道；`taken_at` 不动）。
+    MissingSizes,
+}
+
+/// 重读一条资产的文件行（写事务内的并发检查）——**筛选条件与候选查询逐字一致**。
+fn per_asset_sql(scope: Scope) -> &'static str {
+    match scope {
+        Scope::MissingTime => {
+            "SELECT f.id, f.role, f.rel_path, f.mtime_ms, f.size_bytes, f.file_id,
+                    f.display_width, f.display_height, f.orientation
+               FROM asset_files f JOIN assets a ON a.id = f.asset_id
+              WHERE f.asset_id = ?1 AND a.taken_at IS NULL AND f.missing_since IS NULL
+              ORDER BY (f.role = 'raw'), f.rel_path"
+        }
+        Scope::AllOnline => {
+            "SELECT f.id, f.role, f.rel_path, f.mtime_ms, f.size_bytes, f.file_id,
+                    f.display_width, f.display_height, f.orientation
+               FROM asset_files f
+              WHERE f.asset_id = ?1 AND f.missing_since IS NULL
+              ORDER BY (f.role = 'raw'), f.rel_path"
+        }
+        Scope::MissingSizes => {
+            "SELECT f.id, f.role, f.rel_path, f.mtime_ms, f.size_bytes, f.file_id,
+                    f.display_width, f.display_height, f.orientation
+               FROM asset_files f
+              WHERE f.asset_id = ?1 AND f.missing_since IS NULL
+                AND (f.display_width IS NULL OR f.display_height IS NULL)
+              ORDER BY (f.role = 'raw'), f.rel_path"
+        }
+    }
 }
 
 /// 回填一个库（真实现：从磁盘读 EXIF）。
@@ -65,6 +109,26 @@ pub fn backfill_metadata(catalog: &CatalogDb, now_ms: i64) -> Result<BackfillRep
         let taken = exif::resolve_taken_at(Some(&data), name, mtime_ms);
         Some((data, taken))
     })
+}
+
+/// 只补展示尺寸（`asset_files.display_*` 为空的行）——老库升级后的尺寸专道。
+///
+/// 不碰 `assets`（时间 / 器材 / 用户数据一律不动），不扫全库（只查缺列的行）。
+pub fn backfill_display_sizes(catalog: &CatalogDb, now_ms: i64) -> Result<BackfillReport> {
+    sync_with(
+        catalog,
+        now_ms,
+        Scope::MissingSizes,
+        None,
+        |abs, name, mtime_ms| {
+            if !abs.is_file() {
+                return None;
+            }
+            let data = read_disk_metadata(abs);
+            let taken = exif::resolve_taken_at(Some(&data), name, mtime_ms);
+            Some((data, taken))
+        },
+    )
 }
 
 /// 重建数据时使用：不只补 NULL，而是重新读取全部在线资产的文件元数据。
@@ -87,7 +151,7 @@ pub fn refresh_assets(
     now_ms: i64,
     ids: &std::collections::BTreeSet<i64>,
 ) -> Result<BackfillReport> {
-    sync_with(catalog, now_ms, false, Some(ids), |abs, name, mtime| {
+    sync_with(catalog, now_ms, Scope::AllOnline, Some(ids), |abs, name, mtime| {
         if !abs.is_file() {
             return None;
         }
@@ -103,10 +167,17 @@ pub fn refresh_assets(
 fn read_disk_metadata(path: &Path) -> ExifData {
     let mut data = exif::read_file_for(path);
     if let Ok(meta) = read_photo_meta(path) {
-        let (width, height) = if orientation_swaps_axes(meta.orientation) {
-            (meta.height, meta.width)
-        } else {
-            (meta.width, meta.height)
+        // RAW 报**出图尺寸**（与懒回填 / 导入同一个口径，`store::sizes::raw_output_size`）：
+        // 它本来就是原始像素轴，和下面那段方向换算是同一个坐标系，所以直接替掉换过来的值。
+        let (width, height) = match crate::store::sizes::raw_output_size(path) {
+            Some((width, height)) => (width, height),
+            None => {
+                if orientation_swaps_axes(meta.orientation) {
+                    (meta.height, meta.width)
+                } else {
+                    (meta.width, meta.height)
+                }
+            }
         };
         data.width = (width > 0).then_some(i64::from(width));
         data.height = (height > 0).then_some(i64::from(height));
@@ -115,12 +186,35 @@ fn read_disk_metadata(path: &Path) -> ExifData {
     data
 }
 
+/// 一次读盘得到的「展示尺寸 + 方向」（`asset_files.display_*` 三列）。
+///
+/// `ExifData.width/height` 在这里是**原始轴**（`read_disk_metadata` 换回过），
+/// 展示尺寸由**唯一**的方向函数算出（`media::meta::oriented_size`）。
+fn display_columns(data: &ExifData) -> Option<(i64, i64, i64)> {
+    let width = data.width.filter(|value| *value > 0)?;
+    let height = data.height.filter(|value| *value > 0)?;
+    let orientation = crate::media::meta::normalize_orientation(data.orientation);
+    let (display_width, display_height) = crate::media::meta::oriented_size(
+        u32::try_from(width).ok()?,
+        u32::try_from(height).ok()?,
+        orientation,
+    );
+    if display_width == 0 || display_height == 0 {
+        return None;
+    }
+    Some((
+        i64::from(display_width),
+        i64::from(display_height),
+        i64::from(orientation),
+    ))
+}
+
 /// 可注入读法的版本（测试用假读法，不必造真文件）。
 pub fn backfill_with<F>(catalog: &CatalogDb, now_ms: i64, read: F) -> Result<BackfillReport>
 where
     F: Fn(&Path, &str, Option<i64>) -> Option<(ExifData, Option<TakenAt>)>,
 {
-    sync_with(catalog, now_ms, true, None, read)
+    sync_with(catalog, now_ms, Scope::MissingTime, None, read)
 }
 
 /// 可注入读法的全量刷新（测试与重建共用）。
@@ -128,13 +222,13 @@ pub fn refresh_with<F>(catalog: &CatalogDb, now_ms: i64, read: F) -> Result<Back
 where
     F: Fn(&Path, &str, Option<i64>) -> Option<(ExifData, Option<TakenAt>)>,
 {
-    sync_with(catalog, now_ms, false, None, read)
+    sync_with(catalog, now_ms, Scope::AllOnline, None, read)
 }
 
 fn sync_with<F>(
     catalog: &CatalogDb,
     now_ms: i64,
-    only_missing: bool,
+    scope: Scope,
     asset_ids: Option<&std::collections::BTreeSet<i64>>,
     read: F,
 ) -> Result<BackfillReport>
@@ -143,17 +237,33 @@ where
 {
     let root: PathBuf = catalog.root().to_path_buf();
     let grouped: BTreeMap<i64, Vec<FileRow>> = catalog.read(|conn| {
-        let sql = if only_missing {
-            "SELECT f.asset_id, f.role, f.rel_path, f.mtime_ms, f.size_bytes, f.file_id
-               FROM asset_files f
-               JOIN assets a ON a.id = f.asset_id
-              WHERE a.taken_at IS NULL AND f.missing_since IS NULL
-              ORDER BY f.asset_id, (f.role = 'raw'), f.rel_path"
-        } else {
-            "SELECT f.asset_id, f.role, f.rel_path, f.mtime_ms, f.size_bytes, f.file_id
-               FROM asset_files f
-              WHERE f.missing_since IS NULL
-              ORDER BY f.asset_id, (f.role = 'raw'), f.rel_path"
+        let sql = match scope {
+            // 老库的症状：没有拍摄时间（2026-09-18 之前的导入）——
+            // 顺手把这次读到的展示尺寸也写回文件行（`specs/display-size-source.md` §3.2）。
+            Scope::MissingTime => {
+                "SELECT f.asset_id, f.id, f.role, f.rel_path, f.mtime_ms, f.size_bytes, f.file_id,
+                        f.display_width, f.display_height, f.orientation
+                   FROM asset_files f
+                   JOIN assets a ON a.id = f.asset_id
+                  WHERE a.taken_at IS NULL AND f.missing_since IS NULL
+                  ORDER BY f.asset_id, (f.role = 'raw'), f.rel_path"
+            }
+            Scope::AllOnline => {
+                "SELECT f.asset_id, f.id, f.role, f.rel_path, f.mtime_ms, f.size_bytes, f.file_id,
+                        f.display_width, f.display_height, f.orientation
+                   FROM asset_files f
+                  WHERE f.missing_since IS NULL
+                  ORDER BY f.asset_id, (f.role = 'raw'), f.rel_path"
+            }
+            // 只补尺寸：taken_at 一个字都不碰（老库升级后的补尺寸专道）
+            Scope::MissingSizes => {
+                "SELECT f.asset_id, f.id, f.role, f.rel_path, f.mtime_ms, f.size_bytes, f.file_id,
+                        f.display_width, f.display_height, f.orientation
+                   FROM asset_files f
+                  WHERE f.missing_since IS NULL
+                    AND (f.display_width IS NULL OR f.display_height IS NULL)
+                  ORDER BY f.asset_id, (f.role = 'raw'), f.rel_path"
+            }
         };
         // 位图排在 RAW 前面（`role = 'raw'` 为真时排后面）。
         let sql = sql.replace(
@@ -166,11 +276,15 @@ where
             Ok((
                 row.get::<_, i64>(0)?,
                 FileRow {
-                    role: row.get(1)?,
-                    rel_path: row.get(2)?,
-                    mtime_ms: row.get(3)?,
-                    size_bytes: row.get(4)?,
-                    identity: row.get(5)?,
+                    row_id: row.get(1)?,
+                    role: row.get(2)?,
+                    rel_path: row.get(3)?,
+                    mtime_ms: row.get(4)?,
+                    size_bytes: row.get(5)?,
+                    identity: row.get(6)?,
+                    display_width: row.get(7)?,
+                    display_height: row.get(8)?,
+                    orientation: row.get(9)?,
                 },
             ))
         })?;
@@ -188,16 +302,18 @@ where
         candidates: grouped.len(),
         ..BackfillReport::default()
     };
-    let mut updates: Vec<(i64, ExifData, Option<TakenAt>, Vec<FileRow>)> = Vec::new();
+    let mut updates: Vec<(i64, ExifData, Option<TakenAt>, Vec<FileRow>, Vec<(usize, ExifData)>)> =
+        Vec::new();
 
     for (asset_id, files) in &grouped {
-        let mut reads: Vec<(ExifData, Option<TakenAt>)> = Vec::new();
+        // 每一条读得到的结果都带上它在 `files` 里的下标 —— 逐文件写展示尺寸要用它
+        let mut reads: Vec<(usize, ExifData, Option<TakenAt>)> = Vec::new();
         let mut any_unreadable = false;
-        for file in files {
+        for (index, file) in files.iter().enumerate() {
             let abs = root.join(&file.rel_path);
             let name = file.rel_path.rsplit('/').next().unwrap_or(&file.rel_path);
             match read(&abs, name, file.mtime_ms) {
-                Some(reading) => reads.push(reading),
+                Some((data, taken)) => reads.push((index, data, taken)),
                 None => any_unreadable = true,
             }
         }
@@ -213,7 +329,7 @@ where
          * 器材/曝光这些字段一律取**第一个读到的位图**那份（RAW 的读法字段更少）。
          */
         let mut best: Option<TakenAt> = None;
-        for (_, taken) in &reads {
+        for (_, _, taken) in &reads {
             let Some(candidate) = taken else { continue };
             let better = best
                 .is_none_or(|current| source_rank(candidate.source) > source_rank(current.source));
@@ -223,32 +339,40 @@ where
         }
         let primary = reads
             .first()
-            .map(|(data, _)| data.clone())
+            .map(|(_, data, _)| data.clone())
             .unwrap_or_default();
         if best.is_none() && primary == ExifData::default() {
             report.still_missing += 1;
             continue;
         }
-        updates.push((*asset_id, primary, best, files.clone()));
+        let per_file: Vec<(usize, ExifData)> = reads
+            .iter()
+            .map(|(index, data, _)| (*index, data.clone()))
+            .collect();
+        updates.push((*asset_id, primary, best, files.clone(), per_file));
     }
 
     if !updates.is_empty() {
         let total = updates.len();
+        let asset_sql = per_asset_sql(scope);
         let count = catalog.write_tx(move |tx| {
             let mut written = 0usize;
-            for (asset_id, data, taken, expected) in &updates {
-                let mut stmt = tx.prepare(
-                    "SELECT role, rel_path, mtime_ms, size_bytes, file_id FROM asset_files
-                    WHERE asset_id=?1 AND missing_since IS NULL ORDER BY (role='raw'), rel_path",
-                )?;
+            for (asset_id, data, taken, expected, per_file) in &updates {
+                // 重读必须用与候选**同一套条件**（否则 `expected` 与 `current` 行数不同，
+                // 并发检查会假报「文件变了」而什么都不写）
+                let mut stmt = tx.prepare(asset_sql)?;
                 let current = stmt
                     .query_map([asset_id], |row| {
                         Ok(FileRow {
-                            role: row.get(0)?,
-                            rel_path: row.get(1)?,
-                            mtime_ms: row.get(2)?,
-                            size_bytes: row.get(3)?,
-                            identity: row.get(4)?,
+                            row_id: row.get(0)?,
+                            role: row.get(1)?,
+                            rel_path: row.get(2)?,
+                            mtime_ms: row.get(3)?,
+                            size_bytes: row.get(4)?,
+                            identity: row.get(5)?,
+                            display_width: row.get(6)?,
+                            display_height: row.get(7)?,
+                            orientation: row.get(8)?,
                         })
                     })?
                     .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -256,20 +380,57 @@ where
                     continue;
                 }
 
-                if only_missing {
-                    // 回填期间用户又改了这一行 → 不覆盖（只填空值）
-                    let still_empty: bool = tx.query_row(
-                        "SELECT taken_at IS NULL FROM assets WHERE id = ?1",
-                        [asset_id],
-                        |row| row.get(0),
-                    )?;
-                    if !still_empty {
+                /*
+                 * `assets` 那一半只在「本来就缺时间」或全量刷新时写 ——
+                 * 只补尺寸的那一遭（`Scope::MissingSizes`）**不能**碰 `assets`：
+                 * 那会把已有的 `taken_at` 写成 NULL（`apply_exif` 是覆盖式写）。
+                 */
+                let mut touched = false;
+                match scope {
+                    Scope::MissingTime => {
+                        // 回填期间用户又改了这一行 → 不覆盖（只填空值）
+                        let still_empty: bool = tx.query_row(
+                            "SELECT taken_at IS NULL FROM assets WHERE id = ?1",
+                            [asset_id],
+                            |row| row.get(0),
+                        )?;
+                        if still_empty {
+                            assets::apply_exif(tx, *asset_id, data, *taken, now_ms)?;
+                            super::fts::refresh_asset(tx, *asset_id)?;
+                            touched = true;
+                        }
+                    }
+                    Scope::AllOnline => {
+                        assets::apply_exif(tx, *asset_id, data, *taken, now_ms)?;
+                        super::fts::refresh_asset(tx, *asset_id)?;
+                        touched = true;
+                    }
+                    Scope::MissingSizes => {}
+                }
+
+                // 每个文件写自己的展示尺寸 + 方向（写前比较：一致就不动）
+                for (index, reading) in per_file {
+                    let Some(file) = expected.get(*index) else {
+                        continue;
+                    };
+                    let Some((width, height, orientation)) = display_columns(reading) else {
+                        continue;
+                    };
+                    if file.display_width == Some(width)
+                        && file.display_height == Some(height)
+                        && file.orientation == Some(orientation)
+                    {
                         continue;
                     }
+                    tx.execute(
+                        "UPDATE asset_files SET display_width = ?2, display_height = ?3, orientation = ?4, updated_at = ?5 WHERE id = ?1",
+                        rusqlite::params![file.row_id, width, height, orientation, now_ms],
+                    )?;
+                    touched = true;
                 }
-                assets::apply_exif(tx, *asset_id, data, *taken, now_ms)?;
-                super::fts::refresh_asset(tx, *asset_id)?;
-                written += 1;
+                if touched {
+                    written += 1;
+                }
             }
             Ok(written)
         })?;
@@ -616,6 +777,146 @@ mod tests {
         assert_eq!(report.filled, 1);
         assert_eq!(read_time(&catalog, id).0, Some(T0 - 7));
     }
+    #[test]
+    fn display_sizes_are_written_per_file_and_corrected_when_wrong() {
+        // `specs/display-size-source.md` §3.2：每文件一份展示尺寸 + 自己的方向；
+        // 写前比较（NULL 才补、不符才改），且不碰 `taken_at`。
+        let (_dir, catalog) = temp_catalog();
+        let id = asset_with_file(&catalog, "photos/a.rw2", "raw", Some(T0));
+        add_file(&catalog, id, "photos/a.jpg", "bitmap");
+        // 资产已经有拍摄时间（这一遭**不许**碰它）
+        catalog
+            .write(move |conn| {
+                conn.execute("UPDATE assets SET taken_at = ?1 WHERE id = ?2", rusqlite::params![T0, id])?;
+                Ok(())
+            })
+            .unwrap();
+        // 位图预置一个**错的**尺寸（旧值不符 ⇒ 要改），RAW 空着（NULL ⇒ 要补）
+        catalog
+            .write(move |conn| {
+                conn.execute(
+                    "UPDATE asset_files SET display_width = 1, display_height = 1, orientation = 1
+                      WHERE asset_id = ?1 AND role = 'bitmap'",
+                    [id],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+
+        let reads = |_abs: &Path, name: &str, _mtime| {
+            if name.ends_with(".rw2") {
+                Some((
+                    ExifData {
+                        width: Some(6000),
+                        height: Some(4000),
+                        orientation: Some(6),
+                        ..ExifData::default()
+                    },
+                    None,
+                ))
+            } else {
+                Some((
+                    ExifData {
+                        width: Some(4000),
+                        height: Some(3000),
+                        orientation: Some(1),
+                        ..ExifData::default()
+                    },
+                    None,
+                ))
+            }
+        };
+        let report = sync_with(&catalog, T0 + 100, Scope::MissingSizes, None, reads).unwrap();
+        assert_eq!(report.filled, 1);
+        assert_eq!(
+            display_of(&catalog, id, "raw"),
+            (Some(4000), Some(6000), Some(6)),
+            "竖拍 RAW：6000×4000 + 方向 6 ⇒ 展示 4000×6000"
+        );
+        assert_eq!(
+            display_of(&catalog, id, "bitmap"),
+            (Some(1), Some(1), Some(1)),
+            "有值就不动它（值对不对由刷新那一遭管）"
+        );
+        assert_eq!(read_time(&catalog, id).0, Some(T0), "只补尺寸那一遭不碰时间");
+
+        // 幂等：已补过的行不再是候选
+        let again = sync_with(&catalog, T0 + 200, Scope::MissingSizes, None, reads).unwrap();
+        assert_eq!(again.candidates, 0);
+        assert_eq!(again.filled, 0);
+
+        // 全量刷新：错的旧值要改正，对的不重写（`updated_at` 动不了）
+        catalog
+            .write(move |conn| {
+                conn.execute(
+                    "UPDATE asset_files SET updated_at = 999 WHERE asset_id = ?1 AND role = 'raw'",
+                    [id],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+        refresh_with(&catalog, T0 + 300, |_abs, name, _mtime| {
+            let raw = name.ends_with(".rw2");
+            Some((
+                ExifData {
+                    width: Some(if raw { 6000 } else { 4000 }),
+                    height: Some(if raw { 4000 } else { 3000 }),
+                    orientation: Some(if raw { 6 } else { 1 }),
+                    ..ExifData::default()
+                },
+                None,
+            ))
+        })
+        .unwrap();
+        assert_eq!(
+            display_of(&catalog, id, "bitmap"),
+            (Some(4000), Some(3000), Some(1)),
+            "错的旧值要被改正"
+        );
+        let raw_updated_at: i64 = catalog
+            .read(move |conn| {
+                Ok(conn.query_row(
+                    "SELECT updated_at FROM asset_files WHERE asset_id = ?1 AND role = 'raw'",
+                    [id],
+                    |row| row.get(0),
+                )?)
+            })
+            .unwrap();
+        assert_eq!(raw_updated_at, 999, "值已经对的那一行不重写");
+    }
+
+    /// 给已有资产再挂一个文件行（无尺寸 —— 回填要自己读）。
+    fn add_file(catalog: &CatalogDb, asset_id: i64, rel: &str, role: &str) {
+        let rel = rel.to_string();
+        let role = role.to_string();
+        catalog
+            .write(move |conn| {
+                conn.execute(
+                    "INSERT INTO asset_files
+                        (asset_id, role, rel_path, rel_path_folded, ext, size_bytes, mtime_ms,
+                         created_at, updated_at)
+                     VALUES (?1, ?2, ?3, ?3, 'x', 10, ?4, ?5, ?5)",
+                    rusqlite::params![asset_id, role, rel, i64::from(1), T0],
+                )?;
+                Ok(())
+            })
+            .expect("插文件行");
+    }
+
+    /// `asset_files` 里那个文件的 `(display_width, display_height, orientation)`。
+    fn display_of(catalog: &CatalogDb, id: i64, role: &str) -> (Option<i64>, Option<i64>, Option<i64>) {
+        catalog
+            .read(move |conn| {
+                Ok(conn.query_row(
+                    "SELECT display_width, display_height, orientation FROM asset_files
+                      WHERE asset_id = ?1 AND role = ?2",
+                    rusqlite::params![id, role],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )?)
+            })
+            .expect("读回")
+    }
+
     #[test]
     fn concurrent_file_fact_change_does_not_apply_stale_metadata() {
         let (_dir, catalog) = temp_catalog();

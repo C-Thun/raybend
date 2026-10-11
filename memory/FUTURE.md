@@ -29,14 +29,14 @@
 | --- | --- | --- | --- |
 | 1 | **editor presets** | **已完成，待验收（崔总 2026-10-04 确认）**；审计发现的问题已于 2026-10-07 逐条修复并补回归（等高容器 / 选中收敛 / 名称上限 / 库串行 / 版本契约 / 错误区分 / rev 单次 / 应用前重读 LUT），真机验收待崔总 | `implementations/2026-09-30_editor-presets.md`；`implementations/2026-10-04_editor-presets-audit.md`；`implementations/2026-10-07_editor-presets-audit-fixes.md`；`design/editor.pen` |
 | 2 | **文件管理与相片整理完善** | **正在完善（崔总 2026-10-04 口径）**；已交付的相片整理上期（含跨库多选导出）仍待 Windows 真机交互与大库性能验收 | `specs/photo-organization.md`；`memory/PLAN.md` §4；`memory/FINISHED.md` §11 |
-| 3 | **XMP sidecar** | **已完成，待验收（崔总 2026-10-04 确认）**；本轮审查缺陷已修复并补回归，Windows 真实照片写出/读回与回收站链路待崔总验收；范围仍按冻结规格 | `specs/xmp-sidecar.md` §10；`implementations/2026-10-04_xmp-audit-fixes.md` |
+| 3 | **XMP sidecar** | **已完成，待验收（崔总 2026-10-04 确认）**；本轮审查缺陷已修复并补回归，Windows 真实照片写出/读回与回收站链路待崔总验收；范围仍按冻结规格。**2026-10-09 增补**：设置新增唯一一项写出开关（设备级、默认开）、§10 验收清单细化、只读巡检工具 `pnpm check:xmp` | `specs/xmp-sidecar.md` §10；`specs/xmp-write-toggle.md`；`specs/xmp-audit-tool.md`；`implementations/2026-10-04_xmp-audit-fixes.md` |
 | 4 | **色彩管理第一版验收** | 首版开发、核心攻关、共享显示状态及 Agent 冒烟已完成；整窗性能、真实色彩/多屏待统一实机验收；不自动升级旧照片 | `specs/color-management.md` / `implementations/2026-10-04_color-management-ready-for-acceptance.md` |
 | 5 | **发版 CI 化** | tag → 自动构建 NSIS+MSI → 填 GitHub Release 下载资产；**官网下载地址用前端 JS（XHR/fetch）实时取 `/releases/latest`**（action 零 commit）；**色彩管理与文件管理完善、验收后最后推进；崔总在其它会话处理** | G24（查证与适配点在那里） |
 | 6 | **国内官网镜像** | 腾讯 EdgeOne Pages + `rb.cthun.com`（大陆节点；**备案前提已满足**——崔总 2026-10-01 确认已实名+已备案）；与 #5 同一套取版逻辑；EdgeOne 建站/域名接入属人类动作 | G24 补充小节 |
 | 7 | **官网占位内容切真实版本** | 下载/教程从占位切到真实版本信息（与 #5 的取版脚本一体完成） | `website/`（M5-W3 遗留） |
 | 8 | **spike 诊断页二选一** | 发版阻塞：从发布包摇掉或保留，**不许悄悄进包** | C6 |
 | 9 | **MSI 链路实际验收** | G22 脚本已实现；真机 MSI 生成/安装/升级/卸载待崔总验收 | G22、`specs/release-windows-msi.md` |
-| 10 | **应用内回收站** | **必加（崔总 2026-10-09 定）**，形态待崔总规划后再写规格；⚠️ 与既有「删除 = 移到系统回收站」（`AGENTS.md` §2.3）是两回事：那条是删除动作的目的地，这条是应用内可见/可恢复的回收站形态 | 待规划（规划后转 `specs/`） |
+| 10 | **应用内回收站** | **✅ 已完成（2026-10-10）**：库内 `recycle/` 目录 + 拖动删除（统 pointer）+ 回收站视图 / 还原 / 清空；`Delete` 键保留（按钮 + 确认），拖动免确认；真删只有拖动一条路 | `specs/library-recycle-bin.md`；`implementations/2026-10-10_library-recycle-bin.md` |
 
 ---
 
@@ -50,6 +50,17 @@
   收益：压高光不出彩边、极端亮色更稳；成本：中等（要动显示链的颜色回贴方式）。
   现状：正向高光已有近似（`neutralize_positive_highlights`），负向仍是逐通道。
   落点：`crates/raybend/src/develop/pipeline.rs`。评估依据：本会话 2026-10-09 的 RR 对比报告。
+
+* **日志 / 崩溃采集 / 问题报告**（崔总 2026-10-10 定档；**2026-10-12 部分开工**）：
+  **已做（W1/W2/W4/W3-α）**：运行日志（`log` + 自研 writer：2 MiB × 10、20 MiB 硬上限、出口脱敏、会话头、worker stderr 管道接回）、
+  panic 同步记录（`crashes/RB-*/report.{json,txt}` + 日志尾 200 行 + backtrace）、未正常退出兜底（`session.lock`）、
+  独立崩溃助手（`raybend-crashpad` + crash-handler/minidumper，落 `dump.dmp`）、
+  **崩溃后弹窗 → 系统另存为 → 导出报告包**（zip：report + 日志 + 可选 dump + 《提交指南.txt》；不报告则不再问）。看日志的位置与判读方式：`AGENTS.md` §5.8。
+  **仍留本板块（崔总 2026-10-12 明确：发送接收以后再说）**：W3 剩余（报告对话框，需先出 `.pen`；「导出诊断包」命令；复制报告摘要；`mailto:` 预填）
+  与 T1 上传（崔总 Azure VM 上的自建接收服务 + 邮件通知）；W5 WebView2 `ProcessFailed` / 前端上报 / 卡死看门狗。
+  红线不变：不记用户实际信息、**不自动上传**、不接第三方崩溃平台（与 `docs/privacy.md` 现有承诺一致）。
+  规格：`specs/logging-and-crash-report.md`（含线协议契约、脱敏映射表、服务端与部署加固清单、波次划分与验收清单、调研参考 URL）。
+  已拍：release 保持 `panic = "abort"`；符号（`strip` / 行号表）策略**发版前再拍**（当前 dev 构建有行号，发布版 backtrace 只有地址）。T1 的五项待定仍未定。
 
 ---
 
@@ -139,7 +150,7 @@
 | B-2 | **Nikon HE / HE★ 压缩不支持**：`NEF compression Some(HighEfficency) is not supported` | `Z 8` #6616（文件名标 Lossless，但实测走 HE 分支 —— 以解码器报错为准） | 新尼康的 HE 档（省空间模式；默认无损压缩档正常） | 上游补；或从 B2 fork 里吸收补丁 |
 | B-3 | **Sony arw6（新式压缩）机型库缺 mode 条目**：`Unknown camera, model 'ILCE-7M5', make: 'SONY', mode: 'arw6'` | `ILCE-7M5`（A7 V）#8846 | A7 V 一代起的新压缩档（A1 II / A9 III 等同理） | 上游机型表；我们这边只能等/换后端 |
 | B-4 | **Hasselblad CFV 100C 不在机型库**：机型串带快门模式 `CFV 100C/Electronic Shutter` | `CFV 100C` #7782 | CFV 100C / X2D 之后的新哈苏 | 同上；**预览已经能出**（strip 提取修好了），只缺完整解码 |
-| B-5 | **DNG 元数据尺寸取到缩略图**：Ricoh GR IIIx DNG 报 `160×120`（真尺寸 6000×4000 在 SubIFD）；CR3/RAF 报 `0×0` | `GR IIIx` #5818 等 | tile 比例、看图档位判定（不阻塞出图） | 归 `media::meta`：DNG 优先取 `NewSubFileType=0` 那个 SubIFD 的尺寸（或 `DefaultCropSize`），CR3 走 ISO-BMFF 的 `ispe`。独立小活，未排期 |
+| B-5 | **DNG 元数据尺寸取到缩略图**：Ricoh GR IIIx DNG 报 `160×120`（真尺寸 6000×4000 在 SubIFD）；CR3/RAF 报 `0×0` | `GR IIIx` #5818 等 | tile 比例、看图尺寸判定（不阻塞出图） | 归 `media::meta`：DNG 优先取 `NewSubFileType=0` 那个 SubIFD 的尺寸（或 `DefaultCropSize`），CR3 走 ISO-BMFF 的 `ispe`。独立小活，未排期 |
 | B-6 | **两个容器变体没接进扩展名表（优先级低）**：`media::kind` 的 RAW 列表里没有 `.ori`（奥林巴斯高分辨率）与 `.fff`（哈苏），这两类文件会被当作 `Other` 跳过；上游 rawler 的格式表里两者都在 | 暂无样本（需要一个 `.ori` / `.fff`） | 只有这两个扩展名；`.orf` / `.3fr` 正常 | 先拿到真样本再动：`.ori` 是 ORF 结构（预检的 `IIRO` 能过），`.fff` 的魔数待实测确认（若也是标准 TIFF 才能直加）。崔总 2026-10-05 定：**优先级低，不急**。见 `implementations/2026-10-05_readme-and-future.md` |
 
 （B-5 严格说属「RAW 支持矩阵」的缺口而非解码本身，一并放这里免得下次又翻一遍。）
@@ -261,12 +272,81 @@
   内嵌预览够大（≥ 所需尺寸的 75%）就用预览，否则退回**完整解码**。两条路的颜色与亮度不同
   —— 预览是相机处理的、完整解码是我们的最简处理（无机内风格、无色彩管理）。
   实测观感：双击点开 RAW 时「模糊→清晰」的同时颜色/亮度也变一下。
-* **为什么先不收敛**：看图档位要的是清晰度（用户拍板）。把阀值提到 100% 会让看图永远吃预览（糊），
+* **为什么先不收敛**：这条路只服务**缩略图**（网格 / 胶片带）；看图（view / compare / 全屏 / editor）
+  一律走 `Full`（原图像素，2026-10-11 定）。把阀值提到 100% 会让缩略图永远吃预览（糊），
   降下来会让小图也走完整解码（慢）。判据与位置的说明写在 `rawler_backend.rs` 的 `pick_embedded`。
 * **真正的收敛点**：**Rust 按规范渲染出位图 → 前端只负责拖拽/缩放 → 渲染结果按 `render_signature` 缓存**。
   这属于 M3 编辑里程碑的原生视口（spike 已验收）；届时「缩略图 / 看图 / 导出 / 入库」共用同一条渲染管线，
   两条路并成一条，缓存键里已经预留了 `render_signature`（含 `pipeline_ver`）。
 * **触发条件**：M3 编辑视口产品化（或在此之前有人被这个观感差异咬到两次）。
+
+---
+
+### C10　HEIC 解码支持：调研结论（2026-10-09 摸排，**暂不接入**）
+
+> **决定（崔总 2026-10-09）**：成本太高，**暂不接入**。本节只留调研结论与将来真要做的路线，不排期、不立 todo。
+> 触发条件：真实用户库里有值得在意的 HEIC 数量（手机导入常态、房源/客户素材），届时直接从下面的「开工清单」起手。
+
+**一句话结论**：HEIC 现在是「能导入、能建索引、能读元数据，但**像素链路全线断开**」——
+导入时小图没预览**不是导入环节缺功能，而是缺 HEVC 解码器**。
+
+**全链路现状**（2026-10-09 用本仓真实入口实测）：
+
+| 环节 | 现状 |
+| --- | --- |
+| 识别 / 导入 / 建索引 | ✅ `media::kind` 扩展名表含 `heic` / `heif`，拷贝、注册、去重正常 |
+| EXIF 元数据 | ✅ 能读（`kamadak-exif` 0.6 支持 HEIF 容器）—— 但**尺寸取不到**：尺寸只在容器 `ispe` 盒里，实测 `media::meta` 给 `0×0`（tile 只能用占位比例，信息区尺寸为空） |
+| 导入 tiles / 浏览网格 / 胶片带 | ❌ 占位图（深底 + “IMG” 字样） |
+| 看图 / `fullscreen` | ❌ `screen` 档走 Rust 渲染 → 解不开 → 前端静默退回网格占位图 |
+| 编辑器 / 直方图 / 定稿 / 导出 | ❌ 都要像素，卡在同一个入口 |
+| 评级 / 标签 / 色标 / 集合 / XMP sidecar / 目录整理 | ✅ 不碰像素，不受影响 |
+
+**为什么它比 RAW 还难占便宜**（崔总的判断，实测确认）
+
+1. **没有便宜的兜底预览**：RAW 有自己的内嵌 JPEG 快路径（`media::tiff` 有界提取，不依赖机型库），所以网格永远有图；
+   HEIC 的内嵌缩略图是**同一编解码族的 HEVC 项**，不是 JPEG —— 没有真解码器，一张图都出不来。
+2. **浏览器不能代劳**：Windows 上 Chromium / WebView2 不做 HEIC 解码（`<img>` 直接吃 HEIC 不可靠，
+   上游 issue 长期未解决：https://github.com/MicrosoftEdge/WebView2Feedback/issues/1530 ）——
+   AVIF 那种「`<img>` 自己会解」的便宜不存在，**连看图都必须走 Rust 解码**。
+3. 于是成本形态与 RAW 相同（自带解码器 + 缓存/失效策略），却没有 RAW 的机型覆盖红利（HEIC 是单一格式）。
+
+**根因**：全仓只有一条解码入口 —— `thumbnail::render::decode_file`（缩略图 / 看图 / 直方图 / 像素口）
+与 `color::input::decode_bitmap`（色彩管理 / 编辑器 / 导出），都基于 `image` 0.25，
+**它没有 HEIC 解码器**（只有 AVIF）。
+
+**实测方法与证据（可复现）**：在 `crates/raybend` 上直接调真实入口，7 张公开样本
+（libheif `examples/example.heic`、nokia `content/images/*.heic`、GitHub `tigranbs/test-heic-images`、
+`tbraun96/heic-rs` 的 fixtures）`render_file(Grid/Strip/Screen)` 与 `display::pixels(Screen/Full)`
+**全部 `Ok(None)`**；iPhone 样张的尺寸只存在于容器 `ispe`（实测 3992×2992、4242×2828 等）。
+（探针是临时测试，已删；样本已从本地清掉，需要时按上面的出处重下。）
+
+**候选解码器**（将来要做时的选型表）：
+
+| 编号 | 候选 | 许可 | 备注 |
+| --- | --- | --- | --- |
+| C10-a | [libheif](https://github.com/strukturag/libheif) + libde265 | LGPL-3.0（两者） | 事实标准（ImageMagick 等在用）、最稳；代价是 C 工具链：Windows 走 vcpkg 或照 dav1d 的套路自建静态库（`scripts/build-dav1d-win.cmd` 同款）。**若要开工，这是首选路径** |
+| C10-b | [imazen/heic](https://github.com/imazen/heic) | AGPL-3.0-only（与本项目一致） | 纯 Rust + SIMD，22k 行、8 个版本（2026-03 起），三个纯 Rust 候选里最成熟 |
+| C10-c | [heic-rs](https://github.com/tbraun96/heic-rs) | MIT OR Apache-2.0 | 纯 Rust、无 unsafe，9.6k 行，2026-09 才首发（很新） |
+| C10-d | [heif-oxide](https://github.com/dan335/heif-oxide) | MIT OR Apache-2.0 | 薄封装 `rust_h265`，2.3k 行，最早期 |
+
+> 纯 Rust 路线的诱惑是免掉 C 构建链（Windows 侧最贵的那一段）；libheif 路线的优势是解码质量/覆盖率无人质疑。
+> 真要开工时先按 `tbraun96/heic-rs` 的 fixtures（含 `with-exif` / `rotated-90` / `photo-2048`）做一轮对比再定。
+
+**开工清单**（接入时必须一并处理，都是这次摸排翻出来的）：
+
+1. **缓存失效**：HEIC 的占位图已经以**正常缓存签名**写进 `thumbs.db`（`avif-q90-*-v15-*`），
+   不处理的话接了解码器也还是显示占位图 —— 要么 bump `PIPELINE_VERSION`（项目惯例，代价=全库缩略图重生成），
+   要么按源文件扩展名定向清理旧行（需先确认 `thumbs.db` 是否存路径）。
+2. **导入收尾会报错**：`prepare_source_images` 对 HEIC 直接报「无法生成 SOOC 预览」，
+   缩略图任务重试 3 次（30s 退避）后标失败 —— 现状下日志会刷，接了解码自然消失。
+3. **尺寸 `0×0`**：顺带补 ISO-BMFF 的 `ispe` 解析（`media::meta`；与 §B-5 的 CR3 尺寸是同一个小活），
+   或者接了解码器后直接用解码尺寸。
+4. **方向双转风险**：HEIC 同时有容器 `irot`/`imir` 与 EXIF `Orientation`，必须确认只转一次
+   （先照 `rotated-90.heic` 这类样本验）。
+5. **进程隔离**：HEIC 解码要不要进独立 worker（现状缩略图队列在应用进程内）——
+   纯 Rust 解码器无 unsafe，可先在 worker 线程；C 库则以进程隔离更稳（照 §6.3 的红线）。
+6. **许可与文案**：`THIRD-PARTY-NOTICES.md` 登记、`memory/FUNCTION-IMAGING.md` §1.4 / §8、
+   `README*.md` 的 HEIC 脚注（现在只写「预览缺解码器」，实际是显示与编辑都缺）。
 
 ---
 
@@ -293,8 +373,8 @@
 * **现状对应**：decode 已经只做一次（线性源常驻显影线程，**只在换照片时重解**）；
   白平衡 / 曝光确实在 develop 早期（线性域），曲线与色度在后段。
   **2026-09-24 已补上两件**（人类当天追加）：
-  * **拖动中只算预览档** —— `render::tier::tier_for_params`：手指还按着时一律 `Preview`
-    （1:1 也不做全尺寸），松手那一下按缩放重新算 ⇒ 「释放鼠标才对全图做处理」；
+  * ~~拖动中只算预览档~~ —— **已废弃**（崔总 2026-10-11：不存在看图档位，任何看图统一到原图；
+    要提速只能从管线/调度上想办法，不许用「小一号的图」换时间）；
   * **限流两层**：前端按帧合并（只发最后一个值）+ 后端显影线程 `merge_jobs` 把队列里
     被顶替的任务合并掉（不重复算）。
   仍缺：**视口裁切计算**（1:1 时只算可见区域，现在是整张算完再采样）与**分期边界与缓存**
@@ -484,6 +564,26 @@ commands panel、快捷键设置和标题栏菜单都是它的不同呈现。未
 * **触发条件**：开始规划 AI 助手 / 外部 MCP 接入时；
 * **复用纪律**：MCP、commands panel、菜单、快捷键最终调用同一业务动作，差异只在入口与权限适配层。
 
+
+### E7　报告回流 → AI 自动分诊与修复候选（崔总 2026-10-10 提出，**未评估**）
+
+想法来源：`specs/logging-and-crash-report.md` 的 T1 接收服务落地后，报告是**结构化**的（崩溃指纹、版本、渠道、backtrace、日志尾部），
+那就不必人肉逐个看 —— 服务器上可以起一个 agent：自动聚类 → 定位到模块/函数 → 生成候选补丁 + 复现用例。
+
+**能自动的**：分诊（同指纹合并、按版本/渠道切片）、定位（backtrace + 日志上下文）、
+把「确定性纯逻辑」类缺陷做成带单测的候选 PR；与 E6 天然衔接 —— 把开发侧工具暴露成 MCP 工具给 agent 用。
+
+**不能自动的（两条既有红线，且不建议打开）**：
+
+* `AGENTS.md` §2.1：**发布与推送必须由人类执行** —— 「自动发版」与这条直接冲突；
+* `AGENTS.md` §2.8：GUI 交互、视觉正确性、性能体感、色彩正确性只能真人验 —— 补丁「编译通过 + 单测通过」不等于修好了。
+
+现实预期：初期报告量小（一天几份），价值主要在**分诊与复现**，不在写代码；
+「自动合并 / 自动发版」永不开启 —— 一个自动发版的客户端 = 供应链风险。
+
+* **触发条件**：T1 接收服务稳定运行、报告有足量积累之后；
+* **前提**：报告格式（`manifest.json` schema v1）与崩溃指纹口径先稳定。
+
 ---
 
 ## F. 平台扩展
@@ -534,6 +634,8 @@ commands panel、快捷键设置和标题栏菜单都是它的不同呈现。未
 | G13 | **库文件加密** | 用户 2026-09-15 明确「留到 future」。**预想目的**：① 库放在移动硬盘/笔记本上丢失时，防止他人直接打开 `catalog.db` 看到照片清单、路径、评分与关键词（**元数据泄露**比照片本身更敏感）；② 便于把库放进不信任的存储（NAS、共享盘）；③ 将来若做云同步，加密是前置条件。**注意**：若只加密 catalog 不加密 `photos/`，照片本身仍是明文 —— 要真正防泄露需连带考虑照片容器加密或全盘加密配合。实现候选：SQLCipher（重依赖，需评估 Tauri/Windows 交叉编译）或应用层加密敏感列 | 有实际隐私需求时，或云同步（G3）启动前 |
 | G14 | **`photos/` 目录名可配置** | 库根下的落地目录名目前固定为 `photos/`（`memory/FUNCTION-REPOSITORY.md` §1）。有人习惯 `originals/`、`Photos/` 等。做成库级设置需同时处理「改名前后的历史文件仍要能找到」 | M1 之后，有人提出时 |
 | G15 | **与 Luclin `Gid` 的互操作** | 用户现有体系用 `Gid`（时间戳 + shard + 随机数 → 定长 base62，上游默认 18 位）生成唯一 ID。raybend 的库 ID 取的是该方案的**裁剪版**（`memory/FUNCTION-REPOSITORY.md` §2.5：去掉 shard、固定 16 位，已实现于 `store::ids`）。将来若要把库登记到那套服务端，需要双向转换：**补回 shard 段** + 移植 `Gid` 的 `toUpper`（base36 大写、定长 20）形式；注意 base62 在大小写不敏感文件系统上的风险 | 决定对接 Luclin 体系时 |
+| G26 | **库内小图缓存的 GC（接上已经写好的回收器）** | **现状**：`_sources/thumbs.db` 只服务**库内**文件（库外 2026-10-11 起只在进程内存里），但**既没有容量上限，也没有任何回收**：`thumbnail::cache::gc(conn, max_bytes, now)`（frecency：`pinned` 保留 → `hits` 少先走 → `last_used_at` 最久远先走）与 `drop_stale_signatures(conn, sigs)`（按**前缀**保留当前签名、收走旧版本孤儿）**两套都有实现、全仓却没有一个调用点**。于是：库内小图一直涨；每次改口径（2026-10-11 去掉 192 档、管线 v7→v16 等）留下的旧签名行**永远不会被读、也永远不会被删**（用户机器实测那份到过 **148 MB / 4179 行**，绝大多数是死行）。**要做的**：① 接 `gc`（容量上限可放 `app.db` 设置项，或先给个 1–2 GB 的默认值；运行时机照库根 `FullCache::maybe_enforce_capacity` 的形状 —— 写缓存之后、有间隔地跑，别每次写都扫）；② 接 `drop_stale_signatures`（管线版本 / 口径变化时收孤儿）；③ 设置面板里给「清缓存」入口 + 显示占用（`stats()` 已经能给 entries/bytes/by_size）。**注意**：`render_sig_with_edit` 的签名是动态的，判据必须是**前缀匹配**（`drop_stale_signatures` 已经这么写了，别改成 `NOT IN`）；`pinned` 的条目**永不淘汰**；红线 `AGENTS.md` §6.5 —— `app.db` / `catalog.db` / LUT 本体**不是**可删缓存，库根 `cache/full/` 又是另一套（`FullCache::gc_latest` + 容量清扫），别混。**触发条件**：用户抱怨磁盘占用 / 做「缓存设置」面板时 / 发版前（现在装到用户机器上它只会涨） | 有需求时，或做缓存设置面板时 |
+| G25 | **JPEG 解码改用 DCT 缩放（libjpeg-turbo 的 1/8 缩放解码）** | **登记原因**：库外（import）出 384 缩图时，单张 ~200 ms 里约 120 ms 花在**全尺寸解码 + 缩放**上（实测见 `implementations/2026-10-11_import-tiles-jpeg-and-window-queue.md`）。JPEG 可以在解码时直接缩（1/2、1/4、1/8 的 DCT 缩放），把 6000px 解到 750px 再缩到 384 —— 预期单张 **200 ms → 30–60 ms**（一屏 24 张 1.5 s → 0.4–0.6 s）。**代价**：新增 C 依赖（[libjpeg-turbo](https://github.com/libjpeg-turbo/libjpeg-turbo) 或 [mozjpeg](https://github.com/mozilla/mozjpeg)，经 `turbojpeg`/`mozjpeg-sys` 绑定）→ Windows 侧要照 dav1d 的套路自建静态库（`scripts/build-dav1d-win.cmd` 同款）+ `THIRD-PARTY-NOTICES.md` 许可登记（IJG/BSD-3 混），符合 `AGENTS.md` §2.9「新增大型依赖先讨论」。**触发条件**：import 出图体感再被抱怨，或做「大目录秒开」时；本轮（两档缩图 + 库外只在内存）已把最容易拿的几档收益拿完 | 有需求时，或 import 吞吐成为瓶颈时 |
 | G12 | **吸附（snap）的实际行为** | 设计稿把吸附开关列为「以后会加」的占位；M1-4 只做了它的视觉与状态（按下就是按下）。真要做：拖动照片时吸附到网格/边缘，需与视口变换（M2）一起设计 | M2 视口完成后 |
 | G18 | **后端错误文案的 i18n** | 界面文案已经全部进语言包（中/英，有 `pnpm lint:i18n` 守门），但**后端（Rust）抛给前端的错误句仍是写死的中文**（`crates/raybend/src/error.rs` 的 `thiserror` 文案、`src-tauri` 的命令错误、扫描 problems 等）。要做的话得改成「错误码 + 参数」的结构化错误走 IPC，前端加一层 `error.*` 映射与回退（拿不到 code 就显示原话）。**登记原因**：范围不小且现在没阻塞（工作语言就是中文），但一旦真要分发多语言版，它是最大的一块 | 做多语言分发之前，或 Web/CLI 也复用核心库时 |
 | G19 | **统一 UI 状态池（命令可用性 → 总状态）** | 崔总 2026-09-23 提的方向：把快捷键、命令可用性与 UI 组件状态接进**一个状态池**，由统一状态驱动。本轮（2026-09-24）只做了**最小收敛**：`lib/commands.ts::availabilityOf` 把「能不能用」收成一条判定，分发器 / 命令面板 / 标题栏菜单读同一份（之前三套口径，正是「F11 搜不到」的温床）。真正的状态池是更大的重构：状态源从「各工作区注册的动作槽」改为共享 store，收益是跨界面一致性（菜单/面板/按钮/热键不会各说各话），风险是动到全部工作区的状态接线 | 命令/界面数量再长一波，或再出现一次「同一个能力在不同入口说法不一致」的 bug |
@@ -709,7 +811,7 @@ M1 里「导入模版」**纯手输**（`LibrarySettingsDialog`：一个输入�
 * **多仓与离线卷**：多仓同时打开、跨仓搜索、拔插盘降级与自动重定位
 * **缓存治理与任务中心**：容量/保留期/路径设置、缓存面板与一键清理、统一任务中心
 * **备份、恢复、完整性与诊断**：**数据备份支持**（定期策略 + 恢复 UI + 指引）、`integrity_check` 调度、
-  日志与诊断包；RAW worker 失败接进统一诊断
+  日志与诊断包（**已移出本节：见「发版后（after release）」板块的日志 / 崩溃条目**）；RAW worker 失败接进统一诊断（该条目已含）
 
 ---
 
@@ -717,6 +819,10 @@ M1 里「导入模版」**纯手输**（`LibrarySettingsDialog`：一个输入�
 
 | 日期 | 变更 |
 | --- | --- |
+| 2026-10-12 | **日志 / 崩溃采集部分开工（W1+W2+W4）**（崔总当天改口径：「先把日志这套建起来，发送接收以后再说」）：运行日志（`log` + 自研 writer：2 MiB×10 / 20 MiB 硬上限 / 出口脱敏 / 会话头 / worker stderr 管道接回）、panic 同步记录、未正常退出兜底、独立崩溃助手 `raybend-crashpad`（crash-handler + minidumper）；选型由 `flexi_logger` 改为**自研 writer**（核源码后确认它给不了有界队列与按目录总容量清理）。第三层（报告包/发送）与 W5（WebView2/前端/看门狗）留在本条。看日志位置：`AGENTS.md` §5.8。 |
+| 2026-10-10 | **库级回收站（应用内回收站）落地**：库内 `recycle/` + 拖动删除（统一 pointer）+ 回收站视图/还原/清空；`Delete` 键保留（按钮+确认）而拖动免确认；同批完成**快捷键场景化**（同键跨场景并存，browse 删除与 export 移出队列拆为两条）。规格 `specs/library-recycle-bin.md`、`specs/command-scenes.md`；画稿 `design/browse.pen`。Future Release #10 结项。 |
+| 2026-10-10 | 崔总提出「服务端报告 + agent = 自动修 bug / 自动发版」设想；**登记为 E7（未评估）**，并写明两条不可自动化的既有红线（§2.1 发布由人执行、§2.8 真机验收归人类）与「自动合并永不开启」。 |
+| 2026-10-10 | **新增「发版后」条目：日志 / 崩溃采集 / 问题报告**（崔总指示登记到该板块）：三层 = 运行日志（20 MiB 硬上限 + 出口脱敏）/ 异常采集（panic·minidump·前端·WebView2·worker·卡死·未正常退出）/ 报告包与提交（T0 本地导出 + mailto；T1 Azure VM 自建接收服务 + 邮件通知）；详细规格 `specs/logging-and-crash-report.md`；J 节「日志与诊断包」半句移入该条目。 |
 | 2026-10-09 | 崔总定：**应用内回收站发版前必加**，形态待规划；登记为 Future Release #10（与「删除=系统回收站」区分）。 |
 | 2026-10-07 | editor presets 审计问题逐条修复并补回归（等高容器、选中收敛、名称上限、库串行、payload 版本契约、新建错误区分、rev 单次、应用前重读 LUT）；记录 `implementations/2026-10-07_editor-presets-audit-fixes.md`。状态仍为**已完成、待真机验收**。 |
 | 2026-10-04 | 崔总确认 XMP 与 editor presets **已完成，待验收**；本轮 XMP 审查缺陷修复见 `implementations/2026-10-04_xmp-audit-fixes.md`。当前完善色彩管理与文件管理，二者完成并验收后最后推进 CI 和发版，由其它会话处理。 |
@@ -889,3 +995,41 @@ RawTherapee / RapidRAW 是**首批成员**（我们 RAW 开发不做极致，专
 最多保留 32 个访问过的范围，监听本目录、实际 `_RAW` 与父目录，全部非递归。
 照片根的父目录用于发现 `photos` 整体替换；事件在入队前排除 DB/cache/隐藏/临时文件，避免自触发。
 200ms 去抖、连续事件最多等待 1s，积压超限改为重扫活跃范围。原生事件不能替代进入、展开与回焦点读盘。
+
+### 2026-10-11：库级「默认显示变体 = SOOC」（快档）
+
+崔总提出：RAW 首开要等 3–5 秒很正常，但**想要更快时可以在库里把默认显示变体设成 SOOC**
+（SOOC 是原文件直读，毫秒级）—— 这是一个**每库偏好**（设备级还是库级、放 `catalog` 还是 `app.db` 待定），
+不是全局默认；`latest` 仍是出厂默认（编辑结果才是用户要看的）。
+
+落点提示：库设置（`catalog` 表 / `app.db` 的 library 偏好）+ 浏览右栏变体下拉的「设为默认」+
+`display-variants.ts` 的初始 `choice`（现在是 `latest`）。与 `specs/view-true-image.md` §0.4 的
+「缓存不是必须依赖」互补：这条是**用户可控的提速开关**，不是降档充数。
+
+### 2026-10-11：镜头校正用「域外像素」（裁切晚于校正）
+
+真库核对发现：RAW 文件头 = 整传感器帧（5264×3904），rawler 的显影管线裁到官方 4:3
+（5184×3888）；我们自己的镜头校正（`develop::lens` 的 warp）跑在**裁切之后**，
+于是畸变重采样在四边拿不到那圈域外像素（拉伸/发虚的边缘）。
+
+方向：线性解码停在 `CropActiveArea`（或更早），把官方裁切之外的**域外像素**一起交给
+镜头校正，**校正之后再裁**到官方输出尺寸。输出尺寸不变（5184×3888 = 相机 4:3），边缘质量变好。
+
+落点与顺序约束（2026-10-11 核对）：
+
+* `raw/rawler_backend.rs` 的 `LINEAR_STEPS` 去掉 `CropDefault`（`BROWSING_STEPS` /
+  `WORKING_STEPS` 同理，三条步骤表要一起考虑）；于是线性源 = 5264×3904（整帧）；
+* 镜头 warp 是 `develop::pipeline::render_develop16` 里的**第一个阶段**（现状已经是
+  「warp 在线性源上跑」✓，只是线性源已经被裁过）；
+* **官方裁切要重新从元数据读出来**（rawler 的 `crop_area`/`active_area` + `Rect::adapt`
+  同口径；这套读法 2026-10-11 实现过一次又撤了 —— 撤回的是「拿它当显示尺寸」，
+  这次是**管线内部裁切**，用途不同）：warp → **官方裁切** → 用户几何（裁切/旋转）。
+  ⚠️ 顺序不能反：用户几何的矩形以官方尺寸为基准，先裁官方那一步不能省，
+  否则用户裁切会整体偏 1.5%。
+* 改之前先量一张真 RAW 的边缘像素（四边各 40px 的观感），确认确实变好。
+
+G9 的证词：rawler 相机定义 `data/cameras/panasonic/g9.toml` 里 `active_area = [0,0,0,0]`
+（整帧都是有效区、没有掩蔽黑边），文件 5264×3904 全是真实像素，官方 4:3 输出 5184×3888
+—— 所以那圈 80×16 的域外像素**是真像素**，对畸变重采样有用。
+
+崔总 2026-10-11：「域外尺寸应该可以用于镜头校正时的像素挪移时的计算。这个要处理。」

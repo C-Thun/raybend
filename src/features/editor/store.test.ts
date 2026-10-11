@@ -27,7 +27,7 @@ test("屏幕打样不污染照片编辑版本或便携载荷",()=> {
   assert.deepEqual(store.developPayload(),before);
   store.loadDevelop({}, {}, {color:{process_version:"linear_rec2020_v2",source:{kind:"assumed_srgb"}}});
   const snapshot=store.presetSnapshot(["colorManagement"]);
-  assert.deepEqual(snapshot,{version:2,colorManagement:{processVersion:"linear_rec2020_v2",input:"automatic"}});
+  assert.deepEqual(snapshot,{version:3,colorManagement:{processVersion:"linear_rec2020_v2",input:"automatic"}});
   store.setColorState({process_version:"linear_rec2020_v2",source:{kind:"assigned_rgb_icc",profile_id:"a".repeat(64)}});
   assert.deepEqual(store.presetSnapshot(["colorManagement"]).colorManagement?.input,{profileId:"a".repeat(64)});
 });
@@ -453,4 +453,38 @@ test("applyPresetSnapshot：LUT 不在当前库里 → 不动当前 LUT，也不
   store.applyPresetSnapshot({ version: 1, lut: { id: "lost", enabled: true } });
   assert.equal(store.lutId(), "old");
   assert.equal(store.developRev(), rev, "整份快照只有丢失的 LUT → 没有任何写入");
+});
+
+/*
+ * 回归（崔总 2026-10-10 报告“新建预设里切 Lens chip，当前照片像被关了镜头校正”）：
+ * 新建预设弹窗里的 chip 只是 `presetSnapshot(groups)` 的**参数** —— 它只读当前状态，
+ * 不写回照片。这条测试把“快照是纯读”钉死：任何一组（含 lens）构建快照后，
+ * rev / 载荷 / 镜头侧都不许变；同时快照里确实**记录**了当前镜头设置。
+ */
+test("presetSnapshot 是纯读：勾不勾 Lens 都不动当前照片状态", () => {
+  const store = makeStore();
+  store.setLensProfile("Maker|12mm");
+  store.setLensEnabled(true);
+  const before = {
+    rev: store.developRev(),
+    payload: store.developPayload(),
+    profile: store.lensProfile(),
+    enabled: store.lensEnabled(),
+  };
+
+  const withLens = store.presetSnapshot(["lens"]);
+  store.presetSnapshot(["tone", "color", "detail", "lens", "curve", "lut", "colorManagement"]);
+  store.presetSnapshot(["tone"]);
+  store.presetSnapshot([]);
+
+  assert.equal(store.developRev(), before.rev, "构建快照不抬 rev");
+  assert.deepEqual(store.developPayload(), before.payload, "载荷逐字节不变");
+  assert.equal(store.lensProfile(), before.profile, "镜头 profile 不变");
+  assert.equal(store.lensEnabled(), before.enabled, "镜头开关不变");
+  // 创建预设只是把当时的 profile / 开关**记进预设**（apply 才会写回照片）；
+  // 镜头组按契约写全字段，所以除两个附加字段外还有数值参数
+  assert.equal(withLens.lens?.profile, "Maker|12mm");
+  assert.equal(withLens.lens?.enabled, true);
+  assert.equal(typeof withLens.lens?.distortion, "number");
+  assert.equal(store.presetSnapshot(["tone"]).lens, undefined, "没勾 lens 就不记录该组");
 });

@@ -70,7 +70,7 @@ export interface TimeDay {
 }
 
 export interface TimeGrouping {
-  /** 按日期**倒序**（最近的在前，与照片流的方向一致）+ 未知时间组在最后 */
+  /** 按日期**升序**（先到后，与层内一致）+ 未知时间组在最后 */
   days: TimeDay[];
   /** 拍摄时间缺失的那些（不参与切分） */
   unknown: TimeSlice | null;
@@ -127,6 +127,23 @@ function dayKey(ms: number, offsetMinutes: number): string {
   const month = String(shifted.getUTCMonth() + 1).padStart(2, "0");
   const day = String(shifted.getUTCDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+/**
+ * 一张照片落在**哪一天**（`YYYY-MM-DD`；`takenAtMs === null` → `null` = 未知时间组）。
+ *
+ * 导出给导入网格的**增量分组**用（`features/photo-grid/store.ts`）：界面是
+ * 「按天维护、局部增删」的（建分类 / 移除 / 加入），而「这张该进哪一天」这条规则
+ * **只此一处** —— 增量维护不许自己再写一份，否则两边迟早对不上。
+ */
+export function dayKeyOf(
+  takenAtMs: number | null,
+  offsetMinutes: number | null | undefined,
+  defaultOffsetMinutes?: number,
+): string | null {
+  if (takenAtMs === null) return null;
+  const offset = offsetMinutes ?? defaultOffsetMinutes ?? localOffsetMinutes(takenAtMs);
+  return dayKey(takenAtMs, offset);
 }
 
 /** 本地 0 点对应的 Unix 毫秒 */
@@ -268,8 +285,11 @@ export function groupByTime(
     });
   }
 
-  // 最近的日期在前（与「最新的照片先看」一致）；同一天不可能重复
-  result.sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
+  /*
+   * **日期升序（先到后）** —— 崔总 2026-10-12 定：与「层内升序」一个方向。
+   * 天数键是 `YYYY-MM-DD`，直接按字符串比。
+   */
+  result.sort((a, b) => (a.id < b.id ? -1 : 1));
 
   return {
     days: result,

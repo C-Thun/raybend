@@ -25,7 +25,7 @@
 import { infoKeyApplies } from "../../components/ui/tile-info.ts";
 import type { TileInfoMode } from "../../lib/display-prefs.ts";
 import type { ViewerActions } from "../../components/ui/viewer/actions.ts";
-import type { CommandSpec } from "../../lib/commands.ts";
+import { ALL_SCENES, type CommandScene, type CommandSpec } from "../../lib/commands.ts";
 
 /**
  * 工作流 id（结构与 `shell/flow.ts` 的 `WorkflowId` **一致**）。
@@ -96,6 +96,8 @@ export interface CommandDeps {
   openLicenses?: () => void;
   openTags: () => void;
   openLibrarySettings: () => void;
+  /** 打开诊断目录（日志与崩溃记录；报告包与发送属 W3，未开工） */
+  openDiagnosticsFolder?: () => void;
   openNewRepository: () => void;
   repository?: { canRelease?: () => boolean; release?: () => void; canReconnect: () => boolean; reconnect: () => void; canSettings?: () => boolean; canLocate?: () => boolean; locate?: () => void };
 
@@ -159,6 +161,12 @@ export interface CommandDeps {
     toggleSortDirection: () => void;
     /** 打开删除确认（工作区负责确认与失败清单） */
     requestDelete: () => void;
+    /** 是否在回收站视图（`specs/library-recycle-bin.md`）。 */
+    recycle?: () => boolean;
+    /** 还原回收站里选中的照片。 */
+    restoreRecycle?: () => void;
+    /** 清空回收站（工作区负责强确认）。 */
+    emptyRecycle?: () => void;
     /** 网格里移动「当前那张」（←/→） */
     moveFocus: (delta: -1 | 1) => void;
     /** 进看图（锚点那张） */
@@ -232,9 +240,48 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
   const inImport = (): boolean => inTiles() && deps.flow() === "import";
 
   /** 加一条命令（统一填 `when` 默认值，省得每条都写） */
-  const spec = (command: CommandSpec): CommandSpec => command;
+  /**
+   * 命令的**场景**（`specs/command-scenes.md`）：不写按 id 前缀推断；显式给的优先。
+   *
+   * 有默认键位的命令**必须显式写** —— 冲突检测的正确性只依赖有键命令，
+   * 推断错一条就会让「跨场景同键」的判定出假阴性/假阳性；这里当场 throw。
+   */
+  const sceneOf = (command: CommandSpec): readonly CommandScene[] => {
+    if (command.scenes !== undefined) return command.scenes;
+    const id = command.id;
+    if (id.startsWith("editor.")) return ["edit"];
+    if (id.startsWith("export.")) return ["export"];
+    if (id.startsWith("import.")) return ["import"];
+    if (id === "edit.tags") return ["browse"];
+    if (
+      id.startsWith("browse.") ||
+      id.startsWith("recycle.") ||
+      id.startsWith("ai.") ||
+      id.startsWith("organization.") ||
+      id.startsWith("nav.") ||
+      id.startsWith("mark.")
+    ) {
+      return ["browse"];
+    }
+    return ALL_SCENES;
+  };
+  const spec = (command: CommandSpec): CommandSpec => {
+    if (command.defaultKey !== undefined && command.scenes === undefined) {
+      throw new Error(
+        `[commands] ${command.id} has a default chord but no scene label (specs/command-scenes.md §1.1)`,
+      );
+    }
+    return { ...command, scenes: sceneOf(command) };
+  };
 
   const inExport=()=>deps.flow()==="export";
+  /**
+   * 筛选类命令的场景：浏览与导出（导出**恒筛选语义**，没有设置模式）。
+   * 同一条命令在两处做出的事由 `App.tsx` 的 `mark` 接线按 flow 转（场景口径 `AGENTS.md` §11.5）。
+   */
+  const filterScene = (): boolean => inBrowse() || inExport();
+  /** 筛选态下不需要先选照片（与工具条的 `markDisabled` 同口径） */
+  const markEnabled = (): boolean => deps.browse.filterMode() || deps.browse.hasSelection();
   return [
     // 色彩查看及输入恢复低频，默认键位留空；菜单、命令面板与快捷键设置同源。
     spec({id:"editor.color.open",titleKey:"cmd.editor.color.open",group:"view",scope:"viewer",defaultKey:undefined,when:()=>deps.editor.active(),run:()=>deps.editor.color?.open()}),
@@ -247,9 +294,9 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
     spec({id:"ai.recognizeAgain",titleKey:"cmd.ai.recognizeAgain",group:"edit",scope:"global",defaultKey:undefined,when:()=>deps.flow()==="browse" && (deps.browse.ai?.available?.()??false),run:()=>deps.browse.ai?.recognize(true)}),
     spec({id:"ai.tasks",titleKey:"cmd.ai.tasks",group:"view",scope:"global",defaultKey:undefined,when:()=>deps.browse.ai?.available?.()??false,run:()=>deps.browse.ai?.tasks()}),
     spec({id:"ai.models",titleKey:"cmd.ai.models",group:"view",scope:"global",defaultKey:undefined,when:()=>deps.browse.ai?.available?.()??false,run:()=>deps.browse.ai?.models()}),
-    spec({id:"organization.library",titleKey:"cmd.organization.library",group:"view",scope:"global",defaultKey:"Alt+1",when:()=>deps.flow()==="browse",run:()=>deps.browse.organization?.panel("library")}),
-    spec({id:"organization.buckets",titleKey:"cmd.organization.buckets",group:"view",scope:"global",defaultKey:"Alt+2",when:()=>deps.flow()==="browse",run:()=>deps.browse.organization?.panel("buckets")}),
-    spec({id:"organization.tags",titleKey:"cmd.organization.tags",group:"view",scope:"global",defaultKey:"Alt+3",when:()=>deps.flow()==="browse",run:()=>deps.browse.organization?.panel("tags")}),
+    spec({id:"organization.library",titleKey:"cmd.organization.library",group:"view",scope:"global",defaultKey:"Alt+1", scenes: ["browse"],when:()=>deps.flow()==="browse",run:()=>deps.browse.organization?.panel("library")}),
+    spec({id:"organization.buckets",titleKey:"cmd.organization.buckets",group:"view",scope:"global",defaultKey:"Alt+2", scenes: ["browse"],when:()=>deps.flow()==="browse",run:()=>deps.browse.organization?.panel("buckets")}),
+    spec({id:"organization.tags",titleKey:"cmd.organization.tags",group:"view",scope:"global",defaultKey:"Alt+3", scenes: ["browse"],when:()=>deps.flow()==="browse",run:()=>deps.browse.organization?.panel("tags")}),
     // Dialog actions are reachable from the toolbar and command palette; no default
     // chord so they do not steal photo marking keys.
     spec({id:"organization.addSelected",titleKey:"cmd.organization.addSelected",group:"edit",scope:"global",defaultKey:undefined,when:()=>deps.flow()==="browse",enabled:()=>deps.browse.hasSelection() || (deps.browse.organization?.hasOrganizationSelection()??false),run:()=>deps.browse.organization?.addSelected()}),
@@ -258,9 +305,9 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
     spec({id:"organization.newAuto",titleKey:"cmd.organization.newAuto",group:"file",scope:"global",defaultKey:undefined,when:()=>deps.flow()==="browse",run:()=>deps.browse.organization?.newAuto()}),
     // Seconds-long output with a dialog; deliberately no default shortcut.
     spec({id:"browse.externalEditor",titleKey:"cmd.browse.externalEditor",group:"file",scope:"global",defaultKey:undefined,when:()=>deps.flow()==="browse",enabled:()=>deps.browse.canExternalEditor?.()??false,run:()=>deps.browse.externalEditor?.()}),
-    spec({id:"export.run",titleKey:"cmd.export.run",group:"file",scope:"global",defaultKey:"Mod+Enter",when:inExport,enabled:()=>deps.export?.canRun()??false,run:()=>deps.export?.toggleRun()}),
+    spec({id:"export.run",titleKey:"cmd.export.run",group:"file",scope:"global",defaultKey:"Mod+Enter", scenes: ["export"],when:inExport,enabled:()=>deps.export?.canRun()??false,run:()=>deps.export?.toggleRun()}),
     // 预设文件交换暂不启用；目标预览、失败清单不再作为产品命令。
-    spec({id:"export.enqueue",titleKey:"cmd.export.enqueue",group:"file",scope:"tiles",defaultKey:"Enter",when:inExport,enabled:()=>deps.export?.canEnqueue()??false,run:()=>deps.export?.enqueue()}),
+    spec({id:"export.enqueue",titleKey:"cmd.export.enqueue",group:"file",scope:"tiles",defaultKey:"Enter", scenes: ["export"],when:inExport,enabled:()=>deps.export?.canEnqueue()??false,run:()=>deps.export?.enqueue()}),
     spec({id:"export.reset",titleKey:"cmd.export.reset",group:"edit",scope:"global",defaultKey:undefined,when:inExport,enabled:()=>deps.export?.canReset()??false,dangerous:true,run:()=>deps.export?.reset()}),
     spec({id:"export.stopAll",titleKey:"cmd.export.stopAll",group:"file",scope:"global",defaultKey:undefined,when:inExport,enabled:()=>deps.export?.canStop()??false,run:()=>deps.export?.stopAll()}),
     spec({id:"export.scope",titleKey:"cmd.export.scope",group:"view",scope:"tiles",defaultKey:undefined,when:inExport,run:()=>deps.export?.cycleScope()}),
@@ -299,7 +346,18 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       menu: "file",
       scope: "global",
       defaultKey: "Mod+,",
+      scenes: ALL_SCENES,
       run: () => deps.openSettings(),
+    }),
+    spec({
+      // 日志与崩溃记录在哪、怎么看：`AGENTS.md` §5.8。
+      // 低频诊断动作：**不占全局热键**（菜单 + 命令面板可达，弱菜单原则 —— 不进菜单）。
+      id: "diagnostics.openLogFolder",
+      titleKey: "cmd.diagnostics.openLogFolder",
+      group: "file",
+      scope: "global",
+      defaultKey: undefined,
+      run: () => deps.openDiagnosticsFolder?.(),
     }),
     spec({
       id: "repository.reconnect",
@@ -363,6 +421,7 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       menu: "edit",
       scope: "global",
       defaultKey: "Mod+Z",
+      scenes: ["browse", "edit"],
       when: () => deps.history.applies(),
       enabled: () => deps.history.canUndo(),
       run: () => deps.history.undo(),
@@ -375,6 +434,7 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       menu: "edit",
       scope: "global",
       defaultKey: "Mod+Y",
+      scenes: ["browse", "edit"],
       when: () => deps.history.applies(),
       enabled: () => deps.history.canRedo(),
       run: () => deps.history.redo(),
@@ -386,6 +446,7 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       menu: "edit",
       scope: "tiles",
       defaultKey: "Mod+A",
+      scenes: ["import", "browse", "export"],
       when:()=>inTiles()||inExport(),
       run: () => inExport()?deps.export?.selectAll():(deps.flow() === "import" ? deps.import.selectAll() : deps.browse.selectAll()),
     }),
@@ -395,6 +456,7 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       group: "edit",
       scope: "tiles",
       defaultKey: "Esc",
+      scenes: ["browse", "export"],
       when: () => inBrowse() || inExport(),
       enabled: () => inExport() ? (deps.export?.hasSelection() ?? false) : deps.browse.hasSelection(),
       run: () => inExport() ? deps.export?.clearSelection() : deps.browse.clearSelection(),
@@ -409,17 +471,59 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       enabled: () => deps.browse.hasSelection(),
       run: () => deps.openTags(),
     }),
+    /*
+     * 浏览的删除与导出的移出队列**拆成两条命令**（`specs/command-scenes.md` §3）：
+     * 它们共用 `Delete` 键、但场景不同 —— 场景化之后同键并存是合法的，
+     * 用户也能在快捷键设置里分别改。
+     */
     spec({
-      id: "edit.delete",
-      get titleKey() {return inExport()?"cmd.export.remove":"cmd.edit.delete";},
+      id: "browse.delete",
+      titleKey: "cmd.browse.delete",
       group: "edit",
       menu: "edit",
       scope: "tiles",
+      scenes: ["browse"],
       defaultKey: "Delete",
       dangerous: true,
-      when:()=>inBrowse()||inExport(),
-      enabled: () => inExport()?(deps.export?.canRemove()??false):deps.browse.hasSelection(),
-      run: () => inExport()?deps.export?.remove():deps.browse.requestDelete(),
+      when: () => inBrowse() && !(deps.browse.recycle?.() ?? false),
+      enabled: () => deps.browse.hasSelection(),
+      run: () => deps.browse.requestDelete(),
+    }),
+    spec({
+      id: "export.remove",
+      titleKey: "cmd.export.remove",
+      group: "edit",
+      menu: "edit",
+      scope: "tiles",
+      scenes: ["export"],
+      defaultKey: "Delete",
+      dangerous: true,
+      when: () => inExport(),
+      enabled: () => deps.export?.canRemove() ?? false,
+      run: () => deps.export?.remove(),
+    }),
+    /*
+     * 回收站的两条命令：**默认键留空**（崔总 2026-10-10 定 —— 低频操作、点击不差几秒，
+     * 且不占全局键位；真删更是只有「拖到粉碎卡」一条路，不进注册表）。
+     */
+    spec({
+      id: "recycle.restore",
+      titleKey: "cmd.recycle.restore",
+      group: "edit",
+      scope: "tiles",
+      defaultKey: undefined,
+      when: () => inBrowse() && (deps.browse.recycle?.() ?? false),
+      enabled: () => deps.browse.hasSelection(),
+      run: () => deps.browse.restoreRecycle?.(),
+    }),
+    spec({
+      id: "recycle.empty",
+      titleKey: "cmd.recycle.empty",
+      group: "edit",
+      scope: "global",
+      defaultKey: undefined,
+      when: () => inBrowse() && (deps.browse.recycle?.() ?? false),
+      run: () => deps.browse.emptyRecycle?.(),
     }),
     spec({
       id: "nav.movePrev",
@@ -427,6 +531,7 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       group: "navigate",
       scope: "tiles",
       defaultKey: "ArrowLeft",
+      scenes: ["browse"],
       when: inBrowse,
       run: () => deps.browse.moveFocus(-1),
     }),
@@ -436,6 +541,7 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       group: "navigate",
       scope: "tiles",
       defaultKey: "ArrowRight",
+      scenes: ["browse"],
       when: inBrowse,
       run: () => deps.browse.moveFocus(1),
     }),
@@ -448,6 +554,7 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       menu: "view",
       scope: "global",
       defaultKey: "Mod+1",
+      scenes: ALL_SCENES,
       enabled: () => deps.flow() !== "import",
       run: () => deps.setFlow("import"),
     }),
@@ -458,6 +565,7 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       menu: "view",
       scope: "global",
       defaultKey: "Mod+2",
+      scenes: ALL_SCENES,
       enabled: () => deps.flow() !== "browse",
       run: () => deps.setFlow("browse"),
     }),
@@ -468,6 +576,7 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       menu: "view",
       scope: "global",
       defaultKey: "Mod+3",
+      scenes: ALL_SCENES,
       enabled: () => deps.flow() !== "edit",
       run: () => deps.setFlow("edit"),
     }),
@@ -478,6 +587,7 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       menu: "view",
       scope: "global",
       defaultKey: "Mod+4",
+      scenes: ALL_SCENES,
       enabled: () => deps.flow() !== "export",
       run: () => deps.setFlow("export"),
     }),
@@ -509,7 +619,7 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       titleKey: "cmd.view.filter.toggle",
       group: "view",
       scope: "tiles",
-      when: inBrowse,
+      when: filterScene,
       run: () => deps.browse.toggleFilter(),
     }),
     spec({
@@ -517,7 +627,7 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       titleKey: "cmd.view.filter.clear",
       group: "view",
       scope: "tiles",
-      when: inBrowse,
+      when: filterScene,
       enabled: () => deps.browse.filterMode(),
       run: () => deps.browse.clearFilter(),
     }),
@@ -535,6 +645,7 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       group: "view",
       scope: "tiles",
       defaultKey: "i",
+      scenes: ["import", "browse", "export"],
       when: () =>
         inTiles() || inExport() ||
         infoKeyApplies({ viewing: deps.viewer.viewing(), filmVisible: deps.viewer.filmVisible() }),
@@ -590,6 +701,7 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       menu: "view",
       scope: "viewer",
       defaultKey: "Tab",
+      scenes: ALL_SCENES,
       /*
        * `Tab` 在三个 flow 里都改「显示成什么样」，但**档位表不一样**
        * （browse 四档 / import 三档 / editor 三档，见 `lib/viewer-chrome.ts`）：
@@ -625,6 +737,7 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       menu: "view",
       scope: "viewer",
       defaultKey: "F11",
+      scenes: ALL_SCENES,
       when: () => deps.viewer.fullscreen() !== undefined,
       run: () => deps.viewer.fullscreen()?.(),
     }),
@@ -662,6 +775,7 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
     spec({
       id: "editor.tool.crop",
       defaultKey: "C",
+      scenes: ["edit"],
       titleKey: "cmd.editor.crop",
       group: "view",
       scope: "viewer",
@@ -672,6 +786,7 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
     spec({
       id: "editor.tool.rotate",
       defaultKey: "R",
+      scenes: ["edit"],
       titleKey: "cmd.editor.rotate",
       group: "view",
       scope: "viewer",
@@ -712,6 +827,7 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
     spec({
       id: "editor.tool.compare",
       defaultKey: "B",
+      scenes: ["edit"],
       titleKey: "cmd.editor.compare",
       group: "view",
       scope: "viewer",
@@ -773,6 +889,7 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       menu: "help",
       scope: "global",
       defaultKey: "Mod+K",
+      scenes: ALL_SCENES,
       run: () => deps.openPalette(),
     }),
     spec({
@@ -793,7 +910,7 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       scope: "global",
       run: () => deps.toggleLocale(),
     }),
-    spec({id:"help.docs",titleKey:"cmd.help.docs",group:"help",menu:"help",scope:"global",defaultKey:"F1",enabled:()=>!!deps.openHelp,run:()=>deps.openHelp?.()}),
+    spec({id:"help.docs",titleKey:"cmd.help.docs",group:"help",menu:"help",scope:"global",defaultKey:"F1", scenes: ALL_SCENES,enabled:()=>!!deps.openHelp,run:()=>deps.openHelp?.()}),
     spec({id:"help.licenses",titleKey:"cmd.help.licenses",group:"help",menu:"help",scope:"global",defaultKey:undefined,enabled:()=>!!deps.openLicenses,run:()=>deps.openLicenses?.()}),
     spec({id:"help.updates",titleKey:"cmd.help.updates",group:"help",menu:"help",scope:"global",defaultKey:undefined,enabled:()=>!!deps.openUpdates,run:()=>deps.openUpdates?.()}),
     spec({id:"help.welcome",titleKey:"cmd.help.welcome",group:"help",menu:"help",scope:"global",defaultKey:undefined,enabled:()=>!!deps.openWelcome,run:()=>deps.openWelcome?.()}),
@@ -813,6 +930,7 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       group: "viewer",
       scope: "viewer",
       defaultKey: "Esc",
+      scenes: ALL_SCENES,
       when: () => deps.viewer.viewing(),
       run: () => deps.viewer.actions()?.close(),
     }),
@@ -822,6 +940,7 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       group: "viewer",
       scope: "viewer",
       defaultKey: "ArrowLeft",
+      scenes: ALL_SCENES,
       when: () => deps.viewer.viewing(),
       run: () => deps.viewer.actions()?.prev(),
     }),
@@ -831,6 +950,7 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       group: "viewer",
       scope: "viewer",
       defaultKey: "ArrowRight",
+      scenes: ALL_SCENES,
       when: () => deps.viewer.viewing(),
       run: () => deps.viewer.actions()?.next(),
     }),
@@ -840,6 +960,7 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       group: "viewer",
       scope: "viewer",
       defaultKey: "=",
+      scenes: ALL_SCENES,
       when: () => deps.viewer.viewing(),
       run: () => deps.viewer.actions()?.zoomIn(),
     }),
@@ -849,6 +970,7 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       group: "viewer",
       scope: "viewer",
       defaultKey: "-",
+      scenes: ALL_SCENES,
       when: () => deps.viewer.viewing(),
       run: () => deps.viewer.actions()?.zoomOut(),
     }),
@@ -858,6 +980,7 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       group: "viewer",
       scope: "viewer",
       defaultKey: "0",
+      scenes: ALL_SCENES,
       when: () => deps.viewer.viewing(),
       run: () => deps.viewer.actions()?.toggleFit(),
     }),
@@ -867,6 +990,7 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       group: "viewer",
       scope: "viewer",
       defaultKey: "1",
+      scenes: ALL_SCENES,
       when: () => deps.viewer.viewing(),
       run: () => deps.viewer.actions()?.actual(),
     }),
@@ -876,6 +1000,7 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       group: "viewer",
       scope: "viewer",
       defaultKey: "Enter",
+      scenes: ALL_SCENES,
       when: () => deps.viewer.comparing(),
       run: () =>
         deps.flow() === "import"
@@ -891,8 +1016,9 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
         group: "mark",
         scope: "tiles",
         defaultKey: String(star),
-        when: inBrowse,
-        enabled: () => deps.browse.hasSelection(),
+        scenes: ["browse", "export"],
+        when: filterScene,
+        enabled: markEnabled,
         run: () => deps.browse.mark({ kind: "rating", value: star }),
       }),
     ),
@@ -902,6 +1028,7 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       group: "mark",
       scope: "tiles",
       defaultKey: "P",
+      scenes: ["browse"],
       when: inBrowse,
       enabled: () => deps.browse.hasSelection(),
       run: () => deps.browse.setFlag("pick"),
@@ -912,6 +1039,7 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       group: "mark",
       scope: "tiles",
       defaultKey: "X",
+      scenes: ["browse"],
       when: inBrowse,
       enabled: () => deps.browse.hasSelection(),
       run: () => deps.browse.setFlag("reject"),
@@ -922,6 +1050,7 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       group: "mark",
       scope: "tiles",
       defaultKey: "U",
+      scenes: ["browse"],
       when: inBrowse,
       run: () => deps.browse.setFlag(null),
     }),
@@ -930,8 +1059,8 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       titleKey: "cmd.mark.like",
       group: "mark",
       scope: "tiles",
-      when: inBrowse,
-      enabled: () => deps.browse.hasSelection(),
+      when: filterScene,
+      enabled: markEnabled,
       run: () => deps.browse.mark({ kind: "like", value: "like" }),
     }),
     spec({
@@ -939,8 +1068,8 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       titleKey: "cmd.mark.dislike",
       group: "mark",
       scope: "tiles",
-      when: inBrowse,
-      enabled: () => deps.browse.hasSelection(),
+      when: filterScene,
+      enabled: markEnabled,
       run: () => deps.browse.mark({ kind: "like", value: "dislike" }),
     }),
     ...COLOR_VALUES.map((color) =>
@@ -949,8 +1078,8 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
         titleKey: `cmd.mark.color.${color}`,
         group: "mark",
         scope: "tiles",
-        when: inBrowse,
-        enabled: () => deps.browse.hasSelection(),
+        when: filterScene,
+        enabled: markEnabled,
         run: () => deps.browse.mark({ kind: "color", value: color }),
       }),
     ),

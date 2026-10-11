@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["src-tauri", "crates/raybend"]
+members = ["src-tauri", "crates/raybend", "crates/raybend-crashpad"]
 
 [workspace.package]
 version = "0.1.1"
@@ -12,6 +12,10 @@ repository = "https://github.com/C-Thun/raybend"
 
 [workspace.dependencies]
 libc = "0.2"
+# 诊断层（`specs/logging-and-crash-report.md`）：`log` 只做门面，
+# 落盘是我们自己的 writer（crates/raybend/src/diagnostics/writer.rs，崔总 2026-10-12 定）。
+log = { version = "0.4", features = ["std"] }
+
 # 内部 crate
 raybend = { path = "crates/raybend" }
 
@@ -72,7 +76,7 @@ pollster = "0.4"
 lensfun = "0.7"
 
 # Windows 平台调用：文件身份（GetFileInformationByHandleEx）/ 驱动器类型（GetDriveTypeW）
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Registry", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Registry", "Win32_System_Time", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("cargo-clippy"))'] }

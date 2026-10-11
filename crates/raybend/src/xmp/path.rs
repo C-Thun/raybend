@@ -35,7 +35,7 @@ pub fn sidecar_rel_path(files: &[FileRow]) -> Option<String> {
 
 /// 由一个**库内相对路径**推出 sidecar 的相对路径（`_RAW/` 折算 + 去扩展名 + `.xmp`）。
 ///
-/// 单独公开是因为删除照片（`store::delete`）与导入采纳拿到的就是文件路径，而不是文件行。
+/// 单独公开是因为删除照片（`store::recycle`）与导入采纳拿到的就是文件路径，而不是文件行。
 #[must_use]
 pub fn rel_sidecar_of(rel_path: &str) -> Option<String> {
     let (dir, name) = rel_path.rsplit_once('/').unwrap_or(("", rel_path));

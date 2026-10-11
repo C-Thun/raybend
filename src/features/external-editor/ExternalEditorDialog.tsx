@@ -14,7 +14,7 @@ export function ExternalEditorDialog(props:{store:ExternalEditorStore}){
  return <>
   <Dialog open={store.open()} title={t('external.title')} onOpenChange={open=>{if(!open)store.close();}}>
    <div data-external-editor class="flex flex-col gap-3">
-    <p class="truncate text-fs-1 text-fg-2">{store.target()?.name}</p>
+    <p class="overflow-hidden whitespace-nowrap fade-x-end text-fs-1 text-fg-2">{store.target()?.name}</p>
     {/*
       应用选择器（崔总 2026-09-29）：不要黑底框 —— 直接在窗口底色上按手机应用网格排
       方形图标块，末尾固定一个虚线 + 格新增；没登记过就只有 + 格。点块选中（选中 =
@@ -63,7 +63,7 @@ export function ExternalEditorDialog(props:{store:ExternalEditorStore}){
     <Show when={store.discovering()} fallback={<div data-external-candidates class="flex max-h-72 flex-col gap-2 overflow-auto">
      <For each={store.candidates()} fallback={<p class="text-fs-1 text-fg-3">{t('external.notFound')}</p>}>{app=><div class="flex min-w-0 items-start gap-2">
       <Checkbox checked={store.registered(app.path)||store.picked().has(applicationKey(app.path))} disabled={store.registered(app.path)||store.busy()} label={app.name} onCheckedChange={()=>store.toggle(app.path)}/>
-      <span class="min-w-0 flex-1 truncate text-fs-0 text-fg-3" title={app.path}>{store.registered(app.path)?t('external.registered'):app.path}</span>
+      <span class="min-w-0 flex-1 overflow-hidden whitespace-nowrap fade-x-end text-fs-0 text-fg-3" title={app.path}>{store.registered(app.path)?t('external.registered'):app.path}</span>
      </div>}</For>
     </div>}><p role="status" class="text-fs-1 text-fg-3">{t('common.loading')}</p></Show>
     <Show when={error()}><p role="alert" class="text-fs-1 text-danger">{error()}</p></Show>

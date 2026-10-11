@@ -174,7 +174,7 @@ export function CurveEditor(props: CurveEditorProps): JSX.Element {
     if (svg instanceof SVGSVGElement && svg.hasPointerCapture(event.pointerId)) {
       svg.releasePointerCapture(event.pointerId);
     }
-    // 先松开「拖动中」再落库：松手这一下要让 Rust 侧补全尺寸（`tier_for_params`）
+    // 先松开「拖动中」再落库：松手这一下 Rust 侧要把拖期间合并掉的参数算到底
     props.onDragEnd?.();
     props.onConfirm?.();
   }

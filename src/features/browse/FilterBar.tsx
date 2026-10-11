@@ -52,6 +52,9 @@ export function FilterBar(props: FilterBarProps): JSX.Element {
             : t("browse.likeNone");
       case "lock":
         return lockText(chip.value);
+      case "tag":
+        // 标签词典可能还没拉到（或条目已被删）：退成 `#id`，与组织面板同一口径
+        return props.store.tags().find((tag) => tag.id === chip.value)?.name ?? `#${chip.value}`;
       case "flag":
         return chip.value === "pick"
           ? t("browse.flagWith")

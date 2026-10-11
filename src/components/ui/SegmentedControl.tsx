@@ -77,7 +77,7 @@ export function SegmentedControl<TValue extends string>(
                */
 
             class={[
-              "relative z-(--z-bar) flex h-seg-chip-h shrink-0 items-center justify-center",
+              "relative z-(--z-bar) flex h-seg-chip-h min-w-0 shrink items-center justify-center",
               "rounded-ui px-seg-chip-pad-x transition-colors",
               // 选中项自己铺主色底（见下），指示块只做滑动动画
               "data-[state=checked]:bg-brand",
@@ -86,7 +86,7 @@ export function SegmentedControl<TValue extends string>(
           >
             <ArkSegmentGroup.ItemControl
               class={[
-                "flex items-center gap-1.5 text-fs-2 font-medium whitespace-nowrap",
+                "flex min-w-0 items-center gap-1.5 text-fs-2 font-medium whitespace-nowrap",
                 "text-fg-2 transition-colors",
                 "data-[state=checked]:text-fg-on-brand",
                 "data-[disabled]:text-fg-3 data-[disabled]:opacity-60",
@@ -97,7 +97,16 @@ export function SegmentedControl<TValue extends string>(
                   {option.icon}
                 </span>
               </Show>
-              <ArkSegmentGroup.ItemText>{option.label}</ArkSegmentGroup.ItemText>
+              {/*
+               * 标签超长时**在边缘极短渐隐**，而不是把 chip 撑破或在自己盒子里硬裁
+               * （崔总 2026-10-10）。渐隐用 `fade-x-end-sm`（8px）；
+               * 标签盒随内容收缩，所以再配 `fade-x-end-fit` 让出渐隐区。
+               */}
+              <ArkSegmentGroup.ItemText
+                class="min-w-0 overflow-hidden whitespace-nowrap fade-x-end fade-x-end-sm fade-x-end-fit"
+              >
+                {option.label}
+              </ArkSegmentGroup.ItemText>
             </ArkSegmentGroup.ItemControl>
             <ArkSegmentGroup.ItemHiddenInput />
           </ArkSegmentGroup.Item>

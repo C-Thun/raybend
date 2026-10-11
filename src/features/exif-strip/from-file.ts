@@ -11,9 +11,12 @@ import type { FileExif } from "../../api/types.ts";
 import type { ExifData } from "./types.ts";
 import { formatText } from "./exif-format.ts";
 
+/** RAW 的显示名（不细分 RW2/ORF…）：显示规则的**唯一**字面量处。 */
+export const RAW_FORMAT_LABEL = "RAW";
+
 /** 格式显示名：RAW 一律显示 `RAW`（不细分 RW2/ORF…），常见位图给通用写法。 */
 export function formatLabel(file: FileExif): string | undefined {
-  if (file.kind === "raw") return "RAW";
+  if (file.kind === "raw") return RAW_FORMAT_LABEL;
   const ext = file.ext?.trim().toLowerCase();
   if (!ext) return undefined;
   switch (ext) {

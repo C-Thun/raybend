@@ -132,7 +132,7 @@ export function RepositoryList(props: RepositoryListProps) {
             >
               +
             </span>
-            <span class="min-w-0 flex-1 truncate text-start">
+            <span class="min-w-0 flex-1 overflow-hidden whitespace-nowrap fade-x-end text-start">
               {t("repo.create")}
             </span>
           </button>

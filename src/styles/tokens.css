@@ -60,6 +60,19 @@
   /* 浓度参数：与颜色解耦，改色不影响浓度 */
   --tint-hover: 0.16;
   --tint-selected: 0.22;
+  /* 回收站瓷砖底：辅色的很低浓度（`specs/library-recycle-bin.md` §4.2） */
+  --tint-recycle: 0.08;
+
+  /*
+   * 拖动热区（垃圾桶）：浮起的小方块（`specs/library-recycle-bin.md` §5.1）。
+   * **底用辅色**（崔总 2026-10-11：旧版用 `surface-layer` —— 浅色主题下是纯白方块，
+   * 浮在照片上像界面里不存在的颜色；深色主题下又与 tiles 同色、分不清边缘）。
+   * 凸面 = 顶部一线高光 + 底部一线暗影（inset）；外圈在深色主题下用亮面派生**浅浅的发光**。
+   */
+  --heat-surface: var(--brand-2);
+  --heat-light: color-mix(in oklab, var(--fg-1) 16%, transparent);
+  --heat-shade: color-mix(in oklab, var(--surface-track) 60%, transparent);
+  --heat-outer: color-mix(in oklab, var(--fg-1) 9%, transparent);
 
   /* 浮层遮罩：用池内最深的面派生，不引入新的字面黑 */
   --scrim: color-mix(in oklab, var(--surface-track) 72%, transparent);
@@ -100,6 +113,14 @@
 
   --tint-hover: 0.18;
   --tint-selected: 0.25;
+  /* 回收站瓷砖底：辅色的很低浓度（`specs/library-recycle-bin.md` §4.2） */
+  --tint-recycle: 0.1;
+
+  /* 拖动热区：底用辅色（两个主题同一档）；外圈在浅色主题下是浅浅的阴影 */
+  --heat-surface: var(--brand-2);
+  --heat-light: color-mix(in oklab, var(--surface-layer) 85%, transparent);
+  --heat-shade: color-mix(in oklab, var(--surface-track) 45%, transparent);
+  --heat-outer: color-mix(in oklab, var(--fg-1) 18%, transparent);
 
   /* 浅色主题下遮罩要用**深色**（用户色板里的 `深色`）压暗，
      用浅面派生会把背景「洗白」而不是压暗 —— 那看起来像弹窗没出来。 */
@@ -299,6 +320,17 @@
   );
   /* 按下瞬间，比 hover 再深一档 */
   --state-active: color-mix(in oklab, var(--brand) calc(var(--tint-selected) * 130%), transparent);
+
+  /*
+   * 回收站内的瓷砖底色（`specs/library-recycle-bin.md` §4.2）：**辅色的很低浓度**，
+   * 与既有中性面叠加。它描述「这一栏是回收站」这层语境，不是可点击/选中的状态
+   * （指向与点击仍是全局的 hover / selected）。
+   */
+  --state-recycle: color-mix(
+    in oklab,
+    var(--brand-2) calc(var(--tint-recycle) * 100%),
+    transparent
+  );
 
   /*
    * `easy copy` 的悬停细边框（DESIGN.md §12.1）：固定用品牌主色、约 40% 透明度。
@@ -515,6 +547,13 @@
   --color-state-hover: var(--state-hover);
   --color-state-selected: var(--state-selected);
   --color-state-active: var(--state-active);
+  --color-state-recycle: var(--state-recycle);
+  /* 拖动热区（垃圾桶）：凸面高光/暗影 + 外圈（浅阴影或浅发光） */
+  --color-heat-surface: var(--heat-surface);
+  --color-heat-light: var(--heat-light);
+  --color-heat-shade: var(--heat-shade);
+  --color-heat-outer: var(--heat-outer);
+  --radius-heat: 14px;
   /* 拉杆未填充段（半透；`DESIGN.md` §14.10） */
   --color-slider-track: var(--slider-track);
 

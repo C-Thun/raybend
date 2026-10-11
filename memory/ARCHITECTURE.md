@@ -309,7 +309,7 @@ Tauri 3.0 已进入 alpha（`3.0.0-alpha.0`），已知关键变更：
   logs\
 
 <库根目录>\            # 用户指定，可多个
-  catalog.db          # 库真相源：库 ID、资产、元数据、编辑栈/latest、不可变 issue、修订
+  catalog.db          # 库真相源：库 ID、资产、元数据（含**每文件展示尺寸**）、编辑栈/latest（含输出尺寸）、不可变 issue（含输出尺寸）、修订
   photos\             # 导入的落地目录（模版决定 photos/ 内的相对路径）
     2026-08-15\
       MYP0001.png
@@ -330,7 +330,9 @@ Tauri 3.0 已进入 alpha（`3.0.0-alpha.0`），已知关键变更：
   `%LOCALAPPDATA%\com.cthun.raybend\cache\_sources\thumbs.db`（当前实现：源文件与定稿按不同缓存键共享一库；几万行小 BLOB）；
   **大图**（每个命名 issue 独立一张 1920 AVIF）在**库根**的 `cache/full/`（跟着库走，换机器/搬盘不用重渲染）。
   两处的编码格式统一 **AVIF 质量 90 / 4:4:4**（人类 2026-09-24 定；快照恒为 AVIF，
-  不考虑换 JXL —— 格式范围与 JXL 定位见 `memory/FUTURE.md` C8）。
+  不考虑换 JXL —— 格式范围与 JXL 定位见 `memory/FUTURE.md` C8）——限**库内**：
+  **来源目录（import / 未入库）的图一律 JPEG、只在进程内存里**（崔总 2026-10-11；`AGENTS.md` §2.24）——
+  缩略图档 256 MB（字节）、真身档 10 张，键含文件身份（大小 + mtime）；**不写 `_sources/thumbs.db`**。
 - **真相源规则**：本地编辑/评分/关键词以 **DB 为准**，XMP 只是互操作通道；RAW 永不写回原文件（只写 `.xmp` sidecar）。issue 的 XMP 表达契约见 `specs/issue-xmp-contract.md`，实现规格见 `specs/xmp-sidecar.md`（2026-09-30 草案待审）；**XMP 不是第一公民**，整库备份 = 直接拷 repos 目录；当前尚未写出 sidecar。
 - **写并发**：SQLite 单写者 → 采用**单一写者 actor**（专属线程 + 专属连接，所有写操作串行化），读走连接池；批量事务；`PRAGMA journal_mode=WAL, synchronous=NORMAL, busy_timeout=5000, foreign_keys=ON`。
 - **库身份与多路径**（`memory/FUNCTION-REPOSITORY.md` §2）：库身份 = `catalog.db` 内的唯一 ID；`app.db` 记录「库 ID → 多个路径」。
@@ -351,14 +353,42 @@ Tauri 3.0 已进入 alpha（`3.0.0-alpha.0`），已知关键变更：
 
 ### 6.5 缩略图 / 预览缓存
 
-> **三种图（thumb / preview / 大图）的规格、生成节点与显示规则见 `memory/FUNCTION-IMAGING.md`**
+> **两种缩图 + 真身（thumb / preview / 真身）的规格、生成节点与显示规则见 `memory/FUNCTION-IMAGING.md`**
 > （唯一事实源，含格式支持范围）；本节只讲架构与红线。
 
-- 当前尺度：网格 384、胶片带 192、过渡/定稿预览 1920（最长边）；1:1 大图走实时解码和显影，不进持久缓存。
-- **中性缩略图与编辑结果分开**：未编辑源文件按来源生成；latest 参数变化后刷新当前小图与预览；每个命名 issue 的 384/192/1920 AVIF 快照独立保留，删除定稿才清理该定稿快照。
+- 当前尺度：**缩图 384（网格 tiles 与所有胶片带共用）、过渡/定稿预览 1920**（最长边；~~胶片带 192~~ 2026-10-11 取消）；
+  1:1 真身走实时解码和显影，不进持久缓存。
+- **中性缩略图与编辑结果分开**：未编辑源文件按来源生成；latest 参数变化后刷新当前小图与预览；每个命名 issue 的 384/1920 AVIF 快照独立保留，删除定稿才清理该定稿快照。
 - 缓存键包含资产/来源、尺寸档、渲染签名（含管线版本）；命名 issue 还含 issue ID 与 profile 哈希。latest 作废不能误删命名快照。
 - 当前小图存 `%LOCALAPPDATA%\com.cthun.raybend\cache\_sources\thumbs.db` 的 SQLite BLOB；1920 AVIF 存库根 `cache/full/<asset_id>/`。更细的按库迁移、容量上限、frecency 淘汰与缓存设置面板属于后续优化，不能写成 M3 已有功能。
 - **红线**：删掉整个缓存目录后，功能降级但可从原图和配置重建；`app.db`、`catalog.db` 与导入的 LUT 本体不是可删缓存。
+
+### 6.6 编辑器会话与重活调度（2026-10-10，`specs/editor-session-pipeline.md`）
+
+**权威状态与判据**
+
+- **当前在编哪张** = 显影线程的 `wanted_photo`（粘住）+ 渲染线程 `RenderState.photo_path`；
+  前端只发意图。参照源（SOOC 位图可用性）由命令层按 asset 解析一次、随换照片任务交给显影线程
+  **跨缓存重建保留**（`develop::ReferenceSources`）——不再挂在「过渡帧计划」这种偶然载荷上。
+- **白平衡基线 = 解码真值**：管线是 `temperature_gain_ratio(target, asShot)`；
+  payload 里的 `asShotTemperature` 只是「解码还没有值时的占位」，两路显影都调
+  `params_with_decoded_baseline` 覆盖。落库时温度 dirty 而 `as_shot_k` 缺失 →
+  `develop_commit` 用会话解码真值回填（`editor::decoded_as_shot`），两边都拿不到就记诊断。
+- **源缓存重建判据只有一份**：`source_needs_reload(路径 / 源签名 / 显式照片任务 / 色彩状态)`；
+  legacy 与 V2 共用 —— 几何 / 参照操作**不重解码**。
+- **预览快照命名**：`latest-<profile_hash 前 12 位>-src<源签名>-<base>-v<pipeline>.avif`
+  （拼接只在 `develop::latest_variant`）。栈一变名字就变，**落库不删整目录**；
+  旧文件由 `FullCache::gc_latest`（每资产保留最新 2 份）回收。
+
+**重活调度**
+
+- 一条**进程级优先级队列** `src-tauri/src/work.rs`：P0 交互 / P1 前台等待 / P2 预热 / P3 批量；
+  key 去重 + 同 key 单飞（条件变量等待，不轮询）+ 协作式取消。
+  接入：预览刷新（P2）、定稿快照（P3）、源快照预热（P3）、定稿图自愈（P3）、邻图预热（P2）。
+- **RAW 解码优先级**：`raw::worker::acquire(DecodePriority)` 闸门（不可重入，只包最外层重解码）——
+  编辑器 High / 缩略图 Normal / 导出 Low，批量满载时前台可插队。
+- 过渡帧（进编辑先出图）三条契约：**同版本**（L1 栈指纹快照 / L2 空栈基准图 / L3 不出帧）、
+  **同画幅**（逻辑尺寸 = `geometry.output_size`）、**投递可靠**（`accepts_transition`，不吃任务号闸门）。
 
 ---
 

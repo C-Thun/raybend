@@ -29,7 +29,8 @@ export function Checkbox(props: CheckboxProps) {
       checked={props.checked}
       onCheckedChange={(d) => props.onCheckedChange(Boolean(d.checked))}
       disabled={props.disabled}
-      class={["inline-flex items-center gap-1.5", props.class ?? ""].join(" ")}
+      /* 定位祖先（理由见下方 Switch：Ark 隐藏 input 是 position:absolute） */
+      class={["relative inline-flex items-center gap-1.5", props.class ?? ""].join(" ")}
     >
       <ArkCheckbox.Control
         class={[
@@ -141,7 +142,13 @@ export function Switch(props: SwitchProps) {
       onCheckedChange={(d) => props.onCheckedChange(Boolean(d.checked))}
       disabled={props.disabled}
       aria-label={props.label}
-      class={["inline-flex items-center", props.class ?? ""].join(" ")}
+      /*
+       * Root 必须 `relative` —— 它是 Ark 隐藏 input（`position:absolute`）的
+       * 包含块。没有定位祖先时，隐藏 input 会落在**滚动容器之外**的文档坐标上：
+       * 面板滚过之后它就跑到视口下方，点开关时浏览器为了聚焦它会滚动整个文档
+       * —— 整窗被抬上去、中下方留一大片空白（崔总 2026-10-10 在色彩面板实测）。
+       */
+      class={["relative inline-flex items-center", props.class ?? ""].join(" ")}
     >
       <ArkSwitch.Control
         class={[
@@ -219,7 +226,7 @@ export function RadioChoices<T extends string>(props: {
     onValueChange={details=>{if(details.value)props.onValueChange(details.value as T);}}
     class="flex flex-col gap-1">
     <For each={props.options}>{option=><div class="flex min-h-7 items-center gap-2">
-      <ArkRadioGroup.Item value={option.value} data-choice-value={option.value} class="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-fs-1 text-fg-2">
+      <ArkRadioGroup.Item value={option.value} data-choice-value={option.value} class="relative flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-fs-1 text-fg-2">
         <ArkRadioGroup.ItemControl class="size-3 shrink-0 rounded-full border border-fg-3 data-[state=checked]:border-brand data-[state=checked]:bg-brand"/>
         <ArkRadioGroup.ItemText>{option.label}</ArkRadioGroup.ItemText>
         <ArkRadioGroup.ItemHiddenInput/>

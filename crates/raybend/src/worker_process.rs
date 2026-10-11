@@ -108,15 +108,25 @@ pub(crate) fn read_frame<R: BufRead>(r: &mut R) -> Result<Vec<u8>, WorkerError> 
     Ok(body)
 }
 
-pub(crate) fn spawn_proc(path: &std::path::Path, args: &[String]) -> Result<Proc, WorkerError> {
+pub(crate) fn spawn_proc(
+    path: &std::path::Path,
+    args: &[String],
+    tag: &'static str,
+) -> Result<Proc, WorkerError> {
     let mut cmd = Command::new(path);
     cmd.args(args);
     suppress_console_window(&mut cmd);
     let mut child = cmd
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        // stderr 继承：解码器自己的日志/panic 直接进我们这边的日志，不吞掉
-        .stderr(Stdio::inherit())
+        /*
+         * stderr **必须管道接回**（`specs/logging-and-crash-report.md` §4.6）：
+         * 以前用 `Stdio::inherit()`，而发布版/双击启动的父进程没有控制台 ——
+         * 继承来的句柄无效，worker 自己的 panic 与解码器报错**一条都留不下**
+         * （本文件的 `suppress_console_window` 注释早就承认了这一点）。
+         * 现在逐行转进统一日志（带 `[raw-worker]` / `[ai-worker]` 标签）。
+         */
+        .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| WorkerError::Spawn(format!("{}：{e}", path.display())))?;
 
@@ -128,12 +138,38 @@ pub(crate) fn spawn_proc(path: &std::path::Path, args: &[String]) -> Result<Proc
         .stdout
         .take()
         .ok_or_else(|| WorkerError::Spawn("拿不到子进程 stdout".to_string()))?;
+    if let Some(stderr) = child.stderr.take() {
+        forward_stderr(stderr, tag);
+    }
 
     Ok(Proc {
         child,
         stdin,
         stdout: Some(BufReader::new(stdout)),
     })
+}
+
+/// 把 worker 的 stderr 逐行转进统一日志（后台线程；父进程不读管道会把它阻塞）。
+///
+/// worker 侧不需要知道日志框架的存在：»stderr 是它唯一的日志出口» 这条约定照旧。
+fn forward_stderr(stderr: std::process::ChildStderr, tag: &'static str) {
+    let _ = std::thread::Builder::new()
+        .name(format!("{tag}-stderr"))
+        .spawn(move || {
+            let reader = BufReader::new(stderr);
+            for line in reader.lines() {
+                let Ok(line) = line else { break };
+                if line.trim().is_empty() {
+                    continue;
+                }
+                // panic 块的行升到 ERROR：诊断时一眼能扫到
+                if line.contains("panicked at") || line.starts_with("thread '") {
+                    log::error!(target: tag, "{line}");
+                } else {
+                    log::info!(target: tag, "{line}");
+                }
+            }
+        });
 }
 
 /// 不让 worker 弹出一个**新的控制台窗口**（Windows）。
@@ -148,9 +184,10 @@ pub(crate) fn spawn_proc(path: &std::path::Path, args: &[String]) -> Result<Proc
 /// `CREATE_NO_WINDOW`：
 ///
 /// * 父进程**没有**控制台（双击 / 资源管理器 / 打包后的应用）→ 加标志，子进程不再弹窗；
-///   它继承来的 stderr 句柄无效就静默失败（实测过：worker 照常握手、退出码 0，不会 panic）；
-/// * 父进程**有**控制台（开发期从终端跑 debug）→ 什么都不加，worker 照旧继承那个终端，
-///   解码器日志与 panic 落在你看得见的地方（开发期要的就是这个）。
+/// * 父进程**有**控制台（开发期从终端跑 debug）→ 什么都不加，worker 照旧拿得到那个终端。
+///
+/// ❗注意 stderr 的去向**不靠这个标志**：worker 的 stderr 一律走管道接回统一日志
+/// （见 [`spawn_proc`]），不再依赖「继承父进程的控制台句柄」——双击启动也能留下记录。
 ///
 /// 见 <https://learn.microsoft.com/en-us/windows/win32/procthread/process-creation-flags>。
 #[cfg(windows)]

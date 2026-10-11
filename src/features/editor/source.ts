@@ -175,9 +175,18 @@ export function editorViewportNotice(
   if (input.state === null) return "browser";
   if (input.state.lastError !== null) return "render-error";
   if (input.state.decode === "error") return "decode-error";
-  if (input.state.paintedPath !== null) return null;
+  /*
+   * 「画出来了」= **真帧已经上屏**（按当前参数算完的那一帧）。
+   *
+   * 过渡帧/预览帧只把洞口点亮（`paintedPath` 有值、有画面可看），**不算载入结束**：
+   * 崔总 2026-10-11：「正在载入照片…一旦结束，就应该是原图已经载进来、调整都好了的状态」——
+   * 以前一律看 `paintedPath`，于是过渡帧一到提示就撤了，观感是三步：
+   * 空 → 塞一张预览充数 → 又过了一会儿才出原图。现在两步：
+   * **载入中（提示叠在过渡帧/上一帧上）→ 真帧（提示消失）**。
+   */
+  if (input.state.decode === "ready" && input.state.paintedPath !== null) return null;
   if (!input.state.bound || !input.state.ready) return "init";
-  if (input.state.decode === "loading") return "loading";
+  if (input.state.decode === "loading" || input.state.decode === "ready") return "loading";
   return "init";
 }
 

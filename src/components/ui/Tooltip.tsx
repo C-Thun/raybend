@@ -53,6 +53,40 @@ export interface TooltipProps {
   class?: string;
 }
 
+/**
+ * `ButtonTip` —— 给**按钮类原语**（`Button` / `IconButton` / `ToggleBlock`）用的内置提示。
+ *
+ * 三条口径（崔总 2026-10-11）：
+ *
+ * 1. **有提示才包**：没有提示就原样渲染子节点，不多一层 DOM；
+ * 2. **禁用态也要能弹**：禁用的 `<button>` 在浏览器里不派发指针事件，所以提示态下
+ *    在触发层包一个 `inline-flex` 的 `span` 承接命中（按钮自己的 `pointer-events` 是 none）——
+ *    而「为什么不能点」恰恰是最需要说话的场景；
+ * 3. **默认朝下**：工具条贴在窗口顶部，气泡朝下有空间；Zag 定位器自带 `flip`，靠近窗口
+ *    下缘会自动翻上去。
+ *
+ * 触发属性给谁：**有提示 → 给包装 span；没有提示 → 交还给调用方（展开到按钮上）**。
+ */
+export function ButtonTip(props: {
+  content?: string | null;
+  placement?: TooltipPlacement;
+  children: (triggerProps: Record<string, unknown>) => JSX.Element;
+}): JSX.Element {
+  const hasTip = (): boolean =>
+    typeof props.content === "string" && props.content.length > 0;
+  return (
+    <Show when={hasTip()} fallback={props.children({})}>
+      <Tooltip content={props.content} placement={props.placement ?? "bottom"}>
+        {(triggerProps) => (
+          <span {...triggerProps} class="inline-flex">
+            {props.children({})}
+          </span>
+        )}
+      </Tooltip>
+    </Show>
+  );
+}
+
 export function Tooltip(props: TooltipProps) {
   const [local] = splitProps(props, [
     "content",

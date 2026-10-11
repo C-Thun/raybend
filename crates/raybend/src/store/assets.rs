@@ -17,6 +17,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use crate::error::{Error, Result};
 use crate::media::diff::{DiffPlan, DiskFile, Evidence};
 use crate::media::kind::MediaKind;
+use crate::media::meta::PhotoMeta;
 use crate::store::file_id::FileId;
 use crate::store::path_semantics::PathForms;
 
@@ -153,6 +154,11 @@ pub fn insert_asset(conn: &Connection, now_ms: i64) -> Result<i64> {
 
 /// 给一个资产插入一个文件记录。
 ///
+/// `display` = 该文件的**展示尺寸 + 自己的方向**（`media::meta::read_photo_meta` 的读数）——
+/// 调用方在写事务**之外**读一次文件头，这里只负责把它落列；读不到就传 `None`
+/// （列留 NULL = 未知，消费方回退，见 `store::sizes`）。位图与 RAW 各写自己的那份，
+/// **不用 `assets.orientation` 代替**。
+///
 /// `bitmap` 与 `raw` 抢同一个 `(rel_path_folded)` 唯一索引时会报错 —— 那是**好事**：
 /// 说明同一条路径被重复插了，应该在差分阶段就被拦住。
 pub fn insert_file(
@@ -160,6 +166,7 @@ pub fn insert_file(
     asset_id: i64,
     disk: &DiskFile,
     role: &str,
+    display: Option<PhotoMeta>,
     now_ms: i64,
 ) -> Result<i64> {
     let ext = crate::media::kind::extension(&disk.rel_path).unwrap_or_default();
@@ -167,11 +174,13 @@ pub fn insert_file(
         Some(id) if !id.is_zero() => (Some(id.volume_serial as i64), Some(id.file_id.to_vec())),
         _ => (None, None),
     };
+    let display = display.filter(PhotoMeta::has_size);
     conn.execute(
         "INSERT INTO asset_files
             (asset_id, role, rel_path, rel_path_folded, ext, size_bytes, mtime_ms,
-             file_created_ms, volume_serial, file_id, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11)",
+             file_created_ms, volume_serial, file_id, display_width, display_height, orientation,
+             created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?14)",
         params![
             asset_id,
             role,
@@ -183,6 +192,9 @@ pub fn insert_file(
             disk.created_ms,
             vol,
             blob,
+            display.map(|meta| i64::from(meta.width)),
+            display.map(|meta| i64::from(meta.height)),
+            display.map(|meta| i64::from(meta.orientation)),
             now_ms
         ],
     )?;
@@ -375,7 +387,9 @@ pub fn apply_diff(
         };
         for &idx in &group.files {
             let f = &disk[idx];
-            insert_file(conn, asset_id, f, role_of(f.kind), now_ms)?;
+            // 展示尺寸不走差分（重建流程）：新行先留 NULL，
+            // 紧随其后的 `backfill::refresh_*` 会在同一趟重建里读到并写回。
+            insert_file(conn, asset_id, f, role_of(f.kind), None, now_ms)?;
             out.new_files += 1;
         }
     }
@@ -561,6 +575,7 @@ pub fn apply_exif(
             Some(match t.source {
                 crate::media::exif::TakenAtSource::Exif => "exif",
                 crate::media::exif::TakenAtSource::Filename => "filename",
+                crate::media::exif::TakenAtSource::FileCreated => "file_created",
                 crate::media::exif::TakenAtSource::FileMtime => "file_mtime",
                 // 从同名姊妹文件（位图）继承来的（见 `media::pairing`）。
                 // 列是自由文本（`catalog_0001_init.sql` 里的枚举只是注释），所以不需要迁移。
@@ -1000,8 +1015,8 @@ mod tests {
         // 同一路径插两次必须被数据库挡住（差分层不该让它发生，但防线要在）
         let conn = catalog();
         let a = insert_asset(&conn, T0).unwrap();
-        insert_file(&conn, a, &disk("photos/a.jpg", 1, 1), "bitmap", T0).unwrap();
-        let err = insert_file(&conn, a, &disk("Photos/A.JPG", 1, 1), "bitmap", T0);
+        insert_file(&conn, a, &disk("photos/a.jpg", 1, 1), "bitmap", None, T0).unwrap();
+        let err = insert_file(&conn, a, &disk("Photos/A.JPG", 1, 1), "bitmap", None, T0);
         assert!(err.is_err(), "折叠后同路径 → 唯一索引必须报错");
     }
 

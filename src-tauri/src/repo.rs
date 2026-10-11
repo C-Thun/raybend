@@ -740,6 +740,12 @@ fn invalidate_changes<R: Runtime>(
     Ok(())
 }
 
+/// 这个范围是回收站（或它的子目录）吗（`specs/library-recycle-bin.md` §3.3）。
+fn is_recycle_scope(path: &str) -> bool {
+    let dir = raybend::store::recycle::RECYCLE_DIR;
+    path == dir || path.starts_with(&format!("{dir}/"))
+}
+
 #[tauri::command]
 pub async fn repository_sync_dir<R: Runtime>(
     app: AppHandle<R>,
@@ -758,8 +764,21 @@ pub async fn repository_sync_dir<R: Runtime>(
         let Some(scope) = scope_path.filter(|path| !path.is_empty()) else {
             return Ok(None);
         };
+        /*
+         * 回收站范围**不进目录同步**（`specs/library-recycle-bin.md` §3.3）：
+         * 它不在 `photos` 子树内（`rescan_scope` 会直接报「扫描范围必须是 photos 内的相对目录」），
+         * 而扫描本身也会把回收站里的照片当新资产对账 —— 两件都不该发生。
+         * 前端入口都已过滤，这里再兜一道（后台事件、旧页面可能送进来）。
+         */
+        if is_recycle_scope(&scope) {
+            return Ok(None);
+        }
         let refresh_active = scope_paths.as_ref().is_some_and(Vec::is_empty);
-        let mut scopes = scope_paths.unwrap_or_default();
+        let mut scopes: Vec<String> = scope_paths
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|path| !is_recycle_scope(path))
+            .collect();
         if refresh_active
             && let Some((id, _, _, watcher)) = handle.state::<crate::browse::BrowseState>().live_watch.lock().map_err(|e| e.to_string())?.as_ref()
                 && id == &repository_id { scopes = watcher.active_scopes(); }

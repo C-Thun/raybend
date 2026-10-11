@@ -358,7 +358,7 @@ export function TagDialog(props: TagDialogProps): JSX.Element {
                       onMouseEnter={() => setHighlight(index())}
                       onClick={() => stageTag(tag)}
                     >
-                      <span class="min-w-0 flex-1 truncate">{tag.name}</span>
+                      <span class="min-w-0 flex-1 overflow-hidden whitespace-nowrap fade-x-end">{tag.name}</span>
                       <Show when={existingIds().includes(tag.id)}>
                         <span class="shrink-0 text-fs-0 text-fg-3">{t("browse.tagsAlready")}</span>
                       </Show>

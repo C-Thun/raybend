@@ -57,11 +57,39 @@ export interface ThumbQueueDeps {
   maxEntries?: number;
 }
 
+/**
+ * 默认并发：**按 CPU 核数在 2–8 之间浮动**（崔总 2026-10-11 定）。
+ *
+ * 缩略图是 CPU 活（解码 + 缩放 + 编码），并发少了浪费核、多了抢核（还会让滚动掉帧）。
+ * 留一个核给 UI / WebView；拿不到核数（老浏览器 / Node 测试）就回到 4。
+ */
+export function defaultThumbConcurrency(): number {
+  const cores = globalThis.navigator?.hardwareConcurrency;
+  if (typeof cores !== "number" || !Number.isFinite(cores) || cores <= 0) return 4;
+  return Math.min(8, Math.max(2, Math.floor(cores) - 1));
+}
+
 export interface ThumbQueue {
   /** 读一个条目的当前状态（不会触发请求） */
   get: (path: string) => ThumbEntry;
   /** 请求一张（已缓存或已在飞则忽略；失败过的允许重试） */
   request: (path: string, priority?: boolean) => void;
+  /**
+   * **把一整批压进队尾**（进目录时把这一整个目录都放进来）。
+   *
+   * 崔总 2026-10-11 定的队列模型：队列**从进目录起就不停地吃**（2–8 个在飞），
+   * 滚屏只做一件事 —— 把窗口内还没处理的那些**提到队首**（[`ThumbQueue.prioritize`]）。
+   * 队列**不是**屏幕驱动：屏幕外的图照样在排队、照样会被处理完。
+   */
+  enqueue: (paths: readonly string[]) => void;
+  /**
+   * **把这一批路径提到队首**（窗口优先，崔总 2026-10-11 定）。
+   *
+   * 传进来的顺序就是处理顺序；已 ready / 已在飞的自动跳过；不在队里的忽略
+   *（**不在这里补请求** —— 请求只由「看得见的格子」发，虚拟列表保证了这一点，
+   * 两处各拍一次脑袋就会出现“�口外的图也在生成”）。
+   */
+  prioritize: (paths: readonly string[]) => void;
   /**
    * 让**一张**失效并立刻重取（编辑落库后这一张的缩略图要反映新编辑）。
    *
@@ -73,6 +101,20 @@ export interface ThumbQueue {
   cancel: (path: string) => void;
   /** 队内统计（排错与「加载中」提示用） */
   stats: () => { entries: number; inflight: number; queued: number };
+  /**
+   * 完成计数（**响应式**）：每有一张出图就 +1。
+   *
+   * 导入侧用它做「随构建实时重排」的触发 —— 数据层每出图一张，
+   * 就把这一张该有的信息（时间/EXIF）顺手放进了缓存（后端 `remember`），
+   * 界面据此把新完成的那几张的信息取回来、局部重排（见 `photo-grid/store.ts`）。
+   */
+  readySeq: () => number;
+  /**
+   * 取走「自上次调用以来新完成的路径」（**不响应式**，取完即清）。
+   *
+   * 与 [`ThumbQueue.readySeq`] 配对使用：`readySeq` 当扳机、`drainReady` 拿名单。
+   */
+  drainReady: () => string[];
   /** 丢弃全部缓存并回收 URL（换目录、卸载时调） */
   clear: () => void;
 }
@@ -107,7 +149,7 @@ async function defaultPrepareUrl(url: string): Promise<void | { width: number; h
 }
 
 export function createThumbQueue(deps: ThumbQueueDeps): ThumbQueue {
-  const concurrency = Math.max(1, Math.floor(deps.concurrency ?? 4));
+  const concurrency = Math.max(1, Math.floor(deps.concurrency ?? defaultThumbConcurrency()));
   const maxEntries = Math.max(1, Math.floor(deps.maxEntries ?? 600));
   const toUrl = deps.toUrl ?? defaultToUrl;
   const revokeUrl = deps.revokeUrl ?? defaultRevoke;
@@ -120,6 +162,9 @@ export function createThumbQueue(deps: ThumbQueueDeps): ThumbQueue {
   let recent: string[] = [];
   /** 代号：`clear()` 推进它，用来丢弃上一个目录还在飞的请求 */
   let generation = 0;
+  /** 完成计数 + 待取名单（见 `readySeq` / `drainReady`） */
+  const [readySeq, setReadySeq] = createSignal(0);
+  let pendingReady: string[] = [];
   /** 每条路径的代号：`refresh()` 推进它，用来丢弃这条路径上还在飞的旧请求 */
   const pathRevs = new Map<string, number>();
   const revOf = (path: string): number => pathRevs.get(path) ?? 0;
@@ -194,6 +239,8 @@ export function createThumbQueue(deps: ThumbQueueDeps): ThumbQueue {
           touch(path);
           patch(path, { status: "ready", url, ...(approximate ? { approximate: true } : {}), ...dimensions });
           if (oldUrl) revokeUrl(oldUrl);
+          pendingReady.push(path);
+          setReadySeq((n) => n + 1);
           evict();
         })
         .catch(() => {
@@ -232,6 +279,29 @@ export function createThumbQueue(deps: ThumbQueueDeps): ThumbQueue {
     // Request writes queue signals; callers track their path, never queue internals.
     // Otherwise an error publication immediately retries forever from the same effect.
     request: (path, priority) => untrack(() => request(path, priority)),
+    enqueue: (paths) => untrack(() => {
+      for (const path of paths) request(path, false);
+    }),
+
+    /**
+     * 窗口优先：把这一批提到队首（顺序即优先级）。
+     *
+     * 只动 `queued` 这个普通数组，不读任何信号 —— 因此不需要 `untrack`，
+     * 也不会把调用方（网格的滚动回调）变成响应式依赖。
+     */
+    prioritize: (paths) => {
+      if (paths.length === 0 || queued.length === 0) return;
+      const pending = new Set(queued);
+      const picked = new Set<string>();
+      const head: string[] = [];
+      for (const path of paths) {
+        if (picked.has(path) || !pending.has(path)) continue;
+        picked.add(path);
+        head.push(path);
+      }
+      if (head.length === 0) return;
+      queued = [...head, ...queued.filter((path) => !picked.has(path))];
+    },
 
     cancel: (path) => untrack(() => {
       if (!queued.includes(path)) return;
@@ -246,6 +316,12 @@ export function createThumbQueue(deps: ThumbQueueDeps): ThumbQueue {
       inflight: inflight(),
       queued: queued.length,
     }),
+    readySeq,
+    drainReady: () => {
+      const out = pendingReady;
+      pendingReady = [];
+      return out;
+    },
 
     refresh: (path) => {
       // 在飞的旧请求作废，但旧 URL 一直留在视图中。新图解码后再原子换 URL。
@@ -269,6 +345,7 @@ export function createThumbQueue(deps: ThumbQueueDeps): ThumbQueue {
         if (entry.url) revokeUrl(entry.url);
       }
       queued = [];
+      pendingReady = [];
       recent = [];
       setEntries({});
       // 旧目录仍在飞的 I/O 继续占用配额，完成时统一释放。

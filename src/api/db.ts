@@ -36,7 +36,6 @@ import type {
   SourceScan,
   ThumbCacheStats,
   ThumbSize,
-  TimeEntry,
   Volume,
 } from "./types.ts";
 
@@ -57,6 +56,8 @@ export const SETTING_KEYS = {
   avoidDuplicates: "import.avoid_duplicates",
   /** 是否处于「按时间」模式 */
   byTime: "grid.by_time",
+  /** 是否写出 XMP sidecar（设备级，默认开；Rust 侧 `sidecar::XMP_WRITE_KEY` 同源） */
+  xmpWrite: "xmp.write_sidecar",
   /** 导入 / 浏览 / 编辑胶片带各自的 17 档尺寸（app.db，全局设备设置） */
   importFilmStripStep: "filmstrip.import_tile_step",
   browseFilmStripStep: "filmstrip.browse_tile_step",
@@ -107,14 +108,17 @@ export async function forgetRecentDir(path: string): Promise<boolean> {
  * 在浏览器里猜错反而会误导）。
  */
 /**
- * 确保一批文件的展示元信息（宽高 + 方向）是新鲜的。
+ * 确保一批文件的展示元信息（宽高 + 方向 + **拍摄时间**）是新鲜的。
  *
  * 缓存活在 Rust 进程里（会话级、不落盘）：同一目录反复进出不会重复扫盘。
+ * `cacheOnly = true`（导入网格用）：**只查缓存、一个文件都不读** ——
+ * 时间/宽高的真相是出图那一次读顺手放进缓存的（`specs/source-time-inline.md`）。
  * 浏览器里没有文件系统 → 一律返回「尺寸未知」（`0×0`），界面按默认比例占位。
  */
 export async function dirMetaEnsure(
   dir: string,
   files: readonly MetaFile[],
+  cacheOnly = false,
 ): Promise<PhotoMeta[]> {
   if (!isTauriRuntime()) {
     return files.map((file) => ({
@@ -122,9 +126,24 @@ export async function dirMetaEnsure(
       width: 0,
       height: 0,
       orientation: 1,
+      // 浏览器里没有文件系统：时间交给扫描带回来的兜底值（界面上就是那个）
+      takenAtMs: null,
+      takenAtSource: null,
+      takenAtOffsetMin: null,
     }));
   }
-  return call<PhotoMeta[]>("dir_meta_ensure", { path: dir, files });
+  return call<PhotoMeta[]>("dir_meta_ensure", { path: dir, files, cacheOnly });
+}
+
+/**
+ * 忘掉一个目录的元信息缓存（拔盘 / 卸载再插回来时调）。
+ *
+ * 崔总 2026-10-11 的缓存生命周期：**按目录分开存**；目录被卸载后就该当缓存没发生过 ——
+ * 下一次点进来重新读一遍，而不是拿旧盘上的信息当真相。
+ */
+export async function dirMetaForget(dir: string): Promise<void> {
+  if (!isTauriRuntime()) return;
+  await call<void>("dir_meta_forget", { path: dir });
 }
 
 export async function pathsStatus(paths: string[]): Promise<boolean[]> {
@@ -188,12 +207,6 @@ export async function countSourcePhotos(
   return call<PhotoCount>("source_count", { path, recursive });
 }
 
-/** 并行补真实 EXIF 拍摄时间（用户按下「按时间」时才调）。 */
-export async function readSourceTimes(paths: string[]): Promise<TimeEntry[]> {
-  if (!isTauriRuntime()) return [];
-  return call<TimeEntry[]>("source_times", { paths });
-}
-
 /** 一个文件的 EXIF（喂 `flowbar`）。 */
 export async function readFileExif(path: string): Promise<FileExif> {
   if (!isTauriRuntime()) return EMPTY_FILE_EXIF;
@@ -246,8 +259,15 @@ export async function getThumbBytes(
   return toBytes(await call<unknown>("thumb_get", { path, size }));
 }
 
-/** "取一张能显示的图"的用途（`crates/raybend/src/display` 的 `ImagePurpose`）。 */
-export type ImagePurpose = "grid" | "strip" | "screen" | "original";
+/**
+ * "取一张能显示的图"的用途（`crates/raybend/src/display` 的 `ImagePurpose`）。
+ *
+ * `screen`（长边 1920）是**载入占位**；`full` 是**真身**（该图自己的像素，
+ * 崔总 2026-10-11 口径：看图显示的一定是它）—— 位图没编辑时后端直接给原文件字节。
+ * `original` 是「要原文件本身」（导出/互操作），语义与 `full` 不同：
+ * 编辑过时 `original` 不会被编辑结果替换，`full` 会。
+ */
+export type ImagePurpose = "grid" | "screen" | "original" | "full";
 
 /**
  * **统一取图口**（`specs/M2-W2.md` §2.1）：view 与缩略图共用。

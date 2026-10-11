@@ -120,10 +120,10 @@ export function AboutDialog(props: AboutDialogProps) {
             class="size-20 shrink-0 select-none"
           />
           <div class="min-w-0">
-            <div class="truncate text-fs-4 font-semibold text-fg-1">
+            <div class="overflow-hidden whitespace-nowrap fade-x-end text-fs-4 font-semibold text-fg-1">
               {t("app.name")}
             </div>
-            <div class="truncate text-fs-1 text-fg-3">
+            <div class="overflow-hidden whitespace-nowrap fade-x-end text-fs-1 text-fg-3">
               {build().version} · {channelLabel(build().channel)}
               <Show when={build().dirty && !isReleaseReady(build())}>
                 {" "}
@@ -178,7 +178,7 @@ function InfoTable(props: { rows: InfoRow[] }) {
         {(row) => (
           <div class="flex items-baseline gap-2 text-fs-1">
             <dt class="w-16 shrink-0 text-fg-3">{row.label}</dt>
-            <dd class="min-w-0 flex-1 truncate text-fg-2">
+            <dd class="min-w-0 flex-1 overflow-hidden whitespace-nowrap fade-x-end text-fg-2">
               <Show when={row.href} fallback={row.value}>
                 <a
                   href={row.href}

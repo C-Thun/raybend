@@ -497,10 +497,19 @@ export function createExportStore(deps: ExportStoreDeps) {
       repo === null ||
       !repositoryAvailable() ||
       busy() ||
-      selection().ids.size === 0
+      (options.references === undefined && selection().ids.size === 0)
     )
       return 0;
-    const candidates = options.presetId === undefined ? chosenVariants() : selectedVariants();
+    /*
+     * 候选人：
+     * * 显式给引用（RAW 按钮、拖放）→ 从**变体表**里取那一行（拿到真实 profileHash，
+     *   去重与快照才跟画廊选择同口径）；
+     * * 否则仍以当前选择为准（显式预设时用全部选中变体，普通入口只用未锁的）。
+     */
+    const candidates = options.references !== undefined
+      ? options.references.flatMap((reference) =>
+          listFor(reference.assetId).filter((v) => v.reference.variant === reference.variant))
+      : options.presetId === undefined ? chosenVariants() : selectedVariants();
     const targetQueue = () => queues().get(preset.id) ?? [];
     const requested = options.references && new Set(options.references.map(r=>variantKey(repo,r)));
     const queued = new Set(targetQueue().map(i=>JSON.stringify([i.repositoryId,i.snapshot.reference.assetId,i.snapshot.profileHash])));

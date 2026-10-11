@@ -98,7 +98,7 @@ fn main() {
         println!("  {source_kind:?}: {count}");
     }
 
-    // ── ④ 补读真实拍摄时间（用户按「按时间」时才走这条）─────────
+    // ── ④ 补读拍摄时间（跟宽高/方向同一次读头，2026-10-11 起不再有单独的命令）──
     let paths: Vec<PathBuf> = listing
         .items
         .iter()
@@ -106,8 +106,15 @@ fn main() {
         .map(|item| item.path.clone())
         .collect();
     let started = Instant::now();
-    let times = source::read_times(&paths);
-    let with_time = times.iter().filter(|entry| entry.taken_at.is_some()).count();
+    let metas: Vec<_> = paths
+        .iter()
+        .map(|path| raybend::media::meta::read_photo_meta(path).ok())
+        .collect();
+    let read_times = metas
+        .iter()
+        .filter(|meta| meta.as_ref().is_some_and(|meta| meta.taken_at_ms.is_some()))
+        .count();
+    let with_time = read_times;
     let total_ms = started.elapsed().as_secs_f64() * 1000.0;
     println!(
         "补读时间：{} 张（读到 {with_time} 张），{:.1}ms → 平均 {:.1}ms/张",

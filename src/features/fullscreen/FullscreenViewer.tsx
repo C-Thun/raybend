@@ -49,6 +49,8 @@ export function FullscreenViewer() {
   const variantImages=new Map<string, NonNullable<FullscreenPayload["items"][number]["exportVariant"]>>();
   const store = createViewerStore({
     loadScreen: (path) => {const variant=variantImages.get(path);return variant===undefined?getViewImage(path,"screen"):getExportVariantImage(variant.repositoryId,variant.reference,"screen",variant.captured);},
+    // 真身：全屏看图的终态（崔总 2026-10-11：看图界面显示的一定是它）
+    loadFull: (path) => {const variant=variantImages.get(path);return variant===undefined?getViewImage(path,"full"):getExportVariantImage(variant.repositoryId,variant.reference,"full",variant.captured);},
     /*
      * 多图 URL 缓存：当前 + 前后各一张预载 = 3 张，给到 6 留余量。
      * 不加大也能跑，但换图时刚预载好的邻居可能已被挤出去，预载就白做了。
@@ -87,11 +89,25 @@ export function FullscreenViewer() {
     variantImages.clear();
     for(const item of payload.items)if(item.exportVariant!==undefined)variantImages.set(JSON.stringify([payload.revision,item.id,item.exportVariant]),item.exportVariant);
     store.show(
-      payload.items.map((item) => ({
-        id: item.id,
-        path: item.exportVariant===undefined?item.path:JSON.stringify([payload.revision,item.id,item.exportVariant]),
-        fileName: item.fileName,
-      })),
+      payload.items.map((item) => {
+        /*
+         * 明确导出稿（变体）带着**库里存好的尺寸**（`VariantSnapshot.width/height`）——
+         * 直接用，别等位图载入后拿固有尺寸当口径（`specs/display-size-source.md` §6.1）。
+         * 普通路径（没有变体）不带尺寸，保持老行为（`onLoad` 量）。
+         */
+        const captured = item.exportVariant?.captured;
+        const natural = captured !== undefined &&
+          captured.width !== null && captured.height !== null &&
+          captured.width > 0 && captured.height > 0
+          ? { width: captured.width, height: captured.height }
+          : undefined;
+        return {
+          id: item.id,
+          path: item.exportVariant===undefined?item.path:JSON.stringify([payload.revision,item.id,item.exportVariant]),
+          fileName: item.fileName,
+          ...(natural === undefined ? {} : { natural }),
+        };
+      }),
       payload.index,
     );
   };
@@ -265,14 +281,34 @@ export function FullscreenViewer() {
               alt={store.current()?.fileName ?? ""}
               draggable={false}
               onLoad={(event) =>
-                store.setNatural({
-                  width: event.currentTarget.naturalWidth,
-                  height: event.currentTarget.naturalHeight,
-                })
+                /*
+                 * 与主窗口看图同一条规矩（`specs/display-size-source.md` §6.2）：
+                 * 库里已经给了这个变体的尺寸时，位图的固有尺寸（Screen 档只有 1920）
+                 * 不允许把它盖掉；没有才让位图自带尺寸兜底。
+                 */
+                state().naturalKnown
+                  ? undefined
+                  : store.setNatural(
+                      {
+                        width: event.currentTarget.naturalWidth,
+                        height: event.currentTarget.naturalHeight,
+                      },
+                      // 真身在屏才算权威（与主窗口同一条规矩）
+                      store.sharp(),
+                    )
               }
-              class="pointer-events-none absolute top-1/2 left-1/2 max-w-none select-none"
+              class="pointer-events-none absolute top-1/2 left-1/2 max-w-none select-none object-contain"
               style={{
                 // 与主窗口看图同一套顺序：先居中，再平移，最后按元素中心缩放
+                // 布局尺寸 = 变体尺寸（已知时）：位图只提供像素
+                ...(state().naturalKnown &&
+                state().natural.width > 0 &&
+                state().natural.height > 0
+                  ? {
+                      width: `${state().natural.width}px`,
+                      height: `${state().natural.height}px`,
+                    }
+                  : {}),
                 transform: `translate(-50%, -50%) translate3d(${state().pan.x}px, ${state().pan.y}px, 0) scale(${state().zoom})`,
                 "will-change": "transform",
               }}

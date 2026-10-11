@@ -34,7 +34,7 @@ Commercial photo managers are expensive or subscription-based, and a photo libra
 | **Export** | JPG · PNG · WebP · AVIF |
 | **Camera RAW** | `ari` `arw` `cr2` `cr3` `crw` `dcr` `dcs` `dng` `erf` `iiq` `kdc` `mef` `mos` `mrw` `nef` `nrw` `orf` `pef` `raf` `rw2` `sr2` `srf` `srw` `3fr` |
 
-\* HEIC files are imported and indexed; previews need a decoder that is not bundled yet.
+\* HEIC files are imported and indexed, but displaying and editing them needs a decoder that is not bundled yet — thumbnails show a placeholder for now.
 
 RAW import and decoding follow [rawler](https://github.com/dnglab/dnglab), so camera coverage tracks upstream releases. A JPG and a RAW file sharing one name are treated as two files of a single photo.
 

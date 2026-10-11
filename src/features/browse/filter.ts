@@ -40,6 +40,7 @@ export type FilterChip =
   | { kind: "color"; value: string }
   | { kind: "like"; value: string }
   | { kind: "lock"; value: number }
+  | { kind: "tag"; value: number }
   | { kind: "flag"; value: "pick" | "reject" | "none" };
 
 /** chip 的稳定 key（渲染列表与测试用；`kind` + `value` 唯一确定一条） */
@@ -47,7 +48,7 @@ export function chipKey(chip: FilterChip): string {
   return `${chip.kind}:${chip.value}`;
 }
 
-/** 把筛选条件摊成 chips（顺序固定：星 → 色 → 喜欢 → 锁，与控件顺序一致） */
+/** 把筛选条件摊成 chips（顺序固定：星 → 色 → 喜欢 → 锁 → 标签，与控件顺序一致） */
 export function filterChips(filter: BrowseFilter): FilterChip[] {
   const out: FilterChip[] = [];
   if (filter.minRating !== null && filter.minRating !== undefined) {
@@ -56,6 +57,8 @@ export function filterChips(filter: BrowseFilter): FilterChip[] {
   for (const value of filter.colors ?? []) out.push({ kind: "color", value });
   for (const value of filter.likes ?? []) out.push({ kind: "like", value });
   for (const value of filter.locks ?? []) out.push({ kind: "lock", value });
+  // 标签条件（导出侧加入；名字由界面查词典，拿不到就退 `#id`）
+  for (const value of filter.tags ?? []) out.push({ kind: "tag", value });
   // 旗标排在最后（它与其他四组不同：不是「取值」，而是「有没有」）
   if (filter.flag !== null && filter.flag !== undefined) {
     out.push({ kind: "flag", value: filter.flag.mode });
@@ -79,6 +82,8 @@ export function removeChip(filter: BrowseFilter, chip: FilterChip): BrowseFilter
       return { ...filter, likes: (filter.likes ?? []).filter((v) => v !== chip.value) };
     case "lock":
       return { ...filter, locks: (filter.locks ?? []).filter((v) => v !== chip.value) };
+    case "tag":
+      return { ...filter, tags: (filter.tags ?? []).filter((v) => v !== chip.value) };
     case "flag":
       return { ...filter, flag: null };
   }
@@ -86,7 +91,7 @@ export function removeChip(filter: BrowseFilter, chip: FilterChip): BrowseFilter
 
 /** 只保留这四组条件、其余（文本/日期/机型…）原样 —— 「关掉筛选」时清的也就是这四组 */
 export function clearMarkFilters(filter: BrowseFilter): BrowseFilter {
-  return { ...filter, minRating: null, colors: [], likes: [], locks: [], flag: null };
+  return { ...filter, minRating: null, colors: [], likes: [], locks: [], tags: [], flag: null };
 }
 
 /**

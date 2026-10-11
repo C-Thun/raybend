@@ -1,6 +1,6 @@
-//! 浏览工作流的命令：查询、标记、撤销、旗标、删除。
+//! 浏览工作流的命令：查询、标记、撤销、旗标、回收站。
 //!
-//! 业务规则全在 `raybend::store`（`query` / `marking` / `flags` / `delete`），
+//! 业务规则全在 `raybend::store`（`query` / `marking` / `flags` / `recycle`），
 //! 这里只做四件事：
 //!
 //! 1. 把前端传来的筛选/排序**翻译**成 store 的类型；
@@ -17,11 +17,11 @@ use std::sync::{Arc, Mutex};
 
 use raybend::store::availability::{self, Availability, ConnectionStatus, ProbeBudget, Snapshots};
 use raybend::store::db::{CatalogDb, OpenOpts};
-use raybend::store::delete::DeleteReport;
+use raybend::store::recycle::{PurgeReport, RecycleReport, RestoreReport};
 use raybend::store::flags::{Flag, FlagKey, FlagSet};
 use raybend::store::marking::{self, UndoStack};
 use raybend::store::query::{
-    self, AssetRow, Combinator, Filter, FlagFilter, Query, Scope, Sort, SortKey,
+    self, AssetRow, Combinator, Filter, FlagFilter, Query, Scope, Sort, SortKey, Visibility,
 };
 use raybend::store::repository;
 use raybend::store::organization;
@@ -118,13 +118,13 @@ impl BrowseState {
         match self.connections.publish_if(status, revision) {
             Ok(Some(status)) => {
                 if let Err(e) = app.emit("repository://connection", &status) {
-                    eprintln!("[repository] 状态事件失败：{e}");
+                    log::warn!("[repository] 状态事件失败：{e}");
                 }
                 Some(status)
             }
             Ok(None) => None,
             Err(e) => {
-                eprintln!("[repository] 状态代次失败：{e}");
+                log::warn!("[repository] 状态代次失败：{e}");
                 None
             }
         }
@@ -335,6 +335,9 @@ pub struct BrowseQueryDto {
     pub filter: FilterDto,
     #[serde(default)]
     pub sort: SortDto,
+    /// 查回收站（`true` = 只见回收站资产；`scope_path` 已带 `recycle/` 前缀，见 `specs/library-recycle-bin.md`）。
+    #[serde(default)]
+    pub recycle: bool,
 }
 
 impl BrowseQueryDto {
@@ -342,8 +345,13 @@ impl BrowseQueryDto {
     ///
     /// 名字不用 `into_*`：那个约定是「消耗 self 的转换」，这里是**借用着造一份新的**。
     fn to_query(&self) -> Query {
+        /*
+         * **文件夹语义**（崔总 2026-10-11）：点什么目录看什么目录**直接**的内容，
+         * 不递归子目录 —— 点 A 不该把 A/B、A/C 里的照片一起铺出来。
+         * `Scope::Directory` 就是这一条（`_RAW/` 视为透明原片目录，与位图同层）。
+         */
         let scope = match self.scope_path.as_deref().map(str::trim) {
-            Some(path) if !path.is_empty() => Scope::subtree(path),
+            Some(path) if !path.is_empty() => Scope::directory(path),
             _ => Scope::Repository,
         };
         let key = match self.sort.key.as_deref() {
@@ -351,6 +359,7 @@ impl BrowseQueryDto {
             Some("fileName") => SortKey::FileName,
             Some("rating") => SortKey::Rating,
             Some("camera") => SortKey::Camera,
+            Some("deletedAt") => SortKey::DeletedAt,
             _ => SortKey::TakenAt,
         };
         let desc = self.sort.desc.unwrap_or_else(|| Sort::default_desc(key));
@@ -358,6 +367,11 @@ impl BrowseQueryDto {
             scope,
             filter: self.filter.clone().into_filter(),
             sort: Sort::new(key, desc),
+            visibility: if self.recycle {
+                Visibility::Recycled
+            } else {
+                Visibility::Live
+            },
         }
     }
 }
@@ -426,6 +440,20 @@ pub struct AssetItem {
     pub iso: Option<i64>,
     pub width: Option<i64>,
     pub height: Option<i64>,
+    /// RAW 文件的**展示尺寸**（无 RAW → `null`）—— “这张的 RAW 多大”，毫秒级可得。
+    pub raw_width: Option<i64>,
+    pub raw_height: Option<i64>,
+    /// latest 的**输出尺寸**（无编辑栈 → `null`）—— tiles 比例与看图初值用它。
+    ///
+    /// 老库的栈列还没回填时这里给的是**现算值**（`sizes::latest_size`，零 I/O）——
+    /// 绝不退回基准尺寸：那是另一个口径（未裁切的画面），比例可以完全不同。
+    pub latest_width: Option<i64>,
+    pub latest_height: Option<i64>,
+    /// latest 的**来源基底**（`"raw"` / `"sooc"`；无编辑栈 → `null`）。
+    ///
+    /// flowinfo 的「文件类型」随显示变体走（崔总 2026-10-11 定）：latest 看它，
+    /// 定稿看 `IssueDto.sourceBase`。前端 `lib/display-size.ts::sourceBaseOf` 是唯一读口。
+    pub latest_source_base: Option<String>,
     pub orientation: Option<i64>,
     pub size_bytes: Option<i64>,
     pub missing: bool,
@@ -433,14 +461,26 @@ pub struct AssetItem {
     pub issue_count: u16,
     /// 编辑过（编辑栈与原始源不同）—— 没有定稿时 tile 左下角显示编辑图标的判据。
     pub edited: bool,
+    /// 回收站里的原位置（`recycled_from`；不在回收站时为 `null`）—— 右列「原位置」。
+    pub recycled_from: Option<String>,
 }
 
+/// `AssetRow` → 对外 DTO（尺寸的口径全在 `store` 层：latest 的读侧回退在
+/// `store::query::page` 里做过了，这里只搬字段）。
 impl From<AssetRow> for AssetItem {
     fn from(row: AssetRow) -> Self {
         // catalog 存的是文件头里的原始像素轴；Browse DTO 对外给展示尺寸，必须应用方向。
         // 单图 view / film 直接走解码后的图所以一直正常，只有 tiles / compare 读了这两个
         // 原始数值，才会把 orientation=6/8 的竖图压成横图。
-        let (width, height) = oriented_dimensions(row.width, row.height, row.orientation);
+        //
+        // v19 起优先读 `asset_files.display_*`（导入时就摆正过的存档值，
+        // `specs/display-size-source.md` §5）；老库那批 NULL 才退回旧算式。
+        let stored = display_dimensions(&row);
+        let (width, height) = if stored.0.is_some() && stored.1.is_some() {
+            stored
+        } else {
+            oriented_dimensions(row.width, row.height, row.orientation)
+        };
         Self {
             id: row.id,
             file_name: query::file_name_of(&row.rel_path).to_string(),
@@ -472,12 +512,26 @@ impl From<AssetRow> for AssetItem {
             iso: row.iso,
             width,
             height,
+            raw_width: row.raw_width,
+            raw_height: row.raw_height,
+            latest_width: row.latest_width,
+            latest_height: row.latest_height,
+            latest_source_base: row.latest_source_base,
             orientation: row.orientation,
             size_bytes: row.size_bytes,
             missing: row.missing,
             issue_count: row.issue_count,
             edited: row.edited,
+            recycled_from: row.recycled_from,
         }
+    }
+}
+
+/// 库里存好的展示尺寸（`asset_files.display_*`，两列都在且为正才算数）。
+fn display_dimensions(row: &AssetRow) -> (Option<i64>, Option<i64>) {
+    match (row.display_width, row.display_height) {
+        (Some(width), Some(height)) if width > 0 && height > 0 => (Some(width), Some(height)),
+        _ => (None, None),
     }
 }
 
@@ -495,8 +549,153 @@ fn oriented_dimensions(
 
 #[cfg(test)]
 mod tests {
-    use super::{edited_asset_ids, oriented_dimensions};
+    use super::{AssetItem, edited_asset_ids, oriented_dimensions};
     use raybend::store::marking::Op;
+    use raybend::store::{migration, query};
+    use rusqlite::Connection;
+
+    /// 一个跑过全部迁移的内存 catalog。
+    fn catalog() -> Connection {
+        let mut conn = Connection::open_in_memory().unwrap();
+        raybend::store::pragma::apply(&conn, false).unwrap();
+        migration::apply(
+            &mut conn,
+            migration::DbKind::Catalog,
+            migration::Backups::none(),
+            0,
+        )
+        .unwrap();
+        conn
+    }
+
+    /// 一张资产 + 一个文件行（`display_*` 可选）。
+    fn asset(conn: &Connection, id: i64, role: &str, display: Option<(i64, i64, i64)>) {
+        conn.execute(
+            "INSERT OR IGNORE INTO assets(id, taken_at, imported_at, updated_at) VALUES(?1, 1, 1, 1)",
+            [id],
+        )
+        .unwrap();
+        let rel = format!("photos/{id}-{role}.bin");
+        conn.execute(
+            "INSERT INTO asset_files
+                (asset_id, role, rel_path, rel_path_folded, ext, size_bytes, mtime_ms,
+                 display_width, display_height, orientation, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?3, 'bin', 1, 1, ?4, ?5, ?6, 1, 1)",
+            rusqlite::params![
+                id,
+                role,
+                rel,
+                display.map(|d| d.0),
+                display.map(|d| d.1),
+                display.map(|d| d.2),
+            ],
+        )
+        .unwrap();
+    }
+
+    fn item(conn: &Connection, id: i64) -> AssetItem {
+        let rows = query::page(conn, &query::Query::new(query::Scope::Repository), 0, 10).unwrap();
+        rows.into_iter()
+            .find(|row| row.id == id)
+            .map(AssetItem::from)
+            .expect("资产在")
+    }
+
+    #[test]
+    fn asset_item_reads_the_stored_display_sizes_and_falls_back_for_legacy_rows() {
+        // `specs/display-size-source.md` §5：三个口径各读自己那一列；
+        // 老库（列为 NULL）退回旧算式（assets 原始轴 + 方向）。
+        let conn = catalog();
+        // 编辑过的一张：位图 4000×3000、RAW 5208×3904、latest 裁成 2000×1500
+        asset(&conn, 1, "bitmap", Some((4000, 3000, 1)));
+        asset(&conn, 1, "raw", Some((5208, 3904, 1)));
+        conn.execute(
+            "UPDATE assets SET width = 6000, height = 4000, orientation = 6 WHERE id = 1",
+            [],
+        )
+        .unwrap();
+        // 这张合成资产位图行与 RAW 行都有 ⇒ RAW 基底（`default()`）能拿到自己的尺寸
+        let mut stack = raybend::store::develop::DevelopStack::default();
+        stack.params.insert("exposure".into(), 0.5);
+        stack.geometry = Some(raybend::develop::geometry::EditGeometry {
+            rotation: 0.0,
+            crop: Some(raybend::develop::geometry::CropRect {
+                x: 0.0,
+                y: 0.0,
+                width: 0.5,
+                height: 0.5,
+            }),
+            crop_ratio: None,
+        });
+        raybend::store::develop::save(&conn, 1, &stack, 1).unwrap();
+
+        let edited = item(&conn, 1);
+        assert_eq!((edited.width, edited.height), (Some(4000), Some(3000)), "基准 = 位图的展示尺寸（方向已应用过）");
+        assert_eq!((edited.raw_width, edited.raw_height), (Some(5208), Some(3904)), "RAW 各写自己的");
+        assert_eq!((edited.latest_width, edited.latest_height), (Some(2604), Some(1952)), "latest = 栈的输出尺寸");
+        assert_eq!(edited.latest_source_base.as_deref(), Some("raw"), "latest 基底的唯一出处");
+
+        // 老库：文件行 NULL、assets 只有原始轴 + 方向 ⇒ 退回旧算式；无栈 ⇒ latest 为 NULL
+        asset(&conn, 2, "bitmap", None);
+        conn.execute(
+            "UPDATE assets SET width = 6000, height = 4000, orientation = 8 WHERE id = 2",
+            [],
+        )
+        .unwrap();
+        let legacy = item(&conn, 2);
+        assert_eq!((legacy.width, legacy.height), (Some(4000), Some(6000)), "方向 8 ⇒ 交换宽高");
+        assert_eq!((legacy.raw_width, legacy.raw_height), (None, None), "没有 RAW 行就是 null");
+        assert_eq!(
+            (legacy.latest_width, legacy.latest_height),
+            (None, None),
+            "没栈行 ⇒ 读侧不填（latest = 基准是消费方的回退）",
+        );
+        assert_eq!(legacy.latest_source_base, None, "没栈行就没有基底");
+    }
+
+    #[test]
+    fn asset_item_computes_latest_size_when_the_stack_row_predates_v19() {
+        // 崔总 2026-10-11 真机：老库的编辑栈列还没回填（output_* 为 NULL）
+        // ⇒ DTO 必须**按栈现算**，不能退回基准尺寸（那是另一个口径，比例不同）。
+        let conn = catalog();
+        asset(&conn, 1, "bitmap", None);
+        conn.execute(
+            "UPDATE assets SET width = 4000, height = 3000, orientation = 1 WHERE id = 1",
+            [],
+        )
+        .unwrap();
+        // 基底写死 Sooc：合成资产只有位图行，而尺寸只认各自那一行（2026-10-11）
+        let mut stack = raybend::store::develop::DevelopStack {
+            source_base: raybend::store::develop::EditBase::Sooc,
+            ..raybend::store::develop::DevelopStack::default()
+        };
+        stack.params.insert("exposure".into(), 0.5);
+        stack.geometry = Some(raybend::develop::geometry::EditGeometry {
+            rotation: 0.0,
+            crop: Some(raybend::develop::geometry::CropRect {
+                x: 0.0,
+                y: 0.0,
+                width: 0.5,
+                height: 0.5,
+            }),
+            crop_ratio: None,
+        });
+        raybend::store::develop::save(&conn, 1, &stack, 1).unwrap();
+        // 模拟 v19 之前建的行：栈在、尺寸列还在 NULL
+        conn.execute(
+            "UPDATE develop_stacks SET output_width = NULL, output_height = NULL WHERE asset_id = 1",
+            [],
+        )
+        .unwrap();
+
+        let item = item(&conn, 1);
+        assert_eq!(
+            (item.latest_width, item.latest_height),
+            (Some(2000), Some(1500)),
+            "回填之前也要给出裁切后的尺寸（不是基准的 4000×3000）",
+        );
+        assert_eq!(item.latest_source_base.as_deref(), Some("sooc"));
+    }
 
     #[test]
     fn only_develop_undo_ops_invalidate_latest_previews() {
@@ -641,29 +840,75 @@ pub struct DeleteFailure {
     pub reason: String,
 }
 
-/// 删除结果（界面上要说清「删了几张、几张被锁挡住、几个文件没移走」）。
+/// 移入回收站的结果（界面要说清「移了几张、几张被锁挡住、几个文件没动」）。
 #[derive(Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DeleteResult {
-    pub deleted: i64,
+pub struct RecycleResult {
+    pub moved: i64,
     pub blocked_locked: Vec<i64>,
     pub already_gone: i64,
     pub failed: Vec<DeleteFailure>,
 }
 
-impl From<DeleteReport> for DeleteResult {
-    fn from(report: DeleteReport) -> Self {
+impl From<RecycleReport> for RecycleResult {
+    fn from(report: RecycleReport) -> Self {
         Self {
-            deleted: i64::try_from(report.deleted).unwrap_or(i64::MAX),
+            moved: i64::try_from(report.moved).unwrap_or(i64::MAX),
             blocked_locked: report.blocked_locked,
             already_gone: i64::try_from(report.already_gone).unwrap_or(i64::MAX),
-            failed: report
-                .failed
-                .into_iter()
-                .map(|(path, reason)| DeleteFailure { path, reason })
-                .collect(),
+            failed: failures(report.failed),
         }
     }
+}
+
+/// 还原结果（`renamed` = 因原位被占而改名的张数，界面据此提示）。
+#[derive(Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreResult {
+    pub restored: i64,
+    pub renamed: i64,
+    pub failed: Vec<DeleteFailure>,
+}
+
+impl From<RestoreReport> for RestoreResult {
+    fn from(report: RestoreReport) -> Self {
+        Self {
+            restored: i64::try_from(report.restored).unwrap_or(i64::MAX),
+            renamed: i64::try_from(report.renamed).unwrap_or(i64::MAX),
+            failed: failures(report.failed),
+        }
+    }
+}
+
+/// 真删 / 清空的结果。
+#[derive(Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PurgeResult {
+    pub purged: i64,
+    pub failed: Vec<DeleteFailure>,
+}
+
+impl From<PurgeReport> for PurgeResult {
+    fn from(report: PurgeReport) -> Self {
+        Self {
+            purged: i64::try_from(report.purged).unwrap_or(i64::MAX),
+            failed: failures(report.failed),
+        }
+    }
+}
+
+/// 回收站概况（入口行「有内容才出现」+ 数量/占用）。
+#[derive(Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecycleSummaryView {
+    pub count: i64,
+    pub bytes: i64,
+}
+
+fn failures(list: Vec<(String, String)>) -> Vec<DeleteFailure> {
+    list.into_iter()
+        .map(|(path, reason)| DeleteFailure { path, reason })
+        .collect()
 }
 
 /// 旗标快照（当前库的）。
@@ -1133,13 +1378,47 @@ fn stack_snapshot(stack: &UndoStack) -> StackSnapshot {
     )
 }
 
-/// 删除照片（进系统回收站；一级锁挡住）。
+/// 删除照片 = 移入库内回收站（一级锁挡住；`specs/library-recycle-bin.md`）。
 #[tauri::command]
 pub async fn browse_delete<R: Runtime>(
     app: AppHandle<R>,
     repository_id: String,
     ids: Vec<i64>,
-) -> Result<DeleteResult, String> {
+) -> Result<RecycleResult, String> {
+    let handle = app.clone();
+    blocking(move || {
+        let state = handle.state::<BrowseState>();
+        let catalog = state.lease(&handle, &repository_id)?;
+        let root = catalog.root().to_path_buf();
+        let guard = Arc::clone(&catalog);
+        let now = time::now_millis();
+        let label = repository_id.clone();
+        let report = catalog.write_tx(move |conn| {
+            // 诊断（生产也打）：删除链路的**后端唯一抓手** —— 前端「点了没反应」先看这一行
+            eprintln!("[recycle] browse_delete repo={label} ids={ids:?}");
+            let result = raybend::store::recycle::move_to_recycle_checked(
+                conn,
+                &root,
+                &ids,
+                now,
+                || guard.ensure_current(),
+            );
+            eprintln!("[recycle] browse_delete -> {result:?}");
+            result
+        });
+        state.observe_session(&handle, &catalog);
+        report.map(RecycleResult::from).map_err(|e| e.to_string())
+    })
+    .await
+}
+
+/// 还原回收站里选中的照片（回原位；同名自动加 `_01` 后缀，`renamed` 报张数）。
+#[tauri::command]
+pub async fn browse_recycle_restore<R: Runtime>(
+    app: AppHandle<R>,
+    repository_id: String,
+    ids: Vec<i64>,
+) -> Result<RestoreResult, String> {
     let handle = app.clone();
     blocking(move || {
         let state = handle.state::<BrowseState>();
@@ -1147,16 +1426,79 @@ pub async fn browse_delete<R: Runtime>(
         let root = catalog.root().to_path_buf();
         let guard = Arc::clone(&catalog);
         let report = catalog.write_tx(move |conn| {
-            raybend::store::delete::delete_assets_checked(
-                &raybend::store::delete::SystemTrash,
-                conn,
-                &root,
-                &ids,
-                || guard.ensure_current(),
-            )
+            raybend::store::recycle::restore_assets_checked(conn, &root, &ids, || {
+                guard.ensure_current()
+            })
         });
         state.observe_session(&handle, &catalog);
-        report.map(DeleteResult::from).map_err(|e| e.to_string())
+        report.map(RestoreResult::from).map_err(|e| e.to_string())
+    })
+    .await
+}
+
+/// 真删回收站里选中的照片（**永久**；界面上只有拖动一条路，见规格 §1）。
+#[tauri::command]
+pub async fn browse_recycle_purge<R: Runtime>(
+    app: AppHandle<R>,
+    repository_id: String,
+    ids: Vec<i64>,
+) -> Result<PurgeResult, String> {
+    let handle = app.clone();
+    blocking(move || {
+        let state = handle.state::<BrowseState>();
+        let catalog = state.lease(&handle, &repository_id)?;
+        let root = catalog.root().to_path_buf();
+        let guard = Arc::clone(&catalog);
+        let report = catalog.write_tx(move |conn| {
+            raybend::store::recycle::purge_assets_checked(conn, &root, &ids, || {
+                guard.ensure_current()
+            })
+        });
+        state.observe_session(&handle, &catalog);
+        report.map(PurgeResult::from).map_err(|e| e.to_string())
+    })
+    .await
+}
+
+/// 清空回收站（**永久**删除全部；强确认在界面侧）。
+#[tauri::command]
+pub async fn browse_recycle_empty<R: Runtime>(
+    app: AppHandle<R>,
+    repository_id: String,
+) -> Result<PurgeResult, String> {
+    let handle = app.clone();
+    blocking(move || {
+        let state = handle.state::<BrowseState>();
+        let catalog = state.lease(&handle, &repository_id)?;
+        let root = catalog.root().to_path_buf();
+        let guard = Arc::clone(&catalog);
+        let report = catalog.write_tx(move |conn| {
+            raybend::store::recycle::empty_recycle_checked(conn, &root, || guard.ensure_current())
+        });
+        state.observe_session(&handle, &catalog);
+        report.map(PurgeResult::from).map_err(|e| e.to_string())
+    })
+    .await
+}
+
+/// 回收站概况（入口行的出现条件与数量/占用）。
+#[tauri::command]
+pub async fn browse_recycle_summary<R: Runtime>(
+    app: AppHandle<R>,
+    repository_id: String,
+) -> Result<RecycleSummaryView, String> {
+    let handle = app.clone();
+    blocking(move || {
+        let state = handle.state::<BrowseState>();
+        let catalog = state.lease(&handle, &repository_id)?;
+        let summary = catalog.read(raybend::store::recycle::summary);
+        state.observe_session(&handle, &catalog);
+        summary
+            .map(|s| RecycleSummaryView {
+                count: s.count,
+                bytes: s.bytes,
+            })
+            .map_err(|e| e.to_string())
     })
     .await
 }

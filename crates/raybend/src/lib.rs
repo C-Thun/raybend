@@ -22,6 +22,7 @@
 pub mod ai;
 pub mod color;
 pub mod develop;
+pub mod diagnostics;
 pub mod display;
 pub mod export;
 pub mod external_editor;

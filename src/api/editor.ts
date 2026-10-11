@@ -94,6 +94,16 @@ export async function setEditorReferenceIssue(
   await call<void>("editor_set_reference_issue", { repositoryId, assetId, issueId, photoPath, sequence });
 }
 
+/**
+ * **邻图预览预热**（W2 §4.6）：把胶片带前后各一张的 1920 预览在后台（P2）备好，
+ * 来回切换时首帧直接命中 L1 快照。只对编辑过且缺快照的邻居动手；
+ * 新一次调用会撤掉上一次还没开跑的预热。
+ */
+export async function prefetchEditorNeighbors(paths: readonly string[]): Promise<void> {
+  if (!isTauriRuntime() || paths.length === 0) return;
+  await call<void>("editor_prefetch_neighbors", { paths: [...paths] });
+}
+
 /** 读取 Rust 工具草稿；只有确认按钮会将它写入编辑栈。 */
 export async function confirmEditorTool(): Promise<EditGeometry | null> {
   if (!isTauriRuntime()) return null;

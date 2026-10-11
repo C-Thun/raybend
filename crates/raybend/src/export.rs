@@ -271,6 +271,14 @@ pub struct VariantSnapshot {
     pub profile_hash: String,
     pub stack: DevelopStack,
     pub source_signature: String,
+    /// 该变体的**展示尺寸**（`store::sizes::display_size`；库里没存就是 `None`）。
+    ///
+    /// 它只是派生元信息 —— **不进** profile JSON / 哈希 / 签名 / XMP（身份红线，
+    /// `specs/display-size-source.md` §3.5-B）；导出队列与前端靠它拿到“这张多大”。
+    #[serde(default)]
+    pub width: Option<u32>,
+    #[serde(default)]
+    pub height: Option<u32>,
 }
 /// 明确取所需稿，不改变最新工作副本。基准缺失时不自动换另一源。
 pub fn snapshot(conn: &Connection, root: &Path, reference: &VariantRef) -> Result<VariantSnapshot> {
@@ -313,6 +321,13 @@ pub fn snapshot(conn: &Connection, root: &Path, reference: &VariantRef) -> Resul
     let source = crate::store::path_semantics::to_platform_path(&rel);
     let sig = crate::media::source::source_signature(&root.join(source))?;
     let hash = issues::profile_hash(&stack)?;
+    // 展示尺寸：与变体同一个解析口（只读库，毫秒级）—— 库还没存就 `None`，消费方回退
+    let size = crate::store::sizes::display_size(
+        conn,
+        reference.asset_id,
+        crate::store::sizes::SizeVariant::parse(&reference.variant)
+            .ok_or_else(|| Error::Unsupported("无效的导出变体".into()))?,
+    )?;
     Ok(VariantSnapshot {
         reference: reference.clone(),
         name,
@@ -320,6 +335,8 @@ pub fn snapshot(conn: &Connection, root: &Path, reference: &VariantRef) -> Resul
         profile_hash: hash,
         stack,
         source_signature: sig,
+        width: size.map(|(width, _)| width),
+        height: size.map(|(_, height)| height),
     })
 }
 /// 队列预览验证入队快照，既不重取 latest，也不要求命名稿仍存在。
@@ -397,7 +414,7 @@ pub fn render_captured(
     max_edge: u32,
 ) -> Result<crate::display::output::Rgb16Image> {
     verify_capture(path, captured, lut, max_edge)?;
-    let (linear, shot) = crate::display::output::decode_linear_source(path)?;
+    let (linear, shot) = crate::display::output::decode_linear_source(path, crate::raw::DecodePriority::Low)?;
     let image =
         crate::display::output::render_linear(&linear, &captured.stack, lens, shot, lut, max_edge)?;
     check_source(path, captured)?;
@@ -431,7 +448,7 @@ pub fn render_working_captured(
 ) -> Result<crate::color::working::WorkingImage> {
     verify_capture(path, captured, lut, max_edge)?;
     let color = captured.stack.color.as_ref().ok_or_else(|| Error::Unsupported("定稿不属于新版色彩管线".into()))?;
-    let (working, shot) = crate::display::output::decode_working_source(path, color, profile)?;
+    let (working, shot) = crate::display::output::decode_working_source(path, color, profile, crate::raw::DecodePriority::Low)?;
     let source = crate::develop::working::WorkingReferenceImage::from_working(working).map_err(|e| Error::Unsupported(e.to_string()))?;
     let image = crate::display::output::render_working(&source, &captured.stack, lens, shot, lut, max_edge)?;
     check_source(path, captured)?;
@@ -702,6 +719,8 @@ mod tests {
             profile_hash: issues::profile_hash(&stack).unwrap(),
             stack,
             source_signature: crate::media::source::source_signature(&source).unwrap(),
+            width: None,
+            height: None,
         };
         let target = dir.path().join("输出/原尺寸.TIFF");
         assert_eq!(
@@ -930,6 +949,98 @@ mod tests {
         std::fs::remove_file(dir.path().join("photos/a.jpg")).unwrap();
         assert!(!still_current(&c, dir.path(), &base).unwrap());
     }
+    #[test]
+    fn snapshot_carries_the_variant_display_size_from_the_catalog() {
+        // `specs/display-size-source.md` §9：snapshot 的 width/height 来自 `store::sizes`
+        // （含 issue 与 latest 的几何），导出队列与前端靠它拿到「这张多大」。
+        let c = catalog();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("photos")).unwrap();
+        std::fs::write(dir.path().join("photos/中文.jpg"), b"stub").unwrap();
+        c.execute(
+            "INSERT INTO assets(id,imported_at,updated_at)VALUES(1,0,0)",
+            [],
+        )
+        .unwrap();
+        c.execute("INSERT INTO asset_files(asset_id,role,rel_path,rel_path_folded,ext,size_bytes,mtime_ms,display_width,display_height,orientation,created_at,updated_at)VALUES(1,'bitmap','photos/中文.jpg','photos/中文.jpg','jpg',1,1,4000,3000,1,0,0)",[]).unwrap();
+
+        let sooc = snapshot(
+            &c,
+            dir.path(),
+            &VariantRef {
+                asset_id: 1,
+                variant: "sooc".into(),
+            },
+        )
+        .unwrap();
+        assert_eq!((sooc.width, sooc.height), (Some(4000), Some(3000)));
+
+        // latest：裁一半 ⇒ 输出尺寸由几何算出（与栈同一笔写）
+        let mut stack = DevelopStack {
+            source_base: EditBase::Sooc,
+            params: std::collections::BTreeMap::from([("exposure".into(), 0.5)]),
+            ..Default::default()
+        };
+        stack.geometry = Some(crate::develop::geometry::EditGeometry {
+            rotation: 0.0,
+            crop: Some(crate::develop::geometry::CropRect {
+                x: 0.0,
+                y: 0.0,
+                width: 0.5,
+                height: 0.5,
+            }),
+            crop_ratio: None,
+        });
+        crate::store::develop::save(&c, 1, &stack, 1).unwrap();
+        let latest = snapshot(
+            &c,
+            dir.path(),
+            &VariantRef {
+                asset_id: 1,
+                variant: "latest".into(),
+            },
+        )
+        .unwrap();
+        assert_eq!((latest.width, latest.height), (Some(2000), Some(1500)));
+
+        // issue：同一份几何，走定稿自己那一行
+        let issue = issues::create(&c, 1, "一半", &stack, 2).unwrap();
+        assert_eq!((issue.width, issue.height), (Some(2000), Some(1500)));
+        let named = snapshot(
+            &c,
+            dir.path(),
+            &VariantRef {
+                asset_id: 1,
+                variant: format!("issue:{}", issue.id),
+            },
+        )
+        .unwrap();
+        assert_eq!((named.width, named.height), (Some(2000), Some(1500)));
+
+        // 老库（文件行没尺寸、assets 有原始轴）：退回现算的基准展示尺寸
+        c.execute(
+            "INSERT INTO assets(id,width,height,orientation,imported_at,updated_at)VALUES(2,6000,4000,6,0,0)",
+            [],
+        )
+        .unwrap();
+        c.execute("INSERT INTO asset_files(asset_id,role,rel_path,rel_path_folded,ext,size_bytes,mtime_ms,created_at,updated_at)VALUES(2,'bitmap','photos/旧.jpg','photos/旧.jpg','jpg',1,1,0,0)",[]).unwrap();
+        std::fs::write(dir.path().join("photos/旧.jpg"), b"stub").unwrap();
+        let legacy = snapshot(
+            &c,
+            dir.path(),
+            &VariantRef {
+                asset_id: 2,
+                variant: "sooc".into(),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            (legacy.width, legacy.height),
+            (Some(4000), Some(6000)),
+            "老库：原始轴 + 方向现算（方向只在 media::meta::oriented_size 一处做）"
+        );
+    }
+
     #[test]
     fn snapshot_stays_immutable_and_rejects_missing_or_wrong_source() {
         let c = catalog();

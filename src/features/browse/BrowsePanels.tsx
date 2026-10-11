@@ -19,7 +19,7 @@ import {
   Show,
   type JSX,
 } from "solid-js";
-import { IconDots, IconFolderMinus, IconFolderPlus, IconTag } from "@tabler/icons-solidjs";
+import { IconDots, IconFolderMinus, IconFolderPlus, IconTag, IconTrash } from "@tabler/icons-solidjs";
 
 import { dirCreate, dirEmptyCheck, dirRemoveEmpty, listDirs, syncDirectoryCounts, onCatalogDirty } from "../../api/db.ts";
 import { Button } from "../../components/ui/Button.tsx";
@@ -30,12 +30,13 @@ import { Input } from "../../components/ui/Form.tsx";
 import { Menu } from "../../components/ui/Menu.tsx";
 import type { AssetItem, DirEmptyView, FileExif, RepositoryView } from "../../api/types.ts";
 import type { IssueLibrary } from "../../api/issues.ts";
+import { displaySizeOf, issueOf } from "../../lib/display-size.ts";
 import { locale, t } from "../../i18n/index.ts";
 import { setDirectoryTag, tagsForDirectory } from "../../api/organization.ts";
 
 import type { ViewerStore } from "../../components/ui/viewer/index.ts";
 
-import { dirDisplayName, PHOTOS_DIR, visibleChildDirs } from "./dirs.ts";
+import { dirDisplayName, PHOTOS_DIR, RECYCLE_DIR, visibleChildDirs } from "./dirs.ts";
 import { ViewerReadout } from "./ViewerReadout.tsx";
 import {
   compactList,
@@ -201,7 +202,11 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
     if (repositoryId === null) return;
     try {
       const entries = await listDirs(abs);
-      if (reconcile) await syncDirectoryCounts(repositoryId, store.scopePath() ?? relPath, [relPath]);
+      // 回收站不在 photos 的目录计数体系里：不给它跑 sync（那是 photos 专用的同步）
+      const inRecycle = relPath === RECYCLE_DIR || relPath.startsWith(`${RECYCLE_DIR}/`);
+      if (reconcile && !inRecycle) {
+        await syncDirectoryCounts(repositoryId, store.scopePath() ?? relPath, [relPath]);
+      }
       if (base !== root() || repositoryId !== store.repositoryId()) return;
       // 保留目录 `_RAW` 不进树（`memory/FUNCTION-REPOSITORY.md` §4.1），别的原样
       const visible = visibleChildDirs(entries);
@@ -239,7 +244,20 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
     const focus = (): void => {
       const repositoryId = store.repositoryId();
       if (repositoryId === null) return;
-      void syncDirectoryCounts(repositoryId, store.scopePath() ?? PHOTOS_DIR, [PHOTOS_DIR, ...expanded()].slice(0, 66))
+      /*
+       * 回收站不参与目录同步（`specs/library-recycle-bin.md` §3.3）：
+       * 它的路径不在 `photos` 子树内，扫描会对账不上（后端直接报「扫描范围必须是 photos 内的相对目录」）——
+       * 而回收站的计数来自 `recycleSummary`，本来就不靠目录表。
+       */
+      const recycle = (path: string): boolean =>
+        path === RECYCLE_DIR || path.startsWith(`${RECYCLE_DIR}/`);
+      const active = store.scopePath() ?? PHOTOS_DIR;
+      if (recycle(active)) {
+        refreshTree();
+        return;
+      }
+      const scopes = [PHOTOS_DIR, ...expanded()].filter((path) => !recycle(path)).slice(0, 66);
+      void syncDirectoryCounts(repositoryId, active, scopes)
         .then(refreshTree).catch((error: unknown) => store.reportError(error));
     };
     window.addEventListener("focus", focus);
@@ -279,6 +297,11 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
     }),
   );
 
+  /** 这个路径属于回收站区吗（回收站行与它的子目录）。 */
+  function isRecyclePath(relPath: string): boolean {
+    return relPath === RECYCLE_DIR || relPath.startsWith(`${RECYCLE_DIR}/`);
+  }
+
   /** 展开的树（前序遍历）。 */
   const treeRows = createMemo<TreeRow[]>(() => {
     const rows: TreeRow[] = [];
@@ -300,12 +323,136 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
         if (isExpanded) walk(rel, depth + 1);
       }
     };
+    /*
+     * 回收站子树（**入口行单独渲染**在 `For` 之前；这里只把它的子目录按展开态铺出来）。
+     *
+     * - **depth 0**：回收站的一级目录与库内正式目录**同样左对齐**，只有子目录才缩进
+     *   （崔总 2026-10-11）。
+     * - 条件里必须带上「回收站还有内容或正看着它」：入口行不显示时**整块都不铺** ——
+     *   否则还原掉最后一张后，入口行没了、它的子目录行还留在树上。
+     */
+    if ((store.recycleSummary().count > 0 || store.recycleMode()) && expanded().has(RECYCLE_DIR)) {
+      walk(RECYCLE_DIR, 0);
+    }
     walk(PHOTOS_DIR, 0);
     const filter = needle();
     if (filter === "") return rows;
     // 目录名过滤：命中即显示（父链在树里天然保留）
     return rows.filter((row) => row.name.toLowerCase().includes(filter));
   });
+
+  /** 回收站区显示的行（一级目录与它展开的子目录）。 */
+  const recycleRows = createMemo(() => treeRows().filter((row) => isRecyclePath(row.relPath)));
+  /** 库内正式目录区显示的行。 */
+  const photosRows = createMemo(() => treeRows().filter((row) => !isRecyclePath(row.relPath)));
+
+  /** 目录树的一行。回收站里的行走同一份（点击行为与 ⋯ 菜单在内部按路径区分）。 */
+  function renderRow(row: TreeRow): JSX.Element {
+    return (
+              <div
+                class={[
+                  "flex items-center gap-1 rounded-(--radius) pr-1",
+                  store.scopePath() === row.relPath
+                    ? "bg-state-selected text-fg-1"
+                    : "text-fg-2 hover:bg-state-hover",
+                ].join(" ")}
+                style={{ "padding-left": `${row.depth * 12 + 4}px` }}
+              >
+                {/* 点箭头 = 展开；点名字 = 选中（memory/FUNCTION-BROWSE.md §4.3 的两个动作） */}
+                <button
+                  type="button"
+                  aria-label={row.expanded ? t("browse.collapse") : t("browse.expand")}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    toggleExpand(row.relPath);
+                  }}
+                  class="w-4 shrink-0 text-center text-fs-0 text-fg-3 hover:text-fg-1"
+                >
+                  {row.hasChildren ? (row.expanded ? "▾" : "▸") : ""}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    /*
+                     * 回收站区里的行**保持在回收站里**（它只是换范围）：回收站的资产
+                     * `deleted_at` 非空，而「不在回收站模式」的查询只看 Live —— 一旦退出，
+                     * 这些目录点开就是空的（2026-10-11 真机 bug）。
+                     * 库内正式目录的行则相反：在回收站里点它 = 退出回收站并切过去。
+                     */
+                    if (isRecyclePath(row.relPath)) {
+                      if (!store.recycleMode()) store.enterRecycle();
+                      store.setScope(row.relPath);
+                    } else if (store.recycleMode()) {
+                      store.openPhotosScope(row.relPath);
+                    } else {
+                      store.setScope(row.relPath);
+                    }
+                    const repositoryId = store.repositoryId();
+                    if (repositoryId !== null) props.onSelectDirectory?.(repositoryId, row.relPath);
+                  }}
+                  class="min-w-0 flex-1 overflow-hidden whitespace-nowrap fade-x-end py-1 text-left text-fs-2"
+                  title={row.relPath}
+                >
+                  {row.name}
+                </button>
+
+                {/*
+                  行尾 `⋯`（`memory/FUNCTION-BROWSE.md` §4.3）：删除空目录 / 创建子目录。
+
+                  空检查是**打开菜单时**才做的（深度检索要碰盘），结果缓存起来决定
+                  「删除空目录」能不能点；非空时菜单项在，但是暗的。
+
+                  **回收站里的目录没有这些操作** —— 这个菜单只属于 photos 侧的目录行。
+                */}
+                <Show when={row.relPath.startsWith(PHOTOS_DIR)}>
+                <Menu
+                  label={t("browse.dirMenu")}
+                  placement="bottom-end"
+                  items={[
+                    {
+                      value: "delete-empty",
+                      label: t("browse.deleteEmptyDir"),
+                      icon: <IconFolderMinus size={14} />,
+                      disabled: !canDeleteEmpty(row.relPath),
+                    },
+                    {
+                      value: "create-subdir",
+                      label: t("browse.createSubdir"),
+                      icon: <IconFolderPlus size={14} />,
+                    },
+                    {
+                      value: "directory-tags",
+                      label: t("org.directoryTags"),
+                      icon: <IconTag size={14} />,
+                    },
+                  ]}
+                  onSelect={(value) => {
+                    setFormError(null);
+                    if (value === "delete-empty") setConfirmRel(row.relPath);
+                    if (value === "directory-tags") void openDirectoryTags(row.relPath);
+                    if (value === "create-subdir") {
+                      setNewName("");
+                      setCreateRel(row.relPath);
+                    }
+                  }}
+                  onOpenChange={(open) => {
+                    if (open) void checkEmpty(row.relPath);
+                  }}
+                >
+                  {(triggerProps) => (
+                    <button
+                      {...triggerProps()}
+                      aria-label={t("browse.dirMenu")}
+                      class="shrink-0 rounded-(--radius) px-1 text-fg-3 hover:bg-state-hover hover:text-fg-1"
+                    >
+                      <IconDots size={14} />
+                    </button>
+                  )}
+                </Menu>
+                </Show>
+              </div>
+    );
+  }
 
   function toggleExpand(relPath: string): void {
     const isExpanded = expanded().has(relPath);
@@ -548,99 +695,47 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
           class={["overflow-y-auto", libsOpen() ? "shrink-0" : "min-h-0 flex-1"].join(" ")}
           style={libsOpen() ? { height: `${TREE_MIN_HEIGHT_PX}px` } : undefined}
         >
-          <Show when={treeRows().length === 0}>
+
+
+          <Show
+            when={
+              treeRows().length === 0 &&
+              store.recycleSummary().count === 0 &&
+              !store.recycleMode()
+            }
+          >
             <p class="px-1 py-2 text-fs-2 text-fg-3">{t("browse.emptyTree")}</p>
           </Show>
 
-          <For each={treeRows()}>
-            {(row) => (
-              <div
-                class={[
-                  "flex items-center gap-1 rounded-(--radius) pr-1",
-                  store.scopePath() === row.relPath
-                    ? "bg-state-selected text-fg-1"
-                    : "text-fg-2 hover:bg-state-hover",
-                ].join(" ")}
-                style={{ "padding-left": `${row.depth * 12 + 4}px` }}
-              >
-                {/* 点箭头 = 展开；点名字 = 选中（memory/FUNCTION-BROWSE.md §4.3 的两个动作） */}
-                <button
-                  type="button"
-                  aria-label={row.expanded ? t("browse.collapse") : t("browse.expand")}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    toggleExpand(row.relPath);
-                  }}
-                  class="w-4 shrink-0 text-center text-fs-0 text-fg-3 hover:text-fg-1"
-                >
-                  {row.hasChildren ? (row.expanded ? "▾" : "▸") : ""}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    store.setScope(row.relPath);
-                    const repositoryId = store.repositoryId();
-                    if (repositoryId !== null) props.onSelectDirectory?.(repositoryId, row.relPath);
-                  }}
-                  class="min-w-0 flex-1 truncate py-1 text-left text-fs-2"
-                  title={row.relPath}
-                >
-                  {row.name}
-                </button>
+          {/*
+            回收站区（`specs/library-recycle-bin.md` §4.1）：**不是一个目录、没有选中概念** ——
+            这一行的作用就是展开/收起回收站里的一级目录（崔总 2026-10-11）。
+            所以：贴左、无展开箭头、点整行切换；红色垃圾桶只是点缀。
+          */}
+          <Show when={store.recycleSummary().count > 0 || store.recycleMode()}>
+            <button
+              type="button"
+              aria-expanded={expanded().has(RECYCLE_DIR)}
+              onClick={() => toggleExpand(RECYCLE_DIR)}
+              title={t("browse.recycle")}
+              class="flex w-full items-center gap-1 rounded-(--radius) py-1 pr-1 text-left text-fs-2 text-fg-1 hover:bg-state-hover"
+              style={{ "padding-left": "4px" }}
+            >
+              <IconTrash size={14} class="shrink-0 text-danger" aria-hidden="true" />
+              <span class="min-w-0 flex-1 overflow-hidden whitespace-nowrap fade-x-end">
+                {t("browse.recycle")}
+              </span>
+              <span class="shrink-0 pr-1 text-fs-0 text-fg-3 tabular-nums">
+                {store.recycleSummary().count}
+              </span>
+            </button>
+            {/* 回收站里的一级目录：与库内目录**同样左对齐不缩进**（子目录才缩进） */}
+            <For each={recycleRows()}>{renderRow}</For>
+            {/* 分隔回收站区与库内正式目录区（在回收站区**之下**） */}
+            <div class="my-1 border-t border-line-2" />
+          </Show>
 
-                {/*
-                  行尾 `⋯`（`memory/FUNCTION-BROWSE.md` §4.3）：删除空目录 / 创建子目录。
-
-                  空检查是**打开菜单时**才做的（深度检索要碰盘），结果缓存起来决定
-                  「删除空目录」能不能点；非空时菜单项在，但是暗的。
-                */}
-                <Menu
-                  label={t("browse.dirMenu")}
-                  placement="bottom-end"
-                  items={[
-                    {
-                      value: "delete-empty",
-                      label: t("browse.deleteEmptyDir"),
-                      icon: <IconFolderMinus size={14} />,
-                      disabled: !canDeleteEmpty(row.relPath),
-                    },
-                    {
-                      value: "create-subdir",
-                      label: t("browse.createSubdir"),
-                      icon: <IconFolderPlus size={14} />,
-                    },
-                    {
-                      value: "directory-tags",
-                      label: t("org.directoryTags"),
-                      icon: <IconTag size={14} />,
-                    },
-                  ]}
-                  onSelect={(value) => {
-                    setFormError(null);
-                    if (value === "delete-empty") setConfirmRel(row.relPath);
-                    if (value === "directory-tags") void openDirectoryTags(row.relPath);
-                    if (value === "create-subdir") {
-                      setNewName("");
-                      setCreateRel(row.relPath);
-                    }
-                  }}
-                  onOpenChange={(open) => {
-                    if (open) void checkEmpty(row.relPath);
-                  }}
-                >
-                  {(triggerProps) => (
-                    <button
-                      {...triggerProps()}
-                      aria-label={t("browse.dirMenu")}
-                      class="shrink-0 rounded-(--radius) px-1 text-fg-3 hover:bg-state-hover hover:text-fg-1"
-                    >
-                      <IconDots size={14} />
-                    </button>
-                  )}
-                </Menu>
-              </div>
-            )}
-          </For>
+          <For each={photosRows()}>{renderRow}</For>
         </div>
       </Show>
 
@@ -847,7 +942,7 @@ function EditableField(props: {
           <button
             type="button"
             disabled={props.disabled}
-            class="min-w-0 flex-1 cursor-text truncate text-left text-fs-2 text-fg-1 hover:text-brand"
+            class="min-w-0 flex-1 cursor-text overflow-hidden whitespace-nowrap fade-x-end text-left text-fs-2 text-fg-1 hover:text-brand"
             title={props.value ?? props.placeholder}
             onClick={begin}
           >
@@ -913,7 +1008,7 @@ function cameraText(item: AssetItem): string | null {
  * 抽成独立组件是为了让 `AssetInfo` 能在**看图态把它换成预览 + 直方图**
  * （`memory/FUNCTION-BROWSE.md` §5.9）。tiles 态展示选中文件的完整 EXIF，内容过长时只滚动本区。
  */
-function ExifSection(props: { item: AssetItem; file: FileExif | null }): JSX.Element {
+function ExifSection(props: { item: AssetItem; file: FileExif | null; size: { width: number; height: number } | null }): JSX.Element {
   const rows = (): MetadataRow[] => {
     const item = props.item;
     const file = props.file;
@@ -924,7 +1019,7 @@ function ExifSection(props: { item: AssetItem; file: FileExif | null }): JSX.Ele
       { label: t("browse.fieldAperture"), value: item.fNumber === null ? null : `f/${item.fNumber}` },
       { label: t("browse.fieldExposure"), value: exposureText(item.exposureMs) },
       { label: t("browse.fieldIso"), value: item.iso === null ? null : `ISO ${item.iso}` },
-      { label: t("browse.fieldSize"), value: item.width === null || item.height === null ? null : `${item.width} × ${item.height}` },
+      { label: t("browse.fieldSize"), value: props.size === null ? null : `${props.size.width} × ${props.size.height}` },
       { label: t("browse.exif.software"), value: file?.software ?? null },
       { label: t("browse.exif.datetimeRaw"), value: file?.datetimeRaw ?? null },
       { label: t("browse.exif.exposureBias"), value: file?.exposureBiasEv == null ? null : `${file.exposureBiasEv} EV` },
@@ -977,6 +1072,16 @@ export function AssetInfo(props: AssetInfoProps) {
   const item = () => props.item;
   const readOnly = () => props.pending === true || !props.store.canWrite();
   const selectedIssueChoice = () => props.displayedIssueChoice ?? "latest";
+  /**
+   * 「文件基础信息」里的尺寸与 flowinfo 同源：**当前显示变体**的尺寸
+   * （`lib/display-size.ts` 是唯一读口 —— 同一事实不允许两种表达）。
+   */
+  const displaySize = () => {
+    const current = item();
+    if (current === null) return null;
+    const choice = selectedIssueChoice();
+    return displaySizeOf(current, choice, issueOf(props.issueLibrary ?? null, choice));
+  };
 
   /**
    * 创建日期：**文件在磁盘上被创建的时刻**（不是拍摄时间 —— 那个在「拍摄信息」里）。
@@ -1039,7 +1144,7 @@ export function AssetInfo(props: AssetInfoProps) {
             <Show when={props.issueError}><p class="mt-1 text-fs-0 text-danger">{props.issueError}</p></Show>
           </section>}
         </Show>
-        <Show when={props.viewer} fallback={<ExifSection item={item()!} file={props.fileExif ?? null} />}>
+        <Show when={props.viewer} fallback={<ExifSection item={item()!} file={props.fileExif ?? null} size={displaySize()} />}>
           {(store) => (
             <ViewerReadout store={store()} showVisibleBox={props.comparing !== true} histogram={props.displayHistogram} />
           )}
@@ -1064,6 +1169,10 @@ export function AssetInfo(props: AssetInfoProps) {
             <Field label={t("browse.fieldFileName")} value={item()!.fileName} />
             <Field label={t("browse.fieldCreatedAt")} value={createdText()} />
             <Field label={t("browse.fieldPath")} value={item()!.relPath} />
+            {/* 回收站里的照片：告诉用户它原来在哪（`specs/library-recycle-bin.md` §4.3） */}
+            <Show when={item()!.recycledFrom !== null}>
+              <Field label={t("browse.recycleOriginalPath")} value={item()!.recycledFrom} />
+            </Show>
             <Field label={t("browse.fieldRepository")} value={props.repositoryName ?? null} />
             <EditableField
               disabled={readOnly()}

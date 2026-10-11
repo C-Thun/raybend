@@ -207,6 +207,67 @@ pub fn resolve_asset<R: Runtime>(app: &AppHandle<R>, path: &Path) -> Option<Reso
     None
 }
 
+/// 一个**目录**落在哪个库的根里（与 [`resolve_asset`] 同一套前缀匹配，只是按目录一次查完）。
+///
+/// 用途：`dir_meta_ensure` 刚读到的展示尺寸要写回库里的文件行（老库懒回填，
+/// `specs/display-size-source.md` §3.2）—— 那里只有目录与一批文件名，
+/// 逐文件反查会把同一个库查 N 遍。
+/// 返回 `(库 ID, 库内相对目录, `'/'` 分隔；库根本身时是空串)`。
+/// 不在任何库根下 / 库不在线 → `None`。
+pub(crate) fn catalog_for_dir<R: Runtime>(
+    app: &AppHandle<R>,
+    dir: &Path,
+) -> Option<(String, std::sync::Arc<raybend::store::db::CatalogDb>, String)> {
+    let app_db = app.state::<DbState>();
+    let candidates = app_db
+        .with(app, |db| db.list_repositories().map_err(|e| e.to_string()))
+        .ok()?;
+    for row in candidates {
+        if !row
+            .paths
+            .iter()
+            .any(|p| dir.starts_with(Path::new(&p.path)))
+        {
+            continue;
+        }
+        let Ok(catalog) = app.state::<BrowseState>().lease(app, &row.id) else {
+            continue;
+        };
+        let root = catalog.root().to_path_buf();
+        let Ok(relative) = dir.strip_prefix(&root) else {
+            continue;
+        };
+        let rel = relative.to_string_lossy().replace('\\', "/");
+        return Some((row.id, catalog, rel));
+    }
+    None
+}
+
+/// **latest 预览快照的版本名**（`specs/editor-session-pipeline.md` §4.2）：
+/// `latest-<profile_hash 前 12 位>`，与 `issue-<id>-<hash>` 同一套哈希
+/// （`raybend::store::issues::profile_hash`）。
+///
+/// 栈一变名字就变 —— 读取方（过渡帧 / 缩略图 / 定稿复用）自然失配，
+/// 不再靠「落库删整目录」保证一致性（旧文件由 `FullCache::gc_latest` 回收）。
+/// **拼接只此一处**，不在别处再写一遍。
+pub(crate) fn latest_variant(stack: &DevelopStack) -> Result<String, String> {
+    let hash = raybend::store::issues::profile_hash(stack).map_err(|error| error.to_string())?;
+    Ok(format!("latest-{}", &hash[..12]))
+}
+
+/// latest 预览的**单飞 key**（同一张照片 + 同一份栈 = 同一个 key）：
+/// 前端预览队列与定稿快照等待用同一个，保证同一画面只渲一遍。
+pub(crate) fn latest_preview_key(
+    repository_id: &str,
+    asset_id: i64,
+    stack: &DevelopStack,
+) -> Result<String, String> {
+    Ok(format!(
+        "latest-preview:{repository_id}:{asset_id}:{}",
+        latest_variant(stack)?
+    ))
+}
+
 /// 这张照片该显示哪个 issue（连同它的编辑栈）。
 ///
 /// # Errors
@@ -226,6 +287,38 @@ pub fn issue_of<R: Runtime>(
             .map_err(|e| e.to_string())?;
         Ok((choice, stack))
     })
+}
+
+/// **编辑器参照源**（`specs/editor-session-pipeline.md` §5.1）。
+///
+/// 以前这份事实挂在「过渡帧计划」上 —— 只有换照片那一条任务带，任何不带计划的
+/// 缓存重建都会静默丢掉它，对比参照就退化成 RAW（现象 1）。现在由命令层按 asset
+/// 解析一次，随换照片任务交给显影线程，显影线程**跨缓存重建保留**。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReferenceSources {
+    /// SOOC 位图（同名 JPG 那一侧）；`None` = 这张照片没有位图侧。
+    pub sooc: Option<PathBuf>,
+    /// SOOC 位图可用吗 —— **SOOC 参照能不能用**的唯一判据。
+    /// `false` 时不允许拿 RAW 文件冒充 SOOC 参照（编辑基准的兜底语义不受影响）。
+    pub bitmap_available: bool,
+}
+
+impl ReferenceSources {
+    /// 按 asset 解析（不在库里 / 库离线 → `None`：调用方走「没有参照源」那条路）。
+    #[must_use]
+    pub fn resolve<R: Runtime>(app: &AppHandle<R>, asset: &ResolvedAsset) -> Self {
+        let sooc = source_path_of(app, asset, raybend::store::develop::EditBase::Sooc).filter(
+            |path| {
+                path.is_file()
+                    && raybend::store::develop::EditBase::of_file(path)
+                        == raybend::store::develop::EditBase::Sooc
+            },
+        );
+        Self {
+            bitmap_available: sooc.is_some(),
+            sooc,
+        }
+    }
 }
 
 /// 这张照片在**指定基准**下的源文件（绝对路径）。
@@ -358,14 +451,29 @@ pub async fn develop_preview_refresh<R: Runtime>(
         if !raybend::store::develop::needs_preview(choice, &stack) {
             return Ok(false);
         }
-        crate::thumbs::render_latest_cached(&handle, &asset, &stack)?;
-        let db = handle.state::<crate::thumbs::SourcesThumbs>().get(
-            &crate::thumbs::sources_cache_dir(&handle)?, time::now_millis())?;
-        let source = source_path_of(&handle, &asset, stack.source_base).ok_or("最新编辑源不可用")?;
-        for size in [raybend::thumbnail::SizeClass::Grid, raybend::thumbnail::SizeClass::Strip] {
-            crate::thumbs::render_profile_thumb(&handle, &db, &asset, &source, &stack, size, Some("latest"))
-                .map_err(|e| e.to_string())?;
-        }
+        /*
+         * 走**后台队列的「同 key 单飞」**（§4.3）：同一张照片、同一份栈的预览，
+         * 不管几个调用者（前端预览队列 / 定稿复用 / 进编辑器预温）都只渲一遍；
+         * 后来的调用者等前一个的结果（条件变量，不轮询）。
+         */
+        let key = latest_preview_key(&asset.repository_id, asset.asset_id, &stack)?;
+        let queue = handle.state::<crate::work::WorkQueue>();
+        let task_app = handle.clone();
+        queue.run(crate::work::Priority::Warm, key, move |_token| {
+            crate::thumbs::render_latest_cached(&task_app, &asset, &stack)?;
+            let db = task_app.state::<crate::thumbs::SourcesThumbs>().get(
+                &crate::thumbs::sources_cache_dir(&task_app)?, time::now_millis())?;
+            let source = source_path_of(&task_app, &asset, stack.source_base)
+                .ok_or("最新编辑源不可用")?;
+            let variant = latest_variant(&stack)?;
+            // 只备缩略图那一档（384）—— 胶片带也吃它（192 那一档 2026-10-11 取消）
+            crate::thumbs::render_profile_thumb(
+                &task_app, &db, &asset, &source, &stack,
+                raybend::thumbnail::SizeClass::Grid, Some(&variant),
+            )
+            .map_err(|e| e.to_string())?;
+            Ok(())
+        })?;
         Ok(true)
     })
     .await
@@ -413,8 +521,39 @@ pub async fn develop_commit<R: Runtime>(
     let undo_repository = repository_id.clone();
     blocking(move || {
         let state = handle.state::<BrowseState>();
-        let stack = stack.into_stack()?;
+        let mut stack = stack.into_stack()?;
+        /*
+         * **温度 dirty ⇒ `as_shot_k` 非空**（`specs/editor-session-pipeline.md` §6.3）。
+         *
+         * 温度是**相对基线**的：基线缺失的栈落库后，编辑器重开只能按静态默认 6250K
+         * 解释它（库里 `as_shot_k NULL` + 显式温度那类污染的来源）。
+         * 会话里有解码真值就回填；两边都拿不到记诊断 —— **不静默写一个 null 基线**。
+         */
+        if stack.params.contains_key("temperature") && stack.as_shot_k.is_none() {
+            match crate::editor::decoded_as_shot(&handle, &repository_id, asset_id, stack.source_base) {
+                Some(shot) => {
+                    // i18n-exempt: 落库诊断（终端日志，不进界面）
+                    log::warn!("[develop] 落库回填 as-shot 基线 {shot}K（asset {asset_id}）");
+                    stack.as_shot_k = Some(shot);
+                }
+                None => {
+                    // i18n-exempt: 落库诊断（终端日志，不进界面）
+                    log::warn!(
+                        "[develop] 落库诊断：温度是显式值但 as_shot_k 缺失，会话里也没有解码真值\
+                         （asset {asset_id}）——渲染会按解码真值算，编辑器下次打开时白平衡基线需重设"
+                    );
+                }
+            }
+        }
         let (stored, ops) = state.with_catalog(&handle, &repository_id, move |db| {
+            /*
+             * 懒回填：这张照片**缺的尺寸记录**顺手补齐（文件行 + latest 输出 + 各定稿输出，
+             * `specs/display-size-lifecycle.md` §2）。文件 I/O 在写事务之下；失败只记日志。
+             */
+            if let Err(error) = raybend::store::sizes::ensure_sizes(db, asset_id) {
+                // i18n-exempt: 终端诊断（尺寸补不上只用回退链，不拦提交）
+                log::warn!("[develop] 源尺寸懒回填跳过（asset {asset_id}）：{error}");
+            }
             // ① 先读旧值（撤销要它 —— 「读旧值 → 写新值」在同一次调用里完成）
             let before = db
                 .read(|conn| develop::load(conn, asset_id))
@@ -431,15 +570,8 @@ pub async fn develop_commit<R: Runtime>(
             Ok((stored, ops))
         })?;
 
-        // ④ 大图缓存立刻作废（编辑改了画面，旧的 latest.avif 不许再被读到）
-        if let Ok(root) = crate::browse::resolve_root(&handle, &undo_repository)
-            && let Ok(cache) = raybend::display::FullCache::open(&root)
-        {
-            let removed = cache.invalidate(asset_id);
-            if removed > 0 {
-                eprintln!("[develop] 编辑落库，作废 {removed} 个大图缓存文件");
-            }
-        }
+        // ④′ **不再整目录作废**（W2 §4.2）：latest 快照按栈指纹命名，旧文件
+        //     自然失配；真正的回收交给 `FullCache::gc_latest`（写新快照之后顺手做）。
 
         // ⑤ 记进**同一个**撤销栈（`browse` 的标记操作与编辑共用一套历史 —— 不另造一份）
         let label = undo_label(&ops);

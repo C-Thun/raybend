@@ -76,6 +76,8 @@ function backend() {
       if(cmd==="browse_timeline") return {total:state.count,entries:Array.from({length:state.count},(_,i)=>({id:i+1,relPath:photo.relPath,takenAt:photo.takenAt}))};
       if(cmd==="browse_facets")return {ratings:[],colors:[],likes:[],locks:[]};
       if(cmd==="browse_flags_get")return {total:0,picks:[],rejects:[]};
+      // 回收站摘要：夹具不测回收站，但界面会读它（读不到会拿到 null 并在左侧栏炸开）
+      if(cmd==="browse_recycle_summary")return {count:0,bytes:0};
       if(["volumes_list","recent_dirs_list","browse_markings","tag_list"].includes(cmd))return [];
       if(cmd==="dir_list")return String(args.path).replaceAll("\\","/").endsWith("/photos")?[{name:"2026-08-15",path:repo.root+"/photos/2026-08-15",hasChildren:false}]:[];
       if(cmd==="dir_meta_ensure")return (args.files??[]).map(f=>({relative:f.relative,width:4000,height:3000,orientation:1}));
@@ -113,9 +115,11 @@ try {
   await cdp.send("Input.dispatchMouseEvent",{type:"mousePressed",button:"left",buttons:1,clickCount:1,...point});
   await cdp.send("Input.dispatchMouseEvent",{type:"mouseReleased",button:"left",buttons:0,clickCount:1,...point});
   await until("document.querySelector('[data-export-issue=\"issue:7\"]')","populated grid requests variants");
-  assert(await evaluate("document.querySelectorAll('[data-export-issue]').length===3"),"one photo exposes SOOC, RAW, latest and named issue");
+  assert(await evaluate("document.querySelectorAll('[data-export-issue]').length===2"),"one photo exposes at most two strip tiles (latest is the main; RAW is a button, not a tile)");
   assert(await evaluate("document.querySelector('[data-export-issue=\"issue:7\"] [data-export-suffix]')?.textContent==='I07'"),"issue tile carries its ordinal suffix badge");
-  assert(await evaluate("document.querySelector('[data-export-issue=raw] [data-export-suffix]')?.textContent==='IRA'"),"RAW-marked issue tile carries IRA badge");
+  assert(await evaluate("document.querySelector('[data-export-issues] [data-export-issue=raw]')===null"),"raw never shows as a strip tile (2026-10-11)");
+  assert(await evaluate("(()=>{const b=document.querySelector('[data-export-issues] [data-export-all-issues]');return b!==null&&b.textContent.trim()==='RAW';})()"),"only the RAW is left over → the entry button is labelled RAW");
+  assert(await evaluate("getComputedStyle(document.querySelector('[data-export-issues] [data-export-all-issues]')).cursor==='pointer'"),"the entry button shows the button cursor");
   assert(await evaluate("document.querySelector('[data-export-issue=sooc] [data-export-suffix]')?.textContent==='ISO'"),"SOOC tile carries ISO badge");
   await until("[...document.querySelectorAll('[data-export-left] button')].some(b=>b.textContent.includes('2026-08-15'))","directory tree");
   await until("document.querySelector('[data-export-issue=\"issue:7\"] img')", "issue thumbnail ready");
@@ -193,11 +197,11 @@ try {
   assert.deepEqual(changedRefresh,{during:true,after:true,image:true,height:true},"slow metadata/image refresh keeps complete tiles and geometry");
 
   const mainSelector="[data-export-area=gallery] [role=option]";
-  assert.equal(await evaluate(`document.querySelector('${mainSelector}').getBoundingClientRect().width`),240,"upper initial minimum");
-  assert.equal(await evaluate("document.querySelector('[data-export-area=gallery] [role=slider]').getAttribute('aria-valuemax')"),"5");
+  assert.equal(await evaluate(`document.querySelector('${mainSelector}').getBoundingClientRect().width`),192,"upper initial minimum (2026-10-11: 240 → 192)");
+  assert.equal(await evaluate("document.querySelector('[data-export-area=gallery] [role=slider]').getAttribute('aria-valuemax')"),"9");
   assert.equal(await evaluate("document.querySelector('[data-export-area=queue] [role=slider]').getAttribute('aria-valuemax')"),"16");
   await evaluate("window.__exportNodes={bar:document.querySelector('[data-export-area=gallery] [data-tiles-control-bar]'),shell:document.querySelector('[data-export-area=gallery] [data-tiles-shell]'),slider:document.querySelector('[data-export-area=gallery] [role=slider]')};window.__exportNodes.slider.focus()");
-  for(const [key,size] of [['End',320],['Home',240]]){
+  for(const [key,size] of [['End',320],['Home',192]]){
     await cdp.send('Input.dispatchKeyEvent',{type:'keyDown',key,code:key});
     await cdp.send('Input.dispatchKeyEvent',{type:'keyUp',key,code:key});
     await until(`document.querySelector('${mainSelector}').getBoundingClientRect().width===${size}`,"zoom boundary "+size);
@@ -205,18 +209,18 @@ try {
   }
   assert(await evaluate("!document.querySelector('[data-export-area=gallery] [data-tiles-fit-row]').disabled"),"fit allowed for this measured viewport");
   await evaluate("document.querySelector('[data-export-area=gallery] [data-tiles-fit-row]').click()");
-  await until(`document.querySelector('${mainSelector}').getBoundingClientRect().width>240`,"fit provider reaches grid");
+  await until(`document.querySelector('${mainSelector}').getBoundingClientRect().width>192`,"fit provider reaches grid");
   assert(await evaluate(`document.querySelector('${mainSelector}').getBoundingClientRect().width<=320`));
   await evaluate("window.__exportNodes.slider.focus()");
   await cdp.send('Input.dispatchKeyEvent',{type:'keyDown',key:'Home',code:'Home'});
   await cdp.send('Input.dispatchKeyEvent',{type:'keyUp',key:'Home',code:'Home'});
-  await until(`document.querySelector('${mainSelector}').getBoundingClientRect().width===240`,"minimum after fit");
+  await until(`document.querySelector('${mainSelector}').getBoundingClientRect().width===192`,"minimum after fit");
   await evaluate("document.querySelector('[data-export-area=gallery] [role=option]').click()");
   assert(await evaluate("(()=>{const tile=document.querySelector('[data-export-area=gallery] [role=option]');const frame=tile.querySelector('[data-tile-selection-frame]');return frame && Number(getComputedStyle(frame).zIndex)>Math.max(...[...tile.querySelectorAll('[data-tile-bar]')].map(el=>Number(getComputedStyle(el).zIndex)||0));})()"),"selection frame paints above both information strips");
   await evaluate("document.querySelector('[data-export-area=gallery] [role=option]').click()");
   await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent.includes('测试输出')).click()");
   await evaluate("document.querySelector('[data-export-issue=\"issue:7\"] [role=option]').click()");
-  await until("[...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='送入队列'&&!b.disabled)","selected issue can enqueue");
+  await until("document.querySelector('[data-export-enqueue]') && !document.querySelector('[data-export-enqueue]').disabled","selected issue can enqueue");
   await evaluate("document.querySelector('[data-export-issue=\"issue:7\"] [role=option]').focus()");
   await cdp.send("Input.dispatchKeyEvent",{type:"keyDown",key:"Enter",code:"Enter"});
   await cdp.send("Input.dispatchKeyEvent",{type:"keyUp",key:"Enter",code:"Enter"});
@@ -235,8 +239,8 @@ try {
   await evaluate("document.querySelector('[data-export-run]').click()");
   await until("document.querySelector('[data-export-run]').textContent==='开始导出'","disabled preset");
   await evaluate("document.querySelector('[data-export-issue=\"issue:7\"] [role=option]').dispatchEvent(new MouseEvent('click',{bubbles:true,ctrlKey:true}))");
-  await until("[...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='送入队列'&&!b.disabled)","refill selection ready");
-  await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='送入队列').click()");
+  await until("document.querySelector('[data-export-enqueue]') && !document.querySelector('[data-export-enqueue]').disabled","refill selection ready");
+  await evaluate("document.querySelector('[data-export-enqueue]').click()");
   await until("document.querySelector('[data-export-area=queue] [role=option]')","runtime queue refill");
   await evaluate("document.querySelector('[data-export-run]').click()");
   await until("document.querySelector('[data-export-status=running]')","runtime notification reflected");
@@ -253,7 +257,7 @@ try {
   await until("document.querySelector('[data-export-issue=\"issue:7\"] img')", "all issues return after workspace remount");
   assert.equal(await evaluate("!!document.querySelector('[data-flow-processing]')"),false,"done removes shimmer");
   assert.equal(await evaluate("document.querySelector('[data-export-area=queue] [role=option]').getAttribute('aria-disabled')"),'true');
-  await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='重置所有队列').click()");
+  await evaluate("document.querySelector('[data-export-reset]').click()");
   await until("document.querySelector('[role=dialog]')","reset dialog");
   await evaluate("[...document.querySelectorAll('[role=dialog] button')].find(b=>b.textContent.trim()==='确定').click()");
   await until("!document.querySelector('[data-export-area=queue] [role=option]')","reset clears runtime queue");
@@ -303,15 +307,17 @@ try {
   assert.deepEqual(stability,{shifts:0,row:true,card:true},"background catalog notices preserve directory position and node identity");
   const scopeButton="[...document.querySelectorAll('button')].find(b=>['全部','仅定稿','编辑过'].includes(b.textContent.trim()))";
   await evaluate(scopeButton+".click()");
-  await until("document.querySelectorAll('[data-export-issue]').length===3","manual issues scope");
+  await until("document.querySelectorAll('[data-export-issue]').length===2","manual issues scope");
   await evaluate(scopeButton+".click()");
-  await until("document.querySelectorAll('[data-export-issue]').length===3","edited scope");
+  await until("document.querySelectorAll('[data-export-issue]').length===2","edited scope");
   await evaluate(scopeButton+".click()");
-  await until("document.querySelectorAll('[data-export-issue]').length===3","all scope recovery");
+  await until("document.querySelectorAll('[data-export-issue]').length===2","all scope recovery");
   await evaluate("window.__exportTest.more=true;window.__exportTest.change()");
-  await until("document.querySelectorAll('[data-export-area=gallery] [data-export-issue]').length===6","six visible small issues");
+  await until("document.querySelectorAll('[data-export-area=gallery] [data-export-issue]').length===2","two visible small issues (row is capped at two)");
+  await until("[...document.querySelectorAll('[data-export-area=gallery] button')].some(b=>b.textContent.trim()==='全部定稿')","more than two tiles surfaces the all-issues entry");
   await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='全部定稿').click()");
-  await until("document.querySelectorAll('[data-export-all-issues] [data-export-issue]').length===11","modal includes all issues and main");
+  await until("document.querySelectorAll('[data-export-all-issues] [data-export-issue]').length===11","modal includes every issue, the main row and the RAW");
+  assert(await evaluate("(()=>{const tiles=[...document.querySelectorAll('[data-export-all-issues] [data-export-issue]')];return tiles[tiles.length-1]?.getAttribute('data-export-issue')==='raw';})()"),"RAW is pinned last in the modal");
   const hidden=await evaluate("document.querySelector('[data-export-all-issues] [data-export-issue=\"issue:14\"] [role=option]')!==null");assert(hidden);
   await evaluate("document.querySelector('[data-export-all-issues] [data-export-issue=\"issue:14\"] [role=option]').click()");
   await until("document.querySelector('[data-export-all-issues] [data-export-issue=\"issue:14\"] [role=option]')?.getAttribute('aria-selected')==='true'","modal selection survives update");
@@ -333,28 +339,28 @@ try {
     await cdp.send('Input.dispatchKeyEvent',{type:'keyUp',key,code,modifiers});
   };
   await key('a','KeyA',2);
-  await until("document.querySelectorAll('[data-export-area=gallery] [role=option][aria-selected=true]').length===7",'top Ctrl+A includes complete hidden issue selection');
+  await until("document.querySelectorAll('[data-export-area=gallery] [role=option][aria-selected=true]').length===3",'top Ctrl+A includes complete hidden issue selection');
   const drag=async(dest,source='[data-export-area=gallery] [role=option]',release=true)=>{
     const a=await evaluate(`(()=>{const r=document.querySelector(${JSON.stringify(source)}).getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()`);
     await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',...a});
     await evaluate("window.__pid=null;window.addEventListener('pointerdown',e=>{window.__pid=e.pointerId;},{capture:true,once:true})");
     await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',buttons:1,clickCount:1,...a});
     await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',buttons:1,x:a.x+3,y:a.y});
-    assert(!await evaluate("!!document.querySelector('[data-export-drag-preview]')"),'normal click movement does not drag');
+    assert(!await evaluate("!!document.querySelector('[data-drag-preview]')"),'normal click movement does not drag');
     await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',buttons:1,x:a.x+12,y:a.y});
-    await until("document.querySelector('[data-export-drag-preview]')",'drag starts');
+    await until("document.querySelector('[data-drag-preview]')",'drag starts');
     // 幽灵中心就落在指针上（只差 8px 手感偏移）——旧版把卡片摆在右下 100px 开外。
-    await until(`(()=>{const el=document.querySelector('[data-export-drag-preview]');if(!el)return false;const r=el.getBoundingClientRect();return Math.abs(r.x+r.width/2-(${a.x+20}))<6&&Math.abs(r.y+r.height/2-(${a.y+8}))<6;})()`,'ghost centred on the pointer');
-    const node=await evaluate("(()=>{const el=document.querySelector('[data-export-drag-preview]'),r=el.getBoundingClientRect();window.__dragPreview=el;window.__dragCount=Number(el.querySelector('[data-export-drag-count]').textContent);return {width:r.width,height:r.height,cards:el.querySelectorAll('.rb-export-drag-card').length};})()");
+    await until(`(()=>{const el=document.querySelector('[data-drag-preview]');if(!el)return false;const r=el.getBoundingClientRect();return Math.abs(r.x+r.width/2-(${a.x+8}))<6&&Math.abs(r.y+r.height/2-(${a.y+8}))<6;})()`,'ghost centred on the pointer');
+    const node=await evaluate("(()=>{const el=document.querySelector('[data-drag-preview]'),r=el.getBoundingClientRect();window.__dragPreview=el;window.__dragCount=Number(el.querySelector('[data-drag-count]').textContent);return {width:r.width,height:r.height,cards:el.querySelectorAll('[data-drag-card]').length};})()");
     assert.deepEqual(node,{width:132,height:132,cards:4},'ghost is one card wide with four cards');
     assert(await evaluate("Number.isInteger(window.__dragCount)&&window.__dragCount>0"),'drag badge counts the captured batch');
     if(dest==='outside'){
       // CDP 的合成鼠标事件出不了视口（浏览器直接丢弃越界坐标），所以用一条同 pointerId 的
       // 合成 pointermove 走**真实的那段代码路径** —— 与下面 blur 取消同一个做法。
       await evaluate("window.dispatchEvent(new PointerEvent('pointermove',{pointerId:window.__pid,clientX:-24,clientY:120}))");
-      await until("!document.querySelector('[data-export-drag-preview]')",'leaving the window aborts the drag');
+      await until("!document.querySelector('[data-drag-preview]')",'leaving the window aborts the drag');
       await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',buttons:0,clickCount:1,...a});
-      assert(!await evaluate("!!document.querySelector('[data-export-drag-preview]')"),'aborted drag does not come back');
+      assert(!await evaluate("!!document.querySelector('[data-drag-preview]')"),'aborted drag does not come back');
       return;
     }
     const b=await evaluate(`(()=>{
@@ -372,16 +378,16 @@ try {
       assert.equal(hover.card,dest,'pointer hits preset: '+JSON.stringify(hover));
       await until(`document.querySelector('[data-export-preset="${dest}"]')?.classList.contains('border-brand-2')`,'drop target highlighted');
     }
-    assert(await evaluate("window.__dragPreview===document.querySelector('[data-export-drag-preview]')"),'preview identity survives pointer move');
+    assert(await evaluate("window.__dragPreview===document.querySelector('[data-drag-preview]')"),'preview identity survives pointer move');
     if(release)await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',buttons:0,clickCount:1,...b});
     else {await evaluate("window.dispatchEvent(new Event('blur'))");await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',buttons:0,clickCount:1,...b});}
-    await until("!document.querySelector('[data-export-drag-preview]')",'preview cleared');
+    await until("!document.querySelector('[data-drag-preview]')",'preview cleared');
   };
   await drag('second-preset');
   await until("window.__exportQueue.state().queues['second-preset']?.length===11",'drag includes all eleven selected issues');
   await until("document.querySelector('[data-export-preset-count=\"second-preset\"]').textContent==='11/11'",'animated counter reaches target');
   assert(await evaluate("document.querySelector('[data-export-preset=\"test-preset\"] > button').getAttribute('aria-pressed')==='true'"),'drag does not switch selected preset');
-  assert.equal(await evaluate("document.querySelectorAll('[data-export-area=gallery] [role=option][aria-selected=true]').length"),7,'source selection survives drop');
+  assert.equal(await evaluate("document.querySelectorAll('[data-export-area=gallery] [role=option][aria-selected=true]').length"),3,'source selection survives drop');
   await drag('second-preset','[data-export-area=gallery] [data-export-issue] [role=option]');
   assert.equal(await evaluate("window.__exportQueue.state().queues['second-preset'].length"),11,'repeat drop deduplicates');
   assert(!await evaluate("document.querySelector('[data-export-preset-count=\"second-preset\"]').classList.contains('rb-export-count-bump')"),'duplicate drop does not animate');
@@ -391,7 +397,7 @@ try {
   await until("window.__exportQueue.state().queues['test-preset']?.length===11",'same selection drops into another preset');
   await evaluate("document.querySelector('[data-export-run]').click()");
   await until("document.querySelector('[data-export-status=running]')",'dropped issues start normal worker');
-  assert.equal(await evaluate("document.querySelectorAll('[data-export-area=gallery] [role=option][aria-selected=true]').length"),7,'selection retained when dropped queue begins processing');
+  assert.equal(await evaluate("document.querySelectorAll('[data-export-area=gallery] [role=option][aria-selected=true]').length"),3,'selection retained when dropped queue begins processing');
   assert(await evaluate("document.querySelector('[data-export-run] .rb-shimmer-mask svg')!==null"),'button glyph and text share running mask');
   await evaluate("window.__exportQueue.skip()");
   await until("document.querySelector('[data-export-status=skipped]')",'existing file skip status retained');
@@ -402,14 +408,14 @@ try {
   await until("(()=>{const scope=document.querySelector('[data-export-area=queue]');const unfinished=scope.querySelectorAll('[role=option]:not([aria-disabled=true])');return unfinished.length>0 && scope.querySelectorAll('[role=option][aria-selected=true]').length===unfinished.length && [...unfinished].every(el=>el.getAttribute('aria-selected')==='true') && !scope.querySelector('[role=option][aria-disabled=true][aria-selected=true]');})()",'bottom Ctrl+A selects only unfinished');
   await key('Delete','Delete');
   await until("document.querySelectorAll('[data-export-area=queue] [role=option]').length===1",'bottom Delete preserves skipped issue');
-  await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='重置所有队列').click()");
+  await evaluate("document.querySelector('[data-export-reset]').click()");
   await until("document.querySelector('[role=dialog]')",'reset drag queues');
   await evaluate("[...document.querySelectorAll('[role=dialog] button')].find(b=>b.textContent.trim()==='确定').click()");
   await until("Object.keys(window.__exportQueue.state().queues).length===0",'reset all destination queues');
   // 拖到下方队列区：与 toolsbar「送入队列」同一个落点（当前选中预设），进范围时队列区亮主色框。
   await evaluate("document.querySelector('[data-export-area=gallery] [role=option]').focus()");
   await key('a','KeyA',2);
-  await until("document.querySelectorAll('[data-export-area=gallery] [role=option][aria-selected=true]').length===7",'reselect gallery before queue drop');
+  await until("document.querySelectorAll('[data-export-area=gallery] [role=option][aria-selected=true]').length===3",'reselect gallery before queue drop');
   await drag('queue');
   await until("Number.isInteger(window.__dragCount)&&window.__exportQueue.state().queues['test-preset']?.length===window.__dragCount",'queue drop enqueues the dragged batch into the selected preset');
   await until("document.querySelector('[data-export-preset-count=\"test-preset\"]').textContent===window.__dragCount+'/'+window.__dragCount",'queue drop animates the same counter');
@@ -462,7 +468,7 @@ try {
   assert(await evaluate("document.querySelector('[data-export-mid] [role=alert]')?.textContent.includes('队列') ?? document.body.innerText.includes('未完成的条目')"), '拦截要说清原因');
   await evaluate("document.querySelector('[role=dialog] [data-part=close-trigger]')?.click() ?? [...document.querySelectorAll('[role=dialog] button')].find(b=>b.textContent.trim()==='取消')?.click()");
   // 清空队列后再删：这次真的少一张，且选中态被清掉
-  await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='重置所有队列').click()");
+  await evaluate("document.querySelector('[data-export-reset]').click()");
   await until("document.querySelector('[role=dialog]')",'reset before delete');
   await evaluate("[...document.querySelectorAll('[role=dialog] button')].find(b=>b.textContent.trim()==='确定').click()");
   await until("Object.keys(window.__exportQueue.state().queues).length===0",'reset before preset delete');

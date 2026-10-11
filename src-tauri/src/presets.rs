@@ -79,6 +79,25 @@ pub async fn preset_delete_directory<R: Runtime>(
     .await
 }
 
+/// 重命名目录（非空目录也能改；`default` / 重名 / 非法名由 store 层拒绝）。
+#[tauri::command]
+pub async fn preset_rename_directory<R: Runtime>(
+    app: AppHandle<R>,
+    id: String,
+    name: String,
+) -> Result<PresetLibraryDto, String> {
+    let handle = app.clone();
+    crate::source::blocking(move || {
+        let db = handle.state::<DbState>();
+        db.with(&handle, |db| {
+            db.write(move |conn| presets::rename_directory(conn, &id, &name))
+                .map_err(|error| error.to_string())
+        })?;
+        library(&handle)
+    })
+    .await
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PresetCreateArgs {

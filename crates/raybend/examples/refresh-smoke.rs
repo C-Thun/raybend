@@ -115,7 +115,8 @@ fn fill_exif(db: &CatalogDb, root: &std::path::Path, now: i64) -> (usize, usize)
             let key = match t.source {
                 TakenAtSource::Exif => "exif",
                 TakenAtSource::Filename => "filename",
-                TakenAtSource::FileMtime => "file_mtime",
+                TakenAtSource::FileCreated => "file_created",
+            TakenAtSource::FileMtime => "file_mtime",
                 TakenAtSource::Sibling => "sibling",
             };
             *by_source.entry(key).or_default() += 1;

@@ -44,6 +44,9 @@ function backend() {
   window.__importTest = { calls: [], volumes: [{ path: "C:\\", kind: "local", kindLabel: "本地磁盘" }] };
   window.__importTest.progress = {batchId:"batch-1",state:"running",stage:"scan",total:0,done:0,imported:0,skipped:0,duplicates:0,failed:0,bytes:0,errors:[],errorsTotal:0,freeBytes:null,startedAt:0,finishedAt:null,currentRun:null,runs:[]};
   localStorage.clear();
+  // 断言写的是中文标签：把界面语言钉死（清空 localStorage 后系统探测在无头 Chrome 里
+  // 只会给 en-US，第一句就挂）—— 2026-10-11
+  localStorage.setItem("raybend.locale", "zh-CN");
   window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
   window.__importTest.emit = (progress) => {
     window.__importTest.progress = progress;
@@ -77,6 +80,10 @@ function backend() {
         repo.online=false; repo.root=null; repo.connection={repositoryId:repo.id,state:"released",reason:null,root:null,generation:"1",revision:"3",observedAt:1};
         return structuredClone(repo);
       }
+      // 这两个是别的会话新加的命令（组织补扫 / 库升级快照）——假后端不实现时
+      // 前端模块会在 null 上崩（`failedRepositories` / `revision`），冒烟就红在这里
+      if (cmd === "organization_reconcile") return { processedBatches: 0, failedRepositories: [] };
+      if (cmd === "migration_snapshot") return { revision: "0", active: [] };
       if (cmd === "setting_get") return null;
       if (cmd === "setting_set") return null;
       if (["thumb_get", "view_image", "export_variant_image"].includes(cmd))
@@ -86,7 +93,9 @@ function backend() {
   };
 }
 
-const chrome = launchChrome({ port });
+// 界面语言跟着浏览器走 —— 这个脚本的断言写的是中文标签，所以把语言钉死，
+// 免得在 en-US 的无头 Chrome 上第一句就挂（2026-10-11）
+const chrome = launchChrome({ port, args: ["--lang=zh-CN"] });
 let cdp;
 try {
   cdp = await connectCdp(port);

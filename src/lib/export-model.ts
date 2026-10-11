@@ -50,6 +50,12 @@ export interface VariantSnapshot {
   profileHash: string;
   stack: unknown;
   sourceSignature: string;
+  /**
+   * 该变体的**展示尺寸**（Rust `store::sizes::display_size` 的结果；库未回填 → `null`）。
+   * 只作显示元信息 —— **不进** profile 哈希 / XMP（`specs/display-size-source.md` §3.5-B）。
+   */
+  width: number | null;
+  height: number | null;
 }
 export interface ExportQueueItem {
   id: string;
@@ -122,6 +128,45 @@ export function variantSuffix(v: VariantSummary): string {
     return `I${String(v.ordinal).padStart(2, "0")}`;
   }
   return "ILA";
+}
+
+/**
+ * 画廊 tile 的 issue 区展示模型（`design/export.md` §4.2，崔总 2026-10-11 两轮定案）。
+ *
+ * 输入是**已经排好序**的小片列表（`store.smallFor()` —— 选中 / 已入队的提到前面、
+ * RAW 在最后），这里只管四件事：
+ *
+ * 1. **最多两片**（`ISSUE_STRIP_LIMIT`）；
+ * 2. **RAW 不占小片位** —— 它只住在「全部定稿」弹窗里（排在末尾、位置固定），
+ *    哪怕被选中也不冒到 tile 上来（与 SOOC 不同）；
+ * 3. 弹窗里比 tile 多出东西才出入口按钮：多出别的定稿 → 「全部定稿」，
+ *    **只多出一张 RAW** → 按钮就叫 `RAW`（弹窗内容一样，只是不发看标题）；
+ * 4. 弹窗里没有比 tile 更多的内容时**没有按钮**（tile 不被入口刷屏）。
+ */
+export const ISSUE_STRIP_LIMIT = 2;
+
+export interface IssueStrip {
+  /** 下挂的小片（已是显示顺序，最多两片，不含 RAW） */
+  tiles: readonly VariantSummary[];
+  /** 没展示出来的非 RAW 定稿张数（>0 ⇒ 弹窗里还有定稿可看） */
+  hidden: number;
+  /** 非主行的 RAW 变体（只进弹窗）；没有就不出 RAW 相关入口 */
+  raw: VariantSummary | null;
+  /** 入口按钮的文字：`all` = 全部定稿、`raw` = RAW、`null` = 不出按钮 */
+  entry: "all" | "raw" | null;
+}
+
+export function issueStrip(smalls: readonly VariantSummary[]): IssueStrip {
+  const tiles = smalls.filter((v) => v.reference.variant !== "raw");
+  const raw = smalls.find((v) => v.reference.variant === "raw") ?? null;
+  const hidden = Math.max(0, tiles.length - ISSUE_STRIP_LIMIT);
+  return {
+    tiles: tiles.slice(0, ISSUE_STRIP_LIMIT),
+    hidden,
+    raw,
+    // 只多一张 RAW ⇒ 按钮名就叫 RAW（弹窗里固定只有它一张可看）
+    entry: hidden > 0 ? "all" : raw !== null ? "raw" : null,
+  };
 }
 
 export function queueFinished(status: ExportQueueItem["status"]): boolean {

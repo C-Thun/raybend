@@ -339,6 +339,8 @@ mod tests {
                 profile_hash: crate::store::issues::profile_hash(&stack).unwrap(),
                 stack,
                 source_signature: "sig".into(),
+                width: None,
+                height: None,
             },
             preset: Preset {
                 output_color: crate::color::OutputColor::Srgb,

@@ -83,7 +83,7 @@ export function Panel(props: PanelProps) {
             </button>
           </Show>
           <Show when={local.title}>
-            <h2 class="min-w-0 flex-1 truncate text-fs-1 font-medium tracking-wide text-fg-2 uppercase">
+            <h2 class="min-w-0 flex-1 overflow-hidden whitespace-nowrap fade-x-end text-fs-1 font-medium tracking-wide text-fg-2 uppercase">
               {local.title}
             </h2>
           </Show>

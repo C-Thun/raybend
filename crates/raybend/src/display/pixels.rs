@@ -81,6 +81,71 @@ impl DisplayPixels {
             && self.height > 0
             && self.rgb.len() == (self.width as usize) * (self.height as usize) * 3
     }
+
+    /// **有意软化**（过渡帧专用，崔总 2026-10-10）：按当前窗口的放大倍率把预览图轻微模糊掉。
+    ///
+    /// 为什么：过渡帧通常是 1920 预览，在高分屏 / 大窗口下会被放大显示；
+    /// 渲染侧的放大采样是最近邻（1:1 要看像素），1920 被放大就成了马赛克。
+    /// 一张「软预览」比马赛克好读，也比空屏好。只动像素，不改尺寸。
+    ///
+    /// `amount` ∈ [0, 1]：0 / 非有限 = 不动；1 = 3×3 可分离核 `[0.25, 0.5, 0.25]`。
+    pub fn soften(&mut self, amount: f32) {
+        if !self.is_consistent() {
+            return;
+        }
+        soften_rgb8(&mut self.rgb, self.width, self.height, amount);
+    }
+}
+
+/// RGB8 的 3×3 可分离软化（`[w, 1−2w, w]` 横竖各一遍，`w = 0.25 × amount`）。
+///
+/// * 边缘用**复制边缘**（clamp）处理，不引入黑边；
+/// * `amount` 非有限或 ≤ 0 → 原样返回；> 1 按 1 算；
+/// * 长度与尺寸对不上也原样返回（宁可不做，也不越界）。
+///
+/// 这是**有意的**模糊（过渡帧占位），不是渲染管线的降采样 —— 别拿去当抗锯齿用。
+pub fn soften_rgb8(rgb: &mut [u8], width: u32, height: u32, amount: f32) {
+    if !amount.is_finite() || amount <= 0.0 {
+        return;
+    }
+    let (w, h) = (width as usize, height as usize);
+    if w == 0 || h == 0 || rgb.len() != w * h * 3 {
+        return;
+    }
+    let side = 0.25 * amount.min(1.0);
+    let center = 1.0 - 2.0 * side;
+    // 横一遍进 scratch，竖一遍回写 —— 两遍都是一维核，O(w·h)。
+    let mut scratch = vec![0_u8; rgb.len()];
+    for y in 0..h {
+        let row = y * w * 3;
+        for x in 0..w {
+            let column = x * 3;
+            let index = row + column;
+            let left = if x == 0 { index } else { index - 3 };
+            let right = if x + 1 == w { index } else { index + 3 };
+            for channel in 0..3 {
+                let value = side * f32::from(rgb[left + channel])
+                    + center * f32::from(rgb[index + channel])
+                    + side * f32::from(rgb[right + channel]);
+                scratch[index + channel] = value.round().clamp(0.0, 255.0) as u8;
+            }
+        }
+    }
+    for y in 0..h {
+        let row = y * w * 3;
+        let up = if y == 0 { row } else { row - w * 3 };
+        let down = if y + 1 == h { row } else { row + w * 3 };
+        for x in 0..w {
+            let column = x * 3;
+            let index = row + column;
+            for channel in 0..3 {
+                let value = side * f32::from(scratch[up + column + channel])
+                    + center * f32::from(scratch[index + channel])
+                    + side * f32::from(scratch[down + column + channel]);
+                rgb[index + channel] = value.round().clamp(0.0, 255.0) as u8;
+            }
+        }
+    }
 }
 
 /// 认得出这张照片是什么类型吗（RAW / 位图）。认不出就走位图那条路（与 `display_image` 一致）。
@@ -206,6 +271,41 @@ mod tests {
         }
         img.save(&path).expect("写 PNG");
         (dir, path)
+    }
+
+    /// **过渡帧软化**（崔总 2026-10-10）：0 / 非法输入不动；> 0 只混邻近像素、
+    /// 尺寸不变；均匀图不动（无边缘伪影）；单像素图不越界。
+    #[test]
+    fn soften_only_blends_neighbours_and_never_changes_size() {
+        // 0 / 负数 / NaN / 无穷 → 原样
+        for amount in [0.0, -1.0, f32::NAN, f32::INFINITY] {
+            let mut rgb = vec![0_u8, 128, 255];
+            soften_rgb8(&mut rgb, 1, 1, amount);
+            assert_eq!(rgb, vec![0, 128, 255], "amount={amount} 不该动像素");
+        }
+        // 单像素图：clamp 边缘，不越界、不变色
+        let mut single = vec![10_u8, 20, 30];
+        soften_rgb8(&mut single, 1, 1, 1.0);
+        assert_eq!(single, vec![10, 20, 30]);
+        // 均匀图：模糊后仍是原色（边缘复制、无黑边）
+        let mut flat = vec![200_u8; 5 * 4 * 3];
+        soften_rgb8(&mut flat, 5, 4, 1.0);
+        assert!(flat.iter().all(|value| *value == 200), "均匀图不该出现边缘伪影");
+        // 冲激：中心变暗、邻域变亮；尺寸与长度不变
+        let (width, height) = (5_u32, 5_u32);
+        let mut impulse = vec![0_u8; (width * height * 3) as usize];
+        let center = ((2 * width + 2) * 3) as usize;
+        impulse[center..center + 3].copy_from_slice(&[255, 255, 255]);
+        let before = impulse.clone();
+        soften_rgb8(&mut impulse, width, height, 1.0);
+        assert_eq!(impulse.len(), before.len(), "尺寸不变");
+        assert!(impulse[center] < 255, "中心要被邻居摊薄：{}", impulse[center]);
+        let left = ((2 * width + 1) * 3) as usize;
+        assert!(impulse[left] > 0, "左邻要接到能量");
+        // 长度与尺寸对不上 → 原样返回（宁可不做，不越界）
+        let mut broken = vec![1_u8, 2, 3];
+        soften_rgb8(&mut broken, 4, 4, 1.0);
+        assert_eq!(broken, vec![1, 2, 3]);
     }
 
     #[test]

@@ -493,7 +493,13 @@ export function Tile(props: TileProps) {
       </div>
 
       <Show when={local.minimal}>
-        <div data-tile-bar="minimal-name" class="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-scrim px-1 text-fs-0 text-fg-1" title={local.label}>{local.label}</div>
+        {/*
+         * `minimal` 也还是** tile 信息条**（`Tile.tsx` 顶部三条纪律、`DESIGN.md` §12.9）：
+         * 底纹必须用主题中性蒙层 `--tile-bar-scrim`（浅色**提亮**、深色压暗）。
+         * 2026-10-11 崔总报的 bug：这里曾写成弹窗遮罩 `--scrim`（浅色主题下是深色），
+         * 于是浅色模式变成深条 + 深字，整条读不出来。
+         */}
+        <div data-tile-bar="minimal-name" class="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-(--tile-bar-scrim) px-1 text-fs-0 text-fg-1" title={local.label}>{local.label}</div>
       </Show>
       <Show when={!local.minimal}>
       {/* ── 顶部信息条（库内）：星标 / 颜色 / 旗标 ─────────────── */}
@@ -594,7 +600,7 @@ function TileName(props: {
 }): JSX.Element {
   return (
     <>
-      <span class="min-w-0 flex-1 truncate text-fs-1" title={props.label}>
+      <span class="min-w-0 flex-1 overflow-hidden whitespace-nowrap fade-x-end text-fs-1" title={props.label}>
         {props.name}
       </span>
       <Show when={props.tag}>

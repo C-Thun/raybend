@@ -6,6 +6,7 @@ import type { AssetItem, BrowseFilter, RepositoryView } from "../../api/types.ts
 import type { TilesSource, GridItem } from "../../components/ui/tiles/source.ts";
 import type { ThumbEntry } from "../../components/ui/thumb-queue.ts";
 import { clampDisplayAspect } from "../../lib/tile-flow.ts";
+import { displaySizeOf } from "../../lib/display-size.ts";
 import { joinPath } from "../../lib/paths.ts";
 import { applySelection, clearSelection, EMPTY_SELECTION, focusSelection, pruneSelection, selectAll, toggleGroupSelection, type SelectionState } from "../../lib/selection.ts";
 import type { TileInfoMode } from "../../lib/display-prefs.ts";
@@ -71,9 +72,10 @@ export function createOrganizationSource(deps: {
     if (!entry || !item) return null;
     const path = absolute(entry, item);
     if (!path) return null;
+    const stored = displaySizeOf(item, undefined, undefined);
     return {
       id, path, fileName: item.fileName, ext: item.ext,
-      aspect: clampDisplayAspect(item.width ?? 0, item.height ?? 0),
+      aspect: clampDisplayAspect(stored?.width ?? 0, stored?.height ?? 0),
       isRaw: item.isRaw, hasRaw: item.hasRaw, issueCount: item.issueCount,
       edited: item.edited, missing: item.missing,
       marks: { rating: item.rating, colorLabel: item.colorLabel, likeState: item.likeState,
@@ -199,8 +201,8 @@ export function createOrganizationSource(deps: {
     itemAt: (index) => { const id = idAt(index); return id ? gridItem(id) : null; },
     itemById: gridItem,
     ensureRange,
-    aspectOf: (id) => { const item = itemById(id); return clampDisplayAspect(item?.width ?? 0, item?.height ?? 0); },
-    naturalOf: (id) => { const item = itemById(id); return item?.width && item.height ? { width: item.width, height: item.height } : null; },
+    aspectOf: (id) => { const item = itemById(id); const stored = item === null ? null : displaySizeOf(item, undefined, undefined); return clampDisplayAspect(stored?.width ?? 0, stored?.height ?? 0); },
+    naturalOf: (id) => { const item = itemById(id); return item === null ? null : displaySizeOf(item, undefined, undefined); },
     ensureNatural: () => {},
     slices: () => undefined,
     status: () => error() ? "error" : loading() ? "loading" : "ready",

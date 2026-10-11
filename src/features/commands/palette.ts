@@ -12,7 +12,7 @@
  */
 
 import { rankCommands } from "../../lib/command-match.ts";
-import { availabilityOf, type CommandSpec } from "../../lib/commands.ts";
+import { availabilityOf, scenesOf, type CommandScene, type CommandSpec } from "../../lib/commands.ts";
 
 /** 面板里的一行：命令 + 展示字段 + 此刻可用性 */
 export interface PaletteRow {
@@ -25,6 +25,8 @@ export interface PaletteRow {
   chord: string | null;
   /** 此刻能不能用（不能用时面板灰掉并说明原因） */
   availability: ReturnType<typeof availabilityOf>;
+  /** 这条命令在哪些场景成立（`specs/command-scenes.md`；面板/设置显示场景列） */
+  scenes: readonly CommandScene[];
 }
 
 export interface PaletteRowSources {
@@ -76,6 +78,7 @@ export function buildPaletteRows(sources: PaletteRowSources): PaletteRow[] {
     group: sources.groupOf(command),
     chord: sources.chordOf(command),
     availability: availabilityOf(command),
+    scenes: scenesOf(command),
   }));
 
   const searchable = rows.map((row) => ({

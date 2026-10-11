@@ -44,6 +44,8 @@ fn one_and_thousand() {
                 profile_hash: crate::store::issues::profile_hash(&stack).unwrap(),
                 stack,
                 source_signature: crate::media::source::source_signature(&source).unwrap(),
+                width: None,
+                height: None,
             };
             let preset = Preset {
                 output_color: crate::color::OutputColor::Srgb,

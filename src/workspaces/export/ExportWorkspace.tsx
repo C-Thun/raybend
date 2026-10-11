@@ -16,13 +16,12 @@ import {
   IconPhoto,
   IconUpload, IconPlayerSkipForward, IconClock, IconLoader2, IconCheck, IconAlertTriangle,
 } from "@tabler/icons-solidjs";
-import {
-  BrowseLeftColumn,
-  type BrowseStore,
-} from "../../features/browse/index.ts";
+import { BrowseLeftColumn, type BrowseStore } from "../../features/browse/index.ts";
+import { FilterBar } from "../../features/browse/FilterBar.tsx";
 import { browseSource } from "../../features/browse/grid-source.ts";
 import { PhotoGrid } from "../../features/photo-grid/PhotoGrid.tsx";
 import { TilesShell } from "../../components/ui/tiles/TilesShell.tsx";
+import { DragPreview } from "../../components/ui/DragPreview.tsx";
 import { Tile } from "../../components/ui/Tile.tsx";
 import { Button, IconButton } from "../../components/ui/Button.tsx";
 import { Input, RadioChoices } from "../../components/ui/Form.tsx";
@@ -52,12 +51,11 @@ import { clickMode } from "../../lib/selection.ts";
 import { joinPath } from "../../lib/paths.ts";
 import {
   variantKey,
-  exportGalleryState, mainVariant, variantSuffix,
+  exportGalleryState, mainVariant, variantSuffix, issueStrip,
   formatSupportsQuality, EXPORT_FORMATS, EXISTING_FILE_POLICIES,
   type VariantSummary,
 } from "../../lib/export-model.ts";
 import { t } from "../../i18n/index.ts";
-import { Portal } from "solid-js/web";
 import { trackPointerDrag } from "../../lib/pointer-drag.ts";
 import { animateCount } from "../../lib/count-transition.ts";
 import { registerExportActions } from "./actions.ts";
@@ -432,11 +430,21 @@ export function ExportWorkspace(props: ExportWorkspaceProps) {
     </span></Show>;
   }
   function IssueTile(p: { variant: VariantSummary; size: number }) {
-    const key=()=>JSON.stringify([store.repository(),p.variant.reference,p.variant.profileHash]);
+    /*
+     * RAW 小片**不直读 RAW**（崔总 2026-10-11：直读太贵）：借同一张照片的 SOOC 小图，
+     * 再用既有的「RAW 模拟」滤镜（`Tile.approximate` → `.photo-raw-approximate`）压暗去饱和，
+     * 看起来就是一张没修过的原片。收益：**零额外解码**（SOOC 小图通常已在缓存里），
+     * 而且同一张照片的两片共用一条缓存键（借的那片的 `profileHash` 也是 null）。
+     * 只有**非主行的 RAW 变体**才借 —— RAW 单文件的照片主行就是它自己，没有 SOOC 可借。
+     */
+    const base = () => store.listFor(p.variant.reference.assetId).find(v => v.reference.variant === "sooc") ?? null;
+    const borrowed = () => p.variant.reference.variant === "raw" && !p.variant.main ? base() : null;
+    const reference = () => borrowed()?.reference ?? p.variant.reference;
+    const key=()=>JSON.stringify([store.repository(),reference(),borrowed()===null?p.variant.profileHash:null]);
     const state=()=>store.queueState(p.variant.reference,p.variant.profileHash);
     createEffect(()=>{ const value=key(); issueThumbs.request(value); onCleanup(()=>issueThumbs.cancel(value)); });
     return <div data-export-issue={p.variant.reference.variant} class="relative" title={p.variant.name} style={{width:`${p.size}px`,height:`${p.size}px`,"--tile-cell":`${p.size}px`}}>
-      <Tile keyboardActivate={false} label={p.variant.name} src={issueThumbs.get(key()).url} approximate={issueThumbs.get(key()).approximate} aspect={1} minimal selectionFrame
+      <Tile keyboardActivate={false} label={p.variant.name} src={issueThumbs.get(key()).url} approximate={borrowed()!==null || issueThumbs.get(key()).approximate} aspect={1} minimal selectionFrame
         selected={store.selection().ids.has(variantKey(store.repository()??"",p.variant.reference))}
         disabled={store.locked(p.variant)} selectionLocked={store.locked(p.variant)}
         loading={issueThumbs.get(key()).status==="loading"}
@@ -447,12 +455,34 @@ export function ExportWorkspace(props: ExportWorkspaceProps) {
       <span data-export-suffix={variantSuffix(p.variant)} class="pointer-events-none absolute right-1 top-1 rounded-ui bg-surface-layer px-1 text-fs-0 leading-4 text-fg-2">{variantSuffix(p.variant)}</span>
     </div>;
   }
+  /**
+   * tile 的 issue 区（`design/export.md` §4.2，崔总 2026-10-11 两轮定案）：
+   *
+   * * 小片**最多两片**（不含 RAW）；
+   * * 入口按钮：弹窗里比 tile 多出东西才出 —— 只多一张 RAW 时按钮就叫 `RAW`
+   *   （点开还是同一个弹窗，里面固定那张 RAW 原片）；没有更多内容就不出按钮；
+   * * RAW 自己只住在弹窗里（排末尾、位置固定），**不占小片位、不因选中而冒上来**。
+   */
   function IssueStrip(p: { assetId: number }) {
+    const strip = () => issueStrip(store.smallFor(p.assetId));
     const small=()=>Math.max(1,(tileSizeAt(prefs.value().topStep, EXPORT_TOP_SIZE_BOUNDS)-4)/2);
-    return <div data-export-issues class="pt-1">
-      <div class="grid grid-cols-2 gap-1"><For each={store.smallFor(p.assetId).slice(0,6)}>{v=><IssueTile variant={v} size={small()}/>}</For></div>
-      <Show when={store.smallFor(p.assetId).length>6}><button type="button" class="flex h-5 items-center rounded-ui text-fs-0 text-fg-2 hover:text-fg-1" onClick={()=>{store.focusArea("gallery");setAllIssues(p.assetId);}}>{t("export.allIssues")}</button></Show>
-    </div>;
+    const openAll = () => { store.focusArea("gallery"); setAllIssues(p.assetId); };
+    return <Show when={strip().tiles.length > 0 || strip().entry !== null}>
+      {/* `pb-1` 是标题条的呼吸位（崔总 2026-10-11）：不留的话文字紧贴着下一行的大图 */}
+      <div data-export-issues class="pt-1 pb-1">
+        <Show when={strip().tiles.length > 0}>
+          <div class="flex gap-1"><For each={strip().tiles}>{v=><IssueTile variant={v} size={small()}/>}</For></div>
+        </Show>
+        <Show when={strip().entry !== null}>
+          <div class="mt-1 flex h-5 items-center">
+            {/* 入口按钮：走共享 `Button` —— 纯文字外观，但**有按钮的指向手形与聚焦环**（崔总 2026-10-11） */}
+            <Button data-export-all-issues variant="ghost" size="sm" class="px-1 text-fs-0" onClick={openAll}>
+              {strip().entry === "raw" ? t("export.rawEntry") : t("export.allIssues")}
+            </Button>
+          </div>
+        </Show>
+      </div>
+    </Show>;
   }
   function QueueFailure(p: { id: string }) {
     const item = () => store.queueItems().find(entry => entry.id === p.id);
@@ -470,7 +500,13 @@ export function ExportWorkspace(props: ExportWorkspaceProps) {
     return <QueueBadge status={item()?.status} error={item()?.error}/>;
   };
   const top = (
-    <div data-export-area="gallery" onDragStart={event=>event.preventDefault()} class="flex min-h-0 flex-1 border" classList={{"border-brand-2":store.activeArea()==="gallery","border-surface-layer":store.activeArea()!=="gallery"}} onPointerDown={event=>{store.focusArea("gallery");beginIssueDrag(event);}} onFocusIn={()=>store.focusArea("gallery")}><TilesShell sizeBounds={EXPORT_TOP_SIZE_BOUNDS} bar={bar()}>
+    <div data-export-area="gallery" onDragStart={event=>event.preventDefault()} class="flex min-h-0 flex-1 flex-col border" classList={{"border-brand-2":store.activeArea()==="gallery","border-surface-layer":store.activeArea()!=="gallery"}} onPointerDown={event=>{store.focusArea("gallery");beginIssueDrag(event);}} onFocusIn={()=>store.focusArea("gallery")}>
+      {/*
+        筛选条件（与 browse **共用同一份** `browseStore.filter()`）：只作用于画廊照片，
+        筛选开启时才出现（`FilterBar` 自己判 `filterMode`）；下面的队列不受影响。
+      */}
+      <FilterBar store={props.browse} />
+      <TilesShell sizeBounds={EXPORT_TOP_SIZE_BOUNDS} bar={bar()}>
       <PhotoGrid
         source={gallery}
         commandEnter
@@ -636,8 +672,8 @@ export function ExportWorkspace(props: ExportWorkspaceProps) {
                   aria-pressed={store.selectedPreset()?.id===preset.id}
                   onClick={() => store.choosePreset(preset.id)}
                 >
-                  <span class="block truncate text-fg-1">{preset.name}</span>
-                  <span class="block truncate text-fs-0 text-fg-3">
+                  <span class="block overflow-hidden whitespace-nowrap fade-x-end text-fg-1">{preset.name}</span>
+                  <span class="block overflow-hidden whitespace-nowrap fade-x-end text-fs-0 text-fg-3">
                     {preset.format.toUpperCase()} ·{" "}
                     {preset.sizeMode === "original" ? t("export.originalSize") : preset.sizeMode === "percent" ? preset.percent + "%" : preset.maxEdge + "px"}
                   </span>
@@ -814,27 +850,19 @@ export function ExportWorkspace(props: ExportWorkspaceProps) {
         <p data-export-save-hint class="shrink-0 text-fs-0 text-fg-3">{t("export.saveBeforeStart")}</p>
         </section>
       </aside>
-      <Show when={dragBatch()}>{batch=><Portal>
-        {/*
-          指针预览：整叠卡片的**中心落在指针上**（再 +8px，看着像「捏着」而不是「贴着」）。
-
-          旧版把卡片摆在指针右下 100px 开外（容器内 26/38 的定位 + 14px 偏移），拖动时
-          目光要在指针与幽灵之间来回跳；现在中心对齐，瞄准半径只剩一张卡片。
-
-          也不再向窗口内夹取：夹取会在指针出窗时把幽灵钉在窗口边缘，看着像拖动卡死了。
-          出窗已经由 `cancelOutsideWindow` 中止，幽灵跟着指针走就行。
-        */}
-        <div data-export-drag-preview aria-hidden="true" class="pointer-events-none fixed z-(--z-modal) opacity-80" style={{left:`${batch().x+8}px`,top:`${batch().y+8}px`,transform:"translate(-50%,-50%)"}}>
-          <div class="relative size-[132px]">
-            <For each={batch().variants.slice(0,4)}>{(v,i)=><div class="rb-export-drag-card absolute inset-0 overflow-hidden rounded-ui border border-fg-3 bg-surface-layer" style={{transform:`translate(${i()*9}px,${-i()*3}px) rotate(${(i()-(Math.min(4,batch().variants.length)-1)/2)*8}deg)`,'transform-origin':'50% 85%'}}>
-              <Show when={issueThumbs.get(JSON.stringify([batch().repository,v.reference,v.profileHash])).url} fallback={<IconPhoto size={48} class="m-auto mt-10 text-fg-3"/>}>{url=><img class="size-full object-contain" src={url()} alt="" draggable={false}/>}</Show>
-            </div>}</For>
-            <span data-export-drag-count class="absolute bottom-0 right-0 rounded-ui bg-surface-layer px-2 py-1 text-fs-2 text-fg-1 tnum">{batch().variants.length}</span>
-          </div>
-        </div>
-      </Portal>}</Show>
+      {/* 拖动预览：**与 browse 同一个组件**（`components/ui/DragPreview.tsx`） */}
+      <Show when={dragBatch()}>{batch=><DragPreview
+        x={batch().x}
+        y={batch().y}
+        count={batch().variants.length}
+        items={batch().variants.slice(0,4).map(v=>({url:()=>issueThumbs.get(JSON.stringify([batch().repository,v.reference,v.profileHash])).url}))}
+      />}</Show>
       <Dialog open={store.limitOpen()} onOpenChange={store.setLimitOpen} title={t("export.limit")}><p class="text-fg-2">{t("export.limitBody")}</p></Dialog>
       <Dialog open={allIssues()!==null} onOpenChange={open=>{if(!open)setAllIssues(null);}} title={t("export.allIssues")} size="wide">
+        {/*
+         * 弹窗列**全部**定稿：`refsFor` = 主行 + 小片（已排序），RAW 变体排在最后 ——
+         * 它只住在这里（tile 小片区永不含它），选中与否都不动位置（崔总 2026-10-11）。
+         */}
         <div data-export-all-issues class="grid max-h-[60vh] grid-cols-[repeat(auto-fit,minmax(136px,1fr))] gap-2 overflow-auto">
           <For each={allIssues()===null?[]:store.refsFor([allIssues()!])}>{v=><IssueTile variant={v} size={136}/>}</For>
         </div>

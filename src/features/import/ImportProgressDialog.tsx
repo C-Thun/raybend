@@ -223,7 +223,7 @@ export function ImportProgressDialog(props: ImportProgressDialogProps) {
           <Show when={store.currentLabel()}>
             {(current) => (
               <div class="flex flex-col gap-0.5 rounded-ui bg-surface-track px-2 py-1.5">
-                <span class="truncate text-fs-1 text-fg-1">{current()}</span>
+                <span class="overflow-hidden whitespace-nowrap fade-x-end text-fs-1 text-fg-1">{current()}</span>
                 <span class="text-fs-0 text-fg-3">
                   {t("import.keep_partial")}
                 </span>
@@ -237,7 +237,7 @@ export function ImportProgressDialog(props: ImportProgressDialogProps) {
               <For each={store.errors()}>
                 {(error) => (
                   <div class="flex flex-col gap-0.5">
-                    <span class="truncate text-fs-1 text-fg-1">
+                    <span class="overflow-hidden whitespace-nowrap fade-x-end text-fs-1 text-fg-1">
                       {error.target ?? error.source}
                     </span>
                     <span class="text-fs-1 text-danger">{error.reason}</span>

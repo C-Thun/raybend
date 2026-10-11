@@ -17,14 +17,20 @@
 **做**：
 
 1. 右栏第 3 组页签条由「曲线」单项变为「曲线 · 预设」两项，内容区随页签切换；**两页签同高**（同容器，切换不伸缩）。
-2. 预设面板：工具行（应用 / 新建目录 / 新建预设）+ 一级目录树（可折叠、可拖拽移动预设、悬浮删除）。
+2. 预设面板：工具行（应用 / 新建目录 / 新建预设）+ 一级目录树（可折叠、可拖拽移动预设、悬浮删除；**目录有内容时行尾动作换成改名**）。
 3. 新建目录 / 新建预设弹窗（名称输入；预设另按大类勾选，chip 行）。
 4. 预设应用：按保存的大类**整体覆盖**当前照片参数；LUT 丢失忽略。
 5. 存储：设备级 `app.db`（照 LUT 分类口径——预设是应用级资产，换库可用）。
 6. 悬浮信息：列出预设包含的大类（复用 Tooltip）。
 7. 右栏第 1 组（总览 / 定稿 / 信息）默认等高（H = 总览在 3:2 画幅下的自然高度，见 §6）。
+8. **2026-10-10 崔总调整**（实现与规格同步）：
+   - 应用按钮**不做主色常亮**（与旁边两个图标按钮同款 ghost）；禁用时悬浮提示「选中预设执行应用」；
+   - 目录行：去掉右侧计数；名称超长**右缘渐隐**（全项目收尾纪律，`AGENTS.md` §2.22）；
+   - 目录行最右**固定动作位**（`--remove-hit` 宽）：空目录 = 删除、有内容 = 改名、`默认` = 占位；
+   - **目录改名**（新增后端命令，非空目录也能改；`默认` 不可改名）；弹窗打开即聚焦并全选原名称；
+   - 新建预设弹窗**默认不勾选「镜头」**（跨照片套用会套错镜头），其余组仍默认勾选。
 
-**不做**：预设重命名（删除后重建即可，YAGNI）；预设排序拖拽（本轮不做）；跨库同步语义；导入/导出预设文件（远期）。
+**不做**：**预设**重命名（删除后重建即可，YAGNI；目录改名另算）；预设排序拖拽（本轮不做）；跨库同步语义；导入/导出预设文件（远期）。
 
 ---
 
@@ -58,14 +64,14 @@ CREATE UNIQUE INDEX idx_presets_dir_name ON presets(directory_id, name);
 
 ## 3. payload 契约（大类快照）
 
-`payload` 是 JSON 对象（`TEXT` 存字符串；后端只做基本校验——可解析 + **受支持版本**（`version === 1`，或
-色彩管理接入后的 `version === 2` 且带 `colorManagement`）——语义归前端）：
+`payload` 是 JSON 对象（`TEXT` 存字符串；后端只做基本校验——可解析 + **受支持版本**（`version === 1`；
+`version === 2` 且带 `colorManagement`；**`version === 3`** = 白平衡偏移量版，见规则 6）——语义归前端）：
 
 ```jsonc
 {
-  "version": 1,
+  "version": 3,
   "tone":   { "exposure": 0.35, "contrast": 0, "highlights": 0, "blacks": 0, "dynamicContrast": 0 },
-  "color":  { "temperature": 5400, "saturation": 0, "vibrance": 0 },
+  "color":  { "saturation": 4, "vibrance": 35, "wbMired": -120 },
   "detail": { "lumaNr": 0, "colorNr": 0, "sharpenAmount": 0, "sharpenRadius": 0, "nrMethod": null },
   "lens":   { "distortion": 0, "vignette": 0, "vignetteRange": 0, "chromaticBlue": 0, "chromatic": 0,
               "profile": null, "enabled": null },
@@ -78,13 +84,25 @@ CREATE UNIQUE INDEX idx_presets_dir_name ON presets(directory_id, name);
 
 1. **保存**：用户勾选的大类才写入 `payload`；**每个勾选的大类写全字段**（含等于默认值/为空的项）——这样「覆盖」语义才完整（勾了影调但某项没改过，应用时该项也回到预设保存时的值）。
 2. **应用**：勾选的大类各自**整体覆盖**当前编辑栈；未勾选的大类不动。各组落法：
-   - `tone` / `color` / `detail`（4 个数值项）/ `lens`（5 个数值项）：逐项 `setParam(id, 值)`（值为 `payload` 缺项时回退 `PARAM_DEFAULTS[id]`）。
+   - `tone` / `color`（白平衡除外，见规则 6）/ `detail`（4 个数值项）/ `lens`（5 个数值项）：逐项 `setParam(id, 值)`（值为 `payload` 缺项时回退 `PARAM_DEFAULTS[id]`）。
    - `detail.nrMethod` → store 的 `setNrMethod`；`lens.profile` / `lens.enabled` → `setLensProfile` / `setLensEnabled`。
    - `curve`：4 个通道全部 `setCurvePoints`（缺通道按恒等曲线 `[[0,0],[1,1]]`）。
    - `lut`：`id === null` → `setLut(null, false)`（清除）；`id` 非空且**在当前 LUT 库中存在** → `setLut(id, enabled)`；`id` 非空但**不存在或不可用** → **忽略该项**（不动当前 LUT，不报错——崔总：LUT 丢失要有保底）。「存在」以**应用那一刻重读的 LUT 库**为准（工作区先 `lut_library` 刷新再跑应用计划），不用进入编辑器时的旧缓存；重读之后文件又被删的窗口仍走渲染层缺失资源错误契约。
 3. **参数表派生**：大类的数值参数 id 列表**从 `features/editor/params.ts` 的 `PARAMS`（`group` 字段）派生**，不手写第二份；`detail`/`lens` 的额外字段（`nrMethod` / `profile` / `enabled`）按本契约写死名字。
 4. **纯逻辑落点**：payload 的**构建 / 清洗 / 分组名列表 / 应用合并判定**全部放 `src/lib/presets.ts`（`lib` 不许 import `features`——参数 id 由调用方传入或映射表由 `features/editor/params.ts` 侧轻量派生后注入；实现时二选一，**保持分层检查 `pnpm lint:arch` 通过**）。
 5. 不含：基础曲线（`baseCurveProfile` / `baseCurvePoints`）、几何（裁切/旋转）、`asShotK`、`autoAdjust`、`sourceBase`。
+6. **白平衡（v3）**：`color` 里**不存绝对色温**，存**相对拍摄色温的 mired 偏移量** `wbMired`（崔总 2026-10-10）。
+
+   ```text
+   mired(K) = 1_000_000 / K
+   Δmired   = mired(asShot) − mired(target)      // 0 = 跟随拍摄色温；Δ<0 = 更暖（target K 更低），Δ>0 = 更冷
+   target   = 1_000_000 / (mired(asShot) − Δmired)   // 结果 clamp 到 2500..10000
+   ```
+
+   * **保存**：由当前 `temperature` + 该照片的 `asShot` 算 `wbMired`；拍摄色温未知或未动过白平衡 → `0`（跟随）。
+   * **应用**：`wbMired = 0` → 把色温写回该照片的 `asShot`（不算显式值）；`≠ 0` → 按上式换算成目标 K 并标记显式；**`asShot` 未知 → 跳过白平衡项**（其余项照常应用）并提示一次（`editor.preset.wbSkipped`）。
+   * **读时迁移**（v1 / v2 → v3）：旧 payload 的 `color.temperature` 存的是**当时那张照片的绝对 K**，当偏移量没有依据 —— 按「跟随拍摄色温」处理（删该项、`wbMired = 0`），并一次性提示 `editor.preset.wbMigrated`；DB 行不批量改写，用户下次保存该预设时自然落成 v3。
+   * 换算实现只有一份：`src/lib/white-balance.ts`（纯函数 + 单测）。
 
 **大类清单**（顺序即界面顺序）：`tone` 影调 / `color` 色彩 / `detail` 清晰度 / `lens` 镜头 / `curve` 曲线 / `lut` LUT。（未来可能加「色彩管理」，届时在联合类型与 chips 数组各加一项。）
 
@@ -105,6 +123,7 @@ struct PresetLibraryDto { directories: Vec<PresetDirectoryDto>, presets: Vec<Pre
 | `preset_library` | — | 读全库；目录表为空则建 `default`。payload 以 **JSON 值**返回（解析失败**或版本不受支持**的行跳过并记一行诊断，不让面板起不来） |
 | `preset_create_directory` | `id, name` | 重名（NOCASE）→ Err（前端提示） |
 | `preset_delete_directory` | `id` | `id == "default"` → Err；**目录非空 → Err**（后端兜底，前端本就不显示按钮） |
+| `preset_rename_directory` | `id, name` | 非空目录也能改；`id == "default"` → Err；重名（NOCASE，排除自己）→ Err；非法名（空 / 超 40 字 / 控制字符）→ Err；只改 `name`，不动 `sort_order` 与预设关联（2026-10-10） |
 | `preset_create` | `id, directory_id, name, payload` | 目录不存在 → Err；同目录重名 → Err；payload 不可解析或版本不受支持 → Err |
 | `preset_delete` | `id` | 直删（无关联副作用） |
 | `preset_move` | `id, directory_id` | 目标目录不存在 → Err；**目标同名时自动加 ` 2`/` 3` 后缀**（在同目录内循环找第一个可用名；后缀从基名里让位，**搬完仍在 80 字符上限内**） |
@@ -152,24 +171,25 @@ applyPresetSnapshot: (snapshot: PresetSnapshot, groups: readonly PresetGroup[]) 
 
 ```text
 [曲线][预设]                      ← 页签在 panels.tsx 里（第 3 组）
-[▶ 应用] [＋目录] [＋预设]          ← 工具行：3 个图标按钮 + Tooltip
+[▶ 应用] [＋目录] [＋预设]          ← 工具行：三个 ghost 图标按钮 + Tooltip（应用禁用时提示“选中预设执行应用”）
 ────────────────────────────
-▼ 默认 (3)                        ← 目录行：chevron + 名称 + 计数；行尾删除（仅空目录；default 永不）
+▼ 默认                             ← 目录行：chevron + 名称（超长右缘渐隐）；最右固定动作位（默认目录占位）
    □ 柔和胶片                      ← 预设行：图标 + 名称；选中 = bg-state-selected
    □ 街头黑金            ⃠        ← 悬浮行尾删除（EasyDestroyButton，Shift 直删）
    □ 夜景蓝
-▶ 人像 (2)
-▶ 旅行 (0)               ⃠
+▶ 人像                   ✎        ← 有内容 → 行尾是改名（弹窗全选原名）；空目录才是 ⃠
+▶ 旅行                  ⃠
 ```
 
 - **工具行**：`Button variant="ghost"` + Tabler 图标 + `Tooltip`（照 LUT 标题行）：
-  - 应用 = `IconPlayerPlay`，**仅 `selection.kind==="presets" && ids.length===1` 时可用**；点击 → `applyPresetSnapshot` + `onCommit`。
+  - 应用 = `IconPlayerPlay`，**仅 `selection.kind==="presets" && ids.length===1` 时可用**；点击 → `applyPresetSnapshot` + `onCommit`。禁用时提示「选中预设执行应用」（Tooltip 触发器挂在外层 span 上——禁用按钮收不到悬停）。
   - 新建目录 = `IconFolderPlus`（与 LUT「新建分类」同图标，同一语义同一图标 §2.12）。
   - 新建预设 = `IconBookmarkPlus`。
-- **目录行**（`h-row-h`，`bg-surface-bar`，radius-ui）：点行 = 选中目录（`bg-state-selected`）；chevron 点 = 折叠切换；行尾删除按钮 `EasyDestroyButton` **仅当目录为空且非 default** 时渲染；拖着预设靠近时 = 投放高亮（`ring-1 ring-brand`）。
-- **预设行**（`h-row-h`）：点行 = 选中（单选替换 / Shift 多选）；选中 = `bg-state-selected`；悬浮 = `bg-state-hover` + 行尾 `EasyDestroyButton`（`opacity-0 group-hover:opacity-100 group-focus-within:opacity-100`，照 LUT tile）；行上 `Tooltip` 显示「包含：影调 · 色彩 · 曲线」（从 payload 已存大类派生，用 ` · ` 连接；空 payload 显示 `t("editor.preset.containsNone")`）。
+- **目录行**（`h-row-h`，`bg-surface-bar`，radius-ui）：点行 = 选中目录（`bg-state-selected`）；chevron 点 = 折叠切换；名称超长右缘渐隐（`.fade-x-end`）；**最右固定动作位**（`--remove-hit` 宽，默认目录留占位）——空目录 = `EasyDestroyButton`（仅非 default）、有内容 = 改名 `IconButton`（`IconPencil`，弹窗打开即聚焦并全选原名）；拖着预设靠近时 = 投放高亮（`ring-1 ring-brand`）。
+- **预设行**（`h-row-h`）：点行 = 选中（单选替换 / Shift 多选），**双击 = 直接应用这一条**（与工具行「应用」同一条路，2026-10-10）；选中 = `bg-state-selected`；悬浮 = `bg-state-hover` + 行尾 `EasyDestroyButton`（`opacity-0 group-hover:opacity-100 group-focus-within:opacity-100`，照 LUT tile）；行上 `Tooltip` 显示「包含：影调 · 色彩 · 曲线」（从 payload 已存大类派生，用 ` · ` 连接；空 payload 显示 `t("editor.preset.containsNone")`）。
 - **新建目录弹窗**：`Dialog`，标题 + 名称输入 + 取消/确认（取消左确认右 §11.5）；名称先过前端校验（空 / 超长 40 字 / 控制字符）与重名检查，再调后端；重名与其它失败**分开提示**，后端真实原因显示在弹窗内（`PresetCreateOutcome`，审计 2026-10-07）。
-- **新建预设弹窗**：`Dialog`，名称输入 + **大类 chips 行**（六个 chip：选中 = `bg-state-selected` + `font-semibold text-fg-1`，未选 = `bg-surface-bar` + `text-fg-2`，照导入 LUT 弹窗的 `CategoryChips` 语言）+ 提示「未勾选的大类不覆盖照片当前值」；**默认全选**；名称为空或一个大类都没选时禁用「保存」（超长 80 字 / 控制字符同目录弹窗处理）。保存后关闭并选中新预设。
+- **新建预设弹窗**：`Dialog`，名称输入 + **大类 chips 行**（七个 chip：选中 = `bg-state-selected` + `font-semibold text-fg-1`，未选 = `bg-surface-bar` + `text-fg-2`，照导入 LUT 弹窗的 `CategoryChips` 语言）+ 提示「未勾选的大类不覆盖照片当前值」；**默认勾选影调 / 色彩 / 清晰度 / 曲线 / LUT（不含镜头与色彩管理）**；名称为空或一个大类都没选时禁用「保存」（超长 80 字 / 控制字符同目录弹窗处理）。保存后关闭并选中新预设。
+- **目录改名弹窗**：`Dialog`，标题 + 名称输入（初值 = 原名，打开即聚焦并全选）+ 取消 / 保存；前端先过校验与重名检查（排除自己），后端返回的错误原样贴出；名字未变直接关窗不跑后端。
 - **拖拽**（复用 `lib/pointer-drag.ts::trackPointerDrag`，阈值 + `cancelOutsideWindow: true`）：
   - 起拖（阈值后）：标记 `dragging`；**所有目录显示为折叠**（临时覆盖，不改展开记录）；ghost = `position: fixed` 的行快照（`surface-layer` 底 + 1px `brand` 描边，照画稿）；多选时拖动任一选中行 = 整组移动。
   - move：命中判定对**可见目录行**做 hit test（`getBoundingClientRect`）→ 高亮目标；指针进入滚动容器上/下缘 24px 内且未到顶/底 → `requestAnimationFrame` 步进滚动（step 8px）。
@@ -186,10 +206,10 @@ applyPresetSnapshot: (snapshot: PresetSnapshot, groups: readonly PresetGroup[]) 
 ```text
 editor.preset.title           = 预设                    Presets
 editor.preset.apply           = 应用                    Apply
+editor.preset.applyDisabled   = 选中预设执行应用         Select a preset to apply
 editor.preset.newDirectory    = 新建目录                New directory
 editor.preset.newPreset       = 新建预设                New preset
 editor.preset.defaultDir      = 默认                    Default
-editor.preset.count           = {n}                     {n}          ← 与 editor.lut.count 同形
 editor.preset.empty           = 还没有预设              No presets yet
 editor.preset.emptyHint       = 在目录下新建预设，保存当前照片的调整   …
 editor.preset.emptyDirectory  = 空目录（可删除）         Empty directory (removable)
@@ -199,12 +219,14 @@ editor.preset.name            = 名称                    Name
 editor.preset.dirName         = 目录名称                Directory name
 editor.preset.namePlaceholder = 预设名称                Preset name
 editor.preset.dirPlaceholder  = 目录名称                Directory name
-editor.preset.includeGroups   = 包含大类（默认全选）      Include groups (all by default)
+editor.preset.includeGroups   = 包含大类                 Include groups
 editor.preset.keepHint        = 未勾选的大类不覆盖照片当前值   …
 editor.preset.contains        = 包含：{groups}           Includes: {groups}
 editor.preset.containsNone    = 不含任何大类             No groups
 editor.preset.remove          = 删除预设                Delete preset
 editor.preset.removeDir       = 删除目录                Delete directory
+editor.preset.renameDir       = 重命名目录              Rename directory
+editor.preset.renameDirTitle  = 重命名目录              Rename directory
 editor.preset.removeTitle     = 删除预设                Delete preset
 editor.preset.removeDirTitle  = 删除目录                Delete directory
 editor.preset.removeConfirm   = 确定删除预设“{name}”？删除后不可恢复。    …
@@ -242,7 +264,7 @@ min-height: calc((var(--panel-w-right) - var(--panel-pad) - var(--panel-pad-scro
 
 ## 7. 测试与验收
 
-**Rust（`cargo test`）**：`store/presets.rs` 的 CRUD 对内存 SQLite 逐条覆盖——建目录/重名/删 default 拒绝/删非空拒绝/建预设/同目录重名/移动/移动自动后缀（含**80 字上限撞名后仍合法**）/payload 非法 JSON 行/版本契约（v1、带 colorManagement 的 v2 接受；缺 version、v3、v2 缺字段拒绝）。命令层薄，无需单独测试。
+**Rust（`cargo test`）**：`store/presets.rs` 的 CRUD 对内存 SQLite 逐条覆盖——建目录/重名/删 default 拒绝/删非空拒绝/建预设/同目录重名/移动/移动自动后缀（含**80 字上限撞名后仍合法**）/payload 非法 JSON 行/版本契约（v1、带 colorManagement 的 v2、**v3** 接受；缺 version、v4、v2 缺字段拒绝；旧行读回不被改写）。命令层薄，无需单独测试。
 
 **前端（`pnpm test`）**：`lib/presets.test.ts` 覆盖 §5.1 纯函数（含 `PARAM_DEFAULTS` 回退、LUT 忽略分支、名称字符计数与收敛纯函数）；`features/editor/store.test.ts` 覆盖库刷新收敛选中/折叠、应用 rev 单次、丢失 LUT 不动当前值；`locale-parity` 自动覆盖 i18n。
 

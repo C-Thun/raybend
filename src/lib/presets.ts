@@ -11,13 +11,23 @@
 
 import { IDENTITY_CURVE } from "./curve.ts";
 import type { PhotoColorState } from "./color-model.ts";
+import { WB_KELVIN_MAX, WB_KELVIN_MIN, kelvinToWbMired, wbMiredToKelvin } from "./white-balance.ts";
 
 /** `默认` 目录的固定 id（名称走语言包，DB 里的 `name` 只是占位）。 */
 export const DEFAULT_DIRECTORY_ID = "default";
 
 /** 六个大类（顺序即界面 chips 顺序；未来加「色彩管理」时在此追加）。 */
 export const PRESET_GROUPS = ["tone", "color", "detail", "lens", "curve", "lut", "colorManagement"] as const;
-export const DEFAULT_PRESET_GROUPS = PRESET_GROUPS.filter(group=>group !== "colorManagement");
+/**
+ * 新建预设默认勾选的大类：不带**镜头**与**色彩管理**。
+ *
+ * * 镜头：预设里存的是那次拍摄的镜头 profile（按焦段 / 光圈解析）——
+ *   换张照片套用会直接套错镜头，画面反而“变形”（崔总 2026-10-10）；
+ * * 色彩管理：输入策略是随照片的（另见默认目录里的说明），不默认随预设走。
+ */
+export const DEFAULT_PRESET_GROUPS = PRESET_GROUPS.filter(
+  (group) => group !== "colorManagement" && group !== "lens",
+);
 export type PresetGroup = (typeof PRESET_GROUPS)[number];
 
 /** 带数值参数的四个大类（与 `ParamGroup` 同名同义；curve / lut 单独处理）。 */
@@ -102,8 +112,8 @@ export function validatePresetName(raw: string, kind: PresetNameKind): PresetNam
   return null;
 }
 
-/** 新建目录 / 预设的结果（面板据此区分「重名」与其它后端失败，审计 2026-10-04）。 */
-export type PresetCreateOutcome =
+/** 新建 / 改名 / 移动这类“写名字”操作的结果（面板据此区分「重名」与其它后端失败）。 */
+export type PresetMutationOutcome =
   | { ok: true }
   | { ok: false; message: string };
 
@@ -188,19 +198,36 @@ function sanitizeCurve(raw: unknown): Partial<Record<string, [number, number][]>
   return out;
 }
 
-/** 任何输入 → 合法快照；不是 `{version:1, …}` 就返回 `null`（调用方丢行）。 */
+/**
+ * 任何输入 → 合法快照（**输出恒为 v3**）；版本不认识 / v2 缺色彩管理就返回 `null`。
+ *
+ * 读时迁移（`specs/editor-presets.md` §3，崔总 2026-10-10）：v1 / v2 的
+ * `color.temperature` 存的是**当时那张照片的绝对 K**（它当初写的就是 as-shot），
+ * 当偏移量没有依据 —— 按「跟随拍摄色温」处理：删掉该项、`wbMired = 0`。
+ * DB 行不批量改写，下次保存该预设时自然写成 v3。
+ */
 export function sanitizePresetSnapshot(raw: unknown): PresetSnapshot | null {
   if (typeof raw !== "object" || raw === null) return null;
   const record = raw as Record<string, unknown>;
-  if (record.version !== 1 && record.version !== 2) return null;
-  if (record.version === 2 && !Object.prototype.hasOwnProperty.call(record,"colorManagement")) return null;
-  const snapshot: PresetSnapshot = { version: record.version };
+  const version = record.version;
+  if (version !== 1 && version !== 2 && version !== 3) return null;
+  if (version === 2 && !Object.prototype.hasOwnProperty.call(record,"colorManagement")) return null;
+  const snapshot: PresetSnapshot = { version: 3 };
   let present = false;
   for (const group of ["tone", "color", "detail", "lens"] as const) {
     if (typeof record[group] !== "object" || record[group] === null) continue;
     const values = sanitizeValues(record[group]);
     const extra = record[group] as Record<string, unknown>;
-    if (group === "detail") {
+    if (group === "color") {
+      // v3：白平衡只认偏移量 —— 旧 payload 的 `temperature`（绝对值）一律丢掉。
+      const color: Record<string, number> = {};
+      for (const [id, value] of Object.entries(values)) {
+        if (id === "temperature") continue;
+        color[id] = value;
+      }
+      color.wbMired = version >= 3 ? finiteNumber(extra.wbMired) ?? 0 : 0;
+      snapshot.color = color;
+    } else if (group === "detail") {
       snapshot.detail = { ...values, nrMethod: extra.nrMethod === "high" ? "high" : null };
     } else if (group === "lens") {
       snapshot.lens = {
@@ -230,6 +257,25 @@ export function sanitizePresetSnapshot(raw: unknown): PresetSnapshot | null {
     present = true;
   }
   return present ? snapshot : null;
+}
+
+/**
+ * 库里还有 v1 / v2 的预设吗（它们的白平衡按绝对值存）。
+ *
+ * 读时迁移的**一次性提示**用它：即便当次清洗已把它们规范成 v3，
+ * 用户也该知道「旧预设的白平衡按跟随拍摄色温处理了」。只看版本号，不解析 payload。
+ */
+export function hasLegacyWbPresets(raw: unknown): boolean {
+  if (typeof raw !== "object" || raw === null) return false;
+  const presets = (raw as Record<string, unknown>).presets;
+  if (!Array.isArray(presets)) return false;
+  return presets.some((item) => {
+    if (typeof item !== "object" || item === null) return false;
+    const payload = (item as Record<string, unknown>).payload;
+    if (typeof payload !== "object" || payload === null) return false;
+    const version = (payload as Record<string, unknown>).version;
+    return version === 1 || version === 2;
+  });
 }
 
 /** 任何输入 → 合法库（坏行丢弃）。 */
@@ -295,6 +341,8 @@ export interface PresetSnapshotSource {
   lensEnabled: boolean | null;
   lutId: string | null;
   lutEnabled: boolean;
+  /** 这张照片的拍摄色温（K）——白平衡偏移量（`wbMired`）的基线；`null` = 读不到。 */
+  asShotK: number | null;
 }
 
 /**
@@ -306,19 +354,29 @@ export function buildPresetSnapshot(
   source: PresetSnapshotSource,
   groupParams: GroupParams,
 ): PresetSnapshot {
-  const snapshot: PresetSnapshot = { version: 1 };
+  const snapshot: PresetSnapshot = { version: 3 };
   for (const group of groups) {
     switch (group) {
       case "colorManagement": {
         const color=source.photoColor;
         if (color?.process_version === "linear_rec2020_v2") {
-          snapshot.version=2;
           snapshot.colorManagement={processVersion:"linear_rec2020_v2",input:color.source.kind === "assigned_rgb_icc" ? {profileId:color.source.profile_id} : "automatic"};
         }
         break;
       }
+      case "color": {
+        // v3：白平衡不存绝对 K，存相对 as-shot 的 Δmired（0 = 跟随拍摄色温）；
+        // 其余色彩项与别的大类一样写全字段（覆盖语义）。
+        const values: Record<string, number> = {};
+        for (const id of groupParams.color) {
+          if (id === "temperature") continue;
+          values[id] = finiteNumber(source.values[id]) ?? 0;
+        }
+        values.wbMired = kelvinToWbMired(source.values.temperature ?? 0, source.asShotK);
+        snapshot.color = values;
+        break;
+      }
       case "tone":
-      case "color":
       case "detail":
       case "lens": {
         const values: Record<string, number> = {};
@@ -357,7 +415,7 @@ export function buildPresetSnapshot(
 export function presetColorChoice(snapshot: PresetSnapshot): string|null|undefined {
   if (!Object.prototype.hasOwnProperty.call(snapshot,"colorManagement")) return undefined;
   const group=snapshot.colorManagement;
-  if (snapshot.version !== 2 || !group || typeof group !== "object" || Object.keys(group).length !== 2 || group.processVersion !== "linear_rec2020_v2") throw new Error("PRESET_COLOR_UNSUPPORTED");
+  if (snapshot.version !== 3 || !group || typeof group !== "object" || Object.keys(group).length !== 2 || group.processVersion !== "linear_rec2020_v2") throw new Error("PRESET_COLOR_UNSUPPORTED");
   if (group.input === "automatic") return null;
   if (typeof group.input === "object" && group.input !== null && Object.keys(group.input).length === 1 && /^[0-9a-f]{64}$/.test(group.input.profileId)) return group.input.profileId;
   throw new Error("PRESET_COLOR_UNSUPPORTED");
@@ -377,17 +435,25 @@ export interface PresetApplyPlan {
   lut: { id: string | null; enabled: boolean } | "missing" | null;
   /** 实际生效的大类（LUT 丢失时不含 `lut`）。 */
   appliedGroups: PresetGroup[];
+  /** 白平衡是不是一个**显式偏移**（Δmired ≠ 0）—— `false` = 跟随该照片 as-shot。 */
+  wbExplicit: boolean;
+  /** `asShotK` 未知而跳过了白平衡项（Δmired ≠ 0 才有意义）；调用方提示一次。 */
+  wbSkipped: boolean;
 }
 
 /**
  * 把快照变成应用计划：保存的大类各自**整体覆盖**；
  * LUT 的 id 非空但在库里找不到（或不可用）→ `"missing"`，静默忽略（崔总：要有保底）。
+ *
+ * `asShotK` = 当前照片的拍摄色温（白平衡偏移量的基线）：`null` 时**跳过白平衡项**
+ * （其余项照常应用，`wbSkipped` 报出来让调用方提示一次）。
  */
 export function planPresetApply(
   snapshot: PresetSnapshot,
   groupParams: GroupParams,
   defaults: Readonly<Record<string, number>>,
   lutExists: (id: string) => boolean,
+  asShotK: number | null,
   channels: readonly string[] = ["rgb", "r", "g", "b"],
 ): PresetApplyPlan {
   presetColorChoice(snapshot);
@@ -400,11 +466,33 @@ export function planPresetApply(
     lens: { profile: null, enabled: null },
     lut: null,
     appliedGroups: [],
+    wbExplicit: false,
+    wbSkipped: false,
   };
   for (const group of snapshotGroups(snapshot)) {
     switch (group) {
+      case "color": {
+        const raw = snapshot.color;
+        if (raw === undefined) break;
+        for (const id of groupParams.color) {
+          if (id === "temperature") continue;
+          plan.values[id] = finiteNumber(raw[id]) ?? defaults[id] ?? 0;
+        }
+        const wbMired = finiteNumber(raw.wbMired) ?? 0;
+        if (asShotK === null) {
+          // 没有基线就没有「相对谁」：跳过白平衡（其余项照常），提示交给调用方。
+          plan.wbSkipped = true;
+        } else if (wbMired === 0) {
+          // 跟随拍摄色温 = 回到该照片的基线（覆盖语义：其它项照常写）。
+          plan.values.temperature = Math.min(WB_KELVIN_MAX, Math.max(WB_KELVIN_MIN, asShotK));
+        } else {
+          plan.values.temperature = wbMiredToKelvin(asShotK, wbMired);
+          plan.wbExplicit = true;
+        }
+        plan.appliedGroups.push(group);
+        break;
+      }
       case "tone":
-      case "color":
       case "detail":
       case "lens": {
         const raw = snapshot[group];

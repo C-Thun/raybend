@@ -389,6 +389,27 @@ pub fn load(conn: &Connection, asset_id: i64) -> Result<DevelopStack> {
     Ok(stack)
 }
 
+/// **存量修复候选**：温度是显式值、但 `as_shot_k` 为空的编辑栈
+/// （`specs/editor-session-pipeline.md` §6.8）。
+///
+/// 白平衡的基线缺失时，`temperature` 这个绝对值没有「相对谁」的解释（§6.3）——
+/// 这类行要用该照片的**解码真值**回填 `as_shot_k` 才能重新解释。
+/// 返回 `(asset_id, temperature)`，按 asset 排序；是否执行由调用方（人类）决定。
+///
+/// # Errors
+/// 数据库读失败。
+pub fn stacks_missing_as_shot_baseline(conn: &Connection) -> Result<Vec<(i64, f64)>> {
+    let mut statement = conn.prepare(
+        "SELECT p.asset_id, p.value FROM develop_params p \
+         JOIN develop_stacks d ON d.asset_id = p.asset_id \
+         WHERE p.param_id = 'temperature' AND d.as_shot_k IS NULL \
+         ORDER BY p.asset_id",
+    )?;
+    Ok(statement
+        .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, f64>(1)?)))?
+        .collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
 /// **覆盖式写入**一张照片的编辑栈（前端那份载荷的语义）。
 ///
 /// 语义：栈里没有的项**删掉**、有的项写入 —— 于是「重置这一项」与「拖回默认」
@@ -396,15 +417,58 @@ pub fn load(conn: &Connection, asset_id: i64) -> Result<DevelopStack> {
 ///
 /// # Errors
 /// 校验不过（未知 id / 值非法 / 坏曲线）或数据库写失败。
+/// 懒回填：把这张照片 **latest 输出尺寸为空**的编辑栈补上（能算才算，算不出保持 NULL）。
+///
+/// 与 `issues::backfill_output_sizes` 对称、同口径（`store::sizes::stack_output_size`，
+/// 零 I/O、零渲染）；幂等、只写缺值。**老库 / 源尺寸当时未知**留下的 NULL
+/// 在这一步补成现成值（`specs/display-size-lifecycle.md` §2），读侧下次就纯读。
+///
+/// 返回这次真写了多少行。
+///
+/// # Errors
+/// 数据库读写失败。
+pub fn backfill_output_sizes(conn: &Connection, asset_id: i64) -> Result<usize> {
+    let pending: Option<i64> = conn
+        .query_row(
+            "SELECT asset_id FROM develop_stacks
+              WHERE asset_id = ?1 AND (output_width IS NULL OR output_height IS NULL)",
+            [asset_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if pending.is_none() {
+        return Ok(0);
+    }
+    // 栈本体走读侧同一个装载口（参数在 `develop_params`，不是一个 JSON 列）
+    let stack = load(conn, asset_id)?;
+    let Some((width, height)) = crate::store::sizes::stack_output_size(conn, asset_id, &stack)?
+    else {
+        return Ok(0); // 源尺寸还未知：保持 NULL，下次再算
+    };
+    Ok(conn.execute(
+        "UPDATE develop_stacks SET output_width = ?2, output_height = ?3
+          WHERE asset_id = ?1 AND (output_width IS NULL OR output_height IS NULL)",
+        rusqlite::params![asset_id, i64::from(width), i64::from(height)],
+    )?)
+}
+
 pub fn save(conn: &Connection, asset_id: i64, stack: &DevelopStack, now_ms: i64) -> Result<usize> {
     stack.validate()?;
 
     // ② 栈本体（没有就建一个；as-shot 与镜头 / 降噪那几项跟着一起写）
     ensure_stack(conn, asset_id, now_ms)?;
+    /*
+     * latest 的**输出尺寸**在同一条 UPDATE / 同一笔事务里写（`specs/display-size-source.md` §3.2）：
+     * 尺寸与它描述的栈同生共死 —— 栈在则尺寸在，本次编辑改了几何就跟着更新。
+     * 只读库（源文件的展示尺寸是导入时写下的），**零渲染、零读盘**；
+     * 源尺寸未知（老库未回填）就写 NULL，消费方按 `store::sizes` 的回退链拿。
+     */
+    let output = crate::store::sizes::stack_output_size(conn, asset_id, stack)?;
     conn.execute(
         "UPDATE develop_stacks SET as_shot_k = ?2, lens_profile = ?3, lens_enabled = ?4, \
          nr_method = ?5, source_base = ?6, edit_geometry = ?7, base_curve_profile = ?8, \
-         base_curve_points = ?9, lut_id = ?10, lut_enabled = ?11, auto_adjust = ?12, color_state = ?13 WHERE asset_id = ?1",
+         base_curve_points = ?9, lut_id = ?10, lut_enabled = ?11, auto_adjust = ?12, color_state = ?13, \
+         output_width = ?14, output_height = ?15 WHERE asset_id = ?1",
         rusqlite::params![
             asset_id,
             stack.as_shot_k.map(f64::from),
@@ -434,6 +498,8 @@ pub fn save(conn: &Connection, asset_id: i64, stack: &DevelopStack, now_ms: i64)
                 .map_err(|error| Error::Unsupported(format!("自动调整基线序列化失败：{error}")))?,
             stack.color.as_ref().map(serde_json::to_string).transpose()
                 .map_err(|error| Error::Unsupported(format!("色彩状态序列化失败：{error}")))?,
+            output.map(|(width, _)| i64::from(width)),
+            output.map(|(_, height)| i64::from(height)),
         ],
     )?;
 
@@ -775,7 +841,31 @@ pub fn set_setting(
         value
     };
     conn.execute(&sql, rusqlite::params![asset_id, stored])?;
+    /*
+     * 这一项改变**源或几何**时，latest 的输出尺寸跟着变（撤销拖一次几何、
+     * 切换编辑基准都走这条路；§3.3 的「栈变→尺寸跟着变」不只是 `save` 的约定）。
+     */
+    if matches!(setting, Setting::SourceBase | Setting::Geometry) {
+        refresh_output_size(conn, asset_id)?;
+    }
     prune_empty_stack(conn, asset_id)?;
+    Ok(())
+}
+
+/// 用**库里当前那一行**重算 latest 的输出尺寸（`save` 之外的写入口共用；只读库）。
+///
+/// 幂等：算不出来就写 NULL（消费方回退）—— 与 [`save`] 同一套口径。
+fn refresh_output_size(conn: &Connection, asset_id: i64) -> Result<()> {
+    let stack = load(conn, asset_id)?;
+    let output = crate::store::sizes::stack_output_size(conn, asset_id, &stack)?;
+    conn.execute(
+        "UPDATE develop_stacks SET output_width = ?2, output_height = ?3 WHERE asset_id = ?1",
+        rusqlite::params![
+            asset_id,
+            output.map(|(width, _)| i64::from(width)),
+            output.map(|(_, height)| i64::from(height)),
+        ],
+    )?;
     Ok(())
 }
 
@@ -1007,6 +1097,7 @@ pub fn has_edits_batch(conn: &Connection, asset_ids: &[i64]) -> Result<Vec<i64>>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::develop::geometry::CropRect;
     use crate::store::migration::{Backups, DbKind, apply};
     use crate::store::time::now_millis;
 
@@ -1600,6 +1691,42 @@ mod tests {
         assert!(baseline_only.is_empty(), "只存基线不算编辑过");
     }
 
+    /// 存量修复候选的选取（`specs/editor-session-pipeline.md` §6.8）：
+    /// 只要「显式温度 + 基线为空」那一类；基线已在、没有显式温度的一律不动。
+    #[test]
+    fn missing_baseline_candidates_are_exactly_the_dirty_temperature_rows() {
+        let (conn, _) = catalog_with_asset();
+        conn.execute(
+            "INSERT INTO assets (rating, flag, imported_at, updated_at) VALUES (0, 'none', 0, 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO assets (rating, flag, imported_at, updated_at) VALUES (0, 'none', 0, 0)",
+            [],
+        )
+        .unwrap();
+        // ① 污染行：显式温度 + 基线为空 → 候选
+        save(
+            &conn,
+            1,
+            &stack(&[("temperature", 5008.4043)], &[]),
+            now_millis(),
+        )
+        .unwrap();
+        // ② 显式温度 + 基线已在 → 不动
+        let mut fine = stack(&[("temperature", 4300.0)], &[]);
+        fine.as_shot_k = Some(4350.0);
+        save(&conn, 2, &fine, now_millis()).unwrap();
+        // ③ 基线为空但没有显式温度（未动过白平衡）→ 不动
+        let mut neutral = stack(&[("exposure", 0.5)], &[]);
+        neutral.as_shot_k = None;
+        save(&conn, 3, &neutral, now_millis()).unwrap();
+
+        let candidates = stacks_missing_as_shot_baseline(&conn).unwrap();
+        assert_eq!(candidates, vec![(1, 5008.4043)]);
+    }
+
     #[test]
     fn two_assets_do_not_see_each_other() {
         let (conn, first) = catalog_with_asset();
@@ -1924,5 +2051,79 @@ mod tests {
         )
         .expect("写");
         assert!(has_edits(&conn, asset_id).expect("查"));
+    }
+
+    /// `develop_stacks.output_*` 读回（latest 的成片输出尺寸）。
+    fn latest_output(conn: &Connection, asset_id: i64) -> (Option<i64>, Option<i64>) {
+        conn.query_row(
+            "SELECT output_width, output_height FROM develop_stacks WHERE asset_id = ?1",
+            [asset_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("栈行在")
+    }
+
+    /// 给资产挂一个带展示尺寸的文件行。
+    fn file_row(conn: &Connection, asset_id: i64, role: &str, width: i64, height: i64) {
+        conn.execute(
+            "INSERT INTO asset_files
+                (asset_id, role, rel_path, rel_path_folded, ext, size_bytes, mtime_ms,
+                 display_width, display_height, orientation, created_at, updated_at)
+             VALUES (?1, ?2, ?2 || '.bin', ?2 || '.bin', 'bin', 1, 1, ?3, ?4, 1, 0, 0)",
+            rusqlite::params![asset_id, role, width, height],
+        )
+        .expect("插文件行");
+    }
+
+    #[test]
+    fn stack_changes_rewrite_the_latest_output_size_in_the_same_transaction() {
+        // `specs/display-size-source.md` §3.3：栈变 → 尺寸跟着变；
+        // 撤销走路（`set_setting`）也要跟着重算（它也是栈的写入口）。
+        let (conn, asset_id) = catalog_with_asset();
+        file_row(&conn, asset_id, "bitmap", 4000, 3000);
+        file_row(&conn, asset_id, "raw", 5000, 4000);
+
+        // 没几何：输出尺寸 = 源展示尺寸（默认基准 raw）
+        let mut editing = stack(&[("exposure", 0.5)], &[]);
+        save(&conn, asset_id, &editing, 1).expect("写");
+        assert_eq!(latest_output(&conn, asset_id), (Some(5000), Some(4000)));
+
+        // 裁一半：输出尺寸跟着栈一起变（同一条 UPDATE）
+        editing.geometry = Some(EditGeometry {
+            rotation: 0.0,
+            crop: Some(CropRect {
+                x: 0.0,
+                y: 0.0,
+                width: 0.5,
+                height: 0.5,
+            }),
+            crop_ratio: None,
+        });
+        save(&conn, asset_id, &editing, 2).expect("写");
+        assert_eq!(latest_output(&conn, asset_id), (Some(2500), Some(2000)));
+
+        // 撤销那一半走路：清掉几何 → 尺寸回到源展示尺寸
+        set_setting(&conn, asset_id, Setting::Geometry, None, 3).expect("清几何");
+        assert_eq!(latest_output(&conn, asset_id), (Some(5000), Some(4000)));
+
+        // 切换编辑基准：源换了一侧，尺寸跟着换
+        set_setting(&conn, asset_id, Setting::SourceBase, Some("sooc"), 4).expect("切基准");
+        assert_eq!(latest_output(&conn, asset_id), (Some(4000), Some(3000)));
+
+        // 老库：源尺寸也缺 → 写 NULL（消费方按回退链现算，不报错）
+        let (bare, bare_id) = catalog_with_asset();
+        let mut bare_stack = stack(&[("exposure", 0.5)], &[]);
+        bare_stack.geometry = Some(EditGeometry {
+            rotation: 0.0,
+            crop: Some(CropRect {
+                x: 0.0,
+                y: 0.0,
+                width: 0.5,
+                height: 0.5,
+            }),
+            crop_ratio: None,
+        });
+        save(&bare, bare_id, &bare_stack, 5).expect("写");
+        assert_eq!(latest_output(&bare, bare_id), (None, None));
     }
 }

@@ -105,8 +105,22 @@ export interface NaturalSize {
 }
 
 export interface ViewerStoreDeps {
-  /** 取**屏幕档**大图（长边 1920）。返回 `null` 表示取不到（浏览器里就是这样） */
-  loadScreen: (path: string) => Promise<Uint8Array | null>;
+  /** 取**屏幕档**大图（长边 1920）—— **载入占位**，不是看图成品。 */
+  /**
+   * 取**载入占位**（1920 预览档）。
+   *
+   * 库里给 `view_image(…, "screen")`；**import 不给** —— 崔总 2026-10-11 定的口径是
+   * import 不生成也不请求 1920（占位直接用 384 小图顶着，真身随后补上；
+   * `specs/thumbnail-tiers-and-import-memory.md`）。不给这一档时占位 = `loadThumb`。
+   */
+  loadScreen?: (path: string) => Promise<Uint8Array | null>;
+  /**
+   * 取**真身**（该变体自己的像素，`view_image(…, "full")`）。
+   *
+   * 崔总 2026-10-11 口径：看图界面最终显示的必须是它；`loadScreen` 只是它到达
+   * 之前顶着的那张（占位）。**没给就不做第二段**（导入侧/无库里图那样，行为完全同旧）。
+   */
+  loadFull?: (path: string) => Promise<Uint8Array | null>;
   /** 取网格小图（可能已经在网格的缓存里，用来秒显）。可省略 */
   loadThumb?: (path: string) => Promise<Uint8Array | null>;
   makeUrl?: (bytes: Uint8Array) => string;
@@ -128,6 +142,14 @@ export interface ViewerState {
   fit: boolean;
   viewport: ViewportSize;
   natural: NaturalSize;
+  /**
+   * `natural` 是不是**这张照片自己的**尺寸（库里存的变体尺寸 / 已从图里量到）。
+   *
+   * 用处只有一个（`specs/display-size-source.md` §6.2）：`<img>` 的布局尺寸与
+   * `onLoad` 兜底都看它 —— 已知尺寸时**不允许**再用位图的固有尺寸覆盖
+   * （那就是「2M 的 RAW 被压成 1M 大小」的根因）；未知时才让位图自带尺寸兜底。
+   */
+  naturalKnown: boolean;
 }
 
 export const EMPTY_VIEWER: ViewerState = {
@@ -139,14 +161,17 @@ export const EMPTY_VIEWER: ViewerState = {
   fit: true,
   viewport: { width: 0, height: 0 },
   natural: { width: 0, height: 0 },
+  naturalKnown: false,
 };
 
 /** 缩放上下限：下限允许缩到很小（看全景），上限 8× 足够看像素（再大只是糊） */
+import { oneToOneZoom } from "./zoom.ts";
+
 export const MIN_ZOOM = 0.05;
 export const MAX_ZOOM = 8;
 
 export function clampZoom(zoom: number): number {
-  if (!Number.isFinite(zoom) || zoom <= 0) return 1;
+  if (!Number.isFinite(zoom) || zoom <= 0) return oneToOneZoom();
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
 }
 
@@ -261,7 +286,14 @@ export interface ViewerStore {
   /** 确保指定照片进入多图 URL 缓存；同一路径并发调用会合并。 */
   ensureImage: (photo: ViewerPhoto) => Promise<void>;
   imageStatus: () => "idle" | "loading" | "ready" | "error";
-  /** 「正在显示大图」—— 视图据此显示一个极轻的指示（可选） */
+  /**
+   * 「真身还在路上」—— 视图据此显示一个不拦输入的角标（「正在载入原图…」）。
+   *
+   * 它与 [`Self::sharp`] 是一对：`fullPending` 为真时屏上是**占位**，
+   * `sharp` 为真才是真身已上屏（崔总 2026-10-11：提示一旦结束，就应是原图）。
+   */
+  fullPending: () => boolean;
+  /** 「正在显示真身（原图/成片）」—— 缩放读数据此报百分比 */
   sharp: () => boolean;
   show: (photos: readonly ViewerPhoto[], index: number) => void;
   syncPhotos: (photos: readonly ViewerPhoto[]) => void;
@@ -282,7 +314,17 @@ export interface ViewerStore {
   /** 磁盘源变化：保留无关比较图，失效这些路径的派生 URL。 */
   invalidatePaths: (paths: readonly string[]) => void;
   setViewport: (size: ViewportSize) => void;
-  setNatural: (size: NaturalSize) => void;
+  /**
+   * 图上量到的尺寸。`authoritative` = 这份图**就是该变体的像素**
+   * （真身在屏 / 库里已经给过尺寸）；占位图（1920 / 384）量到的那份**不算权威** ——
+   * 它只是「先摆个差不多的大小」，真身一到还会再报一次并把它换掉。
+   *
+   * 为什么必须分这两种（崔总 2026-10-11「选 issue 尺寸也不对」的真凶）：
+   * 老库里某变体的尺寸是 NULL 时，第一个上屏的是**占位图**，它一量就把 `natural`
+   * 定成 1920 并标成「已知」⇒ 真身（5184×3888）到了也改不动 ⇒ 布局盒小一圈，
+   * 「100%」被放大成 ~2.7×。
+   */
+  setNatural: (size: NaturalSize, authoritative?: boolean) => void;
   zoomBy: (factor: number, anchor?: { x: number; y: number }) => void;
   zoomTo: (zoom: number, anchor?: { x: number; y: number }) => void;
   panBy: (dx: number, dy: number) => void;
@@ -299,6 +341,16 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
   const [imageStatus, setImageStatus] =
     createSignal<"idle" | "loading" | "ready" | "error">("idle");
   const [sharp, setSharp] = createSignal(false);
+  const [fullPending, setFullPending] = createSignal(false);
+  /** 已经在屏上的那份真身属于哪张（预载借进来的也算）—— 避免重复取一遍 9MB。 */
+  let currentFullKey: string | null = null;
+  /**
+   * 屏上这份「不是网格小图」的原图属于哪张（屏幕档或真身都算）。
+   *
+   * 用途只有一个：没给真身取图口的那一侧（`deps.loadFull === undefined`）要把
+   * 「屏幕档到了」当终态收尾 —— 但**只有屏幕档真的到了**才算（grid 小图兜底不算）。
+   */
+  let screenKey: string | null = null;
   const [overviewStatus, setOverviewStatus] = createSignal<"idle" | "loading" | "ready" | "error">("idle");
   const [overview, setOverview] = createSignal<{ url: string; natural: ViewerState["natural"] } | null>(null);
   /**
@@ -401,11 +453,18 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
     if (previous !== undefined && previous !== url) releaseUrl(previous, reason);
   }
 
-  function publishScreen(url: string): void {
+  /**
+   * 占位上屏（screen 档）。
+   *
+   * ⚠️ **不置 `sharp`**（2026-10-11 改）：`sharp` 的语义是「屏上已经是真身」——
+   * 占位到了只说明「不等白了」，缩放读数与「正在载入原图…」都还指着第二段
+   * （`loadFullFor`）。没给真身取图口的那一侧才在第二段里直接当终态收尾。
+   */
+  function publishScreen(url: string, key: string): void {
+    screenKey = key;
     batch(() => {
       replaceUrl(url);
       replaceOverview(url);
-      setSharp(true);
       setOverviewStatus("ready");
       setImageStatus("ready");
     });
@@ -448,20 +507,28 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
     return cached.url;
   }
 
-  /** 多幅画面各取自己的屏幕档；同一照片在途请求合并，迟到结果按代号丢弃。 */
+  /** 多幅画面各取自己的图；同一照片在途请求合并，迟到结果按代号丢弃。
+   *
+   * 2026-10-11 起取的是**真身**（`loadFull`）：对比画幅也是看图界面 ——
+   * 四个格子各几百像素时占位档够用，但用户把某一格放大到 100% 时，
+   * 占位档就是「拿假图充看着」。（对比是刻意动作，缓存一次就不再花时间。）
+   */
   function ensureImage(photo: ViewerPhoto): Promise<void> {
     const key = imageKey(photo);
     if (imageUrls().has(key)) return Promise.resolve();
     const pending = pendingImageUrls.get(key);
     if (pending !== undefined) return pending.task;
     const ticket = ++imageUrlsTicket;
-    probe.record({ kind: "ensure", key, url: null, detail: photo.fileName });
+    const load = deps.loadFull ?? deps.loadScreen;
+    if (load === undefined) return Promise.resolve(); // 两个口都没给：没什么可预载的
+    const detail = deps.loadFull === undefined ? photo.fileName : `${photo.fileName} · full`;
+    probe.record({ kind: "ensure", key, url: null, detail });
     const task = (async () => {
       try {
-        const bytes = await deps.loadScreen(photo.imageKey ?? photo.path);
+        const bytes = await load(photo.imageKey ?? photo.path);
         if (bytes === null || pendingImageUrls.get(key)?.ticket !== ticket) return;
         const url = makeUrl(bytes);
-        probe.record({ kind: "new", key, url, detail: photo.fileName });
+        probe.record({ kind: "new", key, url, detail });
         if (pendingImageUrls.get(key)?.ticket !== ticket) {
           dropUrl(url, "stale-ticket");
           return;
@@ -531,9 +598,12 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
   }
 
   /** 取图：小图先上、大图再换（渐进），换图期间旧图留着不闪空 */
-  async function loadFor(photo: ViewerPhoto, ticket: number, keepPrevious = false): Promise<void> {
+  async function loadPlaceholder(photo: ViewerPhoto, ticket: number, keepPrevious = false): Promise<void> {
     setImageStatus("loading");
     setSharp(false);
+    setFullPending(true);
+    currentFullKey = null;
+    screenKey = null;
     setOverviewStatus("loading");
 
     /*
@@ -549,7 +619,7 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
         releaseUrl(prefetched, "stale-borrow");
         return;
       }
-      publishScreen(prefetched);
+      publishScreen(prefetched, imageKey(photo));
       return;
     }
 
@@ -563,7 +633,7 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
       if (ticket !== generation) return;
       const arrived = borrowCachedImageUrl(photo);
       if (arrived !== null) {
-        publishScreen(arrived);
+        publishScreen(arrived, imageKey(photo));
         return;
       }
       // 预载没成（取不到 / 已被作废）：落回下面的常规路径再试一次
@@ -585,6 +655,16 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
       }
     }
 
+    if (deps.loadScreen === undefined) {
+      /*
+       * 没有「载入占位」这一档（import）：384 小图就是占位，真身由第二段补。
+       * 总览收回 `idle` —— 它在本工作流没人看，但状态不该永远停在 loading。
+       */
+      replaceOverview(null);
+      setOverviewStatus("idle");
+      return;
+    }
+
     try {
       const bytes = await deps.loadScreen(photo.imageKey ?? photo.path);
       if (ticket !== generation) {
@@ -599,7 +679,7 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
       }
       const url = makeUrl(bytes);
       probe.record({ kind: "new", key: imageKey(photo), url, detail: `${photo.fileName} · screen` });
-      publishScreen(url);
+      publishScreen(url, imageKey(photo));
     } catch {
       if (ticket === generation) {
         if (imageUrl() === null) setImageStatus("error");
@@ -607,6 +687,92 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
         setOverviewStatus("error");
       }
     }
+  }
+
+  /**
+   * **两段载入**（崔总 2026-10-11 口径）：① 占位先上屏（可交互）→ ② 真身原地替换。
+   *
+   * 「原地」是真的原地：`natural` / zoom / pan 一个都不动（占位与真身是同一张照片，
+   * 只是像素多少不同；尺寸口径来自当前变体，不靠位图自带尺寸）。
+   */
+  async function loadFor(photo: ViewerPhoto, ticket: number, keepPrevious = false): Promise<void> {
+    await loadPlaceholder(photo, ticket, keepPrevious);
+    if (ticket !== generation) return;
+    await loadFullFor(photo, ticket);
+  }
+
+  /**
+   * 第二段：取**真身**（该变体自己的像素）。
+   *
+   * * 已经在屏上（预载借进来的那份就是真身）→ 不重取；
+   * * 取不到 → **保留占位**（它至少是一张真图）、`fullPending` 落下，下次进入再试；
+   * * 到位 → 换下占位、`sharp` 立起来（缩放读数这时才报百分比）。
+   */
+  async function loadFullFor(photo: ViewerPhoto, ticket: number): Promise<void> {
+    const load = deps.loadFull;
+    const key = imageKey(photo);
+    if (load === undefined) {
+      // 没给真身取图口 → 占位即终态（行为完全同旧）。但只认**屏幕档**：
+      // 只有 grid 小图兜底时（大图取不到）不算「有图」，也不报百分比。
+      if (screenKey === key) {
+        currentFullKey = key;
+        setSharp(true);
+      }
+      setFullPending(false);
+      return;
+    }
+    if (currentFullKey === key) {
+      setFullPending(false);
+      return;
+    }
+    // 多图缓存里已经有这一张（预载/对比取过）→ 直接借过来用，不再走一次 IPC。
+    const cached = imageUrls().get(key);
+    if (cached !== undefined) {
+      setSharp(true);
+      currentFullKey = key;
+      screenKey = key;
+      replaceUrl(cached.url, "full-borrow");
+      setFullPending(false);
+      void prefetchNextFull();
+      return;
+    }
+    let bytes: Uint8Array | null = null;
+    try {
+      bytes = await load(photo.imageKey ?? photo.path);
+    } catch {
+      bytes = null;
+    }
+    if (ticket !== generation) {
+      if (bytes !== null) dropUrl(makeUrl(bytes), "late-full");
+      setFullPending(false);
+      return;
+    }
+    if (bytes === null) {
+      // 屏上连占位都没有（import 没有 1920 那一档）：这张真就没图可显示
+      if (imageUrl() === null) setImageStatus("error");
+      setFullPending(false);
+      return;
+    }
+    const url = makeUrl(bytes);
+    probe.record({ kind: "new", key, url, detail: `${photo.fileName} · full` });
+    currentFullKey = key;
+    screenKey = key;
+    replaceUrl(url, "full");
+    setSharp(true);
+    setFullPending(false);
+    void prefetchNextFull();
+  }
+
+  /**
+   * 顺手预取**下一张**的真身（只向后一张、失败静默）——「翻回去看要快」就靠它。
+   *
+   * 不预取上一张：顺序浏览是主流；而一次只投一张，避免与当前这张抢那个单例 RAW worker。
+   */
+  function prefetchNextFull(): void {
+    if (deps.loadFull === undefined) return;
+    const next = photos()[index() + 1];
+    if (next === undefined || imageUrls().has(imageKey(next))) return;
+    void ensureImage(next);
   }
 
   function show(nextPhotos: readonly ViewerPhoto[], nextIndex: number): void {
@@ -628,6 +794,7 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
         index: clamped,
         fit: true,
         natural: photo.natural ?? prev.natural,
+        naturalKnown: photo.natural !== undefined,
       };
       return { ...next, ...refit(next) };
     });
@@ -651,6 +818,9 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
     replaceOverview(null, "close");
     clearImageUrls(undefined, "close");
     setSharp(false);
+    setFullPending(false);
+    currentFullKey = null;
+    screenKey = null;
     setOverviewStatus("idle");
     setImageStatus("idle");
     setState({ ...EMPTY_VIEWER, viewport: state().viewport });
@@ -671,6 +841,7 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
         index: clamped,
         fit: true,
         natural: photo?.natural ?? prev.natural,
+        naturalKnown: photo?.natural !== undefined,
       };
       return { ...next, ...refit(next) };
     });
@@ -689,6 +860,7 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
       ...prev,
       index: clamped,
       natural: photo.natural ?? prev.natural,
+      naturalKnown: photo.natural !== undefined,
     }));
     void loadFor(photo, ticket);
   }
@@ -730,7 +902,7 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
     });
   }
 
-  function setNatural(size: NaturalSize): void {
+  function setNatural(size: NaturalSize, authoritative = true): void {
     // The image's load event can refine dimensions after the Screen URL arrives.
     // Retain that final aspect too, instead of the initial catalog/previous estimate.
     if (overviewStatus() === "ready") {
@@ -738,7 +910,11 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
     }
     setState((prev) => {
       if (prev.natural.width === size.width && prev.natural.height === size.height) {
-        return prev;
+        // 尺寸没变也可能把「未知」变成「已知」（真身载完了）—— 别提前返回；
+        // 占位图来的那份**不许**把状态标成已知（见 API 注释）
+        return prev.naturalKnown === authoritative
+          ? prev
+          : { ...prev, naturalKnown: authoritative };
       }
       /*
        * 大图上来时原图尺寸会从小图（384）变成 1920 —— 此时**不能**让画面跳：
@@ -747,7 +923,7 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
        */
       const ratio =
         prev.natural.width > 0 ? size.width / prev.natural.width : 1;
-      const next = { ...prev, natural: size };
+      const next = { ...prev, natural: size, naturalKnown: authoritative };
       if (prev.fit) return { ...next, ...refit(next) };
       /*
        * 屏幕上的大小 = `natural × zoom`。原图尺寸变成 `natural × ratio` 之后，
@@ -810,7 +986,9 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
   function toggleFit(): void {
     setState((prev) => {
       if (prev.fit) {
-        const zoom = clampZoom(1);
+        // 「100%」= 1 图像像素对 1 **设备**像素（与编辑器原生视口同口径）——
+        // CSS 变换里的倍率是 `1 / dpr`：`components/ui/viewer/zoom.ts`。
+        const zoom = clampZoom(oneToOneZoom());
         return { ...prev, fit: false, zoom, pan: { x: 0, y: 0 } };
       }
       const next = { ...prev, fit: true };
@@ -828,6 +1006,7 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
     imageUrlFor,
     ensureImage,
     imageStatus,
+    fullPending,
     sharp,
     show,
     syncPhotos,

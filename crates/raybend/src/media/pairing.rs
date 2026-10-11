@@ -25,7 +25,8 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::media::kind;
+use crate::media::exif::TakenAtSource;
+use crate::media::kind::{self, MediaKind};
 
 /// 配对继承的一条输入。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -108,9 +109,98 @@ pub fn inherit_times_from_bitmaps(pairs: &mut [TimePair]) -> usize {
     filled
 }
 
+/// 把配对继承**直接作用在一批元信息上**（`dir_meta_ensure` 的用法）。
+///
+/// `names[i]` 是第 i 条的文件名（**目录内相对名**，不是绝对路径 —— 配对键只看主名，
+/// 同一批本来就在同一个目录里）。返回被填上的条数。
+///
+/// 与 [`inherit_times_from_bitmaps`] 的关系：规则只有这一套（谁借谁、借哪一个），
+/// 这里只是把「读头读出来的元信息」搬进 `TimePair` 再搬回去 —— 调用方不必自己写第二遍。
+/// 借来的时间**来源写成 [`TakenAtSource::Sibling`]**（界面上「这条时间不是从它自己读到的」
+/// 是有意义的），而原来就有时间的（哪怕只是 mtime 兜底）不动。
+pub fn inherit_times_in_metas(names: &[String], metas: &mut [crate::media::meta::PhotoMeta]) -> usize {
+    if names.len() != metas.len() || names.is_empty() {
+        return 0;
+    }
+    let mut pairs: Vec<TimePair> = names
+        .iter()
+        .map(|name| {
+            TimePair::new(
+                Path::new(name),
+                kind::kind_of_file(name) == MediaKind::Raw,
+                None,
+            )
+        })
+        .collect();
+    /*
+     * 只把**位图那些**的时间喂进配对表：RAW 自己读到的时间不该参与「借出」，
+     * 而且 `inherit_times_from_bitmaps` 本来就只从位图取 donor —— 所以这里把
+     * 每条的时间按「是不是 RAW」分开喂：位图给真值，RAW 一律给 `None`（空位=vacancy）。
+     */
+    for (pair, meta) in pairs.iter_mut().zip(metas.iter()) {
+        if !pair.is_raw {
+            pair.taken_at = meta.taken_at_ms;
+        }
+    }
+    if inherit_times_from_bitmaps(&mut pairs) == 0 {
+        return 0;
+    }
+    let mut filled = 0;
+    for ((pair, meta), name) in pairs.iter().zip(metas.iter_mut()).zip(names.iter()) {
+        let _ = name;
+        if !pair.is_raw || meta.taken_at_ms.is_some() {
+            continue;
+        }
+        let Some(millis) = pair.taken_at else { continue };
+        meta.taken_at_ms = Some(millis);
+        meta.taken_at_source = Some(TakenAtSource::Sibling);
+        filled += 1;
+    }
+    filled
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn 元信息上做配对继承_raw借位图的时间() {
+        use crate::media::meta::PhotoMeta;
+
+        let names = vec![
+            "P1000019.JPG".to_string(),
+            "P1000019.RW2".to_string(),
+            "P1000020.RW2".to_string(),
+        ];
+        let mut metas = vec![
+            PhotoMeta {
+                taken_at_ms: Some(1000),
+                taken_at_source: Some(TakenAtSource::Exif),
+                ..PhotoMeta::default()
+            },
+            // 这张 RAW 自己没读到时间 → 借上面那张 JPG 的
+            PhotoMeta::default(),
+            // 这张有自己读到的（没有位图兄弟）→ 一个字节都不动
+            PhotoMeta {
+                taken_at_ms: Some(2000),
+                taken_at_source: Some(TakenAtSource::Exif),
+                ..PhotoMeta::default()
+            },
+        ];
+
+        assert_eq!(inherit_times_in_metas(&names, &mut metas), 1);
+        assert_eq!(metas[1].taken_at_ms, Some(1000), "RAW 借到同名位图的时间");
+        assert_eq!(
+            metas[1].taken_at_source,
+            Some(TakenAtSource::Sibling),
+            "借来的要标成 Sibling（不是它自己读到的）"
+        );
+        assert_eq!(metas[2].taken_at_ms, Some(2000));
+        assert_eq!(metas[2].taken_at_source, Some(TakenAtSource::Exif));
+
+        // 长度对不上就当没这回事（调用方自己会核对）——不 panic
+        assert_eq!(inherit_times_in_metas(&names, &mut metas[..1]), 0);
+    }
 
     fn pairs(list: &[(&str, bool, Option<i64>)]) -> Vec<TimePair> {
         list.iter()

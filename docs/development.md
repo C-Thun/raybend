@@ -90,6 +90,7 @@ pnpm ai:prepare -- --ai=required            # 构建前校验并冻结输入
 | `pnpm check:export` | 导出工作区启动 |
 | `pnpm check:external` | 外部编辑器往返 |
 | `pnpm check:color-status [url]` | 色彩管线状态探针（显示配置与变换状态） |
+| `pnpm check:xmp "<库根>"` | XMP sidecar 巡检（只读；核对路径规则、哈希、元数据与 `crs:` 规则；有 FAIL 退出码 1）—— 先关掉应用 |
 
 ## 性能
 

@@ -56,8 +56,8 @@ use raybend::develop::{
 };
 use raybend::display::{self, FullCache, PixelSize};
 use raybend::render::{
-    FitMode, GpuContext, ImageTier, PresentationAdapter, RenderImage, RenderOutcome, RestartPolicy,
-    SurfaceComposition, Verdict, tier_for, tier_for_params,
+    FitMode, GpuContext, PresentationAdapter, RenderImage, RenderOutcome, RestartPolicy,
+    SurfaceComposition, Verdict,
 };
 
 use crate::MAIN_WINDOW_LABEL;
@@ -474,10 +474,12 @@ enum RenderCommand {
     ///
     /// `transition`：**过渡帧计划**（进编辑先出图，handoff §3）——
     /// 命令层算好（那里有库、有 catalog），显影线程只管试。`None` = 不发过渡帧。
+    /// `sources`：**参照源**（§5.1）——同样命令层按 asset 解析；显影线程跨缓存重建保留。
     SetPhoto {
         color: Option<Arc<working_editor::Input>>,
         path: Option<String>,
         transition: Option<TransitionPlan>,
+        sources: Option<Arc<crate::develop::ReferenceSources>>,
     },
     /// 视口意图
     Intent(ViewportIntent),
@@ -493,7 +495,6 @@ enum RenderCommand {
     /// 带的是**已经校验过的**解析结果（命令层负责校验，线程里不再解析一遍）。
     ///
     /// `interactive` = 手指还按着（人类 2026-09-24）：拖动中只算预览档，
-    /// 松手那一下才按缩放补全尺寸（`tier_for_params`）。
     SetParams {
         color: Option<Arc<working_editor::Input>>,
         nr_method: NrMethod,
@@ -544,7 +545,6 @@ pub struct DevelopParamsDto {
     #[serde(default)]
     pub lut_enabled: Option<bool>,
     /// **手指还按在滑杆 / 曲线上**（人类 2026-09-24）：
-    /// 拖动中只算屏幕那一档，松手那一下才按缩放补全尺寸（`tier_for_params`）。
     #[serde(default)]
     pub interactive: bool,
     /// 镜头配置文件（`None` = 未选择；`"none"` = 显式关掉；否则是 `maker|model`）
@@ -608,19 +608,27 @@ struct TransitionSource {
 ///
 /// 计划在**命令层**算好（那里有库、有 catalog），显影线程只管试 ——
 /// 它是个普通线程，够不着数据库。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 struct TransitionPlan {
     _permit: Option<Arc<raybend::store::session::TaskPermit>>,
     sources: Vec<TransitionSource>,
-    /// **原图尺寸**（已按方向摆正）—— 过渡帧的逻辑尺寸。
+    /// **原图尺寸**（已按方向摆正）—— `original_image` 报它（裁切工具的边界也是它）。
     ///
-    /// 为什么不报过渡帧自己的尺寸（例如 1920）：`set_image` 在逻辑尺寸变了时会 `refit`，
-    /// 真帧回来那一刻几何会重摆（`Free` 模式下用户拖过的视角会被拉回中心）。
-    /// 报原图尺寸就**根本不会发生那次 refit**。
-    /// 查不到时退回用过渡帧自己的尺寸 —— 两者都已摆正、宽高比一致，
-    /// `Fit` 档下 refit 的结果逐像素相同（`zoom_for_fit` 只取决于宽高比）。
+    /// 查不到时 `None`：`original_*` 退回用逻辑尺寸。
     source_size: Option<(u32, u32)>,
-    sooc: Option<std::path::PathBuf>,
+    /// **真帧将报的逻辑尺寸** = `geometry.output_size(原图尺寸)`（§3.1-2 同画幅）。
+    ///
+    /// `None` = 几何恒等（或读不到栈 / 原图尺寸）—— 此时逻辑尺寸就是 `source_size`。
+    /// 拿原图尺寸当逻辑尺寸的旧行为会让**裁切过的照片**首帧被拉伸，真帧到达时
+    /// `set_image` 再 refit 跳一下（现象 3）。
+    output_size: Option<(u32, u32)>,
+    /// **编辑栈里的几何**（非恒等时才 `Some`）：给「基准图兜底」用 ——
+    /// 拿基准图当过渡帧时必须把同一套裁切 / 旋转套上去，否则画幅不对（会被拉伸）。
+    geometry: Option<raybend::develop::geometry::EditGeometry>,
+    /// 编辑栈是不是空的（L2 / L3 的分界）：
+    /// * 空栈 → 基准图就是真帧的近似版本，正常软化；
+    /// * 非空栈 → 基准图只是**兜底占位**，至少强制软化到看得出是「临时图」。
+    stack_is_empty: bool,
 }
 
 /// 一次**显影任务**（渲染线程 → 显影线程）。
@@ -638,8 +646,8 @@ struct DevelopJob {
     rev: u64,
     /// `Some(path)` = 先换照片（解码线性源）；`None` = 用缓存里的源重算
     photo: Option<String>,
-    /// 输出档位（预览 = 缩到屏幕档；全尺寸 = 原尺寸）
-    tier: ImageTier,
+    /// 手指是否还按在参数上（**只影响限流 / 优先级，不影响输出尺寸** ——
+    /// 崔总 2026-10-11：任何看图统一到原图，没有档位）
     interactive: bool,
     params: DevelopParams,
     /// 已解析的镜头校正（配置文件那一半；`None` = 不用配置文件）。
@@ -652,13 +660,19 @@ struct DevelopJob {
     /// **过渡帧计划**（进编辑先出图）：只在真的要解码那一下用一次；
     /// `None` = 不发过渡帧（换档位 / 改参数那类任务）
     transition: Option<TransitionPlan>,
+    /// **参照源**（§5.1）：只随换照片任务来（命令层解析）；显影线程自己保留一份，
+    /// 后续任务（参数 / 几何 / 参照）不带它也不丢。
+    sources: Option<Arc<crate::develop::ReferenceSources>>,
+    /// **过渡帧的软化量**（0..1，崔总 2026-10-10）：1920 预览在高分屏上被放大显示时，
+    /// 最近邻采样会变成马赛克 —— 按当时的放大倍率做一个有意软化。
+    /// 只随换照片任务来（`None` = 不软化）。
+    transition_soften: Option<f32>,
 }
 
 /// 显影线程手里缓存的**线性源**（一张照片一份，含按档位缩好的预览副本）。
 struct CachedSource {
     storage: Option<raybend::store::session::TaskAccess>,
     reference: ReferenceCache,
-    sooc: Option<std::path::PathBuf>,
     source_revision: u64,
     source_signature: Option<String>,
     path: String,
@@ -689,11 +703,10 @@ struct DevelopOutcome {
     id: u64,
     rev: u64,
     path: String,
-    tier: ImageTier,
     /// 像素从哪来（`bitmap` / `raw-linear` / `preview-latest`…）——诊断与界面提示要看
     origin: String,
     /// 这是**过渡帧**吗（进编辑先出图）：真帧还在路上 ——
-    /// 所以它**不清 `wanted_tier`、不置 `ready`、不动 `applied_params_rev`**。
+    /// 所以它**不置 `ready`、不动 `applied_params_rev`**。
     transition: bool,
     /// 拍摄色温估计（K）——前端拿它当色温拉杆的基线
     as_shot_temperature: Option<f32>,
@@ -778,10 +791,6 @@ pub struct RenderState {
     pub original_image: Option<SizeDto>,
     pub tool_box_css: Option<RectDto>,
     pub tool_revision: u64,
-    /// 当前档位（`preview` / `full`）
-    pub tier: Option<ImageTier>,
-    /// 正在取的档位（不一样就说明解码还没回来）
-    pub wanted_tier: Option<ImageTier>,
     /// 像素从哪来（RAW 线性解码 / 位图线性化）
     pub origin: Option<String>,
     /// 当前照片最近一次非交互显影的直方图；拖动中保持上一份。
@@ -829,7 +838,7 @@ const HISTORY_LIMIT: usize = 12;
 impl RenderState {
     fn note(&mut self, message: impl Into<String>) {
         let message = message.into();
-        eprintln!("[editor] {message}");
+        log::warn!("[editor] {message}");
         self.history.push(message);
         if self.history.len() > HISTORY_LIMIT {
             let overflow = self.history.len() - HISTORY_LIMIT;
@@ -870,6 +879,8 @@ pub struct EditorState {
     lens_cache: Arc<Mutex<Option<(LensCacheKey, Option<LensCorrection>)>>>,
     lut_cache: Arc<Mutex<Option<(String, Arc<raybend::develop::lut::Lut>)>>>,
     input_cache: Arc<Mutex<Option<Arc<working_editor::Input>>>>,
+    /// 邻图预热（§4.6）的 key：新一次预热会把上一次还没开跑的撤掉。
+    prefetch_keys: Mutex<Vec<String>>,
 }
 
 type LensCacheKey = (String, i64, Option<String>, Option<bool>);
@@ -1118,7 +1129,7 @@ pub async fn editor_set_photo<R: Runtime>(
     let request = state.photo_request.begin()?;
     // 旧照片还在后台解析的参数绝不能套到新照片上。
     state.params_request.begin()?;
-    let (plan, color) = match path.as_deref() {
+    let (plan, color, sources) = match path.as_deref() {
         Some(path) => {
             let handle = app.clone();
             let path = path.to_string();
@@ -1126,14 +1137,17 @@ pub async fn editor_set_photo<R: Runtime>(
                 let permit=handle.state::<crate::browse::BrowseState>().path_task(&handle,Path::new(&path))?;
                 let mut plan=transition_plan(&handle,&path);
                 if let Some(permit)=permit {
-                    let saved=plan.get_or_insert_with(||TransitionPlan{_permit:None,sources:Vec::new(),source_size:None,sooc:None});
+                    let saved=plan.get_or_insert_with(||TransitionPlan{_permit:None,sources:Vec::new(),source_size:None,output_size:None,geometry:None,stack_is_empty:true});
                     saved._permit=Some(Arc::new(permit));
                 }
+                // 参照源按 asset 解析一次（§5.1）：显影线程跨缓存重建保留它。
+                let sources = crate::develop::resolve_asset(&handle, Path::new(&path))
+                    .map(|asset| Arc::new(crate::develop::ReferenceSources::resolve(&handle, &asset)));
                 let color = working_editor::saved(&handle, Path::new(&path))?;
-                Ok((plan, color))
+                Ok((plan, color, sources))
             }).await?
         }
-        None => (None, None),
+        None => (None, None, None),
     };
     // 查库/读元数据在后台完成：若期间用户已经选了另一张，这条旧请求
     // 不能再进渲染队列，否则会在新照片之后把旧照片装回来。
@@ -1144,17 +1158,95 @@ pub async fn editor_set_photo<R: Runtime>(
                 color,
                 path,
                 transition: plan,
+                sources,
             })
             .map_err(|_| "渲染线程不在了".to_string())
     })?;
     current_render_state(&state)
 }
 
+/// **邻图预览预热**（`specs/editor-session-pipeline.md` §4.6）：把胶片带前后各一张的
+/// 1920 预览在后台（P2）备好 —— 来回切换时首帧直接命中 L1 快照。
+///
+/// 只对**编辑过且缺快照**的邻居动手（没编辑过的邻居走内嵌预览本来就快）；
+/// 新一次调用会撤掉上一次还没开跑的预热（可取消）；已在同一 key 上排队的（比如
+/// 前端预览队列正在渲同一张）自然去重。
+///
+/// 前端在**当前真帧就绪、停留 300ms** 之后调（与 `issue_sources_prepare` 同一条空闲节流）。
+#[tauri::command]
+pub async fn editor_prefetch_neighbors<R: Runtime>(
+    app: AppHandle<R>,
+    paths: Vec<String>,
+) -> Result<(), String> {
+    let handle = app.clone();
+    crate::source::blocking(move || {
+        let queue = handle.state::<crate::work::WorkQueue>();
+        // 上一批还没开跑的预热撤掉（已经开跑的靠 token 在检查点退出）
+        let editor_state = handle.state::<EditorState>();
+        let previous = {
+            let mut keys = editor_state
+                .prefetch_keys
+                .lock()
+                .map_err(|_| "邻图预热键锁中毒".to_string())?;
+            std::mem::take(&mut *keys)
+        };
+        for key in previous {
+            queue.cancel(&key);
+        }
+        for path in paths {
+            let Some(asset) = crate::develop::resolve_asset(&handle, Path::new(&path)) else {
+                continue;
+            };
+            let Ok((choice, stack)) = crate::develop::issue_of(&handle, &asset) else {
+                continue;
+            };
+            if !raybend::store::develop::needs_preview(choice, &stack) {
+                continue;
+            }
+            let Ok(key) =
+                crate::develop::latest_preview_key(&asset.repository_id, asset.asset_id, &stack)
+            else {
+                continue;
+            };
+            let task_app = handle.clone();
+            let task_asset = asset.clone();
+            let task_stack = stack.clone();
+            let token = queue.spawn(crate::work::Priority::Warm, key.clone(), move |token| {
+                if token.cancelled() {
+                    return;
+                }
+                if let Err(error) =
+                    crate::thumbs::render_latest_cached(&task_app, &task_asset, &task_stack)
+                {
+                    // i18n-exempt: 后台诊断（终端日志，不进界面）
+                    log::warn!("[editor] 邻图预览预热失败：{error}");
+                }
+            });
+            let Some(_token) = token else {
+                // 同一个 key 已有任务（去重）或队列已停：不记进本批
+                continue;
+            };
+            if let Ok(mut keys) = editor_state.prefetch_keys.lock() {
+                keys.push(key);
+            }
+        }
+        Ok(())
+    })
+    .await
+}
+
 /// **候选顺序**（纯逻辑，可单测）：`latest`（同基准）→ `SOOC` 位图 → 要编的文件本身。
 ///
-/// 入参是已经查好的事实（缓存路径、位图路径），调用方负责查库；
+/// 入参是已经查好的事实（缓存路径、位图路径、编辑栈是不是空的），调用方负责查库；
 /// 这里只回答「先试哪个、后试哪个」。**缺文件的一律不进列表** ——
 /// 显影线程里试一个不存在的文件只是白跑一趟。
+///
+/// # 版本分层（§3.1-1；在这里实现，不要在别处再写一份）
+///
+/// * **L1**：有编辑栈 + `latest` 快照存在 → 只推它（最接近真帧的那一份）；
+/// * **L2**：编辑栈为空 → 允许基准图（SOOC / RAW 内嵌预览），真帧就是它的中性显影；
+/// * **L3**：有编辑栈但 `latest` 快照不在 → **一个候选都不推**（返回空 = 不出帧）。
+///   宁可让界面停在「载入中」，也不拿「别的版本」（相机白平衡、无裁切、无 LUT）冒充。
 fn transition_sources(
     path: &Path,
     base: raybend::store::develop::EditBase,
@@ -1172,6 +1264,15 @@ fn transition_sources(
         });
     }
 
+    /*
+     * ②③ **基准图**（SOOC / RAW 内嵌预览）：
+     *
+     * * 编辑栈为空（L2）→ 它**就是**真帧的近似版本（真帧 = 它的中性显影）；
+     * * 编辑栈非空但没有 latest 快照（L3）→ 它是**兜底占位**（崔总 2026-10-10：
+     *   「就算没生成……至少比空屏好」）。此时 `transition_outcome` 会把编辑栈的
+     *   几何套上去（画幅正确、不被拉伸）并**强制软化**，让它一眼看得出是临时图，
+     *   不是最终版本 —— 不再像旧行为那样拿基准图冒充编辑结果。
+     */
     // ② SOOC：相机直出的位图。
     //    只在「要编的是 RAW」时单独推 —— 要编的就是位图时，它就是下面第三步那张，别重复。
     if base == raybend::store::develop::EditBase::Raw
@@ -1201,49 +1302,91 @@ fn transition_sources(
 
 /// **过渡帧的取图计划**（能找到哪个用哪个，顺序即优先级，见 [`transition_sources`]）：
 ///
-/// 1. `latest` —— 大图缓存里**与当前编辑基准同一侧**的那一份（编辑过的照片才有；
-///    基准进文件名，所以这里拿到的不会另一侧的图，见 `memory/FUNCTION-IMAGING.md` §4.3）；
-/// 2. `SOOC` —— 相机直出的位图（同名 JPG）；
-/// 3. 要编的这张文件本身 —— RAW 走 worker 的内嵌预览，位图直接解。
+/// 1. `latest` —— 大图缓存里**与当前编辑基准同一侧**的那一份（编辑过的照片才有）；
+/// 2. `SOOC` / 要编的文件本身 —— **只在编辑栈为空时**（L2，见 [`transition_sources`]）；
+/// 3. 编辑栈非空又没有 `latest` 快照（L3）→ `None`：**不发过渡帧**，界面停在「载入中」。
 ///
-/// 不在任何库里（源目录直接进编辑这种）或一个候选都没有 → `None`：
-/// 不发过渡帧，走老路（视口等真帧）。
+/// 不在任何库里（源目录直接进编辑这种）或一个候选都没有 → `None`：不发过渡帧，走老路。
 fn transition_plan<R: Runtime>(app: &AppHandle<R>, path: &str) -> Option<TransitionPlan> {
     let path = Path::new(path);
-    let asset = crate::develop::resolve_asset(app, path)?;
+    let Some(asset) = crate::develop::resolve_asset(app, path) else {
+        // i18n-exempt: 后台诊断（终端日志，不进界面）
+        log::warn!(
+            "[editor] 过渡帧计划：这张照片不在任何库里（{}）——不发帧",
+            path.display()
+        );
+        return None;
+    };
     let base = raybend::store::develop::EditBase::of_file(path);
 
+    // 编辑栈：决定版本分层（L1/L2/L3），也提供几何（同画幅）。
+    // 读不到（库离线 / 未入库）时按「空栈」处理：那是老路的语义（基准图近似真帧）。
+    let stack = crate::develop::issue_of(app, &asset)
+        .map(|(_, stack)| stack)
+        .ok();
+    let stack_is_empty = stack
+        .as_ref()
+        .is_none_or(raybend::store::develop::DevelopStack::is_empty);
+
+    // latest 快照按**栈指纹**命名（§4.2）：命中就一定是同一份编辑栈的图；
+    // 栈为空 / 读不到栈时没有对应的 latest（预览只对非空栈生成）。
     let signature = raybend::media::source::source_signature(path).ok();
-    let latest_cache =
-        FullCache::open(&asset.root)
+    let latest_cache = match (FullCache::open(&asset.root), signature, stack.as_ref()) {
+        (Ok(cache), Some(signature), Some(stack)) => crate::develop::latest_variant(stack)
             .ok()
-            .zip(signature)
-            .map(|(cache, signature)| {
+            .map(|variant| {
                 cache.path_for(
                     asset.asset_id,
-                    &FullCache::source_name("latest", &signature),
+                    &FullCache::source_name(&variant, &signature),
                     base,
                     raybend::thumbnail::render::PIPELINE_VERSION,
                 )
-            });
+            }),
+        _ => None,
+    };
     let sooc = crate::develop::source_path_of(app, &asset, raybend::store::develop::EditBase::Sooc);
     let sources = transition_sources(path, base, latest_cache, sooc.clone());
     if sources.is_empty() {
+        // i18n-exempt: 后台诊断（终端日志，不进界面）
+        log::warn!(
+            "[editor] 过渡帧计划：没有可用候选（{}）——不发帧，等真帧",
+            path.display()
+        );
         return None;
     }
+    // i18n-exempt: 后台诊断（终端日志，不进界面）
+    log::warn!(
+        "[editor] 过渡帧计划：{} 个候选（{}）{}",
+        sources.len(),
+        sources
+            .iter()
+            .map(|source| source.origin)
+            .collect::<Vec<_>>()
+            .join(" → "),
+        if stack_is_empty { "，空栈" } else { "，有编辑栈" }
+    );
 
-    // 原图尺寸（**已按方向摆正**）：过渡帧的逻辑尺寸用它，真帧回来时不会 refit。
-    // 读的是文件头（`read_photo_meta` 只读头，不整图解码），毫秒级。
+    // 原图尺寸（**已按方向摆正**）：`original_image` 用它；读的是文件头
+    // （`read_photo_meta` 只读头，不整图解码），毫秒级。
     let source_size = raybend::media::meta::read_photo_meta(path)
         .ok()
         .filter(raybend::media::meta::PhotoMeta::has_size)
         .map(|meta| (meta.width, meta.height));
+    // 逻辑尺寸 = 真帧将报的 `geometry.output_size(原图尺寸)`（§3.1-2）。
+    // 恒等几何时留 `None`，`transition_outcome` 自然退回原图尺寸。
+    let geometry = stack
+        .as_ref()
+        .and_then(|stack| stack.geometry)
+        .filter(|geometry| !geometry.is_identity());
+    let output_size = source_size.and_then(|size| geometry.map(|geometry| geometry.output_size(size)));
 
     Some(TransitionPlan {
         _permit: None,
         sources,
         source_size,
-        sooc: sooc.filter(|path| path.is_file()),
+        output_size,
+        geometry,
+        stack_is_empty,
     })
 }
 
@@ -1474,6 +1617,30 @@ fn current_render_state(state: &EditorState) -> Result<RenderState, String> {
     }
 }
 
+/// 会话里最近一次**解码得到的** as-shot K（`develop_commit` 回填基线用，§6.3）。
+///
+/// 只在「渲染线程当前装的正是这张照片的源文件」时才认 —— 换了照片而编辑器还没跟上时，
+/// 宁可返回 `None`（调用方记诊断），也不能把另一张照片的色温回填进去。
+pub(crate) fn decoded_as_shot<R: Runtime>(
+    app: &AppHandle<R>,
+    repository_id: &str,
+    asset_id: i64,
+    base: raybend::store::develop::EditBase,
+) -> Option<f32> {
+    let root = crate::browse::resolve_root(app, repository_id).ok()?;
+    let asset = crate::develop::ResolvedAsset {
+        repository_id: repository_id.to_string(),
+        asset_id,
+        root,
+        rel_path: String::new(),
+    };
+    let path = crate::develop::source_path_of(app, &asset, base)?;
+    let state = app.try_state::<EditorState>()?;
+    let snapshot = current_render_state(&state).ok()?;
+    (snapshot.photo_path.as_deref() == Some(path.to_string_lossy().as_ref())).then_some(())?;
+    snapshot.as_shot_temperature
+}
+
 /* ── 窗口事件（主线程 → 渲染线程；装一次）────────────────── */
 
 fn install_window_events<R: Runtime>(state: &EditorState, window: &WebviewWindow<R>) {
@@ -1486,7 +1653,7 @@ fn install_window_events<R: Runtime>(state: &EditorState, window: &WebviewWindow
         if let Some(sender) = display_sink.lock().ok().and_then(|slot| slot.clone()) {
             let _ = sender.send(RenderCommand::Display(prepared));
         }
-    }).map_err(|e| eprintln!("[color] display watch unavailable: {e}")).ok();
+    }).map_err(|e| log::warn!("[color] display watch unavailable: {e}")).ok();
     *state.display_watch.lock().unwrap_or_else(|e| e.into_inner()) = watcher.clone();
     window.on_window_event(move |event| {
         if let Some(watcher) = &watcher {
@@ -2036,11 +2203,10 @@ fn apply_command(
                 state.backdrop = validated.backdrop.into();
                 state.dpr = validated.dpr;
             }
-            ensure_output(context, shared, developer, latest_job, session);
             *dirty = true;
             Ok(())
         }
-        RenderCommand::SetPhoto { path, transition, color } => {
+        RenderCommand::SetPhoto { path, transition, color, sources } => {
             session.pending_presentation=None;
             context.cancel_prepared_images();
             session.color = color;
@@ -2067,18 +2233,24 @@ fn apply_command(
                     state.photo_path = Some(path.clone());
                     state.decode = "loading".to_string();
                     state.decode_error = None;
-                    state.wanted_tier = Some(ImageTier::Preview);
-                    state.as_shot_temperature = None;
-                    state.tier = None;
-                    state.history_photo(&path);
+                        state.as_shot_temperature = None;
+                        state.history_photo(&path);
                     *latest_job += 1;
+                    // 过渡帧软化量：按这张照片的逻辑尺寸在当前视口下的放大倍率算
+                    // （只在有过渡帧计划时有意义；真帧不受影响）
+                    let has_transition = transition.is_some();
+                    let soften = transition
+                        .as_ref()
+                        .and_then(|plan| plan.output_size.or(plan.source_size))
+                        .map(|logical| transition_soften(context.viewport_mut(), Some(logical)))
+                        .unwrap_or(0.0);
                     let job = DevelopJob {
                         color: session.color.clone(),
                         nr_method: session.nr_method,
                         id: *latest_job,
                         rev: state.params_rev,
                         photo: Some(path),
-                        tier: ImageTier::Preview,
+                        // 进视口要的是**原图**（崔总 2026-10-11）：过渡帧顶着，原尺寸算好直接上屏。
                         interactive: session.interactive,
                         params: session.params.clone(),
                         lens: session.lens.clone(),
@@ -2091,6 +2263,8 @@ fn apply_command(
                         },
                         prefer_sooc: session.prefer_sooc,
                         transition,
+                        sources,
+                        transition_soften: has_transition.then_some(soften),
                     };
                     drop(state);
                     if developer.send(job).is_err() {
@@ -2105,9 +2279,7 @@ fn apply_command(
                     state.painted_path = None;
                     state.image = None;
                     state.original_image = None;
-                    state.tier = None;
-                    state.wanted_tier = None;
-                    state.origin = None;
+                            state.origin = None;
                     state.histogram = None;
                     state.reference_ready = false;
                     state.reference_base = None;
@@ -2173,15 +2345,13 @@ fn apply_command(
             let rev = state.params_rev;
             let path = state.photo_path.clone();
             if path.is_some() {
-                // 档位（人类 2026-09-24）：**拖动中一律预览档** —— 1:1 下也不做全尺寸；
-                // 松手那一下按缩放重新算（要全尺寸就给全尺寸）。见 `tier_for_params`。
-                let wanted = tier_for_params(
-                    interactive,
-                    context.viewport().zoom,
-                    state.tier.unwrap_or(ImageTier::Preview),
-                );
-                state.wanted_tier = Some(wanted);
-                state.decode = "loading".to_string();
+                /*
+                 * 崔总 2026-10-11：**没有档位** —— 参数一变就按**原图**重出，
+                 * 尺寸不做决策；缩放 / 平移是视口变换，连任务都不发。
+                 *
+                 * 这里**不写 `decode = "loading"`**：同一张照片的重出图是静默的
+                 *（当前帧留在屏上，算好再替换）。「正在载入照片…」只属于**换照片**。
+                 */
                 *latest_job += 1;
                 let job = DevelopJob {
                     color: session.color.clone(),
@@ -2189,7 +2359,6 @@ fn apply_command(
                     id: *latest_job,
                     rev,
                     photo: None,
-                    tier: wanted,
                     interactive,
                     params: session.params.clone(),
                     lens: session.lens.clone(),
@@ -2203,6 +2372,8 @@ fn apply_command(
                     prefer_sooc: session.prefer_sooc,
                     // 参数任务不发过渡帧（图已经在屏幕上，只是要重算）
                     transition: None,
+                        sources: None,
+                        transition_soften: None,
                 };
                 drop(state);
                 if developer.send(job).is_err() {
@@ -2227,10 +2398,6 @@ fn apply_command(
                 id: *latest_job,
                 rev: state.params_rev,
                 photo: Some(path),
-                tier: state
-                    .wanted_tier
-                    .or(state.tier)
-                    .unwrap_or(ImageTier::Preview),
                 interactive: false,
                 params: session.params.clone(),
                 lens: session.lens.clone(),
@@ -2243,6 +2410,8 @@ fn apply_command(
                 },
                 prefer_sooc: session.prefer_sooc,
                 transition: None,
+                        sources: None,
+                        transition_soften: None,
             };
             drop(state);
             developer
@@ -2267,21 +2436,53 @@ fn apply_command(
             if let Ok(geometry) = result {
                 session.geometry = Some(geometry);
                 session.tool = None;
-                queue_geometry_job(context, shared, developer, latest_job, session)?;
+                queue_geometry_job(shared, developer, latest_job, session)?;
                 *dirty = true;
             }
             let _ = reply.send(result);
             Ok(())
         }
         RenderCommand::Developed(mut outcome) => {
-            if outcome.id != *latest_job {return Ok(());}
             // Normalize legacy bytes once; retries keep the identical Arc and
             // never allocate another whole RGBA source while upload is pending.
             if let Ok(image)=&mut outcome.result
                 && let Some((source,tone))=image.pixels.render(image.width,image.height) {
                     image.pixels=DevelopedPixels::Working(raybend::render::working_preview::PreparedWorkingFrame {image:source,tone});
                 }
-            let (reference,reference_base)=if outcome.transition {(None,None)} else if let Some((reference,id))=&session.reference_issue {
+            /*
+             * **过渡帧不吃「最新任务号」闸门**（§3.1-3）：解码期间用户拖了一下拉杆
+             * （`SetParams` 抬了 `latest_job`）不该让「先出图」的那一帧陪葬 ——
+             * 真帧随后会由那次参数任务补上。真正的守卫是 `accepts_transition`：
+             * 只能给「还没有帧画上去」的当前照片当临时占位，真帧一到就不再接受。
+             */
+            if outcome.transition {
+                let state = lock_state(shared);
+                if !accepts_transition(&state, &outcome.path) {
+                    // i18n-exempt: 后台诊断（终端日志，不进界面）
+                    log::warn!(
+                        "[editor] 过渡帧被丢弃：帧 path={}，当前 photo_path={:?} painted={:?} decode={}",
+                        outcome.path, state.photo_path, state.painted_path, state.decode
+                    );
+                    return Ok(());
+                }
+                drop(state);
+                return apply_command(
+                    RenderCommand::Present(PreparedPresentation {
+                        outcome,
+                        reference: None,
+                        reference_base: None,
+                        reference_sequence: session.reference_sequence,
+                    }),
+                    context,
+                    shared,
+                    developer,
+                    latest_job,
+                    dirty,
+                    session,
+                );
+            }
+            if outcome.id != *latest_job {return Ok(());}
+            let (reference,reference_base)=if let Some((reference,id))=&session.reference_issue {
                 (context.reference_image(reference.id).or_else(||RenderImage::from_rgb8(reference.width,reference.height,&reference.rgb).map(Arc::new)).map(|image|(reference.id,image)),Some(format!("issue:{id}")))
             } else if let Some(reference)=outcome.working_reference.clone() {
                 (Some(reference),outcome.reference_base.map(str::to_string))
@@ -2291,6 +2492,19 @@ fn apply_command(
             apply_command(RenderCommand::Present(PreparedPresentation {outcome,reference,reference_base,reference_sequence:session.reference_sequence}),context,shared,developer,latest_job,dirty,session)
         }
         RenderCommand::Present(frame) => {
+            /*
+             * **过渡帧**（进编辑先出图，handoff §3）：把图先画上去，但**状态留在「载入中」**——
+             * 真帧还在路上，不许把它当「算完了」：
+             *
+             * * 不置 `decode = ready`（否则载入提示提前撤掉、界面骗人）；
+             * * 不动 `applied_params_rev`（这张不是按当前参数算出来的）；
+             *
+             * 逻辑尺寸用 `output_size`（= 真帧将报的那个值）——
+             * 裁切过的照片首帧不会拉伸，真帧回来时 `set_image` 直接早退。
+             */
+            if frame.outcome.transition {
+                return present_transition(frame.outcome, context, shared, dirty);
+            }
             if frame.outcome.id != *latest_job {
                 // A newer tone-only result may share this source. Retain the
                 // single pending payload/upload until it arrives, without restart.
@@ -2315,41 +2529,6 @@ fn apply_command(
             }
             session.pending_presentation=None;
             let outcome=frame.outcome;
-            /*
-             * **过渡帧**（进编辑先出图，handoff §3）：把图先画上去，但**状态留在「载入中」**——
-             * 真帧还在路上，不许把它当「算完了」：
-             *
-             * * 不清 `wanted_tier`（真帧还要按它出）；
-             * * 不置 `decode = ready`（否则载入提示提前撤掉、界面骗人）；
-             * * 不动 `applied_params_rev`（这张不是按当前参数算出来的）；
-             * * 不调 `ensure_output`（它不是一帧「已就绪」的结果，别拿它去触发档位切换）。
-             *
-             * 逻辑尺寸照旧用**原图尺寸**（`source_width/height`）——
-             * 与真帧同一个值，真帧回来时 `set_image` 直接早退，**连 refit 都不会发生**。
-             */
-            if outcome.transition {
-                let mut state = lock_state(shared);
-                if let Ok(image) = outcome.result {
-                    let source_size = (image.source_width, image.source_height);
-                    if let Some((render_image, tone)) =
-                        image.pixels.render(image.width, image.height)
-                    {
-                        context.set_global_tone(tone);
-                    context.set_shared_image(render_image, source_size);
-                        state.image = Some(SizeDto {
-                            width: source_size.0 as f64,
-                            height: source_size.1 as f64,
-                        });
-                        state.original_image = Some(SizeDto {
-                            width: image.original_width as f64,
-                            height: image.original_height as f64,
-                        });
-                        state.origin = Some(outcome.origin);
-                    }
-                }
-                *dirty = true;
-                return Ok(());
-            }
             let mut state = lock_state(shared);
             if let Some((id,image))=frame.reference {
                 context.set_shared_reference_image(id,image);
@@ -2358,7 +2537,6 @@ fn apply_command(
             }
             state.nr_pending = outcome.nr_pending;
             state.nr_error = outcome.nr_error;
-            state.wanted_tier = None;
             state.decode_ms = outcome.decode_ms;
             state.develop_ms = Some(outcome.develop_ms);
             match outcome.result {
@@ -2381,6 +2559,8 @@ fn apply_command(
                      */
                     let previous_size = context.viewport().image_size;
                     context.set_global_tone(tone);
+                    // 真帧：回到最近邻放大（1:1 看像素），顺序同上
+                    context.set_soft_preview(false);
                     context.set_shared_image(render_image, source_size);
                     if let Some(tool) = session.tool {
                         context.viewport_mut().rotation = tool.geometry.rotation;
@@ -2400,7 +2580,6 @@ fn apply_command(
                         width: image.original_width as f64,
                         height: image.original_height as f64,
                     });
-                    state.tier = Some(outcome.tier);
                     state.origin = Some(outcome.origin);
                     if let Some(histogram) = outcome.histogram {
                         state.histogram = Some(histogram);
@@ -2412,7 +2591,6 @@ fn apply_command(
                         state.as_shot_temperature = outcome.as_shot_temperature;
                     }
                     drop(state);
-                    ensure_output(context, shared, developer, latest_job, session);
                 }
                 Err(error) => {
                     state.decode = "error".to_string();
@@ -2487,7 +2665,7 @@ fn apply_command(
                         session.prefer_sooc = prefer;
                         session.reference_issue = None;
                         if changed {
-                            queue_geometry_job(context, shared, developer, latest_job, session)?;
+                            queue_geometry_job(shared, developer, latest_job, session)?;
                         }
                     }
                 }
@@ -2527,7 +2705,7 @@ fn apply_command(
                                 line_end: None,
                             }
                         });
-                        queue_geometry_job(context, shared, developer, latest_job, session)?;
+                        queue_geometry_job(shared, developer, latest_job, session)?;
                     }
                 }
                 ViewportIntent::SetCropRatio { ratio } => {
@@ -2677,38 +2855,78 @@ fn apply_command(
                     return Ok(());
                 }
             }
-            ensure_output(context, shared, developer, latest_job, session);
             *dirty = true;
             Ok(())
         }
     }
 }
 
+/// **过渡帧的接受判据**（纯逻辑，可单测）—— §3.1-3「投递可靠」。
+///
+/// 接受的三个条件（**AND**，比「任务号」宽，但比「有图就画」严）：
+///
+/// * `photo_path == path`：这一帧就是当前照片的（用户已经切走了就丢掉）；
+/// * `decode != "ready"`：真帧还没应用 —— `Present` 在**真正上屏之前**就把它置 `ready`，
+///   所以这个条件也挡掉了「真帧已到、还在等绘制」的那个窗口；
+/// * `painted_path != path`：这张照片还没有任何一帧画上去。
+///   真帧（或更早的过渡帧）一旦落地就置它，之后到达的旧快照一律丢弃 ——
+///   「陈旧帧盖新帧」是这条规则改动里风险最高的一种，两道闸门一起挡。
+fn accepts_transition(state: &RenderState, path: &str) -> bool {
+    state.photo_path.as_deref() == Some(path)
+        && state.painted_path.as_deref() != Some(path)
+        && state.decode != "ready"
+}
+
+/// 把一张过渡帧画上去（`Developed` 与 `Present` 共用一份实现，§2.12）。
+///
+/// 状态留在「载入中」——真帧还在路上（完整理由见 `Present` 里的注释）：
+/// 不置 `decode = ready`、不动 `applied_params_rev`、
+fn present_transition(
+    outcome: DevelopOutcome,
+    context: &mut GpuContext,
+    shared: &Arc<Mutex<RenderState>>,
+    dirty: &mut bool,
+) -> Result<(), String> {
+    let mut state = lock_state(shared);
+    if let Ok(image) = outcome.result {
+        let source_size = (image.source_width, image.source_height);
+        if let Some((render_image, tone)) = image.pixels.render(image.width, image.height) {
+            context.set_global_tone(tone);
+            // 过渡帧：放大走线性采样（顺序要紧：先置开关，再上传重建绑定组）
+            context.set_soft_preview(true);
+            context.set_shared_image(render_image, source_size);
+            state.image = Some(SizeDto {
+                width: source_size.0 as f64,
+                height: source_size.1 as f64,
+            });
+            state.original_image = Some(SizeDto {
+                width: image.original_width as f64,
+                height: image.original_height as f64,
+            });
+            state.origin = Some(outcome.origin);
+        }
+    }
+    *dirty = true;
+    Ok(())
+}
+
 fn queue_geometry_job(
-    context: &GpuContext,
     shared: &Arc<Mutex<RenderState>>,
     developer: &Sender<DevelopJob>,
     latest_job: &mut u64,
     session: &SessionParams,
 ) -> Result<(), String> {
-    let mut state = lock_state(shared);
+    let state = lock_state(shared);
     let Some(path) = state.photo_path.clone() else {
         return Ok(());
     };
     *latest_job += 1;
-    let tier = tier_for(
-        context.viewport().zoom,
-        state.tier.unwrap_or(ImageTier::Preview),
-    );
-    state.wanted_tier = Some(tier);
-    state.decode = "loading".into();
     let job = DevelopJob {
         color: session.color.clone(),
         nr_method: session.nr_method,
         id: *latest_job,
         rev: state.params_rev,
         photo: Some(path),
-        tier,
         interactive: false,
         params: session.params.clone(),
         lens: session.lens.clone(),
@@ -2721,58 +2939,13 @@ fn queue_geometry_job(
         },
         prefer_sooc: session.prefer_sooc,
         transition: None,
+                        sources: None,
+                        transition_soften: None,
     };
     drop(state);
     developer
         .send(job)
         .map_err(|_| "显影线程不在了".to_string())
-}
-
-/// 需要换档位吗（缩放跨过 `1:1` 就要全尺寸输出）—— 需要就让显影线程重出一张。
-///
-/// 注意：**这里不重新解码**（线性源缓存在显影线程里），只换输出尺寸。
-fn ensure_output(
-    context: &GpuContext,
-    shared: &Arc<Mutex<RenderState>>,
-    developer: &Sender<DevelopJob>,
-    latest_job: &mut u64,
-    session: &SessionParams,
-) {
-    let mut state = lock_state(shared);
-    let Some(path) = state.photo_path.clone() else {
-        return;
-    };
-    let viewport = context.viewport();
-    let wanted = tier_for(viewport.zoom, state.tier.unwrap_or(ImageTier::Preview));
-    if state.tier == Some(wanted) || state.wanted_tier == Some(wanted) {
-        return;
-    }
-    state.wanted_tier = Some(wanted);
-    state.decode = "loading".to_string();
-    *latest_job += 1;
-    let job = DevelopJob {
-        color: session.color.clone(),
-        nr_method: session.nr_method,
-        id: *latest_job,
-        rev: state.params_rev,
-        photo: Some(path),
-        tier: wanted,
-        interactive: session.interactive,
-        params: session.params.clone(),
-        lens: session.lens.clone(),
-        lut: session.lut.clone(),
-        curves: session.curves.clone(),
-        geometry: if session.tool.is_some() {
-            None
-        } else {
-            session.geometry
-        },
-        prefer_sooc: session.prefer_sooc,
-        // 换档位不发过渡帧：源已经在显影线程手里（这一步只是换输出尺寸）
-        transition: None,
-    };
-    drop(state);
-    let _ = developer.send(job);
 }
 
 /// 把渲染器的状态如实地搬进快照。
@@ -2858,6 +3031,9 @@ fn merge_jobs(older: DevelopJob, newer: DevelopJob) -> DevelopJob {
         // 过渡帧计划跟着**照片**走：参数任务不带它（`None`），合并时不许把它丢了 ——
         // 丢了就变成「换照片的那条任务没过渡帧」，而那正是需要它的那一条。
         transition: newer.transition.or(older.transition),
+        // 参照源与过渡帧软化量也跟照片走（参数任务不带它们，合并时不许弄丢）
+        sources: newer.sources.or(older.sources),
+        transition_soften: newer.transition_soften.or(older.transition_soften),
         ..newer
     }
 }
@@ -2880,6 +3056,8 @@ fn develop_loop(receiver: Receiver<DevelopJob>, commands: Sender<RenderCommand>,
     let mut working: Option<working_editor::Cached> = None;
     // 最近一次被告知要显示的照片（**粘住**：参数任务不该把「要看哪张」弄丢）
     let mut wanted_photo: Option<String> = None;
+    // 参照源（§5.1）：同样粘住 —— 参数 / 几何任务不带它，但缓存重建时需要它
+    let mut wanted_sources: Option<Arc<crate::develop::ReferenceSources>> = None;
 
     while let Ok(job) = receiver.recv() {
         // 队列里躺着的时候就可能已经过期了：先看通道里还有没有更新的（合成，不是替换）
@@ -2894,15 +3072,18 @@ fn develop_loop(receiver: Receiver<DevelopJob>, commands: Sender<RenderCommand>,
         if let Some(path) = job.photo.clone() {
             wanted_photo = Some(path);
         }
+        if let Some(sources) = job.sources.clone() {
+            wanted_sources = Some(sources);
+        }
 
         let outcome = match std::panic::catch_unwind(AssertUnwindSafe(|| {
             if job.color.is_some() {
                 cached = None;
                 high.clear();
-                working_editor::run(&mut working, &wanted_photo, &job, max_texture,&mut working_high)
+                working_editor::run(&mut working, &wanted_photo, &job, wanted_sources.as_deref(), max_texture, &commands, &mut working_high)
             } else {
                 working = None; working_high.clear();
-                run_develop_job(&mut cached, &wanted_photo, &job, max_texture, &commands, &mut high)
+                run_develop_job(&mut cached, &wanted_photo, &job, wanted_sources.as_deref(), max_texture, &commands, &mut high)
             }
         })) {
             Ok(outcome) => outcome,
@@ -2922,7 +3103,6 @@ fn develop_loop(receiver: Receiver<DevelopJob>, commands: Sender<RenderCommand>,
                         .clone()
                         .or_else(|| wanted_photo.clone())
                         .unwrap_or_default(),
-                    tier: job.tier,
                     origin: "panic".to_string(),
                     transition: false,
                     as_shot_temperature: None,
@@ -2948,17 +3128,89 @@ fn develop_loop(receiver: Receiver<DevelopJob>, commands: Sender<RenderCommand>,
 ///
 /// `commands`：**过渡帧直接从这儿发**（不等这条任务算完）——
 /// 「先出图、再解码」的关键就在这一行的位置上：它必须在 `decode_linear_source` **之前**。
-fn should_reload_source(
+/// **缓存的源还能用吗** —— legacy 与 V2 共用这一份判据（W2 §4.5 / W3 §5.3）。
+///
+/// 重建的三种理由：
+/// * 路径变了（换了照片）；
+/// * 色彩状态变了（V2 才有；legacy 恒 `false`）；
+/// * 这条任务**明确带了照片**（换图 / 几何 / 参照操作），而磁盘上的源签名与缓存不符
+///   （或验不出来）—— 只有显式照片任务才验签名：纯参数任务不该因为文件被动过而重解码。
+///
+/// ⚠️「明确带了照片」**不等于**要重建：几何 / 参照操作也带照片，但源没变就不该整张重解码
+/// （V2 以前的条件里带着 `job.photo.is_some()`，切一下对比参照就重解一次 —— 现象 2 的一半）。
+fn source_needs_reload(
     cached_path: Option<&str>,
     cached_signature: Option<&str>,
     wanted_path: &str,
     observed_signature: Option<&str>,
     explicit_photo: bool,
+    color_changed: bool,
 ) -> bool {
     cached_path != Some(wanted_path)
+        || color_changed
         || explicit_photo
             && (observed_signature.is_none() || observed_signature != cached_signature)
 }
+/// **参照源的 SOOC 位图路径**（legacy 与 V2 共用，§5.1）。
+///
+/// * 会话里有解析结果（照片在库里）：`bitmap_available == false` → **不可用**
+///   （不允许拿 RAW 文件冒充 SOOC 参照）；否则给位图路径。
+/// * 没有解析结果（源目录直接进编辑）：**位图文件自己就是 SOOC 侧**；RAW 没有。
+fn reference_sooc_path<'a>(
+    sources: Option<&'a crate::develop::ReferenceSources>,
+    source_path: &'a str,
+) -> Option<&'a Path> {
+    if let Some(sources) = sources {
+        return sources
+            .bitmap_available
+            .then_some(sources.sooc.as_deref())
+            .flatten();
+    }
+    (raybend::media::kind::kind_of_file(source_path)
+        != raybend::media::kind::MediaKind::Raw)
+        .then(|| Path::new(source_path))
+}
+
+/// **白平衡基线 = 解码真值**（§6.2，两路共用一份）：payload 的 `asShotTemperature`
+/// 只是「解码还没有值时的占位」；解码一给出真值就覆盖它 —— 否则首帧按静态默认 6250K 算，
+/// 几秒后才跳回来（现象 3 的白平衡那一半）。
+fn params_with_decoded_baseline(params: &DevelopParams, shot: Option<f32>) -> DevelopParams {
+    let mut out = params.clone();
+    if shot.is_some() {
+        out.set_as_shot_temperature(shot);
+    }
+    out
+}
+
+/// 左侧参照帧的来源标签：RAW 文件 → `raw`，其余 → `sooc`（两路共用一份拼法）。
+fn reference_base_of(path: &str) -> &'static str {
+    if raybend::media::kind::kind_of_file(path) == raybend::media::kind::MediaKind::Raw {
+        "raw"
+    } else {
+        "sooc"
+    }
+}
+
+/// **过渡帧的软化量**（0..1）：按「逻辑图像像素 → 物理像素」的放大倍率算 ——
+/// 放大越多越软（1920 预览在高分屏上被最近邻放大就是马赛克）。
+///
+/// 倍率口径与 [`Viewport::zoom_for_fit`] **同一份**：临时把逻辑尺寸换进来读一次，
+/// 不复制 Fit / Fill / 1:1 / Free 那套数学；读完立刻还原（这个函数不改视口状态）。
+fn transition_soften(
+    viewport: &mut raybend::render::viewport::Viewport,
+    logical: Option<(u32, u32)>,
+) -> f32 {
+    let Some(logical) = logical.filter(|size| size.0 > 0 && size.1 > 0) else {
+        return 0.0;
+    };
+    let previous = viewport.image_size;
+    viewport.image_size = logical;
+    let scale = viewport.zoom_for_fit();
+    viewport.image_size = previous;
+    // 0.75 是手感系数：1.5× 左右给一点软，3× 以上给足（上限 1）。
+    ((scale - 1.0) * 0.75).clamp(0.0, 1.0)
+}
+
 fn source_dependency_signature(path: &str, sooc: Option<&Path>) -> Option<String> {
     let mut signature = raybend::media::source::source_signature(Path::new(path)).ok()?;
     if let Some(sooc) = sooc.filter(|source| *source != Path::new(path))
@@ -2973,6 +3225,7 @@ fn run_develop_job(
     cached: &mut Option<CachedSource>,
     wanted_photo: &Option<String>,
     job: &DevelopJob,
+    sources: Option<&crate::develop::ReferenceSources>,
     max_texture: u32,
     commands: &Sender<RenderCommand>,
     high: &mut HighDenoise,
@@ -2992,20 +3245,11 @@ fn run_develop_job(
                 .as_ref()
                 .and_then(|entry| entry.source_signature.clone());
         }
-        let sooc = job
-            .transition
-            .as_ref()
-            .and_then(|plan| plan.sooc.as_deref())
-            .or_else(|| {
-                cached
-                    .as_ref()
-                    .filter(|entry| entry.path == path)
-                    .and_then(|entry| entry.sooc.as_deref())
-            });
+        let sooc = reference_sooc_path(sources, path);
         source_dependency_signature(path, sooc)
     });
     if let Some(path) = wanted_photo.clone()
-        && should_reload_source(
+        && source_needs_reload(
             cached.as_ref().map(|entry| entry.path.as_str()),
             cached
                 .as_ref()
@@ -3013,6 +3257,7 @@ fn run_develop_job(
             &path,
             signature.as_deref(),
             job.photo.is_some(),
+            false,
         )
     {
         // 旧线性源在换图时已经无用；先释放，再解新 RAW。否则旧源、
@@ -3028,7 +3273,7 @@ fn run_develop_job(
                     return None; // 渲染线程走了
                 }
             } else {
-                eprintln!(
+                log::warn!(
                     "[editor] 过渡帧：{} 个候选一个都用不了（{path}）——直接解真帧",
                     plan.sources.len()
                 );
@@ -3043,17 +3288,6 @@ fn run_develop_job(
                 *cached = Some(CachedSource {
                     storage: access,
                     reference: ReferenceCache::default(),
-                    sooc: job
-                        .transition
-                        .as_ref()
-                        .and_then(|plan| plan.sooc.clone())
-                        .or_else(|| {
-                            (!matches!(
-                                raybend::media::kind::kind_of_file(&path),
-                                raybend::media::kind::MediaKind::Raw
-                            ))
-                            .then(|| std::path::PathBuf::from(&path))
-                        }),
                     source_revision: job.id,
                     source_signature: signature,
                     path,
@@ -3075,7 +3309,6 @@ fn run_develop_job(
                     id: job.id,
                     rev: job.rev,
                     path,
-                    tier: job.tier,
                     origin,
                     transition: false,
                     as_shot_temperature: None,
@@ -3091,7 +3324,7 @@ fn run_develop_job(
     let Some(entry) = cached.as_mut() else {
         // 只有「还没让显示过任何照片」才会走到这里（开局那一条参数任务）。
         // 一旦要过照片，`wanted_photo` 就粘住了 —— 见 `merge_jobs` 的注释。
-        eprintln!(
+        log::warn!(
             "[editor] 参数任务先到、还没有照片可算（job #{}）：跳过",
             job.id
         );
@@ -3111,7 +3344,6 @@ fn run_develop_job(
             id: job.id,
             rev: job.rev,
             path: entry.path.clone(),
-            tier: job.tier,
             origin,
             transition: false,
             as_shot_temperature,
@@ -3123,15 +3355,26 @@ fn run_develop_job(
     }
     let develop_started = Instant::now();
 
+    /*
+     * **白平衡基线 = 解码真值**（`specs/editor-session-pipeline.md` §6.2）。
+     *
+     * 管线里白平衡是 `temperature_gain_ratio(target, baseline)`，baseline 必须是
+     * **这张照片**的 as-shot K。payload 里的 `asShotTemperature` 只是"解码还没有值时的占位"：
+     * 切图瞬间前端会把基线写成 null，若真拿它算，首帧就按静态默认 6250K 出来，
+     * 解码真值到达后再跳一下（现象 3 的白平衡那一半）。
+     * 解码真值一到就用它覆盖 —— 预览 / 缩略图 / 导出走的就是同一口径。
+     */
+    let params = params_with_decoded_baseline(&job.params, as_shot_temperature);
+
     // ②′ 可选阶段（镜头手动微调 / 降噪 / 锐化 / 动态反差强度）——
     //     用**完整线性源**的尺寸建（归一化坐标与档位无关，见 `develop/lens.rs` 模块头）。
-    let plans = DevelopPlans::from_params(entry.full.width, entry.full.height, &job.params);
+    let plans = DevelopPlans::from_params(entry.full.width, entry.full.height, &params);
 
     // ② 动态反差：分析图只缩一次；分析结果只在**线性链参数**变了才重算。
     //    这一段必须放在取 source 之前（它要可变借 entry）。
     let local_strength = plans.local_tone;
     if local_strength > 0.0 {
-        let key = Resolved::new(&job.params).chain_key();
+        let key = Resolved::new(&params).chain_key();
         if entry
             .local_tone
             .as_ref()
@@ -3142,24 +3385,15 @@ fn run_develop_job(
                 entry.analysis_source = Some(entry.full.downscaled_to((long / 4).max(256)));
             }
             if let Some(analysis) = entry.analysis_source.as_ref() {
-                let chained = chain_image(analysis, &job.params);
+                let chained = chain_image(analysis, &params);
                 let state = LocalToneState::analyze(&chained, &LocalToneOpts::default());
                 entry.local_tone = Some((key, state));
             }
         }
     }
 
-    // ③ 按档位取源（预览档要缩一次，缩完缓存住）
-    let (source, width, height) = match job.tier {
-        ImageTier::Full => (&entry.full, entry.full.width, entry.full.height),
-        ImageTier::Preview => {
-            if entry.preview.is_none() {
-                entry.preview = Some(Arc::new(entry.full.downscaled_to(PixelSize::SCREEN_EDGE)));
-            }
-            let preview = entry.preview.as_ref().expect("刚补上的");
-            (preview, preview.width, preview.height)
-        }
-    };
+    // ③ 取源：**永远原尺寸**（崔总 2026-10-11：任何看图统一到原图，没有档位）
+    let (source, width, height) = (&entry.full, entry.full.width, entry.full.height);
 
     // ④ 跑管线（这一段就是「拖一下要多久」的全部）
     let local = if local_strength > 0.0 {
@@ -3184,7 +3418,7 @@ fn run_develop_job(
         (None, None)
     } else if let Some(frame) = job
         .prefer_sooc
-        .then_some(entry.sooc.as_deref())
+        .then(|| reference_sooc_path(sources, &entry.path))
         .flatten()
         .and_then(|path| entry.reference.get_sooc(path, job.geometry))
     {
@@ -3192,15 +3426,7 @@ fn run_develop_job(
     } else {
         (
             Some(entry.reference.get(source, &correction, job.geometry)),
-            Some(
-                if raybend::media::kind::kind_of_file(&entry.path)
-                    == raybend::media::kind::MediaKind::Raw
-                {
-                    "raw"
-                } else {
-                    "sooc"
-                },
-            ),
+            Some(reference_base_of(&entry.path)),
         )
     };
     let lens_map = LensMap::new(&correction);
@@ -3238,7 +3464,7 @@ fn run_develop_job(
     };
     let started = std::time::Instant::now();
     let input = high_image.as_deref().unwrap_or(source);
-    let rgb = render_develop(input, &job.params, &job.curves, &stages);
+    let rgb = render_develop(input, &params, &job.curves, &stages);
     let (width, height, rgb) = match job.geometry {
         Some(geometry) => raybend::develop::geometry::apply_rgb8((width, height), &rgb, geometry)
             .expect("已按源尺寸校验成片几何"),
@@ -3250,10 +3476,9 @@ fn run_develop_job(
             geometry.output_size((entry.full.width, entry.full.height))
         });
     let develop_ms = started.elapsed().as_secs_f64() * 1000.0;
-    eprintln!(
-        "[editor] 真帧：job #{id} 档 {tier:?} {w}×{h} 解码 {decode} 管线 {develop:.0}ms（整条 {total:.0}ms）",
+    log::warn!(
+        "[editor] 真帧：job #{id} {w}×{h} 解码 {decode} 管线 {develop:.0}ms（整条 {total:.0}ms）",
         id = job.id,
-        tier = job.tier,
         w = width,
         h = height,
         decode = decode_ms.map_or("—".to_string(), |ms| format!("{ms:.0}ms")),
@@ -3270,7 +3495,6 @@ fn run_develop_job(
         id: job.id,
         rev: job.rev,
         path: entry.path.clone(),
-        tier: job.tier,
         origin,
         transition: false,
         as_shot_temperature,
@@ -3297,9 +3521,12 @@ fn settled_histogram(rgb: &[u8], interactive: bool) -> Option<crate::thumbs::His
 
 /// **过渡帧**：按计划里的顺序找第一个能解出来的来源，做成一条显影结果（handoff §3）。
 ///
-/// 与真帧走的是**同一条通道**（`RenderCommand::Developed` + **同一个任务号**）——
-/// 任务号必须一致，否则渲染线程会把它当过期结果丢掉（`outcome.id != *latest_job`），
-/// 过渡帧就永远不显示。
+/// 与真帧走的是**同一条通道**（`RenderCommand::Developed`）—— 接受判据由渲染线程的
+/// `accepts_transition` 单独决定（§3.1-3），不受「最新任务号」支配。
+///
+/// # 尺寸（§3.1-2 同画幅）
+/// * `source_width/height` = `geometry.output_size(原图尺寸)`（真帧报的就是它）；
+/// * `original_width/height` = 原图尺寸（裁切工具边界 / `original_image` 用它）。
 ///
 /// 一条都解不出来就返回 `None`（不是错：真帧照样会来）。
 fn transition_outcome(
@@ -3313,7 +3540,7 @@ fn transition_outcome(
         let pixels = match source.kind {
             TransitionKind::AvifCache => {
                 let Ok(bytes) = std::fs::read(&source.path) else {
-                    eprintln!(
+                    log::warn!(
                         "[editor] 过渡帧候选 {origin}：读不到缓存 {path}（{ms:.0}ms）",
                         origin = source.origin,
                         path = source.path.display(),
@@ -3327,8 +3554,8 @@ fn transition_outcome(
                 .ok()
                 .flatten(),
         };
-        let Some(pixels) = pixels else {
-            eprintln!(
+        let Some(mut pixels) = pixels else {
+            log::warn!(
                 "[editor] 过渡帧候选 {origin}：解不出来 {path}（{ms:.0}ms）",
                 origin = source.origin,
                 path = source.path.display(),
@@ -3336,15 +3563,61 @@ fn transition_outcome(
             );
             continue;
         };
-        let (source_width, source_height) =
-            plan.source_size.unwrap_or((pixels.width, pixels.height));
-        eprintln!(
-            "[editor] 过渡帧：{origin} {w}×{h}（逻辑 {sw}×{sh}）耗时 {ms:.0}ms；候选 {count} 个",
+        /*
+         * **基准图兜底**（L3，崔总 2026-10-10）：编辑栈非空却没有 latest 快照时，
+         * 把编辑栈的几何套到基准图上（画幅与真帧一致、不被拉伸），再**强制软化**
+         * 到一眼看得出是临时图 —— 不再是「拿基准图冒充编辑结果」。
+         */
+        let is_base_fallback = !plan.stack_is_empty && source.kind == TransitionKind::PhotoFile;
+        if is_base_fallback
+            && let Some(geometry) = plan.geometry
+        {
+            match raybend::develop::geometry::apply_rgb8(
+                (pixels.width, pixels.height),
+                &pixels.rgb,
+                geometry,
+            ) {
+                Some((width, height, rgb)) => {
+                    pixels.width = width;
+                    pixels.height = height;
+                    pixels.rgb = rgb;
+                }
+                None => {
+                    // i18n-exempt: 后台诊断（终端日志，不进界面）
+                    log::warn!(
+                        "[editor] 过渡帧候选 {origin}：套用几何失败——试下一个",
+                        origin = source.origin
+                    );
+                    continue;
+                }
+            }
+        }
+        // 有意软化（崔总 2026-10-10）：放大倍率越高越软，免得 1920 预览成马赛克；
+        // 基准图兜底再压一个下限，保证它在缩小档也看得出是「临时图」。
+        let soften = job.transition_soften.unwrap_or(0.0);
+        let soften = if is_base_fallback { soften.max(0.35) } else { soften };
+        if soften > 0.0 {
+            pixels.soften(soften);
+        }
+        // 逻辑尺寸 = 真帧将报的 `output_size`；原图尺寸单独报（两者在裁切时不同）。
+        let (source_width, source_height) = plan
+            .output_size
+            .or(plan.source_size)
+            .unwrap_or((pixels.width, pixels.height));
+        let (original_width, original_height) = plan
+            .source_size
+            .unwrap_or((source_width, source_height));
+        log::warn!(
+            "[editor] 过渡帧：{origin} {w}×{h}（逻辑 {sw}×{sh}，原图 {ow}×{oh}，软化 {soften:.2}{fallback}）耗时 {ms:.0}ms；候选 {count} 个",
             origin = source.origin,
             w = pixels.width,
             h = pixels.height,
             sw = source_width,
             sh = source_height,
+            ow = original_width,
+            oh = original_height,
+            soften = soften,
+            fallback = if is_base_fallback { "，基准兜底" } else { "" },
             count = plan.sources.len(),
             ms = started.elapsed().as_secs_f64() * 1000.0,
         );
@@ -3357,7 +3630,6 @@ fn transition_outcome(
             id: job.id,
             rev: job.rev,
             path: path.to_string(),
-            tier: job.tier,
             origin: source.origin.to_string(),
             transition: true,
             // 过渡帧不是「按参数算出来的」：色温基线还得等真帧（RAW 的 as-shot 在解码里）
@@ -3371,8 +3643,8 @@ fn transition_outcome(
                 pixels: DevelopedPixels::Legacy(pixels.rgb),
                 source_width,
                 source_height,
-                original_width: source_width,
-                original_height: source_height,
+                original_width,
+                original_height,
             }),
         });
     }
@@ -3389,6 +3661,8 @@ fn decode_linear_source(path: &Path, max_texture: u32) -> Result<LinearSource, S
     let started = std::time::Instant::now();
     let (mut image, origin, as_shot_temperature) = if display::pixels::is_raw_photo(path) {
         let request = raybend::raw::backend::DecodeRequest::full(path);
+        // 编辑器当前照片：High（§4.4）——批量快照满载时也要能插队
+        let _permit = raybend::raw::worker::acquire(raybend::raw::DecodePriority::High);
         let worker = raybend::raw::worker::shared();
         let mut guard = worker.lock().map_err(|_| "RAW worker 锁中毒".to_string())?;
         let mut decoded = guard.decode_linear(&request).map_err(|e| e.to_string())?;
@@ -3598,7 +3872,6 @@ mod tests {
             id,
             rev,
             photo: photo.map(str::to_string),
-            tier: ImageTier::Preview,
             interactive: false,
             params: DevelopParams::default(),
             curves: CurveSet::default(),
@@ -3607,6 +3880,8 @@ mod tests {
             geometry: None,
             prefer_sooc: true,
             transition: None,
+            sources: None,
+            transition_soften: None,
         }
     }
 
@@ -3620,7 +3895,9 @@ mod tests {
                 origin,
             }],
             source_size: Some((4000, 3000)),
-            sooc: None,
+            output_size: None,
+            geometry: None,
+            stack_is_empty: true,
         }
     }
 
@@ -3720,7 +3997,9 @@ mod tests {
                 },
             ],
             source_size: Some((3888, 5184)),
-            sooc: None,
+            output_size: None,
+            geometry: None,
+            stack_is_empty: true,
         };
         let mut job = job(1, 1, Some(&raw.to_string_lossy()));
         job.transition = Some(plan);
@@ -3732,6 +4011,7 @@ mod tests {
             &mut cached,
             &Some(raw.to_string_lossy().into_owned()),
             &job,
+            None,
             0,
             &tx,
             &mut HighDenoise::new(|| {}),
@@ -3787,6 +4067,153 @@ mod tests {
         );
         assert_eq!(sources[0].kind, TransitionKind::AvifCache);
         assert_eq!(sources[1].kind, TransitionKind::PhotoFile);
+
+        // **有编辑栈**：latest 仍在最前（最接近真帧）；基准图退到后面当兜底
+        // （崔总 2026-10-10：没快照时「至少比空屏好」，但兜底帧会套几何 + 强制软化）。
+        let edited = transition_sources(
+            &raw,
+            raybend::store::develop::EditBase::Raw,
+            Some(cached),
+            Some(jpg),
+        );
+        assert_eq!(
+            edited
+                .iter()
+                .map(|source| source.origin)
+                .collect::<Vec<_>>(),
+            vec!["preview-latest", "preview-sooc", "preview-raw"],
+            "latest 优先，基准图只作兜底"
+        );
+    }
+
+    /// **基准图兜底帧套几何**（L3）：裁切过的照片拿基准图兜底时，
+    /// 像素要按编辑栈的几何裁出来（画幅与真帧一致，不被拉伸），逻辑尺寸报真帧的值。
+    #[test]
+    fn fallback_transition_applies_the_stack_geometry() {
+        use raybend::develop::geometry::{CropRect, EditGeometry};
+        let dir = tempfile::tempdir().expect("临时目录");
+        let path = dir.path().join("photo.png");
+        image::RgbImage::new(64, 48).save(&path).expect("写 PNG");
+        let geometry = EditGeometry {
+            crop: Some(CropRect { x: 0.0, y: 0.0, width: 0.5, height: 1.0 }),
+            ..Default::default()
+        };
+        let plan = TransitionPlan {
+            _permit: None,
+            sources: vec![TransitionSource {
+                path: path.clone(),
+                kind: TransitionKind::PhotoFile,
+                origin: "preview-raw",
+            }],
+            source_size: Some((4000, 3000)),
+            output_size: Some(geometry.output_size((4000, 3000))),
+            geometry: Some(geometry),
+            stack_is_empty: false,
+        };
+        let job = job(1, 1, Some(&path.to_string_lossy()));
+        let image = transition_outcome(&plan, &job, &path.to_string_lossy())
+            .expect("兜底帧要出图")
+            .result
+            .expect("解得出");
+        assert_eq!(
+            (image.width, image.height),
+            (32, 48),
+            "纹理要按几何裁出来（64×48 的一半宽）"
+        );
+        assert_eq!(
+            (image.source_width, image.source_height),
+            (2000, 3000),
+            "逻辑尺寸仍报真帧将报的 output_size"
+        );
+    }
+
+    /// **过渡帧软化量**（崔总 2026-10-10）：放大越多越软；缩小 / 1:1 / 尺寸未知不动；
+    /// 读一次视口不改它的状态。
+    #[test]
+    fn transition_soften_follows_the_window_magnification() {
+        let mut viewport = raybend::render::viewport::Viewport {
+            image_size: (1920, 1280),
+            viewport_size: (1920.0, 1280.0),
+            ..Default::default()
+        };
+        // 适配档正好 1:1 → 不软（此时最近邻放大本来就是像素对齐）
+        assert_eq!(transition_soften(&mut viewport, Some((1920, 1280))), 0.0);
+        // 高分屏 / 大窗口：倍率 1.5 → 轻微软
+        viewport.viewport_size = (2880.0, 1920.0);
+        let mild = transition_soften(&mut viewport, Some((1920, 1280)));
+        assert!(mild > 0.0 && mild < 0.5, "1.5× 要轻微软：{mild}");
+        // 倍率 3 → 给足（上限 1）
+        viewport.viewport_size = (5760.0, 3840.0);
+        assert_eq!(transition_soften(&mut viewport, Some((1920, 1280))), 1.0);
+        // 缩小（洞比图小）→ 不软
+        viewport.viewport_size = (960.0, 640.0);
+        assert_eq!(transition_soften(&mut viewport, Some((1920, 1280))), 0.0);
+        // 1:1 档 → 不软
+        viewport.fit_mode = FitMode::OneToOne;
+        viewport.viewport_size = (2880.0, 1920.0);
+        assert_eq!(transition_soften(&mut viewport, Some((1920, 1280))), 0.0);
+        // 逻辑尺寸未知 → 不软，也不 panic
+        viewport.fit_mode = FitMode::Fit;
+        assert_eq!(transition_soften(&mut viewport, None), 0.0);
+        assert_eq!(transition_soften(&mut viewport, Some((0, 0))), 0.0);
+        // 读一次不改视口状态（helper 只是临时换尺寸读倍率）
+        assert_eq!(viewport.image_size, (1920, 1280));
+    }
+
+    /// **参照源解析**（W3 §5.1）：没位图的照片不允许拿 RAW 冒充 SOOC 参照；
+    /// 不在库里（没有解析结果）时，位图文件自己就是 SOOC 侧。
+    #[test]
+    fn reference_sooc_path_never_masquerades_a_raw_as_sooc() {
+        let bitmap = crate::develop::ReferenceSources {
+            sooc: Some(std::path::PathBuf::from("/x/photo.jpg")),
+            bitmap_available: true,
+        };
+        assert_eq!(
+            reference_sooc_path(Some(&bitmap), "/x/photo.rw2"),
+            Some(Path::new("/x/photo.jpg"))
+        );
+        let raw_only = crate::develop::ReferenceSources {
+            sooc: None,
+            bitmap_available: false,
+        };
+        assert_eq!(
+            reference_sooc_path(Some(&raw_only), "/x/photo.rw2"),
+            None,
+            "没有位图 → SOOC 参照不可用（不允许 RAW 冒充）"
+        );
+        // 不在库里：位图文件自己就是 SOOC 侧，RAW 没有
+        assert_eq!(
+            reference_sooc_path(None, "/x/photo.jpg"),
+            Some(Path::new("/x/photo.jpg"))
+        );
+        assert_eq!(reference_sooc_path(None, "/x/photo.rw2"), None);
+    }
+
+    /// **L3 兜底（有编辑栈、latest 快照不在）**：仍然给基准图 —— 崔总 2026-10-10
+    /// 「就算没生成……至少比空屏好」；`transition_outcome` 会套几何 + 强制软化，
+    /// 让它一眼看得出是临时图（不再是拿基准图冒充编辑结果）。
+    #[test]
+    fn transition_sources_keep_base_images_as_a_last_resort_for_an_edited_stack() {
+        let dir = tempfile::tempdir().expect("临时目录");
+        let raw = dir.path().join("photo.rw2");
+        let jpg = dir.path().join("photo.jpg");
+        for file in [&raw, &jpg] {
+            std::fs::write(file, b"x").expect("建文件");
+        }
+        let sources = transition_sources(
+            &raw,
+            raybend::store::develop::EditBase::Raw,
+            Some(dir.path().join("missing-latest.avif")),
+            Some(jpg),
+        );
+        assert_eq!(
+            sources
+                .iter()
+                .map(|source| source.origin)
+                .collect::<Vec<_>>(),
+            vec!["preview-sooc", "preview-raw"],
+            "没有 latest 快照时退回基准图兜底（不再空屏）"
+        );
     }
 
     /// 没编辑过（没有 latest 缓存）、没有同名 JPG：只剩「要编的这张」—— 依然要出过渡帧。
@@ -3812,7 +4239,7 @@ mod tests {
                 &dir.path().join("gone.rw2"),
                 raybend::store::develop::EditBase::Raw,
                 None,
-                None
+                None,
             )
             .is_empty()
         );
@@ -3837,6 +4264,106 @@ mod tests {
             "位图基准下 SOOC 与「要编的这张」是同一个：{sources:?}"
         );
         assert_eq!(sources[0].origin, "preview-bitmap");
+    }
+
+    /// **同画幅（§3.1-2）**：有裁切/旋转时，逻辑尺寸 = `geometry.output_size`，
+    /// 原图尺寸单独报 —— 真帧到达时 `set_image` 不 refit（否则就是现象 3 的拉伸 + 跳变）。
+    #[test]
+    fn transition_frame_reports_the_output_geometry() {
+        use raybend::develop::geometry::{CropRect, EditGeometry};
+        let dir = tempfile::tempdir().expect("临时目录");
+        let path = dir.path().join("photo.png");
+        image::RgbImage::new(64, 48).save(&path).expect("写 PNG");
+
+        // 两组数据：3:2 裁切（半宽）与带旋转的裁切。
+        let cases = [
+            (
+                EditGeometry {
+                    crop: Some(CropRect {
+                        x: 0.0,
+                        y: 0.0,
+                        width: 0.5,
+                        height: 1.0,
+                    }),
+                    ..Default::default()
+                },
+                (2000, 3000),
+            ),
+            (
+                EditGeometry {
+                    rotation: 90.0,
+                    crop: Some(CropRect {
+                        x: 0.0,
+                        y: 0.0,
+                        width: 1.0,
+                        height: 0.5,
+                    }),
+                    ..Default::default()
+                },
+                (4000, 1500),
+            ),
+        ];
+        for (geometry, expected) in cases {
+            let mut plan = plan(
+                &path.to_string_lossy(),
+                TransitionKind::PhotoFile,
+                "preview-photo",
+            );
+            plan.output_size = Some(geometry.output_size((4000, 3000)));
+            assert_eq!(plan.output_size, Some(expected), "先确认几何算得对");
+            assert_ne!(expected, (4000, 3000), "这组数据必须真的改变画幅");
+            let job = job(1, 1, Some(&path.to_string_lossy()));
+            let image = transition_outcome(&plan, &job, &path.to_string_lossy())
+                .expect("有过渡帧")
+                .result
+                .expect("解得出");
+            assert_eq!(
+                (image.source_width, image.source_height),
+                expected,
+                "逻辑尺寸必须是真帧将报的 output_size"
+            );
+            assert_eq!(
+                (image.original_width, image.original_height),
+                (4000, 3000),
+                "原图尺寸单独报（裁切工具边界用）"
+            );
+        }
+    }
+
+    /// **过渡帧的接受判据（§3.1-3）**：晚于参数任务到达仍被画；真帧之后到达被丢。
+    #[test]
+    fn transition_delivery_survives_params_but_not_a_real_frame() {
+        let mut state = RenderState {
+            photo_path: Some("a.rw2".into()),
+            decode: "loading".into(),
+            ..Default::default()
+        };
+        assert!(
+            accepts_transition(&state, "a.rw2"),
+            "刚换照片（还没画任何帧）时过渡帧要被接受"
+        );
+
+        // 参数任务把 latest_job 抬走对判据没有影响：解码期间拖了拉杆，过渡帧照样上屏。
+        state.params_rev += 3;
+        assert!(accepts_transition(&state, "a.rw2"));
+
+        // 真帧应用（Present 置 ready）后到达的过渡帧一律丢弃 ——
+        // 哪怕是又一轮参数任务把 decode 打回 loading（painted_path 还在）。
+        state.decode = "ready".into();
+        assert!(!accepts_transition(&state, "a.rw2"), "真帧已应用");
+        state.painted_path = Some("a.rw2".into());
+        state.decode = "loading".into();
+        assert!(
+            !accepts_transition(&state, "a.rw2"),
+            "这张照片已经画过一帧：旧快照不得再盖上去"
+        );
+
+        // 换了照片：旧路径的过渡帧丢弃。
+        state.photo_path = Some("b.rw2".into());
+        state.painted_path = None;
+        state.decode = "loading".into();
+        assert!(!accepts_transition(&state, "a.rw2"));
+        assert!(accepts_transition(&state, "b.rw2"));
     }
 
     /// 没有原图尺寸时退回用过渡帧自己的尺寸（宽高比一致时 Fit 档下看不出区别）。
@@ -3881,7 +4408,9 @@ mod tests {
                 },
             ],
             source_size: None,
-            sooc: None,
+            output_size: None,
+            geometry: None,
+            stack_is_empty: true,
         };
         let job = job(1, 1, Some("x.rw2"));
         assert!(transition_outcome(&plan, &job, "x.rw2").is_none());
@@ -3912,7 +4441,9 @@ mod tests {
                 origin: "preview-latest",
             }],
             source_size: Some((6000, 4500)),
-            sooc: None,
+            output_size: None,
+            geometry: None,
+            stack_is_empty: true,
         };
         let job = job(9, 3, Some("x.rw2"));
         let outcome = transition_outcome(&plan, &job, "x.rw2").expect("缓存能解");
@@ -4221,7 +4752,6 @@ mod tests {
             ready: true,
             adapter: "fake".to_string(),
             painted_path: Some("a.jpg".to_string()),
-            tier: Some(ImageTier::Preview),
             ..Default::default()
         };
         let value = serde_json::to_value(&state).expect("能序列化");
@@ -4229,11 +4759,6 @@ mod tests {
         assert!(object.contains_key("paintedPath"), "前端读的是 camelCase");
         assert!(object.contains_key("drawnFrames"));
         assert!(object.contains_key("lastHit"));
-        assert_eq!(
-            object.get("tier").and_then(|tier| tier.as_str()),
-            Some("preview"),
-            "档位名是线上一词"
-        );
     }
     #[test]
     fn high_quality_swaps_in_then_reuses_cache_for_tone_and_histogram() {
@@ -4252,7 +4777,7 @@ mod tests {
         request.nr_method = NrMethod::High;
         request.params.set("lumaNr", 60.0).unwrap();
         let mut cached = None;
-        let fast = run_develop_job(&mut cached, &photo, &request, 8192, &tx, &mut high).unwrap();
+        let fast = run_develop_job(&mut cached, &photo, &request, None, 8192, &tx, &mut high).unwrap();
         assert!(fast.nr_pending);
         assert!(fast.nr_error.is_none());
         let reference = fast.reference.unwrap();
@@ -4261,7 +4786,7 @@ mod tests {
         request.rev = 2;
         request.params.set("exposure", 0.5).unwrap();
         let final_frame =
-            run_develop_job(&mut cached, &photo, &request, 8192, &tx, &mut high).unwrap();
+            run_develop_job(&mut cached, &photo, &request, None, 8192, &tx, &mut high).unwrap();
         assert!(!final_frame.nr_pending);
         assert!(final_frame.nr_error.is_none());
         assert_eq!(reference.id, final_frame.reference.unwrap().id);
@@ -4273,42 +4798,67 @@ mod tests {
             serde_json::to_value(expected).unwrap()
         );
     }
+    /// **两路共用的重建判据**（W2 §4.5 / W3 §5.3）：显式照片任务才验签名；
+    /// 几何 / 参照操作虽然带照片，源没变就不该重解码；色彩状态变了必须重建。
     #[test]
     fn changed_source_reloads_but_unchanged_and_parameter_jobs_reuse() {
-        assert!(should_reload_source(
+        assert!(source_needs_reload(
             Some("a.jpg"),
             Some("old"),
             "a.jpg",
             Some("new"),
-            true
+            true,
+            false
         ));
-        assert!(!should_reload_source(
+        assert!(!source_needs_reload(
             Some("a.jpg"),
             Some("old"),
             "a.jpg",
             Some("old"),
-            true
+            true,
+            false
         ));
-        assert!(!should_reload_source(
+        assert!(!source_needs_reload(
             Some("a.jpg"),
             Some("old"),
             "a.jpg",
             None,
+            false,
             false
         ));
-        assert!(should_reload_source(
+        assert!(source_needs_reload(
             Some("a.jpg"),
             Some("old"),
             "b.jpg",
             Some("old"),
+            false,
             false
         ));
-        assert!(should_reload_source(
+        assert!(source_needs_reload(
             None,
             None,
             "a.jpg",
             Some("new"),
+            false,
             false
+        ));
+        // 几何 / 参照操作（explicit_photo=true）但源没变 → 复用（V2 以前在这里重解码）
+        assert!(!source_needs_reload(
+            Some("a.jpg"),
+            Some("same"),
+            "a.jpg",
+            Some("same"),
+            true,
+            false
+        ));
+        // 色彩状态变了 → 必须重建
+        assert!(source_needs_reload(
+            Some("a.jpg"),
+            Some("same"),
+            "a.jpg",
+            Some("same"),
+            true,
+            true
         ));
         let root = tempfile::tempdir().unwrap();
         let raw = root.path().join("x.raw");

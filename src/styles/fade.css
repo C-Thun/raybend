@@ -16,20 +16,51 @@
  * ```
  *
  * * 文字**没超长**时渐隐区是空白 ⇒ 看不出来（这是关键性质，不是巧合）；
- * * 文字超长时右端 `1.25rem`（= 20px，与工具条内侧渐隐同一长度）一段淡出，
- *   且**不出现省略号**（省略号与渐隐叠在一起会糊）。
+ * * 文字超长时右端 `--fade-x-len`（默认 `1.25rem` = 20px，与工具条内侧渐隐同一长度）
+ *   一段淡出，且**不出现省略号**（省略号与渐隐叠在一起会糊）。
+ *
+ * ## 两个长度档
+ *
+ * * `.fade-x-end` —— 默认 20px，给列表行（宽度由外层给足，渐隐区落在空白上）；
+ * * `.fade-x-end-sm` —— **8px 极短档**，给分段控件（segmented tab）这种小元素：
+ *   渐隐区与 chip 的横向内边距同长，溢出时在边缘很快收掉（崔总 2026-10-10）。
+ *
+ * ## 盒子宽度
+ *
+ * 渐隐是“在**盒子**右端 N px 内淡出”，所以：
+ *
+ * * 盒子由外层给足（`flex-1` / `block` / `w-full`）→ 直接用 `.fade-x-end`，
+ *   没超长时渐隐区是空白，看不出来；
+ * * 盒子**随内容收缩**（内容宽 == 文本宽）→ 必须再配 `.fade-x-end-fit`：
+ *   它让出渐隐长度的右侧内边距、再用负外边距抵回布局宽度 ——
+ *   没溢出时渐隐区只盖住那段内边距（不啃字），溢出时刚好在边缘收掉。
+ *   两者也是 `.fade-x-end-sm` 的正确用法（`SegmentedControl` 就是这么用的）。
+ *
+ * 边界：元素**自己带底色**时不要直接上（mask 会把底色也淡掉）——
+ * 得在内部包一层只负责文字的 span；居中文本溢出时左端仍是硬裁，属已知取舍。
  */
 
 .fade-x-end {
-  /* 长度直接写在这里而不是做令牌：它只服务这一条“文本收尾”，与工具条那个 20px 渐隐同口径 */
+  /* 长度是这一条“文本收尾”自己的变量：默认与工具条那个 20px 渐隐同口径 */
+  --fade-x-len: 1.25rem;
   mask-image: linear-gradient(
     to right,
-    black calc(100% - 1.25rem),
+    black calc(100% - var(--fade-x-len)),
     transparent 100%
   );
   -webkit-mask-image: linear-gradient(
     to right,
-    black calc(100% - 1.25rem),
+    black calc(100% - var(--fade-x-len)),
     transparent 100%
   );
+}
+
+.fade-x-end-sm {
+  --fade-x-len: 0.5rem;
+}
+
+/* 内容宽度的盒子（见文件头）：让出渐隐长度，负外边距抵回布局宽度 */
+.fade-x-end-fit {
+  padding-right: var(--fade-x-len);
+  margin-right: calc(-1 * var(--fade-x-len));
 }

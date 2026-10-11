@@ -23,7 +23,7 @@ import {
 import { compareNatural } from "../../lib/natural-order.ts";
 import { joinPath } from "../../lib/paths.ts";
 import { groupByTime, type TimeGrouping } from "../../lib/time-group.ts";
-import type { ThumbEntry } from "../../components/ui/thumb-queue.ts";
+import type { ThumbQueue } from "../../components/ui/thumb-queue.ts";
 import type { RowSlice } from "../../components/ui/tiles/rows.ts";
 import type { GridItem, GridStatus, TilesSource } from "../../components/ui/tiles/source.ts";
 import type { BrowseStore } from "./store.ts";
@@ -46,7 +46,7 @@ export interface BrowseSourceDeps {
    * 与胶片带**共用**的缩略图队列（工作区建、两边用）：
    * 网格里已缓存的照片，胶片带里立刻就有。
    */
-  thumbs: { get: (path: string) => ThumbEntry; request: (path: string) => void; clear: () => void };
+  thumbs: Pick<ThumbQueue, "get" | "request" | "clear" | "prioritize">;
   /** 当前档位（受控：工作区落盘） */
   tileStep: () => number;
   setTileStep: (step: number) => void;
@@ -293,7 +293,20 @@ export function browseSource(deps: BrowseSourceDeps): TilesSource {
     setTileStep: (step) => deps.setTileStep(step),
     commitTileStep: () => deps.commitTileStep(),
     thumb: (path) => deps.thumbs.get(path),
-    requestThumb: (path) => deps.thumbs.request(path),
+    requestThumb: (path, priority) => deps.thumbs.request(path, priority),
+    // 窗口优先：索引先把显示序换成数据序，再拿已经加载到的 item 的绝对路径
+    prioritizeVisible: (from, to) => {
+      const paths: string[] = [];
+      for (let index = Math.max(0, from); index < to; index += 1) {
+        const dataIndex = dataIndexAt(index);
+        if (dataIndex === undefined) continue;
+        const item = store.itemAt(dataIndex);
+        const root = deps.root();
+        if (item === null || root === null) continue;
+        paths.push(joinPath(root, item.relPath));
+      }
+      deps.thumbs.prioritize(paths);
+    },
   };
 }
 

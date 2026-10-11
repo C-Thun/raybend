@@ -31,7 +31,7 @@
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -64,6 +64,89 @@ const MAX_PAYLOAD_BYTES: u64 = 1024 * 1024 * 1024;
 pub fn shared() -> &'static Mutex<RawWorker> {
     static SHARED: std::sync::OnceLock<Mutex<RawWorker>> = std::sync::OnceLock::new();
     SHARED.get_or_init(|| Mutex::new(RawWorker::new()))
+}
+
+// ─────────────────────── 解码优先级（§4.4）───────────────────────
+
+/// **解码优先级**（`specs/editor-session-pipeline.md` §4.4）：高优先可插队。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum DecodePriority {
+    /// 编辑器当前照片（换照片 / 过渡帧 / 参数帧）。
+    High = 0,
+    /// 缩略图 / 看图 / 预热。
+    Normal = 1,
+    /// 快照 / 批量 / 导出预览。
+    Low = 2,
+}
+
+const PRIORITY_LEVELS: usize = 3;
+
+#[derive(Default)]
+struct GateState {
+    busy: bool,
+    waiting: [u32; PRIORITY_LEVELS],
+}
+
+/// 优先级闸门：全进程一条 RAW 管道，谁先拿到许可谁先解（高优先先走）。
+#[derive(Default)]
+struct PriorityGate {
+    state: Mutex<GateState>,
+    cv: Condvar,
+}
+
+impl PriorityGate {
+    fn acquire(&self, priority: DecodePriority) -> DecodePermit<'_> {
+        let index = priority as usize;
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        loop {
+            let higher_waiting = state.waiting[..index].iter().any(|count| *count > 0);
+            if !state.busy && !higher_waiting {
+                state.busy = true;
+                return DecodePermit { gate: self };
+            }
+            state.waiting[index] += 1;
+            state = self
+                .cv
+                .wait(state)
+                .unwrap_or_else(|error| error.into_inner());
+            state.waiting[index] -= 1;
+        }
+    }
+}
+
+fn gate() -> &'static PriorityGate {
+    static GATE: std::sync::OnceLock<PriorityGate> = std::sync::OnceLock::new();
+    GATE.get_or_init(PriorityGate::default)
+}
+
+/// 解码许可（RAII）：**拿到它才算排到队**；drop 时让给下一个（高优先先走）。
+pub struct DecodePermit<'a> {
+    gate: &'a PriorityGate,
+}
+
+impl Drop for DecodePermit<'_> {
+    fn drop(&mut self) {
+        let mut state = self
+            .gate
+            .state
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        state.busy = false;
+        self.gate.cv.notify_all();
+    }
+}
+
+/// 排一个**解码优先级**的队；返回时已经拿到许可（drop 许可才让位）。
+///
+/// 为什么要有它：全进程只有一条 RAW 管道（[`shared`]），谁先抢到锁谁先解。
+/// 一台机器跑批量快照时，编辑器换照片的解码会被一屋子缩略图 / 快照排在后面 ——
+/// 这里让高优先的等待者先拿到许可（`Mutex` 本身不保证公平）。
+///
+/// **不要嵌套**：许可不可重入（同一线程再 `acquire` 会自锁）。只包住**最外层**的重解码
+/// （编辑器解码 / 缩略图渲染 / 导出），探针类小请求不排队。
+#[must_use]
+pub fn acquire(priority: DecodePriority) -> DecodePermit<'static> {
+    gate().acquire(priority)
 }
 
 // ─────────────────────────── 协议 ───────────────────────────
@@ -724,7 +807,11 @@ pub fn resolve_worker() -> Result<(PathBuf, bool), String> {
 
 fn spawn_proc(path: &std::path::Path) -> Result<Proc, WorkerError> {
     let marker=path.file_name().is_none_or(|n|!n.to_string_lossy().starts_with("raybend-raw-worker"));
-    crate::worker_process::spawn_proc(path, &if marker {vec![WORKER_ARG.into()]} else {Vec::new()})
+    crate::worker_process::spawn_proc(
+        path,
+        &if marker { vec![WORKER_ARG.into()] } else { Vec::new() },
+        "raw-worker",
+    )
 }
 
 fn describe_exit(status: &std::process::ExitStatus) -> String {
@@ -979,6 +1066,54 @@ fn write_response<W: Write>(out: &mut W, resp: &Response, payload: &[u8]) -> std
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 等某个优先级真的有等待者（有上限，避免测试挂死）。
+    fn wait_for_waiter(gate: &PriorityGate, priority: DecodePriority) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let waiting = {
+                let state = gate.state.lock().unwrap_or_else(|error| error.into_inner());
+                state.waiting[priority as usize] > 0
+            };
+            if waiting {
+                return;
+            }
+            assert!(std::time::Instant::now() < deadline, "等不到排队者");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+
+    /// **高优先插队**（§4.4）：批量已排满时，编辑器解码先走。
+    /// 用独立的闸门实例（不碰全局），与其它并行测试互不干扰。
+    #[test]
+    fn decode_priority_lets_the_editor_jump_a_full_batch_queue() {
+        let gate = Arc::new(PriorityGate::default());
+        let order = Arc::new(Mutex::new(Vec::new()));
+        let held = gate.acquire(DecodePriority::Low);
+        let mut handles = Vec::new();
+        for (priority, name) in [
+            (DecodePriority::Low, "batch"),
+            (DecodePriority::Normal, "thumb"),
+            (DecodePriority::High, "editor"),
+        ] {
+            let order = Arc::clone(&order);
+            let thread_gate = Arc::clone(&gate);
+            handles.push(std::thread::spawn(move || {
+                let _permit = thread_gate.acquire(priority);
+                order.lock().unwrap().push(name);
+            }));
+            wait_for_waiter(&gate, priority);
+        }
+        drop(held);
+        for handle in handles {
+            handle.join().expect("线程不 panic");
+        }
+        assert_eq!(
+            *order.lock().unwrap(),
+            vec!["editor", "thumb", "batch"],
+            "高优先必须插到批量与缩略图前面"
+        );
+    }
 
     #[test]
     fn a_stale_worker_is_rejected_loudly_instead_of_silently_wrong() {

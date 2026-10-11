@@ -180,6 +180,7 @@ pub async fn organization_tag_timeline<R: Runtime>(
             scope: Scope::TagKey { key: tags::fold_name(&tag_key) },
             filter: filter.into_filter(),
             sort: query::Sort::new(query::SortKey::TakenAt, true),
+            visibility: query::Visibility::Live,
         };
         db.read(|conn| {
             let total = query::count(conn, &q)?;
@@ -208,6 +209,7 @@ pub async fn organization_bucket_timeline<R: Runtime>(
                         scope: Scope::AssetIds { ids: chunk.iter().map(|item| item.asset_id).collect() },
                         filter: filter.clone().into_filter(),
                         sort: query::Sort::new(query::SortKey::TakenAt, true),
+                        visibility: query::Visibility::Live,
                     };
                     entries.extend(query::timeline(conn, &q, 0)?.into_iter().map(|row| TimelineEntry {
                         id: row.id, taken_at: row.taken_at, rel_path: row.rel_path,
@@ -267,6 +269,7 @@ pub async fn organization_rules_preview<R: Runtime>(
                             scope: Scope::Repository,
                             filter: organization::filter_for_group(group),
                             sort: query::Sort::default(),
+                            visibility: query::Visibility::Live,
                         };
                         matched.extend(query::timeline(conn, &q, 0)?.into_iter().map(|row| row.id));
                     }

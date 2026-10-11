@@ -37,7 +37,7 @@ pub mod worker;
 pub use backend::{DecodeRequest, PixelSource, RawBackend, RawError, RawImage8, RawResult};
 pub use precheck::{Container, Precheck, precheck};
 pub use rawler_backend::RawlerBackend;
-pub use worker::{RawWorker, WorkerError};
+pub use worker::{DecodePriority, RawWorker, WorkerError};
 
 /// 本项目**内置**的后端名（日志与诊断用）。
 pub const DEFAULT_BACKEND: &str = "rawler";

@@ -26,10 +26,13 @@
 //! **删掉整个缓存目录后，功能降级但完全可用。** 缓存库里没有任何信息是不可再生的。
 
 pub mod cache;
+/// 库外（未入库）图的进程内缓存 —— 见 `AGENTS.md` §2.24。
+pub mod memory;
 pub mod render;
 pub mod worker;
 
 pub use cache::{CacheStats, GcOutcome, ThumbsDb, cache_key};
+pub use memory::{MemoryStats, SourceKey, SourceThumbs};
 pub use render::{
     SizeClass, Thumb, render_file, render_file_with_edit, render_sig, render_sig_with_edit,
 };

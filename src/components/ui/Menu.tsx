@@ -63,12 +63,19 @@ export interface MenuProps {
   onOpenChange?: (open: boolean) => void;
   /** 受控开关；标题栏用它让一个菜单打开后，悬浮其它标题即可切换。 */
   open?: boolean;
+  /**
+   * 选中一项后是否关闭菜单（默认 `true`）。
+   *
+   * 多选类菜单（如标签筛选）传 `false`：点一条就关会让「再多选两条」变成反复开关。
+   */
+  closeOnSelect?: boolean;
 }
 
 export function Menu(props: MenuProps) {
   return (
     <ArkMenu.Root
       open={props.open}
+      closeOnSelect={props.closeOnSelect ?? true}
       positioning={{ placement: props.placement ?? "bottom-start" }}
       onSelect={(details) => props.onSelect(String(details.value))}
       onOpenChange={(details) => props.onOpenChange?.(details.open)}
@@ -116,7 +123,7 @@ export function Menu(props: MenuProps) {
                         {item.icon}
                       </span>
                     </Show>
-                    <ArkMenu.ItemText class="min-w-0 flex-1 truncate">
+                    <ArkMenu.ItemText class="min-w-0 flex-1 overflow-hidden whitespace-nowrap fade-x-end">
                       {item.label}
                     </ArkMenu.ItemText>
                     <Show when={item.shortcut}>

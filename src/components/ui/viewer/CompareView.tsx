@@ -80,6 +80,7 @@ import {
   takeViewerFocus,
   viewerControlsVisible,
 } from "./interaction.ts";
+import { isOneToOne, oneToOneZoom, zoomPercent } from "./zoom.ts";
 import { ViewerControls } from "./ViewerControls.tsx";
 import { registerViewerActions } from "./actions.ts";
 
@@ -198,11 +199,11 @@ export function CompareView(props: CompareViewProps): JSX.Element {
     });
   };
 
-  /** 100%：画布 1:1（与单张看图同一口径）；同样是归位（清错位） */
+  /** 100%：**1 图像像素对 1 设备像素**（与单张看图、编辑器原生视口同一口径）；同样是归位（清错位） */
   const goToOneToOne = (): void => {
     batch(() => {
       setFitId(null);
-      setManualZoom(clampZoom(1));
+      setManualZoom(clampZoom(oneToOneZoom()));
       setPan({ x: 0, y: 0 });
       setPaneOffsets(new Map());
     });
@@ -291,8 +292,8 @@ export function CompareView(props: CompareViewProps): JSX.Element {
     return props.photos.find((photo) => photo.id === id) ?? props.photos[0];
   };
 
-  /** 是不是正处在 100%（画布 1:1） */
-  const atOneToOne = (): boolean => Math.abs(zoom() - 1) < 1e-6;
+  /** 是不是正处在 100%（1 图像像素 = 1 设备像素，见 `viewer/zoom.ts`） */
+  const atOneToOne = (): boolean => isOneToOne(zoom());
 
   /**
    * **双击**某格：在 **100% ↔ 适合窗口** 之间切（人类 2026-09-20 报「双击放大缩小还是不行」）。
@@ -499,10 +500,10 @@ export function CompareView(props: CompareViewProps): JSX.Element {
     props.onClose?.();
   };
 
-  /** 读数：绝对倍率（100% = 1:1）；处在「适合窗口」状态时只说「适配」 */
+  /** 读数：绝对倍率（100% = 1:1 设备像素）；处在「适合窗口」状态时只说「适配」 */
   const zoomLabel = (): string => {
     if (fitId() !== null && fitId() === props.store.current()?.id) return t("viewer.fit");
-    return `${Math.round(zoom() * 100)}%`;
+    return `${Math.round(zoomPercent(zoom()))}%`;
   };
 
   const focusFromTarget = (target: EventTarget | null): ViewerPhoto | undefined => {
@@ -687,7 +688,11 @@ export function CompareView(props: CompareViewProps): JSX.Element {
                 <Show when={props.store.imageUrlFor(placement().photo)}>
                   {(url) => (
                     <img
-                      class="pointer-events-none absolute max-w-none select-none"
+                      /*
+                       * 盒子由 `placement().natural`（= 变体尺寸）给出 —— 与主看图同一条规矩；
+                       * `object-contain` 是安全网：比例若有微小出入也不拉变形（2026-10-11 崔总真机反馈）。
+                       */
+                      class="pointer-events-none absolute max-w-none select-none object-contain"
                       src={url()}
                       alt=""
                       draggable={false}

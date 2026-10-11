@@ -241,6 +241,23 @@ pub const CATALOG_MIGRATIONS: &[Migration] = &[
         name: "ai_vocabulary",
         sql: include_str!("migrations/catalog_0017_ai_vocabulary.sql"),
     },
+    Migration {
+        version: 18,
+        name: "recycle",
+        sql: include_str!("migrations/catalog_0018_recycle.sql"),
+    },
+    Migration {
+        version: 19,
+        // 每文件方向 + 展示尺寸；latest 与定稿的输出尺寸（specs/display-size-source.md）
+        name: "display_size",
+        sql: include_str!("migrations/catalog_0019_display_size.sql"),
+    },
+    Migration {
+        version: 20,
+        // RAW 尺寸改按 rawler 出图尺寸记 ⇒ 老记录置空待重建（specs/display-size-lifecycle.md §4）
+        name: "size_refresh",
+        sql: include_str!("migrations/catalog_0020_size_refresh.sql"),
+    },
 ];
 
 /// 缩略图缓存库 `thumbs.db` 的迁移列表。
@@ -1853,6 +1870,153 @@ mod tests {
                 .unwrap()
                 .applied
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn display_size_migration_adds_nullable_columns_without_rewriting_rows() {
+        // v18 → v19（specs/display-size-source.md §7.8）：**只有 ALTER**，
+        // 旧行一个字节都不动，新列一律 NULL（NULL = 未知，消费方回退旧行为）。
+        let mut conn = mem();
+        apply_list(
+            &mut conn,
+            DbKind::Catalog,
+            &CATALOG_MIGRATIONS[..18],
+            Backups::none(),
+            1,
+        )
+        .unwrap();
+        conn.execute_batch(
+            "INSERT INTO assets(id, taken_at, imported_at, updated_at) VALUES(1, 1, 1, 1);
+             INSERT INTO asset_files(asset_id, role, rel_path, rel_path_folded, ext,
+                                     size_bytes, mtime_ms, created_at, updated_at)
+               VALUES(1, 'bitmap', 'photos/a.jpg', 'photos/a.jpg', 'jpg', 10, 1, 1, 1);
+             INSERT INTO develop_stacks(asset_id, created_at, updated_at) VALUES(1, 1, 1);
+             INSERT INTO issues(asset_id, schema_version, name, profile_json, profile_hash,
+                                source_base, created_at, ordinal)
+               VALUES(1, 1, '柔光', '{}', 'hash', 'raw', 1, 0);",
+        )
+        .unwrap();
+
+        let out = apply(&mut conn, DbKind::Catalog, Backups::none(), 2).unwrap();
+        assert_eq!(out.applied, vec![19, 20]);
+        assert_eq!(schema_version(&conn).unwrap(), 20);
+
+        // 旧行原样还在；新列全部 NULL
+        let (path, files_n, stack_n, issue_n): (String, i64, i64, i64) = conn
+            .query_row(
+                "SELECT rel_path,
+                        (SELECT display_width IS NULL AND display_height IS NULL AND orientation IS NULL
+                           FROM asset_files WHERE asset_id = 1),
+                        (SELECT output_width IS NULL AND output_height IS NULL
+                           FROM develop_stacks WHERE asset_id = 1),
+                        (SELECT output_width IS NULL AND output_height IS NULL
+                           FROM issues WHERE asset_id = 1)
+                   FROM asset_files WHERE asset_id = 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(path, "photos/a.jpg");
+        assert_eq!(files_n, 1, "每文件三列必须是 NULL");
+        assert_eq!(stack_n, 1, "latest 输出尺寸必须是 NULL");
+        assert_eq!(issue_n, 1, "定稿输出尺寸必须是 NULL");
+
+        // 新列能写、能读回来（写侧不靠默认值）
+        conn.execute(
+            "UPDATE asset_files SET display_width = 4000, display_height = 6000, orientation = 6 WHERE asset_id = 1",
+            [],
+        )
+        .unwrap();
+        let (w, h): (i64, i64) = conn
+            .query_row(
+                "SELECT display_width, display_height FROM asset_files WHERE asset_id = 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!((w, h), (4000, 6000));
+
+        // 重复应用是空操作
+        assert!(
+            apply(&mut conn, DbKind::Catalog, Backups::none(), 3)
+                .unwrap()
+                .applied
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn size_refresh_migration_nulls_only_raw_based_rows() {
+        // v20（specs/display-size-lifecycle.md §4）：RAW 尺寸改按 rawler 出图尺寸记，
+        // 老记录里基于旧口径（我们私自解的文件头整帧）的值必须重算 —— 迁移只**置空**，
+        // 且只动 RAW 那条链：位图行、sooc 基的栈与定稿一个字节都不许碰。
+        let mut conn = mem();
+        apply_list(
+            &mut conn,
+            DbKind::Catalog,
+            &CATALOG_MIGRATIONS[..19],
+            Backups::none(),
+            1,
+        )
+        .unwrap();
+        conn.execute_batch(
+            "INSERT INTO assets(id, taken_at, imported_at, updated_at) VALUES(1, 1, 1, 1), (2, 1, 1, 1);
+             -- 资产 1：位图 + RAW 两行，都已有尺寸（旧口径的 RAW = 5264×3904）
+             INSERT INTO asset_files(asset_id, role, rel_path, rel_path_folded, ext,
+                                     size_bytes, mtime_ms, display_width, display_height, orientation,
+                                     created_at, updated_at)
+               VALUES(1, 'bitmap', 'photos/a.jpg', 'photos/a.jpg', 'jpg', 10, 1, 3712, 2784, 1, 1, 1),
+                      (1, 'raw', 'photos/_RAW/a.rw2', 'photos/_raw/a.rw2', 'rw2', 20, 1, 5264, 3904, 1, 1, 1);
+             -- 资产 1：sooc 基的栈（不动）
+             INSERT INTO develop_stacks(asset_id, source_base, output_width, output_height, created_at, updated_at)
+               VALUES(1, 'sooc', 1000, 1000, 1, 1);
+             -- 资产 2：raw 基的栈（置空）
+             INSERT INTO develop_stacks(asset_id, source_base, output_width, output_height, created_at, updated_at)
+               VALUES(2, 'raw', 5264, 3904, 1, 1);
+             -- 定稿：sooc 基（不动）/ raw 基（置空）
+             INSERT INTO issues(asset_id, schema_version, name, profile_json, profile_hash,
+                                source_base, created_at, ordinal, output_width, output_height)
+               VALUES(1, 1, '柔光', '{}', 'h1', 'sooc', 1, 0, 111, 222),
+                      (2, 1, '浓郁', '{}', 'h2', 'raw', 1, 0, 5264, 3904);",
+        )
+        .unwrap();
+
+        let out = apply(&mut conn, DbKind::Catalog, Backups::none(), 2).unwrap();
+        assert_eq!(out.applied, vec![20]);
+
+        let row = |sql: &str| -> (Option<i64>, Option<i64>) {
+            conn.query_row(sql, [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap()
+        };
+        assert_eq!(
+            row("SELECT display_width, display_height FROM asset_files WHERE role = 'bitmap'"),
+            (Some(3712), Some(2784)),
+            "位图行不动（我们自己的文件头解析就是权威）"
+        );
+        assert_eq!(
+            row("SELECT display_width, display_height FROM asset_files WHERE role = 'raw'"),
+            (None, None),
+            "RAW 行置空，等按 rawler 出图尺寸重建"
+        );
+        assert_eq!(
+            row("SELECT output_width, output_height FROM develop_stacks WHERE asset_id = 1"),
+            (Some(1000), Some(1000)),
+            "sooc 基的栈不动（源尺寸没变）"
+        );
+        assert_eq!(
+            row("SELECT output_width, output_height FROM develop_stacks WHERE asset_id = 2"),
+            (None, None),
+            "raw 基的栈置空"
+        );
+        assert_eq!(
+            row("SELECT output_width, output_height FROM issues WHERE name = '柔光'"),
+            (Some(111), Some(222)),
+            "sooc 基的定稿不动"
+        );
+        assert_eq!(
+            row("SELECT output_width, output_height FROM issues WHERE name = '浓郁'"),
+            (None, None),
+            "raw 基的定稿置空"
         );
     }
 }

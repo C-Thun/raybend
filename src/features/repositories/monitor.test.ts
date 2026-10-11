@@ -3,7 +3,7 @@ import test from "node:test";
 import { spawnSync } from "node:child_process";
 import type { RepositoryConnection, RepositoryView, Volume } from "../../api/types.ts";
 import { createRepositoryState } from "./state.ts";
-import { createRepositoryMonitor, PROBE_DEBOUNCE_MS, RETRY_MS, VOLUME_POLL_MS, type RepositoryMonitorTimers } from "./monitor.ts";
+import { createRepositoryMonitor, PROBE_DEBOUNCE_MS, VOLUME_POLL_MS, type RepositoryMonitorTimers } from "./monitor.ts";
 
 const status = (revision: string, state: RepositoryConnection["state"] = "offline", generation = "1"): RepositoryConnection => ({
   repositoryId: "中文库", revision, state, generation, root: state === "online" ? "E:/照片" : null, reason: null, observedAt: 0,
@@ -47,7 +47,7 @@ function clock() {
   } };
 }
 
-test("订阅先于快照；离线只有三次重试，重复 focus 合并且销毁后停止", async () => {
+test("订阅先于快照；探测只按请求发生一次（失败也不自动重试），销毁后停止", async () => {
   const time = clock(), calls: string[] = [];
   const repositories = createRepositoryState({ api: {
     listRepositories: async () => { calls.push("snapshot"); return [row()]; },
@@ -61,9 +61,12 @@ test("订阅先于快照；离线只有三次重试，重复 focus 合并且销�
   for (let i = 0; i < 100; i++) monitor.request();
   assert.equal([...time.tasks.values()].filter(task => !task.repeat).length, 1);
   await time.fire(PROBE_DEBOUNCE_MS);
-  for (const delay of RETRY_MS) await time.fire(delay);
-  assert.equal(calls.filter(call => call === "probe").length, 4);
+  // 探完仍是离线：**不再自动排下一轮**（崔总 2026-10-11：后台重试是刷屏的来源）
+  assert.equal(calls.filter(call => call === "probe").length, 1);
   assert.equal([...time.tasks.values()].filter(task => !task.repeat).length, 0);
+  // 用户再点一次库 → 才再有下一次探测
+  monitor.request(); await time.fire(PROBE_DEBOUNCE_MS);
+  assert.equal(calls.filter(call => call === "probe").length, 2);
   assert.equal(repositories.byId("中文库")?.photosCount, 7);
   monitor.dispose(); monitor.request(); assert.equal(time.tasks.size, 0); assert.equal(calls[calls.length - 1], "unsubscribe");
 });
@@ -86,7 +89,7 @@ test("事件先于快照；恢复只响应较新代次，真实故障不当拔�
   // The stale probe response cannot overwrite the newer event.
   assert.equal(repositories.byId("中文库")?.online, true);
   repositories.applyConnection({ ...status("6", "unavailable"), reason: "catalog_invalid" });
-  monitor.request(); await time.fire(PROBE_DEBOUNCE_MS); await time.fire(RETRY_MS[0]);
+  monitor.request(); await time.fire(PROBE_DEBOUNCE_MS);
   assert.equal(probes, 2); monitor.dispose();
 });
 
@@ -102,7 +105,7 @@ test("卷枚举单飞，迟到结果不更新已销毁的观察者", async () =>
   assert.equal(changes, 0); assert.equal(time.tasks.size, 0); repositories.dispose();
 });
 
-test("同端点暂忙的 checking 状态按既有预算重试，预算释放后恢复且停止重试", async () => {
+test("暂忙（checking）不自动重试；下一次用户请求才恢复", async () => {
   const time = clock(); let probes = 0;
   const repositories = createRepositoryState({ api: {
     listRepositories: async () => [row()],
@@ -117,15 +120,15 @@ test("同端点暂忙的 checking 状态按既有预算重试，预算释放后�
   });
   await monitor.start(); await time.fire(PROBE_DEBOUNCE_MS);
   assert.equal(repositories.byId("中文库")?.connection?.reason, "busy");
-  assert.equal([...time.tasks.values()].filter(task => !task.repeat).length, 1);
-  await time.fire(RETRY_MS[0]);
+  assert.equal(probes, 1);
+  assert.equal([...time.tasks.values()].filter(task => !task.repeat).length, 0, "暂忙也不排下一轮");
+  monitor.request(); await time.fire(PROBE_DEBOUNCE_MS);
   assert.equal(repositories.byId("中文库")?.online, true); assert.equal(probes, 2);
   assert.equal([...time.tasks.values()].filter(task => !task.repeat).length, 0);
-  for (const delay of RETRY_MS) await time.fire(delay);
-  assert.equal(probes, 2); monitor.dispose(); repositories.dispose();
+  monitor.dispose(); repositories.dispose();
 });
 
-test("事件订阅失败仍载入登记并有界探测；恢复刷新和清理继续生效", async () => {
+test("事件订阅失败仍载入登记并按需探测；恢复刷新和清理继续生效", async () => {
   const time = clock(); let failures = 0, recoveries = 0, probes = 0;
   const repositories = createRepositoryState({ api: {
     listRepositories: async () => [row()],
@@ -142,7 +145,7 @@ test("事件订阅失败仍载入登记并有界探测；恢复刷新和清理�
   monitor.dispose(); assert.equal(time.tasks.size, 0); repositories.dispose();
 });
 
-test("释放状态不被启动探测、回焦点或卷变化解除；明确重连才恢复", async () => {
+test("释放状态不被启动探测或卷变化解除；明确重连才恢复", async () => {
   const time=clock(); let calls=0;
   const repositories=createRepositoryState({api:{listRepositories:async()=>[row(status("1","released"))],setRepositoryTemplate:async()=>({importTemplate:""}),remountRepository:async(_id,automatic)=>{assert.equal(automatic,false);calls++;return row(status("2","online","2"));}}});
   let volumes:Volume[]=[];

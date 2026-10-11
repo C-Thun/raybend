@@ -2228,9 +2228,12 @@ try {
     await sleep(220);
     result.rightPadLoose = infoPad();
 
+    // 只认**左段**的整理入口：中段的「标签」按钮（打开标签弹窗）与它同名，
+    // 2026-10-11 起中段图标也带了 aria-label，不加作用域会点错。
     const panelButton = (zh, en) =>
-      document.querySelector('button[aria-label="' + zh + '"]') ??
-      document.querySelector('button[aria-label="' + en + '"]');
+      document.querySelector('[data-toolsbar-left] button[aria-label="' + zh + '"]') ??
+      document.querySelector('[data-toolsbar-left] button[aria-label="' + en + '"]') ??
+      document.querySelector('button[aria-label="' + zh + '"]');
     const libraries = panelButton("库目录", "Libraries");
     const buckets = panelButton("相片桶", "Photo buckets");
     const tags = panelButton("标签", "Tags");
@@ -2483,6 +2486,29 @@ try {
       tab("曲线")?.click();
       await new Promise((resolve) => setTimeout(resolve, 300));
       advanced.back = height();
+
+      /*
+       * 色彩管理页签（崔总 2026-10-10 两处实报）：
+       * ① 内容必须紧跟页签条 —— 曲线那份留位容器不许空在色彩内容上方；
+       * ② 右栏滚到底后整页不许被撑高 —— Ark 隐藏 input 若落到文档坐标上，
+       *   点开关会把整窗滚走、中下方留一大片空白。
+       */
+      tab("色彩管理")?.click();
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      const tabStrip = advancedGroup.firstElementChild;
+      const colorPanel = advancedGroup.querySelector("[data-editor-color-management]");
+      advanced.colorGap = colorPanel === null || tabStrip === null
+        ? null
+        : Math.round(colorPanel.getBoundingClientRect().top - tabStrip.getBoundingClientRect().bottom);
+      const panelRail = document.querySelector("[data-editor-panels]");
+      if (panelRail !== null) {
+        panelRail.scrollTop = panelRail.scrollHeight;
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+      advanced.pageOverflow = Math.round(document.documentElement.scrollHeight - window.innerHeight);
+      if (panelRail !== null) panelRail.scrollTop = 0;
+      tab("曲线")?.click();
+      await new Promise((resolve) => setTimeout(resolve, 300));
     }
 
     /*
@@ -2577,6 +2603,18 @@ try {
         problems.push(
           `预设树没有获得有界的内部滚动区（overflow-y=${advanced.treeOverflow}，在容器内=${advanced.treeInside}）` +
             "—— 预设多时会把右栏撑长",
+        );
+      }
+      if (advanced.colorGap === null || advanced.colorGap > 16) {
+        problems.push(
+          `色彩页签内容与页签条之间空了 ${advanced.colorGap}px（只允许组内 gap ≤ 16px）` +
+            "—— 曲线的留位容器漏到了色彩页签（崔总 2026-10-10）",
+        );
+      }
+      if (advanced.pageOverflow > 1) {
+        problems.push(
+          `编辑右栏滚到底后整页高出视口 ${advanced.pageOverflow}px` +
+            "—— Ark 隐藏 input 逃到文档坐标上，点开关会把整窗滚走（崔总 2026-10-10）",
         );
       }
     }

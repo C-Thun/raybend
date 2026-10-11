@@ -25,10 +25,15 @@ unicode-normalization.workspace = true
 wgpu.workspace = true
 pollster.workspace = true
 lensfun.workspace = true
+log.workspace = true
 sha2 = "0.10.9"
 # Already locked/transitive; parse native XMP without a new XML implementation.
 roxmltree = "0.20.0"
 flate2 = "1.1.10"
+# 错误报告包（W3-α，崔总 2026-10-12）：崩溃记录 + 日志打成一个 zip 交给用户自己发给开发者。
+# 已在 Cargo.lock（4.6.1，传递依赖）；**只开 deflate**——加密/bzip2/lzma/zstd 这些我们不用，
+# 开了会把一堆压缩后端拉进发布物。
+zip = { version = "4.6.1", default-features = false, features = ["deflate"] }
 webp = { version = "0.3.1", default-features = false }
 notify = { version = "8.2.0", default-features = false }
 lcms2 = { version = "6.2.0", features = ["static"] }

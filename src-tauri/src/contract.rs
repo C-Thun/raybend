@@ -19,7 +19,7 @@ use crate::repo::{RepositoryPathDto, RepositoryProbeDto, RepositoryViewDto};
 use crate::repo::{RepositorySettingsDto, TemplatePreviewDto};
 use crate::source::{
     DirEntryView, FileExifView, MetaFileView, PhotoCountView, PhotoMetaView, RecentDirView,
-    SourceItemView, SourceScanView, TimeEntryView, VolumeView,
+    SourceItemView, SourceScanView, VolumeView,
 };
 
 /// 前端契约文件（与 TS 侧共用同一份）。
@@ -184,6 +184,9 @@ fn photo_meta_keys_match_contract() {
         width: 4000,
         height: 3000,
         orientation: 1,
+        taken_at_ms: Some(1_700_000_000_000),
+        taken_at_source: Some("exif".to_string()),
+        taken_at_offset_min: Some(480),
     };
     assert_eq!(keys_of_value(&meta), contract_keys("PhotoMeta"));
 }
@@ -250,7 +253,6 @@ fn source_scan_keys_match_contract() {
 
 #[test]
 fn time_entry_keys_match_contract() {
-    assert_eq!(keys_of::<TimeEntryView>(), contract_keys("TimeEntry"));
 }
 
 #[test]
@@ -322,7 +324,6 @@ fn every_contract_entry_has_a_test() {
         "DirEntry",
         "SourceItem",
         "SourceScan",
-        "TimeEntry",
         "PhotoCount",
         "FileExif",
         "RepositoryView",
@@ -354,7 +355,10 @@ fn every_contract_entry_has_a_test() {
         "BrowseFacets",
         "MarkingItem",
         "MarkResult",
-        "DeleteResult",
+        "RecycleResult",
+        "RestoreResult",
+        "PurgeResult",
+        "RecycleSummaryView",
         "DeleteFailure",
         "FlagsView",
         "DirEmptyView",
@@ -395,8 +399,8 @@ fn every_contract_entry_has_a_test() {
 #[test]
 fn browse_assets_dtos_match_contract() {
     use crate::browse::{
-        AssetItem, BrowseFacets, BrowseTimeline, BrowseWindow, DeleteResult, FacetCount, FlagsView,
-        MarkResult, MarkingItem, TimelineEntry,
+        AssetItem, BrowseFacets, BrowseTimeline, BrowseWindow, FacetCount, FlagsView, MarkResult,
+        MarkingItem, PurgeResult, RecycleResult, RecycleSummaryView, RestoreResult, TimelineEntry,
     };
     use crate::dirs::DirEmptyView;
 
@@ -408,7 +412,13 @@ fn browse_assets_dtos_match_contract() {
     assert_eq!(keys_of::<BrowseFacets>(), contract_keys("BrowseFacets"));
     assert_eq!(keys_of::<MarkingItem>(), contract_keys("MarkingItem"));
     assert_eq!(keys_of::<MarkResult>(), contract_keys("MarkResult"));
-    assert_eq!(keys_of::<DeleteResult>(), contract_keys("DeleteResult"));
+    assert_eq!(keys_of::<RecycleResult>(), contract_keys("RecycleResult"));
+    assert_eq!(keys_of::<RestoreResult>(), contract_keys("RestoreResult"));
+    assert_eq!(keys_of::<PurgeResult>(), contract_keys("PurgeResult"));
+    assert_eq!(
+        keys_of::<RecycleSummaryView>(),
+        contract_keys("RecycleSummaryView")
+    );
     assert_eq!(keys_of::<FlagsView>(), contract_keys("FlagsView"));
     assert_eq!(keys_of::<DirEmptyView>(), contract_keys("DirEmptyView"));
 }

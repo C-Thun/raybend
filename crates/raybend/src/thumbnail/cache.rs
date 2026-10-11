@@ -513,7 +513,7 @@ mod tests {
             .unwrap();
         assert_eq!(got.len(), 16);
         assert!(has(&conn, &key, SizeClass::Grid, render_sig(SizeClass::Grid)).unwrap());
-        assert!(!has(&conn, &key, SizeClass::Strip, render_sig(SizeClass::Strip)).unwrap());
+        assert!(!has(&conn, &key, SizeClass::Screen, render_sig(SizeClass::Screen)).unwrap());
     }
 
     #[test]
@@ -602,7 +602,7 @@ mod tests {
         let conn = mem();
         let key = cache_key(None, "a.jpg");
         put_n(&conn, &key, SizeClass::Grid, 10, T0);
-        put_n(&conn, &key, SizeClass::Strip, 20, T0);
+        put_n(&conn, &key, SizeClass::Screen, 20, T0);
         // 老签名（算法升级前）
         put(
             &conn,
@@ -623,7 +623,7 @@ mod tests {
                 .is_some()
         );
         assert!(
-            get(&conn, &key, SizeClass::Strip, render_sig(SizeClass::Strip))
+            get(&conn, &key, SizeClass::Screen, render_sig(SizeClass::Screen))
                 .unwrap()
                 .is_some()
         );
@@ -642,7 +642,7 @@ mod tests {
         let a = cache_key(None, "a.jpg");
         let b = cache_key(None, "b.jpg");
         put_n(&conn, &a, SizeClass::Grid, 8, T0);
-        put_n(&conn, &a, SizeClass::Strip, 8, T0);
+        put_n(&conn, &a, SizeClass::Screen, 8, T0);
         put_n(&conn, &b, SizeClass::Grid, 8, T0);
 
         assert_eq!(remove(&conn, &a, SizeClass::Grid).unwrap(), 1);
@@ -686,7 +686,7 @@ mod tests {
         put(
             &conn,
             &key,
-            SizeClass::Strip,
+            SizeClass::Screen,
             "jpeg-q82-g1",
             &[3u8; 4],
             1,
@@ -799,12 +799,12 @@ mod tests {
         let k2 = cache_key(None, "b.jpg");
         put_n(&conn, &k1, SizeClass::Grid, 100, T0);
         put_n(&conn, &k2, SizeClass::Grid, 50, T0);
-        put_n(&conn, &k1, SizeClass::Strip, 25, T0);
+        put_n(&conn, &k1, SizeClass::Screen, 25, T0);
         let s = stats(&conn).unwrap();
         assert_eq!((s.entries, s.bytes), (3, 175));
         assert_eq!(
             s.by_size,
-            vec![("grid".to_string(), 2, 150), ("strip".to_string(), 1, 25)]
+            vec![("grid".to_string(), 2, 150), ("screen".to_string(), 1, 25)]
         );
     }
 

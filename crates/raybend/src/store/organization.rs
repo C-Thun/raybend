@@ -445,6 +445,8 @@ fn matching_ids(conn: &Connection, bucket: &Bucket, repository_id: &str, candida
             scope: query::Scope::AssetIds { ids: candidates.to_vec() },
             filter: filter_for_group(group),
             sort: query::Sort::default(),
+            // 别会话（回收站）给 Query 加了 visibility；此处按默认（Live）补齐
+            visibility: query::Visibility::default(),
         };
         for row in query::timeline(conn, &query, 0)? {
             found.insert(row.id);

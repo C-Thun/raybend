@@ -164,7 +164,7 @@ export function TreeNode(props: TreeNodeProps) {
       <Show when={local.labelNode} fallback={
         <span
           class={[
-            "min-w-0 flex-1 truncate text-fs-2",
+            "min-w-0 flex-1 overflow-hidden whitespace-nowrap fade-x-end text-fs-2",
             local.selected ? "text-fg-1" : "",
           ]
             .filter(Boolean)

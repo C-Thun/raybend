@@ -1,14 +1,17 @@
 /**
  * 浏览模式的 `toolsbar` 装配（`memory/FUNCTION-BROWSE.md` §3、`design/browse.md` §2.1）。
  *
- * 按钮按**组**从左到右：组内几乎无间距，组间用 `ToolsSeparator`（浅竖线）隔开
- * （分组规则的唯一事实源：`memory/DESIGN.md` §12.12）：
+ * 按钮按**大类**从左到右，**大类之间**才用 `ToolsSeparator`（浅竖线）隔开
+ * （崔总 2026-10-11：分隔线只在概念区别很大时用，能少用就少用）：
  *
  * ```text
- * [删除] │ [撤销][重做] │ [筛选] │ [旗标][清空旗标] │ [★★★★★] │ [●色标×6] │ [赞][踩] │ [标签] │ [锁]
+ * [垃圾桶] │ [撤销][重做] │ [漏斗][旗标][清空旗标][★][●×6][赞][踩][标签][相片桶][锁]
+ * └ 删除 ┘  └ 可逆 ┘   └─────────────── 其余全部 ───────────────┘
  * ```
  *
  * 删除与撤销之间的分隔是**语义性**的：它不可撤销（崔总 2026-09-28）。
+ * 图标按钮的悬停提示统一由 `Button` / `ToggleBlock` 内置（`label`/`aria-label` 即提示文案）；
+ * 星 / 色标 / 赞踩 / 旗标筛选是 `MarkControls.tsx` 的共享控件排（与导出工具条同一份）。
  *
  * # 三态是这一行最容易写错的地方
  *
@@ -33,22 +36,17 @@
  * 属 W2（`specs/M2.md` 的阶段 6 只出控件本身）。
  */
 
-import { For, Show } from "solid-js";
+import { Show } from "solid-js";
 import {
   IconAlbum,
-  IconFlag,
-  IconLock,
   IconArrowBackUp,
+  IconArrowForwardUp,
   IconFilter,
   IconFlagFilled,
   IconFlagOff,
-  IconArrowForwardUp,
-  IconTag,
+  IconLock,
   IconScan,
-  IconStar,
-  IconStarFilled,
-  IconThumbDownFilled,
-  IconThumbUpFilled,
+  IconTag,
   IconTrash,
 } from "@tabler/icons-solidjs";
 
@@ -58,13 +56,12 @@ import { ToolsSeparator } from "../../components/ui/ToolsSeparator.tsx";
 import { ConfirmDialog } from "../../components/ui/Dialog.tsx";
 import { createEasyDestroy } from "../../lib/easy-destroy.ts";
 import { applyMarkIntent, type MarkIntent } from "./mark-actions.ts";
+import { ColorRow, FlagFilterPair, LikeRow, MixedMark, RatingRow } from "./MarkControls.tsx";
 import type { ToastStore } from "../../components/ui/Toast.tsx";
 import { filterFromSelection } from "./filter.ts";
-import { colorText } from "./labels.ts";
 import { Button } from "../../components/ui/Button.tsx";
 import { t } from "../../i18n/index.ts";
 import {
-  COLOR_VALUES,
   LOCK_LEVELS,
   lockCycleTarget,
   lockFilterStep,
@@ -73,7 +70,6 @@ import {
   type TriState,
 } from "../../lib/marking-state.ts";
 import type { BrowseStore } from "./store.ts";
-import { COLOR_DOT_CLASS, isColorLabel } from "../../lib/color-labels.ts";
 
 export interface BrowseToolbarProps {
   store: BrowseStore;
@@ -97,15 +93,6 @@ export interface BrowseToolbarProps {
    * 层叠上下文困住），所以 store 由组装层建、这里只往里推。可选 = 陈列室/单测里不必准备。
    */
   toast?: ToastStore;
-}
-
-/** 混合态的视觉：半亮 + 一个短横。 */
-function MixedMark() {
-  return (
-    <span class="text-fg-2 opacity-70" aria-hidden="true">
-      —
-    </span>
-  );
 }
 
 export function BrowseToolbar(props: BrowseToolbarProps) {
@@ -291,22 +278,19 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
   };
 
   return (
-    <div class="flex items-center">
+    <div class="flex items-center gap-1">
       {/*
         删除（崔总 2026-09-28）：与 `Delete` 键同一个入口（含确认弹窗与回收站语义），
         由组装层接 `browseActions()?.requestDelete()`。它**不可撤销** ——
-        所以和撤销/重做之间必须有组分隔线，「长得像的按钮做的事不一样」要看得出来。
+        所以和撤销/重做之间必须有**大类分隔线**（2026-10-11 口径：只在功能大类之间用）。
       */}
       <Show when={!props.collectionMode}><Button
         variant="ghost"
         icon={<IconTrash size={14} />}
         disabled={!store.canWrite() || !hasSelection()}
-        title={t("cmd.edit.delete")}
-        aria-label={t("cmd.edit.delete")}
+        aria-label={t("cmd.browse.delete")}
         onClick={() => props.onDelete?.()}
-      >
-        {t("browse.delete")}
-      </Button></Show>
+      /></Show>
 
       <Show when={!props.collectionMode}><ToolsSeparator /></Show>
 
@@ -320,22 +304,16 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
           variant="ghost"
           icon={<IconArrowBackUp size={14} />}
           disabled={!store.canWrite() || !store.undoState().canUndo}
-          title={undoTitle()}
           aria-label={undoTitle()}
           onClick={() => void runHistory("undo")}
-        >
-          {t("browse.undo")}
-        </Button>
+        />
         <Button
           variant="ghost"
           icon={<IconArrowForwardUp size={14} />}
           disabled={!store.canWrite() || !store.undoState().canRedo}
-          title={redoTitle()}
           aria-label={redoTitle()}
           onClick={() => void runHistory("redo")}
-        >
-          {t("browse.redo")}
-        </Button>
+        />
       </div></Show>
 
       <Show when={!props.collectionMode}><ToolsSeparator /></Show>
@@ -361,11 +339,10 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
         /* 漏斗 = 筛选的通用符号；`IconBan` 在本项目里是「移除/排除」的意思（AGENTS.md §11.3），不能混用 */
         icon={<IconFilter size={16} />}
         label={t("browse.filterHint")}
-      >
-        {t("browse.filter")}
-      </ToggleBlock>
+      />
 
-      <ToolsSeparator />
+      {/* 筛选开关右边就是**剩下的一大类**（旗标 / 星级 / 色标 / 赞踩 / 标签 / 相片桶 / 锁），
+          组间不再画线（崔总 2026-10-11：只在功能大类之间用分隔线）。 */}
 
       {/*
         旗标（人类 2026-09-19 重定）：
@@ -388,13 +365,12 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
               onPressedChange={() => void toggleFlag()}
               icon={<IconFlagFilled size={14} />}
               label={t("browse.flagToggle")}
-            >
-              {t("browse.flagToggle")}
-            </ToggleBlock>
+            />
             <Button
               variant="ghost"
               disabled={store.picks().size + store.rejects().size === 0}
               icon={<IconFlagOff size={14} />}
+              aria-label={t("browse.flagClear")}
               onClick={(event) => {
                 clearFlags.request(
                   t("browse.flagClearConfirm"),
@@ -406,157 +382,62 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
                   event,
                 );
               }}
-            >
-              {t("browse.flagClear")}
-            </Button>
+            />
           </>
         }
       >
-        <ToggleBlock
-          pressed={filterFlag() === "pick"}
-          onPressedChange={() =>
-            store.patchFilter({ flag: filterFlag() === "pick" ? null : { mode: "pick" } })
-          }
-          icon={<IconFlagFilled size={14} />}
-          label={t("browse.flagWith")}
-        >
-          {t("browse.flagWith")}
-        </ToggleBlock>
-        <ToggleBlock
-          pressed={filterFlag() === "none"}
-          onPressedChange={() =>
-            store.patchFilter({ flag: filterFlag() === "none" ? null : { mode: "none" } })
-          }
-          icon={<IconFlag size={14} />}
-          label={t("browse.flagWithout")}
-        >
-          {t("browse.flagWithout")}
-        </ToggleBlock>
+        <FlagFilterPair
+          mode={filterFlag() as "pick" | "reject" | "none" | null}
+          onPick={(mode) => store.patchFilter({ flag: mode === null ? null : { mode } })}
+        />
       </Show>
       </div></Show>
 
-      <Show when={!props.collectionMode || filterMode()}><ToolsSeparator /></Show>
-
       {/*
         星级：五颗；混合态用「短横 + 半亮」区分。
-        间距与色标对齐（崔总 2026-09-28）：按钮自身的 2px 内边距就是间隔，
-        容器不再另给 gap —— 星与星、点与点都是 4px。
+        控件排本体在 `MarkControls.tsx`（与导出工具条共用同一份）。
       */}
-      <div class="flex items-center">
-        <Show when={ratingState().kind === "mixed"}>
-          <MixedMark />
-        </Show>
-        <For each={[1, 2, 3, 4, 5]}>
-          {(star) => {
-            const state = () => ratingState();
-            const iconClass = () => {
-              const s = state();
-              if (s.kind === "mixed") return "text-fg-2 opacity-70";
-              return starFilled(star) ? "text-brand" : "text-fg-3";
-            };
-            return (
-              <button
-                type="button"
-                disabled={markDisabled()}
-                aria-label={t("grid.rating").replace("{n}", String(star))}
-                onClick={() => void markRating(star)}
-                class={[
-                  "rounded-(--radius) p-0.5 hover:bg-state-hover",
-                  markDisabled() ? "opacity-40" : "",
-                ].join(" ")}
-              >
-                <span class={iconClass()}>
-                  {starFilled(star) ? <IconStarFilled size={14} /> : <IconStar size={14} />}
-                </span>
-              </button>
-            );
-          }}
-        </For>
-      </div>
-
-      <ToolsSeparator />
+      <RatingRow
+        active={starFilled}
+        mixed={ratingState().kind === "mixed"}
+        disabled={markDisabled()}
+        label={(star) => t("grid.rating").replace("{n}", String(star))}
+        tip={(star) =>
+          filterMode()
+            ? t("browse.filterRatingAtLeast").replace("{n}", String(star))
+            : t("grid.rating").replace("{n}", String(star))
+        }
+        onPick={(star) => void markRating(star)}
+      />
 
       {/* 色标：5 个实心点 + 1 个空心圈（无色） */}
-      <div class="flex items-center gap-1">
-        <Show when={colorState().kind === "mixed"}>
-          <MixedMark />
-        </Show>
-        <For each={COLOR_VALUES}>
-          {(color) => {
-            const active = () => {
-              const s = colorState();
-              return s.kind === "value" && s.value === color;
-            };
-            const filtered = () =>
-              filterMode() &&
-              (store.filter().colors ?? []).includes(color ?? "none");
-            return (
-              <button
-                type="button"
-                disabled={markDisabled()}
-                aria-label={colorText(color)}
-                onClick={() => void markColor(color)}
-                class={[
-                  "h-3.5 w-3.5 rounded-full",
-                  /*
-                   * 有颜色的圆点**只要颜色**，不加描边（人类 2026-09-19：降低框线感）；
-                   * 但「取消标色」那个空圆必须留一圈 —— 否则它在面色上根本看不见。
-                   */
-                  color === null
-                    ? "ring-1 ring-line-2 bg-transparent"
-                    : (isColorLabel(color) ? COLOR_DOT_CLASS[color] : ""),
-                  /*
-                   * 选中态 = **两层环**（人类 2026-09-19）：
-                   *   * 外圈：固定主色（`ring-2 ring-brand`，与全局「点击后=主色底」一脉）；
-                   *   * 内圈：**所在面的颜色**（`inset-ring-1`）——
-                   *     让它把主色与色标本色隔开一圈，形成「主色环扣着一颗色标」的效果。
-                   * 代价是加内圈后色标看起来小了一点，这是**预期的**（内圈占了本色）。
-                   */
-                  active() || filtered()
-                    ? "ring-2 ring-brand inset-ring-1 inset-ring-(--label-ring-inset)"
-                    : "",
-                  markDisabled() ? "opacity-40" : "",
-                ].join(" ")}
-              />
-            );
-          }}
-        </For>
-      </div>
+      <ColorRow
+        selected={(color) => {
+          if (filterMode()) return (store.filter().colors ?? []).includes(color ?? "none");
+          const state = colorState();
+          return state.kind === "value" && state.value === color;
+        }}
+        mixed={colorState().kind === "mixed"}
+        disabled={markDisabled()}
+        onPick={(color) => void markColor(color)}
+      />
 
-      <ToolsSeparator />
-
-      {/* 喜欢：三态（喜欢 / 不喜欢 / 取消）—— 赞与踩是一组，组内几乎无间距 */}
-      <div class="flex items-center gap-0.5">
-        <Show when={likeState().kind === "mixed"}>
-          <MixedMark />
-        </Show>
-        <ToggleBlock
-          pressed={likePressed("like")}
-          disabled={markDisabled()}
-          onPressedChange={() => void markLike("like")}
-          icon={<IconThumbUpFilled size={16} />}
-          label={t("browse.like")}
-        />
-        <ToggleBlock
-          pressed={likePressed("dislike")}
-          disabled={markDisabled()}
-          onPressedChange={() => void markLike("dislike")}
-          icon={<IconThumbDownFilled size={16} />}
-          label={t("browse.dislike")}
-        />
-      </div>
-
-      <ToolsSeparator />
+      {/* 喜欢：三态（喜欢 / 不喜欢 / 取消）—— 赞与踩是一组 */}
+      <LikeRow
+        pressed={likePressed}
+        mixed={likeState().kind === "mixed"}
+        disabled={markDisabled()}
+        onPick={(value) => void markLike(value)}
+      />
 
       {/* 标签：开弹窗（`TagDialog`，单张可增删、批量只加） */}
       <Button
         variant="ghost"
         disabled={markDisabled()}
         icon={<IconTag size={14} />}
+        aria-label={t("browse.tag")}
         onClick={props.onOpenTags}
-      >
-        {t("browse.tag")}
-      </Button>
+      />
       <Show when={props.onOpenAi}><Button variant="ghost" icon={<IconScan size={14} />} aria-label={t("ai.recognize")} onClick={props.onOpenAi} /></Show>
       <Menu
         label={t("org.bucketActions")}
@@ -576,8 +457,6 @@ export function BrowseToolbar(props: BrowseToolbarProps) {
           <IconAlbum size={16} />
         </button>}
       </Menu>
-
-      <ToolsSeparator />
 
       {/*
         锁：**一个循环键**（崔总 2026-09-28：一级/二级并成一颗）。

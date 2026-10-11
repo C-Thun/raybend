@@ -37,6 +37,11 @@ use crate::media::exif;
 pub const UNKNOWN_EDGE: u32 = 0;
 
 /// 一张照片的展示用基本信息。
+///
+/// **拍摄时间也算在里面**（2026-10-11 崔总口径）：读方向/尺寸时那次 EXIF 读
+/// **本来就把 `DateTimeOriginal` 拿在手里**，顺手带出来几乎是免费的；
+/// 前端「按时间」分组就靠它，不再有第二条专门读时间的命令
+/// （规格 `specs/source-time-inline.md`）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct PhotoMeta {
     /// 宽（**已应用方向**）
@@ -45,6 +50,12 @@ pub struct PhotoMeta {
     pub height: u32,
     /// 原始 EXIF 方向（`1..8`）
     pub orientation: u16,
+    /// 拍摄时间（Unix 毫秒）。`None` = 读不到（极罕见）。
+    pub taken_at_ms: Option<i64>,
+    /// 拍摄时间的来源（EXIF / 文件名 / 文件修改时间 / 姊妹文件）。
+    pub taken_at_source: Option<exif::TakenAtSource>,
+    /// 拍摄时间的时区偏移（分钟，东八区 = 480）；`None` = 相机没写时区。
+    pub taken_at_offset_min: Option<i32>,
     /// 文件字节数（缓存失效判据之一）
     pub file_size: u64,
     /// 修改时间（Unix 毫秒；读不到时 `0`。缓存失效判据之一）
@@ -121,10 +132,27 @@ pub fn read_photo_meta(path: &Path) -> Result<PhotoMeta> {
 
     let (width, height) = oriented_size(raw_width, raw_height, orientation);
 
+    /*
+     * 拍摄时间**在同一次 EXIF 读里就有**（`DateTimeOriginal` 就在刚解析出的那些 tag 里）——
+     * 顺手带回，别再过一遍文件（规格 `specs/source-time-inline.md`）。
+     * 读不到 EXIF 就按 `resolve_taken_at` 的既定次序退：文件名 → 文件修改时间。
+     */
+    let file_name = path
+        .file_name()
+        .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+    let taken = exif::resolve_taken_at(
+        Some(&exif),
+        &file_name,
+        (mtime_ms != 0).then_some(mtime_ms),
+    );
+
     Ok(PhotoMeta {
         width,
         height,
         orientation,
+        taken_at_ms: taken.map(|t| t.millis),
+        taken_at_source: taken.map(|t| t.source),
+        taken_at_offset_min: taken.and_then(|t| t.offset_min),
         file_size,
         mtime_ms,
     })
@@ -157,6 +185,35 @@ mod tests {
     /// 造一个只带 EXIF 的**裸 TIFF**（RAW 就是这条路径）。
     ///
     /// 手写最小 TIFF：`MM` 字节序 + 一个 IFD，含 Orientation / ImageWidth / ImageLength。
+    #[test]
+    fn 拍摄时间跟着读头一起回来() {
+        let dir = tempfile::tempdir().expect("临时目录");
+        // 文件名里有日期：EXIF 读不到时兜底来源是 Filename，值就是文件名解析出来的那个
+        let named = write_jpeg(dir.path(), "IMG_20260815_123456.jpg", 40, 30);
+        let meta = read_photo_meta(&named).expect("读得到");
+        assert_eq!(
+            meta.taken_at_source,
+            Some(crate::media::exif::TakenAtSource::Filename)
+        );
+        let expected = crate::media::exif::resolve_taken_at(None, "IMG_20260815_123456.jpg", None)
+            .expect("文件名里有日期");
+        assert_eq!(meta.taken_at_ms, Some(expected.millis));
+
+        // 名字里没日期：退到文件修改时间，来源标成 FileMtime
+        let plain = write_jpeg(dir.path(), "plain.jpg", 40, 30);
+        let meta = read_photo_meta(&plain).expect("读得到");
+        assert_eq!(
+            meta.taken_at_source,
+            Some(crate::media::exif::TakenAtSource::FileMtime)
+        );
+        let mtime = std::fs::metadata(&plain)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| i64::try_from(d.as_millis()).unwrap_or(0));
+        assert_eq!(meta.taken_at_ms, mtime);
+    }
+
     fn write_bare_tiff_with_orientation(
         dir: &Path,
         name: &str,

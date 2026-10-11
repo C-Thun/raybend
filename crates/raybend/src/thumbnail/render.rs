@@ -1,14 +1,13 @@
 //! 缩略图渲染：解码 → 按 EXIF 朝向摆正 → 缩放 → 编码 JPEG。
 //!
-//! # 尺度（`AGENTS.md` §6.5）
+//! # 尺度（`AGENTS.md` §6.5、`specs/thumbnail-tiers-and-import-memory.md`）
 //!
-//! 第一阶段只有两个尺度，够用且省事：
+//! **缩图只有两档**（崔总 2026-10-11 定：192 那一档取消 —— 384 直接缩着显示就行，
+//! 没必要为胶片带多算一遍缩图）：
 //!
-//! * [`SizeClass::Grid`] —— 网格缩略图，长边 384：浏览网格最多 9 档（最大 512 显示宽），
-//!   384 在常见档位下足够清晰；
-//! * [`SizeClass::Strip`] —— 胶片带，长边 192（显示约 96×80，给到 2×）。
-//!
-//! `SCREEN` / `FULL` 属于后续（视口分辨率与 1:1），本阶段不做。
+//! * [`SizeClass::Grid`] —— 缩略图，长边 384：网格 tiles、**所有**胶片带、定稿卡片都用它；
+//! * [`SizeClass::Screen`] —— 载入占位 / 总览（长边 1920）；
+//! * [`SizeClass::Full`] —— 真身（不缩放），看图终态（`specs/view-true-image.md`）。
 //!
 //! # 渲染签名
 //!
@@ -36,10 +35,8 @@ use crate::store::develop::DevelopStack;
 use crate::error::{Error, Result};
 use crate::media::kind::{MediaKind, kind_of_file};
 
-/// 网格缩略图长边。
+/// 缩略图长边（网格 tiles、所有胶片带、定稿卡片共用这一档）。
 pub const GRID_LONG_EDGE: u32 = 384;
-/// 胶片带缩略图长边。
-pub const STRIP_LONG_EDGE: u32 = 192;
 /// 屏幕（看图用；`AGENTS.md` §6.5 的 SCREEN 档 —— 视口级别，比网格大一档）。
 ///
 /// 1920 是个折中：绝大多数显示器 1:1 看已经够清楚，解码与缓存代价又远小于原图。
@@ -66,7 +63,28 @@ pub const AVIF_QUALITY: u8 = 90;
 /// 慢 8 倍以上，所以线程是必须的。
 pub const AVIF_SPEED: u8 = 10;
 
-/// **AVIF 编码**（全系统缓存图的唯一出口）。
+/// **缓存图的编码格式 —— 由场景决定**（崔总 2026-10-11 定；`AGENTS.md` §2.24）。
+///
+/// * [`EncodeFormat::Avif`]：**库内**（浏览 / 编辑 / 导出）。库里有 catalog + 反复访问，
+///   为画质与磁盘占用付编解码代价是值的（AVIF q90 / 4:4:4）。
+/// * [`EncodeFormat::Jpeg`]：**库外**（import 的来源目录）。那里只求「最快出现」——
+///   来源是相机卡 / 待入老库 / 临时盘，导入完就不会再回来，画质与体积都可以让步。
+///
+/// 实测（同一张 384px 图，Windows release，真照片）：AVIF q90 要 **118–166 ms**，
+/// JPEG q82 只要 **3–5 ms**（体积 25 KB → 27 KB）——给 import 做 AVIF 是纯负优化。
+/// 依据 `implementations/2026-10-11_import-tiles-diagnosis.md`。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum EncodeFormat {
+    #[default]
+    Avif,
+    Jpeg,
+}
+
+/// **库外（import）小图的质量**：q82 —— import 第一版（2026-09-16）就是这个值，
+/// 也是实测「3–5 ms/张」那一档（`AGENTS.md` §2.24）。
+pub const JPEG_THUMB_QUALITY: u8 = 82;
+
+/// **AVIF 编码**（库内缓存图的唯一出口；库外走 [`EncodeFormat::Jpeg`]）。
 ///
 /// # Errors
 /// 编码器内部错误（尺寸为 0、数据长度对不上…）。
@@ -138,19 +156,34 @@ pub fn encode_avif_with_metadata(rgb: &[u8], width:u32,height:u32,quality:u8,exi
 // v13: optional camera base curve before the editable user curve.
 // v14: RGB16 display stages; quantize only after sharpen/LUT/geometry.
 // v15: append an sRGB ICC to AVIF without changing or re-encoding AV1 samples.
-pub const PIPELINE_VERSION: u32 = 15;
+// v16: 3:1 展示夹取先截后缩 —— 取源/解码尺寸把夹取算进去（极端长宽比不再糊，崔总 2026-10-10）。
+pub const PIPELINE_VERSION: u32 = 16;
 
 /// 缩略图尺度。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SizeClass {
-    /// 网格（长边 [`GRID_LONG_EDGE`]）。
+    /// 缩略图（长边 [`GRID_LONG_EDGE`]）—— 网格 tiles、胶片带、定稿卡片都吃它。
     Grid,
-    /// 胶片带（长边 [`STRIP_LONG_EDGE`]）。
-    Strip,
-    /// 看图（长边 [`SCREEN_LONG_EDGE`]）。
+    /// 看图**载入占位**（长边 [`SCREEN_LONG_EDGE`]）。
     Screen,
+    /// **真身**：该图自己的像素，不缩放（2026-10-11 崔总口径）。
+    ///
+    /// 看图（view / compare / fullscreen）的**终态**就是这一档；`Screen` 只是它到达之前的占位。
+    /// 编码用 JPEG q92（20MP 的 AVIF 是秒级，实测见 `specs/view-true-image.md` §0.4）。
+    Full,
 }
+
+/// [`SizeClass::Full`] 的「长边」：**不缩放**。
+///
+/// 取一个大于任何相机像素数的哨兵（当今天花板是 100MP / ~12240px），于是既有的
+/// `resize_for_thumb`（不放大）与 `clamp(…, 8192)` 都自然退化成「原尺寸」——
+/// 不需要给每一处缩放调用都开一个 `if Full` 分支。
+/// （真身档的取源另算：见 [`geometry_input_edge`]。）
+pub const FULL_LONG_EDGE: u32 = 16384;
+
+/// 真身档的 JPEG 质量（q92 ≈ 8.9MB/20MP、编码 ~0.8s；再高质量只增体积）。
+pub const FULL_JPEG_QUALITY: u8 = 92;
 
 impl SizeClass {
     /// 稳定的字符串名（进数据库与缓存键，**不要改**）。
@@ -158,8 +191,8 @@ impl SizeClass {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Grid => "grid",
-            Self::Strip => "strip",
             Self::Screen => "screen",
+            Self::Full => "full",
         }
     }
 
@@ -167,37 +200,43 @@ impl SizeClass {
     pub const fn long_edge(self) -> u32 {
         match self {
             Self::Grid => GRID_LONG_EDGE,
-            Self::Strip => STRIP_LONG_EDGE,
             Self::Screen => SCREEN_LONG_EDGE,
+            Self::Full => FULL_LONG_EDGE,
         }
     }
 
     /// 所有尺度（GC、预热、统计遍历用）。
     #[must_use]
     pub const fn all() -> [Self; 3] {
-        [Self::Grid, Self::Strip, Self::Screen]
+        [Self::Grid, Self::Screen, Self::Full]
     }
 
     /// 这一档要不要按 [`MAX_DISPLAY_ASPECT`] 夹取？
     ///
-    /// 只有网格与胶片带夹取；看图档保持原始比例。
+    /// 只有缩略图档夹取；看图档（含真身）保持原始比例。
     #[must_use]
     pub const fn clamps_display_aspect(self) -> bool {
-        matches!(self, Self::Grid | Self::Strip)
+        matches!(self, Self::Grid)
+    }
+
+    /// 真身档（不缩放、不许用内嵌预览充数）。
+    #[must_use]
+    pub const fn is_full(self) -> bool {
+        matches!(self, Self::Full)
     }
 
     #[must_use]
     pub fn parse(s: &str) -> Option<Self> {
         match s {
             "grid" => Some(Self::Grid),
-            "strip" => Some(Self::Strip),
             "screen" => Some(Self::Screen),
+            "full" => Some(Self::Full),
             _ => None,
         }
     }
 }
 
-/// 渲染签名（编码格式 + 质量 + 管线版本 + 尺度）。
+/// 渲染签名（编码格式 + 质量 + 管线版本 + 尺度）——**库内**（AVIF）用。
 ///
 /// ⚠️ 这里的版本字面量必须与 [`PIPELINE_VERSION`] **同改** —— 常量管「新图用哪个版本」，
 /// 字面量管「缓存键里写哪个版本」，两者不一致就会出现「改完算法、旧缓存仍命中」
@@ -205,9 +244,25 @@ impl SizeClass {
 #[must_use]
 pub const fn render_sig(size: SizeClass) -> &'static str {
     match size {
-        SizeClass::Grid => "avif-q90-grid-v15-embedded-v1",
-        SizeClass::Strip => "avif-q90-strip-v15-embedded-v1",
-        SizeClass::Screen => "avif-q90-screen-v15",
+        SizeClass::Grid => "avif-q90-grid-v16-embedded-v1",
+        SizeClass::Screen => "avif-q90-screen-v16",
+        // 真身档不走 `thumbs.db`（9MB/张的 JPEG 靠库内 `cache/full/<资产>/` 管），
+        // 这个签名只是让本函数保持全函数；真身档自己的键在 `FullCache` 里（含管线版本）。
+        SizeClass::Full => "jpeg-q92-full-v16",
+    }
+}
+
+/// **库外（import / 来源目录）的渲染签名**：与 [`render_sig`] 同一套版本字面量，
+/// 但格式段是 **JPEG q82**（`AGENTS.md` §2.24：来源目录不玩 AVIF）。
+///
+/// 两个签名分开是**故意的**：同一个文件先后被 import（库外）与 browse（库内）看，
+/// 两边的图本来就是两份（格式不同、代价不同），不能互相冒充。
+#[must_use]
+pub const fn render_sig_source(size: SizeClass) -> &'static str {
+    match size {
+        SizeClass::Grid => "jpeg-q82-grid-v16-embedded-v1",
+        SizeClass::Screen => "jpeg-q82-screen-v16",
+        SizeClass::Full => "jpeg-q92-full-v16",
     }
 }
 
@@ -259,6 +314,11 @@ pub struct DecodeSpec {
     pub max_edge: Option<u32>,
     /// 允许 RAW 走**内嵌预览**快路径（够大就用它）。
     pub allow_preview: bool,
+    /// **强制走内嵌预览**（即便 `max_edge` 比网格档大）。
+    ///
+    /// 极端长宽比的小图要在 3:1 截取**之前**多取像素（见 [`display_aspect_scale`]），
+    /// 但没必要为一张网格缩略图做一次真解码 —— 内嵌预览仍然快一两个数量级。
+    pub embedded_only: bool,
 }
 
 impl DecodeSpec {
@@ -268,6 +328,17 @@ impl DecodeSpec {
         Self {
             max_edge: Some(long_edge),
             allow_preview: true,
+            embedded_only: false,
+        }
+    }
+
+    /// 只读内嵌预览（不真解码）；`max_edge` 可以大于网格档。
+    #[must_use]
+    pub const fn embedded_preview(long_edge: u32) -> Self {
+        Self {
+            max_edge: Some(long_edge),
+            allow_preview: true,
+            embedded_only: true,
         }
     }
 
@@ -277,6 +348,7 @@ impl DecodeSpec {
         Self {
             max_edge: None,
             allow_preview: false,
+            embedded_only: false,
         }
     }
 }
@@ -368,7 +440,7 @@ pub fn render_file_with_edit(
     edit: Option<&DevelopStack>,
     lens: Option<&crate::develop::lens::LensCorrection>,
 ) -> Result<Option<Thumb>> {
-    render_file_with_edit_and_lut(path, size, edit, lens, None)
+    render_file_with_edit_and_lut(path, size, edit, lens, None, EncodeFormat::Avif)
 }
 
 pub fn render_file_with_edit_and_lut(
@@ -377,8 +449,9 @@ pub fn render_file_with_edit_and_lut(
     edit: Option<&DevelopStack>,
     lens: Option<&crate::develop::lens::LensCorrection>,
     lut: Option<&crate::develop::lut::Lut>,
+    format: EncodeFormat,
 ) -> Result<Option<Thumb>> {
-    render_file_with_profiles(path, size, edit, lens, lut, |id, _| {
+    render_file_with_profiles(path, size, edit, lens, lut, format, |id, _| {
         Err(Error::Unsupported(format!("缩略图缺少输入 ICC：{}", id.as_str())))
     })
 }
@@ -387,11 +460,12 @@ pub fn render_file_with_edit_and_lut(
 pub fn render_file_with_profiles(
     path: &Path, size: SizeClass, edit: Option<&DevelopStack>,
     lens: Option<&crate::develop::lens::LensCorrection>, lut: Option<&crate::develop::lut::Lut>,
+    format: EncodeFormat,
     profile: impl FnMut(&crate::color::ProfileId, crate::color::icc::IccRole) -> Result<crate::color::icc::RgbIcc>,
 ) -> Result<Option<Thumb>> {
     if let Some(stack) = edit && let Some(color) = &stack.color {
-        let (source, shot) = crate::display::output::decode_working_source(path, color, profile)?;
-        let edge = geometry_input_edge(size, source.dimensions(), stack.geometry);
+        let (source, shot) = crate::display::output::decode_working_source(path, color, profile, crate::raw::DecodePriority::Normal)?;
+        let edge = source_input_edge(size, source.dimensions(), stack.geometry);
         let source = crate::develop::working::WorkingReferenceImage::from_working(source.into_downscaled(edge))
             .map_err(|e| Error::Unsupported(e.to_string()))?;
         let working = crate::display::output::render_working(&source, stack, lens, shot, lut, 0)?;
@@ -399,20 +473,38 @@ pub fn render_file_with_profiles(
         let (w, h) = working.dimensions();
         let rgb = image::ImageBuffer::from_raw(w, h, working.to_rgb16_flat(&target).map_err(|e| Error::Unsupported(e.to_string()))?)
             .ok_or_else(|| Error::Unsupported("色彩缩略图尺寸与像素不符".into()))?;
-        return encode_with_lut(DynamicImage::ImageRgb16(rgb), size, None, false, None, None, None).map(Some);
+        return encode_with_lut(DynamicImage::ImageRgb16(rgb), size, None, false, None, None, None, format).map(Some);
     }
     let kind = path
         .file_name()
         .map_or(MediaKind::Other, |n| kind_of_file(&n.to_string_lossy()));
     if kind == MediaKind::Raw {
-        return render_raw_file(path, size, edit, lens, lut);
+        return render_raw_file(path, size, edit, lens, lut, format);
     }
 
-    if size.clamps_display_aspect() && edit.is_none_or(DevelopStack::is_empty)
-        && let Some(embedded) = crate::media::embedded::read(path)
-            && let Ok(Some(thumb)) = render_bytes(&embedded.bytes, size, embedded.orientation) {
-                return Ok(Some(thumb));
-            }
+    /*
+     * 位图先试内嵌预览（EXIF 缩略图）—— 它够大就是最省的一条路。
+     *
+     * ⚠️ 顺序是**先出像素、比过尺寸，再编码**（2026-10-11 修）：这里以前是先
+     * `render_bytes`（含编码）再比尺寸，而相机的内嵌图常见只有 160×120 —— 
+     * 不够 384 档就整张丢掉，白烧一次编码（实测 ~118 ms/张，AVIF）。
+     * 现在不够大的话一次编码都不花，直接走完整解码。
+     */
+    let embedded = if size.clamps_display_aspect() && edit.is_none_or(DevelopStack::is_empty) {
+        crate::media::embedded::read(path).and_then(|embedded| {
+            let img = image::load_from_memory(&embedded.bytes).ok()?;
+            prepare_pixels(img, size, embedded.orientation, None, None, None).ok()
+        })
+    } else {
+        None
+    };
+    // 内嵌图够大（3:1 截取后仍是满档）就直接用；不够大说明源不够，
+    // 宁可完整解码（只慢这一次，结果进缓存）—— 先缩后截会只剩几十像素（崔总 2026-10-10）。
+    if let Some(pixels) = &embedded
+        && pixels.width().max(pixels.height()) >= size.long_edge()
+    {
+        return thumb_from_pixels(pixels, size, format).map(Some);
+    }
 
     let bytes = std::fs::read(path)?;
     /*
@@ -425,7 +517,13 @@ pub fn render_file_with_profiles(
     let orientation = crate::media::exif::read_bytes(&bytes)
         .and_then(|data| data.orientation)
         .map(|raw| crate::media::meta::normalize_orientation(Some(raw)));
-    render_bytes_with_edit_and_lut(&bytes, size, orientation, edit, lens, lut)
+    let full = render_bytes_with_edit_and_lut(&bytes, size, orientation, edit, lens, lut, format)?;
+    // 完整解码没出图（例如只有内嵌图可用的合成 / 损坏文件）→ 退回内嵌结果（这时才编码）
+    if full.is_none()
+        && let Some(pixels) = &embedded {
+            return thumb_from_pixels(pixels, size, format).map(Some);
+        }
+    Ok(full)
 }
 
 /// 给 RAW 缩放时多要的倍数：最终尺寸的 Lanczos 由 [`encode`] 在小图上做，
@@ -434,11 +532,17 @@ const RAW_OVERSAMPLE: u32 = 2;
 
 /// 裁切前需要保留足够源像素：成片若只占原图 1/4，先缩到目标长边会让结果只剩 1/4 尺寸。
 /// RAW 与位图共用这个口径，最后仍由 `encode` 收至请求的档位。
+///
+/// **只管编辑栈的几何**（用户裁切）；网格的 3:1 展示夹取另算 —— 见 [`source_input_edge`]。
 fn geometry_input_edge(
     size: SizeClass,
     source: (u32, u32),
     geometry: Option<crate::develop::geometry::EditGeometry>,
 ) -> u32 {
+    // 真身档：**源有多少就给多少**（不过采样、不受 8192 夹取 —— 真身就是真身）。
+    if size.is_full() {
+        return source.0.max(source.1).max(1);
+    }
     let base = size.long_edge().saturating_mul(RAW_OVERSAMPLE);
     let Some(geometry) = geometry.filter(|g| !g.is_identity()) else {
         return base;
@@ -448,29 +552,83 @@ fn geometry_input_edge(
     ((base as f32 / fraction).ceil() as u32).clamp(base, 8192)
 }
 
-/// RAW 的渲染（= [`decode_raw_file`] + JPEG 编码）。
+/// **取源**要多少长边像素（解码 / 先缩一次之前用）：几何裁切 **×** 3:1 展示夹取。
+///
+/// 两个「裁切」都要算进去，否则先缩后截会只剩几个像素：
+/// * 编辑栈的成片几何（[`geometry_input_edge`]）；
+/// * 网格 / 胶片带的 3:1 展示夹取（[`display_aspect_scale`]，1:10 的图截完只剩 1/3.3）。
+///
+/// 最后仍由 `encode` 在小图上截取并收至请求的档位（RAW 与 V2 共用这个口径）。
+fn source_input_edge(
+    size: SizeClass,
+    source: (u32, u32),
+    geometry: Option<crate::develop::geometry::EditGeometry>,
+) -> u32 {
+    let base = geometry_input_edge(size, source, geometry);
+    if !size.clamps_display_aspect() {
+        return base;
+    }
+    let scale = display_aspect_scale(source.0, source.1).max(1.0);
+    ((base as f32 * scale).ceil() as u32).clamp(base, 8192)
+}
+
+/// RAW 的渲染（= [`decode_raw_file`] + 编码）。
 fn render_raw_file(
     path: &Path,
     size: SizeClass,
     edit: Option<&DevelopStack>,
     lens: Option<&crate::develop::lens::LensCorrection>,
     lut: Option<&crate::develop::lut::Lut>,
+    format: EncodeFormat,
 ) -> Result<Option<Thumb>> {
-    if size.clamps_display_aspect() && edit.is_none_or(DevelopStack::is_empty) {
-        let Some(decoded) = decode_raw_file(path, DecodeSpec::thumb(size.long_edge()))? else {
-            return Ok(None);
-        };
-        return encode(decoded.image, size, decoded.orientation, false, None, None).map(Some);
-    }
     let source_size = crate::media::meta::read_photo_meta(path)
         .ok()
         .map(|meta| (meta.width, meta.height))
         .unwrap_or((1, 1));
-    let want = geometry_input_edge(size, source_size, edit.and_then(|stack| stack.geometry)).max(1);
+    if size.clamps_display_aspect() && edit.is_none_or(DevelopStack::is_empty) {
+        // 内嵌预览快路径：取源尺寸要把 3:1 展示夹取算进去，否则极端长宽比只剩几十像素
+        //（崔总 2026-10-10）；仍然只读内嵌预览，不为一张网格图真解码。
+        let want = source_input_edge(size, source_size, None).max(1);
+        if let Some(decoded) = decode_raw_file(path, DecodeSpec::embedded_preview(want))? {
+            return encode_with_format(decoded.image, size, decoded.orientation, false, None, None, format).map(Some);
+        }
+        // 没有内嵌预览 → 落到下面的常规请求（必要时真解码），与老行为一致
+    }
+    /*
+     * **真身档：完整解码，禁止内嵌预览**（2026-10-11 崔总口径）。
+     *
+     * 内嵌预览是**机内 JPEG**：在它上面套参数会让「看图里的这张」与编辑视口
+     * 成为两张不同的照片（与下面 `latest` 那条同一个道理），而且分辨率也不够
+     *（它就是 1920 那一档）。所以真身档走 `DecodeRequest::full`（不限长边、不要预览）。
+     */
+    if size.is_full() {
+        if let Some(stack) = edit.filter(|stack| !stack.is_empty()) {
+            let request = crate::raw::DecodeRequest::full(path);
+            let _permit = crate::raw::worker::acquire(crate::raw::DecodePriority::Normal);
+            let mut decoded = crate::raw::worker::shared()
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .decode_linear(&request)
+                .map_err(|e| Error::Unsupported(format!("RAW 线性解码失败：{e}")))?;
+            let shot_k = decoded.as_shot_temperature;
+            decoded.orientation = crate::media::exif::raw_orientation(path, decoded.orientation);
+            let linear = LinearImage::from_raw16(decoded)
+                .ok_or_else(|| Error::Unsupported("RAW 线性像素尺寸不合法".to_string()))?;
+            let rgb = apply_develop_linear(&linear, stack, lens, shot_k, lut)?;
+            return encode_with_format(DynamicImage::ImageRgb8(rgb), size, None, false, None, None, format).map(Some);
+        }
+        let Some(decoded) = decode_raw_file(path, DecodeSpec::full())? else {
+            return Ok(None);
+        };
+        return encode_with_format(decoded.image, size, decoded.orientation, false, None, lens, format).map(Some);
+    }
+    let want = source_input_edge(size, source_size, edit.and_then(|stack| stack.geometry)).max(1);
     // latest 基于 RAW 时必须从传感器线性像素显影。内嵌 JPEG 是机内 SOOC，
     // 在它上面套参数会让总览/胶片带与编辑视口成为两张不同的照片。
     if let Some(stack) = edit.filter(|stack| !stack.is_empty()) {
         let request = crate::raw::DecodeRequest::thumb(path, want).with_preview(false);
+        // 缩略图/胶片带是 Normal 档（§4.4）
+        let _permit = crate::raw::worker::acquire(crate::raw::DecodePriority::Normal);
         let mut decoded = crate::raw::worker::shared()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -482,12 +640,12 @@ fn render_raw_file(
             .ok_or_else(|| Error::Unsupported("RAW 线性像素尺寸不合法".to_string()))?
             .downscaled_to(want);
         let rgb = apply_develop_linear(&linear, stack, lens, shot_k, lut)?;
-        return encode(DynamicImage::ImageRgb8(rgb), size, None, false, None, None).map(Some);
+        return encode_with_format(DynamicImage::ImageRgb8(rgb), size, None, false, None, None, format).map(Some);
     }
     let Some(decoded) = decode_raw_file(path, DecodeSpec::thumb(want))? else {
         return Ok(None);
     };
-    encode(decoded.image, size, decoded.orientation, false, None, lens).map(Some)
+    encode_with_format(decoded.image, size, decoded.orientation, false, None, lens, format).map(Some)
 }
 
 /// RAW 的解码：走 worker 进程（`AGENTS.md` §6.3：解码必须在独立进程里）。
@@ -496,6 +654,9 @@ fn render_raw_file(
 /// 一张解不开的 RAW 不该让整个导入挂掉，所以这里 `Ok(None)`、由调用方用占位图兜底。
 fn decode_raw_file(path: &Path, spec: DecodeSpec) -> Result<Option<DecodedSource>> {
     let request = match spec.max_edge {
+        // 强制内嵌（极端长宽比的小图要在截取前多取像素，但不值得为它真解码）
+        Some(max_edge) if spec.embedded_only =>
+            crate::raw::DecodeRequest::embedded(path, max_edge.max(1)),
         Some(max_edge) if spec.allow_preview && max_edge <= GRID_LONG_EDGE =>
             crate::raw::DecodeRequest::embedded(path, max_edge.max(1)),
         Some(max_edge) => crate::raw::DecodeRequest::thumb(path, max_edge.max(1)),
@@ -503,15 +664,16 @@ fn decode_raw_file(path: &Path, spec: DecodeSpec) -> Result<Option<DecodedSource
     }
     .with_preview(spec.allow_preview);
 
-    // 共享一条解码管道（理由见 `raw::worker::shared`）
+    // 共享一条解码管道（理由见 `raw::worker::shared`）；缩略图/预览都是 Normal 档
     let decoded = {
+        let _permit = crate::raw::worker::acquire(crate::raw::DecodePriority::Normal);
         let mut worker = crate::raw::worker::shared()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         match worker.decode(&request) {
             Ok(image) => image,
             Err(e) => {
-                eprintln!(
+                log::warn!(
                     "[thumb] RAW 解码失败（改用占位图）：{} —— {e}",
                     path.display()
                 );
@@ -578,7 +740,7 @@ pub fn render_bytes_with_edit(
     edit: Option<&DevelopStack>,
     lens: Option<&crate::develop::lens::LensCorrection>,
 ) -> Result<Option<Thumb>> {
-    render_bytes_with_edit_and_lut(bytes, size, orientation, edit, lens, None)
+    render_bytes_with_edit_and_lut(bytes, size, orientation, edit, lens, None, EncodeFormat::Avif)
 }
 
 pub fn render_bytes_with_edit_and_lut(
@@ -588,11 +750,12 @@ pub fn render_bytes_with_edit_and_lut(
     edit: Option<&DevelopStack>,
     lens: Option<&crate::develop::lens::LensCorrection>,
     lut: Option<&crate::develop::lut::Lut>,
+    format: EncodeFormat,
 ) -> Result<Option<Thumb>> {
     let Ok(img) = image::load_from_memory(bytes) else {
         return Ok(None); // 不是能解码的图像（RAW、损坏文件…）
     };
-    encode_with_lut(img, size, orientation, false, edit, lens, lut).map(Some)
+    encode_with_lut(img, size, orientation, false, edit, lens, lut, format).map(Some)
 }
 
 /// 网格/胶片带小图的**最大展示宽高比**（两侧都算：3:1 与 1:3）。
@@ -601,7 +764,7 @@ pub fn render_bytes_with_edit_and_lut(
 /// 全景图按原始比例塞进正方外框会缩成一条细缝，谁也看不清；
 /// 截取到 3:1 之后至少看得出是全景、也有内容可看。
 ///
-/// **只作用于小图**（`Grid` / `Strip`）—— 看图用的 `Screen` 档必须保持原始比例，
+/// **只作用于缩略图档**（`Grid`）—— 看图用的 `Screen` 档必须保持原始比例，
 /// 否则全景照片在查看器里就看不成完整的了。
 pub const MAX_DISPLAY_ASPECT: f64 = 3.0;
 
@@ -631,7 +794,27 @@ pub fn clamp_rect(width: u32, height: u32, max_aspect: f64) -> (u32, u32, u32, u
     (0, 0, width, height)
 }
 
-/// 按最大展示宽高比居中截取（`Grid` / `Strip` 用；`Screen` 不调它）。
+/// **3:1 展示夹取会让长边缩短多少倍**（≥ 1；比例在范围内 = 1）。
+///
+/// 小图的口径是「先按 3:1 居中截取、再缩到目标档」。所以**取源 / 解码的尺寸必须把这一刀
+/// 算进去**：369×3693 这种 1:10 的图，截完只剩约 1/3.3 的长边 —— 若先把源缩到 384 再截，
+/// 结果只剩 38×114 像素，`resize_for_thumb` 又不放大，铺满 tile 就是糊的
+/// （崔总 2026-10-10 报的现象；这条纯函数就是给取源尺寸用的）。
+#[must_use]
+pub fn display_aspect_scale(width: u32, height: u32) -> f32 {
+    if width == 0 || height == 0 {
+        return 1.0;
+    }
+    let (_, _, kept_w, kept_h) = clamp_rect(width, height, MAX_DISPLAY_ASPECT);
+    let long = width.max(height) as f64;
+    let kept_long = kept_w.max(kept_h) as f64;
+    if kept_long <= 0.0 || kept_long >= long {
+        return 1.0;
+    }
+    (long / kept_long) as f32
+}
+
+/// 按最大展示宽高比居中截取（`Grid` 用；`Screen` 不调它）。
 #[must_use]
 pub fn clamp_display_aspect(img: DynamicImage, max_aspect: f64) -> DynamicImage {
     let (x, y, width, height) = clamp_rect(img.width(), img.height(), max_aspect);
@@ -678,11 +861,9 @@ fn apply_develop_linear(
         .ok_or_else(|| Error::Unsupported("显示像素尺寸不一致".into()))
 }
 
-/// 缩放后编码成 AVIF（全系统缓存图的唯一格式，见 [`encode_avif`]）。
+/// 缩放后编码成缓存图 —— 库内走 AVIF（见 [`encode_avif`]），库外走 JPEG（[`EncodeFormat`]）。
 ///
-/// 用 **Lanczos3** 而不是盒式平均：缩略图是照片软件的「门面」，6000px → 384px 这种
-/// 大幅度缩小时盒式滤波会出现明显的锯齿与摩尔纹。速度实测够用（见
-/// `examples/thumb-bench.rs`）。
+/// 缩放走 [`resize_for_thumb`]（盒式快降，2026-10-11 起不再做 Lanczos3 精修）。
 pub fn encode(
     img: DynamicImage,
     size: SizeClass,
@@ -691,7 +872,20 @@ pub fn encode(
     edit: Option<&DevelopStack>,
     lens: Option<&crate::develop::lens::LensCorrection>,
 ) -> Result<Thumb> {
-    encode_with_lut(img, size, orientation, placeholder, edit, lens, None)
+    encode_with_format(img, size, orientation, placeholder, edit, lens, EncodeFormat::Avif)
+}
+
+/// 同 [`encode`]，但**编码格式由场景给**（库外 import 传 [`EncodeFormat::Jpeg`]）。
+pub fn encode_with_format(
+    img: DynamicImage,
+    size: SizeClass,
+    orientation: Option<u16>,
+    placeholder: bool,
+    edit: Option<&DevelopStack>,
+    lens: Option<&crate::develop::lens::LensCorrection>,
+    format: EncodeFormat,
+) -> Result<Thumb> {
+    encode_with_lut(img, size, orientation, placeholder, edit, lens, None, format)
 }
 
 pub fn encode_with_lut(
@@ -702,7 +896,35 @@ pub fn encode_with_lut(
     edit: Option<&DevelopStack>,
     lens: Option<&crate::develop::lens::LensCorrection>,
     lut: Option<&crate::develop::lut::Lut>,
+    format: EncodeFormat,
 ) -> Result<Thumb> {
+    let result = prepare_pixels(img, size, orientation, edit, lens, lut)?;
+    let (width, height) = result.dimensions();
+    let data = encode_pixels(result.as_raw(), width, height, size, format)?;
+    Ok(Thumb {
+        data,
+        width,
+        height,
+        placeholder,
+    })
+}
+
+/// 出图管线的**前半段**：方向 → 3:1 夹取 → 缩放 →（可选）编辑栈，产出可编码的 RGB。
+///
+/// 单独拆出来只为一件事：**先出像素、比过尺寸，再决定要不要编码**。
+/// 内嵌预览常常小于目标档（相机实测全是 160×120），先编码再发现不够就是白烧一次编码
+/// （2026-10-11 实测 ~118 ms/张，见 `implementations/2026-10-11_import-tiles-diagnosis.md`）。
+///
+/// # Errors
+/// 编辑栈里的参数 / 曲线不合法。
+pub fn prepare_pixels(
+    img: DynamicImage,
+    size: SizeClass,
+    orientation: Option<u16>,
+    edit: Option<&DevelopStack>,
+    lens: Option<&crate::develop::lens::LensCorrection>,
+    lut: Option<&crate::develop::lut::Lut>,
+) -> Result<image::RgbImage> {
     let img = match orientation {
         Some(o) if o != 1 => apply_orientation(&img, o),
         _ => img,
@@ -732,52 +954,80 @@ pub fn encode_with_lut(
         Some(stack) if !stack.is_empty() => apply_develop(&rgb, stack, lens, lut)?,
         _ => rgb,
     };
-    let result = if geometry.is_some() {
+    Ok(if geometry.is_some() {
         resize_for_thumb(DynamicImage::ImageRgb8(developed), size.long_edge()).to_rgb8()
     } else {
         developed
-    };
-    let (width, height) = result.dimensions();
-    let data = encode_avif(result.as_raw(), width, height)?;
-    Ok(Thumb {
-        data,
-        width,
-        height,
-        placeholder,
     })
 }
 
-/// 缩到长边 `long`（不放大）。
+/// 编码「准备好的像素」——**缓存图唯一的编码出口**（格式由场景给，见 [`EncodeFormat`]）。
 ///
-/// # 为什么要两段式（有实测支撑，别改回去）
+/// # Errors
+/// 编码器内部错误。
+fn encode_pixels(
+    rgb: &[u8],
+    width: u32,
+    height: u32,
+    size: SizeClass,
+    format: EncodeFormat,
+) -> Result<Vec<u8>> {
+    if size.is_full() {
+        // 真身档恒 JPEG（20MP 的 AVIF 编码是秒级，JPEG 是 ~0.8s；`specs/view-true-image.md`）
+        return encode_jpeg_bytes(rgb, width, height, FULL_JPEG_QUALITY);
+    }
+    match format {
+        EncodeFormat::Jpeg => encode_jpeg_bytes(rgb, width, height, JPEG_THUMB_QUALITY),
+        EncodeFormat::Avif => encode_avif(rgb, width, height),
+    }
+}
+
+/// 像素 → 一张缓存图（内嵌预览快路径与占位图用）——[`prepare_pixels`] 的下半段。
+fn thumb_from_pixels(
+    pixels: &image::RgbImage,
+    size: SizeClass,
+    format: EncodeFormat,
+) -> Result<Thumb> {
+    let (width, height) = pixels.dimensions();
+    Ok(Thumb {
+        data: encode_pixels(pixels.as_raw(), width, height, size, format)?,
+        width,
+        height,
+        placeholder: false,
+    })
+}
+
+/// JPEG 编码（只给真身档用；其余档仍是 AVIF）。
 ///
-/// 实测（`examples/thumb-bench.rs`，30 张 6000×4000 的 JPG，release）：
+/// # Errors
+/// 编码器失败（尺寸不合法 / 内存）。
+fn encode_jpeg_bytes(rgb: &[u8], width: u32, height: u32, quality: u8) -> Result<Vec<u8>> {
+    let mut data = Vec::new();
+    let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut data, quality);
+    encoder
+        .encode(rgb, width, height, image::ExtendedColorType::Rgb8)
+        .map_err(|error| Error::Unsupported(format!("JPEG 编码失败：{error}")))?;
+    Ok(data)
+}
+
+/// 缩到长边 `long`（不放大）：**一条盒式快降走到底**。
 ///
-/// | 做法 | 每张耗时 |
-/// | --- | --- |
-/// | 直接 Lanczos3 | **191 ms** |
-/// | 直接三角滤波 | 68 ms |
-/// | 直接最近邻 | 14 ms |
-/// | **两段式（盒式 → 2×目标 → Lanczos3）** | **约 45 ms** |
+/// # 为什么去掉了 Lanczos3 精修（崔总 2026-10-11 定）
 ///
-/// 直接把 6000px 缩到 384px，Lanczos3 的核要跨 15 个像素取样，代价极高；
-/// 先用盒式（整数快路径）降到 2× 目标，再让 Lanczos3 做最后一步精修，
-/// 观感与直接 Lanczos3 几乎一致（大幅缩小本就丢高频），速度却快 4 倍。
+/// 以前是两段式：盒式快降到 2× 目标，再用 Lanczos3 精修最后一段
+/// （实测 45 ms/张；直接 Lanczos3 是 191 ms —— 见 `examples/thumb-bench.rs`）。
+/// 崔总的口径是**能多快就多快**：缩略图是「先出来」的东西，画质可以让步，
+/// 于是精修那一步去掉，只留盒式（`thumbnail` 的整数快路径）。
+///
+/// 大幅缩小时两者观感差别很小（高频本就丢掉了）；真要再快一档得换解码器
+/// —— libjpeg-turbo 的 1/8 DCT 缩放解码登记在 `memory/FUTURE.md`。
 #[must_use]
 pub fn resize_for_thumb(img: DynamicImage, long: u32) -> DynamicImage {
     let (w, h) = (img.width(), img.height());
     if w.max(h) <= long {
         return img; // 已经比目标小：不放大（放大只会更糊，还更费空间）
     }
-    let double = long * 2;
-    if w.max(h) <= double {
-        // 只比目标大一点点：直接一次滤波就够
-        return img.resize(long, long, image::imageops::FilterType::Lanczos3);
-    }
-    // ① 盒式快降（整数路径，`thumbnail` 就是干这个的）
-    let coarse = img.thumbnail(double, double);
-    // ② Lanczos3 精修最后一段（2× → 1×，核很短，几乎不花时间）
-    coarse.resize(long, long, image::imageops::FilterType::Lanczos3)
+    img.thumbnail(long, long)
 }
 
 /// 按 EXIF orientation 摆正（1..8）。
@@ -815,7 +1065,9 @@ pub fn placeholder(kind: MediaKind, size: SizeClass) -> Result<Thumb> {
 /// 想断言「字真的画上去了」就只能在这一层看像素。
 #[must_use]
 pub fn placeholder_image(kind: MediaKind, size: SizeClass) -> RgbImage {
-    let long = size.long_edge();
+    // 占位图不可能是真身档（它只在网格/胶片带/屏幕档兜底）；夹一道保险，
+    // 免得将来谁拿 `Full` 要占位图时画出一张 16384 像素的空图。
+    let long = size.long_edge().min(SCREEN_LONG_EDGE);
     // 占位图按 3:2 画（相机的常见比例），再按尺度等比
     let (w, h) = (long, long * 2 / 3);
     let mut img = RgbImage::from_pixel(w, h, Rgb(BG));
@@ -1029,9 +1281,13 @@ mod tests {
     #[test]
     fn size_class_contract() {
         assert_eq!(SizeClass::Grid.long_edge(), 384);
-        assert_eq!(SizeClass::Strip.long_edge(), 192);
         // 看图档（M1-9 之后加）：屏幕级别的大图
         assert_eq!(SizeClass::Screen.long_edge(), 1920);
+        // 真身档（2026-10-11 加）：不缩放 —— 「长边」是个大于任何相机的哨兵
+        assert_eq!(SizeClass::Full.long_edge(), FULL_LONG_EDGE);
+        assert!(FULL_LONG_EDGE > 12240, "要大于今天最大的相机像素数（100MP ≈ 12240px）");
+        assert!(SizeClass::Full.is_full());
+        assert!(!SizeClass::Screen.is_full());
         assert_eq!(SizeClass::all().len(), 3);
         for s in SizeClass::all() {
             assert_eq!(SizeClass::parse(s.as_str()), Some(s));
@@ -1039,6 +1295,47 @@ mod tests {
         }
         assert_eq!(SizeClass::parse(""), None);
         assert_eq!(SizeClass::parse("不认识的档"), None);
+    }
+
+    /// **真身档不许缩**（2026-10-11 崔总口径：「禁止再出现拿假图来充看图界面的功能」）：
+    /// 一张比屏幕档还大的位图，`Full` 出来必须还是它自己的像素尺寸；
+    /// 同一张图的 `Screen` 则按老规矩缩到 1920 —— 两个档的差别就在这里。
+    #[test]
+    fn full_class_renders_the_source_pixels_without_downscaling() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("big.jpg");
+        std::fs::write(&path, jpeg_of(2400, 1800, [40, 90, 160])).unwrap();
+        let full = render_file(&path, SizeClass::Full).unwrap().expect("真身档");
+        assert_eq!((full.width, full.height), (2400, 1800), "不缩 —— 就是原像素");
+        assert_eq!(&full.data[..2], &[0xff, 0xd8], "真身档是 JPEG（AVIF 编码太慢）");
+        let screen = render_file(&path, SizeClass::Screen).unwrap().expect("屏幕档");
+        assert_eq!((screen.width, screen.height), (1920, 1440), "屏幕档仍缩到 1920");
+    }
+
+    /// 真身档 + 裁切：出的是**裁切后的原像素**（不是再缩到某个长边）。
+    #[test]
+    fn full_class_keeps_the_crop_pixels() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("crop.jpg");
+        std::fs::write(&path, jpeg_of(2400, 1800, [10, 120, 200])).unwrap();
+        let mut stack = DevelopStack {
+            geometry: Some(crate::develop::geometry::EditGeometry {
+                rotation: 0.0,
+                crop: Some(crate::develop::geometry::CropRect {
+                    x: 0.25,
+                    y: 0.25,
+                    width: 0.5,
+                    height: 0.5,
+                }),
+                crop_ratio: None,
+            }),
+            ..DevelopStack::default()
+        };
+        stack.params.insert("exposure".into(), 0.25);
+        let thumb = render_file_with_edit(&path, SizeClass::Full, Some(&stack), None)
+            .unwrap()
+            .expect("真身档");
+        assert_eq!((thumb.width, thumb.height), (1200, 900), "半幅裁切 = 原始像素的一半");
     }
 
     #[test]
@@ -1058,7 +1355,6 @@ mod tests {
                 "{size:?} 的签名里要带上 {expected}"
             );
         }
-        assert_ne!(render_sig(SizeClass::Grid), render_sig(SizeClass::Strip));
         assert_ne!(render_sig(SizeClass::Grid), render_sig(SizeClass::Screen));
     }
 
@@ -1093,10 +1389,61 @@ mod tests {
             "竖图长边是高"
         );
 
-        let strip = render_bytes(&jpeg_of(4000, 3000, [1, 2, 3]), SizeClass::Strip, None)
-            .unwrap()
-            .unwrap();
-        assert_eq!((strip.width, strip.height), (192, 144));
+    }
+
+    #[test]
+    fn display_aspect_scale_tells_how_much_the_long_edge_shrinks() {
+        // 1:10 的图截完只剩 1/3.336 —— 取源要乘这个倍数（崔总 2026-10-10）
+        assert!((display_aspect_scale(369, 3693) - 3.336).abs() < 0.01);
+        assert!((display_aspect_scale(3693, 369) - 3.336).abs() < 0.01);
+        // 比例在范围内（含正好 3:1）不动
+        for (w, h) in [(3, 2), (2, 3), (1, 1), (3, 1), (1, 3), (0, 100)] {
+            assert_eq!(display_aspect_scale(w, h), 1.0, "{w}×{h} 不该放大取源");
+        }
+        // 与 clamp_rect 一致：截完的长边 × scale ≈ 原长边
+        for (w, h) in [(369, 3693), (5000, 400), (4000, 3000)] {
+            let (_, _, kw, kh) = clamp_rect(w, h, MAX_DISPLAY_ASPECT);
+            let kept = kw.max(kh) as f32;
+            let long = w.max(h) as f32;
+            assert!(
+                (kept * display_aspect_scale(w, h) - long).abs() <= 2.0,
+                "{w}×{h}: 截完 {kept} × scale ≠ {long}"
+            );
+        }
+    }
+
+    #[test]
+    fn extreme_aspect_requests_enough_source_before_the_3to1_crop() {
+        // Grid（384）：3:1 截取让长边只剩 1/3.336，取源必须补回来，否则截完只有几十像素
+        let want = source_input_edge(SizeClass::Grid, (369, 3693), None);
+        assert!(want >= 384 * 3, "取源 {want} 太小，截完不够 384");
+        assert_eq!(want, 2563, "ceil(384×2×3.336) = 2563");
+        // Screen 不做 3:1 夹取 → 只按过采样
+        assert_eq!(
+            source_input_edge(SizeClass::Screen, (369, 3693), None),
+            3840
+        );
+        // 正常比例不受影响
+        assert_eq!(source_input_edge(SizeClass::Grid, (4000, 3000), None), 768);
+        // 荒谬比例仍受 8192 上限
+        assert_eq!(
+            source_input_edge(SizeClass::Grid, (10, 100_000), None),
+            8192
+        );
+    }
+
+    #[test]
+    fn extreme_aspect_thumbnail_keeps_the_full_long_edge_after_the_crop() {
+        // 先缩后截的旧口径：369×3693 先缩到 384 再截只剩 38×114（糊）。
+        // 位图这条路本来就是「整图解出 → 3:1 截 → 缩」，断言它截完仍有满档长边。
+        for bytes in [png_of(369, 3693), png_of(3693, 369)] {
+            let t = render_bytes(&bytes, SizeClass::Grid, None)
+                .unwrap()
+                .unwrap();
+            assert_eq!(t.width.max(t.height), GRID_LONG_EDGE, "长边必须满档");
+            assert_eq!(t.width.min(t.height), 128, "3:1 截取后短边 = 384/3");
+            assert!(!t.placeholder);
+        }
     }
 
     #[test]
@@ -1151,21 +1498,12 @@ mod tests {
     }
 
     #[test]
-    fn two_stage_resize_matches_direct_resize_in_shape() {
-        // 形状与直接缩放一致（两段式只是快，不该改变尺寸规则）
+    fn resize_for_thumb_keeps_the_size_contract() {
+        // 盒式快降只影响画质，不该改变尺寸规则
         let img = DynamicImage::ImageRgb8(RgbImage::from_pixel(6000, 4000, Rgb([40, 80, 120])));
-        let two = resize_for_thumb(img.clone(), GRID_LONG_EDGE);
-        let direct = img.resize(
-            GRID_LONG_EDGE,
-            GRID_LONG_EDGE,
-            image::imageops::FilterType::Lanczos3,
-        );
+        let resized = resize_for_thumb(img, GRID_LONG_EDGE);
         assert_eq!(
-            (two.width(), two.height()),
-            (direct.width(), direct.height())
-        );
-        assert_eq!(
-            (two.width(), two.height()),
+            (resized.width(), resized.height()),
             (384, 256),
             "6000×4000 → 384×256"
         );
@@ -1277,8 +1615,6 @@ mod tests {
             assert_eq!(p.width, GRID_LONG_EDGE);
             assert_eq!(p.height, GRID_LONG_EDGE * 2 / 3);
         }
-        let strip = placeholder(MediaKind::Raw, SizeClass::Strip).unwrap();
-        assert_eq!((strip.width, strip.height), (192, 128));
     }
 
     #[test]

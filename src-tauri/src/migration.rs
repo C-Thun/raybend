@@ -113,14 +113,14 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) {
         match registry.apply(notice) {
             Ok(snapshot) => {
                 if let Err(err) = handle.emit(MIGRATION_EVENT, snapshot) {
-                    eprintln!("[raybend] 迁移事件发送失败：{err}");
+                    log::warn!("[raybend] 迁移事件发送失败：{err}");
                 }
             }
-            Err(err) => eprintln!("[raybend] 迁移状态更新失败：{err}"),
+            Err(err) => log::warn!("[raybend] 迁移状态更新失败：{err}"),
         }
     }));
     if !installed {
-        eprintln!("[raybend] 迁移通知钩子已经注册过，忽略重复安装");
+        log::warn!("[raybend] 迁移通知钩子已经注册过，忽略重复安装");
     }
 }
 

@@ -63,9 +63,13 @@ export function EditorToolbar(props: EditorSourceHistoryProps): JSX.Element {
     ? t("browse.redo")
     : t("browse.redoWith").replace("{label}", props.history.state().redoLabel ?? "");
   return (
-    <div class="flex h-full shrink-0 items-center">
-      {/* 编辑源（SOOC/RAW）自成一组；后面按 组内紧、组间分隔 的规矩排（DESIGN.md §12.12） */}
+    <div class="flex h-full shrink-0 items-center gap-1">
+      {/*
+        编辑源（SOOC/RAW）：形态自带**边框感**，右侧只留一点留白，不再叠一根竖线
+        （崔总 2026-10-11：边框感 + 竖线太重复）。
+      */}
       <SegmentedControl
+        class="me-2"
         value={props.store.editBase()}
         onValueChange={(value) => props.onBaseChange(value as DevelopEditBase)}
         label={t("editor.base.label")}
@@ -75,25 +79,22 @@ export function EditorToolbar(props: EditorSourceHistoryProps): JSX.Element {
         ]}
       />
 
-      <ToolsSeparator />
-
-      {/* 可逆的历史动作是一组 */}
+      {/* 可逆的历史动作是一组（纯图标；提示里带具体动作名） */}
       <div class="flex items-center gap-0.5">
-        <Button variant="ghost" disabled={!props.history.state().canUndo} title={undoTitle()}
+        <Button variant="ghost" disabled={!props.history.state().canUndo}
           aria-label={undoTitle()} icon={<IconArrowBackUp size={14} />}
-          onClick={props.history.undo}>{t("browse.undo")}</Button>
-        <Button variant="ghost" disabled={!props.history.state().canRedo} title={redoTitle()}
+          onClick={props.history.undo} />
+        <Button variant="ghost" disabled={!props.history.state().canRedo}
           aria-label={redoTitle()} icon={<IconArrowForwardUp size={14} />}
-          onClick={props.history.redo}>{t("browse.redo")}</Button>
+          onClick={props.history.redo} />
       </div>
 
+      {/* 本流程**唯一**一根分隔线（崔总 2026-10-11：只在功能大类之间用） */}
       <ToolsSeparator />
 
-      <Button variant="ghost" disabled={!props.canAutoAdjust?.()}
-        title={t("editor.autoAdjustHint")} icon={<IconWand size={14} />}
-        onClick={() => props.onAutoAdjust?.()}>{t(props.store.autoAdjusting() ? "editor.autoAdjusting" : "editor.autoAdjust")}</Button>
-
-      <ToolsSeparator />
+      <Button variant="ghost" disabled={!props.canAutoAdjust?.()} loading={props.store.autoAdjusting()}
+        tip={t("editor.autoAdjustHint")} aria-label={t("editor.autoAdjust")} icon={<IconWand size={14} />}
+        onClick={() => props.onAutoAdjust?.()} />
 
       {/* 画布工具（裁切/旋转/对比）：互斥的一组开关 */}
       <div class="flex items-center gap-0.5">
@@ -122,9 +123,7 @@ export function EditorPanelToggles(props: EditorToolbarProps): JSX.Element {
     icon={<IconPalette size={14} />}
     label={t("editor.toolsbar.lut")}
     onClick={() => props.store.toggleLut()}
-  >
-    {t("editor.toolsbar.lut")}
-  </ToggleBlock>;
+  />;
 }
 
 /** 右段：重置之后是定稿；两者都走工作区动作槽。 */
@@ -135,9 +134,8 @@ export function EditorResetTool(props: EditorToolbarProps & {
   onFinalize?: () => void;
 }): JSX.Element {
   return <div class="flex items-center gap-1">
-    <Button variant="ghost" icon={<IconRefresh size={14} />} disabled={!props.enabled || !(props.canReset?.() ?? props.store.resetStage() !== "none")} onClick={props.onRequestReset}>
-      {t("editor.panel.resetAll")}
-    </Button>
+    <Button variant="ghost" icon={<IconRefresh size={14} />} aria-label={t("editor.panel.resetAll")}
+      disabled={!props.enabled || !(props.canReset?.() ?? props.store.resetStage() !== "none")} onClick={props.onRequestReset} />
     <Button variant="primary" icon={<IconBookmark size={14} />} disabled={!props.canFinalize?.()} onClick={() => props.onFinalize?.()}>
       {t("editor.issue.toolbar")}
     </Button>

@@ -23,6 +23,10 @@ pub struct Issue {
     pub created_at: i64,
     /// 导出尾号序号（I00–I99）；每资产唯一，分配见 `allocate_ordinal`。
     pub ordinal: i64,
+    /// 成片**输出尺寸**（`issues.output_*`；列即使 NULL 也已在读侧按该定稿的配置
+    /// 现算过 —— `store::sizes::issue_output_size`，零 I/O；真算不出来才是 `None`）。
+    pub width: Option<u32>,
+    pub height: Option<u32>,
     pub stack: DevelopStack,
 }
 
@@ -49,9 +53,17 @@ pub fn profile_hash(stack: &DevelopStack) -> Result<String> {
     Ok(format!("{hash:016x}"))
 }
 
+/// `issues.output_*` 列 → 正整数尺寸（非正 / 超 u32 = 未知）。
+fn positive(value: Option<i64>) -> Option<u32> {
+    value
+        .and_then(|value| u32::try_from(value).ok())
+        .filter(|value| *value > 0)
+}
+
 pub fn list(conn: &Connection, asset_id: i64) -> Result<Vec<Issue>> {
     let mut statement = conn.prepare(
-        "SELECT id, asset_id, name, profile_hash, source_base, created_at, schema_version, profile_json, ordinal \
+        "SELECT id, asset_id, name, profile_hash, source_base, created_at, schema_version, profile_json, ordinal, \
+                output_width, output_height \
          FROM issues WHERE asset_id = ?1 ORDER BY created_at DESC, id DESC",
     )?;
     let rows = statement.query_map([asset_id], |row| {
@@ -65,10 +77,12 @@ pub fn list(conn: &Connection, asset_id: i64) -> Result<Vec<Issue>> {
             row.get::<_, i64>(6)?,
             row.get::<_, String>(7)?,
             row.get::<_, i64>(8)?,
+            row.get::<_, Option<i64>>(9)?,
+            row.get::<_, Option<i64>>(10)?,
         ))
     })?;
     rows.map(|row| {
-        let (id, asset_id, name, profile_hash, base, created_at, schema_version, json, ordinal) = row?;
+        let (id, asset_id, name, profile_hash, base, created_at, schema_version, json, ordinal, width, height) = row?;
         if !(1..=PROFILE_SCHEMA_VERSION).contains(&schema_version) {
             return Err(Error::Unsupported(format!(
                 "定稿 {id} 的配置版本 {schema_version} 尚不支持"
@@ -82,6 +96,20 @@ pub fn list(conn: &Connection, asset_id: i64) -> Result<Vec<Issue>> {
         if schema_version != profile_schema_version(&stack) || stack.source_base != source_base || self::profile_hash(&stack)? != profile_hash {
             return Err(Error::Unsupported(format!("定稿 {id} 的配置指纹不一致")));
         }
+        /*
+         * 输出尺寸：库里存的值优先；NULL（v19 之前建的定稿）就**现算** ——
+         * 栈和基底已经在手上，源尺寸取库里的值，零 I/O。
+         * 不回退成「基准展示尺寸」：那是另一个口径（未裁切的画面），比例可以完全不同
+         * （`specs/display-size-source.md` §7；2026-10-11 崔总真机反馈）。
+         */
+        let (width, height) = match (
+            positive(width),
+            positive(height),
+        ) {
+            (Some(width), Some(height)) => (Some(width), Some(height)),
+            _ => crate::store::sizes::issue_output_size(conn, asset_id, source_base, &stack)?
+                .map_or((None, None), |(width, height)| (Some(width), Some(height))),
+        };
         Ok(Issue {
             id,
             asset_id,
@@ -90,6 +118,8 @@ pub fn list(conn: &Connection, asset_id: i64) -> Result<Vec<Issue>> {
             source_base,
             created_at,
             ordinal,
+            width,
+            height,
             stack,
         })
     })
@@ -102,8 +132,7 @@ pub fn get(conn: &Connection, asset_id: i64, issue_id: i64) -> Result<Option<Iss
         .find(|issue| issue.id == issue_id))
 }
 
-fn same_adjustments(first: &DevelopStack, second: &DevelopStack) -> bool {
-    let mut first = first.clone();
+fn same_adjustments(first: &DevelopStack, second: &DevelopStack) -> bool {    let mut first = first.clone();
     let mut second = second.clone();
     first.auto_adjust = None;
     second.auto_adjust = None;
@@ -184,10 +213,23 @@ pub fn create(
     let json = serde_json::to_string(stack)
         .map_err(|error| Error::Unsupported(format!("定稿配置序列化失败：{error}")))?;
     let ordinal = allocate_ordinal(conn, asset_id)?;
+    // 输出尺寸：**零渲染**，由几何与源展示尺寸现算（拿不到就 NULL，不阻塞创建）
+    let output = crate::store::sizes::stack_output_size(conn, asset_id, stack)?;
     conn.execute(
-        "INSERT INTO issues (asset_id, schema_version, name, profile_json, profile_hash, source_base, created_at, ordinal) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-        params![asset_id, profile_schema_version(stack), name, json, hash, stack.source_base.as_str(), now_ms, ordinal],
+        "INSERT INTO issues (asset_id, schema_version, name, profile_json, profile_hash, source_base, created_at, ordinal, output_width, output_height) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        params![
+            asset_id,
+            profile_schema_version(stack),
+            name,
+            json,
+            hash,
+            stack.source_base.as_str(),
+            now_ms,
+            ordinal,
+            output.map(|(width, _)| i64::from(width)),
+            output.map(|(_, height)| i64::from(height))
+        ],
     )?;
     get(conn, asset_id, conn.last_insert_rowid())?
         .ok_or_else(|| Error::Unsupported("刚创建的定稿无法读回".into()))
@@ -297,9 +339,10 @@ pub fn import_issue(
     let hash = profile_hash(&stack)?;
     let json = serde_json::to_string(&stack)
         .map_err(|error| Error::Unsupported(format!("定稿配置序列化失败：{error}")))?;
+    let output = crate::store::sizes::stack_output_size(conn, asset_id, &stack)?;
     conn.execute(
-        "INSERT INTO issues (asset_id, schema_version, name, profile_json, profile_hash, source_base, created_at, ordinal) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        "INSERT INTO issues (asset_id, schema_version, name, profile_json, profile_hash, source_base, created_at, ordinal, output_width, output_height) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         params![
             asset_id,
             profile_schema_version(&stack),
@@ -308,10 +351,53 @@ pub fn import_issue(
             hash,
             source_base.as_str(),
             created_at_ms,
-            ordinal
+            ordinal,
+            output.map(|(width, _)| i64::from(width)),
+            output.map(|(_, height)| i64::from(height))
         ],
     )?;
     Ok(true)
+}
+
+/// 懒回填：把这张照片**尺寸为空**的定稿补上（能算才算，算不出保持 NULL）。
+///
+/// 幂等、可重入、只写缺值：读定稿列表时可以顺手调一下（失败不影响读）。
+/// 返回这次真写了多少行。
+///
+/// # Errors
+/// 数据库读写失败。
+pub fn backfill_output_sizes(conn: &Connection, asset_id: i64) -> Result<usize> {
+    let pending: Vec<(i64, String, String)> = {
+        let mut statement = conn.prepare(
+            "SELECT id, source_base, profile_json FROM issues
+              WHERE asset_id = ?1 AND (output_width IS NULL OR output_height IS NULL)",
+        )?;
+        statement
+            .query_map([asset_id], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    let mut written = 0usize;
+    for (issue_id, base, json) in pending {
+        let Ok(stack) = serde_json::from_str::<DevelopStack>(&json) else {
+            continue; // 坏配置：读侧会报错，回填不掺和
+        };
+        let base = EditBase::parse(&base)
+            .ok_or_else(|| Error::Unsupported(format!("定稿 {issue_id} 的编辑源无效")))?;
+        // 尺寸算法只有一处（`store::sizes::issue_output_size`，与读侧现算同源）
+        let Some((width, height)) =
+            crate::store::sizes::issue_output_size(conn, asset_id, base, &stack)?
+        else {
+            continue;
+        };
+        written += conn.execute(
+            "UPDATE issues SET output_width = ?3, output_height = ?4
+              WHERE asset_id = ?1 AND id = ?2 AND (output_width IS NULL OR output_height IS NULL)",
+            params![asset_id, issue_id, i64::from(width), i64::from(height)],
+        )?;
+    }
+    Ok(written)
 }
 
 /// 影调与颜色取十档；这只是可编辑的建议名，不参与配置或画面。
@@ -574,6 +660,86 @@ mod tests {
     }
 
     #[test]
+    fn list_computes_output_size_when_the_issue_row_predates_v19() {
+        // 崔总 2026-10-11 真机：v19 之前建的定稿，`output_*` 还没回填 ——
+        // 读列表时必须**现算**（零 I/O），否则 flowinfo / 看图会退回基准尺寸
+        // （那是另一个口径，裁切过的画面比例可以完全不同）。
+        let conn = db();
+        conn.execute_batch(
+            "INSERT INTO assets(id, imported_at, updated_at, width, height, orientation)
+             VALUES(1,1,1,4000,3000,1);",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO asset_files(asset_id, role, rel_path, rel_path_folded, ext, size_bytes,
+                                     mtime_ms, created_at, updated_at, display_width, display_height, orientation)
+             VALUES(1,'bitmap','photos/a.jpg','photos/a.jpg','jpg',1,1,1,1,4000,3000,1)",
+            [],
+        )
+        .unwrap();
+        // 半幅裁切：输出尺寸应当是 2000×1500（不是基准的 4000×3000）
+        /*
+         * 基底写死 **Sooc**：这张合成资产只有位图行，而尺寸只认各自那一行
+         * （2026-10-11：RAW 缺行时不许拿位图的尺寸顶，所以不能留 `default()` 的 Raw 基底）。
+         */
+        let mut stack = DevelopStack { source_base: EditBase::Sooc, ..DevelopStack::default() };
+        stack.params.insert("exposure".into(), 0.5);
+        stack.geometry = Some(crate::develop::geometry::EditGeometry {
+            rotation: 0.0,
+            crop: Some(crate::develop::geometry::CropRect {
+                x: 0.0,
+                y: 0.0,
+                width: 0.5,
+                height: 0.5,
+            }),
+            crop_ratio: None,
+        });
+        let created = create(&conn, 1, "裁切", &stack, 1).unwrap();
+        assert_eq!((created.width, created.height), (Some(2000), Some(1500)));
+        // 模拟 v19 之前建的行（列全 NULL）
+        conn.execute(
+            "UPDATE issues SET output_width = NULL, output_height = NULL WHERE id = ?1",
+            [created.id],
+        )
+        .unwrap();
+
+        let issues = list(&conn, 1).unwrap();
+        assert_eq!(issues.len(), 1);
+        assert_eq!(
+            (issues[0].width, issues[0].height),
+            (Some(2000), Some(1500)),
+            "回填之前读列表也要给出裁切后的尺寸",
+        );
+        // 写侧回填把同一个值落库（幂等）
+        assert_eq!(backfill_output_sizes(&conn, 1).unwrap(), 1);
+        let stored: (Option<i64>, Option<i64>) = conn
+            .query_row(
+                "SELECT output_width, output_height FROM issues WHERE id = ?1",
+                [created.id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(stored, (Some(2000), Some(1500)));
+    }
+
+    #[test]
+    fn profile_hash_and_signature_stay_byte_identical_with_display_sizes_in_the_catalog() {
+        // `specs/display-size-source.md` §9「身份不变」：显示尺寸只进 DB 列，
+        // **不进**结构体 / profile JSON / 签名 —— 固定样例栈的两个指纹必须与改动前
+        // 逐字节一致。谁把尺寸（或别的派生值）塞进 `DevelopStack`，这条测试会当场红。
+        let mut stack = DevelopStack::default();
+        stack.params.insert("exposure".into(), 0.35);
+        stack.params.insert("contrast".into(), 12.0);
+        stack
+            .curves
+            .insert("rgb".into(), vec![[0.0, 0.0], [0.5, 0.6], [1.0, 1.0]]);
+        stack.as_shot_k = Some(5200.0);
+        stack.source_base = EditBase::Sooc;
+        assert_eq!(profile_hash(&stack).unwrap(), "58428d1d076da744");
+        assert_eq!(stack.signature(), 16_719_530_885_303_448_403_u64);
+    }
+
+    #[test]
     fn automatic_provenance_is_saved_without_affecting_issue_matching_or_legacy_hash() {
         let conn = db();
         conn.execute_batch("INSERT INTO assets(id, imported_at, updated_at) VALUES(1,1,1);")
@@ -783,6 +949,8 @@ mod tests {
             source_base: EditBase::Raw,
             created_at: 1,
             ordinal: 0,
+            width: None,
+            height: None,
             stack: stack.clone(),
         };
         assert_eq!(selection(&stack, &[issue]).unwrap(), Selection::Issue(7));
@@ -805,6 +973,8 @@ mod tests {
             source_base: EditBase::Raw,
             created_at: 1,
             ordinal: 1,
+            width: None,
+            height: None,
             stack,
         };
         assert_eq!(

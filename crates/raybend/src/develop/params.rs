@@ -385,6 +385,49 @@ mod tests {
     }
 
     #[test]
+    fn decoded_baseline_overrides_the_payload_placeholder() {
+        /*
+         * `specs/editor-session-pipeline.md` §6.2：「同一条栈、两种基线输入 → 覆盖成同一结果」。
+         *
+         * 切图瞬间前端把 as-shot 写成 null（payload 只有显式温度），首帧本会按静态默认
+         * 6250K 算基准；解码真值到达后用 `set_as_shot_temperature` 覆盖 —— 覆盖后与
+         * 「一开始就带着真值」必须逐增益一致。
+         */
+        let payload = DevelopParams::from_values(
+            [("temperature".to_owned(), 5000.0), ("exposure".to_owned(), 0.5)],
+            None,
+        )
+        .expect("合法载荷");
+        assert_eq!(
+            payload.baseline("temperature"),
+            6250.0,
+            "占位基线：读不到真值时的表默认"
+        );
+
+        let mut fixed = payload.clone();
+        fixed.set_as_shot_temperature(Some(5000.0));
+        assert_eq!(fixed.value("temperature"), 5000.0, "显式温度不因覆盖而改变");
+        assert_eq!(fixed.baseline("temperature"), 5000.0);
+
+        let honest = DevelopParams::from_values(
+            [("temperature".to_owned(), 5000.0), ("exposure".to_owned(), 0.5)],
+            Some(5000.0),
+        )
+        .expect("合法载荷");
+        use super::super::pipeline::Resolved;
+        assert_eq!(
+            Resolved::new(&fixed).gains(),
+            Resolved::new(&honest).gains(),
+            "覆盖后的增益必须与一开始就带真值的一致"
+        );
+        assert_ne!(
+            Resolved::new(&payload).gains(),
+            Resolved::new(&fixed).gains(),
+            "不覆盖就是错的（这正是修复前的首帧）"
+        );
+    }
+
+    #[test]
     fn illegal_values_are_rejected_not_clamped() {
         let mut params = DevelopParams::new(None);
         assert!(params.set("exposure", 3.0).is_err(), "超出范围要报错");

@@ -3,6 +3,9 @@ use crate::browse::BrowseState;
 use raybend::export::{AssetVariants, Preset, PresetValidation, VariantRef, VariantSnapshot};
 use tauri::{AppHandle, Manager, Runtime};
 
+/// 取快照时顺手做尺寸懒回填的**引用数上限**（超过就不做 —— 那是批量，见调用处）。
+const LAZY_FILL_MAX_ASSETS: usize = 8;
+
 #[tauri::command]
 pub async fn export_variants<R: Runtime>(
     app: AppHandle<R>,
@@ -34,6 +37,35 @@ pub async fn export_snapshots<R: Runtime>(
             .state::<BrowseState>()
             .with_catalog(&handle, &repository_id, |db| {
                 let root = db.root();
+                /*
+                 * 懒回填：切到某个变体时，把这一两张照片的**文件展示尺寸**补一次
+                 * （老库未回填时 `raw` / `sooc` 的尺寸只能退到 `assets` 的原始轴，
+                 * RAW 与位图尺寸不同的照片会差一截）。读文件头只在**这一次**发生，
+                 * 之后写进 `asset_files.display_*`；只在有缺失行时才会读盘，
+                 * 失败只记日志（尺寸退到回退链，不拦快照）。
+                 *
+                 * **只对少量引用做**：这是「用户正看着这张」的顺手补 ——
+                 * 导出面板那种几十上百张的批量取快照不该把读盘搬进写事务；
+                 * 那种批量交 `--sizes` / 重建数据（`store::backfill`）。
+                 */
+                let fill_root = root.to_path_buf();
+                if references.len() <= LAZY_FILL_MAX_ASSETS {
+                    let targets: Vec<i64> = references.iter().map(|r| r.asset_id).collect();
+                    if let Err(error) = db.write(move |conn| {
+                        let mut written = 0usize;
+                        for asset_id in targets {
+                            written += raybend::store::sizes::ensure_sizes_conn(
+                                conn,
+                                &fill_root,
+                                asset_id,
+                            )?;
+                        }
+                        Ok(written)
+                    }) {
+                        // i18n-exempt: 终端诊断（回填失败不拦快照，下次再来）
+                        eprintln!("[export] 文件展示尺寸懒回填跳过：{error}");
+                    }
+                }
                 db.read(|conn| {
                     references
                         .iter()
@@ -60,15 +92,9 @@ pub async fn export_variant_image<R: Runtime>(
 ) -> Result<tauri::ipc::Response, String> {
     let handle = app.clone();
     let bytes = crate::source::blocking(move || {
+        // `parse` 认不出的尺度过不去；认出来的（grid / screen / full）都是显示档 ——
+        // 192 那一档 2026-10-11 取消后，这里不再需要额外白名单
         let class = raybend::thumbnail::SizeClass::parse(&size).ok_or("不支持此预览尺寸")?;
-        if !matches!(
-            class,
-            raybend::thumbnail::SizeClass::Grid
-                | raybend::thumbnail::SizeClass::Strip
-                | raybend::thumbnail::SizeClass::Screen
-        ) {
-            return Err("导出只提供显示档预览".into());
-        }
         let browse = handle.state::<BrowseState>();
         let _permit = browse
             .sessions
@@ -108,13 +134,30 @@ pub async fn export_variant_image<R: Runtime>(
             if let Some(issue_id) = reference.variant.strip_prefix("issue:").and_then(|id| id.parse::<i64>().ok()) {
                 let bytes = if class == raybend::thumbnail::SizeClass::Screen {
                     crate::issues::preview_bytes(&handle, &repository_id, reference.asset_id, issue_id)?
+                } else if class == raybend::thumbnail::SizeClass::Full {
+                    // 真身档（2026-10-11）：全尺寸成片，落库内 `cache/full/…-full-…jpg`。
+                    // 命名以 `issue-<id>-` 开头 —— `FullCache::remove_issue` 靠它连带清理。
+                    crate::thumbs::render_full_cached(
+                        &handle,
+                        &asset,
+                        &snap.stack,
+                        &format!("issue-{issue_id}-{}", snap.profile_hash),
+                    )?
                 } else {
                     crate::issues::thumb_bytes(&handle, &repository_id, reference.asset_id, issue_id, class)?
                 };
                 catalog.ensure_current().map_err(|e| e.to_string())?;
                 return Ok(bytes);
             }
-            if reference.variant == "raw" && class != raybend::thumbnail::SizeClass::Screen {
+            /*
+             * `raw_original` 是导出面板的「RAW 原样」选项（内嵌原图系列）。
+             * **真身档不走它**：内嵌预览的原样不是「这张照片的真身」（崔总 2026-10-11：
+             * 禁止拿假图充看图界面），真身档要真的完整解码。
+             */
+            if reference.variant == "raw"
+                && class != raybend::thumbnail::SizeClass::Screen
+                && class != raybend::thumbnail::SizeClass::Full
+            {
                 if raw_original != Some(false)
                     && let Some(bytes) = crate::thumbs::raw_original_thumb(&handle, &asset, class)? { return Ok(bytes); }
                 if raw_original == Some(true) { return Ok(Vec::new()); }
@@ -130,6 +173,8 @@ pub async fn export_variant_image<R: Runtime>(
             else { format!("export-{}-{}", reference.variant, snap.profile_hash) };
             let bytes = if class == raybend::thumbnail::SizeClass::Screen {
                 crate::thumbs::render_profile_cached(&handle, &asset, &snap.stack, &preview_variant)?
+            } else if class == raybend::thumbnail::SizeClass::Full {
+                crate::thumbs::render_full_cached(&handle, &asset, &snap.stack, &preview_variant)?
             } else {
                 let db = handle.state::<crate::thumbs::SourcesThumbs>().get(
                     &crate::thumbs::sources_cache_dir(&handle)?, raybend::store::time::now_millis())?;
@@ -162,6 +207,22 @@ pub async fn export_variant_details<R: Runtime>(
 ) -> Result<VariantDetails, String> {
     crate::source::blocking(move || {
         let prepared = prepare(&app, &repository_id, &captured)?.ok_or("定稿已变更或删除")?;
+        /*
+         * 尺寸**读库**（`store::sizes`，毫秒级）—— 不再拿全尺寸渲染的结果当唯一来源；
+         * 库里没存（老库未回填）才退回快照携带的值，再退回渲染尺寸。
+         * 渲染这一段仍要做，但只为了**直方图**（本单元不动它）。
+         */
+        let library_size = prepared
+            .catalog
+            .read(|conn| {
+                raybend::store::sizes::display_size(
+                    conn,
+                    captured.reference.asset_id,
+                    raybend::store::sizes::SizeVariant::parse(&captured.reference.variant)
+                        .ok_or_else(|| raybend::Error::Unsupported("无效的导出变体".into()))?,
+                )
+            })
+            .map_err(|error| error.to_string())?;
         let (lens, lut) = resources(&app, &repository_id, &captured)?;
         let image = raybend::export::render_captured(
             &prepared.source,
@@ -171,7 +232,9 @@ pub async fn export_variant_details<R: Runtime>(
             0,
         )
         .map_err(|e| e.to_string())?;
-        let (width, height) = image.dimensions();
+        let (width, height) = library_size
+            .or_else(|| captured.width.zip(captured.height))
+            .unwrap_or_else(|| image.dimensions());
         let rgb = image::DynamicImage::ImageRgb16(image)
             .thumbnail(512, 512)
             .to_rgb8();

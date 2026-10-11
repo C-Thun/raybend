@@ -29,6 +29,7 @@ import {
   takeViewerFocus,
   viewerControlsVisible,
 } from "./interaction.ts";
+import { t } from "../../../i18n/index.ts";
 
 export interface ViewerProps {
   store: ViewerStore;
@@ -226,13 +227,44 @@ export function Viewer(props: ViewerProps) {
             alt={props.store.current()?.fileName ?? ""}
             draggable={false}
             onLoad={(event) =>
-              props.store.setNatural({
-                width: event.currentTarget.naturalWidth,
-                height: event.currentTarget.naturalHeight,
-              })
+              /*
+               * 只在**没有已知尺寸**时兜底（老库 NULL / 未入库 / 全屏外来图）：
+               * 库里已经给了这个变体的尺寸，位图的固有尺寸（Screen 档只有 1920）
+               * **不允许**把它盖掉 —— 那就是「2M 的 RAW 被压成 1M 大小」的根因
+               * （`specs/display-size-source.md` §6.2）。
+               */
+              state().naturalKnown
+                ? undefined
+                : props.store.setNatural(
+                    {
+                      width: event.currentTarget.naturalWidth,
+                      height: event.currentTarget.naturalHeight,
+                    },
+                    // 真身在屏才算权威（占位图 1920 只是先摆个差不多的大小，见 store API 注释）
+                    props.store.sharp(),
+                  )
             }
-            class="pointer-events-none absolute top-1/2 left-1/2 max-w-none select-none"
+            class="pointer-events-none absolute top-1/2 left-1/2 max-w-none select-none object-contain"
             style={{
+              /*
+               * **布局尺寸 = 变体尺寸**（`natural`）：位图只提供像素，
+               * 于是 fit / pan / `visibleRect` / 缩放百分比与布局同一个基准，
+               * 「100%」就是该尺寸下的 1:1（预览像素被放大到该尺寸）。
+               * 尺寸未知时不写 —— 保持位图固有尺寸的老行为（零回归）。
+               *
+               * `object-contain` 是**安全网**：万一某张图的像素比例与库里存的尺寸
+               * 比例有不一致（外部改过的文件、将来多一种产图管道），宁可留边也不要
+               * 把画面拉变形 —— 2026-10-11 崔总真机报的「latest 被拉成 4:3」
+               * 就是比例不一致被硬拉出来的。
+               */
+              ...(state().naturalKnown &&
+              state().natural.width > 0 &&
+              state().natural.height > 0
+                ? {
+                    width: `${state().natural.width}px`,
+                    height: `${state().natural.height}px`,
+                  }
+                : {}),
               // 顺序要紧：先居中，再平移，最后按**元素中心**缩放
               //（store 里的锚点数学就是按「未变换时居中」推的）
               transform: `translate(-50%, -50%) translate3d(${state().pan.x}px, ${state().pan.y}px, 0) scale(${state().zoom})`,
@@ -240,6 +272,24 @@ export function Viewer(props: ViewerProps) {
             }}
           />
         )}
+      </Show>
+
+      <Show when={props.store.fullPending()}>
+        {/*
+          「正在载入原图…」——真身（该变体自己的像素）还在路上，屏上是占位图。
+
+          崔总 2026-10-11 口径：**提示一旦结束，屏上就该是原图** ——
+          所以它只在 `fullPending` 为真时出现（不是另一步），且 `pointer-events-none`
+          （载入期间拖动/缩放/返回照常可用）。
+        */}
+        <div
+          class="pointer-events-none absolute start-1/2 top-3 z-20 flex -translate-x-1/2 items-center gap-1.5 rounded-ui bg-surface-layer/80 px-2.5 py-1 text-fs-1 text-fg-1"
+          data-viewer-loading="full"
+          role="status"
+        >
+          <span class="h-1.5 w-1.5 animate-pulse rounded-full bg-brand" aria-hidden="true" />
+          <span>{t("viewer.loading_original")}</span>
+        </div>
       </Show>
 
       <ViewerControls

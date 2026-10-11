@@ -140,7 +140,7 @@ export function RepositoryCard(props: RepositoryCardProps): JSX.Element {
             }><IconFolder size={14} aria-hidden="true" /></Show>
           }><IconLoader2 size={14} class="animate-spin" aria-hidden="true" /></Show>
         </button>
-        <span class="min-w-0 flex-1 truncate text-fs-2 text-fg-1">{props.name}</span>
+        <span class="min-w-0 flex-1 overflow-hidden whitespace-nowrap fade-x-end text-fs-2 text-fg-1">{props.name}</span>
 
         {/* 永久设置入口；离线时仍能登记新盘符。 */}
         <Show when={interactive()}>
@@ -155,7 +155,7 @@ export function RepositoryCard(props: RepositoryCardProps): JSX.Element {
       {/* ── 第二行：路径缩写 + 相片总数（两个工作区都显示） ── */}
       <div class="flex min-w-0 items-center gap-1.5 ps-8 text-fs-0 text-fg-3">
         <Show when={(props.displayPath ?? "") !== ""}>
-          <span class="min-w-0 flex-1 truncate" title={props.displayPath ?? ""}>
+          <span class="min-w-0 flex-1 overflow-hidden whitespace-nowrap fade-x-end" title={props.displayPath ?? ""}>
             {shortPath(props.displayPath ?? "", { maxLength: 40 })}
           </span>
         </Show>

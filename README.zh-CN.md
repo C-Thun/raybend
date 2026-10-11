@@ -34,7 +34,7 @@
 | **导出** | JPG · PNG · WebP · AVIF |
 | **相机 RAW** | `ari` `arw` `cr2` `cr3` `crw` `dcr` `dcs` `dng` `erf` `iiq` `kdc` `mef` `mos` `mrw` `nef` `nrw` `orf` `pef` `raf` `rw2` `sr2` `srf` `srw` `3fr` |
 
-\* HEIC 会被导入并建索引；预览还需要一个尚未内置的解码器。
+\* HEIC 会被导入并建索引，但显示与编辑还需要一个尚未内置的解码器 —— 缩略图目前显示占位图。
 
 RAW 导入与解码跟随 [rawler](https://github.com/dnglab/dnglab)，机型覆盖随上游版本推进。同名的 JPG 与 RAW 视为一张照片的两个文件。
 

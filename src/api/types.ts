@@ -28,14 +28,15 @@ export type VolumeKind =
 export type MediaKind = "raw" | "image" | "other";
 
 /** 拍摄时间的来源（`raybend::media::exif::TakenAtSource`） */
-export type TakenAtSource = "exif" | "filename" | "file_mtime" | "sibling";
+export type TakenAtSource = "exif" | "filename" | "file_created" | "file_mtime" | "sibling";
 
 /** 缩略图尺度（`raybend::thumbnail::render::SizeClass`） */
 /**
  * 缩略图尺度档（与 Rust 的 `thumbnail::SizeClass` 一一对应）。
- * `screen` 是看图用的大图（长边 1920），比网格大一档、比原图便宜得多。
+ * `grid` = 缩略图 384 —— 网格 tiles 与**所有**胶片带共用这一档（192 那一档 2026-10-11 取消）；
+ * `screen` = 1920，看图载入期间的占位（`specs/thumbnail-tiers-and-import-memory.md`）。
  */
-export type ThumbSize = "grid" | "strip" | "screen";
+export type ThumbSize = "grid" | "screen";
 
 /** 最近导入过的一个目录（`store::recent::RecentDir`）。 */
 export interface RecentDir {
@@ -88,6 +89,16 @@ export interface PhotoMeta {
   height: number;
   /** 原始 EXIF 方向（1..8） */
   orientation: number;
+  /**
+   * 拍摄时间（Unix 毫秒）+ 来源 + 时区偏移。
+   *
+   * 它**跟着同一次读头一起回来**（`specs/source-time-inline.md`）——以前是一条单独的
+   * `source_times` 命令，一次读整目录、真机上 6 秒，把整条 IPC 和界面都按住了。
+   * `null` = 这张读不出来（界面上归「未知时间」）。
+   */
+  takenAtMs: number | null;
+  takenAtSource: TakenAtSource | null;
+  takenAtOffsetMin: number | null;
 }
 
 export interface SourceItem {
@@ -99,7 +110,11 @@ export interface SourceItem {
   sizeBytes: number;
   /** 文件修改时间（Unix 毫秒）。 */
   mtimeMs: number | null;
-  /** **快速兜底**的拍摄时间：来自文件名或 mtime；真相要用 `readSourceTimes` 补。 */
+  /**
+   * **快速兜底**的拍摄时间：文件名 → **创建时间** → mtime（崔总 2026-10-11：
+   * 从卡上直接读时创建时间就是拍照时间）。真相**跟着出图那一次读**回来
+   *（`specs/source-time-inline.md`），界面只查缓存、不另读文件。
+   */
   takenAtMs: number | null;
   takenAtSource: TakenAtSource | null;
   /**
@@ -119,14 +134,6 @@ export interface SourceScan {
   /** 读不了的位置（权限等）——不是致命错误。 */
   problems: string[];
   elapsedMs: number;
-}
-
-/** 一个文件的精确拍摄时间。 */
-export interface TimeEntry {
-  path: string;
-  takenAtMs: number | null;
-  takenAtSource: TakenAtSource | null;
-  takenAtOffsetMin: number | null;
 }
 
 /** 照片计数（喂「已选择 N 张照片」）。 */
@@ -414,6 +421,8 @@ export interface AssetItem {
   /** 拍摄时间用的时区偏移（分钟）；`null` = 相机没写，按 UTC 看。 */
   takenAtOffsetMin: number | null;
   rating: number;
+  /** 回收站里的原位置（`recycled_from`；不在回收站时为 `null`）—— 右列「原位置」用。 */
+  recycledFrom: string | null;
   colorLabel: string | null;
   likeState: string | null;
   lockLevel: number;
@@ -426,6 +435,28 @@ export interface AssetItem {
   iso: number | null;
   width: number | null;
   height: number | null;
+  /**
+   * RAW 文件的**展示尺寸**（无 RAW → `null`）—— 切到 `RAW` 变体时界面按它布局。
+   * 与 `width/height`（基准文件的展示尺寸）同源：都是库里存好的值，毫秒级可得。
+   */
+  rawWidth: number | null;
+  rawHeight: number | null;
+  /**
+   * latest（当前编辑结果）的**输出尺寸**（无编辑栈 → `null`）。
+   * tiles 比例与看图初值用它；没有就回退 `width/height`。
+   * 老库的栈列还没回填时，后端读侧会按栈**现算**填上（零 I/O）——
+   * 于是这里拿到的一律是「这个变体多大」，不会是未裁切的基准画面。
+   * 详见 `specs/display-size-source.md` 与 `src/lib/display-size.ts`。
+   */
+  latestWidth: number | null;
+  latestHeight: number | null;
+  /**
+   * latest 的**来源基底**（`"raw"` / `"sooc"`；无编辑栈 → `null`）。
+   *
+   * flowinfo 的「文件类型」随显示变体走（崔总 2026-10-11 定）：latest 看它，
+   * 定稿看 `Issue.sourceBase` —— 唯一读口 `lib/display-size.ts::sourceBaseOf`。
+   */
+  latestSourceBase: string | null;
   orientation: number | null;
   sizeBytes: number | null;
   missing: boolean;
@@ -516,18 +547,37 @@ export interface MarkResult {
   canRedo: boolean;
 }
 
-/** 删除失败的一个文件。 */
+/** 回收站动作（移入 / 还原 / 真删）里失败的一个文件。 */
 export interface DeleteFailure {
   path: string;
   reason: string;
 }
 
-/** 删除结果。 */
-export interface DeleteResult {
-  deleted: number;
+/** 移入回收站的结果。 */
+export interface RecycleResult {
+  moved: number;
   blockedLocked: number[];
   alreadyGone: number;
   failed: DeleteFailure[];
+}
+
+/** 还原结果（`renamed` = 因原位被占而改名的张数）。 */
+export interface RestoreResult {
+  restored: number;
+  renamed: number;
+  failed: DeleteFailure[];
+}
+
+/** 真删 / 清空的结果。 */
+export interface PurgeResult {
+  purged: number;
+  failed: DeleteFailure[];
+}
+
+/** 回收站概况（入口行「有内容才出现」+ 数量/占用）。 */
+export interface RecycleSummaryView {
+  count: number;
+  bytes: number;
 }
 
 /** 旗标快照（当前库的）。 */
@@ -586,7 +636,7 @@ export interface BrowseFilter {
 
 /** 排序。 */
 export interface BrowseSort {
-  key?: "takenAt" | "importedAt" | "fileName" | "rating" | "camera";
+  key?: "takenAt" | "importedAt" | "fileName" | "rating" | "camera" | "deletedAt";
   desc?: boolean;
 }
 
@@ -596,6 +646,8 @@ export interface BrowseQuery {
   scopePath?: string | null;
   filter?: BrowseFilter;
   sort?: BrowseSort;
+  /** 查回收站（`true` = 只见回收站资产；`scopePath` 已是 `recycle/...` 前缀）。 */
+  recycle?: boolean;
 }
 
 /** 标记动作（对应 Rust 的 `MarkActionDto`，serde 用 `kind` 做标签）。 */
@@ -729,7 +781,6 @@ export interface EditorViewportState {
 }
 
 /** 取图档位：屏幕档（内嵌预览）/ 全尺寸（1:1）。 */
-export type EditorImageTier = "preview" | "full";
 
 /** 像素从哪来（RAW 的两条路在这一项上分得开）。 */
 export type EditorPixelOrigin = "bitmap" | "raw-embedded-preview" | "raw-decoded";
@@ -873,7 +924,7 @@ export interface EditorRenderState {
   nrPending: boolean;
   nrError: string | null;
   referenceReady: boolean;
-  referenceBase: "sooc" | "raw" | null;
+  referenceBase: "sooc" | "raw" | `issue:${number}` | null;
   comparing: boolean;
   compareLineCss: number | null;
   /** 会话在（渲染线程活着） */
@@ -898,8 +949,6 @@ export interface EditorRenderState {
   originalImage: SizeView | null;
   toolBoxCss: RectView | null;
   toolRevision: number;
-  tier: EditorImageTier | null;
-  wantedTier: EditorImageTier | null;
   origin: EditorPixelOrigin | null;
   /** 非交互显影帧的直方图；拖动时保持上次统计。 */
   histogram: import("../lib/histogram.ts").HistogramCounts | null;

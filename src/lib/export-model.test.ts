@@ -8,11 +8,20 @@ import {
   serializePresets,
   variantKey,
   variantAssetId,
-  visibleVariants, admitsPhoto, mainVariant, orderedIssues, variantSuffix,
+  visibleVariants, admitsPhoto, mainVariant, orderedIssues, variantSuffix, issueStrip,
   type ExportPreset,
   type ExportQueueItem,
   type VariantSummary,
 } from "./export-model.ts";
+
+/** 画廊小片的测试夹具：`smallFor()` 的输出形状（已排序、不含主行） */
+const issue = (variant: string): VariantSummary => ({
+  relPath: `photos/${variant}.jpg`,
+  reference: { assetId: 1, variant },
+  name: variant === "raw" ? "RAW" : variant === "sooc" ? "SOOC" : variant,
+  sourceBase: variant === "sooc" ? "sooc" : "raw",
+  profileHash: null,
+});
 const preset: ExportPreset = {
   id: "stable",
   name: "中文 📷",
@@ -87,13 +96,48 @@ test("photo filters never restrict the admitted photo's issue list", () => {
   for(const scope of ["all","issues","edited"] as const)assert.equal(visibleVariants(items,scope).length,4);
   assert(admitsPhoto(items,"edited"));assert(admitsPhoto(items,"issues"));
   assert.equal(mainVariant(items)?.reference.variant,"latest");
-  const strip=orderedIssues(items,()=>false).map(v=>v.reference.variant);
-  assert(strip.includes("raw"),"RAW 行回到 issue 条（标记为 RAW 的 issue）");
-  assert.equal(strip[strip.length-1],"raw");
+  const ordered=orderedIssues(items,()=>false).map(v=>v.reference.variant);
+  assert.equal(ordered[ordered.length-1],"raw","排序层仍把 RAW 排在小片列尾");
+  const strip=issueStrip(orderedIssues(items,()=>false));
+  assert(!strip.tiles.some(v=>v.reference.variant==="raw"),"RAW 不占小片位（只住弹窗）");
+  assert.deepEqual(strip.tiles.map(v=>v.reference.variant),["sooc"]);
+  assert.equal(strip.raw?.reference.variant,"raw","RAW 仍进弹窗，且排在末尾");
   const reset=items.map(v=>v.main?{...v,edited:false}:v);
   assert(!admitsPhoto(reset,"edited"));assert(admitsPhoto(reset,"issues"));
   assert(admitsPhoto([],"all"));assert(!admitsPhoto([],"issues"));
 });
+test("issue strip: 最多两片 + 入口按钮（全部定稿 / RAW / 不出现），崔总 2026-10-11 两轮定案", () => {
+  assert.deepEqual(issueStrip([]), { tiles: [], hidden: 0, raw: null, entry: null }, "什么都没有 → 连入口都不出");
+
+  const two = issueStrip([issue("issue:1"), issue("sooc")]);
+  assert.equal(two.tiles.length, 2);
+  assert.equal(two.entry, null, "两片全都摆得下、没有 RAW → 不出入口（tile 不被入口刷屏）");
+  assert.equal(two.raw, null);
+
+  const four = issueStrip([issue("issue:1"), issue("issue:2"), issue("issue:3"), issue("sooc")]);
+  assert.deepEqual(four.tiles.map(v=>v.reference.variant), ["issue:1", "issue:2"]);
+  assert.equal(four.hidden, 2);
+  assert.equal(four.entry, "all", "还有别的定稿没摆下 → 入口叫「全部定稿」");
+
+  const withRaw = issueStrip([issue("issue:1"), issue("issue:2"), issue("issue:3"), issue("raw")]);
+  assert.deepEqual(withRaw.tiles.map(v=>v.reference.variant), ["issue:1", "issue:2"]);
+  assert.equal(withRaw.entry, "all", "既有多出来的定稿又有 RAW → 仍叫「全部定稿」");
+  assert.equal(withRaw.raw?.reference.variant, "raw", "RAW 排在末尾、只进弹窗");
+
+  const rawOnly = issueStrip([issue("raw")]);
+  assert.equal(rawOnly.tiles.length, 0);
+  assert.equal(rawOnly.entry, "raw", "只多一张 RAW → 入口名字改成 RAW");
+
+  const fitsWithRaw = issueStrip([issue("issue:1"), issue("raw")]);
+  assert.deepEqual(fitsWithRaw.tiles.map(v=>v.reference.variant), ["issue:1"]);
+  assert.equal(fitsWithRaw.hidden, 0);
+  assert.equal(fitsWithRaw.entry, "raw", "主行 + 一片 + RAW 也只在弹窗里多一张 RAW");
+
+  const exactlyThree = issueStrip([issue("sooc"), issue("issue:1"), issue("issue:2"), issue("raw")]);
+  assert.equal(exactlyThree.hidden, 1, "主行 + 三片 = 有一片摆不下");
+  assert.equal(exactlyThree.entry, "all");
+});
+
 test("variant suffixes map four ways", () => {
   assert.equal(variantSuffix({relPath:"p",reference:{assetId:1,variant:"sooc"},name:"SOOC",sourceBase:"sooc",profileHash:null}),"ISO");
   assert.equal(variantSuffix({relPath:"p",reference:{assetId:1,variant:"raw"},name:"RAW",sourceBase:"raw",profileHash:null}),"IRA");

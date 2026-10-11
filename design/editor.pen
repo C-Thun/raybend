@@ -1,5 +1,5 @@
 {
-  "version": "2.20",
+  "version": "2.21",
   "children": [
     {
       "type": "frame",
@@ -774,6 +774,13 @@
                 },
                 {
                   "type": "frame",
+                  "id": "iaq3x",
+                  "name": "Spacer / 编辑源右侧留白",
+                  "width": 8,
+                  "height": 1
+                },
+                {
+                  "type": "frame",
                   "id": "N6kB9U",
                   "name": "工具按钮 / 撤销",
                   "width": 28,
@@ -817,28 +824,33 @@
                   ]
                 },
                 {
+                  "type": "rectangle",
+                  "id": "xNaV2",
+                  "name": "组分隔",
+                  "fill": "#000000",
+                  "width": 1,
+                  "height": 16
+                },
+                {
                   "type": "frame",
-                  "id": "Zp1Bz",
-                  "name": "按钮 / 自动调整",
+                  "id": "a6H4Fm",
+                  "name": "图标按钮 / 自动调整",
+                  "width": 28,
                   "height": 28,
-                  "fill": "$surface-track",
+                  "fill": "$surface-main",
                   "cornerRadius": 4,
-                  "padding": [
-                    0,
-                    9
-                  ],
                   "justifyContent": "center",
                   "alignItems": "center",
                   "children": [
                     {
-                      "type": "text",
-                      "id": "SCrF6",
-                      "name": "文字 / 自动调整",
-                      "fill": "$fg-2",
-                      "content": "自动调整",
-                      "fontFamily": "Inter",
-                      "fontSize": 12,
-                      "fontWeight": "600"
+                      "type": "icon",
+                      "id": "dAU5V",
+                      "name": "图标 / 自动调整",
+                      "width": 15,
+                      "height": 15,
+                      "icon": "wand-sparkles",
+                      "library": "lucide",
+                      "fill": "$fg-2"
                     }
                   ]
                 },
@@ -953,10 +965,10 @@
             {
               "type": "frame",
               "id": "mPyiT",
-              "x": 1442,
+              "x": 1496,
               "y": 0,
               "name": "ToolsBar Right",
-              "width": 150,
+              "width": 104,
               "height": 40,
               "fill": "$surface-main",
               "gap": 4,
@@ -965,37 +977,35 @@
               "children": [
                 {
                   "type": "frame",
-                  "id": "jWUME",
-                  "name": "按钮 / 重置修改",
+                  "id": "yB7yC",
+                  "name": "图标按钮 / 重置修改",
+                  "width": 28,
                   "height": 28,
-                  "fill": "$surface-track",
+                  "fill": "$surface-main",
                   "cornerRadius": 4,
-                  "padding": [
-                    0,
-                    9
-                  ],
                   "justifyContent": "center",
                   "alignItems": "center",
                   "children": [
                     {
-                      "type": "text",
-                      "id": "T9NvX6",
-                      "name": "文字 / 重置修改",
-                      "fill": "$fg-2",
-                      "content": "重置修改",
-                      "fontFamily": "Inter",
-                      "fontSize": 12,
-                      "fontWeight": "600"
+                      "type": "icon",
+                      "id": "UCsOy",
+                      "name": "图标 / 重置修改",
+                      "width": 15,
+                      "height": 15,
+                      "icon": "refresh-cw",
+                      "library": "lucide",
+                      "fill": "$fg-2"
                     }
                   ]
                 },
                 {
                   "type": "frame",
-                  "id": "g7qtRQ",
+                  "id": "LdoMb",
                   "name": "按钮 / 定稿",
                   "height": 28,
                   "fill": "$brand",
                   "cornerRadius": 4,
+                  "gap": 6,
                   "padding": [
                     0,
                     10
@@ -1004,8 +1014,18 @@
                   "alignItems": "center",
                   "children": [
                     {
+                      "type": "icon",
+                      "id": "hgyKE",
+                      "name": "图标 / 定稿",
+                      "width": 14,
+                      "height": 14,
+                      "icon": "bookmark",
+                      "library": "lucide",
+                      "fill": "$fg-on-brand"
+                    },
+                    {
                       "type": "text",
-                      "id": "itRoI",
+                      "id": "xtqbD",
                       "name": "文字 / 定稿",
                       "fill": "$fg-on-brand",
                       "content": "定稿",
@@ -1048,7 +1068,7 @@
             {
               "type": "rectangle",
               "id": "dEgvM",
-              "x": 1505,
+              "x": 1480,
               "y": 0,
               "name": "ToolsBar Right / 渐隐覆盖",
               "fill": {
@@ -27794,7 +27814,7 @@
           "id": "ygP1t",
           "name": "Note / 常态",
           "fill": "$fg-2",
-          "content": "常态：左 / 中 / 右三段；中段居中，未指定的一律放中段",
+          "content": "常态：左 / 中 / 右三段；紧缩后中段为纯图标，只在功能大类之间画一根竖线（这里：撤销·重做 │ 其余）；图标按钮自带统一悬停提示（样式见 export.pen 的 Components / Export / ToolsBar 帧）。",
           "fontFamily": "Inter",
           "fontSize": 12,
           "fontWeight": "normal"
@@ -27881,6 +27901,13 @@
                 },
                 {
                   "type": "frame",
+                  "id": "wDKw8",
+                  "name": "Spacer / 编辑源右侧留白",
+                  "width": 8,
+                  "height": 1
+                },
+                {
+                  "type": "frame",
                   "id": "I8efMb",
                   "name": "工具按钮 / 撤销",
                   "width": 28,
@@ -27924,28 +27951,33 @@
                   ]
                 },
                 {
+                  "type": "rectangle",
+                  "id": "Ss2Wl",
+                  "name": "组分隔",
+                  "fill": "#000000",
+                  "width": 1,
+                  "height": 16
+                },
+                {
                   "type": "frame",
-                  "id": "s5ufTx",
-                  "name": "按钮 / 自动调整",
+                  "id": "kw8Db",
+                  "name": "图标按钮 / 自动调整",
+                  "width": 28,
                   "height": 28,
-                  "fill": "$surface-track",
+                  "fill": "$surface-main",
                   "cornerRadius": 4,
-                  "padding": [
-                    0,
-                    9
-                  ],
                   "justifyContent": "center",
                   "alignItems": "center",
                   "children": [
                     {
-                      "type": "text",
-                      "id": "o6Cip",
-                      "name": "文字 / 自动调整",
-                      "fill": "$fg-2",
-                      "content": "自动调整",
-                      "fontFamily": "Inter",
-                      "fontSize": 12,
-                      "fontWeight": "600"
+                      "type": "icon",
+                      "id": "X0O5kU",
+                      "name": "图标 / 自动调整",
+                      "width": 15,
+                      "height": 15,
+                      "icon": "wand-sparkles",
+                      "library": "lucide",
+                      "fill": "$fg-2"
                     }
                   ]
                 },
@@ -28060,10 +28092,10 @@
             {
               "type": "frame",
               "id": "k2FY8u",
-              "x": 1442,
+              "x": 1496,
               "y": 0,
               "name": "ToolsBar Right",
-              "width": 150,
+              "width": 104,
               "height": 40,
               "fill": "$surface-main",
               "gap": 4,
@@ -28072,37 +28104,35 @@
               "children": [
                 {
                   "type": "frame",
-                  "id": "uYKwC",
-                  "name": "按钮 / 重置修改",
+                  "id": "u7L3H3",
+                  "name": "图标按钮 / 重置修改",
+                  "width": 28,
                   "height": 28,
-                  "fill": "$surface-track",
+                  "fill": "$surface-main",
                   "cornerRadius": 4,
-                  "padding": [
-                    0,
-                    9
-                  ],
                   "justifyContent": "center",
                   "alignItems": "center",
                   "children": [
                     {
-                      "type": "text",
-                      "id": "lD0QL",
-                      "name": "文字 / 重置修改",
-                      "fill": "$fg-2",
-                      "content": "重置修改",
-                      "fontFamily": "Inter",
-                      "fontSize": 12,
-                      "fontWeight": "600"
+                      "type": "icon",
+                      "id": "P8TyPM",
+                      "name": "图标 / 重置修改",
+                      "width": 15,
+                      "height": 15,
+                      "icon": "refresh-cw",
+                      "library": "lucide",
+                      "fill": "$fg-2"
                     }
                   ]
                 },
                 {
                   "type": "frame",
-                  "id": "BMufv",
+                  "id": "A58av",
                   "name": "按钮 / 定稿",
                   "height": 28,
                   "fill": "$brand",
                   "cornerRadius": 4,
+                  "gap": 6,
                   "padding": [
                     0,
                     10
@@ -28111,8 +28141,18 @@
                   "alignItems": "center",
                   "children": [
                     {
+                      "type": "icon",
+                      "id": "uC7pf",
+                      "name": "图标 / 定稿",
+                      "width": 14,
+                      "height": 14,
+                      "icon": "bookmark",
+                      "library": "lucide",
+                      "fill": "$fg-on-brand"
+                    },
+                    {
                       "type": "text",
-                      "id": "pvEtC",
+                      "id": "u8FTL",
                       "name": "文字 / 定稿",
                       "fill": "$fg-on-brand",
                       "content": "定稿",
@@ -28155,7 +28195,7 @@
             {
               "type": "rectangle",
               "id": "m3wXB",
-              "x": 1434,
+              "x": 1480,
               "y": 0,
               "name": "ToolsBar Right / 渐隐覆盖",
               "fill": {

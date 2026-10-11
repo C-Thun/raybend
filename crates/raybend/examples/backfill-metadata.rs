@@ -1,16 +1,19 @@
-//! 老库回填：把 `taken_at IS NULL` 的资产重读一遍 EXIF 写回库。
+//! 老库回填：把 `taken_at IS NULL` 的资产重读一遍 EXIF 写回库；`--sizes` 只补展示尺寸。
 //!
 //! 用法：
 //!
 //! ```bash
-//! cargo run -p raybend --example backfill-metadata -- <库根> [--dry-run]
+//! cargo run -p raybend --example backfill-metadata -- <库根> [--dry-run] [--sizes]
 //! ```
 //!
-//! * `--dry-run` 只读不写（跑一遍看会补多少张，不动库）。
+//! * `--dry-run` 只读不写（跑一遍看会补多少张，不动库）；
+//! * `--sizes` 只补 `asset_files.display_*`（方向 + 展示尺寸）——**不碰** `taken_at`
+//!   （`specs/display-size-source.md` §3.2：v19 之前导入的库都缺这三列）。
 //!
 //! 为什么需要它：2026-09-18 之前的导入**不写 EXIF**（根因见 `import/sink.rs`），
-//! 那段时间导入的库里时间/器材全是 NULL。新导入已经写对了，这个例子负责补老库。
-//! 只填空值、不动用户数据（`store::backfill` 里写了规则）。
+//! 那段时间导入的库里时间/器材全是 NULL；v18 之前的导入也没写展示尺寸。
+//! 新导入已经写对了，这个例子负责补老库。只填空值、不动用户数据
+//! （`store::backfill` 里写了规则）。
 
 use std::path::PathBuf;
 
@@ -21,8 +24,9 @@ use raybend::store::time;
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let dry_run = args.iter().any(|a| a == "--dry-run");
+    let sizes_only = args.iter().any(|a| a == "--sizes");
     let Some(root) = args.iter().find(|a| !a.starts_with("--")).map(PathBuf::from) else {
-        eprintln!("用法：backfill-metadata <库根> [--dry-run]");
+        eprintln!("用法：backfill-metadata <库根> [--dry-run] [--sizes]");
         std::process::exit(2);
     };
     if !root.join("catalog.db").is_file() {
@@ -40,20 +44,41 @@ fn main() {
     };
 
     if dry_run {
-        let count: usize = catalog
+        let (missing_time, missing_sizes): (usize, usize) = catalog
             .read(|conn| {
-                Ok(conn.query_row(
-                    "SELECT count(*) FROM assets WHERE taken_at IS NULL",
-                    [],
-                    |row| Ok(row.get::<_, i64>(0)? as usize),
-                )?)
+                Ok((
+                    conn.query_row(
+                        "SELECT count(*) FROM assets WHERE taken_at IS NULL",
+                        [],
+                        |row| Ok(row.get::<_, i64>(0)? as usize),
+                    )?,
+                    conn.query_row(
+                        "SELECT count(*) FROM asset_files
+                          WHERE missing_since IS NULL
+                            AND (display_width IS NULL OR display_height IS NULL)",
+                        [],
+                        |row| Ok(row.get::<_, i64>(0)? as usize),
+                    )?,
+                ))
             })
-            .unwrap_or(0);
-        println!("（dry-run）这个库里有 {count} 张照片没有拍摄时间，正式跑会给它们补上");
+            .unwrap_or((0, 0));
+        if sizes_only {
+            println!("（dry-run）这个库里有 {missing_sizes} 个文件缺展示尺寸，正式跑会给它们补上");
+        } else {
+            println!(
+                "（dry-run）这个库里有 {missing_time} 张照片没有拍摄时间、\
+                 {missing_sizes} 个文件缺展示尺寸，正式跑会给它们补上"
+            );
+        }
         return;
     }
 
-    match backfill::backfill_metadata(&catalog, now) {
+    let outcome = if sizes_only {
+        backfill::backfill_display_sizes(&catalog, now)
+    } else {
+        backfill::backfill_metadata(&catalog, now)
+    };
+    match outcome {
         Ok(report) => {
             println!("库：{}", root.display());
             println!("候选资产：      {}", report.candidates);

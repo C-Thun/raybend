@@ -107,11 +107,19 @@ function Rows(props: RecentListProps) {
                 ].join(" ")}
                 title={unavailable() ? t("source.recent_unmounted") : undefined}
               >
+                {/*
+                 * `flex-1` 必须给：不给的话 `PathText` 的外框只按**内容宽**排，
+                 * 于是末端的渐隐落在文字尾巴上、右边还空一大截（崔总 2026-10-11 报的
+                 * 「渐隐太靠左、路径几乎看不见、中间空好多」就是它）。
+                 * 给上之后文字吃满可用宽，渐隐自然贴住右侧的删除按钮 ——
+                 * 而且列表宽度可调、按钮位置会动，这样才跟得住。
+                 */}
                 <PathText
                   path={entry.path}
                   maxLength={36}
                   icon={<IconFolder size={14} />}
                   selected={props.isSelected(entry.path)}
+                  class="flex-1"
                 />
                 <Show when={unavailable()}>
                   <IconFolderOff

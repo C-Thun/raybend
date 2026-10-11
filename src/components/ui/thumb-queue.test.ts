@@ -8,7 +8,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createThumbQueue } from "./thumb-queue.ts";
+import { createThumbQueue, defaultThumbConcurrency } from "./thumb-queue.ts";
 
 /** 可挂起、可失败的假加载器；同时统计并发峰值 */
 function fakeLoader(options: { hold?: boolean; fail?: boolean } = {}) {
@@ -330,6 +330,55 @@ test("当前照片排到待加载队列前面，避免切图时总览等整条�
   loader.releaseAll();
   await flush();
   assert.deepEqual(loader.calls, ["/first.jpg", "/current.jpg", "/neighbor.jpg"]);
+});
+
+test("窗口优先：当前窗口这一批提到队首，顺序即优先级（没请求过的不补）", async () => {
+  const loader = fakeLoader({ hold: true });
+  const queue = createThumbQueue({ load: loader.load, ...fakeUrls(), concurrency: 1 });
+  queue.request("/a.jpg"); // 已在飞，不受影响
+  for (const path of ["/b.jpg", "/c.jpg", "/d.jpg", "/e.jpg"]) queue.request(path);
+  // 窗口里现在看得到 d、c：它们排到 b/e 前面；窗口外的 c 后面那些保持原序
+  queue.prioritize(["/d.jpg", "/c.jpg", "/never-requested.jpg"]);
+  assert.deepEqual(loader.calls, ["/a.jpg"]);
+  assert.equal(queue.stats().queued, 4);
+  loader.state.hold = false;
+  loader.releaseAll();
+  await flush(8);
+  assert.deepEqual(loader.calls, ["/a.jpg", "/d.jpg", "/c.jpg", "/b.jpg", "/e.jpg"]);
+});
+
+test("窗口优先：已经出好的不再入队，也不会被重取", async () => {
+  const loader = fakeLoader();
+  const queue = createThumbQueue({ load: loader.load, ...fakeUrls(), concurrency: 2 });
+  queue.request("/ready.jpg");
+  await flush(6);
+  assert.equal(queue.get("/ready.jpg").status, "ready");
+  const before = loader.calls.length;
+  queue.prioritize(["/ready.jpg", "/never-requested.jpg"]);
+  await flush(4);
+  assert.equal(loader.calls.length, before, "ready 的不该再读一遍");
+  assert.equal(queue.get("/never-requested.jpg").status, "idle", "没请求过的不该被补请求");
+});
+
+test("默认并发按 CPU 核数在 2–8 之间（拿不到核数就 4）", () => {
+  const original = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  const withCores = (cores: number | undefined): number => {
+    Object.defineProperty(globalThis, "navigator", {
+      value: cores === undefined ? undefined : { hardwareConcurrency: cores },
+      configurable: true,
+    });
+    return defaultThumbConcurrency();
+  };
+  try {
+    assert.equal(withCores(1), 2);
+    assert.equal(withCores(2), 2);
+    assert.equal(withCores(4), 3);
+    assert.equal(withCores(16), 8);
+    assert.equal(withCores(undefined), 4);
+  } finally {
+    if (original === undefined) delete (globalThis as { navigator?: unknown }).navigator;
+    else Object.defineProperty(globalThis, "navigator", original);
+  }
 });
 
 test("failure waits for an explicit retry instead of restarting by itself",async()=>{

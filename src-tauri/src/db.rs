@@ -200,19 +200,21 @@ pub fn warm_up<R: Runtime>(app: &AppHandle<R>, state: &DbState) {
     match state.get_or_open(app) {
         Ok(()) => {
             if let Ok(paths) = app_paths(app.clone()) {
-                println!(
-                    "[raybend] 数据底座就绪：{}（位置：{}）",
-                    paths.app_db, paths.data_dir_kind
+                log::info!(
+                    target: "db",
+                    "数据底座就绪：{}（位置：{}）",
+                    paths.app_db,
+                    paths.data_dir_kind
                 );
                 if paths.data_dir_kind != "local" {
-                    eprintln!(
+                    log::warn!(
                         "[raybend] ⚠️ 应用数据目录位于非本地位置（{}）—— SQLite 有损坏风险，见 AGENTS.md §6.4",
                         paths.data_dir_kind
                     );
                 }
             }
         }
-        Err(e) => eprintln!("[raybend] ⚠️ 打开应用数据库失败（不影响窗口显示）：{e}"),
+        Err(e) => log::warn!("[raybend] ⚠️ 打开应用数据库失败（不影响窗口显示）：{e}"),
     }
 }
 

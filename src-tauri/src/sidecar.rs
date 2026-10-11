@@ -11,8 +11,8 @@
 use crate::browse::BrowseState;
 use crate::db::DbState;
 use raybend::store::time;
-use raybend::store::{assets, develop, issues, tags, photo_tags, organization};
-use raybend::xmp::{self, SidecarContent, SidecarMetadata, SidecarProfile};
+use raybend::store::{organization, tags};
+use raybend::xmp;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::{OnceLock, mpsc};
@@ -20,6 +20,26 @@ use tauri::{AppHandle, Manager, Runtime};
 
 /// `xmp:CreatorTool`（应用名 + 版本，读者能认出这是谁写的）。
 const TOOL: &str = concat!("RayBend ", env!("CARGO_PKG_VERSION"));
+
+/// 写出开关（设备级，`specs/xmp-write-toggle.md`）：`app.db` settings 的 KV，**默认开**。
+/// 关闭 = 写出通路整体跳过（不写、不删），编辑与读回不受影响。
+pub(crate) const XMP_WRITE_KEY: &str = "xmp.write_sidecar";
+
+/// 开关值的判定：缺失 / 读失败 / 不是 `false` 都算**开**（向写的一侧保守）。
+fn write_enabled_value(value: Option<&str>) -> bool {
+    !value.is_some_and(|value| value.trim().eq_ignore_ascii_case("false"))
+}
+
+fn write_enabled<R: Runtime>(app: &AppHandle<R>) -> bool {
+    let value = app
+        .state::<DbState>()
+        .with(app, |db| {
+            db.get_setting(XMP_WRITE_KEY).map_err(|e| e.to_string())
+        })
+        .ok()
+        .flatten();
+    write_enabled_value(value.as_deref())
+}
 
 type Task = Box<dyn FnOnce() + Send + 'static>;
 
@@ -53,7 +73,7 @@ pub(crate) fn queue_sync<R: Runtime>(app: AppHandle<R>, repository_id: &str, ass
     let repository_id = repository_id.to_string();
     queue(move || {
         if let Err(error) = sync_now(&app, &repository_id, &asset_ids) {
-            eprintln!("[sidecar] 同步失败（{repository_id}）：{error}");
+            log::warn!("[sidecar] 同步失败（{repository_id}）：{error}");
         }
     });
 }
@@ -64,21 +84,28 @@ fn sync_now<R: Runtime>(
     repository_id: &str,
     asset_ids: &[i64],
 ) -> Result<(), String> {
+    if !write_enabled(app) {
+        return Ok(()); // 写出开关关着：整批不动作（不写也不删），编辑仍在库里
+    }
     let state = app.state::<BrowseState>();
     let catalog = state.lease(app, repository_id)?;
-    let dictionary = app.state::<DbState>().with(app, |db| db.read(tags::list_all).map_err(|e| e.to_string()))?;
-    catalog.write(move |conn| organization::sync_legacy_terms(conn, &dictionary)).map_err(|e| e.to_string())?;
+    let dictionary = app
+        .state::<DbState>()
+        .with(app, |db| db.read(tags::list_all).map_err(|e| e.to_string()))?;
+    catalog
+        .write(move |conn| organization::sync_legacy_terms(conn, &dictionary))
+        .map_err(|e| e.to_string())?;
     let root = catalog.root().to_path_buf();
     let now = time::now_millis();
     let mut failed = 0usize;
     for asset_id in asset_ids {
         if let Err(error) = sync_one(app, &catalog, &root, *asset_id, now) {
             failed += 1;
-            eprintln!("[sidecar] 资产 {asset_id} 写出失败：{error}");
+            log::warn!("[sidecar] 资产 {asset_id} 写出失败：{error}");
         }
     }
     if failed > 0 {
-        eprintln!(
+        log::warn!(
             "[sidecar] 同步 {} 个资产：{failed} 失败（保留盘上文件，下次触发重试）",
             asset_ids.len()
         );
@@ -88,6 +115,9 @@ fn sync_now<R: Runtime>(
 }
 
 /// 一个资产的镜像写出 / 清空删除。
+///
+/// 落点与内容由核心的 `xmp::collect` 组装（与巡检工具同一份实现，`AGENTS.md` §2.12）；
+/// 这里只负责「拿库内相对路径 → 落到库根下 → 发布/删除 → 记日志」。
 fn sync_one<R: Runtime>(
     _app: &AppHandle<R>,
     catalog: &std::sync::Arc<raybend::store::db::CatalogDb>,
@@ -95,80 +125,21 @@ fn sync_one<R: Runtime>(
     asset_id: i64,
     now: i64,
 ) -> raybend::Result<()> {
-    let (files, latest, finalized, row, keywords, tag_state) = catalog.read(move |conn| {
-        let files = assets::files_of_asset(conn, asset_id)?;
-        let latest = develop::load(conn, asset_id)?;
-        let finalized = issues::list(conn, asset_id)?;
-        let row = conn.query_row(
-            "SELECT rating, color_label, author, description, country, province_state, city, sublocation \
-             FROM assets WHERE id = ?1",
-            [asset_id],
-            |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, Option<String>>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                    row.get::<_, Option<String>>(3)?,
-                    row.get::<_, Option<String>>(4)?,
-                    row.get::<_, Option<String>>(5)?,
-                    row.get::<_, Option<String>>(6)?,
-                    row.get::<_, Option<String>>(7)?,
-                ))
-            },
-        )?;
-        let keywords = photo_tags::effective_names(conn, asset_id)?;
-        let tag_state = photo_tags::snapshot(conn, asset_id)?;
-        Ok((files, latest, finalized, row, keywords, tag_state))
-    })?;
-    let Some(rel) = xmp::sidecar_rel_path(&files) else {
+    let Some(asset) = catalog.read(move |conn| xmp::collect(conn, asset_id))? else {
         return Ok(()); // 连文件行都没有（资产已删）—— 没什么可镜像
     };
-    let abs = root.join(rel.replace('/', std::path::MAIN_SEPARATOR_STR));
+    let abs = root.join(asset.rel.replace('/', std::path::MAIN_SEPARATOR_STR));
+    let rel = asset.rel;
 
-    let (rating, color_label, author, description, country, province_state, city, sublocation) =
-        row;
-    let raw_file_name = files
-        .iter()
-        .find(|file| file.role == "raw" && !file.missing)
-        .or_else(|| files.iter().find(|file| file.role == "raw"))
-        .and_then(|file| file.rel_path.rsplit('/').next().map(str::to_string));
-
-    let content = SidecarContent {
-        tag_state: Some(tag_state),
-        latest: Some(latest),
-        profiles: finalized
-            .iter()
-            .map(|issue| SidecarProfile {
-                name: issue.name.clone(),
-                source_base: issue.source_base,
-                created_at_ms: issue.created_at,
-                ordinal: Some(issue.ordinal),
-                stack: issue.stack.clone(),
-            })
-            .collect(),
-        metadata: SidecarMetadata {
-            rating: rating.clamp(0, 5) as u8,
-            color_label,
-            keywords,
-            author,
-            description,
-            country,
-            province_state,
-            city,
-            sublocation,
-        },
-        raw_file_name,
-    };
-
-    match xmp::compose_checked(&content, now, TOOL)? {
+    match xmp::compose_checked(&asset.content, now, TOOL)? {
         Some(xml) => {
             if let xmp::PublishOutcome::Preserved = xmp::publish(&abs, &xml)? {
-                eprintln!("[sidecar] {rel} 是更新版本的文件，保留未改写");
+                log::warn!("[sidecar] {rel} 是更新版本的文件，保留未改写");
             }
         }
         None => {
             if xmp::remove_if_ours(&abs)? {
-                eprintln!("[sidecar] {rel} 内容已全空，删除（编辑了才有）");
+                log::warn!("[sidecar] {rel} 内容已全空，删除（编辑了才有）");
             }
         }
     }
@@ -215,12 +186,12 @@ pub(crate) fn adopt_new_assets<R: Runtime>(
             Ok(false) => skipped += 1,
             Err(error) => {
                 skipped += 1;
-                eprintln!("[sidecar] 采纳 {} 失败：{error}", sidecar.display());
+                log::warn!("[sidecar] 采纳 {} 失败：{error}", sidecar.display());
             }
         }
     }
     if adopted + skipped > 0 {
-        eprintln!("[sidecar] 新资产 sidecar 采纳：{adopted} 成功、{skipped} 跳过");
+        log::warn!("[sidecar] 新资产 sidecar 采纳：{adopted} 成功、{skipped} 跳过");
     }
 }
 
@@ -236,10 +207,16 @@ fn adopt_one<R: Runtime>(
         return Ok(false); // 别家的文件：不读
     };
     for warning in &parsed.warnings {
-        eprintln!("[sidecar] 采纳 {}：{warning}", sidecar.display());
+        log::warn!("[sidecar] 采纳 {}：{warning}", sidecar.display());
     }
-    if parsed.profiles.is_empty() && parsed.latest.is_none() && parsed.metadata.is_empty()
-        && !parsed.tag_state.as_ref().is_some_and(|state| state.has_content()) {
+    if parsed.profiles.is_empty()
+        && parsed.latest.is_none()
+        && parsed.metadata.is_empty()
+        && !parsed
+            .tag_state
+            .as_ref()
+            .is_some_and(|state| state.has_content())
+    {
         return Ok(false);
     }
     // 跨库恢复保留资源 ID；缺 LUT 明确记录，不能静默清掉引用或改变 profile。
@@ -265,20 +242,29 @@ fn adopt_one<R: Runtime>(
             Ok((root, resources)) => {
                 for (id, record) in resources {
                     if record.is_none_or(|record| !root.join(record.file_rel_path).is_file()) {
-                        eprintln!(
+                        log::warn!(
                             "[sidecar] 采纳 {}：LUT {id} 缺失，保留引用等待资源补齐",
                             sidecar.display()
                         );
                     }
                 }
             }
-            Err(error) => eprintln!("[sidecar] LUT 资源检查失败，保留引用：{error}"),
+            Err(error) => log::warn!("[sidecar] LUT 资源检查失败，保留引用：{error}"),
         }
     }
     // 文件 IO 和 app.db 词典写入不占 catalog 事务；守卫在最终写事务内再检查。
-    let names = parsed.tag_state.as_ref().map_or_else(|| parsed.metadata.keywords.clone(), |state| {
-        state.manual.iter().chain(&state.ai).chain(&state.masks).cloned().collect()
-    });
+    let names = parsed.tag_state.as_ref().map_or_else(
+        || parsed.metadata.keywords.clone(),
+        |state| {
+            state
+                .manual
+                .iter()
+                .chain(&state.ai)
+                .chain(&state.masks)
+                .cloned()
+                .collect()
+        },
+    );
     let ids = if names.is_empty() {
         Vec::new()
     } else {
@@ -289,12 +275,14 @@ fn adopt_one<R: Runtime>(
             })?
     };
     let dictionary = app.state::<DbState>().with(app, |db| {
-        db.read(|conn| tags::tags_by_ids(conn, &ids)).map_err(|e| e.to_string())
+        db.read(|conn| tags::tags_by_ids(conn, &ids))
+            .map_err(|e| e.to_string())
     })?;
-    catalog.write(move |conn| {
-        organization::sync_legacy_terms(conn, &dictionary)?;
-        xmp::adopt(conn, asset_id, &parsed, &ids, time::now_millis())
-    })
+    catalog
+        .write(move |conn| {
+            organization::sync_legacy_terms(conn, &dictionary)?;
+            xmp::adopt(conn, asset_id, &parsed, &ids, time::now_millis())
+        })
         .map_err(|e| e.to_string())
 }
 
@@ -302,6 +290,20 @@ fn adopt_one<R: Runtime>(
 mod tests {
     use super::*;
     use raybend::store::marking::Op;
+
+    #[test]
+    fn write_toggle_defaults_on_and_only_explicit_false_turns_it_off() {
+        // 缺失 / 读取不到 / 非法值：都向写的一侧保守（`specs/xmp-write-toggle.md` §2.1）。
+        assert!(write_enabled_value(None));
+        assert!(write_enabled_value(Some("true")));
+        assert!(write_enabled_value(Some("TRUE")));
+        assert!(write_enabled_value(Some("  true  ")));
+        assert!(write_enabled_value(Some("1")));
+        assert!(write_enabled_value(Some("garbage")));
+        // 只有明确的 false（大小写/空白无关）才关。
+        assert!(!write_enabled_value(Some("false")));
+        assert!(!write_enabled_value(Some(" FALSE ")));
+    }
 
     #[test]
     fn sidecar_mark_targets_exclude_private_flags_and_deduplicate_assets() {

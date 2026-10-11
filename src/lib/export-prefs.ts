@@ -1,7 +1,16 @@
 import { createSignal } from "solid-js";
 import { clampTileStepIndex, tilePositionForSize, tileSizeAt } from "./tile-flow.ts";
-export const EXPORT_TOP_SIZE_BOUNDS = { min: 240, max: 320 } as const;
-export const EXPORT_PREFS_KEY = "raybend.export-display.v3";
+/**
+ * 导出**上部**网格的边长边界（崔总 2026-10-11：下限 240 → **192**，−20%）。
+ *
+ * 为什么缩：中列 920（设计值）时旧下限下 `4×240 + 3×3 = 969 > 920` —— 永远差一列；
+ * 新下限下 `4×226 + 3×3 = 913 ≤ 920`，四列可达。档位取 192…320 共 10 档。
+ */
+export const EXPORT_TOP_SIZE_BOUNDS = { min: 192, max: 320 } as const;
+/** 迁移用：v3 及更早的档位是在这组边界下存的 */
+export const LEGACY_EXPORT_TOP_SIZE_BOUNDS = { min: 240, max: 320 } as const;
+export const EXPORT_PREFS_KEY = "raybend.export-display.v4";
+const LEGACY_KEYS = ["raybend.export-display.v3", "raybend.export-display.v2", "raybend.export-display.v1"] as const;
 export interface ExportDisplay {
   topStep: number;
   queueStep: number;
@@ -66,13 +75,25 @@ export function createExportPreferences(
   try {
     raw = storage?.getItem(EXPORT_PREFS_KEY) ?? null;
     if (raw === null) {
-      const v2 = storage?.getItem("raybend.export-display.v2") ?? null;
-      const old = v2 ?? storage?.getItem("raybend.export-display.v1") ?? null;
-      if (old !== null) {
+      /*
+       * 旧 key 的一次性迁移（`AGENTS.md` §2.16：版本化 key + 显式迁移）。
+       *
+       * ⚠ 档位是**下标**，而 v4 的 bounds 下限变了（240 → 192）：同一个下标含义就变了。
+       * 所以一律**按尺寸**回填（旧下标 → 旧 bounds 下的尺寸 → 在新 bounds 里的位置）——
+       * 老用户的上部尺寸不会被静默顶小，想拿四列自己往左拖一档（240 → 226）。
+       */
+      const legacyKey = LEGACY_KEYS.find((key) => storage?.getItem(key) != null);
+      const old = legacyKey === undefined ? null : storage?.getItem(legacyKey) ?? null;
+      if (old !== null && legacyKey !== undefined) {
         const previous = JSON.parse(old) as Partial<ExportDisplay>;
         const migrated = readExportDisplay(old);
-        migrated.topStep = tilePositionForSize(tileSizeAt(typeof previous.topStep === "number" ? previous.topStep : 8), EXPORT_TOP_SIZE_BOUNDS);
-        migrated.scope = v2 === null ? "all" : readExportDisplay(old).scope;
+        const size = tileSizeAt(
+          typeof previous.topStep === "number" ? previous.topStep : 0,
+          legacyKey === "raybend.export-display.v3" ? LEGACY_EXPORT_TOP_SIZE_BOUNDS : undefined,
+        );
+        migrated.topStep = tilePositionForSize(size, EXPORT_TOP_SIZE_BOUNDS);
+        // v1 的 scope 是旧的 `sooc` 档（v2 起才是 all/edited/issues）
+        if (legacyKey === "raybend.export-display.v1") migrated.scope = "all";
         raw = JSON.stringify(migrated);
         storage?.setItem(EXPORT_PREFS_KEY, raw);
       }

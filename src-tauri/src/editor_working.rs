@@ -52,7 +52,6 @@ pub(super) struct Cached {
     preview: WorkingPreview,
     original: (u32, u32),
     shot: Option<f32>,
-    sooc: Option<std::path::PathBuf>,
     reference: ReferenceCache,
     revision: u64,
     high_preview: Option<(DenoiseKey, WorkingPreview)>,
@@ -62,7 +61,9 @@ pub(super) fn run(
     cached: &mut Option<Cached>,
     wanted: &Option<String>,
     job: &DevelopJob,
+    sources: Option<&crate::develop::ReferenceSources>,
     max_texture: u32,
+    commands: &Sender<RenderCommand>,
     high: &mut raybend::develop::denoise_job::WorkingHighDenoise,
 ) -> Option<DevelopOutcome> {
     let path = wanted.as_deref()?;
@@ -85,6 +86,13 @@ pub(super) fn run(
     let mut reference_base = None;
     let mut nr_pending = false;
     let mut nr_error = None;
+    /*
+     * **白平衡基线 = 解码真值**（`specs/editor-session-pipeline.md` §6.2，与 legacy 同一口径）。
+     * payload 里的 `asShotTemperature` 只是"解码还没有值时的占位"；解码一给出真值
+     * （下面 `params.set_as_shot_temperature(shot)`）就覆盖它 —— 否则首帧按静态默认 6250K 算，
+     * 几秒后跳回真值（现象 3 的白平衡那一半）。
+     */
+    let mut params = job.params.clone();
     let result = (|| -> Result<DevelopedImage, String> {
         let signature =
             if job.photo.is_some() || cached.as_ref().is_none_or(|entry| entry.path != path) {
@@ -96,14 +104,37 @@ pub(super) fn run(
                 cached.as_ref().and_then(|entry| entry.signature.clone())
             };
         if cached.as_ref().is_none_or(|entry| {
-            entry.path != path
-                || entry.color != input.state
-                || entry.signature != signature
-                || job.photo.is_some()
+            source_needs_reload(
+                Some(entry.path.as_str()),
+                entry.signature.as_deref(),
+                path,
+                signature.as_deref(),
+                job.photo.is_some(),
+                entry.color != input.state,
+            )
         }) {
             *cached = None;
             high.clear();
+            /*
+             * ①′ **过渡帧**：与 legacy 同一份实现（`transition_outcome`），
+             * 必须在 `decode_working_source` **之前**发 —— 「先出图、再解码」的全部秘密
+             * 就在这一行的位置上（V2 以前没有这一段：这就是「有的照片快、有的慢」的一半）。
+             * 解不出来就什么都不发（不是错：真帧照样会来）。
+             */
+            if let Some(plan) = job.transition.as_ref() {
+                if let Some(frame) = transition_outcome(plan, job, path) {
+                    if commands.send(RenderCommand::Developed(frame)).is_err() {
+                        return Err("渲染线程不在了".into());
+                    }
+                } else {
+                    eprintln!(
+                        "[editor] 过渡帧：{} 个候选一个都用不了（{path}）——直接解真帧",
+                        plan.sources.len()
+                    );
+                }
+            }
             let begin = Instant::now();
+            // 编辑器当前照片：High（§4.4）——批量快照满载时也要能插队
             let (image, decoded_shot) = raybend::display::output::decode_working_source(
                 Path::new(path),
                 &input.state,
@@ -115,6 +146,7 @@ pub(super) fn run(
                         .cloned()
                         .ok_or_else(|| raybend::Error::Unsupported("固化输入 ICC 不可用".into()))
                 },
+                raybend::raw::DecodePriority::High,
             )
             .map_err(|e| e.to_string())?;
             let original = image.dimensions();
@@ -130,7 +162,6 @@ pub(super) fn run(
                 preview: WorkingPreview::new(source),
                 original,
                 shot: decoded_shot,
-                sooc: job.transition.as_ref().and_then(|plan| plan.sooc.clone()),
                 reference: ReferenceCache::default(),
                 revision: raybend::develop::reference::next_frame_id(),
                 high_preview: None,
@@ -139,17 +170,16 @@ pub(super) fn run(
         }
         let source = cached.as_mut().expect("decoded");
         shot = source.shot;
-        let edge = if job.tier == ImageTier::Preview {
-            PixelSize::SCREEN_EDGE
-        } else {
-            0
-        };
+        // 解码真值一到就覆盖基线（共享实现：`params_with_decoded_baseline`）
+        params = params_with_decoded_baseline(&job.params, shot);
+        // 任何看图都按**原尺寸**出（崔总 2026-10-11：没有档位）；`edge = 0` 就是不缩。
+        let edge = 0;
         if !job.interactive {
             if let Some(frame) = job
                 .prefer_sooc
-                .then_some(source.sooc.as_deref())
+                .then(|| reference_sooc_path(sources, path))
                 .flatten()
-                .and_then(|path| source.reference.get_sooc(path, job.geometry))
+                .and_then(|sooc| source.reference.get_sooc(sooc, job.geometry))
             {
                 reference = Some(frame);
                 reference_base = Some("sooc");
@@ -157,21 +187,13 @@ pub(super) fn run(
                 working_reference = Some(
                     source
                         .preview
-                        .reference(edge, &job.params, job.lens.as_ref(), job.geometry)
+                        .reference(edge, &params, job.lens.as_ref(), job.geometry)
                         .map_err(|e| e.to_string())?,
                 );
-                reference_base = Some(
-                    if raybend::media::kind::kind_of_file(path)
-                        == raybend::media::kind::MediaKind::Raw
-                    {
-                        "raw"
-                    } else {
-                        "sooc"
-                    },
-                );
+                reference_base = Some(reference_base_of(path));
             }
         }
-        let plans = DevelopPlans::from_params(source.original.0, source.original.1, &job.params);
+        let plans = DevelopPlans::from_params(source.original.0, source.original.1, &params);
         let mut correction = job.lens.clone().unwrap_or_else(|| {
             LensCorrection::manual_only(source.original.0, source.original.1, plans.lens.manual)
         });
@@ -194,7 +216,7 @@ pub(super) fn run(
                     {
                         source.high_preview = Some((key, WorkingPreview::from_shared(image)));
                     }
-                    let mut params = job.params.clone();
+                    let mut high_params = params.clone();
                     for id in [
                         "lumaNr",
                         "colorNr",
@@ -203,7 +225,7 @@ pub(super) fn run(
                         "vignetteRange",
                         "chromatic",
                     ] {
-                        params.clear(id);
+                        high_params.clear(id);
                     }
                     Some(
                         source
@@ -213,7 +235,7 @@ pub(super) fn run(
                             .1
                             .render(
                                 0,
-                                &params,
+                                &high_params,
                                 &job.curves,
                                 NrMethod::Fast,
                                 None,
@@ -242,7 +264,7 @@ pub(super) fn run(
                 .preview
                 .render(
                     edge,
-                    &job.params,
+                    &params,
                     &job.curves,
                     NrMethod::Fast,
                     job.lens.as_ref(),
@@ -266,10 +288,10 @@ pub(super) fn run(
     })();
     let histogram = if result.is_ok() && !job.interactive {
         cached.as_ref().and_then(|source| {
-            let mut params = job.params.clone();
+            let mut params = params.clone();
             let mut lens = job.lens.as_ref();
             let has_noise =
-                !DevelopPlans::from_params(source.original.0, source.original.1, &job.params)
+                !DevelopPlans::from_params(source.original.0, source.original.1, &params)
                     .denoise
                     .is_identity();
             let preview = if job.nr_method == NrMethod::High
@@ -318,7 +340,6 @@ pub(super) fn run(
         id: job.id,
         rev: job.rev,
         path: path.into(),
-        tier: job.tier,
         origin: "working-rec2020-v2".into(),
         transition: false,
         as_shot_temperature: shot,
@@ -349,18 +370,19 @@ mod tests {
         }));
         job.nr_method = NrMethod::High;
         job.params.set("lumaNr", 40.0).unwrap();
-        let (tx, rx) = std::sync::mpsc::channel();
+        let (notify, rx) = std::sync::mpsc::channel();
         let mut high = raybend::develop::denoise_job::WorkingHighDenoise::new(move || {
-            let _ = tx.send(());
+            let _ = notify.send(());
         });
+        let (tx, _render) = std::sync::mpsc::channel();
         let mut cached = None;
-        let first = run(&mut cached, &wanted, &job, 8192, &mut high).unwrap();
+        let first = run(&mut cached, &wanted, &job, None, 8192, &tx, &mut high).unwrap();
         assert!(first.nr_pending);
         assert!(first.result.is_ok());
         assert!(first.nr_error.is_none());
         rx.recv_timeout(std::time::Duration::from_secs(3)).unwrap();
         job.photo = None;
-        let ready = run(&mut cached, &wanted, &job, 8192, &mut high).unwrap();
+        let ready = run(&mut cached, &wanted, &job, None, 8192, &tx, &mut high).unwrap();
         assert!(!ready.nr_pending);
         assert!(ready.nr_error.is_none());
         assert!(ready.histogram.is_some());
@@ -368,7 +390,7 @@ mod tests {
             panic!("legacy frame")
         };
         job.params.set("exposure", 0.5).unwrap();
-        let again = run(&mut cached, &wanted, &job, 8192, &mut high).unwrap();
+        let again = run(&mut cached, &wanted, &job, None, 8192, &tx, &mut high).unwrap();
         assert!(again.decode_ms.is_none());
         assert!(!again.nr_pending);
         let DevelopedPixels::Working(again) = again.result.unwrap().pixels else {
@@ -376,7 +398,7 @@ mod tests {
         };
         assert!(Arc::ptr_eq(&first.image, &again.image));
         job.params.clear("lumaNr");
-        let neutral = run(&mut cached, &wanted, &job, 8192, &mut high).unwrap();
+        let neutral = run(&mut cached, &wanted, &job, None, 8192, &tx, &mut high).unwrap();
         assert!(!neutral.nr_pending);
         assert!(neutral.histogram.is_some());
     }
@@ -392,10 +414,15 @@ mod tests {
             state: PhotoColorState::new_pipeline(SourceColor::AssumedSrgb),
             profile: None,
         }));
+        // 这张测试要验的是**working_reference**（左侧参照帧）的复用：
+        // 关掉「优先 SOOC」——位图照片的 SOOC 侧就是它自己（§5.1），
+        // 不关会走到 get_sooc 那条路。
+        job.prefer_sooc = false;
         let mut cached = None;
         let mut high = raybend::develop::denoise_job::WorkingHighDenoise::new(|| {});
         let wanted = Some(path.to_string_lossy().into_owned());
-        let first = run(&mut cached, &wanted, &job, 8192, &mut high).unwrap();
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let first = run(&mut cached, &wanted, &job, None, 8192, &tx, &mut high).unwrap();
         assert!(first.histogram.is_some());
         let first_reference = first.working_reference.as_ref().unwrap().clone();
         let first = first.result.unwrap();
@@ -404,7 +431,7 @@ mod tests {
         };
         job.photo = None;
         job.params.set("exposure", 1.0).unwrap();
-        let second = run(&mut cached, &wanted, &job, 8192, &mut high).unwrap();
+        let second = run(&mut cached, &wanted, &job, None, 8192, &tx, &mut high).unwrap();
         assert!(second.decode_ms.is_none());
         let second_reference = second.working_reference.as_ref().unwrap();
         assert_eq!(first_reference.0, second_reference.0);

@@ -336,6 +336,8 @@ mod tests {
             profile_hash: crate::store::issues::profile_hash(&stack).unwrap(),
             stack,
             source_signature: crate::media::source::source_signature(&source).unwrap(),
+            width: None,
+            height: None,
         };
         (dir, source, snap)
     }

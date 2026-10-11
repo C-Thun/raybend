@@ -11,11 +11,11 @@ import test from "node:test";
 
 test("色彩预设组默认不选，缺配置或未来处理版本拒绝整份应用",()=> {
   assert.equal(DEFAULT_PRESET_GROUPS.includes("colorManagement" as never),false);
-  const valid={version:2,colorManagement:{processVersion:"linear_rec2020_v2",input:{profileId:"b".repeat(64)}}} as const;
+  const valid={version:3,colorManagement:{processVersion:"linear_rec2020_v2",input:{profileId:"b".repeat(64)}}} as const;
   assert.deepEqual(sanitizePresetSnapshot(valid),valid);
   assert.equal(presetColorChoice(valid),"b".repeat(64));
-  assert.equal(presetColorChoice({version:1,tone:{exposure:1}}),undefined);
-  assert.equal(presetColorChoice({version:2,colorManagement:{processVersion:"linear_rec2020_v2",input:"automatic"}}),null);
+  assert.equal(presetColorChoice({version:3,tone:{exposure:1}}),undefined);
+  assert.equal(presetColorChoice({version:3,colorManagement:{processVersion:"linear_rec2020_v2",input:"automatic"}}),null);
   for(const input of [null,{processVersion:"future_v3",input:"automatic"},{processVersion:"linear_rec2020_v2",input:{profileId:"C:/相机.icc"}},{processVersion:"linear_rec2020_v2",input:"automatic",monitor:"x"}]) {
     const original={version:2,tone:{exposure:1},colorManagement:input};
     const saved=sanitizePresetSnapshot(original)!;
@@ -28,6 +28,7 @@ import {
   DEFAULT_DIRECTORY_ID,
   PRESET_GROUPS,
   buildPresetSnapshot,
+  hasLegacyWbPresets,
   isDirectoryNameTaken,
   isPresetNameTaken,
   newPresetDirectoryId,
@@ -43,6 +44,16 @@ import {
   type GroupParams,
   type PresetSnapshot,
 } from "./presets.ts";
+
+test("新建预设默认不勾选镜头（换张照片套用会套错镜头）", () => {
+  // 崔总 2026-10-10：镜头 profile 是按拍摄焦段 / 光圈解析的，跨照片直接搬会“变形”
+  assert.equal(DEFAULT_PRESET_GROUPS.includes("lens" as never), false);
+  assert.deepEqual([...DEFAULT_PRESET_GROUPS], ["tone", "color", "detail", "curve", "lut"]);
+  // 其它组仍然默认全选：镜头只是不预勾，用户想存仍可手动勾
+  for (const group of ["tone", "color", "detail", "curve", "lut"] as const) {
+    assert.ok(DEFAULT_PRESET_GROUPS.includes(group), `${group} 应默认勾选`);
+  }
+});
 
 const GROUP_PARAMS: GroupParams = {
   tone: ["exposure", "contrast"],
@@ -64,6 +75,8 @@ test("sanitizePresetSnapshot 拒绝非对象 / 错版本", () => {
   assert.equal(sanitizePresetSnapshot("text"), null);
   assert.equal(sanitizePresetSnapshot({ version: 2, tone: {} }), null);
   assert.equal(sanitizePresetSnapshot({ tone: { exposure: 1 } }), null);
+  // 未来版本同样拒绝（后端契约测试的同一口径）
+  assert.equal(sanitizePresetSnapshot({ version: 4, tone: {} }), null);
 });
 
 test("sanitizePresetSnapshot 丢弃非法数值 / 非法曲线点，保留合法部分", () => {
@@ -185,6 +198,7 @@ test("buildPresetSnapshot 勾选的大类写全字段（含默认值项）", () 
       lensEnabled: null,
       lutId: "lut-1",
       lutEnabled: true,
+      asShotK: 5400,
     },
     GROUP_PARAMS,
   );
@@ -196,9 +210,10 @@ test("buildPresetSnapshot 勾选的大类写全字段（含默认值项）", () 
   assert.equal(snapshot.lens, undefined);
   assert.equal(snapshot.curve, undefined);
   assert.deepEqual(snapshot.lut, { id: "lut-1", enabled: true });
+  assert.equal(snapshot.version, 3);
   // 缺失的参数值按 0 兜底
   const partial = buildPresetSnapshot(["tone"],
-    { values: {}, curves: {}, nrMethod: null, lensProfile: null, lensEnabled: null, lutId: null, lutEnabled: false },
+    { values: {}, curves: {}, nrMethod: null, lensProfile: null, lensEnabled: null, lutId: null, lutEnabled: false, asShotK: null },
     GROUP_PARAMS);
   assert.deepEqual(partial.tone, { exposure: 0, contrast: 0 });
 });
@@ -209,7 +224,7 @@ test("buildPresetSnapshot detail/lens 携带附加字段", () => {
     {
       values: { lumaNr: 12, sharpenAmount: 3, distortion: -4, vignette: 60 },
       curves: {}, nrMethod: "high", lensProfile: "maker|model", lensEnabled: false,
-      lutId: null, lutEnabled: false,
+      lutId: null, lutEnabled: false, asShotK: null,
     },
     GROUP_PARAMS,
   );
@@ -234,7 +249,7 @@ test("planPresetApply 按保存的大类整体覆盖（缺项回退默认值）"
     tone: { exposure: 0.5 }, // contrast 缺 → 回退默认 0
     detail: { lumaNr: 10, nrMethod: "high" },
   })!;
-  const plan = planPresetApply(snapshot, GROUP_PARAMS, DEFAULTS, () => false);
+  const plan = planPresetApply(snapshot, GROUP_PARAMS, DEFAULTS, () => false, null);
   assert.deepEqual(plan.values, { exposure: 0.5, contrast: 0, lumaNr: 10, sharpenAmount: 0 });
   assert.equal(plan.hasDetail, true);
   assert.equal(plan.nrMethod, "high");
@@ -247,7 +262,7 @@ test("planPresetApply 曲线大类写满四通道（缺通道 = 恒等）", () =
   const snapshot = sanitizePresetSnapshot({
     version: 1, curve: { r: [[0, 0.1], [1, 0.9]] },
   })!;
-  const plan = planPresetApply(snapshot, GROUP_PARAMS, DEFAULTS, () => false);
+  const plan = planPresetApply(snapshot, GROUP_PARAMS, DEFAULTS, () => false, null);
   assert.deepEqual(plan.curves.r, [[0, 0.1], [1, 0.9]]);
   assert.deepEqual(plan.curves.rgb, [[0, 0], [1, 1]]);
   assert.deepEqual(plan.curves.g, [[0, 0], [1, 1]]);
@@ -256,18 +271,18 @@ test("planPresetApply 曲线大类写满四通道（缺通道 = 恒等）", () =
 
 test("planPresetApply LUT 存在才生效，丢失静默忽略", () => {
   const exists = sanitizePresetSnapshot({ version: 1, lut: { id: "lut-1", enabled: true } })!;
-  const applied = planPresetApply(exists, GROUP_PARAMS, DEFAULTS, (id) => id === "lut-1");
+  const applied = planPresetApply(exists, GROUP_PARAMS, DEFAULTS, (id) => id === "lut-1", null);
   assert.deepEqual(applied.lut, { id: "lut-1", enabled: true });
   assert.deepEqual(applied.appliedGroups, ["lut"]);
 
-  const missing = planPresetApply(exists, GROUP_PARAMS, DEFAULTS, () => false);
+  const missing = planPresetApply(exists, GROUP_PARAMS, DEFAULTS, () => false, null);
   assert.equal(missing.lut, "missing");
   assert.deepEqual(missing.appliedGroups, []);
 });
 
 test("planPresetApply LUT id 为 null 表示清除当前 LUT", () => {
   const snapshot = sanitizePresetSnapshot({ version: 1, lut: { id: null, enabled: false } })!;
-  const plan = planPresetApply(snapshot, GROUP_PARAMS, DEFAULTS, () => true);
+  const plan = planPresetApply(snapshot, GROUP_PARAMS, DEFAULTS, () => true, null);
   assert.deepEqual(plan.lut, { id: null, enabled: false });
   assert.deepEqual(plan.appliedGroups, ["lut"]);
 });
@@ -276,7 +291,7 @@ test("planPresetApply lens 大类带配置与开关", () => {
   const snapshot = sanitizePresetSnapshot({
     version: 1, lens: { distortion: 3, profile: "m|l", enabled: false },
   })!;
-  const plan = planPresetApply(snapshot, GROUP_PARAMS, DEFAULTS, () => false);
+  const plan = planPresetApply(snapshot, GROUP_PARAMS, DEFAULTS, () => false, null);
   assert.equal(plan.hasLens, true);
   assert.deepEqual(plan.lens, { profile: "m|l", enabled: false });
 });
@@ -332,4 +347,88 @@ test("id 生成器本地唯一", () => {
 
 test("PRESET_GROUPS 顺序即界面顺序", () => {
   assert.deepEqual([...PRESET_GROUPS], ["tone", "color", "detail", "lens", "curve", "lut", "colorManagement"]);
+});
+
+/* ── v3 白平衡：偏移量（specs/editor-presets.md §3，崔总 2026-10-10）──── */
+
+test("sanitizePresetSnapshot v3：白平衡只认 wbMired，不再有绝对色温", () => {
+  const snapshot = sanitizePresetSnapshot({
+    version: 3,
+    color: { temperature: 5400, saturation: 4, vibrance: 35, wbMired: -120 },
+  })!;
+  assert.deepEqual(snapshot.color, { saturation: 4, vibrance: 35, wbMired: -120 });
+  assert.equal(snapshot.version, 3);
+  // 缺 wbMired 的 v3 按 0 兜底；非有限值也按 0
+  assert.equal(sanitizePresetSnapshot({ version: 3, color: { saturation: 1 } })!.color?.wbMired, 0);
+  assert.equal(sanitizePresetSnapshot({ version: 3, color: { wbMired: Number.NaN } })!.color?.wbMired, 0);
+});
+
+test("旧预设（v1/v2）读时迁移：绝对温度按「跟随拍摄色温」处理", () => {
+  for (const version of [1, 2]) {
+    const raw = version === 2
+      ? { version, color: { temperature: 5008.4043, saturation: 10 },
+          colorManagement: { processVersion: "linear_rec2020_v2", input: "automatic" } }
+      : { version, color: { temperature: 5008.4043, saturation: 10 } };
+    const snapshot = sanitizePresetSnapshot(raw)!;
+    assert.equal(snapshot.version, 3, "清洗输出恒为 v3");
+    assert.deepEqual(snapshot.color, { saturation: 10, wbMired: 0 },
+      "temperature 丢掉、wbMired = 跟随拍摄色温");
+  }
+  assert.equal(hasLegacyWbPresets({ presets: [{ payload: { version: 1, color: {} } }] }), true);
+  assert.equal(hasLegacyWbPresets({ presets: [{ payload: { version: 2, colorManagement: {} } }] }), true);
+  assert.equal(hasLegacyWbPresets({ presets: [{ payload: { version: 3, color: {} } }] }), false);
+  assert.equal(hasLegacyWbPresets({ presets: [] }), false);
+  assert.equal(hasLegacyWbPresets(null), false);
+});
+
+test("buildPresetSnapshot 色彩大类存 Δmired（不再存绝对色温）", () => {
+  const snapshot = buildPresetSnapshot(["color"], {
+    values: { temperature: 3000, saturation: 4 },
+    curves: {}, nrMethod: null, lensProfile: null, lensEnabled: null, lutId: null, lutEnabled: false,
+    asShotK: 5000,
+  }, GROUP_PARAMS);
+  assert.equal(snapshot.color?.saturation, 4);
+  assert.equal(snapshot.color?.temperature, undefined);
+  // mired(5000) − mired(3000) = 200 − 333.3 = −133.3 → 更暖（Δ 负 = 更暖）
+  const delta = snapshot.color?.wbMired ?? 0;
+  assert.ok(delta < -130 && delta > -136, `更暖的偏移应为负，得到 ${delta}`);
+  // 没动过白平衡（值 = as-shot）→ 0
+  const neutral = buildPresetSnapshot(["color"], {
+    values: { temperature: 5000 },
+    curves: {}, nrMethod: null, lensProfile: null, lensEnabled: null, lutId: null, lutEnabled: false,
+    asShotK: 5000,
+  }, GROUP_PARAMS);
+  assert.equal(neutral.color?.wbMired, 0);
+  // 基线未知 → 0（没有「相对谁」）
+  const unknown = buildPresetSnapshot(["color"], {
+    values: { temperature: 5000 },
+    curves: {}, nrMethod: null, lensProfile: null, lensEnabled: null, lutId: null, lutEnabled: false,
+    asShotK: null,
+  }, GROUP_PARAMS);
+  assert.equal(unknown.color?.wbMired, 0);
+});
+
+test("planPresetApply：偏移量按当前照片的 as-shot 换算", () => {
+  const snapshot = sanitizePresetSnapshot({ version: 3, color: { saturation: 4, wbMired: -133.33 } })!;
+  const plan = planPresetApply(snapshot, GROUP_PARAMS, DEFAULTS, () => false, 5000);
+  assert.equal(plan.wbExplicit, true);
+  assert.ok(Math.abs((plan.values.temperature ?? 0) - 3000) < 1, "5000K 上 −133mired ≈ 3000K");
+  assert.equal(plan.values.saturation, 4);
+  assert.deepEqual(plan.appliedGroups, ["color"]);
+});
+
+test("planPresetApply：wbMired 0 = 回到该照片的 as-shot（不算显式值）", () => {
+  const snapshot = sanitizePresetSnapshot({ version: 3, color: { saturation: 0, wbMired: 0 } })!;
+  const plan = planPresetApply(snapshot, GROUP_PARAMS, DEFAULTS, () => false, 4200);
+  assert.equal(plan.values.temperature, 4200);
+  assert.equal(plan.wbExplicit, false);
+});
+
+test("planPresetApply：asShot 未知 → 跳过白平衡（其余项照常）并报 wbSkipped", () => {
+  const snapshot = sanitizePresetSnapshot({ version: 3, color: { saturation: 7, wbMired: -120 } })!;
+  const plan = planPresetApply(snapshot, GROUP_PARAMS, DEFAULTS, () => false, null);
+  assert.equal(plan.wbSkipped, true);
+  assert.equal(plan.values.temperature, undefined);
+  assert.equal(plan.values.saturation, 7, "白平衡之外的色彩项照常应用");
+  assert.deepEqual(plan.appliedGroups, ["color"]);
 });

@@ -13,9 +13,11 @@
 //! | 阶段 | 数据来源 | 代价 |
 //! | --- | --- | --- |
 //! | 列表（[`scan_photos`]） | 文件名 → 文件修改时间 | 一次 `read_dir` |
-//! | 精确（[`read_times`]） | 真读 EXIF（并行） | 每张几毫秒 |
+//! | 精确（`media::meta::read_photo_meta` → `dir_meta_ensure`） | 真读 EXIF（顺路带回宽高/方向） | 每张几毫秒 |
 //!
-//! 先出网格、用户按下「按时间」再补真相 —— 否则进一个大目录要干等好几秒。
+//! 先出网格（兜底时间就够了）、再由「读文件信息」**分块**把真相补回来 ——
+//! 2026-10-11 崔总口径：时间并进那次读头，**不再有第二条专读时间的命令**
+//!（`specs/source-time-inline.md`；以前那条 `read_times` 一次读整目录，真机 6 秒把界面按住）。
 
 use std::path::{Path, PathBuf};
 
@@ -76,7 +78,11 @@ pub struct SourceItem {
     pub size_bytes: u64,
     /// 文件修改时间（Unix 毫秒）。
     pub mtime_ms: Option<i64>,
-    /// **快速兜底**的拍摄时间（文件名 → mtime）；真相要 [`read_times`]。
+    /// **快速兜底**的拍摄时间（文件名 → **创建时间** → mtime）；真相由「读文件信息」顺路补回
+    /// （`dir_meta_ensure`，见 `specs/source-time-inline.md`）。
+    ///
+    /// 创建时间的位置是崔总 2026-10-11 定的：**从 SD 卡直接读时它就是拍照时间**，
+    /// 搭「按时间」的初始框架靠它 —— 不读 EXIF，随目录列表一起来的。
     pub taken_at: Option<TakenAt>,
 }
 
@@ -207,7 +213,8 @@ pub fn list_dirs(root: &Path) -> Result<Vec<DirEntry>> {
 
 /// 列出目录里的照片（`recursive = false` 时只列直属的）。
 ///
-/// 这一步**不读 EXIF**：拍摄时间先用「文件名 → mtime」兜底（见模块文档）。
+/// 这一步**不读 EXIF**：拍摄时间先用「文件名 → 创建时间 → mtime」兜底
+/// （见模块文档；创建时间是 `read_dir` 顺手就有的，不额外读文件）。
 pub fn scan_photos(root: &Path, recursive: bool) -> Result<SourceListing> {
     let opts = ScanOptions {
         max_depth: if recursive { 32 } else { 0 },
@@ -217,7 +224,7 @@ pub fn scan_photos(root: &Path, recursive: bool) -> Result<SourceListing> {
     let outcome = scan::scan(root, &opts, &Cancel::new(), |event| {
         if let ScanEvent::File(file) = event {
             listing.items.push(SourceItem {
-                taken_at: exif::resolve_taken_at(None, &file.file_name, file.mtime_ms),
+                taken_at: fallback_taken_at(&file),
                 path: file.abs_path,
                 file_name: file.file_name,
                 ext: file.ext,
@@ -239,6 +246,39 @@ pub fn scan_photos(root: &Path, recursive: bool) -> Result<SourceListing> {
     Ok(listing)
 }
 
+/// 列表阶段的**兜底**拍摄时间：文件名 → **创建时间** → mtime。
+///
+/// 为什么把创建时间放在 mtime 前面（崔总 2026-10-11）：「导入大多数是直接从相机卡读，
+/// 那时文件创建时间就是拍照时间」——文件系统给，随目录列表一起到手，不用读文件。
+/// ⚠️ 拷贝过的文件在 NTFS 上 `created` 是**复制时间**（比 mtime 远）；所以这条
+/// **只用于来源目录的界面**，进库（`import/sink.rs`）仍按「EXIF → 文件名 → mtime」。
+fn fallback_taken_at(file: &scan::ScannedFile) -> Option<TakenAt> {
+    /*
+     * 文件系统那两个时间**取小的那个**（崔总 2026-10-11 定）：
+     * 从卡上直接读时两者一致；复制过来的文件 `created` 会变成复制那天（2026），
+     * 而 mtime 还是拍摄日（2018）—— 取小值就与「按时间」的正确顺序一致，
+     * 界面上显示的日期也不会比排序看起来晚一大截。
+     */
+    let filesystem = match (file.created_ms, file.mtime_ms) {
+        (Some(created), Some(mtime)) if mtime < created => Some(TakenAt {
+            millis: mtime,
+            offset_min: None,
+            source: exif::TakenAtSource::FileMtime,
+        }),
+        (Some(created), _) => Some(TakenAt {
+            millis: created,
+            offset_min: None,
+            source: exif::TakenAtSource::FileCreated,
+        }),
+        (None, mtime) => mtime.map(|millis| TakenAt {
+            millis,
+            offset_min: None,
+            source: exif::TakenAtSource::FileMtime,
+        }),
+    };
+    exif::resolve_taken_at(None, &file.file_name, None).or(filesystem)
+}
+
 /// 只数张数（不保留清单）——「已选择 N 张照片」用它。
 ///
 /// 与 [`scan_photos`] 的区别只是**不攒清单**：大目录下省内存。
@@ -258,117 +298,6 @@ pub fn count_photos(root: &Path, recursive: bool) -> Result<PhotoCount> {
     count.skipped = outcome.skipped - outcome.skipped_count(scan::SkipReason::TooDeep);
     count.truncated = outcome.cancelled;
     Ok(count)
-}
-
-/// 一个文件的精确拍摄时间。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TimeEntry {
-    pub path: PathBuf,
-    pub taken_at: Option<TakenAt>,
-}
-
-/// 并行读一批文件的**真实 EXIF 拍摄时间**（用户按下「按时间」时才调）。
-///
-/// * 结果顺序**与输入一致**（并行不影响确定性，测试与界面都靠它）；
-/// * 单张失败不影响其它（读不到就是 `None`，没有错误分支）；
-/// * 线程数取 `min(4, 可用核数)` —— 这是可中断的一批活，不是要压满 CPU 的基准。
-#[must_use]
-pub fn read_times(paths: &[PathBuf]) -> Vec<TimeEntry> {
-    let workers = std::thread::available_parallelism()
-        .map_or(1, std::num::NonZeroUsize::get)
-        .clamp(1, 4);
-
-    if paths.is_empty() {
-        return Vec::new();
-    }
-    if workers == 1 || paths.len() < 2 {
-        return paths.iter().map(|p| read_time_one(p)).collect();
-    }
-
-    let chunk = paths.len().div_ceil(workers);
-    let mut out = Vec::with_capacity(paths.len());
-    std::thread::scope(|scope| {
-        let handles: Vec<_> = paths
-            .chunks(chunk)
-            .map(|slice| {
-                scope.spawn(move || {
-                    slice
-                        .iter()
-                        .map(|p| read_time_one(p.as_path()))
-                        .collect::<Vec<_>>()
-                })
-            })
-            .collect();
-        for handle in handles {
-            // 线程 panic 不该把整批拖垮：跳过它，后面按长度补齐
-            if let Ok(entries) = handle.join() {
-                out.extend(entries);
-            }
-        }
-    });
-
-    // 线程 panic 时长度会对不上 —— 补齐比让调用方拿到错位的数组安全
-    while out.len() < paths.len() {
-        out.push(TimeEntry {
-            path: PathBuf::new(),
-            taken_at: None,
-        });
-    }
-
-    /*
-     * 配对继承：RAW 自己没读到时间时，从**同名的位图**那里借（见 `media::pairing`）。
-     *
-     * 少了这一步的后果不是「时间不准」那么轻：按时间分组时，同一张照片的 JPG 与 RAW
-     * 会落进**不同的时间片**，界面上就是「同一天的分组标题出现两次、一遍纯位图一遍纯 RAW」
-     * （人类 2026-09-17/18 两次上报）。放在整批读完之后做 —— 配对要看得见同批的位图。
-     */
-    let mut pairs: Vec<super::pairing::TimePair> = out
-        .iter()
-        .map(|entry| {
-            let name = entry
-                .path
-                .file_name()
-                .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
-            super::pairing::TimePair::new(
-                &entry.path,
-                kind::kind_of_file(&name) == MediaKind::Raw,
-                entry.taken_at.map(|t| t.millis),
-            )
-        })
-        .collect();
-    if super::pairing::inherit_times_from_bitmaps(&mut pairs) > 0 {
-        for (entry, pair) in out.iter_mut().zip(pairs.iter()) {
-            let Some(millis) = pair.taken_at else {
-                continue;
-            };
-            if entry.taken_at.map(|t| t.millis) == Some(millis) {
-                continue;
-            }
-            entry.taken_at = Some(TakenAt {
-                millis,
-                // 同一台相机同一批照片，时区偏移沿用本文件已有的（没有就是没有）
-                offset_min: entry.taken_at.and_then(|t| t.offset_min),
-                source: exif::TakenAtSource::Sibling,
-            });
-        }
-    }
-    out
-}
-
-fn read_time_one(path: &Path) -> TimeEntry {
-    // RAW 也要能读出拍摄时间（库外目录同样如此）
-    let data = exif::read_file_for(path);
-    let file_name = path
-        .file_name()
-        .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
-    let mtime_ms = std::fs::metadata(path)
-        .ok()
-        .and_then(|m| m.modified().ok())
-        .map(crate::store::time::from_system_time);
-    TimeEntry {
-        path: path.to_path_buf(),
-        taken_at: exif::resolve_taken_at(Some(&data), &file_name, mtime_ms),
-    }
 }
 
 /// 把 `scan` 给的相对路径（`/` 分隔）接成原生路径。
@@ -594,6 +523,7 @@ mod tests {
                     i.taken_at.map(|t| match t.source {
                         exif::TakenAtSource::Exif => "exif",
                         exif::TakenAtSource::Filename => "filename",
+                        exif::TakenAtSource::FileCreated => "created",
                         exif::TakenAtSource::FileMtime => "mtime",
                         exif::TakenAtSource::Sibling => "sibling",
                     }),
@@ -602,9 +532,49 @@ mod tests {
             .collect();
         assert!(by_name.contains(&("IMG_20260815_123456.jpg", Some("filename"))));
         assert!(
-            by_name.contains(&("plain.jpg", Some("mtime"))),
-            "列表阶段不能去读 EXIF（太慢），必须落到 mtime：{by_name:?}"
+            by_name.contains(&("plain.jpg", Some("created"))),
+            "列表阶段不能去读 EXIF（太慢）——落到**文件创建时间**（崔总 2026-10-11 定）：{by_name:?}"
         );
+    }
+
+    #[test]
+    fn 兜底次序是_文件名_创建时间_mtime() {
+        let file = |name: &str, created: Option<i64>, mtime: Option<i64>| scan::ScannedFile {
+            abs_path: PathBuf::from(name),
+            rel_path: String::from(name),
+            ext: kind::extension(name),
+            stem_folded: kind::stem_folded(name),
+            file_name: name.to_string(),
+            kind: MediaKind::Image,
+            size_bytes: 1,
+            mtime_ms: mtime,
+            created_ms: created,
+        };
+
+        // 文件名里有日期 → 用它
+        let named = fallback_taken_at(&file("IMG_20260815_123456.jpg", Some(500), Some(900)));
+        assert_eq!(named.map(|t| t.source), Some(exif::TakenAtSource::Filename));
+        // 没有日期 → 创建时间（从卡上直接读时就是拍照时间）
+        let created = fallback_taken_at(&file("plain.jpg", Some(500), Some(900)));
+        assert_eq!(
+            created.map(|t| (t.millis, t.source)),
+            Some((500, exif::TakenAtSource::FileCreated))
+        );
+        // 两个文件系统时间都在 → **取小的那个**（复制过来的文件 created 是复制日，mtime 才是拍摄日）
+        let older_mtime = fallback_taken_at(&file("plain.jpg", Some(900), Some(500)));
+        assert_eq!(
+            older_mtime.map(|t| (t.millis, t.source)),
+            Some((500, exif::TakenAtSource::FileMtime)),
+            "mtime 更小 → 用它（与「按时间」的正确顺序一致）"
+        );
+        // 文件系统不给创建时间 → mtime 兜底
+        let only_mtime = fallback_taken_at(&file("plain.jpg", None, Some(900)));
+        assert_eq!(
+            only_mtime.map(|t| (t.millis, t.source)),
+            Some((900, exif::TakenAtSource::FileMtime))
+        );
+        // 什么都没有 → 没有
+        assert_eq!(fallback_taken_at(&file("plain.jpg", None, None)), None);
     }
 
     #[test]
@@ -647,61 +617,6 @@ mod tests {
         let count = count_photos(dir.path(), true).unwrap();
         assert_eq!(count.photos, 0);
         assert!(!count.truncated);
-    }
-
-    // ---------- read_times ----------
-
-    #[test]
-    fn read_times_preserves_input_order_and_length() {
-        let dir = tmp();
-        let root = dir.path();
-        let paths: Vec<PathBuf> = (0..9)
-            .map(|i| {
-                let p = root.join(format!("IMG_2026081{i}_000000.jpg"));
-                write(&p, 10);
-                p
-            })
-            .collect();
-
-        let times = read_times(&paths);
-        assert_eq!(times.len(), paths.len());
-        for (entry, path) in times.iter().zip(paths.iter()) {
-            assert_eq!(&entry.path, path, "顺序必须与输入一致");
-            let taken = entry.taken_at.expect("文件名里有日期，应该能解析出来");
-            assert_eq!(taken.source, exif::TakenAtSource::Filename);
-        }
-    }
-
-    #[test]
-    fn read_times_on_empty_input_is_empty() {
-        assert!(read_times(&[]).is_empty());
-    }
-
-    #[test]
-    fn read_times_survives_missing_files() {
-        let dir = tmp();
-        let missing = dir.path().join("gone.jpg");
-        let times = read_times(std::slice::from_ref(&missing));
-        assert_eq!(times.len(), 1);
-        assert_eq!(times[0].path, missing);
-        assert!(
-            times[0].taken_at.is_none(),
-            "文件都不在了，不该编出一个时间"
-        );
-    }
-
-    #[test]
-    fn read_times_on_a_single_path_stays_single() {
-        let dir = tmp();
-        let p = dir.path().join("one.jpg");
-        write(&p, 4);
-        let times = read_times(std::slice::from_ref(&p));
-        assert_eq!(times.len(), 1);
-        // 没有 EXIF、文件名里也没日期 → mtime 兜底
-        assert_eq!(
-            times[0].taken_at.map(|t| t.source),
-            Some(exif::TakenAtSource::FileMtime)
-        );
     }
 
     // ---------- join_relative ----------

@@ -61,6 +61,9 @@ fn parse_payload(payload: &str) -> Option<serde_json::Value> {
     match object.get("version").and_then(serde_json::Value::as_i64) {
         Some(1) => Some(value),
         Some(2) if object.contains_key("colorManagement") => Some(value),
+        // v3：白平衡从绝对色温改为相对 as-shot 的 Δmired（`specs/editor-presets.md` §3，
+        // 崔总 2026-10-10）。与 v2 一样只验版本可解析；`colorManagement` 在 v3 里可选。
+        Some(3) => Some(value),
         _ => None,
     }
 }
@@ -102,14 +105,37 @@ pub fn directory_exists(conn: &Connection, id: &str) -> Result<bool> {
         .is_some())
 }
 
-fn directory_name_taken(conn: &Connection, name: &str) -> Result<bool> {
+fn directory_name_taken(conn: &Connection, name: &str, except_id: Option<&str>) -> Result<bool> {
     // SQLite NOCASE 只覆盖 ASCII；与前端 toLowerCase 的 Unicode 口径保持一致。
+    // `except_id` 用于改名：允许把一个目录改成「与它自己同名」的另一种大小写。
     let wanted = name.to_lowercase();
-    let mut statement = conn.prepare("SELECT name FROM preset_dirs")?;
-    for candidate in statement.query_map([], |row| row.get::<_, String>(0))? {
-        if candidate?.to_lowercase() == wanted { return Ok(true); }
+    let mut statement = conn.prepare("SELECT id, name FROM preset_dirs")?;
+    for row in statement.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })? {
+        let (id, candidate) = row?;
+        if except_id == Some(id.as_str()) { continue; }
+        if candidate.to_lowercase() == wanted { return Ok(true); }
     }
     Ok(false)
+}
+
+/// 单个目录（不存在时 `None`；改名要拿旧名字与 sort_order）。
+pub fn directory(conn: &Connection, id: &str) -> Result<Option<PresetDirectory>> {
+    Ok(conn
+        .query_row(
+            "SELECT id, name, sort_order, created_at FROM preset_dirs WHERE id = ?1",
+            [id],
+            |row| {
+                Ok(PresetDirectory {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    sort_order: row.get(2)?,
+                    created_at: row.get(3)?,
+                })
+            },
+        )
+        .optional()?)
 }
 
 pub fn create_directory(
@@ -122,7 +148,7 @@ pub fn create_directory(
     if !valid_id(id) || !valid_name(name, DIRECTORY_NAME_MAX) {
         return Err(Error::Unsupported("预设目录 ID 或名称无效".into()));
     }
-    if id == DEFAULT_DIRECTORY_ID || directory_name_taken(conn, name)? {
+    if id == DEFAULT_DIRECTORY_ID || directory_name_taken(conn, name, None)? {
         return Err(Error::Unsupported("同名目录已存在".into()));
     }
     conn.execute(
@@ -135,6 +161,36 @@ pub fn create_directory(
         name: name.to_string(),
         sort_order: 0,
         created_at: now_ms,
+    })
+}
+
+/// 重命名目录：**非空目录也能改**（这是它存在的理由——有内容的目录不该被迫“删了重建”）。
+/// `default` 拒绝（名字走语言包）；与其它目录重名（大小写不敏感）拒绝；只改名字，
+/// 不碰 `sort_order` / 预设关联 / 预设记录（崔总 2026-10-10）。
+pub fn rename_directory(conn: &Connection, id: &str, name: &str) -> Result<PresetDirectory> {
+    let name = name.trim();
+    if id == DEFAULT_DIRECTORY_ID {
+        return Err(Error::Unsupported("默认目录不可改名".into()));
+    }
+    if !valid_name(name, DIRECTORY_NAME_MAX) {
+        return Err(Error::Unsupported("目录名称无效".into()));
+    }
+    let Some(current) = directory(conn, id)? else {
+        return Err(Error::Unsupported("目录不存在".into()));
+    };
+    if current.name == name {
+        return Ok(current);
+    }
+    if directory_name_taken(conn, name, Some(id))? {
+        return Err(Error::Unsupported("同名目录已存在".into()));
+    }
+    conn.execute(
+        "UPDATE preset_dirs SET name = ?2 WHERE id = ?1",
+        params![id, name],
+    )?;
+    Ok(PresetDirectory {
+        name: name.to_string(),
+        ..current
     })
 }
 
@@ -360,6 +416,40 @@ mod tests {
     }
 
     #[test]
+    fn rename_directory_guards_and_updates() {
+        let conn = db();
+        create_directory(&conn, "d1", "人像", 10).unwrap();
+        create(&conn, "p1", "d1", "柔和", PAYLOAD, 20).unwrap();
+        // 非空目录也能改名：预设与关联不动
+        let renamed = rename_directory(&conn, "d1", "人像・2026").unwrap();
+        assert_eq!(renamed.name, "人像・2026");
+        assert_eq!(renamed.sort_order, directory(&conn, "d1").unwrap().unwrap().sort_order);
+        assert_eq!(get(&conn, "p1").unwrap().unwrap().name, "柔和");
+        assert!(directories(&conn)
+            .unwrap()
+            .iter()
+            .any(|d| d.id == "d1" && d.name == "人像・2026"));
+        // default 拒绝（名字走语言包）
+        assert!(rename_directory(&conn, DEFAULT_DIRECTORY_ID, "别的").is_err());
+        // 不存在的目录
+        assert!(rename_directory(&conn, "nope", "x").is_err());
+        // 非法名：空 / 超长（41 字）/ 控制字符
+        assert!(rename_directory(&conn, "d1", "").is_err());
+        assert!(rename_directory(&conn, "d1", "   ").is_err());
+        assert!(rename_directory(&conn, "d1", &"长".repeat(41)).is_err());
+        assert!(rename_directory(&conn, "d1", "坏\u{7}名").is_err());
+        // 与其它目录重名（ASCII 大小写不敏感）
+        create_directory(&conn, "d2", "Travel", 30).unwrap();
+        assert!(rename_directory(&conn, "d1", "travel").is_err());
+        // 改名撞到 default 也不行
+        assert!(rename_directory(&conn, "d1", "Default").is_err());
+        // 与自己同名 / 只改大小写：允许（排除自己）
+        assert_eq!(rename_directory(&conn, "d1", "人像・2026").unwrap().name, "人像・2026");
+        assert_eq!(rename_directory(&conn, "d1", "Äther").unwrap().name, "Äther");
+        assert_eq!(rename_directory(&conn, "d1", "äther").unwrap().name, "äther");
+    }
+
+    #[test]
     fn delete_directory_guards() {
         let conn = db();
         // default 拒绝
@@ -425,9 +515,9 @@ mod tests {
         let conn = db();
         // 无 version / 未知 version / v2 缺 colorManagement → 写入即拒
         assert!(create(&conn, "p1", DEFAULT_DIRECTORY_ID, "无版本", r#"{"tone":{}}"#, 20).is_err());
-        assert!(create(&conn, "p2", DEFAULT_DIRECTORY_ID, "未来版本", r#"{"version":3,"tone":{}}"#, 21).is_err());
+        assert!(create(&conn, "p2", DEFAULT_DIRECTORY_ID, "未来版本", r#"{"version":4,"tone":{}}"#, 21).is_err());
         assert!(create(&conn, "p3", DEFAULT_DIRECTORY_ID, "缺色彩管理", r#"{"version":2,"tone":{}}"#, 22).is_err());
-        // 受支持的两个版本
+        // 受支持的三个版本
         create(&conn, "p4", DEFAULT_DIRECTORY_ID, "v1", PAYLOAD, 23).unwrap();
         create(
             &conn,
@@ -438,6 +528,36 @@ mod tests {
             24,
         )
         .unwrap();
+        create(
+            &conn,
+            "p6",
+            DEFAULT_DIRECTORY_ID,
+            "v3",
+            r#"{"version":3,"color":{"saturation":4,"vibrance":35,"wbMired":-120}}"#,
+            25,
+        )
+        .unwrap();
+    }
+
+    /// 旧 payload（v1/v2）**读得出来、不被后端改写**。
+    ///
+    /// 白平衡的读时迁移（绝对温度 → Δmired = 0）只在前端 `sanitizePresetSnapshot`
+    /// 里做一份 —— 后端不重写 `payload` 原文（DB 行要等用户下次保存才进 v3，
+    /// `specs/editor-presets.md` §3 的口径）。
+    #[test]
+    fn legacy_payloads_read_back_untouched_for_the_frontend_to_migrate() {
+        let conn = db();
+        let legacy = r#"{"version":1,"color":{"temperature":5008.4043,"saturation":10}}"#;
+        create(&conn, "p1", DEFAULT_DIRECTORY_ID, "旧预设", legacy, 20).unwrap();
+        let records = presets(&conn).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].payload["version"], 1, "后端不改写版本号");
+        assert_eq!(
+            records[0].payload["color"]["temperature"].as_f64(),
+            Some(5008.4043),
+            "绝对温度原样留在 DB 里，迁移由前端读时完成"
+        );
+        assert!(records[0].payload["color"].get("wbMired").is_none());
     }
 
     #[test]

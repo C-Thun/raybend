@@ -247,8 +247,13 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
    * 同一份 `chrome.ts`（四态循环）、同一个 `Viewer` / `FilmStrip` / `CompareView`。
    * tiles 仍是默认态，且**排版口径一点没动**（还是 `PhotoGrid` + `lib/tile-flow.ts`）。
    */
+  /*
+   * import 的看图**只有两段**（崔总 2026-10-11）：384 小图占位 → 真身。
+   * 1920 那一档在 import 里不存在（不生成、不请求；`specs/thumbnail-tiers-and-import-memory.md`）——
+   * 所以这里**不给 `loadScreen`**。真身对位图就是原文件本身（秒出），对 RAW 是完整解码。
+   */
   const viewer = createViewerStore({
-    loadScreen: (path) => getViewImage(path, "screen"),
+    loadFull: (path) => getViewImage(path, "full"),
     loadThumb: (path) => getThumbBytes(path, "grid"),
   });
   const viewingInfo = (): TilesViewingInfo => ({

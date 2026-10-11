@@ -46,6 +46,15 @@
 - 显示尾号徽标：issue 行 `I03`、RAW 行 `IRA`、未匹配 latest `ILA`、原片行 `ISO`
   （`VariantSummary` 增加 `ordinal: number | null`；raw/sooc/latest 为 null，由前端按变体映射固定尾号）。
 
+> **2026-10-11 修订（崔总口述；尾号体系不变）**：RAW 行**不再以图的形式占 tile 的小片位** ——
+> 画廊小片区**最多两片**、**永不含 RAW**；RAW 只住在「全部定稿」弹窗里，**排末尾、位置固定**
+> （选中它也不会冒到 tile 上来，这点与 SOOC 不同），选中即正常入队（导出仍是 `IRA`）。
+> tile 上的入口按钮按「弹窗比 tile 多出什么」命名：多出别的定稿 → `全部定稿`，
+> 只多一张 RAW → 按钮就叫 `RAW`，没有更多内容就不出按钮。小片的图**不直读 RAW**，
+> 借同一张照片的 SOOC 小图 + `.photo-raw-approximate` 模拟。
+> 口径见 `specs/toolsbar-compact-and-export-gallery.md` §1.5（含第二轮修订）与
+> `design/export.md` 的 2026-10-11 修订节。
+
 ## 5. 改动落点
 
 | 层 | 文件 | 改什么 |

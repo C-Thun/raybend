@@ -336,11 +336,16 @@ run("② Windows 侧 cargo 构建（debug + custom-protocol）", "cmd.exe", [
    * 2026-09-24 就是这么栽的：Windows 那个 worker 停在 9 月 19 日（还不认 `linear16`），
    * 编辑器的线性解码在真机上一直失败。`check-win-artifact.mjs` 现在会核对它。
    *
+   * ❗`-p raybend-crashpad` 不能少（W4 加的）：崩溃助手是同目录里的第二个 exe，
+   * 它**不能**靠「主程序 re-exec 自己」当助手（那是社区里反复翻车的做法，见
+   * `specs/logging-and-crash-report.md` §5.2）。只建主程序的话助手不存在，
+   * 崩溃时只有 panic 记录、没有 dump。
+   *
    * `--message-format=json` 把**本次构建图里的每个单元**（连已经是最新的也在内）
    * 落到 `last-build.json` —— 第 ④ 步的瘦身脚本靠它判断「谁还活着」。
    * 进度信息走 stderr，所以终端上照旧能看到 `Compiling …`。
    */
-  `pushd ${windowsRepoPath()} & cargo build -p raybend-desktop -p raybend --features ${aiPlan.features.join(",")} --message-format=json > ${BUILD_UNITS}`,
+  `pushd ${windowsRepoPath()} & cargo build -p raybend-desktop -p raybend -p raybend-crashpad --features ${aiPlan.features.join(",")} --message-format=json > ${BUILD_UNITS}`,
 ], {
   env: windowsBuildEnv({ CARGO_TARGET_DIR,TAURI_CONFIG:aiEnv.TAURI_CONFIG,RAYBEND_PHOTO_AI:aiEnv.RAYBEND_PHOTO_AI }),
 });

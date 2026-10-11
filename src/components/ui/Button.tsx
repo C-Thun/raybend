@@ -16,6 +16,7 @@
 
 import type { JSX } from "solid-js";
 import { Show, splitProps } from "solid-js";
+import { ButtonTip } from "./Tooltip.tsx";
 
 export type ButtonVariant = "primary" | "accent" | "secondary" | "ghost";
 export type ButtonSize = "sm" | "md";
@@ -29,6 +30,13 @@ export interface ButtonProps
   loading?: boolean;
   /** 前置图标（一般是 Tabler 图标组件渲染结果） */
   icon?: JSX.Element;
+  /**
+   * 悬停提示（2026-10-11）。
+   *
+   * 口径：给了 `tip` 就显示它；没给、且**没有可见文字**时，退回 `aria-label`。
+   * 有可见文字的按钮默认不弹（提示属于「图标自己说不清」的场景）。
+   */
+  tip?: string;
 }
 
 /** 变体 → 态色的对应表。集中在这里，方便对照 memory/DESIGN.md §5 复核。 */
@@ -71,6 +79,7 @@ export function Button(props: ButtonProps) {
     "selected",
     "loading",
     "icon",
+    "tip",
     "class",
     "children",
     "disabled",
@@ -78,48 +87,57 @@ export function Button(props: ButtonProps) {
 
   const variant = () => local.variant ?? "ghost";
   const isDisabled = () => local.disabled || local.loading;
+  /** 纯图标（无可见文字）时提示退回无障碍名 —— 两者永远同一句话 */
+  const tipText = (): string | undefined =>
+    local.tip ??
+    (local.children == null ? (rest["aria-label"] as string | undefined) : undefined);
 
   return (
-    <button
-      {...rest}
-      type={rest.type ?? "button"}
-      disabled={isDisabled()}
-      aria-busy={local.loading || undefined}
-      aria-pressed={local.selected || undefined}
-      class={[
-        "relative inline-flex select-none items-center justify-center rounded-ui font-medium transition-colors",
-        SIZE_CLASSES[local.size ?? "md"],
-        variantClasses(variant(), Boolean(local.selected)),
-        // 禁用态只降前景、不动面（memory/DESIGN.md §5）
-        isDisabled()
-          ? "pointer-events-none text-fg-3 opacity-60"
-          : "cursor-pointer",
-        local.class ?? "",
-      ].join(" ")}
-    >
-      {/*
-        加载中仍然渲染图标/文字但置为透明 —— 这样按钮宽度不会在加载时跳变。
-        禁用态优先级高于 loading，所以这里用 loading 单独判断。
-      */}
-      <span
-        class={
-          local.loading ? "invisible flex items-center gap-1.5" : "contents"
-        }
-      >
-        <Show when={local.icon}>
-          <span class="flex size-3.5 items-center justify-center">
-            {local.icon}
+    <ButtonTip content={tipText()}>
+      {(triggerProps) => (
+        <button
+          {...rest}
+          {...triggerProps}
+          type={rest.type ?? "button"}
+          disabled={isDisabled()}
+          aria-busy={local.loading || undefined}
+          aria-pressed={local.selected || undefined}
+          class={[
+            "relative inline-flex select-none items-center justify-center rounded-ui font-medium transition-colors",
+            SIZE_CLASSES[local.size ?? "md"],
+            variantClasses(variant(), Boolean(local.selected)),
+            // 禁用态只降前景、不动面（memory/DESIGN.md §5）
+            isDisabled()
+              ? "pointer-events-none text-fg-3 opacity-60"
+              : "cursor-pointer",
+            local.class ?? "",
+          ].join(" ")}
+        >
+          {/*
+            加载中仍会渲染图标/文字但置为透明 —— 这样按钮宽度不会在加载时跳变。
+            禁用态优先级高于 loading，所以这里用 loading 单独判断。
+          */}
+          <span
+            class={
+              local.loading ? "invisible flex items-center gap-1.5" : "contents"
+            }
+          >
+            <Show when={local.icon}>
+              <span class="flex size-3.5 items-center justify-center">
+                {local.icon}
+              </span>
+            </Show>
+            {local.children}
           </span>
-        </Show>
-        {local.children}
-      </span>
-      <Show when={local.loading}>
-        <span
-          class="absolute size-3 animate-spin rounded-full border border-current border-t-transparent"
-          aria-hidden="true"
-        />
-      </Show>
-    </button>
+          <Show when={local.loading}>
+            <span
+              class="absolute size-3 animate-spin rounded-full border border-current border-t-transparent"
+              aria-hidden="true"
+            />
+          </Show>
+        </button>
+      )}
+    </ButtonTip>
   );
 }
 
@@ -132,10 +150,16 @@ export type IconButtonShape = "square" | "circle";
 export interface IconButtonProps
   extends JSX.ButtonHTMLAttributes<HTMLButtonElement> {
   shape?: IconButtonShape;
-  size?: "regular" | "large";
+  /**
+   * `hit` = 与 `RemoveButton` 同一命中尺寸（`--remove-hit`）——
+   * 行尾动作按钮（重命名 / 删除…）成对出现时命中区必须一样大。
+   */
+  size?: "regular" | "large" | "hit";
   selected?: boolean;
   /** 无障碍名。**必填** —— 纯图标按钮没有可读文本，缺了它对屏幕阅读器就是空白。 */
   label: string;
+  /** 悬停提示；不给就用 `label`（两者同一句话，风格由组件统一） */
+  tip?: string;
 }
 
 export function IconButton(props: IconButtonProps) {
@@ -144,33 +168,40 @@ export function IconButton(props: IconButtonProps) {
     "size",
     "selected",
     "label",
+    "tip",
     "class",
     "children",
     "disabled",
   ]);
 
+  const tipText = (): string => local.tip ?? rest.title ?? local.label;
+
   return (
-    <button
-      {...rest}
-      type={rest.type ?? "button"}
-      disabled={local.disabled}
-      title={rest.title ?? local.label}
-      aria-label={local.label}
-      aria-pressed={local.selected || undefined}
-      class={[
-        "inline-flex shrink-0 select-none items-center justify-center transition-colors",
-        (local.shape ?? "square") === "circle" ? "rounded-full" : "rounded-ui",
-        local.size === "large" ? "size-flow-icon-hit" : "size-6",
-        local.selected
-          ? "bg-brand text-fg-on-brand hover:bg-brand"
-          : "text-fg-2 hover:bg-state-hover hover:text-fg-1",
-        local.disabled
-          ? "pointer-events-none text-fg-3 opacity-60"
-          : "cursor-pointer",
-        local.class ?? "",
-      ].join(" ")}
-    >
-      {local.children}
-    </button>
+    <ButtonTip content={tipText()}>
+      {(triggerProps) => (
+        <button
+          {...rest}
+          {...triggerProps}
+          type={rest.type ?? "button"}
+          disabled={local.disabled}
+          aria-label={local.label}
+          aria-pressed={local.selected || undefined}
+          class={[
+            "inline-flex shrink-0 select-none items-center justify-center transition-colors",
+            (local.shape ?? "square") === "circle" ? "rounded-full" : "rounded-ui",
+            local.size === "large" ? "size-flow-icon-hit" : local.size === "hit" ? "size-remove-hit" : "size-6",
+            local.selected
+              ? "bg-brand text-fg-on-brand hover:bg-brand"
+              : "text-fg-2 hover:bg-state-hover hover:text-fg-1",
+            local.disabled
+              ? "pointer-events-none text-fg-3 opacity-60"
+              : "cursor-pointer",
+            local.class ?? "",
+          ].join(" ")}
+        >
+          {local.children}
+        </button>
+      )}
+    </ButtonTip>
   );
 }

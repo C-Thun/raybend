@@ -58,3 +58,23 @@ export function installEscapeBlur(target: Window = window): () => void {
   target.addEventListener("keydown", onKeyDown, true);
   return () => target.removeEventListener("keydown", onKeyDown, true);
 }
+
+/**
+ * 弹窗输入框的 **ref 回调**：出现即聚焦并**全选**。
+ *
+ * 崔总 2026-10-10：「弹窗后直接选中 input 并且全选应该成为本能」——
+ * 改名 / 另存这类弹窗的初始值就是要被重写的，全选后直接敲字就换了，
+ * 不用先手动全选。用法：`<input ref={selectAllOnMount} autofocus … />`。
+ *
+ * 为什么要等一帧：Solid 的 `ref` 在元素插入文档前就可能被调用；
+ * 未挂载的元素聚焦会落到 `body` 上，所以先看 `isConnected`，不在文档里就等下一帧。
+ */
+export function selectAllOnMount(element: HTMLInputElement): void {
+  const apply = (): void => {
+    if (!element.isConnected) return;
+    element.focus();
+    element.select();
+  };
+  if (element.isConnected) queueMicrotask(apply);
+  else requestAnimationFrame(apply);
+}

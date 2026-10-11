@@ -9,12 +9,16 @@ import { createExportStore } from "./store.ts";
 import { createExportPreferences } from "../../lib/export-prefs.ts";
 import type { TilesSource } from "../../components/ui/tiles/source.ts";
 import { IDLE_THUMB } from "../../components/ui/thumb-queue.ts";
-test("issue wrap follows cell width; more than four and small tiles add correct rows", () => {
-  assert.equal(issueExtraHeight(0, 240), 0);
-  assert.equal(issueExtraHeight(4, 236), 244);
-  assert.equal(issueExtraHeight(5, 236), 364);
-  assert.equal(issueExtraHeight(8, 116), 204);
-  assert.equal(issueExtraHeight(1, 32), 22);
+test("issue strip height: one row of up to two tiles plus the button row plus a bottom gap", () => {
+  // 零小片且没有入口按钮 → 整区不占高
+  assert.equal(issueExtraHeight({ tiles: 0, entry: null }, 240), 0);
+  // 零小片但有入口（只多一张 RAW）→ 只剩按钮行 + 下留白（4 + 4 + 20 + 4）
+  assert.equal(issueExtraHeight({ tiles: 0, entry: "raw" }, 240), 32);
+  // 一到两片都是**一行**（格宽 236 → 小片 116）：4 + 116 + 24 + 4
+  assert.equal(issueExtraHeight({ tiles: 1, entry: "all" }, 236), 148);
+  assert.equal(issueExtraHeight({ tiles: 2, entry: "all" }, 236), 148);
+  // 多于两片不再加行（旧规则是每行两张、最多三行）
+  assert.equal(issueExtraHeight({ tiles: 9, entry: "all" }, 116), 88);
 });
 test("gallery adapter preserves shared photo source including unloaded asset IDs", async () => {
   const s = createExportStore({

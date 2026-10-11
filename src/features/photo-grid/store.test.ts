@@ -11,7 +11,12 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { SourceItem, SourceScan, TimeEntry } from "../../api/types.ts";
+import type {
+  PhotoMeta,
+  SourceItem,
+  SourceScan,
+  TakenAtSource,
+} from "../../api/types.ts";
 import { itemId } from "./rows.ts";
 import {
   importDisplayByTime,
@@ -61,13 +66,44 @@ function at(hour: number, minute = 0, day = 15): number {
   return Date.UTC(2026, 7, day, hour, minute) - CST * 60_000;
 }
 
+/**
+ * 测试里给某一张指定的「真实 EXIF 时间」。
+ *
+ * 以前它喂给 `readSourceTimes`；2026-10-11 起时间跟着 `dir_meta_ensure` 一起回来
+ * （`specs/source-time-inline.md`），所以这里改成假后端的「读到的时间」。
+ */
+interface FakeTime {
+  takenAtMs: number | null;
+  takenAtSource: TakenAtSource | null;
+  takenAtOffsetMin: number | null;
+}
+
+/** 一条元信息（测试里的字面量帮手；不写时间 = 这张读不到） */
+function meta(
+  relative: string,
+  width: number,
+  height: number,
+  orientation = 1,
+  times: Partial<FakeTime> = {},
+): PhotoMeta {
+  return {
+    relative,
+    width,
+    height,
+    orientation,
+    takenAtMs: times.takenAtMs ?? null,
+    takenAtSource: times.takenAtSource ?? null,
+    takenAtOffsetMin: times.takenAtOffsetMin ?? null,
+  };
+}
+
 function scanOf(items: SourceItem[]): SourceScan {
   return { root: "/src", items, skipped: 0, problems: [], elapsedMs: 1 };
 }
 
 interface FakeState {
   items: SourceItem[];
-  times: Map<string, TimeEntry>;
+  times: Map<string, FakeTime>;
   settings: Map<string, string>;
   calls: string[];
   /** 元信息命令要返回什么（不给就是空） */
@@ -78,6 +114,10 @@ interface FakeState {
   holdMeta: boolean;
   /** 读头失败（不该把网格变成错误态） */
   failMeta: boolean;
+  /** 缓存里什么都没有：只查缓存时应当如实返回「不知道」（0×0 / 时间 null） */
+  cacheMisses: boolean;
+  /** 每次调 `dirMetaEnsure` 时前端传的 `cacheOnly`（钉住「界面的时间线路永不读文件」） */
+  cacheOnlyFlags: boolean[];
   scanRoots: string[];
 }
 
@@ -91,6 +131,8 @@ function fakeApi(overrides: Partial<FakeState> = {}) {
     failScan: false,
     holdMeta: false,
     failMeta: false,
+    cacheMisses: false,
+    cacheOnlyFlags: [],
     scanRoots: [],
     ...overrides,
   };
@@ -98,14 +140,29 @@ function fakeApi(overrides: Partial<FakeState> = {}) {
   const pendingMeta: Array<() => void> = [];
 
   const api: PhotoGridApi = {
-    async dirMetaEnsure(_dir, files) {
+    async dirMetaEnsure(_dir, files, cacheOnly = false) {
       state.calls.push(`dirMeta:${files.length}`);
+      state.cacheOnlyFlags.push(cacheOnly);
       if (state.holdMeta) {
         await new Promise<void>((resolve) => pendingMeta.push(resolve));
       }
       if (state.failMeta) throw new Error("读不了文件头");
-      // 默认什么都不给：比例退回占位（专门的用例会覆盖它）
-      return state.dirMeta ?? [];
+      // **只查缓存**而缓存里没有 → 如实报「不知道」（宽高 0、时间 null）
+      if (cacheOnly && state.cacheMisses) {
+        return files.map((file) => meta(file.relative, 0, 0));
+      }
+      // 显式给了就照给（测比例那些用例）；没给就按真实实现的口径合成：
+      // 「读头成功 → 时间来源 exif」，其中某一张的真实时间可以用 state.times 指定
+      if (state.dirMeta) return state.dirMeta;
+      return files.map((file) => {
+        const entry = state.items.find((candidate) => candidate.fileName === file.relative);
+        const explicit = entry === undefined ? undefined : state.times.get(itemId(entry));
+        return meta(file.relative, 4000, 3000, 1, {
+          takenAtMs: explicit?.takenAtMs ?? entry?.takenAtMs ?? null,
+          takenAtSource: explicit?.takenAtSource ?? "exif",
+          takenAtOffsetMin: explicit?.takenAtOffsetMin ?? entry?.takenAtOffsetMin ?? null,
+        });
+      });
     },
     async scanSourceDir(path) {
       state.calls.push(`scan:${path}`);
@@ -115,22 +172,6 @@ function fakeApi(overrides: Partial<FakeState> = {}) {
       }
       if (state.failScan) throw new Error(`读不了 ${path}`);
       return scanOf(state.items);
-    },
-    async readSourceTimes(paths) {
-      state.calls.push(`times:${paths.length}`);
-      return paths.map((path) => {
-        const explicit = state.times.get(path);
-        if (explicit) return explicit;
-        // 真实实现是「EXIF → 文件名 → mtime」，绝不会把已知的时间抹成空；
-        // 这里的替身也照这个口径：没显式指定就回显该条自己的值
-        const source = state.items.find((entry) => itemId(entry) === path);
-        return {
-          path,
-          takenAtMs: source?.takenAtMs ?? null,
-          takenAtSource: "exif",
-          takenAtOffsetMin: source?.takenAtOffsetMin ?? null,
-        };
-      });
     },
     async getThumbBytes(path) {
       state.calls.push(`thumb:${path}`);
@@ -268,7 +309,6 @@ test("按时间：只对「还不是 exif」的那些补读真相，并就地更
     item("b.jpg", null),
   ];
   state.times.set("/src/b.jpg", {
-    path: "/src/b.jpg",
     takenAtMs: at(20, 0),
     takenAtSource: "exif",
     takenAtOffsetMin: CST,
@@ -281,17 +321,28 @@ test("按时间：只对「还不是 exif」的那些补读真相，并就地更
   await flush();
 
   assert.equal(store.loadingTimes(), false);
-  assert.ok(store.grouping(), "读到时间后应该能分组");
-  const updated = store.items().find((entry) => entry.fileName === "b.jpg");
-  assert.equal(updated?.takenAtSource, "exif");
-  assert.equal(updated?.takenAtMs, at(20, 0));
+  /*
+   * 时间现在**不写回 `items`**（那是整表信号 → 会引发整表重排 ✗），只落进增量维护的分组结构。
+   * 所以这里断言**用户看得见的那个结果**：这张落进了它该在的日期分类。
+   */
+  const grouped = store.grouping();
+  assert.ok(grouped, "读到时间后应该能分组");
   assert.ok(
-    state.calls.includes("times:1"),
-    "只补读那一张（a.jpg 已经是文件名来源，不需要重读）",
+    grouped.days.some((day) => day.photoIds.includes("/src/b.jpg")),
+    "补到真时间后，b 应当出现在对应的日期分类里",
+  );
+  assert.equal(
+    store.items().find((entry) => entry.fileName === "b.jpg")?.takenAtSource,
+    null,
+    "`items` 保持清单层的值不动（真相在分组结构里）",
+  );
+  assert.ok(
+    state.calls.includes("dirMeta:1"),
+    "只补读那一张（a.jpg 已经是 exif 来源，不需要重读）",
   );
 });
 
-test("按时间：显示顺序跟着分组走（日倒序 → 片升序）", async () => {
+test("按时间：显示顺序跟着分组走（日升序 → 片升序）", async () => {
   const { api, state } = fakeApi();
   state.items = [item("old.jpg", at(9, 0, 14)), item("new.jpg", at(9, 0, 15))];
   const store = createPhotoGridStore({ api });
@@ -302,8 +353,8 @@ test("按时间：显示顺序跟着分组走（日倒序 → 片升序）", asy
 
   assert.deepEqual(
     store.displayItems().map((entry) => entry.fileName),
-    ["new.jpg", "old.jpg"],
-    "最近的日期在前",
+    ["old.jpg", "new.jpg"],
+    "日期层先到后（升序）",
   );
   assert.deepEqual(
     store.items().map((entry) => entry.fileName),
@@ -498,6 +549,47 @@ test("hydrate：设置里有非法值时退回默认", async () => {
   assert.equal(store.tileStep(), importDisplayTileStep());
 });
 
+test("换卡/覆盖保存：同一个路径换了内容就作废那条小图", async () => {
+  const f = fakeApi({ items: [item("甲.jpg")] });
+  const store = createPhotoGridStore({ api: f.api });
+  store.setSourceDir("/src");
+  await flush();
+  store.requestThumb("/src/甲.jpg");
+  await flush();
+  assert.equal(store.thumb("/src/甲.jpg").status, "ready");
+
+  // ① 同一张卡再看一眼（内容没变）→ 不许重取：这就是「临时缓存」要保住的东西
+  store.setSourceDir("/other");
+  await flush();
+  store.setSourceDir("/src");
+  await flush();
+  assert.equal(
+    store.thumb("/src/甲.jpg").status,
+    "ready",
+    "文件身份没变，内存里那份就该继续用",
+  );
+
+  // ② 换了一张卡（或文件被重新导出覆盖）：同一个路径下是**另一张照片** ——
+  //    少了身份比对，用户会看到上一张卡的照片（崔总 2026-10-11 点出的场景）
+  store.setSourceDir("/other");
+  await flush();
+  f.state.items = [
+    { ...item("甲.jpg"), sizeBytes: 4096, mtimeMs: 1_700_000_000_000 },
+  ];
+  store.setSourceDir("/src");
+  await flush();
+  assert.equal(
+    store.thumb("/src/甲.jpg").status,
+    "ready",
+    "取回来的还是同一格（旧图先顶着，不闪白）",
+  );
+  assert.equal(
+    f.state.calls.filter((call) => call === "thumb:/src/甲.jpg").length,
+    2,
+    "身份变了必须重新取一次 —— 否则显示的会是上一张卡的照片",
+  );
+});
+
 test("缩略图：按需请求，命中后不再重复取", async () => {
   const { api, state } = fakeApi();
   const store = createPhotoGridStore({ api });
@@ -517,11 +609,11 @@ test("缩略图：按需请求，命中后不再重复取", async () => {
 test("元信息：拿到的宽高决定展示比例（竖图就是竖的）", async () => {
   const { api, state } = fakeApi();
   state.dirMeta = [
-    { relative: "a.jpg", width: 4000, height: 3000, orientation: 1 },
+    meta("a.jpg", 4000, 3000),
     // 竖拍：后端已经应用过方向，所以这里宽高是反的
-    { relative: "b.jpg", width: 3000, height: 4000, orientation: 6 },
+    meta("b.jpg", 3000, 4000, 6),
     // 全景：超出 3:1 → 夹到 3:1
-    { relative: "c.jpg", width: 8000, height: 1000, orientation: 1 },
+    meta("c.jpg", 8000, 1000),
   ];
   state.items = [item("a.jpg"), item("b.jpg"), item("c.jpg")];
   const store = createPhotoGridStore({ api });
@@ -554,7 +646,7 @@ test("元信息：读不到就用默认占位比例，不报错", async () => {
 test("慢盘目录立即 ready，不读任何原片 metadata；view 才补方向与自然尺寸", async () => {
   const { api, state, releaseMeta } = fakeApi({ holdMeta: true });
   state.items = Array.from({ length: 500 }, (_, i) => item(`照片${i}.jpg`));
-  state.dirMeta = [{ relative: "照片0.jpg", width: 3000, height: 4000, orientation: 6 }];
+  state.dirMeta = [meta("照片0.jpg", 3000, 4000, 6)];
   const store = createPhotoGridStore({ api });
   store.setSourceDir("/photos"); await flush();
   assert.equal(store.status(), "ready");
@@ -570,7 +662,7 @@ test("慢盘目录立即 ready，不读任何原片 metadata；view 才补方向
 
 test("view 迟到的原片尺寸不能污染新目录", async () => {
   const { api, state, releaseMeta } = fakeApi({ holdMeta: true });
-  state.items = [item("old.jpg")]; state.dirMeta = [{ relative: "old.jpg", width: 3000, height: 4000, orientation: 6 }];
+  state.items = [item("old.jpg")]; state.dirMeta = [meta("old.jpg", 3000, 4000, 6)];
   const store = createPhotoGridStore({ api }); store.setSourceDir("/old"); await flush();
   const oldPath = store.items()[0]!.path; const read = store.ensureNatural([oldPath]);
   state.items = [item("new.jpg")]; store.setSourceDir("/new"); await flush();
@@ -596,7 +688,6 @@ test("按时间：同名 JPG 与 RW2 补读 EXIF 后落进同一片，并且片�
   ];
   const withExif = (name: string, ms: number): void => {
     state.times.set(`/src/${name}`, {
-      path: `/src/${name}`,
       takenAtMs: ms,
       takenAtSource: "exif",
       takenAtOffsetMin: CST,
@@ -626,22 +717,130 @@ test("按时间：同名 JPG 与 RW2 补读 EXIF 后落进同一片，并且片�
 });
 
 
-test("按时间补读只提交小批次，关闭后不再读后续照片", async () => {
+test("按时间补读分块（48/条），关掉之后不再读后续块", async () => {
   resetDisplayPrefsForTests();
-  const f = fakeApi({ items: Array.from({ length: 40 }, (_, i) => item(`${i}.JPG`)) });
+  /*
+   * 为什么是「小批」而不是「一趟读完」（2026-10-11 崔总拍板的改法）：
+   * 以前 `TIMES_BATCH = 512`——一条命令读整目录，真机 306 张要 6 秒，
+   * 那 6 秒里所有缩略图请求和整个界面都被按住（诊断
+   * `implementations/2026-10-11_import-still-slow-diagnosis.md`）。
+   * 现在一条命令最多 48 张（几十毫秒），块间让出一帧，界面插得进空。
+   */
+  const f = fakeApi({ items: Array.from({ length: 200 }, (_, i) => item(`${i}.JPG`)) });
   const batches: number[] = [];
   let release: (() => void) | undefined;
-  f.api.readSourceTimes = async (paths) => {
-    batches.push(paths.length);
+  const inner = f.api.dirMetaEnsure;
+  f.api.dirMetaEnsure = async (dir, files) => {
+    batches.push(files.length);
     await new Promise<void>((resolve) => { release = resolve; });
-    return [];
+    return inner(dir, files);
   };
   const store = createPhotoGridStore({ api: f.api });
   store.setSourceDir("/src"); await flush();
   store.setByTime(true); await flush();
-  assert.deepEqual(batches, [8]);
-  store.setByTime(false); release?.(); await flush();
-  assert.deepEqual(batches, [8]);
+  assert.deepEqual(batches, [48], "一条命令最多 48 张");
+  store.setByTime(false);
+  release?.();
+  await flush();
+  await flush();
+  assert.deepEqual(batches, [48], "关掉之后不再读后续块");
   assert.equal(store.loadingTimes(), false);
+  resetDisplayPrefsForTests();
+});
+
+test("按时间：只查缓存，缓存没有就保持兜底（界面这条线永远不读文件）", async () => {
+  resetDisplayPrefsForTests();
+  const f = fakeApi();
+  f.state.cacheMisses = true; // 缓存里什么都没有（谁还没出过图）
+  f.state.items = [item("a.jpg", at(9, 0)), item("b.jpg", null)];
+  const store = createPhotoGridStore({ api: f.api });
+  store.setSourceDir("/src");
+  await flush();
+  store.setByTime(true);
+  await flush();
+
+  const items = store.items();
+  assert.equal(items[0]?.takenAtSource, "filename", "缓存没有 → 兜底时间原样留着");
+  assert.equal(items[0]?.takenAtMs, at(9, 0));
+  assert.equal(items[1]?.takenAtMs, null, "连兜底都没有 → 未知时间组");
+  assert.ok(
+    f.state.cacheOnlyFlags.length > 0 && f.state.cacheOnlyFlags.every(Boolean),
+    "每一次查询都必须带 cacheOnly（这条线不许读文件）",
+  );
+  resetDisplayPrefsForTests();
+});
+
+test("按时间：分块补读不把一对 JPG/RAW 拆进两次请求", async () => {
+  resetDisplayPrefsForTests();
+  // 25 对（50 个文件）：一条命令最多 48 张，但边界必须落在「主名变化」处，
+  // 否则后端那一批里只有 RAW 没有它的位图兄弟，配对继承就断了
+  //（规格 `specs/source-time-inline.md` §2；规则本身在 Rust 的 `media::pairing`）。
+  const items: SourceItem[] = [];
+  for (let i = 0; i < 25; i += 1) {
+    const stem = `P10000${String(i).padStart(2, "0")}`;
+    items.push({ ...item(`${stem}.JPG`), ext: "jpg", kind: "image" });
+    items.push({ ...item(`${stem}.RW2`), ext: "rw2", kind: "raw" });
+  }
+  const f = fakeApi({ items });
+  const batches: string[][] = [];
+  const inner = f.api.dirMetaEnsure;
+  f.api.dirMetaEnsure = async (dir, files) => {
+    batches.push(files.map((file) => file.relative));
+    return inner(dir, files);
+  };
+  const store = createPhotoGridStore({ api: f.api });
+  store.setSourceDir("/src");
+  await flush();
+  store.setByTime(true);
+  await flush();
+
+  assert.equal(batches.length, 2, "50 张按 48 切 → 两块");
+  for (const batch of batches) {
+    const stems = new Set(batch.map((name) => name.replace(/\.[^.]+$/, "")));
+    assert.equal(
+      stems.size * 2,
+      batch.length,
+      `一对不许被拆开：${batch.slice(0, 3).join(",")} …`,
+    );
+  }
+  resetDisplayPrefsForTests();
+});
+
+test("按时间：分块到达就分块重排（渐进，不用等整目录）", async () => {
+  resetDisplayPrefsForTests();
+  // 96 张 = 两块。先让第一块回来，分组框架就该已经按真时间排好第一块
+  const f = fakeApi({ items: Array.from({ length: 96 }, (_, i) => item(`${i}.JPG`)) });
+  const store = createPhotoGridStore({ api: f.api });
+  store.setSourceDir("/src");
+  await flush();
+  store.setByTime(true);
+  await flush(); // 第一块落地（假后端每块立即返回）
+  assert.ok(store.grouping(), "第一块回来就能分组");
+  assert.equal(store.loadingTimes(), false);
+  resetDisplayPrefsForTests();
+});
+
+test("按时间：低可信度的时间不许把已读到的高可信度顶掉（只升不降）", async () => {
+  resetDisplayPrefsForTests();
+  const f = fakeApi();
+  // 清单里已经是「姊妹文件继承」来的时间（rank 2，比 mtime 高）……
+  f.state.items = [
+    { ...item("a.jpg", at(9, 0)), takenAtSource: "sibling", takenAtOffsetMin: CST },
+  ];
+  // ……而这次读头只拿到 mtime（rank 0，例如缓存没建全、EXIF 一时读不到）
+  f.state.dirMeta = [
+    meta("a.jpg", 4000, 3000, 1, {
+      takenAtMs: at(23, 0),
+      takenAtSource: "file_mtime",
+      takenAtOffsetMin: CST,
+    }),
+  ];
+  const store = createPhotoGridStore({ api: f.api });
+  store.setSourceDir("/src");
+  await flush();
+  store.setByTime(true);
+  await flush();
+  assert.equal(store.items()[0]?.takenAtSource, "sibling", "低来源不许覆盖高来源");
+  assert.equal(store.items()[0]?.takenAtMs, at(9, 0), "时间也没被改写");
   resetDisplayPrefsForTests();
 });

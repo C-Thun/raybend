@@ -86,7 +86,7 @@ export function SliderRow(props: SliderRowProps): JSX.Element {
     >
       {/* 上行：标签 + 当前值 */}
       <div class="flex items-baseline gap-2">
-        <ArkSlider.Label class="min-w-0 truncate text-fs-0 text-fg-2">
+        <ArkSlider.Label class="min-w-0 overflow-hidden whitespace-nowrap fade-x-end fade-x-end-fit text-fs-0 text-fg-2">
           {t(props.spec.labelKey)}
         </ArkSlider.Label>
         <span class="flex-1" />

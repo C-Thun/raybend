@@ -34,6 +34,10 @@ import { getExportVariants, exportQueue, onExportState, getExportSnapshots, vali
 import { Show, createEffect, createRenderEffect, createSignal, on, onCleanup, onMount } from "solid-js";
 import { uiReady, tauriWindowHandle } from "./api/window.ts";
 import { openFullscreen } from "./api/fullscreen.ts";
+import { openDiagnosticsFolder } from "./api/diagnostics.ts";
+import * as diagnosticsApi from "./api/diagnostics.ts";
+import type { CrashSummary } from "./api/diagnostics.ts";
+import { pickSaveFile } from "./api/dialog.ts";
 import { isTauriRuntime } from "./api/tauri-env.ts";
 import type { AssetItem, BrowseSort, DevelopEditBase, MarkResult, MarkingItem, Volume } from "./api/types.ts";
 import { t, timeoutMessage } from "./i18n/index.ts";
@@ -59,8 +63,10 @@ import { createPhotoBucket, reconcileOrganization, removePhotoFromBucket, savePh
 import { rulesFromBrowseFilter } from "./features/browse/organization-rules.ts";
 import { createOrganizationWorker } from "./lib/organization-worker.ts";
 import { ToggleBlock } from "./components/ui/ToggleBlock.tsx";
-import { ConfirmDialog } from "./components/ui/Dialog.tsx";
+import { ConfirmDialog, Dialog } from "./components/ui/Dialog.tsx";
+import { Checkbox } from "./components/ui/Form.tsx";
 import { browseActions } from "./features/browse/actions.ts";
+import { RECYCLE_DIR } from "./features/browse/dirs.ts";
 import { applyMarkIntent } from "./features/browse/mark-actions.ts";
 import { importActions } from "./features/import/actions.ts";
 import { editorActions } from "./features/editor/actions.ts";
@@ -95,7 +101,7 @@ import { locale, nextLocale, setLocale } from "./i18n/index.ts";
 import { createRepositoryMonitor } from "./features/repositories/monitor.ts";
 import { createRepositoryState } from "./features/repositories/state.ts";
 import { LibrarySettingsDialog } from "./features/repositories/index.ts";
-import { browseDelete, browseFacets, browseMark, browseMarkings, browsePage, browseRedo, browseTimeline, browseUndo, flagsClear, flagsGet, flagsSet, tagList } from "./api/browse.ts";
+import { browseDelete, browseFacets, browseMark, browseMarkings, browsePage, browseRecycleEmpty, browseRecyclePurge, browseRecycleRestore, browseRecycleSummary, browseRedo, browseTimeline, browseUndo, flagsClear, flagsGet, flagsSet, tagList } from "./api/browse.ts";
 import { BrowseWorkspace } from "./workspaces/browse/index.ts";
 import { EditorWorkspace } from "./workspaces/editor/EditorWorkspace.tsx";
 import {
@@ -113,7 +119,8 @@ import {
 import { readBrowseSession, writeBrowseSession } from "./lib/browse-session.ts";
 import { withTimeout } from "./lib/timeout.ts";
 import { createFilmStripPreferenceStore } from "./lib/film-strip-prefs.ts";
-import { IconAlbum, IconExternalLink, IconFolder, IconTag } from "@tabler/icons-solidjs";
+import { IconAlbum, IconExternalLink, IconFolder, IconRestore, IconTag, IconTrashX } from "@tabler/icons-solidjs";
+import { ToolsSeparator } from "./components/ui/ToolsSeparator.tsx";
 
 const STARTUP_REPOSITORIES_TIMEOUT_MS = 15_000;
 
@@ -220,6 +227,10 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
       undo: browseUndo,
       redo: browseRedo,
       remove: browseDelete,
+      recycleRestore: browseRecycleRestore,
+      recyclePurge: browseRecyclePurge,
+      recycleEmpty: browseRecycleEmpty,
+      recycleSummary: browseRecycleSummary,
       flagsGet,
       flagsSet,
       flagsClear,
@@ -232,7 +243,9 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
     if (repositoryId !== browseStore.repositoryId() || liveDisposed) return;
     try {
       const scope = browseStore.scopePath();
-      if (scope !== null) await db.syncDirectoryCounts(repositoryId, scope, scopes);
+      // 回收站不参与目录同步（同上）：它不是 `photos` 子树，扫描会对不上账
+      const recycle = scope === RECYCLE_DIR || (scope?.startsWith(`${RECYCLE_DIR}/`) ?? false);
+      if (scope !== null && !recycle) await db.syncDirectoryCounts(repositoryId, scope, scopes);
       if (repositoryId === browseStore.repositoryId() && !liveDisposed) await browseStore.refresh();
     } catch (error) { if (repositoryId === browseStore.repositoryId() && !liveDisposed) browseStore.reportError(error); }
   });
@@ -255,15 +268,19 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
   });
   const repositoriesReady = repositoryMonitor.start();
   onCleanup(repositoryMonitor.dispose);
-  onMount(() => {
-    const focus = () => repositoryMonitor.request();
-    window.addEventListener("focus", focus);
-    onCleanup(() => window.removeEventListener("focus", focus));
-  });
+  /*
+   * 换库才探（崔总 2026-10-11）：
+   * 启动时 `repositoryMonitor.start()` 已经把登记过的库各探过一次，这里只负责
+   * 「用户换了另一个库」这一种情况 —— 同一个库不重复探（卡片上的「重新查找」与
+   * 命令面板的「重新连接」是用户手上的重试入口，它们直接走 `repositories.remount`）。
+   * 盯住上一轮探过的 id，就不用因为「切工作流」这种与库无关的动作又探一遍。
+   */
+  let probedLibrary: string | null = null;
   createEffect(() => {
-    shell.workflow();
     const id = shell.workflow() === "import" ? importStore.selectedRepositoryId() : browseStore.repositoryId();
-    if (id !== null) repositoryMonitor.request([id]);
+    if (id === null || id === probedLibrary) return;
+    probedLibrary = id;
+    repositoryMonitor.request([id]);
   });
 
   /*
@@ -379,6 +396,13 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
    * 两边都在这里汇合（`memory/ARCHITECTURE.md` §2 的组合层职责）。
    */
   const [tagsOpen, setTagsOpen] = createSignal(false);
+  /*
+   * 上次崩溃的报告：启动后**问一次**「要不要存下来发给我们」。
+   * 同一条崩溃记录只问一次 —— 用户选「不报告」（或存成功）后都会被标记，
+   * 下次启动不再弹；只有**新的**崩溃记录才会再问（`diagnostics/dismissCrash`）。
+   */
+  const [crashPrompt, setCrashPrompt] = createSignal<CrashSummary | null>(null);
+  const [crashIncludeDump, setCrashIncludeDump] = createSignal(false);
   const [aiAvailable, setAiAvailable] = createSignal(false);
   onMount(() => { void aiModelStatus().then(status => setAiAvailable(aiCapability(aiBuildEnabled(), status.compiled))).catch(() => setAiAvailable(false)); });
   const [aiDialog, setAiDialog] = createSignal<{ mode: "recognize" | "tasks"; rerun: boolean } | null>(null);
@@ -664,6 +688,12 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
     openShortcuts: () => { setSettingsPage("shortcuts"); setSettingsOpen(true); },
     openSettings: () => setSettingsOpen(true),
     openAbout: () => {setAboutPage("about");setAboutOpen(true);},
+    // 诊断目录（日志 + 崩溃记录）：成功时把路径写进提示（带变量的句子），失败原样报原因
+    openDiagnosticsFolder: () => {
+      void openDiagnosticsFolder()
+        .then((path) => toast.show({ tone: "success", message: t("diagnostics.opened").replace("{path}", path) }))
+        .catch((error: unknown) => toast.show({ tone: "danger", message: String(error) }));
+    },
     openHelp: () => {setAboutPage("help");setAboutOpen(true);},
     openLicenses: () => {setAboutPage("licenses");setAboutOpen(true);},
     openWelcome: () => setWelcomeOpen(true),
@@ -734,8 +764,9 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
       selectedCount: () => !organizationPhotoView() ? browseStore.selectedCount() : organizationSelected().length,
       selectAll: () => !organizationPhotoView() ? browseStore.selectAll() : organizationActions?.selectAll(),
       clearSelection: () => !organizationPhotoView() ? browseStore.clearSelection() : organizationActions?.clearSelection(),
-      // **与工具条同一份实现**（`features/browse/mark-actions.ts`）：筛选态改条件、标记态打标
-      mark: (action) => void applyMarkIntent(!organizationPhotoView() ? browseStore : organizationMarkStore, action, toast),
+      // **与工具条同一份实现**（`features/browse/mark-actions.ts`）：筛选态改条件、标记态打标。
+      // **导出场景恒筛选**（导出只有筛选模式）：同一条命令在两处按场景转换（§11.5）。
+      mark: (action) => void applyMarkIntent(!organizationPhotoView() ? browseStore : organizationMarkStore, action, toast, { forceFilter: shell.workflow() === "export" }),
       setFlag: (value) => {
         if (!organizationPhotoView()) { void browseStore.setFlag(browseStore.selectedIds(), value); return; }
         const groups = new Map<string, number[]>();
@@ -756,6 +787,9 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
       toggleSortDirection: () =>
         browseStore.setSort({ ...browseStore.sort(), desc: !browseStore.sort().desc }),
       requestDelete: () => browseActions()?.requestDelete(),
+      recycle: () => browseStore.recycleMode(),
+      restoreRecycle: () => browseActions()?.requestRestoreRecycle(),
+      emptyRecycle: () => browseActions()?.requestEmptyRecycle(),
       moveFocus: (delta) => browseActions()?.moveFocus(delta),
       openViewer: () => browseActions()?.openViewer(),
       cycleChrome: () => browseActions()?.cycleChrome(),
@@ -808,7 +842,7 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
       document.querySelector('[role="dialog"]') !== null,
     allowedWhileBlocked: (command) => document.querySelector("[data-export-all-issues]") !== null &&
       !paletteOpen() && !settingsOpen() && !aboutOpen() &&
-      ["edit.selectAll", "edit.delete", "export.enqueue"].includes(command.id),
+      ["edit.selectAll", "export.remove", "export.enqueue"].includes(command.id),
     onRun: (command) => {
       // 「打开面板」这类命令会把面板开开关关，别让分发器的日志把它们写成递归
       if (command.id !== "help.palette") setPaletteOpen(false);
@@ -818,6 +852,58 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
     dispatcher.attach();
     onCleanup(() => dispatcher.dispose());
   });
+
+  /*
+   * 上一次跑崩了吗？界面起来之后再问（不跟闪屏抢），问完就结束。
+   * 失败静默：诊断层不可用时不允许影响启动（`AGENTS.md` §5.8）。
+   */
+  onMount(() => {
+    void diagnosticsApi
+      .pendingCrash()
+      .then((pending) => {
+        if (!pending) return;
+        setCrashIncludeDump(false);
+        setCrashPrompt(pending);
+      })
+      .catch(() => {});
+  });
+
+  /** 「不报告」：标记已问过，别反复打扰（崔总 2026-10-12）。 */
+  const dismissCrashPrompt = () => {
+    const pending = crashPrompt();
+    setCrashPrompt(null);
+    if (pending) void diagnosticsApi.dismissCrash(pending.dir).catch(() => {});
+  };
+
+  /** 崩溃时间（记录里存的是 UTC，界面按本地时间显示）。 */
+  const crashPromptTime = () => {
+    const raw = crashPrompt()?.createdAt ?? "";
+    const at = new Date(raw);
+    return Number.isNaN(at.getTime()) ? raw : at.toLocaleString();
+  };
+
+  /** 「保存报告」：系统另存为 → 写 zip + 提交指南（同目录）。 */
+  const saveCrashReport = async () => {
+    const pending = crashPrompt();
+    if (!pending) return;
+    const target = await pickSaveFile({
+      title: t("diagnostics.crashPrompt.saveTitle"),
+      defaultName: `${t("diagnostics.crashPrompt.fileName").replace("{id}", pending.reportId)}.zip`,
+      filters: [{ name: "Zip", extensions: ["zip"] }],
+    });
+    // 在系统另存为里取消：收弹窗但**不标记** —— 用户本想存东西，下次启动再问一次
+    if (!target) {
+      setCrashPrompt(null);
+      return;
+    }
+    try {
+      const outcome = await diagnosticsApi.exportBundle(pending.dir, target, crashIncludeDump());
+      setCrashPrompt(null);
+      toast.show({ tone: "success", message: t("diagnostics.crashPrompt.saved").replace("{path}", outcome.zipPath) });
+    } catch (error) {
+      toast.show({ tone: "danger", message: t("diagnostics.crashPrompt.saveFailed").replace("{error}", String(error)) });
+    }
+  };
 
   /** 菜单项的键位提示（菜单与面板读同一份覆盖表） */
   const menuShortcut = (command: CommandSpec): string | undefined =>
@@ -885,20 +971,37 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
           onRequestReset={() => editorActions()?.resetDevelop()}
           canReset={() => editorActions()?.canReset() ?? false}
           canFinalize={() => editorActions()?.canFinalize() ?? false}
-          onFinalize={() => editorActions()?.finalize()} />}><ExportStopTool store={exportStore}/></Show>}><Button data-browse-external-editor variant="ghost" icon={<IconExternalLink size={14} />} disabled={organizationPhotoView() || !(browseActions()?.canExternalEditor()??false)} onClick={()=>browseActions()?.externalEditor()}>{t("external.title")}</Button></Show>}
+          onFinalize={() => editorActions()?.finalize()} />}><ExportStopTool store={exportStore}/></Show>}><Button data-browse-external-editor variant="ghost" icon={<IconExternalLink size={14} />} aria-label={t("external.title")} disabled={organizationPhotoView() || !(browseActions()?.canExternalEditor()??false)} onClick={()=>browseActions()?.externalEditor()}/></Show>}
       >
         {/* 浏览模式的工具（标记系列 / 筛选开关 / 锁）由那个模块自己给 —— 见 ToolsBar 的说明 */}
         <Show when={shell.workflow() === "browse" && !organizationPhotoView()}>
-          <BrowseToolbar
-            store={browseStore}
-            toast={toast}
-            onOpenAi={aiAvailable() ? () => setAiDialog({ mode: "recognize", rerun: false }) : undefined}
-            onOpenTags={() => setTagsOpen(true)}
-            onAddSelectedToBucket={() => openBucketPicker("selected")}
-            onAddFlagsToBucket={() => openBucketPicker("flags")}
-            onNewAutoBucket={() => void openAutoBucket()}
-            onDelete={() => browseActions()?.requestDelete()}
-          />
+          {/*
+            回收站视图的工具条**只有两件能做的事**（`specs/library-recycle-bin.md` §4.2）：
+            还原选中 / 清空。真删不在这里 —— 它只有「拖到粉碎卡」一条路（崔总 2026-10-10 定）。
+          */}
+          <Show when={browseStore.recycleMode()} fallback={
+            <BrowseToolbar
+              store={browseStore}
+              toast={toast}
+              onOpenAi={aiAvailable() ? () => setAiDialog({ mode: "recognize", rerun: false }) : undefined}
+              onOpenTags={() => setTagsOpen(true)}
+              onAddSelectedToBucket={() => openBucketPicker("selected")}
+              onAddFlagsToBucket={() => openBucketPicker("flags")}
+              onNewAutoBucket={() => void openAutoBucket()}
+              onDelete={() => browseActions()?.requestDelete()}
+            />
+          }>
+            <Button variant="ghost" icon={<IconRestore size={14} />}
+              disabled={browseStore.selectedCount() === 0}
+              onClick={() => browseActions()?.requestRestoreRecycle()}>
+              {t("browse.recycleRestore")}
+            </Button>
+            <ToolsSeparator />
+            <Button variant="ghost" class="text-danger" icon={<IconTrashX size={14} />}
+              onClick={() => browseActions()?.requestEmptyRecycle()}>
+              {t("browse.recycleEmpty")}
+            </Button>
+          </Show>
         </Show>
         <Show when={shell.workflow() === "browse" && organizationPhotoView()}>
           <BrowseToolbar store={organizationMarkStore} collectionMode toast={toast}
@@ -921,7 +1024,7 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
             onBaseChange={setEditorBase}
             history={historyActions} />
         </Show>
-        <Show when={exportFlow()}><ExportToolbar store={exportStore}/></Show>
+        <Show when={exportFlow()}><ExportToolbar store={exportStore} browse={browseStore}/></Show>
       </ToolsBar>
 
       {/*
@@ -978,6 +1081,28 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
         message={t("org.removeConfirm").replace("{n}", String(organizationSelected().length))}
         confirmLabel={t("org.removeSelected")}
         onCancel={() => setPendingBucketRemoval(false)} onConfirm={() => void removeFromCurrentBucket()} />
+
+      {/* 上次崩溃的报告：问一次要不要存下来发给我们（内容已脱敏；不报告就直接结束） */}
+      <Dialog
+        open={crashPrompt() !== null}
+        onOpenChange={(open) => { if (!open) dismissCrashPrompt(); }}
+        title={t("diagnostics.crashPrompt.title")}
+        description={t("diagnostics.crashPrompt.message").replace("{time}", crashPromptTime())}
+        footer={
+          <>
+            <Button variant="secondary" onClick={dismissCrashPrompt}>{t("diagnostics.crashPrompt.dismiss")}</Button>
+            <Button variant="primary" onClick={() => void saveCrashReport()}>{t("diagnostics.crashPrompt.save")}</Button>
+          </>
+        }
+      >
+        <Show when={crashPrompt()?.hasDump}>
+          <Checkbox
+            checked={crashIncludeDump()}
+            onCheckedChange={setCrashIncludeDump}
+            label={t("diagnostics.crashPrompt.includeDump")}
+          />
+        </Show>
+      </Dialog>
 
       {/*
         库设置（齿轮）：浏览侧的那条路。弹窗自带「两个计数 + 重建数据」，

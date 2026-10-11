@@ -81,7 +81,23 @@ export function importSource(
     commitTileStep: () => store.commitTileStep(),
     thumb: (path) => store.thumb(path),
     tileNatural: false,
-    cancelThumb: store.thumbQueue.cancel,
-    requestThumb: (path) => store.requestThumb(path),
+    /*
+     * 滚出屏幕**不撤销**：队列要一直吃到底（崔总 2026-10-11 的队列模型）。
+     * 撤销只发生在换目录 / 卸载（`thumbs.clear()`）。
+     */
+    cancelThumb: () => {},
+    requestThumb: (path, priority) => store.thumbQueue.request(path, priority),
+    // 窗口优先：把当前窗口内的未处理项提到队首（滚动/缩放停下来后网格会调）
+    prioritizeVisible: (from, to) => {
+      const list = store.displayItems();
+      const paths: string[] = [];
+      for (let slot = Math.max(0, from); slot < Math.min(to, list.length); slot += 1) {
+        const item = list[slot];
+        if (item !== undefined) paths.push(itemId(item));
+      }
+      store.thumbQueue.prioritize(paths);
+      // 元信息补读也窗口优先（拍摄时间跟宽高一起回来，见 store 的 syncTimes）
+      store.noteVisible(paths);
+    },
   };
 }

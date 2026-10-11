@@ -83,7 +83,7 @@ test("间隔超过阈值：断为新片", () => {
   assert.equal(slices[1].id, "2026-08-15 #2");
 });
 
-test("跨天：一天一组，最近的在前", () => {
+test("跨天：一天一组，**先到后**（升序）", () => {
   const grouping = groupByTime(
     [
       photo("old", at(2026, 8, 14, 23, 30)),
@@ -94,17 +94,18 @@ test("跨天：一天一组，最近的在前", () => {
   );
   assert.deepEqual(
     grouping.days.map((day) => day.id),
-    ["2026-08-15", "2026-08-14"],
+    ["2026-08-14", "2026-08-15"],
+    "日期层先到后（升序）",
   );
-  // 23:30 与 00:30 只差 1 小时，但**跨天**，所以必然在不同片里
-  assert.deepEqual(grouping.days[0].slices[0].photoIds, ["new"]);
-  // 前一天的 10:00 与 23:30 差 13.5 小时 → 又是另一片
+  // 前一天的 10:00 与 23:30 差 13.5 小时 → 两片
   assert.deepEqual(
-    grouping.days[1].slices.map((slice) => slice.photoIds),
+    grouping.days[0].slices.map((slice) => slice.photoIds),
     [["mid"], ["old"]],
   );
+  // 23:30 与次日 00:30 只差 1 小时，但**跨天**，所以必然在不同片里
+  assert.deepEqual(grouping.days[1].slices[0].photoIds, ["new"]);
   assert.equal(
-    grouping.days[0].dayStartMs,
+    grouping.days[1].dayStartMs,
     at(2026, 8, 15, 0),
     "日组要给出当天 0 点（视图显示日期用）",
   );
@@ -234,7 +235,7 @@ test("片 id 稳定且唯一（选中与折叠都靠它）", () => {
     { gapMinutes: 60, offsetMinutes: CST },
   );
   const ids = grouping.days.flatMap((day) => day.slices.map((slice) => slice.id));
-  assert.deepEqual(ids, ["2026-08-15 #1", "2026-08-15 #2", "2026-08-14 #1"]);
+  assert.deepEqual(ids, ["2026-08-14 #1", "2026-08-15 #1", "2026-08-15 #2"]);
   assert.equal(new Set(ids).size, ids.length, "不能有重复的片 id");
 });
 

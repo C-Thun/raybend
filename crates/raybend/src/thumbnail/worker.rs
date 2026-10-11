@@ -346,6 +346,38 @@ pub fn render_now(
     render_now_with_edit(thumbs, abs_path, size, now_ms, None, None)
 }
 
+/// **库外（import / 来源目录）口径的渲染**：JPEG q82（`AGENTS.md` §2.24）。
+///
+/// 只管渲染，**不碰任何缓存**（磁盘、数据库都不碰）—— 库外图只活在进程内存里，
+/// 存取由调用方负责（`thumbnail::memory::SourceThumbs`；前端那份 blob 缓存是另一层，
+/// 见它的注释）。
+///
+/// 同一张图未入库时走这里、入库后走 [`render_now`]（AVIF + 磁盘缓存）。
+/// 实测：同一张 384px 图 AVIF q90 要 118–166 ms，JPEG q82 只要 3–5 ms。
+///
+/// # Errors
+/// 读文件 / 解码 / 编码任一步失败（解不开的那类给占位图，不算失败）。
+pub fn render_source(abs_path: &Path, size: SizeClass) -> Result<render::Thumb> {
+    let rendered = render::render_file_with_edit_and_lut(
+        abs_path,
+        size,
+        None,
+        None,
+        None,
+        render::EncodeFormat::Jpeg,
+    )?;
+    match rendered {
+        Some(thumb) => Ok(thumb),
+        // 不可解码（相机不支持 / 文件损坏）：占位图兜底 —— 与队列那条路同一取舍
+        None => {
+            let file_name = abs_path
+                .file_name()
+                .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+            render::placeholder(kind::kind_of_file(&file_name), size)
+        }
+    }
+}
+
 /// 同 [`render_now`]，但**可以带编辑栈**（M3-W3：缩略图反映编辑结果）。
 ///
 /// 带编辑时缓存签名变成 `<基础签名>+e<指纹>`（`render::render_sig_with_edit`）——
@@ -374,8 +406,16 @@ pub fn render_now_with_edit_and_lut(
     lens: Option<&crate::develop::lens::LensCorrection>,
     lut: Option<&crate::develop::lut::Lut>,
 ) -> Result<Vec<u8>> {
+    // 带编辑栈 = 库内口径（编辑只存在于库里）
     render_cached_with(thumbs, abs_path, size, now_ms, edit, || {
-        render::render_file_with_edit_and_lut(abs_path, size, edit, lens, lut)
+        render::render_file_with_edit_and_lut(
+            abs_path,
+            size,
+            edit,
+            lens,
+            lut,
+            render::EncodeFormat::Avif,
+        )
     })
 }
 
@@ -388,10 +428,23 @@ pub fn render_cached_with(
     edit: Option<&crate::store::develop::DevelopStack>,
     render: impl FnOnce() -> Result<Option<render::Thumb>>,
 ) -> Result<Vec<u8>> {
+    let sig = render::render_sig_with_edit(size, edit);
+    render_cached_with_signature(thumbs, abs_path, size, now_ms, &sig, render)
+}
+
+/// 同 [`render_cached_with`]，但**签名由调用方给**（库内 / 库外两套签名的分派点）。
+fn render_cached_with_signature(
+    thumbs: &ThumbsDb,
+    abs_path: &Path,
+    size: SizeClass,
+    now_ms: i64,
+    sig: &str,
+    render: impl FnOnce() -> Result<Option<render::Thumb>>,
+) -> Result<Vec<u8>> {
     // 源文件还没入库，「身份字符串」就是**绝对路径**（见 `cache_key_for`）
     let material = abs_path.to_string_lossy().into_owned();
     let key = cache_key_for(abs_path, &material);
-    let sig = render::render_sig_with_edit(size, edit);
+    let sig = sig.to_string();
 
     // 读池的连接是 `query_only`，且闭包要 `Send + 'static` —— 键与签名都得自己持一份
     let read_key = key.clone();
@@ -795,7 +848,7 @@ mod tests {
         produce(
             &conn,
             &root,
-            &ThumbJob::new("r", "a.jpg", SizeClass::Strip),
+            &ThumbJob::new("r", "a.jpg", SizeClass::Screen),
             T0,
         )
         .unwrap();
@@ -805,7 +858,7 @@ mod tests {
             s.by_size,
             vec![
                 ("grid".to_string(), 1, s.by_size[0].2),
-                ("strip".to_string(), 1, s.by_size[1].2)
+                ("screen".to_string(), 1, s.by_size[1].2)
             ]
             .into_iter()
             .map(|(a, b, _)| (a, b, 0))
@@ -1017,7 +1070,7 @@ mod tests {
         let thumbs = thumbs_db(dir.path());
         let mut stack = crate::store::develop::DevelopStack::default();
         stack.params.insert("exposure".into(), 1.0);
-        for size in [SizeClass::Grid, SizeClass::Strip] {
+        for size in [SizeClass::Grid, SizeClass::Screen] {
             let first = render_cached_with(&thumbs, &raw, size, T0, Some(&stack), || {
                 render::render_preview_or_else(Some(&preview), size, || panic!("RAW decoded"))
             }).unwrap();
@@ -1075,6 +1128,47 @@ mod tests {
     }
 
     #[test]
+    fn render_source_is_jpeg_and_touches_no_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        let photo = dir.path().join("源");
+        write_jpeg(&photo.join("a.jpg"), 600, 400);
+        let thumbs = thumbs_db(dir.path());
+        let abs = photo.join("a.jpg");
+
+        // 库外（import / 来源目录）口径：**JPEG**（崔总 2026-10-11；AGENTS.md §2.24）——
+        // 来源目录导入完就走，画质与体积可以让步，只要快。
+        let source = render_source(&abs, SizeClass::Grid).unwrap();
+        assert!(render::is_valid_jpeg(&source.data), "来源目录的小图必须是 JPEG");
+
+        // ⚠️ 关键：**一行缓存都不许写**（崔总 2026-10-11 定：库外只在进程内存里）。
+        // 以前这里会落盘，临时目录换个内容那些行就永远读不回来，只剩无限增长。
+        assert_eq!(
+            thumbs.read(cache::stats).unwrap().entries,
+            0,
+            "库外渲染不许碰磁盘缓存"
+        );
+
+        // 库内口径：同一张图仍是 AVIF，照旧落盘
+        let library = render_now(&thumbs, &abs, SizeClass::Grid, T0).unwrap();
+        assert!(render::is_valid_avif(&library), "库内的小图仍是 AVIF");
+        assert_eq!(thumbs.read(cache::stats).unwrap().entries, 1);
+    }
+
+    #[test]
+    fn source_and_library_signatures_are_distinct_but_share_the_pipeline_version() {
+        for size in [SizeClass::Grid, SizeClass::Screen] {
+            let library = render::render_sig(size);
+            let source = render::render_sig_source(size);
+            assert_ne!(library, source, "{size:?}：两套口径不能共用一个签名");
+            assert!(source.starts_with("jpeg-q82-"), "{source} 应当是 JPEG 口径");
+            // 版本字面量必须同步（与 `render_sig_changes_with_pipeline_version` 同一纪律）
+            let version = format!("v{}", render::PIPELINE_VERSION);
+            assert!(library.contains(&version), "{library} 缺 {version}");
+            assert!(source.contains(&version), "{source} 缺 {version}");
+        }
+    }
+
+    #[test]
     fn render_now_uses_a_placeholder_for_undecodable_files() {
         let dir = tempfile::tempdir().unwrap();
         let photo = dir.path().join("源");
@@ -1083,7 +1177,7 @@ mod tests {
         std::fs::write(photo.join("a.rw2"), vec![1u8, 2, 3, 4, 5]).unwrap();
         let thumbs = thumbs_db(dir.path());
 
-        let bytes = render_now(&thumbs, &photo.join("a.rw2"), SizeClass::Strip, T0).unwrap();
+        let bytes = render_now(&thumbs, &photo.join("a.rw2"), SizeClass::Grid, T0).unwrap();
         assert!(render::is_valid_avif(&bytes), "占位图也是合法 AVIF");
         assert_eq!(
             thumbs.read(cache::stats).unwrap().entries,
@@ -1124,7 +1218,7 @@ mod tests {
         let thumbs = thumbs_db(dir.path());
 
         render_now(&thumbs, &file, SizeClass::Grid, T0).unwrap();
-        render_now(&thumbs, &file, SizeClass::Strip, T0).unwrap();
+        render_now(&thumbs, &file, SizeClass::Screen, T0).unwrap();
         assert_eq!(
             thumbs.read(cache::stats).unwrap().entries,
             2,

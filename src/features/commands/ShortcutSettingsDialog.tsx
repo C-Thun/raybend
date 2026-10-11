@@ -24,7 +24,7 @@ import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "so
 
 import { Button } from "../../components/ui/Button.tsx";
 import { Dialog } from "../../components/ui/Dialog.tsx";
-import { blockingIssues, detectConflicts, rawChordOf, type CommandSpec } from "../../lib/commands.ts";
+import { blockingIssues, detectConflicts, rawChordOf, scenesOf, type CommandSpec } from "../../lib/commands.ts";
 import { chordFromEvent, formatChord, parseChord } from "../../lib/key-chords.ts";
 import {
   clearShortcutOverride,
@@ -35,7 +35,7 @@ import {
   setShortcutOverride,
   type ImportProblem,
 } from "../../lib/shortcuts.ts";
-import { issueText, problemText } from "./messages.ts";
+import { issueText, problemText, sceneText } from "./messages.ts";
 import { t, type MessageKey } from "../../i18n/index.ts";
 
 export interface ShortcutSettingsDialogProps {
@@ -177,6 +177,8 @@ export function ShortcutSettingsPanel(props: ShortcutSettingsDialogProps) {
           >
             <h2 class="text-fs-3 leading-6 font-semibold text-fg-1">{t("shortcuts.title")}</h2>
             <p class="text-[13px] text-fg-2">{t("shortcuts.description")}</p>
+            {/* 场景说明（`specs/command-scenes.md` §2.2）：它是操作说明，不是重复注解 */}
+            <p class="text-fs-0 text-fg-3">{t("shortcuts.scenesNote")}</p>
 
             {/* 阻断冲突：红字逐条列出来（保存会被禁用） */}
             <Show when={blocking().length > 0}>
@@ -213,8 +215,14 @@ export function ShortcutSettingsPanel(props: ShortcutSettingsDialogProps) {
                           data-shortcut-row={command.id}
                           class="flex items-center gap-2 rounded-ui px-1 py-1 hover:bg-state-hover"
                         >
-                          <span class="min-w-0 flex-1 truncate text-fs-2 text-fg-1">
+                          <span class="min-w-0 flex-1 overflow-hidden whitespace-nowrap fade-x-end text-fs-2 text-fg-1">
                             {t(command.titleKey as MessageKey)}
+                          </span>
+                          <span
+                            data-shortcut-scene={command.id}
+                            class="w-24 shrink-0 text-center text-fs-0 text-fg-3"
+                          >
+                            {sceneText(scenesOf(command))}
                           </span>
                           <button
                             type="button"

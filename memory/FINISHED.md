@@ -471,6 +471,27 @@ Tabler 是唯一同时满足「数量大 + 描边/填充成对 + MIT + 有 Solid
 2026-09-27 M4-W6/W7 开发收口：证据与限制见 `implementations/2026-09-27_m4-finalization.md`，真机验收仍独立。
 
 
+## 2026-10-11 import 出图提速：库外只在内存 + 缩图收敛为两档 ◐（真机体感待崔总验收）
+
+三件事一次做完（崔总 2026-10-11 定，规格 `specs/thumbnail-tiers-and-import-memory.md`）：
+
+1. **库外（import / 未入库）的图只在进程内存里**：`thumbnail::memory::SourceThumbs` 两档 ——
+   缩略图 384（256 MB 字节上限）、**真身** 10 张；键含**文件身份**（大小 + mtime），换卡 / 覆盖保存自动不命中。
+   `_sources/thumbs.db` 从此**只服务库内文件**（以前库外也往里写：临时目录的行永远读不回来，用户机器上攒了 148 MB 死行）。
+2. **缩图收敛成两档**：`thumb` 384（网格 tiles、**所有**胶片带、定稿卡片共用）+ `preview` 1920；
+   **192（`strip`）整档取消**（少算一遍缩图、少一类签名与缓存行）。import **没有 1920 这一档** ——
+   看图的占位直接用 384 顶着，真身随后补（位图 = 原文件本身、RAW = 完整解码）。
+3. **重采样去掉 Lanczos3 精修**（只留盒式快降）；JPEG 的 DCT 缩放解码（libjpeg-turbo）登记 `memory/FUTURE.md` G25。
+
+Rust 1517 项、前端 1289 项测试与全部静态门通过。实测（Windows release，306 张的目录）：
+单张冷渲染 JPG **206.8 ms**（原 448–494）、RAW 120.9 ms；**内存命中 0.24–0.27 ms**；`--source` 跑完
+**磁盘一行都没写**。真实观感（JPEG q82 + 盒式重采样、胶片带用 384 缩小显示、import 看图过渡）待崔总真机确认。
+
+证据：`implementations/2026-10-11_import-tiles-diagnosis.md`（诊断与实测）、
+`implementations/2026-10-11_import-tiles-jpeg-and-window-queue.md`（第一轮：口径分派 + 窗口优先队列）、
+`implementations/2026-10-11_import-source-memory-only.md`（第二轮：只在内存 + 两档缩图）。
+
+
 ## 2026-10-04 色彩管理首版：开发与 Agent 冒烟收口
 
 在既有 W1–W5 首版上完成 Astra 的复杂显示 ICC、精确输入加速、60MP 有界后台上传与 RAW 新旧标度重放，再完成 Sol 的实际呈现状态/系统事实分离、共享组件、本地化和设置刷新接线。最终 Rust 1562 项、前端 1207 项通过；中英组件22项与UI冒烟、Windows主程序/worker配套构建核对通过。统一实机验收尚未完成，不自动升级旧照片，复杂CLUT打样/完整HDR/打印仍按既有范围留后续。证据与验收路径：`implementations/2026-10-04_color-management-ready-for-acceptance.md`；核心数值与性能：`implementations/2026-10-04_color-management-core-hardening.md`。Pencil内存稿仍须崔总手动保存，代码未提交。

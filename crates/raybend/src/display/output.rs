@@ -12,13 +12,18 @@ use std::path::Path;
 pub type Rgb16Image = image::ImageBuffer<image::Rgb<u16>, Vec<u16>>;
 
 /// Strict full-size source. RAW never falls back to an embedded JPEG or a placeholder.
-pub fn decode_linear_source(path: &Path) -> Result<(LinearImage, Option<f32>)> {
+pub fn decode_linear_source(
+    path: &Path,
+    priority: crate::raw::DecodePriority,
+) -> Result<(LinearImage, Option<f32>)> {
     use crate::media::kind::{MediaKind, kind_of_file};
     if path
         .file_name()
         .is_some_and(|name| kind_of_file(&name.to_string_lossy()) == MediaKind::Raw)
     {
         let request = crate::raw::DecodeRequest::full(path).with_preview(false);
+        // 优先级闸门包住最外层解码（§4.4）：批量排满时编辑器 / 前台仍能插队。
+        let _permit = crate::raw::worker::acquire(priority);
         let mut decoded = crate::raw::worker::shared()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -151,6 +156,7 @@ pub fn decode_working_source(
     path: &Path,
     color: &crate::color::PhotoColorState,
     mut profile: impl FnMut(&crate::color::ProfileId, crate::color::icc::IccRole) -> Result<crate::color::icc::RgbIcc>,
+    priority: crate::raw::DecodePriority,
 ) -> Result<(crate::color::working::WorkingImage, Option<f32>)> {
     use crate::color::SourceColor;
     color.validate_frozen().map_err(|e| Error::Unsupported(e.into()))?;
@@ -160,6 +166,8 @@ pub fn decode_working_source(
     if raw {
         let SourceColor::RawCameraMatrix { matrix_id } = &color.source else { return Err(unsupported()); };
         let request = crate::raw::DecodeRequest::full(path).with_preview(false).with_camera_matrix(matrix_id.clone());
+        // 优先级闸门包住最外层解码（§4.4）
+        let _permit = crate::raw::worker::acquire(priority);
         let decoded = crate::raw::worker::shared().lock().unwrap_or_else(|e| e.into_inner())
             .decode_working(&request).map_err(|e| Error::Unsupported(format!("RAW 高精度解码失败：{e}")))?;
         if decoded.source != crate::raw::backend::PixelSource::Decoded || &decoded.camera_matrix_id != matrix_id {

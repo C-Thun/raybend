@@ -112,6 +112,15 @@ export interface TilesSource {
   commitTileStep(): void;
   thumb(path: string): ThumbEntry;
   cancelThumb?(path: string): void;
+  /**
+   * 把**窗口内这一段**（显示序下标，`[from, to)`）的缩略图提到队首。
+   *
+   * 网格在滚动 / 缩放停下来（防抖 300ms）后调它；虚拟列表只渲染可见项，
+   * 所以“该出图的”仍由格子发请求，这里只负责**顺序**（崔总 2026-10-11）。
+   * 没队列的数据源不实现。
+   */
+  prioritizeVisible?(from: number, to: number): void;
   tileNatural?: boolean;
-  requestThumb(path: string): void;
+  /** `priority` = 现在就要（可见格子）；队列会把它放到队首 */
+  requestThumb(path: string, priority?: boolean): void;
 }

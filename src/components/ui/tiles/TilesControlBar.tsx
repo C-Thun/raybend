@@ -181,10 +181,10 @@ export function TilesControlBar(input: TilesControlBarComponentProps) {
             {(dir) => <PathText path={dir()} maxLength={40} class="max-w-64 shrink-0" />}
           </Show>
           <Show when={leadText() !== ""}>
-            <span class="truncate">{leadText()}</span>
+            <span class="min-w-0 overflow-hidden whitespace-nowrap fade-x-end fade-x-end-fit">{leadText()}</span>
           </Show>
           <Show when={(props.fileName ?? "") !== ""}>
-            <span class="truncate text-fg-2">· {props.fileName}</span>
+            <span class="min-w-0 overflow-hidden whitespace-nowrap fade-x-end fade-x-end-fit text-fg-2">· {props.fileName}</span>
           </Show>
         </span>
       </Show>
@@ -389,7 +389,7 @@ export function PhotoStatusBar(props: { info: TilesViewingInfo; class?: string; 
       </Show>
       <Show when={!props.compare}>
       {/* 左：文件名 + 紧挨着的锁徽标 */}
-      <span class="min-w-0 shrink truncate text-fs-1 text-fg-1" title={info().fileName ?? ""}>
+      <span class="min-w-0 shrink overflow-hidden whitespace-nowrap fade-x-end fade-x-end-fit text-fs-1 text-fg-1" title={info().fileName ?? ""}>
         {info().fileName ?? ""}
       </span>
       <Show when={info().lockLevel > 0}>

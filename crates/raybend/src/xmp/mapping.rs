@@ -155,9 +155,7 @@ mod tests {
             stack.params.insert((*key).to_string(), *value);
         }
         for (channel, points) in curves {
-            stack
-                .curves
-                .insert((*channel).to_string(), points.clone());
+            stack.curves.insert((*channel).to_string(), points.clone());
         }
         stack
     }
@@ -208,7 +206,11 @@ mod tests {
     fn unmapped_params_do_not_leak() {
         let block = crs_block(
             &stack(
-                &[("temperature", 5500.0), ("dynamicContrast", 40.0), ("vignette", -20.0)],
+                &[
+                    ("temperature", 5500.0),
+                    ("dynamicContrast", 40.0),
+                    ("vignette", -20.0),
+                ],
                 &[],
             ),
             None,
@@ -220,10 +222,7 @@ mod tests {
     #[test]
     fn curves_map_to_255_space_with_endpoints() {
         let block = crs_block(
-            &stack(
-                &[],
-                &[("rgb", vec![[0.0, 0.0], [0.5, 0.6], [1.0, 1.0]])],
-            ),
+            &stack(&[], &[("rgb", vec![[0.0, 0.0], [0.5, 0.6], [1.0, 1.0]])]),
             None,
         );
         assert_eq!(

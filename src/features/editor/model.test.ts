@@ -311,10 +311,30 @@ test("洞口提示：没选中照片就不提示（那是水印的活）", () =>
   assert.equal(editorViewportNotice(noticeInput({ hasPhoto: false })), null);
 });
 
-test("洞口提示：画出来了就什么都不显示", () => {
+test("洞口提示：真帧上屏了才什么都不显示（decode=ready + paintedPath）", () => {
+  assert.equal(
+    editorViewportNotice(
+      noticeInput({ state: { ...noticeInput().state!, paintedPath: "/a.jpg", decode: "ready" } }),
+    ),
+    null,
+  );
+  // 真帧算完但还没画上（中途重启一帧）→ 仍然提示，不许出现「既无图也无提示」
+  assert.equal(
+    editorViewportNotice(noticeInput({ state: { ...noticeInput().state!, decode: "ready" } })),
+    "loading",
+  );
+});
+
+/*
+ * 崔总 2026-10-11：过渡帧（软化的画面）只是「别让我看空白」，
+ * **不是载入结束** —— 提示要一直挂在它上面，直到真帧到位。
+ * 以前只看 `paintedPath`：过渡帧一画上提示就撤，于是「载入中 → 塞预览 → 原图」三步。
+ */
+test("洞口提示：过渡帧（有画面但 decode 仍在 loading）仍然提示", () => {
   assert.equal(
     editorViewportNotice(noticeInput({ state: { ...noticeInput().state!, paintedPath: "/a.jpg" } })),
-    null,
+    "loading",
+    "有画面 ≠ 载入完：提示要叠在过渡帧上，直到真帧把 decode 置 ready",
   );
 });
 
@@ -348,11 +368,15 @@ test("洞口提示：初始化 / 载入中分得开", () => {
   assert.equal(editorViewportNotice(notBound), "init");
   const loading = noticeInput();
   assert.equal(editorViewportNotice(loading), "loading");
-  // 解码好了但还没画（等渲染线程那一帧）：也当初始化那一档，别报错
+  /*
+   * 解码好了但还没画（等渲染线程那一帧）：**报「正在载入照片…」**。
+   * 以前这里是「初始化」那一档（2026-10-11 改）：对用户来说这一段等的就是照片，
+   * 而且口径是「提示结束 ⇔ 原图已在屏上」—— 没画上就不算结束。
+   */
   const decodedNotPainted = noticeInput({
     state: { ...noticeInput().state!, decode: "ready" },
   });
-  assert.equal(editorViewportNotice(decodedNotPainted), "init");
+  assert.equal(editorViewportNotice(decodedNotPainted), "loading");
 });
 
 

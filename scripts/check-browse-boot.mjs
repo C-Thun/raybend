@@ -173,6 +173,9 @@ const FIXTURES = {
     entries: DEMO_ITEMS.map((i) => ({ id: i.id, relPath: i.relPath, takenAt: i.takenAt })),
   },
   browse_facets: { ratings: [], colors: [], likes: [], locks: [] },
+  // 回收站概况：左侧栏一挂载就会读它；夹具不测回收站，但**必须**回一份，
+  // 否则返回 undefined → `store.recycleSummary().count` 在渲染里炸开（未处理异常）。
+  browse_recycle_summary: { count: 0, bytes: 0 },
   browse_markings: [],
   // 标签词典（3.2）：搜索与创建各给一份
   tag_list: [
@@ -182,7 +185,7 @@ const FIXTURES = {
   tag_ensure: { id: 9, name: "新标签", useCount: 0 },
   // 删除：一次把三条路径都造出来（删到 1 张、被锁挡住 1 张、失败 1 张）
   browse_delete: {
-    deleted: 1,
+    moved: 1,
     blockedLocked: [9],
     alreadyGone: 0,
     failed: [{ path: "C:/Photos/demo/photos/2026-08-15/MY006.JPG", reason: "文件被占用" }],
@@ -871,7 +874,8 @@ try {
   const clearGate = await send("Runtime.evaluate", {
     expression: `(() => {
       const buttons = [...document.querySelectorAll("button")];
-      const clear = buttons.find((b) => b.textContent && b.textContent.includes("清空旗标"));
+      // 2026-10-11：工具条图标去文字 → 按无障碍名找（悬停提示同一句话）
+      const clear = buttons.find((b) => b.getAttribute("aria-label") === "清空旗标");
       if (!clear) return { found: false };
       if (clear.disabled) return { found: true, disabled: true };
       clear.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -922,9 +926,10 @@ try {
    */
   const openTags = await send("Runtime.evaluate", {
     expression: `(() => {
-      const button = [...document.querySelectorAll("button")].find(
-        (b) => b.textContent && b.textContent.trim() === "标签",
-      );
+      const button = [...document.querySelectorAll("button")].find((b) => {
+        const label = b.getAttribute("aria-label");
+        return label === "标签" || label === "设置标签";
+      });
       if (!button) return { found: false };
       if (button.disabled) return { found: true, disabled: true };
       button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -1082,8 +1087,13 @@ try {
    */
   const undoUi = await send("Runtime.evaluate", {
     expression: `(() => {
+      // 工具条图标在 2026-10-11 去了文字（纯图标 + 悬停提示）——
+      // 所以用**无障碍名**找，文案仍是「撤销：<动作名>」那套。
+      const bar = document.querySelector("[data-toolsbar]");
       const find = (text) =>
-        [...document.querySelectorAll("button")].find((b) => b.textContent?.trim() === text);
+        [...(bar?.querySelectorAll("button") ?? [])].find((b) =>
+          (b.getAttribute("aria-label") ?? "").startsWith(text),
+        );
       const undo = find("撤销");
       const redo = find("重做");
       return {
@@ -4792,9 +4802,26 @@ try {
   });
   await sleep(300);
 
-  // 快捷键设置：改一条键 → 保存 → 新键生效、旧键解绑
+  /*
+   * 快捷键编辑：改一条键 → 保存 → 新键生效、旧键解绑。
+   *
+   * `Ctrl+,` 现在开的是**统一设置**（`settings.open`；`help.shortcuts` 的默认键早已转给它，
+   * 见 `catalog.ts` 的注释 —— 崔总 2026-10-11 确认现状正确），所以先按键、再切到
+   * 设置里的「快捷键」那一页；命令面板里的快捷键命令本来就是直接落这一页。
+   */
   await cdpKey({ key: ",", code: "Comma", vk: 188, modifiers: MOD_CTRL, text: "," });
   await sleep(450);
+  const toShortcuts = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const entry = [...document.querySelectorAll("[role=dialog] nav button")]
+        .find((b) => b.textContent.trim() === "快捷键" || b.textContent.trim() === "Keyboard shortcuts");
+      entry?.click();
+      return entry !== undefined;
+    })()`,
+    returnByValue: true,
+  });
+  if (toShortcuts.result?.value !== true) problems.push("统一设置里找不到「快捷键」那一页");
+  await sleep(300);
   const settingsOpen = await send("Runtime.evaluate", {
     expression: `(() => {
       const dialog = document.querySelector('[data-shortcuts-dialog="open"]');
@@ -5174,7 +5201,8 @@ try {
   });
   const runtimeErrorList = runtimeErrors.result?.value ?? [];
   if (runtimeErrorList.length > 0) {
-    problems.push(`页面有 ${runtimeErrorList.length} 条未处理异常，例如：` + String(runtimeErrorList[0]).split("\n")[0]);
+    // 诊断：连栈一起打出来（只打一行会不知道是哪一处在读什么）
+    problems.push(`页面有 ${runtimeErrorList.length} 条未处理异常，例如：` + String(runtimeErrorList[0]).split("\n").slice(0, 6).join(" | "));
   }
 } finally {
   chrome.kill("SIGKILL");

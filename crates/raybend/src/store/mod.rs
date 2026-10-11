@@ -25,6 +25,7 @@
 //! | [`fts`] | 全文检索索引的维护（派生索引，过期即在查询前重建） |
 //! | [`tags`] | 标签：全局词典（`app.db`）+ 每库关联（`catalog.db`），`memory/FUNCTION-BROWSE.md` §7 |
 //! | [`assets`] | 资产与文件记录的读写：差分计划的落库、配对、缺失标记 |
+//! | [`sizes`] | 显示尺寸的唯一解析口（变体 → 展示尺寸；只读库，不读盘、不渲染） |
 //! | [`backfill`] | 老库的元数据回填（`taken_at IS NULL` 的资产重读 EXIF） |
 //! | [`recent`] | 最近导入过的目录（`app.db`）——「最近」列表的存取与裁剪 |
 //! | [`volumes`] | 可选来源的枚列（Windows 驱动器 / Linux 挂载点）+ 来源类型判定 |
@@ -36,7 +37,7 @@ pub mod availability;
 pub mod backfill;
 pub mod base_curve;
 pub mod db;
-pub mod delete;
+pub mod recycle;
 pub mod develop;
 pub mod file_id;
 pub mod flags;
@@ -60,6 +61,7 @@ pub mod rebuild;
 pub mod recent;
 pub mod repository;
 pub mod session;
+pub mod sizes;
 pub mod tags;
 pub mod time;
 pub mod volumes;

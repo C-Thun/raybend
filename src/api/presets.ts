@@ -33,6 +33,18 @@ export async function deletePresetDirectory(id: string): Promise<PresetLibrary |
   return call<PresetLibrary>("preset_delete_directory", { id });
 }
 
+/**
+ * 重命名目录（非空目录也能改）。`default` 由后端拒绝；重名 / 非法名报错返回。
+ * 与非空目录「删除换成改名」的前端口径配套（崔总 2026-10-10）。
+ */
+export async function renamePresetDirectory(
+  id: string,
+  name: string,
+): Promise<PresetLibrary | null> {
+  if (!isTauriRuntime()) return null;
+  return call<PresetLibrary>("preset_rename_directory", { id, name });
+}
+
 export async function createPreset(
   id: string,
   directoryId: string,

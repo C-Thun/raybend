@@ -17,6 +17,8 @@ target/
 
 # 开发
 prompts/
+# Tauri sidecar：由构建流程从 cargo 产物拷进来（崩溃助手 raybend-crashpad），不进 Git
+src-tauri/binaries/
 # 人工执行的发布脚本临时配置与清单
 .release/
 

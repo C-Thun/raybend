@@ -34,6 +34,12 @@ export interface BrowseActions {
   filmVisible: () => boolean;
   /** 打开删除确认（工作区负责确认 → 回收站 → 失败清单） */
   requestDelete: () => void;
+  /** 还原回收站里选中的照片（工作区负责执行与结果提示）。 */
+  requestRestoreRecycle: () => void;
+  /** 打开「清空回收站」强确认（工作区负责确认 → 永久删除 → 结果）。 */
+  requestEmptyRecycle: () => void;
+  /** 真删选中的照片（**永久**；回收站内拖到粉碎卡时由工作区自己调，槽里也给一个入口）。 */
+  requestPurgeRecycle: () => void;
   /** 网格里移动「当前那张」（←/→）：与点击同一套选择语义 */
   moveFocus: (delta: -1 | 1) => void;
   /** 进看图（从锚点那张开始；多选时自然进对比） */

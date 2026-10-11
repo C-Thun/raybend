@@ -626,7 +626,7 @@ fn refresh_directory_counts<R: Runtime>(app: &AppHandle<R>, original: &std::sync
         })
     })();
     if let Err(error) = result {
-        eprintln!("[raybend] 写目录计数失败：{error}");
+        log::warn!("[raybend] 写目录计数失败：{error}");
     }
 }
 
@@ -648,7 +648,7 @@ fn consume_source_images<R: Runtime>(app: &AppHandle<R>, catalog: &std::sync::Ar
         let claimed = app.state::<DbState>().with(app, |db| db.write(move |conn|
             worker::claim_next_for(conn, time::now_millis(), Some(&repository))).map_err(|e| e.to_string()));
         let job = match claimed { Ok(Some(job)) => job, Ok(None) => break,
-            Err(error) => { eprintln!("[thumb] 认领失败：{error}"); break; } };
+            Err(error) => { log::warn!("[thumb] 认领失败：{error}"); break; } };
         let result = (|| {
             catalog.ensure_current().map_err(|e| e.to_string())?;
             let relative = std::path::Path::new(&job.job.rel_path);
@@ -668,19 +668,20 @@ fn consume_source_images<R: Runtime>(app: &AppHandle<R>, catalog: &std::sync::Ar
                 // RAW-only 导入只备小图。真实 RAW 原始快照推迟到明确进入编辑。
                 let db = app.state::<crate::thumbs::SourcesThumbs>().get(
                     &crate::thumbs::sources_cache_dir(app)?, time::now_millis())?;
-                for size in [SizeClass::Grid, SizeClass::Strip] {
-                    raybend::thumbnail::render_now(&db, &path, size, time::now_millis()).map_err(|e| e.to_string())?;
-                }
+                // 只备缩略图那一档（384）—— 192 那一档 2026-10-11 取消，
+                // 胶片带直接用 384（`specs/thumbnail-tiers-and-import-memory.md`）
+                raybend::thumbnail::render_now(&db, &path, SizeClass::Grid, time::now_millis())
+                    .map_err(|e| e.to_string())?;
             }
             catalog.ensure_current().map_err(|e| e.to_string())
         })();
         let id = job.job_id;
         let failure = result.err();
-        if let Some(error) = &failure { eprintln!("[thumb] 导入派生图生成失败：{error}"); }
+        if let Some(error) = &failure { log::warn!("[thumb] 导入派生图生成失败：{error}"); }
         let settled = app.state::<DbState>().with(app, |db| db.write(move |conn| {
             if let Some(error) = failure { worker::fail(conn, id, &error, time::now_millis()).map(|_| ()) }
             else { worker::complete(conn, id, time::now_millis()) }
         }).map_err(|e| e.to_string()));
-        if let Err(error) = settled { eprintln!("[thumb] 写生成结果失败：{error}"); break; }
+        if let Err(error) = settled { log::warn!("[thumb] 写生成结果失败：{error}"); break; }
     }
 }

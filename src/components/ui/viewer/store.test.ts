@@ -274,6 +274,20 @@ test("show/goTo：元数据尺寸随当前照片切换，不沿用上一张", ()
   assert.deepEqual(store.state().natural, { width: 3000, height: 4000 });
 });
 
+test("naturalKnown：库里有尺寸才算已知（onLoad 的固有尺寸只能算兑底）", () => {
+  const fake = fakeDeps();
+  const store = createViewerStore(fake.deps);
+  assert.equal(store.state().naturalKnown, false, "空态：未知");
+  store.show([{ ...PHOTOS[0]!, natural: { width: 5208, height: 3904 } }], 0);
+  assert.equal(store.state().naturalKnown, true, "照片自带尺寸 = 已知");
+  // 没有尺寸的照片：沿用上一张的尺寸当**估计**（行为不变），但不算「已知」
+  store.show([PHOTOS[1]!], 0);
+  assert.deepEqual(store.state().natural, { width: 5208, height: 3904 });
+  assert.equal(store.state().naturalKnown, false, "估计不是已知：onLoad 还要用固有尺寸兜底");
+  store.setNatural({ width: 1920, height: 1440 });
+  assert.equal(store.state().naturalKnown, true, "量到固有尺寸之后就是已知");
+});
+
 test("next/prev：到头就停住，不循环（循环会让人以为后面还有）", () => {
   const fake = fakeDeps();
   const store = createViewerStore(fake.deps);
@@ -471,6 +485,34 @@ test("URL 所有权：被挤出缓存的 URL 若单图还在显示则不回收�
   assert.equal(new Set(revoked).size, revoked.length, "同一个 URL 不能回收两次");
 });
 
+test("没有 loadScreen（import 口径）：384 小图占位 → 真身上屏，全程不碰 1920", async () => {
+  const calls: string[] = [];
+  let counter = 0;
+  const store = createViewerStore({
+    // import 只给这两口（崔总 2026-10-11）：1920 那一档在 import 里不存在
+    loadThumb: async (path: string): Promise<Uint8Array> => {
+      calls.push(`thumb:${path}`);
+      return new Uint8Array([1]);
+    },
+    loadFull: async (path: string): Promise<Uint8Array> => {
+      calls.push(`full:${path}`);
+      return new Uint8Array([9]);
+    },
+    makeUrl: () => `blob:${(counter += 1)}`,
+    revokeUrl: () => {},
+  });
+  store.setViewport({ width: 800, height: 600 });
+  store.show(PHOTOS, 0);
+  await flush();
+  await flush();
+
+  assert.ok(calls.includes("thumb:/a.jpg"), "占位走 384 小图");
+  assert.ok(calls.includes("full:/a.jpg"), "终态取真身");
+  assert.equal(store.imageStatus(), "ready", "小图先上屏，状态就是 ready");
+  assert.equal(store.sharp(), true, "真身到位后 sharp 立起来（缩放读数才有意义）");
+  assert.ok(!calls.some((call) => call.startsWith("screen:")), "一次都不该请求 1920");
+});
+
 test("loadFor：预载写下的 URL 会被单图路径直接吃掉（不再走第二次 IPC）", async () => {
   let screenCalls = 0;
   const fake = fakeDeps();
@@ -605,6 +647,7 @@ function viewerState(overrides: Partial<ViewerState> = {}): ViewerState {
     fit: false,
     viewport: { width: 500, height: 250 },
     natural: { width: 1000, height: 500 },
+    naturalKnown: true,
     ...overrides,
   };
 }
@@ -735,4 +778,98 @@ test('display draft keys reload one asset without altering its file path; unchan
  viewer.syncPhotos([{...PHOTOS[0]!,imageKey:'draft-1'}]);assert.equal(viewer.state().zoom,zoom);assert.deepEqual(calls,['draft-1']);
  viewer.syncPhotos([{...PHOTOS[0]!,imageKey:'draft-2'}]);await new Promise(resolve=>setImmediate(resolve));assert.deepEqual(calls,['draft-1','draft-2']);assert.equal(viewer.current()?.path,'/a.jpg');
  viewer.syncPhotos([]);assert(!viewer.state().active);viewer.close();
+});
+
+/*
+ * **两段载入**（崔总 2026-10-11 口径：'正在载入原图' 结束 = 原图已在屏上）——
+ * 这一组钉住三件事：占位先上屏、真身原地替换（几何一个都不动）、失败退得干净。
+ */
+function stagedDeps(options: { fullFails?: boolean } = {}) {
+  let release: (() => void) | null = null;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const revoked: string[] = [];
+  return {
+    revoked,
+    releaseFull: () => release?.(),
+    deps: {
+      loadThumb: async (): Promise<Uint8Array> => new Uint8Array([1]),
+      loadScreen: async (): Promise<Uint8Array> => new Uint8Array([2]),
+      loadFull: async (): Promise<Uint8Array | null> => {
+        await gate;
+        return options.fullFails === true ? null : new Uint8Array([3]);
+      },
+      // URL 直接用首字节，断言里看得清是「占位(2)」还是「真身(3)」
+      makeUrl: (bytes: Uint8Array): string => `blob:${bytes[0]}`,
+      revokeUrl: (url: string): void => {
+        revoked.push(url);
+      },
+    },
+  };
+}
+
+test("两段载入：占位先上屏（提示在），真身到位后原地替换且几何一个都不动", async () => {
+  const staged = stagedDeps();
+  const store = createViewerStore(staged.deps);
+  const photo: ViewerPhoto = {
+    id: "a",
+    path: "/a.jpg",
+    fileName: "a.jpg",
+    natural: { width: 4000, height: 3000 },
+  };
+  store.setViewport({ width: 800, height: 600 });
+  store.show([photo], 0);
+  await flush();
+  await flush();
+
+  assert.equal(store.imageUrl(), "blob:2", "先看到的是占位（screen 档）");
+  assert.equal(store.fullPending(), true, "真身还在路上 → 角标该亮");
+  assert.equal(store.sharp(), false, "还不是真身 ⇒ 缩放读数不报百分比");
+  const before = store.state();
+
+  staged.releaseFull();
+  await flush();
+  await flush();
+
+  assert.equal(store.imageUrl(), "blob:3", "真身到位 → 替换占位");
+  assert.equal(store.fullPending(), false, "提示落下");
+  assert.equal(store.sharp(), true);
+  assert.equal(store.state().zoom, before.zoom, "倍率不动（是同一张照片，不该重算适配）");
+  assert.deepEqual(store.state().natural, before.natural, "尺寸口径不动");
+  assert.equal(store.state().fit, before.fit);
+  assert.equal(store.state().pan.x, before.pan.x);
+  store.close();
+});
+
+test("两段载入：真身取不到时占位留着、提示落下（下次进入再试）", async () => {
+  const staged = stagedDeps({ fullFails: true });
+  const store = createViewerStore(staged.deps);
+  store.setViewport({ width: 800, height: 600 });
+  store.show([{ id: "a", path: "/a.jpg", fileName: "a.jpg" }], 0);
+  await flush();
+  await flush();
+  staged.releaseFull();
+  await flush();
+  await flush();
+
+  assert.equal(store.imageUrl(), "blob:2", "退到占位：它至少是一张真图，不是空白");
+  assert.equal(store.fullPending(), false);
+  assert.equal(store.sharp(), false, "没到真身就不谎报「已是原图」");
+  store.close();
+});
+
+test("两段载入：没给 loadFull 的口（导入侧等）→ 行为完全同旧（不做第二段）", async () => {
+  const store = createViewerStore({
+    loadScreen: async (): Promise<Uint8Array> => new Uint8Array([2]),
+    makeUrl: (bytes: Uint8Array): string => `blob:${bytes[0]}`,
+  });
+  store.setViewport({ width: 800, height: 600 });
+  store.show([{ id: "a", path: "/a.jpg", fileName: "a.jpg" }], 0);
+  await flush();
+
+  assert.equal(store.imageUrl(), "blob:2");
+  assert.equal(store.fullPending(), false, "没有第二段，就不该一直挂着「正在载入原图」");
+  assert.equal(store.sharp(), true, "旧行为：屏幕档到了就报数");
+  store.close();
 });

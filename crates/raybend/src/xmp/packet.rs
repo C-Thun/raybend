@@ -72,7 +72,7 @@ impl SidecarContent {
     /// 「编辑了才有」的判据：有可表达内容才写文件（规格 §6.1）。
     #[must_use]
     pub fn has_content(&self) -> bool {
-        self.latest.as_ref().is_some_and(latest_has_content)
+        self.latest.as_ref().is_some_and(latest_is_recorded)
             || !self.profiles.is_empty()
             || !self.metadata.is_empty()
             || self
@@ -82,7 +82,9 @@ impl SidecarContent {
     }
 }
 
-fn latest_has_content(stack: &DevelopStack) -> bool {
+/// `rb:latest` 的写出判据（`specs/xmp-sidecar.md` §4）：空 RAW 栈省略；空 SOOC 栈仍保留编辑源。
+#[must_use]
+pub fn latest_is_recorded(stack: &DevelopStack) -> bool {
     stack.source_base != EditBase::Raw || !stack.is_empty()
 }
 
@@ -142,6 +144,30 @@ pub fn rdf_alt(value: &str) -> String {
 }
 
 /// —— 构建 ——
+///
+/// `crs:` 块的序列化片段：`(属性串, 元素串)` —— 标量走属性、曲线走元素。
+///
+/// 抽取出来是因为**巡检工具按同一形状核对盘上文件**（`specs/xmp-audit-tool.md`）；
+/// 序列化形状只允许这一份实现（`AGENTS.md` §2.12）。
+#[must_use]
+pub fn crs_fragments(block: &crate::xmp::mapping::CrsBlock) -> (String, String) {
+    let mut attrs = String::new();
+    let mut elements = String::new();
+    for (name, value) in &block.attrs {
+        attrs.push_str(&format!(" crs:{name}=\"{}\"", escape(value)));
+    }
+    for (name, points) in &block.curves {
+        let items = points
+            .iter()
+            .map(|(x, y)| format!("<rdf:li>{x}, {y}</rdf:li>"))
+            .collect::<String>();
+        elements.push_str(&format!(
+            "<crs:{name}><rdf:Seq>{items}</rdf:Seq></crs:{name}>"
+        ));
+    }
+    (attrs, elements)
+}
+
 /// 组装整份 sidecar XML。`None` = 没有可表达内容（调用方据此删文件）。
 ///
 /// `tool`：`xmp:CreatorTool`（如 `RayBend 0.1.1`）；`now_ms`：`xmp:MetadataDate`（UTC）。
@@ -217,25 +243,16 @@ pub fn compose(content: &SidecarContent, now_ms: i64, tool: &str) -> Option<Stri
     {
         let block = crate::xmp::mapping::crs_block(latest, content.raw_file_name.as_deref());
         if block.has_any {
-            for (name, value) in &block.attrs {
-                attrs.push_str(&format!(" crs:{name}=\"{}\"", escape(value)));
-            }
-            for (name, points) in &block.curves {
-                let items = points
-                    .iter()
-                    .map(|(x, y)| format!("<rdf:li>{x}, {y}</rdf:li>"))
-                    .collect::<String>();
-                elements.push_str(&format!(
-                    "<crs:{name}><rdf:Seq>{items}</rdf:Seq></crs:{name}>"
-                ));
-            }
+            let (block_attrs, block_elements) = crs_fragments(&block);
+            attrs.push_str(&block_attrs);
+            elements.push_str(&block_elements);
         }
     }
 
     if let Some(latest) = content
         .latest
         .as_ref()
-        .filter(|stack| latest_has_content(stack))
+        .filter(|stack| latest_is_recorded(stack))
         .and_then(canonical_payload)
     {
         elements.push_str(&format!(

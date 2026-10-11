@@ -96,7 +96,13 @@ export interface PhotoGridProps {
   onInteract?: () => void;
   /** 点了第几格（显示序下标）：浏览侧据此记住「当前那张」，键盘导航从它接着走 */
   onFocusIndex?: (index: number) => void;
-  onPhotoDragStart?: (id: string, event: DragEvent) => void;
+  /**
+   * tile 上按下了（**pointer**，不是 HTML5 drag）：拖动统一走 `lib/pointer-drag`
+   * （`specs/library-recycle-bin.md` §5），由调用方决定拖起来干什么。
+   */
+  onPhotoPointerDown?: (id: string, event: PointerEvent) => void;
+  /** 正在被拖的照片（半透明表现）；`null`/未传 = 没有拖动。 */
+  draggingIds?: () => ReadonlySet<string>;
   /**
    * 打开看图的**前一刻**回调（浏览侧要在这里复位四态 `chrome`、收起库列表）。
    * 网格自己不认识那些概念 —— 它只负责「打开前打个招呼」。
@@ -139,6 +145,14 @@ export interface PhotoGridProps {
 function asColorLabel(value: string | null | undefined): ColorLabel | null {
   return isColorLabel(value) ? value : null;
 }
+
+/**
+ * 窗口优先排队的防抖窗口（毫秒，崔总 2026-10-11 定的口径）。
+ *
+ * 滚动 / 缩放的每一帧都会改变可见区间 —— 帧内重排只会搞乱正在飞的请求；
+ * 停下来 0.3s 之后再排，体感上就是「停手后先出眼前这几张」。
+ */
+const VIEWPORT_PRIORITY_DEBOUNCE_MS = 300;
 
 export function PhotoGrid(props: PhotoGridProps): JSX.Element {
   const source = props.source;
@@ -265,6 +279,7 @@ export function PhotoGrid(props: PhotoGridProps): JSX.Element {
   const ownViewer = props.viewer === undefined
     ? createViewerStore({
         loadScreen: (path) => getViewImage(path, "screen"),
+        loadFull: (path) => getViewImage(path, "full"),
         loadThumb: (path) => getThumbBytes(path, "grid"),
       })
     : null;
@@ -495,6 +510,26 @@ export function PhotoGrid(props: PhotoGridProps): JSX.Element {
    * * 两侧都要补读**可见那些**的真实宽高 —— 老库的 `width/height` 可能是 NULL，
    *   而 tile 的比例、看图的拖动边界都要它。
    */
+  /*
+   * ── 窗口优先的排队（崔总 2026-10-11 定）──
+   *
+   * 虚拟化知道「现在看的是哪几行」，但滚动 / 缩放过程中这个区间每帧都在变 ——
+   * 每帧重排队首既没意义，又会把正在飞的请求搞乱。所以**停下来再排**：
+   * 0.3s 防抖之后，把当前窗口内还没处理的缩略图提到队首。
+   */
+  let priorityTimer: ReturnType<typeof setTimeout> | undefined;
+  const scheduleViewportPriority = (from: number, to: number): void => {
+    if (source.prioritizeVisible === undefined) return;
+    if (priorityTimer !== undefined) clearTimeout(priorityTimer);
+    priorityTimer = setTimeout(() => {
+      priorityTimer = undefined;
+      source.prioritizeVisible?.(from, to);
+    }, VIEWPORT_PRIORITY_DEBOUNCE_MS);
+  };
+  onCleanup(() => {
+    if (priorityTimer !== undefined) clearTimeout(priorityTimer);
+  });
+
   function onVisibleRange(start: number, end: number): void {
     rememberReference(start);
     const list = rows();
@@ -510,6 +545,7 @@ export function PhotoGrid(props: PhotoGridProps): JSX.Element {
     }
     if (!Number.isFinite(from)) return;
     void source.ensureRange?.(from, to + 1);
+    scheduleViewportPriority(from, to + 1);
     const entries: { id: string; path: string }[] = [];
     for (let slot = from; slot <= to; slot += 1) {
       const item = source.itemAt(slot);
@@ -572,7 +608,8 @@ export function PhotoGrid(props: PhotoGridProps): JSX.Element {
                 cellOverlay={props.cellOverlay}
                 {...(props.onInteract === undefined ? {} : { onInteract: props.onInteract })}
                 {...(props.onFocusIndex === undefined ? {} : { onFocusIndex: props.onFocusIndex })}
-                onPhotoDragStart={props.onPhotoDragStart}
+                onPhotoPointerDown={props.onPhotoPointerDown}
+                draggingIds={props.draggingIds}
               />
             ) : (
               <GroupHeader source={source} row={row} locale={groupingLocale()} />
@@ -607,7 +644,8 @@ function TileRow(props: {
   cellOverlay?: (item: GridItem) => JSX.Element;
   onInteract?: () => void;
   onFocusIndex?: (index: number) => void;
-  onPhotoDragStart?: (id: string, event: DragEvent) => void;
+  onPhotoPointerDown?: (id: string, event: PointerEvent) => void;
+  draggingIds?: () => ReadonlySet<string>;
 }): JSX.Element {
   return (
     <div
@@ -632,7 +670,8 @@ function TileRow(props: {
             cellOverlay={props.cellOverlay}
             {...(props.onInteract === undefined ? {} : { onInteract: props.onInteract })}
             {...(props.onFocusIndex === undefined ? {} : { onFocusIndex: props.onFocusIndex })}
-            onPhotoDragStart={props.onPhotoDragStart}
+            onPhotoPointerDown={props.onPhotoPointerDown}
+            draggingIds={props.draggingIds}
           />
         )}
       </For>
@@ -651,7 +690,8 @@ function TileCell(props: {
   cellOverlay?: (item: GridItem) => JSX.Element;
   onInteract?: () => void;
   onFocusIndex?: (index: number) => void;
-  onPhotoDragStart?: (id: string, event: DragEvent) => void;
+  onPhotoPointerDown?: (id: string, event: PointerEvent) => void;
+  draggingIds?: () => ReadonlySet<string>;
 }): JSX.Element {
   // 被渲染（= 可见）时才请求 —— 虚拟化保证了这一点
   let requestedPath: string | null = null;
@@ -667,7 +707,7 @@ function TileCell(props: {
         if (requestedPath !== null && requestedPath !== (item.imageKey ?? item.path))
           props.source.cancelThumb?.(requestedPath);
         requestedPath = item.imageKey ?? item.path;
-        props.source.requestThumb(item.imageKey ?? item.path);
+        props.source.requestThumb(requestedPath, true);
       }
     }
   });
@@ -698,17 +738,22 @@ function TileCell(props: {
   return (
     <div
       data-grid-item={id()}
-      class={props.listMode?"relative flex w-full items-center gap-3":"relative"}
-      // **正方外框**：边长就是尺寸档。行高恒定才有得拖（见 Tile 的模块注释）
+      class={[
+        props.listMode ? "relative flex w-full items-center gap-3" : "relative",
+        // 拖动中的项半透明（`specs/library-recycle-bin.md` §5.1 的「被拖项抬高/半透明」）
+        props.draggingIds?.().has(id()) ? "opacity-40" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
       style={{ width: props.listMode?"100%":"var(--tile-cell)", height: `${tileSize() + (props.listMode?0:props.source.extraHeight?.(props.slot, tileSize()) ?? 0)}px` }}
+      onPointerDown={(event) => {
+        const current = item();
+        if (current) props.onPhotoPointerDown?.(current.id, event);
+      }}
     >
       <div class="relative shrink-0" style={{height: "var(--tile-cell)",width:"var(--tile-cell)"}}>
       <Tile
-        draggable={props.onPhotoDragStart !== undefined && item() !== null}
-        onDragStart={(event) => {
-          const current = item();
-          if (current) props.onPhotoDragStart?.(current.id, event);
-        }}
+        // HTML5 拖拽去掉：拖动统一走 pointer（`specs/library-recycle-bin.md` §5 —— 两套并存会互抢手势）
         keyboardActivate={props.commandEnter !== true}
         info={props.source.infoMode()}
         /*
@@ -816,7 +861,7 @@ function GroupHeader(props: {
       </Show>
       <span
         class={[
-          "truncate",
+          "min-w-0 overflow-hidden whitespace-nowrap fade-x-end fade-x-end-fit",
           isDay() ? "text-fs-2 font-semibold text-fg-1" : "text-fs-1 text-fg-2",
         ].join(" ")}
       >

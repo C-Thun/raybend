@@ -35,7 +35,12 @@ function sourceWith(byTime: () => boolean, overrides: Partial<BrowseStore> = {})
   return browseSource({
     store,
     root: () => "C:/Photos/demo",
-    thumbs: { get: () => ({ status: "idle", url: null }), request: () => {}, clear: () => {} },
+    thumbs: {
+      get: () => ({ status: "idle", url: null }),
+      request: () => {},
+      clear: () => {},
+      prioritize: () => {},
+    },
     tileStep: () => 4,
     setTileStep: () => {},
     commitTileStep: () => {},

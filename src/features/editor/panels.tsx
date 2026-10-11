@@ -63,10 +63,11 @@ import {
   type ParamGroup,
 } from "./params.ts";
 import { PendingNote } from "./parts.tsx";
+import { selectAllOnMount } from "../../lib/dom-focus.ts";
 import { PresetPanel } from "./preset-panel.tsx";
 import { SliderRow } from "./SliderRow.tsx";
 import type { EditorStore } from "./store.ts";
-import type { PresetCreateOutcome, PresetGroup } from "../../lib/presets.ts";
+import type { PresetGroup, PresetMutationOutcome } from "../../lib/presets.ts";
 import { CurveEditor } from "./CurveEditor.tsx";
 import { EditorZoomControl } from "./zoom-control.tsx";
 
@@ -158,8 +159,9 @@ export interface EditorPanelsProps {
   /** 手动输入的目标缩放（`1.0` = 100%） */
   onZoomTo?: (zoom: number) => void;
   /* ── 预设（specs/editor-presets.md）：持久化动作由工作区注入 ── */
-  onCreatePresetDirectory: (name: string) => Promise<PresetCreateOutcome>;
-  onCreatePreset: (name: string, directoryId: string, groups: readonly PresetGroup[]) => Promise<PresetCreateOutcome>;
+  onCreatePresetDirectory: (name: string) => Promise<PresetMutationOutcome>;
+  onCreatePreset: (name: string, directoryId: string, groups: readonly PresetGroup[]) => Promise<PresetMutationOutcome>;
+  onRenamePresetDirectory: (id: string, name: string) => Promise<PresetMutationOutcome>;
   onDeletePreset: (id: string) => Promise<void>;
   onDeletePresetDirectory: (id: string) => Promise<void>;
   onMovePresets: (ids: readonly string[], directoryId: string) => Promise<void>;
@@ -353,8 +355,12 @@ export function EditorPanels(props: EditorPanelsProps): JSX.Element {
          * 预设绝对定位填满同一格 —— 切页签高度不伸缩；预设树在容器里 flex 填充、
          * 内部滚动。审计 2026-10-04：此前两页签各挂各的、只有自然高度，
          * 预设多时整条右栏被撑长。
+         *
+         * 色彩管理页签**不属于这个容器**（内容跟在容器后面）：切到色彩时整格 `hidden`
+         * —— 否则曲线那份留位会原样空在色彩内容上方，就是「色彩面板上部一大块空白」
+         * （崔总 2026-10-10）。等高只管曲线 ↔ 预设两页签。
          */}
-        <div class="relative flex min-h-0 flex-col" data-editor-advanced-body>
+        <div class="relative flex min-h-0 flex-col" classList={{ hidden: curveTab() === "color" }} data-editor-advanced-body>
           <div classList={{ invisible: curveTab() !== "curve" }} data-editor-curve-slot>
             <CurveTab
               store={props.store}
@@ -375,6 +381,7 @@ export function EditorPanels(props: EditorPanelsProps): JSX.Element {
                 onConfirm={props.onConfirm}
                 createDirectory={props.onCreatePresetDirectory}
                 createPreset={props.onCreatePreset}
+                renameDirectory={props.onRenamePresetDirectory}
                 deletePreset={props.onDeletePreset}
                 deleteDirectory={props.onDeletePresetDirectory}
                 movePresets={props.onMovePresets}
@@ -548,7 +555,7 @@ function IssuesTab(props: { enabled: boolean; store: EditorStore; library: Issue
         <span class="flex min-w-0 flex-1 flex-col">
           <span class="fade-x-end block overflow-hidden whitespace-nowrap text-fs-2 leading-5 text-fg-1"
             title={pending().name}>{pending().name}</span>
-          <span class="block truncate text-fs-0 leading-5 text-fg-3">{pending().sourceBase.toUpperCase()} · {t("editor.issue.generating")}</span>
+          <span class="fade-x-end block overflow-hidden whitespace-nowrap text-fs-0 leading-5 text-fg-3">{pending().sourceBase.toUpperCase()} · {t("editor.issue.generating")}</span>
         </span>
       </div>}
     </Show>
@@ -563,12 +570,12 @@ function IssuesTab(props: { enabled: boolean; store: EditorStore; library: Issue
             右边那列图标于是能与两行一一对齐（崔总 2026-10-09），中间那片也因此更宽。
             第一行**不撑行宽**：宽度由这一列给足，超出部分右端渐隐（`.fade-x-end`，
             没超出时渐隐区是空白，看不出来）；整名仍可以在悬停提示里读到。
-            第二行宽度受这一列约束，超长才截断（带省略号）。
+            第二行宽度受这一列约束，同样右端渐隐（`.fade-x-end`；固定短语，只在极窄时才会碰到）。
           */}
           <span class="flex min-w-0 flex-1 flex-col">
             <span class="fade-x-end block overflow-hidden whitespace-nowrap text-fs-2 leading-5 text-fg-1"
               title={issue.name}>{issue.name}</span>
-            <span class="block truncate text-fs-0 leading-5 text-fg-3">{issue.sourceBase.toUpperCase()} · {formatDay(issue.createdAt)}</span>
+            <span class="block overflow-hidden whitespace-nowrap fade-x-end text-fs-0 leading-5 text-fg-3">{issue.sourceBase.toUpperCase()} · {formatDay(issue.createdAt)}</span>
           </span>
         </button>
         {/* 动作列：上=改名（对齐第一行）、下=删除（对齐第二行），与两行文字同高 */}
@@ -588,15 +595,43 @@ function IssuesTab(props: { enabled: boolean; store: EditorStore; library: Issue
 }
 
 function IssueThumb(props: { imageKey: string; thumbs: ThumbQueue }): JSX.Element {
+  /*
+   * **旧图留守**：键一变就 `Show` 掉会看到缩略图位闪一下（崔总 2026-10-10：
+   * 生成过程中面板在闪）——新图（或新 key 的缓存）就绪前，把上一张留在原位；
+   * 只有**换照片**（key 里的 repo/asset 变了）才清空：别的照片的旧图不能顶在格子里。
+   */
+  const [shown, setShown] = createSignal<{ url: string; approximate: boolean } | null>(null);
+  let identity: string | null = null;
+  const identityOf = (key: string): string | null => {
+    if (key === "") return null;
+    try {
+      const parsed = JSON.parse(key) as [string, number];
+      return `${parsed[0]}:${parsed[1]}`;
+    } catch {
+      return key; // 坏 key：整串当身份（换掉就清）
+    }
+  };
   createEffect(() => {
     const key = props.imageKey;
-    if (key !== "") props.thumbs.request(key);
+    if (key === "") return;
+    props.thumbs.request(key);
     onCleanup(() => props.thumbs.cancel(key));
   });
-  const thumb = () => props.thumbs.get(props.imageKey);
+  createEffect(() => {
+    const key = props.imageKey;
+    const next = identityOf(key);
+    if (next !== identity) {
+      identity = next;
+      setShown(null);
+    }
+    const entry = props.thumbs.get(key);
+    if (entry.url !== null) {
+      setShown({ url: entry.url, approximate: entry.approximate === true });
+    }
+  });
   return <span class="flex h-10 w-14 shrink-0 overflow-hidden rounded-ui bg-surface-bar">
-    <Show when={thumb().url}>{(src) => <img src={src()} alt="" class="h-full w-full object-cover"
-      classList={{ "photo-raw-approximate": thumb().approximate === true }} />}</Show>
+    <Show when={shown()}>{(value) => <img src={value().url} alt="" class="h-full w-full object-cover"
+      classList={{ "photo-raw-approximate": value().approximate }} />}</Show>
   </span>;
 }
 
@@ -897,7 +932,7 @@ function CurveTab(props: {
           </Show>
           <For each={props.baseCurveLibrary?.profiles ?? []}>{profile =>
             <div class="flex items-center gap-1 rounded-ui hover:bg-state-hover">
-              <button type="button" class="min-w-0 flex-1 truncate rounded-ui px-2 py-1.5 text-left text-fs-1 text-fg-1"
+              <button type="button" class="min-w-0 flex-1 overflow-hidden whitespace-nowrap fade-x-end rounded-ui px-2 py-1.5 text-left text-fs-1 text-fg-1"
                 disabled={!props.enabled || props.store.autoAdjusting()}
                 aria-pressed={props.store.baseCurveProfile() === profile.id}
                 onClick={() => { props.onSelectBaseCurve(profile.id); setBaseOpen(false); }}>
@@ -916,7 +951,7 @@ function CurveTab(props: {
           <Button variant="secondary" onClick={closeRename}>{t("common.cancel")}</Button>
           <Button variant="primary" disabled={renameBusy() || !validName() || !props.enabled} onClick={() => void rename()}>{t("common.save")}</Button>
         </>}>
-        <input type="text" value={renameName()} maxLength={160} autofocus
+        <input type="text" value={renameName()} maxLength={160} autofocus ref={selectAllOnMount}
           aria-label={t("editor.baseCurve.rename")} disabled={renameBusy()}
           class="h-9 w-full rounded-ui bg-surface-track px-2 text-fs-1 text-fg-1 outline-none"
           onInput={(event) => setRenameName(event.currentTarget.value)}
@@ -954,7 +989,7 @@ function CropBlock(props: { store: EditorStore; enabled: boolean; onConfirm?: ()
             <Button {...triggerProps()} variant="ghost" disabled={!props.enabled}
               aria-label={`${t("editor.crop.ratio")}: ${ratioLabelOf(ratioId(), t)}`}
               class="h-row-h w-full min-w-0 justify-between bg-surface-layer text-fg-1">
-              <span class="min-w-0 truncate">{ratioLabelOf(ratioId(), t)}</span>
+              <span class="min-w-0 overflow-hidden whitespace-nowrap fade-x-end fade-x-end-fit">{ratioLabelOf(ratioId(), t)}</span>
               <IconChevronDown size={14} aria-hidden="true" class="shrink-0 text-fg-2" />
             </Button>
           )}

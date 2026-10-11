@@ -44,6 +44,14 @@ export interface DialogProps {
    */
   scrim?: boolean;
   size?: "md" | "wide" | "settings";
+  /**
+   * 打开时的初始焦点元素。
+   *
+   * **确认类弹窗必须传**（崔总 2026-10-11）：不传时 Ark 把焦点给第一个可聚焦元素 ——
+   * 也就是右上角的关闭叉 —— 于是**回车等于关窗**，用户以为按了确认其实取消了。
+   * 口径：**回车 = 前进/确认，Esc = 关闭**。
+   */
+  initialFocusEl?: () => HTMLElement | null;
   class?: string;
 }
 
@@ -58,6 +66,7 @@ export function Dialog(props: DialogProps) {
     "closeLabel",
     "scrim",
     "size",
+    "initialFocusEl",
     "class",
   ]);
 
@@ -65,6 +74,7 @@ export function Dialog(props: DialogProps) {
     <ArkDialog.Root
       open={local.open}
       onOpenChange={(details) => local.onOpenChange?.(details.open)}
+      initialFocusEl={local.initialFocusEl}
       // 点遮罩（外点）与按 Esc 都会关窗：**关之前先把焦点摘掉**。
       // 否则焦点一直留在触发按钮上，WebView2 会把它当键盘焦点画一圈（`lib/dom-focus.ts` 有完整根因）。
       // 顺序不能反 —— 反了会看着圈闪一下。
@@ -166,12 +176,15 @@ export interface ConfirmDialogProps {
  * 而且在 `danger` 令牌定案前（`design/main.md` §7 待决项）也不该有红色按钮。
  */
 export function ConfirmDialog(props: ConfirmDialogProps) {
+  // 「确定」按钮的 ref：打开时焦点落它（**回车 = 确认**，Esc = 关闭）—— 见 `DialogProps.initialFocusEl`
+  let confirmEl: HTMLButtonElement | undefined;
   return (
     <Dialog
       open={props.open}
       onOpenChange={(open) => {
         if (!open) props.onCancel();
       }}
+      initialFocusEl={() => confirmEl ?? null}
       title={props.title}
       /*
        * 「二级确认」用**透明遮罩**（人类 2026-09-19）：一级窗口已经在压暗背景了，
@@ -183,7 +196,7 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
           <Button variant="secondary" onClick={props.onCancel}>
             {props.cancelLabel ?? t("common.cancel")}
           </Button>
-          <Button variant="primary" onClick={props.onConfirm}>
+          <Button variant="primary" ref={(el) => { confirmEl = el; }} onClick={props.onConfirm}>
             {props.confirmLabel ?? t("common.confirm")}
           </Button>
         </>

@@ -26,6 +26,17 @@ import { formatChord, isReservedChord, parseChord, type Chord } from "./key-chor
 /** 命令的作用域（见文件头的表） */
 export type CommandScope = "global" | "tiles" | "viewer";
 
+/**
+ * 命令的**场景**（`specs/command-scenes.md`）：顶部工作流（flow）的四档。
+ *
+ * 冲突判定 = **场景相交 ∧ 作用域相交**：同一键位在不同场景各自生效是**合法**的
+ * （browse 的删除 vs export 的移出队列就是一对）——“一个键位只能绑一条命令”是旧口径。
+ */
+export type CommandScene = "import" | "browse" | "edit" | "export";
+
+/** 四个场景全上（外壳类命令：设置 / 帮助 / 窗口 / flow 切换…）。 */
+export const ALL_SCENES: readonly CommandScene[] = ["import", "browse", "edit", "export"];
+
 /** 命令分组（命令面板的分节、菜单之外的分组） */
 export type CommandGroup =
   | "file"
@@ -56,6 +67,13 @@ export interface CommandSpec {
    */
   menu?: CommandMenu;
   scope: CommandScope;
+  /**
+   * 这条命令在哪些场景里成立（静态声明；运行时仍由 `when()` 精确判定）。
+   *
+   * `catalog.ts` 的 `spec()` 会把缺省值按 id 前缀推断并填上（外壳类 = 全场景）——
+   * **有默认键位的命令必须显式写**（`spec()` 当场报错，见 `specs/command-scenes.md` §1.1）。
+   */
+  scenes?: readonly CommandScene[];
   /** 默认键位串（`Mod+K` / `P` / `Delete` …）。不填 = 默认不绑键 */
   defaultKey?: string;
   /**
@@ -112,6 +130,17 @@ export interface BindingIssue {
   /** 显示用键位（格式化后的） */
   chord: string;
   commandIds: readonly string[];
+}
+
+/** 一条命令的场景（缺省 = 全场景；`catalog.ts` 的 `spec()` 会显式填上）。 */
+export function scenesOf(command: CommandSpec): readonly CommandScene[] {
+  return command.scenes ?? ALL_SCENES;
+}
+
+/** 两条命令的场景会不会同时成立（冲突判定的第一半）。 */
+export function scenesOverlap(a: CommandSpec, b: CommandSpec): boolean {
+  const mine = scenesOf(a);
+  return scenesOf(b).some((scene) => mine.includes(scene));
 }
 
 /** 两个作用域会不会同时成立 */
@@ -240,11 +269,11 @@ export function detectConflicts(
 
   for (const { text, commands: same } of byChord.values()) {
     if (same.length < 2) continue;
-    // 两两看作用域：只要有一对相交，这条键就是真冲突
+    // 两两看：**场景相交且作用域相交**才是真冲突（`specs/command-scenes.md` §1.2）
     let overlapping = false;
     for (let i = 0; i < same.length && !overlapping; i += 1) {
       for (let j = i + 1; j < same.length; j += 1) {
-        if (scopeOverlaps(same[i].scope, same[j].scope)) {
+        if (scenesOverlap(same[i], same[j]) && scopeOverlaps(same[i].scope, same[j].scope)) {
           overlapping = true;
           break;
         }

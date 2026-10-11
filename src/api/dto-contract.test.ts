@@ -33,7 +33,10 @@ import type {
   BrowseTimeline,
   BrowseWindow,
   DeleteFailure,
-  DeleteResult,
+  RecycleResult,
+  RestoreResult,
+  PurgeResult,
+  RecycleSummaryView,
   DirEmptyView,
   EditorRenderState,
   EditorViewportState,
@@ -71,7 +74,6 @@ import type {
   SourceItem,
   SourceScan,
   ThumbCacheStats,
-  TimeEntry,
   TimelineEntry,
   Volume,
 } from "./types.ts";
@@ -124,6 +126,9 @@ const PHOTO_META_KEYS = [
   "height",
   "orientation",
   "relative",
+  "takenAtMs",
+  "takenAtOffsetMin",
+  "takenAtSource",
   "width",
 ] as const satisfies readonly (keyof PhotoMeta)[];
 const DIR_ENTRY_KEYS = ["hasChildren", "name", "path"] as const satisfies readonly (keyof DirEntry)[];
@@ -145,12 +150,6 @@ const SOURCE_SCAN_KEYS = [
   "root",
   "skipped",
 ] as const satisfies readonly (keyof SourceScan)[];
-const TIME_ENTRY_KEYS = [
-  "path",
-  "takenAtMs",
-  "takenAtOffsetMin",
-  "takenAtSource",
-] as const satisfies readonly (keyof TimeEntry)[];
 const PHOTO_COUNT_KEYS = [
   "photos",
   "skipped",
@@ -320,12 +319,18 @@ const ASSET_ITEM_KEYS = [
   "id",
   "isRaw",
   "iso",
+  "latestHeight",
+  "latestSourceBase",
+  "latestWidth",
   "lens",
   "likeState",
   "lockLevel",
   "missing",
   "orientation",
   "rating",
+  "rawHeight",
+  "rawWidth",
+  "recycledFrom",
   "relPath",
   "sizeBytes",
   "takenAt",
@@ -354,12 +359,22 @@ const MARK_RESULT_KEYS = [
   "undoLabel",
 ] as const satisfies readonly (keyof MarkResult)[];
 const DELETE_FAILURE_KEYS = ["path", "reason"] as const satisfies readonly (keyof DeleteFailure)[];
-const DELETE_RESULT_KEYS = [
+const RECYCLE_RESULT_KEYS = [
   "alreadyGone",
   "blockedLocked",
-  "deleted",
   "failed",
-] as const satisfies readonly (keyof DeleteResult)[];
+  "moved",
+] as const satisfies readonly (keyof RecycleResult)[];
+const RESTORE_RESULT_KEYS = [
+  "failed",
+  "renamed",
+  "restored",
+] as const satisfies readonly (keyof RestoreResult)[];
+const PURGE_RESULT_KEYS = ["failed", "purged"] as const satisfies readonly (keyof PurgeResult)[];
+const RECYCLE_SUMMARY_VIEW_KEYS = [
+  "bytes",
+  "count",
+] as const satisfies readonly (keyof RecycleSummaryView)[];
 const REBUILD_REPORT_KEYS = [
   "imagesCount",
   "metadataFilled",
@@ -444,8 +459,6 @@ const EDITOR_RENDER_STATE_KEYS = [
   "restarts",
   "rotation",
   "surface",
-  "tier",
-  "wantedTier",
   "zoom",
 ] as const satisfies readonly (keyof EditorRenderState)[];
 const DISPLAY_PRESENTATION_KEYS = ["diagnostic", "displayId", "generation", "kind", "outputSpace", "profilePath", "reason", "sdrWhiteNits"] as const satisfies readonly (keyof DisplayPresentation)[];
@@ -486,7 +499,6 @@ const KEY_TABLES = {
   MetaFile: checkKeys<MetaFile, typeof META_FILE_KEYS>(META_FILE_KEYS),
   PhotoMeta: checkKeys<PhotoMeta, typeof PHOTO_META_KEYS>(PHOTO_META_KEYS),
   SourceScan: checkKeys<SourceScan, typeof SOURCE_SCAN_KEYS>(SOURCE_SCAN_KEYS),
-  TimeEntry: checkKeys<TimeEntry, typeof TIME_ENTRY_KEYS>(TIME_ENTRY_KEYS),
   PhotoCount: checkKeys<PhotoCount, typeof PHOTO_COUNT_KEYS>(PHOTO_COUNT_KEYS),
   FileExif: checkKeys<FileExif, typeof FILE_EXIF_KEYS>(FILE_EXIF_KEYS),
   RepositoryConnection: checkKeys<RepositoryConnection, typeof REPOSITORY_CONNECTION_KEYS>(REPOSITORY_CONNECTION_KEYS),
@@ -538,7 +550,12 @@ const KEY_TABLES = {
   MarkingItem: checkKeys<MarkingItem, typeof MARKING_ITEM_KEYS>(MARKING_ITEM_KEYS),
   MarkResult: checkKeys<MarkResult, typeof MARK_RESULT_KEYS>(MARK_RESULT_KEYS),
   DeleteFailure: checkKeys<DeleteFailure, typeof DELETE_FAILURE_KEYS>(DELETE_FAILURE_KEYS),
-  DeleteResult: checkKeys<DeleteResult, typeof DELETE_RESULT_KEYS>(DELETE_RESULT_KEYS),
+  RecycleResult: checkKeys<RecycleResult, typeof RECYCLE_RESULT_KEYS>(RECYCLE_RESULT_KEYS),
+  RestoreResult: checkKeys<RestoreResult, typeof RESTORE_RESULT_KEYS>(RESTORE_RESULT_KEYS),
+  PurgeResult: checkKeys<PurgeResult, typeof PURGE_RESULT_KEYS>(PURGE_RESULT_KEYS),
+  RecycleSummaryView: checkKeys<RecycleSummaryView, typeof RECYCLE_SUMMARY_VIEW_KEYS>(
+    RECYCLE_SUMMARY_VIEW_KEYS,
+  ),
   FlagsView: checkKeys<FlagsView, typeof FLAGS_VIEW_KEYS>(FLAGS_VIEW_KEYS),
   RebuildProgress: checkKeys<RebuildProgress, typeof REBUILD_PROGRESS_KEYS>(
     REBUILD_PROGRESS_KEYS,

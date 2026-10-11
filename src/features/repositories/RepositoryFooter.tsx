@@ -68,7 +68,7 @@ export function RepositoryFooter(props: RepositoryFooterProps) {
     <div class={["flex flex-col gap-1.5", props.class ?? ""].join(" ")}>
       {/* 选中统计（放在按钮上面：按之前先看清代价）；排除数靠右，不抢主句 */}
       <p class="flex items-baseline gap-2 text-fs-1 text-fg-2">
-        <span class="min-w-0 flex-1 truncate">{summary()}</span>
+        <span class="min-w-0 flex-1 overflow-hidden whitespace-nowrap fade-x-end">{summary()}</span>
         <Show when={excludedCount() > 0}>
           <span class="shrink-0 text-fg-3 tnum">
             {t("import.excluded_count", { n: formatCount(excludedCount(), locale()) })}

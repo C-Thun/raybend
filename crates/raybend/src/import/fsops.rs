@@ -198,7 +198,7 @@ impl Scanner for FsScanner {
             return vec![SourceExtras::default(); files.len()];
         }
 
-        // 与 `media::source::read_times` 同一套办法：分块、`min(4, 核数)` 线程、结果保持顺序
+        // 与 `media::meta_cache::ensure_dir` 同一套办法：分块、有限线程、结果保持顺序
         let workers = std::thread::available_parallelism()
             .map_or(1, std::num::NonZeroUsize::get)
             .clamp(1, 4);
@@ -468,7 +468,7 @@ impl FileOps for RepoFs {
                 return Err(Error::Unsupported("来源文件在复制期间发生变化".into()));
             }
             self.check()?;
-            std::fs::File::open(&part)?.sync_all()?;
+            sync_before_publish(&part)?;
             crate::fs_atomic::publish_new(&part, &target)?;
             Ok(written)
         })();
@@ -510,6 +510,35 @@ impl FileOps for RepoFs {
 impl crate::import::plan::FsProbe for RepoFs {
     fn file_exists(&self, rel_path: &str) -> bool {
         self.exists(rel_path)
+    }
+}
+
+/// 把复制好的 `.part` 刷到盘上（发布之前）。
+///
+/// ❗**必须用带写权限的句柄**：Windows 的 `FlushFileBuffers` 要求句柄持有 `GENERIC_WRITE`，
+/// 在只读句柄上调用只回 `os error 5（拒绝访问）` —— 而 `File::open` 给的正是只读句柄。
+/// 2026-10-12 事故：这一步用 `File::open(&part)?.sync_all()` 刷盘，于是**每个文件**都失败
+/// （306/306 条「IO 错误：拒绝访问」），导入一条都进不来。
+///
+/// 只读的**来源文件**还带一层连带：`std::fs::copy` 会把权限/属性一并复制到 `.part` 上
+/// （Windows 的只读属性、Unix 的写位），那样的 part 连写句柄都打不开。
+/// 库里的副本归库管，这里顺手把只读去掉 —— Windows 上只读文件连 `remove_file` 都报
+/// 同一个拒绝访问，真删/清空回收站也要绕开这颗雷。
+fn sync_before_publish(part: &Path) -> Result<()> {
+    let open_for_write = || std::fs::OpenOptions::new().write(true).open(part);
+    match open_for_write() {
+        Ok(file) => {
+            file.sync_all()?;
+            Ok(())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+            let mut permissions = std::fs::metadata(part)?.permissions();
+            permissions.set_readonly(false);
+            std::fs::set_permissions(part, permissions)?;
+            open_for_write()?.sync_all()?;
+            Ok(())
+        }
+        Err(error) => Err(error.into()),
     }
 }
 
@@ -1028,6 +1057,38 @@ mod tests {
             .filter(|n| n.contains("part"))
             .collect();
         assert!(leftovers.is_empty(), "不该留下 .part：{leftovers:?}");
+    }
+
+    /// 只读来源也要能导入：复制过来的 `.part` 带着只读位，写句柄打不开，
+    /// 得先把只读去掉再刷盘（见 `sync_before_publish`）。
+    ///
+    /// ❗这条要在 **Windows 上跑**才算数：Linux 的 `fsync` 在只读 fd 上也能成功，
+    /// 只读 part 的「打不开写句柄」在 Linux 上恰好被 `File::open` 绕过 ——
+    /// 真机语义（`FlushFileBuffers` 要 `GENERIC_WRITE`）只有 Windows 侧能验。
+    #[test]
+    fn repo_fs_copy_survives_a_readonly_source() {
+        let dir = tmp();
+        let source = write_source(dir.path(), "只读.tif", b"read only bytes");
+        let mut permissions = std::fs::metadata(&source).unwrap().permissions();
+        permissions.set_readonly(true);
+        std::fs::set_permissions(&source, permissions).unwrap();
+
+        let root = dir.path().join("repo");
+        let fs = RepoFs::new(&root);
+        fs.copy(&source, "photos/只读.tif")
+            .expect("只读来源也要导得进来");
+
+        let published = root.join("photos/只读.tif");
+        assert_eq!(std::fs::read(&published).unwrap(), b"read only bytes");
+        assert!(
+            !std::fs::metadata(&published)
+                .unwrap()
+                .permissions()
+                .readonly(),
+            "库里的副本去掉只读：否则 Windows 上连删都删不掉"
+        );
+        // 发布完不留 `.part`
+        assert!(!root.join("photos/.只读.tif.part").exists());
     }
 
     #[test]

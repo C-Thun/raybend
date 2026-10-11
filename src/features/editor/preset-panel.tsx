@@ -21,6 +21,7 @@ import {
   IconChevronDown,
   IconChevronRight,
   IconFolderPlus,
+  IconPencil,
   IconPlayerPlay,
   IconStack2,
 } from "@tabler/icons-solidjs";
@@ -28,8 +29,10 @@ import {
 import { Button } from "../../components/ui/Button.tsx";
 import { Dialog } from "../../components/ui/Dialog.tsx";
 import { EasyDestroyButton } from "../../components/ui/EasyDestroy.tsx";
+import { IconButton } from "../../components/ui/Button.tsx";
 import { Tooltip } from "../../components/ui/Tooltip.tsx";
 import { t, type MessageKey } from "../../i18n/index.ts";
+import { selectAllOnMount } from "../../lib/dom-focus.ts";
 import { trackPointerDrag } from "../../lib/pointer-drag.ts";
 import {
   DEFAULT_DIRECTORY_ID,
@@ -41,7 +44,7 @@ import {
   resolveCreateDirectory,
   snapshotGroups,
   validatePresetName,
-  type PresetCreateOutcome,
+  type PresetMutationOutcome,
   type PresetDirectory,
   type PresetGroup,
   type PresetNameError,
@@ -74,8 +77,9 @@ export interface PresetPanelProps {
   /** 应用 / 新建后落库（与 LUT 选择的 `onSelect → confirmEdit` 同一条路） */
   onConfirm?: () => void;
   applyPreset: (snapshot: PresetSnapshot) => Promise<void>;
-  createDirectory: (name: string) => Promise<PresetCreateOutcome>;
-  createPreset: (name: string, directoryId: string, groups: readonly PresetGroup[]) => Promise<PresetCreateOutcome>;
+  createDirectory: (name: string) => Promise<PresetMutationOutcome>;
+  createPreset: (name: string, directoryId: string, groups: readonly PresetGroup[]) => Promise<PresetMutationOutcome>;
+  renameDirectory: (id: string, name: string) => Promise<PresetMutationOutcome>;
   deletePreset: (id: string) => Promise<void>;
   deleteDirectory: (id: string) => Promise<void>;
   movePresets: (ids: readonly string[], directoryId: string) => Promise<void>;
@@ -87,6 +91,11 @@ export function PresetPanel(props: PresetPanelProps): JSX.Element {
   const [dirOpen, setDirOpen] = createSignal(false);
   const [dirDraft, setDirDraft] = createSignal("");
   const [dirError, setDirError] = createSignal<string | null>(null);
+
+  /* 重命名目录弹窗（默认目录不可改名，不会打开） */
+  const [renameDirTarget, setRenameDirTarget] = createSignal<PresetDirectory | null>(null);
+  const [renameDirDraft, setRenameDirDraft] = createSignal("");
+  const [renameDirError, setRenameDirError] = createSignal<string | null>(null);
 
   /* ── 新建预设弹窗 ─────────────────────────────────── */
   const [presetOpen, setPresetOpen] = createSignal(false);
@@ -173,6 +182,50 @@ export function PresetPanel(props: PresetPanelProps): JSX.Element {
   };
 
   /* ── 新建预设 ─────────────────────────────────────── */
+  /* ── 重命名目录 ───────────────────────────────── */
+  const openRenameDirectory = (directory: PresetDirectory): void => {
+    setRenameDirTarget(directory);
+    setRenameDirDraft(directory.name);
+    setRenameDirError(null);
+  };
+
+  const closeRenameDirectory = (): void => {
+    setRenameDirTarget(null);
+    setRenameDirDraft("");
+    setRenameDirError(null);
+  };
+
+  const submitRenameDirectory = async (): Promise<void> => {
+    const target = renameDirTarget();
+    if (busy() || target === null) return;
+    const name = renameDirDraft().trim();
+    const problem = validatePresetName(name, "directory");
+    if (problem !== null) {
+      setRenameDirError(nameErrorText(problem, "directory"));
+      return;
+    }
+    // 名字没变：不当成一次改名（也免得白跑一趟后端）
+    if (name === target.name) {
+      closeRenameDirectory();
+      return;
+    }
+    if (isDirectoryNameTaken(
+      name,
+      directories().filter((directory) => directory.id !== target.id),
+    )) {
+      setRenameDirError(t("editor.preset.dirExists"));
+      return;
+    }
+    setBusy(true);
+    try {
+      const outcome = await props.renameDirectory(target.id, name);
+      if (outcome.ok) closeRenameDirectory();
+      else setRenameDirError(outcome.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const submitPreset = async (): Promise<void> => {
     if (busy()) return;
     const name = presetDraft().trim();
@@ -293,18 +346,24 @@ export function PresetPanel(props: PresetPanelProps): JSX.Element {
       data-editor-preset-panel
       class={["flex min-h-0 flex-col", props.class ?? ""].filter(Boolean).join(" ")}
     >
-      {/* 工具行：应用（主色，选中单预设才可用）/ 新建目录 / 新建预设 */}
+      {/* 工具行：应用 / 新建目录 / 新建预设（三个同款 ghost 图标按钮） */}
       <div class="flex shrink-0 items-center gap-1 pb-1.5">
-        <Tooltip content={t("editor.preset.apply")}>
+        {/*
+         * 应用按钮**不做主色常亮**（崔总 2026-10-10：常亮会让人误以为“还有东西要确认”）。
+         * 禁用时按钮自己 `pointer-events-none`，所以 Tooltip 的触发器挂在外层 span 上，
+         * 那样悬停才收得到 —— 顺手把“为什么不能用”说清楚。
+         */}
+        <Tooltip content={canApply() ? t("editor.preset.apply") : t("editor.preset.applyDisabled")}>
           {(triggerProps) => (
-            <Button
-              {...triggerProps()}
-              variant="primary"
-              disabled={!canApply()}
-              aria-label={t("editor.preset.apply")}
-              icon={<IconPlayerPlay size={14} />}
-              onClick={applySelected}
-            />
+            <span {...triggerProps()} class="inline-flex">
+              <Button
+                variant="ghost"
+                disabled={!canApply()}
+                aria-label={t("editor.preset.apply")}
+                icon={<IconPlayerPlay size={14} />}
+                onClick={applySelected}
+              />
+            </span>
           )}
         </Tooltip>
         <Tooltip content={t("editor.preset.newDirectory")}>
@@ -383,26 +442,44 @@ export function PresetPanel(props: PresetPanelProps): JSX.Element {
                   </button>
                   <button
                     type="button"
-                    class="flex min-w-0 flex-1 items-center gap-1.5 rounded-ui text-left"
+                    class="flex min-w-0 flex-1 items-center rounded-ui text-left"
                     onClick={() => props.store.selectPresetDirectory(directory.id)}
                   >
-                    <span class="min-w-0 flex-1 truncate text-fs-2 text-fg-1">
+                    {/* 名称超长在右缘渐隐（不是省略号）：与全局收尾纪律一致 */}
+                    <span class="min-w-0 flex-1 overflow-hidden whitespace-nowrap fade-x-end text-fs-2 text-fg-1">
                       {dirLabel(directory)}
                     </span>
-                    <span class="shrink-0 text-fs-0 tabular-nums text-fg-3">
-                      {t("editor.preset.count").replace("{n}", String(entries().length))}
-                    </span>
                   </button>
-                  {/* 目录清空后才能删；默认目录永远不可删（specs §5.3） */}
-                  <Show when={directory.id !== DEFAULT_DIRECTORY_ID && entries().length === 0 && !dragging()}>
-                    <EasyDestroyButton
-                      class="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
-                      label={t("editor.preset.removeDir")}
-                      confirmTitle={t("editor.preset.removeDirTitle")}
-                      confirmMessage={t("editor.preset.removeDirConfirm").replace("{name}", dirLabel(directory))}
-                      onRemove={() => props.deleteDirectory(directory.id)}
-                    />
-                  </Show>
+                  {/*
+                   * 最右动作位**固定占宽**（崔总 2026-10-10）：默认目录不可删 / 不可改名，
+                   * 也照样留着空位 —— 各行按钮横坐标一致，目录之间不跳。
+                   * 空目录 = 删除；有预设 = 改名（默认目录两者都不显示）。
+                   */}
+                  <span class="flex size-remove-hit shrink-0 items-center justify-center">
+                    <Show when={!dragging() && directory.id !== DEFAULT_DIRECTORY_ID}>
+                      <Show
+                        when={entries().length === 0}
+                        fallback={
+                          <IconButton
+                            size="hit"
+                            class="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+                            label={t("editor.preset.renameDir")}
+                            onClick={() => openRenameDirectory(directory)}
+                          >
+                            <IconPencil size="var(--remove-icon)" aria-hidden="true" />
+                          </IconButton>
+                        }
+                      >
+                        <EasyDestroyButton
+                          class="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+                          label={t("editor.preset.removeDir")}
+                          confirmTitle={t("editor.preset.removeDirTitle")}
+                          confirmMessage={t("editor.preset.removeDirConfirm").replace("{name}", dirLabel(directory))}
+                          onRemove={() => props.deleteDirectory(directory.id)}
+                        />
+                      </Show>
+                    </Show>
+                  </span>
                 </div>
 
                 <Show when={expanded()}>
@@ -443,10 +520,17 @@ export function PresetPanel(props: PresetPanelProps): JSX.Element {
                                     }
                                     props.store.selectPreset(preset.id, event);
                                   }}
+                                  onDblClick={() => {
+                                    // 双击 = 直接应用这一条（崔总 2026-10-10）；与工具栏「应用」同一条路
+                                    // （都走 `props.applyPreset` → 落库 confirm）
+                                    if (props.enabled && !suppressDragClick) {
+                                      void props.applyPreset(preset.payload);
+                                    }
+                                  }}
                                   onPointerDown={(event) => startRowDrag(event, preset)}
                                 >
                                   <IconBookmark size={14} class="shrink-0 text-fg-2" aria-hidden="true" />
-                                  <span class="min-w-0 flex-1 truncate text-fs-2 text-fg-1">
+                                  <span class="min-w-0 flex-1 overflow-hidden whitespace-nowrap fade-x-end text-fs-2 text-fg-1">
                                     {preset.name}
                                   </span>
                                 </button>
@@ -545,7 +629,55 @@ export function PresetPanel(props: PresetPanelProps): JSX.Element {
         </Show>
       </Dialog>
 
-      {/* 新建预设：名称 + 大类 chips（默认全选；照导入 LUT 弹窗的 chip 语言） */}
+      {/* 重命名目录：与新建同形；打开就聚焦并**全选**原名（直接重打） */}
+      <Dialog
+        open={renameDirTarget() !== null}
+        onOpenChange={(open) => { if (!open) closeRenameDirectory(); }}
+        title={t("editor.preset.renameDirTitle")}
+        footer={
+          <>
+            <Button variant="secondary" onClick={closeRenameDirectory}>
+              {t("common.cancel")}
+            </Button>
+            <Button
+              variant="primary"
+              disabled={busy() || renameDirDraft().trim() === ""}
+              onClick={() => void submitRenameDirectory()}
+            >
+              {t("common.save")}
+            </Button>
+          </>
+        }
+      >
+        <label class="flex flex-col gap-1.5">
+          <span class="text-fs-2 text-fg-2">{t("editor.preset.dirName")}</span>
+          <input
+            data-preset-dir-rename-input
+            class="h-row-h rounded-ui bg-surface-track px-2 text-fs-2 text-fg-1 outline-none focus-visible:ring-1 focus-visible:ring-focus-ring"
+            placeholder={t("editor.preset.dirPlaceholder")}
+            value={renameDirDraft()}
+            autofocus
+            ref={selectAllOnMount}
+            onInput={(event) => {
+              setRenameDirDraft(event.currentTarget.value);
+              setRenameDirError(null);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.isComposing) {
+                event.preventDefault();
+                void submitRenameDirectory();
+              }
+            }}
+          />
+        </label>
+        <Show when={renameDirError()}>
+          <p data-preset-dir-rename-error class="mt-1.5 text-fs-0 text-danger">
+            {renameDirError()}
+          </p>
+        </Show>
+      </Dialog>
+
+      {/* 新建预设：名称 + 大类 chips（默认不含镜头 / 色彩管理；照导入 LUT 弹窗的 chip 语言） */}
       <Dialog
         open={presetOpen()}
         onOpenChange={setPresetOpen}

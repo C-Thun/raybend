@@ -18,10 +18,13 @@ import type {
   AssetItem,
   BrowseFacets,
   BrowseQuery,
-  DeleteResult,
   MarkAction,
   MarkResult,
   MarkingItem,
+  PurgeResult,
+  RecycleResult,
+  RecycleSummaryView,
+  RestoreResult,
   TimelineEntry,
 } from "../../api/types.ts";
 import { createBrowseStore, PAGE_SIZE, type BrowseApi, type BrowseStore } from "./store.ts";
@@ -58,11 +61,17 @@ function item(id: number, overrides: Partial<AssetItem> = {}): AssetItem {
     iso: null,
     width: 5184,
     height: 3888,
+    rawWidth: null,
+    rawHeight: null,
+    latestWidth: null,
+    latestHeight: null,
+    latestSourceBase: null,
     orientation: 1,
     sizeBytes: 1000,
     missing: false,
     issueCount: 0,
     edited: false,
+    recycledFrom: null,
     ...overrides,
   };
 }
@@ -76,17 +85,20 @@ const EMPTY_MARK: MarkResult = {
   canUndo: false,
   canRedo: false,
 };
-const EMPTY_DELETE: DeleteResult = {
-  deleted: 0,
+const EMPTY_RECYCLE: RecycleResult = {
+  moved: 0,
   blockedLocked: [],
   alreadyGone: 0,
   failed: [],
 };
+const EMPTY_RESTORE: RestoreResult = { restored: 0, renamed: 0, failed: [] };
+const EMPTY_PURGE: PurgeResult = { purged: 0, failed: [] };
+const EMPTY_RECYCLE_SUMMARY: RecycleSummaryView = { count: 0, bytes: 0 };
 
 /** 假后端：一个内存里的照片库 + 调用记录。 */
 function fakeApi(count: number) {
   const all = Array.from({ length: count }, (_, i) => item(i + 1));
-  const calls = { page: [] as number[], timeline: 0, facets: 0, mark: [] as MarkAction[] };
+  const calls = { page: [] as number[], queries: [] as BrowseQuery[], sync: [] as BrowseQuery[], timeline: 0, facets: 0, mark: [] as MarkAction[] };
   const marks = new Map<number, MarkingItem>();
   let flagState = { total: 0, picks: [] as number[], rejects: [] as number[] };
   /** 让测试能控制某个请求什么时候返回。 */
@@ -97,8 +109,9 @@ function fakeApi(count: number) {
     async tagList() {
       return [];
     },
-    async page(_query: BrowseQuery, offset: number, limit: number) {
+    async page(query: BrowseQuery, offset: number, limit: number) {
       calls.page.push(offset);
+      calls.queries.push(query);
       if (gates.length > 0) {
         await new Promise<void>((resolve) => gates.push(resolve));
       }
@@ -120,6 +133,10 @@ function fakeApi(count: number) {
     async facets(): Promise<BrowseFacets> {
       calls.facets += 1;
       return EMPTY_FACETS;
+    },
+    async syncScope(query: BrowseQuery) {
+      calls.sync.push(query);
+      return null;
     },
     async markings(_id: string, ids: readonly number[]): Promise<MarkingItem[]> {
       return ids.map(
@@ -156,8 +173,20 @@ function fakeApi(count: number) {
     async redo(): Promise<MarkResult> {
       return EMPTY_MARK;
     },
-    async remove(): Promise<DeleteResult> {
-      return EMPTY_DELETE;
+    async remove(): Promise<RecycleResult> {
+      return EMPTY_RECYCLE;
+    },
+    async recycleRestore() {
+      return EMPTY_RESTORE;
+    },
+    async recyclePurge() {
+      return EMPTY_PURGE;
+    },
+    async recycleEmpty() {
+      return EMPTY_PURGE;
+    },
+    async recycleSummary() {
+      return EMPTY_RECYCLE_SUMMARY;
     },
     async flagsGet() {
       return flagState;
@@ -855,7 +884,7 @@ test("setAnchor：没有选择时也不动", async () => {
 
 // ─────────────────── 删除（走回收站） ───────────────────
 
-test("removeSelected：删完清空选择、重新取一遍页面数据、把结果原样带回", async () => {
+test("removeSelected：删完清空选择、把删掉的从画面上就地摸掉（不重查、不闪）", async () => {
   const { api, calls } = fakeApi(6);
   const store = createBrowseStore({ api });
   open(store);
@@ -866,12 +895,16 @@ test("removeSelected：删完清空选择、重新取一遍页面数据、把结
   store.select(2, "toggle");
   const result = await store.removeSelected();
 
-  assert.deepEqual(result, EMPTY_DELETE, "后端回什么就带什么（界面按它决定提示）");
+  assert.deepEqual(result, EMPTY_RECYCLE, "后端回什么就带什么（界面按它决定提示）");
   assert.deepEqual(store.selectedIds(), [], "删完选择清空");
-  assert.ok(
-    calls.page.length > pagesBefore,
-    "删完要重新取一遍（否则网格上还留着已经删掉的照片）",
-  );
+  /*
+   * **就地摸掉，不重查**（崔总 2026-10-11）：重查首屏会把整块网格清空重建，tiles 会闪一下。
+   * 所以这里钉：页面请求数不变，而条目确实不见了、总数减了。
+   */
+  assert.equal(calls.page.length, pagesBefore, "不重查页面（局部变更，不闪）");
+  assert.equal(store.total(), 4, "总数减掉被删的两张");
+  const shown = store.itemAt(0);
+  assert.ok(shown === null || (shown.id !== 1 && shown.id !== 2), "网格里不再有被删的那两张");
   assert.equal(store.error(), null);
 });
 
@@ -916,7 +949,19 @@ function legacyApi(count: number) {
       return EMPTY_MARK;
     },
     async remove() {
-      return EMPTY_DELETE;
+      return EMPTY_RECYCLE;
+    },
+    async recycleRestore() {
+      return EMPTY_RESTORE;
+    },
+    async recyclePurge() {
+      return EMPTY_PURGE;
+    },
+    async recycleEmpty() {
+      return EMPTY_PURGE;
+    },
+    async recycleSummary() {
+      return EMPTY_RECYCLE_SUMMARY;
     },
     async flagsGet() {
       return { total: all.length, picks: [], rejects: [] };
@@ -947,6 +992,37 @@ test("naturalOf：数据库里有宽高就直接用（不必补读）", async ()
   assert.deepEqual(store.naturalOf(1), { width: 5184, height: 3888 });
 });
 
+test("naturalOf：编辑过的照片用 latest 的输出尺寸（tiles 比例与看图初值）", async () => {
+  // `specs/display-size-source.md` §5：latestWidth/Height 是「现在屏上这张多大」的默认口径
+  const all = [item(1, { width: 4000, height: 3000, latestWidth: 2000, latestHeight: 1500, edited: true })];
+  const api: BrowseApi = {
+    async page(_query: BrowseQuery, offset: number, limit: number) {
+      return { total: all.length, offset, items: all.slice(offset, offset + limit) };
+    },
+    async timeline() {
+      return { total: all.length, entries: all.map((a) => ({ id: a.id, relPath: a.relPath, takenAt: a.takenAt })) };
+    },
+    async facets(): Promise<BrowseFacets> { return EMPTY_FACETS; },
+    async tagList() { return []; },
+    async markings() { return []; },
+    async mark() { return EMPTY_MARK; },
+    async undo() { return EMPTY_MARK; },
+    async redo() { return EMPTY_MARK; },
+    async remove() { return EMPTY_RECYCLE; },
+    async recycleRestore() { return EMPTY_RESTORE; },
+    async recyclePurge() { return EMPTY_PURGE; },
+    async recycleEmpty() { return EMPTY_PURGE; },
+    async recycleSummary() { return EMPTY_RECYCLE_SUMMARY; },
+    async flagsGet() { return { total: all.length, picks: [], rejects: [] }; },
+    async flagsSet() { return { total: all.length, picks: [], rejects: [] }; },
+    async flagsClear() { return { total: all.length, picks: [], rejects: [] }; },
+  };
+  const store = createBrowseStore({ api });
+  open(store);
+  await tick();
+  assert.deepEqual(store.naturalOf(1), { width: 2000, height: 1500 });
+});
+
 test("ensureNatural：把补读回来的宽高**合并**进缓存，并只问缺的那些", async () => {
   const { api } = legacyApi(3);
   const asked: { dir: string; names: string[] }[] = [];
@@ -959,6 +1035,9 @@ test("ensureNatural：把补读回来的宽高**合并**进缓存，并只问缺
         width: 4000,
         height: 3000,
         orientation: 1,
+        takenAtMs: null,
+        takenAtSource: null,
+        takenAtOffsetMin: null,
       }));
     },
   });
@@ -993,6 +1072,9 @@ test("ensureNatural：不同目录分开问；读不到不报错（静默退回�
         width: 0,
         height: 0,
         orientation: 1,
+        takenAtMs: null,
+        takenAtSource: null,
+        takenAtOffsetMin: null,
       }));
     },
   });
@@ -1093,7 +1175,7 @@ test("共享库状态离线后保留内容与选择，标记/撤销/重做/删�
   let online = true, writes = 0;
   const { api, calls } = fakeApi(3);
   api.undo = api.redo = async () => { writes++; return EMPTY_MARK; };
-  api.remove = async () => { writes++; return EMPTY_DELETE; };
+  api.remove = async () => { writes++; return EMPTY_RECYCLE; };
   const store = createBrowseStore({ api, canWrite: () => online }); open(store); await tick();
   store.selectAll(); const selected = store.selectedIds(); const before = store.itemAt(0); online = false;
   assert.equal(store.canWrite(), false);
@@ -1101,4 +1183,27 @@ test("共享库状态离线后保留内容与选择，标记/撤销/重做/删�
   assert.equal(calls.mark.length, 0); assert.equal(writes, 0);
   assert.deepEqual(store.selectedIds(), selected); assert.equal(store.itemAt(0), before);
   online = true; assert.equal(store.canWrite(), true);
+});
+
+test("回收站模式：不跑目录同步（syncScope 只服务 photos 树）", async () => {
+  /*
+   * `syncScope` 的语义是「扫 photos/ 下这个范围、对账目录计数」，只认 `photos` 前缀 ——
+   * 传 `recycle` 进去后端会报错，`loadFirstScreen` 整体被 catch，回收站视图就永远空
+   * （2026-10-11 真机修：回收站显示 0 张）。这条钉住：进回收站后那次加载**不请求目录同步**。
+   */
+  const { api, calls } = fakeApi(3);
+  const store = createBrowseStore({ api });
+  open(store);
+  await tick();
+  const before = calls.sync.length;
+  assert.ok(before >= 1, "photos 侧正常加载会同步一次");
+
+  store.enterRecycle();
+  await tick();
+
+  assert.equal(calls.sync.length, before, "回收站那次加载不该再同步目录");
+  const last = calls.queries[calls.queries.length - 1];
+  assert.equal(last?.recycle, true, "查询带 recycle 标志");
+  assert.deepEqual(last?.sort, { key: "deletedAt", desc: true }, "按删除时间倒序");
+  assert.equal(store.total(), 3, "回收站条目不应因为跳过同步而变空");
 });

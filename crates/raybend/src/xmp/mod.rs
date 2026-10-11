@@ -14,15 +14,18 @@
 //! 接入点（写出触发、导入采纳）在 `src-tauri` 侧，见规格 §6–§8。
 
 mod adopt;
+pub mod audit;
+mod collect;
 pub mod mapping;
 pub mod packet;
 pub mod path;
 
 pub use adopt::adopt;
+pub use collect::{AssetSidecar, collect};
 
 pub use packet::{
-    ParsedSidecar, SidecarContent, SidecarMetadata, SidecarProfile, compose, compose_checked, escape, parse,
-    rdf_alt, rdf_list,
+    ParsedSidecar, SidecarContent, SidecarMetadata, SidecarProfile, compose, compose_checked,
+    crs_fragments, escape, latest_is_recorded, parse, rdf_alt, rdf_list,
 };
 pub use path::{probe_sidecar, rel_sidecar_of, resolve_sidecar, sidecar_rel_path};
 
@@ -119,7 +122,7 @@ pub fn remove_if_ours(path: &Path) -> crate::Result<bool> {
 
 /// 这个文件是**我们的** sidecar 吗（含 `rb:` 域即算；解析不了的也按命名空间认）。
 ///
-/// `store::delete` 把 sidecar 与照片一起送回收站前用它做守卫。
+/// `store::recycle` 把 sidecar 与照片一起送入/移出回收站前用它做守卫。
 #[must_use]
 pub fn is_ours(path: &Path) -> bool {
     std::fs::read(path)

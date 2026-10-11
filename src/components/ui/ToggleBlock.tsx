@@ -16,6 +16,7 @@
  */
 
 import { Show, splitProps, type JSX } from "solid-js";
+import { ButtonTip } from "./Tooltip.tsx";
 
 /** 按钮上的鼠标事件（Solid 会把 `currentTarget` 收窄成这个元素） */
 type ButtonMouseEvent = MouseEvent & { currentTarget: HTMLButtonElement; target: Element };
@@ -36,6 +37,8 @@ export interface ToggleBlockProps
    * 崔总 2026-09-28 定）。未按下时两种 tone 长得一样。
    */
   tone?: "brand" | "accent";
+  /** 悬停提示（2026-10-11）；不给则纯图标时用 `label` */
+  tip?: string;
 }
 
 export function ToggleBlock(props: ToggleBlockProps) {
@@ -46,10 +49,15 @@ export function ToggleBlock(props: ToggleBlockProps) {
     "icon",
     "children",
     "label",
+    "tip",
     "class",
     "tone",
     "disabled",
   ]);
+
+  /** 纯图标（无可见文字）时提示用 `label`；有文字时不弹 */
+  const tipText = (): string | undefined =>
+    local.tip ?? rest.title ?? (local.children == null ? local.label : undefined);
 
   /**
    * 调用调用方传的 `onClick`。
@@ -70,54 +78,58 @@ export function ToggleBlock(props: ToggleBlockProps) {
   };
 
   return (
-    <button
-      {...rest}
-      type={rest.type ?? "button"}
-      disabled={local.disabled}
-      aria-pressed={local.pressed}
-      aria-label={local.label}
-      title={rest.title ?? local.label}
-      /*
-       * 两个回调**都要调**：本组件的语义是 `onPressedChange`（模式切换），
-       * 但调用方如果想在点击时顺手做点别的（切旗标、打锁），传 `onClick` 是自然的写法。
-       * 2026-09-19：早先只调 `onPressedChange` 且把 `onClick` 放在 `{...rest}` 里 ——
-       * 结果调用方传的 `onClick` 被**静默覆盖**，工具条里的旗标/喜欢/锁按钮全是死的
-       * （冒烟里 invoke 日志一条都没有，才把这个揪出来）。
-       */
-      onClick={(event) => {
-        local.onPressedChange?.(!local.pressed);
-        callOuterClick(event);
-      }}
-      class={[
-        "inline-flex shrink-0 cursor-pointer select-none items-center justify-center gap-1.5 rounded-ui transition-colors",
-        // 方块尺寸随密度档变化，图标尺寸也跟着档位但**不随字号**（§8.1）
-        "min-h-toggle-block min-w-toggle-block px-1.5",
-        local.pressed
-          ? local.tone === "accent"
-            ? "bg-brand-2 text-fg-on-brand hover:bg-brand-2"
-            : "bg-brand text-fg-on-brand hover:bg-brand"
-          : "text-fg-2 hover:bg-state-hover hover:text-fg-1",
-        local.disabled
-          ? "pointer-events-none text-fg-3 opacity-60"
-          : "cursor-pointer",
-        local.class ?? "",
-      ].join(" ")}
-    >
-      <Show when={local.icon}>
-        <span
-          class="flex items-center justify-center"
-          style={{
-            width: "var(--toggle-block-icon)",
-            height: "var(--toggle-block-icon)",
+    <ButtonTip content={tipText()}>
+      {(triggerProps) => (
+        <button
+          {...rest}
+          {...triggerProps}
+          type={rest.type ?? "button"}
+          disabled={local.disabled}
+          aria-pressed={local.pressed}
+          aria-label={local.label}
+          /*
+           * 两个回调**都要调**：本组件的语义是 `onPressedChange`（模式切换），
+           * 但调用方如果想在点击时顺手做点别的（切旗标、打锁），传 `onClick` 是自然的写法。
+           * 2026-09-19：早先只调 `onPressedChange` 且把 `onClick` 放在 `{...rest}` 里 ——
+           * 结果调用方传的 `onClick` 被**静默覆盖**，工具条里的旗标/喜欢/锁按钮全是死的
+           * （冒烟里 invoke 日志一条都没有，才把这个揪出来）。
+           */
+          onClick={(event) => {
+            local.onPressedChange?.(!local.pressed);
+            callOuterClick(event);
           }}
-          aria-hidden="true"
+          class={[
+            "inline-flex shrink-0 cursor-pointer select-none items-center justify-center gap-1.5 rounded-ui transition-colors",
+            // 方块尺寸随密度档变化，图标尺寸也跟着档位但**不随字号**（§8.1）
+            "min-h-toggle-block min-w-toggle-block px-1.5",
+            local.pressed
+              ? local.tone === "accent"
+                ? "bg-brand-2 text-fg-on-brand hover:bg-brand-2"
+                : "bg-brand text-fg-on-brand hover:bg-brand"
+              : "text-fg-2 hover:bg-state-hover hover:text-fg-1",
+            local.disabled
+              ? "pointer-events-none text-fg-3 opacity-60"
+              : "cursor-pointer",
+            local.class ?? "",
+          ].join(" ")}
         >
-          {local.icon}
-        </span>
-      </Show>
-      <Show when={local.children}>
-        <span class="text-fs-2 whitespace-nowrap">{local.children}</span>
-      </Show>
-    </button>
+          <Show when={local.icon}>
+            <span
+              class="flex items-center justify-center"
+              style={{
+                width: "var(--toggle-block-icon)",
+                height: "var(--toggle-block-icon)",
+              }}
+              aria-hidden="true"
+            >
+              {local.icon}
+            </span>
+          </Show>
+          <Show when={local.children}>
+            <span class="text-fs-2 whitespace-nowrap">{local.children}</span>
+          </Show>
+        </button>
+      )}
+    </ButtonTip>
   );
 }

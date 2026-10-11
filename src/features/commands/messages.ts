@@ -10,7 +10,7 @@
  * 但一张表更好读，也不会被「没有 default」的规则误伤）。
  */
 
-import type { BindingIssue } from "../../lib/commands.ts";
+import { ALL_SCENES, type BindingIssue, type CommandScene } from "../../lib/commands.ts";
 import type { ImportProblem } from "../../lib/shortcuts.ts";
 import { t, type MessageKey } from "../../i18n/index.ts";
 
@@ -43,6 +43,20 @@ function fill(text: string, values: Record<string, string>): string {
     out = out.split(`{${key}}`).join(value);
   }
   return out;
+}
+
+/** 场景 → 文案 key（标签直接复用四个 flow 名） */
+const SCENE_KEYS = {
+  import: "flow.import",
+  browse: "flow.browse",
+  edit: "flow.edit",
+  export: "flow.export",
+} as const satisfies Record<CommandScene, MessageKey>;
+
+/** 一条命令的场景标签（四个全上 = 「通用」；多场景用 ` · ` 连） */
+export function sceneText(scenes: readonly CommandScene[]): string {
+  if (scenes.length >= ALL_SCENES.length) return t("scene.all");
+  return scenes.map((scene) => t(SCENE_KEYS[scene])).join(" · ");
 }
 
 /** 一条冲突 / 提示 → 人话 */

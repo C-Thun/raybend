@@ -126,7 +126,7 @@ test("导出命令默认 Enter 无冲突，Esc/Ctrl+A 复用取消和全选，�
 test("export reuses Delete without a shortcut conflict and bounded zoom follows active tiles",()=>{
  let area="gallery",position=0,canRemove=false;const calls:string[]=[];
  const deps={flow:()=>"export",viewer:{viewing:()=>false},export:{canRemove:()=>canRemove,remove:()=>calls.push("remove")},display:{tileStep:()=>position,sizeBounds:()=>area==="gallery"?{min:240,max:320}:undefined,setTileStep:(p:number)=>{position=p;},commitTileStep:()=>{}}} as unknown as CommandDeps;
- const registry=createCommandRegistry(deps),del=registry.find(c=>c.id==="edit.delete")!,zoomIn=registry.find(c=>c.id==="view.tiles.zoomIn")!,zoomOut=registry.find(c=>c.id==="view.tiles.zoomOut")!;
+ const registry=createCommandRegistry(deps),del=registry.find(c=>c.id==="export.remove")!,zoomIn=registry.find(c=>c.id==="view.tiles.zoomIn")!,zoomOut=registry.find(c=>c.id==="view.tiles.zoomOut")!;
  assert.equal(del.titleKey,"cmd.export.remove");assert.equal(del.defaultKey,"Delete");assert(!del.enabled?.());canRemove=true;del.run();assert.deepEqual(calls,["remove"]);
  assert(!zoomOut.enabled?.());position=5;assert(!zoomIn.enabled?.());area="queue";assert(zoomIn.enabled?.());zoomIn.run();assert.equal(position,6);
  assert.deepEqual(detectConflicts(registry,{}).filter(c=>c.blocking),[]);

@@ -203,7 +203,7 @@ test("按时间：未知时间组排在最后，且没有任何时间范围", ()
   assert.equal(countRowPhotos(rows), 2);
 });
 
-test("按时间：多个日组，最近的在前", () => {
+test("按时间：多个日组，先到后（升序）", () => {
   const items = [item("d14.jpg", at(9, 0, 14)), item("d15.jpg", at(9, 0, 15))];
   const grouping = groupByTime(
     items.map((entry) => ({ id: itemId(entry), takenAtMs: entry.takenAtMs })),
@@ -217,7 +217,7 @@ test("按时间：多个日组，最近的在前", () => {
   });
   assert.deepEqual(
     dayGroups(rows).map((row) => row.dayId),
-    ["2026-08-15", "2026-08-14"],
+    ["2026-08-14", "2026-08-15"],
   );
 });
 

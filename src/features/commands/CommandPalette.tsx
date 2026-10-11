@@ -39,6 +39,7 @@ import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "so
 import { Portal } from "solid-js/web";
 
 import { chordOf, rawChordOf, type CommandSpec } from "../../lib/commands.ts";
+import { sceneText } from "./messages.ts";
 import { shortcutOverrides, recentCommands } from "../../lib/shortcuts.ts";
 import { t } from "../../i18n/index.ts";
 import type { MessageKey } from "../../i18n/index.ts";
@@ -256,13 +257,15 @@ export function CommandPalette(props: CommandPaletteProps) {
                           .filter(Boolean)
                           .join(" ")}
                       >
-                        <span class="min-w-0 flex-1 truncate">{row.title}</span>
+                        <span class="min-w-0 flex-1 overflow-hidden whitespace-nowrap fade-x-end">{row.title}</span>
                         {/* 不可用就说清为什么（灰掉不解释等于「坏了」）——它是解释，不是装饰，用次级色保证能读 */}
                         <Show when={unavailableKey(row)}>
                           {(key) => (
                             <span class="shrink-0 text-fs-0 text-fg-2">{t(key())}</span>
                           )}
                         </Show>
+                        {/* 场景列（`specs/command-scenes.md` §2.1）：同键可在不同场景各自生效 */}
+                        <span class="shrink-0 text-fs-0 text-fg-3">{sceneText(row.scenes)}</span>
                         <span
                           data-command-chord={row.command.id}
                           class="shrink-0 text-fs-0 text-fg-3 tnum"

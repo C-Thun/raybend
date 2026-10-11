@@ -147,6 +147,10 @@ pub struct GpuContext {
     reference_uniform: wgpu::Buffer,
     texture: wgpu::Texture,
     sampler: wgpu::Sampler,
+    /// **过渡帧**用的采样器：放大走线性（见 [`Self::set_soft_preview`]）。
+    soft_sampler: wgpu::Sampler,
+    /// 当前这张图是不是**过渡帧**（1920 预览占位）：是就用线性放大采样。
+    soft_preview: bool,
     screen_color: super::color_transform::GpuScreenTransform,
     tone: super::tone::GpuTone,
     proof: super::proof::GpuProof,
@@ -295,6 +299,8 @@ impl GpuContext {
             reference_uniform: resources.reference_uniform,
             texture: resources.texture,
             sampler: resources.sampler,
+            soft_sampler: resources.soft_sampler,
+            soft_preview: false,
             screen_color: resources.screen_color,
             tone: resources.tone,
             proof: resources.proof,
@@ -420,6 +426,14 @@ impl GpuContext {
         self.upload_image(true);
     }
 
+    /// **过渡帧开关**：下一次换图（`set_shared_image`）用线性放大采样。
+    ///
+    /// 只影响**下一次上传**（绑定组在上传时重建）—— 调用顺序必须是
+    /// 「先 `set_soft_preview` 再 `set_shared_image`」。真帧到达时置回 `false`。
+    pub fn set_soft_preview(&mut self, soft: bool) {
+        self.soft_preview = soft;
+    }
+
     /// Prepare both sides of a frame without changing texture/tone/geometry.
     /// Caller polls while processing input, then commits its entire frame only
     /// after this returns true. Existing installed textures require no upload.
@@ -504,6 +518,7 @@ impl GpuContext {
         self.cancel_prepared_images();
         self.reference = None;
         self.reference_bind_group = None;
+        self.soft_preview = false;
         self.image = Arc::new(RenderImage::transparent_1x1());
         self.set_source_size((1, 1));
         self.upload_image(false);
@@ -533,11 +548,13 @@ impl GpuContext {
         self.upload_error=error;
         if self.upload_error.is_some() {return;}
         self.texture=texture;
+        // 过渡帧用线性放大采样（`set_soft_preview`），真帧用最近邻（1:1 看像素）。
+        let sampler = if self.soft_preview { &self.soft_sampler } else { &self.sampler };
         self.bind_group = make_bind_group(
             &self.device,
             &self.layout,
             &self.texture,
-            &self.sampler,
+            sampler,
             &self.uniform,
             &self.label,
             self.image.encoding,
@@ -831,6 +848,7 @@ impl GpuContext {
         self.reference_uniform = resources.reference_uniform;
         self.texture = resources.texture;
         self.sampler = resources.sampler;
+        self.soft_sampler = resources.soft_sampler;
         let output_scale=self.screen_color.output_scale;
         let source = self.screen_color.source.clone();
         let proof_source = self.proof.source.clone();
@@ -895,6 +913,8 @@ struct DeviceResources {
     reference_uniform: wgpu::Buffer,
     texture: wgpu::Texture,
     sampler: wgpu::Sampler,
+    /// 过渡帧的线性放大采样器（与 `sampler` 同寿命，`recover()` 一起重建）。
+    soft_sampler: wgpu::Sampler,
     screen_color: super::color_transform::GpuScreenTransform,
     tone: super::tone::GpuTone,
     proof: super::proof::GpuProof,
@@ -917,6 +937,14 @@ fn build_device_resources(
         label: Some(&format!("{label_prefix}-sampler")),
         // 放大用最近邻：1:1 档位要能看出「一个图像像素就是一个屏幕像素」
         mag_filter: wgpu::FilterMode::Nearest,
+        min_filter: wgpu::FilterMode::Linear,
+        ..Default::default()
+    });
+    // 过渡帧专用：放大走线性 —— 1920 预览在高分屏上被放大时，最近邻会变成马赛克
+    // （崔总 2026-10-10；配合 `DisplayPixels::soften` 的有意软化）
+    let soft_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        label: Some(&format!("{label_prefix}-soft-sampler")),
+        mag_filter: wgpu::FilterMode::Linear,
         min_filter: wgpu::FilterMode::Linear,
         ..Default::default()
     });
@@ -951,6 +979,7 @@ fn build_device_resources(
         reference_uniform,
         texture,
         sampler,
+        soft_sampler,
         screen_color,
         tone,
         proof,

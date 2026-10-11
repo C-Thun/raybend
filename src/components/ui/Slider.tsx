@@ -76,7 +76,8 @@ export function Slider(props: SliderProps) {
         </span>
       ) : null}
 
-      <ArkSlider.Control class="flex min-w-0 flex-1 items-center">
+      {/* Control 是定位祖先：Ark 隐藏 input 是 position:absolute（同 Switch 的教训，2026-10-10） */}
+      <ArkSlider.Control class="relative flex min-w-0 flex-1 items-center">
         <ArkSlider.Track class="relative h-1 w-full rounded-full bg-surface-track">
           <ArkSlider.Range class="absolute h-full rounded-full bg-brand" />
         </ArkSlider.Track>

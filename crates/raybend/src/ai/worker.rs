@@ -97,6 +97,7 @@ impl Worker {
             let proc = Arc::new(Mutex::new(worker_process::spawn_proc(
                 &self.bin,
                 &[WORKER_ARG.into()],
+                "ai-worker",
             )?));
             {
                 let mut slot = self
@@ -293,6 +294,7 @@ mod tests {
             worker_process::spawn_proc(
                 Path::new("/bin/sh"),
                 &["-c".into(), "exec sleep 10".into()],
+                "test-worker",
             )
             .unwrap(),
         ));

@@ -1,5 +1,21 @@
 /** Shared pointer tracking for resize handles and internal drag gestures. */
 export interface DragPoint { x: number; y: number }
+
+/**
+ * 指针位置下、最近的「带某个属性」的宿主元素（拖动落点判定用）。
+ *
+ * **拖动落点一律用它，不要自己注册矩形**（崔总 2026-10-11：browse 与 export 必须同一套）：
+ * 矩形方案要维护「元素活着 → 报矩形」的时序 —— 松手时预览先清、落点元素跟着卸载，
+ * 矩形变 `null`，于是永远判不中（browse 拖动删除失效就是这么来的）。
+ * `elementFromPoint` 直接问浏览器「松手这一刻指针下面是谁」，没有时序问题。
+ *
+ * 注意：落点元素**不能**是 `pointer-events: none`（那样命中不到），
+ * 也不该盖在别的可拖区域内层遮住它。
+ */
+export function dropHostAt(point: DragPoint, selector: string): HTMLElement | null {
+  const hit = document.elementFromPoint(point.x, point.y);
+  return hit?.closest<HTMLElement>(selector) ?? null;
+}
 export interface PointerDragEnv {
   events: EventTarget;
   requestFrame(fn: FrameRequestCallback): number;

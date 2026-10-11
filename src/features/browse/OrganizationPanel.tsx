@@ -5,8 +5,8 @@ import { IconBan, IconDots, IconFolder, IconLock, IconPhoto, IconPlus, IconSearc
 
 import type { RepositoryView, Tag } from "../../api/types.ts";
 import type { PhotoBucket } from "../../api/organization.ts";
-import { addPhotosToBucket, directoriesForTag, directoryTagCounts, listPhotoBuckets, pinPhotoBucket, deletePhotoBucket, pausePhotoBucket, setDirectoryTag, syncPhotoTags } from "../../api/organization.ts";
-import { parsePhotoDrag, PHOTO_DRAG_TYPE } from "./organization-drag.ts";
+import { directoriesForTag, directoryTagCounts, listPhotoBuckets, pinPhotoBucket, deletePhotoBucket, pausePhotoBucket, setDirectoryTag, syncPhotoTags } from "../../api/organization.ts";
+import { BUCKET_DROP_ATTR, photoDrag } from "./photo-drag.ts";
 import { tagList } from "../../api/browse.ts";
 import { TreeNode } from "../../components/ui/TreeNode.tsx";
 import { Menu } from "../../components/ui/Menu.tsx";
@@ -36,6 +36,11 @@ export interface OrganizationPanelProps {
 
 export function OrganizationPanel(props: OrganizationPanelProps) {
   const tagKey = (name: string) => name.normalize("NFC").toLowerCase();
+  /** 拖动中的指针是不是悬在这张桶卡上（落点高亮与松手命中同一个判据）。 */
+  const isBucketTarget = (id: number): boolean => {
+    const target = photoDrag()?.target;
+    return target?.kind === "bucket" && target.bucketId === id;
+  };
   const [search, setSearch] = createSignal("");
   const [tags, setTags] = createSignal<readonly Tag[]>([]);
   const [buckets, setBuckets] = createSignal<readonly PhotoBucket[]>([]);
@@ -162,23 +167,13 @@ export function OrganizationPanel(props: OrganizationPanelProps) {
               <div class={[
                 "mb-2 flex h-18 items-center gap-2 rounded-ui px-2 text-fg-2 hover:bg-state-hover",
                 props.selection?.kind === "bucket" && props.selection.id === bucket.id ? "bg-state-selected text-fg-1" : "bg-surface-bar",
-              ].join(" ")}
+                // 拖动悬停在卡上：辅色描边（落点提示；松手动作由工作区执行，见 photo-drag.ts）
+                isBucketTarget(bucket.id) ? "ring-2 ring-brand-2" : "",
+              ].filter(Boolean).join(" ")}
                 role="option" aria-selected={props.selection?.kind === "bucket" && props.selection.id === bucket.id}
                 tabindex="0" onClick={() => props.onSelectBucket(bucket)}
                 onKeyDown={(event) => { if (event.key === "Enter") props.onSelectBucket(bucket); }}
-                onDragOver={(event) => {
-                  if (event.dataTransfer?.types.includes(PHOTO_DRAG_TYPE)) {
-                    event.preventDefault(); event.dataTransfer.dropEffect = "copy";
-                  }
-                }}
-                onDrop={(event) => {
-                  const photos = parsePhotoDrag(event.dataTransfer?.getData(PHOTO_DRAG_TYPE) ?? "");
-                  if (photos.length === 0) return;
-                  event.preventDefault();
-                  void addPhotosToBucket(bucket.id, photos).then(async () => {
-                    await refreshBuckets(); props.onChanged?.();
-                  }).catch(props.onError);
-                }}
+                {...{ [BUCKET_DROP_ATTR]: String(bucket.id), "data-photo-drop-name": bucket.name }}
               >
                 <span class="relative flex size-12 shrink-0 items-center justify-center" aria-hidden="true">
                   <span class="absolute left-2 top-0 size-9 rounded-ui bg-surface-layer" />
@@ -187,8 +182,8 @@ export function OrganizationPanel(props: OrganizationPanelProps) {
                   </span>
                 </span>
                 <span class="min-w-0 flex-1">
-                  <span class="block truncate text-fs-2 font-semibold text-fg-1">{bucket.name}</span>
-                  <span class="block truncate text-fs-0 text-fg-3">
+                  <span class="block overflow-hidden whitespace-nowrap fade-x-end text-fs-2 font-semibold text-fg-1">{bucket.name}</span>
+                  <span class="block overflow-hidden whitespace-nowrap fade-x-end text-fs-0 text-fg-3">
                     {bucket.memberCount} {t("org.photos")}
                     {bucket.rules.groups.length > 0 ? ` · ${bucket.rules.groups.length} ${t("org.ruleGroups")}` : ""}
                   </span>
@@ -244,7 +239,7 @@ export function OrganizationPanel(props: OrganizationPanelProps) {
                       const repo = () => props.repositories.find((item) => item.id === directory.repositoryId);
                       return <TreeNode
                         label={directory.path}
-                        labelNode={<span class="truncate">{repo()?.name ?? directory.repositoryId} / {directory.path.split("/").pop()}</span>}
+                        labelNode={<span class="min-w-0 overflow-hidden whitespace-nowrap fade-x-end fade-x-end-fit">{repo()?.name ?? directory.repositoryId} / {directory.path.split("/").pop()}</span>}
                         depth={1} icon={<IconFolder size={15} />}
                         selected={props.selection?.kind === "directory" &&
                           props.selection.repositoryId === directory.repositoryId &&

@@ -35,7 +35,7 @@ cargo clippy -q -p raybend -p raybend-desktop --all-targets   # 只应剩 store/
 
 | 想知道什么 | 去哪 |
 | --- | --- |
-| 三种图（thumb / preview / 大图）的规格与现状 | **`memory/FUNCTION-IMAGING.md`**（唯一事实源；§1 格式范围、§4.3 编辑基准、§5.1 档位、§8 现状对照、§9 未决点） |
+| 三种图（thumb / preview / 大图）的规格与现状 | **`memory/FUNCTION-IMAGING.md`**（唯一事实源；§1 格式范围、§4.3 编辑基准、§5.1 编辑视口口径、§8 现状对照、§9 未决点） |
 | 格式支持范围 / AVIF 编码代价 | `memory/FUNCTION-IMAGING.md` §1、`memory/FUTURE.md` §C8 |
 | 编辑视口与显影线程 | `src-tauri/src/editor.rs`（`develop_loop` / `run_develop_job` / `decode_linear_source` / `RenderCommand` / `DevelopedImage`） |
 | 取图口（view / 缩略图 / 直方图） | `src-tauri/src/thumbs.rs`（`view_image`、`render_latest_cached`）、`crates/raybend/src/display/`（`pixels.rs`、`full_cache.rs`） |
@@ -64,7 +64,7 @@ cargo run -q -p raybend --example avif-probe                                    
 
 | 提交 | 内容 |
 | --- | --- |
-| `c44117c` | **拖动中只算预览档**：`render::tier::tier_for_params`（手指按着时一律 Preview，松手按缩放补全尺寸）+ 载荷 `interactive` + 滑杆/曲线接线 |
+| `c44117c` | ~~**拖动中只算预览档**~~（**该方案 2026-10-11 整体废弃**：不存在看图档位，任何看图统一原图）+ 载荷 `interactive` 保留（现只用于限流合并） |
 | `ca6c52f` | **preview 生成节点**：`store::develop::needs_preview` + 命令 `develop_preview_refresh`（进/出编辑），复用 `render_latest_cached` |
 | `67e2422` | 小图必须放大（`PreviewFrame` 过渡态去掉 `max-*`）+ 载入提示改半透毛玻璃（只遮 view、`pointer-events-none`） |
 | `d385144` | **`memory/FUNCTION-IMAGING.md` 立项**（格式范围 + 三种图规格 + 现状对照 + 未决点）；FUTURE §C8 / PLAN §M4-W2 改成指向它 |
@@ -189,8 +189,8 @@ cargo run -q -p raybend --example avif-probe                                    
    → 过渡帧的 source size 用**原图尺寸**：`catalog` 的 `assets.width/height` 有值
      （`catalog_0001_init.sql` 第 33–34 行）——**口径要在实现时确认**（它可能是位图的尺寸），
      确认不了就退回「过渡帧不 refit、只换纹理」那条路。
-4. **档位交互**：`tier_for_params` 的 `interactive` 只影响参数任务；`SetPhoto` 那条本来就是
-   `ImageTier::Preview` 起步 —— 过渡帧天然是预览档，不用额外处理。
+4. ~~**档位交互**~~：**这一节整体作废**（崔总 2026-10-11：不存在看图档位 —— 任何看图一律
+   原图像素，缩放/平移是纯视口变换；`render/tier.rs` 已删，`interactive` 现在只用于限流合并）。
 5. **直方图**：`memory/FUNCTION-IMAGING.md` 的实时口径是「像素由显影线程当前帧直接给出」——
    过渡帧期间直方图会是 preview 的直方图，真帧到了再刷新。**这是可接受的**（但要知道，
    否则会被当成「直方图不跟着走」的 bug）。

@@ -27,6 +27,13 @@ pub enum TakenAtSource {
     Exif,
     /// 文件名里带的日期时间（手机与部分相机的命名习惯）。
     Filename,
+    /// **文件创建时间**（文件系统给的，随目录列表一起拿到）。
+    ///
+    /// 崔总 2026-10-11 定：**从 SD 卡直接读时它就是拍照时间**，搭「按时间」分组的
+    /// 初始框架用它 —— 不读 EXIF，瞬间就有。
+    /// ⚠️ 拷贝过的文件在 NTFS 上这个值是**复制时间**（那时 mtime 更可靠）；
+    /// 所以库里（`import/sink.rs`）不用它，只用于**来源目录**的界面。
+    FileCreated,
     /// 文件修改时间（最后手段：至少能把照片排进时间轴）。
     FileMtime,
     /// **从同名的姊妹文件（位图）继承**来的时间（见 `media::pairing`）。
@@ -42,12 +49,15 @@ pub enum TakenAtSource {
 /// 位图与 RAW 共用一个 `assets` 行，而两侧各自读到的来源可能不同
 /// （例如 RAW 只能退到 mtime）—— 后写的那个不该把好时间冲掉，
 /// 靠这个分级决定「能不能换」（`import/sink.rs` 的 `keep_better_taken`）。
+///
+/// 次序（高 → 低）：EXIF > 姊妹继承 > 文件名 > **创建时间** > mtime。
 #[must_use]
 pub const fn source_rank(source: TakenAtSource) -> i32 {
     match source {
-        TakenAtSource::Exif => 3,
-        TakenAtSource::Sibling => 2,
-        TakenAtSource::Filename => 1,
+        TakenAtSource::Exif => 4,
+        TakenAtSource::Sibling => 3,
+        TakenAtSource::Filename => 2,
+        TakenAtSource::FileCreated => 1,
         TakenAtSource::FileMtime => 0,
     }
 }
@@ -133,6 +143,35 @@ pub fn read_file_for(path: &Path) -> ExifData {
     } else {
         read_file(path)
     }
+}
+
+/// **一次读**同时拿「元信息视角的 EXIF」与「flowinfo 用的字段表」。
+///
+/// 为什么要有它（`specs/source-time-inline.md`）：出图那一步本来就要打开这个文件读一段头，
+/// 顺手把**两份结果一起**解出来放进缓存 —— 于是
+/// * 拍摄时间（分组要的）不用第二次读文件；
+/// * 鼠标点/停到某张图上时，flowinfo 的 EXIF 也能**直接从缓存出**，同样不读盘。
+///
+/// 头一段（1 MiB）解不出来时才退回既有的两个入口（它们各自带整读兜底），
+/// 语义与 [`read_file_for`] / [`read_fields_for`] 完全一致。
+#[must_use]
+pub fn read_bundle_for(path: &Path) -> (ExifData, Vec<ExifField>) {
+    use std::io::Read;
+
+    let raw_family = is_raw_path(path);
+    if let Ok(mut file) = std::fs::File::open(path) {
+        let mut head = vec![0_u8; HEAD_PROBE_BYTES];
+        if let Ok(length) = file.read(&mut head) {
+            head.truncate(length);
+            let data = read_bytes_inner(&head, raw_family);
+            let fields = fields_from_bytes(&head, raw_family);
+            if let (Some(data), Some(fields)) = (data, fields) {
+                return (data, fields);
+            }
+        }
+    }
+    // 头一段不够（IFD 指向文件尾部、或容器要看完整文件）→ 退回既有入口
+    (read_file_for(path), read_fields_for(path))
 }
 
 /// A single original EXIF/TIFF field for the information panels. Binary vendor payloads are

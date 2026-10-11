@@ -37,7 +37,10 @@ export interface PhotoViewingStageProps {
   movesWithArrowKeys?: boolean;
   onInteract?: () => void;
   onFocusIndex?: (index: number) => void;
-  onPhotoDragStart?: (id: string, event: DragEvent) => void;
+  /** tile 按下（pointer）；拖动统一走 `lib/pointer-drag`（`specs/library-recycle-bin.md` §5）。 */
+  onPhotoPointerDown?: (id: string, event: PointerEvent) => void;
+  /** 正在被拖的照片（半透明表现）。 */
+  draggingIds?: () => ReadonlySet<string>;
   watermark?: PhotoGridProps["watermark"];
   class?: string;
 }
@@ -67,7 +70,8 @@ export function PhotoViewingStage(props: PhotoViewingStageProps): JSX.Element {
           {...(props.onFocusIndex === undefined
             ? {}
             : { onFocusIndex: props.onFocusIndex })}
-          onPhotoDragStart={props.onPhotoDragStart}
+          onPhotoPointerDown={props.onPhotoPointerDown}
+          draggingIds={props.draggingIds}
           {...(props.watermark === undefined ? {} : { watermark: props.watermark })}
         />
 

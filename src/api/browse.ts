@@ -14,11 +14,14 @@ import type {
   BrowseQuery,
   BrowseTimeline,
   BrowseWindow,
-  DeleteResult,
   FlagsView,
   MarkAction,
   MarkResult,
   MarkingItem,
+  PurgeResult,
+  RecycleResult,
+  RecycleSummaryView,
+  RestoreResult,
   Tag,
 } from "./types.ts";
 
@@ -50,12 +53,15 @@ const NO_BACKEND_MARK: MarkResult = {
   canUndo: false,
   canRedo: false,
 };
-const NO_BACKEND_DELETE: DeleteResult = {
-  deleted: 0,
+const NO_BACKEND_RECYCLE: RecycleResult = {
+  moved: 0,
   blockedLocked: [],
   alreadyGone: 0,
   failed: [],
 };
+const NO_BACKEND_RESTORE: RestoreResult = { restored: 0, renamed: 0, failed: [] };
+const NO_BACKEND_PURGE: PurgeResult = { purged: 0, failed: [] };
+const NO_BACKEND_RECYCLE_SUMMARY: RecycleSummaryView = { count: 0, bytes: 0 };
 
 /** 取一页照片（虚拟网格的可视窗口）。 */
 export async function browsePage(
@@ -136,16 +142,60 @@ export async function browseRedo(repositoryId: string): Promise<MarkResult> {
   return call<MarkResult>("browse_redo", { repositoryId });
 }
 
-/** 删除（进系统回收站）。 */
+/** 删除（移入库内回收站；`specs/library-recycle-bin.md`）。 */
 export async function browseDelete(
   repositoryId: string,
   ids: readonly number[],
-): Promise<DeleteResult> {
-  if (!isTauriRuntime()) return NO_BACKEND_DELETE;
-  return call<DeleteResult>("browse_delete", {
+): Promise<RecycleResult> {
+  if (!isTauriRuntime()) {
+    // 诊断（生产也打）：非 Tauri 运行时（浏览器里开页面）后端调用全部返回空结果 ——
+    // 「点了没反应」的一种成因就是它，日志把这种情形显式说出来。
+    console.debug("[recycle] browse_delete skipped: not in Tauri runtime");
+    return NO_BACKEND_RECYCLE;
+  }
+  console.debug("[recycle] invoke browse_delete", { repositoryId, ids: [...ids] });
+  const result = await call<RecycleResult>("browse_delete", {
     repositoryId,
     ids: [...ids],
   });
+  console.debug("[recycle] browse_delete ->", result);
+  return result;
+}
+
+/** 还原回收站里选中的照片（回原位；同名自动加 `_01` 后缀）。 */
+export async function browseRecycleRestore(
+  repositoryId: string,
+  ids: readonly number[],
+): Promise<RestoreResult> {
+  if (!isTauriRuntime()) return NO_BACKEND_RESTORE;
+  return call<RestoreResult>("browse_recycle_restore", {
+    repositoryId,
+    ids: [...ids],
+  });
+}
+
+/** 真删回收站里选中的照片（**永久**；界面上只有拖动一条路）。 */
+export async function browseRecyclePurge(
+  repositoryId: string,
+  ids: readonly number[],
+): Promise<PurgeResult> {
+  if (!isTauriRuntime()) return NO_BACKEND_PURGE;
+  return call<PurgeResult>("browse_recycle_purge", {
+    repositoryId,
+    ids: [...ids],
+  });
+}
+
+/** 清空回收站（**永久**删除全部；强确认在界面侧）。 */
+export async function browseRecycleEmpty(repositoryId: string): Promise<PurgeResult> {
+  if (!isTauriRuntime()) return NO_BACKEND_PURGE;
+  return call<PurgeResult>("browse_recycle_empty", { repositoryId });
+}
+
+/** 回收站概况（入口行「有内容才出现」+ 数量/占用）。 */
+export async function browseRecycleSummary(repositoryId: string): Promise<RecycleSummaryView> {
+  if (!isTauriRuntime()) return NO_BACKEND_RECYCLE_SUMMARY;
+  return call<RecycleSummaryView>("browse_recycle_summary", { repositoryId });
 }
 
 /** 当前库的旗标快照。 */

@@ -3,7 +3,7 @@
 use rusqlite::{Connection, OptionalExtension};
 
 use super::ParsedSidecar;
-use crate::store::{assets, develop, issues, tags, photo_tags};
+use crate::store::{assets, develop, issues, photo_tags, tags};
 
 /// 调用方仅传新登记的资产。关键词已经在 app.db 对齐成 ID。
 /// `false` 表示资产不存在、已有用户数据，或 sidecar 没有可采纳内容。
@@ -15,7 +15,13 @@ pub fn adopt(
     now_ms: i64,
 ) -> crate::Result<bool> {
     // 未知来源扩展不能把 subject 中的 AI 静默变成手动标签。
-    if parsed.warnings.iter().any(|warning| warning.contains("rb:tags")) { return Ok(false); }
+    if parsed
+        .warnings
+        .iter()
+        .any(|warning| warning.contains("rb:tags"))
+    {
+        return Ok(false);
+    }
     let tx = conn.unchecked_transaction()?;
     let clean = tx
         .query_row(
@@ -88,7 +94,9 @@ pub fn adopt(
         photo_tags::restore_sidecar(&tx, asset_id, state, now_ms)?;
         adopted |= state.has_content();
     } else {
-        for id in tag_ids { adopted |= tags::attach_tag(&tx, asset_id, *id, now_ms)?; }
+        for id in tag_ids {
+            adopted |= tags::attach_tag(&tx, asset_id, *id, now_ms)?;
+        }
     }
     tx.commit()?;
     Ok(adopted)
@@ -242,54 +250,105 @@ mod tests {
 #[cfg(test)]
 mod tag_source_tests {
     use super::*;
-    use crate::store::{migration::{self,DbKind}, photo_tags::{self,AiResult,AiOrigin,AiEvidence}};
-    use crate::xmp::{SidecarContent, SidecarMetadata, compose_checked,parse,publish,PublishOutcome};
+    use crate::store::{
+        migration::{self, DbKind},
+        photo_tags::{self, AiEvidence, AiOrigin, AiResult},
+    };
+    use crate::xmp::{
+        PublishOutcome, SidecarContent, SidecarMetadata, compose_checked, parse, publish,
+    };
     fn db() -> Connection {
-        let mut conn=Connection::open_in_memory().unwrap();
-        crate::store::pragma::apply(&conn,false).unwrap();
-        migration::apply(&mut conn,DbKind::Catalog,migration::Backups::none(),1).unwrap();
-        conn.execute_batch("INSERT INTO assets(id,organization_uid,imported_at,updated_at) VALUES(1,'uid',1,1);").unwrap();conn
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::store::pragma::apply(&conn, false).unwrap();
+        migration::apply(&mut conn, DbKind::Catalog, migration::Backups::none(), 1).unwrap();
+        conn.execute_batch(
+            "INSERT INTO assets(id,organization_uid,imported_at,updated_at) VALUES(1,'uid',1,1);",
+        )
+        .unwrap();
+        conn
     }
     fn content() -> SidecarContent {
-        let conn=db(); photo_tags::retain_manual(&conn,1,"旅行 & <山>",1).unwrap();
-        let token=photo_tags::begin_attempt(&conn,1,"uid","original").unwrap();
-        let result=AiResult {source_key:"original".into(),model_sha256:"a".repeat(64),pipeline_sha256:"b".repeat(64),generated_at:2,origin:AiOrigin::Local,valid:true,
-            evidence:vec![AiEvidence {concept_key:"sea".into(),tag_name:"海".into(),score:0.3,accepted:true}]};
-        photo_tags::commit_ai(&conn,1,&token,"original",&result,2).unwrap();
-        photo_tags::mask(&conn,1,"海",true,3).unwrap();
-        SidecarContent {tag_state:Some(photo_tags::snapshot(&conn,1).unwrap()),metadata:SidecarMetadata {keywords:photo_tags::effective_names(&conn,1).unwrap(),..Default::default()},..Default::default()}
+        let conn = db();
+        photo_tags::retain_manual(&conn, 1, "旅行 & <山>", 1).unwrap();
+        let token = photo_tags::begin_attempt(&conn, 1, "uid", "original").unwrap();
+        let result = AiResult {
+            source_key: "original".into(),
+            model_sha256: "a".repeat(64),
+            pipeline_sha256: "b".repeat(64),
+            generated_at: 2,
+            origin: AiOrigin::Local,
+            valid: true,
+            evidence: vec![AiEvidence {
+                concept_key: "sea".into(),
+                tag_name: "海".into(),
+                score: 0.3,
+                accepted: true,
+            }],
+        };
+        photo_tags::commit_ai(&conn, 1, &token, "original", &result, 2).unwrap();
+        photo_tags::mask(&conn, 1, "海", true, 3).unwrap();
+        SidecarContent {
+            tag_state: Some(photo_tags::snapshot(&conn, 1).unwrap()),
+            metadata: SidecarMetadata {
+                keywords: photo_tags::effective_names(&conn, 1).unwrap(),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
     }
     #[test]
     fn extended_round_trip_keeps_masks_and_sources_and_standard_subject_is_effective() {
-        let content=content();let xml=compose_checked(&content,0,"test").unwrap().unwrap();
-        let parsed=parse(&xml).unwrap().unwrap();
-        assert!(parsed.warnings.is_empty());assert_eq!(parsed.tag_state,content.tag_state);
-        assert_eq!(parsed.metadata.keywords,["旅行 & <山>"]);
-        let conn=db();assert!(adopt(&conn,1,&parsed,&[7,8],5).unwrap());
-        let state=photo_tags::snapshot(&conn,1).unwrap();
-        assert_eq!(state.manual,["旅行 & <山>"]);assert_eq!(state.ai,["海"]);assert_eq!(state.masks,["海"]);
-        assert_eq!(state.result.unwrap().origin,AiOrigin::Sidecar);
-        assert!(tags::tags_of_asset(&conn,1).unwrap().is_empty());
-        assert!(!adopt(&conn,1,&parsed,&[],6).unwrap());
+        let content = content();
+        let xml = compose_checked(&content, 0, "test").unwrap().unwrap();
+        let parsed = parse(&xml).unwrap().unwrap();
+        assert!(parsed.warnings.is_empty());
+        assert_eq!(parsed.tag_state, content.tag_state);
+        assert_eq!(parsed.metadata.keywords, ["旅行 & <山>"]);
+        let conn = db();
+        assert!(adopt(&conn, 1, &parsed, &[7, 8], 5).unwrap());
+        let state = photo_tags::snapshot(&conn, 1).unwrap();
+        assert_eq!(state.manual, ["旅行 & <山>"]);
+        assert_eq!(state.ai, ["海"]);
+        assert_eq!(state.masks, ["海"]);
+        assert_eq!(state.result.unwrap().origin, AiOrigin::Sidecar);
+        assert!(tags::tags_of_asset(&conn, 1).unwrap().is_empty());
+        assert!(!adopt(&conn, 1, &parsed, &[], 6).unwrap());
     }
     #[test]
     fn masks_only_and_empty_success_are_not_deleted() {
-        let conn=db();photo_tags::mask(&conn,1,"鸟",true,1).unwrap();
-        let c=SidecarContent{tag_state:Some(photo_tags::snapshot(&conn,1).unwrap()),..Default::default()};
-        let parsed=parse(&compose_checked(&c,0,"test").unwrap().unwrap()).unwrap().unwrap();
-        let other=db();assert!(adopt(&other,1,&parsed,&[],2).unwrap());
-        assert_eq!(photo_tags::snapshot(&other,1).unwrap().masks,["鸟"]);
-        let mut c=content();c.tag_state.as_mut().unwrap().version=2;assert!(compose_checked(&c,0,"test").is_err());
+        let conn = db();
+        photo_tags::mask(&conn, 1, "鸟", true, 1).unwrap();
+        let c = SidecarContent {
+            tag_state: Some(photo_tags::snapshot(&conn, 1).unwrap()),
+            ..Default::default()
+        };
+        let parsed = parse(&compose_checked(&c, 0, "test").unwrap().unwrap())
+            .unwrap()
+            .unwrap();
+        let other = db();
+        assert!(adopt(&other, 1, &parsed, &[], 2).unwrap());
+        assert_eq!(photo_tags::snapshot(&other, 1).unwrap().masks, ["鸟"]);
+        let mut c = content();
+        c.tag_state.as_mut().unwrap().version = 2;
+        assert!(compose_checked(&c, 0, "test").is_err());
     }
     #[test]
     fn unknown_or_bad_tag_extension_is_preserved_and_not_imported_as_manual() {
-        let xml=compose_checked(&content(),0,"test").unwrap().unwrap();
-        for broken in [xml.replace("&quot;version&quot;:1","&quot;version&quot;:2"),xml.replace("&quot;score&quot;:0.3","&quot;score&quot;:9.0")] {
-            assert_ne!(broken,xml);
-            let parsed=parse(&broken).unwrap().unwrap();assert!(!parsed.warnings.is_empty());
-            let conn=db();assert!(!adopt(&conn,1,&parsed,&[7],1).unwrap());
-            let dir=tempfile::tempdir().unwrap();let path=dir.path().join("中文.xmp");std::fs::write(&path,&broken).unwrap();
-            assert_eq!(publish(&path,&xml).unwrap(),PublishOutcome::Preserved);assert_eq!(std::fs::read_to_string(path).unwrap(),broken);
+        let xml = compose_checked(&content(), 0, "test").unwrap().unwrap();
+        for broken in [
+            xml.replace("&quot;version&quot;:1", "&quot;version&quot;:2"),
+            xml.replace("&quot;score&quot;:0.3", "&quot;score&quot;:9.0"),
+        ] {
+            assert_ne!(broken, xml);
+            let parsed = parse(&broken).unwrap().unwrap();
+            assert!(!parsed.warnings.is_empty());
+            let conn = db();
+            assert!(!adopt(&conn, 1, &parsed, &[7], 1).unwrap());
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("中文.xmp");
+            std::fs::write(&path, &broken).unwrap();
+            assert_eq!(publish(&path, &xml).unwrap(), PublishOutcome::Preserved);
+            assert_eq!(std::fs::read_to_string(path).unwrap(), broken);
         }
     }
 }

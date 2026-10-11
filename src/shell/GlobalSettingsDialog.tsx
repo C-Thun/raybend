@@ -3,7 +3,7 @@
  * 默认规则和配置资产入口。尚未接线的功能用明确的状态说明，避免虚假的可操作控件。
  */
 
-import { IconAdjustments, IconDeviceDesktop, IconEyeOff, IconFileDescription, IconKeyboard, IconPalette, IconPlus, IconRefresh, IconScan } from "@tabler/icons-solidjs";
+import { IconAdjustments, IconDeviceDesktop, IconEyeOff, IconFileDescription, IconFiles, IconKeyboard, IconPalette, IconPlus, IconRefresh, IconScan } from "@tabler/icons-solidjs";
 import { createEffect, createSignal, For, onCleanup, Show, type Component } from "solid-js";
 import { getColorDefaults, setColorDefaults, getColorProfileLibrary, getDisplaySnapshot, hideColorProfile, importColorProfileFiles, onDisplayEnvironmentChange, openSystemDisplaySettings, type ColorDefaults, type ColorProfileEntry, type ColorProfileImport, type ColorProfileLibrary, type DisplaySnapshot } from "../api/color.ts";
 import { ProfileSelect } from "../components/ui/ProfileSelect.tsx";
@@ -14,6 +14,9 @@ import { getEditorRenderState } from "../api/editor.ts";
 import type { EditorRenderState } from "../api/types.ts";
 import { displayPresentationMatches, type DisplayPhase } from "../lib/display-color.ts";
 import { displayDetectionKey } from "../i18n/display-color.ts";
+import { getSetting, setSetting, SETTING_KEYS } from "../api/db.ts";
+import { xmpWriteEnabled } from "../lib/xmp-write.ts";
+import { Switch } from "../components/ui/Form.tsx";
 import { pickOpenFiles } from "../api/dialog.ts";
 import { isTauriRuntime } from "../api/tauri-env.ts";
 import { Button, IconButton } from "../components/ui/Button.tsx";
@@ -23,7 +26,7 @@ import { t, type MessageKey } from "../i18n/index.ts";
 import { AiModelSettings } from "../features/browse/AiModelSettings.tsx";
 import { ShortcutSettingsPanel } from "../features/commands/index.ts";
 
-export type SettingsPage = "color" | "profiles" | "editor" | "shortcuts" | "ai";
+export type SettingsPage = "color" | "profiles" | "editor" | "files" | "shortcuts" | "ai";
 
 export interface GlobalSettingsDialogProps {
   open: boolean;
@@ -40,6 +43,7 @@ const PAGES: readonly { id: SettingsPage; label: MessageKey; icon: Component<{ s
   { id: "color", label: "settings.color.title", icon: IconPalette },
   { id: "profiles", label: "settings.profiles.title", icon: IconFileDescription },
   { id: "editor", label: "settings.editor.title", icon: IconAdjustments },
+  { id: "files", label: "settings.files.title", icon: IconFiles },
   { id: "ai", label: "ai.title", icon: IconScan },
   { id: "shortcuts", label: "settings.shortcuts.title", icon: IconKeyboard },
 ];
@@ -75,6 +79,29 @@ export function GlobalSettingsDialog(props: GlobalSettingsDialogProps) {
   const [defaultsError, setDefaultsError] = createSignal<string | null>(null);
   const [savingDefaults, setSavingDefaults] = createSignal(false);
   const defaultsDirty = () => defaults() !== null && JSON.stringify(defaults()) !== savedDefaults();
+
+  // 文件页：XMP 写出开关（设备级；Rust 写出口每次触发时现读，改完立即生效）。
+  const [xmpWrite, setXmpWrite] = createSignal(true);
+  const [xmpWriteBusy, setXmpWriteBusy] = createSignal(false);
+  const [xmpWriteError, setXmpWriteError] = createSignal<string | null>(null);
+  createEffect(() => {
+    if (!props.open || props.page !== "files") return;
+    let active = true;
+    setXmpWriteError(null);
+    void getSetting(SETTING_KEYS.xmpWrite)
+      .then((value) => { if (active) setXmpWrite(xmpWriteEnabled(value)); })
+      .catch((error: unknown) => { if (active) setXmpWriteError(String(error)); });
+    onCleanup(() => { active = false; });
+  });
+  const changeXmpWrite = (checked: boolean) => {
+    const previous = xmpWrite();
+    setXmpWrite(checked);
+    setXmpWriteError(null);
+    setXmpWriteBusy(true);
+    void setSetting(SETTING_KEYS.xmpWrite, checked ? "true" : "false")
+      .catch((error: unknown) => { setXmpWrite(previous); setXmpWriteError(String(error)); })
+      .finally(() => setXmpWriteBusy(false));
+  };
   createEffect(() => {
     if (!props.open || props.page !== "color") return;
     let active = true;
@@ -352,7 +379,7 @@ export function GlobalSettingsDialog(props: GlobalSettingsDialogProps) {
                     <div class="flex min-h-11 items-center gap-3 border-t border-surface-bar py-2 text-fs-1">
                       <div class="flex min-w-0 flex-1 items-center gap-2 text-fg-1">
                         <span class={entry.builtIn ? "size-2 shrink-0 rounded-full bg-fg-3" : "size-2 shrink-0 rounded-full bg-brand"} aria-hidden="true" />
-                        <span class="truncate" title={entry.name}>{entry.name}</span>
+                        <span class="min-w-0 overflow-hidden whitespace-nowrap fade-x-end fade-x-end-fit" title={entry.name}>{entry.name}</span>
                       </div>
                       <span class="w-32 shrink-0 text-fg-2">{t(profileRole(entry))}</span>
                       <span class="w-20 shrink-0 text-fg-2">{t(entry.builtIn ? "settings.profiles.builtIn" : "settings.profiles.importedSource")}</span>
@@ -399,6 +426,30 @@ export function GlobalSettingsDialog(props: GlobalSettingsDialogProps) {
                   ]}
                 />
               </div>
+            </div>
+          </Show>
+
+          {/*
+            文件页（`specs/xmp-write-toggle.md`）：目前只有 XMP sidecar 写出开关。
+            后果说明放标题的原生 tooltip，不占版面（`AGENTS.md` §2.20）。
+          */}
+          <Show when={props.page === "files"}>
+            <div class="space-y-5">
+              <header>
+                <h2 class="text-fs-3 font-semibold text-fg-1">{t("settings.files.title")}</h2>
+              </header>
+              <div class="flex items-center gap-5 border-b border-surface-bar py-5">
+                <h3 class="min-w-0 flex-1 text-fs-2 font-semibold text-fg-1" title={t("settings.files.xmp.hint")}>
+                  {t("settings.files.xmp.title")}
+                </h3>
+                <Switch
+                  checked={xmpWrite()}
+                  onCheckedChange={changeXmpWrite}
+                  label={t("settings.files.xmp.title")}
+                  disabled={xmpWriteBusy()}
+                />
+              </div>
+              <Show when={xmpWriteError()}>{(error) => <p class="text-fs-1 text-danger" role="alert">{error()}</p>}</Show>
             </div>
           </Show>
 

@@ -44,6 +44,11 @@ test("Windows 配置签名、通道和前端只构建一次",()=>{
   const cmd=windowsReleaseCommands('C:\\中文 相册','C:\\staging area\\config.json');
   assert.ok(cmd.includes('cd /d "C:\\中文 相册"'));assert.ok(cmd.includes("--locked"));
   assert.ok(cmd.includes("cargo build -p raybend"));assert.ok(cmd.includes("--features custom-protocol"));
+  // 崩溃助手（W4）：先建、再拷成 sidecar 命名；缺了 bundle 会失败，所以拷贝失败就当场停
+  assert.ok(cmd.includes("cargo build -p raybend-crashpad --release --locked || exit /b 1"));
+  assert.ok(cmd.includes("raybend-crashpad-x86_64-pc-windows-msvc.exe"));
+  // 发版配置要带 externalBin（否则装出来的包里没有助手，崩溃时没有 dump）
+  assert.deepEqual(windowsReleaseConfig(base,{...env,unsigned:true,certThumbprint:""}).bundle.externalBin,["binaries/raybend-crashpad"]);
   assert.ok(cmd.includes("cargo tauri bundle -vv"));assert.ok(!cmd.includes("pushd"));
   assert.throws(()=>windowsReleaseCommands('\\\\wsl.localhost\\Ubuntu\\home\\repo','C:\\config.json'),/本地盘/);
   assert.throws(()=>windowsReleaseCommands('C:\\repo','config.json'),/本地盘/);

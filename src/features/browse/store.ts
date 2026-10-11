@@ -32,19 +32,23 @@
 
 import { batch, createSignal } from "solid-js";
 
+import { displaySizeOf } from "../../lib/display-size.ts";
 import type {
   AssetItem,
   BrowseFacets,
   BrowseFilter,
   BrowseQuery,
   BrowseSort,
-  DeleteResult,
   EditableTextField,
   MarkAction,
   MarkResult,
   MarkingItem,
   MetaFile,
   PhotoMeta,
+  PurgeResult,
+  RecycleResult,
+  RecycleSummaryView,
+  RestoreResult,
   Tag,
   TimelineEntry,
 } from "../../api/types.ts";
@@ -89,7 +93,11 @@ export interface BrowseApi {
   ): Promise<MarkResult>;
   undo(repositoryId: string): Promise<MarkResult>;
   redo(repositoryId: string): Promise<MarkResult>;
-  remove(repositoryId: string, ids: readonly number[]): Promise<DeleteResult>;
+  remove(repositoryId: string, ids: readonly number[]): Promise<RecycleResult>;
+  recycleRestore(repositoryId: string, ids: readonly number[]): Promise<RestoreResult>;
+  recyclePurge(repositoryId: string, ids: readonly number[]): Promise<PurgeResult>;
+  recycleEmpty(repositoryId: string): Promise<PurgeResult>;
+  recycleSummary(repositoryId: string): Promise<RecycleSummaryView>;
   flagsGet(repositoryId: string): Promise<{
     total: number;
     picks: number[];
@@ -212,7 +220,8 @@ export interface BrowseStore {
   /**
    * 一张照片的**真实宽高**（tile 比例、看图缩放边界都要它）。
    *
-   * 取法：先看补读缓存（老库那批），再退回数据库清单里的 `width/height`；
+   * 取法：先看**库里的显示尺寸**（`lib/display-size.ts`：默认变体 = 编辑过的就是
+   * latest 的输出尺寸，否则基准尺寸），再看补读缓存（老库那批）；
    * 都没有就是 `null`（界面按占位比例显示，不报错）。
    *
    * 注意它**不是**响应式的读取（内部按数组身份缓存索引）：调用方要拿到「补读之后」
@@ -296,8 +305,31 @@ export interface BrowseStore {
    * 只认「撤销 / 重做」这一件事，不跟着普通标记动作抖。
    */
   undoTick(): number;
-  /** 删掉选中的照片（回收站）。 */
-  removeSelected(): Promise<DeleteResult | null>;
+  /** 删掉选中的照片（移入库内回收站）。 */
+  removeSelected(): Promise<RecycleResult | null>;
+  /** 按 ids 移入回收站（**拖动删除**用：拖的那批不一定等于当前选择）。 */
+  removeIds(ids: readonly string[]): Promise<RecycleResult | null>;
+  /** 按 ids 真删（回收站内拖动粉碎用）。 */
+  purgeIds(ids: readonly string[]): Promise<PurgeResult | null>;
+
+  // ── 回收站（`specs/library-recycle-bin.md`）──
+  /** 是否在回收站视图（左列入口进；查询带 `recycle` 标志、排序固定删除时间倒序）。 */
+  recycleMode(): boolean;
+  /** 进入回收站视图（记住 photos 侧当前的目录，退出时恢复）。 */
+  enterRecycle(): void;
+  /** 退出回收站视图（回到 photos 侧原来的目录）。 */
+  exitRecycle(): void;
+  /** 从回收站切到 photos 侧的一个目录（退出回收站 + 设范围，只发一次查询）。 */
+  openPhotosScope(path: string | null): void;
+  /** 回收站概况（入口行「有内容才出现」与数量/占用）。 */
+  recycleSummary(): RecycleSummaryView;
+  refreshRecycleSummary(): Promise<void>;
+  /** 还原选中的照片（回原位；同名自动加后缀）。 */
+  restoreSelected(): Promise<RestoreResult | null>;
+  /** 真删选中的照片（**永久**；回收站视图内拖动到粉碎卡时调用）。 */
+  purgeSelected(): Promise<PurgeResult | null>;
+  /** 清空回收站（**永久**；调用方负责强确认）。 */
+  emptyRecycle(): Promise<PurgeResult | null>;
   /**
    * 改右栏里可编辑的文字字段（作者 / 描述 / 地理四项）。
    *
@@ -338,6 +370,17 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
     return result;
   };
   const [sort, setSortSignal] = createSignal<BrowseSort>({ key: "takenAt", desc: true });
+  /**
+   * 回收站视图（`specs/library-recycle-bin.md`）：查询带 `recycle` 标志、排序固定删除时间倒序。
+   * `scopePath` 在回收站模式下是 `recycle/...`（与 photos 树同一种「库内相对路径」口径）。
+   */
+  const [recycleMode, setRecycleMode] = createSignal(false);
+  const [recycleSummary, setRecycleSummary] = createSignal<RecycleSummaryView>({
+    count: 0,
+    bytes: 0,
+  });
+  /** 进回收站前 photos 侧选的目录（`null` = 还没选，退出时照旧为 null）。 */
+  let photosScope: string | null = null;
 
   const [total, setTotal] = createSignal(0);
   const [entries, setEntries] = createSignal<readonly (AssetItem | null)[]>([]);
@@ -377,12 +420,13 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
   };
 
   const naturalOf = (id: number): { width: number; height: number } | null => {
-    const extra = extraNatural().get(id);
-    if (extra !== undefined) return extra;
+    // 库里的显示尺寸优先（毫秒级；默认变体 = 编辑过的就是 latest 的输出尺寸）
     const item = itemsById().get(id);
-    if (item === undefined || item.width === null || item.height === null) return null;
-    if (item.width <= 0 || item.height <= 0) return null;
-    return { width: item.width, height: item.height };
+    if (item !== undefined) {
+      const stored = displaySizeOf(item, undefined, undefined);
+      if (stored !== null) return stored;
+    }
+    return extraNatural().get(id) ?? null;
   };
 
   async function ensureNatural(entries: readonly { id: number; path: string }[]): Promise<void> {
@@ -458,8 +502,10 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
     return {
       repositoryId: id,
       scopePath: scope,
-      filter: withFlagIds(filter()),
-      sort: sort(),
+      // 回收站里不筛选（toolsbar 已收走）；排序固定「删除时间倒序」（最近删的在前）。
+      filter: recycleMode() ? {} : withFlagIds(filter()),
+      sort: recycleMode() ? { key: "deletedAt", desc: true } : sort(),
+      recycle: recycleMode(),
     };
   };
 
@@ -541,6 +587,27 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
   };
 
   /**
+   * 把一批资产从当前画面上**就地摘掉**（删除 / 真删 / 还原之后用）。
+   *
+   * 为什么不 `reload()`：重查首屏会把整块网格清空重建，tiles 会**闪一下**
+   * （崔总 2026-10-11：「这肯定是要做局部变更，绝对不能闪烁」）。
+   * 这里只动三样：时间线、条目表、总数；不重查、不换代次、不动别的状态。
+   * 重排与「标记需重读的页」直接复用 `retainPagesForTimeline`。
+   */
+  const dropEntries = (ids: ReadonlySet<number>): void => {
+    if (ids.size === 0) return;
+    const line = timeline();
+    const kept = line.filter((entry) => !ids.has(entry.id));
+    if (kept.length === line.length) return;
+    batch(() => {
+      setTimeline(kept);
+      retainPagesForTimeline(kept);
+      setTotal((current) => Math.max(0, current - (line.length - kept.length)));
+      setSelection(clearSelection());
+    });
+  };
+
+  /**
    * 取「进目录首屏」的三件事：第一页 + 时间线 + 分面。
    *
    * `reload` 与 `refresh` 共用 —— 这一条路上就这么多事，两者只差**读之前/之后
@@ -552,7 +619,14 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
     mine: number,
   ): Promise<readonly TimelineEntry[] | null> => {
     try {
-      await api.syncScope?.(q);
+      /*
+       * 回收站视图**不做目录同步**（`specs/library-recycle-bin.md` §4）：
+       * `syncScope` 的语义是「扫一遍 `photos/` 下这个范围，把新增/删除对账回目录计数」，
+       * 它只认 `photos` 前缀 —— 传 `recycle` 进去会找不到目录而报错，
+       * `loadFirstScreen` 整体被 catch 掉，整屏就停在空列表（2026-10-11 修：回收站视图显示 0 张）。
+       * 回收站不进目录树计数，也不需要文件监听。
+       */
+      if (!q.recycle) await api.syncScope?.(q);
       if (mine !== generation) return null;
       const [window, line, faces] = await Promise.all([
         api.page(q, 0, PAGE_SIZE),
@@ -712,6 +786,57 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
   };
 
   const canWrite = (): boolean => { const id = repositoryId(); return id !== null && (deps.canWrite?.(id) ?? true); };
+
+  const refreshRecycleSummary = async (): Promise<void> => {
+    const id = repositoryId();
+    if (id === null) {
+      setRecycleSummary({ count: 0, bytes: 0 });
+      return;
+    }
+    try {
+      setRecycleSummary(await api.recycleSummary(id));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  /** 进回收站：记住 photos 侧目录，把范围切到回收站根（`recycle`）。 */
+  const enterRecycle = (): void => {
+    if (recycleMode()) return;
+    photosScope = scopePath();
+    batch(() => {
+      setRecycleMode(true);
+      setScopePathSignal("recycle");
+    });
+    void reload();
+    void refreshRecycleSummary();
+  };
+
+  /** 退回收站：范围回到 photos 侧原来那个目录。 */
+  const exitRecycle = (): void => {
+    if (!recycleMode()) return;
+    batch(() => {
+      setRecycleMode(false);
+      setScopePathSignal(photosScope);
+    });
+    void reload();
+    void refreshRecycleSummary();
+  };
+
+  /** photos 树里点目录（可能在回收站模式下）：退回收站并切过去，只重查一次。 */
+  const openPhotosScope = (path: string | null): void => {
+    photosScope = path;
+    if (!recycleMode() && scopePath() === path) {
+      void refresh();
+      return;
+    }
+    batch(() => {
+      setRecycleMode(false);
+      setScopePathSignal(path);
+    });
+    void reload();
+    void refreshRecycleSummary();
+  };
   const mark = async (action: MarkAction): Promise<MarkResult | null> => {
     const id = repositoryId();
     const ids = selectedIds();
@@ -771,9 +896,14 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
     setRepository(id) {
       if (repositoryId() === id) return;
       setRepositoryIdSignal(id);
-      // 换库：范围回到「还没选目录」—— 浏览范围一定是库下的某个目录（见 `query`）
+      // 换库：退出回收站、范围回到「还没选目录」—— 浏览范围一定是库下的某个目录（见 `query`）
+      if (recycleMode()) setRecycleMode(false);
+      photosScope = null;
       setScopePathSignal(null);
-      void reload().then(() => refreshFlags());
+      void reload().then(() => {
+        void refreshFlags();
+        void refreshRecycleSummary();
+      });
     },
     setScope(path) {
       if (path !== null && path === scopePath()) { void refresh(); return; }
@@ -910,10 +1040,85 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
     async removeSelected() {
       const id = repositoryId();
       const ids = selectedIds();
-      if (id === null || ids.length === 0 || !canWrite()) return null;
+      if (id === null || ids.length === 0 || !canWrite() || recycleMode()) {
+        // 诊断（生产也打）：删除链路的**前端抓手** —— 「点了没反应」先看这一行
+        console.debug("[recycle] removeSelected skipped", {
+          id,
+          ids,
+          canWrite: canWrite(),
+          recycle: recycleMode(),
+        });
+        return null;
+      }
       const result = await api.remove(id, ids);
+      dropEntries(new Set(ids));
+      void refreshRecycleSummary();
+      return result;
+    },
+
+    async removeIds(ids) {
+      const id = repositoryId();
+      if (id === null || ids.length === 0 || !canWrite() || recycleMode()) {
+        console.debug("[recycle] removeIds skipped", {
+          id,
+          ids,
+          canWrite: canWrite(),
+          recycle: recycleMode(),
+        });
+        return null;
+      }
+      const removed = ids.map(Number);
+      const result = await api.remove(id, removed);
+      dropEntries(new Set(removed));
+      void refreshRecycleSummary();
+      return result;
+    },
+
+    async purgeIds(ids) {
+      const id = repositoryId();
+      if (id === null || ids.length === 0 || !canWrite() || !recycleMode()) return null;
+      const removed = ids.map(Number);
+      const result = await api.recyclePurge(id, removed);
+      await refreshRecycleSummary();
+      if (recycleSummary().count === 0) exitRecycle();
+      else dropEntries(new Set(removed));
+      return result;
+    },
+
+    recycleMode,
+    recycleSummary,
+    refreshRecycleSummary,
+    enterRecycle,
+    exitRecycle,
+    openPhotosScope,
+    async restoreSelected() {
+      const id = repositoryId();
+      const ids = selectedIds();
+      if (id === null || ids.length === 0 || !canWrite() || !recycleMode()) return null;
+      const result = await api.recycleRestore(id, ids);
+      await refreshRecycleSummary();
+      // 最后一张还原完：入口消失、视图落回 photos 侧（规格 §4.2 的空态口径）
+      if (recycleSummary().count === 0) exitRecycle();
+      else dropEntries(new Set(ids));
+      return result;
+    },
+    async purgeSelected() {
+      const id = repositoryId();
+      const ids = selectedIds();
+      if (id === null || ids.length === 0 || !canWrite() || !recycleMode()) return null;
+      const result = await api.recyclePurge(id, ids);
+      await refreshRecycleSummary();
+      if (recycleSummary().count === 0) exitRecycle();
+      else dropEntries(new Set(ids));
+      return result;
+    },
+    async emptyRecycle() {
+      const id = repositoryId();
+      if (id === null || !canWrite() || !recycleMode()) return null;
+      const result = await api.recycleEmpty(id);
       setSelection(clearSelection());
-      await reload();
+      // 清空后必定没有内容：退出回收站（它自己会重读并刷新概况）
+      exitRecycle();
       return result;
     },
 

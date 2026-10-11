@@ -38,6 +38,12 @@ const fail = (message, remedy) => {
   process.exit(1);
 };
 
+/** 不阻断构建，但必须打印出来 —— 沉默的缺失会被当成「已经全接了」。 */
+const warn = (message, remedy) => {
+  console.warn(`⚠ ${message}`);
+  console.warn(`  建议：\n${remedy}`);
+};
+
 if (!existsSync(exePath)) {
   fail(`找不到 Windows 产物：${exePath}`, "先在 WSL 里构建（见 AGENTS.md §5.3 的 Windows 侧命令）");
 }
@@ -147,6 +153,16 @@ if (!selfWorker && !existsSync(workerExe)) {
   fail(
     `找不到 RAW worker：${workerExe}`,
     `    cmd.exe /c 'pushd \\\\wsl.localhost\\Ubuntu-24.04\\home\\andares\\repos\\c-thun\\raybend & cargo build -p raybend-desktop -p raybend --features custom-protocol'`,
+  );
+}
+
+// ── ③′ 崩溃助手（W4）：独立进程，主程序崩溃时它负责落 dump ──
+// 缺了它不是致命错误（还有日志与 panic 记录），但必须**看得见** —— 否则会以为「已经全接了」。
+const crashpadExe = join(dirname(exePath), "raybend-crashpad.exe");
+if (!existsSync(crashpadExe)) {
+  warn(
+    `找不到崩溃助手：${crashpadExe}（崩溃时只有日志与 panic 记录，没有 dump）`,
+    `    cmd.exe /c 'pushd \\\\wsl.localhost\\Ubuntu-24.04\\home\\andares\\repos\\c-thun\\raybend & cargo build -p raybend-desktop -p raybend -p raybend-crashpad --features custom-protocol'`,
   );
 }
 

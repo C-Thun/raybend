@@ -177,6 +177,8 @@ const PROVIDED_ELSEWHERE = new Map([
   ["--height", "Ark SegmentGroup.Indicator"],
   // 弹窗层级：Ark 的 Positioner 会吃掉内联 z-index，`index.css` 里按 data 属性赋值
   ["--z-index", "src/index.css（Ark Positioner 的层级栈）"],
+  // 渐隐收尾的长度：`.fade-x-end` 家族在 `styles/fade.css` 里自定义（两个档位 + fit）
+  ["--fade-x-len", "src/styles/fade.css（.fade-x-end / .fade-x-end-sm）"],
 ]);
 
 function sourceFiles(): string[] {

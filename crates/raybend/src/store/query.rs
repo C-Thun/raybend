@@ -61,10 +61,21 @@ pub enum Scope {
 }
 
 impl Scope {
-    /// 目录子树（写起来方便）。
+    /// 目录子树（库内相对路径；空串 = 库根）。
     #[must_use]
     pub fn subtree(rel_path: impl Into<String>) -> Self {
         Self::Subtree {
+            rel_path: rel_path.into(),
+        }
+    }
+
+    /// **当前目录**：只看直属照片（`_RAW/` 视为透明的相机原片目录，与位图同层）。
+    ///
+    /// 浏览侧用的就是它 —— 「点什么目录看什么目录里的东西」，与文件夹概念一致
+    /// （崔总 2026-10-11：点子目录不该把 A/B、A/C 的照片一起铺出来）。
+    #[must_use]
+    pub fn directory(rel_path: impl Into<String>) -> Self {
+        Self::Directory {
             rel_path: rel_path.into(),
         }
     }
@@ -365,6 +376,8 @@ pub enum SortKey {
     Rating,
     /// 机型。
     Camera,
+    /// 删除时间（**回收站视图固定用它**；正常视图不该选它）。
+    DeletedAt,
 }
 
 impl SortKey {
@@ -390,6 +403,7 @@ impl SortKey {
             Self::Camera => format!(
                 "({CAMERA_EXPR}) IS NULL, ({CAMERA_EXPR}) {dir}, a.taken_at {dir}, a.id {dir}"
             ),
+            Self::DeletedAt => format!("a.deleted_at {dir}, a.id {dir}"),
         }
     }
 }
@@ -415,12 +429,26 @@ impl Sort {
     }
 }
 
-/// 一次查询（范围 + 筛选 + 排序）。
+/// 资产可见性（`specs/library-recycle-bin.md` §3.3）——**所有「列 / 数资产」查询的唯一收口**。
+///
+/// 新增查询时不需要记住这件事：条件在 [`Query::where_clause`] 开头无条件生成。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Visibility {
+    /// 正常资产（不在回收站）。**默认值**。
+    #[default]
+    Live,
+    /// 回收站里的资产。
+    Recycled,
+}
+
+/// 一次查询（范围 + 筛选 + 排序 + 可见性）。
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Query {
     pub scope: Scope,
     pub filter: Filter,
     pub sort: Sort,
+    /// 看正常资产还是回收站资产；用 [`Query::new`] 构造的默认是 [`Visibility::Live`]。
+    pub visibility: Visibility,
 }
 
 impl Query {
@@ -433,6 +461,7 @@ impl Query {
                 key: SortKey::TakenAt,
                 desc: true,
             },
+            visibility: Visibility::default(),
         }
     }
 
@@ -441,12 +470,23 @@ impl Query {
         let mut params: Vec<Value> = Vec::new();
         let mut parts: Vec<String> = Vec::new();
 
+        // 可见性永远是第一个条件（唯一收口，见 [`Visibility`]）：
+        // 只要查询经过这里就自动带上，漏不掉。
+        parts.push(match self.visibility {
+            Visibility::Live => "a.deleted_at IS NULL".to_string(),
+            Visibility::Recycled => "a.deleted_at IS NOT NULL".to_string(),
+        });
+
         // 范围永远是「与」——它是「我在看哪一块」，不是筛选条件。
         // 空前缀 = 库根 = 整库：不产生任何条件（否则会变成 `LIKE '/%'` 一条都匹配不上）
         if let Scope::Subtree { rel_path } | Scope::Directory { rel_path } = &self.scope
             && !normalize_rel_prefix(rel_path).is_empty()
         {
-            let prefix = normalize_rel_prefix(rel_path);
+            /*
+             * 与 `rel_path_folded`（小写折叠列）同口径：库里存的目录名可能带大写，
+             * 比较前必须折叠，否则那些目录查不出照片（2026-10-11 修）。
+             */
+            let prefix = normalize_rel_prefix(rel_path).to_lowercase();
             /*
              * 用**范围比较**而不是 `LIKE '前缀/%'`：
              *
@@ -468,7 +508,8 @@ impl Query {
             params.push(Value::Text(upper));
         }
         if let Scope::Directory { rel_path } = &self.scope {
-            let prefix = normalize_rel_prefix(rel_path);
+            // 同上：与 `rel_path_folded`（小写列）同口径，否则带大写的目录名查不出照片
+            let prefix = normalize_rel_prefix(rel_path).to_lowercase();
             let lower = if prefix.is_empty() { String::new() } else { format!("{prefix}/") };
             let offset = lower.chars().count() as i64 + 1;
             parts.push("EXISTS (SELECT 1 FROM asset_files df WHERE df.asset_id=a.id AND substr(df.rel_path_folded,1,?)=? AND (instr(substr(df.rel_path_folded,?),'/')=0 OR (substr(df.rel_path_folded,?,5)='_raw/' AND instr(substr(df.rel_path_folded,?),'/')=0)))".into());
@@ -579,6 +620,25 @@ pub struct AssetRow {
     pub width: Option<i64>,
     pub height: Option<i64>,
     pub orientation: Option<i64>,
+    /// 展示文件（`f` 那一行）的**展示尺寸**（`asset_files.display_*`；老库未回填时为 NULL）。
+    ///
+    /// 与 `width/height` 的分工：那三个是 `assets` 的**原始轴 + 方向**（语义不变），
+    /// 这里是导入时就摆正过的展示尺寸 —— DTO 边界优先用它（`specs/display-size-source.md` §5）。
+    pub display_width: Option<i64>,
+    pub display_height: Option<i64>,
+    /// RAW 文件那一行的展示尺寸（没有 RAW → NULL）—— `raw` 变体用它。
+    pub raw_width: Option<i64>,
+    pub raw_height: Option<i64>,
+    /// latest 的输出尺寸（`develop_stacks.output_*`；没编辑栈 → NULL）—— 看图初值用它。
+    ///
+    /// NULL 不等于「未知」：老库的栈列还没回填时，DTO 层走 [`crate::store::sizes::latest_size`]
+    /// 现算（零 I/O，2026-10-11 修）——不能退回基准尺寸（那是另一个口径）。
+    pub latest_width: Option<i64>,
+    pub latest_height: Option<i64>,
+    /// latest 的**来源基底**（`develop_stacks.source_base`；没编辑栈 → `None`）。
+    ///
+    /// flowinfo 的「文件类型」随显示变体走（崔总 2026-10-11 定）：latest 就是它。
+    pub latest_source_base: Option<String>,
     pub size_bytes: Option<i64>,
     /// 展示用文件已被标记为缺失（磁盘上找不到了）。
     pub missing: bool,
@@ -588,6 +648,10 @@ pub struct AssetRow {
     /// 编辑过吗（编辑栈与原始源不同，判据 `DevelopStack::is_empty`，由分页统一充实）。
     /// tile 左下角：没有定稿但编辑过时显示编辑图标。
     pub edited: bool,
+    /// 回收站里的原位置（`recycled_from`；不在回收站时为 `None`）。
+    ///
+    /// 只有回收站视图会用它（右列「原位置」）—— 正常查询里永远是 `None`。
+    pub recycled_from: Option<String>,
 }
 
 /// 文件名（含扩展名）——从库内相对路径取最后一段。
@@ -607,7 +671,17 @@ const ROW_COLUMNS: &str = "\
     a.author, a.description, a.gps_lat, a.gps_lon, \
     a.country, a.province_state, a.city, a.sublocation, \
     COALESCE(f.file_created_ms, f.mtime_ms) AS created_ms, \
-    (SELECT COUNT(*) FROM issues i WHERE i.asset_id = a.id) AS issue_count";
+    (SELECT COUNT(*) FROM issues i WHERE i.asset_id = a.id) AS issue_count, \
+    (SELECT rf.recycled_from FROM asset_files rf \
+      WHERE rf.asset_id = a.id AND rf.recycled_from IS NOT NULL ORDER BY rf.role LIMIT 1) AS recycled_from, \
+    f.display_width, f.display_height, \
+    (SELECT r.display_width FROM asset_files r \
+      WHERE r.asset_id = a.id AND r.role = 'raw' AND r.display_width IS NOT NULL \
+      ORDER BY r.id LIMIT 1) AS raw_display_width, \
+    (SELECT r.display_height FROM asset_files r \
+      WHERE r.asset_id = a.id AND r.role = 'raw' AND r.display_height IS NOT NULL \
+      ORDER BY r.id LIMIT 1) AS raw_display_height, \
+    d.output_width, d.output_height, d.source_base";
 
 /// 展示用文件的选取规则：**有位图就位图，没有就 RAW**。
 ///
@@ -617,6 +691,11 @@ const ROW_COLUMNS: &str = "\
 const DISPLAY_FILE_JOIN: &str = "\
     LEFT JOIN asset_files f ON f.asset_id = a.id \
      AND f.role = (SELECT MIN(role) FROM asset_files WHERE asset_id = a.id)";
+
+/// latest 的输出尺寸（`develop_stacks.output_*`）—— 主键关联，代价可忽略；
+/// 没有栈行时两列全为 NULL（“没编辑过”）。
+const LATEST_SIZE_JOIN: &str = "\
+    LEFT JOIN develop_stacks d ON d.asset_id = a.id";
 
 fn row_from(row: &Row<'_>) -> rusqlite::Result<AssetRow> {
     let rel_path: String = row.get(1)?;
@@ -652,6 +731,13 @@ fn row_from(row: &Row<'_>) -> rusqlite::Result<AssetRow> {
         width: row.get(17)?,
         height: row.get(18)?,
         orientation: row.get(19)?,
+        display_width: row.get(34)?,
+        display_height: row.get(35)?,
+        raw_width: row.get(36)?,
+        raw_height: row.get(37)?,
+        latest_width: row.get(38)?,
+        latest_height: row.get(39)?,
+        latest_source_base: row.get(40)?,
         size_bytes: row.get(20)?,
         missing: row.get::<_, Option<i64>>(21)?.is_some(),
         // 定稿数：子查询计数永远非负；100 夹取只是对「旧库脏数据」的保险
@@ -661,6 +747,7 @@ fn row_from(row: &Row<'_>) -> rusqlite::Result<AssetRow> {
             .min(100),
         // 「编辑过」由 page() 统一批量充实（判据见 develop::has_edits_batch）
         edited: false,
+        recycled_from: row.get(33)?,
     })
 }
 
@@ -718,7 +805,7 @@ pub fn page(
     let (where_sql, mut params) = query.where_clause();
     let order = query.sort.key.order_by(query.sort.desc);
     let sql = format!(
-        "SELECT {ROW_COLUMNS} FROM assets a {DISPLAY_FILE_JOIN} {where_sql} ORDER BY {order} LIMIT ? OFFSET ?"
+        "SELECT {ROW_COLUMNS} FROM assets a {DISPLAY_FILE_JOIN} {LATEST_SIZE_JOIN} {where_sql} ORDER BY {order} LIMIT ? OFFSET ?"
     );
     params.push(Value::Integer(i64::try_from(limit).unwrap_or(i64::MAX)));
     params.push(Value::Integer(i64::try_from(offset).unwrap_or(i64::MAX)));
@@ -741,6 +828,24 @@ pub fn page(
         for row in &mut out {
             row.edited = edited.contains(&row.id);
         }
+    }
+    /*
+     * latest 尺寸的**读侧回退**（崔总 2026-10-11 真机反馈的 4:3 拉伸）：
+     * 有栈行但 `output_*` 还是 NULL（v19 之前建的编辑，还没回填）→ 按栈现算
+     * （`sizes::latest_size`，**零 I/O**，只读库）。
+     *
+     * 为什么在这里而不是各 DTO：读口只有这一个 —— `browse_page` 与组织视图都走它；
+     * 消费方拿到的 `latest_*` 因此总是「库里存的值，没存就是现算的值」，
+     * **不会退回基准尺寸**（那是另一个口径：未裁切的画面，比例可以完全不同）。
+     * 没栈行的照片不填（latest = 基准是消费方的回退，不必多查三下）。
+     */
+    for row in &mut out {
+        // `source_base` 非空 ⟺ LEFT JOIN 命中了栈行（该列 NOT NULL，schema 保证）
+        if row.latest_width.is_none() && row.latest_source_base.is_some()
+            && let Some((width, height)) = super::sizes::latest_size(conn, row.id)? {
+                row.latest_width = Some(i64::from(width));
+                row.latest_height = Some(i64::from(height));
+            }
     }
     Ok(out)
 }
@@ -1110,6 +1215,69 @@ mod tests {
         let mut got = ids_of(&page(&conn, &query, 0, 50).unwrap());
         got.sort_unstable();
         assert_eq!(got, vec![day1, day1_deep]);
+        assert_eq!(count(&conn, &query).unwrap(), 2);
+    }
+
+    /*
+     * **文件夹语义**（崔总 2026-10-11）：点什么目录只看那个目录**直属**的照片 ——
+     * 点 A 不该把 A/B、A/C 里的也铺出来（那是子树语义，看着就乱套）。
+     * `_RAW/` 是透明原片目录，算同层。浏览侧用的就是 `Scope::directory`；
+     * `Scope::subtree` 保留给确实要整棵树的调用方。
+     */
+    #[test]
+    fn directory_scope_sees_only_its_own_photos() {
+        let conn = catalog();
+        let own = add(
+            &conn,
+            Spec {
+                rel: "photos/A/a.jpg",
+                ..Spec::default()
+            },
+        );
+        let raw = add(
+            &conn,
+            Spec {
+                rel: "photos/A/_RAW/a.orf",
+                role: "raw",
+                ..Spec::default()
+            },
+        );
+        add(
+            &conn,
+            Spec {
+                rel: "photos/A/B/b.jpg",
+                ..Spec::default()
+            },
+        );
+        add(
+            &conn,
+            Spec {
+                rel: "photos/A/C/c.jpg",
+                ..Spec::default()
+            },
+        );
+        add(
+            &conn,
+            Spec {
+                rel: "photos/x.jpg",
+                ..Spec::default()
+            },
+        );
+        // 相邻目录名不能被前缀匹配误伤（`photos/Ab/…` 不属于 A）
+        add(
+            &conn,
+            Spec {
+                rel: "photos/Ab/d.jpg",
+                ..Spec::default()
+            },
+        );
+
+        let query = Query::new(Scope::directory("photos/A"));
+        let mut got = ids_of(&page(&conn, &query, 0, 50).unwrap());
+        got.sort_unstable();
+        let mut want = vec![own, raw];
+        want.sort_unstable();
+        assert_eq!(got, want, "只看 A 直属的（含 _RAW/），不含子目录与相邻目录");
         assert_eq!(count(&conn, &query).unwrap(), 2);
     }
 

@@ -17,6 +17,9 @@ import type { DirEntry } from "../../api/types.ts";
 /** `photos/` —— 库内照片的落地根，也是目录树的根（库根不再是树的根）。 */
 export const PHOTOS_DIR = "photos";
 
+/** `recycle/` —— 库内回收站目录（与 `photos/` 同级；`specs/library-recycle-bin.md`）。 */
+export const RECYCLE_DIR = "recycle";
+
 /** `_RAW/` —— 保留目录名。Rust 侧同名常量：`crates/raybend/src/import/plan.rs` 的 `RAW_DIR`。 */
 export const RAW_DIR = "_RAW";
 

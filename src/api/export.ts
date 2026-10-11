@@ -39,7 +39,7 @@ export async function validateExportPreset(
 export async function getExportVariantImage(
   repositoryId: string,
   reference: VariantRef,
-  size: "grid" | "strip" | "screen",
+  size: "grid" | "screen" | "full",
   captured?: VariantSnapshot,
   rawOriginal?: boolean,
 ): Promise<Uint8Array | null> {
@@ -77,7 +77,7 @@ export async function getExportVariantDetails(repositoryId:string,captured:Varia
 
 /** RAW 真实小图命中才去掉模拟滤镜；字节和来源作为同一个队列结果发布。 */
 export async function getVariantThumb(repositoryId: string, reference: VariantRef,
-  size: "grid" | "strip", captured?: VariantSnapshot): Promise<{ bytes: Uint8Array; approximate: boolean } | null> {
+  size: "grid" | "screen", captured?: VariantSnapshot): Promise<{ bytes: Uint8Array; approximate: boolean } | null> {
   if (reference.variant === "raw") {
     const cached = await getExportVariantImage(repositoryId, reference, size, captured, true);
     if (cached !== null && cached.byteLength > 0) return { bytes: cached, approximate: false };

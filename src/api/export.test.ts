@@ -47,13 +47,13 @@ test("RAW 真小图命中不读模拟；未命中则把内嵌字节和滤镜标�
   } };
   try {
     const ref = { assetId: 1, variant: "raw" };
-    assert.deepEqual(await getVariantThumb("repo", ref, "strip"), { bytes: new Uint8Array([1, 2]), approximate: false });
+    assert.deepEqual(await getVariantThumb("repo", ref, "screen"), { bytes: new Uint8Array([1, 2]), approximate: false });
     assert.equal(calls.length, 1);
     hasRaw = false; calls.length = 0;
     assert.deepEqual(await getVariantThumb("repo", ref, "grid"), { bytes: new Uint8Array([3, 4]), approximate: true });
     assert.deepEqual(calls.map((call) => call.rawOriginal), [true, false]);
     calls.length = 0;
-    assert.deepEqual(await getVariantThumb("repo", { assetId: 1, variant: "issue:2" }, "strip"),
+    assert.deepEqual(await getVariantThumb("repo", { assetId: 1, variant: "issue:2" }, "screen"),
       { bytes: new Uint8Array([3, 4]), approximate: false });
     assert.equal(calls.length, 1);
     assert.equal(calls[0]?.rawOriginal, null);

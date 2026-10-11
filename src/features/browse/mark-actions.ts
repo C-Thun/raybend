@@ -69,6 +69,17 @@ export async function runMark(
   }
 }
 
+/** `applyMarkIntent` 的调用选项。 */
+export interface MarkIntentOptions {
+  /**
+   * 强制按**筛选语义**应用（导出工具条用：导出只有筛选模式、没有设置模式）。
+   *
+   * 条件写入前先把 `filterMode` 置真 —— 目的不是给用户看一个开关，而是让 browse 的漏斗、
+   * 两边的 chips 行与真正生效的查询**永远同一份状态**（否则会出现「看着没筛却少着照片」）。
+   */
+  forceFilter?: boolean;
+}
+
 /**
  * 按**当前模式**应用一个标记意图（工具条与命令面板的唯一入口）。
  *
@@ -82,7 +93,9 @@ export async function applyMarkIntent(
   store: BrowseStore,
   intent: MarkIntent,
   toast?: ToastStore,
+  options: MarkIntentOptions = {},
 ): Promise<void> {
+  if (options.forceFilter === true && !store.filterMode()) store.setFilterMode(true);
   const selected = store.selectedItems();
 
   if (store.filterMode()) {

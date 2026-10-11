@@ -37,11 +37,17 @@ function item(overrides: Partial<AssetItem> = {}): AssetItem {
     iso: 200,
     width: 6000,
     height: 4000,
+    rawWidth: 6000,
+    rawHeight: 4000,
+    latestWidth: null,
+    latestHeight: null,
+    latestSourceBase: null,
     orientation: 1,
     sizeBytes: 20_000_000,
     missing: false,
     issueCount: 0,
     edited: false,
+    recycledFrom: null,
     ...overrides,
   };
 }

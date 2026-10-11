@@ -8,7 +8,7 @@
 > 不维护「待办清单」文件；需要留痕的写进 `implementations/` 记录或相应文档，
 > 人类做完之后 Agent 要**自己验证**并把结论记进同一处。
 >
-> 建立时间：2026-09-15 ｜ 最近重构：2026-09-27（记忆体分层：本文件瘦身，细节迁入 `memory/`）
+> 建立时间：2026-09-15 ｜ 最近重构：2026-10-11（全局信息梳理：纪律压缩、关键定义上移到 §11；细节仍在 `memory/` 各文件里留档）
 
 ---
 
@@ -43,23 +43,80 @@ raybend（中文名**「光伴」**，产品名 `RayBend`）是一个**相片管
 9. 新增顶层框架或大型依赖前先在会话中讨论，候选方案登记到 `memory/FUTURE.md`。
 10. **单元测试必须齐备**（交付模块必须同时交付测试）：覆盖边界（空输入/单元素/上下限/非法值/Unicode 与中文/超长路径/大小写规范化/并发竞争/溢出截断），`cargo test` 与 `pnpm test` 保持秒级；重负载降为小规模合成数据或 `#[ignore]` 手动基准。
 11. **遇到难题：先绕过、记录、继续走**。能绕过就把「问题 + 绕法 + 风险」写进 `implementations/` 并在对话里说一声；绕不过去（继续会踩空或污染已完成部分）就先做其它能做的，攒到没有可开工任务时汇总请求协助，不要自己硬试。判据是「绕过之后剩下的事还成不成立」，不是「难不难」。**进度只能往前走。**
-12. **复用优先于重复硬编码**——同一个能力只允许有一套实现；「同一个东西两个组件 / 两种表达」本身就是 bug。动手前先找现成的：① 仓里已有的（`components/ui/`、`lib/`、同类工作区那份）→ **读它的源码**（读，不是猜）；② 有 → 改它、一般化它，**绝不写第二份**；③ 没有 → 才新建，并在 `implementations/` 写清「为什么现有的扩不了」；④ 两侧数据形状不同属**适配层**，不是写两份的理由。Pencil 画稿只是参考，优先复用现代组件库。重构是日常动作：改到哪儿顺手收敛到哪儿。
+12. **复用优先**：同一能力只允许一套实现，「两种表达」本身就是 bug。动手前先**研判有哪些可复用的子模块**，
+    再到仓里找（**基础组件清单见 §12**、`lib/`、同类工作区那份）→ **读它的源码**（读，不是猜）；有 → 改它、一般化它，
+    **绝不写第二份**；没有 → 才新建，并在 `implementations/` 写清「为什么现有的扩不了」+ **把新基础组件补进 §12**。
+    ❗**用户指定参考哪个功能时，全部精力用于复用那份参考**，不许照着重做（2026-10-11 教训：让参考 export 的
+    拖动，结果写了第二套 —— 尺寸/透明度/命中方式全不一样，用户看到「同一个手势两个效果」）。
+    **画稿与既有实现冲突时既有实现优先**（Pencil 定「要什么」，不定「另一套怎么写」）。重构是日常动作。
 13. **本地应用实时性优先，丢掉 web 式缓存思维**：桌面程序外部的磁盘状态会变，「载入一遍不动」是错的；默认每次进入/展开/重读重新读盘（readdir 是微秒级）。要防的是「疯狂扫描」（同秒反复全盘扫描、无上限递归），不是多扫几遍。实时性与性能冲突时，把「多久算过期」写出来让人类拍板。
-14. **一轮清单要连续做完**：人类一次给一批事项 = 「一直做到没有可做的」；停下来只有两种正当理由——真的需要人类协助（直接说）、继续会踩空或污染已完成部分。中间过程只写 `implementations/`，不逐项请示（§5.5）。
-15. **新增功能必须评估命令体系接入**：用户可触发的功能要检查是否登记进统一命令注册表（`features/commands/catalog.ts`），进而出现在命令面板（`Ctrl+K`）、快捷键设置与标题栏菜单；❗**默认热键（`defaultKey`）或明确留空（写明理由）必须在同一次改动里给出**，不做事后审计。选键先过冲突与保留规则（`lib/commands.ts::detectConflicts`、`lib/key-chords.ts::RESERVED_CHORDS`）；键位文案走 `keyLabel` / `formatChord`。不是所有功能都必须变成命令，但实施记录要写清「已接入（含热键决定）」或「不接入及理由」。
+14. **一轮清单要连续做完**：人类给一批事项 = 一直做到没有可做的。停下的正当理由只有两个：
+    真需要人类协助（直接说）、继续会踩空或污染已完成部分。中间只写 `implementations/`，不逐项请示（§5.5）。
+15. **新功能必须评估命令体系接入**：用户可触发的功能登记进 `features/commands/catalog.ts` → 命令面板（`Ctrl+K`）/
+    快捷键设置 / 菜单；❗**默认热键或明确留空（写明理由）在同一次改动里给出**，不做事后审计
+    （选键过 `lib/commands.ts::detectConflicts` 与 `lib/key-chords.ts::RESERVED_CHORDS`，文案走 `keyLabel`/`formatChord`）。
+    不接入的，实施记录要写理由。
 16. **数据库 schema 变化只走现有迁移框架**（`crates/raybend/src/store/migration.rs` + `store/migrations/*.sql`）：版本闸门、`VACUUM INTO` 迁移前快照、逐条事务、完整性检查。禁止启动时临时 `ALTER`、另造迁移通道、静默删库重建；localStorage 等设备级偏好用**版本化 key + 显式一次性迁移**。
 17. **Solid 壳组件透传 children：`untrack` 写在插入点**——`{untrack(() => props.children)}`（就写在 JSX 那一行）；**禁止**提到组件 body 里提前求值。A/B 两面的完整教训、判据与回归脚本见 `memory/ARCHITECTURE.md` §9。
 18. **禁止全盘搜索**：不许 `find /`、`grep -r /` 这类从根往下的扫描（会把 `/mnt` 一起卷进来）。先查本仓；第三方源码走确定路径：cargo 依赖在 `~/.cargo/registry/src/index.crates.io-*/`、pnpm 依赖在仓内 `node_modules/`、参考实现在 `/home/andares/repos/refers/<name>/`；不确定路径先 `ls` 父目录一层。
 19. **新增/改动功能必须同步评估 XMP 侧影响**（崔总 2026-09-30 定）：凡是改动会进 sidecar 的数据（编辑栈 / issue / 评级 / 色标 / 标签 / 文字 / 地点等）或其存储布局（目录、命名、`_RAW/` 规则），必须在**同一次改动**里判断并接好对 XMP sidecar 写出与读回的影响（规格：`specs/xmp-sidecar.md`），**不得延后欠账**——例：将来改地理位置功能的落地方式时，`photoshop:` / `Iptc4xmpCore:` 那一侧的映射要一起动。
-20. **界面不加「不带变量的固定说明文字」**（崔总 2026-10-08 定）：用户没明确要求时，不要在界面上写解释性句子 —— 界面不是说明书。判据：**这句话里有没有随数据变化的量**（名称、日期、数量、状态）。
-    - 该留：`RAW · 2026-10-08`（带日期）、`已选择 3 张`（带数量）、错误原因与禁用理由（讲清**这一次**为什么不行）。
-    - 该去：`固定不可编辑`、`工作副本 · 自动保存` 这类对每个用户、每次打开都一样的注解；要解释概念就写进 `docs/` 或 hover 提示（tooltip 可以有，但不能占版面）。
-    - 它与 §11.1「界面文案零硬编码」不冲突：那条管**文字怎么进语言包**，这条管**该不该出现**。两处同源记述：`memory/DESIGN.md` §11.1 规则 6。
-21. **编辑器的快照只在 confirm 时建立**（崔总 2026-10-09 定）：`EditorWorkspace.confirmEdit` 是**唯一**建立快照（撤销栈条目）的入口；拖动过程中只发内存参数给渲染线程，**绝不落库**。
-    - **每加一个编辑功能，先列出它有哪些「操作节点」**（松手 / 双击归位 / 重置 / 选择 / 开关 / 应用 / 工具确认…），把每个节点接到 `onConfirm` 上，并在 `confirmEdit` 的节点清单表里补一行 —— 漏一个，撤销就会跳步或出现用户看不懂的中间快照。
-    - 走**工具草稿**的功能（如旋转角度）其 confirm 是工具的「确认」那一步，不是草稿内的拖动；载入/换照片时的自动纠正（`setEditBase(target.actualBase)`）也不是用户操作 —— 这两类要在清单里写明。
-    - 排查抓手：`EditorStore.confirmTick` / `confirmNote`（计数与摘要）与 `console.debug("[editor] confirm", …)`（每次 confirm 都打，生产也在）。
-    - 变更点反查法（崔总提供、已验证有效）：**看 profile 结构里有哪些项**（`values` / `curves` / `lutId` / `lensProfile` / `sourceBase` / `geometry` / `color`…），把「会改每一项的 store 方法」全列出来，再找它们的 UI 调用点 —— 这就是需要 confirm 的完备集合。
+20. **界面不加「不带变量的固定说明文字」**（崔总 2026-10-08）：判据是**这句话里有没有随数据变化的量**
+    （名称/日期/数量/状态）。带变量的留（`RAW · 2026-10-08`、`已选择 3 张`、讲清「这一次」为什么不行）；
+    对每次都一样的注解去掉（`固定不可编辑`、`工作副本 · 自动保存`），要解释概念就进 `docs/` 或 hover 提示。
+    与「界面文案零硬编码」（§11.1）不冲突：那条管文字**怎么进**语言包，这条管**该不该出现**。
+21. **编辑器的快照只在 confirm 时建立**（崔总 2026-10-09）：`EditorWorkspace.confirmEdit` 是**唯一**建立快照
+    （撤销栈条目）的入口；拖动只发内存参数给渲染线程，**绝不落库**。每加一个编辑功能，先列它的「操作节点」
+    （松手 / 归位 / 重置 / 选择 / 开关 / 应用 / 工具确认…），全部接到 `onConfirm` 并补进 `confirmEdit` 的节点清单
+    —— 漏一个，撤销就会跳步。工具草稿类（如旋转角度）的 confirm 是工具的「确认」那一步；载入/换照片的自动纠正
+    不算用户操作（这两类在清单里写明）。反查法：看 profile 结构里每一项（`values`/`curves`/`lutId`/`lensProfile`/
+    `sourceBase`/`geometry`/`color`…），列出会改它的 store 方法，再找 UI 调用点 —— 这就是完备集合。
+    抓手：`confirmTick`/`confirmNote` 与 `console.debug("[editor] confirm", …)`。
+22. **长文本收尾一律渐隐，不用省略号**（崔总 2026-10-10）：宽度受限的文字超长时用**右缘渐隐截断**，
+    不再用 `text-overflow: ellipsis`（Tailwind `truncate`）。工具在 `src/styles/fade.css`：
+    `.fade-x-end`（20px）/ `.fade-x-end-sm`（8px 小元素）/ 盒子随内容收缩时**必须**配 `.fade-x-end-fit`。
+    边界：元素自带底色时在内部包一层只放文字的 span（mask 上在带底色的元素上会把底色一起淡掉）；
+    居中文本的溢出左端仍是硬裁（已知取舍）。存量改到哪儿顺手收敛到哪儿。
+
+23. **改动前做足影响调研**（崔总 2026-10-11）：软件越完善，一个改动牵动的模块越多（做回收站就要同时动扫描、
+    目录同步门禁、目录树、缓存、XMP 侧车、命令注册）。动手前列「会碰到哪些模块 / 调用方」，改完逐项核，
+    结论写进 `implementations/`。
+
+25. **看图没有「档位」**（崔总 2026-10-11 定案）：任何看图的地方（browse view / compare / 全屏 /
+    editor 视口）**一律原图像素** —— 不存在「预览档 / 全尺寸档」「按需升档」「拖动时用小一号的图凑」
+    「按缩放档位选凑合尺寸」这类机制；见到了就删，不要再商量。
+    ❗**缩放 / 平移 / 适应窗口 / 100% 是纯视口变换，永远不重新出图、不弹载入提示**。
+    代号曾是 `render/tier.rs`（已删除）、`specs/HANDOFF-2026-09-24-*` 的档位部分（已废弃）。
+    要提速只能从管线、缓存、调度上想办法 —— **不许用「小一号的图」换时间**。
+26. **每次看图只允许一次载入**（崔总 2026-10-11）：一次「载入」= 从打开/切到某张照片到它按原图
+    画上屏。任何**可能触发第二次载入**的路径都禁止存在（缩放、窗口尺寸、DPR 变化、对比进入、
+    全屏打开、参数调整…都只能复用已画好的图）。「正在载入…」提示只属于**换照片**这一件事。
+    占位图（1920 / 384）只允许作为**载入期的过渡帧**：一次、被原图原地替换、绝不成为终态。
+
+24. **库外（import）与库内是两套口径：import 一律 JPEG、不碰缓存、窗口优先**（崔总 2026-10-11 定）：
+    动手前先问「这段代码服务哪个场景」——import 面对的是**外部目录**（相机卡 / SD 卡 / 待入老库 / 临时盘），
+    **导入完就不会再访问**；库内（浏览 / 编辑 / 导出）相反：有 catalog + 缩略图缓存，同一张图会被反复看几十次。
+    * **小图格式**：库内一律 **AVIF q90 / 4:4:4**（为画质与磁盘占用付编解码代价，规格在 `memory/FUNCTION-IMAGING.md`）；
+      **import（来源目录 / 未入库）一律 JPEG** —— 那里要的是「最快出现」，不追求画质与体积。
+      给 import 做 AVIF 是纯负优化（实测单张编码 118 ms vs JPEG 3–5 ms，依据 `implementations/2026-10-11_import-tiles-diagnosis.md`）。
+    * **禁止在来源目录上折腾缓存**：预热 / 持久化 / 失效策略 / 命中率 / GC 都不是 import 的课题 ——
+      SD 卡导入完就清、临时目录不会回来、thumbcache 那套在 import 里没有有效期可言。
+      用户看到的「越优化越慢」就是这么来的。
+    * **库外的图只活在进程内存里**（2026-10-11 定）：`thumbnail::memory::SourceThumbs` 两档 ——
+      缩略图（384）256 MB 字节上限、**真身**（该图自己的像素）10 张；键含**文件身份**（大小 + mtime），
+      换卡 / 覆盖保存自动不命中。**一行都不许写 `_sources/thumbs.db`**（那份只服务库内文件；
+      以前库外也往里写，用户机器上攒了 148 MB 永远读不回来的死行）。
+    * **import 没有 1920 这一档**：占位直接用 384 顶着，真身随后补（位图 = 原文件本身，RAW = 完整解码）。
+      规格 `specs/thumbnail-tiers-and-import-memory.md`（全局缩图只剩 384 / 1920 两档，192 已取消）。
+    * **import 只有一道题**：怎么最快把**窗口内那几屏 tiles** 显示出来。判据（拿不准按它拍）：
+      ① **只读必要的**（tiles 要的就是 文件名 / 类型 / 小图 / 方向，其它点中再拿）；
+      ② **只保证不显示错的信息**，画质可以让步（低质小图、内嵌预览都行）；点中了再读那张的真东西；
+      ③ **窗口优先（viewport-first）**：取数与生成以**当前窗口**为第一优先，窗口外的请求必须能撤（滚出去就撤）；
+      ④ **不许卡**：不允许界面无响应 —— 真要等就上过渡（占位 / 先低质后补 / 转圈）。
+    * **变化点清单法**（选中 / 进 view / 切图前先列）：把会变的界面元素逐条列出来
+      （`flowinfo` 的 EXIF、尺寸 / 类型、规格标记、预览底图…）→ 每条写清「从哪取、要多久、会不会阻塞」→
+      阻塞的必须在同一次改动里配过渡，**不许先接了再说**。
+    * 做法上**先做减法**：能删的工作先删（不读、不编码、不做缓存），剩下的才谈调度（窗口优先、离开即撤）。
+      加缓存 / 加预热 / 加队列不是本场景的答案 —— 先回到「最早那一版为什么够快」（import 第一版小图就是 JPEG q82）再谈优化。
 
 ---
 
@@ -154,6 +211,7 @@ pnpm smoke:ui [url]
 # —— Windows 侧（真实产品环境；日常用封装脚本）——
 pnpm debug:win             # build + 跨编译 + check:win + 运行（含 dav1d 环境）
 pnpm check:win             # 产物时间与内容核对（见下）
+pnpm check:diagnostics     # 诊断层真机冒烟（日志/崩溃记录/导出报告，见 §5.8；先 debug:win）
 pnpm release [patch|minor|major] --win-msi ...   # 或 --win-nsis（可组合）；打包/publish 由人类执行
 # ❗ release 只在**任务清单里真有发版任务**时才跑（崔总 2026-09-28 定）：
 #    给崔总出测试产物用 pnpm debug:win（快）；release 一次 15 分钟起，还会顶版本号。
@@ -188,6 +246,68 @@ pnpm release [patch|minor|major] --win-msi ...   # 或 --win-nsis（可组合）
 `REVIEW.md` 记「每轮 review 的判断、取舍与去向」，只记结论与落点，**规格正文写回拥有它的那份文件**；
 维护规则见该文件 §0。结论归人类拍板，Agent 不得把「待决」自行改成「已采纳」。
 
+### 5.7 真机直连调试（CDP）——要看真应用，**先走这条现成通道**
+
+要在**正在运行的 Windows 应用**里看 DOM / 拦 IPC / 驱动界面（排「真机为什么慢」这类问题时必用），
+**不许自己搭隧道**（2026-10-11 教训：绕了一大圈反向隧道，其实仓库里早有授权好的直连；`rbrelay` 那套已删）。
+
+1. **看方案本身**：`scripts/perf-win.mjs` 头部（连接方式一节）+ `scripts/lib/cdp.mjs`（公共工装）。
+2. **拉起带调试口的 exe**：`pnpm perf:win --launch`（它代劳了 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9333`
+   经 `WSLENV` 透传 + 直连候选轮询）。手工起也一样：
+   `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS='--remote-debugging-port=9333' WSLENV=WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS <exe>`。
+3. **一次性授权**（本机已做过，`netsh portproxy` **9334 → 127.0.0.1:9333** + 防火墙只放行 WSL 子网 172.16.0.0/12；
+   原文命令在 `perf-win.mjs` 头部）。授权还在就直接用；WSL 侧连 **`http://<默认网关>:9334/json/list`**。
+4. **拦 IPC 的窍门**（找错拦截点会白费一轮）：Tauri v2 的 IPC 是 **`fetch("http://ipc.localhost/<cmd>")`**，
+   **不是** `chrome.webview.postMessage`（后者在我们的版本上不承载 IPC）；
+   `window.__TAURI_INTERNALS__.invoke` 是 `{writable:false, configurable:false}`，**patch 不了** ——
+   要计时就拦 `window.fetch`（记 url / 耗时 / 成败 / 回包字节）。
+5. **纪律**：诊断只看不改；拉起来的实例会锁住 exe（挡住下一次 `debug:win`），收工时记得收；
+   **别拿探针的「空闲 + 热缓存」数字当用户体感**——真机首进目录是冷读、且同时在跑别的命令，场景不同结论就不同。
+6. **排障**：`netstat -ano | findstr 9333` 没有 → 调试口没开（多半已有别的实例占着 WebView2 进程，先关掉再拉）；
+   连不上 → 先确认 exe 是带参数起的、`netsh portproxy show v4tov4` 里 9334 那一行还在。
+
+### 5.8 出问题了去哪看：日志与崩溃记录（崔总 2026-10-12 要求写清）
+
+**先看这两个目录**（Windows；`<数据目录>` = `%LOCALAPPDATA%\com.cthun.raybend`）：
+
+```text
+<数据目录>\logs\raybend.log        本次会话（上一会话是 raybend.1.log，直到 .9；2 MiB/个，目录总上限 20 MiB）
+<数据目录>\crashes\RB-<日期>-<短码>\  一次崩溃一个目录
+    report.json / report.txt        崩溃记录：类型 / panic 消息与位置 / 线程 / backtrace / 日志尾 200 行
+    dump.dmp / dump.json            硬崩溃的 minidump（助手进程写；report 里的 panic 那份没有 dump 说明助手不在）
+```
+
+**怎么读**：
+
+* 第一行是**会话头**：`=== session <本地时间+偏移> <版本> <dev|release> <os-arch> cpu=<N>t pid=<pid> id=<会话 id> ===`。
+  日志行一律 **UTC 毫秒**（`2026-10-12T01:39:51.123Z`），对本地时间要 **+8 小时**（会话头给的是本地时间，两者一对照就能定位）。
+* 行格式：`<UTC 时间>  <级别>  <目标>  <消息> [ thread=<线程> ]`；`目标` 是模块或进程标签
+  （`editor`、`sidecar`、`db`、`raw-worker`/`ai-worker` = 子进程 stderr、`crashpad` = 崩溃助手）。
+* **dev 构建默认 DEBUG、发布版 INFO**；临时要更细：`RAYBEND_LOG=debug`（或 `trace`）启动。
+* **日志已脱敏**：路径是 `<path:.jpg#3f9a>`、UNC 是 `<unc>`、邮箱/IP/URL 也是占位符；
+  代码位置（`crates/.../x.rs:42`）**保留原样** —— 所以日志可以直接贴出来。
+* **崩溃了怎么判**：
+  1. `crashes/RB-*` 里有 `report.json` → 是 **panic**（看 `panic.location` 与 `logTail` 的最后几行）；
+  2. 有 `dump.dmp` 但没有 report → **硬崩溃**（访问违例/栈溢出等，进程来不及写字）；
+  3. 什么都没有，但上次启动时日志末尾有一行 `上次会话未正常退出` → 进程被外部杀掉（任务管理器/断电）
+     或崩得太早（助手与 hook 都还没装上，例如启动第一秒）。
+* **worker 崩了**：主日志里搜 `[raw-worker]` / `[ai-worker]`（worker 的 stderr 现在按行转进同一份日志，含它的 panic）。
+* **崩溃后第二次启动会弹一次窗**（崔总 2026-10-12）：问你「要不要把错误报告存下来发给我们」，点「保存报告…」→
+  系统另存为 → 在你选的目录产出 `RayBend-错误报告-RB-*.zip` + 《RayBend-错误报告提交指南.txt》
+  （里面有 GitHub issue 与邮件 `raybend+andares@outlook.com`；QQ 群未建、暂不列）。
+  点「不报告」/ Esc / 点遮罩 → **该崩溃记录被标记，下次启动不再问同一条**（只有新的崩溃才会再问）；
+  在系统另存为里取消 → 不标记，下次启动还会问一次（用户本意是要存的）。
+  ⚠ 报告包里的 `report.json` / 日志都已脱敏；**内存转储默认不带**，需要时在弹窗里勾选（可能含图像数据片段）。
+* 日志/崩溃目录满了会自己清（只留最近的）；`crashes/` 每份记录都带 `RB-*` 目录名，
+  出问题时**把整个目录（或整份 raybend.log）发给定位的人**即可 —— 里面没有你的路径、名字与文件内容。
+
+**没装成的东西**：「一键发送（T1 自建接收服务）」「复制报告摘要」「`mailto:` 预填」与报告对话框的完整版
+属第三层（W3/S1，登记在 `memory/FUTURE.md`）——现在只能自己存包、自己发。
+规格总表：`specs/logging-and-crash-report.md`。
+
+**想一次把整条链验一遍**：`pnpm debug:win && pnpm check:diagnostics --reset`（脚本会自己启动/硬杀/重启，
+验七件事：会话头 → 助手就位 → 硬杀后能被检测到 → 导出 zip+指南 → 不再重复问 → 优雅关闭删锁 → panic 落 report+dump）。
+
 ---
 
 ## 6. 已确定的架构决定
@@ -197,8 +317,11 @@ pnpm release [patch|minor|major] --win-msi ...   # 或 --win-nsis（可组合）
 - **6.1 渲染架构 = 原生 wgpu + 透明挖洞（方案 B）**：WebView2 覆盖全窗，照片视口在 webview 中间挖透明洞，Rust/wgpu 绘制其下原生 GPU 底板（Windows 产品默认 **DX12 + DirectComposition visual + Opaque**）。Library/网格用 DOM 虚拟化，Develop 视口用原生 wgpu 直绘。**接口三条红线**：① 视口状态由 Rust 独有，前端只发交互意图；② 覆盖层用 Rust 提供的同一变换矩阵，禁止前端自行推导像素对齐；③ WGSL 与 uniform 属于 Rust crate，前端不接触像素格式与色彩空间。透明链是硬约束：`html`/`body` 必须常驻透明。坐标契约（四种量不得混用、DPR 读运行时值）见 §7.9 与 `docs/native-viewport-coordinate-guide.md`。
 - **6.2 为 Tauri 3.0 迁移做准备**：不引用 `tauri::Wry` 具体类型与 feature flag，窗口句柄包成自己的 `NativeWindowHandle`；资源路径走 Tauri path API。
 - **6.3 RAW 解码层（可插拔）**：首选 rawler 0.8.0，后端可插拔接口在 `raybend` 内，禁止其它模块直接依赖 rawler 类型；**解码必须在独立 worker 进程**执行（崩溃不带崩主进程），对文件做大小/格式预检；第一阶段优先用内嵌 JPEG 预览做缩略图（快 1–2 个数量级）。
-- **6.4 存储架构 = 全局库 + 每仓 catalog（分层）**：`%LOCALAPPDATA%\com.cthun.raybend\`（app.db、备份、缩略图缓存、luts、日志）+ 库根（catalog.db 真相源、photos/、cache/full/ 大图）。真相源规则：本地编辑以 DB 为准、XMP 只是互操作通道、RAW 永不写回。写并发 = 单写者 actor + 读连接池 + WAL。库身份 = catalog.db 内唯一 ID，app.db 记多路径；路径挂了哪个库靠**读 ID 比对**。禁止 catalog 放云同步/网络盘。完整目录布局与规则见 `memory/ARCHITECTURE.md` §6.4，业务规格见 `memory/FUNCTION-REPOSITORY.md`。
-- **6.5 缩略图 / 预览缓存**：三种图（thumb 384 / 胶片带 192 / 预览 1920）的规格与生成节点见 `memory/FUNCTION-IMAGING.md`（唯一事实源）。小图在 `%LOCALAPPDATA%\...\cache\_sources\thumbs.db`，1920 AVIF 在库根 `cache/full/`；AVIF 质量 90 / 4:4:4。红线：删掉整个缓存目录后功能降级但可从原图重建；`app.db` / `catalog.db` / LUT 本体不是可删缓存。
+- **6.4 存储架构 = 全局库 + 每仓 catalog（分层）**：`%LOCALAPPDATA%\com.cthun.raybend\`（app.db、备份、缩略图缓存、luts、日志）+ 库根（catalog.db 真相源、photos/、recycle/ 回收站、cache/full/ 大图）。真相源规则：本地编辑以 DB 为准、XMP 只是互操作通道、RAW 永不写回。写并发 = 单写者 actor + 读连接池 + WAL。库身份 = catalog.db 内唯一 ID，app.db 记多路径；路径挂了哪个库靠**读 ID 比对**。禁止 catalog 放云同步/网络盘。完整目录布局与规则见 `memory/ARCHITECTURE.md` §6.4，业务规格见 `memory/FUNCTION-REPOSITORY.md`。
+- **6.5 缩略图 / 预览 / 真身缓存**：两种缩图 + 真身的规格与生成节点见 `memory/FUNCTION-IMAGING.md`（唯一事实源）；**缩图只有 `thumb` 384 与 `preview` 1920 两档**（192 那一档 2026-10-11 取消）。小图在 `%LOCALAPPDATA%\...\cache\_sources\thumbs.db`，库内大图在库根 `cache/full/<资产>/`，**库内**一律 **AVIF 质量 90 / 4:4:4**；**来源目录（未入库）的小图一律 JPEG**（§2.24，别给 import 做 AVIF）。
+  **库内大图分两档**（2026-10-11 起，`CacheClass::{Preview,Full}`）：`…-v<pipeline>.avif` = **载入占位**（长边 1920）；`…-full-v<pipeline>.jpg` = **看图真身**（该变体自己的像素，JPEG q92 ~9MB/20MP）。
+  latest 快照名含**栈指纹**（`latest-<profile_hash 前 12 位>-src<源签名>-<base>[-full]-v<pipeline>`）：落库不删整目录，旧文件由 `FullCache::gc_latest` **按档各**保留最新 2 份；容量上限 = **5GB 或可用空间 5% 取小**（`maybe_enforce_capacity`，写后有限流），超限按「真身档先删、同档最旧先删」。
+  **失效要连真身档一起**（`invalidate_source` 不限扩展名；`invalidate` 按 `latest-` 前缀、`remove_issue` 按 `issue-<id>-` 前缀，两档都命中）。红线：删掉整个缓存目录后功能降级但可从原图重建；`app.db` / `catalog.db` / LUT 本体不是可删缓存。回收站清空/真删时连带清理该资产的 `cache/full/<id>/`。
 
 ---
 
@@ -316,17 +439,23 @@ left / right 叠在 mid 之上各自贴边（分别装 workspace 左列 / 右列
 两者互相独立；勾选要显式点圈，选中是「点行本身」的结果；跨面板的选中状态是同一个状态，必须同步。
 ❗ 不要因为某目录被选中而强制展开树（`memory/DESIGN.md` §12.4.1）。
 
-### 11.3 移除 / 排除 / 删除（三者不同，统一用禁行图标，不用叉号）
+### 11.3 移除 / 排除 / 删除 / 还原（四者不同，统一用禁行图标，不用叉号）
 
 | 术语 | 含义 | 弹窗 |
 | --- | --- | --- |
 | **移除**（remove） | 从**当前集合**里拿掉 | 默认要，`Shift` 跳过（`easy destroy`） |
 | **排除**（exclude） | 本次导入不带这张（不动库、不动磁盘） | 同上 |
-| **删除**（delete） | **移到系统回收站**（不提供永久删除；先文件后记录，回收失败不动 DB） | 要（**无 `Shift` 快通道**，它真动磁盘） |
+| **删除**（delete） | **移入库内回收站** `recycle/`（可还原；文件先走、记录后走，移动失败不动 DB） | 按钮 / `Delete` 键：要；**拖动：不要**（明确手势） |
+| **还原**（restore） | 从回收站移回原位（同名自动加 `_01` 后缀） | 不要 |
+| **真删**（purge） | 永久删除回收站里选中的（**只有拖动一条路**：无按钮、无快捷键） | 不要 |
+| **清空**（empty） | 永久删除回收站全部 | **要**（强确认） |
 
 ### 11.4 组件 × 工作流的组合表达
 
-四个工作流 `import` / `browse` / `edit` / `export`（顺序即流水线）。workspace 中列组件：
+四个工作流 `import` / `browse` / `edit` / `export`（顺序即流水线）。
+❗**`import` 与另外三个不是同一套口径**（外部目录 vs 库内：小图格式、缓存、取数优先级都不同）——见 §2.24。
+
+workspace 中列组件：
 
 | 词 | 指什么 |
 | --- | --- |
@@ -349,7 +478,11 @@ import 与 browse 的照片区必须经同一个 `PhotoViewingStage` / `PhotoVie
 | 术语 | 含义 |
 | --- | --- |
 | **库**（repository） | 用户选择的相片仓根目录；**没有库就无法导入** |
+| **资产**（asset） | 一张照片 = 一条记录 + 它的**文件组**：位图 + 同名的 `_RAW/` 下 RAW + `.xmp` 侧车。库里一律按资产说话（评级/标签/编辑栈都挂在资产上）。规格 `memory/FUNCTION-REPOSITORY.md` |
+| **`_RAW/`** | 库内的**保留目录**：同名的相机原片放在位图旁边的 `_RAW/` 里。它不是“另一个目录”，不进目录树、不算范围、对侧车折算回上级目录（`store::assets` 的折算规则是唯一实现） |
 | **来源**（source） | 待导入的目录（磁盘 / NAS / 云） |
+| **缩略图两档** | `thumb`（缩略图，最长边 **384** —— 网格 tiles 与**所有**胶片带、定稿卡片共用）/ `preview`（1920 AVIF q90 4:4:4）。~~`film` 192~~ 2026-10-11 取消（`specs/thumbnail-tiers-and-import-memory.md`）。规格与生成节点见 `memory/FUNCTION-IMAGING.md`（唯一事实源）；缓存位置见 §6.5。**来源目录（import）的图是 JPEG 且只在进程内存里**（§2.24） |
+| **`latest`** | 当前编辑栈的输出（还没定稿）；与 `issue` 并列的两种「看图用的东西」，切换语义见 `memory/FUNCTION-IMAGING.md` |
 | **最近**（Recent） | 自动记录的最近 50 个导入目录 |
 | **已选目录** | 已勾选、准备导入的目录集合（横条列表） |
 | **`shortpath`** | 路径缩写：盘符 + 中间各级首字母 + 末级全名（`memory/DESIGN.md` §12.3） |
@@ -372,3 +505,74 @@ import 与 browse 的照片区必须经同一个 `PhotoViewingStage` / `PhotoVie
 | **场景（scene）** | 命令体系的一层（崔总 2026-10-09 定）：**入口唯一，逻辑按场景转换** —— 撤销/重做对用户是一套操作，在浏览与编辑背后是两套内部逻辑。落地见 `CommandDeps.history` 与 `App.tsx` 的 `historyScene()`；`scope` 只管静态归属与冲突检测 |
 | **弱菜单** | 菜单是**逃生通道**不是功能索引：界面里已有入口的动作/开关不进菜单（仍留在命令面板与快捷键里）。见 `CommandSpec.menu` 注释与 `implementations/2026-10-09_menu-weak-menu-cleanup.md` |
 | **动态反差**（Dynamic Contrast） | 一根拉杆的局部色调映射（`dynamicContrast`，0–100 单极）；与全局 `contrast` 不是一回事 |
+| **显示尺寸**（display size） | 「这张照片**现在显示多大**」的唯一口径：与方向一样**记在库**里（每文件 `asset_files.display_*`、latest `develop_stacks.output_*`、每条定稿 `issues.output_*`），按**显示变体**解析（`store::sizes::display_size` / 前端 `lib/display-size.ts`）。view 按该尺寸布局，flow info 与 tiles 比例也读它；规格 `specs/display-size-source.md` |
+| **展示尺寸 / 输出尺寸** | 展示尺寸 = `oriented_size(原始轴, 方向)`（屏上宽×高）；输出尺寸 = `EditGeometry::output_size(源展示尺寸)`（已含裁切/旋转，latest 与定稿用） |
+
+---
+
+## 12. 基础组件清单（要用就从这里挑）
+
+> **纪律（崔总 2026-10-11 定）**：写界面前先在下面这份清单里找 —— 找到就**用它**（不够就改它、一般化它），
+> **不要再写第二个**（§2.12）；清单里确实没有才新建，并且**同一次改动里补进这份表**。
+> 本表是**索引**（谁在哪、管什么）；**视觉规格**（状态、密度、主题、尺寸令牌）在 `memory/DESIGN.md` §10.1，
+> 画稿在 `design/*.pen` + 同名 `.md`。想「看一眼」全部组件：dev 下开 `/dev/kitchen-sink`（`src/dev/KitchenSink.tsx` 画廊）。
+>
+> 分层规则（`lint:arch` 强制）：`components/ui/` **不许 import `features/` 或 `api/`**（取图、文案这类外部事实由调用方传入）；
+> 组件里**不许硬编码色值**（走令牌）与**中文文案**（走 i18n）。
+
+### 12.1 原语（无业务含义，`src/components/ui/*.tsx`）
+
+| 组件 | 文件 | 管什么 |
+| --- | --- | --- |
+| `Button` / `IconButton` | `Button.tsx` | 按钮族：`primary/accent/secondary/ghost` × `sm/md`；纯图标按钮（方/圆）+ 角标 |
+| `Checkbox` / `RadioCircle` / `Switch` / `Input` | `Form.tsx` | 表单四件：方形勾选（树/列表）、**圆形主色勾选**（勾选 ≠ 选中，§11.2）、开关、文本框（唯一保留描边的控件之一） |
+| `SegmentedControl` | `SegmentedControl.tsx` | 凹槽 + 移动色块的分段控件（工作流切换、密度开关都用它） |
+| `CompactChoice` | `CompactChoice.tsx` | 紧凑单选（直方图/曲线通道、面板内二选一） |
+| `Slider` | `Slider.tsx` | 连续 / 定档滑块（网格缩放档、编辑参数）；键盘与 aria 由 Ark UI 承载 |
+| `Tooltip` / `ButtonTip` | `Tooltip.tsx` | 提示气泡；`easy copy` 的「点击复制 / 已复制」复用它 |
+| `Menu` | `Menu.tsx` | 下拉菜单（标题栏菜单、右键菜单） |
+| `Dialog` / `ConfirmDialog` | `Dialog.tsx` | 模态弹窗（建库、`easy destroy` 确认）；**取消在左、确认在右** |
+| `ToggleBlock` | `ToggleBlock.tsx` | 可按下按钮（吸附、按时间这类模式开关） |
+| `Badge` / `CountBadge` | `Badge.tsx` | 计数 / 状态小标签 |
+| `PathText` | `PathText.tsx` | `shortpath` 路径缩写（§11.5、`memory/DESIGN.md` §12.3） |
+| `TreeNode` | `TreeNode.tsx` | 树形行（展开箭头 + 图标 + 名称 + 勾选框）；目录树用它 |
+| `Panel` | `Panel.tsx` | 面板容器（标题行、可折叠，可进 `SplitStack` 参与拖拽分段） |
+| `SplitHandle` / `SplitHandleDots` / `SplitStack` | `SplitHandle.tsx` / `SplitStack.tsx` | **全项目唯一**的拖拽分隔条（`...` 三点）与 N 段可拖布局；尺寸数学在 `lib/stack-resize.ts`（有单测） |
+| `ScrollBox` / `SubtleScrollbar` | `ScrollBar.tsx` / `SubtleScrollbar.tsx` | 可滚动内容区（统一滚动条样式）/ 2px 无感横向进度指示 |
+| `VirtualGrid` | `VirtualGrid.tsx` | 行式虚拟滚动容器（照片网格骨架） |
+| `StateWatermark` | `StateWatermark.tsx` | 内容区的载入 / 空 / 错误 / 提示水印 |
+| `Toast` / `ToastHost` | `Toast.tsx`（状态机 `toast.ts`） | 轻提示（成功 / 危险 / 信息） |
+| `MetadataRows` | `MetadataRows.tsx` | 「名称 : 值」两列信息行（右栏与编辑器共用一份排版） |
+| `ToolsSeparator` | `ToolsSeparator.tsx` | toolsbar 的组分隔符 |
+| `Histogram` / `HistogramPanel` | `Histogram.tsx` / `HistogramPanel.tsx` | RGB 直方图（三通道曲线 + 通道选择）/ 直方图那一块（标题 + 取数与缓存） |
+| `DisplayColorStatus` | `DisplayColorStatus.tsx` | 显示色彩状态（编辑器与设备设置共用同一种呈现） |
+| `Tile` | `Tile.tsx` | 网格基本单元（图标 tile / 图片 tile 的公共骨架） |
+| `PhotoMarks` | `PhotoMarks.tsx` | 一张照片的标记簇（星标 / 色标 / 赞踩 / 旗标），只读 |
+| `readTokenPx`（令牌读值，函数不是组件） | `tokens.ts` | 把 CSS 令牌读成数字（虚拟化算行高要用）—— 样式本身在 `src/styles/tokens.css`，**改色 / 间距先看那里**，别在组件里写死（`lint:colors`） |
+
+### 12.2 范式组件（「这件事全项目只有一种做法」的封装）
+
+| 组件 | 文件 | 管什么 |
+| --- | --- | --- |
+| `EasyCopy` | `EasyCopy.tsx` | `easy copy`：指向即知可复制 → 点击变「已复制」 |
+| `EasyDestroyButton` / `EasyDestroyHost` | `EasyDestroy.tsx`（判定在 `lib/easy-destroy.ts`） | `easy destroy`：移除类快速通道，默认弹确认、`Shift` 跳过 |
+| `RemoveButton` / `RemoveGlyph` | `RemoveButton.tsx` | 移除 / 排除按钮：**禁行图标**，不用叉号（§11.3） |
+| `DragPreview` | `DragPreview.tsx` | 拖动预览（整叠卡片 + 数量角标）——**全局唯一一份** |
+| `PreviewFrame` | `PreviewFrame.tsx` | 右栏全图总览（比例夹在 3:1～3:4 + 视野框） |
+| `ProfileSelect` | `ProfileSelect.tsx` | 预设 / 配置文件选择（输入与导出共用同一套可用性规则） |
+| `RepositoryCard` | `RepositoryCard.tsx` | 库卡片（全项目唯一一份） |
+
+### 12.3 成套共享件（跨工作区的组合，住在 `components/ui/` 或 `features/`）
+
+| 组件 | 位置 | 管什么 |
+| --- | --- | --- |
+| `TilesShell` / `TilesControlBar` / `PhotoStatusBar` | `components/ui/tiles/` | tiles 一族的外框与控制条（`TilesControlBar` **只能由 `TilesShell` 装配**，§11.4 红线） |
+| `Viewer` / `ViewerControls` | `components/ui/viewer/` | 单张看图（缩放 / 平移 / 适配 / 100%）；**取图由调用方注入**（`components/ui` 不许 import `api`） |
+| `FilmStrip` / `CompareView` / `photosFromSource` | `components/ui/viewer/` | 胶片带与对比的画幅；`photosFromSource` 是 tiles → 看图件的**唯一**转换 |
+| `PhotoGrid` / `PhotoViewingStage` / `viewing.ts` | `features/photo-grid/` | 照片区控制器：**import 与 browse 必须走同一份**（§11.4 红线） |
+| `DirTree` | `features/dir-tree/` | 目录树（导入左列；行渲染走 `TreeNode`，行模型在 `rows.ts`） |
+| `ExifStrip` + `createSelectedFileMetadata` | `features/exif-strip/` | flowbar 的 `flowinfo`（相机 / 镜头 / 曝光 / 尺寸 / MP / 类型）；尺寸与类型随显示变体 |
+| `CommandPalette` / `ShortcutSettingsDialog` | `features/commands/` | 命令面板（`Ctrl+K`）与快捷键设置；命令注册表是 `catalog.ts`（§2.15） |
+
+**不在这份清单里**：`src/shell/`（外壳 chrome：`TitleBar` / `FlowBar` / `ToolsBar` 与几个窗口级对话框 —— 各只有一份，但它们是窗口结构，不是可复用原语）、
+`src/features/<模块>/` 下的工作区专用件（跟着那个工作区走）、`src/lib/`（纯逻辑，不放组件）。

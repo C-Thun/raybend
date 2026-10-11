@@ -14,6 +14,9 @@ export interface Issue {
   profileHash: string;
   sourceBase: "raw" | "sooc";
   createdAt: number;
+  /** 定稿的**成片输出尺寸**（老库未回填 → `null`；回退见 `lib/display-size.ts`）。 */
+  width: number | null;
+  height: number | null;
   stack: DevelopStack;
 }
 export type IssueSelection = "sooc" | "raw" | "latest" | { issue: number };
@@ -46,7 +49,7 @@ export async function deleteIssue(repositoryId: string, assetId: number, issueId
   if (!isTauriRuntime()) return null;
   return call<IssueLibrary>("issue_delete", { repositoryId, assetId, issueId, english });
 }
-export async function getIssueThumb(repositoryId: string, assetId: number, issueId: number, size: "grid" | "strip"): Promise<Uint8Array | null> {
+export async function getIssueThumb(repositoryId: string, assetId: number, issueId: number, size: "grid"): Promise<Uint8Array | null> {
   if (!isTauriRuntime()) return null;
   const bytes = await call<number[] | Uint8Array | ArrayBuffer>("issue_thumb_get", { repositoryId, assetId, issueId, size });
   return toBytes(bytes);
@@ -54,4 +57,30 @@ export async function getIssueThumb(repositoryId: string, assetId: number, issue
 
 export async function prepareIssueSources(path: string): Promise<void> {
   if (isTauriRuntime()) await call("issue_sources_prepare", { path });
+}
+
+/** 定稿图自愈补过的条目（W5 §7.3）：`sizes` 是这次真补了的档位。 */
+export interface IssueSnapshotsFilled {
+  issueId: number;
+  sizes: string[];
+}
+
+/**
+ * **定稿图自愈**（`specs/editor-session-pipeline.md` §7.3）：扫描该照片所有定稿的
+ * 三档图（`screen` / `grid` / `strip`），缺什么补什么 —— 静默、幂等、低优先。
+ *
+ * `sizes` 缺省三档；返回**这次真补了**的条目（调用方据此刷新对应缩略图）。
+ * 非 Tauri 运行时直接返回空数组。
+ */
+export async function ensureIssueSnapshots(
+  repositoryId: string,
+  assetId: number,
+  sizes?: readonly string[],
+): Promise<IssueSnapshotsFilled[]> {
+  if (!isTauriRuntime()) return [];
+  return call<IssueSnapshotsFilled[]>("issue_snapshots_ensure", {
+    repositoryId,
+    assetId,
+    sizes: sizes === undefined ? null : [...sizes],
+  });
 }

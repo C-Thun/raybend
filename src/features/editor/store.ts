@@ -199,7 +199,8 @@ export interface EditorStore {
    * **手指还按在滑杆 / 曲线上**（人类 2026-09-24）。
    *
    * 它只影响一件事：拖动期间 Rust 侧**只算预览档**，松手那一下才按缩放补全尺寸
-   * （`tier_for_params`）—— 「调拉杆时只对展示的像素处理，释放鼠标才对全图做处理」。
+   * （2026-10-11 起**没有档位**：任何时刻都是同一张原图，`interactive` 只用于限流合并）；
+   * ⚠️ 档位**只跟「手指是否按着」有关**，与缩放无关（崔总 2026-10-11）。
    * 它跟着载荷一起发出去（不单独开 IPC）。
    */
   paramDragging: () => boolean;
@@ -292,7 +293,7 @@ export interface EditorStore {
   /** 当前编辑栈的大类快照（新建预设用；序列化由工作区完成）。 */
   presetSnapshot: (groups: readonly PresetGroup[]) => PresetSnapshot;
   /** 按快照保存的大类**整体覆盖**当前编辑栈（LUT 丢失静默忽略；specs §3）。 */
-  applyPresetSnapshot: (snapshot: PresetSnapshot) => void;
+  applyPresetSnapshot: (snapshot: PresetSnapshot) => { wbSkipped: boolean };
 
   /* ── GPU 视口（M3-W2）────────────────────────────── */
   /**
@@ -476,7 +477,7 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
       color: colorState(),
       asShotTemperature: asShot(),
       curves: dirtyCurves,
-      // 拖动中：Rust 侧只算预览档（`tier_for_params`）
+      // 拖动中：Rust 侧只做限流合并（不换图、不换分辨率 —— 没有档位）
       interactive: paramDragging(),
       // 镜头 / 降噪方式：它们是编辑栈的一级（会改变像素），跟着载荷一起发
       lensProfile: lensProfile(),
@@ -856,16 +857,19 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
       lensEnabled: lensEnabled(),
       lutId: lutId(),
       lutEnabled: lutEnabled(),
+      asShotK: asShot(),
     }, PRESET_GROUP_PARAMS),
     applyPresetSnapshot: (snapshot) => {
       const plan = planPresetApply(snapshot, PRESET_GROUP_PARAMS, PARAM_DEFAULTS, (id) =>
         categories().some((category) =>
-          category.entries.some((entry) => entry.id === id && entry.available !== false)));
-      if (plan.appliedGroups.length === 0) return;
+          category.entries.some((entry) => entry.id === id && entry.available !== false)), asShot());
+      if (plan.appliedGroups.length === 0) return { wbSkipped: false };
       batch(() => {
         setParams((current) => ({ ...current, ...plan.values }));
+        // v3：白平衡是**偏移量**——`wbExplicit` 才表示用户看到了一个明确的偏移；
+        // Δmired = 0 = 跟随拍摄色温（回到基线，不算显式值）。
         if (Object.prototype.hasOwnProperty.call(plan.values, "temperature")) {
-          setTemperatureExplicit(true);
+          setTemperatureExplicit(plan.wbExplicit);
         }
         setCurves((current) => ({ ...current, ...plan.curves }));
         if (plan.hasDetail) setNrMethodSignal(plan.nrMethod === "high" ? "high" : null);
@@ -877,6 +881,7 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
         }
         bumpDevelop();
       });
+      return { wbSkipped: plan.wbSkipped };
     },
 
     renderState,

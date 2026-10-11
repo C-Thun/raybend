@@ -7,12 +7,19 @@ import type {
 import type { RowSlice } from "../../components/ui/tiles/rows.ts";
 import type { ThumbEntry } from "../../components/ui/thumb-queue.ts";
 import type { ExportQueueItem } from "../../lib/export-model.ts";
-import { variantKey, variantAssetId, mainVariant, admitsPhoto, orderedIssues } from "../../lib/export-model.ts";
+import { variantKey, variantAssetId, mainVariant, admitsPhoto, issueStrip } from "../../lib/export-model.ts";
 import type { ExportStore } from "./store.ts";
-export function issueExtraHeight(count: number, cellSize: number): number {
-  if(count<=0)return 0;
-  const small=Math.max(1,(cellSize-4)/2);
-  return 4 + Math.ceil(Math.min(count,6)/2)*(small+4) + (count>6?20:0);
+/**
+ * tile 小片区多出来的高度（`IssueStrip` 的布局契约，与组件同改同测）。
+ *
+ * 组成：上留白 4 + 小片行（有片才算）+ 按钮行（上间距 4 + 行高 20）+ **下留白 4** ——
+ * 最后那 4px 是崔总 2026-10-11 要的：入口文字不该紧贴着下一行的大图。
+ */
+export function issueExtraHeight(input: { tiles: number; entry: "all" | "raw" | null }, cellSize: number): number {
+  const tiles = Math.max(0, Math.min(input.tiles, 2));
+  if (tiles === 0 && input.entry === null) return 0;
+  const small = Math.max(1, (cellSize - 4) / 2);
+  return 4 + (tiles > 0 ? small : 0) + 24 + 4;
 }
 export function exportGallerySource(
   base: TilesSource,
@@ -73,8 +80,9 @@ export function exportGallerySource(
     },
     extraHeight: (i, size) => {
       const asset = Number(id(i));
+      const strip = issueStrip(store.variants().has(asset) ? store.smallFor(asset) : []);
       return issueExtraHeight(
-        store.variants().has(asset) ? orderedIssues(store.listFor(asset),()=>false).length : 0,
+        { tiles: strip.tiles.length, entry: strip.entry },
         size,
       );
     },

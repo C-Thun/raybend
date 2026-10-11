@@ -48,6 +48,12 @@ serde_json.workspace = true
 tauri-plugin-dialog = "2.7.3"
 image.workspace = true
 tauri-plugin-updater = "2"
+# 诊断层门面（日志）：落盘实现全在 `raybend::diagnostics`，这里只拿 `log::info!` 这类调用入口
+log.workspace = true
+# 崩溃采集（W4）：crash-handler 接硬崩溃，minidumper 走 IPC 把 dump 写出去。
+# 两者都只在 `src-tauri/src/crashpad.rs` 里用；独立助手本身见 `crates/raybend-crashpad`。
+crash-handler = "0.8"
+minidumper = "0.11"
 
 # 与当前 Tauri 2.11 的 WebView2 COM 类型一致；依赖已在锁文件里，无额外 DLL。
 [target.'cfg(windows)'.dependencies]

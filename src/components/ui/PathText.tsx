@@ -92,7 +92,7 @@ export function PathText(props: PathTextProps) {
           */}
           <span
             dir="ltr"
-            class="min-w-0 flex-1 truncate text-fs-2"
+            class="min-w-0 flex-1 overflow-hidden whitespace-nowrap fade-x-end text-fs-2"
             title={isAbbreviated() ? undefined : local.path}
           >
             {display()}

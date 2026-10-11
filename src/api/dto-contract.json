@@ -36,6 +36,9 @@
     "height",
     "orientation",
     "relative",
+    "takenAtMs",
+    "takenAtOffsetMin",
+    "takenAtSource",
     "width"
   ],
   "SourceItem": [
@@ -55,12 +58,6 @@
     "problems",
     "root",
     "skipped"
-  ],
-  "TimeEntry": [
-    "path",
-    "takenAtMs",
-    "takenAtOffsetMin",
-    "takenAtSource"
   ],
   "PhotoCount": [
     "photos",
@@ -224,6 +221,9 @@
     "isRaw",
     "iso",
     "issueCount",
+    "latestHeight",
+    "latestSourceBase",
+    "latestWidth",
     "lens",
     "likeState",
     "lockLevel",
@@ -231,6 +231,9 @@
     "orientation",
     "provinceState",
     "rating",
+    "rawHeight",
+    "rawWidth",
+    "recycledFrom",
     "relPath",
     "sizeBytes",
     "sublocation",
@@ -282,11 +285,24 @@
     "path",
     "reason"
   ],
-  "DeleteResult": [
+  "RecycleResult": [
     "alreadyGone",
     "blockedLocked",
-    "deleted",
-    "failed"
+    "failed",
+    "moved"
+  ],
+  "RestoreResult": [
+    "failed",
+    "renamed",
+    "restored"
+  ],
+  "PurgeResult": [
+    "failed",
+    "purged"
+  ],
+  "RecycleSummaryView": [
+    "bytes",
+    "count"
   ],
   "FlagsView": [
     "picks",
@@ -360,8 +376,6 @@
     "restarts",
     "rotation",
     "surface",
-    "tier",
-    "wantedTier",
     "zoom"
   ],
   "FullscreenItem": [

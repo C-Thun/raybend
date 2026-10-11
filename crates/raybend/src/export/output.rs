@@ -468,7 +468,7 @@ mod tests {
         };
         let snapshot = VariantSnapshot { reference: super::super::VariantRef { asset_id: 1, variant: "latest".into() }, name: "高精度".into(),
             rel_path: "广色域原片.png".into(), profile_hash: crate::store::issues::profile_hash(&stack).unwrap(), stack,
-            source_signature: crate::media::source::source_signature(&source).unwrap() };
+            source_signature: crate::media::source::source_signature(&source).unwrap(), width: None, height: None };
         let preset = Preset { output_color: crate::color::OutputColor::AdobeRgb, id: "p".into(), name: "成片".into(), format: "png".into(), quality: 90,
             max_edge: 0, size_mode: super::super::SizeMode::Original, percent: 100, directory: dir.path().join("输出").to_string_lossy().into_owned(),
             template: ":FILENAME".into(), existing_file: super::super::ExistingFile::Append };
@@ -517,6 +517,8 @@ mod tests {
             profile_hash: crate::store::issues::profile_hash(&stack).unwrap(),
             stack,
             source_signature: crate::media::source::source_signature(&source).unwrap(),
+            width: None,
+            height: None,
         };
         let output = dir.path().join("输出");
         std::fs::create_dir(&output).unwrap();
@@ -733,6 +735,8 @@ mod tests {
             profile_hash: crate::store::issues::profile_hash(&stack).unwrap(),
             stack,
             source_signature: crate::media::source::source_signature(&source).unwrap(),
+            width: None,
+            height: None,
         };
         let mut preset = Preset {
             output_color: crate::color::OutputColor::Srgb,

@@ -18,6 +18,7 @@ import type { JSX } from "solid-js";
 
 import { t } from "../../../i18n/index.ts";
 import type { ViewerStore } from "./store.ts";
+import { zoomPercent } from "./zoom.ts";
 
 export interface ViewerControlsProps {
   store: ViewerStore;
@@ -37,9 +38,12 @@ export function ViewerControls(props: ViewerControlsProps): JSX.Element {
   /** 显示哪个数字：适配状态只说「适配」，用户自己缩放过才报百分比（见 Viewer 的说明） */
   const zoomLabel = (): string => {
     const state = props.store.state();
-    if (!state.fit) return `${Math.round(state.zoom * 100)}%`;
+    // 倍率读数 = CSS 缩放 × DPR（100% = 1:1 设备像素，`viewer/zoom.ts`）
+    if (!state.fit) return `${Math.round(zoomPercent(state.zoom))}%`;
     const fitText = t("viewer.fit");
-    return props.store.sharp() ? `${fitText} · ${Math.round(state.zoom * 100)}%` : fitText;
+    return props.store.sharp()
+      ? `${fitText} · ${Math.round(zoomPercent(state.zoom))}%`
+      : fitText;
   };
 
   return (
@@ -101,7 +105,7 @@ export function ViewerControls(props: ViewerControlsProps): JSX.Element {
         >
           <IconPlus size={14} aria-hidden="true" />
         </button>
-        <span class="max-w-64 truncate ps-1 text-fs-1 text-fg-3">
+        <span class="max-w-64 min-w-0 overflow-hidden whitespace-nowrap fade-x-end fade-x-end-fit ps-1 text-fs-1 text-fg-3">
           {props.store.current()?.fileName ?? ""}
         </span>
       </div>
