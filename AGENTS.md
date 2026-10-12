@@ -199,6 +199,7 @@ GitHub Actions → Pages 发布，**不进** `pnpm release` 流程。细则见 `
 pnpm install
 pnpm tauri dev            # Linux/webkit2gtk 窗口（WSLg 显示）
 cargo check --workspace
+cargo test --workspace    # ❗范围必须是 `--workspace`，理由见下第三条红线
 
 # —— 前端质量门（改完就跑）——
 pnpm typecheck && pnpm test
@@ -219,12 +220,17 @@ pnpm release [patch|minor|major] --win-msi ...   # 或 --win-nsis（可组合）
 
 **关键红线**（完整排障手册、十条硬规矩与事故案例在 `memory/ARCHITECTURE.md` §8）：
 
-- **先 `pnpm build` 再构建 Windows，构建完必须 `pnpm check:win`**——`dist/` 是编译期嵌进 exe 的；
+- **构建 Windows 前必须完成 `pnpm build`，构建完必须 `pnpm check:win`**——`dist/` 是编译期嵌进 exe 的；
   「主程序新、worker 旧」也要防（`-p raybend-desktop -p raybend` 一起建，协议版本握手会报错）。
 - Windows 构建产物必须落在 Windows 本地盘（debug 默认 `C:\rb-target\...`；release 自动探测 `%LOCALAPPDATA%\raybend\build`，可用 `--win-dir` 覆盖）；跨 WSL 传环境变量用 `WSLENV`；
   `--features custom-protocol` 必须加（否则白屏）；启动 exe 直接用 `/mnt/c/...` 路径，不经 `cmd start`。
 - dav1d 静态库环境变量已封进 `scripts/lib/dav1d-win.mjs`，别在别处再写一份。
 - `pnpm clean:win` / `clean:wsl` 清理只进不出的 target 产物（cargo 从不回收旧单元）。
+- **Rust 测试门只认 `cargo test --workspace`**：`cargo check --workspace` **不编 `#[cfg(test)]` 目标**，
+  `cargo test -p raybend` 只编主库 lib —— 新增的 crate / bin 的测试目标会整个漏掉。
+  2026-10-12 事故：`crates/raybend-crashpad` 的测试从诞生（e0f61c4）起就编不过，
+  直到另一个会话跑 workspace 全量才发现；当时实施记录里那条「passed」是**编造**的。
+  报「cargo test 全绿」时必须写清范围与命令原文。
 - 换图标后「看起来没换」多半是 Windows 图标缓存——用 exe 资源字节比对判定，别用眼睛。
 
 ### 5.4 规划纪律

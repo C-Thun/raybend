@@ -158,9 +158,17 @@ struct Args {
 }
 
 fn parse_args() -> Result<Args, String> {
+    parse_args_from(std::env::args().skip(1))
+}
+
+/// 参数解析本体（吃一个迭代器 —— 测试才不用碰真实的 `env::args`）。
+fn parse_args_from<I>(args: I) -> Result<Args, String>
+where
+    I: IntoIterator<Item = String>,
+{
     let mut pipe = None;
     let mut crash_root = None;
-    let mut args = std::env::args().skip(1);
+    let mut args = args.into_iter();
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--pipe" => pipe = args.next(),
@@ -231,17 +239,29 @@ mod tests {
 
     #[test]
     fn args_parse_and_reject_junk() {
-        // 直接测解析的纯逻辑（命令行参数由 parse_args 从 env 取，这里只覆盖合法组合）
-        let args = Args {
-            pipe: "raybend-crashpad-1".to_string(),
-            crash_root: PathBuf::from("C:\\crashes"),
-        };
+        // 合法组合（含换序 —— 参数顺序不该影响结果）
+        let args = parse_args_from(
+            ["--pipe", "raybend-crashpad-1", "--crash-root", "C:\\crashes"].map(String::from),
+        )
+        .expect("合法参数应当解析成功");
         assert_eq!(args.pipe, "raybend-crashpad-1");
+        assert_eq!(args.crash_root, PathBuf::from("C:\\crashes"));
+
+        let swapped = parse_args_from(["--crash-root", "C:\\crashes", "--pipe", "p"].map(String::from))
+            .expect("换序也应成功");
+        assert_eq!(swapped.pipe, "p");
+
+        // 缺项 / 未知参数 / 缺值，全部必须是错误（旧版本这条测试断言的是自己写的字面量，永不失败）
+        assert!(parse_args_from(Vec::<String>::new()).is_err(), "什么都没给");
+        assert!(parse_args_from(["--pipe", "p"].map(String::from)).is_err(), "缺 --crash-root");
+        assert!(parse_args_from(["--crash-root", "C:\\c"].map(String::from)).is_err(), "缺 --pipe");
+        assert!(parse_args_from(["--pipe", "p", "--nope"].map(String::from)).is_err(), "未知参数");
+        assert!(parse_args_from(["--pipe"].map(String::from)).is_err(), "--pipe 没有值");
     }
 
     #[test]
     fn marker_json_mentions_size_and_kind() {
-        let dir = tempfile::tempdir().unwrap_or_else(|_| std::env::temp_dir().into());
+        let dir = tempfile::tempdir().expect("建临时目录");
         let dump = dir.path().join("dump.dmp");
         std::fs::write(&dump, b"x").expect("写假 dump");
         write_marker(&dump, 1);
