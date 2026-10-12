@@ -4,7 +4,7 @@
 选型改定：**自研轻量 writer**，不用 `flexi_logger` —— 核实源码后确认它给不了有界队列与按目录总容量清理，见 `implementations/2026-10-12_diagnostics-logs-and-crashpad.md`。
 **W3 剩余（报告对话框 / 「导出诊断包」命令 / 复制报告摘要 / `mailto:` 预填）与 W5（WebView2 ProcessFailed / 前端上报 / 卡死看门狗）未开工**；**S1 服务端（T1 一键上传）仍留在 `memory/FUTURE.md`，崔总明确「发送接收以后再说」**。
 **关联**：`memory/FUTURE.md`「🧊 发版后（after release）可立即做」（登记条目）与 J 节（原「日志与诊断包」半句的落点即本文件）；
-`docs/privacy.md` / `docs/privacy.en.md`（发送功能落地时**同批**更新）；`AGENTS.md` §2.8 §2.12 §2.15 §2.16 §2.19 §2.20 §5.3、§5.8（日志与崩溃记录怎么看）。
+`docs/privacy.md` / `docs/privacy.en.md`（发送功能落地时**同批**更新）；`AGENTS.md` §2.8 §2.12 §2.15 §2.16 §2.19 §2.20 §5.3、`memory/DEBUGGING.md`（日志与崩溃记录怎么看）。
 
 ---
 

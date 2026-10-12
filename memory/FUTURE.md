@@ -55,7 +55,7 @@
   **已做（W1/W2/W4/W3-α）**：运行日志（`log` + 自研 writer：2 MiB × 10、20 MiB 硬上限、出口脱敏、会话头、worker stderr 管道接回）、
   panic 同步记录（`crashes/RB-*/report.{json,txt}` + 日志尾 200 行 + backtrace）、未正常退出兜底（`session.lock`）、
   独立崩溃助手（`raybend-crashpad` + crash-handler/minidumper，落 `dump.dmp`）、
-  **崩溃后弹窗 → 系统另存为 → 导出报告包**（zip：report + 日志 + 可选 dump + 《提交指南.txt》；不报告则不再问）。看日志的位置与判读方式：`AGENTS.md` §5.8。
+  **崩溃后弹窗 → 系统另存为 → 导出报告包**（zip：report + 日志 + 可选 dump + 《提交指南.txt》；不报告则不再问）。看日志的位置与判读方式：`memory/DEBUGGING.md`。
   **仍留本板块（崔总 2026-10-12 明确：发送接收以后再说）**：W3 剩余（报告对话框，需先出 `.pen`；「导出诊断包」命令；复制报告摘要；`mailto:` 预填）
   与 T1 上传（崔总 Azure VM 上的自建接收服务 + 邮件通知）；W5 WebView2 `ProcessFailed` / 前端上报 / 卡死看门狗。
   红线不变：不记用户实际信息、**不自动上传**、不接第三方崩溃平台（与 `docs/privacy.md` 现有承诺一致）。
@@ -819,7 +819,7 @@ M1 里「导入模版」**纯手输**（`LibrarySettingsDialog`：一个输入�
 
 | 日期 | 变更 |
 | --- | --- |
-| 2026-10-12 | **日志 / 崩溃采集部分开工（W1+W2+W4）**（崔总当天改口径：「先把日志这套建起来，发送接收以后再说」）：运行日志（`log` + 自研 writer：2 MiB×10 / 20 MiB 硬上限 / 出口脱敏 / 会话头 / worker stderr 管道接回）、panic 同步记录、未正常退出兜底、独立崩溃助手 `raybend-crashpad`（crash-handler + minidumper）；选型由 `flexi_logger` 改为**自研 writer**（核源码后确认它给不了有界队列与按目录总容量清理）。第三层（报告包/发送）与 W5（WebView2/前端/看门狗）留在本条。看日志位置：`AGENTS.md` §5.8。 |
+| 2026-10-12 | **日志 / 崩溃采集部分开工（W1+W2+W4）**（崔总当天改口径：「先把日志这套建起来，发送接收以后再说」）：运行日志（`log` + 自研 writer：2 MiB×10 / 20 MiB 硬上限 / 出口脱敏 / 会话头 / worker stderr 管道接回）、panic 同步记录、未正常退出兜底、独立崩溃助手 `raybend-crashpad`（crash-handler + minidumper）；选型由 `flexi_logger` 改为**自研 writer**（核源码后确认它给不了有界队列与按目录总容量清理）。第三层（报告包/发送）与 W5（WebView2/前端/看门狗）留在本条。看日志位置：`memory/DEBUGGING.md`。 |
 | 2026-10-10 | **库级回收站（应用内回收站）落地**：库内 `recycle/` + 拖动删除（统一 pointer）+ 回收站视图/还原/清空；`Delete` 键保留（按钮+确认）而拖动免确认；同批完成**快捷键场景化**（同键跨场景并存，browse 删除与 export 移出队列拆为两条）。规格 `specs/library-recycle-bin.md`、`specs/command-scenes.md`；画稿 `design/browse.pen`。Future Release #10 结项。 |
 | 2026-10-10 | 崔总提出「服务端报告 + agent = 自动修 bug / 自动发版」设想；**登记为 E7（未评估）**，并写明两条不可自动化的既有红线（§2.1 发布由人执行、§2.8 真机验收归人类）与「自动合并永不开启」。 |
 | 2026-10-10 | **新增「发版后」条目：日志 / 崩溃采集 / 问题报告**（崔总指示登记到该板块）：三层 = 运行日志（20 MiB 硬上限 + 出口脱敏）/ 异常采集（panic·minidump·前端·WebView2·worker·卡死·未正常退出）/ 报告包与提交（T0 本地导出 + mailto；T1 Azure VM 自建接收服务 + 邮件通知）；详细规格 `specs/logging-and-crash-report.md`；J 节「日志与诊断包」半句移入该条目。 |
