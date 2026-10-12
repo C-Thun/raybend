@@ -1038,6 +1038,7 @@ export const enUS: Record<MessageKey, string> = {
 
  // ── Editor workspace (M3-W1; see design/editor.md + prompts/editor.pd) ──
  "editor.toolsbar.lut": "LUT",
+ "editor.toolsbar.issues": "Issues",
  "editor.tool.crop": "Crop",
  "editor.tool.rotate": "Rotate",
  "editor.tool.compare": "Compare",
@@ -1270,6 +1271,7 @@ export const enUS: Record<MessageKey, string> = {
  "cmd.editor.baseRaw": "Use RAW as edit source",
  "cmd.editor.finalize": "Finalize as new issue",
  "cmd.editor.lut": "Toggle LUT panel",
+ "cmd.editor.issues": "Toggle issues panel",
  "cmd.editor.crop": "Crop tool",
  "cmd.editor.rotate": "Rotate tool",
  "cmd.editor.compare": "Compare tool",

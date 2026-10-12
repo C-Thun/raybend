@@ -2492,6 +2492,8 @@ try {
        * ① 内容必须紧跟页签条 —— 曲线那份留位容器不许空在色彩内容上方；
        * ② 右栏滚到底后整页不许被撑高 —— Ark 隐藏 input 若落到文档坐标上，
        *   点开关会把整窗滚走、中下方留一大片空白。
+       * 2026-10-12 起右栏只有**下半个可滚动区**（直方图固定在顶部），
+       * 所以滚的是 [data-editor-param-scroll]（没有就退回 [data-editor-panels]）。
        */
       tab("色彩管理")?.click();
       await new Promise((resolve) => setTimeout(resolve, 300));
@@ -2500,7 +2502,7 @@ try {
       advanced.colorGap = colorPanel === null || tabStrip === null
         ? null
         : Math.round(colorPanel.getBoundingClientRect().top - tabStrip.getBoundingClientRect().bottom);
-      const panelRail = document.querySelector("[data-editor-panels]");
+      const panelRail = document.querySelector("[data-editor-param-scroll]") ?? document.querySelector("[data-editor-panels]");
       if (panelRail !== null) {
         panelRail.scrollTop = panelRail.scrollHeight;
         await new Promise((resolve) => setTimeout(resolve, 200));
@@ -2512,8 +2514,9 @@ try {
     }
 
     /*
-     * 仅 view 档里 LUT 开关**不锁**（人类 2026-09-23 晚）：
-     * 按两下 Tab 进 ③（左列本来收起）→ 点 LUT 开关 → 左列必须真的出现。
+     * 仅 view 档里左列开关**不锁**（人类 2026-09-23 晚）：
+     * 按两下 Tab 进 ③（左列本来收起）→ 点 toolsbar left 的开关
+     * （2026-10-12 起左段有两个：定稿 / LUT，这里取第一个 = 定稿）→ 左列必须真的出现。
      * 左列宽度是最好的判据（收起时那一列量出来是 0）。
      */
     const leftAside = [...document.querySelectorAll("[data-editor-workspace] aside")][0] ?? null;
@@ -2586,7 +2589,7 @@ try {
     }
     if (!(editor.leftAfterToggle > 0)) {
       problems.push(
-        `「仅 view」档里点 LUT 开关左列没出现（宽度 ${editor.leftAfterToggle}px）—— 开关被档位锁住了`,
+        `「仅 view」档里点左列开关左列没出现（宽度 ${editor.leftAfterToggle}px）—— 开关被档位锁住了`,
       );
     }
     if (editor.advanced === null) {

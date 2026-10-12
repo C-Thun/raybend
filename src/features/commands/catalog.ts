@@ -200,6 +200,8 @@ export interface CommandDeps {
     cycleChrome: () => void;
     /** LUT 面板开关（toolsbar left 的那个开关） */
     toggleLut: () => void;
+    /** 定稿面板开关（toolsbar left，与 LUT 同一组、同一时刻只开一个） */
+    toggleIssues: () => void;
     /** SOOC/RAW 编辑源；命令与工具栏共用一条动作 */
     setBase: (base: "sooc" | "raw") => void;
     /** 三个画布工具：互斥，再按一次同一个 = 退出 */
@@ -771,6 +773,14 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       scope: "viewer",
       when: () => deps.editor.active(),
       run: () => deps.editor.toggleLut(),
+    }),
+    spec({
+      id: "editor.issues.toggle",
+      titleKey: "cmd.editor.issues",
+      group: "view",
+      scope: "viewer",
+      when: () => deps.editor.active(),
+      run: () => deps.editor.toggleIssues(),
     }),
     spec({
       id: "editor.tool.crop",

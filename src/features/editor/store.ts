@@ -33,13 +33,17 @@ import { t } from "../../i18n/index.ts";
 import {
   initialEditorChrome,
   editorChromeName,
+  editorIssuesVisible,
+  editorLeftPanelVisible,
   editorLutVisible,
   editorShowsFilm,
   editorShowsRight,
   resetEditorChrome,
-  setEditorLutOpen,
+  setEditorLeftPanel,
   stepEditorTab,
+  toggleEditorLeftPanel,
   type EditorChromeState,
+  type EditorLeftPanel,
 } from "../../lib/editor-chrome.ts";
 import {
   DEFAULT_EDITOR_PREFS,
@@ -117,17 +121,21 @@ export interface EditorStore {
   chromeStep: () => number;
   /** 档位名（`data-chrome` 用） */
   chromeName: () => string;
-  /** LUT 面板这一刻可见吗（= 档位允许左列 **且** 面板开着） */
+  /** 左列这一刻可见吗（= 档位允许左列 **且** 有面板开着；底部总览 / 信息跟着它） */
+  leftVisible: () => boolean;
+  /** 左列的**用户意图**（持久化的那一个）：`lut` / `issues` / `null` */
+  leftPanel: () => EditorLeftPanel | null;
+  /** LUT 面板这一刻可见吗（= 左列可见 **且** 开着的是 LUT） */
   lutVisible: () => boolean;
-  /** LUT 面板的**用户意图**（持久化的那一个） */
-  lutOpen: () => boolean;
+  /** 定稿面板这一刻可见吗（= 左列可见 **且** 开着的是定稿） */
+  issuesVisible: () => boolean;
   showsRight: () => boolean;
   showsFilm: () => boolean;
   /** `Tab`：三档循环 */
   cycleTab: () => void;
-  /** 点 `toolsbar left` 的 LUT 开关（含命令面板那条路） */
-  toggleLut: () => void;
-  setLutOpen: (open: boolean) => void;
+  /** 点 `toolsbar left` 的开关（含命令面板那条路）：同一个再点一次 = 关整列，点另一个 = 切过去 */
+  toggleLeft: (panel: EditorLeftPanel) => void;
+  setLeftPanel: (panel: EditorLeftPanel | null) => void;
   /** 换库 / 换目录时把档位复位（面板偏好不动） */
   resetChrome: () => void;
 
@@ -348,14 +356,14 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
   );
   if (initialCategories.length !== initial.lutCategories.length) {
     try {
-      writePrefs({ lutOpen: initial.lutOpen, lutCategories: initialCategories });
+      writePrefs({ leftPanel: initial.leftPanel, lutCategories: initialCategories });
     } catch {
       // 写不进去不影响这次会话（偏好是锦上添花）
     }
   }
 
   const [chrome, setChrome] = createSignal<EditorChromeState>(
-    initialEditorChrome(initial.lutOpen),
+    initialEditorChrome(initial.leftPanel),
   );
   const [categories, setCategories] = createSignal<LutCategory[]>([
     ...initialCategories,
@@ -538,7 +546,7 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
   /** 面板状态一变就落盘（它只有开关两态，不需要防抖）。 */
   const persist = (next: EditorChromeState, nextCategories = categories()): void => {
     try {
-      writePrefs({ lutOpen: next.lutOpen, lutCategories: [...nextCategories] });
+      writePrefs({ leftPanel: next.leftPanel, lutCategories: [...nextCategories] });
     } catch {
       // 写不进去不影响这次会话（偏好是锦上添花）
     }
@@ -601,18 +609,20 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
   return {
     chromeStep: () => chrome().step,
     chromeName: () => editorChromeName(chrome()),
+    leftVisible: () => editorLeftPanelVisible(chrome()),
+    leftPanel: () => chrome().leftPanel,
     lutVisible: () => editorLutVisible(chrome()),
-    lutOpen: () => chrome().lutOpen,
+    issuesVisible: () => editorIssuesVisible(chrome()),
     showsRight: () => editorShowsRight(chrome()),
     showsFilm: () => editorShowsFilm(chrome()),
     cycleTab: () => {
       updateChrome(stepEditorTab);
     },
-    toggleLut: () => {
-      updateChrome((state) => setEditorLutOpen(state, !editorLutVisible(state)));
+    toggleLeft: (panel) => {
+      updateChrome((state) => toggleEditorLeftPanel(state, panel));
     },
-    setLutOpen: (open) => {
-      updateChrome((state) => setEditorLutOpen(state, open));
+    setLeftPanel: (panel) => {
+      updateChrome((state) => setEditorLeftPanel(state, panel));
     },
     resetChrome: () => {
       const next = resetEditorChrome(chrome());

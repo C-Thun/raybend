@@ -809,7 +809,8 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
       active: () => shell.workflow() === "edit",
       hasPhoto: editorEnabled,
       cycleChrome: () => editorStore.cycleTab(),
-      toggleLut: () => editorStore.toggleLut(),
+      toggleLut: () => editorStore.toggleLeft("lut"),
+      toggleIssues: () => editorStore.toggleLeft("issues"),
       setBase: setEditorBase,
       toggleTool: (tool) => editorStore.toggleTool(tool),
       isToolActive: (tool) => editorStore.tool() === tool,
@@ -969,9 +970,7 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
         hasRightTools={shell.workflow() === "browse" || shell.workflow() === "edit" || exportFlow()}
         right={<Show when={shell.workflow()==="browse"} fallback={<Show when={exportFlow()} fallback={<EditorResetTool store={editorStore} enabled={editorEnabled()}
           onRequestReset={() => editorActions()?.resetDevelop()}
-          canReset={() => editorActions()?.canReset() ?? false}
-          canFinalize={() => editorActions()?.canFinalize() ?? false}
-          onFinalize={() => editorActions()?.finalize()} />}><ExportStopTool store={exportStore}/></Show>}><Button data-browse-external-editor variant="ghost" icon={<IconExternalLink size={14} />} aria-label={t("external.title")} disabled={organizationPhotoView() || !(browseActions()?.canExternalEditor()??false)} onClick={()=>browseActions()?.externalEditor()}/></Show>}
+          canReset={() => editorActions()?.canReset() ?? false} />}><ExportStopTool store={exportStore}/></Show>}><Button data-browse-external-editor variant="ghost" icon={<IconExternalLink size={14} />} aria-label={t("external.title")} disabled={organizationPhotoView() || !(browseActions()?.canExternalEditor()??false)} onClick={()=>browseActions()?.externalEditor()}/></Show>}
       >
         {/* 浏览模式的工具（标记系列 / 筛选开关 / 锁）由那个模块自己给 —— 见 ToolsBar 的说明 */}
         <Show when={shell.workflow() === "browse" && !organizationPhotoView()}>

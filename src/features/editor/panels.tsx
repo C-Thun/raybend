@@ -1,38 +1,36 @@
-import type { ShiftLikeEvent } from "../../lib/easy-destroy.ts";
 import type { LensQueryState } from "./lens-query.ts";
 /**
- * 编辑右栏：**三个各自独立、同时在场**的页签组（`memory/DESIGN.md` §14.9、`design/editor.md` §2.2）。
+ * 编辑右栏（2026-10-12 改版，崔总口述；`design/editor.md` §2.2）。
  *
  * ```text
- * ┌──────────────────────────┐   第 1 组：总览 · 定稿 · 信息
- * │ [总览][定稿][信息]        │     总览 = 预览 + 直方图；定稿 = issue 列表；信息 = 文件 / 相机 / 尺寸
+ * ┌──────────────────────────┐   直方图（**固定**在这一栏顶部，不参与滚动）
+ * │ 直方图                    │
+ * ├──────────────────────────┤   ↓ 以下整体可滚动
+ * │ [影调][色彩][清晰度][镜头] │   调整参数（拉杆）
  * ├──────────────────────────┤
- * │ [影调][色彩][清晰度][镜头] │   第 2 组：调整参数（拉杆）
- * ├──────────────────────────┤
- * │ [曲线]                    │   第 3 组：曲线编辑器
+ * │ [曲线][预设][色彩管理]     │   曲线 / 预设 / 色彩管理
  * └──────────────────────────┘
  * ```
  *
- * 三组**同时在场**（不是一条总页签 + 子页签 —— 人类 2026-09-23 特意纠正过）；
+ * 两个页签组**同时在场**（不是一条总页签 + 子页签 —— 人类 2026-09-23 特意纠正过）；
  * 组间只用间距分隔，**不加分隔线**（无边线设计）。页签条直接复用
  * `components/ui/SegmentedControl.tsx`（凹槽 + 主色胶囊，与设计稿同形）。
  *
- * 工具控制块（裁切 / 旋转）出现在**最顶部**（`.pd`：「workspace right顶部出现控制块」），
- * 只在对应工具激活时出现；三工具互斥由 store 保证。
+ * 原来住在这里的「总览 / 定稿 / 信息」第 1 组已整体搬到**左列**（`left-panel.tsx`）：
+ * 总览与信息成为左列底部的页签组，定稿成为 `toolsbar left` 的另一个面板。
+ *
+ * 工具控制块（裁切 / 旋转）出现在**最顶部**（`.pd`：「workspace right 顶部出现控制块」），
+ * 只在对应工具激活时出现（固定在直方图之上，不随滚动跑掉）；三工具互斥由 store 保证。
  *
  * 本波的诚实边界（界面上有 `PendingNote` 明说）：
- * 拉杆改数值不改画面（W3）、issue 与编辑栈未落库（W3）、曲线是恒等曲线（W3）、
+ * 拉杆改数值不改画面（W3）、曲线是恒等曲线（W3）、
  * 裁切/旋转的画布草稿由 Rust 渲染线程持有，控制块只传选项与确认。
  */
 
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, type JSX } from "solid-js";
-import { IconChevronDown, IconExternalLink, IconLoader2, IconPencil, IconTrash } from "@tabler/icons-solidjs";
+import { IconChevronDown, IconExternalLink, IconLoader2, IconPencil } from "@tabler/icons-solidjs";
 
 import { Button, IconButton } from "../../components/ui/Button.tsx";
-import { MetadataRows } from "../../components/ui/MetadataRows.tsx";
-import type { ExifTag } from "../../api/types.ts";
-import type { DevelopStack } from "../../api/editor.ts";
-import type { IssueLibrary, Issue, IssueSelection } from "../../api/issues.ts";
 import { SegmentedControl } from "../../components/ui/SegmentedControl.tsx";
 import { HistogramPanel } from "../../components/ui/HistogramPanel.tsx";
 import { Switch } from "../../components/ui/Form.tsx";
@@ -44,15 +42,12 @@ import { Menu } from "../../components/ui/Menu.tsx";
 import { Dialog } from "../../components/ui/Dialog.tsx";
 import { appliedLensProfile, chosenLensProfile, searchLensProfiles, suggestedLensProfiles } from "./lens-options.ts";
 import { t } from "../../i18n/index.ts";
-import { formatDay } from "../../lib/datetime.ts";
 import type { MessageKey } from "../../i18n/index.ts";
 import type { LensMatch } from "../../api/types.ts";
 import type { BaseCurveLibrary } from "../../api/editor.ts";
 import { CompactChoice } from "../../components/ui/CompactChoice.tsx";
 import { HISTOGRAM_SAMPLES, type HistogramCounts } from "../../lib/histogram.ts";
-import type { ThumbQueue } from "../../components/ui/thumb-queue.ts";
 import type { ViewerPhoto } from "../../components/ui/viewer/index.ts";
-import { PreviewFrame } from "../../components/ui/PreviewFrame.tsx";
 import {
   ANGLE_SPEC,
   CROP_RATIOS,
@@ -69,44 +64,15 @@ import { SliderRow } from "./SliderRow.tsx";
 import type { EditorStore } from "./store.ts";
 import type { PresetGroup, PresetMutationOutcome } from "../../lib/presets.ts";
 import { CurveEditor } from "./CurveEditor.tsx";
-import { EditorZoomControl } from "./zoom-control.tsx";
 
 /* ══════════════════════════════════════════════════════════════
  * 入参形状
  * ══════════════════════════════════════════════════════════════ */
 
 /**
- * 「信息」页签要的字段（**结构类型**，由工作区拼好传进来）。
- *
- * 为什么不让本模块自己去查：`features/*` 之间不许互相 import（分层规则），
- * 而照片数据属于浏览那一侧 —— 工作区把两块接起来正是它的职责（`memory/ARCHITECTURE.md` §2）。
- * 这里的字段**都是显示字符串**（格式化的唯一实现在 `features/exif-strip/exif-format.ts`
- * 与 `lib/datetime.ts`）。
- *
- * 包含 flowbar 中已有的拍摄参数；调节相关项置顶，后面列出文件内全部可读标签。
+ * 「信息」页签要的字段、以及「定稿面板」的类型都在 `left-panel.tsx`
+ * （第 1 组整体搬到左列，2026-10-12）。
  */
-export interface EditorPhotoInfo {
-  tags: ExifTag[];
-  fileName: string;
-  relativePath: string;
-  temperatureBaseline: string | null;
-  exposureBias: string | null;
-  iso: string | null;
-  shutter: string | null;
-  aperture: string | null;
-  focal: string | null;
-  cameraMake: string | null;
-  cameraModel: string | null;
-  lens: string | null;
-  dimensions: string | null;
-  orientation: string | null;
-  takenAt: string | null;
-  datetimeRaw: string | null;
-  software: string | null;
-  gps: string | null;
-  format: string | null;
-  kind: string | null;
-}
 
 export interface EditorPanelsProps {
   store: EditorStore;
@@ -114,30 +80,11 @@ export interface EditorPanelsProps {
   enabled: boolean;
   /** 当前那张（胶片带的锚点） */
   current: ViewerPhoto | null;
-  /** 信息行（没有选中就是 `null`） */
-  info: EditorPhotoInfo | null;
   lensQuery: LensQueryState;
   onRefreshLens: () => void;
   baseCurveLibrary: BaseCurveLibrary | null;
-  issues: IssueLibrary | null;
-  /** 正在生成的定稿（确认后立刻现身，预览位转圈；成功后由真实条目接替）—— 2026-09-29 崔总定 */
-  pendingIssue?: { name: string; sourceBase: "raw" | "sooc" } | null;
-  issueFocusTick: number;
-  /**
-   * 选中态的**本地先行值**（崔总 2026-09-28：切定稿时面板要立刻亮，不能等后端）。
-   * 点击后由工作区立刻写入，`issues.selection` 追上来或换图时清空；`null` = 没在先行。
-   */
-  issueSelectionOverride?: IssueSelection | null;
-  onSelectIssue: (stack: DevelopStack, selection: IssueSelection) => void;
-  onDeleteIssue: (issue: Issue, event: ShiftLikeEvent) => void;
-  /** 点定稿名字旁的笔：由工作区弹出改名弹窗（与「保存为新定稿」同一个对话框形状） */
-  onRenameIssue: (issue: Issue) => void;
-  issueThumbs: ThumbQueue;
-  issueThumbKey: (choice: string) => string;
   onSelectBaseCurve: (id: string | null) => void;
   onRenameBaseCurve: (id: string, name: string) => Promise<void>;
-  /** 总览专用 Screen 全图队列；胶片带继续使用 grid 小图。 */
-  overviewImages: ThumbQueue;
   /** 直方图取数（Rust 算的；注入进来，本模块不碰 `api`） */
   loadHistogram: (path: string, bins: number) => Promise<HistogramCounts | null>;
   /**
@@ -152,12 +99,6 @@ export interface EditorPanelsProps {
   error?: string | null;
   /** 这张照片被二级锁锁住（不可编辑）—— 整列禁用 + 一句话说明 */
   locked?: boolean;
-  /** Rust 视口的当前缩放（`null` = 还没有渲染状态）—— 总览页的缩放控制用 */
-  zoom?: number | null;
-  /** 按倍率缩放一档（工作区把意图发给 Rust） */
-  onZoomBy?: (factor: number) => void;
-  /** 手动输入的目标缩放（`1.0` = 100%） */
-  onZoomTo?: (zoom: number) => void;
   /* ── 预设（specs/editor-presets.md）：持久化动作由工作区注入 ── */
   onCreatePresetDirectory: (name: string) => Promise<PresetMutationOutcome>;
   onCreatePreset: (name: string, directoryId: string, groups: readonly PresetGroup[]) => Promise<PresetMutationOutcome>;
@@ -179,27 +120,21 @@ export interface EditorPanelsProps {
  * 组件
  * ══════════════════════════════════════════════════════════════ */
 
-type ViewTab = "view" | "issues" | "info";
 type CurveTab = "curve" | "preset" | "color";
 
 /**
- * 第 1 组页签等高（`design/editor.md` §3.11，崔总 2026-09-30 定案）：
- * 定稿 / 信息默认高度 = 总览在 3:2 画幅下的自然高度 =
- * 预览（内容宽 / 1.5）+ gap 8 + 缩放行 24 + gap 8 + 直方图块 213
- * （HistogramPanel：标题 ~19 + mb 6 + py 12 + `h-44` 176；组件改版时这里要跟着核）。
+ * 第 1 组（总览 / 定稿 / 信息）的等高规则已随 2026-10-12 改版作废：
+ * 总览与信息成了左列底部的页签组（`left-panel.tsx`，高度规则在 `layout.ts`），
+ * 定稿成了 toolsbar left 的另一个面板。右栏现在只有「直方图（固定）+ 可滚动参数区」。
  */
-const GROUP1_TAB_HEIGHT =
-  "calc((var(--panel-w-right) - var(--panel-pad) - var(--panel-pad-scroll)) / 1.5 + 253px)";
 
 export function EditorPanels(props: EditorPanelsProps): JSX.Element {
   /*
    * 右栏**不许自己跳顶**（崔总 2026-09-28，点名过两次）：点裁切/旋转只是把工具块
-   * 插在这一栏顶部，点定稿只是切到「定稿」页签 —— 阅读位置是用户的，不能替他重置。
+   * 插在这一栏顶部，阅读位置是用户的，不能替他重置。
    * 以前两处都 `scrollHost.scrollTo({top:0})`，看着像界面在乱跳；要定位到具体条目
    * 时用 `scrollIntoView({block:"nearest"})` 那种最小位移，不要整栏重置。
    */
-  const [viewTab, setViewTab] = createSignal<ViewTab>("view");
-  createEffect(() => { if (props.issueFocusTick > 0) setViewTab("issues"); });
   const [paramTab, setParamTab] = createSignal<ParamGroup>("tone");
   const curveTab = props.store.advancedTab;
   const setCurveTab = props.store.setAdvancedTab;
@@ -208,14 +143,14 @@ export function EditorPanels(props: EditorPanelsProps): JSX.Element {
     <div
       data-editor-panels
       class={[
-        /* 滚动条落在预留空间里；横向 padding 走密度令牌（与 browse 右栏同一口径） */
-        "flex min-h-0 flex-1 scroll-y-reserved flex-col gap-3 bg-surface-main pl-panel-pad pr-panel-pad-scroll py-panel-pad",
+        /* 横向 padding 走密度令牌（与 browse 右栏同一口径）；滚动只发生在下半个可滚动区里 */
+        "flex min-h-0 flex-1 flex-col gap-3 bg-surface-main pl-panel-pad pr-panel-pad-scroll py-panel-pad",
         props.class ?? "",
       ]
         .filter(Boolean)
         .join(" ")}
     >
-      {/* 工具控制块（裁切 / 旋转）——只在工具激活时出现，三工具互斥 */}
+      {/* 工具控制块（裁切 / 旋转）——只在工具激活时出现，三工具互斥；固定在直方图之上 */}
       <Show when={props.store.tool() === "crop"}>
         <CropBlock store={props.store} enabled={props.enabled} onConfirm={props.onToolConfirm} />
       </Show>
@@ -223,41 +158,23 @@ export function EditorPanels(props: EditorPanelsProps): JSX.Element {
         <RotateBlock store={props.store} enabled={props.enabled} onConfirm={props.onToolConfirm} />
       </Show>
 
-      {/* ── 第 1 组：总览 / 定稿 / 信息 ───────────────────── */}
-      <section class="flex flex-col gap-2" data-editor-group="view">
-        <SegmentedControl
-          value={viewTab()}
-          onValueChange={(value) => setViewTab(value as ViewTab)}
-          label={t("editor.group.view")}
-          options={[
-            { value: "view", label: t("editor.group.view") },
-            { value: "issues", label: t("editor.group.issues") },
-            { value: "info", label: t("editor.group.info") },
-          ]}
-        />
-        <Show when={viewTab() === "view"}>
-          <OverviewTab
-            current={props.current}
-            overviewImages={props.overviewImages}
-            loadHistogram={props.loadHistogram}
-            store={props.store}
-            enabled={props.enabled}
-            zoom={props.zoom ?? null}
-            {...(props.onZoomBy === undefined ? {} : { onZoomBy: props.onZoomBy })}
-            {...(props.onZoomTo === undefined ? {} : { onZoomTo: props.onZoomTo })}
-          />
-        </Show>
-        <Show when={viewTab() === "issues"}>
-          <IssuesTab enabled={props.enabled} store={props.store} library={props.issues}
-            selectionOverride={props.issueSelectionOverride ?? null}
-            pending={props.pendingIssue ?? null}
-            onSelect={props.onSelectIssue} onDelete={props.onDeleteIssue} onRename={props.onRenameIssue}
-            thumbs={props.issueThumbs} thumbKey={props.issueThumbKey} />
-        </Show>
-        <Show when={viewTab() === "info"}>
-          <InfoTab info={props.info} />
-        </Show>
-      </section>
+      {/*
+        直方图**固定**在这一栏顶部，不参与滚动（崔总 2026-10-12）。
+        取数与缓存都在 `HistogramPanel` 里（与浏览右栏共用一份）。
+      */}
+      <HistogramPanel
+        class="shrink-0"
+        load={props.loadHistogram}
+        path={props.current?.path ?? null}
+        countsOverride={props.store.renderState() === null
+          ? undefined
+          : props.store.renderState()?.histogram ?? null}
+        title={t("browse.histogram")}
+        emptyText={t("browse.histogramEmpty")}
+      />
+
+      {/* ↓ 以下（参数组 + 曲线组）是**可滚动区** */}
+      <div class="scroll-y-reserved flex min-h-0 flex-1 flex-col gap-3" data-editor-param-scroll>
 
       {/* ── 第 2 组：影调 / 色彩 / 清晰度 / 镜头 ───────────── */}
       <section class="flex flex-col gap-2" data-editor-group="params">
@@ -395,6 +312,7 @@ export function EditorPanels(props: EditorPanelsProps): JSX.Element {
           <ColorManagementTab store={props.store} enabled={props.enabled} hasPhoto={props.current !== null} profileEntries={props.profileEntries} onRefreshProfiles={props.onRefreshProfiles} onApplyColor={props.onApplyColor} onOpenProfiles={props.onOpenColorProfiles} colorBatchCount={props.colorBatchCount} onReviewColorBatch={props.onReviewColorBatch} />
         </Show>
       </section>
+      </div>
     </div>
   );
 }
@@ -452,257 +370,6 @@ function ColorManagementTab(props: { store: EditorStore; enabled: boolean; hasPh
         <IconExternalLink size={16} aria-hidden="true" />
       </button>
       <p class="px-1 text-fs-0 leading-relaxed text-fg-3">{t("editor.colorManagement.cacheHint")}</p>
-    </div>
-  );
-}
-
-/* ══════════════════════════════════════════════════════════════
- * 第 1 组的三块内容
- * ══════════════════════════════════════════════════════════════ */
-
-function OverviewTab(props: {
-  current: ViewerPhoto | null;
-  overviewImages: ThumbQueue;
-  loadHistogram: (path: string, bins: number) => Promise<HistogramCounts | null>;
-  store: EditorStore;
-  enabled: boolean;
-  zoom: number | null;
-  onZoomBy?: (factor: number) => void;
-  onZoomTo?: (zoom: number) => void;
-}): JSX.Element {
-  const path = (): string | null => props.current?.path ?? null;
-  const thumb = (): string | null => {
-    const file = path();
-    if (file === null) return null;
-    props.overviewImages.request(file, true);
-    return props.overviewImages.get(file).url;
-  };
-
-  return (
-    <>
-      {/*
-        预览与浏览右栏共用 `PreviewFrame`，图源走完整 Screen 档（长边 ≤1920）。
-        胶片带的 grid 小图会按 3:1 裁切，不能拿来做全图总览。
-      */}
-      <PreviewFrame
-        src={thumb()}
-        natural={props.current?.natural ?? null}
-        emptyText={path() === null ? t("editor.empty.noSelection") : t("common.loading")}
-      />
-      {/* 缩放控制仍在总览图片下方，按用户本轮要求不移动。 */}
-      <EditorZoomControl
-        zoom={props.zoom}
-        enabled={props.enabled}
-        onZoomBy={(factor) => props.onZoomBy?.(factor)}
-        onZoomTo={(zoom) => props.onZoomTo?.(zoom)}
-      />
-      <HistogramPanel
-        load={props.loadHistogram}
-        path={path()}
-        countsOverride={props.store.renderState() === null
-          ? undefined
-          : props.store.renderState()?.histogram ?? null}
-        title={t("browse.histogram")}
-        emptyText={t("browse.histogramEmpty")}
-      />
-    </>
-  );
-}
-
-/** 定稿页签：选中态来自当前配置哈希；用户定稿永不覆盖。 */
-function IssuesTab(props: { enabled: boolean; store: EditorStore; library: IssueLibrary | null;
-  selectionOverride: IssueSelection | null;
-  pending: { name: string; sourceBase: "raw" | "sooc" } | null;
-  onSelect: (stack: DevelopStack, selection: IssueSelection) => void; onDelete: (issue: Issue, event: ShiftLikeEvent) => void;
-  /** 改名：只对**已保存的定稿**开口（SOOC / RAW / 最近编辑是三种基准，不是条目） */
-  onRename: (issue: Issue) => void;
-  thumbs: ThumbQueue; thumbKey: (choice: string) => string }): JSX.Element {
-  const isSelected = (kind: "sooc" | "raw" | "latest" | number): boolean => {
-    // 先行值优先：点击那一刻就亮；后端的 selection 追上来后两者自然一致
-    const selected = props.selectionOverride ?? props.library?.selection;
-    return typeof kind === "number" ? typeof selected === "object" && selected.issue === kind : selected === kind;
-  };
-  const source = (base: "sooc" | "raw"): DevelopStack => ({
-    sourceBase: base, values: {}, curves: {}, asShotK: props.store.asShotTemperature(),
-    lensProfile: null, lensEnabled: null, baseCurveProfile: null, baseCurvePoints: null,
-    lutId: null, lutEnabled: null, nrMethod: null, geometry: null,
-  });
-  return <div class="flex flex-col gap-1 overflow-y-auto pr-1" data-editor-issues
-    style={{ height: GROUP1_TAB_HEIGHT }}>
-    <For each={(["sooc", "raw"] as const)}>{(base) =>
-      <button type="button" disabled={!props.enabled || !(base === "raw" ? props.store.editBaseAvailable().raw : props.store.editBaseAvailable().bitmap)}
-        class="flex min-h-12 items-center gap-2 rounded-ui px-1 text-left hover:bg-state-hover disabled:opacity-50"
-        classList={{ "bg-state-selected": isSelected(base) }} onClick={() => props.onSelect(source(base), base)}>
-        <IssueThumb imageKey={props.thumbKey(base)} thumbs={props.thumbs} />
-        <span class="block text-fs-2 text-fg-1">{base.toUpperCase()}</span>
-      </button>}
-    </For>
-    <div class="flex min-h-12 items-center gap-2 rounded-ui px-1" classList={{ "bg-state-selected": isSelected("latest") }}>
-      <IssueThumb imageKey={props.thumbKey("latest")} thumbs={props.thumbs} />
-      <span class="block text-fs-2 text-fg-1">{t("editor.issue.latest")}</span>
-    </div>
-    {/*
-      正在生成的定稿（占位）：确认弹窗一关它就现身，预览位转圈（崔总 2026-09-29：
-      「先生出条目，生成完再显示出图」，不再是几秒无事发生）。
-      列表按 created_at 倒序，新定稿落在最顶 —— 占位也放最顶，接替时无跳变。
-      不可点选：后端还在渲染，选它没有意义。
-    */}
-    <Show when={props.pending}>{(pending) =>
-      <div class="flex min-h-12 items-center gap-1 rounded-ui px-1" data-editor-issue-pending aria-busy="true">
-        <span class="flex h-10 w-14 shrink-0 items-center justify-center overflow-hidden rounded-ui bg-surface-bar">
-          <IconLoader2 size={16} class="animate-spin text-fg-3" aria-hidden="true" />
-        </span>
-        <span class="flex min-w-0 flex-1 flex-col">
-          <span class="fade-x-end block overflow-hidden whitespace-nowrap text-fs-2 leading-5 text-fg-1"
-            title={pending().name}>{pending().name}</span>
-          <span class="fade-x-end block overflow-hidden whitespace-nowrap text-fs-0 leading-5 text-fg-3">{pending().sourceBase.toUpperCase()} · {t("editor.issue.generating")}</span>
-        </span>
-      </div>}
-    </Show>
-    <For each={props.library?.issues ?? []}>{(issue) =>
-      <div class="group flex min-h-12 items-center gap-1 rounded-ui px-1 hover:bg-state-hover"
-        classList={{ "bg-state-selected": isSelected(issue.id) }}>
-        <button type="button" disabled={!props.enabled} onClick={() => props.onSelect(issue.stack, { issue: issue.id })}
-          class="flex min-w-0 flex-1 items-center gap-2 text-left disabled:opacity-50">
-          <IssueThumb imageKey={props.thumbKey(`issue:${issue.id}`)} thumbs={props.thumbs} />
-          {/*
-            文字区固定**两行**（名称 / 基准+日期），两行都是 `leading-5`（20px）——
-            右边那列图标于是能与两行一一对齐（崔总 2026-10-09），中间那片也因此更宽。
-            第一行**不撑行宽**：宽度由这一列给足，超出部分右端渐隐（`.fade-x-end`，
-            没超出时渐隐区是空白，看不出来）；整名仍可以在悬停提示里读到。
-            第二行宽度受这一列约束，同样右端渐隐（`.fade-x-end`；固定短语，只在极窄时才会碰到）。
-          */}
-          <span class="flex min-w-0 flex-1 flex-col">
-            <span class="fade-x-end block overflow-hidden whitespace-nowrap text-fs-2 leading-5 text-fg-1"
-              title={issue.name}>{issue.name}</span>
-            <span class="block overflow-hidden whitespace-nowrap fade-x-end text-fs-0 leading-5 text-fg-3">{issue.sourceBase.toUpperCase()} · {formatDay(issue.createdAt)}</span>
-          </span>
-        </button>
-        {/* 动作列：上=改名（对齐第一行）、下=删除（对齐第二行），与两行文字同高 */}
-        <span class="flex shrink-0 flex-col">
-          <button type="button" class="grid h-5 w-6 place-items-center rounded-ui text-fg-3 opacity-0 hover:text-fg-1 group-hover:opacity-100"
-            aria-label={t("editor.issue.renameTitle")} title={t("editor.issue.renameTitle")}
-            disabled={!props.enabled}
-            onClick={() => props.onRename(issue)}><IconPencil size={14} /></button>
-          <button type="button" class="grid h-5 w-6 place-items-center rounded-ui text-fg-3 opacity-0 hover:text-danger group-hover:opacity-100"
-            aria-label={t("editor.issue.delete")} title={t("editor.issue.delete")}
-            onClick={(event) => props.onDelete(issue, event)}><IconTrash size={14} /></button>
-        </span>
-      </div>}
-    </For>
-    <Show when={(props.library?.issues.length ?? 0) === 0 && props.pending === null}><p class="px-1 py-2 text-fs-0 text-fg-3">{t("editor.issue.empty")}</p></Show>
-  </div>;
-}
-
-function IssueThumb(props: { imageKey: string; thumbs: ThumbQueue }): JSX.Element {
-  /*
-   * **旧图留守**：键一变就 `Show` 掉会看到缩略图位闪一下（崔总 2026-10-10：
-   * 生成过程中面板在闪）——新图（或新 key 的缓存）就绪前，把上一张留在原位；
-   * 只有**换照片**（key 里的 repo/asset 变了）才清空：别的照片的旧图不能顶在格子里。
-   */
-  const [shown, setShown] = createSignal<{ url: string; approximate: boolean } | null>(null);
-  let identity: string | null = null;
-  const identityOf = (key: string): string | null => {
-    if (key === "") return null;
-    try {
-      const parsed = JSON.parse(key) as [string, number];
-      return `${parsed[0]}:${parsed[1]}`;
-    } catch {
-      return key; // 坏 key：整串当身份（换掉就清）
-    }
-  };
-  createEffect(() => {
-    const key = props.imageKey;
-    if (key === "") return;
-    props.thumbs.request(key);
-    onCleanup(() => props.thumbs.cancel(key));
-  });
-  createEffect(() => {
-    const key = props.imageKey;
-    const next = identityOf(key);
-    if (next !== identity) {
-      identity = next;
-      setShown(null);
-    }
-    const entry = props.thumbs.get(key);
-    if (entry.url !== null) {
-      setShown({ url: entry.url, approximate: entry.approximate === true });
-    }
-  });
-  return <span class="flex h-10 w-14 shrink-0 overflow-hidden rounded-ui bg-surface-bar">
-    <Show when={shown()}>{(value) => <img src={value().url} alt="" class="h-full w-full object-cover"
-      classList={{ "photo-raw-approximate": value().approximate }} />}</Show>
-  </span>;
-}
-
-/** 信息页签：只展示拍摄时的原始文件信息，按调节相关项、拍摄与文件分组。 */
-function InfoTab(props: { info: EditorPhotoInfo | null }): JSX.Element {
-  const groups = (): {
-    titleKey: MessageKey;
-    rows: { labelKey: MessageKey; value: string | null }[];
-  }[] => {
-    const info = props.info;
-    if (info === null) return [];
-    return [
-      {
-        titleKey: "editor.info.adjustGroup",
-        rows: [
-          { labelKey: "editor.info.temperatureBaseline", value: info.temperatureBaseline },
-          { labelKey: "editor.info.exposureBias", value: info.exposureBias },
-          { labelKey: "editor.info.iso", value: info.iso },
-          { labelKey: "editor.info.shutter", value: info.shutter },
-          { labelKey: "editor.info.aperture", value: info.aperture },
-          { labelKey: "editor.info.focal", value: info.focal },
-        ],
-      },
-      {
-        titleKey: "editor.info.shotGroup",
-        rows: [
-          { labelKey: "editor.info.cameraMake", value: info.cameraMake },
-          { labelKey: "editor.info.cameraModel", value: info.cameraModel },
-          { labelKey: "editor.info.lens", value: info.lens },
-          { labelKey: "editor.info.takenAt", value: info.takenAt },
-          { labelKey: "editor.info.datetimeRaw", value: info.datetimeRaw },
-          { labelKey: "editor.info.software", value: info.software },
-          { labelKey: "editor.info.gps", value: info.gps },
-        ],
-      },
-      {
-        titleKey: "editor.info.fileGroup",
-        rows: [
-          { labelKey: "editor.info.name", value: info.fileName },
-          { labelKey: "editor.info.path", value: info.relativePath },
-          { labelKey: "editor.info.dimensions", value: info.dimensions },
-          { labelKey: "editor.info.orientation", value: info.orientation },
-          { labelKey: "editor.info.format", value: info.format },
-          { labelKey: "editor.info.kind", value: info.kind },
-        ],
-      },
-    ];
-  };
-
-  return (
-    <div class="flex flex-col gap-3 overflow-y-auto pr-1" data-editor-info
-      style={{ height: GROUP1_TAB_HEIGHT }}>
-      <Show
-        when={props.info !== null}
-        fallback={<p class="py-2 text-fs-1 text-fg-3">{t("exif.empty")}</p>}
-      >
-        <For each={groups()}>
-          {(group) => (
-            <div class="flex flex-col gap-1" data-editor-info-group>
-              <span class="text-fs-0 font-semibold text-fg-2">{t(group.titleKey)}</span>
-              <MetadataRows rows={group.rows.map((row) => ({ label: t(row.labelKey), value: row.value }))} />
-            </div>
-          )}
-        </For>
-        <Show when={(props.info?.tags.length ?? 0) > 0}>
-          <div class="flex flex-col gap-1" data-editor-exif-tags>
-            <span class="text-fs-0 font-semibold text-fg-2">{t("editor.info.allExif")}</span>
-            <MetadataRows rows={(props.info?.tags ?? []).map((tag) => ({ label: tag.ifd + " · " + tag.tag, value: tag.value }))} />
-          </div>
-        </Show>
-      </Show>
     </div>
   );
 }

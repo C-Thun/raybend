@@ -13,9 +13,15 @@ export { EditorViewport, EDITOR_ZOOM_STEP } from "./viewport.tsx";
 export type { EditorViewportProps } from "./viewport.tsx";
 
 export { EditorPanels } from "./panels.tsx";
-export type { EditorPanelsProps, EditorPhotoInfo } from "./panels.tsx";
+export type { EditorPanelsProps } from "./panels.tsx";
 
-export { LutPanel, LUT_PANEL_WIDTH } from "./lut-panel.tsx";
+export { EditorLeftPanel } from "./left-panel.tsx";
+export type { EditorLeftPanelProps, EditorPhotoInfo } from "./left-panel.tsx";
+
+export { LutPanel } from "./lut-panel.tsx";
+
+/** 左列布局数学（宽度与底部块高度）—— 唯一出处见 `layout.ts`。 */
+export { EDITOR_LEFT_BOTTOM_INFO, EDITOR_LEFT_BOTTOM_VIEW, EDITOR_LEFT_WIDTH } from "./layout.ts";
 
 export { EditorPanelToggles, EditorResetTool, EditorToolbar } from "./toolbar.tsx";
 

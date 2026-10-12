@@ -37,9 +37,7 @@ import { t } from "../../i18n/index.ts";
 import { lutCount, visibleLutCategories, type LutEntry } from "../../lib/lut-library.ts";
 import { getLutCover } from "../../api/lut.ts";
 import type { EditorStore } from "./store.ts";
-
-/** 面板固定宽（`.pd` 只说「不可调宽」，没给数值 —— 见 `design/editor.md` §7 待决项 #3）。 */
-export const LUT_PANEL_WIDTH = 280;
+import { EDITOR_LEFT_WIDTH } from "./layout.ts";
 
 export interface LutPanelProps {
   store: EditorStore;
@@ -90,7 +88,7 @@ export function LutPanel(props: LutPanelProps): JSX.Element {
       class={["flex min-h-0 flex-1 flex-col bg-surface-main", props.class ?? ""]
         .filter(Boolean)
         .join(" ")}
-      style={{ width: `${LUT_PANEL_WIDTH}px` }}
+      style={{ width: `${EDITOR_LEFT_WIDTH}px` }}
     >
       {/*
         标题行：「LUT」+ 行尾两个图标按钮（新建分类 / 导入 LUT）。

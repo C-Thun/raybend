@@ -1050,6 +1050,7 @@ export const zhCN = {
 
  // ── 编辑工作区（M3-W1；design/editor.md + prompts/editor.pd）──
  "editor.toolsbar.lut": "LUT",
+ "editor.toolsbar.issues": "定稿",
  "editor.tool.crop": "裁切",
  "editor.tool.rotate": "旋转",
  "editor.tool.compare": "对比",
@@ -1282,6 +1283,7 @@ export const zhCN = {
  "cmd.editor.baseRaw": "使用 RAW 编辑源",
  "cmd.editor.finalize": "定稿为新版本",
  "cmd.editor.lut": "切换 LUT 面板",
+ "cmd.editor.issues": "切换定稿面板",
  "cmd.editor.crop": "裁切工具",
  "cmd.editor.rotate": "旋转工具",
  "cmd.editor.compare": "对比工具",

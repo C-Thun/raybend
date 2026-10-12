@@ -519,7 +519,7 @@ import 与 browse 的照片区必须经同一个 `PhotoViewingStage` / `PhotoVie
 | `EasyDestroyButton` / `EasyDestroyHost` | `EasyDestroy.tsx`（判定在 `lib/easy-destroy.ts`） | `easy destroy`：移除类快速通道，默认弹确认、`Shift` 跳过 |
 | `RemoveButton` / `RemoveGlyph` | `RemoveButton.tsx` | 移除 / 排除按钮：**禁行图标**，不用叉号（§11.3） |
 | `DragPreview` | `DragPreview.tsx` | 拖动预览（整叠卡片 + 数量角标）——**全局唯一一份** |
-| `PreviewFrame` | `PreviewFrame.tsx` | 右栏全图总览（比例夹在 3:1～3:4 + 视野框） |
+| `PreviewFrame` | `PreviewFrame.tsx` | 全图总览（比例夹在 3:1～3:4 + 视野框）；浏览右栏与**编辑左列底部**共用一份 |
 | `ProfileSelect` | `ProfileSelect.tsx` | 预设 / 配置文件选择（输入与导出共用同一套可用性规则） |
 | `RepositoryCard` | `RepositoryCard.tsx` | 库卡片（全项目唯一一份） |
 

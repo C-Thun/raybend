@@ -107,11 +107,11 @@ import { formatDateTime } from "../../lib/datetime.ts";
 import { browseSource } from "../../features/browse/grid-source.ts";
 import type { BrowseStore } from "../../features/browse/store.ts";
 import {
+  EditorLeftPanel,
   EditorPanels,
   createLensQuery,
   EditorViewport,
   EDITOR_ZOOM_STEP,
-  LutPanel,
   createEditorStrip,
   editorEmptyKind,
   editorVisibleRenderState,
@@ -1625,20 +1625,46 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
     >
       <div class="flex min-h-0 flex-1">
         {/*
-          左列：**没有把手**（`.pd`：LUT 面板「不可调宽度」）。
-          面板关掉时整列不占位置（`editorLutVisible` 同时管着档位与开关两个轴）。
+          左列（2026-10-12 改版）：上面是 LUT / 定稿 面板（toolsbar left 切换），
+          下面是**贴着底部**的总览 / 信息页签组；整列关掉时一起不占位置
+          （`store.leftVisible()` 同时管着档位与两个开关）。
+          左列**没有把手**（`.pd`：LUT 面板「不可调宽度」）。
         */}
         <aside
           class={[
             "flex min-h-0 shrink-0 flex-col bg-surface-main",
-            props.store.lutVisible() ? "" : "hidden",
+            props.store.leftVisible() ? "" : "hidden",
           ]
             .filter(Boolean)
             .join(" ")}
         >
-          <LutPanel store={props.store} onCreateCategory={createCategory} onImport={importDirectory}
-            onSelect={(id) => { if (!enabled()) return; props.store.setLut(id, true); confirmEdit(); }}
-            onToggle={confirmEdit} onHide={hideLutEntry} />
+          <EditorLeftPanel
+            store={props.store}
+            enabled={enabled()}
+            current={current()}
+            overviewImages={overviewImages}
+            renderState={props.store.renderState}
+            zoom={props.store.renderState()?.zoom ?? null}
+            onZoomBy={(factor) => sendIntent({ kind: "zoomBy", factor })}
+            onZoomTo={zoomTo}
+            info={info()}
+            issues={issueLibrary()}
+            pendingIssue={pendingIssue()}
+            issueFocusTick={issueFocusTick()}
+            issueSelectionOverride={issueSelectionOverride()}
+            onSelectIssue={selectIssue}
+            onDeleteIssue={requestDeleteIssue}
+            onRenameIssue={requestRenameIssue}
+            issueThumbs={issueThumbs}
+            issueThumbKey={issueThumbKey}
+            canFinalize={() => enabled() && !finalizeBusy() && (issueLibrary()?.canFinalize ?? false)}
+            onFinalize={() => void finalize()}
+            onCreateCategory={createCategory}
+            onImport={importDirectory}
+            onSelectLut={(id) => { if (!enabled()) return; props.store.setLut(id, true); confirmEdit(); }}
+            onToggleLut={confirmEdit}
+            onHideLut={hideLutEntry}
+          />
         </aside>
 
         {/*
@@ -1747,30 +1773,16 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
             store={props.store}
             enabled={enabled()}
             current={current()}
-            info={info()}
             lensQuery={lensQuery.state()}
             baseCurveLibrary={baseCurveLibrary()}
-            issues={issueLibrary()}
-            pendingIssue={pendingIssue()}
-            issueFocusTick={issueFocusTick()}
-            issueSelectionOverride={issueSelectionOverride()}
-            onSelectIssue={selectIssue}
-            onDeleteIssue={requestDeleteIssue}
-            onRenameIssue={requestRenameIssue}
-            issueThumbs={issueThumbs}
-            issueThumbKey={issueThumbKey}
             onSelectBaseCurve={selectBaseCurve}
             onRenameBaseCurve={renameBaseCurve}
             onRefreshLens={() => { void lensQuery.refresh(); }}
-            overviewImages={overviewImages}
             loadHistogram={loadHistogram}
             onConfirm={confirmEdit}
             onToolConfirm={confirmTool}
             error={developError() ?? store.error()}
             locked={locked()}
-            zoom={props.store.renderState()?.zoom ?? null}
-            onZoomBy={(factor) => sendIntent({ kind: "zoomBy", factor })}
-            onZoomTo={zoomTo}
             onCreatePresetDirectory={createPresetDirectoryW}
             onCreatePreset={createPresetW}
             onRenamePresetDirectory={renamePresetDirectoryW}

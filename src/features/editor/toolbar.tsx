@@ -7,7 +7,7 @@
 import { For, type JSX } from "solid-js";
 import {
   IconArrowsHorizontal,
-  IconBookmark,
+  IconCardsFilled,
   IconCrop,
   IconPalette,
   IconRefresh,
@@ -116,28 +116,30 @@ export function EditorToolbar(props: EditorSourceHistoryProps): JSX.Element {
   );
 }
 
-/** 左段：与左列对应的 LUT 面板开关。 */
+/** 左段：与左列对应的两个面板开关（定稿 / LUT，同一时刻只开一个；再点同一个 = 关整列）。 */
 export function EditorPanelToggles(props: EditorToolbarProps): JSX.Element {
-  return <ToggleBlock
-    pressed={props.store.lutVisible()}
-    icon={<IconPalette size={14} />}
-    label={t("editor.toolsbar.lut")}
-    onClick={() => props.store.toggleLut()}
-  />;
+  return <>
+    {/* 图标与 browse tile 左下角的「定稿数量」角标同款（`IconCardsFilled`）—— 同一件事同一张脸 */}
+    <ToggleBlock
+      pressed={props.store.issuesVisible()}
+      icon={<IconCardsFilled size={14} />}
+      label={t("editor.toolsbar.issues")}
+      onClick={() => props.store.toggleLeft("issues")}
+    />
+    <ToggleBlock
+      pressed={props.store.lutVisible()}
+      icon={<IconPalette size={14} />}
+      label={t("editor.toolsbar.lut")}
+      onClick={() => props.store.toggleLeft("lut")}
+    />
+  </>;
 }
 
-/** 右段：重置之后是定稿；两者都走工作区动作槽。 */
+/** 右段：只剩统一重置（定稿按钮已随 2026-10-12 改版移进左列的定稿面板）。 */
 export function EditorResetTool(props: EditorToolbarProps & {
   onRequestReset: () => void;
   canReset?: () => boolean;
-  canFinalize?: () => boolean;
-  onFinalize?: () => void;
 }): JSX.Element {
-  return <div class="flex items-center gap-1">
-    <Button variant="ghost" icon={<IconRefresh size={14} />} aria-label={t("editor.panel.resetAll")}
-      disabled={!props.enabled || !(props.canReset?.() ?? props.store.resetStage() !== "none")} onClick={props.onRequestReset} />
-    <Button variant="primary" icon={<IconBookmark size={14} />} disabled={!props.canFinalize?.()} onClick={() => props.onFinalize?.()}>
-      {t("editor.issue.toolbar")}
-    </Button>
-  </div>;
+  return <Button variant="ghost" icon={<IconRefresh size={14} />} aria-label={t("editor.panel.resetAll")}
+    disabled={!props.enabled || !(props.canReset?.() ?? props.store.resetStage() !== "none")} onClick={props.onRequestReset} />;
 }

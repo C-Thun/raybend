@@ -22,7 +22,9 @@ import { zhCN } from "./zh-CN.ts";
  * 2026-10-05 加了 editor.preset.nameTooLong/nameInvalid/unavailable 三条
  * （预设审计修复：前端名称校验与错误区分）。
  * 2026-10-12 加了 cmd.diagnostics.openLogFolder 与 diagnostics.* 七条
- * （日志/崩溃采集 W1/W2/W3-α：打开诊断目录、崩溃后保存报告弹窗）。）
+ * （日志/崩溃采集 W1/W2/W3-α：打开诊断目录、崩溃后保存报告弹窗）。
+ * 2026-10-12 加了 editor.toolsbar.issues 与 cmd.editor.issues 两条
+ * （编辑左栏改版：定稿面板开关；加完本文件即刷新检查器缓存）。）
  *
  * ⚠️ 加了新键之后若类型检查器仍报「键不存在」，那是**陈旧快照**误报（不是真错）：
  * 判据与验证配方见 编译器诊断纪律：以 `tsc` 为准（必要时用 `MessageKey[]` 临时证明文件 + 退出码）。
