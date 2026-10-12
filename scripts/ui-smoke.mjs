@@ -1260,6 +1260,46 @@ try {
   }
 
   /*
+   * PreviewFrame 的**高度不变量**（2026-10-13 修）：外框高度只由 aspect-ratio 决定，
+   * 内容（已缓存的超长纵向图）不许把它撑爆 —— 那正是「切到信息再切回总览」时
+   * `min-height: auto` 取内容 min-content 高的那个 bug（`min-h-0` 是修法）。
+   * 画廊那格带「重挂载」按钮，点一下就是同一种重挂载。
+   */
+  const previewFrame = await evaluate(`(async () => {
+    const demo = document.querySelector('[data-demo="preview-extreme"]');
+    if (!demo) return null;
+    const read = () => {
+      const frame = demo.querySelector("[data-preview-frame]");
+      if (frame === null) return null;
+      const rect = frame.getBoundingClientRect();
+      return { width: Math.round(rect.width), height: Math.round(rect.height) };
+    };
+    const image = demo.querySelector("img");
+    if (image !== null && !image.complete) {
+      await new Promise((resolve) => setTimeout(resolve, 600));
+    }
+    const before = read();
+    demo.querySelector("[data-preview-remount]")?.click();
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    return { before, after: read() };
+  })()`);
+  if (previewFrame === null || previewFrame.before === null || previewFrame.after === null) {
+    problems.push(
+      "画廊里找不到 PreviewFrame 的超长纵向样例（[data-demo=preview-extreme]）—— 高度不变量没法量",
+    );
+  } else {
+    for (const [name, entry] of [["重挂载前", previewFrame.before], ["重挂载后", previewFrame.after]]) {
+      const expected = entry.width / (3 / 4);
+      if (Math.abs(entry.height - expected) > 8) {
+        problems.push(
+          `PreviewFrame（超长纵向）${name}高度是 ${entry.height}px，按 3:4 夹取应当是 ${Math.round(expected)}px` +
+            " —— 内容把框撑爆了（min-h-0 那条不变量破了）",
+        );
+      }
+    }
+  }
+
+  /*
    * 旧的「tile 画面区比例必须 1.5」断言已删除：格子的形状现在统一是**正方外框**，
    * 照片在里面的比例**每张不同**（来自元信息，还可能被 3:1 夹取）。
    * 对齐 / 居中 / 比例范围 / 信息条可见性由下面 `tileGrid` 那一段统一量。

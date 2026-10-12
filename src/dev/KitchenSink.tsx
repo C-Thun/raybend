@@ -54,6 +54,7 @@ import { Menu } from "../components/ui/Menu";
 import { ConfirmDialog, Dialog } from "../components/ui/Dialog";
 import { PathText } from "../components/ui/PathText";
 import { Tile } from "../components/ui/Tile";
+import { PreviewFrame } from "../components/ui/PreviewFrame";
 import { TreeNode } from "../components/ui/TreeNode";
 import { Panel } from "../components/ui/Panel";
 import { SplitHandle } from "../components/ui/SplitHandle";
@@ -68,6 +69,17 @@ import { ImportProgressDemo } from "./import-progress-demo.tsx";
 import { MigrationGateDemo } from "./migration-gate-demo.tsx";
 
 /** 演示用的 EXIF：三组都有值（对应 design/main.md §2.2 的示例） */
+/**
+ * 超长纵向样片（1080×8000 ≈ 1:7.4，远超 3:4 上限）—— 用内联 SVG 固定固有尺寸，
+ * 不依赖任何磁盘资源；它守的是 PreviewFrame 的 `min-h-0`（2026-10-13 修）。
+ * 填充用**颜色名**而不是十六进制：`lint:colors` 只允许令牌写色值，而这是图像内容、不是界面样式。
+ */
+const EXTREME_PORTRAIT =
+  "data:image/svg+xml;utf8," +
+  encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="8000"><rect width="1080" height="8000" fill="dimgray"/></svg>',
+  );
+
 const DEMO_EXIF: ExifData = {
   camera: "DC-G9",
   lens: "LEICA DG 12-60mm F2.8-4.0",
@@ -133,6 +145,8 @@ export default function KitchenSink() {
     "import",
   );
   const [toggleSnap, setToggleSnap] = createSignal(false);
+  /* PreviewFrame 那格的重挂载计数（从 1 开始 —— `Show keyed` 要真值） */
+  const [extremeTick, setExtremeTick] = createSignal(1);
   const [toggleByTime, setToggleByTime] = createSignal(true);
   const [dialogOpen, setDialogOpen] = createSignal(false);
   const [confirmOpen, setConfirmOpen] = createSignal(false);
@@ -707,6 +721,32 @@ export default function KitchenSink() {
               <Tile label="损坏文件" empty src={demoImage()} />
               <Tile label="文件夹" icon={<IconFolderFilled size={20} />} />
               <Tile label="不可用" tag="离线卷" disabled />
+            </Row>
+          </Section>
+
+          {/* ── PreviewFrame ─────────────────────────────── */}
+          <Section
+            title="PreviewFrame（全图总览）"
+            note="比例随照片变化、夹在 3:1～3:4；超出后保持框高、整图缩入并留白。视野框（1px 主色）只在传 visibleRect 时出现。超长纵向那格带「重挂载」按钮 —— 它守的是「图已缓存时重挂载不许把框撑爆」（min-h-0，2026-10-13 修）"
+          >
+            <Row label="3:2 照片 + 视野框">
+              <div class="w-64">
+                <PreviewFrame src={demoImage()} natural={{ width: 3000, height: 2000 }} emptyText=""
+                  visibleRect={{ x: 500, y: 300, width: 1200, height: 800 }} />
+              </div>
+            </Row>
+            <Row label="超长纵向（约 1:7.4，夹在 3:4）">
+              {/* 必须是 **flex 列**（与编辑器左列同形）：`min-height:auto` 只对 flex 项生效，
+                  写成普通 block 的话这个样例永远复现不出那个 bug */}
+              <div class="flex w-64 flex-col" data-demo="preview-extreme">
+                <button type="button" data-preview-remount
+                  class="mb-2 h-7 w-full rounded-ui bg-surface-track text-fs-1 text-fg-2 hover:bg-state-hover"
+                  onClick={() => setExtremeTick((value) => value + 1)}>重挂载</button>
+                {/* `keyed`：tick 一变就整块重建 —— 正是「切页签再切回来」那种重挂载 */}
+                <Show when={extremeTick()} keyed>
+                  {(_tick: number) => <PreviewFrame src={EXTREME_PORTRAIT} natural={{ width: 1080, height: 8000 }} emptyText="" />}
+                </Show>
+              </div>
             </Row>
           </Section>
 

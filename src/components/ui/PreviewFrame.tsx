@@ -68,8 +68,19 @@ export function PreviewFrame(props: PreviewFrameProps): JSX.Element {
 
   return (
     <div
-      class={["flex w-full items-stretch justify-center rounded-ui bg-surface-bar p-2", props.class ?? ""]
-        .filter(Boolean).join(" ")}
+      class={[
+        /*
+         * `min-h-0` 是必需的（2026-10-13 修）：外框是 flex 项，默认 `min-height: auto`
+         * 会取**内容的 min-content 高** —— 图已缓存时（切页签重挂载就是这种情况）
+         * `<img>` 的固有比例会把它撑到「宽度 × 原图高宽比」（超长纵向图 = 上千像素），
+         * **盖过 `aspect-ratio` 算出来的高度**，总览就把整列吃光。
+         * 归零后外框高度只由 `aspect-ratio` 定，内容超出由里层 `overflow-hidden` 裁。
+         */
+        "flex min-h-0 w-full items-stretch justify-center rounded-ui bg-surface-bar p-2",
+        props.class ?? "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
       style={{ "aspect-ratio": String(previewFrameAspect(natural()?.width, natural()?.height)) }}
       data-preview-frame
     >
