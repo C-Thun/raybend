@@ -27,10 +27,13 @@ use std::collections::HashMap;
 use rusqlite::params;
 
 use crate::error::Result;
-use crate::import::plan::{KnownSources, PlannedItem, Sequences, SourceFile};
+use crate::import::plan::{
+    KnownSources, KnownTargets, LibraryEntry, PlannedItem, Sequences, SourceFile,
+};
 use crate::import::runner::{ImportSink, RunCounts, RunRequest};
 use crate::media::diff::DiskFile;
 use crate::media::exif::{self, ExifData, TakenAt, TakenAtSource};
+use crate::media::fingerprint::{ContentFingerprint, HashKind};
 use crate::media::kind::MediaKind;
 use crate::store::assets;
 use crate::store::db::CatalogDb;
@@ -74,6 +77,15 @@ enum Op {
         /// 与 EXIF 同一次登记里读的头；位图与 RAW 各一份，`specs/display-size-source.md` §3.2）。
         /// 读不到尺寸时是 `None` —— 那些列就留 NULL（消费方回退）。
         display: Option<crate::media::meta::PhotoMeta>,
+        /// 库内副本的内容指纹（位图全文 / RAW 采样；`None` = 没算成）。
+        fingerprint: Option<ContentFingerprint>,
+        /// 这个资产所在的文件组是不是「整组完整导入」（边车采纳的门，见 `NewAsset`）。
+        complete: bool,
+    },
+    /// 回填一条内容指纹（判重时顺手为库内老行建立的）。
+    SetContentHash {
+        rel_path: String,
+        fingerprint: ContentFingerprint,
     },
     /// 更新一条的状态。
     Mark {
@@ -109,6 +121,11 @@ pub struct NewAsset {
     pub asset_id: i64,
     pub target_rel: String,
     pub source_file_abs: String,
+    /// 这个资产所在的**文件组**是不是「整组完整导入」了（没跳过、没失败、没改名）。
+    ///
+    /// 边车（`.xmp`）采纳靠它把门：拆开的情况（例：位图改名 `_01`、RAW 跳过）
+    /// 不算完整导入，不采纳配置（`specs/import-dedup-fingerprint.md` §9）。
+    pub complete: bool,
 }
 
 impl<'a> CatalogSink<'a> {
@@ -204,6 +221,39 @@ impl ImportSink for CatalogSink<'_> {
         self.active().read(load_known_sources)
     }
 
+    fn known_targets(&mut self) -> Result<KnownTargets> {
+        self.flush()?;
+        self.active().read(|conn| {
+            // 含标了缺失的行：盘上找不到不代表这个**路径**能再用 ——
+            // 库里那行还在，向同一路径插新行依旧会撞 `UNIQUE(rel_path_folded)`。
+            // 顺手把大小与已有指纹带出来：判「同一份内容」时能直接用，不必再读盘。
+            let mut stmt = conn.prepare(
+                "SELECT rel_path, size_bytes, content_hash, content_hash_kind FROM asset_files",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                let rel_path: String = row.get(0)?;
+                let size: Option<i64> = row.get(1)?;
+                let hex: Option<String> = row.get(2)?;
+                let kind: Option<String> = row.get(3)?;
+                Ok(LibraryEntry {
+                    rel_path,
+                    size_bytes: size.map(|value| value.max(0) as u64),
+                    fingerprint: match (hex, kind) {
+                        (Some(hex), Some(kind)) => {
+                            HashKind::parse(&kind).map(|kind| ContentFingerprint::new(kind, hex))
+                        }
+                        _ => None,
+                    },
+                })
+            })?;
+            let mut targets = KnownTargets::new();
+            for row in rows {
+                targets.insert(row?);
+            }
+            Ok(targets)
+        })
+    }
+
     fn interrupted_sources(&mut self) -> Result<KnownSources> {
         self.flush()?;
         self.active()
@@ -284,10 +334,27 @@ impl ImportSink for CatalogSink<'_> {
         item: &PlannedItem,
         file: &SourceFile,
         copy_identity: Option<FileId>,
+        fingerprint: Option<ContentFingerprint>,
     ) -> Result<()> {
         let Some(target_rel) = item.target_rel() else {
             return Ok(());
         };
+        /*
+         * 冲突兜底①（数据库侧）：这个目标路径库里已经有人占着了吗 ——
+         * 导入写进 `photos/` 会触发文件监听差分，`store::rebuild` 可能
+         * **抢在我们前面**把同名文件登记进库（`specs/import-dedup-fingerprint.md` §1.3）。
+         *
+         * 判据是「角色 + 大小」：一致 → 照常推 op（`apply` 会认领那一行，不再插）；
+         * 不一致 → 真冲突，直接返回错误 —— 执行器按「单条失败」处理，
+         * 不碰库里的记录，也不带崩整批。
+         */
+        if let Some(existing) = self
+            .active()
+            .read(|conn| assets::find_file_by_rel_path(conn, target_rel))?
+            && !existing.matches_copy(assets::role_of(file.kind), file.size_bytes)
+        {
+            return Err(crate::Error::ContentConflict(target_rel.to_string()));
+        }
         /*
          * 元数据在这里读（**库内副本**、在写事务之外）——
          * 以前这一块根本没做，于是导入进库的照片 `taken_at` 永远是 NULL
@@ -328,6 +395,20 @@ impl ImportSink for CatalogSink<'_> {
             exif: Box::new(exif),
             taken,
             display,
+            fingerprint,
+            complete: item.complete,
+        });
+        Ok(())
+    }
+
+    fn set_content_hash(
+        &mut self,
+        rel_path: &str,
+        fingerprint: &ContentFingerprint,
+    ) -> Result<()> {
+        self.ops.push(Op::SetContentHash {
+            rel_path: rel_path.to_string(),
+            fingerprint: fingerprint.clone(),
         });
         Ok(())
     }
@@ -400,56 +481,55 @@ fn apply(
             exif,
             taken,
             display,
+            fingerprint,
+            complete,
         } => {
-            let forms = PathForms::new(target_rel);
-            let (asset_id, created) = find_or_create_asset(conn, target_rel, now_ms)?;
-            if created {
-                new_assets.push(NewAsset {
-                    asset_id,
-                    target_rel: target_rel.clone(),
-                    source_file_abs: source_path.clone(),
-                });
-            }
-            let disk = DiskFile {
-                rel_path: target_rel.clone(),
-                rel_path_folded: forms.folded().to_string(),
-                kind: *kind,
+            let facts = CopyFacts {
+                target_rel,
+                role: assets::role_of(*kind),
                 size_bytes: *size_bytes,
                 mtime_ms: *mtime_ms,
                 created_ms: *created_ms,
                 identity: *copy_identity,
+                source_path,
+                source_identity: *source_identity,
+                fingerprint: fingerprint.clone(),
+                complete: *complete,
             };
-            assets::insert_file(
-                conn,
-                asset_id,
-                &disk,
-                assets::role_of(*kind),
-                *display,
-                now_ms,
-            )?;
-            assets::set_source(conn, forms.folded(), source_path, *source_identity, now_ms)?;
-            /*
-             * EXIF 只由**位图**写，RAW 只在「这个资产没有位图」时才写。
-             *
-             * 为什么：同一张照片的位图与 RAW 共用一个 `assets` 行，而 RAW 那边
-             * 能读到的字段往往更少（镜头名、部分曝光字段）—— 让后登记的那个去覆盖，
-             * 会把位图读到的信息冲成空。时间同理，只是多一层「不许降级」（见下）。
-             */
-            let has_bitmap: i64 = conn.query_row(
-                "SELECT count(*) FROM asset_files WHERE asset_id = ?1 AND role = 'bitmap'",
-                [asset_id],
-                |row| row.get(0),
-            )?;
-            if matches!(kind, MediaKind::Image) || has_bitmap == 0 {
-                let effective = keep_better_taken(conn, asset_id, *taken)?;
-                assets::apply_exif(conn, asset_id, exif, effective, now_ms)?;
+            // 冲突兜底②：库里有行就认领（同步竞态、我们自己的半成品都走这条）。
+            if let Some(existing) = assets::find_file_by_rel_path(conn, target_rel)? {
+                return adopt_occupied(conn, *run_id, &facts, &existing, now_ms);
             }
-            conn.execute(
-                "UPDATE import_items
-                    SET asset_id = ?1, status = 'copied', reason = NULL
-                  WHERE run_id = ?2 AND target_rel = ?3",
-                params![asset_id, run_id, target_rel],
-            )?;
+            /*
+             * 真插入：整段包在 savepoint 里。万一还有别的写者抢在前头，
+             * 回滚到 savepoint（连新建的 `assets` 行一起撤）后再走同一条兜底 ——
+             * **绝不**让一条冲突把整个批事务带走（2026-10-12 真机事故）。
+             */
+            conn.execute_batch("SAVEPOINT rb_register")?;
+            match register_fresh(
+                conn, *run_id, &facts, *kind, exif, *taken, *display, now_ms, new_assets,
+            ) {
+                Ok(()) => conn.execute_batch("RELEASE rb_register")?,
+                Err(error) if unique_violation(&error) => {
+                    conn.execute_batch("ROLLBACK TO rb_register; RELEASE rb_register")?;
+                    match assets::find_file_by_rel_path(conn, target_rel)? {
+                        Some(existing) => {
+                            adopt_occupied(conn, *run_id, &facts, &existing, now_ms)?;
+                        }
+                        // 行又没了（另一个写者又把它删了）：把原始错误交出去，
+                        // 由执行器记入失败清单。
+                        None => return Err(error),
+                    }
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        Op::SetContentHash {
+            rel_path,
+            fingerprint,
+        } => {
+            // 幂等：库里已经有指纹就不覆盖（`set_content_hash` 里带了守卫）
+            assets::set_content_hash(conn, rel_path, fingerprint, now_ms)?;
         }
         Op::Mark {
             run_id,
@@ -576,6 +656,179 @@ fn strip_raw_segment(dir: &str) -> &str {
     }
 }
 
+/// 一份「刚复制到位的副本」的事实（登记与认领都要用）。
+struct CopyFacts<'a> {
+    target_rel: &'a str,
+    role: &'a str,
+    size_bytes: u64,
+    mtime_ms: Option<i64>,
+    created_ms: Option<i64>,
+    identity: Option<FileId>,
+    source_path: &'a str,
+    source_identity: Option<FileId>,
+    /// 库内副本的内容指纹（位图全文 / RAW 采样）。
+    fingerprint: Option<ContentFingerprint>,
+    /// 这个资产所在的文件组是不是「整组完整导入」（边车采纳的门）。
+    complete: bool,
+}
+
+/// 真插一行新记录（`assets` 需要时新建）—— 这条路径当时确实空着。
+#[allow(clippy::too_many_arguments)]
+fn register_fresh(
+    conn: &rusqlite::Connection,
+    run_id: i64,
+    facts: &CopyFacts<'_>,
+    kind: MediaKind,
+    exif: &ExifData,
+    taken: Option<TakenAt>,
+    display: Option<crate::media::meta::PhotoMeta>,
+    now_ms: i64,
+    new_assets: &mut Vec<NewAsset>,
+) -> Result<()> {
+    let forms = PathForms::new(facts.target_rel);
+    let (asset_id, created) = find_or_create_asset(conn, facts.target_rel, now_ms)?;
+    if created {
+        new_assets.push(NewAsset {
+            asset_id,
+            target_rel: facts.target_rel.to_string(),
+            source_file_abs: facts.source_path.to_string(),
+            complete: facts.complete,
+        });
+    }
+    let disk = DiskFile {
+        rel_path: facts.target_rel.to_string(),
+        rel_path_folded: forms.folded().to_string(),
+        kind,
+        size_bytes: facts.size_bytes,
+        mtime_ms: facts.mtime_ms,
+        created_ms: facts.created_ms,
+        identity: facts.identity,
+    };
+    assets::insert_file(
+        conn,
+        asset_id,
+        &disk,
+        facts.role,
+        display,
+        facts.fingerprint.as_ref(),
+        now_ms,
+    )?;
+    assets::set_source(
+        conn,
+        forms.folded(),
+        facts.source_path,
+        facts.source_identity,
+        now_ms,
+    )?;
+    /*
+     * EXIF 只由**位图**写，RAW 只在「这个资产没有位图」时才写。
+     *
+     * 为什么：同一张照片的位图与 RAW 共用一个 `assets` 行，而 RAW 那边
+     * 能读到的字段往往更少（镜头名、部分曝光字段）—— 让后登记的那个去覆盖，
+     * 会把位图读到的信息冲成空。时间同理，只是多一层「不许降级」（见下）。
+     */
+    let has_bitmap: i64 = conn.query_row(
+        "SELECT count(*) FROM asset_files WHERE asset_id = ?1 AND role = 'bitmap'",
+        [asset_id],
+        |row| row.get(0),
+    )?;
+    if matches!(kind, MediaKind::Image) || has_bitmap == 0 {
+        let effective = keep_better_taken(conn, asset_id, taken)?;
+        assets::apply_exif(conn, asset_id, exif, effective, now_ms)?;
+    }
+    mark_item_imported(conn, run_id, facts.target_rel, asset_id)
+}
+
+/// 目标路径**已经被登记过**时的兜底（`specs/import-dedup-fingerprint.md` §7）。
+///
+/// * 与刚复制到位的这份是同一份文件（角色 + 大小一致）→ **认领**：不插新行，
+///   把来源列补上、把副本的新身份/时间写回去、把这一条挂到它所属的 `asset_id`；
+/// * 否则只把**这一条**标失败（原因写清楚），库与磁盘都不动。
+fn adopt_occupied(
+    conn: &rusqlite::Connection,
+    run_id: i64,
+    facts: &CopyFacts<'_>,
+    existing: &assets::ExistingFile,
+    now_ms: i64,
+) -> Result<()> {
+    if !existing.matches_copy(facts.role, facts.size_bytes) {
+        return fail_item(
+            conn,
+            run_id,
+            facts.target_rel,
+            &format!("库内已有同名路径、内容不同：{}", facts.target_rel),
+        );
+    }
+    assets::update_stat(
+        conn,
+        existing.row_id,
+        facts.size_bytes,
+        facts.mtime_ms,
+        facts.created_ms,
+        now_ms,
+    )?;
+    assets::update_identity(conn, existing.row_id, facts.identity)?;
+    assets::clear_missing(conn, existing.row_id, now_ms)?;
+    // 库里那行还没指纹而我们刚算了一份 → 顺手补上（下次判重省一次读盘）。
+    // 已经有指纹就不动：同一份内容的指纹不会变（`set_content_hash` 自己也是幂等的）。
+    if existing.fingerprint.is_none()
+        && let Some(fingerprint) = &facts.fingerprint
+    {
+        assets::set_content_hash(conn, facts.target_rel, fingerprint, now_ms)?;
+    }
+    assets::set_source(
+        conn,
+        PathForms::new(facts.target_rel).folded(),
+        facts.source_path,
+        facts.source_identity,
+        now_ms,
+    )?;
+    mark_item_imported(conn, run_id, facts.target_rel, existing.asset_id)
+}
+
+/// 登记成功：条目状态**一步到 `imported`**（`specs/M1-6.md` §3.3：`copied` 与
+/// `imported` 之间没有需要区分的时刻；分两步写反而会让兜底标的 `failed`
+/// 被后一条 `Mark(imported)` 盖掉）。
+fn mark_item_imported(
+    conn: &rusqlite::Connection,
+    run_id: i64,
+    target_rel: &str,
+    asset_id: i64,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE import_items SET asset_id = ?1, status = 'imported', reason = NULL
+          WHERE run_id = ?2 AND target_rel = ?3",
+        params![asset_id, run_id, target_rel],
+    )?;
+    Ok(())
+}
+
+/// 只让这一条失败（写进错误清单的原因文案由调用方给）。
+fn fail_item(
+    conn: &rusqlite::Connection,
+    run_id: i64,
+    target_rel: &str,
+    reason: &str,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE import_items SET status = 'failed', reason = ?1
+          WHERE run_id = ?2 AND target_rel = ?3",
+        params![reason, run_id, target_rel],
+    )?;
+    Ok(())
+}
+
+/// 是不是「唯一约束冲突」（`UNIQUE constraint failed: asset_files.rel_path_folded`）。
+///
+/// 只认这一种：外键、非空之类的约束错误是**别的问题**，不该被当成「路径被占」。
+fn unique_violation(error: &crate::Error) -> bool {
+    matches!(
+        error,
+        crate::Error::Database(rusqlite::Error::SqliteFailure(inner, _))
+            if inner.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE
+    )
+}
+
 /// 库里记着「哪些源已经导进来过」（`memory/FUNCTION-REPOSITORY.md` §4.3）。
 fn load_known_sources(conn: &rusqlite::Connection) -> Result<KnownSources> {
     load_known_sources_filtered(conn, false)
@@ -683,6 +936,8 @@ mod tests {
                 target_rel: target.to_string(),
             },
             missing: Vec::new(),
+            // 测试里默认当「整组完整导入」：想验拆开的情形显式改。
+            complete: true,
         }
     }
 
@@ -708,6 +963,216 @@ mod tests {
             failed,
             bytes: 1234,
         }
+    }
+
+    /* ══════════════════════════════════════════════════════════════
+     * 冲突兜底（`specs/import-dedup-fingerprint.md` §7）
+     *
+     * 2026-10-12 真机事故：导入写进 `photos/` 触发文件监听差分，
+     * `store::rebuild` 抢先把同一个路径登记进库 —— 导入自己的 `Op::Register`
+     * 再插一条就撞 `UNIQUE(rel_path_folded)`，一条冲突把**整批**带走了。
+     * ══════════════════════════════════════════════════════════════ */
+
+    /// 「别人」把同一个路径登记进去了（大小一致）→ 导入要**认领**那一行。
+    #[test]
+    fn register_adopts_a_row_that_someone_else_registered_first() {
+        let dir = tmp();
+        let db = catalog(dir.path());
+        let mut sink = CatalogSink::new(&db, T0);
+        let run_id = sink.begin_run(&request("/src")).unwrap();
+        let file = source_file("a.jpg", MediaKind::Image, "/src/2026/a.jpg", 10);
+        let item = planned(0, "a.jpg", "photos/2026/a.jpg", Role::Bitmap);
+        sink.record_plan(run_id, std::slice::from_ref(&file), std::slice::from_ref(&item))
+            .unwrap();
+        sink.commit().unwrap();
+
+        // 差分同步先登记的那一行：路径一样、大小一样，但**来源列还空着**。
+        let asset_id = db
+            .write(|conn| {
+                let asset = assets::insert_asset(conn, T0)?;
+                let disk = DiskFile::new("photos/2026/a.jpg", 10, Some(T0 - 1000));
+                assets::insert_file(conn, asset, &disk, "bitmap", None, None, T0)?;
+                Ok(asset)
+            })
+            .unwrap();
+
+        sink.register(run_id, &item, &file, Some(FileId::new(7, [7u8; 16])), None)
+            .expect("大小一致 = 我们自己刚写下的那份，应该认领");
+        sink.commit().expect("认领不该报错");
+
+        let (rows, status, item_asset, source, volume, source_volume) = db
+            .read(|conn| {
+                let rows: i64 = conn.query_row(
+                    "SELECT count(*) FROM asset_files WHERE rel_path_folded = 'photos/2026/a.jpg'",
+                    [],
+                    |r| r.get(0),
+                )?;
+                let (status, asset, source, volume, source_volume): (
+                    String,
+                    Option<i64>,
+                    Option<String>,
+                    Option<i64>,
+                    Option<i64>,
+                ) = conn.query_row(
+                    "SELECT i.status, i.asset_id, f.source_path, f.volume_serial, f.source_volume_serial
+                       FROM import_items i JOIN asset_files f ON f.rel_path_folded = i.target_rel
+                      WHERE i.run_id = ?1",
+                    [run_id],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+                )?;
+                Ok((rows, status, asset, source, volume, source_volume))
+            })
+            .unwrap();
+        assert_eq!(rows, 1, "认领不该再插第二条");
+        assert_eq!(status, "imported");
+        assert_eq!(item_asset, Some(asset_id), "这条要挂到已存在的那张照片上");
+        assert_eq!(source.as_deref(), Some("/src/2026/a.jpg"), "来源列要补上（判重靠它）");
+        assert_eq!(volume, Some(7), "副本的新身份要写进 volume_serial");
+        assert_eq!(source_volume, Some(5), "源身份写进 source_volume_serial（两列分开）");
+    }
+
+    /// 冲突发生在**推 op 之后、提交之前**（文件监听差分抢跑）：
+    /// 只让这一条失败，**其余照常登记、批照样提交**。
+    #[test]
+    fn a_conflicting_row_fails_one_item_without_killing_the_batch() {
+        let dir = tmp();
+        let db = catalog(dir.path());
+        let mut sink = CatalogSink::new(&db, T0);
+        let run_id = sink.begin_run(&request("/src")).unwrap();
+        let files = [
+            source_file("a.jpg", MediaKind::Image, "/src/a.jpg", 10),
+            source_file("b.jpg", MediaKind::Image, "/src/b.jpg", 20),
+        ];
+        let items = [
+            planned(0, "a.jpg", "photos/a.jpg", Role::Bitmap),
+            planned(1, "b.jpg", "photos/b.jpg", Role::Bitmap),
+        ];
+        sink.record_plan(run_id, &files, &items).unwrap();
+        sink.commit().unwrap();
+
+        // 两条登记 op 已经攒下（推的时候库里还是空的）—— 这时别人把 `photos/b.jpg` 占了。
+        sink.register(run_id, &items[0], &files[0], None, None).unwrap();
+        sink.register(run_id, &items[1], &files[1], None, None).unwrap();
+        db.write(|conn| {
+            let asset = assets::insert_asset(conn, T0)?;
+            let disk = DiskFile::new("photos/b.jpg", 99, Some(T0 - 1000));
+            assets::insert_file(conn, asset, &disk, "bitmap", None, None, T0)?;
+            Ok(())
+        })
+        .unwrap();
+
+        sink.commit().expect("单条冲突绝不能带崩整批");
+
+        let (b_rows, a_rows, statuses) = db
+            .read(|conn| {
+                let count = |path: &str| -> Result<i64> {
+                    Ok(conn.query_row(
+                        "SELECT count(*) FROM asset_files WHERE rel_path_folded = ?1",
+                        [path],
+                        |r| r.get(0),
+                    )?)
+                };
+                let mut stmt =
+                    conn.prepare("SELECT status FROM import_items WHERE run_id = ?1 ORDER BY id")?;
+                let statuses = stmt
+                    .query_map([run_id], |r| r.get::<_, String>(0))?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                Ok((count("photos/b.jpg")?, count("photos/a.jpg")?, statuses))
+            })
+            .unwrap();
+        assert_eq!(a_rows, 1, "不冲突的那条照常进来");
+        assert_eq!(b_rows, 1, "冲突那条保留别人登记的行，不覆盖也不新增");
+        assert_eq!(statuses, vec!["imported", "failed"]);
+
+        let (failed, reason) = db
+            .read(|conn| {
+                Ok(conn.query_row(
+                    "SELECT failed, (SELECT reason FROM import_items WHERE run_id = ?1 AND status = 'failed')
+                       FROM import_runs WHERE id = ?1",
+                    [run_id],
+                    |r| Ok((r.get::<_, i64>(0)?, r.get::<_, Option<String>>(1)?)),
+                )?)
+            })
+            .unwrap();
+        assert_eq!(failed, 1, "计数要如实反应那一条的失败");
+        let reason = reason.expect("失败要带原因");
+        assert!(reason.contains("内容不同"), "原因要能给人看懂：{reason}");
+    }
+
+    /// 推 op 那一刻库里有行且**不是同一份**（大小不同）→ 当场拒掉，
+    /// 由执行器走「单条失败」，不浪费时间读 EXIF、也不碰库。
+    #[test]
+    fn register_rejects_a_path_occupied_by_a_different_file() {
+        let dir = tmp();
+        let db = catalog(dir.path());
+        let mut sink = CatalogSink::new(&db, T0);
+        let run_id = sink.begin_run(&request("/src")).unwrap();
+        let file = source_file("a.jpg", MediaKind::Image, "/src/a.jpg", 10);
+        let item = planned(0, "a.jpg", "photos/a.jpg", Role::Bitmap);
+        sink.record_plan(run_id, std::slice::from_ref(&file), std::slice::from_ref(&item))
+            .unwrap();
+        sink.commit().unwrap();
+        db.write(|conn| {
+            let asset = assets::insert_asset(conn, T0)?;
+            let disk = DiskFile::new("photos/a.jpg", 99, Some(T0 - 1000));
+            assets::insert_file(conn, asset, &disk, "bitmap", None, None, T0)?;
+            Ok(())
+        })
+        .unwrap();
+
+        let error = sink
+            .register(run_id, &item, &file, None, None)
+            .expect_err("同一路径上不是同一份文件，不能闷头认领");
+        assert!(matches!(error, crate::Error::ContentConflict(_)), "{error:?}");
+        assert_eq!(sink.pending_ops(), 0, "被拒的条目不该留下半截 op");
+        sink.commit().unwrap();
+        let rows = db
+            .read(|conn| {
+                Ok(conn.query_row(
+                    "SELECT count(*) FROM asset_files WHERE rel_path_folded = 'photos/a.jpg'",
+                    [],
+                    |r| r.get::<_, i64>(0),
+                )?)
+            })
+            .unwrap();
+        assert_eq!(rows, 1, "库里的那一行不能被碰");
+    }
+
+    /// `known_targets` 交给规划的东西：**库里所有**路径，含标了缺失的行
+    /// （盘上找不到不代表这个路径能再用 —— 库里那行还在，插新行依旧撞唯一索引）。
+    #[test]
+    fn known_targets_include_every_registered_path_even_missing_ones() {
+        let dir = tmp();
+        let db = catalog(dir.path());
+        let mut sink = CatalogSink::new(&db, T0);
+        let run_id = sink.begin_run(&request("/src")).unwrap();
+        let files = [
+            source_file("a.jpg", MediaKind::Image, "/src/a.jpg", 10),
+            source_file("b.jpg", MediaKind::Image, "/src/b.jpg", 10),
+        ];
+        let items = [
+            planned(0, "a.jpg", "photos/A.jpg", Role::Bitmap),
+            planned(1, "b.jpg", "photos/B.jpg", Role::Bitmap),
+        ];
+        sink.record_plan(run_id, &files, &items).unwrap();
+        sink.register(run_id, &items[0], &files[0], None, None)
+            .unwrap();
+        sink.register(run_id, &items[1], &files[1], None, None)
+            .unwrap();
+        sink.commit().unwrap();
+        db.write(|conn| {
+            conn.execute(
+                "UPDATE asset_files SET missing_since = ?1 WHERE rel_path_folded = 'photos/b.jpg'",
+                [T0],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+
+        let targets = sink.known_targets().unwrap();
+        assert!(targets.contains("photos/A.jpg"));
+        assert!(targets.contains("photos/a.jpg"), "折叠比较（库里列是小写）");
+        assert!(targets.contains("photos/B.jpg"), "标了缺失的行也占着这个路径");
     }
 
     #[test]
@@ -772,7 +1237,7 @@ mod tests {
             std::slice::from_ref(&item),
         )
         .unwrap();
-        sink.register(run, &item, &file, None).unwrap();
+        sink.register(run, &item, &file, None, None).unwrap();
         sink.mark(run, &item, "imported", None).unwrap();
         let pending = sink.pending_ops();
         sessions.invalidate(&id).unwrap();
@@ -843,6 +1308,7 @@ mod tests {
                 role: Some(Role::Bitmap),
                 outcome: ItemOutcome::Skipped("已在库中（按文件身份判重）".to_string()),
                 missing: Vec::new(),
+                complete: false,
             },
         ];
         sink.record_plan(run_id, &files, &items).unwrap();
@@ -880,7 +1346,7 @@ mod tests {
         let bitmap = source_file("a.jpg", MediaKind::Image, "/src/2026/a.jpg", 10);
         let bitmap_item = planned(0, "a.jpg", "photos/2026/a.jpg", Role::Bitmap);
         sink.record_plan(run_id, std::slice::from_ref(&bitmap), std::slice::from_ref(&bitmap_item)).unwrap();
-        sink.register(run_id, &bitmap_item, &bitmap, None).unwrap();
+        sink.register(run_id, &bitmap_item, &bitmap, None, None).unwrap();
         sink.commit().unwrap();
         let created = sink.take_new_assets();
         assert_eq!(created.len(), 1);
@@ -891,7 +1357,7 @@ mod tests {
         let raw = source_file("a.orf", MediaKind::Raw, "/src/2026/a.orf", 20);
         let raw_item = planned(0, "a.orf", "photos/2026/_RAW/a.orf", Role::Raw);
         sink.record_plan(run_id, std::slice::from_ref(&raw), std::slice::from_ref(&raw_item)).unwrap();
-        sink.register(run_id, &raw_item, &raw, None).unwrap();
+        sink.register(run_id, &raw_item, &raw, None, None).unwrap();
         sink.commit().unwrap();
         assert!(sink.take_new_assets().is_empty(), "往已有资产补文件不算新建");
 
@@ -917,7 +1383,7 @@ mod tests {
             std::slice::from_ref(&item),
         )
         .unwrap();
-        sink.register(run_id, &item, &file, Some(FileId::new(9, [1u8; 16])))
+        sink.register(run_id, &item, &file, Some(FileId::new(9, [1u8; 16])), None)
             .unwrap();
         sink.mark(run_id, &item, "imported", None).unwrap();
         sink.commit().unwrap();
@@ -1006,8 +1472,8 @@ mod tests {
         ];
         let files = [bitmap, raw];
         sink.record_plan(run_id, &files, &items).unwrap();
-        sink.register(run_id, &items[0], &files[0], None).unwrap();
-        sink.register(run_id, &items[1], &files[1], None).unwrap();
+        sink.register(run_id, &items[0], &files[0], None, None).unwrap();
+        sink.register(run_id, &items[1], &files[1], None, None).unwrap();
         sink.commit().unwrap();
 
         let rows: Vec<(String, Option<i64>, Option<i64>, Option<i64>)> = db
@@ -1076,8 +1542,8 @@ mod tests {
         ];
         let files = [bitmap, raw];
         sink.record_plan(run_id, &files, &items).unwrap();
-        sink.register(run_id, &items[0], &files[0], None).unwrap();
-        sink.register(run_id, &items[1], &files[1], None).unwrap();
+        sink.register(run_id, &items[0], &files[0], None, None).unwrap();
+        sink.register(run_id, &items[1], &files[1], None, None).unwrap();
         sink.commit().unwrap();
 
         let (assets_n, files_n, roles): (i64, i64, Vec<String>) = db
@@ -1112,7 +1578,7 @@ mod tests {
             std::slice::from_ref(&item),
         )
         .unwrap();
-        sink.register(run_id, &item, &raw, None).unwrap();
+        sink.register(run_id, &item, &raw, None, None).unwrap();
         sink.commit().unwrap();
 
         let (assets_n, files_n): (i64, i64) = db
@@ -1141,7 +1607,7 @@ mod tests {
             std::slice::from_ref(&item_b),
         )
         .unwrap();
-        sink.register(run_id, &item_b, &bitmap, None).unwrap();
+        sink.register(run_id, &item_b, &bitmap, None, None).unwrap();
         sink.commit().unwrap();
 
         // 再导同名的 RAW（正常目录，不是 _RAW/）—— 应当挂到同一条资产上
@@ -1153,7 +1619,7 @@ mod tests {
             std::slice::from_ref(&item_r),
         )
         .unwrap();
-        sink.register(run_id, &item_r, &raw, None).unwrap();
+        sink.register(run_id, &item_r, &raw, None, None).unwrap();
         sink.commit().unwrap();
 
         let (assets_n, files_n): (i64, i64) = db
@@ -1181,7 +1647,7 @@ mod tests {
             std::slice::from_ref(&item),
         )
         .unwrap();
-        sink.register(run_id, &item, &file, None).unwrap();
+        sink.register(run_id, &item, &file, None, None).unwrap();
         sink.commit().unwrap();
 
         let mut fresh = CatalogSink::new(&db, T0);
@@ -1210,7 +1676,7 @@ mod tests {
             std::slice::from_ref(&item),
         )
         .unwrap();
-        sink.register(run_id, &item, &file, None).unwrap();
+        sink.register(run_id, &item, &file, None, None).unwrap();
         sink.commit().unwrap();
         db.write(|conn| assets::mark_missing(conn, 1, T0)).unwrap();
 
@@ -1293,6 +1759,7 @@ mod tests {
             role: Some(Role::Bitmap),
             outcome: ItemOutcome::Failed("路径不合法".to_string()),
             missing: Vec::new(),
+            complete: false,
         };
         sink.record_plan(
             run_b,
@@ -1360,10 +1827,10 @@ mod tests {
         let items = [item_raw, item_bitmap];
         sink.record_plan(run_id, &files, &items).unwrap();
         // 先 RAW
-        sink.register(run_id, &items[0], &files[0], None).unwrap();
+        sink.register(run_id, &items[0], &files[0], None, None).unwrap();
         sink.commit().unwrap();
         // 再位图
-        sink.register(run_id, &items[1], &files[1], None).unwrap();
+        sink.register(run_id, &items[1], &files[1], None, None).unwrap();
         sink.commit().unwrap();
 
         let (assets_n, files_n, roles): (i64, i64, Vec<String>) = db

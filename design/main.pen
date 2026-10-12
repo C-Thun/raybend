@@ -1,5 +1,5 @@
 {
-  "version": "2.20",
+  "version": "2.21",
   "children": [
     {
       "type": "frame",
@@ -3171,6 +3171,49 @@
                           "name": "AvoidDupLabel",
                           "fill": "$fg-2",
                           "content": "避免重复导入",
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "bjrMu",
+                      "name": "ImportXmpRow",
+                      "gap": 6,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "Z90br",
+                          "name": "Checkbox / checked",
+                          "width": 16,
+                          "height": 16,
+                          "fill": "$brand",
+                          "cornerRadius": 2,
+                          "layout": "vertical",
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "D9qNd",
+                              "name": "Glyph / check",
+                              "width": 11,
+                              "height": 11,
+                              "icon": "check",
+                              "library": "lucide",
+                              "fill": "$fg-on-brand"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "id": "X6MxM",
+                          "name": "AvoidDupLabel",
+                          "fill": "$fg-2",
+                          "content": "导入 xmp 配置",
                           "fontFamily": "Inter",
                           "fontSize": 14,
                           "fontWeight": "normal"

@@ -199,6 +199,7 @@ export function ImportProgressDemo() {
         repositoryId: "demo",
         sources: [{ path: "D:\\照片\\2026 旅行", includeSubdirs: true }],
         avoidDuplicates: true,
+        importXmp: true,
       })
       .then(() => push(SCRIPTS.running()));
   }
@@ -215,6 +216,7 @@ export function ImportProgressDemo() {
         repositoryId: "demo",
         sources: [{ path: "D:\\照片\\2026 旅行", includeSubdirs: true }],
         avoidDuplicates: true,
+        importXmp: true,
       })
       // 挂载完先收起来：画廊里别一上来就占满整页；而且「点击打开」正是真机路径
       // （用户点「导入」→ 弹窗出现），冒烟断言的也就是它。

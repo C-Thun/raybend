@@ -16,6 +16,7 @@
 pub mod diff;
 pub(crate) mod embedded;
 pub mod exif;
+pub mod fingerprint;
 pub mod kind;
 pub mod meta;
 pub mod meta_cache;

@@ -175,6 +175,13 @@ export interface ImportStore {
    */
   avoidDuplicates: () => boolean;
   setAvoidDuplicates: (value: boolean) => void;
+  /**
+   * 「导入 xmp 配置」——默认**开**（`specs/xmp-sidecar.md` §7）。
+   * 勾上时导入会读照片旁的自家 `.xmp`，把编辑配置/评级/标签复原到新资产；
+   * 只在**整组完整导入**时生效（拆分/改名/跳过不采纳）。
+   */
+  importXmp: () => boolean;
+  setImportXmp: (value: boolean) => void;
   /** 从设置里读回导入偏好（工作区挂载时调一次） */
   hydratePreferences: () => Promise<void>;
 }
@@ -209,6 +216,9 @@ export const SOURCE_POLL_MS = 2000;
 /** 设置键：「避免重复导入」（与 `src/api/db.ts` 的 `SETTING_KEYS` 一致） */
 const IMPORT_AVOID_DUPLICATES_KEY = "import.avoid_duplicates";
 
+/** 设置键：「导入 xmp 配置」（同源；默认开） */
+const IMPORT_XMP_KEY = "import.import_xmp";
+
 export function createImportStore(deps: ImportStoreDeps): ImportStore {
   const limit = deps.recentLimit ?? DEFAULT_RECENT_LIMIT;
 
@@ -239,6 +249,7 @@ export function createImportStore(deps: ImportStoreDeps): ImportStore {
     string | null
   >(null);
   const [avoidDuplicates, setAvoidDuplicatesSignal] = createSignal(true);
+  const [importXmp, setImportXmpSignal] = createSignal(true);
 
   /* ══════════════════════════════════════════════════════════
    * 选中
@@ -428,15 +439,28 @@ export function createImportStore(deps: ImportStoreDeps): ImportStore {
       });
   };
 
+  const setImportXmp = (value: boolean): void => {
+    if (value === importXmp()) return;
+    setImportXmpSignal(value);
+    void deps.api.setSetting(IMPORT_XMP_KEY, value ? "1" : "0").catch(() => {
+      // 存不下偏好不影响本次使用
+    });
+  };
+
   async function hydratePreferences(): Promise<void> {
     // 启动就把「最近」的挂载情况认一遍（不等用户点）
     void refreshSources();
     try {
       const raw = await deps.api.getSetting(IMPORT_AVOID_DUPLICATES_KEY);
-      if (raw === null) return;
-      setAvoidDuplicatesSignal(raw === "1" || raw.toLowerCase() === "true");
+      if (raw !== null) {
+        setAvoidDuplicatesSignal(raw === "1" || raw.toLowerCase() === "true");
+      }
+      const xmp = await deps.api.getSetting(IMPORT_XMP_KEY);
+      if (xmp !== null) {
+        setImportXmpSignal(xmp === "1" || xmp.toLowerCase() === "true");
+      }
     } catch {
-      // 读不到就用默认（开）
+      // 读不到就用默认（都开）
     }
   }
 
@@ -647,6 +671,8 @@ export function createImportStore(deps: ImportStoreDeps): ImportStore {
     remount,
     avoidDuplicates,
     setAvoidDuplicates,
+    importXmp,
+    setImportXmp,
     hydratePreferences,
   };
 }

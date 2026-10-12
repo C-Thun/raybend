@@ -99,9 +99,9 @@ function fakeApi() {
   };
 
   const api: ImportApi = {
-    async start(_repositoryId, sources, avoidDuplicates) {
+    async start(_repositoryId, sources, avoidDuplicates, importXmp) {
       state.calls.push(
-        `start:${sources.map((s) => s.path).join(",")}:${String(avoidDuplicates)}`,
+        `start:${sources.map((s) => s.path).join(",")}:${String(avoidDuplicates)}:${String(importXmp)}`,
       );
       if (state.startFails) throw new Error("库离线了");
       return {
@@ -155,6 +155,7 @@ async function startedStore() {
     repositoryId: "repo-1",
     sources: [{ path: "/src/a", includeSubdirs: true }],
     avoidDuplicates: true,
+    importXmp: true,
   });
   return { ...fake, store };
 }
@@ -165,7 +166,11 @@ async function startedStore() {
 
 test("begin：调 start、订阅事件、取一次快照", async () => {
   const { state, store } = await startedStore();
-  assert.deepEqual(state.calls, ["start:/src/a:true", "subscribe", "status:b1"]);
+  assert.deepEqual(state.calls, [
+    "start:/src/a:true:true",
+    "subscribe",
+    "status:b1",
+  ]);
   assert.equal(store.batchId(), "b1");
   assert.equal(store.open(), true);
   assert.equal(store.error(), null);
@@ -228,6 +233,7 @@ test("多源目录：计数是聚合值，标签给 [2/3] 目录名", async () =
       { path: "/src/c", includeSubdirs: false },
     ],
     avoidDuplicates: true,
+    importXmp: true,
   });
 
   fake.emit(
@@ -348,6 +354,7 @@ test("命令失败：记下原因，但不清掉已有进度", async () => {
     repositoryId: "repo-1",
     sources: [{ path: "/src/a", includeSubdirs: true }],
     avoidDuplicates: true,
+    importXmp: true,
   });
   fake.emit(
     snapshot({
@@ -368,6 +375,7 @@ test("开始导入失败：记原因、没有批次、不订阅", async () => {
     repositoryId: "repo-1",
     sources: [{ path: "/src/a", includeSubdirs: true }],
     avoidDuplicates: false,
+    importXmp: true,
   });
   assert.equal(store.error(), "库离线了");
   assert.equal(store.batchId(), null);
@@ -390,6 +398,7 @@ test("浏览器降级：没有后端时给一句人话，不订阅、不空转",
     repositoryId: "repo-1",
     sources: [{ path: "/src/a", includeSubdirs: true }],
     avoidDuplicates: true,
+    importXmp: true,
   });
   assert.equal(store.batchId(), null);
   assert.match(store.error() ?? "", /开发预览|dev preview/);
@@ -434,6 +443,7 @@ test("导出错误清单：拿到条数；失败时返回 0 并记原因", async
     repositoryId: "repo-1",
     sources: [{ path: "/src/a", includeSubdirs: true }],
     avoidDuplicates: true,
+    importXmp: true,
   });
   assert.equal(await broken.exportErrors("/root/errors.json"), 0);
   assert.equal(broken.error(), "写不进去");

@@ -167,6 +167,7 @@ pub fn insert_file(
     disk: &DiskFile,
     role: &str,
     display: Option<PhotoMeta>,
+    fingerprint: Option<&crate::media::fingerprint::ContentFingerprint>,
     now_ms: i64,
 ) -> Result<i64> {
     let ext = crate::media::kind::extension(&disk.rel_path).unwrap_or_default();
@@ -179,8 +180,8 @@ pub fn insert_file(
         "INSERT INTO asset_files
             (asset_id, role, rel_path, rel_path_folded, ext, size_bytes, mtime_ms,
              file_created_ms, volume_serial, file_id, display_width, display_height, orientation,
-             created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?14)",
+             content_hash, content_hash_kind, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?16)",
         params![
             asset_id,
             role,
@@ -195,10 +196,35 @@ pub fn insert_file(
             display.map(|meta| i64::from(meta.width)),
             display.map(|meta| i64::from(meta.height)),
             display.map(|meta| i64::from(meta.orientation)),
+            fingerprint.map(|fp| fp.hex.clone()),
+            fingerprint.map(|fp| fp.kind.as_str()),
             now_ms
         ],
     )?;
     Ok(conn.last_insert_rowid())
+}
+
+/// 回填一条内容指纹（判重时顺手为库内老行建立的，`specs/import-dedup-fingerprint.md` §6）。
+///
+/// 幂等：库里已经有指纹就不覆盖（`WHERE content_hash IS NULL`）——
+/// 同一份内容的指纹不会变，重复写只是浪费事务。返回改了几行（0 或 1）。
+pub fn set_content_hash(
+    conn: &Connection,
+    rel_path: &str,
+    fingerprint: &crate::media::fingerprint::ContentFingerprint,
+    now_ms: i64,
+) -> Result<usize> {
+    let folded = crate::store::path_semantics::PathForms::new(rel_path)
+        .folded()
+        .to_string();
+    // 指纹是派生缓存：除了这两列与 `updated_at`，别的列一个都不碰（缺失标记也不碰）。
+    let updated = conn.execute(
+        "UPDATE asset_files
+            SET content_hash = ?2, content_hash_kind = ?3, updated_at = ?4
+          WHERE rel_path_folded = ?1 AND content_hash IS NULL",
+        params![folded, fingerprint.hex, fingerprint.kind.as_str(), now_ms],
+    )?;
+    Ok(updated)
 }
 
 /// 补写一个文件的「来源」列（`memory/FUNCTION-REPOSITORY.md` §4.3 的判重靠它）。
@@ -389,7 +415,7 @@ pub fn apply_diff(
             let f = &disk[idx];
             // 展示尺寸不走差分（重建流程）：新行先留 NULL，
             // 紧随其后的 `backfill::refresh_*` 会在同一趟重建里读到并写回。
-            insert_file(conn, asset_id, f, role_of(f.kind), None, now_ms)?;
+            insert_file(conn, asset_id, f, role_of(f.kind), None, None, now_ms)?;
             out.new_files += 1;
         }
     }
@@ -635,6 +661,72 @@ pub fn find_by_rel_path(conn: &Connection, rel_path: &str) -> Result<Option<i64>
             |row| row.get::<_, i64>(0),
         )
         .optional()?)
+}
+
+/// 库里这个路径上的文件行（一次唯一索引查询）。
+///
+/// 导入登记的冲突兜底要用它：目标路径在盘上没人，但**库里可能有行**
+/// （文件监听差分抢先登记、半成品、标了缺失的旧行）—— 那时裸 `INSERT` 会撞
+/// `UNIQUE(rel_path_folded)`（`specs/import-dedup-fingerprint.md` §1）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExistingFile {
+    /// `asset_files.id`。
+    pub row_id: i64,
+    /// 它挂在哪个资产上。
+    pub asset_id: i64,
+    /// `bitmap` / `raw` / `sidecar`。
+    pub role: String,
+    /// 库里记的大小（老行可能是 NULL）。
+    pub size_bytes: Option<u64>,
+    /// 库里已有的内容指纹（NULL = 还没建立；认领时可以顺手补上）。
+    pub fingerprint: Option<crate::media::fingerprint::ContentFingerprint>,
+}
+
+/// 按库内相对路径取文件行（找不到 → `None`；路径按**折叠**形式比）。
+///
+/// # Errors
+/// 数据库读失败。
+pub fn find_file_by_rel_path(conn: &Connection, rel_path: &str) -> Result<Option<ExistingFile>> {
+    let folded = crate::store::path_semantics::PathForms::new(rel_path)
+        .folded()
+        .to_string();
+    Ok(conn
+        .query_row(
+            "SELECT id, asset_id, role, size_bytes, content_hash, content_hash_kind
+               FROM asset_files WHERE rel_path_folded = ?1",
+            [folded],
+            |row| {
+                let hex: Option<String> = row.get(4)?;
+                let kind: Option<String> = row.get(5)?;
+                Ok(ExistingFile {
+                    row_id: row.get(0)?,
+                    asset_id: row.get(1)?,
+                    role: row.get(2)?,
+                    size_bytes: row.get::<_, Option<i64>>(3)?.map(|v| v.max(0) as u64),
+                    fingerprint: match (hex, kind) {
+                        (Some(hex), Some(kind)) => {
+                            crate::media::fingerprint::HashKind::parse(&kind).map(|kind| {
+                                crate::media::fingerprint::ContentFingerprint::new(kind, hex)
+                            })
+                        }
+                        _ => None,
+                    },
+                })
+            },
+        )
+        .optional()?)
+}
+
+impl ExistingFile {
+    /// 这条行跟「刚复制到位的这份」是不是同一份文件。
+    ///
+    /// 判据是**角色一致 + 大小一致**：大小相等的位图不会被错认成 RAW，而大小
+    /// 不等一定不是同一份内容（`specs/import-dedup-fingerprint.md` §7 B/C）。
+    /// 库里大小未知（老行）时**不敢认** —— 宁可走冲突分支。
+    #[must_use]
+    pub fn matches_copy(&self, role: &str, size_bytes: u64) -> bool {
+        self.role == role && self.size_bytes == Some(size_bytes)
+    }
 }
 
 /// 一个资产下有哪些文件（按角色）。
@@ -1015,8 +1107,8 @@ mod tests {
         // 同一路径插两次必须被数据库挡住（差分层不该让它发生，但防线要在）
         let conn = catalog();
         let a = insert_asset(&conn, T0).unwrap();
-        insert_file(&conn, a, &disk("photos/a.jpg", 1, 1), "bitmap", None, T0).unwrap();
-        let err = insert_file(&conn, a, &disk("Photos/A.JPG", 1, 1), "bitmap", None, T0);
+        insert_file(&conn, a, &disk("photos/a.jpg", 1, 1), "bitmap", None, None, T0).unwrap();
+        let err = insert_file(&conn, a, &disk("Photos/A.JPG", 1, 1), "bitmap", None, None, T0);
         assert!(err.is_err(), "折叠后同路径 → 唯一索引必须报错");
     }
 

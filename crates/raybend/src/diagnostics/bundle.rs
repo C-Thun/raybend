@@ -79,7 +79,12 @@ pub fn latest_unprompted(crashes_dir: &Path) -> Option<CrashSummary> {
             .unwrap_or(std::time::UNIX_EPOCH);
         candidates.push((modified, path));
     }
-    candidates.sort_by_key(|(modified, _)| std::cmp::Reverse(*modified));
+    // 目录 mtime 可能撞在同一刻度上（同一次启动里连续两次崩溃、或文件系统时间粒度粗），
+    // 那时按**目录名**兜底：`RB-<日期>-<短码>` 里的日期就是崩溃日，名字越大越新。
+    // 不这么办的话这里就是不确定的（测试在本机曾稳定选错、真机上会「提示的不是最新那份」）。
+    candidates.sort_by(|(a_time, a_path), (b_time, b_path)| {
+        b_time.cmp(a_time).then_with(|| b_path.cmp(a_path))
+    });
     let (_, dir) = candidates.into_iter().next()?;
     Some(summarize(&dir))
 }

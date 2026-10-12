@@ -535,6 +535,7 @@ export const zhCN = {
  "import.timeout.precheck": "空间预检",
  "repo.import": "导入",
  "repo.avoid_duplicates": "避免重复导入",
+ "repo.import_xmp": "导入 xmp 配置",
  "repo.empty": "还没有库 —— 先新建一个作为导入目标",
  "repo.online": "在线",
  "repo.offline": "离线",

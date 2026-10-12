@@ -37,14 +37,15 @@ use std::time::{Duration, Instant};
 use crate::error::Result;
 use crate::import::fsops::{FileOps, ScanNeeds, Scanner};
 use crate::import::plan::{
-    self, FsProbe, KnownSources, PlanOptions, PlannedItem, Reserved, Sequences, SourceExtras,
-    SourceFile,
+    self, ContentProbe, FsProbe, KnownSources, KnownTargets, PlanOptions, PlannedItem, Reserved,
+    Sequences, SourceExtras, SourceFile,
 };
 use crate::import::progress::{
     BatchCommit, BatchHandle, BatchProgress, CurrentItem, ImportError, ImportStage, ImportState,
     RunProgress, Throttle,
 };
 use crate::import::template::Template;
+use crate::media::fingerprint::{self, ContentFingerprint, HashKind};
 use crate::media::scan::{Cancel, ScanOptions, ScannedFile};
 use crate::store::file_id::FileId;
 
@@ -235,6 +236,10 @@ pub trait ImportSink {
     }
     /// 判重用的「已导入过的源」（关掉判重时不必调）。
     fn known_sources(&mut self) -> Result<KnownSources>;
+    /// 库里**已经占着**的目标路径（重名让位要同时看盘与库；测试替身可以是空集）。
+    fn known_targets(&mut self) -> Result<KnownTargets> {
+        Ok(KnownTargets::new())
+    }
     fn interrupted_sources(&mut self) -> Result<KnownSources> {
         Ok(KnownSources::new())
     }
@@ -260,7 +265,17 @@ pub trait ImportSink {
         item: &PlannedItem,
         file: &SourceFile,
         copy_identity: Option<FileId>,
+        fingerprint: Option<ContentFingerprint>,
     ) -> Result<()>;
+    /// 回填一条内容指纹（判重时顺手为库内老行建立的，`Op::SetContentHash`）。
+    /// 测试替身可以不管（默认什么都不做）。
+    fn set_content_hash(
+        &mut self,
+        _rel_path: &str,
+        _fingerprint: &ContentFingerprint,
+    ) -> Result<()> {
+        Ok(())
+    }
     /// 更新一条的状态与原因。
     fn mark(
         &mut self,
@@ -624,9 +639,17 @@ impl Deps<'_> {
                 }
             }
             let copy_identity = self.ops.identity_of(target);
-            match self.target_call(|sink| sink.register(run_id, item, file, copy_identity)) {
+            // 内容指纹（位图全文 / RAW 采样）：判重的第三级判据，顺便给新文件建档。
+            // 复制刚完，库内这一份就在页缓存里 —— 这次读盘几乎不要钱。
+            let fingerprint = self.ops.fingerprint_of(target);
+            match self.target_call(|sink| {
+                sink.register(run_id, item, file, copy_identity, fingerprint.clone())
+            }) {
                 Ok(()) => {
-                    self.target_call(|sink| sink.mark(run_id, item, "imported", None))?;
+                    // 状态由 `Register` 自己定（`imported`）：登记就代表这一条成了。
+                    // 中间那个 `copied` 两个 op 之间没有可观察到的时刻 —— 批事务里
+                    // 先写再改，谁也没看见（`specs/M1-6.md` §3.3），而分开写反而会让
+                    // 登记阶段的冲突兑底（标 `failed`）被后一条 `Mark(imported)` 盖掉。
                     work.counts.imported += 1;
                     self.bump(run_id, 1, 0, 0);
                     if item.role != Some(plan::Role::Raw) {
@@ -747,6 +770,9 @@ impl Deps<'_> {
         } else {
             KnownSources::new()
         };
+        // 冲突判定**不管判重开关**：盘上没人、库里有行的路径必须让位，
+        // 否则登记时会撞 `UNIQUE(rel_path_folded)`（2026-10-12 的整批中断就是这个）。
+        let known_targets = self.target_call(|sink| sink.known_targets())?;
         let interrupted = self.target_call(|sink| sink.interrupted_sources())?;
         files.retain(|file| !interrupted.contains(file));
         let mut sequences = self.target_call(|sink| sink.sequences())?;
@@ -779,12 +805,15 @@ impl Deps<'_> {
         }
 
         let probe = OpsProbe(self.ops);
+        let content = FsContentProbe { ops: self.ops };
         let planned = plan::plan(
             &files,
             &job.template,
             &options,
             &probe,
             &known,
+            &known_targets,
+            &content,
             &mut sequences,
             &resumable,
             &adopt,
@@ -796,6 +825,10 @@ impl Deps<'_> {
             return Err(crate::Error::PathNotFound(job.source_root.clone()));
         }
         self.target_call(|sink| sink.record_plan(run_id, &files, &planned.items))?;
+        // 判重时顺手为库内老行建立的内容指纹：随这一批回填（下次判到同一条省一次读盘）
+        for (rel_path, fingerprint) in &planned.backfilled {
+            self.target_call(|sink| sink.set_content_hash(rel_path, fingerprint))?;
+        }
         self.target_call(|sink| sink.save_sequences(&sequences))?;
         self.target_call(|sink| sink.commit())?;
 
@@ -1057,6 +1090,29 @@ impl FsProbe for OpsProbe<'_> {
     }
 }
 
+/// 内容指纹的真实来源：源文件走盘（绝对路径），库内文件走 [`FileOps`]。
+///
+/// 只在目标路径被占时才被调（`specs/import-dedup-fingerprint.md` §3.2）。
+struct FsContentProbe<'a> {
+    ops: &'a dyn FileOps,
+}
+
+impl ContentProbe for FsContentProbe<'_> {
+    fn source_fingerprint(&self, file: &SourceFile) -> Option<ContentFingerprint> {
+        // 口径由类型定：位图全文（源文件也读全文 —— 被占着才走到这里）
+        let kind = HashKind::for_media(file.kind);
+        fingerprint::fingerprint_path(&file.abs_path, kind).ok()
+    }
+
+    fn library_fingerprint(&self, rel_path: &str) -> Option<ContentFingerprint> {
+        self.ops.fingerprint_of(rel_path)
+    }
+
+    fn library_size(&self, rel_path: &str) -> Option<u64> {
+        self.ops.size_of(rel_path)
+    }
+}
+
 fn run_of(progress: &mut BatchProgress, run_id: i64) -> &mut RunProgress {
     // run 一定在（刚 push 过）；真找不到就补一个，绝不 panic（进度不该能弄崩导入）
     if let Some(pos) = progress.runs.iter().position(|r| r.run_id == run_id) {
@@ -1221,6 +1277,7 @@ mod tests {
             item: &PlannedItem,
             file: &SourceFile,
             copy_identity: Option<FileId>,
+            _fingerprint: Option<crate::media::fingerprint::ContentFingerprint>,
         ) -> Result<()> {
             if self.fail_register_for.as_deref() == Some(file.rel_path.as_str()) {
                 return Err(crate::error::Error::Unsupported(
@@ -1230,6 +1287,10 @@ mod tests {
             if let Some(record) = self.items.iter_mut().find(|i| i.source == file.rel_path) {
                 record.copy_identity = copy_identity;
                 record.source_identity = file.identity;
+                // 契约：**登记成功即 `imported`**（真实实现里这条状态由
+                // `Op::Register` 自己落，执行器不再补一条 `Mark`）。
+                record.status = "imported".to_string();
+                record.reason = None;
             }
             let _ = item;
             Ok(())

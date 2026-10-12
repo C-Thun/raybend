@@ -65,11 +65,15 @@ export async function importPrecheck(
  * `excluded` = 用户排除掉的文件（**绝对路径**，跨目录、跨源共用一份）。
  * 后端会把它们从扫描结果里剔除：不进规划、不计入 total/skipped ——
  * 「不导入这张」与「试过了、跳过」不是一回事。
+ *
+ * `importXmp` = 导入时是否按旁的 `.xmp` 复原编辑配置
+ * （`specs/xmp-sidecar.md` §7：只在**整组完整导入**时才采纳，拆分/改名不采纳）。
  */
 export async function importStart(
   repositoryId: string,
   sources: readonly ImportSource[],
   avoidDuplicates: boolean,
+  importXmp: boolean,
   excluded: readonly string[] = [],
 ): Promise<ImportStart> {
   if (!isTauriRuntime()) {
@@ -79,6 +83,7 @@ export async function importStart(
     repositoryId,
     sources: sources.map((source) => ({ ...source })),
     avoidDuplicates,
+    importXmp,
     excluded: [...excluded],
   });
 }

@@ -190,6 +190,8 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
       repositoryId,
       sources: sources(),
       avoidDuplicates: store.avoidDuplicates(),
+      // 导入时按旁的 `.xmp` 复原编辑配置（只在整组完整导入时生效）
+      importXmp: store.importXmp(),
       // 排除清单只带**落在已勾选目录里**的那些：用户排过、随后又把那个目录取消勾选的，
       // 不该再跟着这批走（排除本身还留在内存里，再勾回来就还在）
       excluded: store.excludedForImport(),
@@ -496,6 +498,8 @@ export function ImportWorkspace(props: ImportWorkspaceProps) {
           repositoryOnline={store.selectedRepository()?.online ?? false}
           avoidDuplicates={store.avoidDuplicates()}
           onAvoidDuplicatesChange={store.setAvoidDuplicates}
+          importXmp={store.importXmp()}
+          onImportXmpChange={store.setImportXmp}
           onImport={requestImport}
           locale={groupingLocale()}
         />

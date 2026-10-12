@@ -54,6 +54,8 @@ export const SETTING_KEYS = {
   tileStep: "grid.tile_step",
   /** 「避免重复导入」是否勾选 */
   avoidDuplicates: "import.avoid_duplicates",
+  /** 「导入 xmp 配置」是否勾选（导入时按 sidecar 复原编辑配置；默认开） */
+  importXmp: "import.import_xmp",
   /** 是否处于「按时间」模式 */
   byTime: "grid.by_time",
   /** 是否写出 XMP sidecar（设备级，默认开；Rust 侧 `sidecar::XMP_WRITE_KEY` 同源） */

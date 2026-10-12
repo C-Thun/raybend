@@ -258,6 +258,12 @@ pub const CATALOG_MIGRATIONS: &[Migration] = &[
         name: "size_refresh",
         sql: include_str!("migrations/catalog_0020_size_refresh.sql"),
     },
+    Migration {
+        version: 21,
+        // 导入判重的第三级判据：内容指纹（`specs/import-dedup-fingerprint.md` §4）
+        name: "content_hash",
+        sql: include_str!("migrations/catalog_0021_content_hash.sql"),
+    },
 ];
 
 /// 缩略图缓存库 `thumbs.db` 的迁移列表。
@@ -1899,8 +1905,17 @@ mod tests {
         .unwrap();
 
         let out = apply(&mut conn, DbKind::Catalog, Backups::none(), 2).unwrap();
-        assert_eq!(out.applied, vec![19, 20]);
-        assert_eq!(schema_version(&conn).unwrap(), 20);
+        // 从 v18 往上的**全部**迁移都要依次应用（以后加迁移不必改这条断言）
+        let expected: Vec<i64> = CATALOG_MIGRATIONS
+            .iter()
+            .filter(|m| m.version >= 19)
+            .map(|m| m.version)
+            .collect();
+        assert_eq!(out.applied, expected);
+        assert_eq!(
+            schema_version(&conn).unwrap(),
+            CATALOG_MIGRATIONS.last().expect("有迁移").version
+        );
 
         // 旧行原样还在；新列全部 NULL
         let (path, files_n, stack_n, issue_n): (String, i64, i64, i64) = conn
@@ -1983,7 +1998,12 @@ mod tests {
         .unwrap();
 
         let out = apply(&mut conn, DbKind::Catalog, Backups::none(), 2).unwrap();
-        assert_eq!(out.applied, vec![20]);
+        let expected: Vec<i64> = CATALOG_MIGRATIONS
+            .iter()
+            .filter(|m| m.version >= 20)
+            .map(|m| m.version)
+            .collect();
+        assert_eq!(out.applied, expected);
 
         let row = |sql: &str| -> (Option<i64>, Option<i64>) {
             conn.query_row(sql, [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap()

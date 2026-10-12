@@ -721,6 +721,7 @@ mod tests {
                             &DiskFile::new("photos/concurrent.jpg", 12, Some(11)),
                             "bitmap",
                             None,
+                            None,
                             11,
                         )?;
                         Ok(())

@@ -5,6 +5,7 @@
  * 已选择 3 个目录 · 1 248 张照片        已排除 12 张   ← 让人在按下之前就知道要带进多少东西
  * [        导入        ]            ← 左右都选中才可点
  * ☑ 避免重复导入                    ← 默认勾上；顺序上它是按钮的「修饰」
+ * ☑ 导入 xmp 配置                   ← 默认勾上（同上，见 `specs/xmp-sidecar.md` §7）
  * ```
  *
  * 两个数字的口径（2026-09-16 人类要求把「排除」这条链路做通）：
@@ -37,6 +38,12 @@ export interface RepositoryFooterProps {
   repositoryOnline: boolean;
   avoidDuplicates: boolean;
   onAvoidDuplicatesChange: (value: boolean) => void;
+  /**
+   * 「导入 xmp 配置」：导入时按照片旁的自家 `.xmp` 复原编辑配置
+   * （`specs/xmp-sidecar.md` §7；默认开，只在整组完整导入时生效）。
+   */
+  importXmp: boolean;
+  onImportXmpChange: (value: boolean) => void;
   /** 按下导入（M1-6 才真的执行；这里只做可用性与事件） */
   onImport: () => void;
   locale?: GroupingLocale;
@@ -95,6 +102,13 @@ export function RepositoryFooter(props: RepositoryFooterProps) {
         checked={props.avoidDuplicates}
         onCheckedChange={props.onAvoidDuplicatesChange}
         label={t("repo.avoid_duplicates")}
+      />
+
+      {/* 与「避免重复导入」同一组：都是「导入时怎么处理这些东西」的修饰 */}
+      <Checkbox
+        checked={props.importXmp}
+        onCheckedChange={props.onImportXmpChange}
+        label={t("repo.import_xmp")}
       />
     </div>
   );

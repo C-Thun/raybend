@@ -25,12 +25,14 @@
 //!
 //! 注入点（测试与真实环境的分界）：
 //!
-//! * [`FsProbe`] —— 目标路径是不是已经占着了（真实实现查盘，测试用内存集合）；
+//! * [`FsProbe`] —— 目标路径在**盘上**是不是已经占着了（真实实现查盘，测试用内存集合）；
+//! * [`KnownTargets`] —— 目标路径在**库里**是不是已经占着了（真实实现读 `asset_files`，见 sink）；
 //! * [`Sequences`] —— 序号计数（真实实现落 `seq_counters` 表，见 runner）。
 
 use std::collections::{HashMap, HashSet};
 
 use crate::import::template::{self, RenderCtx, Template, Var};
+use crate::media::fingerprint::ContentFingerprint;
 use crate::media::kind::MediaKind;
 use crate::media::scan::ScannedFile;
 use crate::store::file_id::FileId;
@@ -271,6 +273,92 @@ pub trait FsProbe {
     fn file_exists(&self, rel_path: &str) -> bool;
 }
 
+/// 库里已经占着的目标路径（folded → 那一行）—— 冲突判定必须**同时**看盘与库。
+///
+/// 只看盘为什么不够：库里有一行、盘上没有的路径（标了 missing、被手动删、
+/// 或者**文件监听差分刚刚登记**）在盘探针看来是「空位」，而登记时的
+/// `INSERT` 会撞 `UNIQUE(rel_path_folded)`（`store::assets::insert_file` 是裸 INSERT，
+/// 且这条 op 在批事务里 —— 一条撞库会带走整批，2026-10-12 真机事故）。
+///
+/// 反过来的情况（盘上有、库里没有）由 [`FsProbe`] 负责；两者**都要**问。
+/// 带上各自的大小与已建立的内容指纹：判定「同一份内容」时能直接用它，
+/// 不必再去读库内文件（`specs/import-dedup-fingerprint.md` §3.2）。
+#[derive(Debug, Default, Clone)]
+pub struct KnownTargets {
+    entries: HashMap<String, LibraryEntry>,
+}
+
+/// 库内一个文件行（冲突判定要的三件事）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LibraryEntry {
+    /// 库内相对路径（**原文**，给人看；键是它的折叠形态）。
+    pub rel_path: String,
+    /// 库里记的大小（老行可能是 `NULL`）。
+    pub size_bytes: Option<u64>,
+    /// 已建立的内容指纹（`NULL` = 还没建立）。
+    pub fingerprint: Option<ContentFingerprint>,
+}
+
+impl KnownTargets {
+    /// 空集。
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// 记一条（内部按折叠比较，跟重名规则一致）。
+    pub fn insert(&mut self, entry: LibraryEntry) {
+        self.entries.insert(fold(&entry.rel_path), entry);
+    }
+
+    /// 这条路径库里占着吗；占着就回那一行。
+    #[must_use]
+    pub fn get(&self, rel_path: &str) -> Option<&LibraryEntry> {
+        self.entries.get(&fold(rel_path))
+    }
+
+    /// 这条路径库里占着吗。
+    #[must_use]
+    pub fn contains(&self, rel_path: &str) -> bool {
+        self.entries.contains_key(&fold(rel_path))
+    }
+
+    /// 有没有。
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
+/// 内容指纹的来源（判重的注入点；真实实现读盘，测试用内存表）。
+///
+/// 只在**目标路径被占**时才被调用（`specs/import-dedup-fingerprint.md` §3.2）——
+/// 新照片的导入路径一个字节都不多读。
+pub trait ContentProbe {
+    /// 源文件的内容指纹（口径按类型选）；读不到 → `None`（那就按冲突处理）。
+    fn source_fingerprint(&self, file: &SourceFile) -> Option<ContentFingerprint>;
+    /// 库内文件的内容指纹（读盘上那一份）；读不到 → `None`。
+    fn library_fingerprint(&self, rel_path: &str) -> Option<ContentFingerprint>;
+    /// 库内文件的大小（读盘上那一份）；盘上没有 → `None`。
+    fn library_size(&self, rel_path: &str) -> Option<u64>;
+}
+
+/// 什么都不读的探针（关掉判重、以及不关心指纹的测试用）。
+#[derive(Debug, Default, Clone, Copy)]
+pub struct NoContent;
+
+impl ContentProbe for NoContent {
+    fn source_fingerprint(&self, _file: &SourceFile) -> Option<ContentFingerprint> {
+        None
+    }
+    fn library_fingerprint(&self, _rel_path: &str) -> Option<ContentFingerprint> {
+        None
+    }
+    fn library_size(&self, _rel_path: &str) -> Option<u64> {
+        None
+    }
+}
+
 /// 序号分配：按「最终目标目录 + 位数」独立计数（`memory/FUNCTION-REPOSITORY.md` §3.3）。
 #[derive(Debug, Default, Clone)]
 pub struct Sequences {
@@ -308,6 +396,16 @@ impl Sequences {
             .or_insert(0);
         *entry = if *entry >= cap { 1 } else { *entry + 1 };
         *entry
+    }
+
+    /// 把某个计数器**还回**到之前的值。
+    ///
+    /// 用在「名字渲染完了、结果整组都被跳过（内容与库里一致）」这一条路上：
+    /// 跳过的文件不消耗序号（`memory/FUNCTION-REPOSITORY.md` §3.3），
+    /// 否则一次「重复导入」会把库里的编号白白往后推。
+    pub fn restore(&mut self, directory: &str, width: usize, value: u64) {
+        self.values
+            .insert((fold(directory), width), value.min(max_value(width)));
     }
 
     /// 导出所有非零计数（runner 据此写回 `seq_counters`）。
@@ -364,6 +462,12 @@ pub struct PlannedItem {
     pub outcome: ItemOutcome,
     /// 模版里**缺值**的变量（用占位符顶了，值得记一笔）。
     pub missing: Vec<Var>,
+    /// 它的**整组**是不是「完整导入」了（`specs/import-dedup-fingerprint.md` §9）。
+    ///
+    /// 判据：这一组在源里的每个成员都真的导入了（没跳过、没失败）、而且**没改名**。
+    /// 边车（`.xmp`）采纳靠它把门 —— 拆开的情况（例：位图改名 `_01`、RAW 跳过）
+    /// 不算完整导入，不采纳配置。
+    pub complete: bool,
 }
 
 impl PlannedItem {
@@ -434,6 +538,11 @@ pub struct PlanResult {
     pub counts: PlanCounts,
     /// 这一批触及的目标目录（去重、排序；runner 据此建目录）。
     pub target_dirs: Vec<String>,
+    /// 判重时**顺手为库内老行建立的**内容指纹：`(库内相对路径, 指纹)`。
+    ///
+    /// plan 不写库（它只算），由 runner 随这一批事务回填（`Op::SetContentHash`）——
+    /// 下次再判到同一条就省一次读盘。
+    pub backfilled: Vec<(String, ContentFingerprint)>,
 }
 
 impl PlanResult {
@@ -500,6 +609,8 @@ pub fn plan(
     opts: &PlanOptions,
     fs: &dyn FsProbe,
     known: &KnownSources,
+    known_targets: &KnownTargets,
+    content: &dyn ContentProbe,
     seq: &mut Sequences,
     reserved: &Reserved,
     adopt: &Adopt,
@@ -535,9 +646,24 @@ pub fn plan(
     // ── 第 2 遍：逐组算路径 ─────────────────────────────────
     // 组长（组里第一个要导的位图，没有位图就是第一个要导的文件）去问序号分配器，
     // 组里其他文件复用它的名字：`MYP0001.png` 与 `_RAW/MYP0001.ORF` 同名是有意的。
+    //
+    // 判重（**逐成员**）与改名（**整组**）都在这一遍收口（`specs/import-dedup-fingerprint.md` §3）：
+    // 只要有一个要导入的成员「同名但内容不同」，**整组一起**加同一个后缀 —— 否则
+    // `A/MYP1_01.JPG` 与 `A/_RAW/MYP1.RW2` 名字对不上，库侧按主体配对时
+    // 会把同一张照片拆成两个格子。
     let mut claimed: HashSet<String> = HashSet::new();
     let mut dirs: Vec<String> = Vec::new();
     let mut missing_by_item: Vec<Vec<Var>> = vec![Vec::new(); files.len()];
+    let mut complete_by_item: Vec<bool> = vec![false; files.len()];
+    let mut backfilled: Vec<(String, ContentFingerprint)> = Vec::new();
+    // 源文件指纹缓存：同一次规划里一个源文件最多读一次
+    let mut source_fingerprints: HashMap<String, Option<ContentFingerprint>> = HashMap::new();
+    let context = VerdictContext {
+        fs,
+        known_targets,
+        content,
+        avoid_duplicates: opts.avoid_duplicates,
+    };
 
     for group in &groups {
         let members: Vec<usize> = group
@@ -562,22 +688,39 @@ pub fn plan(
             order.swap(0, pos);
         }
 
-        // 组员的公共信息：名字（组长的渲染结果）与目录（组长的目标根）
+        // 组员的公共信息：名字（组长的渲染结果）与目录（组长的目标根）。
+        //
+        // 续跑（`specs/import-dedup-fingerprint.md` §11.3）：组里**任一**成员上次已经落过位置
+        // → 整组沿用那个名字与目录，因为「位图与同组 RAW 同名」是配对不变量，
+        // 只让一个成员落回原名、另一个重新编号就会把它打散。
+        // 成员是 RAW 时它的落点在 `<组目录>/_RAW` 下 —— 组目录要折回上一层。
         let mut shared: Option<(String, String, Vec<Var>)> = None;
+        if let Some((idx, target)) = order
+            .iter()
+            .find_map(|idx| adopt.get(&files[*idx].rel_path).map(|target| (*idx, target)))
+        {
+            let adopted = adopted_target(target);
+            let dir = match (files[idx].role(), group.has_bitmap) {
+                (Some(Role::Raw), true) => {
+                    crate::store::assets::normalize_raw_dir(&adopted.dir).to_string()
+                }
+                _ => adopted.dir.clone(),
+            };
+            shared = Some((dir, adopted.stem.clone(), adopted.missing.clone()));
+        }
+        // 组长这次取走的号（整组都被跳过时还回去：跳过的文件不消耗序号）
+        let mut consumed: Vec<(String, usize, u64)> = Vec::new();
+        let mut plan_members: Vec<GroupMember> = Vec::new();
 
         for idx in order {
             let file = &files[idx];
             let missing = match &shared {
                 Some((_, _, missing)) => missing.clone(),
                 None => {
-                    // 续跑且上次已经把这个文件放过位置了：沿用那个名字（**不再编新号**），
-                    // 于是 runner 会直接登记它 —— 磁盘上不会多出第二份。
-                    let rendered = match adopt.get(&file.rel_path) {
-                        Some(target) => Ok(adopted_target(target)),
-                        None => render_target(file, tpl, opts, seq),
-                    };
-                    match rendered {
+                    // 还没人替这一组占过位置 → 让组长的模版渲一次，全组复用它的名字
+                    match render_target(file, tpl, opts, seq) {
                         Ok(rendered) => {
+                            consumed = rendered.consumed.clone();
                             shared = Some((rendered.dir.clone(), rendered.stem.clone(), rendered.missing.clone()));
                             rendered.missing
                         }
@@ -598,18 +741,104 @@ pub fn plan(
                 (Some(Role::Raw), true) => join_rel(&[dir.as_str(), RAW_DIR]),
                 _ => dir.clone(),
             };
+            plan_members.push(GroupMember {
+                idx,
+                dir: target_dir,
+                stem,
+                ext: file.ext.clone(),
+                missing,
+            });
+        }
+        if plan_members.is_empty() {
+            continue;
+        }
 
-            let target_rel = resolve_conflict(&target_dir, &stem, &file.ext, fs, &claimed, reserved);
-            claimed.insert(fold(&target_rel));
-            if !dirs.contains(&target_dir) {
-                dirs.push(target_dir);
+        // 逐成员判「原名字这条路通不通」（占用 + 内容）
+        let verdicts: Vec<Verdict> = plan_members
+            .iter()
+            .map(|member| {
+                member_verdict(
+                    &files[member.idx],
+                    member,
+                    &claimed,
+                    reserved,
+                    &context,
+                    &mut source_fingerprints,
+                    &mut backfilled,
+                )
+            })
+            .collect();
+
+        // 整组消解：任一要导入的成员冲突 → 整组共用一个后缀
+        let suffix = if verdicts.iter().any(Verdict::is_conflict) {
+            find_group_suffix(&plan_members, &verdicts, &claimed, reserved, &context)
+        } else {
+            None
+        };
+
+        let mut planned_here = 0usize;
+        let mut skipped_here = 0usize;
+        for (member, verdict) in plan_members.iter().zip(verdicts.iter()) {
+            match verdict {
+                Verdict::Skip { library_rel } => {
+                    skipped_here += 1;
+                    counts.skipped += 1;
+                    counts.duplicates += 1;
+                    outcomes[member.idx] = Some(ItemOutcome::Skipped(format!(
+                        "同一张照片（内容一致）：库内 {library_rel}"
+                    )));
+                }
+                Verdict::Free | Verdict::Conflict => {
+                    let stem = match suffix {
+                        Some(n) => collision_stem(&member.stem, n),
+                        None => member.stem.clone(),
+                    };
+                    let mut target_rel = compose(&member.dir, &stem, &member.ext);
+                    // 同一批里已经有别的成员落到这个名字上（同一组里出现同名成员 ——
+                    // 只可能来自重复输入）→ 按既有重名规则往后让位，
+                    // **绝不**让两个成员算出同一个路径。
+                    if !is_path_free(&target_rel, &claimed, reserved, &context) {
+                        for n in 1..=99_999u64 {
+                            let candidate =
+                                compose(&member.dir, &collision_stem(&member.stem, n), &member.ext);
+                            if is_path_free(&candidate, &claimed, reserved, &context) {
+                                target_rel = candidate;
+                                break;
+                            }
+                        }
+                    }
+                    claimed.insert(fold(&target_rel));
+                    if !dirs.contains(&member.dir) {
+                        dirs.push(member.dir.clone());
+                    }
+                    if !member.missing.is_empty() {
+                        counts.missing_meta += 1;
+                    }
+                    missing_by_item[member.idx] = member.missing.clone();
+                    counts.planned += 1;
+                    planned_here += 1;
+                    outcomes[member.idx] = Some(ItemOutcome::Plan { target_rel });
+                }
             }
-            if !missing.is_empty() {
-                counts.missing_meta += 1;
+        }
+
+        // 整组一个都没导（全被内容判重跳过）→ 把这一组取走的号还回去。
+        // 只跳过一部分时不还：还有成员在用那个名字（位图跳过、RAW 补号也落回它）。
+        if planned_here == 0 && skipped_here > 0 {
+            for (key_dir, width, before) in &consumed {
+                seq.restore(key_dir, *width, *before);
             }
-            missing_by_item[idx] = missing;
-            counts.planned += 1;
-            outcomes[idx] = Some(ItemOutcome::Plan { target_rel });
+        }
+
+        // 「整组完整导入」：组里每个成员都真的导了、而且没改名 ——
+        // 边车（`.xmp`）采纳靠它把门（`specs/import-dedup-fingerprint.md` §9）。
+        let complete = suffix.is_none()
+            && group
+                .members
+                .iter()
+                .all(|idx| matches!(outcomes[*idx], Some(ItemOutcome::Plan { .. })));
+        for member in &plan_members {
+            complete_by_item[member.idx] = complete;
         }
     }
 
@@ -626,6 +855,7 @@ pub fn plan(
                 source_rel: file.rel_path.clone(),
                 role: file.role(),
                 missing: missing_by_item[idx].clone(),
+                complete: complete_by_item[idx],
                 outcome,
             }
         })
@@ -636,6 +866,7 @@ pub fn plan(
         items,
         counts,
         target_dirs: dirs,
+        backfilled,
     }
 }
 
@@ -664,6 +895,9 @@ struct RenderedTarget {
     stem: String,
     /// 缺值的模版变量。
     missing: Vec<Var>,
+    /// 这次渲染取走的序号（`(计数器键目录, 宽度, 取号前的值)`）——
+    /// 整组都被跳过时要原样还回去（`Sequences::restore`）。
+    consumed: Vec<(String, usize, u64)>,
 }
 
 /// 从「上次留下的目标路径」反推目录与主干名（扩展名一律取自源文件，
@@ -675,6 +909,8 @@ fn adopted_target(target: &str) -> RenderedTarget {
         dir: dir.to_string(),
         stem: stem.to_string(),
         missing: Vec::new(),
+        // 沿用上次的名字：这次没有向计数器取号，也就没什么可还的
+        consumed: Vec::new(),
     }
 }
 
@@ -706,10 +942,17 @@ fn render_target(
     ]);
 
     // 每个宽度各取一个号（`memory/FUNCTION-REPOSITORY.md` §3.3：宽度不同就是不同的计数器）
+    // 顺手记下取号前的值：整组都被跳过时要原样还回去（`Sequences::restore`）
+    let mut consumed: Vec<(String, usize, u64)> = Vec::new();
     let values: Vec<(usize, u64)> = tpl
         .seq_widths()
         .into_iter()
-        .map(|width| (width, seq.next(&key_dir, width)))
+        .map(|width| {
+            let before = seq.last(&key_dir, width);
+            let value = seq.next(&key_dir, width);
+            consumed.push((key_dir.clone(), width, before));
+            (width, value)
+        })
         .collect();
 
     // 带真值再渲染一次 —— **目录部分要跟着走**（序号可能出现在目录里）
@@ -727,6 +970,7 @@ fn render_target(
         dir,
         stem: name.to_string(),
         missing: rendered.missing,
+        consumed,
     })
 }
 
@@ -741,48 +985,192 @@ fn render_ctx<'a>(file: &'a SourceFile, seqs: template::SeqValues<'a>) -> Render
     }
 }
 
-/// 冲突消解：目标已存在（盘上或本批已占）就加 `_01`…`_99`、`_100`…
-/// （`memory/FUNCTION-REPOSITORY.md` §3.4；主序号不因此后退，追加位置在扩展名之前）。
-fn resolve_conflict(
-    dir: &str,
-    stem: &str,
-    ext: &str,
-    fs: &dyn FsProbe,
-    claimed: &HashSet<String>,
-    reserved: &Reserved,
-) -> String {
-    let candidate = compose(dir, stem, ext);
-    if is_free(&candidate, fs, claimed, reserved) {
-        return candidate;
+/// 组里一个成员的落点（第 2 遍里用）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct GroupMember {
+    idx: usize,
+    dir: String,
+    stem: String,
+    ext: String,
+    missing: Vec<Var>,
+}
+
+/// 一个成员在**原（不带后缀）目标路径**上的判定。
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Verdict {
+    /// 这条路通（盘上库里都没有，或者本来就是我们自己留下的）。
+    Free,
+    /// 路占着，且内容与库里那份一致 —— 跳过这一条。
+    Skip { library_rel: String },
+    /// 路占着，但内容不同 / 核对不了 —— 要改名。
+    Conflict,
+}
+
+impl Verdict {
+    fn is_conflict(&self) -> bool {
+        matches!(self, Self::Conflict)
     }
-    // 上限是防御性的：真到了十万张同名文件，用户面对的是别的问题。
-    // 撞满上限就把不加后缀的名字交出去 —— runner 用 `create_new` 写文件，
-    // 会以「目标已存在」失败，**不会静默覆盖**。
-    for i in 1..=99_999u64 {
-        let candidate = compose(dir, &collision_stem(stem, i), ext);
-        if is_free(&candidate, fs, claimed, reserved) {
-            return candidate;
+}
+
+/// 判定要用的一堆外部事实（打包一下，免得参数排到十几个）。
+struct VerdictContext<'a> {
+    fs: &'a dyn FsProbe,
+    known_targets: &'a KnownTargets,
+    content: &'a dyn ContentProbe,
+    avoid_duplicates: bool,
+}
+
+/// 这条路径现在被谁占着（库里那一行优先，其次盘上那个文件）。
+enum Occupant {
+    /// 库里有行（带着库里记的大小与已有指纹）。
+    Row(LibraryEntry),
+    /// 只有盘上有文件：库里没登记（手动拷进库、或差分还没跑）—— 大小与指纹现读。
+    DiskOnly { rel_path: String },
+}
+
+impl Occupant {
+    fn rel_path(&self) -> &str {
+        match self {
+            Self::Row(entry) => &entry.rel_path,
+            Self::DiskOnly { rel_path } => rel_path,
         }
     }
-    compose(dir, stem, ext)
+
+    fn size_bytes(&self, ctx: &VerdictContext<'_>) -> Option<u64> {
+        match self {
+            Self::Row(entry) => entry.size_bytes,
+            Self::DiskOnly { rel_path } => ctx.content.library_size(rel_path),
+        }
+    }
+
+    /// 库内那一份的内容指纹：库里存着就用存的，否则现读一次（读到的回填）。
+    fn fingerprint(
+        &self,
+        ctx: &VerdictContext<'_>,
+        backfilled: &mut Vec<(String, ContentFingerprint)>,
+    ) -> Option<ContentFingerprint> {
+        match self {
+            Self::Row(entry) => {
+                if let Some(fingerprint) = &entry.fingerprint {
+                    return Some(fingerprint.clone());
+                }
+                let computed = ctx.content.library_fingerprint(&entry.rel_path)?;
+                backfilled.push((entry.rel_path.clone(), computed.clone()));
+                Some(computed)
+            }
+            // 盘上多出来的文件：库里没行可回填，只用于这次判定
+            Self::DiskOnly { rel_path } => ctx.content.library_fingerprint(rel_path),
+        }
+    }
+}
+
+/// 这条路径现在被谁占着；`None` = 空着。
+fn occupancy(rel_path: &str, ctx: &VerdictContext<'_>) -> Option<Occupant> {
+    if let Some(entry) = ctx.known_targets.get(rel_path) {
+        return Some(Occupant::Row(entry.clone()));
+    }
+    if ctx.fs.file_exists(rel_path) {
+        return Some(Occupant::DiskOnly {
+            rel_path: rel_path.to_string(),
+        });
+    }
+    None
+}
+
+/// 判一个成员在**原名字**上的路通不通（`specs/import-dedup-fingerprint.md` §3.2）。
+fn member_verdict(
+    file: &SourceFile,
+    member: &GroupMember,
+    claimed: &HashSet<String>,
+    reserved: &Reserved,
+    ctx: &VerdictContext<'_>,
+    source_cache: &mut HashMap<String, Option<ContentFingerprint>>,
+    backfilled: &mut Vec<(String, ContentFingerprint)>,
+) -> Verdict {
+    let plain = compose(&member.dir, &member.stem, &member.ext);
+    // 本批里已经有人占了这个名字（同一批两个源目录落到同一个名字）→ 改名。
+    // 这条要放在 `reserved` 之前：`claimed` 是「这一批真实的落点」，优先级最高。
+    if claimed.contains(&fold(&plain)) {
+        return Verdict::Conflict;
+    }
+    // 我们自己留下的名字（续跑）：落回去，不算占用
+    if reserved.contains(&plain) {
+        return Verdict::Free;
+    }
+    let Some(occupant) = occupancy(&plain, ctx) else {
+        return Verdict::Free;
+    };
+    // 关掉判重：不读指纹，直接重名让位
+    if !ctx.avoid_duplicates {
+        return Verdict::Conflict;
+    }
+    // 大小先筛：不同一定不是同一份（省掉绝大多数读盘）
+    if occupant.size_bytes(ctx) != Some(file.size_bytes) {
+        return Verdict::Conflict;
+    }
+    let Some(library) = occupant.fingerprint(ctx, backfilled) else {
+        // 库内那份读不到（缺失 / 权限）→ 核对不了，宁可改名导入也不覆盖
+        return Verdict::Conflict;
+    };
+    let source = source_cache
+        .entry(file.rel_path.clone())
+        .or_insert_with(|| ctx.content.source_fingerprint(file));
+    match source {
+        Some(source) if source.same_content(&library) => Verdict::Skip {
+            library_rel: occupant.rel_path().to_string(),
+        },
+        _ => Verdict::Conflict,
+    }
+}
+
+/// 给**整组**找最小可用后缀：组里每个要导入的成员都得空着（盘上库里都没有）。
+///
+/// 找不到（1–99999 全被占）时返回 `None`：调用方把不加后缀的名字交出去，
+/// runner 用 `create_new` 写文件会以「目标已存在」失败 —— **绝不静默覆盖**。
+fn find_group_suffix(
+    members: &[GroupMember],
+    verdicts: &[Verdict],
+    claimed: &HashSet<String>,
+    reserved: &Reserved,
+    ctx: &VerdictContext<'_>,
+) -> Option<u64> {
+    for n in 1..=99_999u64 {
+        let free = members
+            .iter()
+            .zip(verdicts)
+            .filter(|(_, verdict)| !matches!(verdict, Verdict::Skip { .. }))
+            .all(|(member, _)| {
+                let candidate = compose(&member.dir, &collision_stem(&member.stem, n), &member.ext);
+                is_path_free(&candidate, claimed, reserved, ctx)
+            });
+        if free {
+            return Some(n);
+        }
+    }
+    None
+}
+
+fn is_path_free(
+    candidate: &str,
+    claimed: &HashSet<String>,
+    reserved: &Reserved,
+    ctx: &VerdictContext<'_>,
+) -> bool {
+    if claimed.contains(&fold(candidate)) {
+        return false;
+    }
+    // 自己留下的半成品算「可用」（续跑要落回同一个名字）—— 这条**优先于**库内占用：
+    // 文件监听差分可能已经把我们自己写下的半成品登记进库了（2026-10-12 事故），
+    // 那时库里有行不代表这个位置「是别人的」—— 执行器会认出「这条是我们自己的」直接补登记。
+    if reserved.contains(candidate) {
+        return true;
+    }
+    !ctx.known_targets.contains(candidate) && !ctx.fs.file_exists(candidate)
 }
 
 /// Shared no-overwrite naming convention for import and export.
 pub fn collision_stem(stem: &str, index: u64) -> String {
     if index == 0 { stem.into() } else { format!("{stem}_{index:02}") }
-}
-
-fn is_free(
-    candidate: &str,
-    fs: &dyn FsProbe,
-    claimed: &HashSet<String>,
-    reserved: &Reserved,
-) -> bool {
-    if claimed.contains(&fold(candidate)) {
-        return false;
-    }
-    // 自己留下的半成品算「可用」（续跑要落回同一个名字）
-    reserved.contains(candidate) || !fs.file_exists(candidate)
 }
 
 fn compose(dir: &str, stem: &str, ext: &str) -> String {
@@ -822,6 +1210,7 @@ mod tests {
     use super::*;
     use crate::import::template::parse as parse_template;
     use crate::media::kind;
+    use std::cell::{Cell, RefCell};
 
     /// 2026-08-15T12:00:00Z
     const T2026_08_15: i64 = 1_786_795_200_000;
@@ -846,6 +1235,70 @@ mod tests {
         fn file_exists(&self, rel_path: &str) -> bool {
             self.existing.contains(&fold(rel_path))
         }
+    }
+
+    /// 内存里的「指纹表」：源文件与库内文件各一张，并记下被问了几次
+    /// —— 「没被占用就别读盘」这条靠调用计数验证。
+    #[derive(Default)]
+    struct FakeContent {
+        source: RefCell<HashMap<String, ContentFingerprint>>,
+        library: RefCell<HashMap<String, ContentFingerprint>>,
+        source_calls: Cell<usize>,
+        library_calls: Cell<usize>,
+    }
+
+    impl FakeContent {
+        fn new() -> Self {
+            Self::default()
+        }
+
+        /// 给一个源文件（按 `rel_path` 认）配上指纹。
+        fn source(self, rel_path: &str, fp: ContentFingerprint) -> Self {
+            self.source.borrow_mut().insert(rel_path.to_string(), fp);
+            self
+        }
+
+        /// 给一个库内路径配上指纹（模拟「读盘算出来」）。
+        fn library(self, rel_path: &str, fp: ContentFingerprint) -> Self {
+            // 键用**折叠**形式：真实实现查库内文件也走折叠比较
+            self.library.borrow_mut().insert(fold(rel_path), fp);
+            self
+        }
+
+        fn source_calls(&self) -> usize {
+            self.source_calls.get()
+        }
+
+        fn library_calls(&self) -> usize {
+            self.library_calls.get()
+        }
+    }
+
+    impl ContentProbe for FakeContent {
+        fn source_fingerprint(&self, file: &SourceFile) -> Option<ContentFingerprint> {
+            self.source_calls.set(self.source_calls.get() + 1);
+            self.source.borrow().get(&file.rel_path).cloned()
+        }
+
+        fn library_fingerprint(&self, rel_path: &str) -> Option<ContentFingerprint> {
+            self.library_calls.set(self.library_calls.get() + 1);
+            self.library.borrow().get(&fold(rel_path)).cloned()
+        }
+
+        fn library_size(&self, rel_path: &str) -> Option<u64> {
+            // 内存「盘」上的大小：测试里只要指纹对得上就当大小也一致（大小单独用 KnownTargets 验）
+            self.library
+                .borrow()
+                .contains_key(&fold(rel_path))
+                .then_some(1000)
+        }
+    }
+
+    fn fp(hex: &str) -> ContentFingerprint {
+        ContentFingerprint::new(
+            crate::media::fingerprint::HashKind::Full,
+            hex.to_string(),
+        )
     }
 
     fn file(rel: &str, kind: MediaKind, taken_at: Option<i64>) -> SourceFile {
@@ -900,7 +1353,50 @@ mod tests {
     ) -> PlanResult {
         let tpl = parse_template(template).expect("模版应当能解析");
         let mut seq = Sequences::new();
-        plan(files, &tpl, opts, fs, known, &mut seq, &Reserved::new(), &Adopt::new())
+        plan(
+            files,
+            &tpl,
+            opts,
+            fs,
+            known,
+            &KnownTargets::new(),
+            &NoContent,
+            &mut seq,
+            &Reserved::new(),
+            &Adopt::new(),
+        )
+    }
+
+    /// 「库里已经占着这些目标路径」（盘上什么都没有）。
+    fn plan_occupied(
+        files: &[SourceFile],
+        template: &str,
+        fs: &FakeFs,
+        occupied: &[&str],
+    ) -> PlanResult {
+        let tpl = parse_template(template).expect("模版应当能解析");
+        let mut seq = Sequences::new();
+        let mut targets = KnownTargets::new();
+        for path in occupied {
+            targets.insert(LibraryEntry {
+                rel_path: (*path).to_string(),
+                // 库里没记大小、没建立指纹的**老行**：判定只能走冲突（改名）
+                size_bytes: None,
+                fingerprint: None,
+            });
+        }
+        plan(
+            files,
+            &tpl,
+            &PlanOptions::default(),
+            fs,
+            &KnownSources::new(),
+            &targets,
+            &NoContent,
+            &mut seq,
+            &Reserved::new(),
+            &Adopt::new(),
+        )
     }
 
     fn plan_reserved(
@@ -921,6 +1417,8 @@ mod tests {
             &PlanOptions::default(),
             fs,
             &KnownSources::new(),
+            &KnownTargets::new(),
+            &NoContent,
             &mut seq,
             &set,
             &Adopt::new(),
@@ -1526,6 +2024,453 @@ mod tests {
         assert_eq!(
             targets(&result),
             vec!["photos/2026/SEQ001/a.jpg", "photos/2026/SEQ002/b.jpg"]
+        );
+    }
+
+    /* ══════════════════════════════════════════════════════════════
+     * 库内占用（`specs/import-dedup-fingerprint.md` §3 第 4 步）
+     *
+     * 2026-10-12 真机事故：库里有一行、盘上没有时，盘探针说「空位」→
+     * 算出同一个路径 → 登记时撞 `UNIQUE(rel_path_folded)`，整批回滚。
+     * ══════════════════════════════════════════════════════════════ */
+
+    #[test]
+    fn catalog_occupancy_forces_a_suffix_even_when_the_disk_is_free() {
+        let result = plan_occupied(
+            &[bitmap("a.jpg")],
+            DEFAULT_TPL,
+            &FakeFs::default(),
+            &["photos/2026-08-15/MYa.jpg"],
+        );
+        assert_eq!(targets(&result), vec!["photos/2026-08-15/MYa_01.jpg"]);
+    }
+
+    #[test]
+    fn catalog_and_disk_occupancy_both_advance_the_suffix() {
+        // 库里占着 `_01`、盘上占着原名：两个都不能用，于是落到 `_02`。
+        let fs = FakeFs::with(&["photos/2026-08-15/MYa.jpg"]);
+        let result = plan_occupied(
+            &[bitmap("a.jpg")],
+            DEFAULT_TPL,
+            &fs,
+            &["photos/2026-08-15/MYa_01.jpg"],
+        );
+        assert_eq!(targets(&result), vec!["photos/2026-08-15/MYa_02.jpg"]);
+    }
+
+    #[test]
+    fn our_own_leftovers_win_over_catalog_occupancy() {
+        // 续跑场景：文件监听差分可能已经把我们自己的半成品登记进库了，
+        // 但那个名字是**我们自己**留下的 —— 必须落回它，不能改成 `_01`。
+        let files = [bitmap("a.jpg")];
+        let tpl = parse_template(DEFAULT_TPL).expect("模版应当能解析");
+        let mut seq = Sequences::new();
+        let mut reserved = Reserved::new();
+        reserved.insert("photos/2026-08-15/MYa.jpg");
+        let mut targets_set = KnownTargets::new();
+        targets_set.insert(LibraryEntry {
+            rel_path: "photos/2026-08-15/MYa.jpg".to_string(),
+            size_bytes: None,
+            fingerprint: None,
+        });
+        let result = plan(
+            &files,
+            &tpl,
+            &PlanOptions::default(),
+            &FakeFs::default(),
+            &KnownSources::new(),
+            &targets_set,
+            &NoContent,
+            &mut seq,
+            &reserved,
+            &Adopt::new(),
+        );
+        assert_eq!(targets(&result), vec!["photos/2026-08-15/MYa.jpg"]);
+    }
+
+    #[test]
+    fn catalog_occupancy_is_folded_like_everything_else() {
+        // 库里的列是折叠的（小写）；规划出来的路径保留原文 —— 两边要能对上。
+        let result = plan_occupied(
+            &[bitmap("A.JPG")],
+            DEFAULT_TPL,
+            &FakeFs::default(),
+            &["photos/2026-08-15/mya.jpg"],
+        );
+        assert_eq!(targets(&result), vec!["photos/2026-08-15/MYA_01.JPG"]);
+    }
+
+    /* ══════════════════════════════════════════════════════════════
+     * 内容判重（`specs/import-dedup-fingerprint.md` §3.2–§3.3）
+     *
+     * 判据只在「目标路径被占」时才读盘：大小先筛，再比指纹。
+     * 调用计数就是「别多读一个字节」那条红线的测据。
+     * ══════════════════════════════════════════════════════════════ */
+
+    /// 库里有这一行（大小/指纹由调用方给）。
+    fn library_row(
+        target: &str,
+        size: Option<u64>,
+        fingerprint: Option<ContentFingerprint>,
+    ) -> LibraryEntry {
+        LibraryEntry {
+            rel_path: target.to_string(),
+            size_bytes: size,
+            fingerprint,
+        }
+    }
+
+    fn plan_content(
+        files: &[SourceFile],
+        template: &str,
+        fs: &FakeFs,
+        targets_in: &KnownTargets,
+        content: &dyn ContentProbe,
+    ) -> PlanResult {
+        let tpl = parse_template(template).expect("模版应当能解析");
+        let mut seq = Sequences::new();
+        plan(
+            files,
+            &tpl,
+            &PlanOptions::default(),
+            fs,
+            &KnownSources::new(),
+            targets_in,
+            content,
+            &mut seq,
+            &Reserved::new(),
+            &Adopt::new(),
+        )
+    }
+
+    #[test]
+    fn a_free_path_never_reads_a_fingerprint() {
+        let content = FakeContent::new();
+        let result = plan_content(
+            &[bitmap("a.jpg")],
+            DEFAULT_TPL,
+            &FakeFs::default(),
+            &KnownTargets::new(),
+            &content,
+        );
+        assert_eq!(targets(&result), vec!["photos/2026-08-15/MYa.jpg"]);
+        assert_eq!(content.source_calls(), 0, "没被占用就一个字节都不多读");
+        assert_eq!(content.library_calls(), 0);
+        assert!(result.items[0].complete, "干净导入 = 整组完整");
+    }
+
+    #[test]
+    fn a_same_name_with_a_different_size_is_not_the_same_photo() {
+        let mut targets_in = KnownTargets::new();
+        targets_in.insert(library_row("photos/2026-08-15/MYa.jpg", Some(999), None));
+        let content = FakeContent::new().library("photos/2026-08-15/MYa.jpg", fp("a"));
+        let result = plan_content(
+            &[bitmap("a.jpg")],
+            DEFAULT_TPL,
+            &FakeFs::default(),
+            &targets_in,
+            &content,
+        );
+        assert_eq!(
+            targets(&result),
+            vec!["photos/2026-08-15/MYa_01.jpg"],
+            "大小不同 → 不是同一份，改名导入"
+        );
+        assert_eq!(content.library_calls(), 0, "大小先筛：不必读指纹");
+        assert!(!result.items[0].complete, "改过名 = 不是完整导入（边车不采纳）");
+    }
+
+    #[test]
+    fn the_same_content_at_the_same_name_is_skipped() {
+        let mut targets_in = KnownTargets::new();
+        targets_in.insert(library_row(
+            "photos/2026-08-15/MYa.jpg",
+            Some(1000),
+            Some(fp("deadbeef")),
+        ));
+        let content = FakeContent::new().source("a.jpg", fp("deadbeef"));
+        let result = plan_content(
+            &[bitmap("a.jpg")],
+            DEFAULT_TPL,
+            &FakeFs::default(),
+            &targets_in,
+            &content,
+        );
+        let rendered = targets(&result);
+        assert!(
+            rendered[0].starts_with("跳过：同一张照片（内容一致）"),
+            "{rendered:?}"
+        );
+        assert!(
+            rendered[0].contains("photos/2026-08-15/MYa.jpg"),
+            "原因要指出库内那一条：{rendered:?}"
+        );
+        assert_eq!(result.counts.skipped, 1);
+        assert_eq!(result.counts.duplicates, 1);
+        assert_eq!(result.counts.planned, 0);
+        assert_eq!(content.library_calls(), 0, "库里存着指纹就不必读盘");
+        assert_eq!(content.source_calls(), 1, "源文件读一次");
+    }
+
+    #[test]
+    fn the_same_name_with_other_content_is_renamed() {
+        let mut targets_in = KnownTargets::new();
+        targets_in.insert(library_row(
+            "photos/2026-08-15/MYa.jpg",
+            Some(1000),
+            Some(fp("aaaa")),
+        ));
+        let content = FakeContent::new().source("a.jpg", fp("bbbb"));
+        let result = plan_content(
+            &[bitmap("a.jpg")],
+            DEFAULT_TPL,
+            &FakeFs::default(),
+            &targets_in,
+            &content,
+        );
+        assert_eq!(targets(&result), vec!["photos/2026-08-15/MYa_01.jpg"]);
+        assert_eq!(result.counts.duplicates, 0);
+        assert!(!result.items[0].complete);
+    }
+
+    #[test]
+    fn a_library_row_without_a_fingerprint_is_measured_and_handed_back() {
+        let mut targets_in = KnownTargets::new();
+        targets_in.insert(library_row("photos/2026-08-15/MYa.jpg", Some(1000), None));
+        let content = FakeContent::new()
+            .library("photos/2026-08-15/MYa.jpg", fp("same"))
+            .source("a.jpg", fp("same"));
+        let result = plan_content(
+            &[bitmap("a.jpg")],
+            DEFAULT_TPL,
+            &FakeFs::default(),
+            &targets_in,
+            &content,
+        );
+        assert_eq!(content.library_calls(), 1, "库里没指纹就现算一次");
+        assert_eq!(result.backfilled.len(), 1, "算出来的要带回去回填");
+        assert_eq!(result.backfilled[0].0, "photos/2026-08-15/MYa.jpg");
+        assert!(targets(&result)[0].starts_with("跳过："));
+    }
+
+    #[test]
+    fn an_unreadable_library_copy_means_conflict_not_skip() {
+        let mut targets_in = KnownTargets::new();
+        targets_in.insert(library_row("photos/2026-08-15/MYa.jpg", Some(1000), None));
+        // 库内那份读不到（fake 里没给）→ 核对不了
+        let content = FakeContent::new().source("a.jpg", fp("same"));
+        let result = plan_content(
+            &[bitmap("a.jpg")],
+            DEFAULT_TPL,
+            &FakeFs::default(),
+            &targets_in,
+            &content,
+        );
+        assert_eq!(
+            targets(&result),
+            vec!["photos/2026-08-15/MYa_01.jpg"],
+            "核对不了宁可改名，也不覆盖"
+        );
+        assert!(result.backfilled.is_empty());
+    }
+
+    #[test]
+    fn avoiding_duplicates_off_never_reads_a_fingerprint() {
+        let tpl = parse_template(DEFAULT_TPL).expect("模版应当能解析");
+        let mut seq = Sequences::new();
+        let mut targets_in = KnownTargets::new();
+        targets_in.insert(library_row(
+            "photos/2026-08-15/MYa.jpg",
+            Some(1000),
+            Some(fp("deadbeef")),
+        ));
+        let content = FakeContent::new().source("a.jpg", fp("deadbeef"));
+        let opts = PlanOptions {
+            avoid_duplicates: false,
+            ..PlanOptions::default()
+        };
+        let result = plan(
+            &[bitmap("a.jpg")],
+            &tpl,
+            &opts,
+            &FakeFs::default(),
+            &KnownSources::new(),
+            &targets_in,
+            &content,
+            &mut seq,
+            &Reserved::new(),
+            &Adopt::new(),
+        );
+        assert_eq!(content.source_calls(), 0);
+        assert_eq!(
+            targets(&result),
+            vec!["photos/2026-08-15/MYa_01.jpg"],
+            "关掉判重：纯重名让位"
+        );
+    }
+
+    #[test]
+    fn a_conflicting_bitmap_renames_its_raw_sibling_too() {
+        // 库里有同名 jpg（内容不同）、`_RAW/` 下那条路空着 —— 两个仍然要**一起**改名，
+        // 否则 `A/MYP1_01.JPG` 与 `A/_RAW/MYP1.RW2` 名字对不上，配对就断了。
+        let files = [bitmap("P1.JPG"), raw("P1.RW2")];
+        let mut targets_in = KnownTargets::new();
+        targets_in.insert(library_row(
+            "photos/2026-08-15/MYP1.JPG",
+            Some(1000),
+            Some(fp("other")),
+        ));
+        let content = FakeContent::new().source("P1.JPG", fp("mine"));
+        let result = plan_content(
+            &files,
+            DEFAULT_TPL,
+            &FakeFs::default(),
+            &targets_in,
+            &content,
+        );
+        assert_eq!(
+            targets(&result),
+            vec![
+                "photos/2026-08-15/MYP1_01.JPG",
+                "photos/2026-08-15/_RAW/MYP1_01.RW2"
+            ]
+        );
+        assert!(result.items.iter().all(|item| !item.complete));
+    }
+
+    #[test]
+    fn a_skipped_bitmap_lets_its_raw_keep_the_plain_name() {
+        // 库里的 jpg 与源 jpg 内容一致 → 跳过；raw 落原名，正好与库里那张配成对。
+        let files = [bitmap("P1.JPG"), raw("P1.RW2")];
+        let mut targets_in = KnownTargets::new();
+        targets_in.insert(library_row(
+            "photos/2026-08-15/MYP1.JPG",
+            Some(1000),
+            Some(fp("same")),
+        ));
+        let content = FakeContent::new()
+            .source("P1.JPG", fp("same"))
+            .source("P1.RW2", fp("raw"));
+        let result = plan_content(
+            &files,
+            DEFAULT_TPL,
+            &FakeFs::default(),
+            &targets_in,
+            &content,
+        );
+        assert_eq!(
+            targets(&result),
+            vec![
+                "跳过：同一张照片（内容一致）：库内 photos/2026-08-15/MYP1.JPG",
+                "photos/2026-08-15/_RAW/MYP1.RW2"
+            ]
+        );
+        assert!(
+            result.items.iter().all(|item| !item.complete),
+            "一半跳过 = 不是完整导入"
+        );
+    }
+
+    #[test]
+    fn a_skipped_group_does_not_consume_a_sequence_number() {
+        let files = [bitmap("P1.JPG"), raw("P1.RW2")];
+        let mut targets_in = KnownTargets::new();
+        targets_in.insert(library_row(
+            "photos/2026-08-15/MY0001.JPG",
+            Some(1000),
+            Some(fp("same")),
+        ));
+        targets_in.insert(library_row(
+            "photos/2026-08-15/_RAW/MY0001.RW2",
+            Some(1000),
+            Some(fp("raw")),
+        ));
+        let content = FakeContent::new()
+            .source("P1.JPG", fp("same"))
+            .source("P1.RW2", fp("raw"));
+        let tpl = parse_template(":CYEAR-:CMONTH-:CDAY/MY:SEQ0000").expect("模版应当能解析");
+        let mut seq = Sequences::new();
+        let result = plan(
+            &files,
+            &tpl,
+            &PlanOptions::default(),
+            &FakeFs::default(),
+            &KnownSources::new(),
+            &targets_in,
+            &content,
+            &mut seq,
+            &Reserved::new(),
+            &Adopt::new(),
+        );
+        assert_eq!(result.counts.planned, 0, "{:?}", targets(&result));
+        assert_eq!(
+            seq.last("photos/2026-08-15", 4),
+            0,
+            "整组都被跳过 → 取走的号要还回去（跳过的文件不消耗序号）"
+        );
+    }
+
+    #[test]
+    fn an_adopted_raw_sibling_keeps_the_group_name() {
+        // 续跑：上次只把 RAW 放到位（位图还没轮到）、而且计数器已经往后走了 ——
+        // 整组仍要沿用那个名字，否则 `_RAW/MY0001.RW2` 会变成 `_RAW/MY0006.RW2`，
+        // 与位图配对断掉（`specs/import-dedup-fingerprint.md` §11.3）。
+        let files = [bitmap("P1.JPG"), raw("P1.RW2")];
+        let tpl = parse_template(":CYEAR-:CMONTH-:CDAY/MY:SEQ0000").expect("模版应当能解析");
+        let mut seq = Sequences::new();
+        seq.seed("photos/2026-08-15", 4, 5);
+        let mut adopt = Adopt::new();
+        adopt.insert(
+            "P1.RW2".to_string(),
+            "photos/2026-08-15/_RAW/MY0001.RW2".to_string(),
+        );
+        let result = plan(
+            &files,
+            &tpl,
+            &PlanOptions::default(),
+            &FakeFs::default(),
+            &KnownSources::new(),
+            &KnownTargets::new(),
+            &NoContent,
+            &mut seq,
+            &Reserved::new(),
+            &adopt,
+        );
+        assert_eq!(
+            targets(&result),
+            vec![
+                "photos/2026-08-15/MY0001.JPG",
+                "photos/2026-08-15/_RAW/MY0001.RW2"
+            ]
+        );
+        assert_eq!(
+            seq.last("photos/2026-08-15", 4),
+            5,
+            "沿用上次的名字，这次不再取号"
+        );
+    }
+
+    #[test]
+    fn a_lone_raw_is_judged_in_the_parent_directory() {
+        // 源里只有 RAW（没位图）→ 落 `A/`，判定也在 `A/` 上（不是 `A/_RAW/`）。
+        let mut targets_in = KnownTargets::new();
+        targets_in.insert(library_row(
+            "photos/2026-08-15/MYP1.RW2",
+            Some(1000),
+            Some(fp("same")),
+        ));
+        let content = FakeContent::new().source("P1.RW2", fp("same"));
+        let result = plan_content(
+            &[raw("P1.RW2")],
+            DEFAULT_TPL,
+            &FakeFs::default(),
+            &targets_in,
+            &content,
+        );
+        assert!(
+            targets(&result)[0].starts_with("跳过：同一张照片（内容一致）"),
+            "{:?}",
+            targets(&result)
         );
     }
 }

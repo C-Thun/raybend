@@ -28,6 +28,7 @@ export interface ImportApi {
     repositoryId: string,
     sources: readonly ImportSource[],
     avoidDuplicates: boolean,
+    importXmp: boolean,
     excluded: readonly string[],
   ) => Promise<ImportStart>;
   pause: (batchId: string) => Promise<ImportBatchProgress>;
@@ -47,6 +48,11 @@ export interface ImportRequest {
   /** 每个源目录带自己的「包含子目录」开关。 */
   sources: readonly ImportSource[];
   avoidDuplicates: boolean;
+  /**
+   * 导入时是否按旁的 `.xmp` 复原编辑配置（右列那个勾选）。
+   * 后端只在**整组完整导入**时才采纳（拆分/改名/跳过都不算，见 `specs/xmp-sidecar.md` §7）。
+   */
+  importXmp: boolean;
   /**
    * 用户**排除**掉的文件（绝对路径）。默认空 —— 老的调用点不必改。
    * 后端会把它们整批剔掉（见 `import/runner.rs`）：不进规划、不计入 total/skipped。
@@ -198,6 +204,7 @@ export function createImportStore(deps: ImportStoreDeps): ImportStore {
           request.repositoryId,
           request.sources,
           request.avoidDuplicates,
+          request.importXmp,
           request.excluded ?? [],
         ),
         timeout,

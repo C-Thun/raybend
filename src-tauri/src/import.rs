@@ -241,6 +241,7 @@ pub async fn import_start<R: Runtime>(
     repository_id: String,
     sources: Vec<ImportSourceArg>,
     avoid_duplicates: bool,
+    import_xmp: bool,
     excluded: Option<Vec<String>>,
 ) -> Result<ImportStartDto, String> {
     if sources.is_empty() {
@@ -337,6 +338,7 @@ pub async fn import_start<R: Runtime>(
             batch_handle,
             control,
             identities,
+            import_xmp,
         );
     });
 
@@ -502,6 +504,9 @@ impl<R: Runtime> raybend::import::runner::StorageRecovery for ImportRecovery<'_,
 /// 导入线程：自己开一个 `catalog.db`，把注入点接好后跑完整批。
 ///
 /// 导入线程持有命令期取得的共享租约，固定根和代次，直到本批结束。
+// 参数全是「这一批导入必需的外部事实」（窗口、库、任务、这一批的 jobs / 句柄 / 闸门 /
+// 来源身份、以及采纳边车那个开关）—— 打包成结构体只是把它们藏起来，看不出依赖什么。
+#[allow(clippy::too_many_arguments)]
 fn run_import_thread<R: Runtime>(
     app: AppHandle<R>,
     catalog: std::sync::Arc<CatalogDb>,
@@ -510,6 +515,7 @@ fn run_import_thread<R: Runtime>(
     handle: BatchHandle,
     control: Control,
     identities: HashMap<PathBuf, raybend::store::session::SourceIdentity>,
+    import_xmp: bool,
 ) {
     let now = time::now_millis();
     let task = std::sync::Arc::new(raybend::store::session::TaskCatalog::new(
@@ -558,17 +564,27 @@ fn run_import_thread<R: Runtime>(
     };
     run_batch(deps, &jobs);
 
-    // 新登记资产的 sidecar 采纳（`specs/xmp-sidecar.md` §7：自动发现，无需用户操作）
+    // 新登记资产的 sidecar 采纳（`specs/xmp-sidecar.md` §7）。
+    //
+    // 两道门（崔总 2026-10-12）：
+    //   ① 用户勾了「导入 xmp 配置」—— 关掉就整个不读；
+    //   ② 这一**组**是「整组完整导入」—— 拆分/改名/跳过都不算，
+    //      那种情况下源目录里的 xmp 未必描述的是这一份（例如位图改名 `_01`、RAW 跳过）。
     let current = task.current();
     let new_assets = sink.take_new_assets();
-    if !new_assets.is_empty() {
-        let items: Vec<crate::sidecar::NewAsset> = new_assets
+    let items: Vec<crate::sidecar::NewAsset> = if import_xmp {
+        new_assets
             .into_iter()
+            .filter(|item| item.complete)
             .map(|item| crate::sidecar::NewAsset {
                 asset_id: item.asset_id,
                 file_abs: std::path::PathBuf::from(&item.source_file_abs),
             })
-            .collect();
+            .collect()
+    } else {
+        Vec::new()
+    };
+    if !items.is_empty() {
         crate::sidecar::adopt_new_assets(&app, &current, &items);
     }
 

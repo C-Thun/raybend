@@ -417,8 +417,16 @@
      放在**导入按钮上面**，让人在按下前就知道这一下会带进多少东西。
   1. **导入按钮**（`ImportButton / 可点` `MC0Gt`）：**必须左边（已选目录）与右边（库）都选中后才亮起可点**。
   2. **「避免重复导入」勾选项**（`AvoidDupRow` `u7Qutm`）：**默认勾上**。
+  3. **「导入 xmp 配置」勾选项**（2026-10-12 新增，崔总定）：**默认勾上**，就排在
+     「避免重复导入」**下面**（同一个「导入时的可选修饰」分组）。
+     语义：导入时按照片旁的自家 `.xmp` 复原编辑配置/评级/标签；
+     **只在整组完整导入时生效**（位图与同组 RAW 都没跳过、没改名），
+     拆开的情况不采纳 —— 规格 `specs/xmp-sidecar.md` §7.1。
+
   > 顺序修订（2026-09-15）：原为「勾选项在上、按钮在下」，用户要求**上下对调**。
   > 对调后符合「选项是按钮的修饰」的阅读顺序 —— 先看到主操作，再看到它的可选条件。
+  > 画稿已同步（2026-10-12）：右列底部的新勾选项 `ImportXmpRow` `bjrMu`
+  > （拖 `AvoidDupRow` `u7Qutm` 复制后改文案，勾选框与字色字号保持一致）。
 
 ---
 
@@ -688,6 +696,7 @@
 | `repo.create` | 新建库 | New library |
 | `repo.import` | 导入 | Import |
 | `repo.avoid_duplicates` | 避免重复导入 | Skip duplicates |
+| `repo.import_xmp` | 导入 xmp 配置 | Import XMP settings |
 | `tools.filter` | 筛选 | Filter |
 | `grid.count` | 1 248 张 | 1,248 items |
 | `common.easy_copy.hint` | 点击复制 | Click to copy |

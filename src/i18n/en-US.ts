@@ -525,6 +525,7 @@ export const enUS: Record<MessageKey, string> = {
  "import.timeout.precheck": "Space check",
  "repo.import": "Import",
  "repo.avoid_duplicates": "Skip duplicates",
+ "repo.import_xmp": "Import XMP settings",
  "repo.empty": "No libraries yet — create one to import into",
  "repo.online": "Online",
  "repo.offline": "Offline",

@@ -21,6 +21,8 @@ use std::path::{Path, PathBuf};
 use crate::error::{Error, Result};
 use crate::import::plan::SourceExtras;
 use crate::media::exif;
+use crate::media::fingerprint::{self, ContentFingerprint, HashKind};
+use crate::media::kind;
 use crate::media::scan::{Cancel, ScanEvent, ScanOptions, ScannedFile};
 use crate::store::file_id::FileId;
 
@@ -49,6 +51,12 @@ pub trait FileOps {
     fn size_of(&self, rel: &str) -> Option<u64>;
     /// 库内文件的身份（读不到 → `None`）。
     fn identity_of(&self, rel: &str) -> Option<FileId>;
+    /// 库内文件的内容指纹（口径按类型选：位图全文 / 其余采样；读不动 → `None`）。
+    ///
+    /// 两个消费者：判重（`plan` 的 `ContentProbe`）与导入后建档
+    /// （`specs/import-dedup-fingerprint.md` §5–§6）。读不动**不报错**：
+    /// 指纹是判重的辅助手段，拿不到时判重退回「按冲突处理」。
+    fn fingerprint_of(&self, rel: &str) -> Option<ContentFingerprint>;
     /// 目标卷剩余空间（拿不到 → `None`）。
     fn free_bytes(&self) -> Option<u64>;
     /// pending 只有完整内容核对后可接纳，大小相同不足以证明复制完成。
@@ -497,6 +505,14 @@ impl FileOps for RepoFs {
         FileId::try_read(self.abs(rel))
     }
 
+    fn fingerprint_of(&self, rel: &str) -> Option<ContentFingerprint> {
+        if self.check().is_err() {
+            return None;
+        }
+        let kind = HashKind::for_media(kind::kind_of_file(rel));
+        fingerprint::fingerprint_path(&self.abs(rel), kind).ok()
+    }
+
     fn free_bytes(&self) -> Option<u64> {
         free_bytes_of(
             &self
@@ -767,6 +783,13 @@ impl FileOps for MemoryFs {
     fn identity_of(&self, rel: &str) -> Option<FileId> {
         // 内存里的文件没有真实身份 —— 由测试显式指定（`set_identity`）
         self.identity_answers.borrow().get(rel).copied()
+    }
+
+    fn fingerprint_of(&self, rel: &str) -> Option<ContentFingerprint> {
+        let files = self.files.borrow();
+        let (_, bytes) = files.get(&fold(rel))?;
+        let kind = HashKind::for_media(kind::kind_of_file(rel));
+        Some(fingerprint::fingerprint_bytes(bytes, kind))
     }
 
     fn free_bytes(&self) -> Option<u64> {

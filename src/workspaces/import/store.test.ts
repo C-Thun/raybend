@@ -654,6 +654,20 @@ test("避免重复导入：默认开、写回设置、能读回", async () => {
   assert.equal(reopened.avoidDuplicates(), false);
 });
 
+test("导入 xmp 配置：默认开、写回设置、能读回", async () => {
+  const { api, state } = fakeApi();
+  const store = createImportStore({ api });
+
+  assert.equal(store.importXmp(), true, "默认勾上（specs/xmp-sidecar.md §7）");
+  store.setImportXmp(false);
+  await flush();
+  assert.equal(state.settings.get("import.import_xmp"), "0");
+
+  const reopened = createImportStore({ api });
+  await reopened.hydratePreferences();
+  assert.equal(reopened.importXmp(), false);
+});
+
 /* ══════════════════════════════════════════════════════════════
  * 小工具
  * ══════════════════════════════════════════════════════════════ */

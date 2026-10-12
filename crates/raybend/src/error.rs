@@ -53,6 +53,14 @@ pub enum Error {
     #[error("目标已存在：{0}")]
     TargetExists(String),
 
+    /// 目标路径在**库里**已经有一条记录，且内容与这次要导的那份不同。
+    ///
+    /// 与 [`Error::TargetExists`]（盘上文件已存在）分开：这条是**数据库侧**的冲突
+    /// （文件监听差分抢先登记、旧行标了缺失…），兜底只让这一条失败，不覆盖库里的记录、
+    /// 也不中断整批（`specs/import-dedup-fingerprint.md` §7 C）。
+    #[error("库内已有同名路径、内容不同：{0}")]
+    ContentConflict(String),
+
     /// JSON 解析/序列化错误（`repo.json`、任务载荷、设置值等）。
     #[error("JSON 错误：{0}")]
     Json(#[from] serde_json::Error),
