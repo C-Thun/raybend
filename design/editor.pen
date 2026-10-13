@@ -1692,7 +1692,7 @@
                     {
                       "type": "frame",
                       "id": "lqnFy",
-                      "name": "PreviewFrame / 总览（随照片比例，3:1～3:4）",
+                      "name": "PreviewFrame / 总览（高度随照片比例，3:2～2:3）",
                       "context": "实际高度由照片比例决定；外框宽度占满右栏，比例夹在 3:1 与 3:4；Screen 图完整显示，极端比例留白。",
                       "width": "fill_container",
                       "height": 196,
@@ -6880,7 +6880,7 @@
                     {
                       "type": "frame",
                       "id": "rGAVE",
-                      "name": "PreviewFrame / 总览（随照片比例，3:1～3:4）",
+                      "name": "PreviewFrame / 总览（高度随照片比例，3:2～2:3）",
                       "context": "实际高度由照片比例决定；外框宽度占满右栏，比例夹在 3:1 与 3:4；Screen 图完整显示，极端比例留白。",
                       "width": "fill_container",
                       "height": 196,
@@ -12608,7 +12608,7 @@
                     {
                       "type": "frame",
                       "id": "jj9oZ",
-                      "name": "PreviewFrame / 总览（随照片比例，3:1～3:4）",
+                      "name": "PreviewFrame / 总览（高度随照片比例，3:2～2:3）",
                       "context": "实际高度由照片比例决定；外框宽度占满右栏，比例夹在 3:1 与 3:4；Screen 图完整显示，极端比例留白。",
                       "width": "fill_container",
                       "height": 196,
@@ -18204,7 +18204,7 @@
                     {
                       "type": "frame",
                       "id": "B3lZL",
-                      "name": "PreviewFrame / 总览（随照片比例，3:1～3:4）",
+                      "name": "PreviewFrame / 总览（高度随照片比例，3:2～2:3）",
                       "context": "实际高度由照片比例决定；外框宽度占满右栏，比例夹在 3:1 与 3:4；Screen 图完整显示，极端比例留白。",
                       "width": "fill_container",
                       "height": 196,
@@ -46071,7 +46071,7 @@
                     {
                       "type": "frame",
                       "id": "VY7KO",
-                      "name": "PreviewFrame / 总览（随照片比例，3:1～3:4）",
+                      "name": "PreviewFrame / 总览（高度随照片比例，3:2～2:3）",
                       "context": "实际高度由照片比例决定；外框宽度占满右栏，比例夹在 3:1 与 3:4；Screen 图完整显示，极端比例留白。",
                       "width": "fill_container",
                       "height": 196,
@@ -47011,7 +47011,7 @@
           "fill": "$fg-3",
           "textGrowth": "fixed-width",
           "width": 960,
-          "content": "底部块基准 262 = 页签 30 + 8 + 预览 196 + 8 + 缩放 24（左栏宽 280，内容宽 264）",
+          "content": "底部块（3:2 那一档）262 = 页签 30 + 8 + 预览 196 + 8 + 缩放 24（左栏宽 280，内容宽 264）；预览高度随照片比例在 宽/1.5～宽×1.5 之间（3:2～2:3）",
           "fontFamily": "Inter",
           "fontSize": 11,
           "fontWeight": "normal"
@@ -47023,7 +47023,7 @@
           "fill": "$fg-3",
           "textGrowth": "fixed-width",
           "width": 960,
-          "content": "信息展开 = 262 × 1.8 ≈ 472（内容 434，内部滚动）；上方列表因此变短",
+          "content": "信息展开 = 总览态 ×1.8（3:2 时 ≈472），最多占左列 60%、且不比总览矮；上方列表因此变短",
           "fontFamily": "Inter",
           "fontSize": 11,
           "fontWeight": "normal"

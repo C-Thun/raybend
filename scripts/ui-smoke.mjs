@@ -1289,10 +1289,10 @@ try {
     );
   } else {
     for (const [name, entry] of [["重挂载前", previewFrame.before], ["重挂载后", previewFrame.after]]) {
-      const expected = entry.width / (3 / 4);
+      const expected = entry.width / (2 / 3);
       if (Math.abs(entry.height - expected) > 8) {
         problems.push(
-          `PreviewFrame（超长纵向）${name}高度是 ${entry.height}px，按 3:4 夹取应当是 ${Math.round(expected)}px` +
+          `PreviewFrame（超长纵向）${name}高度是 ${entry.height}px，按 2:3 夹取应当是 ${Math.round(expected)}px` +
             " —— 内容把框撑爆了（min-h-0 那条不变量破了）",
         );
       }

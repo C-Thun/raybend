@@ -47,6 +47,7 @@ import type { EditorStore } from "./store.ts";
 import { LutPanel } from "./lut-panel.tsx";
 import { EditorZoomControl } from "./zoom-control.tsx";
 import { overviewVisibleRect } from "./overview-rect.ts";
+import { previewFrameAspect } from "../../lib/preview-frame.ts";
 import { EDITOR_LEFT_BOTTOM_INFO, EDITOR_LEFT_WIDTH } from "./layout.ts";
 
 /* ══════════════════════════════════════════════════════════════
@@ -144,6 +145,13 @@ export function EditorLeftPanel(props: EditorLeftPanelProps): JSX.Element {
   });
 
   const rect = createMemo(() => overviewVisibleRect(props.renderState?.() ?? null));
+  /*
+   * 当前照片的**外框比例**（夹在 3:2～2:3）—— 以 CSS 变量传给底部块：
+   * 信息态的高度公式（`layout.ts`）要靠它把「总览态多高」算出来。
+   */
+  const aspect = createMemo(() =>
+    previewFrameAspect(props.current?.natural?.width, props.current?.natural?.height),
+  );
 
   return (
     <div
@@ -178,7 +186,10 @@ export function EditorLeftPanel(props: EditorLeftPanelProps): JSX.Element {
         class="flex shrink-0 flex-col gap-2 px-panel-pad pb-panel-pad pt-2"
         data-editor-left-bottom
         data-tab={tab()}
-        style={tab() === "info" ? { height: EDITOR_LEFT_BOTTOM_INFO } : undefined}
+        style={{
+          "--preview-aspect": String(aspect()),
+          ...(tab() === "info" ? { height: EDITOR_LEFT_BOTTOM_INFO } : {}),
+        }}
       >
         <SegmentedControl
           class="w-full shrink-0"

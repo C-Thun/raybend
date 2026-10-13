@@ -727,7 +727,7 @@ export default function KitchenSink() {
           {/* ── PreviewFrame ─────────────────────────────── */}
           <Section
             title="PreviewFrame（全图总览）"
-            note="比例随照片变化、夹在 3:1～3:4；超出后保持框高、整图缩入并留白。视野框（1px 主色）只在传 visibleRect 时出现。超长纵向那格带「重挂载」按钮 —— 它守的是「图已缓存时重挂载不许把框撑爆」（min-h-0，2026-10-13 修）"
+            note="高度随照片比例变化、夹在 3:2（最矮）～2:3（最高）；超出后保持框高、整图缩入并留白。视野框（1px 主色）只在传 visibleRect 时出现。超长纵向那格带「重挂载」按钮 —— 它守的是「图已缓存时重挂载不许把框撑爆」（min-h-0，2026-10-13 修）"
           >
             <Row label="3:2 照片 + 视野框">
               <div class="w-64">
@@ -735,7 +735,7 @@ export default function KitchenSink() {
                   visibleRect={{ x: 500, y: 300, width: 1200, height: 800 }} />
               </div>
             </Row>
-            <Row label="超长纵向（约 1:7.4，夹在 3:4）">
+            <Row label="超长纵向（约 1:7.4，夹到 2:3）">
               {/* 必须是 **flex 列**（与编辑器左列同形）：`min-height:auto` 只对 flex 项生效，
                   写成普通 block 的话这个样例永远复现不出那个 bug */}
               <div class="flex w-64 flex-col" data-demo="preview-extreme">

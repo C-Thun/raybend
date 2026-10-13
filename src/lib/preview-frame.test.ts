@@ -8,15 +8,24 @@ import {
   previewFrameAspect,
 } from "./preview-frame.ts";
 
-test("总览外框随照片比例变化，限定在 3:1 到 3:4", () => {
-  assert.equal(PREVIEW_FRAME_MAX_ASPECT, 3);
-  assert.equal(PREVIEW_FRAME_MIN_ASPECT, 3 / 4);
-  assert.equal(previewFrameAspect(3000, 1000), 3);
-  assert.equal(previewFrameAspect(4000, 1000), 3);
-  assert.equal(previewFrameAspect(3000, 2000), 1.5);
+test("总览外框随照片比例变化，限定在 3:2（最矮）到 2:3（最高）", () => {
+  assert.equal(PREVIEW_FRAME_MAX_ASPECT, 3 / 2);
+  assert.equal(PREVIEW_FRAME_MIN_ASPECT, 2 / 3);
+  assert.equal(previewFrameAspect(3000, 1000), 3 / 2, "超宽图夹到 3:2");
+  assert.equal(previewFrameAspect(4000, 1000), 3 / 2);
+  assert.equal(previewFrameAspect(3000, 2000), 3 / 2, "正好 3:2 原样");
   assert.equal(previewFrameAspect(1000, 1000), 1);
-  assert.equal(previewFrameAspect(3000, 4000), 3 / 4);
-  assert.equal(previewFrameAspect(1000, 4000), 3 / 4);
+  assert.equal(previewFrameAspect(3000, 4000), 3 / 4, "4:3 竖拍原样（在范围内）");
+  assert.equal(previewFrameAspect(2000, 3000), 2 / 3, "正好 2:3 原样");
+  assert.equal(previewFrameAspect(1000, 4000), 2 / 3, "更长图夹到 2:3");
+});
+
+test("高度范围：最矮 3:2（宽 / 1.5）、最高 2:3（宽 × 1.5）", () => {
+  const width = 256;
+  const wide = width / previewFrameAspect(8000, 1080);
+  const tall = width / previewFrameAspect(1080, 8000);
+  assert.equal(wide, width / 1.5);
+  assert.equal(tall, width * 1.5);
 });
 
 test("未知和非法尺寸采用稳定占位比例", () => {
