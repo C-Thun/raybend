@@ -48,10 +48,15 @@ export function publishRelease({ root, directory, execute = false, noCrates = fa
     return plan;
   }
   try {gh('auth', 'status');} catch {throw new Error('需在 WSL 安装并登录 GitHub CLI gh（https://cli.github.com/），尚未改写 git 或上传');} // 在任何 git 写入之前检查账户。
-  // GH 404 才能当作“首次发布”；网络/认证错误不可吞掉。
+  // Release 读取统一走**列表端点**：`releases/tags/<tag>` 对 **draft** 固定 404
+  // （2026-10-15 首次发布实测：`gh release create --draft` 成功后读不到 → 误报「创建后未找到」），
+  // 列表端点对认证用户包含 draft。网络 / 认证错误照旧抛出，不吞。
   const readRemote = () => {
-    try { return JSON.parse(String(gh('api', `repos/C-Thun/raybend/releases/tags/${plan.tag}`))); }
-    catch (error) { if (/HTTP 404/.test(String(error.stderr ?? '') + error.message)) return null; throw error; }
+    const raw = String(gh('api', 'repos/C-Thun/raybend/releases?per_page=100'));
+    let list;
+    try { list = JSON.parse(raw); } catch (error) { throw new Error('gh api 未返回合法 JSON（Release 列表）', { cause: error }); }
+    if (!Array.isArray(list)) throw new Error('gh api 未返回 Release 列表');
+    return list.find(item => item?.tag_name === plan.tag) ?? null;
   };
   let release = readRemote();
   if (release && (release.tag_name !== plan.tag || release.prerelease !== plan.prerelease)) throw new Error('已有 Release 通道/tag 不匹配；不覆盖');

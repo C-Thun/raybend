@@ -58,8 +58,10 @@ function fixture(licensePadding=0, { version = '1.2.3', channel = 'release' } = 
     if (cmd === 'gh') {
       if (args[0] === 'auth') { if(state.authFailed)throw new Error('auth failed'); return ''; }
       if (args[0] === 'api') {
-        if (!state.release) { const e = new Error('not found'); e.stderr = 'HTTP 404'; throw e; }
-        return JSON.stringify(state.release);
+        const path = String(args[1]);
+        if (path.includes('/releases/assets/')) return ''; // 夹具的资产都带 digest，不会走到这里
+        if (path.startsWith('repos/C-Thun/raybend/releases')) return JSON.stringify(state.release ? [state.release] : []);
+        const e = new Error('not found'); e.stderr = 'HTTP 404'; throw e;
       }
       if (args[0] === 'release' && args[1] === 'create') { state.release = { tag_name: tag, prerelease: channel === 'beta', draft: true, assets: [], published_at: '2026-09-27T00:00:00Z' }; return ''; }
       if (args[0] === 'release' && args[1] === 'upload') {
@@ -91,6 +93,7 @@ test('默认只读；显式执行顺序为精确提交/tag/原子推送/草稿�
     assert.ok(f.state.calls.every(c => c[0] === 'git' && !['add', 'commit', 'tag', 'push'].includes(c[1])));
     f.state.calls = [];
     f.call(true);
+    assert.ok(!f.state.calls.some(c => c[0] === 'gh' && c[1] === 'api' && String(c[2]).includes('/releases/tags/')), 'draft 读取不得再用 tags 端点（对 draft 固定 404）');
     assert.equal(f.state.release.draft, false);
     assert.equal(f.state.release.assets.length, 4);
     assert.ok(f.state.calls.findIndex(c => c[1] === 'push') < f.state.calls.findIndex(c => c[2] === 'create'));

@@ -147,7 +147,14 @@ export function publishCrate({
 
   log(`crates.io：发布 ${CRATE_NAME} ${version}（${CRATE_PAGE}/${version}，不可撤回；登录凭据：${credentials}）`);
   try {
-    run("cargo", ["publish", "-p", CRATE_NAME], { cwd: root, stdio: "inherit", encoding: "utf8" });
+    // 上传超时与重试固化（崔总 2026-10-15：本机直连 crates.io 上传偶发 30 s 超时）：
+    // 默认 30 s 太短，给 10 分钟并允许重试；已有环境变量值不覆盖。
+    run("cargo", ["publish", "-p", CRATE_NAME], {
+      cwd: root,
+      stdio: "inherit",
+      encoding: "utf8",
+      env: { ...env, CARGO_HTTP_TIMEOUT: env.CARGO_HTTP_TIMEOUT ?? "600", CARGO_NET_RETRY: env.CARGO_NET_RETRY ?? "5" },
+    });
   } catch (error) {
     // 索引降级时可能撞上「已发布」：此时回到幂等判据，别把重复发布当成新失败。
     if (!/already (been )?(uploaded|published)|already exists|crate version .* is already/i.test(String(error.stderr ?? "") + error.message)) throw error;

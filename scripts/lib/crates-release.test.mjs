@@ -14,12 +14,12 @@ function fixture({ before = "missing", after = "missing", packageBytes = PACKED,
   mkdirSync(join(root, "target/package"), { recursive: true });
   mkdirSync(join(root, "home/.cargo"), { recursive: true });
   if (credentials) writeFileSync(join(root, "home/.cargo/credentials.toml"), '[registry]\ntoken = "synthetic"\n');
-  const state = { calls: [], logs: [], reads: 0, before, after };
-  const run = (cmd, args) => {
+  const state = { calls: [], logs: [], reads: 0, before, after, publishOptions: null };
+  const run = (cmd, args, options) => {
     state.calls.push([cmd, ...args]);
     const write = () => writeFileSync(localCratePath(root, "1.2.3"), packageBytes);
     if (cmd === "cargo" && args[0] === "package") { write(); return ""; }
-    if (cmd === "cargo" && args[0] === "publish") { if (publishError) throw publishError; write(); return ""; }
+    if (cmd === "cargo" && args[0] === "publish") { state.publishOptions = options; if (publishError) throw publishError; write(); return ""; }
     throw new Error(`unexpected synthetic command: ${cmd} ${args.join(" ")}`);
   };
   const readIndexText = () => {
@@ -99,6 +99,17 @@ test("未发布：只调 cargo publish，并用索引 checksum 核对本地包",
     assert.deepEqual(f.cargo(), ["cargo publish"]);
     assert.deepEqual(result, { action: "published", checksum: sha256(PACKED), verified: true });
     assert.ok(!f.state.calls.some(c => c[1] === "package"));
+    assert.equal(f.state.publishOptions?.env?.CARGO_HTTP_TIMEOUT, "600", "上传超时固化为 10 分钟（本机实测 30 s 不够）");
+    assert.equal(f.state.publishOptions?.env?.CARGO_NET_RETRY, "5");
+  } finally { f.dispose(); }
+});
+
+test("上传超时 / 重试：已设环境变量时不覆盖", () => {
+  const f = fixture({ before: "missing", after: line("1.2.3", sha256(PACKED)) });
+  try {
+    f.call({ env: { CARGO_HTTP_TIMEOUT: "120", CARGO_NET_RETRY: "2" } });
+    assert.equal(f.state.publishOptions?.env?.CARGO_HTTP_TIMEOUT, "120");
+    assert.equal(f.state.publishOptions?.env?.CARGO_NET_RETRY, "2");
   } finally { f.dispose(); }
 });
 
