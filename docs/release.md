@@ -300,6 +300,10 @@ pnpm release:publish release-out/v0.1.2 --execute   # 发布（崔总；提交/t
 ```
 
 * **`--no-crates`** 跳过 crates.io（只发安装包）；**beta / test 版不发**（预发布版本不可撤回，不值当）。
+* **核心库没变动就跳过**（崔总 2026-10-14 定）：发版前按「crates.io 上最新已发布版本」的 tag 比对
+  `crates/raybend/`，没有改动就不发这一版，**等下个核心库有改动的版本再发**。没有可比的 tag（首次发布、
+  历史版本没打 tag）或拿不到构建来源 commit 时按「有改动」处理 —— 宁可多发一次，也不静默漏发；
+  本次发布（首个带 tag 的版本）之后，后续版本即可精确比对。
 * **重跑安全**：同一条指令重跑时，若该版本已在 crates.io，本地会重新 `cargo package` 并与索引里的
   sha256 比对——一致就跳过，不一致就报错（版本号在 crates.io 不可覆盖，只能升版）。
 * **登录凭据是前提**：脚本只检查 `~/.cargo/credentials.toml` 或 `CARGO_REGISTRY_TOKEN` 是否存在，

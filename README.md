@@ -85,7 +85,7 @@ pnpm release patch --win-msi --unsigned             # or stop after preparing…
 pnpm release:publish release-out/v0.1.2 --execute   # …then publish after reviewing the installer
 ```
 
-Add `--with-updater` to ship the signed update manifest; add `--no-crates` to skip the crates.io sync. Publishing side effects (commit/tag/push/upload/wait for the website) happen only with `--publish` or the second command.
+Add `--with-updater` to ship the signed update manifest; add `--no-crates` to skip the crates.io sync (it runs by default, but is **skipped automatically when the core crate has not changed since the last published version** — it waits for a version that changes it). Publishing side effects (commit/tag/push/upload/wait for the website) happen only with `--publish` or the second command.
 
 **AI models (compile-time add-on).** Zero-config by default: builds look for a **sibling** `../model-registry` checkout; if it is missing they produce a non-AI build and print the reason (`--ai=required` fails instead, `--ai=off` opts out explicitly). When the model library lives elsewhere, register its absolute path once (stored locally, Git-ignored):
 

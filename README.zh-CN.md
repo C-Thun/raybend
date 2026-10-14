@@ -85,7 +85,7 @@ pnpm release patch --win-msi --unsigned             # 或者先准备…
 pnpm release:publish release-out/v0.1.2 --execute   # …验收安装器后再发布
 ```
 
-带更新清单加 `--with-updater`；跳过 crates.io 同步加 `--no-crates`；发布动作（提交/tag/推送/上传/等官网）只由 `--publish` 或第二条指令执行。
+带更新清单加 `--with-updater`；跳过 crates.io 同步加 `--no-crates`（默认跟发，但**核心库自上次发布以来没改动时会自动跳过**，等下个有改动的版本）；发布动作（提交/tag/推送/上传/等官网）只由 `--publish` 或第二条指令执行。
 
 **AI 模型（编译期外挂）**：默认零配置 —— 构建时自动找**同级**的 `../model-registry`；找不到就出无 AI 版并在日志打印原因（`--ai=required` 改为直接失败，`--ai=off` 明确不要）。模型库在别处时，把它的**绝对路径**登记一次（只写在本机，Git 忽略）：
 
