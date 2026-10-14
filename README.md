@@ -54,6 +54,19 @@ pnpm build            # frontend build; dist/ is embedded into the executable at
 
 The complete command index — tests, quality gates, Windows debug builds, AI assets — is in [docs/development.md](docs/development.md).
 
+## Release builds
+
+Installers are built locally (WSL front end + Windows-side Rust/MSVC) and published by the maintainer. One command, or two:
+
+```bash
+pnpm release patch --win-msi --unsigned --publish   # bump, build the MSI and publish in one go
+pnpm release 0.2.0 --win-msi --unsigned --publish   # or pin an exact version
+pnpm release patch --win-msi --unsigned             # or stop after preparing…
+pnpm release:publish release-out/v0.1.2 --execute   # …then publish after reviewing the installer
+```
+
+Setup (dav1d, `cargo tauri`, `gh` login), update signing keys, the AI model hook (`--ai=auto|required|off`, zero-config from a sibling `model-registry` checkout, with a printed fallback to a non-AI build) and what the website does on a release are documented in [docs/release.md](docs/release.md).
+
 ## Tech stack
 
 Rust · Tauri 2 · wgpu (native GPU rendering) · SolidJS · Tailwind CSS · SQLite · rawler (RAW decoding)

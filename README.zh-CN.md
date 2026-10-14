@@ -54,6 +54,19 @@ pnpm build            # 前端构建；dist/ 在编译期嵌进可执行文件
 
 开发期的完整命令索引（测试、质量门、Windows 调试构建、AI 资源）见 [docs/development.md](docs/development.md)。
 
+## 发布构建
+
+安装包在本地构建（WSL 前端 + Windows 侧 Rust/MSVC），由维护者发布。一条命令或两条：
+
+```bash
+pnpm release patch --win-msi --unsigned --publish   # 升版 + 打 MSI + 发布，一次到底
+pnpm release 0.2.0 --win-msi --unsigned --publish   # 也可以指定版本号
+pnpm release patch --win-msi --unsigned             # 或者先准备…
+pnpm release:publish release-out/v0.1.2 --execute   # …验收安装器后再发布
+```
+
+一次性准备（dav1d、`cargo tauri`、`gh` 登录）、更新签名密钥、AI 模型外挂（`--ai=auto|required|off`，默认零配置从同级 `model-registry` 取，找不到会打印原因并回退到无 AI 版）以及发布时官网做了什么，都在[发布指南](docs/release.md)里。
+
 ## 技术栈
 
 Rust · Tauri 2 · wgpu（原生 GPU 渲染）· SolidJS · Tailwind CSS · SQLite · rawler（RAW 解码）

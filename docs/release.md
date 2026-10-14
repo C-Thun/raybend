@@ -2,15 +2,35 @@
 
 本文的打包、签名、tag、push、上传与真机验收由您执行。M4 最新开发与冒烟已收口，M5 发行 DoD 仍需真机验收。本轮聚焦 NSIS/MSI → GitHub Release → 官网，MSIX 已登记 FUTURE，后续独立启动。
 
-## 日常发行只用两条指令
+## 日常发行：一条命令或两条指令
 
-前提：先审阅并提交当前开发工作树；不要把并行未完成的改动混入发行。下面以当前 0.1.1 升到 0.1.2、暂不配置 Windows 发布者证书/内置更新为例。执行者是崔总：
+前提：先审阅并**自己提交**开发改动（脚本只提交版本文件与许可清单，其余改动一律阻断 —— 见 §2）；不要把并行未完成的改动混入发行。执行者是崔总。
+
+**一条命令（推荐，`--publish`）** —— 准备与发布一次做完：
+
+```bash
+# 自增 patch：0.1.1 → 0.1.2，构建 MSI 并直接发布（提交/tag/推送/上传/公开/等官网）
+pnpm release patch --win-msi --unsigned --publish
+
+# 指定版本号：位置参数或 --version 均可，接受 v 前缀与预发布标签
+pnpm release 0.2.0 --win-msi --unsigned --publish
+pnpm release --version v0.2.0 --win-msi --unsigned --publish
+
+# 正式版跳过 crates.io 同步（默认跟着发）
+pnpm release patch --win-msi --unsigned --publish --no-crates
+```
+
+`--publish` 的硬规则：必须同时指定 `--win-msi` / `--win-nsis`；不能与 `--dry-run`、`--skip-build` 或 `test` 通道同用；发布动作与下面第二条指令**完全一致**（同一个脚本函数，不是第二条通路）。
+
+**两条指令（需要验收窗口时）** —— 与上面等价，只是中间停下来让您验收安装器、核对/编辑 `release-out/v版本/RELEASE-NOTES.md`：
 
 ```bash
 pnpm release patch --win-msi --unsigned
 # 在 Windows 验收本版安装器，并核对/编辑 release-out/v0.1.2/RELEASE-NOTES.md 后：
 pnpm release:publish release-out/v0.1.2 --execute
 ```
+
+版本决定两种方式：`patch` / `minor` / `major` 自增（含 beta 线递增规则），或直接指定 `x.y.z`（必须**严格大于**当前版本；beta 通道的目标版本要自带预发布标签）。指定版本号是给“跳级、补齐、早就定好的版本”用的，不是绕过降级保护的后门。
 
 第一条同步版本、重生成许可、构建一次前端、构建 Windows 主程序/worker、自动镜像到 Windows 本地盘并打所选的 MSI、核对嵌入前端和 worker 协议、验证签名（或显式 unsigned）、生成完整 `release-out/v版本/`。输出目录含安装器、可选 .sig、SHA256SUMS、release-index.json、raybend-build.json、可选 latest.json 和发布说明；只收本次版本，缺目标安装器直接失败，旧包不混入。输出目录必须全新，不覆盖旧产物或并行文件。第一条成功后不再另跑 finalize。官网优先选择同版 MSI，没有 MSI 时选择 NSIS。test 为单独带时间的输出目录且不能公开上传；beta 仅 NSIS。
 
@@ -111,10 +131,11 @@ Microsoft Store 当前新入口个人/公司注册免费，仍需身份验证：
 ```bash
 pnpm release patch --dry-run
 pnpm release minor --channel beta --dry-run
+pnpm release 0.2.0 --win-msi --unsigned --dry-run
 pnpm release test --win-msi --unsigned --dry-run
 ```
 
-package.json 为产品版本来源，Cargo.toml 与 Cargo.lock 的两个本地包同步，Tauri 直接读取 package.json。test 不升版，前端落 dist/test-build；beta/release 落 dist。脚本不 commit/tag/push/上传。manifest 的 gitHash 记录升版前已提交代码的 commit，版本改动随后由您提交；它不是最终版本提交的 hash。源代码 tag 必须保留该次升版与生成许可资源。工作树非干净时，beta/release 默认阻断；--allow-dirty 是明确接受脏树来源的选项，不建议用于公开版。
+package.json 为产品版本来源，Cargo.toml 与 Cargo.lock 的两个本地包同步，Tauri 直接读取 package.json。test 不升版，前端落 dist/test-build；beta/release 落 dist。`pnpm release` 自身不 commit/tag/push/上传；只有 `--publish`（或第二条 `release:publish --execute`）才会做这些外部动作。指定版本号时必须严格大于当前版本，降级会被拒绝；beta 通道的目标版本必须自带预发布标签（如 `0.2.0-beta.1`），test 不接受指定版本号。manifest 的 gitHash 记录升版前已提交代码的 commit，版本改动随后由发布步骤提交；它不是最终版本提交的 hash。源代码 tag 必须保留该次升版与生成许可资源。工作树非干净时，beta/release 默认阻断；--allow-dirty 是明确接受脏树来源的选项，不建议用于公开版，而且 `--publish` 会因为发布提交里混入了版本文件以外的改动而失败。
 
 注意：正式/预览准备成功会修改版本文件；构建失败恢复本次版本写入。发生并行修改时保留外部编辑并报冲突。失败生成的前端不是可发布文件，修复后重跑，不要沿用旧 dist 或旧 SHA。
 
@@ -146,14 +167,54 @@ pnpm release patch --win-msi --unsigned
 pnpm tauri signer generate -w /您自己选择的仓外安全目录/raybend-updater.key
 ```
 
-以安全环境变量/密钥管理提供 RAYBEND_UPDATER_PUBLIC_KEY、TAURI_SIGNING_PRIVATE_KEY（Tauri 支持私钥内容或绝对路径）与 TAURI_SIGNING_PRIVATE_KEY_PASSWORD；本机存在的私钥文件路径会经 wslpath 转成 Windows 可访问路径，内容型密钥不转换；密钥不会打印到计划中。公开公钥可进发布配置。私钥不能由 Agent 代您保管。
+以安全环境变量/密钥管理提供私钥与密码。**变量关系（已核实，2026-10-14）**：
+
+| 变量 | 用在哪里 | 本项目怎么用 |
+| --- | --- | --- |
+| `TAURI_SIGNING_PRIVATE_KEY` | `tauri build`/`bundle` 与 `tauri signer sign` | **必须用这个**：值是私钥文件路径（或私钥内容）。路径会被脚本自动转成 Windows 可访问路径（本机实测 `/home/…` → `\\wsl.localhost\<发行版>\…`，Windows 侧 `Test-Path` 可读） |
+| `TAURI_SIGNING_PRIVATE_KEY_PATH` | **只有 `tauri signer sign` 读**，`build`/`bundle` **不读** | 不要用它做发布构建，否则签名时“找不到私钥”；另外它与 `TAURI_SIGNING_PRIVATE_KEY` **同时设置会报互斥错误**（自测签名时才用它） |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | 与私钥同时使用 | 生成时设了密码就必须给（本机这对密钥**带密码**，实测 `signer sign` 不给密码会报 `incorrect updater private key password`）；生成时没设密码则不用 |
+
+在**您自己的终端（fish）**里一次性设置（`set -Ux` 是持久变量，重开 shell 仍在）：
+
+```fish
+chmod 600 $HOME/.config/raybend/updater.key
+set -Ux TAURI_SIGNING_PRIVATE_KEY $HOME/.config/raybend/updater.key
+set -Ux TAURI_SIGNING_PRIVATE_KEY_PASSWORD '生成密钥时设的密码'
+```
+
+验证（分两层，都不输出私钥）：
+
+```fish
+# ① 签名自测：signer sign 把 TAURI_SIGNING_PRIVATE_KEY 当「内容」、_PATH 当「路径」，
+#    两者同时存在会报互斥 —— 所以自测时用 PATH 变量并临时移除内容变量：
+env -u TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PATH=$HOME/.config/raybend/updater.key pnpm tauri signer sign /tmp/rb-sign.txt
+
+# ② 发布路径验证（不构建、不改文件）：确认私钥可读且路径能转成 Windows 形式
+pnpm release test --win-msi --unsigned --with-updater --dry-run
+```
+
+⚙️ **实现差异（已读 tauri-cli 2.11.4 源码，2026-10-14）**：`bundle.rs` 用
+`Path::new(&private_key).exists()` 判断「值到底是路径还是内容」，所以 `build/bundle` 路径两种都支持；
+`signer/sign.rs` 则把两个变量分别绑到 `--private-key`（内容）与 `--private-key-path`（路径）两个互斥参数上。
+❗ 本地（非 CI）构建若没设密码变量，CLI 会尝试在终端**交互提示输入密码**；发布构建经 `cmd.exe` 批处理发起，
+不要依赖交互提示 —— 把 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 设上。构建时 CLI 还会比对私钥与 `release.config.json`
+公钥是否匹配，不匹配会打印警告（首次构建可用它当配对自检）。
+
+**这两个变量什么时候用到**：只有**构建带更新的安装包**（`--with-updater`）时 —— Tauri 在 Windows 侧为每个安装器生成 `.sig`，签名至此固化；`release:publish` 只是上传，不需要私钥。平时发版（不带 `--with-updater`）完全不需要它们。**不配给 Agent 的 bash**：私钥不由 Agent 保管，带签名的构建与发布全部由您执行。
+
+**公钥写进仓库的公开配置**：`release.config.json`（仓库根）的 `updaterPublicKey`（`schema: 1`）—— 公钥是公开身份（会进安装包与更新清单），入库后每次发版不必再 export；环境变量 `RAYBEND_UPDATER_PUBLIC_KEY` 仍优先，供临时换密钥用。已接入（2026-10-14）。
+
+```json
+{ "schema": 1, "updaterPublicKey": "<pnpm tauri signer generate 打印的公钥>" }
+```
 
 ```bash
 pnpm release patch --win-msi --with-updater --unsigned
 # 有发布者证书时去掉 --unsigned
 ```
 
-包默认仅主动检查更新；没有构建公钥时默认关闭，不发无效网络请求。官方稳定源为 GitHub 最新正式 release 的 latest.json；预览源为官网 /updates/beta.json，发布前必须实际部署该文件。源码可替换源/公钥或关闭更新，仍保留签名校验；稳定源拒绝预发布版本。NSIS 和 MSI 使用各自 windows-x86_64-nsis/msi 更新目标，未知/裸 exe 不跨用另一种安装器。
+**启动后静默检查一次更新**（默认开，可在更新对话框里关；测试/开发通道默认不自动检查，避免调试环境被拉到正式版），发现新版本只给出提示，下载与安装仍由用户确认并验证签名。没有构建公钥时默认关闭，不发无效网络请求。官方稳定源为 GitHub 最新正式 release 的 latest.json；预览源为官网 /updates/beta.json，发布前必须实际部署该文件。源码可替换源/公钥或关闭更新，仍保留签名校验；稳定源拒绝预发布版本。NSIS 和 MSI 使用各自 windows-x86_64-nsis/msi 更新目标，未知/裸 exe 不跨用另一种安装器。启动检查会联网 —— 隐私说明与 `updates.privacy` 文案必须与之一致（已同步）。
 
 ## 5. 验证与生成清单
 
@@ -279,3 +340,45 @@ cargo publish -p raybend             # 上传（崔总执行）
 * docs.rs 文档为异步自动构建（可能因缺系统库失败），**失败不影响发布本体**，只是页面上没有 API 文档。
 * 将来可选配置 Trusted Publishing（GitHub Actions 免长期 token），但**首次发布不适用**（crate 必须先存在）；
   是否启用属发布方式变更，需崔总拍板。
+
+## 10. AI 外挂编译（`--ai`）：默认零配置，找不到就出基础版
+
+AI 能力是**编译期外挂**：模型与 CPU 推理库不进本仓 Git，构建时按校验过的字节装进安装包。
+功能规格见 `specs/ai-model-library-build.md` 与 `memory/FUNCTION-IMAGING.md`；这里只讲发布侧怎么用。
+
+### 输入从哪来
+
+| 输入 | 位置 | 获取方式 |
+| --- | --- | --- |
+| 模型（`image_encoder.onnx` 152 MB + 词表/许可） | **独立的 `model-registry` 仓库**（git LFS，云上另存） | `pnpm ai:use` 显式登记，或构建时自动探测同级 `../model-registry` |
+| CPU 推理库（onnxruntime 1.28.0 DLL，约 16 MB） | `crates/raybend/assets/ai/ort-win-x64/`（已 gitignore） | `pnpm ai:prepare`：从 onnxruntime 官方 Release 固定 URL 下载 + SHA-256 校验后解出 |
+
+模型绑定的是 `profiles/raybend-photo-tags/v1`（消费侧契约）：`manifest.json` 的摘要必须与
+`crates/raybend/assets/ai/tinyclip-v1/manifest.json` 一致，否则拒绝使用 —— 不是“换个模型就上”。
+
+### 命令与回退链
+
+```bash
+pnpm release patch --win-msi --unsigned --ai=auto      # 默认：找不到就出无 AI 版并打印原因
+pnpm release patch --win-msi --unsigned --ai=required  # 找不到就失败，绝不静默降级
+pnpm release patch --win-msi --unsigned --ai=off       # 不碰模型源、不联网，明确要无 AI 版
+pnpm debug:win --ai=auto                               # 调试包同一套口径（release 与 debug 一致）
+```
+
+- **默认 `auto` 的回退链**：`ai-model-source.local.json` 登记 → 同级 `../model-registry` 自动探测（不写登记文件，同样过全部摘要与契约校验）→ 都没有就构建基础版，并在构建日志打印 `⚠ AI 未启用：…`。
+- `--ai` 与 `--publish` 可同用：一键发版照样按上面的规则决定带不带 AI。
+- 产物有身份记录：前端标志、`features=photo-ai-runtime`、`raybend-ai-build.json`、二进制内的 `on`/`off` 标记与模型摘要；`pnpm check:win` 会核对它们是否一致（无 AI 包残留旧模型目录也会报错）。
+- 带 AI 的安装器比基础版大约 160 MB；`--with-updater` 与 `--ai` 互不干扰。
+
+## 11. 为什么暂不做 CI 打包（2026-10-14 评估）
+
+**结论：技术上可行，但对现状不划算，暂缓；登记到 `memory/FUTURE.md` G24，触发条件是「模型公开分发方式定下来」或「有了云签名」。**
+
+评估依据（已核对的代码与事实）：
+
+- 现有流水线是 **WSL 前端 + Windows 原生 cargo** 的两端结构，`release.mjs` 里大量逻辑（镜像同步、`wslpath` 路径转换、本地盘校验、并发锁）是为这两台“机器”服务的；CI 里这些既用不上也不能照搬。
+- 全部构建输入在 CI 上**基本都拿得到**：Rust 工具链由 `rust-toolchain.toml` 固定；MSVC/WiX 由 GitHub windows runner 提供；dav1d 1.5.0 能按 `scripts/build-dav1d-win.cmd` 的逻辑（meson+ninja+nasm）重建并用 actions cache；onnxruntime DLL 已有固定 URL + SHA-256 的自动下载。
+- **真正的卡点是 AI 模型**：152 MB 的 ONNX 在独立仓库 `model-registry`（git LFS），不在本仓。CI 要出 AI 版，得先解决模型怎么公开分发（LFS 流量 / Release 资产 / 私有仓库令牌）；否则 CI 产物只能是不带 AI 的版本 —— 与本地主力包不同质，等于维护两套发布口径与两套校验。
+- 其余成本：Secrets 管理（更新私钥、将来 Authenticode 云签名）、缓存键维护、`check:win` 要在 CI 里同套复跑；而且 CI 直接执行发布动作（提交/tag/上传）与“发布由人类执行”的纪律边界需要重新划定（可行形态是 CI 出草稿、人类点 publish，但又回到了人的动作）。
+
+因此本轮先把**本地一键链路**（本文件）与**启动自动检查更新**做顺；CI 打包留到模型分发与签名方案落地后再启动。
