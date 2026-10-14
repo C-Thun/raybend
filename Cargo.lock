@@ -4315,13 +4315,19 @@ dependencies = [
 name = "raybend-desktop"
 version = "0.1.2"
 dependencies = [
+ "base64 0.22.1",
  "crash-handler",
+ "futures-util",
  "image",
  "log",
  "minidumper",
+ "minisign-verify",
  "raw-window-handle",
  "raybend",
+ "reqwest",
  "rusqlite",
+ "rustls",
+ "semver",
  "serde",
  "serde_json",
  "tauri",
@@ -4329,6 +4335,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-updater",
  "tempfile",
+ "tokio",
  "webview2-com",
  "windows-core 0.61.2",
  "windows-sys 0.61.2",

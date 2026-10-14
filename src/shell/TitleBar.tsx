@@ -27,6 +27,8 @@ import { A } from "@solidjs/router";
 import logoSmall from "../assets/branding/logo-small.png";
 import {
   IconArrowsMinimize,
+  IconCircleCheck,
+  IconDownload,
   IconMinus,
   IconMoon,
   IconSquare,
@@ -45,6 +47,7 @@ import { availabilityOf, chordOf, type CommandSpec } from "../lib/commands.ts";
 import { shortcutOverrides } from "../lib/shortcuts.ts";
 import type { AppearanceStore } from "../lib/appearance.ts";
 import { AboutDialog } from "./AboutDialog.tsx";
+import { updateIndicator } from "./update-center.tsx";
 import type { ShellStore } from "./store.ts";
 
 /** 标题栏上的菜单顺序（`specs/M2-W3.md` §2.6） */
@@ -62,9 +65,24 @@ export interface TitleBarProps {
   aboutOpen: boolean;
   aboutPage?: "about" | "help" | "licenses";
   onAboutOpenChange: (open: boolean) => void;
+  /** 打开更新对话框（更新指示器点一下就到这里；平时那位置不放东西） */
+  onOpenUpdates: () => void;
 }
 
 export function TitleBar(props: TitleBarProps) {
+  /** 更新指示器的提示文案：下载中报百分比（拿不到总长就不报），就绪时报版本号 */
+  function indicatorLabel(current: {
+    phase: string;
+    version: string | null;
+    percent: number | null;
+  }): string {
+    if (current.phase === "ready")
+      return t("updates.indicator.ready", { version: current.version ?? "" });
+    return current.percent === null
+      ? t("updates.indicator.downloading")
+      : t("updates.indicator.downloadingPercent", { percent: String(current.percent) });
+  }
+
   const chrome = createWindowChrome();
   const [openMenu, setOpenMenu] = createSignal<MenuName | null>(null);
 
@@ -232,6 +250,28 @@ export function TitleBar(props: TitleBarProps) {
 
         {/* ── 主题 + 密度 ───────────────────────────────── */}
         <div class="flex shrink-0 items-center gap-2 pe-pad-x">
+          {/* 更新指示器（崔总 2026-10-15）：只在「后台下载中 / 已下载待安装」时出现，
+              点一下打开更新对话框 —— 平时一个像素都不占，下载也永远不拦操作。 */}
+          <Show when={updateIndicator()}>
+            {(current) => (
+              <Tooltip content={indicatorLabel(current())}>
+                {(triggerProps) => (
+                  <IconButton
+                    {...triggerProps()}
+                    label={t("updates.title")}
+                    onClick={() => props.onOpenUpdates()}
+                  >
+                    <Show
+                      when={current().phase === "ready"}
+                      fallback={<IconDownload size={14} />}
+                    >
+                      <IconCircleCheck size={14} />
+                    </Show>
+                  </IconButton>
+                )}
+              </Tooltip>
+            )}
+          </Show>
           <Tooltip content={t("titlebar.theme.toggle")}>
             {(triggerProps) => (
               <IconButton

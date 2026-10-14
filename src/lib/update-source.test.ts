@@ -1,30 +1,59 @@
-import { test } from "node:test";import assert from "node:assert/strict";
-import {validUpdateSource,readUpdateSource,defaultUpdateSource,readAutoCheck,autoCheckSource} from "./update-source.ts";
-test("未配置默认关闭；自定义源和自定义公钥绑定，关闭偏好优先",()=>{
- const fallback=defaultUpdateSource("official","release");assert.equal(defaultUpdateSource("","release").mode,"off");assert.equal(defaultUpdateSource("pub","beta").mode,"beta");
- const custom={mode:"custom" as const,endpoint:"https://fork.example/update",publicKey:"fork"};assert.deepEqual(readUpdateSource(JSON.stringify(custom),fallback),custom);assert.equal(readUpdateSource('{"mode":"off"}',fallback).mode,"off");assert.deepEqual(readUpdateSource('garbage',fallback),fallback);
-});
-test("拒绝无公钥、HTTP、本地文件、凭据、片段及超长配置",()=>{
- for(const endpoint of ["http://example.org","file:///a","https://me:pass@example.org/u","https://example.org/#secret",""])assert.equal(validUpdateSource({mode:"custom",endpoint,publicKey:"k"}),false);
- assert.equal(validUpdateSource({mode:"custom",endpoint:"https://example.org",publicKey:""}),false);
- assert.equal(validUpdateSource({mode:"custom",endpoint:"https://example.org",publicKey:"k".repeat(8193)}),false);
- assert.equal(validUpdateSource({mode:"stable",endpoint:"https://example.org",publicKey:"k"}),true);
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import {
+  BETA_CHANNEL_ENABLED,
+  UPDATE_ENDPOINTS,
+  UPDATE_PREF_KEY,
+  autoCheckAllowed,
+  readUpdatePrefs,
+  updateSource,
+  updatesAvailable,
+} from "./update-source.ts";
+
+test("v2 偏好优先，坏值不拦路", () => {
+  assert.deepEqual(readUpdatePrefs('{"channel":"beta","autoCheck":false}', null, null), {
+    channel: "beta",
+    autoCheck: false,
+  });
+  assert.deepEqual(readUpdatePrefs('{"channel":"stable"}', null, null), {
+    channel: "stable",
+    autoCheck: true,
+  });
+  assert.deepEqual(readUpdatePrefs("garbage", null, null), { channel: "stable", autoCheck: true });
+  assert.deepEqual(readUpdatePrefs('{"channel":"编写错了"}', null, null), {
+    channel: "stable",
+    autoCheck: true,
+  });
+  assert.equal(UPDATE_PREF_KEY, "raybend.updates.v2");
 });
 
-test("开机静默检查：默认开，只有显式 off 才关",()=>{
- assert.equal(readAutoCheck(null),true,"没存过 = 默认开");
- assert.equal(readAutoCheck("on"),true);
- assert.equal(readAutoCheck("off"),false);
- assert.equal(readAutoCheck("garbage"),true,"损坏偏好不静默地把用户的路堵上");
+test("从 v1 迁移：off 等价于关掉自动检查，custom 归并到稳定", () => {
+  assert.deepEqual(readUpdatePrefs(null, '{"mode":"off"}', null), { channel: "stable", autoCheck: false });
+  assert.deepEqual(readUpdatePrefs(null, '{"mode":"stable"}', null), { channel: "stable", autoCheck: true });
+  assert.deepEqual(readUpdatePrefs(null, '{"mode":"beta"}', null), { channel: "beta", autoCheck: true });
+  assert.deepEqual(readUpdatePrefs(null, '{"mode":"custom"}', null), { channel: "stable", autoCheck: true });
+  // 两个旧键都关过才算关（任一为 off 就不自动查）
+  assert.deepEqual(readUpdatePrefs(null, '{"mode":"stable"}', "off"), { channel: "stable", autoCheck: false });
+  assert.deepEqual(readUpdatePrefs(null, null, null), { channel: "stable", autoCheck: true });
 });
 
-test("开机静默检查的源：用户偏好优先；off / 无公钥不查",()=>{
- const fallback=defaultUpdateSource("official","release");
- assert.equal(autoCheckSource(null,defaultUpdateSource("","release")),null,"构建不带公钥时没有可验证的源");
- assert.deepEqual(autoCheckSource(null,fallback),fallback);
- assert.equal(autoCheckSource(JSON.stringify({mode:"off"}),fallback),null,"用户关过就尊重");
- assert.deepEqual(autoCheckSource(JSON.stringify({mode:"stable",endpoint:"",publicKey:""}),fallback),fallback,"残缺偏好回到构建默认（只信可验证的源）");
- const custom={mode:"custom" as const,endpoint:"https://fork.example/update",publicKey:"fork"};
- assert.deepEqual(autoCheckSource(JSON.stringify(custom),fallback),custom,"自定义源照用");
- assert.deepEqual(autoCheckSource("garbage",fallback),fallback,"损坏偏好回到构建默认");
+test("自动检查的准入：通道对得上、用户没关、构建带公钥", () => {
+  const on = { channel: "stable" as const, autoCheck: true };
+  assert.equal(autoCheckAllowed(on, "release", "pub"), true);
+  assert.equal(autoCheckAllowed({ ...on, autoCheck: false }, "release", "pub"), false);
+  assert.equal(autoCheckAllowed(on, "release", "  "), false, "没有公钥就没有可验证的源");
+  assert.equal(autoCheckAllowed(on, "test", "pub"), false, "测试包不自动查，免得被拉到正式版");
+  assert.equal(autoCheckAllowed(on, "dev", "pub"), false);
+  assert.equal(autoCheckAllowed({ channel: "beta", autoCheck: true }, "release", "pub"), false, "正式包不追预览源");
+  assert.equal(autoCheckAllowed({ channel: "beta", autoCheck: true }, "beta", "pub"), true);
+});
+
+test("源组装与「预览先灰着」的口子", () => {
+  const source = updateSource({ channel: "stable", autoCheck: true }, "pub");
+  assert.deepEqual(source, { mode: "stable", endpoint: UPDATE_ENDPOINTS.stable, publicKey: "pub" });
+  assert.match(UPDATE_ENDPOINTS.stable, /^https:\/\/github\.com\//);
+  assert.match(UPDATE_ENDPOINTS.beta, /^https:\/\//);
+  assert.equal(BETA_CHANNEL_ENABLED, false, "预览通道留口但先别开");
+  assert.equal(updatesAvailable("pub"), true);
+  assert.equal(updatesAvailable(""), false);
 });

@@ -1,45 +1,233 @@
-import { createSignal, For, Show } from "solid-js";
-import { Dialog, ConfirmDialog } from "../components/ui/Dialog.tsx";
+/**
+ * 更新对话框：设置（更新源 + 启动检查开关）与状态（进度 / 已就绪 / 上次失败）。
+ *
+ * 崔总 2026-10-15 定：面向普通用户只留**稳定 / 预览**两个源，预览先灰着留口；
+ * 界面里不出现密钥与自定义地址。**用户被问到的只有两个决策点**（下载 / 跳过、安装 / 取消），
+ * 它们住在 `update-center.tsx` 的启动流程里；这里是「自己来看一眼」的地方，永远如实显示状态。
+ *
+ * 规格 `specs/update-flow-v2.md`。
+ */
+import { createSignal, Show } from "solid-js";
+import { ConfirmDialog, Dialog } from "../components/ui/Dialog.tsx";
 import { Button } from "../components/ui/Button.tsx";
-import { Input, Switch } from "../components/ui/Form.tsx";
+import { Switch } from "../components/ui/Form.tsx";
+import { CompactChoice } from "../components/ui/CompactChoice.tsx";
 import { t } from "../i18n/index.ts";
-import { updateCheck, updateDownload, updateInstall, type AvailableUpdate } from "../api/updates.ts";
-import { currentBuildInfo } from "../lib/build-info.ts";
-import { AUTO_UPDATE_KEY, UPDATE_KEY, UPDATE_ENDPOINTS, defaultUpdateSource, readAutoCheck, readUpdateSource, validUpdateSource, type UpdateMode, type UpdateSource } from "../lib/update-source.ts";
-export function UpdateDialog(props:{open:boolean;onOpenChange:(open:boolean)=>void;canInstall:()=>boolean}) {
-  const fallback=defaultUpdateSource(__RAYBEND_UPDATER_PUBLIC_KEY__,currentBuildInfo().channel);
-  let raw:string|null=null,autoRaw:string|null=null;try{raw=localStorage.getItem(UPDATE_KEY);autoRaw=localStorage.getItem(AUTO_UPDATE_KEY);}catch{/* 偏好读失败不影响应用。 */}
-  const [source,setSource]=createSignal(readUpdateSource(raw,fallback));
-  const [autoCheck,setAutoCheck]=createSignal(readAutoCheck(autoRaw));
-  const [available,setAvailable]=createSignal<AvailableUpdate|null>(null);
-  const [state,setState]=createSignal<"idle"|"checking"|"current"|"available"|"downloading"|"downloaded"|"installing"|"error">("idle");
-  const [error,setError]=createSignal("");const [confirm,setConfirm]=createSignal(false);
-  const busy=()=>["checking","downloading","installing"].includes(state());
-  const storeManaged=()=>__RAYBEND_DISTRIBUTION__==="store";
-  function change(next:UpdateSource):void{setSource(next);setAvailable(null);setState("idle");setError("");try{localStorage.setItem(UPDATE_KEY,JSON.stringify(next));}catch{setError(t("updates.storage_error"));}}
-  function toggleAutoCheck(next:boolean):void{setAutoCheck(next);try{localStorage.setItem(AUTO_UPDATE_KEY,next?"on":"off");}catch{setError(t("updates.storage_error"));}}
-  function mode(next:UpdateMode):void{change(next==="off"?{mode:"off",endpoint:"",publicKey:""}:next==="custom"?{...source(),mode:"custom"}:{mode:next,endpoint:UPDATE_ENDPOINTS[next],publicKey:__RAYBEND_UPDATER_PUBLIC_KEY__});}
-  async function act(action:"check"|"download"|"install"):Promise<void>{
-    if(busy())return;
-    if(action==="install" && !props.canInstall()){setError(t("updates.tasks_active"));return;}
-    const selected=source();setError("");setState(action==="check"?"checking":action==="download"?"downloading":"installing");
-    try{if(action==="check"){setAvailable(null);const update=await updateCheck(selected);setAvailable(update);setState(update?"available":"current");}else if(action==="download"){await updateDownload(selected);setState("downloaded");}else {await updateInstall(selected);setState("downloaded");}}
-    catch(caught){setError(t("updates.failed",{message:String(caught)}));setState("error");}
-  }
-  return <><Dialog open={props.open} onOpenChange={open=>{if(!busy())props.onOpenChange(open);}} title={t("updates.title")} footer={<>
-    <Button variant="secondary" disabled={busy()} onClick={()=>props.onOpenChange(false)}>{t("common.close")}</Button>
-    <Show when={state()==="available"}><Button onClick={()=>void act("download")}>{t("updates.download")}</Button></Show>
-    <Show when={state()==="downloaded"}><Button disabled={!props.canInstall()} onClick={()=>setConfirm(true)}>{t("updates.install")}</Button></Show>
-    <Button variant="secondary" loading={busy()} disabled={busy()||storeManaged()||!validUpdateSource(source())} onClick={()=>void act("check")}>{t("updates.check")}</Button>
-  </>}><div class="flex flex-col gap-3">
-    <p class="text-fs-1 text-fg-2">{t(storeManaged()?"updates.store":"updates.privacy")}</p>
-    <div class="flex shrink-0 items-center justify-between gap-2 rounded-ui bg-surface-track px-2 py-1.5 text-fs-1 text-fg-2"><span>{t("updates.auto.label")}</span><Switch checked={autoCheck()} disabled={busy()||storeManaged()} onCheckedChange={toggleAutoCheck} label={t("updates.auto.label")}/></div>
-    <div class="flex flex-wrap gap-1"><For each={["off","stable","beta","custom"] as const}>{value=><Button variant={source().mode===value?"primary":"secondary"} disabled={busy()||storeManaged()} onClick={()=>mode(value)}>{t(`updates.mode.${value}`)}</Button>}</For></div>
-    <Show when={source().mode==="custom"}><label>{t("updates.endpoint")}<Input disabled={busy()} value={source().endpoint} onInput={e=>change({...source(),endpoint:e.currentTarget.value})}/></label><label>{t("updates.public_key")}<Input disabled={busy()} value={source().publicKey} onInput={e=>change({...source(),publicKey:e.currentTarget.value})}/></label></Show>
-    <p aria-live="polite" class="text-fs-1">{t(`updates.state.${state()}`)} <Show when={available()}>{update=><span>{update().version}</span>}</Show></p>
-    <Show when={source().mode!=="off" && !validUpdateSource(source())}><p class="text-fs-1 text-fg-3">{t("updates.not_configured")}</p></Show>
-    <Show when={available()?.notes}><p class="max-h-40 overflow-auto whitespace-pre-wrap text-fs-1 text-fg-2">{available()?.notes}</p></Show>
-    <Show when={!props.canInstall()}><p class="text-fs-1 text-fg-3">{t("updates.tasks_active")}</p></Show>
-    <Show when={error()}><p role="alert" class="text-fs-1 text-danger">{error()}</p></Show>
-  </div></Dialog><ConfirmDialog open={confirm()} scrim={false} title={t("updates.install")} message={t("updates.confirm")} onCancel={()=>setConfirm(false)} onConfirm={()=>{setConfirm(false);void act("install");}}/></>;
+import type { AvailableUpdate } from "../api/updates.ts";
+import { BETA_CHANNEL_ENABLED, UPDATE_ENDPOINTS } from "../lib/update-source.ts";
+import {
+  beginUpdate,
+  checkForUpdates,
+  installUpdate,
+  readPrefs,
+  refreshUpdateStatus,
+  savePrefs,
+  updateBusy as busy,
+  updateSourceForBuild,
+  updateStatusView as statusView,
+} from "./update-center.tsx";
+
+function megabytes(bytes: number | null | undefined): string {
+  return `${((bytes ?? 0) / (1024 * 1024)).toFixed(1)}`;
 }
+
+export function UpdateDialog(props: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  /** 有没有正在跑的导入 / 导出 / 迁移（有就不许装） */
+  canInstall: () => boolean;
+}) {
+  const storeManaged = () => __RAYBEND_DISTRIBUTION__ === "store";
+  const configured = () => updateSourceForBuild() !== null;
+  const [prefs, setPrefs] = createSignal(readPrefs());
+  const [checking, setChecking] = createSignal(false);
+  /** 手动查过的结果：`null` = 没查过，`{version:null}` = 已是最新 */
+  const [checked, setChecked] = createSignal<AvailableUpdate | "none" | null>(null);
+  const [error, setError] = createSignal("");
+  const [confirm, setConfirm] = createSignal(false);
+  const status = statusView;
+
+  function writePrefs(next: ReturnType<typeof readPrefs>): void {
+    setPrefs(next);
+    try {
+      savePrefs(next);
+    } catch {
+      setError(t("updates.storage_error"));
+    }
+  }
+
+  async function check(): Promise<void> {
+    if (checking() || busy()) return;
+    setError("");
+    setChecking(true);
+    try {
+      setChecked((await checkForUpdates(true)) ?? "none");
+    } catch (caught) {
+      setError(t("updates.failed", { message: String(caught) }));
+    } finally {
+      setChecking(false);
+      await refreshUpdateStatus();
+    }
+  }
+
+  const phase = () => status()?.phase ?? "idle";
+  const percent = () => {
+    const current = status();
+    if (!current?.totalBytes) return null;
+    return Math.min(100, Math.round((current.doneBytes / current.totalBytes) * 100));
+  };
+  const found = () => {
+    const result = checked();
+    return result && result !== "none" ? result : null;
+  };
+
+  return (
+    <>
+      <Dialog
+        open={props.open}
+        onOpenChange={(open) => {
+          if (!checking() && !busy()) props.onOpenChange(open);
+        }}
+        title={t("updates.title")}
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              disabled={checking() || busy()}
+              onClick={() => props.onOpenChange(false)}
+            >
+              {t("common.close")}
+            </Button>
+            <Show when={phase() === "ready"}>
+              <Button disabled={!props.canInstall()} onClick={() => setConfirm(true)}>
+                {t("updates.installNow")}
+              </Button>
+            </Show>
+            <Show when={phase() === "paused"}>
+              <Button onClick={() => void beginUpdate(false)}>{t("updates.resume")}</Button>
+            </Show>
+            <Show when={phase() === "idle" && found()}>
+              {(update) => (
+                <Button onClick={() => void beginUpdate(false)}>
+                  {t("updates.download")} {update().version}
+                </Button>
+              )}
+            </Show>
+            <Button
+              variant="secondary"
+              loading={checking()}
+              disabled={checking() || busy() || storeManaged() || !configured()}
+              onClick={() => void check()}
+            >
+              {t("updates.check")}
+            </Button>
+          </>
+        }
+      >
+        <div class="flex flex-col gap-3">
+          <p class="text-fs-1 text-fg-2">
+            {t("updates.current", { version: status()?.currentVersion ?? "" })}
+          </p>
+
+          {/* ── 状态区：跟着 Rust 的 phase 走，永远说真话 ── */}
+          <Show when={phase() === "downloading"}>
+            <div class="flex flex-col gap-1.5">
+              <p class="text-fs-1 text-fg-2">
+                {t("updates.progress", {
+                  version: status()?.version ?? "",
+                  done: megabytes(status()?.doneBytes),
+                  total: status()?.totalBytes ? megabytes(status()?.totalBytes) : t("updates.unknown"),
+                })}
+              </p>
+              <div class="h-1 w-full overflow-hidden rounded-full bg-surface-track">
+                <div
+                  class="h-full bg-primary transition-[width]"
+                  style={{ width: `${percent() ?? 0}%` }}
+                />
+              </div>
+            </div>
+          </Show>
+          <Show when={phase() === "ready"}>
+            <p class="text-fs-1 text-fg-2">
+              {t("updates.state.ready", {
+                version: status()?.version ?? "",
+              })}
+            </p>
+          </Show>
+          <Show when={phase() === "paused"}>
+            <p class="text-fs-1 text-fg-2">
+              {t("updates.state.paused", {
+                error: status()?.error ?? "",
+              })}
+            </p>
+          </Show>
+          <Show when={phase() === "idle"}>
+            <p class="text-fs-1 text-fg-2">
+              {checked() === "none"
+                ? t("updates.state.current")
+                : found()
+                  ? t("updates.state.available", { version: found()?.version ?? "" })
+                  : t("updates.state.never")}
+            </p>
+          </Show>
+
+          {/* ── 设置 ── */}
+          <div class="flex flex-col gap-2 rounded-ui bg-surface-track px-2 py-2">
+            <div class="flex shrink-0 items-center justify-between gap-2 text-fs-1 text-fg-2">
+              <span>{t("updates.auto.label")}</span>
+              <Switch
+                checked={prefs().autoCheck}
+                disabled={checking() || busy() || storeManaged()}
+                onCheckedChange={(value) => writePrefs({ ...prefs(), autoCheck: value })}
+                label={t("updates.auto.label")}
+              />
+            </div>
+            <CompactChoice
+              label={t("updates.source.label")}
+              value={prefs().channel}
+              options={[
+                { value: "stable", label: t("updates.mode.stable") },
+                {
+                  value: "beta",
+                  label: t("updates.mode.beta"),
+                  // 预览通道先灰着留口：等真的有预览发布流程了再开（`BETA_CHANNEL_ENABLED`）
+                  disabled: !BETA_CHANNEL_ENABLED,
+                },
+              ]}
+              onValueChange={(value) => writePrefs({ ...prefs(), channel: value })}
+            />
+          </div>
+
+          <p class="text-fs-1 text-fg-3">
+            {t(storeManaged() ? "updates.store" : "updates.privacy")}
+          </p>
+          <Show when={!configured() && !storeManaged()}>
+            <p class="text-fs-1 text-fg-3">{t("updates.not_configured")}</p>
+          </Show>
+          <Show when={!props.canInstall()}>
+            <p class="text-fs-1 text-fg-3">{t("updates.tasks_active")}</p>
+          </Show>
+          <Show when={error()}>
+            <p role="alert" class="text-fs-1 text-danger">
+              {error()}
+            </p>
+          </Show>
+        </div>
+      </Dialog>
+      <ConfirmDialog
+        open={confirm()}
+        scrim={false}
+        title={t("updates.installNow")}
+        message={t("updates.confirm")}
+        onCancel={() => setConfirm(false)}
+        onConfirm={() => {
+          setConfirm(false);
+          void installUpdate();
+        }}
+      />
+    </>
+  );
+}
+
+/** 稳定源的地址（对话框不显示，留给诊断与将来打开预览时引用）。 */
+export const STABLE_ENDPOINT = UPDATE_ENDPOINTS.stable;

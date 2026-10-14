@@ -48,6 +48,17 @@ serde_json.workspace = true
 tauri-plugin-dialog = "2.7.3"
 image.workspace = true
 tauri-plugin-updater = "2"
+# —— 更新包下载（v2）：续传要自己发 Range 请求，官方插件的 download() 只给整包字节。
+# 特性集与插件保持完全一致（rustls-no-provider + system-proxy），不换 TLS 后端；
+# rustls 只用于在进程里补装 ring provider（插件与 tauri core 本来就装，这里自己保一手）。
+reqwest = { version = "0.13", default-features = false, features = ["stream", "rustls-no-provider", "system-proxy"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+# 校验与官方插件同一套语义：base64 解码后 minisign 验签 + 签名内含版本号比对。
+minisign-verify = "0.2"
+base64 = "0.22"
+semver = "1"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+tokio = { version = "1", features = ["time"] }
 # 诊断层门面（日志）：落盘实现全在 `raybend::diagnostics`，这里只拿 `log::info!` 这类调用入口
 log.workspace = true
 # 崩溃采集（W4）：crash-handler 接硬崩溃，minidumper 走 IPC 把 dump 写出去。

@@ -248,7 +248,12 @@ pub fn run() {
         .manage(fullscreen::FullscreenState::default())
         .invoke_handler(tauri::generate_handler![
             // ── 数据底座的诊断与设置（M1-2）──
+            updates::updates_status,
             updates::updates_check,
+            updates::updates_begin,
+            updates::updates_skip,
+            updates::updates_mark_install_prompted,
+            updates::updates_install,
             // ── 诊断（W1/W2：日志与崩溃记录所在目录；W3-α：崩溃报告导出）──
             diagnostics_cmd::diagnostics_open_folder,
             diagnostics_cmd::diagnostics_pending_crash,
@@ -256,8 +261,6 @@ pub fn run() {
             diagnostics_cmd::diagnostics_export_bundle,
             // 仅开发构建：故意崩一次，验「panic → 记录 + dump」整条链（发布构建里调用会被拒）
             diagnostics_cmd::diagnostics_self_test_crash,
-            updates::updates_download,
-            updates::updates_install,
             db::app_paths,
             system_preferences::system_preferences,
             color_system::color_display_snapshot,
@@ -619,7 +622,7 @@ mod tests {
         ("lib.rs", include_str!("lib.rs")),
         ("db.rs", include_str!("db.rs")),
         ("import.rs", include_str!("import.rs")),
-        ("updates.rs", include_str!("updates.rs")),
+        ("updates/mod.rs", include_str!("updates/mod.rs")),
         ("migration.rs", include_str!("migration.rs")),
         ("repo.rs", include_str!("repo.rs")),
         ("source.rs", include_str!("source.rs")),

@@ -199,6 +199,7 @@ export default function KitchenSink() {
         commands={[]}
         onRun={() => {}}
         aboutOpen={false}
+        onOpenUpdates={() => {}}
         onAboutOpenChange={() => {}}
       />
 
