@@ -4,8 +4,9 @@ import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {prepareAiAssets} from './ai-assets.mjs';
 export const sha=b=>createHash('sha256').update(b).digest('hex');
-export function aiFixture(t){
- const root=mkdtempSync(join(tmpdir(),'raybend-ai-中文 空格-'));t.after(()=>rmSync(root,{recursive:true,force:true}));
+export function aiFixture(t,{sibling=false}={}){
+ const base=mkdtempSync(join(tmpdir(),'raybend-ai-中文 空格-'));t.after(()=>rmSync(base,{recursive:true,force:true}));
+ const root=sibling?join(base,'raybend'):base;if(sibling)mkdirSync(root,{recursive:true});
  const model=join(root,'crates/raybend/assets/ai/tinyclip-v1'),runtime=join(root,'crates/raybend/assets/ai/ort-win-x64'),source=join(root,'incoming');
  for(const d of [model,runtime,source])mkdirSync(d,{recursive:true});
  const files=['image_encoder.onnx','classes.json','LICENSE.txt','onnxruntime.dll','onnxruntime_providers_shared.dll'].map(name=>{
@@ -14,7 +15,7 @@ export function aiFixture(t){
  const manifest={format:2,thresholds_calibrated:true,ort_version:'1.28.0',opset:17,image_input:'pixel_values',image_output:'image_features',files:files.slice(0,3)};
  writeFileSync(join(model,'manifest.json'),JSON.stringify(manifest));writeFileSync(join(runtime,'runtime.json'),JSON.stringify({version:'1.28.0',platform:'win-x64',files:files.slice(3)}));
  for(const n of ['LICENSE.txt','ThirdPartyNotices.txt'])writeFileSync(join(runtime,n),'upstream license');
- const registry=join(root,'registry'),artifact='onnx/tinyclip/test-r1',profile='profiles/raybend-photo-tags/v1',registryId=randomUUID();
+ const registry=join(sibling?base:root,sibling?'model-registry':'registry'),artifact='onnx/tinyclip/test-r1',profile='profiles/raybend-photo-tags/v1',registryId=randomUUID();
  mkdirSync(join(registry,artifact),{recursive:true});mkdirSync(join(registry,profile),{recursive:true});writeFileSync(join(registry,'.model-registry.json'),JSON.stringify({schema:1,kind:'model-registry',registryId}));
  const meta={schema:1,format:'onnx',id:'tinyclip',version:'test-r1',precision:'fp32',opset:17,contract:{input:{name:'pixel_values',shape:[1,3,224,224]},output:{name:'image_features',shape:[1,512]}},files:[files[0],files[2]]};
  writeFileSync(join(registry,artifact,'artifact.json'),JSON.stringify(meta));

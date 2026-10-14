@@ -28,7 +28,7 @@
 ## AI 资源（离线相片标签）
 
 识别全在本机：模型包与 CPU 运行库都是**构建输入**，不在运行时下载。
-构建命令（`pnpm tauri` / `pnpm debug:win` / `pnpm release`）都接 `--ai=auto|required|off` —— `auto`（默认）用已登记的包，没有就回退到无 AI 版（会打印原因）；`required` 要求每个输入都在且已校验，否则失败；`off` 不碰模型源也不联网。
+构建命令（`pnpm tauri` / `pnpm debug:win` / `pnpm release`）都接 `--ai=auto|required|off` —— `auto`（默认）优先用已登记的源，没有就**自动探测同级 `../model-registry`**，再没有才回退到无 AI 版（会打印原因）；`required` 要求每个输入都在且已校验，否则失败；`off` 不碰模型源也不联网。
 
 | 命令 | 作用 |
 | --- | --- |

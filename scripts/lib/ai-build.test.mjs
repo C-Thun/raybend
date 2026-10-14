@@ -33,6 +33,13 @@ test('runtime is only prepared for valid model and requested materialization',t=
  rmSync(join(f.root,'ai-model-source.local.json'));resolveAiBuild(opts);assert.equal(fetched,1);
 });
 
+test('未登记时自动探测同级 ../model-registry：仍走同一套校验，失败回退基础版',t=>{
+ const f=aiFixture(t,{sibling:true});f.prepare();const opts={root:f.root,log:quiet,fetchRuntime:()=>f.prepare()};
+ const on=resolveAiBuild({...opts,mode:'required'});assert.equal(on.enabled,true);assert.equal(on.source,'sibling');assert.equal(existsSync(join(f.root,'ai-model-source.local.json')),false,'自动探测不落登记文件');
+ writeFileSync(join(f.registry,f.artifact,'image_encoder.onnx'),'corrupt');const damaged=resolveAiBuild(opts);assert.equal(damaged.enabled,false);assert.match(damaged.message,/不符/);
+ rmSync(f.registry,{recursive:true,force:true});const missing=resolveAiBuild(opts);assert.equal(missing.enabled,false);assert.match(missing.message,/同级/);
+});
+
 test('Tauri wrapper merges unrelated features but refuses bypassing native AI capability',()=>{
  const off={features:['custom-protocol']};assert.deepEqual(tauriAiArgs(['build','--features','other,more','--debug'],off),['build','--debug','--features','custom-protocol,other,more']);
  assert.deepEqual(tauriAiArgs(['dev'],off),['dev']);

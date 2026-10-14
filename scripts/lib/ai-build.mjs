@@ -1,14 +1,14 @@
 /** One model-registry source and one build capability decision for dev/debug/release. */
 import {copyFileSync,existsSync,lstatSync,mkdirSync,readFileSync,realpathSync,renameSync,rmSync,writeFileSync} from 'node:fs';
 import {createHash,randomUUID} from 'node:crypto';
-import {dirname,join,resolve,sep} from 'node:path';
+import {join,resolve,sep} from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {descriptors,verifyAiFile,checkAiAssets} from './ai-assets.mjs';
 const hash=b=>createHash('sha256').update(b).digest('hex');
 export const AI_OFF_MARKER='raybend-photo-ai-build-v1=off';
 export const AI_ON_MARKER='raybend-photo-ai-build-v1=on';
 export function parseAiArgs(args){let mode='auto',seen=false;const rest=[];for(let i=0;i<args.length;i++){if(args[i]==='--')continue;if(args[i]==='--ai'||args[i].startsWith('--ai=')){if(seen)throw new Error('重复 --ai');seen=true;mode=args[i]==='--ai'?args[++i]:args[i].slice(5);if(!['auto','required','off'].includes(mode))throw new Error('--ai 必须是 auto|required|off');}else rest.push(args[i]);}return {mode,args:rest};}
-export function readLimitedJson(path,max=65536){const stat=lstatSync(path);if(!stat.isFile()||stat.isSymbolicLink()||stat.size>max)throw new Error('AI 元数据类型/大小无效');return JSON.parse(readFileSync(path,'utf8'));}
+export function readLimitedJson(path,max=65536){const stat=lstatSync(path);if(!stat.isFile()||stat.isSymbolicLink()||stat.size>max)throw new Error('AI 元数据类型/大小无效');try{return JSON.parse(readFileSync(path,'utf8'));}catch(error){throw new Error(`AI 元数据不是有效 JSON：${path}`,{cause:error});}}
 function inside(root,path){if(typeof path!=='string'||path.includes('\\')||path.split('/').some(p=>!p||p==='.'||p==='..'||!/^[a-zA-Z0-9_.-]+$/.test(p)))throw new Error('AI 引用路径无效');let target=root;for(const p of path.split('/')){target=join(target,p);if(existsSync(target)&&lstatSync(target).isSymbolicLink())throw new Error('AI 引用路径含链接');}if(!target.startsWith(root+sep))throw new Error('AI 引用路径越界');return target;}
 export function readAiSource(root,candidate){
  const source=candidate??readLimitedJson(join(root,'ai-model-source.local.json'));
@@ -17,7 +17,7 @@ export function readAiSource(root,candidate){
  if(marker.schema!==1||marker.kind!=='model-registry'||typeof marker.registryId!=='string'||!/^[-a-f0-9]{36}$/.test(marker.registryId)||marker.registryId!==source.registryId)throw new Error('AI registry 身份不符');
  if(typeof source.artifact!=='string'||source.artifact.split('/').length!==3||source.artifact.split('/')[0]!=='onnx'||typeof source.profile!=='string'||source.profile.split('/').length!==3||source.profile.split('/')[0]!=='profiles')throw new Error('AI artifact/profile 必须是三级定位');
  const directory=inside(registry,source.artifact),profileDirectory=inside(registry,source.profile);readLimitedJson(inside(registry,`${source.artifact}/artifact.json`));const artifactRaw=readFileSync(inside(registry,`${source.artifact}/artifact.json`));if(artifactRaw.length>65536||hash(artifactRaw)!==source.artifactSha256)throw new Error('AI artifact 元数据摘要不符');
- const artifact=JSON.parse(artifactRaw);if(artifact.schema!==1||artifact.format!=='onnx'||artifact.id!==source.artifact.split('/')[1]||artifact.version!==source.artifact.split('/')[2]||!Array.isArray(artifact.files)||artifact.files.length>64||new Set(artifact.files.map(f=>f.name)).size!==artifact.files.length)throw new Error('AI artifact 格式无效');
+ let artifact;try{artifact=JSON.parse(artifactRaw);}catch{throw new Error('AI artifact 元数据不是有效 JSON');}if(artifact.schema!==1||artifact.format!=='onnx'||artifact.id!==source.artifact.split('/')[1]||artifact.version!==source.artifact.split('/')[2]||!Array.isArray(artifact.files)||artifact.files.length>64||new Set(artifact.files.map(f=>f.name)).size!==artifact.files.length)throw new Error('AI artifact 格式无效');
  for(const f of artifact.files)verifyAiFile(inside(registry,`${source.artifact}/${f.name}`),f);
  const profile=readLimitedJson(join(profileDirectory,'profile.json'));if(profile.schema!==1||profile.artifact!==source.artifact||profile.artifactSha256!==source.artifactSha256||profile.manifestSha256!==source.profileManifestSha256)throw new Error('AI profile 与模型绑定不符');
  const descriptor=descriptors(root);readLimitedJson(join(profileDirectory,'manifest.json'));const manifestRaw=readFileSync(join(profileDirectory,'manifest.json'));if(manifestRaw.length>65536||hash(manifestRaw)!==source.profileManifestSha256||source.profileManifestSha256!==descriptor.manifestSha256)throw new Error('AI 标签包不属于已准入版本');
@@ -41,8 +41,14 @@ export function resolveAiBuild({root,mode='auto',materialize=true,platform='win3
  root=resolve(root);if(!['auto','required','off'].includes(mode))throw new Error('AI 模式无效');let plan={schema:1,enabled:false,reason:'explicit-off',features:['custom-protocol'],resources:{}};
  if(mode!=='off'){
   try{
-   if(!existsSync(join(root,'ai-model-source.local.json'))){plan.reason='source-missing';throw new Error('未配置本地模型源');}
-   plan.reason='source-unavailable';const data=readAiSource(root);if(platform!=='win32'){plan.reason='platform-unavailable';throw new Error('当前仅提供 Windows x64 CPU 运行库');}
+   let data,source;
+   if(existsSync(join(root,'ai-model-source.local.json'))){plan.reason='source-unavailable';source='registered';data=readAiSource(root);}
+   else{/* 零配置回退：同级目录的 model-registry（崔总 2026-10-14）；不写登记文件，仍走同一套摘要与契约校验。 */
+    const sibling=resolve(root,'../model-registry');plan.reason='source-missing';
+    if(!existsSync(join(sibling,'.model-registry.json')))throw new Error('未配置本地模型源，且同级没有 model-registry');
+    plan.reason='source-unavailable';source='sibling';data=readAiSource(root,existingAiSource(sibling));
+   }
+   if(platform!=='win32'){plan.reason='platform-unavailable';throw new Error('当前仅提供 Windows x64 CPU 运行库');}
    plan.reason='runtime-unavailable';try{runtimeReady(data.descriptor);}catch(error){if(materialize&&fetchRuntime){fetchRuntime(root);runtimeReady(data.descriptor);}else throw error;}
    let snapshot=null;
    if(materialize){
@@ -51,10 +57,10 @@ export function resolveAiBuild({root,mode='auto',materialize=true,platform='win3
     else{try{for(const d of ['ai-model','ai-runtime'])mkdirSync(join(stage,d),{recursive:true});for(const f of data.descriptor.files){const dir=f.kind==='runtime'?f.directory:f.name==='image_encoder.onnx'?data.directory:data.profileDirectory;copyFileSync(join(dir,f.name),join(stage,f.kind==='model'?'ai-model':'ai-runtime',f.name));verifyAiFile(join(stage,f.kind==='model'?'ai-model':'ai-runtime',f.name),f);}copyFileSync(join(data.profileDirectory,'manifest.json'),join(stage,'ai-model/manifest.json'));for(const name of ['LICENSE.txt','ThirdPartyNotices.txt','runtime.json'])copyFileSync(join(root,'crates/raybend/assets/ai/ort-win-x64',name),join(stage,'ai-runtime',name));renameSync(stage,target);}finally{rmSync(stage,{recursive:true,force:true});}}
     checkAiAssets(root,target);snapshot=target;
    }
-   plan={schema:1,enabled:true,reason:'ready',features:['custom-protocol','photo-ai-runtime'],manifestSha256:data.descriptor.manifestSha256,artifactSha256:data.source.artifactSha256,runtimeVersion:data.descriptor.runtime.version,snapshot,resources:materialize?aiResourceMap(root,snapshot):{}};
+   plan={schema:1,enabled:true,reason:'ready',source,features:['custom-protocol','photo-ai-runtime'],manifestSha256:data.descriptor.manifestSha256,artifactSha256:data.source.artifactSha256,runtimeVersion:data.descriptor.runtime.version,snapshot,resources:materialize?aiResourceMap(root,snapshot):{}};
   }catch(error){if(mode==='required')throw new Error(`要求 AI，但模型或 CPU 资源不可用：${error.message}`);plan.message=error.message;}
  }
- log(plan.enabled?`✓ AI 已启用：TinyCLIP · CPU ORT ${plan.runtimeVersion}`:`⚠ AI 未启用：${plan.message??'显式关闭'}；继续构建基础版本`);return plan;
+ log(plan.enabled?`✓ AI 已启用：TinyCLIP · CPU ORT ${plan.runtimeVersion}${plan.source==='sibling'?'（源：同级 model-registry 自动探测）':''}`:`⚠ AI 未启用：${plan.message??'显式关闭'}；继续构建基础版本`);return plan;
 }
 export function aiResourceMap(root,snapshot){const base=snapshot.slice(root.length+1).replaceAll('\\','/');return {[`../${base}/ai-model/*`]:'ai-model/',[`../${base}/ai-runtime/*`]:'ai-runtime/'};}
 export function aiBuildMetadata(plan){return {enabled:plan.enabled,reason:plan.reason,...(plan.enabled?{manifestSha256:plan.manifestSha256,artifactSha256:plan.artifactSha256,runtimeVersion:plan.runtimeVersion}:{})};}
