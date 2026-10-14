@@ -80,6 +80,33 @@ function readIndex({ readIndexText }) {
 }
 
 /**
+ * 从索引里取最新一条未 yank 的版本（稀疏索引按发布先后追加，末条即最新）；读不到索引时 ok:false。
+ */
+export function latestPublishedVersion({ readIndexText } = {}) {
+  const index = readIndex({ readIndexText });
+  if (!index.ok) return { ok: false, reason: index.reason };
+  const published = index.versions.filter(entry => !entry.yanked);
+  return { ok: true, version: published.at(-1)?.version };
+}
+
+/**
+ * 本版要不要发核心库：`crates/raybend/` 自「crates.io 上最新已发布版本」的 tag 以来有没有变化。
+ * 崔总 2026-10-14：核心库没变动就跳过，等下个有变动的版本再发。
+ * 基准缺失（首次发布、历史版本没打 tag、拿不到构建来源 commit）一律按「有变化」处理 ——
+ * 宁可多发一次，也不静默漏发。
+ */
+export function crateChanged({ root, base, lastVersion, run = execFileSync } = {}) {
+  if (!lastVersion) return { changed: true, reason: "crates.io 上还没有已发布版本（首次发布）" };
+  const tag = `v${lastVersion}`;
+  const listed = String(run("git", ["tag", "--list", tag], { cwd: root, encoding: "utf8" })).trim();
+  if (!listed) return { changed: true, reason: `找不到 ${tag}（该版本没打 tag），无法比对核心库改动` };
+  if (!base) return { changed: true, reason: `拿不到构建来源 commit，无法比对 ${tag} 之后的核心库改动` };
+  const files = String(run("git", ["diff", "--name-only", `${tag}..${base}`, "--", "crates/raybend"], { cwd: root, encoding: "utf8" })).trim();
+  if (!files) return { changed: false, reason: `核心库自 ${tag} 以来没有改动` };
+  return { changed: true, reason: `核心库自 ${tag} 以来有 ${files.split("\n").length} 个文件改动` };
+}
+
+/**
  * 发布核心库。调用方保证：工作树干净、版本号已由发布流程处理、人类已 `--execute`。
  * @returns {{action:'already-published'|'published', checksum?:string, verified?:boolean, warning?:string}}
  */

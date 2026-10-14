@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { crateEligibility, indexUrl, indexPath, localCratePath, parseIndex, publishCrate, sha256 } from "./crates-release.mjs";
+import { crateEligibility, crateChanged, indexUrl, indexPath, latestPublishedVersion, localCratePath, parseIndex, publishCrate, sha256 } from "./crates-release.mjs";
 
 const PACKED = Buffer.from("synthetic crate bytes, not a real tarball");
 const line = (version, checksum, yanked = false) => JSON.stringify({ name: "raybend", vers: version, cksum: checksum, deps: [], yanked });
@@ -60,6 +60,36 @@ test("该不该发：稳态发，预发布与 --no-crates 不发", () => {
   assert.equal(crateEligibility({ version: "1.2.3", noCrates: true }).publish, false);
   assert.match(crateEligibility({ version: "1.2.3", noCrates: true }).reason, /--no-crates/);
   assert.equal(crateEligibility({ version: "1.2.3-beta.1", prerelease: true, noCrates: true }).publish, false);
+});
+
+test("最新已发布版本：取索引末条未 yank；读不到索引时 ok:false", () => {
+  const two = `${line("0.1.0", "a".repeat(64))}\n${line("0.1.1", "b".repeat(64))}\n`;
+  assert.deepEqual(latestPublishedVersion({ readIndexText: () => two }), { ok: true, version: "0.1.1" });
+  const yankedLatest = `${line("0.1.0", "a".repeat(64))}\n${line("0.1.1", "b".repeat(64), true)}\n`;
+  assert.deepEqual(latestPublishedVersion({ readIndexText: () => yankedLatest }), { ok: true, version: "0.1.0" }, "末条被 yank 时前移");
+  assert.deepEqual(latestPublishedVersion({ readIndexText: () => "" }), { ok: true, version: undefined });
+  const failed = latestPublishedVersion({ readIndexText: () => { throw new Error("curl 传输失败"); } });
+  assert.equal(failed.ok, false);
+  assert.match(failed.reason, /传输失败/);
+});
+
+test("核心库是否变动：按上次发布的 tag 比对 crates/raybend；基准缺失一概按有变动处理", () => {
+  const gitStub = ({ tagExists = true, files = "" } = {}) => (cmd, args) => {
+    assert.equal(cmd, "git");
+    if (args[0] === "tag") return tagExists ? args[2] : "";
+    if (args[0] === "diff") {
+      assert.deepEqual(args.slice(1), ["--name-only", "v0.1.1..abc", "--", "crates/raybend"], "只比对核心库目录");
+      return files;
+    }
+    throw new Error(`unexpected git ${args[0]}`);
+  };
+  assert.equal(crateChanged({ root: "/r", base: "abc", lastVersion: "0.1.1", run: gitStub({ files: "" }) }).changed, false);
+  const changed = crateChanged({ root: "/r", base: "abc", lastVersion: "0.1.1", run: gitStub({ files: "crates/raybend/src/a.rs\ncrates/raybend/src/b.rs" }) });
+  assert.equal(changed.changed, true);
+  assert.match(changed.reason, /2 个文件/);
+  assert.equal(crateChanged({ root: "/r", base: "abc", lastVersion: "0.1.1", run: gitStub({ tagExists: false }) }).changed, true, "没打 tag 时保守发布");
+  assert.equal(crateChanged({ root: "/r", base: "abc", lastVersion: undefined, run: gitStub({}) }).changed, true, "首次发布");
+  assert.equal(crateChanged({ root: "/r", base: undefined, lastVersion: "0.1.1", run: gitStub({}) }).changed, true, "拿不到构建来源 commit");
 });
 
 test("未发布：只调 cargo publish，并用索引 checksum 核对本地包", () => {

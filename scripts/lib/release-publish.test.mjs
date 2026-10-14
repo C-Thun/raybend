@@ -27,7 +27,7 @@ function fixture(licensePadding=0, { version = '1.2.3', channel = 'release' } = 
   writeFileSync(join(root, `bundle/RayBend_${version}_x64-setup.exe`), 'synthetic bytes, not an installer');
   const out = join(root, 'out');
   finalizeRelease({ argv: [join(root, 'bundle'), '--manifest', join(root, 'manifest.json'), '--out', out, '--allow-unsigned'], log: () => {} });
-  const state = { head: base, paths: [...RELEASE_SOURCE_FILES], staged: false, tag: null, release: null, calls: [], crateCalls: [], partialOnce: false, siteFailed: false, previousSiteFailure:false, placeholderOnce:false, authFailed: false };
+  const state = { head: base, paths: [...RELEASE_SOURCE_FILES], staged: false, tag: null, release: null, calls: [], crateCalls: [], partialOnce: false, siteFailed: false, previousSiteFailure:false, placeholderOnce:false, authFailed: false, indexText: '', crateChanges: undefined };
   const run = (cmd, args, options) => {
     state.calls.push([cmd, ...args]);
     if (cmd === 'git') {
@@ -41,7 +41,10 @@ function fixture(licensePadding=0, { version = '1.2.3', channel = 'release' } = 
         return ref ? original[path] : (options.encoding === null ? readFileSync(join(root, path)) : readFileSync(join(root, path), 'utf8'));
       }
       if (args[0] === 'status') return state.paths.map(p => ` M ${p}\0`).join('');
-      if (args[0] === 'diff') return state.staged ? 'somebody-else.txt' : '';
+      if (args[0] === 'diff') {
+        if (args.includes('--cached')) return state.staged ? 'somebody-else.txt' : '';
+        return state.crateChanges ?? 'crates/raybend/src/lib.rs';
+      }
       if (args[0] === 'add') { assert.deepEqual(args.slice(2), RELEASE_SOURCE_FILES); return ''; }
       if (args[0] === 'commit') { state.head = releaseHead; state.paths = []; return ''; }
       if (args[0] === 'tag') { if (args[1] === '--list') return state.tag ? tag : ''; state.tag = state.head; return ''; }
@@ -73,7 +76,8 @@ function fixture(licensePadding=0, { version = '1.2.3', channel = 'release' } = 
     throw new Error(`unexpected synthetic command: ${cmd} ${args}`);
   };
   const crates = ({ version: published }) => { state.crateCalls.push(published); state.calls.push(['crates', 'publish', published]); return { action: 'published', checksum: 'c'.repeat(64), verified: true }; };
-  return { root, out, state, run, crates, call: (execute, extra = {}) => publishRelease({ root, directory: out, execute, run, log: () => {}, wait: () => {}, crates, ...extra }), dispose: () => rmSync(root, { recursive: true, force: true }) };
+  const readIndexText = () => state.indexText;
+  return { root, out, state, run, crates, call: (execute, extra = {}) => publishRelease({ root, directory: out, execute, run, log: () => {}, wait: () => {}, crates, readIndexText, ...extra }), dispose: () => rmSync(root, { recursive: true, force: true }) };
 }
 test('默认只读；显式执行顺序为精确提交/tag/原子推送/草稿完整上传/公开/等待官网', () => {
   const f = fixture();
@@ -141,6 +145,19 @@ test('草稿中断上传的 starter 零字节占位可移除重传，已完成�
  assert.equal(f.state.release.assets.length,4);
  assert.equal(f.state.calls.filter(c=>c[2]==='delete-asset').length,1);
  }finally{f.dispose();}
+});
+
+test('核心库自上次发布以来没改动：跳过 crates.io，等有改动的版本再发', () => {
+  const f = fixture();
+  try {
+    f.state.indexText = JSON.stringify({ name: 'raybend', vers: '1.2.2', cksum: 'd'.repeat(64), deps: [], yanked: false }) + '\n';
+    f.state.crateChanges = '';
+    f.call(true);
+    assert.deepEqual(f.state.crateCalls, [], '无改动不得发布核心库');
+    assert.ok(f.state.calls.some(c => c[0] === 'git' && c[1] === 'tag' && c[2] === '--list' && c[3] === 'v1.2.2'), '按上次发布版本查 tag');
+    assert.ok(f.state.calls.some(c => c[0] === 'git' && c[1] === 'diff' && c[2] === '--name-only' && String(c[3]).startsWith('v1.2.2..')), '比对 crates/raybend');
+    assert.equal(f.state.release.draft, false, 'Release 照常公开');
+  } finally { f.dispose(); }
 });
 
 test('crates.io 同步：正式版默认发一次，位置在 Release 公开之后、官网等待之前', () => {

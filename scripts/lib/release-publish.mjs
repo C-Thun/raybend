@@ -3,13 +3,13 @@ import { readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { githubReleasePlan } from './release-upload.mjs';
 import { sha256, versionEdits, RELEASE_SOURCE_FILES } from './release-files.mjs';
-import { CRATE_NAME, crateEligibility, publishCrate } from './crates-release.mjs';
+import { CRATE_NAME, crateEligibility, publishCrate, latestPublishedVersion, crateChanged, curlIndexText } from './crates-release.mjs';
 import { parseJson } from './json-text.mjs';
 
 export { RELEASE_SOURCE_FILES } from './release-files.mjs';
 
 /** 发布副作用只在崔总显式 --execute 时执行；run 注入用于完全离线的合成回归。 */
-export function publishRelease({ root, directory, execute = false, noCrates = false, run = execFileSync, log = console.log, crates = publishCrate, wait = () => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2000) }) {
+export function publishRelease({ root, directory, execute = false, noCrates = false, run = execFileSync, log = console.log, crates = publishCrate, wait = () => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2000), readIndexText }) {
   const plan = githubReleasePlan(directory);
   const manifest = parseJson(readFileSync(join(directory, 'raybend-build.json'), 'utf8'), '构建清单 raybend-build.json');
   const command = (cmd, args, extra = {}) => run(cmd, args, { cwd: root, encoding: 'utf8', maxBuffer: 64*1024*1024, stdio: ['ignore', 'pipe', 'pipe'], ...extra });
@@ -103,13 +103,22 @@ export function publishRelease({ root, directory, execute = false, noCrates = fa
     verifyAssets(release, true);
     gh('release', 'edit', plan.tag, '--repo', 'C-Thun/raybend', '--draft=false', `--latest=${!plan.prerelease}`);
   }
-  // crates.io 同步（崔总 2026-10-09 定：正式版默认发、--no-crates 跳过、预发布不发）。
+  // crates.io 同步（崔总 2026-10-09 定：正式版默认发、--no-crates 跳过、预发布不发；
+  // 2026-10-14 补：核心库自上次发布以来没改动就跳过，等下个有改动的版本再发）。
   // 放在这里而不是最后：它是最不可撤回的一步，但官网等待只是监控，失败不应拖住它；
   // 失败时重跑同一指令只补做未完成的部分（Release 已公开、资产已核对）。
   const crate = crateEligibility({ version: plan.version, prerelease: plan.prerelease, noCrates });
-  let crateResult;
-  if (crate.publish) crateResult = crates({ root, version: plan.version, run, log, wait });
-  else log(`crates.io：${crate.reason}，未同步核心库`);
+  const indexReader = readIndexText ?? curlIndexText({ run });
+  let crateResult, crateSkipped;
+  if (crate.publish) {
+    const latest = latestPublishedVersion({ readIndexText: indexReader });
+    const change = crateChanged({ root, base, lastVersion: latest.ok ? latest.version : undefined, run });
+    if (!change.changed) { crateSkipped = change.reason; log(`crates.io：${change.reason} —— 本版跳过，等下个核心库有改动的版本再发`); }
+    else {
+      if (!latest.ok) log(`⚠ crates.io 索引暂不可读（${latest.reason}）；按需要发布继续`);
+      crateResult = crates({ root, version: plan.version, run, log, wait, readIndexText: indexReader });
+    }
+  } else log(`crates.io：${crate.reason}，未同步核心库`);
   if (!plan.prerelease) {
     release=readRemote();
     let siteRun;
@@ -126,6 +135,6 @@ export function publishRelease({ root, directory, execute = false, noCrates = fa
     }
     command('gh',['run','watch',String(siteRun.databaseId),'--repo','C-Thun/raybend','--exit-status'],{stdio:'inherit'});
   }
-  log(`已发布：https://github.com/C-Thun/raybend/releases/tag/${plan.tag}\n安装器：https://github.com/C-Thun/raybend/releases/download/${plan.tag}/${encodeURIComponent(plan.assets.find(p=>p.toLowerCase().endsWith('.exe'))?.split(/[\\/]/).at(-1) ?? '')}\n${crate.publish ? `crates.io：${CRATE_NAME} ${plan.version} ${crateResult?.action === 'already-published' ? '此前已发布（内容与本地一致）' : '已发布'} · https://crates.io/crates/${CRATE_NAME}/${plan.version}${crateResult?.warning === 'index-lag' ? '（索引尚未刷新，稍后自查）' : ''}${crateResult?.warning === 'checksum-mismatch' ? '（❗索引 checksum 与本地包不一致，请人工核对）' : ''}` : `crates.io：未同步（${crate.reason}）`}\n${plan.prerelease ? '预览版不上官网；beta 更新 JSON 部署仍按 docs/release.md。' : '官网 Actions 构建/Pages 部署已通过：https://github.com/C-Thun/raybend/actions/workflows/website.yml\n下载区已由本版 Release 数据自动生成；仍需您打开官网确认访问结果。'}`);
+  log(`已发布：https://github.com/C-Thun/raybend/releases/tag/${plan.tag}\n安装器：https://github.com/C-Thun/raybend/releases/download/${plan.tag}/${encodeURIComponent(plan.assets.find(p=>p.toLowerCase().endsWith('.exe'))?.split(/[\\/]/).at(-1) ?? '')}\n${crateSkipped ? `crates.io：跳过（${crateSkipped}）` : crate.publish ? `crates.io：${CRATE_NAME} ${plan.version} ${crateResult?.action === 'already-published' ? '此前已发布（内容与本地一致）' : '已发布'} · https://crates.io/crates/${CRATE_NAME}/${plan.version}${crateResult?.warning === 'index-lag' ? '（索引尚未刷新，稍后自查）' : ''}${crateResult?.warning === 'checksum-mismatch' ? '（❗索引 checksum 与本地包不一致，请人工核对）' : ''}` : `crates.io：未同步（${crate.reason}）`}\n${plan.prerelease ? '预览版不上官网；beta 更新 JSON 部署仍按 docs/release.md。' : '官网 Actions 构建/Pages 部署已通过：https://github.com/C-Thun/raybend/actions/workflows/website.yml\n下载区已由本版 Release 数据自动生成；仍需您打开官网确认访问结果。'}`);
   return plan;
 }
