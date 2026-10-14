@@ -236,6 +236,11 @@ pnpm release [patch|minor|major] --win-msi ...   # 或 --win-nsis（可组合）
   直到另一个会话跑 workspace 全量才发现；当时实施记录里那条「passed」是**编造**的。
   报「cargo test 全绿」时必须写清范围与命令原文。
 - 换图标后「看起来没换」多半是 Windows 图标缓存——用 exe 资源字节比对判定，别用眼睛。
+- **构建 / 发布进行中禁止改动工作树**（2026-10-15 首发事故）：`pnpm release` 与 `release:publish`
+  都按**构建时的文件快照**校验工作树（`raybend-build.json` 的 `sourceFiles` + 版本文件逐字节比对），
+  期间**任何**工作树改动（哪怕只给 `package.json` 加一行脚本、哪怕已提交）都会让发布在校验处中断，
+  而且失败回滚会与已提交内容冲突（聚合错误把真实原因吞掉）。判据：动仓库前先看 `.release/build.lock`
+  与 Windows 镜像侧 `source.lock` 是否存在；存在就等它结束。
 
 ### 5.4 规划纪律
 
