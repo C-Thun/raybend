@@ -12,12 +12,17 @@ function fixture(licensePadding=0, { version = '1.2.3', channel = 'release' } = 
   const root = mkdtempSync(join(tmpdir(), 'raybend-publish-fixture-'));
   mkdirSync(join(root, 'public/legal'), { recursive: true });
   mkdirSync(join(root, 'bundle'));
+  const members = [['crates/raybend','raybend'],['src-tauri','raybend-desktop'],['crates/raybend-crashpad','raybend-crashpad']];
   const original = {
     'package.json': '{"version":"1.2.2"}\n',
-    'Cargo.toml': '[workspace.package]\nversion = "1.2.2"\n',
-    'Cargo.lock': '[[package]]\nname = "raybend"\nversion = "1.2.2"\n\n[[package]]\nname = "raybend-desktop"\nversion = "1.2.2"\n',
+    'Cargo.toml': '[workspace]\nmembers = ["crates/raybend", "src-tauri", "crates/raybend-crashpad"]\n\n[workspace.package]\nversion = "1.2.2"\n',
+    'Cargo.lock': members.map(([,name])=>`[[package]]\nname = "${name}"\nversion = "1.2.2"\n`).join('\n'),
   };
-  for (const [path, text] of Object.entries(original)) writeFileSync(join(root, path), text);
+  for (const [dir, name] of members) {
+    mkdirSync(join(root, dir), { recursive: true });
+    original[`${dir}/Cargo.toml`] = `[package]\nname = "${name}"\nversion.workspace = true\n`;
+  }
+  for (const [path, text] of Object.entries(original)) { mkdirSync(join(root, path, '..'), { recursive: true }); writeFileSync(join(root, path), text); }
   versionEdits(root, version).forEach(e => writeFileSync(e.path, e.after));
   writeFileSync(join(root, 'pnpm-lock.yaml'), 'synthetic lock');
   writeFileSync(join(root, 'public/legal/third-party.json'), JSON.stringify({ fixturePadding: 'x'.repeat(licensePadding), locks: { cargo: sha256(readFileSync(join(root, 'Cargo.lock'))), pnpm: sha256(readFileSync(join(root, 'pnpm-lock.yaml'))) } }));

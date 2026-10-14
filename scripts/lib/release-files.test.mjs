@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { applyVersionEdits, versionEdits, workspaceVersion } from "./release-files.mjs";
@@ -9,13 +9,24 @@ test("版本事务同步三文件、保留其他字段并可恢复",()=>{
   const root=mkdtempSync(join(tmpdir(),"raybend-release-"));
   try {
     writeFileSync(join(root,"package.json"),JSON.stringify({version:"0.1.0",packageManager:"pnpm@12.3.4"},null,2)+"\n");
-    writeFileSync(join(root,"Cargo.toml"),'[workspace]\nmembers = []\n\n[workspace.package]\nversion = "0.1.0"\nedition = "2024"\n\n[profile.dev]\nopt-level = 2\n');
-    writeFileSync(join(root,"Cargo.lock"),'version = 4\n\n[[package]]\nname = "raybend"\nversion = "0.1.0"\n\n[[package]]\nname = "raybend-desktop"\nversion = "0.1.0"\n');
+    writeFileSync(join(root,"Cargo.toml"),'[workspace]\nmembers = ["crates/raybend", "src-tauri", "crates/raybend-crashpad"]\n\n[workspace.package]\nversion = "0.1.0"\nedition = "2024"\n\n[profile.dev]\nopt-level = 2\n');
+    const members = [["crates/raybend","raybend"],["src-tauri","raybend-desktop"],["crates/raybend-crashpad","raybend-crashpad"]];
+    for (const [dir, name] of members) {
+      mkdirSync(join(root, dir), { recursive: true });
+      writeFileSync(join(root, dir, "Cargo.toml"), `[package]\nname = "${name}"\nversion.workspace = true\n`);
+    }
+    writeFileSync(join(root,"Cargo.lock"),'version = 4\n\n'+members.map(([, name]) => `[[package]]\nname = "${name}"\nversion = "0.1.0"\n`).join("\n"));
     const edits=versionEdits(root,"0.2.0-beta.2"), restore=applyVersionEdits(edits);
     assert.equal(workspaceVersion(readFileSync(join(root,"Cargo.toml"),"utf8")),"0.2.0-beta.2");
     assert.equal(JSON.parse(readFileSync(join(root,"package.json"))).packageManager,"pnpm@12.3.4");
+    const lockAfter=readFileSync(join(root,"Cargo.lock"),"utf8");
+    for (const [, name] of members) assert.match(lockAfter, new RegExp(`name = "${name}"\\nversion = "0.2.0-beta.2"`), `${name} 必须跟着升`);
     restore();for(const e of edits) assert.equal(readFileSync(e.path,"utf8"),e.before);
     assert.equal(versionEdits(root,"0.1.0").length,0);
+    // 新增工作区成员但 Cargo.lock 里没它的条目 → 必须报错（2026-10-14 发版被卡事故的回归）
+    writeFileSync(join(root,"Cargo.lock"),'version = 4\n\n[[package]]\nname = "raybend"\nversion = "0.1.0"\n\n[[package]]\nname = "raybend-desktop"\nversion = "0.1.0"\n');
+    assert.throws(()=>versionEdits(root,"0.2.0"),/raybend-crashpad/);
+    writeFileSync(join(root,"Cargo.lock"),members.map(([, name]) => `[[package]]\nname = "${name}"\nversion = "0.1.0"\n`).join("\n"));
     writeFileSync(join(root,"Cargo.toml"),'[workspace.package]\nversion = "9.0.0"\n');
     assert.throws(()=>versionEdits(root,"0.2.0"),/不一致/);
   } finally {rmSync(root,{recursive:true,force:true});}

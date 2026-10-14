@@ -10,10 +10,12 @@ function fixture(){
  mkdirSync(join(root,'src/api'),{recursive:true});writeFileSync(join(root,'src/api/dto-contract.json'),'{}');
  for(const name of ['rust-toolchain.toml','LICENSE','THIRD-PARTY-NOTICES.md'])writeFileSync(join(root,name),'fixture');
  mkdirSync(join(root,'public/legal'),{recursive:true});writeFileSync(join(root,'public/legal/third-party.json'),'{}');
- mkdirSync(join(root,'src-tauri'));mkdirSync(join(root,'crates/raybend/src/raw'),{recursive:true});
+ mkdirSync(join(root,'src-tauri'));mkdirSync(join(root,'crates/raybend/src/raw'),{recursive:true});mkdirSync(join(root,'crates/raybend-crashpad/src'),{recursive:true});
+ const members=[['crates/raybend','raybend'],['src-tauri','raybend-desktop'],['crates/raybend-crashpad','raybend-crashpad']];
+ for(const [dir,name] of members)writeFileSync(join(root,dir,'Cargo.toml'),`[package]\nname = "${name}"\nversion.workspace = true\n`);
  writeFileSync(join(root,'package.json'),JSON.stringify({version:'0.1.0',packageManager:'pnpm@12.3.4'}));
- writeFileSync(join(root,'Cargo.toml'),'[workspace.package]\nversion = "0.1.0"\n');
- writeFileSync(join(root,'Cargo.lock'),'[[package]]\nname = "raybend"\nversion = "0.1.0"\n\n[[package]]\nname = "raybend-desktop"\nversion = "0.1.0"\n');
+ writeFileSync(join(root,'Cargo.toml'),'[workspace]\nmembers = ["src-tauri", "crates/raybend", "crates/raybend-crashpad"]\n\n[workspace.package]\nversion = "0.1.0"\n');
+ writeFileSync(join(root,'Cargo.lock'),members.map(([,name])=>`[[package]]\nname = "${name}"\nversion = "0.1.0"\n`).join('\n'));
  writeFileSync(join(root,'src-tauri/tauri.conf.json'),JSON.stringify({version:'../package.json'}));
  writeFileSync(join(root,'crates/raybend/src/raw/worker.rs'),'pub const PROTOCOL_TAG: &str = "fixture-v1";');
  const paths={hostBase:base,hostDrive:base,hostSource:mirror,hostTarget:target,windowsBase:'D:\\构建 目录',windowsSource:'D:\\构建 目录\\source',windowsTarget:'D:\\构建 目录\\target'};

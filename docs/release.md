@@ -135,7 +135,7 @@ pnpm release 0.2.0 --win-msi --unsigned --dry-run
 pnpm release test --win-msi --unsigned --dry-run
 ```
 
-package.json 为产品版本来源，Cargo.toml 与 Cargo.lock 的两个本地包同步，Tauri 直接读取 package.json。test 不升版，前端落 dist/test-build；beta/release 落 dist。`pnpm release` 自身不 commit/tag/push/上传；只有 `--publish`（或第二条 `release:publish --execute`）才会做这些外部动作。指定版本号时必须严格大于当前版本，降级会被拒绝；beta 通道的目标版本必须自带预发布标签（如 `0.2.0-beta.1`），test 不接受指定版本号。manifest 的 gitHash 记录升版前已提交代码的 commit，版本改动随后由发布步骤提交；它不是最终版本提交的 hash。源代码 tag 必须保留该次升版与生成许可资源。工作树非干净时，beta/release 默认阻断；--allow-dirty 是明确接受脏树来源的选项，不建议用于公开版，而且 `--publish` 会因为发布提交里混入了版本文件以外的改动而失败。
+package.json 为产品版本来源，Cargo.toml 的 workspace 版本与 Cargo.lock 里**全部 workspace 成员**（当前：raybend / raybend-desktop / raybend-crashpad —— 由 `[workspace] members` 动态解析，新增成员自动跟上）同步，Tauri 直接读取 package.json。test 不升版，前端落 dist/test-build；beta/release 落 dist。`pnpm release` 自身不 commit/tag/push/上传；只有 `--publish`（或第二条 `release:publish --execute`）才会做这些外部动作。指定版本号时必须严格大于当前版本，降级会被拒绝；beta 通道的目标版本必须自带预发布标签（如 `0.2.0-beta.1`），test 不接受指定版本号。manifest 的 gitHash 记录升版前已提交代码的 commit，版本改动随后由发布步骤提交；它不是最终版本提交的 hash。源代码 tag 必须保留该次升版与生成许可资源。工作树非干净时，beta/release 默认阻断；--allow-dirty 是明确接受脏树来源的选项，不建议用于公开版，而且 `--publish` 会因为发布提交里混入了版本文件以外的改动而失败。
 
 注意：正式/预览准备成功会修改版本文件；构建失败恢复本次版本写入。发生并行修改时保留外部编辑并报冲突。失败生成的前端不是可发布文件，修复后重跑，不要沿用旧 dist 或旧 SHA。
 
