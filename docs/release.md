@@ -356,6 +356,30 @@ AI 能力是**编译期外挂**：模型与 CPU 推理库不进本仓 Git，构�
 模型绑定的是 `profiles/raybend-photo-tags/v1`（消费侧契约）：`manifest.json` 的摘要必须与
 `crates/raybend/assets/ai/tinyclip-v1/manifest.json` 一致，否则拒绝使用 —— 不是“换个模型就上”。
 
+### 模型库在别处：怎么指定路径
+
+构建**只认路径、不认裸 ONNX 文件**：模型必须先是一个**已初始化的 model-registry**（含 `.model-registry.json`
+与 `profiles/`），因为构建要按 artifact/profile 的摘要与契约校验字节；随便指一个 `.onnx` 文件会被拒绝。指定顺序：
+
+```bash
+# 1) 已在别处有模型库（如 clone 下来的 model-registry）：登记结对路径，一次即可
+pnpm ai:use /结对路径/model-registry
+#    要求该目录已初始化；登记写入 ai-model-source.local.json（Git 忽略）；
+#    已登记优先于「同级自动探测」—— 登记了就按登记的走
+
+# 2) 在新位置建库（空库，随后导出/导入模型）
+pnpm ai:library:init /新位置/model-registry
+pnpm ai:export /新位置/model-registry --import /已导出的模型目录
+
+# 3) 不想要登记（回到零配置自动探测）
+rm ai-model-source.local.json
+```
+
+- **`--ai` 本身不带路径参数**（`auto|required|off` 只决定“找不到时怎么办”）：模型路径只通过
+  `ai-model-source.local.json`、同级探测提供；`RAYBEND_AI_RUNTIME_DIR` 只服务 CPU 运行库 DLL，**不是模型**。
+- 换了模型 = 换了摘要：raybend 侧的准入 manifest（`crates/raybend/assets/ai/tinyclip-v1/manifest.json`）要同步更新，
+  属**待审阅事件**，不会自动跟随（见 `specs/ai-model-library-build.md`）。
+
 ### 命令与回退链
 
 ```bash

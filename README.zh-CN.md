@@ -56,16 +56,44 @@ pnpm build            # 前端构建；dist/ 在编译期嵌进可执行文件
 
 ## 发布构建
 
-安装包在本地构建（WSL 前端 + Windows 侧 Rust/MSVC），由维护者发布。一条命令或两条：
+安装包在本地构建（WSL 前端 + Windows 侧 Rust/MSVC），由维护者发布；完整手册（签名、构建目录、排障）见[发布指南](docs/release.md)。
+
+**一次性准备**（换机器时才需要重做）：
+
+```bash
+# Windows 侧：与前端 CLI 同版本的 cargo-tauri（版本不匹配时 release 会在构建前报错）
+cmd.exe /d /c "cargo install tauri-cli --version 2.11.4 --locked"
+# WSL 侧：GitHub CLI 登录（发布时用；与 git 的 SSH 认证是两回事）
+gh auth login
+# 更新签名密钥：只生成一次，私钥与密码自己保管、不进仓库
+pnpm tauri signer generate -w ~/.config/raybend/updater.key
+```
+
+只在**带更新的构建**（`--with-updater`）需要这两个环境变量（下面是 bash；fish 用 `set -Ux`）：
+
+```bash
+export TAURI_SIGNING_PRIVATE_KEY="$HOME/.config/raybend/updater.key"
+export TAURI_SIGNING_PRIVATE_KEY_PASSWORD='生成密钥时设的密码'
+```
+
+**日常发版**（一条命令，或两条）：
 
 ```bash
 pnpm release patch --win-msi --unsigned --publish   # 升版 + 打 MSI + 发布，一次到底
-pnpm release 0.2.0 --win-msi --unsigned --publish   # 也可以指定版本号
+pnpm release 0.2.0 --win-msi --unsigned --publish   # 指定版本号（或 --version v0.2.0）
 pnpm release patch --win-msi --unsigned             # 或者先准备…
 pnpm release:publish release-out/v0.1.2 --execute   # …验收安装器后再发布
 ```
 
-一次性准备（dav1d、`cargo tauri`、`gh` 登录）、更新签名密钥、AI 模型外挂（`--ai=auto|required|off`，默认零配置从同级 `model-registry` 取，找不到会打印原因并回退到无 AI 版）以及发布时官网做了什么，都在[发布指南](docs/release.md)里。
+带更新清单加 `--with-updater`；跳过 crates.io 同步加 `--no-crates`；发布动作（提交/tag/推送/上传/等官网）只由 `--publish` 或第二条指令执行。
+
+**AI 模型（编译期外挂）**：默认零配置 —— 构建时自动找**同级**的 `../model-registry`；找不到就出无 AI 版并在日志打印原因（`--ai=required` 改为直接失败，`--ai=off` 明确不要）。模型库在别处时，把它的**绝对路径**登记一次（只写在本机，Git 忽略）：
+
+```bash
+pnpm ai:use /绝对路径/model-registry      # 要求该目录是已初始化的 model-registry
+```
+
+CPU 运行库（onnxruntime DLL）自动从上游固定地址下载并校验 SHA-256；想用本机已有的 DLL 就设 `RAYBEND_AI_RUNTIME_DIR=<目录>`，想换下载缓存位置就设 `RAYBEND_AI_CACHE_DIR`。
 
 ## 技术栈
 

@@ -56,16 +56,44 @@ The complete command index — tests, quality gates, Windows debug builds, AI as
 
 ## Release builds
 
-Installers are built locally (WSL front end + Windows-side Rust/MSVC) and published by the maintainer. One command, or two:
+Installers are built locally (WSL front end + Windows-side Rust/MSVC) and published by the maintainer; the full manual — signing, build-directory selection, troubleshooting — is [docs/release.md](docs/release.md) (Chinese).
+
+**One-time setup** (only when setting up a machine):
+
+```bash
+# on Windows: a cargo-tauri matching the front-end CLI version (release refuses to build on mismatch)
+cmd.exe /d /c "cargo install tauri-cli --version 2.11.4 --locked"
+# in WSL: GitHub CLI login (used by publish; unrelated to your git SSH key)
+gh auth login
+# updater signing key: generate once, keep private key and password out of the repo
+pnpm tauri signer generate -w ~/.config/raybend/updater.key
+```
+
+These two environment variables are only needed for **update-enabled** builds (`--with-updater`) — bash shown, fish uses `set -Ux`:
+
+```bash
+export TAURI_SIGNING_PRIVATE_KEY="$HOME/.config/raybend/updater.key"
+export TAURI_SIGNING_PRIVATE_KEY_PASSWORD='the password you set'
+```
+
+**Day-to-day releases** (one command, or two):
 
 ```bash
 pnpm release patch --win-msi --unsigned --publish   # bump, build the MSI and publish in one go
-pnpm release 0.2.0 --win-msi --unsigned --publish   # or pin an exact version
+pnpm release 0.2.0 --win-msi --unsigned --publish   # or pin a version (also --version v0.2.0)
 pnpm release patch --win-msi --unsigned             # or stop after preparing…
 pnpm release:publish release-out/v0.1.2 --execute   # …then publish after reviewing the installer
 ```
 
-Setup (dav1d, `cargo tauri`, `gh` login), update signing keys, the AI model hook (`--ai=auto|required|off`, zero-config from a sibling `model-registry` checkout, with a printed fallback to a non-AI build) and what the website does on a release are documented in [docs/release.md](docs/release.md).
+Add `--with-updater` to ship the signed update manifest; add `--no-crates` to skip the crates.io sync. Publishing side effects (commit/tag/push/upload/wait for the website) happen only with `--publish` or the second command.
+
+**AI models (compile-time add-on).** Zero-config by default: builds look for a **sibling** `../model-registry` checkout; if it is missing they produce a non-AI build and print the reason (`--ai=required` fails instead, `--ai=off` opts out explicitly). When the model library lives elsewhere, register its absolute path once (stored locally, Git-ignored):
+
+```bash
+pnpm ai:use /absolute/path/to/model-registry   # must be an initialized model-registry
+```
+
+The CPU runtime (onnxruntime DLLs) is fetched from the pinned upstream URL and SHA-256 verified; set `RAYBEND_AI_RUNTIME_DIR=<dir>` to use local DLLs, or `RAYBEND_AI_CACHE_DIR` to move the download cache.
 
 ## Tech stack
 
