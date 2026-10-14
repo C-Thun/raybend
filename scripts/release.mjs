@@ -11,9 +11,11 @@ import { windowsReleaseConfig, windowsReleaseCommands } from "./lib/release-wind
 import { discoverWindowsReleasePaths, toHostPath, toWindowsPath, runWindowsReleaseBatch } from "./lib/windows-paths.mjs";
 import { acquireReleaseLock, syncReleaseMirror } from "./lib/release-mirror.mjs";
 import { finalizeRelease } from "./finalize-release.mjs";
+import { publishRelease } from "./lib/release-publish.mjs";
+import { updaterPublicKey } from "./lib/release-config.mjs";
 import {parseAiArgs,resolveAiBuild,aiBuildEnv,aiBuildMetadata,ensureBuildRuntime,syncAiOutput} from "./lib/ai-build.mjs";
 import { windowsBuildEnv } from "./lib/dav1d-win.mjs";
-export function runRelease({root=resolve(dirname(fileURLToPath(import.meta.url)),".."),argv=process.argv.slice(2),env=process.env,run=execFileSync,log=console.log,finalize=finalizeRelease,discover=discoverWindowsReleasePaths,aiResolver=resolveAiBuild}={}) {
+export function runRelease({root=resolve(dirname(fileURLToPath(import.meta.url)),".."),argv=process.argv.slice(2),env=process.env,run=execFileSync,log=console.log,finalize=finalizeRelease,discover=discoverWindowsReleasePaths,aiResolver=resolveAiBuild,publish=publishRelease}={}) {
   const aiArgs=parseAiArgs(argv);
   const request=parseReleaseArgs(aiArgs.args),pkg=parseJson(readFileSync(join(root,"package.json"),"utf8"),"package.json");
   const windows=request.windowsTargets.length>0;
@@ -28,7 +30,7 @@ export function runRelease({root=resolve(dirname(fileURLToPath(import.meta.url))
   if(config.version!=="../package.json")throw new Error("Tauri 必须从 ../package.json 读取产品版本");
   const builtAt=env.RAYBEND_BUILD_TIME || new Date().toISOString();
   if(!Number.isFinite(Date.parse(builtAt)))throw new Error("非法 RAYBEND_BUILD_TIME");
-  const publicKey=request.withUpdater ? env.RAYBEND_UPDATER_PUBLIC_KEY ?? "" : "";
+  const publicKey=request.withUpdater ? updaterPublicKey(root,env) : "";
   const buildEnv={...env,RAYBEND_VERSION:plan.targetVersion,RAYBEND_CHANNEL:plan.channel,RAYBEND_BUILD_TIME:builtAt,RAYBEND_GIT_HASH:gitHash??"",RAYBEND_DIRTY:dirty?"1":"0",RAYBEND_UPDATER_PUBLIC_KEY:publicKey,RAYBEND_DISTRIBUTION:"direct"};
   const winConfig=windows ? windowsReleaseConfig(plan,{unsigned:request.unsigned,withUpdater:request.withUpdater,frontendDist:"../dist",certThumbprint:env.RAYBEND_SIGN_CERT_SHA1,updaterPublicKey:publicKey,updaterPrivateKey:env.TAURI_SIGNING_PRIVATE_KEY,timestamp:env.RAYBEND_SIGN_TIMESTAMP}):undefined;
   const releaseOut=join(root,"release-out",plan.channel==="test"?`test-${builtAt.replaceAll(":","-")}`:`v${plan.targetVersion}`);
@@ -95,7 +97,10 @@ export function runRelease({root=resolve(dirname(fileURLToPath(import.meta.url))
         syncAiOutput(root,aiPlan,join(windowsTarget,"release"));
         run("pnpm",["check:win"],{cwd:root,stdio:"inherit",env:{...buildEnv,WIN_DIST:frontendRoot,WIN_EXE:join(windowsTarget,"release","raybend-desktop.exe"),WIN_WORKER_MODE:"self"}});
         finalize({argv:[bundle,"--manifest",join(frontendRoot,"raybend-build.json"),"--out",releaseOut,...(request.unsigned?["--allow-unsigned"]:[]),...(request.withUpdater?["--base-url",`https://github.com/C-Thun/raybend/releases/download/v${plan.targetVersion}/`]:[])],run,log,selectVersion:plan.targetVersion,requiredTargets:winConfig.bundle.targets});
-        log(`本地准备完成；由崔总真机验收后执行：pnpm release:publish ${relative(root,releaseOut)} --execute`);
+        if(request.publish){
+          log(`一键发版：构建与收口完成，继续执行发布（--publish）——提交版本文件、原子推送、上传 Release、公开。`);
+          publish({root,directory:releaseOut,execute:true,noCrates:request.noCrates??false,run,log});
+        }else log(`本地准备完成；由崔总真机验收后执行：pnpm release:publish ${relative(root,releaseOut)} --execute`);
       }
     }
   } catch(error) {

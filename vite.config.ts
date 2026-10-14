@@ -1,4 +1,3 @@
-import { resolveAiBuild } from "./scripts/lib/ai-build.mjs";
 import { defineConfig, type Plugin } from "vite";
 import solid from "vite-plugin-solid";
 import tailwindcss from "@tailwindcss/vite";
@@ -176,7 +175,9 @@ export default defineConfig(() => ({
    */
   define: {
     __RAYBEND_BUILD__: JSON.stringify(readBuildInfo()),
-    __RAYBEND_PHOTO_AI__: process.env.RAYBEND_PHOTO_AI !== undefined ? process.env.RAYBEND_PHOTO_AI === "1" : resolveAiBuild({root:process.cwd(),materialize:false,log:()=>{}}).enabled,
+    // 只读构建注入：release / debug:win / pnpm tauri 都会设 RAYBEND_PHOTO_AI；裸 pnpm build 不带 AI（Rust 侧同口径）。
+    __RAYBEND_PHOTO_AI__: process.env.RAYBEND_PHOTO_AI === "1",
+    // 更新公钥由发布链注入（release.mjs 解析 release.config.json / 环境变量后写进构建环境）；裸构建不带更新源。
     __RAYBEND_UPDATER_PUBLIC_KEY__: JSON.stringify(process.env.RAYBEND_UPDATER_PUBLIC_KEY || ""),
     __RAYBEND_DISTRIBUTION__: JSON.stringify(process.env.RAYBEND_DISTRIBUTION || "direct"),
     __RAYBEND_DIAGNOSTICS__: JSON.stringify(["dev","test"].includes(process.env.RAYBEND_CHANNEL?.trim() || "dev")),

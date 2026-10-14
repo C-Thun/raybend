@@ -35,7 +35,8 @@ test("Windows 配置签名、通道和前端只构建一次",()=>{
   assert.deepEqual(windowsReleaseConfig({...base,windowsTargets:["nsis","msi"]},env).bundle.targets,["nsis","msi"]);
   assert.equal(stable.bundle.windows.signCommand.args.at(-1),"%1");assert.equal(stable.bundle.windows.allowDowngrades,false);
   assert.equal(windowsReleaseConfig(base,{...env,unsigned:true,certThumbprint:""}).bundle.windows.signCommand,null);
-  assert.throws(()=>windowsReleaseConfig(base,{...env,withUpdater:true}),/私钥/);
+  assert.throws(()=>windowsReleaseConfig(base,{...env,withUpdater:true}),/公钥/);
+  assert.throws(()=>windowsReleaseConfig(base,{...env,withUpdater:true,updaterPublicKey:"pub"}),/私钥/);
   assert.throws(()=>windowsReleaseConfig(base,{...env,timestamp:"http://example.com"}),/HTTPS/);
   assert.throws(()=>windowsReleaseConfig(base,{...env,timestamp:"not a url"}),/HTTPS/);
   const beta=windowsReleaseConfig({...base,targetVersion:"1.2.3-beta.1",channel:"beta",windowsTargets:["nsis"]},{frontendDist:"../dist",unsigned:true});

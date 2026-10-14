@@ -179,3 +179,26 @@ test('required AI failure precedes version edits and frontend, releases locks; d
   runRelease({root:f.root,discover:()=>f.paths,argv:['patch','--win-msi','--unsigned','--ai=auto','--dry-run'],run,log:()=>{},aiResolver});assert.equal(seen.at(-1).materialize,false);assert.equal(existsSync(f.mirror),false);
  }finally{f.dispose();}
 });
+
+test('一键发版：--publish 在收口后执行发布；构建失败时不发布',()=>{
+ const f=fixture();try{
+  const published=[];let finalized=false,failBundle=false;
+  const run=(cmd,args)=>{
+   if(cmd==='git')return args[0]==='status'?'':'abcdef012345';
+   if(cmd==='wslpath')throw new Error('unexpected wslpath');
+   if(cmd==='cmd.exe'){if(args.at(-1).endsWith('.cmd')){if(failBundle)throw new Error('bundle failed');return '';}return 'tauri-cli 2.11.4';}
+   assert.equal(cmd,'pnpm');if(args[0]==='licenses:generate'||args[0]==='check:win')return;
+   assert.equal(args[0],'build');mkdirSync(join(f.root,'dist'),{recursive:true});writeFileSync(join(f.root,'dist/index.html'),'synthetic');
+  };
+  runRelease({root:f.root,checkAssets:()=>{},discover:()=>f.paths,argv:['patch','--win-msi','--unsigned','--publish'],run,log:()=>{},finalize:()=>{finalized=true;},publish:opts=>published.push(opts)});
+  assert.equal(finalized,true);
+  assert.equal(published.length,1);
+  assert.equal(published[0].execute,true);
+  assert.equal(published[0].noCrates,false);
+  assert.equal(published[0].run,run,'发布步骤复用同一个子进程注入');
+  assert.equal(published[0].directory,join(f.root,'release-out/v0.1.1'));
+  published.length=0;failBundle=true;
+  assert.throws(()=>runRelease({root:f.root,checkAssets:()=>{},discover:()=>f.paths,argv:['minor','--win-msi','--unsigned','--publish','--no-crates'],run,log:()=>{},finalize:()=>{throw new Error('unreachable');},publish:opts=>published.push(opts)}),/已恢复/);
+  assert.equal(published.length,0,'构建失败时不能发布');
+ }finally{f.dispose();}
+});

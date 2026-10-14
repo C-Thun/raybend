@@ -4,7 +4,8 @@ export function windowsReleaseConfig(plan, env) {
   const unsigned = env.unsigned === true;
   const thumb = env.certThumbprint ?? "";
   if (!unsigned && !/^[a-fA-F0-9]{40}$/.test(thumb)) throw new Error("Windows 签名需要 RAYBEND_SIGN_CERT_SHA1（Windows 证书存储中的 40 位指纹）；无签名显式 --unsigned");
-  if (env.withUpdater && (!env.updaterPublicKey || !env.updaterPrivateKey)) throw new Error("更新产物需要 RAYBEND_UPDATER_PUBLIC_KEY 与 TAURI_SIGNING_PRIVATE_KEY；私钥只能由崔总配置");
+  if (env.withUpdater && !env.updaterPublicKey) throw new Error("更新产物需要公钥：在 release.config.json 写 updaterPublicKey，或设置 RAYBEND_UPDATER_PUBLIC_KEY");
+  if (env.withUpdater && !env.updaterPrivateKey) throw new Error("更新产物需要私钥：请在您自己的终端设置 TAURI_SIGNING_PRIVATE_KEY（私钥文件路径；不要用 TAURI_SIGNING_PRIVATE_KEY_PATH，build/bundle 不读它）与 TAURI_SIGNING_PRIVATE_KEY_PASSWORD");
   const timestamp = env.timestamp ?? "https://timestamp.digicert.com";
   let parsed; // 解析失败也走同一条报错，不让裸 TypeError 冒到崔总面前。
   try { parsed = new URL(timestamp); } catch { parsed = null; }

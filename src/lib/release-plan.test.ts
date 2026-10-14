@@ -10,9 +10,11 @@ import { test } from "node:test";
 import {
   BUMP_TYPES,
   bumpVersion,
+  compareVersions,
   createReleasePlan,
   inBetaSeries,
   nextPrerelease,
+  normalizeTargetVersion,
   parseReleaseArgs,
   parseVersion,
   PRERELEASE_LABEL,
@@ -23,6 +25,9 @@ import type { ReleaseRequest } from "./release-plan.ts";
 
 const request = (over: Partial<ReleaseRequest> = {}): ReleaseRequest => ({
   bump: "test",
+  explicitVersion: undefined,
+  publish: false,
+  noCrates: false,
   // 不传 channel 时实现里是显式的 undefined，断言要跟着写
   channel: undefined,
   dryRun: false,
@@ -250,6 +255,65 @@ test("人要做的事被明确列出来（脚本只准备，不推送）", () =>
     plan.humanCommands.every((cmd) => !cmd.includes("--force")),
     "发版命令里不该出现 force",
   );
+});
+
+test("compareVersions：语义化比较（含预发布规则）", () => {
+  assert.equal(compareVersions("1.2.3", "1.2.3"), 0);
+  assert.equal(compareVersions("1.2.3", "1.2.4"), -1);
+  assert.equal(compareVersions("1.10.0", "1.9.0"), 1, "按数值比，不按字符串");
+  assert.equal(compareVersions("2.0.0", "1.99.99"), 1);
+  assert.equal(compareVersions("1.2.3", "1.2.3-beta.1"), 1, "稳定版大于同号预发布");
+  assert.equal(compareVersions("1.2.3-beta.2", "1.2.3-beta.10"), -1, "预发布计数按数值");
+  assert.equal(compareVersions("1.2.3-beta.1", "1.2.3-rc.1"), -1, "字母段按字典序");
+  assert.equal(compareVersions("1.2.3-1", "1.2.3-alpha"), -1, "数字段小于字母段");
+});
+
+test("normalizeTargetVersion：接受前导 v，非法版本号拒绝", () => {
+  assert.equal(normalizeTargetVersion("v1.4.0"), "1.4.0");
+  assert.equal(normalizeTargetVersion(" V1.4.0-beta.1 "), "1.4.0-beta.1");
+  for (const bad of ["1.4", "version", "v", ""]) {
+    assert.throws(() => normalizeTargetVersion(bad), /版本号必须是/);
+  }
+});
+
+test("指定版本号：位置参数与 --version 两种写法", () => {
+  assert.deepEqual(
+    parseReleaseArgs(["1.4.0", "--win-msi"]),
+    request({ bump: undefined, explicitVersion: "1.4.0", windowsTargets: ["msi"] }),
+  );
+  assert.deepEqual(
+    parseReleaseArgs(["--version", "v1.4.0"]).explicitVersion,
+    "1.4.0",
+    "带 v 的 tag 形式可以直接粘贴",
+  );
+  assert.equal(parseReleaseArgs(["--version=1.4.0-beta.1"]).explicitVersion, "1.4.0-beta.1");
+  for (const args of [["1.4.0", "patch"], ["1.4.0", "--version", "1.5.0"], ["--version"], ["--version="], ["--version", "1.4"], ["1.2"]]) {
+    assert.throws(() => parseReleaseArgs(args), /./, `${args.join(" ")} 应被拒绝`);
+  }
+});
+
+test("指定版本号：必须大于当前版本；beta 要带预发布标签", () => {
+  const plan = (version: string, args: string[]) =>
+    createReleasePlan({ version, request: parseReleaseArgs(args), dirty: false, gitHash: "abc1234" });
+  assert.equal(plan("0.1.1", ["0.2.0"]).targetVersion, "0.2.0");
+  assert.equal(plan("0.1.1", ["--version", "1.0.0"]).changesVersion, true);
+  assert.equal(plan("0.1.1-beta.2", ["0.1.1"]).targetVersion, "0.1.1", "beta 定稿到同号稳定版是合法的");
+  assert.throws(() => plan("0.1.1", ["0.1.1"]), /必须大于当前版本/);
+  assert.throws(() => plan("0.1.1", ["0.0.9"]), /必须大于当前版本/);
+  assert.throws(() => plan("0.2.0", ["0.1.0"]), /必须大于当前版本/);
+  assert.equal(plan("0.1.1", ["--channel", "beta", "--version", "0.2.0-beta.1"]).targetVersion, "0.2.0-beta.1");
+  assert.throws(() => plan("0.1.1", ["--channel", "beta", "0.2.0"]), /beta 通道/);
+  assert.throws(() => plan("0.1.1", ["1.0.0", "--channel", "test"]), /test 通道不升版/);
+});
+
+test("--publish 入口：要求有安装器、不与预览/跳过构建同用", () => {
+  assert.equal(parseReleaseArgs(["patch", "--win-msi", "--publish"]).publish, true);
+  assert.equal(parseReleaseArgs(["1.2.0", "--win-nsis", "--publish", "--no-crates"]).noCrates, true);
+  assert.throws(() => parseReleaseArgs(["patch", "--publish", "--win-msi", "--dry-run"]), /冲突/);
+  assert.throws(() => parseReleaseArgs(["patch", "--publish", "--win-msi", "--skip-build"]), /不能跳过构建/);
+  assert.throws(() => parseReleaseArgs(["patch", "--publish"]), /需要安装器/);
+  assert.throws(() => parseReleaseArgs(["patch", "--win-msi", "--no-crates"]), /只在 --publish/);
+  assert.throws(() => parseReleaseArgs(["test", "--win-msi", "--publish"]), /不能用于 test 通道/);
 });
 
 test("参数的两个 channel 写法、非法值、未知与重复参数",()=>{
