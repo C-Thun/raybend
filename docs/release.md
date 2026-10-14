@@ -50,6 +50,7 @@ pnpm release:publish release-out/v0.1.2 --execute
 
 - **同日 WSL 未找到 GitHub CLI `gh`**。在 WSL 安装并登录官方 GitHub CLI https://cli.github.com/ ，确认账号可向本仓推送并管理 Release/读取 Actions。SSH origin 的 Git 认证和 GitHub API 登录是两件事。脚本不收集或存储密码/私钥；不要把密钥写进仓库。使用能触发后续工作流的个人登录令牌；不要用仓库 GITHUB_TOKEN 代替个人发行登录后假定它会触发新的 Actions。
 - 仓库 Pages 来源选 GitHub Actions，自定义域名/HTTPS 按 website/AGENTS.md §5 配置，开启 Actions。官网已有 .github/workflows/website.yml，不需要新增网站发布服务器。
+- **`github-pages` environment 要允许 `v*` 标签部署**（2026-10-15 实测补）：Settings → Environments → `github-pages` → Deployment branches and tags 里加上 tag 规则 `v*`。否则 release 事件（ref = tag）会被环境规则直接拒绝：`Tag "v0.1.2" is not allowed to deploy to github-pages due to environment protection rules` —— 官网不会更新、workflow 报 failure（此时可用 `gh workflow run website.yml -f tag=v0.1.2` 从 master 手工重发一次先绕过）。
 - 如需签名更新，先自己生成/备份私钥并设置 §4 的公私钥环境变量；第一条加 `--with-updater`，第二条不变。没有该参数时新构建默认关闭内置更新，手动下载升级可先发行。有 Authenticode 证书时配置指纹并去掉 `--unsigned`；二者与发行指令数量无关。
 
 GitHub 草稿/资产与 --verify-tag 参数依据：https://cli.github.com/manual/gh_release_create 。Release 触发 Pages 与令牌触发边界依据：https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#release 、https://docs.github.com/en/actions/how-tos/writing-workflows/choosing-when-your-workflow-runs/triggering-a-workflow 。脚本已用模拟后端验证；真实安装器/账户/线上链路仍需首次执行验收。
@@ -410,3 +411,27 @@ pnpm debug:win --ai=auto                               # 调试包同一套口�
 - 其余成本：Secrets 管理（更新私钥、将来 Authenticode 云签名）、缓存键维护、`check:win` 要在 CI 里同套复跑；而且 CI 直接执行发布动作（提交/tag/上传）与“发布由人类执行”的纪律边界需要重新划定（可行形态是 CI 出草稿、人类点 publish，但又回到了人的动作）。
 
 因此本轮先把**本地一键链路**（本文件）与**启动自动检查更新**做顺；CI 打包留到模型分发与签名方案落地后再启动。
+
+## 12. 磁盘占用与清理（2026-10-14 实测）
+
+构建缓存分布在四处，各自只由对应命令清；**发版流程本身不删任何缓存**（Windows `target/` 是刻意保留的：
+下次构建不冷启，省十几分钟）。看总账：
+
+```bash
+pnpm clean:report
+```
+
+| 位置 | 实测 | 性质 | 清理 |
+| --- | --- | --- | --- |
+| WSL `target/` | **58 G** | 日常 `cargo check/test` 的缓存，只进不出 | `pnpm clean:wsl`（按构建图清失效产物）；`--keep-days 0` 深清，代价是 examples 重编 |
+| Windows `…\raybend\build\target` | 4.6 G | 发版 / 调试构建缓存，**刻意保留** | `pnpm clean:win`（只清失效产物） |
+| 旧 `C:\rb-target` | **17.9 G** | 2026-09-29 前的默认位置，已弃用 | `pnpm clean:win --target-dir 'C:\rb-target\raybend' --keep-days 0`（或直接删） |
+| `release-out/` | 130 M | 已发布产物的字节副本，保留 | 旧 `test-*` 目录可手动删 |
+| `.release/`（AI 输入快照） | 168 M | 模型 + CPU 运行库冻结副本，构建复用 | 保留 |
+| pnpm store | 4.0 G | 全局包仓库（所有 pnpm 项目共享） | `pnpm store prune` |
+| cargo registry | 1.4 G | crate 下载缓存 | 保留（删了要重新下载） |
+
+口径：`clean:win` / `clean:wsl` 只清「不在当前构建图里、且已凉 ≥ N 天（默认 3）」的产物 ——
+正在用的不动、不付冷构建代价；依赖升级 / feature 组合变化 / 换构建参数留下的旧产物由它回收。
+`clean:win` 的默认目标与发版构建**同一套探测**（`RAYBEND_WIN_BUILD_DIR` / `--win-dir` 可覆盖），
+旧目录还在时它会打印一行提示。

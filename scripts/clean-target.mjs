@@ -76,9 +76,23 @@ import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { windowsBuildEnv } from "./lib/dav1d-win.mjs";
+import { discoverWindowsReleasePaths } from "./lib/windows-paths.mjs";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
-const WIN_TARGET_DIR = process.env.WIN_TARGET_DIR ?? "C:\\rb-target\\raybend";
+/** 旧的默认构建目录（2026-09-29 前的 `C:\rb-target\raybend`）：只用于提示，不再当默认清理目标。 */
+const LEGACY_WIN_TARGET = "C:\\rb-target\\raybend";
+/**
+ * 当前的 Windows 构建目录由 release/debug 的**同一套探测**决定
+ * （`RAYBEND_WIN_BUILD_DIR` / `--win-dir` 都能覆盖），不再写死旧路径 ——
+ * 否则 16 GB 的旧目录一直有人“清”，真正在长的当前缓存反而没人管。
+ */
+function currentWinTarget() {
+  try {
+    return discoverWindowsReleasePaths({ directory: process.env.RAYBEND_WIN_BUILD_DIR }).windowsTarget;
+  } catch (error) {
+    fail(`无法探测当前 Windows 构建目录：${error.message}`, "用 --target-dir 'C:\\…' 指定，或先跑一次 pnpm debug:win / pnpm release（探测需要 powershell.exe 与 wslpath）");
+  }
+}
 
 /** `C:\rb-target\raybend` → `/mnt/c/rb-target/raybend`；本机路径（含相对路径）原样。 */
 function toLocalPath(path) {
@@ -113,7 +127,8 @@ if (!Number.isFinite(KEEP_DAYS) || KEEP_DAYS < 0) {
   fail(`--keep-days 要给天数（≥0），收到：${valueOf("--keep-days")}`);
 }
 
-const TARGET_WIN = valueOf("--target-dir", WIN_TARGET_DIR);
+const EXPLICIT_TARGET = valueOf("--target-dir", process.env.WIN_TARGET_DIR);
+const TARGET_WIN = EXPLICIT_TARGET ?? currentWinTarget();
 /** 这个 target 在 Windows 侧吗（决定构建那一步走 cmd.exe 还是本地 cargo）。 */
 const IS_WINDOWS_TARGET = /^[A-Za-z]:[\\/]/.test(TARGET_WIN);
 const TARGET = toLocalPath(TARGET_WIN);
@@ -121,6 +136,9 @@ if (TARGET === null) {
   fail(`--target-dir 要给 Windows 路径（C:\\…）或本机绝对路径（/…），收到：${TARGET_WIN}`);
 }
 if (!existsSync(TARGET)) fail(`target 目录不存在：${TARGET}`);
+if (EXPLICIT_TARGET === undefined && toLocalPath(LEGACY_WIN_TARGET) !== TARGET && existsSync(toLocalPath(LEGACY_WIN_TARGET))) {
+  console.log(`ℹ 存在旧构建目录 ${LEGACY_WIN_TARGET}（本次不清它）；确认无用后：pnpm clean:win --target-dir "${LEGACY_WIN_TARGET}" --keep-days 0`);
+}
 const DEBUG = join(TARGET, "debug");
 const JSON_PATH = valueOf("--json", join(TARGET_WIN, "last-build.json"));
 /** 清单是调用方显式给的（`debug:win` 刚用它自己的构建落过）还是脚本自己挑的默认路径。 */

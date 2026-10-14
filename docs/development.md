@@ -22,6 +22,7 @@
 | `pnpm debug:win` | 一键 debug 构建：前端 → Windows cargo → 产物核对（可接 `-- --ai=…`） |
 | `pnpm check:win` | 产物体检：与 `dist/` 的时间戳、内嵌前端资源、worker 协议 |
 | `pnpm clean:win` / `pnpm clean:wsl` | 只清理失效 target 产物，不付冷构建的代价 |
+| `pnpm clean:report` | 磁盘占用总账（只读）：各缓存目录多大、该谁清 |
 | `pnpm check:color-win [profile…]` | Windows 侧色彩探针（在 Windows 目标上构建并跑色彩示例） |
 | `pnpm check:lens-ipc-win --launch <库 id> <资产 id>` | 只读的镜头元数据 IPC 冒烟；`--expect-profile=` / `--expect-metadata-warning` 加断言 |
 
