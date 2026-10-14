@@ -56,6 +56,9 @@ import { ToolsBar } from "./shell/ToolsBar.tsx";
 import { createImportStore, ImportWorkspace } from "./workspaces/import/index.ts";
 import { createToastStore, ToastHost, toastDisposer } from "./components/ui/Toast.tsx";
 import { aiBuildEnabled, aiCapability } from "./lib/ai-capability.ts";
+import { updateCheck } from "./api/updates.ts";
+import { currentBuildInfo } from "./lib/build-info.ts";
+import { AUTO_UPDATE_DELAY_MS, AUTO_UPDATE_KEY, UPDATE_KEY, autoCheckSource, defaultUpdateSource, readAutoCheck } from "./lib/update-source.ts";
 import { aiModelStatus, aiForeground } from "./api/photo-ai.ts";
 import { AiDialog } from "./features/browse/AiDialog.tsx";
 import { BrowseToolbar, BucketDialog, BucketPickerDialog, createBrowseStore, TagDialog, type BrowseStore } from "./features/browse/index.ts";
@@ -587,6 +590,22 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
   const [settingsPage, setSettingsPage] = createSignal<SettingsPage>("color");
   const [aboutOpen, setAboutOpen] = createSignal(false);
   const [updatesOpen,setUpdatesOpen]=createSignal(false);
+  /*
+   * 启动静默检查更新（崔总 2026-10-14 定）：默认开，用户可在更新对话框里关。
+   * 只拉更新清单，**只在发现新版本时提示**；下载与安装仍由用户确认。
+   * 构建不带公钥（源为 off）、商店版、或用户关过 —— 都不联网；失败静默不打扰启动。
+   */
+  onMount(()=>{
+    const stored=(key:string):string|null=>{try{return localStorage.getItem(key);}catch{return null;}};
+    const source=autoCheckSource(stored(UPDATE_KEY),defaultUpdateSource(__RAYBEND_UPDATER_PUBLIC_KEY__,currentBuildInfo().channel));
+    if(!source||!readAutoCheck(stored(AUTO_UPDATE_KEY))||__RAYBEND_DISTRIBUTION__==="store")return;
+    const timer=window.setTimeout(()=>{
+      void updateCheck(source).then(update=>{
+        if(update)toast.show({tone:"info",message:t("updates.auto.available",{version:update.version}),action:{label:t("updates.auto.view"),onAction:()=>setUpdatesOpen(true)},duration:15000});
+      }).catch(()=>{/* 启动检查失败不打扰：用户在更新对话框里可手动重试。 */});
+    },AUTO_UPDATE_DELAY_MS);
+    onCleanup(()=>window.clearTimeout(timer));
+  });
   const [aboutPage,setAboutPage]=createSignal<"about"|"help"|"licenses">("about");
   /** 「新建库」的请求计数：导入工作区看到它变就开弹窗（弹窗状态住在那个工作区） */
   const [newRepositoryRequest, setNewRepositoryRequest] = createSignal(0);
