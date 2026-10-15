@@ -12998,199 +12998,6 @@
     },
     {
       "type": "frame",
-      "id": "OBgSA",
-      "x": 10696,
-      "y": 1301,
-      "name": "Dialog / 更新设置与检查",
-      "width": 600,
-      "fill": "$surface-layer",
-      "cornerRadius": "$radius",
-      "layout": "vertical",
-      "gap": 12,
-      "padding": 16,
-      "children": [
-        {
-          "type": "text",
-          "id": "RqlGX",
-          "name": "Dialog Title",
-          "fill": "$fg-1",
-          "content": "更新",
-          "fontFamily": "Inter",
-          "fontSize": 13,
-          "fontWeight": "normal"
-        },
-        {
-          "type": "frame",
-          "id": "czHdS",
-          "name": "About Brand / 放大软件图标",
-          "width": "fill_container",
-          "height": 80,
-          "gap": 16,
-          "alignItems": "center",
-          "children": [
-            {
-              "type": "frame",
-              "id": "B8CgE",
-              "name": "RayBend App Image / 80×80",
-              "width": 80,
-              "height": 80,
-              "fill": "$brand",
-              "cornerRadius": 16,
-              "justifyContent": "center",
-              "alignItems": "center",
-              "children": [
-                {
-                  "type": "icon",
-                  "id": "lvB6V",
-                  "name": "Glyph / aperture",
-                  "width": 46,
-                  "height": 46,
-                  "icon": "aperture",
-                  "library": "lucide",
-                  "fill": "$fg-on-brand"
-                }
-              ]
-            },
-            {
-              "type": "frame",
-              "id": "a43AJJ",
-              "name": "About Product Copy",
-              "width": "fill_container",
-              "layout": "vertical",
-              "gap": 6,
-              "justifyContent": "center",
-              "children": [
-                {
-                  "type": "text",
-                  "id": "ZyKwX",
-                  "name": "Dialog Hint",
-                  "fill": "$fg-2",
-                  "content": "版本 0.1.0 · AGPL-3.0-only · 相片管理",
-                  "fontFamily": "Inter",
-                  "fontSize": 12,
-                  "fontWeight": "normal"
-                },
-                {
-                  "type": "text",
-                  "id": "faxRG",
-                  "name": "About Tagline",
-                  "fill": "$fg-2",
-                  "content": "面向摄影师的本地相片管理器",
-                  "fontFamily": "Inter",
-                  "fontSize": 12,
-                  "fontWeight": "normal"
-                }
-              ]
-            }
-          ]
-        },
-        {
-          "type": "frame",
-          "id": "B5AOWz",
-          "name": "About Info",
-          "width": "fill_container",
-          "fill": "$surface-track",
-          "cornerRadius": "$radius",
-          "layout": "vertical",
-          "gap": 4,
-          "padding": 8,
-          "children": [
-            {
-              "type": "text",
-              "id": "L4idWi",
-              "name": "About Row",
-              "fill": "$fg-2",
-              "content": "检查更新 / 最新 / 可更新 / 下载中 / 已下载 / 错误",
-              "fontFamily": "Inter",
-              "fontSize": 12,
-              "fontWeight": "normal"
-            },
-            {
-              "type": "text",
-              "id": "H9Am7",
-              "name": "About Row",
-              "fill": "$fg-2",
-              "textGrowth": "fixed-width",
-              "width": "fill_container",
-              "content": "更新：关闭 / 稳定 / 预览 / 自定义 HTTPS 源 + 公钥",
-              "fontFamily": "Inter",
-              "fontSize": 12,
-              "fontWeight": "normal"
-            },
-            {
-              "type": "text",
-              "id": "F0GA0Y",
-              "name": "About Row",
-              "fill": "$fg-2",
-              "textGrowth": "fixed-width",
-              "width": "fill_container",
-              "content": "主动联网；下载后验证签名；安装前结束导入/导出并保存编辑",
-              "fontFamily": "Inter",
-              "fontSize": 12,
-              "fontWeight": "normal"
-            }
-          ]
-        },
-        {
-          "type": "frame",
-          "id": "Zlyeh",
-          "name": "Dialog Footer",
-          "width": "fill_container",
-          "gap": 8,
-          "justifyContent": "end",
-          "children": [
-            {
-              "type": "frame",
-              "id": "I2E0dk",
-              "name": "Button / 关闭",
-              "height": 32,
-              "fill": "$surface-track",
-              "cornerRadius": "$radius",
-              "padding": "$pad-x",
-              "justifyContent": "center",
-              "alignItems": "center",
-              "children": [
-                {
-                  "type": "text",
-                  "id": "lCzG0",
-                  "name": "Button Label",
-                  "fill": "$fg-1",
-                  "content": "关闭",
-                  "fontFamily": "Inter",
-                  "fontSize": 12,
-                  "fontWeight": "normal"
-                }
-              ]
-            },
-            {
-              "type": "frame",
-              "id": "ys35E",
-              "name": "Button / 查看许可",
-              "height": 32,
-              "fill": "$brand",
-              "cornerRadius": "$radius",
-              "padding": "$pad-x",
-              "justifyContent": "center",
-              "alignItems": "center",
-              "children": [
-                {
-                  "type": "text",
-                  "id": "mgcrY",
-                  "name": "Button Label",
-                  "fill": "$fg-on-brand",
-                  "content": "检查更新",
-                  "fontFamily": "Inter",
-                  "fontSize": 12,
-                  "fontWeight": "normal"
-                }
-              ]
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "type": "frame",
       "id": "YtBhK",
       "x": 0,
       "y": 0,
@@ -22536,6 +22343,633 @@
                   "fontFamily": "Inter",
                   "fontSize": 13,
                   "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "eQN2Z",
+      "x": 10696,
+      "y": 1301,
+      "name": "Dialog / 更新 · 下载中",
+      "width": 600,
+      "fill": "$surface-layer",
+      "cornerRadius": "$radius",
+      "layout": "vertical",
+      "gap": 12,
+      "padding": 16,
+      "children": [
+        {
+          "type": "text",
+          "id": "zrPRd",
+          "name": "Dialog Title",
+          "fill": "$fg-1",
+          "content": "更新",
+          "fontFamily": "Inter",
+          "fontSize": 17,
+          "fontWeight": "600"
+        },
+        {
+          "type": "text",
+          "id": "J4NiJd",
+          "name": "Current Version",
+          "fill": "$fg-2",
+          "content": "当前版本 0.1.2",
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "H473nl",
+          "name": "Progress Block",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 8,
+          "children": [
+            {
+              "type": "text",
+              "id": "XhLp5",
+              "name": "Progress Text",
+              "fill": "$fg-2",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "正在后台下载 0.1.3：38.4 MB / 120.5 MB（32%）",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "oxPfl",
+              "name": "Progress Track",
+              "width": "fill_container",
+              "height": 4,
+              "fill": "$surface-bar",
+              "cornerRadius": 2,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "m3rPk",
+                  "name": "Progress Fill",
+                  "width": 182,
+                  "height": 4,
+                  "fill": "$brand",
+                  "cornerRadius": 2
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "EhBFA",
+          "name": "Settings Block",
+          "width": "fill_container",
+          "fill": "$surface-track",
+          "cornerRadius": "$radius",
+          "layout": "vertical",
+          "gap": 10,
+          "padding": 12,
+          "children": [
+            {
+              "type": "frame",
+              "id": "t6IqG5",
+              "name": "Row / 启动检查",
+              "width": "fill_container",
+              "gap": 8,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "wjfML",
+                  "name": "Setting Label",
+                  "fill": "$fg-2",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "启动时检查更新",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "qLLmL",
+                  "name": "Switch / On",
+                  "width": 32,
+                  "height": 18,
+                  "fill": "$brand",
+                  "cornerRadius": 9,
+                  "padding": 2,
+                  "justifyContent": "end",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "L3WXW",
+                      "name": "Switch Knob",
+                      "width": 14,
+                      "height": 14,
+                      "fill": "$fg-on-brand",
+                      "cornerRadius": 7
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "GrYU5",
+              "name": "Row / 更新来源",
+              "width": "fill_container",
+              "gap": 8,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "rGIRj",
+                  "name": "Setting Label",
+                  "fill": "$fg-2",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "更新来源",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "PUnst",
+                  "name": "Source Chips",
+                  "gap": 6,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "JzeJ9",
+                      "name": "Chip / 稳定",
+                      "height": 26,
+                      "fill": "$brand",
+                      "cornerRadius": "$radius",
+                      "gap": 6,
+                      "padding": "$pad-x",
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "nutqv",
+                          "name": "Chip Label",
+                          "fill": "$fg-on-brand",
+                          "content": "稳定",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "fcGnh",
+                      "name": "Chip / 预览",
+                      "height": 26,
+                      "fill": "$surface-bar",
+                      "cornerRadius": "$radius",
+                      "gap": 6,
+                      "padding": "$pad-x",
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "npSYg",
+                          "name": "Chip Label",
+                          "fill": "$fg-3",
+                          "content": "预览",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "a4MDZ4",
+                          "name": "Chip Note",
+                          "fill": "$fg-3",
+                          "content": "暂未开放",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "s98Vk",
+          "name": "Dialog Hint",
+          "fill": "$fg-3",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "启动后与您手动检查时联网，只请求更新清单（不发送照片或库内容）；下载的安装包通过签名校验后才会保存。",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 11,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "yDc3o",
+          "name": "Dialog Footer",
+          "width": "fill_container",
+          "gap": 8,
+          "justifyContent": "end",
+          "children": [
+            {
+              "type": "frame",
+              "id": "ak8WV",
+              "name": "Button / 关闭",
+              "height": 32,
+              "fill": "$surface-track",
+              "cornerRadius": "$radius",
+              "padding": "$pad-x",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "wOdCZ",
+                  "name": "Button Label",
+                  "fill": "$fg-1",
+                  "content": "关闭",
+                  "fontFamily": "Inter",
+                  "fontSize": 14,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "qqfbl",
+      "x": 10696,
+      "y": 1653,
+      "name": "Dialog / 更新提示 · 下载或跳过",
+      "width": 480,
+      "fill": "$surface-layer",
+      "cornerRadius": "$radius",
+      "layout": "vertical",
+      "gap": 12,
+      "padding": 16,
+      "children": [
+        {
+          "type": "text",
+          "id": "QbIji",
+          "name": "Dialog Title",
+          "fill": "$fg-1",
+          "content": "发现新版本 0.1.3",
+          "fontFamily": "Inter",
+          "fontSize": 17,
+          "fontWeight": "600"
+        },
+        {
+          "type": "text",
+          "id": "i0IAhi",
+          "name": "Dialog Hint",
+          "fill": "$fg-2",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "下载在后台进行，您可以照常使用。选「跳过」后这个版本不再自动提示，想更新时在「更新」里手动检查即可。",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "nIQMb",
+          "name": "Dialog Footer",
+          "width": "fill_container",
+          "gap": 8,
+          "justifyContent": "end",
+          "children": [
+            {
+              "type": "frame",
+              "id": "K6A6f",
+              "name": "Button / 跳过",
+              "height": 32,
+              "fill": "$surface-track",
+              "cornerRadius": "$radius",
+              "padding": "$pad-x",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "iWYDk",
+                  "name": "Button Label",
+                  "fill": "$fg-1",
+                  "content": "跳过",
+                  "fontFamily": "Inter",
+                  "fontSize": 14,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "I43WF",
+              "name": "Button / 下载",
+              "height": 32,
+              "fill": "$brand",
+              "cornerRadius": "$radius",
+              "padding": "$pad-x",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "VGHUs",
+                  "name": "Button Label",
+                  "fill": "$fg-on-brand",
+                  "content": "下载 0.1.3",
+                  "fontFamily": "Inter",
+                  "fontSize": 14,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "hEg3a",
+      "x": 10696,
+      "y": 1872,
+      "name": "Dialog / 更新就绪 · 安装或取消",
+      "width": 480,
+      "fill": "$surface-layer",
+      "cornerRadius": "$radius",
+      "layout": "vertical",
+      "gap": 12,
+      "padding": 16,
+      "children": [
+        {
+          "type": "text",
+          "id": "OGDLE",
+          "name": "Dialog Title",
+          "fill": "$fg-1",
+          "content": "新版本 0.1.3 已下载完成",
+          "fontFamily": "Inter",
+          "fontSize": 17,
+          "fontWeight": "600"
+        },
+        {
+          "type": "text",
+          "id": "LNsOt",
+          "name": "Dialog Hint",
+          "fill": "$fg-2",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "安装会关闭并重启应用；也可以先取消，之后在「更新」里安装。",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "hV7Z3",
+          "name": "Dialog Footer",
+          "width": "fill_container",
+          "gap": 8,
+          "justifyContent": "end",
+          "children": [
+            {
+              "type": "frame",
+              "id": "Pi3qV",
+              "name": "Button / 取消",
+              "height": 32,
+              "fill": "$surface-track",
+              "cornerRadius": "$radius",
+              "padding": "$pad-x",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "P8r6m",
+                  "name": "Button Label",
+                  "fill": "$fg-1",
+                  "content": "取消",
+                  "fontFamily": "Inter",
+                  "fontSize": 14,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "NZ64d",
+              "name": "Button / 安装",
+              "height": 32,
+              "fill": "$brand",
+              "cornerRadius": "$radius",
+              "padding": "$pad-x",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "uCSJG",
+                  "name": "Button Label",
+                  "fill": "$fg-on-brand",
+                  "content": "安装",
+                  "fontFamily": "Inter",
+                  "fontSize": 14,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "Ugclp",
+      "x": 12526,
+      "y": 1301,
+      "name": "Components / TitleBar 更新指示器",
+      "width": 420,
+      "layout": "vertical",
+      "gap": 12,
+      "children": [
+        {
+          "type": "frame",
+          "id": "BJdYy",
+          "name": "TitleBar / 后台下载中",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 6,
+          "children": [
+            {
+              "type": "text",
+              "id": "XnSCE",
+              "name": "Strip Caption",
+              "fill": "$fg-3",
+              "content": "下载中：图标 + 百分比提示，点一下打开更新对话框",
+              "fontFamily": "Inter",
+              "fontSize": 11,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "DQwW5",
+              "name": "TitleBar Slice",
+              "width": "fill_container",
+              "height": 40,
+              "fill": "$surface-bar",
+              "cornerRadius": "$radius",
+              "gap": 8,
+              "padding": "$pad-x",
+              "justifyContent": "end",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "kXBiW",
+                  "name": "Indicator Button",
+                  "width": 28,
+                  "height": 28,
+                  "cornerRadius": "$radius",
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "P6kQR",
+                      "name": "Indicator Icon",
+                      "width": 14,
+                      "height": 14,
+                      "icon": "download",
+                      "library": "Material Symbols Rounded",
+                      "fill": "$brand"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "nMdP3",
+                  "name": "Tooltip Bubble",
+                  "fill": "$surface-layer",
+                  "cornerRadius": "$radius",
+                  "gap": 6,
+                  "padding": "$pad-y",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "CJeOE",
+                      "name": "Tooltip Text",
+                      "fill": "$fg-1",
+                      "content": "正在后台下载更新（32%）",
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "pbDOk",
+          "name": "TitleBar / 已下载待安装",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 6,
+          "children": [
+            {
+              "type": "text",
+              "id": "CWg3F",
+              "name": "Strip Caption",
+              "fill": "$fg-3",
+              "content": "已就绪：换成对勾，点一下打开更新对话框（取消后不再自动问）",
+              "fontFamily": "Inter",
+              "fontSize": 11,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "aNrRO",
+              "name": "TitleBar Slice",
+              "width": "fill_container",
+              "height": 40,
+              "fill": "$surface-bar",
+              "cornerRadius": "$radius",
+              "gap": 8,
+              "padding": "$pad-x",
+              "justifyContent": "end",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "B7DnUl",
+                  "name": "Indicator Button",
+                  "width": 28,
+                  "height": 28,
+                  "cornerRadius": "$radius",
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "XMQvu",
+                      "name": "Indicator Icon",
+                      "width": 14,
+                      "height": 14,
+                      "icon": "check_circle",
+                      "library": "Material Symbols Rounded",
+                      "fill": "$brand"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "iRZzq",
+                  "name": "Tooltip Bubble",
+                  "fill": "$surface-layer",
+                  "cornerRadius": "$radius",
+                  "gap": 6,
+                  "padding": "$pad-y",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "huVoT",
+                      "name": "Tooltip Text",
+                      "fill": "$fg-1",
+                      "content": "新版本 0.1.3 可以安装",
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
                 }
               ]
             }
