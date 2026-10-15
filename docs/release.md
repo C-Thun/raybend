@@ -363,6 +363,16 @@ Windows cargo 构建主程序与 worker → 打所选安装器 → 核对嵌入�
 
 更新密钥免费自持，独立于 Authenticode。请自己生成并备份加密私钥和密码，不要放进仓库、对话、日志或自动化脚本。
 
+**发布前可选：验签上一个真实产物**（不需要密码，只读）—— 用客户端同一套校验代码确认
+「私钥 ↔ 公钥 ↔ 上一版产物」三者配对，避免发布出去才发现旧客户端验不过：
+
+```bash
+RAYBEND_VERIFY_ARTIFACT=$PWD/release-out/v0.1.2/RayBend_0.1.2_x64_en-US.msi \
+RAYBEND_VERIFY_VERSION=0.1.2 \
+  cargo test -p raybend-desktop --lib verifies_a_real_release -- --ignored --nocapture
+# ✓ 通过 ⇒ 同一把私钥可以继续签下一版
+```
+
 ```bash
 pnpm tauri signer generate -w /您自己选择的仓外安全目录/raybend-updater.key
 ```

@@ -337,4 +337,36 @@ mod tests {
         assert!(verify_signed_version("version:1.0.0-rc", "1.0.0-rc").is_ok());
         assert!(verify_signed_version("version:1.0.0-rc", "1.0.0").is_err());
     }
+
+    /// 发布前的**真实产物核查**（手动、默认跳过）：用客户端同一套代码验一个真安装器。
+    ///
+    /// ```bash
+    /// RAYBEND_VERIFY_ARTIFACT=release-out/v0.1.3/RayBend_0.1.3_x64_en-US.msi \
+    /// RAYBEND_VERIFY_VERSION=0.1.3 \
+    ///   cargo test -p raybend-desktop --lib verifies_a_real_release -- --ignored --nocapture
+    /// ```
+    /// 公钥取自仓库根 `release.config.json`（与安装包内置的那把同一来源）。
+    #[test]
+    #[ignore = "手动：需要一个真实发布产物（用法见 docs/release.md 附录 A）"]
+    fn verifies_a_real_release_artifact() {
+        let artifact = std::env::var("RAYBEND_VERIFY_ARTIFACT").expect("缺 RAYBEND_VERIFY_ARTIFACT");
+        let version = std::env::var("RAYBEND_VERIFY_VERSION").expect("缺 RAYBEND_VERIFY_VERSION");
+        let signature = fs::read_to_string(format!("{artifact}.sig")).expect("读 .sig");
+        let config = fs::read_to_string("../release.config.json").expect("读 release.config.json");
+        let parsed: serde_json::Value = serde_json::from_str(&config).expect("release.config.json 是 JSON");
+        let public_key = parsed["updaterPublicKey"]
+            .as_str()
+            .expect("updaterPublicKey 是字符串")
+            .to_string();
+        let plan = Plan {
+            version,
+            url: Url::parse("https://example.org/installer").expect("构造 URL"),
+            signature: signature.trim().to_string(),
+            public_key,
+        };
+        match verify_file(Path::new(&artifact), &plan) {
+            Ok(()) => println!("[verify] ✓ {artifact} 验签通过"),
+            Err(error) => panic!("真实产物验签失败：{error}"),
+        }
+    }
 }
