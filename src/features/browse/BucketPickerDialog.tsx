@@ -24,8 +24,10 @@ export function BucketPickerDialog(props: {
     if (busy() || props.photos.length === 0) return;
     setBusy(true); setError(null);
     try {
-      const id = bucketId ?? (await createPhotoBucket(name().trim())).id;
-      const count = await addPhotosToBucket(id, [...props.photos]);
+      // 已有桶：只加成员；新桶：创建与加入同一事务，失败不留空桶
+      const count = bucketId !== undefined
+        ? await addPhotosToBucket(bucketId, [...props.photos])
+        : (await createPhotoBucket(name().trim(), { groups: [] }, [...props.photos])).added;
       props.onDone(count);
       props.onClose();
     } catch (reason) { setError(String(reason)); }

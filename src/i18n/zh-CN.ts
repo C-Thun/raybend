@@ -106,6 +106,7 @@ export const zhCN = {
   "org.removedCount": "已从相片桶移出 {n} 张照片",
   "org.removeFailed": "有 {n} 张照片移出失败",
   "org.deleteBucketConfirm": "删除相片桶“{name}”？桶内成员关系会移除，照片本身不会删除。",
+  "org.bucketDeletedFallback": "已删除相片桶“{name}”，照片区回到库目录",
   "org.markFailed": "有 {n} 个库的标记写入失败，其余库已完成",
   "org.flagFailed": "有 {n} 个库的旗标更新失败，其余库已完成",
   "org.reconcileFailed": "自动收片更新失败；重新进入库或窗口聚焦时会重试",

@@ -30,6 +30,8 @@ export interface OrganizationPanelProps {
   onSelectDirectory: (repositoryId: string, path: string) => void;
   onNewBucket: () => void;
   onEditBucket: (bucket: PhotoBucket) => void;
+  /** 删除成功后被删桶是当前选中项时触发（由工作区决定回退与提示）。 */
+  onBucketDeleted?: (bucket: PhotoBucket) => void;
   onError: (error: unknown) => void;
   onChanged?: () => void;
 }
@@ -140,6 +142,7 @@ export function OrganizationPanel(props: OrganizationPanelProps) {
     try {
       await deletePhotoBucket(target.id);
       setDeleteTarget(null);
+      if (props.selection?.kind === "bucket" && props.selection.id === target.id) props.onBucketDeleted?.(target);
       await refreshBuckets();
       props.onChanged?.();
     } catch (error) { props.onError(error); }

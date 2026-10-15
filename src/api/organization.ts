@@ -40,8 +40,13 @@ export async function listPhotoBuckets(): Promise<PhotoBucket[]> {
   return isTauriRuntime() ? invokeBrowseCommand("organization_buckets") : [];
 }
 
-export async function createPhotoBucket(name: string, rules: RuleSet = { groups: [] }): Promise<PhotoBucket> {
-  return invokeBrowseCommand("organization_bucket_create", { name, rules });
+export interface CreateBucketOutcome { bucket: PhotoBucket; added: number }
+
+/** 创建桶；带上 photos 时「新建并加入」在同一事务里提交（失败不留空桶）。 */
+export async function createPhotoBucket(
+  name: string, rules: RuleSet = { groups: [] }, photos: AssetIdentity[] = [],
+): Promise<CreateBucketOutcome> {
+  return invokeBrowseCommand("organization_bucket_create", { name, rules, photos });
 }
 
 export async function renamePhotoBucket(id: number, name: string): Promise<boolean> {

@@ -106,6 +106,7 @@ export const enUS: Record<MessageKey, string> = {
   "org.removedCount": "Removed {n} photos from the bucket",
   "org.removeFailed": "Failed to remove {n} photos",
   "org.deleteBucketConfirm": "Delete bucket “{name}”? The photos themselves will stay in their libraries.",
+  "org.bucketDeletedFallback": "Bucket “{name}” deleted. The photo area is back to library directories.",
   "org.markFailed": "Marking failed in {n} libraries; the others completed",
   "org.flagFailed": "Flag updates failed in {n} libraries; the others completed",
   "org.reconcileFailed": "Automatic bucket update failed; it will retry when a library or this window is reopened",

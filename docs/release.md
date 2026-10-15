@@ -355,7 +355,41 @@ Windows cargo 构建主程序与 worker → 打所选安装器 → 核对嵌入�
 | beta 版打 MSI 失败 | MSI 是数值版本，区分不了 `beta.N` | beta / 预发布一律 `--win-nsis`（脚本不做静默替换） |
 | 调试包被拉到正式版 | 早期实现里 test/dev 通道也会自动检查更新 | 现在按通道分档：只有 release/beta 构建自动检查；debug 包连公钥都不带（§2.3） |
 | 更新下载中断就得从头再来 | 官方插件的 `download()` 一次性收整包进内存，续不了传 | v2 自研 Range 续传（落盘 `.part` + 状态 `state.json`），规格 `specs/update-flow-v2.md` |
-| AI 版突然变无 AI 版 | 模型在独立仓库（git LFS），本仓没有 | 默认 `--ai=auto` 会退化成基础版并打印原因；要强制就 `--ai=required`（附录 E） |
+| AI 版突然变无 AI 版 | 模型在独立仓库（git LFS），本仓没有 | 默认 `--ai=auto` 会退化成基础版并打印原因；要强制就 `--ai=required`（附录 D） |
+| 每次打 MSI 都报 4 条 `warning LGHT1076`（ICE03 / ICE40 / ICE57 / ICE61） | 全部来自 **Tauri 官方 WiX 模板**（写死的，不是我们的配置错） | **属正常噪音，不影响结果** —— 证据与逐条解释见 §8.1 |
+
+### 8.1 看着像错误、其实是噪音的 MSI 警告
+
+每次 Windows 打包末尾都会出现这四条（`light.exe` 的 ICE 校验警告，**不阻断构建**）：
+
+```text
+warning LGHT1076 : ICE03: String overflow ... Table: CustomAction, Column: Target, Key(s): DownloadAndInvokeBootstrapper
+warning LGHT1076 : ICE40: REINSTALLMODE is defined in the Property table. This may cause difficulties.
+warning LGHT1076 : ICE57: Component 'CMP_UninstallShortcut' has both per-user and per-machine data with an HKCU Registry KeyPath.
+warning LGHT1076 : ICE61: This product should remove only older versions of itself. The Maximum version is not less than the current product. (0.1.3 0.1.3)
+```
+
+出处（`tauri-bundler/src/bundle/windows/msi/main.wxs`，都在模板里写死，不随我们的 `tauri.conf.json` 变）：
+
+| 警告 | 模板里的源头 | 到底是怎么回事 |
+| --- | --- | --- |
+| ICE03 | 第 294 行 WebView2 **下载引导器**的 `CustomAction`（内联 PowerShell 命令；默认 `webviewInstallMode: downloadBootstrapper`） | 命令长 407 字符，ICE 按老的列宽限制报警；**但 MSI 表里存的是完整命令**（已读数据库核对，没截断）⇒ 引导器能正常跑 |
+| ICE40 | 第 33 行 `<Property Id="REINSTALLMODE" Value="amus" />` | Tauri **故意**这么设（重装全部文件、重写注册表、重建快捷方式），为的是自更新时覆盖得干净 |
+| ICE57 | 第 177 行卸载快捷方式组件（perMachine 包里写了 HKCU 的 KeyPath） | Tauri 模板如此；共享机器上可能给其他用户留个卸载快捷方式，不影响安装 / 升级 / 卸载本体 |
+| ICE61 | 第 43 行 `<MajorUpgrade ... AllowSameVersionUpgrades="yes" />` | 为**自更新重装同版本**而开：装了同版本也要走「卸旧→装新」，ICE 于是抱怨 Maximum 不低于当前版 |
+
+**要不要规避**：
+
+- **建议：不规避**。四条都不改变产物行为；v0.1.3 的 MSI 已逐表核对：`RemoveExistingProducts` 在执行序列（升级会先卸旧版）、
+  Upgrade 表两行分别指向 `WIX_UPGRADE_DETECTED` / `WIX_DOWNGRADE_DETECTED`（升级正常、降级拦截）、
+  `ALLUSERS=1`（per-machine 安装）、引导器命令完整。
+- 想只消掉 ICE03：把 `bundle.windows.webviewInstallMode` 换成 `embedBootstrapper`（内嵌约 1.5 MB 引导器，安装时仍联网拉 WebView2）
+  或 `offlineInstaller`（内嵌完整运行时，安装包 +130 MB 量级）—— 代价是体积。
+- 想全部消掉：自定义 `bundle.windows.wix.template` 接一份模板进仓 —— 从此要跟上游模板逐版 diff，**不推荐**。
+- 想靠 `light.exe -sice:…` 抑制：Tauri 的 bundler 不暴露该参数（只能改上游或提 PR）。
+
+排查手法（只读）：用 Windows 的 `WindowsInstaller.Installer` COM 查 MSI 的 `CustomAction` / `Property` / `Upgrade` / `InstallExecuteSequence`
+四张表，就能把「警告到底有没有造成实际后果」问清楚 —— 别靠猜。
 
 ---
 

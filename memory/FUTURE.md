@@ -62,6 +62,17 @@
   规格：`specs/logging-and-crash-report.md`（含线协议契约、脱敏映射表、服务端与部署加固清单、波次划分与验收清单、调研参考 URL）。
   已拍：release 保持 `panic = "abort"`；符号（`strip` / 行号表）策略**发版前再拍**（当前 dev 构建有行号，发布版 backtrace 只有地址）。T1 的五项待定仍未定。
 
+* **相片桶改名入口与桶时间线取数优化**（2026-10-13 审查登记，崔总定档 after release；当前 pre-release 试发版不动）：
+  * **改名入口**：`organization_bucket_rename` IPC 已实现但前端零调用（死命令，`src/api/organization.ts::renamePhotoBucket` 无人引用）；
+    普通桶改名只能开「编辑规则」弹窗改名字段（文案与意图不符），且 `set_bucket_rules` 无条件 `rule_revision + 1`，
+    自动桶改个名就触发一次全库补扫。要做：面板菜单加「重命名」项（复用死命令），编辑规则弹窗仅在规则实际变化时 bump revision。
+    落点：`crates/raybend/src/store/organization.rs`、`src/features/browse/OrganizationPanel.tsx`、`src-tauri/src/organization.rs`。
+  * **桶时间线全量物化**（「时间线」= `query::timeline` 那条「id + 拍摄时间 + 相对路径」的有序列表，浏览按时间模式取数用的就是它）：
+    `organization_bucket_timeline` 每次打开都把全成员捞出（`member_refs` 全量 + `valid_member_refs` 逐行核对 UID + 无分页全排序），
+    万级成员的桶打开会慢且无上限保护。优化方向：成员有效性核对批量化（IN 查询代替逐行）、timeline 分页/keyset、计数与可用性口径分开。
+    落点：`src-tauri/src/organization.rs::organization_bucket_timeline`、`crates/raybend/src/store/organization.rs::valid_member_refs`。
+    依据：2026-10-13 bucket/tag/AI 链路审查报告（会话记录）。
+
 ---
 
 ## 库与磁盘的一致性：进目录「清点人头」（已排期 M4-W1）

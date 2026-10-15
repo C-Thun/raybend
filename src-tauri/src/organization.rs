@@ -13,11 +13,28 @@ pub async fn organization_buckets<R: Runtime>(app: AppHandle<R>) -> Result<Vec<B
     })).await
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateBucketOutcome {
+    pub bucket: Bucket,
+    pub added: usize,
+}
+
+/// 创建桶；带上 `photos` 时「新建并加入」在同一个 app.db 事务里提交（规格 §7：失败不留空桶）。
 #[tauri::command]
-pub async fn organization_bucket_create<R: Runtime>(app: AppHandle<R>, name: String, rules: RuleSet) -> Result<Bucket, String> {
-    blocking(move || app.state::<DbState>().with(&app, |db| {
-        db.write(move |conn| organization::create_bucket(conn, &name, rules, time::now_millis())).map_err(|e| e.to_string())
-    })).await
+pub async fn organization_bucket_create<R: Runtime>(
+    app: AppHandle<R>, name: String, rules: RuleSet, photos: Option<Vec<AssetIdentity>>,
+) -> Result<CreateBucketOutcome, String> {
+    blocking(move || {
+        let refs = resolve_refs(&app, photos.as_deref().unwrap_or(&[]))?;
+        app.state::<DbState>().with(&app, |db| {
+            db.write(move |conn| {
+                organization::create_bucket_with_members(conn, &name, rules, &refs, time::now_millis())
+            })
+            .map(|(bucket, added)| CreateBucketOutcome { bucket, added })
+            .map_err(|e| e.to_string())
+        })
+    }).await
 }
 
 #[tauri::command]

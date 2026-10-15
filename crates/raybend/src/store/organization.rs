@@ -155,16 +155,13 @@ fn clean_bucket_name(input: &str) -> Result<String> {
     Ok(name.into())
 }
 
-/// 创建桶，规则与待补扫范围同时提交。
-pub fn create_bucket(conn: &Connection, name: &str, rules: RuleSet, now: i64) -> Result<Bucket> {
-    let name = clean_bucket_name(name)?;
-    let rules = normalize_rules(rules)?;
-    let text = (!rules.groups.is_empty()).then(|| serde_json::to_string(&rules).expect("规则可序列化"));
-    let transaction = conn.unchecked_transaction()?;
+/// 在已有事务里插入桶本体与待补扫范围；组合操作（创建+加入）共用这一段。
+fn insert_bucket_tx(transaction: &Connection, name: &str, rules: &RuleSet, now: i64) -> Result<i64> {
+    let text = (!rules.groups.is_empty()).then(|| serde_json::to_string(rules).expect("规则可序列化"));
     transaction.execute(
         "INSERT INTO photo_buckets(name, name_folded, rule_json, rule_revision, created_at, updated_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
-        params![name, tags::fold_name(&name), text, i64::from(!rules.groups.is_empty()), now],
+        params![name, tags::fold_name(name), text, i64::from(!rules.groups.is_empty()), now],
     )?;
     let id = transaction.last_insert_rowid();
     if !rules.groups.is_empty() {
@@ -176,6 +173,15 @@ pub fn create_bucket(conn: &Connection, name: &str, rules: RuleSet, now: i64) ->
             )?;
         }
     }
+    Ok(id)
+}
+
+/// 创建桶，规则与待补扫范围同时提交。
+pub fn create_bucket(conn: &Connection, name: &str, rules: RuleSet, now: i64) -> Result<Bucket> {
+    let name = clean_bucket_name(name)?;
+    let rules = normalize_rules(rules)?;
+    let transaction = conn.unchecked_transaction()?;
+    let id = insert_bucket_tx(&transaction, &name, &rules, now)?;
     transaction.commit()?;
     bucket_by_id(conn, id)?.ok_or_else(|| Error::Unsupported("相片桶创建后无法读取".into()))
 }
@@ -251,10 +257,8 @@ fn validate_refs(photos: &[PhotoRef]) -> Result<()> {
     Ok(())
 }
 
-/// 手动加入自动桶会清除此前的排除；重复加入是幂等的。
-pub fn add_members(conn: &Connection, bucket_id: i64, photos: &[PhotoRef], now: i64) -> Result<usize> {
-    validate_refs(photos)?;
-    let transaction = conn.unchecked_transaction()?;
+/// 在已有事务里加成员；手动加入自动桶会清除此前的排除。返回新增条数。
+fn add_members_tx(transaction: &Connection, bucket_id: i64, photos: &[PhotoRef], now: i64) -> Result<usize> {
     let mut added = 0;
     for photo in photos {
         transaction.execute(
@@ -267,8 +271,36 @@ pub fn add_members(conn: &Connection, bucket_id: i64, photos: &[PhotoRef], now: 
             params![bucket_id, photo.repository_id, photo.photo_uid, photo.asset_id, now],
         )?;
     }
+    Ok(added)
+}
+
+/// 手动加入自动桶会清除此前的排除；重复加入是幂等的。
+pub fn add_members(conn: &Connection, bucket_id: i64, photos: &[PhotoRef], now: i64) -> Result<usize> {
+    validate_refs(photos)?;
+    let transaction = conn.unchecked_transaction()?;
+    let added = add_members_tx(&transaction, bucket_id, photos, now)?;
     transaction.commit()?;
     Ok(added)
+}
+
+/// 「新建桶并加入」：桶与首批成员在**同一个事务**里提交，失败不留空桶。
+/// 返回新桶与实际新增的成员数（重复身份被主键幂等掉的不计）。
+pub fn create_bucket_with_members(
+    conn: &Connection,
+    name: &str,
+    rules: RuleSet,
+    photos: &[PhotoRef],
+    now: i64,
+) -> Result<(Bucket, usize)> {
+    let name = clean_bucket_name(name)?;
+    let rules = normalize_rules(rules)?;
+    validate_refs(photos)?;
+    let transaction = conn.unchecked_transaction()?;
+    let id = insert_bucket_tx(&transaction, &name, &rules, now)?;
+    let added = add_members_tx(&transaction, id, photos, now)?;
+    transaction.commit()?;
+    let bucket = bucket_by_id(conn, id)?.ok_or_else(|| Error::Unsupported("相片桶创建后无法读取".into()))?;
+    Ok((bucket, added))
 }
 
 /// 自动加入先查 revision 与排除，再在同一事务里提交，旧规则结果不能越过新规则。
@@ -677,6 +709,26 @@ mod tests {
         assert_ne!(refs[0].photo_uid, refs[1].photo_uid);
         assert!(photo_refs(&cat, "库 A", &[first, second + 1]).is_err());
         assert!(photo_refs(&cat, "库 A", &[0]).is_err());
+    }
+
+    #[test]
+    fn create_with_members_is_atomic_and_idempotent() {
+        let app = db(DbKind::App);
+        let photos = [
+            PhotoRef { repository_id: "A".into(), photo_uid: "u1".into(), asset_id: 1 },
+            PhotoRef { repository_id: "A".into(), photo_uid: "u2".into(), asset_id: 2 },
+        ];
+        let (bucket, added) = create_bucket_with_members(&app, "海边", RuleSet::default(), &photos, 1).unwrap();
+        assert_eq!(added, 2);
+        assert_eq!(bucket.member_count, 2);
+        assert_eq!(member_refs(&app, bucket.id, "A").unwrap().len(), 2);
+        // 无效引用整单失败：桶与成员都不留
+        let bad = [PhotoRef { repository_id: "".into(), photo_uid: "u3".into(), asset_id: 3 }];
+        assert!(create_bucket_with_members(&app, "应回滚", RuleSet::default(), &bad, 2).is_err());
+        assert!(list_buckets(&app).unwrap().iter().all(|b| b.name != "应回滚"));
+        // 重名（折叠后相同）同样整单回滚
+        assert!(create_bucket_with_members(&app, " 海边 ", RuleSet::default(), &photos, 3).is_err());
+        assert_eq!(list_buckets(&app).unwrap().len(), 1);
     }
 
     #[test]
