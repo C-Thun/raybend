@@ -121,11 +121,10 @@ impl UpdateState {
         std::fs::create_dir_all(&dir).map_err(|_| "UPDATE_DIR".to_string())?;
         inner.stored = Stored::load(&dir);
         // 装着的那一版已经跑到当前版本上了 ⇒ 状态归零（成品文件随后清掉）
-        if let (Phase::Ready, Some(version)) = (inner.stored.phase, inner.stored.version.clone()) {
-            if version == app.package_info().version.to_string() {
+        if let (Phase::Ready, Some(version)) = (inner.stored.phase, inner.stored.version.clone())
+            && version == app.package_info().version.to_string() {
                 inner.stored.reset();
             }
-        }
         let keep = match inner.stored.phase {
             Phase::Idle => None,
             _ => inner.stored.version.clone(),

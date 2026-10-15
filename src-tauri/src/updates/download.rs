@@ -158,11 +158,10 @@ pub async fn fetch<F: FnMut(u64, Option<u64>)>(
     writer
         .flush()
         .map_err(|error| format!("UPDATE_DOWNLOAD_WRITE:{error}"))?;
-    if let Some(total) = total {
-        if done != total {
+    if let Some(total) = total
+        && done != total {
             return Err(format!("UPDATE_DOWNLOAD_INCOMPLETE:{done}/{total}"));
         }
-    }
     Ok(done)
 }
 

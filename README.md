@@ -56,7 +56,7 @@ The complete command index — tests, quality gates, Windows debug builds, AI as
 
 ## Release builds
 
-Installers are built locally (WSL front end + Windows-side Rust/MSVC) and published by the maintainer; the full manual — signing, build-directory selection, troubleshooting — is [docs/release.md](docs/release.md) (Chinese).
+Installers are built locally (WSL front end + Windows-side Rust/MSVC) and published by the maintainer; the full manual — signing, build-directory selection, troubleshooting — is [docs/release.md](docs/release.md) (Chinese). It reads top-down as **environment → commands → recovery**: three tiers (local dev → local debug build → release), each with its own checklist, then the commands for those same three tiers.
 
 **One-time setup** (only when setting up a machine):
 
