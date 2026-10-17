@@ -114,7 +114,7 @@ export function pickInstaller(
 export function resolveRelease(info: ReleaseInfo | null | undefined): ReleaseView {
   const tag = parseTag(info?.tag);
 
-  if (!info || !tag || info.prerelease || info.draft || tag.split('+')[0]!.includes('-')) {
+  if (!info || !tag || info.prerelease || info.draft || tag.split('+')[0]?.includes('-')) {
     return { state: 'pending', releaseUrl: RELEASES_URL };
   }
 
@@ -132,6 +132,16 @@ export function resolveRelease(info: ReleaseInfo | null | undefined): ReleaseVie
     sizeLabel: formatBytes(installer?.size),
     publishedAt: info.publishedAt,
   };
+}
+
+/**
+ * 下载按钮的去处（规格 §5：**hero 主按钮与下载区大卡用同一份下载信息**）。
+ *
+ * 有安装包时给**文件直链**（点下去就是下载，不经过 GitHub 页面）；
+ * 没有可识别资产（退化为发布页）或还没发布（发布列表页）时给发布页。
+ */
+export function downloadHref(view: ReleaseView): string {
+  return view.state === 'available' ? view.downloadUrl : view.releaseUrl;
 }
 
 /** 构建期注入的发布信息（本地 dev 没注入时返回 `null`） */

@@ -6,7 +6,7 @@ import { GithubMark } from '../components/GithubMark.tsx';
 import { Shot } from '../components/Shot.tsx';
 import { WindowFrame } from '../components/WindowFrame.tsx';
 import { locale, messages } from '../i18n/index.ts';
-import { currentRelease } from '../data/release.ts';
+import { currentRelease, downloadHref } from '../data/release.ts';
 import { REPO_URL } from '../data/site.ts';
 
 /** 胶片孔数量：够铺满最宽的屏幕（多出来的被 `overflow-hidden` 裁掉） */
@@ -44,6 +44,11 @@ const NAME_WIDTH_CLASS: Record<string, string> = {
 export function Hero() {
   const t = () => messages().hero;
   const release = () => currentRelease();
+  /** 有正式版时的下载视图（pending 时 `undefined`）—— 按钮去处与提示语都据它走 */
+  const available = () => {
+    const view = release();
+    return view.state === 'available' ? view : undefined;
+  };
 
   return (
     <section id="top" class="relative overflow-hidden bg-accent text-ink">
@@ -101,7 +106,8 @@ export function Hero() {
 
             <div class="mt-6 flex flex-wrap items-center gap-3">
               <Button
-                href={release().releaseUrl}
+                /* 直链：点下去就是下载安装包本体（规格 §5「hero 主按钮 + 下载区大卡」共用一份下载信息） */
+                href={downloadHref(release())}
                 variant="ink"
                 size="lg"
                 icon={<IconDownload class="size-[1.1em]" strokeWidth={2} />}
@@ -134,7 +140,11 @@ export function Hero() {
               </For>
             </ul>
 
-            <p class="mt-5 max-w-xl text-xs/relaxed text-ink/60">{t().earlyNote}</p>
+            <p class="mt-5 max-w-xl text-xs/relaxed text-ink/60">
+              <Show when={available()} fallback={t().earlyNote}>
+                {(view) => t().readyNote.replace('{version}', view().version)}
+              </Show>
+            </p>
           </div>
 
           <div class="relative">

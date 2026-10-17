@@ -4,7 +4,7 @@ import { Button } from '../components/Button.tsx';
 import { Section, SectionHeading } from '../components/Section.tsx';
 import { Shot } from '../components/Shot.tsx';
 import { messages, locale } from '../i18n/index.ts';
-import { currentRelease } from '../data/release.ts';
+import { currentRelease, downloadHref } from '../data/release.ts';
 import { LICENSE_NAME, README_URL } from '../data/site.ts';
 
 /**
@@ -22,8 +22,8 @@ export function DownloadSection() {
     const view = release();
     return view.state === 'available' ? view : undefined;
   });
-  /** 主按钮去处：有安装包直链用直链，否则去发布页 */
-  const ctaHref = () => available()?.downloadUrl ?? release().releaseUrl;
+  /** 主按钮去处：有安装包直链用直链，否则去发布页（判断与 hero 主按钮共用 `downloadHref`） */
+  const ctaHref = () => downloadHref(release());
 
   const versionText = () => {
     const view = available();

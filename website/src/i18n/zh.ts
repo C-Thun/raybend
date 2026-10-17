@@ -28,11 +28,13 @@ export const zh = {
     tagline: '本地优先的开源相片管理软件',
     intro:
       '把「导入 → 浏览 → 评级 → 筛选 → 整理 → 导出」做成一条顺手的流水线。照片、评分、标签都留在你自己的硬盘上 —— 没有账号，不用订阅，也不上传任何东西。',
+// hero 的两句说明二选一：还没发布时用 earlyNote，有正式版时用 readyNote（Hero 按发布状态切）
     ctaPrimary: '下载 Windows 版',
     ctaSecondary: '在 GitHub 看源码',
     facts: ['Windows 10/11', '免费开源 AGPL-3.0', '照片只存本地'],
     earlyNote:
       '目前处于早期开发。想第一时间拿到可用版本，关注发布页即可。',
+    readyNote: '最新正式版：v{version}；历史版本与校验值在发布页。',
     shotCaption: '应用截图（浏览工作区）· 待补',
   },
 

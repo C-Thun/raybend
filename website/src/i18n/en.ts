@@ -32,6 +32,7 @@ export const en: Dictionary = {
     facts: ['Windows 10/11', 'Free & open source (AGPL-3.0)', 'Photos stay local'],
     earlyNote:
       'Early days still. Watch the releases page to be first in line for a usable build.',
+    readyNote: 'Latest stable build: v{version}. Older builds and checksums are on the releases page.',
     shotCaption: 'App screenshot (browse workspace) — coming soon',
   },
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  downloadHref,
   formatBytes,
   parseTag,
   pickInstaller,
@@ -71,6 +72,21 @@ describe('pickInstaller', () => {
     expect(pickInstaller(undefined)).toBeUndefined();
     expect(pickInstaller([])).toBeUndefined();
     expect(pickInstaller([{ name: 'a.exe' }])).toBeUndefined();
+  });
+});
+
+describe('downloadHref', () => {
+  it('有安装包给文件直链（hero 与下载区共用同一去处）', () => {
+    expect(downloadHref(resolveRelease(FULL_RELEASE))).toBe(
+      'https://github.com/C-Thun/raybend/releases/download/v0.1.0/RayBend_0.1.0_x64-setup.exe',
+    );
+  });
+
+  it('有版本但没可识别资产退化为发布页；未发布去发布列表页', () => {
+    expect(downloadHref(resolveRelease({ tag: 'v0.2.0', assets: [{ name: 'notes.txt', url: 'n' }] }))).toBe(
+      `${REPO_URL}/releases/tag/v0.2.0`,
+    );
+    expect(downloadHref(resolveRelease(null))).toBe(`${REPO_URL}/releases`);
   });
 });
 
