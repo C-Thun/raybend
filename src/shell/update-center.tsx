@@ -247,6 +247,7 @@ function DownloadPrompt(props: { version: string }) {
             {t("updates.prompt.skip")}
           </Button>
           <Button
+            variant="primary"
             onClick={() => {
               setPrompt(null);
               void beginUpdate(false);
@@ -278,6 +279,7 @@ function InstallPrompt(props: { version: string }) {
             {t("common.cancel")}
           </Button>
           <Button
+            variant="primary"
             onClick={() => {
               close();
               void installUpdate();

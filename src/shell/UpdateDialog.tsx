@@ -99,16 +99,16 @@ export function UpdateDialog(props: {
               {t("common.close")}
             </Button>
             <Show when={phase() === "ready"}>
-              <Button disabled={!props.canInstall()} onClick={() => setConfirm(true)}>
+              <Button variant="primary" disabled={!props.canInstall() || busy()} onClick={() => setConfirm(true)}>
                 {t("updates.installNow")}
               </Button>
             </Show>
             <Show when={phase() === "paused"}>
-              <Button onClick={() => void beginUpdate(false)}>{t("updates.resume")}</Button>
+              <Button variant="primary" disabled={busy()} onClick={() => void beginUpdate(false)}>{t("updates.resume")}</Button>
             </Show>
             <Show when={phase() === "idle" && found()}>
               {(update) => (
-                <Button onClick={() => void beginUpdate(false)}>
+                <Button variant="primary" disabled={busy()} onClick={() => void beginUpdate(false)}>
                   {t("updates.download")} {update().version}
                 </Button>
               )}
