@@ -952,6 +952,11 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
               }}
               onNewBucket={props.onNewBucket}
               onEditBucket={props.onEditBucket}
+              onBucketDeleted={(bucket) => {
+                // 删的正是当前在看的桶：清选中回退库目录浏览，并明确提示（规格 §9）
+                setOrganizationSelection((current) => current?.kind === "bucket" && current.id === bucket.id ? null : current);
+                props.toast?.show({ tone: "info", message: t("org.bucketDeletedFallback").replace("{name}", bucket.name) });
+              }}
               onError={(error) => store.reportError(error)}
               onChanged={props.onOrganizationChanged}
             />
