@@ -172,7 +172,7 @@ HEIC 解码仍是未完成导入能力，不因五格式导出标成完成。
 
 ---
 
-## 8. M5 —— 分发与发布 ◐ 工程准备完成（发行操作与真机验收待人类）
+## 8. M5 —— 分发与发布 ✅ 2026-10-24 崔总口径算完成（走完流程，使用中发现问题再改）
 
 **定位**（人类 2026-09-21 定）：四大模块完成即发版先用。品牌、闪屏、Windows 构建路径、
 官网与 Pages 工作流已提前完成。
@@ -198,7 +198,11 @@ macOS 暂缓、Linux 空闲时先行（`memory/FUTURE.md` F1/F2）。
 → 规格 `specs/m5-crates-publish.md`，操作 `docs/release.md` §9，证据 `implementations/2026-10-09_crates-io-release-integration.md`。
 （`memory/PLAN.md` §3 的 M5 DoD 不因此改变：仍待真机安装/升级与一次实发验证。）
 
-**剩余验收与发行操作清单在 `memory/PLAN.md` §3**（M5 DoD 未勾选，不计作完成）。
+**2026-10-15/16 首次实发（v0.1.2、v0.1.3）**：GitHub Release 公开、MSI + 签名 `latest.json`、官网取版、crates.io `0.1.2` 同步；发布链已实跑。
+**2026-10-24 崔总：安装/升级/卸载、更新链、MSI、官网真实版本、spike 页全部算完成**（走完流程，使用中发现问题再改）。
+剩余的真机事项只剩崔总自己的四项：XMP 核验、bucket/tag + AI 实跑、回收站细测、全流程 + 导出确认（`memory/PLAN.md` §2 的 M3/M4 验收并入其中）。
+
+**剩余验收与发行操作清单在 `memory/PLAN.md` §3**（历史清单保留；M5 发布链按 2026-10-24 口径收口）。
 
 ---
 
@@ -495,3 +499,9 @@ Rust 1517 项、前端 1289 项测试与全部静态门通过。实测（Windows
 ## 2026-10-04 色彩管理首版：开发与 Agent 冒烟收口
 
 在既有 W1–W5 首版上完成 Astra 的复杂显示 ICC、精确输入加速、60MP 有界后台上传与 RAW 新旧标度重放，再完成 Sol 的实际呈现状态/系统事实分离、共享组件、本地化和设置刷新接线。最终 Rust 1562 项、前端 1207 项通过；中英组件22项与UI冒烟、Windows主程序/worker配套构建核对通过。统一实机验收尚未完成，不自动升级旧照片，复杂CLUT打样/完整HDR/打印仍按既有范围留后续。证据与验收路径：`implementations/2026-10-04_color-management-ready-for-acceptance.md`；核心数值与性能：`implementations/2026-10-04_color-management-core-hardening.md`。Pencil内存稿仍须崔总手动保存，代码未提交。
+
+## 2026-10-25 发版前缺陷收口（桶/标签审查 3、5–15 / 发布说明 / 小图缓存 GC / XMP 自维护 / 老库尺寸 / 崩溃符号）
+
+按崔总 2026-10-24 的逐项拍板完成：桶/标签审查 3、5–15 全修（死成员清理与按库计数、AI 重试一步、预览失败提示、筛选建桶默认库、AI 弹窗状态、加桶计数、标签子目录刷新、空桶文案、目录标签确认、行点击展开、词典全量、游标清理）；发布说明去掉内部提示行并接入 `docs/release-notes/<版本>.md`；`thumbs.db` 接上 6 小时节流的旧签名孤儿 + 1 GiB 容量回收，设置 → 文件页可看占用/清理；开库后逐资产后台补齐老库展示尺寸；XMP 自维护落到 `AGENTS.md` §13 项目图景 + `PARAMS` 归类测试；发布构建归档 PDB 并在崩溃报告写入 `gitHash`/`buildTime`。
+
+验证：`cargo test --workspace` 1747 passed / 13 ignored；`pnpm typecheck && pnpm test` 1319 passed；三 lint 与 `pnpm build` 通过；发布脚本测试 15 passed。真机 E2E 仍归崔总（四项验收不变）。证据：`implementations/2026-10-25_release-blockers-and-review-fixes.md`。

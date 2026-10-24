@@ -23,20 +23,21 @@
 > 这里收的是**收尾与验收**。
 >
 > **2026-10-04 崔总确认**：**XMP 与 editor presets 已完成，待验收**；当前继续完善的是**色彩管理与文件管理**。
-> 等这两项完善并验收后，**最后做 CI 和发版**，由崔总在其它会话推进；本会话不执行 CI 改造或发版。
+> 等这两项完善并验收后，**最后推进发版**，由崔总在其它会话处理；**发版 CI 化不在计划内**（只在 G24 存档，见下）。
 
 | # | 事项 | 一句话状态 | 落点 |
 | --- | --- | --- | --- |
-| 1 | **editor presets** | **已完成，待验收（崔总 2026-10-04 确认）**；审计发现的问题已于 2026-10-07 逐条修复并补回归（等高容器 / 选中收敛 / 名称上限 / 库串行 / 版本契约 / 错误区分 / rev 单次 / 应用前重读 LUT），真机验收待崔总 | `implementations/2026-09-30_editor-presets.md`；`implementations/2026-10-04_editor-presets-audit.md`；`implementations/2026-10-07_editor-presets-audit-fixes.md`；`design/editor.pen` |
-| 2 | **文件管理与相片整理完善** | **正在完善（崔总 2026-10-04 口径）**；已交付的相片整理上期（含跨库多选导出）仍待 Windows 真机交互与大库性能验收 | `specs/photo-organization.md`；`memory/PLAN.md` §4；`memory/FINISHED.md` §11 |
-| 3 | **XMP sidecar** | **已完成，待验收（崔总 2026-10-04 确认）**；本轮审查缺陷已修复并补回归，Windows 真实照片写出/读回与回收站链路待崔总验收；范围仍按冻结规格。**2026-10-09 增补**：设置新增唯一一项写出开关（设备级、默认开）、§10 验收清单细化、只读巡检工具 `pnpm check:xmp` | `specs/xmp-sidecar.md` §10；`specs/xmp-write-toggle.md`；`specs/xmp-audit-tool.md`；`implementations/2026-10-04_xmp-audit-fixes.md` |
-| 4 | **色彩管理第一版验收** | 首版开发、核心攻关、共享显示状态及 Agent 冒烟已完成；整窗性能、真实色彩/多屏待统一实机验收；不自动升级旧照片 | `specs/color-management.md` / `implementations/2026-10-04_color-management-ready-for-acceptance.md` |
-| 5 | **发版 CI 化** | tag → 自动构建 NSIS+MSI → 填 GitHub Release 下载资产；**官网下载地址用前端 JS（XHR/fetch）实时取 `/releases/latest`**（action 零 commit）；**色彩管理与文件管理完善、验收后最后推进；崔总在其它会话处理** | G24（查证与适配点在那里） |
-| 6 | **国内官网镜像** | 腾讯 EdgeOne Pages + `rb.cthun.com`（大陆节点；**备案前提已满足**——崔总 2026-10-01 确认已实名+已备案）；与 #5 同一套取版逻辑；EdgeOne 建站/域名接入属人类动作 | G24 补充小节 |
-| 7 | **官网占位内容切真实版本** | 下载/教程从占位切到真实版本信息（与 #5 的取版脚本一体完成） | `website/`（M5-W3 遗留） |
-| 8 | **spike 诊断页二选一** | 发版阻塞：从发布包摇掉或保留，**不许悄悄进包** | C6 |
-| 9 | **MSI 链路实际验收** | G22 脚本已实现；真机 MSI 生成/安装/升级/卸载待崔总验收 | G22、`specs/release-windows-msi.md` |
+| 1 | **editor presets** | **✅ 算完成（崔总 2026-10-24：走完流程，使用中发现问题再改）**；审计问题已于 2026-10-07 逐条修复并补回归 | `implementations/2026-09-30_editor-presets.md`；`implementations/2026-10-04_editor-presets-audit.md`；`implementations/2026-10-07_editor-presets-audit-fixes.md`；`design/editor.pen` |
+| 2 | **文件管理与相片整理完善** | **正在完善（崔总 2026-10-04 口径）**；已交付的相片整理上期（含跨库多选导出）仍待 Windows 真机交互与大库性能验收；**2026-10-25 桶/标签审查 3、5–15 已修**（死成员清理与按库计数、AI 重试一步、预览失败提示、筛选建桶默认库等） | `specs/photo-organization.md`；`memory/PLAN.md` §4；`memory/FINISHED.md` §11 |
+| 3 | **XMP sidecar** | **已完成，待验收（崔总 2026-10-04 确认）**；本轮审查缺陷已修复并补回归，Windows 真实照片写出/读回与回收站链路待崔总验收；范围仍按冻结规格。**2026-10-09 增补**：设置新增唯一一项写出开关（设备级、默认开）、§10 验收清单细化、只读巡检工具 `pnpm check:xmp`。**2026-10-25 自维护闸门已补**：`AGENTS.md` §13 项目图景 + `PARAMS` 归类测试；最小核验见 §10 | `specs/xmp-sidecar.md` §10；`specs/xmp-write-toggle.md`；`specs/xmp-audit-tool.md`；`implementations/2026-10-04_xmp-audit-fixes.md` |
+| 4 | **色彩管理第一版验收** | **✅ 算完成（崔总 2026-10-24）**；首版开发与 Agent 冒烟已完成，不自动升级旧照片；使用中再实测 | `specs/color-management.md` / `implementations/2026-10-04_color-management-ready-for-acceptance.md` |
+| 7 | **官网占位内容切真实版本** | **✅ 已完成**：下载/教程已用真实版本信息（取版：构建期注入 `website/scripts/release-info.ts`，与应用发布 CI 无关） | `website/`（M5-W3 遗留） |
+| 8 | **spike 诊断页二选一** | **✅ 已完成**：release 包已用构建期常量 `__RAYBEND_DIAGNOSTICS__` 摇掉（只 dev/test 有），不再进包 | C6 |
+| 9 | **MSI 链路实际验收** | **✅ 算完成（崔总 2026-10-24：已走完流程，使用中发现问题再改）**；G22 脚本已实现，v0.1.2/v0.1.3 已产出并发布 | G22、`specs/release-windows-msi.md` |
 | 10 | **应用内回收站** | **✅ 已完成（2026-10-10）**：库内 `recycle/` 目录 + 拖动删除（统 pointer）+ 回收站视图 / 还原 / 清空；`Delete` 键保留（按钮 + 确认），拖动免确认；真删只有拖动一条路 | `specs/library-recycle-bin.md`；`implementations/2026-10-10_library-recycle-bin.md` |
+
+> 编号保持历史稳定（#10 等旧引用仍有效）。原 **#5 发版 CI 化**与 **#6 国内官网镜像**已于 2026-10-24 移出本板：#5 **不排期、仅存档**（见 G24；崔总明确发版前/后都不做），#6 移入下方「发版后」板块。
+> **2026-10-24 崔总：本板除 #2 / #3 / #10 外全部算完成**（走完流程，使用中发现问题再改）。
 
 ---
 
@@ -44,6 +45,12 @@
 
 > **定义**：本板块记**发版之后马上可以动手**的项目 —— 不阻塞 release，但已经想清楚、成本可控。
 > 与上面「发版前必须完成」的区别：那些不做不能发，这些是发完就有空做的。
+
+* **国内官网镜像（`rb.cthun.com` / EdgeOne Makers）**（原 Future Release #6，崔总 2026-10-24 移入）：
+  用腾讯 EdgeOne Makers 托管一份官网，绑 `rb.cthun.com`（`cthun.com` 已实名 + 备案，子域共享），
+  给大陆访问一条不经过 GitHub Pages 的路径。**方案、免费版配额、发布刷新与下载策略见 `specs/website-cn-mirror.md`**。
+  一句话现状：页面镜像免费可行；安装包国内直下受免费版 **25 MB/文件**限制（当前 MSI 约 120 MB），
+  需在「COS+CDN / 仅镜像 NSIS / ghproxy / 仍走 GitHub」里拍板。EdgeOne 建站与域名接入属人类动作。
 
 * **高光改「luma 比值回贴」+ 高亮去饱和**（对照 RapidRAW `apply_highlights_adjustment`）：
   负向高光也从逐通道曲线改成「按亮度比值回贴」（严格保色相），并在 luma 进入 >1 区域时向白点去饱和。
@@ -645,7 +652,7 @@ commands panel、快捷键设置和标题栏菜单都是它的不同呈现。未
 | G13 | **库文件加密** | 用户 2026-09-15 明确「留到 future」。**预想目的**：① 库放在移动硬盘/笔记本上丢失时，防止他人直接打开 `catalog.db` 看到照片清单、路径、评分与关键词（**元数据泄露**比照片本身更敏感）；② 便于把库放进不信任的存储（NAS、共享盘）；③ 将来若做云同步，加密是前置条件。**注意**：若只加密 catalog 不加密 `photos/`，照片本身仍是明文 —— 要真正防泄露需连带考虑照片容器加密或全盘加密配合。实现候选：SQLCipher（重依赖，需评估 Tauri/Windows 交叉编译）或应用层加密敏感列 | 有实际隐私需求时，或云同步（G3）启动前 |
 | G14 | **`photos/` 目录名可配置** | 库根下的落地目录名目前固定为 `photos/`（`memory/FUNCTION-REPOSITORY.md` §1）。有人习惯 `originals/`、`Photos/` 等。做成库级设置需同时处理「改名前后的历史文件仍要能找到」 | M1 之后，有人提出时 |
 | G15 | **与 Luclin `Gid` 的互操作** | 用户现有体系用 `Gid`（时间戳 + shard + 随机数 → 定长 base62，上游默认 18 位）生成唯一 ID。raybend 的库 ID 取的是该方案的**裁剪版**（`memory/FUNCTION-REPOSITORY.md` §2.5：去掉 shard、固定 16 位，已实现于 `store::ids`）。将来若要把库登记到那套服务端，需要双向转换：**补回 shard 段** + 移植 `Gid` 的 `toUpper`（base36 大写、定长 20）形式；注意 base62 在大小写不敏感文件系统上的风险 | 决定对接 Luclin 体系时 |
-| G26 | **库内小图缓存的 GC（接上已经写好的回收器）** | **现状**：`_sources/thumbs.db` 只服务**库内**文件（库外 2026-10-11 起只在进程内存里），但**既没有容量上限，也没有任何回收**：`thumbnail::cache::gc(conn, max_bytes, now)`（frecency：`pinned` 保留 → `hits` 少先走 → `last_used_at` 最久远先走）与 `drop_stale_signatures(conn, sigs)`（按**前缀**保留当前签名、收走旧版本孤儿）**两套都有实现、全仓却没有一个调用点**。于是：库内小图一直涨；每次改口径（2026-10-11 去掉 192 档、管线 v7→v16 等）留下的旧签名行**永远不会被读、也永远不会被删**（用户机器实测那份到过 **148 MB / 4179 行**，绝大多数是死行）。**要做的**：① 接 `gc`（容量上限可放 `app.db` 设置项，或先给个 1–2 GB 的默认值；运行时机照库根 `FullCache::maybe_enforce_capacity` 的形状 —— 写缓存之后、有间隔地跑，别每次写都扫）；② 接 `drop_stale_signatures`（管线版本 / 口径变化时收孤儿）；③ 设置面板里给「清缓存」入口 + 显示占用（`stats()` 已经能给 entries/bytes/by_size）。**注意**：`render_sig_with_edit` 的签名是动态的，判据必须是**前缀匹配**（`drop_stale_signatures` 已经这么写了，别改成 `NOT IN`）；`pinned` 的条目**永不淘汰**；红线 `AGENTS.md` §6.5 —— `app.db` / `catalog.db` / LUT 本体**不是**可删缓存，库根 `cache/full/` 又是另一套（`FullCache::gc_latest` + 容量清扫），别混。**触发条件**：用户抱怨磁盘占用 / 做「缓存设置」面板时 / 发版前（现在装到用户机器上它只会涨） | 有需求时，或做缓存设置面板时 |
+| G26 | **库内小图缓存的 GC（接上已经写好的回收器）** | **现状**：`_sources/thumbs.db` 只服务**库内**文件（库外 2026-10-11 起只在进程内存里），但**既没有容量上限，也没有任何回收**：`thumbnail::cache::gc(conn, max_bytes, now)`（frecency：`pinned` 保留 → `hits` 少先走 → `last_used_at` 最久远先走）与 `drop_stale_signatures(conn, sigs)`（按**前缀**保留当前签名、收走旧版本孤儿）**两套都有实现、全仓却没有一个调用点**。于是：库内小图一直涨；每次改口径（2026-10-11 去掉 192 档、管线 v7→v16 等）留下的旧签名行**永远不会被读、也永远不会被删**（用户机器实测那份到过 **148 MB / 4179 行**，绝大多数是死行）。**要做的**：① 接 `gc`（容量上限可放 `app.db` 设置项，或先给个 1–2 GB 的默认值；运行时机照库根 `FullCache::maybe_enforce_capacity` 的形状 —— 写缓存之后、有间隔地跑，别每次写都扫）；② 接 `drop_stale_signatures`（管线版本 / 口径变化时收孤儿）；③ 设置面板里给「清缓存」入口 + 显示占用（`stats()` 已经能给 entries/bytes/by_size）。**注意**：`render_sig_with_edit` 的签名是动态的，判据必须是**前缀匹配**（`drop_stale_signatures` 已经这么写了，别改成 `NOT IN`）；`pinned` 的条目**永不淘汰**；红线 `AGENTS.md` §6.5 —— `app.db` / `catalog.db` / LUT 本体**不是**可删缓存，库根 `cache/full/` 又是另一套（`FullCache::gc_latest` + 容量清扫），别混。**触发条件**：用户抱怨磁盘占用 / 做「缓存设置」面板时 / 发版前（现在装到用户机器上它只会涨） | ✅ 2026-10-24 已接上：写后 6 小时节流维护（旧签名孤儿 + 1 GiB 容量）+ 设置页显示占用与清理。**2026-10-25 评审修订**：孤儿判据从「当前签名白名单」改为「签名里的 `-v<PIPELINE_VERSION>` 片段」（`drop_other_pipeline_versions`），白名单漏登记会把活缓存每 6 小时删一遍；旧函数 `drop_stale_signatures` 随之删除 |
 | G25 | **JPEG 解码改用 DCT 缩放（libjpeg-turbo 的 1/8 缩放解码）** | **登记原因**：库外（import）出 384 缩图时，单张 ~200 ms 里约 120 ms 花在**全尺寸解码 + 缩放**上（实测见 `implementations/2026-10-11_import-tiles-jpeg-and-window-queue.md`）。JPEG 可以在解码时直接缩（1/2、1/4、1/8 的 DCT 缩放），把 6000px 解到 750px 再缩到 384 —— 预期单张 **200 ms → 30–60 ms**（一屏 24 张 1.5 s → 0.4–0.6 s）。**代价**：新增 C 依赖（[libjpeg-turbo](https://github.com/libjpeg-turbo/libjpeg-turbo) 或 [mozjpeg](https://github.com/mozilla/mozjpeg)，经 `turbojpeg`/`mozjpeg-sys` 绑定）→ Windows 侧要照 dav1d 的套路自建静态库（`scripts/build-dav1d-win.cmd` 同款）+ `THIRD-PARTY-NOTICES.md` 许可登记（IJG/BSD-3 混），符合 `AGENTS.md` §2.9「新增大型依赖先讨论」。**触发条件**：import 出图体感再被抱怨，或做「大目录秒开」时；本轮（两档缩图 + 库外只在内存）已把最容易拿的几档收益拿完 | 有需求时，或 import 吞吐成为瓶颈时 |
 | G12 | **吸附（snap）的实际行为** | 设计稿把吸附开关列为「以后会加」的占位；M1-4 只做了它的视觉与状态（按下就是按下）。真要做：拖动照片时吸附到网格/边缘，需与视口变换（M2）一起设计 | M2 视口完成后 |
 | G18 | **后端错误文案的 i18n** | 界面文案已经全部进语言包（中/英，有 `pnpm lint:i18n` 守门），但**后端（Rust）抛给前端的错误句仍是写死的中文**（`crates/raybend/src/error.rs` 的 `thiserror` 文案、`src-tauri` 的命令错误、扫描 problems 等）。要做的话得改成「错误码 + 参数」的结构化错误走 IPC，前端加一层 `error.*` 映射与回退（拿不到 code 就显示原话）。**登记原因**：范围不小且现在没阻塞（工作语言就是中文），但一旦真要分发多语言版，它是最大的一块 | 做多语言分发之前，或 Web/CLI 也复用核心库时 |
@@ -653,7 +660,7 @@ commands panel、快捷键设置和标题栏菜单都是它的不同呈现。未
 | G20 | **Gallery / 外部编辑器** | 外部编辑产物入库统一管理（新 flow + 与 browse 关联跳转）；**取回链路跑不顺**，现在只做「纯单向输出」。详见文末「Gallery / 外部编辑器」 | 单向输出 M4-W6 已开发，软件兼容待验收；Gallery 本体未排期 |
 | G21 | **导出的「来源标记」：元数据 → 水印 → 内容凭证** | **定位：它是「来源标记」，不是「防盗手段」**（当防拷手段宣传是错的期待）。三层按成本递进：① **元数据**（EXIF/IPTC 的作者·联系方式·版权）—— **M4 基座已有**（导出元数据矩阵已写作者/版权/说明与关键词）且**已在写入**，**再完善即可**，不单独开波次；缺点是一删就没。② **传统频域水印**（DCT/DWT 嵌短串，如用户 ID + 时间戳）—— 能抗压缩与轻度裁剪，适合「发到平台想证明是我拍的」这类**善意场景**；❗**不要宣传「不可去除」**，对抗性编辑下不堪一击。③ **内容凭证 C2PA** https://c2pa.org/ —— 记录来源与编辑历史、可密码学验证（徕卡已机内做签名）；它解决的是**信任链**而不是「把信息藏起来」，比传统隐形水印更值得投入，但**比较远** | ① 随时可做（不单独开波次）；② 有人提出「要能证明是我拍的」时；③ 更远，等生态与需求成形 |
 | G22 | **Windows 本地源码镜像 / MSI 恢复** | **2026-09-29 已实现脚本，待实际 MSI 验收**。旧失败原因：32 位 WiX light.exe 无法从 WSL 映射盘/UNC 源可靠创建 cabinet；历史实测见 `implementations/2026-09-27_release-msi-wix-light-path.md`。现方案从 WSL 一条 `pnpm release … --win-msi` 自动镜像并调用 Windows Cargo/Tauri；`--win-nsis` 可独立/组合。按崔总追加要求，自动探测 Windows LocalApplicationData、本地盘与 WSL 实际挂载，通过 `wslpath` 双向转换，支持 `--win-dir`，不写死 C 盘或 `/mnt/c`。复用现有版本/签名/dav1d/核查/收口，不复制依赖、target 或 Git。规格 `specs/release-windows-msi.md`，操作 `docs/release.md`，实施 `implementations/2026-09-29_release-windows-msi.md`。首次切换目录冷编译，后续复用固定镜像和缓存；仍须 WSLENV 转发环境 | 脚本与路径冒烟已落地；实际 MSI 生成、安装/升级/卸载及 NSIS → MSI 切换由崔总验收 |
-| G24 | **发版 CI 化：tag → 自动构建 → 填 Release 下载址 → 官网实时取版**（崔总 2026-10-01 登记：**发版验收通过后马上做；现在不动**，先验本地发版脚本） | 目标：push `v*` tag 到 GitHub → 一个 workflow 内自动：① windows runner 构建（NSIS + MSI）；② 创建 GitHub Release 并把安装包填进下载资产。**③ 官网版本号与下载地址由 website 前端 JS 运行时实时获取**（GitHub `/releases/latest`：天然只含非 draft/prerelease，恰合「最新有效版本」语义）——**action 不产生任何 commit**（崔总 2026-10-01 定，否掉「release workflow commit 版本文件」与「website 固定分支」两个 dirty 方案）。**查证结论（2026-10-01）：单 workflow 闭环可行**——`tauri-action` 官方支持 tag 触发→构建→建 Release→上传产物（含 updater `latest.json` 可选）；dav1d 静态库可在 windows runner 上 `meson + ninja + nasm` 一次构建并缓存（libavf CI 先例，本地等价脚本 `scripts/build-dav1d-win.cmd`）。已知适配点：① `release.mjs` 加 CI 模式（tag 即版本、无人工交互、与 tauri-action 的产物路径对齐，不再需要 WSL→Windows 镜像）；② dav1d 构建结果用 actions cache 复用；③ 建议 Release 先建 **draft**、人类点 publish（保留人类发布把关，`AGENTS.md` §2.1 精神）；④ updater/latest.json 是否上传随 M5 更新通道实配再定；⑤ `check:win` 的产物校验要在 CI 里跑同一套逻辑；⑥ 官网取版脚本带**静态兑底**（内置最低已知版本；`api.github.com` 国内可达性与匿名限流 60 次/时/IP 是现实风险，失败/超时回退静态值）；备选更稳形态：release workflow 发 `repository_dispatch` 触发 website 重构建、构建期注入（静态输出、访客不碰 GitHub API）——开工时二选一。参考：https://v2.tauri.app/distribute/pipelines/github/ 、https://github.com/tauri-apps/tauri-action 。**2026-10-14 评估（崔总提出“CI 打包似乎不靠谱”）：结论 = 技术可行但当前不划算，暂缓** —— 全部构建输入在 runner 上基本可得（Rust 工具链锁定、MSVC/WiX 自带、dav1d 可 meson+ninja+nasm 重建并缓存、onnxruntime DLL 已有固定 URL + SHA-256 自动下载），但 ① **AI 模型（152 MB ONNX）在独立 `model-registry` 仓库（LFS）**，CI 要出 AI 版必须先定模型公开分发方式，否则 CI 产物只能是不带 AI 的版本、与本地主力包不同质；② 现有 WSL→Windows 镜像 / wslpath / 锁逻辑在 CI 里要重写一套，加 Secrets、缓存键、`check:win` 复跑与发布纪律边界重划。评估正文 `docs/release.md` §11；**触发条件改为「模型公开分发方式定下来」或「有了云签名」** | 模型分发 / 签名方案落地后启动 |
+| G24 | **发版 CI 化：tag → 自动构建 → 填 Release 下载址**（官网取版已独立落地，不属本条；崔总 2026-10-01 登记、**2026-10-24 明确不排期**：发版前、发版、发版后都不做；仅作方向存档，除非崔总重新提出） | 目标：push `v*` tag 到 GitHub → 一个 workflow 内自动：① windows runner 构建（NSIS + MSI）；② 创建 GitHub Release 并把安装包填进下载资产。**③ 官网版本号与下载地址由 website 前端 JS 运行时实时获取**（GitHub `/releases/latest`：天然只含非 draft/prerelease，恰合「最新有效版本」语义）——**action 不产生任何 commit**（崔总 2026-10-01 定，否掉「release workflow commit 版本文件」与「website 固定分支」两个 dirty 方案）。**查证结论（2026-10-01）：单 workflow 闭环可行**——`tauri-action` 官方支持 tag 触发→构建→建 Release→上传产物（含 updater `latest.json` 可选）；dav1d 静态库可在 windows runner 上 `meson + ninja + nasm` 一次构建并缓存（libavf CI 先例，本地等价脚本 `scripts/build-dav1d-win.cmd`）。已知适配点：① `release.mjs` 加 CI 模式（tag 即版本、无人工交互、与 tauri-action 的产物路径对齐，不再需要 WSL→Windows 镜像）；② dav1d 构建结果用 actions cache 复用；③ 建议 Release 先建 **draft**、人类点 publish（保留人类发布把关，`AGENTS.md` §2.1 精神）；④ updater/latest.json 是否上传随 M5 更新通道实配再定；⑤ `check:win` 的产物校验要在 CI 里跑同一套逻辑；⑥ 官网取版脚本带**静态兑底**（内置最低已知版本；`api.github.com` 国内可达性与匿名限流 60 次/时/IP 是现实风险，失败/超时回退静态值）；备选更稳形态：release workflow 发 `repository_dispatch` 触发 website 重构建、构建期注入（静态输出、访客不碰 GitHub API）——开工时二选一。参考：https://v2.tauri.app/distribute/pipelines/github/ 、https://github.com/tauri-apps/tauri-action 。**2026-10-14 评估（崔总提出“CI 打包似乎不靠谱”）：技术可行但当前不划算（当时记作「暂缓」；2026-10-24 改为不排期）** —— 全部构建输入在 runner 上基本可得（Rust 工具链锁定、MSVC/WiX 自带、dav1d 可 meson+ninja+nasm 重建并缓存、onnxruntime DLL 已有固定 URL + SHA-256 自动下载），但 ① **AI 模型（152 MB ONNX）在独立 `model-registry` 仓库（LFS）**，CI 要出 AI 版必须先定模型公开分发方式，否则 CI 产物只能是不带 AI 的版本、与本地主力包不同质；② 现有 WSL→Windows 镜像 / wslpath / 锁逻辑在 CI 里要重写一套，加 Secrets、缓存键、`check:win` 复跑与发布纪律边界重划。评估正文 `docs/release.md` 附录 I；模型分发与云签名只是将来若重新评估时的前提，**不构成启动条件**。**2026-10-24 补注**：官网侧取版已按「备选更稳形态」落地——构建期注入 + `release: published` 重建（`website/scripts/release-info.ts`），XHR 方案未采用；见 `website/AGENTS.md` §5 | 仅存档，不排期（崔总 2026-10-24） |
 
 ---
 
@@ -671,13 +678,9 @@ CatalogSessions；来源扩展继续复用 Scanner/FileOps，长任务恢复通�
 边界，另行确定远程对象身份与暂存/提交语义；本地 FileId 不直接当 NAS 对象身份。
 实际协议、认证、远程 catalog 与多机写入仍待决，证据见 W3/W4 实施记录。
 
-### G24 补充：国内分发与下载加速（2026-10-01 查证，崔总提出 rb.cthun.com 国内专供）
+### G24 补充：国内分发与下载加速（2026-10-01 查证；2026-10-24 移入发版后）
 
-- **Gitee Pages：已死，排除**。2024-05 无公告下线（至今未恢复；蓝点网报道 https://www.landian.news/archives/103754.html 、Gitee 官方 issue https://gitee.com/oschina/git-osc/issues/I9RGKI ，Vant 等项目已被迫迁移）。Gitee 仓库镜像本身还能用（代码可见性/国内 clone 快），但页面托管没这个选项了。
-- **Deno Deploy：无大陆节点，不解决国内问题**。官方区域表 https://docs.deno.org.cn/deploy/manual/regions/ 无中国大陆；社区实测国内流量走香港 GCP、移动绕德国。CI 倒是方便（GitHub 集成自动部署），但换了也不比 GitHub Pages 快。
-- **首选候选：腾讯 EdgeOne Pages（现名 EdgeOne Makers）** https://pages.edgeone.ai/ —— 免费、静态托管、**GitHub 仓库集成自动构建部署**（CI 方便，不用镜像仓库）、腾讯 CDN **含大陆节点**、自带媒体存储（可放下载文件，额度待查）。✅ **前提已满足（2026-10-01 崔总确认）：`cthun.com` 托管于腾讯云个人账号，已实名认证且已 ICP 备案**——域名、托管、EdgeOne 同在腾讯体系，无接入商变更障碍；`rb.cthun.com` 子域共享主域备案，CNAME 到 EdgeOne 分配地址即可。
-- **零成本补充**：官网取版 JS 可给 GitHub 资产 URL 拼 ghproxy 类加速前缀做「加速下载」入口——不需镜像仓库/新站，但公共代理稳定性自担，只作兑底选项。
-- **MSIX 进商店**：崔总 2026-10-01 重申「觉得有用」——维持 R3-01 拍板（直下链走通后即启动，零现金成本签名主攻）；与 G24 同属发版验收后的分发收口。
+Gitee Pages 已下线、Deno Deploy 无大陆节点；选 **腾讯 EdgeOne Pages（现 EdgeOne Makers）** https://pages.edgeone.ai/ 做 `rb.cthun.com` 国内镜像。`cthun.com` 已实名 + 已备案（子域共享），CNAME 接入即可；EdgeOne 建站与域名接入属人类动作。方案、免费版配额、发布刷新、下载策略与待拍板项统一见 `specs/website-cn-mirror.md`；ghproxy 类加速前缀只作零成本备选，MSIX 进商店维持 R3-01。
 
 ---
 
@@ -830,6 +833,8 @@ M1 里「导入模版」**纯手输**（`LibrarySettingsDialog`：一个输入�
 
 | 日期 | 变更 |
 | --- | --- |
+| 2026-10-24 | **国内官网镜像移入「发版后」**（崔总指示）：从 Future Release #6 移到 after-release；方案落 `specs/website-cn-mirror.md`（EdgeOne Makers + `rb.cthun.com`，含免费版配额、发布刷新、下载策略与待拍板项）；G24 补充压缩为指针，降低 FUTURE 厚度 |
+| 2026-10-24 | **发版 CI 化移出计划**（崔总指示）：Future Release 表删除 #5，G24 改为「仅存档、不排期」——发版前、发版、发版后都不做；原「验收后马上做」「触发条件到了再启动」的口径作废 |
 | 2026-10-14 | **发版与更新链路一轮收口（崔总提四件事）**：① 新增别名/命令 **AI 模型自动探测同级 `../model-registry`**（`--ai=auto` 回退链：登记 → 同级探测 → 无 AI 版 + 提示）；② `pnpm release` 支持 **指定版本号**（`pnpm release 0.2.0` / `--version v…`，必须严格大于当前版本）与 **`--publish` 一条命令发版**（与两步发布同一函数）；③ **启动静默检查更新**（8 s 后一次，有新版本才提示；可在更新对话框关；test/dev 通道默认不自动检查）+ 隐私说明/文案同步；④ 更新公钥改放仓内公开配置 `release.config.json`（env 仍优先）。**CI 打包评估：暂缓**（原因见 G24 本轮补充），本地一键发版先行走通。实施记录 `implementations/2026-10-14_release-and-update-entry.md` |
 | 2026-10-12 | **日志 / 崩溃采集部分开工（W1+W2+W4）**（崔总当天改口径：「先把日志这套建起来，发送接收以后再说」）：运行日志（`log` + 自研 writer：2 MiB×10 / 20 MiB 硬上限 / 出口脱敏 / 会话头 / worker stderr 管道接回）、panic 同步记录、未正常退出兜底、独立崩溃助手 `raybend-crashpad`（crash-handler + minidumper）；选型由 `flexi_logger` 改为**自研 writer**（核源码后确认它给不了有界队列与按目录总容量清理）。第三层（报告包/发送）与 W5（WebView2/前端/看门狗）留在本条。看日志位置：`memory/DEBUGGING.md`。 |
 | 2026-10-10 | **库级回收站（应用内回收站）落地**：库内 `recycle/` + 拖动删除（统一 pointer）+ 回收站视图/还原/清空；`Delete` 键保留（按钮+确认）而拖动免确认；同批完成**快捷键场景化**（同键跨场景并存，browse 删除与 export 移出队列拆为两条）。规格 `specs/library-recycle-bin.md`、`specs/command-scenes.md`；画稿 `design/browse.pen`。Future Release #10 结项。 |

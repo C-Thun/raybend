@@ -63,7 +63,7 @@ raybend（中文名**「光伴」**，产品名 `RayBend`）是一个**相片管
 16. **数据库 schema 变化只走现有迁移框架**（`crates/raybend/src/store/migration.rs` + `store/migrations/*.sql`）：版本闸门、`VACUUM INTO` 迁移前快照、逐条事务、完整性检查。禁止启动时临时 `ALTER`、另造迁移通道、静默删库重建；localStorage 等设备级偏好用**版本化 key + 显式一次性迁移**。
 17. **Solid 壳组件透传 children：`untrack` 写在插入点**——`{untrack(() => props.children)}`（就写在 JSX 那一行）；**禁止**提到组件 body 里提前求值。A/B 两面的完整教训、判据与回归脚本见 `memory/ARCHITECTURE.md` §9。
 18. **禁止全盘搜索**：不许 `find /`、`grep -r /` 这类从根往下的扫描（会把 `/mnt` 一起卷进来）。查询从本仓开始；第三方源码走确定路径：cargo 依赖在 `~/.cargo/registry/src/index.crates.io-*/`、pnpm 依赖在仓内 `node_modules/`、参考实现在 `/home/andares/repos/refers/<name>/`；不确定路径时 `ls` 父目录一层。
-19. **新增/改动功能必须同步评估 XMP 侧影响**（崔总 2026-09-30 定）：凡是改动会进 sidecar 的数据（编辑栈 / issue / 评级 / 色标 / 标签 / 文字 / 地点等）或其存储布局（目录、命名、`_RAW/` 规则），必须在**同一次改动**里判断并接好对 XMP sidecar 写出与读回的影响（规格：`specs/xmp-sidecar.md`），**不得延后欠账**——例：将来改地理位置功能的落地方式时，`photoshop:` / `Iptc4xmpCore:` 那一侧的映射要一起动。
+19. **新增/改动功能必须同步评估 XMP 侧影响**（崔总 2026-09-30 定）：凡是改动会进 sidecar 的数据（编辑栈 / issue / 评级 / 色标 / 标签 / 文字 / 地点等）或其存储布局（目录、命名、`_RAW/` 规则），必须在**同一次改动**里判断并接好对 XMP sidecar 写出与读回的影响（规格：`specs/xmp-sidecar.md`），**不得延后欠账**——例：将来改地理位置功能的落地方式时，`photoshop:` / `Iptc4xmpCore:` 那一侧的映射要一起动。**新增无损编辑参数按 §13.1 的固定清单走**（参数表 → 渲染 → 版本 → XMP 归类 → 测试）。
 20. **界面不加「不带变量的固定说明文字」**（崔总 2026-10-08）：判据是**这句话里有没有随数据变化的量**
     （名称/日期/数量/状态）。带变量的留（`RAW · 2026-10-08`、`已选择 3 张`、讲清「这一次」为什么不行）；
     对每次都一样的注解去掉（`固定不可编辑`、`工作副本 · 自动保存`），要解释概念就进 `docs/` 或 hover 提示。
@@ -497,7 +497,7 @@ import 与 browse 的照片区必须经同一个 `PhotoViewingStage` / `PhotoVie
 | `Slider` | `Slider.tsx` | 连续 / 定档滑块（网格缩放档、编辑参数）；键盘与 aria 由 Ark UI 承载 |
 | `Tooltip` / `ButtonTip` | `Tooltip.tsx` | 提示气泡；`easy copy` 的「点击复制 / 已复制」复用它 |
 | `Menu` | `Menu.tsx` | 下拉菜单（标题栏菜单、右键菜单） |
-| `Dialog` / `ConfirmDialog` | `Dialog.tsx` | 模态弹窗（建库、`easy destroy` 确认）；**取消在左、确认在右** |
+| `Dialog` / `ConfirmDialog` / `DialogFrame` | `Dialog.tsx` | 模态弹窗（建库、`easy destroy` 确认）；**取消在左、确认在右**。`DialogFrame` 是唯一 Ark 三件套（Root/Backdrop/Positioner/Content）实现，命令面板也复用它；遮罩由弹窗栈自动只画最底层，弹窗面固定 1px `--dialog-ring` 内描边 |
 | `ToggleBlock` | `ToggleBlock.tsx` | 可按下按钮（吸附、按时间这类模式开关） |
 | `Badge` / `CountBadge` | `Badge.tsx` | 计数 / 状态小标签 |
 | `PathText` | `PathText.tsx` | `shortpath` 路径缩写（§11.5、`memory/DESIGN.md` §12.3） |
@@ -542,3 +542,46 @@ import 与 browse 的照片区必须经同一个 `PhotoViewingStage` / `PhotoVie
 
 **不在这份清单里**：`src/shell/`（外壳 chrome：`TitleBar` / `FlowBar` / `ToolsBar` 与几个窗口级对话框 —— 各只有一份，但它们是窗口结构，不是可复用原语）、
 `src/features/<模块>/` 下的工作区专用件（跟着那个工作区走）、`src/lib/`（纯逻辑，不放组件）。
+
+---
+
+## 13. 项目图景与改动影响索引（改功能前先看这张图）
+
+> 目的：一个功能不只改一个文件。下表把「功能 → 代码落点 → 会写什么 → 还必须同步什么」钉在一起；
+> 新增功能或改数据形状时，先按行找到落点，再把最后一列逐项核一遍。与 §2.19（XMP 侧影响）配合使用。
+
+| 功能面 | 主要落点 | 会写 / 会改的东西 | 改它时必须同步 |
+| --- | --- | --- | --- |
+| 导入 | `crates/raybend/src/import/`、`src-tauri/src/import.rs`、`src/features/import/` | `catalog.assets/asset_files`、缩略图缓存、XMP 读回 | 判重/冲突、`_RAW/` 规则、XMP 采纳、导入模板、缩略图两档 |
+| 浏览 / 评级 / 标签 / 桶 | `store/{assets,tags,photo_tags,organization}.rs`、`src-tauri/{browse,organization}.rs`、`src/features/browse/` | `catalog` 标记、`app.db` 桶/成员/词典 | XMP 元数据层、撤销/重做、命令注册（§2.15）、i18n、筛选查询 |
+| **编辑（无损参数）** | `develop/params.rs` + `assets/develop-params.json`、`develop/pipeline.rs`、`store/develop.rs`、`store/issues.rs`、`src/features/editor/` | 编辑栈 `DevelopStack`、`latest` / issue 快照、preset | **XMP（见 §13.1）**、profile schema 版本、preset 兼容、撤销节点（§2.21）、渲染缓存签名 |
+| 导出 | `export/`、`src-tauri/src/export.rs`、`src/features/export/` | 输出文件、元数据、ICC | issue/尺寸契约、外部编辑器 TIFF、队列 |
+| 色彩 | `color/`、`display/`、`src-tauri/src/color_profiles.rs` | 输入/工作/输出 ICC、显示状态 | 缓存代理、XMP 色彩身份、导出标记 |
+| 回收站 / 存储 | `store/delete.rs`、`store/repository.rs`、`src-tauri/src/repo.rs` | 文件移动、catalog 标记、缓存清理 | XMP 随照片移动、还原同名后缀、离线降级 |
+| XMP | `crates/raybend/src/xmp/`、`src-tauri/src/sidecar.rs` | `<主体名>.xmp` | `specs/xmp-sidecar.md`、`specs/issue-xmp-contract.md`、写出开关、巡检工具 |
+
+### 13.1 新增「无损编辑参数」的固定清单
+
+> 这是最容易漏 XMP 的一类改动。按顺序做，缺一项都算没完成：
+
+1. **参数表**：`crates/raybend/src/develop/params.rs` 的 `PARAMS` + `crates/raybend/assets/develop-params.json`（前端契约，同序）——两处必须一致，单测盯着。
+2. **渲染**：接进 `develop/pipeline.rs`（以及需要时的 GPU/预览路径），补最小单测。
+3. **存储/版本**：确认 `DevelopStack` 的序列化形状；若新增的是 profile 的结构字段（不是 `params` 里的标量），同步 `store/issues.rs` 的 `PROFILE_SCHEMA_VERSION` 与旧数据读取。
+4. **XMP 归类（强制）**：在 `crates/raybend/src/xmp/mapping.rs` 里二选一：
+   - 有 Lightroom 对应项 → 加进 `SCALARS`（并补 `crs:` 换算测试）；
+   - 没有对应项 → 加进 `NOT_MAPPED` 并写一句理由。
+   `every_develop_param_is_classified_for_crs` 会遍历 `PARAMS`，漏归类直接红。
+5. **rb 域**：`rb:profileJson` 存完整 `DevelopStack`，新参数**自动**跟着走；只要上面的结构没变，不需要改 `packet.rs`。
+6. **preset / 旧数据**：预设交换与旧 profile 读取是否仍成立；需要时补兼容测试。
+7. **文档**：`specs/xmp-sidecar.md` §5.1 的映射表、`specs/issue-xmp-contract.md`（若 rb 形状变了）、`memory/FUNCTION-IMAGING.md`（若影响显示）。
+8. **测试门**：`cargo test -p raybend xmp`、`cargo test --workspace`、`pnpm typecheck && pnpm test`。
+
+> 判据：**新参数只要进了 `PARAMS`，XMP 侧就不可能被忘掉** —— 要么映射，要么显式声明不映射，测试会拦住。
+
+### 13.2 其它跨面改动的固定检查
+
+- **数据库 schema**：只走 `store/migration.rs` + `store/migrations/*.sql`（§2.16），不临时 `ALTER`。
+- **用户可触发动作**：登记 `features/commands/catalog.ts` + 默认键或留空理由（§2.15）。
+- **写 sidecar 的数据**（编辑栈 / issue / 评级 / 色标 / 标签 / 文字 / 地点 / 目录命名）：同一次改动里核 XMP（§2.19）。
+- **缓存口径**：小图两档 / 真身 / 库外内存（§2.24/§6.5）；**新签名必须带 `-v<PIPELINE_VERSION>` 片段**，
+  否则自动维护（`thumbnail/cache.rs::drop_other_pipeline_versions`）既不会收它、也无法判断新旧。
