@@ -16,6 +16,8 @@ export interface BucketDialogProps {
   open: boolean;
   bucket?: PhotoBucket | null;
   seed?: RuleSet | null;
+  /** 由筛选等入口生成草稿时的一句说明（告诉用户导航范围不会带入）。 */
+  note?: string | null;
   repositories: readonly RepositoryView[];
   onClose: () => void;
   onSave: (name: string, rules: RuleSet) => Promise<void>;
@@ -94,6 +96,7 @@ export function BucketDialog(props: BucketDialogProps) {
     </>}
   >
     <div class="flex max-h-[70vh] flex-col gap-3 overflow-y-auto">
+      <Show when={props.note}>{(note) => <p class="text-fs-1 text-fg-3">{note()}</p>}</Show>
       <label class="flex flex-col gap-1 text-fs-1 text-fg-2">
         {t("org.bucketName")}
         <input class="h-8 rounded-ui bg-surface-bar px-2 text-fs-2 text-fg-1 outline-none focus:ring-1 focus:ring-brand"
@@ -180,7 +183,14 @@ export function BucketDialog(props: BucketDialogProps) {
           groups: [...current.groups, ...emptyRuleDraft().groups],
         }))}>{t("org.addRuleGroup")}</Button>
       <Show when={preview()}>{(result) =>
-        <p class="text-fs-1 text-fg-3">{t("org.previewCount").replace("{n}", String(result().matches))}</p>}
+        <div class="space-y-1">
+          <p class="text-fs-1 text-fg-3">{t("org.previewCount").replace("{n}", String(result().matches))}</p>
+          <Show when={result().failedRepositories.length > 0}>
+            <p class="text-fs-1 text-fg-2" role="status">
+              {t("org.previewPartial").replace("{n}", String(result().failedRepositories.length))}
+            </p>
+          </Show>
+        </div>}
       </Show>
       <Show when={error()}>{(message) => <p role="alert" class="text-fs-1 text-danger">{message()}</p>}</Show>
     </div>

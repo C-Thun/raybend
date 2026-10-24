@@ -23,6 +23,8 @@ export interface PhotoBucket {
   rules: RuleSet;
   ruleRevision: number;
   memberCount: number;
+  /** 成员按库计数（卡片显示「当前挂载 / 全部」，清理失效成员也按库检查）。 */
+  memberCountsByRepository: Record<string, number>;
 }
 
 export interface PhotoRef {
@@ -81,6 +83,13 @@ export async function bucketMembers(bucketId: number, repositoryId: string): Pro
   return isTauriRuntime()
     ? invokeBrowseCommand("organization_bucket_members", { bucketId, repositoryId })
     : [];
+}
+
+/** 清掉某库在桶里已失效的成员（照片真删 / UID 不在 catalog）。离线库不要调用。 */
+export async function prunePhotoBucketMembers(bucketId: number, repositoryId: string): Promise<number> {
+  return isTauriRuntime()
+    ? invokeBrowseCommand("organization_bucket_prune", { bucketId, repositoryId })
+    : 0;
 }
 
 export async function syncPhotoTags(repositoryId: string): Promise<number> {

@@ -125,6 +125,12 @@ export async function tagList(query = "", limit = 50): Promise<Tag[]> {
   return call<Tag[]>("tag_list", { query, limit });
 }
 
+/** 词典全量：只给「名字解析」用（避免低频标签因限额退化成 `#id`）。 */
+export async function tagListAll(): Promise<Tag[]> {
+  if (!isTauriRuntime()) return [];
+  return call<Tag[]>("tag_list_all");
+}
+
 /** 建标签（同名幂等：已有就返回已有的那条）。 */
 export async function tagEnsure(name: string): Promise<Tag | null> {
   if (!isTauriRuntime()) return null;

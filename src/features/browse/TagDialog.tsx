@@ -43,7 +43,7 @@ import { IconPlus, IconSearch, IconBan } from "@tabler/icons-solidjs";
 
 import { photoTagState, type PhotoTagState } from "../../api/organization.ts";
 import { stageTagEdit, tagDraftRows, tagKey, type TagEdit } from "./tag-draft.ts";
-import { tagEnsure, tagList } from "../../api/browse.ts";
+import { tagEnsure, tagList, tagListAll } from "../../api/browse.ts";
 import type { MarkResult, Tag } from "../../api/types.ts";
 import { Button } from "../../components/ui/Button.tsx";
 import { Dialog } from "../../components/ui/Dialog.tsx";
@@ -54,8 +54,6 @@ import type { BrowseStore } from "./store.ts";
 export const TAG_SEARCH_DEBOUNCE_MS = 600;
 /** 一屏最多给多少条候选（词典可能很大，别一次倒出来） */
 const SEARCH_LIMIT = 30;
-/** 打开时先读一批常用的（顺带给「已有标签」查名字用） */
-const DICTIONARY_LIMIT = 500;
 
 export interface TagDialogProps {
   open: boolean;
@@ -167,7 +165,7 @@ export function TagDialog(props: TagDialogProps): JSX.Element {
     const epoch = dialogEpoch;
     void (async () => {
       try {
-        const found = await tagList("", DICTIONARY_LIMIT);
+        const found = await tagListAll();
         if (!props.open || dialogEpoch !== epoch) return;
         setDictionary(found); await refreshSearch("");
       } catch (error) { if (props.open && dialogEpoch === epoch) setSaveError(String(error)); }

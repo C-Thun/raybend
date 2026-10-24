@@ -64,6 +64,24 @@ pub async fn tag_list<R: Runtime>(
     .await
 }
 
+/// 词典全量（给「名字解析」用，不做手输搜索列表）。
+///
+/// 标签弹窗与右栏需要把任意一个 tag id 还原成名字；分页/限额会让低频标签退化成 `#id`，
+/// 所以名字解析走这一条（`store::tags::list_all` 本来就是全量查询）。
+#[tauri::command]
+pub async fn tag_list_all<R: Runtime>(app: AppHandle<R>) -> Result<Vec<TagDto>, String> {
+    let handle = app.clone();
+    blocking(move || {
+        let state = handle.state::<DbState>();
+        state.with(&handle, |db: &AppDb| {
+            db.read(tags::list_all)
+                .map(|list| list.into_iter().map(TagDto::from).collect())
+                .map_err(|e| e.to_string())
+        })
+    })
+    .await
+}
+
 /// 建标签（已有同名就返回已有的那条 —— 幂等）。
 ///
 /// 名字的规范化与校验在 `store::tags::clean_name` 里（去首尾空白、空名与超长报错），

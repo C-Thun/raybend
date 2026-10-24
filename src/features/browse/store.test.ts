@@ -109,6 +109,9 @@ function fakeApi(count: number) {
     async tagList() {
       return [];
     },
+    async tagListAll() {
+      return [];
+    },
     async page(query: BrowseQuery, offset: number, limit: number) {
       calls.page.push(offset);
       calls.queries.push(query);
@@ -936,6 +939,9 @@ function legacyApi(count: number) {
     async tagList() {
       return [];
     },
+    async tagListAll() {
+      return [];
+    },
     async markings() {
       return [];
     },
@@ -1004,6 +1010,7 @@ test("naturalOf：编辑过的照片用 latest 的输出尺寸（tiles 比例与
     },
     async facets(): Promise<BrowseFacets> { return EMPTY_FACETS; },
     async tagList() { return []; },
+    async tagListAll() { return []; },
     async markings() { return []; },
     async mark() { return EMPTY_MARK; },
     async undo() { return EMPTY_MARK; },

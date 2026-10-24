@@ -201,7 +201,7 @@ pub async fn photo_ai_task_action<R: Runtime>(
                 .action(db, id, &action)
                 .map_err(|e| e.to_string())
         })?;
-        if action == "resume" && result {
+        if (action == "resume" || action == "retry") && result {
             wake(&app)?;
         }
         Ok(result)

@@ -229,6 +229,9 @@ pnpm release patch --win-msi --unsigned --publish --no-crates
 `--publish` 的硬规则：必须同时指定 `--win-msi` / `--win-nsis`；不能与 `--dry-run`、`--skip-build`
 或 `test` 通道同用；它调用的发布逻辑与下面的两条指令**完全是同一个函数**，不是第二条通路。
 
+**本版变更**：在 `docs/release-notes/<版本>.md`（例如 `0.1.4.md`）写 Markdown，构建时会自动嵌入
+`RELEASE-NOTES.md`；没有这个文件时放提交记录链接。发布说明里**不再有**内部操作提示行。
+
 ### 6.2 两条指令（需要验收窗口时）
 
 想在中间停一下，人工验一下安装器、核对/编辑 `release-out/v版本/RELEASE-NOTES.md`：
@@ -775,9 +778,9 @@ v0.1.2 的实跑记录：`implementations/2026-10-15_first-release-and-fixes.md`
 
 ---
 
-## 附录 I · 为什么暂不做 CI 打包
+## 附录 I · 为什么不排期 CI 打包
 
-**结论：技术上可行，但对现状不划算，暂缓；登记到 `memory/FUTURE.md` G24，触发条件是「模型公开分发方式定下来」或「有了云签名」。**
+**结论：技术上可行，但对现状不划算，不排期**（崔总 2026-10-24：发版前、发版、发版后都不做）。只作为方向存档在 `memory/FUTURE.md` G24；除非崔总重新提出，否则不再评估。
 
 评估依据（已核对的代码与事实）：
 
@@ -786,7 +789,7 @@ v0.1.2 的实跑记录：`implementations/2026-10-15_first-release-and-fixes.md`
 - **真正的卡点是 AI 模型**：152 MB 的 ONNX 在独立仓库 `model-registry`（git LFS），不在本仓。CI 要出 AI 版，得先解决模型怎么公开分发（LFS 流量 / Release 资产 / 私有仓库令牌）；否则 CI 产物只能是不带 AI 的版本 —— 与本地主力包不同质，等于维护两套发布口径与两套校验。
 - 其余成本：Secrets 管理（更新私钥、将来 Authenticode 云签名）、缓存键维护、`check:win` 要在 CI 里同套复跑；而且 CI 直接执行发布动作（提交/tag/上传）与“发布由人类执行”的纪律边界需要重新划定（可行形态是 CI 出草稿、人类点 publish，但又回到了人的动作）。
 
-因此本轮先把**本地一键链路**（本文件）与**启动自动检查更新**做顺；CI 打包留到模型分发与签名方案落地后再启动。
+因此长期方案就是**本地一键链路**（本文件）与**启动自动检查更新**；CI 打包不在发布计划内，模型分发与云签名只是将来若重新提出时的评估前提，不构成启动条件。
 
 ---
 
@@ -813,3 +816,24 @@ pnpm clean:report
 正在用的不动、不付冷构建代价；依赖升级 / feature 组合变化 / 换构建参数留下的旧产物由它回收。
 `clean:win` 的默认目标与发版构建**同一套探测**（`RAYBEND_WIN_BUILD_DIR` / `--win-dir` 可覆盖），
 旧目录还在时它会打印一行提示。
+
+---
+
+## 附录 K · 发布版崩溃符号（PDB）
+
+发布包**不带 PDB**（体积 + 构建路径），但每个正式版都要能精确定位崩溃：
+
+- `pnpm release` 在 Windows 构建完成后，把 `release/` 下的 `*.pdb` 复制到
+  `release-out/symbols/v<版本>/`（正式版/预览版）或 `release-out/symbols/test-<时间戳>/`（test 通道，
+  它们的版本号常等于当前版本，混放会让正式包的符号对不上二进制）。
+  **不上传** GitHub Release；发布校验只认版本目录。
+- 崩溃报告的 `report.json` 的 `app` 带 `version` / `gitHash` / `buildTime`，`report.txt` 也印 commit 与构建时间；
+  报告本身已做出口脱敏，**不自动上传**。
+- 定位：拿同版本 `release-out/symbols/v<版本>/*.pdb` + 报告里的 `dump.dmp`（若有）离线符号化。
+  当前 release 档**未开 debug 信息**：能定位到**函数**，不保证行号；想要行号就在发布档加
+  `debug = "line-tables-only"`（代价：构建变慢、PDB 变大；PDB 不进安装包）。
+  没有 dump 时，文本 backtrace 的函数名取决于运行时能否找到 PDB —— 发布包不带 PDB 是刻意取舍。
+  报告里的 `version` / `gitHash` / `buildTime` 三件合起来就能确定“该用哪一份 PDB”。
+- `Cargo.toml` 的 `strip = "debuginfo"` 在 Windows MSVC 上被 rustc 忽略（符号由 PDB 提供），
+  在其它平台保留符号表、只剥 debuginfo，至少保证函数名。
+- 红线：PDB 是**代码符号**，不含用户照片、库路径或编辑内容；不要把用户目录打进符号文件。

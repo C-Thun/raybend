@@ -48,6 +48,7 @@ import { FilterBar } from "../../features/browse/FilterBar.tsx";
 import { browseSource } from "../../features/browse/grid-source.ts";
 import { createOrganizationSource } from "../../features/browse/organization-source.ts";
 import { beginPhotoDrag, dragIdsFor, photoDrag } from "../../features/browse/photo-drag.ts";
+import { membersAllOffline } from "../../features/browse/bucket-counts.ts";
 import {
   createPhotoViewingController,
   PhotoViewingStage,
@@ -179,6 +180,11 @@ function ColumnHandle(props: {
 export function BrowseWorkspace(props: BrowseWorkspaceProps) {
   const store = props.store;
   const [organizationSelection, setOrganizationSelection] = createSignal<OrganizationSelection>(null);
+  /** 当前选中的桶（面板给的对象，用来区分「空桶」与「成员都在未挂载库」）。 */
+  const [selectedBucket, setSelectedBucket] = createSignal<PhotoBucket | null>(null);
+  createEffect(() => {
+    if (organizationSelection()?.kind !== "bucket") setSelectedBucket(null);
+  });
   const organizationPhotos = () => organizationSelection()?.kind === "tag" || organizationSelection()?.kind === "bucket";
   const organizationInfoAligned = () => {
     const id = organization.selection().anchor;
@@ -454,8 +460,15 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
         icon={<IconPhoto size={64} />} text={t("browse.loading")} />;
       if (!repositories().some((repo) => repo.online && repo.root !== null))
         return <StateWatermark icon={<IconAlbumOff size={64} />} text={t("org.mountLibrary")} />;
-      if (organization.source.count() === 0) return <StateWatermark icon={<IconPhotoOff size={64} />}
-        text={t("org.noMatchingPhotos")} />;
+      if (organization.source.count() === 0) {
+        const bucket = selectedBucket();
+        if (organizationSelection()?.kind === "bucket" && bucket !== null &&
+          membersAllOffline(bucket, new Set(repositories().filter((repo) => repo.online).map((repo) => repo.id)))) {
+          return <StateWatermark icon={<IconAlbumOff size={64} />} text={t("org.bucketMembersOffline")} />;
+        }
+        return <StateWatermark icon={<IconPhotoOff size={64} />}
+          text={t("org.noMatchingPhotos")} />;
+      }
       return null;
     }
     if (store.repositoryId() === null) {
@@ -722,11 +735,11 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
     });
     if (photos.length === 0) return;
     try {
-      await addPhotosToBucket(bucketId, photos);
+      const added = await addPhotosToBucket(bucketId, photos);
       props.onOrganizationChanged?.();
       props.toast?.show({
-        tone: "success",
-        message: t("org.addedCount").replace("{n}", String(photos.length)),
+        tone: added > 0 ? "success" : "info",
+        message: t(added > 0 ? "org.addedCount" : "org.addedNone").replace("{n}", String(added)),
       });
       void name;
     } catch (error) {
@@ -943,9 +956,10 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
               refreshKey={props.organizationRevision}
               repositories={repositories()}
               selection={organizationSelection()}
-              onSelectTag={(tag) => setOrganizationSelection({ kind: "tag", key: tag.name.normalize("NFC").toLowerCase() })}
-              onSelectBucket={(bucket) => setOrganizationSelection({ kind: "bucket", id: bucket.id })}
+              onSelectTag={(tag) => { setSelectedBucket(null); setOrganizationSelection({ kind: "tag", key: tag.name.normalize("NFC").toLowerCase() }); }}
+              onSelectBucket={(bucket) => { setSelectedBucket(bucket); setOrganizationSelection({ kind: "bucket", id: bucket.id }); }}
               onSelectDirectory={(repositoryId, path) => {
+                setSelectedBucket(null);
                 setOrganizationSelection({ kind: "directory", repositoryId, path });
                 store.setRepository(repositoryId);
                 store.setScope(path);
@@ -954,10 +968,16 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
               onEditBucket={props.onEditBucket}
               onBucketDeleted={(bucket) => {
                 // 删的正是当前在看的桶：清选中回退库目录浏览，并明确提示（规格 §9）
+                setSelectedBucket(null);
                 setOrganizationSelection((current) => current?.kind === "bucket" && current.id === bucket.id ? null : current);
                 props.toast?.show({ tone: "info", message: t("org.bucketDeletedFallback").replace("{name}", bucket.name) });
               }}
               onError={(error) => store.reportError(error)}
+              onBucketSnapshot={(bucket) => {
+                // 面板只在「当前选中项确实是这个桶」时给非空值；直接同步快照即可。
+                setSelectedBucket(bucket);
+              }}
+              onNotice={(message) => props.toast?.show({ tone: "info", message })}
               onChanged={props.onOrganizationChanged}
             />
           }>

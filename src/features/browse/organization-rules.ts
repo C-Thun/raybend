@@ -10,7 +10,12 @@ export type DraftResult =
 const has = (value: unknown): boolean =>
   Array.isArray(value) ? value.length > 0 : value !== null && value !== undefined && value !== "";
 
-export function rulesFromBrowseFilter(filter: BrowseFilter, tags: readonly Tag[]): DraftResult {
+export function rulesFromBrowseFilter(
+  filter: BrowseFilter,
+  tags: readonly Tag[],
+  repositoryIds: readonly string[] = [],
+): DraftResult {
+  const scope = [...new Set(repositoryIds.filter((id) => id.trim() !== ""))];
   const unsupported = [
     ["flag", filter.flag],
     ["takenFrom", filter.takenFrom],
@@ -39,17 +44,17 @@ export function rulesFromBrowseFilter(filter: BrowseFilter, tags: readonly Tag[]
     return {
       ok: true,
       rules: { groups: (values.length > 0 ? values : [{}]).map((value) => ({
-        repositoryIds: [],
+        repositoryIds: [...scope],
         ...value,
       })) },
     };
   }
   return {
     ok: true,
-    rules: { groups: [{ repositoryIds: [], ...Object.assign({}, ...values) }] },
+    rules: { groups: [{ repositoryIds: [...scope], ...Object.assign({}, ...values) }] },
   };
 }
 
-export function emptyRuleDraft(): RuleSet {
-  return { groups: [{ repositoryIds: [] }] };
+export function emptyRuleDraft(repositoryIds: readonly string[] = []): RuleSet {
+  return { groups: [{ repositoryIds: [...new Set(repositoryIds.filter((id) => id.trim() !== ""))] }] };
 }

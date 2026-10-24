@@ -2,7 +2,7 @@
 //!
 //! 所有写函数由现有单写者调用；跨库查询只接收已挂载库的租约。
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -111,11 +111,21 @@ pub struct Bucket {
     pub rules: RuleSet,
     pub rule_revision: i64,
     pub member_count: i64,
+    /// 成员按库分组（卡片显示「当前挂载 / 全部」，也是清理失效成员的依据）。
+    #[serde(default)]
+    pub member_counts_by_repository: BTreeMap<String, i64>,
 }
+
+/// 桶查询的列（`list_buckets` 与 `bucket_by_id` 共用一份，避免两处口径漂移）。
+const BUCKET_COLUMNS: &str = "b.id, b.name, b.pinned, b.paused, b.rule_json, b.rule_revision, \
+    (SELECT count(*) FROM photo_bucket_members m WHERE m.bucket_id = b.id), \
+    COALESCE((SELECT json_group_object(repository_id, n) FROM (\
+        SELECT repository_id, count(*) AS n FROM photo_bucket_members m\n         WHERE m.bucket_id = b.id GROUP BY repository_id)), '{}')";
 
 fn bucket_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Bucket> {
     let json: Option<String> = row.get(4)?;
     let rules = json.and_then(|text| serde_json::from_str(&text).ok()).unwrap_or_default();
+    let counts: String = row.get(7)?;
     Ok(Bucket {
         id: row.get(0)?,
         name: row.get(1)?,
@@ -124,25 +134,21 @@ fn bucket_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Bucket> {
         rules,
         rule_revision: row.get(5)?,
         member_count: row.get(6)?,
+        member_counts_by_repository: serde_json::from_str(&counts).unwrap_or_default(),
     })
 }
 
 pub fn list_buckets(conn: &Connection) -> Result<Vec<Bucket>> {
-    let mut stmt = conn.prepare(
-        "SELECT b.id, b.name, b.pinned, b.paused, b.rule_json, b.rule_revision,
-                (SELECT count(*) FROM photo_bucket_members m WHERE m.bucket_id = b.id)
-         FROM photo_buckets b
-         ORDER BY b.pinned DESC, (b.rule_json IS NOT NULL) DESC, b.name_folded, b.id"
-    )?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {BUCKET_COLUMNS} FROM photo_buckets b\n         ORDER BY b.pinned DESC, (b.rule_json IS NOT NULL) DESC, b.name_folded, b.id"
+    ))?;
     let rows = stmt.query_map([], bucket_row)?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
 pub fn bucket_by_id(conn: &Connection, id: i64) -> Result<Option<Bucket>> {
     Ok(conn.query_row(
-        "SELECT b.id, b.name, b.pinned, b.paused, b.rule_json, b.rule_revision,
-                (SELECT count(*) FROM photo_bucket_members m WHERE m.bucket_id = b.id)
-         FROM photo_buckets b WHERE b.id = ?1",
+        &format!("SELECT {BUCKET_COLUMNS} FROM photo_buckets b WHERE b.id = ?1"),
         [id], bucket_row,
     ).optional()?)
 }
@@ -328,6 +334,27 @@ pub fn remove_member(conn: &Connection, bucket_id: i64, photo: &PhotoRef, now: i
             "INSERT OR IGNORE INTO photo_bucket_exclusions(bucket_id, repository_id, photo_uid, excluded_at)
              SELECT id, ?2, ?3, ?4 FROM photo_buckets WHERE id = ?1 AND rule_json IS NOT NULL",
             params![bucket_id, photo.repository_id, photo.photo_uid, now],
+        )?;
+    }
+    transaction.commit()?;
+    Ok(removed)
+}
+
+/// 清掉一批**已失效**成员（照片已从库里真删 / UID 已不在 catalog）。
+///
+/// 与 [`remove_member`] 的区别：这里**不写排除** —— 照片本身已经不存在，
+/// 排除项没有意义，也会在下次导入同 UID 时造成困惑。
+pub fn prune_members(conn: &Connection, bucket_id: i64, refs: &[PhotoRef]) -> Result<usize> {
+    if refs.is_empty() {
+        return Ok(0);
+    }
+    let transaction = conn.unchecked_transaction()?;
+    let mut removed = 0usize;
+    for photo in refs {
+        removed += transaction.execute(
+            "DELETE FROM photo_bucket_members
+              WHERE bucket_id = ?1 AND repository_id = ?2 AND photo_uid = ?3",
+            params![bucket_id, photo.repository_id, photo.photo_uid],
         )?;
     }
     transaction.commit()?;
@@ -684,6 +711,28 @@ mod tests {
         assert!(!delete_bucket(&app, bucket.id).unwrap());
         set_bucket_pinned(&app, bucket.id, false, 11).unwrap();
         assert!(delete_bucket(&app, bucket.id).unwrap());
+    }
+
+    #[test]
+    fn member_counts_follow_repository_and_prune_drops_dead_rows() {
+        let app = db(DbKind::App);
+        let a = PhotoRef { repository_id: "A".into(), photo_uid: "u1".into(), asset_id: 1 };
+        let b = PhotoRef { repository_id: "B".into(), photo_uid: "u2".into(), asset_id: 2 };
+        let (bucket, added) = create_bucket_with_members(
+            &app, "跨库", RuleSet::default(), &[a.clone(), b.clone()], 1,
+        ).unwrap();
+        assert_eq!(added, 2);
+        let loaded = bucket_by_id(&app, bucket.id).unwrap().unwrap();
+        assert_eq!(loaded.member_count, 2);
+        assert_eq!(loaded.member_counts_by_repository.get("A"), Some(&1));
+        assert_eq!(loaded.member_counts_by_repository.get("B"), Some(&1));
+
+        assert_eq!(prune_members(&app, bucket.id, std::slice::from_ref(&a)).unwrap(), 1);
+        let after = bucket_by_id(&app, bucket.id).unwrap().unwrap();
+        assert_eq!(after.member_count, 1);
+        assert_eq!(after.member_counts_by_repository.get("A"), None);
+        assert_eq!(after.member_counts_by_repository.get("B"), Some(&1));
+        assert_eq!(member_refs(&app, bucket.id, "B").unwrap(), [b]);
     }
 
     #[test]

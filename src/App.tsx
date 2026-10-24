@@ -102,7 +102,7 @@ import { locale, nextLocale, setLocale } from "./i18n/index.ts";
 import { createRepositoryMonitor } from "./features/repositories/monitor.ts";
 import { createRepositoryState } from "./features/repositories/state.ts";
 import { LibrarySettingsDialog } from "./features/repositories/index.ts";
-import { browseDelete, browseFacets, browseMark, browseMarkings, browsePage, browseRecycleEmpty, browseRecyclePurge, browseRecycleRestore, browseRecycleSummary, browseRedo, browseTimeline, browseUndo, flagsClear, flagsGet, flagsSet, tagList } from "./api/browse.ts";
+import { browseDelete, browseFacets, browseMark, browseMarkings, browsePage, browseRecycleEmpty, browseRecyclePurge, browseRecycleRestore, browseRecycleSummary, browseRedo, browseTimeline, browseUndo, flagsClear, flagsGet, flagsSet, tagList, tagListAll } from "./api/browse.ts";
 import { BrowseWorkspace } from "./workspaces/browse/index.ts";
 import { EditorWorkspace } from "./workspaces/editor/EditorWorkspace.tsx";
 import {
@@ -224,6 +224,7 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
       facets: browseFacets,
       markings: browseMarkings,
       tagList,
+      tagListAll,
       mark: browseMark,
       undo: browseUndo,
       redo: browseRedo,
@@ -444,7 +445,7 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
       window.clearInterval(timer); window.removeEventListener("focus", focus);
     });
   });
-  const [bucketDialog, setBucketDialog] = createSignal<{ bucket: PhotoBucket | null; seed: RuleSet | null } | null>(null);
+  const [bucketDialog, setBucketDialog] = createSignal<{ bucket: PhotoBucket | null; seed: RuleSet | null; note: string | null } | null>(null);
   const [bucketPicker, setBucketPicker] = createSignal<AssetIdentity[] | null>(null);
   const [organizationSelected, setOrganizationSelected] = createSignal<AssetIdentity[]>([]);
   const [organizationSelectedItems, setOrganizationSelectedItems] = createSignal<AssetItem[]>([]);
@@ -559,12 +560,17 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
   }
   async function openAutoBucket(): Promise<void> {
     await browseStore.loadTags();
-    const draft = rulesFromBrowseFilter(browseStore.filter(), browseStore.tags());
+    const repositoryId = browseStore.repositoryId();
+    const draft = rulesFromBrowseFilter(
+      browseStore.filter(),
+      browseStore.tags(),
+      repositoryId ? [repositoryId] : [],
+    );
     if (!draft.ok) {
       toast.show({ tone: "danger", message: t("org.unsupportedFilter").replace("{fields}", draft.unsupported.join(", ")) });
       return;
     }
-    setBucketDialog({ bucket: null, seed: draft.rules });
+    setBucketDialog({ bucket: null, seed: draft.rules, note: t("org.fromFilterNote") });
   }
   /**
    * 所有工作流的齿轮与库命令都进入这一份根层库设置弹窗。
@@ -1067,6 +1073,7 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
         open={bucketDialog() !== null}
         bucket={bucketDialog()?.bucket}
         seed={bucketDialog()?.seed}
+        note={bucketDialog()?.note}
         repositories={repositories.list()}
         onClose={() => setBucketDialog(null)}
         onSave={async (name, rules) => {
@@ -1202,8 +1209,8 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
         <BrowseWorkspace
           organizationPanel={organizationPanel()}
           organizationRevision={organizationRevision()}
-          onNewBucket={() => setBucketDialog({ bucket: null, seed: null })}
-          onEditBucket={(bucket) => setBucketDialog({ bucket, seed: null })}
+          onNewBucket={() => setBucketDialog({ bucket: null, seed: null, note: null })}
+          onEditBucket={(bucket) => setBucketDialog({ bucket, seed: null, note: null })}
           onOrganizationChanged={() => { setOrganizationRevision((value) => value + 1); organizationWorker.wake(); }}
           onOrganizationSelection={receiveOrganizationSelection}
           onOrganizationViewChange={setOrganizationPhotoView}

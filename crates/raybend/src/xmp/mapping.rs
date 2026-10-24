@@ -30,6 +30,23 @@ const SCALARS: &[(&str, &str)] = &[
     ("sharpenAmount", "Sharpness"),
 ];
 
+/// **明确不映射**的参数（新增编辑参数时必须在这里或 [`SCALARS`] 里归类）。
+///
+/// 第二列写理由；`xmp/mapping.rs` 的 `every_develop_param_is_classified_for_crs`
+/// 会遍历 `develop::params::PARAMS`，漏归类的参数直接让测试红。
+///
+/// `rb:` 域不受这张表影响：`rb:profileJson` 存完整 profile，新参数自动跟着走。
+pub const NOT_MAPPED: &[(&str, &str)] = &[
+    ("temperature", "白平衡是基线 + 偏移量，crs 的色温/色调尺度不同"),
+    ("dynamicContrast", "Lightroom 无对应项"),
+    ("sharpenRadius", "Lightroom 无独立对应项"),
+    ("distortion", "镜头项按配置文件校正，不做手动映射"),
+    ("vignette", "镜头项按配置文件校正，不做手动映射"),
+    ("vignetteRange", "镜头项按配置文件校正，不做手动映射"),
+    ("chromatic", "镜头项按配置文件校正，不做手动映射"),
+    ("chromaticBlue", "镜头项按配置文件校正，不做手动映射"),
+];
+
 /// 从 raw 基的 latest 推出 `crs:` 块。
 ///
 /// `raw_file_name`：RAW 文件的文件名（`crs:RawFileName`；`None` = 没有独立 RAW 文件）。
@@ -200,6 +217,28 @@ mod tests {
         assert_eq!(get("HasSettings"), "True");
         assert_eq!(get("ProcessVersion"), "11.0");
         assert!(block.has_any);
+    }
+
+    #[test]
+    fn every_develop_param_is_classified_for_crs() {
+        use crate::develop::params::PARAMS;
+        let mapped: Vec<&str> = SCALARS.iter().map(|(id, _)| *id).collect();
+        let excluded: Vec<&str> = NOT_MAPPED.iter().map(|(id, _)| *id).collect();
+        for spec in PARAMS {
+            let in_mapped = mapped.contains(&spec.id);
+            let in_excluded = excluded.contains(&spec.id);
+            assert!(
+                in_mapped != in_excluded,
+                "参数 {} 必须且只能归入 SCALARS 或 NOT_MAPPED（新增无损编辑参数时同步决定 XMP 兼容层）",
+                spec.id
+            );
+        }
+        for id in mapped.iter().chain(excluded.iter()) {
+            assert!(
+                PARAMS.iter().any(|spec| spec.id == *id),
+                "XMP 映射表里的 {id} 已不在参数表，删掉或改名时记得同步这里"
+            );
+        }
     }
 
     #[test]

@@ -143,7 +143,7 @@ pub fn encode_avif_with_metadata(rgb: &[u8], width:u32,height:u32,quality:u8,exi
 ///
 /// **第四次（v5 → v6，2026-09-24）**：编码格式从 JPEG 换成 **AVIF**（质量 90 / 4:4:4，
 /// 人类定的全局口径）。这次**同时**改了 `render_sig` 的字面量与常量 —— 正是上面那条纪律。
-/// 旧 JPEG 缓存变成孤儿，由 GC 收走（`cache.rs` 的 `drop_stale_signatures`）。
+/// 旧 JPEG 缓存变成孤儿，由维护时收走（`cache.rs` 的 `drop_other_pipeline_versions`）。
 ///
 /// ⇒ 所以这条纪律的正确用法是：**同一个改动里，改了渲染行为就顺手抬版本**，
 /// 不要「先合并渲染改动、之后再抬」（中间那段时间产出的缓存会带着旧行为却持有新签名）。
@@ -271,8 +271,8 @@ pub const fn render_sig_source(size: SizeClass) -> &'static str {
 /// 没编辑过就是基础签名（与旧缓存完全一致 —— 老照片不会因为这次改动而重渲染）。
 /// 编辑过则带上编辑栈的指纹：**改一个参数就换一个签名** ⇒ 自动绕开旧缓存。
 ///
-/// ⚠️ 这种「动态签名」让 `drop_stale_signatures` 的 `NOT IN (...)` 判据失效
-/// （它只认那几个静态签名）—— 所以那边的 GC 改成了**前缀匹配**（`cache.rs`）。
+/// ⚠️ 这种「动态签名」让「只认静态签名的白名单」判据失效，所以自动维护改成
+/// **按管线版本片段**收孤儿（`cache.rs` 的 `drop_other_pipeline_versions`）。
 #[must_use]
 pub fn render_sig_with_edit(size: SizeClass, edit: Option<&DevelopStack>) -> String {
     match edit {

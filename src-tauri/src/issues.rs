@@ -371,6 +371,7 @@ fn ensure_snapshots<R: Runtime>(
         })
         .map_err(|error| error.to_string())?;
     }
+    let _ = db.maybe_maintain(raybend::thumbnail::cache::DEFAULT_MAX_BYTES, time::now_millis());
     Ok(())
 }
 
@@ -567,6 +568,7 @@ pub(crate) fn thumb_bytes<R: Runtime>(app: &AppHandle<R>, repo: &str,
         let write_key = key.clone(); let write_sig = sig.clone();
         db.write(move |conn| cache::put(conn, &write_key, size, &write_sig, &bytes, width, height, time::now_millis()))
             .map_err(|error| error.to_string())?;
+        let _ = db.maybe_maintain(raybend::thumbnail::cache::DEFAULT_MAX_BYTES, time::now_millis());
         db.read(move |conn| cache::get(conn, &key, size, &sig))
             .map_err(|error| error.to_string())?
             .ok_or("定稿缩略图生成后无法读取".into())

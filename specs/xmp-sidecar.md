@@ -202,6 +202,10 @@ sidecar_path(asset) = <照片目录>/<主体名>.xmp
   **2026-10-10 复核（编辑会话管道 W4）**：白平衡改成「预设里存 Δmired 偏移量」后，
   sidecar 侧无任何变化 —— `temperature` 仍不写、`as_shot_k` 也不写；预设是设备级内部资产
   （`app.db`），不进 XMP。本条声明在本期后依然成立。
+- **维护闸门（2026-10-24）**：新增/删除无损编辑参数时按 `AGENTS.md` §13.1 的固定清单走；
+  `crates/raybend/src/xmp/mapping.rs` 的 `every_develop_param_is_classified_for_crs` 会遍历
+  `develop::params::PARAMS`，每个参数必须归入 `SCALARS`（映射）或 `NOT_MAPPED`（写理由），
+  漏归类直接红。`rb:profileJson` 存完整 `DevelopStack`，新参数自动跟着走；`crs:` 只走本表。
 
 ### 5.2 元数据（与 base 无关；只要有值就写）
 
@@ -306,6 +310,15 @@ sidecar_path(asset) = <照片目录>/<主体名>.xmp
     不进命令注册表、不需要默认热键（实施记录里写明此结论）。
 
 ## 10. 测试与验收
+
+#### 最小核验（2026-10-24 崔总口径：XMP 处于预备状态，功能可用但不进入实用）
+
+不必每次跑完整 A–E。按下面四步过一遍即可，**A–E 全表降为「出问题再抽查」**：
+
+1. 关掉应用，跑 `pnpm check:xmp "<验收库根>"`（只读）。
+2. 编辑一张 RAW（曝光 + 曲线）→ 库内出现同名 `.xmp`，含 `rb:latest` 与 `crs:Exposure2012`。
+3. 打 4★ + 一个关键词 → 见 `xmp:Rating` / `dc:subject`。
+4. 重置编辑并清空标记 → 文件消失；latest 切 SOOC → `crs:` 整段消失、`rb:` 仍在。
 
 #### 单元测试（必须齐备、秒级；覆盖边界：空/单元素/上下限/非法值/中文与 Unicode/超长路径/大小写）
 

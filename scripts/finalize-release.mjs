@@ -57,6 +57,12 @@ export function finalizeRelease({ argv = process.argv.slice(2), run = execFileSy
   }
   artifacts.sort((a, b) => a.name.localeCompare(b.name));
   const manifest = JSON.parse(readFileSync(resolve(options['--manifest']), 'utf8'));
+  const notesName = String(manifest.version).replace(/[^0-9A-Za-z._-]/g, '_');
+  const notesPath = fileURLToPath(new URL(`../docs/release-notes/${notesName}.md`, import.meta.url));
+  const changes = existsSync(notesPath) ? readFileSync(notesPath, 'utf8').trim() : '';
+  const changesSection = changes
+    ? `## 本版变更\n\n${changes}\n\n`
+    : `## 本版变更\n\n详见提交记录：https://github.com/C-Thun/raybend/commits/v${manifest.version}\n\n`;
   const metadata = releaseMetadata({ manifest, artifacts, baseUrl: options['--base-url'], withUpdater: !!options['--base-url'], unsigned: allowUnsigned });
   mkdirSync(dirname(out), { recursive: true });
   mkdirSync(out); // 独占创建，外部并行创建时直接失败。
@@ -69,7 +75,7 @@ export function finalizeRelease({ argv = process.argv.slice(2), run = execFileSy
   write('SHA256SUMS', metadata.checksums);
   write('release-index.json', JSON.stringify(metadata.index, null, 2) + '\n');
   if (metadata.update) write(manifest.channel === 'beta' ? 'beta.json' : 'latest.json', JSON.stringify(metadata.update, null, 2) + '\n');
-  write('RELEASE-NOTES.md', `# RayBend ${manifest.version}\n\nWindows x64 · ${manifest.channel}\n\n导入、浏览评级筛选、非破坏性编辑与多定稿、WebP/AVIF/JPG/PNG 导出、RGB16 TIFF 单向外部编辑交接。\n\n${allowUnsigned ? '此包未使用 Windows 发布者签名；Windows 可能提示未知发布者或阻止运行。' : '最终安装器已通过本机 Authenticode 验证。'} 不保证 SmartScreen 信誉，勿关闭系统保护作为通用安装步骤。\n\n${metadata.update ? '本发布包含签名更新清单；应用仅在主动检查时联网。' : '本发布未提供签名更新清单；请通过发布页手动更新。'}\n\n校验安装器：下载 SHA256SUMS 并核对 SHA-256。对应源码：https://github.com/C-Thun/raybend/tree/v${manifest.version}\n使用说明：https://github.com/C-Thun/raybend/blob/v${manifest.version}/docs/user-guide.md\n\n发布前请按 docs/release.md 完成真机验收，核对此说明的功能/限制与实际结果，并补充本版变更。\n`);
+  write('RELEASE-NOTES.md', `# RayBend ${manifest.version}\n\nWindows x64 · ${manifest.channel}\n\n导入、浏览评级筛选、非破坏性编辑与多定稿、WebP/AVIF/JPG/PNG 导出、RGB16 TIFF 单向外部编辑交接。\n\n${allowUnsigned ? '此包未使用 Windows 发布者签名；Windows 可能提示未知发布者或阻止运行。' : '最终安装器已通过本机 Authenticode 验证。'} 不保证 SmartScreen 信誉，勿关闭系统保护作为通用安装步骤。\n\n${metadata.update ? '本发布包含签名更新清单；应用仅在主动检查时联网。' : '本发布未提供签名更新清单；请通过发布页手动更新。'}\n\n${changesSection}## 校验与文档\n\n下载 SHA256SUMS 并核对安装器的 SHA-256。对应源码：https://github.com/C-Thun/raybend/tree/v${manifest.version}\n使用说明：https://github.com/C-Thun/raybend/blob/v${manifest.version}/docs/user-guide.md\n`);
   log(`已准备 ${artifacts.length} 个安装器、签名/哈希/清单与说明到 ${out}；未上传。运行 pnpm release:publish ${out} 只读核对并预览人工上传命令。`);
   return metadata;
 }

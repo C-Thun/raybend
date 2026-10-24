@@ -24,6 +24,8 @@
 //! `pinned` → `hits` → `last_used_at`，`pinned = 1` 的永不淘汰。
 
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use rusqlite::{Connection, OptionalExtension, params};
 
@@ -37,6 +39,12 @@ use crate::thumbnail::render::SizeClass;
 
 /// 缓存库文件名。
 pub const THUMBS_FILE_NAME: &str = "thumbs.db";
+
+/// 每库小图缓存默认上限：1 GiB（FUTURE G26 建议值；设置面板以后可覆盖）。
+pub const DEFAULT_MAX_BYTES: i64 = 1 << 30;
+
+/// 自动维护的间隔（写缓存后触发，但最多这么久跑一次）。
+const MAINTENANCE_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 
 /// 算一个缓存键。
 ///
@@ -102,6 +110,8 @@ pub struct ThumbsDb {
     pool: ReadPool,
     writer: Writer,
     path: PathBuf,
+    /// 上次维护时间（进程内节流；不落库）。
+    last_maintenance: Mutex<Option<Instant>>,
 }
 
 impl ThumbsDb {
@@ -116,7 +126,7 @@ impl ThumbsDb {
 
         let pool = ReadPool::open(&path)?;
         let writer = Writer::open(&path)?;
-        Ok(Self { pool, writer, path })
+        Ok(Self { pool, writer, path, last_maintenance: Mutex::new(None) })
     }
 
     #[must_use]
@@ -145,6 +155,26 @@ impl ThumbsDb {
         F: FnOnce(&rusqlite::Transaction<'_>) -> Result<T> + Send + 'static,
     {
         self.writer.transaction(f)
+    }
+
+    /// 有节制地跑一次维护：旧签名孤儿回收 + 容量回收。
+    ///
+    /// 调用方在**写缓存之后**顺手调一下即可；内部按 [`MAINTENANCE_INTERVAL`] 节流，
+    /// 所以不会每次写都扫全表。返回 `None` = 这次没到时间。
+    ///
+    /// # Errors
+    /// 数据库读写失败。
+    pub fn maybe_maintain(&self, max_bytes: i64, now_ms: i64) -> Result<Option<(GcOutcome, usize)>> {
+        let mut last = self
+            .last_maintenance
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if last.is_some_and(|at| at.elapsed() < MAINTENANCE_INTERVAL) {
+            return Ok(None);
+        }
+        *last = Some(Instant::now());
+        drop(last);
+        self.write(move |conn| maintenance(conn, max_bytes, now_ms)).map(Some)
     }
 
     /// 把队列跑干（`Drop` 时也会跑，这里是显式版）。
@@ -312,26 +342,37 @@ pub fn clear(conn: &Connection) -> Result<usize> {
     Ok(conn.execute("DELETE FROM thumbs", [])?)
 }
 
-/// 删掉**不属于当前签名**的老条目（算法升级后的孤儿回收）。
+/// 收掉**其它管线版本**留下的孤儿行（算法升级后的缓存回收）。
 ///
-/// # 为什么是**前缀匹配**而不是 `NOT IN`
+/// 判据是签名里的版本片段 `-v<数字>`：
 ///
-/// 带编辑的渲染签名是**动态**的（`avif-q90-grid-v6+e<指纹>`，见
-/// `render::render_sig_with_edit`）—— 一张编辑过的照片就有一个新签名，
-/// 用 `NOT IN (几个静态签名)` 会把它们全当成孤儿删掉（每次 GC 都白删一遍）。
-/// 改成「前缀命中就留着」之后：
+/// * 当前家族的签名都带 `-v<PIPELINE_VERSION>`（`avif-q90-grid-v16…`、`issue-v16-…`、
+///   `raw-original-v16-…`）；带编辑的动态签名 `…+e<指纹>` 也带 ⇒ **保住**；
+/// * 老版本（`…-v7+e…`、`…-v5`）不含当前版本 ⇒ **收走**；
+/// * **完全不带 `-v<数字>` 片段的签名一律保留** —— 宁可漏收，也不能让一次命名变化把
+///   还在用的缓存当成孤儿每次维护都扫一遍（那等于反复清空重渲染）。
 ///
-/// * 静态签名（没编辑过）前缀就是它自己 ⇒ 行为与以前一致；
-/// * 编辑过的签名前缀是基础签名 ⇒ 被保住；
-/// * 真·老版本（`avif-q90-grid-v5+…`）前缀对不上 ⇒ 照旧回收。
-pub fn drop_stale_signatures(conn: &Connection, sigs: &[&str]) -> Result<usize> {
-    if sigs.is_empty() {
-        return clear(conn);
-    }
-    let clauses = vec!["render_sig NOT LIKE ?"; sigs.len()].join(" AND ");
-    let patterns: Vec<String> = sigs.iter().map(|sig| format!("{sig}%")).collect();
-    let sql = format!("DELETE FROM thumbs WHERE {clauses}");
-    Ok(conn.execute(&sql, rusqlite::params_from_iter(patterns.iter()))?)
+/// 为什么用 `GLOB '*-v[0-9]*'` 而不是 `LIKE '%-v%'`：后者会被 `-version` 这类
+/// 普通单词误命中（2026-10-25 评审时单测当场发现）。
+///
+/// 为什么不按「当前签名白名单」收（2026-10-25 评审改）：那要求每加一种缓存东西就回来
+/// 补一次名单，漏了就会让那些行每 6 小时被删一次；按版本片段判是**自维护**的，
+/// 且判错的失效方向是「多留」而不是「误删」。
+///
+/// 旧版本的行一律收（含 `pinned`）：它们已经不可读取，留着只是永久占字节。
+pub fn drop_other_pipeline_versions(conn: &Connection, version: u32) -> Result<usize> {
+    let current = format!("%-v{version}%");
+    Ok(conn.execute(
+        "DELETE FROM thumbs WHERE render_sig GLOB '*-v[0-9]*' AND render_sig NOT LIKE ?1",
+        [current],
+    )?)
+}
+
+/// 一次维护：先收其它管线版本的孤儿，再按容量回收。
+pub fn maintenance(conn: &Connection, max_bytes: i64, now_ms: i64) -> Result<(GcOutcome, usize)> {
+    let stale = drop_other_pipeline_versions(conn, crate::thumbnail::render::PIPELINE_VERSION)?;
+    let outcome = gc(conn, max_bytes, now_ms)?;
+    Ok((outcome, stale))
 }
 
 /// 统计。
@@ -425,7 +466,7 @@ mod tests {
     use super::*;
     use crate::store::migration;
     use crate::store::pragma;
-    use crate::thumbnail::render::render_sig;
+    use crate::thumbnail::render::{PIPELINE_VERSION, render_sig};
 
     const T0: i64 = 1_789_516_800_000;
 
@@ -658,57 +699,77 @@ mod tests {
     }
 
     #[test]
-    fn drop_stale_signatures_reclaims_old_pipeline_versions() {
+    fn stale_reclaim_only_drops_other_pipeline_versions() {
         let conn = mem();
         let key = cache_key(None, "a.jpg");
-        put(
-            &conn,
-            &key,
-            SizeClass::Grid,
-            "jpeg-q82-g1",
-            &[1u8; 4],
-            1,
-            1,
-            T0,
-        )
-        .unwrap();
-        put(
-            &conn,
-            &key,
-            SizeClass::Grid,
-            "jpeg-q82-g2",
-            &[2u8; 4],
-            1,
-            1,
-            T0,
-        )
-        .unwrap();
-        put(
-            &conn,
-            &key,
-            SizeClass::Screen,
-            "jpeg-q82-g1",
-            &[3u8; 4],
-            1,
-            1,
-            T0,
-        )
-        .unwrap();
+        let current = render_sig(SizeClass::Grid);
+        let edited = format!("{}+e0badc0de", render_sig(SizeClass::Screen));
+        let issue = format!("issue-v{PIPELINE_VERSION}-abc-srcdef");
+        let raw = format!("raw-original-v{PIPELINE_VERSION}-srcdef");
+        let old_grid = "avif-q90-grid-v7+e0badc0de".to_string();
+        let old_issue = "issue-v7-abc-srcdef".to_string();
+        let unversioned = "legacy-signature-without-version".to_string();
+        for (index, sig) in [
+            current.to_string(),
+            edited.clone(),
+            issue.clone(),
+            raw.clone(),
+            old_grid.clone(),
+            old_issue.clone(),
+            unversioned.clone(),
+        ]
+        .iter()
+        .enumerate()
+        {
+            put(&conn, &key, SizeClass::Grid, sig, &[index as u8; 4], 1, 1, T0).unwrap();
+        }
 
-        let removed = drop_stale_signatures(&conn, &["jpeg-q82-g1"]).unwrap();
-        assert_eq!(removed, 1, "g2 是孤儿，收走");
-        assert_eq!(stats(&conn).unwrap().entries, 2);
-        /*
-         * **带编辑的动态签名**（前缀 = 当前基础签名）必须被保住：
-         * 编辑过的照片签名是 `avif-q90-grid-v7+e<指纹>`，用老的 `NOT IN` 判据会被
-         * 每次 GC 都白删一遍（每次都要重渲染）。现在按前缀匹配 ⇒ 保住。
-         */
-        put(&conn, b"k", SizeClass::Grid, "jpeg-q82-g1+e0badc0de", b"x", 1, 1, 0).unwrap();
-        let removed = drop_stale_signatures(&conn, &["jpeg-q82-g1"]).unwrap();
-        assert_eq!(removed, 0, "编辑过的签名前缀命中，不许当孤儿删掉");
-        assert_eq!(stats(&conn).unwrap().entries, 3);
-        // 语法糖：不传任何签名 = 清空
-        assert_eq!(drop_stale_signatures(&conn, &[]).unwrap(), 3);
+        let removed = drop_other_pipeline_versions(&conn, PIPELINE_VERSION).unwrap();
+        assert_eq!(removed, 2, "只收走旧版本的两条");
+        assert!(get(&conn, &key, SizeClass::Grid, current).unwrap().is_some());
+        assert!(get(&conn, &key, SizeClass::Grid, &edited).unwrap().is_some(), "带编辑的动态签名要保住");
+        assert!(get(&conn, &key, SizeClass::Grid, &issue).unwrap().is_some());
+        assert!(get(&conn, &key, SizeClass::Grid, &raw).unwrap().is_some());
+        assert!(get(&conn, &key, SizeClass::Grid, &unversioned).unwrap().is_some(), "不带版本片段的一律保留（宁可漏收）");
+        assert!(get(&conn, &key, SizeClass::Grid, &old_grid).unwrap().is_none());
+        assert!(get(&conn, &key, SizeClass::Grid, &old_issue).unwrap().is_none());
+    }
+
+    #[test]
+    fn maintenance_reclaims_old_signatures_but_keeps_current_families() {
+        let conn = mem();
+        let key = cache_key(None, "a.jpg");
+        let issue = format!("issue-v{PIPELINE_VERSION}-abc-srcdef");
+        let raw = format!("raw-original-v{PIPELINE_VERSION}-srcdef");
+        for (size, sig) in [
+            (SizeClass::Grid, render_sig(SizeClass::Grid).to_string()),
+            (SizeClass::Screen, format!("{}+e1234", render_sig(SizeClass::Screen))),
+            (SizeClass::Grid, issue.clone()),
+            (SizeClass::Grid, raw.clone()),
+            (SizeClass::Grid, "avif-q90-strip-v7".to_string()),
+        ] {
+            put(&conn, &key, size, &sig, &[1u8; 4], 1, 1, T0).unwrap();
+        }
+        let (outcome, stale) = maintenance(&conn, DEFAULT_MAX_BYTES, T0 + 1).unwrap();
+        assert_eq!(stale, 1, "只该收走旧签名那一条");
+        assert_eq!(outcome.removed, 0, "没超限不应按容量淘汰");
+        assert_eq!(stats(&conn).unwrap().entries, 4);
+        assert!(get(&conn, &key, SizeClass::Grid, render_sig(SizeClass::Grid)).unwrap().is_some());
+        assert!(get(&conn, &key, SizeClass::Screen, &format!("{}+e1234", render_sig(SizeClass::Screen))).unwrap().is_some());
+        assert!(get(&conn, &key, SizeClass::Grid, &issue).unwrap().is_some());
+        assert!(get(&conn, &key, SizeClass::Grid, &raw).unwrap().is_some());
+    }
+
+    #[test]
+    fn maintenance_enforces_capacity_after_stale_cleanup() {
+        let conn = mem();
+        for i in 0..5 {
+            put_n(&conn, &cache_key(None, &format!("bulk{i}.jpg")), SizeClass::Grid, 100, T0 + i);
+        }
+        let (outcome, stale) = maintenance(&conn, 250, T0 + 10).unwrap();
+        assert_eq!(stale, 0);
+        assert!(outcome.removed >= 3, "应当删到上限以下");
+        assert!(stats(&conn).unwrap().bytes <= 250);
     }
 
     #[test]

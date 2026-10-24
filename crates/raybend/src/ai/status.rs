@@ -53,7 +53,9 @@ pub fn retry(conn: &Connection, id: i64, now: i64) -> Result<bool> {
         ));
     }
     let tx = conn.unchecked_transaction()?;
-    let changed=tx.execute("UPDATE jobs SET state='paused',error=NULL,updated_at=?2 WHERE id=?1 AND kind='photo_ai_run' AND state='failed'",params![id,now])?>0;
+    // 一步重试：父任务直接回到 pending（与 resume 同一状态口径），失败子项重新排队；
+    // 调用方负责 wake 工作线程。不要再停在 paused 让用户点第二次。
+    let changed=tx.execute("UPDATE jobs SET state='pending',error=NULL,updated_at=?2 WHERE id=?1 AND kind='photo_ai_run' AND state='failed'",params![id,now])?>0;
     if changed {
         tx.execute("UPDATE jobs SET state='pending',attempts=0,error=NULL,updated_at=?2 WHERE kind='photo_ai_image' AND state='failed' AND json_extract(CASE WHEN json_valid(payload) THEN payload ELSE '{}' END,'$.runId')=?1",params![id,now])?;
     }
@@ -102,7 +104,7 @@ mod tests {
         let row = tasks(&c).unwrap().remove(0);
         assert_eq!(
             (row.done, row.failed, row.total, row.state),
-            (1, 0, 2, "paused".into())
+            (1, 0, 2, "pending".into())
         );
         assert!(action(&c, id, "arbitrary", 6).is_err());
     }

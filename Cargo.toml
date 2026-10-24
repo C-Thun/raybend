@@ -91,7 +91,10 @@ codegen-units = 1
 lto = true
 opt-level = 3
 panic = "abort"
-strip = true
+# Windows MSVC 的 rustc 会忽略 -C strip（rust-lang/rust#115120），符号实际由 PDB 提供；
+# 其他平台保留符号表、只剥 debuginfo，让崩溃 backtrace 至少有函数名。
+# 发布版 PDB 由 release.mjs 归档到 release-out/symbols/（不上传）。
+strip = "debuginfo"
 
 # 图像类工作负载在 dev 下也需要足够性能（详见 AGENTS.md）
 [profile.dev]

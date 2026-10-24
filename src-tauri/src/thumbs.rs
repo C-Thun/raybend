@@ -594,6 +594,16 @@ pub async fn thumb_sources_stats<R: Runtime>(
         .map_err(|e| e.to_string())
 }
 
+/// 清空小图缓存（设置里的「清理」；派生数据，删掉后浏览时自动重建）。
+#[tauri::command]
+pub async fn thumb_sources_clear<R: Runtime>(app: AppHandle<R>) -> Result<usize, String> {
+    let cache_dir = sources_cache_dir(&app)?;
+    let state = app.state::<SourcesThumbs>();
+    let db = state.get(&cache_dir, time::now_millis())?;
+    db.write(|conn| raybend::thumbnail::cache::clear(conn))
+        .map_err(|e| e.to_string())
+}
+
 /// 原始 RAW 真显影与内嵌模拟小图使用不同缓存键，不能相互冒充。
 fn raw_thumb_key(asset: &ResolvedAsset) -> Vec<u8> {
     format!("raw-original:{}:{}", asset.repository_id, asset.asset_id).into_bytes()
@@ -619,6 +629,7 @@ pub(crate) fn raw_original_thumb<R: Runtime>(
     let bytes = thumb.data.clone();
     db.write(move |conn| raybend::thumbnail::cache::put(conn, &key, size, &sig, &thumb.data,
         thumb.width, thumb.height, time::now_millis())).map_err(|e| e.to_string())?;
+    let _ = db.maybe_maintain(raybend::thumbnail::cache::DEFAULT_MAX_BYTES, time::now_millis());
     Ok(Some(bytes))
 }
 
@@ -657,6 +668,7 @@ pub(crate) fn prepare_source_images<R: Runtime>(
             db.write(move |conn| raybend::thumbnail::cache::put(conn, &key, size, &sig,
                 &thumb.data, thumb.width, thumb.height, time::now_millis())).map_err(|e| e.to_string())?;
         }
+        let _ = db.maybe_maintain(raybend::thumbnail::cache::DEFAULT_MAX_BYTES, time::now_millis());
     } else {
         let full = FullCache::open(&asset.root).map_err(|e| e.to_string())?;
         let name = FullCache::source_name("sooc", &signature);

@@ -14,13 +14,14 @@ import { getEditorRenderState } from "../api/editor.ts";
 import type { EditorRenderState } from "../api/types.ts";
 import { displayPresentationMatches, type DisplayPhase } from "../lib/display-color.ts";
 import { displayDetectionKey } from "../i18n/display-color.ts";
-import { getSetting, setSetting, SETTING_KEYS } from "../api/db.ts";
+import { getSetting, setSetting, SETTING_KEYS, thumbSourcesClear, thumbSourcesStats } from "../api/db.ts";
+import type { ThumbCacheStats } from "../api/types.ts";
 import { xmpWriteEnabled } from "../lib/xmp-write.ts";
 import { Switch } from "../components/ui/Form.tsx";
 import { pickOpenFiles } from "../api/dialog.ts";
 import { isTauriRuntime } from "../api/tauri-env.ts";
 import { Button, IconButton } from "../components/ui/Button.tsx";
-import { Dialog } from "../components/ui/Dialog.tsx";
+import { Dialog, ConfirmDialog } from "../components/ui/Dialog.tsx";
 import type { CommandSpec } from "../lib/commands.ts";
 import { t, type MessageKey } from "../i18n/index.ts";
 import { AiModelSettings } from "../features/browse/AiModelSettings.tsx";
@@ -101,6 +102,37 @@ export function GlobalSettingsDialog(props: GlobalSettingsDialogProps) {
     void setSetting(SETTING_KEYS.xmpWrite, checked ? "true" : "false")
       .catch((error: unknown) => { setXmpWrite(previous); setXmpWriteError(String(error)); })
       .finally(() => setXmpWriteBusy(false));
+  };
+
+  // 文件页：库内小图缓存占用与清理（FUTURE G26）。
+  const [cacheStats, setCacheStats] = createSignal<ThumbCacheStats | null>(null);
+  const [cacheBusy, setCacheBusy] = createSignal(false);
+  const [cacheError, setCacheError] = createSignal<string | null>(null);
+  const [cacheNotice, setCacheNotice] = createSignal<string | null>(null);
+  const [cacheConfirm, setCacheConfirm] = createSignal(false);
+  const formatCacheSize = (bytes: number): string =>
+    bytes < 1024 * 1024 ? `${Math.round(bytes / 1024)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  createEffect(() => {
+    if (!props.open || props.page !== "files") return;
+    let active = true;
+    setCacheError(null);
+    void thumbSourcesStats()
+      .then((value) => { if (active) setCacheStats(value); })
+      .catch((error: unknown) => { if (active) setCacheError(String(error)); });
+    onCleanup(() => { active = false; });
+  });
+  const clearThumbCache = async (): Promise<void> => {
+    if (cacheBusy()) return;
+    setCacheBusy(true);
+    setCacheError(null);
+    setCacheNotice(null);
+    try {
+      const removed = await thumbSourcesClear();
+      setCacheConfirm(false);
+      setCacheStats(await thumbSourcesStats());
+      setCacheNotice(t("settings.files.cache.cleared").replace("{n}", String(removed)));
+    } catch (error) { setCacheError(String(error)); }
+    finally { setCacheBusy(false); }
   };
   createEffect(() => {
     if (!props.open || props.page !== "color") return;
@@ -450,6 +482,27 @@ export function GlobalSettingsDialog(props: GlobalSettingsDialogProps) {
                 />
               </div>
               <Show when={xmpWriteError()}>{(error) => <p class="text-fs-1 text-danger" role="alert">{error()}</p>}</Show>
+              <div class="flex items-center gap-5 border-b border-surface-bar py-5">
+                <div class="min-w-0 flex-1">
+                  <h3 class="text-fs-2 font-semibold text-fg-1">{t("settings.files.cache.title")}</h3>
+                  <p class="mt-1 text-fs-1 text-fg-3">
+                    {t("settings.files.cache.detail")
+                      .replace("{size}", formatCacheSize(cacheStats()?.bytes ?? 0))
+                      .replace("{n}", String(cacheStats()?.entries ?? 0))}
+                  </p>
+                </div>
+                <Button variant="secondary" size="sm"
+                  disabled={cacheBusy() || (cacheStats()?.entries ?? 0) === 0}
+                  onClick={() => setCacheConfirm(true)}>
+                  {t("settings.files.cache.clear")}
+                </Button>
+              </div>
+              <Show when={cacheError()}>{(error) => <p class="text-fs-1 text-danger" role="alert">{error()}</p>}</Show>
+              <Show when={cacheNotice()}>{(notice) => <p class="text-fs-1 text-fg-3" role="status">{notice()}</p>}</Show>
+              <ConfirmDialog open={cacheConfirm()} title={t("settings.files.cache.title")}
+                message={t("settings.files.cache.clearConfirm")}
+                confirmLabel={t("settings.files.cache.clear")}
+                onCancel={() => setCacheConfirm(false)} onConfirm={() => void clearThumbCache()} />
             </div>
           </Show>
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /** 准备发布；--win-msi / --win-nsis 仅供崔总执行。无 tag/push/上传。 */
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, existsSync, rmSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, existsSync, rmSync, copyFileSync } from "node:fs";
 import { dirname, join, resolve, relative, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseReleaseArgs, createReleasePlan } from "../src/lib/release-plan.ts";
@@ -96,6 +96,19 @@ export function runRelease({root=resolve(dirname(fileURLToPath(import.meta.url))
         runWindowsReleaseBatch(windowsRoot,{run,env:windowsEnv});
         syncAiOutput(root,aiPlan,join(windowsTarget,"release"));
         run("pnpm",["check:win"],{cwd:root,stdio:"inherit",env:{...buildEnv,WIN_DIST:frontendRoot,WIN_EXE:join(windowsTarget,"release","raybend-desktop.exe"),WIN_WORKER_MODE:"self"}});
+        // 符号：PDB 不进安装包（体积/构建路径），按版本归档到 release-out/symbols/（不上传）。
+        // 崩溃报告带 version/gitHash/buildTime + dump.dmp，用这份 PDB 离线定位到函数。
+        // ❗test 通道单独一个目录：它们的版本号往往等于当前版本，混进 v<版本> 会让
+        //   正式包的符号对不上二进制（2026-10-25 评审）。
+        const releaseDir=join(windowsTarget,"release");
+        const pdbs=existsSync(releaseDir)?readdirSync(releaseDir).filter(name=>name.toLowerCase().endsWith(".pdb")):[];
+        if(pdbs.length>0){
+          const symbolSlot=plan.channel==="test"?`test-${builtAt.replaceAll(":","-")}`:`v${plan.targetVersion}`;
+          const symbols=join(root,"release-out","symbols",symbolSlot);
+          mkdirSync(symbols,{recursive:true});
+          for(const name of pdbs)copyFileSync(join(releaseDir,name),join(symbols,name));
+          log(`符号已归档：${relative(root,symbols)}（不上传）`);
+        }else log("⚠ 未找到 PDB；本版崩溃报告无法精确符号化");
         finalize({argv:[bundle,"--manifest",join(frontendRoot,"raybend-build.json"),"--out",releaseOut,...(request.unsigned?["--allow-unsigned"]:[]),...(request.withUpdater?["--base-url",`https://github.com/C-Thun/raybend/releases/download/v${plan.targetVersion}/`]:[])],run,log,selectVersion:plan.targetVersion,requiredTargets:winConfig.bundle.targets});
         if(request.publish){
           log(`一键发版：构建与收口完成，继续执行发布（--publish）——提交版本文件、原子推送、上传 Release、公开。`);

@@ -163,6 +163,32 @@ pub fn file_display_size(
     )))
 }
 
+/// 列出还缺展示尺寸的文件行所属资产（后台补齐的候选；**只读库**）。
+///
+/// 只选在线文件（`missing_since IS NULL`）、两列有一列为 NULL、且 `asset_id > after` 的资产，
+/// 按 id 升序取 `limit` 条（`limit` 为 0 → 空）。
+///
+/// 用**游标**而不是一次拉全部：读不出尺寸的行会永远留在候选集里，必须靠游标前进才能把
+/// 后面的资产也试到（2026-10-25 评审：否则前 64 个坏文件就能把整个补齐卡住）。
+pub fn assets_missing_display_sizes(
+    conn: &Connection,
+    after: i64,
+    limit: usize,
+) -> Result<Vec<i64>> {
+    if limit == 0 {
+        return Ok(Vec::new());
+    }
+    let mut stmt = conn.prepare(
+        "SELECT DISTINCT asset_id FROM asset_files
+          WHERE missing_since IS NULL
+            AND (display_width IS NULL OR display_height IS NULL)
+            AND asset_id > ?1
+          ORDER BY asset_id LIMIT ?2",
+    )?;
+    let rows = stmt.query_map([after, i64::try_from(limit).unwrap_or(i64::MAX)], |row| row.get(0))?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
 /// 把这张照片的**所有尺寸记录**补成现成的（缺什么补什么）—— 读侧碰到 NULL 的保底入口。
 ///
 /// 顺序：文件行（`ensure_file_sizes`）→ latest 输出（`develop::backfill_output_sizes`）
@@ -191,7 +217,8 @@ pub fn ensure_sizes_conn(conn: &Connection, root: &std::path::Path, asset_id: i6
 
 /// 老的（v19 之前导入的）文件行补上方向与展示尺寸 —— **唯一**会读文件头的入口。
 ///
-/// 幂等、可重入、失败只当「没读到」：已有值不动，读不出尺寸的行保持 NULL。
+/// 幂等、可重入、失败只当「没读到」：**完整值不覆盖**；只有一列有值的半残行也补齐
+/// （与候选查询的口径一致），读不出尺寸的行保持 NULL。
 /// 调用方拿它当「顺手补一下」，不该等它。
 ///
 /// 返回这次真写了多少行。
@@ -247,10 +274,15 @@ pub fn ensure_file_sizes_conn(
 
     let mut written = 0usize;
     for (row_id, width, height, orientation) in updates {
+        /*
+         * 写前再确认一次「还没有完整尺寸」（同一行可能被另一个线程刚补完）。
+         * 判据用 **OR**：只填了一半的行也允许补齐 —— 候选查询与这里必须是同一口径，
+         * 否则半残行会永远被列为候选、却永远填不上（2026-10-25 评审）。
+         */
         written += conn.execute(
             "UPDATE asset_files
                 SET display_width = ?2, display_height = ?3, orientation = ?4, updated_at = ?5
-              WHERE id = ?1 AND display_width IS NULL AND display_height IS NULL",
+              WHERE id = ?1 AND (display_width IS NULL OR display_height IS NULL)",
             params![
                 row_id,
                 i64::from(width),
@@ -868,6 +900,22 @@ mod tests {
     }
 
     #[test]
+    fn missing_display_size_assets_lists_only_incomplete_online_rows() {
+        let conn = catalog();
+        asset(&conn, 1, &[("bitmap", Some(4000), Some(3000), Some(1))]);
+        asset(&conn, 2, &[("bitmap", None, Some(3000), Some(1))]);
+        asset(&conn, 3, &[("bitmap", Some(4000), None, Some(1))]);
+        asset(&conn, 4, &[("bitmap", None, None, Some(1))]);
+        conn.execute("UPDATE asset_files SET missing_since = 1 WHERE asset_id = 4", [])
+            .unwrap();
+        assert_eq!(super::assets_missing_display_sizes(&conn, 0, 10).unwrap(), vec![2, 3]);
+        assert_eq!(super::assets_missing_display_sizes(&conn, 0, 1).unwrap(), vec![2]);
+        // 游标：跳过已处理过的 id（读不出尺寸的行不会被反复选中）
+        assert_eq!(super::assets_missing_display_sizes(&conn, 2, 10).unwrap(), vec![3]);
+        assert!(super::assets_missing_display_sizes(&conn, 0, 0).unwrap().is_empty());
+    }
+
+    #[test]
     fn ensure_file_sizes_reads_the_header_once_and_only_fills_nulls() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().to_path_buf();
@@ -937,6 +985,60 @@ mod tests {
             })
             .unwrap();
         assert_eq!(ensure_file_sizes(&catalog, 1).unwrap(), 0);
+    }
+
+    #[test]
+    fn ensure_file_sizes_repairs_a_half_filled_row() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::fs::create_dir_all(root.join("photos")).unwrap();
+        write_bare_tiff(&root.join("photos/half.rw2"), 1, 3000, 2000);
+        {
+            let mut conn = Connection::open(root.join("catalog.db")).unwrap();
+            migration::apply(&mut conn, DbKind::Catalog, Backups::none(), T0).unwrap();
+            conn.execute(
+                "INSERT INTO repository_meta(key, value) VALUES ('repository_id', '0SizesTest000002')",
+                [],
+            )
+            .unwrap();
+        }
+        let catalog = CatalogDb::open(&root, OpenOpts::unbacked_up(T0)).unwrap();
+        catalog
+            .write(|conn| {
+                crate::store::assets::insert_asset(conn, T0)?;
+                // 只写了宽度、高度仍为 NULL（旧版本或人工写坏的行）
+                conn.execute(
+                    "INSERT INTO asset_files
+                        (asset_id, role, rel_path, rel_path_folded, ext, size_bytes, mtime_ms,
+                         display_width, created_at, updated_at)
+                     VALUES (1, 'bitmap', 'photos/half.rw2', 'photos/half.rw2', 'rw2', 1, 1, 1234, 1, 1)",
+                    [],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+
+        assert_eq!(
+            catalog.read(|conn| super::assets_missing_display_sizes(conn, 0, 10)).unwrap(),
+            vec![1]
+        );
+        assert_eq!(ensure_file_sizes(&catalog, 1).unwrap(), 1, "只填了一半的行也要补齐");
+        let (width, height) = catalog
+            .read(|conn| {
+                Ok(conn.query_row(
+                    "SELECT display_width, display_height FROM asset_files WHERE asset_id = 1",
+                    [],
+                    |row| Ok((row.get::<_, Option<i64>>(0)?, row.get::<_, Option<i64>>(1)?)),
+                )?)
+            })
+            .unwrap();
+        assert_eq!((width, height), (Some(3000), Some(2000)));
+        assert!(
+            catalog
+                .read(|conn| super::assets_missing_display_sizes(conn, 0, 10))
+                .unwrap()
+                .is_empty()
+        );
     }
 
     /// 裸 TIFF：`MM` 大端 + 一个 IFD，含 Orientation / ImageWidth / ImageLength

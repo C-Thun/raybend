@@ -86,6 +86,8 @@ export interface BrowseApi {
   markings(repositoryId: string, ids: readonly number[]): Promise<MarkingItem[]>;
   /** 标签词典（右栏显示标签名用；标签弹窗自己另按搜索拉一份更长的） */
   tagList(query: string, limit: number): Promise<Tag[]>;
+  /** 词典全量（只给名字解析；避免低频标签因限额退化成 `#id`） */
+  tagListAll(): Promise<Tag[]>;
   mark(
     repositoryId: string,
     ids: readonly number[],
@@ -138,9 +140,6 @@ export interface UndoState {
   undoLabel: string | null;
   redoLabel: string | null;
 }
-
-/** 标签词典一次拉多少条（够右栏显示用；标签弹窗自己按搜索拉）。 */
-const TAG_DICTIONARY_LIMIT = 200;
 
 export const EMPTY_UNDO_STATE: UndoState = {
   canUndo: false,
@@ -532,7 +531,7 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
     if (tagsLoaded) return;
     tagsLoaded = true;
     try {
-      const list = await api.tagList("", TAG_DICTIONARY_LIMIT);
+      const list = await api.tagListAll();
       setTags(list);
     } catch {
       // 读不到词典不是错误：界面把标签名退回「#id」显示

@@ -45,6 +45,8 @@ pub struct BrowseState {
     disk_sync: Mutex<HashMap<String, std::sync::Weak<Mutex<()>>>>,
     pub(crate) live_watch:
         Mutex<Option<(String, PathBuf, u64, raybend::media::watch::CatalogWatcher)>>,
+    /// 本次进程里已经启动过「老库展示尺寸后台补齐」的库（只跑一趟）。
+    size_backfill: Arc<Mutex<BTreeSet<String>>>,
 }
 
 impl BrowseState {
@@ -90,7 +92,7 @@ impl BrowseState {
         let backups = crate::db::data_dir(app)
             .map_err(raybend::Error::Unsupported)?
             .join(raybend::store::db::BACKUPS_DIR);
-        self.sessions.acquire(
+        let db = self.sessions.acquire(
             id,
             || {
                 let paths = app
@@ -104,7 +106,87 @@ impl BrowseState {
                 availability::resolve_preferred(id, &paths, preferred.as_ref())
             },
             OpenOpts::new(Some(&backups), time::now_millis()),
-        )
+        )?;
+        self.maybe_backfill_sizes(&db);
+        Ok(db)
+    }
+
+    /// 老库的展示尺寸补齐：**逐资产、可中断**（只碰缺列的行，不扫全库）。
+    ///
+    /// 不注册任务许可，但每处理一个资产都检查 `ensure_current()`：库被卸载/释放时立即停。
+    /// 单资产一次写事务，所以不会长时间占住写者；失败只记日志，下次开库再试。
+    fn maybe_backfill_sizes(&self, db: &Arc<CatalogDb>) {
+        let repository_id = db.meta().id.clone();
+        {
+            let mut started = self
+                .size_backfill
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if !started.insert(repository_id.clone()) {
+                return;
+            }
+        }
+        let db = Arc::clone(db);
+        let started = Arc::clone(&self.size_backfill);
+        let thread_repo = repository_id.clone();
+        let spawned = std::thread::Builder::new()
+            .name("size-backfill".into())
+            .spawn(move || {
+                let mut filled = 0usize;
+                let mut completed = false;
+                // 游标前进而不是「试过的 id 集合」：读不出尺寸的行会永远留在候选集里，
+                // 只有游标能保证后面的资产也被试到（否则前 64 个坏文件就把补齐卡死）。
+                let mut cursor = 0i64;
+                const BATCH: usize = 64;
+                loop {
+                    if db.ensure_current().is_err() {
+                        break;
+                    }
+                    let ids = match db.read(|conn| {
+                        raybend::store::sizes::assets_missing_display_sizes(conn, cursor, BATCH)
+                    }) {
+                        Ok(ids) => ids,
+                        Err(error) => {
+                            log::warn!(target: "sizes", "老库尺寸候选读取失败：{error}");
+                            break;
+                        }
+                    };
+                    let Some(last) = ids.last().copied() else {
+                        completed = true;
+                        break;
+                    };
+                    let exhausted = ids.len() < BATCH;
+                    for id in ids {
+                        if db.ensure_current().is_err() {
+                            break;
+                        }
+                        match raybend::store::sizes::ensure_file_sizes(&db, id) {
+                            Ok(written) => filled += written,
+                            Err(error) => log::warn!(target: "sizes", "资产 {id} 尺寸补齐失败：{error}"),
+                        }
+                    }
+                    cursor = last;
+                    if exhausted {
+                        completed = true;
+                        break;
+                    }
+                }
+                if filled > 0 {
+                    log::info!(target: "sizes", "老库展示尺寸后台补齐：写入 {filled} 行");
+                }
+                if !completed {
+                    // 中途被卸载/失败：允许下次开库重试。
+                    if let Ok(mut started) = started.lock() {
+                        started.remove(&thread_repo);
+                    }
+                }
+            });
+        if let Err(error) = spawned {
+            log::warn!(target: "sizes", "尺寸补齐线程启动失败：{error}");
+            if let Ok(mut started) = self.size_backfill.lock() {
+                started.remove(&repository_id);
+            }
+        }
     }
     pub(crate) fn publish<R: Runtime>(&self, app: &AppHandle<R>, status: ConnectionStatus) {
         self.publish_if(app, status, None);

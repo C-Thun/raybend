@@ -185,6 +185,12 @@ pub struct AppInfo {
     pub profile: String,
     pub os: String,
     pub arch: String,
+    /// 发布构建的源码 commit（开发构建可能为空）；报告靠它对准源码与符号。
+    #[serde(rename = "gitHash", skip_serializing_if = "Option::is_none")]
+    pub git_hash: Option<String>,
+    /// 发布构建时间（ISO 8601，UTC）；同 commit 多次构建时区分产物。
+    #[serde(rename = "buildTime", skip_serializing_if = "Option::is_none")]
+    pub build_time: Option<String>,
 }
 
 impl AppInfo {
@@ -195,6 +201,12 @@ impl AppInfo {
             profile: if cfg!(debug_assertions) { "dev" } else { "release" }.to_string(),
             os: std::env::consts::OS.to_string(),
             arch: std::env::consts::ARCH.to_string(),
+            git_hash: option_env!("RAYBEND_GIT_HASH")
+                .filter(|value| !value.is_empty())
+                .map(str::to_string),
+            build_time: option_env!("RAYBEND_BUILD_TIME")
+                .filter(|value| !value.is_empty())
+                .map(str::to_string),
         }
     }
 }
@@ -257,8 +269,10 @@ fn panic_message(info: &std::panic::PanicHookInfo<'_>) -> String {
 }
 
 fn capture_backtrace() -> Vec<String> {
-    // 发布版 strip=true 时只有地址（崔总 2026-10-12 拍：符号策略发版前再定）；
-    // dev 构建有行号，直接可读。
+    // 发布版（`strip = "debuginfo"`）在 Windows/MSVC 上符号由 PDB 提供：这份文本 backtrace
+    // 能不能出函数名取决于运行时能否找到同版本 PDB，所以它只是**辅助**；
+    // 真正的定位靠 `report.json` 的 version/gitHash/buildTime + `dump.dmp` + 发版归档的 PDB
+    // （`docs/release.md` 附录 K）。dev 构建有行号，直接可读。
     let backtrace = std::backtrace::Backtrace::force_capture();
     backtrace
         .to_string()
@@ -330,6 +344,12 @@ pub fn human_text(report: &CrashReport) -> String {
         report.app.os,
         report.session,
     ));
+    if let Some(hash) = report.app.git_hash.as_deref() {
+        out.push_str(&format!("commit  : {hash}\n"));
+    }
+    if let Some(built) = report.app.build_time.as_deref() {
+        out.push_str(&format!("构建时间: {built}\n"));
+    }
     if let Some(panic) = report.panic.as_ref() {
         out.push_str(&format!(
             "\npanic   : {}\n位置    : {}\n线程    : {}\n",

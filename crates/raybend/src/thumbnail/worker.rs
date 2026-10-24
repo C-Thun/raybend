@@ -381,8 +381,8 @@ pub fn render_source(abs_path: &Path, size: SizeClass) -> Result<render::Thumb> 
 /// 同 [`render_now`]，但**可以带编辑栈**（M3-W3：缩略图反映编辑结果）。
 ///
 /// 带编辑时缓存签名变成 `<基础签名>+e<指纹>`（`render::render_sig_with_edit`）——
-/// 改一个参数就换一个签名，自动绕开旧缓存；GC 那边按**前缀**匹配保住它们
-/// （`cache::drop_stale_signatures`）。
+/// 改一个参数就换一个签名，自动绕开旧缓存；维护时按**管线版本片段**保住它们
+/// （`cache::drop_other_pipeline_versions`）。
 ///
 /// # Errors
 /// 读文件 / 解码 / 编码 / 数据库任一步失败。
@@ -468,6 +468,8 @@ fn render_cached_with_signature(
     thumbs.write(move |conn| {
         cache::put(conn, &key, size, &sig, &data, width, height, now_ms)
     })?;
+    // 写后顺手维护：内部有 6 小时节流，不会每次写都扫全表（FUTURE G26）。
+    let _ = thumbs.maybe_maintain(cache::DEFAULT_MAX_BYTES, now_ms);
     Ok(bytes)
 }
 
@@ -495,7 +497,6 @@ pub fn run_pending<W>(
 where
     W: FnMut(&Connection, i64, bool, &str, i64) -> Result<()>,
 {
-    let _ = thumbs;
     let mut stats = RunStats::default();
     let mut done = 0usize;
 
@@ -534,6 +535,8 @@ where
             }
         }
     }
+    // 一轮结束后维护一次（节流在 ThumbsDb 内部；队列空时也会跑）。
+    let _ = thumbs.maybe_maintain(cache::DEFAULT_MAX_BYTES, now_ms);
     Ok(stats)
 }
 

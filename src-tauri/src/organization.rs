@@ -130,6 +130,37 @@ pub async fn organization_bucket_members<R: Runtime>(app: AppHandle<R>, bucket_i
     }).await
 }
 
+/// 清掉某个库在桶里已经失效的成员（照片真删 / UID 已不在 catalog）。
+/// 只代表这个库的检查结果；调用方按已挂载库逐个调用，离线库一律不碰。
+#[tauri::command]
+pub async fn organization_bucket_prune<R: Runtime>(
+    app: AppHandle<R>, bucket_id: i64, repository_id: String,
+) -> Result<usize, String> {
+    blocking(move || {
+        let refs = app.state::<DbState>().with(&app, |db| {
+            db.read(|conn| organization::member_refs(conn, bucket_id, &repository_id)).map_err(|e| e.to_string())
+        })?;
+        let valid = app.state::<BrowseState>().with_catalog(&app, &repository_id, |db| {
+            db.read(|conn| organization::valid_member_refs(conn, refs.clone())).map_err(|e| e.to_string())
+        })?;
+        let valid_keys: std::collections::BTreeSet<(String, String)> = valid
+            .into_iter()
+            .map(|photo| (photo.repository_id, photo.photo_uid))
+            .collect();
+        let dead: Vec<PhotoRef> = refs
+            .into_iter()
+            .filter(|photo| !valid_keys.contains(&(photo.repository_id.clone(), photo.photo_uid.clone())))
+            .collect();
+        if dead.is_empty() {
+            return Ok(0);
+        }
+        app.state::<DbState>().with(&app, |db| {
+            db.write(move |conn| organization::prune_members(conn, bucket_id, &dead))
+                .map_err(|e| e.to_string())
+        })
+    }).await
+}
+
 /// 标签面板进入时同步旧数字 ID 的文字。找不到词典名的旧记录保留在 asset_tags。
 #[tauri::command]
 pub async fn organization_tag_sync<R: Runtime>(app: AppHandle<R>, repository_id: String) -> Result<usize, String> {

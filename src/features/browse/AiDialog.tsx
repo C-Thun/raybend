@@ -50,7 +50,14 @@ export function AiDialog(props: { open: boolean; mode: "recognize" | "tasks"; re
     finally { setActionBusy(false); }
   };
   const stateKey = (state: string): MessageKey => ({ pending: "ai.pending", preparing: "ai.preparing", running: "ai.running", paused: "ai.paused", cancelled: "ai.cancelled", failed: "ai.failed", done: "ai.done" } as Record<string, MessageKey>)[state] ?? "ai.failed";
-  return <Dialog open={props.open} onOpenChange={(open) => { if (!open && !actionBusy()) props.onClose(); }} title={t(props.mode === "tasks" ? "ai.tasks" : "ai.recognize")} footer={<div class="flex justify-end gap-2"><Button variant="secondary" disabled={actionBusy()} onClick={props.onClose}>{t("common.cancel")}</Button><Show when={props.mode === "recognize"}><Button disabled={actionBusy() || model()?.state !== "ready"} title={model()?.state !== "ready" ? t(model()?.state === "unpublished" ? "ai.unpublished" : "ai.missing") : undefined} onClick={() => void start()}>{t("ai.start")}</Button></Show></div>}>
+  /** 模型状态 → 一句人话：未回来是「读取中」，损坏/未编译各自说清，不再一律显示成「缺模型」。 */
+  const modelMessage = (status: AiModelStatus | null): MessageKey =>
+    status === null ? "ai.loadingModel"
+      : status.state === "damaged" ? "ai.damaged"
+        : status.state === "disabled" ? "ai.buildDisabled"
+          : status.state === "unpublished" ? "ai.unpublished"
+            : "ai.missing";
+  return <Dialog open={props.open} onOpenChange={(open) => { if (!open && !actionBusy()) props.onClose(); }} title={t(props.mode === "tasks" ? "ai.tasks" : "ai.recognize")} footer={<div class="flex justify-end gap-2"><Button variant="secondary" disabled={actionBusy()} onClick={props.onClose}>{t("common.cancel")}</Button><Show when={props.mode === "recognize"}><Button disabled={actionBusy() || model()?.state !== "ready"} title={model()?.state !== "ready" ? t(modelMessage(model())) : undefined} onClick={() => void start()}>{t("ai.start")}</Button></Show></div>}>
     <div class="space-y-4">
       <Show when={props.mode === "recognize"}>
         <fieldset class="space-y-2"><legend class="mb-2 text-fs-1 text-fg-2">{t("ai.range")}</legend>
@@ -61,7 +68,7 @@ export function AiDialog(props: { open: boolean; mode: "recognize" | "tasks"; re
         <p class="text-fs-1 text-fg-3">{t("ai.freeze")}</p>
         <label class="flex gap-2 text-fs-1 text-fg-2"><input type="checkbox" checked={!rerun()} onChange={(event) => setRerun(!event.currentTarget.checked)} />{t("ai.skipKnown")}</label>
         <p class="text-fs-1 text-fg-3">{t("ai.replace")}</p>
-        <Show when={model()?.state !== "ready"}><div class="space-y-2 rounded-ui bg-surface-bar p-3"><p class="text-fs-1 text-fg-2">{t(model()?.state === "unpublished" ? "ai.unpublished" : "ai.missing")}</p><Button variant="secondary" size="sm" onClick={props.onModels}>{t("ai.manageModel")}</Button></div></Show>
+        <Show when={model()?.state !== "ready"}><div class="space-y-2 rounded-ui bg-surface-bar p-3"><p class="text-fs-1 text-fg-2">{t(modelMessage(model()))}</p><Button variant="secondary" size="sm" onClick={props.onModels}>{t("ai.manageModel")}</Button></div></Show>
       </Show>
       <Show when={props.mode === "tasks"}>
         <Button variant="ghost" size="sm" onClick={() => void refresh()}>{t("ai.refresh")}</Button>

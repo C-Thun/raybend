@@ -440,6 +440,13 @@ pub fn find_repository(conn: &Connection, repository_id: &str) -> Result<Option<
 /// 从 `app.db` 里**忘记**一个库：只删登记，**不动磁盘上的任何文件**。
 pub fn forget_repository(conn: &Connection, repository_id: &str) -> Result<bool> {
     let n = conn.execute("DELETE FROM repositories WHERE id = ?1", [repository_id])?;
+    if n > 0 {
+        // 补扫游标只对已登记的库有意义；库被忘记后留着只会永久累积。
+        conn.execute(
+            "DELETE FROM photo_organization_cursors WHERE repository_id = ?1",
+            [repository_id],
+        )?;
+    }
     Ok(n > 0)
 }
 
@@ -1161,9 +1168,22 @@ mod tests {
         let app = app_db();
         register_repository(&app, &meta, T0).unwrap();
         add_repository_path(&app, &meta.id, dir.path().to_string_lossy().as_ref(), T0).unwrap();
+        app.execute(
+            "INSERT INTO photo_organization_cursors(repository_id, event_id) VALUES (?1, 1)",
+            [&meta.id],
+        )
+        .unwrap();
 
         assert!(forget_repository(&app, &meta.id).unwrap());
         assert!(list_repositories(&app).unwrap().is_empty());
+        let cursors: i64 = app
+            .query_row(
+                "SELECT count(*) FROM photo_organization_cursors WHERE repository_id = ?1",
+                [&meta.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(cursors, 0, "忘记库后补扫游标不能永久残留");
         assert!(
             db.is_file(),
             "「忘记库」绝不能删磁盘上的东西（那是另一件事，需要用户明确同意）"

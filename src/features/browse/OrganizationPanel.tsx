@@ -5,8 +5,9 @@ import { IconBan, IconDots, IconFolder, IconLock, IconPhoto, IconPlus, IconSearc
 
 import type { RepositoryView, Tag } from "../../api/types.ts";
 import type { PhotoBucket } from "../../api/organization.ts";
-import { directoriesForTag, directoryTagCounts, listPhotoBuckets, pinPhotoBucket, deletePhotoBucket, pausePhotoBucket, setDirectoryTag, syncPhotoTags } from "../../api/organization.ts";
+import { directoriesForTag, directoryTagCounts, listPhotoBuckets, pinPhotoBucket, deletePhotoBucket, pausePhotoBucket, prunePhotoBucketMembers, setDirectoryTag, syncPhotoTags } from "../../api/organization.ts";
 import { BUCKET_DROP_ATTR, photoDrag } from "./photo-drag.ts";
+import { mountedMemberCount } from "./bucket-counts.ts";
 import { tagList } from "../../api/browse.ts";
 import { TreeNode } from "../../components/ui/TreeNode.tsx";
 import { Menu } from "../../components/ui/Menu.tsx";
@@ -32,7 +33,11 @@ export interface OrganizationPanelProps {
   onEditBucket: (bucket: PhotoBucket) => void;
   /** 删除成功后被删桶是当前选中项时触发（由工作区决定回退与提示）。 */
   onBucketDeleted?: (bucket: PhotoBucket) => void;
+  /** 桶列表刷新后把**当前选中桶的新快照**交出去（空态文案读它，不能留旧计数）。 */
+  onBucketSnapshot?: (bucket: PhotoBucket | null) => void;
   onError: (error: unknown) => void;
+  /** 一次性提示（清理失效成员等结果）；文案由调用方给。 */
+  onNotice?: (message: string) => void;
   onChanged?: () => void;
 }
 
@@ -52,7 +57,19 @@ export function OrganizationPanel(props: OrganizationPanelProps) {
   const [directoryCountsKnown, setDirectoryCountsKnown] = createSignal(false);
   const [busy, setBusy] = createSignal(false);
   const [deleteTarget, setDeleteTarget] = createSignal<PhotoBucket | null>(null);
+  const [removeDirTag, setRemoveDirTag] = createSignal<{ repositoryId: string; path: string; name: string } | null>(null);
   let tagGeneration = 0;
+
+  const onlineRepositoryIds = () => new Set(props.repositories.filter((repo) => repo.online).map((repo) => repo.id));
+  /** 桶卡片的成员数：当前挂载 / 全部；相等时只显示一个数（规格 §5.2）。 */
+  function bucketSubtitle(bucket: PhotoBucket): string {
+    const mounted = mountedMemberCount(bucket, onlineRepositoryIds());
+    return mounted === bucket.memberCount
+      ? `${bucket.memberCount} ${t("org.photos")}`
+      : `${mounted} / ${bucket.memberCount} ${t("org.photos")}`;
+  }
+  const tagHasChildren = (key: string): boolean =>
+    (children().get(key)?.length ?? 0) > 0 || (directoryCounts().get(key) ?? 0) > 0 || (!directoryCountsKnown() && !children().has(key));
 
   async function refreshTags(query: string): Promise<void> {
     const mine = ++tagGeneration;
@@ -65,7 +82,14 @@ export function OrganizationPanel(props: OrganizationPanelProps) {
   }
 
   async function refreshBuckets(): Promise<void> {
-    try { setBuckets(await listPhotoBuckets()); }
+    try {
+      const list = await listPhotoBuckets();
+      setBuckets(list);
+      const selection = props.selection;
+      props.onBucketSnapshot?.(selection?.kind === "bucket"
+        ? list.find((bucket) => bucket.id === selection.id) ?? null
+        : null);
+    }
     catch (error) { props.onError(error); }
   }
 
@@ -100,31 +124,64 @@ export function OrganizationPanel(props: OrganizationPanelProps) {
     onCleanup(() => { current = false; });
   }));
 
+  async function loadChildren(key: string): Promise<void> {
+    const mounted = props.repositories.filter((repo) => repo.online && repo.root !== null);
+    const all = await Promise.all(mounted.map(async (repo) => {
+      const directories: { repositoryId: string; path: string }[] = [];
+      for (let offset = 0; ; offset += 500) {
+        const page = await directoriesForTag(repo.id, key, offset, 500);
+        directories.push(...page.map((path) => ({ repositoryId: repo.id, path })));
+        if (page.length < 500) break;
+      }
+      return directories;
+    }));
+    setChildren((previous) => new Map(previous).set(key, all.flat()));
+  }
+
   async function expandTag(tag: Tag): Promise<void> {
     const key = tagKey(tag.name);
     if (expanded().has(key)) {
       setExpanded((previous) => { const next = new Set(previous); next.delete(key); return next; });
       return;
     }
-    const mounted = props.repositories.filter((repo) => repo.online && repo.root !== null);
     try {
-      const all = await Promise.all(mounted.map(async (repo) => {
-        const directories: { repositoryId: string; path: string }[] = [];
-        for (let offset = 0; ; offset += 500) {
-          const page = await directoriesForTag(repo.id, key, offset, 500);
-          directories.push(...page.map((path) => ({ repositoryId: repo.id, path })));
-          if (page.length < 500) break;
-        }
-        return directories;
-      }));
-      setChildren((previous) => new Map(previous).set(key, all.flat()));
+      await loadChildren(key);
       setExpanded((previous) => new Set(previous).add(key));
     } catch (error) { props.onError(error); }
   }
 
+  // 目录标签可能在别处（目录树菜单）改过：refreshKey 变化时，已展开的标签要重拉子目录，
+  // 不能等用户收起再展开。
+  createEffect(on(() => [props.mode, props.refreshKey,
+    props.repositories.filter((repo) => repo.online).map((repo) => repo.id).join("|")] as const,
+  ([mode]) => {
+    if (mode !== "tags") return;
+    const keys = [...expanded()];
+    if (keys.length === 0) return;
+    void Promise.allSettled(keys.map(loadChildren)).then((results) => {
+      for (const result of results) if (result.status === "rejected") props.onError(result.reason);
+    });
+  }));
+
   async function bucketAction(bucket: PhotoBucket, action: string): Promise<void> {
     if (action === "rules") { props.onEditBucket(bucket); return; }
     if (action === "delete") { setDeleteTarget(bucket); return; }
+    if (action === "prune") {
+      setBusy(true);
+      try {
+        let removed = 0;
+        for (const repositoryId of onlineRepositoryIds()) {
+          removed += await prunePhotoBucketMembers(bucket.id, repositoryId);
+        }
+        await refreshBuckets();
+        props.onChanged?.();
+        props.onNotice?.(removed > 0
+          ? t("org.prunedCount").replace("{n}", String(removed))
+          : t("org.pruneNone"));
+      } catch (error) { props.onError(error); }
+      finally { setBusy(false); }
+      return;
+    }
     setBusy(true);
     try {
       if (action === "pin") await pinPhotoBucket(bucket.id, !bucket.pinned);
@@ -149,12 +206,34 @@ export function OrganizationPanel(props: OrganizationPanelProps) {
     finally { setBusy(false); }
   }
 
+  async function confirmRemoveDirectoryTag(): Promise<void> {
+    const target = removeDirTag();
+    if (!target || busy()) return;
+    setBusy(true);
+    try {
+      await setDirectoryTag(target.repositoryId, target.path, target.name, false);
+      const key = tagKey(target.name);
+      setChildren((previous) => new Map(previous).set(key,
+        (previous.get(key) ?? []).filter((item) =>
+          item.repositoryId !== target.repositoryId || item.path !== target.path)));
+      setRemoveDirTag(null);
+      props.onChanged?.();
+    } catch (error) { props.onError(error); }
+    finally { setBusy(false); }
+  }
+
   return (
     <div class="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden bg-surface-main p-panel-pad">
       <ConfirmDialog open={deleteTarget() !== null} title={t("org.deleteBucket")}
         message={t("org.deleteBucketConfirm").replace("{name}", deleteTarget()?.name ?? "")}
         confirmLabel={t("org.deleteBucket")}
         onCancel={() => setDeleteTarget(null)} onConfirm={() => void confirmDelete()} />
+      <ConfirmDialog open={removeDirTag() !== null} title={t("org.removeDirectoryTag")}
+        message={t("org.removeDirectoryTagConfirm")
+          .replace("{path}", removeDirTag()?.path ?? "")
+          .replace("{name}", removeDirTag()?.name ?? "")}
+        confirmLabel={t("org.removeDirectoryTag")}
+        onCancel={() => setRemoveDirTag(null)} onConfirm={() => void confirmRemoveDirectoryTag()} />
       <div class="flex h-8 shrink-0 items-center justify-between">
         <h2 class="text-fs-2 font-semibold text-fg-1">
           {props.mode === "tags" ? t("org.tags") : t("org.buckets")}
@@ -187,7 +266,7 @@ export function OrganizationPanel(props: OrganizationPanelProps) {
                 <span class="min-w-0 flex-1">
                   <span class="block overflow-hidden whitespace-nowrap fade-x-end text-fs-2 font-semibold text-fg-1">{bucket.name}</span>
                   <span class="block overflow-hidden whitespace-nowrap fade-x-end text-fs-0 text-fg-3">
-                    {bucket.memberCount} {t("org.photos")}
+                    {bucketSubtitle(bucket)}
                     {bucket.rules.groups.length > 0 ? ` · ${bucket.rules.groups.length} ${t("org.ruleGroups")}` : ""}
                   </span>
                 </span>
@@ -200,6 +279,7 @@ export function OrganizationPanel(props: OrganizationPanelProps) {
                     items={[
                       { value: "rules", label: t("org.editRules") },
                       { value: "pin", label: bucket.pinned ? t("org.unpin") : t("org.pin") },
+                      ...(bucket.memberCount > 0 ? [{ value: "prune", label: t("org.pruneMembers") }] : []),
                       ...(bucket.rules.groups.length > 0 ? [{ value: "pause", label: bucket.paused ? t("org.resume") : t("org.pause") }] : []),
                       { value: "delete", label: t("org.deleteBucket"), disabled: bucket.pinned || busy(), separatorBefore: true },
                     ]}
@@ -231,9 +311,12 @@ export function OrganizationPanel(props: OrganizationPanelProps) {
               return <>
                 <TreeNode label={tag.name} depth={0} icon={<IconTag size={15} />}
                   selected={props.selection?.kind === "tag" && props.selection.key === key()}
-                  hasChildren={dirs().length > 0 || (directoryCounts().get(key()) ?? 0) > 0 || !directoryCountsKnown() && !children().has(key())}
+                  hasChildren={tagHasChildren(key())}
                   expanded={expanded().has(key())}
-                  onClick={() => props.onSelectTag(tag)}
+                  onClick={() => {
+                    props.onSelectTag(tag);
+                    if (!expanded().has(key()) && tagHasChildren(key())) void expandTag(tag);
+                  }}
                   onToggleExpand={() => void expandTag(tag)}
                 />
                 <Show when={expanded().has(key())}>
@@ -251,12 +334,7 @@ export function OrganizationPanel(props: OrganizationPanelProps) {
                           class="rounded-ui p-0.5 text-fg-3 hover:bg-state-hover hover:text-fg-1"
                           onClick={(event) => {
                             event.stopPropagation();
-                            void setDirectoryTag(directory.repositoryId, directory.path, tag.name, false)
-                              .then(() => {
-                                setChildren((previous) => new Map(previous).set(key(),
-                                  (previous.get(key()) ?? []).filter((item) => item.repositoryId !== directory.repositoryId || item.path !== directory.path)));
-                                props.onChanged?.();
-                              }).catch(props.onError);
+                            setRemoveDirTag({ repositoryId: directory.repositoryId, path: directory.path, name: tag.name });
                           }}><IconBan size={14} /></button>}
                         onClick={() => props.onSelectDirectory(directory.repositoryId, directory.path)}
                       />;
@@ -266,6 +344,9 @@ export function OrganizationPanel(props: OrganizationPanelProps) {
               </>;
             }}
           </For>
+          <Show when={tags().length >= 500}>
+            <p class="p-2 text-fs-0 text-fg-3">{t("org.tagListLimit").replace("{n}", "500")}</p>
+          </Show>
         </div>
       </Show>
     </div>

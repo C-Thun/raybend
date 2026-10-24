@@ -495,6 +495,8 @@ pub fn cached_image(
         thumbs.write(move |conn| {
             thumb_cache::put(conn, &key, size, sig, &data, width, height, now_ms)
         })?;
+        // 写后顺手维护（内部 6 小时节流）：旧签名孤儿 + 容量上限，FUTURE G26。
+        let _ = thumbs.maybe_maintain(thumb_cache::DEFAULT_MAX_BYTES, now_ms);
     }
     Ok(Some(image))
 }

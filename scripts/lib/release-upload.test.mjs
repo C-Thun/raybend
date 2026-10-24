@@ -25,6 +25,9 @@ test('最终目录含精确安装器与更新签名；只读计划含完整上�
     assert.equal(plan.assets.length, 6);
     assert.equal(plan.tag, 'v1.2.3');
     assert.equal(readFileSync(join(f.out, f.name), 'utf8'), 'synthetic installer fixture only');
+    const notes = readFileSync(join(f.out, 'RELEASE-NOTES.md'), 'utf8');
+    assert.ok(!notes.includes('发布前请按'), '发布说明不能带内部提示行');
+    assert.ok(notes.includes('## 本版变更'), '发布说明要有本版变更区');
     assert.throws(() => finalizeRelease({ argv: f.argv, log: () => {} }), /已存在/);
   } finally { f.dispose(); }
 });
