@@ -216,7 +216,6 @@ export function UpdateDialog(props: {
       </Dialog>
       <ConfirmDialog
         open={confirm()}
-        scrim={false}
         title={t("updates.installNow")}
         message={t("updates.confirm")}
         onCancel={() => setConfirm(false)}

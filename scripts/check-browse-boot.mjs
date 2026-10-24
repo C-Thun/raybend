@@ -4952,8 +4952,12 @@ try {
    * 放在中间会让后面那些「hover / 键盘」断言莫名失败 —— 那是工装噪音，不是产品问题。
    */
   /*
-   * 弹窗层级（人类 2026-09-20 报）：**弹窗要盖住看图的覆盖层，但要在标题栏之下**
-   *（阶梯：toast 80 > titlebar 75 > modal 70 > scrim 60 > popover 40）。
+   * 弹窗层级（人类 2026-09-20 报）：**弹窗要盖住看图的覆盖层，也要高于标题栏**；
+   * 标题栏仍在遮罩之上。完整阶梯的**单一事实来源是 `memory/DESIGN.md` §8.5**，
+   * 这里不重复抄数字（抄过一次，已经漂成 toast 80 / titlebar 75 / modal 70 / popover 40 了）。
+   *
+   * 本条实际断言的相对关系：viewer < scrim < titlebar < modal；toast > titlebar；
+   * 标题栏那一带命中的仍是标题栏自己（不是弹窗）。
    *
    * 复现的正是真机那条路：进看图（view/film）→ 点左列库卡片上的齿轮 →
    * 从前弹窗被 `z-10` 的看图覆盖层压住，只有周围一圈被遮罩压暗。
@@ -5048,7 +5052,7 @@ try {
     }
     if (layers.modalZ !== null && layers.titlebarZ !== null && !(layers.modalZ > layers.titlebarZ && layers.titlebarZ > layers.scrimZ)) {
       problems.push(
-        `弹窗应高于标题栏，标题栏高于遮罩（memory/DESIGN.md 2026-09-25 规范，实测 titlebar=${layers.titlebarZ}, modal=${layers.modalZ}）`,
+        `弹窗应高于标题栏，标题栏高于遮罩（memory/DESIGN.md §8.5，实测 titlebar=${layers.titlebarZ}, modal=${layers.modalZ}）`,
       );
     }
     if (layers.titleHitIsDialog === true) {

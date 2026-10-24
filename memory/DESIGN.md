@@ -295,7 +295,7 @@ Rust 侧的合法值在 `store/marking.rs` 的 `COLORS`（校验用，**不重�
 | **不做毛玻璃** | 不使用 `backdrop-filter` 之类的模糊/半透明材质 |
 | **不做阴影** | 不用 `box-shadow` 表达层次；层次一律靠**面与面的色彩差** |
 | **小倒角** | 绝大部分情况使用小圆角；大圆角只在极少数需要明确「胶囊」语义的控件上出现（如工作流切换） |
-| **无边线设计** | **面板与面板之间用纯色块区分，不上分隔线**。描边仅保留给「必须限定边界」的输入类控件、焦点环，以及 `easy copy` 的悬停高亮框 |
+| **无边线设计** | **面板与面板之间用纯色块区分，不上分隔线**。描边仅保留给「必须限定边界」的输入类控件、焦点环、`easy copy` 的悬停高亮框，以及**弹窗的 1px 辅色边界线**（叠层时两层同为 `surface-layer`，没有阴影/毛玻璃，缺这条线边界会消失；见 §10.1 #9） |
 
 **无边线设计的直接后果**：§1.2 的深度阶梯差异幅度必须**足够可辨**。
 若美术阶段发现差异过小导致区域糊成一片，优先**加大阶梯差异**，而不是改回描边。
@@ -455,15 +455,15 @@ Rust 侧的合法值在 `store/marking.rs` 的 `COLORS`（校验用，**不重�
 | 层 | 令牌 | 值 | 谁用它 |
 | --- | --- | --- | --- |
 | 外壳控件内部的分层 | `--z-bar` | 10 | 工作流切换、分段控件的文字/指示块 |
-| 普通浮层 | `--z-popover` | 40 | 菜单、一般提示、下拉、日期选择器；在模态遮罩之下 |
 | 弹窗遮罩 | `--z-scrim` | 60 | 遮住底层操作控件，包括 easy copy 的触发元素 |
 | 标题栏 | `--z-titlebar` | 70 | 在遮罩上、弹窗下 |
-| 弹窗本体 | `--z-modal` | 80 | 对话框面板 |
+| 弹窗本体 | `--z-modal` | 80 | 对话框面板（每层栈深 +2，见下） |
+| 普通浮层 | `--z-popover` | 88 | 菜单、一般提示、下拉、日期选择器；**必须高于弹窗本体**（弹窗内 Tooltip/Menu、标题栏菜单），仍低于 easy copy tip 与 message |
 | easy copy 提示 | `--z-easy-copy-tip` | 90 | Portal 中的气泡；触发元素仍在原位，不能穿透遮罩 |
 | message | `--z-toast` | 100 | 右上角提示，普通操作时最高 |
 | 数据升级阻塞 | `--z-migration` | 110 | 覆盖标题栏、已有弹窗与 message，升级期间所有输入等待 |
 
-**顺序（人类 2026-09-25 重定；2026-09-29 补充升级阻塞）**：数据升级阻塞 > message > easy copy tip > 弹窗 > titlebar > 弹窗遮罩。
+**顺序（人类 2026-09-25 重定；2026-09-29 补充升级阻塞；2026-10-24 抬升 popover）**：数据升级阻塞 > message > easy copy tip > 普通浮层（菜单/提示）> 弹窗 > titlebar > 弹窗遮罩。
 
 **纪律**：
 
@@ -476,7 +476,9 @@ Rust 侧的合法值在 `store/marking.rs` 的 `COLORS`（校验用，**不重�
 > Zag 的 dialog positioner **根本不写** `z-index: var(--z-index)`（实测计算值 `auto`、
 > 内联里也没有 z-index），弹窗于是只能靠 DOM 顺序，**被工作区里 `z-10` 的看图/胶片覆盖层压住**
 > （真机症状：film/view 下点库齿轮，弹窗看不见、只有周围一圈被遮罩压暗）。
-> 所以 dialog 的 backdrop / positioner 要**直接**写 `z-index: var(--z-scrim|--z-modal) !important`。
+> 所以 dialog 的 backdrop / positioner 要**直接**写 `z-index`，并按 `DialogFrame` 写入的
+> `--dialog-layer`（弹窗栈深，1 起）每层抬 2 档：`calc(var(--z-scrim|--z-modal) + (var(--dialog-layer, 1) - 1) * 2) !important`。
+> 这样后开的弹窗永远在上，不再依赖 Portal 的 DOM 顺序。
 
 > **为什么不能用 Tailwind 的 z 工具类**（2026-09-16 踩坑记录）：
 > Ark/Zag 的浮层元素带**内联** `z-index: var(--z-index)`，而 `--z-index` 由 Zag 的层级栈赋值、
@@ -630,6 +632,7 @@ memory/DESIGN.md（本文件，人类可读的规格与色板）
 | `--overlay-line` | —（画在照片上，走内联样式或 canvas） | **照片覆盖线的浅色线**：裁切/旋转/对比的框线与把手（2026-09-23 新增，见 §14.8） |
 | `--overlay-halo` | —（同上） | **照片覆盖线的深色包边**：与浅色线组成「深-浅-深」三段，保证压在任意照片内容上都清楚（同 §14.8） |
 | `--slider-track` | `bg-slider-track` | **拉杆未填充段的底色**：反色方向的中性色，**50% 半透**（dark = 深浅色 `#EDF0E9`、light = 浅深色 `#2A2D33`，2026-09-23 新增、同日加 50% 浓度，见 §14.10） |
+| `--dialog-ring` | `inset-ring-(--dialog-ring)` | **弹窗 1px 辅色内描边**（无边线设计的唯一常驻例外；由 `--brand-2` 派生） |
 | `--ring-easy-copy` | `border-ring-easy-copy` | `easy copy` 悬停细边框（品牌主色 40%） |
 | `--focus-ring` / `--focus-ring-w` | `border-focus-ring` | 焦点环（品牌主色 / 1px） |
 | `--scrollbar-thumb` / `--scrollbar-thumb-hover` | —（CSS 内部使用） | 细滚动条滑块（由 `fg-3` / `fg-2` 派生） |
@@ -702,7 +705,7 @@ memory/DESIGN.md（本文件，人类可读的规格与色板）
 | 6 | `Input` | 文本框（唯一保留描边的控件之一） |
 | 7 | `Tooltip` | 提示气泡，`easy copy` 的「点击复制/已复制」复用它 |
 | 8 | `Menu` | 下拉菜单（标题栏菜单用） |
-| 9 | `Dialog` | 模态弹窗（建库、`easy destroy` 确认用） |
+| 9 | `Dialog` | 模态弹窗（建库、`easy destroy` 确认用）。**内容面固定 1px `--brand-2` inner 描边**（`--dialog-ring`）；遮罩只由弹窗栈最底层画一次，二级弹窗透明；后开的永远在上、下层不可点 |
 | 10 | `PathText` | **`shortpath` 路径缩写**组件（见 §12.3），带长度上限参数 |
 | 11 | `Tile` | 网格基本单元（图标 tile / 图片 tile 的公共骨架） |
 | 12 | `TreeNode` | 树形行（展开箭头 + 图标 + 名称 + 勾选框） |
@@ -1532,3 +1535,4 @@ browse 的「删除」接的就是 `Delete` 键那条命令（含确认与回收
 | 2026-09-23 | **tiles / film 的 17 档重排（最大档 −20%）+ 自适应宽度夹上限**（人类 2026-09-23 定）：tiles 128–400 → **128–320**（等比每级 +7.4% → **+5.9%**，默认 260 → 254）；film 96–240（等差 +9px）→ **96–192**（**等比 +4.4%**，默认 132 → 130）；自适应宽度算出的格宽超过 `MAX_TILE_SIZE` 时按钮**禁用**（新 `canFitRow` + `TilesFitChannel.available` 回填），而不是夹到最大档假装铺满 |
 | 2026-10-11 | **修 `minimal` tile 信息条用错令牌**（崔总在导出画廊浅色模式下报「深条深字看不见」）：`Tile.tsx` 的小片名字条把弹窗遮罩 `--scrim` 当作了信息条底纹（浅色主题下它是深色），改用 §12.9 的中性蒙层 `--tile-bar-scrim`，与 `minimal` 的 `text-fg-1` 配套（浅色提亮 + 深字）。同轮更新 §12.12 的大类分组与四 flow 现状表 |
 | 2026-09-28 | **新增 §12.12 toolsbar 的分组与分隔**（崔总定）＋令牌 `--line-2`（中性 hairline，此前 DESIGN 引用但令牌一直没落地）：组内几乎无间距、组间用 `ToolsSeparator`（1px 浅竖线 + 两侧 4px）；可逆与不可逆动作之间**必须**有分隔（browse 新增「删除」按钮，接 `Delete` 同一条命令）。星标间距收到与色标一致（4px）。browse 的锁**合并为一个循环键**：未锁 → 一级锁（辅色底）→ 二级锁（主色底）→ 未锁；筛选态同键：一级 → 二级 → **不按锁筛选**。四个 flow 的 mid 全部按此规整 |
+| 2026-10-24 | **弹窗叠放与边界线（崔总定）**：所有弹窗内容面固定 1px `--brand-2` inner 描边（新令牌 `--dialog-ring`），作为无边线设计的唯一常驻例外；遮罩改为**只有弹窗栈最底层画一次**（删除调用方 `scrim` 开关），后开的弹窗永远在上、下层不可点击；`--z-popover` 抬到弹窗之上（弹窗内 Tooltip / 标题栏菜单不再被盖住），titlebar 加入 Ark 的 `persistentElements`。设计稿：`main.pen` 28 个弹窗帧（14 个 `Dialog /` + 6 个 `Global Settings /` + 8 个状态变体）已在当前 Pencil 会话加描边（磁盘保存由崔总执行）；**`browse.pen` / `editor.pen` / `export.pen` 的弹窗帧尚未同步**，已在 `memory/PLAN.md` §5 登记 |

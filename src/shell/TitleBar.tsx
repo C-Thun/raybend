@@ -153,6 +153,8 @@ export function TitleBar(props: TitleBarProps) {
   return (
     <>
       <header
+        // Ark 的 `persistentElements` 靠它找标题栏：弹窗打开时仍能拖/关窗口
+        data-app-titlebar
         // 裸值 = 只有直接点在标题行自身（含空白拖拽区）才触发拖动；
         // 按钮/标签这类可点元素会**自动**阻断拖动，所以不要给它们加这个属性
         data-tauri-drag-region

@@ -34,9 +34,9 @@
  * 否则命令多于一屏时选中行会跑到可视区外。
  */
 
-import { Dialog as ArkDialog } from "@ark-ui/solid";
 import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "solid-js";
-import { Portal } from "solid-js/web";
+
+import { DialogFrame } from "../../components/ui/Dialog.tsx";
 
 import { chordOf, rawChordOf, type CommandSpec } from "../../lib/commands.ts";
 import { sceneText } from "./messages.ts";
@@ -174,113 +174,103 @@ export function CommandPalette(props: CommandPaletteProps) {
   };
 
   return (
-    <ArkDialog.Root
+    <DialogFrame
       open={props.open}
-      onOpenChange={(details) => props.onOpenChange(details.open)}
-      lazyMount
-      unmountOnExit
-      role="dialog"
+      onOpenChange={props.onOpenChange}
+      /* 偏上摆放（命令面板的惯例：下面留给结果展开，视线不用来回跑） */
+      positionerClass="items-start pt-[10vh]"
+      contentClass="flex max-h-[60vh] w-full max-w-xl flex-col overflow-hidden"
+      contentAttrs={{ "data-command-palette": "open" }}
     >
-      <Portal>
-        <ArkDialog.Backdrop class="fixed inset-0 bg-scrim" />
-        {/* 偏上摆放（命令面板的惯例：下面留给结果展开，视线不用来回跑） */}
-        <ArkDialog.Positioner class="fixed inset-0 flex items-start justify-center p-4 pt-[10vh]">
-          <ArkDialog.Content
-            data-command-palette="open"
-            class="flex max-h-[60vh] w-full max-w-xl flex-col overflow-hidden rounded-ui bg-surface-layer outline-none"
-          >
-            <input
-              ref={(element) => {
-                // 打开即聚焦（Ark 的焦点陷阱会先给 content，这里把光标抢到输入行）
-                queueMicrotask(() => element.focus());
-                onCleanup(() => element.blur());
-              }}
-              value={query()}
-              onInput={(event) => {
-                setQuery(event.currentTarget.value);
-                setCursor(0);
-              }}
-              onKeyDown={onInputKeyDown}
-              placeholder={t("palette.placeholder")}
-              aria-label={t("palette.placeholder")}
-              class="h-10 shrink-0 border-b border-b-surface-track bg-transparent px-3 text-fs-3 text-fg-1 outline-none placeholder:text-fg-3"
-            />
+      <input
+        ref={(element) => {
+          // 打开即聚焦（Ark 的焦点陷阱会先给 content，这里把光标抢到输入行）
+          queueMicrotask(() => element.focus());
+          onCleanup(() => element.blur());
+        }}
+        value={query()}
+        onInput={(event) => {
+          setQuery(event.currentTarget.value);
+          setCursor(0);
+        }}
+        onKeyDown={onInputKeyDown}
+        placeholder={t("palette.placeholder")}
+        aria-label={t("palette.placeholder")}
+        class="h-10 shrink-0 border-b border-b-surface-track bg-transparent px-3 text-fs-3 text-fg-1 outline-none placeholder:text-fg-3"
+      />
 
-            <Show
-              when={rows().length > 0}
-              fallback={
-                <p class="px-3 py-6 text-center text-fs-2 text-fg-3">{t("palette.empty")}</p>
-              }
-            >
-              <ul
-                ref={(element: HTMLUListElement) => {
-                  listElement = element;
-                }}
-                class="min-h-0 flex-1 overflow-y-auto py-1"
-                role="listbox"
-              >
-                <For each={rows()}>
-                  {(row, index) => (
-                    <>
-                      {/* 分组小标题：只在换了组时出现 */}
-                      <Show when={index() === 0 || rows()[index() - 1].group !== row.group}>
-                        <li class="px-3 pt-2 pb-1 text-fs-0 text-fg-3" role="presentation">
-                          {row.group}
-                        </li>
-                      </Show>
-                      <li
-                        ref={(element) => {
-                          itemElements.set(row.command.id, element);
-                          onCleanup(() => itemElements.delete(row.command.id));
-                        }}
-                        data-command-item={row.command.id}
-                        data-command-available={row.availability.available ? "yes" : "no"}
-                        role="option"
-                        aria-selected={index() === cursor()}
-                        aria-disabled={!row.availability.available}
-                        onMouseMove={() => setCursor(index())}
-                        onClick={() => run(row)}
-                        class={[
-                          "flex cursor-pointer items-center gap-2 px-3 py-1.5 text-fs-2",
-                          // 指向/光标 = 辅色底（全局反馈规则）；**不靠改字色**表达
-                          index() === cursor() ? "bg-state-hover" : "",
-                          /*
-                           * 字色只分两档（`memory/DESIGN.md` §4 的标准档位 + §5 的 disabled 规则）：
-                           *   能用   → `fg-1`（正文/标题级，高反差）
-                           *   不能用 → `fg-2`（次级；「前景降为次级色，面不变」）
-                           *
-                           * ⚠️ **不要再叠 `opacity`**（人类 2026-09-24：「根本看不清，能用的就亮出来不好吗」）——
-                           * 次级色上再乘一道透明度，两级降下来就低于可读线了。
-                           */
-                          row.availability.available ? "text-fg-1" : "text-fg-2",
-                        ]
-                          .filter(Boolean)
-                          .join(" ")}
-                      >
-                        <span class="min-w-0 flex-1 overflow-hidden whitespace-nowrap fade-x-end">{row.title}</span>
-                        {/* 不可用就说清为什么（灰掉不解释等于「坏了」）——它是解释，不是装饰，用次级色保证能读 */}
-                        <Show when={unavailableKey(row)}>
-                          {(key) => (
-                            <span class="shrink-0 text-fs-0 text-fg-2">{t(key())}</span>
-                          )}
-                        </Show>
-                        {/* 场景列（`specs/command-scenes.md` §2.1）：同键可在不同场景各自生效 */}
-                        <span class="shrink-0 text-fs-0 text-fg-3">{sceneText(row.scenes)}</span>
-                        <span
-                          data-command-chord={row.command.id}
-                          class="shrink-0 text-fs-0 text-fg-3 tnum"
-                        >
-                          {row.chord ?? "—"}
-                        </span>
-                      </li>
-                    </>
-                  )}
-                </For>
-              </ul>
-            </Show>
-          </ArkDialog.Content>
-        </ArkDialog.Positioner>
-      </Portal>
-    </ArkDialog.Root>
+      <Show
+        when={rows().length > 0}
+        fallback={
+          <p class="px-3 py-6 text-center text-fs-2 text-fg-3">{t("palette.empty")}</p>
+        }
+      >
+        <ul
+          ref={(element: HTMLUListElement) => {
+            listElement = element;
+          }}
+          class="min-h-0 flex-1 overflow-y-auto py-1"
+          role="listbox"
+        >
+          <For each={rows()}>
+            {(row, index) => (
+              <>
+                {/* 分组小标题：只在换了组时出现 */}
+                <Show when={index() === 0 || rows()[index() - 1].group !== row.group}>
+                  <li class="px-3 pt-2 pb-1 text-fs-0 text-fg-3" role="presentation">
+                    {row.group}
+                  </li>
+                </Show>
+                <li
+                  ref={(element) => {
+                    itemElements.set(row.command.id, element);
+                    onCleanup(() => itemElements.delete(row.command.id));
+                  }}
+                  data-command-item={row.command.id}
+                  data-command-available={row.availability.available ? "yes" : "no"}
+                  role="option"
+                  aria-selected={index() === cursor()}
+                  aria-disabled={!row.availability.available}
+                  onMouseMove={() => setCursor(index())}
+                  onClick={() => run(row)}
+                  class={[
+                    "flex cursor-pointer items-center gap-2 px-3 py-1.5 text-fs-2",
+                    // 指向/光标 = 辅色底（全局反馈规则）；**不靠改字色**表达
+                    index() === cursor() ? "bg-state-hover" : "",
+                    /*
+                     * 字色只分两档（`memory/DESIGN.md` §4 的标准档位 + §5 的 disabled 规则）：
+                     *   能用   → `fg-1`（正文/标题级，高反差）
+                     *   不能用 → `fg-2`（次级；「前景降为次级色，面不变」）
+                     *
+                     * ⚠️ **不要再叠 `opacity`**（人类 2026-09-24：「根本看不清，能用的就亮出来不好吗」）——
+                     * 次级色上再乘一道透明度，两级降下来就低于可读线了。
+                     */
+                    row.availability.available ? "text-fg-1" : "text-fg-2",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                >
+                  <span class="min-w-0 flex-1 overflow-hidden whitespace-nowrap fade-x-end">{row.title}</span>
+                  {/* 不可用就说清为什么（灰掉不解释等于「坏了」）——它是解释，不是装饰，用次级色保证能读 */}
+                  <Show when={unavailableKey(row)}>
+                    {(key) => (
+                      <span class="shrink-0 text-fs-0 text-fg-2">{t(key())}</span>
+                    )}
+                  </Show>
+                  {/* 场景列（`specs/command-scenes.md` §2.1）：同键可在不同场景各自生效 */}
+                  <span class="shrink-0 text-fs-0 text-fg-3">{sceneText(row.scenes)}</span>
+                  <span
+                    data-command-chord={row.command.id}
+                    class="shrink-0 text-fs-0 text-fg-3 tnum"
+                  >
+                    {row.chord ?? "—"}
+                  </span>
+                </li>
+              </>
+            )}
+          </For>
+        </ul>
+      </Show>
+    </DialogFrame>
   );
 }

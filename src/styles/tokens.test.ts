@@ -247,13 +247,14 @@ test("组件里引用到的令牌，tokens.css 里必须有定义", () => {
   );
 });
 
-test("全局层级：message > easy copy tip > 弹窗 > titlebar > 遮罩", () => {
+test("全局层级：message > easy copy tip > 弹窗内提示/标题栏菜单 > 弹窗 > titlebar > 遮罩", () => {
   const value = (name: string): number => {
     const match = css.match(new RegExp(`^\\s*${name}:\\s*(\\d+);`, "m"));
     assert.ok(match, `${name} 未定义`);
     return Number(match[1]);
   };
-  const levels = ["--z-toast", "--z-easy-copy-tip", "--z-modal", "--z-titlebar", "--z-scrim"].map(value);
+  // `--z-popover` 必须高于 `--z-modal`：弹窗内的 Tooltip/Menu 与标题栏菜单不能被弹窗盖住
+  const levels = ["--z-toast", "--z-easy-copy-tip", "--z-popover", "--z-modal", "--z-titlebar", "--z-scrim"].map(value);
   assert.ok(levels.every((level, index) => index === 0 || levels[index - 1]! > level), levels.join(" > "));
   const base = readFileSync(new URL("../index.css", import.meta.url), "utf8");
   assert.match(base, /\[data-easy-copy-tip\][^{}]*\{[^{}]*--z-index: var\(--z-easy-copy-tip\) !important/s);

@@ -147,13 +147,16 @@ textarea,
   * 内联里也没有 z-index），于是弹窗只能靠 DOM 顺序，**被工作区里 `z-10` 的看图/胶片覆盖层压住**
   * （真机症状：film/view 下点库齿轮，弹窗看不见、只有周围一圈被遮罩压暗）。
   * `!important` 与上面同一理由：将来 Zag 真写了内联 z-index 时也要压得住。
+  *
+  * `--dialog-layer` 由 `DialogFrame` 按弹窗栈深写入（1 起，关闭时也写 1）：
+  * 每层抬 2 档，后开的弹窗永远在上，不再依赖 Portal 的 DOM 顺序。
   */
- z-index: var(--z-scrim) !important;
+ z-index: calc(var(--z-scrim) + (var(--dialog-layer, 1) - 1) * 2) !important;
 }
 
 [data-scope="dialog"][data-part="positioner"] {
  --z-index: var(--z-modal) !important;
- z-index: var(--z-modal) !important;
+ z-index: calc(var(--z-modal) + (var(--dialog-layer, 1) - 1) * 2) !important;
  /* 全屏位置器透明穿透；只让真实弹窗内容接点击，titlebar 才能位于遮罩与弹窗之间。 */
  pointer-events: none;
 }

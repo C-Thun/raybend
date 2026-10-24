@@ -269,13 +269,12 @@ export function ImportProgressDialog(props: ImportProgressDialogProps) {
       </div>
 
       </Dialog>
-      {/* 二次确认复用 Dialog 的独立遮罩/内容层，避免全屏容器盖住 titlebar。 */}
+      {/* 二次确认复用 Dialog 的内容层；遮罩由弹窗栈自动只画在最底层。 */}
       <Dialog
         open={store.open() && confirmingCancel()}
         onOpenChange={(open) => {
           if (!open) setConfirmingCancel(false);
         }}
-        scrim={false}
         footer={
           <>
             <Button variant="secondary" onClick={() => setConfirmingCancel(false)}>

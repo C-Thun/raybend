@@ -434,23 +434,22 @@ export function LibrarySettingsDialog(props: LibrarySettingsDialogProps) {
         </Show>
       </div>
 
-      <ConfirmDialog open={usePath() !== null} scrim={false} title={t("repo.locations.use")}
+      <ConfirmDialog open={usePath() !== null} title={t("repo.locations.use")}
         message={t("repo.locations.use_confirm", {path:usePath() ?? ""})} confirmLabel={t("common.confirm")}
         onCancel={() => setUsePath(null)} onConfirm={() => { const path=usePath(); setUsePath(null); if (path !== null) void manageLocation(path); }} />
-      <ConfirmDialog open={releaseOpen()} scrim={false} title={t("repo.release")} message={t("repo.release_confirm")} confirmLabel={t("repo.release")}
+      <ConfirmDialog open={releaseOpen()} title={t("repo.release")} message={t("repo.release_confirm")} confirmLabel={t("repo.release")}
         onCancel={() => setReleaseOpen(false)} onConfirm={() => { setReleaseOpen(false); void manageLocation(null); }} />
-      <ConfirmDialog open={removePath() !== null} scrim={false}
+      <ConfirmDialog open={removePath() !== null}
         title={t("repo.locations.remove_title")} message={t("repo.locations.remove_confirm", { path: removePath() ?? "" })}
         confirmLabel={t("repo.locations.remove")} onCancel={() => setRemovePath(null)}
         onConfirm={() => { const path = removePath(); setRemovePath(null); if (path !== null) void locations.remove(path); }} />
 
       {/*
-        二级确认：**透明遮罩**（人类 2026-09-19）—— 一级窗口已经在压暗背景了，
-        再叠一层半透就是越叠越黑。文案里把「要花时间」说清楚，别让用户以为卡住了。
+        二级确认：遮罩由 `DialogFrame` 的弹窗栈自动处理（二级透明）。
+        文案里把「要花时间」说清楚，别让用户以为卡住了。
       */}
       <ConfirmDialog
         open={rebuildOpen()}
-        scrim={false}
         title={t("repo.rebuild_confirm_title")}
         message={t("repo.rebuild_confirm")}
         confirmLabel={t("repo.rebuild_confirm_ok")}

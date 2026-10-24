@@ -58,7 +58,7 @@ export function ExternalEditorDialog(props:{store:ExternalEditorStore}){
     </div>
    </div>
   </Dialog>
-  <Dialog open={store.adding()} title={t('external.addTitle')} scrim={false} onOpenChange={store.setAdding}>
+  <Dialog open={store.adding()} title={t('external.addTitle')} onOpenChange={store.setAdding}>
    <div class="flex flex-col gap-3">
     <Show when={store.discovering()} fallback={<div data-external-candidates class="flex max-h-72 flex-col gap-2 overflow-auto">
      <For each={store.candidates()} fallback={<p class="text-fs-1 text-fg-3">{t('external.notFound')}</p>}>{app=><div class="flex min-w-0 items-start gap-2">

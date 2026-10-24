@@ -60,7 +60,7 @@ export function MigrationGate(props: MigrationGateProps) {
               <div
                 ref={dialog}
                 tabIndex={-1}
-                class="pointer-events-auto flex w-80 flex-col gap-2 rounded-ui bg-surface-layer p-(--dialog-pad)"
+                class="pointer-events-auto flex w-80 flex-col gap-2 rounded-ui bg-surface-layer inset-ring-1 inset-ring-(--dialog-ring) p-(--dialog-pad)"
                 data-migration-gate="open"
                 role="alertdialog"
                 aria-modal="true"

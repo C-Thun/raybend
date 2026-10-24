@@ -5,12 +5,18 @@
  *
  * 状态：
  *   关       不渲染任何东西（含遮罩）
- *   开       遮罩 `bg-scrim`（由令牌派生，两主题都是**压暗**）+ 浮层底 `surface-layer`
- *   标题     13px semibold，正文 12px 次级色
+ *   开       内容面 `surface-layer` + **1px `--dialog-ring` 内描边**；遮罩由弹窗栈最底层画一次
+ *   标题     17px semibold，正文 13px 次级色
  *   动作区   右下角：取消（secondary）+ 确定（primary）
  *
- * 风格纪律：**不做阴影、不做毛玻璃**（§6）。所以「浮起来」只靠两层：
- * 遮罩压暗后面的内容 + 弹窗自己用最亮的浮层面。这也是为什么弹窗不需要描边。
+ * 风格纪律：**不做阴影、不做毛玻璃**（§6）。「浮起来」靠两层：
+ * 遮罩压暗后面的内容 + 弹窗自己用最亮的浮层面。**描边是无边线设计的唯一常驻例外** ——
+ * 两层弹窗叠放时底色完全相同，没有阴影可依，缺这条线边界就会糊在一起（崔总 2026-10-24）。
+ *
+ * 叠放纪律（`lib/dialog-stack.ts`）：
+ *   * 遮罩只由**最底层**画；二级/三级弹窗自动透明，调用方不需要也不能手写 `scrim`；
+ *   * 后开的弹窗永远在上（`--dialog-layer` 按栈深抬 z）；
+ *   * 下层弹窗不可点击、焦点不进入 —— 由 Ark/Zag 的 modal 行为承担（body pointer-events + 焦点陷阱栈）。
  *
  * 无障碍（焦点陷阱、Esc 关闭、外点关闭、`aria-modal`、标题关联）交给 Ark。
  * 位置器**自己套 `Portal`**（原因同 `Tooltip`）。
@@ -22,7 +28,93 @@ import { Show, splitProps, untrack, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 import { t } from "../../i18n";
 import { blurActive } from "../../lib/dom-focus.ts";
+import { createDialogLayer } from "../../lib/dialog-stack.ts";
 import { Button, IconButton } from "./Button.tsx";
+
+/**
+ * 标题栏在弹窗打开时仍要能拖、能关窗口。
+ *
+ * Ark 的 modal 会把 `body` 设成 `pointer-events: none`，titlebar 会被一起禁掉
+ * （它又不在弹窗的 Portal 里）。`persistentElements` 是 Ark 给的正规出口：
+ * 它会把这些元素重新设为 `pointer-events: auto`，并把它们从「外点关窗」的判定里排除。
+ */
+const PERSISTENT_ELEMENTS = [
+  () => document.querySelector<HTMLElement>("[data-app-titlebar]"),
+];
+
+export interface DialogFrameProps {
+  open: boolean;
+  onOpenChange?: (open: boolean) => void;
+  /** 打开时的初始焦点元素；确认类弹窗必须传（见 `DialogProps.initialFocusEl`） */
+  initialFocusEl?: () => HTMLElement | null;
+  /** 位置器额外类（命令面板用 `items-start pt-[10vh]`；默认垂直居中） */
+  positionerClass?: string;
+  /** 内容面额外类（尺寸、平移、overflow 等；基础面与描边由这里统一给） */
+  contentClass?: string;
+  /** 内容面的附加属性（命令面板的 `data-command-palette` 等） */
+  contentAttrs?: Record<string, string | number | boolean>;
+  children?: JSX.Element;
+  role?: "dialog" | "alertdialog";
+}
+
+/**
+ * `DialogFrame` —— 所有模态弹窗共用的 Ark 三件套（Root / Backdrop / Positioner / Content）。
+ *
+ * 它只管「层级、遮罩、边框、外点/Esc 的焦点清理」；标题、按钮、正文布局归 `Dialog` 或
+ * 命令面板自己。抽出来的理由：命令面板原本复制了同一套 Ark 结构，边框与遮罩机制
+ * 一旦只写在 `Dialog` 里，第二个实现就会漏。
+ */
+export function DialogFrame(props: DialogFrameProps) {
+  const layer = createDialogLayer(() => props.open);
+  /** 栈深 → `index.css` 的弹窗 z 公式；关闭时也写 1，避免读到空值 */
+  const layerStyle = (): JSX.CSSProperties => ({
+    "--dialog-layer": String(Math.max(1, layer.depth())),
+  });
+
+  return (
+    <ArkDialog.Root
+      open={props.open}
+      onOpenChange={(details) => props.onOpenChange?.(details.open)}
+      initialFocusEl={props.initialFocusEl}
+      persistentElements={PERSISTENT_ELEMENTS}
+      // 点遮罩（外点）与按 Esc 都会关窗：**关之前先把焦点摘掉**。
+      // 否则焦点一直留在触发按钮上，WebView2 会把它当键盘焦点画一圈（`lib/dom-focus.ts` 有完整根因）。
+      // 顺序不能反 —— 反了会看着圈闪一下。
+      onInteractOutside={() => blurActive()}
+      onEscapeKeyDown={() => blurActive()}
+      lazyMount
+      unmountOnExit
+      role={props.role ?? "dialog"}
+    >
+      <Portal>
+        <ArkDialog.Backdrop
+          class={[
+            "fixed inset-0",
+            layer.paintsScrim() ? "bg-scrim" : "bg-transparent",
+          ].join(" ")}
+          style={layerStyle()}
+        />
+        <ArkDialog.Positioner
+          class={[
+            "fixed inset-0 flex justify-center p-4",
+            props.positionerClass ?? "items-center",
+          ].join(" ")}
+          style={layerStyle()}
+        >
+          <ArkDialog.Content
+            class={[
+              "rounded-ui bg-surface-layer inset-ring-1 inset-ring-(--dialog-ring) outline-none",
+              props.contentClass ?? "",
+            ].join(" ")}
+            {...props.contentAttrs}
+          >
+            {props.children}
+          </ArkDialog.Content>
+        </ArkDialog.Positioner>
+      </Portal>
+    </ArkDialog.Root>
+  );
+}
 
 export interface DialogProps {
   open: boolean;
@@ -35,14 +127,6 @@ export interface DialogProps {
   footer?: JSX.Element;
   /** 右上角那个关闭按钮的无障碍名，默认「关闭」 */
   closeLabel?: string;
-  /**
-   * 遮罩要不要压暗背景。默认要（`bg-scrim`）。
-   *
-   * **二级确认弹窗传 `false`**（人类 2026-09-19）：一级弹窗已经压暗过一次，
-   * 二级再压一次就是「半透叠半透」—— 背景越叠越黑，看起来像界面坏了。
-   * 透明遮罩仍然拦住点击（该有的模态语义一个不少）。
-   */
-  scrim?: boolean;
   size?: "md" | "wide" | "settings";
   /**
    * 打开时的初始焦点元素。
@@ -64,91 +148,72 @@ export function Dialog(props: DialogProps) {
     "children",
     "footer",
     "closeLabel",
-    "scrim",
     "size",
     "initialFocusEl",
     "class",
   ]);
 
   return (
-    <ArkDialog.Root
+    <DialogFrame
       open={local.open}
-      onOpenChange={(details) => local.onOpenChange?.(details.open)}
+      onOpenChange={local.onOpenChange}
       initialFocusEl={local.initialFocusEl}
-      // 点遮罩（外点）与按 Esc 都会关窗：**关之前先把焦点摘掉**。
-      // 否则焦点一直留在触发按钮上，WebView2 会把它当键盘焦点画一圈（`lib/dom-focus.ts` 有完整根因）。
-      // 顺序不能反 —— 反了会看着圈闪一下。
-      onInteractOutside={() => blurActive()}
-      onEscapeKeyDown={() => blurActive()}
-      lazyMount
-      unmountOnExit
-      role="dialog"
+      contentClass={[
+        /*
+         * 骨架照设计稿（main.pen `Dialog / 新建库`）：**padding 16 / gap 12**，
+         * 且内边距**不吃密度档**（`--dialog-pad`）—— 紧凑档缩到 6px 会「贴边」。
+         */
+        "flex w-full min-w-72 flex-col gap-3 p-(--dialog-pad)",
+        local.size === "settings" ? "h-160 max-h-dvh max-w-5xl" : local.size === "wide" ? "max-w-2xl" : "max-w-md",
+        local.class ?? "",
+      ].join(" ")}
     >
-      <Portal>
-        <ArkDialog.Backdrop
-          class={["fixed inset-0", local.scrim === false ? "bg-transparent" : "bg-scrim"].join(" ")}
-        />
-        <ArkDialog.Positioner class="fixed inset-0 flex items-center justify-center p-4">
-          <ArkDialog.Content
-            class={[
-              /*
-               * 骨架照设计稿（main.pen `Dialog / 新建库`）：**padding 16 / gap 12**，
-               * 且内边距**不吃密度档**（`--dialog-pad`）—— 紧凑档缩到 6px 会「贴边」。
-               */
-              "flex w-full min-w-72 flex-col gap-3 rounded-ui bg-surface-layer p-(--dialog-pad) outline-none",
-              local.size === "settings" ? "h-160 max-h-dvh max-w-5xl" : local.size === "wide" ? "max-w-2xl" : "max-w-md",
-              local.class ?? "",
-            ].join(" ")}
+      {/*
+        标题与右上角的叉**要对齐**：给标题一个 24px 的行盒（`leading-6`），
+        和叉的图标按钮同高，`items-start` 下两者的中心就重合了。
+        （2026-09-16 人类反馈：之前标题比叉低一截。标题字号也照设计稿
+        从 13px 提到 **17px semibold** —— 设计稿里的弹窗标题就是 17。）
+      */}
+      <div class="flex items-start gap-2">
+        <div class="min-w-0 flex-1">
+          <Show when={local.title}>
+            <ArkDialog.Title class="text-[17px] leading-6 font-semibold text-fg-1">
+              {local.title}
+            </ArkDialog.Title>
+          </Show>
+          <Show when={local.description}>
+            <ArkDialog.Description class="mt-1 text-[13px] leading-normal text-fg-2">
+              {local.description}
+            </ArkDialog.Description>
+          </Show>
+        </div>
+        <ArkDialog.CloseTrigger asChild={(triggerProps) => (
+          <IconButton
+            {...triggerProps()}
+            label={local.closeLabel ?? t("common.close")}
           >
-            {/*
-              标题与右上角的叉**要对齐**：给标题一个 24px 的行盒（`leading-6`），
-              和叉的图标按钮同高，`items-start` 下两者的中心就重合了。
-              （2026-09-16 人类反馈：之前标题比叉低一截。标题字号也照设计稿
-              从 13px 提到 **17px semibold** —— 设计稿里的弹窗标题就是 17。）
-            */}
-            <div class="flex items-start gap-2">
-              <div class="min-w-0 flex-1">
-                <Show when={local.title}>
-                  <ArkDialog.Title class="text-[17px] leading-6 font-semibold text-fg-1">
-                    {local.title}
-                  </ArkDialog.Title>
-                </Show>
-                <Show when={local.description}>
-                  <ArkDialog.Description class="mt-1 text-[13px] leading-normal text-fg-2">
-                    {local.description}
-                  </ArkDialog.Description>
-                </Show>
-              </div>
-              <ArkDialog.CloseTrigger asChild={(triggerProps) => (
-                <IconButton
-                  {...triggerProps()}
-                  label={local.closeLabel ?? t("common.close")}
-                >
-                  <IconX size={14} aria-hidden="true" />
-                </IconButton>
-              )} />
-            </div>
+            <IconX size={14} aria-hidden="true" />
+          </IconButton>
+        )} />
+      </div>
 
-            <Show when={untrack(() => local.children) != null}>
-              <div class={local.size === "settings" ? "flex min-h-0 flex-1 text-[13px] leading-normal text-fg-1" : "min-w-0 text-[13px] leading-normal text-fg-1"}>
-                {untrack(() => local.children)}
-              </div>
-            </Show>
+      <Show when={untrack(() => local.children) != null}>
+        <div class={local.size === "settings" ? "flex min-h-0 flex-1 text-[13px] leading-normal text-fg-1" : "min-w-0 text-[13px] leading-normal text-fg-1"}>
+          {untrack(() => local.children)}
+        </div>
+      </Show>
 
-            <Show when={untrack(() => local.footer) != null}>
-              {/*
-                底部按钮按设计稿高 **32px**（`Dialog Footer` 里的 `Button` 就是 32 高）。
-                用后代选择器统一抬高，而不是让每个调用点自己写 `size` ——
-                弹窗底部的按钮理应一律同高，散在各处迟早会不一致。
-              */}
-              <div class="flex items-center justify-end gap-2 [&>button]:h-8 [&>button]:px-4 [&>button]:leading-none">
-                {untrack(() => local.footer)}
-              </div>
-            </Show>
-          </ArkDialog.Content>
-        </ArkDialog.Positioner>
-      </Portal>
-    </ArkDialog.Root>
+      <Show when={untrack(() => local.footer) != null}>
+        {/*
+          底部按钮按设计稿高 **32px**（`Dialog Footer` 里的 `Button` 就是 32 高）。
+          用后代选择器统一抬高，而不是让每个调用点自己写 `size` ——
+          弹窗底部的按钮理应一律同高，散在各处迟早会不一致。
+        */}
+        <div class="flex items-center justify-end gap-2 [&>button]:h-8 [&>button]:px-4 [&>button]:leading-none">
+          {untrack(() => local.footer)}
+        </div>
+      </Show>
+    </DialogFrame>
   );
 }
 
@@ -161,8 +226,6 @@ export interface ConfirmDialogProps {
   cancelLabel?: string;
   /** 正文下方的补充内容，仅用于说明本次操作后果。 */
   description?: JSX.Element;
-  /** 遮罩是否压暗（二级确认传 `false`；见 `DialogProps.scrim`） */
-  scrim?: boolean;
   size?: "md" | "wide";
   onConfirm: () => void;
   onCancel: () => void;
@@ -174,6 +237,8 @@ export interface ConfirmDialogProps {
  * 注意「确定」用的是 **primary（主色）** 而不是危险红：
  * 移除/排除**不是破坏性删除**（AGENTS.md §11.3），
  * 而且在 `danger` 令牌定案前（`design/main.md` §7 待决项）也不该有红色按钮。
+ *
+ * 二级确认的遮罩**不需要调用方声明**：`DialogFrame` 的栈会自动让它透明。
  */
 export function ConfirmDialog(props: ConfirmDialogProps) {
   // 「确定」按钮的 ref：打开时焦点落它（**回车 = 确认**，Esc = 关闭）—— 见 `DialogProps.initialFocusEl`
@@ -186,11 +251,7 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
       }}
       initialFocusEl={() => confirmEl ?? null}
       title={props.title}
-      /*
-       * 「二级确认」用**透明遮罩**（人类 2026-09-19）：一级窗口已经在压暗背景了，
-       * 这里再叠一层半透就是越叠越黑。给了 `scrim: false` 就交给调用方决定。
-       */
-      {...(props.scrim === undefined ? {} : { scrim: props.scrim })}
+      size={props.size}
       footer={
         <>
           <Button variant="secondary" onClick={props.onCancel}>
