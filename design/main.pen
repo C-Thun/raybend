@@ -15382,6 +15382,18 @@
             },
             {
               "type": "text",
+              "id": "TCrCC",
+              "name": "超 15 万提示",
+              "fill": "$fg-2",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "已超过 15 万张 · 建议开一个新库分担",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
               "id": "r96QXm",
               "name": "Field Label",
               "fill": "$fg-2",
@@ -16294,6 +16306,18 @@
                   "fontWeight": "normal"
                 }
               ]
+            },
+            {
+              "type": "text",
+              "id": "zpZlC",
+              "name": "超 15 万提示",
+              "fill": "$fg-2",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "已超过 15 万张 · 建议开一个新库分担",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
             },
             {
               "type": "text",

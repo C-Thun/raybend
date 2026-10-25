@@ -23224,8 +23224,8 @@
       "y": 1570,
       "name": "Components / 标签弹窗",
       "clip": true,
-      "width": 980,
-      "height": 620,
+      "width": 1432,
+      "height": 640,
       "fill": "$surface-main",
       "layout": "vertical",
       "gap": 14,
@@ -23257,6 +23257,7 @@
           "type": "frame",
           "id": "DTAOc",
           "name": "Row / 两态",
+          "width": 1392,
           "gap": 24,
           "children": [
             {
@@ -23334,6 +23335,27 @@
                           "content": "wed",
                           "fontFamily": "Inter",
                           "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "EyA7W",
+                      "name": "DictCount",
+                      "width": "fill_container",
+                      "gap": 8,
+                      "justifyContent": "space_between",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "d6yHjL",
+                          "name": "DictCountText",
+                          "fill": "$fg-3",
+                          "content": "标签 1 284 / 5 000",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
                           "fontWeight": "normal"
                         }
                       ]
@@ -23789,6 +23811,27 @@
                     },
                     {
                       "type": "frame",
+                      "id": "SShqA",
+                      "name": "DictCount",
+                      "width": "fill_container",
+                      "gap": 8,
+                      "justifyContent": "space_between",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "kTmBD",
+                          "name": "DictCountText",
+                          "fill": "$fg-3",
+                          "content": "标签 1 284 / 5 000",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
                       "id": "o2YnTN",
                       "name": "ChipRow",
                       "width": "fill_container",
@@ -24001,6 +24044,487 @@
                               "name": "ButtonLabel",
                               "fill": "$fg-on-brand",
                               "content": "添加标签",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "Us6YI",
+              "name": "Col / 满额",
+              "width": 440,
+              "layout": "vertical",
+              "gap": 8,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "nIOQt",
+                  "name": "Label / 满额",
+                  "fill": "$fg-2",
+                  "content": "满额（词典 5 000 / 5 000）",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "DBqxz",
+                  "name": "Modal / 标签（满额）",
+                  "width": 420,
+                  "fill": "$surface-layer",
+                  "cornerRadius": 6,
+                  "layout": "vertical",
+                  "gap": 14,
+                  "padding": 20,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "p32v1m",
+                      "name": "ModalTitle",
+                      "fill": "$fg-1",
+                      "content": "标签",
+                      "fontFamily": "Inter",
+                      "fontSize": 17,
+                      "fontWeight": "600"
+                    },
+                    {
+                      "type": "text",
+                      "id": "H6ZL8d",
+                      "name": "ModalDesc",
+                      "fill": "$fg-3",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "P1000156.JPG · 已有 3 个标签 · 词典已满",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "L6bto4",
+                      "name": "TextField",
+                      "width": "fill_container",
+                      "height": 32,
+                      "fill": "$surface-bar",
+                      "cornerRadius": 4,
+                      "padding": [
+                        0,
+                        8
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "EvEQx",
+                          "name": "FieldText",
+                          "fill": "$fg-1",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "wed",
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "uacGB",
+                      "name": "DictCount",
+                      "width": "fill_container",
+                      "gap": 8,
+                      "justifyContent": "space_between",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "saG72",
+                          "name": "DictCountText",
+                          "fill": "$fg-2",
+                          "content": "标签 5 000 / 5 000 · 已达上限",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "hTNan",
+                          "name": "DictCleanup",
+                          "fill": "$brand",
+                          "content": "清理未使用标签（96）",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "z0uPzd",
+                      "name": "SearchResults",
+                      "width": "fill_container",
+                      "fill": "$surface-bar",
+                      "cornerRadius": 4,
+                      "layout": "vertical",
+                      "gap": 4,
+                      "padding": 8,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "bjfcm",
+                          "name": "Result / 婚礼",
+                          "width": "fill_container",
+                          "height": 24,
+                          "gap": 6,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "ZwpQy",
+                              "name": "ResultLabel",
+                              "fill": "$fg-1",
+                              "content": "婚礼",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "text",
+                              "id": "pathf",
+                              "name": "ResultHint",
+                              "fill": "$fg-3",
+                              "content": "已有实例 12",
+                              "fontFamily": "Inter",
+                              "fontSize": 11,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "s3KjJv",
+                          "name": "Result / wedding 外景",
+                          "width": "fill_container",
+                          "height": 24,
+                          "gap": 6,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "nXttM",
+                              "name": "ResultLabel",
+                              "fill": "$fg-1",
+                              "content": "wedding 外景",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "text",
+                              "id": "D94UG5",
+                              "name": "ResultHint",
+                              "fill": "$fg-3",
+                              "content": "已有实例 3",
+                              "fontFamily": "Inter",
+                              "fontSize": 11,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "S1R8Q",
+                          "name": "Result / 创建「wed」",
+                          "opacity": 0.55,
+                          "width": "fill_container",
+                          "height": 24,
+                          "gap": 6,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "o3QNxc",
+                              "name": "ResultLabel",
+                              "fill": "$fg-3",
+                              "content": "已达上限，不能新建",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "text",
+                              "id": "UjCPf",
+                              "name": "ResultHint",
+                              "fill": "$fg-3",
+                              "content": "先清理",
+                              "fontFamily": "Inter",
+                              "fontSize": 11,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "NETPz",
+                      "name": "ChipRow",
+                      "width": "fill_container",
+                      "gap": 6,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "Q6IeX",
+                          "name": "Chip / 婚礼",
+                          "height": 24,
+                          "fill": "$surface-bar",
+                          "cornerRadius": 999,
+                          "gap": 4,
+                          "padding": [
+                            0,
+                            10
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "m8gYci",
+                              "name": "ChipLabel",
+                              "fill": "$fg-1",
+                              "content": "婚礼",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "icon",
+                              "id": "skJwe",
+                              "name": "Glyph / x",
+                              "width": 11,
+                              "height": 11,
+                              "icon": "x",
+                              "library": "lucide",
+                              "fill": "$fg-3"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "BS5FY",
+                          "name": "Chip / 外景",
+                          "height": 24,
+                          "fill": "$surface-bar",
+                          "cornerRadius": 999,
+                          "gap": 4,
+                          "padding": [
+                            0,
+                            10
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "ahSUI",
+                              "name": "ChipLabel",
+                              "fill": "$fg-1",
+                              "content": "外景",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "icon",
+                              "id": "S1bDj",
+                              "name": "Glyph / x",
+                              "width": 11,
+                              "height": 11,
+                              "icon": "x",
+                              "library": "lucide",
+                              "fill": "$fg-3"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "NSWlD",
+                          "name": "Chip / 朋友",
+                          "height": 24,
+                          "fill": "$surface-bar",
+                          "cornerRadius": 999,
+                          "gap": 4,
+                          "padding": [
+                            0,
+                            10
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "diQfH",
+                              "name": "ChipLabel",
+                              "fill": "$fg-1",
+                              "content": "朋友",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "icon",
+                              "id": "LagaE",
+                              "name": "Glyph / x",
+                              "width": 11,
+                              "height": 11,
+                              "icon": "x",
+                              "library": "lucide",
+                              "fill": "$fg-3"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "dJMzy",
+                      "name": "ChipRow",
+                      "width": "fill_container",
+                      "gap": 6,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "ZXQyE",
+                          "name": "Chip / 夏天",
+                          "height": 24,
+                          "fill": "$surface-bar",
+                          "cornerRadius": 999,
+                          "gap": 4,
+                          "padding": [
+                            0,
+                            10
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "ctO35",
+                              "name": "ChipLabel",
+                              "fill": "$fg-1",
+                              "content": "夏天",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "icon",
+                              "id": "m0koM",
+                              "name": "Glyph / x",
+                              "width": 11,
+                              "height": 11,
+                              "icon": "x",
+                              "library": "lucide",
+                              "fill": "$fg-3"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "mGfLK",
+                          "name": "Chip / 2026",
+                          "height": 24,
+                          "fill": "$surface-bar",
+                          "cornerRadius": 999,
+                          "gap": 4,
+                          "padding": [
+                            0,
+                            10
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "pF41g",
+                              "name": "ChipLabel",
+                              "fill": "$fg-1",
+                              "content": "2026",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "icon",
+                              "id": "B3J7l",
+                              "name": "Glyph / x",
+                              "width": 11,
+                              "height": 11,
+                              "icon": "x",
+                              "library": "lucide",
+                              "fill": "$fg-3"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "rW6cq",
+                      "name": "ModalButtons",
+                      "width": "fill_container",
+                      "height": 32,
+                      "gap": 8,
+                      "justifyContent": "end",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "zqHl6",
+                          "name": "Button / 取消",
+                          "height": 32,
+                          "fill": "$surface-track",
+                          "cornerRadius": 4,
+                          "padding": [
+                            0,
+                            14
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "Znd9i",
+                              "name": "ButtonLabel",
+                              "fill": "$fg-1",
+                              "content": "取消",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "tN2ux",
+                          "name": "Button / 保存",
+                          "height": 32,
+                          "fill": "$brand",
+                          "cornerRadius": 4,
+                          "padding": [
+                            0,
+                            14
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "DOxa5",
+                              "name": "ButtonLabel",
+                              "fill": "$fg-on-brand",
+                              "content": "保存",
                               "fontFamily": "Inter",
                               "fontSize": 13,
                               "fontWeight": "normal"
@@ -48271,6 +48795,269 @@
                       ]
                     }
                   ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "ZGQC3",
+      "x": 4420,
+      "y": 1570,
+      "name": "Components / 标签筛选菜单",
+      "clip": true,
+      "width": 320,
+      "fill": "$surface-main",
+      "cornerRadius": 6,
+      "layout": "vertical",
+      "gap": 12,
+      "padding": 20,
+      "children": [
+        {
+          "type": "text",
+          "id": "LmtAx",
+          "name": "Title",
+          "fill": "$fg-1",
+          "content": "标签筛选菜单（只筛不设置）",
+          "fontFamily": "Inter",
+          "fontSize": 15,
+          "fontWeight": "semibold"
+        },
+        {
+          "type": "text",
+          "id": "iDkAA",
+          "name": "Intro",
+          "fill": "$fg-3",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "系统硬上限 5 000 个：菜单不平铺全部，默认给已选 + 常用，输入即搜。",
+          "fontFamily": "Inter",
+          "fontSize": 11,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "RKITF",
+          "name": "Menu / 标签筛选",
+          "width": "fill_container",
+          "fill": "$surface-layer",
+          "cornerRadius": 4,
+          "layout": "vertical",
+          "gap": 4,
+          "padding": 6,
+          "children": [
+            {
+              "type": "frame",
+              "id": "L4iWdA",
+              "name": "SearchField",
+              "width": "fill_container",
+              "height": 28,
+              "fill": "$surface-bar",
+              "cornerRadius": 4,
+              "gap": 6,
+              "padding": [
+                0,
+                8
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "VSZQS",
+                  "name": "Glyph / search",
+                  "width": 12,
+                  "height": 12,
+                  "icon": "search",
+                  "library": "lucide",
+                  "fill": "$fg-3"
+                },
+                {
+                  "type": "text",
+                  "id": "ReHrY",
+                  "name": "FieldText",
+                  "fill": "$fg-3",
+                  "content": "搜索标签…",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "oDT0j",
+              "name": "SearchHint",
+              "fill": "$fg-3",
+              "content": "共 1 284 个标签 · 输入以搜索",
+              "fontFamily": "Inter",
+              "fontSize": 11,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "ibCET",
+              "name": "Item / 旅行",
+              "width": "fill_container",
+              "height": 28,
+              "fill": "$state-selected",
+              "cornerRadius": 4,
+              "gap": 8,
+              "padding": [
+                0,
+                8
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "k1v1X",
+                  "name": "Glyph / tag",
+                  "width": 14,
+                  "height": 14,
+                  "icon": "tag",
+                  "library": "lucide",
+                  "fill": "$fg-1"
+                },
+                {
+                  "type": "text",
+                  "id": "NNBPN",
+                  "name": "Label",
+                  "fill": "$fg-1",
+                  "content": "旅行",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "a1ff6s",
+                  "name": "Spacer",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "text",
+                  "id": "E3rFJ",
+                  "name": "Check",
+                  "fill": "$fg-3",
+                  "content": "已选",
+                  "fontFamily": "Inter",
+                  "fontSize": 11,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "Kj5ep",
+              "name": "Item / 家人",
+              "width": "fill_container",
+              "height": 28,
+              "fill": "$surface-layer",
+              "cornerRadius": 4,
+              "gap": 8,
+              "padding": [
+                0,
+                8
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "rMKbg",
+                  "name": "Glyph / tag",
+                  "width": 14,
+                  "height": 14,
+                  "icon": "tag",
+                  "library": "lucide",
+                  "fill": "$fg-2"
+                },
+                {
+                  "type": "text",
+                  "id": "ere8j",
+                  "name": "Label",
+                  "fill": "$fg-2",
+                  "content": "家人",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "LEitN",
+              "name": "Item / 飞鸟",
+              "width": "fill_container",
+              "height": 28,
+              "fill": "$surface-layer",
+              "cornerRadius": 4,
+              "gap": 8,
+              "padding": [
+                0,
+                8
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "jvrEx",
+                  "name": "Glyph / tag",
+                  "width": 14,
+                  "height": 14,
+                  "icon": "tag",
+                  "library": "lucide",
+                  "fill": "$fg-2"
+                },
+                {
+                  "type": "text",
+                  "id": "ONiKy",
+                  "name": "Label",
+                  "fill": "$fg-2",
+                  "content": "飞鸟",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "nOQFh",
+              "name": "Item / 夜景",
+              "width": "fill_container",
+              "height": 28,
+              "fill": "$surface-layer",
+              "cornerRadius": 4,
+              "gap": 8,
+              "padding": [
+                0,
+                8
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "wPuT2",
+                  "name": "Glyph / tag",
+                  "width": 14,
+                  "height": 14,
+                  "icon": "tag",
+                  "library": "lucide",
+                  "fill": "$fg-2"
+                },
+                {
+                  "type": "text",
+                  "id": "R4VrPm",
+                  "name": "Label",
+                  "fill": "$fg-2",
+                  "content": "夜景",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
                 }
               ]
             }

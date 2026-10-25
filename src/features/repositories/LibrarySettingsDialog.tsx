@@ -345,6 +345,9 @@ export function LibrarySettingsDialog(props: LibrarySettingsDialogProps) {
             </span>
           </div>
           <p class="text-fs-0 text-fg-3">{t("repo.counts_hint")}</p>
+          <Show when={(photosCount() ?? 0) >= 150_000}>
+            <p class="text-fs-0 text-fg-2">{t("repo.counts_many")}</p>
+          </Show>
         </div>
 
         {/* 重建数据：重扫整个库（文件对齐 + 元数据重读 + 计数重算） */}

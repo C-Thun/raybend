@@ -48,7 +48,6 @@ test("浏览器里：目录扫描返回空清单但保留 root（界面能显示
 
 test("浏览器里：缩略图返回 null（调用方显示占位图）", async () => {
   assert.equal(await getThumbBytes("/photos/a.jpg"), null);
-  assert.equal(await getThumbBytes("/photos/a.jpg", "screen"), null);
 });
 
 test("浏览器里：EXIF 返回空值而不是抛错", async () => {

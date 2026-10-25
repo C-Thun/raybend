@@ -505,3 +505,15 @@ Rust 1517 项、前端 1289 项测试与全部静态门通过。实测（Windows
 按崔总 2026-10-24 的逐项拍板完成：桶/标签审查 3、5–15 全修（死成员清理与按库计数、AI 重试一步、预览失败提示、筛选建桶默认库、AI 弹窗状态、加桶计数、标签子目录刷新、空桶文案、目录标签确认、行点击展开、词典全量、游标清理）；发布说明去掉内部提示行并接入 `docs/release-notes/<版本>.md`；`thumbs.db` 接上 6 小时节流的旧签名孤儿 + 1 GiB 容量回收，设置 → 文件页可看占用/清理；开库后逐资产后台补齐老库展示尺寸；XMP 自维护落到 `AGENTS.md` §13 项目图景 + `PARAMS` 归类测试；发布构建归档 PDB 并在崩溃报告写入 `gitHash`/`buildTime`。
 
 验证：`cargo test --workspace` 1747 passed / 13 ignored；`pnpm typecheck && pnpm test` 1319 passed；三 lint 与 `pnpm build` 通过；发布脚本测试 15 passed。真机 E2E 仍归崔总（四项验收不变）。证据：`implementations/2026-10-25_release-blockers-and-review-fixes.md`。
+
+## 2026-10-25 小图缓存按库（384 / AVIF q80 / 每库 2 GiB）+ 标签 5000 硬上限
+
+按崔总 2026-10-25 的拍板完成：小图缓存从全局 `_sources/thumbs.db` 改为**跟着库走**（`<库根>/cache/thumbs.db`，每库一份），384 档改 **AVIF q80**（1920/真身仍 q90），每库 **2 GiB** 维护阈值；写时清同键旧签名、GC 一次收敛、命中批量 touch（LRU）；thumbs.db **只存 384**，1920 全部走 `cache/full/`；旧全局 DB 升级时删除。基础保障指标 = **单库 15 万张（RAW+JPG 算一张）下 384 缓存 ≤2 GiB 且浏览不抖动**（`AGENTS.md` §6.5）；单库达到 15 万张后库设置提示建议开新库。
+
+标签系统改为**全局硬上限 5000**：`ensure_tag` 满额拒绝新名、已有名照常；AI/XMP 后台路径用 `ensure_names_capped` 跳过新名；标签弹窗显示 `n / 5000`、满额禁用新建、提供「清理未使用标签」；筛选菜单加搜索（C）。标签范围仍是 `app.db` 全局，未改。
+
+另修 `release-run.test.mjs` 的非 hermetic 失败（私钥转换只在 `--with-updater` 时执行；测试显式注入 `env: {}`；新增 unsigned 无 updater 不调 `wslpath` 回归）。
+
+画稿同步：`design/browse.pen` 标签弹窗加计数行并新增「满额」态、新增 `Components / 标签筛选菜单`（搜索框 + 已选置顶）；`design/main.pen` 库设置在超 15 万张时加「建议开新库」提示；`design/browse.md` / `design/main.md` 同步，预览在 `design/exports/tag-5000/`。**`.pen` 的磁盘保存由崔总执行。**
+
+验证：`cargo test --workspace` 1756 passed / 13 ignored；`pnpm typecheck && pnpm test` 1324 passed；三 lint 与 `pnpm build` 通过；`pnpm test:release` 104 passed。真机 E2E（15 万库、5000 标签、q80 画质、缓存占用/清理）仍归崔总。证据：`implementations/2026-10-25_thumbnail-cache-per-library-and-tag-cap.md`；规格：`specs/thumbnail-cache-per-library.md`。

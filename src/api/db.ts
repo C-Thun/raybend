@@ -338,16 +338,16 @@ export function toBytes(value: unknown): Uint8Array | null {
   return null;
 }
 
-/** 源文件缩略图缓存的统计（排错与设置面板用）。 */
-export async function thumbSourcesStats(): Promise<ThumbCacheStats | null> {
-  if (!isTauriRuntime()) return null;
-  return call<ThumbCacheStats>("thumb_sources_stats");
+/** 当前库的小图缓存统计（排错与设置面板用；缓存跟着库走）。 */
+export async function thumbCacheStats(repositoryId: string): Promise<ThumbCacheStats | null> {
+  if (!isTauriRuntime() || !repositoryId) return null;
+  return call<ThumbCacheStats>("thumb_cache_stats", { repositoryId });
 }
 
-/** 清空小图缓存（派生数据；浏览时自动重建）。返回删掉的条目数。 */
-export async function thumbSourcesClear(): Promise<number> {
-  if (!isTauriRuntime()) return 0;
-  return call<number>("thumb_sources_clear");
+/** 清空当前库的小图缓存（派生数据；浏览时自动重建）。返回删掉的条目数。 */
+export async function thumbCacheClear(repositoryId: string): Promise<number> {
+  if (!isTauriRuntime() || !repositoryId) return 0;
+  return call<number>("thumb_cache_clear", { repositoryId });
 }
 
 /* ══════════════════════════════════════════════════════════════

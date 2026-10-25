@@ -14,7 +14,7 @@ import { getEditorRenderState } from "../api/editor.ts";
 import type { EditorRenderState } from "../api/types.ts";
 import { displayPresentationMatches, type DisplayPhase } from "../lib/display-color.ts";
 import { displayDetectionKey } from "../i18n/display-color.ts";
-import { getSetting, setSetting, SETTING_KEYS, thumbSourcesClear, thumbSourcesStats } from "../api/db.ts";
+import { getSetting, setSetting, SETTING_KEYS, thumbCacheClear, thumbCacheStats } from "../api/db.ts";
 import type { ThumbCacheStats } from "../api/types.ts";
 import { xmpWriteEnabled } from "../lib/xmp-write.ts";
 import { Switch } from "../components/ui/Form.tsx";
@@ -35,6 +35,8 @@ export interface GlobalSettingsDialogProps {
   page: SettingsPage;
   onPageChange: (page: SettingsPage) => void;
   commands: readonly CommandSpec[];
+  /** 当前打开的库；小图缓存跟着库走，设置页只显示/清理这个库的。 */
+  repositoryId: string | null;
   onShortcutsSaved?: () => void;
   /** 编辑调节响应率（设备级偏好，住在组装层）：这里只改它 */
   response: EditorResponseStore;
@@ -116,7 +118,9 @@ export function GlobalSettingsDialog(props: GlobalSettingsDialogProps) {
     if (!props.open || props.page !== "files") return;
     let active = true;
     setCacheError(null);
-    void thumbSourcesStats()
+    const repositoryId = props.repositoryId;
+    if (!repositoryId) { setCacheStats(null); return; }
+    void thumbCacheStats(repositoryId)
       .then((value) => { if (active) setCacheStats(value); })
       .catch((error: unknown) => { if (active) setCacheError(String(error)); });
     onCleanup(() => { active = false; });
@@ -127,9 +131,11 @@ export function GlobalSettingsDialog(props: GlobalSettingsDialogProps) {
     setCacheError(null);
     setCacheNotice(null);
     try {
-      const removed = await thumbSourcesClear();
+      const repositoryId = props.repositoryId;
+      if (!repositoryId) return;
+      const removed = await thumbCacheClear(repositoryId);
       setCacheConfirm(false);
-      setCacheStats(await thumbSourcesStats());
+      setCacheStats(await thumbCacheStats(repositoryId));
       setCacheNotice(t("settings.files.cache.cleared").replace("{n}", String(removed)));
     } catch (error) { setCacheError(String(error)); }
     finally { setCacheBusy(false); }
@@ -486,13 +492,15 @@ export function GlobalSettingsDialog(props: GlobalSettingsDialogProps) {
                 <div class="min-w-0 flex-1">
                   <h3 class="text-fs-2 font-semibold text-fg-1">{t("settings.files.cache.title")}</h3>
                   <p class="mt-1 text-fs-1 text-fg-3">
-                    {t("settings.files.cache.detail")
-                      .replace("{size}", formatCacheSize(cacheStats()?.bytes ?? 0))
-                      .replace("{n}", String(cacheStats()?.entries ?? 0))}
+                    {props.repositoryId
+                      ? t("settings.files.cache.detail")
+                          .replace("{size}", formatCacheSize(cacheStats()?.bytes ?? 0))
+                          .replace("{n}", String(cacheStats()?.entries ?? 0))
+                      : t("settings.files.cache.noLibrary")}
                   </p>
                 </div>
                 <Button variant="secondary" size="sm"
-                  disabled={cacheBusy() || (cacheStats()?.entries ?? 0) === 0}
+                  disabled={!props.repositoryId || cacheBusy() || (cacheStats()?.entries ?? 0) === 0}
                   onClick={() => setCacheConfirm(true)}>
                   {t("settings.files.cache.clear")}
                 </Button>

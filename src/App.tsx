@@ -1165,6 +1165,7 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
         page={settingsPage()}
         onPageChange={setSettingsPage}
         commands={commands}
+        repositoryId={browseStore.repositoryId()}
         onShortcutsSaved={() => toast.show({ tone: "success", message: t("shortcuts.saved") })}
         response={editorResponse}
       />
