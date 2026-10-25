@@ -803,21 +803,34 @@ v0.1.2 的实跑记录：`implementations/2026-10-15_first-release-and-fixes.md`
 pnpm clean:report
 ```
 
-| 位置 | 实测 | 性质 | 清理 |
+| 位置 | 实测（2026-10-26） | 性质 | 清理 |
 | --- | --- | --- | --- |
-| WSL `target/` | **58 G** | 日常 `cargo check/test` 的缓存，只进不出 | `pnpm clean:wsl`（按构建图清失效产物）；`--keep-days 0` 深清，代价是 examples 重编 |
-| Windows `C:\rb-target\raybend` | **12 G** | 日常 `pnpm debug:win` 的缓存，**天天写、长得最快** | `pnpm clean:win`（只清失效产物，默认就是这个目录） |
-| Windows `…\raybend\build\target` | 4.6 G | 发版构建缓存（只在发版时用），**刻意保留** | `pnpm clean:win --target-dir "<发版 target>"`（只清失效产物） |
-| `release-out/` | 130 M | 已发布产物的字节副本，保留 | 旧 `test-*` 目录可手动删 |
+| WSL `target/` | **87 G** | 日常 `cargo check/test` 的缓存，只进不出（其中 `debug/examples` 43 G 是诊断 examples、`debug/deps` 24 G） | `pnpm clean:wsl`（按构建图清失效产物；本次实测可回收 **69 G**）；`--keep-days 0` 深清，代价是 examples 与带 feature 的变体重编 |
+| Windows `C:\rb-target\raybend` | 8.0 G | 日常 `pnpm debug:win` 的缓存，**天天写** | `pnpm clean:win`（只清失效产物，默认就是这个目录） |
+| Windows `…\raybend\build\target` | 4.9 G | 发版构建缓存（只在发版时用），**刻意保留** | **别用 `clean:win` 清它**：清单重建会在那编一份 debug（十几 G），而脚本只清 `<target>\debug`。真要清就整目录删（代价：下次发版冷启 ≥15 min） |
+| `C:\rb-target\` 下的残留（旧 `raybend-release`、AI 冒烟副本…） | 5.3 G | 不在任何脚本的清理范围（历史上因此一直隐形） | 确认无用后手动删；`pnpm clean:report` 现在逐条列出 |
+| `release-out/` | 360 M | 已发布产物的字节副本，保留 | 旧 `test-*` 目录可手动删 |
 | `.release/`（AI 输入快照） | 168 M | 模型 + CPU 运行库冻结副本，构建复用 | 保留 |
-| pnpm store | 4.0 G | 全局包仓库（所有 pnpm 项目共享） | `pnpm store prune` |
+| pnpm store | 4.6 G | 全局包仓库（所有 pnpm 项目共享） | `pnpm store prune` |
 | cargo registry | 1.4 G | crate 下载缓存 | 保留（删了要重新下载） |
+| 应用运行时数据（`…\com.cthun.raybend`） | 166 M | 日志 / 崩溃记录 / app.db / 备份（不是构建缓存） | 保留 |
 
 口径：`clean:win` / `clean:wsl` 只清「不在当前构建图里、且已凉 ≥ N 天（默认 3）」的产物 ——
 正在用的不动、不付冷构建代价；依赖升级 / feature 组合变化 / 换构建参数留下的旧产物由它回收。
 `clean:win` 默认清**日常 debug** 的 `C:\rb-target\raybend`（长得最快的那个）；`RAYBEND_WIN_BUILD_DIR`
 或 `--target-dir` 可改指发版目录。两个目录都在时它会打印另一个的位置 —— 最容易
 「以为在清它、其实在清另一个」。
+
+`clean:wsl` 没显式给 `--json` 时会**先重建一份清单**（`build --workspace --lib --bins` +
+`test --workspace --tests --no-run`，2026-10-26 实测约 3.5 min），然后才清。
+
+**结论（2026-10-26 权衡）**：WSL 的 87 G 与 `debug:win` / `release` **完全无关**（后两者都编在 Windows 侧
+目标里），清它只影响 WSL 侧 `check/test` 的增量速度；两个 Windows target 是热缓存，冷启各 15 min 起，**留着**。
+想把 WSL 侧从 87 G 长期压到 20 G 以下只有一个结构性办法：对**依赖**关调试信息
+（`[profile.dev.package."*"] debug = false`；自己的 crate 仍保留 `[profile.dev] debug = 1` 的行号表）。
+量级参考：单个 example 二进制 211 MB，`strip --strip-debug` 后只剩 **22 MB**（2026-10-26 实测）——
+即调试题信息占九成；只剥依赖估在 40–70 MB/个。代价：进不了第三方库的源码行
+（backtrace 仍有函数名），且两个 target 都要重编一次。详见 `memory/ARCHITECTURE.md` §8 第 10 条。
 
 ---
 

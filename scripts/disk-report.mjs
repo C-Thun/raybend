@@ -15,7 +15,7 @@
  * ```
  */
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEBUG_WINDOWS_TARGET, discoverWindowsReleasePaths, windowsPowerShell } from "./lib/windows-paths.mjs";
@@ -54,6 +54,46 @@ function duWindows(windowsPath) {
   }
 }
 
+/** 应用运行时数据目录的标识符（`%LOCALAPPDATA%\<identifier>`）—— 从 `tauri.conf.json` 取，别写死。 */
+const APP_IDENTIFIER = (() => {
+  try { return JSON.parse(readFileSync(join(ROOT, "src-tauri/tauri.conf.json"), "utf8")).identifier; }
+  catch { return null; }
+})();
+/** `%LOCALAPPDATA%`（问 Windows 要，拼 `C:\Users\<名字>` 会把人名写死）。 */
+const LOCAL_APP_DATA = (() => {
+  try { return String(windowsPowerShell("[Environment]::GetFolderPath('LocalApplicationData')")).trim(); }
+  catch { return null; }
+})();
+
+/**
+ * `C:\rb-target` 下**除日常 debug target 以外**的残留（旧发版 target、AI 冒烟副本、探针数据…）。
+ *
+ * 它们不在任何脚本的清理范围（`clean:win` 只打自己那条 target），所以历史上一直隐形：
+ * 2026-10-26 翻账才发现 `raybend-release`（2026-09-27，4.4 G）与五份 AI 冒烟副本（0.9 G）
+ * 从来没人清。报告只把它们摆出来 —— 删不删由人定，脚本不碰。
+ */
+function leftoverWindowsDirs() {
+  const keep = `'${DEBUG_WINDOWS_TARGET.replaceAll("'", "''")}'`;
+  try {
+    const out = String(windowsPowerShell(`
+      $root = Split-Path -Parent ${keep}
+      $keep = ${keep}
+      $items = @()
+      foreach ($dir in @(Get-ChildItem -LiteralPath $root -Directory -Force -ErrorAction SilentlyContinue)) {
+        if ($dir.FullName.TrimEnd('\\') -eq $keep) { continue }
+        $sum = (Get-ChildItem -LiteralPath $dir.FullName -Recurse -File -Force -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
+        if ($null -eq $sum) { $sum = 0 }
+        $items += @{ name = $dir.Name; path = $dir.FullName; bytes = [double]$sum }
+      }
+      ConvertTo-Json -InputObject @($items) -Compress
+    `)).trim();
+    const parsed = JSON.parse(out === "" ? "[]" : out);
+    return (Array.isArray(parsed) ? parsed : [parsed]).filter((item) => item && typeof item.path === "string");
+  } catch {
+    return []; // 探测失败不是报告失败的理由
+  }
+}
+
 const win = (() => {
   try { return discoverWindowsReleasePaths({ directory: process.env.RAYBEND_WIN_BUILD_DIR }); }
   catch { return null; }
@@ -66,20 +106,30 @@ const storePath = (() => {
 const rows = [
   { label: "WSL cargo target", host: join(ROOT, "target"), note: "构建 / 测试缓存（只进不出，越攒越大）", action: "pnpm clean:wsl" },
   { label: "Windows debug target", win: DEBUG_WINDOWS_TARGET, note: "日常 `pnpm debug:win` 的缓存（天天写、长得最快）", action: "pnpm clean:win" },
-  { label: "Windows 发版 target", win: win?.windowsTarget, note: "发版构建缓存（只在发版时用，刻意保留）", action: win ? `pnpm clean:win --target-dir "${win.windowsTarget}"` : "（探测失败）" },
+  { label: "Windows 发版 target", win: win?.windowsTarget, note: "发版构建缓存（只在发版时用，刻意保留）", action: "保留；别用 clean:win 清它（会往那编一份 debug）" },
+  ...leftoverWindowsDirs().map((item) => ({
+    label: `C:\\rb-target\\${item.name}`,
+    win: item.path,
+    bytes: item.bytes,
+    note: "残留：不在任何脚本的清理范围内（旧发版 target / AI 冒烟副本 / 探针数据）",
+    action: "确认无用后手动删（脚本不碰）",
+  })),
   { label: "发布产物 release-out/", host: join(ROOT, "release-out"), note: "保留：对应 GitHub Release 的字节副本", action: "旧 test-* 目录可手动删" },
   { label: "AI 输入快照 .release/", host: join(ROOT, ".release"), note: "保留：模型 + CPU 运行库的冻结副本，构建复用", action: "删除后下次构建重新校验 / 复制" },
   { label: "前端产物 dist/", host: join(ROOT, "dist"), note: "小，随时可重建", action: "pnpm build" },
   { label: "node_modules/", host: join(ROOT, "node_modules"), note: "依赖", action: "pnpm install 重建" },
   { label: "pnpm store（全局共享）", host: storePath, note: "所有 pnpm 项目的包仓库", action: "pnpm store prune" },
   { label: "cargo registry（全局）", host: join(process.env.HOME ?? "", ".cargo/registry"), note: "crate 下载缓存", action: "保留（删了要重新下载）" },
-  { label: "应用数据（含上面构建缓存）", win: win ? win32.dirname(win.windowsBase) : null, note: "日志 / 缩略图缓存 / 数据库备份等运行数据", action: "按需手工清理子目录" },
+  { label: "应用运行时数据", win: LOCAL_APP_DATA && APP_IDENTIFIER ? win32.join(LOCAL_APP_DATA, APP_IDENTIFIER) : null, note: "日志 / 崩溃记录 / app.db / 数据库备份（不是构建缓存）", action: "保留；日志与 backups/ 可按需手清" },
 ];
 
 const width = Math.max(...rows.map(row => row.label.length)) + 2;
 console.log("RayBend 磁盘占用报告（只读；Windows 侧用 PowerShell 统计，大目录需要一会儿）\n");
 for (const row of rows) {
-  const size = row.win ? duWindows(row.win) : duHost(row.host);
+  /* 残留行已经带回了 PowerShell 一次算好的字节数，不必再为每个目录单开一次扫描。 */
+  let size;
+  if (row.bytes !== undefined) size = human(row.bytes) ?? "0";
+  else size = row.win ? duWindows(row.win) : duHost(row.host);
   console.log(`${row.label.padEnd(width)}${(size ?? "（不存在）").padStart(9)}  ${row.note}`);
   if (size !== null) console.log(`${" ".repeat(width)}${"".padStart(9)}  → ${row.action}`);
 }
