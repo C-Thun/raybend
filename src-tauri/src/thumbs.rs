@@ -4,11 +4,12 @@
 //!
 //! | 口径 | 住哪 | 为什么 |
 //! | --- | --- | --- |
-//! | **库内**（入库资产） | 磁盘 `<app data>/cache/_sources/thumbs.db` | 持久资产，重启后浏览还得靠它命中 |
+//! | **库内**（入库资产） | 磁盘 `<库根>/cache/thumbs.db`（每库一份） | 持久资产，重启后浏览还得靠它命中；跟着库走 |
 //! | **库外**（来源目录 / 未入库） | **进程内存**（[`SourcesMemory`]） | import 面对的是临时目录：同一个路径下次打开内容可能完全不同，**落盘的行永远读不回来**，只剩无限增长 |
 //!
 //! ✋ **别再把库外的东西写进 `thumbs.db`**（2026-10-11 之前就是那样，用户机器上攒了 148 MB 死行）。
-//! 目录名 `_sources` 是早年只服务源文件时的历史名字，现在装的是**库内**文件的图，不再改（改了等于清缓存）。
+//! 旧的全局 `_sources/thumbs.db` 在升级时一次性删除（派生数据，各库按需重建）。
+//! 库内小图**只存 384**：1920 载入占位走库根 `cache/full/`（`FullCache`）。
 //!
 //! 库内那条路的键优先用**文件身份**（改名/移动后仍命中），读不到身份才退回**绝对路径**。
 //!
@@ -24,7 +25,7 @@
 //! 这里不再自己排队 —— 免得两处同时限流、互相等。
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use raybend::display::{self, CacheClass, DEFAULT_BINS, FullCache, ImagePurpose, ImageRequest};
 use raybend::store::develop::IssueChoice;
@@ -44,26 +45,26 @@ use crate::develop::{self, ResolvedAsset};
 /// 所以这个名字永远不可能与某个真实库的缓存目录撞上。
 pub const SOURCES_CACHE_DIR: &str = "_sources";
 
-/// 源文件缩略图缓存库的持有者（延迟打开，全程共用一份）。
+/// 旧的全局小图缓存（`<app data>/cache/_sources/thumbs.db`）清理。
 ///
-/// 用一个 `Arc<ThumbsDb>` 而不是直接存 `ThumbsDb`：**取出引用就放开锁**，
-/// 否则所有缩略图请求会被串行化在一把锁上（渲染本来就慢，再串起来就没法滚动了）。
-#[derive(Default)]
-pub struct SourcesThumbs {
-    inner: Mutex<Option<Arc<ThumbsDb>>>,
-}
-
-impl SourcesThumbs {
-    /// 取（必要时打开）缓存库。
-    pub(crate) fn get(&self, dir: &Path, now_ms: i64) -> Result<Arc<ThumbsDb>, String> {
-        let mut guard = self.inner.lock().map_err(|_| "内部锁已损坏".to_string())?;
-        if let Some(db) = guard.as_ref() {
-            return Ok(Arc::clone(db));
+/// 2026-10-25 起小图缓存跟着库走（`<库根>/cache/thumbs.db`），这份全局文件
+/// 不再有任何读者；它只是派生数据，升级后删掉即可（各库按需重建）。
+/// 返回释放的字节数（日志用）。
+pub(crate) fn cleanup_legacy_sources_cache<R: Runtime>(app: &AppHandle<R>) -> Result<u64, String> {
+    let dir = crate::db::data_dir(app)?
+        .join("cache")
+        .join(SOURCES_CACHE_DIR);
+    let mut freed = 0u64;
+    for name in ["thumbs.db", "thumbs.db-wal", "thumbs.db-shm"] {
+        let path = dir.join(name);
+        if let Ok(meta) = std::fs::metadata(&path) {
+            freed += meta.len();
+            if let Err(error) = std::fs::remove_file(&path) {
+                log::warn!("[thumbs] 旧全局小图缓存清理失败（{}）：{error}", path.display());
+            }
         }
-        let db = Arc::new(ThumbsDb::open(dir, now_ms).map_err(|e| e.to_string())?);
-        *guard = Some(Arc::clone(&db));
-        Ok(db)
     }
+    Ok(freed)
 }
 
 /// 库外图的**进程内**缓存（崔总 2026-10-11；`AGENTS.md` §2.24）。
@@ -74,25 +75,20 @@ impl SourcesThumbs {
 #[derive(Clone, Default)]
 pub struct SourcesMemory(pub Arc<raybend::thumbnail::memory::SourceThumbs>);
 
-/// 源文件缩略图的存放目录（`<app data>/cache/_sources/`）。
-pub(crate) fn sources_cache_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
-    Ok(crate::db::data_dir(app)?
-        .join("cache")
-        .join(SOURCES_CACHE_DIR))
-}
-
 /// 取一张缩略图的字节。
 ///
-/// `size`：`"grid"`（网格，长边 384）或 `"strip"`（胶片带，长边 192）；缺省 `grid`。
+/// `size`：只支持 `"grid"`（长边 384）；1920 请走 [`view_image`]。
 #[tauri::command]
 pub async fn thumb_get<R: Runtime>(
     app: AppHandle<R>,
     path: String,
     size: Option<String>,
 ) -> Result<tauri::ipc::Response, String> {
-    let cache_dir = sources_cache_dir(&app)?;
     let size = SizeClass::parse(size.as_deref().unwrap_or("grid"))
         .ok_or_else(|| format!("未知的缩略图尺度：{}", size.as_deref().unwrap_or("")))?;
+    if size != SizeClass::Grid {
+        return Err("缩略图只支持 grid（384）；1920 请走 view_image".to_string());
+    }
 
     // 来源查库、lensfun 解析与渲染同在后台线程；缩略图多张并发时
     // 不能让这些同步工作占住 IPC executor，拖慢编辑换图与状态轮询。
@@ -108,16 +104,34 @@ pub async fn thumb_get<R: Runtime>(
         let asset = develop::resolve_asset(&handle, Path::new(&path));
         let bytes = match &asset {
             Some(asset) => {
-                // 磁盘缓存句柄**只在库内这条路上取** —— 库外看一眼就走，连库都不该开
-                let db = handle.state::<SourcesThumbs>().get(&cache_dir, now)?;
-                match edited_source(&handle, asset)? {
-                    Some((stack, source)) => {
+                /*
+                 * 磁盘缓存句柄**只在库内这条路上取** —— 库外看一眼就走，连库都不该开。
+                 * 打不开（库已释放 / 权限 / 磁盘）只降级为「这次不缓存」：
+                 * 一张缩略图不该让整个网格变成错误。
+                 */
+                let library = handle
+                    .state::<crate::browse::BrowseState>()
+                    .library_thumbs(&handle, &asset.repository_id);
+                let db = match library {
+                    Ok(db) => Some(db),
+                    Err(error) => {
+                        log::warn!("[thumbs] 库小图缓存不可用，本次直接渲染：{error}");
+                        None
+                    }
+                };
+                match (edited_source(&handle, asset)?, db) {
+                    (Some((stack, source)), Some(db)) => {
                         let variant = crate::develop::latest_variant(&stack)?;
                         render_profile_thumb(
                             &handle, &db, asset, &source, &stack, size, Some(&variant),
                         )
                     }
-                    None => render_now(&db, Path::new(&path), size, now),
+                    (Some((stack, source)), None) => {
+                        let variant = crate::develop::latest_variant(&stack)?;
+                        render_profile_uncached(&handle, asset, &source, &stack, size, &variant)
+                    }
+                    (None, Some(db)) => render_now(&db, Path::new(&path), size, now),
+                    (None, None) => render_source(Path::new(&path), size).map(|thumb| thumb.data),
                 }
             }
             None => {
@@ -214,21 +228,49 @@ pub(crate) fn render_profile_thumb<R: Runtime>(
     preview_variant: Option<&str>,
 ) -> raybend::Result<Vec<u8>> {
     render_cached_with(db, source, size, time::now_millis(), Some(stack), || {
-        let signature = raybend::media::source::source_signature(source)?;
-        let preview = preview_variant.and_then(|variant| FullCache::open(&asset.root).ok()
-            .and_then(|cache| cache.read(asset.asset_id, &FullCache::source_name(variant, &signature),
-                stack.source_base, PIPELINE_VERSION)));
-        raybend::thumbnail::render::render_preview_or_else(preview.as_deref(), size, || {
-            let lens = crate::lens::render_correction(app, &asset.repository_id, asset.asset_id,
-                stack.lens_profile.as_deref(), stack.lens_enabled);
-            let lut = stack.lut_id.as_deref().filter(|_| stack.lut_enabled == Some(true))
-                .map(|id| crate::lut::resolve(app, id)).transpose()
-                .map_err(raybend::Error::Unsupported)?;
-            raybend::thumbnail::render::render_file_with_profiles(
-                source, size, Some(stack), lens.as_ref(), lut.as_deref(), raybend::thumbnail::render::EncodeFormat::Avif,
-                |id, role| crate::color_profiles::resolve(app, id, role))
-        })
+        render_profile_pixels(app, asset, source, stack, size, preview_variant)
     })
+}
+
+/// [`render_profile_thumb`] 的**像素那一半**：已有 preview 缩小 → 否则按尺寸重建。
+///
+/// 抽出来是给「缓存库打不开」的降级路径用：那条路要的是**带编辑结果的图**，
+/// 不能退回去渲染源文件（会显示成未编辑的样子）。
+pub(crate) fn render_profile_pixels<R: Runtime>(
+    app: &AppHandle<R>, asset: &ResolvedAsset, source: &Path,
+    stack: &raybend::store::develop::DevelopStack, size: SizeClass,
+    preview_variant: Option<&str>,
+) -> raybend::Result<Option<raybend::thumbnail::render::Thumb>> {
+    let signature = raybend::media::source::source_signature(source)?;
+    let preview = preview_variant.and_then(|variant| FullCache::open(&asset.root).ok()
+        .and_then(|cache| cache.read(asset.asset_id, &FullCache::source_name(variant, &signature),
+            stack.source_base, PIPELINE_VERSION)));
+    raybend::thumbnail::render::render_preview_or_else(preview.as_deref(), size, || {
+        let lens = crate::lens::render_correction(app, &asset.repository_id, asset.asset_id,
+            stack.lens_profile.as_deref(), stack.lens_enabled);
+        let lut = stack.lut_id.as_deref().filter(|_| stack.lut_enabled == Some(true))
+            .map(|id| crate::lut::resolve(app, id)).transpose()
+            .map_err(raybend::Error::Unsupported)?;
+        raybend::thumbnail::render::render_file_with_profiles(
+            source, size, Some(stack), lens.as_ref(), lut.as_deref(), raybend::thumbnail::render::EncodeFormat::Avif,
+            |id, role| crate::color_profiles::resolve(app, id, role))
+    })
+}
+
+/// 缓存不可用时的兜底：像素照常出，`None` 用占位图接住（与队列那条路同一取舍）。
+fn render_profile_uncached<R: Runtime>(
+    app: &AppHandle<R>, asset: &ResolvedAsset, source: &Path,
+    stack: &raybend::store::develop::DevelopStack, size: SizeClass, variant: &str,
+) -> raybend::Result<Vec<u8>> {
+    let thumb = render_profile_pixels(app, asset, source, stack, size, Some(variant))?;
+    let thumb = match thumb {
+        Some(thumb) => thumb,
+        None => {
+            let kind = raybend::media::kind::kind_of_file(&source.to_string_lossy());
+            raybend::thumbnail::render::placeholder(kind, size)?
+        }
+    };
+    Ok(thumb.data)
 }
 
 /// 这个资产**编辑过吗**？编辑过就把它的编辑栈取出来（给渲染用）。
@@ -326,6 +368,8 @@ pub(crate) fn render_profile_cached<R: Runtime>(
         // 写新快照之后顺手回收旧版本（每资产保留最新 2 份，§4.2）；
         // 不进热路径、失败不算错。
         let _ = cache.gc_latest(asset.asset_id, 2);
+        // 1920 也走同一套容量清扫（未编辑 SOOC/RAW 的 Screen 现在也落这里）。
+        let _ = cache.maybe_enforce_capacity();
     }
     Ok(thumb.data)
 }
@@ -416,6 +460,44 @@ pub(crate) fn render_full_cached<R: Runtime>(
     Ok(thumb.data)
 }
 
+/// 看图/占位该渲染**哪个变体**（`Screen` / `Full` 的 1920/真身分派）。
+///
+/// 关键一条：`IssueChoice::Sooc` 必须把基准改成 [`EditBase::Sooc`] ——
+/// 未编辑照片的编辑栈是空栈，`source_base` 落的是**默认值 `Raw`**；
+/// 直接拿它去渲染会去解 RAW（JPG 只有位图时干脆找不到源文件），
+/// 看到的就不是「相机直出」，而是 RAW 解码结果（或直接报错）。
+fn profile_target(
+    purpose: ImagePurpose,
+    choice: IssueChoice,
+    stack: &raybend::store::develop::DevelopStack,
+) -> Result<Option<(String, raybend::store::develop::DevelopStack)>, String> {
+    use raybend::store::develop::EditBase;
+    let mut stack = stack.clone();
+    let target = match (purpose, choice) {
+        (ImagePurpose::Screen | ImagePurpose::Full, IssueChoice::Latest) => {
+            let variant = develop::latest_variant(&stack)?;
+            Some((variant, stack))
+        }
+        // 1920 一律走 `cache/full/`（FullCache），**不进 thumbs.db**。
+        // 未编辑的 SOOC / RAW 也要落一份 1920，否则每次看图都要重解。
+        (ImagePurpose::Screen, IssueChoice::Sooc) => {
+            stack.source_base = EditBase::Sooc;
+            Some(("sooc".to_string(), stack))
+        }
+        (ImagePurpose::Screen, IssueChoice::Raw) => {
+            stack.source_base = EditBase::Raw;
+            Some(("raw".to_string(), stack))
+        }
+        (ImagePurpose::Full, IssueChoice::Raw) => {
+            stack.source_base = EditBase::Raw;
+            Some(("raw".to_string(), stack))
+        }
+        // Full + SOOC（位图）走下面的原文件短路，不渲染；grid/original 不走这里。
+        _ => None,
+    };
+    Ok(target)
+}
+
 /// **统一取图口**（`crates/raybend/src/display`，口径见 `specs/M2-W2.md` §2.1）。
 ///
 /// 与 `thumb_get` 的区别：那个是「给我一张源文件的网格/胶片带小图」的专用命令；
@@ -424,9 +506,10 @@ pub(crate) fn render_full_cached<R: Runtime>(
 ///
 /// **带缓存**（`display::cached_image`）：所以连续看图、邻图预载都不会重复解码 ——
 /// 旧的裸 `display_image` 每次都重解，一张 RAW 要一秒多。
-/// 缓存跟着口径走：库内 → 磁盘 `_sources/thumbs.db`；库外 → **进程内存**（`AGENTS.md` §2.24）。
+/// 缓存跟着口径走：库内 → 库根 `cache/thumbs.db`（384）与 `cache/full/`（1920/真身）；
+/// 库外 → **进程内存**（`AGENTS.md` §2.24）。
 ///
-/// `purpose`：`"grid"` / `"strip"` / `"screen"` / `"original"`；缺省 `screen`（看图）。
+/// `purpose`：`"grid"` / `"screen"` / `"original"` / `"full"`；缺省 `screen`（看图）。
 /// 位图 + `original` + 没编辑过 ⇒ **直接给原文件字节**（不经渲染管线，也不缓存）。
 #[tauri::command]
 pub async fn view_image<R: Runtime>(
@@ -443,7 +526,7 @@ pub async fn view_image<R: Runtime>(
      * **编辑过的照片：非编辑器里也看编辑结果**（人类 2026-09-24 定的口径）。
      *
      * 只有 `screen`（全图查看）走这条路：
-     * * `grid` / `strip` 由 `thumb_get` 负责（它有自己的缓存库）；
+     * * `grid` 由 `thumb_get` 负责（它有自己的缓存库）；
      * * `original` 的语义是「要原文件本身」（导出、互操作），**不该**被编辑结果替换。
      *
      * 顺序也重要：先看库里的大图缓存（AVIF，命中就毫秒级返回），没有再渲染并写回。
@@ -470,19 +553,8 @@ pub async fn view_image<R: Runtime>(
         // 这一段只在库里才成立（编辑只存在于库里）—— 作用域收在花括号里，
         // 免得把 `asset` 的借用带到下面的 blocking 闭包里。
         if let Some(asset) = &asset {
-            let target = match develop::issue_of(&app, asset) {
-                Ok((IssueChoice::Latest, stack)) => {
-                    Some((develop::latest_variant(&stack)?, stack))
-                }
-                Ok((_, stack))
-                    if purpose == ImagePurpose::Full
-                        && stack.source_base == raybend::store::develop::EditBase::Raw =>
-                {
-                    Some((stack.source_base.as_str().to_string(), stack))
-                }
-                _ => None,
-            };
-            if let Some((variant, stack)) = target {
+            let (choice, stack) = develop::issue_of(&app, asset)?;
+            if let Some((variant, stack)) = profile_target(purpose, choice, &stack)? {
                 let handle = app.clone();
                 let want_full = purpose == ImagePurpose::Full;
                 // 闭包要 `'static`：拿一份**自己的**资产，别把上面那笔借用带进去
@@ -491,7 +563,7 @@ pub async fn view_image<R: Runtime>(
                     if want_full {
                         render_full_cached(&handle, &owned, &stack, &variant)
                     } else {
-                        render_latest_cached(&handle, &owned, &stack)
+                        render_profile_cached(&handle, &owned, &stack, &variant)
                     }
                 })
                 .await?;
@@ -500,29 +572,39 @@ pub async fn view_image<R: Runtime>(
         }
     }
 
-    let cache_dir = sources_cache_dir(&app)?;
     let memory = {
         // 库外那份在内存里（`AGENTS.md` §2.24）；`State` 不能跨 await 持有，先取出来
         let handle = app.clone();
-        
+
         handle.state::<SourcesMemory>().0.clone()
     };
+    // 库内：这个资产所属库自己的 thumbs.db（跟着库走）。打不开就降级为不缓存。
+    // 句柄在 blocking 线程里取（开库/迁移都可能碰磁盘，不能在 IPC executor 上做）。
+    let library_repo = asset.as_ref().map(|asset| asset.repository_id.clone());
     let bytes = crate::source::blocking(move || {
         let _permit=app.state::<crate::browse::BrowseState>().path_task(&app,Path::new(&path))?;
+        let library_thumbs = match &library_repo {
+            Some(id) => match app
+                .state::<crate::browse::BrowseState>()
+                .library_thumbs(&app, id)
+            {
+                Ok(db) => Some(db),
+                Err(error) => {
+                    // 缓存不可用只降级为不缓存：图还要能看。
+                    log::warn!("[thumbs] 库小图缓存不可用，本次不落缓存：{error}");
+                    None
+                }
+            },
+            None => None,
+        };
         let request = if in_library {
             ImageRequest::plain(Path::new(&path), purpose)
         } else {
             // 库外（来源目录）：JPEG —— import 只看一眼就走，不为画质付秒级编码
             ImageRequest::source(Path::new(&path), purpose)
         };
-        // 磁盘缓存句柄**只在库内那条路上取**：库外连库都不该开
-        let db = if in_library {
-            Some(app.state::<SourcesThumbs>().get(&cache_dir, time::now_millis())?)
-        } else {
-            None
-        };
         let image = display::cached_image(
-            db.as_deref(),
+            library_thumbs.as_deref(),
             Some(&memory),
             &request,
             time::now_millis(),
@@ -582,26 +664,38 @@ impl From<raybend::display::Histogram> for HistogramDto {
     }
 }
 
-/// 源文件缩略图缓存的统计（设置面板与排错用）。
+/// 当前库的小图缓存统计（设置面板与排错用；缓存跟着库走）。
 #[tauri::command]
-pub async fn thumb_sources_stats<R: Runtime>(
+pub async fn thumb_cache_stats<R: Runtime>(
     app: AppHandle<R>,
+    repository_id: String,
 ) -> Result<raybend::thumbnail::CacheStats, String> {
-    let cache_dir = sources_cache_dir(&app)?;
-    let state = app.state::<SourcesThumbs>();
-    let db = state.get(&cache_dir, time::now_millis())?;
-    db.read(raybend::thumbnail::cache::stats)
-        .map_err(|e| e.to_string())
+    let handle = app.clone();
+    crate::source::blocking(move || {
+        let db = handle
+            .state::<crate::browse::BrowseState>()
+            .library_thumbs(&handle, &repository_id)?;
+        db.read(raybend::thumbnail::cache::stats)
+            .map_err(|e| e.to_string())
+    })
+    .await
 }
 
-/// 清空小图缓存（设置里的「清理」；派生数据，删掉后浏览时自动重建）。
+/// 清空当前库的小图缓存（派生数据，删掉后浏览时自动重建）。
 #[tauri::command]
-pub async fn thumb_sources_clear<R: Runtime>(app: AppHandle<R>) -> Result<usize, String> {
-    let cache_dir = sources_cache_dir(&app)?;
-    let state = app.state::<SourcesThumbs>();
-    let db = state.get(&cache_dir, time::now_millis())?;
-    db.write(|conn| raybend::thumbnail::cache::clear(conn))
-        .map_err(|e| e.to_string())
+pub async fn thumb_cache_clear<R: Runtime>(
+    app: AppHandle<R>,
+    repository_id: String,
+) -> Result<usize, String> {
+    let handle = app.clone();
+    crate::source::blocking(move || {
+        let db = handle
+            .state::<crate::browse::BrowseState>()
+            .library_thumbs(&handle, &repository_id)?;
+        db.write(|conn| raybend::thumbnail::cache::clear(conn))
+            .map_err(|e| e.to_string())
+    })
+    .await
 }
 
 /// 原始 RAW 真显影与内嵌模拟小图使用不同缓存键，不能相互冒充。
@@ -616,10 +710,13 @@ pub(crate) fn raw_original_thumb<R: Runtime>(
 ) -> Result<Option<Vec<u8>>, String> {
     let Some(source) = develop::source_path_of(app, asset, raybend::store::develop::EditBase::Raw) else { return Ok(None) };
     let signature = raybend::media::source::source_signature(&source).map_err(|e| e.to_string())?;
-    let db = app.state::<SourcesThumbs>().get(&sources_cache_dir(app)?, time::now_millis())?;
+    let db = app
+        .state::<crate::browse::BrowseState>()
+        .library_thumbs(app, &asset.repository_id)?;
     let key = raw_thumb_key(asset); let sig = raw_thumb_sig(&signature);
     let read_key = key.clone(); let read_sig = sig.clone();
     if let Some(bytes) = db.read(move |conn| raybend::thumbnail::cache::get(conn, &read_key, size, &read_sig)).map_err(|e| e.to_string())? {
+        db.note_use(&key, size, &sig, time::now_millis());
         return Ok(Some(bytes));
     }
     let Some(preview) = FullCache::open(&asset.root).ok().and_then(|cache|
@@ -633,7 +730,7 @@ pub(crate) fn raw_original_thumb<R: Runtime>(
     Ok(Some(bytes))
 }
 
-/// SOOC 生成 1920 + 384/192；RAW 仅补 384/192。只在导入收尾/当前编辑照片后台调用。
+/// SOOC 生成 1920 + 384；RAW 仅补 384。只在导入收尾/当前编辑照片后台调用。
 /// SOOC 不重复存 initial-latest：未编辑 latest 的显示复用同一份源快照。
 pub(crate) fn prepare_source_images<R: Runtime>(
     app: &AppHandle<R>, asset: &ResolvedAsset, base: raybend::store::develop::EditBase,
@@ -647,7 +744,7 @@ pub(crate) fn prepare_source_images<R: Runtime>(
     let snapshot = catalog.read(|conn| raybend::export::snapshot(conn, &asset.root, &reference)).map_err(|e| e.to_string())?;
     let source = develop::source_path_of(app, asset, base).ok_or("原始源不存在")?;
     let signature = raybend::media::source::source_signature(&source).map_err(|e| e.to_string())?;
-    let db = app.state::<SourcesThumbs>().get(&sources_cache_dir(app)?, time::now_millis())?;
+    let db = browse.library_thumbs(app, &asset.repository_id)?;
     if base == EditBase::Raw {
         let mut missing = Vec::new();
         for size in [SizeClass::Grid] {
@@ -726,4 +823,60 @@ pub async fn issue_sources_prepare<R: Runtime>(app: AppHandle<R>, path: String) 
         Ok(())
     })
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use raybend::store::develop::{DevelopStack, EditBase};
+
+    #[test]
+    fn sooc_screen_renders_the_bitmap_not_the_raw_side() {
+        // 未编辑照片的栈是空栈：`source_base` 默认 Raw。选 SOOC 时必须改成 Sooc，
+        // 否则 JPG-only 资产会「找不到 raw 源文件」，JPG+RAW 会显示 RAW 解码结果。
+        let stack = DevelopStack::default();
+        assert_eq!(stack.source_base, EditBase::Raw, "前提：默认基准是 RAW");
+        let (variant, resolved) =
+            profile_target(ImagePurpose::Screen, IssueChoice::Sooc, &stack).unwrap().unwrap();
+        assert_eq!(variant, "sooc");
+        assert_eq!(resolved.source_base, EditBase::Sooc);
+        assert!(
+            profile_target(ImagePurpose::Full, IssueChoice::Sooc, &stack).unwrap().is_none(),
+            "位图真身直接给原文件字节，不渲染"
+        );
+    }
+
+    #[test]
+    fn raw_and_latest_targets_keep_their_base() {
+        let stack = DevelopStack::default();
+        let (variant, resolved) =
+            profile_target(ImagePurpose::Screen, IssueChoice::Raw, &stack).unwrap().unwrap();
+        assert_eq!(variant, "raw");
+        assert_eq!(resolved.source_base, EditBase::Raw);
+
+        let (variant, resolved) =
+            profile_target(ImagePurpose::Full, IssueChoice::Raw, &stack).unwrap().unwrap();
+        assert_eq!(variant, "raw");
+        assert_eq!(resolved.source_base, EditBase::Raw);
+
+        let mut edited = DevelopStack::default();
+        edited.source_base = EditBase::Sooc;
+        let (variant, resolved) =
+            profile_target(ImagePurpose::Screen, IssueChoice::Latest, &edited).unwrap().unwrap();
+        assert!(variant.starts_with("latest-"), "编辑结果用栈指纹命名");
+        assert_eq!(resolved.source_base, EditBase::Sooc, "编辑基准必须原样保留");
+    }
+
+    #[test]
+    fn bitmap_full_and_grid_do_not_target_the_profile_cache() {
+        let stack = DevelopStack::default();
+        assert!(
+            profile_target(ImagePurpose::Full, IssueChoice::Sooc, &stack).unwrap().is_none(),
+            "位图真身直接给原文件字节，不渲染"
+        );
+        assert!(
+            profile_target(ImagePurpose::Grid, IssueChoice::Raw, &stack).unwrap().is_none(),
+            "384 走 thumb_get"
+        );
+    }
 }

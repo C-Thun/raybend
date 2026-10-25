@@ -304,7 +304,6 @@ Tauri 3.0 已进入 alpha（`3.0.0-alpha.0`），已知关键变更：
 %LOCALAPPDATA%\com.cthun.raybend\
   app.db              # 全局：应用设置 / 库注册表 / 标签词典 / LUT 分类与文件元数据
   backups\            # 迁移前快照（VACUUM INTO，保留 7 份）
-  cache\_sources\thumbs.db # 当前缩略图缓存：源文件与命名 issue 的两档 AVIF
   luts\<LUT id>\    # 用户导入的 .cube / Hald 本体与一张 384 或 768 宽 4:3 WebP 封面
   logs\
 
@@ -315,7 +314,8 @@ Tauri 3.0 已进入 alpha（`3.0.0-alpha.0`），已知关键变更：
       MYP0001.png
       _RAW\
         MYP0001.ORF   # 同名 RAW 放同级的 _RAW/（见 REPOSITORY.md §4.1）
-  cache\              # **库内缓存**（M3-W3 起）：大图（每 issue 一份 AVIF）
+  cache\              # **库内缓存**（跟着库走）
+    thumbs.db         # 384 小图（每库 2 GiB 维护阈值；AVIF q80）
     full\<资产 id>\
       latest-raw-v6.avif  # latest 编辑结果（管线版本号随实现升级）
       issue-42-<hash>-raw-v6.avif # 命名定稿独立的 1920 AVIF
@@ -326,13 +326,12 @@ Tauri 3.0 已进入 alpha（`3.0.0-alpha.0`），已知关键变更：
 > 导入物落在库根的 `photos/`，`repo.json` 取消（库身份记在 `catalog.db` 内 + 中央 `app.db` 登记）。
 > **完整业务规格见 `memory/FUNCTION-REPOSITORY.md`**（库身份 / 同路径多库 / 同库多路径 / 在线离线 / 导入模版 / 序号 / 重名 / RAW 分流 / 目录透传）。
 
-- **缓存分两处**（M3-W3 定）：**小图**（网格 / 胶片带 / 看图的缩略图）在
-  `%LOCALAPPDATA%\com.cthun.raybend\cache\_sources\thumbs.db`（当前实现：源文件与定稿按不同缓存键共享一库；几万行小 BLOB）；
-  **大图**（每个命名 issue 独立一张 1920 AVIF）在**库根**的 `cache/full/`（跟着库走，换机器/搬盘不用重渲染）。
-  两处的编码格式统一 **AVIF 质量 90 / 4:4:4**（人类 2026-09-24 定；快照恒为 AVIF，
-  不考虑换 JXL —— 格式范围与 JXL 定位见 `memory/FUTURE.md` C8）——限**库内**：
+- **缓存跟着库走**（2026-10-25 定）：**小图**（384）在**库根** `cache/thumbs.db`（每库一份，SQLite BLOB；
+  维护阈值 2 GiB，写时清同键旧签名 + 按 frecency 淘汰；基础保障指标 = 单库 15 万张下 ≤2 GiB）；
+  **大图**（1920 载入占位 / 真身 / 命名 issue）在**库根** `cache/full/`（换机器/搬盘不用重渲染）。
+  **384 小图 AVIF q80 / 4:4:4；1920 与真身 AVIF q90**（人类 2026-09-24 定 q90；2026-10-25 为 15 万/2 GiB 把小图降到 q80）。
   **来源目录（import / 未入库）的图一律 JPEG、只在进程内存里**（崔总 2026-10-11；`AGENTS.md` §2.24）——
-  缩略图档 256 MB（字节）、真身档 10 张，键含文件身份（大小 + mtime）；**不写 `_sources/thumbs.db`**。
+  缩略图档 256 MB（字节）、真身档 10 张，键含文件身份（大小 + mtime）；**不写库内 thumbs.db**。
 - **真相源规则**：本地编辑/评分/关键词以 **DB 为准**，XMP 只是互操作通道；RAW 永不写回原文件（只写 `.xmp` sidecar）。issue 的 XMP 表达契约见 `specs/issue-xmp-contract.md`，实现规格见 `specs/xmp-sidecar.md`（2026-09-30 草案待审）；**XMP 不是第一公民**，整库备份 = 直接拷 repos 目录；当前尚未写出 sidecar。
 - **写并发**：SQLite 单写者 → 采用**单一写者 actor**（专属线程 + 专属连接，所有写操作串行化），读走连接池；批量事务；`PRAGMA journal_mode=WAL, synchronous=NORMAL, busy_timeout=5000, foreign_keys=ON`。
 - **库身份与多路径**（`memory/FUNCTION-REPOSITORY.md` §2）：库身份 = `catalog.db` 内的唯一 ID；`app.db` 记录「库 ID → 多个路径」。
@@ -360,7 +359,7 @@ Tauri 3.0 已进入 alpha（`3.0.0-alpha.0`），已知关键变更：
   1:1 真身走实时解码和显影，不进持久缓存。
 - **中性缩略图与编辑结果分开**：未编辑源文件按来源生成；latest 参数变化后刷新当前小图与预览；每个命名 issue 的 384/1920 AVIF 快照独立保留，删除定稿才清理该定稿快照。
 - 缓存键包含资产/来源、尺寸档、渲染签名（含管线版本）；命名 issue 还含 issue ID 与 profile 哈希。latest 作废不能误删命名快照。
-- 当前小图存 `%LOCALAPPDATA%\com.cthun.raybend\cache\_sources\thumbs.db` 的 SQLite BLOB；1920 AVIF 存库根 `cache/full/<asset_id>/`。更细的按库迁移、容量上限、frecency 淘汰与缓存设置面板属于后续优化，不能写成 M3 已有功能。
+- 小图存库根 `cache/thumbs.db` 的 SQLite BLOB（每库 2 GiB 维护阈值、写时清兄弟签名、frecency 批量 touch）；1920 AVIF 存库根 `cache/full/<asset_id>/`。设置页按当前库显示占用与清理；旧全局 `_sources/thumbs.db` 升级时删除。
 - **红线**：删掉整个缓存目录后，功能降级但可从原图和配置重建；`app.db`、`catalog.db` 与导入的 LUT 本体不是可删缓存。
 
 ### 6.6 编辑器会话与重活调度（2026-10-10，`specs/editor-session-pipeline.md`）

@@ -47,6 +47,8 @@ pub struct BrowseState {
         Mutex<Option<(String, PathBuf, u64, raybend::media::watch::CatalogWatcher)>>,
     /// 本次进程里已经启动过「老库展示尺寸后台补齐」的库（只跑一趟）。
     size_backfill: Arc<Mutex<BTreeSet<String>>>,
+    /// 每个库自己的 384 小图缓存（`<库根>/cache/thumbs.db`，跟着库走）。
+    pub(crate) thumbs: raybend::thumbnail::cache::LibraryThumbs,
 }
 
 impl BrowseState {
@@ -84,6 +86,21 @@ impl BrowseState {
             }
         }
     }
+    /// 取某个库的小图缓存（必要时打开 `<库根>/cache/thumbs.db`）。
+    ///
+    /// 缓存打不开时**降级为不缓存**：调用方拿到错误后照常渲染，只记日志，
+    /// 不让一张缩略图把整个浏览流程打断。
+    pub(crate) fn library_thumbs<R: Runtime>(
+        &self,
+        app: &AppHandle<R>,
+        id: &str,
+    ) -> Result<Arc<raybend::thumbnail::ThumbsDb>, String> {
+        let db = self.lease(app, id)?;
+        self.thumbs
+            .get(id, db.root(), time::now_millis())
+            .map_err(|e| e.to_string())
+    }
+
     pub(crate) fn acquire_session<R: Runtime>(
         &self,
         app: &AppHandle<R>,

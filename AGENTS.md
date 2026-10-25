@@ -88,16 +88,16 @@ raybend（中文名**「光伴」**，产品名 `RayBend`）是一个**相片管
 24. **库外（import）与库内是两套口径：import 一律 JPEG、不碰缓存、窗口优先**（崔总 2026-10-11 定）：
     动手前问「这段代码服务哪个场景」——import 面对的是**外部目录**（相机卡 / SD 卡 / 待入老库 / 临时盘），
     **导入完就不会再访问**；库内（浏览 / 编辑 / 导出）相反：有 catalog + 缩略图缓存，同一张图会被反复看几十次。
-    * **小图格式**：库内一律 **AVIF q90 / 4:4:4**（为画质与磁盘占用付编解码代价，规格在 `memory/FUNCTION-IMAGING.md`）；
-      **import（来源目录 / 未入库）一律 JPEG** —— 那里要的是「最快出现」，不追求画质与体积。
+    * **小图格式**：库内 **384 小图 AVIF q80 / 4:4:4**（每库 15 万张 / 2 GiB 预算，2026-10-25 定）；
+      **1920 预览与真身仍 AVIF q90**。**import（来源目录 / 未入库）一律 JPEG** —— 那里要的是「最快出现」，不追求画质与体积。
       给 import 做 AVIF 是纯负优化（实测单张编码 118 ms vs JPEG 3–5 ms，依据 `implementations/2026-10-11_import-tiles-diagnosis.md`）。
     * **禁止在来源目录上折腾缓存**：预热 / 持久化 / 失效策略 / 命中率 / GC 都不是 import 的课题 ——
       SD 卡导入完就清、临时目录不会回来、thumbcache 那套在 import 里没有有效期可言。
       用户看到的「越优化越慢」就是这么来的。
     * **库外的图只活在进程内存里**（2026-10-11 定）：`thumbnail::memory::SourceThumbs` 两档 ——
       缩略图（384）256 MB 字节上限、**真身**（该图自己的像素）10 张；键含**文件身份**（大小 + mtime），
-      换卡 / 覆盖保存自动不命中。**一行都不许写 `_sources/thumbs.db`**（那份只服务库内文件；
-      以前库外也往里写，用户机器上攒了 148 MB 永远读不回来的死行）。
+      换卡 / 覆盖保存自动不命中。**库外一行都不许写库内 `thumbs.db`**（库内那份在
+      `<库根>/cache/thumbs.db`，跟着库走；旧的全局 `_sources/thumbs.db` 升级时一次性删除）。
     * **import 没有 1920 这一档**：占位直接用 384 顶着，真身随后补（位图 = 原文件本身，RAW = 完整解码）。
       规格 `specs/thumbnail-tiers-and-import-memory.md`（全局缩图只剩 384 / 1920 两档，192 已取消）。
     * **import 只有一道题**：怎么最快把**窗口内那几屏 tiles** 显示出来。判据（拿不准按它拍）：
@@ -282,8 +282,9 @@ pnpm release [patch|minor|major] --win-msi ...   # 或 --win-nsis（可组合）
 - **6.1 渲染架构 = 原生 wgpu + 透明挖洞（方案 B）**：WebView2 覆盖全窗，照片视口在 webview 中间挖透明洞，Rust/wgpu 绘制其下原生 GPU 底板（Windows 产品默认 **DX12 + DirectComposition visual + Opaque**）。Library/网格用 DOM 虚拟化，Develop 视口用原生 wgpu 直绘。**接口三条红线**：① 视口状态由 Rust 独有，前端只发交互意图；② 覆盖层用 Rust 提供的同一变换矩阵，禁止前端自行推导像素对齐；③ WGSL 与 uniform 属于 Rust crate，前端不接触像素格式与色彩空间。透明链是硬约束：`html`/`body` 必须常驻透明。坐标契约（四种量不得混用、DPR 读运行时值）见 §7.9 与 `docs/native-viewport-coordinate-guide.md`。
 - **6.2 为 Tauri 3.0 迁移做准备**：不引用 `tauri::Wry` 具体类型与 feature flag，窗口句柄包成自己的 `NativeWindowHandle`；资源路径走 Tauri path API。
 - **6.3 RAW 解码层（可插拔）**：首选 rawler 0.8.0，后端可插拔接口在 `raybend` 内，禁止其它模块直接依赖 rawler 类型；**解码必须在独立 worker 进程**执行（崩溃不带崩主进程），对文件做大小/格式预检；第一阶段用内嵌 JPEG 预览做缩略图（快 1–2 个数量级）。
-- **6.4 存储架构 = 全局库 + 每仓 catalog（分层）**：`%LOCALAPPDATA%\com.cthun.raybend\`（app.db、备份、缩略图缓存、luts、日志）+ 库根（catalog.db 真相源、photos/、recycle/ 回收站、cache/full/ 大图）。真相源规则：本地编辑以 DB 为准、XMP 只是互操作通道、RAW 永不写回。写并发 = 单写者 actor + 读连接池 + WAL。库身份 = catalog.db 内唯一 ID，app.db 记多路径；路径挂了哪个库靠**读 ID 比对**。禁止 catalog 放云同步/网络盘。完整目录布局与规则见 `memory/ARCHITECTURE.md` §6.4，业务规格见 `memory/FUNCTION-REPOSITORY.md`。
-- **6.5 缩略图 / 预览 / 真身缓存**：两种缩图 + 真身的规格与生成节点见 `memory/FUNCTION-IMAGING.md`（唯一事实源）；**缩图只有 `thumb` 384 与 `preview` 1920 两档**（192 那一档 2026-10-11 取消）。小图在 `%LOCALAPPDATA%\...\cache\_sources\thumbs.db`，库内大图在库根 `cache/full/<资产>/`，**库内**一律 **AVIF 质量 90 / 4:4:4**；**来源目录（未入库）的小图一律 JPEG**（§2.24，别给 import 做 AVIF）。
+- **6.4 存储架构 = 全局库 + 每仓 catalog（分层）**：`%LOCALAPPDATA%\com.cthun.raybend\`（app.db、备份、luts、日志）+ 库根（catalog.db 真相源、photos/、recycle/ 回收站、cache/full/ 大图、cache/thumbs.db 小图）。真相源规则：本地编辑以 DB 为准、XMP 只是互操作通道、RAW 永不写回。写并发 = 单写者 actor + 读连接池 + WAL。库身份 = catalog.db 内唯一 ID，app.db 记多路径；路径挂了哪个库靠**读 ID 比对**。禁止 catalog 放云同步/网络盘。完整目录布局与规则见 `memory/ARCHITECTURE.md` §6.4，业务规格见 `memory/FUNCTION-REPOSITORY.md`。
+- **6.5 缩略图 / 预览 / 真身缓存**：两种缩图 + 真身的规格与生成节点见 `memory/FUNCTION-IMAGING.md`（唯一事实源）；**缩图只有 `thumb` 384 与 `preview` 1920 两档**（192 那一档 2026-10-11 取消）。**小图跟着库走**：`<库根>/cache/thumbs.db`（每库一份，只存 384，AVIF q80 / 4:4:4，维护阈值 **2 GiB**）；**1920 载入占位与真身在库根 `cache/full/<资产>/`，仍 AVIF q90**；**来源目录（未入库）的小图一律 JPEG 且只在进程内存**（§2.24）。
+  **基础保障指标**：单库 **15 万张**（RAW+JPG 算一张）下，384 小图缓存 ≤2 GiB 且浏览不因容量抖动；超出按 frecency 淘汰、按需重建。单库达到 15 万张后库设置界面提示建议开新库（不阻断）。
   **库内大图分两档**（2026-10-11 起，`CacheClass::{Preview,Full}`）：`…-v<pipeline>.avif` = **载入占位**（长边 1920）；`…-full-v<pipeline>.jpg` = **看图真身**（该变体自己的像素，JPEG q92 ~9MB/20MP）。
   latest 快照名含**栈指纹**（`latest-<profile_hash 前 12 位>-src<源签名>-<base>[-full]-v<pipeline>`）：落库不删整目录，旧文件由 `FullCache::gc_latest` **按档各**保留最新 2 份；容量上限 = **5GB 或可用空间 5% 取小**（`maybe_enforce_capacity`，写后有限流），超限时删除次序为真身档在前、同档最旧在前。
   **失效要连真身档一起**（`invalidate_source` 不限扩展名；`invalidate` 按 `latest-` 前缀、`remove_issue` 按 `issue-<id>-` 前缀，两档都命中）。红线：删掉整个缓存目录后功能降级但可从原图重建；`app.db` / `catalog.db` / LUT 本体不是可删缓存。回收站清空/真删时连带清理该资产的 `cache/full/<id>/`。
@@ -447,7 +448,7 @@ import 与 browse 的照片区必须经同一个 `PhotoViewingStage` / `PhotoVie
 | **资产**（asset） | 一张照片 = 一条记录 + 它的**文件组**：位图 + 同名的 `_RAW/` 下 RAW + `.xmp` 侧车。库里一律按资产说话（评级/标签/编辑栈都挂在资产上）。规格 `memory/FUNCTION-REPOSITORY.md` |
 | **`_RAW/`** | 库内的**保留目录**：同名的相机原片放在位图旁边的 `_RAW/` 里。它不是“另一个目录”，不进目录树、不算范围、对侧车折算回上级目录（`store::assets` 的折算规则是唯一实现） |
 | **来源**（source） | 待导入的目录（磁盘 / NAS / 云） |
-| **缩略图两档** | `thumb`（缩略图，最长边 **384** —— 网格 tiles 与**所有**胶片带、定稿卡片共用）/ `preview`（1920 AVIF q90 4:4:4）。~~`film` 192~~ 2026-10-11 取消（`specs/thumbnail-tiers-and-import-memory.md`）。规格与生成节点见 `memory/FUNCTION-IMAGING.md`（唯一事实源）；缓存位置见 §6.5。**来源目录（import）的图是 JPEG 且只在进程内存里**（§2.24） |
+| **缩略图两档** | `thumb`（缩略图，最长边 **384** —— 网格 tiles 与**所有**胶片带、定稿卡片共用，**AVIF q80**）/ `preview`（1920 AVIF q90 4:4:4）。~~`film` 192~~ 2026-10-11 取消（`specs/thumbnail-tiers-and-import-memory.md`）。规格与生成节点见 `memory/FUNCTION-IMAGING.md`（唯一事实源）；**缓存跟着库走**：`<库根>/cache/thumbs.db`（384）与 `cache/full/`（1920/真身），见 §6.5。**来源目录（import）的图是 JPEG 且只在进程内存里**（§2.24） |
 | **`latest`** | 当前编辑栈的输出（还没定稿）；与 `issue` 并列的两种「看图用的东西」，切换语义见 `memory/FUNCTION-IMAGING.md` |
 | **最近**（Recent） | 自动记录的最近 50 个导入目录 |
 | **已选目录** | 已勾选、准备导入的目录集合（横条列表） |

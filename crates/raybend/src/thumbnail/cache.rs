@@ -1,10 +1,11 @@
-//! 缩略图缓存：`<app data>/cache/<repository_id>/thumbs.db`。
+//! 缩略图缓存：`<库根>/cache/thumbs.db`（跟着库走，与 `cache/full/` 同级）。
 //!
 //! # 位置与形态（`AGENTS.md` §6.5）
 //!
-//! * 缓存**不在库根目录**里 —— 库根只放 `catalog.db` 与 `photos/`（`memory/FUNCTION-REPOSITORY.md` §2）。
+//! * 缓存**在库根的 `cache/` 里** —— 换机器/换盘只要库在，缩图就在；删掉它只降级、可重建。
 //! * 用**独立的小 SQLite 库**而不是散文件：一次事务写一张、读一张很快，
-//!   而且 GC 就是几条 SQL（不用扫目录、不用管目录分片）。
+//!   而且 GC 就是几条 SQL（不用扫目录、不用管目录分片）。15 万张的规模由
+//!   每库 2 GiB 维护阈值 + 写时清兄弟签名 + LRU 兜住（`specs/thumbnail-cache-per-library.md`）。
 //! * 它是**派生数据**：删掉整个目录 → 功能降级但完全可用。**不做快照备份。**
 //!
 //! # 缓存键
@@ -23,13 +24,14 @@
 //! 一次性翻过的大量照片不该把常用的那几张挤掉。淘汰顺序
 //! `pinned` → `hits` → `last_used_at`，`pinned = 1` 的永不淘汰。
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use rusqlite::{Connection, OptionalExtension, params};
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::store::db::migrate_file;
 use crate::store::file_id::FileId;
 use crate::store::migration::{Backups, DbKind};
@@ -40,8 +42,12 @@ use crate::thumbnail::render::SizeClass;
 /// 缓存库文件名。
 pub const THUMBS_FILE_NAME: &str = "thumbs.db";
 
-/// 每库小图缓存默认上限：1 GiB（FUTURE G26 建议值；设置面板以后可覆盖）。
-pub const DEFAULT_MAX_BYTES: i64 = 1 << 30;
+/// 每库小图缓存维护阈值：2 GiB（崔总 2026-10-25 定的预期量级，不是硬限制）。
+///
+/// 按 384 档 AVIF q80 实测 12.75 KB/张，15 万张约 1.8 GiB；超过阈值时按
+/// frecency 淘汰最久未用的条目，浏览时按需重建。单库达到 15 万张后界面会
+/// 提示建议开新库，而不是在 2 GiB 处阻断。
+pub const DEFAULT_MAX_BYTES: i64 = 2 << 30;
 
 /// 自动维护的间隔（写缓存后触发，但最多这么久跑一次）。
 const MAINTENANCE_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
@@ -112,11 +118,20 @@ pub struct ThumbsDb {
     path: PathBuf,
     /// 上次维护时间（进程内节流；不落库）。
     last_maintenance: Mutex<Option<Instant>>,
+    /// 命中后待批量刷新的 frecency（读路径不能写，先攒着）。
+    touch_queue: Mutex<TouchState>,
+}
+
+/// 读命中攒下来的「用过」记录：同一行只留一条，30 秒或 200 条刷一次。
+#[derive(Default)]
+struct TouchState {
+    pending: HashMap<(Vec<u8>, String, String), i64>,
+    last_flush: Option<Instant>,
 }
 
 impl ThumbsDb {
-    /// 打开（必要时创建）缓存库。`dir` 是**该库的缓存目录**
-    /// （通常是 `<app data>/cache/<repository_id>/`）。
+    /// 打开（必要时创建）缓存库。`dir` 是**该库的缓存目录**（`<库根>/cache/`），
+    /// 文件固定叫 [`THUMBS_FILE_NAME`]。
     pub fn open(dir: impl AsRef<Path>, now_ms: i64) -> Result<Self> {
         let dir = dir.as_ref();
         std::fs::create_dir_all(dir)?;
@@ -126,7 +141,13 @@ impl ThumbsDb {
 
         let pool = ReadPool::open(&path)?;
         let writer = Writer::open(&path)?;
-        Ok(Self { pool, writer, path, last_maintenance: Mutex::new(None) })
+        Ok(Self {
+            pool,
+            writer,
+            path,
+            last_maintenance: Mutex::new(None),
+            touch_queue: Mutex::new(TouchState::default()),
+        })
     }
 
     #[must_use]
@@ -174,7 +195,67 @@ impl ThumbsDb {
         }
         *last = Some(Instant::now());
         drop(last);
-        self.write(move |conn| maintenance(conn, max_bytes, now_ms)).map(Some)
+        /*
+         * **一次事务**跑完整维护：`gc` 一次最多删 5 万行，逐条自动提交会变成
+         * 5 万次提交（慢盘上可能几秒），而它占用的是写线程 —— 期间所有缩图写入
+         * 都会排队。包成一笔事务后只有一次提交成本。
+         */
+        self.write_tx(move |tx| maintenance(tx, max_bytes, now_ms))
+            .map(Some)
+    }
+
+    /// 记一次读命中（frecency 的原料）。
+    ///
+    /// 读连接是 `query_only`，不能直接写；这里只把「这一行被用过」攒进内存，
+    /// 每 30 秒或 200 条批量刷一次。同一行只留一条，刷的时候还带
+    /// `last_used_at < now - 1h` 的条件 —— 一小时内反复看同一张只写一次。
+    pub fn note_use(&self, key: &[u8], size: SizeClass, sig: &str, now_ms: i64) {
+        let flush = {
+            let mut state = match self.touch_queue.lock() {
+                Ok(state) => state,
+                Err(_) => return,
+            };
+            state
+                .pending
+                .insert((key.to_vec(), size.as_str().to_string(), sig.to_string()), now_ms);
+            state.pending.len() >= 200
+                || state
+                    .last_flush
+                    .is_none_or(|at| at.elapsed() >= Duration::from_secs(30))
+        };
+        if flush {
+            self.flush_touches(now_ms);
+        }
+    }
+
+    /// 把攒下的 touch 一次性写掉（失败只记日志：frecency 坏掉不该影响看图）。
+    pub fn flush_touches(&self, now_ms: i64) {
+        let pending = {
+            let mut state = match self.touch_queue.lock() {
+                Ok(state) => state,
+                Err(_) => return,
+            };
+            state.last_flush = Some(Instant::now());
+            std::mem::take(&mut state.pending)
+        };
+        if pending.is_empty() {
+            return;
+        }
+        let cutoff = now_ms.saturating_sub(60 * 60 * 1000);
+        let result = self.write_tx(move |tx| {
+            for ((key, size, sig), used_at) in pending {
+                tx.execute(
+                    "UPDATE thumbs SET hits = hits + 1, last_used_at = ?1
+                      WHERE cache_key = ?2 AND size_class = ?3 AND render_sig = ?4
+                        AND last_used_at < ?5",
+                    params![used_at, key, size, sig, cutoff],
+                )?;
+            }
+            Ok(())
+        });
+        if let Err(error) = result {
+            log::warn!(target: "thumbs", "frecency 批量刷新失败（不影响看图）：{error}");
+        }
     }
 
     /// 把队列跑干（`Drop` 时也会跑，这里是显式版）。
@@ -198,6 +279,12 @@ pub fn put(
     height: u32,
     now_ms: i64,
 ) -> Result<()> {
+    if !matches!(size, SizeClass::Grid) {
+        return Err(Error::Unsupported(format!(
+            "thumbs.db 只存 384 小图，收到 {}",
+            size.as_str()
+        )));
+    }
     conn.execute(
         "INSERT INTO thumbs
             (cache_key, size_class, render_sig, width, height, bytes, data,
@@ -216,6 +303,18 @@ pub fn put(
             data,
             now_ms
         ],
+    )?;
+    /*
+     * 同一个 (文件, 尺度) 只有**最新**那一份是活的：
+     * * 编辑确认后旧 `+e<指纹>` 立即作废；
+     * * 重置编辑后 base 又成为活的那份。
+     * 不在这里删，编辑历史会一直攒到容量 GC（15 万张的 2 GiB 预算会被吃掉）。
+     * `pinned` 的条目不动（用户明确要求留着的东西）。
+     */
+    conn.execute(
+        "DELETE FROM thumbs
+          WHERE cache_key = ?1 AND size_class = ?2 AND render_sig <> ?3 AND pinned = 0",
+        params![key, size.as_str(), sig],
     )?;
     Ok(())
 }
@@ -414,51 +513,113 @@ pub fn gc(conn: &Connection, max_bytes: i64, now_ms: i64) -> Result<GcOutcome> {
         return Ok(out);
     }
 
-    // 一条 SQL 挑出「该先走的」：没钉住的里，命中少、最久没用过的排前面
-    let mut stmt = conn.prepare(
-        "SELECT cache_key, size_class, render_sig, bytes FROM thumbs
-          WHERE pinned = 0
-          ORDER BY hits ASC, last_used_at ASC
-          LIMIT 2000",
-    )?;
-    let victims = stmt
-        .query_map([], |r| {
-            Ok((
-                r.get::<_, Vec<u8>>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, String>(2)?,
-                r.get::<_, i64>(3)?,
-            ))
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    drop(stmt);
-
     let mut remaining = total;
-    for (key, size, sig, bytes) in victims {
-        if remaining <= max_bytes {
+    let mut removed = 0i64;
+    let mut freed = 0i64;
+    // 单次维护的删除预算：一次跑干通常远小于它；给个上限防病态数据卡住维护。
+    let mut budget = 50_000usize;
+    while remaining > max_bytes && budget > 0 {
+        // 一条 SQL 挑出「该先走的」：没钉住的里，命中少、最久没用过的排前面
+        let victims = {
+            let mut stmt = conn.prepare(
+                "SELECT cache_key, size_class, render_sig, bytes FROM thumbs
+                  WHERE pinned = 0
+                  ORDER BY hits ASC, last_used_at ASC
+                  LIMIT 2000",
+            )?;
+
+            stmt
+                .query_map([], |r| {
+                    Ok((
+                        r.get::<_, Vec<u8>>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, String>(2)?,
+                        r.get::<_, i64>(3)?,
+                    ))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        if victims.is_empty() {
             break;
         }
-        let n = conn.execute(
-            "DELETE FROM thumbs WHERE cache_key = ?1 AND size_class = ?2 AND render_sig = ?3",
-            params![key, size, sig],
-        )?;
-        if n > 0 {
-            out.removed += 1;
-            out.bytes_freed += bytes;
-            remaining -= bytes;
+        for (key, size, sig, bytes) in victims {
+            if remaining <= max_bytes || budget == 0 {
+                break;
+            }
+            budget -= 1;
+            let n = conn.execute(
+                "DELETE FROM thumbs WHERE cache_key = ?1 AND size_class = ?2 AND render_sig = ?3",
+                params![key, size, sig],
+            )?;
+            if n > 0 {
+                removed += 1;
+                freed += bytes;
+                remaining -= bytes;
+            }
         }
     }
+    out.removed = removed;
+    out.bytes_freed = freed;
     out.remaining_bytes = remaining;
     Ok(out)
 }
 
-/// 把一个库的缓存目录算出来（`<app data>/cache/<repository_id>/`）。
+/// 按库持有小图缓存（`<库根>/cache/thumbs.db`）。
 ///
-/// 缓存位置将来可按库配置（`AGENTS.md` §6.5 允许「随外接盘」），所以**不要**
-/// 在各处硬拼这个路径，一律走这里。
-#[must_use]
-pub fn cache_dir(app_data: &Path, repository_id: &str) -> PathBuf {
-    app_data.join("cache").join(repository_id)
+/// 库会话（`BrowseState`）持有这个映射：库打开时懒打开、库释放/换位置时
+/// 从映射里移除（后台任务手里的 `Arc` 会自然活到任务结束）。
+/// 缓存**跟着库走**：换机器/换盘只要库在，缩图就在；删库目录时缩图跟着消失。
+#[derive(Default)]
+pub struct LibraryThumbs {
+    inner: Mutex<HashMap<String, Arc<ThumbsDb>>>,
+}
+
+impl LibraryThumbs {
+    /// 取（必要时打开）某个库的缓存库。`root` = 库根。
+    ///
+    /// # Errors
+    /// 目录创建 / SQLite 打开失败。调用方应**降级为不缓存**，而不是让看图失败。
+    pub fn get(&self, repository_id: &str, root: &Path, now_ms: i64) -> Result<Arc<ThumbsDb>> {
+        {
+            let guard = self
+                .inner
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Some(db) = guard.get(repository_id) {
+                return Ok(Arc::clone(db));
+            }
+        }
+        let dir = root.join("cache");
+        let opened = Arc::new(ThumbsDb::open(&dir, now_ms)?);
+        let mut guard = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // 两个线程同时打开同一个库：先到的那份说了算，后来这份直接丢掉。
+        if let Some(existing) = guard.get(repository_id) {
+            return Ok(Arc::clone(existing));
+        }
+        guard.insert(repository_id.to_string(), Arc::clone(&opened));
+        Ok(opened)
+    }
+
+    /// 库释放 / 换位置时调用；之后再有任务拿旧库会重新打开新路径。
+    pub fn release(&self, repository_id: &str) {
+        let mut guard = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        guard.remove(repository_id);
+    }
+
+    /// 当前进程里已经打开的库（诊断/测试用）。
+    #[must_use]
+    pub fn is_open(&self, repository_id: &str) -> bool {
+        self.inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains_key(repository_id)
+    }
 }
 
 #[cfg(test)]
@@ -562,14 +723,14 @@ mod tests {
         let conn = mem();
         let key = cache_key(None, "a.jpg");
         assert!(
-            get_with_size(&conn, &key, SizeClass::Screen, render_sig(SizeClass::Screen))
+            get_with_size(&conn, &key, SizeClass::Grid, render_sig(SizeClass::Grid))
                 .unwrap()
                 .is_none(),
             "未命中是 None，不是错误"
         );
-        put_n(&conn, &key, SizeClass::Screen, 16, T0);
+        put_n(&conn, &key, SizeClass::Grid, 16, T0);
         let (bytes, width, height) =
-            get_with_size(&conn, &key, SizeClass::Screen, render_sig(SizeClass::Screen))
+            get_with_size(&conn, &key, SizeClass::Grid, render_sig(SizeClass::Grid))
                 .unwrap()
                 .unwrap();
         assert_eq!(bytes.len(), 16);
@@ -639,40 +800,61 @@ mod tests {
     }
 
     #[test]
-    fn sizes_and_signatures_are_independent_rows() {
+    fn put_prunes_older_signatures_for_the_same_key() {
         let conn = mem();
         let key = cache_key(None, "a.jpg");
         put_n(&conn, &key, SizeClass::Grid, 10, T0);
-        put_n(&conn, &key, SizeClass::Screen, 20, T0);
-        // 老签名（算法升级前）
+        // 换一个签名（编辑确认 / 重置）—— 同一 (文件, 尺度) 只留最新那份
         put(
             &conn,
             &key,
             SizeClass::Grid,
-            "jpeg-q50-g0",
-            &[1u8; 5],
+            "avif-q80-grid-v17+e000000000000001",
+            &[1u8; 20],
             10,
             10,
-            T0,
+            T0 + 1,
         )
         .unwrap();
+        assert_eq!(stats(&conn).unwrap().entries, 1);
+        assert!(
+            get(
+                &conn,
+                &key,
+                SizeClass::Grid,
+                "avif-q80-grid-v17+e000000000000001"
+            )
+            .unwrap()
+            .is_some()
+        );
+        assert!(
+            get(&conn, &key, SizeClass::Grid, render_sig(SizeClass::Grid))
+                .unwrap()
+                .is_none(),
+            "旧签名要当场删掉，不能等容量 GC"
+        );
 
-        assert_eq!(stats(&conn).unwrap().entries, 3);
+        // 写回 base 也一样：只留最新的
+        put_n(&conn, &key, SizeClass::Grid, 8, T0 + 2);
+        assert_eq!(stats(&conn).unwrap().entries, 1);
         assert!(
             get(&conn, &key, SizeClass::Grid, render_sig(SizeClass::Grid))
                 .unwrap()
                 .is_some()
         );
-        assert!(
-            get(&conn, &key, SizeClass::Screen, render_sig(SizeClass::Screen))
-                .unwrap()
-                .is_some()
-        );
-        assert!(
-            get(&conn, &key, SizeClass::Grid, "jpeg-q50-g0")
-                .unwrap()
-                .is_some()
-        );
+    }
+
+    #[test]
+    fn put_rejects_non_grid_sizes() {
+        let conn = mem();
+        let key = cache_key(None, "a.jpg");
+        for size in [SizeClass::Screen, SizeClass::Full] {
+            assert!(
+                put(&conn, &key, size, render_sig(size), b"x", 1, 1, T0).is_err(),
+                "thumbs.db 只存 384：{size:?} 必须被拒"
+            );
+        }
+        assert_eq!(stats(&conn).unwrap().entries, 0);
     }
 
     // ---------- 删除 ----------
@@ -683,7 +865,6 @@ mod tests {
         let a = cache_key(None, "a.jpg");
         let b = cache_key(None, "b.jpg");
         put_n(&conn, &a, SizeClass::Grid, 8, T0);
-        put_n(&conn, &a, SizeClass::Screen, 8, T0);
         put_n(&conn, &b, SizeClass::Grid, 8, T0);
 
         assert_eq!(remove(&conn, &a, SizeClass::Grid).unwrap(), 1);
@@ -692,7 +873,9 @@ mod tests {
             0,
             "再删就没有了"
         );
-        assert_eq!(remove_key(&conn, &a).unwrap(), 1, "剩下那个尺度");
+        assert_eq!(remove_key(&conn, &a).unwrap(), 0, "已经空了");
+        put_n(&conn, &a, SizeClass::Grid, 8, T0);
+        assert_eq!(remove_key(&conn, &a).unwrap(), 1, "删掉这个键的所有行");
         assert_eq!(stats(&conn).unwrap().entries, 1);
         assert_eq!(clear(&conn).unwrap(), 1, "一键清理");
         assert_eq!(stats(&conn).unwrap().entries, 0);
@@ -701,63 +884,80 @@ mod tests {
     #[test]
     fn stale_reclaim_only_drops_other_pipeline_versions() {
         let conn = mem();
-        let key = cache_key(None, "a.jpg");
         let current = render_sig(SizeClass::Grid);
-        let edited = format!("{}+e0badc0de", render_sig(SizeClass::Screen));
+        let edited = format!("{}+e0badc0de", render_sig(SizeClass::Grid));
         let issue = format!("issue-v{PIPELINE_VERSION}-abc-srcdef");
         let raw = format!("raw-original-v{PIPELINE_VERSION}-srcdef");
         let old_grid = "avif-q90-grid-v7+e0badc0de".to_string();
         let old_issue = "issue-v7-abc-srcdef".to_string();
         let unversioned = "legacy-signature-without-version".to_string();
-        for (index, sig) in [
-            current.to_string(),
-            edited.clone(),
-            issue.clone(),
-            raw.clone(),
-            old_grid.clone(),
-            old_issue.clone(),
-            unversioned.clone(),
+        // 不同家族用不同键（现实里 base/编辑同一键、定稿与 raw-original 各有自己的键）
+        for (index, (name, sig)) in [
+            ("current", current),
+            ("edited", edited.as_str()),
+            ("issue", issue.as_str()),
+            ("raw", raw.as_str()),
+            ("old-grid", old_grid.as_str()),
+            ("old-issue", old_issue.as_str()),
+            ("unversioned", unversioned.as_str()),
         ]
-        .iter()
+        .into_iter()
         .enumerate()
         {
+            let key = cache_key(None, name);
             put(&conn, &key, SizeClass::Grid, sig, &[index as u8; 4], 1, 1, T0).unwrap();
         }
 
         let removed = drop_other_pipeline_versions(&conn, PIPELINE_VERSION).unwrap();
         assert_eq!(removed, 2, "只收走旧版本的两条");
-        assert!(get(&conn, &key, SizeClass::Grid, current).unwrap().is_some());
-        assert!(get(&conn, &key, SizeClass::Grid, &edited).unwrap().is_some(), "带编辑的动态签名要保住");
-        assert!(get(&conn, &key, SizeClass::Grid, &issue).unwrap().is_some());
-        assert!(get(&conn, &key, SizeClass::Grid, &raw).unwrap().is_some());
-        assert!(get(&conn, &key, SizeClass::Grid, &unversioned).unwrap().is_some(), "不带版本片段的一律保留（宁可漏收）");
-        assert!(get(&conn, &key, SizeClass::Grid, &old_grid).unwrap().is_none());
-        assert!(get(&conn, &key, SizeClass::Grid, &old_issue).unwrap().is_none());
+        for (name, sig) in [
+            ("current", current),
+            ("edited", edited.as_str()),
+            ("issue", issue.as_str()),
+            ("raw", raw.as_str()),
+            ("unversioned", unversioned.as_str()),
+        ] {
+            let key = cache_key(None, name);
+            assert!(
+                get(&conn, &key, SizeClass::Grid, sig).unwrap().is_some(),
+                "{name} 要保住"
+            );
+        }
+        assert!(
+            get(&conn, &cache_key(None, "old-grid"), SizeClass::Grid, &old_grid)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            get(&conn, &cache_key(None, "old-issue"), SizeClass::Grid, &old_issue)
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
     fn maintenance_reclaims_old_signatures_but_keeps_current_families() {
         let conn = mem();
-        let key = cache_key(None, "a.jpg");
         let issue = format!("issue-v{PIPELINE_VERSION}-abc-srcdef");
         let raw = format!("raw-original-v{PIPELINE_VERSION}-srcdef");
-        for (size, sig) in [
-            (SizeClass::Grid, render_sig(SizeClass::Grid).to_string()),
-            (SizeClass::Screen, format!("{}+e1234", render_sig(SizeClass::Screen))),
-            (SizeClass::Grid, issue.clone()),
-            (SizeClass::Grid, raw.clone()),
-            (SizeClass::Grid, "avif-q90-strip-v7".to_string()),
+        for (name, sig) in [
+            ("base", render_sig(SizeClass::Grid).to_string()),
+            ("edited", format!("{}+e1234", render_sig(SizeClass::Grid))),
+            ("issue", issue.clone()),
+            ("raw", raw.clone()),
+            ("old", "avif-q90-strip-v7".to_string()),
         ] {
-            put(&conn, &key, size, &sig, &[1u8; 4], 1, 1, T0).unwrap();
+            let key = cache_key(None, name);
+            put(&conn, &key, SizeClass::Grid, &sig, &[1u8; 4], 1, 1, T0).unwrap();
         }
         let (outcome, stale) = maintenance(&conn, DEFAULT_MAX_BYTES, T0 + 1).unwrap();
         assert_eq!(stale, 1, "只该收走旧签名那一条");
         assert_eq!(outcome.removed, 0, "没超限不应按容量淘汰");
         assert_eq!(stats(&conn).unwrap().entries, 4);
-        assert!(get(&conn, &key, SizeClass::Grid, render_sig(SizeClass::Grid)).unwrap().is_some());
-        assert!(get(&conn, &key, SizeClass::Screen, &format!("{}+e1234", render_sig(SizeClass::Screen))).unwrap().is_some());
-        assert!(get(&conn, &key, SizeClass::Grid, &issue).unwrap().is_some());
-        assert!(get(&conn, &key, SizeClass::Grid, &raw).unwrap().is_some());
+        assert!(get(&conn, &cache_key(None, "base"), SizeClass::Grid, render_sig(SizeClass::Grid)).unwrap().is_some());
+        assert!(get(&conn, &cache_key(None, "edited"), SizeClass::Grid, &format!("{}+e1234", render_sig(SizeClass::Grid))).unwrap().is_some());
+        assert!(get(&conn, &cache_key(None, "issue"), SizeClass::Grid, &issue).unwrap().is_some());
+        assert!(get(&conn, &cache_key(None, "raw"), SizeClass::Grid, &raw).unwrap().is_some());
     }
 
     #[test]
@@ -854,19 +1054,81 @@ mod tests {
     // ---------- 统计 ----------
 
     #[test]
-    fn stats_group_by_size_class() {
+    fn stats_counts_entries_and_bytes() {
         let conn = mem();
         let k1 = cache_key(None, "a.jpg");
         let k2 = cache_key(None, "b.jpg");
         put_n(&conn, &k1, SizeClass::Grid, 100, T0);
         put_n(&conn, &k2, SizeClass::Grid, 50, T0);
-        put_n(&conn, &k1, SizeClass::Screen, 25, T0);
         let s = stats(&conn).unwrap();
-        assert_eq!((s.entries, s.bytes), (3, 175));
-        assert_eq!(
-            s.by_size,
-            vec![("grid".to_string(), 2, 150), ("screen".to_string(), 1, 25)]
-        );
+        assert_eq!((s.entries, s.bytes), (2, 150));
+        assert_eq!(s.by_size, vec![("grid".to_string(), 2, 150)]);
+    }
+
+    #[test]
+    fn gc_converges_in_one_run_beyond_the_batch_limit() {
+        let conn = mem();
+        for i in 0..5_000 {
+            put_n(
+                &conn,
+                &cache_key(None, &format!("bulk{i}.jpg")),
+                SizeClass::Grid,
+                100,
+                T0 + i,
+            );
+        }
+        let out = gc(&conn, 50_000, T0 + 10_000).unwrap();
+        assert!(out.removed >= 4_500, "一次维护要能删到上限以下");
+        assert!(stats(&conn).unwrap().bytes <= 50_000);
+    }
+
+    #[test]
+    fn note_use_batches_frecency_and_ignores_repeats_within_an_hour() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = ThumbsDb::open(dir.path().join("cache"), T0).unwrap();
+        let key = cache_key(None, "a.jpg");
+        {
+            let key = key.clone();
+            db.write(move |conn| {
+                put(
+                    conn,
+                    &key,
+                    SizeClass::Grid,
+                    render_sig(SizeClass::Grid),
+                    b"x",
+                    1,
+                    1,
+                    T0,
+                )
+            })
+            .unwrap();
+        }
+        // 行是 T0 写的；超过一小时后才算一次「用过」
+        db.note_use(&key, SizeClass::Grid, render_sig(SizeClass::Grid), T0 + 4_000_000);
+        db.flush_touches(T0 + 4_000_000);
+        let m = db
+            .read(|conn| meta(conn, &key, SizeClass::Grid, render_sig(SizeClass::Grid)))
+            .unwrap()
+            .unwrap();
+        assert_eq!(m.hits, 1);
+
+        // 一小时内重复看同一张：不重复写
+        db.note_use(&key, SizeClass::Grid, render_sig(SizeClass::Grid), T0 + 5_000_000);
+        db.flush_touches(T0 + 5_000_000);
+        let m = db
+            .read(|conn| meta(conn, &key, SizeClass::Grid, render_sig(SizeClass::Grid)))
+            .unwrap()
+            .unwrap();
+        assert_eq!(m.hits, 1, "一小时内的重复命中只算一次");
+
+        // 超过一小时：再算一次
+        db.note_use(&key, SizeClass::Grid, render_sig(SizeClass::Grid), T0 + 8_000_000);
+        db.flush_touches(T0 + 8_000_000);
+        let m = db
+            .read(|conn| meta(conn, &key, SizeClass::Grid, render_sig(SizeClass::Grid)))
+            .unwrap()
+            .unwrap();
+        assert_eq!(m.hits, 2);
     }
 
     // ---------- 门面（真实文件）----------
@@ -874,8 +1136,7 @@ mod tests {
     #[test]
     fn thumbs_db_opens_persists_and_reopens() {
         let dir = tempfile::tempdir().unwrap();
-        let cache_dir = cache_dir(dir.path(), "0AbCdEfGhIjKlMn");
-        std::fs::create_dir_all(&cache_dir).unwrap();
+        let cache_dir = dir.path().join("cache");
 
         let key = cache_key(None, "photos/a.jpg");
         let key_for_write = key.clone(); // 闭包要 'static，只能把副本 move 进去
@@ -910,7 +1171,7 @@ mod tests {
     fn deleting_the_cache_dir_only_costs_regeneration() {
         // 红线（AGENTS.md §6.5）：整个缓存目录删掉 → 功能降级但可用
         let dir = tempfile::tempdir().unwrap();
-        let cache_dir = cache_dir(dir.path(), "0AbCdEfGhIjKlMn");
+        let cache_dir = dir.path().join("cache");
         let key = cache_key(None, "a.jpg");
         let key_for_write = key.clone();
         {
@@ -941,11 +1202,50 @@ mod tests {
     }
 
     #[test]
-    fn cache_dir_is_per_repository() {
-        let a = cache_dir(Path::new("/app"), "repoA");
-        let b = cache_dir(Path::new("/app"), "repoB");
-        assert_ne!(a, b);
-        assert!(a.ends_with("repoA"));
-        assert!(a.to_string_lossy().contains("cache"));
+    fn library_thumbs_are_isolated_per_repository() {
+        let dir = tempfile::tempdir().unwrap();
+        let root_a = dir.path().join("repoA");
+        let root_b = dir.path().join("repoB");
+        std::fs::create_dir_all(&root_a).unwrap();
+        std::fs::create_dir_all(&root_b).unwrap();
+        let map = LibraryThumbs::default();
+        let a = map.get("repoA", &root_a, T0).unwrap();
+        let b = map.get("repoB", &root_b, T0).unwrap();
+        assert!(a.path().starts_with(&root_a), "A 的缓存要在 A 的库根下");
+        assert!(b.path().starts_with(&root_b), "B 的缓存要在 B 的库根下");
+
+        let key = cache_key(None, "same.jpg");
+        {
+            let key = key.clone();
+            a.write(move |conn| {
+                put(
+                    conn,
+                    &key,
+                    SizeClass::Grid,
+                    render_sig(SizeClass::Grid),
+                    b"a",
+                    1,
+                    1,
+                    T0,
+                )
+            })
+            .unwrap();
+        }
+        assert!(
+            b.read(|conn| get(conn, &key, SizeClass::Grid, render_sig(SizeClass::Grid)))
+                .unwrap()
+                .is_none(),
+            "库 B 不能读到库 A 的缓存"
+        );
+        assert!(map.is_open("repoA"));
+        drop(a);
+        map.release("repoA");
+        assert!(!map.is_open("repoA"));
+        let reopened = map.get("repoA", &root_a, T0 + 1).unwrap();
+        assert_eq!(
+            reopened.read(stats).unwrap().entries,
+            1,
+            "释放后再打开仍读得到原库缓存"
+        );
     }
 }

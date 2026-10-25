@@ -13,7 +13,7 @@
 //! ## 线程模型
 //!
 //! 所有方法都是 `&mut self` —— 上层（`src-tauri`）包一层 `Mutex` 就能用，
-//! 与 `SourcesThumbs` 的样式一致。时钟是**注入**的（`now: Instant`），
+//! 与 `LibraryThumbs` 的样式一致。时钟是**注入**的（`now: Instant`），
 //! 这样 TTL 才测得动（与仓库里到处传 `now_ms` 的习惯一致）。
 
 use std::collections::HashMap;

@@ -176,8 +176,9 @@ pub async fn export_variant_image<R: Runtime>(
             } else if class == raybend::thumbnail::SizeClass::Full {
                 crate::thumbs::render_full_cached(&handle, &asset, &snap.stack, &preview_variant)?
             } else {
-                let db = handle.state::<crate::thumbs::SourcesThumbs>().get(
-                    &crate::thumbs::sources_cache_dir(&handle)?, raybend::store::time::now_millis())?;
+                let db = handle
+                    .state::<crate::browse::BrowseState>()
+                    .library_thumbs(&handle, &asset.repository_id)?;
                 let source = crate::develop::source_path_of(&handle, &asset, snap.stack.source_base)
                     .ok_or("定稿源文件不可用")?;
                 crate::thumbs::render_profile_thumb(&handle, &db, &asset, &source, &snap.stack,

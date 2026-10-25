@@ -47,7 +47,17 @@ pub const SCREEN_LONG_EDGE: u32 = 1920;
 /// 4:4:4 不是「随手选的参数」：ravif 只有走 **RGB8**（`encode_rgb`）才是 4:4:4，
 /// 走 RGBA8 是 4:2:0 —— 所以缩略图与缓存图**一律丢 alpha** 再编码
 /// （照片本来也没有 alpha；见 [`encode_avif`]）。
+///
+/// **384 小图例外（崔总 2026-10-25 定）**：网格档用 [`AVIF_QUALITY_GRID`]（q80），
+/// 给单库 15 万张的 2 GiB 预算腾出余量；1920 预览与真身仍用 q90。
 pub const AVIF_QUALITY: u8 = 90;
+
+/// 网格档（384）的 AVIF 质量。
+///
+/// 实测 12 张真实照片：q90 22.6 KB、q80 12.75 KB（-44%）。15 万张 × 12.75 KB ≈ 1.8 GiB，
+/// 刚好落在每库 2 GiB 的预期内；q90 会到 3.4 GB。
+/// 改这个值必须同时改 [`render_sig`] 的 `q80` 段并抬 [`PIPELINE_VERSION`]。
+pub const AVIF_QUALITY_GRID: u8 = 80;
 
 /// AVIF 编码速度（1 最慢 / 10 最快）。**取 10**，理由是一组实测（22 线程，合成图，
 /// `examples/avif-probe.rs` 跑出来的；真实照片会更低）：
@@ -157,7 +167,8 @@ pub fn encode_avif_with_metadata(rgb: &[u8], width:u32,height:u32,quality:u8,exi
 // v14: RGB16 display stages; quantize only after sharpen/LUT/geometry.
 // v15: append an sRGB ICC to AVIF without changing or re-encoding AV1 samples.
 // v16: 3:1 展示夹取先截后缩 —— 取源/解码尺寸把夹取算进去（极端长宽比不再糊，崔总 2026-10-10）。
-pub const PIPELINE_VERSION: u32 = 16;
+// v17: 384 网格档改 AVIF q80（每库 15 万张 / 2 GiB 预算）；1920/真身仍 q90。
+pub const PIPELINE_VERSION: u32 = 17;
 
 /// 缩略图尺度。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
@@ -244,11 +255,11 @@ impl SizeClass {
 #[must_use]
 pub const fn render_sig(size: SizeClass) -> &'static str {
     match size {
-        SizeClass::Grid => "avif-q90-grid-v16-embedded-v1",
-        SizeClass::Screen => "avif-q90-screen-v16",
+        SizeClass::Grid => "avif-q80-grid-v17-embedded-v1",
+        SizeClass::Screen => "avif-q90-screen-v17",
         // 真身档不走 `thumbs.db`（9MB/张的 JPEG 靠库内 `cache/full/<资产>/` 管），
         // 这个签名只是让本函数保持全函数；真身档自己的键在 `FullCache` 里（含管线版本）。
-        SizeClass::Full => "jpeg-q92-full-v16",
+        SizeClass::Full => "jpeg-q92-full-v17",
     }
 }
 
@@ -260,9 +271,9 @@ pub const fn render_sig(size: SizeClass) -> &'static str {
 #[must_use]
 pub const fn render_sig_source(size: SizeClass) -> &'static str {
     match size {
-        SizeClass::Grid => "jpeg-q82-grid-v16-embedded-v1",
-        SizeClass::Screen => "jpeg-q82-screen-v16",
-        SizeClass::Full => "jpeg-q92-full-v16",
+        SizeClass::Grid => "jpeg-q82-grid-v17-embedded-v1",
+        SizeClass::Screen => "jpeg-q82-screen-v17",
+        SizeClass::Full => "jpeg-q92-full-v17",
     }
 }
 
@@ -978,7 +989,14 @@ fn encode_pixels(
     }
     match format {
         EncodeFormat::Jpeg => encode_jpeg_bytes(rgb, width, height, JPEG_THUMB_QUALITY),
-        EncodeFormat::Avif => encode_avif(rgb, width, height),
+        EncodeFormat::Avif => {
+            let quality = if matches!(size, SizeClass::Grid) {
+                AVIF_QUALITY_GRID
+            } else {
+                AVIF_QUALITY
+            };
+            encode_avif_with_metadata(rgb, width, height, quality, Vec::new())
+        }
     }
 }
 

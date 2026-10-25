@@ -450,6 +450,7 @@ fn render_cached_with_signature(
     let read_key = key.clone();
     let read_sig = sig.clone();
     if let Some(bytes) = thumbs.read(move |conn| cache::get(conn, &read_key, size, &read_sig))? {
+        thumbs.note_use(&key, size, &sig, now_ms);
         return Ok(bytes);
     }
 
@@ -835,7 +836,7 @@ mod tests {
     }
 
     #[test]
-    fn both_size_classes_are_independent() {
+    fn only_grid_is_cached_in_thumbs_db() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().join("lib");
         write_jpeg(&root.join("a.jpg"), 1000, 1000);
@@ -848,35 +849,20 @@ mod tests {
             T0,
         )
         .unwrap();
-        produce(
-            &conn,
-            &root,
-            &ThumbJob::new("r", "a.jpg", SizeClass::Screen),
-            T0,
-        )
-        .unwrap();
-        let s = cache::stats(&conn).unwrap();
-        assert_eq!(s.entries, 2, "两个尺度各自一条");
-        assert_eq!(
-            s.by_size,
-            vec![
-                ("grid".to_string(), 1, s.by_size[0].2),
-                ("screen".to_string(), 1, s.by_size[1].2)
-            ]
-            .into_iter()
-            .map(|(a, b, _)| (a, b, 0))
-            .collect::<Vec<_>>()
-            .into_iter()
-            .zip(s.by_size.iter())
-            .map(|((a, b, _), (a2, b2, c2))| {
-                assert_eq!((&a, b), (a2, *b2));
-                (a2.clone(), *b2, *c2)
-            })
-            .collect::<Vec<_>>()
+        assert!(
+            produce(
+                &conn,
+                &root,
+                &ThumbJob::new("r", "a.jpg", SizeClass::Screen),
+                T0,
+            )
+            .is_err(),
+            "thumbs.db 只存 384；1920 走 FullCache"
         );
+        let s = cache::stats(&conn).unwrap();
+        assert_eq!(s.entries, 1);
+        assert_eq!(s.by_size[0].0, "grid");
     }
-
-    // ---------- 跑一轮 ----------
 
     #[test]
     fn run_pending_processes_everything_and_stops() {
@@ -1073,7 +1059,7 @@ mod tests {
         let thumbs = thumbs_db(dir.path());
         let mut stack = crate::store::develop::DevelopStack::default();
         stack.params.insert("exposure".into(), 1.0);
-        for size in [SizeClass::Grid, SizeClass::Screen] {
+        for size in [SizeClass::Grid] {
             let first = render_cached_with(&thumbs, &raw, size, T0, Some(&stack), || {
                 render::render_preview_or_else(Some(&preview), size, || panic!("RAW decoded"))
             }).unwrap();
@@ -1214,18 +1200,17 @@ mod tests {
     }
 
     #[test]
-    fn render_now_respects_size_classes() {
+    fn render_now_only_caches_grid() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("big.jpg");
         write_jpeg(&file, 1200, 800);
         let thumbs = thumbs_db(dir.path());
 
         render_now(&thumbs, &file, SizeClass::Grid, T0).unwrap();
-        render_now(&thumbs, &file, SizeClass::Screen, T0).unwrap();
-        assert_eq!(
-            thumbs.read(cache::stats).unwrap().entries,
-            2,
-            "两个尺度各存一条"
+        assert!(
+            render_now(&thumbs, &file, SizeClass::Screen, T0).is_err(),
+            "thumbs.db 只存 384；1920 走 FullCache"
         );
+        assert_eq!(thumbs.read(cache::stats).unwrap().entries, 1);
     }
 }

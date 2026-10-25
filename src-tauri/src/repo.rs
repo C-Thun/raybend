@@ -448,6 +448,8 @@ pub async fn repository_use_location<R: Runtime>(
                     .map_err(raybend::Error::Unsupported)
             })
             .map_err(|e| e.to_string())?;
+        // 换位置后旧路径的 thumbs 句柄作废；下次取图按新库根重新打开。
+        browse.thumbs.release(&id);
         browse.clear_watch(&id);
         browse.publish(
             &handle,
@@ -493,6 +495,7 @@ pub async fn repository_release<R: Runtime>(
             .sessions
             .finish_release(&repository_id)
             .map_err(|e| e.to_string())?;
+        browse.thumbs.release(&repository_id);
         let mut status = raybend::store::availability::ConnectionStatus::unknown(&repository_id);
         status.state = raybend::store::availability::Availability::Released;
         browse.publish(&app, status);
@@ -725,10 +728,9 @@ fn invalidate_changes<R: Runtime>(
             keys.push(crate::issues::cache_key(repository_id, *asset, issue.id));
         }
     }
-    let dir = crate::thumbs::sources_cache_dir(app)?;
     let thumbs = app
-        .state::<crate::thumbs::SourcesThumbs>()
-        .get(&dir, time::now_millis())?;
+        .state::<crate::browse::BrowseState>()
+        .library_thumbs(app, repository_id)?;
     thumbs
         .write_tx(move |conn| {
             for key in keys {

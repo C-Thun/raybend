@@ -81,7 +81,7 @@ pub struct PhotoMetaView {
 ///
 /// 用 `Arc<Mutex<...>>` 而不是直接放 `Mutex<MetaCache>`：命令是异步的，
 /// 要把锁搬进 `spawn_blocking` 的闭包里 —— 那样闭包必须是 `'static`，
-/// 拿 `State` 借来的引用过不去（与 `SourcesThumbs` 用 `Arc` 的理由相同）。
+/// 拿 `State` 借来的引用过不去（与 `LibraryThumbs` 用 `Arc` 的理由相同）。
 #[derive(Clone, Default)]
 pub struct SourcesMetaCache(pub Arc<Mutex<MetaCache>>);
 

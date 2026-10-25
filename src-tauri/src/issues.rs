@@ -2,7 +2,6 @@
 
 use crate::browse::BrowseState;
 use crate::develop::{self, DevelopStackDto, ResolvedAsset};
-use crate::thumbs::SourcesThumbs;
 use raybend::display::{CacheClass, FullCache};
 use raybend::store::develop::{DevelopStack, EditBase, load as load_stack};
 use raybend::store::issues::{self, Issue, Selection};
@@ -337,8 +336,8 @@ fn ensure_snapshots<R: Runtime>(
         .map_err(|error| format!("定稿预览解码失败：{error}"))?;
     let image = render::clamp_display_aspect(image, render::MAX_DISPLAY_ASPECT);
     let db = app
-        .state::<SourcesThumbs>()
-        .get(&crate::thumbs::sources_cache_dir(app)?, time::now_millis())?;
+        .state::<crate::browse::BrowseState>()
+        .library_thumbs(app, repo)?;
     let key = cache_key(repo, issue.asset_id, issue.id);
     let signature = render_signature(issue, &source_signature);
     for size in [SizeClass::Grid] {
@@ -349,12 +348,19 @@ fn ensure_snapshots<R: Runtime>(
             .map_err(|error| error.to_string())?
             .is_some()
         {
+            db.note_use(&key, size, &signature, time::now_millis());
             continue;
         }
         let rgb = render::resize_for_thumb(image.clone(), size.long_edge()).to_rgb8();
         let (width, height) = rgb.dimensions();
-        let bytes =
-            render::encode_avif(rgb.as_raw(), width, height).map_err(|error| error.to_string())?;
+        let bytes = render::encode_avif_with_metadata(
+            rgb.as_raw(),
+            width,
+            height,
+            render::AVIF_QUALITY_GRID,
+            Vec::new(),
+        )
+        .map_err(|error| error.to_string())?;
         let write_key = key.clone();
         let write_sig = signature.clone();
         db.write(move |conn| {
@@ -481,10 +487,10 @@ pub async fn issue_delete<R: Runtime>(
         {
             cache.remove_issue(asset_id, issue_id);
         }
-        if let Ok(db) = handle.state::<SourcesThumbs>().get(
-            &crate::thumbs::sources_cache_dir(&handle)?,
-            time::now_millis(),
-        ) {
+        if let Ok(db) = handle
+            .state::<crate::browse::BrowseState>()
+            .library_thumbs(&handle, &repository_id)
+        {
             let key = cache_key(&repository_id, asset_id, issue_id);
             let _ = db.write(move |conn| cache::remove_key(conn, &key));
         }
@@ -544,10 +550,9 @@ pub async fn issue_thumb_get<R: Runtime>(
 pub(crate) fn thumb_bytes<R: Runtime>(app: &AppHandle<R>, repo: &str,
     asset_id: i64, issue_id: i64, size: SizeClass) -> Result<Vec<u8>, String> {
         let issue = issue_of(app, repo, asset_id, issue_id)?;
-        let db = app.state::<SourcesThumbs>().get(
-            &crate::thumbs::sources_cache_dir(app)?,
-            time::now_millis(),
-        )?;
+        let db = app
+            .state::<crate::browse::BrowseState>()
+            .library_thumbs(app, repo)?;
         let key = cache_key(repo, asset_id, issue_id);
         let sig = render_signature(&issue, &source_signature(app, repo, &issue)?);
         let read_key = key.clone();
@@ -556,6 +561,7 @@ pub(crate) fn thumb_bytes<R: Runtime>(app: &AppHandle<R>, repo: &str,
             .read(move |conn| cache::get(conn, &read_key, size, &read_sig))
             .map_err(|error| error.to_string())?
         {
+            db.note_use(&key, size, &sig, time::now_millis());
             return Ok(bytes);
         }
         let asset = asset_for(app, repo, asset_id)?;
@@ -627,10 +633,9 @@ fn ensure_issue_snapshots<R: Runtime>(
     }
     let asset = asset_for(app, repo, asset_id)?;
     let full = FullCache::open(&asset.root).map_err(|error| error.to_string())?;
-    let db = app.state::<SourcesThumbs>().get(
-        &crate::thumbs::sources_cache_dir(app)?,
-        time::now_millis(),
-    )?;
+    let db = app
+        .state::<crate::browse::BrowseState>()
+        .library_thumbs(app, repo)?;
     let mut filled = Vec::new();
     for issue in issues {
         match fill_issue_snapshots(app, repo, &issue, sizes, &full, &db) {

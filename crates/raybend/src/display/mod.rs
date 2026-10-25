@@ -389,7 +389,7 @@ const fn backend_of(kind: MediaKind) -> Backend {
 ///
 /// | 口径 | 缓存 | 为什么 |
 /// | --- | --- | --- |
-/// | 库内（入库资产） | 磁盘 `thumbs.db`（与网格/胶片带同一套键与 `render_sig`） | 持久资产，重启后浏览还得靠它 |
+/// | 库内（入库资产） | 库根 `cache/thumbs.db`（每库一份，只存 384；与网格同一套键与 `render_sig`） | 持久资产，重启后浏览还得靠它 |
 /// | 库外（import / 未入库） | **只在 `memory`（进程内存）** | 临时目录下次打开内容可能全变，落盘的行永远读不回来（§2.24） |
 ///
 /// 为什么必须有缓存（人类 2026-09-23 报「每切一张都要等 1 秒多」）：旧路径每次都重新解码 ——
@@ -422,13 +422,22 @@ pub fn cached_image(
     /*
      * **真身档（库内）不进 `thumbs.db`**（2026-10-11）：那一档是 ~9MB/张的 JPEG，
      * 该住在库内 `cache/full/<资产>/`（跟库走、随资产删、有容量上限与 LRU），
-     * 不是 app data 里那个「几万行小 BLOB」的缩略图库（`AGENTS.md` §6.5）。
+     * 不是库根 `cache/thumbs.db` 里那个「几万行小 BLOB」的缩略图库（`AGENTS.md` §6.5）。
      * 所以库内的真身档只“现算 + 交给调用方缓存”，这里不做 DB 读写。
      *
      * 库外（import）**不一样**：那边的真身要在内存里留最近的 10 张
      * （`specs/thumbnail-tiers-and-import-memory.md`），所以这一档不在这里短路。
      */
     if size.is_full() && request.scope == ImageScope::Library {
+        return display_image(request);
+    }
+    /*
+     * **库内 thumbs.db 只存 384**（崔总 2026-10-25）：1920 载入占位走库根
+     * `cache/full/`（`FullCache`），不能把 329 KB/张的 screen 图混进 2 GiB 的
+     * 小图预算里。调用方（`view_image`）已经把 Screen 路由到 FullCache；
+     * 这里再兜一道，保证任何遗漏都不会写进 thumbs.db。
+     */
+    if size != SizeClass::Grid && request.scope == ImageScope::Library {
         return display_image(request);
     }
 
@@ -477,6 +486,7 @@ pub fn cached_image(
     if let Some((bytes, width, height)) =
         thumbs.read(move |conn| thumb_cache::get_with_size(conn, &read_key, size, sig))?
     {
+        thumbs.note_use(&key, size, sig, now_ms);
         return Ok(Some(DisplayImage {
             bytes,
             mime,
@@ -611,7 +621,7 @@ mod tests {
     }
 
     #[test]
-    fn cached_image_serves_from_disk_and_leaves_the_original_shortcut_uncached() {
+    fn cached_image_serves_grid_from_disk_and_leaves_the_original_shortcut_uncached() {
         let dir = tempfile::tempdir().expect("临时目录");
         let path = dir.path().join("photo.jpg");
         let img = image::RgbImage::from_fn(8, 6, |x, y| {
@@ -621,7 +631,7 @@ mod tests {
         let db = ThumbsDb::open(dir.path().join("cache"), 0).expect("开缓存库");
 
         // 未变更时命中；同一路径覆盖保存后必须重新渲染。
-        let screen = ImageRequest::plain(&path, ImagePurpose::Screen);
+        let screen = ImageRequest::plain(&path, ImagePurpose::Grid);
         let first = cached_image(Some(&db), None, &screen, 0)
             .expect("第一次不该报错")
             .expect("应当有图");
@@ -645,6 +655,26 @@ mod tests {
             .expect("有原文件");
         assert_eq!(raw.origin, ImageOrigin::OriginalFile);
         assert_eq!(raw.bytes, std::fs::read(&path).expect("读原文件"));
+    }
+
+    #[test]
+    fn library_screen_never_enters_the_thumbs_db() {
+        let dir = tempfile::tempdir().expect("临时目录");
+        let path = dir.path().join("photo.jpg");
+        image::RgbImage::from_fn(64, 48, |_, _| image::Rgb([12, 34, 56]))
+            .save(&path)
+            .expect("写 JPEG");
+        let db = ThumbsDb::open(dir.path().join("cache"), 0).expect("开缓存库");
+        let request = ImageRequest::plain(&path, ImagePurpose::Screen);
+        let image = cached_image(Some(&db), None, &request, 0)
+            .expect("不该报错")
+            .expect("应当有图");
+        assert_eq!(image.origin, ImageOrigin::Rendered);
+        assert_eq!(
+            db.read(crate::thumbnail::cache::stats).unwrap().entries,
+            0,
+            "1920 走 FullCache，不能写进 384 的 thumbs.db"
+        );
     }
 
     #[test]

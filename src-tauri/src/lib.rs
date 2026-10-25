@@ -226,7 +226,6 @@ pub fn run() {
         .manage(db::DbState::default())
         .manage(color_batch::ColorBatchState::default())
         .manage(photo_ai::PhotoAiState::default())
-        .manage(thumbs::SourcesThumbs::default())
         .manage(thumbs::SourcesMemory::default())
         // 后台重活的优先级队列（编辑会话管道 W2：一条有优先级、去重的重活入口）
         .manage(work::WorkQueue::default())
@@ -293,13 +292,15 @@ pub fn run() {
             // ── 缩略图（未入库的源文件也要能出图）──
             thumbs::thumb_get,
             thumbs::issue_sources_prepare,
-            thumbs::thumb_sources_stats,
-            thumbs::thumb_sources_clear,
+            thumbs::thumb_cache_stats,
+            thumbs::thumb_cache_clear,
             // ── 统一取图口（view 与缩略图共用的总入口，M2-W2）──
             thumbs::view_image,
             thumbs::image_histogram,
             tags::tag_list,
             tags::tag_list_all,
+            tags::tag_stats,
+            tags::tag_prune_unused,
             tags::tag_ensure,
             photo_ai::photo_ai_model_status,
             photo_ai::photo_ai_model_install,
@@ -467,6 +468,14 @@ pub fn run() {
                 );
             } else {
                 eprintln!("[diagnostics] 应用数据目录解析失败 —— 本次没有落盘日志");
+            }
+            // 旧全局小图缓存（`cache/_sources/thumbs.db`）已无读者：一次性删掉，各库按需重建。
+            match crate::thumbs::cleanup_legacy_sources_cache(app.handle()) {
+                Ok(freed) if freed > 0 => {
+                    log::info!(target: "thumbs", "已清理旧全局小图缓存：{freed} 字节");
+                }
+                Ok(_) => {}
+                Err(error) => log::warn!(target: "thumbs", "旧全局小图缓存清理失败：{error}"),
             }
             color_system::install(app.handle());
             use tauri::Manager;

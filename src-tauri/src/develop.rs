@@ -461,8 +461,9 @@ pub async fn develop_preview_refresh<R: Runtime>(
         let task_app = handle.clone();
         queue.run(crate::work::Priority::Warm, key, move |_token| {
             crate::thumbs::render_latest_cached(&task_app, &asset, &stack)?;
-            let db = task_app.state::<crate::thumbs::SourcesThumbs>().get(
-                &crate::thumbs::sources_cache_dir(&task_app)?, time::now_millis())?;
+            let db = task_app
+                .state::<crate::browse::BrowseState>()
+                .library_thumbs(&task_app, &asset.repository_id)?;
             let source = source_path_of(&task_app, &asset, stack.source_base)
                 .ok_or("最新编辑源不可用")?;
             let variant = latest_variant(&stack)?;

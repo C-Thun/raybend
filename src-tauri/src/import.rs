@@ -682,8 +682,9 @@ fn consume_source_images<R: Runtime>(app: &AppHandle<R>, catalog: &std::sync::Ar
                 crate::thumbs::prepare_source_images(app, &asset, raybend::store::develop::EditBase::Sooc)?;
             } else {
                 // RAW-only 导入只备小图。真实 RAW 原始快照推迟到明确进入编辑。
-                let db = app.state::<crate::thumbs::SourcesThumbs>().get(
-                    &crate::thumbs::sources_cache_dir(app)?, time::now_millis())?;
+                let db = app
+                    .state::<crate::browse::BrowseState>()
+                    .library_thumbs(app, &repo)?;
                 // 只备缩略图那一档（384）—— 192 那一档 2026-10-11 取消，
                 // 胶片带直接用 384（`specs/thumbnail-tiers-and-import-memory.md`）
                 raybend::thumbnail::render_now(&db, &path, SizeClass::Grid, time::now_millis())
