@@ -2,8 +2,8 @@
 /**
  * **磁盘占用报告**（只读）：回答「几十 G 去哪了、哪些该清、哪些是故意留的」。
  *
- * 为什么要它：构建缓存分布在四处（WSL `target/`、Windows 构建 `target/`、旧构建目录
- * `C:\rb-target`、全局包仓库），**没有任何一个地方会告诉你总账** ——
+ * 为什么要它：构建缓存分布在四处（WSL `target/`、Windows 日常 debug 的
+ * `C:\rb-target\raybend`、发版的 `…\raybend\build\target`、全局包仓库），**没有任何一个地方会告诉你总账** ——
  * 2026-10-14 崔总实测：WSL 58 G + 旧目录 16 G + 当前缓存 4.2 G + pnpm store 4 G ≈ 84 G。
  *
  * 本命令**只量不删**；每行末尾给出各自的清理入口。逐项「算完即打」，几十万文件的目录
@@ -18,7 +18,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
-import { discoverWindowsReleasePaths, windowsPowerShell } from "./lib/windows-paths.mjs";
+import { DEBUG_WINDOWS_TARGET, discoverWindowsReleasePaths, windowsPowerShell } from "./lib/windows-paths.mjs";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 
@@ -65,8 +65,8 @@ const storePath = (() => {
 
 const rows = [
   { label: "WSL cargo target", host: join(ROOT, "target"), note: "构建 / 测试缓存（只进不出，越攒越大）", action: "pnpm clean:wsl" },
-  { label: "Windows 构建 target", win: win?.windowsTarget, note: "发版 / 调试构建缓存（刻意保留，让下次构建不冷启）", action: "pnpm clean:win" },
-  { label: "旧构建目录（2026-09-29 前）", win: "C:\\rb-target", note: "已弃用：脚本早就不往这写，也没人清", action: "pnpm clean:win --target-dir 'C:\\rb-target\\raybend' --keep-days 0" },
+  { label: "Windows debug target", win: DEBUG_WINDOWS_TARGET, note: "日常 `pnpm debug:win` 的缓存（天天写、长得最快）", action: "pnpm clean:win" },
+  { label: "Windows 发版 target", win: win?.windowsTarget, note: "发版构建缓存（只在发版时用，刻意保留）", action: win ? `pnpm clean:win --target-dir "${win.windowsTarget}"` : "（探测失败）" },
   { label: "发布产物 release-out/", host: join(ROOT, "release-out"), note: "保留：对应 GitHub Release 的字节副本", action: "旧 test-* 目录可手动删" },
   { label: "AI 输入快照 .release/", host: join(ROOT, ".release"), note: "保留：模型 + CPU 运行库的冻结副本，构建复用", action: "删除后下次构建重新校验 / 复制" },
   { label: "前端产物 dist/", host: join(ROOT, "dist"), note: "小，随时可重建", action: "pnpm build" },

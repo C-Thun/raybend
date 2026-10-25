@@ -37,13 +37,14 @@ import { dirname, resolve } from "node:path";
 
 import {parseAiArgs,resolveAiBuild,aiBuildEnv,ensureBuildRuntime,syncAiOutput} from "./lib/ai-build.mjs";
 
-import { windowsBuildEnv } from "./lib/dav1d-win.mjs";
+import { DEBUG_WINDOWS_TARGET, toHostPath } from "./lib/windows-paths.mjs";
+import { productBuildCommand, productBuildEnv } from "./lib/product-build.mjs";
 
 /** 仓库根（脚本自身位置向上一级） */
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-/** Windows 侧产物目录（`AGENTS.md` §5.3：必须落 Windows 本地盘） */
-const CARGO_TARGET_DIR = "C:\\rb-target\\raybend";
+/** Windows 侧产物目录（`AGENTS.md` §5.3：必须落 Windows 本地盘；字面量只在 `windows-paths` 写一次） */
+const CARGO_TARGET_DIR = DEBUG_WINDOWS_TARGET;
 /**
  * 本次构建图的单元清单（cargo 的 `--message-format=json` 输出）。
  *
@@ -51,10 +52,10 @@ const CARGO_TARGET_DIR = "C:\\rb-target\\raybend";
  * 别自己把自己清了。
  */
 const BUILD_UNITS = `${CARGO_TARGET_DIR}\\last-build.json`;
-/** 对应的 WSL 侧路径（check:win 与打印用） */
-const EXE = "/mnt/c/rb-target/raybend/debug/raybend-desktop.exe";
 /** 同一个产物的 Windows 侧路径（查进程与占用必须用它 —— WSL 路径 Windows 侧认不出来） */
 const EXE_WIN = `${CARGO_TARGET_DIR}\\debug\\raybend-desktop.exe`;
+/** 对应的 WSL 侧路径（check:win 与打印用；现算，不写死盘符） */
+const EXE = toHostPath(EXE_WIN);
 
 /** 仓库根的 Windows UNC 形式（`\\wsl.localhost\<distro>\...`）—— 用 wslpath 现算，不写死发行版名 */
 function windowsRepoPath() {
@@ -331,26 +332,20 @@ run("② Windows 侧 cargo 构建（debug + custom-protocol）", "cmd.exe", [
    * 盘符（Z:），那个「UNC 路径不受支持」的警告是预期噪音。仓库路径不含空格。
    */
   /*
-   * ⚠️ `-p raybend` 不能少：`raybend-raw-worker` 是 `raybend` 包里的 bin 目标，
-   * 只选 `raybend-desktop` 的话**它根本不会被构建** —— 于是主程序新、worker 旧。
-   * 2026-09-24 就是这么栽的：Windows 那个 worker 停在 9 月 19 日（还不认 `linear16`），
-   * 编辑器的线性解码在真机上一直失败。`check-win-artifact.mjs` 现在会核对它。
-   *
-   * ❗`-p raybend-crashpad` 不能少（W4 加的）：崩溃助手是同目录里的第二个 exe，
-   * 它**不能**靠「主程序 re-exec 自己」当助手（那是社区里反复翻车的做法，见
-   * `specs/logging-and-crash-report.md` §5.2）。只建主程序的话助手不存在，
-   * 崩溃时只有 panic 记录、没有 dump。
+   * 包的选型与环境（`-p` 清单、AI feature、dav1d）统一在 `scripts/lib/product-build.mjs`
+   * —— 瘦身脚本要用同一份定义推导构建图，两边各写一份就会漂。那里的注释记了每个包
+   * 不能少的理由（worker / 崩溃助手）。
    *
    * `--message-format=json` 把**本次构建图里的每个单元**（连已经是最新的也在内）
    * 落到 `last-build.json` —— 第 ④ 步的瘦身脚本靠它判断「谁还活着」。
    * 进度信息走 stderr，所以终端上照旧能看到 `Compiling …`。
    */
-  `pushd ${windowsRepoPath()} & cargo build -p raybend-desktop -p raybend -p raybend-crashpad --features ${aiPlan.features.join(",")} --message-format=json > ${BUILD_UNITS}`,
+  `pushd ${windowsRepoPath()} & ${productBuildCommand({ aiPlan, jsonPath: BUILD_UNITS })}`,
 ], {
-  env: windowsBuildEnv({ CARGO_TARGET_DIR,TAURI_CONFIG:aiEnv.TAURI_CONFIG,RAYBEND_PHOTO_AI:aiEnv.RAYBEND_PHOTO_AI }),
+  env: productBuildEnv({ aiPlan, cargoTargetDir: CARGO_TARGET_DIR }),
 });
 
-syncAiOutput(ROOT,aiPlan,"/mnt/c/rb-target/raybend/debug");
+syncAiOutput(ROOT,aiPlan,dirname(EXE));
 
 run("③ 产物核对（时间戳 + 资源名）", "node", ["scripts/check-win-artifact.mjs"]);
 
@@ -359,8 +354,15 @@ run("③ 产物核对（时间戳 + 资源名）", "node", ["scripts/check-win-a
  * 为什么需要：那个目录只进不出，攒过 11.6 GiB（`cargo clean` 代价是十几分钟冷构建）。
  * 复用第 ② 步的 JSON，不额外编译；宽限期保证不会把别的会话正在用的变体删掉。
  */
+/*
+ * ❗`--target-dir` 必须与第 ② 步的 CARGO_TARGET_DIR 一起给：瘦身脚本记的是**清单里的产物
+ * 落在哪个 `debug/` 下**，目录给不一致就一个都认领不到，直接判「清单是空的」并以 1 退出
+ * （2026-10-25 就这么天天报错，构建本身其实是好的）。
+ */
 run("④ target 瘦身（删掉失效的旧产物）", "node", [
   "scripts/clean-target.mjs",
+  "--target-dir",
+  CARGO_TARGET_DIR,
   "--json",
   BUILD_UNITS,
 ]);

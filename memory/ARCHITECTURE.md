@@ -647,6 +647,13 @@ cmd.exe /c 'pushd \\wsl.localhost\Ubuntu-24.04\home\andares\repos\c-thun\raybend
       `[profile.dev.package."*"] debug = false`（体积砍 3–5 倍，代价是调试器变量信息）。
       另：`-p raybend` 与 `--workspace` 两种调用会各养一套依赖变体（实测差 107 个单元），
       尽量用一致的构建调用。
+    * **2026-10-25**：清单与 target 目录必须**同源**。Windows 有两个构建目录（日常 debug
+      `C:\\rb-target\\raybend`、发版 `%LOCALAPPDATA%\\raybend\\build\\target`）：`clean-target` 把默认改成
+      发版探测，而 `debug:win` 仍写 debug 目录，于是第 ④ 步拿 debug 的清单去比 release 的目录 ——
+      一个产物都认领不到、次次以 1 退出（构建本身是好的）。现在产品构建的参数 / 环境 / 包清单
+      只在 `scripts/lib/product-build.mjs` 写一份，`debug:win` 与清单重建共用；`clean:win` 默认清
+      日常 debug 目录（发版目录用 `RAYBEND_WIN_BUILD_DIR` / `--target-dir` 指）。
+      记录：`implementations/2026-10-26_debug-win-clean-target-target-dir.md`。
 
 ### 8.1 为什么必须加 `--features custom-protocol`（重要，别拆掉）
 

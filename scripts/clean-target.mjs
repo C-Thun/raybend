@@ -41,8 +41,8 @@
  *
  * # 清单的口径（哪次构建说了算「谁活着」）
  *
- * * **Windows 侧**：住户就是产品构建（`debug:win` 的 `-p raybend-desktop -p raybend
- *   --features custom-protocol`），清单也用它；
+ * * **Windows 侧**：住户就是产品构建 —— **与 `debug:win` 同一份定义**
+ *   （`lib/product-build.mjs`：包清单 / AI feature / dav1d / target 目录）：两边各写一份就会漂；
  * * **WSL 侧**：**两段拼接** —— `build --workspace --lib --bins`（构建态）+
  *   `test --workspace --lib --bins --tests --no-run`（测试态；`cargo test` 用 cfg(test)
  *   编 lib/bins，是另一套单元，只取一段会漏）。应用二进制、worker、全部测试目标算存活
@@ -75,22 +75,30 @@ import { closeSync, existsSync, openSync, readFileSync, readdirSync, rmSync, sta
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { windowsBuildEnv } from "./lib/dav1d-win.mjs";
-import { discoverWindowsReleasePaths } from "./lib/windows-paths.mjs";
+import { DEBUG_WINDOWS_TARGET, discoverWindowsReleasePaths } from "./lib/windows-paths.mjs";
+import { parseAiArgs, resolveAiBuild } from "./lib/ai-build.mjs";
+import { productBuildCommand, productBuildEnv } from "./lib/product-build.mjs";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
-/** 旧的默认构建目录（2026-09-29 前的 `C:\rb-target\raybend`）：只用于提示，不再当默认清理目标。 */
-const LEGACY_WIN_TARGET = "C:\\rb-target\\raybend";
 /**
- * 当前的 Windows 构建目录由 release/debug 的**同一套探测**决定
- * （`RAYBEND_WIN_BUILD_DIR` / `--win-dir` 都能覆盖），不再写死旧路径 ——
- * 否则 16 GB 的旧目录一直有人“清”，真正在长的当前缓存反而没人管。
+ * Windows 侧有两个构建目录，**不是同一个**（`AGENTS.md` §5.3）：
+ *
+ *   * 日常 debug = `C:\rb-target\raybend`（`pnpm debug:win` 写死）——天天写、长得最快，**默认清它**；
+ *   * 发版 = `%LOCALAPPDATA%\raybend\build\target`（`discoverWindowsReleasePaths` 探测，
+ *     `RAYBEND_WIN_BUILD_DIR` / `--win-dir` 覆盖）——只在发版时用。
+ *
+ * ❗2026-10-15 把默认改成「发版那套探测」时忘了一件事： debug 并不往那写。于是
+ * `debug:win` 第 ④ 步拿着 debug 的清单去比 release 的目录 —— 一个产物都认领不到，
+ * 每次构建都以 1 退出（**构建本身是好的**）。教训：清单与目录必须同源。
  */
-function currentWinTarget() {
+const RELEASE_TARGET_ENV = process.env.RAYBEND_WIN_BUILD_DIR;
+
+/** 发版构建目录（探测得到就返回；探测不了返回 null —— 日常不用它）。 */
+function probeReleaseTarget() {
   try {
-    return discoverWindowsReleasePaths({ directory: process.env.RAYBEND_WIN_BUILD_DIR }).windowsTarget;
-  } catch (error) {
-    fail(`无法探测当前 Windows 构建目录：${error.message}`, "用 --target-dir 'C:\\…' 指定，或先跑一次 pnpm debug:win / pnpm release（探测需要 powershell.exe 与 wslpath）");
+    return discoverWindowsReleasePaths({ directory: RELEASE_TARGET_ENV }).windowsTarget;
+  } catch {
+    return null;
   }
 }
 
@@ -128,7 +136,19 @@ if (!Number.isFinite(KEEP_DAYS) || KEEP_DAYS < 0) {
 }
 
 const EXPLICIT_TARGET = valueOf("--target-dir", process.env.WIN_TARGET_DIR);
-const TARGET_WIN = EXPLICIT_TARGET ?? currentWinTarget();
+const TARGET_WIN = EXPLICIT_TARGET ?? (RELEASE_TARGET_ENV ? releaseTargetOrFail() : DEBUG_WINDOWS_TARGET);
+
+/** 显式要清发版目录（`RAYBEND_WIN_BUILD_DIR`）却探测失败时，报清楚而不是默默换一个目录清。 */
+function releaseTargetOrFail() {
+  const target = probeReleaseTarget();
+  if (target === null) {
+    fail(
+      `无法探测发版构建目录（RAYBEND_WIN_BUILD_DIR=${RELEASE_TARGET_ENV}）`,
+      "用 --target-dir 'C:\\…' 指定，或检查 WSL 互操作（需要 powershell.exe 与 wslpath）",
+    );
+  }
+  return target;
+}
 /** 这个 target 在 Windows 侧吗（决定构建那一步走 cmd.exe 还是本地 cargo）。 */
 const IS_WINDOWS_TARGET = /^[A-Za-z]:[\\/]/.test(TARGET_WIN);
 const TARGET = toLocalPath(TARGET_WIN);
@@ -136,8 +156,13 @@ if (TARGET === null) {
   fail(`--target-dir 要给 Windows 路径（C:\\…）或本机绝对路径（/…），收到：${TARGET_WIN}`);
 }
 if (!existsSync(TARGET)) fail(`target 目录不存在：${TARGET}`);
-if (EXPLICIT_TARGET === undefined && toLocalPath(LEGACY_WIN_TARGET) !== TARGET && existsSync(toLocalPath(LEGACY_WIN_TARGET))) {
-  console.log(`ℹ 存在旧构建目录 ${LEGACY_WIN_TARGET}（本次不清它）；确认无用后：pnpm clean:win --target-dir "${LEGACY_WIN_TARGET}" --keep-days 0`);
+/* 另一个构建目录顺手报一句：两个目录长得像，最容易「以为在清它、其实在清另一个」。 */
+const SIBLING = [
+  { path: DEBUG_WINDOWS_TARGET, why: "日常 debug 构建（pnpm debug:win）" },
+  { path: probeReleaseTarget(), why: "发版构建（pnpm release）" },
+].find((item) => item.path !== null && toLocalPath(item.path) !== TARGET && existsSync(toLocalPath(item.path)));
+if (SIBLING !== undefined) {
+  console.log(`ℹ 另一个构建目录 ${SIBLING.path}（${SIBLING.why}）本次不清；要清它：pnpm clean:win --target-dir "${SIBLING.path}"`);
 }
 const DEBUG = join(TARGET, "debug");
 const JSON_PATH = valueOf("--json", join(TARGET_WIN, "last-build.json"));
@@ -150,18 +175,24 @@ const JSON_LOCAL = toLocalPath(JSON_PATH);
 
 /*
  * 口径按端分叉（理由见文件头「清单的口径」）：
- *   * Windows 侧 = 产品构建（`debug:win` 用的就是它）；
+ *   * Windows 侧 = **产品构建**（与 `debug:win` 同一份定义：`lib/product-build.mjs`）；
  *   * WSL 侧 = **两段拼接**：`build --lib --bins`（构建态）+ `test --lib --bins --tests
  *     --no-run`（测试态）—— `cargo test` 用 cfg(test) 编 lib/bins，是**另一套单元**，
  *     只取一段会漏；两段都进清单，`cargo build` 与 `cargo test` 两个日常环都是热的，
  *     且都不含 examples。
  */
-const manifestCommands = IS_WINDOWS_TARGET
-  ? [["build", "-p", "raybend-desktop", "-p", "raybend", "--features", "custom-protocol", "--message-format=json"]]
-  : [
-      ["build", "--workspace", "--lib", "--bins", "--message-format=json"],
-      ["test", "--workspace", "--lib", "--bins", "--tests", "--no-run", "--message-format=json"],
-    ];
+const WSL_MANIFEST_COMMANDS = [
+  ["build", "--workspace", "--lib", "--bins", "--message-format=json"],
+  ["test", "--workspace", "--lib", "--bins", "--tests", "--no-run", "--message-format=json"],
+];
+
+/*
+ * ⚠ 推导清单必须**真编一遍**（cargo 没有 dry-run 的 JSON），所以这次构建用的参数与环境
+ * 必须与 `debug:win` 完全同源 —— 否则「清个缓存」就把刚建好的 exe 换成另一套 feature 的
+ * 产物（AI 版变成无 AI 版最隐蔽）。`--ai` 与 `debug:win` 同义（auto 兜底）。
+ * WSL 侧用不到 AI，所以不在那里探模型源（探测要校验摘要，白花几秒）。
+ */
+const AI_PLAN = IS_WINDOWS_TARGET ? resolveAiBuild({ root: ROOT, mode: parseAiArgs(args).mode, log: () => {} }) : null;
 
 if (!EXPLICIT_JSON) {
   console.log(
@@ -169,15 +200,14 @@ if (!EXPLICIT_JSON) {
   );
   let status = 1;
   if (IS_WINDOWS_TARGET) {
-    const command = `cargo ${manifestCommands[0].join(" ")} > ${JSON_PATH}`;
-    status = spawnSync("cmd.exe", ["/c", `pushd ${windowsRepoPath()} & ${command}`], {
+    status = spawnSync("cmd.exe", ["/c", `pushd ${windowsRepoPath()} & ${productBuildCommand({ aiPlan: AI_PLAN, jsonPath: JSON_PATH })}`], {
       stdio: ["ignore", "inherit", "inherit"],
-      env: windowsBuildEnv({ CARGO_TARGET_DIR: TARGET_WIN }),
+      env: productBuildEnv({ aiPlan: AI_PLAN, cargoTargetDir: TARGET_WIN }),
     }).status;
   } else {
     /* 两段 JSON 流按行拼进同一个清单文件：collectLive 逐行解析，天然兼容。 */
     const json = openSync(JSON_LOCAL, "w");
-    for (const command of manifestCommands) {
+    for (const command of WSL_MANIFEST_COMMANDS) {
       status = spawnSync("cargo", command, {
         stdio: ["ignore", json, "inherit"],
         env: { ...process.env, CARGO_TARGET_DIR: TARGET_WIN },
@@ -198,7 +228,14 @@ function windowsRepoPath() {
 }
 
 const live = collectLive(JSON_LOCAL);
-if (live.files.size === 0) fail(`单元清单里一个产物都没有：${JSON_PATH}（构建是不是根本没跑？）`);
+if (live.files.size === 0) {
+  /* 这一条以前是「构建是不是根本没跑？」—— 可是最常见的真实原因是**清单与目录不同源**
+     （把 A 目录的 `last-build.json` 拿去清 B 目录），那话说反了方向，白排一下午。 */
+  fail(
+    `单元清单里一个产物都没有：${JSON_PATH}`,
+    `清单里的产物必须落在 ${DEBUG}\\ 下 —— --target-dir 与 --json 要指向**同一个**构建目录（pnpm debug:win 会自动配对）`,
+  );
+}
 
 /** 读 cargo 的 JSON 流：收集产物路径 + 版本信息。 */
 function collectLive(jsonPath) {

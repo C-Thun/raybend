@@ -4,6 +4,16 @@ import { statSync } from "node:fs";
 import { resolve, win32 } from "node:path";
 import { cmdPath } from "./release-windows.mjs";
 
+/**
+ * 日常 **debug** 构建目录（`pnpm debug:win` 用的那个，`AGENTS.md` §5.3）。
+ *
+ * ❗它与发版目录（`discoverWindowsReleasePaths().windowsTarget` =
+ * `%LOCALAPPDATA%\raybend\build\target`）**不是同一个**：debug 天天写、长得最快，
+ * 发版只在发版时用。所以这个字面量只在这里写一次 —— 各脚本各写一份就会漂成
+ * 「按 A 目录的清单清 B 目录」（2026-10-25：`debug:win` ④ 彻底失败）。
+ */
+export const DEBUG_WINDOWS_TARGET = "C:\\rb-target\\raybend";
+
 const windowsAbsolute = value => /^[A-Za-z]:[\\/]/.test(value) || /^\\\\[^\\]+\\[^\\]+/.test(value);
 const localAbsolute = value => /^[A-Za-z]:\\/.test(value);
 

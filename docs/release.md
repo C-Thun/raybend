@@ -311,7 +311,7 @@ Windows cargo 构建主程序与 worker → 打所选安装器 → 核对嵌入�
 | 报「镜像目录已有归属其它脚本」 | 说明该目录不是本流程建的：换一个空目录，别手改标记文件 |
 | 「看起来还是旧图标 / 旧界面」 | 先怀疑 Windows 图标缓存与 dist 未重建：用 exe 资源字节比对判定，别用眼睛；确认先跑了 `pnpm build` |
 | MSI 打包失败报 VBScript / light.exe | 属 Windows 可选功能缺失，按 Tauri 官方 Windows 安装器文档配置，别一律归咎于路径 |
-| 磁盘吃紧 | `pnpm clean:report` 看总账，再按附录 J 分别清理（旧 `C:\rb-target` 有 17.9 G 的前科） |
+| 磁盘吃紧 | `pnpm clean:report` 看总账，再按附录 J 分别清理（日常 debug 的 `C:\rb-target\raybend` 最能攒：2026-10-25 实测 12 G） |
 
 ### 7.3 第三层
 
@@ -355,6 +355,7 @@ Windows cargo 构建主程序与 worker → 打所选安装器 → 核对嵌入�
 | 主程序与 worker 协议对不上 | 只重建了主程序没重建 worker | 两个一起建（`-p raybend-desktop -p raybend`）；`pnpm check:win` 会核对 |
 | Rust 测试「全绿」但某个 crate 的测试其实编不过 | 只跑了 `cargo test -p <crate>`（或只 `cargo check`） | 只认 `cargo test --workspace`（§4.1） |
 | 旧构建目录占 17.9 G | 2026-09-29 前的默认位置 `C:\rb-target` 被新流程弃用后没人清 | `pnpm clean:report` 看账；`pnpm clean:win --target-dir 'C:\rb-target\raybend' --keep-days 0` |
+| `debug:win` 第 ④ 步每次都失败：`单元清单里一个产物都没有`（可构建本身是好的） | 瘦身脚本把默认目录改成了**发版**那套探测（`%LOCALAPPDATA%\raybend\build\target`），而 `debug:win` 仍写到 `C:\rb-target\raybend` —— 清单与目录不同源，一个产物都认领不到 | `debug:win` 显式传 `--target-dir`；目录字面量只在 `scripts/lib/windows-paths.mjs` 写一次，`clean:win` 默认清日常 debug 目录（2026-10-25） |
 | beta 版打 MSI 失败 | MSI 是数值版本，区分不了 `beta.N` | beta / 预发布一律 `--win-nsis`（脚本不做静默替换） |
 | 调试包被拉到正式版 | 早期实现里 test/dev 通道也会自动检查更新 | 现在按通道分档：只有 release/beta 构建自动检查；debug 包连公钥都不带（§2.3） |
 | 更新下载中断就得从头再来 | 官方插件的 `download()` 一次性收整包进内存，续不了传 | v2 自研 Range 续传（落盘 `.part` + 状态 `state.json`），规格 `specs/update-flow-v2.md` |
@@ -805,8 +806,8 @@ pnpm clean:report
 | 位置 | 实测 | 性质 | 清理 |
 | --- | --- | --- | --- |
 | WSL `target/` | **58 G** | 日常 `cargo check/test` 的缓存，只进不出 | `pnpm clean:wsl`（按构建图清失效产物）；`--keep-days 0` 深清，代价是 examples 重编 |
-| Windows `…\raybend\build\target` | 4.6 G | 发版 / 调试构建缓存，**刻意保留** | `pnpm clean:win`（只清失效产物） |
-| 旧 `C:\rb-target` | **17.9 G** | 2026-09-29 前的默认位置，已弃用 | `pnpm clean:win --target-dir 'C:\rb-target\raybend' --keep-days 0`（或直接删） |
+| Windows `C:\rb-target\raybend` | **12 G** | 日常 `pnpm debug:win` 的缓存，**天天写、长得最快** | `pnpm clean:win`（只清失效产物，默认就是这个目录） |
+| Windows `…\raybend\build\target` | 4.6 G | 发版构建缓存（只在发版时用），**刻意保留** | `pnpm clean:win --target-dir "<发版 target>"`（只清失效产物） |
 | `release-out/` | 130 M | 已发布产物的字节副本，保留 | 旧 `test-*` 目录可手动删 |
 | `.release/`（AI 输入快照） | 168 M | 模型 + CPU 运行库冻结副本，构建复用 | 保留 |
 | pnpm store | 4.0 G | 全局包仓库（所有 pnpm 项目共享） | `pnpm store prune` |
@@ -814,8 +815,9 @@ pnpm clean:report
 
 口径：`clean:win` / `clean:wsl` 只清「不在当前构建图里、且已凉 ≥ N 天（默认 3）」的产物 ——
 正在用的不动、不付冷构建代价；依赖升级 / feature 组合变化 / 换构建参数留下的旧产物由它回收。
-`clean:win` 的默认目标与发版构建**同一套探测**（`RAYBEND_WIN_BUILD_DIR` / `--win-dir` 可覆盖），
-旧目录还在时它会打印一行提示。
+`clean:win` 默认清**日常 debug** 的 `C:\rb-target\raybend`（长得最快的那个）；`RAYBEND_WIN_BUILD_DIR`
+或 `--target-dir` 可改指发版目录。两个目录都在时它会打印另一个的位置 —— 最容易
+「以为在清它、其实在清另一个」。
 
 ---
 
