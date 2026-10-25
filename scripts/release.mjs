@@ -82,10 +82,18 @@ export function runRelease({root=resolve(dirname(fileURLToPath(import.meta.url))
         writeFileSync(cfg,JSON.stringify(winConfig,null,2)+"\n");
         const cfgWin=win32.join(paths.windowsSource,".release","tauri.release.json");
         writeFileSync(script,windowsReleaseCommands(paths.windowsSource,cfgWin,{signed:winConfig.bundle.windows.signCommand!==null,features:aiPlan.features}));
-        const names=["RAYBEND_VERSION","RAYBEND_CHANNEL","RAYBEND_BUILD_TIME","RAYBEND_GIT_HASH","RAYBEND_DIRTY","RAYBEND_UPDATER_PUBLIC_KEY","RAYBEND_DISTRIBUTION","RAYBEND_PHOTO_AI","TAURI_SIGNING_PRIVATE_KEY","TAURI_SIGNING_PRIVATE_KEY_PASSWORD"];
+        /*
+         * 更新私钥只服务 updater 产物（`createUpdaterArtifacts`）。unsigned / 无更新的
+         * 构建不该因为环境里躺着一个过期的 `TAURI_SIGNING_PRIVATE_KEY` 去做 wslpath
+         * 转换（那会让一个与本次构建无关的路径把构建拦下来，2026-10-25 评审）。
+         */
+        const keyNames=request.withUpdater?["TAURI_SIGNING_PRIVATE_KEY","TAURI_SIGNING_PRIVATE_KEY_PASSWORD"]:[];
+        const names=["RAYBEND_VERSION","RAYBEND_CHANNEL","RAYBEND_BUILD_TIME","RAYBEND_GIT_HASH","RAYBEND_DIRTY","RAYBEND_UPDATER_PUBLIC_KEY","RAYBEND_DISTRIBUTION","RAYBEND_PHOTO_AI",...keyNames];
         const dav1dEnv=env.RAYBEND_DAV1D_WIN_DIR ? {RAYBEND_DAV1D_WIN_DIR:toWindowsPath(env.RAYBEND_DAV1D_WIN_DIR,{run,cwd:root})} : {};
-        const windowsEnv=windowsBuildEnv({...Object.fromEntries(names.map(name=>[name,buildEnv[name]])),CARGO_TARGET_DIR:paths.windowsTarget},names,{...buildEnv,...dav1dEnv});
-        const privateKeyFile=env.TAURI_SIGNING_PRIVATE_KEY;
+        const windowsBaseEnv={...buildEnv,...dav1dEnv};
+        if(!request.withUpdater){delete windowsBaseEnv.TAURI_SIGNING_PRIVATE_KEY;delete windowsBaseEnv.TAURI_SIGNING_PRIVATE_KEY_PASSWORD;}
+        const windowsEnv=windowsBuildEnv({...Object.fromEntries(names.map(name=>[name,buildEnv[name]])),CARGO_TARGET_DIR:paths.windowsTarget},names,windowsBaseEnv);
+        const privateKeyFile=request.withUpdater?env.TAURI_SIGNING_PRIVATE_KEY:undefined;
         if(privateKeyFile){
           const hostKey=toHostPath(privateKeyFile,{run,cwd:root});
           if(existsSync(hostKey) && statSync(hostKey).isFile())windowsEnv.TAURI_SIGNING_PRIVATE_KEY=toWindowsPath(hostKey,{run,cwd:root});

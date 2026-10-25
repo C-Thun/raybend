@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { runRelease } from '../release.mjs';
+import { runRelease as runReleaseRaw } from '../release.mjs';
+// 测试必须 hermetic：默认不吃开发机环境（签名私钥、dav1d 路径等）。
+const runRelease = options => runReleaseRaw({ env: {}, ...options });
 function fixture(){
  const base=mkdtempSync(join(tmpdir(),'raybend-release-'));
  const root=join(base,'repo'),mirror=join(base,'mirror'),target=join(base,'target');mkdirSync(root);
@@ -202,5 +204,22 @@ test('一键发版：--publish 在收口后执行发布；构建失败时不发�
   published.length=0;failBundle=true;
   assert.throws(()=>runRelease({root:f.root,checkAssets:()=>{},discover:()=>f.paths,argv:['minor','--win-msi','--unsigned','--publish','--no-crates'],run,log:()=>{},finalize:()=>{throw new Error('unreachable');},publish:opts=>published.push(opts)}),/已恢复/);
   assert.equal(published.length,0,'构建失败时不能发布');
+ }finally{f.dispose();}
+});
+
+test('unsigned 且无 --with-updater 时忽略环境里的更新私钥（不调 wslpath）',()=>{
+ const f=fixture();try{
+  let sawWslpath=false;
+  const run=(cmd,args)=>{
+   if(cmd==='git')return args[0]==='status'?'':'abcdef012345';
+   if(cmd==='wslpath'){sawWslpath=true;throw new Error('unexpected wslpath');}
+   if(cmd==='cmd.exe')return 'tauri-cli 2.11.4';
+   if(cmd==='pnpm'){
+    if(args[0]==='licenses:generate'||args[0]==='ai:prepare'||args[0]==='check:win')return;
+    if(args[0]==='build'){mkdirSync(join(f.root,'dist/test-build'),{recursive:true});writeFileSync(join(f.root,'dist/test-build/index.html'),'synthetic');}
+   }
+  };
+  runRelease({root:f.root,checkAssets:()=>{},discover:()=>f.paths,argv:['test','--win-msi','--unsigned'],env:{TAURI_SIGNING_PRIVATE_KEY:'/stale/updater.key'},run,log:()=>{},finalize:()=>{}});
+  assert.equal(sawWslpath,false,'unsigned 构建不该为更新私钥做路径转换');
  }finally{f.dispose();}
 });
