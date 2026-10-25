@@ -111,9 +111,15 @@ Pencil 连接正常，按本轮代码同步了三个位置（**`.pen` 的磁盘�
   顶部搜索框（`搜索标签…`）+ `共 1 284 个标签 · 输入以搜索` + 标签行（选中 = 主色底 + 右侧「已选」）。
 - `design/main.pen` · 库设置（`Wg6x8` 在线 / `L4N9Dz` 浅色宽松）：在「计数与重建」块之后加一行
   `已超过 15 万张 · 建议开一个新库分担`（12px / `$fg-2`，不阻断）。
-- 说明文档：`design/browse.md`（三态 + 新组件行）、`design/main.md`（15 万提示的界面出口；
-  并记下「设置 → 文件页尚未进画稿」这一遗留）。
-- 预览导出：`design/exports/tag-5000/{PGvh4,ZRANP,DBqxz,ZGQC3}.png`。
+- `design/main.pen` · 补画设置 → **编辑器 / 文件** 两页（此前只有色彩/配置文件/快捷键）：
+  `Global Settings / 编辑器 / Dark Compact`（`ZmXNi`）/ `Light Loose`（`EK5uW`）——
+  响应率高/低分段控件 + 说明；`Global Settings / 文件 / Dark Compact`（`dcVYl`）/
+  `Light Loose`（`qiVta`）—— XMP sidecar 开关 + 当前库小图缓存占用/清理 + 重建说明。
+  既有色彩/配置文件/AI 帧的导航也补上「编辑器 / 文件」，避免各页导航分叉。
+- 说明文档：`design/browse.md`（三态 + 新组件行）、`design/main.md`（15 万提示的界面出口 +
+  新增两页的帧 id/行为）。
+- 预览导出：`design/exports/tag-5000/{PGvh4,ZRANP,DBqxz,ZGQC3}.png`；
+  `design/exports/settings-files-editor/{dcVYl,qiVta,ZmXNi,EK5uW}.png`。
 - 布局校验：`o4M2cF` 加宽到 1432、`DTAOc` 1392（三列 440 + gap 24），`Get` 复查无 clipped；
   菜单面板去掉了 1px 描边（描边只属于弹窗，菜单仍是无边线）。
 
