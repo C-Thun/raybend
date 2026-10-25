@@ -214,6 +214,8 @@ export interface BrowseStore {
   tags(): readonly Tag[];
   /** 拉一次词典（幂等：已经拉到过就不再拉） */
   loadTags(): Promise<void>;
+  /** 强制重拉词典（清理未使用标签后要让筛选菜单/右栏同步） */
+  reloadTags(): Promise<void>;
   /** 记一个刚建出来的标签（弹窗里「回车建新标签」之后调，免得右栏要等下次刷新） */
   rememberTag(tag: Tag): void;
   /**
@@ -537,6 +539,11 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
       // 读不到词典不是错误：界面把标签名退回「#id」显示
       tagsLoaded = false;
     }
+  }
+
+  async function reloadTags(): Promise<void> {
+    tagsLoaded = false;
+    await loadTags();
   }
 
   /** 换查询之后的统一处理：作废在飞结果、清空数据与选择、重新加载。 */
@@ -946,6 +953,7 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
     ensureRange,
     tags,
     loadTags,
+    reloadTags,
     rememberTag: (tag) => {
       setTags((prev) => (prev.some((item) => item.id === tag.id) ? prev : [...prev, tag]));
     },

@@ -69,6 +69,8 @@ export interface MenuProps {
    * 多选类菜单（如标签筛选）传 `false`：点一条就关会让「再多选两条」变成反复开关。
    */
   closeOnSelect?: boolean;
+  /** 菜单顶部的自定义区域（如标签筛选的搜索框）。 */
+  header?: JSX.Element;
 }
 
 export function Menu(props: MenuProps) {
@@ -91,7 +93,15 @@ export function Menu(props: MenuProps) {
         {/* z 轴由**基础层统一赋值**（`index.css` 里按 Ark 的 data 属性给 `--z-index`），
         不在这里写 z 类 —— 原因见那里的注释（Ark 的内联 `z-index: var(--z-index)` 压过一切 class）。 */}
       <ArkMenu.Positioner>
-          <ArkMenu.Content class="flex min-w-32 flex-col rounded-ui bg-surface-layer py-1 outline-none">
+          <ArkMenu.Content class={[
+            "flex flex-col rounded-ui bg-surface-layer py-1 outline-none",
+            props.header ? "min-w-56" : "min-w-32",
+          ].join(" ")}>
+            <Show when={props.header}>
+              <div class="px-2 pb-1 pt-1" onPointerDown={(event) => event.stopPropagation()}>
+                {props.header}
+              </div>
+            </Show>
             <For each={props.items}>
               {(item) => (
                 <>

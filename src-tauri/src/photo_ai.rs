@@ -501,14 +501,21 @@ impl<R: Runtime> ai::service::Host for HostAdapter<R> {
                 invalidated,
             ))
         })?;
-        let dictionary = self
+        let (dictionary, skipped) = self
             .app
             .state::<DbState>()
             .with(&self.app, |db| {
-                db.write(move |c| tags::ensure_names(c, &names, time::now_millis()))
+                db.write(move |c| tags::ensure_names_capped(c, &names, time::now_millis()))
                     .map_err(|e| e.to_string())
             })
             .map_err(core)?;
+        if skipped > 0 {
+            log::warn!(
+                target: "ai",
+                "标签已达 {} 上限，跳过 {skipped} 个新标签（已有标签照常应用）",
+                tags::MAX_TAGS
+            );
+        }
         catalog.write(move |c| organization::sync_legacy_terms(c, &dictionary))?;
         if invalidated {
             self.changed(repo, claim.item.photo.asset_id, delta);

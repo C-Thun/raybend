@@ -28,6 +28,12 @@ use crate::error::{Error, Result};
 /// 这种把 UI 撑爆的输入；超限返回 [`Error::Unsupported`]，由 UI 提示用户。
 pub const MAX_TAG_NAME_CHARS: usize = 64;
 
+/// 标签词典的**系统硬上限**（全局，跨库公用；崔总 2026-10-25 定）。
+///
+/// 5000 已经远超正常使用；到顶后只允许挂已有标签，不再新建。
+/// 界面会显示 `n / 5000`，并提供「清理未使用标签」腾出名额。
+pub const MAX_TAGS: i64 = 5_000;
+
 /// 一个标签（词典侧）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tag {
@@ -229,6 +235,10 @@ pub fn ensure_tag(conn: &Connection, name: &str, now_ms: i64) -> Result<i64> {
     {
         return Ok(id);
     }
+    let total: i64 = count_tags(conn)?;
+    if total >= MAX_TAGS {
+        return Err(Error::TagLimit { limit: MAX_TAGS });
+    }
     conn.execute(
         "INSERT INTO tags (name, name_folded, use_count, created_at) VALUES (?1, ?2, 0, ?3)",
         params![name, folded, now_ms],
@@ -239,6 +249,43 @@ pub fn ensure_tag(conn: &Connection, name: &str, now_ms: i64) -> Result<i64> {
 /// 批量 [`ensure_tag`]；返回与入参**一一对应**的 id 列表（含重复项）。
 pub fn ensure_tags(conn: &Connection, names: &[String], now_ms: i64) -> Result<Vec<i64>> {
     names.iter().map(|n| ensure_tag(conn, n, now_ms)).collect()
+}
+
+/// 批量取或建，但**达到上限后跳过新名字**（AI 识别 / XMP 导入这类后台路径用）。
+///
+/// 返回（成功拿到 id 的标签，跳过的名字数）。已有标签即使满额也会返回；
+/// 只有真正要新建的名字才会被跳过 —— 后台任务不该因为满额整批失败。
+pub fn ensure_names_capped(
+    conn: &Connection,
+    names: &[String],
+    now_ms: i64,
+) -> Result<(Vec<Tag>, usize)> {
+    let mut out = Vec::new();
+    let mut skipped = 0usize;
+    for name in names {
+        match ensure_tag(conn, name, now_ms) {
+            Ok(id) => out.push(
+                tag_by_id(conn, id)?
+                    .ok_or_else(|| Error::Unsupported("标签词典同步失败".into()))?,
+            ),
+            Err(Error::TagLimit { .. }) => skipped += 1,
+            Err(error) => return Err(error),
+        }
+    }
+    Ok((out, skipped))
+}
+
+/// 词典里有多少个**未使用**标签（`use_count = 0`，可安全清理）。
+pub fn count_unused_tags(conn: &Connection) -> Result<i64> {
+    Ok(conn.query_row("SELECT count(*) FROM tags WHERE use_count = 0", [], |r| r.get(0))?)
+}
+
+/// 清掉未使用标签，腾出名额。返回删除条数。
+///
+/// **只删 `use_count = 0`**：已用标签的关联在各库 `asset_tags` 里，跨库清理/合并
+/// 是另一个功能，不在这里做（删了会让照片显示成 `#id`）。
+pub fn prune_unused_tags(conn: &Connection) -> Result<usize> {
+    Ok(conn.execute("DELETE FROM tags WHERE use_count = 0", [])?)
 }
 
 /// 按 id **补登记**词典条目（已知名字时用）。
@@ -1146,5 +1193,51 @@ mod tests {
             [id],
         )
         .unwrap();
+    }
+
+    #[test]
+    fn tag_limit_blocks_new_names_but_allows_existing_and_reports_skips() {
+        let conn = app();
+        {
+            let tx = conn.unchecked_transaction().unwrap();
+            for i in 0..MAX_TAGS {
+                tx.execute(
+                    "INSERT INTO tags (name, name_folded, use_count, created_at)
+                     VALUES (?1, ?1, 0, ?2)",
+                    params![format!("tag-{i}"), T0],
+                )
+                .unwrap();
+            }
+            tx.commit().unwrap();
+        }
+        assert_eq!(count_tags(&conn).unwrap(), MAX_TAGS);
+
+        // 满额：新名字被拒，已有名字（折叠后相等）仍能拿到 id
+        assert!(matches!(
+            ensure_tag(&conn, "one-more", T0),
+            Err(Error::TagLimit { limit }) if limit == MAX_TAGS
+        ));
+        assert!(ensure_tag(&conn, "TAG-0", T0).unwrap() > 0);
+
+        // 后台路径：已有标签照常返回，新名字跳过并计数
+        let names = vec![
+            "tag-1".to_string(),
+            "new-one".to_string(),
+            "new-two".to_string(),
+        ];
+        let (tags, skipped) = ensure_names_capped(&conn, &names, T0).unwrap();
+        assert_eq!(tags.len(), 1, "只返回已有的那条");
+        assert_eq!(skipped, 2, "两个新名字被跳过");
+
+        // 未使用标签可清理；已用的保留
+        conn.execute(
+            "UPDATE tags SET use_count = 1 WHERE name_folded = 'tag-0'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(count_unused_tags(&conn).unwrap(), MAX_TAGS - 1);
+        assert_eq!(prune_unused_tags(&conn).unwrap(), (MAX_TAGS - 1) as usize);
+        assert_eq!(count_tags(&conn).unwrap(), 1);
+        assert!(ensure_tag(&conn, "new-one", T0).is_ok(), "腾出名额后可以新建");
     }
 }

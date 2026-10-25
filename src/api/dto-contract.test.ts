@@ -73,6 +73,7 @@ import type {
   TemplatePreview,
   SourceItem,
   SourceScan,
+  TagStats,
   ThumbCacheStats,
   TimelineEntry,
   Volume,
@@ -206,6 +207,12 @@ const REPOSITORY_PROBE_KEYS = [
   "registered",
   "repositoryId",
 ] as const satisfies readonly (keyof RepositoryProbe)[];
+const TAG_STATS_KEYS = [
+  "limit",
+  "total",
+  "unused",
+] as const satisfies readonly (keyof TagStats)[];
+
 const THUMB_CACHE_STATS_KEYS = [
   "bySize",
   "bytes",
@@ -512,6 +519,7 @@ const KEY_TABLES = {
   RepositoryProbe: checkKeys<RepositoryProbe, typeof REPOSITORY_PROBE_KEYS>(
     REPOSITORY_PROBE_KEYS,
   ),
+  TagStats: checkKeys<TagStats, typeof TAG_STATS_KEYS>(TAG_STATS_KEYS),
   ThumbCacheStats: checkKeys<ThumbCacheStats, typeof THUMB_CACHE_STATS_KEYS>(
     THUMB_CACHE_STATS_KEYS,
   ),

@@ -265,19 +265,23 @@ fn adopt_one<R: Runtime>(
                 .collect()
         },
     );
-    let ids = if names.is_empty() {
-        Vec::new()
+    let (dictionary, skipped) = if names.is_empty() {
+        (Vec::new(), 0usize)
     } else {
         app.state::<DbState>()
             .with(app, move |db: &raybend::store::db::AppDb| {
-                db.write(move |conn| tags::ensure_tags(conn, &names, time::now_millis()))
+                db.write(move |conn| tags::ensure_names_capped(conn, &names, time::now_millis()))
                     .map_err(|e| e.to_string())
             })?
     };
-    let dictionary = app.state::<DbState>().with(app, |db| {
-        db.read(|conn| tags::tags_by_ids(conn, &ids))
-            .map_err(|e| e.to_string())
-    })?;
+    if skipped > 0 {
+        log::warn!(
+            target: "sidecar",
+            "标签已达 {} 上限，跳过 {skipped} 个新标签（已有标签照常导入）",
+            tags::MAX_TAGS
+        );
+    }
+    let ids: Vec<i64> = dictionary.iter().map(|tag| tag.id).collect();
     catalog
         .write(move |conn| {
             organization::sync_legacy_terms(conn, &dictionary)?;

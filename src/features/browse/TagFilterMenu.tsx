@@ -1,5 +1,5 @@
 /**
- * 标签**筛选**菜单（崔总 2026-10-11：导出需要标签筛选）。
+ * 标签**筛选**菜单（崔总 2026-10-11：导出需要标签筛选；2026-10-25 加搜索）。
  *
  * 三条边界：
  *
@@ -7,30 +7,70 @@
  * 2. **不识别** —— 没有 AI 识别标签的入口（那是浏览侧的事）；
  * 3. **组内或**：多个标签条件是「命中任一」（与 `filter.tags` 的既有语义一致，`store/query.rs`）。
  *
+ * 标签词典是全局的，系统硬上限 5000（`store::tags::MAX_TAGS`）。菜单**不**平铺
+ * 5000 条：默认给常用的一批 + 已选中的，输入时在词典里搜（`TagDialog` 的输入即搜
+ * 是服务端 `tag_list`；这里量级只有 5000，客户端过滤即可，免去防抖与 IPC）。
+ *
  * 菜单点一条**不关**（`closeOnSelect={false}`）：筛标签天然是多选动作，反复开关菜单很烦。
- * 标签词典来自 `browseStore.tags()`（挂载时拉一次，失败退回 `#id` 显示）；当前有标签条件时
- * 触发器保持「点击后」的主色底，收起菜单也能看出它在生效。
  */
 
-import { onMount, type JSX } from "solid-js";
-import { IconTag } from "@tabler/icons-solidjs";
+import { createMemo, createSignal, onMount, type JSX } from "solid-js";
+import { IconSearch, IconTag } from "@tabler/icons-solidjs";
 
 import { Menu } from "../../components/ui/Menu.tsx";
 import { ButtonTip } from "../../components/ui/Tooltip.tsx";
 import { t } from "../../i18n/index.ts";
 import type { BrowseStore } from "./store.ts";
+import { filterTagMenu } from "./tag-filter.ts";
 
 export function TagFilterMenu(props: { store: BrowseStore }): JSX.Element {
   onMount(() => void props.store.loadTags());
 
+  const [query, setQuery] = createSignal("");
   const ids = (): readonly number[] => props.store.filter().tags ?? [];
   const label = (): string => t("browse.filterByTag");
+  const allTags = () => props.store.tags();
+
+  const items = createMemo(() => filterTagMenu(allTags(), ids(), query()));
+
+  const header = (
+    <div class="flex flex-col gap-1">
+      <div class="flex h-7 items-center gap-1.5 rounded-ui bg-surface-bar px-2">
+        <IconSearch size={12} class="shrink-0 text-fg-3" aria-hidden="true" />
+        <input
+          class="min-w-0 flex-1 bg-transparent text-fs-2 text-fg-1 outline-none placeholder:text-fg-3"
+          placeholder={t("tags.searchPlaceholder")}
+          aria-label={t("tags.searchPlaceholder")}
+          value={query()}
+          onInput={(event) => setQuery(event.currentTarget.value)}
+          /*
+           * 方向键留给 Ark 在菜单项之间移动；其余按键（输入、回车、空格）不往上冒 ——
+           * 否则回车会触发菜单的「选中高亮项」，在搜索框里按回车就误选了标签。
+           */
+          onKeyDown={(event) => {
+            if (event.key !== "ArrowDown" && event.key !== "ArrowUp") event.stopPropagation();
+          }}
+        />
+      </div>
+      {items().length === 0 ? (
+        <p class="px-1 text-fs-0 text-fg-3">{t("browse.tagsNoMatch")}</p>
+      ) : (
+        query().trim() === "" &&
+        allTags().length > items().length && (
+          <p class="px-1 text-fs-0 text-fg-3">
+            {t("tags.searchHint").replace("{n}", String(allTags().length))}
+          </p>
+        )
+      )}
+    </div>
+  );
 
   return (
     <Menu
       label={label()}
       closeOnSelect={false}
-      items={props.store.tags().map((tag) => ({
+      header={header}
+      items={items().map((tag) => ({
         value: String(tag.id),
         label: tag.name,
         selected: ids().includes(tag.id),
@@ -44,6 +84,7 @@ export function TagFilterMenu(props: { store: BrowseStore }): JSX.Element {
             ? current.filter((one) => one !== id)
             : [...current, id],
         });
+        setQuery("");
       }}
     >
       {(trigger) => (

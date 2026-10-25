@@ -23,6 +23,7 @@ import type {
   RecycleSummaryView,
   RestoreResult,
   Tag,
+  TagStats,
 } from "./types.ts";
 
 let coreModule: Promise<typeof import("@tauri-apps/api/core")> | undefined;
@@ -129,6 +130,17 @@ export async function tagList(query = "", limit = 50): Promise<Tag[]> {
 export async function tagListAll(): Promise<Tag[]> {
   if (!isTauriRuntime()) return [];
   return call<Tag[]>("tag_list_all");
+}
+
+export async function tagStats(): Promise<TagStats | null> {
+  if (!isTauriRuntime()) return null;
+  return call<TagStats>("tag_stats");
+}
+
+/** 清掉未使用标签（use_count = 0），腾出 5000 名额。返回删除条数。 */
+export async function tagPruneUnused(): Promise<number> {
+  if (!isTauriRuntime()) return 0;
+  return call<number>("tag_prune_unused");
 }
 
 /** 建标签（同名幂等：已有就返回已有的那条）。 */

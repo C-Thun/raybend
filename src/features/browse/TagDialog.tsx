@@ -43,8 +43,8 @@ import { IconPlus, IconSearch, IconBan } from "@tabler/icons-solidjs";
 
 import { photoTagState, type PhotoTagState } from "../../api/organization.ts";
 import { stageTagEdit, tagDraftRows, tagKey, type TagEdit } from "./tag-draft.ts";
-import { tagEnsure, tagList, tagListAll } from "../../api/browse.ts";
-import type { MarkResult, Tag } from "../../api/types.ts";
+import { tagEnsure, tagList, tagListAll, tagPruneUnused, tagStats } from "../../api/browse.ts";
+import type { MarkResult, Tag, TagStats } from "../../api/types.ts";
 import { Button } from "../../components/ui/Button.tsx";
 import { Dialog } from "../../components/ui/Dialog.tsx";
 import { t } from "../../i18n/index.ts";
@@ -68,6 +68,7 @@ export function TagDialog(props: TagDialogProps): JSX.Element {
   const [query, setQuery] = createSignal("");
   const [results, setResults] = createSignal<Tag[]>([]);
   const [dictionary, setDictionary] = createSignal<Tag[]>([]);
+  const [dictionaryStats, setDictionaryStats] = createSignal<TagStats | null>(null);
   const [highlight, setHighlight] = createSignal(-1);
   /** 草稿：待挂上的标签（新标签或搜索结果） */
   const [adding, setAdding] = createSignal<Tag[]>([]);
@@ -77,6 +78,7 @@ export function TagDialog(props: TagDialogProps): JSX.Element {
   const [sources, setSources] = createSignal<PhotoTagState | null>(null);
   const [edits, setEdits] = createSignal<TagEdit[]>([]);
   const [detail, setDetail] = createSignal<string | null>(null);
+  const [notice, setNotice] = createSignal<string | null>(null);
   const [sourceError, setSourceError] = createSignal<string | null>(null);
   const [sourceLoading, setSourceLoading] = createSignal(false);
   const [loadRevision, setLoadRevision] = createSignal(0);
@@ -142,7 +144,7 @@ export function TagDialog(props: TagDialogProps): JSX.Element {
     const open = props.open;
     const repo = props.store.repositoryId();
     const ids = selectedIds();
-    setSources(null); setEdits([]); setDetail(null); setSourceError(null); setSourceLoading(false);
+    setSources(null); setEdits([]); setDetail(null); setNotice(null); setSourceError(null); setSourceLoading(false);
     if (!open || ids.length !== 1 || !repo) return;
     let active = true;
     setSourceLoading(true);
@@ -165,9 +167,9 @@ export function TagDialog(props: TagDialogProps): JSX.Element {
     const epoch = dialogEpoch;
     void (async () => {
       try {
-        const found = await tagListAll();
+        const [found, stats] = await Promise.all([tagListAll(), tagStats()]);
         if (!props.open || dialogEpoch !== epoch) return;
-        setDictionary(found); await refreshSearch("");
+        setDictionary(found); setDictionaryStats(stats); await refreshSearch("");
       } catch (error) { if (props.open && dialogEpoch === epoch) setSaveError(String(error)); }
     })();
     // 输入框要拿到焦点，否则「输入即搜」根本没法开始
@@ -206,6 +208,34 @@ export function TagDialog(props: TagDialogProps): JSX.Element {
     );
   }
 
+  const atLimit = (): boolean => {
+    const stats = dictionaryStats();
+    return stats !== null && stats.total >= stats.limit;
+  };
+
+  async function cleanupUnused(): Promise<void> {
+    if (busy()) return;
+    const epoch = dialogEpoch;
+    try {
+      const removed = await tagPruneUnused();
+      if (!props.open || dialogEpoch !== epoch) return;
+      const [found, stats] = await Promise.all([tagListAll(), tagStats()]);
+      if (!props.open || dialogEpoch !== epoch) return;
+      setDictionary(found); setDictionaryStats(stats);
+      /*
+       * 库里刚删掉的可能正是**本弹窗草稿里已挂上**的标签（它们 use_count = 0）：
+       * 不清掉草稿，保存时会用已不存在的 id 去挂关联，界面上只剩 `#id`。
+       */
+      const alive = new Set(found.map((tag) => tag.id));
+      setAdding((current) => current.filter((tag) => alive.has(tag.id)));
+      setRemoving((current) => current.filter((id) => alive.has(id)));
+      setSaveError(null);
+      setNotice(t("tags.pruned").replace("{n}", String(removed)));
+      // 共享词典也要重拉：筛选菜单/右栏不能继续显示刚删掉的未使用标签。
+      await props.store.reloadTags();
+    } catch (error) { setSaveError(String(error)); }
+  }
+
   /** 回车：选中了就挂它，没选就**创建新标签**（即使已经有匹配结果） */
   async function commitInput(): Promise<void> {
     const epoch = dialogEpoch;
@@ -224,10 +254,15 @@ export function TagDialog(props: TagDialogProps): JSX.Element {
       stageTag(existing);
       return;
     }
+    if (atLimit()) {
+      setSaveError(t("tags.limitReached").replace("{limit}", String(dictionaryStats()?.limit ?? 5000)));
+      return;
+    }
     const created = await tagEnsure(name);
     if (created === null) throw new Error(t("ai.saveFailed"));
     if (!props.open || dialogEpoch !== epoch) return;
     setDictionary((current) => [created, ...current]);
+    setDictionaryStats((current) => current ? { ...current, total: current.total + 1 } : current);
     // 同步进 store 的词典：右栏「标签」那一段当场就能显示它（不必等下次刷新）
     props.store.rememberTag(created);
     stageTag(created);
@@ -319,6 +354,7 @@ export function TagDialog(props: TagDialogProps): JSX.Element {
         <Show when={sourceLoading()}><p class="text-fs-1 text-fg-3" role="status">{t("ai.loadingTags")}</p></Show>
         <Show when={sourceError()}>{(error) => <div class="space-y-2"><p class="text-fs-1 text-danger" role="alert">{error()}</p><Button variant="secondary" size="sm" onClick={() => setLoadRevision((n) => n + 1)}>{t("ai.retry")}</Button></div>}</Show>
         <Show when={saveError()}>{(error) => <p class="text-fs-1 text-danger" role="alert">{error()}</p>}</Show>
+        <Show when={notice()}>{(message) => <p class="text-fs-1 text-fg-3" role="status">{message()}</p>}</Show>
         <fieldset class="contents" disabled={busy() || sourceLoading() || sourceError() !== null}>
         {/* 输入即搜 */}
         <div class="flex h-8 items-center gap-2 rounded-ui bg-surface-bar px-2">
@@ -333,6 +369,29 @@ export function TagDialog(props: TagDialogProps): JSX.Element {
             onKeyDown={onInputKeyDown}
           />
         </div>
+
+        {/* 词典计数 + 满额时的清理入口（崔总 2026-10-25：系统硬上限 5000） */}
+        <div class="flex items-center justify-between gap-2 text-fs-0 text-fg-3">
+          <span>
+            {t("tags.dictionaryCount")
+              .replace("{n}", String(dictionaryStats()?.total ?? dictionary().length))
+              .replace("{limit}", String(dictionaryStats()?.limit ?? 5000))}
+          </span>
+          <Show when={atLimit() && (dictionaryStats()?.unused ?? 0) > 0}>
+            <button
+              type="button"
+              class="shrink-0 text-brand hover:underline"
+              onClick={() => void cleanupUnused()}
+            >
+              {t("tags.pruneUnused").replace("{n}", String(dictionaryStats()?.unused ?? 0))}
+            </button>
+          </Show>
+        </div>
+        <Show when={atLimit()}>
+          <p class="text-fs-0 text-fg-2">
+            {t("tags.limitReached").replace("{limit}", String(dictionaryStats()?.limit ?? 5000))}
+          </p>
+        </Show>
 
         {/* 搜索结果（上下键选、回车挂上；最后一行是「创建」） */}
         <div class="rounded-ui bg-surface-bar p-2" data-tag-results="open">
@@ -371,7 +430,8 @@ export function TagDialog(props: TagDialogProps): JSX.Element {
             <button
               type="button"
               data-tag-create="open"
-              class="mt-1 flex w-full items-center gap-1.5 rounded-ui px-1.5 py-0.5 text-left text-fs-2 text-brand hover:bg-state-hover"
+              disabled={atLimit()}
+              class="mt-1 flex w-full items-center gap-1.5 rounded-ui px-1.5 py-0.5 text-left text-fs-2 text-brand hover:bg-state-hover disabled:opacity-50 disabled:hover:bg-transparent"
               onClick={() => void commitInput().catch((error: unknown) => setSaveError(String(error)))}
             >
               <IconPlus size={12} aria-hidden="true" />

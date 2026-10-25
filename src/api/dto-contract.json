@@ -114,6 +114,11 @@
     "registered",
     "repositoryId"
   ],
+  "TagStats": [
+    "limit",
+    "total",
+    "unused"
+  ],
   "ThumbCacheStats": [
     "bySize",
     "bytes",

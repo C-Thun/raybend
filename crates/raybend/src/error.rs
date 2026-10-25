@@ -113,6 +113,10 @@ pub enum Error {
     /// 库当前处于离线状态（登记的路径下找不到它的 `catalog.db`）。
     #[error("库「{name}」当前离线：登记过的 {tried} 个路径下都没有找到它")]
     RepositoryOffline { name: String, tried: usize },
+
+    /// 标签词典达到系统上限：只允许挂已有标签，不再新建。
+    #[error("标签已达上限（{limit} 个）；请先清理未使用标签")]
+    TagLimit { limit: i64 },
 }
 
 impl Error {

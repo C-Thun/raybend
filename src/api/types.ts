@@ -36,7 +36,7 @@ export type TakenAtSource = "exif" | "filename" | "file_created" | "file_mtime" 
  * `grid` = 缩略图 384 —— 网格 tiles 与**所有**胶片带共用这一档（192 那一档 2026-10-11 取消）；
  * `screen` = 1920，看图载入期间的占位（`specs/thumbnail-tiers-and-import-memory.md`）。
  */
-export type ThumbSize = "grid" | "screen";
+export type ThumbSize = "grid";
 
 /** 最近导入过的一个目录（`store::recent::RecentDir`）。 */
 export interface RecentDir {
@@ -240,7 +240,14 @@ export interface RepositoryProbe {
   message: string | null;
 }
 
-/** `thumb_sources_stats` 的返回（缓存统计）。 */
+/** 标签词典的计数/上限/未使用数（`tag_stats`）。 */
+export interface TagStats {
+  total: number;
+  limit: number;
+  unused: number;
+}
+
+/** `thumb_cache_stats` 的返回（当前库的小图缓存统计）。 */
 export interface ThumbCacheStats {
   entries: number;
   bytes: number;

@@ -298,6 +298,14 @@ fn repository_probe_keys_match_contract() {
 }
 
 #[test]
+fn tag_stats_keys_match_contract() {
+    assert_eq!(
+        keys_of::<crate::tags::TagStatsDto>(),
+        contract_keys("TagStats")
+    );
+}
+
+#[test]
 fn thumb_cache_stats_keys_match_contract() {
     assert_eq!(
         keys_of::<raybend::thumbnail::CacheStats>(),
@@ -331,6 +339,7 @@ fn every_contract_entry_has_a_test() {
         "RepositoryConnection",
         "RepositoryPath",
         "RepositoryProbe",
+        "TagStats",
         "ThumbCacheStats",
         // 目录元信息（M1-10：宽高 + 方向）
         "MetaFile",

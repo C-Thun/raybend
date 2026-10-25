@@ -82,6 +82,48 @@ pub async fn tag_list_all<R: Runtime>(app: AppHandle<R>) -> Result<Vec<TagDto>, 
     .await
 }
 
+/// 标签词典的计数/上限/未使用数（界面显示 `n / 5000` 与清理入口用）。
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TagStatsDto {
+    pub total: i64,
+    pub limit: i64,
+    pub unused: i64,
+}
+
+#[tauri::command]
+pub async fn tag_stats<R: Runtime>(app: AppHandle<R>) -> Result<TagStatsDto, String> {
+    let handle = app.clone();
+    blocking(move || {
+        let state = handle.state::<DbState>();
+        state.with(&handle, |db: &AppDb| {
+            db.read(|conn| {
+                Ok(TagStatsDto {
+                    total: tags::count_tags(conn)?,
+                    limit: tags::MAX_TAGS,
+                    unused: tags::count_unused_tags(conn)?,
+                })
+            })
+            .map_err(|e| e.to_string())
+        })
+    })
+    .await
+}
+
+/// 清掉未使用标签（`use_count = 0`），腾出 5000 名额。返回删除条数。
+#[tauri::command]
+pub async fn tag_prune_unused<R: Runtime>(app: AppHandle<R>) -> Result<usize, String> {
+    let handle = app.clone();
+    blocking(move || {
+        let state = handle.state::<DbState>();
+        state.with(&handle, |db: &AppDb| {
+            db.write(|conn| tags::prune_unused_tags(conn))
+                .map_err(|e| e.to_string())
+        })
+    })
+    .await
+}
+
 /// 建标签（已有同名就返回已有的那条 —— 幂等）。
 ///
 /// 名字的规范化与校验在 `store::tags::clean_name` 里（去首尾空白、空名与超长报错），
