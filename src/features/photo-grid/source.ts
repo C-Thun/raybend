@@ -17,8 +17,19 @@ import type { PhotoGridStore } from "./store.ts";
 import { itemId } from "./rows.ts";
 import type { TileInfoMode } from "../../lib/display-prefs.ts";
 
-/** 把一张 `SourceItem` 转成网格要看的形状 */
-function toGridItem(store: PhotoGridStore, item: ReturnType<PhotoGridStore["displayItems"]>[number]): GridItem {
+/**
+ * 把一张 `SourceItem` 转成网格要看的形状。
+ *
+ * `isExcluded` **必须在这里求值**（不是只挂在 `TilesSource` 边上）：网格只读
+ * `GridItem.excluded`（`PhotoGrid` 把它接到 `Tile` 的 `excluded` prop），没有第二条出口。
+ * 2026-09-19 统一网格（`75334bd`）时把它漏在了适配器外，症状就是「批量排除点了
+ * 没有任何效果」——集合变了、画面不变。
+ */
+function toGridItem(
+  store: PhotoGridStore,
+  item: ReturnType<PhotoGridStore["displayItems"]>[number],
+  isExcluded?: (id: string) => boolean,
+): GridItem {
   const id = itemId(item);
   return {
     id,
@@ -28,30 +39,38 @@ function toGridItem(store: PhotoGridStore, item: ReturnType<PhotoGridStore["disp
     aspect: store.aspectOf(id),
     // 展示的就是 RAW 才有角标；导入侧没有「位图 + RAW 复合」这回事
     isRaw: item.kind === "raw",
+    excluded: isExcluded?.(id) === true,
   };
 }
 
 export interface ImportSourceOptions {
-  /** 这张是不是被排除了（状态不在网格里，见 `PhotoGrid` 的说明） */
+  /**
+   * 这张是不是被排除了（排除集合住在导入工作区的 store；这里只负责把它带进
+   * `GridItem.excluded`——网格不认别的形状）。
+   */
   isExcluded?: (id: string) => boolean;
   infoMode?: () => TileInfoMode;
 }
 
-/** 包一个导入侧数据源。`isExcluded` 会一路带到 `Tile` 上（排除态的画法）。 */
+/**
+ * 包一个导入侧数据源。`isExcluded` 会一路带到 `Tile` 上（排除态的画法）。
+ *
+ * 排除状态**只从 `GridItem.excluded` 出去**：不在返回对象上再挂一个 `isExcluded`——
+ * 那是同一件事的第二种表达，网格不会去读它，留着只会让人以为它生效。
+ */
 export function importSource(
   store: PhotoGridStore,
   options: ImportSourceOptions = {},
-): TilesSource & { isExcluded?: (id: string) => boolean } {
+): TilesSource {
   return {
-    isExcluded: options.isExcluded,
     count: () => store.displayItems().length,
     itemAt: (index) => {
       const item = store.displayItems()[index];
-      return item === undefined ? null : toGridItem(store, item);
+      return item === undefined ? null : toGridItem(store, item, options.isExcluded);
     },
     itemById: (id) => {
       const item = store.displayItems().find((entry) => itemId(entry) === id);
-      return item === undefined ? null : toGridItem(store, item);
+      return item === undefined ? null : toGridItem(store, item, options.isExcluded);
     },
     aspectOf: (id) => store.aspectOf(id),
     naturalOf: (id) => store.naturalOf(id),

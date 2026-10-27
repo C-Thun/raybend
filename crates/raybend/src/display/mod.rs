@@ -381,6 +381,22 @@ const fn backend_of(kind: MediaKind) -> Backend {
     }
 }
 
+/// 库外图像的执行中单飞表。
+/// key 直接复用 `SourceKey`：文件大小、mtime、档位与编码签名都在内，
+/// 换卡 / 覆盖保存不会被错误合并。结果只交给当前等待者，真正的缓存仍是 `SourceThumbs`。
+fn external_flights() -> &'static crate::thumbnail::flight::FlightGate<
+    crate::thumbnail::memory::SourceKey,
+    Option<DisplayImage>,
+> {
+    static FLIGHTS: std::sync::OnceLock<
+        crate::thumbnail::flight::FlightGate<
+            crate::thumbnail::memory::SourceKey,
+            Option<DisplayImage>,
+        >,
+    > = std::sync::OnceLock::new();
+    FLIGHTS.get_or_init(Default::default)
+}
+
 /// **带缓存的统一取图口**（view 路径走它；`src-tauri` 的 `view_image`）。
 ///
 /// 与 [`display_image`] 的唯一区别：走渲染管线出来的结果会被缓存，同一张、同一档
@@ -445,33 +461,54 @@ pub fn cached_image(
     if request.scope == ImageScope::External {
         // 进内存缓存的只有缩略图（384）与真身两档；1920 那一档 import 不产生（见 `memory`）
         let key = crate::thumbnail::memory::SourceKey::of(request.path, size, sig);
-        if let Some(hit) = memory.and_then(|cache| cache.get(&key)) {
-            return Ok(Some(DisplayImage {
-                bytes: hit.data,
-                mime,
-                origin: ImageOrigin::Rendered,
-                backend,
-                size: Some((hit.width, hit.height)),
-            }));
-        }
-        let Some(image) = display_image(request)? else {
-            return Ok(None);
-        };
-        if image.origin == ImageOrigin::Rendered {
-            let (width, height) = image.size.unwrap_or((0, 0));
-            if let Some(cache) = memory {
-                cache.put(
-                    key,
-                    Thumb {
-                        data: image.bytes.clone(),
-                        width,
-                        height,
-                        placeholder: false,
-                    },
-                );
+        match external_flights().begin(key.clone()) {
+            crate::thumbnail::flight::FlightClaim::Wait(wait) => {
+                return wait
+                    .wait()
+                    .map(crate::thumbnail::flight::into_owned)
+                    .map_err(crate::error::Error::Unsupported);
+            }
+            crate::thumbnail::flight::FlightClaim::Leader(leader) => {
+                let result = (|| {
+                    if let Some(hit) = memory.and_then(|cache| cache.get(&key)) {
+                        return Ok(Some(DisplayImage {
+                            bytes: hit.data,
+                            mime,
+                            origin: ImageOrigin::Rendered,
+                            backend,
+                            size: Some((hit.width, hit.height)),
+                        }));
+                    }
+                    let Some(image) = display_image(request)? else {
+                        return Ok(None);
+                    };
+                    if image.origin == ImageOrigin::Rendered {
+                        let (width, height) = image.size.unwrap_or((0, 0));
+                        if let Some(cache) = memory {
+                            cache.put(
+                                key,
+                                Thumb {
+                                    data: image.bytes.clone(),
+                                    width,
+                                    height,
+                                    placeholder: false,
+                                },
+                            );
+                        }
+                    }
+                    Ok(Some(image))
+                })();
+                return match result {
+                    Ok(image) => {
+                        Ok(crate::thumbnail::flight::into_owned(leader.publish(image)))
+                    }
+                    Err(error) => {
+                        leader.publish_error(&error);
+                        Err(error)
+                    }
+                };
             }
         }
-        return Ok(Some(image));
     }
 
     // ── 库内：磁盘缓存（未入库的源文件身份字符串就是绝对路径，见 `cache_key_for`）──

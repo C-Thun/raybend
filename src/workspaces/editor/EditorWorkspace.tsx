@@ -208,6 +208,10 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
    */
   const previews = createPreviewQueue({
     run: (path) => refreshDevelopPreview(path),
+    onDuplicate: ({ identity, where }) => {
+      // i18n-exempt: 控制台诊断（路径不进 console，后端日志另有脱敏）
+      console.debug("[editor] 重复预览刷新已合并", { identity, where });
+    },
     onError: (error) => {
       console.error("[editor] 预览图刷新失败", error); // i18n-exempt: 控制台诊断
     },
@@ -671,9 +675,20 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
     }, 250);
     onCleanup(() => {
       window.clearInterval(timer);
-      void unbindEditorRenderer().catch(() => {
-        // 停不掉也只是线程多活一会儿；窗口关了进程就没了
-      });
+      /*
+       * 停渲染线程要等一个在跑的显影任务落地（Rust 侧 `join`），真机上是**退出编辑的那一卡**。
+       * 记一行耗时：卡多久、是不是它卡的，一眼就能对上（2026-10-27 排障加）。
+       */
+      const stopped = performance.now();
+      void unbindEditorRenderer()
+        .then(() => {
+          const elapsed = Math.round(performance.now() - stopped);
+          // i18n-exempt: 控制台诊断
+          if (elapsed >= 100) console.debug(`[editor] 停渲染线程 ${elapsed}ms`);
+        })
+        .catch(() => {
+          // 停不掉也只是线程多活一会儿；窗口关了进程就没了
+        });
       applyRenderState(null);
       setRendererBound(false);
     });
@@ -973,7 +988,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
    * | 预设 `PresetPanel` | 应用预设（`onApplyPreset`） |
    * | 色彩输入 | 「应用 / 恢复自动 / 批量」按钮（选 profile 只是预览） |
    * | 工具栏 | 自动调整；重置修改 / 恢复自动；编辑源 SOOC↔RAW |
-   * | 定稿 | 切定稿；创建定稿（先 confirm 再渲染） |
+   * | 定稿 | **创建**定稿（先 confirm 再渲染）；**切定稿只是「看」，不写库**（2026-10-27） |
    * | 画布工具 | 裁切 / 旋转的「确认」（`confirmTool`） |
    *
    * **不是** confirm 节点：旋转角度拉杆（工具草稿，落库在工具确认那一步）、
@@ -1027,7 +1042,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
           thumbs.refresh(path);
           setIssueThumbRevision((value) => value + 1);
           // 1920 预览排队在后台；就绪后再刷总览图（总览读的就是这份预览）
-          void previews.push(path, persistTail).then(() => {
+          void previews.push(path, persistTail, String(rev)).then(() => {
             if (currentPath() === path) overviewImages.refresh(path);
           });
         }
@@ -1096,7 +1111,8 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
         if (path !== null) {
           thumbs.refresh(path);
           setIssueThumbRevision((value) => value + 1);
-          void previews.push(path).then(() => {
+          const revision = String(props.store.developRev());
+          void previews.push(path, undefined, revision).then(() => {
             if (currentPath() === path) overviewImages.refresh(path);
           });
         }
@@ -1122,9 +1138,9 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
    * 这是**后台那一路** —— 不等它（高质量降噪下一张 1920 要十几秒），失败也只记日志：
    * 预览没备好最多让下次看图慢一点，不该影响编辑。
    */
-  const refreshPreview = (path: string | null): void => {
+  const refreshPreview = (path: string | null, identity?: string): void => {
     if (path === null || path === "") return;
-    void previews.push(path);
+    void previews.push(path, undefined, identity);
   };
 
   const lensQuery = createLensQuery(getLensMatch);
@@ -1145,19 +1161,21 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
       active = false;
       // 换照片 / 卸载：① 还没落库的改动存到**上一张**上；② 把 preview 更新到最后状态
       if (previous === null) return;
+      // 离开时的 rev 就是上一张照片的内容身份；同 rev 的退出补刷与 confirm 合并。
+      const revision = String(untrack(() => props.store.developRev()));
       if (untrack(() => props.store.developDirty())) {
         const stack = untrack(currentDevelopStack);
         void persist(async () => {
           await commitDevelopStack(previous.repositoryId, previous.assetId, stack);
           // 落库之后才排队：preview 读的是库里的当前栈（队列内部也是这个顺序）
-          if (previous.path !== null) void previews.push(previous.path);
+          if (previous.path !== null) void previews.push(previous.path, undefined, revision);
         })
           .catch((error: unknown) => {
             console.error("[editor] 切换照片前落库失败", error); // i18n-exempt: 控制台诊断
           });
       } else {
         // 没改动也刷一次：上一次落库已经把缓存作废了（「退出编辑」那个节点）
-        refreshPreview(previous.path);
+        refreshPreview(previous.path, revision);
       }
     });
 
@@ -1327,7 +1345,13 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
     autoAdjust: () => void autoAdjust(),
     canAutoAdjust,
     canFinalize: () => enabled() && !finalizeBusy() && (issueLibrary()?.canFinalize ?? false),
-    finalize: () => { setFinalizeName(issueLibrary()?.suggestedName ?? ""); setFinalizeOpen(true); },
+    /*
+     * 命令 / 左栏按钮**同一个入口**：先把建议名填进弹窗再开。
+     * ❗别把它和下面的 `finalize()`（真正保存）接反 —— 左栏按钮曾经直接指向保存函数，
+     * 而那时 `finalizeName()` 还是空的，于是 `finalize()` 第一句就 return，
+     * 表现就是「定稿按钮按了没反应」（2026-10-27 修）。
+     */
+    finalize: () => openFinalizeDialog(),
     fullscreenTarget,
   };
 
@@ -1415,18 +1439,93 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
     }, 60);
     onCleanup(() => { active = false; window.clearTimeout(timer); });
   });
-  const selectIssue = (stack: DevelopStack, selection: IssueSelection): void => {
-    if (!enabled()) return;
+  /*
+   * 把一份 **查看用** 的编辑栈载进界面（切 SOOC / RAW / 历史定稿 / 回 latest 共用）。
+   *
+   * 两条铁律（崔总 2026-10-27 的问题就是这个）：
+   *
+   * 1. **不写库**：`develop_stacks`（latest）只在用户**编辑操作**（`confirmEdit`）时写。
+   *    切定稿只是「看」——旧实现先 `applyDevelop` 再 `confirmEdit`，正好把目标栈
+   *    存成了 latest，于是「编辑 → 点 SOOC → 点最近编辑」就再也回不来了。
+   * 2. **载入后立刻标记已落库**：否则这次载入会被当成「未保存的编辑」，
+   *    下一次任何 confirm 都会把它写进 latest（同样是覆盖用户的编辑）。
+   */
+  const applyViewedStack = (stack: DevelopStack): void => {
     props.store.applyDevelop(stack.values, stack.curves, developSettingsOf(stack));
-    confirmEdit();
-    // 面板高亮立刻切过去；渲染提示晚 300ms 才亮（快的时候不闪）
-    setIssueSelectionOverride(selection);
+    props.store.markCommitted(props.store.developRev());
     issueSwitchPending = true;
     window.clearTimeout(issueSwitchTimer);
     issueSwitchTimer = window.setTimeout(() => {
       if (issueSwitchPending) setIssueSwitching(true);
     }, 300);
   };
+
+  /** 切走前把**没落库**的编辑存成 latest —— 「没退出 editor 就不丢」只靠这一句保证。 */
+  const persistPendingEdits = (): void => {
+    if (props.store.developDirty()) confirmEdit();
+  };
+
+  const selectIssue = (stack: DevelopStack, selection: IssueSelection): void => {
+    if (!enabled()) return;
+    persistPendingEdits();
+    applyViewedStack(stack);
+    // 面板高亮立刻切过去（用户点的就是这一项）；渲染提示晚 300ms 才亮（快的时候不闪）
+    setIssueSelectionOverride(selection);
+  };
+
+  /**
+   * 切回「最近编辑」（latest）。
+   *
+   * latest 的唯一真相是库里的 `develop_stacks`（与换照片读的是同一份）。
+   * 切到 SOOC / 定稿时**不写**它，所以这里读回来的就是用户最后那次编辑。
+   */
+  const selectLatest = async (): Promise<void> => {
+    const repositoryId = store.repositoryId();
+    const assetId = currentAssetId();
+    if (!enabled() || repositoryId === null || assetId === null || assetId === undefined) return;
+    const stillCurrent = (): boolean =>
+      store.repositoryId() === repositoryId && currentAssetId() === assetId;
+    const revAtClick = props.store.developRev();
+    persistPendingEdits();
+    /*
+     * 先等挂起的落库跑完再读：否则可能读到**写入前**的那一份（用户刚 confirm 的编辑
+     * 还在 `persistTail` 里），界面就会跳回旧版本 —— 看着像「又丢了」。
+     */
+    await persistTail;
+    /*
+     * 等待期间用户又切了别处（或又改了参数）：这次点击作废 ——
+     * 否则晚到的 latest 会盖掉刚选中的目标。
+     */
+    if (!stillCurrent() || props.store.developRev() !== revAtClick) return;
+    try {
+      const stack = await getDevelopStack(repositoryId, Number(assetId));
+      // 读盘期间又切了别处 / 又改了参数：不拿这份结果盖掉新的选择
+      if (!stillCurrent() || props.store.developRev() !== revAtClick || stack === null) return;
+      applyViewedStack(stack);
+      const revAfterApply = props.store.developRev();
+      /*
+       * 高亮**由后端判**（这份栈算 latest，还是其实落回了 SOOC/RAW）——
+       * 前端不重算 profile 指纹（那是 `store/issues.rs` 的唯一职责）。
+       */
+      const library = await getIssueLibrary(
+        repositoryId, Number(assetId), locale() === "en-US", currentDevelopStack(),
+      );
+      // 回填也要再一次守卫：两个 await 之间用户可能已经点去别处
+      if (!stillCurrent() || props.store.developRev() !== revAfterApply || library === null) return;
+      setIssueLibrary(library);
+      setIssueSelectionOverride(library.selection);
+    } catch (error) {
+      setDevelopError(String(error));
+    }
+  };
+
+  /** 打「定稿为新 Issue」弹窗（建议名由后端给）；真正的保存在 `finalize()`。 */
+  const openFinalizeDialog = (): void => {
+    if (!enabled() || !issueLibrary()?.canFinalize || finalizeBusy()) return;
+    setFinalizeName(issueLibrary()?.suggestedName ?? "");
+    setFinalizeOpen(true);
+  };
+
   const finalize = async (): Promise<void> => {
     if (!enabled() || !issueLibrary()?.canFinalize || finalizeBusy()) return;
     const repositoryId = store.repositoryId();
@@ -1653,12 +1752,13 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
             issueFocusTick={issueFocusTick()}
             issueSelectionOverride={issueSelectionOverride()}
             onSelectIssue={selectIssue}
+            onSelectLatest={selectLatest}
             onDeleteIssue={requestDeleteIssue}
             onRenameIssue={requestRenameIssue}
             issueThumbs={issueThumbs}
             issueThumbKey={issueThumbKey}
             canFinalize={() => enabled() && !finalizeBusy() && (issueLibrary()?.canFinalize ?? false)}
-            onFinalize={() => void finalize()}
+            onFinalize={openFinalizeDialog}
             onCreateCategory={createCategory}
             onImport={importDirectory}
             onSelectLut={(id) => { if (!enabled()) return; props.store.setLut(id, true); confirmEdit(); }}

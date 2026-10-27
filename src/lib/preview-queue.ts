@@ -19,6 +19,8 @@ export interface PreviewQueueDeps {
   run: (path: string) => Promise<unknown>;
   /** 渲染失败（只报不抛：队列要继续跑后面的） */
   onError?: (error: unknown) => void;
+  /** 同路径、同内容身份的请求被合并（诊断重复触发源；不掺进调度）。 */
+  onDuplicate?: (event: { path: string; identity: string; where: "active" | "pending" }) => void;
 }
 
 export interface PreviewQueue {
@@ -27,10 +29,12 @@ export interface PreviewQueue {
    *
    * @param path 照片路径
    * @param after 落库闸门；解析后才渲染（失败则跳过）。缺省立即渲染。
+   * @param identity 内容身份（编辑会话里用 `developRev`）。同路径 + 同身份才合并；
+   *          不传则保持旧行为，每次 push 都可能是新内容，绝不盲目按路径去重。
    * @returns 在该次（或更新的）渲染完成后 resolve 的 promise ——
    *          需要「预览就绪后再做点什么」（如刷新总览图）时 await 它。
    */
-  push: (path: string, after?: Promise<unknown>) => Promise<void>;
+  push: (path: string, after?: Promise<unknown>, identity?: string) => Promise<void>;
   /** 卸载：清掉排队项并放行等待者；在飞的那一次无法取消（结果会被丢弃） */
   dispose: () => void;
 }
@@ -39,6 +43,7 @@ export function createPreviewQueue(deps: PreviewQueueDeps): PreviewQueue {
   interface Job {
     path: string;
     after: Promise<unknown>;
+    identity?: string;
     waiters: (() => void)[];
   }
 
@@ -75,13 +80,30 @@ export function createPreviewQueue(deps: PreviewQueueDeps): PreviewQueue {
   };
 
   return {
-    push: (path, after) => {
+    push: (path, after, identity) => {
       if (disposed) return Promise.resolve();
       const gate = after ?? Promise.resolve();
+      /*
+       * 同一份内容的 confirm / 退出补刷可能撞上在飞任务：让新调用者等同一个，
+       * 不再把一模一样的工作排到它后面。身份缺省时绝不按路径猜同内容。
+       */
+      const running = active;
+      if (identity !== undefined && running?.path === path && running.identity === identity) {
+        deps.onDuplicate?.({ path, identity, where: "active" });
+        return new Promise<void>((resolve) => { running.waiters.push(resolve); });
+      }
+      if (identity !== undefined && pending?.path === path && pending.identity === identity) {
+        deps.onDuplicate?.({ path, identity, where: "pending" });
+        const waiters = pending.waiters;
+        const promise = new Promise<void>((resolve) => { waiters.push(resolve); });
+        // 同内容只更新落库闸门（保留所有等待者），不增加一次渲染。
+        pending = { path, after: gate, identity, waiters };
+        return promise;
+      }
       const waiters = pending?.waiters ?? [];
       const promise = new Promise<void>((resolve) => { waiters.push(resolve); });
       // 最新者优先：排队中的请求被后来的替换，等待者合并（都等下一次真正跑完）
-      pending = { path, after: gate, waiters };
+      pending = { path, after: gate, identity, waiters };
       pump();
       return promise;
     },

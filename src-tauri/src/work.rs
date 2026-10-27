@@ -84,9 +84,22 @@ impl CancelToken {
 struct Slot {
     result: Mutex<Option<Result<(), String>>>,
     ready: Condvar,
+    /// 合并进来的重复请求数（只用于诊断，不影响调度）。
+    duplicates: std::sync::atomic::AtomicUsize,
 }
 
 impl Slot {
+    fn note_duplicate(&self, key: &str) {
+        let ordinal = self.duplicates.fetch_add(1, Ordering::Relaxed) + 1;
+        log::debug!("[work] 相同后台任务已存在，合并第 {ordinal} 个重复请求：{key}");
+        if ordinal == 3 {
+            log::warn!(
+                "[work] 相同后台任务连续压入 {} 次，已合并；请检查上游重复触发：{key}",
+                ordinal + 1
+            );
+        }
+    }
+
     fn finish(&self, result: Result<(), String>) {
         let mut guard = self.result.lock().unwrap_or_else(|error| error.into_inner());
         if guard.is_none() {
@@ -228,6 +241,9 @@ impl WorkQueue {
         let token = CancelToken::new();
         let mut inner = self.inner.0.lock().unwrap_or_else(|error| error.into_inner());
         if inner.shutdown || inner.inflight.contains_key(&key) {
+            if let Some(slot) = inner.inflight.get(&key) {
+                slot.note_duplicate(&key);
+            }
             return None;
         }
         inner.enqueue(
@@ -259,6 +275,7 @@ impl WorkQueue {
                 return Err("后台队列已停止".to_string());
             }
             if let Some(slot) = inner.inflight.get(&key) {
+                slot.note_duplicate(&key);
                 Arc::clone(slot)
             } else {
                 let token = CancelToken::new();

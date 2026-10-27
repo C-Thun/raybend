@@ -16,6 +16,14 @@ export interface ToolsBarProps {
   store: ShellStore;
   /** 当前有没有选中照片（决定「批量排除」能不能点） */
   hasSelection?: boolean;
+  /**
+   * 「批量排除」在当前视图下不可用。
+   *
+   * 存在的理由：排除的**可见反馈**只在 tiles 里（照片变透明 + 正中禁行图标）。
+   * 看图态（`view` / `film` / 对比）不渲染那张网格 —— 按钮能点却没有反馈，
+   * 读起来就是「点了没反应」。将来若看图态也画排除标记，把这个开关去掉即可。
+   */
+  excludeDisabled?: boolean;
   /** 点「批量排除」 */
   onBatchExclude?: () => void;
   /*
@@ -100,7 +108,8 @@ export function ToolsBar(props: ToolsBarProps) {
               {(tool) => (
                 <Button
                   variant="ghost"
-                  disabled={isToolDisabled(tool, Boolean(props.hasSelection))}
+                  disabled={isToolDisabled(tool, Boolean(props.hasSelection)) ||
+                    (tool.id === "batch-exclude" && props.excludeDisabled === true)}
                   icon={<Dynamic component={TOOL_ICONS[tool.id]} size={14} />}
                   onClick={tool.id === "batch-exclude" ? props.onBatchExclude : undefined}
                 >

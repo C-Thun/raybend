@@ -1063,9 +1063,19 @@ pub async fn editor_unbind_renderer(state: State<'_, EditorState>) -> Result<(),
         .map_err(|_| "编辑器会话锁中毒".to_string())?
         .take();
     if let Some(session) = session {
+        let started = std::time::Instant::now();
         let _ = session.commands.send(RenderCommand::Stop);
         // 线程退出很快（最多等一次 render 的时间）；join 失败不该让命令报错
         let _ = session.thread.join();
+        /*
+         * 这一行是「退出编辑器要等多久」的度量：真机上退出编辑后界面会卡一下，
+         * 卡多久就取决于这次 join（等一个在跑的显影任务落地）——
+         * 日志里有数才能说清「是它拖的」还是「别处堵的」（2026-10-27 排障加）。
+         */
+        log::debug!(
+            "[editor] 渲染线程已停（join {}ms）",
+            started.elapsed().as_millis()
+        );
     }
     Ok(())
 }

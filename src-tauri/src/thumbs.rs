@@ -21,8 +21,10 @@
 //!
 //! # 并发
 //!
-//! 渲染一张要几十到两百毫秒。**限流放在前端**（同时最多 4 个在飞），
-//! 这里不再自己排队 —— 免得两处同时限流、互相等。
+//! 普通限流仍由调用方负责；这里额外做**同请求单飞**：网格、看图、对比与
+//! 退出编辑的预览刷新可能同时撞同一幅输出，缓存未命中时也只真正渲染一次。
+//! key 与缓存身份同源（文件身份 / 源签名 / 编辑指纹 / 档位 / 管线版本），
+//! 不是只按路径去重；不同内容的正常请求仍可并行。
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -92,6 +94,9 @@ pub async fn thumb_get<R: Runtime>(
 
     // 来源查库、lensfun 解析与渲染同在后台线程；缩略图多张并发时
     // 不能让这些同步工作占住 IPC executor，拖慢编辑换图与状态轮询。
+    // 计时只给**慢请求**记一行（debug）：排障看「tiles 半天不出来」时谁在拖。
+    let started = std::time::Instant::now();
+    let label = path.clone(); // 日志用（path 要 move 进后台闭包）
     let handle = app.clone();
     let bytes = crate::source::blocking(move || {
         let _permit=handle.state::<crate::browse::BrowseState>().path_task(&handle,Path::new(&path))?;
@@ -216,6 +221,15 @@ pub async fn thumb_get<R: Runtime>(
         Ok(bytes)
     })
     .await?;
+    let elapsed = started.elapsed();
+    if elapsed.as_millis() >= 200 {
+        log::debug!(
+            "[view] thumb 慢 {} {}ms（{}B）",
+            label,
+            elapsed.as_millis(),
+            bytes.len()
+        );
+    }
 
     Ok(tauri::ipc::Response::new(bytes))
 }
@@ -297,6 +311,59 @@ fn edited_source<R: Runtime>(
     Ok(Some((stack, source)))
 }
 
+/// 1920 / 真身渲染的执行中身份。
+/// `name` 已含变体指纹与源文件签名；尺寸档区分 Preview 与 Full。
+/// 路径只进日志（Debug 走脱敏层），身份判断不依赖路径文本。
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct FullFlightKey {
+    repository_id: String,
+    asset_id: i64,
+    name: String,
+    base: String,
+    size: SizeClass,
+    pipeline: u32,
+    path: PathBuf,
+}
+
+impl std::fmt::Debug for FullFlightKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("full")
+            .field("path", &raybend::thumbnail::flight::LogPath(&self.path))
+            .field("repository", &self.repository_id)
+            .field("asset", &self.asset_id)
+            .field("variant", &self.name)
+            .field("base", &self.base)
+            .field("size", &self.size)
+            .field("pipeline", &self.pipeline)
+            .finish()
+    }
+}
+
+fn full_flights() -> &'static raybend::thumbnail::flight::FlightGate<FullFlightKey, Vec<u8>> {
+    static FLIGHTS: std::sync::OnceLock<
+        raybend::thumbnail::flight::FlightGate<FullFlightKey, Vec<u8>>,
+    > = std::sync::OnceLock::new();
+    FLIGHTS.get_or_init(Default::default)
+}
+
+fn full_flight_key(
+    asset: &ResolvedAsset,
+    path: &Path,
+    name: &str,
+    base: raybend::store::develop::EditBase,
+    size: SizeClass,
+) -> FullFlightKey {
+    FullFlightKey {
+        repository_id: asset.repository_id.clone(),
+        asset_id: asset.asset_id,
+        name: name.to_string(),
+        base: base.as_str().to_string(),
+        size,
+        pipeline: PIPELINE_VERSION,
+        path: path.to_path_buf(),
+    }
+}
+
 /// **大图缓存**：`<库根>/cache/full/<asset>/latest-<hash12>-src<signature>-<base>-v<pipeline>.avif`。
 ///
 /// 命中直接给；没命中就渲染一遍再写进去（写失败只记一句 —— 缓存写不进去
@@ -334,9 +401,19 @@ pub(crate) fn render_profile_cached<R: Runtime>(
     }
     let signature = raybend::media::source::source_signature(&full).map_err(|e| e.to_string())?;
     let name = FullCache::source_name(variant, &signature);
+    let flight_key = full_flight_key(asset, &full, &name, base, SizeClass::Screen);
+    match full_flights().begin(flight_key) {
+        raybend::thumbnail::flight::FlightClaim::Wait(wait) => {
+            wait.wait().map(raybend::thumbnail::flight::into_owned)
+        }
+        raybend::thumbnail::flight::FlightClaim::Leader(leader) => {
+            let result = (|| {
     if let Some(bytes) = cache.read(asset.asset_id, &name, base, PIPELINE_VERSION) {
+        log::debug!("[view] 占位缓存命中 {}（{}B）", full.display(), bytes.len());
         return Ok(bytes);
     }
+    log::debug!("[view] 占位缓存未命中，开始渲染 {}（变体 {variant}）", full.display());
+    let started = std::time::Instant::now();
     // 镜头配置文件（调用方解析 —— 渲染层不认识数据库）
     let lens = crate::lens::render_correction(
         app,
@@ -371,7 +448,24 @@ pub(crate) fn render_profile_cached<R: Runtime>(
         // 1920 也走同一套容量清扫（未编辑 SOOC/RAW 的 Screen 现在也落这里）。
         let _ = cache.maybe_enforce_capacity();
     }
+    log::debug!(
+        "[view] 占位渲染完成 {} {}ms（{}B）",
+        full.display(),
+        started.elapsed().as_millis(),
+        thumb.data.len()
+    );
     Ok(thumb.data)
+            })();
+            match result {
+                // 共享后的字节由最后一个持者直接拿走（无等待者时零拷贝）。
+                Ok(bytes) => Ok(raybend::thumbnail::flight::into_owned(leader.publish(bytes))),
+                Err(error) => {
+                    leader.publish_error(&error);
+                    Err(error)
+                }
+            }
+        }
+    }
 }
 
 /// **真身档**（2026-10-11 崔总口径）：该变体自己的像素，不缩放、不用内嵌预览充数。
@@ -409,6 +503,13 @@ pub(crate) fn render_full_cached<R: Runtime>(
     }
     let signature = raybend::media::source::source_signature(&full).map_err(|e| e.to_string())?;
     let name = FullCache::source_name(variant, &signature);
+    let flight_key = full_flight_key(asset, &full, &name, base, SizeClass::Full);
+    match full_flights().begin(flight_key) {
+        raybend::thumbnail::flight::FlightClaim::Wait(wait) => {
+            wait.wait().map(raybend::thumbnail::flight::into_owned)
+        }
+        raybend::thumbnail::flight::FlightClaim::Leader(leader) => {
+            let result = (|| {
     if let Some(bytes) = cache.read_class(
         asset.asset_id,
         &name,
@@ -416,8 +517,11 @@ pub(crate) fn render_full_cached<R: Runtime>(
         CacheClass::Full,
         PIPELINE_VERSION,
     ) {
+        log::debug!("[view] 真身缓存命中 {}（{}B）", full.display(), bytes.len());
         return Ok(bytes);
     }
+    log::debug!("[view] 真身缓存未命中，开始渲染 {}（变体 {variant}）", full.display());
+    let started = std::time::Instant::now();
     // 镜头配置文件与 LUT 由调用方（这里）解析 —— 渲染层不认识数据库
     let lens = crate::lens::render_correction(
         app,
@@ -457,7 +561,24 @@ pub(crate) fn render_full_cached<R: Runtime>(
         let _ = cache.gc_latest(asset.asset_id, 2);
         let _ = cache.maybe_enforce_capacity();
     }
+    log::debug!(
+        "[view] 真身渲染完成 {} {}ms（{}B）",
+        full.display(),
+        started.elapsed().as_millis(),
+        thumb.data.len()
+    );
     Ok(thumb.data)
+            })();
+            match result {
+                // 共享后的字节由最后一个持者直接拿走（无等待者时零拷贝）。
+                Ok(bytes) => Ok(raybend::thumbnail::flight::into_owned(leader.publish(bytes))),
+                Err(error) => {
+                    leader.publish_error(&error);
+                    Err(error)
+                }
+            }
+        }
+    }
 }
 
 /// 看图/占位该渲染**哪个变体**（`Screen` / `Full` 的 1920/真身分派）。
@@ -518,8 +639,19 @@ pub async fn view_image<R: Runtime>(
     purpose: Option<String>,
 ) -> Result<tauri::ipc::Response, String> {
     let text = purpose.as_deref().unwrap_or("screen");
+    /*
+     * 请求进/出各一行（debug）：排障「双击看大图卡住」时，日志里要能看出
+     * **谁先到、谁排了多久**。同时段内两条重叠就是排队（单例 RAW worker + 渲染）。
+     */
+    let started = std::time::Instant::now();
+    log::debug!("[view] → {text} {path}");
+    let label = path.clone(); // 日志用（path 要 move 进后面的后台闭包）
     let handle=app.clone(); let task_path=path.clone();
     let _permit = crate::source::blocking(move || handle.state::<crate::browse::BrowseState>().path_task(&handle,Path::new(&task_path))).await?;
+    log::debug!(
+        "[view] 库许可已取 {text} {path}（{}ms）",
+        started.elapsed().as_millis()
+    );
     let purpose = ImagePurpose::parse(text).ok_or_else(|| format!("未知的取图用途：{text}"))?;
 
     /*
@@ -567,6 +699,11 @@ pub async fn view_image<R: Runtime>(
                     }
                 })
                 .await?;
+                log::debug!(
+                    "[view] ← {text} {path} {}ms（{}B）",
+                    started.elapsed().as_millis(),
+                    bytes.len()
+                );
                 return Ok(tauri::ipc::Response::new(bytes));
             }
         }
@@ -614,6 +751,11 @@ pub async fn view_image<R: Runtime>(
         Ok(image.bytes)
     })
     .await?;
+    log::debug!(
+        "[view] ← {text} {label} {}ms（{}B）",
+        started.elapsed().as_millis(),
+        bytes.len()
+    );
     Ok(tauri::ipc::Response::new(bytes))
 }
 

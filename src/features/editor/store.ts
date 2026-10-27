@@ -234,7 +234,11 @@ export interface EditorStore {
     curves: Partial<Record<CurveChannel, readonly CurvePoint[]>>,
     settings?: DevelopSettings,
   ) => void;
-  /** 载入定稿为新的工作状态；保留 dirty 以便写入 latest 和撤销栈。 */
+  /**
+   * 载入一份**要当成新工作状态**的栈（查看目标：SOOC / RAW / 定稿 / latest 均用它）。
+   * 载入后由工作区调 `markCommitted` 标为已落库 —— 查看**不写** `develop_stacks`
+   * （`latest` 只在用户编辑操作时写，见 `EditorWorkspace.applyViewedStack`）。
+   */
   applyDevelop: EditorStore["loadDevelop"];
 
   /* ── 镜头 / 降噪方式（M3-W4）──────────────────────── */

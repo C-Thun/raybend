@@ -1499,6 +1499,29 @@ try {
     };
     const out = tiles.map(describe);
     /*
+     * 加载态的排除（2026-10-27）：缩略图未到时，排除的禁行图标也要在。
+     * 单独量那一格（data-tile-loading-excluded），不混进上面「有图」那一组。
+     */
+    const loadingExcluded = (() => {
+      const box = document.querySelector("[data-tile-loading-excluded]");
+      if (box === null) return null;
+      const icon = box.querySelector('[aria-label="已排除"], [aria-label="Excluded"]');
+      return {
+        hasImage: box.querySelector("img") !== null,
+        icon: icon !== null,
+        iconColor: icon ? getComputedStyle(icon).color : null,
+        iconCentered: (() => {
+          if (!icon) return null;
+          const iconRect = icon.getBoundingClientRect();
+          const tile = box.querySelector("[role=option]");
+          const boxRect = (tile ?? box).getBoundingClientRect();
+          return Math.abs(iconRect.left + iconRect.width / 2 - (boxRect.left + boxRect.width / 2)) <= 2
+            && Math.abs(iconRect.top + iconRect.height / 2 - (boxRect.top + boxRect.height / 2)) <= 2;
+        })(),
+        spinning: box.querySelector(".animate-spin") !== null,
+      };
+    })();
+    /*
      * **两种主题都要量**：蒙层是主题相关的令牌（深色压暗 / 浅色提亮），
      * 只量当前主题会漏掉最危险的那一半 —— 深色主题下亮照片上的文件名正是最早报的那张。
      * 直接改 data-theme 属性量一遍（令牌就挂在这个属性上），量完还原，不影响后面的断言。
@@ -1539,6 +1562,7 @@ try {
       libraryTopBars: out.filter((t) => t.hasTopBar).length,
       neutralColor,
       excludedTiles: out.filter((t) => t.excluded),
+      loadingExcluded,
       scrim,
     };
   })()`);
@@ -1602,6 +1626,24 @@ try {
             "图标已经把意思说清了，颜色要克制",
         );
       }
+    }
+    /*
+     * 加载态排除样例：没图也要画出禁行图标（2026-10-27 修过的那条）。
+     * 图标颜色同样要克制（与有图那一组同一套令牌）。
+     */
+    if (tileGrid.loadingExcluded === null) {
+      problems.push("没有加载态排除样例（data-tile-loading-excluded）");
+    } else {
+      const sample = tileGrid.loadingExcluded;
+      if (sample.hasImage) problems.push("加载态排除样例不该有图（应传 loading 而非 src）");
+      if (!sample.icon) problems.push("加载态的排除图标没有渲染 —— 排除反馈在缩略图未到时丢了");
+      if (sample.icon && sample.iconCentered !== true) {
+        problems.push("加载态的排除图标不在 tile 正中");
+      }
+      if (sample.icon && sample.iconColor !== tileGrid.neutralColor) {
+        problems.push(`加载态排除图标用了 ${sample.iconColor}，不是中性的 ${tileGrid.neutralColor}`);
+      }
+      if (sample.spinning) problems.push("加载态排除样例还在转圈 —— 排除态应当优先于加载动画");
     }
     /*
      * RAW 角标在**图片之外**（人类 2026-09-22 报的那条）。

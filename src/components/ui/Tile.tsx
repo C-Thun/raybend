@@ -315,19 +315,34 @@ export function Tile(props: TileProps) {
             /*
              * 加载中 / 空态：**不要内框**（外框已经在了）。
              * 低存在感的形状就够 —— 一张占位图不该抢眼，也不该看起来像「一张照片」。
+             *
+             * **排除态优先于加载态**（2026-10-27）：缩略图还没到时排除的反馈也不能缺席 ——
+             * 用户刚点了「批量排除」，看到的应当是同一种禁行图标，而不是「只有转圈」。
              */
             <span
               class={[
                 "flex items-center justify-center text-fg-3",
-                local.loading ? "animate-pulse" : "",
+                local.loading && !local.excluded ? "animate-pulse" : "",
               ].join(" ")}
-              aria-hidden="true"
+              aria-hidden={local.excluded ? undefined : "true"}
             >
-              {local.loading ? (
-                <span class="size-4 animate-spin rounded-full border border-current border-t-transparent" />
-              ) : (
-                (local.icon ?? <span class="size-4 rounded-(--tile-radius) bg-fg-3/20" />)
-              )}
+              <Show
+                when={local.excluded}
+                fallback={
+                  local.loading ? (
+                    <span class="size-4 animate-spin rounded-full border border-current border-t-transparent" />
+                  ) : (
+                    (local.icon ?? <span class="size-4 rounded-(--tile-radius) bg-fg-3/20" />)
+                  )
+                }
+              >
+                <IconBan
+                  size={28}
+                  stroke-width={1.5}
+                  class="text-fg-2"
+                  aria-label={t("grid.excluded")}
+                />
+              </Show>
             </span>
           }
         >

@@ -45,6 +45,61 @@ test("单飞 + 最新者优先：在飞时排队只留最后一次", async () =>
   assert.deepEqual(runs, ["a", "c"], "中间的 b 被 c 取代，不再单独渲染");
 });
 
+test("同路径同内容身份：合并到在飞任务，只执行一次并报告重复", async () => {
+  const runs: string[] = [];
+  const duplicates: Array<{ path: string; identity: string; where: string }> = [];
+  const first = deferred();
+  const queue = createPreviewQueue({
+    run: (path) => { runs.push(path); return first.promise; },
+    onDuplicate: (event) => duplicates.push(event),
+  });
+  const a = queue.push("a", undefined, "rev:7");
+  const same = queue.push("a", undefined, "rev:7");
+  await tick();
+  assert.deepEqual(runs, ["a"], "重复的同内容请求不另起渲染");
+  first.resolve();
+  await Promise.all([a, same]);
+  assert.deepEqual(runs, ["a"]);
+  assert.deepEqual(duplicates, [{ path: "a", identity: "rev:7", where: "active" }]);
+});
+
+test("同路径不同内容身份：只保留最新尾随；同身份待跑项也合并", async () => {
+  const runs: string[] = [];
+  const duplicates: string[] = [];
+  const first = deferred();
+  const queue = createPreviewQueue({
+    run: (path) => {
+      runs.push(path);
+      return runs.length === 1 ? first.promise : Promise.resolve();
+    },
+    onDuplicate: ({ identity }) => duplicates.push(identity),
+  });
+  const a = queue.push("a", undefined, "rev:1");
+  const old = queue.push("a", undefined, "rev:2");
+  const oldDuplicate = queue.push("a", undefined, "rev:2");
+  const latest = queue.push("a", undefined, "rev:3");
+  await tick();
+  assert.deepEqual(runs, ["a"]);
+  first.resolve();
+  await Promise.all([a, old, oldDuplicate, latest]);
+  assert.equal(runs.length, 2, "旧 rev 不逐个补跑，只跑在飞的 rev:1 与最新 rev:3");
+  assert.deepEqual(duplicates, ["rev:2"]);
+});
+
+test("不传内容身份时保持旧行为：同路径也允许尾随新内容", async () => {
+  const runs: string[] = [];
+  const first = deferred();
+  const queue = createPreviewQueue({
+    run: (path) => { runs.push(path); return runs.length === 1 ? first.promise : Promise.resolve(); },
+  });
+  const a = queue.push("a");
+  const b = queue.push("a");
+  await tick();
+  first.resolve();
+  await Promise.all([a, b]);
+  assert.equal(runs.length, 2, "没有身份就不能猜它是重复请求");
+});
+
 test("落库闸门：先落库再渲染；落库失败就不渲染", async () => {
   const runs: string[] = [];
   const queue = createPreviewQueue({

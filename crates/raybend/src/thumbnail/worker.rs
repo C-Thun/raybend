@@ -23,7 +23,7 @@
 //! 进程被杀时任务停在 `running`。启动时调 [`requeue_running`] 把它们退回 `pending`；
 //! 因为「渲染一张缩略图」是**幂等**的，重复跑只是浪费一点 CPU，不会产生坏数据。
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -432,6 +432,35 @@ pub fn render_cached_with(
     render_cached_with_signature(thumbs, abs_path, size, now_ms, &sig, render)
 }
 
+/// 同一张小图在执行中的身份。
+///
+/// `cache_key` 已经含文件身份，`sig` 已经含编辑指纹与管线版本；
+/// `path` 只用于日志（自定义 Debug，绝不把可能含路径的原始 cache key 字节打印出来）。
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct ThumbFlightKey {
+    cache_key: Vec<u8>,
+    size: SizeClass,
+    sig: String,
+    path: PathBuf,
+}
+
+impl std::fmt::Debug for ThumbFlightKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("thumb")
+            .field("path", &crate::thumbnail::flight::LogPath(&self.path))
+            .field("size", &self.size)
+            .field("sig", &self.sig)
+            .finish()
+    }
+}
+
+fn thumbnail_flights() -> &'static crate::thumbnail::flight::FlightGate<ThumbFlightKey, Vec<u8>> {
+    static FLIGHTS: std::sync::OnceLock<
+        crate::thumbnail::flight::FlightGate<ThumbFlightKey, Vec<u8>>,
+    > = std::sync::OnceLock::new();
+    FLIGHTS.get_or_init(Default::default)
+}
+
 /// 同 [`render_cached_with`]，但**签名由调用方给**（库内 / 库外两套签名的分派点）。
 fn render_cached_with_signature(
     thumbs: &ThumbsDb,
@@ -454,24 +483,59 @@ fn render_cached_with_signature(
         return Ok(bytes);
     }
 
-    let file_name = abs_path
-        .file_name()
-        .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
-    let kind = kind::kind_of_file(&file_name);
-    let thumb = match render()? {
-        Some(t) => t,
-        // 不可解码（RAW）：先用占位图兜住（与队列那条路同一取舍）
-        None => render::placeholder(kind, size)?,
+    let flight_key = ThumbFlightKey {
+        cache_key: key.clone(),
+        size,
+        sig: sig.clone(),
+        path: abs_path.to_path_buf(),
     };
-    let (data, width, height) = (thumb.data, thumb.width, thumb.height);
+    match thumbnail_flights().begin(flight_key) {
+        crate::thumbnail::flight::FlightClaim::Wait(wait) => wait
+            .wait()
+            .map(crate::thumbnail::flight::into_owned)
+            .map_err(crate::error::Error::Unsupported),
+        crate::thumbnail::flight::FlightClaim::Leader(leader) => {
+            let result = (|| {
+                // 初次未命中到拿到 leader 之间，另一张请求可能刚写完；再读一次，
+                // 避免把「先后到达」也变成一次重复渲染。
+                let read_key = key.clone();
+                let read_sig = sig.clone();
+                if let Some(bytes) = thumbs.read(move |conn| {
+                    cache::get(conn, &read_key, size, &read_sig)
+                })? {
+                    thumbs.note_use(&key, size, &sig, now_ms);
+                    return Ok(bytes);
+                }
 
-    let bytes = data.clone();
-    thumbs.write(move |conn| {
-        cache::put(conn, &key, size, &sig, &data, width, height, now_ms)
-    })?;
-    // 写后顺手维护：内部有 6 小时节流，不会每次写都扫全表（FUTURE G26）。
-    let _ = thumbs.maybe_maintain(cache::DEFAULT_MAX_BYTES, now_ms);
-    Ok(bytes)
+                let file_name = abs_path
+                    .file_name()
+                    .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+                let kind = kind::kind_of_file(&file_name);
+                let thumb = match render()? {
+                    Some(t) => t,
+                    // 不可解码（RAW）：先用占位图兜住（与队列那条路同一取舍）
+                    None => render::placeholder(kind, size)?,
+                };
+                let (data, width, height) = (thumb.data, thumb.width, thumb.height);
+
+                let bytes = data.clone();
+                thumbs.write(move |conn| {
+                    cache::put(conn, &key, size, &sig, &data, width, height, now_ms)
+                })?;
+                // 写后顺手维护：内部有 6 小时节流，不会每次写都扫全表（FUTURE G26）。
+                let _ = thumbs.maybe_maintain(cache::DEFAULT_MAX_BYTES, now_ms);
+                Ok(bytes)
+            })();
+            match result {
+                // 共享后的结果由最后一个持者直接拿走（无等待者时零拷贝）。
+                Ok(bytes) => Ok(crate::thumbnail::flight::into_owned(leader.publish(bytes))),
+                Err(error) => {
+                    leader.publish_error(&error);
+                    Err(error)
+                }
+            }
+        }
+    }
 }
 
 /// 一条「真的干过活」的任务的完整结果（给访问用）。
@@ -1046,6 +1110,54 @@ mod tests {
     }
 
     // ---------- render_now（导入工作区的滚动加载）----------
+
+    #[test]
+    fn concurrent_identical_thumbnail_requests_render_once_and_share_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let abs = dir.path().join("a.jpg");
+        std::fs::write(&abs, b"source identity").unwrap();
+        let thumbs = thumbs_db(dir.path());
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(6));
+
+        let results = std::thread::scope(|scope| {
+            let mut handles = Vec::new();
+            for _ in 0..6 {
+                let thumbs = &thumbs;
+                let abs = &abs;
+                let calls = std::sync::Arc::clone(&calls);
+                let barrier = std::sync::Arc::clone(&barrier);
+                handles.push(scope.spawn(move || {
+                    barrier.wait();
+                    render_cached_with(thumbs, abs, SizeClass::Grid, T0, None, || {
+                        calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        std::thread::sleep(std::time::Duration::from_millis(80));
+                        Ok(Some(render::Thumb {
+                            data: vec![7, 8, 9],
+                            width: 1,
+                            height: 1,
+                            placeholder: false,
+                        }))
+                    })
+                    .unwrap()
+                }));
+            }
+            handles
+                .into_iter()
+                .map(|handle| handle.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+
+        assert!(results.iter().all(|bytes| bytes == &[7, 8, 9]));
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1,
+            "并发同 key 只能进一次真正的渲染");
+        // 结算后的请求走真实缓存，不能再渲染。
+        let cached = render_cached_with(&thumbs, &abs, SizeClass::Grid, T0, None, || {
+            panic!("缓存已写好，不应再次渲染")
+        })
+        .unwrap();
+        assert_eq!(cached, vec![7, 8, 9]);
+    }
 
     #[test]
     fn latest_preview_and_small_cache_never_decode_raw_on_a_hit() {

@@ -282,6 +282,83 @@ test("refresh 时在飞的旧结果被丢掉，不会把旧图盖在新图上", 
   assert.deepEqual(queue.stats(), { entries: 1, inflight: 0, queued: 0 });
 });
 
+test("在飞期间连续 refresh 只补一次最新请求，不并发同路径渲染", async () => {
+  const loader = fakeLoader({ hold: true });
+  const urls = fakeUrls();
+  const queue = createThumbQueue({ load: loader.load, ...urls, concurrency: 4 });
+
+  queue.request("/a.jpg");
+  await flush(1);
+  queue.refresh("/a.jpg");
+  queue.refresh("/a.jpg");
+  queue.refresh("/a.jpg");
+  assert.deepEqual(loader.calls, ["/a.jpg"], "旧请求没结束时一个重复的都不发");
+  assert.equal(queue.stats().inflight, 1);
+
+  loader.state.hold = false;
+  loader.releaseAll();
+  await flush(8);
+  assert.equal(loader.calls.length, 2, "旧请求 + 一次尾随最新刷新");
+  assert.equal(queue.get("/a.jpg").status, "ready");
+  assert.equal(urls.created.length, 1, "中间结果不发布，只有最后结果建 URL");
+  assert.deepEqual(queue.stats(), { entries: 1, inflight: 0, queued: 0 });
+});
+
+test("clear 同时取消在飞期间登记的尾随 refresh，旧目录不复活", async () => {
+  const loader = fakeLoader({ hold: true });
+  const queue = createThumbQueue({ load: loader.load, ...fakeUrls() });
+  queue.request("/old.jpg");
+  await flush(1);
+  queue.refresh("/old.jpg");
+  queue.clear();
+
+  loader.state.hold = false;
+  loader.releaseAll();
+  await flush(8);
+  assert.deepEqual(loader.calls, ["/old.jpg"], "clear 后不能再补旧目录的刷新");
+  assert.equal(queue.get("/old.jpg").status, "idle");
+  assert.deepEqual(queue.stats(), { entries: 0, inflight: 0, queued: 0 });
+});
+
+test("clear 之后同路径重取：旧请求结束不能替新请求补尾随刷新（不并发同路径）", async () => {
+  // 可控 loader：每个请求各自可放，才能造出「旧 generation 先结束」的顺序
+  const resolvers: Array<() => void> = [];
+  const calls: string[] = [];
+  const queue = createThumbQueue({
+    concurrency: 4,
+    load: (path) => {
+      calls.push(path);
+      return new Promise((resolve) => {
+        resolvers.push(() => resolve(new Uint8Array([calls.length])));
+      });
+    },
+    ...fakeUrls(),
+  });
+
+  queue.request("/a.jpg");
+  await flush(1);
+  queue.clear(); // 旧请求仍在飞
+  queue.request("/a.jpg"); // 同一路径立刻重取（新 generation）
+  await flush(1);
+  assert.equal(calls.length, 2, "新旧各发一次");
+
+  queue.refresh("/a.jpg"); // 新请求在飞 → 只登记尾随
+  assert.equal(calls.length, 2, "在飞期间不得再发同路径");
+
+  resolvers[0]!(); // 旧 generation 先结束
+  await flush(4);
+  assert.equal(calls.length, 2, "旧请求结束不能把新请求的尾随刷新提前放出");
+  assert.equal(queue.stats().queued + queue.stats().inflight, 1, "只剩新请求那一条");
+
+  resolvers[1]!(); // 新请求结束 → 现在才补一次
+  await flush(4);
+  assert.equal(calls.length, 3, "尾随刷新只补一次");
+  resolvers[2]!();
+  await flush(4);
+  assert.equal(queue.get("/a.jpg").status, "ready");
+  assert.deepEqual(queue.stats(), { entries: 1, inflight: 0, queued: 0 });
+});
+
 test("refresh 一张没请求过的：当作首次请求", async () => {
   const loader = fakeLoader();
   const urls = fakeUrls();

@@ -335,6 +335,22 @@ export function viewerPhotoKey(photo: ViewerPhoto): string {
   return `${photo.id}\u0000${photo.imageKey ?? photo.path}`;
 }
 
+/**
+ * 取图耗时进控制台（`console.debug`）——「双击看大图卡住」时的第一手证据：
+ * 哪个阶段（占位 screen / 真身 full / 预载）花了多久、什么时候回来。
+ *
+ * 只记 ≥100ms 的：缓存命中（几毫秒）不刷屏；真出了问题一眼就是几千毫秒。
+ */
+function logViewLoad(
+  stage: "screen" | "full" | "ensure",
+  fileName: string,
+  started: number,
+): void {
+  const elapsed = Math.round(performance.now() - started);
+  // i18n-exempt: 控制台诊断
+  if (elapsed >= 100) console.debug(`[viewer] ${stage} ${fileName} ${elapsed}ms`);
+}
+
 export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
   const [state, setState] = createSignal<ViewerState>(EMPTY_VIEWER);
   const [imageUrl, setImageUrl] = createSignal<string | null>(null);
@@ -517,7 +533,11 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
     const key = imageKey(photo);
     if (imageUrls().has(key)) return Promise.resolve();
     const pending = pendingImageUrls.get(key);
-    if (pending !== undefined) return pending.task;
+    if (pending !== undefined) {
+      // i18n-exempt: 控制台诊断
+      console.debug(`[viewer] 重复真身预载已合并 ${photo.fileName}`);
+      return pending.task;
+    }
     const ticket = ++imageUrlsTicket;
     const load = deps.loadFull ?? deps.loadScreen;
     if (load === undefined) return Promise.resolve(); // 两个口都没给：没什么可预载的
@@ -525,7 +545,9 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
     probe.record({ kind: "ensure", key, url: null, detail });
     const task = (async () => {
       try {
+        const started = performance.now();
         const bytes = await load(photo.imageKey ?? photo.path);
+        logViewLoad("ensure", photo.fileName, started);
         if (bytes === null || pendingImageUrls.get(key)?.ticket !== ticket) return;
         const url = makeUrl(bytes);
         probe.record({ kind: "new", key, url, detail });
@@ -666,7 +688,14 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
     }
 
     try {
+      /*
+       * 取图耗时进控制台（`console.debug`，只在 devtools 里看）：
+       * 「双击看大图卡住」时要分得清是**没请求**、**请求慢**还是**回包丢了**。
+       * 阈值 100ms：正常的缓存命中不刷屏。
+       */
+      const started = performance.now();
       const bytes = await deps.loadScreen(photo.imageKey ?? photo.path);
+      logViewLoad("screen", photo.fileName, started);
       if (ticket !== generation) {
         if (bytes !== null) dropUrl(makeUrl(bytes), "late-screen"); // 迟到的大图直接丢掉
         return;
@@ -726,6 +755,20 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
       return;
     }
     // 多图缓存里已经有这一张（预载/对比取过）→ 直接借过来用，不再走一次 IPC。
+    const pending = pendingImageUrls.get(key);
+    if (pending !== undefined) {
+      // 预载 / 对比的另一格已经在取同一份真身：等它，不再发第二个 IPC。
+      // 以前只有 loadPlaceholder 的开头等它；若它是在占位返回后才出现，
+      // 这里仍会漏成第二个 full 渲染（2026-10-27 排障补）。
+      // i18n-exempt: 控制台诊断
+      console.debug(`[viewer] 重复真身请求已合并 ${photo.fileName}`);
+      await pending.task;
+      if (ticket !== generation) {
+        // 这一代已经被换图作废：**不要**碰 `fullPending` —— 它现在描述的是新那张
+        // （新那张自己在载入时置 true、完成后置 false），旧结果管不着。
+        return;
+      }
+    }
     const cached = imageUrls().get(key);
     if (cached !== undefined) {
       setSharp(true);
@@ -738,13 +781,20 @@ export function createViewerStore(deps: ViewerStoreDeps): ViewerStore {
     }
     let bytes: Uint8Array | null = null;
     try {
+      const started = performance.now();
       bytes = await load(photo.imageKey ?? photo.path);
+      logViewLoad("full", photo.fileName, started);
     } catch {
       bytes = null;
     }
     if (ticket !== generation) {
+      /*
+       * **作废代不碰全局提示状态**（全函数同一条纪律）：
+       * 迟到的旧结果只处理它自己那份 URL，`fullPending` / `imageUrl` / `sharp`
+       * 都已经属于新那一代（新照片刚置 true、它会自己置 false）—— 旧结果一碰，
+       * 新照片的「正在载入原图…」就会被提前摘下。
+       */
       if (bytes !== null) dropUrl(makeUrl(bytes), "late-full");
-      setFullPending(false);
       return;
     }
     if (bytes === null) {

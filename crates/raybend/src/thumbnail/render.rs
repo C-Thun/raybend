@@ -475,16 +475,26 @@ pub fn render_file_with_profiles(
     profile: impl FnMut(&crate::color::ProfileId, crate::color::icc::IccRole) -> Result<crate::color::icc::RgbIcc>,
 ) -> Result<Option<Thumb>> {
     if let Some(stack) = edit && let Some(color) = &stack.color {
+        let mut clock = RenderClock::new();
         let (source, shot) = crate::display::output::decode_working_source(path, color, profile, crate::raw::DecodePriority::Normal)?;
+        let decode_ms = clock.lap();
         let edge = source_input_edge(size, source.dimensions(), stack.geometry);
         let source = crate::develop::working::WorkingReferenceImage::from_working(source.into_downscaled(edge))
             .map_err(|e| Error::Unsupported(e.to_string()))?;
+        let scale_ms = clock.lap();
         let working = crate::display::output::render_working(&source, stack, lens, shot, lut, 0)?;
+        let develop_ms = clock.lap();
         let target = crate::color::icc::srgb_icc().map_err(|e| Error::Unsupported(e.to_string()))?;
         let (w, h) = working.dimensions();
         let rgb = image::ImageBuffer::from_raw(w, h, working.to_rgb16_flat(&target).map_err(|e| Error::Unsupported(e.to_string()))?)
             .ok_or_else(|| Error::Unsupported("色彩缩略图尺寸与像素不符".into()))?;
-        return encode_with_lut(DynamicImage::ImageRgb16(rgb), size, None, false, None, None, None, format).map(Some);
+        let thumb = encode_with_lut(DynamicImage::ImageRgb16(rgb), size, None, false, None, None, None, format)?;
+        let encode_ms = clock.lap();
+        log_render_stages(
+            size, path, &clock, decode_ms, scale_ms, develop_ms, 0, encode_ms,
+            Some((thumb.width, thumb.height)),
+        );
+        return Ok(Some(thumb));
     }
     let kind = path
         .file_name()
@@ -535,6 +545,60 @@ pub fn render_file_with_profiles(
             return thumb_from_pixels(pixels, size, format).map(Some);
         }
     Ok(full)
+}
+
+/// 一次渲染的**分段计时**（`RAYBEND_LOG=debug` 才输出，release 里只是几次 `Instant::now()`）。
+///
+/// 为什么要有它：真机上「双击看大图卡十几秒」时，日志里只有编辑器那几条「真帧」，
+/// 浏览/看图这条路的解码、显影、几何、编码各花多少**一条都没有** —— 定位只能靠猜。
+/// 这里把一条请求拆成四段记一行：谁慢一眼就看出来（2026-10-27 排障加）。
+struct RenderClock {
+    started: std::time::Instant,
+    last: std::time::Instant,
+}
+
+impl RenderClock {
+    fn new() -> Self {
+        let now = std::time::Instant::now();
+        Self { started: now, last: now }
+    }
+
+    /// 上一段到现在的毫秒数，并把游标推到现在。
+    fn lap(&mut self) -> u128 {
+        let now = std::time::Instant::now();
+        let ms = now.duration_since(self.last).as_millis();
+        self.last = now;
+        ms
+    }
+
+    fn total(&self) -> u128 {
+        self.started.elapsed().as_millis()
+    }
+}
+
+/// 渲染分段的 debug 日志（一行一条请求）。
+///
+/// 字段固定为「尺寸档 / 文件 / 解码 / 缩放 / 显影 / 几何 / 编码 / 合计 / 输出」——
+/// 排障时按阶段排序即可，不必再改代码。
+#[allow(clippy::too_many_arguments)]
+fn log_render_stages(
+    size: SizeClass,
+    path: &Path,
+    clock: &RenderClock,
+    decode_ms: u128,
+    scale_ms: u128,
+    develop_ms: u128,
+    geometry_ms: u128,
+    encode_ms: u128,
+    out: Option<(u32, u32)>,
+) {
+    log::debug!(
+        "[render] {:?} {} 解码 {decode_ms}ms 缩放 {scale_ms}ms 显影 {develop_ms}ms 几何 {geometry_ms}ms 编码 {encode_ms}ms 合计 {}ms 输出 {}",
+        size,
+        path.display(),
+        clock.total(),
+        out.map_or_else(|| "-".to_string(), |(w, h)| format!("{w}×{h}")),
+    );
 }
 
 /// 给 RAW 缩放时多要的倍数：最终尺寸的 Lanczos 由 [`encode`] 在小图上做，
@@ -614,6 +678,7 @@ fn render_raw_file(
      */
     if size.is_full() {
         if let Some(stack) = edit.filter(|stack| !stack.is_empty()) {
+            let mut clock = RenderClock::new();
             let request = crate::raw::DecodeRequest::full(path);
             let _permit = crate::raw::worker::acquire(crate::raw::DecodePriority::Normal);
             let mut decoded = crate::raw::worker::shared()
@@ -621,12 +686,20 @@ fn render_raw_file(
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .decode_linear(&request)
                 .map_err(|e| Error::Unsupported(format!("RAW 线性解码失败：{e}")))?;
+            let decode_ms = clock.lap();
             let shot_k = decoded.as_shot_temperature;
             decoded.orientation = crate::media::exif::raw_orientation(path, decoded.orientation);
             let linear = LinearImage::from_raw16(decoded)
                 .ok_or_else(|| Error::Unsupported("RAW 线性像素尺寸不合法".to_string()))?;
             let rgb = apply_develop_linear(&linear, stack, lens, shot_k, lut)?;
-            return encode_with_format(DynamicImage::ImageRgb8(rgb), size, None, false, None, None, format).map(Some);
+            let develop_ms = clock.lap();
+            let thumb = encode_with_format(DynamicImage::ImageRgb8(rgb), size, None, false, None, None, format)?;
+            let encode_ms = clock.lap();
+            log_render_stages(
+                size, path, &clock, decode_ms, 0, develop_ms, 0, encode_ms,
+                Some((thumb.width, thumb.height)),
+            );
+            return Ok(Some(thumb));
         }
         let Some(decoded) = decode_raw_file(path, DecodeSpec::full())? else {
             return Ok(None);
@@ -637,6 +710,7 @@ fn render_raw_file(
     // latest 基于 RAW 时必须从传感器线性像素显影。内嵌 JPEG 是机内 SOOC，
     // 在它上面套参数会让总览/胶片带与编辑视口成为两张不同的照片。
     if let Some(stack) = edit.filter(|stack| !stack.is_empty()) {
+        let mut clock = RenderClock::new();
         let request = crate::raw::DecodeRequest::thumb(path, want).with_preview(false);
         // 缩略图/胶片带是 Normal 档（§4.4）
         let _permit = crate::raw::worker::acquire(crate::raw::DecodePriority::Normal);
@@ -645,13 +719,22 @@ fn render_raw_file(
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .decode_linear(&request)
             .map_err(|e| Error::Unsupported(format!("RAW 线性解码失败：{e}")))?;
+        let decode_ms = clock.lap();
         let shot_k = decoded.as_shot_temperature;
         decoded.orientation = crate::media::exif::raw_orientation(path, decoded.orientation);
         let linear = LinearImage::from_raw16(decoded)
             .ok_or_else(|| Error::Unsupported("RAW 线性像素尺寸不合法".to_string()))?
             .downscaled_to(want);
+        let scale_ms = clock.lap();
         let rgb = apply_develop_linear(&linear, stack, lens, shot_k, lut)?;
-        return encode_with_format(DynamicImage::ImageRgb8(rgb), size, None, false, None, None, format).map(Some);
+        let develop_ms = clock.lap();
+        let thumb = encode_with_format(DynamicImage::ImageRgb8(rgb), size, None, false, None, None, format)?;
+        let encode_ms = clock.lap();
+        log_render_stages(
+            size, path, &clock, decode_ms, scale_ms, develop_ms, 0, encode_ms,
+            Some((thumb.width, thumb.height)),
+        );
+        return Ok(Some(thumb));
     }
     let Some(decoded) = decode_raw_file(path, DecodeSpec::thumb(want))? else {
         return Ok(None);

@@ -115,6 +115,8 @@ export interface EditorLeftPanelProps {
    */
   issueSelectionOverride?: IssueSelection | null;
   onSelectIssue: (stack: DevelopStack, selection: IssueSelection) => void;
+  /** 切回「最近编辑」（latest 的栈从后端读，不在这里拼） */
+  onSelectLatest: () => void;
   onDeleteIssue: (issue: Issue, event: ShiftLikeEvent) => void;
   /** 点定稿名字旁的笔：由工作区弹出改名弹窗 */
   onRenameIssue: (issue: Issue) => void;
@@ -172,7 +174,8 @@ export function EditorLeftPanel(props: EditorLeftPanelProps): JSX.Element {
           <IssuesPanel enabled={props.enabled} store={props.store} library={props.issues}
             selectionOverride={props.issueSelectionOverride ?? null}
             pending={props.pendingIssue ?? null}
-            onSelect={props.onSelectIssue} onDelete={props.onDeleteIssue} onRename={props.onRenameIssue}
+            onSelect={props.onSelectIssue} onSelectLatest={props.onSelectLatest}
+            onDelete={props.onDeleteIssue} onRename={props.onRenameIssue}
             thumbs={props.issueThumbs} thumbKey={props.issueThumbKey}
             canFinalize={props.canFinalize} onFinalize={props.onFinalize} />
         </Show>
@@ -248,6 +251,7 @@ function IssuesPanel(props: {
   selectionOverride: IssueSelection | null;
   pending: { name: string; sourceBase: "raw" | "sooc" } | null;
   onSelect: (stack: DevelopStack, selection: IssueSelection) => void;
+  onSelectLatest: () => void;
   onDelete: (issue: Issue, event: ShiftLikeEvent) => void;
   onRename: (issue: Issue) => void;
   thumbs: ThumbQueue;
@@ -280,10 +284,16 @@ function IssuesPanel(props: {
           </button>}
         </For>
 
-        <div class="flex min-h-12 items-center gap-2 rounded-ui px-1" classList={{ "bg-state-selected": isSelected("latest") }}>
+        {/*
+          「最近编辑」（latest）：**也是一项可点选的状态**（崔总 2026-10-27）——
+          以前它只是个 div，编辑后切去 SOOC/RAW 就回不来了。
+        */}
+        <button type="button" disabled={!props.enabled}
+          class="flex min-h-12 items-center gap-2 rounded-ui px-1 text-left hover:bg-state-hover disabled:opacity-50"
+          classList={{ "bg-state-selected": isSelected("latest") }} onClick={props.onSelectLatest}>
           <IssueThumb imageKey={props.thumbKey("latest")} thumbs={props.thumbs} />
           <span class="block text-fs-2 text-fg-1">{t("editor.issue.latest")}</span>
-        </div>
+        </button>
         {/*
           正在生成的定稿（占位）：确认弹窗一关它就现身，预览位转圈（崔总 2026-09-29：
           「先生出条目，生成完再显示出图」，不再是几秒无事发生）。

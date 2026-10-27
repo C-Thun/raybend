@@ -146,7 +146,21 @@ impl Drop for DecodePermit<'_> {
 /// （编辑器解码 / 缩略图渲染 / 导出），探针类小请求不排队。
 #[must_use]
 pub fn acquire(priority: DecodePriority) -> DecodePermit<'static> {
-    gate().acquire(priority)
+    /*
+     * 等许可的时长就是**排队时长**。真机上「退出编辑后看图/小图都不出来」时，
+     * 日志里只要看到一大串「等解码许可 2000ms+」，就能断定是单例管道堵了，
+     * 而不是哪张图本身慢（2026-10-27 排障加）。短等不记，免得刷屏。
+     */
+    let started = std::time::Instant::now();
+    let permit = gate().acquire(priority);
+    let waited = started.elapsed();
+    if waited.as_millis() >= 30 {
+        log::debug!(
+            "[raw] 等解码许可 {priority:?} {}ms",
+            waited.as_millis()
+        );
+    }
+    permit
 }
 
 // ─────────────────────────── 协议 ───────────────────────────

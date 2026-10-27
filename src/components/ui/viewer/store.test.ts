@@ -458,7 +458,10 @@ test("URL 所有权：被挤出缓存的 URL 若单图还在显示则不回收�
   }));
   const store = createViewerStore({
     loadScreen: async () => new Uint8Array([1]),
-    makeUrl: () => `blob:${(counter += 1)}`,
+    makeUrl: () => {
+      counter += 1;
+      return `blob:${counter}`;
+    },
     revokeUrl: (url) => revoked.push(url),
     cacheLimit: 2, // 实际下限也是 4（对比上限），下面按 4 条构造
   });
@@ -498,7 +501,10 @@ test("没有 loadScreen（import 口径）：384 小图占位 → 真身上屏�
       calls.push(`full:${path}`);
       return new Uint8Array([9]);
     },
-    makeUrl: () => `blob:${(counter += 1)}`,
+    makeUrl: () => {
+      counter += 1;
+      return `blob:${counter}`;
+    },
     revokeUrl: () => {},
   });
   store.setViewport({ width: 800, height: 600 });
@@ -839,6 +845,45 @@ test("两段载入：占位先上屏（提示在），真身到位后原地替�
   assert.deepEqual(store.state().natural, before.natural, "尺寸口径不动");
   assert.equal(store.state().fit, before.fit);
   assert.equal(store.state().pan.x, before.pan.x);
+  store.close();
+});
+
+test("两段载入：换图后旧照片迟到的真身不能摘掉新照片的「正在载入原图」", async () => {
+  // 每张照片的真身各自可放：先让 a 在飞，再换到 b，最后先放 a（典型的迟到）
+  const releases = new Map<string, () => void>();
+  const store = createViewerStore({
+    loadThumb: async (): Promise<Uint8Array> => new Uint8Array([1]),
+    loadScreen: async (): Promise<Uint8Array> => new Uint8Array([2]),
+    loadFull: (path) => new Promise<Uint8Array>((resolve) => {
+      releases.set(path, () => resolve(new Uint8Array([3])));
+    }),
+    makeUrl: (bytes: Uint8Array): string => `blob:${bytes[0]}`,
+    revokeUrl: () => {},
+  });
+  store.setViewport({ width: 800, height: 600 });
+  store.show([{ id: "a", path: "/a.jpg", fileName: "a.jpg" }], 0);
+  await flush();
+  await flush();
+  assert.equal(store.fullPending(), true, "a 的真身在飞");
+
+  // 换到 b：b 自己的占位到了，真身还在飞
+  store.show([{ id: "b", path: "/b.jpg", fileName: "b.jpg" }], 0);
+  await flush();
+  await flush();
+  assert.equal(store.current()?.id, "b");
+  assert.equal(store.fullPending(), true, "b 的真身在飞");
+
+  // a 的真身现在才回来（作废代）：它不能把 b 的角标落下
+  releases.get("/a.jpg")!();
+  await flush();
+  await flush();
+  assert.equal(store.fullPending(), true, "旧结果迟到不能替新照片宣布载入完毕");
+  assert.equal(store.current()?.id, "b");
+
+  releases.get("/b.jpg")!();
+  await flush();
+  await flush();
+  assert.equal(store.fullPending(), false, "b 自己到了才落下");
   store.close();
 });
 

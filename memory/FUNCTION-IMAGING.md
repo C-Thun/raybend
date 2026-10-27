@@ -180,7 +180,7 @@ RAW 行没值就是**未知（NULL）**，不许拿 `assets` 的 EXIF/文件头�
 `+RAW` 复用目录同步后的 catalog 配对信息，不为角标读 RAW；browse 不再顺带读取配对 RAW 的 EXIF。
 tiles 的旧 RAW 记录若缺宽高，先用占位比例；明确打开看图/对比时才允许补读。目录实时同步不变。
 
-M3-W6c 的定稿模型以当前 editor profile 为真相：`latest` 是自动保存的工作副本；命名 issue 是不可变完整 profile 快照。切换 SOOC、RAW 或命名 issue 时，把该 profile 写入 latest，同时进入统一撤销/重做历史，刷新当前图的小图、看图和预览。继续调整只修改 latest；配置哈希加完整比较推导当前选中的 issue，不另存选择 ID。匹配优先级为命名定稿 → SOOC/RAW 原始源 → latest；新调整没有其它匹配时选中 latest。定稿资格只排除原始源和已有命名定稿，latest 工作副本不参与去重。
+M3-W6c 的定稿模型以当前 editor profile 为真相：`latest` 是自动保存的工作副本；命名 issue 是不可变完整 profile 快照。**latest 只在用户编辑操作（confirm）时写，切换查看目标（SOOC / RAW / 命名 issue / 回 latest）不写库**（2026-10-27 崔总定）；切走前若有未落库的改动，先存一次。继续调整只修改 latest；配置哈希加完整比较推导当前选中的 issue，不另存选择 ID。匹配优先级为命名定稿 → SOOC/RAW 原始源 → latest；新调整没有其它匹配时选中 latest。定稿资格只排除原始源和已有命名定稿，latest 工作副本不参与去重。
 
 **issue 导出序号（2026-09-28，规格 `specs/export-issue-ordinal.md`）**：每个命名定稿带一个**每照片唯一的序号**（`issues.ordinal`，0–99，最多 100 个定稿、全满拒绝保存）；分配从 `assets.issue_counter` 游标顺找空位、绕圈复用删除留下的洞。导出文件名 = 模版主名 + 强制尾号：定稿 `I00`–`I99`、原片 `ISO`、RAW 标记 issue `IRA`、未匹配 latest `ILA`（latest 优先按哈希匹配已有定稿，匹配上按那个定稿的序号算——export tiles 的显示与导出同一口径）。
 
@@ -196,7 +196,9 @@ M3-W6c 的定稿模型以当前 editor profile 为真相：`latest` 是自动保
 
 面板不闪：`IssueThumb` 新图就绪前**旧图留守**（只有换照片才清）；缩略图缓存键的修订号只推给会随编辑变的 sooc/raw/latest，命名定稿（不可变）不跟着重建；占位条目超过 300ms 才现身（同切定稿提示的口径，很快返回时不闪一下）。实施记录 `implementations/2026-10-10_finalize-chain-and-preset-dblclick.md`。
 
-原先“切 issue 时保留旧 latest 供返回”的设想已由人类在 2026-09-26 明确替换为“编辑状态一变即更新 latest，包括选中 issue”；返回切换前状态走撤销/重做。
+**latest 的写入时机（2026-10-27 崔总定，取代 2026-09-26 的旧口径）**：`develop_stacks`（latest）只在**用户编辑操作**（confirm：拉杆 / 曲线松手、LUT 选择、编辑源切换、自动调整、工具确认、定稿前）时写；**切到 SOOC / RAW / 历史定稿 / 切回 latest 都只是「看」，不写库**。切走前若还有未落库的改动，先存一次（「没退出 editor 就不丢」）；目标栈载入界面后立刻标记已落库（`markCommitted`），否则下一次 confirm 会把「看」的状态写进 latest。回来时直接读库里那一份（`develop_get`），不回退旧版本。切照片同理：离开时把未落库改动存到**上一张**，回来读该张的 latest。
+
+旧口径（2026-09-26：「编辑状态一变即更新 latest，包括选中 issue；返回切换前状态走撤销/重做」）**已作废** —— 它会让「编辑 → 点 SOOC → 点最近编辑」永久丢掉那次编辑（2026-10-27 实测复现）。
 
 **定稿图自愈（2026-10-10 W5，崔总口述）**：某张照片的定稿三档图缺了（创建失败 / 中途退出 / 缓存被清）——
 **进 editor 或选中该定稿时自动补齐**：`issue_snapshots_ensure(repository_id, asset_id, sizes?)` 扫该照片
@@ -310,7 +312,7 @@ M3-W6c 的定稿模型以当前 editor profile 为真相：`latest` 是自动保
 | 进编辑 | 当前真帧就绪并停留 300ms 后，后台串行补原始 RAW 384；SOOC 缺失也补 | latest 生成 / 刷新 |
 | 退出编辑 | — | **按最后状态更新** |
 | 存 issue | **为该 issue 单独生成 384 一套** | **为该 issue 单独生成一张 1920** |
-| 切 issue | 选中 profile 写入 latest 后刷新当前图缩略图 | latest 重新渲染，命名快照保持独立 |
+| 切 issue / 回 latest | 只切界面，不写 latest（切走前有未落库改动才存一次） | 不重新渲染 latest；命名快照保持独立 |
 | 删缓存目录 | 全部可重建（功能降级但可用，§6.5 红线） | 同左 |
 
 ---

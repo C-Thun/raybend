@@ -167,6 +167,20 @@ export function createThumbQueue(deps: ThumbQueueDeps): ThumbQueue {
   let pendingReady: string[] = [];
   /** 每条路径的代号：`refresh()` 推进它，用来丢弃这条路径上还在飞的旧请求 */
   const pathRevs = new Map<string, number>();
+  /**
+   * 真正已经发给 loader 的**路径 → 在飞条数**。
+   *
+   * 为什么用计数而不是布尔集合：`clear()` 之后同一路径可能立刻重取，而旧 generation 的
+   * 请求还在飞 —— 那条旧的 `finally` 不能把**新**请求的「在飞」抹掉，否则下一次 refresh
+   * 会以为它不在飞，又并发一份同路径渲染（正是本轮要消掉的东西）。
+   */
+  const activeLoads = new Map<string, number>();
+  /**
+   * 在飞期间收到的 refresh：只记一次尾随刷新。
+   * 旧请求回来后被代号丢弃，finally 里再把最新的一次排进去；
+   * 不在旧请求旁边并发一串同路径渲染（2026-10-27）。
+   */
+  const pendingRefreshes = new Set<string>();
   const revOf = (path: string): number => pathRevs.get(path) ?? 0;
 
   const patch = (path: string, entry: ThumbEntry): void => {
@@ -211,6 +225,7 @@ export function createThumbQueue(deps: ThumbQueueDeps): ThumbQueue {
 
       const issuedAt = generation;
       const issuedRev = revOf(path);
+      activeLoads.set(path, (activeLoads.get(path) ?? 0) + 1);
       void deps
         .load(path)
         .then(async (loaded) => {
@@ -249,6 +264,14 @@ export function createThumbQueue(deps: ThumbQueueDeps): ThumbQueue {
           }
         })
         .finally(() => {
+          const left = (activeLoads.get(path) ?? 1) - 1;
+          if (left > 0) activeLoads.set(path, left);
+          else activeLoads.delete(path);
+          /*
+           * 只有**这条路径最后一个**在飞请求结束时才放出尾随刷新：
+           * 旧 generation 的请求先结束也不能替新请求补刷（那样会并发两份同路径渲染）。
+           */
+          if (left === 0 && pendingRefreshes.delete(path)) queued.push(path);
           setInflight((n) => Math.max(0, n - 1));
           pump();
         });
@@ -304,7 +327,9 @@ export function createThumbQueue(deps: ThumbQueueDeps): ThumbQueue {
     },
 
     cancel: (path) => untrack(() => {
-      if (!queued.includes(path)) return;
+      const queuedBefore = queued.includes(path);
+      const refreshBefore = pendingRefreshes.delete(path);
+      if (!queuedBefore && !refreshBefore) return;
       queued = queued.filter((item) => item !== path);
       const current = entries()[path];
       if (current?.url) patch(path, { ...current, status: "ready" });
@@ -330,6 +355,13 @@ export function createThumbQueue(deps: ThumbQueueDeps): ThumbQueue {
       const current = untrack(entries)[path];
       queued = queued.filter((item) => item !== path);
       patch(path, { ...current, status: "loading", url: current?.url ?? null });
+      if ((activeLoads.get(path) ?? 0) > 0) {
+        // 不在旧请求旁边再发一个：旧请求的结果已被 rev 作废，
+        // 它结束后只补**一次**最新刷新（连续 confirm 不再叠 N 个同路径渲染）。
+        pendingRefreshes.add(path);
+        return;
+      }
+      pendingRefreshes.delete(path);
       queued.push(path);
       untrack(pump);
     },
@@ -346,6 +378,7 @@ export function createThumbQueue(deps: ThumbQueueDeps): ThumbQueue {
       }
       queued = [];
       pendingReady = [];
+      pendingRefreshes.clear();
       recent = [];
       setEntries({});
       // 旧目录仍在飞的 I/O 继续占用配额，完成时统一释放。

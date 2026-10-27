@@ -72,7 +72,27 @@ function backend() {
           : [];
       }
       if (cmd === "source_count") return { photos: 2, skipped: 0, truncated: false };
-      if (cmd === "source_scan") return { root: String(args.path), items: [], skipped: 0, problems: [], elapsedMs: 1 };
+      if (cmd === "source_scan") {
+        /*
+         * 给来源目录两张照片：批量排除那条链路（选择 → toolsbar 按钮 → tile 画法）
+         * 只有**真的有 tile** 时才走得到。`C:\photos` 之外一律空（别的断言不依赖内容）。
+         */
+        const root = String(args.path);
+        const items = root.replaceAll("\\", "/").toLowerCase().endsWith("/photos")
+          ? ["a.jpg", "b.jpg"].map((name, index) => ({
+              path: `${root}\\${name}`,
+              fileName: name,
+              ext: "jpg",
+              kind: "image",
+              sizeBytes: 1024,
+              mtimeMs: 1_700_000_000_000 + index,
+              takenAtMs: 1_700_000_000_000 + index,
+              takenAtSource: "filename",
+              takenAtOffsetMin: null,
+            }))
+          : [];
+        return { root, items, skipped: 0, problems: [], elapsedMs: 1 };
+      }
       if (cmd === "import_precheck") return { tight: false, neededBytes: 1024, freeBytes: 1_000_000_000 };
       if (cmd === "import_start") { window.__importTest.start = args; return { batchId: "batch-1", runs: [] }; }
       if (cmd === "import_status" || cmd === "import_resume" || cmd === "import_cancel") return window.__importTest.progress ?? null;
@@ -154,6 +174,48 @@ try {
   await until(`window.__importTest.calls.filter(c=>c==='source_scan').length>${scansBefore}`, "同路径恢复重新读取图片区");
   assert(await evaluate(`window.__importTest.calls.filter(c=>c==='dir_list').length>${dirsBefore}`), "恢复读取展开树");
 
+  /*
+   * ⑥ 批量排除（2026-10-27 回归）：选中一张 → 点 toolsbar 的「批量排除」→
+   *    tile **当场**变成排除态（照片变透明 + 正中禁行图标），再点一次恢复。
+   *    这条链路跨了三层（网格 store → 导入工作区 store → `GridItem` → `Tile`），
+   *    2026-09-19 统一网格时断在适配器那一跳（单测只钉得住映射，钉不住「画面到底变不变」）。
+   */
+  await until("document.querySelectorAll('[data-grid-item] [role=option]').length === 2", "来源照片铺进网格");
+  await click("document.querySelectorAll('[data-grid-item] [role=option]')[0]", "第一张照片");
+  const excludeButton = "[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='批量排除')";
+  assert(!await evaluate(`(${excludeButton}).disabled`), "选中一张之后「批量排除」应当可点");
+  /* 排除态的判据：禁行图标 + 照片变透明（`Tile` 的两个可见表现） */
+  const excludedState = `(()=>{
+    const tile=[...document.querySelectorAll('[data-grid-item]')].find(el=>el.querySelector('[aria-label="已排除"]'));
+    if(!tile) return null;
+    const img=tile.querySelector('img');
+    return {id:tile.getAttribute('data-grid-item'),opacity:img?Number(getComputedStyle(img).opacity):null,count:document.querySelectorAll('[data-grid-item] [aria-label="已排除"]').length};
+  })()`;
+  await click(excludeButton, "批量排除");
+  await until(`${excludedState} !== null`, "点「批量排除」后 tile 应当立刻变成排除态");
+  const excludedVisual = await evaluate(excludedState);
+  assert.equal(excludedVisual.count, 1, "只该有刚排除的那一张：" + JSON.stringify(excludedVisual));
+  assert(excludedVisual.opacity !== null && excludedVisual.opacity < 1, "排除态的照片要变透明：" + JSON.stringify(excludedVisual));
+  const excludedPath = excludedVisual.id;
+  await click(excludeButton, "批量排除（恢复）");
+  await until(`${excludedState} === null`, "再点一次应当恢复（批量排除是反转语义）");
+  await click(excludeButton, "批量排除（再次排除）");
+  await until(`${excludedState} !== null`, "排除集合应当能再次反转");
+  await until("[...document.querySelectorAll('span')].some(el=>el.textContent.trim()==='已排除 1 张')", "右列底部应当显示已排除张数");
+
+  /*
+   * ⑦ 看图态禁用「批量排除」（崔总 2026-10-27）：view / film / 对比不渲染网格，
+   *    排除在那里没有可见反馈 —— 按钮必须禁用，而不是「点了没反应」。
+   *    双击第一张进入看图（与真实手势同一条路）。
+   */
+  await evaluate("document.querySelectorAll('[data-grid-item] [role=option]')[0].dispatchEvent(new MouseEvent('dblclick',{bubbles:true}))");
+  await until("document.querySelector('[data-viewer=open]')", "进入看图态");
+  assert(await evaluate(`(${excludeButton}).disabled`), "看图态下「批量排除」应当禁用");
+  /* 关掉看图回到 tiles：按钮必须**自动恢复**可点（不能禁用一次就再也回不来） */
+  await click("[...document.querySelectorAll('button')].find(b=>b.getAttribute('aria-label')==='返回')", "看图态的返回按钮");
+  await until("document.querySelector('[data-viewer=open]')===null", "返回 tiles");
+  assert(!await evaluate(`(${excludeButton}).disabled`), "回到 tiles 后「批量排除」应当恢复可点");
+
   // ② 选中目标库（右列库卡片）
   await click("[...document.querySelectorAll('[role=option]')].find(el=>el.textContent.includes('测试库'))", "库卡片");
   await until(`!(${importButton}).disabled`, "勾了目录 + 选了库之后「导入」可点");
@@ -207,6 +269,7 @@ try {
   const started = await evaluate("window.__importTest.start");
   assert.equal(started.repositoryId, "repro0000000000", "要导进选中的那个库：" + JSON.stringify(started));
   assert.deepEqual(started.sources, [{ path: "C:\\photos", includeSubdirs: false }], "源目录与「包含子目录」开关要如实传：" + JSON.stringify(started));
+  assert.deepEqual(started.excluded, [excludedPath], "排除清单要如实传给后端：" + JSON.stringify(started));
   await until("[...document.querySelectorAll('[role=dialog]')].some(d=>d.innerText.includes('导入中'))", "顶上来的是「导入中」进度窗");
 
   await evaluate(`window.__importTest.emit({batchId:"batch-1",state:"waiting",stage:"import",total:2,done:1,imported:1,skipped:0,duplicates:0,failed:0,bytes:5,errors:[],errorsTotal:0,freeBytes:null,startedAt:0,finishedAt:null,currentRun:0,runs:[{runId:1,sourceRoot:"C:/photos",state:"waiting",stage:"import",total:2,done:1,imported:1,skipped:0,duplicates:0,failed:0,bytes:5,scanned:2,current:null,note:"storage.wait.source"}]})`);

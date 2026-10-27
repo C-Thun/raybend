@@ -263,7 +263,14 @@ test("切换定稿与撤销重读完整 profile：编辑源、曲线、基础曲
   });
   assert.equal(store.editBase(), "sooc");
   assert.equal(store.lutEnabledSetting(), false);
-  assert.equal(store.developDirty(), true, "切稿也要写入 latest 并进入撤销历史");
+  assert.equal(store.developDirty(), true, "applyDevelop 只载入并抬 rev，dirty 由工作区收尾");
+  /*
+   * 2026-10-27 基准：查看目标（SOOC / RAW / 定稿）不写 latest。
+   * 工作区载入后立刻 `markCommitted` —— 少了这一步，下一次任何 confirm 都会把
+   * 「看」的状态写进 `develop_stacks`，正是用户报的那个丢失。
+   */
+  store.markCommitted(store.developRev());
+  assert.equal(store.developDirty(), false, "查看目标载入后标记已落库，不写 latest");
   store.loadDevelop({ exposure: 0.4, temperature: 6000 }, curve, before);
   assert.equal(store.editBase(), "raw");
   assert.equal(store.asShotTemperature(), 5100);

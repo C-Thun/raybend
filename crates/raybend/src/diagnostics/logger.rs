@@ -25,9 +25,32 @@ struct DiagLogger {
     level: LevelFilter,
 }
 
+/// 已知的**噪音源**（2026-10-27 排障加）。
+///
+/// `wgpu` / `naga` 在 DEBUG 级会把每片着色器的 WGSL 与 HLSL **整段**打出来：
+/// 进一次编辑器 ≈ 2 MiB，正好把日志轮转窗口（2 MiB/文件）吃满，
+/// `[view]` / `[render]` 这些真正有用的行刚写就被挤走了。
+///
+/// 规则：**只丢 DEBUG 级的噪音**，它们的 WARN / ERROR 照旧 ——
+/// 排障要的是「着色器/解码报什么错」，不是「它们的语法树长什么样」。
+const NOISY_TARGETS: &[&str] = &["naga", "wgpu", "wgpu_core", "wgpu_hal", "mp4parse"];
+
+fn is_noise(level: Level, target: &str) -> bool {
+    if level != Level::Debug {
+        return false;
+    }
+    // 「前缀相同但不是子模块」（如 wgpu_notes）不能误伤，所以只认 `前缀::`。
+    // 不用 `format!`：这是每条日志都会走的热路径，不该为它分配。
+    NOISY_TARGETS.iter().any(|prefix| {
+        target.strip_prefix(prefix).is_some_and(|rest| {
+            rest.is_empty() || rest.starts_with("::")
+        })
+    })
+}
+
 impl Log for DiagLogger {
     fn enabled(&self, metadata: &Metadata<'_>) -> bool {
-        metadata.level() <= self.level
+        metadata.level() <= self.level && !is_noise(metadata.level(), metadata.target())
     }
 
     fn log(&self, record: &Record<'_>) {
@@ -129,6 +152,20 @@ fn parse_level(spec: &str) -> Option<LevelFilter> {
 mod tests {
     use super::*;
     use std::time::{Duration, UNIX_EPOCH};
+
+    #[test]
+    fn shader_and_decoder_chatter_is_dropped_only_at_debug() {
+        // 进编辑器时 naga 会把整片着色器打在 DEBUG 上（≈2 MiB/次），必须丢
+        assert!(is_noise(Level::Debug, "naga::valid::expression"));
+        assert!(is_noise(Level::Debug, "wgpu_hal::dx12::device"));
+        assert!(is_noise(Level::Debug, "mp4parse"));
+        // 它们的**错误**不能丢：那才是排障要看的
+        assert!(!is_noise(Level::Warn, "naga::valid::expression"));
+        assert!(!is_noise(Level::Error, "wgpu_core"));
+        // 本仓自己的 target 一律不丢（前缀只是「wgpu」才命中，不会误伤 wgpu_notes）
+        assert!(!is_noise(Level::Debug, "raybend_desktop_lib::editor"));
+        assert!(!is_noise(Level::Debug, "wgpu_notes"));
+    }
 
     fn at(secs: u64, millis: u32) -> SystemTime {
         UNIX_EPOCH + Duration::new(secs, millis * 1_000_000)

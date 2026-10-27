@@ -26,6 +26,8 @@
 //! **删掉整个缓存目录后，功能降级但完全可用。** 缓存库里没有任何信息是不可再生的。
 
 pub mod cache;
+/// 执行中的图像渲染按完整请求身份做单飞（不是另一层缓存）。
+pub mod flight;
 /// 库外（未入库）图的进程内缓存 —— 见 `AGENTS.md` §2.24。
 pub mod memory;
 pub mod render;

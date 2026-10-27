@@ -723,6 +723,15 @@ export default function KitchenSink() {
               <Tile label="文件夹" icon={<IconFolderFilled size={20} />} />
               <Tile label="不可用" tag="离线卷" disabled />
             </Row>
+            {/*
+              加载态的排除（2026-10-27）：缩略图还没到时，排除也要显示同一个禁行图标，
+              而不是只有转圈。冒烟量这一格（`data-tile-loading-excluded`）。
+            */}
+            <Row label="加载中的排除态">
+              <div data-tile-loading-excluded>
+                <Tile label="DSC_0196.NEF" loading excluded />
+              </div>
+            </Row>
           </Section>
 
           {/* ── PreviewFrame ─────────────────────────────── */}

@@ -967,6 +967,13 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
         // 批量排除是**反转**语义（memory/DESIGN.md §12.2）：排除集合住在导入工作区，
         // 选中的照片清单来自网格 —— 外壳只负责把两边接起来
         onBatchExclude={() => importStore.toggleExcluded([...grid.selectedIds()])}
+        /*
+         * 看图态（view / film / 对比）不渲染网格，排除也就没有可见反馈 ——
+         * 那里把按钮禁用，而不是让它「点了没反应」。判定来自导入工作区注册的动作槽
+         * （`viewing` / `comparing` 都是响应式读取）。
+         */
+        excludeDisabled={shell.workflow() === "import" &&
+          (importActions()?.viewing() === true || importActions()?.comparing() === true)}
         // 插槽里到底有没有东西，由这里明说（理由见 ToolsBar 的 hasExtraTools）
         hasExtraTools={shell.workflow() === "browse" || shell.workflow() === "edit" || exportFlow()}
         /* left/right 盖在全宽 mid 上；mid 按整条 toolsbar 的中心对齐。 */
