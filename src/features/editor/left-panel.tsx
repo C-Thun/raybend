@@ -22,7 +22,7 @@
  *    贴底、整宽、主色 —— 图标与文案与原来一致（`editor.issue.toolbar`）。
  */
 
-import { createEffect, createMemo, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, Show, untrack, type JSX } from "solid-js";
 import {
   IconBookmark,
   IconLoader2,
@@ -143,7 +143,15 @@ export function EditorLeftPanel(props: EditorLeftPanelProps): JSX.Element {
    * 与原来右栏第 1 组的规则一致（崔总 2026-09-28：阅读位置是用户的）。
    */
   createEffect(() => {
-    if (props.issueFocusTick > 0) props.store.setLeftPanel("issues");
+    if (props.issueFocusTick > 0) {
+      /*
+       * `untrack`：这里只应该**因为 `issueFocusTick` 变化**而切面板。
+       * 不包的话，`setLeftPanel` 内部一旦读到 chrome 类信号，这个 effect 就会
+       * 把自己订阅上去、写完反激自己 —— 2026-10-31 真机爆栈就是这么来的
+       * （根本修复在 `store.ts::updateChrome`，这里再上一道口气，见 AGENTS.md §2.17）。
+       */
+      untrack(() => props.store.setLeftPanel("issues"));
+    }
   });
 
   const rect = createMemo(() => overviewVisibleRect(props.renderState?.() ?? null));

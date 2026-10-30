@@ -32,7 +32,7 @@
     "perf:browse": "node --check scripts/perf-browse.mjs && node scripts/perf-browse.mjs",
     "perf:grid": "node --check scripts/grid-bench.mjs && node --experimental-strip-types scripts/grid-bench.mjs",
     "perf:win": "node --check scripts/perf-win.mjs && node scripts/perf-win.mjs",
-    "test": "node --test \"src/**/*.test.ts\"",
+    "test": "node --test --conditions=browser \"src/**/*.test.ts\"",
     "shot": "node scripts/shot.mjs",
     "crash:drill": "bash scripts/crash-drill.sh",
     "migrate:drill": "bash scripts/migration-drill.sh",

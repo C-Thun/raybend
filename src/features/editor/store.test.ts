@@ -8,6 +8,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { batch, createEffect, createRoot } from "solid-js";
+
 import { DEFAULT_EDITOR_PREFS } from "../../lib/editor-prefs.ts";
 import { createEditorStore, withTemperatureBaseline } from "./store.ts";
 
@@ -494,4 +496,48 @@ test("presetSnapshot 是纯读：勾不勾 Lens 都不动当前照片状态", ()
   assert.equal(withLens.lens?.enabled, true);
   assert.equal(typeof withLens.lens?.distortion, "number");
   assert.equal(store.presetSnapshot(["tone"]).lens, undefined, "没勾 lens 就不记录该组");
+});
+
+/*
+ * 2026-10-31 真机缺陷的回归：**在 effect 里调 store 的面板开关**
+ * （`left-panel.tsx` 的 `issueFocusTick` → `setLeftPanel("issues")`）。
+ *
+ * 旧实现 `updateChrome` 先 `produce(chrome())` 读信号、再 `setChrome` 写同一个信号，
+ * 于是「读 chrome 的 effect」把自己订阅上了 chrome：写完立刻失效 → 再跑 → 再写……
+ * 生产构建没有循环保护，同步递归到爆栈（`RangeError: Maximum call stack size exceeded`）。
+ * 爆栈发生在 `finalize()` 的 `setIssueFocusTick()` 那一行，**后面的 createIssue 一行没跑**
+ * —— 现象是「点定稿确认什么都不生成，但按钮永久变灰（busy 没复位），连 LUT 开关也失灵」。
+ *
+ * 判据：effect 只该因为**自己的依赖**变化而重跑，不该被自己写下去的 signal 反激。
+ */
+test("在 effect 里切左列面板不会自激（定稿确认后爆栈的回归）", () => {
+  const store = makeStore();
+  let runs = 0;
+  const dispose = createRoot((stop) => {
+    createEffect(() => {
+      runs += 1;
+      store.setLeftPanel("issues");
+    });
+    return stop;
+  });
+  batch(() => {}); // 触发一次更新刷新，让排队的 effect 真正执行
+  dispose();
+  assert.equal(runs, 1, `effect 应只执行 1 次，实际 ${runs} 次（写了自己读的信号 = 无限循环）`);
+  assert.equal(store.leftPanel(), "issues");
+});
+
+/** 同一个坑的另一种入口：`toggleLeft`（toolsbar 左段的两个开关）也不能自激。 */
+test("在 effect 里 toggleLeft 不会自激", () => {
+  const store = makeStore();
+  let runs = 0;
+  const dispose = createRoot((stop) => {
+    createEffect(() => {
+      runs += 1;
+      store.toggleLeft("lut");
+    });
+    return stop;
+  });
+  batch(() => {}); // 触发一次更新刷新，让排队的 effect 真正执行
+  dispose();
+  assert.equal(runs, 1, `effect 应只执行 1 次，实际 ${runs} 次`);
 });

@@ -767,6 +767,27 @@ let dev = !custom_protocol;        // ← dev 由 feature 决定，不是 debug/
   再配合 `element === 上次那个` 的身份比对，就能定位到是哪一层被重建。
   B 面更快：在子组件里读一次那个 context，把结果（`yes` / `no`）写到 DOM 属性上看一眼。
 
+### 9.1 C 面：**store 的更新函数不许读自己要写的那个信号**（2026-10-31 真机爆栈）
+
+第三个同族坑，症状最吓人：**点定稿确认什么都不生成、按钮永久变灰、连 LUT 开关都失灵**。
+
+- **手法**：`updateChrome(produce)` 里写成 `const next = produce(chrome()); setChrome(next);`
+  —— 同步**读**了 `chrome` 信号。调用方一旦是 **effect**（`left-panel.tsx` 的
+  `issueFocusTick → setLeftPanel("issues")`），这个 effect 就把自己订阅到了 `chrome` 上：
+  写完 → 立刻失效 → 再跑 → 再写 …… 生产构建**没有循环保护**，同步递归到
+  `RangeError: Maximum call stack size exceeded`（栈形如 `runUpdates ↔ completeUpdates` 互递归）。
+- **为什么是「伪假定稿」**：爆栈发生在 `finalize()` 的 `setIssueFocusTick()` 那一行，
+  它后面的 `persistTail → createIssue` **一行都没执行** —— 库里当然没有；
+  而爆栈前刚执行的 `setFinalizeBusy(true)` 的 `finally` 永远没机会跑，
+  于是 `canFinalize()` 恒 false（按钮灰）、整棵响应式树被炸断（LUT 开关不再驱动 DOM）。
+- **✅ 规矩**：store 的更新函数**一律用 setter 的函数式更新**
+  （`setChrome(state => produce(state))`）—— setter 的函数形参不会建立依赖。
+  确实需要在 effect 里调副作用时，再从调用点补一次 `untrack`（两道保险）。
+- **回归**：`src/features/editor/store.test.ts` 的「在 effect 里切左列面板不会自激」
+  与「在 effect 里 toggleLeft 不会自激」—— 判据是 **effect 只跑一次**（旧实现在这两条上
+  直接 `RangeError`）。它们依赖 Solid 的**浏览器构建**（`createEffect` 在 server 构建里是空函数），
+  所以 `pnpm test` 带 `--conditions=browser`。
+
 ---
 
 ## 10. 变更记录

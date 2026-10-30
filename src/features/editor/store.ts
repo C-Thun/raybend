@@ -604,10 +604,23 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
       });
   };
 
+  /**
+   * 写面板状态（唯一入口）。
+   *
+   * ❗**必须用 setter 的函数式更新，不能 `produce(chrome())`**（2026-10-31 真机爆栈）：
+   * 那样会**同步读一次 `chrome` 信号**，于是「调用方是 effect」时它把自己订阅到了 chrome 上 ——
+   * 写完立刻失效 → 再跑 → 再写 …… 生产构建没有循环保护，直接同步递归到
+   * `RangeError: Maximum call stack size exceeded`。
+   *
+   * 真机现场（`left-panel.tsx` 的 `issueFocusTick` effect → `setLeftPanel("issues")`）：
+   * 爆栈发生在 `finalize()` 的 `setIssueFocusTick()` 那一行，**后面的 createIssue 一行没跑**
+   * —— 表现为「点定稿确认什么都不生成、按钮永久变灰（busy 没复位）、连 LUT 开关都失灵」。
+   * 回归：`store.test.ts` 的「在 effect 里切左列面板不会自激」。
+   */
   const updateChrome = (produce: (state: EditorChromeState) => EditorChromeState): void => {
-    const next = produce(chrome());
-    setChrome(next);
-    persist(next);
+    let next: EditorChromeState | undefined;
+    setChrome((state) => (next = produce(state)));
+    if (next !== undefined) persist(next);
   };
 
   return {
@@ -629,9 +642,10 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
       updateChrome((state) => setEditorLeftPanel(state, panel));
     },
     resetChrome: () => {
-      const next = resetEditorChrome(chrome());
-      setChrome(next);
-      persist(next);
+      // 同上：走 setter 的函数式更新，不读信号（读就会把调用方订阅成依赖）
+      let next: EditorChromeState | undefined;
+      setChrome((state) => (next = resetEditorChrome(state)));
+      if (next !== undefined) persist(next);
     },
 
     tool,
