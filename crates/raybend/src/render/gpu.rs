@@ -153,6 +153,8 @@ pub struct GpuContext {
     soft_preview: bool,
     screen_color: super::color_transform::GpuScreenTransform,
     tone: super::tone::GpuTone,
+    /// 创意 LUT（`group(4)`）：只影响**主图**，参照帧绑它的 `disabled()`。
+    creative_lut: super::creative_lut::GpuLut,
     proof: super::proof::GpuProof,
     image: Arc<RenderImage>,
     /// **画不画这个四边形**。`false` = 只有洞口底色（还没有照片 / 刚换掉）。
@@ -303,6 +305,7 @@ impl GpuContext {
             soft_preview: false,
             screen_color: resources.screen_color,
             tone: resources.tone,
+            creative_lut: resources.creative_lut,
             proof: resources.proof,
             image,
             has_image,
@@ -375,6 +378,53 @@ impl GpuContext {
 
     pub fn set_global_tone(&mut self, tone: Option<Arc<crate::develop::working::GpuToneDescription>>) {
         self.tone.set(&self.device, &self.queue, tone);
+    }
+
+    /// 换创意 LUT（`None` = 不套）。
+    ///
+    /// **只有「像素里还没有 LUT」的帧才能传 `Some`**：CPU 烘焙过 LUT 的帧传 `None`，
+    /// 否则同一支 LUT 会被套两次。所以调用方拿的是**帧自带的** `gpu_lut`，不是当前选中项。
+    pub fn set_creative_lut(&mut self, lut: Option<Arc<crate::develop::lut::Lut>>) {
+        if !self.creative_lut.set(&self.device, &self.queue, lut) {
+            return;
+        }
+        // LUT 的资源就挂在图像绑定组里（group 0 binding 4..7），换了就得重绑。
+        // 只有「选 LUT」这种低频动作会走到这里；拖滑杆时 `Arc` 相等，提前返回。
+        self.rebuild_image_bind_group();
+        // 参照帧固定用「不套 LUT」那一套，一并刷新保持一致。
+        if let Some((_, image, texture)) = &self.reference {
+            self.reference_bind_group = Some(make_bind_group(
+                &self.device,
+                &self.layout,
+                texture,
+                &self.sampler,
+                &self.reference_uniform,
+                &self.label,
+                image.encoding,
+                false,
+                self.creative_lut.disabled_resources(),
+            ));
+        }
+    }
+
+    /// 用当前的纹理 / 影调 / LUT 重建主图绑定组（`upload_image`、选 LUT、设备恢复共用一份）。
+    fn rebuild_image_bind_group(&mut self) {
+        let sampler = if self.soft_preview {
+            &self.soft_sampler
+        } else {
+            &self.sampler
+        };
+        self.bind_group = make_bind_group(
+            &self.device,
+            &self.layout,
+            &self.texture,
+            sampler,
+            &self.uniform,
+            &self.label,
+            self.image.encoding,
+            true,
+            self.creative_lut.resources(),
+        );
     }
 
     pub fn set_display_transform(&mut self, transform: Option<Arc<crate::color::display::ScreenTransform>>) {
@@ -462,9 +512,11 @@ impl GpuContext {
         if self.reference_id() == Some(id) { return; }
         let (texture,error) = if Arc::ptr_eq(&self.image, &image) || self.image.shares_source(&image) { (self.texture.clone(),None) } else if let Some(texture)=self.uploads.texture(&image) {(texture,None)} else { create_image_texture(&self.device, &self.queue, &image, &self.label) };
         if error.is_some() { self.upload_error=error;return; }
-        // ⚠️ 用**参照自己的** uniform：主图按当前画面铺，参照帧按 cover 尺寸铺（两个矩阵）
+        // ⚠️ 用**参照自己的** uniform：主图按当前画面铺，参照帧按 cover 尺寸铺（两个矩阵）。
+        // LUT 用「关闭」那一套：参照帧是「没有编辑的同一张源」。
         self.reference_bind_group = Some(make_bind_group(
             &self.device, &self.layout, &texture, &self.sampler, &self.reference_uniform, &self.label, image.encoding, false,
+            self.creative_lut.disabled_resources(),
         ));
         self.reference = Some((id, image, texture));
     }
@@ -548,18 +600,9 @@ impl GpuContext {
         self.upload_error=error;
         if self.upload_error.is_some() {return;}
         self.texture=texture;
-        // 过渡帧用线性放大采样（`set_soft_preview`），真帧用最近邻（1:1 看像素）。
-        let sampler = if self.soft_preview { &self.soft_sampler } else { &self.sampler };
-        self.bind_group = make_bind_group(
-            &self.device,
-            &self.layout,
-            &self.texture,
-            sampler,
-            &self.uniform,
-            &self.label,
-            self.image.encoding,
-            true,
-        );
+        // 过渡帧用线性放大采样（`set_soft_preview`），真帧用最近邻（1:1 看像素）——
+        // 采样器与 LUT 的绑定都在 `rebuild_image_bind_group` 里。
+        self.rebuild_image_bind_group();
         self.has_image = has_image;
     }
 
@@ -734,6 +777,7 @@ impl GpuContext {
                          */
                         if let Some(clip) = self.viewport.reference_scissor(left) {
                             pass.set_scissor_rect(clip.0, clip.1, clip.2, clip.3);
+                            // 参照帧 = 「没有编辑的同一张源」：它的绑定组里就是「不套 LUT」那一套。
                             pass.set_bind_group(0, reference, &[]);
                             pass.draw(0..4, 0..1);
                         }
@@ -861,12 +905,20 @@ impl GpuContext {
         let source = self.tone.source.clone();
         self.tone = resources.tone;
         if source.is_some() { self.tone.set(&self.device, &self.queue, source); }
+        let lut_source = self.creative_lut.source.clone();
+        self.creative_lut = resources.creative_lut;
+        if lut_source.is_some() {
+            self.creative_lut.set(&self.device, &self.queue, lut_source);
+            // 恢复到原来的 LUT 之后**必须重绑主图**：`resources.bind_group` 是「不套 LUT」那套。
+            self.rebuild_image_bind_group();
+        }
         if let Some((_, image, texture)) = &mut self.reference {
             let (new_texture,error)=if Arc::ptr_eq(image,&self.image) || image.shares_source(&self.image) {(self.texture.clone(),None)} else {create_image_texture(&self.device, &self.queue, image, &self.label)};
             if error.is_some() {self.upload_error=error;return;}
             *texture=new_texture;
             self.reference_bind_group = Some(make_bind_group(
                 &self.device, &self.layout, texture, &self.sampler, &self.reference_uniform, &self.label, image.encoding, false,
+                self.creative_lut.disabled_resources(),
             ));
         }
 
@@ -917,6 +969,8 @@ struct DeviceResources {
     soft_sampler: wgpu::Sampler,
     screen_color: super::color_transform::GpuScreenTransform,
     tone: super::tone::GpuTone,
+    /// 创意 LUT（`group(4)`）；没有选中时绑的是「关闭」占位组。
+    creative_lut: super::creative_lut::GpuLut,
     proof: super::proof::GpuProof,
     overlay: super::overlay::OverlayRenderer,
 }
@@ -964,7 +1018,9 @@ fn build_device_resources(
         mapped_at_creation: false,
     });
     let layout = create_bind_group_layout(device);
-    let bind_group = make_bind_group(device, &layout, &texture, &sampler, &uniform, label_prefix, image.encoding, true);
+    // LUT 资源要先于绑定组建好：它的句柄是 group 0 的 binding 4..7。
+    let creative_lut = super::creative_lut::GpuLut::new(device, queue);
+    let bind_group = make_bind_group(device, &layout, &texture, &sampler, &uniform, label_prefix, image.encoding, true, creative_lut.resources());
     let screen_color = super::color_transform::GpuScreenTransform::new(device, queue);
     let tone = super::tone::GpuTone::new(device, queue);
     let proof = super::proof::GpuProof::new(device, queue);
@@ -982,6 +1038,7 @@ fn build_device_resources(
         soft_sampler,
         screen_color,
         tone,
+        creative_lut,
         proof,
     }
 }
@@ -1034,6 +1091,48 @@ fn create_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
                     has_dynamic_offset: false,
                     min_binding_size: None,
                 },
+                count: None,
+            },
+            /*
+             * 创意 LUT 挂在 **group 0**（4..7）：WebGPU 的 `max_bind_groups` 默认只有 4，
+             * 再开一个 `group(4)` 会在建着色器时直接报错（离屏第一次跑就撞上了）。
+             * 挂在图像绑定组反而更对：「这张图有没有 LUT」本来就是这张图的事实，
+             * 参照帧有自己的绑定组，于是「参照帧不套 LUT」不需要运行时开关。
+             */
+            wgpu::BindGroupLayoutEntry {
+                binding: 4,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 5,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D3,
+                    multisampled: false,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 6,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 7,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                 count: None,
             },
         ],
@@ -1117,6 +1216,7 @@ fn make_bind_group(
     label_prefix: &str,
     encoding: super::image::RenderEncoding,
     apply_tone: bool,
+    lut: &super::creative_lut::LutResources,
 ) -> wgpu::BindGroup {
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
     let image_config = device.create_buffer(&wgpu::BufferDescriptor {
@@ -1148,6 +1248,10 @@ fn make_bind_group(
                 resource: wgpu::BindingResource::Sampler(sampler),
             },
             wgpu::BindGroupEntry { binding: 3, resource: image_config.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 4, resource: lut.uniform.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(&lut.cube_view) },
+            wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::TextureView(&lut.shaper_view) },
+            wgpu::BindGroupEntry { binding: 7, resource: wgpu::BindingResource::Sampler(&lut.sampler) },
         ],
     })
 }
@@ -1240,6 +1344,7 @@ pub struct OffscreenRenderer {
     sampler: wgpu::Sampler,
     screen_color: super::color_transform::GpuScreenTransform,
     tone: super::tone::GpuTone,
+    creative_lut: super::creative_lut::GpuLut,
     proof: super::proof::GpuProof,
     texture: wgpu::Texture,
     image: Arc<RenderImage>,
@@ -1328,6 +1433,7 @@ impl OffscreenRenderer {
             sampler: resources.sampler,
             screen_color: resources.screen_color,
             tone: resources.tone,
+            creative_lut: resources.creative_lut,
             proof: resources.proof,
             texture: resources.texture,
             image:Arc::new(image),
@@ -1358,6 +1464,7 @@ impl OffscreenRenderer {
             "offscreen",
             self.image.encoding,
             true,
+            self.creative_lut.resources(),
         );
         // 旧纹理由这个字段持有、新纹理接上（不靠绑定组隐式提寿 —— 显式持有最不容易误判）
         self.texture = texture;
@@ -1371,7 +1478,7 @@ impl OffscreenRenderer {
     pub fn cancel_prepared_image(&mut self) {self.uploads.cancel();}
     pub fn commit_prepared_image(&mut self,image:Arc<RenderImage>)->Result<(),GpuError> {
         let texture=self.uploads.texture(&image).ok_or_else(||GpuError::Device("source upload is not complete".into()))?;
-        self.bind_group=make_bind_group(&self.device,&self.layout,&texture,&self.sampler,&self.uniform,"offscreen",image.encoding,true);
+        self.bind_group=make_bind_group(&self.device,&self.layout,&texture,&self.sampler,&self.uniform,"offscreen",image.encoding,true,self.creative_lut.resources());
         self.image=image;self.texture=texture;Ok(())
     }
 
@@ -1382,6 +1489,24 @@ impl OffscreenRenderer {
 
     pub fn set_global_tone(&mut self, tone: Option<Arc<crate::develop::working::GpuToneDescription>>) {
         self.tone.set(&self.device, &self.queue, tone);
+    }
+
+    /// 与 `GpuContext::set_creative_lut` 同一口径：`None` = 这张图的像素里本来就没 LUT。
+    pub fn set_creative_lut(&mut self, lut: Option<Arc<crate::develop::lut::Lut>>) {
+        if !self.creative_lut.set(&self.device, &self.queue, lut) {
+            return;
+        }
+        self.bind_group = make_bind_group(
+            &self.device,
+            &self.layout,
+            &self.texture,
+            &self.sampler,
+            &self.uniform,
+            "offscreen",
+            self.image.encoding,
+            true,
+            self.creative_lut.resources(),
+        );
     }
 
     pub fn set_display_transform(&mut self, transform: Option<Arc<crate::color::display::ScreenTransform>>) {
@@ -1444,6 +1569,22 @@ impl OffscreenRenderer {
         let source = self.tone.source.clone();
         self.tone = resources.tone;
         if source.is_some() { self.tone.set(&self.device, &self.queue, source); }
+        let lut_source = self.creative_lut.source.clone();
+        self.creative_lut = resources.creative_lut;
+        if lut_source.is_some() {
+            self.creative_lut.set(&self.device, &self.queue, lut_source);
+            self.bind_group = make_bind_group(
+                &self.device,
+                &self.layout,
+                &self.texture,
+                &self.sampler,
+                &self.uniform,
+                "offscreen",
+                self.image.encoding,
+                true,
+                self.creative_lut.resources(),
+            );
+        }
         Ok(())
     }
 

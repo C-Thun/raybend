@@ -61,6 +61,22 @@ struct ProofConfig {
 };
 @group(3) @binding(0) var<uniform> proof: ProofConfig;
 
+/*
+ * 创意 LUT（`.cube` / Hald）：与 `crates/raybend/src/render/creative_lut.rs` **逐字段对应**。
+ * 挂在 group 0 的 4..7 —— WebGPU 的 `max_bind_groups` 默认只有 4，开不了 `group(4)`；
+ * 而「这张图有没有 LUT」本来就属于图像绑定组（参照帧自己有一套，不套 LUT）。
+ * `.low.xyz` = DOMAIN_MIN，`.high.xyz` = DOMAIN_MAX；`.low.w` = enabled，
+ * `.high.w` = strength（多层链用）；`.flags.x/.y` = 有无立方表 / 有无 1D shaper。
+ * 关闭时绑定的是 1×1×1 占位 + enabled = 0：着色器早退，一次采样都不做。
+ */
+struct CreativeLut {
+    low: vec4<f32>, high: vec4<f32>, flags: vec4<f32>,
+};
+@group(0) @binding(4) var<uniform> lut: CreativeLut;
+@group(0) @binding(5) var lut_cube: texture_3d<f32>;
+@group(0) @binding(6) var lut_shaper: texture_2d<f32>;
+@group(0) @binding(7) var lut_sampler: sampler;
+
 fn signed_encode(value: f32) -> f32 {
     let v = abs(value);
     if v <= 0.0031308 { return value * 12.92; }
@@ -92,11 +108,27 @@ fn decode_encoded(value:f32)->f32 {
     if abs(value)>4.0 {return signed_decode(value);}
     return tone_lookup((value+4.0)/8.0,2,0u);
 }
-fn adjust_global(working: vec3<f32>) -> vec3<f32> {
-    if tone.params.x < 0.5 { return working; }
-    let input = from_rec2020(working) * tone.gains.xyz;
+fn adjust_global(working: vec3<f32>, tone_on: bool) -> vec3<f32> {
+    // `tone.params.x` = 影调资源存在（`GpuTone::set(Some)`），`tone_on` = **这一帧**该不该套影调
+    // （参照帧的图像配置把它关掉）。两个都关且没有 LUT 时**原样返回**：
+    // 不坐一次 from/to Rec2020 的往返（那会改动末位）。
+    let tone_active = tone_on && tone.params.x > 0.5;
+    if !tone_active && lut.low.w < 0.5 { return working; }
+    var rgb = from_rec2020(working);
+    if tone_active { rgb = adjust_srgb(rgb); }
+    rgb = apply_creative_lut(rgb);
+    return to_rec2020(rgb);
+}
+
+/// 全局影调 + 曲线 + 色度调整，**在 sRGB 线性域**进出。
+///
+/// 拆出来是为了让创意 LUT 落在与 CPU 完全相同的位置：
+/// `WorkingTonePlan::display_reference` 出来的就是 sRGB 线性值，LUT 在它的编码域里求值，
+/// 之后才转到 Rec.2020（`render_working_reference` 的最后一步）。
+fn adjust_srgb(rgb_in: vec3<f32>) -> vec3<f32> {
+    let input = rgb_in * tone.gains.xyz;
     var rgb = vec3<f32>(tone_channel(input.r, 0u), tone_channel(input.g, 1u), tone_channel(input.b, 2u));
-    if tone.params.w>0.5 {return to_rec2020(rgb);}
+    if tone.params.w>0.5 {return rgb;}
     let weights = vec3<f32>(0.2126, 0.7152, 0.0722);
     if abs(tone.params.y) > 0.000001 {
         let luma = dot(weights, rgb); rgb = vec3<f32>(luma) + (rgb - vec3<f32>(luma)) * max(0.0, 1.0 + tone.params.y);
@@ -107,7 +139,41 @@ fn adjust_global(working: vec3<f32>) -> vec3<f32> {
         if high > 0.000001 { current = clamp((high - low) / high, 0.0, 1.0); }
         rgb = vec3<f32>(luma) + (rgb - vec3<f32>(luma)) * max(0.0, 1.0 + tone.params.z * (1.0 - current));
     }
-    return to_rec2020(vec3<f32>(decode_encoded(rgb.r), decode_encoded(rgb.g), decode_encoded(rgb.b)));
+    return vec3<f32>(decode_encoded(rgb.r), decode_encoded(rgb.g), decode_encoded(rgb.b));
+}
+
+/// 一支 LUT 的求值 —— 与 `develop/lut.rs::eval_extended` 逐条对齐：
+/// 1. 输入先夹到 `DOMAIN_MIN..DOMAIN_MAX`，**夹掉的那部分作为残差留在外面**（HDR 高光不被吞）；
+/// 2. 归一化到 0..1，可选 1D shaper，再查 3D 立方表（硬件三线性 = CPU 的 8 点插值）；
+/// 3. 表输出夹到 0..1，最后把残差加回去。
+fn lut_encoded(x: vec3<f32>) -> vec3<f32> {
+    let bounded = clamp(x, lut.low.xyz, lut.high.xyz);
+    let span = max(lut.high.xyz - lut.low.xyz, vec3<f32>(0.000001));
+    var xyz = clamp((bounded - lut.low.xyz) / span, vec3<f32>(0.0), vec3<f32>(1.0));
+    if lut.flags.y > 0.5 {
+        let w = max(f32(textureDimensions(lut_shaper).x), 2.0);
+        let uvx = vec2<f32>((xyz.x * (w - 1.0) + 0.5) / w, 0.5);
+        let uvy = vec2<f32>((xyz.y * (w - 1.0) + 0.5) / w, 0.5);
+        let uvz = vec2<f32>((xyz.z * (w - 1.0) + 0.5) / w, 0.5);
+        xyz = clamp(vec3<f32>(textureSampleLevel(lut_shaper, lut_sampler, uvx, 0.0).r,
+            textureSampleLevel(lut_shaper, lut_sampler, uvy, 0.0).g,
+            textureSampleLevel(lut_shaper, lut_sampler, uvz, 0.0).b), vec3<f32>(0.0), vec3<f32>(1.0));
+    }
+    var mapped = xyz;
+    if lut.flags.x > 0.5 {
+        let n = max(f32(textureDimensions(lut_cube).x), 2.0);
+        mapped = textureSampleLevel(lut_cube, lut_sampler, (xyz * (n - 1.0) + 0.5) / n, 0.0).rgb;
+    }
+    return clamp(mapped, vec3<f32>(0.0), vec3<f32>(1.0)) + (x - bounded);
+}
+
+/// 创意 LUT 在**显示参考的编码域**里求值（CPU 也是 `transfer.encode` → LUT → `transfer.decode`）。
+/// strength = 1 时与 `eval_extended` 完全等价；小于 1 是将来多层链每层的强度旋钮。
+fn apply_creative_lut(rgb: vec3<f32>) -> vec3<f32> {
+    if lut.low.w < 0.5 { return rgb; }
+    let encoded = vec3<f32>(signed_encode(rgb.r), signed_encode(rgb.g), signed_encode(rgb.b));
+    let mixed = mix(encoded, lut_encoded(encoded), clamp(lut.high.w, 0.0, 1.0));
+    return vec3<f32>(signed_decode(mixed.r), signed_decode(mixed.g), signed_decode(mixed.b));
 }
 
 fn from_rec2020(rgb: vec3<f32>) -> vec3<f32> {
@@ -237,8 +303,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     if image_config.x > 0.5 {
         // V2 texture: linear Rec.2020 D65 → standard SDR sRGB presentation.
         // This clipping belongs to the screen boundary, never the working image.
-        var working = texel.rgb;
-        if image_config.y > 0.5 { working = adjust_global(working); }
+        let working = adjust_global(texel.rgb, image_config.y > 0.5);
         return vec4<f32>(screen_color(working), texel.a) * uniforms.params.x;
     }
     if display.params.x > 0.5 || display.params.y > 0.5 || proof.params.x > 0.5 { return vec4<f32>(screen_color(to_rec2020(texel.rgb)), texel.a) * uniforms.params.x; }

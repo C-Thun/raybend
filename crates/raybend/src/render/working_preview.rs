@@ -14,6 +14,11 @@ use std::sync::Arc;
 pub struct PreparedWorkingFrame {
     pub image: Arc<RenderImage>,
     pub tone: Option<Arc<GpuToneDescription>>,
+    /// **快速路里由着色器套的创意 LUT**。
+    ///
+    /// `None` = 这张图的像素里没有待套的 LUT：要么没选，要么慢速路已在 CPU 烘焙过。
+    /// 渲染线程照着它 `set_creative_lut`，不要拿「当前选中的 LUT」代替 —— 帧与选择可能差一拍。
+    pub gpu_lut: Option<Arc<Lut>>,
 }
 
 struct TierCache {
@@ -78,7 +83,7 @@ impl WorkingPreview {
         curves: &CurveSet,
         nr_method: NrMethod,
         lens: Option<&LensCorrection>,
-        lut: Option<&Lut>,
+        lut: Option<&Arc<Lut>>,
         geometry: Option<EditGeometry>,
     ) -> crate::Result<PreparedWorkingFrame> {
         if let Some(geometry) = geometry {
@@ -100,8 +105,9 @@ impl WorkingPreview {
         let fast = nr_method != NrMethod::High
             && plans.sharpen.is_identity()
             && plans.local_tone == 0.0
-            && lut.is_none()
             && geometry.is_none_or(|value| value.is_identity());
+        // 创意 LUT 不再退出快速路（2026-10-31）：它在着色器里与全局影调同一趟完成，
+        // 每帧代价是「一次 3D 纹理采样」而不是「一遍 CPU 全画幅重渲」。
         if fast {
             if tier
                 .neutral
@@ -128,6 +134,7 @@ impl WorkingPreview {
                 tone: Some(Arc::new(
                     WorkingTonePlan::new(params, curves).gpu_description(),
                 )),
+                gpu_lut: lut.cloned(),
             })
         } else {
             let image = crate::display::output::render_working_params(
@@ -136,7 +143,7 @@ impl WorkingPreview {
                 curves,
                 nr_method,
                 lens,
-                lut,
+                lut.map(Arc::as_ref),
                 geometry,
                 0,
             )?;
@@ -145,6 +152,8 @@ impl WorkingPreview {
                     crate::Error::Unsupported("工作图超出 GPU 浮点纹理范围".into())
                 })?),
                 tone: None,
+                // 慢速路已经把 LUT 烘进像素了，GPU 再套一次就是双重应用。
+                gpu_lut: None,
             })
         }
     }
@@ -239,6 +248,48 @@ mod tests {
         // Direct source packing must match shared reference math, including signed range.
         let expected=crate::develop::working::render_working_reference(&preview.full.source,&WorkingTonePlan::new(&DevelopParams::default(),&curves),&DevelopStages::default()).unwrap();
         assert_eq!(packed.bytes,RenderImage::from_working(&expected).unwrap().pixels);
+    }
+
+    #[test]
+    fn a_creative_lut_rides_on_the_fast_path_and_the_slow_path_bakes_it() {
+        // 契约：快速路把 LUT 交给着色器（`gpu_lut = Some`）；
+        // 一旦某个阶段把快速路关掉（这里是锐化），LUT 就在 CPU 烘进像素，帧里**不能**再带 ——
+        // 否则渲染线程会套两次（一次在像素里、一次在着色器里）。
+        let image = crate::color::working::WorkingImage::new(
+            4,
+            4,
+            vec![[0.2, 0.4, 0.6]; 16],
+        )
+        .unwrap();
+        let source = WorkingReferenceImage::from_working(image).unwrap();
+        let mut preview = WorkingPreview::new(source);
+        let lut = Arc::new(
+            crate::develop::lut::Lut::parse_cube(
+                "LUT_3D_SIZE 2\n0 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1\n",
+            )
+            .unwrap(),
+        );
+        let curves = CurveSet::identity();
+        let fast = preview
+            .render(0, &DevelopParams::default(), &curves, NrMethod::Fast, None, Some(&lut), None)
+            .unwrap();
+        assert!(fast.tone.is_some(), "快速路要带影调表");
+        assert!(
+            fast.gpu_lut.as_ref().is_some_and(|bound| Arc::ptr_eq(bound, &lut)),
+            "快速路的帧必须带上这条链要用的 LUT"
+        );
+
+        let mut sharpened = DevelopParams::default();
+        sharpened.set("sharpenAmount", 20.0).unwrap();
+        sharpened.set("sharpenRadius", 30.0).unwrap();
+        let slow = preview
+            .render(0, &sharpened, &curves, NrMethod::Fast, None, Some(&lut), None)
+            .unwrap();
+        assert!(slow.tone.is_none(), "锐化走 CPU 参考路径");
+        assert!(
+            slow.gpu_lut.is_none(),
+            "CPU 已经烘过 LUT，帧里不能再带 gpu_lut"
+        );
     }
 
     #[test]

@@ -239,7 +239,7 @@ pub(super) fn run(
                                 &job.curves,
                                 NrMethod::Fast,
                                 None,
-                                job.lut.as_deref(),
+                                job.lut.as_ref(),
                                 job.geometry,
                             )
                             .map_err(|e| e.to_string())?,
@@ -268,7 +268,7 @@ pub(super) fn run(
                     &job.curves,
                     NrMethod::Fast,
                     job.lens.as_ref(),
-                    job.lut.as_deref(),
+                    job.lut.as_ref(),
                     job.geometry,
                 )
                 .map_err(|e| e.to_string())?,

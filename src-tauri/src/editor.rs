@@ -746,10 +746,15 @@ enum DevelopedPixels {
 }
 
 impl DevelopedPixels {
-    fn render(&self, width:u32, height:u32) -> Option<(Arc<RenderImage>, Option<Arc<raybend::develop::working::GpuToneDescription>>)> {
+    /// 返回三件东西：纹理、影调表、**快速路里还没套进像素的创意 LUT**。
+    ///
+    /// 第三项必须跟着**帧**走，而不是读当前选中项：显影线程与渲染线程差一拍时，
+    /// 拿新的选择去配旧帧就是「图与参数对不上」。慢速路的 LUT 已烘进像素，所以给 `None`。
+    #[allow(clippy::type_complexity)]
+    fn render(&self, width:u32, height:u32) -> Option<(Arc<RenderImage>, Option<Arc<raybend::develop::working::GpuToneDescription>>, Option<Arc<raybend::develop::lut::Lut>>)> {
         match self {
-            Self::Legacy(rgb) => RenderImage::from_rgb8(width,height,rgb).map(|image| (Arc::new(image),None)),
-            Self::Working(frame) => Some((Arc::clone(&frame.image),frame.tone.clone())),
+            Self::Legacy(rgb) => RenderImage::from_rgb8(width,height,rgb).map(|image| (Arc::new(image),None,None)),
+            Self::Working(frame) => Some((Arc::clone(&frame.image),frame.tone.clone(),frame.gpu_lut.clone())),
         }
     }
 }
@@ -2456,8 +2461,8 @@ fn apply_command(
             // Normalize legacy bytes once; retries keep the identical Arc and
             // never allocate another whole RGBA source while upload is pending.
             if let Ok(image)=&mut outcome.result
-                && let Some((source,tone))=image.pixels.render(image.width,image.height) {
-                    image.pixels=DevelopedPixels::Working(raybend::render::working_preview::PreparedWorkingFrame {image:source,tone});
+                && let Some((source,tone,gpu_lut))=image.pixels.render(image.width,image.height) {
+                    image.pixels=DevelopedPixels::Working(raybend::render::working_preview::PreparedWorkingFrame {image:source,tone,gpu_lut});
                 }
             /*
              * **过渡帧不吃「最新任务号」闸门**（§3.1-3）：解码期间用户拖了一下拉杆
@@ -2525,7 +2530,7 @@ fn apply_command(
             }
             let mut sources=Vec::new();
             if let Ok(image)=&frame.outcome.result {
-                if let Some((source,_))=image.pixels.render(image.width,image.height) {sources.push(source);}
+                if let Some((source,_,_))=image.pixels.render(image.width,image.height) {sources.push(source);}
                 if let Some((id,reference))=&frame.reference && context.reference_id()!=Some(*id) {sources.push(reference.clone());}
             }
             match context.prepare_frame_images(&sources) {
@@ -2552,7 +2557,7 @@ fn apply_command(
             match outcome.result {
                 Ok(image) => {
                     let source_size = (image.source_width, image.source_height);
-                    let Some((render_image, tone)) =
+                    let Some((render_image, tone, gpu_lut)) =
                         image.pixels.render(image.width, image.height)
                     else {
                         state.decode = "error".to_string();
@@ -2569,6 +2574,8 @@ fn apply_command(
                      */
                     let previous_size = context.viewport().image_size;
                     context.set_global_tone(tone);
+                    // LUT 与影调同属「这一帧怎么算出来的」，必须在下一次上传/绘制之前装好。
+                    context.set_creative_lut(gpu_lut);
                     // 真帧：回到最近邻放大（1:1 看像素），顺序同上
                     context.set_soft_preview(false);
                     context.set_shared_image(render_image, source_size);
@@ -2900,8 +2907,9 @@ fn present_transition(
     let mut state = lock_state(shared);
     if let Ok(image) = outcome.result {
         let source_size = (image.source_width, image.source_height);
-        if let Some((render_image, tone)) = image.pixels.render(image.width, image.height) {
+        if let Some((render_image, tone, gpu_lut)) = image.pixels.render(image.width, image.height) {
             context.set_global_tone(tone);
+            context.set_creative_lut(gpu_lut);
             // 过渡帧：放大走线性采样（顺序要紧：先置开关，再上传重建绑定组）
             context.set_soft_preview(true);
             context.set_shared_image(render_image, source_size);

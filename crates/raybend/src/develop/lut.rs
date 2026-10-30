@@ -260,11 +260,64 @@ impl Lut {
         }
         Ok(())
     }
+
+    /// 输入域（`DOMAIN_MIN` / `DOMAIN_MAX`）：GPU 侧只上传这两个端点，不在着色器里
+    /// 重新解释 `.cube` 语法。
+    #[must_use]
+    pub fn domain(&self) -> ([f32; 3], [f32; 3]) {
+        (self.domain_min, self.domain_max)
+    }
+
+    /// 3D 表边长（0 = 纯 1D shaper，没有立方表）。
+    #[must_use]
+    pub fn cube_size(&self) -> usize {
+        self.cube_size
+    }
+
+    /// 3D 表的原始采样，顺序与 [`Self::eval`] 一致：`r + n·g + n²·b`。
+    ///
+    /// 只读暴露给 `render::creative_lut`（上传 GPU 纹理用），求值语义仍在本模块 ——
+    /// 谁想做第二套插值，先问过 `eval` 的单测。
+    #[must_use]
+    pub fn cube(&self) -> &[[f32; 3]] {
+        &self.cube
+    }
+
+    /// 1D shaper 表（空 = 没有 shaper）。
+    #[must_use]
+    pub fn shaper(&self) -> &[[f32; 3]] {
+        &self.shaper
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cube_samples_are_r_fastest_for_the_gpu_upload() {
+        // GPU 侧按 `x = r, y = g, z = b` 上纹理（`render/creative_lut.rs`），
+        // 所以这里的顺序就是那边的契约：r 最快、然后 g、再 b。
+        let mut text = String::from("LUT_3D_SIZE 2\n");
+        for b in 0..2 {
+            for g in 0..2 {
+                for r in 0..2 {
+                    text.push_str(&format!("{r} {g} {b}\n"));
+                }
+            }
+        }
+        let lut = Lut::parse_cube(&text).unwrap();
+        assert_eq!(lut.cube_size(), 2);
+        assert_eq!(lut.domain(), ([0.0; 3], [1.0; 3]));
+        assert_eq!(lut.shaper(), &[] as &[[f32; 3]]);
+        assert_eq!(lut.cube().len(), 8);
+        assert_eq!(lut.cube()[0], [0.0, 0.0, 0.0]);
+        assert_eq!(lut.cube()[1], [1.0, 0.0, 0.0], "r 最快");
+        assert_eq!(lut.cube()[2], [0.0, 1.0, 0.0], "其次是 g");
+        assert_eq!(lut.cube()[4], [0.0, 0.0, 1.0], "最后是 b");
+        // 与 eval 的交点一致（顺序错了这里就会露）。
+        assert_eq!(lut.eval([1.0, 0.0, 0.0]), [1.0, 0.0, 0.0]);
+    }
 
     #[test]
     fn cube_red_fastest_and_trilinear_midpoint() {
