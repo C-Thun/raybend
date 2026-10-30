@@ -74,7 +74,7 @@ Windows 桌面合成、真实窗口中的目视对齐与跨屏体感仍需要真
 
 ## 4. 必须长期遵守的坐标契约
 
-### 四种量不能混用
+### 五种量不能混用（第五种 2026-10-31 加入）
 
 | 名称 | 来源 | 单位与用途 |
 | --- | --- | --- |
@@ -82,6 +82,7 @@ Windows 桌面合成、真实窗口中的目视对齐与跨屏体感仍需要真
 | WebView DPR | `window.devicePixelRatio` | DOM client/CSS 坐标 → surface 物理像素 |
 | DOM viewport | `window.innerWidth/innerHeight` | WebView 实际 CSS 视口；不能拿 native size / native scale 冒充 |
 | image zoom | Rust `Viewport.zoom` | 图像像素 → 物理像素；1:1 永远是 1.0 |
+| **area space** | 编辑区（`area`）里存的归一化坐标（`AreaKind::Point.x/y`） | **源图**归一化 0..1（方向已归正、**裁切前**）；绘制时经 Rust 变换换算成屏幕，前端不得自行乘除 |
 
 前端只报告原始事实：`getBoundingClientRect()`、`clientX/Y`、拖动 CSS 位移、DPR。
 **所有物理坐标换算仍然在 Rust**。上报 DPR 不等于把变换数学搬到前端。
@@ -240,3 +241,16 @@ WGSL 着色器共用原实现，没有增加像素回读/IPC/浏览器解码的�
 [调查记录](../implementations/2026-09-25_editor-offscreen-composition-investigation.md)；
 默认固化与适配器验证见
 [实施记录](../implementations/2026-09-25_editor-directcomposition-default.md)。
+
+### area space：编辑区坐标（2026-10-31 加入，`specs/editor-area.md`）
+
+控制点存的是**源图归一化坐标**（`x, y ∈ 0..1`，方向已归正、裁切与镜头校正之前），
+不是像素、不是屏幕、也不是裁切后的显示坐标。三条约束：
+
+1. **存源图、画时换算**：裁切 / 旋转 / 缩放都不改存量数据，只改绘制变换 —— 这样几何改动不会
+   让控制点"跑位"。
+2. **绘制走 Rust 的同一变换矩阵**：圆片、引线、范围圆都挂在 `/ 6.1 红线②` 的那条变换上；
+   前端只拿 Rust 给的屏幕位置，**不自己算**。圆片与文字的大小是屏幕像素常量（不随缩放变），
+   但**位置**必须随图像变换。
+3. **半径归一化到短边**：`radius` 是源图短边的比例，换算到屏幕要乘当前显示尺度 ——
+   这是面积会影响观感的地方，也是"引线长度固定、半径由范围圆表达"的原因。

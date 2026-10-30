@@ -122,6 +122,13 @@ raybend（中文名**「光伴」**，产品名 `RayBend`）是一个**相片管
     全屏打开、参数调整…都只能复用已画好的图）。「正在载入…」提示只属于**换照片**这一件事。
     占位图（1920 / 384）只允许作为**载入期的过渡帧**：一次、被原图原地替换、绝不成为终态。
 
+27. **编辑区（`area`）的边界 = 管线的阶段边界**（崔总 2026-10-31 定）：一张照片的编辑栈是一叠 `area`，
+    层内**只允许逐像素操作**（影调 / 色彩 / 曲线）；镜头、降噪、锐化、局部色调（`dynamicContrast`）、
+    基础曲线 / 机型档案、LUT、色彩管理、几何都是**全局阶段**，不进层。理由不是界面取舍而是渲染结构：
+    层内全逐像素 ⇒ **合成不需要中间图**，一个像素里内循环走层即可，`map_rows` 的行并行与缓存签名都不用动；
+    一旦给层塞进邻域算子，就要引入 N 份 RGBA16 中间缓冲（20MP 一张 160MB），架构立刻崩。
+    规格 `specs/editor-area.md`。
+
 ---
 
 ## 3. 版本基线（2026-09-15 核实）
@@ -356,6 +363,7 @@ pi 的 todo 工具，**同时把需求原文落一份到 `todos/`**（文件名 
 | `memory/FUNCTION-BROWSE.md` | 浏览模式规格：三列结构、toolsbar、选择逻辑、看图/对比、胶片带、标签、浮层、术语细则 |
 | `memory/FUNCTION-IMAGING.md` | 图像格式与显示规格（唯一事实源）：格式范围 + 三种图规格 + issue/latest 切换语义 |
 | `memory/FUNCTION-REPOSITORY.md` | 库与导入规格：库身份、导入模版、序号、重名、RAW 分流、目录透传 |
+| `memory/EDIT-GPU.md` | 编辑计算 GPU 化账本：哪一段在 GPU / 还在 CPU、掉出快速路的判据、下一步该搬谁 |
 | `specs/` | 单工作单元的详细方案与需求规格（`<milestone>-<单元>.md`，文件名小写） |
 | `design/*.pen` + `.md` | Pencil 设计稿与说明（成对） |
 | `implementations/*.md` | 实施记录（文件名带日期，内容首行带精确时间） |
@@ -381,6 +389,7 @@ pi 的 todo 工具，**同时把需求原文落一份到 `todos/`**（文件名 
 | **`workspace`** | 三条下面的工作区，完全跟着工作流走 | `Workspace` |
 | **工作流**（flow） | 导入 / 浏览 / 编辑 / 导出，**有序流水线** | `FlowChip` |
 | **`statusbar`** | 中列最底部的状态/控制位置；**位置术语**，不保证对应同一组件 | `…StatusBar` |
+| **`area panel`**（编辑区面板） | 编辑栈的**层列表**：类型 / 名字 / 启停 / 删除 / 拖动排序 +「新建控制点」；与定稿、LUT 面板同一套开关逻辑（toolsbar left 三选一，底部固定 `总览/信息`） | `AreaPanel` |
 
 **toolsbar 三段式**（left / center / right，人类 2026-09-23 定）：mid 按整窗居中占满整条；
 left / right 叠在 mid 之上各自贴边（分别装 workspace 左列 / 右列相关的**面板开关**），
@@ -474,6 +483,9 @@ import 与 browse 的照片区必须经同一个 `PhotoViewingStage` / `PhotoVie
 | **动态反差**（Dynamic Contrast） | 一根拉杆的局部色调映射（`dynamicContrast`，0–100 单极）；与全局 `contrast` 不是一回事 |
 | **显示尺寸**（display size） | 「这张照片**现在显示多大**」的唯一口径：与方向一样**记在库**里（每文件 `asset_files.display_*`、latest `develop_stacks.output_*`、每条定稿 `issues.output_*`），按**显示变体**解析（`store::sizes::display_size` / 前端 `lib/display-size.ts`）。view 按该尺寸布局，flow info 与 tiles 比例也读它；规格 `specs/display-size-source.md` |
 | **展示尺寸 / 输出尺寸** | 展示尺寸 = `oriented_size(原始轴, 方向)`（屏上宽×高）；输出尺寸 = `EditGeometry::output_size(源展示尺寸)`（已含裁切/旋转，latest 与定稿用） |
+| **`area`（编辑区）** | 编辑栈里的一「层」：带名字（≤30 字）、上下顺序、启停的逐像素调整集合。`全图` 是唯一必须存在的类型（可多份，删到最后一个即不可再删）；层内只装逐像素参数与曲线，全局阶段不进层（§2.27）。规格 `specs/editor-area.md` |
+| **`control point`（控制点）** | `area` 的一种：一个**冻结种子** + 一个**范围** + 平滑权重，把调整铺开到「色/亮相近」的像素上，不用画蒙版。名字固定写英文 `control point`（崔总 2026-10-31 指定）。**不做**影响面可视化 |
+| **眼睛（`显示控制点`）** | toolsbar right 的开关，**只管**控制点的圆点 / 引线 / 名字是否显示；纯视图偏好（`localStorage`，不进 profile / 哈希 / 撤销 / XMP）。未来的蒙版显示是另一套（半透明红区），与它无关 |
 
 ---
 
@@ -512,6 +524,7 @@ import 与 browse 的照片区必须经同一个 `PhotoViewingStage` / `PhotoVie
 | `MetadataRows` | `MetadataRows.tsx` | 「名称 : 值」两列信息行（右栏与编辑器共用一份排版） |
 | `ToolsSeparator` | `ToolsSeparator.tsx` | toolsbar 的组分隔符 |
 | `Histogram` / `HistogramPanel` | `Histogram.tsx` / `HistogramPanel.tsx` | RGB 直方图（三通道曲线 + 通道选择）/ 直方图那一块（标题 + 取数与缓存） |
+| `Progress` | `Progress.tsx` | 进度条（**全项目唯一一份**）：确定态按百分比；`value=null` = 不确定态（没有总数就不编百分比）。照片导入与 LUT 导入共用（2026-10-30） |
 | `DisplayColorStatus` | `DisplayColorStatus.tsx` | 显示色彩状态（编辑器与设备设置共用同一种呈现） |
 | `Tile` | `Tile.tsx` | 网格基本单元（图标 tile / 图片 tile 的公共骨架） |
 | `PhotoMarks` | `PhotoMarks.tsx` | 一张照片的标记簇（星标 / 色标 / 赞踩 / 旗标），只读 |
@@ -560,6 +573,7 @@ import 与 browse 的照片区必须经同一个 `PhotoViewingStage` / `PhotoVie
 | 色彩 | `color/`、`display/`、`src-tauri/src/color_profiles.rs` | 输入/工作/输出 ICC、显示状态 | 缓存代理、XMP 色彩身份、导出标记 |
 | 回收站 / 存储 | `store/delete.rs`、`store/repository.rs`、`src-tauri/src/repo.rs` | 文件移动、catalog 标记、缓存清理 | XMP 随照片移动、还原同名后缀、离线降级 |
 | XMP | `crates/raybend/src/xmp/`、`src-tauri/src/sidecar.rs` | `<主体名>.xmp` | `specs/xmp-sidecar.md`、`specs/issue-xmp-contract.md`、写出开关、巡检工具 |
+| **编辑区（area / 层）** | `store/develop.rs::DevelopStack`、`develop/pipeline.rs`、`src/features/editor/area-panel.tsx` | 层的参数与曲线、层序、层名、冻结种子、范围 | **撤销键加 `area_id` + 结构 op**、定稿哈希与 schema 版本（v3 按内容分支）、XMP（`crs` 无层概念 → 层只进 `rb:`）、预设作用域过滤、缓存签名、缩略图渲染路径、坐标契约 |
 
 ### 13.1 新增「无损编辑参数」的固定清单
 
