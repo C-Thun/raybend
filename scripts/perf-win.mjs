@@ -24,11 +24,15 @@
  *
  * ## 连接方式（WSL → Windows 宿主：直连；需一次性 netsh 授权）
  *
- * exe 需要带调试参数起 WebView2（`--launch` 已代劳，经 WSLENV 透传）：
+ * **2026-10-30 起，debug 构建自己就把调试口开了**（`src-tauri/src/webview_debug.rs`，
+ * 默认 `127.0.0.1:9333`），所以本脚本**不需要**再带环境变量拉 exe：
  *
  * ```bash
- * WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS='--remote-debugging-port=9333'
+ * pnpm debug:win      # 编完直接跑 exe，或本脚本直接连已开的实例
  * ```
+ *
+ * `--launch` 仍会显式带 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS='--remote-debugging-port=9333'`
+ * 经 WSLENV 透传 —— 显式值优先，不会和程序自己设的重复。想关掉程序那条：`RAYBEND_CDP=0`。
  *
  * ⚠️ **Chromium（WebView2 153 实测）把调试口硬绑在 Windows 的 `127.0.0.1`**（headed
  * 模式下的安全限制，`--remote-debugging-address=0.0.0.0` 被无视）；WSL NAT 下

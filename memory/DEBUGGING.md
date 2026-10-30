@@ -15,13 +15,19 @@
 **不许自己搭隧道**——仓库里已有授权好的直连通道（2026-10-11 教训：绕了一圈反向隧道，其实早有现成的；`rbrelay` 那套已删）。
 
 1. **方案与公共工装**：`scripts/perf-win.mjs` 头部「连接方式」一节、`scripts/lib/cdp.mjs`。
-2. **拉起带调试口的 exe**：`pnpm perf:win --launch` 代劳了 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9333`
-   经 `WSLENV` 透传与直连候选轮询。手工起也一样：
+2. **拉起带调试口的 exe（2026-10-30 起不用再手动带参数）**：`debug:win` 编出来的 exe **自己会开**调试口
+   （`src-tauri/src/webview_debug.rs`；默认 `127.0.0.1:9333`），直接跑就行：
+   `/mnt/c/rb-target/raybend/debug/raybend-desktop.exe`。发布构建**永远不碰**这个开关。
+   * 换端口：`RAYBEND_CDP_PORT=9450`（同时 `netsh portproxy` 要改指向）；
+   * 关掉：`RAYBEND_CDP=0`（也认 `off` / `false` / `no`）；
+   * `pnpm perf:win --launch` 仍会自己带参数起（显式给的 `--remote-debugging-port` 优先，不会重复加两个）。
+   * 同时开两个 debug 实例时只有一个能绑上端口，另一个只是没有调试口，应用照常跑。
+   手工起（旧办法，仍然有效）：
    `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS='--remote-debugging-port=9333' WSLENV=WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS <exe>`。
 3. **一次性授权**：本机已做过 `netsh portproxy` 9334 → 127.0.0.1:9333，防火墙只放行 WSL 子网 172.16.0.0/12（原文命令在 `perf-win.mjs` 头部）。授权还在就直接用；WSL 侧连 `http://<默认网关>:9334/json/list`。
 4. **拦 IPC 的窍门**：Tauri v2 的 IPC 是 `fetch("http://ipc.localhost/<cmd>")`，不是 `chrome.webview.postMessage`；`window.__TAURI_INTERNALS__.invoke` 是 `{writable:false, configurable:false}`，patch 不了。要计时就拦 `window.fetch`，记 url / 耗时 / 成败 / 回包字节。
 5. **纪律**：诊断只看不改；拉起的实例会锁住 exe，挡住下一次 `debug:win`，收工时记得收；别拿探针的「空闲 + 热缓存」数字当用户体感——真机首进目录是冷读，且同时在跑别的命令，场景不同结论就不同。
-6. **排障**：`netstat -ano | findstr 9333` 没有输出说明调试口没开，多半已有别的实例占着 WebView2 进程，关掉占用实例再拉；连不上时确认 exe 是带参数起的、`netsh portproxy show v4tov4` 里 9334 那一行还在。
+6. **排障**：`netstat -ano | findstr 9333` 没有输出 → 要么这次是用 `RAYBEND_CDP=0` 起的，要么端口被别的实例/别的程序占了（调试口**只绑 127.0.0.1**，占用的不一定是雷清）。连不上时再查 `netsh portproxy show v4tov4` 里 9334 那一行还在不在。
 
 ## 2. 日志与崩溃记录
 

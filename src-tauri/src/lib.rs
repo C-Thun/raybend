@@ -42,6 +42,8 @@ pub mod thumbs;
 mod updates;
 /// 窗口「工作区布局」（Shift+点击最大化键，`specs/window-work-area-layout.md`）。
 mod window_layout;
+/// debug 构建自动开 WebView2 调试口（CDP，`memory/DEBUGGING.md` §1）。发布构建不生效。
+mod webview_debug;
 mod work;
 
 /// IPC 契约测试（拉把 Rust 序列化出的键名与前端 ts 镜像对齐）。
@@ -216,6 +218,12 @@ fn reveal_main_after_splash_min(app: &tauri::AppHandle) {
 ///
 /// Tauri 运行时初始化失败时 panic —— 此时进程已无法提供任何功能。
 pub fn run() {
+    /*
+     * **必须在 `tauri::Builder` 之前**：窗口（连同 WebView2 环境）是按 `tauri.conf.json`
+     * 在 builder 里就建好的，setup 跑起来时环境已经创建完，再设环境变量就晚了。
+     * 发布构建里这个函数直接返回 `None`，什么都不做。
+     */
+    webview_debug::install();
     tauri::Builder::default()
         .append_invoke_initialization_script(splash::initialization_script())
         .plugin(desktop_behavior::init())
@@ -464,6 +472,13 @@ pub fn run() {
                     diagnostics.previous_unclean(),
                     diagnostics.root().display(),
                 );
+                // 调试口是环境变量在 builder 之前设的（那时日志层还没起），这里补一行落盘记录
+                if let Some(port) = webview_debug::enabled_port() {
+                    log::info!(
+                        target: "app",
+                        "debug 构建：WebView2 调试口 127.0.0.1:{port}（RAYBEND_CDP=0 可关）"
+                    );
+                }
                 // 崩溃助手（W4）：起不来只是少一份 dump，日志与 panic 记录照旧
                 let _ = crashpad::attach(
                     diagnostics.recorder(),
