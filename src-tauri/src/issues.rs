@@ -49,6 +49,12 @@ pub struct IssueLibraryDto {
     pub issues: Vec<IssueDto>,
     pub selection: Selection,
     pub can_finalize: bool,
+    /// 当前编辑栈（latest）是否**与某条定稿完全相同**（指纹 + 调整逐项一致）。
+    ///
+    /// 为真时界面**不画「最近编辑」那一行**（崔总 2026-10-31）：此时 latest 与那条定稿是同一份
+    /// 画面，再列一行只会让用户选到一个无法区分的目标，同时也会让「定稿存不进去」变得莫名其妙。
+    /// 判据与 `can_finalize` 同一个（都走 `store::issues::matching_issue`）。
+    pub latest_matches_issue: bool,
     pub suggested_name: Option<String>,
     pub snapshot_error: Option<String>,
 }
@@ -78,6 +84,7 @@ fn library<R: Runtime>(
             };
             let issues = issues::list(conn, asset_id)?;
             let selection = issues::selection(&stack, &issues)?;
+            let latest_matches_issue = issues::latest_matches_issue(&stack, &issues)?;
             let can_finalize = issues::can_finalize(&stack, &issues)?;
             let suggested_name = if can_finalize {
                 Some(issues::suggested_name(conn, asset_id, &stack, english)?)
@@ -87,6 +94,7 @@ fn library<R: Runtime>(
             Ok(IssueLibraryDto {
                 issues: issues.into_iter().map(Into::into).collect(),
                 selection,
+                latest_matches_issue,
                 can_finalize,
                 suggested_name,
                 snapshot_error: None,

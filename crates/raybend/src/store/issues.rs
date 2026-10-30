@@ -9,6 +9,14 @@ use crate::error::{Error, Result};
 
 pub const PROFILE_SCHEMA_VERSION: i64 = 2;
 
+/// 每张照片的**定稿数量上限**（崔总 2026-10-31 定）。
+///
+/// 序号（`ordinal`，导出尾号 I00–I99）本身有 100 个位置，但一张照片真攒到几十份定稿时
+/// 面板早就不堪入目，侧车里的 `rb:profiles` 也会跟着膨胀。所以业务上限单独钉在 32：
+/// 达到上限后 `can_finalize` 返回假（按钮变灰），`create` 报一句能看懂的中文错误 ——
+/// **不把「序号用满」当成业务上限**（那是另一个口径，见 `allocate_ordinal`）。
+pub const MAX_ISSUES_PER_ASSET: usize = 32;
+
 pub fn profile_schema_version(stack: &DevelopStack) -> i64 {
     if stack.color.is_some() { 2 } else { 1 }
 }
@@ -162,9 +170,20 @@ pub fn selection(stack: &DevelopStack, issues: &[Issue]) -> Result<Selection> {
     Ok(Selection::Latest)
 }
 
+/// 当前编辑栈（latest）是不是**与某条定稿完全相同**（指纹 + 调整逐项一致）。
+///
+/// 界面用它决定要不要画「最近编辑」那一行（崔总 2026-10-31）：相同时 latest 与那条定稿
+/// 是同一份画面，再列一行只会让用户选到一个无法区分的目标 —— 直接不显示。
+pub fn latest_matches_issue(stack: &DevelopStack, issues: &[Issue]) -> Result<bool> {
+    Ok(matching_issue(stack, issues)?.is_some())
+}
+
 pub fn can_finalize(stack: &DevelopStack, issues: &[Issue]) -> Result<bool> {
     // 自动保存使当前 profile 必然等于 latest；这不能阻止另存定稿。
-    // 只有原始源或已经存在的不可变定稿才阻止保存。
+    // 只有原始源、已经存在的不可变定稿、或已经到数量上限才阻止保存。
+    if issues.len() >= MAX_ISSUES_PER_ASSET {
+        return Ok(false);
+    }
     Ok(!stack.is_empty() && matching_issue(stack, issues)?.is_none())
 }
 
@@ -206,7 +225,15 @@ pub fn create(
 ) -> Result<Issue> {
     let name = validated_name(raw_name)?;
     ensure_name_free(conn, asset_id, name, None)?;
-    if !can_finalize(stack, &list(conn, asset_id)?)? {
+    let existing = list(conn, asset_id)?;
+    // 上限先报：与「配置重复」是两种不同的拒绝理由，混成一句会让用户不知道该怎么办
+    if existing.len() >= MAX_ISSUES_PER_ASSET {
+        return Err(Error::Unsupported(format!(
+            "这张照片已有 {} 个定稿，已达上限 {MAX_ISSUES_PER_ASSET} 个；删掉一个再存",
+            existing.len()
+        )));
+    }
+    if !can_finalize(stack, &existing)? {
         return Err(Error::Unsupported("当前配置与现有定稿或原始源相同".into()));
     }
     let hash = profile_hash(stack)?;
@@ -627,36 +654,68 @@ mod tests {
         assert_eq!(g.ordinal, 1);
     }
 
+    /// 数量上限（`MAX_ISSUES_PER_ASSET`）：到顶后按钮该变灰、创建该被拒且**理由不同**于
+    /// 「配置重复」；删掉一份立刻能再存。
     #[test]
-    fn ordinal_cap_at_one_hundred_rejects_new_issues_and_reuses_freed_slot() {
+    fn issue_count_cap_rejects_new_issues_and_frees_a_slot() {
         let conn = db();
         conn.execute_batch("INSERT INTO assets(id, imported_at, updated_at) VALUES(1,1,1);")
             .unwrap();
-        for number in 0..100 {
+        for number in 0..MAX_ISSUES_PER_ASSET {
             let mut stack = DevelopStack::default();
-            stack.params.insert("exposure".into(), -2.0 + number as f64 / 25.0);
-            create(&conn, 1, &format!("第{number}"), &stack, number + 1).unwrap();
+            stack.params.insert("exposure".into(), -2.0 + number as f64 / 8.0);
+            create(&conn, 1, &format!("第{number}"), &stack, number as i64 + 1).unwrap();
         }
-        let mut ordinals: Vec<i64> = list(&conn, 1)
-            .unwrap()
-            .iter()
-            .map(|issue| issue.ordinal)
-            .collect();
-        ordinals.sort_unstable();
-        assert_eq!(ordinals, (0..100).collect::<Vec<_>>());
-        let mut stack = DevelopStack::default();
-        stack.params.insert("exposure".into(), 1.999);
-        let full = create(&conn, 1, "第一百零一", &stack, 999).unwrap_err();
-        assert!(full.to_string().contains("100"));
-        // 删掉一个，位置立刻可用
-        let victim = list(&conn, 1)
-            .unwrap()
-            .into_iter()
-            .find(|issue| issue.ordinal == 42)
-            .unwrap();
+        assert_eq!(list(&conn, 1).unwrap().len(), MAX_ISSUES_PER_ASSET);
+        // 取一个**不与已有 32 个重复**的值（-2.0 + n/8 的序列里没有 1.51）
+        let mut fresh = DevelopStack::default();
+        fresh.params.insert("exposure".into(), 1.51);
+        assert!(
+            !can_finalize(&fresh, &list(&conn, 1).unwrap()).unwrap(),
+            "到上限后 can_finalize 必须是假（按钮变灰）"
+        );
+        let refused = create(&conn, 1, "第三十三个", &fresh, 999).unwrap_err();
+        assert!(
+            refused.to_string().contains(&MAX_ISSUES_PER_ASSET.to_string()),
+            "上限错误要说清是 32 个：{refused}"
+        );
+        assert!(!refused.to_string().contains("相同"), "不能和「配置重复」混成一句：{refused}");
+        // 删掉一份，位置立刻回来
+        let victim = list(&conn, 1).unwrap().into_iter().next().unwrap();
         assert!(delete(&conn, 1, victim.id).unwrap());
-        let again = create(&conn, 1, "补位", &stack, 1000).unwrap();
-        assert_eq!(again.ordinal, 42);
+        assert!(can_finalize(&fresh, &list(&conn, 1).unwrap()).unwrap());
+        let again = create(&conn, 1, "补位", &fresh, 1000).unwrap();
+        assert_eq!(list(&conn, 1).unwrap().len(), MAX_ISSUES_PER_ASSET);
+        assert_eq!(again.ordinal, MAX_ISSUES_PER_ASSET as i64, "序号从游标继续，不复用被删的那个");
+    }
+
+    /// 同哈希 / 同配置的定稿**存不进去**（`can_finalize` 的口径），而「最近编辑」行的显示
+    /// 判据（`latest_matches_issue`）必须与它一致 —— 否则就会出现「存不了却还在列里」。
+    #[test]
+    fn duplicate_profile_is_rejected_and_latest_is_hidden_for_it() {
+        let conn = db();
+        conn.execute_batch("INSERT INTO assets(id, imported_at, updated_at) VALUES(1,1,1);")
+            .unwrap();
+        let mut stack = DevelopStack::default();
+        stack.params.insert("exposure".into(), 0.5);
+        assert!(!latest_matches_issue(&stack, &[]).unwrap(), "没有定稿时不算匹配");
+        create(&conn, 1, "甲", &stack, 1).unwrap();
+        let issues = list(&conn, 1).unwrap();
+        assert!(
+            latest_matches_issue(&stack, &issues).unwrap(),
+            "与现有定稿逐项一致 → 界面隐藏「最近编辑」"
+        );
+        let duplicate = create(&conn, 1, "乙", &stack, 2).unwrap_err();
+        assert!(duplicate.to_string().contains("相同"), "{duplicate}");
+        // 改一格参数就既不再是重复、也不再隐藏「最近编辑」
+        let mut edited = stack.clone();
+        edited.params.insert("exposure".into(), 0.6);
+        assert!(!latest_matches_issue(&edited, &issues).unwrap());
+        assert!(can_finalize(&edited, &issues).unwrap());
+        // 空栈（原始源）同样不能定稿，也不算「匹配某条定稿」
+        let empty = DevelopStack::default();
+        assert!(!can_finalize(&empty, &issues).unwrap());
+        assert!(!latest_matches_issue(&empty, &issues).unwrap());
     }
 
     #[test]

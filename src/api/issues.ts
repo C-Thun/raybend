@@ -23,6 +23,13 @@ export type IssueSelection = "sooc" | "raw" | "latest" | { issue: number };
 export interface IssueLibrary {
   issues: Issue[];
   selection: IssueSelection;
+  /**
+   * 当前编辑栈（latest）与某条定稿**完全相同**（后端按指纹 + 逐项调整判）。
+   *
+   * 为真时界面不画「最近编辑」那一行（`lib/issue-visibility.ts::showsLatestRow`，
+   * 崔总 2026-10-31）：那一刻 latest 与那条定稿是同一份画面，选它没有意义。
+   */
+  latestMatchesIssue: boolean;
   canFinalize: boolean;
   suggestedName: string | null;
   snapshotError: string | null;

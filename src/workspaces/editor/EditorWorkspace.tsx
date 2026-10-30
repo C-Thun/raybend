@@ -63,6 +63,7 @@ import {
 } from "../../api/editor.ts";
 import { createEasyDestroy, type ShiftLikeEvent } from "../../lib/easy-destroy.ts";
 import { selectAllOnMount } from "../../lib/dom-focus.ts";
+import { showsLatestRow } from "../../lib/issue-visibility.ts";
 import { EasyDestroyHost } from "../../components/ui/EasyDestroy.tsx";
 import { createLatestCoalescer } from "../../lib/editor-intent.ts";
 import { createPreviewQueue } from "../../lib/preview-queue.ts";
@@ -1754,6 +1755,11 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
             info={info()}
             issues={issueLibrary()}
             pendingIssue={pendingIssue()}
+            /*
+             * 当前栈与已有定稿指纹一致时不画「最近编辑」（崔总 2026-10-31）：
+             * 那一刻 latest 与那条定稿是同一份画面，列出来只会让用户选到一个无法区分的项。
+             */
+            showLatest={showsLatestRow(issueLibrary())}
             issueFocusTick={issueFocusTick()}
             issueSelectionOverride={issueSelectionOverride()}
             onSelectIssue={selectIssue}

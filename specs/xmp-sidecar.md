@@ -105,7 +105,7 @@ sidecar_path(asset) = <照片目录>/<主体名>.xmp
 | 属性 | 形式 | 说明 |
 | --- | --- | --- |
 | `rb:latest` | 资源（`rdf:parseType="Resource"`） | 工作副本：`rb:latestSchemaVersion`、`rb:sourceBase`、`rb:profileHash`、`rb:profileJson` |
-| `rb:profiles` | `rdf:Seq` | 全部不可变定稿；每个 `rdf:li` 含：`rb:name`（UTF-8）、`rb:sourceBase`（raw/sooc）、`rb:createdAtMs`、`rb:ordinal`、`rb:schemaVersion`、`rb:profileHash`、`rb:profileJson`。**即使没有定稿也写出空的 `rb:profiles`**——它是 §3.3「我们的文件」判据的载体，纯元数据 sidecar 靠它不被自己误判为外来文件 |
+| `rb:profiles` | `rdf:Seq` | 全部不可变定稿；每个 `rdf:li` 含：`rb:name`（UTF-8）、`rb:sourceBase`（raw/sooc）、`rb:createdAtMs`、`rb:ordinal`、`rb:schemaVersion`、`rb:profileHash`、`rb:profileJson`。**每张照片最多 32 条定稿**（`store::issues::MAX_ISSUES_PER_ASSET`，2026-10-31），所以这个 `rdf:Seq` 有确定上界。**即使没有定稿也写出空的 `rb:profiles`**——它是 §3.3「我们的文件」判据的载体，纯元数据 sidecar 靠它不被自己误判为外来文件 |
 
 - `rb:profileJson` = `DevelopStack` 的规范 JSON，**剔除 `auto_adjust`**——与 `profile_hash` 同一口径，任何读者可**直接重算哈希**校验（本规格同步修订契约，见 `specs/issue-xmp-contract.md`）。
 - 版本由核心 `issues::profile_schema_version` 决定；没有色彩状态的旧 profile 继续写 1，新色彩状态写 2，不因程序支持上限提升而统一升级旧配置。色彩管理和照片标签来源的新增字段按各自规格同步接入，沿用本文件的损坏/未知保护与事务读回。
