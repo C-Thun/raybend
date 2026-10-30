@@ -10,10 +10,80 @@ use raybend::store::time;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
-use tauri::{AppHandle, Manager, Runtime};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::{Duration, Instant};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+
+/// LUT 导入进度事件名（前端 `onLutImportProgress` 监听的就是它）。
+pub const LUT_IMPORT_PROGRESS_EVENT: &str = "lut://import-progress";
+
+/// 进度事件的节流间隔 —— 每个文件都会想发一条，太密没有意义，
+/// 但**第一条与最后一条必须发**（否则界面会从「没反应」直接跳到 100%）。
+const PROGRESS_THROTTLE: Duration = Duration::from_millis(80);
+
+/// 一次 LUT 导入的进度快照。
+///
+/// `phase` 三档：`scan`（**还没有总数**，界面走不确定态）/ `copy`（总数已知，逐张处理）/ `done`（收尾）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LutImportProgressDto {
+    pub phase: &'static str,
+    pub done: usize,
+    pub total: usize,
+    /// 正在处理的文件名（不含目录）
+    pub current: Option<String>,
+    pub imported: usize,
+    pub duplicates: usize,
+    pub skipped: usize,
+    pub cancelled: bool,
+}
+
+/// 取消开关：同一时刻只有一次 LUT 导入（前端用 `busy` 门控），所以一个布尔量就够。
+///
+/// 取消是**真中止**：在处理完当前文件之后停下，已导入的保留（与照片导入的取消同一条承诺）。
+#[derive(Default)]
+pub struct LutImportCancel(AtomicBool);
+
+impl LutImportCancel {
+    pub fn request(&self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+
+    pub fn is_requested(&self) -> bool {
+        self.0.load(Ordering::SeqCst)
+    }
+
+    pub fn reset(&self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
+
+/// 进度事件节流器（保证首条一定发）。
+struct ProgressThrottle {
+    last: Option<Instant>,
+}
+
+impl ProgressThrottle {
+    fn new() -> Self {
+        Self { last: None }
+    }
+
+    /// `force` = 无视节流（首条 / 末条 / 阶段切换）
+    fn ready(&mut self, force: bool) -> bool {
+        let now = Instant::now();
+        let due = self
+            .last
+            .is_none_or(|last| now.duration_since(last) >= PROGRESS_THROTTLE);
+        if force || due {
+            self.last = Some(now);
+            true
+        } else {
+            false
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -199,6 +269,14 @@ pub struct LutImportDto {
     pub duplicates: usize,
     pub restored: usize,
     pub skipped: Vec<String>,
+    /// 本次导入是不是被用户中止的（中止也返回已完成的那部分）
+    pub cancelled: bool,
+}
+
+/// 中止正在跑的 LUT 导入（在处理完当前文件后停下，已导入的保留）。
+#[tauri::command]
+pub fn lut_import_cancel<R: Runtime>(app: AppHandle<R>) {
+    app.state::<LutImportCancel>().request();
 }
 
 #[tauri::command]
@@ -209,9 +287,43 @@ pub async fn lut_import_directory<R: Runtime>(
 ) -> Result<LutImportDto, String> {
     let handle = app.clone();
     crate::source::blocking(move || {
+        let cancel = handle.state::<LutImportCancel>();
+        cancel.reset();
+        /*
+         * 进度事件：
+         *   scan ── 还没有总数（界面走不确定态，不编百分比）
+         *   copy ── 总数已知，每个文件一条（节流），`current` 就是「它没卡住」的证据
+         *   done ── 无论完成还是中止都发最后一条，让进度条落地
+         */
+        let emit = |phase: &'static str,
+                    done: usize,
+                    total: usize,
+                    current: Option<String>,
+                    imported: usize,
+                    duplicates: usize,
+                    skipped: usize,
+                    cancelled: bool| {
+            // 事件发不出去（窗口关了）不该影响导入
+            let _ = handle.emit(
+                LUT_IMPORT_PROGRESS_EVENT,
+                LutImportProgressDto {
+                    phase,
+                    done,
+                    total,
+                    current,
+                    imported,
+                    duplicates,
+                    skipped,
+                    cancelled,
+                },
+            );
+        };
+        emit("scan", 0, 0, None, 0, 0, 0, false);
         backfill_hashes(&handle)?;
         let source = Path::new(&path);
         let files = discover(source).map_err(|error| error.to_string())?;
+        let total = files.len();
+        emit("copy", 0, total, None, 0, 0, 0, false);
         let root = root(&handle)?;
         let db = handle.state::<DbState>();
         let valid_category = db.with(&handle, |db| {
@@ -229,7 +341,33 @@ pub async fn lut_import_directory<R: Runtime>(
         let mut duplicates = 0;
         let mut restored = 0;
         let mut skipped = Vec::new();
-        for file in files {
+        let mut cancelled = false;
+        // 已经处理过的候选文件数（含重复 / 跳过）。中止时必须保留真实进度，
+        // 不能拿 total 冒充 done，否则界面会虚报 100%。
+        let mut processed = 0;
+        let mut throttle = ProgressThrottle::new();
+        for (index, file) in files.into_iter().enumerate() {
+            // 取消在两张之间生效：当前这张做完再停（硬中断会把半份副本留在库里）。
+            if cancel.is_requested() {
+                cancelled = true;
+                break;
+            }
+            processed = index + 1;
+            if throttle.ready(index == 0) {
+                let name = file
+                    .file_name()
+                    .map(|value| value.to_string_lossy().into_owned());
+                emit(
+                    "copy",
+                    index,
+                    total,
+                    name,
+                    imported,
+                    duplicates,
+                    skipped.len(),
+                    false,
+                );
+            }
             // .cube 的同名伴生图不能再作为 Hald 导入，后缀比较不区分大小写。
             if file
                 .extension()
@@ -344,12 +482,23 @@ pub async fn lut_import_directory<R: Runtime>(
                 }
             }
         }
+        emit(
+            "done",
+            processed,
+            total,
+            None,
+            imported,
+            duplicates,
+            skipped.len(),
+            cancelled,
+        );
         Ok(LutImportDto {
             library: library(&handle, &[])?,
             imported,
             duplicates,
             restored,
             skipped,
+            cancelled,
         })
     })
     .await
@@ -394,4 +543,89 @@ pub async fn lut_hide<R: Runtime>(app: AppHandle<R>, id: String) -> Result<LutLi
         library(&handle, &[])
     })
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{LutImportCancel, LutImportProgressDto, PROGRESS_THROTTLE, ProgressThrottle};
+
+    /// 前端按 `camelCase` 读字段（`done` / `total` / `current` / `imported` …）。
+    /// 这条测试是**跨语言契约**：改了字段名或大小写，前端会静默读不到数。
+    #[test]
+    fn progress_dto_is_camel_case() {
+        let json = serde_json::to_value(LutImportProgressDto {
+            phase: "copy",
+            done: 7,
+            total: 12,
+            current: Some("Kodak 2383.cube".into()),
+            imported: 6,
+            duplicates: 1,
+            skipped: 0,
+            cancelled: false,
+        })
+        .unwrap();
+        for key in [
+            "phase",
+            "done",
+            "total",
+            "current",
+            "imported",
+            "duplicates",
+            "skipped",
+            "cancelled",
+        ] {
+            assert!(json.get(key).is_some(), "缺字段 {key}");
+        }
+        assert_eq!(json["phase"], "copy");
+        assert_eq!(json["current"], "Kodak 2383.cube");
+    }
+
+    /// 扫描阶段没有总数：`total = 0`、`current = null`（前端据此走不确定态）。
+    #[test]
+    fn scan_progress_has_no_total() {
+        let json = serde_json::to_value(LutImportProgressDto {
+            phase: "scan",
+            done: 0,
+            total: 0,
+            current: None,
+            imported: 0,
+            duplicates: 0,
+            skipped: 0,
+            cancelled: false,
+        })
+        .unwrap();
+        assert_eq!(json["total"], 0);
+        assert!(json["current"].is_null());
+    }
+
+    /// 首条必须发（否则界面从「没反应」直接跳到 100%）。
+    #[test]
+    fn throttle_lets_the_first_event_through() {
+        let mut throttle = ProgressThrottle::new();
+        assert!(throttle.ready(false));
+        // 紧跟着的第二条被节流掉
+        assert!(!throttle.ready(false));
+        // force 无视节流
+        assert!(throttle.ready(true));
+    }
+
+    /// 节流间隔是一个「小但非零」的窗口——改大了会看不出推进，改小了事件太密。
+    #[test]
+    fn throttle_window_is_bounded() {
+        assert!(PROGRESS_THROTTLE.as_millis() >= 30);
+        assert!(PROGRESS_THROTTLE.as_millis() <= 500);
+    }
+
+    /// 取消是一次性的显式动作：请求后一直为真，下一次导入开始时才复位。
+    #[test]
+    fn cancel_flag_resets_per_import() {
+        let cancel = LutImportCancel::default();
+        assert!(!cancel.is_requested());
+        cancel.request();
+        assert!(cancel.is_requested());
+        // 连读两次仍然为真（不能「读一次就清」——循环每张都要问一次）
+        assert!(cancel.is_requested());
+        cancel.reset();
+        assert!(!cancel.is_requested());
+    }
 }

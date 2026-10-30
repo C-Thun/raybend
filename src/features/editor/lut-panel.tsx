@@ -18,7 +18,7 @@
  * 所以这里没有把手，也不需要 `SplitHandle`。
  */
 
-import { For, Show, createSignal, createEffect, onCleanup, type JSX } from "solid-js";
+import { For, Show, createSignal, createEffect, onCleanup, onMount, type JSX } from "solid-js";
 import {
   IconCheck,
   IconChevronDown,
@@ -32,10 +32,15 @@ import { Button } from "../../components/ui/Button.tsx";
 import { Switch } from "../../components/ui/Form.tsx";
 import { EasyDestroyButton } from "../../components/ui/EasyDestroy.tsx";
 import { Dialog } from "../../components/ui/Dialog.tsx";
-import { Tooltip } from "../../components/ui/Tooltip.tsx";
 import { t } from "../../i18n/index.ts";
 import { lutCount, visibleLutCategories, type LutEntry } from "../../lib/lut-library.ts";
-import { getLutCover } from "../../api/lut.ts";
+import {
+  cancelLutImport,
+  getLutCover,
+  onLutImportProgress,
+  type LutImportProgress,
+} from "../../api/lut.ts";
+import { LutImportProgressView } from "./lut-import-progress.tsx";
 import type { EditorStore } from "./store.ts";
 import { EDITOR_LEFT_WIDTH } from "./layout.ts";
 
@@ -56,7 +61,65 @@ export function LutPanel(props: LutPanelProps): JSX.Element {
   const [importOpen, setImportOpen] = createSignal(false);
   const [importCategory, setImportCategory] = createSignal("");
   const [busy, setBusy] = createSignal(false);
+  const [stopping, setStopping] = createSignal(false);
+  const [importProgress, setImportProgress] = createSignal<LutImportProgress | null>(null);
   const [importSummary, setImportSummary] = createSignal<string | null>(null);
+
+  /*
+   * 进度走 Rust 的事件（`lut://import-progress`）。
+   * 订阅放在面板挂载时：**必须在发命令之前就位**，否则前几条事件会丢
+   * （`listen` 是异步的，而用户点「导入」的时刻我们控制不了）。
+   */
+  onMount(() => {
+    let stop: (() => void) | undefined;
+    let disposed = false;
+    void onLutImportProgress((progress) => setImportProgress(progress)).then((unsubscribe) => {
+      if (disposed) unsubscribe();
+      else stop = unsubscribe;
+    });
+    onCleanup(() => {
+      disposed = true;
+      stop?.();
+    });
+  });
+
+  const importCategoryName = (): string =>
+    categories().find((category) => category.id === importCategory())?.name ?? importCategory();
+
+  /**
+   * 跑一次导入。
+   *
+   * ❗**只有真导过（拿到摘要）才关窗**：取消目录选择 / 出错时返回 `null`，
+   * 那时关窗会让人以为「点了没反应」。
+   */
+  async function submitImport(): Promise<void> {
+    if (busy()) return;
+    setBusy(true);
+    setStopping(false);
+    setImportSummary(null);
+    // 第一条事件还没到（含原生目录选择器开着的那段）→ 界面说「正在准备…」，不伪造扫描进度
+    setImportProgress(null);
+    try {
+      const summary = (await props.onImport?.(importCategory())) ?? null;
+      setImportSummary(summary);
+      if (summary !== null) setImportOpen(false);
+    } finally {
+      setBusy(false);
+      setStopping(false);
+      setImportProgress(null);
+    }
+  }
+
+  /** 底栏「取消」：导入中 = **真中止**（当前文件完成后停，已导入的保留）；否则 = 关窗。 */
+  async function requestCancelImport(): Promise<void> {
+    if (!busy()) {
+      setImportOpen(false);
+      return;
+    }
+    if (stopping()) return;
+    setStopping(true);
+    await cancelLutImport();
+  }
 
   const categories = () => visibleLutCategories(props.store.lutCategories());
   const total = () => lutCount(categories());
@@ -92,30 +155,29 @@ export function LutPanel(props: LutPanelProps): JSX.Element {
     >
       {/*
         标题行：「LUT」+ 行尾两个图标按钮（新建分类 / 导入 LUT）。
-        文字按钮会和 LUT 名挤在一起，所以用图标 + Tooltip（`design/editor.md` §3.1）。
+        文字按钮会和 LUT 名挤在一起，所以用图标 + 内置提示（`design/editor.md` §3.1）。
+        ❗提示走按钮自己的 `tip`，**不要在外面再套一层 `<Tooltip>`** —— 那就是两台
+        tooltip machine 抢同一指针路径（2026-10-11 修掉的「移到下一个按钮不弹」）。
       */}
       <div class="flex shrink-0 items-center gap-1 px-panel-pad pt-panel-pad pb-1.5">
         <span class="flex-1 text-fs-3 font-semibold text-fg-1">
           {t("editor.lut.title")}
         </span>
-        <Tooltip content={t("editor.lut.newCategory")}>
-          {(triggerProps) => (
-            <Button
-              {...triggerProps()}
-              variant="ghost"
-              aria-label={t("editor.lut.newCategory")}
-              icon={<IconFolderPlus size={14} />}
-              onClick={openCreate}
-            />
-          )}
-        </Tooltip>
-        <Tooltip content={t("editor.lut.import")}>
-          {(triggerProps) => (
-            <Button {...triggerProps()} variant="ghost" data-lut-import
-              aria-label={t("editor.lut.import")} icon={<IconUpload size={14} />}
-              onClick={() => { setImportCategory(categories()[0]?.id ?? ""); setImportOpen(true); }} />
-          )}
-        </Tooltip>
+        <Button
+          tip={t("editor.lut.newCategory")}
+          variant="ghost"
+          aria-label={t("editor.lut.newCategory")}
+          icon={<IconFolderPlus size={14} />}
+          onClick={openCreate}
+        />
+        <Button
+          tip={t("editor.lut.import")}
+          variant="ghost"
+          data-lut-import
+          aria-label={t("editor.lut.import")}
+          icon={<IconUpload size={14} />}
+          onClick={() => { setImportCategory(categories()[0]?.id ?? ""); setImportOpen(true); }}
+        />
       </div>
 
       <div class="flex shrink-0 items-center justify-between px-panel-pad pb-1 text-fs-1 text-fg-2">
@@ -205,19 +267,65 @@ export function LutPanel(props: LutPanelProps): JSX.Element {
         </Show>
       </div>
 
-      <Dialog open={importOpen()} onOpenChange={setImportOpen} title={t("editor.lut.import")}
-        footer={<><Button variant="secondary" onClick={() => setImportOpen(false)}>{t("common.cancel")}</Button>
-          <Button variant="primary" disabled={busy() || importCategory() === ""}
-            onClick={async () => { setBusy(true); setImportSummary(null);
-              try { setImportSummary(await props.onImport?.(importCategory()) ?? null); }
-              finally { setBusy(false); setImportOpen(false); } }}>
-            {t("editor.lut.import")}</Button></>}>
-        <label class="flex flex-col gap-2 text-fs-1 text-fg-2">{t("editor.lut.category")}
-          <select class="rounded-ui bg-surface-track px-2 py-1.5 text-fg-1"
-            value={importCategory()} onChange={(event) => setImportCategory(event.currentTarget.value)}>
-            <For each={categories()}>{(category) => <option value={category.id}>{category.name}</option>}</For>
-          </select>
-        </label>
+      {/*
+        导入弹窗：选择分类 → 跑导入。
+        导入期间换成**进度状态**（扫描中走不确定态、复制中给确定值），
+        底栏的「取消」是真中止（已导入的保留）—— 画稿 `design/editor.md` §3.1.2。
+        关窗（Esc / 遮罩）与「取消」同一条口径：不能“关掉窗口让它偷偷继续”。
+      */}
+      <Dialog
+        open={importOpen()}
+        onOpenChange={(open) => {
+          if (open) setImportOpen(true);
+          else void requestCancelImport();
+        }}
+        title={t("editor.lut.import")}
+        footer={
+          <>
+            <Button variant="secondary" disabled={stopping()} onClick={() => void requestCancelImport()}>
+              {t("common.cancel")}
+            </Button>
+            <Button
+              variant="primary"
+              disabled={busy() || importCategory() === ""}
+              onClick={() => void submitImport()}
+            >
+              {t("editor.lut.import")}
+            </Button>
+          </>
+        }
+      >
+        <Show
+          when={busy()}
+          fallback={
+            <label class="flex flex-col gap-2 text-fs-1 text-fg-2">
+              {t("editor.lut.category")}
+              <select
+                class="rounded-ui bg-surface-track px-2 py-1.5 text-fg-1"
+                value={importCategory()}
+                onChange={(event) => setImportCategory(event.currentTarget.value)}
+              >
+                <For each={categories()}>
+                  {(category) => <option value={category.id}>{category.name}</option>}
+                </For>
+              </select>
+            </label>
+          }
+        >
+          <Show
+            when={importProgress()}
+            fallback={
+              // 目录选择器还开着 / 命令刚发出，还没有第一条事件
+              <p role="status" class="text-fs-1 text-fg-2">{t("import.preparing")}</p>
+            }
+          >
+            <LutImportProgressView
+              progress={importProgress()}
+              stopping={stopping()}
+              categoryName={importCategoryName()}
+            />
+          </Show>
+        </Show>
       </Dialog>
 
       {/* 库里一个 LUT 都没有时的说明（分类建了但空着时也有用） */}

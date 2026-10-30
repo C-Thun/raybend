@@ -47329,6 +47329,419 @@
           ]
         }
       ]
+    },
+    {
+      "type": "frame",
+      "id": "lTMMb",
+      "x": 1960,
+      "y": 2240,
+      "name": "States / Editor / 导入 LUT 进度",
+      "fill": "$surface-main",
+      "layout": "vertical",
+      "gap": 16,
+      "padding": 24,
+      "children": [
+        {
+          "type": "frame",
+          "id": "J4sBqL",
+          "name": "Column / 扫描中",
+          "layout": "vertical",
+          "gap": 8,
+          "children": [
+            {
+              "type": "text",
+              "id": "iUWp4",
+              "name": "Caption / 扫描中",
+              "fill": "$fg-3",
+              "content": "扫描中：还不知道总数 → 不确定态（一道来回跑的亮条）",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "RuPjr",
+              "name": "Modal / 导入 LUT · 扫描中",
+              "width": 420,
+              "fill": "$surface-layer",
+              "cornerRadius": 6,
+              "layout": "vertical",
+              "gap": 12,
+              "padding": 20,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "ML4dw",
+                  "name": "ModalTitle",
+                  "fill": "$fg-1",
+                  "content": "导入 LUT",
+                  "fontFamily": "Inter",
+                  "fontSize": 17,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "text",
+                  "id": "NuYkq",
+                  "name": "ModalDesc",
+                  "fill": "$fg-3",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "正在扫描目录，找出可导入的 .cube / Hald 图",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "p6dvJg",
+                  "name": "ProgressBar / 不确定态",
+                  "width": 380,
+                  "height": 6,
+                  "fill": "$surface-track",
+                  "cornerRadius": 999,
+                  "layout": "none",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "ZxwEa",
+                      "x": 96,
+                      "y": 0,
+                      "name": "ProgressPulse",
+                      "width": 132,
+                      "height": 6,
+                      "fill": "$brand",
+                      "cornerRadius": 999
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "UqOMw",
+                  "name": "ModalButtons",
+                  "width": "fill_container",
+                  "height": 32,
+                  "gap": 8,
+                  "justifyContent": "end",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "ZErwN",
+                      "name": "Button / 取消",
+                      "height": 32,
+                      "fill": "$surface-track",
+                      "cornerRadius": 4,
+                      "padding": [
+                        0,
+                        14
+                      ],
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "mU64w",
+                          "name": "ButtonLabel / 取消",
+                          "fill": "$fg-1",
+                          "content": "取消",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "500"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "A2kafN",
+                      "name": "Button / 导入",
+                      "height": 32,
+                      "fill": "$surface-track",
+                      "cornerRadius": 4,
+                      "padding": [
+                        0,
+                        14
+                      ],
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "X9r0P",
+                          "name": "ButtonLabel / 导入",
+                          "fill": "$fg-3",
+                          "content": "导入",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "500"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "j3SpE",
+          "name": "Column / 复制中",
+          "layout": "vertical",
+          "gap": 8,
+          "children": [
+            {
+              "type": "text",
+              "id": "Fsq14",
+              "name": "Caption / 复制中",
+              "fill": "$fg-3",
+              "content": "复制中：总数已知 → 确定态（计数 / 进度条 / 当前项 / 已导入的保留）",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "e3mPb",
+              "name": "Modal / 导入 LUT · 复制中",
+              "width": 420,
+              "fill": "$surface-layer",
+              "cornerRadius": 6,
+              "layout": "vertical",
+              "gap": 12,
+              "padding": 20,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "FywZT",
+                  "name": "ModalTitle",
+                  "fill": "$fg-1",
+                  "content": "导入 LUT",
+                  "fontFamily": "Inter",
+                  "fontSize": 17,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "text",
+                  "id": "GFalW",
+                  "name": "ModalDesc",
+                  "fill": "$fg-3",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "12 个 LUT · 正在复制到分类「胶片模拟」",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "d59Ll1",
+                  "name": "ProgressBlock",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 6,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "ZQxFB",
+                      "name": "ProgressLabelRow",
+                      "width": "fill_container",
+                      "height": 16,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "LSsHz",
+                          "name": "ProgressCount",
+                          "fill": "$fg-2",
+                          "content": "7 / 12",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "jWele",
+                          "name": "SpacerFlex",
+                          "width": "fill_container",
+                          "height": 1
+                        },
+                        {
+                          "type": "text",
+                          "id": "GsNu8",
+                          "name": "ProgressPercent",
+                          "fill": "$fg-2",
+                          "content": "58%",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "eHte1",
+                      "name": "ProgressBar",
+                      "width": "fill_container",
+                      "height": 6,
+                      "fill": "$surface-track",
+                      "cornerRadius": 999,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "puPkW",
+                          "name": "ProgressFill / 58%",
+                          "width": 220,
+                          "height": 6,
+                          "fill": "$brand",
+                          "cornerRadius": 999
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "PpPXT",
+                  "name": "CountsRow",
+                  "width": "fill_container",
+                  "gap": 12,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "y6umA",
+                      "name": "Count / 已导入",
+                      "fill": "$fg-1",
+                      "content": "已导入 7",
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "XCA4t",
+                      "name": "Count / 重复",
+                      "fill": "$fg-2",
+                      "content": "重复 1",
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "q4z2G4",
+                      "name": "Count / 跳过",
+                      "fill": "$fg-2",
+                      "content": "跳过 0",
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "FwBUd",
+                  "name": "CurrentItem",
+                  "width": "fill_container",
+                  "fill": "$surface-bar",
+                  "cornerRadius": 4,
+                  "layout": "vertical",
+                  "gap": 2,
+                  "padding": [
+                    8,
+                    10
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "zWE3M",
+                      "name": "CurrentFile",
+                      "fill": "$fg-1",
+                      "content": "Kodak 2383.cube",
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "s1Im1",
+                      "name": "CurrentHint",
+                      "fill": "$fg-3",
+                      "content": "已导入的会保留",
+                      "fontFamily": "Inter",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "uRfKN",
+                  "name": "ModalButtons",
+                  "width": "fill_container",
+                  "height": 32,
+                  "gap": 8,
+                  "justifyContent": "end",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "NcaE6",
+                      "name": "Button / 取消",
+                      "height": 32,
+                      "fill": "$surface-track",
+                      "cornerRadius": 4,
+                      "padding": [
+                        0,
+                        14
+                      ],
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "MHkVc",
+                          "name": "ButtonLabel / 取消",
+                          "fill": "$fg-1",
+                          "content": "取消",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "500"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "qK25D",
+                      "name": "Button / 导入",
+                      "height": 32,
+                      "fill": "$surface-track",
+                      "cornerRadius": 4,
+                      "padding": [
+                        0,
+                        14
+                      ],
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "D1enHz",
+                          "name": "ButtonLabel / 导入",
+                          "fill": "$fg-3",
+                          "content": "导入",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "500"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
     }
   ],
   "themes": {

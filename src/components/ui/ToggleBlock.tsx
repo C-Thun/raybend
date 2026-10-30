@@ -50,14 +50,15 @@ export function ToggleBlock(props: ToggleBlockProps) {
     "children",
     "label",
     "tip",
+    "title",
     "class",
     "tone",
     "disabled",
   ]);
 
-  /** 纯图标（无可见文字）时提示用 `label`；有文字时不弹 */
+  /** 纯图标（无可见文字）时提示用 `label`；有文字时不弹。`title` 进了提示就不再上 DOM */
   const tipText = (): string | undefined =>
-    local.tip ?? rest.title ?? (local.children == null ? local.label : undefined);
+    local.tip ?? local.title ?? (local.children == null ? local.label : undefined);
 
   /**
    * 调用调用方传的 `onClick`。
@@ -84,6 +85,7 @@ export function ToggleBlock(props: ToggleBlockProps) {
           {...rest}
           {...triggerProps}
           type={rest.type ?? "button"}
+          title={tipText() === undefined ? local.title : undefined}
           disabled={local.disabled}
           aria-pressed={local.pressed}
           aria-label={local.label}

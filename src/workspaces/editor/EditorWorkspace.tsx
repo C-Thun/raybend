@@ -388,9 +388,14 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
       if (result !== null) {
         applyLutLibrary(result.library);
         if (result.skipped.length > 0) setDevelopError(result.skipped.slice(0, 3).join("；"));
-        return t("editor.lut.importSummary").replace("{imported}", String(result.imported))
-          .replace("{restored}", String(result.restored)).replace("{duplicates}", String(result.duplicates))
-          .replace("{failed}", String(result.skipped.length));
+        // 中止（用户点了取消）也要给摘要 —— 已导入的保留，数字必须看得见。
+        const summary = t("editor.lut.importSummary", {
+          imported: result.imported,
+          restored: result.restored,
+          duplicates: result.duplicates,
+          failed: result.skipped.length,
+        });
+        return result.cancelled ? t("editor.lut.importCancelled", { summary }) : summary;
       }
     } catch (error) { setDevelopError(String(error)); }
     finally { setLutBusy(false); }

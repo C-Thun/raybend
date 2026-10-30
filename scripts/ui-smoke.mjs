@@ -639,6 +639,172 @@ try {
   }
 
   /*
+   * LUT 导入的进度状态（2026-10-30）：扫描中 → 复制中 → 中止中。
+   *
+   * 断言点选在「能不能分清两档」上：
+   *   * 扫描阶段**不编百分比**（没有总数 → 不确定态），
+   *   * 复制阶段要给计数 / 百分比 / 当前文件，
+   *   * 点取消后要能看出「正在中止」。
+   */
+  const lutImport = await evaluate(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const demo = document.querySelector("[data-lut-import-demo]");
+    if (!demo) return null;
+    const button = (label) =>
+      [...demo.querySelectorAll("button")].find((node) => node.textContent.trim() === label);
+    const block = () => demo.querySelector("[data-lut-import-progress]");
+    const bar = () => block()?.querySelector('[role="progressbar"]');
+    const text = () => (block() ? block().innerText.replace(/\\s+/g, " ") : "");
+
+    button("扫描中")?.click();
+    await sleep(120);
+    const scanning = {
+      present: block() !== null,
+      text: text(),
+      indeterminate: bar()?.getAttribute("aria-valuenow") === null,
+      pulse: block()?.querySelector(".rb-progress-pulse") !== null,
+    };
+
+    button("复制中 7/12")?.click();
+    await sleep(120);
+    const copying = {
+      text: text(),
+      now: Number(bar()?.getAttribute("aria-valuenow")),
+      label: bar()?.getAttribute("aria-label"),
+    };
+
+    button("点取消（中止中）")?.click();
+    await sleep(120);
+    const stopping = { text: text() };
+    return { scanning, copying, stopping };
+  })()`);
+
+  if (lutImport === null) {
+    problems.push("画廊里没有「LUT 导入进度」演示（src/dev/lut-import-demo.tsx 没挂上？）");
+  } else {
+    if (!lutImport.scanning.present) problems.push("LUT 导入演示没渲染进度块");
+    if (/\\d+%/.test(lutImport.scanning.text)) {
+      problems.push(`LUT 扫描阶段不该出现百分比（没有总数）：${lutImport.scanning.text}`);
+    }
+    if (!lutImport.scanning.indeterminate || !lutImport.scanning.pulse) {
+      problems.push("LUT 扫描阶段的进度条不是不确定态（应无 aria-valuenow + 有流动亮条）");
+    }
+    if (!lutImport.copying.text.includes("7 / 12") || !lutImport.copying.text.includes("58%")) {
+      problems.push(`LUT 复制阶段没显示 7 / 12 与 58%：${lutImport.copying.text}`);
+    }
+    if (!lutImport.copying.text.includes("Kodak 2383.cube")) {
+      problems.push("LUT 复制阶段没显示当前文件（「它没卡住」只能靠这一行证明）");
+    }
+    if (!lutImport.copying.text.includes("已导入 6")) {
+      problems.push(`LUT 复制阶段没显示导入计数：${lutImport.copying.text}`);
+    }
+    if (lutImport.copying.now !== 58 || !lutImport.copying.label) {
+      problems.push(
+        `LUT 进度条的 aria 不对（valuenow=${lutImport.copying.now}, label=${lutImport.copying.label}）`,
+      );
+    }
+    if (!lutImport.stopping.text.includes("正在中止")) {
+      problems.push(`点了取消没提示「正在中止」：${lutImport.stopping.text}`);
+    }
+  }
+
+  /*
+   * 提示气泡的跨按钮切换（2026-10-11）：
+   *
+   * 两个相邻的图标按钮，A 悬停出气泡后**直接**划到 B，B 也必须弹得出；
+   * 而且任何时刻页面上只允许一张气泡。
+   *
+   * 为什么必须用真鼠标（CDP `Input.dispatchMouseEvent`，不能合成 PointerEvent）：
+   * 这条 bug 只在真实 pointerover → pointerleave → pointerover 序列下出现 ——
+   * 按钮原语自带的提示与外层 `Tooltip` 各有一台 machine，抢同一个全局 store，
+   * 败者停在 `opening` / `hasPointerMoveOpened` 清不掉，于是“移到下一个按钮不弹，
+   * 得先移出去再回来”，而且两台默认方位不同（top / bottom）会先上后下闪一下。
+   */
+  const tipContent = () =>
+    evaluate(`[...document.querySelectorAll('[data-scope="tooltip"][data-part="content"]')]
+      .filter((c) => !c.hasAttribute('hidden'))
+      .map((c) => c.textContent.trim())`);
+
+  const parkMouse = async () => {
+    await send("Input.dispatchMouseEvent", {
+      type: "mouseMoved",
+      x: 4,
+      y: 4,
+      button: "none",
+      buttons: 0,
+    });
+    await sleep(250);
+  };
+
+  /** 把一个钩子元素滚到视口中间，返回它的中心点（CSS 像素，正好是 CDP 的鼠标坐标） */
+  const centerOf = async (selector) => {
+    await evaluate(
+      `document.querySelector(${JSON.stringify(selector)})?.scrollIntoView({ block: "center" })`,
+    );
+    await sleep(150);
+    return evaluate(
+      `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`,
+    );
+  };
+
+  /** 真鼠标划过去，并在过渡期间采样「同时存在几张气泡」 */
+  const sweep = async (from, to) => {
+    const samples = [];
+    for (let i = 1; i <= 6; i += 1) {
+      await send("Input.dispatchMouseEvent", {
+        type: "mouseMoved",
+        x: from.x + ((to.x - from.x) * i) / 6,
+        y: from.y + ((to.y - from.y) * i) / 6,
+        button: "none",
+        buttons: 0,
+      });
+      await sleep(30);
+      samples.push((await tipContent()).length);
+    }
+    // 悬停延时 150ms，等它真的弹出来再读一次
+    await sleep(450);
+    samples.push((await tipContent()).length);
+    return { max: Math.max(...samples), tips: await tipContent() };
+  };
+
+  const tipGroups = [
+    { name: "图标按钮内置提示", a: '[data-tip-switch="a"]', b: '[data-tip-switch="b"]', labels: ["复制", "新建"] },
+    // 外层 Tooltip 包图标按钮：内层 ButtonTip 必须让位，只出一张（内容是外层那句）
+    { name: "外层 Tooltip × 图标按钮", a: '[data-tip-nested="a"]', b: '[data-tip-nested="b"]', labels: ["外层说明", "纯按钮"] },
+  ];
+  for (const group of tipGroups) {
+    const a = await centerOf(group.a);
+    const b = await centerOf(group.b);
+    if (a === null || b === null) {
+      problems.push(`画廊缺提示切换用例（${group.name}）—— KitchenSink 的冒烟钩子被删了？`);
+      continue;
+    }
+    await parkMouse();
+    const show = await sweep({ x: 4, y: 4 }, a);
+    const next = await sweep(a, b);
+    const back = await sweep(b, a);
+    if (!show.tips.includes(group.labels[0])) {
+      problems.push(`悬停 A 没弹出预期提示（${group.name}）：看到 ${JSON.stringify(show.tips)}`);
+    }
+    if (!next.tips.includes(group.labels[1])) {
+      problems.push(
+        `从 A 直接划到 B 后 B 的提示没出来（${group.name}）：看到 ${JSON.stringify(next.tips)}`,
+      );
+    }
+    if (!back.tips.includes(group.labels[0])) {
+      problems.push(
+        `从 B 再划回 A 时 A 的提示没出来（${group.name}）：看到 ${JSON.stringify(back.tips)}`,
+      );
+    }
+    if (show.max > 1 || next.max > 1 || back.max > 1) {
+      problems.push(
+        `同一时刻出现了多张提示气泡（${group.name}）—— 嵌套的两台 tooltip machine 没收敛：${JSON.stringify([show.max, next.max, back.max])}`,
+      );
+    }
+    await parkMouse();
+  }
+
+  /*
    * 数据库升级遮罩（M2-W2）：升级期间**鼠标与键盘都得挡住**。
    *
    * 为什么值得断言：只挡鼠标是最容易犯的错 —— 外观上一切正常，

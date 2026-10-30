@@ -19,10 +19,16 @@
 
 import { Tooltip as ArkTooltip } from "@ark-ui/solid";
 import type { PolymorphicProps } from "@ark-ui/solid";
-import { Show, splitProps, type JSX } from "solid-js";
+import { Show, createContext, splitProps, useContext, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 
 export type TooltipPlacement = "top" | "bottom" | "left" | "right";
+
+/**
+ * 「这段子树已经在某个 `Tooltip` 的触发区里」——由 `Tooltip` 打在触发子树上，
+ * `ButtonTip` 读到它就不再自己套一层（双提示的根因与症状见 `ButtonTip` 注释）。
+ */
+const TooltipOwnerContext = createContext<boolean>(false);
 
 /**
  * 触发器渲染函数 —— **直接复用 Ark 的 `asChild` 类型**，不自己另立一个。
@@ -66,19 +72,27 @@ export interface TooltipProps {
  *    下缘会自动翻上去。
  *
  * 触发属性给谁：**有提示 → 给包装 span；没有提示 → 交还给调用方（展开到按钮上）**。
+ *
+ * ❗**外面已经有一层 `Tooltip` 时一律让位**（2026-10-11 复现并修掉）：两套提示挂在
+ * 同一条指针路径上（外层 → 按钮、内层 → 包装 span），一共两台 Ark tooltip machine 抢
+ * 同一个全局 store —— 挨个按钮划过去时后一台会卡在 `opening`/`hasPointerMoveOpened`，
+ * 表现为「移到下一个按钮不弹，得先移出去再回来」，而且两台的默认方位不同（top/bottom）
+ * 会先上后下闪一下。判据由 `Tooltip` 自己在**触发子树**上打标（`TooltipOwnerContext`），
+ * 所以调用点写不写错都不会再出现双提示。
  */
 export function ButtonTip(props: {
   content?: string | null;
   placement?: TooltipPlacement;
   children: (triggerProps: Record<string, unknown>) => JSX.Element;
 }): JSX.Element {
+  const insideTooltip = useContext(TooltipOwnerContext);
   const hasTip = (): boolean =>
-    typeof props.content === "string" && props.content.length > 0;
+    !insideTooltip && typeof props.content === "string" && props.content.length > 0;
   return (
     <Show when={hasTip()} fallback={props.children({})}>
       <Tooltip content={props.content} placement={props.placement ?? "bottom"}>
         {(triggerProps) => (
-          <span {...triggerProps} class="inline-flex">
+          <span {...triggerProps()} class="inline-flex">
             {props.children({})}
           </span>
         )}
@@ -112,7 +126,13 @@ export function Tooltip(props: TooltipProps) {
       lazyMount
       unmountOnExit
     >
-      <ArkTooltip.Trigger asChild={local.children} />
+      <ArkTooltip.Trigger
+        asChild={(triggerProps) => (
+          <TooltipOwnerContext.Provider value={true}>
+            {local.children(triggerProps)}
+          </TooltipOwnerContext.Provider>
+        )}
+      />
       <Portal>
         {/* 同 Menu：z 轴由基础层统一赋值（见 index.css） */}
         <ArkTooltip.Positioner data-easy-copy-tip={local.layer === "easy-copy" ? "" : undefined}>

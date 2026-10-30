@@ -69,6 +69,23 @@ test("timeoutMessage 的秒数是四舍五入的整数（日志与界面都不�
   });
 });
 
+test("LUT 中止摘要：说明与计数两句之间必须有分隔（英文尤其容易漏空格）", () => {
+  const params = { imported: 2, restored: 0, duplicates: 1, failed: 0 };
+  withLocale("zh-CN", () => {
+    const summary = t("editor.lut.importSummary", params);
+    assert.equal(
+      t("editor.lut.importCancelled", { summary }),
+      "导入已中止：已导入的保留。导入 2 个，恢复 0 个，跳过重复 1 个，失败 0 个。",
+    );
+  });
+  withLocale("en-US", () => {
+    const summary = t("editor.lut.importSummary", params);
+    const text = t("editor.lut.importCancelled", { summary });
+    assert.ok(text.includes("kept. Imported 2,"), text);
+    assert.ok(!text.includes("kept.Imported"), text);
+  });
+});
+
 test("setLocale 会把语言写到 <html lang>（WebView 的断行与字体回退都读它）", () => {
   // Node 里没有 document —— 运行时应当自己跳过，不抛错
   withLocale("en-US", () => {

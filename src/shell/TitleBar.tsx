@@ -40,7 +40,6 @@ import { createWindowChrome, maximizeKeyAction, tauriWindowHandle } from "../api
 import { IconButton } from "../components/ui/Button.tsx";
 import { Menu } from "../components/ui/Menu.tsx";
 import { SegmentedControl } from "../components/ui/SegmentedControl.tsx";
-import { Tooltip } from "../components/ui/Tooltip.tsx";
 import { locale, localeLabel, nextLocale, t } from "../i18n/index.ts";
 import type { MessageKey } from "../i18n/index.ts";
 import { availabilityOf, chordOf, type CommandSpec } from "../lib/commands.ts";
@@ -256,40 +255,32 @@ export function TitleBar(props: TitleBarProps) {
               点一下打开更新对话框 —— 平时一个像素都不占，下载也永远不拦操作。 */}
           <Show when={updateIndicator()}>
             {(current) => (
-              <Tooltip content={indicatorLabel(current())}>
-                {(triggerProps) => (
-                  <IconButton
-                    {...triggerProps()}
-                    label={t("updates.title")}
-                    onClick={() => props.onOpenUpdates()}
-                  >
-                    <Show
-                      when={current().phase === "ready"}
-                      fallback={<IconDownload size={14} />}
-                    >
-                      <IconCircleCheck size={14} />
-                    </Show>
-                  </IconButton>
-                )}
-              </Tooltip>
-            )}
-          </Show>
-          <Tooltip content={t("titlebar.theme.toggle")}>
-            {(triggerProps) => (
               <IconButton
-                {...triggerProps()}
-                label={t("titlebar.theme.toggle")}
-                onClick={() => props.appearance.toggleTheme()}
+                tip={indicatorLabel(current())}
+                label={t("updates.title")}
+                onClick={() => props.onOpenUpdates()}
               >
                 <Show
-                  when={props.appearance.theme() === "dark"}
-                  fallback={<IconSun size={14} />}
+                  when={current().phase === "ready"}
+                  fallback={<IconDownload size={14} />}
                 >
-                  <IconMoon size={14} />
+                  <IconCircleCheck size={14} />
                 </Show>
               </IconButton>
             )}
-          </Tooltip>
+          </Show>
+          <IconButton
+            tip={t("titlebar.theme.toggle")}
+            label={t("titlebar.theme.toggle")}
+            onClick={() => props.appearance.toggleTheme()}
+          >
+            <Show
+              when={props.appearance.theme() === "dark"}
+              fallback={<IconSun size={14} />}
+            >
+              <IconMoon size={14} />
+            </Show>
+          </IconButton>
 
           <SegmentedControl
             label={t("titlebar.density.compact")}

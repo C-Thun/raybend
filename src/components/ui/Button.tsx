@@ -80,6 +80,7 @@ export function Button(props: ButtonProps) {
     "loading",
     "icon",
     "tip",
+    "title",
     "class",
     "children",
     "disabled",
@@ -87,9 +88,13 @@ export function Button(props: ButtonProps) {
 
   const variant = () => local.variant ?? "ghost";
   const isDisabled = () => local.disabled || local.loading;
-  /** 纯图标（无可见文字）时提示退回无障碍名 —— 两者永远同一句话 */
+  /**
+   * 纯图标（无可见文字）时提示退回无障碍名 —— 两者永远同一句话。
+   * `title` 也算提示来源：它一旦进了提示文案，就不能再落到 DOM ——
+   * 否则同一个按钮先出我们的气泡、一秒后浏览器又冒一个灰框（两张提示）。
+   */
   const tipText = (): string | undefined =>
-    local.tip ??
+    local.tip ?? local.title ??
     (local.children == null ? (rest["aria-label"] as string | undefined) : undefined);
 
   return (
@@ -99,6 +104,7 @@ export function Button(props: ButtonProps) {
           {...rest}
           {...triggerProps}
           type={rest.type ?? "button"}
+          title={tipText() === undefined ? local.title : undefined}
           disabled={isDisabled()}
           aria-busy={local.loading || undefined}
           aria-pressed={local.selected || undefined}
@@ -169,12 +175,14 @@ export function IconButton(props: IconButtonProps) {
     "selected",
     "label",
     "tip",
+    "title",
     "class",
     "children",
     "disabled",
   ]);
 
-  const tipText = (): string => local.tip ?? rest.title ?? local.label;
+  /** 提示由本组件统一弹（`label` 就是那句话）；`title` 只当文案来源，不再落到 DOM */
+  const tipText = (): string => local.tip ?? local.title ?? local.label;
 
   return (
     <ButtonTip content={tipText()}>
@@ -183,6 +191,7 @@ export function IconButton(props: IconButtonProps) {
           {...rest}
           {...triggerProps}
           type={rest.type ?? "button"}
+          title={tipText() === "" ? local.title : undefined}
           disabled={local.disabled}
           aria-label={local.label}
           aria-pressed={local.selected || undefined}

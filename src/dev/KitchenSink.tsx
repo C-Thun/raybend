@@ -66,6 +66,7 @@ import { EasyCopy } from "../components/ui/EasyCopy";
 import { EasyDestroyButton } from "../components/ui/EasyDestroy";
 import { DirTreeDemo } from "./dir-tree-demo.tsx";
 import { ImportProgressDemo } from "./import-progress-demo.tsx";
+import { LutImportDemo } from "./lut-import-demo.tsx";
 import { MigrationGateDemo } from "./migration-gate-demo.tsx";
 
 /** 演示用的 EXIF：三组都有值（对应 design/main.md §2.2 的示例） */
@@ -318,10 +319,15 @@ export default function KitchenSink() {
               </Button>
             </Row>
             <Row label="IconButton 方 / 圆">
-              <IconButton label="复制">
+              {/*
+                `data-tip-switch` 是冒烟脚本的钩子（`pnpm smoke:ui`）：两个指向按钮必须
+                相邻，用来验证「A 悬停 → 直接移到 B」时 B 的提示弹得出来、且全程只有一张
+                （2026-10-11：「移到下一个按钮不弹」的回归门）。
+              */}
+              <IconButton label="复制" data-tip-switch="a">
                 <IconCopy size={14} />
               </IconButton>
-              <IconButton label="新建" shape="circle">
+              <IconButton label="新建" shape="circle" data-tip-switch="b">
                 <IconPlus size={14} />
               </IconButton>
               <IconButton label="已选中" selected>
@@ -545,6 +551,23 @@ export default function KitchenSink() {
                   </Button>
                 )}
               </Tooltip>
+            </Row>
+            {/*
+              外层 Tooltip 包图标按钮：按钮自己的 `ButtonTip` 必须**自动让位**，全程只有一张气泡
+              （双 machine 的症状与修法见 `components/ui/Tooltip.tsx` 的 `ButtonTip` 注释）。
+              `data-tip-nested` 是冒烟钩子。
+            */}
+            <Row label="Tooltip × IconButton（内层自动让位）">
+              <Tooltip content="外层说明">
+                {(triggerProps) => (
+                  <IconButton {...triggerProps()} label="内层标签" data-tip-nested="a">
+                    <IconInfoCircle size={14} />
+                  </IconButton>
+                )}
+              </Tooltip>
+              <IconButton label="纯按钮" data-tip-nested="b">
+                <IconInfoCircle size={14} />
+              </IconButton>
             </Row>
             <Row label="Menu">
               <Menu
@@ -1064,6 +1087,13 @@ export default function KitchenSink() {
     
       <Section title="导入进度（M1-6）" note="真 store + 假后端：按钮把快照推进订阅里，结构与生产一致">
         <ImportProgressDemo />
+      </Section>
+
+      <Section
+        title="LUT 导入进度（编辑器）"
+        note="扫描中走不确定态、复制中给计数与当前文件；取消是真中止（已导入的保留）"
+      >
+        <LutImportDemo />
       </Section>
 
 

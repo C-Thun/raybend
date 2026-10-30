@@ -350,54 +350,43 @@ export function PresetPanel(props: PresetPanelProps): JSX.Element {
       <div class="flex shrink-0 items-center gap-1 pb-1.5">
         {/*
          * 应用按钮**不做主色常亮**（崔总 2026-10-10：常亮会让人误以为“还有东西要确认”）。
-         * 禁用时按钮自己 `pointer-events-none`，所以 Tooltip 的触发器挂在外层 span 上，
-         * 那样悬停才收得到 —— 顺手把“为什么不能用”说清楚。
+         * 禁用态的提示由 `Button` 自己的 `ButtonTip` 承担（它会将触发器挂到包装 span 上，
+         * 所以禁用按钮也接得到悬停）—— 顺手把“为什么不能用”说清楚。
+         * ❗不要再在外面套 `<Tooltip>`：两台 machine 会抢同一条指针路径，
+         * 表现为“移到下一个按钮不弹”（2026-10-11 修的）。
          */}
-        <Tooltip content={canApply() ? t("editor.preset.apply") : t("editor.preset.applyDisabled")}>
-          {(triggerProps) => (
-            <span {...triggerProps()} class="inline-flex">
-              <Button
-                variant="ghost"
-                disabled={!canApply()}
-                aria-label={t("editor.preset.apply")}
-                icon={<IconPlayerPlay size={14} />}
-                onClick={applySelected}
-              />
-            </span>
-          )}
-        </Tooltip>
-        <Tooltip content={t("editor.preset.newDirectory")}>
-          {(triggerProps) => (
-            <Button
-              {...triggerProps()}
-              variant="ghost"
-              aria-label={t("editor.preset.newDirectory")}
-              icon={<IconFolderPlus size={14} />}
-              onClick={() => {
-                setDirDraft("");
-                setDirError(null);
-                setDirOpen(true);
-              }}
-            />
-          )}
-        </Tooltip>
-        <Tooltip content={t("editor.preset.newPreset")}>
-          {(triggerProps) => (
-            <Button
-              {...triggerProps()}
-              variant="ghost"
-              disabled={!props.enabled}
-              aria-label={t("editor.preset.newPreset")}
-              icon={<IconBookmarkPlus size={14} />}
-              onClick={() => {
-                setPresetDraft("");
-                setPresetError(null);
-                setPresetGroups([...DEFAULT_PRESET_GROUPS]);
-                setPresetOpen(true);
-              }}
-            />
-          )}
-        </Tooltip>
+        <Button
+          tip={canApply() ? t("editor.preset.apply") : t("editor.preset.applyDisabled")}
+          variant="ghost"
+          disabled={!canApply()}
+          aria-label={t("editor.preset.apply")}
+          icon={<IconPlayerPlay size={14} />}
+          onClick={applySelected}
+        />
+        <Button
+          tip={t("editor.preset.newDirectory")}
+          variant="ghost"
+          aria-label={t("editor.preset.newDirectory")}
+          icon={<IconFolderPlus size={14} />}
+          onClick={() => {
+            setDirDraft("");
+            setDirError(null);
+            setDirOpen(true);
+          }}
+        />
+        <Button
+          tip={t("editor.preset.newPreset")}
+          variant="ghost"
+          disabled={!props.enabled}
+          aria-label={t("editor.preset.newPreset")}
+          icon={<IconBookmarkPlus size={14} />}
+          onClick={() => {
+            setPresetDraft("");
+            setPresetError(null);
+            setPresetGroups([...DEFAULT_PRESET_GROUPS]);
+            setPresetOpen(true);
+          }}
+        />
       </div>
 
       {/* 可滚动的目录 / 预设树：父容器已限定高度，这里 flex 填充并自滚 */}

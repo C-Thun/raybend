@@ -27,6 +27,7 @@ import { t } from "../../i18n/index.ts";
 import { pickSaveFile } from "../../api/dialog.ts";
 import { Button } from "../../components/ui/Button.tsx";
 import { Dialog } from "../../components/ui/Dialog.tsx";
+import { Progress } from "../../components/ui/Progress.tsx";
 import type { ImportStage, ImportStore } from "./index.ts";
 
 /** 阶段顺序（阶段条按它渲染）。 */
@@ -85,7 +86,7 @@ export function ImportProgressDialog(props: ImportProgressDialogProps) {
       onOpenChange={(open) => {
         if (!open) requestCancel();
       }}
-      title={store.finished() ? t("import.done_title") : store.state() === "waiting" ? t("import.waiting_title") : t("import.title")}
+      title={dialogTitle(store)}
       footer={
         <>
           <Show when={store.errors().length > 0}>
@@ -183,15 +184,8 @@ export function ImportProgressDialog(props: ImportProgressDialogProps) {
             </For>
           </div>
 
-          {/* 进度条：有总数才给确定值 */}
-          <div class="h-1.5 w-full overflow-hidden rounded-ui bg-surface-track">
-            <Show when={store.percent() !== null}>
-              <div
-                class="h-full rounded-ui bg-brand transition-[width] duration-200"
-                style={{ width: `${store.percent() ?? 0}%` }}
-              />
-            </Show>
-          </div>
+          {/* 进度条：有总数给确定值，没有总数（扫描 / 规划）走不确定态 */}
+          <Progress value={store.percent()} label={t("import.progressLabel")} />
 
           <div class="flex items-center gap-4">
             <span class="text-fs-1 text-fg-1">
@@ -291,6 +285,13 @@ export function ImportProgressDialog(props: ImportProgressDialogProps) {
       </Dialog>
     </>
   );
+}
+
+/** 弹窗标题：完成 / 等待来源或目标 / 进行中（顺序即优先级） */
+function dialogTitle(store: ImportStore): string {
+  if (store.finished()) return t("import.done_title");
+  if (store.state() === "waiting") return t("import.waiting_title");
+  return t("import.title");
 }
 
 /** 头部那一句：目录数 + 总数 + 「已导入的保留」的承诺。 */

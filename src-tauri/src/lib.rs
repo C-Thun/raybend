@@ -243,6 +243,8 @@ pub fn run() {
         .manage(external_editor::ExternalState::default())
         // 编辑视口的洞口事实（M3-W1）：前端报原始值，这里存着并算物理像素版本
         .manage(editor::EditorState::default())
+        // LUT 导入的取消开关（进度弹窗的「取消」是真中止，不是关窗了事）
+        .manage(lut::LutImportCancel::default())
         // 全屏看图的清单与当前下标（flowbar 的全屏按钮）
         .manage(fullscreen::FullscreenState::default())
         .invoke_handler(tauri::generate_handler![
@@ -407,6 +409,7 @@ pub fn run() {
             lut::lut_library,
             lut::lut_create_category,
             lut::lut_import_directory,
+            lut::lut_import_cancel,
             lut::lut_cover,
             lut::lut_hide,
             // ── 编辑预设（specs/editor-presets.md）──
