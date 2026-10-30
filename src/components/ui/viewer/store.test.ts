@@ -848,6 +848,46 @@ test("两段载入：占位先上屏（提示在），真身到位后原地替�
   store.close();
 });
 
+test("两段载入：预载等待分支里，作废旧请求也不能摘掉新照片的提示", async () => {
+  const releases = new Map<string, () => void>();
+  const store = createViewerStore({
+    loadThumb: async (): Promise<Uint8Array> => new Uint8Array([1]),
+    loadScreen: async (): Promise<Uint8Array> => new Uint8Array([2]),
+    loadFull: (path) => new Promise<Uint8Array>((resolve) => {
+      releases.set(path, () => resolve(new Uint8Array([3])));
+    }),
+    makeUrl: (bytes: Uint8Array): string => `blob:${bytes[0]}`,
+    revokeUrl: () => {},
+  });
+  const a = { id: "a", path: "/a.jpg", fileName: "a.jpg" };
+  const b = { id: "b", path: "/b.jpg", fileName: "b.jpg" };
+  store.setViewport({ width: 800, height: 600 });
+
+  store.show([a], 0);
+  // show 已经开始占位加载，再让同一张进入预载表：loadFullFor 会走「等 pending.task」分支。
+  const prefetch = store.ensureImage(a);
+  await flush();
+  await flush();
+  assert.equal(store.fullPending(), true);
+
+  store.show([b], 0);
+  await flush();
+  await flush();
+  assert.equal(store.current()?.id, "b");
+  assert.equal(store.fullPending(), true);
+
+  releases.get("/a.jpg")!();
+  await prefetch;
+  await flush();
+  assert.equal(store.fullPending(), true, "pending.task 的迟到结果也不能清掉新照片的提示");
+
+  releases.get("/b.jpg")!();
+  await flush();
+  await flush();
+  assert.equal(store.fullPending(), false);
+  store.close();
+});
+
 test("两段载入：换图后旧照片迟到的真身不能摘掉新照片的「正在载入原图」", async () => {
   // 每张照片的真身各自可放：先让 a 在飞，再换到 b，最后先放 a（典型的迟到）
   const releases = new Map<string, () => void>();

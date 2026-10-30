@@ -161,7 +161,8 @@ where
     }
 }
 
-/// 首个调用者的执行权。必须用 [`FlightLeader::complete`] 按任务结果结算。
+/// 首个调用者的执行权。成功用 [`FlightLeader::publish`]，失败用
+/// [`FlightLeader::publish_error`]；提前返回或 panic 由 `Drop` 兜底结算。
 pub struct FlightLeader<K, T>
 where
     K: Eq + Hash + Clone + Debug,
@@ -222,7 +223,7 @@ where
     K: Eq + Hash + Clone + Debug,
 {
     fn drop(&mut self) {
-        // 正常路径已经 complete；提前 return / panic 走这里，保证等待者不被吊住。
+        // 正常路径已经 publish / publish_error；提前 return / panic 走这里，保证等待者不被吊住。
         self.settle(Err("图像渲染任务未完成（调用方提前退出或 panic）".to_string()));
     }
 }
@@ -301,6 +302,51 @@ mod tests {
     use std::sync::mpsc;
     use std::thread;
     use std::time::Duration;
+
+    #[test]
+    fn into_owned_moves_a_unique_value_and_clones_only_when_shared() {
+        struct Probe {
+            clones: Arc<AtomicUsize>,
+        }
+        impl Clone for Probe {
+            fn clone(&self) -> Self {
+                self.clones.fetch_add(1, Ordering::SeqCst);
+                Self {
+                    clones: Arc::clone(&self.clones),
+                }
+            }
+        }
+
+        let clones = Arc::new(AtomicUsize::new(0));
+        let unique = Arc::new(Probe {
+            clones: Arc::clone(&clones),
+        });
+        drop(super::into_owned(unique));
+        assert_eq!(clones.load(Ordering::SeqCst), 0, "唯一持者必须直接拿走，不 clone");
+
+        let shared = Arc::new(Probe {
+            clones: Arc::clone(&clones),
+        });
+        let other_holder = Arc::clone(&shared);
+        drop(super::into_owned(shared));
+        assert_eq!(clones.load(Ordering::SeqCst), 1, "还有其它持者才复制一次");
+        drop(other_holder);
+    }
+
+    #[test]
+    fn zero_wait_limit_returns_immediately() {
+        let gate = FlightGate::<String, usize>::default();
+        let leader = match gate.begin("zero".into()) {
+            FlightClaim::Leader(leader) => leader,
+            FlightClaim::Wait(_) => panic!("leader"),
+        };
+        let wait = match gate.begin("zero".into()) {
+            FlightClaim::Wait(wait) => wait,
+            FlightClaim::Leader(_) => panic!("waiter"),
+        };
+        assert!(wait.wait_timeout(Duration::ZERO).is_err());
+        drop(leader); // 收尾释放 key，不把状态带进别的测试
+    }
 
     #[test]
     fn same_key_has_one_leader_and_waiters_share_the_result() {
