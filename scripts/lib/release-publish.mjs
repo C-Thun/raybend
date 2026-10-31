@@ -94,8 +94,14 @@ export function publishRelease({ root, directory, execute = false, noCrates = fa
   command('git', ['push', '--atomic', 'origin', 'HEAD:refs/heads/master', `refs/tags/${plan.tag}:refs/tags/${plan.tag}`]);
   if (!release) {
     gh('release', 'create', plan.tag, '--repo', 'C-Thun/raybend', '--verify-tag', '--draft', '--title', `RayBend ${plan.version}`, '--notes-file', plan.notes, ...(plan.prerelease ? ['--prerelease'] : []));
-    release = readRemote();
-    if (!release) throw new Error('创建后未找到 Release，请重跑同一指令');
+    // 列表端点对**刚创建的草稿**有秒级索引延迟：2026-10-31 v0.1.4 实测 create 返回 0 后立刻列空，
+    // 链在「创建后未找到」断掉（草稿其实已建成，tag/提交也已推送）。轮询几次再判失败，
+    // 失败仍按 §6.5 重跑同一指令（幂等：已有的提交/tag/草稿/资产都会复用）。
+    for (let attempt = 0; attempt < 10 && !release; attempt++) {
+      if (attempt) wait();
+      release = readRemote();
+    }
+    if (!release) throw new Error('创建后未找到 Release（已轮询约 18s，草稿可能已建成）；请重跑同一指令');
   }
   if (release.draft) {
     const missing = verifyAssets(release);

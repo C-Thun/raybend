@@ -207,6 +207,30 @@ test('一键发版：--publish 在收口后执行发布；构建失败时不发�
  }finally{f.dispose();}
 });
 
+test('发布步骤失败不回滚版本写入（工作树留在发布提交上）；报错指向重跑 release:publish',()=>{
+ const f=fixture();try{
+  const run=(cmd,args)=>{
+   if(cmd==='git')return args[0]==='status'?'':'abcdef012345';
+   if(cmd==='wslpath')throw new Error('unexpected wslpath');
+   if(cmd==='cmd.exe')return args.at(-1).endsWith('.cmd')?'':'tauri-cli 2.11.4';
+   assert.equal(cmd,'pnpm');if(args[0]==='licenses:generate'||args[0]==='check:win')return;
+   assert.equal(args[0],'build');mkdirSync(join(f.root,'dist'),{recursive:true});writeFileSync(join(f.root,'dist/index.html'),'synthetic');
+  };
+  let error;
+  try {
+   runRelease({root:f.root,checkAssets:()=>{},discover:()=>f.paths,argv:['patch','--win-msi','--unsigned','--publish'],run,log:()=>{},finalize:()=>{},publish:()=>{throw new Error('创建后未找到 Release');}});
+  } catch(caught){error=caught;}
+  assert.match(error.message,/发布未完成/,'发布失败不得冒充构建失败');
+  assert.doesNotMatch(error.message,/已恢复本次版本写入/);
+  assert.match(error.message,/release-out\/v0\.1\.1/);
+  assert.match(error.message,/release:publish .*--execute/,'必须直接给出可重跑的发布指令');
+  assert.equal(JSON.parse(readFileSync(join(f.root,'package.json'),'utf8')).version,'0.1.1','发布已推送后仍把版本改回去会让工作树落后 HEAD');
+  assert.match(readFileSync(join(f.root,'Cargo.toml'),'utf8'),/version = "0\.1\.1"/);
+  assert.match(readFileSync(join(f.root,'Cargo.lock'),'utf8'),/version = "0\.1\.1"/);
+  assert.equal(existsSync(`${f.mirror}.lock`),false,'锁必须释放');
+ }finally{f.dispose();}
+});
+
 test('unsigned 且无 --with-updater 时忽略环境里的更新私钥（不调 wslpath）',()=>{
  const f=fixture();try{
   let sawWslpath=false;

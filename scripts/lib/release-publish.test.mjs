@@ -32,7 +32,7 @@ function fixture(licensePadding=0, { version = '1.2.3', channel = 'release' } = 
   writeFileSync(join(root, `bundle/RayBend_${version}_x64-setup.exe`), 'synthetic bytes, not an installer');
   const out = join(root, 'out');
   finalizeRelease({ argv: [join(root, 'bundle'), '--manifest', join(root, 'manifest.json'), '--out', out, '--allow-unsigned'], log: () => {} });
-  const state = { head: base, paths: [...RELEASE_SOURCE_FILES], staged: false, tag: null, release: null, calls: [], crateCalls: [], partialOnce: false, siteFailed: false, previousSiteFailure:false, placeholderOnce:false, authFailed: false, indexText: '', crateChanges: undefined };
+  const state = { head: base, paths: [...RELEASE_SOURCE_FILES], staged: false, tag: null, release: null, calls: [], crateCalls: [], partialOnce: false, siteFailed: false, previousSiteFailure:false, placeholderOnce:false, authFailed: false, indexText: '', crateChanges: undefined, createLag: 0, lag: 0, waits: 0 };
   const run = (cmd, args, options) => {
     state.calls.push([cmd, ...args]);
     if (cmd === 'git') {
@@ -60,10 +60,11 @@ function fixture(licensePadding=0, { version = '1.2.3', channel = 'release' } = 
       if (args[0] === 'api') {
         const path = String(args[1]);
         if (path.includes('/releases/assets/')) return ''; // 夹具的资产都带 digest，不会走到这里
-        if (path.startsWith('repos/C-Thun/raybend/releases')) return JSON.stringify(state.release ? [state.release] : []);
+        // 草稿刚创建时列表端点有秒级索引延迟：createLag 模拟「前 N 次读空」。
+        if (path.startsWith('repos/C-Thun/raybend/releases')) { if (state.lag > 0) { state.lag--; return '[]'; } return JSON.stringify(state.release ? [state.release] : []); }
         const e = new Error('not found'); e.stderr = 'HTTP 404'; throw e;
       }
-      if (args[0] === 'release' && args[1] === 'create') { state.release = { tag_name: tag, prerelease: channel === 'beta', draft: true, assets: [], published_at: '2026-09-27T00:00:00Z' }; return ''; }
+      if (args[0] === 'release' && args[1] === 'create') { state.lag = state.createLag; state.release = { tag_name: tag, prerelease: channel === 'beta', draft: true, assets: [], published_at: '2026-09-27T00:00:00Z' }; return ''; }
       if (args[0] === 'release' && args[1] === 'upload') {
         for (const path of args.slice(3, args.indexOf('--repo'))) {
           const bytes = readFileSync(path);
@@ -84,7 +85,7 @@ function fixture(licensePadding=0, { version = '1.2.3', channel = 'release' } = 
   };
   const crates = ({ version: published }) => { state.crateCalls.push(published); state.calls.push(['crates', 'publish', published]); return { action: 'published', checksum: 'c'.repeat(64), verified: true }; };
   const readIndexText = () => state.indexText;
-  return { root, out, state, run, crates, call: (execute, extra = {}) => publishRelease({ root, directory: out, execute, run, log: () => {}, wait: () => {}, crates, readIndexText, ...extra }), dispose: () => rmSync(root, { recursive: true, force: true }) };
+  return { root, out, state, run, crates, call: (execute, extra = {}) => publishRelease({ root, directory: out, execute, run, log: () => {}, wait: () => { state.waits++; }, crates, readIndexText, ...extra }), dispose: () => rmSync(root, { recursive: true, force: true }) };
 }
 test('默认只读；显式执行顺序为精确提交/tag/原子推送/草稿完整上传/公开/等待官网', () => {
   const f = fixture();
@@ -114,6 +115,29 @@ test('并行代码/暂存/来源变更与未登录均不产生发布副作用', 
     } finally { f.dispose(); }
   }
 });
+test('草稿创建后的列表索引延迟不中断发布；一直读不到才报错要重跑（回退 2026-10-31 v0.1.4 事故）', () => {
+  for (const lag of [1, 3, 9]) {
+    const f = fixture();
+    try {
+      f.state.createLag = lag;
+      f.call(true);
+      assert.equal(f.state.release.draft, false, `延迟 ${lag} 次后必须照常发布`);
+      assert.equal(f.state.release.assets.length, 4);
+      assert.ok(f.state.waits >= lag, '必须轮询等待而不是一次读定生死');
+      f.state.waits = 0;
+      f.call(true);
+      assert.equal(f.state.waits, 0, '草稿已可见时不得空等');
+    } finally { f.dispose(); }
+  }
+  const f = fixture();
+  try {
+    f.state.createLag = 10;
+    assert.throws(() => f.call(true), /创建后未找到 Release.*重跑同一指令/);
+    assert.equal(f.state.release.draft, true, '读不到时不得假装成功');
+    assert.equal(f.state.calls.filter(c => c[1] === 'release' && c[2] === 'create').length, 1, '不得重复创建草稿');
+  } finally { f.dispose(); }
+});
+
 test('部分上传失败留草稿；同一指令只补缺失文件，不覆盖资产', () => {
   const f = fixture();
   try {

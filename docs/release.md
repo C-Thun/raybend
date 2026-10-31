@@ -280,6 +280,12 @@ Windows cargo 构建主程序与 worker → 打所选安装器 → 核对嵌入�
 
 - **网络中断**：保留草稿与已上传资产；修复后重跑同一条发布指令 —— 已上传资产按字节比对，只补缺项，冲突不覆盖；
   草稿里留下的零字节占位会被删除重传，已完成资产不删。
+- **发布步骤失败不回滚版本写入**：`--publish` 的发布步骤跑在构建回滚保护**之外**（2026-10-31 v0.1.4 修）。
+  一旦发布开始，提交 / tag / 推送 / 上传都可能已经生效，此时把工作树恢复成旧版本号只会让它落后于 HEAD，
+  下一次 `release:publish` 的升版校验（`版本文件含升版以外的改动`）必然拒绝。所以失败信息是
+  「发布未完成（构建产物与版本提交保留，不回收工作树）」，并按上下文直接给出重跑命令。
+  演练/受伤后的核对：`git status --short` 应只显示发布脚本自己的版本写入（或干脆为空），
+  万一工作树被改回了旧版本号，`git restore -- Cargo.toml Cargo.lock package.json` 回到 HEAD 即可，不要重新构建。
 - **公开后官网失败**：报错，但 **Release 已公开的事实不回滚**；排障后重跑不会重传安装器，
   对匹配的已失败官网工作流会自动重跑一次并等待。再失败就照日志修，不反复重传或循环重跑。
 - **不能用发布指令续跑的情形**：构建来源之后又出现了**新的独立提交**（HEAD 的父不再是构建来源）——
@@ -344,7 +350,7 @@ Windows cargo 构建主程序与 worker → 打所选安装器 → 核对嵌入�
 | 症状 | 根因 | 做法 / 落点 |
 | --- | --- | --- |
 | `cargo metadata --locked` 拒绝写锁：`cannot update the lock file … --locked` | 发版只同步了两个包在 `Cargo.lock` 里的版本，**新增的 workspace 成员漏了**（首次是 `raybend-crashpad`） | `versionEdits` 改为按 `[workspace] members` 动态解析（`d3a03ac`）；新增成员自动跟上 |
-| 「创建后未找到 Release，请重跑同一指令」（草稿明明建成了） | `GET /releases/tags/<tag>` **对 draft 固定 404**（GitHub API 行为） | 改用列表端点匹配 `tag_name`（`940eaa4`），带断言防回归 |
+| 「创建后未找到 Release，请重跑同一指令」（草稿明明建成了） | ① `GET /releases/tags/<tag>` **对 draft 固定 404**；② 列表端点对**刚创建的草稿**有秒级索引延迟 | ① 改用列表端点匹配 `tag_name`（`940eaa4`），带断言防回归；② `create` 之后用 `wait` 轮询 10 次（约 18s）再判失败（2026-10-31 v0.1.4 第二次踩到，同日记 `implementations/`）|
 | `cargo publish` 上传超时：`[28] Timeout was reached (Connection timed out after 30001 ms)` | 默认 30 s 上传超时，直连 crates.io 偶发 | 发布时固化 `CARGO_HTTP_TIMEOUT=600` / `CARGO_NET_RETRY=5`（`940eaa4`），已有环境变量不覆盖 |
 | 官网部署失败：`Tag "v0.1.2" is not allowed to deploy to github-pages due to environment protection rules` | `github-pages` environment 只允许 `master` 分支，而 release 事件的 ref 是 tag | 加 tag 规则 `v*`（§3.1）；文档与流程都已写死这条前置 |
 | 发布中途失败，报错是 `AggregateError` / `版本文件含升版以外的改动` | 构建期间改了工作树（提交了别的改动） | §7.4 红线：构建/发布期间不动工作树；本次靠 `git reset` + `git stash` + 快照对齐恢复 |

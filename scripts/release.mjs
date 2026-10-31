@@ -54,6 +54,7 @@ export function runRelease({root=resolve(dirname(fileURLToPath(import.meta.url))
   let aiPlan;
   const unlocks=[];
   let rollback=()=>{};
+  let handedToPublish=false; // 一旦交给发布步骤，提交/tag/推送就可能已发生：此后不得回滚版本写入
   try {
     if(windows){
       unlocks.push(acquireReleaseLock(join(root,".release","build.lock")));
@@ -119,16 +120,27 @@ export function runRelease({root=resolve(dirname(fileURLToPath(import.meta.url))
         }else log("⚠ 未找到 PDB；本版崩溃报告无法精确符号化");
         finalize({argv:[bundle,"--manifest",join(frontendRoot,"raybend-build.json"),"--out",releaseOut,...(request.unsigned?["--allow-unsigned"]:[]),...(request.withUpdater?["--base-url",`https://github.com/C-Thun/raybend/releases/download/v${plan.targetVersion}/`]:[])],run,log,selectVersion:plan.targetVersion,requiredTargets:winConfig.bundle.targets});
         if(request.publish){
-          log(`一键发版：构建与收口完成，继续执行发布（--publish）——提交版本文件、原子推送、上传 Release、公开。`);
-          publish({root,directory:releaseOut,execute:true,noCrates:request.noCrates??false,run,log});
+          // ❗发布放在回滚保护之外：一旦发布提交/tag/推送发生，再把版本文件恢复成旧版本，
+          //   工作树就比 HEAD 落后这三个文件，重跑发布指令的升版校验必然失败
+          //   （2026-10-31 v0.1.4 首次发布踩到）。锁仍持到发布结束，防止期间有人改工作树。
+          handedToPublish=true;
+          try{
+            log(`一键发版：构建与收口完成，继续执行发布（--publish）——提交版本文件、原子推送、上传 Release、公开。`);
+            publish({root,directory:releaseOut,execute:true,noCrates:request.noCrates??false,run,log});
+          }catch(error){
+            // 发布不是「构建失败」：产物与版本提交都已落地，绝不回收版本写入。
+            // 中途失败按 docs/release.md §6.5 的语义重跑同一发布指令（幂等）。
+            throw new Error(`发布未完成（构建产物与版本提交保留，不回收工作树）：${error.message}\n排障后由崔总重跑：pnpm release:publish ${relative(root,releaseOut)} --execute`,{cause:error});
+          }
         }else log(`本地准备完成；由崔总真机验收后执行：pnpm release:publish ${relative(root,releaseOut)} --execute`);
       }
     }
   } catch(error) {
-    try {rollback();} catch(conflict){throw new AggregateError([error,conflict],"构建失败；保留外部版本修改，需核对");}
+    if(handedToPublish)throw error; // 发布失败已带重跑指令，不改写、不回滚
+    try {rollback();} catch(conflict){throw new AggregateError([error,conflict],"构建失败；保留外部修改，需核对");}
     throw new Error(`构建失败，已恢复本次版本写入；重试前重建前端：${error.message}`,{cause:error});
   } finally {
-    for(const unlock of unlocks.reverse())unlock();
+    for(const unlock of [...unlocks].reverse())unlock();
   }
   if(request.skipBuild)log("版本准备完成；未构建，不是可发布产物");
   if(!windows)for(const command of plan.humanCommands)log(`由崔总执行：${command}`);
