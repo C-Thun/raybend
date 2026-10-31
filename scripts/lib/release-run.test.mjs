@@ -231,6 +231,22 @@ test('发布步骤失败不回滚版本写入（工作树留在发布提交上�
  }finally{f.dispose();}
 });
 
+test('正式版配了更新公钥却没有 --with-updater 时构建前就拦住；--no-updater 显式放行',()=>{
+ const f=fixture();try{
+  writeFileSync(join(f.root,'release.config.json'),JSON.stringify({schema:1,updaterPublicKey:'synthetic-public-key'}));
+  const before=['package.json','Cargo.toml','Cargo.lock'].map(p=>readFileSync(join(f.root,p),'utf8'));
+  const run=(cmd,args)=>{if(cmd==='git')return args[0]==='status'?'':'abcdef012345';throw new Error('不应走到构建');};
+  assert.throws(()=>runRelease({root:f.root,discover:()=>f.paths,argv:['patch','--win-msi','--unsigned'],run,log:()=>{}}),/latest\.json 会 404/,'2026-10-31 v0.1.4 就是这么断链的');
+  before.forEach((value,i)=>assert.equal(readFileSync(join(f.root,['package.json','Cargo.toml','Cargo.lock'][i]),'utf8'),value),'拦截发生在升版之前');
+  const run2=(cmd,args)=>{if(cmd==='git')return args[0]==='status'?'':'abcdef012345';throw new Error('reached build');};
+  const error=(()=>{try{runRelease({root:f.root,discover:()=>f.paths,argv:['patch','--win-msi','--unsigned','--no-updater'],run:run2,log:()=>{}});return null;}catch(caught){return caught;}})();
+  assert.ok(error,'必须真的往下走（在构建处失败）');
+  assert.doesNotMatch(error.message,/latest\.json 会 404/,'--no-updater 是显式放行');
+  const plan=runRelease({root:f.root,discover:()=>f.paths,argv:['patch','--win-msi','--unsigned','--dry-run'],run,log:()=>{},aiResolver:()=>({enabled:false,features:[],resources:{}})});
+  assert.equal(plan.windowsTargets.length,1,'dry-run 只警告不阻断');
+ }finally{f.dispose();}
+});
+
 test('unsigned 且无 --with-updater 时忽略环境里的更新私钥（不调 wslpath）',()=>{
  const f=fixture();try{
   let sawWslpath=false;

@@ -30,7 +30,8 @@ export function runRelease({root=resolve(dirname(fileURLToPath(import.meta.url))
   if(config.version!=="../package.json")throw new Error("Tauri 必须从 ../package.json 读取产品版本");
   const builtAt=env.RAYBEND_BUILD_TIME || new Date().toISOString();
   if(!Number.isFinite(Date.parse(builtAt)))throw new Error("非法 RAYBEND_BUILD_TIME");
-  const publicKey=request.withUpdater ? updaterPublicKey(root,env) : "";
+  const configuredUpdaterKey=updaterPublicKey(root,env);
+  const publicKey=request.withUpdater ? configuredUpdaterKey : "";
   const buildEnv={...env,RAYBEND_VERSION:plan.targetVersion,RAYBEND_CHANNEL:plan.channel,RAYBEND_BUILD_TIME:builtAt,RAYBEND_GIT_HASH:gitHash??"",RAYBEND_DIRTY:dirty?"1":"0",RAYBEND_UPDATER_PUBLIC_KEY:publicKey,RAYBEND_DISTRIBUTION:"direct"};
   const winConfig=windows ? windowsReleaseConfig(plan,{unsigned:request.unsigned,withUpdater:request.withUpdater,frontendDist:"../dist",certThumbprint:env.RAYBEND_SIGN_CERT_SHA1,updaterPublicKey:publicKey,updaterPrivateKey:env.TAURI_SIGNING_PRIVATE_KEY,timestamp:env.RAYBEND_SIGN_TIMESTAMP}):undefined;
   const releaseOut=join(root,"release-out",plan.channel==="test"?`test-${builtAt.replaceAll(":","-")}`:`v${plan.targetVersion}`);
@@ -40,8 +41,14 @@ export function runRelease({root=resolve(dirname(fileURLToPath(import.meta.url))
   if(windows)log(`Windows 构建目录：${paths.windowsBase}\nWSL 挂载目录：${paths.hostBase}\n本地源码：${paths.windowsSource}\n编译缓存：${paths.windowsTarget}\n最终安装器：${releaseOut}`);
   for(const warning of plan.warnings)log(`⚠ ${warning}`);
   for(const blocker of plan.blockers)log(`⛔ ${blocker}`);
+  // 正式版断链防护：仓里配了更新公钥（= 项目对外发的是带自动更新的安装包）却没带更新产物，
+  // 新版一公开 `releases/latest/download/latest.json` 就 404，已装用户的自动更新全部失效
+  //（2026-10-31 v0.1.4 实测：0.1.3 用户报「更新失败：Could not fetch a valid release JSON from the remote」）。
+  const updaterGap=plan.channel==="release"&&windows&&!request.withUpdater&&!request.noUpdater&&configuredUpdaterKey!=="";
+  if(updaterGap)log("⚠ 本次正式版没有 --with-updater：不生成 .sig 与 latest.json，已装用户的自动更新会失效（确认要这样发请显式加 --no-updater）");
   if(request.dryRun){aiResolver({root,mode:aiArgs.mode,materialize:false,log});log("dry-run：没有改文件、构建、签名或发布");return plan;}
   if(plan.blockers.length)throw new Error(plan.blockers.join("；"));
+  if(updaterGap)throw new Error("正式版缺 --with-updater：新版公开后 releases/latest/download/latest.json 会 404，已装用户的自动更新全部失效（带更新发版请加 --with-updater，需要 TAURI_SIGNING_PRIVATE_KEY；确认这次就是不带更新产物才加 --no-updater）");
   if(windows && existsSync(releaseOut))throw new Error("本版本 release-out 已存在；保留已有产物，请先核对，不能重复覆盖");
   const windowsRoot=paths?.hostSource,windowsTarget=paths?.hostTarget;
   if(windows){

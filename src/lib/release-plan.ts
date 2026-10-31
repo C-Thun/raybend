@@ -72,11 +72,13 @@ export interface ReleaseRequest {
   /** 准备完成后直接执行发布（提交/tag/push/上传/公开），给人类的一条命令入口 */
   publish?: boolean;
   windowsTargets: WindowsInstaller[]; windowsDir?: string; unsigned?: boolean; withUpdater?: boolean;
+  /** 与 --with-updater 互斥：显式声明「这次正式版不带更新产物」（默认会被断链防护拦住） */
+  noUpdater?: boolean;
   /** 与 --publish 搭配：跳过 crates.io 同步 */
   noCrates?: boolean;
 }
 export type WindowsInstaller = "nsis" | "msi";
-const USAGE = "用法：pnpm release <test|patch|minor|major> 或 pnpm release <x.y.z>（亦可 --version x.y.z） [--channel beta|test|release] [--dry-run] [--allow-dirty] [--skip-build] [--publish [--no-crates]] [--win-msi] [--win-nsis] [--win-dir <Windows 或 WSL 本地盘目录>] [--unsigned] [--with-updater]";
+const USAGE = "用法：pnpm release <test|patch|minor|major> 或 pnpm release <x.y.z>（亦可 --version x.y.z） [--channel beta|test|release] [--dry-run] [--allow-dirty] [--skip-build] [--publish [--no-crates]] [--win-msi] [--win-nsis] [--win-dir <Windows 或 WSL 本地盘目录>] [--unsigned] [--with-updater|--no-updater]";
 export function parseReleaseArgs(argv: readonly string[]): ReleaseRequest {
   let bump: BumpType | undefined, explicitVersion: string | undefined, channel: BuildChannel | undefined, windowsDir: string | undefined;
   const flags = new Set<string>();
@@ -98,7 +100,7 @@ export function parseReleaseArgs(argv: readonly string[]): ReleaseRequest {
       if (!windowsDir?.trim() || windowsDir.startsWith("--")) throw new Error("--win-dir 缺少构建目录");
     } else if (arg.startsWith("--")) {
       if (arg === "--windows") throw new Error("--windows 已改为 --win-msi / --win-nsis；两个开关可同时指定");
-      if (!["--dry-run", "--allow-dirty", "--skip-build", "--publish", "--no-crates", "--win-msi", "--win-nsis", "--unsigned", "--with-updater"].includes(arg)) throw new Error(`未知参数：${arg}`);
+      if (!["--dry-run", "--allow-dirty", "--skip-build", "--publish", "--no-crates", "--win-msi", "--win-nsis", "--unsigned", "--with-updater", "--no-updater"].includes(arg)) throw new Error(`未知参数：${arg}`);
       if (flags.has(arg)) throw new Error(`重复参数：${arg}`);
       flags.add(arg);
     } else {
@@ -120,9 +122,10 @@ export function parseReleaseArgs(argv: readonly string[]): ReleaseRequest {
   if (flags.has("--no-crates") && !flags.has("--publish")) throw new Error("--no-crates 只在 --publish 时有意义");
   const windowsTargets = (["nsis", "msi"] as const).filter(target => flags.has(`--win-${target}`));
   if (windowsTargets.length && flags.has("--skip-build")) throw new Error("Windows 打包不能跳过前端构建");
-  if ((flags.has("--unsigned") || flags.has("--with-updater")) && !windowsTargets.length) throw new Error("--unsigned / --with-updater 需要 --win-msi 或 --win-nsis");
+  if ((flags.has("--unsigned") || flags.has("--with-updater") || flags.has("--no-updater")) && !windowsTargets.length) throw new Error("--unsigned / --with-updater / --no-updater 需要 --win-msi 或 --win-nsis");
+  if (flags.has("--with-updater") && flags.has("--no-updater")) throw new Error("--with-updater 与 --no-updater 冲突：更新产物要么带，要么显式不带");
   if (windowsDir !== undefined && !windowsTargets.length) throw new Error("--win-dir 需要 --win-msi 或 --win-nsis");
-  return { bump, explicitVersion, publish: flags.has("--publish"), noCrates: flags.has("--no-crates"), channel, dryRun: flags.has("--dry-run"), allowDirty: flags.has("--allow-dirty"), skipBuild: flags.has("--skip-build"), windowsTargets, windowsDir, unsigned: flags.has("--unsigned"), withUpdater: flags.has("--with-updater") };
+  return { bump, explicitVersion, publish: flags.has("--publish"), noCrates: flags.has("--no-crates"), channel, dryRun: flags.has("--dry-run"), allowDirty: flags.has("--allow-dirty"), skipBuild: flags.has("--skip-build"), windowsTargets, windowsDir, unsigned: flags.has("--unsigned"), withUpdater: flags.has("--with-updater"), noUpdater: flags.has("--no-updater") };
 }
 /** 两类安装器共享版本线，均遵守 MSI 数值版本上限。 */
 export function windowsVersion(version: string): string {

@@ -253,6 +253,7 @@ pnpm release:publish release-out/v0.1.3 --execute # 发布：提交 / tag / 推�
 | `--win-msi` / `--win-nsis` | 安装器类型，可同时给（只编译一次，打两种）；**beta 与预发布只能 NSIS**（MSI 数值版本区分不了 beta） |
 | `--unsigned` | 明确接受无 Authenticode 签名（官网直下路线） |
 | `--with-updater` | 生成带签名更新的产物（`.sig` + `latest.json`）；需要 §3.1 的密钥 |
+| `--no-updater` | 显式声明「这次正式版不带更新产物」。默认会被断链防护拦住：仓里配了更新公钥却没 `--with-updater` 时，新版一公开 `latest.json` 就 404（§8） |
 | `--ai=auto|required|off` | AI 模型外挂策略（附录 D） |
 | `--no-crates` | 这次不同步 crates.io |
 | `--publish` | 准备完直接发布（§6.1） |
@@ -351,6 +352,7 @@ Windows cargo 构建主程序与 worker → 打所选安装器 → 核对嵌入�
 | --- | --- | --- |
 | `cargo metadata --locked` 拒绝写锁：`cannot update the lock file … --locked` | 发版只同步了两个包在 `Cargo.lock` 里的版本，**新增的 workspace 成员漏了**（首次是 `raybend-crashpad`） | `versionEdits` 改为按 `[workspace] members` 动态解析（`d3a03ac`）；新增成员自动跟上 |
 | 「创建后未找到 Release，请重跑同一指令」（草稿明明建成了） | ① `GET /releases/tags/<tag>` **对 draft 固定 404**；② 列表端点对**刚创建的草稿**有秒级索引延迟 | ① 改用列表端点匹配 `tag_name`（`940eaa4`），带断言防回归；② `create` 之后用 `wait` 轮询 10 次（约 18s）再判失败（2026-10-31 v0.1.4 第二次踩到，同日记 `implementations/`）|
+| 已装版本检查更新报「更新失败：Could not fetch a valid release JSON from the remote」 | 最新那版**没带 `--with-updater`**：它没有 `latest.json`，而 `releases/latest/download/latest.json` 永远指向**最新** Release → 404，链整条断掉（2026-10-31：v0.1.4 就是这么发的，0.1.3 用户全部卡住） | 发一版带 `--with-updater` 的修复（更新会直接跳过去）；`pnpm release` 已加断链防护：仓里有更新公钥的正式版必须带 `--with-updater`，确实不带要显式 `--no-updater`（2026-10-31） |
 | `cargo publish` 上传超时：`[28] Timeout was reached (Connection timed out after 30001 ms)` | 默认 30 s 上传超时，直连 crates.io 偶发 | 发布时固化 `CARGO_HTTP_TIMEOUT=600` / `CARGO_NET_RETRY=5`（`940eaa4`），已有环境变量不覆盖 |
 | 官网部署失败：`Tag "v0.1.2" is not allowed to deploy to github-pages due to environment protection rules` | `github-pages` environment 只允许 `master` 分支，而 release 事件的 ref 是 tag | 加 tag 规则 `v*`（§3.1）；文档与流程都已写死这条前置 |
 | 发布中途失败，报错是 `AggregateError` / `版本文件含升版以外的改动` | 构建期间改了工作树（提交了别的改动） | §7.4 红线：构建/发布期间不动工作树；本次靠 `git reset` + `git stash` + 快照对齐恢复 |

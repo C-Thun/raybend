@@ -37,6 +37,7 @@ const request = (over: Partial<ReleaseRequest> = {}): ReleaseRequest => ({
   windowsDir: undefined,
   unsigned: false,
   withUpdater: false,
+  noUpdater: false,
   ...over,
 });
 
@@ -318,12 +319,14 @@ test("--publish 入口：要求有安装器、不与预览/跳过构建同用", 
 
 test("参数的两个 channel 写法、非法值、未知与重复参数",()=>{
   assert.equal(parseReleaseArgs(["minor","--channel","beta"]).channel,"beta");
-  for(const args of [["patch","--channel"],["patch","--channel=bad"],["patch","--unknown"],["patch","--dry-run","--dry-run"],["patch","--channel=beta","--channel=release"],["test","--channel=beta"],["minor","--channel=test"],["patch","--unsigned"],["patch","--with-updater"],["test","--win-msi","--skip-build"],["test","--win-nsis","--skip-build"],["test","--win-msi","--win-msi"]]) assert.throws(()=>parseReleaseArgs(args));
+  for(const args of [["patch","--channel"],["patch","--channel=bad"],["patch","--unknown"],["patch","--dry-run","--dry-run"],["patch","--channel=beta","--channel=release"],["test","--channel=beta"],["minor","--channel=test"],["patch","--unsigned"],["patch","--with-updater"],["patch","--no-updater"],["patch","--win-msi","--with-updater","--no-updater"],["test","--win-msi","--skip-build"],["test","--win-nsis","--skip-build"],["test","--win-msi","--win-msi"]]) assert.throws(()=>parseReleaseArgs(args));
 });
 test("Windows 目标独立选择、组合顺序固定；旧参数给出迁移提示",()=>{
   assert.deepEqual(parseReleaseArgs(["test","--win-msi","--unsigned"]),request({windowsTargets:["msi"],unsigned:true}));
   assert.deepEqual(parseReleaseArgs(["test","--win-nsis"]).windowsTargets,["nsis"]);
   assert.deepEqual(parseReleaseArgs(["patch","--win-msi","--win-nsis","--with-updater"]).windowsTargets,["nsis","msi"]);
+  assert.deepEqual(parseReleaseArgs(["patch","--win-msi","--unsigned","--no-updater"]),request({bump:"patch",windowsTargets:["msi"],unsigned:true,noUpdater:true}));
+  assert.throws(()=>parseReleaseArgs(["patch","--win-msi","--with-updater","--no-updater"]),/冲突/);
   assert.throws(()=>parseReleaseArgs(["patch","--windows"]),/--win-msi \/ --win-nsis/);
 });
 test("Windows 构建目录接受两种参数写法，不吞后续开关，拒绝空值/重复/无目标",()=>{
