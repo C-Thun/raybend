@@ -289,7 +289,16 @@ impl FullCache {
         }
         let mut removed = 0;
         for group in &mut by_class {
-            group.sort_by(|a, b| b.0.cmp(&a.0));
+            /*
+             * mtime 相同就按路径名排 —— **必须给一个确定的次序**（2026-11-05）。
+             *
+             * 依赖「mtime 一定不同」是错的：exFAT/FAT 的 mtime 粒度是 **2 秒**，
+             * 连续写出的两份 `latest-*` 会拿到同一个时间戳；此时 `sort_by` 的次序
+             * 完全由目录遍历顺序决定，同一份输入可能删掉不同的那一个
+             * （真机代价只是多渲一次，但单测 `gc_keeps_only_the_newest_latest_snapshots`
+             * 会因此偶发失败 —— 2026-11-05 全量 `cargo test --workspace` 就撞到过一次）。
+             */
+            group.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1)));
             for (_, path) in group.drain(..).skip(keep) {
                 if std::fs::remove_file(path).is_ok() {
                     removed += 1;
@@ -711,6 +720,41 @@ mod tests {
             cache.read(5, "issue-1-hash", EditBase::Raw, 6).is_some(),
             "定稿快照不归它管"
         );
+        assert_eq!(cache.gc_latest(5, 2), 0, "幂等");
+    }
+
+    #[test]
+    fn gc_latest_breaks_mtime_ties_by_name() {
+        let (_dir, cache) = cache();
+        for name in [
+            "latest-aaaaaaaaaaaa",
+            "latest-bbbbbbbbbbbb",
+            "latest-cccccccccccc",
+        ] {
+            cache.write(5, name, EditBase::Raw, 6, b"x").expect("写");
+        }
+        /*
+         * 把三份文件的 mtime 设成**同一刻**：exFAT/FAT 的 mtime 粒度是 2 秒，
+         * 连续写出的快照在移动盘上就是这个样子。GC 的次序必须仍然确定 ——
+         * 否则同一份输入可能删掉不同的那一个（真机代价是多渲一次，
+         * 单测代价是偶发红：2026-11-05 全量跑就撞到过一次）。
+         */
+        let when = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        for entry in std::fs::read_dir(cache.root().join("5")).expect("读目录").flatten() {
+            std::fs::OpenOptions::new()
+                .write(true)
+                .open(entry.path())
+                .expect("打开")
+                .set_modified(when)
+                .expect("改 mtime");
+        }
+        assert_eq!(cache.gc_latest(5, 2), 1, "三份同岁 ⇒ 仍然只删一份");
+        assert!(
+            cache.read(5, "latest-aaaaaaaaaaaa", EditBase::Raw, 6).is_none(),
+            "同岁时按名字降序保留 ⇒ 删名字最小的那份（确定，不随目录遍历顺序变）"
+        );
+        assert!(cache.read(5, "latest-bbbbbbbbbbbb", EditBase::Raw, 6).is_some());
+        assert!(cache.read(5, "latest-cccccccccccc", EditBase::Raw, 6).is_some());
         assert_eq!(cache.gc_latest(5, 2), 0, "幂等");
     }
 
