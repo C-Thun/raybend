@@ -45,6 +45,7 @@
 | 标签名字 | 64 字符 | `crates/raybend/src/store/tags.rs::MAX_TAG_NAME_CHARS` |
 | 桶名字 | 80 字符 | `crates/raybend/src/store/organization.rs::MAX_BUCKET_NAME_CHARS` |
 | 视口最大缩放 | 64× | `crates/raybend/src/render/viewport.rs::MAX_ZOOM` |
+| 文件重名后缀尝试 | 999 次（`_01`…`_999`） | `crates/raybend/src/store/relocate.rs::MAX_RENAME_ATTEMPTS`；回收站还原同一口径见 `store/recycle.rs`（`attempt <= 999`） |
 
 ## 4. 待补
 
@@ -58,3 +59,4 @@
 | 2026-10-31 | 建立；登记 LUT 8 / 定稿 32 / area 32（规划）/ 标签 5000 等 9 条业务上限、3 条容量预算、5 条技术性上限 |
 | 2026-10-31 | area 32 落地（W2/W4）：代码唯一真相 + 面板变灰与浮条已接；新增「编辑区层名 30 字符」一条 |
 | 2026-11-03 | 新增右栏「文字字段长度 2000 字符」与「建议输入候选 20 条/字段」两条（`TEXT_FIELD_MAX_CHARS` / `TEXT_SUGGEST_LIMIT`，前后端同值） |
+| 2026-11-05 | 新增技术性上限「文件重名后缀尝试 999 次」（移动资产 `relocate` 与回收站还原共用同一口径；此前只活在 `recycle.rs` 里没登记） |

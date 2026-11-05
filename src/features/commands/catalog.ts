@@ -161,6 +161,14 @@ export interface CommandDeps {
     toggleSortDirection: () => void;
     /** 打开删除确认（工作区负责确认与失败清单） */
     requestDelete: () => void;
+    /** 剪切选中的照片（`Ctrl+X`；只记状态，不动文件） */
+    cut: () => void;
+    canCut: () => boolean;
+    /** 把剪切的那批移到当前选中目录（`Ctrl+V`） */
+    paste: () => void;
+    canPaste: () => boolean;
+    /** 重读当前目录（`F5`） */
+    refresh: () => void;
     /** 是否在回收站视图（`specs/library-recycle-bin.md`）。 */
     recycle?: () => boolean;
     /** 还原回收站里选中的照片。 */
@@ -509,6 +517,48 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       when: () => inBrowse() && !(deps.browse.recycle?.() ?? false),
       enabled: () => deps.browse.hasSelection(),
       run: () => deps.browse.requestDelete(),
+    }),
+    spec({
+      /* 手动重读当前目录（崔总 2026-11-05）：正常靠焦点 / 目录事件，`F5` 只是兜底。 */
+      id: "browse.refresh",
+      titleKey: "cmd.browse.refresh",
+      group: "view",
+      scope: "global",
+      scenes: ["browse"],
+      defaultKey: "F5",
+      when: inBrowse,
+      run: () => deps.browse.refresh(),
+    }),
+    spec({
+      /*
+       * 剪切 / 粘贴（崔总 2026-11-05）：`Mod+X` / `Mod+V`，**只有这两条**——
+       * 复制暂不支持（`Mod+C` 不登记，命令面板里也搜不到，免得「看着能按但没实现」）。
+       *
+       * 剪切只是**记状态**（`features/browse/photo-cut.ts`），文件一个都不动；
+       * 真正搬家发生在粘贴那一刻（目标 = 当前选中的目录，库根与回收站不可用）。
+       */
+      id: "browse.cut",
+      titleKey: "cmd.browse.cut",
+      group: "edit",
+      menu: "edit",
+      scope: "tiles",
+      scenes: ["browse"],
+      defaultKey: "Mod+X",
+      when: () => inBrowse() && !(deps.browse.recycle?.() ?? false),
+      enabled: () => deps.browse.canCut(),
+      run: () => deps.browse.cut(),
+    }),
+    spec({
+      id: "browse.paste",
+      titleKey: "cmd.browse.paste",
+      group: "edit",
+      menu: "edit",
+      scope: "tiles",
+      scenes: ["browse"],
+      defaultKey: "Mod+V",
+      when: () => inBrowse() && !(deps.browse.recycle?.() ?? false),
+      enabled: () => deps.browse.canPaste(),
+      run: () => deps.browse.paste(),
     }),
     spec({
       id: "export.remove",

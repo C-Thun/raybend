@@ -68,8 +68,12 @@ export interface TooltipProps {
  * 2. **禁用态也要能弹**：禁用的 `<button>` 在浏览器里不派发指针事件，所以提示态下
  *    在触发层包一个 `inline-flex` 的 `span` 承接命中（按钮自己的 `pointer-events` 是 none）——
  *    而「为什么不能点」恰恰是最需要说话的场景；
- * 3. **默认朝下**：工具条贴在窗口顶部，气泡朝下有空间；Zag 定位器自带 `flip`，靠近窗口
- *    下缘会自动翻上去。
+ * 3. **默认朝上**（崔总 2026-11-05 改）：朝下时气泡正好落在鼠标光标底下，要看清得把光标
+ *    挪到按钮上缘去 —— 提示自己成了遮挡物。所以一律先朝上；**只有上方放不下时才翻到下方**
+ *    （气泡高 + 8px 间距超出窗口上缘，典型就是 `titlebar` 那排按钮）。
+ *    翻转由 Zag 定位器自带的 `flip` 做，边界就是**窗口**：气泡 Portal 挂在 `body` 下，
+ *    而 `html/body` 都是 `overflow: hidden` 且撑满视口 —— 裁切祖先 = 视口 = 应用窗口客户区，
+ *    与「哪个面板、滚没滚动」无关（`overflowPadding` 默认 8px，即真的贴边了才翻）。
  *
  * 触发属性给谁：**有提示 → 给包装 span；没有提示 → 交还给调用方（展开到按钮上）**。
  *
@@ -90,7 +94,7 @@ export function ButtonTip(props: {
     !insideTooltip && typeof props.content === "string" && props.content.length > 0;
   return (
     <Show when={hasTip()} fallback={props.children({})}>
-      <Tooltip content={props.content} placement={props.placement ?? "bottom"}>
+      <Tooltip content={props.content} placement={props.placement ?? "top"}>
         {(triggerProps) => (
           <span {...triggerProps()} class="inline-flex">
             {props.children({})}

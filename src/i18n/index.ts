@@ -33,6 +33,14 @@ import { zhCN } from "./zh-CN.ts";
  * descriptionTitle / descriptionExpand / gpsOpenMap / textSuggestHint / geoFill / geoFillBusy /
  * geoFilled / geoFillMiss 十一条（右栏元数据字段的建议输入、描述弹窗、GPS 复制/地图与「按 GPS 填入地点」；
  * 加完本文件即刷新检查器缓存）。
+ * 2026-11-05 加了 editor.tabs.basic / advanced / leftBottom 三条（三条页签带的**组名** aria-label：
+ * 基础调整 / 曲线与色彩 / 总览与信息；同时英文页签 “Color wheels” 精简为 “Wheels”。
+ * 加完本文件即刷新检查器缓存）。
+ * 2026-11-05（同日第二批）加了 browse.cutHint / moveDone / moveRenamed / moveNone、
+ * browse.newDir / newDirTitle / dirName / dirNamePlaceholder / deleteDir / deleteDirTitle /
+ * deleteDirBody / dirTag / libraryRoot，与 cmd.browse.cut / paste 两条命令名
+ * （左列目录工具栏 + 剪切粘贴；`browse.pickDirectory` 改名 `browse.libraryRoot`。
+ * 加完本文件即刷新检查器缓存）。
  *
  * ⚠️ 加了新键之后若类型检查器仍报「键不存在」，那是**陈旧快照**误报（不是真错）：
  * 判据与验证配方见 编译器诊断纪律：以 `tsc` 为准（必要时用 `MessageKey[]` 临时证明文件 + 退出码）。

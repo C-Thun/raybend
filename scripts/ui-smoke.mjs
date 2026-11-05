@@ -747,6 +747,27 @@ try {
     );
   };
 
+  /** 元素滚到视口中间后的完整矩形（几何断言要用 top/bottom，不能只拿中心点） */
+  const rectOf = async (selector) => {
+    await evaluate(
+      `document.querySelector(${JSON.stringify(selector)})?.scrollIntoView({ block: "center" })`,
+    );
+    await sleep(150);
+    return evaluate(
+      `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return null; const r = el.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`,
+    );
+  };
+
+  /** 当前可见气泡的文字与矩形（没有气泡就 null） */
+  const tipBox = async () =>
+    evaluate(`(() => {
+      const content = [...document.querySelectorAll('[data-scope="tooltip"][data-part="content"]')]
+        .find((node) => !node.hasAttribute('hidden'));
+      if (!content) return null;
+      const r = content.getBoundingClientRect();
+      return { text: content.textContent.trim(), top: r.top, bottom: r.bottom, side: content.dataset.side ?? null };
+    })()`);
+
   /** 真鼠标划过去，并在过渡期间采样「同时存在几张气泡」 */
   const sweep = async (from, to) => {
     const samples = [];
@@ -799,6 +820,57 @@ try {
     if (show.max > 1 || next.max > 1 || back.max > 1) {
       problems.push(
         `同一时刻出现了多张提示气泡（${group.name}）—— 嵌套的两台 tooltip machine 没收敛：${JSON.stringify([show.max, next.max, back.max])}`,
+      );
+    }
+    await parkMouse();
+  }
+
+  /*
+   * 提示气泡的**方位**（崔总 2026-11-05 定）：
+   *
+   * 默认朝上 —— 朝下时气泡正好压在鼠标光标底下，要看清得先把光标挪到按钮上缘，
+   * 提示自己成了遮挡物。只有**上方放不下**（气泡 + 间距超出窗口上缘）才翻到下方，
+   * 典型就是 `titlebar` 那一排。
+   *
+   * 断言量的是**几何**而不是 Zag 的 `data-side`：`data-side` 只说明中间件怎么算的，
+   * 真正要保证的是「气泡真的落在按钮上方 / 下方」。
+   */
+  const midButton = await rectOf('[data-tip-switch="a"]');
+  if (midButton === null) {
+    problems.push('画廊缺提示方位用例（data-tip-switch="a"）—— KitchenSink 的冒烟钩子被删了？');
+  } else {
+    await parkMouse();
+    await sweep({ x: 4, y: 4 }, midButton);
+    const box = await tipBox();
+    if (box === null) {
+      problems.push("页面中部的图标按钮悬停后没弹出提示（方位断言拿不到气泡）");
+    } else if (!(box.bottom <= midButton.top)) {
+      problems.push(
+        `页面中部的提示气泡没在上方（side=${box.side}）：气泡 bottom=${Math.round(box.bottom)}，按钮 top=${Math.round(midButton.top)}`,
+      );
+    }
+    await parkMouse();
+  }
+
+  // titlebar 的图标按钮贴着窗口上缘：上方放不下，必须翻到下方（否则气泡会被窗口裁掉）
+  const titlebarTip = await evaluate(`(() => {
+    const buttons = [...document.querySelectorAll('[data-app-titlebar] button[aria-label]')];
+    const target = buttons[buttons.length - 1];
+    if (!target) return null;
+    const r = target.getBoundingClientRect();
+    return { top: r.top, bottom: r.bottom, x: r.x + r.width / 2, y: r.y + r.height / 2, label: target.getAttribute('aria-label') };
+  })()`);
+  if (titlebarTip === null) {
+    problems.push("titlebar 上没找到带 aria-label 的图标按钮（方位断言拿不到上缘用例）");
+  } else {
+    await parkMouse();
+    await sweep({ x: 4, y: 4 }, titlebarTip);
+    const box = await tipBox();
+    if (box === null) {
+      problems.push(`titlebar 的图标按钮（${titlebarTip.label}）悬停后没弹出提示`);
+    } else if (!(box.top >= titlebarTip.bottom)) {
+      problems.push(
+        `titlebar 的提示气泡没翻到下方（side=${box.side}）：气泡 top=${Math.round(box.top)}，按钮 bottom=${Math.round(titlebarTip.bottom)}`,
       );
     }
     await parkMouse();

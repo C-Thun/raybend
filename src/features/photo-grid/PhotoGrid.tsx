@@ -103,6 +103,8 @@ export interface PhotoGridProps {
   onPhotoPointerDown?: (id: string, event: PointerEvent) => void;
   /** 正在被拖的照片（半透明表现）；`null`/未传 = 没有拖动。 */
   draggingIds?: () => ReadonlySet<string>;
+  /** 已被剪切的照片（`Ctrl+X`）：**只有缩图**压到 70%（崔总 2026-11-05）。 */
+  cutIds?: () => ReadonlySet<string>;
   /**
    * 打开看图的**前一刻**回调（浏览侧要在这里复位四态 `chrome`、收起库列表）。
    * 网格自己不认识那些概念 —— 它只负责「打开前打个招呼」。
@@ -610,6 +612,7 @@ export function PhotoGrid(props: PhotoGridProps): JSX.Element {
                 {...(props.onFocusIndex === undefined ? {} : { onFocusIndex: props.onFocusIndex })}
                 onPhotoPointerDown={props.onPhotoPointerDown}
                 draggingIds={props.draggingIds}
+                cutIds={props.cutIds}
               />
             ) : (
               <GroupHeader source={source} row={row} locale={groupingLocale()} />
@@ -646,6 +649,7 @@ function TileRow(props: {
   onFocusIndex?: (index: number) => void;
   onPhotoPointerDown?: (id: string, event: PointerEvent) => void;
   draggingIds?: () => ReadonlySet<string>;
+  cutIds?: () => ReadonlySet<string>;
 }): JSX.Element {
   return (
     <div
@@ -672,6 +676,7 @@ function TileRow(props: {
             {...(props.onFocusIndex === undefined ? {} : { onFocusIndex: props.onFocusIndex })}
             onPhotoPointerDown={props.onPhotoPointerDown}
             draggingIds={props.draggingIds}
+            cutIds={props.cutIds}
           />
         )}
       </For>
@@ -692,6 +697,7 @@ function TileCell(props: {
   onFocusIndex?: (index: number) => void;
   onPhotoPointerDown?: (id: string, event: PointerEvent) => void;
   draggingIds?: () => ReadonlySet<string>;
+  cutIds?: () => ReadonlySet<string>;
 }): JSX.Element {
   // 被渲染（= 可见）时才请求 —— 虚拟化保证了这一点
   let requestedPath: string | null = null;
@@ -782,6 +788,7 @@ function TileCell(props: {
         disabled={item()?.disabled}
         loading={item() === null || thumb().status === "loading" || thumb().status === "idle"}
         excluded={item()?.excluded === true}
+        cut={props.cutIds?.().has(id()) === true}
         rating={item()?.marks?.rating ?? 0}
         /*
          * 色标值来自数据库（可能有历史脏数据），认不出来的当没有 ——

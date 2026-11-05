@@ -312,6 +312,11 @@
     "renamed",
     "restored"
   ],
+  "MoveResult": [
+    "moved",
+    "renamed",
+    "failed"
+  ],
   "PurgeResult": [
     "failed",
     "purged"
@@ -325,12 +330,11 @@
     "rejects",
     "total"
   ],
-  "DirEmptyView": [
-    "empty",
-    "fileCount",
-    "dirCount",
-    "emptyDirCount",
-    "hasUnresolvedLink"
+  "DirDeleteCheckView": [
+    "deletable",
+    "photoCount",
+    "visibleDirCount",
+    "hasLink"
   ],
   "EditorViewportState": [
     "backdrop",

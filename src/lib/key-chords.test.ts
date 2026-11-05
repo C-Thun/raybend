@@ -152,6 +152,21 @@ test("eventKey：从事件取规范化键名", () => {
   assert.equal(eventKey({ key: "Nonsense" }), null);
 });
 
+/*
+ * 回归（崔总 2026-11-05 报的「编辑区按空格切层不生效」）：
+ * 真实空格键上报的是 `event.key === " "`，而 `normalizeKey` 会把它 trim 成空串 ⇒ null。
+ * 以前只测了 `normalizeKey("Space")` 这个方向，所以测试一直是绿的。
+ */
+test("eventKey：真实空格键（event.key === \" \"）就是 Space", () => {
+  assert.equal(eventKey({ key: " " }), "space");
+  const parsed = parseChord("Space");
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.equal(chordMatches(parsed.chord, { key: " " }, "win"), true, "真机按空格必须能命中 Space 键位");
+  assert.equal(chordMatches(parsed.chord, { key: " ", shiftKey: true }, "win"), false, "带修饰键就不该命中");
+  assert.equal(chordFromEvent({ key: " " }, "win"), "Space", "快捷键设置里要能捕获空格");
+});
+
 test("keyLabel：F 键显示成大写（F11，不是 f11）", () => {
   // 人类 2026-09-23 定：全屏用 F11 —— 快捷键面板与命令面板都显示它，
   // 而 normalizeKey 存的是小写 `f11`，所以这里必须有一步大写。

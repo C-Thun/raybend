@@ -384,11 +384,12 @@ fn every_contract_entry_has_a_test() {
         "GeoPlace",
         "RecycleResult",
         "RestoreResult",
+        "MoveResult",
         "PurgeResult",
         "RecycleSummaryView",
         "DeleteFailure",
         "FlagsView",
-        "DirEmptyView",
+        "DirDeleteCheckView",
         // 数据库升级通知（M2-W2）
         "MigrationNotice",
         "MigrationSnapshot",
@@ -427,9 +428,10 @@ fn every_contract_entry_has_a_test() {
 fn browse_assets_dtos_match_contract() {
     use crate::browse::{
         AssetItem, BrowseFacets, BrowseTimeline, BrowseWindow, FacetCount, FlagsView, MarkResult,
-        MarkingItem, PurgeResult, RecycleResult, RecycleSummaryView, RestoreResult, TimelineEntry,
+        MarkingItem, MoveResult, PurgeResult, RecycleResult, RecycleSummaryView, RestoreResult,
+        TimelineEntry,
     };
-    use crate::dirs::DirEmptyView;
+    use crate::dirs::DirDeleteCheckView;
 
     assert_eq!(keys_of::<AssetItem>(), contract_keys("AssetItem"));
     assert_eq!(keys_of::<BrowseWindow>(), contract_keys("BrowseWindow"));
@@ -441,13 +443,17 @@ fn browse_assets_dtos_match_contract() {
     assert_eq!(keys_of::<MarkResult>(), contract_keys("MarkResult"));
     assert_eq!(keys_of::<RecycleResult>(), contract_keys("RecycleResult"));
     assert_eq!(keys_of::<RestoreResult>(), contract_keys("RestoreResult"));
+    assert_eq!(keys_of::<MoveResult>(), contract_keys("MoveResult"));
     assert_eq!(keys_of::<PurgeResult>(), contract_keys("PurgeResult"));
     assert_eq!(
         keys_of::<RecycleSummaryView>(),
         contract_keys("RecycleSummaryView")
     );
     assert_eq!(keys_of::<FlagsView>(), contract_keys("FlagsView"));
-    assert_eq!(keys_of::<DirEmptyView>(), contract_keys("DirEmptyView"));
+    assert_eq!(
+        keys_of::<DirDeleteCheckView>(),
+        contract_keys("DirDeleteCheckView")
+    );
 }
 
 /// 迁移通知也要进契约：字段名漂了，前端拿到 `undefined` 就撤不掉阻塞遮罩

@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import type { DirEntry } from "../../api/types.ts";
-import { dirDisplayName, isRawDirName, PHOTOS_DIR, visibleChildDirs } from "./dirs.ts";
+import { createParentOf, dirDisplayName, isRawDirName, nextDirScope, photoDirOf, PHOTOS_DIR, visibleChildDirs } from "./dirs.ts";
 
 function entry(name: string, path = `C:/lib/photos/${name}`, hasChildren = true): DirEntry {
   return { name, path, hasChildren };
@@ -81,4 +81,23 @@ test("Unicode 与超长名字原样返回最后一段", () => {
   assert.equal(dirDisplayName("photos/2026-08-15 婚礼 📷"), "2026-08-15 婚礼 📷");
   const long = "x".repeat(300);
   assert.equal(dirDisplayName(`photos/${long}`), long);
+});
+
+test("nextDirScope：点别的目录 = 选中它，点自己 = 回库根", () => {
+  assert.equal(nextDirScope(null, "photos/2026"), "photos/2026", "库根下点一个目录 = 选中");
+  assert.equal(nextDirScope("photos/2026", "photos/2026"), null, "再点一次 = 取消选中（回库根）");
+  assert.equal(nextDirScope("photos/2026", "photos/2025"), "photos/2025", "点别的 = 切过去");
+});
+
+test("createParentOf：选中目录建在它下面，库根建在 photos/ 这一级", () => {
+  assert.equal(createParentOf("photos/2026-08-15"), "photos/2026-08-15");
+  assert.equal(createParentOf(null), PHOTOS_DIR, "库根状态要建在树根那一级（photos/），不是库根");
+});
+
+test("photoDirOf：RAW 的目录折算回上一层；没加载到就是 null", () => {
+  assert.equal(photoDirOf("photos/2026/IMG.jpg"), "photos/2026");
+  assert.equal(photoDirOf("photos/2026/_RAW/IMG.CR3"), "photos/2026");
+  assert.equal(photoDirOf("photos/2026/_raw/IMG.CR3"), "photos/2026", "大小写不敏感");
+  assert.equal(photoDirOf("photos/2026/RAW/IMG.CR3"), "photos/2026/RAW", "只有保留名 _RAW 才折算");
+  assert.equal(photoDirOf(null), null, "没加载到 ≠ 不用搬");
 });

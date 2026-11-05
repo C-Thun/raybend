@@ -397,6 +397,7 @@ pub fn run() {
             browse::browse_undo,
             browse::browse_redo,
             browse::browse_delete,
+            browse::browse_move,
             browse::browse_recycle_restore,
             browse::browse_recycle_purge,
             browse::browse_recycle_empty,
@@ -470,8 +471,8 @@ pub fn run() {
             fullscreen::fullscreen_payload,
             fullscreen::fullscreen_close,
             // ── 库内目录树的菜单（新建子目录 / 删除空目录，memory/FUNCTION-BROWSE.md §4.3）──
-            dirs::dir_empty_check,
-            dirs::dir_remove_empty,
+            dirs::dir_delete_check,
+            dirs::dir_delete,
             dirs::dir_create,
             // ── 渲染 spike（M2-W1：透明挖洞 + wgpu 直绘的可行性验证）──
             spike_viewport::spike_open,

@@ -38,6 +38,7 @@ pub mod backfill;
 pub mod base_curve;
 pub mod db;
 pub mod recycle;
+pub mod relocate;
 pub mod develop;
 pub mod file_id;
 pub mod flags;

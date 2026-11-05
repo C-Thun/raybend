@@ -71,7 +71,7 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { closeSync, existsSync, openSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
+import { closeSync, existsSync, openSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -136,6 +136,18 @@ if (!Number.isFinite(KEEP_DAYS) || KEEP_DAYS < 0) {
 }
 
 const EXPLICIT_TARGET = valueOf("--target-dir", process.env.WIN_TARGET_DIR);
+/**
+ * 自动触发时的时间闸门（天）：距上次成功清理不足这么多天就跳过（0 = 不设闸门）。
+ *
+ * 为什么需要：`debug:win` / `release` 每次都会顺手调本脚本，但它们构建的是 **Windows 侧**；
+ * WSL 侧清单要跑两段 cargo（`build --lib --bins` + `test --tests --no-run`），如果 WSL target
+ * 落后于源码，那就是一次全量重编 —— 为了清缓存先花几分钟编译，不划算。
+ * 闸门把它变成「每周第一次跑 `debug:win` 时清一次」，其余时候秒过。
+ */
+const STALE_DAYS = Number(valueOf("--if-stale-days", "0"));
+if (!Number.isFinite(STALE_DAYS) || STALE_DAYS < 0) {
+  fail(`--if-stale-days 要给天数（≥0），收到：${valueOf("--if-stale-days")}`);
+}
 const TARGET_WIN = EXPLICIT_TARGET ?? (RELEASE_TARGET_ENV ? releaseTargetOrFail() : DEBUG_WINDOWS_TARGET);
 
 /** 显式要清发版目录（`RAYBEND_WIN_BUILD_DIR`）却探测失败时，报清楚而不是默默换一个目录清。 */
@@ -165,6 +177,17 @@ if (SIBLING !== undefined) {
   console.log(`ℹ 另一个构建目录 ${SIBLING.path}（${SIBLING.why}）本次不清；要清它：pnpm clean:win --target-dir "${SIBLING.path}"`);
 }
 const DEBUG = join(TARGET, "debug");
+/** 上次成功清理的时间戳（时间闸门用；成功清完后写）。 */
+const STAMP = join(TARGET, ".last-clean");
+if (STALE_DAYS > 0 && existsSync(STAMP)) {
+  const ageDays = (Date.now() - statSync(STAMP).mtimeMs) / 86400000;
+  if (ageDays < STALE_DAYS) {
+    console.log(
+      `ℹ 距上次清理 ${ageDays.toFixed(1)} 天（< ${STALE_DAYS} 天），跳过；要强制清：加 --if-stale-days 0`,
+    );
+    process.exit(0);
+  }
+}
 const JSON_PATH = valueOf("--json", join(TARGET_WIN, "last-build.json"));
 /** 清单是调用方显式给的（`debug:win` 刚用它自己的构建落过）还是脚本自己挑的默认路径。 */
 const EXPLICIT_JSON = has("--json");
@@ -440,6 +463,7 @@ if (DRY_RUN) process.exit(0);
 
 for (const file of plan.files) rmSync(file, { force: true });
 for (const dir of plan.dirs) rmSync(dir, { force: true, recursive: true });
+writeFileSync(STAMP, new Date().toISOString());
 console.log(`✓ 已清理 ${plan.files.length + plan.dirs.length} 项，回收约 ${mb(plan.bytes)}`);
 
 /* ── 工具 ─────────────────────────────────────────────────── */

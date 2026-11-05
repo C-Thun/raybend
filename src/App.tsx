@@ -229,6 +229,8 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
       undo: browseUndo,
       redo: browseRedo,
       remove: browseDelete,
+      moveAssets: (repositoryId, ids, target) =>
+        db.moveAssets(repositoryId, ids.map(String), target),
       recycleRestore: browseRecycleRestore,
       recyclePurge: browseRecyclePurge,
       recycleEmpty: browseRecycleEmpty,
@@ -798,6 +800,11 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
       toggleSortDirection: () =>
         browseStore.setSort({ ...browseStore.sort(), desc: !browseStore.sort().desc }),
       requestDelete: () => browseActions()?.requestDelete(),
+      cut: () => browseActions()?.cut(),
+      canCut: () => browseActions()?.canCut() ?? false,
+      paste: () => browseActions()?.paste(),
+      canPaste: () => browseActions()?.canPaste() ?? false,
+      refresh: () => browseActions()?.refresh(),
       recycle: () => browseStore.recycleMode(),
       restoreRecycle: () => browseActions()?.requestRestoreRecycle(),
       emptyRecycle: () => browseActions()?.requestEmptyRecycle(),

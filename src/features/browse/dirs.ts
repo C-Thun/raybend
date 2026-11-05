@@ -45,3 +45,46 @@ export function dirDisplayName(relPath: string): string {
   const parts = trimmed.split(/[\\/]/);
   return parts[parts.length - 1] ?? trimmed;
 }
+
+/**
+ * 点一下目录行之后，浏览范围应该变成什么（崔总 2026-11-05 定）。
+ *
+ * | 当前范围 | 点的是 | 结果 |
+ * | --- | --- | --- |
+ * | 别的目录 / 库根 | A | `A`（选中） |
+ * | A | A | `null` = **库根**（再点一次 = 取消选中并上到库根） |
+ *
+ * 库根不是一个能"取消选中"的行：它就是"没选任何目录"的那个状态，
+ * 中列显示「当前处于相片库根目录」的水印（见 `gridWatermark`）。
+ */
+export function nextDirScope(current: string | null, clicked: string): string | null {
+  return current === clicked ? null : clicked;
+}
+
+/**
+ * 「新建目录」应该建在哪一级（崔总 2026-11-05 定）。
+ *
+ * 选中某个目录 → 建在它下面；库根状态（`scope === null`）→ 建在树的根那一级。
+ * 树的根是 `photos/`（`memory/FUNCTION-BROWSE.md` §4.3），**不是库根** ——
+ * 建在库根会让目录在树里看不见。
+ */
+export function createParentOf(scope: string | null): string {
+  return scope === null ? PHOTOS_DIR : scope;
+}
+
+/**
+ * 一张照片**现在所在的目录**（库内相对路径）。
+ *
+ * RAW 在 `<目录>/_RAW/` 里，所以要把末段 `_RAW` 折算回去再比 —— 否则
+ * 「已经在这个目录里的 RAW-only 资产」会被误判成「还要搬一次」。
+ * `null` / 空串 = 本地还不知道它在哪（没加载到），调用方**不许**据此跳过搬运。
+ */
+export function photoDirOf(relPath: string | null): string | null {
+  if (relPath === null) return null;
+  const normalized = relPath.replace(/\\/g, "/");
+  const dir = normalized.includes("/")
+    ? normalized.slice(0, normalized.lastIndexOf("/"))
+    : "";
+  if (dir.toLowerCase().endsWith("/_raw")) return dir.slice(0, -5);
+  return dir;
+}

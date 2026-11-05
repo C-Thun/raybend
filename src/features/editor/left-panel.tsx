@@ -249,7 +249,8 @@ export function EditorLeftPanel(props: EditorLeftPanelProps): JSX.Element {
           class="w-full shrink-0"
           value={tab()}
           onValueChange={(value) => setTab(value as LeftBottomTab)}
-          label={t("editor.group.view")}
+          /* 组名（读屏用），不是默认页签的名字 —— 见 panels.tsx 的同一处说明 */
+          label={t("editor.tabs.leftBottom")}
           options={[
             { value: "view", label: t("editor.group.view") },
             { value: "info", label: t("editor.group.info") },

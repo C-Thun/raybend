@@ -13,7 +13,9 @@ import test from "node:test";
 import {
   clearFlowHint,
   flowHint,
+  flowHintDefault,
   flowHintsEnabled,
+  setFlowHintDefault,
   setFlowHintsEnabled,
   showFlowHint,
 } from "./flow-hint.ts";
@@ -75,5 +77,56 @@ test("开关：关掉后不再显示，且正在显示的那条会被清掉", ()
   showFlowHint("a", "拖边缘可改宽度");
   assert.equal(flowHint(), "拖边缘可改宽度");
   clearFlowHint("a");
+  assert.equal(flowHint(), null);
+});
+
+/*
+ * 默认槽（崔总 2026-11-05）：这条带子兼任「状态播报位」。
+ *
+ * 三条语义必须钉死：
+ * 1. 默认槽在没指向任何东西时显示，指向提示盖住它、离开后回到它；
+ * 2. `clearFlowHint`（任何人）**不许**把默认槽清掉；
+ * 3. 「提示区」开关只管指向提示，**不管**默认槽 —— 关掉提示不该把「正拿着剪切的东西」藏起来。
+ */
+test("默认槽：没指向时显示，指向盖住、离开回到默认槽", () => {
+  setFlowHintDefault("");
+  assert.equal(flowHint(), null, "默认槽是空串 = 什么都不显示");
+
+  setFlowHintDefault("已经剪切 3 张照片");
+  assert.equal(flowHint(), "已经剪切 3 张照片", "没有指向时显示默认槽");
+  assert.equal(flowHintDefault(), "已经剪切 3 张照片");
+
+  showFlowHint("a", "按住 Ctrl 键可拖动");
+  assert.equal(flowHint(), "按住 Ctrl 键可拖动", "指向提示优先于默认槽");
+
+  // A 离开 → 回到默认槽（不是变空）
+  clearFlowHint("a");
+  assert.equal(flowHint(), "已经剪切 3 张照片");
+
+  // 重复写同一句不改变什么
+  setFlowHintDefault("已经剪切 3 张照片");
+  assert.equal(flowHint(), "已经剪切 3 张照片");
+
+  setFlowHintDefault("");
+  assert.equal(flowHint(), null, "状态结束写回空串");
+});
+
+test("默认槽：任何人的 clearFlowHint 都清不掉它", () => {
+  setFlowHintDefault("已经剪切 2 张照片");
+  showFlowHint("a", "一");
+  clearFlowHint("a");
+  clearFlowHint("别人的 owner");
+  assert.equal(flowHint(), "已经剪切 2 张照片");
+  setFlowHintDefault("");
+});
+
+test("默认槽：不受「提示区开关」管（关掉提示也要看得见剪切状态）", () => {
+  setFlowHintDefault("已经剪切 1 张照片");
+  setFlowHintsEnabled(false);
+  assert.equal(flowHint(), "已经剪切 1 张照片", "状态不该跟着提示开关一起消失");
+  showFlowHint("a", "一");
+  assert.equal(flowHint(), "已经剪切 1 张照片", "关着时指向提示照旧被丢掉");
+  setFlowHintsEnabled(true);
+  setFlowHintDefault("");
   assert.equal(flowHint(), null);
 });

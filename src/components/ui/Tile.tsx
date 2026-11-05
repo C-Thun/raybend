@@ -111,6 +111,14 @@ export interface TileProps
    *      所以用中性的 `fg-2`，并且**压在照片上**（中心）而不是挂在角上。
    */
   excluded?: boolean;
+  /**
+   * 已被**剪切**（`Ctrl+X` 之后、`Ctrl+V` / `Esc` 之前）。
+   *
+   * 表现 = **只有照片本体**压到 70% 不透明度（崔总 2026-11-05）：外框、标记条、文件名
+   * 都保持原样 —— 既能一眼看出「这几张我要搬」，又不影响读它们叫什么、打了几星。
+   * 与 `excluded`（35% + 禁行图标）是两件事，不要合并。
+   */
+  cut?: boolean;
   /** 动作槽（照片右上角，指向/聚焦时出现） */
   actions?: JSX.Element;
   /**
@@ -195,6 +203,7 @@ export function Tile(props: TileProps) {
     "loading",
     "empty",
     "excluded",
+    "cut",
     "actions",
     "context",
     "info",
@@ -370,6 +379,7 @@ export function Tile(props: TileProps) {
               class={[
                 local.minimal || local.selectionFrame ? "size-full object-contain" : "size-full object-cover",
                 local.excluded ? "opacity-35" : "",
+                local.cut ? "opacity-70" : "",
                 local.approximate ? "photo-raw-approximate" : "",
               ]
                 .filter(Boolean)

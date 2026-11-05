@@ -80,6 +80,8 @@ import { ConfirmDialog, Dialog } from "../../components/ui/Dialog.tsx";
 import { DragPreview } from "../../components/ui/DragPreview.tsx";
 import type { ToastStore } from "../../components/ui/Toast.tsx";
 import { registerBrowseActions } from "../../features/browse/actions.ts";
+import { PHOTOS_DIR, photoDirOf } from "../../features/browse/dirs.ts";
+import { beginPhotoCut, clearPhotoCut, cutIdsOf, photoCut } from "../../features/browse/photo-cut.ts";
 import { SplitHandle } from "../../components/ui/SplitHandle.tsx";
 import { nudgeWidth, resizeWidth } from "../../lib/column-resize.ts";
 import { joinPath } from "../../lib/paths.ts";
@@ -182,6 +184,8 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
   const [organizationSelection, setOrganizationSelection] = createSignal<OrganizationSelection>(null);
   /** 当前选中的桶（面板给的对象，用来区分「空桶」与「成员都在未挂载库」）。 */
   const [selectedBucket, setSelectedBucket] = createSignal<PhotoBucket | null>(null);
+  /** 照片移动成功一次就 +1：左列据此重算「选中目录能不能删」。 */
+  const [moveRevision, setMoveRevision] = createSignal(0);
   createEffect(() => {
     if (organizationSelection()?.kind !== "bucket") setSelectedBucket(null);
   });
@@ -339,6 +343,26 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
     props.onOrganizationActions?.({ selectAll: organization.selectAll, clearSelection: organization.clearSelection });
     onCleanup(() => props.onOrganizationActions?.(null));
   });
+  /*
+   * `Esc` 取消剪切（崔总 2026-11-05）：**先于**「清除选中」生效。
+   *
+   * 为何不登记成命令：`Esc` 已经被 `edit.clearSelection` 占着（同一场景、同一作用域，
+   * 再登一条就是重键冲突）；而剪切是**临时会话态**，与编辑器工具快捷键的同一种做法。
+   * 用 **capture** 阶段并在命中时 `preventDefault()`：分发器（window 冒泡）看到
+   * `defaultPrevented` 就不跑了，两件事不会同时发生。
+   * 弹窗开着时让位 —— 那一按 `Esc` 是关弹窗。
+   */
+  onMount(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape" || photoCut() === null) return;
+      if (document.querySelector('[role="dialog"]') !== null) return;
+      event.preventDefault();
+      event.stopPropagation();
+      clearPhotoCut();
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    onCleanup(() => window.removeEventListener("keydown", onKeyDown, true));
+  });
   createEffect(on(() => [organizationSelection(),
     repositories().filter((repo) => repo.online).map((repo) => `${repo.id}:${repo.connection?.generation}`).join("|"),
     props.organizationRevision, JSON.stringify(store.filter())] as const, ([selected]) => {
@@ -483,7 +507,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
       return (
         <StateWatermark
           icon={<IconFolder size={64} stroke-width={1} />}
-          text={t("browse.pickDirectory")}
+          text={t("browse.libraryRoot")}
         />
       );
     }
@@ -566,6 +590,43 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
       requestRestoreRecycle: () => void runRestoreRecycle(),
       requestEmptyRecycle: () => setPendingEmpty(true),
       requestPurgeRecycle: () => void runPurgeRecycle(),
+      /*
+       * 剪切 / 粘贴（崔总 2026-11-05）：
+       * * 能剪 = 有选中、不在回收站（回收站里的照片该走还原，不是搬家）；
+       * * 能粘 = 剪切态非空、当前选中一个**库内目录**（不是库根、不是回收站），
+       *   而且那批照片里至少有一张不在目标目录里（原地粘贴不是操作）。
+       */
+      cut: () => {
+        const repositoryId = store.repositoryId();
+        // 跨库组织视图里的「选中」不属于当前 store，不能拿 store 的 id 去剪
+        if (repositoryId === null || organizationPhotos()) return;
+        beginPhotoCut(repositoryId, [...store.selection().ids]);
+      },
+      canCut: () =>
+        !organizationPhotos() && store.canWrite() && !store.recycleMode() && store.selectedCount() > 0,
+      paste: () => {
+        const cut = photoCut();
+        const target = store.scopePath();
+        if (cut === null || target === null) return;
+        void runMoveIds(cut.ids, target);
+      },
+      canPaste: () => {
+        const cut = photoCut();
+        const target = store.scopePath();
+        if (cut === null || target === null || store.recycleMode() || organizationPhotos()) return false;
+        if (cut.repositoryId !== store.repositoryId()) return false;
+        if (!target.startsWith(`${PHOTOS_DIR}/`)) return false;
+        /*
+         * 全部都已经在目标目录里 ⇒ 没得粘。没加载到的条目录成「可能要搬」
+         * （不能因为本地还没取到那一页就把粘贴键禁掉；后端对同目录是幂等）。
+         */
+        return cut.ids.some((id) => photoDirOf(store.itemById(Number(id))?.relPath ?? null) !== target);
+      },
+      cancelCut: () => clearPhotoCut(),
+      refresh: () => {
+        if (organizationPhotos()) void organization.load(organizationSelection());
+        else void store.refresh();
+      },
       moveFocus,
       openViewer: viewing.requestOpen,
       cycleChrome: viewing.cycleChrome,
@@ -585,6 +646,8 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
       // 诊断（生产也打）：注册/注销的时序 —— 命令与工具条按钮都靠这个槽（slot）
       console.debug("[browse] actions unregistered");
       registerBrowseActions(null);
+      // 离开浏览流 = 剪切会话结束：否则默认槽会把「可粘贴到新目录」带到编辑器里去
+      clearPhotoCut();
     });
     console.debug("[browse] actions registered");
   });
@@ -675,6 +738,49 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
   async function runDeleteIds(ids: readonly string[]): Promise<void> {
     try {
       reportRecycle(await store.removeIds(ids));
+    } catch (error) {
+      reportFailure(error);
+    }
+  }
+
+  /**
+   * **移动到另一个目录**（拖动 / `Ctrl+X`+`Ctrl+V` 共用这一份）。
+   *
+   * 失败清单复用删除那一套（`setDeleteFailures`）—— 形状一样（路径 + 原因），
+   * 界面上就是同一块"哪些没成"的清单。
+   */
+  async function runMoveIds(ids: readonly string[], target: string): Promise<void> {
+    const repositoryId = store.repositoryId();
+    if (repositoryId === null || organizationPhotos()) return;
+    /*
+     * 同目录 = 不动盘、不报错（把东西拖回原处不是操作）。
+     * 但**没加载到的条目必须照常交给后端** —— 本地没有它的路径，不等于它不用搬。
+     */
+    const wouldMove = ids.filter((id) => {
+      const dir = photoDirOf(store.itemById(Number(id))?.relPath ?? null);
+      return dir === null || dir !== target;
+    });
+    if (wouldMove.length === 0) {
+      props.toast?.show({ tone: "info", message: t("browse.moveNone") });
+      return;
+    }
+    try {
+      const result = await store.moveIds(wouldMove, target);
+      if (result === null) return;
+      if (result.moved > 0) {
+        props.toast?.show({
+          tone: "success",
+          message: t("browse.moveDone").replace("{n}", String(result.moved)),
+        });
+      }
+      if (result.renamed > 0) {
+        props.toast?.show({ tone: "info", message: t("browse.moveRenamed") });
+      }
+      if (result.failed.length > 0) setDeleteFailures([...result.failed]);
+      // 目录内容真的变了：让左列把「能不能删」重新问一遍
+      if (result.moved > 0) setMoveRevision((value) => value + 1);
+      // 粘贴完剪切态就结束（成功与否都结束：留住一个"已经不在原处"的剪切没意义）
+      clearPhotoCut();
     } catch (error) {
       reportFailure(error);
     }
@@ -983,7 +1089,11 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
           }>
           <BrowseLeftColumn
             store={store}
-            onSelectDirectory={(repositoryId, path) => setOrganizationSelection({ kind: "directory", repositoryId, path })}
+            moveRevision={moveRevision()}
+            onSelectDirectory={(repositoryId, path) =>
+              // 回到库根（反选）= 组织视图那边也清掉目录筛选（`path: null` 不是一种目录）
+              setOrganizationSelection(path === null ? null : { kind: "directory", repositoryId, path })
+            }
             repositories={repositories()}
             reposLoading={reposLoading()}
             reposError={reposError()}
@@ -1101,6 +1211,8 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
           onInteract={() => setLibsExpanded(false)}
           onFocusIndex={(index) => { setFocusIndex(index); setFocusId(undefined); }}
           draggingIds={draggingIds}
+          /* 被剪的照片：tile 的缩图压到 70% 亮度感（只看图，不动整格 —— 标记/信息条仍可读） */
+          cutIds={() => cutIdsOf(store.repositoryId())}
           onPhotoPointerDown={(id, event) => {
             const ids = dragIdsFor(id, gridSource().selection().ids);
             beginPhotoDrag(event, {
@@ -1116,6 +1228,15 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
                 else void runDeleteIds(ids);
               },
               onBucket: (bucketId, name) => void dropIdsIntoBucket(bucketId, name, ids),
+              /*
+               * 拖到左列的一行目录 = **移动**到它下面（崔总 2026-11-05）。
+               * 落点合法性（库内目录 / 不是库根、不是回收站、不是原处）已经在
+               * `runMoveIds` 里判 —— 手势层只管把落点交出去。
+               */
+              onDirectory: (relPath) => {
+                // 组织视图是跨库来源，「移到当前库某目录」对那批照片不成立
+                if (!organizationPhotos()) void runMoveIds(ids, relPath);
+              },
             });
           }}
           watermark={() => gridWatermark()}

@@ -1656,6 +1656,43 @@
                     },
                     {
                       "type": "frame",
+                      "id": "pL9k6",
+                      "name": "DirToolbar / 新建与删除",
+                      "width": "fill_container",
+                      "height": 28,
+                      "gap": 8,
+                      "padding": [
+                        0,
+                        4
+                      ],
+                      "justifyContent": "end",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "g3kcmg",
+                          "name": "Btn / 新建目录",
+                          "width": 14,
+                          "height": 14,
+                          "icon": "folder-plus",
+                          "library": "lucide",
+                          "fill": "$fg-3"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "g8kfM",
+                          "name": "Btn / 删除目录 · 禁用（下面有子目录）",
+                          "opacity": 40,
+                          "width": 14,
+                          "height": 14,
+                          "icon": "folder-minus",
+                          "library": "lucide",
+                          "fill": "$fg-3"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
                       "id": "u8cLr",
                       "name": "TreeRow / 2026",
                       "width": "fill_container",
@@ -1700,16 +1737,6 @@
                           "fontFamily": "Inter",
                           "fontSize": 14,
                           "fontWeight": "normal"
-                        },
-                        {
-                          "type": "icon",
-                          "id": "gmUjm",
-                          "name": "Glyph / more-horizontal",
-                          "width": 14,
-                          "height": 14,
-                          "icon": "ellipsis",
-                          "library": "lucide",
-                          "fill": "$fg-3"
                         }
                       ]
                     },
@@ -1757,16 +1784,6 @@
                           "fontFamily": "Inter",
                           "fontSize": 14,
                           "fontWeight": "normal"
-                        },
-                        {
-                          "type": "icon",
-                          "id": "Y6IloA",
-                          "name": "Glyph / more-horizontal",
-                          "width": 14,
-                          "height": 14,
-                          "icon": "ellipsis",
-                          "library": "lucide",
-                          "fill": "$fg-3"
                         }
                       ]
                     },
@@ -1776,6 +1793,7 @@
                       "name": "TreeRow / 09-02 外景",
                       "width": "fill_container",
                       "height": 28,
+                      "fill": "$state-hover",
                       "cornerRadius": 4,
                       "gap": 4,
                       "padding": [
@@ -1817,13 +1835,13 @@
                         },
                         {
                           "type": "icon",
-                          "id": "i5rMl",
-                          "name": "Glyph / more-horizontal",
+                          "id": "SUEVW",
+                          "name": "Glyph / tag · 指向时出现",
                           "width": 14,
                           "height": 14,
-                          "icon": "ellipsis",
+                          "icon": "tag",
                           "library": "lucide",
-                          "fill": "$fg-3"
+                          "fill": "$fg-1"
                         }
                       ]
                     },
@@ -1872,16 +1890,6 @@
                           "fontFamily": "Inter",
                           "fontSize": 14,
                           "fontWeight": "normal"
-                        },
-                        {
-                          "type": "icon",
-                          "id": "nm3om",
-                          "name": "Glyph / more-horizontal",
-                          "width": 14,
-                          "height": 14,
-                          "icon": "ellipsis",
-                          "library": "lucide",
-                          "fill": "$fg-3"
                         }
                       ]
                     },
@@ -1929,16 +1937,6 @@
                           "fontFamily": "Inter",
                           "fontSize": 14,
                           "fontWeight": "normal"
-                        },
-                        {
-                          "type": "icon",
-                          "id": "w00Jn",
-                          "name": "Glyph / more-horizontal",
-                          "width": 14,
-                          "height": 14,
-                          "icon": "ellipsis",
-                          "library": "lucide",
-                          "fill": "$fg-3"
                         }
                       ]
                     }
@@ -8031,6 +8029,43 @@
                     },
                     {
                       "type": "frame",
+                      "id": "r6wY3",
+                      "name": "DirToolbar / 新建与删除",
+                      "width": "fill_container",
+                      "height": 28,
+                      "gap": 8,
+                      "padding": [
+                        0,
+                        4
+                      ],
+                      "justifyContent": "end",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "QMaV9",
+                          "name": "Btn / 新建目录",
+                          "width": 14,
+                          "height": 14,
+                          "icon": "folder-plus",
+                          "library": "lucide",
+                          "fill": "$fg-3"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "bRJek",
+                          "name": "Btn / 删除目录 · 禁用（下面有子目录）",
+                          "opacity": 40,
+                          "width": 14,
+                          "height": 14,
+                          "icon": "folder-minus",
+                          "library": "lucide",
+                          "fill": "$fg-3"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
                       "id": "RLTlX",
                       "name": "TreeRow / 2026",
                       "width": "fill_container",
@@ -8075,16 +8110,6 @@
                           "fontFamily": "Inter",
                           "fontSize": 14,
                           "fontWeight": "normal"
-                        },
-                        {
-                          "type": "icon",
-                          "id": "Il7Ks",
-                          "name": "Glyph / more-horizontal",
-                          "width": 14,
-                          "height": 14,
-                          "icon": "ellipsis",
-                          "library": "lucide",
-                          "fill": "$fg-3"
                         }
                       ]
                     },
@@ -8132,16 +8157,6 @@
                           "fontFamily": "Inter",
                           "fontSize": 14,
                           "fontWeight": "normal"
-                        },
-                        {
-                          "type": "icon",
-                          "id": "I7jFav",
-                          "name": "Glyph / more-horizontal",
-                          "width": 14,
-                          "height": 14,
-                          "icon": "ellipsis",
-                          "library": "lucide",
-                          "fill": "$fg-3"
                         }
                       ]
                     },
@@ -8151,6 +8166,7 @@
                       "name": "TreeRow / 09-02 外景",
                       "width": "fill_container",
                       "height": 28,
+                      "fill": "$state-hover",
                       "cornerRadius": 4,
                       "gap": 4,
                       "padding": [
@@ -8192,13 +8208,13 @@
                         },
                         {
                           "type": "icon",
-                          "id": "nOgXE",
-                          "name": "Glyph / more-horizontal",
+                          "id": "GYe1p",
+                          "name": "Glyph / tag · 指向时出现",
                           "width": 14,
                           "height": 14,
-                          "icon": "ellipsis",
+                          "icon": "tag",
                           "library": "lucide",
-                          "fill": "$fg-3"
+                          "fill": "$fg-1"
                         }
                       ]
                     },
@@ -8247,16 +8263,6 @@
                           "fontFamily": "Inter",
                           "fontSize": 14,
                           "fontWeight": "normal"
-                        },
-                        {
-                          "type": "icon",
-                          "id": "IgmoZ",
-                          "name": "Glyph / more-horizontal",
-                          "width": 14,
-                          "height": 14,
-                          "icon": "ellipsis",
-                          "library": "lucide",
-                          "fill": "$fg-3"
                         }
                       ]
                     },
@@ -8304,16 +8310,6 @@
                           "fontFamily": "Inter",
                           "fontSize": 14,
                           "fontWeight": "normal"
-                        },
-                        {
-                          "type": "icon",
-                          "id": "Q1t20",
-                          "name": "Glyph / more-horizontal",
-                          "width": 14,
-                          "height": 14,
-                          "icon": "ellipsis",
-                          "library": "lucide",
-                          "fill": "$fg-3"
                         }
                       ]
                     }
@@ -13028,6 +13024,43 @@
                     },
                     {
                       "type": "frame",
+                      "id": "U6Z3M",
+                      "name": "DirToolbar / 新建与删除",
+                      "width": "fill_container",
+                      "height": 28,
+                      "gap": 8,
+                      "padding": [
+                        0,
+                        4
+                      ],
+                      "justifyContent": "end",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "jLSzk",
+                          "name": "Btn / 新建目录",
+                          "width": 14,
+                          "height": 14,
+                          "icon": "folder-plus",
+                          "library": "lucide",
+                          "fill": "$fg-3"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "Fm5py",
+                          "name": "Btn / 删除目录 · 禁用（下面有子目录）",
+                          "opacity": 40,
+                          "width": 14,
+                          "height": 14,
+                          "icon": "folder-minus",
+                          "library": "lucide",
+                          "fill": "$fg-3"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
                       "id": "xV6Qy",
                       "name": "TreeRow / 2026",
                       "width": "fill_container",
@@ -13072,16 +13105,6 @@
                           "fontFamily": "Inter",
                           "fontSize": 14,
                           "fontWeight": "normal"
-                        },
-                        {
-                          "type": "icon",
-                          "id": "LoMtM",
-                          "name": "Glyph / more-horizontal",
-                          "width": 14,
-                          "height": 14,
-                          "icon": "ellipsis",
-                          "library": "lucide",
-                          "fill": "$fg-3"
                         }
                       ]
                     },
@@ -13129,16 +13152,6 @@
                           "fontFamily": "Inter",
                           "fontSize": 14,
                           "fontWeight": "normal"
-                        },
-                        {
-                          "type": "icon",
-                          "id": "CTKCI",
-                          "name": "Glyph / more-horizontal",
-                          "width": 14,
-                          "height": 14,
-                          "icon": "ellipsis",
-                          "library": "lucide",
-                          "fill": "$fg-3"
                         }
                       ]
                     },
@@ -13148,6 +13161,7 @@
                       "name": "TreeRow / 09-02 外景",
                       "width": "fill_container",
                       "height": 28,
+                      "fill": "$state-hover",
                       "cornerRadius": 4,
                       "gap": 4,
                       "padding": [
@@ -13189,13 +13203,13 @@
                         },
                         {
                           "type": "icon",
-                          "id": "eRZ4C",
-                          "name": "Glyph / more-horizontal",
+                          "id": "MLcxj",
+                          "name": "Glyph / tag · 指向时出现",
                           "width": 14,
                           "height": 14,
-                          "icon": "ellipsis",
+                          "icon": "tag",
                           "library": "lucide",
-                          "fill": "$fg-3"
+                          "fill": "$fg-1"
                         }
                       ]
                     },
@@ -13244,16 +13258,6 @@
                           "fontFamily": "Inter",
                           "fontSize": 14,
                           "fontWeight": "normal"
-                        },
-                        {
-                          "type": "icon",
-                          "id": "w56Y8",
-                          "name": "Glyph / more-horizontal",
-                          "width": 14,
-                          "height": 14,
-                          "icon": "ellipsis",
-                          "library": "lucide",
-                          "fill": "$fg-3"
                         }
                       ]
                     },
@@ -13301,16 +13305,6 @@
                           "fontFamily": "Inter",
                           "fontSize": 14,
                           "fontWeight": "normal"
-                        },
-                        {
-                          "type": "icon",
-                          "id": "ZTNN0",
-                          "name": "Glyph / more-horizontal",
-                          "width": 14,
-                          "height": 14,
-                          "icon": "ellipsis",
-                          "library": "lucide",
-                          "fill": "$fg-3"
                         }
                       ]
                     }
@@ -17633,7 +17627,7 @@
                   "name": "LibraryList / 紧缩",
                   "clip": true,
                   "width": "fill_container",
-                  "height": "fill_container",
+                  "height": 688,
                   "layout": "vertical",
                   "gap": 8,
                   "children": [
@@ -18380,7 +18374,7 @@
                   "name": "DirTree / 缩到最小",
                   "clip": true,
                   "width": "fill_container",
-                  "height": 88,
+                  "height": 116,
                   "layout": "vertical",
                   "gap": 2,
                   "children": [
@@ -18393,6 +18387,43 @@
                       "fontFamily": "Inter",
                       "fontSize": 11,
                       "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "ZkaCH",
+                      "name": "DirToolbar / 新建与删除",
+                      "width": "fill_container",
+                      "height": 28,
+                      "gap": 8,
+                      "padding": [
+                        0,
+                        4
+                      ],
+                      "justifyContent": "end",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "x6UxZ",
+                          "name": "Btn / 新建目录",
+                          "width": 14,
+                          "height": 14,
+                          "icon": "folder-plus",
+                          "library": "lucide",
+                          "fill": "$fg-3"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "amvzQ",
+                          "name": "Btn / 删除目录 · 禁用（下面有子目录）",
+                          "opacity": 40,
+                          "width": 14,
+                          "height": 14,
+                          "icon": "folder-minus",
+                          "library": "lucide",
+                          "fill": "$fg-3"
+                        }
+                      ]
                     },
                     {
                       "type": "frame",
@@ -18440,16 +18471,6 @@
                           "fontFamily": "Inter",
                           "fontSize": 14,
                           "fontWeight": "normal"
-                        },
-                        {
-                          "type": "icon",
-                          "id": "OA3Or",
-                          "name": "Glyph / more-horizontal",
-                          "width": 14,
-                          "height": 14,
-                          "icon": "ellipsis",
-                          "library": "lucide",
-                          "fill": "$fg-3"
                         }
                       ]
                     },
@@ -18497,16 +18518,6 @@
                           "fontFamily": "Inter",
                           "fontSize": 14,
                           "fontWeight": "normal"
-                        },
-                        {
-                          "type": "icon",
-                          "id": "muIpV",
-                          "name": "Glyph / more-horizontal",
-                          "width": 14,
-                          "height": 14,
-                          "icon": "ellipsis",
-                          "library": "lucide",
-                          "fill": "$fg-3"
                         }
                       ]
                     }
@@ -23020,7 +23031,7 @@
                   "id": "G1nBK",
                   "name": "Label / 未选目录",
                   "fill": "$fg-1",
-                  "content": "④ 未选目录：中列是「挑一个目录」的空态",
+                  "content": "④ 库根态：选中目录再点一次 = 回库根（中列空、可在此新建目录）",
                   "fontFamily": "Inter",
                   "fontSize": 13,
                   "fontWeight": "normal"
@@ -23187,7 +23198,7 @@
                               "id": "i9xSpJ",
                               "name": "HintText",
                               "fill": "$fg-2",
-                              "content": "在左边挑一个目录",
+                              "content": "当前处于相片库根目录",
                               "fontFamily": "Inter",
                               "fontSize": 10,
                               "fontWeight": "normal"
@@ -39653,6 +39664,43 @@
                     },
                     {
                       "type": "frame",
+                      "id": "RpmoK",
+                      "name": "DirToolbar / 新建与删除",
+                      "width": "fill_container",
+                      "height": 28,
+                      "gap": 8,
+                      "padding": [
+                        0,
+                        4
+                      ],
+                      "justifyContent": "end",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "w0o3N",
+                          "name": "Btn / 新建目录",
+                          "width": 14,
+                          "height": 14,
+                          "icon": "folder-plus",
+                          "library": "lucide",
+                          "fill": "$fg-3"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "hzs7C",
+                          "name": "Btn / 删除目录 · 禁用（下面有子目录）",
+                          "opacity": 40,
+                          "width": 14,
+                          "height": 14,
+                          "icon": "folder-minus",
+                          "library": "lucide",
+                          "fill": "$fg-3"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
                       "id": "k2tRNS",
                       "name": "TreeRow / 回收站",
                       "width": "fill_container",
@@ -39868,16 +39916,6 @@
                           "fontFamily": "Inter",
                           "fontSize": 14,
                           "fontWeight": "normal"
-                        },
-                        {
-                          "type": "icon",
-                          "id": "DkQfY",
-                          "name": "Glyph / more-horizontal",
-                          "width": 14,
-                          "height": 14,
-                          "icon": "ellipsis",
-                          "library": "lucide",
-                          "fill": "$fg-3"
                         }
                       ]
                     },
@@ -39887,6 +39925,7 @@
                       "name": "TreeRow / 08-15 婚礼",
                       "width": "fill_container",
                       "height": 28,
+                      "fill": "$state-hover",
                       "cornerRadius": 4,
                       "gap": 4,
                       "padding": [
@@ -39928,13 +39967,13 @@
                         },
                         {
                           "type": "icon",
-                          "id": "i3TWo4",
-                          "name": "Glyph / more-horizontal",
+                          "id": "Q1GUGD",
+                          "name": "Glyph / tag · 指向时出现",
                           "width": 14,
                           "height": 14,
-                          "icon": "ellipsis",
+                          "icon": "tag",
                           "library": "lucide",
-                          "fill": "$fg-3"
+                          "fill": "$fg-1"
                         }
                       ]
                     },
@@ -39982,16 +40021,6 @@
                           "fontFamily": "Inter",
                           "fontSize": 14,
                           "fontWeight": "normal"
-                        },
-                        {
-                          "type": "icon",
-                          "id": "QrLBM",
-                          "name": "Glyph / more-horizontal",
-                          "width": 14,
-                          "height": 14,
-                          "icon": "ellipsis",
-                          "library": "lucide",
-                          "fill": "$fg-3"
                         }
                       ]
                     },
@@ -40040,16 +40069,6 @@
                           "fontFamily": "Inter",
                           "fontSize": 14,
                           "fontWeight": "normal"
-                        },
-                        {
-                          "type": "icon",
-                          "id": "tHrtM",
-                          "name": "Glyph / more-horizontal",
-                          "width": 14,
-                          "height": 14,
-                          "icon": "ellipsis",
-                          "library": "lucide",
-                          "fill": "$fg-3"
                         }
                       ]
                     },
@@ -40097,16 +40116,6 @@
                           "fontFamily": "Inter",
                           "fontSize": 14,
                           "fontWeight": "normal"
-                        },
-                        {
-                          "type": "icon",
-                          "id": "K3Zfe2",
-                          "name": "Glyph / more-horizontal",
-                          "width": 14,
-                          "height": 14,
-                          "icon": "ellipsis",
-                          "library": "lucide",
-                          "fill": "$fg-3"
                         }
                       ]
                     }
@@ -44366,6 +44375,43 @@
                     },
                     {
                       "type": "frame",
+                      "id": "fC2mK",
+                      "name": "DirToolbar / 新建与删除",
+                      "width": "fill_container",
+                      "height": 28,
+                      "gap": 8,
+                      "padding": [
+                        0,
+                        4
+                      ],
+                      "justifyContent": "end",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "jhS0X",
+                          "name": "Btn / 新建目录",
+                          "width": 14,
+                          "height": 14,
+                          "icon": "folder-plus",
+                          "library": "lucide",
+                          "fill": "$fg-3"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "nJUBW",
+                          "name": "Btn / 删除目录 · 禁用（下面有子目录）",
+                          "opacity": 40,
+                          "width": 14,
+                          "height": 14,
+                          "icon": "folder-minus",
+                          "library": "lucide",
+                          "fill": "$fg-3"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
                       "id": "enbkw",
                       "name": "TreeRow / 2026",
                       "width": "fill_container",
@@ -44410,16 +44456,6 @@
                           "fontFamily": "Inter",
                           "fontSize": 14,
                           "fontWeight": "normal"
-                        },
-                        {
-                          "type": "icon",
-                          "id": "JGZKQ",
-                          "name": "Glyph / more-horizontal",
-                          "width": 14,
-                          "height": 14,
-                          "icon": "ellipsis",
-                          "library": "lucide",
-                          "fill": "$fg-3"
                         }
                       ]
                     },
@@ -44467,16 +44503,6 @@
                           "fontFamily": "Inter",
                           "fontSize": 14,
                           "fontWeight": "normal"
-                        },
-                        {
-                          "type": "icon",
-                          "id": "CBCIA",
-                          "name": "Glyph / more-horizontal",
-                          "width": 14,
-                          "height": 14,
-                          "icon": "ellipsis",
-                          "library": "lucide",
-                          "fill": "$fg-3"
                         }
                       ]
                     },
@@ -44524,16 +44550,6 @@
                           "fontFamily": "Inter",
                           "fontSize": 14,
                           "fontWeight": "normal"
-                        },
-                        {
-                          "type": "icon",
-                          "id": "auiiX",
-                          "name": "Glyph / more-horizontal",
-                          "width": 14,
-                          "height": 14,
-                          "icon": "ellipsis",
-                          "library": "lucide",
-                          "fill": "$fg-3"
                         }
                       ]
                     },
@@ -44582,16 +44598,6 @@
                           "fontFamily": "Inter",
                           "fontSize": 14,
                           "fontWeight": "normal"
-                        },
-                        {
-                          "type": "icon",
-                          "id": "QNQwz",
-                          "name": "Glyph / more-horizontal",
-                          "width": 14,
-                          "height": 14,
-                          "icon": "ellipsis",
-                          "library": "lucide",
-                          "fill": "$fg-3"
                         }
                       ]
                     },
@@ -44639,16 +44645,6 @@
                           "fontFamily": "Inter",
                           "fontSize": 14,
                           "fontWeight": "normal"
-                        },
-                        {
-                          "type": "icon",
-                          "id": "gEsDr",
-                          "name": "Glyph / more-horizontal",
-                          "width": 14,
-                          "height": 14,
-                          "icon": "ellipsis",
-                          "library": "lucide",
-                          "fill": "$fg-3"
                         }
                       ]
                     }
@@ -48055,16 +48051,6 @@
                   "fontFamily": "Inter",
                   "fontSize": 14,
                   "fontWeight": "normal"
-                },
-                {
-                  "type": "icon",
-                  "id": "MAcwz",
-                  "name": "Glyph / more-horizontal",
-                  "width": 14,
-                  "height": 14,
-                  "icon": "ellipsis",
-                  "library": "lucide",
-                  "fill": "$fg-3"
                 }
               ]
             },
@@ -48112,16 +48098,6 @@
                   "fontFamily": "Inter",
                   "fontSize": 14,
                   "fontWeight": "normal"
-                },
-                {
-                  "type": "icon",
-                  "id": "RrbO4",
-                  "name": "Glyph / more-horizontal",
-                  "width": 14,
-                  "height": 14,
-                  "icon": "ellipsis",
-                  "library": "lucide",
-                  "fill": "$fg-3"
                 }
               ]
             }
@@ -48262,16 +48238,6 @@
                   "fontFamily": "Inter",
                   "fontSize": 14,
                   "fontWeight": "normal"
-                },
-                {
-                  "type": "icon",
-                  "id": "LLhOn",
-                  "name": "Glyph / more-horizontal",
-                  "width": 14,
-                  "height": 14,
-                  "icon": "ellipsis",
-                  "library": "lucide",
-                  "fill": "$fg-3"
                 }
               ]
             },
@@ -48319,16 +48285,6 @@
                   "fontFamily": "Inter",
                   "fontSize": 14,
                   "fontWeight": "normal"
-                },
-                {
-                  "type": "icon",
-                  "id": "uj383",
-                  "name": "Glyph / more-horizontal",
-                  "width": 14,
-                  "height": 14,
-                  "icon": "ellipsis",
-                  "library": "lucide",
-                  "fill": "$fg-3"
                 }
               ]
             }
@@ -48410,16 +48366,6 @@
                   "fontFamily": "Inter",
                   "fontSize": 14,
                   "fontWeight": "normal"
-                },
-                {
-                  "type": "icon",
-                  "id": "K1cz3",
-                  "name": "Glyph / more-horizontal",
-                  "width": 14,
-                  "height": 14,
-                  "icon": "ellipsis",
-                  "library": "lucide",
-                  "fill": "$fg-3"
                 }
               ]
             },
@@ -48467,16 +48413,6 @@
                   "fontFamily": "Inter",
                   "fontSize": 14,
                   "fontWeight": "normal"
-                },
-                {
-                  "type": "icon",
-                  "id": "QX6yu",
-                  "name": "Glyph / more-horizontal",
-                  "width": 14,
-                  "height": 14,
-                  "icon": "ellipsis",
-                  "library": "lucide",
-                  "fill": "$fg-3"
                 }
               ]
             }

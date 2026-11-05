@@ -374,4 +374,27 @@ run("④ target 瘦身（删掉失效的旧产物）", "node", [
   BUILD_UNITS,
 ]);
 
+/*
+ * ⑤ WSL 侧收尾（崔总 2026-11-05 定：「我常跑的只有 debug:win 和 release，
+ *    这两个执行完就该自动处理」）。
+ *
+ * 只清 WSL 的 `./target`，不碰 Windows 那两个目录（③④ 已经管过）。
+ * 清理失败**不让构建失败** —— 它只是收尾，构建结果才是判据。
+ * 完整瘦身带 7 天闸门：WSL 清单要跑两段 cargo，每构建一次就跑不划算。
+ */
+function runCleanup(title, args) {
+  console.log(`── ${title}`);
+  const result = spawnSync("node", args, { stdio: "inherit", cwd: ROOT });
+  if (result.status !== 0) console.warn(`⚠ ${title} 未完成（不影响构建）`);
+}
+
+runCleanup("⑤ WSL examples 擦屁股（只删历史 hash 版本）", ["scripts/prune-examples.mjs"]);
+runCleanup("⑤ WSL target 瘦身（每周一次；不满 7 天自动跳过）", [
+  "scripts/clean-target.mjs",
+  "--target-dir",
+  "./target",
+  "--if-stale-days",
+  "7",
+]);
+
 console.log(`\n✓ Windows debug 构建完成：${EXE}`);

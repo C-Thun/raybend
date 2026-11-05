@@ -52,7 +52,8 @@ fn recycle_rel_of(rel_path: &str) -> String {
     }
 }
 
-fn folded_of(rel_path: &str) -> String {
+/// 折叠路径（唯一比较口径）。**公开给 `relocate` 复用**（同一件事不写第二份）。
+pub(crate) fn folded_of(rel_path: &str) -> String {
     PathForms::new(rel_path).folded().to_string()
 }
 
@@ -101,14 +102,15 @@ pub struct RecycleSummary {
     pub bytes: i64,
 }
 
-struct FileRow {
-    id: i64,
-    role: String,
-    rel_path: String,
-    recycled_from: Option<String>,
+pub(crate) struct FileRow {
+    pub(crate) id: i64,
+    pub(crate) role: String,
+    pub(crate) rel_path: String,
+    pub(crate) recycled_from: Option<String>,
 }
 
-fn files_of(conn: &Connection, asset_id: i64) -> Result<Vec<FileRow>> {
+/// 一个资产的全部文件行（按 role 排序）。**公开给 `relocate` 复用**。
+pub(crate) fn files_of(conn: &Connection, asset_id: i64) -> Result<Vec<FileRow>> {
     let mut stmt = conn.prepare(
         "SELECT id, role, rel_path, recycled_from FROM asset_files \
          WHERE asset_id = ?1 ORDER BY role, rel_path",
@@ -127,14 +129,16 @@ fn files_of(conn: &Connection, asset_id: i64) -> Result<Vec<FileRow>> {
 }
 
 /// 移动一个文件（同卷 `rename`；目标目录按需创建）。
-fn move_file(from: &Path, to: &Path) -> std::result::Result<(), String> {
+/// 移动一个文件（同卷 `rename`；目标目录按需创建）。**公开给 `relocate` 复用**。
+pub(crate) fn move_file(from: &Path, to: &Path) -> std::result::Result<(), String> {
     if let Some(parent) = to.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("建目录失败：{e}"))?;
     }
     std::fs::rename(from, to).map_err(|e| format!("{e}"))
 }
 
-fn rollback(pairs: &[(PathBuf, PathBuf)]) {
+/// 按相反顺序把已经移动过的文件移回去。**公开给 `relocate` 复用**。
+pub(crate) fn rollback(pairs: &[(PathBuf, PathBuf)]) {
     for (from, to) in pairs.iter().rev() {
         if let Err(error) = std::fs::rename(to, from) {
             log::warn!(
@@ -499,7 +503,8 @@ fn restore_assets_body(
 /// **触发式清理**（崔总 2026-10-11 定）：只在「照片被移走 / 被删掉」之后调用一次，
 /// 不做全盘扫描 —— 用户自己新建的空目录不会被顺手清掉（那是他的东西，不是残留）。
 /// `_RAW/` 也在覆盖内：位图与 RAW 都移走后它空了就一起收掉。
-fn prune_ancestors_of(from_dir: &Path, stop_at: &Path) {
+/// **公开给 `relocate` 复用**：搬空之后逐级收掉空目录。
+pub(crate) fn prune_ancestors_of(from_dir: &Path, stop_at: &Path) {
     let mut current = from_dir.to_path_buf();
     while current != stop_at && current.starts_with(stop_at) {
         if std::fs::remove_dir(&current).is_err() {

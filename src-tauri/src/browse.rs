@@ -970,6 +970,25 @@ impl From<RecycleReport> for RecycleResult {
     }
 }
 
+/// 移动结果（拖到目录行 / `Ctrl+X`+`Ctrl+V`）：搬了几张、几张因重名改了名。
+#[derive(Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MoveResult {
+    pub moved: i64,
+    pub renamed: i64,
+    pub failed: Vec<DeleteFailure>,
+}
+
+impl From<raybend::store::relocate::MoveReport> for MoveResult {
+    fn from(report: raybend::store::relocate::MoveReport) -> Self {
+        Self {
+            moved: i64::try_from(report.moved).unwrap_or(i64::MAX),
+            renamed: i64::try_from(report.renamed).unwrap_or(i64::MAX),
+            failed: failures(report.failed),
+        }
+    }
+}
+
 /// 还原结果（`renamed` = 因原位被占而改名的张数，界面据此提示）。
 #[derive(Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1581,6 +1600,34 @@ pub async fn browse_delete<R: Runtime>(
         });
         state.observe_session(&handle, &catalog);
         report.map(RecycleResult::from).map_err(|e| e.to_string())
+    })
+    .await
+}
+
+/// 把这批照片**移动到库内另一个目录**（拖到左列目录行 / `Ctrl+X`+`Ctrl+V`）。
+///
+/// 文件组整体搬（位图 + `_RAW/` 原片 + `.xmp` 侧车），规则见 `raybend::store::relocate`。
+/// 目标由前端给的是**库内相对路径**：越界、库根、回收站、`_RAW/` 都拒（`resolve_target`）。
+#[tauri::command]
+pub async fn browse_move<R: Runtime>(
+    app: AppHandle<R>,
+    repository_id: String,
+    ids: Vec<i64>,
+    target: String,
+) -> Result<MoveResult, String> {
+    let handle = app.clone();
+    blocking(move || {
+        let state = handle.state::<BrowseState>();
+        let catalog = state.lease(&handle, &repository_id)?;
+        let root = catalog.root().to_path_buf();
+        let guard = Arc::clone(&catalog);
+        let report = catalog.write_tx(move |conn| {
+            raybend::store::relocate::move_assets_to_dir_checked(conn, &root, &ids, &target, || {
+                guard.ensure_current()
+            })
+        });
+        state.observe_session(&handle, &catalog);
+        report.map(MoveResult::from).map_err(|e| e.to_string())
     })
     .await
 }

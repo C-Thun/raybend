@@ -148,6 +148,21 @@ raybend（中文名**「光伴」**，产品名 `RayBend`）是一个**相片管
     自查：`grep -rn 'text-danger' src` 命中的应当是图标 / 危险按钮配色或对话框内联校验。
     口径与判据见 `memory/COMPONENTS.md` §3.4。
 
+30. **执行任何指令前先估它的磁盘压力**（崔总 2026-11-05 定，真机事故）：开发机是 WSL，仓库与
+    `target/` 都在虚拟盘上 —— **一条命令的代价能差几个数量级，判据在「遍历范围」，不在命令名字**。
+    * 动手前先问三句：**它要碰多少个 inode？我是不是在遍历根本不需要的东西？能不能把范围缩到具体文件 / 目录？**
+    * **禁止对着大目录做全量遍历**：`du -sh target`、`du -sh node_modules`、`du -sh /tmp`、
+      `find` 整个仓、`grep -r` 整棵树 —— `target/` 十几万文件、`node_modules/` 十万级、
+      `~/.cargo/registry/` 几十万，**一条就能把磁盘队列打满、整机卡死**（2026-11-05 就是 `du` 干的）。
+      要看体积就 `du -sh <具体子目录>`；拿不准就先 `ls` 一层。
+    * **查代码先缩范围**：给 `rg` 明确路径（`rg pattern src/features/browse`）、或先 `symbol_search` /
+      直接读文件；不要「先全仓扫一遍再说」。与 §18 是一族：**那条管起点（不许从根往下），这条管范围**。
+    * **重命令一次只跑一条**，别把几条 `bash` 并发丢出去（cargo / `node --test` 默认吃满全部核，
+      并发时互相踩 I/O 与内存，表现是磁盘 100% 而 CPU 只有一成）。
+    * 这条**不管验证本身**：该跑的 `pnpm test` / `cargo test --workspace` 照跑。管的是**无必要的、游走的**
+      遍历 —— 区别在「已知必要的整批工作」与「为了看一眼而扫一整棵树」。
+    * 旁证：`df` 看的是**容量**，与这件事无关；磁盘 100% 是**队列 / 换页**，只看遍历了多少东西。
+
 ---
 
 ## 3. 版本基线（2026-09-15 核实）
@@ -229,7 +244,7 @@ GitHub Actions → Pages 发布，**不进** `pnpm release` 流程。细则见 `
 pnpm install
 pnpm tauri dev            # Linux/webkit2gtk 窗口（WSLg 显示）
 cargo check --workspace
-cargo test --workspace    # ❗范围必须是 `--workspace`，理由见下第三条红线
+pnpm test:rust            # = cargo test --workspace + 自动擦屁股；❗范围必须是 `--workspace`
 
 # —— 前端质量门（改完就跑）——
 pnpm typecheck && pnpm test
@@ -256,7 +271,17 @@ pnpm release [patch|minor|major] --win-msi ...   # 或 --win-nsis（可组合）
   `--features custom-protocol` 必须加（否则白屏）；启动 exe 直接用 `/mnt/c/...` 路径，不经 `cmd start`。
 - dav1d 静态库环境变量已封进 `scripts/lib/dav1d-win.mjs`，别在别处再写一份。
 - `pnpm clean:win` / `clean:wsl` 清理只进不出的 target 产物（cargo 从不回收旧单元）。
-- **Rust 测试门只认 `cargo test --workspace`**：`cargo check --workspace` **不编 `#[cfg(test)]` 目标**，
+- **Rust 测试一律走 `pnpm test:rust`**（2026-11-05 定）：它就是 `cargo test --workspace` + 收尾两件事
+  —— `prune-examples`（秒级，每次都跑）与 `clean-target --if-stale-days 7`（每周一次）。
+  裸跑 `cargo test` 会让 `examples/` 无限累积：实测积到 **895 个条目 / 23.6 GiB**（单个二进制
+  ~220 MB，旧 hash 版本 cargo **永不删除**）。`prune-examples` 只删带 `-<16位hash>` 的旧版本、
+  保留规范名那一份，**不编译**；实测删后再 `cargo build --example` 只需 **2 秒**（复用产物，
+  仅恢复硬链接）。`cargo test -p raybend xmp` 这类子集测试也走 `pnpm test:rust -p raybend xmp`。
+- **`pnpm clean:wsl` 现在由 `debug:win` / `release` 自动带（7 天闸门）**（2026-11-05 定）：
+  处理 `deps/` / `incremental/` 里的旧变体（实测同一份 `libtoml` 有 **21 个 rlib 变体**）。
+  清单要跑两段 cargo（1–2 分钟），所以不适合每次编译都跑；手动深清用
+  `pnpm clean:wsl --if-stale-days 0`。
+- **Rust 测试门只认 `pnpm test:rust`（底层 `cargo test --workspace`）**：`cargo check --workspace` **不编 `#[cfg(test)]` 目标**，
   `cargo test -p raybend` 只编主库 lib —— 新增的 crate / bin 的测试目标会整个漏掉。
   2026-10-12 事故：`crates/raybend-crashpad` 的测试从诞生（e0f61c4）起就编不过，
   直到另一个会话跑 workspace 全量才发现；当时实施记录里那条「passed」是**编造**的。
@@ -267,6 +292,9 @@ pnpm release [patch|minor|major] --win-msi ...   # 或 --win-nsis（可组合）
   期间**任何**工作树改动（哪怕只给 `package.json` 加一行脚本、哪怕已提交）都会让发布在校验处中断，
   而且失败回滚会与已提交内容冲突（聚合错误把真实原因吞掉）。判据：动仓库前先看 `.release/build.lock`
   与 Windows 镜像侧 `source.lock` 是否存在；存在就等它结束。
+- **命令的磁盘代价先估再跑**（§2.30）：仓库与 `target/` 都在 WSL 虚拟盘上，`du` / `find` / `grep -r`
+  扫大目录**一条就能把整机 I/O 打满**（表现是磁盘 100%、CPU 只有一成、所有进程卡住）；
+  看体积用具体子目录，查代码用具体路径。
 
 ### 5.4 规划纪律
 
@@ -393,6 +421,7 @@ pi 的 todo 工具，**同时把需求原文落一份到 `todos/`**（文件名 
 | `website/AGENTS.md` | 官网专属指南（独立技术栈） |
 | `docs/native-viewport-coordinate-guide.md` | 原生视口坐标契约完整报告（动原生视口前必读） |
 | `docs/pre-release-acceptance.md` | **对外推广前的功能核验清单**（崔总执行，逐项带权威正文指针；与 `docs/release.md` 的分工：那个管出包/发，这个管功能对不对） |
+| `docs/wsl-disk-maintenance.md` | **WSL 磁盘维护手册**（Windows 侧操作）：ext4.vhdx / docker_data.vhdx 的 diskpart 收缩、Temp 里的 swap 残留清理、日常防回涨 |
 
 ---
 
@@ -629,7 +658,7 @@ import 与 browse 的照片区必须经同一个 `PhotoViewingStage` / `PhotoVie
 5. **rb 域**：`rb:profileJson` 存完整 `DevelopStack`，新参数**自动**跟着走；只要上面的结构没变，不需要改 `packet.rs`。
 6. **preset / 旧数据**：预设交换与旧 profile 读取是否仍成立；需要时补兼容测试。
 7. **文档**：`specs/xmp-sidecar.md` §5.1 的映射表、`specs/issue-xmp-contract.md`（若 rb 形状变了）、`memory/FUNCTION-IMAGING.md`（若影响显示）。
-8. **测试门**：`cargo test -p raybend xmp`、`cargo test --workspace`、`pnpm typecheck && pnpm test`。
+8. **测试门**：`pnpm test:rust -p raybend xmp`、`pnpm test:rust`、`pnpm typecheck && pnpm test`。
 
 > 判据：**新参数只要进了 `PARAMS`，XMP 侧就不可能被忘掉** —— 要么映射，要么显式声明不映射，测试会拦住。
 

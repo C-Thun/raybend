@@ -654,6 +654,14 @@ cmd.exe /c 'pushd \\wsl.localhost\Ubuntu-24.04\home\andares\repos\c-thun\raybend
       只在 `scripts/lib/product-build.mjs` 写一份，`debug:win` 与清单重建共用；`clean:win` 默认清
       日常 debug 目录（发版目录用 `RAYBEND_WIN_BUILD_DIR` / `--target-dir` 指）。
       记录：`implementations/2026-10-26_debug-win-clean-target-target-dir.md`。
+    * **2026-11-05**：`examples/` 又长回 **23.6 GiB / 895 个条目**（27 个 example × 每个 16 个历史 hash 版本）。
+      根因不是规则不对，是**触发点缺失**：`clean:wsl` 是手动命令，WSL 侧没有任何自动清理，
+      examples 又只靠 3 天宽限期幸存，于是「跑一次 `cargo test --workspace` 长一套、没人清」循环。
+      新增 **`pnpm prune:examples`**（`scripts/prune-examples.mjs`）：不编译、不重建清单，
+      只删 `name-<16位hash>` 历史版本、保留规范名。实测：删后再 `cargo build --example` **2 秒**
+      （cargo 复用产物、只恢复硬链接，不重编）。纪律：每次 `cargo test --workspace` / `--all-targets`
+      之后必须跑；`deps/` `incremental/` 的旧变体仍交给每周一次的 `pnpm clean:wsl`。
+      同日实测 `deps/` 里 `libtoml` 已有 **21 个 rlib 变体**（10-26: 5 / 10-27: 7 / 10-31: 9）。
 
 ### 8.1 为什么必须加 `--features custom-protocol`（重要，别拆掉）
 

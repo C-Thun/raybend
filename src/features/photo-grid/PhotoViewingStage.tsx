@@ -41,6 +41,8 @@ export interface PhotoViewingStageProps {
   onPhotoPointerDown?: (id: string, event: PointerEvent) => void;
   /** 正在被拖的照片（半透明表现）。 */
   draggingIds?: () => ReadonlySet<string>;
+  /** 已被剪切的照片（`Ctrl+X`）：只有缩图压到 70%（崔总 2026-11-05）。 */
+  cutIds?: () => ReadonlySet<string>;
   watermark?: PhotoGridProps["watermark"];
   class?: string;
 }
@@ -72,6 +74,7 @@ export function PhotoViewingStage(props: PhotoViewingStageProps): JSX.Element {
             : { onFocusIndex: props.onFocusIndex })}
           onPhotoPointerDown={props.onPhotoPointerDown}
           draggingIds={props.draggingIds}
+          cutIds={props.cutIds}
           {...(props.watermark === undefined ? {} : { watermark: props.watermark })}
         />
 

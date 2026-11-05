@@ -18,7 +18,8 @@ import { onTauriEvent } from "./events.ts";
 import { joinPath } from "../lib/paths.ts";
 import { t } from "../i18n/index.ts";
 import type {
-  DirEmptyView,
+  DirDeleteCheckView,
+  MoveResult,
   DirEntry,
   MigrationSnapshot,
   RepositorySettings,
@@ -164,26 +165,52 @@ export async function listDirs(path: string): Promise<DirEntry[]> {
 }
 
 /*
- * 库内目录的菜单动作（`memory/FUNCTION-BROWSE.md` §4.3 行尾 `⋯`）。
+ * 库内目录的动作（入口 = 浏览左列目录区工具栏，`memory/FUNCTION-BROWSE.md` §4.3）。
  *
  * 传的是 `root + rel`（**库根 + 库内相对路径**），不是绝对路径：
  * Rust 侧会拿 `rel` 过一遍越界检查（`..`、绝对路径、盘符一律拒）——
  * 界面上一层笔误不该能碰到库外面去。
  */
 
-/** 深度检查这个目录的整棵子树里有没有文件（决定「删除空目录」能不能点）。 */
-export async function dirEmptyCheck(root: string, rel: string): Promise<DirEmptyView> {
-  // 浏览器里没有真目录：按「不空」处理，菜单项于是是禁用的（而不是假装能删）
+/**
+ * 这个目录现在能不能删（决定工具栏「删除目录」那颗按钮的 enable）。
+ *
+ * 判据是**浅检查**：这一层有没有可见子目录 / 有没有照片（本层 + `_RAW/`）。
+ * 看不见的残留（`.xmp`、空 `_RAW/`）不阻止删除。
+ */
+export async function dirDeleteCheck(root: string, rel: string): Promise<DirDeleteCheckView> {
+  // 浏览器里没有真目录：按「不能删」处理（而不是假装能删）
   if (!isTauriRuntime()) {
-    return { empty: false, fileCount: 0, dirCount: 0, emptyDirCount: 0, hasUnresolvedLink: false };
+    return { deletable: false, photoCount: 0, visibleDirCount: 0, hasLink: false };
   }
-  return call<DirEmptyView>("dir_empty_check", { root, rel });
+  return call<DirDeleteCheckView>("dir_delete_check", { root, rel });
 }
 
-/** 删除空目录（连同其下所有空子目录），返回删掉的目录个数。 */
-export async function dirRemoveEmpty(root: string, rel: string): Promise<number> {
+/** 删除一个目录（连同看不见的残留），返回删掉的个数。Rust 侧删前会自己再查一遍。 */
+export async function dirDelete(root: string, rel: string): Promise<number> {
   if (!isTauriRuntime()) return 0;
-  return call<number>("dir_remove_empty", { root, rel });
+  return call<number>("dir_delete", { root, rel });
+}
+
+/**
+ * 把这批照片**移动到库内另一个目录**（拖到左列目录行 / `Ctrl+X`+`Ctrl+V`）。
+ *
+ * `target` 是**库内相对路径**（`photos/2026/云南`）；库根、回收站与 `_RAW/` 会被后端拒掉。
+ * 文件组整体搬（位图 + `_RAW/` 原片 + `.xmp` 侧车），重名整组加 `_01`。
+ */
+export async function moveAssets(
+  repositoryId: string,
+  ids: readonly string[],
+  target: string,
+): Promise<MoveResult> {
+  if (!isTauriRuntime()) {
+    return { moved: 0, renamed: 0, failed: [] };
+  }
+  return call<MoveResult>("browse_move", {
+    repositoryId,
+    ids: ids.map(Number),
+    target,
+  });
 }
 
 /** 建一个子目录，返回它的库内相对路径。 */

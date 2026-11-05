@@ -42,7 +42,7 @@
 | `SegmentedControl` | `SegmentedControl.tsx` | 凹槽 + 移动色块的分段控件 | 一排按钮假装分段 |
 | `CompactChoice` | `CompactChoice.tsx` | 紧凑单选 | — |
 | `Slider` | `Slider.tsx` | 连续 / 定档滑块（键盘与无障碍由 Ark 承载） | 原生 `<input type="range">` |
-| `Tooltip` / `ButtonTip` | `Tooltip.tsx` | 提示气泡；按钮自带 `tip` 优先用它，**不要外套 Tooltip** | 第二套 tooltip machine |
+| `Tooltip` / `ButtonTip` | `Tooltip.tsx` | 提示气泡（**默认朝上**，只有上方超出窗口上缘才翻到下方）；按钮自带 `tip` 优先用它，**不要外套 Tooltip** | 第二套 tooltip machine |
 | `Menu` | `Menu.tsx` | 下拉菜单 | — |
 | `SuggestInput` | `SuggestInput.tsx` | **带建议列表的行内输入框**（focus 出列表、前缀筛选、↑↓、Enter 采用、Esc 先关列表）；候选合并/筛选在 `lib/suggest.ts` | 第二套「输入 + 下拉」（不要用 Ark Combobox 再做一份：这里的第一公民是**自由文本**） |
 | `Dialog` / `ConfirmDialog` / `DialogFrame` | `Dialog.tsx` | 模态弹窗（**取消在左、确认在右**）；`DialogFrame` 是唯一 Ark 三件套实现 | 自己拼 Backdrop/Positioner |

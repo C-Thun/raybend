@@ -103,7 +103,7 @@ export function TagFilterMenu(props: { store: BrowseStore }): JSX.Element {
             提示挂在内层的图标上：菜单触发器已经把 `ref`/键盘事件占在按钮上，
             再叠一层 Tooltip 的触发属性会互相踩；内层铺满按钮、命中不丢。
           */}
-          <ButtonTip content={label()} placement="bottom">
+          <ButtonTip content={label()}>
             {(tipProps) => (
               <span {...tipProps} class="flex size-full items-center justify-center">
                 <IconTag size={16} />

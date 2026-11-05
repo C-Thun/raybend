@@ -152,7 +152,14 @@ export function EditorPanels(props: EditorPanelsProps): JSX.Element {
     .filter((group) => globalStages() || (group !== "detail" && group !== "lens"));
   const curveTabs = (): readonly { value: string; label: string }[] => [
     { value: "curve", label: t("editor.group.curve") },
-    // 色盘：**空面板**（崔总 2026-11-05 预留四色轮调色位；这里只有页签与空态）
+    /*
+     * 色盘：**空面板**（崔总 2026-11-05 预留四色轮调色位；这里只有页签与空态）。
+     *
+     * 英文页签只写控件名 **“Wheels”**（2026-11-05 定，与 `Curve` 同一个命名法）：三个页签
+     * 与“Color mgmt”挤在 268px 内容区里，全名会把这一行顶出去；完整词由**正文**负责
+     * （空态 "No color-wheel settings yet"，将来面板自己的标题），页签只是它的短别名。
+     * 中文侧「色盘」两字已经最紧，**不跟着缩**。
+     */
     { value: "swatch", label: t("editor.group.swatch") },
     ...(globalStages()
       ? [{ value: "color", label: t("editor.colorManagement.title") }]
@@ -276,7 +283,12 @@ export function EditorPanels(props: EditorPanelsProps): JSX.Element {
         <SegmentedControl
           value={paramTab()}
           onValueChange={(value) => setParamTab(value as ParamGroup)}
-          label={t("editor.group.tone")}
+          /*
+           * `label` 是**这一条页签带的组名**（读屏报“组名, 选项卡列表”），不是默认页签的名字。
+           * 以前传的是 `editor.group.tone`/`editor.group.curve`，读屏会念成「影调 / 曲线」
+           * 却罩着四个 / 三个不同页签（2026-11-05 改）。
+           */
+          label={t("editor.tabs.basic")}
           options={paramGroups().map((group) => ({
             value: group,
             label: t(GROUP_LABEL_KEY[group]),
@@ -365,7 +377,7 @@ export function EditorPanels(props: EditorPanelsProps): JSX.Element {
         <SegmentedControl
           value={curveTab()}
           onValueChange={(value) => setCurveTab(value as CurveTab)}
-          label={t("editor.group.curve")}
+          label={t("editor.tabs.advanced")}
           options={curveTabs()}
         />
         {/*
@@ -398,7 +410,7 @@ export function EditorPanels(props: EditorPanelsProps): JSX.Element {
 }
 
 /**
- * 色盘（Color wheels）—— **空面板占位**（崔总 2026-11-05）。
+ * 色盘（英文页签 **“Wheels”**，完整词 color wheels 留在正文）—— **空面板占位**（崔总 2026-11-05）。
  *
  * 位置：右栏第 3 组，夹在 `曲线` 与 `色彩管理` 之间。将来这里放类似 DaVinci 的
  * 四色轮调色（阴影 / 中间调 / 高光 / 偏移）。

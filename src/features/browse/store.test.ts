@@ -85,6 +85,7 @@ const EMPTY_MARK: MarkResult = {
   canUndo: false,
   canRedo: false,
 };
+const EMPTY_MOVE = { moved: 0, renamed: 0, failed: [] };
 const EMPTY_RECYCLE: RecycleResult = {
   moved: 0,
   blockedLocked: [],
@@ -182,6 +183,9 @@ function fakeApi(count: number) {
     },
     async remove(): Promise<RecycleResult> {
       return EMPTY_RECYCLE;
+    },
+    async moveAssets() {
+      return EMPTY_MOVE;
     },
     async recycleRestore() {
       return EMPTY_RESTORE;
@@ -964,6 +968,9 @@ function legacyApi(count: number) {
     async remove() {
       return EMPTY_RECYCLE;
     },
+    async moveAssets() {
+      return EMPTY_MOVE;
+    },
     async recycleRestore() {
       return EMPTY_RESTORE;
     },
@@ -1026,6 +1033,7 @@ test("naturalOf：编辑过的照片用 latest 的输出尺寸（tiles 比例与
     async undo() { return EMPTY_MARK; },
     async redo() { return EMPTY_MARK; },
     async remove() { return EMPTY_RECYCLE; },
+    async moveAssets() { return EMPTY_MOVE; },
     async recycleRestore() { return EMPTY_RESTORE; },
     async recyclePurge() { return EMPTY_PURGE; },
     async recycleEmpty() { return EMPTY_PURGE; },

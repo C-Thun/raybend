@@ -34,10 +34,11 @@ import type {
   BrowseWindow,
   DeleteFailure,
   RecycleResult,
+  MoveResult,
   RestoreResult,
   PurgeResult,
   RecycleSummaryView,
-  DirEmptyView,
+  DirDeleteCheckView,
   EditorRenderState,
   EditorViewportState,
   FullscreenItem,
@@ -388,6 +389,11 @@ const RESTORE_RESULT_KEYS = [
   "restored",
 ] as const satisfies readonly (keyof RestoreResult)[];
 const PURGE_RESULT_KEYS = ["failed", "purged"] as const satisfies readonly (keyof PurgeResult)[];
+const MOVE_RESULT_KEYS = [
+  "failed",
+  "moved",
+  "renamed",
+] as const satisfies readonly (keyof MoveResult)[];
 const RECYCLE_SUMMARY_VIEW_KEYS = [
   "bytes",
   "count",
@@ -418,13 +424,12 @@ const MIGRATION_NOTICE_KEYS = [
 ] as const satisfies readonly (keyof MigrationNotice)[];
 const MIGRATION_SNAPSHOT_KEYS = ["active", "revision"] as const satisfies readonly (keyof MigrationSnapshot)[];
 const FLAGS_VIEW_KEYS = ["picks", "rejects", "total"] as const satisfies readonly (keyof FlagsView)[];
-const DIR_EMPTY_VIEW_KEYS = [
-  "empty",
-  "fileCount",
-  "dirCount",
-  "emptyDirCount",
-  "hasUnresolvedLink",
-] as const satisfies readonly (keyof DirEmptyView)[];
+const DIR_DELETE_CHECK_VIEW_KEYS = [
+  "deletable",
+  "photoCount",
+  "visibleDirCount",
+  "hasLink",
+] as const satisfies readonly (keyof DirDeleteCheckView)[];
 const EDITOR_VIEWPORT_STATE_KEYS = [
   "backdrop",
   "backdropReported",
@@ -574,6 +579,7 @@ const KEY_TABLES = {
   DeleteFailure: checkKeys<DeleteFailure, typeof DELETE_FAILURE_KEYS>(DELETE_FAILURE_KEYS),
   RecycleResult: checkKeys<RecycleResult, typeof RECYCLE_RESULT_KEYS>(RECYCLE_RESULT_KEYS),
   RestoreResult: checkKeys<RestoreResult, typeof RESTORE_RESULT_KEYS>(RESTORE_RESULT_KEYS),
+  MoveResult: checkKeys<MoveResult, typeof MOVE_RESULT_KEYS>(MOVE_RESULT_KEYS),
   PurgeResult: checkKeys<PurgeResult, typeof PURGE_RESULT_KEYS>(PURGE_RESULT_KEYS),
   RecycleSummaryView: checkKeys<RecycleSummaryView, typeof RECYCLE_SUMMARY_VIEW_KEYS>(
     RECYCLE_SUMMARY_VIEW_KEYS,
@@ -587,7 +593,7 @@ const KEY_TABLES = {
     MIGRATION_NOTICE_KEYS,
   ),
   MigrationSnapshot: checkKeys<MigrationSnapshot, typeof MIGRATION_SNAPSHOT_KEYS>(MIGRATION_SNAPSHOT_KEYS),
-  DirEmptyView: checkKeys<DirEmptyView, typeof DIR_EMPTY_VIEW_KEYS>(DIR_EMPTY_VIEW_KEYS),
+  DirDeleteCheckView: checkKeys<DirDeleteCheckView, typeof DIR_DELETE_CHECK_VIEW_KEYS>(DIR_DELETE_CHECK_VIEW_KEYS),
   EditorViewportState: checkKeys<EditorViewportState, typeof EDITOR_VIEWPORT_STATE_KEYS>(
     EDITOR_VIEWPORT_STATE_KEYS,
   ),

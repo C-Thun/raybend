@@ -17,11 +17,12 @@ import {
   onCleanup,
   onMount,
   Show,
+  untrack,
   type JSX,
 } from "solid-js";
-import { IconChecks, IconDots, IconExternalLink, IconFolderMinus, IconFolderPlus, IconMaximize, IconTag, IconTrash } from "@tabler/icons-solidjs";
+import { IconChecks, IconExternalLink, IconFolderMinus, IconFolderPlus, IconMaximize, IconTag, IconTrash } from "@tabler/icons-solidjs";
 
-import { dirCreate, dirEmptyCheck, dirRemoveEmpty, listDirs, syncDirectoryCounts, onCatalogDirty } from "../../api/db.ts";
+import { dirCreate, dirDelete, dirDeleteCheck, listDirs, syncDirectoryCounts, onCatalogDirty } from "../../api/db.ts";
 import { Button, IconButton } from "../../components/ui/Button.tsx";
 import { EasyCopy } from "../../components/ui/EasyCopy.tsx";
 import { SuggestInput } from "../../components/ui/SuggestInput.tsx";
@@ -31,8 +32,7 @@ import { MetadataRows, type MetadataRow } from "../../components/ui/MetadataRows
 import { RepositoryCard } from "../../components/ui/RepositoryCard.tsx";
 import { ConfirmDialog, Dialog } from "../../components/ui/Dialog.tsx";
 import { Input } from "../../components/ui/Form.tsx";
-import { Menu } from "../../components/ui/Menu.tsx";
-import type { AssetItem, DirEmptyView, EditableTextField, FileExif, RepositoryView } from "../../api/types.ts";
+import type { AssetItem, DirDeleteCheckView, EditableTextField, FileExif, RepositoryView } from "../../api/types.ts";
 import type { IssueLibrary } from "../../api/issues.ts";
 import { openExternalUrl } from "../../api/external.ts";
 import { geoReverse } from "../../api/browse.ts";
@@ -44,7 +44,9 @@ import { setDirectoryTag, tagsForDirectory } from "../../api/organization.ts";
 
 import type { ViewerStore } from "../../components/ui/viewer/index.ts";
 
-import { dirDisplayName, PHOTOS_DIR, RECYCLE_DIR, visibleChildDirs } from "./dirs.ts";
+import { createParentOf, dirDisplayName, nextDirScope, PHOTOS_DIR, RECYCLE_DIR, visibleChildDirs } from "./dirs.ts";
+import { photoDrag } from "./photo-drag.ts";
+import { clearPhotoCut, photoCut } from "./photo-cut.ts";
 import { ViewerReadout } from "./ViewerReadout.tsx";
 import {
   compactList,
@@ -60,6 +62,9 @@ import type { BrowseStore } from "./store.ts";
 
 /** 紧缩库列表最多显示几个（第 4 个只露半截，见 `memory/FUNCTION-BROWSE.md` §4.2）。 */
 export const COMPACT_REPO_LIMIT = 3;
+
+/** 拖动停在目录行上多久之后自动展开它（毫秒；崔总 2026-11-05）。 */
+const AUTO_EXPAND_MS = 1000;
 
 /* 目录树的显示口径（树的根 = `photos/` 之内、`_RAW` 不显示）在 `dirs.ts` ——
  * 那边是纯函数，有单测；这里只管拿它去读盘与渲染。 */
@@ -89,10 +94,17 @@ export interface BrowseLeftColumnProps {
    * 点开的是同一个 `LibrarySettingsDialog`（由组装层持有）。
    */
   onOpenSettings?: (repositoryId: string) => void;
-  /** 目录树明确导航时通知照片来源适配层；切换左栏本身不改变照片来源。 */
-  onSelectDirectory?: (repositoryId: string, path: string) => void;
+  /**
+   * 目录树明确导航时通知照片来源适配层；切换左栏本身不改变照片来源。
+   *
+   * `path` 为 `null` = **回到库根**（再点一次选中的目录、或回收站里再点同一行）——
+   * 组织视图那边要据此把「按目录筛选」清掉，否则它会一直指着一个已经不在范围里的目录。
+   */
+  onSelectDirectory?: (repositoryId: string, path: string | null) => void;
   /** 点离线图标：对登记过的路径重新找一遍（与导入侧同一套语义）。 */
   onRemount?: (repositoryId: string) => void;
+  /** 照片刚被移动过（每次成功 +1）：目录的「能不能删」缓存要跟着作废。 */
+  moveRevision?: number;
   isRemounting?: (id: string) => boolean;
   class?: string;
 }
@@ -124,13 +136,18 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
   /** 本次会话里的库顺序（点库移顶）。 */
   const [order, setOrder] = createSignal<readonly string[]>([]);
 
-  /* ══ 行尾 `⋯` 菜单的两个动作（`memory/FUNCTION-BROWSE.md` §4.3）══ */
+  /* ══ 目录工具栏的两个动作（`memory/FUNCTION-BROWSE.md` §4.3）══ */
 
-  /** 每个目录的**深度**空检查结果，菜单打开时查一次。 */
-  const [emptyInfo, setEmptyInfo] = createSignal<ReadonlyMap<string, DirEmptyView>>(new Map());
+  /**
+   * 每个目录的**浅**检查结果（能不能删）—— 选中变了就查一次，按钮跟着它 enable/disable。
+   * 判定口径见 `crates/raybend/src/repo/dirs.rs`：只看这一层看得见的东西。
+   */
+  const [deleteInfo, setDeleteInfo] = createSignal<ReadonlyMap<string, DirDeleteCheckView>>(new Map());
+  /** 正在查（按钮在这期间是禁用的，避免"看起来能点但没反应"） */
+  const [checking, setChecking] = createSignal(false);
   /** 待确认删除的目录（null = 没弹） */
   const [confirmRel, setConfirmRel] = createSignal<string | null>(null);
-  /** 正在建子目录的**父**目录（null = 没弹） */
+  /** 正在建目录的**父**目录（null = 没弹；`photos` = 树根那一级） */
   const [createRel, setCreateRel] = createSignal<string | null>(null);
   const [newName, setNewName] = createSignal("");
   const [busy, setBusy] = createSignal(false);
@@ -247,7 +264,11 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
       for (const scope of expanded()) void loadChildren(scope, false);
     };
     void onCatalogDirty((change) => {
-      if (change.repositoryId === store.repositoryId()) refreshTree();
+      if (change.repositoryId !== store.repositoryId()) return;
+      refreshTree();
+      // 外面动了盘（导入 / 别的程序）：能不能删的结论要重新问一次
+      setDeleteInfo(new Map());
+      void checkDelete(store.scopePath());
     }).then((unsubscribe) => { if (disposed) unsubscribe(); else off = unsubscribe; });
     const focus = (): void => {
       const repositoryId = store.repositoryId();
@@ -296,6 +317,7 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
       setExpanded(new Set<string>());
       setChildren(new Map());
       setChildFlags(new Map());
+      setDeleteInfo(new Map());
       if (base !== null) {
         void (async () => {
           await loadChildren(PHOTOS_DIR);
@@ -304,6 +326,20 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
       }
     }),
   );
+
+  /*
+   * 选中目录一变，就问一次「它现在能不能删」（崔总 2026-11-05：「根据点中的目录来算」）。
+   *
+   * 放在这里而不是放进点击回调：范围也可能被别处改（启动恢复、组织视图、换库），
+   * 只有 `scopePath` 这一个来源才不会漏。
+   */
+  createEffect(on(() => store.scopePath(), (scope) => {
+    void checkDelete(scope);
+  }));
+  /* 移动成功也会改变目录内容（`catalog://dirty` 到得更晚），所以单独有一个修订号。 */
+  createEffect(on(() => props.moveRevision, () => {
+    forgetDeleteInfo();
+  }, { defer: true }));
 
   /** 这个路径属于回收站区吗（回收站行与它的子目录）。 */
   function isRecyclePath(relPath: string): boolean {
@@ -354,19 +390,47 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
   /** 库内正式目录区显示的行。 */
   const photosRows = createMemo(() => treeRows().filter((row) => !isRecyclePath(row.relPath)));
 
-  /** 目录树的一行。回收站里的行走同一份（点击行为与 ⋯ 菜单在内部按路径区分）。 */
+  /**
+   * 目录树的一行。回收站里的行走同一份（点击行为与行尾标签按钮在内部按路径区分）。
+   *
+   * 行上三件事（崔总 2026-11-05 把行尾 `⋯` 菜单拆开之后）：
+   * * **箭头** = 展开 / 收起，**不改变选中**（`AGENTS.md` §11.1 的两个动作）；
+   * * **名字** = 选中 / 再点一次回库根（`nextDirScope`）；
+   * * **行尾标签按钮** = 只在指向（或键盘焦点进来）时出现，动作与原来菜单里的
+   *   「目录标签」完全一样 —— 入口换了，功能没变。
+   */
   function renderRow(row: TreeRow): JSX.Element {
+    /** 拖动正压在这一行上（辅色底，与「选中」的主色底成对，一眼分得开）。
+     *
+     * 当前范围那行**不亮**：照片本来就是从这里拖出来的，“可以搬进去”对它是假的（崔总 2026-11-05）。
+     */
+    const dropHover = (): boolean => {
+      const target = photoDrag()?.target;
+      return (
+        target?.kind === "dir" &&
+        target.relPath === row.relPath &&
+        row.relPath !== store.scopePath()
+      );
+    };
     return (
               <div
+                data-dir-row={row.relPath}
+                /*
+                 * 拖动的落点属性**只挂在 photos 侧的行上**：回收站不是"移到目录"的去处
+                 * （拖到回收站 = 删除，走的是工作区那块热区）。
+                 */
+                data-photo-drop-dir={row.relPath.startsWith(PHOTOS_DIR) ? row.relPath : undefined}
                 class={[
-                  "flex items-center gap-1 rounded-(--radius) pr-1",
-                  store.scopePath() === row.relPath
-                    ? "bg-state-selected text-fg-1"
-                    : "text-fg-2 hover:bg-state-hover",
+                  "group/row flex items-center gap-1 rounded-(--radius) pr-1",
+                  dropHover()
+                    ? "bg-brand-2/30 text-fg-1"
+                    : store.scopePath() === row.relPath
+                      ? "bg-state-selected text-fg-1"
+                      : "text-fg-2 hover:bg-state-hover",
                 ].join(" ")}
                 style={{ "padding-left": `${row.depth * 12 + 4}px` }}
               >
-                {/* 点箭头 = 展开；点名字 = 选中（memory/FUNCTION-BROWSE.md §4.3 的两个动作） */}
+                {/* 点箭头 = 只展开 / 收起；**不选中**（全局口径，任何用到目录树的地方都一样） */}
                 <button
                   type="button"
                   aria-label={row.expanded ? t("browse.collapse") : t("browse.expand")}
@@ -381,22 +445,35 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
                 <button
                   type="button"
                   onClick={() => {
+                    const repositoryId = store.repositoryId();
                     /*
                      * 回收站区里的行**保持在回收站里**（它只是换范围）：回收站的资产
                      * `deleted_at` 非空，而「不在回收站模式」的查询只看 Live —— 一旦退出，
                      * 这些目录点开就是空的（2026-10-11 真机 bug）。
-                     * 库内正式目录的行则相反：在回收站里点它 = 退出回收站并切过去。
+                     * 再点**同一个**回收站目录 = 退出回收站并回到库根（崔总 2026-11-05）。
                      */
                     if (isRecyclePath(row.relPath)) {
+                      if (store.recycleMode() && store.scopePath() === row.relPath) {
+                        store.openPhotosScope(null);
+                        if (repositoryId !== null) props.onSelectDirectory?.(repositoryId, null);
+                        return;
+                      }
                       if (!store.recycleMode()) store.enterRecycle();
                       store.setScope(row.relPath);
-                    } else if (store.recycleMode()) {
-                      store.openPhotosScope(row.relPath);
-                    } else {
-                      store.setScope(row.relPath);
+                      if (repositoryId !== null) props.onSelectDirectory?.(repositoryId, row.relPath);
+                      return;
                     }
-                    const repositoryId = store.repositoryId();
-                    if (repositoryId !== null) props.onSelectDirectory?.(repositoryId, row.relPath);
+                    /*
+                     * 库内目录：点一次选中、再点一次回库根。
+                     * 在回收站里点它 = 退出回收站并切过去（同一个 2026-10-11 的道理）。
+                     */
+                    const inRecycle = store.recycleMode();
+                    const next = inRecycle
+                      ? row.relPath
+                      : nextDirScope(store.scopePath(), row.relPath);
+                    if (inRecycle) store.openPhotosScope(next);
+                    else store.setScope(next);
+                    if (repositoryId !== null) props.onSelectDirectory?.(repositoryId, next);
                   }}
                   class="min-w-0 flex-1 overflow-hidden whitespace-nowrap fade-x-end py-1 text-left text-fs-2"
                   title={row.relPath}
@@ -405,58 +482,23 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
                 </button>
 
                 {/*
-                  行尾 `⋯`（`memory/FUNCTION-BROWSE.md` §4.3）：删除空目录 / 创建子目录。
-
-                  空检查是**打开菜单时**才做的（深度检索要碰盘），结果缓存起来决定
-                  「删除空目录」能不能点；非空时菜单项在，但是暗的。
-
-                  **回收站里的目录没有这些操作** —— 这个菜单只属于 photos 侧的目录行。
+                  行尾**目录标签**按钮（原来 `⋯` 菜单里的第三项）：只有 photo 侧的行有，
+                  平时不占位置 —— 指向行、或键盘焦点进来时才浮出来（`group-hover/row`
+                  + `group-focus-within/row`，与 LUT / 预设面板同一个做法）。
                 */}
                 <Show when={row.relPath.startsWith(PHOTOS_DIR)}>
-                <Menu
-                  label={t("browse.dirMenu")}
-                  placement="bottom-end"
-                  items={[
-                    {
-                      value: "delete-empty",
-                      label: t("browse.deleteEmptyDir"),
-                      icon: <IconFolderMinus size={14} />,
-                      disabled: !canDeleteEmpty(row.relPath),
-                    },
-                    {
-                      value: "create-subdir",
-                      label: t("browse.createSubdir"),
-                      icon: <IconFolderPlus size={14} />,
-                    },
-                    {
-                      value: "directory-tags",
-                      label: t("org.directoryTags"),
-                      icon: <IconTag size={14} />,
-                    },
-                  ]}
-                  onSelect={(value) => {
-                    setFormError(null);
-                    if (value === "delete-empty") setConfirmRel(row.relPath);
-                    if (value === "directory-tags") void openDirectoryTags(row.relPath);
-                    if (value === "create-subdir") {
-                      setNewName("");
-                      setCreateRel(row.relPath);
-                    }
-                  }}
-                  onOpenChange={(open) => {
-                    if (open) void checkEmpty(row.relPath);
-                  }}
-                >
-                  {(triggerProps) => (
-                    <button
-                      {...triggerProps()}
-                      aria-label={t("browse.dirMenu")}
-                      class="shrink-0 rounded-(--radius) px-1 text-fg-3 hover:bg-state-hover hover:text-fg-1"
-                    >
-                      <IconDots size={14} />
-                    </button>
-                  )}
-                </Menu>
+                  <button
+                    type="button"
+                    aria-label={t("browse.dirTag")}
+                    title={t("browse.dirTag")}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void openDirectoryTags(row.relPath);
+                    }}
+                    class="shrink-0 rounded-(--radius) px-1 text-fg-3 opacity-0 transition-opacity hover:bg-state-hover hover:text-fg-1 focus-visible:opacity-100 group-focus-within/row:opacity-100 group-hover/row:opacity-100"
+                  >
+                    <IconTag size={14} />
+                  </button>
                 </Show>
               </div>
     );
@@ -476,6 +518,48 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
     }
   }
 
+  /*
+   * 拖动停在目录行上 **1 秒**就自动展开它（崔总 2026-11-05）：
+   * 搬照片到子目录时不必先把树展开、再重拖一次。
+   *
+   * * 只在「有子目录 **且** 还没展开」时计时；指针移开 / 松手 / 换行都清零；
+   * * 到点前再确认一次指针还在同一行（计时期间可能已经走了）；
+   * * 当前范围那一行也不计时（它是照片的出处，展开它没有意义）。
+   *
+   * 边缘自动上下滚动**没做**，已登记 `memory/FUTURE.md`。
+   */
+  let autoExpandTimer: number | undefined;
+  let autoExpandTarget: string | null = null;
+  const clearAutoExpand = (): void => {
+    if (autoExpandTimer !== undefined) window.clearTimeout(autoExpandTimer);
+    autoExpandTimer = undefined;
+    autoExpandTarget = null;
+  };
+  createEffect(() => {
+    const target = photoDrag()?.target;
+    const rel = target?.kind === "dir" ? target.relPath : null;
+    if (rel === autoExpandTarget) return; // 同一行不重开计时
+    clearAutoExpand();
+    if (rel === null || rel === store.scopePath()) return;
+    // `untrack`：树的任何变化不该把计时重置（这里只是“看一眼这行存不存在”）
+    const row = untrack(treeRows).find((candidate) => candidate.relPath === rel);
+    if (row === undefined || row.expanded || !row.hasChildren) return;
+    autoExpandTarget = rel;
+    autoExpandTimer = window.setTimeout(() => {
+      autoExpandTimer = undefined;
+      const still = photoDrag()?.target;
+      if (still?.kind !== "dir" || still.relPath !== rel) return;
+      toggleExpand(rel);
+    }, AUTO_EXPAND_MS);
+  });
+  onCleanup(clearAutoExpand);
+
+  /** 换库 = 旧库的剪切会话作废（`cutIdsOf` 只管 tile，默认槽也要跟着清）。 */
+  createEffect(on(() => store.repositoryId(), (id) => {
+    const current = photoCut();
+    if (current !== null && current.repositoryId !== id) clearPhotoCut();
+  }));
+
   function selectRepository(id: string): void {
     // 移顶**只在展开态**发生（`memory/FUNCTION-BROWSE.md` §4.2）：缩起态在顶部三张之间来回切不该移位
     if (libsOpen()) {
@@ -492,28 +576,71 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
   /* ══ 行尾 `⋯` 的实际动作 ══ */
 
   /**
-   * 查一次这棵子树里有没有文件 —— 「删除空目录」能不能点**由它决定**。
+   * 查一次「**选中的目录**现在能不能删」—— 选中一变就查，工具栏那颗按钮跟着它
+   * enable / disable（崔总 2026-11-05：「要根据点中的目录来算」）。
    *
-   * 查不动（离线、权限、目录刚被别人删了）时按**不空**处理：菜单项禁用，
+   * 判据是**浅检查**（`crates/raybend/src/repo/dirs.rs`）：只看这一层有没有可见子目录、
+   * 有没有照片（本层 + `_RAW/`）。代价是两次 `read_dir`，所以随选中实时跑得起；
+   * 结果按路径缓存，建 / 删 / 移动与外部改动时清空（`forgetDeleteInfo`）。
+   *
+   * 查不动（离线、权限、目录刚被别人删了）时按**不能删**处理：按钮禁用，
    * 总比让人点了再报错好。
    */
-  async function checkEmpty(relPath: string): Promise<void> {
+  async function checkDelete(relPath: string | null): Promise<void> {
+    if (relPath === null || isRecyclePath(relPath)) return;
     const base = root();
     if (base === null) return;
+    if (deleteInfo().has(relPath)) return;
+    setChecking(true);
     try {
-      const info = await dirEmptyCheck(base, relPath);
-      setEmptyInfo((prev) => new Map(prev).set(relPath, info));
+      const info = await dirDeleteCheck(base, relPath);
+      if (base !== root()) return; // 换库了，这份结果作废
+      setDeleteInfo((prev) => new Map(prev).set(relPath, info));
     } catch {
-      setEmptyInfo((prev) =>
+      setDeleteInfo((prev) =>
         new Map(prev).set(relPath, {
-          empty: false,
-          fileCount: 0,
-          dirCount: 0,
-          emptyDirCount: 0,
-          hasUnresolvedLink: false,
+          deletable: false,
+          photoCount: 0,
+          visibleDirCount: 0,
+          hasLink: true,
         }),
       );
+    } finally {
+      setChecking(false);
     }
+  }
+
+  /** 结构变了（建 / 删 / 移动 / 外部改动）：缓存全部作废，再查一次当前选中的那个。 */
+  function forgetDeleteInfo(): void {
+    setDeleteInfo(new Map());
+    void checkDelete(store.scopePath());
+  }
+
+  /** 选中的目录（回收站里的路径**不算**：那两个按钮只对 photos 侧有意义）。 */
+  const selectedRel = (): string | null => {
+    const scope = store.scopePath();
+    if (scope === null || isRecyclePath(scope)) return null;
+    return scope;
+  };
+
+  /** 「删除目录」的 enable：选中了 photos 目录、查完了、确实可以删。 */
+  const canDeleteSelected = (): boolean => {
+    const rel = selectedRel();
+    if (rel === null || checking()) return false;
+    return deleteInfo().get(rel)?.deletable === true;
+  };
+
+  /** 「新建目录」的 enable：有库；选中回收站里的目录时不给建（那不是建目录的地方）。 */
+  const canCreateDir = (): boolean => {
+    const scope = store.scopePath();
+    return root() !== null && !(scope !== null && isRecyclePath(scope));
+  };
+
+  /** 点「新建目录」：选中目录就在它下面建，库根状态就建在树根那一级（`photos/`）。 */
+  function openCreate(): void {
+    setNewName("");
+    setFormError(null);
+    setCreateRel(createParentOf(selectedRel()));
   }
 
   /** 父目录的库内相对路径（`photos/2026` → `photos`；根级 → `""`）。 */
@@ -537,22 +664,27 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
     });
   }
 
-  /** 删掉一棵空目录树，然后把树刷成新的样子。 */
-  async function doDeleteEmpty(): Promise<void> {
+  /** 删掉选中的目录（连同看不见的残留），然后把树与范围一起收拾干净。 */
+  async function doDeleteDir(): Promise<void> {
     const relPath = confirmRel();
     const base = root();
-    if (relPath === null || base === null) return;
+    // 连点「确认」不能并发删两次；第二次直接当没发生
+    if (relPath === null || base === null || busy()) return;
     setBusy(true);
     setFormError(null);
     try {
-      await dirRemoveEmpty(base, relPath);
+      await dirDelete(base, relPath);
       const parent = parentOf(relPath);
       forget(relPath);
       // 正在看的目录被删了 ⇒ 退回「整个库」，否则网格会停在一个不存在的范围上
       const scope = store.scopePath();
       if (scope !== null && (scope === relPath || scope.startsWith(`${relPath}/`))) {
+        // 回到库根（不是"停在一个已经不存在的范围上"）
         store.setScope(null);
+        const repositoryId = store.repositoryId();
+        if (repositoryId !== null) props.onSelectDirectory?.(repositoryId, null);
       }
+      forgetDeleteInfo();
       await loadChildren(parent);
       setConfirmRel(null);
     } catch (error) {
@@ -576,6 +708,8 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
       store.setScope(created);
       const repositoryId = store.repositoryId();
       if (repositoryId !== null) props.onSelectDirectory?.(repositoryId, created);
+      // 结构变了：父目录不再可删（它刚多了个子目录），新目录自己要查一次
+      forgetDeleteInfo();
       setCreateRel(null);
       setNewName("");
     } catch (error) {
@@ -584,10 +718,6 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
       setBusy(false);
     }
   }
-
-  /** `⋯` 菜单里那一行给菜单项用的禁用判定。 */
-  const canDeleteEmpty = (relPath: string): boolean =>
-    emptyInfo().get(relPath)?.empty === true;
 
   async function openDirectoryTags(path: string): Promise<void> {
     const repositoryId = store.repositoryId();
@@ -699,6 +829,37 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
         不逼用户在「选目录」与「管库」之间二选一。
       */}
       <Show when={root() !== null}>
+        {/*
+          **目录区工具栏**（崔总 2026-11-05）：新建 / 删除目录。
+
+          * 它是目录树的**兄弟**而不是子节点 —— 下面的树怎么滚，这一行都钉在原处；
+          * 只有图标、没有文字（用户学一遍就会的东西不占可视面积，§2.20 的同一条精神）；
+          * 两颗按钮的 enable **跟着"点中的目录"实时算**：删除要等浅检查回来才知道
+            （`checkDelete` / `canDeleteSelected`），所以查的过程中它是暗的；
+          * 删除仍然要确认一次 —— 能删的时候已经没什么危害了，但"点错了少个目录"
+            找起来很恼火（崔总 2026-11-05）。
+        */}
+        <div class="flex shrink-0 items-center justify-end gap-1" data-dir-toolbar>
+          <Button
+            variant="ghost"
+            tip={t("browse.newDir")}
+            aria-label={t("browse.newDir")}
+            icon={<IconFolderPlus size={14} />}
+            disabled={!canCreateDir()}
+            onClick={() => openCreate()}
+          />
+          <Button
+            variant="ghost"
+            tip={t("browse.deleteDir")}
+            aria-label={t("browse.deleteDir")}
+            icon={<IconFolderMinus size={14} />}
+            disabled={!canDeleteSelected()}
+            onClick={() => {
+              setFormError(null);
+              setConfirmRel(selectedRel());
+            }}
+          />
+        </div>
         <div
           class={["overflow-y-auto", libsOpen() ? "shrink-0" : "min-h-0 flex-1"].join(" ")}
           style={libsOpen() ? { height: `${TREE_MIN_HEIGHT_PX}px` } : undefined}
@@ -748,28 +909,26 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
       </Show>
 
       {/*
-        删除空目录的确认。
+        删除目录的确认。
 
         这里是**真的在磁盘上删目录**（不是「从集合里移除」），所以刻意**不做**
         `easy destroy` 的 Shift 快通道（`memory/DESIGN.md` §12.2 那条是为移除类操作定的）。
-        能删的东西本身无害（目录里一个文件都没有 → 删了不影响照片），
-        但一旦删错就无法撤销，弹一次值得。
+        能删的时候目录里已经没有照片、也没有子目录了（判据见 `repo::dirs`），
+        但一旦删错就无法撤销，弹一次值得 —— 「莫名其妙少了个目录、还要找少了哪个」太恼火。
       */}
       <ConfirmDialog
         open={confirmRel() !== null}
-        title={t("browse.deleteEmptyTitle")}
+        title={t("browse.deleteDirTitle")}
         message={[
-          t("browse.deleteEmptyBody", {
-            n: confirmRel() === null ? 0 : (emptyInfo().get(confirmRel()!)?.emptyDirCount ?? 0),
-          }),
-          // 删除失败（目录被别人占用/中途冒出了文件）时把话接在正文后面：
+          t("browse.deleteDirBody", { name: confirmRel() === null ? "" : dirDisplayName(confirmRel()!) }),
+          // 删除失败（目录被别人占用 / 中途冒出了文件）时把话接在正文后面：
           // 这个弹窗没有单独的错误行，报错不能没地方去
           formError(),
         ]
           .filter((line): line is string => line !== null && line !== "")
           .join("\n\n")}
-        confirmLabel={t("browse.deleteEmptyDir")}
-        onConfirm={() => void doDeleteEmpty()}
+        confirmLabel={t("browse.deleteDir")}
+        onConfirm={() => void doDeleteDir()}
         onCancel={() => {
           setConfirmRel(null);
           setFormError(null);
@@ -785,7 +944,7 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
             setFormError(null);
           }
         }}
-        title={t("browse.createSubdirTitle")}
+        title={t("browse.newDirTitle")}
         footer={
           <>
             <Button
@@ -802,16 +961,16 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
               disabled={busy() || newName().trim() === ""}
               onClick={() => void doCreateSubdir()}
             >
-              {t("browse.createSubdir")}
+              {t("browse.newDir")}
             </Button>
           </>
         }
       >
         <label class="flex flex-col gap-1">
-          <span class="text-fs-0 text-fg-2">{t("browse.subdirName")}</span>
+          <span class="text-fs-0 text-fg-2">{t("browse.dirName")}</span>
           <Input
             value={newName()}
-            placeholder={t("browse.subdirNamePlaceholder")}
+            placeholder={t("browse.dirNamePlaceholder")}
             onInput={(event) => setNewName(event.currentTarget.value)}
             onKeyDown={(event) => {
               if (event.key === "Enter" && newName().trim() !== "") void doCreateSubdir();

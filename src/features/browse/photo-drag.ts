@@ -20,6 +20,7 @@
  * | --- | --- |
  * | 回收站热区（移入 / 粉碎） | `[data-photo-drop-zone]`（工作区渲染的那个方块） |
  * | 相片桶卡片 | `[data-photo-drop-bucket]`（`OrganizationPanel` 挂的属性） |
+ * | 左列目录行（移动到该目录） | `[data-photo-drop-dir]`（`BrowsePanels` 的 `renderRow` 挂的属性，值是库内相对路径） |
  *
  * 落点判定一律用 `dropHostAt`（`elementFromPoint`）—— 与 export 同一套；
  * 旧实现用「注册热区矩形」，松手时热区已随预览卸载、矩形变 `null`，判不中（2026-10-11 修）。
@@ -32,6 +33,8 @@ import { dropHostAt, trackPointerDrag, type DragPoint } from "../../lib/pointer-
 export type PhotoDropTarget =
   | { kind: "recycle" }
   | { kind: "bucket"; bucketId: number; name: string }
+  /** 左列的一行目录：松手 = 把这批照片**移动**到它下面。 */
+  | { kind: "dir"; relPath: string }
   | { kind: "none" };
 
 export interface PhotoDragState {
@@ -53,6 +56,9 @@ export const BUCKET_DROP_ATTR = "data-photo-drop-bucket";
 /** 垃圾桶热区的命中属性（元素由工作区渲染）。 */
 export const RECYCLE_DROP_ATTR = "data-photo-drop-zone";
 
+/** 目录行的命中属性（值是**库内相对路径**；只有 photos 侧的行挂着它）。 */
+export const DIR_DROP_ATTR = "data-photo-drop-dir";
+
 /** 拖哪几张：拖**选中项**带整批；拖未选中项只带它一个（文件管理器同一套直觉）。 */
 export function dragIdsFor(id: string, selected: ReadonlySet<string>): string[] {
   return selected.has(id) ? [...selected] : [id];
@@ -63,6 +69,13 @@ export function photoDropTargetAt(point: DragPoint): PhotoDropTarget {
   if (dropHostAt(point, `[${RECYCLE_DROP_ATTR}]`) !== null) {
     return { kind: "recycle" };
   }
+  /*
+   * 目录行**先于**相片桶判：左列与右列不重叠，顺序其实无所谓，
+   * 但目录是「这次拖动最常见的落点」，先判它省一次 `closest`。
+   */
+  const dir = dropHostAt(point, `[${DIR_DROP_ATTR}]`);
+  const relPath = dir?.getAttribute(DIR_DROP_ATTR) ?? "";
+  if (relPath !== "") return { kind: "dir", relPath };
   const bucket = dropHostAt(point, `[${BUCKET_DROP_ATTR}]`);
   if (bucket !== null) {
     const bucketId = Number(bucket.getAttribute(BUCKET_DROP_ATTR));
@@ -84,6 +97,8 @@ export interface BeginPhotoDragOptions {
   onRecycle: () => void;
   /** 在桶卡片上松手。 */
   onBucket: (bucketId: number, name: string) => void;
+  /** 在一行目录上松手（移动这批照片到它下面）。 */
+  onDirectory?: (relPath: string) => void;
   /** 拖动**真正开始**时（越过阈值）的回调，例如把左列切到桶面板。 */
   onStart?: () => void;
 }
@@ -124,6 +139,7 @@ export function beginPhotoDrag(event: PointerEvent, options: BeginPhotoDragOptio
       if (!started || cancelled || final === null) return;
       if (target.kind === "recycle") options.onRecycle();
       else if (target.kind === "bucket") options.onBucket(target.bucketId, target.name);
+      else if (target.kind === "dir") options.onDirectory?.(target.relPath);
     },
   });
 }

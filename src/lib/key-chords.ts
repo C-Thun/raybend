@@ -216,8 +216,18 @@ export interface ChordEventLike {
   altKey?: boolean;
 }
 
-/** 事件 → 规范化键名（`+`/`=` 归一，字母小写） */
+/**
+ * 事件 → 规范化键名（`+`/`=` 归一，字母小写）。
+ *
+ * ⚠️ **空格键必须在 `normalizeKey` 之前接住**：空格条上报的是 `event.key === " "`
+ * （一个空格字符），而 `normalizeKey` 第一步就 `trim()` —— 它会变成空串、返回 `null`，
+ * 于是 `defaultKey: "Space"` 那条**永远不会匹配**。
+ * 这是真机 bug（崔总 2026-11-05 报「编辑区按空格切层不生效」）：单测只测过
+ * `normalizeKey("Space")` 这个方向，反向（真实事件 → 键名）从来没被测到。
+ */
 export function eventKey(event: ChordEventLike): string | null {
+  // 空格键的 `event.key` 就是 `" "`（不是 `"Space"`）
+  if (event.key === " ") return "space";
   return normalizeKey(event.key);
 }
 

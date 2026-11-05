@@ -151,6 +151,19 @@ export function runRelease({root=resolve(dirname(fileURLToPath(import.meta.url))
   }
   if(request.skipBuild)log("版本准备完成；未构建，不是可发布产物");
   if(!windows)for(const command of plan.humanCommands)log(`由崔总执行：${command}`);
+  /*
+   * 收尾：擦 WSL 侧的构建垃圾（崔总 2026-11-05 定：「我常跑的只有 debug:win 和 release，
+   * 这两个执行完就该自动处理」）。只清 WSL `./target`，**不动发版目录和日常 debug 目录**
+   * （它们下次还要用）。失败只提示，不影响已完成的发布。
+   */
+  if(!request.skipBuild){
+    try{
+      run("node",["scripts/prune-examples.mjs"],{cwd:root,stdio:"inherit"});
+      run("node",["scripts/clean-target.mjs","--target-dir","./target","--if-stale-days","7"],{cwd:root,stdio:"inherit"});
+    }catch(error){
+      log(`⚠ 收尾清理未完成（不影响已完成的发布）：${error.message}`);
+    }
+  }
   return plan;
 }
 if(process.argv[1] && resolve(process.argv[1])===fileURLToPath(import.meta.url)){

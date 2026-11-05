@@ -43,6 +43,7 @@ import type {
   MarkAction,
   MarkResult,
   MarkingItem,
+  MoveResult,
   MetaFile,
   PhotoMeta,
   PurgeResult,
@@ -105,6 +106,8 @@ export interface BrowseApi {
   undo(repositoryId: string): Promise<MarkResult>;
   redo(repositoryId: string): Promise<MarkResult>;
   remove(repositoryId: string, ids: readonly number[]): Promise<RecycleResult>;
+  /** 移动到库内另一个目录（拖到目录行 / `Ctrl+X`+`Ctrl+V`）。 */
+  moveAssets(repositoryId: string, ids: readonly number[], target: string): Promise<MoveResult>;
   recycleRestore(repositoryId: string, ids: readonly number[]): Promise<RestoreResult>;
   recyclePurge(repositoryId: string, ids: readonly number[]): Promise<PurgeResult>;
   recycleEmpty(repositoryId: string): Promise<PurgeResult>;
@@ -321,6 +324,13 @@ export interface BrowseStore {
   removeIds(ids: readonly string[]): Promise<RecycleResult | null>;
   /** 按 ids 真删（回收站内拖动粉碎用）。 */
   purgeIds(ids: readonly string[]): Promise<PurgeResult | null>;
+  /**
+   * 把这批照片**移动到库内另一个目录**（拖到目录行 / 粘贴）。
+   *
+   * 与删除的区别：**记录留在原处**，只是物理位置变了 —— 所以网格要 `refresh()`
+   * （当前范围里那几张已经不在了），而不是把它们从列表里删掉。
+   */
+  moveIds(ids: readonly string[], target: string): Promise<MoveResult | null>;
 
   // ── 回收站（`specs/library-recycle-bin.md`）──
   /** 是否在回收站视图（左列入口进；查询带 `recycle` 标志、排序固定删除时间倒序）。 */
@@ -1168,6 +1178,18 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
       const result = await api.remove(id, removed);
       dropEntries(new Set(removed));
       void refreshRecycleSummary();
+      return result;
+    },
+
+    async moveIds(ids, target) {
+      const id = repositoryId();
+      if (id === null || ids.length === 0 || !canWrite() || recycleMode()) return null;
+      const result = await api.moveAssets(id, ids.map(Number), target);
+      /*
+       * 搬走的那几张可能已经不在当前范围里了：`refresh` 会把它们从网格上拿掉，
+       * 同时保住剩下的选中（与删除不同 —— 记录没被删，只是换了目录）。
+       */
+      await refresh();
       return result;
     },
 

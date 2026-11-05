@@ -23,6 +23,18 @@
  * 3. **同一时刻只显示一条**：后指到的覆盖前一条（鼠标只能指一个地方）。
  * 4. **粘住的来源不会遮住后来者**：`clear` 只清自己那条 —— 但覆盖之后，
  *    先前的 owner 离开时**不会**把新的那条清掉（归属对得上才清）。
+ *
+ * # 默认槽（崔总 2026-11-05）
+ *
+ * 这条带子除了「指向即提示」之外，还兼任一个**状态播报位**：
+ *
+ * * `flowHintDefault` 是**唯一那一份事实文字**（默认空串）—— 一般情况下什么都没有，
+ *   需要某个**持续状态**（例如「已剪切 N 张」）在整个界面上一直说得清时，
+ *   `setFlowHintDefault(text)` 把它写进去，状态结束再写回 `""`；
+ * * **优先级**：指向提示（`showFlowHint`）> 默认槽。指向某处时那句话盖住状态；
+ *   手一移开（`clearFlowHint`）就回到默认槽 —— 两种情况都不占额外界面空间；
+ * * **不受「提示区开关」管**：那个开关管的是「烦不烦人的说明」（§2.20）；
+ *   默认槽装的是**状态**，关掉提示不该把「你正拿着剪切的东西」也藏起来。
  */
 
 import { createSignal } from "solid-js";
@@ -35,6 +47,15 @@ export interface FlowHintState {
 }
 
 const [hint, setHint] = createSignal<FlowHintState | null>(null);
+
+/**
+ * 默认槽（状态播报位）。**只有一份事实文字**，空串 = 什么都不显示。
+ *
+ * 为什么不做成「又一条 hint」：hint 是**谁的**（owner + 指向覆盖语义），
+ * 默认槽是**没有归属的常驻状态** —— 它的生命周期由写它的人（剪切态）掌握，
+ * 任何人的 `clearFlowHint` 都不应该把它清掉。
+ */
+const [defaultText, setDefaultText] = createSignal("");
 
 /*
  * **开/关住在这一层**（崔总 2026-11-02）：设置里那个开关只改这里，
@@ -78,8 +99,28 @@ export function setFlowHintsEnabled(next: boolean): void {
 
 /** 当前要显示的提示文本（`null` = 这条带子上什么都不显示 / 提示区被关掉）。 */
 export function flowHint(): string | null {
-  if (!enabled()) return null;
-  return hint()?.text ?? null;
+  // 指向提示 > 默认槽（见文件头「默认槽」）
+  if (enabled()) {
+    const current = hint()?.text;
+    if (current !== undefined) return current;
+  }
+  const fallback = defaultText();
+  return fallback === "" ? null : fallback;
+}
+
+/** 默认槽现在的文字（空串 = 没有；调试/测试用，也方便调用方判断要不要改）。 */
+export function flowHintDefault(): string {
+  return defaultText();
+}
+
+/**
+ * 写默认槽（唯一那份事实文字）。传 `""` 就是清掉。
+ *
+ * 同一句话重复写不产生新值 —— 剪切态每改一次张数才调一次，不必自己去重。
+ */
+export function setFlowHintDefault(text: string): void {
+  if (defaultText() === text) return;
+  setDefaultText(text);
 }
 
 /** 显示一条提示（后指到的覆盖前一条；同一 owner + 同一文案不重复写）。 */

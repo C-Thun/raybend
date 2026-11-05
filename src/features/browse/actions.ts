@@ -40,6 +40,16 @@ export interface BrowseActions {
   requestEmptyRecycle: () => void;
   /** 真删选中的照片（**永久**；回收站内拖到粉碎卡时由工作区自己调，槽里也给一个入口）。 */
   requestPurgeRecycle: () => void;
+  /** 剪切选中的照片（`Ctrl+X`；只是记进剪切态，不动任何文件）。 */
+  cut: () => void;
+  canCut: () => boolean;
+  /** 把剪切的那批移到**当前选中目录**（`Ctrl+V`）。 */
+  paste: () => void;
+  canPaste: () => boolean;
+  /** 取消剪切（`Esc`；剪切态优先于「清除选中」）。 */
+  cancelCut: () => void;
+  /** 重读当前目录（`F5`；崔总 2026-11-05：刷新是程序自己的事，但留一条手动兜底）。 */
+  refresh: () => void;
   /** 网格里移动「当前那张」（←/→）：与点击同一套选择语义 */
   moveFocus: (delta: -1 | 1) => void;
   /** 进看图（从锚点那张开始；多选时自然进对比） */

@@ -1,11 +1,24 @@
-//! 库根目录层面的目录操作：**新建子目录**与**删除空目录**。
+//! 库内目录的操作：**新建目录**与**删除目录**。
 //!
-//! 这两个动作来自浏览模式左列目录树行尾的 `⋯` 菜单（`memory/FUNCTION-BROWSE.md` §4.3）：
+//! 两个动作的入口是浏览模式左列的**目录区工具栏**（崔总 2026-11-05 把行尾 `⋯` 菜单
+//! 拆成了常驻按钮与 hover 标签按钮，见 `memory/FUNCTION-BROWSE.md` §4.3）：
 //!
-//! | 菜单项 | 规则 |
+//! | 入口 | 规则 |
 //! | --- | --- |
-//! | 删除空目录 | 选项**一直在**，目录不为空时禁用；判定要**深度检索**（整个子树里没有文件才算空），删除时连同其下所有空子目录一起删 |
-//! | 创建子目录 | 名字要校验（Windows 口径），**重名要挡住**（大小写不敏感） |
+//! | 删除目录 | 判据**只看这一层**：没有用户可见的子目录、也没有照片（本层 + `_RAW/`）——
+//!   也就是「浏览界面里既看不到照片、左边也看不到子目录」。**浅检查，不递归**；
+//!   删的时候连同看不见的残留（`.xmp`、空的 `_RAW/`）一起走 |
+//! | 新建目录 | 名字要校验（Windows 口径），**重名要挡住**（大小写不敏感） |
+//!
+//! # 为什么删除判据是「浏览里看得见的东西」
+//!
+//! （崔总 2026-11-05）浏览模式能看见的只有两样：**目录**与**照片**。库是我们自己维护的，
+//! 侧车 `.xmp` 这类残留本来就不该存在；真残留了，用户看不见它，也不该因为它而删不掉目录。
+//! 所以：`_RAW/`、`.xmp`、随手扔进去的 `.txt` 都**不阻止删除**，跟着一起删。
+//!
+//! 子目录不递归删除 —— 要删就一级一级删（删父之前先把子目录删掉）。
+//! 唯一例外是 `_RAW/`：它在浏览里**不可见**，不是用户目录，所以它里面的照片算作**本目录的照片**
+//! （那些照片在网格里是会显示成 tile 的，挡住删除是对的）。
 //!
 //! # 为什么校验按 Windows 口径
 //!
@@ -15,9 +28,10 @@
 //!
 //! # 两条不可逾越的底线
 //!
-//! 1. **删除只删空目录**：实现只调用 `remove_dir`（目录非空时它自己会失败），
-//!    绝不出现任何形式的递归删除 —— 那是一条能把用户照片删光的路径。
-//! 2. **离线/权限问题一律当失败**：拿不准就不动，宁可让用户再点一次。
+//! 1. **删前必查、查和删用同一套判据**：`remove_dir_checked` 自己先跑一遍
+//!    `check_visible_contents`，通过了才动盘 —— 不靠调用方记得先查。
+//! 2. **符号链接一律算「有东西」**：不跟随、也不删（删别人指向的东西不是这个功能该干的事），
+//!    拿不准就不动。
 
 use std::path::{Component, Path, PathBuf};
 
@@ -128,149 +142,101 @@ pub fn resolve_inside(root: &Path, rel: &str) -> Result<PathBuf, String> {
     Ok(root.join(candidate))
 }
 
-/// 深度检查的结果。
+/// 「这个目录能不能删」的报告（浅检查，只看**浏览界面里看得见的东西**）。
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct EmptyReport {
-    /// 整个子树里一个文件都没有
-    pub empty: bool,
-    /// 子树里的文件数（用来解释「为什么不能删」）
-    pub file_count: u64,
-    /// 子树里的目录数（**不含**传进来的这个目录自己）
-    pub dir_count: u64,
-    /// 其中空目录的个数（删除时会被一起带走）
-    pub empty_dir_count: u64,
-    /// 遇到符号链接之类不好判断的东西（保守起见算「不空」，也不去删它）
-    pub has_unresolved_link: bool,
+pub struct VisibleReport {
+    /// 用户可见的子目录个数（**不含** `_RAW`）
+    pub visible_dir_count: u64,
+    /// 照片个数：本层 + 本层 `_RAW/` 里的（RAW 与位图都算 —— 它们在网格里都是 tile）
+    pub photo_count: u64,
+    /// 有没有符号链接（保守：算「有东西」）
+    pub has_link: bool,
 }
 
-/// 深度检索：`dir` 这棵子树里有没有文件。
+impl VisibleReport {
+    /// 能不能删：看不见任何照片、也看不见任何子目录、也没有链接。
+    #[must_use]
+    pub fn deletable(&self) -> bool {
+        self.visible_dir_count == 0 && self.photo_count == 0 && !self.has_link
+    }
+}
+
+/// `_RAW/` 的目录名（与 `import::plan::RAW_DIR` 同口径，比较大小写不敏感）。
+const RAW_DIR: &str = "_RAW";
+
+/// 浅检查：这一层在**浏览界面里**看得见东西吗（判据见文件头）。
 ///
-/// 规则：
-/// - 只看**文件**（目录不计数）—— 空目录不阻止删除，它们本来就是要一起删的；
-/// - **不跟随符号链接**：遇到链接当作「不好判断」，记 `has_unresolved_link` 并把整棵树判成不空
-///   （删别人指向的东西不是这个功能该干的事）；
-/// - `dir` 自己不存在 → 报错（不是「空」）。
-pub fn check_empty_tree(dir: &Path) -> std::io::Result<EmptyReport> {
+/// 代价是**两次 `read_dir`**（本层 + `_RAW/`），不递归、不 stat 文件内容 ——
+/// 所以选中目录时可以随时跑一次给按钮定 enable / disable。
+pub fn check_visible_contents(dir: &Path) -> std::io::Result<VisibleReport> {
     let meta = std::fs::symlink_metadata(dir)?;
+    if meta.is_symlink() {
+        // 传进来的是个链接：绝对不动它
+        return Ok(VisibleReport { has_link: true, ..VisibleReport::default() });
+    }
     if !meta.is_dir() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
             "不是一个目录",
         ));
     }
-    let mut report = EmptyReport::default();
-    let mut stack = vec![dir.to_path_buf()];
-    while let Some(current) = stack.pop() {
-        for entry in std::fs::read_dir(&current)? {
-            let entry = entry?;
-            let file_type = entry.file_type()?;
-            if file_type.is_symlink() {
-                report.has_unresolved_link = true;
-                continue;
-            }
-            if file_type.is_dir() {
-                report.dir_count += 1;
-                // 先当空的，往下走；下面若发现文件会把它记成非空
-                stack.push(entry.path());
-            } else {
-                report.file_count += 1;
-            }
-        }
-    }
-    // 再数一遍空目录：**自底向上**判定（判定规则见 `count_empty_dirs`）
-    report.empty_dir_count = count_empty_dirs(dir)?;
-    report.empty = report.file_count == 0 && !report.has_unresolved_link;
+    let mut report = VisibleReport::default();
+    count_layer(dir, &mut report, false)?;
     Ok(report)
 }
 
-/// 数这棵子树里有多少个**空目录**：不包含该目录自己。
-///
-/// 「空」的判定是**递归的**：一个目录下面的所有子目录都空、自己又不含文件，它也算空
-/// （它会随着删除一起消失）。所以 `a/b/c` 全空时是 **3 个**空目录，而不是 1 个叶子。
-fn count_empty_dirs(dir: &Path) -> std::io::Result<u64> {
-    let mut count = 0;
+/// 数一层。`in_raw` = 正在数 `_RAW/` 里面：那里只数照片，子目录与链接照旧保守处理。
+fn count_layer(dir: &Path, report: &mut VisibleReport, in_raw: bool) -> std::io::Result<()> {
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
         let file_type = entry.file_type()?;
-        if !file_type.is_dir() || file_type.is_symlink() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if file_type.is_symlink() {
+            report.has_link = true;
             continue;
         }
-        let child = entry.path();
-        if !has_file_under(&child)? {
-            count += 1;
-        }
-        count += count_empty_dirs(&child)?;
-    }
-    Ok(count)
-}
-
-/// 这棵子树（含自己这一层）里有没有文件。
-///
-/// 符号链接按「有东西」算 —— 它指向什么这里并不去看（也不跟随）。
-fn has_file_under(dir: &Path) -> std::io::Result<bool> {
-    for entry in std::fs::read_dir(dir)? {
-        let entry = entry?;
-        let file_type = entry.file_type()?;
-        if file_type.is_symlink() {
-            return Ok(true);
-        }
         if file_type.is_dir() {
-            if has_file_under(&entry.path())? {
-                return Ok(true);
+            // `_RAW/` 不是用户目录：它里面的照片算本目录的照片
+            if in_raw || name.eq_ignore_ascii_case(RAW_DIR) {
+                if in_raw {
+                    // `_RAW/` 里面再套目录：浏览里一样看不见，照旧只数照片（不再往下走一层）
+                    continue;
+                }
+                count_layer(&entry.path(), report, true)?;
+            } else {
+                report.visible_dir_count += 1;
             }
-        } else {
-            return Ok(true);
+            continue;
         }
+        if crate::media::kind::kind_of_file(&name).is_photo() {
+            report.photo_count += 1;
+        }
+        // 余下的都是看不见的残留（`.xmp` / `.txt` / 缩略图 …）：不计数
     }
-    Ok(false)
+    Ok(())
 }
 
-/// 删除**空的**子树：`dir` 自己以及其下所有空目录。
+/// 删除一个目录（连同看不见的残留）。**先查再删**，判据与按钮的 enable 是同一个函数。
 ///
-/// **先查再删**：整棵子树里只要有文件就**一律不动**并报错。
-/// 刻意不做「先把空子目录清掉、最后卡在非空的目标上」——那种半途而废最难解释，
-/// 用户看到的是「报错了，但东西少了一些」。（界面上非空时菜单项本来就是禁用的，
-/// 这里只是兜住「点了之后才有文件冒出来」那种竞态。）
-///
-/// 返回删掉的目录个数。**不会**删除任何文件：底层只调 `remove_dir`，
-/// 而它对非空目录必然失败 —— 这条路径不可能删到用户的照片。
-pub fn remove_empty_tree(dir: &Path) -> std::io::Result<usize> {
-    let report = check_empty_tree(dir)?;
-    if !report.empty {
+/// 通过检查之后用 `remove_dir_all`：里面此刻只剩 `.xmp` / 空 `_RAW/` 这类看不见的东西。
+/// 返回删掉的条目数（给了一句能看懂的报告用）。
+pub fn remove_dir_checked(dir: &Path) -> std::io::Result<u64> {
+    let report = check_visible_contents(dir)?;
+    if !report.deletable() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::DirectoryNotEmpty,
-            if report.has_unresolved_link {
-                "目录里有符号链接，出于安全不自动删除".to_string()
+            if report.has_link {
+                "目录里有符号链接，出于安全没有删除".to_string()
+            } else if report.photo_count > 0 {
+                format!("目录里还有 {} 张照片，不能删", report.photo_count)
             } else {
-                format!("目录里还有 {} 个文件，不能删", report.file_count)
+                format!("目录里还有 {} 个子目录，先把它们删掉", report.visible_dir_count)
             },
         ));
     }
-    let mut removed = remove_empty_children(dir)?;
-    // 整个子树已经确认无文件，最后删自己
-    std::fs::remove_dir(dir)?;
-    removed += 1;
-    Ok(removed)
-}
-
-fn remove_empty_children(dir: &Path) -> std::io::Result<usize> {
-    let mut removed = 0usize;
-    for entry in std::fs::read_dir(dir)? {
-        let entry = entry?;
-        let file_type = entry.file_type()?;
-        // 链接不跟随、也不删（那是别人家的东西）
-        if file_type.is_symlink() || !file_type.is_dir() {
-            continue;
-        }
-        let child = entry.path();
-        removed += remove_empty_children(&child)?;
-        // 只有真的空了才删；非空会失败 —— 那属于「这个目录不该删」，跳过而不是报错
-        if std::fs::read_dir(&child)?.next().is_none() {
-            std::fs::remove_dir(&child)?;
-            removed += 1;
-        }
-    }
-    Ok(removed)
+    // 约定几个文件系统都会有的错误（权限、被占用）要原样报出去
+    std::fs::remove_dir_all(dir)?;
+    Ok(1)
 }
 
 /// 在 `parent` 下建一个名为 `name` 的子目录。
@@ -394,97 +360,85 @@ mod tests {
         }
     }
 
-    // ── 深度空判定 ────────────────────────────────────────────
+    // ── 浅检查：「浏览里看得见东西吗」 ────────────────────────────
 
     #[test]
-    fn reports_empty_for_truly_empty_tree() {
-        let root = temp_root("empty");
-        std::fs::create_dir_all(root.join("a/b/c")).unwrap();
-        let report = check_empty_tree(&root).unwrap();
-        assert!(report.empty);
-        assert_eq!(report.file_count, 0);
-        assert_eq!(report.dir_count, 3);
-        assert_eq!(report.empty_dir_count, 3);
+    fn empty_directory_is_deletable() {
+        let root = temp_root("shallow-empty");
+        std::fs::create_dir_all(root.join("a")).unwrap();
+        let report = check_visible_contents(&root.join("a")).unwrap();
+        assert_eq!(report, VisibleReport::default());
+        assert!(report.deletable());
         std::fs::remove_dir_all(&root).ok();
     }
 
     #[test]
-    fn reports_not_empty_when_a_file_hides_deep_down() {
-        let root = temp_root("deep-file");
-        std::fs::create_dir_all(root.join("a/b/c")).unwrap();
-        std::fs::write(root.join("a/b/c/photo.jpg"), b"x").unwrap();
-        let report = check_empty_tree(&root).unwrap();
-        assert!(!report.empty);
-        assert_eq!(report.file_count, 1);
-        // c 非空 → c 不算空目录；a、b 里有东西（c）也不算
-        assert_eq!(report.empty_dir_count, 0);
+    fn residue_dot_xmp_and_empty_raw_do_not_block_deletion() {
+        let root = temp_root("shallow-residue");
+        std::fs::create_dir_all(root.join("a/_RAW")).unwrap();
+        std::fs::write(root.join("a/IMG_0001.xmp"), b"<x/>").unwrap();
+        std::fs::write(root.join("a/notes.txt"), b"hello").unwrap();
+        let report = check_visible_contents(&root.join("a")).unwrap();
+        assert!(report.deletable(), "看不见的残留不该阻止删除：{report:?}");
+        // 删的时候一起走 —— 这是「库是我们自己维护的」那条口径
+        assert_eq!(remove_dir_checked(&root.join("a")).unwrap(), 1);
+        assert!(!root.join("a").exists());
         std::fs::remove_dir_all(&root).ok();
     }
 
     #[test]
-    fn counts_empty_siblings_alongside_a_file() {
-        let root = temp_root("mixed");
-        std::fs::create_dir_all(root.join("keep")).unwrap();
-        std::fs::create_dir_all(root.join("empty1/empty2")).unwrap();
-        std::fs::write(root.join("keep/photo.jpg"), b"x").unwrap();
-        let report = check_empty_tree(&root).unwrap();
-        assert!(!report.empty);
-        assert_eq!(report.file_count, 1);
-        assert_eq!(report.empty_dir_count, 2, "empty1/empty2 都空");
-        std::fs::remove_dir_all(&root).ok();
-    }
-
-    #[test]
-    fn missing_directory_is_an_error_not_empty() {
-        let root = temp_root("missing");
-        assert!(check_empty_tree(&root.join("nope")).is_err());
-        std::fs::remove_dir_all(&root).ok();
-    }
-
-    #[test]
-    fn file_passed_as_directory_is_rejected() {
-        let root = temp_root("file-as-dir");
-        std::fs::write(root.join("f.txt"), b"x").unwrap();
-        assert!(check_empty_tree(&root.join("f.txt")).is_err());
-        assert!(remove_empty_tree(&root.join("f.txt")).is_err());
-        std::fs::remove_dir_all(&root).ok();
-    }
-
-    // ── 删除 ────────────────────────────────────────────────
-
-    #[test]
-    fn removes_whole_empty_tree_including_itself() {
-        let root = temp_root("remove");
-        std::fs::create_dir_all(root.join("gone/child/grand")).unwrap();
-        let removed = remove_empty_tree(&root.join("gone")).unwrap();
-        assert_eq!(removed, 3);
-        assert!(!root.join("gone").exists());
-        // 库根自己还在
-        assert!(root.exists());
-        std::fs::remove_dir_all(&root).ok();
-    }
-
-    #[test]
-    fn refuses_to_touch_a_tree_that_has_files() {
-        let root = temp_root("keep-files");
-        std::fs::create_dir_all(root.join("keep/empty-child")).unwrap();
-        std::fs::write(root.join("keep/photo.jpg"), b"photo").unwrap();
-        // 非空 ⇒ **一点都不动**（连空子目录也不碰），并且要明确报错
-        let err = remove_empty_tree(&root.join("keep")).unwrap_err();
+    fn photos_inside_raw_block_deletion() {
+        let root = temp_root("shallow-raw-photo");
+        std::fs::create_dir_all(root.join("a/_RAW")).unwrap();
+        std::fs::write(root.join("a/_RAW/IMG_0001.ORF"), b"raw").unwrap();
+        let report = check_visible_contents(&root.join("a")).unwrap();
+        assert_eq!(report.photo_count, 1, "_RAW 里的照片是会显示成 tile 的");
+        assert!(!report.deletable());
+        let err = remove_dir_checked(&root.join("a")).unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::DirectoryNotEmpty);
-        assert!(err.to_string().contains("1 个文件"), "错误信息要能直接给用户看：{err}");
-        assert!(root.join("keep/photo.jpg").exists(), "文件必须原样留着");
-        assert!(root.join("keep/empty-child").exists(), "不空就一律不动");
-        // 空的那一棵该删干净
-        assert_eq!(remove_empty_tree(&root.join("keep/empty-child")).unwrap(), 1);
-        assert!(root.join("keep/photo.jpg").exists());
+        assert!(root.join("a/_RAW/IMG_0001.ORF").exists(), "照片必须原样留着");
         std::fs::remove_dir_all(&root).ok();
     }
 
     #[test]
-    fn refuses_to_follow_symlinks() {
-        let root = temp_root("symlink");
-        let outside = temp_root("symlink-outside");
+    fn any_subdirectory_blocks_deletion_but_deep_files_do_not_matter() {
+        let root = temp_root("shallow-subdir");
+        // 子目录里有照片：子目录本身已经足以挡住删除
+        std::fs::create_dir_all(root.join("a/child")).unwrap();
+        std::fs::write(root.join("a/child/photo.jpg"), b"x").unwrap();
+        let report = check_visible_contents(&root.join("a")).unwrap();
+        assert_eq!(report.visible_dir_count, 1);
+        assert_eq!(report.photo_count, 0, "不递归数照片 —— 只看这一层");
+        assert!(!report.deletable());
+        let err = remove_dir_checked(&root.join("a")).unwrap_err();
+        assert!(err.to_string().contains("子目录"), "{err}");
+        assert!(root.join("a/child/photo.jpg").exists());
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn top_level_photo_blocks_deletion() {
+        let root = temp_root("shallow-photo");
+        std::fs::create_dir_all(root.join("a")).unwrap();
+        std::fs::write(root.join("a/photo.JPG"), b"x").unwrap();
+        assert!(!check_visible_contents(&root.join("a")).unwrap().deletable());
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn missing_or_file_target_is_an_error() {
+        let root = temp_root("shallow-missing");
+        assert!(check_visible_contents(&root.join("nope")).is_err());
+        std::fs::write(root.join("f.txt"), b"x").unwrap();
+        assert!(check_visible_contents(&root.join("f.txt")).is_err());
+        assert!(remove_dir_checked(&root.join("f.txt")).is_err());
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn symlink_counts_as_something_and_is_never_deleted_through() {
+        let root = temp_root("shallow-symlink");
+        let outside = temp_root("shallow-symlink-outside");
         std::fs::write(outside.join("重要文件.jpg"), b"data").unwrap();
         std::fs::create_dir_all(root.join("tree")).unwrap();
         #[cfg(unix)]
@@ -493,12 +447,13 @@ mod tests {
         let linked = false;
 
         if linked {
-            let report = check_empty_tree(&root.join("tree")).unwrap();
-            assert!(!report.empty, "有链接时保守判成不空");
-            assert!(report.has_unresolved_link);
-            // 删不掉（因为不空），而且外部文件必须毫发无伤
-            assert!(remove_empty_tree(&root.join("tree")).is_err());
-            assert!(outside.join("重要文件.jpg").exists());
+            let report = check_visible_contents(&root.join("tree")).unwrap();
+            assert!(report.has_link);
+            assert!(!report.deletable(), "有链接时保守判成有东西");
+            assert!(remove_dir_checked(&root.join("tree")).is_err());
+            assert!(outside.join("重要文件.jpg").exists(), "外部文件毫发无伤");
+            // 链接自己的目标目录也不能被当成「目录里的东西」删掉
+            assert!(std::fs::symlink_metadata(root.join("tree/link")).is_ok());
         }
         std::fs::remove_dir_all(&root).ok();
         std::fs::remove_dir_all(&outside).ok();

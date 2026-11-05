@@ -361,7 +361,7 @@ export function ExportWorkspace(props: ExportWorkspaceProps) {
       animate={state === "loading"}
       icon={<IconPhoto size={64} />}
       tone={state === "error" ? "error" : "muted"}
-      text={state === "repository" ? t("browse.noRepository") : state === "directory" ? t("browse.pickDirectory") : state === "loading" ? t("browse.loading") : state === "error" ? (store.error() ?? props.browse.error() ?? "") : t("export.noIssues")}
+      text={state === "repository" ? t("browse.noRepository") : state === "directory" ? t("browse.libraryRoot") : state === "loading" ? t("browse.loading") : state === "error" ? (store.error() ?? props.browse.error() ?? "") : t("export.noIssues")}
     />;
   };
   /**

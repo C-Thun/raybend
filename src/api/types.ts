@@ -594,6 +594,14 @@ export interface RecycleResult {
 }
 
 /** 还原结果（`renamed` = 因原位被占而改名的张数）。 */
+/** 移动结果（拖到目录行 / `Ctrl+X`+`Ctrl+V`）—— `store::relocate::MoveReport` 的镜像。 */
+export interface MoveResult {
+  moved: number;
+  /** 因目标重名而整组改了名（`_01`）的张数 */
+  renamed: number;
+  failed: DeleteFailure[];
+}
+
 export interface RestoreResult {
   restored: number;
   renamed: number;
@@ -624,12 +632,15 @@ export interface FlagsView {
  *
  * `emptyDirCount` 是**递归**口径：`a/b/c` 全空时算 3 个（它们会一起被删掉）。
  */
-export interface DirEmptyView {
-  empty: boolean;
-  fileCount: number;
-  dirCount: number;
-  emptyDirCount: number;
-  hasUnresolvedLink: boolean;
+export interface DirDeleteCheckView {
+  /** 能不能删（= 看不见照片、看不见子目录、没有链接） */
+  deletable: boolean;
+  /** 本层 + `_RAW/` 里的照片数（解释「为什么不能删」） */
+  photoCount: number;
+  /** 可见子目录数（不递归） */
+  visibleDirCount: number;
+  /** 有符号链接（保守：算有东西） */
+  hasLink: boolean;
 }
 
 /* ── 输入侧（前端 → Rust；不进契约文件，因为没有返回值那种「静默漂移」风险）── */
