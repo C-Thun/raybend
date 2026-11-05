@@ -32,6 +32,7 @@ import { t } from "../i18n";
 import { WORKFLOWS, WORKFLOW_LABEL_KEY, type WorkflowId } from "./flow.ts";
 import { FlowSwitcher, type FlowSwitcherOption } from "./FlowSwitcher.tsx";
 import type { ShellStore } from "./store.ts";
+import { flowHint } from "../lib/flow-hint.ts";
 
 export interface FlowBarProps {
   store: ShellStore;
@@ -75,8 +76,37 @@ export function FlowBar(props: FlowBarProps) {
         <IconSettings size={16} aria-hidden="true" />
       </IconButton>
 
-      {/* 弹性空白：把 EXIF 与开关推到右边 */}
-      <div class="h-px min-w-2 flex-1" />
+      {/*
+        **功能提示区**（崔总 2026-11-01）：设置按钮右边、照片信息左边的那段弹性带子。
+
+        * 文字**左对齐、紧贴设置按钮**（锚点是左边那个按钮，不是整条带子的中点：
+          居中会让它在宽窗口下浮在中间，左不左右不右 —— 崔总 2026-11-01 指出）；
+         * 宽度吃满到 info 区前面，但**留 100px 不顶死**（`pr-[100px]`）；
+        * 没有提示时它只是一个空的弹性占位（与原来的 spacer 等价，不改变布局）；
+        * 超出时右端渐隐（`.fade-x-end`），**不出现省略号**（`AGENTS.md` §2.22）；
+
+        内容与来源走 `lib/flow-hint.ts`：谁指到了谁提一条，离开就清自己那条。
+      */}
+      <div
+        data-flow-hint
+        class="flex h-full min-w-0 flex-1 items-center gap-2 pr-[100px]"
+      >
+        {/*
+          ⚠️ 文字这一层必须**吃满**整条带子（`flex-1`），不能随内容收缩：
+          `.fade-x-end` 的渐隐落在**盒子**右端 —— 盒子随内容收缩时，它淡掉的就是最后 20px 的
+          **字**（短提示看着像缺了个尾巴）。吃满之后，短提示的渐隐区落在空白上，看不见。
+        */}
+        <Show when={flowHint()}>
+          {(text) => (
+            <span
+              class="rb-fade-in min-w-0 flex-1 overflow-hidden whitespace-nowrap fade-x-end text-fs-1 text-fg-accent"
+              data-flow-hint-text
+            >
+              {text()}
+            </span>
+          )}
+        </Show>
+      </div>
 
       <ExifStrip data={props.exif ?? null} class="justify-end" />
 

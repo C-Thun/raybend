@@ -224,7 +224,7 @@ fn adopt_one<R: Runtime>(
         .latest
         .iter()
         .chain(parsed.profiles.iter().map(|profile| &profile.stack))
-        .filter_map(|stack| stack.lut_id.clone())
+        .flat_map(|stack| stack.lut_chain.iter().map(|layer| layer.id.clone()))
         .collect();
     if !lut_ids.is_empty() {
         let resources = app.state::<DbState>().with(app, |db| {

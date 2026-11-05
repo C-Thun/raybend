@@ -60,6 +60,9 @@ pub struct WorkingTonePlan {
     tone: Option<Vec<f32>>,
     curve_tables: Option<[Vec<f32>; 3]>,
     transfer: &'static TransferTables,
+    /// 「这一份计划是从哪几条参数来的」—— 编辑区层链（有额外层时）要走回
+    /// `render_develop16`，那条路需要原始参数与曲线，而不是已经压成表的这一份。
+    params: DevelopParams,
 }
 
 /// Small per-parameter data for GPU global adjustment. No source pixels are baked
@@ -113,7 +116,20 @@ impl WorkingTonePlan {
             tone,
             curve_tables,
             transfer: transfer_tables(),
+            params: params.clone(),
         }
+    }
+
+    /// 这份计划的原始参数（层链回退用）。
+    #[must_use]
+    pub fn params(&self) -> &DevelopParams {
+        &self.params
+    }
+
+    /// 这份计划的曲线（层链回退用）。
+    #[must_use]
+    pub fn curves(&self) -> &CurveSet {
+        &self.curves
     }
 
     fn tone_at(&self, value: f32) -> f32 {
@@ -293,6 +309,53 @@ pub fn render_working_reference(
     tone: &WorkingTonePlan,
     stages: &DevelopStages<'_>,
 ) -> Result<WorkingImage, WorkingImageError> {
+    /*
+     * **有额外编辑区层时走整条显影管线**（`specs/editor-area.md` §4.1）。
+     *
+     * 工作域（Rec.2020 f32）这条路的 GPU 快速路只认识「默认层那一条全局链」，
+     * 而层链是逐像素的 CPU 合成 —— 复用 `render_develop16` 一份实现，
+     * 不在这里再写第二套层循环（`AGENTS.md` §2.12）。
+     *
+     * **已知取舍**（写进实施记录）：中转一次 `0..1` 的 16bit 线性图，
+     * 工作域里 >1 的高光在这一段被夹掉；无额外层的老路一点没变。
+     */
+    if let Some(stack) = stages.areas.filter(|stack| !stack.is_degenerate()) {
+        let mut rgb = Vec::with_capacity(source.rgb.len());
+        for value in &source.rgb {
+            let value = if value.is_finite() {
+                value.clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            rgb.push((value * 65535.0 + 0.5) as u16);
+        }
+        let linear = super::pipeline::LinearImage {
+            width: source.width,
+            height: source.height,
+            rgb,
+        };
+        let legacy = DevelopStages {
+            lens: stages.lens,
+            nr_method: stages.nr_method,
+            denoise: stages.denoise,
+            local_tone: stages.local_tone,
+            sharpen: stages.sharpen,
+            lut: stages.lut,
+            areas: Some(stack),
+            weight: stages.weight,
+        };
+        let displayed =
+            super::pipeline::render_develop16(&linear, tone.params(), tone.curves(), &legacy);
+        let mut out = vec![0.0f32; displayed.len()];
+        for (slot, value) in out.iter_mut().zip(displayed) {
+            *slot = color::srgb_to_linear(f32::from(value) / 65535.0);
+        }
+        for pixel in out.as_chunks_mut::<3>().0 {
+            *pixel = color::mat3_vec3(LINEAR_SRGB_TO_REC2020, *pixel);
+        }
+        return WorkingImage::from_flat(source.width, source.height, out);
+    }
     let warped = stages
         .lens
         .filter(|map| !map.is_identity())
@@ -321,7 +384,7 @@ pub fn render_working_reference(
     let gains = tone.resolved.gains();
     let finish_in_pass = stages.local_tone.is_none()
         && stages.sharpen.is_none_or(|plan| plan.is_identity())
-        && stages.lut.is_none();
+        && stages.lut.is_none_or(super::lut::LutChain::is_empty);
     let map = |src: &[f32], dst: &mut [f32]| {
         for (pixel, output) in src
             .as_chunks::<3>()
@@ -360,16 +423,18 @@ pub fn render_working_reference(
     for pixel in output.as_chunks_mut::<3>().0 {
         *pixel = tone.display_reference(*pixel);
     }
-    if stages.sharpen.is_some_and(|plan| !plan.is_identity()) || stages.lut.is_some() {
+    if stages.sharpen.is_some_and(|plan| !plan.is_identity())
+        || stages.lut.is_some_and(|chain| !chain.is_empty())
+    {
         for value in &mut output {
             *value = tone.transfer.encode(*value);
         }
         if let Some(plan) = stages.sharpen.filter(|plan| !plan.is_identity()) {
             super::sharpen::sharpen_display(&mut output, source.width, source.height, plan);
         }
-        if let Some(lut) = stages.lut {
+        if let Some(chain) = stages.lut.filter(|chain| !chain.is_empty()) {
             for pixel in output.as_chunks_mut::<3>().0 {
-                *pixel = lut.eval_extended(*pixel);
+                *pixel = chain.eval_extended(*pixel);
             }
         }
         for value in &mut output {
@@ -395,6 +460,8 @@ mod tests {
             local_tone: None,
             sharpen: None,
             lut: None,
+            areas: None,
+            ..DevelopStages::default()
         }
     }
 
@@ -464,7 +531,8 @@ mod tests {
         .unwrap();
         let tone = WorkingTonePlan::new(&DevelopParams::default(), &CurveSet::identity());
         let mut stages = stages();
-        stages.lut = Some(&lut);
+        let chain = super::super::lut::LutChain::single(std::sync::Arc::new(lut));
+        stages.lut = Some(&chain);
         let output = render_working_reference(&input, &tone, &stages).unwrap();
         assert!(output.pixels()[0][0] < 0.0 && output.pixels()[0][2] > 1.0);
     }
@@ -500,6 +568,8 @@ mod tests {
                 local_tone: Some((&local, 0.3)),
                 sharpen: Some(&plans.sharpen),
                 lut: None,
+                areas: None,
+                ..DevelopStages::default()
             };
             let output = render_working_reference(&input, &tone, &stages).unwrap();
             let reference = WorkingReferenceImage::from_working(output).unwrap();

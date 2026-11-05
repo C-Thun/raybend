@@ -34,6 +34,7 @@
 //! 单测用外部给定的测试向量钉住 `map_pixel_exact`，再逐点比对「LUT 路径 vs 精确路径」
 //! （差不超过 1 级 8bit）—— 所以「快」不会把「对」甩掉。
 
+use super::areas::{AreaKind, LayerStack, PointWeightConfig, point_weight_with};
 use super::color::{linear_to_srgb, srgb8_to_linear_table, temperature_gain_ratio};
 use super::curve::CurveSet;
 use super::local_tone::{LocalToneRows, LocalToneState};
@@ -283,6 +284,20 @@ impl Resolved {
     #[must_use]
     pub fn needs_chroma(&self) -> bool {
         self.saturation.abs() > 1e-6 || self.vibrance.abs() > 1e-6
+    }
+
+    /// 线性那半条链是**恒等**吗（没有白平衡 / 曝光 / 反差 / 高光 / 黑区）。
+    ///
+    /// 层循环用它决定「这一层要不要建线性查表」：新建的空层是恒等的，
+    /// 33 层全恒等时一次查表都不该发生。
+    #[must_use]
+    fn is_linear_identity(&self) -> bool {
+        self.gains
+            .iter()
+            .all(|gain| (*gain - 1.0).abs() < 1e-6)
+            && self.contrast.abs() < 1e-6
+            && self.highlights.abs() < 1e-6
+            && self.blacks.abs() < 1e-6
     }
 
     /// **线性链的指纹**：这几项变了才需要重算局部色调映射的分析。
@@ -769,6 +784,29 @@ impl LinearChainLuts {
         let fraction = scaled - index as f32;
         table[index] + (table[index + 1] - table[index]) * fraction
     }
+
+    /// 查表（**f32 输入**，层循环用）。
+    ///
+    /// 表只在 `0..=1` 上采样（与快路径同一个域）；越界的通道**当场退回标量**，
+    /// 而不是夹到表的两端 —— 层间是「f32 线性、不夹取」（`specs/editor-area.md` §4.6），
+    /// 夹一次就会把上一层的高光吃掉。
+    #[inline]
+    fn lookup_f32(&self, channel: usize, linear: f32, resolved: &Resolved) -> f32 {
+        if !(0.0..=1.0).contains(&linear) {
+            #[allow(clippy::cast_possible_truncation)]
+            let gain = resolved.gains[channel];
+            return chain_linear(linear, gain, resolved);
+        }
+        let table = &self.tables[channel];
+        let scaled = linear * (LUT_LEN - 1) as f32;
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let index = scaled.floor() as usize;
+        if index + 1 >= LUT_LEN {
+            return table[LUT_LEN - 1];
+        }
+        let fraction = scaled - index as f32;
+        table[index] + (table[index + 1] - table[index]) * fraction
+    }
 }
 
 /// 显示 LUT（**融合路径用**）：线性（0..1，越界夹）→ 显示值 0..1（含 sRGB OETF 与曲线）。
@@ -817,6 +855,616 @@ impl DisplayLuts {
         let fraction = scaled - index as f32;
         table[index] + (table[index + 1] - table[index]) * fraction
     }
+}
+
+/// 显示域 → 线性（**带符号扩展**：±1 以上按同一份 sRGB 曲线外推）。
+///
+/// 层间穿过显示域（曲线 / 色度 / LUT）之后要回到线性给下一层用；
+/// 夹到 `0..1` 会把上一层已经推出的高光吃掉，所以走带符号的那一套
+/// （与 `develop::working` 的 `signed_encode / decode` 同一个口径）。
+#[inline]
+fn decode_signed(value: f32) -> f32 {
+    if value.abs() <= 1e-6 {
+        return 0.0;
+    }
+    value.signum() * super::color::srgb_to_linear(value.abs())
+}
+
+/// 线性 → 显示（带符号扩展，`decode_signed` 的逆）。
+#[inline]
+fn encode_signed(value: f32) -> f32 {
+    if value.abs() <= 1e-6 {
+        return 0.0;
+    }
+    value.signum() * linear_to_srgb(value.abs())
+}
+
+/// 层间「线性 → 线性」的预折叠表：显示值 `0..1` → 线性（带符号）。
+///
+/// 每像素每层错开一次 `powf` 太贵；表外的值（±1 以上）当场退回标量 ——
+/// 那是被上一层推出去的少量高光，不影响主流。
+struct DecodeLut(Vec<f32>);
+
+impl DecodeLut {
+    fn build() -> Self {
+        #[allow(clippy::cast_precision_loss)]
+        let denominator = (LUT_LEN - 1) as f32;
+        Self(
+            (0..LUT_LEN)
+                .map(|index| {
+                    #[allow(clippy::cast_precision_loss)]
+                    let display = index as f32 / denominator;
+                    super::color::srgb_to_linear(display)
+                })
+                .collect(),
+        )
+    }
+
+    #[inline]
+    fn decode(&self, value: f32) -> f32 {
+        if value.abs() > 1.0 {
+            return decode_signed(value);
+        }
+        let scaled = value.abs() * (LUT_LEN - 1) as f32;
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let index = scaled.floor() as usize;
+        let a = self.0[index.min(LUT_LEN - 1)];
+        let b = self.0[(index + 1).min(LUT_LEN - 1)];
+        let linear = a + (b - a) * (scaled - index as f32);
+        if value < 0.0 { -linear } else { linear }
+    }
+}
+
+/// 一层**准备好求值**的形态（`specs/editor-area.md` §4.5 的层内固定管线）。
+///
+/// ```text
+/// 线性 → WB×EV → 反差 → 高光/黑区 →（默认层：基础曲线）→ rgb 曲线 → 通道曲线
+///      → 正向高光中性化 → 色度 →（默认层：LUT）
+/// ```
+///
+/// 既无曲线也无色度（也不是默认层带 LUT / 本地色调）⇒ **全程留在线性域**，
+/// 不跨域、不做 OETF。
+struct PreparedArea<'a> {
+    /// 权重（全图恒 1；控制点按向量距离平滑衰减）
+    weight: AreaWeight,
+    /// 层不透明度
+    opacity: f32,
+    resolved: Resolved,
+    /// 线性半条链的查表（`None` = 本层没有线性调整）
+    linear: Option<LinearChainLuts>,
+    /// 显示半条链的查表（`None` = 本层不跨到显示域）
+    display: Option<DisplayLuts>,
+    /// 本层的曲线：**表外**的值用它精确求值（signed 扩展，不能夹到 0..1）
+    curves: &'a CurveSet,
+    /// **额外地层**才走 signed 扩展；默认层必须保持改动前的夹取语义（单层等价）。
+    extended_display: bool,
+    /// `highlights > 0` 时的基线（正向高光只提亮度，不推色相）
+    baseline: Option<DisplayLuts>,
+    chroma: bool,
+    /// 默认层独有的两件：LUT 链与局部色调（§4.3）
+    lut: Option<&'a super::lut::LutChain>,
+    local: Option<(&'a LocalToneState, f32)>,
+}
+
+/// 一层拿多少权重。
+#[derive(Debug, Clone, Copy)]
+enum AreaWeight {
+    /// 全图（含默认层）：恒 1
+    Full,
+    /// 控制点：冻结的种子向量 + 容差（**没有空间项**）
+    Point {
+        seed: [f32; 3],
+        tolerance: f32,
+        /// 容差 → 两个轴的映射（默认 = 固化常量；开发期可被调试面板覆盖）
+        config: PointWeightConfig,
+    },
+}
+
+impl AreaWeight {
+    #[inline]
+    fn at(&self, linear: [f32; 3]) -> f32 {
+        match *self {
+            Self::Full => 1.0,
+            Self::Point { seed, tolerance, config } => {
+                point_weight_with(seed, tolerance, linear, &config)
+            }
+        }
+    }
+}
+
+impl<'a> PreparedArea<'a> {
+    fn prepare(
+        resolved: Resolved,
+        curves: &'a CurveSet,
+        weight: AreaWeight,
+        opacity: f32,
+        lut: Option<&'a super::lut::LutChain>,
+        local: Option<(&'a LocalToneState, f32)>,
+    ) -> Self {
+        let chroma = resolved.needs_chroma();
+        let baseline_resolved = (resolved.highlights > 0.0).then_some(Resolved {
+            highlights: 0.0,
+            ..resolved
+        });
+        let needs_display = !curves.is_identity() || chroma || lut.is_some();
+        Self {
+            weight,
+            opacity: opacity.clamp(0.0, 1.0),
+            resolved,
+            linear: (!resolved.is_linear_identity()).then(|| LinearChainLuts::build(&resolved)),
+            display: needs_display.then(|| DisplayLuts::build(curves)),
+            curves,
+            extended_display: false,
+            baseline: baseline_resolved.map(|_| DisplayLuts::build(curves)),
+            chroma,
+            lut,
+            local,
+        }
+    }
+
+    fn from_area(area: &'a super::areas::AreaLayer, config: PointWeightConfig) -> Self {
+        let weight = match area.kind {
+            AreaKind::Full => AreaWeight::Full,
+            AreaKind::Point { seed, tolerance, .. } => AreaWeight::Point {
+                seed,
+                tolerance,
+                config,
+            },
+        };
+        let mut prepared = Self::prepare(
+            Resolved::new(&area.params),
+            &area.curves,
+            weight,
+            // 关掉的层 = 权重恒 0（整层旁路，但**留在链里**：顺序 / 名字 / 参数都不动）
+            if area.enabled { area.opacity } else { 0.0 },
+            None,
+            None,
+        );
+        prepared.extended_display = true;
+        prepared
+    }
+
+    /// 线性半条链（本层无调整时原样返回）。
+    #[inline]
+    fn apply_linear(&self, prev: [f32; 3]) -> [f32; 3] {
+        match &self.linear {
+            None => prev,
+            Some(tables) => [
+                tables.lookup_f32(0, prev[0], &self.resolved),
+                tables.lookup_f32(1, prev[1], &self.resolved),
+                tables.lookup_f32(2, prev[2], &self.resolved),
+            ],
+        }
+    }
+
+    /// 显示半条链（`None` = 本层不跨域）。
+    #[inline]
+    fn apply_display(&self, linear: [f32; 3]) -> Option<[f32; 3]> {
+        let display = self.display.as_ref()?;
+        let mut out = [
+            self.display_value(display, 0, linear[0]),
+            self.display_value(display, 1, linear[1]),
+            self.display_value(display, 2, linear[2]),
+        ];
+        if let Some(baseline) = &self.baseline {
+            let original = [
+                self.display_value(baseline, 0, linear[0]),
+                self.display_value(baseline, 1, linear[1]),
+                self.display_value(baseline, 2, linear[2]),
+            ];
+            out = neutralize_positive_highlights(out, original);
+        }
+        if self.chroma {
+            out = apply_chroma_unbounded(out, self.resolved.saturation, self.resolved.vibrance);
+        }
+        if let Some(lut) = self.lut {
+            out = lut.eval_extended(out);
+        }
+        Some(out)
+    }
+
+    /// 表内查表；**表外**（上一层推出的 >1 / <0）用 signed 的精确求值。
+    ///
+    /// 这是 §4.6「层间不夹取」的关键：`DisplayLuts` 的域只有 `0..1`，
+    /// 直接查它会把上一层的高光夹到白点，下一层再也拉不回来。
+    #[inline]
+    fn display_value(&self, table: &DisplayLuts, channel: usize, linear: f32) -> f32 {
+        if self.extended_display && linear.is_finite() && !(0.0..=1.0).contains(&linear) {
+            encode_and_curve_extended(linear, channel, self.curves)
+        } else {
+            table.lookup(channel, linear)
+        }
+    }
+}
+
+/// `encode_and_curve` 的**带符号扩展**版本（层间用，不进快路径）。
+///
+/// 与 `develop::working` 的 `curve_at` 同一条口径：OETF 按符号外推，
+/// 曲线用 `eval_extended`（保留域外残差），于是「上一层推出去的 >1」
+/// 在下一层仍然是一個可以继续运算的数，而不是被削成 1。
+fn encode_and_curve_extended(linear: f32, channel: usize, curves: &CurveSet) -> f32 {
+    let encoded = encode_signed(linear);
+    let based = curves.base.eval_extended(encoded);
+    let composite = curves.rgb.eval_extended(based);
+    match channel {
+        0 => curves.r.eval_extended(composite),
+        1 => curves.g.eval_extended(composite),
+        _ => curves.b.eval_extended(composite),
+    }
+}
+
+/// **链循环**（`specs/editor-area.md` §4.1）：默认层插在 `default_index` 的位置。
+struct LayerChain<'a> {
+    layers: Vec<PreparedArea<'a>>,
+}
+
+impl<'a> LayerChain<'a> {
+    fn build(
+        default: PreparedArea<'a>,
+        stack: &'a LayerStack,
+        config: PointWeightConfig,
+    ) -> Self {
+        let mut layers = Vec::with_capacity(stack.len());
+        let mut areas = stack.areas.iter();
+        let mut default = Some(default);
+        for position in 0..stack.len() {
+            if position == stack.default_index {
+                if let Some(layer) = default.take() {
+                    layers.push(layer);
+                }
+            } else if let Some(area) = areas.next() {
+                layers.push(PreparedArea::from_area(area, config));
+            }
+        }
+        Self { layers }
+    }
+
+    /// 默认层带局部色调时，每个线程要自己建一份行推进器（`strength` 已在里面）。
+    fn local_tone(&self) -> Option<(&'a LocalToneState, f32)> {
+        self.layers.iter().find_map(|layer| layer.local)
+    }
+
+    /// 一个像素：线性输入 → 显示输出（`0..1`，未夹取）。
+    ///
+    /// 红线：**权重读本层输入 `prev`，绝不读本层输出**（§4.1 红线一）。
+    #[inline]
+    fn eval(
+        &self,
+        linear: [f32; 3],
+        x: usize,
+        rows: &mut Option<LocalToneRows<'_>>,
+        decode: &DecodeLut,
+    ) -> [f32; 3] {
+        match self.run(linear, x, rows, decode) {
+            ChainValue::Display(value) => value,
+            ChainValue::Linear(value) => [
+                encode_signed(value[0]),
+                encode_signed(value[1]),
+                encode_signed(value[2]),
+            ],
+        }
+    }
+
+    /// 合成到第 `layer` 层**之前**为止的**线性**值（穿过显示域的那一段解回线性）——
+    /// 控制点落点取种子用（`layer` 在**行序**里的位置；0 = 原始源）。
+    fn compose_linear_upto(&self, linear: [f32; 3], layer: usize, decode: &DecodeLut) -> [f32; 3] {
+        let mut current = linear;
+        let mut display: Option<[f32; 3]> = None;
+        for (index, area) in self.layers.iter().enumerate() {
+            if index == layer {
+                break;
+            }
+            let prev = current;
+            let alpha = area.weight.at(prev) * area.opacity;
+            if !(alpha > 1e-6) {
+                continue;
+            }
+            let lin = area.apply_linear(prev);
+            if let Some(mapped) = area.apply_display(lin) {
+                let previous_display = display.unwrap_or_else(|| {
+                    [
+                        encode_signed(prev[0]),
+                        encode_signed(prev[1]),
+                        encode_signed(prev[2]),
+                    ]
+                });
+                let blended = std::array::from_fn(|channel| {
+                    previous_display[channel] + (mapped[channel] - previous_display[channel]) * alpha
+                });
+                display = Some(blended);
+                current = [
+                    decode.decode(blended[0]),
+                    decode.decode(blended[1]),
+                    decode.decode(blended[2]),
+                ];
+            } else {
+                current = std::array::from_fn(|channel| {
+                    prev[channel] + (lin[channel] - prev[channel]) * alpha
+                });
+                display = None;
+            }
+        }
+        match display {
+            Some(value) => [
+                decode.decode(value[0]),
+                decode.decode(value[1]),
+                decode.decode(value[2]),
+            ],
+            None => current,
+        }
+    }
+
+    fn run(
+        &self,
+        linear: [f32; 3],
+        x: usize,
+        rows: &mut Option<LocalToneRows<'_>>,
+        decode: &DecodeLut,
+    ) -> ChainValue {
+        let mut current = linear;
+        let mut display: Option<[f32; 3]> = None;
+        for layer in &self.layers {
+            let prev = current;
+            let alpha = layer.weight.at(prev) * layer.opacity;
+            if !(alpha > 1e-6) {
+                continue;
+            }
+            let mut lin = layer.apply_linear(prev);
+            if layer.local.is_some()
+                && let Some(tone) = rows.as_mut()
+            {
+                // `ratio_for_rgb` 的 `log2` 在 NaN 上不会短路：luma NaN ⇒ ratio NaN。
+                // 调不出 NaN 的链不该让它有出口 —— 别把一个 NaN 带进输出。
+                let ratio = tone.ratio_for_rgb(x, lin);
+                let ratio = if ratio.is_finite() { ratio } else { 1.0 };
+                lin = [lin[0] * ratio, lin[1] * ratio, lin[2] * ratio];
+            }
+            if let Some(mapped) = layer.apply_display(lin) {
+                let previous_display = display.unwrap_or_else(|| {
+                    [
+                        encode_signed(prev[0]),
+                        encode_signed(prev[1]),
+                        encode_signed(prev[2]),
+                    ]
+                });
+                let blended = std::array::from_fn(|channel| {
+                    previous_display[channel] + (mapped[channel] - previous_display[channel]) * alpha
+                });
+                display = Some(blended);
+                current = [
+                    decode.decode(blended[0]),
+                    decode.decode(blended[1]),
+                    decode.decode(blended[2]),
+                ];
+            } else {
+                current = std::array::from_fn(|channel| {
+                    prev[channel] + (lin[channel] - prev[channel]) * alpha
+                });
+                display = None;
+            }
+        }
+        match display {
+            Some(value) => ChainValue::Display(value),
+            None => ChainValue::Linear(current),
+        }
+    }
+}
+
+/// 链跑完时值在哪一个域。
+enum ChainValue {
+    Linear([f32; 3]),
+    Display([f32; 3]),
+}
+
+/// **层链的生产路径**（有额外层时才走这里；单层仍走 [`map_rows`] / [`LocalPass`]）。
+///
+/// 与快路径共用同一套数学（`Resolved` / `DisplayLuts` / `apply_chroma` / `neutralize_positive_highlights`），
+/// 只是把「一个像素里内循环走层」写在了一处 —— 合成不需要任何中间图（§4.6）。
+fn render_layered16(
+    source: &LinearImage,
+    params: &DevelopParams,
+    curves: &CurveSet,
+    stages: &DevelopStages<'_>,
+    stack: &LayerStack,
+) -> Vec<u16> {
+    let resolved = Resolved::new(params);
+    let default = PreparedArea::prepare(
+        resolved,
+        curves,
+        AreaWeight::Full,
+        1.0,
+        stages.lut.filter(|chain| !chain.is_empty()),
+        stages.local_tone.filter(|(_, strength)| *strength > 0.0),
+    );
+    let chain = LayerChain::build(default, stack, stages.weight);
+    // **退化的层不跑**：空层 / 关掉的层不产生任何像素改动，整张图走快路径即可
+    //（33 层全空时不能多跑一遍全画幅）。
+    if chain
+        .layers
+        .iter()
+        .all(|layer| layer.opacity <= 1e-6 || (layer.linear.is_none() && layer.display.is_none()))
+    {
+        // 退化的**层**省掉了，但 LUT 仍要套（它是默认层那一段的末尾）
+        let mut out = render_rgb16_with_local_tone(source, params, curves, stages.local_tone);
+        if let Some(chain) = stages.lut.filter(|chain| !chain.is_empty()) {
+            chain
+                .apply_rgb(&mut out)
+                .expect("管线输出必为 RGB 三元组");
+        }
+        return out;
+    }
+    let decode = DecodeLut::build();
+    let width = source.width as usize;
+    let mut out = vec![0u16; source.rgb.len()];
+    let run = |input: &[u16], output: &mut [u16], first_row: usize| {
+        let mut rows = chain
+            .local_tone()
+            .map(|(state, strength)| LocalToneRows::new(state, strength, source.width, source.height));
+        for (row, (line_in, line_out)) in input
+            .as_chunks::<3>()
+            .0
+            .chunks(width)
+            .zip(output.as_chunks_mut::<3>().0.chunks_mut(width))
+            .enumerate()
+        {
+            if let Some(tone) = rows.as_mut() {
+                tone.set_row(first_row + row);
+            }
+            for (x, (pixel_in, pixel_out)) in line_in.iter().zip(line_out.iter_mut()).enumerate() {
+                let linear = [
+                    f32::from(pixel_in[0]) / 65535.0,
+                    f32::from(pixel_in[1]) / 65535.0,
+                    f32::from(pixel_in[2]) / 65535.0,
+                ];
+                let display = chain.eval(linear, x, &mut rows, &decode);
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                for (channel, slot) in pixel_out.iter_mut().enumerate() {
+                    *slot = (display[channel].clamp(0.0, 1.0) * 65535.0 + 0.5) as u16;
+                }
+            }
+        }
+    };
+
+    let threads = std::thread::available_parallelism()
+        .map_or(1, std::num::NonZeroUsize::get)
+        .min(16);
+    if threads <= 1 || source.height < 32 {
+        run(&source.rgb, &mut out, 0);
+        return out;
+    }
+    let rows_per_chunk = (source.height as usize).div_ceil(threads);
+    std::thread::scope(|scope| {
+        let mut remaining_in = source.rgb.as_slice();
+        let mut remaining_out = out.as_mut_slice();
+        let mut first_row = 0usize;
+        while !remaining_out.is_empty() {
+            let rows = (remaining_out.len() / (width * 3)).min(rows_per_chunk).max(1);
+            let take = rows * width * 3;
+            let (chunk_out, rest_out) = remaining_out.split_at_mut(take);
+            let (chunk_in, rest_in) = remaining_in.split_at(take);
+            remaining_in = rest_in;
+            remaining_out = rest_out;
+            let start = first_row;
+            first_row += rows;
+            let run_ref = &run;
+            scope.spawn(move || run_ref(chunk_in, chunk_out, start));
+        }
+    });
+    out
+}
+
+/// **单个像素的合成结果（线性）** —— 控制点落点取种子用（`specs/editor-area.md` §3.3）。
+///
+/// 种子是「**该层输入**」：把链合成到 `layer` 那一层**之前**为止（第 `layer` 行在
+/// 行序中的位置；0 = 原始线性源，`layer == layer_count()` = 整链跑完）。
+/// 穿过显示域的那一段再解回线性（§4.6 的 signed 可逆编码）。
+///
+/// `x` / `y` 是**像素坐标**（采样位本身不参与权重，§4.2）。
+/// 镜头 / 降噪 / 局部色调**不在这里**：种子取的是「这张照片的像素」，
+/// 而镜头重采样会移动像素位置（落点是一次点击，不值得为它跑一遍镜头）。
+#[must_use]
+pub fn compose_linear_at(
+    source: &LinearImage,
+    params: &DevelopParams,
+    curves: &CurveSet,
+    stages: &DevelopStages<'_>,
+    layer: usize,
+    x: u32,
+    y: u32,
+) -> Option<[f32; 3]> {
+    compose_linear_median(source, params, curves, stages, layer, x, y, 0)
+}
+
+/// 控制点落点取样的**小窗半径**（1024 长边解码上的像素）。
+///
+/// 7×7 = 49 个像素；对 3712 宽的原图约 25×25 像素。单像素会采到热噪点、
+/// 压缩块边界或刚好跨在物体边缘的一颗异色点 —— 一次点击就永久冻结错的种子。
+/// 小窗中位数对少量坏值免疫，又不会像大窗那样把邻近物体混进来。
+pub const SEED_SAMPLE_RADIUS: u32 = 3;
+
+/// **小窗取样的合成结果**（控制点种子用）：在 `radius` 像素的方形窗内，
+/// 对「该层输入」的线性 RGB 逐通道取**中位数**。
+///
+/// 为什么是中位数而不是均值：窗外缘可能压到物体边界，窗内也可能有热噪点；
+/// 均值会被这些少数坏值拉走，中位数不会。窗是**方形**而不是圆：实现简单、
+/// 半径语义一眼看得懂（`3` = 7×7）。`radius = 0` 时退化为单点，
+/// 与旧的 [`compose_linear_at`] 逐位一致。
+#[allow(clippy::too_many_arguments)]
+#[must_use]
+pub fn compose_linear_median(
+    source: &LinearImage,
+    params: &DevelopParams,
+    curves: &CurveSet,
+    stages: &DevelopStages<'_>,
+    layer: usize,
+    x: u32,
+    y: u32,
+    radius: u32,
+) -> Option<[f32; 3]> {
+    if source.width == 0 || source.height == 0 || x >= source.width || y >= source.height {
+        return None;
+    }
+    let mut default = Some(PreparedArea::prepare(
+        Resolved::new(params),
+        curves,
+        AreaWeight::Full,
+        1.0,
+        // 默认层挂着的 LUT 也是「该层输入」的一部分（默认层在目标层之前时）
+        stages.lut.filter(|chain| !chain.is_empty()),
+        None,
+    ));
+    let decode = DecodeLut::build();
+    let chain = if let Some(stack) = stages.areas {
+        let default = default.take()?;
+        Some(LayerChain::build(default, stack, stages.weight))
+    } else {
+        None
+    };
+    let sample = |pixel: [f32; 3]| -> Option<[f32; 3]> {
+        if let Some(chain) = &chain {
+            // 行号在层数之后 = 整链跑完（与 `LayerStack::len()` 同口径；超出的按整链算）
+            Some(chain.compose_linear_upto(pixel, layer.min(chain.layers.len()), &decode))
+        } else if layer == 0 {
+            // 没有额外层：layer 0 = 原始源，layer 1（默认层之后）= 默认层的线性段
+            Some(pixel)
+        } else {
+            default
+                .as_ref()
+                .map(|default| default.apply_linear(pixel))
+        }
+    };
+    let x0 = x.saturating_sub(radius);
+    let x1 = x.saturating_add(radius).min(source.width - 1);
+    let y0 = y.saturating_sub(radius);
+    let y1 = y.saturating_add(radius).min(source.height - 1);
+    let mut channels: [Vec<f32>; 3] = std::array::from_fn(|_| Vec::new());
+    for yy in y0..=y1 {
+        let row = (yy as usize) * (source.width as usize);
+        for xx in x0..=x1 {
+            let offset = (row + xx as usize) * 3;
+            let pixel = [
+                f32::from(source.rgb[offset]) / 65535.0,
+                f32::from(source.rgb[offset + 1]) / 65535.0,
+                f32::from(source.rgb[offset + 2]) / 65535.0,
+            ];
+            let value = sample(pixel);
+            // 坏数据不能把中位数带成 NaN（管线正常不会给，但这是进程边界）
+            if let Some(value) = value.filter(|value| value.iter().all(|channel| channel.is_finite())) {
+                for (channel, slot) in channels.iter_mut().enumerate() {
+                    slot.push(value[channel]);
+                }
+            }
+        }
+    }
+    if channels[0].is_empty() {
+        return None;
+    }
+    let mut out = [0.0; 3];
+    for (channel, values) in channels.iter_mut().enumerate() {
+        values.sort_by(f32::total_cmp);
+        out[channel] = values[values.len() / 2];
+    }
+    Some(out)
 }
 
 /// **生产路径（带动态反差）**：线性源 → 局部色调映射 → 16bit sRGB。
@@ -914,8 +1562,17 @@ pub struct DevelopStages<'a> {
     pub local_tone: Option<(&'a LocalToneState, f32)>,
     /// 锐化（显示域，**就地**改 16bit 输出）
     pub sharpen: Option<&'a super::sharpen::SharpenPlan>,
-    /// 选中的创意 LUT；在显示域最后应用。
-    pub lut: Option<&'a super::lut::Lut>,
+    /// 选中的创意 LUT；作用在**默认层那一段的末尾**（§4.7，2026-10-31 起在锐化之前）。
+    pub lut: Option<&'a super::lut::LutChain>,
+    /// **默认层之外的编辑区层 + 默认层的位置**（`specs/editor-area.md`）。
+    ///
+    /// `None` / 退化（只有默认层）⇒ 走原来的快路径，与改动前**逐位一致**；
+    /// 有额外层 ⇒ 逐像素链循环（`render_layered16`）。
+    pub areas: Option<&'a super::areas::LayerStack>,
+    /// **控制点容差 → 权重**的映射（`develop/areas.rs::PointWeightConfig`）。
+    ///
+    /// 默认就是固化常量；开发期的调试面板可以逐次覆盖它（只在编辑器真帧那条路上生效）。
+    pub weight: PointWeightConfig,
 }
 
 /// **从编辑参数里解析出来的可选阶段**（显影线程与缩略图**共用一份**，免得两处各拼一遍 ——
@@ -989,13 +1646,24 @@ pub fn render_develop16(
             }
         });
     let source = denoised.as_ref().unwrap_or(source);
-    let mut out = render_rgb16_with_local_tone(source, params, curves, stages.local_tone);
+    let layered = stages.areas.filter(|stack| !stack.is_degenerate());
+    let mut out = match layered {
+        // 有额外层：一条链一次算完（LUT 在默认层那一段的末尾，已在链里）
+        Some(stack) => render_layered16(source, params, curves, stages, stack),
+        None => {
+            let mut out =
+                render_rgb16_with_local_tone(source, params, curves, stages.local_tone);
+            // LUT = **默认层那一段的末尾**（§4.7）：默认层在第 1 位时它就落在锐化之前。
+            if let Some(chain) = stages.lut.filter(|chain| !chain.is_empty()) {
+                chain
+                    .apply_rgb(&mut out)
+                    .expect("管线输出必为 RGB 三元组");
+            }
+            out
+        }
+    };
     if let Some(plan) = stages.sharpen.filter(|plan| !plan.is_identity()) {
         super::sharpen::sharpen_display(&mut out, source.width, source.height, plan);
-    }
-    if let Some(lut) = stages.lut {
-        lut.apply_rgb(&mut out, 1.0)
-            .expect("管线输出必为 RGB 三元组");
     }
     out
 }
@@ -1246,6 +1914,8 @@ mod tests {
             local_tone: None,
             sharpen: Some(&zero_sharpen),
             lut: None,
+            areas: None,
+            ..DevelopStages::default()
         };
         assert_eq!(render_develop(&source, &params, &curves, &stages), plain);
     }
@@ -1942,6 +2612,385 @@ mod tests {
         );
     }
 
+    /// **种子取「该层输入」**（`compose_linear_at`）：只算到那一层之前，
+    /// 在那一层之后的调整**不能**影响种子（2026-10-31 评审发现的真实 bug）。
+    #[test]
+    fn seed_sampling_only_uses_layers_before_the_target() {
+        let source = image(&[[0.2, 0.2, 0.2]]);
+        let params = DevelopParams::new(None);
+        let curves = CurveSet::identity();
+        // 默认层压暗一半、之后一层拉亮 +1EV：默认层之后取到的应当是**压暗过**的
+        let stack = layer_stack(vec![full_area(&[("exposure", 1.0)])], None);
+        let at_default = {
+            let stages = DevelopStages {
+                areas: Some(&stack),
+                ..DevelopStages::default()
+            };
+            compose_linear_at(&source, &params, &curves, &stages, 1, 0, 0)
+                .expect("合法像素")
+        };
+        assert!(
+            (at_default[0] - 0.2).abs() < 1e-6,
+            "默认层（无调整）之后应当还是原值（{at_default:?}）"
+        );
+        let after_first = {
+            let stages = DevelopStages {
+                areas: Some(&stack),
+                ..DevelopStages::default()
+            };
+            compose_linear_at(&source, &params, &curves, &stages, 2, 0, 0).expect("合法像素")
+        };
+        assert!(
+            (after_first[0] - 0.4).abs() < 1e-4,
+            "+1EV 之后应当是 0.4（{after_first:?}）"
+        );
+        // 行号在层数之后 = 整链跑完（同一份链），再大也只是"合成全部"
+        let stages = DevelopStages {
+            areas: Some(&stack),
+            ..DevelopStages::default()
+        };
+        assert!(compose_linear_at(&source, &params, &curves, &stages, 3, 0, 0).is_some());
+        assert!(compose_linear_at(&source, &params, &curves, &stages, 9, 0, 0).is_some());
+        assert!(compose_linear_at(&source, &params, &curves, &stages, 0, 5, 0).is_none());
+        // 没有额外层时：0 = 原始源，1 = 默认层的线性段
+        let plain = DevelopStages::default();
+        let raw_pixel = compose_linear_at(&source, &params, &curves, &plain, 0, 0, 0)
+            .expect("原始源");
+        assert!((raw_pixel[0] - 0.2).abs() < 1e-6);
+        assert!(
+            (compose_linear_at(&source, &params, &curves, &plain, 1, 0, 0)
+                .expect("默认层之后")[0]
+                - 0.2)
+                .abs()
+                < 1e-6
+        );
+    }
+
+    /* ── 编辑区（area）层链（W2）────────────────────────────── */
+
+    /// **种子取样是“小窗中位数”，不是单像素**（2026-11-02 真实照片修复的配套）。
+    ///
+    /// 单像素会采到热噪点 / 压缩边缘；区域中位数对少量坏值免疫。
+    /// 这里用一个 5×5 全 0.2 的图、只在中心放一颗纯红热像素：
+    /// 单点必须采到红，`SEED_SAMPLE_RADIUS` 的窗必须回到 0.2。
+    #[test]
+    fn seed_sampling_uses_a_region_median_not_one_pixel() {
+        let base = linear(0.2);
+        let mut rgb = vec![base; 5 * 5 * 3];
+        let center = (2 * 5 + 2) * 3;
+        rgb[center] = linear(1.0);
+        rgb[center + 1] = 0;
+        rgb[center + 2] = 0;
+        let source = LinearImage::new(5, 5, rgb).expect("形状对得上");
+        let params = DevelopParams::new(None);
+        let curves = CurveSet::identity();
+        let stages = DevelopStages::default();
+
+        let single = compose_linear_at(&source, &params, &curves, &stages, 0, 2, 2)
+            .expect("中心像素");
+        assert!(
+            (single[0] - 1.0).abs() < 1e-4 && single[1] < 1e-4,
+            "radius 0 应当就是那颗热像素：{single:?}"
+        );
+
+        let sampled = compose_linear_median(
+            &source,
+            &params,
+            &curves,
+            &stages,
+            0,
+            2,
+            2,
+            SEED_SAMPLE_RADIUS,
+        )
+        .expect("小窗");
+        assert!(
+            (sampled[0] - 0.2).abs() < 1e-3
+                && (sampled[1] - 0.2).abs() < 1e-3
+                && (sampled[2] - 0.2).abs() < 1e-3,
+            "24 个底色 + 1 个热像素 ⇒ 中位数应回到底色：{sampled:?}"
+        );
+
+        // 靠边时窗口夹在图像内，不 panic、也不越界
+        let edge = compose_linear_median(&source, &params, &curves, &stages, 0, 0, 0, 99)
+            .expect("边缘小窗");
+        assert!(
+            (edge[0] - 0.2).abs() < 1e-3,
+            "窗口夹到图像内后仍应是底色中位数：{edge:?}"
+        );
+    }
+
+    fn layer_stack(
+        areas: Vec<super::super::areas::AreaSpec>,
+        default_index: Option<u8>,
+    ) -> super::super::areas::LayerStack {
+        super::super::areas::LayerStack::from_specs(&areas, default_index, None)
+            .expect("测试用的层列表要合法")
+    }
+
+    fn full_area(params: &[(&str, f64)]) -> super::super::areas::AreaSpec {
+        let mut area = super::super::areas::AreaSpec::full();
+        for (id, value) in params {
+            area.params.insert((*id).to_string(), *value);
+        }
+        area
+    }
+
+    fn point_area(
+        seed: [f32; 3],
+        tolerance: f32,
+        params: &[(&str, f64)],
+    ) -> super::super::areas::AreaSpec {
+        let mut area = full_area(params);
+        area.kind = super::super::areas::AreaKind::Point {
+            x: 0.5,
+            y: 0.5,
+            seed,
+            tolerance,
+        };
+        area
+    }
+
+    /// 一条 16×16 的渐变（亮度从左到右、色相从上到下）。
+    fn gradient_image() -> LinearImage {
+        let mut rgb = Vec::new();
+        for y in 0..16u32 {
+            for x in 0..16u32 {
+                let luma = x as f32 / 15.0;
+                let warm = y as f32 / 15.0;
+                rgb.extend([
+                    linear(luma),
+                    linear(luma * (1.0 - warm * 0.5)),
+                    linear(luma * (1.0 - warm)),
+                ]);
+            }
+        }
+        LinearImage::new(16, 16, rgb).expect("形状对得上")
+    }
+
+    /// **退化等价**：多一层「什么都不做」的层，逐位等于单层快路径。
+    #[test]
+    fn identity_area_layer_is_bit_identical_to_the_single_layer_path() {
+        let source = gradient_image();
+        let params = params(&[
+            ("exposure", 0.4),
+            ("contrast", 25.0),
+            ("saturation", 30.0),
+            ("blacks", 10.0),
+        ]);
+        let mut curves = CurveSet::identity();
+        curves.rgb =
+            crate::develop::Curve::from_points(vec![[0.0, 0.0], [0.5, 0.6], [1.0, 1.0]]).unwrap();
+        let plain = render_develop16(&source, &params, &curves, &DevelopStages::default());
+
+        for default_index in [None, Some(0), Some(1)] {
+            let stack = layer_stack(vec![super::super::areas::AreaSpec::full()], default_index);
+            let stages = DevelopStages {
+                areas: Some(&stack),
+                ..DevelopStages::default()
+            };
+            /*
+             * 逐点等价到 **1 个 16bit 级**：快路径把「线性链 + 显示变换」合成一张表
+             * （一次插值），层链是「线性表 → 显示表」两次插值 —— 中间那一次的
+             * 表误差（≈1e-5）在个别像素上会翻成 1 级。这是**精度实现差异**，
+             * 不是口径差异；8bit 输出最多差 1 级（量化时贴着舍入边界的那一格）。
+             */
+            let layered = render_develop16(&source, &params, &curves, &stages);
+            let worst = layered
+                .iter()
+                .zip(&plain)
+                .map(|(a, b)| usize::from(a.abs_diff(*b)))
+                .max()
+                .unwrap_or(0);
+            assert!(
+                worst <= 1,
+                "空层（默认层位置 {default_index:?}）不能改变画面（最大偏差 {worst} 级）"
+            );
+            assert!(
+                quantize_rgb8(&layered) == quantize_rgb8(&plain)
+                    || quantize_rgb8(&layered)
+                        .iter()
+                        .zip(quantize_rgb8(&plain))
+                        .all(|(a, b)| a.abs_diff(b) <= 1),
+                "8bit 输出最多差 1 级（默认层位置 {default_index:?}）"
+            );
+        }
+    }
+
+    /// **关掉的层整层旁路**（权重 0），但留在链里（顺序 / 名字 / 参数都不动）。
+    #[test]
+    fn disabled_area_is_bypassed_without_being_removed() {
+        let source = gradient_image();
+        let params = DevelopParams::new(None);
+        let curves = CurveSet::identity();
+        let plain = render_develop16(&source, &params, &curves, &DevelopStages::default());
+
+        let mut off = full_area(&[("exposure", 1.5)]);
+        off.enabled = false;
+        let stack = layer_stack(vec![off], None);
+        let stages = DevelopStages {
+            areas: Some(&stack),
+            ..DevelopStages::default()
+        };
+        let bypassed = render_develop16(&source, &params, &curves, &stages);
+        let worst = bypassed
+            .iter()
+            .zip(&plain)
+            .map(|(a, b)| usize::from(a.abs_diff(*b)))
+            .max()
+            .unwrap_or(0);
+        assert!(
+            worst <= 1,
+            "关掉的层不能改画面（最大偏差 {worst} 级；表插值差异上限 1）"
+        );
+
+        let mut on = full_area(&[("exposure", 1.5)]);
+        on.enabled = true;
+        let stack = layer_stack(vec![on], None);
+        let stages = DevelopStages {
+            areas: Some(&stack),
+            ..DevelopStages::default()
+        };
+        assert_ne!(
+            render_develop16(&source, &params, &curves, &stages),
+            plain,
+            "开着的同一层必须真的改到画面"
+        );
+    }
+
+    /// **层间不夹取**（§4.6）：上一层把高光推出 1，下一层仍然能拉回来。
+    #[test]
+    fn out_of_range_values_survive_the_display_domain_between_layers() {
+        // 中性灰：色度对它没有影响，方便只看「夹没夹」
+        let source = image(&[[0.2, 0.2, 0.2]]);
+        let params = DevelopParams::new(None);
+        let curves = CurveSet::identity();
+        let plain = render_develop16(&source, &params, &curves, &DevelopStages::default());
+
+        // 第 1 层（默认层之后）+2EV 并带色度 ⇒ 这一层要跨到显示域；
+        // 第 2 层 −2EV 把它拉回来。中间若被夹到 1，结果就是白的而不是原来的 0.2。
+        let stack = layer_stack(
+            vec![
+                full_area(&[("exposure", 2.0), ("saturation", 30.0)]),
+                full_area(&[("exposure", -2.0)]),
+            ],
+            None,
+        );
+        let stages = DevelopStages {
+            areas: Some(&stack),
+            ..DevelopStages::default()
+        };
+        let out = render_develop16(&source, &params, &curves, &stages);
+        let back = f32::from(out[0]) / 65535.0;
+        let expected = f32::from(plain[0]) / 65535.0;
+        assert!(
+            (back - expected).abs() < 0.01,
+            "两层互相抵消后应当回到原图（实际 {back}，期望 {expected}；被夹过就会接近 1）"
+        );
+        assert_eq!(out.len(), plain.len());
+    }
+
+    /// **层序改变 ⇒ 画面改变**（列表自上而下 = 计算顺序）。
+    #[test]
+    fn layer_order_changes_the_picture() {
+        let source = gradient_image();
+        let params = DevelopParams::new(None);
+        let curves = CurveSet::identity();
+        let exposure = full_area(&[("exposure", 0.8)]);
+        let contrast = full_area(&[("contrast", 70.0)]);
+
+        let first = layer_stack(vec![exposure.clone(), contrast.clone()], None);
+        let second = layer_stack(vec![contrast, exposure], None);
+        let render = |stack: &super::super::areas::LayerStack| {
+            let stages = DevelopStages {
+                areas: Some(stack),
+                ..DevelopStages::default()
+            };
+            render_develop16(&source, &params, &curves, &stages)
+        };
+        let a = render(&first);
+        let b = render(&second);
+        assert_ne!(a, b, "曝光→反差 与 反差→曝光 必须是两种结果");
+    }
+
+    /// **容差变大 ⇒ 受影响的像素变多**（权重单调）。
+    #[test]
+    fn larger_tolerance_affects_more_pixels() {
+        let source = gradient_image();
+        let params = DevelopParams::new(None);
+        let curves = CurveSet::identity();
+        let base = render_develop16(&source, &params, &curves, &DevelopStages::default());
+        let seed = super::super::areas::feature_vector([0.5, 0.5, 0.5]);
+        let affected = |tolerance: f32| {
+            let stack = layer_stack(
+                vec![point_area(seed, tolerance, &[("exposure", 0.5)])],
+                None,
+            );
+            let stages = DevelopStages {
+                areas: Some(&stack),
+                ..DevelopStages::default()
+            };
+            render_develop16(&source, &params, &curves, &stages)
+                .iter()
+                .zip(&base)
+                .filter(|(after, before)| after != before)
+                .count()
+        };
+        // 容差是 100..1000 的**数值域**（映射到两个轴的区间见 `POINT_WEIGHT_CONFIG`）。
+        // 这两个取值让「小」只圈住种子附近、「大」明显更宽但还不到全图。
+        let small = affected(300.0);
+        let large = affected(700.0);
+        assert!(small > 0, "种子附近必须真的改到像素");
+        assert!(
+            large > small,
+            "容差变大要让更多像素进入（300 → {small}，700 → {large}）"
+        );
+        assert!(large < base.len(), "容差再大也不该命中全部像素");
+    }
+
+    /// **没有空间项**：采样位（`x` / `y`）怎么动，画面都逐位一样。
+    #[test]
+    fn moving_the_point_sample_does_not_change_the_pixels() {
+        use crate::store::develop::{Area, AreaKind as StoreKind};
+
+        let source = gradient_image();
+        let params = DevelopParams::new(None);
+        let curves = CurveSet::identity();
+        let make = |x: f32, y: f32| Area {
+            id: 1,
+            kind: StoreKind::Point {
+                x,
+                y,
+                seed: [0.4, 0.55, 0.5],
+                tolerance: 0.2,
+            },
+            name: String::new(),
+            enabled: true,
+            opacity: 1.0,
+            color: 0,
+            params: [("exposure".to_string(), 0.6)].into(),
+            curves: std::collections::BTreeMap::new(),
+            seed_version: crate::store::develop::SEED_VERSION,
+        };
+        let render = |area: &Area| {
+            let stack = super::super::areas::LayerStack::from_specs(
+                &[area.to_spec()],
+                None,
+                None,
+            )
+            .expect("合法层");
+            let stages = DevelopStages {
+                areas: Some(&stack),
+                ..DevelopStages::default()
+            };
+            render_develop16(&source, &params, &curves, &stages)
+        };
+        assert_eq!(
+            render(&make(0.1, 0.9)),
+            render(&make(0.95, 0.05)),
+            "控制点只看向量，采样位不同不该改任何像素"
+        );
+    }
     #[test]
     fn base_curve_precedes_user_curve_without_changing_user_points() {
         let mut curves = CurveSet::identity();

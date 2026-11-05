@@ -45,6 +45,13 @@ pub const NOT_MAPPED: &[(&str, &str)] = &[
     ("vignetteRange", "镜头项按配置文件校正，不做手动映射"),
     ("chromatic", "镜头项按配置文件校正，不做手动映射"),
     ("chromaticBlue", "镜头项按配置文件校正，不做手动映射"),
+    // 编辑区（area）的掩膜参数：它们不是"一次显影的标量"，而是层的控制点设置。
+    // `crs:` 里没有层的概念（Lightroom 的局部调整在 `LrLocalCorrection` 里，量表完全不同），
+    // 所以整层只进 `rb:profileJson`（新参数随 `areas` 自动跟随）。
+    ("areaTolerance", "控制点容差，属层设置；层只进 rb:profileJson"),
+    ("areaOpacity", "层不透明度，属层设置；层只进 rb:profileJson"),
+    ("areaChroma", "控制点距离权重，属层设置；层只进 rb:profileJson"),
+    ("areaLuma", "控制点距离权重，属层设置；层只进 rb:profileJson"),
 ];
 
 /// 从 raw 基的 latest 推出 `crs:` 块。
@@ -239,6 +246,54 @@ mod tests {
                 "XMP 映射表里的 {id} 已不在参数表，删掉或改名时记得同步这里"
             );
         }
+    }
+
+    /// 编辑区（area）层**只进 `rb:profileJson`**：层里的参数不进 `crs:`（§13.2 的 XMP 口径）。
+    #[test]
+    fn area_layers_never_leak_into_crs() {
+        use crate::store::develop::{Area, AreaKind};
+        let mut latest = stack(&[], &[]);
+        latest.areas = vec![
+            Area {
+                id: 1,
+                kind: AreaKind::Full,
+                name: "天空".into(),
+                enabled: true,
+                opacity: 1.0,
+                color: 0,
+                params: [("exposure".to_string(), -0.8), ("saturation".to_string(), 40.0)].into(),
+                curves: [("rgb".to_string(), vec![[0.0, 0.0], [0.5, 0.7], [1.0, 1.0]])].into(),
+                seed_version: 0,
+            },
+            Area {
+                id: 2,
+                kind: AreaKind::Point {
+                    x: 0.4,
+                    y: 0.6,
+                    seed: [0.3, 0.0, 0.0],
+                    tolerance: crate::develop::areas::TOLERANCE_DEFAULT,
+                },
+                name: String::new(),
+                enabled: true,
+                opacity: 1.0,
+                color: 3,
+                params: [("contrast".to_string(), 30.0)].into(),
+                curves: Default::default(),
+                seed_version: crate::store::develop::SEED_VERSION,
+            },
+        ];
+        latest.default_index = Some(0);
+        let block = crs_block(&latest, None);
+        assert!(
+            block.attrs.is_empty(),
+            "层里的参数 / 曲线不能写进 crs：{:?}",
+            block.attrs
+        );
+        // 完整 profile（含层）走 `rb:profileJson`
+        let json = serde_json::to_string(&latest).expect("序列化");
+        assert!(json.contains("\"areas\""), "层必须进 rb 的规范 JSON：{json}");
+        // `DevelopStack` 自己的序列化是 snake_case（`rb:profileJson` 用这一份）
+        assert!(json.contains("\"default_index\":0"), "{json}");
     }
 
     #[test]

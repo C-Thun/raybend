@@ -24,6 +24,7 @@
 import { Show, untrack, type JSX } from "solid-js";
 
 import type { EditorRenderState } from "../../api/types.ts";
+import { overlayLive } from "../../lib/overlay-live.ts";
 
 /** 把 `[a, b, c, d, e, f]` 写成 CSS `matrix(...)`。 */
 export function overlayMatrixCss(
@@ -41,9 +42,26 @@ export interface ViewportOverlayProps {
 }
 
 export function ViewportOverlay(props: ViewportOverlayProps): JSX.Element {
+  /**
+   * 矩阵**优先读实时那一份**（`lib/overlay-live.ts`）：拖动 / 缩放时每帧读一次，
+   * 静止时才退回 250ms 轮询的快照。不这样的话，照片在动而覆盖层每 250ms 才跳一下
+   * （崔总 2026-11-01：控制点必须完美实时跟随）。
+   *
+   * 实时那份带着「哪张照片」——换图中途读到上一张的矩阵就忽略它。
+   */
+  const matrix = (): readonly [number, number, number, number, number, number] | null => {
+    const live = overlayLive();
+    if (live !== null && live.transform !== null) {
+      const painted = props.renderState?.paintedPath ?? null;
+      if (live.photoPath === null || painted === null || live.photoPath === painted) {
+        return live.transform;
+      }
+    }
+    return props.renderState?.overlayTransform ?? null;
+  };
   const transform = (): string | null => {
-    const matrix = props.renderState?.overlayTransform ?? null;
-    return matrix === null ? null : overlayMatrixCss(matrix);
+    const value = matrix();
+    return value === null ? null : overlayMatrixCss(value);
   };
 
   return (

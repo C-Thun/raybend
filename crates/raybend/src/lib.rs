@@ -26,6 +26,7 @@ pub mod diagnostics;
 pub mod display;
 pub mod export;
 pub mod external_editor;
+pub mod geo;
 pub mod import;
 pub mod index;
 pub mod lens;

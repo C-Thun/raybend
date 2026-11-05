@@ -2,6 +2,7 @@
 
 use crate::error::{Error, Result};
 use std::path::Path;
+use std::sync::Arc;
 
 pub const SAMPLE_WEBP: &[u8] = include_bytes!("../../assets/lut-sample.webp");
 pub const SAMPLE_WIDTH: u32 = 768;
@@ -18,6 +19,75 @@ pub struct Lut {
 
 fn error(message: impl Into<String>) -> Error {
     Error::Unsupported(message.into())
+}
+
+/// **一条已解析的 LUT 链**：按顺序逐层应用到像素上。
+///
+/// 持有 `Arc<Lut>`，于是可以跨线程/跨帧传递（显影 worker → 渲染线程 / 缩略图缓存）。
+/// 空链与「没有 LUT」等价：所有调用点都用 `Option<&LutChain>`（`None` / 空都什么也不做）。
+#[derive(Debug, Clone, Default)]
+pub struct LutChain {
+    layers: Vec<LutChainLayer>,
+}
+
+/// 链里的一层：哪支 LUT + 强度（0..=1，1 = 100%）。
+#[derive(Debug, Clone)]
+pub struct LutChainLayer {
+    pub lut: Arc<Lut>,
+    pub strength: f32,
+}
+
+impl LutChain {
+    #[must_use]
+    pub fn new(layers: Vec<LutChainLayer>) -> Self {
+        Self {
+            layers: layers
+                .into_iter()
+                .filter(|layer| layer.strength.is_finite() && layer.strength > 0.0)
+                .collect(),
+        }
+    }
+
+    /// 单支（强度 100%）——便利构造与旧调用点迁移用。
+    #[must_use]
+    pub fn single(lut: Arc<Lut>) -> Self {
+        Self::new(vec![LutChainLayer { lut, strength: 1.0 }])
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.layers.is_empty()
+    }
+
+    #[must_use]
+    pub fn layers(&self) -> &[LutChainLayer] {
+        &self.layers
+    }
+
+    /// 显示域（u16 / u8）：逐层 `eval` + 强度混合（与单支时的 `apply_rgb` 同一套数学）。
+    ///
+    /// # Errors
+    /// 像素长度不是 3 的倍数，或某层求值失败。
+    pub fn apply_rgb<T: super::sample::RgbSample>(&self, rgb: &mut [T]) -> Result<()> {
+        for layer in &self.layers {
+            layer.lut.apply_rgb(rgb, layer.strength)?;
+        }
+        Ok(())
+    }
+
+    /// 工作域（f32）：逐层 `eval_extended` + 强度混合。
+    ///
+    /// `strength == 1` 时**逐位等于**单支的 `eval_extended`（多层只是串起来）。
+    #[must_use]
+    pub fn eval_extended(&self, mut input: [f32; 3]) -> [f32; 3] {
+        for layer in &self.layers {
+            let mapped = layer.lut.eval_extended(input);
+            input = std::array::from_fn(|c| {
+                input[c] + (mapped[c] - input[c]) * layer.strength.clamp(0.0, 1.0)
+            });
+        }
+        input
+    }
 }
 
 impl Lut {

@@ -113,6 +113,13 @@ impl TextField {
 /// 文字字段的长度上限：够写一段描述，又不至于把界面/DB 撑爆。
 pub const TEXT_FIELD_MAX_CHARS: usize = 2000;
 
+/// 建议输入的候选条数上限（每个字段：最近输入 + 库内已有值都在这个额度里）。
+///
+/// 登记在 `memory/LIMITS.md`：这是**面板可读性**的闸门（下拉最多 8 行可见，
+/// 再多就要翻很久才找得到想要的那个），不是性能限制。
+/// 前端 `lib/text-history.ts::TEXT_SUGGEST_LIMIT` 必须与它同值。
+pub const TEXT_SUGGEST_LIMIT: usize = 20;
+
 /// 撤销栈的默认深度。100 步足够覆盖「刚发现打错了」这类场景，内存也几乎为零。
 pub const DEFAULT_UNDO_DEPTH: usize = 100;
 
@@ -166,8 +173,12 @@ pub enum Op {
     /// （撤销栈与测试都靠它），而 f64 不是 `Eq`。位模式能**精确**还原原值 ——
     /// 连 `-0.0` 与 `0.0` 的区别都保得住（`==` 分不出来，位模式分得出来）。
     /// `None` = 这一项不在（回到基线）。
+    ///
+    /// `area_id`：`None` = **默认层**（旧历史全是 `None`，因此旧撤销栈照旧可解析）；
+    /// `Some(id)` = 那个附加层（`specs/editor-area.md` §2）。
     DevelopParam {
         asset_id: i64,
+        area_id: Option<u32>,
         param_id: String,
         before: Option<u64>,
         after: Option<u64>,
@@ -175,11 +186,59 @@ pub enum Op {
     /// 改一条**曲线**（整条替换；`None` = 回到恒等）。
     ///
     /// 控制点存成 JSON 字符串：撤销要的是「原样还原」，字符串最不容易出错。
+    /// `area_id` 同 [`Self::DevelopParam`]。
     DevelopCurve {
         asset_id: i64,
+        area_id: Option<u32>,
         channel: String,
         before: Option<String>,
         after: Option<String>,
+    },
+    /// **新建一层**（`area` = 该层的 JSON；`index` = 插入的行号）。
+    AreaAdd {
+        asset_id: i64,
+        index: u32,
+        area: String,
+    },
+    /// **删除一层**（`index` = 它原来的行号，撤销时插回原位）。
+    AreaRemove {
+        asset_id: i64,
+        index: u32,
+        area: String,
+    },
+    /// **拖动排序**：把第 `from` 行移到第 `to` 行（行序含默认层）。
+    AreaMove {
+        asset_id: i64,
+        from: u32,
+        to: u32,
+    },
+    /// 改层名。
+    AreaRename {
+        asset_id: i64,
+        id: u32,
+        before: String,
+        after: String,
+    },
+    /// 层启停。
+    AreaToggle {
+        asset_id: i64,
+        id: u32,
+        before: bool,
+        after: bool,
+    },
+    /// 控制点的颜色槽位。
+    AreaColor {
+        asset_id: i64,
+        id: u32,
+        before: u8,
+        after: u8,
+    },
+    /// 控制点的六个数 `[x, y, seed0, seed1, seed2, tolerance]`（**f32 位模式**，为了 `Eq`）。
+    AreaPoint {
+        asset_id: i64,
+        id: u32,
+        before: [u32; 6],
+        after: [u32; 6],
     },
     /// 改一项**编辑栈设置**（镜头配置文件 / 启用开关 / 降噪方式；M3-W4）。
     ///
@@ -209,7 +268,14 @@ impl Op {
             | Self::Text { asset_id, .. }
             | Self::DevelopParam { asset_id, .. }
             | Self::DevelopCurve { asset_id, .. }
-            | Self::DevelopSetting { asset_id, .. } => *asset_id,
+            | Self::DevelopSetting { asset_id, .. }
+            | Self::AreaAdd { asset_id, .. }
+            | Self::AreaRemove { asset_id, .. }
+            | Self::AreaMove { asset_id, .. }
+            | Self::AreaRename { asset_id, .. }
+            | Self::AreaToggle { asset_id, .. }
+            | Self::AreaColor { asset_id, .. }
+            | Self::AreaPoint { asset_id, .. } => *asset_id,
         }
     }
 
@@ -283,25 +349,99 @@ impl Op {
             },
             Self::DevelopParam {
                 asset_id,
+                area_id,
                 param_id,
                 before,
                 after,
             } => Self::DevelopParam {
                 asset_id: *asset_id,
+                area_id: *area_id,
                 param_id: param_id.clone(),
                 before: *after,
                 after: *before,
             },
             Self::DevelopCurve {
                 asset_id,
+                area_id,
                 channel,
                 before,
                 after,
             } => Self::DevelopCurve {
                 asset_id: *asset_id,
+                area_id: *area_id,
                 channel: channel.clone(),
                 before: after.clone(),
                 after: before.clone(),
+            },
+            // 结构类：增删是一对，移动把 from / to 对调，其余交换 before / after。
+            // 撤销时这些 op 是**逆序**执行的（`ChangeSet::invert`），所以连续多步
+            // 排序也能原样还原。
+            Self::AreaAdd {
+                asset_id,
+                index,
+                area,
+            } => Self::AreaRemove {
+                asset_id: *asset_id,
+                index: *index,
+                area: area.clone(),
+            },
+            Self::AreaRemove {
+                asset_id,
+                index,
+                area,
+            } => Self::AreaAdd {
+                asset_id: *asset_id,
+                index: *index,
+                area: area.clone(),
+            },
+            Self::AreaMove { asset_id, from, to } => Self::AreaMove {
+                asset_id: *asset_id,
+                from: *to,
+                to: *from,
+            },
+            Self::AreaRename {
+                asset_id,
+                id,
+                before,
+                after,
+            } => Self::AreaRename {
+                asset_id: *asset_id,
+                id: *id,
+                before: after.clone(),
+                after: before.clone(),
+            },
+            Self::AreaToggle {
+                asset_id,
+                id,
+                before,
+                after,
+            } => Self::AreaToggle {
+                asset_id: *asset_id,
+                id: *id,
+                before: *after,
+                after: *before,
+            },
+            Self::AreaColor {
+                asset_id,
+                id,
+                before,
+                after,
+            } => Self::AreaColor {
+                asset_id: *asset_id,
+                id: *id,
+                before: *after,
+                after: *before,
+            },
+            Self::AreaPoint {
+                asset_id,
+                id,
+                before,
+                after,
+            } => Self::AreaPoint {
+                asset_id: *asset_id,
+                id: *id,
+                before: *after,
+                after: *before,
             },
             Self::DevelopSetting {
                 asset_id,
@@ -346,11 +486,15 @@ impl ChangeSet {
     }
 
     /// 反转后的补丁（撤销就是把它应用一遍）。
+    ///
+    /// **顺序要倒过来**：一步改动里的 op 是按先后执行的，逆操作必须反过来跑
+    /// （`specs/editor-area.md`：层排序是多步 `AreaMove`，正着跑还原不了）。
+    /// 对互不相关的 op（打星 / 标签）倒序没有区别。
     #[must_use]
     pub fn invert(&self) -> Self {
         Self {
             label: self.label.clone(),
-            ops: self.ops.iter().map(Op::invert).collect(),
+            ops: self.ops.iter().rev().map(Op::invert).collect(),
         }
     }
 }
@@ -462,15 +606,23 @@ pub fn apply(conn: &Connection, change: &ChangeSet) -> Result<Applied> {
                 }
             }
             Op::DevelopParam {
-                param_id, after, ..
+                area_id,
+                param_id,
+                after,
+                ..
             } => {
                 // 位模式 → f64（见 `Op::DevelopParam` 的说明：为了 `Eq`）
                 let value = after.map(f64::from_bits);
-                crate::store::develop::set_param(conn, asset_id, param_id, value, now)?;
+                crate::store::develop::set_area_param(
+                    conn, asset_id, *area_id, param_id, value, now,
+                )?;
                 changed.insert(asset_id);
             }
             Op::DevelopCurve {
-                channel, after, ..
+                area_id,
+                channel,
+                after,
+                ..
             } => {
                 let points: Option<Vec<[f32; 2]>> = match after {
                     Some(json) => Some(serde_json::from_str(json).map_err(|e| {
@@ -480,11 +632,58 @@ pub fn apply(conn: &Connection, change: &ChangeSet) -> Result<Applied> {
                     })?),
                     None => None,
                 };
-                crate::store::develop::set_curve(
+                crate::store::develop::set_area_curve(
                     conn,
                     asset_id,
+                    *area_id,
                     channel,
                     points.as_deref(),
+                    now,
+                )?;
+                changed.insert(asset_id);
+            }
+            Op::AreaAdd { index, area, .. } => {
+                crate::store::develop::add_area(
+                    conn,
+                    asset_id,
+                    Some(*index as usize),
+                    area,
+                    now,
+                )?;
+                changed.insert(asset_id);
+            }
+            Op::AreaRemove { index, .. } => {
+                crate::store::develop::remove_area(conn, asset_id, *index as usize, now)?;
+                changed.insert(asset_id);
+            }
+            Op::AreaMove { from, to, .. } => {
+                crate::store::develop::move_area(
+                    conn,
+                    asset_id,
+                    *from as usize,
+                    *to as usize,
+                    now,
+                )?;
+                changed.insert(asset_id);
+            }
+            Op::AreaRename { id, after, .. } => {
+                crate::store::develop::rename_area(conn, asset_id, *id, after, now)?;
+                changed.insert(asset_id);
+            }
+            Op::AreaToggle { id, after, .. } => {
+                crate::store::develop::toggle_area(conn, asset_id, *id, *after, now)?;
+                changed.insert(asset_id);
+            }
+            Op::AreaColor { id, after, .. } => {
+                crate::store::develop::set_area_color(conn, asset_id, *id, *after, now)?;
+                changed.insert(asset_id);
+            }
+            Op::AreaPoint { id, after, .. } => {
+                crate::store::develop::set_area_point(
+                    conn,
+                    asset_id,
+                    *id,
+                    crate::store::develop::point_from_bits(*after),
                     now,
                 )?;
                 changed.insert(asset_id);
@@ -543,6 +742,55 @@ pub fn set_text(
         });
     }
     Ok(ChangeSet::new(format!("改{}", field.label()), ops))
+}
+
+/// 按地点数据**填入地理三项**（国家 / 省州 / 城市）—— 右栏「按 GPS 填入地点」。
+///
+/// 两条口径（与「个人手写的值最贵」一致）：
+///
+/// 1. **只填空字段**：已经有值的列不碰（不覆盖人写过的）；
+/// 2. **三项合成一个 `ChangeSet`**：这是一次用户动作，撤销按一次就该全部退回去，
+///    而不是要按三次（每次退一项）。
+///
+/// `None` / 空白值视为「没有建议」，跳过。
+pub fn fill_geo(
+    conn: &Connection,
+    ids: &[i64],
+    country: Option<&str>,
+    province_state: Option<&str>,
+    city: Option<&str>,
+) -> Result<ChangeSet> {
+    let fields = [
+        (TextField::Country, country),
+        (TextField::ProvinceState, province_state),
+        (TextField::City, city),
+    ];
+    let mut ops = Vec::new();
+    for id in ids {
+        for (field, incoming) in fields {
+            let Some(after) = incoming
+                .map(str::trim)
+                .filter(|text| !text.is_empty())
+                .map(ToOwned::to_owned)
+            else {
+                continue;
+            };
+            let sql = format!("SELECT {} FROM assets WHERE id = ?1", field.column());
+            let before: Option<String> = conn.query_row(&sql, [id], |r| r.get(0))?;
+            // 空白串也算「没填」（历史数据/外部写入可能留下 `""`）；
+            // 真正有人写过的非空值才保护不覆盖。
+            if before.as_deref().is_some_and(|text| !text.trim().is_empty()) {
+                continue;
+            }
+            ops.push(Op::Text {
+                asset_id: *id,
+                field,
+                before,
+                after: Some(after),
+            });
+        }
+    }
+    Ok(ChangeSet::new("按 GPS 填入地点", ops))
 }
 
 /// 一张照片当前的标记值（读旧值用）。
@@ -954,6 +1202,7 @@ mod tests {
         let id = asset(&conn);
         let op = Op::DevelopParam {
             asset_id: id,
+            area_id: None,
             param_id: "exposure".to_string(),
             before: None,
             after: Some(0.5f64.to_bits()),
@@ -974,6 +1223,7 @@ mod tests {
         // `-0.0` 的位模式能精确还原（`==` 会把 -0.0 与 0.0 看成相等）
         let zero = Op::DevelopParam {
             asset_id: id,
+            area_id: None,
             param_id: "blacks".to_string(),
             before: Some((-0.0f64).to_bits()),
             after: Some(0.0f64.to_bits()),
@@ -996,6 +1246,7 @@ mod tests {
         let json = serde_json::to_string(&points).unwrap();
         let op = Op::DevelopCurve {
             asset_id: id,
+            area_id: None,
             channel: "rgb".to_string(),
             before: None,
             after: Some(json.clone()),
@@ -1375,6 +1626,107 @@ mod tests {
         stack.undo(&conn).unwrap();
         stack.clear();
         assert!(!stack.can_undo() && !stack.can_redo());
+    }
+
+    #[test]
+    fn set_text_is_idempotent_and_normalizes_blanks() {
+        let conn = catalog();
+        let id = asset(&conn);
+        let change = set_text(&conn, &[id], TextField::Author, Some("  崔总  ")).unwrap();
+        assert_eq!(change.len(), 1);
+        apply(&conn, &change).unwrap();
+        assert_eq!(value::<Option<String>>(&conn, id, "author").as_deref(), Some("崔总"));
+        // 同一个值再写一次：不产生 op（不占一步撤销）
+        assert!(set_text(&conn, &[id], TextField::Author, Some("崔总  ")).unwrap().is_empty());
+        // 空白 = 清空
+        let clear = set_text(&conn, &[id], TextField::Author, Some("   ")).unwrap();
+        apply(&conn, &clear).unwrap();
+        assert_eq!(value::<Option<String>>(&conn, id, "author"), None);
+    }
+
+    #[test]
+    fn fill_geo_only_fills_empty_fields_as_one_undo_step() {
+        let conn = catalog();
+        let empty = asset(&conn);
+        let kept = asset(&conn);
+        conn.execute("UPDATE assets SET country = '中国' WHERE id = ?1", [kept])
+            .unwrap();
+
+        let change = fill_geo(
+            &conn,
+            &[empty, kept],
+            Some("中国"),
+            Some("浙江省"),
+            Some("杭州"),
+        )
+        .unwrap();
+        // empty：三项都填；kept：国家已有值，只填省 + 市
+        assert_eq!(change.len(), 5);
+        assert_eq!(change.label, "按 GPS 填入地点");
+        apply(&conn, &change).unwrap();
+        assert_eq!(
+            value::<Option<String>>(&conn, empty, "country").as_deref(),
+            Some("中国")
+        );
+        assert_eq!(
+            value::<Option<String>>(&conn, empty, "province_state").as_deref(),
+            Some("浙江省")
+        );
+        assert_eq!(
+            value::<Option<String>>(&conn, empty, "city").as_deref(),
+            Some("杭州")
+        );
+        assert_eq!(
+            value::<Option<String>>(&conn, kept, "province_state").as_deref(),
+            Some("浙江省")
+        );
+
+        // 一次撤销把三项全部退回（不是三次）
+        let undo = change.invert();
+        apply(&conn, &undo).unwrap();
+        assert_eq!(value::<Option<String>>(&conn, empty, "country"), None);
+        assert_eq!(value::<Option<String>>(&conn, empty, "city"), None);
+        // 三项都已经有值的资产：再填就是空补丁（不产生多余的撤销步）
+        let full = asset(&conn);
+        conn.execute(
+            "UPDATE assets SET country = '中国', province_state = '浙江省', city = '杭州' WHERE id = ?1",
+            [full],
+        )
+        .unwrap();
+        assert!(
+            fill_geo(&conn, &[full], Some("中国"), Some("江苏省"), Some("苏州"))
+                .unwrap()
+                .is_empty()
+        );
+        // 还有空字段的资产：会真的产生改动（不是恒空）
+        assert!(
+            fill_geo(&conn, &[kept], Some("中国"), Some("江苏省"), Some("苏州"))
+                .unwrap()
+                .len()
+                == 2,
+            "kept 只缺省与市"
+        );
+    }
+
+    #[test]
+    fn fill_geo_treats_blank_existing_values_as_empty_and_preserves_them_on_undo() {
+        let conn = catalog();
+        let id = asset(&conn);
+        conn.execute("UPDATE assets SET country = '  ' WHERE id = ?1", [id])
+            .unwrap();
+        let change = fill_geo(&conn, &[id], Some("中国"), None, None).unwrap();
+        assert_eq!(change.len(), 1, "空白国家应视为空字段");
+        apply(&conn, &change).unwrap();
+        assert_eq!(
+            value::<Option<String>>(&conn, id, "country").as_deref(),
+            Some("中国")
+        );
+        apply(&conn, &change.invert()).unwrap();
+        assert_eq!(
+            value::<Option<String>>(&conn, id, "country").as_deref(),
+            Some("  "),
+            "撤销要恢复原来的空白值，而不是变成 NULL"
+        );
     }
 
     #[test]

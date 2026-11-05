@@ -5445,27 +5445,22 @@
                       "alignItems": "center",
                       "children": [
                         {
+                          "type": "rectangle",
+                          "id": "hjBJa",
+                          "name": "SectionBar",
+                          "fill": "$brand",
+                          "width": 3,
+                          "height": 12
+                        },
+                        {
                           "type": "text",
                           "id": "m8na7t",
                           "name": "SectionTitle / 导出预设",
                           "fill": "$fg-2",
-                          "content": "导出预设",
+                          "content": "预设列表",
                           "fontFamily": "Inter",
                           "fontSize": 15,
                           "fontWeight": "600"
-                        },
-                        {
-                          "type": "text",
-                          "id": "hJn39",
-                          "name": "SectionHint / 预设",
-                          "fill": "$fg-3",
-                          "textGrowth": "fixed-width",
-                          "width": "fill_container",
-                          "content": "点选后可在下方修改",
-                          "textAlign": "right",
-                          "fontFamily": "Inter",
-                          "fontSize": 12,
-                          "fontWeight": "normal"
                         }
                       ]
                     },
@@ -5918,177 +5913,307 @@
                       "alignItems": "center",
                       "children": [
                         {
+                          "type": "rectangle",
+                          "id": "yWSus",
+                          "name": "SectionBar",
+                          "fill": "$brand",
+                          "width": 3,
+                          "height": 12
+                        },
+                        {
                           "type": "text",
                           "id": "HeTpM",
                           "name": "SectionTitle / 导出设置",
-                          "fill": "$fg-2",
-                          "content": "修改预设",
+                          "fill": "$fg-1",
+                          "content": "当前预设",
                           "fontFamily": "Inter",
                           "fontSize": 15,
                           "fontWeight": "600"
-                        },
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "jpt73",
+                      "name": "Row / 名称",
+                      "width": "fill_container",
+                      "gap": 8,
+                      "alignItems": "center",
+                      "children": [
                         {
                           "type": "text",
-                          "id": "SRkwg",
-                          "name": "SectionHint / 当前预设",
-                          "fill": "$fg-3",
-                          "textGrowth": "fixed-width",
-                          "width": "fill_container",
-                          "content": "修改预设",
-                          "textAlign": "right",
+                          "id": "G8AtA4",
+                          "name": "FieldLabel / 名称",
+                          "fill": "$fg-2",
+                          "content": "名称",
                           "fontFamily": "Inter",
                           "fontSize": 12,
                           "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "iivHq",
+                          "name": "Input",
+                          "width": "fill_container",
+                          "height": 30,
+                          "fill": "$surface-track",
+                          "cornerRadius": 4,
+                          "gap": 6,
+                          "padding": [
+                            0,
+                            8
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "xxVZR",
+                              "name": "InputValue",
+                              "fill": "$fg-1",
+                              "textGrowth": "fixed-width",
+                              "width": 187,
+                              "content": "网页预览 JPEG",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            }
+                          ]
                         }
                       ]
                     },
                     {
-                      "type": "text",
-                      "id": "G8AtA4",
-                      "name": "FieldLabel / 名称",
-                      "fill": "$fg-2",
-                      "content": "名称",
-                      "fontFamily": "Inter",
-                      "fontSize": 12,
-                      "fontWeight": "normal"
-                    },
-                    {
                       "type": "frame",
-                      "id": "iivHq",
-                      "name": "Input",
+                      "id": "A9eez",
+                      "name": "Row / 格式",
                       "width": "fill_container",
-                      "height": 30,
-                      "fill": "$surface-track",
-                      "cornerRadius": 4,
-                      "gap": 6,
-                      "padding": [
-                        0,
-                        8
-                      ],
+                      "gap": 8,
                       "alignItems": "center",
                       "children": [
                         {
                           "type": "text",
-                          "id": "xxVZR",
-                          "name": "InputValue",
-                          "fill": "$fg-1",
-                          "textGrowth": "fixed-width",
-                          "width": "fill_container",
-                          "content": "网页预览 JPEG",
+                          "id": "iIlYV",
+                          "name": "FieldLabel / 导出格式",
+                          "fill": "$fg-2",
+                          "content": "格式",
                           "fontFamily": "Inter",
-                          "fontSize": 13,
+                          "fontSize": 12,
                           "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "qYDOX",
+                          "name": "SegmentedControl / 导出格式",
+                          "width": "fill_container",
+                          "height": 26,
+                          "fill": "$surface-track",
+                          "cornerRadius": 4,
+                          "gap": 2,
+                          "padding": 2,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "KNyFi",
+                              "name": "SegChip / WebP",
+                              "width": "fill_container",
+                              "height": 22,
+                              "cornerRadius": 3,
+                              "justifyContent": "center",
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "gV6Qc",
+                                  "name": "SegLabel / WebP",
+                                  "fill": "$fg-3",
+                                  "content": "WebP",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 12,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "U0o3Eh",
+                              "name": "SegChip / AVIF",
+                              "width": "fill_container",
+                              "height": 22,
+                              "cornerRadius": 3,
+                              "justifyContent": "center",
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "PmYDu",
+                                  "name": "SegLabel / AVIF",
+                                  "fill": "$fg-3",
+                                  "content": "AVIF",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 12,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "C7SC8y",
+                              "name": "SegChip / JPEG",
+                              "width": "fill_container",
+                              "height": 22,
+                              "fill": "$brand",
+                              "cornerRadius": 3,
+                              "justifyContent": "center",
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "aJWAJ",
+                                  "name": "SegLabel / JPEG",
+                                  "fill": "$fg-on-brand",
+                                  "content": "JPG",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 12,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "j5Lug",
+                              "name": "SegChip / PNG",
+                              "width": "fill_container",
+                              "height": 22,
+                              "cornerRadius": 3,
+                              "justifyContent": "center",
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "bqjLb",
+                                  "name": "SegLabel / PNG",
+                                  "fill": "$fg-3",
+                                  "content": "PNG",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 12,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            }
+                          ]
                         }
                       ]
                     },
                     {
-                      "type": "text",
-                      "id": "iIlYV",
-                      "name": "FieldLabel / 导出格式",
-                      "fill": "$fg-2",
-                      "content": "导出格式",
-                      "fontFamily": "Inter",
-                      "fontSize": 12,
-                      "fontWeight": "normal"
-                    },
-                    {
                       "type": "frame",
-                      "id": "qYDOX",
-                      "name": "SegmentedControl / 导出格式",
+                      "id": "Rh60i",
+                      "name": "Row / 文件同名",
                       "width": "fill_container",
-                      "height": 26,
-                      "fill": "$surface-track",
-                      "cornerRadius": 4,
-                      "gap": 2,
-                      "padding": 2,
+                      "gap": 8,
                       "alignItems": "center",
                       "children": [
                         {
-                          "type": "frame",
-                          "id": "KNyFi",
-                          "name": "SegChip / WebP",
-                          "width": "fill_container",
-                          "height": 22,
-                          "cornerRadius": 3,
-                          "justifyContent": "center",
-                          "alignItems": "center",
-                          "children": [
-                            {
-                              "type": "text",
-                              "id": "gV6Qc",
-                              "name": "SegLabel / WebP",
-                              "fill": "$fg-3",
-                              "content": "WebP",
-                              "fontFamily": "Inter",
-                              "fontSize": 12,
-                              "fontWeight": "normal"
-                            }
-                          ]
+                          "type": "text",
+                          "id": "ffXmD",
+                          "name": "FieldLabel / 导出文件已经存在",
+                          "fill": "$fg-2",
+                          "content": "文件同名",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
-                          "id": "U0o3Eh",
-                          "name": "SegChip / AVIF",
+                          "id": "b4czty",
+                          "name": "SegmentedControl / 导出文件已经存在",
                           "width": "fill_container",
-                          "height": 22,
-                          "cornerRadius": 3,
-                          "justifyContent": "center",
+                          "height": 26,
+                          "fill": "$surface-track",
+                          "cornerRadius": 4,
+                          "gap": 2,
+                          "padding": 2,
                           "alignItems": "center",
                           "children": [
                             {
-                              "type": "text",
-                              "id": "PmYDu",
-                              "name": "SegLabel / AVIF",
-                              "fill": "$fg-3",
-                              "content": "AVIF",
-                              "fontFamily": "Inter",
-                              "fontSize": 12,
-                              "fontWeight": "normal"
-                            }
-                          ]
-                        },
-                        {
-                          "type": "frame",
-                          "id": "C7SC8y",
-                          "name": "SegChip / JPEG",
-                          "width": "fill_container",
-                          "height": 22,
-                          "fill": "$brand",
-                          "cornerRadius": 3,
-                          "justifyContent": "center",
-                          "alignItems": "center",
-                          "children": [
+                              "type": "frame",
+                              "id": "T5rG6k",
+                              "name": "SegChip / 覆盖",
+                              "width": "fill_container",
+                              "height": 22,
+                              "fill": "$surface-track",
+                              "cornerRadius": 3,
+                              "padding": [
+                                0,
+                                8
+                              ],
+                              "justifyContent": "center",
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "lq3jf",
+                                  "name": "SegLabel / 紧凑",
+                                  "fill": "$fg-2",
+                                  "content": "覆盖",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 14,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            },
                             {
-                              "type": "text",
-                              "id": "aJWAJ",
-                              "name": "SegLabel / JPEG",
-                              "fill": "$fg-on-brand",
-                              "content": "JPG",
-                              "fontFamily": "Inter",
-                              "fontSize": 12,
-                              "fontWeight": "normal"
-                            }
-                          ]
-                        },
-                        {
-                          "type": "frame",
-                          "id": "j5Lug",
-                          "name": "SegChip / PNG",
-                          "width": "fill_container",
-                          "height": 22,
-                          "cornerRadius": 3,
-                          "justifyContent": "center",
-                          "alignItems": "center",
-                          "children": [
+                              "type": "frame",
+                              "id": "q3mHIP",
+                              "name": "SegChip / 跳过",
+                              "width": "fill_container",
+                              "height": 22,
+                              "fill": "$surface-track",
+                              "cornerRadius": 3,
+                              "padding": [
+                                0,
+                                8
+                              ],
+                              "justifyContent": "center",
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "dJ6uv",
+                                  "name": "SegLabel / 宽松",
+                                  "fill": "$fg-2",
+                                  "content": "跳过",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 14,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            },
                             {
-                              "type": "text",
-                              "id": "bqjLb",
-                              "name": "SegLabel / PNG",
-                              "fill": "$fg-3",
-                              "content": "PNG",
-                              "fontFamily": "Inter",
-                              "fontSize": 12,
-                              "fontWeight": "normal"
+                              "type": "frame",
+                              "id": "I67E2m",
+                              "name": "SegChip / 追加",
+                              "width": "fill_container",
+                              "height": 22,
+                              "fill": "$brand",
+                              "cornerRadius": 3,
+                              "padding": [
+                                0,
+                                8
+                              ],
+                              "justifyContent": "center",
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "t7dtA",
+                                  "name": "SegLabel / 追加",
+                                  "fill": "$fg-on-brand",
+                                  "content": "追加",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 14,
+                                  "fontWeight": "normal"
+                                }
+                              ]
                             }
                           ]
                         }
@@ -6537,111 +6662,6 @@
                     },
                     {
                       "type": "text",
-                      "id": "ffXmD",
-                      "name": "FieldLabel / 导出文件已经存在",
-                      "fill": "$fg-2",
-                      "content": "导出文件已经存在",
-                      "fontFamily": "Inter",
-                      "fontSize": 12,
-                      "fontWeight": "normal"
-                    },
-                    {
-                      "type": "frame",
-                      "id": "b4czty",
-                      "name": "SegmentedControl / 导出文件已经存在",
-                      "width": "fill_container",
-                      "height": 26,
-                      "fill": "$surface-track",
-                      "cornerRadius": 4,
-                      "gap": 2,
-                      "padding": 2,
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "frame",
-                          "id": "T5rG6k",
-                          "name": "SegChip / 覆盖",
-                          "width": "fill_container",
-                          "height": 22,
-                          "fill": "$surface-track",
-                          "cornerRadius": 3,
-                          "padding": [
-                            0,
-                            8
-                          ],
-                          "justifyContent": "center",
-                          "alignItems": "center",
-                          "children": [
-                            {
-                              "type": "text",
-                              "id": "lq3jf",
-                              "name": "SegLabel / 紧凑",
-                              "fill": "$fg-2",
-                              "content": "覆盖",
-                              "fontFamily": "Inter",
-                              "fontSize": 14,
-                              "fontWeight": "normal"
-                            }
-                          ]
-                        },
-                        {
-                          "type": "frame",
-                          "id": "q3mHIP",
-                          "name": "SegChip / 跳过",
-                          "width": "fill_container",
-                          "height": 22,
-                          "fill": "$surface-track",
-                          "cornerRadius": 3,
-                          "padding": [
-                            0,
-                            8
-                          ],
-                          "justifyContent": "center",
-                          "alignItems": "center",
-                          "children": [
-                            {
-                              "type": "text",
-                              "id": "dJ6uv",
-                              "name": "SegLabel / 宽松",
-                              "fill": "$fg-2",
-                              "content": "跳过",
-                              "fontFamily": "Inter",
-                              "fontSize": 14,
-                              "fontWeight": "normal"
-                            }
-                          ]
-                        },
-                        {
-                          "type": "frame",
-                          "id": "I67E2m",
-                          "name": "SegChip / 追加",
-                          "width": "fill_container",
-                          "height": 22,
-                          "fill": "$brand",
-                          "cornerRadius": 3,
-                          "padding": [
-                            0,
-                            8
-                          ],
-                          "justifyContent": "center",
-                          "alignItems": "center",
-                          "children": [
-                            {
-                              "type": "text",
-                              "id": "t7dtA",
-                              "name": "SegLabel / 追加",
-                              "fill": "$fg-on-brand",
-                              "content": "追加",
-                              "fontFamily": "Inter",
-                              "fontSize": 14,
-                              "fontWeight": "normal"
-                            }
-                          ]
-                        }
-                      ]
-                    },
-                    {
-                      "type": "text",
                       "id": "l5yvxR",
                       "name": "FieldLabel / 导出文件命名模版",
                       "fill": "$fg-2",
@@ -6714,7 +6734,7 @@
                           "id": "zxKBB",
                           "name": "按钮 / 更新预设",
                           "height": 28,
-                          "fill": "$surface-track",
+                          "fill": "$brand-2",
                           "cornerRadius": 4,
                           "gap": 6,
                           "padding": [
@@ -6739,7 +6759,7 @@
                               "id": "gRzv8",
                               "name": "文字 / 更新",
                               "fill": "$fg-1",
-                              "content": "变更",
+                              "content": "保存",
                               "fontFamily": "Inter",
                               "fontSize": 12,
                               "fontWeight": "normal"
@@ -12250,7 +12270,7 @@
                           "id": "Xmyum",
                           "name": "SectionTitle / 导出预设",
                           "fill": "$fg-2",
-                          "content": "导出预设",
+                          "content": "预设列表",
                           "fontFamily": "Inter",
                           "fontSize": 15,
                           "fontWeight": "600"
@@ -12755,7 +12775,7 @@
                           "id": "x1x9C",
                           "name": "SectionTitle / 导出设置",
                           "fill": "$fg-2",
-                          "content": "修改预设",
+                          "content": "当前预设",
                           "fontFamily": "Inter",
                           "fontSize": 15,
                           "fontWeight": "600"
@@ -12767,7 +12787,7 @@
                           "fill": "$fg-3",
                           "textGrowth": "fixed-width",
                           "width": "fill_container",
-                          "content": "修改预设",
+                          "content": "当前预设",
                           "textAlign": "right",
                           "fontFamily": "Inter",
                           "fontSize": 12,
@@ -12819,7 +12839,7 @@
                       "id": "vSVQS",
                       "name": "FieldLabel / 导出格式",
                       "fill": "$fg-2",
-                      "content": "导出格式",
+                      "content": "格式",
                       "fontFamily": "Inter",
                       "fontSize": 12,
                       "fontWeight": "normal"
@@ -13373,7 +13393,7 @@
                       "id": "jQi6c",
                       "name": "FieldLabel / 导出文件已经存在",
                       "fill": "$fg-2",
-                      "content": "导出文件已经存在",
+                      "content": "文件同名",
                       "fontFamily": "Inter",
                       "fontSize": 12,
                       "fontWeight": "normal"
@@ -13572,7 +13592,7 @@
                               "id": "RLy0s",
                               "name": "文字 / 更新",
                               "fill": "$fg-1",
-                              "content": "变更",
+                              "content": "保存",
                               "fontFamily": "Inter",
                               "fontSize": 12,
                               "fontWeight": "normal"
@@ -15837,7 +15857,7 @@
                   "id": "YXvdi",
                   "name": "文字 / 新增",
                   "fill": "$fg-on-brand",
-                  "content": "新增",
+                  "content": "保存",
                   "fontFamily": "Inter",
                   "fontSize": 12,
                   "fontWeight": "normal"
@@ -22267,7 +22287,7 @@
                           "id": "e6IHYf",
                           "name": "SectionTitle / 导出预设",
                           "fill": "$fg-2",
-                          "content": "导出预设",
+                          "content": "预设列表",
                           "fontFamily": "Inter",
                           "fontSize": 15,
                           "fontWeight": "600"
@@ -22747,7 +22767,7 @@
                           "id": "MTgF2",
                           "name": "SectionTitle / 导出设置",
                           "fill": "$fg-2",
-                          "content": "修改预设",
+                          "content": "当前预设",
                           "fontFamily": "Inter",
                           "fontSize": 15,
                           "fontWeight": "600"
@@ -22759,7 +22779,7 @@
                           "fill": "$fg-3",
                           "textGrowth": "fixed-width",
                           "width": "fill_container",
-                          "content": "修改预设",
+                          "content": "当前预设",
                           "textAlign": "right",
                           "fontFamily": "Inter",
                           "fontSize": 12,
@@ -22811,7 +22831,7 @@
                       "id": "u5dITq",
                       "name": "FieldLabel / 导出格式",
                       "fill": "$fg-2",
-                      "content": "导出格式",
+                      "content": "格式",
                       "fontFamily": "Inter",
                       "fontSize": 12,
                       "fontWeight": "normal"
@@ -23365,7 +23385,7 @@
                       "id": "zUrd0",
                       "name": "FieldLabel / 导出文件已经存在",
                       "fill": "$fg-2",
-                      "content": "导出文件已经存在",
+                      "content": "文件同名",
                       "fontFamily": "Inter",
                       "fontSize": 12,
                       "fontWeight": "normal"
@@ -23564,7 +23584,7 @@
                               "id": "v0f4D",
                               "name": "文字 / 更新",
                               "fill": "$fg-1",
-                              "content": "变更",
+                              "content": "保存",
                               "fontFamily": "Inter",
                               "fontSize": 12,
                               "fontWeight": "normal"
@@ -23677,7 +23697,7 @@
                   "fill": "$fg-3",
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
-                  "content": "新建预设",
+                  "content": "当前预设",
                   "textAlign": "right",
                   "fontFamily": "Inter",
                   "fontSize": 12,
@@ -23728,7 +23748,7 @@
               "id": "xGHaY",
               "name": "FieldLabel / 导出格式",
               "fill": "$fg-2",
-              "content": "导出格式",
+              "content": "格式",
               "fontFamily": "Inter",
               "fontSize": 12,
               "fontWeight": "normal"
@@ -24282,7 +24302,7 @@
               "id": "w99M05",
               "name": "FieldLabel / 导出文件已经存在",
               "fill": "$fg-2",
-              "content": "导出文件已经存在",
+              "content": "文件同名",
               "fontFamily": "Inter",
               "fontSize": 12,
               "fontWeight": "normal"
@@ -24471,7 +24491,7 @@
                       "id": "CXK6K",
                       "name": "文字 / 更新",
                       "fill": "$fg-on-brand",
-                      "content": "新增",
+                      "content": "保存",
                       "fontFamily": "Inter",
                       "fontSize": 12,
                       "fontWeight": "normal"
@@ -30386,7 +30406,7 @@
                           "id": "kXKZE",
                           "name": "SectionTitle / 导出预设",
                           "fill": "$fg-2",
-                          "content": "导出预设",
+                          "content": "预设列表",
                           "fontFamily": "Inter",
                           "fontSize": 15,
                           "fontWeight": "600"
@@ -30865,7 +30885,7 @@
                           "id": "Pl9ce",
                           "name": "SectionTitle / 导出设置",
                           "fill": "$fg-2",
-                          "content": "修改预设",
+                          "content": "当前预设",
                           "fontFamily": "Inter",
                           "fontSize": 15,
                           "fontWeight": "600"
@@ -30877,7 +30897,7 @@
                           "fill": "$fg-3",
                           "textGrowth": "fixed-width",
                           "width": "fill_container",
-                          "content": "修改预设",
+                          "content": "当前预设",
                           "textAlign": "right",
                           "fontFamily": "Inter",
                           "fontSize": 12,
@@ -30929,7 +30949,7 @@
                       "id": "zbPvo",
                       "name": "FieldLabel / 导出格式",
                       "fill": "$fg-2",
-                      "content": "导出格式",
+                      "content": "格式",
                       "fontFamily": "Inter",
                       "fontSize": 12,
                       "fontWeight": "normal"
@@ -31483,7 +31503,7 @@
                       "id": "UvrbO",
                       "name": "FieldLabel / 导出文件已经存在",
                       "fill": "$fg-2",
-                      "content": "导出文件已经存在",
+                      "content": "文件同名",
                       "fontFamily": "Inter",
                       "fontSize": 12,
                       "fontWeight": "normal"
@@ -31682,7 +31702,7 @@
                               "id": "KP1R6",
                               "name": "文字 / 更新",
                               "fill": "$fg-1",
-                              "content": "变更",
+                              "content": "保存",
                               "fontFamily": "Inter",
                               "fontSize": 12,
                               "fontWeight": "normal"

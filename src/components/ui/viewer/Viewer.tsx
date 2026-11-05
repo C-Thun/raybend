@@ -281,14 +281,19 @@ export function Viewer(props: ViewerProps) {
           崔总 2026-10-11 口径：**提示一旦结束，屏上就该是原图** ——
           所以它只在 `fullPending` 为真时出现（不是另一步），且 `pointer-events-none`
           （载入期间拖动/缩放/返回照常可用）。
+
+          位置 = **视口正中间**（与 editor 视口的「正在载入照片…」同一处）：
+          它是「还没有真正原图可看」的过渡说明，不是贴在窗口边上的状态角标。
         */}
-        <div
-          class="pointer-events-none absolute start-1/2 top-3 z-20 flex -translate-x-1/2 items-center gap-1.5 rounded-ui bg-surface-layer/80 px-2.5 py-1 text-fs-1 text-fg-1"
-          data-viewer-loading="full"
-          role="status"
-        >
-          <span class="h-1.5 w-1.5 animate-pulse rounded-full bg-brand" aria-hidden="true" />
-          <span>{t("viewer.loading_original")}</span>
+        <div class="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
+          <div
+            class="flex items-center gap-1.5 rounded-ui bg-surface-layer/80 px-2.5 py-1 text-fs-1 text-fg-1"
+            data-viewer-loading="full"
+            role="status"
+          >
+            <span class="h-1.5 w-1.5 animate-pulse rounded-full bg-brand" aria-hidden="true" />
+            <span>{t("viewer.loading_original")}</span>
+          </div>
         </div>
       </Show>
 

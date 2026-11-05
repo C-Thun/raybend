@@ -43,7 +43,8 @@ test("参数表：数字全部来自 develop-params.json（唯一真相）", () 
   assert.equal(PARAM_CONTRACT_VERSION, 1, "契约版本变了要一起改这里的断言");
   assert.deepEqual(
     PARAMS.map((p) => p.id),
-    contract.params.map((p) => p.id),
+    // 掩膜参数（`target = mask`）不进面板：它们由层自己消费，不是拉杆
+    contract.params.filter((p) => p.target !== "mask").map((p) => p.id),
     "两侧的 id 与顺序必须一致（Rust 侧还有一条同样的断言）",
   );
   assert.deepEqual(
@@ -51,8 +52,9 @@ test("参数表：数字全部来自 develop-params.json（唯一真相）", () 
     PARAMS.map((p) => p.id).sort(),
     "装饰表与契约必须一一对应（多一条少一条都是 bug）",
   );
+  const panelParams = contract.params.filter((p) => p.target !== "mask");
   for (const [index, spec] of PARAMS.entries()) {
-    const json = contract.params[index];
+    const json = panelParams[index];
     assert.equal(spec.min, json.min, `${spec.id}: min`);
     assert.equal(spec.max, json.max, `${spec.id}: max`);
     assert.equal(spec.step, json.step, `${spec.id}: step`);
@@ -131,7 +133,8 @@ test("参数表：id 唯一、分组齐全、范围合法", () => {
 });
 
 test("默认值取参数契约，与填充原点无关", () => {
-  for (const entry of contract.params) {
+  // 掩膜参数不进面板参数表（`target = mask`），它们的默认值另有入口
+  for (const entry of contract.params.filter((p) => p.target !== "mask")) {
     assert.equal(PARAM_DEFAULTS[entry.id], entry.default, entry.id);
     assert.ok(entry.default >= entry.min && entry.default <= entry.max);
   }

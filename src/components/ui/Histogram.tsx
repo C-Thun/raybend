@@ -83,7 +83,8 @@ export function Histogram(props: HistogramProps) {
 
   return (
     <div
-      class={["flex h-44 w-full flex-col rounded-ui bg-surface-bar", props.class ?? ""]
+      // 2026-10-31：编辑器右栏要腾出 22 高的层名条 —— 直方图 176 → 164（画稿 SPyhh）
+      class={["flex h-[164px] w-full flex-col rounded-ui bg-surface-bar", props.class ?? ""]
         .filter(Boolean)
         .join(" ")}
       data-histogram={empty() ? "empty" : "lines"}
@@ -189,7 +190,7 @@ export function Histogram(props: HistogramProps) {
         />
       </div>
 
-      <div class="flex h-8 shrink-0 items-center px-1.5">
+      <div class="flex h-[26px] shrink-0 items-center px-1.5">
         <CompactChoice
           value={selected()}
           label={t("browse.histogramChannels")}

@@ -27,10 +27,10 @@ import {
   IconBookmark,
   IconLoader2,
   IconPencil,
-  IconTrash,
 } from "@tabler/icons-solidjs";
 
 import { Button } from "../../components/ui/Button.tsx";
+import { RemoveButton } from "../../components/ui/RemoveButton.tsx";
 import { MetadataRows } from "../../components/ui/MetadataRows.tsx";
 import { SegmentedControl } from "../../components/ui/SegmentedControl.tsx";
 import { PreviewFrame } from "../../components/ui/PreviewFrame.tsx";
@@ -39,12 +39,15 @@ import { formatDay } from "../../lib/datetime.ts";
 import type { MessageKey } from "../../i18n/index.ts";
 import type { ExifTag } from "../../api/types.ts";
 import type { DevelopStack } from "../../api/editor.ts";
+import type { PresetGroup, PresetMutationOutcome, PresetSnapshot } from "../../lib/presets.ts";
 import type { IssueLibrary, Issue, IssueSelection } from "../../api/issues.ts";
 import type { ShiftLikeEvent } from "../../lib/easy-destroy.ts";
 import type { ThumbQueue } from "../../components/ui/thumb-queue.ts";
 import type { ViewerPhoto } from "../../components/ui/viewer/index.ts";
 import type { EditorStore } from "./store.ts";
+import { AreaPanel } from "./area-panel.tsx";
 import { LutPanel } from "./lut-panel.tsx";
+import { PresetPanel } from "./preset-panel.tsx";
 import { EditorZoomControl } from "./zoom-control.tsx";
 import { overviewVisibleRect } from "./overview-rect.ts";
 import { previewFrameAspect } from "../../lib/preview-frame.ts";
@@ -132,11 +135,24 @@ export interface EditorLeftPanelProps {
   /** 「定稿为新 Issue」能不能点（原来 toolsbar right 那个按钮的判据） */
   canFinalize: () => boolean;
   onFinalize: () => void;
+  /* ── 预设面板（2026-11-05 从右栏页签搬到左列第四个面板） ── */
+  onCreatePresetDirectory: (name: string) => Promise<PresetMutationOutcome>;
+  onCreatePreset: (name: string, directoryId: string, groups: readonly PresetGroup[]) => Promise<PresetMutationOutcome>;
+  onRenamePresetDirectory: (id: string, name: string) => Promise<PresetMutationOutcome>;
+  onDeletePreset: (id: string) => Promise<void>;
+  onDeletePresetDirectory: (id: string) => Promise<void>;
+  onMovePresets: (ids: readonly string[], directoryId: string) => Promise<void>;
+  onApplyPreset: (snapshot: PresetSnapshot) => Promise<void>;
   /* ── LUT 面板（透传；面板本体仍在 `lut-panel.tsx`） ── */
   onCreateCategory: (name: string) => Promise<boolean>;
   onImport: (category: string) => Promise<string | null>;
-  onSelectLut: (id: string) => void;
   onToggleLut: () => void;
+  /** 应用层链变化（一次手势一次）—— 工作区据此 `confirmEdit()`。 */
+  onChainChangeLut: () => void;
+  /** 编辑区（area）结构动作结束（新建 / 删除 / 排序 / 改名 / 启停）。 */
+  onAreaChange: () => void;
+  /** 重新取样全部控制点（修复旧取样；面板标题栏那颗刷新按钮）。 */
+  onResampleAreas?: () => void;
   onHideLut: (id: string) => Promise<void>;
   class?: string;
 }
@@ -177,13 +193,32 @@ export function EditorLeftPanel(props: EditorLeftPanelProps): JSX.Element {
       style={{ width: `${EDITOR_LEFT_WIDTH}px` }}
     >
       {/*
-        上方：LUT / 定稿 两个面板**同一时刻只开一个**（toolsbar left 切换）。
+        上方：编辑区 / 定稿 / LUT / 预设 四个面板**同一时刻只开一个**（toolsbar left 切换）。
         `min-h-0 flex-1` 让列表区吃掉剩余高度，底部块才钉得住。
       */}
       <div class="flex min-h-0 flex-1 flex-col" data-editor-left-top>
+        <Show when={props.store.leftPanel() === "areas"}>
+          <AreaPanel store={props.store} enabled={props.enabled} onConfirm={() => props.onAreaChange()} onResampleAll={props.onResampleAreas} />
+        </Show>
         <Show when={props.store.leftPanel() === "lut"}>
           <LutPanel store={props.store} onCreateCategory={props.onCreateCategory} onImport={props.onImport}
-            onSelect={props.onSelectLut} onToggle={props.onToggleLut} onHide={props.onHideLut} />
+            onToggle={props.onToggleLut} onHide={props.onHideLut}
+            onChainChange={props.onChainChangeLut} />
+        </Show>
+        <Show when={props.store.leftPanel() === "preset"}>
+          <PresetPanel
+            store={props.store}
+            enabled={props.enabled}
+            onConfirm={() => props.onAreaChange()}
+            createDirectory={props.onCreatePresetDirectory}
+            createPreset={props.onCreatePreset}
+            renameDirectory={props.onRenamePresetDirectory}
+            deletePreset={props.onDeletePreset}
+            deleteDirectory={props.onDeletePresetDirectory}
+            movePresets={props.onMovePresets}
+            applyPreset={props.onApplyPreset}
+            class="min-h-0 flex-1"
+          />
         </Show>
         <Show when={props.store.leftPanel() === "issues"}>
           <IssuesPanel enabled={props.enabled} store={props.store} library={props.issues}
@@ -285,7 +320,7 @@ function IssuesPanel(props: {
   const source = (base: "sooc" | "raw"): DevelopStack => ({
     sourceBase: base, values: {}, curves: {}, asShotK: props.store.asShotTemperature(),
     lensProfile: null, lensEnabled: null, baseCurveProfile: null, baseCurvePoints: null,
-    lutId: null, lutEnabled: null, nrMethod: null, geometry: null,
+    lutChain: null, lutEnabled: null, nrMethod: null, geometry: null,
   });
   return (
     <div data-editor-issues class="flex min-h-0 flex-1 flex-col">
@@ -356,9 +391,13 @@ function IssuesPanel(props: {
                 aria-label={t("editor.issue.renameTitle")} title={t("editor.issue.renameTitle")}
                 disabled={!props.enabled}
                 onClick={() => props.onRename(issue)}><IconPencil size={14} /></button>
-              <button type="button" class="grid h-5 w-6 place-items-center rounded-ui text-fg-3 opacity-0 hover:text-danger group-hover:opacity-100"
-                aria-label={t("editor.issue.delete")} title={t("editor.issue.delete")}
-                onClick={(event) => props.onDelete(issue, event)}><IconTrash size={14} /></button>
+              {/* 删除 = 全项目唯一那一枚禁行图标（与 area / LUT / 导入「最近」同一枚） */}
+              <RemoveButton
+                class="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+                label={t("editor.issue.delete")}
+                disabled={!props.enabled}
+                onClick={(event) => props.onDelete(issue, event)}
+              />
             </span>
           </div>}
         </For>

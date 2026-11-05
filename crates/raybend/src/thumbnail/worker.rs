@@ -404,7 +404,7 @@ pub fn render_now_with_edit_and_lut(
     now_ms: i64,
     edit: Option<&crate::store::develop::DevelopStack>,
     lens: Option<&crate::develop::lens::LensCorrection>,
-    lut: Option<&crate::develop::lut::Lut>,
+    lut: Option<&crate::develop::lut::LutChain>,
 ) -> Result<Vec<u8>> {
     // 带编辑栈 = 库内口径（编辑只存在于库里）
     render_cached_with(thumbs, abs_path, size, now_ms, edit, || {

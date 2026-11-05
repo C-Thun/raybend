@@ -98,13 +98,16 @@ const EMPTY_RECYCLE_SUMMARY: RecycleSummaryView = { count: 0, bytes: 0 };
 /** 假后端：一个内存里的照片库 + 调用记录。 */
 function fakeApi(count: number) {
   const all = Array.from({ length: count }, (_, i) => item(i + 1));
-  const calls = { page: [] as number[], queries: [] as BrowseQuery[], sync: [] as BrowseQuery[], timeline: 0, facets: 0, mark: [] as MarkAction[] };
+  const calls = { page: [] as number[], queries: [] as BrowseQuery[], sync: [] as BrowseQuery[], timeline: 0, facets: 0, mark: [] as MarkAction[], markIds: [] as number[][] };
   const marks = new Map<number, MarkingItem>();
   let flagState = { total: 0, picks: [] as number[], rejects: [] as number[] };
   /** 让测试能控制某个请求什么时候返回。 */
   const gates: Array<() => void> = [];
 
   const api: BrowseApi = {
+    async textValues() {
+      return [];
+    },
     // 右栏要按 id 显示标签名 ⇒ store 会拉一次词典；测试里给空词典
     async tagList() {
       return [];
@@ -156,6 +159,7 @@ function fakeApi(count: number) {
     },
     async mark(_id: string, ids: readonly number[], action: MarkAction): Promise<MarkResult> {
       calls.mark.push(action);
+      calls.markIds.push([...ids]);
       for (const id of ids) {
         const current =
           marks.get(id) ??
@@ -920,6 +924,9 @@ function legacyApi(count: number) {
   );
   const asked: { dir: string; names: string[] }[] = [];
   const api: BrowseApi = {
+    async textValues() {
+      return [];
+    },
     async page(_query: BrowseQuery, offset: number, limit: number) {
       return { total: all.length, offset, items: all.slice(offset, offset + limit) };
     },
@@ -1002,6 +1009,9 @@ test("naturalOf：编辑过的照片用 latest 的输出尺寸（tiles 比例与
   // `specs/display-size-source.md` §5：latestWidth/Height 是「现在屏上这张多大」的默认口径
   const all = [item(1, { width: 4000, height: 3000, latestWidth: 2000, latestHeight: 1500, edited: true })];
   const api: BrowseApi = {
+    async textValues() {
+      return [];
+    },
     async page(_query: BrowseQuery, offset: number, limit: number) {
       return { total: all.length, offset, items: all.slice(offset, offset + limit) };
     },
@@ -1213,4 +1223,174 @@ test("回收站模式：不跑目录同步（syncScope 只服务 photos 树）",
   assert.equal(last?.recycle, true, "查询带 recycle 标志");
   assert.deepEqual(last?.sort, { key: "deletedAt", desc: true }, "按删除时间倒序");
   assert.equal(store.total(), 3, "回收站条目不应因为跳过同步而变空");
+});
+
+/* ══════════════════════════════════════════════════════════════
+ * 右栏文字字段（2026-11-03）：只改锚点 / 就地回填 / 批量与 GPS 填入
+ * ══════════════════════════════════════════════════════════════ */
+
+test("改文字只改锚点那张：右栏立即拿到新值，其余选中项不动", async () => {
+  const { api, calls } = fakeApi(3);
+  const store = createBrowseStore({ api });
+  open(store);
+  await tick();
+  store.selectAll();
+  store.setAnchor(2);
+  await store.setText("author", "  崔总 ");
+  assert.deepEqual(calls.markIds, [[2]], "只把锚点那张交给后端");
+  assert.equal(calls.mark[0]?.kind, "setText");
+  // 就地回填：不需要任何刷新，右栏读到的条目已经是新值
+  assert.equal(store.itemAt(1)?.author, "崔总");
+  assert.equal(store.itemAt(0)?.author, null, "没选中的不动");
+  assert.equal(store.itemAt(2)?.author, null, "其它选中项也不动（批量是显式动作）");
+});
+
+test("写到全部选中：setTextForSelected 才发整批 id", async () => {
+  const { api, calls } = fakeApi(3);
+  const store = createBrowseStore({ api });
+  open(store);
+  await tick();
+  store.selectAll();
+  await store.setTextForSelected("city", "杭州");
+  assert.deepEqual([...calls.markIds[0]!].sort((a, b) => a - b), [1, 2, 3]);
+  for (const index of [0, 1, 2]) assert.equal(store.itemAt(index)?.city, "杭州");
+});
+
+test("被锁跳过的照片不会被就地回填（界面不能显示一个没写进去的值）", async () => {
+  const { api } = fakeApi(2);
+  api.mark = async (_id, ids) => ({
+    ...EMPTY_MARK,
+    changed: 0,
+    skippedLocked: [...ids],
+  });
+  const store = createBrowseStore({ api });
+  open(store);
+  await tick();
+  store.selectAll();
+  await store.setText("country", "中国");
+  assert.equal(store.itemAt(0)?.country, null);
+  assert.equal(store.itemAt(1)?.country, null);
+});
+
+test("撤空字段写回 null（不是空串），清空后右栏显示占位", async () => {
+  const { api } = fakeApi(1);
+  const store = createBrowseStore({ api });
+  open(store);
+  await tick();
+  store.select(1, "replace");
+  await store.setText("description", "旧的说明");
+  assert.equal(store.itemAt(0)?.description, "旧的说明");
+  await store.setText("description", "   ");
+  assert.equal(store.itemAt(0)?.description, null);
+});
+
+test("按 GPS 填入地点：只填空字段，三项作为一次 setGeo 下发", async () => {
+  const { api, calls } = fakeApi(1);
+  const store = createBrowseStore({ api });
+  open(store);
+  await tick();
+  store.select(1, "replace");
+  await store.applyGeo({ country: "中国", provinceState: "浙江省", city: "杭州" });
+  assert.equal(calls.mark[0]?.kind, "setGeo");
+  assert.deepEqual(calls.mark[0], {
+    kind: "setGeo",
+    country: "中国",
+    provinceState: "浙江省",
+    city: "杭州",
+  });
+  assert.equal(store.itemAt(0)?.country, "中国");
+  assert.equal(store.itemAt(0)?.city, "杭州");
+
+  // 再来一次（换一个地点）：已有的三项都不该被覆盖
+  await store.applyGeo({ country: "日本", provinceState: "京都府", city: "京都" });
+  assert.equal(store.itemAt(0)?.country, "中国");
+  assert.equal(store.itemAt(0)?.provinceState, "浙江省");
+  assert.equal(store.itemAt(0)?.city, "杭州");
+});
+
+test("库内已有值：普通 refresh 不会让正在加载的候选丢失", async () => {
+  const { api } = fakeApi(1);
+  let release: (() => void) | undefined;
+  api.textValues = async () => {
+    await new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    return [{ value: "杭州", count: 1 }];
+  };
+  const store = createBrowseStore({ api });
+  open(store);
+  await tick();
+  const pending = store.ensureTextValues("city");
+  await store.refresh();
+  release?.();
+  await pending;
+  assert.deepEqual(store.textValues("city"), [{ value: "杭州", count: 1 }]);
+});
+
+test("写入发生在库内统计途中时，旧响应不能覆盖新候选", async () => {
+  const { api } = fakeApi(1);
+  let release: (() => void) | undefined;
+  let calls = 0;
+  api.textValues = async () => {
+    calls += 1;
+    const first = calls === 1;
+    if (first) {
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+    }
+    return [{ value: first ? "旧作者" : "新作者", count: 1 }];
+  };
+  const store = createBrowseStore({ api });
+  open(store);
+  await tick();
+  const pending = store.ensureTextValues("author");
+  store.select(1, "replace");
+  await store.setText("author", "新作者");
+  release?.();
+  await pending;
+  assert.equal(calls, 2, "过期响应后要按最新版本重取一次");
+  assert.deepEqual(store.textValues("author"), [{ value: "新作者", count: 1 }]);
+});
+
+test("写库结果跨越换库时不能回填到新库的同 id 照片", async () => {
+  const { api } = fakeApi(1);
+  let release: (() => void) | undefined;
+  api.mark = async () => {
+    await new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    return { ...EMPTY_MARK, changed: 1 };
+  };
+  const store = createBrowseStore({ api });
+  open(store, "RepoA");
+  await tick();
+  store.select(1, "replace");
+  const pending = store.setText("author", "崔总");
+  store.setRepository("RepoB");
+  await tick();
+  release?.();
+  await pending;
+  assert.equal(store.repositoryId(), "RepoB");
+  assert.equal(store.itemAt(0)?.author ?? null, null, "旧库的写入结果不能污染当前库");
+});
+
+test("库内已有值缓存键不会被地名里的竖线撞坏", async () => {
+  const { api } = fakeApi(1);
+  api.textValues = async (_id, _field, parents) => [
+    { value: `${parents.country ?? ""}/${parents.provinceState ?? ""}`, count: 1 },
+  ];
+  const store = createBrowseStore({ api });
+  open(store);
+  await tick();
+  await store.ensureTextValues("city", { country: "A|B", provinceState: "C" });
+  await store.ensureTextValues("city", { country: "A", provinceState: "B|C" });
+  assert.deepEqual(
+    store.textValues("city", { country: "A|B", provinceState: "C" }),
+    [{ value: "A|B/C", count: 1 }],
+  );
+  assert.deepEqual(
+    store.textValues("city", { country: "A", provinceState: "B|C" }),
+    [{ value: "A/B|C", count: 1 }],
+  );
 });

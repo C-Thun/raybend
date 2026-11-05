@@ -1,13 +1,14 @@
 # 弹窗叠放与边界线（dialog-stack-and-border）
 
-> 2026-10-24 ｜ 崔总定案：所有弹窗统一 1px 辅色边框；遮罩由机制保证「只画一次」；
+> 2026-10-24 ｜ 崔总定案：所有弹窗统一辅色边框；遮罩由机制保证「只画一次」；
+> 2026-10-31 ｜ 边框宽度 1px → **0.5px**（崔总：「淡淡一圈就行」）。
 > 弹窗内的提示/菜单、标题栏交互一并收口。
 
 ## 1. 目标
 
 1. **无脑调用也不出错**：任何 `<Dialog open>` / `<ConfirmDialog open>` 直接叠在另一个弹窗上，
    不需要调用方声明「第二层不要遮罩」；全应用任何时刻**恰好一层**压暗。
-2. **视觉边界**：所有弹窗内容面 1px `--brand-2` inner 描边；两层同色面叠放时能一眼分开。
+2. **视觉边界**：所有弹窗内容面 0.5px `--brand-2` inner 描边；两层同色面叠放时能一眼分开。
 3. **层级可预期**：后开的弹窗永远在视觉与交互的最上层；下层弹窗不可点击、焦点不进入。
 4. **收编第二份实现**：命令面板不再直接使用 `ArkDialog`；它和 `Dialog` 共用同一套 Frame。
 5. **弹窗内提示可见**：`IconButton` 的 Tooltip（如关闭叉）不再被弹窗自己盖住；
@@ -33,7 +34,7 @@
 - `ArkDialog.Root` + `Portal` + `Backdrop` + `Positioner` + `Content`；
 - 统一 `onInteractOutside` / `onEscapeKeyDown` → `blurActive()`；
 - `persistentElements` 固定包含 `[data-app-titlebar]` 的标题栏；
-- Content 基础面：`rounded-ui bg-surface-layer inset-ring-1 inset-ring-(--dialog-ring) outline-none`；
+- Content 基础面：`rounded-ui bg-surface-layer inset-ring-(length:--dialog-ring-w) inset-ring-(--dialog-ring) outline-none`；
 - 支持 `positionerClass` / `contentClass` / `contentAttrs`（命令面板用）。
 
 `Dialog` 只负责标题/描述/关闭叉/children/footer；`CommandPalette` 只负责自己的输入与列表。
@@ -67,17 +68,17 @@ positioner: z-index: calc(var(--z-modal) + (var(--dialog-layer, 1) - 1) * 2) !im
 
 ```css
 --dialog-ring: var(--brand-2);
+--dialog-ring-w: 0.5px;
 ```
 
 所有 `DialogFrame` 内容面、命令面板内容面、`MigrationGate` 面板使用
-`inset-ring-1 inset-ring-(--dialog-ring)`。这是「无边线设计」的唯一常驻例外，
+`inset-ring-(length:--dialog-ring-w) inset-ring-(--dialog-ring)`。这是「无边线设计」的唯一常驻例外，
 理由与浅色主题对比度备注写进 `memory/DESIGN.md` §10.1 #9。
 
 ### 3.5 设计稿
 
-- `design/main.pen`：28 个弹窗帧（14 个 `Dialog /` + 6 个 `Global Settings /` + 8 个库设置/导入进度的状态变体）加 `$brand-2` / 1px / inner 描边（已在打开的 Pencil 会话完成；
-  磁盘保存由崔总执行）。
-- `browse.pen` / `editor.pen` / `export.pen` 的弹窗帧本次**不同步**，登记到 `memory/PLAN.md` §5 #11。
+- `design/main.pen`：28 个弹窗帧（14 个 `Dialog /` + 6 个 `Global Settings /` + 8 个库设置/导入进度的状态变体）加 `$brand-2` / 0.5px / inner 描边。
+- `browse.pen` / `editor.pen` / `export.pen` 的弹窗帧 2026-10-31 已一并同步。
 
 ## 4. 验收清单
 
@@ -89,7 +90,7 @@ positioner: z-index: calc(var(--z-modal) + (var(--dialog-layer, 1) - 1) * 2) !im
 - [ ] 真机：库设置 / 导入取消 / 外部编辑器添加应用，同样检查
 - [ ] 真机：弹窗打开时拖标题栏、关窗口、标题栏菜单
 - [ ] 真机：弹窗内关闭叉的 Tooltip 显示在弹窗之上
-- [ ] 浅色主题：确认 1px 辅色边框的实际可见度
+- [ ] 浅色主题：确认 0.5px 辅色边框的实际可见度（是否还够分清两层弹窗）
 
 ## 5. 不做
 

@@ -122,6 +122,16 @@
   }
 }
 
+/*
+ * **只走一遍**的流光（`components/ui/ShimmerText.tsx` 的 `once`）：
+ * 一次性强调用（例如编辑右栏切层时，层名上扫一道），不是「处理中」那种循环状态。
+ * 循环那条 1.9s 是给「不知道要多久」的等待留的；一次强调要快，半秒多就收。
+ */
+.rb-shimmer-once {
+  animation-duration: 0.8s;
+  animation-iteration-count: 1;
+}
+
 .rb-shimmer-mask {
   /* 遮罩只看 alpha：中间那段不透明就够，颜色取令牌（色值只许写在 tokens.css） */
   mask-image: linear-gradient(

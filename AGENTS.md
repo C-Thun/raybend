@@ -129,6 +129,25 @@ raybend（中文名**「光伴」**，产品名 `RayBend`）是一个**相片管
     一旦给层塞进邻域算子，就要引入 N 份 RGBA16 中间缓冲（20MP 一张 160MB），架构立刻崩。
     规格 `specs/editor-area.md`。
 
+28. **窗口还原只判断一次、三种操作、不循环**（崔总 2026-10-31 定）：关闭时把主窗口的
+    **四角点位占所在屏工作区的比例** + 屏幕身份写入 `windows-state.json`；启动在 `show()` 前
+    只做一次「记录在不在 + 四角比例是否 0–1 + 原屏是否可识别」判断，然后只执行
+    **还原 / Shift+最大化回退 / 最大化** 之一。每个操作末尾做一次 titlebar 保底；
+    最小尺寸单边保底后放不下就到此为止——**不许**再判一次、再换布局重试。
+    最小化关闭 = 清除记录；最大化关闭 = 该屏最大化；崩溃保留上次正常关闭的文件。
+    规格 `specs/window-restore.md`。另：产品禁止双开（单实例插件，dev 除外）。
+
+28. **硬性上限集中登记**（崔总 2026-10-31 定）：凡是**为性能 / 面板体积 / 侧车体积**设的硬上限
+    （LUT 链 8 层、单张定稿 32、编辑区 32 层、标签 5000 …），必须在**同一次改动里**登记进
+    `memory/LIMITS.md`，并写清「代码唯一真相在哪 / 到顶时的行为 / 为什么是这个数」。
+    同一个上限**只许有一个常量**，别处引用它；改上限 = 改一处代码 + 改那一行表格。
+
+29. **错误与提示只走统一消息通道**（崔总 2026-11-01）：操作失败 / 落库失败 / 取样失败 / 读库失败
+    一律 `Toast`（`props.toast.show`，组装层建、往下传），**禁止**在工作区与面板里随手塞内联红字。
+    唯一例外是**对话框内的表单校验**（错误属于那个字段，弹到背后的 toast 看不到）。
+    自查：`grep -rn 'text-danger' src` 命中的应当是图标 / 危险按钮配色或对话框内联校验。
+    口径与判据见 `memory/COMPONENTS.md` §3.4。
+
 ---
 
 ## 3. 版本基线（2026-09-15 核实）
@@ -358,6 +377,8 @@ pi 的 todo 工具，**同时把需求原文落一份到 `todos/`**（文件名 
 | `memory/FUTURE.md` | 远期方向登记册（框架迁移、RAW 后端、渲染演进、AI、平台扩展） |
 | `memory/ARCHITECTURE.md` | 架构与工程基线：前端分层、版本基线、架构决定、调研存档、构建排障、untrack 纪律 |
 | `memory/DEBUGGING.md` | 排查工具（可选）：真机直连（CDP）与日志 / 崩溃记录的操作与排障 |
+| `memory/LIMITS.md` | **硬性上限登记册**：业务上限 / 容量预算 / 技术性上限的唯一索引（§2.28） |
+| `memory/COMPONENTS.md` | **组件库方案**：复用五步流程、分层、原语/范式件/成套件的用法与扩展方式、图标纪律、已合并的重复实现（§12 的完整版） |
 | `memory/DESIGN.md` | 视觉与配色体系（唯一事实来源） |
 | `memory/REVIEW.md` | 定期评审与方向修正（结论账本，维护规则见其 §0） |
 | `memory/FUNCTION-BROWSE.md` | 浏览模式规格：三列结构、toolsbar、选择逻辑、看图/对比、胶片带、标签、浮层、术语细则 |
@@ -371,6 +392,7 @@ pi 的 todo 工具，**同时把需求原文落一份到 `todos/`**（文件名 
 | `legal/` | 协议原文与许可数据（说明见 `legal/README.md`） |
 | `website/AGENTS.md` | 官网专属指南（独立技术栈） |
 | `docs/native-viewport-coordinate-guide.md` | 原生视口坐标契约完整报告（动原生视口前必读） |
+| `docs/pre-release-acceptance.md` | **对外推广前的功能核验清单**（崔总执行，逐项带权威正文指针；与 `docs/release.md` 的分工：那个管出包/发，这个管功能对不对） |
 
 ---
 
@@ -385,6 +407,7 @@ pi 的 todo 工具，**同时把需求原文落一份到 `todos/`**（文件名 
 | --- | --- | --- |
 | **`titlebar`** | 最上一条：应用图标/名、菜单、拖拽区、主题/密度开关、窗口三键 | `TitleBar` |
 | **`flowbar`** | 第二条：工作流切换（导入/浏览/编辑/导出）+ 图片信息区 + 开关组 | `FlowBar` |
+| **flowbar 五段**（从左到右，崔总 2026-11-02 定名） | `flow`（工作流切换）· `settings`（设置按钮）· `hint`（提示带）· `info`（图片信息 + 全屏入口前的信息区）· `fullscreen`（全屏按钮）。说「把某某放 hint 里」指的就是这条带子，不再用「中间那块」这类模糊说法 | `FlowBar` |
 | **`toolsbar`** | 第三条：工具按钮，**内容居中**、随工作流变、无内容整行隐藏 | `ToolsBar` |
 | **`workspace`** | 三条下面的工作区，完全跟着工作流走 | `Workspace` |
 | **工作流**（flow） | 导入 / 浏览 / 编辑 / 导出，**有序流水线** | `FlowChip` |
@@ -462,6 +485,7 @@ import 与 browse 的照片区必须经同一个 `PhotoViewingStage` / `PhotoVie
 | **最近**（Recent） | 自动记录的最近 50 个导入目录 |
 | **已选目录** | 已勾选、准备导入的目录集合（横条列表） |
 | **`shortpath`** | 路径缩写：盘符 + 中间各级首字母 + 末级全名（`memory/DESIGN.md` §12.3） |
+| **`flowhint`**（提示区）= flowbar 的 `hint` 段 | **设置按钮右边、`info` 左边**那条弹性带子：一句功能提示（如「按住 Ctrl 键可拖动」），**辅色**文字、超出右缘渐隐、离 info 留 100px。状态在 `lib/flow-hint.ts`（含**开关**：默认开，设置页关掉后 `showFlowHint` 直接丢弃 —— 调用点不判断设置），用法见 `memory/COMPONENTS.md` §3.2 |
 | **`flowinfo`** | flowbar 右侧图片信息区；**跟随当前工作流**，没选中就清空 |
 | **`easy copy`** | 指向信息组 → 细边框 +「点击复制」气泡；点击后变「已复制」 |
 | **`easy destroy`** | 移除类快速通道：默认弹确认，`Shift` 跳过 |
@@ -476,16 +500,21 @@ import 与 browse 的照片区必须经同一个 `PhotoViewingStage` / `PhotoVie
 | **内嵌预览**（embedded preview） | 相机写在 RAW 里的 JPEG 预览，提取快 1–2 个数量级 |
 | **编辑栈**（develop stack） | 全部非破坏性编辑操作的序列；定稿落成 issue |
 | **`fullscreen`** | 无 UI 沉浸式单图浏览（独立无边框窗口，`F11`）；与主窗口看图态是两回事 |
-| **`fitWorkArea`（调整到工作区）** | 最大化键的 **Shift+点击**：窗口调整成所在屏工作区内按比例留白的矩形（左右上 2.5%、下 5%；幂等，不做 toggle）。几何全在 Rust（命令 `window_fit_work_area`）；规格 `specs/window-work-area-layout.md` |
+| **`fitWorkArea`（调整到工作区）** | 最大化键的 **Shift+点击**：窗口调整成所在屏工作区内按比例留白的矩形（左右上 2.5%、下 5%；幂等，不做 toggle）。几何全在 Rust（命令 `window_fit_work_area`）；2026-10-31 起目标尺寸**单边不低于最小窗口尺寸**（高算 700 → 800，宽算 1300 → 1300），保底后放不下就到此为止。规格 `specs/window-work-area-layout.md` |
+| **窗口还原**（window restore） | 启动时恢复上次关闭的四角点位：`src-tauri/src/window_state.rs` + `windows-state.json`；启动只判断一次，三种操作（还原 / Shift+最大化回退 / 最大化），不循环；最小化关闭清记录，最大化关闭该屏最大化。规格 `specs/window-restore.md` |
 | **`shortcut`（快捷键）** | 命令注册表里的默认键位（`CommandSpec.defaultKey`）；新功能必选项（§2.15） |
 | **场景（scene）** | 命令体系的一层（崔总 2026-10-09 定）：**入口唯一，逻辑按场景转换** —— 撤销/重做对用户是一套操作，在浏览与编辑背后是两套内部逻辑。落地见 `CommandDeps.history` 与 `App.tsx` 的 `historyScene()`；`scope` 只管静态归属与冲突检测 |
 | **弱菜单** | 菜单是**逃生通道**不是功能索引：界面里已有入口的动作/开关不进菜单（仍留在命令面板与快捷键里）。见 `CommandSpec.menu` 注释与 `implementations/2026-10-09_menu-weak-menu-cleanup.md` |
 | **动态反差**（Dynamic Contrast） | 一根拉杆的局部色调映射（`dynamicContrast`，0–100 单极）；与全局 `contrast` 不是一回事 |
 | **显示尺寸**（display size） | 「这张照片**现在显示多大**」的唯一口径：与方向一样**记在库**里（每文件 `asset_files.display_*`、latest `develop_stacks.output_*`、每条定稿 `issues.output_*`），按**显示变体**解析（`store::sizes::display_size` / 前端 `lib/display-size.ts`）。view 按该尺寸布局，flow info 与 tiles 比例也读它；规格 `specs/display-size-source.md` |
 | **展示尺寸 / 输出尺寸** | 展示尺寸 = `oriented_size(原始轴, 方向)`（屏上宽×高）；输出尺寸 = `EditGeometry::output_size(源展示尺寸)`（已含裁切/旋转，latest 与定稿用） |
-| **`area`（编辑区）** | 编辑栈里的一「层」：带名字（≤30 字）、上下顺序、启停的逐像素调整集合。`全图` 是唯一必须存在的类型（可多份，删到最后一个即不可再删）；层内只装逐像素参数与曲线，全局阶段不进层（§2.27）。规格 `specs/editor-area.md` |
+| **`area`（编辑区）** | 编辑栈里的一「层」：带名字（≤30 字）、上下顺序、启停的逐像素调整集合。**列表自上而下 = 计算顺序，新增的层追加在末尾**（与 LUT 链同一口径）。三种类型：`默认`（**恰好一个、不可删**，全图效果 + 全局功能的宿主）/ `全图`（用户建的全幅调整层）/ `控制点`；层内只装逐像素参数与曲线，全局阶段（镜头 / 清晰度 / 局部色调 / 色彩管理 / LUT / 基础曲线）只挂在 `默认` 上（§2.27）。规格 `specs/editor-area.md` |
 | **`control point`（控制点）** | `area` 的一种：一个**冻结种子** + 一个**范围** + 平滑权重，把调整铺开到「色/亮相近」的像素上，不用画蒙版。名字固定写英文 `control point`（崔总 2026-10-31 指定）。**不做**影响面可视化 |
 | **眼睛（`显示控制点`）** | toolsbar right 的开关，**只管**控制点的圆点 / 引线 / 名字是否显示；纯视图偏好（`localStorage`，不进 profile / 哈希 / 撤销 / XMP）。未来的蒙版显示是另一套（半透明红区），与它无关 |
+
+**顺序术语（2026-10-31 定，为了无歧义）**：编辑栈 / LUT 链的**列表位置**一律说「第 N 层」（第 1 层在最上面），
+**计算先后**一律说「先 / 后」，**禁止**用「上层 / 下层」指计算顺序 —— 面板上的「上」是**先**算、
+「下」是**后**算，跟手感相反，用「上下」必然歧义。第 1 层有个专名叫**基底**。中文文案、规格、代码注释统一这套。
 
 ---
 
@@ -493,7 +522,12 @@ import 与 browse 的照片区必须经同一个 `PhotoViewingStage` / `PhotoVie
 
 > **纪律（崔总 2026-10-11 定）**：写界面前在下面这份清单里找 —— 找到就**用它**（不够就改它、一般化它），
 > **不要再写第二个**（§2.12）；清单里确实没有才新建，并且**同一次改动里补进这份表**。
-> 本表是**索引**（谁在哪、管什么）；**视觉规格**（状态、密度、主题、尺寸令牌）在 `memory/DESIGN.md` §10.1，
+>
+> ❗**完整方案在 `memory/COMPONENTS.md`（先读那份）**：本表只是索引（谁在哪、管什么），
+> 那份写的是**怎么用 / 怎么扩展 / 哪些重复实现已经合并、禁止写回来**（五步复用流程、
+> 图标纪律、新建组件检查表、已合并案例）。两处一起维护：新建组件 → 两份都补。
+>
+> **视觉规格**（状态、密度、主题、尺寸令牌）在 `memory/DESIGN.md` §10.1，
 > 画稿在 `design/*.pen` + 同名 `.md`。想「看一眼」全部组件：dev 下开 `/dev/kitchen-sink`（`src/dev/KitchenSink.tsx` 画廊）。
 >
 > 分层规则（`lint:arch` 强制）：`components/ui/` **不许 import `features/` 或 `api/`**（取图、文案这类外部事实由调用方传入）；
@@ -510,18 +544,22 @@ import 与 browse 的照片区必须经同一个 `PhotoViewingStage` / `PhotoVie
 | `Slider` | `Slider.tsx` | 连续 / 定档滑块（网格缩放档、编辑参数）；键盘与 aria 由 Ark UI 承载 |
 | `Tooltip` / `ButtonTip` | `Tooltip.tsx` | 提示气泡；`easy copy` 的「点击复制 / 已复制」复用它 |
 | `Menu` | `Menu.tsx` | 下拉菜单（标题栏菜单、右键菜单） |
-| `Dialog` / `ConfirmDialog` / `DialogFrame` | `Dialog.tsx` | 模态弹窗（建库、`easy destroy` 确认）；**取消在左、确认在右**。`DialogFrame` 是唯一 Ark 三件套（Root/Backdrop/Positioner/Content）实现，命令面板也复用它；遮罩由弹窗栈自动只画最底层，弹窗面固定 1px `--dialog-ring` 内描边 |
+| `SuggestInput` | `SuggestInput.tsx` | **带建议列表的行内输入框**（focus 出列表、前缀筛选、↑↓、Enter 采用、Esc 先关列表）；候选合并/筛选在 `lib/suggest.ts` |
+| `Dialog` / `ConfirmDialog` / `DialogFrame` | `Dialog.tsx` | 模态弹窗（建库、`easy destroy` 确认）；**取消在左、确认在右**。`DialogFrame` 是唯一 Ark 三件套（Root/Backdrop/Positioner/Content）实现，命令面板也复用它；遮罩由弹窗栈自动只画最底层，弹窗面固定 0.5px `--dialog-ring` 内描边 |
 | `ToggleBlock` | `ToggleBlock.tsx` | 可按下按钮（吸附、按时间这类模式开关） |
 | `Badge` / `CountBadge` | `Badge.tsx` | 计数 / 状态小标签 |
 | `PathText` | `PathText.tsx` | `shortpath` 路径缩写（§11.5、`memory/DESIGN.md` §12.3） |
 | `TreeNode` | `TreeNode.tsx` | 树形行（展开箭头 + 图标 + 名称 + 勾选框）；目录树用它 |
 | `Panel` | `Panel.tsx` | 面板容器（标题行、可折叠，可进 `SplitStack` 参与拖拽分段） |
 | `SplitHandle` / `SplitHandleDots` / `SplitStack` | `SplitHandle.tsx` / `SplitStack.tsx` | **全项目唯一**的拖拽分隔条（`...` 三点）与 N 段可拖布局；尺寸数学在 `lib/stack-resize.ts`（有单测） |
+| `RowDragSort`（`createRowDragSort`） | `RowDragSort.tsx` | **全项目唯一**的整行拖动排序：手势 + 让位 + 占位洞 + 跟随光标的整行幽灵；几何在 `lib/row-drag-sort.ts`。LUT 链与编辑区层共用 |
+| `ShimmerText` | `ShimmerText.tsx` | **一遍流光**（`.rb-shimmer-mask`）：`once` = 一次性强调（切层时层名走一遍），默认 = 循环状态指示（导出 / 工作流「处理中」）；`dimBase` 控制底层是否压暗 |
 | `ScrollBox` / `SubtleScrollbar` | `ScrollBar.tsx` / `SubtleScrollbar.tsx` | 可滚动内容区（统一滚动条样式）/ 2px 无感横向进度指示 |
 | `VirtualGrid` | `VirtualGrid.tsx` | 行式虚拟滚动容器（照片网格骨架） |
 | `StateWatermark` | `StateWatermark.tsx` | 内容区的载入 / 空 / 错误 / 提示水印 |
 | `Toast` / `ToastHost` | `Toast.tsx`（状态机 `toast.ts`） | 轻提示（成功 / 危险 / 信息） |
 | `MetadataRows` | `MetadataRows.tsx` | 「名称 : 值」两列信息行（右栏与编辑器共用一份排版） |
+| `SectionTitle` | `SectionTitle.tsx` | **段标题**：左侧 3px 主色竖条 + 加粗标题（导出右栏的「预设列表 / 当前预设」；2026-11-05 起各面板标题都该用它，别再手写同款） |
 | `ToolsSeparator` | `ToolsSeparator.tsx` | toolsbar 的组分隔符 |
 | `Histogram` / `HistogramPanel` | `Histogram.tsx` / `HistogramPanel.tsx` | RGB 直方图（三通道曲线 + 通道选择）/ 直方图那一块（标题 + 取数与缓存） |
 | `Progress` | `Progress.tsx` | 进度条（**全项目唯一一份**）：确定态按百分比；`value=null` = 不确定态（没有总数就不编百分比）。照片导入与 LUT 导入共用（2026-10-30） |
@@ -568,12 +606,14 @@ import 与 browse 的照片区必须经同一个 `PhotoViewingStage` / `PhotoVie
 | --- | --- | --- | --- |
 | 导入 | `crates/raybend/src/import/`、`src-tauri/src/import.rs`、`src/features/import/` | `catalog.assets/asset_files`、缩略图缓存、XMP 读回 | 判重/冲突、`_RAW/` 规则、XMP 采纳、导入模板、缩略图两档 |
 | 浏览 / 评级 / 标签 / 桶 | `store/{assets,tags,photo_tags,organization}.rs`、`src-tauri/{browse,organization}.rs`、`src/features/browse/` | `catalog` 标记、`app.db` 桶/成员/词典 | XMP 元数据层、撤销/重做、命令注册（§2.15）、i18n、筛选查询 |
+| **右栏元数据字段 / 地理**（2026-11-03） | `src/features/browse/{BrowsePanels,text-edit,store}.ts`、`crates/raybend/src/{geo.rs,store/{query,marking}.rs}`、`assets/geo/` | 文字字段（作者/描述/地点）与 GPS 展示；建议输入（最近 20 ∪ 库内值）；「按 GPS 填入地点」 | 新增/改字段 → `marking::TextField` 三处同步（枚举/SQL 列/TS 联合）→ `memory/LIMITS.md`；城市数据重建 → `scripts/build-geo-data.mjs` + CC BY 署名 + `THIRD-PARTY-NOTICES.md`；XMP 侧车地点写出见 `specs/xmp-sidecar.md` §5.1 |
 | **编辑（无损参数）** | `develop/params.rs` + `assets/develop-params.json`、`develop/pipeline.rs`、`store/develop.rs`、`store/issues.rs`、`src/features/editor/` | 编辑栈 `DevelopStack`、`latest` / issue 快照、preset | **XMP（见 §13.1）**、profile schema 版本、preset 兼容、撤销节点（§2.21）、渲染缓存签名 |
 | 导出 | `export/`、`src-tauri/src/export.rs`、`src/features/export/` | 输出文件、元数据、ICC | issue/尺寸契约、外部编辑器 TIFF、队列 |
 | 色彩 | `color/`、`display/`、`src-tauri/src/color_profiles.rs` | 输入/工作/输出 ICC、显示状态 | 缓存代理、XMP 色彩身份、导出标记 |
 | 回收站 / 存储 | `store/delete.rs`、`store/repository.rs`、`src-tauri/src/repo.rs` | 文件移动、catalog 标记、缓存清理 | XMP 随照片移动、还原同名后缀、离线降级 |
 | XMP | `crates/raybend/src/xmp/`、`src-tauri/src/sidecar.rs` | `<主体名>.xmp` | `specs/xmp-sidecar.md`、`specs/issue-xmp-contract.md`、写出开关、巡检工具 |
 | **编辑区（area / 层）** | `store/develop.rs::DevelopStack`、`develop/pipeline.rs`、`src/features/editor/area-panel.tsx` | 层的参数与曲线、层序、层名、冻结种子、范围 | **撤销键加 `area_id` + 结构 op**、定稿哈希与 schema 版本（v3 按内容分支）、XMP（`crs` 无层概念 → 层只进 `rb:`）、预设作用域过滤、缓存签名、缩略图渲染路径、坐标契约 |
+| **窗口还原 / 单实例** | `src-tauri/src/window_state.rs`、`window_layout.rs`、`lib.rs` | 主窗口四角点位比例、屏幕身份、最大化/最小化关闭语义；`windows-state.json` | 单实例插件、`tauri.conf.json` 的 `minWidth/minHeight`、启动 show 时序、`fitWorkArea` 共用几何；XMP / DB schema 无影响 |
 
 ### 13.1 新增「无损编辑参数」的固定清单
 

@@ -50,6 +50,8 @@ import type {
   RecycleSummaryView,
   RestoreResult,
   Tag,
+  TextValueCount,
+  TextValueParents,
   TimelineEntry,
 } from "../../api/types.ts";
 import {
@@ -65,6 +67,7 @@ import {
   type SelectionState,
 } from "../../lib/selection.ts";
 import { clearMarkFilters, conditionCount } from "./filter.ts";
+import { fillGeoFields, patchTextFields } from "./text-edit.ts";
 
 /** 一页取多少张。256 与网格的 overscan 一起够撑一屏还有富余。 */
 export const PAGE_SIZE = 256;
@@ -93,6 +96,12 @@ export interface BrowseApi {
     ids: readonly number[],
     action: MarkAction,
   ): Promise<MarkResult>;
+  /** 库内已有值（建议输入的第二个来源）；`description` 后端会拒绝（只来自最近输入）。 */
+  textValues(
+    repositoryId: string,
+    field: EditableTextField,
+    parents: TextValueParents,
+  ): Promise<TextValueCount[]>;
   undo(repositoryId: string): Promise<MarkResult>;
   redo(repositoryId: string): Promise<MarkResult>;
   remove(repositoryId: string, ids: readonly number[]): Promise<RecycleResult>;
@@ -334,10 +343,29 @@ export interface BrowseStore {
   /**
    * 改右栏里可编辑的文字字段（作者 / 描述 / 地理四项）。
    *
-   * 作用对象是**当前选中的那些照片**（批量也能改 —— 与打标同一条规矩）。
+   * 作用对象是**当前那张（锚点）**（崔总 2026-11-03 定：右栏看着谁就改谁，
+   * 多选时不要悄悄改一片）；要批量请显式调 [`setTextForSelected`]。
    * `value` 传空串 = 清空该字段。走的是 `browse_mark`，所以**可以撤销**。
+   *
+   * 成功后**就地回填**条目（不等文件监听 / 整目录重扫），右栏立刻显示新值。
    */
   setText(field: EditableTextField, value: string): Promise<MarkResult | null>;
+  /** 把同一个值写到**当前选中的全部照片**（右栏「应用到所选 N 张」走这条）。 */
+  setTextForSelected(field: EditableTextField, value: string): Promise<MarkResult | null>;
+  /**
+   * 按坐标得到的地点**填入地理三项**（只填空字段；三项算一步撤销）。
+   *
+   * 作用对象是**锚点那张**：地点建议属于「正在看的这张照片」，不该默默地改一片。
+   */
+  applyGeo(place: {
+    country: string | null;
+    provinceState: string | null;
+    city: string | null;
+  }): Promise<MarkResult | null>;
+  /** 库内已有值（建议输入的第二个来源）；没拉过就是空。 */
+  textValues(field: EditableTextField, parents?: TextValueParents): readonly TextValueCount[];
+  /** 按需拉一次库内已有值（幂等；同一个键只拉一次，文字写入后作废）。 */
+  ensureTextValues(field: EditableTextField, parents?: TextValueParents): Promise<void>;
 
   // ── 旗标 ──
   picks(): ReadonlySet<number>;
@@ -357,6 +385,27 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
   const [filterMode, setFilterModeSignal] = createSignal(false);
   const [undoState, setUndoState] = createSignal<UndoState>(EMPTY_UNDO_STATE);
   const [undoTick, setUndoTick] = createSignal(0);
+
+  /*
+   * 「库内已有值」的会话内缓存（建议输入的第二个源）。
+   * 键 = 库 id + 字段 + 上级地理维度；文字写入后整批作废（新写的值要能马上出现在别人的建议里）。
+   * 不走信号而是一个 tick：读取函数是普通函数（同本文件顶部关于 `createMemo` 的说明）。
+   */
+  const textValueCache = new Map<string, readonly TextValueCount[]>();
+  const textValueInFlight = new Set<string>();
+  const [textValueTick, setTextValueTick] = createSignal(0);
+  // 每次成功写入都递增：让在飞的旧统计响应不能覆盖写入后的候选。
+  let textValueRevision = 0;
+  // 键里必须带**库 id**：换库后旧库的候选不能洩到新库的下拉里。
+  // 用 JSON 而不是 `|` 拼接：地名本身可以含 `|`，拼接会造成跨条件碰撞。
+  const textValueKey = (field: EditableTextField, parents: TextValueParents = {}): string =>
+    JSON.stringify([
+      repositoryId() ?? "",
+      field,
+      parents.country ?? "",
+      parents.provinceState ?? "",
+      parents.city ?? "",
+    ]);
 
   /** 每次动作之后把撤销栈状态收下来（marking/undo/redo 三处都走它） */
   const rememberUndo = (result: MarkResult | null): MarkResult | null => {
@@ -774,6 +823,20 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
     return out;
   };
 
+  /**
+   * 锚点那张（多选时右栏 / flowinfo 显示谁）—— **规则只此一处**。
+   *
+   * 有锚点就用锚点；锚点不在选中集里（或没有锚点）就退回第一张；一张没选就是 `null`。
+   * 从 `return` 里抽出来是因为「改文字只改锚点那张」也要用它（`setText`）——
+   * 抽成两个函数只会让两处慢慢走偏。
+   */
+  const anchorSelectionItem = (): AssetItem | null => {
+    const selected = selectedItems();
+    if (selected.length === 0) return null;
+    const anchor = selection().anchor;
+    return selected.find((item) => String(item.id) === anchor) ?? selected[0] ?? null;
+  };
+
   const refreshMarkings = async (): Promise<void> => {
     const id = repositoryId();
     const ids = selectedIds();
@@ -867,6 +930,38 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
         };
       }),
     );
+    return result;
+  };
+
+  /**
+   * 写一个文字字段到指定的一批照片（**锚点/所选两条入口共用**）。
+   *
+   * 成功之后两件事：
+   * 1. **就地回填**条目（`patchTextFields`，与后端 `set_text` 同口径）——
+   *    右栏立刻显示新值，不再依赖「sidecar 写盘 → 文件监听 → 整目录重扫」那条偶然旁路
+   *    （崔总 2026-11-03 报的 1 秒延迟，根因就是这个依赖）；
+   * 2. 候选缓存作废（刚写进去的值要能马上出现在下一次建议里）。
+   *
+   * 失败**不在这里吞**：调用方要拿错误去 Toast（`AGENTS.md` §2.29）。
+   */
+  const writeText = async (
+    field: EditableTextField,
+    value: string,
+    ids: readonly number[],
+  ): Promise<MarkResult | null> => {
+    const id = repositoryId();
+    if (id === null || ids.length === 0 || !canWrite()) return null;
+    const result = await api.mark(id, ids, { kind: "setText", field, value });
+    rememberUndo(result);
+    textValueRevision += 1;
+    textValueCache.clear();
+    setTextValueTick((tick) => tick + 1);
+    // 写入可能跨越一次刷新/换目录：按资产 id 回填仍然正确；**换库**才必须丢弃，
+    // 否则旧库的 id 可能恰好撞上当前库的另一张照片。
+    if (repositoryId() !== id) return result;
+    const skipped = new Set(result.skippedLocked);
+    const written = new Set(ids.filter((assetId) => !skipped.has(assetId)));
+    setEntries((prev) => patchTextFields(prev, written, field, value));
     return result;
   };
 
@@ -975,12 +1070,7 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
      * 人类 2026-09-19：这条规则以前同时写在 browse 工作区与组装层，很容易走偏；
      * flowbar 的信息区（flowinfo）也要用它，所以下沉到这里 —— 两处都读同一个方法。
      */
-    anchorItem: () => {
-      const selected = selectedItems();
-      if (selected.length === 0) return null;
-      const anchor = selection().anchor;
-      return selected.find((item) => String(item.id) === anchor) ?? selected[0] ?? null;
-    },
+    anchorItem: anchorSelectionItem,
     select(id, mode, order) {
       setSelection(
         applySelection(selection(), orderedIds(order), String(id), mode),
@@ -1130,7 +1220,58 @@ export function createBrowseStore(deps: BrowseDeps): BrowseStore {
     },
 
     async setText(field, value) {
-      return mark({ kind: "setText", field, value });
+      const anchor = anchorSelectionItem();
+      return writeText(field, value, anchor === null ? [] : [anchor.id]);
+    },
+    async setTextForSelected(field, value) {
+      return writeText(field, value, selectedIds());
+    },
+    async applyGeo(place) {
+      const id = repositoryId();
+      const anchor = anchorSelectionItem();
+      if (id === null || anchor === null || !canWrite()) return null;
+      const result = await api.mark(id, [anchor.id], { kind: "setGeo", ...place });
+      rememberUndo(result);
+      textValueRevision += 1;
+      textValueCache.clear();
+      setTextValueTick((tick) => tick + 1);
+      if (repositoryId() !== id) return result; // 换库后不能把旧库的 id 填进当前库
+      // 与后端 `marking::fill_geo` 同口径：只填空字段（锁住的资产后端会跳过）
+      const written = new Set(
+        result.skippedLocked.includes(anchor.id) ? [] : [anchor.id],
+      );
+      setEntries((prev) => fillGeoFields(prev, written, place));
+      return result;
+    },
+    textValues(field, parents = {}) {
+      textValueTick(); // 建立响应式依赖：写入文字后 tick 变，候选跟着重读
+      return textValueCache.get(textValueKey(field, parents)) ?? [];
+    },
+    async ensureTextValues(field, parents = {}) {
+      const id = repositoryId();
+      if (id === null) return;
+      const key = textValueKey(field, parents);
+      if (textValueCache.has(key) || textValueInFlight.has(key)) return;
+      textValueInFlight.add(key);
+      try {
+        let mine = textValueRevision;
+        let rows = await api.textValues(id, field, parents);
+        // 写入可能在统计途中发生：重取到本次写入之后的版本为止。
+        // 普通 refresh 不递增这个 revision，因此不会把候选误判为过期。
+        while (repositoryId() === id && mine !== textValueRevision) {
+          mine = textValueRevision;
+          rows = await api.textValues(id, field, parents);
+        }
+        if (repositoryId() !== id || mine !== textValueRevision) return;
+        if (!textValueCache.has(key)) {
+          textValueCache.set(key, rows);
+          setTextValueTick((tick) => tick + 1);
+        }
+      } catch {
+        // 建议不是数据：拉不到就不给候选，不能因此报错/阻断输入
+      } finally {
+        textValueInFlight.delete(key);
+      }
     },
 
     picks,

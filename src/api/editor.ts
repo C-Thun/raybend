@@ -26,6 +26,7 @@ import type {
   EditGeometry,
 } from "./types.ts";
 import type { EditorViewportPayload } from "../lib/editor-viewport.ts";
+import { overlayPulse, publishOverlayLive } from "../lib/overlay-live.ts";
 import { isTauriRuntime } from "./tauri-env.ts";
 
 /** 缓存的 `@tauri-apps/api/core` 模块（浏览器里根本不会加载它）。 */
@@ -83,7 +84,48 @@ export async function sendEditorViewportIntent(
   intent: EditorViewportIntent,
 ): Promise<void> {
   if (!isTauriRuntime()) return;
+  // 视口要动了：覆盖层开始每帧读变换（否则照片动了、标记还停在原地）
+  overlayPulse();
   return call<void>("editor_viewport_intent", { intent });
+}
+
+/**
+ * **开发期**：控制点容差映射的固化默认值（`develop/areas.rs::POINT_WEIGHT_CONFIG`）。
+ *
+ * 只给 `dev/MaskDebugDialog` 的「恢复默认」用 —— 前端不抄一份数字，避免漂。
+ */
+export async function getMaskDefaults(): Promise<import("../lib/mask-debug.ts").MaskWeightConfig> {
+  const fallback: import("../lib/mask-debug.ts").MaskWeightConfig = {
+    lumaCore: [0, 0], lumaEnd: [0, 0], chromaCore: [0, 0], chromaEnd: [0, 0],
+  };
+  if (!isTauriRuntime()) return fallback;
+  /*
+   * **在 I/O 边界解码**（不是把 `undefined` 直接当成配置用）：这条命令只在开发期调试对话框里用，
+   * 但后端没实现（旧版 / 冒烟 fixture）时会返回 `undefined` —— 直接透出去会让对话框在
+   * `defaults.lumaCore` 上抛未捕获异常（2026-11-05 `check:export` 的 exceptions 断言就是它）。
+   * 形状不对就退回零配置：调试对话框能开、能写值，只是默认值全 0。
+   */
+  const raw = await call<Partial<import("../lib/mask-debug.ts").MaskWeightConfig> | null>("editor_mask_defaults");
+  const pair = (value: unknown): [number, number] | null => {
+    if (!Array.isArray(value) || value.length !== 2) return null;
+    const [a, b] = value;
+    return typeof a === "number" && typeof b === "number" && Number.isFinite(a) && Number.isFinite(b)
+      ? [a, b] : null;
+  };
+  const lumaCore = pair(raw?.lumaCore);
+  const lumaEnd = pair(raw?.lumaEnd);
+  const chromaCore = pair(raw?.chromaCore);
+  const chromaEnd = pair(raw?.chromaEnd);
+  if (lumaCore === null || lumaEnd === null || chromaCore === null || chromaEnd === null) return fallback;
+  return { lumaCore, lumaEnd, chromaCore, chromaEnd };
+}
+
+/** 覆盖层的实时变换（只取矩阵 / 比例 / 旋转 / 照片身份，手势期间每帧一次）。 */
+export async function getEditorOverlayState(): Promise<import("../lib/overlay-live.ts").OverlayLive | null> {
+  if (!isTauriRuntime()) return null;
+  const state = await call<import("../lib/overlay-live.ts").OverlayLive>("editor_overlay_state");
+  publishOverlayLive(state);
+  return state;
 }
 
 /** 命名定稿对比参照：Rust 读独立 AVIF 快照并解码，序号挡住迟到结果。 */
@@ -145,6 +187,59 @@ export async function getEditorRenderState(): Promise<EditorRenderState | null> 
  * ══════════════════════════════════════════════════════════════ */
 
 /** 一张照片的编辑栈（与 Rust 侧 `DevelopStackDto` 逐字对应）。 */
+/**
+ * 应用层的一层（多层 LUT）：哪一支、开没开、强度多少。
+ *
+ * 语义（`specs/editor-lut-chain.md` §1）：`像素 = layer_n(...(layer_1(原像素)))`，
+ * 单层作用 = `mix(输入, LUT(输入), strength)`。
+ */
+export interface LutLayer {
+  id: string;
+  enabled: boolean;
+  /** 0..1（1 = 100%） */
+  strength: number;
+}
+
+/**
+ * 编辑区（area）的一层（与 Rust 侧 `store::develop::Area` 逐字对应）。
+ *
+ * `type` 用 serde 的 `tag = "type"` flatten：`full` 只有公共字段，
+ * `point` 多出采样位 / 种子 / 容差（`specs/editor-area.md` §3.1）。
+ */
+export interface AreaCommon {
+  id: number;
+  /** 用户起的名字（≤30 字符）。空 = 用类型默认名。 */
+  name: string;
+  enabled: boolean;
+  /** 0..1（近期没有界面） */
+  opacity: number;
+  /** 控制点的颜色槽位（0..8）；全图层不画标记 */
+  color: number;
+  params: Record<string, number>;
+  curves: Record<string, [number, number][]>;
+  /**
+   * 控制点种子的定义版本（与 Rust `store::develop::SEED_VERSION` 一致）。
+   *
+   * `0` / 缺省 = 旧定义（线性域）—— 前端载入时会**逐点重新取样**，位置不变。
+   */
+  seedVersion: number;
+}
+
+export type Area = AreaCommon &
+  (
+    | { type: "full" }
+    | {
+      type: "point";
+      /** 采样位：图像归一化坐标（方向已归正、裁切前） */
+      x: number;
+      y: number;
+      /** 创建时冻结的特征向量 `[luma, c1, c2]`（0..1） */
+      seed: [number, number, number];
+      /** 归一化向量距离的尺度（0..1）——**不是空间半径** */
+      tolerance: number;
+    }
+  );
+
 export interface DevelopStack {
   color?: import("./color.ts").PhotoColorState | null;
   autoAdjust?: import("./types.ts").AutoAdjustBaseline | null;
@@ -170,13 +265,18 @@ export interface DevelopStack {
   /** RAW 机型基础曲线的选择和像素快照。 */
   baseCurveProfile?: string | null;
   baseCurvePoints?: [number, number][] | null;
-  lutId?: string | null;
+  /** 应用层链（有序；空 = 没有 LUT）。总开关是 `lutEnabled`。 */
+  lutChain?: LutLayer[] | null;
   lutEnabled?: boolean | null;
   /** 配置文件那一半的开关（`null` = 默认开）。**手动三根拉杆不受它影响**。 */
   lensEnabled?: boolean | null;
   /** 降噪方式（`null` = 快速档；`"high"` = BM3D 高质量档）。 */
   nrMethod?: string | null;
   geometry?: EditGeometry | null;
+  /** **默认层之外的编辑区层**（空 = 只有默认层）。 */
+  areas?: Area[] | null;
+  /** 默认层在层列表里的位置（0-based；只有存在额外层时才有意义）。 */
+  defaultIndex?: number | null;
 }
 
 /** 编辑栈 → store 设置的唯一适配，撤销与普通载图共用。 */
@@ -187,13 +287,15 @@ export function developSettingsOf(stack: DevelopStack): DevelopSettings {
     sourceBase: stack.sourceBase ?? "raw",
     baseCurveProfile: stack.baseCurveProfile ?? null,
     baseCurvePoints: stack.baseCurvePoints ?? null,
-    lutId: stack.lutId ?? null,
+    lutChain: stack.lutChain ?? null,
     lutEnabled: stack.lutEnabled ?? null,
     asShotK: stack.asShotK ?? null,
     lensProfile: stack.lensProfile ?? null,
     lensEnabled: stack.lensEnabled ?? null,
     nrMethod: stack.nrMethod === "high" ? "high" : null,
     geometry: stack.geometry ?? null,
+    areas: stack.areas ?? null,
+    defaultIndex: stack.defaultIndex ?? null,
   };
 }
 
@@ -246,16 +348,59 @@ export async function commitDevelopStack(
     lensProfile: stack.lensProfile ?? null,
     baseCurveProfile: stack.baseCurveProfile ?? null,
     baseCurvePoints: stack.baseCurvePoints ?? null,
-    lutId: stack.lutId ?? null,
+    lutChain: stack.lutChain ?? null,
     lutEnabled: stack.lutEnabled ?? null,
     lensEnabled: stack.lensEnabled ?? null,
     nrMethod: stack.nrMethod ?? null,
     geometry: stack.geometry ?? null,
+    areas: stack.areas ?? [],
+    defaultIndex: stack.defaultIndex ?? null,
   };
   return call<DevelopCommitResult>("develop_commit", {
     repositoryId,
     assetId,
     stack: payload,
+  });
+}
+
+/** 控制点落点的取样结果（`specs/editor-area.md` §3.3）。 */
+export interface AreaSeed {
+  /** 归一化坐标（0..1，显示画幅口径） */
+  x: number;
+  y: number;
+  /** 创建时冻结的特征向量 `[luma, c1, c2]`（0..1） */
+  seed: [number, number, number];
+}
+
+/**
+ * **控制点落点取样**：给定归一化坐标，返回「该层输入」的特征向量。
+ *
+ * 取样由 Rust 做（解 1024 长边的线性源 → 把当前栈合成一遍 → 取那个像素）；
+ * 前端只发坐标与当前的编辑栈 —— 种子怎么算只有一份实现。
+ */
+export async function sampleAreaSeed(
+  repositoryId: string,
+  assetId: number,
+  x: number,
+  y: number,
+  stack: DevelopStack,
+  /** 目标层在**行序**里的位置（`undefined` = 整链跑完；`0` = 原始源） */
+  layer?: number,
+): Promise<AreaSeed | null> {
+  if (!isTauriRuntime()) return null;
+  return call<AreaSeed>("develop_area_seed", {
+    repositoryId,
+    assetId,
+    x,
+    y,
+    layer: layer ?? null,
+    stack: {
+      ...stack,
+      values: stack.values,
+      curves: stack.curves,
+      areas: stack.areas ?? [],
+      defaultIndex: stack.defaultIndex ?? null,
+    },
   });
 }
 

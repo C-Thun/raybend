@@ -42,6 +42,10 @@ pub mod thumbs;
 mod updates;
 /// 窗口「工作区布局」（Shift+点击最大化键，`specs/window-work-area-layout.md`）。
 mod window_layout;
+mod open_url;
+mod geo;
+/// 窗口还原（记录四角点位比例 + 屏幕身份，启动只判断一次；`specs/window-restore.md`）。
+mod window_state;
 /// debug 构建自动开 WebView2 调试口（CDP，`memory/DEBUGGING.md` §1）。发布构建不生效。
 mod webview_debug;
 mod work;
@@ -169,8 +173,10 @@ fn reveal_main(app: &tauri::AppHandle) {
     }
     use tauri::Manager;
     if let Some(main) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+        window_state::apply_pending_maximize(app, &main);
         let _ = main.show();
         let _ = main.set_focus();
+        window_state::sync_restore_after_show(app, &main);
     }
     if let Some(splash) = app.get_webview_window(SPLASH_WINDOW_LABEL) {
         let _ = splash.close();
@@ -224,8 +230,23 @@ pub fn run() {
      * 发布构建里这个函数直接返回 `None`，什么都不做。
      */
     webview_debug::install();
-    tauri::Builder::default()
-        .append_invoke_initialization_script(splash::initialization_script())
+    let builder = tauri::Builder::default()
+        .append_invoke_initialization_script(splash::initialization_script());
+    // 单实例必须第一个注册：第二个实例要在其余插件/窗口初始化之前就被拦下。
+    // dev 下跳过，避免 `pnpm tauri dev` 与已安装正式版互相踢；`debug:win` 带 custom-protocol，
+    // `is_dev()` 为假，仍然生效。
+    let builder = if tauri::is_dev() {
+        builder
+    } else {
+        builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            use tauri::Manager;
+            if let Some(main) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+                let _ = main.unminimize();
+                let _ = main.set_focus();
+            }
+        }))
+    };
+    builder
         .plugin(desktop_behavior::init())
         // 目录选择器（建库弹窗的「浏览…」）。官方插件：Windows 走原生对话框。
         .plugin(tauri_plugin_dialog::init())
@@ -255,6 +276,8 @@ pub fn run() {
         .manage(lut::LutImportCancel::default())
         // 全屏看图的清单与当前下标（flowbar 的全屏按钮）
         .manage(fullscreen::FullscreenState::default())
+        // 窗口还原的进程内记忆（四角/正常态/待最大化；落盘在 windows-state.json）
+        .manage(window_state::WindowStateStore::default())
         .invoke_handler(tauri::generate_handler![
             // ── 数据底座的诊断与设置（M1-2）──
             updates::updates_status,
@@ -369,6 +392,7 @@ pub fn run() {
             browse::browse_timeline,
             browse::browse_facets,
             browse::browse_markings,
+            browse::browse_text_values,
             browse::browse_mark,
             browse::browse_undo,
             browse::browse_redo,
@@ -396,6 +420,8 @@ pub fn run() {
             editor::editor_prefetch_neighbors,
             editor::editor_confirm_tool,
             editor::editor_render_state,
+            editor::editor_overlay_state,
+            editor::editor_mask_defaults,
             // ── 编辑栈落库（M3-W3：松手才写库）──
             export::export_variants,
             export::export_snapshots,
@@ -432,8 +458,13 @@ pub fn run() {
             develop::develop_commit,
             develop::develop_edit_target,
             develop::develop_preview_refresh,
+            develop::develop_area_seed,
             // ── 窗口布局（Shift+点击最大化键：调整到工作区内的留白矩形）──
             window_layout::window_fit_work_area,
+            open_url::open_external_url,
+            geo::geo_reverse,
+            // 最大化 / 还原：反最大化前修正系统 restore 矩形并做最小尺寸保底
+            window_state::window_toggle_maximize,
             // ── 全屏看图 ──
             fullscreen::fullscreen_open,
             fullscreen::fullscreen_payload,
@@ -503,6 +534,14 @@ pub fn run() {
              */
             migration::install(app.handle());
             /*
+             * 窗口还原：在**任何 show() 之前**套用上次关闭时的四角点位。
+             * 状态文件独立于 app.db，所以 setup 就能读；主窗口此刻还是 hidden，
+             * 应用几何不会让用户看到跳变。只执行一次，失败只记日志、不重试。
+             */
+            if let Some(main) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+                window_state::install(app.handle(), &main);
+            }
+            /*
              * 启动闪屏（见 `tauri.conf.json` 的 `splash` 窗口与 `public/splash.html`）。
              *
              * 两个窗口都是 `visible: false` 声明的：主窗口藏到「界面就绪」是刻意的
@@ -520,7 +559,9 @@ pub fn run() {
                     let _ = splash.close();
                 }
                 if let Some(main) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+                    window_state::apply_pending_maximize(app.handle(), &main);
                     let _ = main.show();
+                    window_state::sync_restore_after_show(app.handle(), &main);
                 }
             } else {
                 if let Some(splash) = app.get_webview_window(SPLASH_WINDOW_LABEL) {
@@ -576,6 +617,8 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("启动 Tauri 应用失败").run(|app,event| {
             if matches!(event,tauri::RunEvent::Exit) {
+                // 正常退出的兜底（CloseRequested 没走到时再用内存快照写一次；崩溃不会到这里）
+                window_state::save_on_exit(app);
                 photo_ai::shutdown(app);
                 // 正常退出：flush 日志 + 删 session.lock（不删的话下次启动会被判成「未正常退出」）
                 if let Some(diagnostics) = raybend::diagnostics::current() {
@@ -657,6 +700,7 @@ mod tests {
         ("repo.rs", include_str!("repo.rs")),
         ("source.rs", include_str!("source.rs")),
         ("thumbs.rs", include_str!("thumbs.rs")),
+        ("window_state.rs", include_str!("window_state.rs")),
     ];
 
     /// 把 `...::Foo::default()` / `...::Foo` 收敛成**类型名** `Foo`。

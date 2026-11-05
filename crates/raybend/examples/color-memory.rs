@@ -39,6 +39,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 None,
                 None,
                 None,
+                None,
             )?
             .image)
             .clone()

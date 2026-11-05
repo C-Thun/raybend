@@ -164,7 +164,7 @@ pub fn write_tiff(
     directory: &Path,
     metadata: &crate::export::metadata::Metadata,
     lens: Option<&crate::develop::lens::LensCorrection>,
-    lut: Option<&crate::develop::lut::Lut>,
+    lut: Option<&crate::develop::lut::LutChain>,
     cancel: &AtomicBool,
     phase: impl Fn(&str),
 ) -> Result<PathBuf> {
@@ -188,7 +188,7 @@ pub fn write_tiff_checked(
     directory: &Path,
     metadata: &crate::export::metadata::Metadata,
     lens: Option<&crate::develop::lens::LensCorrection>,
-    lut: Option<&crate::develop::lut::Lut>,
+    lut: Option<&crate::develop::lut::LutChain>,
     cancel: &AtomicBool,
     phase: impl Fn(&str),
     check_session: impl Fn() -> Result<()>,
@@ -201,7 +201,7 @@ pub fn write_tiff_checked(
 pub fn write_tiff_checked_with_profiles(
     source: &Path, captured: &crate::export::VariantSnapshot, directory: &Path,
     metadata: &crate::export::metadata::Metadata,
-    lens: Option<&crate::develop::lens::LensCorrection>, lut: Option<&crate::develop::lut::Lut>,
+    lens: Option<&crate::develop::lens::LensCorrection>, lut: Option<&crate::develop::lut::LutChain>,
     cancel: &AtomicBool, phase: impl Fn(&str), check_session: impl Fn() -> Result<()>, suffix: &str,
     profile: impl FnMut(&crate::color::ProfileId,crate::color::icc::IccRole) -> Result<crate::color::icc::RgbIcc>,
 ) -> Result<PathBuf> {

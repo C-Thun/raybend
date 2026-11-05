@@ -202,6 +202,11 @@ sidecar_path(asset) = <照片目录>/<主体名>.xmp
   **2026-10-10 复核（编辑会话管道 W4）**：白平衡改成「预设里存 Δmired 偏移量」后，
   sidecar 侧无任何变化 —— `temperature` 仍不写、`as_shot_k` 也不写；预设是设备级内部资产
   （`app.db`），不进 XMP。本条声明在本期后依然成立。
+- **编辑区（area）层（2026-10-31）**：`crs:` **只表达默认层**（上表所有项都取自 `DevelopStack` 自己的
+  `params` / `curves`，即默认层）；层（全图 / 控制点）**只进 `rb:profileJson`**，`crs:` 里不出现任何层概念。
+  旧版（不认 `areas`）读回本项目写出的 sidecar 时：`rb:profileJson` 里多出来的 `areas` / `default_index`
+  会被旧版反序列化忽略（`DevelopStackWire` 的 `#[serde(default)]`），画面回到「只有默认层」——
+  与旧版对其它新参数的兼容策略一致（`xmp/mapping.rs` 的 `area_layers_never_leak_into_crs` 钉着这一条）。
 - **维护闸门（2026-10-24）**：新增/删除无损编辑参数时按 `AGENTS.md` §13.1 的固定清单走；
   `crates/raybend/src/xmp/mapping.rs` 的 `every_develop_param_is_classified_for_crs` 会遍历
   `develop::params::PARAMS`，每个参数必须归入 `SCALARS`（映射）或 `NOT_MAPPED`（写理由），
@@ -277,6 +282,11 @@ sidecar_path(asset) = <照片目录>/<主体名>.xmp
 - 只认 `rb:` 域与 §5.2 的标准元数据字段；别家命名空间**不读**（不构成「跨家导入」）。
 - 校验：`schemaVersion` 已知（沿用 `issues::profile_schema_version`：旧配置为 1，含色彩状态的配置为 2）→ 继续；`profileJson` 可解析回 `DevelopStack` → 继续；重算 `profileHash` 与文件内一致 → 继续；否则**跳过该条并记录**（不影响导入本身）。
 - 编辑栈同时复用 `DevelopStack::validate` 完整校验参数、曲线控制点、LUT/基础曲线和几何；非法编辑条目跳过，不影响有效元数据。声明 sourceBase 在原始 JSON 的哈希通过后对齐，latest 与 issue 同一口径。
+- **LUT 是链**（2026-10-31）：`rb:profileJson` 里的 `lut_chain` 是有序数组
+  `[{id, enabled, strength}]`（≤8 层，第 1 项 = 底层），`lut_enabled` 是总开关。
+  旧侧车只有 `lut_id` 单支 —— 反序列化时并入链（`DevelopStackWire`），
+  **单层 @100% 仍按旧形状写出**，所以旧定稿的 `profile_hash` 逐字节不变。
+  `crs:` 侧 LUT 依旧**不映射**（§5.1），多层没有 Lightroom 对应物。
 - latest、issue、元数据及关键词关联在同一 catalog 事务中采纳，事务内确认资产仍无用户编辑/标记/标签；缺省元数据不清空已有字段，说明同步刷新 FTS。任何数据库写失败整体回滚。
 - 落库：
   - `rb:latest` → 写 `develop_stacks`（`auto_adjust` 置空）；

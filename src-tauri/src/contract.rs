@@ -256,6 +256,22 @@ fn time_entry_keys_match_contract() {
 }
 
 #[test]
+fn text_value_item_keys_match_contract() {
+    assert_eq!(
+        keys_of::<crate::browse::TextValueItem>(),
+        contract_keys("TextValueItem")
+    );
+}
+
+#[test]
+fn geo_place_keys_match_contract() {
+    assert_eq!(
+        keys_of::<crate::geo::GeoPlaceDto>(),
+        contract_keys("GeoPlace")
+    );
+}
+
+#[test]
 fn photo_count_keys_match_contract() {
     assert_eq!(keys_of::<PhotoCountView>(), contract_keys("PhotoCount"));
 }
@@ -364,6 +380,8 @@ fn every_contract_entry_has_a_test() {
         "BrowseFacets",
         "MarkingItem",
         "MarkResult",
+        "TextValueItem",
+        "GeoPlace",
         "RecycleResult",
         "RestoreResult",
         "PurgeResult",

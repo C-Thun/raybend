@@ -40,6 +40,9 @@ export type ParamOrigin = "center" | "start";
 /** 默认值的来源（与 Rust 侧 `Baseline` 同一套值）。 */
 export type ParamBaseline = "static" | "as-shot";
 
+/** 这条参数能出现在哪种编辑区层里（与 Rust 侧 `ParamTarget` 同一套值）。 */
+export type ParamTarget = "global" | "layered" | "mask";
+
 export interface ParamSpec {
   id: string;
   labelKey: MessageKey;
@@ -62,6 +65,12 @@ export interface ParamSpec {
   wired: boolean;
   /** 默认值从哪来（色温是 `as-shot`：随照片的元数据走）。 */
   baseline: ParamBaseline;
+  /**
+   * 这条参数能出现在哪种层里（`specs/editor-area.md` §3.2）：
+   * `global` 只有默认层能用（界面灰掉）；`layered` 三种层都行；
+   * `mask` 不进面板、不进预设（由掩膜自己消费）。
+   */
+  target: ParamTarget;
   /** 两端是否显示极值。不显示时**槽位仍然保留**（否则同一列轨道会左右不齐）。 */
   limits: boolean;
   /** 小数位（值文本用） */
@@ -83,6 +92,7 @@ interface ContractParam {
   origin: string;
   wired: boolean;
   baseline: string;
+  target: string;
 }
 
 const CONTRACT: { version: number; params: ContractParam[] } = contract as {
@@ -151,7 +161,9 @@ function parseBaseline(id: string, baseline: string): ParamBaseline {
  *
  * 每一条都必须有装饰：契约里多一条没写装饰的，这里当场抛错（漏掉比画错更难发现）。
  */
-export const PARAMS: readonly ParamSpec[] = CONTRACT.params.map((param) => {
+export const PARAMS: readonly ParamSpec[] = CONTRACT.params
+  .filter((param) => param.target !== "mask")
+  .map((param) => {
   const decoration = DECORATIONS[param.id];
   if (decoration === undefined) {
     // i18n-exempt: 同上（契约文件写坏了才会看到）
@@ -167,6 +179,7 @@ export const PARAMS: readonly ParamSpec[] = CONTRACT.params.map((param) => {
     origin: parseOrigin(param.id, param.origin),
     wired: param.wired,
     baseline: parseBaseline(param.id, param.baseline),
+    target: param.target === "global" ? "global" : "layered",
     // 极值一律显示（`memory/DESIGN.md` §14.10 的槽位规则由组件保证）
     limits: true,
     decimals: decoration.decimals,
@@ -177,6 +190,46 @@ export const PARAMS: readonly ParamSpec[] = CONTRACT.params.map((param) => {
 });
 
 export const PARAM_IDS: readonly string[] = PARAMS.map((param) => param.id);
+
+/**
+ * **掩膜参数**（`target = mask`）：不进参数面板、不进预设，但数字口径与 Rust
+ * 同一份契约（`specs/editor-area.md` §2.4）。控制点的容差 / 不透明度从它们取
+ * 范围与默认值 —— 面板与画布 handle 共用一份真相。
+ */
+const MASK_PARAMS: readonly ContractParam[] = CONTRACT.params.filter(
+  (param) => param.target === "mask",
+);
+
+function maskParam(id: string): ContractParam {
+  const found = MASK_PARAMS.find((param) => param.id === id);
+  if (found === undefined) {
+    // i18n-exempt: 契约文件写坏了才会看到
+    throw new Error(`develop-params.json 里缺少掩膜参数 ${id}`);
+  }
+  return found;
+}
+
+/** 控制点容差（0..100 的界面口径；层里存的是 `0..1`）。 */
+export const POINT_TOLERANCE = Object.freeze({
+  min: maskParam("areaTolerance").min,
+  max: maskParam("areaTolerance").max,
+  step: maskParam("areaTolerance").step,
+  /**
+   * **创建时的默认容差**（直接就是层里存的数值：100..1000，默认 300）。
+   *
+   * 界面上的白线长度、拖手柄的换算都按这套数字说话；映射到实际的
+   * 亮度/色相区间由 Rust 的 `PointWeightConfig` 决定。
+   */
+  default: maskParam("areaTolerance").default,
+});
+
+/** 层不透明度（0..100 的界面口径）。 */
+export const AREA_OPACITY = Object.freeze({
+  min: maskParam("areaOpacity").min,
+  max: maskParam("areaOpacity").max,
+  step: maskParam("areaOpacity").step,
+  default: maskParam("areaOpacity").default / 100,
+});
 
 /** 契约文件里声明的版本（改结构时两侧一起看它）。 */
 export const PARAM_CONTRACT_VERSION: number = CONTRACT.version;
@@ -215,7 +268,12 @@ export function isParamWired(id: string): boolean {
  */
 export const PARAM_DEFAULTS: Readonly<Record<string, number>> = Object.freeze(
   Object.fromEntries(
-    CONTRACT.params.map((param) => [param.id, param.default]),
+    // 只收**面板参数**：掩膜那四条（`target = mask`）不进 `params()` / 载荷 / 预设
+    // （`specs/editor-area.md` §2.4），它们的数字走 `POINT_TOLERANCE` / `AREA_OPACITY`。
+    PARAMS.map((param) => [
+      param.id,
+      CONTRACT.params.find((entry) => entry.id === param.id)?.default ?? 0,
+    ]),
   ),
 );
 
@@ -314,6 +372,7 @@ export const ANGLE_SPEC: ParamSpec = {
   origin: "center",
   wired: false,
   baseline: "static",
+  target: "layered",
   limits: true,
   decimals: 1,
   unit: "°",

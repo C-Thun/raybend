@@ -1,0 +1,18 @@
+-- catalog.db（每库一个）schema v22：多层 LUT（应用层链）
+--
+-- 出处：`specs/editor-lut-chain.md` §2。
+--
+-- 为什么加一列而不是一张表：链是**观察整条编辑栈时才成立的一份有序数据**
+-- （顺序、每层开关、每层强度都是栈的一部分），与 `curves` 那种「一个通道一行」
+-- 不同 —— 它没有独立的查询/更新需求，只是随栈一起读写。
+--
+-- 形状：JSON 数组 `[{"id": "...", "enabled": true, "strength": 1.0}, ...]`
+--   * 空数组/NULL 都表示「没有 LUT」；
+--   * 第 1 项 = 底层（列表点选换的就是它）；自上而下 = 逐层处理顺序；
+--   * 上限 8 层（`store::develop::MAX_LUT_LAYERS`）。
+--
+-- 兼容：旧库只有 `lut_id` + `lut_enabled`（单支）。**不做 SQL 回填**：
+-- `DevelopStack` 的反序列化入口（`DevelopStackWire`）与 `store::develop::load`
+-- 会把旧的单支并入链，下一次写入就只剩 `lut_chain`。
+-- 旧的两列保留不删（SQLite 删列会重建表；它们已不再被写）。
+ALTER TABLE develop_stacks ADD COLUMN lut_chain TEXT;

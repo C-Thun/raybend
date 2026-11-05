@@ -21,7 +21,8 @@ use raybend::store::recycle::{PurgeReport, RecycleReport, RestoreReport};
 use raybend::store::flags::{Flag, FlagKey, FlagSet};
 use raybend::store::marking::{self, UndoStack};
 use raybend::store::query::{
-    self, AssetRow, Combinator, Filter, FlagFilter, Query, Scope, Sort, SortKey, Visibility,
+    self, AssetRow, Combinator, Filter, FlagFilter, Query, Scope, Sort, SortKey, TextValueFilter,
+    Visibility,
 };
 use raybend::store::repository;
 use raybend::store::organization;
@@ -498,6 +499,13 @@ pub enum MarkActionDto {
         field: String,
         value: Option<String>,
     },
+    /// 按地点数据**填入地理三项**（右栏「按 GPS 填入地点」）。
+    /// 只填空字段；三项合成**一步撤销**（`marking::fill_geo`）。
+    SetGeo {
+        country: Option<String>,
+        province_state: Option<String>,
+        city: Option<String>,
+    },
 }
 
 // ─────────────────────────── 输出 DTO ───────────────────────────
@@ -806,6 +814,7 @@ mod tests {
             },
             Op::DevelopParam {
                 asset_id: 2,
+                area_id: None,
                 param_id: "exposure".into(),
                 before: None,
                 after: Some(0),
@@ -818,6 +827,7 @@ mod tests {
             },
             Op::DevelopCurve {
                 asset_id: 3,
+                area_id: None,
                 channel: "rgb".into(),
                 before: None,
                 after: Some("[]".into()),
@@ -1132,6 +1142,49 @@ pub async fn browse_facets<R: Runtime>(
     .await
 }
 
+/// 建议输入的候选：某个文字字段在库里已有的取值（按出现次数降序）。
+#[derive(Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TextValueItem {
+    pub value: String,
+    pub count: i64,
+}
+
+/// 读某个文字字段的「库内已有值」（右栏建议输入的下拉候选）。
+///
+/// 只服务**作者与地理四项**；描述不进候选（长且几乎不重复，建议只来自最近输入）。
+/// 候选条数由 `marking::TEXT_SUGGEST_LIMIT` 封顶，调用方传不了更大的值。
+#[tauri::command]
+pub async fn browse_text_values<R: Runtime>(
+    app: AppHandle<R>,
+    repository_id: String,
+    field: String,
+    country: Option<String>,
+    province_state: Option<String>,
+    city: Option<String>,
+) -> Result<Vec<TextValueItem>, String> {
+    let handle = app.clone();
+    blocking(move || {
+        let parsed = marking::TextField::parse(&field)
+            .ok_or_else(|| format!("右栏没有这个可编辑字段：{field}"))?;
+        if parsed == marking::TextField::Description {
+            return Err("描述不建议从库里统计（候选只来自最近输入）".into());
+        }
+        let state = handle.state::<BrowseState>();
+        state.with_catalog(&handle, &repository_id, move |db| {
+            let filter = TextValueFilter { country, province_state, city };
+            db.read(|conn| query::text_values(conn, parsed, &filter, marking::TEXT_SUGGEST_LIMIT))
+                .map(|rows| {
+                    rows.into_iter()
+                        .map(|row| TextValueItem { value: row.value, count: row.count })
+                        .collect()
+                })
+                .map_err(|e| e.to_string())
+        })
+    })
+    .await
+}
+
 /// 读一组照片当前的标记（三态控件的输入）。
 #[tauri::command]
 pub async fn browse_markings<R: Runtime>(
@@ -1268,6 +1321,27 @@ pub async fn browse_mark<R: Runtime>(
                             )));
                         }
                         marking::set_text(conn, &ids, parsed, value.as_deref())?
+                    }
+                    MarkActionDto::SetGeo {
+                        country,
+                        province_state,
+                        city,
+                    } => {
+                        for text in [country, province_state, city].into_iter().flatten() {
+                            if text.chars().count() > marking::TEXT_FIELD_MAX_CHARS {
+                                return Err(raybend::Error::Unsupported(format!(
+                                    "文字太长（上限 {} 字）",
+                                    marking::TEXT_FIELD_MAX_CHARS
+                                )));
+                            }
+                        }
+                        marking::fill_geo(
+                            conn,
+                            &ids,
+                            country.as_deref(),
+                            province_state.as_deref(),
+                            city.as_deref(),
+                        )?
                     }
                 };
                 let applied = marking::apply(conn, &change)?;

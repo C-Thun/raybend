@@ -2707,9 +2707,11 @@ try {
       : [...bar.querySelectorAll("*")].filter((el) => el.tabIndex >= 0).length;
 
     /*
-     * 第 3 组（曲线 / 预设）等高（审计 2026-10-04）：
-     * 两页签必须挂在同一个内容容器里 —— 切页签组高不变；
-     * 预设树在容器里自滚，不许把整条右栏撑长。
+     * 右栏第 3 组：曲线 / 色盘 / 色彩管理（2026-11-05 改版）。
+     *
+     * 预设不再属于右栏页签，搬成了左列第四个面板（验收在下面左列那一段做）。
+     * 这里只看两件事：① 色盘页签是**空面板**且不会把右栏撑长；
+     * ② 色彩管理内容紧跟页签条（崔总 2026-10-10 报过的「上部一大块空白」）。
      * 必须**在 Tab 切档位之前**量：切到「仅 view」档后右栏是收起的，组高会是 0。
      */
     const advancedGroup = document.querySelector('[data-editor-group="curve"]');
@@ -2720,24 +2722,18 @@ try {
           (node) => (node.textContent || "").trim() === text,
         );
       const height = () => Math.round(advancedGroup.getBoundingClientRect().height);
-      advanced = { curve: height() };
-      tab("预设")?.click();
+      advanced = { curve: height(), swatch: null, swatchEmpty: null };
+      tab("色盘")?.click();
       await new Promise((resolve) => setTimeout(resolve, 300));
-      advanced.preset = height();
-      const presetPanel = advancedGroup.querySelector("[data-editor-preset-panel]");
-      const presetTree = advancedGroup.querySelector("[data-preset-tree]");
-      advanced.treeOverflow = presetTree === null ? null : getComputedStyle(presetTree).overflowY;
-      advanced.treeInside = presetTree !== null && presetPanel !== null
-        ? Math.round(presetTree.getBoundingClientRect().height)
-          <= Math.round(presetPanel.getBoundingClientRect().height)
-        : null;
+      advanced.swatch = height();
+      advanced.swatchEmpty = advancedGroup.querySelector("[data-editor-swatch]") !== null;
       tab("曲线")?.click();
       await new Promise((resolve) => setTimeout(resolve, 300));
       advanced.back = height();
 
       /*
        * 色彩管理页签（崔总 2026-10-10 两处实报）：
-       * ① 内容必须紧跟页签条 —— 曲线那份留位容器不许空在色彩内容上方；
+       * ① 内容必须紧跟页签条；
        * ② 右栏滚到底后整页不许被撑高 —— Ark 隐藏 input 若落到文档坐标上，
        *   点开关会把整窗滚走、中下方留一大片空白。
        * 2026-10-12 起右栏只有**下半个可滚动区**（直方图固定在顶部），
@@ -2759,6 +2755,32 @@ try {
       if (panelRail !== null) panelRail.scrollTop = 0;
       tab("曲线")?.click();
       await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+
+    /*
+     * 预设面板（2026-11-05：左列第四个面板）：从 toolsbar left 的第 4 个开关打开，
+     * 树必须拿到有界的内部滚动区（不许把左列撑长）。
+     */
+    let presetPanelCheck = null;
+    const leftPanelButtons = () => [...document.querySelectorAll("[data-toolsbar-left] button")];
+    const presetToggle = leftPanelButtons()[3];
+    if (presetToggle === undefined) {
+      presetPanelCheck = { found: false };
+    } else {
+      presetToggle.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      const presetPanel = document.querySelector("[data-editor-preset-panel]");
+      const presetTree = presetPanel?.querySelector("[data-preset-tree]") ?? null;
+      presetPanelCheck = {
+        found: presetPanel !== null,
+        treeOverflow: presetTree === null ? null : getComputedStyle(presetTree).overflowY,
+        treeInside: presetTree !== null && presetPanel !== null
+          ? Math.round(presetTree.getBoundingClientRect().height)
+            <= Math.round(presetPanel.getBoundingClientRect().height)
+          : null,
+      };
+      presetToggle.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 200));
     }
 
     /*
@@ -2803,6 +2825,7 @@ try {
       leftInViewOnly: leftInViewOnly,
       leftAfterToggle: leftAfterToggle,
       advanced: advanced,
+      presetPanelCheck: presetPanelCheck,
     };
   })()`);
 
@@ -2841,19 +2864,24 @@ try {
       );
     }
     if (editor.advanced === null) {
-      problems.push("编辑右栏第 3 组找不到（曲线 / 预设页签或预设面板不在）");
+      problems.push("编辑右栏第 3 组找不到（曲线 / 色盘 / 色彩管理页签不在）");
     } else {
       const advanced = editor.advanced;
-      if (advanced.curve !== advanced.preset || advanced.curve !== advanced.back) {
-        problems.push(
-          `第 3 组切「曲线 / 预设」时高度在变（${advanced.curve} → ${advanced.preset} → ${advanced.back}）` +
-            "—— 两页签必须同容器等高（审计 2026-10-04）",
-        );
+      if (!advanced.swatchEmpty) {
+        problems.push("色盘页签里没有空面板（data-editor-swatch）—— 预留位不见了");
       }
-      if (advanced.treeOverflow !== "auto" || advanced.treeInside !== true) {
+      if (advanced.swatch > advanced.curve + 40) {
+        problems.push(`切到色盘后右栏高度涨了（${advanced.curve} → ${advanced.swatch}）—— 空面板不该撑长`);
+      }
+      if (Math.abs(advanced.curve - advanced.back) > 2) {
+        problems.push(`切回曲线后高度变了（${advanced.curve} → ${advanced.back}）`);
+      }
+      if (editor.presetPanelCheck === null || editor.presetPanelCheck.found !== true) {
+        problems.push("左列预设面板打不开（toolsbar left 第 4 个开关没有带出 [data-editor-preset-panel]）");
+      } else if (editor.presetPanelCheck.treeOverflow !== "auto" || editor.presetPanelCheck.treeInside !== true) {
         problems.push(
-          `预设树没有获得有界的内部滚动区（overflow-y=${advanced.treeOverflow}，在容器内=${advanced.treeInside}）` +
-            "—— 预设多时会把右栏撑长",
+          `预设树没有获得有界的内部滚动区（overflow-y=${editor.presetPanelCheck.treeOverflow}，在容器内=${editor.presetPanelCheck.treeInside}）` +
+            "—— 预设多时会把左列撑长",
         );
       }
       if (advanced.colorGap === null || advanced.colorGap > 16) {

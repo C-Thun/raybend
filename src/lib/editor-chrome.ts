@@ -45,8 +45,14 @@ import {
 /** editor 这一套的档位表（本文件只服务它，避免调用方到处写字符串）。 */
 const MODE: ChromeMode = "editor";
 
-/** 左列的两个面板（同一时刻只开一个）；`null` = 左列整个关着。 */
-export type EditorLeftPanel = "lut" | "issues";
+/**
+ * 左列的四个面板（同一时刻只开一个）；`null` = 左列整个关着。
+ *
+ * 2026-10-31 加了第三个「编辑区」（area 层列表）；2026-11-05 加了第四个「预设」
+ * （崔总：预设从右栏页签改回左列独立面板，入口放 toolsbar left 的 LUT 右边）——
+ * 四者一律同一套开关逻辑：按一个关其它（再按同一个 = 关整列）。
+ */
+export type EditorLeftPanel = "lut" | "issues" | "areas" | "preset";
 
 export interface EditorChromeState {
   /** `Tab` 档位下标（0 = 默认档） */
@@ -154,6 +160,11 @@ export function editorLutVisible(state: EditorChromeState): boolean {
 /** 这一刻开着的是不是定稿面板（按钮的按下态用它）。 */
 export function editorIssuesVisible(state: EditorChromeState): boolean {
   return editorLeftPanelVisible(state) && state.leftPanel === "issues";
+}
+
+/** 这一刻开着的是不是预设面板（按钮的按下态用它）。 */
+export function editorPresetVisible(state: EditorChromeState): boolean {
+  return editorLeftPanelVisible(state) && state.leftPanel === "preset";
 }
 
 /** 右列这一刻在不在（与面板开关无关）。 */

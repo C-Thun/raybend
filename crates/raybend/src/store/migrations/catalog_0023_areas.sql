@@ -1,0 +1,17 @@
+-- catalog.db（每库一个）schema v23：编辑区（area）层
+--
+-- 出处：`specs/editor-area.md` §3.1。
+--
+-- 为什么是一列而不是两张表：层是**观察整条编辑栈时才成立的一份有序数据**
+-- （顺序、每层开关、每层参数与曲线都是栈的一部分），与 `curves` 那种「一个通道一行」
+-- 不同 —— 它没有独立的查询/更新需求，只是随栈一起读写。
+--
+-- 形状：JSON `{"defaultIndex": 0, "areas": [ ... ]}`
+--   * NULL = 只有默认层（**旧数据全是这种**，因此不需要回填）；
+--   * `areas` 里**不含默认层**：默认层就是 `develop_stacks` 自身的那些列 +
+--     `develop_params` / `develop_curves` 两张表（见 `store::develop` 的字段注释）；
+--   * `defaultIndex` = 默认层在层列表里的位置（0-based）。
+--
+-- 兼容：旧库没有这一列 ⇒ NULL ⇒ 运行时按「只有默认层」理解，
+-- 序列化也仍然逐字节等于旧形状（`DevelopStack::serialize` 的 skip_serializing_if）。
+ALTER TABLE develop_stacks ADD COLUMN areas TEXT;

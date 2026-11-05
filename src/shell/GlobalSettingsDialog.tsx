@@ -17,6 +17,7 @@ import { displayDetectionKey } from "../i18n/display-color.ts";
 import { getSetting, setSetting, SETTING_KEYS, thumbCacheClear, thumbCacheStats } from "../api/db.ts";
 import type { ThumbCacheStats } from "../api/types.ts";
 import { xmpWriteEnabled } from "../lib/xmp-write.ts";
+import { flowHintsEnabled, setFlowHintsEnabled } from "../lib/flow-hint.ts";
 import { Switch } from "../components/ui/Form.tsx";
 import { pickOpenFiles } from "../api/dialog.ts";
 import { isTauriRuntime } from "../api/tauri-env.ts";
@@ -450,6 +451,17 @@ export function GlobalSettingsDialog(props: GlobalSettingsDialogProps) {
               <header>
                 <h2 class="text-fs-3 font-semibold text-fg-1">{t("settings.editor.title")}</h2>
               </header>
+              <div class="flex items-center gap-5 border-b border-surface-bar py-5">
+                <h3 class="min-w-0 flex-1 text-fs-2 font-semibold text-fg-1" title={t("settings.editor.hintsHint")}>
+                  {t("settings.editor.hints")}
+                </h3>
+                {/* 开关只改 `lib/flow-hint.ts` 里的那一个信号；调用点不管它 */}
+                <Switch
+                  label={t("settings.editor.hints")}
+                  checked={flowHintsEnabled()}
+                  onCheckedChange={setFlowHintsEnabled}
+                />
+              </div>
               <div class="flex items-center gap-5 border-b border-surface-bar py-5">
                 <h3 class="min-w-0 flex-1 text-fs-2 font-semibold text-fg-1" title={t("settings.editor.response.hint")}>
                   {t("settings.editor.response.title")}

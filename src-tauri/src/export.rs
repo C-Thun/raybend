@@ -504,7 +504,7 @@ pub(crate) fn resources<R: Runtime>(
 ) -> Result<
     (
         Option<raybend::develop::lens::LensCorrection>,
-        Option<std::sync::Arc<raybend::develop::lut::Lut>>,
+        Option<std::sync::Arc<raybend::develop::lut::LutChain>>,
     ),
     String,
 > {
@@ -522,12 +522,14 @@ pub(crate) fn resources<R: Runtime>(
     {
         return Err("导出定稿引用的镜头配置不可用".into());
     }
-    let lut = stack
-        .lut_id
-        .as_deref()
-        .filter(|_| stack.lut_enabled == Some(true))
-        .map(|id| crate::lut::resolve(app, id))
-        .transpose()?;
+    let resolved = crate::lut::resolve_stack_chain(app, stack);
+    if !resolved.missing.is_empty() {
+        return Err(format!(
+            "导出引用的 LUT 不可用：{}",
+            resolved.missing.join(" / ")
+        ));
+    }
+    let lut = resolved.chain;
     Ok((lens, lut))
 }
 pub(crate) fn metadata_for<R: Runtime>(

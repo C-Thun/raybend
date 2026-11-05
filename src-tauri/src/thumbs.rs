@@ -262,9 +262,7 @@ pub(crate) fn render_profile_pixels<R: Runtime>(
     raybend::thumbnail::render::render_preview_or_else(preview.as_deref(), size, || {
         let lens = crate::lens::render_correction(app, &asset.repository_id, asset.asset_id,
             stack.lens_profile.as_deref(), stack.lens_enabled);
-        let lut = stack.lut_id.as_deref().filter(|_| stack.lut_enabled == Some(true))
-            .map(|id| crate::lut::resolve(app, id)).transpose()
-            .map_err(raybend::Error::Unsupported)?;
+        let lut = crate::lut::resolve_stack_chain(app, stack).chain;
         raybend::thumbnail::render::render_file_with_profiles(
             source, size, Some(stack), lens.as_ref(), lut.as_deref(), raybend::thumbnail::render::EncodeFormat::Avif,
             |id, role| crate::color_profiles::resolve(app, id, role))
@@ -422,11 +420,7 @@ pub(crate) fn render_profile_cached<R: Runtime>(
         stack.lens_profile.as_deref(),
         stack.lens_enabled,
     );
-    let lut = stack
-        .lut_id
-        .as_deref()
-        .filter(|_| stack.lut_enabled == Some(true))
-        .map(|id| crate::lut::resolve(app, id)).transpose()?;
+    let lut = crate::lut::resolve_stack_chain(app, stack).chain;
     let thumb = raybend::thumbnail::render::render_file_with_profiles(
         &full,
         SizeClass::Screen,
@@ -530,12 +524,7 @@ pub(crate) fn render_full_cached<R: Runtime>(
         stack.lens_profile.as_deref(),
         stack.lens_enabled,
     );
-    let lut = stack
-        .lut_id
-        .as_deref()
-        .filter(|_| stack.lut_enabled == Some(true))
-        .map(|id| crate::lut::resolve(app, id))
-        .transpose()?;
+    let lut = crate::lut::resolve_stack_chain(app, stack).chain;
     let thumb = raybend::thumbnail::render::render_file_with_profiles(
         &full,
         SizeClass::Full,

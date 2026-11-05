@@ -384,7 +384,7 @@ impl GpuContext {
     ///
     /// **只有「像素里还没有 LUT」的帧才能传 `Some`**：CPU 烘焙过 LUT 的帧传 `None`，
     /// 否则同一支 LUT 会被套两次。所以调用方拿的是**帧自带的** `gpu_lut`，不是当前选中项。
-    pub fn set_creative_lut(&mut self, lut: Option<Arc<crate::develop::lut::Lut>>) {
+    pub fn set_creative_lut(&mut self, lut: Option<Arc<crate::develop::lut::LutChain>>) {
         if !self.creative_lut.set(&self.device, &self.queue, lut) {
             return;
         }
@@ -1124,7 +1124,8 @@ fn create_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
                 visibility: wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Texture {
                     sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                    view_dimension: wgpu::TextureViewDimension::D2,
+                    // 整条链的 shaper 共用一张数组纹理（layer = 层序号）
+                    view_dimension: wgpu::TextureViewDimension::D2Array,
                     multisampled: false,
                 },
                 count: None,
@@ -1492,7 +1493,7 @@ impl OffscreenRenderer {
     }
 
     /// 与 `GpuContext::set_creative_lut` 同一口径：`None` = 这张图的像素里本来就没 LUT。
-    pub fn set_creative_lut(&mut self, lut: Option<Arc<crate::develop::lut::Lut>>) {
+    pub fn set_creative_lut(&mut self, lut: Option<Arc<crate::develop::lut::LutChain>>) {
         if !self.creative_lut.set(&self.device, &self.queue, lut) {
             return;
         }

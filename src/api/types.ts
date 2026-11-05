@@ -537,6 +537,31 @@ export interface MarkingItem {
   tagIds: number[];
 }
 
+/** 建议输入的候选：某个文字字段在库里已有的一个取值（`browse_text_values`）。 */
+export interface TextValueCount {
+  value: string;
+  /** 库里有多少张照片用了这个值（下拉里用来排顺序与解释来源）。 */
+  count: number;
+}
+
+/** 按坐标得到的地点建议（`geo_reverse`；只会作为建议值，写库要用户确认）。 */
+export interface GeoPlace {
+  city: string;
+  /** 一级行政区；数据里没有中文译名的国家会是英文名 */
+  province: string | null;
+  country: string;
+  countryIso: string;
+  /** 到城市中心的大圆距离（公里） */
+  distanceKm: number;
+}
+
+/** 「库内已有值」的级联过滤：给城市建议时用国家/省缩小范围。空串视为没填。 */
+export interface TextValueParents {
+  country?: string | null;
+  provinceState?: string | null;
+  city?: string | null;
+}
+
 /** 标签词典里的一条（`app.db` 的 `tags` 表）。 */
 export interface Tag {
   id: number;
@@ -681,7 +706,14 @@ export type MarkAction =
   | { kind: "detachTags"; tagIds: number[] }
   | { kind: "photoTags"; edits: { name: string; manual: boolean | null; masked: boolean | null }[] }
   /** 改右栏里可编辑的文字字段（空串 = 清空） */
-  | { kind: "setText"; field: EditableTextField; value: string };
+  | { kind: "setText"; field: EditableTextField; value: string }
+  /** 按 GPS 填入地理三项（只填空字段，三项一步撤销） */
+  | {
+      kind: "setGeo";
+      country: string | null;
+      provinceState: string | null;
+      city: string | null;
+    };
 
 /**
  * 数据库升级通知（`db://migration` 事件的载荷）。
@@ -853,13 +885,23 @@ export interface DevelopParamsPayload {
   lensProfile: string | null;
   /** RAW 基础曲线快照，仅 RAW 编辑时发送。 */
   baseCurvePoints: [number, number][] | null;
-  lutId?: string | null;
+  /** 应用层链（有序；空 = 没有 LUT）。总开关是 `lutEnabled`。 */
+  lutChain?: import("./editor.ts").LutLayer[] | null;
   lutEnabled?: boolean | null;
   /** 配置文件那一半的开关（`null` = 默认开；**手动三根拉杆不受它影响**） */
   lensEnabled: boolean | null;
   /** 降噪方式（`null` = 快速档） */
   nrMethod: DevelopNrMethod | null;
   geometry: EditGeometry | null;
+  /** **默认层之外的编辑区层**（空 = 只有默认层；退化时 Rust 走快路径）。 */
+  areas: import("./editor.ts").Area[];
+  /** 默认层在层列表里的位置（没有额外层时是 `null`）。 */
+  defaultIndex: number | null;
+  /**
+   * **开发期**：控制点容差 → 权重的临时覆盖（`dev/MaskDebugDialog`）。
+   * 生产构建不会发它（那条分支被摇掉）；`null` / 缺省 = 用 Rust 侧的固化常量。
+   */
+  maskDebug?: import("../lib/mask-debug.ts").MaskWeightConfig | null;
 }
 
 /** 降噪方式（编辑栈的一级；`"high"` = BM3D 高质量档，后台任务）。 */
@@ -918,12 +960,17 @@ export interface DevelopSettings {
   asShotK?: number | null;
   baseCurveProfile?: string | null;
   baseCurvePoints?: [number, number][] | null;
-  lutId?: string | null;
+  /** 应用层链（有序；空 = 没有 LUT）。总开关是 `lutEnabled`。 */
+  lutChain?: import("./editor.ts").LutLayer[] | null;
   lutEnabled?: boolean | null;
   lensProfile?: string | null;
   lensEnabled?: boolean | null;
   nrMethod?: DevelopNrMethod | null;
   geometry?: EditGeometry | null;
+  /** **默认层之外的编辑区层**（空 = 只有默认层）。 */
+  areas?: import("./editor.ts").Area[] | null;
+  /** 默认层在层列表里的位置（0-based；没有额外层时为 `null`）。 */
+  defaultIndex?: number | null;
 }
 
 export interface EditorRenderState {
@@ -976,6 +1023,10 @@ export interface EditorRenderState {
    * 覆盖层把子元素写成**图像像素坐标**再整层套上它 —— 视口数学只有 Rust 一份。
    */
   overlayTransform: [number, number, number, number, number, number] | null;
+  /** 图像像素 → CSS 的缩放（= zoom / dpr）；覆盖层用它把标记尺寸钉在屏幕像素上 */
+  overlayScale: number;
+  /** 图像旋转（度）；标记反向旋转才不跟着图转 */
+  overlayRotation: number;
   zoom: number;
   panX: number;
   panY: number;

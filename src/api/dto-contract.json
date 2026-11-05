@@ -286,6 +286,17 @@
     "skippedLocked",
     "undoLabel"
   ],
+  "TextValueItem": [
+    "count",
+    "value"
+  ],
+  "GeoPlace": [
+    "city",
+    "country",
+    "countryIso",
+    "distanceKm",
+    "province"
+  ],
   "DeleteFailure": [
     "path",
     "reason"
@@ -372,6 +383,8 @@
     "lastHit",
     "origin",
     "overlayTransform",
+    "overlayScale",
+    "overlayRotation",
     "paintedPath",
     "panX",
     "panY",

@@ -38,6 +38,7 @@
 
 | ort / ort-sys | **2.0.0-rc.13** | **MIT OR Apache-2.0** | 精确锁定的 CPU 推理绑定，核心 `ai-runtime`、可选桌面 `photo-ai-runtime`；`ai-probe` 为实验兼容别名 | 兼容；崔总已定案 TinyCLIP 首版，RC 状态与 API27 边界已记录 |
 | ONNX Runtime CPU | **1.28.0** | **MIT**，另含上游第三方许可 | Windows 本地标签识别的私有 CPU 动态库；随应用提供 | 兼容；原文在 `legal/onnxruntime-1.28.0/`，应用资源内保留 LICENSE 与 ThirdPartyNotices.txt |
+| **GeoNames 城市数据**（生成后嵌入二进制） | 生成于 2026-11-03（`scripts/build-geo-data.mjs`） | **CC BY 4.0** | 离线逆地理编码：右栏「按 GPS 填入地点」的数据（`crates/raybend/assets/geo/`） | **兼容**：CC BY 4.0 允许商用与改编，**需署原名**。署名与来源写在 `crates/raybend/assets/geo/README.md`，原文在 `legal/CC-BY-4.0.txt`；数据本身不是代码依赖，不进 `pnpm licenses:generate` 的依赖图 |
 
 > **完整分发清单已在 M5 工程准备中补齐**：`pnpm licenses:generate` 从锁定 Windows 依赖图与 pnpm 生产依赖生成 `public/legal/third-party.json`（含传递依赖、原文和来源）；上表保留关键组件的用途/取舍，具体版本以生成清单与锁文件为准。
 
@@ -166,5 +167,9 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ## M5 官方更新插件（2026-09-26）
 
 `tauri-plugin-updater` 2.12.0（MIT OR Apache-2.0），复用 Tauri 官方检查/下载/minisign 验证/安装能力；来源 https://github.com/tauri-apps/plugins-workspace 。没有引入跳过签名的代码。传递依赖按 Cargo.lock 自动收录。
+
+## 单实例插件（2026-10-31）
+
+`tauri-plugin-single-instance` 2.4.5（MIT OR Apache-2.0），Tauri 官方插件，用于产品单实例保护（第二个实例退出并聚焦已有窗口）；来源 https://github.com/tauri-apps/plugins-workspace 。传递依赖按 Cargo.lock 自动收录。
 
 完整分发清单由 `pnpm licenses:generate` 从 Windows 依赖图与 pnpm 生产依赖生成至 `public/legal/third-party.json`；它含版本、SPDX 标识、来源与许可证原文。保守收录 Rust normal/build 依赖（不声称每个构建工具都会留在二进制内）。遗漏许可证的 crate 从上游精确提交取得，凭据在 `legal/upstream-license-overrides.json`。原生 C 库与校准数据另行收录，源码复用的署名仍以本文件为准。

@@ -37,6 +37,13 @@ export type NumericGroupId = "tone" | "color" | "detail" | "lens";
 export type GroupParams = Record<NumericGroupId, readonly string[]>;
 
 /** 一份大类快照（`payload` 的契约形状）。 */
+/** LUT 链里的一层（与 `DevelopStack.lut_chain` / 面板一致）。 */
+export interface LutChainLayer {
+  id: string;
+  enabled: boolean;
+  strength: number;
+}
+
 export interface PresetSnapshot {
   version: number;
   tone?: Record<string, number>;
@@ -46,7 +53,11 @@ export interface PresetSnapshot {
   /** 镜头大类：数值参数 + 配置文件与启用开关，同层扁平。 */
   lens?: PresetLensGroup;
   curve?: Partial<Record<string, [number, number][]>>;
-  lut?: { id: string | null; enabled: boolean };
+  /**
+   * 应用层链。`chain` 是新形状（多层）；`id` 是旧形状（单支，旧预设里只有它）。
+   * 读取时两者都认（`parseSnapshot` 会把旧形状升成一层）。
+   */
+  lut?: { id: string | null; enabled: boolean; chain?: LutChainLayer[] };
   /** Reusable selection strategy, never a source file's embedded ICC or monitor. */
   colorManagement?: { processVersion: "linear_rec2020_v2"; input: "automatic" | {profileId: string} };
 }
@@ -246,10 +257,20 @@ export function sanitizePresetSnapshot(raw: unknown): PresetSnapshot | null {
   }
   if (typeof record.lut === "object" && record.lut !== null) {
     const lut = record.lut as Record<string, unknown>;
-    snapshot.lut = {
-      id: typeof lut.id === "string" && lut.id !== "" ? lut.id : null,
-      enabled: lut.enabled === true,
-    };
+    const id = typeof lut.id === "string" && lut.id !== "" ? lut.id : null;
+    // 新形状优先（`chain`）；旧预设只有 `id` → 升成一层。
+    const chain = Array.isArray(lut.chain)
+      ? (lut.chain as unknown[]).flatMap((item) => {
+          if (typeof item !== "object" || item === null) return [];
+          const layer = item as Record<string, unknown>;
+          if (typeof layer.id !== "string" || layer.id === "") return [];
+          const strength = typeof layer.strength === "number" && Number.isFinite(layer.strength)
+            ? Math.min(1, Math.max(0, layer.strength))
+            : 1;
+          return [{ id: layer.id, enabled: layer.enabled !== false, strength }];
+        })
+      : id === null ? [] : [{ id, enabled: true, strength: 1 }];
+    snapshot.lut = { id, enabled: lut.enabled === true, chain };
     present = true;
   }
   if (Object.prototype.hasOwnProperty.call(record,"colorManagement")) {
@@ -339,7 +360,7 @@ export interface PresetSnapshotSource {
   nrMethod: string | null;
   lensProfile: string | null;
   lensEnabled: boolean | null;
-  lutId: string | null;
+  lutChain: readonly { id: string; enabled: boolean; strength: number }[];
   lutEnabled: boolean;
   /** 这张照片的拍摄色温（K）——白平衡偏移量（`wbMired`）的基线；`null` = 读不到。 */
   asShotK: number | null;
@@ -405,7 +426,11 @@ export function buildPresetSnapshot(
         break;
       }
       case "lut":
-        snapshot.lut = { id: source.lutId, enabled: source.lutEnabled };
+        snapshot.lut = {
+          id: source.lutChain[0]?.id ?? null,
+          enabled: source.lutEnabled,
+          chain: source.lutChain.map((layer) => ({ ...layer })),
+        };
         break;
     }
   }
@@ -431,8 +456,8 @@ export interface PresetApplyPlan {
   nrMethod: string | null;
   hasLens: boolean;
   lens: { profile: string | null; enabled: boolean | null };
-  /** `null` = 未应用 LUT 大类；`"missing"` = LUT 丢失，忽略（不动当前）。 */
-  lut: { id: string | null; enabled: boolean } | "missing" | null;
+  /** `null` = 未应用 LUT 大类；`"missing"` = 链里某支 LUT 丢失，忽略整组（不动当前）。 */
+  lut: { chain: LutChainLayer[]; enabled: boolean } | "missing" | null;
   /** 实际生效的大类（LUT 丢失时不含 `lut`）。 */
   appliedGroups: PresetGroup[];
   /** 白平衡是不是一个**显式偏移**（Δmired ≠ 0）—— `false` = 跟随该照片 as-shot。 */
@@ -455,6 +480,11 @@ export function planPresetApply(
   lutExists: (id: string) => boolean,
   asShotK: number | null,
   channels: readonly string[] = ["rgb", "r", "g", "b"],
+  /**
+   * 当前照片的 LUT 链。**预设的 LUT 是追加到链末尾的**（崔总 2026-10-31），
+   * 所以计划必须知道链现在的样子；缺省 = 空链（老调用与单测无需关心）。
+   */
+  options: { currentLutChain?: readonly LutChainLayer[]; currentLutEnabled?: boolean } = {},
 ): PresetApplyPlan {
   presetColorChoice(snapshot);
   const plan: PresetApplyPlan = {
@@ -527,14 +557,43 @@ export function planPresetApply(
       case "lut": {
         const lut = snapshot.lut;
         if (lut === undefined) break;
-        if (lut.id === null) {
-          plan.lut = { id: null, enabled: false };
-          plan.appliedGroups.push("lut");
-        } else if (lutExists(lut.id)) {
-          plan.lut = { id: lut.id, enabled: lut.enabled === true };
+        const chain = lut.chain ?? (lut.id === null ? [] : [{ id: lut.id, enabled: true, strength: 1 }]);
+        if (chain.length === 0) {
+          /*
+           * **不动当前链**（崔总 2026-10-31 定）：预设的 LUT 是「追加」语义，整套都是加法；
+           * 存了"没有 LUT"的预设就等于这一组没存，不该变成唯一的减法口子。
+           * 要清空 LUT，只能在 LUT 面板里逐层删（或整链关掉）。
+           */
+          break;
+        } else if (chain.length > 8 || new Set(chain.map((layer) => layer.id)).size !== chain.length) {
+          // 外部预设不能绕过 `DevelopStack::validate` 的上限/去重规则。
+          plan.lut = "missing";
+        } else if (chain.every((layer) => !layer.enabled || lutExists(layer.id))) {
+          /*
+           * **追加语义**（崔总 2026-10-31）：预设里的 LUT 贴到现有链的**末尾**，不替换整条链。
+           * 去重按「从上向下」扫：现有链在上，所以**相同的 LUT 保留最上层那个**，预设里重复的那层丢掉。
+           * 上限不在这里截断 —— 交给 `store.commitChain`（链的唯一写入口）截到 8 层，
+           * 被丢掉多少由调用方换算成一次提示。
+           */
+          const current = options.currentLutChain ?? [];
+          const merged: LutChainLayer[] = current.map((layer) => ({ ...layer }));
+          const seen = new Set(merged.map((layer) => layer.id));
+          for (const layer of chain) {
+            if (seen.has(layer.id)) continue;
+            seen.add(layer.id);
+            merged.push({ ...layer });
+          }
+          /*
+           * 总开关（既有口径 + 追加安全）：
+           * - 从空链起步 → **听预设**（预设存的是关，就不要替用户打开）；
+           * - 已有链 → 原来开着就保持开着，预设开也开。**绝不因为套了一个预设就把用户
+           *   正在用的整条链关掉**（那是比"看不见新层"更糟的意外）。
+           */
+          const keepOn = current.length > 0 && options.currentLutEnabled === true;
+          plan.lut = { chain: merged, enabled: keepOn || lut.enabled === true };
           plan.appliedGroups.push("lut");
         } else {
-          // 丢失保底：LUT 文件没了 / 被删了 → 忽略该项，不报错
+          // 丢失保底：链里某一支没了 → 整组忽略（不能悄悄少一层），不报错
           plan.lut = "missing";
         }
         break;

@@ -19,18 +19,26 @@ import {
   Show,
   type JSX,
 } from "solid-js";
-import { IconDots, IconFolderMinus, IconFolderPlus, IconTag, IconTrash } from "@tabler/icons-solidjs";
+import { IconChecks, IconDots, IconExternalLink, IconFolderMinus, IconFolderPlus, IconMaximize, IconTag, IconTrash } from "@tabler/icons-solidjs";
 
 import { dirCreate, dirEmptyCheck, dirRemoveEmpty, listDirs, syncDirectoryCounts, onCatalogDirty } from "../../api/db.ts";
-import { Button } from "../../components/ui/Button.tsx";
+import { Button, IconButton } from "../../components/ui/Button.tsx";
+import { EasyCopy } from "../../components/ui/EasyCopy.tsx";
+import { SuggestInput } from "../../components/ui/SuggestInput.tsx";
+import { ButtonTip } from "../../components/ui/Tooltip.tsx";
+import type { ToastStore } from "../../components/ui/toast.ts";
 import { MetadataRows, type MetadataRow } from "../../components/ui/MetadataRows.tsx";
 import { RepositoryCard } from "../../components/ui/RepositoryCard.tsx";
 import { ConfirmDialog, Dialog } from "../../components/ui/Dialog.tsx";
 import { Input } from "../../components/ui/Form.tsx";
 import { Menu } from "../../components/ui/Menu.tsx";
-import type { AssetItem, DirEmptyView, FileExif, RepositoryView } from "../../api/types.ts";
+import type { AssetItem, DirEmptyView, EditableTextField, FileExif, RepositoryView } from "../../api/types.ts";
 import type { IssueLibrary } from "../../api/issues.ts";
+import { openExternalUrl } from "../../api/external.ts";
+import { geoReverse } from "../../api/browse.ts";
 import { displaySizeOf, issueOf } from "../../lib/display-size.ts";
+import { mergeSuggestions, type Suggestion } from "../../lib/suggest.ts";
+import { recentTextValues, rememberTextValue, TEXT_FIELD_MAX_CHARS, TEXT_SUGGEST_LIMIT } from "../../lib/text-history.ts";
 import { locale, t } from "../../i18n/index.ts";
 import { setDirectoryTag, tagsForDirectory } from "../../api/organization.ts";
 
@@ -877,6 +885,8 @@ export interface AssetInfoProps {
   issueBusy?: boolean;
   issueError?: string | null;
   onSelectIssue?: (choice: string) => void;
+  /** 统一消息通道（落库失败 / 批量应用成功都走它，`AGENTS.md` §2.29） */
+  toast?: ToastStore;
   class?: string;
 }
 
@@ -895,87 +905,338 @@ function Field(props: { label: string; value: string | null }) {
 /**
  * 一行**可编辑**的字段（人类 2026-09-19 的右栏规格：作者 / 描述 / 地理三行政区划）。
  *
- * 交互：点值 → 变输入框 → 回车提交 / `Esc` 取消 / 失焦提交。
- * 提交走 `store.setText()`（后端是 `marking::set_text`，**进撤销栈**）。
+ * 交互（崔总 2026-11-03 定）：点值 → 变输入框 + **建议列表**（最近输入 + 库内已有值）
+ * → 回车提交 / `Esc` 先关列表再取消 / 失焦提交。提交走 `store.setText()`
+ * （后端是 `marking::set_text`，**进撤销栈**，且只改**锚点那张**）。
  *
- * 两条纪律：
+ * 三条纪律：
  * 1. **没变就不发请求**（点开又点走不该产生一次落库与一步撤销）；
  * 2. 空串 = **清空该字段**（后端把空串当 `NULL`）—— 这是「删掉写错的作者」的正路，
- *    不是「取消编辑」；取消是 `Esc`。
+ *    不是「取消编辑」；取消是 `Esc`；
+ * 3. 多选时这一行旁边多一颗「应用到所选 N 张」——采用到全部选中项是**显式动作**，
+ *    不是编辑字段的副作用。
  */
 function EditableField(props: {
   label: string;
   value: string | null;
   placeholder: string;
   disabled?: boolean;
+  suggestions?: readonly Suggestion[];
+  /** 后端上限（2000）；想让用户提前知道打满了 */
+  maxLength?: number;
+  /** 多选时才有；`run` 收到的是**锚点当前显示的值** */
+  applyToSelected?: { count: number; run: (value: string) => void } | null;
   onCommit: (value: string) => void;
 }): JSX.Element {
   const [editing, setEditing] = createSignal(false);
-  const [draft, setDraft] = createSignal("");
-  let inputEl: HTMLInputElement | undefined;
-  createEffect(() => { if (props.disabled) setEditing(false); });
+  createEffect(() => {
+    if (props.disabled) setEditing(false);
+  });
 
-  const begin = (): void => {
-    if (props.disabled) return;
-    setDraft(props.value ?? "");
-    setEditing(true);
-    queueMicrotask(() => {
-      inputEl?.focus();
-      inputEl?.select();
-    });
-  };
-
-  const commit = (): void => {
-    if (!editing() || props.disabled) return;
+  const commit = (next: string): void => {
     setEditing(false);
-    const next = draft().trim();
-    if (next === (props.value ?? "")) return;
+    if (next.trim() === (props.value ?? "")) return;
     props.onCommit(next);
   };
 
   return (
-    <div class="flex items-baseline gap-2" data-editable-field={props.label}>
+    <div class="group flex items-baseline gap-2" data-editable-field={props.label}>
       <span class="w-16 shrink-0 text-fs-0 text-fg-3">{props.label}</span>
       <Show
         when={editing()}
         fallback={
-          <button
-            type="button"
-            disabled={props.disabled}
-            class="min-w-0 flex-1 cursor-text overflow-hidden whitespace-nowrap fade-x-end text-left text-fs-2 text-fg-1 hover:text-brand"
-            title={props.value ?? props.placeholder}
-            onClick={begin}
-          >
-            {props.value !== null && props.value !== "" ? (
-              props.value
-            ) : (
-              <span class="text-fg-3">{props.placeholder}</span>
-            )}
-          </button>
+          <>
+            <button
+              type="button"
+              disabled={props.disabled}
+              class="min-w-0 flex-1 cursor-text overflow-hidden whitespace-nowrap fade-x-end text-left text-fs-2 text-fg-1 hover:text-brand"
+              title={props.value ?? props.placeholder}
+              onClick={() => setEditing(true)}
+            >
+              {props.value !== null && props.value !== "" ? (
+                props.value
+              ) : (
+                <span class="text-fg-3">{props.placeholder}</span>
+              )}
+            </button>
+            <Show when={props.applyToSelected}>
+              {(batch) => (
+                <Show when={(props.value ?? "") !== ""}>
+                  <ButtonTip
+                    content={t("browse.applyToSelected").replace("{n}", String(batch().count))}
+                  >
+                    {(tip) => (
+                      <IconButton
+                        {...tip}
+                        label={t("browse.applyToSelected").replace("{n}", String(batch().count))}
+                        disabled={props.disabled}
+                        class="shrink-0 text-fg-3 hover:text-fg-1"
+                        onClick={() => batch().run(props.value ?? "")}
+                      >
+                        <IconChecks size={13} aria-hidden="true" />
+                      </IconButton>
+                    )}
+                  </ButtonTip>
+                </Show>
+              )}
+            </Show>
+          </>
         }
       >
-        <input
-          ref={inputEl}
-          class="min-w-0 flex-1 rounded-ui bg-surface-bar px-1.5 py-0.5 text-fs-2 text-fg-1 outline-none"
-          value={draft()}
-          aria-label={props.label}
+        <SuggestInput
+          value={props.value ?? ""}
+          label={props.label}
+          placeholder={props.placeholder}
+          suggestions={props.suggestions ?? []}
+          maxLength={props.maxLength}
           disabled={props.disabled}
-          onInput={(event) => setDraft(event.currentTarget.value)}
-          onBlur={commit}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              commit();
-            } else if (event.key === "Escape") {
-              event.preventDefault();
-              // Esc = 取消编辑（不落库）：先把草稿丢回原值，再关掉输入框
-              setDraft(props.value ?? "");
-              setEditing(false);
-            }
-          }}
+          onCommit={commit}
+          onCancel={() => setEditing(false)}
         />
       </Show>
     </div>
+  );
+}
+
+/**
+ * 描述那一行：**行内简版 + 展开弹窗**（崔总 2026-11-03 定）。
+ *
+ * 为什么不能只有行内单行输入框：`dc:description` 允许换行（sidecar A4 用例就带换行），
+ * 而单行 `<input>` 会把换行吃掉 —— 打开一条带换行的描述再回车，等于把格式抹平写回去。
+ * 所以行内只用于短改，长文/多行走弹窗里的 `textarea`。
+ */
+function DescriptionField(props: {
+  label: string;
+  value: string | null;
+  placeholder: string;
+  disabled?: boolean;
+  suggestions?: readonly Suggestion[];
+  maxLength: number;
+  applyToSelected?: { count: number; run: (value: string) => void } | null;
+  onCommit: (value: string) => void;
+}): JSX.Element {
+  const [editing, setEditing] = createSignal(false);
+  const [expanded, setExpanded] = createSignal(false);
+  /** 多行值不进行内输入框（单行 `<input>` 会把换行吃掉），直接开弹窗。 */
+  const multiline = (): boolean => (props.value ?? "").includes("\n");
+  createEffect(() => {
+    if (props.disabled) {
+      setEditing(false);
+      setExpanded(false);
+    }
+  });
+
+  const commitInline = (next: string): void => {
+    setEditing(false);
+    if (next.trim() === (props.value ?? "")) return;
+    props.onCommit(next);
+  };
+
+  return (
+    <div class="group flex items-baseline gap-2" data-editable-field={props.label}>
+      <span class="w-16 shrink-0 text-fs-0 text-fg-3">{props.label}</span>
+      <Show
+        when={editing()}
+        fallback={
+          <>
+            <button
+              type="button"
+              disabled={props.disabled}
+              class="min-w-0 flex-1 cursor-text overflow-hidden whitespace-nowrap fade-x-end text-left text-fs-2 text-fg-1 hover:text-brand"
+              title={props.value ?? props.placeholder}
+              onClick={() => (multiline() ? setExpanded(true) : setEditing(true))}
+            >
+              {props.value !== null && props.value !== "" ? (
+                // 行内只给一行：多行值把换行折成空格显示（真编辑在弹窗里）
+                props.value.replace(/\s*\n\s*/g, " ")
+              ) : (
+                <span class="text-fg-3">{props.placeholder}</span>
+              )}
+            </button>
+            <ButtonTip content={t("browse.descriptionExpand")}>
+              {(tip) => (
+                <IconButton
+                  {...tip}
+                  label={t("browse.descriptionExpand")}
+                  disabled={props.disabled}
+                  class="shrink-0 text-fg-3 hover:text-fg-1"
+                  onClick={() => setExpanded(true)}
+                >
+                  <IconMaximize size={12} aria-hidden="true" />
+                </IconButton>
+              )}
+            </ButtonTip>
+            <Show when={props.applyToSelected}>
+              {(batch) => (
+                <Show when={(props.value ?? "") !== ""}>
+                  <ButtonTip
+                    content={t("browse.applyToSelected").replace("{n}", String(batch().count))}
+                  >
+                    {(tip) => (
+                      <IconButton
+                        {...tip}
+                        label={t("browse.applyToSelected").replace("{n}", String(batch().count))}
+                        disabled={props.disabled}
+                        class="shrink-0 text-fg-3 hover:text-fg-1"
+                        onClick={() => batch().run(props.value ?? "")}
+                      >
+                        <IconChecks size={13} aria-hidden="true" />
+                      </IconButton>
+                    )}
+                  </ButtonTip>
+                </Show>
+              )}
+            </Show>
+          </>
+        }
+      >
+        <SuggestInput
+          value={props.value ?? ""}
+          label={props.label}
+          placeholder={props.placeholder}
+          suggestions={props.suggestions ?? []}
+          maxLength={props.maxLength}
+          disabled={props.disabled}
+          onCommit={commitInline}
+          onCancel={() => setEditing(false)}
+        />
+      </Show>
+      <DescriptionEditor
+        open={expanded()}
+        value={props.value}
+        maxLength={props.maxLength}
+        disabled={props.disabled}
+        onClose={() => setExpanded(false)}
+        onCommit={(value) => props.onCommit(value)}
+      />
+    </div>
+  );
+}
+
+/** 描述弹窗：多行 + 保换行；回车=换行，确认按钮提交。 */
+function DescriptionEditor(props: {
+  open: boolean;
+  value: string | null;
+  maxLength: number;
+  disabled?: boolean;
+  onClose: () => void;
+  onCommit: (value: string) => void;
+}): JSX.Element {
+  const [draft, setDraft] = createSignal(props.value ?? "");
+  let areaEl: HTMLTextAreaElement | undefined;
+
+  // 只在「打开」这一刻取初值：编辑期间库里的值若被别的操作更新，不能把用户草稿冲掉。
+  createEffect(on(() => props.open, (open) => {
+    if (!open) return;
+    setDraft(props.value ?? "");
+    queueMicrotask(() => {
+      areaEl?.focus();
+      const end = areaEl?.value.length ?? 0;
+      areaEl?.setSelectionRange(end, end);
+    });
+  }));
+
+  const confirm = (): void => {
+    props.onClose();
+    if (draft().trim() === (props.value ?? "")) return;
+    props.onCommit(draft());
+  };
+
+  return (
+    <Dialog
+      open={props.open}
+      onOpenChange={(next) => {
+        if (!next) props.onClose();
+      }}
+      title={t("browse.descriptionTitle")}
+      initialFocusEl={() => areaEl ?? null}
+      footer={
+        <>
+          <Button variant="secondary" size="sm" onClick={props.onClose}>
+            {t("common.cancel")}
+          </Button>
+          <Button variant="primary" size="sm" disabled={props.disabled} onClick={confirm}>
+            {t("common.confirm")}
+          </Button>
+        </>
+      }
+    >
+      <textarea
+        ref={areaEl}
+        class="h-40 w-full resize-none rounded-ui bg-surface-track px-2 py-1.5 text-fs-2 text-fg-1 outline-none"
+        aria-label={t("browse.descriptionTitle")}
+        maxLength={props.maxLength}
+        disabled={props.disabled}
+        value={draft()}
+        onInput={(event) => setDraft(event.currentTarget.value)}
+      />
+    </Dialog>
+  );
+}
+
+/**
+ * GPS 一行：只读的十进制坐标 + 可复制 + 地图入口。
+ *
+ * **没有坐标就整行不渲染**（崔总 2026-11-04）：GPS 只从文件 EXIF 来、产品不提供手填，
+ * 所以不能复用可编辑字段那句「未填写（点这里编辑）」—— 点下去什么都不会发生。
+ * 也不留「未填写」这类空态占位：没坐标是常态（相机无 GPS / 导入没读到），不占一行更干净。
+ * 国家/省/市那几项是人写的，照旧可编辑。
+ */
+function GpsField(props: {
+  label: string;
+  lat: number | null;
+  lon: number | null;
+}): JSX.Element {
+  const valid = (): boolean =>
+    props.lat !== null &&
+    props.lon !== null &&
+    Number.isFinite(props.lat) &&
+    Number.isFinite(props.lon) &&
+    props.lat >= -90 &&
+    props.lat <= 90 &&
+    props.lon >= -180 &&
+    props.lon <= 180;
+  const text = (): string | null =>
+    !valid() ? null : `${props.lat!.toFixed(6)}, ${props.lon!.toFixed(6)}`;
+  const mapUrl = (): string | null =>
+    !valid()
+      ? null
+      : `https://www.openstreetmap.org/?mlat=${props.lat!.toFixed(6)}&mlon=${props.lon!.toFixed(6)}#map=15/${props.lat!.toFixed(6)}/${props.lon!.toFixed(6)}`;
+  return (
+    <Show when={text()}>
+      {(value) => (
+        <div class="flex items-baseline gap-2" data-gps-field>
+          <span class="w-16 shrink-0 text-fs-0 text-fg-3">{props.label}</span>
+          <div class="flex min-w-0 flex-1 items-center gap-1">
+            <EasyCopy value={value()} class="min-w-0">
+              <span class="tnum min-w-0 overflow-hidden whitespace-nowrap fade-x-end text-fs-2 text-fg-1">
+                {value()}
+              </span>
+            </EasyCopy>
+            <Show when={mapUrl()}>
+              {(url) => (
+                <ButtonTip content={t("browse.gpsOpenMap")}>
+                  {(tip) => (
+                    <IconButton
+                      {...tip}
+                      label={t("browse.gpsOpenMap")}
+                      class="shrink-0 text-fg-3 hover:text-fg-1"
+                      onClick={() => {
+                        void openExternalUrl(url()).catch(() => {
+                          /* 打不开浏览器不影响看图；不弹错误 */
+                        });
+                      }}
+                    >
+                      <IconExternalLink size={13} aria-hidden="true" />
+                    </IconButton>
+                  )}
+                </ButtonTip>
+              )}
+            </Show>
+          </div>
+        </div>
+      )}
+    </Show>
   );
 }
 
@@ -1008,7 +1269,7 @@ function cameraText(item: AssetItem): string | null {
  * 抽成独立组件是为了让 `AssetInfo` 能在**看图态把它换成预览 + 直方图**
  * （`memory/FUNCTION-BROWSE.md` §5.9）。tiles 态展示选中文件的完整 EXIF，内容过长时只滚动本区。
  */
-function ExifSection(props: { item: AssetItem; file: FileExif | null; size: { width: number; height: number } | null }): JSX.Element {
+function ExifSection(props: { item: AssetItem; file: FileExif | null }): JSX.Element {
   const rows = (): MetadataRow[] => {
     const item = props.item;
     const file = props.file;
@@ -1019,12 +1280,16 @@ function ExifSection(props: { item: AssetItem; file: FileExif | null; size: { wi
       { label: t("browse.fieldAperture"), value: item.fNumber === null ? null : `f/${item.fNumber}` },
       { label: t("browse.fieldExposure"), value: exposureText(item.exposureMs) },
       { label: t("browse.fieldIso"), value: item.iso === null ? null : `ISO ${item.iso}` },
-      { label: t("browse.fieldSize"), value: props.size === null ? null : `${props.size.width} × ${props.size.height}` },
+      /*
+       * 尺寸与 GPS **不在这里**（崔总 2026-11-03）：
+       *   * 尺寸是「文件现在多大」，属于「文件基础信息」（与 flowinfo 同一个口径）；
+       *   * GPS 只留「地理信息」一处 —— 以前这里读 `fileExif`、那里读 `assets`，
+       *     同一件事两种来源，换显示变体时可能出现两行不一致。
+       */
       { label: t("browse.exif.software"), value: file?.software ?? null },
       { label: t("browse.exif.datetimeRaw"), value: file?.datetimeRaw ?? null },
       { label: t("browse.exif.exposureBias"), value: file?.exposureBiasEv == null ? null : `${file.exposureBiasEv} EV` },
       { label: t("browse.exif.orientation"), value: file?.orientation == null ? null : String(file.orientation) },
-      { label: t("browse.exif.gps"), value: file?.gpsLat == null || file.gpsLon == null ? null : `${file.gpsLat}, ${file.gpsLon}` },
     ];
   };
   return <section class="mb-5" data-browse-exif>
@@ -1092,11 +1357,178 @@ export function AssetInfo(props: AssetInfoProps) {
     return ms === null ? null : localDateTime(ms, null);
   };
 
-  /** GPS：十进制度，6 位小数够到亚米级（再多的位数只是噪声） */
-  const gpsText = (): string | null => {
+  /**
+   * 建议输入的候选 = **最近输入**（跟着人走，`lib/text-history.ts`）
+   * ∪ **库内已有值**（跟着库走，`store.textValues`）。
+   *
+   * 一个字段一个 memo：上游是信号（历史、库内缓存 tick），改完文字后两边都会重算。
+   */
+  const authorSuggestions = createMemo(() =>
+    mergeSuggestions(recentTextValues("author"), props.store.textValues("author"), TEXT_SUGGEST_LIMIT),
+  );
+  const descriptionSuggestions = createMemo(() =>
+    // 描述不做库内统计（长且几乎不重复，后端也拒绝），只给最近输入
+    mergeSuggestions(recentTextValues("description"), [], TEXT_SUGGEST_LIMIT),
+  );
+  const countrySuggestions = createMemo(() =>
+    mergeSuggestions(recentTextValues("country"), props.store.textValues("country"), TEXT_SUGGEST_LIMIT),
+  );
+  const provinceSuggestions = createMemo(() =>
+    mergeSuggestions(
+      recentTextValues("provinceState"),
+      props.store.textValues("provinceState", { country: item()?.country }),
+      TEXT_SUGGEST_LIMIT,
+    ),
+  );
+  const citySuggestions = createMemo(() =>
+    mergeSuggestions(
+      recentTextValues("city"),
+      props.store.textValues("city", {
+        country: item()?.country,
+        provinceState: item()?.provinceState,
+      }),
+      TEXT_SUGGEST_LIMIT,
+    ),
+  );
+  const sublocationSuggestions = createMemo(() =>
+    mergeSuggestions(
+      recentTextValues("sublocation"),
+      props.store.textValues("sublocation", {
+        country: item()?.country,
+        provinceState: item()?.provinceState,
+        city: item()?.city,
+      }),
+      TEXT_SUGGEST_LIMIT,
+    ),
+  );
+
+  /*
+   * 库内已有值按需拉一次（store 内部按「字段 + 上级地理维度」缓存）。
+   * 地理字段的上级取**当前锚点已提交的值**：改了国家，省的候选下次就会按新国家收窄。
+   */
+  createEffect(() => {
     const it = item();
-    if (it === null || it.gpsLat === null || it.gpsLon === null) return null;
-    return `${it.gpsLat.toFixed(6)}, ${it.gpsLon.toFixed(6)}`;
+    if (it === null) return;
+    void props.store.ensureTextValues("author");
+    void props.store.ensureTextValues("country");
+    void props.store.ensureTextValues("provinceState", { country: it.country });
+    void props.store.ensureTextValues("city", {
+      country: it.country,
+      provinceState: it.provinceState,
+    });
+    void props.store.ensureTextValues("sublocation", {
+      country: it.country,
+      provinceState: it.provinceState,
+      city: it.city,
+    });
+  });
+
+  /**
+   * 写一个文字字段：默认只改**锚点那张**；`batchCount` 有值 = 写到所选全部。
+   *
+   * 失败走 Toast（`AGENTS.md` §2.29）、右栏保持旧值（条目没被回填）；
+   * 成功则右栏立即显示新值（`store.writeText` 就地回填，不等任何后台链路）。
+   */
+  const writeText = async (
+    field: EditableTextField,
+    value: string,
+    batchCount?: number,
+  ): Promise<void> => {
+    try {
+      const result = batchCount === undefined
+        ? await props.store.setText(field, value)
+        : await props.store.setTextForSelected(field, value);
+      if (result === null) return;
+      rememberTextValue(field, value);
+      if (batchCount !== undefined) {
+        props.toast?.show({
+          tone: "success",
+          message: t("browse.appliedToSelected").replace("{n}", String(batchCount)),
+        });
+      }
+    } catch (error) {
+      props.toast?.show({
+        tone: "danger",
+        message: t("browse.textSaveFailed").replace(
+          "{message}",
+          error instanceof Error ? error.message : String(error),
+        ),
+      });
+    }
+  };
+
+  /** 多选时给字段一颗「应用到所选 N 张」；单选不给（应用=改它自己，无意义）。 */
+  const batchApplier = (
+    field: EditableTextField,
+  ): { count: number; run: (value: string) => void } | null => {
+    const count = props.store.selection().ids.size;
+    if (count <= 1) return null;
+    return { count, run: (value) => void writeText(field, value, count) };
+  };
+
+  /** 「按 GPS 填入地点」：只有在有坐标、且三项里有空的时候才给入口。 */
+  const [geoBusy, setGeoBusy] = createSignal(false);
+  const geoFillable = (): boolean => {
+    const it = item();
+    const blank = (value: string | null): boolean => value === null || value.trim() === "";
+    return (
+      it !== null &&
+      it.gpsLat !== null &&
+      it.gpsLon !== null &&
+      (blank(it.country) || blank(it.provinceState) || blank(it.city))
+    );
+  };
+  const fillGeoFromGps = async (): Promise<void> => {
+    const it = item();
+    if (it === null || it.gpsLat === null || it.gpsLon === null || geoBusy()) return;
+    setGeoBusy(true);
+    try {
+      const place = await geoReverse(it.gpsLat, it.gpsLon, locale());
+      if (place === null) {
+        props.toast?.show({ tone: "info", message: t("browse.geoFillMiss") });
+        return;
+      }
+      // 查表是异步的：期间用户可能已经切到另一张照片，或这张的 GPS 已变。
+      // 不能把旧坐标查到的地名写进新照片（`applyGeo` 默认作用在当前锚点）。
+      const current = item();
+      if (
+        current?.id !== it.id ||
+        current.gpsLat !== it.gpsLat ||
+        current.gpsLon !== it.gpsLon
+      ) {
+        return;
+      }
+      const result = await props.store.applyGeo({
+        country: place.country,
+        provinceState: place.province,
+        city: place.city,
+      });
+      if (result === null) return;
+      for (const [field, value] of [
+        ["country", place.country],
+        ["provinceState", place.province],
+        ["city", place.city],
+      ] as const) {
+        if (value !== null) rememberTextValue(field, value);
+      }
+      props.toast?.show({
+        tone: "success",
+        message: t("browse.geoFilled").replace(
+          "{place}",
+          [place.province, place.city, place.country].filter(Boolean).join(" · "),
+        ),
+      });
+    } catch (error) {
+      props.toast?.show({
+        tone: "danger",
+        message: t("browse.textSaveFailed").replace(
+          "{message}",
+          error instanceof Error ? error.message : String(error),
+        ),
+      });
+    } finally {
+      setGeoBusy(false);
+    }
   };
 
   return (
@@ -1144,7 +1576,7 @@ export function AssetInfo(props: AssetInfoProps) {
             <Show when={props.issueError}><p class="mt-1 text-fs-0 text-danger">{props.issueError}</p></Show>
           </section>}
         </Show>
-        <Show when={props.viewer} fallback={<ExifSection item={item()!} file={props.fileExif ?? null} size={displaySize()} />}>
+        <Show when={props.viewer} fallback={<ExifSection item={item()!} file={props.fileExif ?? null} />}>
           {(store) => (
             <ViewerReadout store={store()} showVisibleBox={props.comparing !== true} histogram={props.displayHistogram} />
           )}
@@ -1174,19 +1606,33 @@ export function AssetInfo(props: AssetInfoProps) {
               <Field label={t("browse.recycleOriginalPath")} value={item()!.recycledFrom} />
             </Show>
             <Field label={t("browse.fieldRepository")} value={props.repositoryName ?? null} />
+            {/*
+              尺寸归位（崔总 2026-11-03）：它是「文件现在多大」，属于「文件基础信息」，
+              与 flowinfo 同一个口径（`lib/display-size.ts` = 当前显示变体的尺寸）。
+            */}
+            <Field
+              label={t("browse.fieldSize")}
+              value={displaySize() === null ? null : `${displaySize()!.width} × ${displaySize()!.height}`}
+            />
             <EditableField
               disabled={readOnly()}
               label={t("browse.fieldAuthor")}
               value={item()!.author}
               placeholder={t("browse.fieldEmpty")}
-              onCommit={(value) => void props.store.setText("author", value)}
+              suggestions={authorSuggestions()}
+              maxLength={TEXT_FIELD_MAX_CHARS}
+              applyToSelected={batchApplier("author")}
+              onCommit={(value) => void writeText("author", value)}
             />
-            <EditableField
+            <DescriptionField
               disabled={readOnly()}
               label={t("browse.fieldDescription")}
               value={item()!.description}
               placeholder={t("browse.fieldEmpty")}
-              onCommit={(value) => void props.store.setText("description", value)}
+              suggestions={descriptionSuggestions()}
+              maxLength={TEXT_FIELD_MAX_CHARS}
+              applyToSelected={batchApplier("description")}
+              onCommit={(value) => void writeText("description", value)}
             />
             <Show when={item()!.missing}>
               <p class="text-fs-2 text-danger">{t("browse.missingFile")}</p>
@@ -1195,40 +1641,64 @@ export function AssetInfo(props: AssetInfoProps) {
         </section>
 
         {/*
-          地理信息：**GPS 是从文件读的**（EXIF，导入时写库，不可编辑）；
-          下面四项是人写的（可编辑，走同一个 `setText`）。
+          地理信息：**GPS 是从文件读的**（EXIF，导入时写库，不可编辑；只读展示 + 复制 + 地图）；
+          下面四项是人写的（可编辑，建议值来自最近输入与库内已有值，逐级收窄）。
         */}
         <section class="mb-5" data-asset-geo="open">
           <h3 class="mb-1.5 text-fs-3 font-semibold text-fg-2">{t("browse.geoInfo")}</h3>
           <div class="flex flex-col gap-1.5">
-            <Field label={t("browse.fieldGps")} value={gpsText()} />
+            <GpsField label={t("browse.fieldGps")} lat={item()!.gpsLat} lon={item()!.gpsLon} />
+            <Show when={geoFillable()}>
+              <div class="flex justify-end">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={readOnly() || geoBusy()}
+                  onClick={() => void fillGeoFromGps()}
+                >
+                  {geoBusy() ? t("browse.geoFillBusy") : t("browse.geoFill")}
+                </Button>
+              </div>
+            </Show>
             <EditableField
               disabled={readOnly()}
               label={t("browse.fieldCountry")}
               value={item()!.country}
               placeholder={t("browse.fieldEmpty")}
-              onCommit={(value) => void props.store.setText("country", value)}
+              suggestions={countrySuggestions()}
+              maxLength={TEXT_FIELD_MAX_CHARS}
+              applyToSelected={batchApplier("country")}
+              onCommit={(value) => void writeText("country", value)}
             />
             <EditableField
               disabled={readOnly()}
               label={t("browse.fieldProvince")}
               value={item()!.provinceState}
               placeholder={t("browse.fieldEmpty")}
-              onCommit={(value) => void props.store.setText("provinceState", value)}
+              suggestions={provinceSuggestions()}
+              maxLength={TEXT_FIELD_MAX_CHARS}
+              applyToSelected={batchApplier("provinceState")}
+              onCommit={(value) => void writeText("provinceState", value)}
             />
             <EditableField
               disabled={readOnly()}
               label={t("browse.fieldCity")}
               value={item()!.city}
               placeholder={t("browse.fieldEmpty")}
-              onCommit={(value) => void props.store.setText("city", value)}
+              suggestions={citySuggestions()}
+              maxLength={TEXT_FIELD_MAX_CHARS}
+              applyToSelected={batchApplier("city")}
+              onCommit={(value) => void writeText("city", value)}
             />
             <EditableField
               disabled={readOnly()}
               label={t("browse.fieldSublocation")}
               value={item()!.sublocation}
               placeholder={t("browse.fieldEmpty")}
-              onCommit={(value) => void props.store.setText("sublocation", value)}
+              suggestions={sublocationSuggestions()}
+              maxLength={TEXT_FIELD_MAX_CHARS}
+              applyToSelected={batchApplier("sublocation")}
+              onCommit={(value) => void writeText("sublocation", value)}
             />
           </div>
         </section>

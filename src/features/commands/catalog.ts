@@ -202,6 +202,22 @@ export interface CommandDeps {
     toggleLut: () => void;
     /** 定稿面板开关（toolsbar left，与 LUT 同一组、同一时刻只开一个） */
     toggleIssues: () => void;
+    /** 编辑区（area）面板开关（toolsbar left 的第三个） */
+    toggleAreas: () => void;
+    /** 新建控制点（面板里那颗；落点在画布上完成） */
+    areaNewPoint: () => void;
+    /** 新建全图层 */
+    areaNewFull: () => void;
+    /** 删除当前层（默认层不可删 → `canRemoveArea` 为假时命令不可用） */
+    removeArea: () => void;
+    canRemoveArea: () => boolean;
+    /** 当前层上移 / 下移一行（-1 = 上一行，+1 = 下一行） */
+    moveArea: (delta: -1 | 1) => void;
+    /** 重新取样全部控制点（修复旧取样；低频，无默认热键） */
+    resampleAreas: () => void;
+    /** 「显示控制点」眼睛（纯视图偏好） */
+    toggleShowPoints: () => void;
+    showPoints: () => boolean;
     /** SOOC/RAW 编辑源；命令与工具栏共用一条动作 */
     setBase: (base: "sooc" | "raw") => void;
     /** 三个画布工具：互斥，再按一次同一个 = 退出 */
@@ -210,6 +226,9 @@ export interface CommandDeps {
     isToolActive: (tool: "crop" | "rotate" | "compare") => boolean;
     /** 重置全部调整（破坏性：一次抹掉所有参数与曲线） */
     resetDevelop: () => void;
+    /** 在默认层与当前层之间切换（`Space`；没有层可切时不可用） */
+    canToggleAreaFocus: () => boolean;
+    toggleAreaFocus: () => void;
     canReset: () => boolean;
     canFinalize: () => boolean;
     finalize: () => void;
@@ -773,6 +792,99 @@ export function createCommandRegistry(deps: CommandDeps): CommandSpec[] {
       scope: "viewer",
       when: () => deps.editor.active(),
       run: () => deps.editor.toggleLut(),
+    }),
+    /*
+     * 编辑区（area）的六条命令。**全部不设默认热键**（理由写在每一条上）：
+     * 它们要么需要画布落点、要么会新建 / 删除结构，热键误触的代价高于收益；
+     * 面板与画布上都有直接入口，命令面板也都能搜到（§2.15 允许「留空 + 说明」）。
+     */
+    spec({
+      /*
+       * 空格：在「默认层 ↔ 当前层」之间来回切（崔/总 2026-11-05）。
+       *
+       * 这是**编辑器里最高频的来回看**（改完局部层马上看整张的全局效果），
+       * 所以给它唯一的默认热键；`canToggleAreaFocus` 只有默认层时为 false ——
+       * 那时按空格不会发生任何事（不建层、不提示）。
+       * 输入框里按空格仍然是打字：分发器统一经 `shouldHandleKey` 跳过 INPUT/TEXTAREA/contenteditable。
+       */
+      id: "editor.area.toggleFocus",
+      defaultKey: "Space",
+      scenes: ["edit"],
+      titleKey: "cmd.editor.areaFocus",
+      group: "view",
+      scope: "viewer",
+      when: () => deps.editor.active() && deps.editor.canToggleAreaFocus(),
+      run: () => deps.editor.toggleAreaFocus(),
+    }),
+    spec({
+      id: "editor.area.toggle",
+      titleKey: "cmd.editor.areaPanel",
+      group: "view",
+      scope: "viewer",
+      when: () => deps.editor.active(),
+      run: () => deps.editor.toggleAreas(),
+    }),
+    spec({
+      // 留空：新建之后必须去画布上点一下，纯键盘无法完成这一步
+      id: "editor.area.newPoint",
+      titleKey: "cmd.editor.areaNewPoint",
+      group: "edit",
+      scope: "viewer",
+      when: () => deps.editor.active() && deps.editor.hasPhoto(),
+      run: () => deps.editor.areaNewPoint(),
+    }),
+    spec({
+      // 留空：同上（结构动作，靠面板更安全）
+      id: "editor.area.newFull",
+      titleKey: "cmd.editor.areaNewFull",
+      group: "edit",
+      scope: "viewer",
+      when: () => deps.editor.active() && deps.editor.hasPhoto(),
+      run: () => deps.editor.areaNewFull(),
+    }),
+    spec({
+      // 留空：删除是可撤销的结构动作，但仍然不该一键可达（误按一次就少一层）
+      id: "editor.area.remove",
+      titleKey: "cmd.editor.areaRemove",
+      group: "edit",
+      scope: "viewer",
+      when: () => deps.editor.active() && deps.editor.hasPhoto() && deps.editor.canRemoveArea(),
+      run: () => deps.editor.removeArea(),
+    }),
+    spec({
+      // 留空：方向键在编辑里没有约定（对话框 / 列表都在用它）
+      id: "editor.area.moveUp",
+      titleKey: "cmd.editor.areaMoveUp",
+      group: "edit",
+      scope: "viewer",
+      when: () => deps.editor.active() && deps.editor.hasPhoto(),
+      run: () => deps.editor.moveArea(-1),
+    }),
+    spec({
+      id: "editor.area.moveDown",
+      titleKey: "cmd.editor.areaMoveDown",
+      group: "edit",
+      scope: "viewer",
+      when: () => deps.editor.active() && deps.editor.hasPhoto(),
+      run: () => deps.editor.moveArea(1),
+    }),
+    spec({
+      // 留空：低频修复动作（重新取样全部控制点），面板里也有入口；不抢热键
+      id: "editor.area.resample",
+      titleKey: "cmd.editor.areaResample",
+      group: "edit",
+      scope: "viewer",
+      when: () => deps.editor.active() && deps.editor.hasPhoto(),
+      run: () => deps.editor.resampleAreas(),
+    }),
+    spec({
+      // 留空：与 LUT / 定稿面板同一口径（视图开关都不抢热键）
+      id: "editor.area.showPoints",
+      titleKey: "cmd.editor.showPoints",
+      group: "view",
+      scope: "viewer",
+      when: () => deps.editor.active(),
+      run: () => deps.editor.toggleShowPoints(),
     }),
     spec({
       id: "editor.issues.toggle",

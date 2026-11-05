@@ -241,6 +241,7 @@ pub(super) fn run(
                                 None,
                                 job.lut.as_ref(),
                                 job.geometry,
+                                job.areas.as_deref(),
                             )
                             .map_err(|e| e.to_string())?,
                     )
@@ -270,6 +271,7 @@ pub(super) fn run(
                     job.lens.as_ref(),
                     job.lut.as_ref(),
                     job.geometry,
+                    job.areas.as_deref(),
                 )
                 .map_err(|e| e.to_string())?,
         };
@@ -323,6 +325,7 @@ pub(super) fn run(
                     lens,
                     job.lut.as_deref(),
                     job.geometry,
+                    job.areas.as_deref(),
                 )
                 .map(|rgb| raybend::display::histogram_of_rgb8(&rgb, display::DEFAULT_BINS).into())
                 .map_err(|e| eprintln!("[color] histogram: {e}"))

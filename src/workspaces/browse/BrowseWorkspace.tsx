@@ -1173,6 +1173,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
               issueBusy={issueBusy()}
               issueError={info()?.error ?? null}
               onSelectIssue={(choice) => void selectBrowseIssue(choice)}
+              toast={props.toast}
               repositoryName={
                 repositories().find((repo) => repo.id === store.repositoryId())?.name ?? null
               }

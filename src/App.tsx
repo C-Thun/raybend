@@ -102,13 +102,12 @@ import { locale, nextLocale, setLocale } from "./i18n/index.ts";
 import { createRepositoryMonitor } from "./features/repositories/monitor.ts";
 import { createRepositoryState } from "./features/repositories/state.ts";
 import { LibrarySettingsDialog } from "./features/repositories/index.ts";
-import { browseDelete, browseFacets, browseMark, browseMarkings, browsePage, browseRecycleEmpty, browseRecyclePurge, browseRecycleRestore, browseRecycleSummary, browseRedo, browseTimeline, browseUndo, flagsClear, flagsGet, flagsSet, tagList, tagListAll } from "./api/browse.ts";
+import { browseDelete, browseFacets, browseMark, browseMarkings, browsePage, browseRecycleEmpty, browseRecyclePurge, browseRecycleRestore, browseRecycleSummary, browseRedo, browseTextValues, browseTimeline, browseUndo, flagsClear, flagsGet, flagsSet, tagList, tagListAll } from "./api/browse.ts";
 import { BrowseWorkspace } from "./workspaces/browse/index.ts";
 import { EditorWorkspace } from "./workspaces/editor/EditorWorkspace.tsx";
 import {
   createEditorStore,
   EditorPanelToggles,
-  EditorResetTool,
   EditorToolbar,
 } from "./features/editor/index.ts";
 import {
@@ -223,6 +222,7 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
       timeline: browseTimeline,
       facets: browseFacets,
       markings: browseMarkings,
+      textValues: (repositoryId, field, parents) => browseTextValues(repositoryId, field, parents),
       tagList,
       tagListAll,
       mark: browseMark,
@@ -822,12 +822,49 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
       cycleChrome: () => editorStore.cycleTab(),
       toggleLut: () => editorStore.toggleLeft("lut"),
       toggleIssues: () => editorStore.toggleLeft("issues"),
+      toggleAreas: () => editorStore.toggleLeft("areas"),
+      areaNewPoint: () => {
+        // 用 `setLeftPanel` 而不是 `toggleLeft`：命令的语义是「打开面板并新建」，
+        // 面板已经开着时不该被它关掉（toggle 会让这一次操作看起来像什么都没发生）。
+        editorStore.setLeftPanel("areas");
+        // **不建层、不落库**：只是把「新建控制点」武装起来，等用户在画面上点一下
+        // （落点那一步才创建层）；中途退出编辑器不该在库里留下一个空控制点层。
+        editorStore.armPointArea();
+      },
+      areaNewFull: () => {
+        editorStore.setLeftPanel("areas");
+        editorStore.createArea();
+        editorActions()?.confirmEdit();
+      },
+      removeArea: () => {
+        const id = editorStore.activeAreaId();
+        if (id === null) return;
+        editorStore.removeArea(id);
+        editorActions()?.confirmEdit();
+      },
+      canRemoveArea: () => editorStore.activeAreaId() !== null,
+      moveArea: (delta) => {
+        const rows = editorStore.layerRows();
+        const active = editorStore.activeAreaId();
+        const from = rows.findIndex((row) =>
+          active === null ? row.kind === "default" : row.kind === "area" && row.area.id === active);
+        if (from < 0) return;
+        const to = from + delta;
+        if (to < 0 || to >= rows.length) return;
+        editorStore.moveAreaRow(from, to);
+        editorActions()?.confirmEdit();
+      },
+      toggleShowPoints: () => editorStore.setShowPoints(!editorStore.showPoints()),
+      showPoints: () => editorStore.showPoints(),
       setBase: setEditorBase,
       toggleTool: (tool) => editorStore.toggleTool(tool),
       isToolActive: (tool) => editorStore.tool() === tool,
       // 重置全部调整要**同时清库**，所以走工作区注册的那一份实现（不是 store 单独能干的）
       resetDevelop: () => editorActions()?.resetDevelop(),
       canReset: () => editorActions()?.canReset() ?? false,
+      resampleAreas: () => editorActions()?.resampleAreas(),
+      canToggleAreaFocus: () => editorActions()?.canToggleAreaFocus() ?? false,
+      toggleAreaFocus: () => editorActions()?.toggleAreaFocus(),
       canFinalize: () => editorActions()?.canFinalize() ?? false,
       finalize: () => editorActions()?.finalize(),
       autoAdjust: () => editorActions()?.autoAdjust(),
@@ -988,9 +1025,7 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
             onPressedChange={() => setOrganizationPanel("tags")} />
         </Show>}
         hasRightTools={shell.workflow() === "browse" || shell.workflow() === "edit" || exportFlow()}
-        right={<Show when={shell.workflow()==="browse"} fallback={<Show when={exportFlow()} fallback={<EditorResetTool store={editorStore} enabled={editorEnabled()}
-          onRequestReset={() => editorActions()?.resetDevelop()}
-          canReset={() => editorActions()?.canReset() ?? false} />}><ExportStopTool store={exportStore}/></Show>}><Button data-browse-external-editor variant="ghost" icon={<IconExternalLink size={14} />} aria-label={t("external.title")} disabled={organizationPhotoView() || !(browseActions()?.canExternalEditor()??false)} onClick={()=>browseActions()?.externalEditor()}/></Show>}
+        right={<Show when={shell.workflow()==="browse"} fallback={<Show when={exportFlow()}><ExportStopTool store={exportStore}/></Show>}><Button data-browse-external-editor variant="ghost" icon={<IconExternalLink size={14} />} aria-label={t("external.title")} disabled={organizationPhotoView() || !(browseActions()?.canExternalEditor()??false)} onClick={()=>browseActions()?.externalEditor()}/></Show>}
       >
         {/* 浏览模式的工具（标记系列 / 筛选开关 / 锁）由那个模块自己给 —— 见 ToolsBar 的说明 */}
         <Show when={shell.workflow() === "browse" && !organizationPhotoView()}>
@@ -1040,6 +1075,8 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
           <EditorToolbar store={editorStore} enabled={editorEnabled()}
             canAutoAdjust={() => editorActions()?.canAutoAdjust() ?? false}
             onAutoAdjust={() => editorActions()?.autoAdjust()}
+            onRequestReset={() => editorActions()?.resetDevelop()}
+            canReset={() => editorActions()?.canReset() ?? false}
             onBaseChange={setEditorBase}
             history={historyActions} />
         </Show>
@@ -1211,6 +1248,7 @@ export default function App(props: { appearance?: AppearanceStore } = {}) {
             onOpenImport={() => shell.setWorkflow("import")}
             onOpenColorProfiles={() => { setSettingsPage("profiles"); const command = commands.find((item) => item.id === "settings.open"); if (command) runCommand(command); }}
             response={editorResponse}
+            toast={toast}
           />
         </Show>
       }>

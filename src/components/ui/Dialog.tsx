@@ -5,7 +5,7 @@
  *
  * 状态：
  *   关       不渲染任何东西（含遮罩）
- *   开       内容面 `surface-layer` + **1px `--dialog-ring` 内描边**；遮罩由弹窗栈最底层画一次
+ *   开       内容面 `surface-layer` + **0.5px `--dialog-ring` 内描边**；遮罩由弹窗栈最底层画一次
  *   标题     17px semibold，正文 13px 次级色
  *   动作区   右下角：取消（secondary）+ 确定（primary）
  *
@@ -103,7 +103,7 @@ export function DialogFrame(props: DialogFrameProps) {
         >
           <ArkDialog.Content
             class={[
-              "rounded-ui bg-surface-layer inset-ring-1 inset-ring-(--dialog-ring) outline-none",
+              "rounded-ui bg-surface-layer inset-ring-(length:--dialog-ring-w) inset-ring-(--dialog-ring) outline-none",
               props.contentClass ?? "",
             ].join(" ")}
             {...props.contentAttrs}

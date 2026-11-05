@@ -32,13 +32,13 @@ function fakeStorage(seed: Record<string, string> = {}): EditorPrefsStorage & {
 }
 
 test("存储键是版本化的（AGENTS.md §2.16）", () => {
-  assert.equal(EDITOR_PREFS_KEY, "raybend.editor.v3");
-  assert.equal(PREVIOUS_EDITOR_PREFS_KEY, "raybend.editor.v2");
+  assert.equal(EDITOR_PREFS_KEY, "raybend.editor.v4");
+  assert.equal(PREVIOUS_EDITOR_PREFS_KEY, "raybend.editor.v3");
   assert.equal(LEGACY_EDITOR_PREFS_KEY, "raybend.editor.v1");
 });
 
 test("默认值：左列默认开 LUT 面板、没有分类", () => {
-  assert.deepEqual(DEFAULT_EDITOR_PREFS, { leftPanel: "lut", lutCategories: [] });
+  assert.deepEqual(DEFAULT_EDITOR_PREFS, { leftPanel: "lut", lutCategories: [], showPoints: true });
   assert.deepEqual(readEditorPrefs(fakeStorage()), DEFAULT_EDITOR_PREFS);
 });
 
@@ -67,7 +67,11 @@ test("损坏的 JSON / 非法结构都安全收敛（不抛）", () => {
 
 test("读回写回一整轮：分类与左列面板都不丢", () => {
   const storage = fakeStorage();
-  const prefs: EditorPrefs = { leftPanel: null, lutCategories: [{ id: "a", name: "旅行", entries: [] }] };
+  const prefs: EditorPrefs = {
+    leftPanel: null,
+    lutCategories: [{ id: "a", name: "旅行", entries: [] }],
+    showPoints: false,
+  };
   writeEditorPrefs(prefs, storage);
   assert.deepEqual(readEditorPrefs(storage), prefs);
 });
@@ -82,17 +86,17 @@ test("写失败不抛（隐私模式 / 配额满不该让面板开关崩掉）",
   assert.doesNotThrow(() => writeEditorPrefs(DEFAULT_EDITOR_PREFS, broken));
 });
 
-test("v2 → v3：读旧键、迁移、写回新键", () => {
+test("v3 → v4：读旧键、迁移、写回新键", () => {
   const old = { lutOpen: false, lutCategories: [{ id: "film", name: "胶片", entries: [] }] };
   const storage = fakeStorage({ [PREVIOUS_EDITOR_PREFS_KEY]: JSON.stringify(old) });
-  assert.deepEqual(readEditorPrefs(storage), {
+  const migrated = {
     leftPanel: null,
     lutCategories: [{ id: "film", name: "胶片", entries: [] }],
-  });
-  assert.equal(
-    storage.written[EDITOR_PREFS_KEY],
-    JSON.stringify({ leftPanel: null, lutCategories: [{ id: "film", name: "胶片", entries: [] }] }),
-  );
+    // 旧版本没有这一项：默认「显示控制点」
+    showPoints: true,
+  };
+  assert.deepEqual(readEditorPrefs(storage), migrated);
+  assert.equal(storage.written[EDITOR_PREFS_KEY], JSON.stringify(migrated));
 });
 
 test("v1 分类升级后只上送一次 app.db，成功标记后不复活旧分类", () => {

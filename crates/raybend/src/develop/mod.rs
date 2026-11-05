@@ -32,6 +32,7 @@
 //! 它们都不许自己再算一遍色调。GPU 化（W4+）时也是**同一组测试向量喂两条路**做交叉验证，
 //! 不是另写一份。
 
+pub mod areas;
 pub mod base_curve;
 pub mod bm3d;
 pub mod color;
@@ -51,6 +52,10 @@ pub mod sharpen;
 pub mod sample;
 pub mod working;
 
+pub use areas::{
+    AreaKind, AreaSpec, Band, LayerStack, PointWeightConfig, TOLERANCE_DEFAULT, TOLERANCE_MAX,
+    TOLERANCE_MIN, feature_vector, point_weight, point_weight_with,
+};
 pub use color::{linear_to_srgb, srgb_to_linear, temperature_gain_ratio};
 pub use curve::{Curve, CurveChannel, CurveSet};
 pub use denoise::{DenoisePlan, NrMethod};

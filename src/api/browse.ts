@@ -14,7 +14,9 @@ import type {
   BrowseQuery,
   BrowseTimeline,
   BrowseWindow,
+  EditableTextField,
   FlagsView,
+  GeoPlace,
   MarkAction,
   MarkResult,
   MarkingItem,
@@ -24,6 +26,7 @@ import type {
   RestoreResult,
   Tag,
   TagStats,
+  TextValueCount,
 } from "./types.ts";
 
 let coreModule: Promise<typeof import("@tauri-apps/api/core")> | undefined;
@@ -98,6 +101,36 @@ export async function browseMarkings(
   return call<MarkingItem[]>("browse_markings", {
     repositoryId,
     ids: [...ids],
+  });
+}
+
+/** 按坐标找最近的城市（离线，随应用发布的城市表）。`null` = 坐标非法/没有数据。 */
+export async function geoReverse(
+  lat: number,
+  lon: number,
+  locale: string,
+): Promise<GeoPlace | null> {
+  if (!isTauriRuntime()) return null;
+  return call<GeoPlace | null>("geo_reverse", { lat, lon, locale });
+}
+
+/** 读某个文字字段在库里已有的取值（右栏建议输入的「库内已有值」）。
+ *
+ * 只服务作者与地理四项：描述长且几乎不重复，候选只来自最近输入（后端会拒绝 `description`）。
+ * 地理字段逐级过滤：给「市」时带上国家/省，给「具体地点」时带上国家/省/市。
+ */
+export async function browseTextValues(
+  repositoryId: string,
+  field: EditableTextField,
+  parents: { country?: string | null; provinceState?: string | null; city?: string | null } = {},
+): Promise<TextValueCount[]> {
+  if (!isTauriRuntime()) return [];
+  return call<TextValueCount[]>("browse_text_values", {
+    repositoryId,
+    field,
+    country: parents.country ?? null,
+    provinceState: parents.provinceState ?? null,
+    city: parents.city ?? null,
   });
 }
 

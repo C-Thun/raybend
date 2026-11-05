@@ -1,8 +1,11 @@
 # 多层 LUT（应用层 + 列表多选）——需求原文与审阅
 
-> 2026-10-31 02:5x CST 崔总在对话中提出。**状态：未开工**（界面部分按约定必须先改 Pencil 画稿、审核通过后才动代码）。
-> 前置任务（把 LUT 计算搬进 GPU）已单独立项并开工，见 `memory/EDIT-GPU.md` 与对应的 `implementations/` 记录。
-> 本文件是**需求原文暂存 + 架构审阅**，不是进度表；开工时以它为源写 `specs/editor-lut-chain.md`。
+> 2026-10-31 CST 崔总在对话中提出。
+> **状态（2026-10-31 17:03）**：画稿已审（崔总「没问题，按 pencil 实施」）→ 规格
+> `specs/editor-lut-chain.md` → 数据/渲染/界面全部落地（`implementations/2026-10-31_lut-chain-multilayer.md`）。
+> 前置任务（LUT 上 GPU）见 `implementations/2026-10-31_lut-on-gpu.md` 与 `memory/EDIT-GPU.md`。
+> 本文件保留为**需求原文 + 审阅记录**，不再承担进度；下面「待定问题」按画稿默认值执行
+> （换底层重置为 100%/开、删首行下一层顶上、同 id 不重复、上限 8 层、强度不显示标签）。
 
 ## 需求原文（verbatim）
 

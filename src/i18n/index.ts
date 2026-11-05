@@ -27,6 +27,12 @@ import { zhCN } from "./zh-CN.ts";
  * （编辑左栏改版：定稿面板开关；加完本文件即刷新检查器缓存）。
  * 2026-10-24 加了 ai.loadingModel 与 org.* 八条（桶计数/清理失效成员/目录标签确认/
  * 预览偏少/筛选来源说明/已在桶里；加完本文件即刷新检查器缓存）。）
+ * 2026-11-02 加了 editor.area.resampleAll 与 cmd.editor.areaResample 两条
+ * （控制点取样方向修复后的「重新取样全部」入口；加完本文件即刷新检查器缓存）。
+ * 2026-11-03 加了 browse.applyToSelected / appliedToSelected / textSaveFailed /
+ * descriptionTitle / descriptionExpand / gpsOpenMap / textSuggestHint / geoFill / geoFillBusy /
+ * geoFilled / geoFillMiss 十一条（右栏元数据字段的建议输入、描述弹窗、GPS 复制/地图与「按 GPS 填入地点」；
+ * 加完本文件即刷新检查器缓存）。
  *
  * ⚠️ 加了新键之后若类型检查器仍报「键不存在」，那是**陈旧快照**误报（不是真错）：
  * 判据与验证配方见 编译器诊断纪律：以 `tsc` 为准（必要时用 `MessageKey[]` 临时证明文件 + 退出码）。

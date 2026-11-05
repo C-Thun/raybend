@@ -65,7 +65,8 @@ impl AutoAdjustBaseline {
 }
 
 /// 一张照片的编辑栈（`latest`）。
-#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Deserialize)]
+#[serde(try_from = "DevelopStackWire")]
 pub struct DevelopStack {
     /// Missing color preserves the historical pipeline and canonical issue hash.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -91,9 +92,9 @@ pub struct DevelopStack {
     pub base_curve_profile: Option<String>,
     /// 被选中档案的曲线快照：旧照片不会被之后的机型统计悄悄改画面。
     pub base_curve_points: Option<Vec<[f32; 2]>>,
-    /// 当前选择的应用级 LUT ID；禁用时仍保留选择。
-    pub lut_id: Option<String>,
-    /// LUT 开关；None 与 false 都表示未启用。
+    /// **应用层的链**（有序；空 = 没有 LUT）。自上而下 = 逐层处理。
+    pub lut_chain: Vec<LutLayer>,
+    /// **总开关**：None 与 false 都表示整条链不参与渲染（链保留）。
     pub lut_enabled: Option<bool>,
     /// **配置文件那一半**的开关（`None` = 默认开）。
     ///
@@ -106,9 +107,509 @@ pub struct DevelopStack {
     /// 重置时恢复的自动结果；不改变像素，不进入像素缓存 / 定稿匹配指纹。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_adjust: Option<AutoAdjustBaseline>,
+    /// **默认层之外**的层（`specs/editor-area.md`）。顺序 = 计算顺序，新层追加在末尾。
+    ///
+    /// **默认层不在这里**：它就是本结构自己的 `params` / `curves` 加那几个全局字段
+    /// （`color` / `lut_chain` / `lens_*` / `nr_method` / `base_curve_*` / `geometry`）。
+    /// 这么切是为了让「退化 = 只有默认层」时**序列化字节与改动前逐字节相同**：
+    /// 空 `areas` 直接不写，旧定稿的 `profile_hash` 与旧缓存签名全部不受影响。
+    pub areas: Vec<Area>,
+    /// 默认层在层列表里的位置（0-based）。**只有存在额外层时才写**。
+    pub default_index: Option<u8>,
+}
+
+/// 链长上限（GPU 同一趟 pass 内逐层串联；`specs/editor-lut-chain.md` §1）。
+pub const MAX_LUT_LAYERS: usize = 8;
+
+/// 编辑区层数上限（**不含默认层**；`memory/LIMITS.md`）。
+pub const MAX_AREAS: usize = 32;
+
+/// 层名长度上限（字符，不是字节）。
+pub const MAX_AREA_NAME_CHARS: usize = 30;
+
+/// 控制点颜色的**色板长度**（崔总 2026-10-31 定 8 个）。
+///
+/// 层里存的是**下标**不是十六进制：以后调色板只改渲染侧，不重写已有数据。
+pub const POINT_COLORS: usize = 8;
+
+/// 编辑区的一层（**默认层不在其中**，见 [`DevelopStack::areas`]）。
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Area {
+    /// 稳定 ID：撤销 / 引用 / 面板排序都靠它，单调递增、永不复用。
+    pub id: u32,
+    #[serde(flatten)]
+    pub kind: AreaKind,
+    /// 用户起的名字（≤30 字符）。空 = 用类型默认名。
+    #[serde(default)]
+    pub name: String,
+    /// 启停（`false` = 整层旁路，不删）。
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// 不透明度 0..=1。近期无 UI（`specs/editor-area.md` §10 D3）。
+    #[serde(default = "default_strength")]
+    pub opacity: f32,
+    /// 控制点的颜色槽位（`0..POINT_COLORS`）。只有 `Point` 用得上；全图层不画标记。
+    ///
+    /// 存**下标**：色板在渲染侧定义，换一套颜色不需要重写任何已有数据。
+    #[serde(default)]
+    pub color: u8,
+    /// 逐像素参数（只装非默认项）。
+    ///
+    /// ❗**不许省字段**（2026-11-01）：空层序列化时也必须带回 `"params": {}` 与
+    /// `"curves": {}` —— 前端 `Object.entries(area.curves)` 拿到 `undefined` 会抛
+    /// `TypeError`，整次编辑栈载入作废（现象：建过 area 再进来只剩默认层）。
+    /// 退化形状（根本没有额外层）仍由 `DevelopStack.areas` 的 `skip_serializing_if` 保住。
+    #[serde(default)]
+    pub params: BTreeMap<String, f64>,
+    /// 通道 → 控制点。
+    #[serde(default)]
+    pub curves: BTreeMap<String, Vec<[f32; 2]>>,
+    /// 控制点种子的定义版本（`SEED_VERSION`；`0` = 旧定义，需要重新取样）。
+    ///
+    /// 只有控制点用得到；全图层恒为 0，不写也合法。
+    #[serde(default)]
+    pub seed_version: u8,
+}
+
+/// 层的类型。默认层不在枚举里（它是栈本身）。
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum AreaKind {
+    /// 用户建的全幅调整层：权重恒 1。
+    Full,
+    /// 控制点：种子向量 + 容差 + 平滑权重（`specs/editor-area.md` §4.2）。
+    ///
+    /// **不是蒙版、也不是圆形蒙版**：它在**全图**范围内找"和种子向量相近"的像素，
+    /// 与采样位的空间距离无关（`x` / `y` 只是采样位，用来取种子、画标记）。
+    Point {
+        /// 采样位：源图归一化坐标（方向已归正、裁切前）。
+        x: f32,
+        y: f32,
+        /// 创建时冻结的特征向量 `[Y′, Cb, Cr]`（感知域；`develop::areas::seed_version()`）。
+        seed: [f32; 3],
+        /// **容差**：界面上那条白线的长度就是这个数（`100..=1000`，连续无台阶）。
+        ///
+        /// 它经 `develop::areas::PointWeightConfig` 映射成「亮度轴 / 色相轴」各自的
+        /// （完全容差, 过渡终点）—— 存储层不解释它，只保证范围。
+        tolerance: f32,
+    },
+}
+
+/// 控制点种子的**定义版本**。
+///
+/// * `1` = `[Y′, Cb, Cr]`（感知域，2026-11-01 起）；
+/// * `0` / 缺省 = 老定义（线性域 `[luma, c1, c2]`）—— **必须重新取样**才能用。
+///
+/// 前端在载入 latest 时看到旧版本会逐点重取一次（位置不变），见
+/// `EditorWorkspace` 的 `migrateLegacySeeds`。
+pub const SEED_VERSION: u8 = 1;
+
+/// `develop_stacks.areas` 这一列的形状（**只在有额外层时写**）。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AreasBlob {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    default_index: Option<u8>,
+    #[serde(default)]
+    areas: Vec<Area>,
+}
+
+impl Area {
+    /// 转成**渲染侧形态**（`develop::areas::AreaSpec`）。
+    ///
+    /// 层的数据形状住在 store（持久化 / 校验），求值住在 develop（纯数学）——
+    /// 这一条转换是两边**唯一**的桥（`develop` 不认识 store 的类型）。
+    ///
+    /// 两个旧数据防线：
+    /// * 容差曾是 `0..1`，在这里统一折算到 `100..1000`（旧定稿 / 侧车不经过 DB `load`）；
+    /// * 旧定义的 `seed_version` **不能按新定义解释**，先把层关掉，等重新取样，
+    ///   不能悄悄把旧线性种子当感知域种子用。
+    #[must_use]
+    pub fn to_spec(&self) -> crate::develop::AreaSpec {
+        crate::develop::AreaSpec {
+            kind: match self.kind {
+                AreaKind::Full => crate::develop::AreaKind::Full,
+                AreaKind::Point {
+                    x, y, seed, tolerance
+                } => crate::develop::AreaKind::Point {
+                    x,
+                    y,
+                    seed,
+                    tolerance: if tolerance.is_finite() && tolerance <= 1.0 {
+                        crate::develop::areas::TOLERANCE_MIN
+                            + tolerance.max(0.0)
+                                * (crate::develop::areas::TOLERANCE_MAX
+                                    - crate::develop::areas::TOLERANCE_MIN)
+                    } else {
+                        tolerance
+                    },
+                },
+            },
+            enabled: self.enabled
+                && (!matches!(self.kind, AreaKind::Point { .. })
+                    || self.seed_version == SEED_VERSION),
+            opacity: self.opacity,
+            params: self.params.clone(),
+            curves: self.curves.clone(),
+        }
+    }
+
+    fn valid(&self) -> Result<()> {
+        if self.id == 0 {
+            return Err(Error::Unsupported("编辑区 ID 不能为 0".into()));
+        }
+        if self.name.chars().count() > MAX_AREA_NAME_CHARS
+            || self.name.chars().any(char::is_control)
+        {
+            return Err(Error::Unsupported(format!(
+                "层名最长 {MAX_AREA_NAME_CHARS} 个字符且不含控制字符"
+            )));
+        }
+        if !self.opacity.is_finite() || !(0.0..=1.0).contains(&self.opacity) {
+            return Err(Error::Unsupported("层不透明度必须在 0..=1".into()));
+        }
+        if usize::from(self.color) >= POINT_COLORS {
+            return Err(Error::Unsupported(format!(
+                "控制点颜色槽位越界：{}（只有 {POINT_COLORS} 个）",
+                self.color
+            )));
+        }
+        for (id, value) in &self.params {
+            let Some(spec) = spec(id) else {
+                return Err(Error::Unsupported(format!("未知的显影参数：{id}")));
+            };
+            if spec.target == crate::develop::params::ParamTarget::Global {
+                return Err(Error::Unsupported(format!(
+                    "{id} 是全局阶段参数，只能挂在默认层"
+                )));
+            }
+            if spec.target == crate::develop::params::ParamTarget::Mask {
+                return Err(Error::Unsupported(format!("{id} 由掩膜自己管，不能写进层参数")));
+            }
+            if !spec.accepts(*value) {
+                return Err(Error::Unsupported(format!(
+                    "参数 {id} 的值非法：{value}（允许 {}..{}）",
+                    spec.min, spec.max
+                )));
+            }
+        }
+        for (channel, points) in &self.curves {
+            if CurveChannel::parse(channel).is_none() {
+                return Err(Error::Unsupported(format!("未知的曲线通道：{channel}")));
+            }
+            Curve::from_points(points.clone())
+                .map_err(|e| Error::Unsupported(format!("曲线 {channel} 不合法：{e}")))?;
+        }
+        if let AreaKind::Point { x, y, seed, tolerance } = self.kind {
+            let unit = |value: f32| value.is_finite() && (0.0..=1.0).contains(&value);
+            let chroma = |value: f32| value.is_finite() && (-0.5..=0.5).contains(&value);
+            let in_range = tolerance.is_finite()
+                && ((crate::develop::areas::TOLERANCE_MIN
+                    ..=crate::develop::areas::TOLERANCE_MAX)
+                    .contains(&tolerance)
+                    // 旧版本存的是 0..1 的分数：读旧定稿 / 侧车时仍要放行，
+                    // 渲染入口 `to_spec` 会折算成新数值域。
+                    || (0.0..=1.0).contains(&tolerance));
+            /*
+             * **旧种子（`seed_version < SEED_VERSION`）只要求是有限数** —— 它不是
+             * 新定义的 `[Y′, Cb, Cr]`，量纲与范围都不同（旧的是线性域），拿新范围去卡
+             * 它必然误杀。
+             *
+             * ❗这里曾经要求旧种子也满足新范围，结果是一条**死锁**（2026-11-01 崔总报的
+             * 「调节容差时报错」）：
+             * ① 取样命令 `develop_area_seed` 自己先 `stack.validate()`；
+             * ② 栈里只要有一个范围外的旧种子，取样就失败；
+             * ③ 而旧种子只能靠取样来迁移 —— 于是永远迁不动，任何一次落库都报
+             *    「不支持：控制点坐标必须在 0..=1、容差必须在 100..=1000…」。
+             * 旧种子本来**不参与渲染**（`to_spec` 会把该层旁路），只校验有限数就够。
+             */
+            let legacy_seed = self.seed_version != SEED_VERSION;
+            let seed_ok = if legacy_seed {
+                seed.iter().all(|value| value.is_finite())
+            } else {
+                unit(seed[0]) && chroma(seed[1]) && chroma(seed[2])
+            };
+            if !unit(x) || !unit(y) || !in_range || !seed_ok {
+                let (min, max) = (
+                    crate::develop::areas::TOLERANCE_MIN,
+                    crate::develop::areas::TOLERANCE_MAX,
+                );
+                return Err(Error::Unsupported(format!(
+                    "控制点不合法：坐标 ({x}, {y})、容差 {tolerance}（允许 {min}..={max}）、\
+                     种子 [{}, {}, {}]（版本 {}/{SEED_VERSION}）",
+                    seed[0], seed[1], seed[2], self.seed_version
+                )));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// **应用层的一项**：哪一支 LUT、开没开、强度多少。
+///
+/// 语义（唯一口径）：
+/// `像素 = layer_n(...(layer_1(原像素)))`，
+/// 单层作用 = `mix(输入, Lut::eval_extended(输入), strength)`。
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct LutLayer {
+    /// 应用级 LUT 的 ID（与 `app.db` 的 `luts.id` 对应）。
+    pub id: String,
+    /// 单层开关：`false` = 该层旁路（不删）。
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// 强度 0..=1（1 = 100%）。
+    #[serde(default = "default_strength")]
+    pub strength: f32,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_strength() -> f32 {
+    1.0
+}
+
+impl LutLayer {
+    /// 新建一层（默认开、100%）。
+    #[must_use]
+    pub fn new(id: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            enabled: true,
+            strength: 1.0,
+        }
+    }
+
+    fn valid(&self) -> bool {
+        !(self.id.is_empty()
+            || self.id.len() > 128
+            || self.id.contains(['/', '\\'])
+            || !self.strength.is_finite()
+            || !(0.0..=1.0).contains(&self.strength))
+    }
+}
+
+/// **反序列化的唯一入口**：旧数据（`lut_id` 单支）在这里并入链。
+///
+/// 为什么用 wire 而不是在各个装载点各调一次归一化：DB、XMP `rb:profileJson`、
+/// issue 快照、preset 全都会反序列化 `DevelopStack`，只有离成一处才不会漏掉某个入口。
+#[derive(serde::Deserialize)]
+struct DevelopStackWire {
+    #[serde(default)]
+    color: Option<crate::color::PhotoColorState>,
+    #[serde(default)]
+    source_base: Option<String>,
+    #[serde(default)]
+    params: BTreeMap<String, f64>,
+    #[serde(default)]
+    curves: BTreeMap<String, Vec<[f32; 2]>>,
+    #[serde(default)]
+    as_shot_k: Option<f32>,
+    #[serde(default)]
+    lens_profile: Option<String>,
+    #[serde(default)]
+    base_curve_profile: Option<String>,
+    #[serde(default)]
+    base_curve_points: Option<Vec<[f32; 2]>>,
+    #[serde(default)]
+    lut_chain: Option<Vec<LutLayer>>,
+    /// 旧格式的单支选择（只读兼容）。
+    #[serde(default)]
+    lut_id: Option<String>,
+    #[serde(default)]
+    lut_enabled: Option<bool>,
+    #[serde(default)]
+    lens_enabled: Option<bool>,
+    #[serde(default)]
+    nr_method: Option<NrMethod>,
+    #[serde(default)]
+    geometry: Option<EditGeometry>,
+    #[serde(default)]
+    auto_adjust: Option<AutoAdjustBaseline>,
+    /// 默认层之外的层；空 = 只有默认层（旧数据全是这种）。
+    #[serde(default)]
+    areas: Vec<Area>,
+    #[serde(default)]
+    default_index: Option<u8>,
+}
+
+/// **序列化的唯一入口**：字段顺序与旧版逐字一致，且「单层 @100% 且开着」会被写成
+/// 旧的 `lut_id` 形状 —— 于是**已有数据的 profile 哈希逐字节不变**（定稿的 `profile_hash`
+/// 就是对这些字节做的 FNV，改了字段就会让所有旧定稿「哈希对不上」）。
+#[derive(serde::Serialize)]
+struct DevelopStackOut<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    color: Option<&'a crate::color::PhotoColorState>,
+    source_base: EditBase,
+    params: &'a BTreeMap<String, f64>,
+    curves: &'a BTreeMap<String, Vec<[f32; 2]>>,
+    as_shot_k: Option<f32>,
+    lens_profile: Option<&'a str>,
+    base_curve_profile: Option<&'a str>,
+    base_curve_points: Option<&'a Vec<[f32; 2]>>,
+    /// 旧形状：**只有**「整条链等价于单支」时才有值（见 [`legacy_lut_id`]）。
+    lut_id: Option<&'a str>,
+    /// 新形状：多层的链。旧形状能表达时**不写**（保证旧字节不变）。
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    lut_chain: Vec<LutLayer>,
+    lut_enabled: Option<bool>,
+    lens_enabled: Option<bool>,
+    nr_method: Option<NrMethod>,
+    geometry: Option<EditGeometry>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    auto_adjust: Option<&'a AutoAdjustBaseline>,
+    /// 退化（只有默认层）时**不写**，旧字节因此逐字不变。
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    areas: &'a Vec<Area>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    default_index: Option<u8>,
+}
+
+/// 这条链能不能用旧的「单支 `lut_id`」形状表达（单层、开、强度 100%）。
+fn legacy_lut_id(chain: &[LutLayer]) -> Option<&str> {
+    match chain {
+        [layer] if layer.enabled && layer.strength == 1.0 => {
+            Some(layer.id.as_str())
+        }
+        [] => None,
+        _ => None,
+    }
+}
+
+impl serde::Serialize for DevelopStack {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let legacy = legacy_lut_id(&self.lut_chain);
+        DevelopStackOut {
+            color: self.color.as_ref(),
+            source_base: self.source_base,
+            params: &self.params,
+            curves: &self.curves,
+            as_shot_k: self.as_shot_k,
+            lens_profile: self.lens_profile.as_deref(),
+            base_curve_profile: self.base_curve_profile.as_deref(),
+            base_curve_points: self.base_curve_points.as_ref(),
+            lut_id: legacy,
+            lut_chain: if legacy.is_some() {
+                Vec::new()
+            } else {
+                self.lut_chain.clone()
+            },
+            lut_enabled: self.lut_enabled,
+            lens_enabled: self.lens_enabled,
+            nr_method: self.nr_method,
+            geometry: self.geometry,
+            auto_adjust: self.auto_adjust.as_ref(),
+            areas: &self.areas,
+            default_index: self.default_index,
+        }
+        .serialize(serializer)
+    }
+}
+
+impl TryFrom<DevelopStackWire> for DevelopStack {
+    type Error = String;
+
+    fn try_from(wire: DevelopStackWire) -> Result<Self, Self::Error> {
+        // 与 `DevelopStackDto::into_stack` 同一口径：未知 source_base 是坏数据，
+        // 不能静默变成 RAW（那会把一张 SOOC 编辑栈悄悄换成另一条管线）。
+        let source_base = wire.source_base.as_deref().map_or(Ok(EditBase::Raw), |text| {
+            EditBase::parse(text).ok_or_else(|| format!("未知的 issue 源：{text}"))
+        })?;
+        let has_lut_chain = wire.lut_chain.is_some();
+        let mut stack = Self {
+            color: wire.color,
+            source_base,
+            params: wire.params,
+            curves: wire.curves,
+            as_shot_k: wire.as_shot_k,
+            lens_profile: wire.lens_profile,
+            base_curve_profile: wire.base_curve_profile,
+            base_curve_points: wire.base_curve_points,
+            lut_chain: wire.lut_chain.unwrap_or_default(),
+            lut_enabled: wire.lut_enabled,
+            lens_enabled: wire.lens_enabled,
+            nr_method: wire.nr_method,
+            geometry: wire.geometry,
+            auto_adjust: wire.auto_adjust,
+            areas: wire.areas,
+            default_index: wire.default_index,
+        };
+        // 只有「字段根本不存在」才按旧格式并入；显式写了空链 = 新数据已经决定不用 LUT。
+        if !has_lut_chain {
+            stack.adopt_legacy_lut(wire.lut_id);
+        }
+        Ok(stack)
+    }
 }
 
 impl DevelopStack {
+    /// 旧数据（`lut_id` 单支 + `lut_enabled`）并入链。**只在本模块的装载口调用**：
+    /// [`DevelopStackWire`]（所有反序列化）与 [`load`]（DB）。
+    fn adopt_legacy_lut(&mut self, legacy_id: Option<String>) {
+        if self.lut_chain.is_empty()
+            && let Some(id) = legacy_id.filter(|id| !id.is_empty())
+        {
+            self.lut_chain.push(LutLayer::new(id));
+        }
+    }
+
+    /// 下一个控制点该用哪个颜色槽位：**取已用得最少的那个**，并列时取下标最小的。
+    ///
+    /// 只数 `Point` 层（全图层不画标记、不占颜色）。算法刻意做成"最简单的一种"：
+    /// 不需要记住上次用了谁，删掉几个点之后再建也自然均衡。
+    #[must_use]
+    pub fn next_point_color(&self) -> u8 {
+        let mut used = [0usize; POINT_COLORS];
+        for area in &self.areas {
+            if matches!(area.kind, AreaKind::Point { .. }) {
+                used[usize::from(area.color) % POINT_COLORS] += 1;
+            }
+        }
+        let mut best = 0usize;
+        for slot in 1..POINT_COLORS {
+            if used[slot] < used[best] {
+                best = slot;
+            }
+        }
+        #[allow(clippy::cast_possible_truncation)]
+        {
+            best as u8
+        }
+    }
+
+    /// 这一份栈在**当前编辑基准**下要计算的额外层。
+    ///
+    /// SOOC（相机直出位图）没有 RAW 取样前提，控制点**整层旁路**；
+    /// 全图层不受影响。层数据一个字不改，切回 RAW 即恢复。
+    /// 编辑器帧、缩略图、定稿与导出都必须走这里，不能只在前端载荷里拦一次。
+    #[must_use]
+    pub fn area_specs(&self) -> Vec<crate::develop::AreaSpec> {
+        self.areas
+            .iter()
+            .map(|area| {
+                let mut spec = area.to_spec();
+                if self.source_base == EditBase::Sooc
+                    && matches!(area.kind, AreaKind::Point { .. })
+                {
+                    spec.enabled = false;
+                }
+                spec
+            })
+            .collect()
+    }
+
+    /// 这一份栈现在真的要套 LUT 吗（总开关开 **且** 至少一层开着）。
+    #[must_use]
+    pub fn lut_chain_active(&self) -> bool {
+        self.lut_enabled == Some(true)
+            && self
+                .lut_chain
+                .iter()
+                .any(|layer| layer.enabled && layer.strength.is_finite() && layer.strength > 0.0)
+    }
+
     /// 完整编辑栈校验；交互保存、定稿读回和 XMP 共用，写入前调用。
     pub fn validate(&self) -> Result<()> {
         if let Some(color) = &self.color { color.validate_frozen().map_err(|e| Error::Unsupported(e.into()))?; }
@@ -135,15 +636,28 @@ impl DevelopStack {
                 .map_err(|e| Error::Unsupported(format!("曲线 {channel} 不合法：{e}")))?;
         }
 
-        if self
-            .lut_id
-            .as_ref()
-            .is_some_and(|id| id.is_empty() || id.len() > 128 || id.contains(['/', '\\']))
-        {
-            return Err(Error::Unsupported("LUT ID 不合法".into()));
+        if self.lut_chain.len() > MAX_LUT_LAYERS {
+            return Err(Error::Unsupported(format!(
+                "LUT 链最多 {MAX_LUT_LAYERS} 层"
+            )));
         }
-        if self.lut_enabled == Some(true) && self.lut_id.is_none() {
-            return Err(Error::Unsupported("启用 LUT 时必须选择 LUT".into()));
+        for layer in &self.lut_chain {
+            if !layer.valid() {
+                return Err(Error::Unsupported(
+                    "LUT 层不合法：ID 为空/过长/含路径分隔符，或强度不在 0..=1".into(),
+                ));
+            }
+        }
+        for (index, layer) in self.lut_chain.iter().enumerate() {
+            if self.lut_chain[..index]
+                .iter()
+                .any(|other| other.id == layer.id)
+            {
+                return Err(Error::Unsupported("同一支 LUT 不能在链里出现两次".into()));
+            }
+        }
+        if self.lut_enabled == Some(true) && self.lut_chain.is_empty() {
+            return Err(Error::Unsupported("启用 LUT 时链不能为空".into()));
         }
         match (
             self.base_curve_profile.as_deref(),
@@ -164,6 +678,25 @@ impl DevelopStack {
         {
             return Err(Error::Unsupported("成片几何不合法".into()));
         }
+
+        // ② 编辑区：上限、ID 唯一、每层自洽、默认层位置落得进列表
+        if self.areas.len() > MAX_AREAS {
+            return Err(Error::Unsupported(format!("编辑区最多 {MAX_AREAS} 层")));
+        }
+        for area in &self.areas {
+            area.valid()?;
+        }
+        for (index, area) in self.areas.iter().enumerate() {
+            if self.areas[..index].iter().any(|other| other.id == area.id) {
+                return Err(Error::Unsupported("同一张照片里层 ID 不能重复".into()));
+            }
+        }
+        if let Some(index) = self.default_index {
+            let layers = self.areas.len() + 1;
+            if usize::from(index) >= layers {
+                return Err(Error::Unsupported("默认层的位置超出了层列表".into()));
+            }
+        }
         Ok(())
     }
 
@@ -175,9 +708,10 @@ impl DevelopStack {
     pub fn is_empty(&self) -> bool {
         self.color.is_none() && self.params.is_empty()
             && self.curves.is_empty()
+            && self.areas.is_empty()
             && self.lens_profile.is_none()
             && self.base_curve_profile.is_none()
-            && self.lut_id.is_none()
+            && self.lut_chain.is_empty()
             && self.lut_enabled != Some(true)
             && self.lens_enabled != Some(false)
             && self.nr_method.is_none_or(NrMethod::is_default)
@@ -191,7 +725,7 @@ impl DevelopStack {
             + self.curves.len()
             + usize::from(self.lens_profile.is_some())
             + usize::from(self.base_curve_profile.is_some())
-            + usize::from(self.lut_id.is_some())
+            + usize::from(!self.lut_chain.is_empty())
             + usize::from(self.lens_enabled == Some(false))
             + usize::from(self.nr_method.is_some_and(|method| !method.is_default()))
             + usize::from(
@@ -241,7 +775,21 @@ impl DevelopStack {
             }
         }
         text.push('|');
-        text.push_str(self.lut_id.as_deref().unwrap_or("-"));
+        // 旧形状（单支 @100% / 空）**逐字照旧**，否则已有缩略图缓存与定稿签名全部失效。
+        if let Some(id) = legacy_lut_id(&self.lut_chain) {
+            text.push_str(id);
+        } else if self.lut_chain.is_empty() {
+            text.push('-');
+        } else {
+            for layer in &self.lut_chain {
+                text.push_str(&format!(
+                    "#{}{}{:.5};",
+                    layer.id,
+                    if layer.enabled { "+" } else { "-" },
+                    layer.strength
+                ));
+            }
+        }
         text.push(if self.lut_enabled == Some(true) {
             '1'
         } else {
@@ -270,6 +818,35 @@ impl DevelopStack {
             text.push_str("|color:");
             text.push_str(&serde_json::to_string(color).expect("finite color identity"));
         }
+        // 层：**只有出现额外层时才续写**，否则旧签名逐字不变（缓存不失效）。
+        if !self.areas.is_empty() {
+            text.push_str("|areas:");
+            text.push_str(&format!("d{}:", self.default_index.unwrap_or(0)));
+            for area in &self.areas {
+                text.push_str(&format!(
+                    "#{}/{}{}{:.4};",
+                    area.id,
+                    match area.kind {
+                        AreaKind::Full => "full".to_string(),
+                        AreaKind::Point { x, y, tolerance, .. } => {
+                            format!("pt{x:.4},{y:.4},{tolerance:.4}")
+                        }
+                    },
+                    if area.enabled { "+" } else { "-" },
+                    area.opacity
+                ));
+                for (id, value) in &area.params {
+                    text.push_str(&format!("{id}={value:.6};"));
+                }
+                for (channel, points) in &area.curves {
+                    text.push_str(channel);
+                    text.push(':');
+                    for point in points {
+                        text.push_str(&format!("{:.4},{:.4};", point[0], point[1]));
+                    }
+                }
+            }
+        }
         // FNV-1a（64 位）：短、稳定、够散 —— 这里不需要密码学强度
         let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
         for byte in text.as_bytes() {
@@ -288,7 +865,7 @@ pub fn load(conn: &Connection, asset_id: i64) -> Result<DevelopStack> {
     let row = conn
         .query_row(
             "SELECT as_shot_k, lens_profile, lens_enabled, nr_method, source_base, edit_geometry, \
-                    base_curve_profile, base_curve_points, lut_id, lut_enabled, auto_adjust, color_state FROM develop_stacks WHERE asset_id = ?1",
+                    base_curve_profile, base_curve_points, lut_id, lut_enabled, lut_chain, auto_adjust, color_state, areas FROM develop_stacks WHERE asset_id = ?1",
             [asset_id],
             |row| {
                 Ok((
@@ -304,6 +881,8 @@ pub fn load(conn: &Connection, asset_id: i64) -> Result<DevelopStack> {
                     row.get::<_, Option<i64>>(9)?,
                     row.get::<_, Option<String>>(10)?,
                     row.get::<_, Option<String>>(11)?,
+                    row.get::<_, Option<String>>(12)?,
+                    row.get::<_, Option<String>>(13)?,
                 ))
             },
         )
@@ -320,8 +899,10 @@ pub fn load(conn: &Connection, asset_id: i64) -> Result<DevelopStack> {
         base_curve_json,
         lut_id,
         lut_enabled,
+        lut_chain_json,
         auto_adjust,
         color_state,
+        areas_json,
     )) = row
     {
         stack.color = color_state.map(|json| serde_json::from_str::<crate::color::PhotoColorState>(&json)
@@ -335,8 +916,18 @@ pub fn load(conn: &Connection, asset_id: i64) -> Result<DevelopStack> {
         }
         stack.lens_profile = lens_profile;
         stack.base_curve_profile = base_curve_profile;
-        stack.lut_id = lut_id;
         stack.lut_enabled = lut_enabled.map(|value| value != 0);
+        let has_lut_chain = lut_chain_json.is_some();
+        stack.lut_chain = lut_chain_json
+            .map(|json| {
+                serde_json::from_str::<Vec<LutLayer>>(&json)
+                    .map_err(|error| Error::Unsupported(format!("LUT 链数据坏了：{error}")))
+            })
+            .transpose()?
+            .unwrap_or_default();
+        if !has_lut_chain {
+            stack.adopt_legacy_lut(lut_id);
+        }
         stack.base_curve_points = base_curve_json
             .map(|json| {
                 serde_json::from_str::<Vec<[f32; 2]>>(&json)
@@ -362,6 +953,31 @@ pub fn load(conn: &Connection, asset_id: i64) -> Result<DevelopStack> {
                     .map_err(|error| Error::Unsupported(format!("成片几何数据坏了：{error}")))
             })
             .transpose()?;
+        if let Some(json) = areas_json {
+            let mut blob: AreasBlob = serde_json::from_str(&json)
+                .map_err(|error| Error::Unsupported(format!("编辑区数据坏了：{error}")))?;
+            /*
+             * **旧容差的数值域换算**（2026-11-01 前存的是 `0..1` 的分数）：
+             * 读进来的那一刻换成 `100..1000`，下次落库就写成新口径 ——
+             * 只在内存里换算，不动历史记录（旧库不会被无谓改写）。
+             *
+             * 种子的定义也换过一次（线性域 → 感知域），但**没法换算**：
+             * 旧 `seed_version = 0` 留给前端逐个重新取样（位置不变）。
+             */
+            for area in &mut blob.areas {
+                if let AreaKind::Point { tolerance, .. } = &mut area.kind
+                    && tolerance.is_finite()
+                    && *tolerance <= 1.0
+                {
+                    *tolerance = crate::develop::areas::TOLERANCE_MIN
+                        + tolerance.max(0.0)
+                            * (crate::develop::areas::TOLERANCE_MAX
+                                - crate::develop::areas::TOLERANCE_MIN);
+                }
+            }
+            stack.areas = blob.areas;
+            stack.default_index = blob.default_index;
+        }
     }
 
     let mut statement =
@@ -464,11 +1080,30 @@ pub fn save(conn: &Connection, asset_id: i64, stack: &DevelopStack, now_ms: i64)
      * 源尺寸未知（老库未回填）就写 NULL，消费方按 `store::sizes` 的回退链拿。
      */
     let output = crate::store::sizes::stack_output_size(conn, asset_id, stack)?;
+    let areas_json = if stack.areas.is_empty() {
+        None
+    } else {
+        Some(
+            serde_json::to_string(&AreasBlob {
+                default_index: stack.default_index,
+                areas: stack.areas.clone(),
+            })
+            .map_err(|error| Error::Unsupported(format!("编辑区序列化失败：{error}")))?,
+        )
+    };
+    let lut_chain_json = if stack.lut_chain.is_empty() {
+        None
+    } else {
+        Some(
+            serde_json::to_string(&stack.lut_chain)
+                .map_err(|error| Error::Unsupported(format!("LUT 链序列化失败：{error}")))?,
+        )
+    };
     conn.execute(
         "UPDATE develop_stacks SET as_shot_k = ?2, lens_profile = ?3, lens_enabled = ?4, \
          nr_method = ?5, source_base = ?6, edit_geometry = ?7, base_curve_profile = ?8, \
-         base_curve_points = ?9, lut_id = ?10, lut_enabled = ?11, auto_adjust = ?12, color_state = ?13, \
-         output_width = ?14, output_height = ?15 WHERE asset_id = ?1",
+         base_curve_points = ?9, lut_chain = ?10, lut_id = NULL, lut_enabled = ?11, auto_adjust = ?12, color_state = ?13, \
+         output_width = ?14, output_height = ?15, areas = ?16 WHERE asset_id = ?1",
         rusqlite::params![
             asset_id,
             stack.as_shot_k.map(f64::from),
@@ -492,7 +1127,7 @@ pub fn save(conn: &Connection, asset_id: i64, stack: &DevelopStack, now_ms: i64)
                 .map(serde_json::to_string)
                 .transpose()
                 .map_err(|error| Error::Unsupported(format!("基础曲线序列化失败：{error}")))?,
-            stack.lut_id,
+            lut_chain_json,
             stack.lut_enabled.map(i64::from),
             stack.auto_adjust.as_ref().map(serde_json::to_string).transpose()
                 .map_err(|error| Error::Unsupported(format!("自动调整基线序列化失败：{error}")))?,
@@ -500,6 +1135,7 @@ pub fn save(conn: &Connection, asset_id: i64, stack: &DevelopStack, now_ms: i64)
                 .map_err(|error| Error::Unsupported(format!("色彩状态序列化失败：{error}")))?,
             output.map(|(width, _)| i64::from(width)),
             output.map(|(_, height)| i64::from(height)),
+            areas_json,
         ],
     )?;
 
@@ -650,6 +1286,332 @@ pub fn set_curve(
     Ok(())
 }
 
+/* ══════════════════════════════════════════════════════════════
+ * 编辑区（area）的写入口（W3）
+ * ══════════════════════════════════════════════════════════════ */
+
+/// 一次「读栈 → 改 → 校验 → 落库」的公共外壳。
+///
+/// 所有层写入口都走它：截上限、结构校验、`default_index` 的合法性只在
+/// [`DevelopStack::validate`] 里判一次（不在每个入口各抄一遍）。
+fn mutate_stack(
+    conn: &Connection,
+    asset_id: i64,
+    now_ms: i64,
+    change: impl FnOnce(&mut DevelopStack) -> Result<()>,
+) -> Result<()> {
+    let mut stack = load(conn, asset_id)?;
+    change(&mut stack)?;
+    stack.validate()?;
+    save(conn, asset_id, &stack, now_ms)?;
+    Ok(())
+}
+
+/// 层列表 → **行序**（`None` = 默认层，`Some(id)` = 附加层）。
+///
+/// 界面上看到的就是这个顺序（列表自上而下 = 计算顺序），结构类撤销操作的
+/// `from` / `to` / `index` 一律是它的下标。
+#[must_use]
+pub fn area_rows(stack: &DevelopStack) -> Vec<Option<u32>> {
+    let default_index = stack.default_index.map_or(0, usize::from);
+    let mut rows = Vec::with_capacity(stack.areas.len() + 1);
+    let mut areas = stack.areas.iter();
+    for position in 0..stack.areas.len() + 1 {
+        if position == default_index {
+            rows.push(None);
+        } else if let Some(area) = areas.next() {
+            rows.push(Some(area.id));
+        }
+    }
+    rows
+}
+
+/// 行序 → `(areas, default_index)`（[`area_rows`] 的逆）。
+fn rows_to_stack(rows: &[Option<u32>], stack: &mut DevelopStack) -> Result<()> {
+    let mut areas = Vec::with_capacity(stack.areas.len());
+    let mut default_index = None;
+    for (position, row) in rows.iter().enumerate() {
+        match row {
+            None => default_index = Some(position),
+            Some(id) => {
+                let Some(area) = stack.areas.iter().find(|area| area.id == *id) else {
+                    return Err(Error::Unsupported(format!("撤销栈里的层 {id} 不在编辑栈里")));
+                };
+                areas.push(area.clone());
+            }
+        }
+    }
+    if areas.len() != stack.areas.len() {
+        return Err(Error::Unsupported("编辑区行序与层列表对不上".into()));
+    }
+    #[allow(clippy::cast_possible_truncation)]
+    {
+        stack.default_index = default_index.map(|index| index as u8);
+    }
+    stack.areas = areas;
+    Ok(())
+}
+
+fn area_index(stack: &DevelopStack, id: u32) -> Result<usize> {
+    stack
+        .areas
+        .iter()
+        .position(|area| area.id == id)
+        .ok_or_else(|| Error::Unsupported(format!("编辑栈里没有层 {id}")))
+}
+
+/// 写**一层**里的一个参数（`area_id = None` ⇒ 默认层，走原来的入口）。
+///
+/// # Errors
+/// 层不存在 / 参数非法 / 全局参数写进非默认层 / 数据库写失败。
+pub fn set_area_param(
+    conn: &Connection,
+    asset_id: i64,
+    area_id: Option<u32>,
+    param_id: &str,
+    value: Option<f64>,
+    now_ms: i64,
+) -> Result<()> {
+    let Some(area_id) = area_id else {
+        return set_param(conn, asset_id, param_id, value, now_ms);
+    };
+    let Some(spec) = spec(param_id) else {
+        return Err(Error::Unsupported(format!("未知的显影参数：{param_id}")));
+    };
+    if spec.target == crate::develop::params::ParamTarget::Global {
+        return Err(Error::Unsupported(format!(
+            "{param_id} 是全局阶段参数，只能挂在默认层"
+        )));
+    }
+    if spec.target == crate::develop::params::ParamTarget::Mask {
+        return Err(Error::Unsupported(format!("{param_id} 由掩膜自己管，不能写进层参数")));
+    }
+    if let Some(value) = value
+        && !spec.accepts(value)
+    {
+        return Err(Error::Unsupported(format!(
+            "参数 {param_id} 的值非法：{value}（允许 {}..{}）",
+            spec.min, spec.max
+        )));
+    }
+    mutate_stack(conn, asset_id, now_ms, |stack| {
+        let index = area_index(stack, area_id)?;
+        match value {
+            Some(value) => {
+                stack.areas[index].params.insert(param_id.to_string(), value);
+            }
+            None => {
+                stack.areas[index].params.remove(param_id);
+            }
+        }
+        Ok(())
+    })
+}
+
+/// 写**一层**里的一条曲线（`area_id = None` ⇒ 默认层）。
+///
+/// # Errors
+/// 层不存在 / 通道未知 / 控制点不合法 / 数据库写失败。
+pub fn set_area_curve(
+    conn: &Connection,
+    asset_id: i64,
+    area_id: Option<u32>,
+    channel: &str,
+    points: Option<&[[f32; 2]]>,
+    now_ms: i64,
+) -> Result<()> {
+    let Some(area_id) = area_id else {
+        return set_curve(conn, asset_id, channel, points, now_ms);
+    };
+    if CurveChannel::parse(channel).is_none() {
+        return Err(Error::Unsupported(format!("未知的曲线通道：{channel}")));
+    }
+    if let Some(points) = points {
+        Curve::from_points(points.to_vec())
+            .map_err(|e| Error::Unsupported(format!("曲线 {channel} 不合法：{e}")))?;
+    }
+    mutate_stack(conn, asset_id, now_ms, |stack| {
+        let index = area_index(stack, area_id)?;
+        match points {
+            Some(points) => {
+                stack.areas[index]
+                    .curves
+                    .insert(channel.to_string(), points.to_vec());
+            }
+            None => {
+                stack.areas[index].curves.remove(channel);
+            }
+        }
+        Ok(())
+    })
+}
+
+/// 在第 `index` 行插入一层（`None` = 追加到末尾）。
+///
+/// # Errors
+/// 层 JSON 坏 / 层数超限（`validate` 会拒）/ 数据库写失败。
+pub fn add_area(
+    conn: &Connection,
+    asset_id: i64,
+    index: Option<usize>,
+    area_json: &str,
+    now_ms: i64,
+) -> Result<()> {
+    let area: Area = serde_json::from_str(area_json)
+        .map_err(|e| Error::Unsupported(format!("撤销栈里的层数据坏了：{e}")))?;
+    mutate_stack(conn, asset_id, now_ms, |stack| {
+        let mut rows = area_rows(stack);
+        let position = index.unwrap_or(rows.len()).min(rows.len());
+        rows.insert(position, Some(area.id));
+        // 层本体先放进列表（`rows_to_stack` 按 id 回填顺序）
+        stack.areas.push(area);
+        rows_to_stack(&rows, stack)?;
+        if stack.default_index.is_none() {
+            stack.default_index = Some(0);
+        }
+        Ok(())
+    })
+}
+
+/// 删掉第 `index` 行的那一层。
+///
+/// # Errors
+/// 行下标越界 / 那里是默认层（默认层不可删）/ 数据库写失败。
+pub fn remove_area(conn: &Connection, asset_id: i64, index: usize, now_ms: i64) -> Result<()> {
+    mutate_stack(conn, asset_id, now_ms, |stack| {
+        let rows = area_rows(stack);
+        let Some(row) = rows.get(index).copied() else {
+            return Err(Error::Unsupported("要删的层不在列表里".into()));
+        };
+        let Some(id) = row else {
+            return Err(Error::Unsupported("默认层不能删除".into()));
+        };
+        let at = area_index(stack, id)?;
+        stack.areas.remove(at);
+        Ok(())
+    })
+}
+
+/// 把第 `from` 行移到第 `to` 行（拖动排序）。
+///
+/// 行序含默认层 —— 把默认层拖到别的位置就是「LUT 在这个全图层之后」。
+///
+/// # Errors
+/// 行下标越界 / 数据库写失败。
+pub fn move_area(conn: &Connection, asset_id: i64, from: usize, to: usize, now_ms: i64) -> Result<()> {
+    mutate_stack(conn, asset_id, now_ms, |stack| {
+        let mut rows = area_rows(stack);
+        if from >= rows.len() || to >= rows.len() {
+            return Err(Error::Unsupported("层排序的下标越界".into()));
+        }
+        if from == to {
+            return Ok(());
+        }
+        let row = rows.remove(from);
+        rows.insert(to, row);
+        rows_to_stack(&rows, stack)
+    })
+}
+
+/// 改层名（空串 = 回到类型默认名）。
+///
+/// # Errors
+/// 层不存在 / 名字超长（`validate` 会拒）/ 数据库写失败。
+pub fn rename_area(conn: &Connection, asset_id: i64, id: u32, name: &str, now_ms: i64) -> Result<()> {
+    mutate_stack(conn, asset_id, now_ms, |stack| {
+        let index = area_index(stack, id)?;
+        stack.areas[index].name = name.to_string();
+        Ok(())
+    })
+}
+
+/// 层的启停。
+///
+/// # Errors
+/// 层不存在 / 数据库写失败。
+pub fn toggle_area(
+    conn: &Connection,
+    asset_id: i64,
+    id: u32,
+    enabled: bool,
+    now_ms: i64,
+) -> Result<()> {
+    mutate_stack(conn, asset_id, now_ms, |stack| {
+        let index = area_index(stack, id)?;
+        stack.areas[index].enabled = enabled;
+        Ok(())
+    })
+}
+
+/// 控制点的颜色槽位。
+///
+/// # Errors
+/// 层不存在 / 槽位越界 / 数据库写失败。
+pub fn set_area_color(conn: &Connection, asset_id: i64, id: u32, color: u8, now_ms: i64) -> Result<()> {
+    mutate_stack(conn, asset_id, now_ms, |stack| {
+        let index = area_index(stack, id)?;
+        stack.areas[index].color = color;
+        Ok(())
+    })
+}
+
+/// 控制点的采样位 / 种子 / 容差（`[x, y, seed0, seed1, seed2, tolerance]`）。
+///
+/// 六个数一起写：落点（位置 + 种子）与拖 handle（容差）都是同一组事实的一部分，
+/// 分成两个入口只会让撤销栈里多出「一半旧、一半新」的中间态。
+///
+/// # Errors
+/// 层不存在 / 不是控制点 / 数值非法 / 数据库写失败。
+pub fn set_area_point(
+    conn: &Connection,
+    asset_id: i64,
+    id: u32,
+    values: [f32; 6],
+    now_ms: i64,
+) -> Result<()> {
+    mutate_stack(conn, asset_id, now_ms, |stack| {
+        let index = area_index(stack, id)?;
+        let AreaKind::Point { x, y, seed, tolerance } = &mut stack.areas[index].kind else {
+            return Err(Error::Unsupported("只有控制点有采样位与容差".into()));
+        };
+        *x = values[0];
+        *y = values[1];
+        seed[0] = values[2];
+        seed[1] = values[3];
+        seed[2] = values[4];
+        *tolerance = values[5];
+        Ok(())
+    })
+}
+
+/// 控制点的六个数 → `[u32; 6]` 位模式（撤销栈要 `Eq`，f32 没有）。
+#[must_use]
+pub fn point_bits(values: [f32; 6]) -> [u32; 6] {
+    values.map(f32::to_bits)
+}
+
+/// 位模式 → 六个 f32（[`point_bits`] 的逆）。
+#[must_use]
+pub fn point_from_bits(bits: [u32; 6]) -> [f32; 6] {
+    bits.map(f32::from_bits)
+}
+
+/// 控制点的六个数（层不是控制点 ⇒ `None`）。
+#[must_use]
+pub fn area_point(area: &Area) -> Option<[f32; 6]> {
+    match area.kind {
+        AreaKind::Point { x, y, seed, tolerance } => Some([
+            x,
+            y,
+            seed[0],
+            seed[1],
+            seed[2],
+            tolerance,
+        ]),
+        AreaKind::Full => None,
+    }
+}
+
 /// 编辑栈里**不是参数也不是曲线**的那几项（M3-W4）。
 ///
 /// 它们共用一种撤销操作（[`crate::store::marking::Op::DevelopSetting`]）：
@@ -663,9 +1625,9 @@ pub enum Setting {
     BaseCurveProfile,
     /// 被选档案的曲线快照，与选择一同撤销。
     BaseCurvePoints,
-    /// 应用级 LUT ID。
-    LutId,
-    /// LUT 开关。
+    /// 应用级 LUT **链**（JSON 数组：`[{id, enabled, strength}]`）。
+    LutChain,
+    /// LUT 总开关。
     LutEnabled,
     /// 镜头配置文件（`None` = 没动过；`"none"` = 显式清除配置；否则是 `maker|model`）
     LensProfile,
@@ -688,7 +1650,7 @@ impl Setting {
             Self::AutoAdjust => "autoAdjust",
             Self::BaseCurveProfile => "baseCurveProfile",
             Self::BaseCurvePoints => "baseCurvePoints",
-            Self::LutId => "lutId",
+            Self::LutChain => "lutChain",
             Self::LutEnabled => "lutEnabled",
             Self::LensProfile => "lensProfile",
             Self::LensEnabled => "lensEnabled",
@@ -706,7 +1668,7 @@ impl Setting {
             "autoAdjust" => Some(Self::AutoAdjust),
             "baseCurveProfile" => Some(Self::BaseCurveProfile),
             "baseCurvePoints" => Some(Self::BaseCurvePoints),
-            "lutId" => Some(Self::LutId),
+            "lutChain" | "lutId" => Some(Self::LutChain),
             "lutEnabled" => Some(Self::LutEnabled),
             "lensProfile" => Some(Self::LensProfile),
             "lensEnabled" => Some(Self::LensEnabled),
@@ -724,7 +1686,7 @@ impl Setting {
             Self::AutoAdjust => "auto_adjust",
             Self::BaseCurveProfile => "base_curve_profile",
             Self::BaseCurvePoints => "base_curve_points",
-            Self::LutId => "lut_id",
+            Self::LutChain => "lut_chain",
             Self::LutEnabled => "lut_enabled",
             Self::LensProfile => "lens_profile",
             Self::LensEnabled => "lens_enabled",
@@ -747,9 +1709,7 @@ impl Setting {
             }
             (Self::BaseCurvePoints, Some(text)) => serde_json::from_str::<Vec<[f32; 2]>>(text)
                 .is_ok_and(|points| Curve::from_points(points).is_ok()),
-            (Self::LutId, Some(text)) => {
-                !text.is_empty() && text.len() <= 128 && !text.contains(['/', '\\'])
-            }
+            (Self::LutChain, Some(text)) => parse_lut_chain_setting(text).is_some(),
             (Self::LutEnabled, Some("0" | "1")) => true,
             (Self::LutEnabled, Some(_)) => false,
             (Self::LensProfile, Some(text)) => !text.is_empty(),
@@ -787,7 +1747,13 @@ impl DevelopStack {
                 .base_curve_points
                 .as_ref()
                 .and_then(|points| serde_json::to_string(points).ok()),
-            Setting::LutId => self.lut_id.clone(),
+            Setting::LutChain => {
+                if self.lut_chain.is_empty() {
+                    None
+                } else {
+                    serde_json::to_string(&self.lut_chain).ok()
+                }
+            }
             Setting::LutEnabled => self
                 .lut_enabled
                 .map(|enabled| if enabled { "1" } else { "0" }.to_string()),
@@ -806,6 +1772,24 @@ impl DevelopStack {
                 .and_then(|geometry| serde_json::to_string(&geometry).ok()),
         }
     }
+}
+
+/// 撤销值 → 链。**同时接受**新 JSON 数组与旧版 `lutId` 的纯 id。
+///
+/// 旧撤销记录（`Op::DevelopSetting { key: "lutId", after: "film" }`）必须还能还原；
+/// 但写库永远只写新链 JSON，不会再生成第二套单支真相。
+fn parse_lut_chain_setting(text: &str) -> Option<Vec<LutLayer>> {
+    if let Ok(chain) = serde_json::from_str::<Vec<LutLayer>>(text) {
+        let unique = chain.iter().enumerate().all(|(index, layer)| {
+            !chain[..index].iter().any(|other| other.id == layer.id)
+        });
+        return (chain.len() <= MAX_LUT_LAYERS
+            && chain.iter().all(LutLayer::valid)
+            && unique)
+            .then_some(chain);
+    }
+    let layer = LutLayer::new(text);
+    layer.valid().then(|| vec![layer])
 }
 
 /// 写**一项**设置（`value = None` ⇒ 清掉 = 回到默认）。
@@ -831,14 +1815,31 @@ pub fn set_setting(
         )));
     }
     ensure_stack(conn, asset_id, now_ms)?;
-    let sql = format!(
-        "UPDATE develop_stacks SET {} = ?2 WHERE asset_id = ?1",
-        setting.column()
-    );
-    let stored = if setting == Setting::SourceBase {
-        Some(value.unwrap_or("raw"))
+    let sql = if setting == Setting::LutChain {
+        // 新链落地时同时清掉旧单支列，否则下一次 load 会把它重新并入链。
+        "UPDATE develop_stacks SET lut_chain = ?2, lut_id = NULL WHERE asset_id = ?1".to_string()
     } else {
+        format!(
+            "UPDATE develop_stacks SET {} = ?2 WHERE asset_id = ?1",
+            setting.column()
+        )
+    };
+    let normalized = if setting == Setting::LutChain {
         value
+            .map(|text| {
+                let chain = parse_lut_chain_setting(text)
+                    .ok_or_else(|| Error::Unsupported("LUT 链撤销值非法".into()))?;
+                serde_json::to_string(&chain)
+                    .map_err(|error| Error::Unsupported(format!("LUT 链序列化失败：{error}")))
+            })
+            .transpose()?
+    } else {
+        value.map(str::to_string)
+    };
+    let stored = if setting == Setting::SourceBase {
+        Some(normalized.as_deref().unwrap_or("raw"))
+    } else {
+        normalized.as_deref()
     };
     conn.execute(&sql, rusqlite::params![asset_id, stored])?;
     /*
@@ -892,6 +1893,12 @@ fn prune_empty_stack(conn: &Connection, asset_id: i64) -> Result<()> {
             AND auto_adjust IS NULL
             AND lens_profile IS NULL
             AND base_curve_profile IS NULL
+            -- 基础曲线的**快照**也是栈的一部分：撤销是逐项重放的，
+            -- 「先写 points、再写 profile」这两个中间态之间不能把整行删掉
+            -- （2026-10-31：`ChangeSet::invert` 改逆序之后暴露出来的）。
+            AND base_curve_points IS NULL
+            AND lut_chain IS NULL
+            AND areas IS NULL
             AND lut_id IS NULL
             AND (lut_enabled IS NULL OR lut_enabled = 0)
             AND nr_method IS NULL
@@ -1161,6 +2168,260 @@ mod tests {
             as_shot_k: None,
             ..DevelopStack::default()
         }
+    }
+
+    fn point_area(id: u32, color: u8, params: &[(&str, f64)]) -> Area {
+        Area {
+            id,
+            kind: AreaKind::Point {
+                x: 0.5,
+                y: 0.5,
+                seed: [0.4, -0.1, 0.05],
+                tolerance: crate::develop::areas::TOLERANCE_DEFAULT,
+            },
+            name: format!("控制点 {id}"),
+            enabled: true,
+            opacity: 1.0,
+            color,
+            params: params
+                .iter()
+                .map(|(id, value)| ((*id).to_string(), *value))
+                .collect(),
+            curves: BTreeMap::new(),
+            seed_version: SEED_VERSION,
+        }
+    }
+
+    #[test]
+    fn area_specs_disable_points_for_sooc_and_legacy_seed_versions() {
+        let mut stack = stack(&[], &[]);
+        stack.areas.push(point_area(1, 0, &[]));
+        stack.areas.push(Area {
+            id: 2,
+            kind: AreaKind::Full,
+            name: "全图".into(),
+            ..point_area(1, 0, &[])
+        });
+        stack.source_base = EditBase::Raw;
+        let raw = stack.area_specs();
+        assert!(raw[0].enabled, "RAW 下当前版本的控制点应参与计算");
+        assert!(raw[1].enabled, "全图层不受基准限制");
+
+        stack.source_base = EditBase::Sooc;
+        let sooc = stack.area_specs();
+        assert!(!sooc[0].enabled, "SOOC 下控制点必须整层旁路");
+        assert!(sooc[1].enabled, "SOOC 下全图层仍然计算");
+
+        // 旧种子不能按新定义解释：宁可暂时不生效，也不能改错区域
+        stack.source_base = EditBase::Raw;
+        stack.areas[0].seed_version = 0;
+        assert!(!stack.area_specs()[0].enabled);
+    }
+
+    /// **旧种子不拿新范围卡**（2026-11-01 真机：调容差就报「控制点…不合法」）。
+    ///
+    /// 旧种子是线性域的 `[luma, c1, c2]`，量纲/范围都跟新的 `[Y′, Cb, Cr]` 不同。
+    /// 只要还能用新范围去校验它，就会死锁：
+    /// `develop_area_seed` 先校验整栈 → 抛错 → 旧种子永远没机会重新取样 →
+    /// 每次落库都报错。这里钉住「旧种子只需要是有限数」。
+    #[test]
+    fn legacy_seed_outside_the_new_ranges_still_validates_and_bypasses() {
+        let mut area = point_area(1, 0, &[]);
+        area.seed_version = 0;
+        area.kind = AreaKind::Point {
+            x: 0.3,
+            y: 0.7,
+            // 线性域的旧值：Cb/Cr 轻松越过 ±0.5
+            seed: [1.6, 0.93, -2.1],
+            tolerance: 0.4,
+        };
+        area.valid().expect("旧种子只要求有限数，不能被新范围误杀");
+        // 渲染侧仍然整层旁路（旧种子不能按新定义解释）
+        assert!(!area.to_spec().enabled);
+
+        // 真的坏数据（NaN）照样拦
+        area.kind = AreaKind::Point {
+            x: 0.3,
+            y: 0.7,
+            seed: [f32::NAN, 0.0, 0.0],
+            tolerance: 0.4,
+        };
+        area.seed_version = 0;
+        assert!(area.valid().is_err(), "非有限的种子不能被放行");
+    }
+
+    #[test]
+    fn legacy_tolerance_is_accepted_and_mapped_to_the_new_domain() {
+        let mut area = point_area(1, 0, &[]);
+        area.kind = AreaKind::Point {
+            x: 0.4,
+            y: 0.6,
+            seed: [0.3, 0.0, 0.0],
+            tolerance: 0.2,
+        };
+        area.valid().expect("旧 0..1 容差仍应能读回");
+        let spec = area.to_spec();
+        match spec.kind {
+            crate::develop::AreaKind::Point { tolerance, .. } => {
+                assert!(
+                    (tolerance - 280.0).abs() < 1e-3,
+                    "0.2 应映射为 100 + 0.2×900 = 280（实际 {tolerance}）"
+                );
+            }
+            crate::develop::AreaKind::Full => panic!("层类型不能走样"),
+        }
+    }
+
+    /// **层要能存进去、读回来**（2026-11-01 真机：「建过 area 退出再进来只剩默认层」）。
+    ///
+    /// 这条同时钉住两件事：
+    /// * `AreasBlob` 的 `default_index` 与 `areas` 一起落库、一起读回；
+    /// * 空 `params` / `curves` 的层序列化后带 `{}`（不再是**缺字段**）——
+    ///   前端 `Object.entries(area.curves)` 才不会拿到 `undefined`。
+    #[test]
+    fn areas_roundtrip_through_the_catalog() {
+        let (conn, asset_id) = catalog_with_asset();
+        let mut stack = stack(&[], &[]);
+        stack.areas.push(point_area(3, 2, &[("exposure", 0.75)]));
+        stack.areas.push(Area {
+            id: 4,
+            kind: AreaKind::Full,
+            name: "全图 1".into(),
+            ..point_area(3, 2, &[])
+        });
+        stack.default_index = Some(1);
+        save(&conn, asset_id, &stack, 1).expect("落库");
+
+        let loaded = load(&conn, asset_id).expect("读回");
+        assert_eq!(loaded.areas.len(), 2, "层必须真的读回来");
+        assert_eq!(loaded.default_index, Some(1), "默认层位置跟着回来");
+        assert_eq!(loaded.areas[0].id, 3);
+        assert_eq!(loaded.areas[0].name, "控制点 3");
+        assert_eq!(loaded.areas[0].color, 2);
+        assert!((loaded.areas[0].params["exposure"] - 0.75).abs() < 1e-9);
+        assert!(loaded.areas[0].curves.is_empty());
+        assert!(matches!(
+            loaded.areas[0].kind,
+            AreaKind::Point { tolerance, .. }
+                if (tolerance - crate::develop::areas::TOLERANCE_DEFAULT).abs() < 1e-3
+        ));
+        assert!(matches!(loaded.areas[1].kind, AreaKind::Full), "层类型不许走样");
+
+        // 空层也要把两个映射写成 `{}`（不是省掉字段）
+        let blob: serde_json::Value = serde_json::from_str(
+            &conn
+                .query_row(
+                    "SELECT areas FROM develop_stacks WHERE asset_id = ?1",
+                    [asset_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .expect("读 blob"),
+        )
+        .expect("blob 是 JSON");
+        let empty = &blob["areas"][1];
+        assert_eq!(empty["params"], serde_json::json!({}));
+        assert_eq!(empty["curves"], serde_json::json!({}));
+    }
+
+    #[test]
+    fn areas_stay_out_of_the_legacy_serialized_form() {
+        // 不变量 1：没用到层时，序列化里**不许**出现 areas / default_index
+        let plain = stack(&[("exposure", 1.0)], &[]);
+        let json = serde_json::to_value(&plain).unwrap();
+        assert!(json.get("areas").is_none(), "退化形状不许写 areas");
+        assert!(json.get("default_index").is_none(), "退化形状不许写 default_index");
+
+        // 有额外层 ⇒ 必须写，而且能原样读回
+        let with_area = DevelopStack {
+            areas: vec![point_area(1, 0, &[("contrast", 10.0)])],
+            default_index: Some(0),
+            ..plain
+        };
+        let value = serde_json::to_value(&with_area).unwrap();
+        assert!(value.get("areas").is_some(), "有额外层必须写 areas");
+        let back: DevelopStack = serde_json::from_value(value).unwrap();
+        assert_eq!(back, with_area);
+    }
+
+    #[test]
+    fn global_params_are_rejected_inside_an_area() {
+        // 不变量 2：阶段边界 —— 全局阶段参数只能挂在默认层
+        let mut global = stack(&[], &[]);
+        global.areas.push(point_area(1, 0, &[("sharpenAmount", 10.0)]));
+        assert!(global.validate().is_err(), "清晰度是全局阶段，不能进层");
+
+        let mut lens = stack(&[], &[]);
+        lens.areas.push(point_area(1, 0, &[("vignette", 10.0)]));
+        assert!(lens.validate().is_err(), "镜头是全局阶段，不能进层");
+
+        let mut layered = stack(&[], &[]);
+        layered.areas.push(point_area(1, 0, &[("contrast", 10.0)]));
+        assert!(layered.validate().is_ok(), "反差是逐像素项，可以进层");
+    }
+
+    #[test]
+    fn areas_change_the_cache_signature() {
+        // 不变量 1 的另一半：没有额外层时签名不变（这里对同一个栈前后比），有层就变
+        let plain = stack(&[("exposure", 1.0)], &[]);
+        assert_eq!(plain.signature(), plain.clone().signature());
+        let with_area = DevelopStack {
+            areas: vec![point_area(1, 0, &[])],
+            ..plain.clone()
+        };
+        assert_ne!(plain.signature(), with_area.signature(), "多一层必须换签名");
+    }
+
+    #[test]
+    fn invalid_area_shapes_are_rejected() {
+        let mut too_many = stack(&[], &[]);
+        for id in 1..=(MAX_AREAS as u32 + 1) {
+            too_many.areas.push(point_area(id, 0, &[]));
+        }
+        assert!(too_many.validate().is_err(), "超过 32 层要拦");
+
+        let mut duplicate = stack(&[], &[]);
+        duplicate.areas.push(point_area(1, 0, &[]));
+        duplicate.areas.push(point_area(1, 1, &[]));
+        assert!(duplicate.validate().is_err(), "层 ID 重复要拦");
+
+        let mut bad_color = stack(&[], &[]);
+        bad_color.areas.push(point_area(1, 8, &[]));
+        assert!(bad_color.validate().is_err(), "颜色槽位越界要拦");
+
+        let mut bad_index = stack(&[], &[]);
+        bad_index.default_index = Some(1);
+        assert!(bad_index.validate().is_err(), "默认层位置越界要拦");
+    }
+
+    #[test]
+    fn point_colors_go_to_the_least_used_slot() {
+        let mut s = stack(&[], &[]);
+        assert_eq!(s.next_point_color(), 0, "空栈从 0 开始");
+
+        s.areas.push(point_area(1, 0, &[]));
+        assert_eq!(s.next_point_color(), 1, "0 用过一次，下一次取 1");
+
+        s.areas.push(point_area(2, 1, &[]));
+        assert_eq!(s.next_point_color(), 2);
+
+        // 全图不占颜色
+        s.areas.push(Area {
+            kind: AreaKind::Full,
+            name: "全图 1".into(),
+            ..point_area(3, 5, &[])
+        });
+        assert_eq!(s.next_point_color(), 2, "全图层不占颜色槽位");
+
+        // 0..3 各用过一次 ⇒ 下一个是最小的**没用过**的 4
+        s.areas.push(point_area(4, 2, &[]));
+        s.areas.push(point_area(5, 3, &[]));
+        assert_eq!(s.next_point_color(), 4, "0..3 各一次，取最小空闲 4");
+
+        // 八个槽位都用满之后，并列时取下标最小的
+        for (index, color) in [4u8, 5, 6, 7].into_iter().enumerate() {
+            s.areas.push(point_area(10 + index as u32, color, &[]));
+        }
+        assert_eq!(s.next_point_color(), 0, "全满后并列在 0，取下标最小的 0");
     }
 
     #[test]
@@ -1975,6 +3236,184 @@ mod tests {
         let cleared = DevelopStack::default();
         save(&conn, asset_id, &cleared, now_millis()).expect("写");
         assert!(!has_edits(&conn, asset_id).expect("查"));
+    }
+
+    #[test]
+    fn legacy_single_lut_is_normalized_into_the_chain() {
+        // 旧 JSON（单支 `lut_id`）→ 一层 @100%。反序列化是唯一入口，所以 XMP / issue / preset 全都吃到。
+        let legacy: DevelopStack = serde_json::from_str(
+            r#"{"source_base":"raw","params":{},"curves":{},"lut_id":"film","lut_enabled":true}"#,
+        )
+        .unwrap();
+        assert_eq!(legacy.lut_chain, vec![LutLayer::new("film")]);
+        assert!(legacy.lut_chain_active());
+        // 已经有多层链时，旧字段不覆盖它（不会被再插一层）。
+        let both: DevelopStack = serde_json::from_str(
+            r#"{"lut_id":"old","lut_chain":[{"id":"a","enabled":true,"strength":1.0}]}"#,
+        )
+        .unwrap();
+        assert_eq!(both.lut_chain.len(), 1);
+        assert_eq!(both.lut_chain[0].id, "a");
+        // 显式空链已经是新语义，不能再被旧的 lut_id 复活。
+        let cleared: DevelopStack = serde_json::from_str(r#"{"lut_id":"old","lut_chain":[]}"#).unwrap();
+        assert!(cleared.lut_chain.is_empty());
+    }
+
+    #[test]
+    fn single_layer_at_full_strength_keeps_the_legacy_json_and_signature() {
+        // 定稿哈希就是对这份 JSON 做的 FNV：老数据（单支 @100%）必须逐字不变。
+        let mut stack = DevelopStack::default();
+        stack.lut_chain = vec![LutLayer::new("film")];
+        let text = serde_json::to_string(&stack).unwrap();
+        assert!(text.contains(r#""lut_id":"film""#), "{text}");
+        assert!(!text.contains("lut_chain"), "{text}");
+        let empty = serde_json::to_string(&DevelopStack::default()).unwrap();
+        assert!(empty.contains(r#""lut_id":null"#), "{empty}");
+        // 多层 / 改强度才换形状。
+        let mut multi = stack.clone();
+        multi.lut_chain.push(LutLayer::new("warm"));
+        let text = serde_json::to_string(&multi).unwrap();
+        assert!(text.contains("lut_chain"), "{text}");
+        assert!(!text.contains(r#""lut_id":"film""#), "{text}");
+    }
+
+    #[test]
+    fn wire_rejects_unknown_source_base_and_tolerates_null_chain() {
+        let error = serde_json::from_str::<DevelopStack>(
+            r#"{"source_base":"not-a-base","params":{},"curves":{}}"#,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("未知的 issue 源"), "{error}");
+        // IPC / preset 可能直接带 null（Option 的形状），不能因此让整份 profile 读不出来。
+        let stack: DevelopStack = serde_json::from_str(
+            r#"{"source_base":"raw","lut_chain":null,"params":{},"curves":{}}"#,
+        )
+        .unwrap();
+        assert!(stack.lut_chain.is_empty());
+    }
+
+    #[test]
+    fn zero_strength_chain_is_not_active() {
+        let mut stack = DevelopStack::default();
+        stack.lut_enabled = Some(true);
+        stack.lut_chain = vec![LutLayer {
+            id: "film".into(),
+            enabled: true,
+            strength: 0.0,
+        }];
+        assert!(!stack.lut_chain_active(), "0% 强度等于没有 LUT，不应让导出报缺文件");
+        stack.lut_chain[0].strength = 0.5;
+        assert!(stack.lut_chain_active());
+    }
+
+    #[test]
+    fn chain_validation_rejects_empty_duplicate_and_too_many_layers() {
+        let mut stack = DevelopStack::default();
+        stack.lut_chain = vec![LutLayer::new("a")];
+        assert!(stack.validate().is_ok());
+        // 重复
+        stack.lut_chain = vec![LutLayer::new("a"), LutLayer::new("a")];
+        assert!(stack.validate().is_err(), "同一支不能出现两次");
+        // 超上限
+        stack.lut_chain = (0..=MAX_LUT_LAYERS).map(|i| LutLayer::new(format!("l{i}"))).collect();
+        assert!(stack.validate().is_err(), "最多 {MAX_LUT_LAYERS} 层");
+        // 强度越界 / 非法 id
+        let mut bad = DevelopStack::default();
+        bad.lut_chain = vec![LutLayer { id: "a".into(), enabled: true, strength: 1.5 }];
+        assert!(bad.validate().is_err());
+        bad.lut_chain = vec![LutLayer { id: "a/b".into(), enabled: true, strength: 1.0 }];
+        assert!(bad.validate().is_err());
+        // 总开关开着但链是空的
+        let mut empty = DevelopStack::default();
+        empty.lut_enabled = Some(true);
+        assert!(empty.validate().is_err());
+    }
+
+    #[test]
+    fn signature_tracks_chain_order_and_strength() {
+        let mut a = DevelopStack::default();
+        a.lut_chain = vec![LutLayer::new("x"), LutLayer::new("y")];
+        let mut b = a.clone();
+        b.lut_chain.swap(0, 1);
+        assert_ne!(a.signature(), b.signature(), "顺序必须改变指纹");
+        let mut c = a.clone();
+        c.lut_chain[1].strength = 0.5;
+        assert_ne!(a.signature(), c.signature(), "强度必须改变指纹");
+        let mut d = a.clone();
+        d.lut_chain[1].enabled = false;
+        assert_ne!(a.signature(), d.signature(), "单层开关必须改变指纹");
+        // 单层 @100% 与旧单支的指纹一致（缓存不无谓失效）
+        let mut single = DevelopStack::default();
+        single.lut_chain = vec![LutLayer::new("film")];
+        let mut legacy = DevelopStack::default();
+        legacy.lut_chain = vec![LutLayer::new("film")];
+        assert_eq!(single.signature(), legacy.signature());
+    }
+
+    #[test]
+    fn chain_round_trips_through_the_catalog() {
+        let (conn, asset_id) = catalog_with_asset();
+        let mut stack = DevelopStack::default();
+        stack.lut_chain = vec![
+            LutLayer::new("film"),
+            LutLayer { id: "warm".into(), enabled: false, strength: 0.4 },
+        ];
+        stack.lut_enabled = Some(true);
+        save(&conn, asset_id, &stack, 1).unwrap();
+        let loaded = load(&conn, asset_id).unwrap();
+        assert_eq!(loaded.lut_chain, stack.lut_chain);
+        assert_eq!(loaded.lut_enabled, Some(true));
+    }
+
+    #[test]
+    fn clearing_the_chain_does_not_resurrect_the_legacy_lut_id() {
+        let (conn, asset_id) = catalog_with_asset();
+        // 模拟 v22 之前的库：只有旧的单支列，没有新链列。
+        conn.execute(
+            "INSERT INTO develop_stacks (asset_id, lut_id, lut_enabled, created_at, updated_at)
+             VALUES (?1, 'legacy', 1, 1, 1)",
+            [asset_id],
+        )
+        .unwrap();
+        set_param(&conn, asset_id, "exposure", Some(0.5), 1).unwrap();
+        let legacy = load(&conn, asset_id).unwrap();
+        assert_eq!(legacy.lut_chain, vec![LutLayer::new("legacy")]);
+
+        // 撤销/清空链：旧 id 必须一并清掉，否则下一次读库会复活它。
+        set_setting(&conn, asset_id, Setting::LutChain, None, 2).unwrap();
+        let cleared = load(&conn, asset_id).unwrap();
+        assert!(cleared.lut_chain.is_empty());
+        assert_eq!(cleared.params.get("exposure"), Some(&0.5));
+        assert_eq!(
+            conn.query_row(
+                "SELECT lut_id FROM develop_stacks WHERE asset_id = ?1",
+                [asset_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .unwrap(),
+            None
+        );
+
+        // 覆盖式保存同样不能让旧列成为第二真相源。
+        let mut again = load(&conn, asset_id).unwrap();
+        again.lut_chain = vec![LutLayer::new("legacy")];
+        save(&conn, asset_id, &again, 3).unwrap();
+        let mut empty = load(&conn, asset_id).unwrap();
+        empty.lut_chain.clear();
+        empty.lut_enabled = Some(false);
+        save(&conn, asset_id, &empty, 4).unwrap();
+        assert!(load(&conn, asset_id).unwrap().lut_chain.is_empty());
+    }
+
+    #[test]
+    fn legacy_lut_undo_values_are_normalized_into_the_chain() {
+        let (conn, asset_id) = catalog_with_asset();
+        // 旧撤销记录的 key = lutId、值 = 纯 id，不是 JSON。
+        set_setting(&conn, asset_id, Setting::LutChain, Some("legacy"), 1).unwrap();
+        assert_eq!(load(&conn, asset_id).unwrap().lut_chain, vec![LutLayer::new("legacy")]);
+        assert!(Setting::LutChain.accepts(Some("legacy")));
+        assert!(!Setting::LutChain.accepts(Some("a/b")));
+        assert!(!Setting::LutChain.accepts(Some(r#"[{"id":"a/b"}]"#)));
     }
 
     #[test]

@@ -19,7 +19,7 @@
 
 use raybend::color::icc::srgb_icc;
 use raybend::color::working::WorkingImage;
-use raybend::develop::lut::Lut;
+use raybend::develop::lut::{Lut, LutChain, LutChainLayer};
 use raybend::develop::working::{
     render_working_reference, WorkingReferenceImage, WorkingTonePlan,
 };
@@ -131,6 +131,14 @@ fn shaper_lut() -> Lut {
     Lut::parse_cube(&text).expect("构造的 shaper cube 必须能解析")
 }
 
+/// 只有 1D shaper、没有 3D 立方表的 LUT：覆盖图集上传对空立方表的处理。
+fn one_d_lut() -> Lut {
+    Lut::parse_cube(
+        "LUT_1D_SIZE 4\n0.05 0.1 0.2\n0.35 0.5 0.4\n0.65 0.7 0.6\n0.95 0.9 0.8\n",
+    )
+    .expect("1D LUT 必须能解析")
+}
+
 fn params(tone: bool) -> DevelopParams {
     let mut params = DevelopParams::new(Some(5600.0));
     if tone {
@@ -147,7 +155,7 @@ fn cpu_reference(
     source: &WorkingReferenceImage,
     params: &DevelopParams,
     curves: &CurveSet,
-    lut: Option<&Lut>,
+    lut: Option<&LutChain>,
 ) -> Vec<u8> {
     let image = render_working_reference(
         source,
@@ -173,7 +181,7 @@ fn gpu_render(
     source: WorkingReferenceImage,
     params: &DevelopParams,
     curves: &CurveSet,
-    lut: &Arc<Lut>,
+    lut: &Arc<LutChain>,
     apply: bool,
 ) -> Vec<u8> {
     let mut preview = WorkingPreview::new(source);
@@ -185,6 +193,7 @@ fn gpu_render(
             NrMethod::Fast,
             None,
             if apply { Some(lut) } else { None },
+            None,
             None,
         )
         .expect("快速路必须成功");
@@ -235,6 +244,24 @@ fn main() -> Result<(), String> {
     let curves = CurveSet::identity();
     let cube = Arc::new(cube_lut());
     let shaper = Arc::new(shaper_lut());
+    let chain_cube = Arc::new(LutChain::single(Arc::clone(&cube)));
+    let chain_shaper = Arc::new(LutChain::single(Arc::clone(&shaper)));
+    let chain_one_d = Arc::new(LutChain::single(Arc::new(one_d_lut())));
+    // 三层链：顺序与每层强度都参加，用来验"整条链在 GPU 上一趟算完"。
+    let chain_three = Arc::new(LutChain::new(vec![
+        LutChainLayer {
+            lut: Arc::clone(&cube),
+            strength: 1.0,
+        },
+        LutChainLayer {
+            lut: Arc::clone(&shaper),
+            strength: 0.6,
+        },
+        LutChainLayer {
+            lut: Arc::clone(&cube),
+            strength: 0.35,
+        },
+    ]));
     let mut failures = Vec::new();
 
     for tone in [false, true] {
@@ -244,12 +271,16 @@ fn main() -> Result<(), String> {
             if tone { "开（曝光/对比/高光/饱和）" } else { "关" }
         );
         let cpu_none = cpu_reference(&source, &params, &curves, None);
-        let cpu_cube = cpu_reference(&source, &params, &curves, Some(&cube));
-        let cpu_shaper = cpu_reference(&source, &params, &curves, Some(&shaper));
+        let cpu_cube = cpu_reference(&source, &params, &curves, Some(&chain_cube));
+        let cpu_shaper = cpu_reference(&source, &params, &curves, Some(&chain_shaper));
+        let cpu_one_d = cpu_reference(&source, &params, &curves, Some(&chain_one_d));
+        let cpu_three = cpu_reference(&source, &params, &curves, Some(&chain_three));
 
-        let gpu_none = gpu_render(source.clone(), &params, &curves, &cube, false);
-        let gpu_cube = gpu_render(source.clone(), &params, &curves, &cube, true);
-        let gpu_shaper = gpu_render(source.clone(), &params, &curves, &shaper, true);
+        let gpu_none = gpu_render(source.clone(), &params, &curves, &chain_cube, false);
+        let gpu_cube = gpu_render(source.clone(), &params, &curves, &chain_cube, true);
+        let gpu_shaper = gpu_render(source.clone(), &params, &curves, &chain_shaper, true);
+        let gpu_one_d = gpu_render(source.clone(), &params, &curves, &chain_one_d, true);
+        let gpu_three = gpu_render(source.clone(), &params, &curves, &chain_three, true);
 
         let (max, over) = compare("关 LUT：GPU vs CPU", &gpu_none, &cpu_none);
         if max > TOLERANCE || over > 0 {
@@ -264,6 +295,14 @@ fn main() -> Result<(), String> {
             failures.push(format!(
                 "shaper+cube 的 GPU 与 CPU 不一致（max={max}，超差={over}）"
             ));
+        }
+        let (max, over) = compare("1D LUT：GPU vs CPU", &gpu_one_d, &cpu_one_d);
+        if max > TOLERANCE || over > 0 {
+            failures.push(format!("1D LUT 的 GPU 与 CPU 不一致（max={max}，超差={over}）"));
+        }
+        let (max, over) = compare("三层链：GPU vs CPU", &gpu_three, &cpu_three);
+        if max > TOLERANCE || over > 0 {
+            failures.push(format!("三层链的 GPU 与 CPU 不一致（max={max}，超差={over}）"));
         }
         // 证明确实套了 LUT：GPU 开/关 必须明显不同。
         let (_, over) = compare("自检：GPU 开 LUT vs 关 LUT", &gpu_cube, &gpu_none);

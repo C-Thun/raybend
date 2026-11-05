@@ -168,7 +168,10 @@ pub fn encode_avif_with_metadata(rgb: &[u8], width:u32,height:u32,quality:u8,exi
 // v15: append an sRGB ICC to AVIF without changing or re-encoding AV1 samples.
 // v16: 3:1 展示夹取先截后缩 —— 取源/解码尺寸把夹取算进去（极端长宽比不再糊，崔总 2026-10-10）。
 // v17: 384 网格档改 AVIF q80（每库 15 万张 / 2 GiB 预算）；1920/真身仍 q90。
-pub const PIPELINE_VERSION: u32 = 17;
+// v18: 编辑区（area）层循环 + LUT 挪到默认层那一段的末尾（锐化之前）。
+// v19: 控制点权重改两段式（100% 核心区 + 平滑渐变区）。
+// v20: 控制点权重改「亮度 × 色相」两个独立区间（感知域 Y′CbCr），容差数值域 100..1000。
+pub const PIPELINE_VERSION: u32 = 20;
 
 /// 缩略图尺度。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
@@ -255,11 +258,11 @@ impl SizeClass {
 #[must_use]
 pub const fn render_sig(size: SizeClass) -> &'static str {
     match size {
-        SizeClass::Grid => "avif-q80-grid-v17-embedded-v1",
-        SizeClass::Screen => "avif-q90-screen-v17",
+        SizeClass::Grid => "avif-q80-grid-v20-embedded-v1",
+        SizeClass::Screen => "avif-q90-screen-v20",
         // 真身档不走 `thumbs.db`（9MB/张的 JPEG 靠库内 `cache/full/<资产>/` 管），
         // 这个签名只是让本函数保持全函数；真身档自己的键在 `FullCache` 里（含管线版本）。
-        SizeClass::Full => "jpeg-q92-full-v17",
+        SizeClass::Full => "jpeg-q92-full-v20",
     }
 }
 
@@ -271,9 +274,9 @@ pub const fn render_sig(size: SizeClass) -> &'static str {
 #[must_use]
 pub const fn render_sig_source(size: SizeClass) -> &'static str {
     match size {
-        SizeClass::Grid => "jpeg-q82-grid-v17-embedded-v1",
-        SizeClass::Screen => "jpeg-q82-screen-v17",
-        SizeClass::Full => "jpeg-q92-full-v17",
+        SizeClass::Grid => "jpeg-q82-grid-v20-embedded-v1",
+        SizeClass::Screen => "jpeg-q82-screen-v20",
+        SizeClass::Full => "jpeg-q92-full-v20",
     }
 }
 
@@ -459,7 +462,7 @@ pub fn render_file_with_edit_and_lut(
     size: SizeClass,
     edit: Option<&DevelopStack>,
     lens: Option<&crate::develop::lens::LensCorrection>,
-    lut: Option<&crate::develop::lut::Lut>,
+    lut: Option<&crate::develop::lut::LutChain>,
     format: EncodeFormat,
 ) -> Result<Option<Thumb>> {
     render_file_with_profiles(path, size, edit, lens, lut, format, |id, _| {
@@ -470,7 +473,7 @@ pub fn render_file_with_edit_and_lut(
 /// The same preview/cache entry point resolves frozen V2 color before resizing.
 pub fn render_file_with_profiles(
     path: &Path, size: SizeClass, edit: Option<&DevelopStack>,
-    lens: Option<&crate::develop::lens::LensCorrection>, lut: Option<&crate::develop::lut::Lut>,
+    lens: Option<&crate::develop::lens::LensCorrection>, lut: Option<&crate::develop::lut::LutChain>,
     format: EncodeFormat,
     profile: impl FnMut(&crate::color::ProfileId, crate::color::icc::IccRole) -> Result<crate::color::icc::RgbIcc>,
 ) -> Result<Option<Thumb>> {
@@ -653,7 +656,7 @@ fn render_raw_file(
     size: SizeClass,
     edit: Option<&DevelopStack>,
     lens: Option<&crate::develop::lens::LensCorrection>,
-    lut: Option<&crate::develop::lut::Lut>,
+    lut: Option<&crate::develop::lut::LutChain>,
     format: EncodeFormat,
 ) -> Result<Option<Thumb>> {
     let source_size = crate::media::meta::read_photo_meta(path)
@@ -843,7 +846,7 @@ pub fn render_bytes_with_edit_and_lut(
     orientation: Option<u16>,
     edit: Option<&DevelopStack>,
     lens: Option<&crate::develop::lens::LensCorrection>,
-    lut: Option<&crate::develop::lut::Lut>,
+    lut: Option<&crate::develop::lut::LutChain>,
     format: EncodeFormat,
 ) -> Result<Option<Thumb>> {
     let Ok(img) = image::load_from_memory(bytes) else {
@@ -930,7 +933,7 @@ fn apply_develop(
     img: &image::RgbImage,
     stack: &DevelopStack,
     lens: Option<&crate::develop::lens::LensCorrection>,
-    lut: Option<&crate::develop::lut::Lut>,
+    lut: Option<&crate::develop::lut::LutChain>,
 ) -> Result<image::RgbImage> {
     let (width, height) = img.dimensions();
     let Some(linear) = LinearImage::from_srgb8(width, height, img.as_raw()) else {
@@ -947,7 +950,7 @@ fn apply_develop_linear(
     stack: &DevelopStack,
     lens: Option<&crate::develop::lens::LensCorrection>,
     decoded_as_shot_k: Option<f32>,
-    lut: Option<&crate::develop::lut::Lut>,
+    lut: Option<&crate::develop::lut::LutChain>,
 ) -> Result<image::RgbImage> {
     let image = crate::display::output::render_linear(linear, stack, lens, decoded_as_shot_k, lut, 0)?;
     image::RgbImage::from_raw(image.width(), image.height(),
@@ -989,7 +992,7 @@ pub fn encode_with_lut(
     placeholder: bool,
     edit: Option<&DevelopStack>,
     lens: Option<&crate::develop::lens::LensCorrection>,
-    lut: Option<&crate::develop::lut::Lut>,
+    lut: Option<&crate::develop::lut::LutChain>,
     format: EncodeFormat,
 ) -> Result<Thumb> {
     let result = prepare_pixels(img, size, orientation, edit, lens, lut)?;
@@ -1017,7 +1020,7 @@ pub fn prepare_pixels(
     orientation: Option<u16>,
     edit: Option<&DevelopStack>,
     lens: Option<&crate::develop::lens::LensCorrection>,
-    lut: Option<&crate::develop::lut::Lut>,
+    lut: Option<&crate::develop::lut::LutChain>,
 ) -> Result<image::RgbImage> {
     let img = match orientation {
         Some(o) if o != 1 => apply_orientation(&img, o),

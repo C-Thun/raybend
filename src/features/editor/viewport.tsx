@@ -22,7 +22,7 @@
  * ⚠️ 水印/提示是**印在洞口里的内容**，照片出来后它们就消失（不是浮在照片上的一层）。
  */
 
-import { createEffect, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { createEffect, onCleanup, onMount, Show, untrack, type JSX } from "solid-js";
 import {
   IconAlertTriangle,
   IconAlbumOff,
@@ -38,9 +38,11 @@ import { t } from "../../i18n/index.ts";
 import type { MessageKey } from "../../i18n/index.ts";
 import { createDragSession, createPanAccumulator, createPointerSender } from "../../lib/editor-intent.ts";
 import { createViewportReporter, type ViewportReporter } from "../../lib/editor-viewport.ts";
-import { sendEditorViewportIntent, setEditorViewport } from "../../api/editor.ts";
+import { onOverlayPulse, overlayLiveWanted } from "../../lib/overlay-live.ts";
+import { getEditorOverlayState, sendEditorViewportIntent, setEditorViewport } from "../../api/editor.ts";
 import { isTauriRuntime } from "../../api/tauri-env.ts";
 import type { EditorRenderState } from "../../api/types.ts";
+import { ViewportOverlay } from "./ViewportOverlay.tsx";
 import {
   editorEmptyIcon,
   editorEmptyOffersImport,
@@ -63,6 +65,15 @@ export interface EditorViewportProps {
   onRetry?: () => void;
   /** 上报开关（开发页里可以关掉；默认开） */
   report?: boolean;
+  /**
+   * 覆盖层内容（用**图像像素**坐标书写；缩放 / 平移 / 旋转由 `ViewportOverlay` 套矩阵）。
+   * 控制点标记走这里（`specs/editor-area.md` §5.4）。
+   */
+  overlay?: () => JSX.Element;
+  /** 正在等控制点落点（这时的单击 = 落点，不是普通命中测试）。 */
+  placingPoint?: () => boolean;
+  /** 落点点击（CSS 坐标；换算与取样在 Rust）。 */
+  onPlacePoint?: (css: { x: number; y: number }) => void;
   class?: string;
 }
 
@@ -188,6 +199,35 @@ export function EditorViewport(props: EditorViewportProps): JSX.Element {
       },
     });
 
+    /*
+     * 覆盖层的**实时跟随**（`lib/overlay-live.ts`）。
+     *
+     * 照片是 wgpu 每帧直绘的，而覆盖层读的是 Rust 报的矩阵 —— 平时 250ms 一次，
+     * 于是拖动时「图片动、标记不动」，松手才跳过去（崔总 2026-11-01）。
+     * 这里挂一个**按需唤醒**的 rAF 链：有人在 `overlayPulse()` 时才醒
+     * （拖动每帧、滚轮、缩放按钮、双击适配都点了），盯完 `HOLD_MS` 自动睡 ——
+     * 静止时一次 IPC 都不发。坐标换算仍然全在 Rust（只读，不自己推）。
+     */
+    let liveFrame = 0;
+    let liveBusy = false;
+    const pumpOverlay = (): void => {
+      if (liveFrame !== 0 || liveBusy) return;
+      const step = (): void => {
+        liveFrame = 0;
+        if (!overlayLiveWanted()) return;
+        liveBusy = true;
+        void getEditorOverlayState()
+          .catch(() => undefined) // 读不到就下一帧再试（状态轮询那条路仍会兜底）
+          .finally(() => {
+            liveBusy = false;
+            // 读的过程中又来了一次 pulse（拖动中必然如此）⇒ 立刻续上
+            if (overlayLiveWanted()) liveFrame = window.requestAnimationFrame(step);
+          });
+      };
+      liveFrame = window.requestAnimationFrame(step);
+    };
+    const stopPump = onOverlayPulse(pumpOverlay);
+
     /* ── ③ 拖动平移 + 点击命中 ────────────────────── */
     const drag = createDragSession();
     const pan = createPanAccumulator({
@@ -264,6 +304,17 @@ export function EditorViewport(props: EditorViewportProps): JSX.Element {
         // 没捕获过就没什么可释放的
       }
       if (ended.click) {
+        if (props.placingPoint?.() === true) {
+          // 等落点：这一下点击是「放置控制点」，不是普通命中测试。
+          // 点击位置相对**洞口**左上角 —— Rust 的矩阵也是这个口径（`clip_rect` 减过原点），
+          // 用屏幕绝对坐标会把窗口偏移算进去（2026-10-31 评审发现的 bug）。
+          const rect = element.getBoundingClientRect();
+          props.onPlacePoint?.({
+            x: event.clientX - rect.left,
+            y: event.clientY - rect.top,
+          });
+          return;
+        }
         // 没怎么动 = 点击：回填命中状态（普通视口操作）
         send({ kind: "hitTest", x: event.clientX, y: event.clientY });
       }
@@ -300,6 +351,9 @@ export function EditorViewport(props: EditorViewportProps): JSX.Element {
       element.removeEventListener("pointerup", finishPointer);
       element.removeEventListener("pointercancel", finishPointer);
       element.removeEventListener("dblclick", onDblClick);
+      stopPump();
+      if (liveFrame !== 0) window.cancelAnimationFrame(liveFrame);
+      liveFrame = 0;
     });
   });
 
@@ -343,7 +397,12 @@ export function EditorViewport(props: EditorViewportProps): JSX.Element {
         // 出图时透明（wgpu 画在下面），否则自己画底色
         transparent() ? "bg-transparent" : "bg-surface-bar",
         // 拖动时的手型与光标反馈（与看图件同一套观感）
-        props.tool?.() === "crop" ? "cursor-crosshair" : props.tool?.() === "rotate" ? "cursor-crosshair" : "cursor-grab active:cursor-grabbing",
+        // 旋转用自绘的圆弧箭头：十字在「旋转」语意下不准确（它表示定位，不表示转）。
+        props.tool?.() === "rotate"
+          ? "rb-cursor-rotate"
+          : props.tool?.() === "crop" || props.placingPoint?.() === true
+            ? "cursor-crosshair"
+            : "cursor-grab active:cursor-grabbing",
         props.class ?? "",
       ]
         .filter(Boolean)
@@ -361,6 +420,15 @@ export function EditorViewport(props: EditorViewportProps): JSX.Element {
         class="pointer-events-none absolute h-0 w-0 bg-surface-bar"
       />
       {/* 工具覆盖层与照片由 Rust 在同一个 GPU pass 中绘制。 */}
+      {/*
+        控制点标记（图像像素坐标 + Rust 的矩阵）。它在**照片之上、水印之下**：
+        `pointer-events-none` 的容器，只有圆片 / handle / 名字自己接指针。
+      */}
+      <Show when={props.overlay !== undefined && transparent()}>
+        <ViewportOverlay renderState={props.renderState()}>
+          {untrack(() => props.overlay?.())}
+        </ViewportOverlay>
+      </Show>
 
       <Show when={props.empty} fallback={<ViewportMessage props={props} />}>
         {(kind) => {

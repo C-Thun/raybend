@@ -953,6 +953,83 @@ pub fn facets(conn: &Connection, query: &Query) -> Result<Facets> {
     Ok(out)
 }
 
+/// 一个文字字段的已有取值（右栏建议输入的「库内已有值」那一源）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TextValue {
+    pub value: String,
+    pub count: i64,
+}
+
+/// 「库内已有值」的级联过滤：给「城市」建议时按已填的国家/省缩小范围。
+///
+/// 空串与全空白一律当作没填（库里 `set_text` 会把它们写成 NULL）。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TextValueFilter {
+    pub country: Option<String>,
+    pub province_state: Option<String>,
+    pub city: Option<String>,
+}
+
+/// 某个文字字段在**当前库里已有的取值**（按出现次数降序，次数相同按字典序）。
+///
+/// 只用于「建议输入」的下拉候选：作者 / 国家 / 省州 / 城市 / 具体地点。
+/// 描述不在此列（描述长且几乎不重复，建议只来自最近输入，不对它跑 `GROUP BY`）。
+///
+/// 过滤是**逐级**的，且**不含本字段自己**：查「市」时按国家 + 省过滤，
+/// 否则「先手打一个不存在的市，候选就全没了」。
+pub fn text_values(
+    conn: &Connection,
+    field: crate::store::marking::TextField,
+    filter: &TextValueFilter,
+    limit: usize,
+) -> Result<Vec<TextValue>> {
+    use crate::store::marking::TextField;
+    let column = field.column();
+    let mut conditions = vec![
+        format!("{column} IS NOT NULL"),
+        format!("trim({column}) <> ''"),
+    ];
+    let mut params: Vec<Value> = Vec::new();
+    // 只有地理三项吃级联；作者不该被国家/省过滤掉。
+    let parents: &[(TextField, &Option<String>)] = match field {
+        TextField::ProvinceState => &[(TextField::Country, &filter.country)],
+        TextField::City => &[
+            (TextField::Country, &filter.country),
+            (TextField::ProvinceState, &filter.province_state),
+        ],
+        TextField::Sublocation => &[
+            (TextField::Country, &filter.country),
+            (TextField::ProvinceState, &filter.province_state),
+            (TextField::City, &filter.city),
+        ],
+        TextField::Country | TextField::Author | TextField::Description => &[],
+    };
+    for (parent, value) in parents {
+        let Some(text) = value.as_deref().map(str::trim).filter(|t| !t.is_empty()) else {
+            continue;
+        };
+        conditions.push(format!("{} = ?", parent.column()));
+        params.push(Value::Text(text.to_string()));
+    }
+    // 列名来自 `TextField::column()`（白名单枚举），其余一律绑定参数。
+    let sql = format!(
+        "SELECT {column}, count(*) FROM assets WHERE {} \
+         GROUP BY {column} ORDER BY count(*) DESC, {column} ASC LIMIT ?",
+        conditions.join(" AND ")
+    );
+    params.push(Value::Integer(i64::try_from(limit).unwrap_or(i64::MAX)));
+    let mut stmt = conn.prepare(&sql)?;
+    let mut rows = stmt.query(params_from_iter(params.iter()))?;
+    let mut out = Vec::new();
+    while let Some(row) = rows.next()? {
+        out.push(TextValue {
+            value: row.get(0)?,
+            count: row.get(1)?,
+        });
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1876,6 +1953,89 @@ mod tests {
     }
 
     // ---------- 纯函数 ----------
+
+    fn set_geo(conn: &Connection, id: i64, country: &str, province: &str, city: &str) {
+        conn.execute(
+            "UPDATE assets SET country = ?1, province_state = ?2, city = ?3 WHERE id = ?4",
+            rusqlite::params![country, province, city, id],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn text_values_rank_by_use_and_skip_blanks() {
+        use crate::store::marking::TextField;
+        let conn = catalog();
+        for author in ["崔总", "崔总", "张三", "  "] {
+            let id = add(&conn, Spec::default());
+            conn.execute("UPDATE assets SET author = ?1 WHERE id = ?2", rusqlite::params![author, id])
+                .unwrap();
+        }
+        let rows = text_values(&conn, TextField::Author, &TextValueFilter::default(), 20).unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                TextValue { value: "崔总".into(), count: 2 },
+                TextValue { value: "张三".into(), count: 1 },
+            ],
+            "按出现次数降序，空白值不算候选"
+        );
+        // 上限生效（候选条数由 `marking::TEXT_SUGGEST_LIMIT` 登记）
+        assert_eq!(
+            text_values(&conn, TextField::Author, &TextValueFilter::default(), 1).unwrap().len(),
+            1
+        );
+    }
+
+    #[test]
+    fn text_values_cascade_down_the_geo_chain() {
+        use crate::store::marking::TextField;
+        let conn = catalog();
+        for (country, province, city, times) in [
+            ("中国", "浙江省", "杭州", 2),
+            ("中国", "北京市", "北京", 1),
+            ("日本", "京都府", "京都", 1),
+        ] {
+            for _ in 0..times {
+                let id = add(&conn, Spec::default());
+                set_geo(&conn, id, country, province, city);
+            }
+        }
+        let cn = TextValueFilter { country: Some("中国".into()), ..Default::default() };
+        let cities = text_values(&conn, TextField::City, &cn, 20).unwrap();
+        assert_eq!(
+            cities.iter().map(|row| row.value.as_str()).collect::<Vec<_>>(),
+            vec!["杭州", "北京"],
+            "市按国家过滤，次数多者在前"
+        );
+        let zhejiang = TextValueFilter {
+            country: Some("中国".into()),
+            province_state: Some("浙江省".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            text_values(&conn, TextField::City, &zhejiang, 20)
+                .unwrap()
+                .into_iter()
+                .map(|row| row.value)
+                .collect::<Vec<_>>(),
+            vec!["杭州"],
+            "再按省收窄"
+        );
+        let provinces = text_values(
+            &conn,
+            TextField::ProvinceState,
+            &TextValueFilter { country: Some("日本".into()), ..Default::default() },
+            20,
+        )
+        .unwrap();
+        assert_eq!(provinces, vec![TextValue { value: "京都府".into(), count: 1 }]);
+        // 本字段自己不做过滤：国家候选不受 `country` 影响（否则你填了一个新国名就再也选不到别的）
+        assert_eq!(
+            text_values(&conn, TextField::Country, &cn, 20).unwrap().len(),
+            2
+        );
+    }
 
     #[test]
     fn file_name_of_takes_the_last_segment() {

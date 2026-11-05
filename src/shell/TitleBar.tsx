@@ -27,6 +27,7 @@ import { A } from "@solidjs/router";
 import logoSmall from "../assets/branding/logo-small.png";
 import {
   IconArrowsMinimize,
+  IconBug,
   IconCircleCheck,
   IconDownload,
   IconMinus,
@@ -35,7 +36,7 @@ import {
   IconSun,
   IconX,
 } from "@tabler/icons-solidjs";
-import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
+import { For, Show, Suspense, createEffect, createMemo, createSignal, lazy, onCleanup, onMount, type JSX } from "solid-js";
 import { createWindowChrome, maximizeKeyAction, tauriWindowHandle } from "../api/window.ts";
 import { IconButton } from "../components/ui/Button.tsx";
 import { Menu } from "../components/ui/Menu.tsx";
@@ -43,6 +44,7 @@ import { SegmentedControl } from "../components/ui/SegmentedControl.tsx";
 import { locale, localeLabel, nextLocale, t } from "../i18n/index.ts";
 import type { MessageKey } from "../i18n/index.ts";
 import { availabilityOf, chordOf, type CommandSpec } from "../lib/commands.ts";
+import { DEV_BUILD } from "../lib/dev-build.ts";
 import { shortcutOverrides } from "../lib/shortcuts.ts";
 import type { AppearanceStore } from "../lib/appearance.ts";
 import { AboutDialog } from "./AboutDialog.tsx";
@@ -68,6 +70,24 @@ export interface TitleBarProps {
   onOpenUpdates: () => void;
 }
 
+/*
+ * 连 `lazy(...)` 的工厂也必须在调试分支里：只守卫 JSX 不够 ——
+ * 生产构建仍会生成 `MaskDebugDialog-*.js` chunk（2026-11-01 评审实测）。
+ *
+ * ❗这里**必须写字面量** `import.meta.env.VITE_DEBUG_PANEL`：Vite 只对这种字面量形式
+ * 在构建期替换成常量，打包器才能把整条分支（连同动态 import）摇掉。
+ * 换成 `lib/dev-build.ts` 导出的 `DEV_BUILD` 就不行了 —— 跨模块的常量不参与这里的 DCE，
+ * 实测生产包会重新出现这个 chunk（2026-11-01）。`mask-debug.ts` 那边用共享常量
+ * （它只需要运行时正确，不需要参与摇树）。
+ *
+ * 为什么不能只看 `import.meta.env.DEV`：`pnpm debug:win` 是「生产前端构建 + debug Rust」，
+ * `DEV` 恒为 `false`，只看它的话真机调试那份 exe 里永远没入口（2026-11-01 崔总）。
+ */
+const MaskDebugDialog = import.meta.env.DEV
+  || import.meta.env.VITE_DEBUG_PANEL === "1"
+  ? lazy(() => import("../dev/MaskDebugDialog.tsx"))
+  : () => null;
+
 export function TitleBar(props: TitleBarProps) {
   /** 更新指示器的提示文案：下载中报百分比（拿不到总长就不报），就绪时报版本号 */
   function indicatorLabel(current: {
@@ -84,6 +104,8 @@ export function TitleBar(props: TitleBarProps) {
 
   const chrome = createWindowChrome();
   const [openMenu, setOpenMenu] = createSignal<MenuName | null>(null);
+  /** 开发期调试面板（只有 DEV 构建里渲染入口；生产包里整条分支被摇掉） */
+  const [debugOpen, setDebugOpen] = createSignal(false);
 
   createEffect(() => props.store.pinMenus(openMenu() !== null));
   onCleanup(() => props.store.pinMenus(false));
@@ -247,6 +269,38 @@ export function TitleBar(props: TitleBarProps) {
             {/* i18n-exempt: 只在 DEV 构建里存在的陈列室入口，生产包没有这条分支 */}
             组件陈列室
           </A>
+        </Show>
+
+        {/*
+          **开发期调试面板**（崔总 2026-11-01）：主题 / 密度开关的**左边**。
+
+          * 入口与框架固定，弹窗内容随每次开发需要换（这轮是控制点容差映射）；
+          * 生产构建里整条分支被摇掉（`DEV_BUILD` + 惰性加载）；
+          * ❗判定用 `DEV_BUILD`（而不是 `import.meta.env.DEV`）：`pnpm debug:win` 是
+            「生产前端构建 + debug Rust」，`DEV` 恒为 false —— 只看 `DEV` 的话真机
+            调试那份 exe 里永远没入口（2026-11-01 崔总连提两次）。
+          * 它不是用户功能：**不进命令面板、不给快捷键**（`AGENTS.md` §2.15 的例外，
+            理由是它根本不在生产包里）。
+        */}
+        <Show when={DEV_BUILD}>
+          {/*
+            ❗必须自己包一层 `items-center`：`header` 是 `items-stretch`，直接把 `IconButton`
+            挂上去它会被拉满整条高度，图标就顶到上沿了（崔总 2026-11-02 指出的
+            「调试按钮跑到 titlebar 顶部」）。与右边主题 / 密度那组同一个口径。
+          */}
+          <div class="flex h-full shrink-0 items-center pe-3">
+            <IconButton
+              label={t("debug.mask.title")}
+              tip={t("debug.mask.title")}
+              selected={debugOpen()}
+              onClick={() => setDebugOpen(true)}
+            >
+              <IconBug size={14} aria-hidden="true" />
+            </IconButton>
+          </div>
+          <Suspense>
+            <MaskDebugDialog open={debugOpen()} onOpenChange={setDebugOpen} />
+          </Suspense>
         </Show>
 
         {/* ── 主题 + 密度 ───────────────────────────────── */}

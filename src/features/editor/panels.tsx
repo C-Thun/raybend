@@ -27,8 +27,8 @@ import type { LensQueryState } from "./lens-query.ts";
  * 裁切/旋转的画布草稿由 Rust 渲染线程持有，控制块只传选项与确认。
  */
 
-import { For, Show, createEffect, createMemo, createSignal, onCleanup, type JSX } from "solid-js";
-import { IconChevronDown, IconExternalLink, IconLoader2, IconPencil } from "@tabler/icons-solidjs";
+import { For, Show, createEffect, createMemo, createSignal, on, onCleanup, type JSX } from "solid-js";
+import { IconChevronDown, IconColorSwatch, IconExternalLink, IconLoader2, IconPencil } from "@tabler/icons-solidjs";
 
 import { Button, IconButton } from "../../components/ui/Button.tsx";
 import { SegmentedControl } from "../../components/ui/SegmentedControl.tsx";
@@ -36,6 +36,8 @@ import { HistogramPanel } from "../../components/ui/HistogramPanel.tsx";
 import { Switch } from "../../components/ui/Form.tsx";
 import { ProfileSelect } from "../../components/ui/ProfileSelect.tsx";
 import { DisplayColorStatus } from "../../components/ui/DisplayColorStatus.tsx";
+import { ShimmerText } from "../../components/ui/ShimmerText.tsx";
+import { AreaGlyph } from "./area-glyph.tsx";
 import type { ColorProfileEntry } from "../../api/color.ts";
 import { outputColorChoice, outputColorFromChoice } from "../../lib/color-model.ts";
 import { Menu } from "../../components/ui/Menu.tsx";
@@ -59,10 +61,9 @@ import {
 } from "./params.ts";
 import { PendingNote } from "./parts.tsx";
 import { selectAllOnMount } from "../../lib/dom-focus.ts";
-import { PresetPanel } from "./preset-panel.tsx";
 import { SliderRow } from "./SliderRow.tsx";
+import { StateWatermark } from "../../components/ui/StateWatermark.tsx";
 import type { EditorStore } from "./store.ts";
-import type { PresetGroup, PresetMutationOutcome } from "../../lib/presets.ts";
 import { CurveEditor } from "./CurveEditor.tsx";
 
 /* ══════════════════════════════════════════════════════════════
@@ -95,24 +96,24 @@ export interface EditorPanelsProps {
    */
   onConfirm?: () => void;
   onToolConfirm?: () => void;
-  /** 落库 / 读库失败的原因（有值就显示一行提示 —— 不静默吞掉） */
-  error?: string | null;
-  /** 这张照片被二级锁锁住（不可编辑）—— 整列禁用 + 一句话说明 */
+  /**
+   * **错误上报**（统一消息通道）：面板里不再显示内联红字，`AGENTS.md` §2.29。
+   * 工作区把 `props.toast.show` 包一层传进来。
+   */
+  onError?: (message: string) => void;
+  /**
+   * 这张照片被二级锁锁住（不可编辑）—— 整列禁用 + 一句话说明。
+   *
+   * ❗**错误不走这里**（崔总 2026-11-01）：落库 / 读库 / 取样失败一律走
+   * `components/ui/Toast.tsx` 的统一消息通道，面板里不再塞内联红字。
+   */
   locked?: boolean;
-  /* ── 预设（specs/editor-presets.md）：持久化动作由工作区注入 ── */
-  onCreatePresetDirectory: (name: string) => Promise<PresetMutationOutcome>;
-  onCreatePreset: (name: string, directoryId: string, groups: readonly PresetGroup[]) => Promise<PresetMutationOutcome>;
-  onRenamePresetDirectory: (id: string, name: string) => Promise<PresetMutationOutcome>;
-  onDeletePreset: (id: string) => Promise<void>;
-  onDeletePresetDirectory: (id: string) => Promise<void>;
-  onMovePresets: (ids: readonly string[], directoryId: string) => Promise<void>;
   onOpenColorProfiles: () => void;
   profileEntries: readonly ColorProfileEntry[];
   onRefreshProfiles: () => void;
   onApplyColor: (profileId: string | null) => Promise<void>;
   colorBatchCount:number;
   onReviewColorBatch:(profileId:string|null)=>Promise<void>;
-  onApplyPreset: (snapshot: import("../../lib/presets.ts").PresetSnapshot) => Promise<void>;
   class?: string;
 }
 
@@ -120,7 +121,7 @@ export interface EditorPanelsProps {
  * 组件
  * ══════════════════════════════════════════════════════════════ */
 
-type CurveTab = "curve" | "preset" | "color";
+type CurveTab = "curve" | "swatch" | "color";
 
 /**
  * 第 1 组（总览 / 定稿 / 信息）的等高规则已随 2026-10-12 改版作废：
@@ -138,6 +139,51 @@ export function EditorPanels(props: EditorPanelsProps): JSX.Element {
   const [paramTab, setParamTab] = createSignal<ParamGroup>("tone");
   const curveTab = props.store.advancedTab;
   const setCurveTab = props.store.setAdvancedTab;
+
+  /*
+   * **全局阶段只属于默认层**（`specs/editor-area.md` §4.3）：不在默认层时，
+   * 那些页签与控件**整块不出现**（崔总 2026-11-01：不要置灰 + 提示，直接隐藏）。
+   *
+   * 页签列表是从“当前层能不能用”推出来的，不是写死的三份列表；
+   * 切层时若当前页签已不存在，退回“影调” / “曲线”（不能让分段控件指向一个不存在的值）。
+   */
+  const globalStages = (): boolean => props.store.onDefaultLayer();
+  const paramGroups = (): readonly ParamGroup[] => PARAM_GROUPS
+    .filter((group) => globalStages() || (group !== "detail" && group !== "lens"));
+  const curveTabs = (): readonly { value: string; label: string }[] => [
+    { value: "curve", label: t("editor.group.curve") },
+    // 色盘：**空面板**（崔总 2026-11-05 预留四色轮调色位；这里只有页签与空态）
+    { value: "swatch", label: t("editor.group.swatch") },
+    ...(globalStages()
+      ? [{ value: "color", label: t("editor.colorManagement.title") }]
+      : []),
+  ];
+  createEffect(() => {
+    if (!paramGroups().includes(paramTab())) setParamTab("tone");
+  });
+  createEffect(() => {
+    if (!globalStages() && curveTab() === "color") setCurveTab("curve");
+  });
+
+  /*
+   * 层名条上的**一次性光条**（`ShimmerText` + `.rb-shimmer-mask`，与导出「开始导出」同一套）。
+   *
+   * 只在**切层**时走一遍：右栏整套参数跟着换了对象，光条是「换了」的信号。
+   * 首次挂载不走（进编辑器就闪一下是噪声）；语言切换 / 改名也不走。
+   */
+  const [sweeping, setSweeping] = createSignal(false);
+  let sweepTimer: number | undefined;
+  onCleanup(() => {
+    if (sweepTimer !== undefined) window.clearTimeout(sweepTimer);
+  });
+  createEffect(on(() => props.store.activeAreaId(), (_id, previous) => {
+    if (previous === undefined) return; // 首次挂载不闪
+    // 连续切层要把动画**从头**放：同一帧里 false → true，光带才会重新扫
+    setSweeping(false);
+    queueMicrotask(() => setSweeping(true));
+    if (sweepTimer !== undefined) window.clearTimeout(sweepTimer);
+    sweepTimer = window.setTimeout(() => setSweeping(false), 860);
+  }, { defer: true }));
 
   return (
     <div
@@ -163,7 +209,12 @@ export function EditorPanels(props: EditorPanelsProps): JSX.Element {
         取数与缓存都在 `HistogramPanel` 里（与浏览右栏共用一份）。
       */}
       <HistogramPanel
-        class="shrink-0"
+        /*
+         * `!mb-0`：`HistogramPanel` 自带 `mb-3`，而这一栏的父级还有 `gap-3` ——
+         * 两层叠起来会让**层名条上方**的留白是下方的一倍多（崔总 2026-11-01 截图指出）。
+         * 这里清零，上下都只留父级的 `gap`（层名条自己再 `-my-1` 收 4px）。
+         */
+        class="shrink-0 !mb-0"
         load={props.loadHistogram}
         path={props.current?.path ?? null}
         countsOverride={props.store.renderState() === null
@@ -173,16 +224,60 @@ export function EditorPanels(props: EditorPanelsProps): JSX.Element {
         emptyText={t("browse.histogramEmpty")}
       />
 
+      {/*
+        **当前层名条**（`design/editor.md` 2026-10-31 画稿 SPyhh 的平化版，崔总 2026-11-01）：
+
+        * **无边框、无底色**（平面设计）—— 它读起来是「直方图下面的一行小标题」，不是一块面板；
+        * 左边一枚**主色**类型记号（与层列表同一个 `AreaGlyph`，形状即层类型）；
+        * 文字比别处稍大一号并加粗（13px / semibold）：这一行的唯一职责就是回答「现在在改哪一层」；
+        * 上下各收 4px（父级 `gap-3` 的 12 变成视觉 8）：它是一行**标题**，不是一块面板，
+          原来 16+16 的上下留白在真机上确实太空；
+        * **切层时名字上走一遍光条**（`ShimmerText`，与导出「开始导出」同一个 `.rb-shimmer-mask`）——
+          右栏的内容整套换掉了，光条是「换了」的信号，比只看文字变一下更容易注意到。
+      */}
+      <Show when={props.current !== null}>
+        <div
+          data-layer-name-bar
+          class="flex h-6 shrink-0 items-center gap-1.5 -my-1"
+          title={props.store.activeAreaName()}
+        >
+          <AreaGlyph
+            kind={props.store.activeArea()?.type ?? "default"}
+            color={props.store.activeArea()?.color ?? 0}
+            class="text-brand"
+          />
+          {/*
+            `fade-x-end` 放在**外层**（`ShimmerText` 的盒子上）：光条那一层是它的兄弟，
+            渐隐必须同时作用于两遍内容，否则被光扫过的那份会在渐隐区外露出整段文字。
+          */}
+          <ShimmerText
+            class="min-w-0 flex-1 fade-x-end"
+            active={sweeping()}
+            once
+            highlight="text-brand"
+          >
+            <span class="w-full whitespace-nowrap text-fs-1 font-semibold text-fg-1">
+              {props.store.activeAreaName()}
+            </span>
+          </ShimmerText>
+        </div>
+      </Show>
+
       {/* ↓ 以下（参数组 + 曲线组）是**可滚动区** */}
       <div class="scroll-y-reserved flex min-h-0 flex-1 flex-col gap-3" data-editor-param-scroll>
 
       {/* ── 第 2 组：影调 / 色彩 / 清晰度 / 镜头 ───────────── */}
       <section class="flex flex-col gap-2" data-editor-group="params">
+        {/*
+          全局阶段（镜头 / 清晰度 / 局部色调 / 色彩管理）只属于默认层
+          （`specs/editor-area.md` §4.3）。不在默认层时这些页签与控件**整块不出现**——
+          不置灰、不放提示条（崔总 2026-11-01：「我说了是隐藏」；`AGENTS.md` §2.20）。
+        */}
         <SegmentedControl
           value={paramTab()}
           onValueChange={(value) => setParamTab(value as ParamGroup)}
           label={t("editor.group.tone")}
-          options={PARAM_GROUPS.map((group) => ({
+          options={paramGroups().map((group) => ({
             value: group,
             label: t(GROUP_LABEL_KEY[group]),
           }))}
@@ -197,8 +292,16 @@ export function EditorPanels(props: EditorPanelsProps): JSX.Element {
                 value={props.store.nrMethod() ?? "fast"}
                 label={t("editor.detail.nrMethod")}
                 options={[
-                  { value: "fast", label: t("editor.detail.nrFast") },
-                  { value: "high", label: t("editor.detail.nrHigh") },
+                  {
+                    value: "fast",
+                    label: t("editor.detail.nrFast"),
+                    disabled: !props.enabled || !props.store.onDefaultLayer(),
+                  },
+                  {
+                    value: "high",
+                    label: t("editor.detail.nrHigh"),
+                    disabled: !props.enabled || !props.store.onDefaultLayer(),
+                  },
                 ]}
                 onValueChange={(value) => {
                   props.store.setNrMethod(value === "high" ? "high" : null);
@@ -223,16 +326,18 @@ export function EditorPanels(props: EditorPanelsProps): JSX.Element {
           </Show>
           {/* 镜头页签多两块非拉杆控件（`.pd`：配置文件 + 启用校正开关） */}
           <Show when={paramTab() === "lens"}>
-            <LensExtras store={props.store} enabled={props.enabled} onConfirm={props.onConfirm}
-              queryState={props.lensQuery} onRefresh={props.onRefreshLens} />
+            <LensExtras store={props.store} enabled={props.enabled && props.store.onDefaultLayer()} onConfirm={props.onConfirm}
+              queryState={props.lensQuery} onRefresh={props.onRefreshLens} onError={props.onError} />
           </Show>
-          <For each={paramsInGroup(paramTab())}>
+          <For each={paramsInGroup(paramTab())
+            .filter((spec) => globalStages() || spec.target !== "global")}>
             {(spec) => (
               <SliderRow
                 spec={spec}
                 value={props.store.paramValue(spec.id)}
-                /* 参数表的 wired 字段与 Rust 契约保持一致。 */
-                disabled={!props.enabled || !spec.wired}
+                /* 参数表的 wired 字段与 Rust 契约保持一致；global 项只在默认层可用。 */
+                disabled={!props.enabled || !spec.wired
+                  || (spec.target === "global" && !props.store.onDefaultLayer())}
                 onValueChange={(value) => props.store.setParam(spec.id, value)}
                 onValueCommit={() => props.onConfirm?.()}
                 onReset={() => {
@@ -247,9 +352,9 @@ export function EditorPanels(props: EditorPanelsProps): JSX.Element {
             )}
           </For>
         </div>
-        <Show when={props.error != null || props.locked === true}>
-          <p class="text-fs-0 leading-snug text-danger" data-editor-develop-error>
-            {props.error ?? t("editor.panel.locked")}
+        <Show when={props.locked === true}>
+          <p class="text-fs-0 leading-snug text-fg-3" data-editor-panel-locked>
+            {t("editor.panel.locked")}
           </p>
         </Show>
       </section>
@@ -261,55 +366,30 @@ export function EditorPanels(props: EditorPanelsProps): JSX.Element {
           value={curveTab()}
           onValueChange={(value) => setCurveTab(value as CurveTab)}
           label={t("editor.group.curve")}
-          options={[
-            { value: "curve", label: t("editor.group.curve") },
-            { value: "preset", label: t("editor.preset.title") },
-            { value: "color", label: t("editor.colorManagement.title") },
-          ]}
+          options={curveTabs()}
         />
         {/*
-         * 曲线 / 预设共用一个内容容器：曲线在流内定高（切到预设时隐藏但**留位**），
-         * 预设绝对定位填满同一格 —— 切页签高度不伸缩；预设树在容器里 flex 填充、
-         * 内部滚动。审计 2026-10-04：此前两页签各挂各的、只有自然高度，
-         * 预设多时整条右栏被撑长。
-         *
-         * 色彩管理页签**不属于这个容器**（内容跟在容器后面）：切到色彩时整格 `hidden`
-         * —— 否则曲线那份留位会原样空在色彩内容上方，就是「色彩面板上部一大块空白」
-         * （崔总 2026-10-10）。等高只管曲线 ↔ 预设两页签。
+         * 三个页签**各自渲染**（2026-11-05）：预设搬去左列面板后，原先「曲线留位 + 预设
+         * 绝对定位填满同一格」的等高技巧就没有第二个对象了 —— 那套容器只会给色盘留下
+         * 一整块空白（正是崔总 2026-10-10 报过的「色彩面板上部一大块空白」的同一个坑）。
          */}
-        <div class="relative flex min-h-0 flex-col" classList={{ hidden: curveTab() === "color" }} data-editor-advanced-body>
-          <div classList={{ invisible: curveTab() !== "curve" }} data-editor-curve-slot>
-            <CurveTab
-              store={props.store}
-              enabled={props.enabled}
-              current={props.current}
-              loadHistogram={props.loadHistogram}
-              onConfirm={props.onConfirm}
-              onRenameBaseCurve={props.onRenameBaseCurve}
-              baseCurveLibrary={props.baseCurveLibrary}
-              onSelectBaseCurve={props.onSelectBaseCurve}
-            />
-          </div>
-          <Show when={curveTab() === "preset"}>
-            <div class="absolute inset-0 flex min-h-0 flex-col" data-editor-preset-slot>
-              <PresetPanel
-                store={props.store}
-                enabled={props.enabled}
-                onConfirm={props.onConfirm}
-                createDirectory={props.onCreatePresetDirectory}
-                createPreset={props.onCreatePreset}
-                renameDirectory={props.onRenamePresetDirectory}
-                deletePreset={props.onDeletePreset}
-                deleteDirectory={props.onDeletePresetDirectory}
-                movePresets={props.onMovePresets}
-                applyPreset={props.onApplyPreset}
-                class="min-h-0 flex-1"
-              />
-            </div>
-          </Show>
-        </div>
+        <Show when={curveTab() === "curve"}>
+          <CurveTab
+            store={props.store}
+            enabled={props.enabled}
+            current={props.current}
+            loadHistogram={props.loadHistogram}
+            onConfirm={props.onConfirm}
+            onRenameBaseCurve={props.onRenameBaseCurve}
+            baseCurveLibrary={props.baseCurveLibrary}
+            onSelectBaseCurve={props.onSelectBaseCurve}
+          />
+        </Show>
+        <Show when={curveTab() === "swatch"}>
+          <SwatchPanel />
+        </Show>
         <Show when={curveTab() === "color"}>
-          <ColorManagementTab store={props.store} enabled={props.enabled} hasPhoto={props.current !== null} profileEntries={props.profileEntries} onRefreshProfiles={props.onRefreshProfiles} onApplyColor={props.onApplyColor} onOpenProfiles={props.onOpenColorProfiles} colorBatchCount={props.colorBatchCount} onReviewColorBatch={props.onReviewColorBatch} />
+          <ColorManagementTab store={props.store} enabled={props.enabled && props.store.onDefaultLayer()} hasPhoto={props.current !== null} profileEntries={props.profileEntries} onRefreshProfiles={props.onRefreshProfiles} onApplyColor={props.onApplyColor} onOpenProfiles={props.onOpenColorProfiles} colorBatchCount={props.colorBatchCount} onReviewColorBatch={props.onReviewColorBatch} onError={props.onError} />
         </Show>
       </section>
       </div>
@@ -317,35 +397,49 @@ export function EditorPanels(props: EditorPanelsProps): JSX.Element {
   );
 }
 
-function ColorManagementTab(props: { store: EditorStore; enabled: boolean; hasPhoto: boolean; profileEntries: readonly ColorProfileEntry[]; onRefreshProfiles: () => void; onApplyColor: (profileId: string | null) => Promise<void>; onOpenProfiles: () => void; colorBatchCount:number;onReviewColorBatch:(profileId:string|null)=>Promise<void> }): JSX.Element {
+/**
+ * 色盘（Color wheels）—— **空面板占位**（崔总 2026-11-05）。
+ *
+ * 位置：右栏第 3 组，夹在 `曲线` 与 `色彩管理` 之间。将来这里放类似 DaVinci 的
+ * 四色轮调色（阴影 / 中间调 / 高光 / 偏移）。
+ *
+ * 现在**刻意什么都不做**：没有控件、没有默认值、不进 profile / 哈希 / 撤销 / XMP。
+ * 放一个空态水印只为说明「这一格是留给它的」，不是功能入口 —— 所以不画假旋钮。
+ */
+function SwatchPanel(): JSX.Element {
+  return (
+    <div class="flex min-h-32 flex-1 items-center justify-center rounded-ui bg-surface-bar" data-editor-swatch>
+      <StateWatermark icon={<IconColorSwatch size={64} stroke-width={1} />} text={t("editor.swatch.empty")} />
+    </div>
+  );
+}
+
+function ColorManagementTab(props: { store: EditorStore; enabled: boolean; hasPhoto: boolean; profileEntries: readonly ColorProfileEntry[]; onRefreshProfiles: () => void; onApplyColor: (profileId: string | null) => Promise<void>; onOpenProfiles: () => void; colorBatchCount:number;onReviewColorBatch:(profileId:string|null)=>Promise<void>; onError?: (message: string) => void }): JSX.Element {
   const [choice,setChoice] = createSignal("auto");
   const [busy,setBusy] = createSignal(false);
-  const [error,setError] = createSignal<string|null>(null);
+
   const color = () => props.store.colorState();
-  createEffect(() => { const source=color()?.source; setChoice(source?.kind === "assigned_rgb_icc" ? source.profile_id : "auto"); setError(null); });
+  createEffect(() => { const source=color()?.source; setChoice(source?.kind === "assigned_rgb_icc" ? source.profile_id : "auto"); });
   const apply = async (automatic=false,batch=false): Promise<void> => {
     if (!props.enabled || busy()) return;
     const selected = automatic ? "auto" : choice();
     const id = selected === "srgb" ? props.profileEntries.find(entry=>entry.key === "builtin:srgb-v1")?.profileId : selected;
     if (!id) return;
-    setBusy(true); setError(null);
+    setBusy(true);
     try { await (batch ? props.onReviewColorBatch : props.onApplyColor)(id === "auto" ? null : id); }
-    catch(error) { setError(String(error)); }
+    catch(error) { props.onError?.(String(error)); }
     finally { setBusy(false); }
   };
   return (
     <div class="flex flex-col gap-2 text-fs-1" data-editor-color-management>
       <div class="flex flex-col gap-2">
         <div class="font-semibold text-fg-1">{t("editor.colorManagement.input")}</div>
-        <p class="mt-1 leading-relaxed text-fg-2">
-          {t(!props.hasPhoto ? "editor.colorManagement.noPhoto" : color() ? "editor.colorManagement.frozen" : "editor.colorManagement.inputPending")}
-        </p>
         <ProfileSelect role="input" allowAutomatic label={t("editor.colorManagement.input")} class="w-full" entries={props.profileEntries} value={choice()} disabled={!props.enabled || busy()} onFocus={props.onRefreshProfiles} onChange={setChoice} />
         <div class="flex gap-2"><Button class="flex-1" variant="primary" disabled={!props.enabled || busy()} onClick={()=>void apply()}>{t(busy() ? "editor.colorManagement.preparing" : "editor.colorManagement.apply")}</Button>
           <Button class="flex-1" variant="secondary" disabled={!props.enabled || busy()} onClick={()=>void apply(true)}>{t("editor.colorManagement.restore")}</Button></div>
         <Button variant="secondary" disabled={!props.enabled || busy() || props.colorBatchCount<2} onClick={()=>void apply(false,true)}>{t("editor.colorManagement.batch",{count:props.colorBatchCount})}</Button>
         <Show when={color()}>{value=><p class="text-fs-0 text-fg-3">{t(`editor.colorManagement.source.${value().source.kind}` as Parameters<typeof t>[0])}</p>}</Show>
-        <Show when={error()}>{message=><p role="alert" class="text-fs-0 text-danger">{message()}</p>}</Show>
+
       </div>
       <div class="rounded-ui bg-surface-bar p-3">
         <div class="font-semibold text-fg-1">{t("editor.colorManagement.working")}</div>
@@ -353,13 +447,20 @@ function ColorManagementTab(props: { store: EditorStore; enabled: boolean; hasPh
       </div>
       <div class="rounded-ui bg-surface-bar p-3">
         <div class="font-semibold text-fg-1">{t("editor.colorManagement.display")}</div>
-        <div class="mt-2"><DisplayColorStatus status={props.store.renderState()?.displayColor ?? null} /></div>
+        <div class="mt-2"><DisplayColorStatus status={props.store.renderState()?.displayColor ?? null} detail={false} /></div>
       </div>
       <div class="rounded-ui bg-surface-bar p-3">
-        <Switch label={t("editor.colorManagement.proof")} checked={props.store.proofEnabled()} disabled={!props.hasPhoto} onCheckedChange={props.store.setProofEnabled} />
+        {/*
+          「相对色度」是打样采用的渲染意图（固定值，不做选择器）。
+          它跟在开关同一行右侧 —— 去掉之前那句「RGB · 相对色度。只改变查看；…」的固定说明
+          （崔总 2026-11-01：界面不挂无变量的静态解释）。
+        */}
+        <div class="flex items-center justify-between gap-2">
+          <Switch label={t("editor.colorManagement.proof")} checked={props.store.proofEnabled()} disabled={!props.hasPhoto} onCheckedChange={props.store.setProofEnabled} />
+          <span class="text-fs-0 text-fg-3">{t("editor.colorManagement.intent")}</span>
+        </div>
         <ProfileSelect role="output" label={t("editor.colorManagement.proofTarget")} class="mt-2 w-full" entries={props.profileEntries} value={outputColorChoice(props.store.proofTarget())} onFocus={props.onRefreshProfiles} onChange={value=>{const target=outputColorFromChoice(value);if(target)props.store.setProofTarget(target);}} />
         <div class="mt-2"><Switch label={t("editor.colorManagement.gamutWarning")} checked={props.store.proofWarning()} disabled={!props.store.proofEnabled()} onCheckedChange={props.store.setProofWarning} /></div>
-        <p class="mt-1 text-fs-0 text-fg-3">{t("editor.colorManagement.proofLimit")}</p>
       </div>
       <button
         type="button"
@@ -369,7 +470,6 @@ function ColorManagementTab(props: { store: EditorStore; enabled: boolean; hasPh
         {t("editor.colorManagement.manage")}
         <IconExternalLink size={16} aria-hidden="true" />
       </button>
-      <p class="px-1 text-fs-0 leading-relaxed text-fg-3">{t("editor.colorManagement.cacheHint")}</p>
     </div>
   );
 }
@@ -380,7 +480,7 @@ function ColorManagementTab(props: { store: EditorStore; enabled: boolean; hasPh
  * 「启用校正」开关**只管配置文件那一半** —— 关掉它之后手动拉杆照常生效
  * （与 Lightroom 的 Lens Corrections 面板一致）。 */
 function LensExtras(props: { store: EditorStore; enabled: boolean; onConfirm?: () => void;
-  queryState: LensQueryState; onRefresh: () => void }): JSX.Element {
+  queryState: LensQueryState; onRefresh: () => void; onError?: (message: string) => void }): JSX.Element {
   const [open, setOpen] = createSignal(false);
   const [query, setQuery] = createSignal("");
   const match = (): LensMatch | null => props.queryState.data;
@@ -409,6 +509,19 @@ function LensExtras(props: { store: EditorStore; enabled: boolean; onConfirm?: (
     return searchLensProfiles(match()!, query()).filter((p) => !suggested.has(p.key));
   };
   const suggestions = () => match() === null ? [] : suggestedLensProfiles(match()!);
+  /*
+   * 查询失败走**统一消息通道**：这里只保留「重试」动作，不再把错误正文
+   * 塞在参数面板里（`AGENTS.md` §2.29）。
+   */
+  createEffect(() => {
+    if (props.queryState.status !== "error") return;
+    const message = props.queryState.error ?? t(props.queryState.failure === "timeout"
+      ? "editor.lens.timeout"
+      : props.queryState.failure === "unavailable"
+        ? "editor.lens.unavailable"
+        : "editor.lens.failed");
+    props.onError?.(message);
+  });
   const row = (key: string, text: string): JSX.Element => (
     <button type="button" class="w-full rounded-ui px-2 py-1.5 text-left text-fs-1 text-fg-1 hover:bg-state-hover"
       aria-pressed={chosen() === key || (chosen() === null && key === "none")}
@@ -421,13 +534,7 @@ function LensExtras(props: { store: EditorStore; enabled: boolean; onConfirm?: (
       </p>
     </Show>
     <Show when={props.queryState.status === "error"}>
-      <div role="alert" class="flex flex-col gap-1" data-lens-error>
-        <p class="break-words text-fs-0 text-danger">{t(props.queryState.failure === "timeout"
-          ? "editor.lens.timeout" : props.queryState.failure === "unavailable"
-          ? "editor.lens.unavailable" : "editor.lens.failed")}</p>
-        <Show when={props.queryState.error}><p class="break-words text-fs-0 text-fg-2">{props.queryState.error}</p></Show>
-        <Button variant="secondary" onClick={props.onRefresh}>{t("editor.lens.retry")}</Button>
-      </div>
+      <Button variant="secondary" onClick={props.onRefresh}>{t("editor.lens.retry")}</Button>
     </Show>
     <Show when={props.queryState.status === "ready" && match()?.detected === null}>
       <p role="status" class="text-fs-0 text-fg-2">{t(match()?.lensName ? "editor.lens.notFound" : "editor.lens.noExif")}</p>
@@ -493,6 +600,11 @@ function CurveTab(props: {
   loadHistogram: (path: string, bins: number) => Promise<HistogramCounts | null>;
   onConfirm?: () => void;
   onToolConfirm?: () => void;
+  /**
+   * **错误上报**（统一消息通道）：面板里不再显示内联红字，`AGENTS.md` §2.29。
+   * 工作区把 `props.toast.show` 包一层传进来。
+   */
+  onError?: (message: string) => void;
   baseCurveLibrary: BaseCurveLibrary | null;
   onSelectBaseCurve: (id: string | null) => void;
   onRenameBaseCurve: (id: string, name: string) => Promise<void>;
@@ -584,13 +696,14 @@ function CurveTab(props: {
     <Show when={props.store.editBase() === "raw" && props.baseCurveLibrary?.cameraMake && props.baseCurveLibrary?.cameraModel}>
       <div class="flex flex-col gap-1" data-base-curve-selector>
         <span class="text-fs-0 text-fg-2">{t("editor.baseCurve.label")}</span>
-        <Button variant="secondary" disabled={!props.enabled || props.store.autoAdjusting()} class="h-auto min-h-8 w-full justify-between py-1.5"
+        <Button variant="secondary" disabled={!props.enabled || props.store.autoAdjusting() || !props.store.onDefaultLayer()} class="h-auto min-h-8 w-full justify-between py-1.5"
           onClick={() => setBaseOpen(true)}>{baseLabel()}</Button>
         <p class="text-fs-0 text-fg-3">{t("editor.baseCurve.cameraOnly")}</p>
       </div>
       <Dialog open={baseOpen()} onOpenChange={setBaseOpen} title={t("editor.baseCurve.label")}>
         <div class="max-h-64 overflow-y-auto" data-base-curve-results>
           <button type="button" class="w-full rounded-ui px-2 py-1.5 text-left text-fs-1 text-fg-1 hover:bg-state-hover"
+            disabled={!props.enabled || props.store.autoAdjusting() || !props.store.onDefaultLayer()}
             aria-pressed={props.store.baseCurveProfile() === "none"}
             onClick={() => { props.onSelectBaseCurve("none"); setBaseOpen(false); }}>
             {t("editor.baseCurve.none")}</button>
@@ -600,11 +713,11 @@ function CurveTab(props: {
           <For each={props.baseCurveLibrary?.profiles ?? []}>{profile =>
             <div class="flex items-center gap-1 rounded-ui hover:bg-state-hover">
               <button type="button" class="min-w-0 flex-1 overflow-hidden whitespace-nowrap fade-x-end rounded-ui px-2 py-1.5 text-left text-fs-1 text-fg-1"
-                disabled={!props.enabled || props.store.autoAdjusting()}
+                disabled={!props.enabled || props.store.autoAdjusting() || !props.store.onDefaultLayer()}
                 aria-pressed={props.store.baseCurveProfile() === profile.id}
                 onClick={() => { props.onSelectBaseCurve(profile.id); setBaseOpen(false); }}>
                 {profile.name}</button>
-              <IconButton label={t("editor.baseCurve.rename")} disabled={!props.enabled || props.store.autoAdjusting()}
+              <IconButton label={t("editor.baseCurve.rename")} disabled={!props.enabled || props.store.autoAdjusting() || !props.store.onDefaultLayer()}
                 onClick={() => { setBaseOpen(false); setRenameName(profile.name); setRenameError(null); setRenameTarget(profile.id); }}>
                 <IconPencil size={14} aria-hidden="true" />
               </IconButton>

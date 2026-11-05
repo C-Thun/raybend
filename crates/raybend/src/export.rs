@@ -410,7 +410,7 @@ pub fn render_captured(
     path: &Path,
     captured: &VariantSnapshot,
     lens: Option<&crate::develop::lens::LensCorrection>,
-    lut: Option<&crate::develop::lut::Lut>,
+    lut: Option<&crate::develop::lut::LutChain>,
     max_edge: u32,
 ) -> Result<crate::display::output::Rgb16Image> {
     verify_capture(path, captured, lut, max_edge)?;
@@ -421,11 +421,12 @@ pub fn render_captured(
     Ok(image)
 }
 
-fn verify_capture(path: &Path, captured: &VariantSnapshot, lut: Option<&crate::develop::lut::Lut>, max_edge: u32) -> Result<()> {
+fn verify_capture(path: &Path, captured: &VariantSnapshot, lut: Option<&crate::develop::lut::LutChain>, max_edge: u32) -> Result<()> {
     if max_edge > 65535 || issues::profile_hash(&captured.stack)? != captured.profile_hash {
         return Err(Error::Unsupported("导出快照或输出尺寸无效".into()));
     }
-    if captured.stack.lut_id.is_some() && captured.stack.lut_enabled == Some(true) && lut.is_none()
+    if captured.stack.lut_chain_active()
+        && lut.is_none_or(crate::develop::lut::LutChain::is_empty)
     {
         return Err(Error::Unsupported("导出定稿引用的 LUT 不可用".into()));
     }
@@ -443,7 +444,7 @@ fn verify_capture(path: &Path, captured: &VariantSnapshot, lut: Option<&crate::d
 
 pub fn render_working_captured(
     path: &Path, captured: &VariantSnapshot, lens: Option<&crate::develop::lens::LensCorrection>,
-    lut: Option<&crate::develop::lut::Lut>, max_edge: u32,
+    lut: Option<&crate::develop::lut::LutChain>, max_edge: u32,
     profile: impl FnMut(&crate::color::ProfileId, crate::color::icc::IccRole) -> Result<crate::color::icc::RgbIcc>,
 ) -> Result<crate::color::working::WorkingImage> {
     verify_capture(path, captured, lut, max_edge)?;
@@ -460,7 +461,7 @@ pub fn render_for_preset(
     path: &Path,
     captured: &VariantSnapshot,
     lens: Option<&crate::develop::lens::LensCorrection>,
-    lut: Option<&crate::develop::lut::Lut>,
+    lut: Option<&crate::develop::lut::LutChain>,
     preset: &Preset,
 ) -> Result<crate::display::output::Rgb16Image> {
     validate_size(preset)?;
@@ -501,7 +502,7 @@ pub fn preset_max_edge(dimensions: (u32, u32), preset: &Preset) -> Result<u32> {
 
 pub fn render_working_for_preset(
     path: &Path, captured: &VariantSnapshot,
-    lens: Option<&crate::develop::lens::LensCorrection>, lut: Option<&crate::develop::lut::Lut>,
+    lens: Option<&crate::develop::lens::LensCorrection>, lut: Option<&crate::develop::lut::LutChain>,
     preset: &Preset,
     profile: impl FnMut(&crate::color::ProfileId, crate::color::icc::IccRole) -> Result<crate::color::icc::RgbIcc>,
 ) -> Result<crate::color::working::WorkingImage> {
@@ -521,7 +522,7 @@ pub fn write_tiff16(
     target: &Path,
     captured: &VariantSnapshot,
     lens: Option<&crate::develop::lens::LensCorrection>,
-    lut: Option<&crate::develop::lut::Lut>,
+    lut: Option<&crate::develop::lut::LutChain>,
     max_edge: u32,
 ) -> Result<(u32, u32)> {
     write_tiff16_checked(path, target, captured, lens, lut, max_edge, || Ok(()))
@@ -531,7 +532,7 @@ pub fn write_tiff16_checked(
     target: &Path,
     captured: &VariantSnapshot,
     lens: Option<&crate::develop::lens::LensCorrection>,
-    lut: Option<&crate::develop::lut::Lut>,
+    lut: Option<&crate::develop::lut::LutChain>,
     max_edge: u32,
     check_session: impl Fn() -> Result<()>,
 ) -> Result<(u32, u32)> {
@@ -748,7 +749,7 @@ mod tests {
             assert!(write_tiff16(&source, &target, &captured, None, None, 0).is_err());
         }
         let mut invalid = captured.clone();
-        invalid.stack.lut_id = Some("missing".into());
+        invalid.stack.lut_chain = vec![crate::store::develop::LutLayer::new("missing")];
         invalid.stack.lut_enabled = Some(true);
         invalid.profile_hash = issues::profile_hash(&invalid.stack).unwrap();
         assert!(render_captured(&source, &invalid, None, None, 0).is_err());

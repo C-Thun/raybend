@@ -7,7 +7,9 @@
  * * `v1`：LUT 分类 + 面板开关（分类首次成功接入后导入 `app.db`）；
  * * `v2`：只保留面板开关（LUT 分类以数据库为真源）；
  * * `v3`（2026-10-12）：开关从「LUT 一个布尔」变成**左列面板**（`lut` / `issues` / `null`）——
- *   左列有 LUT 与定稿两个面板，同一时刻只开一个。
+ *   左列有 LUT 与定稿两个面板，同一时刻只开一个；
+ * * `v4`（2026-10-31）：加 `showPoints` —— toolsbar right 的「显示控制点」眼睛
+ *   （纯视图偏好：不进 profile / 哈希 / 撤销 / XMP）。
  *
  * # 为什么 LUT 分类是**设备级**而不是库级
  *
@@ -31,10 +33,12 @@ import type { EditorLeftPanel } from "./editor-chrome.ts";
 export { LUT_NAME_MAX };
 
 /** 当前存储键（版本化；以后改结构继续升版本并显式迁移）。 */
-export const EDITOR_PREFS_KEY = "raybend.editor.v3";
+export const EDITOR_PREFS_KEY = "raybend.editor.v4";
 export const LEGACY_EDITOR_PREFS_KEY = "raybend.editor.v1";
-/** 上一版（只有 `lutOpen` 布尔的那个）—— 读出来做一次性迁移。 */
-export const PREVIOUS_EDITOR_PREFS_KEY = "raybend.editor.v2";
+/** 上一版（v3：左列面板三态）—— 读出来做一次性迁移。 */
+export const PREVIOUS_EDITOR_PREFS_KEY = "raybend.editor.v3";
+/** v2（只有 `lutOpen` 布尔的那个）。 */
+export const V2_EDITOR_PREFS_KEY = "raybend.editor.v2";
 const LUT_CATEGORY_IMPORT_KEY = "raybend.editor.lut-category-import.v1";
 
 /**
@@ -44,18 +48,22 @@ const LUT_CATEGORY_IMPORT_KEY = "raybend.editor.lut-category-import.v1";
  */
 export const LEGACY_EDITOR_PREFS_KEYS: readonly string[] = [
   PREVIOUS_EDITOR_PREFS_KEY,
+  V2_EDITOR_PREFS_KEY,
   LEGACY_EDITOR_PREFS_KEY,
 ];
 
 export interface EditorPrefs {
   leftPanel: EditorLeftPanel | null;
   lutCategories: LutCategory[];
+  /** 「显示控制点」眼睛（纯视图偏好；默认开）。 */
+  showPoints: boolean;
 }
 
 /** 默认值：**LUT 面板默认开**（人类 2026-09-23 定）。 */
 export const DEFAULT_EDITOR_PREFS: EditorPrefs = {
   leftPanel: "lut",
   lutCategories: [],
+  showPoints: true,
 };
 
 /**
@@ -63,7 +71,7 @@ export const DEFAULT_EDITOR_PREFS: EditorPrefs = {
  * 认不出来就回落到**旧版的 `lutOpen` 布尔**（`v2` 及更早的形状）。
  */
 function sanitizeLeftPanel(panel: unknown, legacyLutOpen: unknown): EditorLeftPanel | null {
-  if (panel === "lut" || panel === "issues") return panel;
+  if (panel === "lut" || panel === "issues" || panel === "areas") return panel;
   if (panel === null) return null;
   // 旧版只有「LUT 面板开着没有」这一个布尔；只有明确的 `false` 才算关着
   return legacyLutOpen === false ? null : "lut";
@@ -77,6 +85,7 @@ export function sanitizeEditorPrefs(raw: unknown): EditorPrefs {
     leftPanel: sanitizeLeftPanel(record.leftPanel, record.lutOpen),
     // 分类的清洗在 `lib/lut-library.ts`（那一份是唯一实现，这里不再抄一遍）
     lutCategories: sanitizeLutCategories(record.lutCategories),
+    showPoints: typeof record.showPoints === "boolean" ? record.showPoints : true,
   };
 }
 

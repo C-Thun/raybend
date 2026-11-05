@@ -358,7 +358,7 @@ pub fn execute(
     metadata: &Metadata,
     sequence: u64,
     lens: Option<&crate::develop::lens::LensCorrection>,
-    lut: Option<&crate::develop::lut::Lut>,
+    lut: Option<&crate::develop::lut::LutChain>,
     suffix: &str,
 ) -> Result<Publication> {
     execute_checked(
@@ -383,7 +383,7 @@ pub fn execute_checked(
     metadata: &Metadata,
     sequence: u64,
     lens: Option<&crate::develop::lens::LensCorrection>,
-    lut: Option<&crate::develop::lut::Lut>,
+    lut: Option<&crate::develop::lut::LutChain>,
     check: impl Fn() -> Result<()>,
     suffix: &str,
 ) -> Result<Publication> {
@@ -393,7 +393,7 @@ pub fn execute_checked(
 
 pub fn execute_checked_with_profiles(
     source: &Path, captured: &VariantSnapshot, preset: &Preset, naming: &Naming, metadata: &Metadata,
-    sequence: u64, lens: Option<&crate::develop::lens::LensCorrection>, lut: Option<&crate::develop::lut::Lut>,
+    sequence: u64, lens: Option<&crate::develop::lens::LensCorrection>, lut: Option<&crate::develop::lut::LutChain>,
     check: impl Fn() -> Result<()>, suffix: &str,
     mut profile: impl FnMut(&crate::color::ProfileId, crate::color::icc::IccRole) -> Result<crate::color::icc::RgbIcc>,
 ) -> Result<Publication> {

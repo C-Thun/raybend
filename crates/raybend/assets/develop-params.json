@@ -8,31 +8,243 @@
     "  * 管线：develop::params::spec(id) 决定一个参数怎么被理解。",
     "'origin' = 拉杆填充从哪长（center 双极 / start 单极），与'把手在哪'无关。",
     "'wired' = 本波（M3-W3）这条参数接没接进显影管线；false 的界面要禁用并写明哪一波接。",
+    "'target' = 这条参数能出现在哪种编辑区层里：global（只有默认层）/ layered（三种层都行）/ mask（不进面板与预设）。规格 specs/editor-area.md §3.2。",
     "'baseline' = 默认值的来源：'static' 用 default 字段；'as-shot' 表示随照片变（色温），",
     "  default 只是读不到元数据时的兜底。",
     "注意：参数表里**没有**曲线 —— 曲线是另一套模型（每通道控制点），不进这个文件。"
   ],
   "version": 1,
   "params": [
-    { "id": "exposure", "min": -2, "max": 2, "step": 0.05, "default": 0, "origin": "center", "wired": true, "baseline": "static" },
-    { "id": "contrast", "min": -100, "max": 100, "step": 1, "default": 0, "origin": "center", "wired": true, "baseline": "static" },
-    { "id": "highlights", "min": -100, "max": 100, "step": 1, "default": 0, "origin": "center", "wired": true, "baseline": "static" },
-    { "id": "blacks", "min": -100, "max": 100, "step": 1, "default": 0, "origin": "center", "wired": true, "baseline": "static" },
-    { "id": "dynamicContrast", "min": 0, "max": 100, "step": 1, "default": 0, "origin": "start", "wired": true, "baseline": "static" },
-
-    { "id": "temperature", "min": 2500, "max": 10000, "step": 50, "default": 6250, "origin": "center", "wired": true, "baseline": "as-shot" },
-    { "id": "saturation", "min": -100, "max": 100, "step": 1, "default": 0, "origin": "center", "wired": true, "baseline": "static" },
-    { "id": "vibrance", "min": -100, "max": 100, "step": 1, "default": 0, "origin": "center", "wired": true, "baseline": "static" },
-
-    { "id": "lumaNr", "min": 0, "max": 100, "step": 1, "default": 0, "origin": "start", "wired": true, "baseline": "static" },
-    { "id": "colorNr", "min": 0, "max": 100, "step": 1, "default": 0, "origin": "start", "wired": true, "baseline": "static" },
-    { "id": "sharpenAmount", "min": 0, "max": 100, "step": 1, "default": 0, "origin": "start", "wired": true, "baseline": "static" },
-    { "id": "sharpenRadius", "min": 0, "max": 100, "step": 1, "default": 0, "origin": "start", "wired": true, "baseline": "static" },
-
-    { "id": "distortion", "min": -100, "max": 100, "step": 1, "default": 0, "origin": "center", "wired": true, "baseline": "static" },
-    { "id": "vignette", "min": -100, "max": 100, "step": 1, "default": 0, "origin": "center", "wired": true, "baseline": "static" },
-    { "id": "vignetteRange", "min": 0, "max": 100, "step": 1, "default": 50, "origin": "start", "wired": true, "baseline": "static" },
-    { "id": "chromatic", "min": -100, "max": 100, "step": 1, "default": 0, "origin": "center", "wired": true, "baseline": "static" },
-    { "id": "chromaticBlue", "min": -100, "max": 100, "step": 1, "default": 0, "origin": "center", "wired": true, "baseline": "static" }
+    {
+      "id": "exposure",
+      "min": -2,
+      "max": 2,
+      "step": 0.05,
+      "default": 0,
+      "origin": "center",
+      "target": "layered",
+      "wired": true,
+      "baseline": "static"
+    },
+    {
+      "id": "contrast",
+      "min": -100,
+      "max": 100,
+      "step": 1,
+      "default": 0,
+      "origin": "center",
+      "target": "layered",
+      "wired": true,
+      "baseline": "static"
+    },
+    {
+      "id": "highlights",
+      "min": -100,
+      "max": 100,
+      "step": 1,
+      "default": 0,
+      "origin": "center",
+      "target": "layered",
+      "wired": true,
+      "baseline": "static"
+    },
+    {
+      "id": "blacks",
+      "min": -100,
+      "max": 100,
+      "step": 1,
+      "default": 0,
+      "origin": "center",
+      "target": "layered",
+      "wired": true,
+      "baseline": "static"
+    },
+    {
+      "id": "dynamicContrast",
+      "min": 0,
+      "max": 100,
+      "step": 1,
+      "default": 0,
+      "origin": "start",
+      "target": "global",
+      "wired": true,
+      "baseline": "static"
+    },
+    {
+      "id": "temperature",
+      "min": 2500,
+      "max": 10000,
+      "step": 50,
+      "default": 6250,
+      "origin": "center",
+      "target": "layered",
+      "wired": true,
+      "baseline": "as-shot"
+    },
+    {
+      "id": "saturation",
+      "min": -100,
+      "max": 100,
+      "step": 1,
+      "default": 0,
+      "origin": "center",
+      "target": "layered",
+      "wired": true,
+      "baseline": "static"
+    },
+    {
+      "id": "vibrance",
+      "min": -100,
+      "max": 100,
+      "step": 1,
+      "default": 0,
+      "origin": "center",
+      "target": "layered",
+      "wired": true,
+      "baseline": "static"
+    },
+    {
+      "id": "lumaNr",
+      "min": 0,
+      "max": 100,
+      "step": 1,
+      "default": 0,
+      "origin": "start",
+      "target": "global",
+      "wired": true,
+      "baseline": "static"
+    },
+    {
+      "id": "colorNr",
+      "min": 0,
+      "max": 100,
+      "step": 1,
+      "default": 0,
+      "origin": "start",
+      "target": "global",
+      "wired": true,
+      "baseline": "static"
+    },
+    {
+      "id": "sharpenAmount",
+      "min": 0,
+      "max": 100,
+      "step": 1,
+      "default": 0,
+      "origin": "start",
+      "target": "global",
+      "wired": true,
+      "baseline": "static"
+    },
+    {
+      "id": "sharpenRadius",
+      "min": 0,
+      "max": 100,
+      "step": 1,
+      "default": 0,
+      "origin": "start",
+      "target": "global",
+      "wired": true,
+      "baseline": "static"
+    },
+    {
+      "id": "distortion",
+      "min": -100,
+      "max": 100,
+      "step": 1,
+      "default": 0,
+      "origin": "center",
+      "target": "global",
+      "wired": true,
+      "baseline": "static"
+    },
+    {
+      "id": "vignette",
+      "min": -100,
+      "max": 100,
+      "step": 1,
+      "default": 0,
+      "origin": "center",
+      "target": "global",
+      "wired": true,
+      "baseline": "static"
+    },
+    {
+      "id": "vignetteRange",
+      "min": 0,
+      "max": 100,
+      "step": 1,
+      "default": 50,
+      "origin": "start",
+      "target": "global",
+      "wired": true,
+      "baseline": "static"
+    },
+    {
+      "id": "chromatic",
+      "min": -100,
+      "max": 100,
+      "step": 1,
+      "default": 0,
+      "origin": "center",
+      "target": "global",
+      "wired": true,
+      "baseline": "static"
+    },
+    {
+      "id": "chromaticBlue",
+      "min": -100,
+      "max": 100,
+      "step": 1,
+      "default": 0,
+      "origin": "center",
+      "target": "global",
+      "wired": true,
+      "baseline": "static"
+    },
+    {
+      "id": "areaTolerance",
+      "min": 100,
+      "max": 1000,
+      "step": 1,
+      "default": 300,
+      "origin": "start",
+      "target": "mask",
+      "wired": true,
+      "baseline": "static"
+    },
+    {
+      "id": "areaOpacity",
+      "min": 0,
+      "max": 100,
+      "step": 1,
+      "default": 100,
+      "origin": "start",
+      "target": "mask",
+      "wired": true,
+      "baseline": "static"
+    },
+    {
+      "id": "areaChroma",
+      "min": 0,
+      "max": 100,
+      "step": 1,
+      "default": 50,
+      "origin": "center",
+      "target": "mask",
+      "wired": true,
+      "baseline": "static"
+    },
+    {
+      "id": "areaLuma",
+      "min": 0,
+      "max": 100,
+      "step": 1,
+      "default": 50,
+      "origin": "center",
+      "target": "mask",
+      "wired": true,
+      "baseline": "static"
+    }
   ]
 }

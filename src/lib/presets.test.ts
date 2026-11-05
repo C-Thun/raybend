@@ -92,7 +92,11 @@ test("sanitizePresetSnapshot 丢弃非法数值 / 非法曲线点，保留合法
   assert.deepEqual(snapshot!.curve?.rgb, [[0, 0], [1, 1]]);
   assert.equal(snapshot!.curve?.r, undefined);
   // lut.enabled 非 true → false
-  assert.deepEqual(snapshot!.lut, { id: "lut-1", enabled: false });
+  assert.deepEqual(snapshot!.lut, {
+    id: "lut-1",
+    enabled: false,
+    chain: [{ id: "lut-1", enabled: true, strength: 1 }],
+  });
 });
 
 test("sanitizePresetSnapshot 裁剪曲线点到 0..1", () => {
@@ -196,7 +200,7 @@ test("buildPresetSnapshot 勾选的大类写全字段（含默认值项）", () 
       nrMethod: "high",
       lensProfile: null,
       lensEnabled: null,
-      lutId: "lut-1",
+      lutChain: [{ id: "lut-1", enabled: true, strength: 1 }],
       lutEnabled: true,
       asShotK: 5400,
     },
@@ -209,11 +213,15 @@ test("buildPresetSnapshot 勾选的大类写全字段（含默认值项）", () 
   assert.equal(snapshot.detail, undefined);
   assert.equal(snapshot.lens, undefined);
   assert.equal(snapshot.curve, undefined);
-  assert.deepEqual(snapshot.lut, { id: "lut-1", enabled: true });
+  assert.deepEqual(snapshot.lut, {
+    id: "lut-1",
+    enabled: true,
+    chain: [{ id: "lut-1", enabled: true, strength: 1 }],
+  });
   assert.equal(snapshot.version, 3);
   // 缺失的参数值按 0 兜底
   const partial = buildPresetSnapshot(["tone"],
-    { values: {}, curves: {}, nrMethod: null, lensProfile: null, lensEnabled: null, lutId: null, lutEnabled: false, asShotK: null },
+    { values: {}, curves: {}, nrMethod: null, lensProfile: null, lensEnabled: null, lutChain: [], lutEnabled: false, asShotK: null },
     GROUP_PARAMS);
   assert.deepEqual(partial.tone, { exposure: 0, contrast: 0 });
 });
@@ -224,7 +232,7 @@ test("buildPresetSnapshot detail/lens 携带附加字段", () => {
     {
       values: { lumaNr: 12, sharpenAmount: 3, distortion: -4, vignette: 60 },
       curves: {}, nrMethod: "high", lensProfile: "maker|model", lensEnabled: false,
-      lutId: null, lutEnabled: false, asShotK: null,
+      lutChain: [], lutEnabled: false, asShotK: null,
     },
     GROUP_PARAMS,
   );
@@ -272,7 +280,10 @@ test("planPresetApply 曲线大类写满四通道（缺通道 = 恒等）", () =
 test("planPresetApply LUT 存在才生效，丢失静默忽略", () => {
   const exists = sanitizePresetSnapshot({ version: 1, lut: { id: "lut-1", enabled: true } })!;
   const applied = planPresetApply(exists, GROUP_PARAMS, DEFAULTS, (id) => id === "lut-1", null);
-  assert.deepEqual(applied.lut, { id: "lut-1", enabled: true });
+  assert.deepEqual(applied.lut, {
+    chain: [{ id: "lut-1", enabled: true, strength: 1 }],
+    enabled: true,
+  });
   assert.deepEqual(applied.appliedGroups, ["lut"]);
 
   const missing = planPresetApply(exists, GROUP_PARAMS, DEFAULTS, () => false, null);
@@ -280,11 +291,59 @@ test("planPresetApply LUT 存在才生效，丢失静默忽略", () => {
   assert.deepEqual(missing.appliedGroups, []);
 });
 
-test("planPresetApply LUT id 为 null 表示清除当前 LUT", () => {
+test("预设里没有 LUT 层 ⇒ 不动当前链（预设整体是加法）", () => {
   const snapshot = sanitizePresetSnapshot({ version: 1, lut: { id: null, enabled: false } })!;
-  const plan = planPresetApply(snapshot, GROUP_PARAMS, DEFAULTS, () => true, null);
-  assert.deepEqual(plan.lut, { id: null, enabled: false });
+  const plan = planPresetApply(
+    snapshot, GROUP_PARAMS, DEFAULTS, () => true, null, undefined,
+    { currentLutChain: [{ id: "a", enabled: true, strength: 1 }], currentLutEnabled: true },
+  );
+  assert.equal(plan.lut, null, "不应用 LUT 大类");
+  assert.deepEqual(plan.appliedGroups, []);
+});
+
+test("应用预设时 LUT **追加**到现有链末尾，不替换整条链", () => {
+  const snapshot = sanitizePresetSnapshot({
+    version: 1,
+    lut: { id: null, enabled: true, chain: [{ id: "b", enabled: true, strength: 1 }] },
+  })!;
+  const plan = planPresetApply(
+    snapshot, GROUP_PARAMS, DEFAULTS, () => true, null, undefined,
+    { currentLutChain: [{ id: "a", enabled: true, strength: 0.5 }] },
+  );
+  assert.deepEqual(plan.lut, {
+    chain: [
+      { id: "a", enabled: true, strength: 0.5 },
+      { id: "b", enabled: true, strength: 1 },
+    ],
+    enabled: true,
+  });
   assert.deepEqual(plan.appliedGroups, ["lut"]);
+  // 现有链那一层**原样保留**（强度 0.5、开关不变）—— 上面第一条 deepEqual 已覆盖
+});
+
+test("追加时同名 LUT 保留最上层（现有链在上，预设里重复的那层丢掉）", () => {
+  const snapshot = sanitizePresetSnapshot({
+    version: 1,
+    lut: {
+      id: null,
+      enabled: true,
+      chain: [
+        { id: "a", enabled: false, strength: 0.2 },
+        { id: "c", enabled: true, strength: 1 },
+      ],
+    },
+  })!;
+  const plan = planPresetApply(
+    snapshot, GROUP_PARAMS, DEFAULTS, () => true, null, undefined,
+    { currentLutChain: [{ id: "a", enabled: true, strength: 1 }] },
+  );
+  assert.deepEqual(plan.lut, {
+    chain: [
+      { id: "a", enabled: true, strength: 1 }, // 最上层那个赢，预设里的 a 被丢
+      { id: "c", enabled: true, strength: 1 },
+    ],
+    enabled: true,
+  });
 });
 
 test("planPresetApply lens 大类带配置与开关", () => {
@@ -384,7 +443,7 @@ test("旧预设（v1/v2）读时迁移：绝对温度按「跟随拍摄色温」
 test("buildPresetSnapshot 色彩大类存 Δmired（不再存绝对色温）", () => {
   const snapshot = buildPresetSnapshot(["color"], {
     values: { temperature: 3000, saturation: 4 },
-    curves: {}, nrMethod: null, lensProfile: null, lensEnabled: null, lutId: null, lutEnabled: false,
+    curves: {}, nrMethod: null, lensProfile: null, lensEnabled: null, lutChain: [], lutEnabled: false,
     asShotK: 5000,
   }, GROUP_PARAMS);
   assert.equal(snapshot.color?.saturation, 4);
@@ -395,14 +454,14 @@ test("buildPresetSnapshot 色彩大类存 Δmired（不再存绝对色温）", (
   // 没动过白平衡（值 = as-shot）→ 0
   const neutral = buildPresetSnapshot(["color"], {
     values: { temperature: 5000 },
-    curves: {}, nrMethod: null, lensProfile: null, lensEnabled: null, lutId: null, lutEnabled: false,
+    curves: {}, nrMethod: null, lensProfile: null, lensEnabled: null, lutChain: [], lutEnabled: false,
     asShotK: 5000,
   }, GROUP_PARAMS);
   assert.equal(neutral.color?.wbMired, 0);
   // 基线未知 → 0（没有「相对谁」）
   const unknown = buildPresetSnapshot(["color"], {
     values: { temperature: 5000 },
-    curves: {}, nrMethod: null, lensProfile: null, lensEnabled: null, lutId: null, lutEnabled: false,
+    curves: {}, nrMethod: null, lensProfile: null, lensEnabled: null, lutChain: [], lutEnabled: false,
     asShotK: null,
   }, GROUP_PARAMS);
   assert.equal(unknown.color?.wbMired, 0);
@@ -431,4 +490,29 @@ test("planPresetApply：asShot 未知 → 跳过白平衡（其余项照常）�
   assert.equal(plan.values.temperature, undefined);
   assert.equal(plan.values.saturation, 7, "白平衡之外的色彩项照常应用");
   assert.deepEqual(plan.appliedGroups, ["color"]);
+});
+
+test("planPresetApply 允许已关闭但丢失的 LUT 层，拒绝重复与超上限链", () => {
+  const valid = sanitizePresetSnapshot({
+    version: 1,
+    lut: {
+      id: "a",
+      enabled: true,
+      chain: [
+        { id: "a", enabled: true, strength: 1 },
+        { id: "gone-but-off", enabled: false, strength: 0.4 },
+      ],
+    },
+  })!;
+  const plan = planPresetApply(valid, GROUP_PARAMS, DEFAULTS, (id) => id === "a", null);
+  assert.notEqual(plan.lut, "missing", "关闭层不参与渲染，文件丢了也不应拖垮整组");
+  assert.equal(plan.appliedGroups.includes("lut"), true);
+
+  for (const chain of [
+    [{ id: "a", enabled: true, strength: 1 }, { id: "a", enabled: true, strength: 1 }],
+    Array.from({ length: 9 }, (_, i) => ({ id: `l${i}`, enabled: true, strength: 1 })),
+  ]) {
+    const snapshot = sanitizePresetSnapshot({ version: 1, lut: { id: "a", enabled: true, chain } })!;
+    assert.equal(planPresetApply(snapshot, GROUP_PARAMS, DEFAULTS, () => true, null).lut, "missing");
+  }
 });

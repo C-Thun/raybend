@@ -351,8 +351,10 @@ mod tests {
             .to_rgb8();
         let source =
             LinearImage::from_srgb8(sample.width(), sample.height(), sample.as_raw()).unwrap();
+        let lut = std::sync::Arc::new(lut);
+        let chain = crate::develop::lut::LutChain::single(std::sync::Arc::clone(&lut));
         let stages = DevelopStages {
-            lut: Some(&lut),
+            lut: Some(&chain),
             ..Default::default()
         };
         let rendered = render_develop(

@@ -50,3 +50,9 @@ test("没有匹配时返回空（选中项仍保留）", () => {
     [2],
   );
 });
+
+test("词典还没拉回来（null）时给空菜单，而不是抛异常", () => {
+  // Solid 的 createMemo 里抛异常会带崩整个响应式根（2026-11-05 实测），所以这里必须稳。
+  assert.deepEqual(filterTagMenu(null, [1, 2], ""), []);
+  assert.deepEqual(filterTagMenu(null, [], "wed"), []);
+});

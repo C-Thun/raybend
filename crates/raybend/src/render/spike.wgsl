@@ -62,19 +62,26 @@ struct ProofConfig {
 @group(3) @binding(0) var<uniform> proof: ProofConfig;
 
 /*
- * 创意 LUT（`.cube` / Hald）：与 `crates/raybend/src/render/creative_lut.rs` **逐字段对应**。
+ * 创意 LUT 链（`.cube` / Hald）：与 `crates/raybend/src/render/creative_lut.rs` **逐字段对应**。
  * 挂在 group 0 的 4..7 —— WebGPU 的 `max_bind_groups` 默认只有 4，开不了 `group(4)`；
  * 而「这张图有没有 LUT」本来就属于图像绑定组（参照帧自己有一套，不套 LUT）。
- * `.low.xyz` = DOMAIN_MIN，`.high.xyz` = DOMAIN_MAX；`.low.w` = enabled，
- * `.high.w` = strength（多层链用）；`.flags.x/.y` = 有无立方表 / 有无 1D shaper。
- * 关闭时绑定的是 1×1×1 占位 + enabled = 0：着色器早退，一次采样都不做。
+ *
+ * 整条链只用**一张 3D 图集**（每层一段带边界复制的 Z）+ **一张 shaper 二维数组**，
+ * 所以层数不受采样器/纹理绑定上限约束（上限 8 是数据层的决定）。
+ * `.params`：x = 有链，y = 层数，z = 每层 slot 深度（片）。
+ * `.layers`：每层 3 个 vec4 ——
+ *   [0] `(domain_min.xyz, domain_max.x)`
+ *   [1] `(domain_max.yz, n, strength)`
+ *   [2] `(z_offset, shaper_len, has_cube, 0)`
+ * 关闭时绑的是 1×1×1 占位 + 层数 0：着色器早退，一次采样都不做。
  */
 struct CreativeLut {
-    low: vec4<f32>, high: vec4<f32>, flags: vec4<f32>,
+    params: vec4<f32>,
+    layers: array<vec4<f32>, 24>,
 };
 @group(0) @binding(4) var<uniform> lut: CreativeLut;
 @group(0) @binding(5) var lut_cube: texture_3d<f32>;
-@group(0) @binding(6) var lut_shaper: texture_2d<f32>;
+@group(0) @binding(6) var lut_shaper: texture_2d_array<f32>;
 @group(0) @binding(7) var lut_sampler: sampler;
 
 fn signed_encode(value: f32) -> f32 {
@@ -113,7 +120,7 @@ fn adjust_global(working: vec3<f32>, tone_on: bool) -> vec3<f32> {
     // （参照帧的图像配置把它关掉）。两个都关且没有 LUT 时**原样返回**：
     // 不坐一次 from/to Rec2020 的往返（那会改动末位）。
     let tone_active = tone_on && tone.params.x > 0.5;
-    if !tone_active && lut.low.w < 0.5 { return working; }
+    if !tone_active && lut.params.x < 0.5 { return working; }
     var rgb = from_rec2020(working);
     if tone_active { rgb = adjust_srgb(rgb); }
     rgb = apply_creative_lut(rgb);
@@ -142,38 +149,67 @@ fn adjust_srgb(rgb_in: vec3<f32>) -> vec3<f32> {
     return vec3<f32>(decode_encoded(rgb.r), decode_encoded(rgb.g), decode_encoded(rgb.b));
 }
 
-/// 一支 LUT 的求值 —— 与 `develop/lut.rs::eval_extended` 逐条对齐：
+/// 一层 LUT 的求值 —— 与 `develop/lut.rs` 的单层语义逐条对齐：
 /// 1. 输入先夹到 `DOMAIN_MIN..DOMAIN_MAX`，**夹掉的那部分作为残差留在外面**（HDR 高光不被吞）；
-/// 2. 归一化到 0..1，可选 1D shaper，再查 3D 立方表（硬件三线性 = CPU 的 8 点插值）；
-/// 3. 表输出夹到 0..1，最后把残差加回去。
-fn lut_encoded(x: vec3<f32>) -> vec3<f32> {
-    let bounded = clamp(x, lut.low.xyz, lut.high.xyz);
-    let span = max(lut.high.xyz - lut.low.xyz, vec3<f32>(0.000001));
-    var xyz = clamp((bounded - lut.low.xyz) / span, vec3<f32>(0.0), vec3<f32>(1.0));
-    if lut.flags.y > 0.5 {
-        let w = max(f32(textureDimensions(lut_shaper).x), 2.0);
-        let uvx = vec2<f32>((xyz.x * (w - 1.0) + 0.5) / w, 0.5);
-        let uvy = vec2<f32>((xyz.y * (w - 1.0) + 0.5) / w, 0.5);
-        let uvz = vec2<f32>((xyz.z * (w - 1.0) + 0.5) / w, 0.5);
-        xyz = clamp(vec3<f32>(textureSampleLevel(lut_shaper, lut_sampler, uvx, 0.0).r,
-            textureSampleLevel(lut_shaper, lut_sampler, uvy, 0.0).g,
-            textureSampleLevel(lut_shaper, lut_sampler, uvz, 0.0).b), vec3<f32>(0.0), vec3<f32>(1.0));
+/// 2. 归一化到 0..1，可选 1D shaper（逐通道），再查 3D 图集里这一层的 Z 段（硬件三线性 = CPU 的 8 点插值）；
+/// 3. 表输出夹到 0..1，把残差加回去，最后按 `strength` 与原值混合。
+fn lut_layer(
+    input: vec3<f32>,
+    domain_min: vec3<f32>,
+    domain_max: vec3<f32>,
+    n: f32, strength: f32,
+    z_offset: f32, shaper_len: f32, has_cube: bool, layer_index: i32,
+) -> vec3<f32> {
+    let bounded = clamp(input, domain_min, domain_max);
+    let span = max(domain_max - domain_min, vec3<f32>(0.000001));
+    var xyz = clamp((bounded - domain_min) / span, vec3<f32>(0.0), vec3<f32>(1.0));
+    if shaper_len > 0.5 {
+        // 逐通道采样：同一个表，三个通道各用自己的输入位置。
+        let tx = clamp(xyz.x, 0.0, 1.0) * (shaper_len - 1.0);
+        let ty = clamp(xyz.y, 0.0, 1.0) * (shaper_len - 1.0);
+        let tz = clamp(xyz.z, 0.0, 1.0) * (shaper_len - 1.0);
+        let sx = vec2<f32>((tx + 0.5) / shaper_len, 0.5);
+        let sy = vec2<f32>((ty + 0.5) / shaper_len, 0.5);
+        let sz = vec2<f32>((tz + 0.5) / shaper_len, 0.5);
+        xyz = clamp(vec3<f32>(
+            textureSampleLevel(lut_shaper, lut_sampler, sx, layer_index, 0.0).r,
+            textureSampleLevel(lut_shaper, lut_sampler, sy, layer_index, 0.0).g,
+            textureSampleLevel(lut_shaper, lut_sampler, sz, layer_index, 0.0).b), vec3<f32>(0.0), vec3<f32>(1.0));
     }
     var mapped = xyz;
-    if lut.flags.x > 0.5 {
-        let n = max(f32(textureDimensions(lut_cube).x), 2.0);
-        mapped = textureSampleLevel(lut_cube, lut_sampler, (xyz * (n - 1.0) + 0.5) / n, 0.0).rgb;
+    if has_cube {
+        // 图集：每层占 slot 片 Z，X/Y/Z 各留 1 texel 边界（CPU 上传时复制），
+        // 所以按层自己的 n 插值也不会串到相邻层。
+        let dims = vec3<f32>(textureDimensions(lut_cube));
+        let tx = 1.0 + xyz.x * (n - 1.0);
+        let ty = 1.0 + xyz.y * (n - 1.0);
+        let tz = z_offset + 1.0 + xyz.z * (n - 1.0);
+        let uv = vec3<f32>((tx + 0.5) / dims.x, (ty + 0.5) / dims.y, (tz + 0.5) / dims.z);
+        mapped = textureSampleLevel(lut_cube, lut_sampler, uv, 0.0).rgb;
     }
-    return clamp(mapped, vec3<f32>(0.0), vec3<f32>(1.0)) + (x - bounded);
+    let extended = clamp(mapped, vec3<f32>(0.0), vec3<f32>(1.0)) + (input - bounded);
+    return mix(input, extended, clamp(strength, 0.0, 1.0));
 }
 
-/// 创意 LUT 在**显示参考的编码域**里求值（CPU 也是 `transfer.encode` → LUT → `transfer.decode`）。
-/// strength = 1 时与 `eval_extended` 完全等价；小于 1 是将来多层链每层的强度旋钮。
+/// 整条链在**显示参考的编码域**里求值（CPU 也是 `transfer.encode` → 逐层 → `transfer.decode`）。
+/// 自上而下逐层串联；单层且 `strength = 1` 时与改动前逐位等价。
 fn apply_creative_lut(rgb: vec3<f32>) -> vec3<f32> {
-    if lut.low.w < 0.5 { return rgb; }
-    let encoded = vec3<f32>(signed_encode(rgb.r), signed_encode(rgb.g), signed_encode(rgb.b));
-    let mixed = mix(encoded, lut_encoded(encoded), clamp(lut.high.w, 0.0, 1.0));
-    return vec3<f32>(signed_decode(mixed.r), signed_decode(mixed.g), signed_decode(mixed.b));
+    let count = i32(lut.params.y);
+    if count <= 0 { return rgb; }
+    var encoded = vec3<f32>(signed_encode(rgb.r), signed_encode(rgb.g), signed_encode(rgb.b));
+    for (var i: i32 = 0; i < count; i = i + 1) {
+        let base = i * 3;
+        let a = lut.layers[base];
+        let b = lut.layers[base + 1];
+        let c = lut.layers[base + 2];
+        encoded = lut_layer(
+            encoded,
+            vec3<f32>(a.x, a.y, a.z),
+            vec3<f32>(a.w, b.x, b.y),
+            b.z, b.w, c.x, c.y, c.z > 0.5, i,
+        );
+    }
+    return vec3<f32>(signed_decode(encoded.r), signed_decode(encoded.g), signed_decode(encoded.b));
 }
 
 fn from_rec2020(rgb: vec3<f32>) -> vec3<f32> {

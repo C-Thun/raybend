@@ -54,6 +54,7 @@ import {
   getEditorRenderState,
   refreshDevelopPreview,
   prefetchEditorNeighbors,
+  sampleAreaSeed,
   renameBaseCurveProfile,
   setEditorParams,
   setEditorPhoto,
@@ -62,8 +63,15 @@ import {
   sendEditorViewportIntent,
 } from "../../api/editor.ts";
 import { createEasyDestroy, type ShiftLikeEvent } from "../../lib/easy-destroy.ts";
+import { normalizeFromCss } from "../../lib/overlay-math.ts";
+import { publishOverlayLive } from "../../lib/overlay-live.ts";
+import { clearFlowHint, showFlowHint } from "../../lib/flow-hint.ts";
+import type { ToastStore } from "../../components/ui/Toast.tsx";
+import { SEED_VERSION } from "../../features/editor/store.ts";
+import { AreaMarkers } from "../../features/editor/area-markers.tsx";
 import { selectAllOnMount } from "../../lib/dom-focus.ts";
 import { showsLatestRow } from "../../lib/issue-visibility.ts";
+import { nextAreaFocus } from "../../lib/editor-area-focus.ts";
 import { EasyDestroyHost } from "../../components/ui/EasyDestroy.tsx";
 import { createLatestCoalescer } from "../../lib/editor-intent.ts";
 import { createPreviewQueue } from "../../lib/preview-queue.ts";
@@ -73,7 +81,7 @@ import { ensureIssueSnapshots, getIssueLibrary, createIssue, renameIssue, delete
 import { IconLoader2 } from "@tabler/icons-solidjs";
 import { pendingLegacyLutCategories, markLegacyLutCategoriesImported } from "../../lib/editor-prefs.ts";
 import { pickDirectory } from "../../api/dialog.ts";
-import type { DevelopStack } from "../../api/editor.ts";
+import type { Area, DevelopStack } from "../../api/editor.ts";
 import { newLutCategoryId } from "../../lib/lut-library.ts";
 import {
   createPreset as createPresetApi,
@@ -91,6 +99,7 @@ import {
   sanitizePresetLibrary,
   type PresetGroup,
   type PresetMutationOutcome,
+  type PresetSnapshot,
   presetColorChoice,
 } from "../../lib/presets.ts";
 import { Button } from "../../components/ui/Button.tsx";
@@ -155,6 +164,11 @@ export interface EditorWorkspaceProps {
   onOpenColorProfiles: () => void;
   /** 调节响应率（设备级偏好；设置页改它、这里读它） */
   response: EditorResponseStore;
+  /**
+   * **提示通道**（`components/ui/Toast.tsx`）：编辑器里的失败 / 重要提示一律走它，
+   * 不在面板里塞内联红字（崔总 2026-11-01：错误要统一口径）。
+   */
+  toast: ToastStore;
   class?: string;
 }
 
@@ -261,7 +275,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
   onMount(() => {
     void getLutLibrary(pendingLegacyLutCategories())
       .then((library) => { if (library !== null) { applyLutLibrary(library); markLegacyLutCategoriesImported(); } })
-      .catch((error: unknown) => setDevelopError(String(error)));
+      .catch((error: unknown) => reportError(String(error)));
   });
   /* 预设库（specs/editor-presets.md）：与 LUT 同一条路 —— 拿整库、清洗后进 store */
   /**
@@ -274,7 +288,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
     props.store.setPresetLibrary(sanitizePresetLibrary(raw));
     if (legacyWb && !wbMigratedNoticeShown) {
       wbMigratedNoticeShown = true;
-      setDevelopError(t("editor.preset.wbMigrated"));
+      reportError(t("editor.preset.wbMigrated"));
     }
   };
   /*
@@ -291,7 +305,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
   onMount(() => {
     void presetCall(() => getPresetLibrary())
       .then((library) => { if (library !== null) applyPresetLibrary(library); })
-      .catch((error: unknown) => setDevelopError(String(error)));
+      .catch((error: unknown) => reportError(String(error)));
   });
   /** 无 Tauri 运行时的统一回话（浏览器预览里点了保存也得说清原因）。 */
   const unavailable = (): PresetMutationOutcome =>
@@ -306,7 +320,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
       props.store.selectPresetDirectory(id);
       return { ok: true };
     } catch (error) {
-      setDevelopError(String(error));
+      reportError(String(error));
       return { ok: false, message: String(error) };
     }
   };
@@ -321,7 +335,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
       props.store.selectPreset(id, { shiftKey: false });
       return { ok: true };
     } catch (error) {
-      setDevelopError(String(error));
+      reportError(String(error));
       return { ok: false, message: String(error) };
     }
   };
@@ -329,13 +343,13 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
     try {
       const library = await presetCall(() => deletePresetApi(id));
       if (library !== null) applyPresetLibrary(library);
-    } catch (error) { setDevelopError(String(error)); }
+    } catch (error) { reportError(String(error)); }
   };
   const deletePresetDirectoryW = async (id: string): Promise<void> => {
     try {
       const library = await presetCall(() => deletePresetDirectoryApi(id));
       if (library !== null) applyPresetLibrary(library);
-    } catch (error) { setDevelopError(String(error)); }
+    } catch (error) { reportError(String(error)); }
   };
   /*
    * 目录改名：走同一条串行链与整库回写。
@@ -349,7 +363,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
       applyPresetLibrary(library);
       return { ok: true };
     } catch (error) {
-      setDevelopError(String(error));
+      reportError(String(error));
       return { ok: false, message: String(error) };
     }
   };
@@ -363,7 +377,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
         const library = await presetCall(() => movePresetApi(id, directoryId));
         if (library !== null) applyPresetLibrary(library);
       }
-    } catch (error) { setDevelopError(String(error)); }
+    } catch (error) { reportError(String(error)); }
     // 释放后打开移入的目录（specs §5.3；原目录展开态从未被动过，自动还原）
     if (!props.store.presetExpanded(directoryId)) props.store.togglePresetDirectory(directoryId);
   };
@@ -377,7 +391,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
       applyLutLibrary(library);
       props.store.toggleCategory(id);
       return true;
-    } catch (error) { setDevelopError(String(error)); return false; }
+    } catch (error) { reportError(String(error)); return false; }
   };
   const importDirectory = async (categoryId: string): Promise<string | null> => {
     if (lutBusy()) return null;
@@ -388,7 +402,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
       const result = await importLutDirectory(path, categoryId);
       if (result !== null) {
         applyLutLibrary(result.library);
-        if (result.skipped.length > 0) setDevelopError(result.skipped.slice(0, 3).join("；"));
+        if (result.skipped.length > 0) reportError(result.skipped.slice(0, 3).join("；"));
         // 中止（用户点了取消）也要给摘要 —— 已导入的保留，数字必须看得见。
         const summary = t("editor.lut.importSummary", {
           imported: result.imported,
@@ -398,13 +412,13 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
         });
         return result.cancelled ? t("editor.lut.importCancelled", { summary }) : summary;
       }
-    } catch (error) { setDevelopError(String(error)); }
+    } catch (error) { reportError(String(error)); }
     finally { setLutBusy(false); }
     return null;
   };
   const hideLutEntry = async (id: string): Promise<void> => {
     try { const library = await hideLut(id); if (library !== null) applyLutLibrary(library); }
-    catch (error) { setDevelopError(String(error)); }
+    catch (error) { reportError(String(error)); }
   };
 
   /** 库根目录（拼缩略图绝对路径用）。 */
@@ -556,8 +570,19 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
    * * `ready` —— 设备与 surface 都就绪；
    * * `paintedPath` —— **真的出过图**；没有它就没有「谁在画这块矩形」的保证。
    */
-  /** 编辑栈落库 / 读取的错误（**不静默**：画面还是对的，但改动会丢，必须让人看见）。 */
-  const [developError, setDevelopError] = createSignal<string | null>(null);
+  /*
+   * **错误一律走统一消息通道**（`components/ui/Toast.tsx`，崔总 2026-11-01）：
+   * 面板里不再塞内联红字。`reportError` 带 3 秒去重 —— 拖动 / 轮询里同一个失败
+   * 会反复触发，不去重就会把 toast 刷屏。
+   */
+  let lastReported = { message: "", at: 0 };
+  const reportError = (message: string | null | undefined): void => {
+    if (message === null || message === undefined || message === "") return;
+    const now = Date.now();
+    if (lastReported.message === message && now - lastReported.at < 3000) return;
+    lastReported = { message, at: now };
+    props.toast.show({ tone: "danger", message });
+  };
   const [resetOpen, setResetOpen] = createSignal(false);
   let resetTarget: string | null = null;
   const [lutBusy, setLutBusy] = createSignal(false);
@@ -622,6 +647,17 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
     const visibleState = editorVisibleRenderState(state, expected);
     const currentFrame = visibleState?.paintedPath != null;
     props.store.setRenderState(visibleState);
+    /*
+     * 覆盖层的实时变换也跟着这条 250ms 的轮询走：手势期间由 `lib/overlay-live.ts`
+     * 的按需 rAF 链补到每帧一次（换图 / 切工具 / 面板尺寸变化这些没有手势的
+     * 变化则靠这里——它们只需要对上，不需要“跟手”）。
+     */
+    publishOverlayLive(visibleState === null ? null : {
+      transform: visibleState.overlayTransform,
+      scale: visibleState.overlayScale,
+      rotation: visibleState.overlayRotation,
+      photoPath: visibleState.paintedPath ?? null,
+    });
     props.store.setHoleActive(
       currentFrame && state !== null && state.bound && state.ready,
     );
@@ -722,7 +758,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
         // 参数被拒（非法值 / 渲染线程没了）**不能只进控制台**：画面会停在最后一帧，
         // 用户看到的是「拉什么杆都没反应」。走面板那条错误通道，让原因留在界面上。
         console.error("[editor] 显影参数被拒", error); // i18n-exempt: 控制台诊断
-        setDevelopError(String(error));
+        reportError(String(error));
       });
     },
   });
@@ -810,7 +846,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
     if (issueId !== null) {
       void setEditorReferenceIssue(repositoryId, Number(assetId), issueId, path, sequence)
         .catch((error: unknown) => {
-          if (sequence === compareReferenceSequence && expectedPhotoPath() === path) setDevelopError(String(error));
+          if (sequence === compareReferenceSequence && expectedPhotoPath() === path) reportError(String(error));
         });
     } else if (choice === "sooc" || choice === "raw") {
       sendIntent({ kind: "setReferenceBase", base: choice, sequence });
@@ -915,7 +951,13 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
   let wbBaselineNoticeShown = false;
   /** 应用预设时白平衡被跳过（拍摄色温未知）的提示也只出现一次。 */
   let wbApplySkipNoticeShown = false;
-  const currentDevelopStack = (): DevelopStack => {
+  /**
+   * 当前编辑栈（落库 / 定稿 / 取样共用一份）。
+   *
+   * `excludeAreaId`：**种子取样**时要把「待落点」那一层去掉 —— 它还没落点
+   * （种子是中性灰、容差是默认值），把它算进「该层输入」会污染取样结果。
+   */
+  const currentDevelopStack = (excludeAreaId: number | null = null): DevelopStack => {
     const payload = props.store.developPayload();
     const asShotK = payload.asShotTemperature ?? null;
     let values = payload.values;
@@ -930,7 +972,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
       values = rest;
       if (!wbBaselineNoticeShown) {
         wbBaselineNoticeShown = true;
-        setDevelopError(t("editor.wb.baselineUnknown"));
+        props.toast.show({ tone: "info", message: t("editor.wb.baselineUnknown") });
       }
     }
     return { color: payload.color ?? null, values, curves: payload.curves, asShotK,
@@ -938,13 +980,23 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
       baseCurveProfile: props.store.baseCurveProfile(),
       baseCurvePoints: props.store.baseCurvePoints()?.map(([x,y]) => [x,y] as [number,number]) ?? null,
       autoAdjust: props.store.autoAdjustBaseline(),
-      lutId: props.store.lutId(), lutEnabled: props.store.lutEnabledSetting(),
-      lensEnabled: payload.lensEnabled, nrMethod: payload.nrMethod, geometry: payload.geometry };
+      lutChain: props.store.lutChain().map((layer) => ({ ...layer })),
+      lutEnabled: props.store.lutEnabledSetting(),
+      lensEnabled: payload.lensEnabled, nrMethod: payload.nrMethod, geometry: payload.geometry,
+      areas: excludeAreaId === null
+        ? payload.areas
+        : payload.areas.filter((area) => area.id !== excludeAreaId),
+      defaultIndex: payload.defaultIndex === null
+        ? null
+        : Math.min(
+          payload.defaultIndex,
+          payload.areas.filter((area) => area.id !== excludeAreaId).length,
+        ) };
   };
 
   const [profileEntries,setProfileEntries] = createSignal<ColorProfileEntry[]>([]);
   const refreshProfiles = (): void => { void getColorProfileLibrary().then(library=>setProfileEntries(library?.entries ?? []))
-    .catch(error=>setDevelopError(String(error))); };
+    .catch(error=>reportError(String(error))); };
   onMount(refreshProfiles);
   let proofRevision = 0;
   createEffect(() => {
@@ -953,7 +1005,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
     const warning = props.store.proofWarning(); const revision = ++proofRevision;
     void setEditorProof(target,warning).catch(error=> {
       if (revision !== proofRevision) return;
-      props.store.setProofEnabled(false); setDevelopError(String(error));
+      props.store.setProofEnabled(false); reportError(String(error));
     });
   });
   const applyColor = async (profileId: string|null): Promise<void> => {
@@ -996,6 +1048,8 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
    * | 工具栏 | 自动调整；重置修改 / 恢复自动；编辑源 SOOC↔RAW |
    * | 定稿 | **创建**定稿（先 confirm 再渲染）；**切定稿只是「看」，不写库**（2026-10-27） |
    * | 画布工具 | 裁切 / 旋转的「确认」（`confirmTool`） |
+   * | 编辑区（area）面板 | 新建层；删除层；拖动排序松手；双击改名提交；启停开关 |
+   * | 画布控制点 | **落点**（`Ctrl` 拖动圆片改采样位松手；拖 handle 改容差松手） |
    *
    * **不是** confirm 节点：旋转角度拉杆（工具草稿，落库在工具确认那一步）、
    * 载入/换照片时后端回填的实际基线（`setEditBase(target.actualBase)` —— 自动纠正不是用户操作）。
@@ -1040,7 +1094,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
           rev,
           values: stack.values,
           curves: Object.keys(stack.curves),
-          lutId: stack.lutId,
+          lutChain: stack.lutChain?.map((layer) => layer.id),
           lutEnabled: stack.lutEnabled,
           sourceBase: stack.sourceBase,
         });
@@ -1056,9 +1110,116 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
       .catch((error: unknown) => {
         // 落库失败不静默：画面还是对的，但下次换照片会丢 —— 必须让人知道
         console.error("[editor] 编辑栈落库失败", error); // i18n-exempt: 控制台诊断
-        setDevelopError(String(error));
+        reportError(String(error));
       });
   };
+
+  /**
+   * **控制点落点**（画布单击）。
+   *
+   * 顺序：把点击位置换成归一化坐标（矩阵是 Rust 给的，这里只做逆变换）→
+   * Rust 取样「该层输入」的特征向量 → **到这一刻才创建那一层** → confirm（一步撤销）。
+   *
+   * 为什么先取样后建层（崔总 2026-11-01）：以前是「点了按钮就建一层 0,0 的空点」，
+   * 面板里凭空多一行、下面还挂一条虚线幽灵行；层在落点失败时会留在那儿。
+   * 现在武装态不建层，落点这一下同时拿到种子与位置，一次提交。
+   */
+  const placeAreaPoint = (css: { x: number; y: number }): void => {
+    const state = props.store.renderState();
+    const matrix = state?.overlayTransform ?? null;
+    const size = state?.image ?? null;
+    if (matrix === null || size === null) return;
+    const point = normalizeFromCss(matrix, size.width, size.height, css);
+    if (point === null) return;
+    // 点在图像外面（洞口的留白上）：不取样、不建层 —— 武装态保留，让他再点一下
+    if (point.x < 0 || point.x > 1 || point.y < 0 || point.y > 1) return;
+    const repositoryId = store.repositoryId();
+    const assetId = currentAssetId();
+    if (repositoryId === null || assetId === null || assetId === undefined) return;
+    if (!props.store.pointArmed()) return;
+    // 取样只支持 RAW 基准；按钮禁用之外再挡一次命令面板 / 切换基准的竞态
+    if (props.store.editBase() !== "raw") return;
+    /*
+     * 取样位置在**行序**里的下标：新层会追加到末尾，所以它还没进列表 ——
+     * 它前面的层数就是它的下标（`compose_linear_upto` 只算它之前那些层）。
+     */
+    const layer = props.store.layerRows().length;
+    const stack = currentDevelopStack();
+    const base = props.store.editBase();
+    void sampleAreaSeed(repositoryId, Number(assetId), point.x, point.y, stack, layer)
+      .then((seed) => {
+        if (seed === null) return;
+        // 取样回来之前换了照片 / 换了编辑基准 / 取消了武装 ⇒ 结果已经不是这一次的
+        if (!props.store.pointArmed()) return;
+        if (currentAssetId() !== assetId || props.store.editBase() !== base) return;
+        props.store.placePointArea({ x: seed.x, y: seed.y, seed: seed.seed });
+        confirmEdit();
+      })
+      .catch((error: unknown) => {
+        // 取样失败走**统一消息通道**（不再在面板里塞一行红字），并保持武装态：
+        // 用户还能再点一次（`SOOC` 下按钮本来就禁用，这里只剩真正的偶发失败）
+        console.error("[editor] 控制点取样失败", error); // i18n-exempt: 控制台诊断
+        props.toast.show({ tone: "danger", message: t("editor.area.seedFailed") });
+      });
+  };
+
+  /**
+   * **采样位移动后的重新取样**（`Ctrl` 拖圆片松手，崔总 2026-11-01）。
+   *
+   * 以前拖圆片只改 `x/y`，种子永远停在第一次落点的那组数 —— 把点拖到别处画面不变，
+   * 「移动采样点」等于白拖。现在松手后按**新位置**、按该层在行序里的下标重新取一次种子。
+   *
+   * 取样只算它**前面**的层（`compose_linear_upto`），所以栈里这一层自己的旧种子不影响结果；
+   * 位置与种子在同一次 `confirmEdit` 里落库（一步撤销）。
+   */
+  const resampleAreaPoint = (id: number): void => {
+    const repositoryId = store.repositoryId();
+    const assetId = currentAssetId();
+    if (repositoryId === null || assetId === null || assetId === undefined) return;
+    // 与落点同口径：取样只支持 RAW 基准（SOOC 下控制点本来就不参与计算）
+    if (props.store.editBase() !== "raw") return;
+    const rows = props.store.layerRows();
+    const layer = rows.findIndex((row) => row.kind === "area" && row.area.id === id);
+    const row = rows[layer];
+    if (row === undefined || row.kind !== "area" || row.area.type !== "point") return;
+    const stack = currentDevelopStack();
+    void sampleAreaSeed(repositoryId, Number(assetId), row.area.x, row.area.y, stack, layer)
+      .then((seed) => {
+        if (seed === null) return;
+        // 取样回来之前换了照片：结果不是这一张的
+        if (currentAssetId() !== assetId) return;
+        props.store.adoptAreaSeed(id, seed.seed);
+        confirmEdit();
+      })
+      .catch((error: unknown) => {
+        console.error("[editor] 控制点重新取样失败", error); // i18n-exempt: 控制台诊断
+        props.toast.show({ tone: "danger", message: t("editor.area.seedFailed") });
+        // 位置已经改了：取样失败也得把它存下去（不能让画面与库对不上）
+        confirmEdit();
+      });
+  };
+
+  /**
+   * 浏览 store 的错误也走消息通道（它以前显示在右栏底部那行红字里）。
+   */
+  createEffect(() => {
+    const error = store.error();
+    if (error !== null && error !== undefined && error !== "") reportError(error);
+  });
+
+  /**
+   * 武装态在 flowbar 提示区说一句「在图片中选取采样点」（离开编辑器 / 取消即撤）。
+   */
+  createEffect(() => {
+    const armed = props.store.pointArmed();
+    if (armed) showFlowHint("editor.area.arm", t("editor.area.pickPoint"));
+    else clearFlowHint("editor.area.arm");
+  });
+  onCleanup(() => {
+    clearFlowHint("editor.area.arm");
+    // 离开编辑器时把「武装态」收掉：下次进来不该还亮着一个等着点的按钮
+    props.store.disarmPointArea();
+  });
 
   const confirmTool = (): void => {
     rotationSender.flush();
@@ -1076,7 +1237,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
         props.store.setGeometry(confirmed);
       });
       confirmEdit();
-    }).catch((error: unknown) => setDevelopError(String(error)));
+    }).catch((error: unknown) => reportError(String(error)));
   };
 
   const canReset = (): boolean => enabled() && !props.store.autoAdjusting() && props.store.resetStage() !== "none";
@@ -1098,6 +1259,83 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
   });
 
   /**
+   * 按**行序**重新取样一组控制点（遗留种子迁移与「修复旧取样」共用的唯一实现）。
+   *
+   * 每个点都取**当时的栈**：上一点刚换的种子会进入下一点的「该层输入」；
+   * 在外面只建一次栈会让后面的点继续用旧种子（2026-11-01 评审修过一次）。
+   */
+  const resamplePoints = (
+    repositoryId: string,
+    assetId: number,
+    shouldResample: (area: Extract<Area, { type: "point" }>) => boolean,
+  ): void => {
+    const targets = props.store
+      .layerRows()
+      .map((row, index) => ({ row, index }))
+      .filter(({ row }) => {
+        if (row.kind !== "area" || row.area.type !== "point") return false;
+        return shouldResample(row.area);
+      });
+    if (targets.length === 0) return;
+    let chain: Promise<void> = Promise.resolve();
+    for (const { row, index } of targets) {
+      if (row.kind !== "area" || row.area.type !== "point") continue;
+      const area = row.area;
+      chain = chain.then(async () => {
+        const stack = currentDevelopStack();
+        const sampled = await sampleAreaSeed(
+          repositoryId, assetId, area.x, area.y, stack, index,
+        );
+        if (sampled === null) return;
+        if (currentAssetId() !== String(assetId)) return;
+        props.store.adoptAreaSeed(area.id, sampled.seed);
+      }).catch((error: unknown) => {
+        console.error("[editor] 控制点重新取样失败", error); // i18n-exempt: 控制台诊断
+      });
+    }
+    void chain.then(() => {
+      if (currentAssetId() !== String(assetId)) return;
+      confirmEdit();
+    });
+  };
+
+  /**
+   * **旧种子的重取样**（种子定义从「线性域」换到「感知域」，2026-11-01）。
+   *
+   * 种子是**冻结**的，但它的**定义**换过一次：`[luma, c1, c2]`（线性）→
+   * `[Y′, Cb, Cr]`（感知域）。这两种向量之间**没有可逆换算**（编码是非线性的，
+   * 而旧数据里没有存原始 RGB），所以只能在**同一个采样位**上重新取一次。
+   *
+   * 位置 / 容差 / 参数 / 层序都不动，只换 `seed` 与 `seedVersion`；
+   * 每个点一次采样命令（Rust 侧解码 1024 线性图），取完统一 `confirmEdit` 落库。
+   */
+  const migrateLegacySeeds = (repositoryId: string, assetId: number): void => {
+    // 旧种子只在 RAW 基准下有正确的线性输入；SOOC 下点虽被旁路，
+    // 但按 SOOC 栈取样出来的种子切回 RAW 后会被重新解释 —— 等回到 RAW 再取。
+    if (props.store.editBase() !== "raw") return;
+    resamplePoints(
+      repositoryId,
+      assetId,
+      (area) => (area.seedVersion ?? 0) !== SEED_VERSION,
+    );
+  };
+
+  /**
+   * **重新取样当前照片的全部控制点**（2026-11-02）。
+   *
+   * 修复 2026-11-02 之前「落点取样没有按文件头方向摆正」留下的旧种子：
+   * 点天空采到墙、点墙采到天空。按行序逐点取，前面的点换新种子后会进入后面的层输入。
+   */
+  const resampleAllAreas = (): void => {
+    const repositoryId = store.repositoryId();
+    const assetId = currentAssetId();
+    if (repositoryId === null || assetId === null || assetId === undefined) return;
+    // 控制点只在 RAW 基准下参与计算；SOOC 下没有可取的线性输入
+    if (props.store.editBase() !== "raw") return;
+    resamplePoints(repositoryId, Number(assetId), () => true);
+  };
+
+  /**
    * **撤销 / 重做之后重读编辑栈**。
    *
    * 显影参数与曲线都进的是**同一个撤销栈**（`browse` 的标记操作与编辑共用一套历史），
@@ -1114,6 +1352,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
       .then(async (stack) => {
         if (stack === null || currentAssetId() !== assetId) return;
         props.store.loadDevelop(stack.values, stack.curves, developSettingsOf(stack));
+        migrateLegacySeeds(repositoryId, Number(assetId));
         if (path !== null) {
           thumbs.refresh(path);
           setIssueThumbRevision((value) => value + 1);
@@ -1125,7 +1364,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
       })
       .catch((error: unknown) => {
         console.error("[editor] 撤销后重读编辑栈失败", error); // i18n-exempt: 控制台诊断
-        setDevelopError(String(error));
+        reportError(String(error));
       });
   });
 
@@ -1195,13 +1434,13 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
     void getBaseCurveProfiles(previous.repositoryId, id).then((library) => {
       if (active) setBaseCurveLibrary(library);
     }).catch((error: unknown) => {
-      if (active) setDevelopError(String(error));
+      if (active) reportError(String(error));
     });
     // 旧图的参数不能在新图载入期间继续被送进显影线程。
     untrack(() => {
       props.store.loadDevelop({}, {}, {});
       props.store.setAsShotTemperature(null);
-      setDevelopError(null);
+      reportError(null);
     });
     // 过渡帧会直接读现有 latest / SOOC / RAW 内嵌预览。此时不再并发生成
     // latest：它会争用 RAW worker 和显影内存；最后状态在离开照片时再刷新。
@@ -1214,18 +1453,27 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
         // 读的过程中用户已经动过：**不要**用库里那份盖掉他的改动
         if (stack !== null && props.store.developRev() === revAtRequest) {
           props.store.loadDevelop(stack.values, stack.curves, developSettingsOf(stack));
+          migrateLegacySeeds(previous.repositoryId, Number(previous.assetId));
         }
         setDevelopReadyAssetId(previous.assetId.toString());
       })
       .catch((error: unknown) => {
         if (!active) return;
         console.error("[editor] 读编辑栈失败", error); // i18n-exempt: 控制台诊断
-        setDevelopError(String(error));
+        reportError(String(error));
         setDevelopReadyAssetId(previous.assetId.toString());
       });
 
   });
 
+  /**
+   * 「拟合」能不能点（崔总 2026-11-05 明确）：**这张照片同时有 RAW 与 JPG，且基底是 RAW**。
+   *
+   * `editBaseAvailable()` 两侧都是**文件是否真的在**（`develop_edit_target` 的
+   * `has_raw` / `has_bitmap`，`bitmap` 是真实的位图文件，不是 RAW 里的内嵌预览）——
+   * 只有 RAW、只有 JPG、文件缺失时这里都是 false，按钮跟着禁用。
+   * 另外还要求机型档案给了相机信息：没有相机就无法建立「RAW → 相机直出」的对照。
+   */
   const canAutoAdjust = (): boolean => enabled() && props.store.editBase() === "raw"
     && props.store.editBaseAvailable().raw && props.store.editBaseAvailable().bitmap
     && baseCurveLibrary()?.cameraMake != null && baseCurveLibrary()?.cameraModel != null
@@ -1282,10 +1530,10 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
         ...current,
         profiles: [...current.profiles.filter((profile) => profile.id !== result.profile.id), result.profile],
       });
-      setDevelopError(null);
+      reportError(null);
       confirmEdit();
     } catch (error) {
-      if (request === autoAdjustRevision) setDevelopError(String(error));
+      if (request === autoAdjustRevision) reportError(String(error));
     } finally {
       if (request === autoAdjustRevision) props.store.setAutoAdjusting(false);
     }
@@ -1320,6 +1568,29 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
   };
 
   /** 工作区动作槽（`App.tsx` 的 `viewing()` / `filmVisible()` 读数靠它）。 */
+  /**
+   * `Space`：在「默认层」与「当前层」之间来回切（崔总 2026-11-05）。
+   *
+   * 记一个「刚才那一层」：从默认层按空格要回到**刚才在改的那一层**，
+   * 而不是列表末尾那一层 —— 实际用法就是在「默认层 ↔ 控制点 A」之间反复横跳。
+   * 只有默认层时什么都不做（不自动建层、不提示）。
+   */
+  const [lastAreaId, setLastAreaId] = createSignal<number | null>(null);
+  createEffect(() => {
+    const id = props.store.activeAreaId();
+    if (id !== null) setLastAreaId(id);
+  });
+  const areaIds = (): number[] =>
+    props.store.layerRows().flatMap((row) => (row.kind === "area" ? [row.area.id] : []));
+  const canToggleAreaFocus = (): boolean => enabled() && areaIds().length > 0;
+  const toggleAreaFocus = (): void => {
+    if (!enabled()) return;
+    // 判定只有一份（`lib/editor-area-focus.ts`，有单测）
+    const next = nextAreaFocus(props.store.activeAreaId(), areaIds(), lastAreaId());
+    if (next === undefined) return;
+    props.store.selectArea(next);
+  };
+
   const editorActionsImpl: EditorActions = {
     viewing: () => current() !== null && props.store.holeActive(),
     filmVisible: () => props.store.showsFilm(),
@@ -1329,9 +1600,12 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
     hasPhoto: () => current() !== null,
     resetDevelop: requestReset,
     canReset,
+    resampleAreas: resampleAllAreas,
+    canToggleAreaFocus,
+    toggleAreaFocus,
     confirmEdit,
-    restoreColor: ()=> { void applyColor(null).catch(error=>setDevelopError(String(error))); },
-    reviewColorBatch:()=> {void reviewColorBatch(null).catch(error=>setDevelopError(String(error)));},
+    restoreColor: ()=> { void applyColor(null).catch(error=>reportError(String(error))); },
+    reviewColorBatch:()=> {void reviewColorBatch(null).catch(error=>reportError(String(error)));},
     setBase: (base) => {
       const assetId = currentAssetId(); const repositoryId = store.repositoryId();
       if (!enabled() || assetId == null || repositoryId === null || props.store.editBase() === base) return;
@@ -1345,8 +1619,12 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
         }
         if (!enabled() || currentAssetId() !== assetId || props.store.editBase() !== previousBase) return;
         batch(()=> { props.store.setEditBase(base); if(color !== null)props.store.setColorState(color); });
+        // 回 RAW 时把之前 SOOC 下跳过的旧种子补上（`migrateLegacySeeds` 的闸门）。
+        if (base === "raw") {
+          migrateLegacySeeds(repositoryId, Number(assetId));
+        }
         confirmEdit();
-      })().catch(error=>setDevelopError(String(error)));
+      })().catch(error=>reportError(String(error)));
     },
     autoAdjust: () => void autoAdjust(),
     canAutoAdjust,
@@ -1441,7 +1719,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
             })
             .catch((error: unknown) => console.error("[editor] 定稿图自愈失败", error)); // i18n-exempt: 后台缓存诊断
         })
-        .catch((error: unknown) => { if (active) setDevelopError(String(error)); });
+        .catch((error: unknown) => { if (active) reportError(String(error)); });
     }, 60);
     onCleanup(() => { active = false; window.clearTimeout(timer); });
   });
@@ -1521,7 +1799,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
       setIssueLibrary(library);
       setIssueSelectionOverride(library.selection);
     } catch (error) {
-      setDevelopError(String(error));
+      reportError(String(error));
     }
   };
 
@@ -1570,10 +1848,10 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
       if (library !== null && stillCurrent()) {
         setIssueLibrary(library);
         setIssueFocusTick((value) => value + 1);
-        if (library.snapshotError !== null) setDevelopError(library.snapshotError);
+        if (library.snapshotError !== null) reportError(library.snapshotError);
       }
     } catch (error) {
-      if (stillCurrent()) setDevelopError(String(error));
+      if (stillCurrent()) reportError(String(error));
     } finally {
       window.clearTimeout(placeholderTimer);
       setFinalizeBusy(false);
@@ -1592,7 +1870,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
       try {
         const library = await deleteIssue(repositoryId, Number(assetId), target.id, locale() === "en-US");
         if (current() && library !== null) setIssueLibrary(library);
-      } catch (error) { if (current()) setDevelopError(String(error)); }
+      } catch (error) { if (current()) reportError(String(error)); }
     }, event, t("editor.issue.deleteTitle"));
   };
   const requestRenameIssue = (target: Issue): void => {
@@ -1690,6 +1968,44 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
   });
 
   /**
+   * 应用预设（左列预设面板的 `applyPreset`）。
+   *
+   * 每一步之间都重新核对「还是不是同一张照片」：取色状态与重读 LUT 库都是异步的，
+   * 期间用户可能已经切走（审计 2026-10-04：丢失 LUT 保底曾经因此失效）。
+   */
+  const applyPresetFromPanel = async (snapshot: PresetSnapshot): Promise<void> => {
+    const path = expectedPhotoPath();
+    const assetId = currentAssetId();
+    if (!enabled() || path === null || assetId == null) return;
+    try {
+      const choice = presetColorChoice(snapshot);
+      const color = choice === undefined ? undefined : await preparePhotoColor(path, choice);
+      if (!enabled() || expectedPhotoPath() !== path || currentAssetId() !== assetId) return;
+      // LUT 的存在性以**此刻磁盘**为准：应用预设前重读一次 LUT 库，
+      // 否则进入编辑器时的旧缓存会把已从磁盘删掉的 LUT 覆盖上去
+      const lutLibrary = await getLutLibrary(pendingLegacyLutCategories());
+      if (lutLibrary !== null) applyLutLibrary(lutLibrary);
+      if (!enabled() || expectedPhotoPath() !== path || currentAssetId() !== assetId) return;
+      batch(() => {
+        const outcome = props.store.applyPresetSnapshot(snapshot);
+        if (color !== undefined) props.store.setColorState(color);
+        // 拍摄色温未知：白平衡项被跳过（其余项已应用）—— 提示一次
+        if (outcome.wbSkipped && !wbApplySkipNoticeShown) {
+          wbApplySkipNoticeShown = true;
+          reportError(t("editor.preset.wbSkipped"));
+        }
+        // 预设的 LUT 是**追加**到链末尾的：超出 8 层时后面几层加不进来，必须让人知道
+        if (outcome.lutDropped > 0) {
+          reportError(t("editor.preset.lutDropped").replace("{count}", String(outcome.lutDropped)));
+        }
+      });
+      confirmEdit();
+    } catch (error) {
+      reportError(String(error));
+    }
+  };
+
+  /**
    * 直方图取数（注入给右栏组件 —— 组件那一层不碰 `api`，`components/ui` 不许 import `api`）。
    *
    * 这里直接用 `api/db.ts` 的取数口，与浏览右栏**同一个函数**（`HistogramPanel` 管缓存）。
@@ -1772,9 +2088,18 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
             onFinalize={openFinalizeDialog}
             onCreateCategory={createCategory}
             onImport={importDirectory}
-            onSelectLut={(id) => { if (!enabled()) return; props.store.setLut(id, true); confirmEdit(); }}
             onToggleLut={confirmEdit}
+            onChainChangeLut={() => { if (!enabled()) return; confirmEdit(); }}
+            onAreaChange={() => { if (!enabled()) return; confirmEdit(); }}
+            onResampleAreas={resampleAllAreas}
             onHideLut={hideLutEntry}
+            onCreatePresetDirectory={createPresetDirectoryW}
+            onCreatePreset={createPresetW}
+            onRenamePresetDirectory={renamePresetDirectoryW}
+            onDeletePreset={deletePresetW}
+            onDeletePresetDirectory={deletePresetDirectoryW}
+            onMovePresets={movePresetsW}
+            onApplyPreset={applyPresetFromPanel}
           />
         </aside>
 
@@ -1798,6 +2123,18 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
             tool={props.store.tool}
             onOpenImport={props.onOpenImport}
             onRetry={startRenderer}
+            overlay={() => (
+              <AreaMarkers
+                store={props.store}
+                renderState={props.store.renderState}
+                enabled={enabled()}
+                inactive={props.store.editBase() === "sooc"}
+                onCommit={confirmEdit}
+                onResample={resampleAreaPoint}
+              />
+            )}
+            placingPoint={() => props.store.pointArmed()}
+            onPlacePoint={placeAreaPoint}
           />
           <Show when={props.store.proofEnabled() && current() !== null}>
             <div class="pointer-events-none absolute left-3 top-3 z-20 rounded-ui bg-surface-layer px-3 py-1 text-fs-0 font-medium text-brand" role="status" data-editor-proof-active>
@@ -1892,43 +2229,14 @@ export function EditorWorkspace(props: EditorWorkspaceProps): JSX.Element {
             loadHistogram={loadHistogram}
             onConfirm={confirmEdit}
             onToolConfirm={confirmTool}
-            error={developError() ?? store.error()}
+            onError={reportError}
             locked={locked()}
-            onCreatePresetDirectory={createPresetDirectoryW}
-            onCreatePreset={createPresetW}
-            onRenamePresetDirectory={renamePresetDirectoryW}
-            onDeletePreset={deletePresetW}
-            onDeletePresetDirectory={deletePresetDirectoryW}
-            onMovePresets={movePresetsW}
             onOpenColorProfiles={props.onOpenColorProfiles}
             profileEntries={profileEntries()}
             onRefreshProfiles={refreshProfiles}
             onApplyColor={applyColor}
             colorBatchCount={store.selection().ids.size}
             onReviewColorBatch={reviewColorBatch}
-            onApplyPreset={async snapshot=> {
-              const path=expectedPhotoPath(); const assetId=currentAssetId();
-              if (!enabled() || path === null || assetId == null) return;
-              try {
-                const choice=presetColorChoice(snapshot);
-                const color=choice === undefined ? undefined : await preparePhotoColor(path,choice);
-                if (!enabled() || expectedPhotoPath() !== path || currentAssetId() !== assetId) return;
-                // LUT 的存在性以**此刻磁盘**为准：应用预设前重读一次 LUT 库，
-                // 否则进入编辑器时的旧缓存会把已从磁盘删掉的 LUT 覆盖上去
-                // （审计 2026-10-04 P1：丢失保底失效）。
-                const lutLibrary = await getLutLibrary(pendingLegacyLutCategories());
-                if (lutLibrary !== null) applyLutLibrary(lutLibrary);
-                if (!enabled() || expectedPhotoPath() !== path || currentAssetId() !== assetId) return;
-                batch(()=> { const outcome = props.store.applyPresetSnapshot(snapshot); if(color !== undefined)props.store.setColorState(color);
-                  // 拍摄色温未知：白平衡项被跳过（其余项已应用）—— 提示一次
-                  if (outcome.wbSkipped && !wbApplySkipNoticeShown) {
-                    wbApplySkipNoticeShown = true;
-                    setDevelopError(t("editor.preset.wbSkipped"));
-                  }
-                });
-                confirmEdit();
-              } catch(error) {setDevelopError(String(error));}
-            }}
           />
         </aside>
       </div>

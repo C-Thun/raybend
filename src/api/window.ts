@@ -235,7 +235,11 @@ export async function tauriWindowHandle(): Promise<WindowHandle | null> {
   const win = getCurrentWindow();
   return {
     minimize: () => win.minimize(),
-    toggleMaximize: () => win.toggleMaximize(),
+    toggleMaximize: async () => {
+      // 反最大化由 Rust 修正系统 restore 矩形并做最小尺寸保底；这里只发意图。
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("window_toggle_maximize");
+    },
     fitWorkArea: async () => {
       // 几何与窗口 API 都在 Rust 侧（同步命令）；这里只发意图
       const { invoke } = await import("@tauri-apps/api/core");

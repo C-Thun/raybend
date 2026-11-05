@@ -23,7 +23,7 @@ export { LutPanel } from "./lut-panel.tsx";
 /** 左列布局数学（宽度与底部块高度）—— 唯一出处见 `layout.ts`。 */
 export { EDITOR_LEFT_BOTTOM_INFO, EDITOR_LEFT_BOTTOM_VIEW, EDITOR_LEFT_WIDTH } from "./layout.ts";
 
-export { EditorPanelToggles, EditorResetTool, EditorToolbar } from "./toolbar.tsx";
+export { EditorPanelToggles, EditorToolbar } from "./toolbar.tsx";
 
 export { createEditorStrip, editorEmptyKind, editorEmptyOffersImport, editorViewportNotice, editorVisibleRenderState } from "./source.ts";
 export type {

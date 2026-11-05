@@ -30,6 +30,7 @@ import { getColorProfileLibrary, type ColorProfileEntry } from "../../api/color.
 import { outputColorChoice, outputColorFromChoice } from "../../lib/color-model.ts";
 import { Slider } from "../../components/ui/Slider.tsx";
 import { SegmentedControl } from "../../components/ui/SegmentedControl.tsx";
+import { SectionTitle } from "../../components/ui/SectionTitle.tsx";
 import { SplitStack } from "../../components/ui/SplitStack.tsx";
 import { SplitHandle } from "../../components/ui/SplitHandle.tsx";
 import { ConfirmDialog, Dialog } from "../../components/ui/Dialog.tsx";
@@ -67,6 +68,34 @@ import {
 import { EXPORT_TOP_SIZE_BOUNDS } from "../../lib/export-prefs.ts";
 import { tileSizeAt } from "../../lib/tile-flow.ts";
 import type { ExportStore } from "./store.ts";
+import type { JSX } from "solid-js";
+
+/**
+ * 一行「字段名 + 控件」（2026-11-05 崔总：下面内容紧凑化）。
+ *
+ * 字段名固定占 `w-16`：几个字段名字数不一样（名称 / 格式 / 文件同名 / 输出色彩），
+ * 不固定列宽的话控件左缘会参差不齐，看上去像随便放进去的。
+ * `stretch` 给要撑满剩余宽度的输入框（名称）；其余控件（分段控件、选择器）靠右收，
+ * 与「输出色彩」原来的样子一致。
+ */
+function FieldRow(props: {
+  label: string;
+  stretch?: boolean;
+  children: JSX.Element;
+}): JSX.Element {
+  return (
+    <div class="flex items-center gap-2 text-fs-1 text-fg-2">
+      <span class="w-16 shrink-0">{props.label}</span>
+      <div
+        class={["min-w-0 flex-1", props.stretch === true ? "" : "flex justify-end"]
+          .filter(Boolean)
+          .join(" ")}
+      >
+        {props.children}
+      </div>
+    </div>
+  );
+}
 
 export interface ExportWorkspaceProps {
   store: ExportStore;
@@ -638,9 +667,7 @@ export function ExportWorkspace(props: ExportWorkspaceProps) {
         class="flex w-panel-w-right min-h-0 shrink-0 flex-col gap-3 bg-surface-main p-panel-pad"
       >
         <section data-export-presets class="flex min-h-24 flex-1 flex-col gap-2">
-        <div class="flex shrink-0 items-center justify-between">
-          <span class="text-fs-2 text-fg-2">{t("export.presetList")}</span>
-        </div>
+        <SectionTitle label={t("export.presetList")} />
         <div data-export-preset-list class="min-h-0 flex-1 overflow-auto">
           <For each={store.presets()} fallback={<p class="text-fs-1 text-fg-3">{t("export.noPresets")}</p>}>
             {(preset) => (
@@ -702,38 +729,41 @@ export function ExportWorkspace(props: ExportWorkspaceProps) {
         <form
           id="export-preset-form"
           data-export-form
-          class="flex min-h-0 shrink flex-col gap-2 overflow-auto"
+          class="flex min-h-0 shrink flex-col gap-1.5 overflow-auto"
           onSubmit={(event) => {
             event.preventDefault();
             void store.save();
           }}
         >
-          <span data-export-form-title class="text-fs-2 text-fg-2">
-            {t(store.matchingPreset() === null ? "export.newPreset" : "export.editPreset")}
-          </span>
-          <label class="flex flex-col gap-1 text-fs-1 text-fg-2">
-            {t("export.name")}
+          {/*
+           * 段标题固定叫「当前预设」（崔/总 2026-11-05）：以前它按名称匹配在「修改预设 / 新建预设」
+           * 之间跳，用户得先看懂名字才明白自己在改谁。下面的「保存」自己处理新建与更新。
+           */}
+          <SectionTitle data-export-form-title label={t("export.currentPreset")} />
+          {/* 名称与输入框同一行（紧凑化 2026-11-05）：字段名固定列宽，下面几行才能对齐 */}
+          <FieldRow label={t("export.name")} stretch>
             <Input
+              class="w-full"
               value={store.draft().name}
               invalid={!!fieldError("name")}
               onInput={(event) =>
                 store.edit({ name: event.currentTarget.value })
               }
             />
-          </label>
-          <div class="text-fs-1 text-fg-2">{t("export.format")}</div>
-          <SegmentedControl
-            label={t("export.format")}
-            value={store.draft().format}
-            options={EXPORT_FORMATS.map((value) => ({ value, label: value === "jpeg" ? "JPG" : value.toUpperCase() }))}
-            onValueChange={(format) => store.edit({ format })}
-          />
-          <div class="flex items-center justify-between gap-2 text-fs-1 text-fg-2">
-            <span>{t("export.outputColor")}</span>
+          </FieldRow>
+          <FieldRow label={t("export.format")}>
+            <SegmentedControl
+              label={t("export.format")}
+              value={store.draft().format}
+              options={EXPORT_FORMATS.map((value) => ({ value, label: value === "jpeg" ? "JPG" : value.toUpperCase() }))}
+              onValueChange={(format) => store.edit({ format })}
+            />
+          </FieldRow>
+          <FieldRow label={t("export.outputColor")}>
             <ProfileSelect label={t("export.outputColor")} role="output" entries={profileEntries()} value={outputColorChoice(store.draft().outputColor)}
               srgbOnly={store.draft().format === "avif"} onFocus={() => void refreshProfiles()}
               onChange={value => { const outputColor = outputColorFromChoice(value); if (outputColor) store.edit({outputColor}); }} />
-          </div>
+          </FieldRow>
           <Show when={store.draft().format === "avif"}><p class="text-fs-0 text-fg-3">{t("export.avifSrgb")}</p></Show>
           <Show when={fieldError("outputColor")}><p class="text-fs-0 text-danger" role="alert">{fieldError("outputColor")}</p></Show>
           <Show when={profileEntriesError()}>{error => <p class="text-fs-0 text-danger" role="alert">{error()}</p>}</Show>
@@ -790,11 +820,12 @@ export function ExportWorkspace(props: ExportWorkspaceProps) {
               </IconButton>
             </span>
           </label>
-          <div data-export-existing-file class="flex flex-col gap-1 text-fs-1 text-fg-2">
-            <span>{t("export.existingFile")}</span>
-            <SegmentedControl label={t("export.existingFile")} value={store.draft().existingFile}
-              options={EXISTING_FILE_POLICIES.map(value=>({value,label:t(`export.existingFile.${value}`)}))}
-              onValueChange={existingFile=>store.edit({existingFile})}/>
+          <div data-export-existing-file class="">
+            <FieldRow label={t("export.existingFile")}>
+              <SegmentedControl label={t("export.existingFile")} value={store.draft().existingFile}
+                options={EXISTING_FILE_POLICIES.map(value=>({value,label:t(`export.existingFile.${value}`)}))}
+                onValueChange={existingFile=>store.edit({existingFile})}/>
+            </FieldRow>
           </div>
           <label class="flex flex-col gap-1 text-fs-1 text-fg-2">
             {t("export.template")}
@@ -835,10 +866,10 @@ export function ExportWorkspace(props: ExportWorkspaceProps) {
         </form>
         <div data-export-actions class="flex shrink-0 items-center gap-2">
           <Button data-export-save type="submit" form="export-preset-form" class="shrink-0"
-            variant={store.matchingPreset() ? "secondary" : "accent"}
+            variant="accent"
             disabled={!store.canSave()}
             loading={store.busy()}>
-            {t(store.matchingPreset() ? "export.update" : "export.add")}
+            {t("common.save")}
           </Button>
           <Button data-export-run class="min-w-0 flex-1" variant="primary" disabled={!store.canRun()} onClick={store.toggleRun}>
             <span class="relative grid overflow-hidden" aria-busy={store.progress(store.selectedPreset()?.id??"").processing}>

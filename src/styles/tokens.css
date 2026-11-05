@@ -55,6 +55,8 @@
   --fg-1: #f6f8f4; /* 正文/标题 */
   --fg-2: #b6b0af; /* 次级（EXIF 值、单位） */
   --fg-3: #7c7876; /* 注释/禁用 */
+  /* 辅色**当文字**用（flowbar 提示等）：深色主题直接用辅色本身 */
+  --fg-accent: var(--brand-2);
   --fg-on-brand: #202226; /* 品牌色底上的文字（DESIGN.md §4.5） */
 
   /* 浓度参数：与颜色解耦，改色不影响浓度 */
@@ -109,6 +111,9 @@
   --fg-1: #202226;
   --fg-2: #6e6866; /* 中间色的深变体，过 WCAG AA（DESIGN.md §13） */
   --fg-3: #a9a3a1;
+  /* 辅色当文字：浅色主题不能用纯辅色（#f0b033 压在白底上 ≈1.9:1，读不清），
+     压暗到同色系的深琥珀 —— 对 surface-bar / surface-layer 都有 4.9:1 以上 */
+  --fg-accent: #8f5c00;
   --fg-on-brand: #202226;
 
   --tint-hover: 0.18;
@@ -146,16 +151,19 @@
   --brand: #52c6ab; /* 主色：更亮更清的一档薄荷绿 */
   --brand-2: #f0b033; /* 辅色：琥珀金 */
   /*
-   * 弹窗边界线（`memory/DESIGN.md` §10.1 #9）：1px 辅色内描边。
+   * 弹窗边界线（`memory/DESIGN.md` §10.1 #9）：辅色内描边。
    * 无边线设计的**唯一常驻例外** —— 两层弹窗叠放时底色同为 `surface-layer`，
    * 没有阴影可依，缺这条线边界会糊成一片（崔总 2026-10-24）。
-   * 浅色主题白底上纯辅色约 1.9:1，偏淡；若实际观感不够，只改这一个令牌即可加深，
-   * 不要去改各个弹窗组件。
+   * 2026-10-31 崔总：1px 太实，宽度减半成淡淡一圈 —— 只改 `--dialog-ring-w`，
+   * 不要去改各个弹窗组件。浅色主题白底上纯辅色约 1.9:1，偏淡。
    */
   --dialog-ring: var(--brand-2);
+  --dialog-ring-w: 0.5px;
   /* W5 照片覆盖线：主题无关，任意照片上固定浅线与深包边。 */
   --overlay-line: #f6f8f4;
   --overlay-halo: #202226;
+  /* 覆盖层文字的投影：画在**照片**上，任何底色都要读得清（控制点名字用它）。 */
+  --overlay-text-shadow: 0 1px 2px rgb(0 0 0 / 0.55);
 
   /*
    * 弹窗内边距**不跟密度档缩**（两档都是 16px，取自设计稿 `Dialog / 新建库` 的 padding）。
@@ -297,6 +305,27 @@
 
 :root[data-theme="light"] {
   --label-tint-mix: 20%;
+}
+
+/* ══════════════════════════════════════════════════════════════
+ * 控制点八色（`memory/DESIGN.md` §15.5，崔总 2026-10-31 定）
+ *
+ * **固定八色**：层里只存槽位下标（0..7），换色板不改数据。
+ * 与浏览的色标（`--label-*`）**故意分家**：色标是「我给照片打的标」，
+ * 这里是「这一层控制点在画布上的身份色」，两者同屏出现时不能被认错。
+ * 深浅主题共用一套：**压暗过一档**（崔总 2026-11-01）—— 圆片里这八个色是压在
+ * **白圈**上的，之前的霓虹色在白底上发飘；现在按「白底有质感、深色面板上也看得清」
+ * 取的中等明度饱和色。改色只动这八个值（层里只存槽位下标）。
+ * ══════════════════════════════════════════════════════════════ */
+:root {
+  --point-0: #d97b3c;
+  --point-1: #2fa5b5;
+  --point-2: #c2b32e;
+  --point-3: #4453c9;
+  --point-4: #4fae3f;
+  --point-5: #8f3fc0;
+  --point-6: #2fa76b;
+  --point-7: #c93f77;
 }
 
 /* 低浓底纹（tile 的外框底色）：**由色标色现算**，不是写死的一组「变淡色」。
@@ -547,6 +576,7 @@
   --color-fg-1: var(--fg-1);
   --color-fg-2: var(--fg-2);
   --color-fg-3: var(--fg-3);
+  --color-fg-accent: var(--fg-accent);
   --color-fg-on-brand: var(--fg-on-brand);
 
   /* 品牌 */
@@ -629,3 +659,33 @@
 
 /* RAW 原始稿缺少真实小图时的 UI 模拟，不进入像素缓存与导出。 */
 .photo-raw-approximate { filter: brightness(0.72) saturate(0.35); }
+
+/* ── 光标（cursor）─────────────────────────────────────
+ *
+ * 系统关键字（`grab` / `crosshair` / `ew-resize`）在**语义不完全对得上**的场合
+ * 会误导（例如"旋转"用十字、控制点取样位用抓手）。这类地方用内联 SVG 光标，
+ * 尺寸固定 24×24、hotspot 在中心，双色描边保证深色 / 亮色照片上都读得清。
+ *
+ * ❗色值只能住在这里（`lint:colors` 的允许清单就是 `tokens.css`）：
+ * cursor 图片**不能**引用 `currentColor`，只能把颜色烘进 data URI。
+ * 用法：在元素上加类名 `rb-cursor-sample`（不要写行内 `cursor`，行内会盖掉它）。
+ */
+:root {
+  /* 取样位移动：圆环 + 四向箭头（对应 Ctrl + 拖动采样点） */
+  --cursor-sample: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24'%3E%3Cg fill='none' stroke='%23000' stroke-width='3.5' opacity='.45'%3E%3Ccircle cx='12' cy='12' r='4.5'/%3E%3Cpath d='M12 1.5v3.5M12 19v3.5M1.5 12h3.5M19 12h3.5'/%3E%3C/g%3E%3Cg fill='none' stroke='%23fff' stroke-width='1.5'%3E%3Ccircle cx='12' cy='12' r='4.5'/%3E%3Cpath d='M12 1.5v3.5M12 19v3.5M1.5 12h3.5M19 12h3.5'/%3E%3C/g%3E%3C/svg%3E") 12 12;
+}
+
+.rb-cursor-sample { cursor: var(--cursor-sample), grab; }
+.rb-cursor-sample:active { cursor: var(--cursor-sample), grabbing; }
+
+:root {
+  /*
+   * 旋转（标平行线）：**垂直向上的箭头**（崔总 2026-11-02 指定 —— 这就是「拉一条线校水平」
+   * 那套软件里用的光标；圆弧箭头容易被读成「转 90°」或「撤销」）。
+   * 双色描边：亮照片、暗照片上都读得清；hotspot 在中心（拖的是整条画面，不是箭头尖）。
+   */
+  --cursor-rotate: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24'%3E%3Cg fill='none' stroke='%23000' stroke-width='4' opacity='.45' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 20.5V4.5'/%3E%3Cpath d='M7 9.5 12 4.5l5 5'/%3E%3C/g%3E%3Cg fill='none' stroke='%23fff' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 20.5V4.5'/%3E%3Cpath d='M7 9.5 12 4.5l5 5'/%3E%3C/g%3E%3C/svg%3E") 12 12;
+}
+
+.rb-cursor-rotate { cursor: var(--cursor-rotate), grab; }
+.rb-cursor-rotate:active { cursor: var(--cursor-rotate), grabbing; }

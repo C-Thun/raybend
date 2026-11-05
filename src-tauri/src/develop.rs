@@ -58,8 +58,10 @@ pub struct DevelopStackDto {
     /// 选中时的曲线快照；用于旧照片渲染稳定性与缓存指纹。
     #[serde(default)]
     pub base_curve_points: Option<Vec<[f32; 2]>>,
+    /// 应用层链（有序；空 = 没有 LUT）。总开关是 `lut_enabled`。
+    /// `Option`：前端可能直接发 `null`（`serde(default)` 只兜「字段缺省」）。
     #[serde(default)]
-    pub lut_id: Option<String>,
+    pub lut_chain: Option<Vec<raybend::store::develop::LutLayer>>,
     #[serde(default)]
     pub lut_enabled: Option<bool>,
     /// 配置文件那一半的开关（`null` = 默认开）
@@ -73,6 +75,14 @@ pub struct DevelopStackDto {
     pub geometry: Option<EditGeometry>,
     #[serde(default)]
     pub auto_adjust: Option<AutoAdjustBaseline>,
+    /// **默认层之外的编辑区层**（`specs/editor-area.md`）。空 / `null` = 只有默认层。
+    ///
+    /// `Option` 与 `lut_chain` 同口径：前端可能直接发 `null`，不能只靠 `default` 兜缺省。
+    #[serde(default)]
+    pub areas: Option<Vec<raybend::store::develop::Area>>,
+    /// 默认层在层列表里的位置（0-based；只有存在额外层时才有意义）。
+    #[serde(default)]
+    pub default_index: Option<u8>,
 }
 
 impl From<DevelopStack> for DevelopStackDto {
@@ -86,12 +96,14 @@ impl From<DevelopStack> for DevelopStackDto {
             lens_profile: stack.lens_profile,
             base_curve_profile: stack.base_curve_profile,
             base_curve_points: stack.base_curve_points,
-            lut_id: stack.lut_id,
+            lut_chain: Some(stack.lut_chain),
             lut_enabled: stack.lut_enabled,
             lens_enabled: stack.lens_enabled,
             nr_method: stack.nr_method.map(|method| method.as_str().to_string()),
             geometry: stack.geometry,
             auto_adjust: stack.auto_adjust,
+            areas: Some(stack.areas),
+            default_index: stack.default_index,
         }
     }
 }
@@ -124,12 +136,16 @@ impl DevelopStackDto {
             lens_profile: self.lens_profile,
             base_curve_profile: self.base_curve_profile,
             base_curve_points: self.base_curve_points,
-            lut_id: self.lut_id,
+            lut_chain: self.lut_chain.unwrap_or_default(),
             lut_enabled: self.lut_enabled,
             lens_enabled: self.lens_enabled,
             nr_method,
             geometry: self.geometry,
             auto_adjust: self.auto_adjust,
+            // **必须带上**：一次普通编辑（只改一个参数）也是一次覆盖式落库，
+            // 这里写成空的就等于「把用户建的所有层删掉」（W1 的坑，W4 已接）。
+            areas: self.areas.unwrap_or_default(),
+            default_index: self.default_index,
         })
     }
 }
@@ -142,6 +158,166 @@ pub struct DevelopCommitResult {
     /// 刚记进撤销栈的那一步叫什么（没改动就是 `null`）
     pub undo_label: Option<String>,
     pub can_undo: bool,
+}
+
+/// 控制点落点的**种子采样结果**（`specs/editor-area.md` §3.3）。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AreaSeedDto {
+    /// 归一化坐标（0..1）——**显示画幅**口径（几何非恒等时按输出画幅算）
+    pub x: f32,
+    pub y: f32,
+    /// 创建时冻结的特征向量 `[Y′, Cb, Cr]`（`develop::areas::feature_vector`）
+    pub seed: [f32; 3],
+}
+
+/// 落点取样用的解码结果**按文件头摆正**（与显示路径同一条规则）。
+///
+/// worker 对 TIFF 家族报的方向不可靠（2026-11-02 的真实照片：RW2 报 1，文件头是 8）；
+/// 不走这一步，[`raybend::develop::LinearImage::from_raw16`] 就不会转，落点会采到
+/// **未摆正**的像素 —— 点天空采到墙、点墙采到天空。
+fn orient_seed_source(
+    path: &Path,
+    mut decoded: raybend::raw::backend::RawImage16,
+) -> raybend::raw::backend::RawImage16 {
+    decoded.orientation = raybend::media::exif::raw_orientation(path, decoded.orientation);
+    decoded
+}
+
+/// **控制点落点取样**：给定归一化坐标，返回「该层输入」的特征向量。
+///
+/// 口径：
+/// * 种子取自**该层输入**——把当前栈（默认层 + 现有各层）合成一遍后取线性值；
+/// * 采样用 1024 长边的解码（一次点击，几十毫秒；与全尺寸同一像素的颜色一致），
+///   **先按文件头方向摆正**（与显示路径同一规则；worker 对 TIFF 家族报的方向不可靠）；
+/// * 取落点周围 7×7 小窗的逐通道中位数，不是单像素 —— 避免热噪点 / 压缩边缘 /
+///   刚好跨在物体边界的一颗异色点；
+/// * 镜头 / 降噪不参与（它们会移动像素，落点不值得为它跑一遍全图重采样）——
+///   探查记录里写明这一条。
+///
+/// # Errors
+/// 栈不合法 / 文件解不出来 / 坐标越界 / 库里没有可编辑文件。
+#[tauri::command]
+pub async fn develop_area_seed<R: Runtime>(
+    app: AppHandle<R>,
+    repository_id: String,
+    asset_id: i64,
+    x: f32,
+    y: f32,
+    stack: DevelopStackDto,
+    layer: Option<u32>,
+) -> Result<AreaSeedDto, String> {
+    let handle = app.clone();
+    blocking(move || {
+        let stack = stack.into_stack()?;
+        stack.validate().map_err(|e| e.to_string())?;
+        if !(0.0..=1.0).contains(&x) || !(0.0..=1.0).contains(&y) {
+            return Err("落点坐标必须在 0..1".into());
+        }
+        // `layer` = 目标层在行序里的位置（`None` = 整链跑完；`0` = 原始源）
+        let layer_count = raybend::store::develop::area_rows(&stack).len();
+        let layer = layer.map_or(layer_count, |value| value as usize);
+        if layer > layer_count {
+            return Err(format!("层下标越界：{layer}（共 {layer_count} 层）"));
+        }
+        let path = {
+            let state = handle.state::<BrowseState>();
+            state.with_catalog(&handle, &repository_id, |db| {
+                let root = db.root().to_path_buf();
+                db.read(move |conn| develop::edit_target(conn, asset_id, stack.source_base))
+                    .map_err(|e| e.to_string())
+                    .map(|rel| {
+                        rel.map(|rel| root.join(rel.replace('/', std::path::MAIN_SEPARATOR_STR)))
+                    })
+            })?
+            .ok_or("这张照片没有可编辑的文件")?
+        };
+        let request = raybend::raw::DecodeRequest::thumb(path.clone(), 1024).with_preview(false);
+        let decoded = raybend::raw::worker::shared()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .decode_linear(&request)
+            .map_err(|e| format!("线性解码失败：{e}"))?;
+        let decoded = orient_seed_source(&path, decoded);
+        let mut linear = raybend::develop::LinearImage::from_raw16(decoded)
+            .ok_or("解码尺寸与像素不一致")?;
+        // SOOC（相机直出位图）基准下控制点不参与计算（§4.2）：也不应该为它取样。
+        // 前端入口之外这里再挡一次，避免直接构造 IPC 时悄悄改种子。
+        if stack.source_base != EditBase::Raw {
+            return Err("控制点取样只支持 RAW 基准".into());
+        }
+        // 几何（旋转 / 裁切）：落点与画布用的是**显示画幅**，这里先摆齐再取样
+        if let Some(geometry) = stack.geometry.filter(|geometry| !geometry.is_identity()) {
+            let (width, height, rgb) =
+                raybend::develop::geometry::apply_rgb((linear.width, linear.height), &linear.rgb, geometry)
+                    .ok_or("成片几何不合法")?;
+            linear = raybend::develop::LinearImage {
+                width,
+                height,
+                rgb,
+            };
+        }
+        let params = raybend::develop::DevelopParams::from_values(
+            stack.params.iter().map(|(id, value)| (id.clone(), *value)),
+            stack.as_shot_k,
+        )
+        .map_err(|e| format!("编辑栈里的参数不合法：{e}"))?;
+        let mut curves = raybend::develop::CurveSet::identity();
+        if stack.source_base == EditBase::Raw
+            && let Some(points) = &stack.base_curve_points
+        {
+            curves.base = raybend::develop::Curve::from_points(points.clone())
+                .map_err(|e| format!("基础曲线不合法：{e}"))?;
+        }
+        for (channel, points) in &stack.curves {
+            let Some(channel) = raybend::develop::CurveChannel::parse(channel) else {
+                return Err(format!("未知的曲线通道：{channel}"));
+            };
+            curves.set_channel(
+                channel,
+                raybend::develop::Curve::from_points(points.clone())
+                    .map_err(|e| format!("曲线不合法：{e}"))?,
+            );
+        }
+        let layers = if stack.areas.is_empty() {
+            None
+        } else {
+            let specs = stack.area_specs();
+            Some(
+                raybend::develop::LayerStack::from_specs(&specs, stack.default_index, stack.as_shot_k)
+                    .map_err(|e| format!("编辑区不合法：{e}"))?,
+            )
+        };
+        // LUT 也要参与取样：默认层在目标层之前时，「该层输入」是 LUT 之后的颜色。
+        // 与渲染同一份解析口（不存在就走空链），不在前端另算一遍。
+        let lut = crate::lut::resolve_stack_chain(&handle, &stack).chain;
+        let stages = raybend::develop::DevelopStages {
+            areas: layers.as_ref(),
+            lut: lut.as_deref(),
+            ..Default::default()
+        };
+        let px = ((x as f64) * f64::from(linear.width.max(1))).floor() as u32;
+        let py = ((y as f64) * f64::from(linear.height.max(1))).floor() as u32;
+        let px = px.min(linear.width.saturating_sub(1));
+        let py = py.min(linear.height.saturating_sub(1));
+        let sampled = raybend::develop::pipeline::compose_linear_median(
+            &linear,
+            &params,
+            &curves,
+            &stages,
+            layer,
+            px,
+            py,
+            raybend::develop::pipeline::SEED_SAMPLE_RADIUS,
+        )
+        .ok_or("落点超出照片范围")?;
+        Ok(AreaSeedDto {
+            x,
+            y,
+            seed: raybend::develop::feature_vector(sampled),
+        })
+    })
+    .await
 }
 
 /// 一个文件属于哪个库的哪个资产（找不到 = 未入库 / 库不在线）。
@@ -604,49 +780,8 @@ pub async fn develop_commit<R: Runtime>(
 fn diff_stack(asset_id: i64, before: &DevelopStack, after: &DevelopStack) -> Vec<Op> {
     let mut ops = Vec::new();
 
-    for (param_id, value) in &after.params {
-        let old = before.params.get(param_id).copied();
-        if old != Some(*value) {
-            ops.push(Op::DevelopParam {
-                asset_id,
-                param_id: param_id.clone(),
-                before: old.map(f64::to_bits),
-                after: Some(value.to_bits()),
-            });
-        }
-    }
-    for (param_id, value) in &before.params {
-        if !after.params.contains_key(param_id) {
-            ops.push(Op::DevelopParam {
-                asset_id,
-                param_id: param_id.clone(),
-                before: Some(value.to_bits()),
-                after: None,
-            });
-        }
-    }
-
-    for (channel, points) in &after.curves {
-        let old = before.curves.get(channel);
-        if old != Some(points) {
-            ops.push(Op::DevelopCurve {
-                asset_id,
-                channel: channel.clone(),
-                before: old.and_then(|points| serde_json::to_string(points).ok()),
-                after: serde_json::to_string(points).ok(),
-            });
-        }
-    }
-    for (channel, points) in &before.curves {
-        if !after.curves.contains_key(channel) {
-            ops.push(Op::DevelopCurve {
-                asset_id,
-                channel: channel.clone(),
-                before: serde_json::to_string(points).ok(),
-                after: None,
-            });
-        }
-    }
+    diff_values(asset_id, None, &before.params, &before.curves, &after.params, &after.curves, &mut ops);
+    diff_areas(asset_id, before, after, &mut ops);
 
     // 设置统一以可空序列化值进入撤销；自动来源也走同一管道，但不改变像素。
     for setting in [
@@ -654,7 +789,7 @@ fn diff_stack(asset_id: i64, before: &DevelopStack, after: &DevelopStack) -> Vec
         Setting::AutoAdjust,
         Setting::BaseCurveProfile,
         Setting::BaseCurvePoints,
-        Setting::LutId,
+        Setting::LutChain,
         Setting::LutEnabled,
         Setting::LensProfile,
         Setting::LensEnabled,
@@ -677,16 +812,222 @@ fn diff_stack(asset_id: i64, before: &DevelopStack, after: &DevelopStack) -> Vec
     ops
 }
 
+/// 一层（默认层或附加层）里的参数与曲线差量。
+fn diff_values(
+    asset_id: i64,
+    area_id: Option<u32>,
+    before_params: &BTreeMap<String, f64>,
+    before_curves: &BTreeMap<String, Vec<[f32; 2]>>,
+    after_params: &BTreeMap<String, f64>,
+    after_curves: &BTreeMap<String, Vec<[f32; 2]>>,
+    ops: &mut Vec<Op>,
+) {
+    for (param_id, value) in after_params {
+        let old = before_params.get(param_id).copied();
+        if old != Some(*value) {
+            ops.push(Op::DevelopParam {
+                asset_id,
+                area_id,
+                param_id: param_id.clone(),
+                before: old.map(f64::to_bits),
+                after: Some(value.to_bits()),
+            });
+        }
+    }
+    for (param_id, value) in before_params {
+        if !after_params.contains_key(param_id) {
+            ops.push(Op::DevelopParam {
+                asset_id,
+                area_id,
+                param_id: param_id.clone(),
+                before: Some(value.to_bits()),
+                after: None,
+            });
+        }
+    }
+    for (channel, points) in after_curves {
+        let old = before_curves.get(channel);
+        if old != Some(points) {
+            ops.push(Op::DevelopCurve {
+                asset_id,
+                area_id,
+                channel: channel.clone(),
+                before: old.and_then(|points| serde_json::to_string(points).ok()),
+                after: serde_json::to_string(points).ok(),
+            });
+        }
+    }
+    for (channel, points) in before_curves {
+        if !after_curves.contains_key(channel) {
+            ops.push(Op::DevelopCurve {
+                asset_id,
+                area_id,
+                channel: channel.clone(),
+                before: serde_json::to_string(points).ok(),
+                after: None,
+            });
+        }
+    }
+}
+
+/// 编辑区（area）的结构差量：增删 / 排序 / 改名 / 启停 / 换色 / 控制点 / 逐层参数。
+///
+/// 顺序是有讲究的（撤销会**逆序**重放，所以正着跑必须能从 before 走到 after）：
+/// ① 先删、② 再插、③ 然后排（在「删 + 插」之后的骨架上算移动）、④ 最后改内容。
+fn diff_areas(asset_id: i64, before: &DevelopStack, after: &DevelopStack, ops: &mut Vec<Op>) {
+    use raybend::store::develop::{area_point, point_bits};
+
+    let before_rows = raybend::store::develop::area_rows(before);
+    let after_rows = raybend::store::develop::area_rows(after);
+
+    // ① 删掉的层（行号从**大**到小，删一个后面的行号不乱）
+    let mut removed: Vec<(usize, u32)> = before_rows
+        .iter()
+        .enumerate()
+        .filter_map(|(index, row)| row.map(|id| (index, id)))
+        .filter(|(_, id)| !after.areas.iter().any(|area| area.id == *id))
+        .collect();
+    removed.sort_by(|a, b| b.0.cmp(&a.0));
+    let mut rows = before_rows.clone();
+    for (index, id) in &removed {
+        let area = before
+            .areas
+            .iter()
+            .find(|area| area.id == *id)
+            .expect("行序里的层一定在列表里");
+        if let Ok(json) = serde_json::to_string(area) {
+            #[allow(clippy::cast_possible_truncation)]
+            ops.push(Op::AreaRemove {
+                asset_id,
+                index: *index as u32,
+                area: json,
+            });
+        }
+        rows.remove(*index);
+    }
+
+    // ② 新加的层（行号从**小**到大，插一个后面的行号往后挪）
+    let mut added: Vec<(usize, u32)> = after_rows
+        .iter()
+        .enumerate()
+        .filter_map(|(index, row)| row.map(|id| (index, id)))
+        .filter(|(_, id)| !before.areas.iter().any(|area| area.id == *id))
+        .collect();
+    added.sort_by_key(|(index, _)| *index);
+    for (index, id) in &added {
+        let area = after
+            .areas
+            .iter()
+            .find(|area| area.id == *id)
+            .expect("行序里的层一定在列表里");
+        if let Ok(json) = serde_json::to_string(area) {
+            #[allow(clippy::cast_possible_truncation)]
+            ops.push(Op::AreaAdd {
+                asset_id,
+                index: *index as u32,
+                area: json,
+            });
+        }
+        rows.insert(*index, Some(*id));
+    }
+
+    // ③ 排序：把骨架逐位对齐到 after 的行序（选择排序式，最多 n−1 步）
+    for index in 0..after_rows.len().min(rows.len()) {
+        if rows[index] == after_rows[index] {
+            continue;
+        }
+        if let Some(source) = rows
+            .iter()
+            .enumerate()
+            .skip(index + 1)
+            .find(|(_, row)| **row == after_rows[index])
+            .map(|(position, _)| position)
+        {
+            let row = rows.remove(source);
+            rows.insert(index, row);
+            #[allow(clippy::cast_possible_truncation)]
+            ops.push(Op::AreaMove {
+                asset_id,
+                from: source as u32,
+                to: index as u32,
+            });
+        }
+    }
+
+    // ④ 内容：改名 / 启停 / 换色 / 控制点 / 逐层参数与曲线
+    for area in &after.areas {
+        let Some(old) = before.areas.iter().find(|candidate| candidate.id == area.id) else {
+            continue;
+        };
+        if old.name != area.name {
+            ops.push(Op::AreaRename {
+                asset_id,
+                id: area.id,
+                before: old.name.clone(),
+                after: area.name.clone(),
+            });
+        }
+        if old.enabled != area.enabled {
+            ops.push(Op::AreaToggle {
+                asset_id,
+                id: area.id,
+                before: old.enabled,
+                after: area.enabled,
+            });
+        }
+        if old.color != area.color {
+            ops.push(Op::AreaColor {
+                asset_id,
+                id: area.id,
+                before: old.color,
+                after: area.color,
+            });
+        }
+        if let (Some(old_point), Some(new_point)) = (area_point(old), area_point(area))
+            && old_point != new_point
+        {
+            ops.push(Op::AreaPoint {
+                asset_id,
+                id: area.id,
+                before: point_bits(old_point),
+                after: point_bits(new_point),
+            });
+        }
+        diff_values(
+            asset_id,
+            Some(area.id),
+            &old.params,
+            &old.curves,
+            &area.params,
+            &area.curves,
+            ops,
+        );
+    }
+}
+
 /// 撤销菜单里那一句（例如「调整参数」/「调整曲线」）。
 fn undo_label(ops: &[Op]) -> String {
     let mut params = 0usize;
     let mut curves = 0usize;
+    let mut areas = 0usize;
     for op in ops {
         match op {
             Op::DevelopParam { .. } => params += 1,
             Op::DevelopCurve { .. } => curves += 1,
+            Op::AreaAdd { .. }
+            | Op::AreaRemove { .. }
+            | Op::AreaMove { .. }
+            | Op::AreaRename { .. }
+            | Op::AreaToggle { .. }
+            | Op::AreaColor { .. }
+            | Op::AreaPoint { .. } => areas += 1,
             _ => {}
         }
+    }
+    if areas > 0 {
+        // 结构动作优先说「编辑区」：一次拖动排序里可能还夹着参数改动，
+        // 但对用户来说那一步就是「动了层」。
+        return "编辑区".to_string();
     }
     match (params, curves) {
         (0, 0) => "调整".to_string(),
@@ -724,7 +1065,7 @@ mod geometry_tests {
             };
             let mut manual = automatic.clone();
             manual.params.insert("exposure".into(), 1.0);
-            manual.lut_id = Some("lut".into());
+            manual.lut_chain = vec![raybend::store::develop::LutLayer::new("lut")];
             manual.lut_enabled = Some(true);
             let cleared = DevelopStack::default();
             let mut undo = UndoStack::new(10);
@@ -748,6 +1089,183 @@ mod geometry_tests {
             Ok(())
         })
         .unwrap();
+    }
+
+    /// **W3：结构动作的往返**（增 / 删 / 排序 / 改名 / 启停 / 换色 / 控制点 / 逐层参数）。
+    #[test]
+    fn area_structural_edits_round_trip_through_the_shared_undo() {
+        use raybend::store::develop::{Area, AreaKind, DevelopStack};
+        use raybend::store::{
+            db::{CatalogDb, OpenOpts},
+            marking::{self, UndoStack},
+        };
+
+        fn area(id: u32, name: &str, kind: AreaKind, params: &[(&str, f64)]) -> Area {
+            Area {
+                id,
+                kind,
+                name: name.to_string(),
+                enabled: true,
+                opacity: 1.0,
+                color: 0,
+                params: params
+                    .iter()
+                    .map(|(id, value)| ((*id).to_string(), *value))
+                    .collect(),
+                curves: Default::default(),
+                seed_version: raybend::store::develop::SEED_VERSION,
+            }
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let db = CatalogDb::create(dir.path(), "编辑区撤销", None, OpenOpts::unbacked_up(1)).unwrap();
+        db.write(|conn| {
+            conn.execute_batch("INSERT INTO assets(id,imported_at,updated_at) VALUES(7,1,1);")
+                .unwrap();
+            let a = area(1, "天空", AreaKind::Full, &[("exposure", -0.4)]);
+            let b = area(2, "地面", AreaKind::Full, &[("contrast", 20.0)]);
+            let c = area(
+                3,
+                "",
+                AreaKind::Point {
+                    x: 0.4,
+                    y: 0.6,
+                    seed: [0.3, 0.05, 0.0],
+                    tolerance: 300.0,
+                },
+                &[("saturation", 30.0)],
+            );
+            let before = DevelopStack {
+                areas: vec![a.clone(), b.clone(), c.clone()],
+                default_index: Some(0),
+                params: [("exposure".to_string(), 0.1)].into(),
+                ..Default::default()
+            };
+            develop::save(conn, 7, &before, 1).unwrap();
+
+            // 删 A、改名 B + 关掉 + 改参数、改 C 的容差、加一个新层、把默认层挪到第 3 行
+            let mut next_b = b.clone();
+            next_b.name = "地面（改）".into();
+            next_b.enabled = false;
+            next_b.color = 5;
+            next_b.params.insert("contrast".into(), 45.0);
+            let mut next_c = c.clone();
+            next_c.kind = AreaKind::Point {
+                x: 0.4,
+                y: 0.6,
+                seed: [0.3, 0.05, 0.0],
+                tolerance: 650.0,
+            };
+            let added = area(4, "新的", AreaKind::Full, &[("highlights", -30.0)]);
+            let after = DevelopStack {
+                // 行序 [B, C, 默认, E] ⇒ areas = [B, C, E]，default_index = 2
+                areas: vec![next_b.clone(), next_c.clone(), added],
+                default_index: Some(2),
+                params: [("exposure".to_string(), 0.1)].into(),
+                ..Default::default()
+            };
+            let ops = diff_stack(7, &before, &after);
+            assert!(
+                ops.iter().any(|op| matches!(op, Op::AreaRemove { .. })),
+                "删层要产生 AreaRemove"
+            );
+            assert!(
+                ops.iter().any(|op| matches!(op, Op::AreaAdd { .. })),
+                "建层要产生 AreaAdd"
+            );
+            assert!(
+                ops.iter().any(|op| matches!(op, Op::AreaMove { .. })),
+                "默认层挪位置要产生 AreaMove"
+            );
+            assert!(
+                ops.iter().any(|op| matches!(op, Op::AreaPoint { .. })),
+                "改容差要产生 AreaPoint"
+            );
+            assert!(
+                ops.iter()
+                    .any(|op| matches!(op, Op::DevelopParam { area_id: Some(2), .. })),
+                "层内参数要带 area_id"
+            );
+
+            let mut undo = UndoStack::new(10);
+            let change = ChangeSet::new(undo_label(&ops), ops);
+            marking::apply(conn, &change).unwrap();
+            assert_eq!(develop::load(conn, 7).unwrap(), after);
+            undo.push(change);
+
+            // 撤销 ⇒ **逐字段**回到 before（位置、名字、颜色、容差都在）
+            undo.undo(conn).unwrap();
+            assert_eq!(develop::load(conn, 7).unwrap(), before);
+            undo.redo(conn).unwrap();
+            assert_eq!(develop::load(conn, 7).unwrap(), after);
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    /// 旧撤销栈（没有 `area_id`）仍然作用在**默认层**上。
+    #[test]
+    fn legacy_param_ops_still_target_the_default_layer() {
+        use raybend::store::{
+            db::{CatalogDb, OpenOpts},
+            marking::{self, Op},
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let db = CatalogDb::create(dir.path(), "旧撤销", None, OpenOpts::unbacked_up(1)).unwrap();
+        db.write(|conn| {
+            conn.execute_batch("INSERT INTO assets(id,imported_at,updated_at) VALUES(7,1,1);")
+                .unwrap();
+            let stack = DevelopStack {
+                params: [("exposure".to_string(), 0.25)].into(),
+                areas: vec![raybend::store::develop::Area {
+                    id: 1,
+                    kind: raybend::store::develop::AreaKind::Full,
+                    name: String::new(),
+                    enabled: true,
+                    opacity: 1.0,
+                    color: 0,
+                    params: Default::default(),
+                    curves: Default::default(),
+                    seed_version: 0,
+                }],
+                default_index: Some(1),
+                ..Default::default()
+            };
+            develop::save(conn, 7, &stack, 1).unwrap();
+            let op = Op::DevelopParam {
+                asset_id: 7,
+                area_id: None,
+                param_id: "exposure".to_string(),
+                before: Some(0.25f64.to_bits()),
+                after: Some(0.75f64.to_bits()),
+            };
+            marking::apply(conn, &ChangeSet::new("改曝光", vec![op.clone()])).unwrap();
+            let after = develop::load(conn, 7).unwrap();
+            assert_eq!(after.params.get("exposure"), Some(&0.75));
+            assert!(
+                after.areas[0].params.is_empty(),
+                "没有 area_id 的旧 op 不能写进附加层"
+            );
+            marking::apply(conn, &ChangeSet::new("改曝光", vec![op.invert()])).unwrap();
+            assert_eq!(
+                develop::load(conn, 7).unwrap().params.get("exposure"),
+                Some(&0.25)
+            );
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    /// 空层 / `areas: null` 也必须能落库：普通编辑（还没有建层）不能被 DTO 拒绝。
+    #[test]
+    fn dto_accepts_null_areas_as_default_layer_only() {
+        let dto: DevelopStackDto = serde_json::from_str(
+            r#"{"values":{},"curves":{},"areas":null,"defaultIndex":null}"#,
+        )
+        .expect("null 层列表是合法载荷");
+        let stack = dto.into_stack().expect("应当转成只有默认层的栈");
+        assert!(stack.areas.is_empty());
+        assert_eq!(stack.default_index, None);
     }
 
     #[test]
@@ -775,6 +1293,62 @@ mod geometry_tests {
         assert!(
             matches!(backward.as_slice(), [Op::DevelopSetting { asset_id: 7, key, before: Some(_), after: None }]
             if key == "geometry")
+        );
+    }
+
+    /// **真照片回归**：EXIF 方向 8 的 RW2，天空点必须采到亮部、墙点必须采到中间调。
+    ///
+    /// 2026-11-02 的真实 bug：worker 报方向 1、文件头是 8，落点取样没有走
+    /// `raw_orientation`，于是天空点采到墙、墙点采到天空。这个测试手动跑：
+    /// `cargo test -p raybend-desktop area_seed_orientation -- --ignored`。
+    #[test]
+    #[ignore = "要真照片（测试库 MYP1000048.RW2）与 worker 二进制，手跑"]
+    fn area_seed_orientation_matches_the_display_frame() {
+        let path = std::path::Path::new(
+            "/mnt/c/src/tmp/testrespos/photos/2026-09-13/_RAW/MYP1000048.RW2",
+        );
+        if !path.exists() {
+            return;
+        }
+        let request = raybend::raw::DecodeRequest::thumb(path.to_path_buf(), 1024)
+            .with_preview(false);
+        let decoded = raybend::raw::worker::shared()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .decode_linear(&request)
+            .expect("解码真 RAW");
+        let decoded = orient_seed_source(path, decoded);
+        let linear = raybend::develop::LinearImage::from_raw16(decoded).expect("线性形状");
+        let params = raybend::develop::DevelopParams::new(None);
+        let curves = raybend::develop::CurveSet::identity();
+        let stages = raybend::develop::DevelopStages::default();
+        let sample = |x: f32, y: f32| {
+            let px = ((x as f64) * f64::from(linear.width.max(1))).floor() as u32;
+            let py = ((y as f64) * f64::from(linear.height.max(1))).floor() as u32;
+            let px = px.min(linear.width.saturating_sub(1));
+            let py = py.min(linear.height.saturating_sub(1));
+            let sampled = raybend::develop::pipeline::compose_linear_median(
+                &linear,
+                &params,
+                &curves,
+                &stages,
+                0,
+                px,
+                py,
+                raybend::develop::pipeline::SEED_SAMPLE_RADIUS,
+            )
+            .expect("取样");
+            raybend::develop::feature_vector(sampled)[0]
+        };
+        // XMP 里这两个点的归一化坐标（`MYP1000048.xmp`）。
+        let sky = sample(0.243_895_83, 0.122_166_55);
+        let wall = sample(0.647_184, 0.255_573_24);
+        println!("orientation seed luma: sky={sky:.4}, wall={wall:.4}");
+        assert!(sky > 0.6, "天空点应当采到亮部：{sky}");
+        assert!(wall < 0.8, "墙点应当采到中间调：{wall}");
+        assert!(
+            sky > wall + 0.1,
+            "方向摆正后天空必须比墙亮：sky={sky}, wall={wall}"
         );
     }
 }

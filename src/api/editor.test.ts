@@ -45,7 +45,8 @@ test("普通载图与撤销共用完整基础曲线适配", () => {
     baseCurveProfile: "8", baseCurvePoints: [[0, 0], [0.4, 0.55], [1, 1]],
     nrMethod: "high" }), {
     sourceBase: "raw", baseCurveProfile: "8", baseCurvePoints: [[0, 0], [0.4, 0.55], [1, 1]],
-    color: null, autoAdjust: null, lutId: null, lutEnabled: null, asShotK: null, lensProfile: null, lensEnabled: null, nrMethod: "high", geometry: null,
+    color: null, autoAdjust: null, lutChain: null, lutEnabled: null, asShotK: null, lensProfile: null, lensEnabled: null, nrMethod: "high", geometry: null,
+    areas: null, defaultIndex: null,
   });
 });
 

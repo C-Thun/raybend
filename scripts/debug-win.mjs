@@ -321,8 +321,15 @@ const parsedAi = parseAiArgs(process.argv.slice(2));
 if (parsedAi.args.length) throw new Error("debug:win 仅支持 --ai=auto|required|off");
 const aiPlan = resolveAiBuild({root:ROOT,mode:parsedAi.mode,fetchRuntime:ensureBuildRuntime});
 const aiEnv = aiBuildEnv(aiPlan);
+/*
+ * 调试产物要带开发期面板（崔总 2026-11-01：「debug 面板入口也没有啊」）。
+ * `debug:win` 跑的是**生产前端构建**（`DEV = false`）+ debug Rust，所以必须显式给一个
+ * 构建期开关；发出去的包（`pnpm build` / `pnpm release`）没有这个变量，分支照样被摇掉。
+ * 判定口径见 `src/lib/dev-build.ts`。
+ */
+const frontendEnv = { ...aiEnv, VITE_DEBUG_PANEL: "1" };
 
-run("① 前端构建（dist/ 嵌进 exe，必须最新）", "pnpm", ["build"], {env:aiEnv});
+run("① 前端构建（dist/ 嵌进 exe，必须最新）", "pnpm", ["build"], { env: frontendEnv });
 
 run("② Windows 侧 cargo 构建（debug + custom-protocol）", "cmd.exe", [
   "/c",

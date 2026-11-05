@@ -7,7 +7,7 @@ use crate::develop::{
     denoise::NrMethod,
     geometry::EditGeometry,
     lens::{LensCorrection, LensMap},
-    lut::Lut,
+    lut::LutChain,
 };
 use std::sync::Arc;
 
@@ -18,7 +18,7 @@ pub struct PreparedWorkingFrame {
     ///
     /// `None` = 这张图的像素里没有待套的 LUT：要么没选，要么慢速路已在 CPU 烘焙过。
     /// 渲染线程照着它 `set_creative_lut`，不要拿「当前选中的 LUT」代替 —— 帧与选择可能差一拍。
-    pub gpu_lut: Option<Arc<Lut>>,
+    pub gpu_lut: Option<Arc<LutChain>>,
 }
 
 struct TierCache {
@@ -83,8 +83,9 @@ impl WorkingPreview {
         curves: &CurveSet,
         nr_method: NrMethod,
         lens: Option<&LensCorrection>,
-        lut: Option<&Arc<Lut>>,
+        lut: Option<&Arc<LutChain>>,
         geometry: Option<EditGeometry>,
+        areas: Option<&crate::develop::LayerStack>,
     ) -> crate::Result<PreparedWorkingFrame> {
         if let Some(geometry) = geometry {
             geometry
@@ -102,9 +103,12 @@ impl WorkingPreview {
             LensCorrection::manual_only(tier.source.width, tier.source.height, plans.lens.manual)
         });
         correction.manual = plans.lens.manual;
+        // 编辑区层**不进 GPU 快速路**：着色器的全局影调只认识默认层那一条链
+        // （`specs/editor-area.md` §4.1 的逐像素合成在 CPU 上，一次算完）。
         let fast = nr_method != NrMethod::High
             && plans.sharpen.is_identity()
             && plans.local_tone == 0.0
+            && areas.is_none_or(crate::develop::LayerStack::is_degenerate)
             && geometry.is_none_or(|value| value.is_identity());
         // 创意 LUT 不再退出快速路（2026-10-31）：它在着色器里与全局影调同一趟完成，
         // 每帧代价是「一次 3D 纹理采样」而不是「一遍 CPU 全画幅重渲」。
@@ -146,6 +150,7 @@ impl WorkingPreview {
                 lut.map(Arc::as_ref),
                 geometry,
                 0,
+                areas,
             )?;
             Ok(PreparedWorkingFrame {
                 image: Arc::new(RenderImage::from_working(&image).ok_or_else(|| {
@@ -194,7 +199,7 @@ impl WorkingPreview {
                 && nr.is_identity() && image.linear_source.is_some() { Arc::clone(image) }
             else { Arc::new(RenderImage::from_shared_linear(Arc::clone(&tier.source)).ok_or_else(|| crate::Error::Unsupported("工作图超出 GPU 浮点纹理范围".into()))?) }
         } else {
-            let image = crate::display::output::render_working_params(&tier.source, &neutral, &CurveSet::identity(), NrMethod::Fast, Some(&correction), None, geometry, 0)?;
+            let image = crate::display::output::render_working_params(&tier.source, &neutral, &CurveSet::identity(), NrMethod::Fast, Some(&correction), None, geometry, 0, None)?;
             Arc::new(RenderImage::from_working(&image).ok_or_else(|| crate::Error::Unsupported("工作图超出 GPU 浮点纹理范围".into()))?)
         };
         let id = crate::develop::reference::next_frame_id();
@@ -210,12 +215,13 @@ impl WorkingPreview {
         curves: &CurveSet,
         nr_method: NrMethod,
         lens: Option<&LensCorrection>,
-        lut: Option<&Lut>,
+        lut: Option<&LutChain>,
         geometry: Option<EditGeometry>,
+        areas: Option<&crate::develop::LayerStack>,
     ) -> crate::Result<Vec<u8>> {
         let sample = self.full.source.downscaled_to(256);
         let image = crate::display::output::render_working_params(
-            &sample, params, curves, nr_method, lens, lut, geometry, 0,
+            &sample, params, curves, nr_method, lens, lut, geometry, 0, areas,
         )?;
         let srgb =
             crate::color::icc::srgb_icc().map_err(|e| crate::Error::Unsupported(e.to_string()))?;
@@ -236,13 +242,13 @@ mod tests {
         let image=crate::color::working::WorkingImage::new(9,7,vec![[0.2,0.4,0.8];63]).unwrap();
         let mut preview=WorkingPreview::new(WorkingReferenceImage::from_working(image).unwrap());
         let mut params=DevelopParams::default();let curves=CurveSet::identity();
-        let first=preview.render(0,&params,&curves,NrMethod::Fast,None,None,None).unwrap();
+        let first=preview.render(0,&params,&curves,NrMethod::Fast,None,None,None,None).unwrap();
         assert!(first.image.pixels.is_empty());assert!(first.image.linear_source.is_some());assert!(first.image.is_consistent());
         let (_,reference)=preview.reference(0,&params,None,None).unwrap();assert!(Arc::ptr_eq(&first.image,&reference));
         params.set("lumaNr",35.0).unwrap();
-        let denoised=preview.render(0,&params,&curves,NrMethod::Fast,None,None,None).unwrap();
+        let denoised=preview.render(0,&params,&curves,NrMethod::Fast,None,None,None,None).unwrap();
         preview.reference(0,&params,None,None).unwrap();
-        let second=preview.render(0,&params,&curves,NrMethod::Fast,None,None,None).unwrap();
+        let second=preview.render(0,&params,&curves,NrMethod::Fast,None,None,None,None).unwrap();
         assert!(Arc::ptr_eq(&denoised.image,&second.image));
         let mut packed=super::super::image::HalfUpload::default();first.image.pack_rows(0,7,&mut packed);
         // Direct source packing must match shared reference math, including signed range.
@@ -263,19 +269,19 @@ mod tests {
         .unwrap();
         let source = WorkingReferenceImage::from_working(image).unwrap();
         let mut preview = WorkingPreview::new(source);
-        let lut = Arc::new(
+        let chain = Arc::new(crate::develop::lut::LutChain::single(Arc::new(
             crate::develop::lut::Lut::parse_cube(
                 "LUT_3D_SIZE 2\n0 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1\n",
             )
             .unwrap(),
-        );
+        )));
         let curves = CurveSet::identity();
         let fast = preview
-            .render(0, &DevelopParams::default(), &curves, NrMethod::Fast, None, Some(&lut), None)
+            .render(0, &DevelopParams::default(), &curves, NrMethod::Fast, None, Some(&chain), None, None)
             .unwrap();
         assert!(fast.tone.is_some(), "快速路要带影调表");
         assert!(
-            fast.gpu_lut.as_ref().is_some_and(|bound| Arc::ptr_eq(bound, &lut)),
+            fast.gpu_lut.as_ref().is_some_and(|bound| Arc::ptr_eq(bound, &chain)),
             "快速路的帧必须带上这条链要用的 LUT"
         );
 
@@ -283,7 +289,7 @@ mod tests {
         sharpened.set("sharpenAmount", 20.0).unwrap();
         sharpened.set("sharpenRadius", 30.0).unwrap();
         let slow = preview
-            .render(0, &sharpened, &curves, NrMethod::Fast, None, Some(&lut), None)
+            .render(0, &sharpened, &curves, NrMethod::Fast, None, Some(&chain), None, None)
             .unwrap();
         assert!(slow.tone.is_none(), "锐化走 CPU 参考路径");
         assert!(
@@ -311,6 +317,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
             )
             .unwrap();
         params.set("exposure", 1.0).unwrap();
@@ -320,6 +327,7 @@ mod tests {
                 &params,
                 &CurveSet::identity(),
                 NrMethod::Fast,
+                None,
                 None,
                 None,
                 None,
@@ -342,6 +350,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
             )
             .unwrap();
         assert!(spatial.tone.is_none());
@@ -355,6 +364,7 @@ mod tests {
             None,
             None,
             0,
+            None,
         )
         .unwrap();
         assert_eq!(*spatial.image, RenderImage::from_working(&offline).unwrap());
@@ -364,6 +374,7 @@ mod tests {
                     &params,
                     &CurveSet::identity(),
                     NrMethod::Fast,
+                    None,
                     None,
                     None,
                     None
@@ -391,6 +402,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
             )
             .unwrap();
         params.set("exposure", 1.0).unwrap();
@@ -400,6 +412,7 @@ mod tests {
                 &params,
                 &CurveSet::identity(),
                 NrMethod::Fast,
+                None,
                 None,
                 None,
                 None,
@@ -414,6 +427,7 @@ mod tests {
                 &params,
                 &CurveSet::identity(),
                 NrMethod::Fast,
+                None,
                 None,
                 None,
                 None,

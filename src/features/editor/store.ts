@@ -29,6 +29,7 @@ import type {
   EditGeometry,
 } from "../../api/types.ts";
 import { t } from "../../i18n/index.ts";
+import type { Area, LutLayer } from "../../api/editor.ts";
 
 import {
   initialEditorChrome,
@@ -36,6 +37,7 @@ import {
   editorIssuesVisible,
   editorLeftPanelVisible,
   editorLutVisible,
+  editorPresetVisible,
   editorShowsFilm,
   editorShowsRight,
   resetEditorChrome,
@@ -58,6 +60,62 @@ import {
   type LutCategory,
 } from "../../lib/lut-library.ts";
 import { isIdentityCurve, type CurvePoint } from "../../lib/curve.ts";
+
+/** 链长上限（与 Rust `store::develop::MAX_LUT_LAYERS`、着色器保持一致）。 */
+export const MAX_LUT_LAYERS = 8;
+
+/** 编辑区层数上限（**不含默认层**；与 Rust `store::develop::MAX_AREAS` 一致）。 */
+export const MAX_AREAS = 32;
+
+/** 控制点颜色槽位数量（`memory/DESIGN.md` §15.5；与 Rust `POINT_COLORS` 一致）。 */
+export const POINT_COLORS = 8;
+
+/**
+ * 控制点种子的定义版本（与 Rust `store::develop::SEED_VERSION` 保持一致）。
+ *
+ * 种子从「线性域 `[luma, c1, c2]`」换成了「感知域 `[Y′, Cb, Cr]`」（2026-11-01），
+ * 旧数据的种子没法换算 —— 载入时按 `x/y` 逐点重取一次（位置不变）。
+ */
+export const SEED_VERSION = 1;
+
+/** 层行（默认层 + 附加层，按计算顺序）。 */
+export type LayerRow =
+  | { kind: "default"; key: "default" }
+  | { kind: "area"; key: string; area: Area };
+
+/**
+ * 行序 → `(areas, defaultIndex)`（`layerRows` 与拖动的唯一换算）。
+ *
+ * 与 Rust `store::develop::area_rows` 同一套口径：默认层是 `defaultIndex` 那个位置，
+ * `areas` 只装非默认层、顺序即计算顺序。
+ */
+export function rowsToLayers(rows: readonly LayerRow[]): { areas: Area[]; defaultIndex: number } {
+  const areas: Area[] = [];
+  let defaultIndex = 0;
+  rows.forEach((row, index) => {
+    if (row.kind === "default") defaultIndex = index;
+    else areas.push(row.area);
+  });
+  return { areas, defaultIndex };
+}
+
+/** `(areas, defaultIndex)` → 行序（`rowsToLayers` 的逆）。 */
+export function layersToRows(areas: readonly Area[], defaultIndex: number): LayerRow[] {
+  const rows: LayerRow[] = [];
+  let next = 0;
+  for (let position = 0; position <= areas.length; position += 1) {
+    if (position === Math.min(Math.max(defaultIndex, 0), areas.length)) {
+      rows.push({ kind: "default", key: "default" });
+    }
+    if (next < areas.length) {
+      rows.push({ kind: "area", key: String(areas[next].id), area: areas[next] });
+      next += 1;
+    }
+  }
+  // 兜底：默认层位置越界时上面那个循环可能一格都没放（数据坏了也不该爆）
+  if (!rows.some((row) => row.kind === "default")) rows.unshift({ kind: "default", key: "default" });
+  return rows;
+}
 import {
   buildPresetSnapshot,
   planPresetApply,
@@ -71,10 +129,13 @@ import {
   type PresetSelection,
   type PresetSnapshot,
 } from "../../lib/presets.ts";
+import { maskWeightPayload } from "../../lib/mask-debug.ts";
 import {
+  AREA_OPACITY,
   CROP_RATIOS,
   defaultParams,
   invertRatio,
+  POINT_TOLERANCE,
   paramSpec,
   paramsInGroup,
   PARAM_DEFAULTS,
@@ -127,6 +188,8 @@ export interface EditorStore {
   leftPanel: () => EditorLeftPanel | null;
   /** LUT 面板这一刻可见吗（= 左列可见 **且** 开着的是 LUT） */
   lutVisible: () => boolean;
+  /** 预设面板这一刻在不在（toolsbar left 的按钮按下态） */
+  presetVisible: () => boolean;
   /** 定稿面板这一刻可见吗（= 左列可见 **且** 开着的是定稿） */
   issuesVisible: () => boolean;
   showsRight: () => boolean;
@@ -217,6 +280,53 @@ export interface EditorStore {
   /** 拖拽结束（松手）—— 这一下会让载荷重发，Rust 侧于是补全尺寸 */
   endParamDrag: () => void;
 
+  /* ── 编辑区（area）层 ─────────────────────────────── */
+  /**
+   * 层列表的**行序**（含默认层）：`{ kind: "default" }` 或 `{ kind: "area", area }`。
+   *
+   * 列表自上而下 = 计算顺序；默认层可以拖到中间（那就是「LUT 在这个层之后」）。
+   */
+  layerRows: () => readonly LayerRow[];
+  /** 当前正在编辑哪一层：`null` = 默认层。 */
+  activeAreaId: () => number | null;
+  /** 换层（点面板行）。被删掉的层由 store 自己收敛，调用方不用管。 */
+  selectArea: (id: number | null) => void;
+  /** 当前层（`null` = 默认层） */
+  activeArea: () => Area | null;
+  /** 当前层的显示名（空名字回落到类型默认名，走 i18n）。 */
+  activeAreaName: () => string;
+  /** 是不是在默认层（全局功能只有它可用）。 */
+  onDefaultLayer: () => boolean;
+  /** 新建一层**全图**层（追加到末尾）。 */
+  createArea: () => number;
+  /**
+   * **已武装**：点了「新建控制点」、正等着在画面上点一下。
+   *
+   * 这一态**没有建任何层** —— 以前先建一层再点，面板里会凭空多一行，
+   * 下面还挂一条虚线幽灵行（崔总 2026-11-01：那个东西没有存在的必要）。
+   */
+  pointArmed: () => boolean;
+  /** 武装 / 取消（按钮本身是开关；`Esc` 也走 `disarm`）。 */
+  armPointArea: () => void;
+  disarmPointArea: () => void;
+  /** **落点**：到这一刻才创建那一层（追加到末尾、成为当前层）。 */
+  placePointArea: (point: { x: number; y: number; seed: [number, number, number] }) => number;
+  removeArea: (id: number) => void;
+  /** 拖动排序：把第 `from` 行移到第 `to` 行（行序含默认层）。 */
+  moveAreaRow: (from: number, to: number) => void;
+  renameArea: (id: number, name: string) => void;
+  setAreaEnabled: (id: number, enabled: boolean) => void;
+  setAreaColor: (id: number, color: number) => void;
+  /** 控制点的采样位 / 容差（拖动松手那一下写；种子不动）。 */
+  setAreaPoint: (id: number, point: { x?: number; y?: number; tolerance?: number }) => void;
+  /** 旧种子（`seedVersion < SEED_VERSION`）重新取样后的写回：只换 seed 与版本。 */
+  adoptAreaSeed: (id: number, seed: [number, number, number]) => void;
+  /** 满 32 层了吗（两个新建按钮据此变灰）。 */
+  areasFull: () => boolean;
+  /** `显示控制点`（眼睛）：纯视图偏好，`localStorage`，不进 profile / 撤销 / XMP。 */
+  showPoints: () => boolean;
+  setShowPoints: (show: boolean) => void;
+
   /* ── 编辑基准（SOOC / RAW，人类 2026-09-24）────── */
   /** 这次编辑拿哪个当底（**默认 RAW**；会话内跟着用户走，重进编辑器回到默认） */
   editBase: () => DevelopEditBase;
@@ -249,8 +359,9 @@ export interface EditorStore {
   colorState: () => import("../../api/color.ts").PhotoColorState | null;
   setColorState: (next: import("../../api/color.ts").PhotoColorState | null) => void;
   proofEnabled: () => boolean;
-  advancedTab: () => "curve" | "preset" | "color";
-  setAdvancedTab: (tab: "curve" | "preset" | "color") => void;
+  /** 右栏第 3 组的页签（预设 2026-11-05 搬到左列面板；色盘是空面板占位） */
+  advancedTab: () => "curve" | "swatch" | "color";
+  setAdvancedTab: (tab: "curve" | "swatch" | "color") => void;
   setProofEnabled: (enabled: boolean) => void;
   proofTarget: () => import("../../lib/color-model.ts").OutputColor;
   setProofTarget: (target: import("../../lib/color-model.ts").OutputColor) => void;
@@ -258,9 +369,29 @@ export interface EditorStore {
   setProofWarning: (enabled: boolean) => void;
   baseCurvePoints: () => readonly CurvePoint[] | null;
   setBaseCurve: (id: string | null, points: readonly CurvePoint[] | null) => void;
-  lutId: () => string | null;
+  /** 应用层链（自上而下 = 逐层处理顺序；空 = 没有 LUT）。 */
+  lutChain: () => readonly LutLayer[];
   lutEnabled: () => boolean;
   lutEnabledSetting: () => boolean | null;
+  /** 点列表里的 tile：换/移到第 1 层（底层）。 */
+  selectLutAsBase: (id: string) => void;
+  /** 点 tile 右上角圆圈：加/减一层。 */
+  toggleLutInChain: (id: string) => void;
+  setLutLayerEnabled: (index: number, enabled: boolean) => void;
+  /**
+   * 强度 0..1（1 = 100%）。**拖动中与松手后都走它**：
+   * 开关始终等于「强度 > 0」（拉到 0 就关层、拉回 >0 就开层，同一步里定）。
+   */
+  setLutLayerStrength: (index: number, strength: number) => void;
+  /**
+   * 强度**松手**时调用：这一下只是一个 confirm（撤销节点），
+   * 开关早已由 `setLutLayerStrength` 按「> 0 ⇔ 开」定好。
+   *
+   * 只动这一层的开关，**不碰**顶部总开关（总开关关着时链照样不参与渲染）。
+   */
+  commitLutLayerStrength: (index: number, strength: number) => void;
+  moveLutLayer: (from: number, to: number) => void;
+  removeLutLayer: (index: number) => void;
   setLut: (id: string | null, enabled: boolean) => void;
   setLutEnabled: (enabled: boolean) => void;
   setLutCategories: (categories: readonly LutCategory[]) => void;
@@ -305,7 +436,8 @@ export interface EditorStore {
   /** 当前编辑栈的大类快照（新建预设用；序列化由工作区完成）。 */
   presetSnapshot: (groups: readonly PresetGroup[]) => PresetSnapshot;
   /** 按快照保存的大类**整体覆盖**当前编辑栈（LUT 丢失静默忽略；specs §3）。 */
-  applyPresetSnapshot: (snapshot: PresetSnapshot) => { wbSkipped: boolean };
+  /** `lutDropped` = 合并后超出 8 层被丢掉的层数（0 = 没丢），调用方提示一次。 */
+  applyPresetSnapshot: (snapshot: PresetSnapshot) => { wbSkipped: boolean; lutDropped: number };
 
   /* ── GPU 视口（M3-W2）────────────────────────────── */
   /**
@@ -360,7 +492,11 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
   );
   if (initialCategories.length !== initial.lutCategories.length) {
     try {
-      writePrefs({ leftPanel: initial.leftPanel, lutCategories: initialCategories });
+      writePrefs({
+        leftPanel: initial.leftPanel,
+        lutCategories: initialCategories,
+        showPoints: initial.showPoints,
+      });
     } catch {
       // 写不进去不影响这次会话（偏好是锦上添花）
     }
@@ -378,6 +514,24 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
   const [presetList, setPresetList] = createSignal<PresetRecord[]>([]);
   const [presetSelectionState, setPresetSelectionState] = createSignal<PresetSelection>(null);
   const [presetCollapsed, setPresetCollapsed] = createSignal<Record<string, boolean>>({});
+  /*
+   * 编辑区（area）层：`areas` 只装**默认层之外**的层，`defaultIndex` 是默认层在
+   * 层列表里的位置（`specs/editor-area.md` §3.1）。`activeAreaId = null` = 默认层。
+   */
+  const [areas, setAreas] = createSignal<Area[]>([]);
+  const [defaultIndex, setDefaultIndexSignal] = createSignal(0);
+  const [activeAreaId, setActiveAreaId] = createSignal<number | null>(null);
+  /**
+   * 控制点「已武装」：点了新建控制点、**还没在画面上落点**。
+   *
+   * 这一态**不建任何层**（崔总 2026-11-01：以前先建一层再点，面板里凭空多一行，
+   * 还挂一个永远不该存在的虚线幽灵行）；画面点下去那一刻才创建并 append 到末尾。
+   */
+  const [pointArmed, setPointArmed] = createSignal(false);
+  /** 层 ID 发号器：**单调递增、永不复用**（删了也往后走）。 */
+  const [areaSeq, setAreaSeq] = createSignal(1);
+  const [showPoints, setShowPointsSignal] = createSignal(initial.showPoints);
+
   const [tool, setTool] = createSignal<EditorTool | null>(null);
   const [cropRatioId, setCropRatioId] = createSignal<string>("free");
   const [cropSize, setCropSizeSignal] = createSignal({ width: 3, height: 2 });
@@ -431,12 +585,12 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
   };
   const [colorState, setColorState] = createSignal<import("../../api/color.ts").PhotoColorState | null>(null);
   const [proofEnabled,setProofEnabled] = createSignal(false);
-  const [advancedTab,setAdvancedTab] = createSignal<"curve"|"preset"|"color">("curve");
+  const [advancedTab,setAdvancedTab] = createSignal<"curve"|"swatch"|"color">("curve");
   const [proofTarget,setProofTarget] = createSignal<import("../../lib/color-model.ts").OutputColor>({kind:"srgb"});
   const [proofWarning,setProofWarning] = createSignal(false);
   const [baseCurveProfile, setBaseCurveProfile] = createSignal<string | null>(null);
   const [baseCurvePoints, setBaseCurvePoints] = createSignal<CurvePoint[] | null>(null);
-  const [lutId, setLutId] = createSignal<string | null>(null);
+  const [lutChain, setLutChainSignal] = createSignal<LutLayer[]>([]);
   const [lutEnabled, setLutEnabled] = createSignal(false);
   const [lutEnabledExplicit, setLutEnabledExplicit] = createSignal(false);
   const [geometry, setGeometrySignal] = createSignal<EditGeometry | null>(null);
@@ -449,6 +603,217 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
   /** 参数动了一下：抬一次 rev（工作区据此发 IPC，DB 层据此判断要不要落库）。 */
   const bumpDevelop = (): void => {
     setDevelopRev((current) => current + 1);
+  };
+
+  /**
+   * **链的唯一写入口**：截断到上限、整条替换；空链关总开关，
+   * 只有新建链或显式换底层才自动开，其余编辑保留用户的总开关选择。
+   *
+   * 所有会改链的动作都走这里 —— 撤销、预设、面板三条路不会各写一套状态机。
+   */
+  const commitChain = (next: readonly LutLayer[], activate = false): void => {
+    // 只截断、**不逐层克隆**：没改动的层保持对象身份（调用方只替换改了的那一条）。
+    // 全量 `{...layer}` 会让「改一层强度」在列表看来等于「整条链换了新对象」——
+    // 2026-10-31 的「强度拉杆拖一下就断」就是这么来的（<For> 按引用比对会重建行 DOM，
+    // Ark 滑块的指针捕获跟着被销毁）。身份稳定 + `<Index>` 双保险。
+    const chain = next.slice(0, MAX_LUT_LAYERS);
+    batch(() => {
+      const wasEmpty = lutChain().length === 0;
+      setLutChainSignal(chain);
+      // 只有「空 → 有层」才自动打开总开关；已有链时改强度/排序/加减层
+      // 都必须尊重用户刚才关掉的那个总开关（关掉 ≠ 下次编辑又打开）。
+      setLutEnabled(chain.length === 0 ? false : activate || wasEmpty || lutEnabled());
+      setLutEnabledExplicit(chain.length > 0);
+      bumpDevelop();
+    });
+  };
+
+  /**
+   * 改一层的强度（**拖动中与松手后走同一条**）。
+   *
+   * 不变式（崔总 2026-11-01）：**不存在「开关开着但强度 0%」的层**。
+   * 强度拖到 0 的**当下**就关掉该层；从 0 往上拖的**当下**就打开它。
+   *
+   * ❗为什么不能只靠「松手那一下」判定：那次判定依赖手势收尾（窗口 pointerup /
+   * 键盘 keyup）。只要有一次没收到（指针被别的东西捕获、值从程序侧改、组件重挂），
+   * 就会留下「开着但 0%」这个自相矛盾的状态 —— 而且之后的错误会一直留在栈里。
+   * 把规则放在数值写入的同一步，任何入口都不可能违反它。
+   *
+   * ❗非有限值一律**忽略**，绝不“猜”成 100%：猜成 100% 就是「点一下开关效果
+   * 突然拉满」那类怪现象的来源（滑杆回灌 / 重新挂载都可能送进一个 NaN，2026-10-31）。
+   *
+   * 只动这一层：顶部的总开关是另一回事，关着的时候整条链照旧不参与渲染
+   * （`DevelopStack::lut_chain_active`）。
+   */
+  const applyLutStrength = (index: number, strength: number): void => {
+    const chain = [...lutChain()];
+    const current = chain[index];
+    if (!current || !Number.isFinite(strength)) return;
+    const value = Math.min(1, Math.max(0, strength));
+    const enabled = value > 0;
+    if (current.strength === value && current.enabled === enabled) return;
+    chain[index] = { ...current, strength: value, enabled };
+    commitChain(chain);
+  };
+
+  /* ── 编辑区（area）层：唯一写入口 ───────────────────────── */
+
+  /** 层列表的行序（默认层可以出现在任何位置）。 */
+  /**
+   * 层列表的行序（默认层可以出现在任何位置）。
+   *
+   * ❗**行对象按内容复用身份**（2026-11-01）：`<For>` 按引用比对，每次改一层参数
+   * 都新建整张行数组的话，**所有行 DOM 会被重建** —— 改名输入框丢焦点、
+   * 开关按钮半拍失灵（LUT 链 2026-10-31 踩过同一个坑，那边靠 `<Index>` 解决）。
+   * 这里只换「真的变了的那一行」，其余行保持同一对象。
+   */
+  let rowCache: readonly LayerRow[] | null = null;
+  const layerRows = (): readonly LayerRow[] => {
+    const rows = layersToRows(areas(), defaultIndex());
+    const previous = rowCache;
+    rowCache = rows.map((row, index) => {
+      const old = previous?.[index];
+      if (old === undefined || old.kind !== row.kind) return row;
+      if (row.kind === "area" && old.kind === "area") {
+        return old.area === row.area ? old : row;
+      }
+      return old; // 两行都是默认层：同一个对象（它没有可变内容）
+    });
+    return rowCache;
+  };
+
+  const activeArea = (): Area | null => {
+    const id = activeAreaId();
+    if (id === null) return null;
+    return areas().find((area) => area.id === id) ?? null;
+  };
+
+  /** 发号：单调递增、**永不复用**（删了也往后走）。 */
+  const nextAreaId = (): number => {
+    const id = areaSeq();
+    setAreaSeq(id + 1);
+    return id;
+  };
+
+  const adoptIdFloor = (list: readonly Area[]): void => {
+    for (const area of list) setAreaSeq((current) => Math.max(current, area.id + 1));
+  };
+
+  /**
+   * 层的唯一写入口：截上限、整表替换；返回 `false` = 超上限没写。
+   *
+   * 所有会改层的动作都走这里（面板 / 画布 / 撤销重读 / 预设），
+   * 于是「32 层上限」「默认层位置合法」只在两处判：这里与 Rust 的 `validate`。
+   */
+  const commitAreas = (
+    next: readonly Area[],
+    nextDefault: number = defaultIndex(),
+  ): boolean => {
+    if (next.length > MAX_AREAS) return false;
+    const clampDefault = Math.min(Math.max(nextDefault, 0), next.length);
+    batch(() => {
+      setAreas([...next]);
+      setDefaultIndexSignal(clampDefault);
+      // 默认层位置只在有额外层时才需要写（退化形状不落 `defaultIndex`）
+      bumpDevelop();
+    });
+    return true;
+  };
+
+  const replaceArea = (id: number, change: (area: Area) => Area): void => {
+    commitAreas(areas().map((area) => (area.id === id ? change(area) : area)));
+  };
+
+  /**
+   * 点「新建全图 / 新建控制点」之后，**当前层**切成新层、并且可以马上调参数。
+   *
+   * 层名留空（面板回落到类型默认名）—— 用户想改名双击那一行。
+   */
+  const createArea = (): number => {
+    const id = nextAreaId();
+    const area: Area = {
+      id,
+      type: "full",
+      name: "",
+      enabled: true,
+      opacity: AREA_OPACITY.default,
+      color: 0,
+      params: {},
+      curves: {},
+      seedVersion: SEED_VERSION,
+    };
+    if (!commitAreas([...areas(), area])) return 0;
+    setActiveAreaId(id);
+    return id;
+  };
+
+  /**
+   * 下一个控制点用哪个颜色槽：**取已用得最少的，并列取下标最小**。
+   *
+   * 与数据侧 `DevelopStack::next_point_color` 同一条规则（那边由单测钉着）。
+   * 这里必须再算一次：层是**前端先建、再整体提交**的，落库前就要定下颜色；
+   * 换个说法，这不是两份实现，是同一份 8 槽规则在两处按各自需要读数据。
+   */
+  const nextPointColor = (list: readonly Area[]): number => {
+    const used = Array.from({ length: POINT_COLORS }, () => 0);
+    for (const area of list) {
+      if (area.type === "point") used[area.color % POINT_COLORS] += 1;
+    }
+    let best = 0;
+    for (let slot = 1; slot < POINT_COLORS; slot += 1) {
+      if (used[slot] < used[best]) best = slot;
+    }
+    return best;
+  };
+
+  /**
+   * **武装**「新建控制点」：只把按钮点成主色、在 flowbar 提一句，**不建层**。
+   *
+   * 再点一次 = 取消（按钮本身就是开关）；上限 / 已有照片不可编辑时不武装。
+   */
+  const armPointArea = (): void => {
+    // SOOC 没有可用来取样的 RAW 线性源；命令面板也走这里，不能只靠按钮禁用
+    if (editBase() !== "raw") return;
+    if (areas().length >= MAX_AREAS) return;
+    setPointArmed((armed) => !armed);
+  };
+
+  const disarmPointArea = (): void => {
+    setPointArmed(false);
+  };
+
+  /**
+   * **落点**：到这一刻才真正创建那一层（追加到末尾、成为当前层）。
+   *
+   * `x` / `y` 是图像归一化坐标，`seed` 是 Rust 按「该层输入」取好的特征向量。
+   */
+  const placePointArea = (point: {
+    x: number;
+    y: number;
+    seed: [number, number, number];
+  }): number => {
+    setPointArmed(false);
+    if (editBase() !== "raw") return 0;
+    if (areas().length >= MAX_AREAS) return 0;
+    const id = nextAreaId();
+    const area: Area = {
+      id,
+      type: "point",
+      x: clamp01(point.x),
+      y: clamp01(point.y),
+      seed: [point.seed[0], point.seed[1], point.seed[2]],
+      tolerance: POINT_TOLERANCE.default,
+      name: "",
+      enabled: true,
+      opacity: AREA_OPACITY.default,
+      color: nextPointColor(areas()),
+      params: {},
+      curves: {},
+      seedVersion: SEED_VERSION,
+    };
+    if (!commitAreas([...areas(), area])) return 0;
+    setActiveAreaId(id);
+    return id;
   };
 
   /**
@@ -489,12 +854,29 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
       color: colorState(),
       asShotTemperature: asShot(),
       curves: dirtyCurves,
+      /*
+       * 层：**默认层之外的**层（空 = 只有默认层 = Rust 走快路径）。
+       * `defaultIndex` 恒为**当前**层列表的位置（Rust 只在有额外层时才存它）。
+       *
+       * **SOOC / 位图基准下控制点不参与计算**（崔总 2026-11-01）：取样与掩膜都以
+       * 「解码后的线性像素」为前提，位图（相机直出 JPG）这条路没有那套输入，
+       * 硬算出来的是另一种东西。这里**只改载荷**（发 `enabled: false` = 权重 0），
+       * 层本身的状态 / 参数一个字都不动 —— 切回 RAW 立刻恢复。
+       */
+      areas: areas().map((area) => (
+        editBase() === "sooc" && area.type === "point"
+          ? { ...area, enabled: false }
+          : { ...area }
+      )),
+      defaultIndex: defaultIndex(),
+      // 开发期：容差映射的临时覆盖（生产构建里这个模块不会被引用，恒为 null）
+      maskDebug: maskWeightPayload(),
       // 拖动中：Rust 侧只做限流合并（不换图、不换分辨率 —— 没有档位）
       interactive: paramDragging(),
       // 镜头 / 降噪方式：它们是编辑栈的一级（会改变像素），跟着载荷一起发
       lensProfile: lensProfile(),
       baseCurvePoints: editBase() === "raw" ? baseCurvePoints()?.map(([x,y]) => [x,y]) ?? null : null,
-      lutId: lutId(),
+      lutChain: lutChain().map((layer) => ({ ...layer })),
       lutEnabled: lutEnabled(),
       lensEnabled: lensEnabled(),
       nrMethod: nrMethod(),
@@ -521,7 +903,9 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
       || CURVE_CHANNELS.some((channel) => !isIdentityCurve(curves()[channel]))
       || lensProfile() !== lens.profile || (lensEnabled() ?? true) !== (lens.enabled ?? true)
       || (nrMethod() === "high") !== (automaticNr === "high")
-      || lutId() !== null || hasGeometryEdits();
+      || lutChain().length > 0 || hasGeometryEdits()
+      // 建过层也算「动过」：重置要连层一起清掉（`specs/editor-area.md` §2）
+      || areas().length > 0;
     if (changed) return "edits";
     const automatic = autoAdjustBaseline();
     const automaticHasEdits = automatic !== null && (
@@ -540,9 +924,11 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
       if (!keepAutomatic) {
         setBaseCurveProfile(null); setBaseCurvePoints(null); setAutoAdjustBaseline(null);
       }
-      setLutId(null); setLutEnabled(false); setLutEnabledExplicit(false);
+      setLutChainSignal([]); setLutEnabled(false); setLutEnabledExplicit(false);
       setNrMethodSignal(keepAutomatic ? autoAdjustBaseline()?.nrMethod ?? null : null);
       setGeometrySignal(null); restoreCropRatio(null);
+      // 层与层的选中态一起清（重置后只剩默认层）
+      setAreas([]); setDefaultIndexSignal(0); setActiveAreaId(null); setPointArmed(false);
       bumpDevelop();
     });
   };
@@ -550,7 +936,11 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
   /** 面板状态一变就落盘（它只有开关两态，不需要防抖）。 */
   const persist = (next: EditorChromeState, nextCategories = categories()): void => {
     try {
-      writePrefs({ leftPanel: next.leftPanel, lutCategories: [...nextCategories] });
+      writePrefs({
+        leftPanel: next.leftPanel,
+        lutCategories: [...nextCategories],
+        showPoints: showPoints(),
+      });
     } catch {
       // 写不进去不影响这次会话（偏好是锦上添花）
     }
@@ -590,13 +980,49 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
       setAutoAdjustBaseline(automatic == null ? null : { ...automatic, values: { ...automatic.values } });
       setBaseCurveProfile(settings?.baseCurveProfile ?? null);
       setBaseCurvePoints(settings?.baseCurvePoints ?? null);
-      setLutId(settings?.lutId ?? null);
+      setLutChainSignal((settings?.lutChain ?? []).map((layer) => ({ ...layer })));
       setLutEnabled(settings?.lutEnabled === true);
       setLutEnabledExplicit(settings?.lutEnabled !== null && settings?.lutEnabled !== undefined);
       setEditBase(base);
       setNrMethodSignal(settings?.nrMethod ?? null);
       setGeometrySignal(settings?.geometry ?? null);
       restoreCropRatio(settings?.geometry ?? null);
+      /*
+       * 编辑区层：**换照片 / 撤销重读都回到默认层**（`specs/editor-area.md` §5 的验收）。
+       * `areas` / `defaultIndex` 是数据，`activeAreaId` 是界面焦点 —— 后者永远从默认层重来。
+       *
+       * ❗**`params` / `curves` 要按可选读**（2026-11-01 真机 bug）：旧 Rust 空层
+       * 可能不带这两个字段，直接 `Object.entries(undefined)` 会让整次载入作废。
+       *
+       * 旧容差是 `0..1`：latest 在 Rust `load` 已折算，**定稿 / 侧车**还要在这里
+       * 再兜一次，否则旧点拖 handle 时会从 0.x 起步、线长也卡在最小值。
+       */
+      const layers = (settings?.areas ?? []).map((area) => {
+        const normalized: Area = {
+          ...area,
+          params: { ...(area.params ?? {}) },
+          curves: Object.fromEntries(
+            Object.entries(area.curves ?? {}).map(([channel, points]) => [
+              channel,
+              (points as [number, number][]).map(([x, y]) => [x, y] as [number, number]),
+            ]),
+          ),
+        };
+        if (
+          normalized.type === "point"
+          && Number.isFinite(normalized.tolerance)
+          && normalized.tolerance <= 1
+        ) {
+          normalized.tolerance = POINT_TOLERANCE.min
+            + Math.max(0, normalized.tolerance) * (POINT_TOLERANCE.max - POINT_TOLERANCE.min);
+        }
+        return normalized;
+      });
+      setAreas(layers);
+      adoptIdFloor(layers);
+      setDefaultIndexSignal(Math.min(Math.max(settings?.defaultIndex ?? 0, 0), layers.length));
+      setActiveAreaId(null);
+      setPointArmed(false);
       // 从库里读回来的就是「已落库」的状态
       const nextRev = developRev() + 1;
       setDevelopRev(nextRev);
@@ -630,6 +1056,7 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
     leftPanel: () => chrome().leftPanel,
     lutVisible: () => editorLutVisible(chrome()),
     issuesVisible: () => editorIssuesVisible(chrome()),
+    presetVisible: () => editorPresetVisible(chrome()),
     showsRight: () => editorShowsRight(chrome()),
     showsFilm: () => editorShowsFilm(chrome()),
     cycleTab: () => {
@@ -696,16 +1123,41 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
     setAngle: (degrees) => setAngleSignal(degrees),
     resetAngle: () => setAngleSignal(0),
 
-    paramValue: (id) => id === "temperature" && !temperatureExplicit()
-      ? paramBaseline(id)
-      : params()[id] ?? PARAM_DEFAULTS[id] ?? 0,
+    paramValue: (id) => {
+      const area = activeArea();
+      // 非默认层：层里没有这一项就是基线（色温同样按照片的 as-shot 解释）
+      if (area !== null) return area.params?.[id] ?? paramBaseline(id);
+      return id === "temperature" && !temperatureExplicit()
+        ? paramBaseline(id)
+        : params()[id] ?? PARAM_DEFAULTS[id] ?? 0;
+    },
     paramBaseline,
     setParam: (id, value) => {
+      const area = activeArea();
+      if (area !== null) {
+        // 全局阶段参数只属于默认层（界面已经灰掉，这里是硬约束）
+        const target = paramSpec(id)?.target ?? "layered";
+        if (target !== "layered") return;
+        replaceArea(area.id, (current) => ({
+          ...current,
+          params: { ...(current.params ?? {}), [id]: value },
+        }));
+        return;
+      }
       if (id === "temperature") setTemperatureExplicit(true);
       setParams((current) => ({ ...current, [id]: value }));
       bumpDevelop();
     },
     resetParam: (id) => {
+      const area = activeArea();
+      if (area !== null) {
+        replaceArea(area.id, (current) => {
+          const next = { ...(current.params ?? {}) };
+          delete next[id];
+          return { ...current, params: next };
+        });
+        return;
+      }
       if (id === "temperature") setTemperatureExplicit(false);
       setParams((current) => ({ ...current, [id]: paramBaseline(id) }));
       bumpDevelop();
@@ -783,11 +1235,84 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
     setColorState: (next) => { setColorState(next == null ? null : structuredClone(next)); bumpDevelop(); },
     baseCurveProfile,
     baseCurvePoints,
-    lutId,
+    lutChain,
     lutEnabled,
     lutEnabledSetting: () => lutEnabledExplicit() ? lutEnabled() : null,
-    setLut: (id, enabled) => { batch(() => { setLutId(id); setLutEnabled(enabled && id !== null); setLutEnabledExplicit(id !== null); bumpDevelop(); }); },
-    setLutEnabled: (enabled) => { if (enabled === lutEnabled()) return; setLutEnabled(enabled && lutId() !== null); setLutEnabledExplicit(lutId() !== null); bumpDevelop(); },
+    selectLutAsBase: (id) => {
+      const chain = [...lutChain()];
+      const index = chain.findIndex((layer) => layer.id === id);
+      if (index > 0) {
+        const [layer] = chain.splice(index, 1);
+        chain.unshift(layer);
+      } else if (index < 0) {
+        // 换底层：新的这一层用默认（开 / 100%），不继承旧底层的强度。
+        const fresh = { id, enabled: true, strength: 1 };
+        if (chain.length === 0) chain.push(fresh);
+        else chain[0] = fresh;
+      }
+      commitChain(chain, true);
+    },
+    toggleLutInChain: (id) => {
+      const chain = [...lutChain()];
+      const index = chain.findIndex((layer) => layer.id === id);
+      if (index >= 0) chain.splice(index, 1);
+      else if (chain.length < MAX_LUT_LAYERS) chain.push({ id, enabled: true, strength: 1 });
+      commitChain(chain);
+    },
+    setLutLayerEnabled: (index, enabled) => {
+      const chain = [...lutChain()];
+      const current = chain[index];
+      if (!current) return;
+      /*
+       * 设计口径（崔总 2026-11-01）：**不允许存在「开关开着但强度 0%」的层**。
+       *
+       * 强度拖到 0% 会自动关层；反过来把 0% 的那层点开，强度直接给回 100% ——
+       * 否则用户拿到的是一个「开着却什么都没发生」的层，开关与画面互相矛盾。
+       * 与「强度 ≥ 0 自动关层 / >0 自动开层」是同一条规则的两个方向。
+       */
+      const strength = enabled && current.strength <= 0 ? 1 : current.strength;
+      if (current.enabled === enabled && current.strength === strength) return;
+      chain[index] = { ...current, enabled, strength };
+      commitChain(chain);
+    },
+    setLutLayerStrength: (index, strength) => applyLutStrength(index, strength),
+    commitLutLayerStrength: (index, strength) => applyLutStrength(index, strength),
+    moveLutLayer: (from, to) => {
+      const chain = [...lutChain()];
+      if (from === to || !chain[from] || to < 0 || to >= chain.length) return;
+      const [layer] = chain.splice(from, 1);
+      chain.splice(to, 0, layer);
+      commitChain(chain);
+    },
+    removeLutLayer: (index) => {
+      const chain = [...lutChain()];
+      if (!chain[index]) return;
+      chain.splice(index, 1);
+      commitChain(chain);
+    },
+    setLut: (id, enabled) => {
+      if (id === null || !enabled) {
+        commitChain([]);
+        return;
+      }
+      const chain = [...lutChain()];
+      const index = chain.findIndex((layer) => layer.id === id);
+      if (index > 0) {
+        const [layer] = chain.splice(index, 1);
+        chain.unshift(layer);
+      } else if (index < 0) {
+        chain[0] = { id, enabled: true, strength: 1 };
+      }
+      commitChain(chain, true);
+    },
+    setLutEnabled: (enabled) => {
+      if (enabled === lutEnabled()) return;
+      batch(() => {
+        setLutEnabled(enabled && lutChain().length > 0);
+        setLutEnabledExplicit(lutChain().length > 0);
+        bumpDevelop();
+      });
+    },
     setLutCategories: (next) => { setCategories([...next]); },
     setBaseCurve: (id, points) => {
       batch(() => {
@@ -808,8 +1333,26 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
     setAutoAdjusting,
 
     setCurveChannel,
-    curvePoints: (channel) => curves()[channel],
+    curvePoints: (channel) => {
+      const area = activeArea();
+      if (area !== null) {
+        const points = area.curves?.[channel];
+        return points !== undefined && points.length >= 2
+          ? points.map(([x, y]) => [x, y] as CurvePoint)
+          : [[0, 0], [1, 1]];
+      }
+      return curves()[channel];
+    },
     setCurvePoints: (channel, points) => {
+      const area = activeArea();
+      if (area !== null) {
+        const mapped = points.map(([x, y]) => [x, y] as [number, number]);
+        replaceArea(area.id, (current) => ({
+          ...current,
+          curves: { ...(current.curves ?? {}), [channel]: mapped },
+        }));
+        return;
+      }
       setCurves((current) => ({
         ...current,
         [channel]: points.map(([x, y]) => [x, y] as CurvePoint),
@@ -817,6 +1360,15 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
       bumpDevelop();
     },
     resetCurve: (channel) => {
+      const area = activeArea();
+      if (area !== null) {
+        replaceArea(area.id, (current) => {
+          const next = { ...(current.curves ?? {}) };
+          delete next[channel];
+          return { ...current, curves: next };
+        });
+        return;
+      }
       setCurves((current) => ({
         ...current,
         [channel]: [
@@ -883,15 +1435,19 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
       nrMethod: nrMethod(),
       lensProfile: lensProfile(),
       lensEnabled: lensEnabled(),
-      lutId: lutId(),
+      lutChain: lutChain().map((layer) => ({ ...layer })),
       lutEnabled: lutEnabled(),
       asShotK: asShot(),
     }, PRESET_GROUP_PARAMS),
     applyPresetSnapshot: (snapshot) => {
       const plan = planPresetApply(snapshot, PRESET_GROUP_PARAMS, PARAM_DEFAULTS, (id) =>
         categories().some((category) =>
-          category.entries.some((entry) => entry.id === id && entry.available !== false)), asShot());
-      if (plan.appliedGroups.length === 0) return { wbSkipped: false };
+          category.entries.some((entry) => entry.id === id && entry.available !== false)), asShot(),
+        undefined,
+        // 预设的 LUT **追加**到现有链末尾（崔总 2026-10-31），所以要交链的现状进去。
+        { currentLutChain: lutChain(), currentLutEnabled: lutEnabled() });
+      if (plan.appliedGroups.length === 0) return { wbSkipped: false, lutDropped: 0 };
+      let lutDropped = 0;
       batch(() => {
         setParams((current) => ({ ...current, ...plan.values }));
         // v3：白平衡是**偏移量**——`wbExplicit` 才表示用户看到了一个明确的偏移；
@@ -903,13 +1459,100 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
         if (plan.hasDetail) setNrMethodSignal(plan.nrMethod === "high" ? "high" : null);
         if (plan.hasLens) applyLensSide({ profile: plan.lens.profile, enabled: plan.lens.enabled });
         if (plan.lut !== null && plan.lut !== "missing") {
-          setLutId(plan.lut.id);
-          setLutEnabled(plan.lut.enabled && plan.lut.id !== null);
-          setLutEnabledExplicit(plan.lut.id !== null);
+          // 走链的唯一写入口（截到 8 层 + bumpDevelop）；总开关随后按**预设口径**显式落定 ——
+          // `commitChain` 的「空 → 有层就自动开」是给面板用的，不能覆盖预设里明确存的"关"。
+          lutDropped = Math.max(0, plan.lut.chain.length - MAX_LUT_LAYERS);
+          commitChain(plan.lut.chain, false);
+          setLutEnabled(plan.lut.chain.length > 0 && plan.lut.enabled);
+          setLutEnabledExplicit(plan.lut.chain.length > 0);
         }
         bumpDevelop();
       });
-      return { wbSkipped: plan.wbSkipped };
+      return { wbSkipped: plan.wbSkipped, lutDropped };
+    },
+
+    layerRows,
+    activeAreaId,
+    selectArea: (id) => {
+      // 只切焦点：不存在的层（刚被删掉）回到默认层
+      if (id !== null && !areas().some((area) => area.id === id)) {
+        setActiveAreaId(null);
+        return;
+      }
+      setActiveAreaId(id);
+    },
+    activeArea,
+    activeAreaName: () => {
+      const area = activeArea();
+      if (area === null) return t("editor.area.default");
+      if (area.name !== "") return area.name;
+      return t(area.type === "point" ? "editor.area.point" : "editor.area.full");
+    },
+    onDefaultLayer: () => activeArea() === null,
+    createArea,
+    placePointArea,
+    pointArmed,
+    armPointArea,
+    disarmPointArea,
+    removeArea: (id) => {
+      const rows = layerRows();
+      const index = rows.findIndex((row) => row.kind === "area" && row.area.id === id);
+      if (index < 0) return;
+      const next = areas().filter((area) => area.id !== id);
+      // 删当前层 ⇒ 选**下一层**（没有下一层就上一层，再没有就默认层）
+      if (activeAreaId() === id) {
+        const neighbour = rows[index + 1] ?? rows[index - 1];
+        setActiveAreaId(neighbour !== undefined && neighbour.kind === "area" ? neighbour.area.id : null);
+      }
+      // 默认层在它之后 ⇒ 位置往前挪一格
+      const currentDefault = defaultIndex();
+      const defaultRow = rows.findIndex((row) => row.kind === "default");
+      commitAreas(next, index < defaultRow ? Math.max(0, currentDefault - 1) : currentDefault);
+    },
+    moveAreaRow: (from, to) => {
+      const rows = [...layerRows()];
+      if (from === to || from < 0 || to < 0 || from >= rows.length || to >= rows.length) return;
+      const [row] = rows.splice(from, 1);
+      rows.splice(to, 0, row);
+      const next = rowsToLayers(rows);
+      commitAreas(next.areas, next.defaultIndex);
+    },
+    renameArea: (id, name) => {
+      const trimmed = Array.from(name).slice(0, 30).join("");
+      replaceArea(id, (area) => ({ ...area, name: trimmed }));
+    },
+    setAreaEnabled: (id, enabled) => replaceArea(id, (area) => ({ ...area, enabled })),
+    setAreaColor: (id, color) => {
+      if (!Number.isInteger(color) || color < 0 || color >= POINT_COLORS) return;
+      replaceArea(id, (area) => ({ ...area, color }));
+    },
+    /** 旧种子重取样后写回（**位置 / 容差 / 参数都不动**，只换 seed 与版本）。 */
+    adoptAreaSeed: (id, seed) =>
+      replaceArea(id, (area) => {
+        if (area.type !== "point") return area;
+        return {
+          ...area,
+          seed: [seed[0], seed[1], seed[2]],
+          seedVersion: SEED_VERSION,
+        };
+      }),
+    setAreaPoint: (id, point) =>
+      replaceArea(id, (area) => {
+        if (area.type !== "point") return area;
+        return {
+          ...area,
+          x: clamp01(point.x ?? area.x),
+          y: clamp01(point.y ?? area.y),
+          // 容差是 100..1000 的**数值域**（不是 0..1）：夹在契约给的上下限里
+          tolerance: clampTolerance(point.tolerance ?? area.tolerance),
+        };
+      }),
+    areasFull: () => areas().length >= MAX_AREAS,
+    showPoints,
+    setShowPoints: (show) => {
+      setShowPointsSignal(show);
+      // 纯视图偏好：落盘即可，**不抬 rev**（不进 profile / 哈希 / 撤销）
+      persist(chrome(), categories());
     },
 
     renderState,
@@ -917,4 +1560,16 @@ export function createEditorStore(deps: EditorStoreDeps = {}): EditorStore {
     holeActive,
     setHoleActive,
   };
+}
+
+/** 容差（100..1000）；NaN / 越界一律回到合法值，避免把坏数据送进落库校验。 */
+function clampTolerance(value: number): number {
+  if (!Number.isFinite(value)) return POINT_TOLERANCE.default;
+  return Math.min(POINT_TOLERANCE.max, Math.max(POINT_TOLERANCE.min, value));
+}
+
+/** 归一化坐标（0..1）；NaN / 越界一律夹回来 —— 画布点击偶尔会给出洞口的边缘值。 */
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.min(1, Math.max(0, value));
 }

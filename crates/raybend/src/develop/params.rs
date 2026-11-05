@@ -40,6 +40,30 @@ pub enum Origin {
     Start,
 }
 
+/// 这条参数**能出现在哪**（编辑区层化后的硬边界，`specs/editor-area.md` §3.2）。
+///
+/// * `Global` —— 只有 `默认` 层能装（镜头 / 清晰度 / 局部色调这些全局阶段）；
+/// * `Layered` —— 三种层都能装（逐像素的影调 / 色彩）；
+/// * `Mask` —— 既不进参数面板也不进预设，由掩膜求值消费。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParamTarget {
+    Global,
+    Layered,
+    Mask,
+}
+
+impl ParamTarget {
+    /// 契约 JSON 里的写法。
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Global => "global",
+            Self::Layered => "layered",
+            Self::Mask => "mask",
+        }
+    }
+}
+
 /// 默认值从哪来。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Baseline {
@@ -61,6 +85,8 @@ pub struct ParamSpec {
     pub origin: Origin,
     /// 本波（M3-W3）接进管线了吗；`false` = M3-W4 接。
     pub wired: bool,
+    /// 这条参数能出现在哪种层里（`specs/editor-area.md` §3.2）。
+    pub target: ParamTarget,
     pub baseline: Baseline,
 }
 
@@ -84,31 +110,46 @@ impl ParamSpec {
 /// 参数表（顺序即界面顺序；与 `develop-params.json` 的 `params` 数组同序）。
 pub const PARAMS: &[ParamSpec] = &[
     // ── 影调 ──
-    ParamSpec { id: "exposure", min: -2.0, max: 2.0, step: 0.05, default: 0.0, origin: Origin::Center, wired: true, baseline: Baseline::Static },
-    ParamSpec { id: "contrast", min: -100.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Center, wired: true, baseline: Baseline::Static },
-    ParamSpec { id: "highlights", min: -100.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Center, wired: true, baseline: Baseline::Static },
-    ParamSpec { id: "blacks", min: -100.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Center, wired: true, baseline: Baseline::Static },
+    ParamSpec { id: "exposure", min: -2.0, max: 2.0, step: 0.05, default: 0.0, origin: Origin::Center, target: ParamTarget::Layered, wired: true, baseline: Baseline::Static },
+    ParamSpec { id: "contrast", min: -100.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Center, target: ParamTarget::Layered, wired: true, baseline: Baseline::Static },
+    ParamSpec { id: "highlights", min: -100.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Center, target: ParamTarget::Layered, wired: true, baseline: Baseline::Static },
+    ParamSpec { id: "blacks", min: -100.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Center, target: ParamTarget::Layered, wired: true, baseline: Baseline::Static },
     // 动态反差（局部色调映射）：单极 0..100，0 = 完全不动画面（`local_tone` 的强度）
-    ParamSpec { id: "dynamicContrast", min: 0.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Start, wired: true, baseline: Baseline::Static },
+    ParamSpec { id: "dynamicContrast", min: 0.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Start, target: ParamTarget::Global, wired: true, baseline: Baseline::Static },
     // ── 色彩 ──
-    ParamSpec { id: "temperature", min: 2500.0, max: 10000.0, step: 50.0, default: 6250.0, origin: Origin::Center, wired: true, baseline: Baseline::AsShot },
-    ParamSpec { id: "saturation", min: -100.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Center, wired: true, baseline: Baseline::Static },
-    ParamSpec { id: "vibrance", min: -100.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Center, wired: true, baseline: Baseline::Static },
+    ParamSpec { id: "temperature", min: 2500.0, max: 10000.0, step: 50.0, default: 6250.0, origin: Origin::Center, target: ParamTarget::Layered, wired: true, baseline: Baseline::AsShot },
+    ParamSpec { id: "saturation", min: -100.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Center, target: ParamTarget::Layered, wired: true, baseline: Baseline::Static },
+    ParamSpec { id: "vibrance", min: -100.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Center, target: ParamTarget::Layered, wired: true, baseline: Baseline::Static },
     // ── 清晰度（M3-W4 接入）──
-    ParamSpec { id: "lumaNr", min: 0.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Start, wired: true, baseline: Baseline::Static },
-    ParamSpec { id: "colorNr", min: 0.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Start, wired: true, baseline: Baseline::Static },
-    ParamSpec { id: "sharpenAmount", min: 0.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Start, wired: true, baseline: Baseline::Static },
-    ParamSpec { id: "sharpenRadius", min: 0.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Start, wired: true, baseline: Baseline::Static },
+    ParamSpec { id: "lumaNr", min: 0.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Start, target: ParamTarget::Global, wired: true, baseline: Baseline::Static },
+    ParamSpec { id: "colorNr", min: 0.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Start, target: ParamTarget::Global, wired: true, baseline: Baseline::Static },
+    ParamSpec { id: "sharpenAmount", min: 0.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Start, target: ParamTarget::Global, wired: true, baseline: Baseline::Static },
+    ParamSpec { id: "sharpenRadius", min: 0.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Start, target: ParamTarget::Global, wired: true, baseline: Baseline::Static },
     // ── 镜头（W4）──
-    ParamSpec { id: "distortion", min: -100.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Center, wired: true, baseline: Baseline::Static },
-    ParamSpec { id: "vignette", min: -100.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Center, wired: true, baseline: Baseline::Static },
-    ParamSpec { id: "vignetteRange", min: 0.0, max: 100.0, step: 1.0, default: 50.0, origin: Origin::Start, wired: true, baseline: Baseline::Static },
-    ParamSpec { id: "chromatic", min: -100.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Center, wired: true, baseline: Baseline::Static },
-    ParamSpec { id: "chromaticBlue", min: -100.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Center, wired: true, baseline: Baseline::Static },
+    ParamSpec { id: "distortion", min: -100.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Center, target: ParamTarget::Global, wired: true, baseline: Baseline::Static },
+    ParamSpec { id: "vignette", min: -100.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Center, target: ParamTarget::Global, wired: true, baseline: Baseline::Static },
+    ParamSpec { id: "vignetteRange", min: 0.0, max: 100.0, step: 1.0, default: 50.0, origin: Origin::Start, target: ParamTarget::Global, wired: true, baseline: Baseline::Static },
+    ParamSpec { id: "chromatic", min: -100.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Center, target: ParamTarget::Global, wired: true, baseline: Baseline::Static },
+    ParamSpec { id: "chromaticBlue", min: -100.0, max: 100.0, step: 1.0, default: 0.0, origin: Origin::Center, target: ParamTarget::Global, wired: true, baseline: Baseline::Static },
+    // ── 编辑区掩膜（`target = Mask`：**不进参数面板、不进预设**）───────────────
+    // 消费方：`develop::areas`（控制点的容差 / 不透明度 / 两项距离权重）。
+    // 四条都不写进 `Area.params`（那是逐像素参数的地盘，`Area::valid` 会拒），
+    // 面板上的容差 / 不透明度直接改 `AreaKind::Point.tolerance` 与 `Area::opacity`，
+    // 数值范围借这两条参数的口径（单一真相）。
+    ParamSpec { id: "areaTolerance", min: 100.0, max: 1000.0, step: 1.0, default: 300.0, origin: Origin::Start, target: ParamTarget::Mask, wired: true, baseline: Baseline::Static },
+    ParamSpec { id: "areaOpacity", min: 0.0, max: 100.0, step: 1.0, default: 100.0, origin: Origin::Start, target: ParamTarget::Mask, wired: true, baseline: Baseline::Static },
+    ParamSpec { id: "areaChroma", min: 0.0, max: 100.0, step: 1.0, default: 50.0, origin: Origin::Center, target: ParamTarget::Mask, wired: true, baseline: Baseline::Static },
+    ParamSpec { id: "areaLuma", min: 0.0, max: 100.0, step: 1.0, default: 50.0, origin: Origin::Center, target: ParamTarget::Mask, wired: true, baseline: Baseline::Static },
 ];
 
 /// 契约文件（**唯一真相**，本文件与它逐条对齐）；前端 `params.ts` 跨树 import 同一份。
 pub const CONTRACT_JSON: &str = include_str!("../../assets/develop-params.json");
+
+/// 按 id 取这条参数的归属（未知 id ⇒ `None`）。
+#[must_use]
+pub fn target(id: &str) -> Option<ParamTarget> {
+    spec(id).map(|param| param.target)
+}
 
 /// 按 id 取参数口径。
 #[must_use]
@@ -275,6 +316,7 @@ mod tests {
         origin: String,
         wired: bool,
         baseline: String,
+        target: String,
     }
 
     fn contract() -> Contract {
@@ -295,6 +337,14 @@ mod tests {
         );
         for (spec, json) in PARAMS.iter().zip(&contract.params) {
             assert_eq!(spec.id, json.id, "第 {} 条的 id 不一致", json.id);
+            assert_eq!(
+                spec.target.as_str(),
+                json.target,
+                "{} 的 target：Rust {:?} / JSON {}",
+                spec.id,
+                spec.target,
+                json.target
+            );
             assert!(
                 (spec.min - json.min).abs() < f64::EPSILON,
                 "{} 的 min：Rust {} / JSON {}",

@@ -6,6 +6,7 @@
 
 - `MIT.txt`、`MPL-2.0.txt`、`CC-BY-SA-3.0.txt`：SPDX license-list-data v3.28.0 的标准原文，来源 https://github.com/spdx/license-list-data/tree/v3.28.0/text 。标准 MIT 中的模板版权占位符不是已确认的组件原始版权声明；组件作者来源于其发布包。
 - `dav1d-1.5.0.txt`：VideoLAN dav1d 1.5.0 COPYING，来源 https://github.com/videolan/dav1d/blob/1.5.0/COPYING 。Windows 使用这一版静态库，不用 WSL 1.4.1 系统库冒充。
+- `CC-BY-4.0.txt`：SPDX license-list-data v3.28.0 的标准原文（https://github.com/spdx/license-list-data/blob/v3.28.0/text/CC-BY-4.0.txt ）。用于随应用发布的 GeoNames 城市数据（`crates/raybend/assets/geo/`，署名见那里的 `README.md`；数据由 `scripts/build-geo-data.mjs` 生成）。
 - LensFun 校准数据署名 LensFun community，CC-BY-SA-3.0，来源 https://github.com/lensfun/lensfun ，由 lensfun 0.7.0 内嵌数据库使用。
 - libwebp 的 vendor/COPYING/PATENTS 随 libwebp-sys 收录，绑定声明 MIT 的文本另行补足，不能把 BSD 的 C 库声明当作 MIT 绑定许可。
 

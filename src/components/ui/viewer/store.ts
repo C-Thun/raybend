@@ -287,7 +287,7 @@ export interface ViewerStore {
   ensureImage: (photo: ViewerPhoto) => Promise<void>;
   imageStatus: () => "idle" | "loading" | "ready" | "error";
   /**
-   * 「真身还在路上」—— 视图据此显示一个不拦输入的角标（「正在载入原图…」）。
+   * 「真身还在路上」—— 视图据此在**视口正中间**显示一个不拦输入的提示（「正在载入原图…」）。
    *
    * 它与 [`Self::sharp`] 是一对：`fullPending` 为真时屏上是**占位**，
    * `sharp` 为真才是真身已上屏（崔总 2026-10-11：提示一旦结束，就应是原图）。

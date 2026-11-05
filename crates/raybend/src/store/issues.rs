@@ -7,7 +7,9 @@ use serde::{Deserialize, Serialize};
 use super::develop::{DevelopStack, EditBase};
 use crate::error::{Error, Result};
 
-pub const PROFILE_SCHEMA_VERSION: i64 = 2;
+/// 本版本**最高能读**的 profile schema。真正的版本号由 [`profile_schema_version`] **按内容选**
+/// （v3 = 有编辑区层，v2 = 有色彩状态，v1 = 老样子），这里只是读取时的上限闸门。
+pub const PROFILE_SCHEMA_VERSION: i64 = 3;
 
 /// 每张照片的**定稿数量上限**（崔总 2026-10-31 定）。
 ///
@@ -17,8 +19,22 @@ pub const PROFILE_SCHEMA_VERSION: i64 = 2;
 /// **不把「序号用满」当成业务上限**（那是另一个口径，见 `allocate_ordinal`）。
 pub const MAX_ISSUES_PER_ASSET: usize = 32;
 
+/// 定稿 profile 的 schema 版本 —— **按内容选**，不做全局版本号：
+///
+/// * v3 = 用了编辑区（有默认层以外的层）；
+/// * v2 = 有色彩状态；
+/// * v1 = 老样子。
+///
+/// 这么选是为了旧数据零迁移：没用到新特性的定稿，版本号、序列化字节、`profile_hash`
+/// 全部与改动前逐字相同（`specs/editor-area.md` §3.5）。
 pub fn profile_schema_version(stack: &DevelopStack) -> i64 {
-    if stack.color.is_some() { 2 } else { 1 }
+    if !stack.areas.is_empty() {
+        3
+    } else if stack.color.is_some() {
+        2
+    } else {
+        1
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -1075,7 +1091,7 @@ mod tests {
         stack.params.insert("exposure".into(), 0.5);
         assert_eq!(selection(&stack, &[]).unwrap(), Selection::Latest);
         let old = profile_hash(&stack).unwrap();
-        stack.lut_id = Some("lut-1".into());
+        stack.lut_chain = vec![crate::store::develop::LutLayer::new("lut-1")];
         stack.lut_enabled = Some(false);
         assert_ne!(old, profile_hash(&stack).unwrap());
     }

@@ -76,7 +76,7 @@ pub fn render_linear(
     stack: &DevelopStack,
     lens: Option<&crate::develop::lens::LensCorrection>,
     decoded_as_shot_k: Option<f32>,
-    lut: Option<&crate::develop::lut::Lut>,
+    lut: Option<&crate::develop::lut::LutChain>,
     max_edge: u32,
 ) -> Result<Rgb16Image> {
     if stack.color.is_some() {
@@ -87,6 +87,7 @@ pub fn render_linear(
     }
     let (width, height) = (linear.width, linear.height);
     let (params, curves) = parameters_and_curves(stack, decoded_as_shot_k)?;
+    let areas = stack_layers(stack, decoded_as_shot_k)?;
     // 可选阶段（降噪 / 锐化 / 镜头手动微调）与动态反差：
     // **缩略图也必须反映编辑结果**（M3 的 DoD）——
     // 动态反差的分解在缩略图尺寸上很便宜，不做的话网格与编辑器会显示两张不同的图。
@@ -111,6 +112,9 @@ pub fn render_linear(
         local_tone: local_state.as_ref().map(|state| (state, plans.local_tone)),
         sharpen: Some(&plans.sharpen),
         lut,
+        areas: areas.as_ref(),
+        // 缩略图 / 导出 / 定稿走**固化常量**（调试面板只覆盖编辑器真帧）
+        ..DevelopStages::default()
     };
     let rgb = render_develop16(linear, &params, &curves, &stages);
     let (out_w, out_h, rgb) = match stack.geometry.filter(|geometry| !geometry.is_identity()) {
@@ -203,14 +207,46 @@ pub fn render_working(
     stack: &DevelopStack,
     lens: Option<&crate::develop::lens::LensCorrection>,
     decoded_as_shot_k: Option<f32>,
-    lut: Option<&crate::develop::lut::Lut>,
+    lut: Option<&crate::develop::lut::LutChain>,
     max_edge: u32,
 ) -> Result<crate::color::working::WorkingImage> {
     let color = stack.color.as_ref().ok_or_else(|| Error::Unsupported("高精度显影需要固化色彩状态".into()))?;
     stack.validate()?;
     color.validate_frozen().map_err(|e| Error::Unsupported(e.into()))?;
     let (params, curves) = parameters_and_curves(stack, decoded_as_shot_k)?;
-    render_working_params(source, &params, &curves, stack.nr_method.unwrap_or_default(), lens, lut, stack.geometry, max_edge)
+    let areas = stack_layers(stack, decoded_as_shot_k)?;
+    render_working_params(
+        source,
+        &params,
+        &curves,
+        stack.nr_method.unwrap_or_default(),
+        lens,
+        lut,
+        stack.geometry,
+        max_edge,
+        areas.as_ref(),
+    )
+}
+
+/// 编辑栈里的**额外层** → 渲染侧的层列表（`None` = 只有默认层 = 走快路径）。
+///
+/// 层参数的校验在这里再走一遍（`Area::valid` 在落库时已经看过，但定稿 / 侧车
+/// 读回来的数据同样经过这里 —— 「库里存着一份算不出来的参数」比当场报错难查得多）。
+fn stack_layers(
+    stack: &DevelopStack,
+    decoded_as_shot_k: Option<f32>,
+) -> Result<Option<crate::develop::LayerStack>, Error> {
+    if stack.areas.is_empty() {
+        return Ok(None);
+    }
+    let specs = stack.area_specs();
+    crate::develop::LayerStack::from_specs(
+        &specs,
+        stack.default_index,
+        decoded_as_shot_k.or(stack.as_shot_k),
+    )
+    .map(Some)
+    .map_err(Error::Unsupported)
 }
 
 /// Shared prepared recipe for offline export and the explicit V2 editor path.
@@ -218,8 +254,9 @@ pub fn render_working_params(
     source: &crate::develop::working::WorkingReferenceImage,
     params: &crate::develop::DevelopParams, curves: &crate::develop::CurveSet,
     nr_method: crate::develop::denoise::NrMethod,
-    lens: Option<&crate::develop::lens::LensCorrection>, lut: Option<&crate::develop::lut::Lut>,
+    lens: Option<&crate::develop::lens::LensCorrection>, lut: Option<&crate::develop::lut::LutChain>,
     geometry: Option<crate::develop::geometry::EditGeometry>, max_edge: u32,
+    areas: Option<&crate::develop::LayerStack>,
 ) -> Result<crate::color::working::WorkingImage> {
     use crate::develop::working::{WorkingTonePlan, render_working_reference};
     let tone = WorkingTonePlan::new(params, curves);
@@ -233,7 +270,7 @@ pub fn render_working_params(
     });
     let stages = DevelopStages { nr_method, lens: Some(&lens_map),
         denoise: Some(&plans.denoise), local_tone: local.as_ref().map(|state| (state, plans.local_tone)),
-        sharpen: Some(&plans.sharpen), lut };
+        sharpen: Some(&plans.sharpen), lut, areas, ..DevelopStages::default() };
     let image = render_working_reference(source, &tone, &stages).map_err(|e| Error::Unsupported(e.to_string()))?;
     let image = match geometry.filter(|geometry| !geometry.is_identity()) {
         Some(geometry) => {
@@ -292,7 +329,8 @@ mod tests {
             }),
             ..Default::default()
         };
-        let output = render_linear(&source, &stack, None, None, Some(&lut), 0).unwrap();
+        let chain = crate::develop::lut::LutChain::single(std::sync::Arc::new(lut));
+        let output = render_linear(&source, &stack, None, None, Some(&chain), 0).unwrap();
         assert_eq!(output.dimensions(), (51, 26));
         let levels: BTreeSet<_> = output.as_raw().iter().copied().collect();
         assert!(
@@ -301,7 +339,7 @@ mod tests {
             levels.len()
         );
         assert_eq!(source, original);
-        let resized = render_linear(&source, &stack, None, None, Some(&lut), 20).unwrap();
+        let resized = render_linear(&source, &stack, None, None, Some(&chain), 20).unwrap();
         assert_eq!(resized.dimensions(), (20, 10));
         assert_eq!(resize_output(output.clone(), 65535), output);
     }

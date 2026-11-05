@@ -264,6 +264,18 @@ pub const CATALOG_MIGRATIONS: &[Migration] = &[
         name: "content_hash",
         sql: include_str!("migrations/catalog_0021_content_hash.sql"),
     },
+    Migration {
+        version: 22,
+        // 多层 LUT：应用层链（`specs/editor-lut-chain.md` §2）
+        name: "lut_chain",
+        sql: include_str!("migrations/catalog_0022_lut_chain.sql"),
+    },
+    Migration {
+        version: 23,
+        // 编辑区（area）层（`specs/editor-area.md` §3.1）
+        name: "areas",
+        sql: include_str!("migrations/catalog_0023_areas.sql"),
+    },
 ];
 
 /// 缩略图缓存库 `thumbs.db` 的迁移列表。

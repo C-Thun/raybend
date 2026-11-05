@@ -36,3 +36,6 @@ scripts/ai/__pycache__/
 # 本机模型库引用，不随软件 Git/镜像分发
 ai-model-source.local.json
 ai-model-source.local.json.stage-*
+
+# crashpad 运行时在仓库根落下的空目录占位（`raybend-crashpad-<pid>`）：诊断产物，不进 Git
+raybend-crashpad-*

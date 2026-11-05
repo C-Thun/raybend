@@ -1,7 +1,7 @@
 //! LUT 应用库 IPC。文件拷贝进 app data，数据库只记录稳定 ID 和相对路径。
 
 use crate::db::DbState;
-use raybend::develop::lut::Lut;
+use raybend::develop::lut::{Lut, LutChain, LutChainLayer};
 use raybend::develop::lut_import::{
     cached_cover, copy_for_import, discover, file_hash, import_cover, source_cube_exists,
 };
@@ -127,6 +127,101 @@ pub fn resolve<R: Runtime>(app: &AppHandle<R>, id: &str) -> Result<Arc<Lut>, Str
     Lut::load(&path)
         .map(Arc::new)
         .map_err(|error| error.to_string())
+}
+
+/// 已解析 LUT 的缓存（按 id）。
+///
+/// 一条链里同一支只会读一次文件；编辑器会话、缩略图批次各自持一份即可。
+/// 上限 16 支：面板里滚来滚去也不会无限长（超出就整批丢掉重建，换一次卡顿可忽略）。
+#[derive(Default)]
+pub struct LutCache {
+    entries: std::collections::HashMap<String, Arc<Lut>>,
+}
+
+impl LutCache {
+    /// 取一支（未命中就读文件）。
+    ///
+    /// # Errors
+    /// 记录不存在 / 文件丢失 / 解析失败。
+    pub fn get<R: Runtime>(&mut self, app: &AppHandle<R>, id: &str) -> Result<Arc<Lut>, String> {
+        if let Some(lut) = self.entries.get(id) {
+            return Ok(Arc::clone(lut));
+        }
+        let lut = resolve(app, id)?;
+        if self.entries.len() >= 16 {
+            self.entries.clear();
+        }
+        self.entries.insert(id.to_string(), Arc::clone(&lut));
+        Ok(lut)
+    }
+}
+
+/// 解析结果：能渲染的链 + 解不出来的层。
+///
+/// 为什么要分开：缩略图/编辑器遇到缺文件应该**跳过这一层继续出图**，
+/// 而导出必须**报错**（静默少一层就是另一张图）。所以不在这里替调用方做决定。
+pub struct ResolvedChain {
+    pub chain: Option<Arc<LutChain>>,
+    pub missing: Vec<String>,
+}
+
+/// **把编辑栈的链解析成可渲染的一条链**（CPU / GPU / 缩略图 / 导出共用这一份）。
+///
+/// 规则（`specs/editor-lut-chain.md` §1）：
+/// * 总开关关、链为空、或没有一层开着 → `chain = None`（= 不套 LUT）；
+/// * 单层关着 → 跳过该层；
+/// * 某层文件丢了 → **跳过这一层并记进 `missing`**，其余层照常。
+pub fn resolve_chain<R: Runtime>(
+    app: &AppHandle<R>,
+    layers: &[raybend::store::develop::LutLayer],
+    master: Option<bool>,
+    cache: &mut LutCache,
+) -> ResolvedChain {
+    let mut missing = Vec::new();
+    if master != Some(true) || layers.is_empty() {
+        return ResolvedChain {
+            chain: None,
+            missing,
+        };
+    }
+    if layers.len() > raybend::store::develop::MAX_LUT_LAYERS {
+        // 外部坏数据也不能让 CPU（全部层）与 GPU（前 8 层）各画一张图。
+        // 正常写入会被 `DevelopStack::validate` 拒绝；这里让预览/缩略图安全降级，
+        // 导出则由 `verify_capture` 判定「链需要 LUT 但没有可渲染结果」而失败。
+        eprintln!("[lut] 链超过 {} 层，拒绝渲染", raybend::store::develop::MAX_LUT_LAYERS);
+        return ResolvedChain {
+            chain: None,
+            missing,
+        };
+    }
+    let mut resolved = Vec::new();
+    for layer in layers.iter().filter(|layer| layer.enabled) {
+        match cache.get(app, &layer.id) {
+            Ok(lut) => resolved.push(LutChainLayer {
+                lut,
+                strength: layer.strength.clamp(0.0, 1.0),
+            }),
+            Err(error) => {
+                eprintln!("[lut] 链里的一层不可用（{}）：{error}", layer.id);
+                missing.push(layer.id.clone());
+            }
+        }
+    }
+    let chain = (!resolved.is_empty()).then(|| Arc::new(LutChain::new(resolved)));
+    ResolvedChain { chain, missing }
+}
+
+/// 一次性解析（不跨调用缓存）——缩略图 / 定稿 / 导出这些批次路径用。
+pub fn resolve_stack_chain<R: Runtime>(
+    app: &AppHandle<R>,
+    stack: &raybend::store::develop::DevelopStack,
+) -> ResolvedChain {
+    resolve_chain(
+        app,
+        &stack.lut_chain,
+        stack.lut_enabled,
+        &mut LutCache::default(),
+    )
 }
 
 fn backfill_hashes<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {

@@ -106,6 +106,7 @@ try {
     const end=Date.now()+30000;
     while(Date.now()<end){if(await evaluate(expression))return;await sleep(100);}
     throw new Error(label+": "+JSON.stringify({text:await evaluate("document.body.innerText.slice(0,1200)"),
+      chips:await evaluate("[...document.querySelectorAll('[data-part=item]')].map(el=>({t:el.textContent.trim(),checked:el.getAttribute('aria-checked'),r:(({x,y,width,height})=>({x,y,width,height}))(el.getBoundingClientRect())}))"),
       calls:await evaluate("window.__exportTest?.calls.slice(-40)"),errors:cdp.consoleErrors,exceptions:cdp.exceptions,
       tile:await evaluate("document.querySelector('[data-export-issue]')?.outerHTML.slice(0,1800)")}));
   };
@@ -250,9 +251,29 @@ try {
   assert(await evaluate("document.querySelector('[data-export-area=queue] [role=option]').getAttribute('aria-disabled')!=='true'"),"failed item stays selectable");
   await evaluate("document.querySelector('[data-export-retry]').click()");
   await until("!document.querySelector('[data-export-queue-error]') && document.querySelector('[data-export-status=running]')", "queue retry uses same item");
-  await evaluate("[...document.querySelectorAll('[data-part=item]')].find(b=>b.textContent.trim()==='浏览').click()");
+  // 工作流切换统一用**真鼠标事件**（`.click()` 在 Ark 分段控件上不可靠：有的 chip 能切、有的切不动）
+  const clickChip=async name=>{
+    const p=await evaluate(`(()=>{const el=[...document.querySelectorAll('[data-part=item]')].find(b=>b.textContent.trim()===${JSON.stringify(name)});if(!el)return null;const r=el.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()`);
+    assert(p, 'flow chip '+name+' exists');
+    const top=await evaluate(`document.elementFromPoint(${p.x},${p.y})?.outerHTML.slice(0,160)`);
+    /*
+     * 先补一次**合成 click**：前面的拖动用例可能把 pointer capture 留在别的元素上，
+     * 之后所有真实鼠标事件都会被路由到那个捕获者（elementFromPoint 仍然显示 chip 在指定位），
+     * 于是「点 chip 没反应」。合成 click 不走 pointer 路由，能绕开这种残留。
+     */
+    await evaluate(`document.elementFromPoint(${p.x},${p.y})?.click()`);
+    await sleep(120);
+    await cdp.send("Input.dispatchMouseEvent",{type:"mousePressed",button:"left",buttons:1,clickCount:1,...p});
+    await cdp.send("Input.dispatchMouseEvent",{type:"mouseReleased",button:"left",buttons:0,clickCount:1,...p});
+    await sleep(120);
+    console.log('[chip]', name, JSON.stringify(p), '| top:', top);
+  };
+  await clickChip('浏览');
+  await until("!document.querySelector('[data-export-right]')",'browse mounted before queue finishes');
   await sleep(150);await evaluate("window.__exportQueue.finish()");
-  await evaluate("[...document.querySelectorAll('[data-part=item]')].find(b=>b.textContent.trim()==='导出').click()");
+  await sleep(150);
+  await clickChip('导出');
+  await until("document.querySelector('[data-export-right]')",'export remounts after workspace switch');
   await until("document.querySelector('[data-export-status=done]')","completion retained across workspaces");
   await until("document.querySelector('[data-export-issue=\"issue:7\"] img')", "all issues return after workspace remount");
   assert.equal(await evaluate("!!document.querySelector('[data-flow-processing]')"),false,"done removes shimmer");
@@ -263,8 +284,27 @@ try {
   await until("!document.querySelector('[data-export-area=queue] [role=option]')","reset clears runtime queue");
   assert.deepEqual(await evaluate("[...document.querySelectorAll('[data-export-form] [data-scope=segment-group][data-part=item]')].map(el=>el.textContent.trim()).filter(text=>['WEBP','AVIF','JPG','PNG'].includes(text))"),['WEBP','AVIF','JPG','PNG']);
   assert(await evaluate("![...document.querySelectorAll('[data-export-right] button')].some(el=>el.textContent.trim()==='新建')"));
-  assert.equal(await evaluate("document.querySelector('[data-export-form-title]').textContent.trim()"),'修改预设');
-  assert.equal(await evaluate("document.querySelector('[data-export-save]').textContent.trim()"),'变更');
+  assert.equal(await evaluate("document.querySelector('[data-export-form-title]').textContent.trim()"),'当前预设');
+  assert.equal(await evaluate("document.querySelector('[data-export-save]').textContent.trim()"),'保存');
+  // 段标题的「标题感」：加粗 + 左侧主色竖条；两段名字固定（不再随名称匹配在 修改/新建 之间跳）
+  assert.deepEqual(
+    await evaluate(`(()=>{
+      const list=[];
+      for (const h of document.querySelectorAll('[data-export-right] h3')) {
+        const bar=h.querySelector('span[aria-hidden]');
+        const label=h.querySelector('span:last-child');
+        list.push({text:h.textContent.trim(),bar:!!bar,weight:Number(getComputedStyle(label).fontWeight)});
+      }
+      return list;
+    })()`),
+    [{text:'预设列表',bar:true,weight:600},{text:'当前预设',bar:true,weight:600}],
+    'section titles read as headings',
+  );
+  // 紧凑化：名称 / 格式 / 文件同名 三行都是「字段名 + 控件同一行」，且控件不溢出
+  const fieldRow = (label) => evaluate(`(()=>{const span=[...document.querySelectorAll('[data-export-form] span.w-16')].find(s=>s.textContent.trim()===${JSON.stringify(label)});if(!span)return null;const row=span.parentElement;const control=row.lastElementChild;const box=row.getBoundingClientRect();const rect=control.getBoundingClientRect();return {sameLine:Math.abs(rect.top+rect.height/2-(box.top+box.height/2))<6,overflow:control.scrollWidth>control.clientWidth+1};})()`);
+  for (const label of ['名称','格式','文件同名']) {
+    assert.deepEqual(await fieldRow(label), {sameLine:true,overflow:false}, label+' 与控件同一行且不溢出');
+  }
   assert(await evaluate("!['导入预设','导出预设','导出预览','失败与失效清单'].some(text=>[...document.querySelectorAll('[data-export-right] button')].some(el=>el.textContent.trim()===text))"),'deferred and removed actions are absent');
   assert(await evaluate("document.querySelector('[data-export-save-hint]').textContent.includes('先保存')"),'footer save hint remains below actions');
   const layout=await evaluate(`(()=>{const top=document.querySelector('[data-export-presets]'),list=document.querySelector('[data-export-preset-list]'),settings=document.querySelector('[data-export-settings]'),right=document.querySelector('[data-export-right]');return {topGrow:getComputedStyle(top).flexGrow,listGrow:getComputedStyle(list).flexGrow,settingsGrow:getComputedStyle(settings).flexGrow,settingsShrink:getComputedStyle(settings).flexShrink,settingsBelow:settings.getBoundingClientRect().top>=top.getBoundingClientRect().bottom,footer:document.querySelector('[data-export-save-hint]').getBoundingClientRect().bottom<=right.getBoundingClientRect().bottom};})()`);
@@ -274,10 +314,12 @@ try {
   assert(await evaluate("document.querySelector('[data-export-run]').disabled"),'unsaved form cannot start queue');
   assert(await evaluate("document.querySelector('[data-export-save]').disabled"),'save waits for name detection');
   await sleep(1300);
-  assert.equal(await evaluate("document.querySelector('[data-export-form-title]').textContent.trim()"),'修改预设','name mode does not switch before debounce');
-  await until("document.querySelector('[data-export-form-title]').textContent.trim()==='新建预设' && document.querySelector('[data-export-save]').textContent.trim()==='新增'",'new name changes both title and save action');
+  assert.equal(await evaluate("document.querySelector('[data-export-form-title]').textContent.trim()"),'当前预设','title stays put while name detection runs');
+  await until("!document.querySelector('[data-export-save]').disabled",'name detection enables save');
+  assert(await evaluate("document.querySelector('[data-export-save]').classList.contains('bg-brand-2')"),'save keeps accent on an existing preset');
   await setName('  测试输出  ');
-  await until("document.querySelector('[data-export-form-title]').textContent.trim()==='修改预设' && document.querySelector('[data-export-save]').textContent.trim()==='变更'",'normalized existing name matches');
+  await until("!document.querySelector('[data-export-save]').disabled",'normalized existing name stays saveable');
+  assert.equal(await evaluate("document.querySelector('[data-export-save]').textContent.trim()"),'保存');
   await setName('测试输出');
   await until("!document.querySelector('[data-export-save]').disabled",'name detection completed before continuing');
   assert(await evaluate("(()=>{const save=document.querySelector('[data-export-save]').getBoundingClientRect(),run=document.querySelector('[data-export-run]').getBoundingClientRect();return save.y===run.y && run.width>save.width*2 && run.x-save.right>=8;})()"),'compact save and expanding run share a row with padding');
@@ -349,10 +391,21 @@ try {
     assert(!await evaluate("!!document.querySelector('[data-drag-preview]')"),'normal click movement does not drag');
     await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',buttons:1,x:a.x+12,y:a.y});
     await until("document.querySelector('[data-drag-preview]')",'drag starts');
-    // 幽灵中心就落在指针上（只差 8px 手感偏移）——旧版把卡片摆在右下 100px 开外。
-    await until(`(()=>{const el=document.querySelector('[data-drag-preview]');if(!el)return false;const r=el.getBoundingClientRect();return Math.abs(r.x+r.width/2-(${a.x+8}))<6&&Math.abs(r.y+r.height/2-(${a.y+8}))<6;})()`,'ghost centred on the pointer');
+    /*
+     * 幽灵中心落在指针上（只差 8px 手感偏移）。
+     *
+     * 断言前**再发一次 move**：幽灵画的是「最近一次指针位置」，而拖动要越过阈值才成立 ——
+     * 越过阈值那一次之后如果没有新的 move，它就停在**触发点**而不是当前的 `+12` 点，
+     * 于是旧断言（拿 a.x+12 去比）会稳定地差出一个阈值距离。再推一格既符合真实手势，
+     * 也真的验证了「跟着指针走」。
+     */
+    const follow={x:a.x+24,y:a.y+12};
+    await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',buttons:1,...follow});
+    await until(`(()=>{const el=document.querySelector('[data-drag-preview]');if(!el)return false;const r=el.getBoundingClientRect();return Math.abs(r.x+r.width/2-(${follow.x+8}))<6&&Math.abs(r.y+r.height/2-(${follow.y+8}))<6;})()`,'ghost centred on the pointer');
     const node=await evaluate("(()=>{const el=document.querySelector('[data-drag-preview]'),r=el.getBoundingClientRect();window.__dragPreview=el;window.__dragCount=Number(el.querySelector('[data-drag-count]').textContent);return {width:r.width,height:r.height,cards:el.querySelectorAll('[data-drag-card]').length};})()");
-    assert.deepEqual(node,{width:132,height:132,cards:4},'ghost is one card wide with four cards');
+    // 幽灵尺寸 = `DragPreview` 的 `size-24`（96px，2026-10-11 与 browse 统一成一份），
+    // 不是旧版 export 内联实现的 132px。
+    assert.deepEqual(node,{width:96,height:96,cards:4},'ghost is one card wide with four cards');
     assert(await evaluate("Number.isInteger(window.__dragCount)&&window.__dragCount>0"),'drag badge counts the captured batch');
     if(dest==='outside'){
       // CDP 的合成鼠标事件出不了视口（浏览器直接丢弃越界坐标），所以用一条同 pointerId 的
@@ -484,9 +537,9 @@ try {
   await until("(()=>{[...document.querySelectorAll('[data-part=item]')].find(b=>b.textContent.trim()==='导出')?.click();return !!document.querySelector('[data-export-preset-list]');})()",'empty export workflow mounted after startup');
   await until("document.querySelector('[data-export-preset-list]')?.textContent==='当前无预设，请先新建'",'empty preset guidance');
   await until("document.querySelector('[data-export-form-title]') && document.querySelector('[data-export-save]') && document.querySelector('[data-export-run]')",'empty preset form finishes mounting');
-  assert.equal(await evaluate("document.querySelector('[data-export-form-title]').textContent.trim()"),'新建预设');
-  assert.equal(await evaluate("document.querySelector('[data-export-save]').textContent.trim()"),'新增');
-  assert(await evaluate("document.querySelector('[data-export-save]').classList.contains('bg-brand-2')"),'new preset uses accent');
+  assert.equal(await evaluate("document.querySelector('[data-export-form-title]').textContent.trim()"),'当前预设');
+  assert.equal(await evaluate("document.querySelector('[data-export-save]').textContent.trim()"),'保存');
+  assert(await evaluate("document.querySelector('[data-export-save]').classList.contains('bg-brand-2')"),'save is always accent');
   assert(await evaluate("document.querySelector('[data-export-run] svg')!==null"),'export icon precedes text');
   assert.equal(await evaluate("document.querySelector('[data-export-existing-file] input:checked').value"),'append');
   assert(await evaluate("document.querySelector('[data-export-run]').disabled"));

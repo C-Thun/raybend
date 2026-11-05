@@ -1,5 +1,9 @@
 //! 有界目录监听：事件只提示重扫，绝不直接修改照片记录。
 //! 活跃目录最多 32 个，非递归监听；200ms 去抖，连续事件最多等待 1s。
+//!
+//! **内部临时文件不进事件流**（2026-11-03）：我们自己的原子写入（sidecar / 导出 / 预设）
+//! 先落 `<名字>.tmp-<pid>-<序号>` 再改名。这类文件既不是照片也不是目录，
+//! 若当成变更就会把「改一次作者」「标一颗星」变成一次整目录重扫。
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
@@ -59,12 +63,38 @@ fn includes_path(photos: &Path, path: &Path) -> bool {
     {
         return false;
     }
-    !path.extension().is_some_and(|ext| {
-        matches!(
-            ext.to_string_lossy().to_ascii_lowercase().as_str(),
-            "tmp" | "db" | "db-wal" | "db-shm" | "xmp"
-        )
-    })
+    !is_internal_file(path)
+}
+
+/// 我们自己产生的、**不属于照片变更**的文件：
+///
+/// * `.tmp` / `.tmp-<pid>-<序号>` —— `crate::fs_atomic::write` 的临时名
+///   （`with_extension("tmp-<pid>-<n>")`，所以扩展名就是整个尾巴）；
+/// * `db` / `db-wal` / `db-shm` —— 库文件；
+/// * `xmp` —— 我们的 sidecar（`fs_atomic` 改名落盘后也会有它的事件）。
+///
+/// 判据集中在这里：漏一个就会变成「改一次元数据 = 整目录重扫」。
+fn is_internal_file(path: &Path) -> bool {
+    let Some(ext) = path.extension() else {
+        return false;
+    };
+    let ext = ext.to_string_lossy().to_ascii_lowercase();
+    if matches!(ext.as_str(), "db" | "db-wal" | "db-shm" | "xmp" | "tmp") {
+        return true;
+    }
+    // fs_atomic 的临时名：tmp-<pid>-<n>
+    let Some(rest) = ext.strip_prefix("tmp-") else {
+        return false;
+    };
+    match rest.split_once('-') {
+        Some((pid, seq)) => {
+            !pid.is_empty()
+                && pid.bytes().all(|b| b.is_ascii_digit())
+                && !seq.is_empty()
+                && seq.bytes().all(|b| b.is_ascii_digit())
+        }
+        None => false,
+    }
 }
 
 /// 同一批改名含旧/新路径；父范围与被移动的活跃子范围同时重扫。
@@ -326,6 +356,25 @@ mod tests {
             )
             .is_empty()
         );
+    }
+    #[test]
+    fn atomic_write_temp_names_never_look_like_photo_changes() {
+        let photos = Path::new("/library/photos");
+        // fs_atomic::write 的临时名：`<stem>.tmp-<pid>-<n>` —— 改一次作者/标一颗星就会产生
+        // （sidecar 写入），当成照片变更就是一次整目录重扫（崔总 2026-11-03 报的延迟）。
+        for name in [
+            "a/DSC1.tmp-4242-0",
+            "a/DSC1.xmp.tmp-7-12",
+            "a/照片.tmp-1-3",
+        ] {
+            let path = photos.join(name);
+            assert!(is_internal_file(&path), "{name} 是内部临时文件");
+            assert!(affected_scopes(photos, &VecDeque::new(), &[path]).is_empty());
+        }
+        // 正常的照片、带 tmp 字样的真扩展名不能被误杀（只认 `tmp-<数字>-<数字>`）
+        for name in ["a/DSC1.JPG", "a/扫描.tmpfoo.jpg", "a/x.tmp-old"] {
+            assert!(!is_internal_file(&photos.join(name)), "{name} 是真实文件");
+        }
     }
     #[test]
     fn batch_and_active_watch_sets_are_bounded() {

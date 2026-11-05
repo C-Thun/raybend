@@ -48,6 +48,9 @@ serde_json.workspace = true
 tauri-plugin-dialog = "2.7.3"
 image.workspace = true
 tauri-plugin-updater = "2"
+# 单实例保护：产品版禁止启动第二个（第二个实例退出并聚焦已有窗口）。
+# 只在 `!tauri::is_dev()` 时注册，避免 dev 与已安装正式版互相踢。
+tauri-plugin-single-instance = "2"
 # —— 更新包下载（v2）：续传要自己发 Range 请求，官方插件的 download() 只给整包字节。
 # 特性集与插件保持完全一致（rustls-no-provider + system-proxy），不换 TLS 后端；
 # rustls 只用于在进程里补装 ring provider（插件与 tauri core 本来就装，这里自己保一手）。
@@ -70,7 +73,7 @@ minidumper = "0.11"
 [target.'cfg(windows)'.dependencies]
 webview2-com = "=0.38.2"
 windows-core = "=0.61.2"
-windows-sys = { workspace = true, features = ["Win32_Globalization", "Win32_Devices_Display", "Win32_Graphics_Gdi", "Win32_UI_ColorSystem", "Win32_System_LibraryLoader", "Win32_System_Threading"] }
+windows-sys = { workspace = true, features = ["Win32_Globalization", "Win32_Devices_Display", "Win32_Graphics_Gdi", "Win32_UI_ColorSystem", "Win32_UI_WindowsAndMessaging", "Win32_System_LibraryLoader", "Win32_System_Threading"] }
 
 [dev-dependencies]
 rusqlite.workspace = true

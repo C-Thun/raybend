@@ -30,6 +30,15 @@ export interface EditorActions {
   /** 两层重置：先确认清除手动调整，再直接清除自动调整；无默认热键，避免误触。 */
   canReset: () => boolean;
   resetDevelop: () => void;
+  /** 重新取样全部控制点（修复 2026-11-02 之前的方向取样 bug）。 */
+  resampleAreas: () => void;
+  /**
+   * 在「默认层」与「当前层」之间来回切（`Space`，崔总 2026-11-05）。
+   *
+   * 只有默认层（没有任何 area）时**什么都不做** —— 不自动建层、不提示。
+   */
+  canToggleAreaFocus: () => boolean;
+  toggleAreaFocus: () => void;
   /** RAW、位图、机型信息齐全且当前可编辑。 */
   canAutoAdjust: () => boolean;
   /** 拟合基础曲线，保守调整影调色彩并匹配镜头。 */

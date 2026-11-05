@@ -54,6 +54,8 @@ import type {
   ImportStart,
   MarkingItem,
   MarkResult,
+  TextValueCount,
+  GeoPlace,
   MigrationNotice,
   MigrationSnapshot,
   MetaFile,
@@ -365,6 +367,14 @@ const MARK_RESULT_KEYS = [
   "skippedLocked",
   "undoLabel",
 ] as const satisfies readonly (keyof MarkResult)[];
+const TEXT_VALUE_COUNT_KEYS = ["count", "value"] as const satisfies readonly (keyof TextValueCount)[];
+const GEO_PLACE_KEYS = [
+  "city",
+  "country",
+  "countryIso",
+  "distanceKm",
+  "province",
+] as const satisfies readonly (keyof GeoPlace)[];
 const DELETE_FAILURE_KEYS = ["path", "reason"] as const satisfies readonly (keyof DeleteFailure)[];
 const RECYCLE_RESULT_KEYS = [
   "alreadyGone",
@@ -457,6 +467,8 @@ const EDITOR_RENDER_STATE_KEYS = [
   "origin",
   // M3-W3：覆盖层变换（Rust 出的「图像像素 → 洞口 CSS 像素」仿射矩阵）
   "overlayTransform",
+  "overlayScale",
+  "overlayRotation",
   "paintedPath",
   "panX",
   "panY",
@@ -557,6 +569,8 @@ const KEY_TABLES = {
   BrowseFacets: checkKeys<BrowseFacets, typeof BROWSE_FACETS_KEYS>(BROWSE_FACETS_KEYS),
   MarkingItem: checkKeys<MarkingItem, typeof MARKING_ITEM_KEYS>(MARKING_ITEM_KEYS),
   MarkResult: checkKeys<MarkResult, typeof MARK_RESULT_KEYS>(MARK_RESULT_KEYS),
+  TextValueItem: checkKeys<TextValueCount, typeof TEXT_VALUE_COUNT_KEYS>(TEXT_VALUE_COUNT_KEYS),
+  GeoPlace: checkKeys<GeoPlace, typeof GEO_PLACE_KEYS>(GEO_PLACE_KEYS),
   DeleteFailure: checkKeys<DeleteFailure, typeof DELETE_FAILURE_KEYS>(DELETE_FAILURE_KEYS),
   RecycleResult: checkKeys<RecycleResult, typeof RECYCLE_RESULT_KEYS>(RECYCLE_RESULT_KEYS),
   RestoreResult: checkKeys<RestoreResult, typeof RESTORE_RESULT_KEYS>(RESTORE_RESULT_KEYS),

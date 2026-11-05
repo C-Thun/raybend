@@ -500,12 +500,15 @@ enum RenderCommand {
         nr_method: NrMethod,
         params: DevelopParams,
         curves: CurveSet,
+        areas: Option<Arc<raybend::develop::LayerStack>>,
+        /// 控制点容差 → 权重的映射（调试面板可覆盖；`None` 时前端不发这个字段）
+        weight: raybend::develop::PointWeightConfig,
         interactive: bool,
         /// 这次要用的**镜头校正**（已解析；`None` = 不用配置文件 —— 手动三根拉杆
         /// 在显影线程里从参数合并，所以拖动时它们是实时的）。
         /// `Box` 是因为它比其它变体大得多（clippy 的 `large_enum_variant`）。
         lens: Option<Box<raybend::develop::lens::LensCorrection>>,
-        lut: Option<Arc<raybend::develop::lut::Lut>>,
+        lut: Option<Arc<raybend::develop::lut::LutChain>>,
         geometry: Option<EditGeometry>,
     },
     /// 显影完了一张（新照片或新参数）
@@ -523,6 +526,29 @@ enum RenderCommand {
 ///
 /// 校验在这里（`into_parts`）：未知 id / 非法值 / 坏曲线一律**报错**，
 /// 不静默夹取 —— 一个 NaN 悄悄过去，整张图就变黑了，而界面上看不出原因。
+/// **开发期**的控制点权重覆盖（`dev/MaskDebugDialog`）。
+///
+/// 生产构建不会发它（前端的调试面板整条分支被摇掉），`None` = 用固化常量。
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PointWeightDto {
+    pub luma_core: [f32; 2],
+    pub luma_end: [f32; 2],
+    pub chroma_core: [f32; 2],
+    pub chroma_end: [f32; 2],
+}
+
+impl From<PointWeightDto> for raybend::develop::PointWeightConfig {
+    fn from(value: PointWeightDto) -> Self {
+        Self {
+            luma_core: value.luma_core,
+            luma_end: value.luma_end,
+            chroma_core: value.chroma_core,
+            chroma_end: value.chroma_end,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DevelopParamsDto {
@@ -540,8 +566,9 @@ pub struct DevelopParamsDto {
     /// RAW 专用的机型基础曲线快照，位于用户曲线之前。
     #[serde(default)]
     pub base_curve_points: Option<Vec<[f32; 2]>>,
+    /// **应用层链**（有序；空 = 没有 LUT）。总开关是 `lut_enabled`。
     #[serde(default)]
-    pub lut_id: Option<String>,
+    pub lut_chain: Option<Vec<raybend::store::develop::LutLayer>>,
     #[serde(default)]
     pub lut_enabled: Option<bool>,
     /// **手指还按在滑杆 / 曲线上**（人类 2026-09-24）：
@@ -558,6 +585,15 @@ pub struct DevelopParamsDto {
     pub nr_method: Option<String>,
     #[serde(default)]
     pub geometry: Option<EditGeometry>,
+    /// **默认层之外的编辑区层**（`specs/editor-area.md`）。空 = 只有默认层。
+    #[serde(default)]
+    pub areas: Vec<raybend::store::develop::Area>,
+    /// 默认层在层列表里的位置（0-based；只有存在额外层时才有意义）。
+    #[serde(default)]
+    pub default_index: Option<u8>,
+    /// **开发期**：控制点权重的临时覆盖（`None` = 固化常量）。
+    #[serde(default)]
+    pub mask_debug: Option<PointWeightDto>,
 }
 
 impl DevelopParamsDto {
@@ -565,7 +601,17 @@ impl DevelopParamsDto {
     ///
     /// # Errors
     /// 未知参数 id / 值非法 / 未知曲线通道 / 控制点不合法。
-    pub fn into_parts(self) -> Result<(DevelopParams, CurveSet), String> {
+    pub fn into_parts(
+        self,
+    ) -> Result<
+        (
+            DevelopParams,
+            CurveSet,
+            Option<Arc<raybend::develop::LayerStack>>,
+            raybend::develop::PointWeightConfig,
+        ),
+        String,
+    > {
         let params = DevelopParams::from_values(self.values, self.as_shot_temperature)?;
         let mut curves = CurveSet::identity();
         if let Some(points) = self.base_curve_points {
@@ -578,7 +624,33 @@ impl DevelopParamsDto {
             let curve = Curve::from_points(points)?;
             curves.set_channel(channel, curve);
         }
-        Ok((params, curves))
+        /*
+         * 编辑区层：与 `DevelopStack` 同一个口径（默认层是栈自己，额外层在 `areas`）。
+         * 退化（没有额外层）⇒ `None` ⇒ 管线走原来的快路径，与改动前逐位一致。
+         */
+        let areas = if self.areas.is_empty() {
+            None
+        } else {
+            let specs: Vec<raybend::develop::AreaSpec> =
+                self.areas.iter().map(|area| area.to_spec()).collect();
+            Some(Arc::new(raybend::develop::LayerStack::from_specs(
+                &specs,
+                self.default_index,
+                self.as_shot_temperature,
+            )?))
+        };
+        Ok((
+            params,
+            curves,
+            areas,
+            // 生产构建里调试覆盖一律无效（即使有人直接构造 IPC 载荷）；
+            // DEV 构建才允许 `dev/MaskDebugDialog` 临时改手感。
+            if cfg!(debug_assertions) {
+                self.mask_debug.map_or_else(Default::default, Into::into)
+            } else {
+                Default::default()
+            },
+        ))
     }
 }
 
@@ -653,8 +725,12 @@ struct DevelopJob {
     /// 已解析的镜头校正（配置文件那一半；`None` = 不用配置文件）。
     /// 手动三根拉杆不在这里 —— 显影线程从 `params` 里合并（那样拖动才是实时的）。
     lens: Option<raybend::develop::lens::LensCorrection>,
-    lut: Option<Arc<raybend::develop::lut::Lut>>,
+    lut: Option<Arc<raybend::develop::lut::LutChain>>,
     curves: CurveSet,
+    /// 默认层之外的编辑区层（`None` = 只有默认层；退化时走快路径）。
+    areas: Option<Arc<raybend::develop::LayerStack>>,
+    /// 控制点容差 → 权重的映射（调试面板可覆盖）
+    weight: raybend::develop::PointWeightConfig,
     geometry: Option<EditGeometry>,
     prefer_sooc: bool,
     /// **过渡帧计划**（进编辑先出图）：只在真的要解码那一下用一次；
@@ -751,7 +827,7 @@ impl DevelopedPixels {
     /// 第三项必须跟着**帧**走，而不是读当前选中项：显影线程与渲染线程差一拍时，
     /// 拿新的选择去配旧帧就是「图与参数对不上」。慢速路的 LUT 已烘进像素，所以给 `None`。
     #[allow(clippy::type_complexity)]
-    fn render(&self, width:u32, height:u32) -> Option<(Arc<RenderImage>, Option<Arc<raybend::develop::working::GpuToneDescription>>, Option<Arc<raybend::develop::lut::Lut>>)> {
+    fn render(&self, width:u32, height:u32) -> Option<(Arc<RenderImage>, Option<Arc<raybend::develop::working::GpuToneDescription>>, Option<Arc<raybend::develop::lut::LutChain>>)> {
         match self {
             Self::Legacy(rgb) => RenderImage::from_rgb8(width,height,rgb).map(|image| (Arc::new(image),None,None)),
             Self::Working(frame) => Some((Arc::clone(&frame.image),frame.tone.clone(),frame.gpu_lut.clone())),
@@ -816,6 +892,13 @@ pub struct RenderState {
     /// 覆盖层（裁切柄 / 旋转框 / 对比线 / 将来的蒙版）把子元素写成**图像像素坐标**，
     /// 整层套这个矩阵 —— 数学只有 Rust 一份（`AGENTS.md` §6.1 红线 2）。
     pub overlay_transform: Option<[f32; 6]>,
+    /// 覆盖层用：**图像像素 → CSS 像素**的缩放（= `zoom / dpr`）。
+    ///
+    /// 覆盖层里的圆片 / 引线 / handle 尺寸要**屏幕像素固定**，所以它们在自己的
+    /// 容器里反向缩放这么多 —— 比例只由 Rust 报，前端不自己算（`AGENTS.md` §6.1）。
+    pub overlay_scale: f32,
+    /// 覆盖层用：图像的旋转（度）。标记要反向旋转才不跟着图转。
+    pub overlay_rotation: f32,
     pub zoom: f32,
     pub pan_x: f32,
     pub pan_y: f32,
@@ -882,7 +965,7 @@ pub struct EditorState {
     proof_cache: Arc<Mutex<Option<(raybend::color::OutputColor,Arc<raybend::color::proof::ProofTransform>)>>>,
     /// 同一照片/镜头选择的解析只做一次（实际工作仍在阻塞线程里）。
     lens_cache: Arc<Mutex<Option<(LensCacheKey, Option<LensCorrection>)>>>,
-    lut_cache: Arc<Mutex<Option<(String, Arc<raybend::develop::lut::Lut>)>>>,
+    lut_cache: Arc<Mutex<crate::lut::LutCache>>,
     input_cache: Arc<Mutex<Option<Arc<working_editor::Input>>>>,
     /// 邻图预热（§4.6）的 key：新一次预热会把上一次还没开跑的撤掉。
     prefetch_keys: Mutex<Vec<String>>,
@@ -1453,30 +1536,16 @@ pub async fn editor_set_params<R: Runtime>(
         .map(NrMethod::parse)
         .unwrap_or(Some(NrMethod::Fast))
         .ok_or_else(|| "未知的降噪方式".to_string())?;
-    let lut_id = if params.lut_enabled == Some(true) {
-        Some(params.lut_id.clone().ok_or("启用 LUT 时必须选择一支 LUT")?)
-    } else {
-        None
-    };
-    let lut = if let Some(id) = lut_id {
+    let lut = {
         let cache = Arc::clone(&state.lut_cache);
         let handle = app.clone();
-        Some(
-            crate::source::blocking(move || {
-                let mut cached = cache.lock().map_err(|_| "LUT 缓存锁中毒".to_string())?;
-                if let Some((stored_id, value)) = cached.as_ref()
-                    && *stored_id == id
-                {
-                    return Ok(Arc::clone(value));
-                }
-                let value = crate::lut::resolve(&handle, &id)?;
-                *cached = Some((id, Arc::clone(&value)));
-                Ok(value)
-            })
-            .await?,
-        )
-    } else {
-        None
+        let layers = params.lut_chain.clone().unwrap_or_default();
+        let master = params.lut_enabled;
+        crate::source::blocking(move || {
+            let mut cached = cache.lock().map_err(|_| "LUT 缓存锁中毒".to_string())?;
+            Ok(crate::lut::resolve_chain(&handle, &layers, master, &mut cached).chain)
+        })
+        .await?
     };
     let key = repository_id
         .zip(asset_id)
@@ -1488,7 +1557,7 @@ pub async fn editor_set_params<R: Runtime>(
                 params.lens_enabled,
             )
         });
-    let (parsed, curves) = params.into_parts()?;
+    let (parsed, curves, areas, weight) = params.into_parts()?;
     // catalog 读取和 lensfun 解析不能占住 Tauri 的同步命令线程。拖动期间
     // 相同的镜头选择命中缓存；等待解析的旧参数由请求序号丢弃。
     let lens = if let Some(key) = key {
@@ -1518,6 +1587,8 @@ pub async fn editor_set_params<R: Runtime>(
                     nr_method,
                     params: parsed,
                     curves,
+                    areas,
+                    weight,
                     interactive,
                     lens: lens.map(Box::new),
                     lut,
@@ -1615,6 +1686,61 @@ pub async fn editor_set_proof<R: Runtime>(app:AppHandle<R>,state:State<'_,Editor
 #[tauri::command]
 pub fn editor_render_state(state: State<'_, EditorState>) -> Result<RenderState, String> {
     current_render_state(&state)
+}
+
+/// **覆盖层的实时变换**（拖 / 缩放照片时要跟着动的标记读它）。
+///
+/// 为什么不复用 `editor_render_state`：那条要克隆整份状态（含直方图、事件历史），
+/// 而这里要**每帧一次**读 —— 只取 3 个数 + 一个照片身份，锁一次、拷 8 个字节。
+///
+/// 前端只在**有视口手势**（拖动 / 滚轮 / 缩放按钮 / 双击适配）时轮询，
+/// 静止时一次都不调（`src/lib/overlay-live.ts`）。
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OverlayLive {
+    /// 图像像素 → 洞口内 CSS 像素的仿射矩阵（`None` = 还没上屏）
+    pub transform: Option<[f32; 6]>,
+    /// = `zoom / dpr`（屏幕像素固定的标记要反向缩放）
+    pub scale: f32,
+    /// 图像旋转角（度）
+    pub rotation: f32,
+    /// 这份变换属于哪张已经上屏的照片（换图瞬间防止张冠李戴）
+    pub photo_path: Option<String>,
+}
+
+/// **控制点权重的固化默认值**（开发期调试面板「恢复默认」用）。
+///
+/// 数字的真相在 `develop/areas.rs::POINT_WEIGHT_CONFIG` —— 这里只是把它交给前端，
+/// 避免前端再抄一份（抄了就会漂）。
+#[tauri::command]
+pub fn editor_mask_defaults() -> PointWeightDto {
+    let config = raybend::develop::PointWeightConfig::default();
+    PointWeightDto {
+        luma_core: config.luma_core,
+        luma_end: config.luma_end,
+        chroma_core: config.chroma_core,
+        chroma_end: config.chroma_end,
+    }
+}
+
+#[tauri::command]
+pub fn editor_overlay_state(state: State<'_, EditorState>) -> Result<OverlayLive, String> {
+    let guard = state
+        .session
+        .lock()
+        .map_err(|_| "编辑器会话锁中毒".to_string())?;
+    match guard.as_ref() {
+        Some(session) => {
+            let snapshot = lock_state(&session.shared);
+            Ok(OverlayLive {
+                transform: snapshot.overlay_transform,
+                scale: snapshot.overlay_scale,
+                rotation: snapshot.overlay_rotation,
+                photo_path: snapshot.painted_path.clone(),
+            })
+        }
+        None => Ok(OverlayLive::default()),
+    }
 }
 
 fn current_render_state(state: &EditorState) -> Result<RenderState, String> {
@@ -1850,10 +1976,14 @@ struct SessionParams {
     nr_method: NrMethod,
     params: DevelopParams,
     curves: CurveSet,
+    /// 默认层之外的编辑区层（`None` = 只有默认层）。
+    areas: Option<Arc<raybend::develop::LayerStack>>,
+    /// 控制点容差 → 权重的映射（开发期调试面板可覆盖；默认 = 固化常量）。
+    weight: raybend::develop::PointWeightConfig,
     /// 已解析的镜头校正（配置文件那一半；`None` = 不用配置文件）。
     /// **手动微调不在这里** —— 它每次从 `params` 里合并（那样拖动才是实时的）。
     lens: Option<raybend::develop::lens::LensCorrection>,
-    lut: Option<Arc<raybend::develop::lut::Lut>>,
+    lut: Option<Arc<raybend::develop::lut::LutChain>>,
     interactive: bool,
     geometry: Option<EditGeometry>,
     tool: Option<ToolDraft>,
@@ -1908,6 +2038,8 @@ impl Default for SessionParams {
             nr_method: NrMethod::Fast,
             params: DevelopParams::new(None),
             curves: CurveSet::identity(),
+            areas: None,
+            weight: raybend::develop::PointWeightConfig::default(),
             lens: None,
             lut: None,
             interactive: false,
@@ -2271,6 +2403,8 @@ fn apply_command(
                         lens: session.lens.clone(),
                         lut: session.lut.clone(),
                         curves: session.curves.clone(),
+                        areas: session.areas.clone(),
+                        weight: session.weight,
                         geometry: if session.tool.is_some() {
                             None
                         } else {
@@ -2340,6 +2474,8 @@ fn apply_command(
             nr_method,
             params,
             curves,
+            areas,
+            weight,
             interactive,
             lens,
             lut,
@@ -2351,6 +2487,8 @@ fn apply_command(
             session.nr_method = nr_method;
             session.params = params;
             session.curves = curves;
+            session.areas = areas;
+            session.weight = weight;
             session.lens = lens.map(|boxed| *boxed);
             session.lut = lut;
             session.interactive = interactive;
@@ -2379,6 +2517,8 @@ fn apply_command(
                     lens: session.lens.clone(),
                     lut: session.lut.clone(),
                     curves: session.curves.clone(),
+                    areas: session.areas.clone(),
+                    weight: session.weight,
                     geometry: if session.tool.is_some() {
                         None
                     } else {
@@ -2418,6 +2558,8 @@ fn apply_command(
                 lens: session.lens.clone(),
                 lut: session.lut.clone(),
                 curves: session.curves.clone(),
+                areas: session.areas.clone(),
+                weight: session.weight,
                 geometry: if session.tool.is_some() {
                     None
                 } else {
@@ -2950,6 +3092,8 @@ fn queue_geometry_job(
         lens: session.lens.clone(),
         lut: session.lut.clone(),
         curves: session.curves.clone(),
+        areas: session.areas.clone(),
+        weight: session.weight,
         geometry: if session.tool.is_some() {
             None
         } else {
@@ -2992,6 +3136,12 @@ fn publish(state: &mut RenderState, context: &GpuContext, session: &SessionParam
     }
     // 覆盖层矩阵：每次发布都算一遍（它只依赖视口状态，很便宜）
     state.overlay_transform = viewport.css_overlay_transform();
+    state.overlay_scale = if viewport.dpr > 0.0 {
+        viewport.zoom / viewport.dpr
+    } else {
+        viewport.zoom
+    };
+    state.overlay_rotation = viewport.rotation;
     state.comparing = context.compare_fraction().is_some();
     state.compare_line_css = context
         .compare_fraction()
@@ -3479,6 +3629,8 @@ fn run_develop_job(
         local_tone: local,
         sharpen: Some(&plans.sharpen),
         lut: job.lut.as_deref(),
+        areas: job.areas.as_deref(),
+        weight: job.weight,
     };
     let started = std::time::Instant::now();
     let input = high_image.as_deref().unwrap_or(source);
@@ -3747,6 +3899,78 @@ mod tests {
 
     use super::*;
 
+    /*
+     * **控制点的局部性**：前端载荷（camelCase 的 `DevelopParamsDto` JSON）
+     * → `into_parts` → 层链 → 像素。这是「选中控制点改参数只改匹配的那部分画面」
+     * 的端到端钉板：DTO 形状、层栈解析、掩膜求值三段任一段坏掉它都会红。
+     */
+    #[test]
+    fn point_area_params_only_change_pixels_that_match_the_seed() {
+        // 8×4：左半暗、右半亮（线性灰度）
+        let mut rgb = Vec::new();
+        for _y in 0..4 {
+            for x in 0..8 {
+                let linear = if x < 4 { 0.05f32 } else { 0.6 };
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                let value = (linear * 65535.0 + 0.5) as u16;
+                rgb.extend([value, value, value]);
+            }
+        }
+        let source = raybend::develop::LinearImage::new(8, 4, rgb).expect("形状对得上");
+        let seed = raybend::develop::feature_vector([0.6, 0.6, 0.6]);
+        let payload = serde_json::json!({
+            "values": {},
+            "curves": {},
+            "asShotTemperature": null,
+            "areas": [{
+                "type": "point",
+                "id": 1,
+                "name": "",
+                "enabled": true,
+                "opacity": 1.0,
+                "color": 0,
+                "x": 0.8,
+                "y": 0.5,
+                "seed": [seed[0], seed[1], seed[2]],
+                "tolerance": 300.0,
+                "seedVersion": 1,
+                "params": { "exposure": 1.0 },
+                "curves": {}
+            }],
+            "defaultIndex": 0
+        });
+        let dto: DevelopParamsDto = serde_json::from_value(payload).expect("载荷形状合法");
+        let (params, curves, areas, _weight) = dto.into_parts().expect("层栈可解析");
+        assert!(areas.is_some(), "有额外层时必须建出层栈");
+        let stages = raybend::develop::DevelopStages {
+            areas: areas.as_deref(),
+            ..Default::default()
+        };
+        let plain = raybend::develop::pipeline::render_develop16(
+            &source,
+            &raybend::develop::DevelopParams::new(None),
+            &raybend::develop::CurveSet::identity(),
+            &raybend::develop::DevelopStages::default(),
+        );
+        let layered =
+            raybend::develop::pipeline::render_develop16(&source, &params, &curves, &stages);
+        assert_eq!(plain.len(), layered.len());
+        for (index, (before, after)) in plain.iter().zip(&layered).enumerate() {
+            let x = (index / 3) % 8;
+            if x < 4 {
+                assert_eq!(
+                    before, after,
+                    "种子之外的像素（第 {index} 个通道）不能变：控制点不是全图调整"
+                );
+            } else {
+                assert_ne!(
+                    before, after,
+                    "种子所在的像素（第 {index} 个通道）必须被改到"
+                );
+            }
+        }
+    }
+
     #[test]
     fn tool_open_intent_carries_initial_ratio_with_camel_case_fields() {
         let intent: ViewportIntent =
@@ -3895,6 +4119,8 @@ mod tests {
             curves: CurveSet::default(),
             lens: None,
             lut: None,
+            areas: None,
+            weight: raybend::develop::PointWeightConfig::default(),
             geometry: None,
             prefer_sooc: true,
             transition: None,

@@ -311,13 +311,7 @@ fn ensure_snapshots<R: Runtime>(
             issue.stack.lens_profile.as_deref(),
             issue.stack.lens_enabled,
         );
-        let lut = issue
-            .stack
-            .lut_id
-            .as_deref()
-            .filter(|_| issue.stack.lut_enabled == Some(true))
-            .map(|id| crate::lut::resolve(app, id))
-            .transpose()?;
+        let lut = crate::lut::resolve_stack_chain(app, &issue.stack).chain;
         let rendered = render::render_file_with_profiles(
             &source,
             SizeClass::Screen,
