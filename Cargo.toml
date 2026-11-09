@@ -5,7 +5,7 @@ members = ["src-tauri", "crates/raybend", "crates/raybend-crashpad"]
 [workspace.package]
 version = "0.1.4"
 edition = "2024"
-rust-version = "1.98"
+rust-version = "1.99"
 license = "AGPL-3.0-only"
 authors = ["raybend contributors"]
 repository = "https://github.com/C-Thun/raybend"

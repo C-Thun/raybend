@@ -45,7 +45,7 @@ tauri = { version = "2", features = [] }
 raybend.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-tauri-plugin-dialog = "2.7.3"
+tauri-plugin-dialog = "2.8.4"
 image.workspace = true
 tauri-plugin-updater = "2"
 # 单实例保护：产品版禁止启动第二个（第二个实例退出并聚焦已有窗口）。
@@ -57,7 +57,8 @@ tauri-plugin-single-instance = "2"
 reqwest = { version = "0.13", default-features = false, features = ["stream", "rustls-no-provider", "system-proxy"] }
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 # 校验与官方插件同一套语义：base64 解码后 minisign 验签 + 签名内含版本号比对。
-minisign-verify = "0.2"
+# 0.3 与 tauri-plugin-updater 2.14 内部用的是同一大版；仍写 0.2 会与它内部那份并存成两份实现。
+minisign-verify = "0.3"
 base64 = "0.22"
 semver = "1"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
@@ -69,10 +70,12 @@ log.workspace = true
 crash-handler = "0.8"
 minidumper = "0.11"
 
-# 与当前 Tauri 2.11 的 WebView2 COM 类型一致；依赖已在锁文件里，无额外 DLL。
+# 与当前 Tauri 2.12 的 WebView2 COM 类型一致（tauri 2.12 起用 webview2-com 0.39 + windows 0.62）；
+# 依赖已在锁文件里，无额外 DLL。❗这两个 pin 必须跟着 tauri 版本一起改 ——
+# 改慢了会同时存在两份 webview2-com，COM 接口类型对不上，编译/运行期直接失败。
 [target.'cfg(windows)'.dependencies]
-webview2-com = "=0.38.2"
-windows-core = "=0.61.2"
+webview2-com = "=0.39.1"
+windows-core = "=0.62.2"
 windows-sys = { workspace = true, features = ["Win32_Globalization", "Win32_Devices_Display", "Win32_Graphics_Gdi", "Win32_UI_ColorSystem", "Win32_UI_WindowsAndMessaging", "Win32_System_LibraryLoader", "Win32_System_Threading"] }
 
 [dev-dependencies]

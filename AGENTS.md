@@ -171,18 +171,19 @@ raybend（中文名**「光伴」**，产品名 `RayBend`）是一个**相片管
 
 | 层 | 选型 | 当前版本 | 备注 |
 | --- | --- | --- | --- |
-| 外壳 | Tauri | `@tauri-apps/cli` 2.11.4（3.0 alpha） | 分层为 3.0 迁移做准备（`memory/ARCHITECTURE.md` §6.2） |
+| 外壳 | Tauri | `@tauri-apps/cli` 2.12.4（3.0 alpha） | 分层为 3.0 迁移做准备（`memory/ARCHITECTURE.md` §6.2） |
 | 构建 | Vite | 8.x | |
-| UI | Solid | **1.9.x**；`@solidjs/router` 1.0.0 | Solid 2 仍 RC，迁移登记 `memory/FUTURE.md` |
-| 样式 | Tailwind CSS | 4.3.3 | CSS-first + CSS 变量令牌层 |
-| 组件原语 | Ark UI | 5.39.x | 选型对比 `memory/ARCHITECTURE.md` §7.6 |
-| 图标 | Tabler | 3.46.0 | 选型对比 `memory/ARCHITECTURE.md` §7.7 |
+| UI | Solid | **1.9.x**；`@solidjs/router` 1.0.1 | Solid 2 仍 RC，迁移登记 `memory/FUTURE.md` |
+| 样式 | Tailwind CSS | 4.3.5 | CSS-first + CSS 变量令牌层 |
+| 组件原语 | Ark UI | 5.40.x | 选型对比 `memory/ARCHITECTURE.md` §7.6 |
+| 图标 | Tabler | 3.51.0 | 选型对比 `memory/ARCHITECTURE.md` §7.7 |
 | RAW 解码 | rawler 0.8.0（LGPL-2.1-only） | 上游 dnglab | 可插拔后端（`memory/ARCHITECTURE.md` §6.3） |
 | 渲染 | wgpu + WGSL | 需锁定版本 | RapidRAW 曾降到 29.0 规避 Apple P3 色偏 |
 | DB | SQLite（rusqlite + 迁移框架） | — | `memory/ARCHITECTURE.md` §6.4 |
 | 色彩 | lcms2（预留，后期接入） | — | 第一阶段不做色彩管理 |
 | 类型桥 | specta / tauri-specta | — | Rust 类型 → TS 类型 |
-| Rust 工具链 | **1.98.1**（`rust-toolchain.toml` 锁定） | | 不改全局默认 |
+| Rust 工具链 | **1.99.1**（`rust-toolchain.toml` 锁定） | | 不改全局默认 |
+| TypeScript | 7.0.x（原生编译器，`tsc --noEmit` ≈0.7 s） | — | 7.0 **不带 compiler API**，别引入 `import "typescript"` 的工具 |
 
 ---
 

@@ -233,18 +233,19 @@ app.db 继续经既有迁移框架创建，设备主题/语言不复制进数据
 
 | 层 | 选型 | 当前版本 | 备注 |
 | --- | --- | --- | --- |
-| 外壳 | Tauri | `@tauri-apps/cli` 2.11.4（3.0 处于 alpha） | 分层为 3.0 迁移做准备，见 §6.2 |
+| 外壳 | Tauri | `@tauri-apps/cli` 2.12.4（3.0 处于 alpha） | 分层为 3.0 迁移做准备，见 §6.2 |
 | 构建 | Vite | 8.x | RapidRAW 亦用 Vite 8 |
-| UI | Solid | **1.9.x（选定）**；`@solidjs/router` 1.0.0 | Solid 2.0 仍是 RC（2.0.0-rc.8），迁移登记 `memory/FUTURE.md` |
-| 样式 | Tailwind CSS | 4.3.3 | CSS-first 配置 + CSS 变量令牌层 |
-| 组件原语 | **Ark UI**（`@ark-ui/solid`） | 5.39.x | 已定；实测对比见 §7.6 |
-| 图标 | **Tabler**（`@tabler/icons-solidjs`） | 3.46.0 | 已定；实测对比见 §7.7 |
+| UI | Solid | **1.9.x（选定）**；`@solidjs/router` 1.0.1 | Solid 2.0 仍 RC（2.0.0-rc.21），迁移登记 `memory/FUTURE.md` |
+| 样式 | Tailwind CSS | 4.3.5 | CSS-first 配置 + CSS 变量令牌层 |
+| 组件原语 | **Ark UI**（`@ark-ui/solid`） | 5.40.x | 已定；实测对比见 §7.6 |
+| 图标 | **Tabler**（`@tabler/icons-solidjs`） | 3.51.0 | 已定；实测对比见 §7.7 |
 | RAW 解码 | rawler 0.8.0（LGPL-2.1-only） | 上游 dnglab | 可插拔后端，候选见 `memory/FUTURE.md` |
 | 渲染 | wgpu + WGSL | 需锁定版本 | **版本锁定有前例教训**：RapidRAW 将 wgpu 降到 29.0 以规避 Apple 设备 P3 色偏 |
 | DB | SQLite（rusqlite + 迁移工具） | — | 见 §6.4 存储架构 |
 | 色彩 | lcms2（预留，后期接入） | — | 第一阶段不做色彩管理 |
 | 类型桥 | specta / tauri-specta | — | Rust 类型 → TS 类型，避免手写漂移 |
-| Rust 工具链 | **1.98.1**（`rust-toolchain.toml` 锁定，不改全局默认） | rawler 要 1.89，Tauri 3 要 1.95 | 全局默认仍是用户自己的版本，仓库内自动切换 |
+| Rust 工具链 | **1.99.1**（`rust-toolchain.toml` 锁定，不改全局默认） | rawler 要 1.89，Tauri 3 要 1.95 | 全局默认仍是用户自己的版本，仓库内自动切换 |
+| TypeScript | **7.0.x**（原生 Go 编译器，`tsc --noEmit` ≈0.7 s） | solid-js 2 的 rc 也要求 node ≥22 | 7.0 **不带 compiler API**（7.1 才计划），禁止引入依赖 `typescript` 库的工具 |
 
 ---
 
