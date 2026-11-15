@@ -15,18 +15,18 @@
 
 | 层 | 选型 | 实测版本 |
 | --- | --- | --- |
-| 元框架 | **SolidStart 2.0** —— 「turnkey 静态客户端」形态：`@solidjs/vite-plugin` 开 `start: true` + `filesystem-routing` 文件式路由；**未安装** `@solidjs/start` 单体包 | vite-plugin `3.0.0-next.38`、filesystem-routing `0.2.1` |
-| UI 框架 | **SolidJS 2.0**（`solid-js` / `@solidjs/web`）—— 2.0 线，当前为 RC | `2.0.0-rc.6` |
-| 路由 | `@solidjs/router`（约定式路由，页面在 `src/routes/`） | `2.0.0-next.21` |
+| 元框架 | **SolidStart 2.0** —— 「turnkey 静态客户端」形态：`@solidjs/vite-plugin` 开 `start: true` + `filesystem-routing` 文件式路由；**未安装** `@solidjs/start` 单体包 | vite-plugin `3.0.0-next.57`、filesystem-routing `0.5.0` |
+| UI 框架 | **SolidJS 2.0**（`solid-js` / `@solidjs/web`）—— 2.0 线，当前为 RC | `2.0.0-rc.21` |
+| 路由 | `@solidjs/router`（约定式路由，页面在 `src/routes/`） | `2.0.0-next.44` |
 | head 标签 | `@solidjs/meta`（运行时覆盖静态 head） | `1.0.0-next.2` |
-| 样式 | **Tailwind CSS v4**（`@tailwindcss/vite`）。CSS-first：**没有** `tailwind.config.js`，令牌写在 `src/App.css` 的 `@theme` 里 | `4.3.3` |
-| 图标 | **Lucide** —— 只取图标数据，生成本站自己的组件（见 §5.5） | `lucide-solid` `1.46.0`（**仅开发期**） |
-| 字体 | **Inter + Noto Sans SC**，`@fontsource-variable` 自托管（无外链） | 各 `5.3.0` |
-| 构建 | Vite 8 | `8.2.2` |
-| 语言 | TypeScript（`strict`、`allowImportingTsExtensions`） | `5.9.3` |
-| 测试 | Vitest 5 + jsdom（`vitest-setup.ts`；`@solidjs/testing-library` 用来写组件测试） | `5.0.0` |
-| Lint | oxlint + `eslint-plugin-solid` 的 **v2 规则集**（见 `oxlint.config.ts`） | oxlint `1.79.0` / plugin `0.18.0` |
-| 反应式诊断 | `@solidjs/diagnostics`（dev 专用，构建时 no-op） | `2.0.0-rc.6` |
+| 样式 | **Tailwind CSS v4**（`@tailwindcss/vite`）。CSS-first：**没有** `tailwind.config.js`，令牌写在 `src/App.css` 的 `@theme` 里 | `4.3.5` |
+| 图标 | **Lucide** —— 只取图标数据，生成本站自己的组件（见 §5.5） | `lucide-solid` `1.73.0`（**仅开发期**） |
+| 字体 | **Inter + Noto Sans SC**，`@fontsource-variable` 自托管（无外链） | Inter `5.3.0` / Noto Sans SC `5.3.1` |
+| 构建 | Vite 8 | `8.3.8` |
+| 语言 | TypeScript（`strict`、`allowImportingTsExtensions`；**7.x 原生 Go 编译器**，`tsc --noEmit` ≈0.25 s，不带 compiler API） | `7.0.2` |
+| 测试 | Vitest 5 + jsdom（`vitest-setup.ts`；`@solidjs/testing-library` `1.0.0-rc.2` 用来写组件测试） | vitest `5.1.0` / jsdom `31.0.1` |
+| Lint | oxlint + `eslint-plugin-solid` 的 **v2 规则集**（见 `oxlint.config.ts`） | oxlint `1.93.0` / plugin `0.19.0` |
+| 反应式诊断 | `@solidjs/diagnostics`（dev 专用，构建时 no-op） | `2.0.0-rc.21` |
 | 运行环境 | Node ≥ 22.12（`@solidjs/vite-plugin` 的 engines 要求）；本机实测 Node `v26.5.0` + pnpm `12.3.4`；CI 用 Node 24 | — |
 
 **站点形态**：纯静态。`pnpm build` 预渲染文档外壳到 `dist/client/index.html`，页面内容在浏览器端渲染
@@ -80,6 +80,7 @@ pnpm serve           # 本地预览构建产物
 pnpm typecheck       # tsc --noEmit
 pnpm test            # Vitest（watch）
 pnpm test:run        # Vitest（跑一次，CI 用）
+pnpm smoke:ui        # 浏览器冒烟（需另一终端 pnpm serve；可传 URL，需本机 Chrome）
 pnpm lint            # oxlint src
 pnpm icons:generate  # 重新生成 src/components/icons.tsx
 pnpm marks:generate  # 重新描摹品牌书法字 → src/components/mark-paths.ts
@@ -157,7 +158,7 @@ fill=var(--color-brand) + stroke=var(--color-white) + paint-order="stroke"
 
 `lucide-solid` 1.x 的组件从 `solid-js` import `splitProps`，**Solid 2 已经没有这个 API**（连 `mergeProps`
 都搬去了 `@solidjs/web`），直接用会在浏览器里报 `does not provide an export named 'splitProps'`；
-官方也还没有支持 Solid 2 的版本（最新 `1.46.0` 的 peer 仍是 `solid-js: ^1.4.7`）。
+官方也还没有支持 Solid 2 的版本（最新 `1.73.0` 的 peer 仍是 `solid-js: ^1.4.7`；`pnpm peers check` 会因此常驻一条 unmet peer，**属预期**）。
 
 所以 `scripts/generate-icons.mjs` **只取 Lucide 的图标数据**（ISC 许可），生成本站自己的
 `src/components/icons.tsx`（Solid 2 友好、产物里只留用到的十几个图标）。加图标：改脚本里的

@@ -5,7 +5,7 @@
  * **为什么不用 `lucide-solid` 的组件**：它的 1.x 组件是从 `solid-js` 里 import
  * `splitProps` 的，而 Solid 2 已经删掉了这个 API（连 `mergeProps` 也搬去了 `@solidjs/web`），
  * 直接用它会在浏览器里报「does not provide an export named 'splitProps'」。
- * 官方也还没有支持 Solid 2 的版本（最新 1.46.0 的 peer 仍是 `solid-js: ^1.4.7`）。
+ * 官方也还没有支持 Solid 2 的版本（最新 1.73.0 的 peer 仍是 `solid-js: ^1.4.7`）。
  *
  * 所以这里只**取它的图标数据**（Lucide 图标本体是 ISC 许可，允许这样用），
  * 生成一份本站自己的、Solid 2 友好的组件 —— 顺带让产物里只留下用到的十几个图标，

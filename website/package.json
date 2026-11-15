@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest",
     "test:run": "vitest run",
+    "smoke:ui": "node scripts/smoke-ui.mjs",
     "icons:generate": "node scripts/generate-icons.mjs",
     "marks:generate": "node scripts/generate-marks.mjs",
     "lint": "oxlint src"
@@ -20,28 +21,28 @@
   "license": "AGPL-3.0-only",
   "dependencies": {
     "@fontsource-variable/inter": "^5.3.0",
-    "@fontsource-variable/noto-sans-sc": "^5.3.0",
+    "@fontsource-variable/noto-sans-sc": "^5.3.1",
     "@solidjs/meta": "^1.0.0-next.2",
-    "@solidjs/router": "^2.0.0-next.21",
-    "@solidjs/web": "^2.0.0-rc.6",
-    "solid-js": "^2.0.0-rc.6"
+    "@solidjs/router": "^2.0.0-next.44",
+    "@solidjs/web": "^2.0.0-rc.21",
+    "solid-js": "^2.0.0-rc.21"
   },
   "devDependencies": {
-    "@solidjs/diagnostics": "^2.0.0-rc.6",
-    "@solidjs/testing-library": "^1.0.0-beta.3",
-    "@solidjs/vite-plugin": "^3.0.0-next.38",
-    "@tailwindcss/vite": "^4.1.13",
+    "@solidjs/diagnostics": "^2.0.0-rc.21",
+    "@solidjs/testing-library": "^1.0.0-rc.2",
+    "@solidjs/vite-plugin": "^3.0.0-next.57",
+    "@tailwindcss/vite": "^4.3.5",
     "@testing-library/jest-dom": "^7.0.0",
-    "@types/node": "^26.5.1",
-    "eslint-plugin-solid": "~0.18.0",
-    "filesystem-routing": "0.2.1",
-    "jsdom": "^25.0.1",
-    "lucide-solid": "^1.46.0",
-    "oxlint": "~1.79.0",
+    "@types/node": "^26.6.6",
+    "eslint-plugin-solid": "~0.19.0",
+    "filesystem-routing": "0.5.0",
+    "jsdom": "^31.0.1",
+    "lucide-solid": "^1.73.0",
+    "oxlint": "~1.93.0",
     "potrace": "^2.1.8",
-    "tailwindcss": "^4.1.13",
-    "typescript": "^5.9.2",
-    "vite": "^8.1.5",
-    "vitest": "^5.0.0"
+    "tailwindcss": "^4.3.5",
+    "typescript": "~7.0.2",
+    "vite": "^8.3.8",
+    "vitest": "^5.1.0"
   }
 }
