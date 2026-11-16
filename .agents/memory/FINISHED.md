@@ -60,13 +60,13 @@
 | 产出 | 内容 | 状态 |
 | --- | --- | --- |
 | `.agents/memory/DESIGN.md` | 令牌体系、四级面、双档密度、组件化策略、i18n、通用交互范式 | ✅ 已定（活文档持续演进） |
-| `design/main.pen` + `.md` | 外壳、基础组件、导入工作区 | ✅ 已落地并用于 M1 |
-| `design/browse.pen` + `.md` | 浏览 / 看图 / 对比 / 标签 / 命令面板 / 菜单 / 快捷键 / 外部编辑弹窗 | ✅ 用于 M2；2026-09-20/21 反向同步；外部编辑弹窗并入（M4-W6） |
-| `design/editor.pen` + `.md` | 编辑工作区：视口、调整面板、裁剪、对比、LUT、issue | ✅ 主稿 + 8 帧已落（2026-09-23 定案）；后续微调持续进稿 |
-| `design/export.pen` + `.md` | 导出工作区：画廊选定稿、预设、队列 | ✅ 2026-09-27 按连续验收定案同步保存 |
+| `design/main.ptr` + `.md` | 外壳、基础组件、导入工作区 | ✅ 已落地并用于 M1 |
+| `design/browse.ptr` + `.md` | 浏览 / 看图 / 对比 / 标签 / 命令面板 / 菜单 / 快捷键 / 外部编辑弹窗 | ✅ 用于 M2；2026-09-20/21 反向同步；外部编辑弹窗并入（M4-W6） |
+| `design/editor.ptr` + `.md` | 编辑工作区：视口、调整面板、裁剪、对比、LUT、issue | ✅ 主稿 + 8 帧已落（2026-09-23 定案）；后续微调持续进稿 |
+| `design/export.ptr` + `.md` | 导出工作区：画廊选定稿、预设、队列 | ✅ 2026-09-27 按连续验收定案同步保存 |
 
 **硬规矩**（`AGENTS.md` §5.1 / `specs/PLAN.md` §0）：任何模块涉及未设计或未定案的界面，
-必须先过「界面设计环节」（Pencil 落稿 → 人类定案）才写界面代码。
+必须先过「界面设计环节」（paintress 落稿 → 人类定案）才写界面代码。
 
 ---
 
@@ -121,7 +121,7 @@ issue / SOOC 从概念变可用能力。
 
 | 波次 | 交付 |
 | --- | --- |
-| W0 编辑工作区界面设计 ✅ 2026-09-23 | `design/editor.pen`（10 帧）+ 同名 `.md`；连带定案 `.agents/memory/DESIGN.md` §14.8–14.10、toolsbar 三段式术语、「取消在左 / 确认在右」 |
+| W0 编辑工作区界面设计 ✅ 2026-09-23 | `design/editor.ptr`（10 帧）+ 同名 `.md`；连带定案 `.agents/memory/DESIGN.md` §14.8–14.10、toolsbar 三段式术语、「取消在左 / 确认在右」 |
 | W1 骨架与洞口契约 | ToolsBar 三段式、Tab 三档、左 LUT 面板、右三组页签、视口洞口契约（DOM 只上报原始事实）、空态四态、命令接入 |
 | W2 GPU 编辑视口产品化 ✅ 2026-09-23 | 透明 WebView + 原生 wgpu；Windows 默认 DX12 + DirectComposition visual + Opaque；渲染线程捕获 panic + 重启；跨屏/DPR 用带 revision 的整包布局事务；真实照片进纹理 |
 | W3 编辑栈与常规调整管线 | issue 落库（走迁移框架）、scene-referred 显影管线（曝光/反差/色温/曲线…）、拖动实时预览、编辑后缩略图失效语义；XMP 契约 `specs/issue-xmp-contract.md` |
@@ -146,7 +146,7 @@ issue / SOOC 从概念变可用能力。
 
 | 波次 | 交付 |
 | --- | --- |
-| W0 设计与口径确认 | `design/export.pen` 六帧核对；行为口径表定案（见下）；外壳/右列尺寸校正（36/48/36、276/288） |
+| W0 设计与口径确认 | `design/export.ptr` 六帧核对；行为口径表定案（见下）；外壳/右列尺寸校正（36/48/36、276/288） |
 | W1 库与磁盘实时一致性 | 范围契约（进/展开/重读只扫相关目录）；完整扫描/权限失败/离线区分，不误标缺失；同卷移动/改名保 asset 与 issue；变更统一刷新 FTS/缓存/计数；notify 8.2.0 有界监听攒批 |
 | W2 导出工作区、issue 画廊与预设 | 真实三列导出工作区（左列复用 browse、双 tiles 各带 statusbar、偏好独立持久化）；**唯一 PhotoGrid/行模型/Tile 上**做 issue 扩展；预设校验与版本化设备设置；**手势反转正式化**（`.agents/memory/FUNCTION-BROWSE.md` §5.2.4） |
 | W3 统一全尺寸出图与 16-bit TIFF | 共享「解码 → profile → 成片几何 → 缩放」入口；浮点/16 位保持到编码；TIFF = RGB16 无损成片；profile/源按入队快照执行 |
@@ -457,7 +457,7 @@ Tabler 是唯一同时满足「数量大 + 描边/填充成对 + MIT + 有 Solid
 
 ### M4-W3　导出工作区、批量队列与试用收口
 
-- **开工前置**：`design/export.pen` + `.md`（画廊选 issue、预设、队列与错误清单——未设计，先过界面设计环节）
+- **开工前置**：`design/export.ptr` + `.md`（画廊选 issue、预设、队列与错误清单——未设计，先过界面设计环节）
 - 导出工作区（画廊式选择导出哪些 issue，`.agents/memory/FUTURE.md`「issue 与 SOOC」的原始设想）；
   批量队列可停止、继续、移除、失败重试，失败信息在条目显示，失效自动移除；无独立摘要或错误清单
 - 导出历史可从资产/issue 追溯；文件同名、目标不可写、磁盘写满、源文件途中离线等失败不打断整批
@@ -469,7 +469,7 @@ Tabler 是唯一同时满足「数量大 + 描边/填充成对 + MIT + 有 Solid
 **结束时可看到**：浏览/编辑里能把当前 issue「在外部编辑器中打开」—— 渲染成 16-bit TIFF
 存到用户指定位置并唤起外部编辑器；**单向，不取回**（取回链路跑不顺，见 `.agents/memory/FUTURE.md`「Gallery / 外部编辑器」）。
 
-- **开工前置**：弹窗界面先过设计环节（`design/external-editor.pen` 或并入 `export.pen`，开工时定）；
+- **开工前置**：弹窗界面先过设计环节（`design/external-editor.pen` 或并入 `export.ptr`，开工时定）；
 - **弹窗**：应用选择（默认选中上次用的；**支持登记多个应用**）+ 导出路径（记忆上次目录）+
   取消/确定（取消在左，§11.5）；**无已登记应用时确定置灰**；
 - **弹窗内「+ 应用」**：常驻应用选择最右侧，点击触发**应用发现**，发现结果给用户勾选加入；可反复发现；
@@ -545,6 +545,6 @@ Rust 1517 项、前端 1289 项测试与全部静态门通过。实测（Windows
 
 另修 `release-run.test.mjs` 的非 hermetic 失败（私钥转换只在 `--with-updater` 时执行；测试显式注入 `env: {}`；新增 unsigned 无 updater 不调 `wslpath` 回归）。
 
-画稿同步：`design/browse.pen` 标签弹窗加计数行并新增「满额」态、新增 `Components / 标签筛选菜单`（搜索框 + 已选置顶）；`design/main.pen` 库设置在超 15 万张时加「建议开新库」提示；`design/browse.md` / `design/main.md` 同步，预览在 `design/exports/tag-5000/`。**`.pen` 的磁盘保存由崔总执行。**
+画稿同步：`design/browse.ptr` 标签弹窗加计数行并新增「满额」态、新增 `Components / 标签筛选菜单`（搜索框 + 已选置顶）；`design/main.ptr` 库设置在超 15 万张时加「建议开新库」提示；`design/browse.md` / `design/main.md` 同步，预览在 `design/exports/tag-5000/`。**`.pen` 的磁盘保存由崔总执行。**
 
 验证：`cargo test --workspace` 1756 passed / 13 ignored；`pnpm typecheck && pnpm test` 1324 passed；三 lint 与 `pnpm build` 通过；`pnpm test:release` 104 passed。真机 E2E（15 万库、5000 标签、q80 画质、缓存占用/清理）仍归崔总。证据：`.agents/implementations/2026-10-25_thumbnail-cache-per-library-and-tag-cap.md`；规格：`specs/thumbnail-cache-per-library.md`。

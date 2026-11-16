@@ -77,8 +77,8 @@ positioner: z-index: calc(var(--z-modal) + (var(--dialog-layer, 1) - 1) * 2) !im
 
 ### 3.5 设计稿
 
-- `design/main.pen`：28 个弹窗帧（14 个 `Dialog /` + 6 个 `Global Settings /` + 8 个库设置/导入进度的状态变体）加 `$brand-2` / 0.5px / inner 描边。
-- `browse.pen` / `editor.pen` / `export.pen` 的弹窗帧 2026-10-31 已一并同步。
+- `design/main.ptr`：28 个弹窗帧（14 个 `Dialog /` + 6 个 `Global Settings /` + 8 个库设置/导入进度的状态变体）加 `$brand-2` / 0.5px / inner 描边。
+- `browse.ptr` / `editor.ptr` / `export.ptr` 的弹窗帧 2026-10-31 已一并同步。
 
 ## 4. 验收清单
 

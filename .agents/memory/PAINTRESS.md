@@ -4,9 +4,9 @@
 > 本文件是 paintress 的操作手册：工具与 CLI 对照、节点 schema 速查、视觉自检、人机协作与纪律。
 > 设计稿**内容**记在 `design/*.md`；视觉规则见 `.agents/memory/DESIGN.md`；设计纪律见 `AGENTS.md` §5.1。
 >
-> 依据：2026-11-12 在 `design/main.pen` / `browse.pen` / `editor.pen` / `export.pen` 上实测（paintress 0.2.3）；
+> 依据：2026-11-12 在 `design/main.ptr` / `browse.ptr` / `editor.ptr` / `export.ptr` 上实测（paintress 0.2.3）；
 > 同日（21:11）升到 0.4.0（`new` / `info` / `validate` / `render` / `shot` / MCP `paintress_new` 全通），
-> 次日 03:59 再升到 **0.5.1**（`shot --board` 单画板截图实测：`main.pen` 的 `rJRpX` 截出 1600×1000，不再是整张 19360×4036 画布）。
+> 次日 03:59 再升到 **0.5.1**（`shot --board` 单画板截图实测：`main.ptr` 的 `rJRpX` 截出 1600×1000，不再是整张 19360×4036 画布）。
 
 ---
 
@@ -23,7 +23,8 @@
   用 `mcp({ server: "paintress" })` 看工具；`paintress doctor` 可核对各客户端登记状态。
 - 格式两种：`.pen`（pen flavor `2.21`，**schema 冻结**，**只作兼容**）与 `.ptr`（paintress 自有，**会演进，新建文件一律用它**）。
   扩展名决定 `doc_info` 报的 `flavor`；两种都能读能写（实测同一份内容存成 `.ptr` 照样 `validate` 通过、可继续 `insert`）。
-  仓里 4 份 `.pen` 全部 `validate` 通过（0 error / 0 warning），按兼容格式继续维护。
+  仓里 4 份主稿（`main` / `browse` / `editor` / `export`）已于 2026-11-15 用 `paintress_convert` 全部转成 `.ptr`，
+  `validate` 全绿；此后新增与维护一律 `.ptr`。
 - **写入直接落盘**：没有「保存」这一步，也没有编辑器 buffer。
 
 ### 1.1 Pencil 时代的限制全部作废（别再按旧记忆干活）
@@ -105,9 +106,32 @@ MCP 工具名 = `paintress_<命令>`，参数与 CLI 同名；CLI 适合在 bash
 
 ## 5. 新建 / 拆分设计稿（现在 Agent 自己就能做）
 
-> **扩展名口径（2026-11-12 崔总定）**：**新建文件一律 `.ptr`**；`.pen` 只作兼容（既有四份继续维护，不主动迁移）。
+> **扩展名口径（2026-11-12 崔总定，2026-11-15 更新）**：**一律 `.ptr`** —— 新建如此，既有四份也已转换完毕，
+> `.pen` 只保留在 git 历史里（历史记录中的 `design/x.pen` 指的就是今天这些 `.ptr` 的旧文件名）。
 > 依据：上游 README 写明「`.pen`，以及它自己写出的 `.ptr`」「`.pen` 层冻结，`.ptr` 层演进」。
 > 注：**paintress 的 MCP server 不提供 instructions**（实测 “does not provide instructions”），格式口径只能从它的 README / `validate` 拿；不存在类似 Pencil 那种「服务端谎称文件加密」的信息。
+
+**`.pen` → `.ptr` 转换（只存在于 MCP，CLI 没有这个子命令）**：
+`paintress_convert(path, out?, overwrite?)` —— 源文件不动、目标默认同名换 `.ptr`、给新 `fileToken`、
+默认拒绝覆盖（`overwrite: true` 才写）。0.8.1 的 CLI 子命令表（`new/info/validate/audit/…`）里**没有** `convert`，
+所以批量迁移只能走 MCP（或逐份 `get` + `insert`，不划算）。
+注意：转换后 `fileToken` 变新，查看器里的旧书签 / 分享链接要重取；文件内容与 `flavor` 不变。
+
+转换后的验收做法（2026-11-15 迁移四份主稿时用的，脚本可复用）：
+
+```bash
+# 1) 语义等价：去掉 fileToken 与 x-paintress 块后，规范化 JSON 的 sha256 必须一致
+python3 - <<'EOF'
+import json, hashlib
+def canon(p):
+    d = json.load(open(p, encoding='utf-8'))
+    for k in ('fileToken', 'x-paintress'): d.pop(k, None)
+    return hashlib.sha256(json.dumps(d, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+print(canon('design/main.pen') == canon('design/main.ptr'))
+EOF
+# 2) 渲染等价：两份各截一张图，比像素差（应接近 0；字体回退抖动会有几十个像素）
+compare -metric AE /tmp/before.png /tmp/after.png null:
+```
 
 **新建（0.4.0 起走工具，不要手写）**：`paintress_new`（MCP）或 `paintress new`（CLI）写出一份合法 `.ptr` ——
 带 `x-paintress` 块、一个空 board，返回 `boardId`。不会覆盖既有文件（除非显式 `overwrite`），给不带扩展名的路径会自动补 `.ptr`。
@@ -121,7 +145,7 @@ paintress info design/<模块>-<视图>.ptr         # 核对顶层 board 与变�
 要**引用令牌**就在同一批改动里用 `paintress_update` 往文件写 `variables`；确实需要一次性铺好大结构时，
 仍可手写 JSON（**最小只要 `version` + `children`**、每个节点带唯一 `id`）——但先用 `new` 起步更省事。
 
-**拆分现有大稿**（`main.pen` 里塞了三套外壳，`design/main.md` §1.1 记的拆分方案）：
+**拆分现有大稿**（`main.ptr` 里塞了三套外壳，`design/main.md` §1.1 记的拆分方案）：
 用 `paintress_get` 取整块 board → `insert root` 进新文件（新文件用 `.ptr`）→ `validate`；
 或复制整个文件后 `delete` 掉不要的 board（保留 `variables` / `themes`，颜色引用才不会断）。
 
@@ -133,8 +157,8 @@ paintress info design/<模块>-<视图>.ptr         # 核对顶层 board 与变�
   命中多个会**报错并列出候选**（不猜），画板尺寸为 0 时报错。返回里带 `board: {id,name,x,y,width,height}`。
 
 ```bash
-paintress shot design/main.pen /tmp/one-board.png --board rJRpX --scale 1
-paintress shot design/main.pen /tmp/detail.png --board "Dialog / 关于 About" --scale 1
+paintress shot design/main.ptr /tmp/one-board.png --board rJRpX --scale 1
+paintress shot design/main.ptr /tmp/detail.png --board "Dialog / 关于 About" --scale 1
 ```
 
 - 老办法（0.5.0 以前没有 `board` 时的兜底，现在一般不需要）：把一块 board 抽成临时文件、`x`/`y` 归零，否则画布会按原绝对坐标留出大片空白：
@@ -142,7 +166,7 @@ paintress shot design/main.pen /tmp/detail.png --board "Dialog / 关于 About" -
 ```bash
 python3 - <<'PY'
 import json
-d = json.load(open('design/browse.pen'))
+d = json.load(open('design/browse.ptr'))
 board = next(n for n in d['children'] if n['id'] == 'o2OJy2')
 board = json.loads(json.dumps(board)); board['x'] = board['y'] = 0
 json.dump({k: d[k] for k in ('version','fileToken','themes','variables')} | {'children': [board]},
@@ -151,7 +175,7 @@ PY
 paintress shot /tmp/one-board.pen /tmp/one-board.png --scale 1
 ```
 
-- 已知数据问题：`main.pen` 的 `Dialog / 关于 About`（`FPU9M`）高度为 0（480×0），单画板截图会直接报错 —— 修稿时顺手补高度。
+- 已知数据问题：`main.ptr` 的 `Dialog / 关于 About`（`FPU9M`）高度为 0（480×0），单画板截图会直接报错 —— 修稿时顺手补高度。
 
 - 渲染告警要读：图标库只支持 `lucide` / `feather`，现有稿里 `Material Symbols Rounded` 的图标
   （browse 32 / editor 6 / export 12 / main 24 个）会渲染成**占位框**；新画的图标一律用 `lucide` 名。
@@ -178,7 +202,7 @@ paintress watch <项目名> <目录>          # 注册一个目录供浏览
 
 > ⚠️ `paintress watch <name> <dir>` 的**相对路径按 daemon 的 cwd 解析**（不是你的 shell cwd；本机 daemon 跑在 `/home/andares`）——
 > 用**绝对路径**最稳。本仓已被注册为项目 `c-thun-raybend`（`/home/andares/repos/c-thun/raybend`，depth 3），
-> 直接开 `http://localhost:3316/?project=c-thun-raybend&file=design/main.pen` 即可。
+> 直接开 `http://localhost:3316/?project=c-thun-raybend&file=design/main.ptr` 即可。
 
 ## 8. 纪律与坑
 

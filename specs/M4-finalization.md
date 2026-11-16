@@ -37,4 +37,4 @@
 - [x] 数字动效按真实新增数量计算，最多每秒 10 次，少量可短于 1 秒，其余约 1–3 秒、最长 3 秒；处理真实计数变动/重置与减少动态偏好。
 - [x] 核对 top / bottom Ctrl+A 统一命令与 Delete 仅移除未执行，补必要单测及自动化冒烟。
 
-本批代码与冒烟证据：`.agents/implementations/2026-09-27_m4-export-collision-and-drag.md`。Windows 主程序 03:33:55、worker 03:32:03 已核对；Pencil 编辑器已同步，本轮 export.pen 尚待保存落盘（磁盘仍为 00:46:36），不据此宣称设计文件已交付或真机验收完成。
+本批代码与冒烟证据：`.agents/implementations/2026-09-27_m4-export-collision-and-drag.md`。Windows 主程序 03:33:55、worker 03:32:03 已核对；Pencil 编辑器已同步，本轮 export.ptr 尚待保存落盘（磁盘仍为 00:46:36），不据此宣称设计文件已交付或真机验收完成。

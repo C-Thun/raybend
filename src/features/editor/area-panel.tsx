@@ -42,7 +42,7 @@ import type { EditorStore } from "./store.ts";
 import type { Area } from "../../api/editor.ts";
 
 /**
- * 控制点八色（`.agents/memory/DESIGN.md` §15.5；与 `design/editor.pen` 的 `point-0..7` 同名）。
+ * 控制点八色（`.agents/memory/DESIGN.md` §15.5；与 `design/editor.ptr` 的 `point-0..7` 同名）。
  *
  * 色值住在 `src/styles/tokens.css`（`--point-0..7`）—— 组件里只引用令牌
  * （`lint:colors` 的规矩）；层里存的是**槽位下标**，换色板不改任何已有数据。

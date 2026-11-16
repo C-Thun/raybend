@@ -228,7 +228,7 @@ cargo run -q -p raybend --example avif-probe                                    
 | issue 打「基于 sooc / 基于 raw」标签 + 点 issue 同步切换按钮 | `.agents/memory/FUTURE.md`「issue 与 SOOC」、`.agents/memory/FUNCTION-IMAGING.md` §4.3 | 等 issue 体系 |
 | 1:1 只算可见区域（视口裁切渲染） | `.agents/memory/FUTURE.md` §D1.5 | 架构级，别顺手做 |
 | develop 分期 + 节点缓存 | `.agents/memory/FUTURE.md` §D1.5 | 同上 |
-| `design/editor.pen` 补画：缩放控制 / 信息三组 / 编辑基准按钮 / 毛玻璃提示 | `design/editor.md` 已同步文字 | **需要人类把该文件在 VS Code 里打开**（Pencil 才连得上） |
+| `design/editor.ptr` 补画：缩放控制 / 信息三组 / 编辑基准按钮 / 毛玻璃提示 | `design/editor.md` 已同步文字 | **需要人类把该文件在 VS Code 里打开**（Pencil 才连得上） |
 | `.agents/memory/FUNCTION-REPOSITORY.md` §4.1「编辑落在 RAW 上」的措辞 | — | 现在多了用户可切的基准，下次顺手对齐 |
 
 ---
@@ -251,7 +251,7 @@ cargo run -q -p raybend --example avif-probe                                    
 
 ## 7. 需要人类配合的事
 
-1. **`design/editor.pen` 要在 VS Code 里打开**（Pencil 才连得上）—— 补画上表那四处。
+1. **`design/editor.ptr` 要在 VS Code 里打开**（Pencil 才连得上）—— 补画上表那四处。
 2. **真机 E2E**（我没法替您看）：
    * 总览下 **SOOC / RAW 按钮**的位置观感、切换后画面确实换底图重解、只有一侧文件时的禁用态；
    * 拖杆「偏软跟手、松手变锐」的体感；毛玻璃提示；退出编辑后 preview 立即可用；

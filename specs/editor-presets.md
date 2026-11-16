@@ -2,7 +2,7 @@
 
 > **工作单元**：editor 右栏第 3 组新增「预设」页签（面板 + 存储 + 应用）+ 第 1 组三页签等高。
 > **定案**：崔总 2026-09-30 审阅设计稿后「可以」；需求原文 `specs/editor-area-bugfix-handoff.md`；
-> 设计定案 `design/editor.md` §3.10 / §3.11，画稿 `design/editor.pen`
+> 设计定案 `design/editor.md` §3.10 / §3.11，画稿 `design/editor.ptr`
 > （`e4WYe` 面板本体 / `nxMA2` 浮层 / `WCT5O` 等高说明 / 主稿与三派生帧页签条）。
 > **纪律**：复用优先（§2.12）——结构照抄 LUT 面板、弹窗照抄 Dialog、删除照抄 EasyDestroy、
 > 提示照抄 Tooltip、拖拽复用 `lib/pointer-drag.ts`；不新造第二份。

@@ -284,15 +284,15 @@ pnpm build && pnpm check:export        # 需另一终端 pnpm dev；断言已按
 
 工具：**paintress**（`.agents/memory/PAINTRESS.md`），直接读写磁盘、无需打开编辑器。
 
-1. **export.pen（主战场）**
+1. **export.ptr（主战场）**
    - `SQH2c` `Components / Export / ToolsBar 三段式与三态`：mid 改为紧缩后的纯图标按钮 + 新增筛选组，
      保留 1600 常态 / 560 挤压态；增加一格**悬停气泡**示范（图标按钮 + `$surface-layer` 气泡）。
    - `HYI2F` `Shell / Export / Dark-Compact` 主稿：同步 toolsbar 与上部画廊（≤2 issue + 两按钮）；
      追加筛选开启态（chips 行 + 星/色点亮）。
    - 新增 `States / Export / 画廊小片与 RAW`：0 / 1 / 2 / 3+ 张 issue 四态 + RAW 禁用态 + 全部定稿弹窗（不含 RAW）。
    - 新增 `States / Export / 四列网格`：290 / 920 宽两种中列下的列数与最小档示意（说明「−20% 换来四列」）。
-2. **browse.pen**：主稿 `o2OJy2` 与 `States / 浏览标记与选择` 的工具条行去掉已精简的文字，补一处悬停气泡。
-3. **editor.pen**：`FPvEw` `Components / Editor / ToolsBar 三段式` + 主稿 `P1JiB` 同步去文字。
+2. **browse.ptr**：主稿 `o2OJy2` 与 `States / 浏览标记与选择` 的工具条行去掉已精简的文字，补一处悬停气泡。
+3. **editor.ptr**：`FPvEw` `Components / Editor / ToolsBar 三段式` + 主稿 `P1JiB` 同步去文字。
 4. **操作纪律**：一次只改一个文件；改前 `paintress_doc_info` 核对顶层 board，改后 `validate` + 截图，
    并在实施记录里写清帧名与节点 id；改前先备份（`cp … /tmp/….bak`）。
 5. 画稿定案后同步 `.md` 说明（`design/export.md` 等），再动代码（§5.1 设计先行）。

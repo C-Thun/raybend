@@ -2,7 +2,7 @@
 
 ## 目标
 
-按 `design/editor.pen` / `design/editor.md` 完成 LUT 与定稿。W6a/W6b 的未提交实现保留。用户 2026-09-26 补充：issue 不可变；切换纳入撤销/重做；每个 issue 保留独立 384、192、1920 AVIF。
+按 `design/editor.ptr` / `design/editor.md` 完成 LUT 与定稿。W6a/W6b 的未提交实现保留。用户 2026-09-26 补充：issue 不可变；切换纳入撤销/重做；每个 issue 保留独立 384、192、1920 AVIF。
 
 ## 实施顺序
 

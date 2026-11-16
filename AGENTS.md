@@ -49,7 +49,7 @@ raybend（中文名**「光伴」**，产品名 `RayBend`）是一个**相片管
 4. **前端不写图像算法**：像素、色彩空间、视口变换、渲染管线全部属于 Rust。前端只负责交互状态、矢量覆盖层与 UI。
 5. **不引入 SolidStart**（桌面应用无 SSR 需求；Start v2 面向 Solid v1，与 Solid 2 不配套）。
 6. **设计稿纪律（paintress）**：界面设计稿用 **paintress**（MCP 工具 / CLI）读写，存 `design/`，
-   每个稿配**同名 `.md`**；**新建文件一律 `.ptr`**（`.pen` 为兼容格式，现有稿继续维护）；
+   每个稿配**同名 `.md`**；**四份主稿已于 2026-11-15 转为 `.ptr`**；`.pen` 只作历史兼容（不再新增）；
    **不再使用 Pencil**（pen.dev 编辑器与 CLI 都已弃用）。
    工具用法、节点 schema 与坑见 `.agents/memory/PAINTRESS.md`，纪律见 §5.1。
 7. **实施记录纪律**：每次编写/改动完成后在 `.agents/implementations/` 写一份记录（§5.2）。
@@ -196,7 +196,7 @@ raybend/
 ├── .agents/prompts/            # 功能口述原文（.pd，模块功能意图的原始输入）
 ├── .agents/uat/                # 验收账本 ledger.jsonl（只由工具 / 页面写）
 ├── specs/                     # 计划与规格：PLAN.md（路线 + 未完成项）+ <unit>.md（单工作单元）
-├── design/                    # 设计稿：xxx.ptr（新）/ xxx.pen（兼容）+ 同名 xxx.md 成对
+├── design/                    # 设计稿：xxx.ptr + 同名 xxx.md 成对（另有 __preset.ptr / __components.ptr）
 ├── docs/                      # 给用户/开发者看的信息类文档（指南、手册、发布说明）
 ├── legal/                     # 协议原文与许可数据（第三方许可文本、overrides）
 ├── src/                       # 前端（Solid + Tailwind）
@@ -218,10 +218,10 @@ GitHub Actions → Pages 发布，**不进** `pnpm release` 流程。细则见 `
 
 ### 5.1 设计纪律（`design/`）
 
-- 命名：`design/<模块>-<视图>.ptr`（**新稿**；历史 `.pen` 兼容保留）与同名 `.md` 成对；`.md` 至少含视图用途、区域划分、控件、状态（默认/hover/激活/禁用/空态/加载态）、交互与快捷键、与其它视图的跳转关系。
+- 命名：`design/<模块>-<视图>.ptr` 与同名 `.md` 成对（历史 `.pen` 已全部转换，仅 git 历史里存在）；`.md` 至少含视图用途、区域划分、控件、状态（默认/hover/激活/禁用/空态/加载态）、交互与快捷键、与其它视图的跳转关系。
 - **工具只有 paintress**（2026-11-12 定）：`.ptr` / `.pen` 的读、写、校验、渲染、截图一律走 paintress（MCP 工具或 CLI），
   **不再使用 Pencil**。它直接读写磁盘、无需打开编辑器、Agent 可自行新建文件；用法与坑见 `.agents/memory/PAINTRESS.md`。
-- **设计稿在前**：界面实现前出设计稿（`.ptr`，或继续维护既有 `.pen`），人类定案后才写代码；实现中要偏离设计，改设计稿之后再改代码。
+- **设计稿在前**：界面实现前出设计稿（`.ptr`），人类定案后才写代码；实现中要偏离设计，改设计稿之后再改代码。
 - **改稿的固定收尾**：`validate` 通过 + 截图自检 + 实施记录写清帧名与节点 id；截图只是 Agent 自检，不等于人的真机验收。
 - **纯尺寸差异不算偏离**：尺寸令牌以 `src/styles/tokens.css` 为准（`.agents/memory/DESIGN.md` §8.4）。
 
@@ -392,7 +392,7 @@ pnpm release [patch|minor|major] --win-msi ...   # 或 --win-nsis（可组合）
 | `.agents/memory/FUNCTION-REPOSITORY.md` | 库与导入规格：库身份、导入模版、序号、重名、RAW 分流、目录透传 |
 | `.agents/memory/EDIT-GPU.md` | 编辑计算 GPU 化账本：哪一段在 GPU / 还在 CPU、掉出快速路的判据、下一步该搬谁 |
 | `specs/` | 单工作单元的详细方案与需求规格（`<milestone>-<单元>.md`，文件名小写） |
-| `design/*.ptr`（新）/ `*.pen`（兼容）+ `.md` | 设计稿（paintress 读写）与说明（成对） |
+| `design/*.ptr` + `.md`（另有 `__preset.ptr` / `__components.ptr`） | 设计稿（paintress 读写）与说明（成对） |
 | `.agents/implementations/*.md` | 实施记录（文件名带日期，内容首行带时间；新增走 `record_change`） |
 | `.agents/prompts/*.pd` | 功能口述原文（口述输入，不成文的不入记忆） |
 | `.agents/uat/ledger.jsonl` | 验收账本（追加写、进 git；**不要手改**） |
@@ -537,7 +537,7 @@ import 与 browse 的照片区必须经同一个 `PhotoViewingStage` / `PhotoVie
 > 图标纪律、新建组件检查表、已合并案例）。两处一起维护：新建组件 → 两份都补。
 >
 > **视觉规格**（状态、密度、主题、尺寸令牌）在 `.agents/memory/DESIGN.md` §10.1，
-> 画稿在 `design/*.pen` + 同名 `.md`。想「看一眼」全部组件：dev 下开 `/dev/kitchen-sink`（`src/dev/KitchenSink.tsx` 画廊）。
+> 画稿在 `design/*.ptr` + 同名 `.md`。想「看一眼」全部组件：dev 下开 `/dev/kitchen-sink`（`src/dev/KitchenSink.tsx` 画廊）。
 >
 > 分层规则（`lint:arch` 强制）：`components/ui/` **不许 import `features/` 或 `api/`**（取图、文案这类外部事实由调用方传入）；
 > 组件里**不许硬编码色值**（走令牌）与**中文文案**（走 i18n）。

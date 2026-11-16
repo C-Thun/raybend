@@ -1,7 +1,7 @@
 /**
  * `LutImportProgressView` —— LUT 导入进行中的状态块（编辑左列 LUT 面板的导入弹窗里用）。
  *
- * 画稿：`design/editor.md` §3.1.2 / `design/editor.pen` 的 `States / Editor / 导入 LUT 进度`。
+ * 画稿：`design/editor.md` §3.1.2 / `design/editor.ptr` 的 `States / Editor / 导入 LUT 进度`。
  *
  * 两条口径：
  *   * **没有总数就不编百分比**（扫描阶段走不确定态）；总数 = 待处理文件数，来自 Rust 的事件；

@@ -155,7 +155,7 @@ export function Switch(props: SwitchProps) {
           "flex shrink-0 cursor-pointer items-center rounded-full p-[2px] transition-colors",
           "h-switch-h w-switch-w",
           /*
-           * 关闭态轨道 = **`surface-main`**（设计稿 main.pen 的 `Switch / 包含子目录 / off`
+           * 关闭态轨道 = **`surface-main`**（设计稿 main.ptr 的 `Switch / 包含子目录 / off`
            * 就是 `$surface-main`）。
            *
            * 曾经写的是 `surface-track` —— 而「已选目录」的卡片**本身就是** `surface-track`

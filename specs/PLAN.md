@@ -82,7 +82,7 @@ NAS 实际协议、认证、远程 catalog 和多机写入继续在 `.agents/mem
 > **人类原话（2026-09-26）**：「后面最重要的就是 3 点，一个色彩管理，一个 XMP 方便导入迁移，一个强化相片集功能，
 > 相片集功能我已经有了些创意想法，到时我们再讨论。」
 > **2026-09-30 收缩**：原 #4「编辑器 preset 的存储与载入」（2026-09-28 崔总加入）被崔总**提前拉出**：
-> 「现在就做，future 里有就删掉」——已转入当前工作（设计稿先行于 `design/editor.pen`，
+> 「现在就做，future 里有就删掉」——已转入当前工作（设计稿先行于 `design/editor.ptr`，
 > 需求原文在 `specs/editor-area-bugfix-handoff.md`），不再属于本节。
 > **2026-09-30 XMP 口径修正**：#2 的范围改为**写出优先 + 自家导入**；跨家兼容不做（边界之外）。
 > 目的是**表态**（开放态度、数据资产归用户）+ best-effort 恢复；**XMP 不是第一公民**，整库备份 = 直接拷 repos。
@@ -167,7 +167,7 @@ XMP 已完成、待真机验收（2026-10-04）；AI新增标签来源已接入�
 | 1 | **去马赛克与画质算法自研成本高**（GPL 实现需移植而非直接可用） | 决定编辑质量与性能 | M3 已落第一阶段；升级路径与候选见 `.agents/memory/FUTURE.md` D2/D3，随编辑深化再取 |
 | 6 | 范围失控：一人做 ON1 级产品 | 项目死亡 | 持续——严格按里程碑走，扩围一律过 `.agents/memory/REVIEW.md` |
 | 7 | 代码签名 / 分发 / SmartScreen / 自动更新 | 发布期阻塞 | ◐ R3-01 拍板 unsigned 直下首发 → MSIX 后续（本文件 §3、`.agents/memory/FUTURE.md`）；EV 证书明确不买 |
-| 11 | **其余画稿的弹窗描边未同步** | 设计稿与实现不一致 | ◐ 2026-10-24：`design/main.pen` 的 32 个弹窗帧已加 `$brand-2` inner 描边；2026-10-31 随实现同步减为 0.5px。`browse.pen` / `editor.pen` / `export.pen` 的弹窗帧仍**没有描边**。**2026-11-12 崔总定：等 paintress 调顺后再补**，已登记 `.agents/memory/FUTURE.md` 发版前板 #11（工具见 `.agents/memory/PAINTRESS.md`） |
+| 11 | **其余画稿的弹窗描边未同步** | 设计稿与实现不一致 | ◐ 2026-10-24：`design/main.ptr` 的 32 个弹窗帧已加 `$brand-2` inner 描边；2026-10-31 随实现同步减为 0.5px。`browse.ptr` / `editor.ptr` / `export.ptr` 的弹窗帧仍**没有描边**。**2026-11-12 崔总定：等 paintress 调顺后再补**，已登记 `.agents/memory/FUTURE.md` 发版前板 #11（工具见 `.agents/memory/PAINTRESS.md`） |
 
 
 ---
@@ -188,7 +188,7 @@ XMP 已完成、待真机验收（2026-10-04）；AI新增标签来源已接入�
 | 2026-10-31 | **编辑区（area）系统规划落地**：崔总口述多层编辑栈 + 控制点交互，同日四个关键问题拍板；规格写入 `specs/editor-area.md`，术语与红线进 `AGENTS.md` §2.27/§11/§13，远期项进 `.agents/memory/FUTURE.md` D11–D13。**未实施，未开工**。 |
 | 2026-10-31 | **窗口还原 + 单实例落地**：四角点位比例 + 屏幕身份 → `windows-state.json`；启动单次判断 + 三种操作；最小尺寸单边保底与 titlebar 保底；最小化清记忆、最大化该屏最大化；`tauri-plugin-single-instance`（dev 例外）。规格 `specs/window-restore.md`，实施记录 `.agents/implementations/2026-10-31_window-restore-and-single-instance.md`。 |
 | 2026-09-30 | **相片整理两期规划**：崔总明确整栏三入口、目录标签保持目录颗粒度、多组自动规则、新建/编辑共用条件链弹窗，筛选转桶不带目录等导航范围；要求上期主要功能、下期 AI 增强分别规划。范围与验收已落 specs，未实施，见 §4 #3。 |
-| 2026-10-24 | **弹窗叠放与边界线**：统一 `DialogFrame`、自动遮罩栈（删除 `scrim` 开关）、栈深 z、1px `--brand-2` border、`--z-popover` 抬升、titlebar `persistentElements`。`main.pen` 已同步，其余 `.pen` 见 §5 #11。 |
+| 2026-10-24 | **弹窗叠放与边界线**：统一 `DialogFrame`、自动遮罩栈（删除 `scrim` 开关）、栈深 z、1px `--brand-2` border、`--z-popover` 抬升、titlebar `persistentElements`。`main.ptr` 已同步，其余 `.pen` 见 §5 #11。 |
 | 2026-09-29 | **相片集主线讨论启动**：H6 图片筒（跨目录工作集）并入本线一起做（崔总定）；Agent 设计草案已出但未采纳，等崔总整理方案后再写规格 —— 见 §4 #3 与 `specs/photo-meta-and-tile-display.md`。同日备份功能确认要做（落点 `.agents/memory/FUTURE.md` J 节） |
 | 2026-09-29 | **可卸载库 W1 开发冒烟收口**：按批准修订稿完成永久设置入口、同库位置管理与手动定位，统一会话/状态/反馈，故障注入与 Windows debug 校验通过；真机验收与 W2–W4 仍单列。最终证据见 §1.1 |
 | 2026-09-29 | **可卸载库首波扩围（崔总采纳）**：同库备用位置管理、离线设置入口和手动定位由 W4 提前到 W1；W4 保留副本冲突与释放。修改后的视觉稿仍须定案，当前代码实施保持暂停；规格与阶段证据见 §1.1 |

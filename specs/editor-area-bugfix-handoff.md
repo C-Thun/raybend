@@ -4,7 +4,7 @@
 > 现在的任务是**修 bug / 补验收问题**。本文件只写「现在到哪了 / 已经怎么做的 / 还缺什么 / 别踩哪些坑」。
 >
 > 口径与设计事实：`specs/editor-area.md`（规格）、`design/editor.md`（画稿说明与决策）、
-> `design/editor.pen` 四帧（`E6tDP` / `SPyhh` / `xjwv9` / `A0UG5v`）。
+> `design/editor.ptr` 四帧（`E6tDP` / `SPyhh` / `xjwv9` / `A0UG5v`）。
 >
 > 建立：2026-10-31（第三次换手：W0 → W1 → W2–W6 → **修 bug**）
 
@@ -12,7 +12,7 @@
 
 | 项 | 状态 | 证据 |
 | --- | --- | --- |
-| W0 设计稿四帧 | ✅ 崔总 2026-10-31「没问题」 | `design/editor.pen` + `design/editor.md` §「2026-10-31 编辑区（area）面板」 |
+| W0 设计稿四帧 | ✅ 崔总 2026-10-31「没问题」 | `design/editor.ptr` + `design/editor.md` §「2026-10-31 编辑区（area）面板」 |
 | W1 类型 / 迁移 / 定稿 v3 / 参数 `target` | ✅ | `.agents/implementations/2026-10-31_editor-area-w1-types.md` |
 | W2 渲染（层循环 / 层内固定管线 / 控制点权重 / `PIPELINE_VERSION` 18） | ✅ | `.agents/implementations/2026-10-31_editor-area-w2-render.md` |
 | W3 撤销与持久化（`area_id` + 7 种结构 op） | ✅ | `.agents/implementations/2026-10-31_editor-area-w3-undo.md` |
@@ -265,7 +265,7 @@ pnpm build                              通过
 ### 背景与落点
 
 - 原登记 `specs/PLAN.md` §4 #4 / `.agents/memory/FUTURE.md` 锁定块 #4 已于 2026-09-30 移除（崔总授权）。
-- 设计稿：`design/editor.pen`（第 3 组页签 + 新组件帧）+ `design/editor.md` 同步。
+- 设计稿：`design/editor.ptr`（第 3 组页签 + 新组件帧）+ `design/editor.md` 同步。
 - 复用源（调研 2026-09-30 已确认）：
   - 结构照抄 LUT 面板（`features/editor/lut-panel.tsx`：一级分类 + 标题行图标按钮 + 折叠）；
   - 弹窗照抄 `Dialog` + LUT 新建分类弹窗（取消左 / 确认右）；

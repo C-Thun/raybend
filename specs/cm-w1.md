@@ -4,7 +4,7 @@
 
 ## 本波交付
 
-- `design/main.pen` 与 `design/main.md` 增加菜单 / flowbar 设置入口和有设计层次的全局设置弹窗，深色紧凑、浅色宽松两态；`design/editor.pen` 与 `design/editor.md` 增加 editor right 第三页签及色彩身份面板。遵照崔总本轮授权，画完自审后直接实现。
+- `design/main.ptr` 与 `design/main.md` 增加菜单 / flowbar 设置入口和有设计层次的全局设置弹窗，深色紧凑、浅色宽松两态；`design/editor.ptr` 与 `design/editor.md` 增加 editor right 第三页签及色彩身份面板。遵照崔总本轮授权，画完自审后直接实现。
 - 菜单、命令面板、`Mod+,` 和 flowbar 无文字齿轮进入同一个全局设置弹窗。flowbar 设置及右侧全屏图标点击区同步（紧凑 32px、宽松 38px），图标均与 flow 图标同为 16px；工作流切换后留 8px 间隔。默认无底无边，hover 辅色底，设置窗口打开时主色底，关闭恢复。设置弹窗可在色彩、配置文件、快捷键之间导航；已有快捷键编辑器只保留一套实现。
 - 建立核心 Rust 色彩身份、输入来源、工作空间版本、输出目标等类型及序列化边界；旧编辑版本语义不变。先做纯类型、校验与 adapter 接口，**不伪称已完成 ICC 转换或显示色彩准确性**。
 - 系统互操作通过可替换 adapter：Windows 实现和无系统环境的 fake 使用同一契约；核心 crate 不依赖 Tauri。显示器探测、系统设置跳转及后续 profile 读取从这个接缝走。

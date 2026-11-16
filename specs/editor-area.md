@@ -3,7 +3,7 @@
 > **状态**：**W0–W6 已实施**（2026-10-31；历史交接 `specs/editor-area-handoff.md`，
 > **修 bug 阶段看 `specs/editor-area-bugfix-handoff.md`**）。
 > 实施记录：`.agents/implementations/2026-10-31_editor-area-w2-render.md` … `…-w6-closeout.md`。
-> **开工门禁**：先出 `design/editor.pen` 四帧（W0，2026-10-31 崔总「没问题」），之后才动代码。
+> **开工门禁**：先出 `design/editor.ptr` 四帧（W0，2026-10-31 崔总「没问题」），之后才动代码。
 > **粒度**：按 §5.4，W1 已细化落地；W2–W6 的实现口径在本文件里按「做完的事实」更新（见各节末尾的 2026-10-31 注）。
 > **关联**：`AGENTS.md` §2.27 / §2.28 / §11、`.agents/memory/LIMITS.md`、`specs/PLAN.md` §4、
 > `.agents/memory/FUTURE.md` §D4/D11–D13、`docs/native-viewport-coordinate-guide.md` §4、
@@ -445,7 +445,7 @@ LUT 面板**恒可用**（崔总 2026-11-01）：选中控制点 / 全图层时�
 
 ## 6. W0 设计稿（Pencil）—— **已完成 2026-10-31，待崔总过目**
 
-**落点修正**：画在 `design/editor.pen` 里（与 LUT 应用层同一个画布），不另开 `design/editor-area.pen` ——
+**落点修正**：画在 `design/editor.ptr` 里（与 LUT 应用层同一个画布），不另开 `design/editor-area.pen` ——
 editor 的设计系统、令牌、外壳几何都在这一份里，另开一个文件会把它们复制成两份。
 配对说明写在 `design/editor.md` 的「2026-10-31 编辑区（area）面板」一节。
 

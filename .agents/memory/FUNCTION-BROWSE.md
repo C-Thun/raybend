@@ -704,7 +704,7 @@ film 总览保留上一张完整 Screen 图及其尺寸，直方图保留旧值�
 | **`catalog.db`** | 每库的评级/标记/标签关联/锁/作者/描述/地理信息 |
 | **`.agents/memory/DESIGN.md`** | 新增的控件（三态标记、树、toast、模态）要在 §7/§9 补规格 |
 | **`.agents/memory/FUNCTION-REPOSITORY.md`** | 导入进度弹窗（§8.1 的中央模态的一个实例）在那边已写 |
-| **界面设计** | 待做：`design/browse-*.pen` + 同名 `.md`（见 §12） |
+| **界面设计** | 待做：`design/browse-*.ptr` + 同名 `.md`（见 §12） |
 
 ---
 
@@ -748,8 +748,8 @@ film 总览保留上一张完整 Screen 图及其尺寸，直方图保留旧值�
 
 ## 12. 界面设计计划（**用户要求：先出设计，设计确认后再开 plan 排期**）
 
-设计稿拟放在 `design/browse.pen` + `design/browse.md`（同建成对，`AGENTS.md` §5.1）。
-✅ **Agent 可以自行新建 `.pen`**（2026-11-12 起，paintress 直接写磁盘）：最小 JSON → `paintress validate` 即可，不再需要人先建文件。用法见 `.agents/memory/PAINTRESS.md`。
+设计稿拟放在 `design/browse.ptr` + `design/browse.md`（同建成对，`AGENTS.md` §5.1）。
+✅ **Agent 可以自行新建设计稿**（2026-11-12 起，paintress 直接写磁盘，`.ptr`）：最小 JSON → `paintress validate` 即可，不再需要人先建文件。用法见 `.agents/memory/PAINTRESS.md`。
 
 拟画的帧（按优先级）：
 
@@ -804,7 +804,7 @@ left / right 叠在 mid 上方，各自贴边，不参与 mid 的宽度计算。
 - **挤压行为**：窗口变窄时，mid 仍保持全宽且按钮组按整窗居中；left/right 的不透明底遮住底下的 mid，
   各自内侧附 20px 渐隐。渐隐只负责遮罩，不承载按钮。
 - 无内容时整行隐藏（原规则不变）。
-- 设计稿：`design/editor.pen` 的 `Components / Editor / ToolsBar 三段式`（常态 + 挤压态）。
+- 设计稿：`design/editor.ptr` 的 `Components / Editor / ToolsBar 三段式`（常态 + 挤压态）。
 
 ### 13.2 tiles / view / film / compare 的结构红线（2026-09-20 定，2026-09-23 补强）
 

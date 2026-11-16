@@ -2,7 +2,7 @@
  * 组件陈列室（.agents/memory/DESIGN.md §10.1 / specs/M1.md §4.2.1）。
  *
  * 目的：把 16 个基础组件的**全部状态 × 两主题 × 两密度**一眼铺开，
- * 供人（不是 Agent）与 `design/main.pen` 逐项比对。`AGENTS.md` §2.8：
+ * 供人（不是 Agent）与 `design/main.ptr` 逐项比对。`AGENTS.md` §2.8：
  * 视觉正确性属 E2E，归人类目视确认；Agent 只保证「能渲染、不报错」。
  *
  * 仅开发期可达（路由在 `src/index.tsx` 里用 `import.meta.env.DEV` 守卫）。
@@ -208,7 +208,7 @@ export default function KitchenSink() {
       <header class="flex h-bar-tool-h shrink-0 items-center gap-3 bg-surface-bar px-pad-x">
         <span class="text-fs-3 font-semibold">组件陈列室</span>
         <span class="text-fs-1 text-fg-3">
-          对齐 design/main.pen 逐项目视比对（Agent
+          对齐 design/main.ptr 逐项目视比对（Agent
           只保证能跑）；主题与密度用上面 titlebar 的开关切
         </span>
         <div class="flex-1" />

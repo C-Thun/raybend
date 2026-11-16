@@ -126,7 +126,7 @@
 | preset | `crates/raybend/src/store/presets.rs`（或等位模块） | 存/取整条链 |
 | 前端 | `src/features/editor/lut-panel.tsx`、`store.ts`、`EditorWorkspace.tsx` | 应用层列表、圈选、拖拽、拉杆 |
 | 命令/热键 | `src/features/commands/catalog.ts` | 新增动作（若有）登记默认键或留空理由 |
-| 设计 | `design/editor.pen` + `design/editor.md` | **先画稿、审核通过再动代码** |
+| 设计 | `design/editor.ptr` + `design/editor.md` | **先画稿、审核通过再动代码** |
 
 ### 验收要点（将来写进 specs 的验收清单）
 

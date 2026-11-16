@@ -109,7 +109,7 @@ sidecar 写入不再触发目录重扫；补了「真扩展名 `tmpfoo` 不能�
 
 ## 6. 未做 / 后续
 
-- `design/browse.pen` 的三态帧**尚未补**（本会话 Pencil 应用未连接）：行内建议列表展开态、
+- `design/browse.ptr` 的三态帧**尚未补**（本会话 Pencil 应用未连接）：行内建议列表展开态、
   描述弹窗、批量按钮；文字规格已写进 `design/browse.md` §2.4。
 - 导入时从原图 EXIF Artist / ImageDescription 取作者/描述（H7 相关，需单独评估）。
 - 城市表会随 GeoNames 变旧；重建命令见 `crates/raybend/assets/geo/README.md`。

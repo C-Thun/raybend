@@ -27,7 +27,7 @@
 
 | # | 事项 | 一句话状态 | 落点 |
 | --- | --- | --- | --- |
-| 1 | **editor presets** | **✅ 算完成（崔总 2026-10-24：走完流程，使用中发现问题再改）**；审计问题已于 2026-10-07 逐条修复并补回归 | `.agents/implementations/2026-09-30_editor-presets.md`；`.agents/implementations/2026-10-04_editor-presets-audit.md`；`.agents/implementations/2026-10-07_editor-presets-audit-fixes.md`；`design/editor.pen` |
+| 1 | **editor presets** | **✅ 算完成（崔总 2026-10-24：走完流程，使用中发现问题再改）**；审计问题已于 2026-10-07 逐条修复并补回归 | `.agents/implementations/2026-09-30_editor-presets.md`；`.agents/implementations/2026-10-04_editor-presets-audit.md`；`.agents/implementations/2026-10-07_editor-presets-audit-fixes.md`；`design/editor.ptr` |
 | 2 | **文件管理与相片整理完善** | **正在完善（崔总 2026-10-04 口径）**；已交付的相片整理上期（含跨库多选导出）仍待 Windows 真机交互与大库性能验收；**2026-10-25 桶/标签审查 3、5–15 已修**（死成员清理与按库计数、AI 重试一步、预览失败提示、筛选建桶默认库等） | `specs/photo-organization.md`；`specs/PLAN.md` §4；`.agents/memory/FINISHED.md` §11 |
 | 3 | **XMP sidecar** | **已完成，待验收（崔总 2026-10-04 确认）**；本轮审查缺陷已修复并补回归，Windows 真实照片写出/读回与回收站链路待崔总验收；范围仍按冻结规格。**2026-10-09 增补**：设置新增唯一一项写出开关（设备级、默认开）、§10 验收清单细化、只读巡检工具 `pnpm check:xmp`。**2026-10-25 自维护闸门已补**：`AGENTS.md` §13 项目图景 + `PARAMS` 归类测试；最小核验见 §10 | `specs/xmp-sidecar.md` §10；`specs/xmp-write-toggle.md`；`specs/xmp-audit-tool.md`；`.agents/implementations/2026-10-04_xmp-audit-fixes.md` |
 | 4 | **色彩管理第一版验收** | **✅ 算完成（崔总 2026-10-24）**；首版开发与 Agent 冒烟已完成，不自动升级旧照片；使用中再实测 | `specs/color-management.md` / `.agents/implementations/2026-10-04_color-management-ready-for-acceptance.md` |
@@ -35,7 +35,7 @@
 | 8 | **spike 诊断页二选一** | **✅ 已完成**：release 包已用构建期常量 `__RAYBEND_DIAGNOSTICS__` 摇掉（只 dev/test 有），不再进包 | C6 |
 | 9 | **MSI 链路实际验收** | **✅ 算完成（崔总 2026-10-24：已走完流程，使用中发现问题再改）**；G22 脚本已实现，v0.1.2/v0.1.3 已产出并发布 | G22、`specs/release-windows-msi.md` |
 | 10 | **应用内回收站** | **✅ 已完成（2026-10-10）**：库内 `recycle/` 目录 + 拖动删除（统 pointer）+ 回收站视图 / 还原 / 清空；`Delete` 键保留（按钮 + 确认），拖动免确认；真删只有拖动一条路 | `specs/library-recycle-bin.md`；`.agents/implementations/2026-10-10_library-recycle-bin-and-command-scenes.md` |
-| 11 | **画稿弹窗描边补齐（browse / editor / export）** | **未做**：`main.pen` 的 32 个弹窗帧已是 0.5px，这三份还没描边。**等 paintress 调顺了再用它补**（崔总 2026-11-12 定，当下不动） | `design/{browse,editor,export}.pen`；口径 `.agents/memory/DESIGN.md` 2026-10-31 条；`specs/PLAN.md` §5 #11；工具 `.agents/memory/PAINTRESS.md` |
+| 11 | **画稿弹窗描边补齐（browse / editor / export）** | **未做**：`main.ptr` 的 32 个弹窗帧已是 0.5px，这三份还没描边。**等 paintress 调顺了再用它补**（崔总 2026-11-12 定，当下不动） | `design/{browse,editor,export}.ptr`；口径 `.agents/memory/DESIGN.md` 2026-10-31 条；`specs/PLAN.md` §5 #11；工具 `.agents/memory/PAINTRESS.md` |
 
 > 编号保持历史稳定（#10 等旧引用仍有效）。原 **#5 发版 CI 化**与 **#6 国内官网镜像**已于 2026-10-24 移出本板：#5 **不排期、仅存档**（见 G24；崔总明确发版前/后都不做），#6 移入下方「发版后」板块。
 > **2026-10-24 崔总：本板除 #2 / #3 / #10 外全部算完成**（走完流程，使用中发现问题再改）。
@@ -116,7 +116,7 @@
     自动进 `develop-params.json`、预设、`signature()`、undo 快照与 `rb:profileJson`；
     若坚持做 `ColorGrade` 结构体，就按 `geometry` 的第一等字段补全 signature / 预设 / XMP / undo / GPU 清单。
   * **UI 与设计**：右栏 276/288px，四轮 2×2、每轮一根 level 条、双击复位、拖动时显示 `H/S/L`，
-    偏移单独一行或加分隔；先出 `design/editor.pen` 两版。`design/editor.md` 的「只有拉杆，不放色轮」
+    偏移单独一行或加分隔；先出 `design/editor.ptr` 两版。`design/editor.md` 的「只有拉杆，不放色轮」
     是 2026-09-23 的旧口径，这次属有意反转，先改画稿 + `.md` 再写代码。对外文案用「四路调色」，
     不直接写 DaVinci（交互可以像，商标不要用）。
 
@@ -589,7 +589,7 @@
 * **要顺带想清楚的**：与 `temperature`（绝对 K）、`saturation` / `vibrance`、RGB 曲线的职责边界 ——
   四者都能「改颜色」，必须各有一句「什么时候用它」，否则界面上会出现四个同义入口（§2.12）。
 * **状态**：2026-11-02 崔总决定**发版前做四路色盘**（本节原「本轮不做」作废）。开工前按 §13.1 清单走，
-  并先落该单元规格（约定名 `editor-color-grade`，尚未建立）+ `design/editor.pen` 四帧（design-first）；第一版建议只落默认层
+  并先落该单元规格（约定名 `editor-color-grade`，尚未建立）+ `design/editor.ptr` 四帧（design-first）；第一版建议只落默认层
   （全局调色），局部色盘等 area GPU 化。
 
 ### D12　层的复制 / 粘贴（含跨图）（2026-10-31 登记）
@@ -1037,7 +1037,7 @@ M1 里「导入模版」**纯手输**（`LibrarySettingsDialog`：一个输入�
 | 2026-10-24 | **发版 CI 化移出计划**（崔总指示）：Future Release 表删除 #5，G24 改为「仅存档、不排期」——发版前、发版、发版后都不做；原「验收后马上做」「触发条件到了再启动」的口径作废 |
 | 2026-10-14 | **发版与更新链路一轮收口（崔总提四件事）**：① 新增别名/命令 **AI 模型自动探测同级 `../model-registry`**（`--ai=auto` 回退链：登记 → 同级探测 → 无 AI 版 + 提示）；② `pnpm release` 支持 **指定版本号**（`pnpm release 0.2.0` / `--version v…`，必须严格大于当前版本）与 **`--publish` 一条命令发版**（与两步发布同一函数）；③ **启动静默检查更新**（8 s 后一次，有新版本才提示；可在更新对话框关；test/dev 通道默认不自动检查）+ 隐私说明/文案同步；④ 更新公钥改放仓内公开配置 `release.config.json`（env 仍优先）。**CI 打包评估：暂缓**（原因见 G24 本轮补充），本地一键发版先行走通。实施记录 `.agents/implementations/2026-10-14_release-and-update-entry.md` |
 | 2026-10-12 | **日志 / 崩溃采集部分开工（W1+W2+W4）**（崔总当天改口径：「先把日志这套建起来，发送接收以后再说」）：运行日志（`log` + 自研 writer：2 MiB×10 / 20 MiB 硬上限 / 出口脱敏 / 会话头 / worker stderr 管道接回）、panic 同步记录、未正常退出兜底、独立崩溃助手 `raybend-crashpad`（crash-handler + minidumper）；选型由 `flexi_logger` 改为**自研 writer**（核源码后确认它给不了有界队列与按目录总容量清理）。第三层（报告包/发送）与 W5（WebView2/前端/看门狗）留在本条。看日志位置：`.agents/memory/DEBUGGING.md`。 |
-| 2026-10-10 | **库级回收站（应用内回收站）落地**：库内 `recycle/` + 拖动删除（统一 pointer）+ 回收站视图/还原/清空；`Delete` 键保留（按钮+确认）而拖动免确认；同批完成**快捷键场景化**（同键跨场景并存，browse 删除与 export 移出队列拆为两条）。规格 `specs/library-recycle-bin.md`、`specs/command-scenes.md`；画稿 `design/browse.pen`。Future Release #10 结项。 |
+| 2026-10-10 | **库级回收站（应用内回收站）落地**：库内 `recycle/` + 拖动删除（统一 pointer）+ 回收站视图/还原/清空；`Delete` 键保留（按钮+确认）而拖动免确认；同批完成**快捷键场景化**（同键跨场景并存，browse 删除与 export 移出队列拆为两条）。规格 `specs/library-recycle-bin.md`、`specs/command-scenes.md`；画稿 `design/browse.ptr`。Future Release #10 结项。 |
 | 2026-10-10 | 崔总提出「服务端报告 + agent = 自动修 bug / 自动发版」设想；**登记为 E7（未评估）**，并写明两条不可自动化的既有红线（§2.1 发布由人执行、§2.8 真机验收归人类）与「自动合并永不开启」。 |
 | 2026-10-10 | **新增「发版后」条目：日志 / 崩溃采集 / 问题报告**（崔总指示登记到该板块）：三层 = 运行日志（20 MiB 硬上限 + 出口脱敏）/ 异常采集（panic·minidump·前端·WebView2·worker·卡死·未正常退出）/ 报告包与提交（T0 本地导出 + mailto；T1 Azure VM 自建接收服务 + 邮件通知）；详细规格 `specs/logging-and-crash-report.md`；J 节「日志与诊断包」半句移入该条目。 |
 | 2026-10-09 | 崔总定：**应用内回收站发版前必加**，形态待规划；登记为 Future Release #10（与「删除=系统回收站」区分）。 |
@@ -1051,7 +1051,7 @@ M1 里「导入模版」**纯手输**（`LibrarySettingsDialog`：一个输入�
 | 2026-10-01 | **设立「Future Release」板块**（崔总指示）：发版前必做项统一归口——四条主线收尾（presets 基本完成、相片整理真机验收、XMP W1 真机验收、色彩管理第一版收尾）+ 发版 CI 化（含官网 XHR 实时取版）+ 国内镜像（EdgeOne/rb.cthun.com）+ spike 页二选一 + MSI 实际验收；锁定块注记收尾归此板块 |
 | 2026-09-30 | **XMP 细则定案 + 定位修正**：写出 `rb:`（全部 issue + latest）+ 标准层（raw-based latest 的调整 + 元数据）；自家导入自动发现；**XMP 不是第一公民**——备份 = 直接拷 repos 目录（J 节按此收窄口径）；规格 `specs/xmp-sidecar.md`（待审）。I 节 XMP 条目随之转入当前工作 |
 | 2026-09-30 | **XMP 口径修正（崔总定）**：**导出优先、导入不急**——先建立自有格式表达与 sidecar，目的是表态开放、用户数据资产归用户；导入兼容降级为远期待需求拉回；「能否被别的软件兼容属边界之外」。原话 `docs/user-requirements.md` 2026-09-30 节；`.agents/memory/REVIEW.md` R6-01、`specs/PLAN.md` §4 #2 同步 |
-| 2026-09-30 | **「四条主线」收缩为三条**：崔总指示「编辑器 preset 现在就做，future 里有就删掉」——#4 从锁定清单移除，转为当前工作（设计稿先行，`design/editor.pen` + `specs/editor-area-bugfix-handoff.md`）；`specs/PLAN.md` §4 同步 |
+| 2026-09-30 | **「四条主线」收缩为三条**：崔总指示「编辑器 preset 现在就做，future 里有就删掉」——#4 从锁定清单移除，转为当前工作（设计稿先行，`design/editor.ptr` + `specs/editor-area-bugfix-handoff.md`）；`specs/PLAN.md` §4 同步 |
 | 2026-09-29 | **文件开头新增「发版后最优先四条主线」锁定块**（崔总指示写入）：四条主线清单与顺序未经崔总明确要求不可改动；详情以 `specs/PLAN.md` §4 为准 |
 | 2026-09-29 | **H6 图片筒并入「强化相片集」主线**（崔总定：放进这次相片整理功能一起做掉，先记录待其整理方案）；**J 节备份功能确认要做**（崔总定，仍留 J 未排期）。详见 `specs/PLAN.md` §4 #3 与 `specs/photo-meta-and-tile-display.md` |
 | 2026-09-15 | 初版：登记 A–G 七类远期方向；确立 rawler 为首选解码后端与候选清单；记录 canvas tile 的取舍理由 |

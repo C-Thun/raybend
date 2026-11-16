@@ -200,7 +200,7 @@ AI 阶段预留:
 - 叠片采用稳定的两个成员及现有缩略图；后台新增照片不反复换封面。没有缓存时用占位，不为卡片启动原片解码。
 - 选择/hover、菜单、键盘、密度和颜色继续复用现有 UI 原语；只在内容结构上区别于 RepositoryCard，不复制其连接状态业务。
 
-卡片细节见已确认的 `design/browse.pen` 和 `design/browse.md`；真机视觉仍由人类验收。
+卡片细节见已确认的 `design/browse.ptr` 和 `design/browse.md`；真机视觉仍由人类验收。
 
 ## 6. auto bucket 多规则组
 

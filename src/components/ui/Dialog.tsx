@@ -160,7 +160,7 @@ export function Dialog(props: DialogProps) {
       initialFocusEl={local.initialFocusEl}
       contentClass={[
         /*
-         * 骨架照设计稿（main.pen `Dialog / 新建库`）：**padding 16 / gap 12**，
+         * 骨架照设计稿（main.ptr `Dialog / 新建库`）：**padding 16 / gap 12**，
          * 且内边距**不吃密度档**（`--dialog-pad`）—— 紧凑档缩到 6px 会「贴边」。
          */
         "flex w-full min-w-72 flex-col gap-3 p-(--dialog-pad)",

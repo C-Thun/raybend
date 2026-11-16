@@ -1,0 +1,16 @@
+{
+  "version": "2.22",
+  "fileToken": "068e17af-7347-4ae6-bdd4-9c82d1b9ca1d",
+  "variables": {},
+  "children": [],
+  "x-paintress": {
+    "spec": "1",
+    "presets": {
+      "version": 1,
+      "items": {}
+    },
+    "generator": "paintress/0.8.1",
+    "updated_at": "2026-11-16T15:37:28.451Z",
+    "created_at": "2026-11-16T15:37:28.451Z"
+  }
+}

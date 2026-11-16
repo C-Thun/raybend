@@ -1,7 +1,7 @@
 # 编辑区（area）系统 —— 换手交接书（W2–W6 一次做完）
 
 > **给接手的新会话**：这份文件是**唯一入口**。读完它就能接着做，不需要重新推导设计。
-> 设计事实在 `specs/editor-area.md`（口径）与 `design/editor.pen`（画稿），本文件只负责
+> 设计事实在 `specs/editor-area.md`（口径）与 `design/editor.ptr`（画稿），本文件只负责
 > **「现在到哪了 / 接下来怎么做 / 别踩哪些坑 / 什么算做完」**。
 >
 > 崔总 2026-10-31 的要求：**换手后一次把剩下的波次干完，做完交给他测试。**
@@ -11,7 +11,7 @@
 
 | 波 | 交付 | 状态 |
 | --- | --- | --- |
-| W0 | 设计稿（`design/editor.pen` 四帧） | ✅ 2026-10-31 崔总「没问题」 |
+| W0 | 设计稿（`design/editor.ptr` 四帧） | ✅ 2026-10-31 崔总「没问题」 |
 | W1 | 类型与迁移（数据形状 / DB / 定稿 v3 / 参数 `target` / 控制点八色） | ✅ 测试全绿 |
 | **W2** | **渲染：链循环 + 层内固定管线 + 控制点权重 + `PIPELINE_VERSION`** | ✅ 2026-10-31 |
 | **W3** | **撤销与持久化：`Op` 加 `area_id` + 结构 op** | ✅ 2026-10-31 |
@@ -95,7 +95,7 @@ pub enum AreaKind {
 ### 1.4 控制点八色（`.agents/memory/DESIGN.md` §15.5）
 
 固定八色、**存槽位下标不存色值**：`#EF884C #4CE4EF #EAEF4C #4C62EF #7DEF4C #BE4CEF #4CEF88 #EF4C98`。
-`design/editor.pen` 里有同名变量 `point-0..point-7`。与 browse 色标（`--label-*`）刻意分家。
+`design/editor.ptr` 里有同名变量 `point-0..point-7`。与 browse 色标（`--label-*`）刻意分家。
 
 ### 1.5 设计稿（W0 已过）
 
