@@ -232,7 +232,23 @@ pnpm release patch --win-msi --unsigned --publish --no-crates
 `--publish` 的硬规则：必须同时指定 `--win-msi` / `--win-nsis`；不能与 `--dry-run`、`--skip-build`
 或 `test` 通道同用；它调用的发布逻辑与下面的两条指令**完全是同一个函数**，不是第二条通路。
 
-**本版变更**：在 `docs/release-notes/<版本>.md`（例如 `0.1.4.md`）写 Markdown，构建时会自动嵌入
+**版本号怎么定档**（2026-11-17 定，判据优先看「用户的数据要不要跟着变」）：
+
+| 情形 | 定档 | 例 |
+| --- | --- | --- |
+| 修复、文案/图标、内部重构、依赖升级 | `patch` | 0.1.3 → 0.1.4 |
+| **新增子系统或能力面**，或**持久化格式/数据库迁移有变**（`PROFILE_SCHEMA_VERSION`、`store/migrations/*.sql`） | `minor` | 0.1.4 → 0.2.0（编辑区/控制点、多层 LUT 链、schema 2→3、+2 条迁移） |
+| 不兼容的对外契约巨变（在 0.x 阶段基本用不到） | `major` | — |
+
+拿不准时用两条命令自查，比记忆可靠：
+
+```bash
+git diff --shortstat v0.1.4 HEAD                                   # 规模
+git diff v0.1.4 HEAD -- crates/raybend/src/store/issues.rs \
+  crates/raybend/src/store/migrations | head                       # 数据格式/迁移有没有变
+```
+
+**`--publish` 的硬规则**照旧。**本版变更**：在 `docs/release-notes/<版本>.md`（例如 `0.2.0.md`）写 Markdown，构建时会自动嵌入
 `RELEASE-NOTES.md`；没有这个文件时放提交记录链接。发布说明里**不再有**内部操作提示行。
 
 ### 6.2 两条指令（需要验收窗口时）
