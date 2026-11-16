@@ -34,3 +34,9 @@ GitHub Pages 按 `pages_build_version`（部署时的 commit SHA）去重，**�
 ## 需要人类做的一步
 
 本次修复的提交本身触碰了 `website/**` 之外的 workflow 文件（在 push 忽略名单内），所以**推送它不会触发站点构建**；线上仍要等一次新的 website 相关推送。想让 0.2.0 立刻上线，最省事的是：`gh workflow run website.yml --ref master -f tag=v0.2.0` 之后**再推一个小改动**——不行，同 SHA 仍被去重；正确做法是下次任何触碰 `website/**` 的推送（新 SHA），届时注入的版本就是 `releases/latest` = v0.2.0。
+
+## 复审修正（2026-11-17T02:36+08:00）
+
+第一次实现用了 `contains(github.event.head_commit.message, '发布版本')`，结果**修复提交自己**被跳过：`head_commit.message` 是完整信息（含正文），而那次提交的正文里正好写了「发布版本」四个字，于是 `gh run list` 里出现 `completed/skipped`，站点自然没刷新。
+
+改成 `startsWith(github.event.head_commit.message, 'chore: 发布版本')`：发布脚本的提交信息就是单行 `chore: 发布版本 <版本>`（`src/lib/release-plan.ts:171`），只看开头即可，不误伤任何正文。注释与 `website/AGENTS.md` §5 都写明了这个区别。

@@ -48,9 +48,11 @@ jobs:
     # 发版提交先被 push 触发部署成 v0.1.4，随后 release 事件重建出 v0.2.0，
     # 两次 SHA 相同 → 线上一直是 v0.1.4）。所以**发版提交的 push 不构建**，
     # 让 release 事件成为该 SHA 的唯一部署方。
+    # 注意用 `startsWith` 而不是 `contains`：head_commit.message 含正文，
+    # 任何在正文里提到「发布版本」的提交都会被误跳过（2026-11-16 自己踩了一次）。
     if: >-
       ${{ (github.event_name != 'release' || github.event.release.prerelease == false) &&
-      !(github.event_name == 'push' && contains(github.event.head_commit.message, '发布版本')) }}
+      !(github.event_name == 'push' && startsWith(github.event.head_commit.message, 'chore: 发布版本')) }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
